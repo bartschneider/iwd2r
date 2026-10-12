@@ -61,6 +61,25 @@ python3 tools/play.py --linux --headless --script scenarios/options.txt
 
 Options are flags, never INI edits: `--windowed` (default) or `--fullscreen`, `--resolution 800|1024` (default 800), `--set "Section/Key=Value"` for anything else, `--frames N`, `--data PATH`. They reach the engine through `IWD2R_INI_OVERRIDE`. Each run writes `runs/<YYYYMMDD-HHMMSS>/` with `log.txt` (the game's output), the screenshots, `ini-backup/` and `summary.txt`. Every `*.ini` in the install is backed up before the run and restored byte-identical afterwards, also on Ctrl-C, because the engine rewrites `icewind2.ini` on exit. Script commands (`wait`, `click`, `rclick`, `move`, `key`, `type`, `shot`, `quit`) are documented in `platform/script.h`; the starter scenarios are in `scenarios/`.
 
+#### Real-input runs (`--vm`)
+
+`--vm` runs the same scenario files with genuine operating-system input in an isolated display, so nothing appears on your desktop: mouse and keyboard events travel OS → SDL → window shim → engine, as a player's do, and the in-engine script (`IWD2R_SCRIPT`) stays off.
+
+```
+python3 tools/play.py --vm linux --script scenarios/options.txt
+python3 tools/play.py --vm linux --suite --jobs 3
+python3 tools/play.py --vm all --suite
+```
+
+- `--vm linux` builds `linux-gcc`, starts `Xvfb :N` (N from 90 up) at the game resolution (800x600 or 1024x768), runs the game windowed on it with the X11 video driver and drives it with xdotool (`tools/realinput.py`). One-time setup: `sudo apt-get install -y xvfb xdotool imagemagick`.
+- `--vm windows` runs each scenario in a fresh Windows Sandbox (`tools/winsandbox.py`, `tools/sandbox/driver.ps1`): the MSVC build from `C:\Users\thier\iwd2r-build` (with the MSVC runtime DLLs copied next to `iwd2r.exe`), a copy of the install in `C:\Users\thier\iwd2r-vm\game` (made once with rsync, refreshed when `CHITIN.KEY` changes; the real install is never mapped), networking off. The driver uses `SendInput` and captures the screen with System.Drawing. One-time setup, in an admin PowerShell, then reboot: `Enable-WindowsOptionalFeature -Online -FeatureName Containers-DisposableClientVM -All`. Only one sandbox runs at a time, so `--jobs` does not apply.
+- `--vm all --suite` runs the suite on Linux, then on Windows when the sandbox is available, and prints both tables.
+- `--suite` runs every `scenarios/*.txt`; `--jobs N` (default 1) runs that many Linux scenarios at once, each on its own display and CPU core; `--timeout S` (default 180) bounds each scenario.
+
+How commands map to input: `click`/`rclick`/`move` move the real pointer to the game coordinates (the window's client area is the game screen) and press the button for 2 frames; `key` presses a real key; `type` types real key strokes; `wait N` lasts N/30 s and until the engine has presented N frames, so slow screen loads do not desynchronise the script; `shot NAME` captures the display (`NAME-screen.png`, the OS view with the engine-drawn pointer) and the engine's framebuffer (`NAME.png`); `quit` closes the window as a window manager's close button does (`WM_DELETE_WINDOW` on X11, `WM_CLOSE` on Windows) and confirms the engine's "quit?" message box with Return. The framebuffer shots and frame counts come from a small control channel: with `IWD2R_CONTROL_DIR` set, the engine answers `shot-NAME.req` and `frames.req` files in that folder once per presented frame; it injects no input.
+
+What lands in `runs/<YYYYMMDD-HHMMSS>/` (one subfolder per scenario with `--suite`, under `linux/` and `windows/` with `--vm all`): `driver.log` (every action with timestamps), `log.txt` (the game's output), `script.txt`, `actions.json` (the parsed scenario), both kinds of screenshots and `summary.txt`; Linux runs add `xvfb.log` and `ini-backup/`, Windows runs `run.wsb`. A suite writes `suite.txt` with the table (scenario, exit code, duration, screenshot count). The exit code is the game's, 124 on a timeout, or non-zero when the driver failed; Xvfb, the game and the sandbox are closed on every exit path, including Ctrl-C.
+
 ### Manual
 
 Point the engine at your install with `IWD2_DATA`:
