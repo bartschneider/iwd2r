@@ -7,8 +7,8 @@
 
 #include <SDL3/SDL.h>
 
-#include <cstdint>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <vector>
 
