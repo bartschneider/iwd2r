@@ -35,3 +35,22 @@ void EnterCriticalSection(CRITICAL_SECTION* section);
 void LeaveCriticalSection(CRITICAL_SECTION* section);
 void DeleteCriticalSection(CRITICAL_SECTION* section);
 BOOL TryEnterCriticalSection(CRITICAL_SECTION* section);
+
+// ---- clock.cpp: tick count, sleep and multimedia timers ----
+
+#define TIME_ONESHOT 0
+#define TIME_PERIODIC 1
+#define TIMERR_NOERROR 0
+#define MMSYSERR_INVALPARAM 11
+
+typedef void(CALLBACK* LPTIMECALLBACK)(UINT, UINT, DWORD_PTR, DWORD_PTR, DWORD_PTR);
+
+DWORD GetTickCount();
+DWORD timeGetTime();
+void Sleep(DWORD milliseconds);
+DWORD SleepEx(DWORD milliseconds, BOOL alertable);
+
+MMRESULT timeSetEvent(UINT delayMs, UINT resolution, LPTIMECALLBACK callback, DWORD_PTR user, UINT flags);
+MMRESULT timeKillEvent(UINT id);
+MMRESULT timeBeginPeriod(UINT period);
+MMRESULT timeEndPeriod(UINT period);

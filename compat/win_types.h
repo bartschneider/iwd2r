@@ -35,6 +35,7 @@ typedef intptr_t INT_PTR;
 typedef uintptr_t UINT_PTR;
 typedef intptr_t LONG_PTR;
 typedef uintptr_t ULONG_PTR;
+typedef ULONG_PTR DWORD_PTR;
 typedef UINT_PTR WPARAM;
 typedef LONG_PTR LPARAM;
 typedef LONG_PTR LRESULT;

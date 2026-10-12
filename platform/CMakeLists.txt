@@ -1,6 +1,6 @@
 # iwd2r. Distributed under LICENSE.md.
 find_package(Threads REQUIRED)
-add_library(iwd2r_platform STATIC platform_version.cpp threads.cpp)
+add_library(iwd2r_platform STATIC platform_version.cpp threads.cpp clock.cpp)
 target_include_directories(iwd2r_platform PUBLIC "${PROJECT_SOURCE_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(iwd2r_platform PUBLIC Threads::Threads iwd2r_compat SDL3::SDL3-static miniaudio)
 iwd2r_strict_warnings(iwd2r_platform)
