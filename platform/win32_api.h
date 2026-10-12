@@ -44,6 +44,13 @@ HANDLE GetCurrentProcess();
 HANDLE GetCurrentThread();
 DWORD GetCurrentProcessId();
 
+// Pins the process, its running threads and the threads it starts later to
+// the CPUs in mask (the original pins itself to CPU 0 with mask 1). Accepts
+// the current-process pseudo handle and NULL (what the engine's OpenProcess
+// call returns here) as this process. GetProcAddress hands it out under its
+// kernel32 name.
+BOOL SetProcessAffinityMask(HANDLE process, DWORD_PTR mask);
+
 #define DUPLICATE_CLOSE_SOURCE 0x00000001
 #define DUPLICATE_SAME_ACCESS 0x00000002
 

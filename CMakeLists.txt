@@ -55,6 +55,23 @@ enable_testing()
 list(APPEND CMAKE_MODULE_PATH "${catch2_SOURCE_DIR}/extras")
 include(Catch)
 
+# PrivateBuild in the built-in version resource: "iwd2r <version> <commit>".
+# Fixed at configure time; reconfigure to refresh the commit.
+find_package(Git QUIET)
+set(IWD2R_GIT_HASH "unknown")
+if(GIT_FOUND)
+    execute_process(COMMAND "${GIT_EXECUTABLE}" rev-parse --short HEAD
+        WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+        OUTPUT_VARIABLE iwd2r_git_hash
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+        RESULT_VARIABLE iwd2r_git_result)
+    if(iwd2r_git_result EQUAL 0 AND NOT iwd2r_git_hash STREQUAL "")
+        set(IWD2R_GIT_HASH "${iwd2r_git_hash}")
+    endif()
+endif()
+set(IWD2R_VERSION_STRING "iwd2r ${PROJECT_VERSION} ${IWD2R_GIT_HASH}")
+
 add_subdirectory(compat)
 add_subdirectory(platform)
 

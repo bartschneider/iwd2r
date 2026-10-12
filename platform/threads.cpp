@@ -5,6 +5,7 @@
 #include "platform/win32_api.h"
 #include "platform/handles.h"
 // clang-format on
+#include "platform/affinity.h"
 
 #include <atomic>
 #include <chrono>
@@ -189,6 +190,19 @@ HANDLE GetCurrentThread() { return kCurrentThread; }
 
 // Nonzero and fixed; the engine only passes it to OpenProcess, which is inert.
 DWORD GetCurrentProcessId() { return 1; }
+
+BOOL SetProcessAffinityMask(HANDLE process, DWORD_PTR mask)
+{
+    if (process != NULL && process != kCurrentProcess) {
+        SetLastError(ERROR_INVALID_HANDLE);
+        return FALSE;
+    }
+    if (!platform::SetNativeProcessAffinity(static_cast<uint64_t>(mask))) {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+    return TRUE;
+}
 
 BOOL DuplicateHandle(HANDLE sourceProcess, HANDLE source, HANDLE targetProcess, HANDLE* target, DWORD, BOOL, DWORD)
 {

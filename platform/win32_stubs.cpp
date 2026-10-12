@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 
 namespace {
 
@@ -23,7 +24,26 @@ HMODULE LoadLibraryA(LPCSTR) { return NULL; }
 
 BOOL FreeLibrary(HMODULE) { return TRUE; }
 
-FARPROC GetProcAddress(HMODULE, LPCSTR) { return NULL; }
+namespace {
+
+// The engine's own pointer type for it (DWORD mask, as on 32-bit Windows).
+BOOL WINAPI SetProcessAffinityMaskEntry(HANDLE process, DWORD mask)
+{
+    return SetProcessAffinityMask(process, static_cast<DWORD_PTR>(mask));
+}
+
+}
+
+// Only the kernel32 entry points the engine looks up and iwd2r implements;
+// NULL for everything else, so the engine takes its fallback paths.
+FARPROC GetProcAddress(HMODULE, LPCSTR name)
+{
+    if (name && std::strcmp(name, "SetProcessAffinityMask") == 0)
+        // Through void (*)(), the generic function pointer type, as callers
+        // of GetProcAddress cast back to the real type.
+        return reinterpret_cast<FARPROC>(reinterpret_cast<void (*)()>(&SetProcessAffinityMaskEntry));
+    return NULL;
+}
 
 HMODULE GetModuleHandleA(LPCSTR) { return reinterpret_cast<HMODULE>(&g_moduleSentinel); }
 
@@ -123,16 +143,101 @@ BOOL EnumDisplaySettingsA(LPCSTR, DWORD, LPDEVMODEA) { return FALSE; }
 
 LONG ChangeDisplaySettingsA(LPDEVMODEA mode, DWORD) { return mode == NULL ? DISP_CHANGE_SUCCESSFUL : DISP_CHANGE_FAILED; }
 
+namespace {
+
+#ifndef IWD2R_VERSION_STRING
+#define IWD2R_VERSION_STRING "iwd2r unknown"
+#endif
+
+// The built-in version resource of whatever file is asked about (the engine
+// asks only about its own executable). Strings as in the GOG 2.01 IWD2.EXE's
+// VS_VERSIONINFO (\StringFileInfo\040904b0), except PrivateBuild (there
+// "50100", unused by the engine), which names this build.
+const char* const kVersionStrings[][2] = {
+    { "CompanyName", "Interplay Entertainment Corp." },
+    { "FileDescription", "Icewind Dale II" },
+    { "FileVersion", "2, 0, 1, 0" },
+    { "InternalName", "Icewind Dale II" },
+    { "OriginalFilename", "IWD2.EXE" },
+    { "PrivateBuild", IWD2R_VERSION_STRING },
+    { "ProductName", "Icewind Dale II" },
+    { "ProductVersion", "2, 0, 1, 0" },
+};
+
+const char kVersionMagic[] = "iwd2rVER";
+const char kStringFilePrefix[] = "\\StringFileInfo\\040904b0\\";
+
+// The block GetFileVersionInfoA fills: the magic, then key NUL value NUL
+// pairs, then a final NUL.
+std::string VersionBlock()
+{
+    std::string block(kVersionMagic, sizeof(kVersionMagic));
+    for (const auto& entry : kVersionStrings) {
+        block.append(entry[0]).push_back('\0');
+        block.append(entry[1]).push_back('\0');
+    }
+    block.push_back('\0');
+    return block;
+}
+
+bool EqualsNoCase(const char* a, const char* b, size_t n)
+{
+    for (size_t i = 0; i < n; i++) {
+        if (std::tolower(static_cast<unsigned char>(a[i])) != std::tolower(static_cast<unsigned char>(b[i])))
+            return false;
+        if (a[i] == '\0')
+            return true;
+    }
+    return true;
+}
+
+}
+
 DWORD GetFileVersionInfoSizeA(LPCSTR, LPDWORD handle)
 {
     if (handle)
         *handle = 0;
-    return 0;
+    return static_cast<DWORD>(VersionBlock().size());
 }
 
-BOOL GetFileVersionInfoA(LPCSTR, DWORD, DWORD, LPVOID) { return FALSE; }
+BOOL GetFileVersionInfoA(LPCSTR, DWORD, DWORD size, LPVOID data)
+{
+    const std::string block = VersionBlock();
+    if (!data || size < block.size()) {
+        SetLastError(ERROR_INSUFFICIENT_BUFFER);
+        return FALSE;
+    }
+    std::memcpy(data, block.data(), block.size());
+    return TRUE;
+}
 
-BOOL VerQueryValueA(LPCVOID, LPCSTR, LPVOID*, PUINT) { return FALSE; }
+// Answers \StringFileInfo\040904b0\<Name> (case-insensitive, as Win32) with
+// a pointer into the caller's block and the length in characters including
+// the NUL. The engine queries no other path (no "\" fixed info, no
+// \VarFileInfo).
+BOOL VerQueryValueA(LPCVOID block, LPCSTR subBlock, LPVOID* buffer, PUINT length)
+{
+    if (!block || !subBlock || !buffer)
+        return FALSE;
+    const char* bytes = static_cast<const char*>(block);
+    if (std::memcmp(bytes, kVersionMagic, sizeof(kVersionMagic)) != 0)
+        return FALSE;
+    const size_t prefixLength = sizeof(kStringFilePrefix) - 1;
+    if (std::strlen(subBlock) <= prefixLength || !EqualsNoCase(subBlock, kStringFilePrefix, prefixLength))
+        return FALSE;
+    const char* name = subBlock + prefixLength;
+    for (const char* key = bytes + sizeof(kVersionMagic); *key != '\0';) {
+        const char* value = key + std::strlen(key) + 1;
+        if (EqualsNoCase(key, name, std::strlen(name) + 1)) {
+            *buffer = const_cast<char*>(value);
+            if (length)
+                *length = static_cast<UINT>(std::strlen(value) + 1);
+            return TRUE;
+        }
+        key = value + std::strlen(value) + 1;
+    }
+    return FALSE;
+}
 
 HRESULT CoInitialize(LPVOID) { return S_OK; }
 
