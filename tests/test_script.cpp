@@ -274,9 +274,12 @@ TEST_CASE("control directory answers shot and frame-count requests", "[script][c
     platform::present::MarkPrimaryDirty();
     platform::window::PumpEvents();
     CHECK_FALSE(std::filesystem::exists(control / "frames.req"));
-    std::ifstream framesIn(control / "frames.txt");
     int frames = -1;
-    framesIn >> frames;
+    {
+        // Closed before the directory is removed (Windows keeps open files).
+        std::ifstream framesIn(control / "frames.txt");
+        framesIn >> frames;
+    }
     CHECK(frames == platform::present::PresentedFrames());
     CHECK(frames == before + 2);
 
