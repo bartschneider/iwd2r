@@ -14,6 +14,7 @@
 #include "mfc_sync.h"
 #include "mfc_wnd.h"
 #include "mfc_resource.h"
+#include "ini.h"
 #include "path_hook.h"
 #include "platform/win32_api.h"
 
