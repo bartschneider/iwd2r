@@ -15,6 +15,7 @@ namespace {
         SIZE screen = { 1024, 768 };
         SIZE desktop = { 0, 0 };
         SIZE mode = { 0, 0 };
+        int scale = 1;
         bool fullscreen = false;
         bool dirty = false;
         int frames = 0;
@@ -75,6 +76,9 @@ namespace {
             s.texture = SDL_CreateTexture(s.renderer, SDL_PIXELFORMAT_XRGB8888, SDL_TEXTUREACCESS_STREAMING, width, height);
             if (!s.texture)
                 return false;
+            // Scaled frames keep their pixels square and sharp.
+            if (s.scale > 1)
+                SDL_SetTextureScaleMode(s.texture, SDL_SCALEMODE_NEAREST);
             s.textureWidth = width;
             s.textureHeight = height;
         }
@@ -99,6 +103,10 @@ void SetScreenSize(int w, int h)
     S().screen.cx = w;
     S().screen.cy = h;
 }
+
+void SetWindowScale(int scale) { S().scale = scale >= 1 ? scale : 1; }
+
+int WindowScale() { return S().scale; }
 
 SIZE ScreenSize()
 {
@@ -149,8 +157,8 @@ void WindowToFrame(float x, float y, float* fx, float* fy)
     const State& s = S();
     if (s.renderer && s.texture && SDL_RenderCoordinatesFromWindow(s.renderer, x, y, fx, fy))
         return;
-    *fx = x;
-    *fy = y;
+    *fx = x / static_cast<float>(s.scale);
+    *fy = y / static_cast<float>(s.scale);
 }
 
 void FrameToWindow(float fx, float fy, float* x, float* y)
@@ -158,8 +166,8 @@ void FrameToWindow(float fx, float fy, float* x, float* y)
     const State& s = S();
     if (s.renderer && s.texture && SDL_RenderCoordinatesToWindow(s.renderer, fx, fy, x, y))
         return;
-    *x = fx;
-    *y = fy;
+    *x = fx * static_cast<float>(s.scale);
+    *y = fy * static_cast<float>(s.scale);
 }
 
 bool FrameSize(int* w, int* h)

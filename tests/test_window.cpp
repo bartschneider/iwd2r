@@ -407,6 +407,57 @@ TEST_CASE("window cursor position is window-relative and clamped to the client a
     CHECK(p.y == 0);
 }
 
+TEST_CASE("window scale maps window pixels to engine pixels", "[window]")
+{
+    platform::present::SetWindowScale(2);
+    {
+        TestWindow w;
+        // The engine asked for 320x200: the window is twice that, and the
+        // engine sees its own size.
+        int ww = 0;
+        int wh = 0;
+        SDL_GetWindowSize(w.Sdl(), &ww, &wh);
+        CHECK(ww == 640);
+        CHECK(wh == 400);
+        RECT cr;
+        REQUIRE(GetClientRect(w.hwnd, &cr));
+        CHECK(cr.right == 320);
+        CHECK(cr.bottom == 200);
+        CHECK(GetSystemMetrics(SM_CXFULLSCREEN) == platform::present::DesktopSize().cx / 2);
+        CHECK(GetSystemMetrics(SM_CYFULLSCREEN) == platform::present::DesktopSize().cy / 2);
+
+        // Before any frame: a window click at (200,100) is engine (100,50).
+        SDL_WarpMouseInWindow(w.Sdl(), 200.0f, 100.0f);
+        PumpAll();
+        POINT p = { -1, -1 };
+        REQUIRE(GetCursorPos(&p));
+        CHECK(p.x == 100);
+        CHECK(p.y == 50);
+
+        // With a presented 320x200 frame, through the renderer's mapping.
+        std::vector<uint32_t> frame(320 * 200, 0);
+        platform::present::Present(frame.data(), 320, 200, 320 * 4);
+        SDL_WarpMouseInWindow(w.Sdl(), 200.0f, 100.0f);
+        PumpAll();
+        REQUIRE(GetCursorPos(&p));
+        CHECK(p.x == 100);
+        CHECK(p.y == 50);
+
+        // SetCursorPos maps back to the window.
+        REQUIRE(SetCursorPos(30, 40));
+        PumpAll();
+        float mx = 0.0f;
+        float my = 0.0f;
+        SDL_GetMouseState(&mx, &my);
+        CHECK(mx == 60.0f);
+        CHECK(my == 80.0f);
+        REQUIRE(GetCursorPos(&p));
+        CHECK(p.x == 30);
+        CHECK(p.y == 40);
+    }
+    platform::present::SetWindowScale(1);
+}
+
 TEST_CASE("window pump translates SDL window events", "[window]")
 {
     TestWindow w;

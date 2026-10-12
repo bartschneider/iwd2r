@@ -22,6 +22,12 @@ void SetPresentTarget(SDL_Window* window);
 // size. 1024x768 until set.
 void SetScreenSize(int w, int h);
 
+// Desktop pixels per engine pixel (Program Options/Scale, 1 to 4): the
+// window is the virtual screen times this, and frames are scaled up with
+// nearest-neighbour filtering. 1 until set.
+void SetWindowScale(int scale);
+int WindowScale();
+
 // The screen the engine sees: the display mode set by SetDisplayMode while
 // fullscreen, otherwise the virtual screen. GetSystemMetrics(SM_CXSCREEN)
 // reports it.
@@ -45,8 +51,9 @@ void SetDisplayMode(int w, int h);
 // Maps a point between window coordinates and the presented frame's
 // (the engine's screen coordinates) through the renderer's logical
 // presentation: stretched onto the window in windowed mode, letterboxed in
-// fullscreen. The identity before the first frame is presented or without a
-// renderer (the dummy video driver before a present).
+// fullscreen. Before the first frame is presented or without a renderer
+// (the dummy video driver before a present), a division (multiplication) by
+// WindowScale().
 void WindowToFrame(float x, float y, float* fx, float* fy);
 void FrameToWindow(float fx, float fy, float* x, float* y);
 

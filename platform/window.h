@@ -27,8 +27,15 @@ void EnqueueMessage(UINT message, WPARAM wParam, LPARAM lParam);
 // Sets the virtual screen (the game resolution, width x height) that
 // GetSystemMetrics(SM_CXSCREEN) reports and CreateWindowExA's window takes,
 // and starts SDL video so the desktop size is known before the engine reads
-// SM_CXFULLSCREEN. False when SDL video cannot start.
-bool InitScreen(int width, int height);
+// SM_CXFULLSCREEN. scale (Program Options/Scale) is the number of desktop
+// pixels per engine pixel: the window is width x height times scale, and
+// every window size, position and desktop size the engine sees is in engine
+// pixels. False when SDL video cannot start.
+bool InitScreen(int width, int height, int scale = 1);
+
+// The primary display's native desktop size in pixels (starting SDL video
+// when needed), for Resolution=desktop. False, with zeros, when unknown.
+bool NativeDesktopSize(int* width, int* height);
 
 // The live window, or NULL.
 HWND MainWindow();
