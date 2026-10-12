@@ -5,17 +5,20 @@
 #include "compat/mfc_file.h"
 #include "compat/path_hook.h"
 
+#include <atomic>
+#include <chrono>
 #include <filesystem>
 #include <string>
-#include <unistd.h>
 
 namespace {
+
+std::atomic<int> s_counter { 0 };
 
 class TempDir {
 public:
     TempDir()
     {
-        m_path = std::filesystem::temp_directory_path() / ("iwd2r_file_test_" + std::to_string(getpid()));
+        m_path = std::filesystem::temp_directory_path() / ("iwd2r_file_test_" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + "_" + std::to_string(s_counter++));
         std::filesystem::remove_all(m_path);
         std::filesystem::create_directories(m_path);
     }
@@ -158,4 +161,25 @@ TEST_CASE("file: CTime basics", "[file]")
     CHECK(now.GetDayOfWeek() >= 1);
     CHECK(now.GetDayOfWeek() <= 7);
     CHECK((CTime(now.GetTime() + 90) - now).GetTotalSeconds() == 90);
+}
+
+TEST_CASE("file: mixed reads and writes on one stream", "[file]")
+{
+    TempDir dir;
+    const std::string path = dir.file("rw.bin");
+    CFile f;
+    REQUIRE(f.Open(path.c_str(), CFile::modeReadWrite | CFile::modeCreate));
+    f.Write("abcd", 4);
+    f.SeekToBegin();
+    char buffer[4];
+    REQUIRE(f.Read(buffer, 2) == 2);
+    CHECK(std::string(buffer, 2) == "ab");
+    f.Write("XY", 2);
+    CHECK(f.GetLength() == 4);
+    f.SeekToBegin();
+    REQUIRE(f.Read(buffer, 4) == 4);
+    CHECK(std::string(buffer, 4) == "abXY");
+    f.Write("Z", 1);
+    REQUIRE(f.Read(buffer, 1) == 0);
+    CHECK(f.GetLength() == 5);
 }

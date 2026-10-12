@@ -5,11 +5,14 @@
 #include "compat/path_hook.h"
 
 #include <cerrno>
+#include <chrono>
+#include <cstdint>
 #include <cstdio>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <unistd.h>
-#include <utime.h>
+#include <cstring>
+#include <filesystem>
+#include <system_error>
+
+namespace fs = std::filesystem;
 
 const HANDLE CFile::hFileNull = (HANDLE)(intptr_t)-1;
 
@@ -17,15 +20,30 @@ namespace {
 
 FILE* asFile(HANDLE handle) { return static_cast<FILE*>(handle); }
 
+// C++17 has no clock_cast, so approximate by comparing the two clocks' "now".
+time_t toTimeT(fs::file_time_type t)
+{
+    const auto sys = std::chrono::system_clock::now() + (t - fs::file_time_type::clock::now());
+    return std::chrono::system_clock::to_time_t(std::chrono::time_point_cast<std::chrono::system_clock::duration>(sys));
+}
+
+fs::file_time_type fromTimeT(time_t t)
+{
+    const auto delta = std::chrono::system_clock::from_time_t(t) - std::chrono::system_clock::now();
+    return fs::file_time_type::clock::now() + std::chrono::duration_cast<fs::file_time_type::duration>(delta);
+}
+
 }
 
 CFile::CFile()
     : m_hFile(hFileNull)
+    , m_lastOp(opNone)
 {
 }
 
 CFile::CFile(const char* path, UINT flags)
     : m_hFile(hFileNull)
+    , m_lastOp(opNone)
 {
     Open(path, flags);
 }
@@ -57,6 +75,7 @@ BOOL CFile::Open(const char* path, UINT flags, void*)
         return FALSE;
     m_hFile = file;
     m_path = resolved;
+    m_lastOp = opNone;
     return TRUE;
 }
 
@@ -64,6 +83,10 @@ UINT CFile::Read(void* buffer, UINT count)
 {
     if (m_hFile == hFileNull || count == 0)
         return 0;
+    // Switching from writing to reading needs a positioning call in between.
+    if (m_lastOp == opWrite)
+        fseek(asFile(m_hFile), 0, SEEK_CUR);
+    m_lastOp = opRead;
     return static_cast<UINT>(fread(buffer, 1, count, asFile(m_hFile)));
 }
 
@@ -71,6 +94,9 @@ void CFile::Write(const void* buffer, UINT count)
 {
     if (m_hFile == hFileNull || count == 0)
         return;
+    if (m_lastOp == opRead)
+        fseek(asFile(m_hFile), 0, SEEK_CUR);
+    m_lastOp = opWrite;
     fwrite(buffer, 1, count, asFile(m_hFile));
 }
 
@@ -79,9 +105,10 @@ LONG CFile::Seek(LONG offset, UINT from)
     if (m_hFile == hFileNull)
         return -1;
     static const int whence[] = { SEEK_SET, SEEK_CUR, SEEK_END };
-    if (from > end || fseeko(asFile(m_hFile), offset, whence[from]) != 0)
+    if (from > end || fseek(asFile(m_hFile), offset, whence[from]) != 0)
         return -1;
-    return static_cast<LONG>(ftello(asFile(m_hFile)));
+    m_lastOp = opNone;
+    return static_cast<LONG>(ftell(asFile(m_hFile)));
 }
 
 void CFile::SeekToBegin()
@@ -98,18 +125,21 @@ DWORD CFile::GetLength() const
 {
     if (m_hFile == hFileNull)
         return 0;
-    fflush(asFile(m_hFile));
-    struct stat info;
-    if (fstat(fileno(asFile(m_hFile)), &info) != 0)
-        return 0;
-    return static_cast<DWORD>(info.st_size);
+    FILE* file = asFile(m_hFile);
+    const long position = ftell(file);
+    fseek(file, 0, SEEK_END);
+    const long length = ftell(file);
+    fseek(file, position, SEEK_SET);
+    m_lastOp = opNone;
+    return length < 0 ? 0 : static_cast<DWORD>(length);
 }
 
 DWORD CFile::GetPosition() const
 {
     if (m_hFile == hFileNull)
         return 0;
-    return static_cast<DWORD>(ftello(asFile(m_hFile)));
+    const long position = ftell(asFile(m_hFile));
+    return position < 0 ? 0 : static_cast<DWORD>(position);
 }
 
 void CFile::SetLength(DWORD length)
@@ -117,8 +147,10 @@ void CFile::SetLength(DWORD length)
     if (m_hFile == hFileNull)
         return;
     fflush(asFile(m_hFile));
-    if (ftruncate(fileno(asFile(m_hFile)), static_cast<off_t>(length)) != 0)
-        return;
+    std::error_code ec;
+    fs::resize_file(fs::path(m_path), length, ec);
+    fseek(asFile(m_hFile), 0, SEEK_CUR);
+    m_lastOp = opNone;
 }
 
 void CFile::Close()
@@ -127,6 +159,8 @@ void CFile::Close()
         fclose(asFile(m_hFile));
         m_hFile = hFileNull;
     }
+    m_path.clear();
+    m_lastOp = opNone;
 }
 
 void CFile::Abort()
@@ -154,17 +188,32 @@ CString CFile::GetFileName() const
 BOOL CFile::GetStatus(const char* path, CFileStatus& status)
 {
     const std::string resolved = compat::ResolvePath(path);
-    struct stat info;
-    if (stat(resolved.c_str(), &info) != 0)
+    const fs::path p(resolved);
+    std::error_code ec;
+    const fs::file_status info = fs::status(p, ec);
+    if (ec || !fs::exists(info))
         return FALSE;
-    status.m_size = static_cast<ULONGLONG>(info.st_size);
-    status.m_mtime = CTime(info.st_mtime);
-    status.m_ctime = CTime(info.st_ctime);
-    status.m_atime = CTime(info.st_atime);
+
+    const bool isDirectory = fs::is_directory(info);
+    status.m_size = 0;
+    if (!isDirectory) {
+        const auto size = fs::file_size(p, ec);
+        if (!ec)
+            status.m_size = static_cast<ULONGLONG>(size);
+    }
+    CTime modified;
+    const auto written = fs::last_write_time(p, ec);
+    if (!ec)
+        modified = CTime(toTimeT(written));
+    status.m_mtime = modified;
+    status.m_ctime = modified;
+    status.m_atime = modified;
+
     BYTE attribute = normal;
-    if (S_ISDIR(info.st_mode))
+    if (isDirectory)
         attribute |= directory;
-    if (access(resolved.c_str(), W_OK) != 0)
+    const fs::perms writeBits = fs::perms::owner_write | fs::perms::group_write | fs::perms::others_write;
+    if ((info.permissions() & writeBits) == fs::perms::none)
         attribute |= readOnly;
     status.m_attribute = attribute;
     strncpy(status.m_szFullName, resolved.c_str(), MAX_PATH - 1);
@@ -174,34 +223,26 @@ BOOL CFile::GetStatus(const char* path, CFileStatus& status)
 
 void CFile::SetStatus(const char* path, const CFileStatus& status)
 {
-    const std::string resolved = compat::ResolvePath(path);
-    struct stat info;
-    if (stat(resolved.c_str(), &info) != 0)
+    const fs::path p(compat::ResolvePath(path));
+    std::error_code ec;
+    if (!fs::exists(p, ec))
         return;
-    mode_t mode = info.st_mode;
     if (status.m_attribute & readOnly)
-        mode &= ~(S_IWUSR | S_IWGRP | S_IWOTH);
+        fs::permissions(p, fs::perms::owner_write | fs::perms::group_write | fs::perms::others_write, fs::perm_options::remove, ec);
     else
-        mode |= S_IWUSR;
-    if (mode != info.st_mode)
-        chmod(resolved.c_str(), mode);
-    if (status.m_mtime.GetTime() != 0) {
-        utimbuf times;
-        times.actime = info.st_atime;
-        times.modtime = status.m_mtime.GetTime();
-        utime(resolved.c_str(), &times);
-    }
+        fs::permissions(p, fs::perms::owner_write, fs::perm_options::add, ec);
+    if (status.m_mtime.GetTime() != 0)
+        fs::last_write_time(p, fromTimeT(status.m_mtime.GetTime()), ec);
 }
 
 void CFile::Remove(const char* path)
 {
-    const std::string resolved = compat::ResolvePath(path);
-    unlink(resolved.c_str());
+    std::error_code ec;
+    fs::remove(fs::path(compat::ResolvePath(path)), ec);
 }
 
 void CFile::Rename(const char* oldPath, const char* newPath)
 {
-    const std::string from = compat::ResolvePath(oldPath);
-    const std::string to = compat::ResolvePath(newPath);
-    rename(from.c_str(), to.c_str());
+    std::error_code ec;
+    fs::rename(fs::path(compat::ResolvePath(oldPath)), fs::path(compat::ResolvePath(newPath)), ec);
 }

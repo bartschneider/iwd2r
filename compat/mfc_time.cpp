@@ -7,7 +7,11 @@ namespace {
 tm localBreakdown(time_t t)
 {
     tm result = {};
+#ifdef _WIN32
+    localtime_s(&result, &t);
+#else
     localtime_r(&t, &result);
+#endif
     return result;
 }
 

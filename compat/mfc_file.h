@@ -62,7 +62,10 @@ public:
     HANDLE m_hFile;
 
 private:
+    enum LastOp { opNone, opRead, opWrite };
+
     std::string m_path;
+    mutable int m_lastOp;
 };
 
 struct CFileStatus {
