@@ -2,6 +2,7 @@
 #define NOMINMAX
 #include <catch2/catch_test_macros.hpp>
 
+#include "compat/path_hook.h"
 #include "platform/data_dir.h"
 #include "platform/fs.h"
 
@@ -33,6 +34,7 @@ struct EnvCwdGuard {
     bool hadEnv;
     std::string savedEnv;
     stdfs::path savedCwd = stdfs::current_path();
+    std::string savedRoot = platform::fs::DataRoot();
     EnvCwdGuard()
     {
         const char* v = std::getenv("IWD2_DATA");
@@ -45,6 +47,8 @@ struct EnvCwdGuard {
     {
         std::error_code ec;
         stdfs::current_path(savedCwd, ec);
+        compat::SetPathResolver(nullptr);
+        platform::fs::SetDataRoot(savedRoot);
         SetEnv("IWD2_DATA", hadEnv ? savedEnv.c_str() : nullptr);
     }
 };
@@ -115,6 +119,8 @@ TEST_CASE("data_dir env without key is skipped and exe symlink wins", "[data_dir
     auto exeDir = tmp.Make("exe");
     std::error_code ec;
     stdfs::create_directory_symlink(real, exeDir / "IWD2", ec);
+    if (ec == std::errc::operation_not_permitted || ec == std::errc::permission_denied)
+        SKIP("cannot create symlinks here");
     REQUIRE_FALSE(ec);
     SetEnv("IWD2_DATA", bad.string().c_str());
     auto r = platform::FindDataDir(exeDir.string().c_str(), nullptr);
@@ -153,7 +159,7 @@ TEST_CASE("data_dir nothing valid yields empty", "[data_dir]")
     CHECK_FALSE(platform::FindDataDir(exeDir.string().c_str(), exeDir.string().c_str()).has_value());
 }
 
-TEST_CASE("data_dir ResolveDataDir failure reports through handler", "[data_dir]")
+TEST_CASE("data_dir ResolveDataDirFrom failure reports through handler", "[data_dir]")
 {
     EnvCwdGuard guard;
     TempDir tmp;
@@ -162,7 +168,7 @@ TEST_CASE("data_dir ResolveDataDir failure reports through handler", "[data_dir]
     g_fatalCalls = 0;
     platform::SetFatalMessageHandler(TestFatal);
     std::string rootBefore = platform::fs::DataRoot();
-    bool ok = platform::ResolveDataDir();
+    bool ok = platform::ResolveDataDirFrom("", "");
     platform::SetFatalMessageHandler(nullptr);
     CHECK_FALSE(ok);
     CHECK(g_fatalCalls == 1);
@@ -170,4 +176,20 @@ TEST_CASE("data_dir ResolveDataDir failure reports through handler", "[data_dir]
     CHECK(g_fatalCaption == "iwd2r");
     CHECK(platform::fs::DataRoot() == rootBefore);
     CHECK(stdfs::equivalent(stdfs::current_path(), empty));
+}
+
+TEST_CASE("data_dir ResolveDataDirFrom success configures the engine", "[data_dir]")
+{
+    EnvCwdGuard guard;
+    TempDir tmp;
+    auto data = tmp.Make("data", "chitin.key");
+    auto elsewhere = tmp.Make("elsewhere");
+    stdfs::current_path(elsewhere);
+    SetEnv("IWD2_DATA", data.string().c_str());
+    bool ok = platform::ResolveDataDirFrom("", "");
+    REQUIRE(ok);
+    CHECK(std::string(platform::DataDirSource()) == "env");
+    CHECK(platform::fs::DataRoot() == data.string());
+    CHECK(stdfs::equivalent(stdfs::current_path(), data));
+    CHECK(compat::ResolvePath("CHITIN.KEY") == "chitin.key");
 }

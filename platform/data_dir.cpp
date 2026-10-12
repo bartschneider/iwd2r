@@ -7,6 +7,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <exception>
 #include <filesystem>
 #include <string>
 #include <system_error>
@@ -17,7 +18,7 @@ namespace {
 
     namespace stdfs = std::filesystem;
 
-    const char* g_source = "";
+    std::string g_source;
     FatalMessageFn g_fatal = nullptr;
 
     void DefaultFatal(const char* text, const char* caption)
@@ -44,21 +45,28 @@ namespace {
 
     bool HasChitinKey(const std::string& dir)
     {
-        std::error_code ec;
-        stdfs::path p(dir);
-        if (!stdfs::is_directory(p, ec))
-            return false;
-        stdfs::directory_iterator it(p, ec), end;
-        for (; !ec && it != end; it.increment(ec)) {
-            if (IsChitinKey(it->path().filename().string()))
-                return true;
+        try {
+            std::error_code ec;
+            stdfs::path p(dir);
+            if (!stdfs::is_directory(p, ec))
+                return false;
+            stdfs::directory_iterator it(p, ec), end;
+            for (; !ec && it != end; it.increment(ec)) {
+                if (IsChitinKey(it->path().filename().string()))
+                    return true;
+            }
+        } catch (const std::exception&) {
         }
         return false;
     }
 
     std::string Child(const char* dir, const char* name)
     {
-        return (stdfs::path(dir) / name).string();
+        try {
+            return (stdfs::path(dir) / name).string();
+        } catch (const std::exception&) {
+            return std::string();
+        }
     }
 
 }
@@ -87,8 +95,11 @@ std::optional<DataDirResult> FindDataDir(const char* exeDir, const char* repoRoo
     std::error_code ec;
     stdfs::path cwd = stdfs::current_path(ec);
     if (!ec) {
-        if (auto r = accept(cwd.string(), "cwd"))
-            return r;
+        try {
+            if (auto r = accept(cwd.string(), "cwd"))
+                return r;
+        } catch (const std::exception&) {
+        }
     }
     return std::nullopt;
 }
@@ -100,13 +111,20 @@ bool ResolveDataDir()
     char buffer[4096];
     DWORD n = GetModuleFileNameA(nullptr, buffer, sizeof(buffer));
     if (n > 0 && n < sizeof(buffer)) {
-        stdfs::path dir = stdfs::path(std::string(buffer, n)).parent_path();
-        exeDir = dir.string();
-        if (dir.has_parent_path())
-            repoHint = dir.parent_path().parent_path().string();
+        try {
+            stdfs::path dir = stdfs::path(std::string(buffer, n)).parent_path();
+            exeDir = dir.string();
+            if (dir.has_parent_path())
+                repoHint = dir.parent_path().parent_path().string();
+        } catch (const std::exception&) {
+        }
     }
+    return ResolveDataDirFrom(exeDir.c_str(), repoHint.c_str());
+}
 
-    auto found = FindDataDir(exeDir.c_str(), repoHint.c_str());
+bool ResolveDataDirFrom(const char* exeDir, const char* repoRootHint)
+{
+    auto found = FindDataDir(exeDir, repoRootHint);
     if (!found) {
         FatalMessageFn fn = g_fatal ? g_fatal : DefaultFatal;
         fn("Set IWD2_DATA to your Icewind Dale II install directory (the one containing CHITIN.KEY).", "iwd2r");
@@ -116,15 +134,13 @@ bool ResolveDataDir()
     fs::SetDataRoot(found->path);
     fs::InstallResolver();
     SetCurrentDirectoryA(found->path.c_str());
-    static std::string stored;
-    stored = found->source;
-    g_source = stored.c_str();
+    g_source = found->source;
     return true;
 }
 
 const char* DataDirSource()
 {
-    return g_source;
+    return g_source.c_str();
 }
 
 void SetFatalMessageHandler(FatalMessageFn handler)

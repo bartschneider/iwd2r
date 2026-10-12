@@ -20,6 +20,9 @@ std::optional<DataDirResult> FindDataDir(const char* exeDir, const char* repoRoo
 // changes the current directory to it. On failure reports through the fatal handler.
 bool ResolveDataDir();
 
+// Same as ResolveDataDir, with the executable directory and repo hint supplied by the caller.
+bool ResolveDataDirFrom(const char* exeDir, const char* repoRootHint);
+
 // The source chosen by the last successful ResolveDataDir; empty before.
 const char* DataDirSource();
 
