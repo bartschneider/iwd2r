@@ -7,4 +7,4 @@ target_link_libraries(iwd2r_tests PRIVATE iwd2r_compat iwd2r_platform ${ZLIB_LIB
 iwd2r_strict_warnings(iwd2r_tests)
 add_dependencies(iwd2r_tests iwd2r)
 target_compile_definitions(iwd2r_tests PRIVATE IWD2R_EXE="$<TARGET_FILE:iwd2r>")
-catch_discover_tests(iwd2r_tests PROPERTIES SKIP_REGULAR_EXPRESSION "SKIPPED")
+catch_discover_tests(iwd2r_tests PROPERTIES SKIP_REGULAR_EXPRESSION "\\[iwd2r-skip\\]" TIMEOUT 180)
