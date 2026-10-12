@@ -133,3 +133,31 @@ TEST_CASE("clock running timer is stopped at process exit", "[clock]")
     // Deliberately left running; the registry destructor must join it.
     REQUIRE(timeSetEvent(15, 1, CountingCallback, 0, TIME_PERIODIC) != 0);
 }
+
+namespace {
+std::atomic<int> g_oldTicks { 0 };
+std::atomic<int> g_newTicks { 0 };
+std::atomic<bool> g_restarted { false };
+void CALLBACK NewShotCallback(UINT, UINT, DWORD_PTR, DWORD_PTR, DWORD_PTR) { ++g_newTicks; }
+void CALLBACK KillAndRestartCallback(UINT id, UINT, DWORD_PTR, DWORD_PTR, DWORD_PTR)
+{
+    if (++g_oldTicks == 1) {
+        timeKillEvent(id);
+        timeSetEvent(10, 1, NewShotCallback, 0, TIME_ONESHOT);
+        g_restarted = true;
+    }
+}
+}
+
+TEST_CASE("clock timer may kill itself and start another from its callback", "[clock]")
+{
+    g_oldTicks = 0;
+    g_newTicks = 0;
+    g_restarted = false;
+    REQUIRE(timeSetEvent(10, 1, KillAndRestartCallback, 0, TIME_PERIODIC) != 0);
+    REQUIRE(WaitFor([] { return g_newTicks.load() >= 1; }, 1000));
+    SleepMs(150);
+    REQUIRE(g_restarted);
+    REQUIRE(g_newTicks == 1);
+    REQUIRE(g_oldTicks == 1);
+}

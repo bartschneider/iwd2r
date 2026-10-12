@@ -6,6 +6,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -31,8 +32,10 @@ public:
 
 DefaultSource& DefaultInstance()
 {
-    static DefaultSource instance;
-    return instance;
+    // Immortal on purpose: timer threads may still read the clock while the
+    // timer registry is being torn down during static destruction.
+    static DefaultSource* instance = new DefaultSource;
+    return *instance;
 }
 
 std::atomic<ClockSource*>& CurrentSource()
@@ -56,8 +59,6 @@ void SetClockSource(ClockSource* source)
 } // namespace platform
 
 namespace {
-
-using SteadyClock = std::chrono::steady_clock;
 
 struct Timer {
     UINT id = 0;
@@ -127,13 +128,23 @@ private:
         timer.cv.notify_all();
     }
 
-    static void Join(std::vector<std::shared_ptr<Timer>>& timers)
+    // Joins the given timers, except the calling thread's own timer, which is
+    // handed back to the retired list to be joined by someone else.
+    void Join(std::vector<std::shared_ptr<Timer>>& timers)
     {
+        std::vector<std::shared_ptr<Timer>> own;
         for (auto& timer : timers) {
-            if (timer->thread.joinable())
+            if (timer->thread.get_id() == std::this_thread::get_id())
+                own.push_back(timer);
+            else if (timer->thread.joinable())
                 timer->thread.join();
         }
         timers.clear();
+        if (!own.empty()) {
+            std::lock_guard<std::mutex> guard(m_lock);
+            for (auto& timer : own)
+                m_retired.push_back(timer);
+        }
     }
 
     void StopAll()
@@ -164,9 +175,9 @@ private:
 
     void Run(const std::shared_ptr<Timer>& timer)
     {
-        const auto delay = std::chrono::milliseconds(timer->delayMs);
-        const auto start = SteadyClock::now();
-        unsigned long long n = 1;
+        const auto delay = std::chrono::milliseconds(timer->delayMs ? timer->delayMs : 1);
+        const auto start = std::chrono::steady_clock::now();
+        std::int64_t n = 1;
         for (;;) {
             const auto due = start + delay * n;
             {
