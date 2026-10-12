@@ -1,3 +1,4 @@
+// Modified for iwd2r; see NOTICE.md
 #include "CTlkTable.h"
 
 #include "CUtil.h"
@@ -176,7 +177,7 @@ BOOLEAN CTlkTable::Fetch(DWORD dwStrId, STR_RES& strRes)
 
         if (STRREF_ON) {
             CString sFormatted;
-            sFormatted.Format("%ld : %s", dwStrId & dword_85DD64, sText);
+            sFormatted.Format("%u : %s", dwStrId & dword_85DD64, sText);
             sText = sFormatted;
         }
 

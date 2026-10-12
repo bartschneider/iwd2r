@@ -1,3 +1,4 @@
+// Modified for iwd2r; see NOTICE.md
 #include "CAIAction.h"
 
 #include "CAIUtil.h"
@@ -266,7 +267,7 @@ void CAIAction::Read(CString sData)
     m_acteeID2.Read(v2);
 
     sscanf(sData,
-        "%ld %d %d %d %d",
+        "%d %d %d %d %d",
         &m_specificID,
         &(m_dest.x),
         &(m_dest.y),

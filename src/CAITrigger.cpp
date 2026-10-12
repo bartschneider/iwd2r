@@ -1,3 +1,4 @@
+// Modified for iwd2r; see NOTICE.md
 #include "CAITrigger.h"
 
 #include "CAIUtil.h"
@@ -88,7 +89,7 @@ void CAITrigger::Read(const CString& sData)
     CString v1 = CAIUtil::ReadTo(sMutableData, CString("OB\n"), FALSE);
 
     sscanf(v1,
-        "%d %ld %ld %ld %ld ",
+        "%d %d %d %d %d ",
         &m_triggerID,
         &m_specificID,
         &m_flags,

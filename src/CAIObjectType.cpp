@@ -1119,7 +1119,7 @@ void CAIObjectType::Read(CString sData)
     int height = -1;
 
     sscanf(sData,
-        "%ld %ld %ld %ld %ld %ld %ld %ld %ld %ld %ld %ld %ld [%d.%d.%d.%d]",
+        "%d %d %d %d %d %d %d %d %d %d %d %d %d [%d.%d.%d.%d]",
         &nEnemyAlly,
         &nGeneral,
         &nRace,
