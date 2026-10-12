@@ -128,10 +128,18 @@ TEST_CASE("clock timer may kill itself from its callback", "[clock]")
     REQUIRE(g_selfCalls == 1);
 }
 
+namespace {
+// Only the timer left running below touches this, so the other clock tests'
+// counters stay theirs in any order.
+std::atomic<int> g_exitTicks { 0 };
+void CALLBACK ExitTimerCallback(UINT, UINT, DWORD_PTR, DWORD_PTR, DWORD_PTR) { ++g_exitTicks; }
+}
+
 TEST_CASE("clock running timer is stopped at process exit", "[clock]")
 {
     // Deliberately left running; the registry destructor must join it.
-    REQUIRE(timeSetEvent(15, 1, CountingCallback, 0, TIME_PERIODIC) != 0);
+    REQUIRE(timeSetEvent(15, 1, ExitTimerCallback, 0, TIME_PERIODIC) != 0);
+    REQUIRE(WaitFor([] { return g_exitTicks.load() >= 1; }, 500));
 }
 
 namespace {
