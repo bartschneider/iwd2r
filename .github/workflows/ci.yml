@@ -55,7 +55,7 @@ jobs:
       - name: Install packages
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake ninja-build clang clang-format pkg-config libasound2-dev libpulse-dev libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxkbcommon-dev libdrm-dev libgbm-dev libgl1-mesa-dev libegl1-mesa-dev libwayland-dev libdecor-0-dev libudev-dev libdbus-1-dev libpipewire-0.3-dev
+          sudo apt-get install -y build-essential cmake ninja-build clang pkg-config libasound2-dev libpulse-dev libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxkbcommon-dev libdrm-dev libgbm-dev libgl1-mesa-dev libegl1-mesa-dev libwayland-dev libdecor-0-dev libudev-dev libdbus-1-dev libpipewire-0.3-dev
       - name: Choose dependency directory
         shell: bash
         run: echo "FETCH_DIR=$(echo "$RUNNER_TEMP" | tr '\\' '/')/fetch" >> "$GITHUB_ENV"
@@ -87,11 +87,11 @@ jobs:
           path: ${{ env.FETCH_DIR }}
           key: fetch-${{ runner.os }}-windows-x64-${{ hashFiles('CMakeLists.txt') }}
       - name: Configure
-        run: cmake --preset windows-x64 -DFETCHCONTENT_BASE_DIR="${{ env.FETCH_DIR }}"
+        run: cmake --preset windows-msvc-x64 -DFETCHCONTENT_BASE_DIR="${{ env.FETCH_DIR }}"
       - name: Build
-        run: cmake --build --preset windows-x64
+        run: cmake --build --preset windows-msvc-x64
       - name: Test
-        run: ctest --preset windows-x64 --output-on-failure
+        run: ctest --preset windows-msvc-x64 --output-on-failure
 
   windows-x86:
     runs-on: windows-latest
@@ -110,8 +110,8 @@ jobs:
           path: ${{ env.FETCH_DIR }}
           key: fetch-${{ runner.os }}-windows-x86-${{ hashFiles('CMakeLists.txt') }}
       - name: Configure
-        run: cmake --preset windows-x86 -DFETCHCONTENT_BASE_DIR="${{ env.FETCH_DIR }}"
+        run: cmake --preset windows-msvc-x86 -DFETCHCONTENT_BASE_DIR="${{ env.FETCH_DIR }}"
       - name: Build
-        run: cmake --build --preset windows-x86
+        run: cmake --build --preset windows-msvc-x86
       - name: Test
-        run: ctest --preset windows-x86 --output-on-failure
+        run: ctest --preset windows-msvc-x86 --output-on-failure
