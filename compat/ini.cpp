@@ -4,6 +4,8 @@
 #include "path_hook.h"
 
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <iterator>
@@ -201,6 +203,81 @@ DWORD CopyList(const std::string& names, LPSTR out, DWORD size)
     return size - 2;
 }
 
+struct Override {
+    std::string section;
+    std::string key;
+    std::string value;
+};
+
+// IWD2R_INI_OVERRIDE, parsed on first use; guarded by s_overrideMutex.
+std::mutex s_overrideMutex;
+bool s_overridesLoaded = false;
+std::vector<Override> s_overrides;
+
+// "Section/Key=Value;...": section up to the first '/', key up to the first
+// '=' (both trimmed, matched case-insensitively), the value verbatim after it.
+void LoadOverrides()
+{
+    s_overrides.clear();
+    s_overridesLoaded = true;
+    const char* env = std::getenv("IWD2R_INI_OVERRIDE");
+    if (!env)
+        return;
+    const std::string text = env;
+    size_t pos = 0;
+    while (pos <= text.size()) {
+        size_t semi = text.find(';', pos);
+        if (semi == std::string::npos)
+            semi = text.size();
+        const std::string entry = text.substr(pos, semi - pos);
+        pos = semi + 1;
+        if (Trim(entry).empty())
+            continue;
+        const size_t eq = entry.find('=');
+        const size_t slash = entry.find('/');
+        Override o;
+        if (eq != std::string::npos && slash < eq) {
+            o.section = Trim(entry.substr(0, slash));
+            o.key = Trim(entry.substr(slash + 1, eq - slash - 1));
+            o.value = entry.substr(eq + 1);
+        }
+        if (o.section.empty() || o.key.empty()) {
+            std::fprintf(stderr, "iwd2r: ignoring malformed IWD2R_INI_OVERRIDE entry \"%s\" (expected Section/Key=Value)\n", entry.c_str());
+            continue;
+        }
+        s_overrides.push_back(std::move(o));
+    }
+}
+
+// The override for section/key; the last matching entry wins.
+bool FindOverride(const char* section, const char* key, std::string& value)
+{
+    std::lock_guard<std::mutex> lock(s_overrideMutex);
+    if (!s_overridesLoaded)
+        LoadOverrides();
+    for (auto it = s_overrides.rbegin(); it != s_overrides.rend(); ++it) {
+        if (EqualNoCase(it->section, section) && EqualNoCase(it->key, key)) {
+            value = it->value;
+            return true;
+        }
+    }
+    return false;
+}
+
+UINT ParseInt(const std::string& value, UINT def)
+{
+    size_t i = 0;
+    bool negative = false;
+    if (i < value.size() && (value[i] == '+' || value[i] == '-'))
+        negative = value[i++] == '-';
+    if (i >= value.size() || value[i] < '0' || value[i] > '9')
+        return def;
+    UINT result = 0;
+    for (; i < value.size() && value[i] >= '0' && value[i] <= '9'; ++i)
+        result = result * 10u + static_cast<UINT>(value[i] - '0');
+    return negative ? 0u - result : result;
+}
+
 }
 
 DWORD GetPrivateProfileStringA(LPCSTR lpAppName, LPCSTR lpKeyName, LPCSTR lpDefault, LPSTR lpReturnedString, DWORD nSize, LPCSTR lpFileName)
@@ -238,6 +315,8 @@ DWORD GetPrivateProfileStringA(LPCSTR lpAppName, LPCSTR lpKeyName, LPCSTR lpDefa
         return CopyList(names, lpReturnedString, nSize);
     }
     std::string value;
+    if (FindOverride(lpAppName, lpKeyName, value))
+        return CopyString(value, lpReturnedString, nSize);
     if (doc && Lookup(*doc, lpAppName, lpKeyName, value))
         return CopyString(value, lpReturnedString, nSize);
     return CopyString(def, lpReturnedString, nSize);
@@ -248,24 +327,17 @@ UINT GetPrivateProfileIntA(LPCSTR lpAppName, LPCSTR lpKeyName, INT nDefault, LPC
     UINT def = static_cast<UINT>(nDefault);
     if (!lpAppName || !lpKeyName)
         return def;
-    std::string path = compat::ResolvePath(lpFileName ? lpFileName : "");
     std::string value;
+    if (FindOverride(lpAppName, lpKeyName, value))
+        return ParseInt(value, def);
+    std::string path = compat::ResolvePath(lpFileName ? lpFileName : "");
     {
         std::lock_guard<std::mutex> lock(s_mutex);
         const Document* doc = Load(path);
         if (!doc || !Lookup(*doc, lpAppName, lpKeyName, value))
             return def;
     }
-    size_t i = 0;
-    bool negative = false;
-    if (i < value.size() && (value[i] == '+' || value[i] == '-'))
-        negative = value[i++] == '-';
-    if (i >= value.size() || value[i] < '0' || value[i] > '9')
-        return def;
-    UINT result = 0;
-    for (; i < value.size() && value[i] >= '0' && value[i] <= '9'; ++i)
-        result = result * 10u + static_cast<UINT>(value[i] - '0');
-    return negative ? 0u - result : result;
+    return ParseInt(value, def);
 }
 
 BOOL WritePrivateProfileStringA(LPCSTR lpAppName, LPCSTR lpKeyName, LPCSTR lpString, LPCSTR lpFileName)
@@ -347,6 +419,13 @@ void FlushCache()
 {
     std::lock_guard<std::mutex> lock(s_mutex);
     s_cache.clear();
+}
+
+void ResetOverridesForTesting()
+{
+    std::lock_guard<std::mutex> lock(s_overrideMutex);
+    s_overrides.clear();
+    s_overridesLoaded = false;
 }
 
 }

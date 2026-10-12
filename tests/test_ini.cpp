@@ -7,6 +7,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -180,4 +181,95 @@ TEST_CASE("ini file names go through the path resolver", "[ini]")
     compat::SetPathResolver([](const char*) { return s_real; });
     CHECK(GetPrivateProfileIntA("program options", "width", 0, "Elsewhere.ini") == 800);
     compat::SetPathResolver(nullptr);
+}
+
+namespace {
+
+// Sets IWD2R_INI_OVERRIDE for one test and makes compat re-read it.
+class OverrideEnv {
+public:
+    explicit OverrideEnv(const char* value)
+    {
+#ifdef _WIN32
+        _putenv_s("IWD2R_INI_OVERRIDE", value);
+#else
+        setenv("IWD2R_INI_OVERRIDE", value, 1);
+#endif
+        compat::ini::ResetOverridesForTesting();
+    }
+    ~OverrideEnv()
+    {
+#ifdef _WIN32
+        _putenv_s("IWD2R_INI_OVERRIDE", "");
+#else
+        unsetenv("IWD2R_INI_OVERRIDE");
+#endif
+        compat::ini::ResetOverridesForTesting();
+    }
+    OverrideEnv(const OverrideEnv&) = delete;
+    OverrideEnv& operator=(const OverrideEnv&) = delete;
+};
+
+}
+
+TEST_CASE("ini override replaces matching reads in any file", "[ini][ini-override]")
+{
+    OverrideEnv env("Program Options/Width=1024;Other/New Key=hello");
+    TempIni t(kSample);
+    CHECK(GetPrivateProfileIntA("Program Options", "Width", 0, t.f()) == 1024);
+    CHECK(GetStr("Program Options", "Width", "", t) == "1024");
+    // Absent from the file: still overridden.
+    CHECK(GetStr("Other", "New Key", "dflt", t) == "hello");
+    TempIni missing;
+    CHECK(GetPrivateProfileIntA("Program Options", "Width", 5, missing.f()) == 1024);
+    // Other keys come from the file.
+    CHECK(GetStr("Program Options", "Name", "", t) == "Icewind Dale II");
+    CHECK(GetPrivateProfileIntA("Program Options", "Flag", 0, t.f()) == 1);
+}
+
+TEST_CASE("ini override matches case-insensitively and keeps the value verbatim", "[ini][ini-override]")
+{
+    OverrideEnv env(" program OPTIONS / name =a=b \"c\" ;;");
+    TempIni t(kSample);
+    CHECK(GetStr("Program Options", "Name", "", t) == "a=b \"c\" ");
+    CHECK(GetStr("PROGRAM options", "NAME", "", t) == "a=b \"c\" ");
+
+    char buf[4];
+    CHECK(GetPrivateProfileStringA("Program Options", "Name", "", buf, sizeof buf, t.f()) == 3);
+    CHECK(std::string(buf) == "a=b");
+}
+
+TEST_CASE("ini override ignores malformed entries", "[ini][ini-override]")
+{
+    OverrideEnv env("Width=1;/Width=2;Program Options/=3;Program Options Width;Program Options/Flag=7");
+    TempIni t(kSample);
+    CHECK(GetPrivateProfileIntA("Program Options", "Width", 0, t.f()) == 800);
+    CHECK(GetPrivateProfileIntA("Program Options", "Flag", 0, t.f()) == 7);
+}
+
+TEST_CASE("ini override leaves writes and enumeration alone", "[ini][ini-override]")
+{
+    OverrideEnv env("Program Options/Width=1024");
+    TempIni t(kSample);
+    CHECK(WritePrivateProfileStringA("Program Options", "Width", "640", t.f()));
+    CHECK(t.contents().find("Width = 640\n") != std::string::npos);
+    CHECK(t.contents().find("1024") == std::string::npos);
+    CHECK(GetPrivateProfileIntA("Program Options", "Width", 0, t.f()) == 1024);
+
+    char buf[64];
+    DWORD n = GetPrivateProfileStringA("Program Options", nullptr, "", buf, 64, t.f());
+    CHECK(n == 16);
+    CHECK(std::string(buf, 17) == std::string("Width\0Name\0Flag\0\0", 17));
+    n = GetPrivateProfileStringA(nullptr, nullptr, "", buf, 64, t.f());
+    CHECK(n == 22);
+}
+
+TEST_CASE("ini override re-reads the variable after a reset", "[ini][ini-override]")
+{
+    TempIni t(kSample);
+    {
+        OverrideEnv env("Program Options/Width=1");
+        CHECK(GetPrivateProfileIntA("Program Options", "Width", 0, t.f()) == 1);
+    }
+    CHECK(GetPrivateProfileIntA("Program Options", "Width", 0, t.f()) == 800);
 }
