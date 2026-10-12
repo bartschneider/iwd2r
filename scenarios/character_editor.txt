@@ -1,0 +1,46 @@
+# New Game, New Party, Party Formation, then Character Generation.
+# Coordinates for Resolution=800.
+#
+# Known engine bug: after Character Generation's Cancel (710,562) returns to
+# Party Formation, quitting or leaving through Exit crashes (SIGSEGV), so this
+# scenario quits from Character Generation, which exits cleanly.
+wait 60
+# New Game (645,262), then Done (537,562) with New Party selected.
+click 645 262
+wait 90
+click 537 562
+wait 60
+# Party Formation: six "Create Character" slots, Exit, Modify Characters,
+# Done.
+shot 01_party_formation
+# Exit (163,507) asks "Are you sure you want to leave the game?".
+click 163 507
+wait 30
+shot 02_leave_prompt
+# ESCAPE closes the prompt (keyboard input check).
+key ESCAPE
+wait 30
+shot 03_prompt_closed
+# The first slot's Create Character (530,100).
+click 530 100
+wait 90
+# Character Generation main menu: Gender (highlighted), Race, Class,
+# Alignment, Abilities, Skills, Appearance, Name; Biography, Import, Back,
+# Finish, Cancel along the bottom.
+shot 04_chargen
+# Gender (400,128).
+click 400 128
+wait 30
+# Gender step: Male and Female portraits with their buttons; Back and Next.
+shot 05_gender
+# Male (400,286).
+click 400 286
+wait 20
+# Male selected; its help text on the right.
+shot 06_male
+# Back (400,562) to the main menu.
+click 400 562
+wait 30
+shot 07_chargen_menu
+# WM_CLOSE: headless, the quit confirmation takes its default (yes).
+quit

@@ -1,0 +1,20 @@
+# Quit Game from the start menu, confirmed in the game's own dialog: the
+# process should exit 0 by itself. Coordinates for Resolution=800.
+wait 60
+# Quit Game (645,442).
+click 645 442
+wait 30
+# Prompt "Are you sure you wish to quit the game?" with Cancel and Quit over
+# the dimmed start screen.
+shot 01_quit_prompt
+# Cancel (340,335) keeps the game running.
+click 340 335
+wait 30
+shot 02_cancelled
+# Quit Game again, then the prompt's Quit (462,335): the engine shuts down.
+click 645 442
+wait 30
+click 462 335
+wait 120
+# Not reached when the engine exits as it should.
+quit

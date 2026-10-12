@@ -1,5 +1,6 @@
 # iwd2r. Distributed under LICENSE.md.
-"""Tests for tools/check_notices.py.
+"""Tests for tools/check_notices.py, tools/gen_map.py and the pure parts of
+tools/play.py.
 
 Run from the repository root: python3 -I tests/test_tools.py
 
@@ -8,6 +9,10 @@ checker as a subprocess with cwd set to that repository, and removes the
 directory afterwards.
 """
 
+import contextlib
+import datetime
+import importlib.util
+import io
 import os
 import subprocess
 import sys
@@ -166,6 +171,135 @@ class GenMapTest(unittest.TestCase):
 
     def test_check_without_map_fails(self):
         self.assertEqual(self.run_gen('--check').returncode, 1)
+
+
+def load_play():
+    spec = importlib.util.spec_from_file_location(
+        'play', os.path.join(ROOT, 'tools', 'play.py'))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+play = load_play()
+
+
+class PlayArgsTest(unittest.TestCase):
+    def overrides(self, *argv):
+        a = play.parse_args(list(argv))
+        return play.build_overrides(a.resolution, a.fullscreen, a.sets)
+
+    def test_defaults(self):
+        a = play.parse_args([])
+        self.assertFalse(a.linux)
+        self.assertFalse(a.headless)
+        self.assertIsNone(a.script)
+        self.assertIsNone(a.frames)
+        self.assertEqual(self.overrides(), [
+            'Program Options/Resolution=800',
+            'Program Options/Full Screen=0'])
+
+    def test_flags_map_to_overrides(self):
+        self.assertEqual(self.overrides('--fullscreen', '--resolution', '1024'), [
+            'Program Options/Resolution=1024',
+            'Program Options/Full Screen=1'])
+        self.assertEqual(self.overrides('--windowed')[1],
+                         'Program Options/Full Screen=0')
+        self.assertEqual(self.overrides('--set', 'Game Options/Gore=0',
+                                        '--set', 'A/B=x=y')[2:],
+                         ['Game Options/Gore=0', 'A/B=x=y'])
+
+    def test_bad_flags_rejected(self):
+        for argv in (['--resolution', '1366'], ['--set', 'NoSlash=1'],
+                     ['--set', 'A/B'], ['--set', 'A/B=1;C/D=2'],
+                     ['--frames', '0'], ['--fullscreen', '--windowed']):
+            with contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit, msg=argv):
+                    play.parse_args(argv)
+
+    def test_child_env(self):
+        env = play.child_env({'PATH': '/bin'}, '/data', ['A/B=1', 'C/D=2'],
+                             True, 300, '/s.txt', '/shots')
+        self.assertEqual(env['IWD2R_INI_OVERRIDE'], 'A/B=1;C/D=2')
+        self.assertEqual(env['SDL_VIDEO_DRIVER'], 'dummy')
+        self.assertEqual(env['SDL_AUDIO_DRIVER'], 'dummy')
+        self.assertEqual(env['IWD2R_SMOKE_FRAMES'], '300')
+        self.assertEqual(env['IWD2R_SCRIPT'], '/s.txt')
+        self.assertEqual(env['IWD2R_SHOT_DIR'], '/shots')
+        self.assertEqual(env['IWD2_DATA'], '/data')
+        self.assertEqual(env['PATH'], '/bin')
+        env = play.child_env({}, '/data', [], False, None, None, '/shots')
+        for name in ('SDL_VIDEO_DRIVER', 'IWD2R_SMOKE_FRAMES', 'IWD2R_SCRIPT'):
+            self.assertNotIn(name, env)
+
+    def test_batch_set_escapes_percent(self):
+        self.assertEqual(play.batch_set('X', 'a & b 100%'), 'set "X=a & b 100%%"')
+
+    def test_sync_list_skips_build_and_runs(self):
+        self.assertEqual(play.sync_list(['a.cpp', 'build/x', 'runs/1/log.txt',
+                                         'tools/build/y', '']),
+                         ['a.cpp', 'tools/build/y'])
+
+
+class PlayRunFolderTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.dir = self._tmp.name
+        self.addCleanup(self._tmp.cleanup)
+
+    def test_name(self):
+        now = datetime.datetime(2026, 1, 2, 3, 4, 5)
+        self.assertEqual(play.run_folder_name(now), '20260102-030405')
+
+    def test_unique_folders(self):
+        now = datetime.datetime(2026, 1, 2, 3, 4, 5)
+        first = play.make_run_folder(self.dir, now)
+        second = play.make_run_folder(self.dir, now)
+        self.assertEqual(os.path.basename(first), '20260102-030405')
+        self.assertEqual(os.path.basename(second), '20260102-030405-2')
+        self.assertTrue(os.path.isdir(second))
+
+
+class PlayIniBackupTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.install = os.path.join(self._tmp.name, 'install')
+        self.backup = os.path.join(self._tmp.name, 'run', 'ini-backup')
+        self.addCleanup(self._tmp.cleanup)
+        os.makedirs(os.path.join(self.install, 'sub.ini'))  # a directory: skipped
+        self.write('icewind2.ini', b'[Program Options]\r\nResolution=1366\r\n')
+        self.write('Keymap.INI', b'\xef\xbb\xbfa=b\n')
+        self.write('chitin.key', b'KEY')
+
+    def write(self, name, data):
+        with open(os.path.join(self.install, name), 'wb') as f:
+            f.write(data)
+
+    def read(self, name):
+        with open(os.path.join(self.install, name), 'rb') as f:
+            return f.read()
+
+    def test_backup_and_restore_byte_identical(self):
+        names = play.backup_inis(self.install, self.backup)
+        self.assertEqual(names, ['Keymap.INI', 'icewind2.ini'])
+        before = {n: self.read(n) for n in names}
+        self.write('icewind2.ini', b'[Program Options]\nResolution=800\n')
+        self.write('new.ini', b'created by the engine')
+        changed = play.restore_inis(self.backup, self.install, names)
+        self.assertEqual(changed, ['icewind2.ini'])
+        for n in names:
+            self.assertEqual(self.read(n), before[n])
+        # Nothing in the install is deleted.
+        self.assertEqual(self.read('new.ini'), b'created by the engine')
+        self.assertEqual(self.read('chitin.key'), b'KEY')
+
+    def test_restore_recreates_a_deleted_ini(self):
+        names = play.backup_inis(self.install, self.backup)
+        os.remove(os.path.join(self.install, 'icewind2.ini'))
+        self.assertEqual(play.restore_inis(self.backup, self.install, names),
+                         ['icewind2.ini'])
+        self.assertEqual(self.read('icewind2.ini'),
+                         b'[Program Options]\r\nResolution=1366\r\n')
 
 
 if __name__ == '__main__':

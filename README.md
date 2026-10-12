@@ -45,6 +45,24 @@ cmake --preset linux-gcc && cmake --build --preset linux-gcc && ctest --preset l
 
 ## Run
 
+### Play
+
+From WSL, one command syncs the working tree to a Windows checkout (`C:\Users\thier\iwd2r-build`), builds it with MSVC and opens the game window on the desktop:
+
+```
+python3 tools/play.py
+```
+
+An automated check on Linux, headless, driven by an input script that takes screenshots:
+
+```
+python3 tools/play.py --linux --headless --script scenarios/options.txt
+```
+
+Options are flags, never INI edits: `--windowed` (default) or `--fullscreen`, `--resolution 800|1024` (default 800), `--set "Section/Key=Value"` for anything else, `--frames N`, `--data PATH`. They reach the engine through `IWD2R_INI_OVERRIDE`. Each run writes `runs/<YYYYMMDD-HHMMSS>/` with `log.txt` (the game's output), the screenshots, `ini-backup/` and `summary.txt`. Every `*.ini` in the install is backed up before the run and restored byte-identical afterwards, also on Ctrl-C, because the engine rewrites `icewind2.ini` on exit. Script commands (`wait`, `click`, `rclick`, `move`, `key`, `type`, `shot`, `quit`) are documented in `platform/script.h`; the starter scenarios are in `scenarios/`.
+
+### Manual
+
 Point the engine at your install with `IWD2_DATA`:
 
 ```
@@ -60,7 +78,7 @@ $env:IWD2_DATA = "C:\Games\Icewind Dale II"
 
 Alternatively, place a link named `IWD2` next to the executable or at the repository root. The directory must contain `CHITIN.KEY`. The engine writes saves, cache and INI files into it exactly as the original does.
 
-`Resolution` in `icewind2.ini` must be 800 or 1024 for now. The IWD2EE mod sets 1366, so set it back to 800 to run iwd2r.
+`Resolution` must be 800 or 1024 for now. The IWD2EE mod sets 1366; rather than editing the file, override it for the run with `IWD2R_INI_OVERRIDE="Program Options/Resolution=800"` (entries are `Section/Key=Value`, separated by `;`), which `tools/play.py` does by default.
 
 The game window is the size of the game resolution (800x600 or 1024x768); with `Full Screen=1` it is letterboxed onto the desktop. Like the original, iwd2r pins itself to one CPU core at start-up, so expect one busy core.
 

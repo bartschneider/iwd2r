@@ -1,0 +1,20 @@
+# New Game: the Select Party screen and a premade party. Coordinates for
+# Resolution=800.
+wait 60
+# New Game (645,262) on the start menu.
+click 645 262
+wait 120
+# Select Party: New Party (selected) and the premade parties on the left,
+# the New Party help text on the right, Modify, Cancel and Done below.
+shot 01_select_party
+# Lady's Lament (124,211).
+click 124 211
+wait 30
+# Lady's Lament selected: its story and member stats on the right.
+shot 02_ladys_lament
+# Cancel (398,562) back to the start screen.
+click 398 562
+wait 40
+# Start screen.
+shot 03_start
+quit

@@ -1,0 +1,21 @@
+# Keyboard (keymap) screen from Options. Coordinates for Resolution=800.
+wait 60
+# Options (645,410) on the start menu.
+click 645 410
+wait 30
+# Keyboard (612,211) on the Options screen.
+click 612 211
+wait 40
+# Keyboard screen: "Page 1 of 1", three columns of actions with their keys
+# (Inventory I, Record R, Journal J...), Default, Cancel and Done below.
+shot 01_keymaps
+# Cancel (400,519) leaves without changes.
+click 400 519
+wait 30
+# Back on the Options screen.
+shot 02_options
+# Return (612,350) to the start screen.
+click 612 350
+wait 30
+shot 03_start
+quit

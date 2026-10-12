@@ -1,0 +1,29 @@
+# Options screen, its version label and the Graphics panel. Coordinates are
+# for Resolution=800 (the play.py default).
+wait 60
+# Start screen: menu panel on the right.
+shot 01_start
+# Options (645,410) on the start menu.
+click 645 410
+wait 30
+# Options screen: Graphics, Sound, Game Play, Movies, Keyboard, Return on the
+# right; the version label "v2.01 (101615)" centred below the picture.
+shot 02_options
+# Graphics (612,81).
+click 612 81
+wait 30
+# Graphics panel: Brightness, Contrast, Color Depth and blit toggles on the
+# left, help text on the right, Cancel and Done below it.
+shot 03_graphics
+# Cancel (548,350) closes the panel without changes.
+click 548 350
+wait 30
+# Back on the Options screen.
+shot 04_options_again
+# Return (612,350) to the start screen.
+click 612 350
+wait 30
+# Start screen again.
+shot 05_start_again
+# WM_CLOSE: headless, the quit confirmation takes its default (yes).
+quit

@@ -393,3 +393,6 @@ FodyWeavers.xsd
 /build
 build/
 build-*/
+
+# play.py run folders
+runs/

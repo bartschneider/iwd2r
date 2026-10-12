@@ -1,8 +1,8 @@
 # Subsystem map
 
-Generated from commit `a4b0a3e` by `tools/gen_map.py`. Do not edit; CI runs `python3 -I tools/gen_map.py --check`.
+Generated from commit `724e80c` by `tools/gen_map.py`. Do not edit; CI runs `python3 -I tools/gen_map.py --check`.
 
-Totals: 462 files, 270441 lines, 369 `TODO: Incomplete`, 9998 address comments.
+Totals: 466 files, 271290 lines, 369 `TODO: Incomplete`, 9998 address comments.
 
 | Family | Files | Lines | `TODO: Incomplete` | Address comments | Platform headers included |
 |---|---:|---:|---:|---:|---|
@@ -16,6 +16,6 @@ Totals: 462 files, 270441 lines, 369 `TODO: Incomplete`, 9998 address comments.
 | Messaging | 10 | 22516 | 37 | 1148 | — |
 | Engine core | 10 | 6986 | 11 | 413 | data_dir.h, fs.h, window.h |
 | Other | 83 | 24583 | 66 | 1335 | — |
-| compat | 25 | 3515 | 0 | 0 | win32_api.h |
-| platform | 28 | 6080 | 0 | 0 | affinity.h, clock.h, data_dir.h, ddraw_shim.h, dsound_shim.h, fs.h, gl_compat.h, handles.h, imm_stub.h, present.h, win32_api.h, window.h |
-| **Total** | 462 | 270441 | 369 | 9998 | |
+| compat | 25 | 3603 | 0 | 0 | win32_api.h |
+| platform | 32 | 6841 | 0 | 0 | affinity.h, clock.h, data_dir.h, ddraw_shim.h, dsound_shim.h, fs.h, gl_compat.h, handles.h, imm_stub.h, png.h, present.h, script.h, win32_api.h, window.h |
+| **Total** | 466 | 271290 | 369 | 9998 | |
