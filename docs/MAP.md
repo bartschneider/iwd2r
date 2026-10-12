@@ -1,8 +1,8 @@
 # Subsystem map
 
-Generated from commit `6f68987` by `tools/gen_map.py`. Do not edit; CI runs `python3 -I tools/gen_map.py --check`.
+Generated from commit `4f37bcc` by `tools/gen_map.py`. Do not edit; CI runs `python3 -I tools/gen_map.py --check`.
 
-Totals: 460 files, 270060 lines, 369 `TODO: Incomplete`, 9998 address comments.
+Totals: 460 files, 270095 lines, 369 `TODO: Incomplete`, 9998 address comments.
 
 | Family | Files | Lines | `TODO: Incomplete` | Address comments | Platform headers included |
 |---|---:|---:|---:|---:|---|
@@ -16,6 +16,6 @@ Totals: 460 files, 270060 lines, 369 `TODO: Incomplete`, 9998 address comments.
 | Messaging | 10 | 22516 | 37 | 1148 | — |
 | Engine core | 10 | 6959 | 11 | 413 | data_dir.h, fs.h, window.h |
 | Other | 83 | 24583 | 66 | 1335 | — |
-| compat | 25 | 3499 | 0 | 0 | win32_api.h |
-| platform | 26 | 5742 | 0 | 0 | clock.h, data_dir.h, ddraw_shim.h, dsound_shim.h, fs.h, gl_compat.h, handles.h, imm_stub.h, present.h, win32_api.h, window.h |
-| **Total** | 460 | 270060 | 369 | 9998 | |
+| compat | 25 | 3510 | 0 | 0 | win32_api.h |
+| platform | 26 | 5766 | 0 | 0 | clock.h, data_dir.h, ddraw_shim.h, dsound_shim.h, fs.h, gl_compat.h, handles.h, imm_stub.h, present.h, win32_api.h, window.h |
+| **Total** | 460 | 270095 | 369 | 9998 | |
