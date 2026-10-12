@@ -5,6 +5,13 @@ Usage (from WSL, in the repository):
 
   python3 tools/play.py                 # Windows build, game window on the desktop
   python3 tools/play.py --linux --headless --script scenarios/options.txt
+  python3 tools/play.py --vm linux --suite --jobs 3
+
+--vm runs scenarios with genuine operating-system input in an isolated
+display instead of the in-engine script: `linux` on an Xvfb display driven
+with xdotool (tools/realinput.py), `windows` in Windows Sandbox driven with
+SendInput (tools/winsandbox.py, tools/sandbox/driver.ps1), `all` both.
+--suite runs every scenarios/*.txt.
 
 Windows runs (the default) copy the working tree (tracked files plus modified
 and untracked non-ignored ones) into a persistent checkout at
@@ -25,13 +32,23 @@ Standard library only.
 """
 
 import argparse
+import concurrent.futures
 import datetime
+import glob
+import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
+
+# The sibling modules (python3 -I does not put the script's folder on the
+# path).
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import realinput  # noqa: E402
+import winsandbox  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_DATA = '/mnt/c/Games/Icewind Dale II'
@@ -44,6 +61,8 @@ WIN_PRESET = 'windows-msvc-x64'
 WIN_EXE_REL = 'build/windows-msvc-x64/RelWithDebInfo/iwd2r.exe'
 LINUX_PRESET = 'linux-gcc'
 SYNC_EXCLUDE = ('build/', 'runs/')
+SCENARIOS = os.path.join(ROOT, 'scenarios')
+VM_MODES = ('linux', 'windows', 'all')
 SET_RE = re.compile(r'^[^/=;]+/[^=;]+=[^;]*$')
 
 
@@ -81,7 +100,35 @@ def parse_args(argv):
                     + DEFAULT_DATA + ')')
     ap.add_argument('--no-build', action='store_true',
                     help='run the existing build without syncing or building')
+    ap.add_argument('--vm', choices=VM_MODES,
+                    help='real OS input in an isolated display: linux (Xvfb '
+                    '+ xdotool), windows (Windows Sandbox) or all')
+    ap.add_argument('--suite', action='store_true',
+                    help='with --vm: run every scenarios/*.txt')
+    ap.add_argument('--jobs', type=int, default=1, metavar='N',
+                    help='with --vm linux --suite: scenarios run at once '
+                    '(default 1)')
+    ap.add_argument('--timeout', type=int, default=realinput.DEFAULT_TIMEOUT,
+                    metavar='S', help='with --vm: per-scenario timeout in '
+                    'seconds (default %d)' % realinput.DEFAULT_TIMEOUT)
     args = ap.parse_args(argv)
+    if args.vm:
+        if not args.suite and not args.script:
+            ap.error('--vm needs --script FILE or --suite')
+        if args.suite and args.script:
+            ap.error('--suite and --script are exclusive')
+        for flag, value in (('--linux', args.linux),
+                            ('--headless', args.headless),
+                            ('--frames', args.frames is not None),
+                            ('--fullscreen', args.fullscreen)):
+            if value:
+                ap.error('%s does not apply to --vm runs' % flag)
+    elif args.suite:
+        ap.error('--suite needs --vm')
+    if args.jobs < 1:
+        ap.error('--jobs must be positive')
+    if args.timeout <= 0:
+        ap.error('--timeout must be positive')
     for entry in args.sets:
         if not SET_RE.match(entry):
             ap.error('--set expects "Section/Key=Value" without ";": %r' % entry)
@@ -316,8 +363,216 @@ def write_summary(run_dir, argv, platform, code, overrides, script, shots,
         f.write('ini restored: %s\n' % restored)
 
 
+# ---------------------------------------------------------------------------
+# Real-input runs (--vm)
+
+def suite_files(directory=SCENARIOS):
+    return sorted(glob.glob(os.path.join(directory, '*.txt')))
+
+
+def scenario_name(path):
+    return os.path.splitext(os.path.basename(path))[0]
+
+
+def format_table(title, rows):
+    """rows: (scenario, code, seconds, screenshots) tuples."""
+    lines = [title,
+             '%-20s %6s %9s %6s' % ('scenario', 'exit', 'duration', 'shots')]
+    for name, code, seconds, shots in rows:
+        lines.append('%-20s %6s %8.1fs %6d' % (name, code, seconds, shots))
+    passed = sum(1 for r in rows if r[1] == 0)
+    lines.append('%d of %d passed' % (passed, len(rows)))
+    return '\n'.join(lines) + '\n'
+
+
+def result_row(name, result):
+    return (name, result['code'], result['seconds'],
+            result['screen_shots'] + result['engine_shots'])
+
+
+def write_vm_summary(run_dir, argv, platform, script, overrides, result):
+    shots = sorted(n for n in os.listdir(run_dir) if n.endswith('.png'))
+    write_summary(run_dir, argv, platform, result['code'], overrides, script,
+                  shots, result['seconds'],
+                  'n/a (the sandbox runs a copy of the install)'
+                  if platform == 'windows-vm'
+                  else 'after the run (ini-backup/ in the run folder)')
+    if result['error']:
+        with open(os.path.join(run_dir, 'summary.txt'), 'a') as f:
+            f.write('driver error: %s\n' % result['error'])
+
+
+def prepare_scenario_dir(run_dir, script, actions):
+    os.makedirs(run_dir, exist_ok=True)
+    shutil.copy2(script, os.path.join(run_dir, 'script.txt'))
+    with open(os.path.join(run_dir, 'actions.json'), 'w') as f:
+        json.dump(actions, f, indent=1)
+
+
+def run_linux_vm(args, argv, scenarios, data, overrides, base_dir, nested):
+    """Runs the scenarios on Xvfb displays; returns the table rows."""
+    missing = realinput.missing_tools()
+    if missing:
+        log('missing %s: sudo apt-get install -y xvfb xdotool imagemagick'
+            % ', '.join(missing))
+        return None
+    exe = os.path.join(ROOT, 'build', LINUX_PRESET, 'iwd2r') \
+        if args.no_build else build_linux()
+    backup = os.path.join(base_dir, 'ini-backup')
+    names = backup_inis(data, backup)
+    log('backed up %d INI files to %s' % (len(names), backup))
+    base_env = child_env(os.environ, data, overrides, False, None, None,
+                         base_dir)
+    taken = set()
+    abort = threading.Event()
+    rows = {}
+    # Parallel jobs each get a core of their own (the engine pins itself to
+    # CPU 0); a single job keeps the engine's own choice.
+    slots = list(range(args.jobs))
+    slots_lock = threading.Lock()
+    cpus = os.sched_getaffinity(0)
+
+    def one(path, actions):
+        with slots_lock:
+            slot = slots.pop(0)
+        try:
+            run_one(path, actions, slot)
+        finally:
+            with slots_lock:
+                slots.append(slot)
+
+    def run_one(path, actions, slot):
+        name = scenario_name(path)
+        run_dir = os.path.join(base_dir, name) if nested else base_dir
+        prepare_scenario_dir(run_dir, path, actions)
+        log('linux: %s on Xvfb (real input)' % name)
+        result = realinput.run_scenario(exe, base_env, actions, run_dir,
+                                        args.resolution, args.timeout, taken,
+                                        cwd=ROOT, abort=abort,
+                                        cpu=realinput.job_cpu(slot, cpus)
+                                        if args.jobs > 1 else None)
+        write_vm_summary(run_dir, argv, 'linux-vm', path, overrides, result)
+        log('linux: %s exit %s in %.1f s%s' % (
+            name, result['code'], result['seconds'],
+            ' (%s)' % result['error'] if result['error'] else ''))
+        rows[path] = result_row(name, result)
+
+    try:
+        with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
+            futures = [pool.submit(one, p, a) for p, a in scenarios]
+            try:
+                for f in futures:
+                    f.result()
+            except KeyboardInterrupt:
+                log('interrupted: stopping the running scenarios')
+                abort.set()
+                for f in futures:
+                    f.cancel()
+                raise
+    finally:
+        changed = restore_inis(backup, data, names)
+        log('restored %d INI files in %s byte-identical (%d had changed%s)' % (
+            len(names), data, len(changed),
+            ': ' + ', '.join(changed) if changed else ''))
+    return [rows[p] for p, _ in scenarios if p in rows]
+
+
+def build_windows_vm(args):
+    if not args.no_build:
+        sync_windows()
+        exe = build_windows()
+    else:
+        exe = os.path.join(WIN_CHECKOUT, WIN_EXE_REL)
+    winsandbox.deploy_runtime(exe, log)
+    return exe
+
+
+def run_windows_vm(args, argv, scenarios, data, overrides, base_dir, nested):
+    """Runs the scenarios one after another in Windows Sandbox (one sandbox
+    can run at a time); returns the table rows."""
+    if not winsandbox.available():
+        print(winsandbox.ENABLE_HINT, flush=True)
+        return None
+    exe = build_windows_vm(args)
+    winsandbox.refresh_cache(data, winsandbox.GAME_CACHE, log)
+    rows = []
+    stamp = os.path.relpath(base_dir, os.path.join(ROOT, 'runs'))
+    for path, actions in scenarios:
+        name = scenario_name(path)
+        run_dir = os.path.join(base_dir, name) if nested else base_dir
+        prepare_scenario_dir(run_dir, path, actions)
+        winsandbox.reset_cache_inis(data, winsandbox.GAME_CACHE)
+        host_run = os.path.join(winsandbox.VM_ROOT, 'runs', stamp, name)
+        os.makedirs(host_run, exist_ok=True)
+        log('windows: %s in Windows Sandbox (real input)' % name)
+        result = winsandbox.run_scenario(
+            exe, winsandbox.GAME_CACHE, realinput.windows_actions(actions),
+            overrides, name, run_dir, host_run, args.timeout,
+            realinput.FRAME_RATE, log)
+        write_vm_summary(run_dir, argv, 'windows-vm', path, overrides,
+                         result)
+        log('windows: %s exit %s in %.1f s%s' % (
+            name, result['code'], result['seconds'],
+            ' (%s)' % result['error'] if result['error'] else ''))
+        rows.append(result_row(name, result))
+    return rows
+
+
+def main_vm(args, argv):
+    if args.vm == 'windows' and not winsandbox.available():
+        print(winsandbox.ENABLE_HINT, flush=True)
+        return 2
+    paths = suite_files() if args.suite else [os.path.abspath(args.script)]
+    if not paths:
+        sys.exit('play: no scenarios in %s' % SCENARIOS)
+    scenarios = []
+    for path in paths:
+        if not os.path.isfile(path):
+            sys.exit('play: no script %s' % path)
+        try:
+            scenarios.append((path, realinput.load_scenario(path)))
+        except realinput.ScenarioError as e:
+            sys.exit('play: %s' % e)
+    data = resolve_data(args.data)
+    overrides = build_overrides(args.resolution, False, args.sets)
+    run_root = make_run_folder(os.path.join(ROOT, 'runs'),
+                               datetime.datetime.now())
+    platforms = ['linux', 'windows'] if args.vm == 'all' else [args.vm]
+    tables = []
+    codes = []
+    try:
+        for platform in platforms:
+            base = os.path.join(run_root, platform) if len(platforms) > 1 \
+                else run_root
+            os.makedirs(base, exist_ok=True)
+            runner = run_linux_vm if platform == 'linux' else run_windows_vm
+            rows = runner(args, argv, scenarios, data, overrides, base,
+                          args.suite)
+            if rows is None:
+                tables.append('%s: not run (see above)\n' % platform)
+                codes.append(2 if args.vm != 'all' or platform == 'linux'
+                             else 0)
+                continue
+            tables.append(format_table(platform, rows))
+            codes.extend(r[1] for r in rows)
+    except KeyboardInterrupt:
+        log('interrupted')
+        codes.append(130)
+    text = '\n'.join(tables)
+    print('\n' + text, end='', flush=True)
+    if args.suite:
+        with open(os.path.join(run_root, 'suite.txt'), 'w') as f:
+            f.write('command: python3 tools/play.py %s\n\n' % ' '.join(argv))
+            f.write(text)
+    log('run folder %s' % run_root)
+    failed = [c for c in codes if c != 0]
+    return failed[0] if failed else 0
+
+
 def main(argv):
     args = parse_args(argv)
+    if args.vm:
+        return main_vm(args, argv)
     headless = args.headless
     if args.linux and not headless and not os.environ.get('DISPLAY') \
             and not os.environ.get('WAYLAND_DISPLAY'):

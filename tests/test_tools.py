@@ -313,6 +313,46 @@ class PlayIniBackupTest(unittest.TestCase):
                          b'[Program Options]\r\nResolution=1366\r\n')
 
 
+class PlayVmArgsTest(unittest.TestCase):
+    def test_vm_needs_a_scenario(self):
+        for argv in (['--vm', 'linux'], ['--suite'],
+                     ['--vm', 'linux', '--suite', '--script', 'x.txt'],
+                     ['--vm', 'linux', '--suite', '--linux'],
+                     ['--vm', 'linux', '--suite', '--headless'],
+                     ['--vm', 'linux', '--suite', '--frames', '10'],
+                     ['--vm', 'linux', '--suite', '--fullscreen'],
+                     ['--vm', 'mac', '--suite'],
+                     ['--vm', 'linux', '--suite', '--jobs', '0'],
+                     ['--vm', 'linux', '--suite', '--timeout', '0']):
+            with contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit, msg=argv):
+                    play.parse_args(argv)
+
+    def test_vm_defaults(self):
+        a = play.parse_args(['--vm', 'all', '--suite'])
+        self.assertEqual((a.vm, a.suite, a.jobs, a.timeout),
+                         ('all', True, 1, 180))
+        a = play.parse_args(['--vm', 'windows', '--script', 's.txt',
+                             '--timeout', '60'])
+        self.assertEqual((a.vm, a.script, a.timeout), ('windows', 's.txt', 60))
+
+    def test_suite_files_are_the_scenarios(self):
+        self.assertEqual(play.suite_files(), scenario_files())
+        self.assertIn('start_screen',
+                      [play.scenario_name(p) for p in play.suite_files()])
+
+    def test_table(self):
+        text = play.format_table('linux', [('a', 0, 1.25, 3),
+                                           ('bb', 124, 180.0, 0)])
+        lines = text.splitlines()
+        self.assertEqual(lines[0], 'linux')
+        self.assertEqual(lines[1].split(),
+                         ['scenario', 'exit', 'duration', 'shots'])
+        self.assertEqual(lines[2].split(), ['a', '0', '1.2s', '3'])
+        self.assertEqual(lines[3].split(), ['bb', '124', '180.0s', '0'])
+        self.assertEqual(lines[4], '1 of 2 passed')
+
+
 class ScenarioParseTest(unittest.TestCase):
     def test_every_verb(self):
         actions = realinput.parse_scenario(
