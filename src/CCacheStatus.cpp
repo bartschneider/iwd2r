@@ -8,6 +8,7 @@
 #include "CScreenWorld.h"
 #include "CUtil.h"
 #include "CVidInf.h"
+#include "ScreenLayout.h"
 
 // 0x8A7BA8
 int CCacheStatus::PARCHMENT_TEXT_START_X = 400;
@@ -530,13 +531,17 @@ void CCacheStatus::Update(BOOLEAN bEnabled, LONG nProgressBarCaption, INT nBytes
                     mosaicRect.right = panelInfo->nWidth;
                     mosaicRect.bottom = panelInfo->nHeight;
                     if (panelInfo->nWidth > 0 && panelInfo->nHeight > 0) {
-                        m_mosBorders[side].Render(CVIDINF_SURFACE_BACK,
-                            panelInfo->x,
-                            panelInfo->y,
-                            mosaicRect,
-                            clipRect,
-                            0x1,
-                            TRUE);
+                        // iwd2r: tiled over margins wider than the mosaic
+                        // at sizes the original did not have.
+                        if (!iwd2r::RenderBorderMosaic(m_mosBorders[side], static_cast<int>(panelInfo->nPanelID), CVIDINF_SURFACE_BACK, clipRect, 0x1, TRUE)) {
+                            m_mosBorders[side].Render(CVIDINF_SURFACE_BACK,
+                                panelInfo->x,
+                                panelInfo->y,
+                                mosaicRect,
+                                clipRect,
+                                0x1,
+                                TRUE);
+                        }
                     }
                 }
             }

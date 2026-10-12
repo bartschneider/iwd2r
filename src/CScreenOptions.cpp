@@ -705,10 +705,18 @@ void CScreenOptions::EnableMainPanel(BOOL bEnable)
     pRightPanel->SetEnabled(bEnable);
 
     if (CVideo::SCREENWIDTH / (g_pBaldurChitin->field_4A28 ? 2 : 1) != CBaldurChitin::DEFAULT_SCREEN_WIDTH) {
-        m_cUIManager.GetPanel(-5)->SetEnabled(bEnable);
-        m_cUIManager.GetPanel(-4)->SetEnabled(bEnable);
-        m_cUIManager.GetPanel(-3)->SetEnabled(bEnable);
-        m_cUIManager.GetPanel(-2)->SetEnabled(bEnable);
+        if (m_cUIManager.GetPanel(-5) != NULL) { // iwd2r: no border panel where its margin is zero
+            m_cUIManager.GetPanel(-5)->SetEnabled(bEnable);
+        }
+        if (m_cUIManager.GetPanel(-4) != NULL) { // iwd2r: no border panel where its margin is zero
+            m_cUIManager.GetPanel(-4)->SetEnabled(bEnable);
+        }
+        if (m_cUIManager.GetPanel(-3) != NULL) { // iwd2r: no border panel where its margin is zero
+            m_cUIManager.GetPanel(-3)->SetEnabled(bEnable);
+        }
+        if (m_cUIManager.GetPanel(-2) != NULL) { // iwd2r: no border panel where its margin is zero
+            m_cUIManager.GetPanel(-2)->SetEnabled(bEnable);
+        }
     }
 
     CheckEnablePortaits(1);

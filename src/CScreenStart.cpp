@@ -299,10 +299,18 @@ void CScreenStart::EnableMainPanel(BOOL bEnabled)
     pPanel->SetEnabled(bEnabled);
 
     if (CVideo::SCREENWIDTH / (g_pBaldurChitin->field_4A28 != 0 ? 2 : 1) != 800) {
-        m_cUIManager.GetPanel(-5)->SetEnabled(bEnabled);
-        m_cUIManager.GetPanel(-4)->SetEnabled(bEnabled);
-        m_cUIManager.GetPanel(-3)->SetEnabled(bEnabled);
-        m_cUIManager.GetPanel(-2)->SetEnabled(bEnabled);
+        if (m_cUIManager.GetPanel(-5) != NULL) { // iwd2r: no border panel where its margin is zero
+            m_cUIManager.GetPanel(-5)->SetEnabled(bEnabled);
+        }
+        if (m_cUIManager.GetPanel(-4) != NULL) { // iwd2r: no border panel where its margin is zero
+            m_cUIManager.GetPanel(-4)->SetEnabled(bEnabled);
+        }
+        if (m_cUIManager.GetPanel(-3) != NULL) { // iwd2r: no border panel where its margin is zero
+            m_cUIManager.GetPanel(-3)->SetEnabled(bEnabled);
+        }
+        if (m_cUIManager.GetPanel(-2) != NULL) { // iwd2r: no border panel where its margin is zero
+            m_cUIManager.GetPanel(-2)->SetEnabled(bEnabled);
+        }
     }
 
     if (bEnabled) {

@@ -17,6 +17,7 @@
 #include "CUIControlTextDisplay.h"
 #include "CUIPanel.h"
 #include "CUtil.h"
+#include "ScreenLayout.h"
 
 // 0x85A1EC
 const LONG CScreenWorld::BORED_TIME = 3000;
@@ -478,6 +479,15 @@ void CScreenWorld::EngineGameInit()
     m_cUIManager.fInit(this,
         CResRef(CString("GUIW") + CBaldurChitin::CHUI_GUIEXT),
         g_pBaldurChitin->field_4A2C);
+
+    // iwd2r: GUIW08 and GUIW10 are laid out for 800x600 and 1024x768, every
+    // panel along the bottom edge. At other sizes they move to the bottom
+    // centre, where the viewport rectangles (iwd2r::ComputeScreenLayout)
+    // leave room for them. Zero at the original four sizes.
+    const iwd2r::ScreenLayout& screenLayout = iwd2r::CurrentScreenLayout();
+    if (screenLayout.worldUiShiftX != 0 || screenLayout.worldUiShiftY != 0) {
+        m_cUIManager.ShiftPanels(CPoint(screenLayout.worldUiShiftX, screenLayout.worldUiShiftY));
+    }
 
     m_pCurrentScrollBar = NULL;
     m_bored = FALSE;
@@ -1550,6 +1560,11 @@ BOOLEAN CScreenWorld::ReadyEndCredits(BOOLEAN bForcedFromServer)
 void CScreenWorld::EndDialog(BOOLEAN bForceExecution, BOOLEAN fullEnd)
 {
     // TODO: Incomplete.
+    //
+    // iwd2r: when completed, the squared-distance comparison at 0x6902D4
+    // (cmp edx, ecx against a squared range) takes
+    // iwd2r::CurrentScreenLayout().dialogAutoScrollRange, as IEex patches it
+    // to scale with the resolution.
 }
 
 // FIXME: `areaName` should be reference.

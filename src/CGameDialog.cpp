@@ -218,4 +218,9 @@ void CGameDialogEntry::RemoveReplies(LONG lMarker, COLORREF rgbNameColor, const 
 void CGameDialogEntry::Handle(CGameSprite* pSprite, COLORREF playerColor, int a3)
 {
     // TODO: Incomplete.
+    //
+    // iwd2r: when completed, the constant 490000 at 0x484BA2 (cmp edx,
+    // 490000: smooth rather than instant scroll to the speaker within 700
+    // pixels) takes iwd2r::CurrentScreenLayout().dialogAutoScrollRange, as
+    // IEex patches it to scale with the resolution.
 }

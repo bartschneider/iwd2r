@@ -9,6 +9,7 @@
 #include "CUtil.h"
 #include "CVidInf.h"
 #include "CVidPoly.h"
+#include "ScreenLayout.h"
 
 // 0x4D2750
 CUIPanel::CUIPanel(CUIManager* manager, UI_PANELHEADER* panelInfo)
@@ -369,13 +370,17 @@ void CUIPanel::Render()
             lock.Unlock();
         }
 
-        m_mosBackground.Render(CVIDINF_SURFACE_BACK,
-            m_ptOrigin.x,
-            m_ptOrigin.y,
-            rMosaic,
-            rDirty,
-            0x1,
-            FALSE);
+        // iwd2r: the stone border panels (-5..-2) tile their mosaic over
+        // margins wider than it at sizes the original did not have.
+        if (!iwd2r::RenderBorderMosaic(m_mosBackground, static_cast<int>(m_nID), CVIDINF_SURFACE_BACK, rDirty, 0x1, FALSE)) {
+            m_mosBackground.Render(CVIDINF_SURFACE_BACK,
+                m_ptOrigin.x,
+                m_ptOrigin.y,
+                rMosaic,
+                rDirty,
+                0x1,
+                FALSE);
+        }
 
         POSITION pos = m_lControls.GetHeadPosition();
         while (pos != NULL) {
