@@ -1,5 +1,5 @@
 # iwd2r. Distributed under LICENSE.md.
-add_executable(iwd2r_tests test_sanity.cpp test_win_types.cpp test_win_types_minmax.cpp test_cstring.cpp test_geometry.cpp test_list.cpp test_array_map.cpp test_sync.cpp test_file.cpp test_misc_mfc.cpp test_ini.cpp test_clock.cpp test_fs.cpp test_data_dir.cpp test_ddraw.cpp test_dsound.cpp test_window.cpp test_network.cpp $<TARGET_OBJECTS:iwd2r_engine>)
+add_executable(iwd2r_tests test_sanity.cpp test_win_types.cpp test_win_types_minmax.cpp test_cstring.cpp test_geometry.cpp test_list.cpp test_array_map.cpp test_sync.cpp test_file.cpp test_misc_mfc.cpp test_ini.cpp test_clock.cpp test_fs.cpp test_data_dir.cpp test_ddraw.cpp test_dsound.cpp test_window.cpp test_network.cpp test_main.cpp $<TARGET_OBJECTS:iwd2r_engine>)
 target_include_directories(iwd2r_tests PRIVATE "${PROJECT_SOURCE_DIR}" "${PROJECT_SOURCE_DIR}/compat")
 # Engine headers (test_network.cpp) are not held to the strict warning level.
 target_include_directories(iwd2r_tests SYSTEM PRIVATE "${PROJECT_SOURCE_DIR}/src")

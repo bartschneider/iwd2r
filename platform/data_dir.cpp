@@ -131,8 +131,7 @@ bool ResolveDataDirFrom(const char* exeDir, const char* repoRootHint)
 {
     auto found = FindDataDir(exeDir, repoRootHint);
     if (!found) {
-        FatalMessageFn fn = g_fatal ? g_fatal : DefaultFatal;
-        fn("Set IWD2_DATA to your Icewind Dale II install directory (the one containing CHITIN.KEY).", "iwd2r");
+        ReportFatal("Set IWD2_DATA to your Icewind Dale II install directory (the one containing CHITIN.KEY).", "iwd2r");
         return false;
     }
 
@@ -146,6 +145,12 @@ bool ResolveDataDirFrom(const char* exeDir, const char* repoRootHint)
 const char* DataDirSource()
 {
     return g_source.c_str();
+}
+
+void ReportFatal(const char* text, const char* caption)
+{
+    FatalMessageFn fn = g_fatal ? g_fatal : DefaultFatal;
+    fn(text, caption);
 }
 
 void SetFatalMessageHandler(FatalMessageFn handler)

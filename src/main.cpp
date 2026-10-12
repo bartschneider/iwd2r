@@ -12,12 +12,37 @@
 
 // 0x421820 was IsSupportedOS, removed with the OS version check.
 
+// Ruling R23. The resolutions whose start-up reaches the smoke hash and exits
+// 0 headless against the real install (Task 21 fix round 1): 800 and 1024.
+// 1280 crashes before the first frame; 1600 and 2048 abort after it.
+static const int kSupportedResolutions[] = { 800, 1024 };
+
+bool iwd2r_IsSupportedResolution(int width)
+{
+    for (int supported : kSupportedResolutions) {
+        if (width == supported) {
+            return true;
+        }
+    }
+    return false;
+}
+
 int iwd2r_main(int argc, char** argv)
 {
     platform::window::InstallFatalMessageBox();
     // First: everything below reads icewind2.ini and game folders relative to the working directory.
     if (!platform::ResolveDataDir()) {
         return 2;
+    }
+
+    // Same section, key, default and file as CBaldurChitin's constructor.
+    const int nResolution = GetPrivateProfileIntA("Program Options", "Resolution", 800, ".\\Icewind2.ini");
+    if (!iwd2r_IsSupportedResolution(nResolution)) {
+        const std::string text = "Resolution=" + std::to_string(nResolution)
+            + " in icewind2.ini is not supported by iwd2r yet; set Resolution=800 or 1024"
+              " (project 1 ports only the resolutions whose UI panels were decompiled).";
+        platform::ReportFatal(text.c_str(), "iwd2r");
+        return 3;
     }
 
     std::cout << std::endl;

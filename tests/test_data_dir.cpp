@@ -198,3 +198,14 @@ TEST_CASE("data_dir ResolveDataDirFrom success configures the engine", "[data_di
     CHECK(compat::ResolvePath("CHITIN.KEY") == "chitin.key");
 #endif
 }
+
+TEST_CASE("data_dir ReportFatal goes through the installed handler", "[data_dir]")
+{
+    g_fatalCalls = 0;
+    platform::SetFatalMessageHandler(TestFatal);
+    platform::ReportFatal("text", "caption");
+    platform::SetFatalMessageHandler(nullptr);
+    CHECK(g_fatalCalls == 1);
+    CHECK(g_fatalText == "text");
+    CHECK(g_fatalCaption == "caption");
+}

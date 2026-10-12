@@ -27,6 +27,8 @@ bool ResolveDataDirFrom(const char* exeDir, const char* repoRootHint);
 const char* DataDirSource();
 
 using FatalMessageFn = void (*)(const char* text, const char* caption);
+// Reports a start-up failure through the installed handler (or the default).
+void ReportFatal(const char* text, const char* caption);
 // Passing null restores the default (prints "caption: text" to stderr).
 void SetFatalMessageHandler(FatalMessageFn handler);
 

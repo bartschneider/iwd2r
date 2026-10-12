@@ -40,8 +40,9 @@
 
 #ifdef _MSC_VER
 // The engine's own <direct.h> and <io.h> includes were dropped (they do not
-// exist elsewhere); <process.h> is never included because it declares
-// _beginthread with C linkage (see platform/win32_api.h).
+// exist elsewhere). Ruling R24: MSVC's <mutex> pulls in <process.h>, whose
+// _beginthread has C linkage, so platform/win32_api.h exposes the shim's
+// _beginthread as iwd2r_beginthread there.
 #include <direct.h>
 #include <io.h>
 #else

@@ -299,6 +299,8 @@ void SetSmokeFrames(int n)
 void InstallFatalMessageBox()
 {
     platform::SetFatalMessageHandler([](const char* text, const char* caption) {
+        // Also on stderr: headless, the message box shows nothing.
+        std::fprintf(stderr, "%s: %s\n", caption, text);
         MessageBoxA(NULL, text, caption, MB_OK | MB_ICONERROR);
     });
 }
