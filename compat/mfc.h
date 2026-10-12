@@ -29,21 +29,24 @@
 #include <utility>
 #include <vector>
 
-#include "ini.h"
-#include "mfc_array.h"
-#include "mfc_file.h"
-#include "mfc_filefind.h"
+// Order is deliberate: win_types.h min/max macros and the compat headers' dependency order.
+// clang-format off
+#include "win_types.h"
+#include "mfc_string.h"
 #include "mfc_geometry.h"
 #include "mfc_list.h"
+#include "mfc_array.h"
 #include "mfc_map.h"
-#include "mfc_resource.h"
-#include "mfc_string.h"
-#include "mfc_sync.h"
 #include "mfc_time.h"
+#include "mfc_file.h"
+#include "mfc_sync.h"
 #include "mfc_wnd.h"
+#include "mfc_resource.h"
+#include "ini.h"
 #include "path_hook.h"
 #include "platform/win32_api.h"
-#include "win_types.h"
+#include "mfc_filefind.h"
+// clang-format on
 
 #define ASSERT(x) ((void)0)
 #define TRACE(...) ((void)0)
