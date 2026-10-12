@@ -21,7 +21,9 @@ Bring your own copy of Icewind Dale II: Complete from GOG. The DRM-free GOG vers
 | 5 | IEex native layer and Lua API | Not started |
 | 6 | Remaster renderer | Not started |
 
-Current numbers: four presets build; 175 tests pass on Linux; the start screen is reached headlessly on Linux and Windows.
+Current numbers: four presets build; 184 tests pass on Linux; the start screen is reached headlessly on Linux and Windows.
+
+Engine sites that still truncate pointers to 32 bits on 64-bit targets are listed for project 3 in [docs/64bit-cast-sites.md](docs/64bit-cast-sites.md).
 
 ## Build
 
@@ -49,9 +51,18 @@ Point the engine at your install with `IWD2_DATA`:
 IWD2_DATA=/path/to/Icewind\ Dale\ II ./build/linux-gcc/iwd2r
 ```
 
+On Windows (Command Prompt, then PowerShell):
+
+```
+set IWD2_DATA=C:\Games\Icewind Dale II
+$env:IWD2_DATA = "C:\Games\Icewind Dale II"
+```
+
 Alternatively, place a link named `IWD2` next to the executable or at the repository root. The directory must contain `CHITIN.KEY`. The engine writes saves, cache and INI files into it exactly as the original does.
 
 `Resolution` in `icewind2.ini` must be 800 or 1024 for now. The IWD2EE mod sets 1366, so set it back to 800 to run iwd2r.
+
+The game window is the size of the game resolution (800x600 or 1024x768); with `Full Screen=1` it is letterboxed onto the desktop. Like the original, iwd2r pins itself to one CPU core at start-up, so expect one busy core.
 
 Headless smoke run, which prints a framebuffer hash:
 
@@ -66,7 +77,10 @@ SDL_VIDEO_DRIVER=dummy SDL_AUDIO_DRIVER=dummy IWD2R_SMOKE_FRAMES=300 ./build/lin
 - Movies are skipped: Bink is not loaded, and a later project may decode them with FFmpeg.
 - IME text composition is inert.
 - GDI (TrueType) text is inert.
-- Fullscreen presents as a borderless window scaled to the desktop with aspect preserved.
+- Fullscreen presents as a borderless window scaled to the desktop with aspect preserved. Windowed, the window's client area is the game's whole screen, so it is game-sized rather than a desktop-sized popup.
+- The single-instance check is removed: two copies can run against the same install, where the original refused to start a second.
+- On Windows the executable is a console program for now, so a console window appears alongside the game window.
+- The version resource is built in: the game name, version (`2, 0, 1, 0`, shown as v2.01 in the options screen) and build number come from strings compiled into iwd2r rather than from an `.exe` resource, and PrivateBuild names the iwd2r version and commit.
 - Only `Resolution` 800 and 1024 are accepted at start-up; 1280, 1600 and 2048 crash inside the ported UI code and are refused with a message.
 - Positioned 3D sounds play centred without distance attenuation when the 3D-sound option is on, because the DirectSound 3D interfaces are no-ops.
 - The assert-time thread suspension is cooperative only: a thread can suspend itself but cannot freeze others.

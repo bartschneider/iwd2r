@@ -77,7 +77,7 @@ Project 1 is done when all of the following hold:
 | `CScreenMultiPlayer` | 3,637 lines | Deleted. The references in `CBaldurChitin` and `CScreenConnection` are removed. |
 | `third_party/directplay` | headers | Deleted. |
 | `register/reg32.exe` launch, the app mutex and the hardcoded GOG path in `main.cpp` | ~30 lines | Replaced by data resolution (7.6) and `SDL_main`. |
-| `resource.rc` and `resource.h` | | The string table moves to a C++ header used on every platform. The only other content is VERSIONINFO, which CMake generates on Windows from the project version. |
+| `resource.rc` and `resource.h` | | The string table moves to a C++ header used on every platform. The only other content is VERSIONINFO. *Amended after the final review 2026-10-12:* the version strings are built into the `GetFileVersionInfoA`/`VerQueryValueA` shim instead (the original executable's `ProductName` and `ProductVersion`, and a `PrivateBuild` naming the iwd2r version and commit). |
 | MFC and DirectX includes in `src/` | | Every `#include <afx*.h>`, `<ddraw.h>`, `<dsound.h>`, `<dplay.h>`, `<mmsystem.h>` and `<windows.h>` is replaced by a `compat/` or `platform/` header. |
 
 ### 4.2 Kept, contrary to a first reading
@@ -129,7 +129,7 @@ Fixed-width typedefs that keep the original's meaning on 64-bit and non-Windows 
 - `HANDLE`, `HWND`, `HINSTANCE`, `HDC`, `HFONT` as opaque pointers. `HWND` points at the platform window object.
 - `VK_*` key codes with their Windows values, because Keymap.ini stores them. `MAX_PATH` = 260.
 - `__stdcall`, `__cdecl`, `CALLBACK`, `WINAPI`, `__declspec(noreturn)` expand to nothing or the compiler equivalent off MSVC. The 420 `__stdcall` uses are OpenGL and Bink function-pointer typedefs.
-- `min` and `max` function templates matching the 726 uses of the Windows macros.
+- `min` and `max` macros matching the 726 uses of the Windows macros, guarded by `NOMINMAX` (*amended after the final review 2026-10-12*; first written as function templates).
 - `_strnicmp`, `_stricmp`, `_vsnprintf`, `_chdir`, `_getcwd`, `_mkdir` map to the POSIX equivalents.
 - `TRUE`, `FALSE`, `NULL`, `LOWORD`, `HIWORD`, `MAKELONG`, `INFINITE`.
 
@@ -188,7 +188,9 @@ Interfaces are declared in `platform/*.h` with no SDL or miniaudio types exposed
 | `WM_SYSKEYDOWN` | key down with Alt | Same handler. |
 | `WM_IME_*`, `WM_INPUTLANGCHANGE` | none | Inert in project 1 (section 4.3). |
 
-Input is polled, not event-driven. The engine calls `GetAsyncKeyState` (15 sites) and `GetCursorPos` (1 site) from its update functions. The shim serves `GetAsyncKeyState` from `SDL_GetKeyboardState` through a VK-to-scancode table that covers every `VK_*` the engine references, and the mouse buttons from `SDL_GetMouseState`. `GetCursorPos`, `ClientToScreen` and `ScreenToClient` use the window's position so the engine's screen-space arithmetic is unchanged. `GetKeyboardLayout` returns a constant US layout. `GetSystemMetrics` for screen size reads the current display mode. `MessageBoxA` maps to `SDL_ShowSimpleMessageBox`. `LoadCursor`/`SetCursor` for the arrow cursor map to the SDL system cursor; the engine draws its own in-game cursors.
+Input is polled, not event-driven. The engine calls `GetAsyncKeyState` (15 sites) and `GetCursorPos` (1 site) from its update functions. The shim serves `GetAsyncKeyState` from `SDL_GetKeyboardState` through a VK-to-scancode table that covers every `VK_*` the engine references, and the mouse buttons from `SDL_GetMouseState`. `GetCursorPos`, `ClientToScreen` and `ScreenToClient` use the window's position so the engine's screen-space arithmetic is unchanged. `GetKeyboardLayout` returns a constant US layout. `GetSystemMetrics` for screen size reads the current display mode.
+
+*Amended after the final review 2026-10-12 (ruling R27):* the window's client area is the engine's whole screen. `GetSystemMetrics(SM_CXSCREEN/SM_CYSCREEN)` reports the game resolution (set from the INI's `Resolution` before the engine starts) in windowed mode and the `SetDisplayMode` size in fullscreen, so the engine's popup is game-sized; `SM_CXFULLSCREEN` stays the desktop. `ClientToScreen`/`ScreenToClient` are the identity; `GetCursorPos`/`SetCursorPos` map between window pixels and frame pixels through the renderer's logical presentation, clamped to the frame. This replaces the window-position arithmetic in the paragraph above. `MessageBoxA` maps to `SDL_ShowSimpleMessageBox`. `LoadCursor`/`SetCursor` for the arrow cursor map to the SDL system cursor; the engine draws its own in-game cursors.
 
 Rendering and presenting stay on the main thread, as in the original, where the message loop thread also renders.
 
@@ -211,6 +213,8 @@ Rendering and presenting stay on the main thread, as in the original, where the 
 | `GetDC`, `ReleaseDC` | 6, 6 | Return `DDERR_UNSUPPORTED`, which makes the GDI text path inert. |
 
 Requesting 8, 16 or 24 bits per pixel returns `DDERR_INVALIDMODE`. Only 32-bpp is implemented upstream, and the engine already falls back on that error. A fullscreen request (`DDSCL_FULLSCREEN` followed by `SetDisplayMode`) is honored as a borderless fullscreen window at the desktop resolution, with the primary surface presented scaled to fit and its aspect ratio preserved. The engine's own resolution and every simulation coordinate are unchanged.
+
+*Amended after the final review 2026-10-12 (ruling R27):* in `DDSCL_NORMAL` the primary surface is client-sized (the game resolution), not desktop-sized, and is presented stretched onto the client area; in fullscreen it is the `SetDisplayMode` size, letterboxed onto the desktop.
 
 ### 7.3 DirectSound shim
 
