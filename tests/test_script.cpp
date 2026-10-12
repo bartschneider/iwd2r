@@ -38,6 +38,11 @@ std::string ParseError(const char* text)
     return error;
 }
 
+// GetAsyncKeyState values: down (0x8000), and down plus pressed since the
+// last poll (0x8001).
+const SHORT kDown = -32768;
+const SHORT kPressed = -32767;
+
 // The injected state of vk, or 0 when not injected.
 SHORT Key(int vk)
 {
@@ -152,15 +157,15 @@ TEST_CASE("script run drives the injected cursor and buttons", "[script]")
     CHECK(Key(VK_LBUTTON) == 0);
 
     platform::script::Advance(); // move held 1 frame and polled: press
-    CHECK(Key(VK_LBUTTON) == SHORT(0x8001)); // first poll reports the press
-    CHECK(Key(VK_LBUTTON) == SHORT(0x8000));
+    CHECK(Key(VK_LBUTTON) == kPressed); // first poll reports the press
+    CHECK(Key(VK_LBUTTON) == kDown);
     platform::script::Advance();
-    CHECK(Key(VK_LBUTTON) == SHORT(0x8000));
+    CHECK(Key(VK_LBUTTON) == kDown);
     platform::script::Advance(); // held 2 frames: release
     CHECK(Key(VK_LBUTTON) == 0);
     platform::script::Advance();
     platform::script::Advance(); // settled 2 frames: key press
-    CHECK(Key(VK_RETURN) == SHORT(0x8001));
+    CHECK(Key(VK_RETURN) == kPressed);
     platform::script::Advance();
     platform::script::Advance();
     CHECK(Key(VK_RETURN) == 0);
@@ -183,7 +188,7 @@ TEST_CASE("script run waits for the engine to poll a press", "[script]")
     for (int i = 0; i < 10; i++)
         platform::script::Advance();
     // Never polled: still down after far more than 2 frames.
-    CHECK(Key(VK_SPACE) == SHORT(0x8001));
+    CHECK(Key(VK_SPACE) == kPressed);
     platform::script::Advance(); // polled and held long enough: release
     CHECK(Key(VK_SPACE) == 0);
 
@@ -201,7 +206,7 @@ TEST_CASE("script type presses shift for capitals", "[script]")
 {
     platform::script::Start(ParseOk("type aB\n"));
     platform::script::Advance();
-    CHECK(Key('A') == SHORT(0x8001));
+    CHECK(Key('A') == kPressed);
     CHECK(Key(VK_SHIFT) == 0);
     platform::script::Advance();
     platform::script::Advance(); // release A
@@ -210,7 +215,7 @@ TEST_CASE("script type presses shift for capitals", "[script]")
     platform::script::Advance(); // shift down
     CHECK(Key(VK_SHIFT) != 0);
     platform::script::Advance(); // B down
-    CHECK(Key('B') == SHORT(0x8001));
+    CHECK(Key('B') == kPressed);
     CHECK(Key(VK_SHIFT) != 0);
     platform::script::Stop();
 }
