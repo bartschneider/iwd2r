@@ -1,9 +1,12 @@
+// Modified for iwd2r; see NOTICE.md
 #include "music/audio.h"
 
 #include <string.h>
 
 #include "music/adecode.h"
 #include "music/sound.h"
+
+#include "compat/path_hook.h"
 
 typedef enum AudioStreamFlags {
     AUDIO_STREAM_IN_USE = 0x1,
@@ -88,10 +91,10 @@ int audio_fclose(FILE* stream)
 FILE* audio_fopen(const char* fname, const char* mode)
 {
     if (dword_A0E420 != NULL) {
-        return fopen(fname, mode);
+        return fopen(compat::ResolvePath(fname).c_str(), mode);
     }
 
-    FILE* stream = fopen(fname, mode);
+    FILE* stream = fopen(compat::ResolvePath(fname).c_str(), mode);
     if (stream == NULL) {
         return NULL;
     }

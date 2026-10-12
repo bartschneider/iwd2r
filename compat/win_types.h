@@ -260,9 +260,9 @@ typedef HIMC__* HIMC;
 #define _stricmp strcasecmp
 #define _strnicmp strncasecmp
 // Older MSVC CRT spellings the music library uses.
-#define stricmp strcasecmp
-#define strcmpi strcasecmp
-#define strnicmp strncasecmp
+#define stricmp(a, b) strcasecmp(a, b)
+#define strcmpi(a, b) strcasecmp(a, b)
+#define strnicmp(a, b, n) strncasecmp(a, b, n)
 #define _vsnprintf vsnprintf
 #define _snprintf snprintf
 #define _chdir chdir
