@@ -1,6 +1,6 @@
 # 64-bit pointer-truncation sites
 
-Engine sites where a pointer is stored in, or read back from, a 32-bit integer and fits neither R19 idiom (an id in a `CPtrList` slot, or an area pointer used as a `DWORD_PTR` sound key). Project 1 keeps the low 32 bits so the engine compiles on 64-bit targets, and records the sites here for project 3. Line numbers are as of the end of project 1 (branch `first`). The list comes from commit `a8ec3e1` ("fits neither idiom") plus the sites the final review added. Classifications are the final reviewer's.
+Engine sites where a pointer is stored in, or read back from, a 32-bit integer and fits neither R19 idiom (an id in a `CPtrList` slot, or an area pointer used as a `DWORD_PTR` sound key). Project 1 keeps the low 32 bits so the engine compiles on 64-bit targets, and records the sites here for project 3. Line numbers are as of the end of project 1 (branch `first`). The list comes from commit `f0f562a` ("fits neither idiom") plus the sites the final review added. Classifications are the final reviewer's.
 
 | Site | What is stored | Classification |
 |---|---|---|
