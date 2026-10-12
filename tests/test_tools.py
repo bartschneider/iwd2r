@@ -102,5 +102,71 @@ class CheckNoticesTest(unittest.TestCase):
         self.assertEqual(self.check().returncode, 0)
 
 
+GEN_MAP = os.path.join(ROOT, 'tools', 'gen_map.py')
+
+
+class GenMapTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.repo = self._tmp.name
+        self.addCleanup(self._tmp.cleanup)
+        self.write('src/CAIAction.cpp', 'int a;\n// TODO: Incomplete.\n// 0x401000\n')
+        self.write('src/CVidMode.cpp', '#include "platform/ddraw_shim.h"\nint v;\n')
+        self.write('src/CGameSpy.cpp', 'int g;\n')
+        self.write('src/CChitin3d.cpp', 'int c;\n')
+        self.write('compat/x.h', 'int x;\n')
+        self.write('platform/y.cpp', 'int y;\n')
+
+    def write(self, rel, text, mode='w'):
+        path = os.path.join(self.repo, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, mode) as f:
+            f.write(text)
+
+    def run_gen(self, *args):
+        return subprocess.run([sys.executable, '-I', GEN_MAP, '--repo', self.repo, *args],
+                              capture_output=True, text=True)
+
+    def rows(self):
+        with open(os.path.join(self.repo, 'docs', 'MAP.md')) as f:
+            out = {}
+            for line in f:
+                if line.startswith('|'):
+                    cells = [c.strip() for c in line.strip().strip('|').split('|')]
+                    out[cells[0]] = cells
+            return out
+
+    def test_rows(self):
+        self.assertEqual(self.run_gen().returncode, 0)
+        rows = self.rows()
+        self.assertEqual(rows['AI'][1:5], ['1', '3', '1', '1'])
+        self.assertEqual(rows['Video'][1], '2')  # CVidMode + CChitin3d
+        self.assertIn('ddraw_shim.h', rows['Video'][5])
+        self.assertEqual(rows['Messaging'][1], '1')  # CGameSpy, not Game
+        self.assertEqual(rows['Game'][1], '0')
+        self.assertEqual(rows['Engine core'][1], '0')
+        self.assertEqual(rows['compat'][1], '1')
+        self.assertEqual(rows['platform'][1], '1')
+        self.assertEqual(rows['AI'][5], '\u2014')
+
+    def test_deterministic(self):
+        self.run_gen()
+        path = os.path.join(self.repo, 'docs', 'MAP.md')
+        first = open(path, 'rb').read()
+        self.run_gen()
+        self.assertEqual(first, open(path, 'rb').read())
+
+    def test_check(self):
+        self.run_gen()
+        self.assertEqual(self.run_gen('--check').returncode, 0)
+        self.write('src/CAIAction.cpp', 'int more;\n', 'a')
+        r = self.run_gen('--check')
+        self.assertEqual(r.returncode, 1)
+        self.assertTrue(r.stdout.strip() or r.stderr.strip())
+
+    def test_check_without_map_fails(self):
+        self.assertEqual(self.run_gen('--check').returncode, 1)
+
+
 if __name__ == '__main__':
     unittest.main()
