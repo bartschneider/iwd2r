@@ -21,7 +21,7 @@ Bring your own copy of Icewind Dale II: Complete from GOG. The DRM-free GOG vers
 | 5 | IEex native layer and Lua API | Not started |
 | 6 | Remaster renderer | Not started |
 
-Current numbers: four presets build; 184 tests pass on Linux; the start screen is reached headlessly on Linux and Windows.
+Current numbers: four presets build; 211 tests pass on Linux; the start screen is reached headlessly on Linux and Windows.
 
 Engine sites that still truncate pointers to 32 bits on 64-bit targets are listed for project 3 in [docs/64bit-cast-sites.md](docs/64bit-cast-sites.md).
 
@@ -59,7 +59,7 @@ An automated check on Linux, headless, driven by an input script that takes scre
 python3 tools/play.py --linux --headless --script scenarios/options.txt
 ```
 
-Options are flags, never INI edits: `--windowed` (default) or `--fullscreen`, `--resolution 800|1024` (default 800), `--set "Section/Key=Value"` for anything else, `--frames N`, `--data PATH`. They reach the engine through `IWD2R_INI_OVERRIDE`. Each run writes `runs/<YYYYMMDD-HHMMSS>/` with `log.txt` (the game's output), the screenshots, `ini-backup/` and `summary.txt`. Every `*.ini` in the install is backed up before the run and restored byte-identical afterwards, also on Ctrl-C, because the engine rewrites `icewind2.ini` on exit. Script commands (`wait`, `click`, `rclick`, `move`, `key`, `type`, `shot`, `quit`) are documented in `platform/script.h`; the starter scenarios are in `scenarios/`.
+Options are flags, never INI edits: `--windowed` (default) or `--fullscreen`, `--resolution W|desktop` (default 800), `--scale 1|2|3|4|auto` (the `Scale` key), `--set "Section/Key=Value"` for anything else (`--set "Program Options/Height=1080"` for the height), `--frames N`, `--data PATH`. They reach the engine through `IWD2R_INI_OVERRIDE`. Each run writes `runs/<YYYYMMDD-HHMMSS>/` with `log.txt` (the game's output), the screenshots, `ini-backup/` and `summary.txt`. Every `*.ini` in the install is backed up before the run and restored byte-identical afterwards, also on Ctrl-C, because the engine rewrites `icewind2.ini` on exit. Script commands (`wait`, `click`, `rclick`, `move`, `key`, `type`, `shot`, `quit`, `origin`) are documented in `platform/script.h`; the starter scenarios are in `scenarios/`. Click and move coordinates are in the original's 800x600 UI by default (`origin ui`): at larger sizes the UI is centred, and the engine (or the real-input driver) adds the centring offset, so one scenario clicks the same buttons at every resolution; `origin screen` switches to screen pixels.
 
 #### Real-input runs (`--vm`)
 
@@ -71,12 +71,12 @@ python3 tools/play.py --vm linux --suite --jobs 3
 python3 tools/play.py --vm all --suite
 ```
 
-- `--vm linux` builds `linux-gcc`, starts `Xvfb :N` (N from 90 up) at the game resolution (800x600 or 1024x768), runs the game windowed on it with the X11 video driver and drives it with xdotool (`tools/realinput.py`). One-time setup: `sudo apt-get install -y xvfb xdotool imagemagick`.
+- `--vm linux` builds `linux-gcc`, starts `Xvfb :N` (N from 90 up) at the output size (the requested resolution; its height from `--set "Program Options/Height=H"`, else 4:3 for 800, 1024, 1600 and 2048, else 16:9; `--resolution desktop` is 1920x1080), runs the game windowed on it with the X11 video driver and drives it with xdotool (`tools/realinput.py`). One-time setup: `sudo apt-get install -y xvfb xdotool imagemagick`.
 - `--vm windows` runs each scenario in a fresh Windows Sandbox (`tools/winsandbox.py`, `tools/sandbox/driver.ps1`): the MSVC build from `C:\Users\thier\iwd2r-build` (with the MSVC runtime DLLs copied next to `iwd2r.exe`), a copy of the install in `C:\Users\thier\iwd2r-vm\game` (made once with rsync, refreshed when `CHITIN.KEY` changes; the real install is never mapped), networking off. The driver uses `SendInput` and captures the screen with System.Drawing. One-time setup, in an admin PowerShell, then reboot: `Enable-WindowsOptionalFeature -Online -FeatureName Containers-DisposableClientVM -All`. Only one sandbox runs at a time, so `--jobs` does not apply.
 - `--vm all --suite` runs the suite on Linux, then on Windows when the sandbox is available, and prints both tables.
 - `--suite` runs every `scenarios/*.txt`; `--jobs N` (default 1) runs that many Linux scenarios at once, each on its own display and CPU core and in a private view of the install (links to its files, with its own `cache`, `temp`, `tempsave` and INI copies, since parallel games would otherwise race on them); `--timeout S` (default 180) bounds each scenario.
 
-How commands map to input: `click`/`rclick`/`move` move the real pointer to the game coordinates (the window's client area is the game screen) and press the button for 2 frames; `key` presses a real key; `type` types real key strokes; `wait N` lasts N/30 s and until the engine has presented N frames, so slow screen loads do not desynchronise the script; `shot NAME` captures the display (`NAME-screen.png`, the OS view with the engine-drawn pointer) and the engine's framebuffer (`NAME.png`); `quit` closes the window as a window manager's close button does (`WM_DELETE_WINDOW` on X11, `WM_CLOSE` on Windows) and confirms the engine's "quit?" message box with Return. The framebuffer shots and frame counts come from a small control channel: with `IWD2R_CONTROL_DIR` set, the engine answers `shot-NAME.req` and `frames.req` files in that folder once per presented frame; it injects no input.
+How commands map to input: `click`/`rclick`/`move` move the real pointer to the game coordinates (UI coordinates plus the centring offset, times the scale: the window's client area is the game screen scaled up) and press the button for 2 frames; `key` presses a real key; `type` types real key strokes; `wait N` lasts N/30 s and until the engine has presented N frames, so slow screen loads do not desynchronise the script; `shot NAME` captures the display (`NAME-screen.png`, the OS view with the engine-drawn pointer) and the engine's framebuffer (`NAME.png`); `quit` closes the window as a window manager's close button does (`WM_DELETE_WINDOW` on X11, `WM_CLOSE` on Windows) and confirms the engine's "quit?" message box with Return. The framebuffer shots and frame counts come from a small control channel: with `IWD2R_CONTROL_DIR` set, the engine answers `shot-NAME.req` and `frames.req` files in that folder once per presented frame; it injects no input.
 
 What lands in `runs/<YYYYMMDD-HHMMSS>/` (one subfolder per scenario with `--suite`, under `linux/` and `windows/` with `--vm all`): `driver.log` (every action with timestamps), `log.txt` (the game's output), `script.txt`, `actions.json` (the parsed scenario), both kinds of screenshots and `summary.txt`; Linux runs add `xvfb.log` and `ini-backup/`, Windows runs `run.wsb`. A suite writes `suite.txt` with the table (scenario, exit code, duration, screenshot count). The exit code is the game's, 124 on a timeout, or non-zero when the driver failed; Xvfb, the game and the sandbox are closed on every exit path, including Ctrl-C.
 
@@ -97,9 +97,16 @@ $env:IWD2_DATA = "C:\Games\Icewind Dale II"
 
 Alternatively, place a link named `IWD2` next to the executable or at the repository root. The directory must contain `CHITIN.KEY`. The engine writes saves, cache and INI files into it exactly as the original does.
 
-`Resolution` must be 800 or 1024 for now. The IWD2EE mod sets 1366; rather than editing the file, override it for the run with `IWD2R_INI_OVERRIDE="Program Options/Resolution=800"` (entries are `Section/Key=Value`, separated by `;`), which `tools/play.py` does by default.
+Screen size, in the `[Program Options]` section of `icewind2.ini`:
 
-The game window is the size of the game resolution (800x600 or 1024x768); with `Full Screen=1` it is letterboxed onto the desktop. Like the original, iwd2r pins itself to one CPU core at start-up, so expect one busy core.
+- `Resolution` is a width in pixels, such as the 1366 IWD2EE sets, or `desktop` for the primary display's native size.
+- `Height` (optional, an iwd2r key) is the height. Without it, 800, 1024, 1600 and 2048 take their original 4:3 heights (600, 768, 1200, 1536) and any other width takes the desktop's aspect (1366 on a 1920x1080 desktop is 1366x768).
+- `Scale` (optional, an iwd2r key, default 1) is 1 to 4 or `auto`: the engine runs at the requested size divided by the scale, and every frame is scaled up with nearest-neighbour filtering, windowed and fullscreen; the mouse is mapped back. `auto` picks the largest factor that keeps the engine's height at least 720 (1920x1080 runs at 1; 2560x1440 at 2, inside 1280x720; 3840x2160 at 3, inside 1280x720). For now the whole frame is scaled; scaling only the UI comes with project 4.
+- The engine's screen must be at least 800x600; anything smaller is refused at start-up with a message.
+
+At 800x600, 1024x768, 1600x1200 and 2048x1536 the layout is the original's (1600 and 2048 draw the UI double size). At any other size the 800x600 UI is centred, the stone borders are tiled over the margins, the world view spans the screen above the bottom panels and the world screen's panels sit bottom-centre. Override any key for one run with `IWD2R_INI_OVERRIDE="Program Options/Resolution=800"` (entries are `Section/Key=Value`, separated by `;`).
+
+The game window is the engine's screen times `Scale`; with `Full Screen=1`, or when that is as wide as the desktop (the original's rule), it is letterboxed onto the desktop. Like the original, iwd2r pins itself to one CPU core at start-up, so expect one busy core.
 
 Headless smoke run, which prints a framebuffer hash:
 
@@ -118,7 +125,7 @@ SDL_VIDEO_DRIVER=dummy SDL_AUDIO_DRIVER=dummy IWD2R_SMOKE_FRAMES=300 ./build/lin
 - The single-instance check is removed: two copies can run against the same install, where the original refused to start a second.
 - On Windows the executable is a console program for now, so a console window appears alongside the game window.
 - The version resource is built in: the game name, version (`2, 0, 1, 0`, shown as v2.01 in the options screen) and build number come from strings compiled into iwd2r rather than from an `.exe` resource, and PrivateBuild names the iwd2r version and commit.
-- Only `Resolution` 800 and 1024 are accepted at start-up; 1280, 1600 and 2048 crash inside the ported UI code and are refused with a message.
+- Arbitrary resolutions beyond the original four (800, 1024, 1600, 2048), `Resolution=desktop`, the `Height` key and the `Scale` key are an IWD2EE-style extension; the layout at other sizes follows IEex's generalisation of the original table (src/ScreenLayout.cpp). On exit the engine writes `Resolution` back as the INI had it rather than the engine's width.
 - Positioned 3D sounds play centred without distance attenuation when the 3D-sound option is on, because the DirectSound 3D interfaces are no-ops.
 - The assert-time thread suspension is cooperative only: a thread can suspend itself but cannot freeze others.
 - The speaker-portrait click in world dialog panels, which forwarded to the multiplayer screen, is now a no-op.
