@@ -90,27 +90,26 @@ bool Headless()
     return driver && (SDL_strcasecmp(driver, "dummy") == 0 || SDL_strcasecmp(driver, "offscreen") == 0);
 }
 
-// The primary display's desktop size. Under the dummy and offscreen drivers
-// there is no real desktop, so the window's size stands in.
-void RefreshScreenSize(SDL_Window* window)
+// The primary display's desktop size (the dummy driver reports a fixed
+// 1024x768 one). Only the window's placement, SM_CXFULLSCREEN, the work
+// area and WM_DISPLAYCHANGE use it: the engine's screen coordinates are the
+// virtual screen's (present::ScreenSize).
+void RefreshDesktopSize()
 {
-    const SDL_DisplayMode* mode = Headless() ? nullptr : SDL_GetDesktopDisplayMode(SDL_GetPrimaryDisplay());
-    if (mode && mode->w > 0 && mode->h > 0) {
-        platform::present::SetScreenSize(mode->w, mode->h);
+    if (!VideoUp())
         return;
-    }
-    int w = 0;
-    int h = 0;
-    if (window && SDL_GetWindowSize(window, &w, &h) && w > 0 && h > 0)
-        platform::present::SetScreenSize(w, h);
+    const SDL_DisplayMode* mode = SDL_GetDesktopDisplayMode(SDL_GetPrimaryDisplay());
+    if (mode && mode->w > 0 && mode->h > 0)
+        platform::present::SetDesktopSize(mode->w, mode->h);
 }
 
-void WindowOrigin(const WindowRecord* record, int& x, int& y)
+// Clamps one window coordinate so a size-long window starting there lies
+// within [origin, origin + extent), or at origin when it cannot fit.
+int ClampToDesktop(int pos, int size, int origin, int extent)
 {
-    x = 0;
-    y = 0;
-    if (record)
-        SDL_GetWindowPosition(record->window, &x, &y);
+    if (size >= extent || pos < origin)
+        return origin;
+    return std::min(pos, origin + extent - size);
 }
 
 // msg.pt is left zero: the engine never reads it, and filling it would call
@@ -224,11 +223,12 @@ void Translate(const SDL_Event& e, bool& displayChanged)
         if (e.wheel.direction == SDL_MOUSEWHEEL_FLIPPED)
             dy = -dy;
         const short delta = static_cast<short>(std::lround(dy * 120.0f));
-        int wx = 0;
-        int wy = 0;
-        WindowOrigin(rec, wx, wy);
-        const int px = wx + static_cast<int>(e.wheel.mouse_x);
-        const int py = wy + static_cast<int>(e.wheel.mouse_y);
+        // Screen coordinates are the engine's frame coordinates.
+        float fx = 0.0f;
+        float fy = 0.0f;
+        platform::present::WindowToFrame(e.wheel.mouse_x, e.wheel.mouse_y, &fx, &fy);
+        const int px = static_cast<int>(fx);
+        const int py = static_cast<int>(fy);
         EnqueueMessage(WM_MOUSEWHEEL, static_cast<WPARAM>(static_cast<DWORD>(static_cast<WORD>(delta)) << 16), MAKELONG(px, py));
         return;
     }
@@ -268,10 +268,9 @@ void PumpEvents()
         while (SDL_PollEvent(&e))
             Translate(e, displayChanged);
         if (displayChanged) {
-            WindowRecord* rec = S().current;
-            RefreshScreenSize(rec ? rec->window : nullptr);
-            const SIZE screen = platform::present::ScreenSize();
-            EnqueueMessage(WM_DISPLAYCHANGE, 32, MAKELONG(screen.cx, screen.cy));
+            RefreshDesktopSize();
+            const SIZE desktop = platform::present::DesktopSize();
+            EnqueueMessage(WM_DISPLAYCHANGE, 32, MAKELONG(desktop.cx, desktop.cy));
         }
     }
     platform::present::PresentIfDirty();
@@ -281,6 +280,16 @@ void PumpEvents()
 void EnqueueMessage(UINT message, WPARAM wParam, LPARAM lParam)
 {
     Enqueue(MainWindow(), message, wParam, lParam);
+}
+
+bool InitScreen(int width, int height)
+{
+    platform::present::SetScreenSize(width, height);
+    SDL_SetHint(SDL_HINT_QUIT_ON_LAST_WINDOW_CLOSE, "0");
+    if (!VideoUp() && !SDL_Init(SDL_INIT_VIDEO))
+        return false;
+    RefreshDesktopSize();
+    return true;
 }
 
 HWND MainWindow()
@@ -336,13 +345,29 @@ HWND CreateWindowExA(DWORD exStyle, LPCSTR className, LPCSTR title, DWORD style,
     if (!VideoUp() && !SDL_Init(SDL_INIT_VIDEO))
         return NULL;
 
-    const bool defaultPos = x == CW_USEDEFAULT || y == CW_USEDEFAULT;
+    RefreshDesktopSize();
+    if (width == CW_USEDEFAULT)
+        width = 640;
+    if (height == CW_USEDEFAULT)
+        height = 480;
+    // The engine asks for a SM_CXSCREEN x SM_CYSCREEN popup: the virtual
+    // screen, game-sized. It stays on the desktop; the origin (where the
+    // engine's own clamp lands when the game fills the desktop) and
+    // CW_USEDEFAULT centre it.
+    const bool centred = x == CW_USEDEFAULT || y == CW_USEDEFAULT || (x == 0 && y == 0);
+    if (!centred) {
+        SDL_Rect bounds = {};
+        if (SDL_GetDisplayBounds(SDL_GetPrimaryDisplay(), &bounds) && bounds.w > 0 && bounds.h > 0) {
+            x = ClampToDesktop(x, width, bounds.x, bounds.w);
+            y = ClampToDesktop(y, height, bounds.y, bounds.h);
+        }
+    }
     SDL_PropertiesID props = SDL_CreateProperties();
     SDL_SetStringProperty(props, SDL_PROP_WINDOW_CREATE_TITLE_STRING, title ? title : "");
-    SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_X_NUMBER, defaultPos ? SDL_WINDOWPOS_CENTERED : x);
-    SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_Y_NUMBER, defaultPos ? SDL_WINDOWPOS_CENTERED : y);
-    SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER, width == CW_USEDEFAULT ? 640 : width);
-    SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, height == CW_USEDEFAULT ? 480 : height);
+    SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_X_NUMBER, centred ? SDL_WINDOWPOS_CENTERED : x);
+    SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_Y_NUMBER, centred ? SDL_WINDOWPOS_CENTERED : y);
+    SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER, width);
+    SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, height);
     SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_BORDERLESS_BOOLEAN, (style & WS_POPUP) != 0);
     SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_HIDDEN_BOOLEAN, (style & WS_VISIBLE) == 0);
     SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_ALWAYS_ON_TOP_BOOLEAN, (exStyle & WS_EX_TOPMOST) != 0);
@@ -357,7 +382,6 @@ HWND CreateWindowExA(DWORD exStyle, LPCSTR className, LPCSTR title, DWORD style,
     rec->title = title ? title : "";
 
     platform::present::SetPresentTarget(window);
-    RefreshScreenSize(window);
 
     {
         std::lock_guard<std::mutex> lock(s.mutex);
@@ -501,31 +525,13 @@ BOOL GetWindowRect(HWND hWnd, LPRECT rect)
     return TRUE;
 }
 
-BOOL ClientToScreen(HWND hWnd, LPPOINT point)
-{
-    WindowRecord* rec = Rec(hWnd);
-    if (!rec || !point)
-        return FALSE;
-    int x = 0;
-    int y = 0;
-    WindowOrigin(rec, x, y);
-    point->x += x;
-    point->y += y;
-    return TRUE;
-}
+// The client area is the engine's whole screen (the virtual screen windowed,
+// the display mode fullscreen), so client and screen coordinates coincide.
+// Only GetWindowRect, SetWindowPos and CreateWindowExA's position are in
+// desktop coordinates.
+BOOL ClientToScreen(HWND hWnd, LPPOINT point) { return Rec(hWnd) && point ? TRUE : FALSE; }
 
-BOOL ScreenToClient(HWND hWnd, LPPOINT point)
-{
-    WindowRecord* rec = Rec(hWnd);
-    if (!rec || !point)
-        return FALSE;
-    int x = 0;
-    int y = 0;
-    WindowOrigin(rec, x, y);
-    point->x -= x;
-    point->y -= y;
-    return TRUE;
-}
+BOOL ScreenToClient(HWND hWnd, LPPOINT point) { return Rec(hWnd) && point ? TRUE : FALSE; }
 
 HWND GetFocus()
 {
@@ -537,13 +543,21 @@ HWND GetFocus()
 
 int GetSystemMetrics(int index)
 {
+    // SM_CXSCREEN is the engine's screen (the window it creates is that
+    // size); SM_CXFULLSCREEN stays the real desktop, which the engine
+    // compares the game resolution against to allow windowed mode and to
+    // place the window.
     switch (index) {
     case SM_CXSCREEN:
-    case SM_CXFULLSCREEN:
         return platform::present::ScreenSize().cx;
     case SM_CYSCREEN:
-    case SM_CYFULLSCREEN:
         return platform::present::ScreenSize().cy;
+    case SM_CXFULLSCREEN:
+        RefreshDesktopSize();
+        return platform::present::DesktopSize().cx;
+    case SM_CYFULLSCREEN:
+        RefreshDesktopSize();
+        return platform::present::DesktopSize().cy;
     case SM_CXDOUBLECLK:
     case SM_CYDOUBLECLK:
         return 4;
@@ -655,45 +669,44 @@ HCURSOR LoadCursorA(HINSTANCE, LPCSTR name)
     return name == IDC_ARROW ? reinterpret_cast<HCURSOR>(&g_arrowCursor) : NULL;
 }
 
+// The pointer in the engine's screen coordinates: the window-relative mouse
+// mapped onto the presented frame, clamped to it (or to the client area
+// before the first frame) so the engine's edge scrolling still sees the
+// edges when the pointer leaves the window or sits in a letterbox bar.
 BOOL GetCursorPos(LPPOINT point)
 {
     if (!point)
         return FALSE;
     point->x = 0;
     point->y = 0;
-    if (!VideoUp())
+    WindowRecord* rec = S().current;
+    if (!VideoUp() || !rec)
         return TRUE;
+    float wx = 0.0f;
+    float wy = 0.0f;
+    SDL_GetMouseState(&wx, &wy);
     float fx = 0.0f;
     float fy = 0.0f;
-    if (Headless()) {
-        // No global mouse here: window-relative plus the window position.
-        SDL_GetMouseState(&fx, &fy);
-        int wx = 0;
-        int wy = 0;
-        WindowOrigin(S().current, wx, wy);
-        fx += static_cast<float>(wx);
-        fy += static_cast<float>(wy);
-    } else {
-        SDL_GetGlobalMouseState(&fx, &fy);
-    }
-    point->x = static_cast<LONG>(fx);
-    point->y = static_cast<LONG>(fy);
+    platform::present::WindowToFrame(wx, wy, &fx, &fy);
+    int w = 0;
+    int h = 0;
+    if (!platform::present::FrameSize(&w, &h))
+        SDL_GetWindowSize(rec->window, &w, &h);
+    point->x = std::clamp(static_cast<LONG>(std::floor(fx)), LONG(0), static_cast<LONG>(std::max(w - 1, 0)));
+    point->y = std::clamp(static_cast<LONG>(std::floor(fy)), LONG(0), static_cast<LONG>(std::max(h - 1, 0)));
     return TRUE;
 }
 
+// Warps to a point in the engine's screen coordinates, within the window.
 BOOL SetCursorPos(int x, int y)
 {
-    if (!VideoUp())
-        return FALSE;
     WindowRecord* rec = S().current;
-    if (!Headless() && SDL_WarpMouseGlobal(static_cast<float>(x), static_cast<float>(y)))
-        return TRUE;
-    if (!rec)
+    if (!VideoUp() || !rec)
         return FALSE;
-    int wx = 0;
-    int wy = 0;
-    WindowOrigin(rec, wx, wy);
-    SDL_WarpMouseInWindow(rec->window, static_cast<float>(x - wx), static_cast<float>(y - wy));
+    float wx = 0.0f;
+    float wy = 0.0f;
+    platform::present::FrameToWindow(static_cast<float>(x), static_cast<float>(y), &wx, &wy);
+    SDL_WarpMouseInWindow(rec->window, wx, wy);
     return TRUE;
 }
 
@@ -851,8 +864,8 @@ BOOL SystemParametersInfoA(UINT action, UINT, LPVOID value, UINT)
         RECT* work = static_cast<RECT*>(value);
         work->left = 0;
         work->top = 0;
-        work->right = GetSystemMetrics(SM_CXSCREEN);
-        work->bottom = GetSystemMetrics(SM_CYSCREEN);
+        work->right = GetSystemMetrics(SM_CXFULLSCREEN);
+        work->bottom = GetSystemMetrics(SM_CYFULLSCREEN);
         return TRUE;
     }
     default:

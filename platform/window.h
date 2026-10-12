@@ -23,6 +23,12 @@ void PumpEvents();
 // Posts a message addressed to the main window.
 void EnqueueMessage(UINT message, WPARAM wParam, LPARAM lParam);
 
+// Sets the virtual screen (the game resolution, width x height) that
+// GetSystemMetrics(SM_CXSCREEN) reports and CreateWindowExA's window takes,
+// and starts SDL video so the desktop size is known before the engine reads
+// SM_CXFULLSCREEN. False when SDL video cannot start.
+bool InitScreen(int width, int height);
+
 // The live window, or NULL.
 HWND MainWindow();
 

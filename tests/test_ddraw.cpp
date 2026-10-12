@@ -8,7 +8,9 @@
 #include <SDL3/SDL.h>
 
 #include <cstdint>
+#include <cmath>
 #include <cstring>
+#include <vector>
 
 namespace {
 
@@ -534,6 +536,105 @@ TEST_CASE("ddraw Present uploads to a real window", "[ddraw]")
     CHECK(platform::present::PresentedFrames() == frames + 2);
     platform::present::SetPresentTarget(nullptr);
 
+    SDL_DestroyWindow(window);
+    SDL_Quit();
+}
+
+TEST_CASE("ddraw display mode sets the screen size and RestoreDisplayMode returns it", "[ddraw]")
+{
+    const SIZE before = platform::present::ScreenSize();
+    platform::present::SetScreenSize(800, 600);
+    IDirectDraw* dd = NewDirectDraw(DDSCL_FULLSCREEN | DDSCL_EXCLUSIVE);
+    CHECK(platform::present::ScreenSize().cx == 800);
+    CHECK(platform::present::ScreenSize().cy == 600);
+    REQUIRE(dd->SetDisplayMode(1024, 768, 32) == DD_OK);
+    CHECK(platform::present::ScreenSize().cx == 1024);
+    CHECK(platform::present::ScreenSize().cy == 768);
+    REQUIRE(dd->RestoreDisplayMode() == DD_OK);
+    CHECK(platform::present::ScreenSize().cx == 800);
+    CHECK(platform::present::ScreenSize().cy == 600);
+
+    // Windowed, the primary is the virtual screen.
+    REQUIRE(dd->SetCooperativeLevel(nullptr, DDSCL_NORMAL) == DD_OK);
+    DDSURFACEDESC ddsd = {};
+    ddsd.dwSize = sizeof(ddsd);
+    ddsd.dwFlags = DDSD_CAPS;
+    ddsd.ddsCaps.dwCaps = DDSCAPS_PRIMARYSURFACE;
+    IDirectDrawSurface* front = nullptr;
+    REQUIRE(dd->CreateSurface(&ddsd, &front, nullptr) == DD_OK);
+    DDSURFACEDESC f = LockAll(front);
+    CHECK(f.dwWidth == 800u);
+    CHECK(f.dwHeight == 600u);
+    REQUIRE(front->Unlock(nullptr) == DD_OK);
+    CHECK(front->Release() == 0);
+    CHECK(dd->Release() == 0);
+    platform::present::SetScreenSize(before.cx, before.cy);
+}
+
+TEST_CASE("ddraw WindowToFrame follows the logical presentation", "[ddraw]")
+{
+    UseDummyVideo();
+    REQUIRE(SDL_Init(SDL_INIT_VIDEO));
+    SDL_Window* window = SDL_CreateWindow("ddraw map", 1600, 1200, SDL_WINDOW_HIDDEN);
+    if (window == nullptr) {
+        SDL_Quit();
+        SKIP("dummy video driver could not create a window: " << SDL_GetError());
+    }
+    platform::present::SetPresentTarget(window);
+    float fx = -1.0f;
+    float fy = -1.0f;
+    // Before the first frame: the identity.
+    platform::present::WindowToFrame(5.0f, 6.0f, &fx, &fy);
+    CHECK(fx == 5.0f);
+    CHECK(fy == 6.0f);
+    int w = 0;
+    int h = 0;
+    CHECK_FALSE(platform::present::FrameSize(&w, &h));
+
+    std::vector<uint32_t> pixels(800 * 600, 0u);
+    platform::present::Present(pixels.data(), 800, 600, 800 * 4);
+    SDL_Renderer* renderer = SDL_GetRenderer(window);
+    if (renderer == nullptr) {
+        platform::present::SetPresentTarget(nullptr);
+        SDL_DestroyWindow(window);
+        SDL_Quit();
+        SKIP("dummy video driver has no renderer: " << SDL_GetError());
+    }
+    REQUIRE(platform::present::FrameSize(&w, &h));
+    CHECK(w == 800);
+    CHECK(h == 600);
+
+    // A 1600x1200 window shows an 800x600 frame at twice the size.
+    platform::present::WindowToFrame(800.0f, 600.0f, &fx, &fy);
+    CHECK(fx == 400.0f);
+    CHECK(fy == 300.0f);
+    platform::present::WindowToFrame(0.0f, 0.0f, &fx, &fy);
+    CHECK(fx == 0.0f);
+    CHECK(fy == 0.0f);
+    float wx = 0.0f;
+    float wy = 0.0f;
+    platform::present::FrameToWindow(400.0f, 300.0f, &wx, &wy);
+    CHECK(wx == 800.0f);
+    CHECK(wy == 600.0f);
+
+    // Letterboxed into 1600x1000 (as fullscreen presents): scale 5/3, the
+    // frame is about 1333 wide and starts about 133 in; the bar maps outside it.
+    REQUIRE(SDL_SetWindowSize(window, 1600, 1000));
+    SDL_SyncWindow(window);
+    REQUIRE(SDL_SetRenderLogicalPresentation(renderer, 800, 600, SDL_LOGICAL_PRESENTATION_LETTERBOX));
+    platform::present::WindowToFrame(800.0f, 500.0f, &fx, &fy);
+    CHECK(std::fabs(fx - 400.0f) < 0.01f);
+    CHECK(std::fabs(fy - 300.0f) < 0.01f);
+    platform::present::WindowToFrame(50.0f, 500.0f, &fx, &fy);
+    CHECK(fx < 0.0f);
+    platform::present::FrameToWindow(0.0f, 0.0f, &wx, &wy);
+    CHECK(std::fabs(wx - 400.0f / 3.0f) < 0.5f); // SDL rounds the bar to whole pixels.
+    CHECK(std::fabs(wy) < 0.01f);
+
+    platform::present::SetPresentTarget(nullptr);
+    platform::present::WindowToFrame(5.0f, 6.0f, &fx, &fy);
+    CHECK(fx == 5.0f);
+    CHECK(fy == 6.0f);
     SDL_DestroyWindow(window);
     SDL_Quit();
 }

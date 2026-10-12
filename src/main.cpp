@@ -27,6 +27,20 @@ bool iwd2r_IsSupportedResolution(int width)
     return false;
 }
 
+int iwd2r_ScreenHeightFor(int width)
+{
+    switch (width) {
+    case 2048:
+        return 1536;
+    case 1600:
+        return 1200;
+    case 1024:
+        return 768;
+    default:
+        return 600;
+    }
+}
+
 int iwd2r_main(int argc, char** argv)
 {
     platform::window::InstallFatalMessageBox();
@@ -43,6 +57,15 @@ int iwd2r_main(int argc, char** argv)
               " (project 1 ports only the resolutions whose UI panels were decompiled).";
         platform::ReportFatal(text.c_str(), "iwd2r");
         return 3;
+    }
+
+    // Ruling R27: the window's client area is the engine's screen, so
+    // GetSystemMetrics(SM_CXSCREEN) must report the game resolution before
+    // CBaldurChitin's constructor reads it. Heights as that constructor's
+    // switch derives them from Resolution.
+    if (!platform::window::InitScreen(nResolution, iwd2r_ScreenHeightFor(nResolution))) {
+        platform::ReportFatal("SDL video could not start.", "iwd2r");
+        return 4;
     }
 
     std::cout << std::endl;

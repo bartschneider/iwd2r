@@ -16,17 +16,46 @@ namespace platform::present {
 // destroys the renderer and texture made for the previous window.
 void SetPresentTarget(SDL_Window* window);
 
-// The desktop size; the windowed primary surface takes this size. 1024x768
-// until the window code sets it.
+// The virtual screen the engine sees in windowed mode: the game resolution
+// (iwd2r_main sets it from the INI before the engine starts). The window's
+// client area is this screen, and the windowed primary surface takes its
+// size. 1024x768 until set.
 void SetScreenSize(int w, int h);
+
+// The screen the engine sees: the display mode set by SetDisplayMode while
+// fullscreen, otherwise the virtual screen. GetSystemMetrics(SM_CXSCREEN)
+// reports it.
 SIZE ScreenSize();
+
+// The real desktop's size, kept by the window code; the window is placed
+// within it and GetSystemMetrics(SM_CXFULLSCREEN) reports it. Falls back to
+// ScreenSize() until set.
+void SetDesktopSize(int w, int h);
+SIZE DesktopSize();
 
 // Switches the target window to borderless desktop fullscreen and back, or
 // remembers the flag while no window is set.
 void SetFullscreen(bool fullscreen);
 
+// DirectDraw's SetDisplayMode: fullscreen at w x h (letterboxed onto the
+// desktop). w or h 0 (RestoreDisplayMode) clears the mode and leaves
+// fullscreen.
+void SetDisplayMode(int w, int h);
+
+// Maps a point between window coordinates and the presented frame's
+// (the engine's screen coordinates) through the renderer's logical
+// presentation: stretched onto the window in windowed mode, letterboxed in
+// fullscreen. The identity before the first frame is presented or without a
+// renderer (the dummy video driver before a present).
+void WindowToFrame(float x, float y, float* fx, float* fy);
+void FrameToWindow(float fx, float fy, float* x, float* y);
+
+// The size of the last presented frame, when WindowToFrame maps through a
+// renderer; false while it is the identity.
+bool FrameSize(int* w, int* h);
+
 // Uploads one XRGB8888 frame and presents it. Without a target window it only
-// counts the frame and records its hash.
+// counts the frame.
 void Present(const uint32_t* xrgb, int width, int height, int pitchBytes);
 
 void MarkPrimaryDirty();

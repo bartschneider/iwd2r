@@ -329,7 +329,7 @@ private:
             const uint32_t* srcRow = srcPixels + static_cast<size_t>(sy) * static_cast<size_t>(src.m_width);
             uint32_t* dstRow = Row(dy + v);
             if (!mirrorX && !useKey) {
-                std::memcpy(dstRow + (dx + uLo), srcRow + sl + uLo, static_cast<size_t>(uHi - uLo) * sizeof(uint32_t));
+                std::memcpy(dstRow + (dx + uLo), srcRow + (sl + uLo), static_cast<size_t>(uHi - uLo) * sizeof(uint32_t));
                 continue;
             }
             for (long long u = uLo; u < uHi; u++) {
@@ -401,7 +401,7 @@ public:
             return DDERR_INVALIDPARAMS;
         m_modeWidth = dwWidth;
         m_modeHeight = dwHeight;
-        platform::present::SetFullscreen(true);
+        platform::present::SetDisplayMode(static_cast<int>(dwWidth), static_cast<int>(dwHeight));
         return DD_OK;
     }
 
@@ -409,7 +409,7 @@ public:
     {
         m_modeWidth = 0;
         m_modeHeight = 0;
-        platform::present::SetFullscreen(false);
+        platform::present::SetDisplayMode(0, 0);
         return DD_OK;
     }
 
@@ -506,7 +506,8 @@ public:
 private:
     ~DirectDraw() override = default;
 
-    // The SetDisplayMode size in fullscreen mode, otherwise the desktop size.
+    // The SetDisplayMode size in fullscreen mode, otherwise the virtual screen
+    // (the game resolution; see present::ScreenSize).
     void ModeSize(DWORD& width, DWORD& height) const
     {
         if (m_fullscreen && m_modeWidth != 0) {

@@ -13,10 +13,11 @@ namespace {
         int textureWidth = 0;
         int textureHeight = 0;
         SIZE screen = { 1024, 768 };
+        SIZE desktop = { 0, 0 };
+        SIZE mode = { 0, 0 };
         bool fullscreen = false;
         bool dirty = false;
         int frames = 0;
-        uint64_t lastFrameHash = 0;
         const std::vector<uint32_t>* primary = nullptr;
         int primaryWidth = 0;
         int primaryHeight = 0;
@@ -99,7 +100,27 @@ void SetScreenSize(int w, int h)
     S().screen.cy = h;
 }
 
-SIZE ScreenSize() { return S().screen; }
+SIZE ScreenSize()
+{
+    const State& s = S();
+    if (s.fullscreen && s.mode.cx > 0 && s.mode.cy > 0)
+        return s.mode;
+    return s.screen;
+}
+
+void SetDesktopSize(int w, int h)
+{
+    S().desktop.cx = w;
+    S().desktop.cy = h;
+}
+
+SIZE DesktopSize()
+{
+    const State& s = S();
+    if (s.desktop.cx > 0 && s.desktop.cy > 0)
+        return s.desktop;
+    return ScreenSize();
+}
 
 void SetFullscreen(bool fullscreen)
 {
@@ -109,16 +130,53 @@ void SetFullscreen(bool fullscreen)
         SDL_SetWindowFullscreen(s.window, fullscreen);
 }
 
+void SetDisplayMode(int w, int h)
+{
+    State& s = S();
+    if (w > 0 && h > 0) {
+        s.mode.cx = w;
+        s.mode.cy = h;
+        SetFullscreen(true);
+        return;
+    }
+    s.mode.cx = 0;
+    s.mode.cy = 0;
+    SetFullscreen(false);
+}
+
+void WindowToFrame(float x, float y, float* fx, float* fy)
+{
+    const State& s = S();
+    if (s.renderer && s.texture && SDL_RenderCoordinatesFromWindow(s.renderer, x, y, fx, fy))
+        return;
+    *fx = x;
+    *fy = y;
+}
+
+void FrameToWindow(float fx, float fy, float* x, float* y)
+{
+    const State& s = S();
+    if (s.renderer && s.texture && SDL_RenderCoordinatesToWindow(s.renderer, fx, fy, x, y))
+        return;
+    *x = fx;
+    *y = fy;
+}
+
+bool FrameSize(int* w, int* h)
+{
+    const State& s = S();
+    if (!s.renderer || !s.texture)
+        return false;
+    *w = s.textureWidth;
+    *h = s.textureHeight;
+    return true;
+}
+
 void Present(const uint32_t* xrgb, int width, int height, int pitchBytes)
 {
     State& s = S();
     s.dirty = false;
     s.frames++;
-
-    uint64_t hash = kFnvOffset;
-    for (int y = 0; y < height; y++)
-        hash = Fnv1a(hash, reinterpret_cast<const unsigned char*>(xrgb) + static_cast<size_t>(y) * pitchBytes, static_cast<size_t>(width) * 4);
-    s.lastFrameHash = hash;
 
     if (!s.window || width <= 0 || height <= 0)
         return;
@@ -126,8 +184,12 @@ void Present(const uint32_t* xrgb, int width, int height, int pitchBytes)
         return;
 
     SDL_UpdateTexture(s.texture, nullptr, xrgb, pitchBytes);
+    // Windowed, the client area is the virtual screen and the frame fills it
+    // (stretch only matters on high-DPI displays or a mismatched window);
+    // fullscreen, the mode is letterboxed onto the desktop. WindowToFrame
+    // maps the mouse through the same presentation.
     SDL_SetRenderLogicalPresentation(s.renderer, width, height,
-        s.fullscreen ? SDL_LOGICAL_PRESENTATION_LETTERBOX : SDL_LOGICAL_PRESENTATION_DISABLED);
+        s.fullscreen ? SDL_LOGICAL_PRESENTATION_LETTERBOX : SDL_LOGICAL_PRESENTATION_STRETCH);
     SDL_SetRenderDrawColor(s.renderer, 0, 0, 0, 255);
     SDL_RenderClear(s.renderer);
     SDL_RenderTexture(s.renderer, s.texture, nullptr, nullptr);

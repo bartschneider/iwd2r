@@ -92,6 +92,14 @@ struct TestWindow {
 
 bool NextMessage(MSG& m) { return PeekMessageA(&m, NULL, 0, 0, PM_REMOVE) != FALSE; }
 
+// Lets SDL process pending events (a warp's synthetic motion) and drops the
+// messages they become.
+void PumpAll()
+{
+    SDL_PumpEvents();
+    Drain();
+}
+
 }
 
 TEST_CASE("window class registration creates a window with the requested client size", "[window]")
@@ -278,12 +286,19 @@ TEST_CASE("window ShowCursor keeps the Win32 display count", "[window]")
 
 TEST_CASE("window geometry follows Win32", "[window]")
 {
+    const SIZE before = platform::present::ScreenSize();
+    platform::present::SetScreenSize(800, 600);
     TestWindow w;
-    CHECK(GetSystemMetrics(SM_CXSCREEN) == platform::present::ScreenSize().cx);
-    CHECK(GetSystemMetrics(SM_CYSCREEN) == platform::present::ScreenSize().cy);
-    // The dummy driver has no real desktop: the window size stands in.
-    CHECK(GetSystemMetrics(SM_CXSCREEN) == 320);
-    CHECK(GetSystemMetrics(SM_CYSCREEN) == 200);
+    // SM_CXSCREEN is the virtual screen (the game resolution), whatever the
+    // window's size; SM_CXFULLSCREEN is the desktop.
+    CHECK(GetSystemMetrics(SM_CXSCREEN) == 800);
+    CHECK(GetSystemMetrics(SM_CYSCREEN) == 600);
+    CHECK(GetSystemMetrics(SM_CXFULLSCREEN) == platform::present::DesktopSize().cx);
+    CHECK(GetSystemMetrics(SM_CYFULLSCREEN) == platform::present::DesktopSize().cy);
+    RECT cr;
+    REQUIRE(GetClientRect(w.hwnd, &cr));
+    CHECK(cr.right == 320);
+    CHECK(cr.bottom == 200);
 
     REQUIRE(SetWindowPos(w.hwnd, HWND_TOP, 10, 20, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE));
     RECT wr;
@@ -293,18 +308,50 @@ TEST_CASE("window geometry follows Win32", "[window]")
     CHECK(wr.right == 330);
     CHECK(wr.bottom == 220);
 
+    // The client area is the engine's screen: no offset, wherever the
+    // window is.
     POINT p = { 5, 6 };
     REQUIRE(ClientToScreen(w.hwnd, &p));
-    CHECK(p.x == 15);
-    CHECK(p.y == 26);
+    CHECK(p.x == 5);
+    CHECK(p.y == 6);
     REQUIRE(ScreenToClient(w.hwnd, &p));
     CHECK(p.x == 5);
     CHECK(p.y == 6);
+    CHECK_FALSE(ClientToScreen(NULL, &p));
 
     CHECK(GetUpdateRect(w.hwnd, NULL, FALSE) == FALSE);
     PAINTSTRUCT ps;
     BeginPaint(w.hwnd, &ps);
     CHECK(EndPaint(w.hwnd, &ps));
+    platform::present::SetScreenSize(before.cx, before.cy);
+}
+
+TEST_CASE("window places the popup on the desktop", "[window]")
+{
+    TestWindow w;
+    // Created at the origin: centred on the desktop.
+    const SIZE desktop = platform::present::DesktopSize();
+    RECT wr;
+    REQUIRE(GetWindowRect(w.hwnd, &wr));
+    CHECK(wr.left == (desktop.cx - 320) / 2);
+    CHECK(wr.top == (desktop.cy - 200) / 2);
+}
+
+TEST_CASE("window cursor position is window-relative and clamped to the client area", "[window]")
+{
+    TestWindow w;
+    REQUIRE(SetCursorPos(10, 20));
+    PumpAll();
+    POINT p = { -1, -1 };
+    REQUIRE(GetCursorPos(&p));
+    CHECK(p.x == 10);
+    CHECK(p.y == 20);
+
+    SDL_WarpMouseInWindow(w.Sdl(), 500.0f, -40.0f);
+    PumpAll();
+    REQUIRE(GetCursorPos(&p));
+    CHECK(p.x == 319);
+    CHECK(p.y == 0);
 }
 
 TEST_CASE("window pump translates SDL window events", "[window]")
@@ -425,12 +472,15 @@ TEST_CASE("window pump coalesces display events and ignores AltGr", "[window]")
     MSG m = {};
     REQUIRE(NextMessage(m));
     CHECK(m.message == WM_DISPLAYCHANGE);
-    CHECK(m.lParam == MAKELONG(320, 200));
+    const SIZE desktop = platform::present::DesktopSize();
+    CHECK(m.lParam == MAKELONG(desktop.cx, desktop.cy));
     CHECK_FALSE(NextMessage(m));
 }
 
 TEST_CASE("window Win32 stubs report fixed values", "[window]")
 {
+    // An earlier test may leave an error set.
+    SetLastError(0);
     OSVERSIONINFOA info = {};
     info.dwOSVersionInfoSize = sizeof(info);
     REQUIRE(GetVersionExA(&info));
@@ -533,15 +583,15 @@ TEST_CASE("window GlobalAlloc blocks round-trip and the clipboard is closed", "[
     SetLastError(0);
 }
 
-TEST_CASE("window work area is the whole screen", "[window]")
+TEST_CASE("window work area is the whole desktop", "[window]")
 {
     TestWindow w;
     RECT work = { -1, -1, -1, -1 };
     REQUIRE(SystemParametersInfoA(SPI_GETWORKAREA, 0, &work, 0) == TRUE);
     CHECK(work.left == 0);
     CHECK(work.top == 0);
-    CHECK(work.right == 320);
-    CHECK(work.bottom == 200);
+    CHECK(work.right == platform::present::DesktopSize().cx);
+    CHECK(work.bottom == platform::present::DesktopSize().cy);
     CHECK(SystemParametersInfoA(SPI_GETWORKAREA, 0, NULL, 0) == FALSE);
 }
 
@@ -552,20 +602,21 @@ TEST_CASE("window CWnd converts points and rectangles", "[window]")
     CWnd wnd;
     wnd.Attach(w.hwnd);
 
+    // Client and screen coordinates coincide (ruling R27).
     POINT p = { 5, 6 };
     wnd.ClientToScreen(&p);
-    CHECK(p.x == 15);
-    CHECK(p.y == 26);
+    CHECK(p.x == 5);
+    CHECK(p.y == 6);
     wnd.ScreenToClient(&p);
     CHECK(p.x == 5);
     CHECK(p.y == 6);
 
     RECT r = { 1, 2, 3, 4 };
     wnd.ClientToScreen(&r);
-    CHECK(r.left == 11);
-    CHECK(r.top == 22);
-    CHECK(r.right == 13);
-    CHECK(r.bottom == 24);
+    CHECK(r.left == 1);
+    CHECK(r.top == 2);
+    CHECK(r.right == 3);
+    CHECK(r.bottom == 4);
     wnd.ScreenToClient(&r);
     CHECK(r.left == 1);
     CHECK(r.top == 2);
