@@ -14,6 +14,8 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <array>
+#include <atomic>
 #include <cctype>
 #include <cmath>
 #include <cstdio>
@@ -63,6 +65,53 @@ State& S()
 }
 
 char g_arrowCursor;
+
+// Win32's "pressed since the last GetAsyncKeyState call" bit, per virtual
+// key: set by the pump on key and mouse-button presses (main thread),
+// cleared by GetAsyncKeyState when it reports it (the engine's input
+// thread). A tap released before the next poll is still seen once.
+std::array<std::atomic<bool>, 256> g_pressedSincePoll;
+
+void MarkPressed(int vk)
+{
+    if (vk > 0 && vk < static_cast<int>(g_pressedSincePoll.size()))
+        g_pressedSincePoll[static_cast<size_t>(vk)].store(true);
+}
+
+bool TakePressed(int vk)
+{
+    if (vk <= 0 || vk >= static_cast<int>(g_pressedSincePoll.size()))
+        return false;
+    return g_pressedSincePoll[static_cast<size_t>(vk)].exchange(false);
+}
+
+// Marks the generic key and, for modifiers, the sided one too.
+void MarkKeyPressed(SDL_Scancode sc)
+{
+    MarkPressed(platform::window::VKForScancode(sc));
+    switch (sc) {
+    case SDL_SCANCODE_LSHIFT:
+        MarkPressed(VK_LSHIFT);
+        break;
+    case SDL_SCANCODE_RSHIFT:
+        MarkPressed(VK_RSHIFT);
+        break;
+    case SDL_SCANCODE_LCTRL:
+        MarkPressed(VK_LCONTROL);
+        break;
+    case SDL_SCANCODE_RCTRL:
+        MarkPressed(VK_RCONTROL);
+        break;
+    case SDL_SCANCODE_LALT:
+        MarkPressed(VK_LMENU);
+        break;
+    case SDL_SCANCODE_RALT:
+        MarkPressed(VK_RMENU);
+        break;
+    default:
+        break;
+    }
+}
 
 HWND ToHwnd(WindowRecord* record) { return reinterpret_cast<HWND>(record); }
 
@@ -234,7 +283,19 @@ void Translate(const SDL_Event& e, bool& displayChanged)
         EnqueueMessage(WM_MOUSEWHEEL, static_cast<WPARAM>(static_cast<DWORD>(static_cast<WORD>(delta)) << 16), MAKELONG(px, py));
         return;
     }
+    if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
+        if (e.button.button == SDL_BUTTON_LEFT)
+            MarkPressed(VK_LBUTTON);
+        else if (e.button.button == SDL_BUTTON_RIGHT)
+            MarkPressed(VK_RBUTTON);
+        else if (e.button.button == SDL_BUTTON_MIDDLE)
+            MarkPressed(VK_MBUTTON);
+        return;
+    }
     if (e.type == SDL_EVENT_KEY_DOWN) {
+        // Auto-repeat is not a new press: the engine times its own repeat.
+        if (!e.key.repeat)
+            MarkKeyPressed(e.key.scancode);
         // Left Alt only: AltGr arrives as right Alt (plus Ctrl) and types text.
         if (!rec || e.key.windowID != id || (e.key.mod & SDL_KMOD_LALT) == 0)
             return;
@@ -765,8 +826,12 @@ SHORT GetAsyncKeyState(int vk)
         mask = SDL_BUTTON_RMASK;
     else if (vk == VK_MBUTTON)
         mask = SDL_BUTTON_MMASK;
+    // Bit 0: pressed since the last call for this key, as Win32 reports it.
+    // The engine treats a state with it as a new press and 0x8000 alone as
+    // a held key.
+    const SHORT since = TakePressed(vk) ? SHORT(1) : SHORT(0);
     if (mask != 0)
-        return (SDL_GetMouseState(nullptr, nullptr) & mask) ? down : 0;
+        return static_cast<SHORT>(((SDL_GetMouseState(nullptr, nullptr) & mask) ? down : 0) | since);
 
     int count = 0;
     const bool* keys = SDL_GetKeyboardState(&count);
@@ -789,7 +854,7 @@ SHORT GetAsyncKeyState(int vk)
         isDown = pressed(platform::window::ScancodeForVK(vk));
         break;
     }
-    return isDown ? down : 0;
+    return static_cast<SHORT>((isDown ? down : 0) | since);
 }
 
 HKL GetKeyboardLayout(DWORD) { return reinterpret_cast<HKL>(static_cast<uintptr_t>(0x04090409)); }

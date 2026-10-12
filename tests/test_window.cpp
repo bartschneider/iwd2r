@@ -272,6 +272,59 @@ TEST_CASE("window GetAsyncKeyState is zero with no key down", "[window]")
     CHECK(GetAsyncKeyState(VK_LBUTTON) == 0);
 }
 
+TEST_CASE("window GetAsyncKeyState reports a tap between polls once", "[window][keys]")
+{
+    TestWindow w;
+    GetAsyncKeyState(VK_F5);
+    GetAsyncKeyState(VK_LBUTTON);
+    GetAsyncKeyState(VK_SHIFT);
+    GetAsyncKeyState(VK_RSHIFT);
+
+    // Press and release before the engine polls. Pushed events leave SDL's
+    // keyboard and mouse state alone, so only the low bit can report them.
+    SDL_Event key = {};
+    key.type = SDL_EVENT_KEY_DOWN;
+    key.key.windowID = SDL_GetWindowID(w.Sdl());
+    key.key.scancode = SDL_SCANCODE_F5;
+    key.key.down = true;
+    REQUIRE(SDL_PushEvent(&key));
+    key.type = SDL_EVENT_KEY_UP;
+    key.key.down = false;
+    REQUIRE(SDL_PushEvent(&key));
+    platform::window::PumpEvents();
+    CHECK(GetAsyncKeyState(VK_F5) == 1);
+    CHECK(GetAsyncKeyState(VK_F5) == 0);
+
+    // Auto-repeat is not a new press.
+    key.type = SDL_EVENT_KEY_DOWN;
+    key.key.down = true;
+    key.key.repeat = true;
+    REQUIRE(SDL_PushEvent(&key));
+    platform::window::PumpEvents();
+    CHECK(GetAsyncKeyState(VK_F5) == 0);
+
+    // A modifier marks the generic and the sided key.
+    key.key.repeat = false;
+    key.key.scancode = SDL_SCANCODE_RSHIFT;
+    REQUIRE(SDL_PushEvent(&key));
+    platform::window::PumpEvents();
+    CHECK(GetAsyncKeyState(VK_SHIFT) == 1);
+    CHECK(GetAsyncKeyState(VK_RSHIFT) == 1);
+    CHECK(GetAsyncKeyState(VK_SHIFT) == 0);
+
+    SDL_Event button = {};
+    button.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+    button.button.windowID = SDL_GetWindowID(w.Sdl());
+    button.button.button = SDL_BUTTON_LEFT;
+    button.button.down = true;
+    REQUIRE(SDL_PushEvent(&button));
+    platform::window::PumpEvents();
+    CHECK(GetAsyncKeyState(VK_LBUTTON) == 1);
+    CHECK(GetAsyncKeyState(VK_LBUTTON) == 0);
+    CHECK(GetAsyncKeyState(VK_RBUTTON) == 0);
+    Drain();
+}
+
 TEST_CASE("window ShowCursor keeps the Win32 display count", "[window]")
 {
     TestWindow w;
