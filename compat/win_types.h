@@ -279,6 +279,11 @@ inline int _access(const char* path, int mode) { return access(compat::ResolvePa
 inline int _mkdir(const char* path) { return mkdir(compat::ResolvePath(path).c_str(), 0777); }
 // The MSVC CRT's current offset of a file descriptor.
 inline long tell(int fd) { return static_cast<long>(lseek(fd, 0, SEEK_CUR)); }
+#else
+// <windef.h> spellings; no Windows SDK header is included.
+#define CALLBACK __stdcall
+#define WINAPI __stdcall
+#define APIENTRY WINAPI
 #endif
 
 struct POINT {

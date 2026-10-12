@@ -9,6 +9,11 @@ set(CMAKE_CXX_EXTENSIONS NO)
 
 if(NOT MSVC)
     add_compile_options(-fsigned-char)
+else()
+    # The engine and the shims call the classic CRT names (fopen, strncpy,
+    # chdir...); compile each project's files in parallel.
+    add_compile_definitions(_CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_WARNINGS)
+    add_compile_options(/MP)
 endif()
 
 function(iwd2r_strict_warnings target)

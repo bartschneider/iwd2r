@@ -2,9 +2,7 @@
 #define NOMINMAX
 #include "platform/dsound_shim.h"
 
-// The one translation unit that compiles miniaudio's implementation. It is
-// warning-clean under -Wall -Wextra on GCC 13 and Clang 18.
-#define MINIAUDIO_IMPLEMENTATION
+// miniaudio's implementation is compiled in miniaudio_impl.cpp.
 #include <miniaudio.h>
 
 #include <algorithm>

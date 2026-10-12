@@ -8,6 +8,15 @@
 
 #include <cstdint>
 
+#ifdef _MSC_VER
+// MSVC's <mutex> includes <thread>, which includes <process.h>: the CRT's
+// _beginthread (C linkage) is declared in every unit that uses the standard
+// threading headers. The shim's own, whose thread handles the other shim
+// functions understand, takes another name there.
+#include <process.h>
+#define _beginthread iwd2r_beginthread
+#endif
+
 // ---- threads.cpp: threads, events, semaphores, mutexes, critical sections ----
 
 struct CRITICAL_SECTION {
@@ -127,7 +136,9 @@ BOOL GetVolumeInformationA(LPCSTR root, LPSTR volumeName, DWORD volumeNameSize, 
 typedef LRESULT(CALLBACK* WNDPROC)(HWND, UINT, WPARAM, LPARAM);
 typedef WORD ATOM;
 
-struct MSG {
+// Tagged as in <winuser.h>: SDL's Windows headers forward-declare
+// `typedef struct tagMSG MSG`.
+struct tagMSG {
     HWND hwnd;
     UINT message;
     WPARAM wParam;
@@ -135,6 +146,7 @@ struct MSG {
     DWORD time;
     POINT pt;
 };
+typedef tagMSG MSG;
 typedef MSG* LPMSG;
 
 struct WNDCLASSEXA {

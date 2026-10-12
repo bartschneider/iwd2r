@@ -28,6 +28,23 @@ bool EndsWith(const std::string& s, const std::string& suffix)
     return s.size() >= suffix.size() && s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
 }
 
+// Resolved paths keep the on-disk case on case-sensitive filesystems. On
+// Windows the filesystem is case-insensitive and the resolver keeps the
+// spelling it was given, so only the letters are compared there.
+std::string CaseKey(std::string s)
+{
+#ifdef _WIN32
+    for (char& c : s)
+        if (c >= 'A' && c <= 'Z')
+            c = static_cast<char>(c - 'A' + 'a');
+#endif
+    return s;
+}
+
+bool SamePath(const std::string& actual, const std::string& expected) { return CaseKey(actual) == CaseKey(expected); }
+
+bool EndsWithPath(const std::string& s, const std::string& suffix) { return EndsWith(CaseKey(s), CaseKey(suffix)); }
+
 // The engine runs with the data root as its working directory; relative paths rely on it.
 struct CwdGuard {
     stdfs::path saved = stdfs::current_path();
@@ -78,15 +95,15 @@ TEST_CASE("fs resolve prefers exact case then the only case-insensitive match", 
     platform::fs::SetDataRoot(tree.str());
     platform::fs::InvalidateCache();
     if (tree.caseSensitive)
-        CHECK(EndsWith(platform::fs::Resolve("override/sw1h01.itm"), "Override/sw1h01.itm"));
-    CHECK(EndsWith(platform::fs::Resolve("override/SW1H01.itm"), "Override/SW1H01.ITM"));
+        CHECK(EndsWithPath(platform::fs::Resolve("override/sw1h01.itm"), "Override/sw1h01.itm"));
+    CHECK(EndsWithPath(platform::fs::Resolve("override/SW1H01.itm"), "Override/SW1H01.ITM"));
 
     TempTree other;
     Touch(other.root / "Override" / "SW1H01.ITM");
     platform::fs::SetDataRoot(other.str());
     platform::fs::InvalidateCache();
-    CHECK(EndsWith(platform::fs::Resolve("override/sw1h01.itm"), "Override/SW1H01.ITM"));
-    CHECK(EndsWith(platform::fs::Resolve("OVERRIDE\\sw1h01.itm"), "Override/SW1H01.ITM"));
+    CHECK(EndsWithPath(platform::fs::Resolve("override/sw1h01.itm"), "Override/SW1H01.ITM"));
+    CHECK(EndsWithPath(platform::fs::Resolve("OVERRIDE\\sw1h01.itm"), "Override/SW1H01.ITM"));
 }
 
 TEST_CASE("fs resolve picks the smallest case-insensitive match when no exact one exists", "[fs]")
@@ -98,7 +115,7 @@ TEST_CASE("fs resolve picks the smallest case-insensitive match when no exact on
     Touch(tree.root / "d" / "b.Txt");
     platform::fs::SetDataRoot(tree.str());
     platform::fs::InvalidateCache();
-    CHECK(EndsWith(platform::fs::Resolve("d/b.txt"), "d/B.TXT"));
+    CHECK(EndsWithPath(platform::fs::Resolve("d/b.txt"), "d/B.TXT"));
 }
 
 TEST_CASE("fs resolve re-roots drive letter paths", "[fs]")
@@ -109,13 +126,18 @@ TEST_CASE("fs resolve re-roots drive letter paths", "[fs]")
     platform::fs::InvalidateCache();
 
     platform::fs::SetInstallPrefix("C:\\Games\\IWD2\\");
-    CHECK(EndsWith(platform::fs::Resolve("C:\\Games\\IWD2\\Data\\a.bif"), "Data/a.bif"));
-    CHECK(platform::fs::Resolve("c:\\games\\iwd2\\data\\A.BIF") == tree.str() + "/Data/a.bif");
+    CHECK(EndsWithPath(platform::fs::Resolve("C:\\Games\\IWD2\\Data\\a.bif"), "Data/a.bif"));
+    CHECK(SamePath(platform::fs::Resolve("c:\\games\\iwd2\\data\\A.BIF"), tree.str() + "/Data/a.bif"));
+#ifdef _WIN32
+    // Outside the install prefix a drive letter is a native path.
+    CHECK(platform::fs::Resolve("D:\\Backup\\save.gam") == "D:/Backup/save.gam");
+#else
     CHECK(platform::fs::Resolve("D:\\Backup\\save.gam") == tree.str() + "/Backup/save.gam");
     CHECK(platform::fs::Resolve("D:save.gam") == tree.str() + "/save.gam");
 
     platform::fs::SetInstallPrefix("");
     CHECK(platform::fs::Resolve("C:\\Games\\IWD2\\Data\\a.bif") == tree.str() + "/Games/IWD2/Data/a.bif");
+#endif
 }
 
 TEST_CASE("fs resolve keeps missing components, relative and absolute paths", "[fs]")
@@ -124,13 +146,13 @@ TEST_CASE("fs resolve keeps missing components, relative and absolute paths", "[
     Touch(tree.root / "Data" / "a.bif");
     platform::fs::SetDataRoot(tree.str());
     platform::fs::InvalidateCache();
-    CHECK(platform::fs::Resolve("missing/dir/x.y") == "missing/dir/x.y");
-    CHECK(platform::fs::Resolve("data/Missing/x.y") == "Data/Missing/x.y");
-    CHECK(platform::fs::Resolve((tree.str() + "/data/A.bif").c_str()) == tree.str() + "/Data/a.bif");
+    CHECK(SamePath(platform::fs::Resolve("missing/dir/x.y"), "missing/dir/x.y"));
+    CHECK(SamePath(platform::fs::Resolve("data/Missing/x.y"), "Data/Missing/x.y"));
+    CHECK(SamePath(platform::fs::Resolve((tree.str() + "/data/A.bif").c_str()), tree.str() + "/Data/a.bif"));
 
     platform::fs::SetDataRoot("");
-    CHECK(platform::fs::Resolve("Some\\Path\\File.ITM") == "Some/Path/File.ITM");
-    CHECK(platform::fs::Resolve("C:\\Some\\File") == "C:/Some/File");
+    CHECK(SamePath(platform::fs::Resolve("Some\\Path\\File.ITM"), "Some/Path/File.ITM"));
+    CHECK(SamePath(platform::fs::Resolve("C:\\Some\\File"), "C:/Some/File"));
 }
 
 TEST_CASE("fs wildcard match", "[fs]")
@@ -233,11 +255,11 @@ TEST_CASE("fs cache sees entries created through the shim", "[fs]")
     Touch(tree.root / "Data" / "a.bif");
     platform::fs::SetDataRoot(tree.str());
     platform::fs::InvalidateCache();
-    CHECK(platform::fs::Resolve("data/NEW.BIF") == "Data/NEW.BIF");
+    CHECK(SamePath(platform::fs::Resolve("data/NEW.BIF"), "Data/NEW.BIF"));
     const std::string src = tree.str() + "/Data/a.bif";
     const std::string dst = tree.str() + "/Data/New.Bif";
     REQUIRE(CopyFileA(src.c_str(), dst.c_str(), TRUE) == TRUE);
-    CHECK(platform::fs::Resolve("data/NEW.BIF") == "Data/New.Bif");
+    CHECK(SamePath(platform::fs::Resolve("data/NEW.BIF"), "Data/New.Bif"));
 }
 
 TEST_CASE("fs disk space and current directory", "[fs]")
@@ -284,7 +306,7 @@ TEST_CASE("fs installed resolver is used by the compat hook", "[fs]")
     platform::fs::SetDataRoot(tree.str());
     platform::fs::InvalidateCache();
     platform::fs::InstallResolver();
-    CHECK(compat::ResolvePath("override\\x.itm") == "Override/X.ITM");
+    CHECK(SamePath(compat::ResolvePath("override\\x.itm"), "Override/X.ITM"));
     compat::SetPathResolver(nullptr);
 }
 
@@ -294,16 +316,16 @@ TEST_CASE("fs cache is invalidated for relative paths", "[fs]")
     Touch(tree.root / "Data" / "a.bif");
     platform::fs::SetDataRoot(tree.str());
     CwdGuard cwd(tree.root);
-    CHECK(platform::fs::Resolve("data/NEW.BIF") == "Data/NEW.BIF");
+    CHECK(SamePath(platform::fs::Resolve("data/NEW.BIF"), "Data/NEW.BIF"));
     REQUIRE(CopyFileA("Data/a.bif", "Data/New.Bif", TRUE) == TRUE);
-    CHECK(platform::fs::Resolve("data/NEW.BIF") == "Data/New.Bif");
+    CHECK(SamePath(platform::fs::Resolve("data/NEW.BIF"), "Data/New.Bif"));
 
-    CHECK(platform::fs::Resolve("top.txt") == "top.txt");
+    CHECK(SamePath(platform::fs::Resolve("top.txt"), "top.txt"));
     Touch(tree.root / "Top.txt");
     platform::fs::InvalidateCache();
-    CHECK(platform::fs::Resolve("TOP.TXT") == "Top.txt");
+    CHECK(SamePath(platform::fs::Resolve("TOP.TXT"), "Top.txt"));
     REQUIRE(DeleteFileA("Top.txt") == TRUE);
-    CHECK(platform::fs::Resolve("top.txt") == "top.txt");
+    CHECK(SamePath(platform::fs::Resolve("top.txt"), "top.txt"));
 }
 
 TEST_CASE("fs rescans after a miss for files created outside the shim", "[fs]")
@@ -311,9 +333,9 @@ TEST_CASE("fs rescans after a miss for files created outside the shim", "[fs]")
     TempTree tree;
     Touch(tree.root / "Save" / "other.gam");
     platform::fs::SetDataRoot(tree.str());
-    CHECK(platform::fs::Resolve("save/SAVE.GAM") == "Save/SAVE.GAM");
+    CHECK(SamePath(platform::fs::Resolve("save/SAVE.GAM"), "Save/SAVE.GAM"));
     Touch(tree.root / "Save" / "Save.gam");
-    CHECK(platform::fs::Resolve("save/SAVE.GAM") == "Save/Save.gam");
+    CHECK(SamePath(platform::fs::Resolve("save/SAVE.GAM"), "Save/Save.gam"));
 }
 
 TEST_CASE("fs DeleteFileA reports a missing file", "[fs]")
@@ -419,3 +441,22 @@ TEST_CASE("fs CFileFind walks a directory like MFC", "[fs]")
     CHECK(dirs == std::set<std::string> { dir + "\\Sub" });
     CHECK(find.FindFile((tree.str() + "/none/*.*").c_str()) == FALSE);
 }
+
+#ifdef _WIN32
+TEST_CASE("fs skips names outside the ANSI code page", "[fs]")
+{
+    TempTree tree;
+    Touch(tree.root / "a.txt");
+    // U+F05C is how WSL stores a backslash in a file name on NTFS.
+    std::ofstream(tree.root / stdfs::path(L"\uF05C.txt")) << "x";
+    WIN32_FIND_DATAA data {};
+    HANDLE h = FindFirstFileA((tree.str() + "/*.txt").c_str(), &data);
+    REQUIRE(h != INVALID_HANDLE_VALUE);
+    CHECK(std::string(data.cFileName) == "a.txt");
+    CHECK(FindNextFileA(h, &data) == FALSE);
+    FindClose(h);
+    platform::fs::SetDataRoot(tree.str());
+    platform::fs::InvalidateCache();
+    CHECK(SamePath(platform::fs::Resolve("A.TXT"), "a.txt"));
+}
+#endif

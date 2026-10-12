@@ -52,8 +52,13 @@ namespace {
                 return false;
             stdfs::directory_iterator it(p, ec), end;
             for (; !ec && it != end; it.increment(ec)) {
-                if (IsChitinKey(it->path().filename().string()))
-                    return true;
+                // A name outside the ANSI code page (Windows) cannot be
+                // converted; it is not CHITIN.KEY either.
+                try {
+                    if (IsChitinKey(it->path().filename().string()))
+                        return true;
+                } catch (const std::system_error&) {
+                }
             }
         } catch (const std::exception&) {
         }

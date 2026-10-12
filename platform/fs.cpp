@@ -13,6 +13,7 @@
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <system_error>
 #include <unordered_map>
 #include <vector>
 
@@ -65,6 +66,19 @@ namespace {
         return c >= 'a' && c <= 'z';
     }
 
+    // The entry's name in the narrow encoding. On Windows a name with characters
+    // outside the ANSI code page cannot be converted (the standard library
+    // throws); such an entry is skipped, as the engine could not name it.
+    bool NarrowName(const stdfs::path& p, std::string& name)
+    {
+        try {
+            name = p.filename().generic_string();
+            return true;
+        } catch (const std::system_error&) {
+            return false;
+        }
+    }
+
     std::string Join(const std::string& dir, const std::string& name)
     {
         if (dir.empty())
@@ -90,8 +104,11 @@ namespace {
         if (ec)
             return false;
         std::vector<std::string> names;
-        for (const stdfs::directory_iterator end; iter != end; iter.increment(ec))
-            names.push_back(iter->path().filename().generic_string());
+        for (const stdfs::directory_iterator end; iter != end; iter.increment(ec)) {
+            std::string name;
+            if (NarrowName(iter->path(), name))
+                names.push_back(std::move(name));
+        }
         if (ec)
             return false;
         entries = &(g_dirCache[dir] = std::move(names));
@@ -101,13 +118,15 @@ namespace {
     // Caller holds g_mutex.
     std::string FoldCase(const std::string& path)
     {
-        const bool absolute = !path.empty() && path[0] == '/';
+        // A native absolute path: "/..." or, on Windows, "X:/...".
+        const size_t rootLength = (!path.empty() && path[0] == '/') ? 1 : (HasDrive(path) && path.size() > 2 && path[2] == '/') ? 3 : 0;
+        const bool absolute = rootLength > 0;
         // Relative paths are looked up under the data root (the engine's working directory).
         const std::string base = absolute ? std::string() : g_dataRoot;
-        std::string result = absolute ? "/" : "";
-        std::string real = absolute ? "/" : base; // the on-disk path matching `result`
+        std::string result = path.substr(0, rootLength);
+        std::string real = absolute ? result : base; // the on-disk path matching `result`
 
-        size_t pos = 0;
+        size_t pos = rootLength;
         while (pos <= path.size()) {
             size_t next = path.find('/', pos);
             if (next == std::string::npos)
@@ -174,6 +193,11 @@ namespace {
                     matched = true;
                 }
             }
+#ifdef _WIN32
+            // A drive letter outside the install prefix is a native path here.
+            if (!matched)
+                return FoldCase(p);
+#endif
             if (!matched) {
                 size_t start = 2;
                 while (start < p.size() && p[start] == '/')
@@ -229,7 +253,9 @@ namespace {
             data.ftCreationTime = data.ftLastWriteTime;
             data.ftLastAccessTime = data.ftLastWriteTime;
         }
-        const std::string name = p.filename().generic_string();
+        std::string name;
+        if (!NarrowName(p, name))
+            return false;
         std::strncpy(data.cFileName, name.c_str(), MAX_PATH - 1);
         data.cFileName[MAX_PATH - 1] = '\0';
         return true;
@@ -367,7 +393,9 @@ HANDLE FindFirstFileA(LPCSTR pattern, WIN32_FIND_DATAA* data)
     for (const stdfs::directory_iterator end; iter != end; iter.increment(ec)) {
         if (ec)
             break;
-        const std::string name = iter->path().filename().generic_string();
+        std::string name;
+        if (!platform::fs::NarrowName(iter->path(), name))
+            continue;
         if (name == "." || name == ".." || !platform::fs::WildcardMatch(wildcard.c_str(), name.c_str()))
             continue;
         WIN32_FIND_DATAA entry;
@@ -438,7 +466,14 @@ BOOL SetFileAttributesA(LPCSTR path, DWORD attributes)
         return FALSE;
     }
     const stdfs::perm_options option = (attributes & FILE_ATTRIBUTE_READONLY) ? stdfs::perm_options::remove : stdfs::perm_options::add;
-    stdfs::permissions(p, stdfs::perms::owner_write, option, ec);
+#ifdef _WIN32
+    // MSVC maps the permission bits to the read-only attribute only when no
+    // write bit at all remains.
+    const stdfs::perms writeBits = stdfs::perms::owner_write | stdfs::perms::group_write | stdfs::perms::others_write;
+#else
+    const stdfs::perms writeBits = stdfs::perms::owner_write;
+#endif
+    stdfs::permissions(p, writeBits, option, ec);
     return ec ? FALSE : TRUE;
 }
 

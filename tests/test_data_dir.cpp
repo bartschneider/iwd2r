@@ -189,7 +189,12 @@ TEST_CASE("data_dir ResolveDataDirFrom success configures the engine", "[data_di
     bool ok = platform::ResolveDataDirFrom("", "");
     REQUIRE(ok);
     CHECK(std::string(platform::DataDirSource()) == "env");
-    CHECK(platform::fs::DataRoot() == data.string());
+    CHECK(platform::fs::DataRoot() == data.generic_string());
     CHECK(stdfs::equivalent(stdfs::current_path(), data));
+#ifdef _WIN32
+    // Case-insensitive: the resolver keeps the spelling it was given.
+    CHECK(compat::ResolvePath("CHITIN.KEY") == "CHITIN.KEY");
+#else
     CHECK(compat::ResolvePath("CHITIN.KEY") == "chitin.key");
+#endif
 }
