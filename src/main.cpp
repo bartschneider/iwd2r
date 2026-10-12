@@ -14,6 +14,12 @@
 
 int iwd2r_main(int argc, char** argv)
 {
+    platform::window::InstallFatalMessageBox();
+    // First: everything below reads icewind2.ini and game folders relative to the working directory.
+    if (!platform::ResolveDataDir()) {
+        return 2;
+    }
+
     std::cout << std::endl;
     std::cout << "BEGIN LOGGING SESSION";
     std::cout << std::endl;
@@ -34,11 +40,6 @@ int iwd2r_main(int argc, char** argv)
     CBaldurChitin baldurChitin;
     if (baldurChitin.field_1932 != 0) {
         return 0;
-    }
-
-    platform::window::InstallFatalMessageBox();
-    if (!platform::ResolveDataDir()) {
-        return 2;
     }
 
     baldurChitin.Init(NULL);
