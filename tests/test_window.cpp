@@ -278,7 +278,9 @@ TEST_CASE("window geometry follows Win32", "[window]")
     TestWindow w;
     CHECK(GetSystemMetrics(SM_CXSCREEN) == platform::present::ScreenSize().cx);
     CHECK(GetSystemMetrics(SM_CYSCREEN) == platform::present::ScreenSize().cy);
-    CHECK(GetSystemMetrics(SM_CXSCREEN) > 0);
+    // The dummy driver has no real desktop: the window size stands in.
+    CHECK(GetSystemMetrics(SM_CXSCREEN) == 320);
+    CHECK(GetSystemMetrics(SM_CYSCREEN) == 200);
 
     REQUIRE(SetWindowPos(w.hwnd, HWND_TOP, 10, 20, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE));
     RECT wr;
@@ -379,6 +381,49 @@ TEST_CASE("window pump translates SDL window events", "[window]")
     REQUIRE(SDL_PushEvent(&quit));
     REQUIRE(NextMessage(m));
     CHECK(m.message == WM_CLOSE);
+}
+
+TEST_CASE("window close request queues exactly one WM_CLOSE", "[window]")
+{
+    TestWindow w;
+    // A real close request on the last window would make SDL add
+    // SDL_EVENT_QUIT unless this hint is off.
+    REQUIRE(SDL_GetHint(SDL_HINT_QUIT_ON_LAST_WINDOW_CLOSE) != nullptr);
+    CHECK(std::string(SDL_GetHint(SDL_HINT_QUIT_ON_LAST_WINDOW_CLOSE)) == "0");
+
+    w.Push(SDL_EVENT_WINDOW_CLOSE_REQUESTED);
+    platform::window::PumpEvents();
+    int closes = 0;
+    MSG m = {};
+    while (NextMessage(m)) {
+        if (m.message == WM_CLOSE)
+            closes++;
+    }
+    CHECK(closes == 1);
+}
+
+TEST_CASE("window pump coalesces display events and ignores AltGr", "[window]")
+{
+    TestWindow w;
+    for (int i = 0; i < 3; i++) {
+        SDL_Event e = {};
+        e.type = i == 0 ? SDL_EVENT_DISPLAY_ORIENTATION : SDL_EVENT_DISPLAY_CURRENT_MODE_CHANGED;
+        e.display.displayID = SDL_GetPrimaryDisplay();
+        REQUIRE(SDL_PushEvent(&e));
+    }
+    SDL_Event key = {};
+    key.type = SDL_EVENT_KEY_DOWN;
+    key.key.windowID = SDL_GetWindowID(w.Sdl());
+    key.key.scancode = SDL_SCANCODE_Q;
+    key.key.mod = SDL_KMOD_RALT | SDL_KMOD_LCTRL;
+    key.key.down = true;
+    REQUIRE(SDL_PushEvent(&key));
+
+    MSG m = {};
+    REQUIRE(NextMessage(m));
+    CHECK(m.message == WM_DISPLAYCHANGE);
+    CHECK(m.lParam == MAKELONG(320, 200));
+    CHECK_FALSE(NextMessage(m));
 }
 
 TEST_CASE("window Win32 stubs report fixed values", "[window]")
