@@ -1,3 +1,4 @@
+// Modified for iwd2r; see NOTICE.md
 #include "CVideo.h"
 
 #include "CChitin.h"
@@ -95,6 +96,18 @@ CVideo::CVideo()
 
 // 0x7950A0
 CVideo::~CVideo()
+{
+    // iwd2r: the body is ReleaseResources, which CChitin::DestroyServices
+    // also calls.
+    ReleaseResources();
+}
+
+// iwd2r: the original destructor's body. CChitin::DestroyServices called the
+// destructor explicitly and ~CChitin ran it again; past the end of the
+// object's lifetime the optimizer drops the NULL stores below, so the
+// double-size buffer (allocated only at 1600x1200 and 2048x1536) was freed
+// twice.
+void CVideo::ReleaseResources()
 {
     for (int k = 0; k < 4; k++) {
         if (m_pVidModes[k] != NULL) {

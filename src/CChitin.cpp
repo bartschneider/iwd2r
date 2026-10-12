@@ -1245,7 +1245,11 @@ void CChitin::DestroyServices()
 
     // NOTE: Ugly, probably `CVideo` has additional `CleanUp`-like method
     // inlined into destructor.
-    cVideo.~CVideo();
+    //
+    // iwd2r: was `cVideo.~CVideo();`, which ~CChitin repeats: undefined
+    // behaviour that freed the double-size buffer twice on exit at 1600x1200
+    // and 2048x1536.
+    cVideo.ReleaseResources();
 
     for (USHORT nIndex = 0; nIndex < m_nThreads; nIndex++) {
         CloseHandle(m_hThreadHandles[nIndex]);

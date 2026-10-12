@@ -21,6 +21,7 @@ public:
 
     CVideo();
     ~CVideo();
+    void ReleaseResources();
 
     void SetDoubleSizeData(size_t size);
     void ResetDoubleSizeData();
