@@ -73,7 +73,7 @@ Project 1 is done when all of the following hold:
 
 | What | Size | Note |
 |---|---|---|
-| DirectPlay and lobby internals of `CNetwork` | most of 4,135 lines | The class survives as a loopback; see 7.7. |
+| DirectPlay side of `CNetwork` | roughly half of 4,135 lines | The class and its null-provider state machine survive; see 7.7. |
 | `CScreenMultiPlayer` | 3,637 lines | Deleted. The references in `CBaldurChitin` and `CScreenConnection` are removed. |
 | `third_party/directplay` | headers | Deleted. |
 | `register/reg32.exe` launch, the app mutex and the hardcoded GOG path in `main.cpp` | ~30 lines | Replaced by data resolution (7.6) and `SDL_main`. |
@@ -86,7 +86,7 @@ Project 1 is done when all of the following hold:
 - **`CMultiplayerSettings`** (1,052 lines) is owned by `CInfGame` and holds party permissions that single-player screens load. Kept.
 - **`CChatBuffer`** (81 lines) is used by the world, world-map and store screens and by `CMessage`. Kept.
 - **`CGameSpy`** (60 lines) is already a stub and is referenced from several headers. Kept as the stub it is.
-- **`CMessage`** (16,806 lines) is the engine's action queue even in single player and one of the most incomplete files. Kept whole; project 3 finishes it against the loopback.
+- **`CMessage`** (16,806 lines) is the engine's action queue even in single player and one of the most incomplete files. Kept whole; project 3 finishes it against the null-provider network.
 
 ### 4.3 Compiled but inert
 
@@ -104,7 +104,7 @@ Each item below keeps compiling, is forced off at runtime, and is listed in the 
 ```
 src/            decompiled engine, structure unchanged; includes compat/ only
 compat/         mfc.h, win_types.h, ini.h; MFC and Win32 subsets; no SDL dependency
-platform/       window, events, clock, threads, fs, ddraw_shim, dsound_shim, network_loopback;
+platform/       window, events, clock, threads, fs, ddraw_shim, dsound_shim;
                 the only code that includes SDL3 or miniaudio
 tools/          gen_map.py writes docs/MAP.md from the source tree
 tests/          Catch2 tests for compat/ and platform/, no game data needed
@@ -257,16 +257,19 @@ The null miniaudio backend is used in tests so they run without an audio device.
 
 At startup, in order: the `IWD2_DATA` environment variable; a link or directory named `IWD2` next to the executable, then at the repository root; the current directory if it contains `CHITIN.KEY`. The directory must contain `CHITIN.KEY`; the first candidate that does is used. If none does, a message box names the variable and the process exits with a non-zero code. The chosen directory becomes the working directory, which is what the original assumes.
 
-### 7.7 Loopback network
+### 7.7 Network without DirectPlay
 
-`CNetwork` keeps its name and the members that kept code uses (Appendix A.5). The DirectPlay interfaces, lobby, session enumeration, player threads and `CGameSpy` traffic are removed from it. Behavior:
+The decompiled `CNetwork` already contains the single-player path the original uses: a "null service provider" (`SERV_PROV_NULL`, value 0) under which `HostNewSession` sets the session open and hosting without DirectPlay, `CreatePlayer` assigns the local player id `slot + 1` and adds the local player to the player table without DirectPlay, `SendSpecificMessage` returns `TRUE` without sending anything, and `ThreadLoop` skips receiving. The engine never queues messages to itself in single player.
 
-- Exactly one player exists, the local player, who is the host. `GetPlayerID`, `GetHostPlayerID`, `GetPlayerName`, `GetHostPlayerName`, `FindPlayerLocationByID`, `FindPlayerIDByName` answer for that player.
-- `GetSessionOpen` and `GetSessionHosting` return what the original returns in a single-player game: open and hosting once the single-player flow starts a game, closed before. The exact transitions are driven by the same call sites that drive them today (`CScreenConnection` and `CScreenSinglePlayer`), unchanged.
-- `SendSpecificMessage` appends to the local inbound queue that `PeekSpecificMessage` and `FetchSpecificMessage` read, so `CMessage` traffic to the local player round-trips without a transport.
-- `GetServiceProvider` and `GetServiceProviderType` report "none". `KickPlayer`, `MakePlayersVisible`, `SetJoinEnabled`, `SetInSessionOptions` and `CloseSession` update state and succeed.
+`CNetwork` therefore keeps its name, its header, its state machine and every method that kept code calls (Appendix A.5). What is removed is the DirectPlay side: the `IDirectPlay4A` and `IDirectPlayLobby3A` members and the two window messages (0x405, 0x406) that create them, `DPSESSIONDESC2`, service-provider and session enumeration callbacks, modem and serial setup, the sliding-window send and receive, and `CGameSpy` traffic. Behavior after the cut:
 
-Project 2's oracle confirms these values against the vanilla exe in single-player runs; project 3 finishes `CMessage` against this loopback.
+- `EnumerateServiceProviders` succeeds with exactly one provider, the null provider, as the original lists it first.
+- `SelectServiceProvider(SERV_PROV_NULL)`, `InitializeConnectionToServiceProvider`, `HostNewSession` and `CreatePlayer` follow their existing null-provider branches unchanged.
+- Methods whose bodies are entirely DirectPlay (`EnumerateSessions`, `JoinSelectedSession`, `GetSessionGUID`, `UnselectSession`, `UnselectModemAddress`, `CreateDirectPlayInterface`, `CreateDirectPlayLobbyInterface`) return `FALSE` or do nothing.
+- `SendSpecificMessage` keeps its null-provider early return. `PeekSpecificMessage` and `FetchSpecificMessage` read the incoming queue, which stays empty in single player, exactly as in the original.
+- `GetSessionOpen`, `GetSessionHosting`, player queries, `CloseSession` and `OnCloseSession` are untouched.
+
+Project 2's oracle confirms these values against the vanilla exe in single-player runs; project 3 finishes `CMessage` against this code.
 
 ## 8. Build
 
@@ -285,7 +288,7 @@ Project 2's oracle confirms these values against the vanilla exe in single-playe
 **ADRs** in `docs/adr/`, each with Context, Decision, Alternatives, Consequences:
 
 - `0001-platform-layer.md`: shim the APIs over rewriting call sites or a dual MFC/shim build; SDL3 fetched and pinned; miniaudio for audio; 64-bit default with a 32-bit Windows preset for the oracle.
-- `0002-single-player-only.md`: multiplayer removed permanently; `CNetwork` kept as a loopback; `CMessage` kept as the action queue; recorded as a deviation.
+- `0002-single-player-only.md`: multiplayer removed permanently; `CNetwork` kept with its null service provider only; `CMessage` kept as the action queue; recorded as a deviation.
 
 **Generated map.** `tools/gen_map.py` (Python 3, standard library only) walks `src/`, `compat/` and `platform/` and writes `docs/MAP.md` with one row per subsystem family (`CAI*`, `CGame*`, `CScreen*`, `CUI*`, `CVid*` and `CInfinity`, `CRes*` and `CDimm*`, `CSound*` and `music/`, `CMessage` and `CNetwork`, and everything else), giving files, lines, remaining `TODO: Incomplete` markers, address-comment count, and which `platform/` headers the family includes. The CI map check regenerates and diffs.
 
@@ -302,7 +305,7 @@ Framework: Catch2 v3. All tests except the last run with no game data.
 | DirectDraw shim | Lock reports the requested pitch and format; color-keyed `BltFast` skips keyed pixels; blits clip at every edge; `Flip` swaps buffers and produces a presented frame on a hidden window. |
 | DirectSound shim | Decibel to gain at -10000, -600 and 0; pan at the extremes and center; `GetStatus` after `Play`, looping `Play` and `Stop`; `Lock` wraparound pointers. Null audio backend. |
 | Clock | A swapped source changes `GetTickCount`; the default source is monotonic. |
-| Loopback | `SendSpecificMessage` then `FetchSpecificMessage` returns the same bytes; player and host queries describe one local host. |
+| Network | After `SelectServiceProvider(0)`, `InitializeConnectionToServiceProvider(TRUE)`, `HostNewSession()` and `CreatePlayer()`: session open and hosting, local player id 1, `GetHostPlayerName` returns the local name, `SendSpecificMessage` returns `TRUE`, `PeekSpecificMessage` returns `FALSE`; `CloseSession(TRUE)` resets all of it. |
 | Smoke (local only, tag `[data]`) | With `IWD2_DATA` set: start, reach the start screen, run 300 frames, exit with code 0, print a hash of the final framebuffer for manual comparison between platforms. Skipped when `IWD2_DATA` is unset. |
 
 **CI** (`.github/workflows/ci.yml`): jobs on `ubuntu-24.04` with GCC and with Clang, and on `windows-latest` with MSVC x64 and x86. Each job configures its preset, builds, runs `iwd2r_tests`, runs `clang-format --dry-run --Werror` on new and modified files, and regenerates `docs/MAP.md` and fails on a diff. No game data is ever present in CI.
@@ -310,17 +313,17 @@ Framework: Catch2 v3. All tests except the last run with no game data.
 ## 11. Sequencing for the implementation plan
 
 1. `compat/` headers with their tests, built and tested alone on Linux.
-2. MSVC x64 build of the whole tree against `compat/` with MFC removed, still using the real DirectX for one step. This proves the shim is complete before the platform changes.
-3. `platform/` shims, deletions and inert stubs from section 4; MSVC build switches to SDL3 and miniaudio; Windows smoke test passes.
-4. Linux build with GCC and Clang; Linux smoke test passes.
+2. `platform/` shims with their tests, still with no engine code compiling against them.
+3. The engine tree compiled translation unit by translation unit against the shims, with the deletions and inert stubs from section 4, until it links on Linux and on Windows. No step builds against the real DirectX or MFC: `compat/win_types.h` is the only source of the Windows typedefs on every platform, so mixing in `<windows.h>` would conflict.
+4. Smoke test on both platforms.
 5. NOTICE.md, file notice lines, README, ADRs, `gen_map.py`, `CMakePresets.json`, CI.
 
 ## 12. Risks
 
-- **MFC quirks the shim misses.** The tree may depend on an MFC behavior not listed in 6.2. Mitigation: step 2 of the sequencing compiles the whole tree against the shim on Windows, where any behavioral difference shows up against the known-good upstream build before platform changes add noise.
+- **MFC quirks the shim misses.** The tree may depend on an MFC behavior not listed in 6.2. Mitigation: every shim class has unit tests against MFC's documented behavior before any engine code compiles against it, and the Windows build is compared by hand with the known-good upstream build on the same screens.
 - **Timing-dependent behavior.** The original runs five threads and a multimedia timer. Reproducing their scheduling exactly is impossible; project 2's replay diffs will show where it matters, and the swappable clock is the hook for fixing it.
 - **64-bit layout.** `/* 0xNNNN */` offset comments document the 32-bit layout and are not relied on by code. Only two pointer-to-integer casts exist, one in `CVidMode` and one passing a pointer as the timer user value in `src/music/sound.cpp`; both are rewritten to pointer-width types. Save-file structs are packed and pointer-free. Project 2 verifies save round trips.
-- **Loopback session semantics.** Section 7.7 states the intended behavior; the exact transitions are confirmed only when the oracle exists. The UI screens upstream reaches today are the acceptance test for project 1.
+- **Null-provider session semantics.** Section 7.7 keeps the original's own single-player branches, so the transitions are the decompiled ones; the oracle in project 2 confirms them. The UI screens upstream reaches today are the acceptance test for project 1.
 
 ## Appendix A: Measurements
 
