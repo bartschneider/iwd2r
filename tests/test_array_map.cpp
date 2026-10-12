@@ -160,8 +160,8 @@ TEST_CASE("map iteration visits every pair once in insertion order", "[map]")
         m.SetAt(keys[i], &vals[i]);
     int n = 0;
     for (POSITION pos = m.GetStartPosition(); pos != NULL;) {
-        WORD k;
-        void* v;
+        WORD k = 0;
+        void* v = nullptr;
         m.GetNextAssoc(pos, k, v);
         REQUIRE(k == keys[n]);
         REQUIRE(v == &vals[n]);
@@ -202,4 +202,46 @@ TEST_CASE("map StringToString is case sensitive", "[map]")
     REQUIRE(m.RemoveKey("A"));
     REQUIRE_FALSE(m.Lookup("A", out));
     REQUIRE(m.GetCount() == 2);
+}
+
+TEST_CASE("map removing the returned key during iteration", "[map]")
+{
+    for (int count = 1; count <= 3; ++count) {
+        CMapWordToPtr m;
+        for (int i = 1; i <= count; ++i)
+            m.SetAt(static_cast<WORD>(i), nullptr);
+        int visited = 0;
+        for (POSITION pos = m.GetStartPosition(); pos != NULL;) {
+            WORD k = 0;
+            void* v = nullptr;
+            m.GetNextAssoc(pos, k, v);
+            ++visited;
+            REQUIRE(k == visited);
+            REQUIRE(m.RemoveKey(k));
+        }
+        REQUIRE(visited == count);
+        REQUIRE(m.GetCount() == 0);
+    }
+}
+
+TEST_CASE("map removing the last element then continuing iteration", "[map]")
+{
+    CMapWordToPtr m;
+    m.SetAt(1, nullptr);
+    m.SetAt(2, nullptr);
+    m.SetAt(3, nullptr);
+    POSITION pos = m.GetStartPosition();
+    WORD k = 0;
+    void* v = nullptr;
+    m.GetNextAssoc(pos, k, v);
+    REQUIRE(k == 1);
+    m.GetNextAssoc(pos, k, v);
+    REQUIRE(k == 2);
+    REQUIRE(pos != NULL);
+    m.RemoveKey(3);
+    m.RemoveKey(2);
+    m.SetAt(4, nullptr);
+    m.GetNextAssoc(pos, k, v);
+    REQUIRE(k == 4);
+    REQUIRE(pos == NULL);
 }
