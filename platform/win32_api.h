@@ -75,3 +75,263 @@ DWORD GetModuleFileNameA(HMODULE module, LPSTR buffer, DWORD size);
 DWORD GetLogicalDrives();
 UINT GetDriveTypeA(LPCSTR root);
 BOOL GetVolumeInformationA(LPCSTR root, LPSTR volumeName, DWORD volumeNameSize, DWORD* serial, DWORD* maxComponentLength, DWORD* flags, LPSTR fileSystemName, DWORD fileSystemNameSize);
+
+// --- window.cpp: window class, window, message queue, polled input ---
+
+typedef LRESULT(CALLBACK* WNDPROC)(HWND, UINT, WPARAM, LPARAM);
+typedef WORD ATOM;
+
+struct MSG {
+    HWND hwnd;
+    UINT message;
+    WPARAM wParam;
+    LPARAM lParam;
+    DWORD time;
+    POINT pt;
+};
+typedef MSG* LPMSG;
+
+struct WNDCLASSEXA {
+    UINT cbSize;
+    UINT style;
+    WNDPROC lpfnWndProc;
+    int cbClsExtra, cbWndExtra;
+    HINSTANCE hInstance;
+    HANDLE hIcon, hCursor, hbrBackground;
+    LPCSTR lpszMenuName, lpszClassName;
+    HANDLE hIconSm;
+};
+
+struct PAINTSTRUCT {
+    HDC hdc;
+    BOOL fErase;
+    RECT rcPaint;
+    BOOL fRestore;
+    BOOL fIncUpdate;
+    BYTE rgbReserved[32];
+};
+typedef PAINTSTRUCT* LPPAINTSTRUCT;
+
+#define WS_POPUP 0x80000000u
+#define WS_VISIBLE 0x10000000u
+#define WS_CLIPSIBLINGS 0x04000000u
+#define WS_CLIPCHILDREN 0x02000000u
+#define WS_CAPTION 0x00C00000u
+#define WS_SYSMENU 0x00080000u
+#define WS_MINIMIZEBOX 0x00020000u
+#define WS_EX_TOPMOST 0x00000008u
+
+#define CW_USEDEFAULT ((int)0x80000000)
+
+#define SW_HIDE 0
+#define SW_SHOWNORMAL 1
+#define SW_SHOWMINIMIZED 2
+#define SW_MAXIMIZE 3
+#define SW_SHOW 5
+#define SW_MINIMIZE 6
+#define SW_RESTORE 9
+
+#define SM_CXSCREEN 0
+#define SM_CYSCREEN 1
+#define SM_CXFULLSCREEN 16
+#define SM_CYFULLSCREEN 17
+#define SM_SWAPBUTTON 23
+#define SM_CXDOUBLECLK 36
+#define SM_CYDOUBLECLK 37
+
+#define PM_NOREMOVE 0x0000
+#define PM_REMOVE 0x0001
+
+#define MB_OK 0x00000000u
+#define MB_OKCANCEL 0x00000001u
+#define MB_YESNOCANCEL 0x00000003u
+#define MB_YESNO 0x00000004u
+#define MB_ICONERROR 0x00000010u
+#define MB_ICONQUESTION 0x00000020u
+#define MB_ICONWARNING 0x00000030u
+#define MB_ICONINFORMATION 0x00000040u
+#define MB_SYSTEMMODAL 0x00001000u
+
+#define IDOK 1
+#define IDCANCEL 2
+#define IDYES 6
+#define IDNO 7
+
+#define IDC_ARROW ((LPCSTR)(ULONG_PTR)32512)
+
+#define HWND_TOP ((HWND)0)
+#define HWND_TOPMOST ((HWND)(LONG_PTR)-1)
+#define HWND_NOTOPMOST ((HWND)(LONG_PTR)-2)
+
+#define SWP_NOSIZE 0x0001
+#define SWP_NOMOVE 0x0002
+#define SWP_NOZORDER 0x0004
+#define SWP_NOACTIVATE 0x0010
+#define SWP_SHOWWINDOW 0x0040
+#define SWP_HIDEWINDOW 0x0080
+
+#define SIZE_RESTORED 0
+#define SIZE_MINIMIZED 1
+#define SIZE_MAXIMIZED 2
+
+#define HTCLIENT 1
+
+ATOM RegisterClassExA(const WNDCLASSEXA* windowClass);
+HWND CreateWindowExA(DWORD exStyle, LPCSTR className, LPCSTR title, DWORD style, int x, int y, int width, int height, HWND parent, HMENU menu, HINSTANCE instance, LPVOID param);
+BOOL DestroyWindow(HWND hWnd);
+BOOL ShowWindow(HWND hWnd, int command);
+BOOL UpdateWindow(HWND hWnd);
+BOOL SetWindowPos(HWND hWnd, HWND insertAfter, int x, int y, int cx, int cy, UINT flags);
+BOOL GetClientRect(HWND hWnd, LPRECT rect);
+BOOL GetWindowRect(HWND hWnd, LPRECT rect);
+BOOL ClientToScreen(HWND hWnd, LPPOINT point);
+BOOL ScreenToClient(HWND hWnd, LPPOINT point);
+HWND GetFocus();
+int GetSystemMetrics(int index);
+
+BOOL PeekMessageA(LPMSG msg, HWND hWnd, UINT filterMin, UINT filterMax, UINT remove);
+BOOL GetMessageA(LPMSG msg, HWND hWnd, UINT filterMin, UINT filterMax);
+BOOL TranslateMessage(const MSG* msg);
+LRESULT DispatchMessageA(const MSG* msg);
+BOOL PostMessageA(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
+LRESULT SendMessageA(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
+// The engine calls the unsuffixed name in two places.
+inline LRESULT SendMessage(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) { return SendMessageA(hWnd, message, wParam, lParam); }
+void PostQuitMessage(int exitCode);
+LRESULT DefWindowProcA(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
+UINT RegisterWindowMessageA(LPCSTR name);
+
+BOOL GetUpdateRect(HWND hWnd, LPRECT rect, BOOL erase);
+HDC BeginPaint(HWND hWnd, LPPAINTSTRUCT paint);
+BOOL EndPaint(HWND hWnd, const PAINTSTRUCT* paint);
+
+HCURSOR SetCursor(HCURSOR cursor);
+HCURSOR LoadCursorA(HINSTANCE instance, LPCSTR name);
+BOOL GetCursorPos(LPPOINT point);
+BOOL SetCursorPos(int x, int y);
+int ShowCursor(BOOL show);
+SHORT GetAsyncKeyState(int vk);
+HKL GetKeyboardLayout(DWORD threadId);
+
+int MessageBoxA(HWND hWnd, LPCSTR text, LPCSTR caption, UINT type);
+
+// --- win32_stubs.cpp: inert DLL, version, GDI, COM, string and process calls ---
+
+typedef INT_PTR(WINAPI* FARPROC)();
+
+struct MEMORYSTATUS {
+    DWORD dwLength;
+    DWORD dwMemoryLoad;
+    SIZE_T dwTotalPhys;
+    SIZE_T dwAvailPhys;
+    SIZE_T dwTotalPageFile;
+    SIZE_T dwAvailPageFile;
+    SIZE_T dwTotalVirtual;
+    SIZE_T dwAvailVirtual;
+};
+typedef MEMORYSTATUS* LPMEMORYSTATUS;
+
+struct STARTUPINFOA {
+    DWORD cb;
+    LPSTR lpReserved;
+    LPSTR lpDesktop;
+    LPSTR lpTitle;
+    DWORD dwX, dwY, dwXSize, dwYSize, dwXCountChars, dwYCountChars, dwFillAttribute, dwFlags;
+    WORD wShowWindow;
+    WORD cbReserved2;
+    LPBYTE lpReserved2;
+    HANDLE hStdInput, hStdOutput, hStdError;
+};
+typedef STARTUPINFOA STARTUPINFO;
+typedef STARTUPINFOA* LPSTARTUPINFOA;
+
+struct PROCESS_INFORMATION {
+    HANDLE hProcess;
+    HANDLE hThread;
+    DWORD dwProcessId;
+    DWORD dwThreadId;
+};
+typedef PROCESS_INFORMATION* LPPROCESS_INFORMATION;
+
+struct IUnknown;
+typedef IUnknown* LPUNKNOWN;
+typedef const GUID& REFCLSID;
+
+#define VER_PLATFORM_WIN32s 0
+#define VER_PLATFORM_WIN32_WINDOWS 1
+#define VER_PLATFORM_WIN32_NT 2
+
+#define BITSPIXEL 12
+#define PLANES 14
+#define LOGPIXELSX 88
+#define LOGPIXELSY 90
+
+#define TRANSPARENT 1
+#define OPAQUE 2
+#define ETO_OPAQUE 0x0002
+#define ETO_CLIPPED 0x0004
+#define CLR_INVALID 0xFFFFFFFFu
+
+// Plain literals so the engine's trailing FF_DONTCARE converts to a null
+// face name.
+#define FW_NORMAL 400
+#define DEFAULT_CHARSET 1
+#define OUT_DEFAULT_PRECIS 0
+#define CLIP_DEFAULT_PRECIS 0
+#define DEFAULT_QUALITY 0
+#define DEFAULT_PITCH 0
+#define FF_DONTCARE 0
+
+#define CLSCTX_INPROC_SERVER 0x1
+#define REGDB_E_CLASSNOTREG ((HRESULT)0x80040154)
+#define REGDB_E_IIDNOTREG ((HRESULT)0x80040155)
+
+#define NORMAL_PRIORITY_CLASS 0x00000020
+
+HMODULE LoadLibraryA(LPCSTR name);
+BOOL FreeLibrary(HMODULE module);
+FARPROC GetProcAddress(HMODULE module, LPCSTR name);
+HMODULE GetModuleHandleA(LPCSTR name);
+
+BOOL GetVersionExA(LPOSVERSIONINFOA info);
+void GlobalMemoryStatus(LPMEMORYSTATUS status);
+
+HDC GetDC(HWND hWnd);
+int ReleaseDC(HWND hWnd, HDC hdc);
+int GetDeviceCaps(HDC hdc, int index);
+HFONT CreateFontA(int height, int width, int escapement, int orientation, int weight, DWORD italic, DWORD underline, DWORD strikeOut, DWORD charSet, DWORD outPrecision, DWORD clipPrecision, DWORD quality, DWORD pitchAndFamily, LPCSTR faceName);
+BOOL DeleteObject(HGDIOBJ object);
+HGDIOBJ SelectObject(HDC hdc, HGDIOBJ object);
+BOOL ExtTextOutA(HDC hdc, int x, int y, UINT options, const RECT* rect, LPCSTR text, UINT count, const INT* dx);
+BOOL TextOutA(HDC hdc, int x, int y, LPCSTR text, int count);
+COLORREF SetTextColor(HDC hdc, COLORREF color);
+COLORREF SetBkColor(HDC hdc, COLORREF color);
+int SetBkMode(HDC hdc, int mode);
+BOOL GetTextExtentPoint32A(HDC hdc, LPCSTR text, int count, LPSIZE size);
+
+DWORD GetFileVersionInfoSizeA(LPCSTR filename, LPDWORD handle);
+BOOL GetFileVersionInfoA(LPCSTR filename, DWORD handle, DWORD size, LPVOID data);
+BOOL VerQueryValueA(LPCVOID block, LPCSTR subBlock, LPVOID* buffer, PUINT length);
+
+HRESULT CoInitialize(LPVOID reserved);
+void CoUninitialize();
+HRESULT CoCreateInstance(REFCLSID clsid, LPUNKNOWN outer, DWORD context, REFIID iid, LPVOID* object);
+
+void OutputDebugStringA(LPCSTR text);
+LPSTR lstrcpyA(LPSTR destination, LPCSTR source);
+LPSTR lstrcatA(LPSTR destination, LPCSTR source);
+int lstrlenA(LPCSTR text);
+int lstrcmpA(LPCSTR a, LPCSTR b);
+int lstrcmpiA(LPCSTR a, LPCSTR b);
+// Writes at most 1024 bytes including the terminator, like Win32.
+int wsprintfA(LPSTR buffer, LPCSTR format, ...);
+
+DWORD GetLastError();
+void SetLastError(DWORD error);
+
+// The command line is const here: the engine passes a string literal and
+// nothing writes to it.
+BOOL CreateProcessA(LPCSTR application, LPCSTR commandLine, LPVOID processAttributes, LPVOID threadAttributes, BOOL inheritHandles, DWORD creationFlags, LPVOID environment, LPCSTR currentDirectory, LPSTARTUPINFOA startupInfo, LPPROCESS_INFORMATION processInfo);
+HINSTANCE ShellExecuteA(HWND hWnd, LPCSTR operation, LPCSTR file, LPCSTR parameters, LPCSTR directory, INT showCommand);
+
+#include "platform/imm_stub.h"

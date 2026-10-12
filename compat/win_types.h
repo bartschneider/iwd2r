@@ -47,6 +47,11 @@ typedef const void* LPCVOID;
 typedef char* LPSTR;
 typedef const char* LPCSTR;
 typedef DWORD* LPDWORD;
+typedef void VOID;
+typedef BYTE* LPBYTE;
+typedef UINT* PUINT;
+typedef ULONG_PTR SIZE_T;
+typedef DWORD_PTR* PDWORD_PTR;
 
 #ifndef TRUE
 #define TRUE 1
@@ -92,8 +97,19 @@ struct HDC__;
 typedef HDC__* HDC;
 struct HFONT__;
 typedef HFONT__* HFONT;
-struct HGDIOBJ__;
-typedef HGDIOBJ__* HGDIOBJ;
+// Untyped like Windows, so every GDI handle converts to it implicitly.
+typedef void* HGDIOBJ;
+typedef HANDLE HGLOBAL;
+struct HBRUSH__;
+typedef HBRUSH__* HBRUSH;
+struct HPALETTE__;
+typedef HPALETTE__* HPALETTE;
+struct HICON__;
+typedef HICON__* HICON;
+struct HMENU__;
+typedef HMENU__* HMENU;
+struct HKEY__;
+typedef HKEY__* HKEY;
 struct HCURSOR__;
 typedef HCURSOR__* HCURSOR;
 struct HKL__;
@@ -130,6 +146,31 @@ struct RECT {
 typedef POINT* LPPOINT;
 typedef SIZE* LPSIZE;
 typedef RECT* LPRECT;
+typedef const RECT* LPCRECT;
+
+struct OSVERSIONINFOA {
+    DWORD dwOSVersionInfoSize;
+    DWORD dwMajorVersion;
+    DWORD dwMinorVersion;
+    DWORD dwBuildNumber;
+    DWORD dwPlatformId;
+    CHAR szCSDVersion[128];
+};
+typedef OSVERSIONINFOA* LPOSVERSIONINFOA;
+
+struct OSVERSIONINFOEXA {
+    DWORD dwOSVersionInfoSize;
+    DWORD dwMajorVersion;
+    DWORD dwMinorVersion;
+    DWORD dwBuildNumber;
+    DWORD dwPlatformId;
+    CHAR szCSDVersion[128];
+    WORD wServicePackMajor;
+    WORD wServicePackMinor;
+    WORD wSuiteMask;
+    BYTE wProductType;
+    BYTE wReserved;
+};
 
 inline BOOL SetRect(RECT* r, int left, int top, int right, int bottom)
 {
@@ -305,6 +346,12 @@ inline BOOL IsEqualGUID(const GUID& a, const GUID& b) { return std::memcmp(&a, &
 #define VK_F11 0x7A
 #define VK_F12 0x7B
 #define VK_NUMLOCK 0x90
+#define VK_LSHIFT 0xA0
+#define VK_RSHIFT 0xA1
+#define VK_LCONTROL 0xA2
+#define VK_RCONTROL 0xA3
+#define VK_LMENU 0xA4
+#define VK_RMENU 0xA5
 #define VK_OEM_1 0xBA
 #define VK_OEM_PLUS 0xBB
 #define VK_OEM_COMMA 0xBC
