@@ -54,13 +54,19 @@ add_subdirectory(compat)
 add_subdirectory(platform)
 
 # Decompiled engine. Builds with warnings allowed (no iwd2r_strict_warnings).
-# Excluded from the default build until the whole tree compiles (Task 21).
 include(cmake/engine_sources.cmake)
-add_library(iwd2r_engine OBJECT EXCLUDE_FROM_ALL ${IWD2R_ENGINE_SOURCES})
+add_library(iwd2r_engine OBJECT ${IWD2R_ENGINE_SOURCES})
 target_include_directories(iwd2r_engine PRIVATE
     "${PROJECT_SOURCE_DIR}/src"
     "${PROJECT_SOURCE_DIR}/compat"
     "${PROJECT_SOURCE_DIR}"
     ${ZLIB_INCLUDE_DIRS})
 target_link_libraries(iwd2r_engine PRIVATE iwd2r_compat iwd2r_platform ${ZLIB_LIBRARIES})
+
+# The game. A console program for now, so the smoke run's stdout is visible on
+# Windows too.
+add_executable(iwd2r platform/entry.cpp $<TARGET_OBJECTS:iwd2r_engine>)
+target_include_directories(iwd2r PRIVATE "${PROJECT_SOURCE_DIR}")
+target_link_libraries(iwd2r PRIVATE iwd2r_platform iwd2r_compat ${ZLIB_LIBRARIES})
+iwd2r_strict_warnings(iwd2r)
 add_subdirectory(tests)

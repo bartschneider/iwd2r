@@ -3628,6 +3628,13 @@ CUIControlButtonMultiPlayerHotArea::~CUIControlButtonMultiPlayerHotArea()
 {
 }
 
+// 0x652D10
+void CUIControlButtonMultiPlayerHotArea::OnHotAreaClick(CPoint pt)
+{
+    // NOTE: iwd2r: the body updated the help text of the removed multiplayer
+    // screen; no remaining panel creates this control.
+}
+
 // -----------------------------------------------------------------------------
 
 // NOTE: Inlined.

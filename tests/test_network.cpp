@@ -1,24 +1,54 @@
 // iwd2r. Distributed under LICENSE.md.
-// Task 21 enables this test: it adds this file and the iwd2r_engine objects to
-// iwd2r_tests once the engine links. Until then it is not built, and the
-// [.pending] tag keeps it out of a default run once it is.
+// The null-provider session sequence of CNetwork, linked against the engine.
 //
 // Fixture: `CNetwork n;` constructs without the chitin object, but the
-// null-provider session sequence does not: HostNewSession, AddPlayerToList
-// (called by CreatePlayer) and OnCloseSession call the
-// g_pChitin->OnMultiplayer* hooks, and the incoming-queue code locks
-// g_pChitin->cNetwork.field_F52. The test therefore needs a live g_pChitin
-// (the engine's CBaldurChitin); Task 21 supplies it when it wires the engine.
+// session sequence does not: HostNewSession, AddPlayerToList (called by
+// CreatePlayer) and OnCloseSession call the g_pChitin->OnMultiplayer* hooks,
+// and the incoming-queue code locks g_pChitin->cNetwork.field_F52. A bare
+// CChitin subclass supplies both: its hooks are the base class's empty ones,
+// and constructing it initializes its own cNetwork. The four thread bodies are
+// pure virtual in CChitin and never run here.
 #define NOMINMAX
 #include <catch2/catch_test_macros.hpp>
 
+#include "CChitin.h"
 #include "CNetwork.h"
 
-class CChitin;
 extern CChitin* g_pChitin;
 
-TEST_CASE("null service provider hosts a single-player session", "[.pending][network]")
+namespace {
+
+class TestChitin : public CChitin {
+public:
+    void MessageThreadMain(void*) override { }
+    void RSThreadMain(void*) override { }
+    void MainAIThread(void*) override { }
+    void MusicThreadMain(void*) override { }
+};
+
+// Installs a TestChitin as g_pChitin for the scope of a test.
+class ChitinScope {
+public:
+    ChitinScope()
+        : m_previous(g_pChitin)
+    {
+        g_pChitin = &m_chitin;
+    }
+    ~ChitinScope() { g_pChitin = m_previous; }
+
+    ChitinScope(const ChitinScope&) = delete;
+    ChitinScope& operator=(const ChitinScope&) = delete;
+
+private:
+    CChitin* m_previous;
+    TestChitin m_chitin;
+};
+
+}
+
+TEST_CASE("null service provider hosts a single-player session", "[network]")
 {
+    ChitinScope scope;
     REQUIRE(g_pChitin != nullptr);
 
     CNetwork n;
