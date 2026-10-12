@@ -8,6 +8,7 @@
 
 #include "platform/data_dir.h"
 #include "platform/present.h"
+#include "platform/script.h"
 #include "platform/win32_api.h"
 
 #include <SDL3/SDL.h>
@@ -52,6 +53,7 @@ struct State {
     int smokeFrames = 0;
     bool smokeDone = false;
     bool smokeEnvRead = false;
+    int scriptFrame = 0; // PresentedFrames() at the script's last step
 };
 
 State& S()
@@ -275,6 +277,12 @@ void PumpEvents()
     }
     platform::present::PresentIfDirty();
     CheckSmoke();
+    // The script advances once per presented frame.
+    const int frames = platform::present::PresentedFrames();
+    while (S().scriptFrame < frames) {
+        S().scriptFrame++;
+        platform::script::Advance();
+    }
 }
 
 void EnqueueMessage(UINT message, WPARAM wParam, LPARAM lParam)
@@ -407,6 +415,8 @@ HWND CreateWindowExA(DWORD exStyle, LPCSTR className, LPCSTR title, DWORD style,
         s.smokeEnvRead = true;
         if (const char* frames = std::getenv("IWD2R_SMOKE_FRAMES"))
             platform::window::SetSmokeFrames(std::atoi(frames));
+        S().scriptFrame = platform::present::PresentedFrames();
+        platform::script::StartFromEnvironment();
     }
     return ToHwnd(rec);
 }
@@ -692,6 +702,9 @@ BOOL GetCursorPos(LPPOINT point)
         return FALSE;
     point->x = 0;
     point->y = 0;
+    // A running script's cursor is already in the engine's coordinates.
+    if (platform::script::InjectedCursor(point))
+        return TRUE;
     WindowRecord* rec = S().current;
     if (!VideoUp() || !rec)
         return TRUE;
@@ -738,6 +751,9 @@ int ShowCursor(BOOL show)
 
 SHORT GetAsyncKeyState(int vk)
 {
+    SHORT injected = 0;
+    if (platform::script::InjectedKey(vk, &injected))
+        return injected;
     if (!VideoUp())
         return 0;
     const SHORT down = -32768; // 0x8000: the key is down now.

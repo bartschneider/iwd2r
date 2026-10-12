@@ -230,4 +230,17 @@ void SetPrimary(const std::vector<uint32_t>* pixels, int width, int height)
 
 const std::vector<uint32_t>* Primary() { return S().primary; }
 
+bool PrimaryFrame(const uint32_t** pixels, int* width, int* height, int* pitchBytes)
+{
+    const State& s = S();
+    if (!s.primary || s.primaryWidth <= 0 || s.primaryHeight <= 0
+        || s.primary->size() < static_cast<size_t>(s.primaryWidth) * static_cast<size_t>(s.primaryHeight))
+        return false;
+    *pixels = s.primary->data();
+    *width = s.primaryWidth;
+    *height = s.primaryHeight;
+    *pitchBytes = s.primaryWidth * 4;
+    return true;
+}
+
 }

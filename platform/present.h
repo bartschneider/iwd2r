@@ -75,4 +75,9 @@ int PresentedFrames();
 void SetPrimary(const std::vector<uint32_t>* pixels, int width, int height);
 const std::vector<uint32_t>* Primary();
 
+// The registered primary's pixels, size and pitch, for screenshots; false
+// when none is registered. Main thread only, like Present: the DirectDraw
+// shim registers and draws into the primary there.
+bool PrimaryFrame(const uint32_t** pixels, int* width, int* height, int* pitchBytes);
+
 }

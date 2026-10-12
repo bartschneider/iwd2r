@@ -17,7 +17,8 @@ int ScancodeForVK(int vk);
 int VKForScancode(int sc);
 
 // Translates pending SDL events into queued window messages, presents the
-// primary surface when dirty and runs the smoke-frame check.
+// primary surface when dirty, runs the smoke-frame check and advances the
+// input script (platform/script.h) once per presented frame.
 void PumpEvents();
 
 // Posts a message addressed to the main window.
@@ -34,7 +35,8 @@ HWND MainWindow();
 
 // After n presented frames the pump prints "framebuffer-hash: <hex>" once and
 // posts WM_DESTROY. 0 disables. CreateWindowExA sets it from
-// IWD2R_SMOKE_FRAMES when that variable is present.
+// IWD2R_SMOKE_FRAMES when that variable is present, and starts the script
+// named by IWD2R_SCRIPT.
 void SetSmokeFrames(int n);
 
 // Routes platform::SetFatalMessageHandler messages to MessageBoxA with
