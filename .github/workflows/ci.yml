@@ -71,7 +71,7 @@ jobs:
         run: ctest --preset linux-clang --output-on-failure
 
   windows-x64:
-    runs-on: windows-latest
+    runs-on: windows-2022
     env:
       SDL_VIDEO_DRIVER: dummy
       SDL_AUDIO_DRIVER: dummy
@@ -94,7 +94,7 @@ jobs:
         run: ctest --preset windows-msvc-x64 --output-on-failure
 
   windows-x86:
-    runs-on: windows-latest
+    runs-on: windows-2022
     env:
       SDL_VIDEO_DRIVER: dummy
       SDL_AUDIO_DRIVER: dummy
