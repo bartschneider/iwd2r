@@ -338,8 +338,10 @@ void PumpEvents()
     }
     platform::present::PresentIfDirty();
     CheckSmoke();
-    // The script advances once per presented frame.
+    // The control channel and the script run once per presented frame.
     const int frames = platform::present::PresentedFrames();
+    if (S().scriptFrame < frames)
+        platform::script::PollControl();
     while (S().scriptFrame < frames) {
         S().scriptFrame++;
         platform::script::Advance();

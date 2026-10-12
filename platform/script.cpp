@@ -12,6 +12,7 @@
 #include <climits>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <mutex>
@@ -259,25 +260,41 @@ std::vector<Step> Expand(const std::vector<Command>& commands)
     std::_Exit(5);
 }
 
-void TakeShot(const Step& step)
+// Writes the primary surface as <IWD2R_SHOT_DIR>/<name>.png. On failure
+// returns false with why set.
+bool WriteShot(const std::string& name, std::string& path, std::string& why)
 {
     std::string dir;
     if (const char* env = std::getenv("IWD2R_SHOT_DIR"))
         dir = env;
-    std::string path = dir;
+    path = dir;
     if (!path.empty() && path.back() != '/' && path.back() != '\\')
         path += path.find('\\') != std::string::npos ? '\\' : '/';
-    path += step.name + ".png";
+    path += name + ".png";
 
     const uint32_t* pixels = nullptr;
     int w = 0;
     int h = 0;
     int pitch = 0;
-    if (!platform::present::PrimaryFrame(&pixels, &w, &h, &pitch))
-        Fail("line " + std::to_string(step.line) + ": shot " + step.name + ": no primary surface yet");
-    if (!platform::WritePng(path.c_str(), pixels, w, h, pitch))
-        Fail("line " + std::to_string(step.line) + ": shot " + step.name + ": cannot write " + path);
-    std::printf("script: line %d: shot %s (%dx%d)\n", step.line, path.c_str(), w, h);
+    if (!platform::present::PrimaryFrame(&pixels, &w, &h, &pitch)) {
+        why = "no primary surface yet";
+        return false;
+    }
+    if (!platform::WritePng(path.c_str(), pixels, w, h, pitch)) {
+        why = "cannot write " + path;
+        return false;
+    }
+    why = std::to_string(w) + "x" + std::to_string(h);
+    return true;
+}
+
+void TakeShot(const Step& step)
+{
+    std::string path;
+    std::string why;
+    if (!WriteShot(step.name, path, why))
+        Fail("line " + std::to_string(step.line) + ": shot " + step.name + ": " + why);
+    std::printf("script: line %d: shot %s (%s)\n", step.line, path.c_str(), why.c_str());
     std::fflush(stdout);
 }
 
@@ -521,6 +538,36 @@ bool InjectedKey(int vk, SHORT* state)
         s = static_cast<SHORT>(s | 1); // pressed since the last poll
     *state = s;
     return true;
+}
+
+void PollControl()
+{
+    const char* dir = std::getenv("IWD2R_CONTROL_DIR");
+    if (!dir || !*dir)
+        return;
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    std::vector<fs::path> requests;
+    for (fs::directory_iterator it(fs::path(dir), ec), end; !ec && it != end; it.increment(ec)) {
+        const std::string file = it->path().filename().string();
+        if (file.size() > 8 && file.compare(0, 5, "shot-") == 0 && file.compare(file.size() - 4, 4, ".req") == 0)
+            requests.push_back(it->path());
+    }
+    for (const fs::path& request : requests) {
+        const std::string file = request.filename().string();
+        const std::string name = file.substr(5, file.size() - 9);
+        std::string path;
+        std::string why;
+        if (WriteShot(name, path, why)) {
+            std::printf("control: shot %s (%s)\n", path.c_str(), why.c_str());
+        } else if (why == "no primary surface yet") {
+            continue; // retried on the next frame
+        } else {
+            std::printf("control: shot %s failed: %s\n", name.c_str(), why.c_str());
+        }
+        std::fflush(stdout);
+        fs::remove(request, ec);
+    }
 }
 
 }

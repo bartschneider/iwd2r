@@ -5,11 +5,13 @@
 #include "platform/present.h"
 #include "platform/script.h"
 #include "platform/win32_api.h"
+#include "platform/window.h"
 
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -57,17 +59,19 @@ POINT Cursor()
     return p;
 }
 
-void SetShotDir(const std::string& dir)
+void SetEnv(const char* name, const std::string& value)
 {
 #ifdef _WIN32
-    _putenv_s("IWD2R_SHOT_DIR", dir.c_str());
+    _putenv_s(name, value.c_str());
 #else
-    if (dir.empty())
-        unsetenv("IWD2R_SHOT_DIR");
+    if (value.empty())
+        unsetenv(name);
     else
-        setenv("IWD2R_SHOT_DIR", dir.c_str(), 1);
+        setenv(name, value.c_str(), 1);
 #endif
 }
+
+void SetShotDir(const std::string& dir) { SetEnv("IWD2R_SHOT_DIR", dir); }
 
 }
 
@@ -233,6 +237,45 @@ TEST_CASE("script shot writes the primary surface", "[script]")
     CHECK(std::filesystem::file_size(dir / "first.png") > 8);
     platform::script::Advance();
     CHECK_FALSE(platform::script::Running());
+
+    platform::present::SetPrimary(nullptr, 0, 0);
+    SetShotDir("");
+    std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("control directory shot request writes the frame and deletes the request", "[script][control]")
+{
+    const std::filesystem::path dir = std::filesystem::temp_directory_path() / ("iwd2r_control_test_" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    const std::filesystem::path control = dir / "control";
+    std::filesystem::create_directories(control);
+    SetShotDir(dir.string());
+    SetEnv("IWD2R_CONTROL_DIR", control.string());
+    const std::filesystem::path request = control / "shot-menu.req";
+    std::ofstream(request).put('\n');
+    std::ofstream(control / "other.txt").put('\n');
+
+    // No frame presented yet: the request waits.
+    platform::present::SetPrimary(nullptr, 0, 0);
+    platform::window::PumpEvents();
+    CHECK(std::filesystem::exists(request));
+
+    std::vector<uint32_t> pixels(4 * 2, 0x00336699u);
+    platform::present::SetPrimary(&pixels, 4, 2);
+    const int before = platform::present::PresentedFrames();
+    platform::present::MarkPrimaryDirty();
+    platform::window::PumpEvents(); // presents one frame
+    CHECK(platform::present::PresentedFrames() == before + 1);
+    CHECK(std::filesystem::file_size(dir / "menu.png") > 8);
+    CHECK_FALSE(std::filesystem::exists(request));
+    CHECK(std::filesystem::exists(control / "other.txt"));
+
+    // Without the variable the directory is not looked at.
+    SetEnv("IWD2R_CONTROL_DIR", "");
+    std::ofstream(control / "shot-later.req").put('\n');
+    platform::present::MarkPrimaryDirty();
+    platform::window::PumpEvents();
+    CHECK(std::filesystem::exists(control / "shot-later.req"));
+    CHECK_FALSE(std::filesystem::exists(dir / "later.png"));
 
     platform::present::SetPrimary(nullptr, 0, 0);
     SetShotDir("");
