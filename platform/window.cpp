@@ -389,6 +389,19 @@ HWND CreateWindowExA(DWORD exStyle, LPCSTR className, LPCSTR title, DWORD style,
         // A new window (Alt+Enter recreates it) revives the loop.
         s.quitting = false;
     }
+    // Win32 sends WM_SIZE and WM_MOVE while creating a window; the engine
+    // takes its client rectangle (the windowed blit target and the pointer
+    // bounds) from them. SDL's dummy driver reports neither.
+    {
+        int cw = 0;
+        int ch = 0;
+        int wx = 0;
+        int wy = 0;
+        SDL_GetWindowSize(window, &cw, &ch);
+        SDL_GetWindowPosition(window, &wx, &wy);
+        platform::window::EnqueueMessage(WM_SIZE, SIZE_RESTORED, MAKELONG(cw, ch));
+        platform::window::EnqueueMessage(WM_MOVE, 0, MAKELONG(wx, wy));
+    }
 
     if (!s.smokeEnvRead) {
         s.smokeEnvRead = true;
