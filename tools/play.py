@@ -64,6 +64,8 @@ SYNC_EXCLUDE = ('build/', 'runs/')
 SCENARIOS = os.path.join(ROOT, 'scenarios')
 VM_MODES = ('linux', 'windows', 'all')
 SET_RE = re.compile(r'^[^/=;]+/[^=;]+=[^;]*$')
+# The desktop --vm runs give Resolution=desktop (the Xvfb screen).
+VM_DESKTOP = (1920, 1080)
 
 
 def log(msg):
@@ -72,6 +74,59 @@ def log(msg):
 
 # ---------------------------------------------------------------------------
 # Pure parts (unit-tested in tests/test_tools.py)
+
+def resolution_arg(value):
+    """--resolution: a width in pixels or 'desktop'."""
+    if value.lower() == 'desktop':
+        return 'desktop'
+    if value.isdigit() and int(value) > 0:
+        return int(value)
+    raise argparse.ArgumentTypeError('expected a width or "desktop": %r'
+                                     % value)
+
+
+def scale_arg(value):
+    """--scale: 1 to 4 or 'auto'."""
+    if value.lower() == 'auto':
+        return 'auto'
+    if value in ('1', '2', '3', '4'):
+        return int(value)
+    raise argparse.ArgumentTypeError('expected 1, 2, 3, 4 or auto: %r'
+                                     % value)
+
+
+def set_value(sets, key):
+    """The last --set value for 'Section/Key' (case-insensitive), or
+    None."""
+    found = None
+    for entry in sets:
+        name, _, value = entry.partition('=')
+        if name.lower() == key.lower():
+            found = value
+    return found
+
+
+def vm_height(resolution, sets):
+    """The requested (output) height of a --vm run: --set "Program
+    Options/Height=H", else the desktop's for Resolution=desktop, else the
+    original 4:3 heights, else 16:9 (the Xvfb desktop is the output size,
+    so the engine derives the same)."""
+    height = set_value(sets, 'Program Options/Height')
+    if height and height.isdigit() and int(height) > 0:
+        return int(height)
+    if resolution == 'desktop':
+        return VM_DESKTOP[1]
+    if resolution in realinput.ORIGINAL_HEIGHTS:
+        return realinput.ORIGINAL_HEIGHTS[resolution]
+    return (resolution * 9 + 8) // 16
+
+
+def vm_geometry(resolution, scale, sets):
+    """The screen of a --vm run (realinput.resolve_screen). Raises
+    ValueError below 800x600 inside."""
+    return realinput.resolve_screen(resolution, vm_height(resolution, sets),
+                                    scale, VM_DESKTOP)
+
 
 def parse_args(argv):
     ap = argparse.ArgumentParser(
@@ -86,8 +141,15 @@ def parse_args(argv):
     mode.add_argument('--fullscreen', dest='fullscreen', action='store_true',
                       help='Program Options/Full Screen=1')
     ap.set_defaults(fullscreen=False)
-    ap.add_argument('--resolution', type=int, choices=(800, 1024), default=800,
-                    help='Program Options/Resolution (default 800)')
+    ap.add_argument('--resolution', type=resolution_arg, default=800,
+                    help='Program Options/Resolution: a width or desktop '
+                    '(default 800); the height comes from --set '
+                    '"Program Options/Height=H" (else 4:3 for 800, 1024, '
+                    '1600 and 2048, else the desktop\'s aspect, 16:9 with '
+                    '--vm)')
+    ap.add_argument('--scale', type=scale_arg,
+                    help='Program Options/Scale: 1-4 or auto (with --vm the '
+                    'default is 1)')
     ap.add_argument('--set', dest='sets', action='append', default=[],
                     metavar='Section/Key=Value',
                     help='any other INI override (repeatable)')
@@ -134,17 +196,38 @@ def parse_args(argv):
             ap.error('--set expects "Section/Key=Value" without ";": %r' % entry)
     if args.frames is not None and args.frames <= 0:
         ap.error('--frames must be positive')
+    if args.vm:
+        try:
+            vm_geometry(args.resolution, args.scale or 1, args.sets)
+        except ValueError as e:
+            ap.error(str(e))
     return args
 
 
-def build_overrides(resolution, fullscreen, sets):
+def build_overrides(resolution, fullscreen, sets, scale=None, height=None):
     """The IWD2R_INI_OVERRIDE entries, in order (a later entry wins)."""
     entries = [
-        'Program Options/Resolution=%d' % resolution,
+        'Program Options/Resolution=%s' % resolution,
         'Program Options/Full Screen=%d' % (1 if fullscreen else 0),
     ]
+    if scale is not None:
+        entries.append('Program Options/Scale=%s' % scale)
+    if height is not None:
+        entries.append('Program Options/Height=%d' % height)
     entries.extend(sets)
     return entries
+
+
+def vm_overrides(args):
+    """build_overrides for a --vm run and its geometry. Scale and Height are
+    always explicit, so the INI's own values cannot disagree with the
+    driver's."""
+    scale = args.scale or 1
+    sets = [e for e in args.sets
+            if e.partition('=')[0].lower() != 'program options/height']
+    overrides = build_overrides(args.resolution, False, sets, scale,
+                                vm_height(args.resolution, args.sets))
+    return overrides, vm_geometry(args.resolution, scale, args.sets)
 
 
 def run_folder_name(now):
@@ -409,7 +492,8 @@ def prepare_scenario_dir(run_dir, script, actions):
         json.dump(actions, f, indent=1)
 
 
-def run_linux_vm(args, argv, scenarios, data, overrides, base_dir, nested):
+def run_linux_vm(args, argv, scenarios, data, overrides, base_dir, nested,
+                 geometry):
     """Runs the scenarios on Xvfb displays; returns the table rows."""
     missing = realinput.missing_tools()
     if missing:
@@ -456,7 +540,7 @@ def run_linux_vm(args, argv, scenarios, data, overrides, base_dir, nested):
             env = dict(base_env, IWD2_DATA=view)
         try:
             result = realinput.run_scenario(
-                exe, env, actions, run_dir, args.resolution, args.timeout,
+                exe, env, actions, run_dir, geometry, args.timeout,
                 taken, cwd=ROOT, abort=abort,
                 cpu=realinput.job_cpu(slot, cpus) if args.jobs > 1 else None)
         finally:
@@ -498,7 +582,8 @@ def build_windows_vm(args):
     return exe
 
 
-def run_windows_vm(args, argv, scenarios, data, overrides, base_dir, nested):
+def run_windows_vm(args, argv, scenarios, data, overrides, base_dir, nested,
+                   geometry):
     """Runs the scenarios one after another in Windows Sandbox (one sandbox
     can run at a time); returns the table rows."""
     if not winsandbox.available():
@@ -517,7 +602,8 @@ def run_windows_vm(args, argv, scenarios, data, overrides, base_dir, nested):
         os.makedirs(host_run, exist_ok=True)
         log('windows: %s in Windows Sandbox (real input)' % name)
         result = winsandbox.run_scenario(
-            exe, winsandbox.GAME_CACHE, realinput.windows_actions(actions),
+            exe, winsandbox.GAME_CACHE,
+            realinput.windows_actions(actions, geometry),
             overrides, name, run_dir, host_run, args.timeout,
             realinput.FRAME_RATE, log)
         write_vm_summary(run_dir, argv, 'windows-vm', path, overrides,
@@ -545,7 +631,10 @@ def main_vm(args, argv):
         except realinput.ScenarioError as e:
             sys.exit('play: %s' % e)
     data = resolve_data(args.data)
-    overrides = build_overrides(args.resolution, False, args.sets)
+    overrides, geometry = vm_overrides(args)
+    log('screen: %dx%d inside, scale %d, output %dx%d' % (
+        geometry['width'], geometry['height'], geometry['scale'],
+        geometry['output_width'], geometry['output_height']))
     run_root = make_run_folder(os.path.join(ROOT, 'runs'),
                                datetime.datetime.now())
     platforms = ['linux', 'windows'] if args.vm == 'all' else [args.vm]
@@ -558,7 +647,7 @@ def main_vm(args, argv):
             os.makedirs(base, exist_ok=True)
             runner = run_linux_vm if platform == 'linux' else run_windows_vm
             rows = runner(args, argv, scenarios, data, overrides, base,
-                          args.suite)
+                          args.suite, geometry)
             if rows is None:
                 tables.append('%s: not run (see above)\n' % platform)
                 codes.append(2 if args.vm != 'all' or platform == 'linux'
@@ -593,7 +682,8 @@ def main(argv):
     script = os.path.abspath(args.script) if args.script else None
     if script and not os.path.isfile(script):
         sys.exit('play: no script %s' % script)
-    overrides = build_overrides(args.resolution, args.fullscreen, args.sets)
+    overrides = build_overrides(args.resolution, args.fullscreen, args.sets,
+                                args.scale)
 
     if args.linux:
         exe = os.path.join(ROOT, 'build', LINUX_PRESET, 'iwd2r') \

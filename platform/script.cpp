@@ -196,7 +196,7 @@ void AddKey(std::vector<Step>& steps, int vk, int line, bool shift)
     }
 }
 
-std::vector<Step> Expand(const std::vector<Command>& commands)
+std::vector<Step> Expand(const std::vector<Command>& commands, SIZE screen)
 {
     std::vector<Step> steps;
     for (const Command& c : commands) {
@@ -212,8 +212,14 @@ std::vector<Step> Expand(const std::vector<Command>& commands)
         case Verb::Click:
         case Verb::RClick:
             s.action = Action::SetCursor;
-            s.x = c.x;
-            s.y = c.y;
+            if (c.ui) {
+                const POINT pt = platform::script::UiToScreen(c.x, c.y, screen.cx, screen.cy);
+                s.x = pt.x;
+                s.y = pt.y;
+            } else {
+                s.x = c.x;
+                s.y = c.y;
+            }
             s.frames = 1;
             s.observe = true;
             steps.push_back(s);
@@ -246,6 +252,8 @@ std::vector<Step> Expand(const std::vector<Command>& commands)
         case Verb::Quit:
             s.action = Action::Quit;
             steps.push_back(s);
+            break;
+        case Verb::Origin:
             break;
         }
     }
@@ -350,6 +358,16 @@ int VKForName(const std::string& name)
     return 0;
 }
 
+POINT UiToScreen(int x, int y, int screenWidth, int screenHeight)
+{
+    const bool doubled = (screenWidth == 1600 && screenHeight == 1200) || (screenWidth == 2048 && screenHeight == 1536);
+    const int scale = doubled ? 2 : 1;
+    POINT pt;
+    pt.x = (screenWidth - 800 * scale) / 2 + x * scale;
+    pt.y = (screenHeight - 600 * scale) / 2 + y * scale;
+    return pt;
+}
+
 bool Parse(const std::string& text, std::vector<Command>& commands, std::string& error)
 {
     commands.clear();
@@ -361,6 +379,7 @@ bool Parse(const std::string& text, std::vector<Command>& commands, std::string&
         commands.clear();
         return false;
     };
+    bool ui = true;
     while (std::getline(in, raw)) {
         ++line;
         const size_t hash = raw.find('#');
@@ -386,6 +405,7 @@ bool Parse(const std::string& text, std::vector<Command>& commands, std::string&
                                                                 : Verb::Move;
             if (args.size() != 2 || !ParseInt(args[0], c.x) || !ParseInt(args[1], c.y))
                 return fail(Lower(verb) + " needs X Y (non-negative integers)");
+            c.ui = ui;
         } else if (v == "KEY") {
             if (args.size() != 1)
                 return fail("key needs one key name");
@@ -414,6 +434,13 @@ bool Parse(const std::string& text, std::vector<Command>& commands, std::string&
             c.text = args[0];
             if (c.text.find_first_of("/\\:") != std::string::npos)
                 return fail("shot name must not contain a path");
+        } else if (v == "ORIGIN") {
+            c.verb = Verb::Origin;
+            const std::string mode = args.size() == 1 ? Upper(args[0]) : std::string();
+            if (mode != "UI" && mode != "SCREEN")
+                return fail("origin needs ui or screen");
+            ui = mode == "UI";
+            c.ui = ui;
         } else if (v == "QUIT") {
             c.verb = Verb::Quit;
             if (!args.empty())
@@ -430,7 +457,7 @@ void Start(std::vector<Command> commands)
 {
     Runtime& r = R();
     std::lock_guard<std::mutex> lock(r.mutex);
-    r.steps = Expand(commands);
+    r.steps = Expand(commands, platform::present::ScreenSize());
     r.next = 0;
     r.inStep = false;
     r.down.clear();

@@ -221,12 +221,53 @@ class PlayArgsTest(unittest.TestCase):
                          ['Game Options/Gore=0', 'A/B=x=y'])
 
     def test_bad_flags_rejected(self):
-        for argv in (['--resolution', '1366'], ['--set', 'NoSlash=1'],
+        for argv in (['--resolution', 'wide'], ['--scale', '5'],
+                     ['--vm', 'linux', '--script', 'x', '--resolution', '640'],
+                     ['--vm', 'linux', '--script', 'x', '--resolution', '1920',
+                      '--scale', '2'],
+                     ['--set', 'NoSlash=1'],
                      ['--set', 'A/B'], ['--set', 'A/B=1;C/D=2'],
                      ['--frames', '0'], ['--fullscreen', '--windowed']):
             with contextlib.redirect_stderr(io.StringIO()):
                 with self.assertRaises(SystemExit, msg=argv):
                     play.parse_args(argv)
+
+    def test_resolution_and_scale_flags(self):
+        a = play.parse_args(['--resolution', '1366', '--scale', 'auto'])
+        self.assertEqual(play.build_overrides(a.resolution, a.fullscreen,
+                                              a.sets, a.scale), [
+            'Program Options/Resolution=1366',
+            'Program Options/Full Screen=0',
+            'Program Options/Scale=auto'])
+        self.assertEqual(play.parse_args(['--resolution', 'Desktop'])
+                         .resolution, 'desktop')
+
+    def test_vm_overrides_carry_height_and_scale(self):
+        def vm(*argv):
+            return play.vm_overrides(play.parse_args(
+                ['--vm', 'linux', '--script', 'x'] + list(argv)))
+        overrides, g = vm()
+        self.assertEqual(overrides, [
+            'Program Options/Resolution=800',
+            'Program Options/Full Screen=0',
+            'Program Options/Scale=1',
+            'Program Options/Height=600'])
+        self.assertEqual((g['width'], g['height'], g['scale']), (800, 600, 1))
+        overrides, g = vm('--resolution', '1366', '--set',
+                          'Program Options/Height=768', '--set', 'A/B=1')
+        self.assertEqual(overrides[2:], ['Program Options/Scale=1',
+                                         'Program Options/Height=768',
+                                         'A/B=1'])
+        self.assertEqual((g['output_width'], g['output_height']), (1366, 768))
+        overrides, g = vm('--resolution', '1920')
+        self.assertEqual(overrides[3], 'Program Options/Height=1080')
+        overrides, g = vm('--resolution', '2560', '--scale', '2')
+        self.assertEqual((g['width'], g['height'], g['scale'],
+                          g['output_width']), (1280, 720, 2, 2560))
+        overrides, g = vm('--resolution', '3840', '--scale', 'auto')
+        self.assertEqual((g['width'], g['height'], g['scale']), (1280, 720, 3))
+        overrides, g = vm('--resolution', 'desktop')
+        self.assertEqual((g['width'], g['height']), play.VM_DESKTOP)
 
     def test_child_env(self):
         env = play.child_env({'PATH': '/bin'}, '/data', ['A/B=1', 'C/D=2'],
@@ -369,9 +410,9 @@ class ScenarioParseTest(unittest.TestCase):
             'quit\n')
         self.assertEqual(actions, [
             {'op': 'wait', 'frames': 60, 'line': 3},
-            {'op': 'click', 'x': 10, 'y': 20, 'line': 4},
-            {'op': 'rclick', 'x': 3, 'y': 4, 'line': 5},
-            {'op': 'move', 'x': 0, 'y': 0, 'line': 6},
+            {'op': 'click', 'x': 10, 'y': 20, 'ui': True, 'line': 4},
+            {'op': 'rclick', 'x': 3, 'y': 4, 'ui': True, 'line': 5},
+            {'op': 'move', 'x': 0, 'y': 0, 'ui': True, 'line': 6},
             {'op': 'key', 'key': 'ESCAPE', 'line': 7},
             {'op': 'key', 'key': 'A', 'line': 8},
             {'op': 'type', 'text': 'Hello  World 2', 'line': 9},
@@ -396,6 +437,8 @@ class ScenarioParseTest(unittest.TestCase):
             ('shot a/b\n', 'line 1: shot name must not contain a path'),
             ('shot c:x\n', 'line 1: shot name must not contain a path'),
             ('quit now\n', 'line 1: quit takes no arguments'),
+            ('origin\n', 'line 1: origin needs ui or screen'),
+            ('origin top\n', 'line 1: origin needs ui or screen'),
             ('wait 1\n\n# x\njump 1\n', "line 4: unknown command 'jump'"),
         ]
         for text, message in cases:
@@ -446,9 +489,56 @@ class ScenarioParseTest(unittest.TestCase):
                           (0x31, False)])
         self.assertEqual(out[5], {'op': 'click', 'x': 5, 'y': 6, 'line': 3})
         json.dumps(out)  # serialisable
+        # Window pixels: the centred UI, times the scale; origin dropped.
+        g = realinput.resolve_screen(2560, 1440, 2, (2560, 1440))
+        out = realinput.windows_actions(realinput.parse_scenario(
+            'click 5 6\norigin screen\nclick 5 6\n'), g)
+        self.assertEqual(out, [
+            {'op': 'click', 'x': (240 + 5) * 2, 'y': (60 + 6) * 2, 'line': 1},
+            {'op': 'click', 'x': 10, 'y': 12, 'line': 3}])
+
+    def test_origin_and_window_points(self):
+        actions = realinput.parse_scenario(
+            'origin screen\nclick 1 2\norigin UI\nmove 3 4\n')
+        self.assertEqual(actions[0], {'op': 'origin', 'ui': False, 'line': 1})
+        self.assertFalse(actions[1]['ui'])
+        self.assertTrue(actions[3]['ui'])
+        click = {'op': 'click', 'x': 645, 'y': 410, 'ui': True}
+        self.assertEqual(realinput.window_point(click, None), (645, 410))
+        for size, scale, want in (
+                ((800, 600), 1, (645, 410)),
+                ((1024, 768), 1, (757, 494)),
+                ((1366, 768), 1, (928, 494)),
+                ((1920, 1080), 1, (1205, 650)),
+                ((1280, 720), 2, (1770, 940)),
+                ((1280, 720), 3, (2655, 1410)),
+                ((1600, 1200), 1, (1290, 820)),
+                ((2048, 1536), 1, (1514, 988))):
+            g = {'width': size[0], 'height': size[1], 'scale': scale}
+            self.assertEqual(realinput.window_point(click, g), want,
+                             (size, scale))
+        screen = dict(click, ui=False)
+        self.assertEqual(realinput.window_point(
+            screen, {'width': 1280, 'height': 720, 'scale': 2}), (1290, 820))
+
+    def test_resolve_screen_matches_screen_layout(self):
+        r = realinput.resolve_screen
+        self.assertEqual(r(800, None, 1, (1920, 1080))['height'], 600)
+        self.assertEqual(r(2048, None, 1, (1920, 1080))['height'], 1536)
+        self.assertEqual(r(1366, None, 1, (1920, 1080))['height'], 768)
+        self.assertEqual(r('desktop', None, 1, (1920, 1080))['width'], 1920)
+        self.assertEqual(r(1920, 1080, 'auto', (1920, 1080))['scale'], 1)
+        self.assertEqual(r(2560, 1440, 'auto', (1920, 1080))['scale'], 2)
+        self.assertEqual(r(3840, 2160, 'auto', (1920, 1080))['scale'], 3)
+        self.assertEqual(r(1366, 768, 'auto', (1920, 1080))['scale'], 1)
+        with self.assertRaises(ValueError):
+            r(640, 480, 1, (1920, 1080))
+        with self.assertRaises(ValueError):
+            r(1920, 1080, 2, (1920, 1080))
 
     def test_describe_round_trips(self):
-        text = 'wait 5\nclick 1 2\nkey TAB\ntype ab\nshot x\nquit\n'
+        text = ('wait 5\nclick 1 2\norigin screen\nmove 3 4\nkey TAB\n'
+                'type ab\nshot x\nquit\n')
         actions = realinput.parse_scenario(text)
         self.assertEqual('\n'.join(realinput.describe(a) for a in actions)
                          + '\n', text)
@@ -496,8 +586,6 @@ class XvfbDisplayTest(unittest.TestCase):
         self.assertEqual(realinput.abstract_x_sockets(path + '-missing'), set())
 
     def test_screen_and_cpu(self):
-        self.assertEqual(realinput.screen_size(800), (800, 600))
-        self.assertEqual(realinput.screen_size(1024), (1024, 768))
         self.assertEqual(realinput.job_cpu(0, {3, 1}), 1)
         self.assertEqual(realinput.job_cpu(3, {3, 1}), 3)
 
@@ -572,6 +660,13 @@ class XDriverTest(unittest.TestCase):
         self.assertEqual(self.xdo(), [
             ['mousemove', '--window', '80', '645', '262'],
             ['mousedown', '1'], ['mouseup', '1']])
+
+    def test_click_lands_on_the_centred_scaled_ui(self):
+        self.driver.geometry = {'width': 1280, 'height': 720, 'scale': 2}
+        self.driver.do({'op': 'click', 'x': 645, 'y': 262, 'ui': True,
+                        'line': 1})
+        self.assertEqual(self.xdo()[0],
+                         ['mousemove', '--window', '80', '1770', '644'])
 
     def test_rclick_and_key(self):
         self.driver.window = 80

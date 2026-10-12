@@ -16,6 +16,12 @@
 //                 IWD2R_SHOT_DIR (default: the working directory, which is
 //                 the install directory once the engine has started)
 //   quit          post WM_CLOSE
+//   origin ui|screen
+//                 how later X Y are read: ui (the default) is the
+//                 original's 800x600 UI, centred on larger screens (and
+//                 drawn double size at 1600x1200 and 2048x1536), so one
+//                 script clicks the same buttons at every resolution;
+//                 screen is the engine's screen pixels
 //
 // The script advances once per presented frame. While it runs, the injected
 // cursor replaces the real mouse and injected keys read as down before the
@@ -38,7 +44,8 @@ enum class Verb { Wait,
     Key,
     Type,
     Shot,
-    Quit };
+    Quit,
+    Origin };
 
 struct Command {
     Verb verb = Verb::Wait;
@@ -47,7 +54,14 @@ struct Command {
     int y = 0;
     int vk = 0; // key
     std::string text; // type, shot
+    bool ui = true; // move, click, rclick: X Y in UI coordinates; origin: the mode set
 };
+
+// A point in the original's 800x600 UI coordinates on a screen of
+// screenWidth x screenHeight engine pixels: offset by the centred UI's
+// corner ((w - 800) / 2, (h - 600) / 2), and doubled at 1600x1200 and
+// 2048x1536, where the original draws the UI double size.
+POINT UiToScreen(int x, int y, int screenWidth, int screenHeight);
 
 // Frames a press, release or move waits for the engine to poll it before
 // the script moves on regardless.

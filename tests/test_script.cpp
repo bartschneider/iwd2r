@@ -145,8 +145,55 @@ TEST_CASE("script parser reports errors with line numbers", "[script]")
     CHECK(ParseError("quit now\n").rfind("line 1: quit", 0) == 0);
 }
 
+TEST_CASE("script origin selects UI or screen coordinates", "[script]")
+{
+    const std::vector<Command> c = ParseOk("click 1 2\norigin screen\nmove 3 4\nORIGIN UI\nrclick 5 6\n");
+    REQUIRE(c.size() == 5);
+    CHECK(c[0].ui);
+    CHECK(c[1].verb == Verb::Origin);
+    CHECK_FALSE(c[2].ui);
+    CHECK(c[4].ui);
+    CHECK(ParseError("origin\n") == "line 1: origin needs ui or screen");
+    CHECK(ParseError("origin centre\n") == "line 1: origin needs ui or screen");
+
+    // The 800x600 UI centred, or drawn double size at 1600x1200 and
+    // 2048x1536.
+    POINT p = platform::script::UiToScreen(645, 410, 800, 600);
+    CHECK(p.x == 645);
+    CHECK(p.y == 410);
+    p = platform::script::UiToScreen(645, 410, 1024, 768);
+    CHECK(p.x == 645 + 112);
+    CHECK(p.y == 410 + 84);
+    p = platform::script::UiToScreen(645, 410, 1920, 1080);
+    CHECK(p.x == 645 + 560);
+    CHECK(p.y == 410 + 240);
+    p = platform::script::UiToScreen(645, 410, 1600, 1200);
+    CHECK(p.x == 1290);
+    CHECK(p.y == 820);
+    p = platform::script::UiToScreen(645, 410, 2048, 1536);
+    CHECK(p.x == 224 + 1290);
+    CHECK(p.y == 168 + 820);
+
+    // Applied when the script starts, from the engine's screen.
+    const SIZE before = platform::present::ScreenSize();
+    platform::present::SetScreenSize(1366, 768);
+    platform::script::Start(ParseOk("move 10 20\norigin screen\nmove 30 40\n"));
+    platform::script::Advance();
+    CHECK(Cursor().x == 10 + 283);
+    CHECK(Cursor().y == 20 + 84);
+    platform::script::Advance();
+    platform::script::Advance();
+    CHECK(Cursor().x == 30);
+    CHECK(Cursor().y == 40);
+    platform::script::Stop();
+    platform::present::SetScreenSize(before.cx, before.cy);
+}
+
 TEST_CASE("script run drives the injected cursor and buttons", "[script]")
 {
+    // At 800x600 UI coordinates are screen coordinates.
+    const SIZE before = platform::present::ScreenSize();
+    platform::present::SetScreenSize(800, 600);
     platform::script::Start(ParseOk("wait 2\nclick 100 200\nkey RETURN\n"));
     REQUIRE(platform::script::Running());
 
@@ -183,6 +230,7 @@ TEST_CASE("script run drives the injected cursor and buttons", "[script]")
     CHECK_FALSE(platform::script::InjectedCursor(&p));
     SHORT state = 0;
     CHECK_FALSE(platform::script::InjectedKey(VK_RETURN, &state));
+    platform::present::SetScreenSize(before.cx, before.cy);
 }
 
 TEST_CASE("script run waits for the engine to poll a press", "[script]")

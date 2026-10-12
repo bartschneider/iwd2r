@@ -146,10 +146,14 @@ def parse_scenario(text):
     """Parses scenario text into a list of actions (dicts with 'op' and
     'line'), accepting exactly what platform::script::Parse accepts.
 
-    Actions: wait {frames}, move/click/rclick {x, y}, key {key}, type
-    {text}, shot {name}, quit. Raises ScenarioError on the first bad line.
+    Actions: wait {frames}, move/click/rclick {x, y, ui}, key {key}, type
+    {text}, shot {name}, quit, origin {ui}. ui is True when X Y are in the
+    original's 800x600 UI coordinates (the default, or after `origin ui`),
+    False for screen pixels (after `origin screen`). Raises ScenarioError on
+    the first bad line.
     """
     actions = []
+    ui = True
     for number, raw in enumerate(text.split('\n'), 1):
         if raw.endswith('\r'):
             raw = raw[:-1]
@@ -175,7 +179,7 @@ def parse_scenario(text):
             if None in xy:
                 fail('%s needs X Y (non-negative integers)' % verb.lower())
             actions.append({'op': v.lower(), 'x': xy[0], 'y': xy[1],
-                            'line': number})
+                            'ui': ui, 'line': number})
         elif v == 'KEY':
             if len(args) != 1:
                 fail('key needs one key name')
@@ -198,6 +202,12 @@ def parse_scenario(text):
             if any(c in args[0] for c in '/\\:'):
                 fail('shot name must not contain a path')
             actions.append({'op': 'shot', 'name': args[0], 'line': number})
+        elif v == 'ORIGIN':
+            mode = args[0].upper() if len(args) == 1 else ''
+            if mode not in ('UI', 'SCREEN'):
+                fail('origin needs ui or screen')
+            ui = mode == 'UI'
+            actions.append({'op': 'origin', 'ui': ui, 'line': number})
         elif v == 'QUIT':
             if args:
                 fail('quit takes no arguments')
@@ -216,12 +226,19 @@ def load_scenario(path):
         raise ScenarioError('%s: %s' % (path, e)) from None
 
 
-def windows_actions(actions):
+def windows_actions(actions, geometry=None):
     """The action list for tools/sandbox/driver.ps1: keys carry their VK code
-    and extended flag, and `type` is expanded into single key presses (with
-    shift for capitals), so PowerShell never interprets scenario text."""
+    and extended flag, `type` is expanded into single key presses (with
+    shift for capitals), so PowerShell never interprets scenario text, and
+    pointer coordinates are window pixels (window_point)."""
     out = []
     for a in actions:
+        if a['op'] == 'origin':
+            continue
+        if a['op'] in ('move', 'click', 'rclick'):
+            x, y = window_point(a, geometry)
+            out.append({'op': a['op'], 'x': x, 'y': y, 'line': a['line']})
+            continue
         if a['op'] == 'key':
             out.append({'op': 'key', 'line': a['line'], 'key': a['key'],
                         'vk': vk_for_name(a['key']),
@@ -251,12 +268,63 @@ def describe(action):
         return 'type %s' % action['text']
     if op == 'shot':
         return 'shot %s' % action['name']
+    if op == 'origin':
+        return 'origin %s' % ('ui' if action['ui'] else 'screen')
     return op
 
 
-def screen_size(resolution):
-    """The Xvfb screen (the game's virtual screen) for a Resolution value."""
-    return {800: (800, 600), 1024: (1024, 768)}[resolution]
+# The original resolutions and their 4:3 heights (src/ScreenLayout.cpp).
+ORIGINAL_HEIGHTS = {800: 600, 1024: 768, 1600: 1200, 2048: 1536}
+MAX_SCALE = 4
+
+
+def resolve_screen(width, height, scale, desktop):
+    """Python port of iwd2r::ResolveScreenSize (src/ScreenLayout.cpp).
+
+    width: an int or 'desktop'; height: an int or None; scale: 1-4 or
+    'auto'; desktop: (w, h). Returns a dict with output_width,
+    output_height, scale, width, height (the engine's internal screen).
+    Raises ValueError below the 800x600 minimum."""
+    if width == 'desktop':
+        width = desktop[0]
+        if not height:
+            height = desktop[1]
+    elif not height:
+        height = ORIGINAL_HEIGHTS.get(width)
+        if height is None:
+            height = (width * desktop[1] + desktop[0] // 2) // desktop[0]
+    if scale == 'auto':
+        scale = 1
+        for s in range(MAX_SCALE, 1, -1):
+            if height // s >= 720 and width // s >= 800 and height // s >= 600:
+                scale = s
+                break
+    scale = int(scale)
+    w, h = width // scale, height // scale
+    if w < 800 or h < 600:
+        raise ValueError('%dx%d at scale %d is %dx%d inside; the minimum is '
+                         '800x600' % (width, height, scale, w, h))
+    return {'output_width': w * scale, 'output_height': h * scale,
+            'scale': scale, 'width': w, 'height': h}
+
+
+def ui_to_screen(x, y, width, height):
+    """A point in the 800x600 UI on an engine screen of width x height:
+    platform::script::UiToScreen (centred, doubled at 1600x1200 and
+    2048x1536)."""
+    k = 2 if (width, height) in ((1600, 1200), (2048, 1536)) else 1
+    return ((width - 800 * k) // 2 + x * k, (height - 600 * k) // 2 + y * k)
+
+
+def window_point(action, geometry):
+    """The window (client area) pixel for a move/click action: UI
+    coordinates placed on the engine's screen, then times the scale."""
+    if geometry is None:
+        geometry = {'width': 800, 'height': 600, 'scale': 1}
+    x, y = action['x'], action['y']
+    if action.get('ui', True):
+        x, y = ui_to_screen(x, y, geometry['width'], geometry['height'])
+    return x * geometry['scale'], y * geometry['scale']
 
 
 def abstract_x_sockets(proc_net_unix='/proc/net/unix'):
@@ -506,7 +574,7 @@ class XDriver:
 
     def __init__(self, display, game, run_dir, control_dir, log, deadline,
                  run=None, sleep=time.sleep, abort=None, baseline=(),
-                 cpu=None):
+                 cpu=None, geometry=None):
         self.display = ':%d' % display if isinstance(display, int) else display
         self.game = game
         self.run_dir = run_dir
@@ -519,6 +587,7 @@ class XDriver:
         self.window = None
         self.baseline = set(baseline)
         self.cpu = cpu
+        self.geometry = geometry
         self.screen_shots = 0
         self.engine_shots = 0
 
@@ -707,7 +776,7 @@ class XDriver:
         if op == 'wait':
             self.wait(action['frames'])
         elif op in ('move', 'click', 'rclick'):
-            self.pointer(action['x'], action['y'])
+            self.pointer(*window_point(action, self.geometry))
             self.sleep_frames(MOVE_SETTLE_FRAMES)
             if op != 'move':
                 self.button(1 if op == 'click' else 3)
@@ -747,9 +816,11 @@ class XDriver:
             raise
 
 
-def run_scenario(exe, base_env, actions, run_dir, resolution, timeout,
+def run_scenario(exe, base_env, actions, run_dir, geometry, timeout,
                  taken, cwd=None, abort=None, cpu=None):
     """Runs the game on its own Xvfb display and drives it with actions.
+
+    geometry: resolve_screen's result; Xvfb takes the output size.
 
     Returns a dict: code (the game's exit code, or non-zero when the driver
     failed or the run timed out), error, screen_shots, engine_shots,
@@ -758,7 +829,7 @@ def run_scenario(exe, base_env, actions, run_dir, resolution, timeout,
     started = time.time()
     control = os.path.join(run_dir, 'control')
     os.makedirs(control, exist_ok=True)
-    width, height = screen_size(resolution)
+    width, height = geometry['output_width'], geometry['output_height']
     result = {'code': None, 'error': None, 'screen_shots': 0,
               'engine_shots': 0, 'seconds': 0.0, 'display': None}
     xvfb = game = None
@@ -793,7 +864,7 @@ def run_scenario(exe, base_env, actions, run_dir, resolution, timeout,
             log('game pid %d' % game.pid)
             driver = XDriver(n, game, run_dir, control, log,
                              started + timeout, abort=abort,
-                             baseline=baseline, cpu=cpu)
+                             baseline=baseline, cpu=cpu, geometry=geometry)
             try:
                 outcome = driver.run(actions)
                 log('scenario %s; waiting for the game to exit' % outcome)
