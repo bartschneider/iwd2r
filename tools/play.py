@@ -446,11 +446,22 @@ def run_linux_vm(args, argv, scenarios, data, overrides, base_dir, nested):
         run_dir = os.path.join(base_dir, name) if nested else base_dir
         prepare_scenario_dir(run_dir, path, actions)
         log('linux: %s on Xvfb (real input)' % name)
-        result = realinput.run_scenario(exe, base_env, actions, run_dir,
-                                        args.resolution, args.timeout, taken,
-                                        cwd=ROOT, abort=abort,
-                                        cpu=realinput.job_cpu(slot, cpus)
-                                        if args.jobs > 1 else None)
+        env = base_env
+        view = None
+        if args.jobs > 1:
+            # Parallel games would share the install's cache and temp
+            # folders and INI files: each gets a private view of it.
+            view = realinput.make_install_view(
+                data, os.path.join(run_dir, 'install'))
+            env = dict(base_env, IWD2_DATA=view)
+        try:
+            result = realinput.run_scenario(
+                exe, env, actions, run_dir, args.resolution, args.timeout,
+                taken, cwd=ROOT, abort=abort,
+                cpu=realinput.job_cpu(slot, cpus) if args.jobs > 1 else None)
+        finally:
+            if view:
+                realinput.remove_install_view(view)
         write_vm_summary(run_dir, argv, 'linux-vm', path, overrides, result)
         log('linux: %s exit %s in %.1f s%s' % (
             name, result['code'], result['seconds'],

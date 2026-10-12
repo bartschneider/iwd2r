@@ -502,6 +502,39 @@ class XvfbDisplayTest(unittest.TestCase):
         self.assertEqual(realinput.job_cpu(3, {3, 1}), 3)
 
 
+class InstallViewTest(unittest.TestCase):
+    def test_view_links_the_install_and_keeps_writes_private(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            install = os.path.join(tmp, 'install')
+            for d in ('Data', 'cache/data', 'temp', 'TempSave'):
+                os.makedirs(os.path.join(install, d))
+            for f, data in (('CHITIN.KEY', 'k'), ('icewind2.ini', 'a=1'),
+                            ('cache/data/x.bif', 'b'), ('temp/t', 't')):
+                with open(os.path.join(install, f), 'w') as fh:
+                    fh.write(data)
+            view = realinput.make_install_view(install,
+                                               os.path.join(tmp, 'view'))
+            self.assertTrue(os.path.islink(os.path.join(view, 'Data')))
+            self.assertTrue(os.path.islink(os.path.join(view, 'CHITIN.KEY')))
+            for d in ('cache', 'temp', 'TempSave'):
+                path = os.path.join(view, d)
+                self.assertFalse(os.path.islink(path), d)
+                self.assertEqual(os.listdir(path), [])
+            ini = os.path.join(view, 'icewind2.ini')
+            self.assertFalse(os.path.islink(ini))
+            with open(ini, 'w') as fh:
+                fh.write('changed')
+            with open(os.path.join(install, 'icewind2.ini')) as fh:
+                self.assertEqual(fh.read(), 'a=1')
+            realinput.remove_install_view(view)
+            self.assertFalse(os.path.exists(view))
+            self.assertTrue(os.path.isfile(
+                os.path.join(install, 'cache', 'data', 'x.bif')))
+            self.assertEqual(sorted(os.listdir(install)),
+                             ['CHITIN.KEY', 'Data', 'TempSave', 'cache',
+                              'icewind2.ini', 'temp'])
+
+
 class FakeGame:
     pid = 4242
 
