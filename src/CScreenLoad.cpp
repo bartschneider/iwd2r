@@ -1,3 +1,4 @@
+// Modified for iwd2r; see NOTICE.md
 #include "CScreenLoad.h"
 
 #include "CBaldurChitin.h"
@@ -6,7 +7,6 @@
 #include "CInfGame.h"
 #include "CScreenCharacter.h"
 #include "CScreenConnection.h"
-#include "CScreenMultiPlayer.h"
 #include "CScreenSinglePlayer.h"
 #include "CScreenStart.h"
 #include "CScreenWorld.h"
@@ -609,11 +609,6 @@ void CScreenLoad::LoadGame(INT nSlot)
                     pSinglePlayer->field_45C = 1;
                     pSinglePlayer->StartSinglePlayer(1);
                     SelectEngine(pSinglePlayer);
-                } else {
-                    CScreenMultiPlayer* pMultiPlayer = g_pBaldurChitin->m_pEngineMultiPlayer;
-                    pMultiPlayer->field_45C = 1;
-                    pMultiPlayer->StartMultiPlayer(1);
-                    SelectEngine(pMultiPlayer);
                 }
                 break;
             default:

@@ -1,3 +1,4 @@
+// Modified for iwd2r; see NOTICE.md
 #ifndef CUICONTROLFACTORY_H_
 #define CUICONTROLFACTORY_H_
 
@@ -164,6 +165,29 @@ public:
     CUIControlButtonMultiPlayerHotArea(CUIPanel* panel, UI_CONTROL_BUTTON* controlInfo);
     ~CUIControlButtonMultiPlayerHotArea() override;
     void OnHotAreaClick(CPoint pt) override;
+};
+
+// NOTE: iwd2r: moved here from the removed `CScreenMultiPlayer.h`; the world,
+// store and other single-player panels create these controls.
+class CUIControlButtonMultiPlayerPortrait : public CUIControlButton {
+public:
+    CUIControlButtonMultiPlayerPortrait(CUIPanel* panel, UI_CONTROL_BUTTON* controlInfo);
+    ~CUIControlButtonMultiPlayerPortrait() override;
+    BOOL Render(BOOL bForce) override;
+    void OnLButtonClick(CPoint pt) override;
+
+    void SetPortrait(const CResRef& resRef);
+
+    CResRef GetPortrait();
+
+    /* 0666 */ CResRef m_portraitResRef;
+};
+
+class CUIControlEditMultiPlayerChat : public CUIControlEdit {
+public:
+    CUIControlEditMultiPlayerChat(CUIPanel* panel, UI_CONTROL_EDIT* controlInfo);
+    ~CUIControlEditMultiPlayerChat() override;
+    void OnEditReturn(CString sText) override;
 };
 
 class CUIControlPortraitGeneral : public CUIControlPortraitBase {

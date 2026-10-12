@@ -1,3 +1,4 @@
+// Modified for iwd2r; see NOTICE.md
 #include "CBaldurChitin.h"
 
 #include "CBaldurProjector.h"
@@ -30,7 +31,6 @@
 #include "CScreenLoad.h"
 #include "CScreenMap.h"
 #include "CScreenMovies.h"
-#include "CScreenMultiPlayer.h"
 #include "CScreenOptions.h"
 #include "CScreenSave.h"
 #include "CScreenSinglePlayer.h"
@@ -166,7 +166,6 @@ CBaldurChitin::CBaldurChitin()
     m_pEngineStart = NULL;
     m_pEngineWorld = NULL;
     m_pEngineStore = NULL;
-    m_pEngineMultiPlayer = NULL;
     m_pEngineSinglePlayer = NULL;
     m_pEngineConnection = NULL;
     m_pEngineWorldMap = NULL;
@@ -670,11 +669,6 @@ CBaldurChitin::~CBaldurChitin()
         m_pEngineConnection = NULL;
     }
 
-    if (m_pEngineMultiPlayer != NULL) {
-        delete m_pEngineMultiPlayer;
-        m_pEngineMultiPlayer = NULL;
-    }
-
     if (m_pEngineSinglePlayer != NULL) {
         delete m_pEngineSinglePlayer;
         m_pEngineSinglePlayer = NULL;
@@ -854,7 +848,6 @@ void CBaldurChitin::Init(HINSTANCE hInstance)
     m_pEngineStart = new CScreenStart();
     m_pEngineWorld = new CScreenWorld();
     m_pEngineStore = new CScreenStore();
-    m_pEngineMultiPlayer = new CScreenMultiPlayer();
     m_pEngineSinglePlayer = new CScreenSinglePlayer();
     m_pEngineConnection = new CScreenConnection();
     m_pEngineWorldMap = new CScreenWorldMap();
@@ -881,7 +874,6 @@ void CBaldurChitin::Init(HINSTANCE hInstance)
     AddEngine(m_pEngineStart);
     AddEngine(m_pEngineWorld);
     AddEngine(m_pEngineStore);
-    AddEngine(m_pEngineMultiPlayer);
     AddEngine(m_pEngineSinglePlayer);
     AddEngine(m_pEngineConnection);
     AddEngine(m_pEngineWorldMap);
@@ -1971,10 +1963,6 @@ void CBaldurChitin::OnMultiplayerSessionOpen(CString& sJoinedGame, CString& sDro
         m_pEngineWorld->ClearChatMessages();
     }
 
-    if (m_pEngineMultiPlayer != NULL) {
-        m_pEngineMultiPlayer->ClearChatMessages();
-    }
-
     if (m_pEngineWorldMap != NULL) {
         m_pEngineWorldMap->ClearChatMessages();
     }
@@ -2014,10 +2002,6 @@ void CBaldurChitin::ClearChatMessages()
 
     if (m_pEngineWorld != NULL) {
         m_pEngineWorld->ClearChatMessages();
-    }
-
-    if (m_pEngineMultiPlayer != NULL) {
-        m_pEngineMultiPlayer->ClearChatMessages();
     }
 
     if (m_pEngineWorldMap != NULL) {

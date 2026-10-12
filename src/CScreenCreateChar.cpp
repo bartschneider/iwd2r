@@ -1,3 +1,4 @@
+// Modified for iwd2r; see NOTICE.md
 #include "CScreenCreateChar.h"
 
 #include "CBaldurChitin.h"
@@ -12,7 +13,6 @@
 #include "CInfGame.h"
 #include "CScreenCharacter.h"
 #include "CScreenConnection.h"
-#include "CScreenMultiPlayer.h"
 #include "CScreenSinglePlayer.h"
 #include "CScreenWorld.h"
 #include "CSpell.h"
@@ -5549,12 +5549,6 @@ void CScreenCreateChar::OnMainCancelButtonClick()
         CScreenSinglePlayer* pSinglePlayer = g_pBaldurChitin->m_pEngineSinglePlayer;
 
         UTIL_ASSERT(pSinglePlayer != NULL);
-    } else {
-        CScreenMultiPlayer* pMultiPlayer = g_pBaldurChitin->m_pEngineMultiPlayer;
-
-        // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenCreateChar.cpp
-        // __LINE__: 9758
-        UTIL_ASSERT(pMultiPlayer != NULL);
     }
 
     CScreenConnection* pConnection = g_pBaldurChitin->m_pEngineConnection;
@@ -5628,11 +5622,6 @@ void CScreenCreateChar::OnMainCancelButtonClick()
                 g_pBaldurChitin->m_pEngineSinglePlayer->StartSinglePlayer(1);
                 g_pBaldurChitin->m_pEngineSinglePlayer->field_138E = 1;
                 SelectEngine(g_pBaldurChitin->m_pEngineSinglePlayer);
-            } else {
-                g_pBaldurChitin->m_pEngineMultiPlayer->field_45C = 1;
-                g_pBaldurChitin->m_pEngineMultiPlayer->StartMultiPlayer(1);
-                g_pBaldurChitin->m_pEngineMultiPlayer->field_138E = 1;
-                SelectEngine(g_pBaldurChitin->m_pEngineMultiPlayer);
             }
 
             break;
@@ -6144,10 +6133,6 @@ void CUIControlButtonCharGenAccept::OnLButtonClick(CPoint pt)
             g_pBaldurChitin->m_pEngineSinglePlayer->field_45C = 1;
             g_pBaldurChitin->m_pEngineSinglePlayer->StartSinglePlayer(1);
             pCreateChar->SelectEngine(g_pBaldurChitin->m_pEngineSinglePlayer);
-        } else {
-            g_pBaldurChitin->m_pEngineMultiPlayer->field_45C = 1;
-            g_pBaldurChitin->m_pEngineMultiPlayer->StartMultiPlayer(1);
-            pCreateChar->SelectEngine(g_pBaldurChitin->m_pEngineMultiPlayer);
         }
         break;
     case 4:

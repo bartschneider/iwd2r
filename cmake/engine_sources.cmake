@@ -285,8 +285,6 @@ set(IWD2R_ENGINE_SOURCES
     "src/CScreenMap.h"
     "src/CScreenMovies.cpp"
     "src/CScreenMovies.h"
-    "src/CScreenMultiPlayer.cpp"
-    "src/CScreenMultiPlayer.h"
     "src/CScreenOptions.cpp"
     "src/CScreenOptions.h"
     "src/CScreenSave.cpp"

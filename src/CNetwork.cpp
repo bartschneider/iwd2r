@@ -1,3 +1,4 @@
+// Modified for iwd2r; see NOTICE.md
 #include "CNetwork.h"
 
 #include "CChitin.h"
@@ -350,80 +351,6 @@ BOOLEAN CNetworkWindow::CheckOutgoingQueueForAppendableMsgs(DWORD dwSize)
     }
 
     return FALSE;
-}
-
-// 0x7A2590
-void CNetworkWindow::FrameSend(BYTE nFrameKind, WORD nFrameNumber)
-{
-    BYTE* pData;
-    DWORD dwSize;
-
-    if (nFrameKind != 0) {
-        pData = new BYTE[CNetwork::dword_85E698];
-        dwSize = CNetwork::dword_85E698;
-    } else {
-        pData = m_pOutgoingBuffers[0].pData;
-        dwSize = m_pOutgoingBuffers[0].dwSize;
-    }
-
-    if (pData == NULL) {
-        // __FILE__: C:\Projects\Icewind2\src\chitin\ChNetwork.cpp
-        // __LINE__ 913
-        UTIL_ASSERT_MSG(FALSE, "FrameSend:: Null Message!\n");
-    }
-
-    pData[0] = nFrameKind;
-    pData[1] = static_cast<BYTE>(nFrameNumber >> 8);
-    pData[2] = static_cast<BYTE>(nFrameNumber);
-    pData[3] = static_cast<BYTE>((m_nFrameExpected - 1) >> 8);
-    pData[4] = static_cast<BYTE>(m_nFrameExpected - 1);
-
-    if (dwSize >= 10) {
-        DWORD dwCrc = 0;
-
-        pData[6] = 0;
-        pData[7] = 0;
-        pData[8] = 0;
-        pData[9] = 0;
-
-        for (DWORD k = 0; k < dwSize; k++) {
-            dwCrc = g_pChitin->cNetwork.m_dwCRC32[(dwCrc & 0xFF) ^ pData[k]] ^ (dwCrc >> 8);
-        }
-
-        pData[6] = static_cast<BYTE>(dwCrc >> 24);
-        pData[7] = static_cast<BYTE>(dwCrc >> 16);
-        pData[8] = static_cast<BYTE>(dwCrc >> 8);
-        pData[9] = static_cast<BYTE>(dwCrc);
-    }
-
-    if (nFrameKind == 2) {
-        m_bNoNak = TRUE;
-    }
-
-    PLAYER_ID idTo = g_pChitin->cNetwork.GetPlayerID(m_nPlayerNumber);
-
-    EnterCriticalSection(&(g_pChitin->cNetwork.field_F6A));
-    g_pChitin->cNetwork.m_lpDirectPlay->Send(g_pChitin->cNetwork.m_idLocalPlayer,
-        idTo,
-        0,
-        pData,
-        dwSize);
-    LeaveCriticalSection(&(g_pChitin->cNetwork.field_F6A));
-
-    if (nFrameKind == 0) {
-        m_pbTimeOutSet[0] = TRUE;
-        m_pnTimeOut[0] = m_nPacketTimeout + GetTickCount();
-        if (m_pnTimeOut[0] > MAX_TIMEOUT_TICK_COUNT) {
-            m_pnTimeOut[0] = 0;
-        }
-    } else {
-        delete pData;
-    }
-
-    m_bAckTimerSet = FALSE;
-
-    // NOTE: Uninline.
-    SetNoMessageTimeout();
 }
 
 // #binary-identical
@@ -993,255 +920,6 @@ BYTE* CNetworkWindow::RemoveFromIncomingQueueSpecific(BYTE nSpecMsgType, BYTE nS
     return NULL;
 }
 
-// 0x7A38B0
-void CNetworkWindow::SendCall()
-{
-    m_bSomethingHappened = FALSE;
-
-    if (m_nNumBuffered != 0) {
-        return;
-    }
-
-    EnterCriticalSection(&(g_pChitin->cNetwork.field_F52));
-
-    while (!m_lQueueOutgoingMessages.IsEmpty() && m_nNumBuffered == 0) {
-        CNETWORKWINDOW_QUEUEENTRY* node = m_lQueueOutgoingMessages.RemoveHead();
-
-        // __FILE__: C:\Projects\Icewind2\src\chitin\ChNetwork.cpp
-        // __LINE__: 2286
-        UTIL_ASSERT_MSG(node != NULL, "CNetworkWindow::SendCall: Null message being sent!");
-
-        if (g_pChitin->cNetwork.m_idLocalPlayer == g_pChitin->cNetwork.GetPlayerID(m_nPlayerNumber)) {
-            AddToIncomingQueue(node->idFrom,
-                node->idTo,
-                node->pData,
-                node->dwSize);
-        } else {
-            m_nNumBuffered++;
-            m_bSomethingHappened = TRUE;
-            m_pOutgoingBuffers[0] = *node;
-            node->pData = NULL;
-            delete node;
-
-            if (m_pOutgoingBuffers[0].dwSize < CNetwork::MAXIMAL_PACKET_SIZE) {
-                DWORD dwRemainingSize = CNetwork::MAXIMAL_PACKET_SIZE - m_pOutgoingBuffers[0].dwSize;
-                if (CNetwork::MAXIMAL_PACKET_SIZE != m_pOutgoingBuffers[0].dwSize
-                    && m_pOutgoingBuffers[0].dwSize > CNetwork::dword_85E68C
-                    && memcmp(m_pOutgoingBuffers[0].pData + CNetwork::dword_85E698, (LPCSTR)CNetwork::JM, CNetwork::dword_85E69C) == 0
-                    && m_pOutgoingBuffers[0].pData[CNetwork::dword_85E698 + CNetwork::dword_85E69C] == 0
-                    && m_pOutgoingBuffers[0].pData[CNetwork::dword_85E698 + CNetwork::dword_85E69C + 1] == 1) {
-                    while (dwRemainingSize != 0) {
-                        if (CheckOutgoingQueueForAppendableMsgs(dwRemainingSize) != TRUE) {
-                            break;
-                        }
-
-                        CNETWORKWINDOW_QUEUEENTRY* newNode = !m_lQueueOutgoingMessages.IsEmpty()
-                            ? m_lQueueOutgoingMessages.RemoveHead()
-                            : NULL;
-
-                        // __FILE__: C:\Projects\Icewind2\src\chitin\ChNetwork.cpp
-                        // __LINE__: 2380
-                        UTIL_ASSERT(newNode != NULL);
-
-                        DWORD dwNewSize = m_pOutgoingBuffers[0].dwSize + newNode->dwSize;
-                        BYTE* pNewData = new BYTE[dwNewSize];
-                        if (pNewData == NULL) {
-                            // __FILE__: C:\Projects\Icewind2\src\chitin\ChNetwork.cpp
-                            // __LINE__: 2400
-                            UTIL_ASSERT(FALSE);
-                        }
-
-                        memcpy(pNewData,
-                            m_pOutgoingBuffers[0].pData,
-                            m_pOutgoingBuffers[0].dwSize);
-                        memcpy(pNewData + m_pOutgoingBuffers[0].dwSize,
-                            newNode->pData,
-                            newNode->dwSize);
-
-                        delete m_pOutgoingBuffers[0].pData;
-                        m_pOutgoingBuffers[0].pData = NULL;
-
-                        if (newNode->pData != NULL) {
-                            delete newNode->pData;
-                            newNode->pData = NULL;
-                        }
-
-                        delete newNode;
-
-                        m_pOutgoingBuffers[0].pData = pNewData;
-                        m_pOutgoingBuffers[0].dwSize = dwNewSize;
-
-                        if (dwNewSize < CNetwork::MAXIMAL_PACKET_SIZE) {
-                            dwRemainingSize = CNetwork::MAXIMAL_PACKET_SIZE - dwNewSize;
-                        } else {
-                            dwRemainingSize = 0;
-                        }
-                    }
-                }
-            }
-
-            FrameSend(0, m_nNextFrameToSend);
-            m_nNextFrameToSend++;
-        }
-    }
-
-    LeaveCriticalSection(&(g_pChitin->cNetwork.field_F52));
-}
-
-// 0x7A3B50
-void CNetworkWindow::ReceiveCall(BYTE* pData, DWORD dwSize)
-{
-    BOOLEAN v1 = FALSE;
-
-    EnterCriticalSection(&(g_pChitin->cNetwork.field_F52));
-
-    BOOLEAN v2 = TRUE;
-    m_bSomethingHappened = TRUE;
-
-    if (pData[0] == 3) {
-        AddToIncomingQueue(g_pChitin->cNetwork.GetPlayerID(m_nPlayerNumber),
-            g_pChitin->cNetwork.m_idLocalPlayer,
-            pData,
-            dwSize);
-    } else {
-        WORD nFrame = pData[2] + (pData[1] << 8);
-        WORD nAck = pData[4] + (pData[3] << 8);
-
-        if (pData[0] == 0) {
-            if (nFrame != m_nFrameExpected && m_bNoNak == TRUE) {
-                FrameSend(2, 0);
-            }
-
-            if ((m_nFrameExpected <= nFrame && nFrame < m_nTooFar)
-                || (m_nTooFar < m_nFrameExpected && m_nFrameExpected <= nFrame)
-                || (nFrame < m_nTooFar && m_nTooFar < m_nFrameExpected)) {
-                if (!m_pbArrived[0]) {
-                    m_pbArrived[0] = TRUE;
-                    m_pIncomingBuffers[0].idFrom = g_pChitin->cNetwork.GetPlayerID(m_nPlayerNumber);
-                    m_pIncomingBuffers[0].idTo = g_pChitin->cNetwork.m_idLocalPlayer;
-                    m_pIncomingBuffers[0].pData = pData;
-                    m_pIncomingBuffers[0].dwSize = dwSize;
-
-                    v1 = TRUE;
-
-                    while (m_pbArrived[0] == TRUE) {
-                        AddToIncomingQueue(m_pIncomingBuffers[0].idFrom,
-                            m_pIncomingBuffers[0].idTo,
-                            m_pIncomingBuffers[0].pData,
-                            m_pIncomingBuffers[0].dwSize);
-                        m_bNoNak = TRUE;
-                        m_pbArrived[0] = FALSE;
-                        m_pIncomingBuffers[0].pData = NULL;
-                        m_pIncomingBuffers[0].dwSize = 0;
-                        m_nFrameExpected++;
-                        m_nTooFar++;
-                        m_bAckTimerSet = TRUE;
-                        m_nAckTimer = m_nPacketTimeout + GetTickCount();
-                        if (m_nAckTimer > CNetworkWindow::MAX_TIMEOUT_TICK_COUNT) {
-                            m_nAckTimer = 0;
-                        }
-                    }
-                }
-            }
-        } else if (pData[0] == 2) {
-            if ((m_nAckExpected <= nAck && nAck < m_nNextFrameToSend)
-                || (m_nNextFrameToSend < m_nAckExpected && m_nAckExpected <= nAck)
-                || (nAck < m_nNextFrameToSend && m_nNextFrameToSend < m_nAckExpected)) {
-                FrameSend(0, nAck);
-            }
-        }
-
-        while ((m_nAckExpected <= nAck && nAck < m_nNextFrameToSend)
-            || (m_nNextFrameToSend < m_nAckExpected && m_nAckExpected <= nAck)
-            || (nAck < m_nNextFrameToSend && m_nNextFrameToSend < m_nAckExpected)) {
-            m_nNumBuffered--;
-            m_pbTimeOutSet[0] = FALSE;
-            m_pnTimeOut[0] = 0;
-
-            if (m_pOutgoingBuffers[0].pData != NULL) {
-                delete m_pOutgoingBuffers[0].pData;
-                m_pOutgoingBuffers[0].pData = NULL;
-            }
-
-            m_pOutgoingBuffers[0].dwSize = 0;
-            m_nAckExpected++;
-        }
-
-        v2 = v1;
-    }
-
-    LeaveCriticalSection(&(g_pChitin->cNetwork.field_F52));
-
-    // NOTE: Uninline.
-    SetPlayerTimeout();
-
-    if (!v2) {
-        delete pData;
-    }
-}
-
-// 0x7A3DF0
-void CNetworkWindow::TimeoutCall()
-{
-    DWORD dwTickCount = GetTickCount();
-
-    BOOLEAN v1 = FALSE;
-    WORD nFrameNumber;
-    if (m_pbTimeOutSet[0] && dwTickCount > m_pnTimeOut[0]) {
-        v1 = TRUE;
-        nFrameNumber = m_pOutgoingBuffers[0].pData[2] + (m_pOutgoingBuffers[0].pData[1] << 8);
-    }
-
-    if (v1 == TRUE) {
-        FrameSend(0, nFrameNumber);
-        m_bSomethingHappened = TRUE;
-    }
-
-    if (m_bAckTimerSet == TRUE && GetTickCount() >= m_nAckTimer) {
-        FrameSend(1, 0);
-        m_bSomethingHappened = TRUE;
-    }
-
-    if (m_nNoMessageTimeout < GetTickCount()) {
-        if (g_pChitin->cNetwork.GetPlayerID(m_nPlayerNumber) != g_pChitin->cNetwork.m_idLocalPlayer) {
-            FrameSend(1, 0);
-            m_bSomethingHappened = TRUE;
-        }
-
-        // NOTE: Uninline.
-        SetNoMessageTimeout();
-    }
-
-    if (m_bSomethingHappened == TRUE) {
-        m_nNextEvent = GetTickCount();
-        return;
-    }
-
-    BOOLEAN bHasNextEvent = FALSE;
-    DWORD nNextEvent;
-    if (m_bAckTimerSet == TRUE) {
-        bHasNextEvent = TRUE;
-        nNextEvent = m_nAckTimer;
-    }
-
-    if (m_pbTimeOutSet[0] == TRUE) {
-        if (bHasNextEvent) {
-            if (m_pnTimeOut[0] < nNextEvent) {
-                nNextEvent = m_pnTimeOut[0];
-            }
-        } else {
-            nNextEvent = m_pnTimeOut[0];
-            bHasNextEvent = TRUE;
-        }
-    }
-
-    if (!bHasNextEvent) {
-        nNextEvent = -1;
-    }
-
-    m_nNextEvent = nNextEvent;
-}
-
 // NOTE: Inlined.
 void CNetworkWindow::SetPlayerTimeout()
 {
@@ -1269,18 +947,11 @@ void CNetworkWindow::SetNoMessageTimeout()
 // 0x7A3FD0
 CNetwork::CNetwork()
 {
-#if DPLAY_COMPAT
-    InitDirectPlay();
-#endif
-
     field_9D = 0;
     field_9E = 0;
-    m_bDirectPlayAddressCreated = FALSE;
     field_796 = 0;
     InitializeCriticalSection(&field_F52);
     InitializeCriticalSection(&field_F6A);
-    m_lpDirectPlay = NULL;
-    m_lpDirectPlayLobby = NULL;
     m_nApplicationGuid = GUID_NULL;
     m_bApplicationGuidDefined = FALSE;
     field_19 = 0;
@@ -1303,9 +974,6 @@ CNetwork::CNetwork()
     m_sPhoneNumber = "";
     m_nSerialBaudRate = 57600;
     m_nSerialPort = 1;
-    m_nSerialFlowControl = DPCPA_RTSDTRFLOW;
-    m_nSerialParity = 0;
-    m_nSerialStopBits = 0;
     m_bSessionEnumerated = FALSE;
 
     for (INT nSession = 0; nSession < CNETWORK_MAX_SESSIONS; nSession++) {
@@ -1366,8 +1034,6 @@ CNetwork::CNetwork()
     for (INT nSlot = 0; nSlot < CNETWORK_MAX_PLAYERS; nSlot++) {
         field_71A[nSlot] = FALSE;
     }
-
-    m_pDirectPlayAddress = NULL;
 }
 
 // 0x7A4440
@@ -1385,35 +1051,8 @@ CNetwork::~CNetwork()
         }
     }
 
-    if (m_nServiceProvider != SERV_PROV_NULL) {
-        EnterCriticalSection(&field_F6A);
-
-        if (m_lpDirectPlay != NULL) {
-            m_lpDirectPlay->Release();
-            m_lpDirectPlay = NULL;
-        }
-
-        if (m_lpDirectPlayLobby != NULL) {
-            m_lpDirectPlayLobby->Release();
-            m_lpDirectPlayLobby = NULL;
-        }
-
-        LeaveCriticalSection(&field_F6A);
-    }
-
     DeleteCriticalSection(&field_F6A);
     DeleteCriticalSection(&field_F52);
-
-#if DPLAY_COMPAT
-    FreeDirectPlay();
-#endif
-}
-
-// 0x7A4660
-void CNetwork::AddModemAddressToList(LPCSTR lpAddress)
-{
-    m_psModemAddress[m_nTotalModemAddresses] = CString(lpAddress, strlen(lpAddress));
-    m_nTotalModemAddresses++;
 }
 
 // 0x7A46E0
@@ -1434,486 +1073,15 @@ void CNetwork::AddServiceProviderToList(const CString& sServiceProviderName, con
     }
 }
 
-// 0x7A4780
-BOOLEAN CNetwork::CreateDirectPlayAddress(BOOLEAN bHostingGame)
-{
-    DPCOMPOUNDADDRESSELEMENT addressElements[3];
-    DWORD dwElementCount = 0;
-    char szIpAddress[MAX_STRING_LENGTH];
-    WORD nPort;
-    char szModemAddress[MAX_STRING_LENGTH];
-    char szPhoneNumber[MAX_STRING_LENGTH];
-    DPCOMPORTADDRESS com;
-    HRESULT hr;
-
-    if (m_bDirectPlayAddressCreated) {
-        if (m_pDirectPlayAddress != NULL) {
-            delete m_pDirectPlayAddress;
-            m_bDirectPlayAddressCreated = FALSE;
-        }
-    }
-
-    if (!m_bServiceProviderSelected
-        || m_nServiceProvider < 0
-        || m_nServiceProvider >= m_nTotalServiceProviders) {
-        if (m_pDirectPlayAddress != NULL) {
-            delete m_pDirectPlayAddress;
-            m_bDirectPlayAddressCreated = FALSE;
-        }
-
-        return FALSE;
-    }
-
-    GUID serviceProviderGuid = m_serviceProviderGuids[m_nServiceProvider];
-
-    if (IsEqualGUID(serviceProviderGuid, DPSPGUID_MODEM)) {
-        addressElements[dwElementCount].guidDataType = DPAID_ServiceProvider;
-        addressElements[dwElementCount].dwDataSize = sizeof(GUID);
-        addressElements[dwElementCount].lpData = (LPVOID)&DPSPGUID_MODEM;
-        dwElementCount++;
-
-        lstrcpyA(szModemAddress, "");
-        if (m_bModemAddressSelected == TRUE
-            && m_nModemAddress >= 1
-            && m_nModemAddress < m_nTotalModemAddresses) {
-            lstrcpynA(szModemAddress, m_psModemAddress[m_nModemAddress], MAX_STRING_LENGTH);
-
-            addressElements[dwElementCount].guidDataType = DPAID_Modem;
-            addressElements[dwElementCount].dwDataSize = lstrlenA(szModemAddress) + 1;
-            addressElements[dwElementCount].lpData = szModemAddress;
-            dwElementCount++;
-        }
-
-        if (m_sPhoneNumber.GetLength() > 0 && !bHostingGame) {
-            lstrcpynA(szPhoneNumber, m_sPhoneNumber, MAX_STRING_LENGTH);
-
-            addressElements[dwElementCount].guidDataType = DPAID_Phone;
-            addressElements[dwElementCount].dwDataSize = lstrlenA(szPhoneNumber) + 1;
-            addressElements[dwElementCount].lpData = szPhoneNumber;
-            dwElementCount++;
-        }
-    } else if (IsEqualGUID(serviceProviderGuid, DPSPGUID_TCPIP)) {
-        addressElements[dwElementCount].guidDataType = DPAID_ServiceProvider;
-        addressElements[dwElementCount].dwDataSize = sizeof(GUID);
-        addressElements[dwElementCount].lpData = (LPVOID)&DPSPGUID_TCPIP;
-        dwElementCount++;
-
-        lstrcpyA(szIpAddress, "");
-        lstrcpynA(szIpAddress, m_sIPAddress, MAX_STRING_LENGTH);
-
-        if (m_sIPAddress.IsEmpty() && bHostingGame == TRUE) {
-            m_sIPAddress = "127.0.0.1";
-            lstrcpynA(szIpAddress, m_sIPAddress, MAX_STRING_LENGTH);
-            m_sIPAddress = "";
-        }
-
-        addressElements[dwElementCount].guidDataType = DPAID_INet;
-        addressElements[dwElementCount].dwDataSize = lstrlenA(szIpAddress) + 1;
-        addressElements[dwElementCount].lpData = szIpAddress;
-        dwElementCount++;
-
-        nPort = g_pChitin->GetMultiplayerDirectPlayPort();
-        if (nPort != 0) {
-            addressElements[dwElementCount].guidDataType = DPAID_INetPort;
-            addressElements[dwElementCount].dwDataSize = sizeof(WORD);
-            addressElements[dwElementCount].lpData = &nPort;
-            dwElementCount++;
-        }
-    } else if (IsEqualGUID(serviceProviderGuid, DPSPGUID_IPX)) {
-        addressElements[dwElementCount].guidDataType = DPAID_ServiceProvider;
-        addressElements[dwElementCount].dwDataSize = sizeof(GUID);
-        addressElements[dwElementCount].lpData = (LPVOID)&DPSPGUID_IPX;
-        dwElementCount++;
-    } else if (IsEqualGUID(serviceProviderGuid, DPSPGUID_SERIAL)) {
-        addressElements[dwElementCount].guidDataType = DPAID_ServiceProvider;
-        addressElements[dwElementCount].dwDataSize = sizeof(GUID);
-        addressElements[dwElementCount].lpData = (LPVOID)&DPSPGUID_SERIAL;
-        dwElementCount++;
-
-        com.dwComPort = m_nSerialPort;
-        com.dwBaudRate = m_nSerialBaudRate;
-        com.dwStopBits = m_nSerialStopBits;
-        com.dwParity = m_nSerialParity;
-        com.dwFlowControl = m_nSerialFlowControl;
-
-        addressElements[dwElementCount].guidDataType = DPAID_ComPort;
-        addressElements[dwElementCount].dwDataSize = sizeof(DPCOMPORTADDRESS);
-        addressElements[dwElementCount].lpData = &com;
-        dwElementCount++;
-    } else {
-        addressElements[dwElementCount].guidDataType = DPAID_ServiceProvider;
-        addressElements[dwElementCount].dwDataSize = sizeof(GUID);
-        addressElements[dwElementCount].lpData = &serviceProviderGuid;
-        dwElementCount++;
-    }
-
-    EnterCriticalSection(&field_F6A);
-
-    if (m_lpDirectPlayLobby == NULL) {
-        if (SendMessageA(g_pChitin->GetWnd()->GetSafeHwnd(), 0x405, (WPARAM)&m_lpDirectPlayLobby, 0) == 0) {
-            if (m_pDirectPlayAddress != NULL) {
-                delete m_pDirectPlayAddress;
-                m_bDirectPlayAddressCreated = FALSE;
-            }
-
-            LeaveCriticalSection(&field_F6A);
-            return FALSE;
-        }
-    }
-
-    hr = m_lpDirectPlayLobby->CreateCompoundAddress(addressElements,
-        dwElementCount,
-        NULL,
-        &m_pDirectPlayAddressSize);
-    if (hr != DPERR_BUFFERTOOSMALL) {
-        if (m_pDirectPlayAddress != NULL) {
-            delete m_pDirectPlayAddress;
-            m_bDirectPlayAddressCreated = FALSE;
-        }
-
-        LeaveCriticalSection(&field_F6A);
-        return FALSE;
-    }
-
-    m_pDirectPlayAddress = new BYTE[m_pDirectPlayAddressSize];
-    if (m_pDirectPlayAddress == NULL) {
-        LeaveCriticalSection(&field_F6A);
-        return FALSE;
-    }
-
-    hr = m_lpDirectPlayLobby->CreateCompoundAddress(addressElements,
-        dwElementCount,
-        m_pDirectPlayAddress,
-        &m_pDirectPlayAddressSize);
-    if (FAILED(hr)) {
-        if (m_pDirectPlayAddress != NULL) {
-            delete m_pDirectPlayAddress;
-            m_bDirectPlayAddressCreated = FALSE;
-        }
-
-        LeaveCriticalSection(&field_F6A);
-        return FALSE;
-    }
-
-    m_bDirectPlayAddressCreated = TRUE;
-
-    LeaveCriticalSection(&field_F6A);
-    return TRUE;
-}
-
-// 0x7A4D90
-BOOLEAN CNetwork::CreateDirectPlayInterface(const GUID* guid, IDirectPlay4A** lplpDirectPlay4)
-{
-    GUID guidCopy = *guid;
-    IDirectPlay* lpDirectPlay = NULL;
-    IDirectPlay4A* lpDirectPlay4 = NULL;
-
-    if (IsEqualGUID(guidCopy, GUID_NULL)) {
-        HRESULT hr = CoCreateInstance(CLSID_DirectPlay,
-            NULL,
-            CLSCTX_INPROC_SERVER,
-            IID_IDirectPlay4A,
-            reinterpret_cast<LPVOID*>(&lpDirectPlay4));
-        if (hr != S_OK) {
-            // NOTE: Not used. Probably were a part of error reporting.
-            switch (hr) {
-            case REGDB_E_CLASSNOTREG:
-                return FALSE;
-            case REGDB_E_IIDNOTREG:
-                return FALSE;
-            }
-
-            return FALSE;
-        }
-    } else {
-        if (DirectPlayCreate(&guidCopy, &lpDirectPlay, NULL) != DP_OK) {
-            return FALSE;
-        }
-
-        if (lpDirectPlay->QueryInterface(IID_IDirectPlay4A, reinterpret_cast<LPVOID*>(&lpDirectPlay4)) != DP_OK) {
-            if (lpDirectPlay != NULL) {
-                lpDirectPlay->Release();
-            }
-            return FALSE;
-        }
-
-        lpDirectPlay->Release();
-    }
-
-    *lplpDirectPlay4 = lpDirectPlay4;
-    return TRUE;
-}
-
-// 0x7A4E80
-BOOLEAN CNetwork::CreateDirectPlayLobbyInterface(IDirectPlayLobby3A** lplpDirectPlayLobby3)
-{
-    IDirectPlayLobby* lpDirectPlayLobby = NULL;
-    IDirectPlayLobby3A* lpDirectPlayLobby3 = NULL;
-
-    if (DirectPlayLobbyCreateA(NULL, &lpDirectPlayLobby, NULL, NULL, 0) != DP_OK) {
-        return FALSE;
-    }
-
-    if (lpDirectPlayLobby->QueryInterface(IID_IDirectPlayLobby3A, reinterpret_cast<LPVOID*>(&lpDirectPlayLobby3)) != DP_OK) {
-        if (lpDirectPlayLobby != NULL) {
-            lpDirectPlayLobby->Release();
-        }
-        return FALSE;
-    }
-
-    lpDirectPlayLobby->Release();
-    *lplpDirectPlayLobby3 = lpDirectPlayLobby3;
-    return TRUE;
-}
-
-// 0x7A4F00
-BOOLEAN CNetwork::HasModems()
-{
-    HKEY hSystem;
-    HKEY hCurrentControlSet;
-    HKEY hServices;
-    HKEY hModem;
-    HKEY hEnum;
-    HKEY hClass;
-    DWORD cSubKeys;
-
-    if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "System", 0, KEY_READ, &hSystem) != ERROR_SUCCESS) {
-        return FALSE;
-    }
-
-    if (RegOpenKeyExA(hSystem, "CurrentControlSet", 0, KEY_READ, &hCurrentControlSet) != ERROR_SUCCESS) {
-        RegCloseKey(hSystem);
-        return FALSE;
-    }
-
-    if (RegOpenKeyExA(hSystem, "Services", 0, KEY_READ, &hServices) != ERROR_SUCCESS) {
-        RegCloseKey(hCurrentControlSet);
-        RegCloseKey(hSystem);
-        return FALSE;
-    }
-
-    if (g_pChitin->dwPlatformId == VER_PLATFORM_WIN32_NT) {
-        if (RegOpenKeyExA(hServices, "Modem", 0, KEY_READ, &hModem) != ERROR_SUCCESS) {
-            RegCloseKey(hServices);
-            RegCloseKey(hCurrentControlSet);
-            RegCloseKey(hSystem);
-            return FALSE;
-        }
-
-        if (RegOpenKeyExA(hModem, "Enum", 0, KEY_READ, &hEnum) != ERROR_SUCCESS) {
-            RegCloseKey(hModem);
-            RegCloseKey(hServices);
-            RegCloseKey(hCurrentControlSet);
-            RegCloseKey(hSystem);
-            return FALSE;
-        }
-
-        RegCloseKey(hEnum);
-        RegCloseKey(hModem);
-        RegCloseKey(hServices);
-        RegCloseKey(hCurrentControlSet);
-        RegCloseKey(hSystem);
-        return TRUE;
-    } else {
-        if (RegOpenKeyExA(hServices, "Class", 0, KEY_READ, &hClass) != ERROR_SUCCESS) {
-            RegCloseKey(hServices);
-            RegCloseKey(hCurrentControlSet);
-            RegCloseKey(hSystem);
-            return FALSE;
-        }
-
-        if (RegOpenKeyExA(hClass, "Modem", 0, KEY_READ, &hModem) != ERROR_SUCCESS) {
-            RegCloseKey(hClass);
-            RegCloseKey(hServices);
-            RegCloseKey(hCurrentControlSet);
-            RegCloseKey(hSystem);
-            return FALSE;
-        }
-
-        if (RegQueryInfoKeyA(hModem, NULL, NULL, NULL, &cSubKeys, NULL, NULL, NULL, NULL, NULL, NULL, NULL) != ERROR_SUCCESS) {
-            RegCloseKey(hModem);
-            RegCloseKey(hClass);
-            RegCloseKey(hServices);
-            RegCloseKey(hCurrentControlSet);
-            RegCloseKey(hSystem);
-            return FALSE;
-        }
-
-        RegCloseKey(hModem);
-        RegCloseKey(hClass);
-        RegCloseKey(hServices);
-        RegCloseKey(hCurrentControlSet);
-        RegCloseKey(hSystem);
-        return cSubKeys != 0;
-    }
-}
-
-// 0x7A58D0
-static BOOL CALLBACK CNetworkEnumAddressCallback(REFGUID guidDataType, DWORD dwDataSize, LPCVOID lpData, LPVOID lpContext)
-{
-    if (IsEqualGUID(guidDataType, DPAID_Modem)) {
-        LPCSTR lpAddress = (LPCSTR)lpData;
-        while (lstrlenA(lpAddress) != 0) {
-            g_pChitin->cNetwork.AddModemAddressToList(lpAddress);
-            lpAddress += lstrlenA(lpAddress) + 1;
-        }
-    }
-
-    return TRUE;
-}
-
-// 0x7A5150
-void CNetwork::EnumerateModems()
-{
-    IDirectPlay4A* lpDirectPlay;
-    LPVOID lpAddress = NULL;
-    HRESULT hr;
-    DWORD dwSize = 0;
-
-    m_bModemEnumerated = TRUE;
-    m_nTotalModemAddresses = 0;
-
-    if (!HasModems()) {
-        return;
-    }
-
-    for (INT nIndex = 0; nIndex < m_nTotalServiceProviders; nIndex++) {
-        if (IsEqualGUID(m_serviceProviderGuids[nIndex], DPSPGUID_MODEM)) {
-            // NOTE: Looks odd, probably some inlining.
-            if (m_bServiceProviderEnumerated && nIndex < m_nTotalServiceProviders) {
-                m_nServiceProvider = nIndex;
-                m_bServiceProviderSelected = TRUE;
-            }
-        }
-    }
-
-    if (CreateDirectPlayAddress(FALSE)) {
-        if (CreateDirectPlayInterface(&GUID_NULL, &lpDirectPlay)
-            && lpDirectPlay->InitializeConnection(m_pDirectPlayAddress, 0) == DP_OK) {
-            if (m_pDirectPlayAddress != NULL) {
-                delete m_pDirectPlayAddress;
-                // FIXME: `m_pDirectPlayAddress` is not nullified.
-
-                m_bDirectPlayAddressCreated = FALSE;
-            }
-            m_bConnectionInitialized = TRUE;
-        } else {
-            if (m_pDirectPlayAddress != NULL) {
-                delete m_pDirectPlayAddress;
-                // FIXME: `m_pDirectPlayAddress` is not nullified.
-
-                m_bDirectPlayAddressCreated = FALSE;
-            }
-
-            m_bConnectionInitialized = FALSE;
-        }
-    } else {
-        m_bConnectionInitialized = FALSE;
-    }
-
-    if (m_bConnectionInitialized == TRUE) {
-        hr = lpDirectPlay->GetPlayerAddress(0, NULL, &dwSize);
-        if (hr == DPERR_BUFFERTOOSMALL) {
-            lpAddress = new BYTE[dwSize];
-            if (lpAddress != NULL) {
-                hr = lpDirectPlay->GetPlayerAddress(0, lpAddress, &dwSize);
-            } else {
-                hr = DPERR_NOMEMORY;
-            }
-        }
-    } else {
-        hr = DP_OK;
-    }
-
-    m_bServiceProviderSelected = FALSE;
-    m_nServiceProvider = -1;
-    m_bConnectionInitialized = FALSE;
-
-    if (lpDirectPlay != NULL) {
-        lpDirectPlay->Release();
-        lpDirectPlay = NULL;
-    }
-
-    if (lpAddress != NULL) {
-        if (dwSize != 0) {
-            if (hr == DP_OK) {
-                EnterCriticalSection(&field_F6A);
-                m_lpDirectPlayLobby->EnumAddress(CNetworkEnumAddressCallback,
-                    lpAddress,
-                    dwSize,
-                    NULL);
-                LeaveCriticalSection(&field_F6A);
-            }
-        }
-        delete lpAddress;
-    }
-}
-
-// 0x7A5930
-static BOOL CALLBACK CNetworkEnumConnectionsCallback(LPCGUID lpguidSP, LPVOID lpConnection, DWORD dwConnectionSize, LPCDPNAME lpName, DWORD dwFlags, LPVOID lpContext)
-{
-    CString sServiceProviderName;
-
-    if (IsEqualGUID(*lpguidSP, DPSPGUID_TCPIP)) {
-        sServiceProviderName = "TCP/IP";
-    } else if (IsEqualGUID(*lpguidSP, DPSPGUID_IPX)) {
-        sServiceProviderName = "IPX";
-    } else if (IsEqualGUID(*lpguidSP, DPSPGUID_MODEM)) {
-        sServiceProviderName = "Modem";
-    } else if (IsEqualGUID(*lpguidSP, DPSPGUID_SERIAL)) {
-        sServiceProviderName = "Serial";
-    }
-
-    if (!sServiceProviderName.IsEmpty()) {
-        g_pChitin->cNetwork.AddServiceProviderToList(sServiceProviderName,
-            *lpguidSP,
-            lpConnection,
-            dwConnectionSize);
-    }
-
-    return TRUE;
-}
-
 // 0x7A5340
 BOOLEAN CNetwork::EnumerateServiceProviders()
 {
-    EnterCriticalSection(&field_F6A);
-
-    if (m_lpDirectPlay != NULL) {
-        m_lpDirectPlay->Release();
-        m_lpDirectPlay = NULL;
-    }
-
-    if (!CreateDirectPlayInterface(&GUID_NULL, &m_lpDirectPlay)) {
-        LeaveCriticalSection(&field_F6A);
-        return FALSE;
-    }
-
-    if (m_lpDirectPlayLobby != NULL) {
-        m_lpDirectPlayLobby->Release();
-        m_lpDirectPlayLobby = NULL;
-    }
-
-    if (!SendMessageA(g_pChitin->GetWnd()->GetSafeHwnd(), 0x405, reinterpret_cast<WPARAM>(&m_lpDirectPlayLobby), 0)) {
-        LeaveCriticalSection(&field_F6A);
-        return FALSE;
-    }
-
     m_bServiceProviderEnumerated = TRUE;
     m_bServiceProviderSelected = FALSE;
     m_nServiceProvider = -1;
     m_nTotalServiceProviders = 0;
     m_serviceProviderGuids[0] = GUID_NULL;
     m_nTotalServiceProviders++;
-
-    m_lpDirectPlay->EnumConnections(&m_nApplicationGuid, CNetworkEnumConnectionsCallback, NULL, DPCONNECTION_DIRECTPLAY);
-    LeaveCriticalSection(&field_F6A);
-
-    for (INT nIndex = 0; nIndex < m_nTotalServiceProviders; nIndex++) {
-        if (IsEqualGUID(m_serviceProviderGuids[nIndex], DPSPGUID_MODEM)) {
-            g_pChitin->cNetwork.EnumerateModems();
-        }
-    }
 
     return TRUE;
 }
@@ -1960,26 +1128,6 @@ BOOLEAN CNetwork::GetServiceProviderType(INT nServiceProviderNumber, INT& nServi
 
     nServiceProviderType = SERV_PROV_NULL;
 
-    if (IsEqualGUID(m_serviceProviderGuids[nServiceProviderNumber], DPSPGUID_IPX)) {
-        nServiceProviderType = SERV_PROV_IPX;
-        return TRUE;
-    }
-
-    if (IsEqualGUID(m_serviceProviderGuids[nServiceProviderNumber], DPSPGUID_SERIAL)) {
-        nServiceProviderType = SERV_PROV_SERIAL;
-        return TRUE;
-    }
-
-    if (IsEqualGUID(m_serviceProviderGuids[nServiceProviderNumber], DPSPGUID_MODEM)) {
-        nServiceProviderType = SERV_PROV_MODEM;
-        return TRUE;
-    }
-
-    if (IsEqualGUID(m_serviceProviderGuids[nServiceProviderNumber], DPSPGUID_TCPIP)) {
-        nServiceProviderType = SERV_PROV_TCP_IP;
-        return TRUE;
-    }
-
     if (IsEqualGUID(m_serviceProviderGuids[nServiceProviderNumber], GUID_NULL)) {
         nServiceProviderType = SERV_PROV_NULL;
     }
@@ -1990,55 +1138,6 @@ BOOLEAN CNetwork::GetServiceProviderType(INT nServiceProviderNumber, INT& nServi
 // 0x7A5600
 BOOLEAN CNetwork::InitializeConnectionToServiceProvider(BOOLEAN bHostingGame)
 {
-    if (!CreateDirectPlayAddress(bHostingGame)) {
-        return FALSE;
-    }
-
-    EnterCriticalSection(&field_F6A);
-
-    if (m_lpDirectPlay == NULL) {
-        if (SendMessageA(g_pChitin->GetWnd()->GetSafeHwnd(), 0x406, (WPARAM)&m_lpDirectPlay, 0) == 0) {
-            if (m_pDirectPlayAddress != NULL) {
-                delete m_pDirectPlayAddress;
-                // FIXME: `m_pDirectPlayAddress` is not nullified.
-
-                m_bDirectPlayAddressCreated = FALSE;
-            }
-
-            LeaveCriticalSection(&field_F6A);
-            m_bConnectionInitialized = FALSE;
-            return FALSE;
-        }
-    }
-
-    HRESULT hr;
-    if (m_nServiceProvider != 0) {
-        hr = m_lpDirectPlay->InitializeConnection(m_pDirectPlayAddress, 0);
-    }
-
-    LeaveCriticalSection(&field_F6A);
-
-    if (m_nServiceProvider != 0) {
-        if (hr != DP_OK && hr != DPERR_ALREADYINITIALIZED) {
-            if (m_pDirectPlayAddress != NULL) {
-                delete m_pDirectPlayAddress;
-                // FIXME: `m_pDirectPlayAddress` is not nullified.
-
-                m_bDirectPlayAddressCreated = FALSE;
-            }
-
-            m_bConnectionInitialized = FALSE;
-            return FALSE;
-        }
-    }
-
-    if (m_pDirectPlayAddress != NULL) {
-        delete m_pDirectPlayAddress;
-        // FIXME: `m_pDirectPlayAddress` is not nullified.
-
-        m_bDirectPlayAddressCreated = FALSE;
-    }
-
     m_bConnectionInitialized = TRUE;
     return TRUE;
 }
@@ -2046,15 +1145,6 @@ BOOLEAN CNetwork::InitializeConnectionToServiceProvider(BOOLEAN bHostingGame)
 // 0x7A5720
 void CNetwork::RemoveInitializeConnection()
 {
-    EnterCriticalSection(&field_F6A);
-
-    if (m_lpDirectPlay != NULL) {
-        m_lpDirectPlay->Release();
-        m_lpDirectPlay = NULL;
-    }
-
-    LeaveCriticalSection(&field_F6A);
-
     m_bConnectionInitialized = FALSE;
 }
 
@@ -2097,10 +1187,6 @@ void CNetwork::SetApplicationOptions(BOOLEAN bKeepAlive, BOOLEAN bMigrateHost)
 {
     m_bSessionOptionsDefined = TRUE;
     m_dwSessionFlags = 0;
-
-    if (bKeepAlive == TRUE) {
-        m_dwSessionFlags |= DPSESSION_KEEPALIVE;
-    }
 }
 
 // 0x7A5800
@@ -2176,23 +1262,6 @@ void CNetwork::OnCloseSession()
 
     g_pChitin->OnMultiplayerSessionClose();
 
-    if (m_bPlayerCreated == TRUE) {
-        EnterCriticalSection(&field_F6A);
-
-        HRESULT hr;
-        if (m_lpDirectPlay != NULL) {
-            hr = m_lpDirectPlay->DestroyPlayer(m_idLocalPlayer);
-        } else {
-            hr = DPERR_NOMEMORY;
-        }
-
-        LeaveCriticalSection(&field_F6A);
-
-        if (hr == DP_OK) {
-            m_bPlayerCreated = FALSE;
-        }
-    }
-
     for (nPlayer = 0; nPlayer < CNETWORK_MAX_PLAYERS; nPlayer++) {
         m_pPlayerID[nPlayer] = 0;
         m_psPlayerName[nPlayer] = "";
@@ -2201,14 +1270,6 @@ void CNetwork::OnCloseSession()
     }
 
     m_nTotalPlayers = 0;
-
-    EnterCriticalSection(&field_F6A);
-
-    if (m_lpDirectPlay != NULL) {
-        m_lpDirectPlay->Close();
-    }
-
-    LeaveCriticalSection(&field_F6A);
 
     m_bConnectionInitialized = FALSE;
     m_bSessionEnumerated = FALSE;
@@ -2272,117 +1333,8 @@ void CNetwork::OnCloseSession()
 // 0x7A5D00
 BOOLEAN CNetwork::CheckSessionStatus(BOOLEAN bInThreadLoop)
 {
-    HRESULT hr;
-    DWORD dwSize = m_dwLastSessionBufferSize;
-    INT nCurrentPlayers;
-    INT nMaxPlayers;
-
     if (m_bConnectionEstablished != TRUE) {
         return TRUE;
-    }
-
-    EnterCriticalSection(&field_F6A);
-
-    if (m_lpDirectPlay != NULL) {
-        hr = m_lpDirectPlay->GetSessionDesc(NULL, &dwSize);
-    } else {
-        hr = DPERR_NOMEMORY;
-    }
-
-    LeaveCriticalSection(&field_F6A);
-
-    if (hr == DPERR_BUFFERTOOSMALL) {
-        if (m_dwLastSessionBufferSize < dwSize) {
-            EnterCriticalSection(&field_F6A);
-
-            if (m_pLastSessionBuffer != NULL) {
-                delete m_pLastSessionBuffer;
-                m_pLastSessionBuffer = NULL;
-            }
-
-            m_pLastSessionBuffer = new BYTE[dwSize];
-            m_dwLastSessionBufferSize = dwSize;
-
-            LeaveCriticalSection(&field_F6A);
-        }
-
-        if (m_pLastSessionBuffer == NULL) {
-            UTIL_ASSERT_MSG(FALSE, "CNetwork::CheckSessionStatus: Can't create session descriptor.");
-        }
-
-        EnterCriticalSection(&field_F6A);
-
-        hr = m_lpDirectPlay->GetSessionDesc(m_pLastSessionBuffer, &dwSize);
-
-        LeaveCriticalSection(&field_F6A);
-
-        nCurrentPlayers = reinterpret_cast<DPSESSIONDESC2*>(m_pLastSessionBuffer)->dwCurrentPlayers;
-        nMaxPlayers = reinterpret_cast<DPSESSIONDESC2*>(m_pLastSessionBuffer)->dwMaxPlayers;
-    } else {
-        if (m_nServiceProvider != 0) {
-            nCurrentPlayers = 1;
-            nMaxPlayers = 1;
-        }
-    }
-
-    if (!bInThreadLoop && hr == DP_OK) {
-        m_sessionDesc = *reinterpret_cast<DPSESSIONDESC2*>(m_pLastSessionBuffer);
-
-        nMaxPlayers = m_sessionDesc.dwMaxPlayers;
-        if (nMaxPlayers <= CNETWORK_MAX_PLAYERS) {
-            m_nMaxPlayers = nMaxPlayers;
-        }
-    }
-
-    if (bInThreadLoop == TRUE && m_bIsHost == TRUE && hr == DP_OK) {
-        // TODO: Check.
-        if ((nCurrentPlayers != CNETWORK_MAX_PLAYERS
-                || nMaxPlayers != CNETWORK_MAX_PLAYERS)
-            && nMaxPlayers != nCurrentPlayers + 1) {
-            m_nMaxPlayers = max(nCurrentPlayers + 1, CNETWORK_MAX_PLAYERS);
-            SetInSessionOptions();
-        }
-    }
-
-    if (hr == DPERR_NOCONNECTION) {
-        if (bInThreadLoop) {
-            g_pChitin->OnMultiplayerSessionToClose();
-            SleepEx(1000, FALSE);
-
-            if (m_bConnectionEstablished == TRUE) {
-                OnCloseSession();
-            }
-        } else {
-            OnCloseSession();
-        }
-
-        return FALSE;
-    }
-
-    if (nCurrentPlayers != m_nTotalPlayers) {
-        EnumeratePlayers(bInThreadLoop);
-    }
-
-    return TRUE;
-}
-
-// 0x7A6840
-static BOOL CALLBACK CNetworkEnumSessionsCallback(LPCDPSESSIONDESC2 lpSessionDesc, LPDWORD lpdwTimeOut, DWORD dwFlags, LPVOID lpContext)
-{
-    CString sSessionName;
-
-    if ((dwFlags & DPESC_TIMEDOUT) != 0) {
-        return FALSE;
-    }
-
-    sSessionName = lpSessionDesc->lpszPasswordA;
-
-    CNetwork* pNetwork = &(g_pChitin->cNetwork);
-    if (pNetwork->m_nTotalSessions < CNETWORK_MAX_SESSIONS) {
-        pNetwork->m_psSessionName[pNetwork->m_nTotalSessions] = sSessionName;
-        pNetwork->m_pSessionGuid[pNetwork->m_nTotalSessions] = lpSessionDesc->guidInstance;
-        pNetwork->m_pbSessionPasswordRequired[pNetwork->m_nTotalSessions] = (lpSessionDesc->dwFlags & DPSESSION_PASSWORDREQUIRED) != 0;
-        pNetwork->m_nTotalSessions++;
     }
 
     return TRUE;
@@ -2391,91 +1343,7 @@ static BOOL CALLBACK CNetworkEnumSessionsCallback(LPCDPSESSIONDESC2 lpSessionDes
 // 0x7A5F00
 BOOLEAN CNetwork::EnumerateSessions(BOOLEAN a1, BOOLEAN a2)
 {
-    DPSESSIONDESC2 dpsd = { 0 };
-    dpsd.dwSize = sizeof(dpsd);
-    dpsd.guidApplication = m_nApplicationGuid;
-
-    DPCAPS caps = { 0 };
-    caps.dwSize = sizeof(caps);
-
-    if (m_lpDirectPlay != NULL) {
-        m_lpDirectPlay->GetCaps(&caps, 0);
-    }
-
-    DWORD dwTimeout = 0;
-    if (!a1 && !a2) {
-        dwTimeout = 3000;
-    }
-
-    DWORD dwFlags = DPENUMSESSIONS_AVAILABLE | DPENUMSESSIONS_PASSWORDREQUIRED;
-
-    if (!IsEqualGUID(m_serviceProviderGuids[m_nServiceProvider], DPSPGUID_MODEM)
-        && !IsEqualGUID(m_serviceProviderGuids[m_nServiceProvider], DPSPGUID_TCPIP)) {
-        dwFlags |= DPENUMSESSIONS_RETURNSTATUS;
-    }
-
-    if (a2 == TRUE) {
-        dwFlags |= DPENUMSESSIONS_STOPASYNC;
-    } else if (a1 == TRUE) {
-        dwFlags |= DPENUMSESSIONS_ASYNC;
-    }
-
-    if (m_bSessionEnumerated == TRUE) {
-        for (INT nSession = 0; nSession < m_nTotalSessions; nSession++) {
-            m_psSessionName[nSession] = "";
-            m_pSessionGuid[nSession] = GUID_NULL;
-            m_pbSessionPasswordRequired[nSession] = FALSE;
-        }
-        m_nTotalSessions = 0;
-    }
-
-    EnterCriticalSection(&field_F6A);
-
-    HRESULT hr;
-    if (m_lpDirectPlay != NULL) {
-        do {
-            hr = m_lpDirectPlay->EnumSessions(&dpsd,
-                dwTimeout,
-                CNetworkEnumSessionsCallback,
-                NULL,
-                dwFlags);
-        } while (hr == DPERR_CONNECTING);
-    } else {
-        hr = DPERR_NOMEMORY;
-    }
-
-    LeaveCriticalSection(&field_F6A);
-
-    if (hr != DP_OK) {
-        m_bSessionEnumerated = FALSE;
-
-        for (INT nSession = 0; nSession < CNETWORK_MAX_SESSIONS; nSession++) {
-            m_psSessionName[nSession] = "";
-            m_pSessionGuid[nSession] = GUID_NULL;
-            m_pbSessionPasswordRequired[nSession] = FALSE;
-        }
-
-        return FALSE;
-    }
-
-    m_bSessionEnumerated = TRUE;
-
-    if (m_bSessionSelected == TRUE) {
-        m_bSessionSelected = FALSE;
-
-        for (INT nSession = 0; nSession < CNETWORK_MAX_SESSIONS; nSession++) {
-            if (IsEqualGUID(m_pSessionGuid[nSession], m_guidSession)) {
-                m_nSession = nSession;
-                m_bSessionSelected = TRUE;
-            }
-        }
-
-        if (!m_bSessionSelected) {
-            m_guidSession = GUID_NULL;
-        }
-    }
-
-    return TRUE;
+    return FALSE;
 }
 
 // 0x7A61D0
@@ -2521,9 +1389,6 @@ BOOLEAN CNetwork::GetSessionGUID(INT nSession, GUID& sessionGuid)
 // 0x7A6270
 BOOLEAN CNetwork::HostNewSession()
 {
-    char szSessionName[MAX_STRING_LENGTH];
-    char szSessionPassword[MAX_STRING_LENGTH];
-
     if (m_bConnectionInitialized != TRUE) {
         return FALSE;
     }
@@ -2534,47 +1399,6 @@ BOOLEAN CNetwork::HostNewSession()
 
     if (!m_bSessionNameToMake) {
         return FALSE;
-    }
-
-    memset(&m_sessionDesc, 0, sizeof(m_sessionDesc));
-    m_sessionDesc.dwFlags = m_dwSessionFlags;
-    m_sessionDesc.guidApplication = m_nApplicationGuid;
-    m_sessionDesc.dwSize = sizeof(m_sessionDesc);
-    m_sessionDesc.dwMaxPlayers = m_nMaxPlayers;
-
-    memset(szSessionName, 0, sizeof(szSessionName));
-    strncpy(szSessionName, m_sSessionNameToMake, m_sSessionNameToMake.GetLength());
-    m_sessionDesc.lpszSessionNameA = szSessionName;
-
-    if (m_bSessionPasswordEnabled == TRUE) {
-        memset(szSessionPassword, 0, sizeof(szSessionPassword));
-        strncpy(szSessionPassword, m_sSessionPassword, m_sSessionPassword.GetLength());
-        m_sessionDesc.lpszPasswordA = szSessionPassword;
-    }
-
-    DWORD dwOpenFlags = DPOPEN_CREATE;
-    if (!IsEqualGUID(m_serviceProviderGuids[m_nServiceProvider], DPSPGUID_MODEM)
-        && !IsEqualGUID(m_serviceProviderGuids[m_nServiceProvider], DPSPGUID_TCPIP)) {
-        dwOpenFlags |= DPOPEN_RETURNSTATUS;
-    }
-
-    if (m_nServiceProvider != 0) {
-        EnterCriticalSection(&field_F6A);
-
-        HRESULT hr;
-        if (m_lpDirectPlay != NULL) {
-            do {
-                hr = m_lpDirectPlay->Open(&m_sessionDesc, dwOpenFlags);
-            } while (hr == DPERR_CONNECTING);
-        } else {
-            hr = DPERR_NOMEMORY;
-        }
-
-        LeaveCriticalSection(&field_F6A);
-
-        if (hr != DP_OK) {
-            return FALSE;
-        }
     }
 
     m_bAllowNewConnections = TRUE;
@@ -2602,65 +1426,7 @@ BOOLEAN CNetwork::HostNewSession()
 // 0x7A64B0
 BOOLEAN CNetwork::JoinSelectedSession(INT& nErrorCode)
 {
-    char szSessionPassword[MAX_STRING_LENGTH];
-
-    if (!m_bSessionSelected) {
-        nErrorCode = ERROR_CANNOTCONNECT;
-        return FALSE;
-    }
-
-    memset(&m_sessionDesc, 0, sizeof(m_sessionDesc));
-    m_sessionDesc.dwSize = sizeof(m_sessionDesc);
-    m_sessionDesc.guidInstance = m_guidSession;
-
-    if (m_bSessionPasswordEnabled) {
-        memset(szSessionPassword, 0, sizeof(szSessionPassword));
-        strncpy(szSessionPassword, m_sSessionPassword, m_sSessionPassword.GetLength());
-        m_sessionDesc.lpszPasswordA = szSessionPassword;
-    }
-
-    EnterCriticalSection(&field_F6A);
-
-    HRESULT hr;
-    if (m_lpDirectPlay != NULL) {
-        do {
-            hr = m_lpDirectPlay->Open(&m_sessionDesc, DPOPEN_JOIN);
-        } while (hr == DPERR_CONNECTING);
-    } else {
-        hr = DPERR_NOMEMORY;
-    }
-
-    LeaveCriticalSection(&field_F6A);
-
-    if (hr == DPERR_INVALIDPASSWORD) {
-        nErrorCode = ERROR_INVALIDPASSWORD;
-        return FALSE;
-    }
-
-    if (hr != DP_OK) {
-        nErrorCode = ERROR_CANNOTCONNECT;
-        return FALSE;
-    }
-
-    m_bConnectionEstablished = TRUE;
-    m_bIsHost = FALSE;
-    m_nHostPlayer = -1;
-    m_nTotalPlayers = 0;
-    m_nLocalPlayer = -1;
-
-    for (INT nPlayer = 0; nPlayer < CNETWORK_MAX_PLAYERS; nPlayer++) {
-        m_pPlayerID[nPlayer] = 0;
-        m_psPlayerName[nPlayer] = "";
-        m_pbPlayerEnumerateFlag[nPlayer] = FALSE;
-        m_pbPlayerVisible[nPlayer] = FALSE;
-        m_pSlidingWindow[nPlayer].Initialize(nPlayer);
-    }
-
-    m_SystemWindow.Initialize(-1);
-
-    g_pChitin->OnMultiplayerSessionOpen(m_sJoinedGame, m_sDroppedGame, m_sLeftGame);
-
-    return TRUE;
+    return FALSE;
 }
 
 // 0x7A6680
@@ -2684,9 +1450,6 @@ BOOLEAN CNetwork::SelectSession(INT nSession)
 // 0x7A66E0
 BOOLEAN CNetwork::SetInSessionOptions()
 {
-    char szSessionName[MAX_STRING_LENGTH];
-    char szSessionPassword[MAX_STRING_LENGTH];
-
     if (m_bConnectionEstablished != TRUE) {
         return FALSE;
     }
@@ -2695,35 +1458,6 @@ BOOLEAN CNetwork::SetInSessionOptions()
         return FALSE;
     }
 
-    m_sessionDesc.dwMaxPlayers = m_nMaxPlayers;
-
-    memset(szSessionName, 0, sizeof(szSessionName));
-    strncpy(szSessionName, m_sSessionNameToMake, m_sSessionNameToMake.GetLength());
-    m_sessionDesc.lpszSessionNameA = szSessionName;
-
-    if (m_bAllowNewConnections == TRUE) {
-        m_sessionDesc.dwFlags = m_dwSessionFlags;
-    } else {
-        m_sessionDesc.dwFlags = m_dwSessionFlags | DPSESSION_JOINDISABLED | DPSESSION_NEWPLAYERSDISABLED;
-    }
-
-    if (m_bSessionPasswordEnabled == TRUE) {
-        memset(szSessionPassword, 0, sizeof(szSessionPassword));
-        strncpy(szSessionPassword, m_sSessionPassword, m_sSessionPassword.GetLength());
-        m_sessionDesc.lpszPasswordA = szSessionPassword;
-    }
-
-    EnterCriticalSection(&field_F6A);
-
-    if (m_lpDirectPlay != NULL) {
-        HRESULT hr = m_lpDirectPlay->SetSessionDesc(&m_sessionDesc, 0);
-        if (hr != DP_OK) {
-            LeaveCriticalSection(&field_F6A);
-            return FALSE;
-        }
-    }
-
-    LeaveCriticalSection(&field_F6A);
     return TRUE;
 }
 
@@ -2761,70 +1495,24 @@ BOOLEAN CNetwork::CreatePlayer(INT& nErrorCode)
         return FALSE;
     }
 
-    DPNAME dpName;
-    dpName.dwSize = sizeof(dpName);
-    dpName.dwFlags = 0;
-    dpName.lpszShortNameA = NULL;
-    dpName.lpszLongNameA = NULL;
-
     char szPlayerName[256];
     memcpy(szPlayerName, m_sLocalPlayerName.GetBuffer(m_sLocalPlayerName.GetLength()), m_sLocalPlayerName.GetLength());
     szPlayerName[m_sLocalPlayerName.GetLength()] = '\0';
 
-    dpName.lpszShortNameA = szPlayerName;
-    dpName.lpszLongNameA = szPlayerName;
-
-    DWORD dwPlayerFlags = 0;
-    if (m_bIsHost == TRUE) {
-        dwPlayerFlags = DPPLAYER_SERVERPLAYER;
+    INT nSlot;
+    for (nSlot = 0; nSlot < CNETWORK_MAX_PLAYERS; nSlot++) {
+        if (!field_71A[nSlot]) {
+            break;
+        }
     }
 
-    if (m_nServiceProvider != SERV_PROV_NULL) {
-        EnterCriticalSection(&field_F6A);
-
-        HRESULT hr;
-        if (m_lpDirectPlay != NULL) {
-            hr = m_lpDirectPlay->CreatePlayer(&m_idLocalPlayer,
-                &dpName,
-                g_pChitin->field_180,
-                NULL,
-                0,
-                dwPlayerFlags);
-        } else {
-            hr = DPERR_NOMEMORY;
-        }
-
-        LeaveCriticalSection(&field_F6A);
-
-        if (hr == DPERR_NOCONNECTION || hr == DPERR_GENERIC) {
-            m_bPlayerCreated = FALSE;
-            nErrorCode = ERROR_CANNOTCONNECT;
-            return FALSE;
-        }
-
-        if (hr != DP_OK) {
-            m_bPlayerCreated = FALSE;
-            nErrorCode = ERROR_CANNOTCREATEPLAYER;
-            return FALSE;
-        }
-
-        AddPlayerToList(m_idLocalPlayer, m_sLocalPlayerName, m_bIsHost, TRUE);
-    } else {
-        INT nSlot;
-        for (nSlot = 0; nSlot < CNETWORK_MAX_PLAYERS; nSlot++) {
-            if (!field_71A[nSlot]) {
-                break;
-            }
-        }
-
-        if (nSlot >= CNETWORK_MAX_PLAYERS) {
-            return FALSE;
-        }
-
-        m_idLocalPlayer = nSlot + 1;
-        field_702[nSlot] = szPlayerName;
-        field_71A[nSlot] = TRUE;
+    if (nSlot >= CNETWORK_MAX_PLAYERS) {
+        return FALSE;
     }
+
+    m_idLocalPlayer = nSlot + 1;
+    field_702[nSlot] = szPlayerName;
+    field_71A[nSlot] = TRUE;
 
     m_bPlayerCreated = TRUE;
     AddPlayerToList(m_idLocalPlayer, m_sLocalPlayerName, m_bIsHost, TRUE);
@@ -3007,22 +1695,6 @@ BOOLEAN CNetwork::RemovePlayerFromList(PLAYER_ID dpID, BOOLEAN bAIResponsible)
     return TRUE;
 }
 
-// 0x7A7510
-static BOOL CALLBACK CNetworkEnumPlayersCallback(DPID dpId, DWORD dwPlayerType, LPCDPNAME lpName, DWORD dwFlags, LPVOID lpContext)
-{
-    CString sPlayerName;
-
-    if (dwPlayerType == DPPLAYERTYPE_PLAYER) {
-        sPlayerName = lpName->lpszShortNameA;
-        g_pChitin->cNetwork.AddPlayerToList(dpId,
-            sPlayerName,
-            (dwFlags & DPENUMPLAYERS_SERVERPLAYER) != 0,
-            FALSE);
-    }
-
-    return TRUE;
-}
-
 // 0x7A6F80
 void CNetwork::EnumeratePlayers(BOOLEAN bProtectList)
 {
@@ -3042,51 +1714,6 @@ void CNetwork::EnumeratePlayers(BOOLEAN bProtectList)
 
     for (INT nPlayer = 0; nPlayer < CNETWORK_MAX_PLAYERS; nPlayer++) {
         m_pbPlayerEnumerateFlag[nPlayer] = FALSE;
-    }
-
-    EnterCriticalSection(&field_F6A);
-
-    if (m_lpDirectPlay != NULL) {
-        m_lpDirectPlay->EnumPlayers(NULL,
-            CNetworkEnumPlayersCallback,
-            NULL,
-            0);
-        LeaveCriticalSection(&field_F6A);
-
-        if (bProtectList == TRUE) {
-            for (INT nPlayer = 0; nPlayer < CNETWORK_MAX_PLAYERS; nPlayer++) {
-                if (m_pPlayerID[nPlayer] != 0 && !m_pbPlayerEnumerateFlag[nPlayer]) {
-                    CString sLeavingGame;
-                    CString sLeftPlayerName;
-
-                    sLeftPlayerName = m_psPlayerName[nPlayer];
-                    if (RemovePlayerFromList(m_pPlayerID[nPlayer], FALSE) == TRUE) {
-                        sLeavingGame.Format(" %s: %s", (LPCSTR)sLeftPlayerName, (LPCSTR)m_sLeftGame);
-                        sLeavingGame.SetAt(0, sLeavingGame.GetLength() - 1);
-
-                        BYTE* pSystemMsg = CreateCopyMessage((LPCSTR)sLeavingGame,
-                            sLeavingGame.GetLength(),
-                            0,
-                            0,
-                            1);
-                        if (pSystemMsg != NULL) {
-                            m_SystemWindow.AddToIncomingQueue(0,
-                                m_idLocalPlayer,
-                                pSystemMsg,
-                                sLeavingGame.GetLength() + 12);
-                        }
-                    } else {
-                        for (INT nIndex = 0; nIndex < CNETWORK_MAX_PLAYERS; nIndex++) {
-                            if (field_772[nIndex] == m_pPlayerID[nPlayer]) {
-                                field_772[nIndex] = 0;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    } else {
-        LeaveCriticalSection(&field_F6A);
     }
 }
 
@@ -3210,65 +1837,16 @@ INT CNetwork::FindPlayerLocationByName(const CString& sPlayerName, BOOLEAN bInvi
     return -1;
 }
 
-// 0x7A7490
-static BOOL CALLBACK CNetworkLobbyEnumAddressCallback(REFGUID guidDataType, DWORD dwDataSize, LPCVOID lpData, LPVOID lpContext)
-{
-    if (IsEqualGUID(guidDataType, DPAID_INet)) {
-        g_pChitin->cNetwork.field_792 = CString((LPCSTR)lpData);
-    }
-
-    return TRUE;
-}
-
 // 0x7A73D0
 void CNetwork::sub_7A73D0(CString& a1)
 {
-    HRESULT hr;
-    DWORD dwSize;
-
     a1 = "";
-
-    if (m_lpDirectPlay != NULL) {
-        hr = m_lpDirectPlay->GetPlayerAddress(1, NULL, &dwSize);
-        if (hr == DPERR_BUFFERTOOSMALL) {
-            LPVOID pData = new BYTE[dwSize];
-
-            // __FILE__: C:\Projects\Icewind2\src\chitin\ChNetwork.cpp
-            // __LINE__: 7685
-            UTIL_ASSERT(pData != NULL);
-
-            hr = m_lpDirectPlay->GetPlayerAddress(1, pData, &dwSize);
-            if (hr == DP_OK) {
-                if (m_lpDirectPlayLobby != NULL) {
-                    field_792 = "";
-                    m_lpDirectPlayLobby->EnumAddress(CNetworkLobbyEnumAddressCallback,
-                        pData,
-                        dwSize,
-                        NULL);
-                    a1 = field_792;
-                }
-            }
-        }
-    }
 }
 
 // 0x7A75B0
 INT CNetwork::ThreadLoop()
 {
     INT nPlayer;
-
-    if (m_bConnectionEstablished == TRUE && m_nServiceProvider != SERV_PROV_NULL) {
-        for (nPlayer = 0; nPlayer < CNETWORK_MAX_PLAYERS; nPlayer++) {
-            if (m_pPlayerID[nPlayer] != 0
-                && m_pSlidingWindow[nPlayer].m_bInitialized == TRUE) {
-                m_pSlidingWindow[nPlayer].SendCall();
-            }
-        }
-
-        SlidingWindowReceive();
-        SlidingWindowTimeouts();
-        CheckSessionStatus(TRUE);
-    }
 
     DWORD dwNextEvent = GetTickCount() + 10;
 
@@ -3286,289 +1864,6 @@ INT CNetwork::ThreadLoop()
     }
 
     return nDelta;
-}
-
-// 0x7A7670
-void CNetwork::SlidingWindowReceive()
-{
-    PLAYER_ID dpIDFrom;
-    DWORD dwSize;
-    BYTE* pData = FetchFrame(dpIDFrom, dwSize);
-    while (pData != NULL) {
-        BOOLEAN bDeleted = FALSE;
-
-        if (dpIDFrom != DPID_SYSMSG) {
-            if (dwSize >= 10) {
-                DWORD dwReceivedCrc = pData[9]
-                    + (pData[8] << 8)
-                    + (pData[7] << 16)
-                    + (pData[6] << 24);
-                DWORD dwExpectedCrc = 0;
-
-                pData[6] = 0;
-                pData[7] = 0;
-                pData[8] = 0;
-                pData[9] = 0;
-
-                for (DWORD k = 0; k < dwSize; k++) {
-                    dwExpectedCrc = m_dwCRC32[(dwExpectedCrc & 0xFF) ^ pData[k]] ^ (dwExpectedCrc >> 8);
-                }
-
-                if (dwReceivedCrc == dwExpectedCrc) {
-                    for (INT nPlayer = 0; nPlayer < CNETWORK_MAX_PLAYERS; nPlayer++) {
-                        if (m_pPlayerID[nPlayer] == dpIDFrom
-                            && m_pPlayerID[nPlayer] != 0
-                            && m_pSlidingWindow[nPlayer].m_bInitialized == TRUE) {
-                            // __FILE__: C:\Projects\Icewind2\src\chitin\ChNetwork.cpp
-                            // __LINE__: 7940
-                            UTIL_ASSERT_MSG(dpIDFrom != 0, "CNetwork::SlidingWindowReceive:  System message in application read.");
-
-                            m_pSlidingWindow[nPlayer].ReceiveCall(pData, dwSize);
-                            bDeleted = TRUE;
-                        }
-                    }
-                }
-            }
-        } else {
-            HandleSystemMessage(pData, dwSize);
-        }
-
-        if (!bDeleted) {
-            delete pData;
-        }
-
-        pData = FetchFrame(dpIDFrom, dwSize);
-    }
-}
-
-// 0x7A77D0
-void CNetwork::SlidingWindowTimeouts()
-{
-    if (m_bConnectionEstablished == TRUE) {
-        for (INT nPlayer = 0; nPlayer < CNETWORK_MAX_PLAYERS; nPlayer++) {
-            if (m_pPlayerID[nPlayer] != 0
-                && m_pSlidingWindow[nPlayer].m_bInitialized == TRUE) {
-                m_pSlidingWindow[nPlayer].TimeoutCall();
-                if (m_nHostPlayer == m_nLocalPlayer) {
-                    if (m_nHostPlayer != nPlayer
-                        && m_pSlidingWindow[nPlayer].m_nPlayerTimeout < GetTickCount()) {
-                        KickPlayer(m_pPlayerID[nPlayer], FALSE);
-                    }
-                } else {
-                    if (m_nHostPlayer == nPlayer
-                        && m_pSlidingWindow[nPlayer].m_nPlayerTimeout < GetTickCount()) {
-                        g_pChitin->OnMultiplayerSessionToClose();
-                        SleepEx(1000, FALSE);
-                        if (m_bConnectionEstablished == TRUE) {
-                            OnCloseSession();
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-// 0x7A7890
-BYTE* CNetwork::FetchFrame(PLAYER_ID& idFrom, DWORD& dwSize)
-{
-    BYTE* pData = new BYTE[MINIMAL_PACKET_SIZE];
-    if (pData == NULL) {
-        return NULL;
-    }
-
-    HRESULT hr;
-    DPID from;
-    DPID to;
-    DWORD dwDataSize = MINIMAL_PACKET_SIZE;
-
-    EnterCriticalSection(&(g_pChitin->cNetwork.field_F6A));
-
-    while (1) {
-        hr = g_pChitin->cNetwork.m_lpDirectPlay->Receive(&from,
-            &to,
-            0,
-            pData,
-            &dwDataSize);
-        if (hr != DPERR_BUFFERTOOSMALL) {
-            break;
-        }
-
-        delete pData;
-
-        pData = new BYTE[dwDataSize];
-        if (pData == NULL) {
-            hr = DPERR_NOMEMORY;
-            break;
-        }
-    }
-
-    LeaveCriticalSection(&(g_pChitin->cNetwork.field_F6A));
-
-    if (hr != DP_OK) {
-        dwSize = 0;
-        delete pData;
-        return NULL;
-    }
-
-    idFrom = from;
-    dwSize = dwDataSize;
-    return pData;
-}
-
-// 0x7A7980
-BOOLEAN CNetwork::HandleSystemMessage(BYTE* pData, DWORD dwSize)
-{
-    switch (reinterpret_cast<DPMSG_GENERIC*>(pData)->dwType) {
-    case DPSYS_CREATEPLAYERORGROUP:
-        if (1) {
-            DPMSG_CREATEPLAYERORGROUP* msg = reinterpret_cast<DPMSG_CREATEPLAYERORGROUP*>(pData);
-
-            CString sText;
-            CString sPlayerName;
-
-            PLAYER_ID dpId = msg->dpId;
-
-            sPlayerName = msg->dpnName.lpszShortNameA;
-            if (AddPlayerToList(dpId, sPlayerName, FALSE, FALSE) == TRUE) {
-                sText.Format(" %s: %s", (LPCSTR)sPlayerName, (LPCSTR)m_sJoinedGame);
-                sText.SetAt(0, sText.GetLength() - 1);
-
-                BYTE* pMessage = CreateCopyMessage(sText,
-                    sText.GetLength(),
-                    0,
-                    0,
-                    1);
-                if (pMessage != NULL) {
-                    m_SystemWindow.AddToIncomingQueue(0,
-                        m_idLocalPlayer,
-                        pMessage,
-                        sText.GetLength() + 12);
-                }
-            }
-        }
-        return TRUE;
-    case DPSYS_DESTROYPLAYERORGROUP:
-        if (1) {
-            DPMSG_DESTROYPLAYERORGROUP* msg = reinterpret_cast<DPMSG_DESTROYPLAYERORGROUP*>(pData);
-
-            CString sText;
-            CString sPlayerName;
-
-            PLAYER_ID dpId = msg->dpId;
-
-            sPlayerName = msg->dpnName.lpszShortNameA;
-            if (RemovePlayerFromList(dpId, FALSE) == TRUE) {
-                sText.Format(" %s: %s", (LPCSTR)sPlayerName, (LPCSTR)m_sLeftGame);
-                sText.SetAt(0, sText.GetLength() - 1);
-
-                BYTE* pMessage = CreateCopyMessage(sText,
-                    sText.GetLength(),
-                    0,
-                    0,
-                    1);
-                if (pMessage != NULL) {
-                    m_SystemWindow.AddToIncomingQueue(0,
-                        m_idLocalPlayer,
-                        pMessage,
-                        sText.GetLength() + 12);
-                }
-            } else {
-                for (INT nPlayer = 0; nPlayer < CNETWORK_MAX_PLAYERS; nPlayer++) {
-                    if (field_772[nPlayer] == dpId) {
-                        field_772[nPlayer] = 0;
-                    }
-                }
-            }
-        }
-        return TRUE;
-    case DPSYS_SESSIONLOST:
-        g_pChitin->OnMultiplayerSessionToClose();
-        SleepEx(1000, FALSE);
-        if (m_bConnectionEstablished == TRUE) {
-            OnCloseSession();
-        }
-        return TRUE;
-    case DPSYS_HOST:
-    case DPSYS_SETPLAYERORGROUPNAME:
-    case DPSYS_SETSESSIONDESC:
-        return TRUE;
-    }
-
-    return FALSE;
-}
-
-// 0x7A7BF0
-void CNetwork::AddMessageToWindow(PLAYER_ID idTo, DWORD dwFlags, BYTE* pData, DWORD dwSize)
-{
-    // NOTE: Uninline.
-    INT nPlayer = FindPlayerLocationByID(idTo, TRUE);
-
-    if (nPlayer == -1) {
-        // __FILE__: C:\Projects\Icewind2\src\chitin\ChNetwork.cpp
-        // __LINE__: 8339
-        UTIL_ASSERT_MSG(FALSE, "CNetwork::AddMessageToWindow: Invalid SendTo ID.");
-    }
-
-    BOOLEAN bRaw = (dwFlags & SEND_RAW) != 0;
-
-    INT nPackets;
-    if (dwSize + 16 >= MAXIMAL_PACKET_SIZE) {
-        nPackets = dwSize / MAXIMAL_PACKET_SIZE + 1;
-        while (nPackets >= 2 && dwSize - (nPackets - 1) * MAXIMAL_PACKET_SIZE < MINIMAL_PACKET_SIZE) {
-            nPackets--;
-        }
-    } else {
-        nPackets = 1;
-    }
-
-    DWORD dwOffset = 0;
-    DWORD dwRemainingSize = dwSize;
-    for (INT nPacket = 0; nPacket < nPackets; nPacket++) {
-        DWORD dwChunkSize = MAXIMAL_PACKET_SIZE;
-        if (nPacket == nPackets - 1) {
-            dwChunkSize = dwRemainingSize;
-        }
-
-        if (nPacket != 0) {
-            BYTE* pMessage = CreateCopyMessage(pData + dwOffset,
-                dwChunkSize,
-                bRaw,
-                TRUE,
-                0);
-
-            EnterCriticalSection(&(g_pChitin->cNetwork.field_F52));
-
-            CNETWORKWINDOW_QUEUEENTRY* pEntry = new CNETWORKWINDOW_QUEUEENTRY();
-            pEntry->idFrom = m_idLocalPlayer;
-            pEntry->idTo = idTo;
-            pEntry->pData = pMessage;
-            pEntry->dwSize = dwChunkSize + 12;
-            m_pSlidingWindow[nPlayer].m_lQueueOutgoingMessages.AddTail(pEntry);
-
-            LeaveCriticalSection(&(g_pChitin->cNetwork.field_F52));
-        } else {
-            BYTE* pMessage = CreateCopyMessage(pData + dwOffset,
-                dwChunkSize,
-                bRaw,
-                TRUE,
-                nPackets);
-
-            EnterCriticalSection(&(g_pChitin->cNetwork.field_F52));
-
-            CNETWORKWINDOW_QUEUEENTRY* pEntry = new CNETWORKWINDOW_QUEUEENTRY();
-            pEntry->idFrom = m_idLocalPlayer;
-            pEntry->idTo = idTo;
-            pEntry->pData = pMessage;
-            pEntry->dwSize = dwChunkSize + 16;
-            m_pSlidingWindow[nPlayer].m_lQueueOutgoingMessages.AddTail(pEntry);
-
-            LeaveCriticalSection(&(g_pChitin->cNetwork.field_F52));
-        }
-
-        dwOffset += dwChunkSize;
-        dwRemainingSize -= dwChunkSize;
-    }
 }
 
 // 0x7A7DF0
@@ -3809,37 +2104,9 @@ BOOLEAN CNetwork::SendMessage_(const CString& sPlayerName, DWORD dwFlags, BYTE* 
         pCompressedData[3] = static_cast<BYTE>(dwSize);
     }
 
-    if (m_lpDirectPlay == NULL || m_idLocalPlayer == idTo) {
-        return FALSE;
-    }
-
-    if (idTo != 0) {
-        if (bCompressed) {
-            AddMessageToWindow(idTo, dwFlags | SEND_RAW, pCompressedData, dwSize);
-        } else {
-            AddMessageToWindow(idTo, dwFlags, pData, dwSize);
-        }
-    } else {
-        for (nPlayer = 0; nPlayer < CNETWORK_MAX_PLAYERS; nPlayer++) {
-            if (((dwFlags & SEND_JOINING_PLAYERS) != 0 || m_pbPlayerVisible[nPlayer])
-                && m_pPlayerID[nPlayer] != 0
-                && m_pPlayerID[nPlayer] != m_idLocalPlayer) {
-                if (bCompressed) {
-                    AddMessageToWindow(m_pPlayerID[nPlayer],
-                        dwFlags | SEND_RAW,
-                        pCompressedData,
-                        dwSize);
-                } else {
-                    AddMessageToWindow(m_pPlayerID[nPlayer],
-                        dwFlags,
-                        pData,
-                        dwSize);
-                }
-            }
-        }
-    }
-
-    return TRUE;
+    // NOTE: iwd2r: DirectPlay is gone, so the original's
+    // `m_lpDirectPlay == NULL` check always holds here.
+    return FALSE;
 }
 
 // 0x7A84F0
@@ -4094,42 +2361,3 @@ void CNetwork::GetHostPlayerName(CString& sHostName)
         sHostName = "";
     }
 }
-
-#if DPLAY_COMPAT
-
-static HRESULT WINAPI FakeDirectPlayCreate(LPGUID, LPDIRECTPLAY*, IUnknown*)
-{
-    return DPERR_GENERIC;
-}
-
-static HRESULT WINAPI FakeDirectPlayLobbyCreateA(LPGUID, LPDIRECTPLAYLOBBYA*, IUnknown*, LPVOID, DWORD)
-{
-    return DPERR_GENERIC;
-}
-
-void CNetwork::InitDirectPlay()
-{
-    hDirectPlayDLL = LoadLibraryA("dplayx");
-    if (hDirectPlayDLL != NULL) {
-        DirectPlayCreate = (DirectPlayCreateFunc*)GetProcAddress(hDirectPlayDLL, "DirectPlayCreate");
-        DirectPlayLobbyCreateA = (DirectPlayLobbyCreateFunc*)GetProcAddress(hDirectPlayDLL, "DirectPlayLobbyCreateA");
-    }
-
-    if (DirectPlayCreate == NULL) {
-        DirectPlayCreate = FakeDirectPlayCreate;
-    }
-
-    if (DirectPlayLobbyCreateA == NULL) {
-        DirectPlayLobbyCreateA = FakeDirectPlayLobbyCreateA;
-    }
-}
-
-void CNetwork::FreeDirectPlay()
-{
-    if (hDirectPlayDLL != NULL) {
-        FreeLibrary(hDirectPlayDLL);
-        hDirectPlayDLL = NULL;
-    }
-}
-
-#endif

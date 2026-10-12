@@ -1,3 +1,4 @@
+// Modified for iwd2r; see NOTICE.md
 #include "CBaldurEngine.h"
 
 #include "CBaldurChitin.h"
@@ -7,7 +8,6 @@
 #include "CScreenInventory.h"
 #include "CScreenJournal.h"
 #include "CScreenMap.h"
-#include "CScreenMultiPlayer.h"
 #include "CScreenOptions.h"
 #include "CScreenSinglePlayer.h"
 #include "CScreenSpellbook.h"
@@ -819,12 +819,6 @@ void CBaldurEngine::OnLeftPanelButtonClick(DWORD dwButtonId)
                 g_pBaldurChitin->m_pEngineSinglePlayer->field_45C = 2;
                 g_pBaldurChitin->m_pEngineSinglePlayer->StartSinglePlayer(2);
                 g_pBaldurChitin->GetActiveEngine()->SelectEngine(g_pBaldurChitin->m_pEngineSinglePlayer);
-            }
-        } else {
-            if (g_pBaldurChitin->m_pEngineMultiPlayer != g_pBaldurChitin->GetActiveEngine()) {
-                g_pBaldurChitin->m_pEngineMultiPlayer->field_45C = 2;
-                g_pBaldurChitin->m_pEngineMultiPlayer->StartMultiPlayer(2);
-                g_pBaldurChitin->GetActiveEngine()->SelectEngine(g_pBaldurChitin->m_pEngineMultiPlayer);
             }
         }
         break;

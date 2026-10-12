@@ -4,12 +4,6 @@
 
 #include "mfc.h"
 
-#if _MSC_VER == 1200
-#define DPLAY_COMPAT 0
-#else
-#define DPLAY_COMPAT 1
-#endif
-
 
 #define CNETWORK_MAX_SERVICE_PROVIDERS 5
 #define CNETWORK_MAX_SESSIONS 64
@@ -40,15 +34,11 @@ public:
     BOOLEAN CheckIncomingQueue();
     BOOLEAN CheckIncomingQueueSpecific(BYTE nSpecMsgType, BYTE nSpecMsgSubType);
     BOOLEAN CheckOutgoingQueueForAppendableMsgs(DWORD dwSize);
-    void FrameSend(BYTE nFrameKind, WORD nFrameNumber);
     void Initialize(INT nIndex);
     void ShutDown();
     void RemoveFromAllQueues();
     BYTE* RemoveFromIncomingQueue(PLAYER_ID& idDPFrom, PLAYER_ID& idDPTo, DWORD& dwDataSize, BOOLEAN& bCompressed);
     BYTE* RemoveFromIncomingQueueSpecific(BYTE nSpecMsgType, BYTE nSpecMsgSubType, PLAYER_ID& idDPFrom, PLAYER_ID& idDPTo, DWORD& dwDataSize, BOOLEAN& bCompressed);
-    void SendCall();
-    void ReceiveCall(BYTE* pData, DWORD dwSize);
-    void TimeoutCall();
 
     void SetPlayerTimeout();
     void SetNoMessageTimeout();
@@ -129,13 +119,7 @@ public:
 
     CNetwork();
     ~CNetwork();
-    void AddModemAddressToList(LPCSTR lpAddress);
     void AddServiceProviderToList(const CString& sServiceProviderName, const GUID& sServiceProviderGuid, LPVOID lpConnection, size_t size);
-    BOOLEAN CreateDirectPlayAddress(BOOLEAN bHostingGame);
-    BOOLEAN CreateDirectPlayInterface(const GUID* guid, IDirectPlay4A** lplpDirectPlay4);
-    BOOLEAN CreateDirectPlayLobbyInterface(IDirectPlayLobby3A** lplpDirectPlayLobby3);
-    BOOLEAN HasModems();
-    void EnumerateModems();
     BOOLEAN EnumerateServiceProviders();
     INT FindModemAddress(const CString& sAddress);
     BOOLEAN GetModemAddress(INT nAddressNumber, CString& sAddress);
@@ -179,11 +163,6 @@ public:
     INT FindPlayerLocationByName(const CString& sPlayerName, BOOLEAN bInvisible);
     void sub_7A73D0(CString& a1);
     INT ThreadLoop();
-    void SlidingWindowReceive();
-    void SlidingWindowTimeouts();
-    BYTE* FetchFrame(PLAYER_ID& id, DWORD& dwSize);
-    BOOLEAN HandleSystemMessage(BYTE* pData, DWORD dwSize);
-    void AddMessageToWindow(PLAYER_ID idTo, DWORD dwFlags, BYTE* pData, DWORD dwSize);
     BYTE* CreateCopyMessage(const void* lpData, DWORD dwDataSize, BOOLEAN bCompressed, unsigned char a4, INT nFrame);
     BYTE* FetchMessage(INT& nMsgFrom, INT& nMsgTo, DWORD& dwSize);
     BYTE* FetchSpecificMessage(const CString& sPlayerName, BYTE nSpecMsgType, BYTE nSpecMsgSubType, DWORD& dwSize);
@@ -200,8 +179,6 @@ public:
     PLAYER_ID GetHostPlayerID();
     void GetHostPlayerName(CString& sHostName);
 
-    /* 0000 */ IDirectPlay4A* m_lpDirectPlay;
-    /* 0004 */ IDirectPlayLobby3A* m_lpDirectPlayLobby;
     /* 0008 */ GUID m_nApplicationGuid;
     /* 0018 */ BOOLEAN m_bApplicationGuidDefined;
     /* 0019 */ unsigned char field_19;
@@ -224,12 +201,6 @@ public:
     /* 00FE */ CString m_sPhoneNumber;
     /* 0102 */ UINT m_nSerialPort;
     /* 0106 */ UINT m_nSerialBaudRate;
-    /* 010A */ DWORD m_nSerialStopBits;
-    /* 010E */ DWORD m_nSerialParity;
-    /* 0112 */ DWORD m_nSerialFlowControl;
-    /* 0116 */ BOOLEAN m_bDirectPlayAddressCreated;
-    /* 0118 */ LPVOID m_pDirectPlayAddress;
-    /* 011C */ DWORD m_pDirectPlayAddressSize;
     /* 0120 */ BOOLEAN m_bSessionEnumerated;
     /* 0121 */ BOOLEAN m_bSessionSelected;
     /* 0122 */ INT m_nSession;
@@ -243,7 +214,6 @@ public:
     /* 0680 */ BOOLEAN m_bSessionPasswordEnabled;
     /* 0682 */ CString m_sSessionPassword;
     /* 0686 */ BOOLEAN m_bAllowNewConnections;
-    /* 0688 */ DPSESSIONDESC2 m_sessionDesc;
     /* 06D8 */ LPVOID m_pLastSessionBuffer;
     /* 06DC */ DWORD m_dwLastSessionBufferSize;
     /* 06E0 */ BOOLEAN m_bConnectionEstablished;
@@ -276,18 +246,6 @@ public:
     /* 0B52 */ DWORD m_dwCRC32[256];
     /* 0F52 */ CRITICAL_SECTION field_F52;
     /* 0F6A */ CRITICAL_SECTION field_F6A;
-
-#if DPLAY_COMPAT
-    typedef HRESULT(WINAPI DirectPlayCreateFunc)(LPGUID, LPDIRECTPLAY*, IUnknown*);
-    typedef HRESULT(WINAPI DirectPlayLobbyCreateFunc)(LPGUID, LPDIRECTPLAYLOBBYA*, IUnknown*, LPVOID, DWORD);
-
-    HMODULE hDirectPlayDLL;
-    DirectPlayCreateFunc* DirectPlayCreate;
-    DirectPlayLobbyCreateFunc* DirectPlayLobbyCreateA;
-
-    void InitDirectPlay();
-    void FreeDirectPlay();
-#endif
 };
 
 #endif /* CNETWORK_H_ */

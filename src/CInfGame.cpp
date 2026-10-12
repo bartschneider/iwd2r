@@ -1,3 +1,4 @@
+// Modified for iwd2r; see NOTICE.md
 #include "CInfGame.h"
 
 #include <process.h>
@@ -20,7 +21,6 @@
 #include "CScreenJournal.h"
 #include "CScreenLoad.h"
 #include "CScreenMap.h"
-#include "CScreenMultiPlayer.h"
 #include "CScreenOptions.h"
 #include "CScreenSave.h"
 #include "CScreenSinglePlayer.h"
@@ -3321,7 +3321,6 @@ void CInfGame::UpdatePortrait(SHORT nPortrait, DWORD dwPanelId)
     if (nPortrait != -1) {
         CBaldurEngine* pEngine = g_pBaldurChitin->GetActiveEngine();
         if (pEngine != g_pBaldurChitin->m_pEngineProjector
-            && pEngine != g_pBaldurChitin->m_pEngineMultiPlayer
             && pEngine != g_pBaldurChitin->m_pEngineSinglePlayer
             && pEngine != g_pBaldurChitin->m_pEngineWorldMap
             && pEngine != g_pBaldurChitin->m_pEngineSave) {
@@ -3354,7 +3353,6 @@ void CInfGame::sub_5AF420(SHORT nPortrait, DWORD dwPanelId)
     if (nPortrait != -1) {
         CBaldurEngine* pEngine = g_pBaldurChitin->GetActiveEngine();
         if (pEngine != g_pBaldurChitin->m_pEngineProjector
-            && pEngine != g_pBaldurChitin->m_pEngineMultiPlayer
             && pEngine != g_pBaldurChitin->m_pEngineSinglePlayer
             && pEngine != g_pBaldurChitin->m_pEngineWorldMap
             && pEngine != g_pBaldurChitin->m_pEngineSave) {

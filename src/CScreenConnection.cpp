@@ -1,3 +1,4 @@
+// Modified for iwd2r; see NOTICE.md
 #include "CScreenConnection.h"
 
 #include "CBaldurChitin.h"
@@ -7,7 +8,6 @@
 #include "CScreenCharacter.h"
 #include "CScreenCreateChar.h"
 #include "CScreenLoad.h"
-#include "CScreenMultiPlayer.h"
 #include "CScreenSinglePlayer.h"
 #include "CScreenStart.h"
 #include "CScreenWorld.h"
@@ -1456,11 +1456,6 @@ void CScreenConnection::OnNewGameButtonClick()
                     pSinglePlayer->field_45C = 1;
                     pSinglePlayer->StartSinglePlayer(1);
                     SelectEngine(pSinglePlayer);
-                } else {
-                    CScreenMultiPlayer* pMultiPlayer = g_pBaldurChitin->m_pEngineMultiPlayer;
-                    pMultiPlayer->field_45C = 1;
-                    pMultiPlayer->StartMultiPlayer(1);
-                    SelectEngine(pMultiPlayer);
                 }
 
                 g_pBaldurChitin->GetObjectGame()->GetMultiplayerSettings()->SetArbitrationLockStatus(TRUE, 0);
@@ -1874,11 +1869,6 @@ void CScreenConnection::OnDoneButtonClick()
                 pSinglePlayer->field_45C = 1;
                 pSinglePlayer->StartSinglePlayer(1);
                 SelectEngine(pSinglePlayer);
-            } else {
-                CScreenMultiPlayer* pMultiPlayer = g_pBaldurChitin->m_pEngineMultiPlayer;
-                pMultiPlayer->field_45C = 1;
-                pMultiPlayer->StartMultiPlayer(1);
-                SelectEngine(pMultiPlayer);
             }
         } else {
             if (nErrorCode == CNetwork::ERROR_CANNOTCONNECT) {
@@ -3409,11 +3399,6 @@ void CScreenConnection::HandleEMEvent(BYTE nEvent, BYTE nEventStage)
                         pSinglePlayer->field_45C = 1;
                         pSinglePlayer->StartSinglePlayer(1);
                         SelectEngine(pSinglePlayer);
-                    } else {
-                        CScreenMultiPlayer* pMultiPlayer = g_pBaldurChitin->m_pEngineMultiPlayer;
-                        pMultiPlayer->field_45C = 1;
-                        pMultiPlayer->StartMultiPlayer(1);
-                        SelectEngine(pMultiPlayer);
                     }
 
                     pSettings->SetArbitrationLockStatus(TRUE, 0);
@@ -3723,10 +3708,6 @@ void CScreenConnection::AutoStartDirectPlayLobby()
         renderLock.Unlock();
 
         g_pBaldurChitin->GetObjectGame()->NewGame(TRUE, FALSE);
-
-        g_pBaldurChitin->m_pEngineMultiPlayer->field_45C = 1;
-        g_pBaldurChitin->m_pEngineMultiPlayer->StartMultiPlayer(1);
-        SelectEngine(g_pBaldurChitin->m_pEngineMultiPlayer);
     }
 
     g_pBaldurChitin->m_bIsAutoStarting = FALSE;
@@ -3917,10 +3898,6 @@ void CScreenConnection::OnLobbyNewGameButtonClick()
         g_pBaldurChitin->m_pEngineSinglePlayer->field_45C = 1;
         g_pBaldurChitin->m_pEngineSinglePlayer->StartSinglePlayer(1);
         SelectEngine(g_pBaldurChitin->m_pEngineSinglePlayer);
-    } else {
-        g_pBaldurChitin->m_pEngineMultiPlayer->field_45C = 1;
-        g_pBaldurChitin->m_pEngineMultiPlayer->StartMultiPlayer(1);
-        SelectEngine(g_pBaldurChitin->m_pEngineMultiPlayer);
     }
 
     pSettings->SetArbitrationLockStatus(TRUE, 0);

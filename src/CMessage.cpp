@@ -1,3 +1,4 @@
+// Modified for iwd2r; see NOTICE.md
 #include "CMessage.h"
 
 #include "CBaldurChitin.h"
@@ -19,7 +20,6 @@
 #include "CScreenConnection.h"
 #include "CScreenCreateChar.h"
 #include "CScreenLoad.h"
-#include "CScreenMultiPlayer.h"
 #include "CScreenSinglePlayer.h"
 #include "CScreenStore.h"
 #include "CScreenWorld.h"
@@ -1677,19 +1677,8 @@ BOOLEAN CBaldurMessage::OnSettingsArbitrationLockStatus(INT nMsgFrom, BYTE* pMes
     if (bStatus == TRUE) {
         if (g_pBaldurChitin->GetActiveEngine() != g_pBaldurChitin->m_pEngineLoad
             && g_pBaldurChitin->GetActiveEngine() != g_pBaldurChitin->m_pEngineCreateChar
-            && g_pBaldurChitin->GetActiveEngine() != g_pBaldurChitin->m_pEngineMultiPlayer
             && g_pBaldurChitin->GetActiveEngine() != g_pBaldurChitin->m_pEngineConnection) {
             g_pBaldurChitin->GetObjectGame()->SetTempCursor(4);
-
-            g_pBaldurChitin->m_pEngineMultiPlayer->field_45C = 1;
-            g_pBaldurChitin->m_pEngineMultiPlayer->StartMultiPlayer(1);
-            g_pBaldurChitin->GetActiveEngine()->SelectEngine(g_pBaldurChitin->m_pEngineMultiPlayer);
-        }
-
-        if (g_pBaldurChitin->GetActiveEngine() == g_pBaldurChitin->m_pEngineMultiPlayer
-            && g_pBaldurChitin->m_pEngineMultiPlayer->field_45C != 1) {
-            g_pBaldurChitin->m_pEngineMultiPlayer->field_45C = 1;
-            g_pBaldurChitin->m_pEngineMultiPlayer->StartMultiPlayer(1);
         }
     }
 
@@ -4965,20 +4954,13 @@ void CMessageHandler::PostAsynchronousUpdate()
         if (g_pBaldurChitin->GetObjectGame()->m_bAnotherPlayerJoinedGame == TRUE
             && (g_pBaldurChitin->GetObjectGame()->CanSaveGame(strError, FALSE, FALSE) == TRUE
                 || g_pBaldurChitin->GetObjectGame()->GetMultiplayerSettings()->m_bArbitrationLockStatus == TRUE)) {
-            if ((g_pBaldurChitin->GetActiveEngine() != g_pBaldurChitin->m_pEngineLoad
-                    && g_pBaldurChitin->GetActiveEngine() != g_pBaldurChitin->m_pEngineCreateChar
-                    && g_pBaldurChitin->GetActiveEngine() != g_pBaldurChitin->m_pEngineMultiPlayer
-                    && g_pBaldurChitin->GetActiveEngine() != g_pBaldurChitin->m_pEngineSinglePlayer
-                    && g_pBaldurChitin->GetActiveEngine() != g_pBaldurChitin->m_pEngineConnection)
-                || (g_pBaldurChitin->GetActiveEngine() == g_pBaldurChitin->m_pEngineMultiPlayer
-                    && g_pBaldurChitin->m_pEngineMultiPlayer->field_45C != 1)) {
+            if (g_pBaldurChitin->GetActiveEngine() != g_pBaldurChitin->m_pEngineLoad
+                && g_pBaldurChitin->GetActiveEngine() != g_pBaldurChitin->m_pEngineCreateChar
+                && g_pBaldurChitin->GetActiveEngine() != g_pBaldurChitin->m_pEngineSinglePlayer
+                && g_pBaldurChitin->GetActiveEngine() != g_pBaldurChitin->m_pEngineConnection) {
                 g_pBaldurChitin->GetObjectGame()->MultiplayerSetCharacterCreationLocation();
 
                 g_pBaldurChitin->GetObjectGame()->m_tempCursor = 4;
-
-                g_pBaldurChitin->m_pEngineMultiPlayer->field_45C = 1;
-                g_pBaldurChitin->m_pEngineMultiPlayer->StartMultiPlayer(1);
-                g_pBaldurChitin->GetActiveEngine()->SelectEngine(g_pBaldurChitin->m_pEngineMultiPlayer);
 
                 g_pBaldurChitin->GetObjectGame()->GetMultiplayerSettings()->SetArbitrationLockStatus(1, 0);
             }

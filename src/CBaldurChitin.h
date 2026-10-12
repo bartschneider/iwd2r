@@ -1,3 +1,4 @@
+// Modified for iwd2r; see NOTICE.md
 #ifndef CBALDURCHITIN_H_
 #define CBALDURCHITIN_H_
 
@@ -28,7 +29,6 @@ class CScreenKeymaps;
 class CScreenLoad;
 class CScreenMap;
 class CScreenMovies;
-class CScreenMultiPlayer;
 class CScreenOptions;
 class CScreenSave;
 class CScreenSinglePlayer;
@@ -176,7 +176,6 @@ public:
     /* 1C84 */ CScreenStart* m_pEngineStart;
     /* 1C88 */ CScreenWorld* m_pEngineWorld;
     /* 1C8C */ CScreenStore* m_pEngineStore;
-    /* 1C90 */ CScreenMultiPlayer* m_pEngineMultiPlayer;
     /* 1C94 */ CScreenSinglePlayer* m_pEngineSinglePlayer;
     /* 1C98 */ CScreenConnection* m_pEngineConnection;
     /* 1C9C */ CScreenWorldMap* m_pEngineWorldMap;
