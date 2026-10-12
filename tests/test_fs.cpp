@@ -280,3 +280,31 @@ TEST_CASE("fs installed resolver is used by the compat hook", "[fs]")
     CHECK(compat::ResolvePath("override\\x.itm") == "Override/X.ITM");
     compat::SetPathResolver(nullptr);
 }
+
+TEST_CASE("fs cache is invalidated for relative paths", "[fs]")
+{
+    TempTree tree;
+    Touch(tree.root / "Data" / "a.bif");
+    platform::fs::SetDataRoot(tree.str());
+    CwdGuard cwd(tree.root);
+    CHECK(platform::fs::Resolve("data/NEW.BIF") == "Data/NEW.BIF");
+    REQUIRE(CopyFileA("Data/a.bif", "Data/New.Bif", TRUE) == TRUE);
+    CHECK(platform::fs::Resolve("data/NEW.BIF") == "Data/New.Bif");
+
+    CHECK(platform::fs::Resolve("top.txt") == "top.txt");
+    Touch(tree.root / "Top.txt");
+    platform::fs::InvalidateCache();
+    CHECK(platform::fs::Resolve("TOP.TXT") == "Top.txt");
+    REQUIRE(DeleteFileA("Top.txt") == TRUE);
+    CHECK(platform::fs::Resolve("top.txt") == "top.txt");
+}
+
+TEST_CASE("fs rescans after a miss for files created outside the shim", "[fs]")
+{
+    TempTree tree;
+    Touch(tree.root / "Save" / "other.gam");
+    platform::fs::SetDataRoot(tree.str());
+    CHECK(platform::fs::Resolve("save/SAVE.GAM") == "Save/SAVE.GAM");
+    Touch(tree.root / "Save" / "Save.gam");
+    CHECK(platform::fs::Resolve("save/SAVE.GAM") == "Save/Save.gam");
+}

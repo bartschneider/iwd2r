@@ -75,23 +75,24 @@ namespace {
 
     // Lists a directory (cached). Returns false when it cannot be listed.
     // Caller holds g_mutex.
-    bool ListDirectory(const std::string& dir, const std::vector<std::string>*& entries)
+    bool ListDirectory(const std::string& dir, const std::vector<std::string>*& entries, bool& fresh)
     {
         auto it = g_dirCache.find(dir);
         if (it != g_dirCache.end()) {
             entries = &it->second;
+            fresh = false;
             return true;
         }
+        fresh = true;
         std::error_code ec;
         stdfs::directory_iterator iter(dir.empty() ? stdfs::path(".") : stdfs::path(dir), ec);
         if (ec)
             return false;
         std::vector<std::string> names;
-        for (const stdfs::directory_iterator end; iter != end; iter.increment(ec)) {
-            if (ec)
-                break;
+        for (const stdfs::directory_iterator end; iter != end; iter.increment(ec))
             names.push_back(iter->path().filename().generic_string());
-        }
+        if (ec)
+            return false;
         entries = &(g_dirCache[dir] = std::move(names));
         return true;
     }
@@ -120,8 +121,13 @@ namespace {
                 std::error_code ec;
                 const std::string candidate = Join(real, comp);
                 if (!stdfs::exists(candidate, ec)) {
-                    const std::vector<std::string>* entries = nullptr;
-                    if (ListDirectory(real, entries)) {
+                    // A cached listing may predate files created outside the shim:
+                    // on a miss, rescan the directory once before giving up.
+                    for (int attempt = 0; attempt < 2; ++attempt) {
+                        const std::vector<std::string>* entries = nullptr;
+                        bool fresh = true;
+                        if (!ListDirectory(real, entries, fresh))
+                            break;
                         const std::string* best = nullptr;
                         for (const std::string& name : *entries) {
                             if (name == comp) {
@@ -131,8 +137,13 @@ namespace {
                             if (EqualsNoCase(name, comp) && (!best || name < *best))
                                 best = &name;
                         }
-                        if (best)
+                        if (best) {
                             chosen = *best;
+                            break;
+                        }
+                        if (fresh)
+                            break;
+                        g_dirCache.erase(real);
                     }
                 }
             }
@@ -228,13 +239,15 @@ namespace {
         size_t next = 0;
     };
 
+    // Cache keys are full on-disk paths, so relative inputs are keyed under the data root.
     void InvalidateParentOf(const std::string& resolved)
     {
         std::lock_guard<std::mutex> lock(g_mutex);
-        const size_t slash = resolved.find_last_of('/');
-        g_dirCache.erase(slash == std::string::npos ? std::string() : (slash == 0 ? std::string("/") : resolved.substr(0, slash)));
-        // The same directory may be keyed under its data-root-relative spelling.
-        g_dirCache.erase(resolved);
+        const bool absolute = !resolved.empty() && resolved[0] == '/';
+        const std::string full = absolute ? resolved : Join(g_dataRoot, resolved);
+        const size_t slash = full.find_last_of('/');
+        g_dirCache.erase(slash == std::string::npos ? std::string() : (slash == 0 ? std::string("/") : full.substr(0, slash)));
+        g_dirCache.erase(full);
     }
 
     DWORD CopyOut(const std::string& s, LPSTR buffer, DWORD size)
@@ -256,7 +269,11 @@ void SetDataRoot(const std::string& root)
     g_dirCache.clear();
 }
 
-const std::string& DataRoot() { return g_dataRoot; }
+std::string DataRoot()
+{
+    std::lock_guard<std::mutex> lock(g_mutex);
+    return g_dataRoot;
+}
 
 void SetInstallPrefix(const std::string& windowsPrefix)
 {
@@ -318,6 +335,7 @@ HANDLE FindFirstFileA(LPCSTR pattern, WIN32_FIND_DATAA* data)
     if (!pattern || !data)
         return INVALID_HANDLE_VALUE;
     const std::string p = platform::fs::Resolve(pattern);
+    // With no directory part this enumerates the current directory, which is the data root by design.
     const size_t slash = p.find_last_of('/');
     const std::string dir = slash == std::string::npos ? std::string() : (slash == 0 ? std::string("/") : p.substr(0, slash));
     const std::string wildcard = slash == std::string::npos ? p : p.substr(slash + 1);

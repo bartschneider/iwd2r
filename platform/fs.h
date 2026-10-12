@@ -9,7 +9,7 @@ namespace platform::fs {
 
 // The directory that holds the game data; empty disables re-rooting and folding.
 void SetDataRoot(const std::string& root);
-const std::string& DataRoot();
+std::string DataRoot();
 
 // The Windows install prefix (for example "C:\Games\IWD2\"), or empty.
 void SetInstallPrefix(const std::string& windowsPrefix);
