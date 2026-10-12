@@ -3,6 +3,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "compat/ini.h"
+#include "install_ini_backup.h"
 
 #include <zlib.h>
 
@@ -13,7 +14,6 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
-#include <map>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -41,34 +41,6 @@ uint32_t U32(const std::string& d, size_t at)
     return (uint32_t(static_cast<unsigned char>(d[at])) << 24) | (uint32_t(static_cast<unsigned char>(d[at + 1])) << 16)
         | (uint32_t(static_cast<unsigned char>(d[at + 2])) << 8) | uint32_t(static_cast<unsigned char>(d[at + 3]));
 }
-
-// The install's INI files, restored byte-identical after the run: the engine
-// rewrites icewind2.ini on exit.
-class IniBackup {
-public:
-    explicit IniBackup(const std::filesystem::path& dir)
-    {
-        for (const auto& entry : std::filesystem::directory_iterator(dir)) {
-            std::string ext = entry.path().extension().string();
-            for (char& c : ext)
-                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-            if (entry.is_regular_file() && ext == ".ini")
-                m_files[entry.path()] = ReadFile(entry.path());
-        }
-    }
-    ~IniBackup()
-    {
-        for (const auto& file : m_files) {
-            std::ofstream out(file.first, std::ios::binary | std::ios::trunc);
-            out << file.second;
-        }
-    }
-    IniBackup(const IniBackup&) = delete;
-    IniBackup& operator=(const IniBackup&) = delete;
-
-private:
-    std::map<std::filesystem::path, std::string> m_files;
-};
 
 }
 
@@ -100,7 +72,7 @@ TEST_CASE("start screen scenario screenshot", "[data][scenario]")
 
     int raw = 0;
     {
-        IniBackup backup(data);
+        InstallIniBackup backup(data);
 #ifdef _WIN32
         const std::string cmd = "set SDL_VIDEO_DRIVER=dummy&& set SDL_AUDIO_DRIVER=dummy&& set IWD2R_SCRIPT=" + script + "&& set IWD2R_SHOT_DIR=" + shots.string() + "&& set IWD2_DATA=" + data + "&& \"" IWD2R_EXE "\" > \"" + out + "\" 2>&1";
         const std::string full = "\"" + cmd + "\"";
