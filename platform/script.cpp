@@ -548,10 +548,25 @@ void PollControl()
     namespace fs = std::filesystem;
     std::error_code ec;
     std::vector<fs::path> requests;
+    bool framesRequested = false;
     for (fs::directory_iterator it(fs::path(dir), ec), end; !ec && it != end; it.increment(ec)) {
         const std::string file = it->path().filename().string();
-        if (file.size() > 8 && file.compare(0, 5, "shot-") == 0 && file.compare(file.size() - 4, 4, ".req") == 0)
+        if (file == "frames.req")
+            framesRequested = true;
+        else if (file.size() > 8 && file.compare(0, 5, "shot-") == 0 && file.compare(file.size() - 4, 4, ".req") == 0)
             requests.push_back(it->path());
+    }
+    if (framesRequested) {
+        // Written aside and renamed, so a reader never sees a partial file.
+        const fs::path answer = fs::path(dir) / "frames.txt";
+        const fs::path temp = fs::path(dir) / "frames.tmp";
+        {
+            std::ofstream out(temp, std::ios::binary | std::ios::trunc);
+            out << platform::present::PresentedFrames() << "\n";
+        }
+        fs::remove(answer, ec);
+        fs::rename(temp, answer, ec);
+        fs::remove(fs::path(dir) / "frames.req", ec);
     }
     for (const fs::path& request : requests) {
         const std::string file = request.filename().string();

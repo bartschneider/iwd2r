@@ -243,7 +243,7 @@ TEST_CASE("script shot writes the primary surface", "[script]")
     std::filesystem::remove_all(dir);
 }
 
-TEST_CASE("control directory shot request writes the frame and deletes the request", "[script][control]")
+TEST_CASE("control directory answers shot and frame-count requests", "[script][control]")
 {
     const std::filesystem::path dir = std::filesystem::temp_directory_path() / ("iwd2r_control_test_" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     const std::filesystem::path control = dir / "control";
@@ -268,6 +268,17 @@ TEST_CASE("control directory shot request writes the frame and deletes the reque
     CHECK(std::filesystem::file_size(dir / "menu.png") > 8);
     CHECK_FALSE(std::filesystem::exists(request));
     CHECK(std::filesystem::exists(control / "other.txt"));
+
+    // frames.req: the presented frame count in frames.txt.
+    std::ofstream(control / "frames.req").put('\n');
+    platform::present::MarkPrimaryDirty();
+    platform::window::PumpEvents();
+    CHECK_FALSE(std::filesystem::exists(control / "frames.req"));
+    std::ifstream framesIn(control / "frames.txt");
+    int frames = -1;
+    framesIn >> frames;
+    CHECK(frames == platform::present::PresentedFrames());
+    CHECK(frames == before + 2);
 
     // Without the variable the directory is not looked at.
     SetEnv("IWD2R_CONTROL_DIR", "");

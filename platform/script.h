@@ -79,9 +79,11 @@ void Advance();
 // The external control channel, active only when IWD2R_CONTROL_DIR is set:
 // for every request file shot-<NAME>.req in that directory, writes the
 // primary surface as <NAME>.png into IWD2R_SHOT_DIR (as the shot command
-// does) and deletes the request. A request made before the first frame
-// waits for it. Called by the window pump once per presented frame; it
-// injects no input, so an outside driver can use it alongside real input.
+// does) and deletes the request; for a request file frames.req, writes the
+// number of presented frames into frames.txt and deletes the request. A
+// request made before the first frame waits for it. Called by the window
+// pump once per presented frame; it injects no input, so an outside driver
+// can use it alongside real input.
 void PollControl();
 
 // True while a started script has commands left.
