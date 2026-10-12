@@ -3247,7 +3247,7 @@ void CScreenConnection::ResetErrorPanel(CUIPanel* pPanel)
 
     pText->RemoveAll();
 
-    UpdateText(pText, "%s", strRes.szText);
+    UpdateText(pText, "%s", (LPCSTR)strRes.szText);
 
     for (INT nButton = 0; nButton < m_nNumErrorButtons; nButton++) {
         CUIControlButton* pButton = static_cast<CUIControlButton*>(pPanel->GetControl(nButton + 1));
@@ -3859,7 +3859,7 @@ void CScreenConnection::UpdateHelp(DWORD dwPanelId, DWORD dwTextId, STRREF dwStr
     pText->RemoveAll();
 
     g_pBaldurChitin->GetTlkTable().Fetch(dwStrId, strRes);
-    UpdateText(pText, "%s", strRes.szText);
+    UpdateText(pText, "%s", (LPCSTR)strRes.szText);
 }
 
 // 0x602170
@@ -5125,7 +5125,7 @@ void CScreenConnection::ResetVersionMismatchPanel(CUIPanel* pPanel)
         break;
     }
 
-    UpdateText(pText, "%s", FetchString(strText));
+    UpdateText(pText, "%s", (LPCSTR)FetchString(strText));
 }
 
 // NOTE: Inlined.

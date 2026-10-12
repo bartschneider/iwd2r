@@ -1,3 +1,4 @@
+// Modified for iwd2r; see NOTICE.md
 #include "CScreenWorld.h"
 
 #include "CBaldurChitin.h"
@@ -2202,7 +2203,7 @@ void CScreenWorld::StartDeath()
     UpdateLabel(pPanel,
         -1,
         "%s",
-        FetchString(strRef));
+        (LPCSTR)FetchString(strRef));
 
     CUIControlButton* pButton = static_cast<CUIControlButton*>(pPanel->GetControl(2));
 

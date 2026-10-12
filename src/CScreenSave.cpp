@@ -1,3 +1,4 @@
+// Modified for iwd2r; see NOTICE.md
 #include "CScreenSave.h"
 
 #include "CBaldurChitin.h"
@@ -1265,7 +1266,7 @@ void CScreenSave::ResetSaveAsPanel(CUIPanel* pPanel)
     UpdateLabel(pPanel,
         0x10000004,
         m_aGameSlots[nGameSlot]->m_sChapter,
-        sTime);
+        (LPCSTR)sTime);
 
     CUIControlButton* pButton = static_cast<CUIControlButton*>(pPanel->GetControl(7));
 
@@ -1337,7 +1338,7 @@ void CScreenSave::ResetErrorPanel(CUIPanel* pPanel)
     UTIL_ASSERT(pText != NULL);
 
     pText->RemoveAll();
-    UpdateText(pText, "%s", strRes.szText);
+    UpdateText(pText, "%s", (LPCSTR)strRes.szText);
 
     for (INT nButton = 0; nButton < m_nNumErrorButtons; nButton++) {
         CUIControlButton* pButton = static_cast<CUIControlButton*>(pPanel->GetControl(nButton + 1));

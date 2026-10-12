@@ -1,3 +1,4 @@
+// Modified for iwd2r; see NOTICE.md
 #include "CScreenJournal.h"
 
 #include "CBaldurChitin.h"
@@ -796,7 +797,7 @@ void CScreenJournal::ResetErrorPanel(CUIPanel* pPanel)
     UTIL_ASSERT(pText != NULL);
 
     pText->RemoveAll();
-    UpdateText(pText, "%s", strRes.szText);
+    UpdateText(pText, "%s", (LPCSTR)strRes.szText);
 
     for (INT nButton = 0; nButton < m_nNumErrorButtons; nButton++) {
         CUIControlButton* pButton = static_cast<CUIControlButton*>(pPanel->GetControl(nButton + 1));

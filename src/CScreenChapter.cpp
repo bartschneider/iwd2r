@@ -1,3 +1,4 @@
+// Modified for iwd2r; see NOTICE.md
 #include "CScreenChapter.h"
 
 #include "CBaldurChitin.h"
@@ -413,7 +414,7 @@ void CScreenChapter::ResetMainPanel()
     UTIL_ASSERT(m_pTextList != NULL && m_pTextList->GetCount() > 0);
 
     if (m_nEngineState == 0) {
-        UpdateLabel(m_pMainPanel, 0x10000000, "%s", FetchString(m_pTextList->GetHead()));
+        UpdateLabel(m_pMainPanel, 0x10000000, "%s", (LPCSTR)FetchString(m_pTextList->GetHead()));
     }
 
     m_pTextControl = static_cast<CUIControlTextDisplay*>(m_pMainPanel->GetControl(2));

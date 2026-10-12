@@ -1,3 +1,4 @@
+// Modified for iwd2r; see NOTICE.md
 #include "CScreenSinglePlayer.h"
 
 #include "CBaldurChitin.h"
@@ -1840,7 +1841,7 @@ void CScreenSinglePlayer::ResetErrorPanel(CUIPanel* pPanel)
     UTIL_ASSERT(pText != NULL);
 
     pText->RemoveAll();
-    UpdateText(pText, "%s", strRes.szText);
+    UpdateText(pText, "%s", (LPCSTR)strRes.szText);
 
     for (INT nButton = 0; nButton < m_nNumErrorButtons; nButton++) {
         CUIControlButton* pButton = static_cast<CUIControlButton*>(pPanel->GetControl(nButton + 1));
@@ -1929,7 +1930,7 @@ void CScreenSinglePlayer::UpdateExperienceEntry(CUIControlTextDisplay* pText, co
             sValue.Format("%d", nLevel);
             tlk.SetToken(CRuleTables::TOKEN_LEVEL, sValue);
 
-            UpdateText(pText, "%s", FetchString(11293)); // "<CLASS>: Level <LEVEL>"
+            UpdateText(pText, "%s", (LPCSTR)FetchString(11293)); // "<CLASS>: Level <LEVEL>"
         }
     }
 }
@@ -2154,26 +2155,26 @@ void CScreenSinglePlayer::ResetViewCharacterPanel(CUIPanel* pPanel)
 
             UpdateText(pTextLeft,
                 "%s: %s",
-                FetchString(1047), // "Name"
-                sName);
+                (LPCSTR)FetchString(1047), // "Name"
+                (LPCSTR)sName);
 
             ruleTables.GetGenderStringMixed(typeAI.m_nGender, sGender);
             UpdateText(pTextLeft,
                 "%s: %s",
-                FetchString(12135), // "Gender"
-                sGender);
+                (LPCSTR)FetchString(12135), // "Gender"
+                (LPCSTR)sGender);
 
             ruleTables.GetRaceStringMixed(typeAI.m_nRace, sRace, typeAI.m_nSubRace);
             UpdateText(pTextLeft,
                 "%s: %s",
-                FetchString(1048), // "Race"
-                sRace);
+                (LPCSTR)FetchString(1048), // "Race"
+                (LPCSTR)sRace);
 
             ruleTables.GetAlignmentStringMixed(typeAI.m_nAlignment, sAlignment);
             UpdateText(pTextLeft,
                 "%s: %s",
-                FetchString(1049), // "Alignment"
-                sRace);
+                (LPCSTR)FetchString(1049), // "Alignment"
+                (LPCSTR)sRace);
 
             // NOTE: Uninline.
             UpdateExperience(pTextLeft, pSprite);
@@ -2183,48 +2184,48 @@ void CScreenSinglePlayer::ResetViewCharacterPanel(CUIPanel* pPanel)
             UpdateTextForceColor(pTextLeft,
                 RGB(200, 200, 0),
                 "%s",
-                FetchString(17088)); // "Abilities"
+                (LPCSTR)FetchString(17088)); // "Abilities"
 
             UpdateText(pTextLeft,
                 "%s: %d  (%+d)",
-                FetchString(1145), // "Strength"
+                (LPCSTR)FetchString(1145), // "Strength"
                 pBStats->m_STRBase,
                 ruleTables.GetAbilityScoreModifier(pBStats->m_STRBase));
 
             UpdateText(pTextLeft,
                 "%s: %d  (%+d)",
-                FetchString(1151), // "Dexterity"
+                (LPCSTR)FetchString(1151), // "Dexterity"
                 pBStats->m_DEXBase,
                 ruleTables.GetAbilityScoreModifier(pBStats->m_DEXBase));
 
             UpdateText(pTextLeft,
                 "%s: %d  (%+d)",
-                FetchString(1178), // "Constitution"
+                (LPCSTR)FetchString(1178), // "Constitution"
                 pBStats->m_CONBase,
                 ruleTables.GetAbilityScoreModifier(pBStats->m_CONBase));
 
             UpdateText(pTextLeft,
                 "%s: %d  (%+d)",
-                FetchString(1179), // "Intelligence"
+                (LPCSTR)FetchString(1179), // "Intelligence"
                 pBStats->m_INTBase,
                 ruleTables.GetAbilityScoreModifier(pBStats->m_INTBase));
 
             UpdateText(pTextLeft,
                 "%s: %d  (%+d)",
-                FetchString(1180), // "Wisdom"
+                (LPCSTR)FetchString(1180), // "Wisdom"
                 pBStats->m_WISBase,
                 ruleTables.GetAbilityScoreModifier(pBStats->m_WISBase));
 
             UpdateText(pTextLeft,
                 "%s: %d  (%+d)",
-                FetchString(1181), // "Charisma"
+                (LPCSTR)FetchString(1181), // "Charisma"
                 pBStats->m_CHRBase,
                 ruleTables.GetAbilityScoreModifier(pBStats->m_CHRBase));
 
             UpdateTextForceColor(pTextRight,
                 RGB(200, 200, 0),
                 "%s",
-                FetchString(36361)); // "Feats"
+                (LPCSTR)FetchString(36361)); // "Feats"
 
             pSprite->DisplayFeats(pTextRight);
 
@@ -2233,7 +2234,7 @@ void CScreenSinglePlayer::ResetViewCharacterPanel(CUIPanel* pPanel)
             UpdateTextForceColor(pTextRight,
                 RGB(200, 200, 0),
                 "%s",
-                FetchString(11983)); // "Skills"
+                (LPCSTR)FetchString(11983)); // "Skills"
 
             pSprite->DisplaySkills(pTextRight);
 
@@ -2242,7 +2243,7 @@ void CScreenSinglePlayer::ResetViewCharacterPanel(CUIPanel* pPanel)
             UpdateTextForceColor(pTextRight,
                 RGB(200, 200, 0),
                 "%s",
-                FetchString(11292)); // "Inventory"
+                (LPCSTR)FetchString(11292)); // "Inventory"
 
             for (INT nSlot = 0; nSlot < 51; nSlot++) {
                 if (nSlot != 10) {
@@ -2250,7 +2251,7 @@ void CScreenSinglePlayer::ResetViewCharacterPanel(CUIPanel* pPanel)
                         STRREF strItem = pSprite->m_equipment.m_items[nSlot]->GetGenericName();
                         UpdateText(pTextRight,
                             "%s",
-                            FetchString(strItem));
+                            (LPCSTR)FetchString(strItem));
                     }
                 }
             }
@@ -2292,7 +2293,7 @@ void CScreenSinglePlayer::ResetViewCharacterPanel(CUIPanel* pPanel)
                         UpdateTextForceColor(pTextRight,
                             RGB(200, 200, 0),
                             "%s",
-                            FetchString(strRef));
+                            (LPCSTR)FetchString(strRef));
 
                         for (UINT nLevel = 0; nLevel < CSPELLLIST_MAX_LEVELS; nLevel++) {
                             // NOTE: Uninline.
@@ -2316,7 +2317,7 @@ void CScreenSinglePlayer::ResetViewCharacterPanel(CUIPanel* pPanel)
                                     UpdateText(pTextRight,
                                         "%d: %s",
                                         nLevel + 1,
-                                        FetchString(name));
+                                        (LPCSTR)FetchString(name));
                                 }
                             }
                         }
@@ -2405,7 +2406,7 @@ void CScreenSinglePlayer::UpdateHelp(DWORD dwPanelId, DWORD dwTextId, DWORD dwSt
     pText->RemoveAll();
 
     g_pBaldurChitin->GetTlkTable().Fetch(dwStrId, strRes);
-    UpdateText(pText, "%s", strRes.szText);
+    UpdateText(pText, "%s", (LPCSTR)strRes.szText);
 }
 
 // 0x665580

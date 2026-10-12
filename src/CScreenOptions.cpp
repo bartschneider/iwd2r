@@ -1,3 +1,4 @@
+// Modified for iwd2r; see NOTICE.md
 #include "CScreenOptions.h"
 
 #include "CBaldurChitin.h"
@@ -269,7 +270,7 @@ void CScreenOptions::EngineActivated()
 
                 sFormattedVersion.Format("v%d.%d%d (%s)", major, minor, patch, sBuildNumber);
 
-                UpdateLabel(pPanel, 0x1000000B, "%s", sFormattedVersion);
+                UpdateLabel(pPanel, 0x1000000B, "%s", (LPCSTR)sFormattedVersion);
             }
         } else {
             if (m_lPopupStack.GetTailPosition() != NULL && m_lPopupStack.GetTail() != NULL) {
@@ -740,7 +741,7 @@ void CScreenOptions::UpdateMainPanel()
 
     sFormattedVersion.Format("v%d.%d%d (%s)", major, minor, patch, sBuildNumber);
 
-    UpdateLabel(pPanel, 0x1000000B, "%s", sFormattedVersion);
+    UpdateLabel(pPanel, 0x1000000B, "%s", (LPCSTR)sFormattedVersion);
 }
 
 // NOTE: Uninlined.
@@ -845,7 +846,7 @@ void CScreenOptions::ResetErrorPanel(CUIPanel* pPanel)
     UTIL_ASSERT(pText != NULL);
 
     pText->RemoveAll();
-    UpdateText(pText, "%s", strRes.szText);
+    UpdateText(pText, "%s", (LPCSTR)strRes.szText);
 
     for (INT nButton = 0; nButton < m_nNumErrorButtons; nButton++) {
         CUIControlButton* pButton = static_cast<CUIControlButton*>(pPanel->GetControl(nButton));
@@ -1690,7 +1691,7 @@ void CScreenOptions::UpdateHelp(DWORD dwPanelId, DWORD dwTextId, DWORD dwStrId)
     pText->RemoveAll();
 
     g_pBaldurChitin->GetTlkTable().Fetch(dwStrId, strRes);
-    UpdateText(pText, "%s", strRes.szText);
+    UpdateText(pText, "%s", (LPCSTR)strRes.szText);
 }
 
 // 0x657470

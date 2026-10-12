@@ -1,3 +1,4 @@
+// Modified for iwd2r; see NOTICE.md
 #include "CScreenSpellbook.h"
 
 #include "CBaldurChitin.h"
@@ -1056,7 +1057,7 @@ void CScreenSpellbook::ResetSpellInfoPanel(CUIPanel* pPanel)
     cSpell.Demand();
 
     STRREF strName = cSpell.GetGenericName();
-    UpdateLabel(pPanel, 0x10000000, "%s", FetchString(strName));
+    UpdateLabel(pPanel, 0x10000000, "%s", (LPCSTR)FetchString(strName));
 
     CUIControlTextDisplay* pText = static_cast<CUIControlTextDisplay*>(pPanel->GetControl(3));
 
@@ -1067,7 +1068,7 @@ void CScreenSpellbook::ResetSpellInfoPanel(CUIPanel* pPanel)
     pText->RemoveAll();
 
     STRREF strDescription = cSpell.GetDescription();
-    UpdateText(pText, "%s", FetchString(strDescription));
+    UpdateText(pText, "%s", (LPCSTR)FetchString(strDescription));
 
     pText->SetTopString(pText->m_plstStrings->FindIndex(0));
 
@@ -1136,7 +1137,7 @@ void CScreenSpellbook::ResetErrorPanel(CUIPanel* pPanel)
     UTIL_ASSERT(pText != NULL);
 
     pText->RemoveAll();
-    UpdateText(pText, "%s", strRes.szText);
+    UpdateText(pText, "%s", (LPCSTR)strRes.szText);
 
     for (INT nButton = 0; nButton < m_nNumErrorButtons; nButton++) {
         CUIControlButton* pButton = static_cast<CUIControlButton*>(pPanel->GetControl(nButton + 1));

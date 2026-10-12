@@ -863,7 +863,7 @@ void CScreenCreateChar::UpdateMainPanel(CGameSprite* pSprite)
         if (m_nCurrentStep > 7) {
             UpdateText(pText,
                 "%s: %s",
-                FetchString(1047),
+                (LPCSTR)FetchString(1047),
                 (LPCSTR)pSprite->GetName());
         }
 
@@ -871,7 +871,7 @@ void CScreenCreateChar::UpdateMainPanel(CGameSprite* pSprite)
             ruleTables.GetGenderStringMixed(pSprite->m_startTypeAI.m_nGender, sGender);
             UpdateText(pText,
                 "%s: %s",
-                FetchString(12135),
+                (LPCSTR)FetchString(12135),
                 (LPCSTR)sGender);
         }
 
@@ -879,7 +879,7 @@ void CScreenCreateChar::UpdateMainPanel(CGameSprite* pSprite)
             ruleTables.GetRaceStringMixed(pSprite->m_startTypeAI.m_nRace, sRace, pSprite->m_startTypeAI.m_nSubRace);
             UpdateText(pText,
                 "%s: %s",
-                FetchString(1048),
+                (LPCSTR)FetchString(1048),
                 (LPCSTR)sRace);
         }
 
@@ -910,7 +910,7 @@ void CScreenCreateChar::UpdateMainPanel(CGameSprite* pSprite)
             ruleTables.GetAlignmentStringMixed(pSprite->m_startTypeAI.m_nAlignment, sAlignment);
             UpdateText(pText,
                 "%s: %s",
-                FetchString(1049),
+                (LPCSTR)FetchString(1049),
                 (LPCSTR)sAlignment);
         }
 
@@ -1157,10 +1157,10 @@ void CScreenCreateChar::ResetMonkPaladinSpecializationPanel(CUIPanel* pPanel, CG
 
     switch (typeAI.m_nClass) {
     case CAIOBJECTTYPE_C_MONK:
-        UpdateLabel(pPanel, 0x1000000A, "%s", FetchString(33));
+        UpdateLabel(pPanel, 0x1000000A, "%s", (LPCSTR)FetchString(33));
         break;
     case CAIOBJECTTYPE_C_PALADIN:
-        UpdateLabel(pPanel, 0x1000000A, "%s", FetchString(1078));
+        UpdateLabel(pPanel, 0x1000000A, "%s", (LPCSTR)FetchString(1078));
         break;
     default:
         // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenCreateChar.cpp
@@ -1540,11 +1540,11 @@ void CScreenCreateChar::ResetClericWizardSpecializationPanel(CUIPanel* pPanel, C
     switch (typeAI.m_nClass) {
     case CAIOBJECTTYPE_C_WIZARD:
         strDescription = 10942;
-        UpdateLabel(pPanel, 0x10000000, "%s", FetchString(1081));
+        UpdateLabel(pPanel, 0x10000000, "%s", (LPCSTR)FetchString(1081));
         break;
     case CAIOBJECTTYPE_C_CLERIC:
         strDescription = 9559;
-        UpdateLabel(pPanel, 0x10000000, "%s", FetchString(1079));
+        UpdateLabel(pPanel, 0x10000000, "%s", (LPCSTR)FetchString(1079));
         break;
     }
 
@@ -2828,7 +2828,7 @@ void CScreenCreateChar::UpdateCustomPortraitsPanel(CUIPanel* pPanel, CGameSprite
     // NOTE: Uninline.
     pPortrait->SetPortrait(CResRef(sPortrait));
 
-    UpdateLabel(pPanel, 0x10000007, "%s", sPortrait);
+    UpdateLabel(pPanel, 0x10000007, "%s", (LPCSTR)sPortrait);
 
     CUIControlButton* pDone = static_cast<CUIControlButton*>(pPanel->GetControl(6));
     pDone->SetEnabled(IsDoneButtonClickable(pSprite));
@@ -2890,7 +2890,7 @@ void CScreenCreateChar::UpdateFeatsPanel(CUIPanel* pPanel, CGameSprite* pSprite)
         UpdateLabel(pPanel,
             0x10000001 + index,
             "%s",
-            FetchString(strName));
+            (LPCSTR)FetchString(strName));
     }
 
     CUIControlButton* pDone = static_cast<CUIControlButton*>(pPanel->GetControl(0));
@@ -3598,7 +3598,7 @@ void CScreenCreateChar::UpdateHelp(DWORD dwPanelId, DWORD dwTextId, DWORD dwStrI
     pText->RemoveAll();
 
     g_pBaldurChitin->GetTlkTable().Fetch(dwStrId, strRes);
-    UpdateText(pText, "%s", strRes.szText);
+    UpdateText(pText, "%s", (LPCSTR)strRes.szText);
 }
 
 // 0x6104B0
@@ -5793,7 +5793,7 @@ void CScreenCreateChar::UpdateClassEntry(CUIControlTextDisplay* pText, const CAI
         sClass,
         typeAI.m_nGender != CAIOBJECTTYPE_SEX_FEMALE);
 
-    UpdateText(pText, "%s", FetchString(12136) + ": " + sClass);
+    UpdateText(pText, "%s", (LPCSTR)(FetchString(12136) + ": " + sClass));
 }
 
 // 0x623BF0

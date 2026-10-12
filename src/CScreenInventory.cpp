@@ -1,3 +1,4 @@
+// Modified for iwd2r; see NOTICE.md
 #include "CScreenInventory.h"
 
 #include "CBaldurChitin.h"
@@ -1231,7 +1232,7 @@ void CScreenInventory::UpdateMainPanel(BOOL bClearError)
             "%d / %d %s",
             nCurrentWeight,
             nTotalWeight,
-            FetchString(39537)); // "lb."
+            (LPCSTR)FetchString(39537)); // "lb."
 
         if (nCurrentWeight == 0) {
             pLabel->SetForegroundColor(RGB(255, 255, 255));
@@ -1774,7 +1775,7 @@ void CScreenInventory::ResetErrorPanel(CUIPanel* pPanel)
     UTIL_ASSERT(pText != NULL);
 
     pText->RemoveAll();
-    UpdateText(pText, "%s", strRes.szText);
+    UpdateText(pText, "%s", (LPCSTR)strRes.szText);
 
     for (INT nButton = 0; nButton < m_nNumErrorButtons; nButton++) {
         CUIControlButton* pButton = static_cast<CUIControlButton*>(pPanel->GetControl(nButton + 1));
@@ -2812,7 +2813,7 @@ void CScreenInventory::UpdateHelp(DWORD dwPanelId, DWORD dwTextId, DWORD dwStrId
     pText->RemoveAll();
 
     g_pBaldurChitin->GetTlkTable().Fetch(dwStrId, strRes);
-    UpdateText(pText, "%s", strRes.szText);
+    UpdateText(pText, "%s", (LPCSTR)strRes.szText);
 }
 
 // 0x62CD60
@@ -2982,14 +2983,14 @@ void CScreenInventory::UpdateHistoryPanel(BOOL a1)
             UpdateLabel(pPanel,
                 0x10000000,
                 "%s",
-                FetchString(pItem->GetGenericName()));
+                (LPCSTR)FetchString(pItem->GetGenericName()));
 
             if ((pItem->m_flags & 0x1) == 0) {
                 // "NOT IDENTIFIED"
                 UpdateLabel(pPanel,
                     0x1000000B,
                     "%s",
-                    FetchString(17108));
+                    (LPCSTR)FetchString(17108));
             } else {
                 UpdateLabel(pPanel, 0x1000000B, "");
             }
@@ -3048,7 +3049,7 @@ void CScreenInventory::UpdateAbilitiesPanel()
 
                 UpdateLabel(pPanel, 0x10000003 + nIndex,
                     "%s",
-                    FetchString(pButtonData->m_abilityId.field_10));
+                    (LPCSTR)FetchString(pButtonData->m_abilityId.field_10));
 
                 m_pAbilities->GetNext(pos);
             } else {

@@ -461,16 +461,16 @@ void CScreenLoad::UpdateMainPanel()
             UpdateLabel(pPanel,
                 0x10000005 + nSlot,
                 "%s",
-                m_aGameSlots[nGameSlot]->m_sSlotName);
+                (LPCSTR)m_aGameSlots[nGameSlot]->m_sSlotName);
             UpdateLabel(pPanel,
                 0x1000000A + nSlot,
                 "%s, %s",
-                m_aGameSlots[nGameSlot]->m_sChapter,
-                sTime);
+                (LPCSTR)m_aGameSlots[nGameSlot]->m_sChapter,
+                (LPCSTR)sTime);
             UpdateLabel(pPanel,
                 0x1000000F + nSlot,
                 "%s",
-                m_aGameSlots[nGameSlot]->m_sFileTime);
+                (LPCSTR)m_aGameSlots[nGameSlot]->m_sFileTime);
         } else {
             UpdateLabel(pPanel, 0x10000005 + nSlot, "");
             UpdateLabel(pPanel, 0x1000000A + nSlot, "");
@@ -1280,7 +1280,7 @@ void CScreenLoad::ResetErrorPanel(CUIPanel* pPanel)
     UTIL_ASSERT(pText != NULL);
 
     pText->RemoveAll();
-    UpdateText(pText, "%s", strRes.szText);
+    UpdateText(pText, "%s", (LPCSTR)strRes.szText);
 
     for (INT nButton = 0; nButton < m_nNumErrorButtons; nButton++) {
         CUIControlButton* pButton = static_cast<CUIControlButton*>(pPanel->GetControl(nButton + 1));
@@ -1316,7 +1316,7 @@ void CScreenLoad::sub_63E150(CUIPanel* pPanel)
     UTIL_ASSERT(pText != NULL);
 
     pText->RemoveAll();
-    UpdateText(pText, "%s", strRes.szText);
+    UpdateText(pText, "%s", (LPCSTR)strRes.szText);
 
     CUIControlButton* pButton = static_cast<CUIControlButton*>(pPanel->GetControl(10));
 

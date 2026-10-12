@@ -683,31 +683,31 @@ void CScreenCharacter::UpdateSavingThrows(CUIControlTextDisplay* pText, CDerived
     UpdateTextForceColor(pText,
         RGB(200, 200, 0),
         "%s",
-        FetchString(17379)); // "Saving Throws"
+        (LPCSTR)FetchString(17379)); // "Saving Throws"
 
     UpdateText(pText,
         "%s: %+d",
-        FetchString(17380), // "Fortitude"
+        (LPCSTR)FetchString(17380), // "Fortitude"
         DStats.m_nSaveVSFortitude);
 
     INT nTrapSenseBonus = ruleTables.GetTrapSenseBonus(DStats);
     if (nTrapSenseBonus != 0) {
         UpdateText(pText,
             "%s: %+d (%s: %d)",
-            FetchString(17381), // "Reflex"
+            (LPCSTR)FetchString(17381), // "Reflex"
             DStats.m_nSaveVSReflex,
-            FetchString(39802), // "Traps"
+            (LPCSTR)FetchString(39802), // "Traps"
             nTrapSenseBonus);
     } else {
         UpdateText(pText,
             "%s: %+d",
-            FetchString(17381), // "Reflex"
+            (LPCSTR)FetchString(17381), // "Reflex"
             DStats.m_nSaveVSReflex);
     }
 
     UpdateText(pText,
         "%s: %+d",
-        FetchString(17382), // "Will"
+        (LPCSTR)FetchString(17382), // "Will"
         DStats.m_nSaveVSWill);
 }
 
@@ -931,7 +931,7 @@ void CScreenCharacter::ResetClassPanel(CGameSprite* pSprite, int a2)
         break;
     }
 
-    UpdateLabel(pPanel, 0x10000000, "%s", FetchString(name));
+    UpdateLabel(pPanel, 0x10000000, "%s", (LPCSTR)FetchString(name));
     UpdateHelp(pPanel->m_nID, 13, description);
 }
 
@@ -2102,7 +2102,7 @@ void CScreenCharacter::UpdateMainPanel(BOOL bCharacterChanged)
                 UpdateTextForceColor(pText,
                     RGB(200, 200, 0),
                     "%s",
-                    FetchString(11983));
+                    (LPCSTR)FetchString(11983));
                 pSprite->DisplaySkills(pText);
 
                 UpdateText(pText, "");
@@ -2110,7 +2110,7 @@ void CScreenCharacter::UpdateMainPanel(BOOL bCharacterChanged)
                 UpdateTextForceColor(pText,
                     RGB(200, 200, 0),
                     "%s",
-                    FetchString(36361));
+                    (LPCSTR)FetchString(36361));
                 pSprite->DisplayFeats(pText);
                 break;
             case 3:
@@ -2435,7 +2435,7 @@ void CScreenCharacter::UpdateGeneralInformation(CUIControlTextDisplay* pText, CG
         UpdateTextForceColor(pText,
             RGB(200, 200, 0),
             "%s",
-            FetchString(15982)); // "Favored Enemies"
+            (LPCSTR)FetchString(15982)); // "Favored Enemies"
 
         for (INT nIndex = 0; nIndex < MAX_HATED_RACES; nIndex++) {
             BYTE nRace = pBStats->m_favoredEnemies[nIndex];
@@ -2538,7 +2538,7 @@ void CScreenCharacter::UpdateGeneralInformation(CUIControlTextDisplay* pText, CG
             0);
     }
 
-    UpdateText(pText, "%s", sHitPointsPerLvl);
+    UpdateText(pText, "%s", (LPCSTR)sHitPointsPerLvl);
 
     if (pDStats->m_nResistAcid != 0
         || pDStats->m_nResistCold != 0
@@ -2661,7 +2661,7 @@ void CScreenCharacter::UpdateMiscInformation(CUIControlTextDisplay* pText, CGame
     UpdateTextForceColor(pText,
         RGB(200, 200, 0),
         "%s",
-        FetchString(40320)); // "Favorites"
+        (LPCSTR)FetchString(40320)); // "Favorites"
 
     pSprite->m_cGameStats.GetFavouriteSpell(resRef);
     if (resRef != "") {
@@ -2678,8 +2678,8 @@ void CScreenCharacter::UpdateMiscInformation(CUIControlTextDisplay* pText, CGame
 
     UpdateText(pText,
         "%s: %s",
-        FetchString(11949), // "Favorite Spell (if applicable)"
-        sFavouriteSpellName);
+        (LPCSTR)FetchString(11949), // "Favorite Spell (if applicable)"
+        (LPCSTR)sFavouriteSpellName);
 
     sFavouriteWeaponName = "";
 
@@ -2713,23 +2713,23 @@ void CScreenCharacter::UpdateMiscInformation(CUIControlTextDisplay* pText, CGame
 
     UpdateText(pText,
         "%s: %s",
-        FetchString(11950), // "Favorite Weapon"
-        sFavouriteWeaponName);
+        (LPCSTR)FetchString(11950), // "Favorite Weapon"
+        (LPCSTR)sFavouriteWeaponName);
 
     UpdateText(pText, "");
 
     UpdateTextForceColor(pText,
         RGB(200, 200, 0),
         "%s",
-        FetchString(40322)); // "Combat Statistics"
+        (LPCSTR)FetchString(40322)); // "Combat Statistics"
 
     STRREF strName;
     pSprite->m_cGameStats.GetStrongestKill(strName);
 
     UpdateText(pText,
         "%s: %s",
-        FetchString(11947), // "Most Powerful Vanquished"
-        FetchString(strName));
+        (LPCSTR)FetchString(11947), // "Most Powerful Vanquished"
+        (LPCSTR)FetchString(strName));
 
     ULONG nCurrentTimeWithParty;
     pSprite->m_cGameStats.GetTimeWithParty(nCurrentTimeWithParty);
@@ -2739,29 +2739,29 @@ void CScreenCharacter::UpdateMiscInformation(CUIControlTextDisplay* pText, CGame
 
     UpdateText(pText,
         "%s: %s",
-        FetchString(11948), // "Time Spent with Party"
-        sCurrentTimeWithParty);
+        (LPCSTR)FetchString(11948), // "Time Spent with Party"
+        (LPCSTR)sCurrentTimeWithParty);
 
     UpdateText(pText,
         "%s: %d",
-        FetchString(11953), // "Experience Value of Kills"
+        (LPCSTR)FetchString(11953), // "Experience Value of Kills"
         pSprite->m_cGameStats.m_nGameKillsXPValue);
 
     UpdateText(pText,
         "%s: %d",
-        FetchString(11954), // "Number of Kills"
+        (LPCSTR)FetchString(11954), // "Number of Kills"
         pSprite->m_cGameStats.m_nGameKillsNumber);
 
     UpdateText(pText,
         "%s: %d%%",
-        FetchString(11951), // "Total Experience Value in Party"
+        (LPCSTR)FetchString(11951), // "Total Experience Value in Party"
         nPartyGameKillsXPValue > 0
             ? 100 * pSprite->m_cGameStats.m_nGameKillsXPValue / nPartyGameKillsXPValue
             : 0);
 
     UpdateText(pText,
         "%s: %d%%",
-        FetchString(11952), // "Percentage of Total Kills in Party"
+        (LPCSTR)FetchString(11952), // "Percentage of Total Kills in Party"
         nPartyGameKillsNumber > 0
             ? 100 * pSprite->m_cGameStats.m_nGameKillsNumber / nPartyGameKillsNumber
             : 0);
@@ -3282,7 +3282,7 @@ void CScreenCharacter::UpdateHelp(DWORD dwPanelId, DWORD dwTextId, DWORD dwStrId
     pText->RemoveAll();
 
     g_pBaldurChitin->GetTlkTable().Fetch(dwStrId, strRes);
-    UpdateText(pText, "%s", strRes.szText);
+    UpdateText(pText, "%s", (LPCSTR)strRes.szText);
 }
 
 // 0x5E6950
@@ -3401,7 +3401,7 @@ void CScreenCharacter::ResetErrorPanel(CUIPanel* pPanel)
     UTIL_ASSERT(pText != NULL);
 
     pText->RemoveAll();
-    UpdateText(pText, "%s", strRes.szText);
+    UpdateText(pText, "%s", (LPCSTR)strRes.szText);
 
     for (INT nButton = 0; nButton < m_nNumErrorButtons; nButton++) {
         CUIControlButton* pButton = static_cast<CUIControlButton*>(pPanel->GetControl(nButton));
