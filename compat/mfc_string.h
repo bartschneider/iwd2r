@@ -52,6 +52,10 @@ public:
     char operator[](int index) const { return m_pchData[index]; }
     void SetAt(int index, char ch) { m_pchData[index] = ch; }
 
+    // Loads a string from the engine string table (compat/mfc_resource.h).
+    // Returns FALSE and leaves the string unchanged for an unknown id.
+    BOOL LoadStringA(UINT id);
+
     int Compare(const char* psz) const;
     int CompareNoCase(const char* psz) const;
 
@@ -79,6 +83,8 @@ public:
     void MakeReverse();
 
     char* GetBuffer(int minLen);
+    // The later MFC overload: the buffer at the current length.
+    char* GetBuffer() { return GetBuffer(0); }
     void ReleaseBuffer(int newLen = -1);
     char* GetBufferSetLength(int newLen);
 

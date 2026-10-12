@@ -1,9 +1,10 @@
 // iwd2r. Distributed under LICENSE.md.
-// MFC CList, CPtrList, CObList and CTypedPtrList. A POSITION is the address of
-// a list node, as in MFC, so positions stay valid across removals of other
-// elements.
+// MFC CList, CPtrList, CObList, CStringList and CTypedPtrList. A POSITION is
+// the address of a list node, as in MFC, so positions stay valid across
+// removals of other elements.
 #pragma once
 
+#include "compat/mfc_string.h"
 #include "compat/win_types.h"
 
 #include <cassert>
@@ -16,8 +17,10 @@ public:
     virtual ~CObject() { }
 };
 
+// Derives from CObject, as in MFC, so the destructor is virtual and engine
+// lists may declare theirs override.
 template <class TYPE, class ARG_TYPE = const TYPE&>
-class CList {
+class CList : public CObject {
 protected:
     struct CNode {
         CNode* pNext;
@@ -41,7 +44,7 @@ public:
     }
     CList(const CList&) = delete;
     CList& operator=(const CList&) = delete;
-    ~CList() { RemoveAll(); }
+    ~CList() override { RemoveAll(); }
 
     int GetCount() const { return m_nCount; }
     int GetSize() const { return m_nCount; }
@@ -284,6 +287,15 @@ class CObList : public CList<CObject*, CObject*> {
 public:
     CObList(int blockSize = 10)
         : CList<CObject*, CObject*>(blockSize)
+    {
+    }
+};
+
+// A string literal converts to CString, so AddTail("x") and Find("x") work.
+class CStringList : public CList<CString, const CString&> {
+public:
+    CStringList(int blockSize = 10)
+        : CList<CString, const CString&>(blockSize)
     {
     }
 };

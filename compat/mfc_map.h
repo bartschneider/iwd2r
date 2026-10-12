@@ -1,6 +1,7 @@
 // iwd2r. Distributed under LICENSE.md.
-// MFC CMapWordToPtr and CMapStringToString over std::unordered_map. Iteration
-// follows insertion order; a POSITION is the sequence number of the next entry.
+// MFC CMapWordToPtr, CMapStringToString and CTypedPtrMap over
+// std::unordered_map. Iteration follows insertion order; a POSITION is the
+// sequence number of the next entry.
 #pragma once
 
 #include "compat/mfc_list.h"
@@ -25,6 +26,9 @@ struct CMapKeyHash {
 template <class KEY, class VALUE>
 class CMapBase {
 public:
+    typedef KEY BaseKey;
+    typedef VALUE BaseValue;
+
     CMapBase() = default;
     CMapBase(const CMapBase&) = delete;
     CMapBase& operator=(const CMapBase&) = delete;
@@ -103,3 +107,29 @@ private:
 class CMapWordToPtr : public CMapBase<WORD, void*> { };
 
 class CMapStringToString : public CMapBase<CString, CString> { };
+
+// Typed view of a pointer map such as CMapWordToPtr. operator[] hands out the
+// stored void* reinterpreted as VALUE&, as MFC does (see CTypedPtrList).
+template <class BASE_CLASS, class KEY, class VALUE>
+class CTypedPtrMap : public BASE_CLASS {
+public:
+    BOOL Lookup(KEY key, VALUE& value) const
+    {
+        typename BASE_CLASS::BaseValue stored {};
+        if (!BASE_CLASS::Lookup(key, stored))
+            return FALSE;
+        value = static_cast<VALUE>(stored);
+        return TRUE;
+    }
+    VALUE& operator[](KEY key) { return reinterpret_cast<VALUE&>(BASE_CLASS::operator[](key)); }
+    void SetAt(KEY key, VALUE value) { BASE_CLASS::SetAt(key, value); }
+    BOOL RemoveKey(KEY key) { return BASE_CLASS::RemoveKey(key); }
+    void GetNextAssoc(POSITION& position, KEY& key, VALUE& value) const
+    {
+        typename BASE_CLASS::BaseKey baseKey {};
+        typename BASE_CLASS::BaseValue stored {};
+        BASE_CLASS::GetNextAssoc(position, baseKey, stored);
+        key = static_cast<KEY>(baseKey);
+        value = static_cast<VALUE>(stored);
+    }
+};

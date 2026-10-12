@@ -2,6 +2,7 @@
 #define NOMINMAX
 #include <catch2/catch_test_macros.hpp>
 
+#include "compat/mfc_filefind.h"
 #include "compat/path_hook.h"
 #include "platform/fs.h"
 #include "platform/win32_api.h"
@@ -143,6 +144,12 @@ TEST_CASE("fs wildcard match", "[fs]")
     CHECK_FALSE(platform::fs::WildcardMatch("a?", "a"));
     CHECK(platform::fs::WildcardMatch("Exact.Txt", "exact.txt"));
     CHECK_FALSE(platform::fs::WildcardMatch("exact", "exact.txt"));
+    // Win32: a trailing ".*" also matches names without an extension.
+    CHECK(platform::fs::WildcardMatch("*.*", "000000001-Quick-Save"));
+    CHECK(platform::fs::WildcardMatch("*.*", "a.b.c"));
+    CHECK(platform::fs::WildcardMatch("save.*", "SAVE"));
+    CHECK_FALSE(platform::fs::WildcardMatch("save.*", "saves"));
+    CHECK_FALSE(platform::fs::WildcardMatch("*.*x", "abc"));
 }
 
 TEST_CASE("fs find enumerates matching entries", "[fs]")
@@ -307,4 +314,108 @@ TEST_CASE("fs rescans after a miss for files created outside the shim", "[fs]")
     CHECK(platform::fs::Resolve("save/SAVE.GAM") == "Save/SAVE.GAM");
     Touch(tree.root / "Save" / "Save.gam");
     CHECK(platform::fs::Resolve("save/SAVE.GAM") == "Save/Save.gam");
+}
+
+TEST_CASE("fs DeleteFileA reports a missing file", "[fs]")
+{
+    TempTree tree;
+    SetLastError(0);
+    CHECK(DeleteFileA((tree.str() + "/nothing.bmp").c_str()) == FALSE);
+    CHECK(GetLastError() == ERROR_FILE_NOT_FOUND);
+    SetLastError(0);
+}
+
+TEST_CASE("fs SetFileAttributesA toggles read-only", "[fs]")
+{
+    TempTree tree;
+    Touch(tree.root / "a.txt");
+    const std::string file = tree.str() + "/a.txt";
+    REQUIRE(SetFileAttributesA(file.c_str(), FILE_ATTRIBUTE_READONLY) == TRUE);
+    CHECK((GetFileAttributes(file.c_str()) & FILE_ATTRIBUTE_READONLY) != 0);
+    REQUIRE(SetFileAttributes(file.c_str(), GetFileAttributes(file.c_str()) & ~FILE_ATTRIBUTE_READONLY) == TRUE);
+    CHECK((GetFileAttributesA(file.c_str()) & FILE_ATTRIBUTE_READONLY) == 0);
+    CHECK(SetFileAttributesA((tree.str() + "/nothing").c_str(), FILE_ATTRIBUTE_NORMAL) == FALSE);
+    SetLastError(0);
+}
+
+TEST_CASE("fs RemoveDirectoryA removes only empty directories", "[fs]")
+{
+    TempTree tree;
+    Touch(tree.root / "full" / "x.txt");
+    stdfs::create_directories(tree.root / "empty");
+    CHECK(RemoveDirectoryA((tree.str() + "/full").c_str()) == FALSE);
+    CHECK(stdfs::exists(tree.root / "full" / "x.txt"));
+    CHECK(RemoveDirectoryA((tree.str() + "/empty").c_str()) == TRUE);
+    CHECK_FALSE(stdfs::exists(tree.root / "empty"));
+    CHECK(RemoveDirectoryA((tree.str() + "/empty").c_str()) == FALSE);
+    SetLastError(0);
+}
+
+TEST_CASE("fs CreateFileA and ReadFile read through a kernel handle", "[fs]")
+{
+    TempTree tree;
+    Touch(tree.root / "Save" / "ICEWIND2.GAM", "GAMEV2.2rest");
+    platform::fs::SetDataRoot(tree.str());
+    platform::fs::InvalidateCache();
+    CwdGuard cwd(tree.root);
+
+    HANDLE h = CreateFileA("save\\icewind2.gam", GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    REQUIRE(h != INVALID_HANDLE_VALUE);
+    char buffer[8];
+    DWORD read = 0;
+    CHECK(ReadFile(h, buffer, sizeof(buffer), &read, NULL) == TRUE);
+    CHECK(read == 8);
+    CHECK(std::string(buffer, 8) == "GAMEV2.2");
+    char rest[16];
+    CHECK(ReadFile(h, rest, sizeof(rest), &read, NULL) == TRUE);
+    CHECK(read == 4);
+    CHECK(WaitForSingleObject(h, 0) == WAIT_OBJECT_0);
+    CHECK(CloseHandle(h) == TRUE);
+
+    SetLastError(0);
+    CHECK(CreateFileA("Save\\missing.gam", GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL) == INVALID_HANDLE_VALUE);
+    CHECK(GetLastError() == ERROR_FILE_NOT_FOUND);
+
+    HANDLE created = CreateFileA("Save\\new.bin", GENERIC_READ | GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+    REQUIRE(created != INVALID_HANDLE_VALUE);
+    CHECK(CloseHandle(created) == TRUE);
+    CHECK(stdfs::exists(tree.root / "Save" / "new.bin"));
+    CHECK(CreateFileA("Save\\new.bin", GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL) == INVALID_HANDLE_VALUE);
+
+    HANDLE event = CreateEventA(NULL, TRUE, FALSE, NULL);
+    CHECK(ReadFile(event, buffer, sizeof(buffer), &read, NULL) == FALSE);
+    CHECK(read == 0);
+    CloseHandle(event);
+    SetLastError(0);
+}
+
+TEST_CASE("fs CFileFind walks a directory like MFC", "[fs]")
+{
+    TempTree tree;
+    Touch(tree.root / "Dir" / "a.txt");
+    Touch(tree.root / "Dir" / "Sub" / "b.txt");
+    const std::string dir = tree.str() + "/Dir";
+
+    CFileFind self;
+    REQUIRE(self.FindFile(dir.c_str()) == TRUE);
+    CHECK(self.GetFileName() == CString()); // nothing current before FindNextFile
+    CHECK(self.FindNextFile() == FALSE);
+    CHECK(self.IsDirectory());
+    CHECK_FALSE(self.IsDots());
+    CHECK(self.GetFileName() == CString("Dir"));
+
+    CFileFind find;
+    std::set<std::string> files, dirs;
+    BOOL working = find.FindFile((dir + "\\*.*").c_str());
+    REQUIRE(working);
+    while (working) {
+        working = find.FindNextFile();
+        if (find.IsDots())
+            continue;
+        const std::string path = static_cast<const char*>(find.GetFilePath());
+        (find.IsDirectory() ? dirs : files).insert(path);
+    }
+    CHECK(files == std::set<std::string> { dir + "\\a.txt" });
+    CHECK(dirs == std::set<std::string> { dir + "\\Sub" });
+    CHECK(find.FindFile((tree.str() + "/none/*.*").c_str()) == FALSE);
 }

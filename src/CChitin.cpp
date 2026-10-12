@@ -1,9 +1,6 @@
 // Modified for iwd2r; see NOTICE.md
 #include "CChitin.h"
 
-#include <direct.h>
-#include <process.h>
-
 #include "CAlias.h"
 #include "CKeyInfo.h"
 #include "CResBinary.h"
@@ -23,7 +20,7 @@ static void MessageThreadMain(void* userInfo);
 static void RSThreadMain(void* userInfo);
 static void MainAIThread(void* userInfo);
 static void MusicThreadMain(void* userInfo);
-static void CALLBACK TimerFunction(UINT uTimerID, UINT uMsg, DWORD dwUser, DWORD dw1, DWORD dw2);
+static void CALLBACK TimerFunction(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser, DWORD_PTR dw1, DWORD_PTR dw2);
 
 // 0x8B9E48
 DWORD CChitin::TIMER_UPDATES_PER_SECOND = 30;
@@ -106,11 +103,6 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lPara
         SetCursor(LoadCursorA(NULL, IDC_ARROW));
         return 0;
     case WM_PAINT:
-        if (GetUpdateRect(hWnd, NULL, FALSE)) {
-            PAINTSTRUCT paint;
-            BeginPaint(hWnd, &paint);
-            EndPaint(hWnd, &paint);
-        }
         return 1;
     case WM_CLOSE:
         if (g_pChitin->cDimm.m_bCDSwitchActivated && !g_pChitin->cDimm.field_296) {
@@ -2193,7 +2185,7 @@ static void MusicThreadMain(void* userInfo)
 }
 
 // 0x792920
-static void CALLBACK TimerFunction(UINT uTimerID, UINT uMsg, DWORD dwUser, DWORD dw1, DWORD dw2)
+static void CALLBACK TimerFunction(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser, DWORD_PTR dw1, DWORD_PTR dw2)
 {
     SetEvent(g_pChitin->m_eventTimer);
 }

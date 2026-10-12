@@ -4,6 +4,7 @@
 
 #include "compat/mfc_list.h"
 
+#include <string>
 #include <type_traits>
 #include <vector>
 
@@ -277,4 +278,31 @@ TEST_CASE("list RemoveAll and other pointer instantiations", "[list]")
 
     STATIC_REQUIRE(!std::is_copy_constructible<CPtrList>::value);
     STATIC_REQUIRE(!std::is_copy_assignable<CPtrList>::value);
+}
+
+TEST_CASE("list classes have virtual destructors like MFC", "[list]")
+{
+    STATIC_REQUIRE(std::has_virtual_destructor<CPtrList>::value);
+    STATIC_REQUIRE(std::is_base_of<CObject, CPtrList>::value);
+    STATIC_REQUIRE(std::is_base_of<CObject, CStringList>::value);
+}
+
+TEST_CASE("list CStringList holds strings", "[list]")
+{
+    CStringList list;
+    list.AddTail("b");
+    list.AddHead(CString("a"));
+    list.AddTail("c");
+    REQUIRE(list.GetCount() == 3);
+    std::vector<std::string> seen;
+    POSITION pos = list.GetHeadPosition();
+    while (pos != NULL)
+        seen.push_back(static_cast<const char*>(list.GetNext(pos)));
+    CHECK(seen == std::vector<std::string> { "a", "b", "c" });
+    POSITION found = list.Find("b");
+    REQUIRE(found != NULL);
+    CHECK(list.GetAt(found) == CString("b"));
+    CHECK(list.Find("z") == NULL);
+    list.RemoveAll();
+    CHECK(list.IsEmpty());
 }

@@ -258,6 +258,15 @@ MMRESULT timeKillEvent(UINT id)
     return Registry().Kill(id);
 }
 
+MMRESULT timeGetDevCaps(LPTIMECAPS caps, UINT size)
+{
+    if (!caps || size < sizeof(TIMECAPS))
+        return MMSYSERR_INVALPARAM;
+    caps->wPeriodMin = 1;
+    caps->wPeriodMax = 1000000;
+    return TIMERR_NOERROR;
+}
+
 MMRESULT timeBeginPeriod(UINT)
 {
     return TIMERR_NOERROR;

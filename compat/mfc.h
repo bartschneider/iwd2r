@@ -43,6 +43,7 @@
 #include "ini.h"
 #include "path_hook.h"
 #include "platform/win32_api.h"
+#include "mfc_filefind.h"
 
 #define ASSERT(x) ((void)0)
 #define TRACE(...) ((void)0)

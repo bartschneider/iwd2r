@@ -2,6 +2,7 @@
 #define NOMINMAX
 #include <catch2/catch_test_macros.hpp>
 
+#include "compat/mfc_resource.h"
 #include "compat/mfc_string.h"
 
 #include <cstring>
@@ -162,4 +163,22 @@ TEST_CASE("cstring operators", "[cstring]")
     s.SetAt(1, 'Z');
     CHECK(s[1] == 'Z');
     CHECK(s == "aZcd");
+}
+
+TEST_CASE("cstring LoadStringA reads the string table", "[cstring]")
+{
+    CString s("keep");
+    CHECK(s.LoadStringA(IDS_ENGLISH) == TRUE);
+    CHECK(s == CString(iwd2r_ResourceString(IDS_ENGLISH)));
+    CHECK(s.LoadStringA(9999) == FALSE);
+    CHECK(s == CString(iwd2r_ResourceString(IDS_ENGLISH)));
+}
+
+TEST_CASE("cstring GetBuffer without a length", "[cstring]")
+{
+    CString s("abc");
+    char* p = s.GetBuffer();
+    CHECK(std::strcmp(p, "abc") == 0);
+    s.ReleaseBuffer();
+    CHECK(s.GetLength() == 3);
 }

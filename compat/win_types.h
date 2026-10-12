@@ -9,7 +9,43 @@
 #include <cstdio>
 #include <cstring>
 
-#ifndef _MSC_VER
+// The Windows-style min/max macros at the end of this header break libstdc++
+// headers included after them. Pull in the standard headers the shims and the
+// engine use first, so later includes of them are no-ops. This lives here, not
+// in mfc.h, because some engine headers reach this file through a shim header
+// (dsound_shim.h, ddraw_shim.h) without mfc.h.
+#ifndef NOMINMAX
+#include <algorithm>
+#include <bitset>
+#include <chrono>
+#include <climits>
+#include <cmath>
+#include <condition_variable>
+#include <cstdarg>
+#include <cstdlib>
+#include <functional>
+#include <iostream>
+#include <limits>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <set>
+#include <string>
+#include <string_view>
+#include <type_traits>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+#endif
+
+#ifdef _MSC_VER
+// The engine's own <direct.h> and <io.h> includes were dropped (they do not
+// exist elsewhere); <process.h> is never included because it declares
+// _beginthread with C linkage (see platform/win32_api.h).
+#include <direct.h>
+#include <io.h>
+#else
+#include <fcntl.h>
 #include <strings.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -109,6 +145,73 @@ struct WIN32_FIND_DATAA {
 #define FILE_ATTRIBUTE_DIRECTORY 0x10
 #define FILE_ATTRIBUTE_NORMAL 0x80
 #define DRIVE_NO_ROOT_DIR 1
+#define DRIVE_CDROM 5
+
+typedef WORD LANGID;
+#define MAKELANGID(p, s) ((LANGID)((((WORD)(s)) << 10) | (WORD)(p)))
+#define PRIMARYLANGID(lgid) ((WORD)(lgid) & 0x3FF)
+#define SUBLANGID(lgid) ((WORD)(lgid) >> 10)
+#define LANG_NEUTRAL 0x00
+#define LANG_CHINESE 0x04
+#define LANG_ENGLISH 0x09
+#define LANG_JAPANESE 0x11
+#define LANG_KOREAN 0x12
+#define SUBLANG_DEFAULT 0x01
+#define SUBLANG_CHINESE_TRADITIONAL 0x01
+#define SUBLANG_CHINESE_SIMPLIFIED 0x02
+#define SUBLANG_ENGLISH_US 0x01
+
+#define GENERIC_READ 0x80000000u
+#define GENERIC_WRITE 0x40000000u
+#define FILE_SHARE_READ 0x00000001
+#define FILE_SHARE_WRITE 0x00000002
+#define CREATE_NEW 1
+#define CREATE_ALWAYS 2
+#define OPEN_EXISTING 3
+#define OPEN_ALWAYS 4
+#define TRUNCATE_EXISTING 5
+
+#define ERROR_SUCCESS 0
+#define ERROR_FILE_NOT_FOUND 2
+#define ERROR_PATH_NOT_FOUND 3
+#define ERROR_ACCESS_DENIED 5
+#define ERROR_INVALID_HANDLE 6
+
+struct SECURITY_ATTRIBUTES {
+    DWORD nLength;
+    LPVOID lpSecurityDescriptor;
+    BOOL bInheritHandle;
+};
+typedef SECURITY_ATTRIBUTES* LPSECURITY_ATTRIBUTES;
+
+// Field layout as stored in .bmp files; the file header is 2-byte packed.
+#pragma pack(push, 2)
+struct BITMAPFILEHEADER {
+    WORD bfType;
+    DWORD bfSize;
+    WORD bfReserved1;
+    WORD bfReserved2;
+    DWORD bfOffBits;
+};
+#pragma pack(pop)
+static_assert(sizeof(BITMAPFILEHEADER) == 14, "BITMAPFILEHEADER is 14 bytes");
+typedef BITMAPFILEHEADER* LPBITMAPFILEHEADER;
+
+struct BITMAPINFOHEADER {
+    DWORD biSize;
+    LONG biWidth;
+    LONG biHeight;
+    WORD biPlanes;
+    WORD biBitCount;
+    DWORD biCompression;
+    DWORD biSizeImage;
+    LONG biXPelsPerMeter;
+    LONG biYPelsPerMeter;
+    DWORD biClrUsed;
+    DWORD biClrImportant;
+};
+static_assert(sizeof(BITMAPINFOHEADER) == 40, "BITMAPINFOHEADER is 40 bytes");
+typedef BITMAPINFOHEADER* LPBITMAPINFOHEADER;
 struct HDC__;
 typedef HDC__* HDC;
 struct HGLRC__;
@@ -150,6 +253,8 @@ typedef HIMC__* HIMC;
 #define _getcwd getcwd
 #define _access access
 inline int _mkdir(const char* path) { return mkdir(path, 0777); }
+// The MSVC CRT's current offset of a file descriptor.
+inline long tell(int fd) { return static_cast<long>(lseek(fd, 0, SEEK_CUR)); }
 #endif
 
 struct POINT {
@@ -286,6 +391,7 @@ inline BOOL UnionRect(RECT* out, const RECT* a, const RECT* b)
 #define LOBYTE(w) ((BYTE)((w) & 0xFF))
 #define HIBYTE(w) ((BYTE)(((w) >> 8) & 0xFF))
 #define MAKEWORD(a, b) ((WORD)(((BYTE)((a) & 0xFF)) | ((WORD)((BYTE)((b) & 0xFF))) << 8))
+#define MAKEWPARAM(l, h) ((WPARAM)(DWORD)MAKELONG(l, h))
 #define MAKELONG(a, b) ((LONG)(((WORD)((a) & 0xFFFF)) | ((DWORD)((WORD)((b) & 0xFFFF))) << 16))
 
 #define S_OK ((HRESULT)0)
@@ -402,6 +508,7 @@ inline BOOL IsEqualGUID(const GUID& a, const GUID& b) { return std::memcmp(&a, &
 #define WM_IME_ENDCOMPOSITION 0x010E
 #define WM_IME_COMPOSITION 0x010F
 #define WM_MOUSEWHEEL 0x020A
+#define WHEEL_DELTA 120
 #define WM_IME_SETCONTEXT 0x0281
 #define WM_IME_NOTIFY 0x0282
 #define WM_IME_CONTROL 0x0283

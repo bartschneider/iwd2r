@@ -84,3 +84,14 @@ TEST_CASE("misc aggregator header exposes the shims", "[misc]")
     REQUIRE(r.Width() == 10);
     REQUIRE(s.GetLength() == 3);
 }
+
+TEST_CASE("misc CWnd converts to its HWND", "[misc]")
+{
+    CWnd w;
+    HWND none = w;
+    CHECK(none == NULL);
+    w.Attach(reinterpret_cast<HWND>(0x10));
+    HWND h = w;
+    CHECK(h == reinterpret_cast<HWND>(0x10));
+    w.Detach();
+}

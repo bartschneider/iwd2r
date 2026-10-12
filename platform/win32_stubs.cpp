@@ -1,6 +1,6 @@
 // iwd2r. Distributed under LICENSE.md.
 // Inert Win32 calls: no DLLs, no GDI text, no COM, no input methods, no
-// child processes. Each returns what Windows returns when the feature is
+// child processes, no other processes. Each returns what Windows returns when the feature is
 // unavailable, so the engine falls back to its own paths.
 #define NOMINMAX
 #include "platform/win32_api.h"
@@ -78,6 +78,10 @@ HFONT CreateFontA(int, int, int, int, int, DWORD, DWORD, DWORD, DWORD, DWORD, DW
 BOOL DeleteObject(HGDIOBJ) { return TRUE; }
 
 HGDIOBJ SelectObject(HDC, HGDIOBJ) { return NULL; }
+
+HGDIOBJ GetStockObject(int) { return NULL; }
+
+HICON LoadIconA(HINSTANCE, LPCSTR) { return NULL; }
 
 BOOL ExtTextOutA(HDC, int, int, UINT, const RECT*, LPCSTR, UINT, const INT*) { return FALSE; }
 
@@ -176,6 +180,14 @@ int wsprintfA(LPSTR buffer, LPCSTR format, ...)
 DWORD GetLastError() { return t_lastError; }
 
 void SetLastError(DWORD error) { t_lastError = error; }
+
+LANGID GetSystemDefaultLangID() { return MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US); }
+
+HANDLE OpenProcess(DWORD, BOOL, DWORD)
+{
+    SetLastError(ERROR_ACCESS_DENIED);
+    return NULL;
+}
 
 BOOL CreateProcessA(LPCSTR, LPCSTR, LPVOID, LPVOID, BOOL, DWORD, LPVOID, LPCSTR, LPSTARTUPINFOA, LPPROCESS_INFORMATION) { return FALSE; }
 

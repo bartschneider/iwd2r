@@ -2,16 +2,17 @@
 // MFC CArray, CPtrArray, CDWordArray, CObArray and CTypedPtrArray over std::vector.
 #pragma once
 
+#include "compat/mfc_list.h"
 #include "compat/win_types.h"
 
 #include <cassert>
 #include <cstddef>
 #include <vector>
 
-class CObject;
-
+// Derives from CObject, as in MFC, so the destructor is virtual and engine
+// arrays may declare theirs override.
 template <class TYPE, class ARG_TYPE = const TYPE&>
-class CArray {
+class CArray : public CObject {
 public:
     CArray() = default;
 

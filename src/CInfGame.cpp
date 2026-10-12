@@ -1,8 +1,6 @@
 // Modified for iwd2r; see NOTICE.md
 #include "CInfGame.h"
 
-#include <process.h>
-
 #include "CAIScript.h"
 #include "CBaldurChitin.h"
 #include "CBaldurEngine.h"

@@ -43,6 +43,7 @@
 #include "CSoundChannel.h"
 #include "CUtil.h"
 #include "resource.h"
+#include "platform/fs.h"
 
 #define FILE_NAME ".\\Icewind2.ini"
 #define PROGRAM_OPTIONS_SECTION_KEY "Program Options"
@@ -557,6 +558,9 @@ CBaldurChitin::CBaldurChitin()
         SCREEN_POSITION_Y_KEY,
         (GetSystemMetrics(SM_CYFULLSCREEN) - CVideo::SCREENHEIGHT) / 2,
         FILE_NAME);
+
+    // iwd2r: lets the installer's Windows paths in the INI re-root onto the data directory.
+    { char buf[MAX_PATH]; GetPrivateProfileStringA("Alias", "HD0:", "", buf, MAX_PATH, GetIniFileName()); platform::fs::SetInstallPrefix(buf); }
 
     m_dwCloseConfirmationFlags = 0x124;
     m_dwCloseConfirmationStrId = 20186;

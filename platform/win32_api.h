@@ -30,6 +30,31 @@ BOOL ReleaseSemaphore(HANDLE semaphore, LONG count, LONG* previous);
 HANDLE CreateMutexA(LPVOID attributes, BOOL initialOwner, LPCSTR name);
 BOOL ReleaseMutex(HANDLE mutex);
 
+// Pseudo handles for the calling process and thread, as in Win32.
+HANDLE GetCurrentProcess();
+HANDLE GetCurrentThread();
+DWORD GetCurrentProcessId();
+
+#define DUPLICATE_CLOSE_SOURCE 0x00000001
+#define DUPLICATE_SAME_ACCESS 0x00000002
+
+// Supports only GetCurrentThread() in the current process, giving a real
+// handle for the calling thread that CloseHandle releases.
+BOOL DuplicateHandle(HANDLE sourceProcess, HANDLE source, HANDLE targetProcess, HANDLE* target, DWORD access, BOOL inherit, DWORD options);
+
+// Cooperative: a thread suspending itself blocks until ResumeThread brings
+// its count to zero; suspending another thread only reports its count.
+// Both return the previous suspend count, or (DWORD)-1 for a bad handle.
+DWORD SuspendThread(HANDLE thread);
+DWORD ResumeThread(HANDLE thread);
+
+#define THREAD_PRIORITY_NORMAL 0
+#define THREAD_PRIORITY_ERROR_RETURN 0x7FFFFFFF
+
+// Priorities are not changed; every thread reports THREAD_PRIORITY_NORMAL.
+int GetThreadPriority(HANDLE thread);
+BOOL SetThreadPriority(HANDLE thread, int priority);
+
 void InitializeCriticalSection(CRITICAL_SECTION* section);
 void EnterCriticalSection(CRITICAL_SECTION* section);
 void LeaveCriticalSection(CRITICAL_SECTION* section);
@@ -50,6 +75,15 @@ DWORD timeGetTime();
 void Sleep(DWORD milliseconds);
 DWORD SleepEx(DWORD milliseconds, BOOL alertable);
 
+struct TIMECAPS {
+    UINT wPeriodMin;
+    UINT wPeriodMax;
+};
+typedef TIMECAPS* LPTIMECAPS;
+
+// Reports a 1 ms to 1000000 ms period range.
+MMRESULT timeGetDevCaps(LPTIMECAPS caps, UINT size);
+
 MMRESULT timeSetEvent(UINT delayMs, UINT resolution, LPTIMECALLBACK callback, DWORD_PTR user, UINT flags);
 MMRESULT timeKillEvent(UINT id);
 MMRESULT timeBeginPeriod(UINT period);
@@ -62,6 +96,18 @@ BOOL FindNextFileA(HANDLE find, WIN32_FIND_DATAA* data);
 BOOL FindClose(HANDLE find);
 
 DWORD GetFileAttributesA(LPCSTR path);
+// Only FILE_ATTRIBUTE_READONLY is honored: it clears or sets the owner write bit.
+BOOL SetFileAttributesA(LPCSTR path, DWORD attributes);
+// The engine calls the unsuffixed names.
+inline DWORD GetFileAttributes(LPCSTR path) { return GetFileAttributesA(path); }
+inline BOOL SetFileAttributes(LPCSTR path, DWORD attributes) { return SetFileAttributesA(path, attributes); }
+BOOL RemoveDirectoryA(LPCSTR path);
+
+// Files as kernel handles that CloseHandle closes. Sharing modes, security
+// attributes, flags and templates are ignored. A missing file sets
+// ERROR_FILE_NOT_FOUND.
+HANDLE CreateFileA(LPCSTR path, DWORD access, DWORD shareMode, LPSECURITY_ATTRIBUTES security, DWORD disposition, DWORD flags, HANDLE templateFile);
+BOOL ReadFile(HANDLE file, LPVOID buffer, DWORD toRead, LPDWORD read, LPVOID overlapped);
 BOOL DeleteFileA(LPCSTR path);
 BOOL CopyFileA(LPCSTR source, LPCSTR destination, BOOL failIfExists);
 BOOL MoveFileA(LPCSTR source, LPCSTR destination);
@@ -215,6 +261,27 @@ HKL GetKeyboardLayout(DWORD threadId);
 
 int MessageBoxA(HWND hWnd, LPCSTR text, LPCSTR caption, UINT type);
 
+// Minimizes the window, as Win32 CloseWindow does.
+BOOL CloseWindow(HWND hWnd);
+
+#define SPI_GETKEYBOARDSPEED 0x000A
+#define SPI_GETSCREENSAVEACTIVE 0x0010
+#define SPI_SETSCREENSAVEACTIVE 0x0011
+#define SPI_GETKEYBOARDDELAY 0x0016
+#define SPI_GETWHEELSCROLLLINES 0x0068
+
+// Reports Windows defaults: keyboard delay 1, keyboard speed 31, wheel
+// scroll lines 3, screen saver active. Setting the screen saver flag is
+// accepted and ignored. Anything else returns FALSE.
+BOOL SystemParametersInfoA(UINT action, UINT param, LPVOID value, UINT winIni);
+inline BOOL SystemParametersInfo(UINT action, UINT param, LPVOID value, UINT winIni) { return SystemParametersInfoA(action, param, value, winIni); }
+
+// The Windows default, 500 ms.
+UINT GetDoubleClickTime();
+
+// No other application windows exist; always NULL.
+HWND FindWindowA(LPCSTR className, LPCSTR windowName);
+
 // --- win32_stubs.cpp: inert DLL, version, GDI, COM, string and process calls ---
 
 typedef INT_PTR(WINAPI* FARPROC)();
@@ -287,6 +354,7 @@ typedef const GUID& REFCLSID;
 #define REGDB_E_IIDNOTREG ((HRESULT)0x80040155)
 
 #define NORMAL_PRIORITY_CLASS 0x00000020
+#define PROCESS_ALL_ACCESS 0x001FFFFFu
 
 HMODULE LoadLibraryA(LPCSTR name);
 BOOL FreeLibrary(HMODULE module);
@@ -302,6 +370,8 @@ int GetDeviceCaps(HDC hdc, int index);
 HFONT CreateFontA(int height, int width, int escapement, int orientation, int weight, DWORD italic, DWORD underline, DWORD strikeOut, DWORD charSet, DWORD outPrecision, DWORD clipPrecision, DWORD quality, DWORD pitchAndFamily, LPCSTR faceName);
 BOOL DeleteObject(HGDIOBJ object);
 HGDIOBJ SelectObject(HDC hdc, HGDIOBJ object);
+HGDIOBJ GetStockObject(int object);
+HICON LoadIconA(HINSTANCE instance, LPCSTR name);
 BOOL ExtTextOutA(HDC hdc, int x, int y, UINT options, const RECT* rect, LPCSTR text, UINT count, const INT* dx);
 BOOL TextOutA(HDC hdc, int x, int y, LPCSTR text, int count);
 COLORREF SetTextColor(HDC hdc, COLORREF color);
@@ -330,6 +400,12 @@ int wsprintfA(LPSTR buffer, LPCSTR format, ...);
 
 DWORD GetLastError();
 void SetLastError(DWORD error);
+
+// English (United States), 0x0409.
+LANGID GetSystemDefaultLangID();
+
+// No other processes are opened: returns NULL with ERROR_ACCESS_DENIED.
+HANDLE OpenProcess(DWORD access, BOOL inherit, DWORD processId);
 
 // The command line is const here: the engine passes a string literal and
 // nothing writes to it.

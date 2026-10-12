@@ -245,3 +245,35 @@ TEST_CASE("map removing the last element then continuing iteration", "[map]")
     REQUIRE(k == 4);
     REQUIRE(pos == NULL);
 }
+
+TEST_CASE("array classes have virtual destructors like MFC", "[array]")
+{
+    STATIC_REQUIRE(std::has_virtual_destructor<CPtrArray>::value);
+    STATIC_REQUIRE(std::is_base_of<CObject, CPtrArray>::value);
+}
+
+TEST_CASE("map CTypedPtrMap stores typed pointers", "[map]")
+{
+    int a = 1, b = 2;
+    CTypedPtrMap<CMapWordToPtr, USHORT, int*> map;
+    map[7] = &a;
+    map.SetAt(3, &b);
+    CHECK(map.GetCount() == 2);
+    int* out = nullptr;
+    REQUIRE(map.Lookup(7, out));
+    CHECK(out == &a);
+    CHECK_FALSE(map.Lookup(9, out));
+    CHECK(out == &a);
+
+    std::set<std::pair<USHORT, int*>> seen;
+    POSITION pos = map.GetStartPosition();
+    while (pos != NULL) {
+        USHORT key;
+        int* value;
+        map.GetNextAssoc(pos, key, value);
+        seen.insert({ key, value });
+    }
+    CHECK(seen == std::set<std::pair<USHORT, int*>> { { 7, &a }, { 3, &b } });
+    CHECK(map.RemoveKey(7));
+    CHECK_FALSE(map.Lookup(7, out));
+}

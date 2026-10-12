@@ -3,6 +3,7 @@
 #include "platform/fs.h"
 
 #include "compat/path_hook.h"
+#include "platform/handles.h"
 #include "platform/win32_api.h"
 
 #include <algorithm>
@@ -290,29 +291,47 @@ std::string Resolve(const char* path)
     return ResolveLocked(path);
 }
 
+namespace {
+
+    bool PlainWildcardMatch(const char* pattern, const char* name)
+    {
+        const char* p = pattern;
+        const char* n = name;
+        const char* starP = nullptr;
+        const char* starN = nullptr;
+        while (*n) {
+            if (*p == '*') {
+                starP = ++p;
+                starN = n;
+            } else if (*p == '?' || (*p && Lower(*p) == Lower(*n))) {
+                ++p;
+                ++n;
+            } else if (starP) {
+                p = starP;
+                n = ++starN;
+            } else {
+                return false;
+            }
+        }
+        while (*p == '*')
+            ++p;
+        return *p == '\0';
+    }
+
+}
+
 bool WildcardMatch(const char* pattern, const char* name)
 {
-    const char* p = pattern;
-    const char* n = name;
-    const char* starP = nullptr;
-    const char* starN = nullptr;
-    while (*n) {
-        if (*p == '*') {
-            starP = ++p;
-            starN = n;
-        } else if (*p == '?' || (*p && Lower(*p) == Lower(*n))) {
-            ++p;
-            ++n;
-        } else if (starP) {
-            p = starP;
-            n = ++starN;
-        } else {
-            return false;
-        }
+    if (PlainWildcardMatch(pattern, name))
+        return true;
+    // Win32: a trailing ".*" also matches a name with no extension, so "*.*"
+    // matches every name and "save.*" matches "save".
+    const size_t length = std::strlen(pattern);
+    if (length >= 2 && pattern[length - 2] == '.' && pattern[length - 1] == '*' && std::strchr(name, '.') == nullptr) {
+        const std::string stem(pattern, length - 2);
+        return PlainWildcardMatch(stem.c_str(), name);
     }
-    while (*p == '*')
-        ++p;
-    return *p == '\0';
+    return false;
 }
 
 void InvalidateCache()
@@ -395,11 +414,109 @@ BOOL DeleteFileA(LPCSTR path)
         return FALSE;
     const std::string p = Resolve(path);
     std::error_code ec;
-    if (stdfs::is_directory(p, ec))
+    if (stdfs::is_directory(p, ec)) {
+        SetLastError(ERROR_ACCESS_DENIED);
         return FALSE;
+    }
+    const bool removed = stdfs::remove(p, ec);
+    platform::fs::InvalidateParentOf(p);
+    if (removed && !ec)
+        return TRUE;
+    // The engine tells a missing file apart from a real failure.
+    SetLastError(!ec ? ERROR_FILE_NOT_FOUND : ERROR_ACCESS_DENIED);
+    return FALSE;
+}
+
+BOOL SetFileAttributesA(LPCSTR path, DWORD attributes)
+{
+    if (!path)
+        return FALSE;
+    const std::string p = Resolve(path);
+    std::error_code ec;
+    if (!stdfs::exists(p, ec)) {
+        SetLastError(ERROR_FILE_NOT_FOUND);
+        return FALSE;
+    }
+    const stdfs::perm_options option = (attributes & FILE_ATTRIBUTE_READONLY) ? stdfs::perm_options::remove : stdfs::perm_options::add;
+    stdfs::permissions(p, stdfs::perms::owner_write, option, ec);
+    return ec ? FALSE : TRUE;
+}
+
+BOOL RemoveDirectoryA(LPCSTR path)
+{
+    if (!path)
+        return FALSE;
+    const std::string p = Resolve(path);
+    std::error_code ec;
+    if (!stdfs::is_directory(p, ec)) {
+        SetLastError(ERROR_PATH_NOT_FOUND);
+        return FALSE;
+    }
+    // Only an empty directory, as in Win32.
     const bool removed = stdfs::remove(p, ec);
     platform::fs::InvalidateParentOf(p);
     return removed && !ec ? TRUE : FALSE;
+}
+
+HANDLE CreateFileA(LPCSTR path, DWORD access, DWORD, LPSECURITY_ATTRIBUTES, DWORD disposition, DWORD, HANDLE)
+{
+    if (!path)
+        return INVALID_HANDLE_VALUE;
+    const std::string p = Resolve(path);
+    std::error_code ec;
+    const bool exists = stdfs::is_regular_file(p, ec);
+    const bool write = (access & GENERIC_WRITE) != 0;
+    const char* mode = nullptr;
+    switch (disposition) {
+    case OPEN_EXISTING:
+        if (exists)
+            mode = write ? "r+b" : "rb";
+        break;
+    case TRUNCATE_EXISTING:
+        if (exists)
+            mode = "w+b";
+        break;
+    case CREATE_NEW:
+        if (!exists)
+            mode = "w+b";
+        break;
+    case OPEN_ALWAYS:
+        mode = exists ? (write ? "r+b" : "rb") : "w+b";
+        break;
+    case CREATE_ALWAYS:
+        mode = "w+b";
+        break;
+    default:
+        SetLastError(ERROR_INVALID_HANDLE);
+        return INVALID_HANDLE_VALUE;
+    }
+    if (!mode) {
+        SetLastError(exists ? ERROR_ACCESS_DENIED : ERROR_FILE_NOT_FOUND);
+        return INVALID_HANDLE_VALUE;
+    }
+    std::FILE* file = std::fopen(p.c_str(), mode);
+    if (!file) {
+        SetLastError(ERROR_ACCESS_DENIED);
+        return INVALID_HANDLE_VALUE;
+    }
+    if (!exists)
+        platform::fs::InvalidateParentOf(p);
+    return platform::handles::MakeFileHandle(file);
+}
+
+BOOL ReadFile(HANDLE file, LPVOID buffer, DWORD toRead, LPDWORD read, LPVOID)
+{
+    if (read)
+        *read = 0;
+    std::FILE* f = platform::handles::FileOf(file);
+    if (!f || (!buffer && toRead > 0)) {
+        SetLastError(ERROR_INVALID_HANDLE);
+        return FALSE;
+    }
+    const size_t got = std::fread(buffer, 1, toRead, f);
+    if (read)
+        *read = static_cast<DWORD>(got);
+    return std::ferror(f) ? FALSE : TRUE;
 }
 
 BOOL CopyFileA(LPCSTR source, LPCSTR destination, BOOL failIfExists)

@@ -16,7 +16,8 @@ void SetInstallPrefix(const std::string& windowsPrefix);
 
 std::string Resolve(const char* path);
 
-// Case-insensitive match with '*' (any run) and '?' (one character).
+// Case-insensitive match with '*' (any run) and '?' (one character); as in
+// Win32, a trailing ".*" also matches a name with no extension.
 bool WildcardMatch(const char* pattern, const char* name);
 
 // Forgets cached directory listings.

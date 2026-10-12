@@ -464,3 +464,38 @@ TEST_CASE("window MessageBoxA returns IDOK", "[window][.manual]")
 {
     CHECK(MessageBoxA(NULL, "iwd2r MessageBoxA test: press OK", "iwd2r", MB_OK) == IDOK);
 }
+
+TEST_CASE("window system parameters report Windows defaults", "[window]")
+{
+    int delay = -1, speed = -1;
+    UINT lines = 0;
+    BOOL active = FALSE;
+    CHECK(SystemParametersInfo(SPI_GETKEYBOARDDELAY, 0, &delay, 0) == TRUE);
+    CHECK(delay == 1);
+    CHECK(SystemParametersInfo(SPI_GETKEYBOARDSPEED, 0, &speed, 0) == TRUE);
+    CHECK(speed == 31);
+    CHECK(SystemParametersInfoA(SPI_GETWHEELSCROLLLINES, 0, &lines, 0) == TRUE);
+    CHECK(lines == 3);
+    CHECK(SystemParametersInfoA(SPI_GETSCREENSAVEACTIVE, 0, &active, 0) == TRUE);
+    CHECK(active == TRUE);
+    CHECK(SystemParametersInfoA(SPI_SETSCREENSAVEACTIVE, FALSE, NULL, 0) == TRUE);
+    CHECK(SystemParametersInfoA(SPI_GETKEYBOARDDELAY, 0, NULL, 0) == FALSE);
+    CHECK(SystemParametersInfoA(0x7FFF, 0, &delay, 0) == FALSE);
+
+    CHECK(GetDoubleClickTime() == 500);
+    CHECK(FindWindowA("MouseZ", "Magellan MSWHEEL") == NULL);
+    CHECK(CloseWindow(NULL) == FALSE);
+}
+
+TEST_CASE("window inert process, GDI and locale stubs", "[window]")
+{
+    CHECK(GetStockObject(4) == NULL);
+    CHECK(LoadIconA(NULL, "ICON") == NULL);
+    CHECK(GetSystemDefaultLangID() == 0x0409);
+    CHECK(PRIMARYLANGID(GetSystemDefaultLangID()) == LANG_ENGLISH);
+    CHECK(SUBLANGID(GetSystemDefaultLangID()) == SUBLANG_ENGLISH_US);
+    SetLastError(0);
+    CHECK(OpenProcess(PROCESS_ALL_ACCESS, FALSE, GetCurrentProcessId()) == NULL);
+    CHECK(GetLastError() == ERROR_ACCESS_DENIED);
+    SetLastError(0);
+}

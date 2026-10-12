@@ -1,6 +1,7 @@
 // iwd2r. Distributed under LICENSE.md.
 #define NOMINMAX
 #include "compat/mfc_string.h"
+#include "compat/mfc_resource.h"
 
 #include <climits>
 #include <cstdio>
@@ -587,4 +588,13 @@ CString operator+(char a, const CString& b)
     CString r(a);
     r += b;
     return r;
+}
+
+BOOL CString::LoadStringA(UINT id)
+{
+    const char* text = iwd2r_ResourceString(id);
+    if (text == nullptr)
+        return FALSE;
+    *this = text;
+    return TRUE;
 }

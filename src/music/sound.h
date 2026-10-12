@@ -3,6 +3,8 @@
 #define MUSIC_SOUND_H_
 
 #include "platform/dsound_shim.h"
+// <dsound.h> brought in <windows.h>; the critical sections and timers come from here.
+#include "platform/win32_api.h"
 
 #define VOLUME_MIN 0
 #define VOLUME_MAX 0x7FFF

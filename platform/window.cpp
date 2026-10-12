@@ -808,3 +808,48 @@ int MessageBoxA(HWND hWnd, LPCSTR text, LPCSTR caption, UINT type)
         return IDOK;
     return chosen < 0 ? escapeId : chosen;
 }
+
+BOOL CloseWindow(HWND hWnd)
+{
+    if (!Rec(hWnd))
+        return FALSE;
+    ShowWindow(hWnd, SW_MINIMIZE);
+    return TRUE;
+}
+
+BOOL SystemParametersInfoA(UINT action, UINT, LPVOID value, UINT)
+{
+    switch (action) {
+    case SPI_GETKEYBOARDDELAY:
+    case SPI_GETKEYBOARDSPEED:
+    case SPI_GETWHEELSCROLLLINES:
+    case SPI_GETSCREENSAVEACTIVE:
+        if (!value)
+            return FALSE;
+        break;
+    default:
+        break;
+    }
+    switch (action) {
+    case SPI_GETKEYBOARDDELAY:
+        *static_cast<int*>(value) = 1;
+        return TRUE;
+    case SPI_GETKEYBOARDSPEED:
+        *static_cast<int*>(value) = 31;
+        return TRUE;
+    case SPI_GETWHEELSCROLLLINES:
+        *static_cast<UINT*>(value) = 3;
+        return TRUE;
+    case SPI_GETSCREENSAVEACTIVE:
+        *static_cast<BOOL*>(value) = TRUE;
+        return TRUE;
+    case SPI_SETSCREENSAVEACTIVE:
+        return TRUE;
+    default:
+        return FALSE;
+    }
+}
+
+UINT GetDoubleClickTime() { return 500; }
+
+HWND FindWindowA(LPCSTR, LPCSTR) { return NULL; }

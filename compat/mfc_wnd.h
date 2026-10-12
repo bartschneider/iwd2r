@@ -24,6 +24,7 @@ public:
     // MFC tolerates a null this here; the engine never calls this through a
     // null pointer, so this is a plain member read.
     HWND GetSafeHwnd() const { return m_hWnd; }
+    operator HWND() const { return m_hWnd; }
 
     HWND m_hWnd;
 };

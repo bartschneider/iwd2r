@@ -192,3 +192,78 @@ TEST_CASE("sync: GetCurrentThreadId is nonzero and per thread", "[sync]")
     REQUIRE(theirs.load() != 0);
     REQUIRE(theirs.load() != mine);
 }
+
+TEST_CASE("sync: pseudo handles and DuplicateHandle of the current thread", "[sync]")
+{
+    HANDLE process = GetCurrentProcess();
+    HANDLE thread = GetCurrentThread();
+    CHECK(process == reinterpret_cast<HANDLE>(static_cast<intptr_t>(-1)));
+    CHECK(thread == reinterpret_cast<HANDLE>(static_cast<intptr_t>(-2)));
+    CHECK(GetCurrentProcessId() != 0);
+
+    HANDLE copy = NULL;
+    REQUIRE(DuplicateHandle(process, thread, process, &copy, 0, TRUE, DUPLICATE_SAME_ACCESS) == TRUE);
+    REQUIRE(copy != NULL);
+    CHECK(copy != thread);
+    CHECK(WaitForSingleObject(copy, 0) == WAIT_TIMEOUT);
+    CHECK(GetThreadPriority(copy) == THREAD_PRIORITY_NORMAL);
+    CHECK(SetThreadPriority(copy, 15) == TRUE);
+    CHECK(GetThreadPriority(copy) == THREAD_PRIORITY_NORMAL);
+    CHECK(CloseHandle(copy) == TRUE);
+
+    HANDLE other = NULL;
+    HANDLE event = CreateEventA(NULL, TRUE, FALSE, NULL);
+    CHECK(DuplicateHandle(process, event, process, &other, 0, FALSE, DUPLICATE_SAME_ACCESS) == FALSE);
+    CloseHandle(event);
+    CHECK(GetThreadPriority(NULL) == THREAD_PRIORITY_ERROR_RETURN);
+    CHECK(SetThreadPriority(NULL, 0) == FALSE);
+    SetLastError(0);
+}
+
+namespace {
+
+struct SuspendProbe {
+    std::atomic<HANDLE> self { nullptr };
+    std::atomic<bool> parked { false };
+    std::atomic<bool> resumed { false };
+    std::atomic<DWORD> previous { 99 };
+};
+
+void suspendingBody(void* arg)
+{
+    SuspendProbe* probe = static_cast<SuspendProbe*>(arg);
+    while (probe->self.load() == nullptr)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    probe->parked = true;
+    probe->previous = SuspendThread(probe->self.load());
+    probe->resumed = true;
+}
+
+}
+
+TEST_CASE("sync: a thread that suspends itself waits for ResumeThread", "[sync]")
+{
+    SuspendProbe probe;
+    uintptr_t r = _beginthread(suspendingBody, 0, &probe);
+    REQUIRE(r != static_cast<uintptr_t>(-1));
+    HANDLE h = reinterpret_cast<HANDLE>(r);
+    probe.self = h;
+    REQUIRE(waitForFlag(probe.parked));
+    // Wait until the thread is actually counted as suspended.
+    DWORD count = 0;
+    for (int i = 0; i < 500 && count == 0; ++i) {
+        count = SuspendThread(h); // another thread: reports, never blocks
+        if (count == 0)
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    REQUIRE(count == 1);
+    CHECK_FALSE(probe.resumed.load());
+    CHECK(ResumeThread(h) == 1);
+    REQUIRE(waitForFlag(probe.resumed));
+    CHECK(probe.previous.load() == 0);
+    CHECK(ResumeThread(h) == 0);
+    REQUIRE(WaitForSingleObject(h, INFINITE) == WAIT_OBJECT_0);
+    CHECK(CloseHandle(h) == TRUE);
+    CHECK(SuspendThread(NULL) == static_cast<DWORD>(-1));
+    CHECK(ResumeThread(NULL) == static_cast<DWORD>(-1));
+}

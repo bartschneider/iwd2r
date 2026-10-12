@@ -161,3 +161,13 @@ TEST_CASE("clock timer may kill itself and start another from its callback", "[c
     REQUIRE(g_newTicks == 1);
     REQUIRE(g_oldTicks == 1);
 }
+
+TEST_CASE("clock timeGetDevCaps reports a period range", "[clock]")
+{
+    TIMECAPS caps = {};
+    REQUIRE(timeGetDevCaps(&caps, sizeof(caps)) == TIMERR_NOERROR);
+    CHECK(caps.wPeriodMin == 1);
+    CHECK(caps.wPeriodMax == 1000000);
+    CHECK(timeGetDevCaps(nullptr, sizeof(caps)) == MMSYSERR_INVALPARAM);
+    CHECK(timeGetDevCaps(&caps, 1) == MMSYSERR_INVALPARAM);
+}
