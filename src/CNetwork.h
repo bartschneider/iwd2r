@@ -1,3 +1,4 @@
+// Modified for iwd2r; see NOTICE.md
 #ifndef CNETWORK_H_
 #define CNETWORK_H_
 
@@ -9,8 +10,6 @@
 #define DPLAY_COMPAT 1
 #endif
 
-#include <dplay.h>
-#include <dplobby.h>
 
 #define CNETWORK_MAX_SERVICE_PROVIDERS 5
 #define CNETWORK_MAX_SESSIONS 64

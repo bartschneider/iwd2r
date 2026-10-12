@@ -1,8 +1,8 @@
+// Modified for iwd2r; see NOTICE.md
 #include "CChitin.h"
 
 #include <direct.h>
 #include <process.h>
-#include <winver.h>
 
 #include "CAlias.h"
 #include "CKeyInfo.h"

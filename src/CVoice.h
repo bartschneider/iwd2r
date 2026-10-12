@@ -1,11 +1,11 @@
+// Modified for iwd2r; see NOTICE.md
 #ifndef CVOICE_H_
 #define CVOICE_H_
 
 #include "mfc.h"
 
 // clang-format off
-#include <mmsystem.h>
-#include <dsound.h>
+#include "platform/dsound_shim.h"
 // clang-format on
 
 class CSound;

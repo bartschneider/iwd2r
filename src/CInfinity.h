@@ -1,9 +1,10 @@
+// Modified for iwd2r; see NOTICE.md
 #ifndef CINFINITY_H_
 #define CINFINITY_H_
 
 #include "mfc.h"
 
-#include <ddraw.h>
+#include "platform/ddraw_shim.h"
 
 #include "CResRef.h"
 #include "CResTile.h"

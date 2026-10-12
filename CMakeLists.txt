@@ -52,4 +52,15 @@ include(Catch)
 
 add_subdirectory(compat)
 add_subdirectory(platform)
+
+# Decompiled engine. Builds with warnings allowed (no iwd2r_strict_warnings).
+# Excluded from the default build until the whole tree compiles (Task 21).
+include(cmake/engine_sources.cmake)
+add_library(iwd2r_engine OBJECT EXCLUDE_FROM_ALL ${IWD2R_ENGINE_SOURCES})
+target_include_directories(iwd2r_engine PRIVATE
+    "${PROJECT_SOURCE_DIR}/src"
+    "${PROJECT_SOURCE_DIR}/compat"
+    "${PROJECT_SOURCE_DIR}"
+    ${ZLIB_INCLUDE_DIRS})
+target_link_libraries(iwd2r_engine PRIVATE iwd2r_compat iwd2r_platform ${ZLIB_LIBRARIES})
 add_subdirectory(tests)

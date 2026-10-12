@@ -3,6 +3,32 @@
 // engine's afxwin.h style includes.
 #pragma once
 
+// win_types.h defines the Windows-style min/max macros (unless NOMINMAX), which
+// break libstdc++ headers included after them. Pull in the standard headers the
+// shims and the engine use first, so later includes of them are no-ops.
+#include <algorithm>
+#include <bitset>
+#include <cmath>
+#include <cstdarg>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <chrono>
+#include <condition_variable>
+#include <functional>
+#include <iostream>
+#include <limits>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <set>
+#include <string>
+#include <string_view>
+#include <type_traits>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
 #include "win_types.h"
 #include "mfc_string.h"
 #include "mfc_geometry.h"
@@ -17,12 +43,6 @@
 #include "ini.h"
 #include "path_hook.h"
 #include "platform/win32_api.h"
-
-#include <cmath>
-#include <cstdarg>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
 
 #define ASSERT(x) ((void)0)
 #define TRACE(...) ((void)0)

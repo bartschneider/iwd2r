@@ -1,11 +1,11 @@
+// Modified for iwd2r; see NOTICE.md
 #ifndef CSOUNDPROPERTIES_H_
 #define CSOUNDPROPERTIES_H_
 
 #include "mfc.h"
 
 // clang-format off
-#include <mmsystem.h>
-#include <dsound.h>
+#include "platform/dsound_shim.h"
 // clang-format on
 
 #define CSOUNDPROPERTIES_EAX_SUPPORTS_ENVIRONMENT 0x1

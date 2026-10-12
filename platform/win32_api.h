@@ -323,6 +323,8 @@ LPSTR lstrcatA(LPSTR destination, LPCSTR source);
 int lstrlenA(LPCSTR text);
 int lstrcmpA(LPCSTR a, LPCSTR b);
 int lstrcmpiA(LPCSTR a, LPCSTR b);
+// Single-byte code page: never a lead byte.
+BOOL IsDBCSLeadByte(BYTE testChar);
 // Writes at most 1024 bytes including the terminator, like Win32.
 int wsprintfA(LPSTR buffer, LPCSTR format, ...);
 

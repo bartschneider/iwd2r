@@ -74,6 +74,21 @@ struct HINSTANCE__;
 typedef HINSTANCE__* HINSTANCE;
 typedef HINSTANCE HMODULE;
 
+struct RGBQUAD {
+    BYTE rgbBlue;
+    BYTE rgbGreen;
+    BYTE rgbRed;
+    BYTE rgbReserved;
+};
+
+// Windows makes this a union with QuadPart over an anonymous struct; standard
+// C++ cannot spell that, and the engine only reads LowPart and HighPart.
+struct ULARGE_INTEGER {
+    DWORD LowPart;
+    DWORD HighPart;
+};
+typedef ULARGE_INTEGER* PULARGE_INTEGER;
+
 struct FILETIME {
     DWORD dwLowDateTime;
     DWORD dwHighDateTime;
@@ -95,6 +110,8 @@ struct WIN32_FIND_DATAA {
 #define DRIVE_NO_ROOT_DIR 1
 struct HDC__;
 typedef HDC__* HDC;
+struct HGLRC__;
+typedef HGLRC__* HGLRC;
 struct HFONT__;
 typedef HFONT__* HFONT;
 // Untyped like Windows, so every GDI handle converts to it implicitly.

@@ -1,9 +1,10 @@
+// Modified for iwd2r; see NOTICE.md
 #ifndef CRESWAVE_H_
 #define CRESWAVE_H_
 
 #include "CRes.h"
 
-#include <mmsystem.h>
+#include "platform/dsound_shim.h"
 
 class CResWave : public CRes {
 public:

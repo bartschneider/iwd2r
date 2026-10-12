@@ -1,10 +1,11 @@
+// Modified for iwd2r; see NOTICE.md
 #ifndef CVIDMODE_H_
 #define CVIDMODE_H_
 
 #include "mfc.h"
 
-#include <ddraw.h>
-#include <gl/gl.h>
+#include "platform/ddraw_shim.h"
+#include "platform/gl_compat.h"
 
 #include "CResRef.h"
 #include "CVidPalette.h"

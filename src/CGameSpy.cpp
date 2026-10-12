@@ -1,6 +1,6 @@
+// Modified for iwd2r; see NOTICE.md
 #include "CGameSpy.h"
 
-#include <winsock2.h>
 
 // #binary-identical
 // 0x4D0930

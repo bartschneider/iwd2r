@@ -1,9 +1,10 @@
+// Modified for iwd2r; see NOTICE.md
 #ifndef CVIDIMAGE_H_
 #define CVIDIMAGE_H_
 
 #include "mfc.h"
 
-#include <ddraw.h>
+#include "platform/ddraw_shim.h"
 
 #include "CVidPalette.h"
 

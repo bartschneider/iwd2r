@@ -1,7 +1,8 @@
+// Modified for iwd2r; see NOTICE.md
 #ifndef MUSIC_SOUND_H_
 #define MUSIC_SOUND_H_
 
-#include <dsound.h>
+#include "platform/dsound_shim.h"
 
 #define VOLUME_MIN 0
 #define VOLUME_MAX 0x7FFF

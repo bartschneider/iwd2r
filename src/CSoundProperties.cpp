@@ -1,8 +1,8 @@
+// Modified for iwd2r; see NOTICE.md
 #include "CSoundProperties.h"
 
 #include "CChitin.h"
 
-#include <initguid.h>
 
 // TODO: Check usage in `CSoundProperties::Init`, probably there were no parens
 // used.

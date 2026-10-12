@@ -27,8 +27,6 @@ struct GLUnurbs;
 struct GLUquadric;
 struct GLUtesselator;
 
-struct HGLRC__;
-typedef HGLRC__* HGLRC;
 typedef INT_PTR(WINAPI* PROC)();
 
 #define GL_NO_ERROR 0

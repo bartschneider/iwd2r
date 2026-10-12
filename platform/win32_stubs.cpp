@@ -155,6 +155,8 @@ int lstrcmpiA(LPCSTR a, LPCSTR b)
     }
 }
 
+BOOL IsDBCSLeadByte(BYTE) { return FALSE; }
+
 int wsprintfA(LPSTR buffer, LPCSTR format, ...)
 {
     if (!buffer || !format)

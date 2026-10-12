@@ -1,10 +1,10 @@
+// Modified for iwd2r; see NOTICE.md
 #ifndef CVIDEO3D_H_
 #define CVIDEO3D_H_
 
 #include "mfc.h"
 
-#include <gl/gl.h>
-#include <gl/glu.h>
+#include "platform/gl_compat.h"
 
 typedef BOOL(__stdcall* PFNSWAPBUFFERSPROC)(HDC);
 typedef int(__stdcall* PFNDESCRIBEPIXELFORMATPROC)(HDC, int, UINT, LPPIXELFORMATDESCRIPTOR);

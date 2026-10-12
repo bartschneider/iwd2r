@@ -1,5 +1,5 @@
 # iwd2r. Distributed under LICENSE.md.
-# Engine source list, preserved for the engine target added in Task 17.
+# Engine source list for the iwd2r_engine object library.
 set(IWD2R_ENGINE_SOURCES
     "src/music/adecode.cpp"
     "src/music/adecode.h"
@@ -410,7 +410,5 @@ set(IWD2R_ENGINE_SOURCES
     "src/IcewindMisc.cpp"
     "src/IcewindMisc.h"
     "src/main.cpp"
-    "src/mfc.h"
     "src/resource.h"
-    "src/resource.rc"
 )

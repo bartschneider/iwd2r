@@ -1,5 +1,5 @@
 // iwd2r. Distributed under LICENSE.md.
-// MFC CArray, CPtrArray, CDWordArray and CTypedPtrArray over std::vector.
+// MFC CArray, CPtrArray, CDWordArray, CObArray and CTypedPtrArray over std::vector.
 #pragma once
 
 #include "compat/win_types.h"
@@ -7,6 +7,8 @@
 #include <cassert>
 #include <cstddef>
 #include <vector>
+
+class CObject;
 
 template <class TYPE, class ARG_TYPE = const TYPE&>
 class CArray {
@@ -102,6 +104,8 @@ protected:
 class CPtrArray : public CArray<void*, void*> { };
 
 class CDWordArray : public CArray<DWORD, DWORD> { };
+
+class CObArray : public CArray<CObject*, CObject*> { };
 
 template <class BASE_CLASS, class TYPE>
 class CTypedPtrArray : public BASE_CLASS {

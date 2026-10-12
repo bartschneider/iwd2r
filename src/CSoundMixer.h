@@ -1,11 +1,11 @@
+// Modified for iwd2r; see NOTICE.md
 #ifndef CSOUNDMIXER_H_
 #define CSOUNDMIXER_H_
 
 #include "mfc.h"
 
 // clang-format off
-#include <mmsystem.h>
-#include <dsound.h>
+#include "platform/dsound_shim.h"
 // clang-format on
 
 #include "CSoundProperties.h"

@@ -1,9 +1,10 @@
+// Modified for iwd2r; see NOTICE.md
 #ifndef CVIDBLITTER_H_
 #define CVIDBLITTER_H_
 
 #include "mfc.h"
 
-#include <ddraw.h>
+#include "platform/ddraw_shim.h"
 
 class CVidBlitter {
 public:
