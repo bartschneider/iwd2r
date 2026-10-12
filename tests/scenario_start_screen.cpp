@@ -2,6 +2,7 @@
 #define NOMINMAX
 #include <catch2/catch_test_macros.hpp>
 
+#include "ScreenLayout.h"
 #include "compat/ini.h"
 #include "install_ini_backup.h"
 
@@ -44,6 +45,23 @@ uint32_t U32(const std::string& d, size_t at)
 
 }
 
+namespace {
+
+// iwd2r::ReadScreenSize as the headless child sees it (the dummy video
+// driver reports a 1024x768 desktop).
+iwd2r::ScreenSize ResolveFromIni(const std::string& ini)
+{
+    char resolution[64];
+    char height[64];
+    char scale[64];
+    GetPrivateProfileStringA("Program Options", "Resolution", "800", resolution, sizeof(resolution), ini.c_str());
+    GetPrivateProfileStringA("Program Options", "Height", "", height, sizeof(height), ini.c_str());
+    GetPrivateProfileStringA("Program Options", "Scale", "1", scale, sizeof(scale), ini.c_str());
+    return iwd2r::ResolveScreenSize(iwd2r::ParseResolution(resolution), iwd2r::ParseHeight(height), iwd2r::ParseScale(scale), 1024, 768);
+}
+
+}
+
 TEST_CASE("start screen scenario screenshot", "[data][scenario]")
 {
     const char* env = std::getenv("IWD2_DATA");
@@ -59,11 +77,13 @@ TEST_CASE("start screen scenario screenshot", "[data][scenario]")
         ini += '/';
     }
     ini += "icewind2.ini";
-    const int resolution = static_cast<int>(GetPrivateProfileIntA("Program Options", "Resolution", 800, ini.c_str()));
-    if (resolution != 800 && resolution != 1024) {
-        SKIP("[iwd2r-skip] icewind2.ini has Resolution=" << resolution << "; set IWD2R_INI_OVERRIDE=\"Program Options/Resolution=800\" to run this test");
+    // Headless, the desktop is the dummy video driver's 1024x768.
+    const iwd2r::ScreenSize screen = ResolveFromIni(ini);
+    if (!screen.ok) {
+        SKIP("[iwd2r-skip] icewind2.ini asks for a screen iwd2r refuses: " << screen.error);
     }
-    const int height = resolution == 1024 ? 768 : 600;
+    const int resolution = screen.width;
+    const int height = screen.height;
 
     const std::filesystem::path shots = std::filesystem::temp_directory_path() / ("iwd2r-scenario-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     std::filesystem::create_directories(shots);

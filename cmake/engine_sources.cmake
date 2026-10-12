@@ -408,5 +408,7 @@ set(IWD2R_ENGINE_SOURCES
     "src/IcewindMisc.cpp"
     "src/IcewindMisc.h"
     "src/main.cpp"
+    "src/ScreenLayout.cpp"
+    "src/ScreenLayout.h"
     "src/resource.h"
 )

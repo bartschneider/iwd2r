@@ -42,6 +42,7 @@
 #include "CSearchBitmap.h"
 #include "CSoundChannel.h"
 #include "CUtil.h"
+#include "ScreenLayout.h"
 #include "resource.h"
 #include "platform/fs.h"
 
@@ -253,10 +254,22 @@ CBaldurChitin::CBaldurChitin()
     memset(m_aBorderPanels, 0, sizeof(m_aBorderPanels));
     field_4A24 = 1;
 
-    CVideo::SCREENWIDTH = GetPrivateProfileIntA(PROGRAM_OPTIONS_SECTION_KEY,
-        RESOLUTION_KEY,
-        800,
-        FILE_NAME);
+    // iwd2r: Resolution may be any width or "desktop", with optional Height
+    // and Scale keys, decided exactly as iwd2r_main decides the window's size
+    // (iwd2r::ReadScreenSize). SCREENWIDTH/SCREENHEIGHT are the engine's
+    // (internal) screen. Originally:
+    //
+    // CVideo::SCREENWIDTH = GetPrivateProfileIntA(PROGRAM_OPTIONS_SECTION_KEY,
+    //     RESOLUTION_KEY,
+    //     800,
+    //     FILE_NAME);
+    iwd2r::ScreenSize screenSize = iwd2r::ReadScreenSize(FILE_NAME);
+    if (!screenSize.ok) {
+        // iwd2r_main refuses to start first; this only guards other callers.
+        screenSize.width = 800;
+        screenSize.height = 600;
+    }
+    CVideo::SCREENWIDTH = static_cast<USHORT>(screenSize.width);
 
     if (CVideo::SCREENWIDTH >= GetSystemMetrics(SM_CXFULLSCREEN)) {
         field_E4 = 1;
@@ -267,6 +280,13 @@ CBaldurChitin::CBaldurChitin()
     field_4A28 = 0;
     field_4A2C = 0;
 
+    // iwd2r: the original switch below, generalised to any size by
+    // iwd2r::ComputeScreenLayout, which returns exactly these values for
+    // 800x600, 1024x768, 1600x1200 and 2048x1536 (tests/test_layout.cpp
+    // checks them value by value). The original fell back to the 800 case
+    // for any other width while SCREENWIDTH kept it, which left the border
+    // panels empty and crashed.
+#if 0
     INT nLogicalScreenWidth;
     INT nLogicalScreenHeight;
 
@@ -516,7 +536,6 @@ CBaldurChitin::CBaldurChitin()
         break;
     }
 
-    CVidMode::word_8BA320 = static_cast<SHORT>(3 * (((CInfinity::stru_8E7548.right - CInfinity::stru_8E7548.left + 63) / 64 + 1) * ((CInfinity::stru_8E7548.bottom - CInfinity::stru_8E7548.top + 63) / 64 + 1)) / 2);
 
     // Left.
     m_aBorderPanels[0].nPanelID = -5;
@@ -549,6 +568,40 @@ CBaldurChitin::CBaldurChitin()
     m_aBorderPanels[3].nWidth = DEFAULT_SCREEN_WIDTH;
     m_aBorderPanels[3].nHeight = (nLogicalScreenHeight - DEFAULT_SCREEN_HEIGHT) / 2;
     m_aBorderPanels[3].nType = 1;
+#endif
+
+    const iwd2r::ScreenLayout layout = iwd2r::ComputeScreenLayout(screenSize.width, screenSize.height);
+    iwd2r::SetCurrentScreenLayout(layout);
+
+    CInfinity::stru_8E7538.SetRect(layout.stru_8E7538.left, layout.stru_8E7538.top, layout.stru_8E7538.right, layout.stru_8E7538.bottom);
+    CInfinity::stru_8E7548.SetRect(layout.stru_8E7548.left, layout.stru_8E7548.top, layout.stru_8E7548.right, layout.stru_8E7548.bottom);
+    CInfinity::stru_8E7958.SetRect(layout.stru_8E7958.left, layout.stru_8E7958.top, layout.stru_8E7958.right, layout.stru_8E7958.bottom);
+    CInfinity::stru_8E7988.SetRect(layout.stru_8E7988.left, layout.stru_8E7988.top, layout.stru_8E7988.right, layout.stru_8E7988.bottom);
+    CInfinity::stru_8E79A8.SetRect(layout.stru_8E79A8.left, layout.stru_8E79A8.top, layout.stru_8E79A8.right, layout.stru_8E79A8.bottom);
+    CInfinity::stru_8E79B8.SetRect(layout.stru_8E79B8.left, layout.stru_8E79B8.top, layout.stru_8E79B8.right, layout.stru_8E79B8.bottom);
+    CInfinity::stru_8E79C8.SetRect(layout.stru_8E79C8.left, layout.stru_8E79C8.top, layout.stru_8E79C8.right, layout.stru_8E79C8.bottom);
+    CInfinity::stru_8E79E0.SetRect(layout.stru_8E79E0.left, layout.stru_8E79E0.top, layout.stru_8E79E0.right, layout.stru_8E79E0.bottom);
+    CInfinity::stru_8E79F8.SetRect(layout.stru_8E79F8.left, layout.stru_8E79F8.top, layout.stru_8E79F8.right, layout.stru_8E79F8.bottom);
+    CInfinity::stru_8E7A10.SetRect(layout.stru_8E7A10.left, layout.stru_8E7A10.top, layout.stru_8E7A10.right, layout.stru_8E7A10.bottom);
+
+    CVideo::SCREENHEIGHT = static_cast<USHORT>(layout.screenHeight);
+    CHUI_GUIEXT = layout.guiExt;
+    field_4A2C = layout.field_4A2C;
+    field_4A28 = layout.field_4A28;
+
+    CVidMode::word_8BA320 = static_cast<SHORT>(3 * (((CInfinity::stru_8E7548.right - CInfinity::stru_8E7548.left + 63) / 64 + 1) * ((CInfinity::stru_8E7548.bottom - CInfinity::stru_8E7548.top + 63) / 64 + 1)) / 2);
+
+    // m_aBorderPanels[0..3]: left (-5), right (-4), top (-3), bottom (-2).
+    static const DWORD kBorderPanelIDs[4] = { static_cast<DWORD>(-5), static_cast<DWORD>(-4), static_cast<DWORD>(-3), static_cast<DWORD>(-2) };
+    for (int side = 0; side < 4; side++) {
+        strncpy(reinterpret_cast<char*>(m_aBorderPanels[side].refMosaic), layout.borderMosaic[side], RESREF_SIZE);
+        m_aBorderPanels[side].nPanelID = kBorderPanelIDs[side];
+        m_aBorderPanels[side].x = static_cast<WORD>(layout.borderPanels[side].x);
+        m_aBorderPanels[side].y = static_cast<WORD>(layout.borderPanels[side].y);
+        m_aBorderPanels[side].nWidth = static_cast<WORD>(layout.borderPanels[side].width);
+        m_aBorderPanels[side].nHeight = static_cast<WORD>(layout.borderPanels[side].height);
+        m_aBorderPanels[side].nType = 1;
+    }
 
     m_ptScreen.x = GetPrivateProfileIntA(PROGRAM_OPTIONS_SECTION_KEY,
         SCREEN_POSITION_X_KEY,
@@ -826,7 +879,7 @@ void CBaldurChitin::Init(HINSTANCE hInstance)
 
     m_pMusicPositions = new CMusicPosition[MAX_MUSIC_POSITIONS];
     for (int k = 0; k < MAX_MUSIC_POSITIONS; k++) {
-        m_pMusicPositions[k].m_areaResRef = "XXXXXXXX";
+        m_pMusicPositions[k].m_areaResRef = "";
         m_pMusicPositions[k].m_nSong = -1;
         m_pMusicPositions[k].m_nSection = 0;
         m_pMusicPositions[k].m_nPosition = 0;
@@ -1697,7 +1750,11 @@ void CBaldurChitin::SaveOptions()
         sString,
         GetIniFileName());
 
-    sString.Format("%d", CVideo::SCREENWIDTH);
+    // iwd2r: writes back Resolution as the INI had it ("desktop", or a width
+    // that Scale divides), not the internal width. Originally:
+    //
+    // sString.Format("%d", CVideo::SCREENWIDTH);
+    sString = iwd2r::IniResolutionText().c_str();
     WritePrivateProfileStringA(PROGRAM_OPTIONS_SECTION_KEY,
         RESOLUTION_KEY,
         sString,
@@ -2366,7 +2423,7 @@ CInfGame* CBaldurChitin::GetObjectGame()
 void CBaldurChitin::AddMusicPosition(CResRef cResRef, INT nSong)
 {
     if (m_pMusicPositions != NULL
-        && cResRef != "XXXXXXXX"
+        && cResRef != ""
         && nSong > 0
         && g_pBaldurChitin->cSoundMixer.GetSongPlaying() == nSong) {
         INT nSection = g_pBaldurChitin->cSoundMixer.GetSectionPlaying();
@@ -2436,7 +2493,7 @@ BOOL CBaldurChitin::RemoveMusicPosition(CResRef cResRef, INT nSong)
                 nIndex++;
             }
 
-            m_pMusicPositions[nIndex].m_areaResRef = "XXXXXXXX";
+            m_pMusicPositions[nIndex].m_areaResRef = "";
             m_pMusicPositions[nIndex].m_nSong = -1;
             m_pMusicPositions[nIndex].m_nSection = 0;
             m_pMusicPositions[nIndex].m_nPosition = 0;

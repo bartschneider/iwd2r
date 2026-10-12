@@ -2,6 +2,7 @@
 #define NOMINMAX
 #include <catch2/catch_test_macros.hpp>
 
+#include "ScreenLayout.h"
 #include "compat/ini.h"
 #include "install_ini_backup.h"
 
@@ -21,6 +22,23 @@
 #error IWD2R_EXE must be defined by tests/CMakeLists.txt
 #endif
 
+namespace {
+
+// iwd2r::ReadScreenSize as the headless child sees it (the dummy video
+// driver reports a 1024x768 desktop).
+iwd2r::ScreenSize ResolveFromIni(const std::string& ini)
+{
+    char resolution[64];
+    char height[64];
+    char scale[64];
+    GetPrivateProfileStringA("Program Options", "Resolution", "800", resolution, sizeof(resolution), ini.c_str());
+    GetPrivateProfileStringA("Program Options", "Height", "", height, sizeof(height), ini.c_str());
+    GetPrivateProfileStringA("Program Options", "Scale", "1", scale, sizeof(scale), ini.c_str());
+    return iwd2r::ResolveScreenSize(iwd2r::ParseResolution(resolution), iwd2r::ParseHeight(height), iwd2r::ParseScale(scale), 1024, 768);
+}
+
+}
+
 TEST_CASE("start screen smoke", "[data]")
 {
     const char* env = std::getenv("IWD2_DATA");
@@ -29,16 +47,17 @@ TEST_CASE("start screen smoke", "[data]")
     }
     const std::string data = env;
 
-    // The engine refuses resolutions other than 800 and 1024 (exit code 3).
-    // Read the player's INI without modifying it.
+    // The engine refuses a screen below 800x600 (exit code 3). Read the
+    // player's INI without modifying it; headless, the desktop is the dummy
+    // video driver's 1024x768.
     std::string ini = data;
     if (!ini.empty() && ini.back() != '/' && ini.back() != '\\') {
         ini += '/';
     }
     ini += "icewind2.ini";
-    const int resolution = static_cast<int>(GetPrivateProfileIntA("Program Options", "Resolution", 800, ini.c_str()));
-    if (resolution != 800 && resolution != 1024) {
-        SKIP("[iwd2r-skip] icewind2.ini has Resolution=" << resolution << "; only 800 and 1024 are supported in project 1");
+    const iwd2r::ScreenSize screen = ResolveFromIni(ini);
+    if (!screen.ok) {
+        SKIP("[iwd2r-skip] icewind2.ini asks for a screen iwd2r refuses: " << screen.error);
     }
 
     WARN("The engine writes into the install directory when it runs (cache files, temp/), as the original game does on every launch; the INI files are restored afterwards.");
