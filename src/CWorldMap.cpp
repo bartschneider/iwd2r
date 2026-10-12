@@ -1,3 +1,4 @@
+// Modified for iwd2r; see NOTICE.md
 #include "CWorldMap.h"
 
 #include "CBaldurChitin.h"
@@ -245,7 +246,8 @@ BOOL CWorldMap::GetAreaIndex(DWORD nMap, const CResRef& cResArea, DWORD& nArea)
     CString v1;
 
     CPoint pt;
-    if (g_pBaldurChitin->GetObjectGame()->GetRuleTables().m_tAreaLoad.Find(CString(cResArea.GetResRef()), pt, TRUE) != TRUE) {
+    CString sArea(cResArea.GetResRef());
+    if (g_pBaldurChitin->GetObjectGame()->GetRuleTables().m_tAreaLoad.Find(sArea, pt, TRUE) != TRUE) {
         return FALSE;
     }
 

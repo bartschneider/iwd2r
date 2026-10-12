@@ -1,6 +1,5 @@
+// Modified for iwd2r; see NOTICE.md
 #include "CAliasList.h"
-
-#include <direct.h>
 
 #include "CAlias.h"
 

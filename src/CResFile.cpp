@@ -1,3 +1,4 @@
+// Modified for iwd2r; see NOTICE.md
 #include "CResFile.h"
 
 #include "CChitin.h"
@@ -110,7 +111,7 @@ DWORD CResFile::GetFileSize(RESID resID)
 
     if (field_20 != NULL) {
         // TODO: Object/structure?
-        return reinterpret_cast<DWORD>(reinterpret_cast<unsigned char*>(field_20) + 2);
+        return static_cast<DWORD>(reinterpret_cast<DWORD_PTR>(reinterpret_cast<unsigned char*>(field_20) + 2));
     }
 
     return 0;

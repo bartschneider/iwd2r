@@ -1,3 +1,4 @@
+// Modified for iwd2r; see NOTICE.md
 #include "CScreenStore.h"
 
 #include "CBaldurChitin.h"
@@ -3353,7 +3354,7 @@ SHORT CScreenStore::GetPanelButtonSequence(INT nButtonIndex)
 
     SHORT nSequence;
     switch (m_adwButtonPanelId[nButtonIndex]) {
-    case -1:
+    case static_cast<DWORD>(-1):
         nSequence = 0;
         break;
     case 2:
@@ -3393,7 +3394,7 @@ STRREF CScreenStore::GetPanelButtonToolTip(INT nButtonIndex)
 
     STRREF strText;
     switch (m_adwButtonPanelId[nButtonIndex]) {
-    case -1:
+    case static_cast<DWORD>(-1):
         strText = -1;
         break;
     case 2:

@@ -7141,7 +7141,7 @@ void CMessageDisplayTextRef::Run()
                 strResText.cSound.SetFireForget(TRUE);
             }
 
-            strResText.cSound.SetChannel(14, reinterpret_cast<DWORD>(pSprite->GetArea()));
+            strResText.cSound.SetChannel(14, reinterpret_cast<DWORD_PTR>(pSprite->GetArea()));
 
             // FIXME: Calls `GetPos` twice.
             strResText.cSound.Play(pSprite->GetPos().x,
@@ -8518,7 +8518,7 @@ void CMessagePlaySoundRef::Run()
 
     if (rc == CGameObjectArray::SUCCESS) {
         cSound.SetChannel(m_nChannel,
-            reinterpret_cast<DWORD>(pObject->GetArea()));
+            reinterpret_cast<DWORD_PTR>(pObject->GetArea()));
         cSound.Play(pObject->GetPos().x,
             pObject->GetPos().y,
             0,
@@ -8529,7 +8529,7 @@ void CMessagePlaySoundRef::Run()
             INFINITE);
     } else {
         cSound.SetChannel(14,
-            reinterpret_cast<DWORD>(g_pBaldurChitin->GetObjectGame()->GetVisibleArea()));
+            reinterpret_cast<DWORD_PTR>(g_pBaldurChitin->GetObjectGame()->GetVisibleArea()));
         cSound.Play(FALSE);
     }
 }
@@ -12912,7 +12912,7 @@ void CMessageDisplayTextRefSend::Run()
                 strResText.cSound.SetFireForget(TRUE);
             }
 
-            strResText.cSound.SetChannel(14, reinterpret_cast<DWORD>(pSprite->GetArea()));
+            strResText.cSound.SetChannel(14, reinterpret_cast<DWORD_PTR>(pSprite->GetArea()));
 
             // FIXME: Calls `GetPos` twice.
             strResText.cSound.Play(pSprite->GetPos().x,
@@ -14277,7 +14277,8 @@ void CMessageStoreAddItem::Run()
         // __LINE__: 26111
         UTIL_ASSERT(pStore != NULL);
 
-        pStore->AddItemExt(CItem(m_item), 1);
+        CItem item(m_item);
+        pStore->AddItemExt(item, 1);
     } else if (g_pChitin->cNetwork.GetSessionOpen()) {
         CStore::InvalidateStore(m_store);
     }

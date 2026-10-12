@@ -1,3 +1,4 @@
+// Modified for iwd2r; see NOTICE.md
 #include "CGameDialog.h"
 
 #include "CBaldurChitin.h"
@@ -55,8 +56,9 @@ BOOL CGameDialogSprite::StartDialog(CGameSprite* pSprite)
 
     for (INT nIndex = 0; nIndex < m_dialogEntriesOrdered.GetCount(); nIndex++) {
         CGameDialogEntry* pEntry = m_dialogEntriesOrdered.GetAt(nIndex);
+        CTypedPtrList<CPtrList, CAITrigger*> triggerList;
         if (pEntry != NULL
-            && pEntry->m_startCondition.Hold(CTypedPtrList<CPtrList, CAITrigger*>(), pSprite)) {
+            && pEntry->m_startCondition.Hold(triggerList, pSprite)) {
             // FIXME: Unused.
             LONG nCharacterId = g_pBaldurChitin->GetObjectGame()->GetProtagonist();
 
@@ -105,7 +107,7 @@ void CGameDialogSprite::EndDialog()
     if (cSound.m_nLooping == 0) {
         cSound.SetFireForget(TRUE);
     }
-    cSound.SetChannel(6, reinterpret_cast<DWORD>(g_pBaldurChitin->GetObjectGame()->GetVisibleArea()));
+    cSound.SetChannel(6, reinterpret_cast<DWORD_PTR>(g_pBaldurChitin->GetObjectGame()->GetVisibleArea()));
     cSound.Play(FALSE);
 }
 

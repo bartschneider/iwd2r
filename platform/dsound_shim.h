@@ -55,8 +55,15 @@
 
 typedef float D3DVALUE;
 
-// Packed as on Windows, where sizeof(WAVEFORMATEX) is 18.
+// Packed as on Windows, where sizeof(WAVEFORMAT) is 14 and sizeof(WAVEFORMATEX) is 18.
 #pragma pack(push, 1)
+struct WAVEFORMAT {
+    WORD wFormatTag;
+    WORD nChannels;
+    DWORD nSamplesPerSec;
+    DWORD nAvgBytesPerSec;
+    WORD nBlockAlign;
+};
 struct WAVEFORMATEX {
     WORD wFormatTag;
     WORD nChannels;

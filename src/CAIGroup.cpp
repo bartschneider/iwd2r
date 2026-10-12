@@ -1,3 +1,4 @@
+// Modified for iwd2r; see NOTICE.md
 #include "CAIGroup.h"
 
 #include "CAITrigger.h"
@@ -435,7 +436,7 @@ void CAIGroup::SetGroupTriggerId(LONG triggerId)
 
     POSITION pos = m_memberList.GetHeadPosition();
     while (pos != NULL) {
-        LONG memberId = reinterpret_cast<LONG>(m_memberList.GetNext(pos));
+        LONG memberId = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_memberList.GetNext(pos)));
 
         CGameSprite* pSprite;
 
@@ -462,7 +463,7 @@ void CAIGroup::RemoveFromSearch(CSearchBitmap* search)
 {
     POSITION pos = m_memberList.GetHeadPosition();
     while (pos != NULL) {
-        LONG memberId = reinterpret_cast<LONG>(m_memberList.GetNext(pos));
+        LONG memberId = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_memberList.GetNext(pos)));
 
         CGameSprite* pSprite;
 
@@ -499,7 +500,7 @@ void CAIGroup::AddToSearch(CSearchBitmap* search)
 {
     POSITION pos = m_memberList.GetHeadPosition();
     while (pos != NULL) {
-        LONG memberId = reinterpret_cast<LONG>(m_memberList.GetNext(pos));
+        LONG memberId = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_memberList.GetNext(pos)));
 
         CGameSprite* pSprite;
 
@@ -535,7 +536,7 @@ void CAIGroup::AddToSearch(CSearchBitmap* search)
 LONG CAIGroup::GetGroupLeader()
 {
     if (m_memberList.GetCount() > 0) {
-        return reinterpret_cast<LONG>(m_memberList.GetHead());
+        return static_cast<LONG>(reinterpret_cast<INT_PTR>(m_memberList.GetHead()));
     }
 
     return CGameObjectArray::INVALID_INDEX;
@@ -549,7 +550,7 @@ LONG* CAIGroup::GetGroupList()
     int index = 0;
     POSITION pos = m_memberList.GetHeadPosition();
     while (pos != NULL) {
-        pList[index++] = reinterpret_cast<LONG>(m_memberList.GetNext(pos));
+        pList[index++] = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_memberList.GetNext(pos)));
     }
 
     return pList;
@@ -577,7 +578,7 @@ POSITION CAIGroup::Add(LONG characterId)
 
     POSITION pos = m_memberList.GetHeadPosition();
     while (pos != NULL) {
-        LONG memberId = reinterpret_cast<LONG>(m_memberList.GetAt(pos));
+        LONG memberId = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_memberList.GetAt(pos)));
         SHORT memberPortraitNum = g_pBaldurChitin->GetObjectGame()->GetCharacterPortraitNum(memberId);
         if (memberPortraitNum == -1 || memberPortraitNum > portraitNum) {
             return m_memberList.InsertBefore(pos, reinterpret_cast<LONG*>(characterId));
@@ -606,7 +607,7 @@ BOOL CAIGroup::IsPartyLeader()
         return FALSE;
     }
 
-    LONG memberId = reinterpret_cast<LONG>(m_memberList.GetHead());
+    LONG memberId = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_memberList.GetHead()));
     if (g_pBaldurChitin->GetObjectGame()->GetCharacterPortraitNum(memberId) != -1) {
         return TRUE;
     }
@@ -624,7 +625,7 @@ void CAIGroup::Sort()
 
     pos = m_memberList.GetHeadPosition();
     while (pos != NULL) {
-        LONG memberId = reinterpret_cast<LONG>(m_memberList.GetNext(pos));
+        LONG memberId = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_memberList.GetNext(pos)));
         tempGroup.Add(memberId);
     }
 
@@ -632,7 +633,7 @@ void CAIGroup::Sort()
 
     pos = tempGroup.m_memberList.GetHeadPosition();
     while (pos != NULL) {
-        LONG memberId = reinterpret_cast<LONG>(tempGroup.m_memberList.GetNext(pos));
+        LONG memberId = static_cast<LONG>(reinterpret_cast<INT_PTR>(tempGroup.m_memberList.GetNext(pos)));
 
         CGameSprite* pSprite;
 
@@ -681,7 +682,7 @@ void CAIGroup::GroupCancelMove()
 
     POSITION pos = m_memberList.GetHeadPosition();
     while (pos != NULL) {
-        LONG memberId = reinterpret_cast<LONG>(m_memberList.GetNext(pos));
+        LONG memberId = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_memberList.GetNext(pos)));
 
         CGameSprite* pSprite;
 
@@ -714,7 +715,7 @@ void CAIGroup::ClearActions()
 
     POSITION pos = m_memberList.GetHeadPosition();
     while (pos != NULL) {
-        LONG memberId = reinterpret_cast<LONG>(m_memberList.GetNext(pos));
+        LONG memberId = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_memberList.GetNext(pos)));
 
         CGameSprite* pSprite;
 
@@ -774,9 +775,10 @@ void CAIGroup::GroupSetTarget(LONG iObject)
             // FIXME: Both params immediately destroyed after call which means
             // they are constructed just for the call which leads to pretty
             // ugly invocation.
+            CAIAction leaderAction(CAIAction::ATTACK, target, 0, 0, 0);
             GroupAction(CAIAction(CAIAction::ATTACK, target, 0, 0, 0),
                 TRUE,
-                &CAIAction(CAIAction::ATTACK, target, 0, 0, 0));
+                &leaderAction);
 
             g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(iObject,
                 CGameObjectArray::THREAD_ASYNCH,
@@ -794,7 +796,7 @@ void CAIGroup::AddTrigger(CAITrigger& trigger)
 {
     POSITION pos = m_memberList.GetHeadPosition();
     while (pos != NULL) {
-        LONG memberId = reinterpret_cast<LONG>(m_memberList.GetNext(pos));
+        LONG memberId = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_memberList.GetNext(pos)));
 
         CGameSprite* pSprite;
 
@@ -838,7 +840,7 @@ void CAIGroup::FollowLeader(CPoint target, BOOL additive)
         CAIAction* action = new CAIAction(CAIAction::LEADER, target, additive, -1);
         actions.AddTail(action);
 
-        LONG memberId = reinterpret_cast<LONG>(m_memberList.GetHead());
+        LONG memberId = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_memberList.GetHead()));
 
         CGameSprite* pSprite;
 
@@ -894,7 +896,7 @@ void CAIGroup::FollowLeader(CPoint target, BOOL additive)
 
             POSITION pos = m_memberList.GetHeadPosition();
             while (pos != NULL) {
-                LONG memberId = reinterpret_cast<LONG>(m_memberList.GetNext(pos));
+                LONG memberId = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_memberList.GetNext(pos)));
 
                 CMessageStopFollow* pMessage = new CMessageStopFollow(memberId, memberId);
                 g_pBaldurChitin->GetMessageHandler()->AddMessage(pMessage, FALSE);

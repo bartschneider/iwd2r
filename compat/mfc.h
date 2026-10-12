@@ -49,3 +49,11 @@
 #define TRACE(...) ((void)0)
 #define VERIFY(x) ((void)(x))
 #define AFX_INLINE inline
+
+// MFC's release-build check: any non-null address is valid.
+inline BOOL AfxIsValidAddress(const void* address, UINT bytes, BOOL readWrite = TRUE)
+{
+    (void)bytes;
+    (void)readWrite;
+    return address != NULL ? TRUE : FALSE;
+}

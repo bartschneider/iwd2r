@@ -277,3 +277,15 @@ TEST_CASE("map CTypedPtrMap stores typed pointers", "[map]")
     CHECK(map.RemoveKey(7));
     CHECK_FALSE(map.Lookup(7, out));
 }
+
+TEST_CASE("cstringarray adds and indexes strings", "[array]")
+{
+    CStringArray a;
+    CHECK(a.Add("one") == 0);
+    CHECK(a.Add(CString("two")) == 1);
+    CHECK(a.GetCount() == 2);
+    CHECK(a[0] == "one");
+    CHECK(a.GetAt(1) == "two");
+    a.RemoveAll();
+    CHECK(a.GetSize() == 0);
+}

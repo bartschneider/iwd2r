@@ -1,3 +1,4 @@
+// Modified for iwd2r; see NOTICE.md
 #include "CGameAIBase.h"
 
 #include "CAIResponse.h"
@@ -1103,7 +1104,7 @@ SHORT CGameAIBase::Shout()
 
     POSITION pos = targets.GetHeadPosition();
     while (pos != NULL) {
-        LONG nId = reinterpret_cast<LONG>(targets.GetNext(pos));
+        LONG nId = static_cast<LONG>(reinterpret_cast<INT_PTR>(targets.GetNext(pos)));
 
         CMessage* message = new CMessageSetTrigger(trigger, m_id, nId);
         g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
@@ -1241,9 +1242,9 @@ SHORT CGameAIBase::DisplayString(CGameAIBase* sprite)
 
         if (sprite->GetObjectType() == TYPE_SPRITE) {
             strRes.cSound.SetChannel(static_cast<CGameSprite*>(sprite)->GetChannel(),
-                reinterpret_cast<DWORD>(m_pArea));
+                reinterpret_cast<DWORD_PTR>(m_pArea));
         } else {
-            strRes.cSound.SetChannel(14, reinterpret_cast<DWORD>(m_pArea));
+            strRes.cSound.SetChannel(14, reinterpret_cast<DWORD_PTR>(m_pArea));
         }
 
         strRes.cSound.Play(m_pos.x, m_pos.y, 0, FALSE);
@@ -1264,9 +1265,9 @@ SHORT CGameAIBase::DisplayString(CGameAIBase* sprite)
 
         if (sprite->GetObjectType() == TYPE_SPRITE) {
             strRes.cSound.SetChannel(static_cast<CGameSprite*>(sprite)->GetChannel(),
-                reinterpret_cast<DWORD>(m_pArea));
+                reinterpret_cast<DWORD_PTR>(m_pArea));
         } else {
-            strRes.cSound.SetChannel(14, reinterpret_cast<DWORD>(m_pArea));
+            strRes.cSound.SetChannel(14, reinterpret_cast<DWORD_PTR>(m_pArea));
         }
 
         strRes.cSound.Play(m_pos.x, m_pos.y, 0, FALSE);

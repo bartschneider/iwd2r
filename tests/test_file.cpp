@@ -183,3 +183,46 @@ TEST_CASE("file: mixed reads and writes on one stream", "[file]")
     REQUIRE(f.Read(buffer, 1) == 0);
     CHECK(f.GetLength() == 5);
 }
+
+TEST_CASE("file: SetFilePath and the open file's status", "[file]")
+{
+    TempDir dir;
+    const std::string path = dir.file("s.bin");
+    {
+        CFile out(path.c_str(), CFile::modeWrite | CFile::modeCreate);
+        out.Write("abcd", 4);
+    }
+    CFile named;
+    named.SetFilePath(path.c_str());
+    CHECK(std::string(named.GetFilePath()) == path);
+    CFileStatus status;
+    CHECK(named.GetStatus(status) == FALSE);
+
+    CFile file;
+    REQUIRE(file.Open(path.c_str(), CFile::modeRead));
+    REQUIRE(file.GetStatus(status));
+    CHECK(status.m_size == 4);
+}
+
+#ifndef _MSC_VER
+TEST_CASE("file: _mkdir, _chdir and _access use the path resolver", "[file]")
+{
+    TempDir dir;
+    static std::string s_root;
+    s_root = dir.file("");
+    compat::SetPathResolver([](const char* path) {
+        std::string p(path);
+        for (char& c : p)
+            if (c == '\\')
+                c = '/';
+        return p.rfind("X:/", 0) == 0 ? s_root + p.substr(3) : p;
+    });
+    char cwd[4096];
+    REQUIRE(_getcwd(cwd, sizeof(cwd)) != nullptr);
+    CHECK(_mkdir("X:\\made") == 0);
+    CHECK(std::filesystem::is_directory(dir.file("made")));
+    CHECK(_access("X:\\made", 0) == 0);
+    CHECK(_chdir("X:\\made") == 0);
+    CHECK(_chdir(cwd) == 0);
+}
+#endif

@@ -1,3 +1,4 @@
+// Modified for iwd2r; see NOTICE.md
 #include "CChitin3d.h"
 
 #include "CChitin.h"
@@ -56,7 +57,7 @@ BOOL CChitin::Init3d()
     sMessage += "opengl32.dll";
 
     if (m_hOpenGL == NULL) {
-        MessageBoxA(NULL, sMessage, m_sGameName, 0);
+        fprintf(stderr, "%s\n", static_cast<LPCSTR>(sMessage));
         return FALSE;
     }
 

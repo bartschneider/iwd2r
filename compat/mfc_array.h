@@ -1,8 +1,9 @@
 // iwd2r. Distributed under LICENSE.md.
-// MFC CArray, CPtrArray, CDWordArray, CObArray and CTypedPtrArray over std::vector.
+// MFC CArray, CPtrArray, CDWordArray, CObArray, CStringArray and CTypedPtrArray over std::vector.
 #pragma once
 
 #include "compat/mfc_list.h"
+#include "compat/mfc_string.h"
 #include "compat/win_types.h"
 
 #include <cassert>
@@ -107,6 +108,8 @@ class CPtrArray : public CArray<void*, void*> { };
 class CDWordArray : public CArray<DWORD, DWORD> { };
 
 class CObArray : public CArray<CObject*, CObject*> { };
+
+class CStringArray : public CArray<CString, const CString&> { };
 
 template <class BASE_CLASS, class TYPE>
 class CTypedPtrArray : public BASE_CLASS {

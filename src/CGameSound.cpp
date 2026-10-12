@@ -1,3 +1,4 @@
+// Modified for iwd2r; see NOTICE.md
 #include "CGameSound.h"
 
 #include "CBaldurChitin.h"
@@ -48,7 +49,7 @@ CGameSound::CGameSound(CGameArea* pArea, CAreaFileSoundObject* pSoundObject)
             m_looping.SetResRef(CResRef(m_soundObject.m_soundObject[0]), TRUE, TRUE);
         }
 
-        m_looping.SetChannel(16, reinterpret_cast<DWORD>(pArea));
+        m_looping.SetChannel(16, reinterpret_cast<DWORD_PTR>(pArea));
         m_looping.SetLoopingFlag(1);
         if ((m_soundObject.m_dwFlags & 0x4) == 0) {
             m_looping.SetRange(m_soundObject.m_range);

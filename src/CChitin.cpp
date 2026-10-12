@@ -850,7 +850,8 @@ int CChitin::InitApplication(HINSTANCE hInstance, int nCmdShow)
 
     if (cVideo.m_bIs3dAccelerated) {
         if (!Init3d()) {
-            return 0;
+            // iwd2r: the 3D mode is refused and the 2D path taken (spec 4.3).
+            cVideo.m_bIs3dAccelerated = FALSE;
         }
     }
 

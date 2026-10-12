@@ -5,6 +5,7 @@
 #include "compat/mfc.h"
 
 #include <ctime>
+#include <string>
 
 TEST_CASE("misc CTime current time is close to time()", "[misc]")
 {
@@ -102,4 +103,40 @@ TEST_CASE("misc CWnd converts to its HWND", "[misc]")
     HWND h = w;
     CHECK(h == reinterpret_cast<HWND>(0x10));
     w.Detach();
+}
+
+TEST_CASE("misc CTime formats local time", "[misc]")
+{
+    const CTime t(static_cast<time_t>(86400 * 365));
+    tm local = {};
+    char expected[64];
+    const time_t raw = t.GetTime();
+#ifdef _WIN32
+    localtime_s(&local, &raw);
+#else
+    localtime_r(&raw, &local);
+#endif
+    std::strftime(expected, sizeof(expected), "%a, %b %d, %Y - %I:%M %p", &local);
+    CHECK(t.Format("%a, %b %d, %Y - %I:%M %p") == expected);
+    CHECK(t.Format("%Y") == CString(std::to_string(t.GetYear()).c_str()));
+}
+
+TEST_CASE("misc AfxIsValidAddress accepts any non-null address", "[misc]")
+{
+    int value = 0;
+    CHECK(AfxIsValidAddress(&value, sizeof(value), 1) == TRUE);
+    CHECK(AfxIsValidAddress(nullptr, 4) == FALSE);
+}
+
+TEST_CASE("misc inert character, pointer and socket helpers", "[misc]")
+{
+    CHECK(IsCharAlphaNumericA('a') == TRUE);
+    CHECK(IsCharAlphaNumericA('7') == TRUE);
+    CHECK(IsCharAlphaNumericA(' ') == FALSE);
+    CHECK(IsCharAlphaNumericA('.') == FALSE);
+    int value = 0;
+    CHECK(IsBadReadPtr(&value, sizeof(value)) == FALSE);
+    CHECK(IsBadReadPtr(nullptr, 4) == TRUE);
+    CHECK(IsBadReadPtr(nullptr, 0) == FALSE);
+    CHECK(WSACleanup() == 0);
 }

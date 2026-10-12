@@ -189,6 +189,12 @@ int lstrcmpiA(LPCSTR a, LPCSTR b)
 
 BOOL IsDBCSLeadByte(BYTE) { return FALSE; }
 
+BOOL IsCharAlphaNumericA(CHAR ch) { return std::isalnum(static_cast<unsigned char>(ch)) ? TRUE : FALSE; }
+
+BOOL IsBadReadPtr(const void* pointer, UINT_PTR size) { return pointer == NULL && size != 0 ? TRUE : FALSE; }
+
+int WSACleanup() { return 0; }
+
 int wsprintfA(LPSTR buffer, LPCSTR format, ...)
 {
     if (!buffer || !format)

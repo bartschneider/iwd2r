@@ -371,3 +371,9 @@ TEST_CASE("dsound C-style macros", "[dsound]")
     CHECK(IDirectSoundBuffer_Release(buf) == 0);
     CHECK(IDirectSound_Release(ds) == 0);
 }
+
+TEST_CASE("dsound wave format headers keep their Windows sizes", "[dsound]")
+{
+    STATIC_REQUIRE(sizeof(WAVEFORMAT) == 14);
+    STATIC_REQUIRE(sizeof(WAVEFORMATEX) == 18);
+}

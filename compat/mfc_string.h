@@ -34,15 +34,23 @@ public:
     CString();
     CString(const CString& other);
     CString(const char* psz);
+    // MFC's overload for unsigned text, such as the engine's RESREF arrays.
+    CString(const unsigned char* psz)
+        : CString(reinterpret_cast<const char*>(psz))
+    {
+    }
     CString(const char* pch, int len);
     CString(char ch, int repeat = 1);
     ~CString();
 
     CString& operator=(const CString& other);
     CString& operator=(const char* psz);
+    CString& operator=(const unsigned char* psz) { return *this = reinterpret_cast<const char*>(psz); }
     CString& operator=(char ch);
 
     operator const char*() const { return m_pchData; }
+    // The later MFC spelling of the same conversion.
+    const char* GetString() const { return m_pchData; }
 
     int GetLength() const { return Header()->nDataLength; }
     BOOL IsEmpty() const { return Header()->nDataLength == 0; }

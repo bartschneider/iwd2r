@@ -1,3 +1,4 @@
+// Modified for iwd2r; see NOTICE.md
 #include "CGameContainer.h"
 
 #include "CAIScript.h"
@@ -774,7 +775,7 @@ void CGameContainer::Marshal(CAreaFileContainer** pContainerObject)
         }
 
         // FIXME: Unsafe x64 conversion.
-        (*pContainerObject)->m_pickPointStart = reinterpret_cast<DWORD>(pPoints);
+        (*pContainerObject)->m_pickPointStart = static_cast<DWORD>(reinterpret_cast<DWORD_PTR>(pPoints));
         (*pContainerObject)->m_pickPointCount = m_nPolygon;
     }
 
@@ -798,7 +799,7 @@ void CGameContainer::Marshal(CAreaFileContainer** pContainerObject)
             UTIL_ASSERT(pItems != NULL)
 
             // FIXME: Unsafe x64 conversion.
-            (*pContainerObject)->m_startingItem = reinterpret_cast<DWORD>(pItems);
+            (*pContainerObject)->m_startingItem = static_cast<DWORD>(reinterpret_cast<DWORD_PTR>(pItems));
             (*pContainerObject)->m_itemCount = cnt;
 
             cnt = 0;

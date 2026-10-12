@@ -182,3 +182,15 @@ TEST_CASE("cstring GetBuffer without a length", "[cstring]")
     s.ReleaseBuffer();
     CHECK(s.GetLength() == 3);
 }
+
+TEST_CASE("cstring from unsigned text", "[cstring]")
+{
+    const unsigned char resref[8] = { 'A', 'R', '1', '0', '0', '0', 0, 0 };
+    CString s(resref);
+    CHECK(s == "AR1000");
+    CString t;
+    t = resref;
+    CHECK(t == "AR1000");
+    CHECK(std::strcmp(t.GetString(), "AR1000") == 0);
+    CHECK(t + resref == "AR1000AR1000");
+}

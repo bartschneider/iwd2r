@@ -207,3 +207,14 @@ TEST_CASE("csize", "[geometry]")
     s -= CSize(1, 1);
     REQUIRE(s == CSize(2, 2));
 }
+
+TEST_CASE("cpoint from a packed DWORD and negation", "[geometry]")
+{
+    STATIC_REQUIRE(std::is_convertible<DWORD, CPoint>::value);
+    const CPoint p = static_cast<DWORD>(0xFFFE0003u);
+    CHECK(p.x == 3);
+    CHECK(p.y == -2);
+    const CPoint n = -CPoint(4, -5);
+    CHECK(n.x == -4);
+    CHECK(n.y == 5);
+}

@@ -1,6 +1,5 @@
+// Modified for iwd2r; see NOTICE.md
 #include "CDimm.h"
-
-#include <direct.h>
 
 #include "CChitin.h"
 #include "CRes.h"

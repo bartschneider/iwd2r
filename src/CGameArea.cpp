@@ -1,3 +1,4 @@
+// Modified for iwd2r; see NOTICE.md
 #include "CGameArea.h"
 
 #include "CAIScript.h"
@@ -430,7 +431,7 @@ LONG CGameArea::GetGroundPile(const CPoint& ptPos)
 
     pos = m_lVertSortBack.GetTailPosition();
     while (pos != NULL) {
-        iObject = reinterpret_cast<LONG>(m_lVertSortBack.GetPrev(pos));
+        iObject = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSortBack.GetPrev(pos)));
 
         rc = m_pGame->GetObjectArray()->GetShare(iObject,
             CGameObjectArray::THREAD_ASYNCH,
@@ -461,7 +462,7 @@ LONG CGameArea::GetGroundPile(const CPoint& ptPos)
     if (iGroundPile == CGameObjectArray::INVALID_INDEX) {
         pos = m_lVertSortBackAdd.GetTailPosition();
         while (pos != NULL) {
-            iObject = reinterpret_cast<LONG>(m_lVertSortBackAdd.GetPrev(pos));
+            iObject = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSortBackAdd.GetPrev(pos)));
 
             rc = m_pGame->GetObjectArray()->GetShare(iObject,
                 CGameObjectArray::THREAD_ASYNCH,
@@ -514,7 +515,7 @@ void CGameArea::GetAllInRange(const CPoint& center, const CAIObjectType& type, S
 
     POSITION pos = m_lVertSort.GetHeadPosition();
     while (pos != NULL) {
-        LONG nId = reinterpret_cast<LONG>(m_lVertSort.GetNext(pos));
+        LONG nId = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSort.GetNext(pos)));
 
         CGameObject* pObject;
 
@@ -557,7 +558,7 @@ int CGameArea::GetCountInRange(const CPoint& center, SHORT range, const CAIObjec
     POSITION pos = m_lVertSort.GetHeadPosition();
     int count = 0;
     while (pos != NULL) {
-        LONG nId = reinterpret_cast<LONG>(m_lVertSort.GetNext(pos));
+        LONG nId = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSort.GetNext(pos)));
 
         CGameObject* pObject;
 
@@ -588,7 +589,7 @@ int CGameArea::GetCountInPoly(const CRect& rBounding, const CAIObjectType& type)
     POSITION pos = m_lVertSort.GetHeadPosition();
     int count = 0;
     while (pos != NULL) {
-        LONG nId = reinterpret_cast<LONG>(m_lVertSort.GetNext(pos));
+        LONG nId = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSort.GetNext(pos)));
 
         CGameObject* pObject;
 
@@ -623,7 +624,7 @@ void CGameArea::GetAllInRangeBack(const CPoint& center, const CAIObjectType& typ
 
     POSITION pos = m_lVertSortBack.GetHeadPosition();
     while (pos != NULL) {
-        LONG nId = reinterpret_cast<LONG>(m_lVertSortBack.GetNext(pos));
+        LONG nId = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSortBack.GetNext(pos)));
 
         CGameObject* pObject;
 
@@ -670,7 +671,7 @@ void CGameArea::GetAllInPoly(const CRect& rBounding, CPoint* pPoly, SHORT nPoly,
 
     pos = m_lVertSort.GetHeadPosition();
     while (pos != NULL) {
-        LONG nId = reinterpret_cast<LONG>(m_lVertSort.GetNext(pos));
+        LONG nId = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSort.GetNext(pos)));
 
         CGameObject* pObject;
 
@@ -700,7 +701,7 @@ void CGameArea::GetAllInPoly(const CRect& rBounding, CPoint* pPoly, SHORT nPoly,
     if (checkBackList == TRUE) {
         pos = m_lVertSortBack.GetHeadPosition();
         while (pos != NULL) {
-            LONG nId = reinterpret_cast<LONG>(m_lVertSortBack.GetNext(pos));
+            LONG nId = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSortBack.GetNext(pos)));
 
             CGameObject* pObject;
 
@@ -756,7 +757,7 @@ BOOLEAN CGameArea::CanSaveGame(STRREF& strError)
 
     pos = m_lVertSortFlight.GetTailPosition();
     while (pos != NULL) {
-        iObject = reinterpret_cast<LONG>(m_lVertSortFlight.GetPrev(pos));
+        iObject = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSortFlight.GetPrev(pos)));
 
         rc = pObjectArray->GetShare(iObject,
             CGameObjectArray::THREAD_ASYNCH,
@@ -778,7 +779,7 @@ BOOLEAN CGameArea::CanSaveGame(STRREF& strError)
 
     pos = m_lVertSort.GetTailPosition();
     while (pos != NULL) {
-        iObject = reinterpret_cast<LONG>(m_lVertSort.GetPrev(pos));
+        iObject = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSort.GetPrev(pos)));
 
         rc = pObjectArray->GetShare(iObject,
             CGameObjectArray::THREAD_ASYNCH,
@@ -800,7 +801,7 @@ BOOLEAN CGameArea::CanSaveGame(STRREF& strError)
 
     pos = m_lVertSortBack.GetTailPosition();
     while (pos != NULL) {
-        iObject = reinterpret_cast<LONG>(m_lVertSortBack.GetPrev(pos));
+        iObject = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSortBack.GetPrev(pos)));
 
         rc = pObjectArray->GetShare(iObject,
             CGameObjectArray::THREAD_ASYNCH,
@@ -1094,7 +1095,7 @@ void CGameArea::AIUpdate()
 
     pos = m_lVertSortFlight.GetTailPosition();
     while (pos != NULL) {
-        iObject = reinterpret_cast<LONG>(m_lVertSortFlight.GetPrev(pos));
+        iObject = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSortFlight.GetPrev(pos)));
 
         do {
             rc = m_pGame->GetObjectArray()->GetShare(iObject,
@@ -1129,7 +1130,7 @@ void CGameArea::AIUpdate()
 
     pos = m_lVertSort.GetTailPosition();
     while (pos != NULL) {
-        iObject = reinterpret_cast<LONG>(m_lVertSort.GetPrev(pos));
+        iObject = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSort.GetPrev(pos)));
 
         do {
             rc = m_pGame->GetObjectArray()->GetShare(iObject,
@@ -1187,7 +1188,7 @@ void CGameArea::AIUpdate()
 
     pos = m_lVertSortBack.GetTailPosition();
     while (pos != NULL) {
-        iObject = reinterpret_cast<LONG>(m_lVertSortBack.GetPrev(pos));
+        iObject = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSortBack.GetPrev(pos)));
 
         do {
             rc = m_pGame->GetObjectArray()->GetShare(iObject,
@@ -1378,7 +1379,7 @@ void CGameArea::CompressTime(DWORD deltaTime)
 
     pos = m_lVertSortFlight.GetTailPosition();
     while (pos != NULL) {
-        iObject = reinterpret_cast<LONG>(m_lVertSortFlight.GetPrev(pos));
+        iObject = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSortFlight.GetPrev(pos)));
 
         do {
             rc = m_pGame->GetObjectArray()->GetDeny(iObject,
@@ -1401,7 +1402,7 @@ void CGameArea::CompressTime(DWORD deltaTime)
 
     pos = m_lVertSort.GetTailPosition();
     while (pos != NULL) {
-        iObject = reinterpret_cast<LONG>(m_lVertSort.GetPrev(pos));
+        iObject = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSort.GetPrev(pos)));
 
         do {
             rc = m_pGame->GetObjectArray()->GetDeny(iObject,
@@ -1424,7 +1425,7 @@ void CGameArea::CompressTime(DWORD deltaTime)
 
     pos = m_lVertSortBack.GetTailPosition();
     while (pos != NULL) {
-        iObject = reinterpret_cast<LONG>(m_lVertSortBack.GetPrev(pos));
+        iObject = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSortBack.GetPrev(pos)));
 
         do {
             rc = m_pGame->GetObjectArray()->GetDeny(iObject,
@@ -1581,7 +1582,7 @@ void CGameArea::ClearMarshal()
         m_nCharacters = -1;
 
         while (!m_lVertSortFlight.IsEmpty()) {
-            iObject = reinterpret_cast<LONG>(m_lVertSortFlight.RemoveHead());
+            iObject = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSortFlight.RemoveHead()));
 
             do {
                 rc = m_pGame->GetObjectArray()->GetDeny(iObject,
@@ -1604,7 +1605,7 @@ void CGameArea::ClearMarshal()
         }
 
         while (!m_lVertSort.IsEmpty()) {
-            iObject = reinterpret_cast<LONG>(m_lVertSort.RemoveHead());
+            iObject = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSort.RemoveHead()));
 
             do {
                 rc = m_pGame->GetObjectArray()->GetDeny(iObject,
@@ -1627,7 +1628,7 @@ void CGameArea::ClearMarshal()
         }
 
         while (!m_lVertSortBack.IsEmpty()) {
-            iObject = reinterpret_cast<LONG>(m_lVertSortBack.RemoveHead());
+            iObject = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSortBack.RemoveHead()));
 
             do {
                 rc = m_pGame->GetObjectArray()->GetDeny(iObject,
@@ -2571,7 +2572,7 @@ void CGameArea::OnActivation()
     }
 
     if (g_pBaldurChitin->GetObjectGame()->GetVisibleArea() == this) {
-        g_pBaldurChitin->cSoundMixer.m_nActiveArea = reinterpret_cast<DWORD>(this);
+        g_pBaldurChitin->cSoundMixer.m_nActiveArea = reinterpret_cast<DWORD_PTR>(this);
         g_pBaldurChitin->cSoundMixer.UpdateSoundList();
 
         if (g_pBaldurChitin->field_1C4A == 1 && byte_8D2138 == TRUE) {
@@ -2798,7 +2799,7 @@ void CGameArea::OnActionButtonUp(const CPoint& pt)
 
                     pos = m_pGame->m_familiars.GetHeadPosition();
                     while (pos != NULL) {
-                        nSprite = reinterpret_cast<LONG>(m_pGame->m_familiars.GetNext(pos));
+                        nSprite = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_pGame->m_familiars.GetNext(pos)));
                         rc = m_pGame->GetObjectArray()->GetShare(nSprite,
                             CGameObjectArray::THREAD_ASYNCH,
                             reinterpret_cast<CGameObject**>(&pSprite),
@@ -2830,7 +2831,7 @@ void CGameArea::OnActionButtonUp(const CPoint& pt)
 
                     pos = m_pGame->m_allies.GetHeadPosition();
                     while (pos != NULL) {
-                        nSprite = reinterpret_cast<LONG>(m_pGame->m_allies.GetNext(pos));
+                        nSprite = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_pGame->m_allies.GetNext(pos)));
                         rc = m_pGame->GetObjectArray()->GetShare(nSprite,
                             CGameObjectArray::THREAD_ASYNCH,
                             reinterpret_cast<CGameObject**>(&pSprite),
@@ -3351,7 +3352,7 @@ void CGameArea::RemoveObject(POSITION posVertList, BYTE listType, LONG id)
         case CGAMEOBJECT_LIST_FRONT:
             pos = m_lVertSortAdd.GetHeadPosition();
             while (pos != NULL) {
-                if (reinterpret_cast<LONG>(m_lVertSortAdd.GetAt(pos)) == id) {
+                if (static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSortAdd.GetAt(pos))) == id) {
                     m_lVertSortAdd.RemoveAt(pos);
                     LeaveCriticalSection(&(g_pBaldurChitin->m_pEngineWorld->field_106));
                     return;
@@ -3363,7 +3364,7 @@ void CGameArea::RemoveObject(POSITION posVertList, BYTE listType, LONG id)
         case CGAMEOBJECT_LIST_BACK:
             pos = m_lVertSortBackAdd.GetHeadPosition();
             while (pos != NULL) {
-                if (reinterpret_cast<LONG>(m_lVertSortBackAdd.GetAt(pos)) == id) {
+                if (static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSortBackAdd.GetAt(pos))) == id) {
                     m_lVertSortBackAdd.RemoveAt(pos);
                     LeaveCriticalSection(&(g_pBaldurChitin->m_pEngineWorld->field_106));
                     return;
@@ -3375,7 +3376,7 @@ void CGameArea::RemoveObject(POSITION posVertList, BYTE listType, LONG id)
         case CGAMEOBJECT_LIST_FLIGHT:
             pos = m_lVertSortFlightAdd.GetHeadPosition();
             while (pos != NULL) {
-                if (reinterpret_cast<LONG>(m_lVertSortFlightAdd.GetAt(pos)) == id) {
+                if (static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSortFlightAdd.GetAt(pos))) == id) {
                     m_lVertSortFlightAdd.RemoveAt(pos);
                     LeaveCriticalSection(&(g_pBaldurChitin->m_pEngineWorld->field_106));
                     return;
@@ -3422,7 +3423,7 @@ void CGameArea::OnLightningStrike()
 {
     if (!m_lVertSort.IsEmpty()) {
         POSITION pos = m_lVertSort.FindIndex(rand() % m_lVertSort.GetCount());
-        LONG nId = reinterpret_cast<LONG>(m_lVertSort.GetAt(pos));
+        LONG nId = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSort.GetAt(pos)));
 
         CGameObject* pObject;
 
@@ -3494,7 +3495,7 @@ void CGameArea::Render(CVidMode* pVidMode, INT nSurface)
     if (m_cInfinity.Render(pVidMode, nSurface, m_nScrollState, &m_visibility) != CInfinity::RENDER_MESSAGESCREEN) {
         pos = m_lVertSort.GetHeadPosition();
         while (pos != NULL) {
-            iObject = reinterpret_cast<LONG>(m_lVertSort.GetNext(pos));
+            iObject = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSort.GetNext(pos)));
 
             do {
                 rc = m_pGame->GetObjectArray()->GetShare(iObject,
@@ -3529,7 +3530,7 @@ void CGameArea::Render(CVidMode* pVidMode, INT nSurface)
 
         pos = m_lVertSortBack.GetHeadPosition();
         while (pos != NULL) {
-            iObject = reinterpret_cast<LONG>(m_lVertSortBack.GetNext(pos));
+            iObject = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSortBack.GetNext(pos)));
 
             do {
                 rc = m_pGame->GetObjectArray()->GetShare(iObject,
@@ -3549,7 +3550,7 @@ void CGameArea::Render(CVidMode* pVidMode, INT nSurface)
 
         pos = m_lVertSort.GetHeadPosition();
         while (pos != NULL) {
-            iObject = reinterpret_cast<LONG>(m_lVertSort.GetNext(pos));
+            iObject = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSort.GetNext(pos)));
 
             do {
                 rc = m_pGame->GetObjectArray()->GetShare(iObject,
@@ -3589,7 +3590,7 @@ void CGameArea::Render(CVidMode* pVidMode, INT nSurface)
 
         pos = m_lVertSortFlight.GetHeadPosition();
         while (pos != NULL) {
-            iObject = reinterpret_cast<LONG>(m_lVertSortFlight.GetNext(pos));
+            iObject = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSortFlight.GetNext(pos)));
 
             do {
                 rc = m_pGame->GetObjectArray()->GetShare(iObject,
@@ -3682,7 +3683,7 @@ void CGameArea::SetDay()
             m_sndAmbientDay.SetResRef(CResRef(m_headerSound.m_dayAmbient), TRUE, TRUE);
             if (m_sndAmbientDay.GetResRef() != "") {
                 m_sndAmbientDay.SetLoopingFlag(TRUE);
-                m_sndAmbientDay.SetChannel(1, reinterpret_cast<DWORD>(this));
+                m_sndAmbientDay.SetChannel(1, reinterpret_cast<DWORD_PTR>(this));
                 m_sndAmbientDay.SetVolume(m_sndAmbientDayVolume * m_sndAmbientVolume / 100);
                 m_sndAmbientDay.Play(FALSE);
             }
@@ -3708,7 +3709,7 @@ void CGameArea::SetNight()
             m_sndAmbientNight.SetResRef(CResRef(m_headerSound.m_nightAmbient), TRUE, TRUE);
             if (m_sndAmbientNight.GetResRef() != "") {
                 m_sndAmbientNight.SetLoopingFlag(TRUE);
-                m_sndAmbientNight.SetChannel(1, reinterpret_cast<DWORD>(this));
+                m_sndAmbientNight.SetChannel(1, reinterpret_cast<DWORD_PTR>(this));
                 m_sndAmbientNight.SetVolume(m_sndAmbientNightVolume * m_sndAmbientVolume / 100);
                 m_sndAmbientNight.Play(FALSE);
             }
@@ -3750,7 +3751,7 @@ void CGameArea::SetDawn(BYTE nIntensity, BOOLEAN bPlayDayNightMovie)
 
             if (m_sndAmbientDay.cResRef != "") {
                 m_sndAmbientDay.SetLoopingFlag(1);
-                m_sndAmbientDay.SetChannel(1, reinterpret_cast<DWORD>(this));
+                m_sndAmbientDay.SetChannel(1, reinterpret_cast<DWORD_PTR>(this));
                 m_sndAmbientDay.SetVolume(m_sndAmbientVolume * m_sndAmbientDayVolume / 100);
                 m_sndAmbientDay.Play(FALSE);
             }
@@ -3772,7 +3773,7 @@ void CGameArea::SetDawn(BYTE nIntensity, BOOLEAN bPlayDayNightMovie)
 
             if (m_sndAmbientNight.cResRef != "") {
                 m_sndAmbientNight.SetLoopingFlag(1);
-                m_sndAmbientNight.SetChannel(1, reinterpret_cast<DWORD>(this));
+                m_sndAmbientNight.SetChannel(1, reinterpret_cast<DWORD_PTR>(this));
                 m_sndAmbientNight.SetVolume(m_sndAmbientVolume * m_sndAmbientNightVolume / 100);
                 m_sndAmbientNight.Play(FALSE);
             }
@@ -3808,7 +3809,7 @@ void CGameArea::SetDusk(BYTE nIntensity, BOOLEAN bPlayDayNightMovie)
 
             if (m_sndAmbientDay.cResRef != "") {
                 m_sndAmbientDay.SetLoopingFlag(1);
-                m_sndAmbientDay.SetChannel(1, reinterpret_cast<DWORD>(this));
+                m_sndAmbientDay.SetChannel(1, reinterpret_cast<DWORD_PTR>(this));
                 m_sndAmbientDay.SetVolume(m_sndAmbientVolume * m_sndAmbientDayVolume / 100);
                 m_sndAmbientDay.Play(FALSE);
             }
@@ -3830,7 +3831,7 @@ void CGameArea::SetDusk(BYTE nIntensity, BOOLEAN bPlayDayNightMovie)
 
             if (m_sndAmbientNight.cResRef != "") {
                 m_sndAmbientNight.SetLoopingFlag(1);
-                m_sndAmbientNight.SetChannel(1, reinterpret_cast<DWORD>(this));
+                m_sndAmbientNight.SetChannel(1, reinterpret_cast<DWORD_PTR>(this));
                 m_sndAmbientNight.SetVolume(m_sndAmbientVolume * m_sndAmbientNightVolume / 100);
                 m_sndAmbientNight.Play(FALSE);
             }
@@ -4008,7 +4009,7 @@ void CGameArea::SortLists()
         }
 
         while (!m_lVertSortAdd.IsEmpty()) {
-            iObject = reinterpret_cast<LONG>(m_lVertSortAdd.RemoveHead());
+            iObject = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSortAdd.RemoveHead()));
 
             do {
                 rc = m_pGame->GetObjectArray()->GetShare(iObject,
@@ -4058,7 +4059,7 @@ void CGameArea::SortLists()
         while (!m_lVertSortBackAdd.IsEmpty()) {
             do {
                 // FIXME: Should be outside of the loop.
-                iObject = reinterpret_cast<LONG>(m_lVertSortBackAdd.RemoveHead());
+                iObject = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSortBackAdd.RemoveHead()));
                 rc = m_pGame->GetObjectArray()->GetShare(iObject,
                     CGameObjectArray::THREAD_ASYNCH,
                     &pObject,
@@ -4090,7 +4091,7 @@ void CGameArea::SortLists()
         while (!m_lVertSortFlightAdd.IsEmpty()) {
             do {
                 // FIXME: Should be outside of the loop.
-                iObject = reinterpret_cast<LONG>(m_lVertSortFlightAdd.RemoveHead());
+                iObject = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSortFlightAdd.RemoveHead()));
                 rc = m_pGame->GetObjectArray()->GetShare(iObject,
                     CGameObjectArray::THREAD_ASYNCH,
                     &pObject,
@@ -4121,7 +4122,7 @@ void CGameArea::SortLists()
 
         if (bSort) {
             while (!m_lVertSort.IsEmpty()) {
-                iObject = reinterpret_cast<LONG>(m_lVertSort.RemoveHead());
+                iObject = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSort.RemoveHead()));
 
                 do {
                     rc = m_pGame->GetObjectArray()->GetShare(iObject,

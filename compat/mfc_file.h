@@ -52,8 +52,12 @@ public:
     virtual void Flush();
 
     CString GetFilePath() const;
+    // Records the path without opening anything, as MFC does.
+    virtual void SetFilePath(const char* path);
     CString GetFileName() const;
 
+    // Status of the open file by its path; FALSE when no file is open.
+    BOOL GetStatus(CFileStatus& status) const;
     static BOOL GetStatus(const char* path, CFileStatus& status);
     static void SetStatus(const char* path, const CFileStatus& status);
     static void Remove(const char* path);

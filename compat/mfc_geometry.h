@@ -20,8 +20,9 @@ public:
         x = initSize.cx;
         y = initSize.cy;
     }
-    // Low word is x, high word is y, both as signed 16-bit values.
-    explicit CPoint(DWORD packed)
+    // Low word is x, high word is y, both as signed 16-bit values. Implicit,
+    // as in MFC: the engine passes object ids where a CPoint is expected.
+    CPoint(DWORD packed)
     {
         x = static_cast<short>(LOWORD(packed));
         y = static_cast<short>(HIWORD(packed));
@@ -47,6 +48,7 @@ public:
     CPoint operator+(POINT p) const { return CPoint(x + p.x, y + p.y); }
     CPoint operator-(SIZE s) const { return CPoint(x - s.cx, y - s.cy); }
     inline CSize operator-(POINT p) const;
+    CPoint operator-() const { return CPoint(-x, -y); }
 };
 
 class CSize : public SIZE {

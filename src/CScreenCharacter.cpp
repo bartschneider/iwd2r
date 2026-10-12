@@ -1,3 +1,4 @@
+// Modified for iwd2r; see NOTICE.md
 #include "CScreenCharacter.h"
 
 #include "CAIObjectType.h"
@@ -2281,7 +2282,7 @@ void CScreenCharacter::UpdateGeneralInformation(CUIControlTextDisplay* pText, CG
 
         POSITION pos = pSprite->m_portraitIcons.GetHeadPosition();
         while (pos != NULL) {
-            INT nState = reinterpret_cast<int>(pSprite->m_portraitIcons.GetAt(pos));
+            INT nState = static_cast<int>(reinterpret_cast<INT_PTR>(pSprite->m_portraitIcons.GetAt(pos)));
             sCode.Format("%c", nState + 'B');
             rule.GetCharacterStateDescription(nState, sDescription);
             pText->DisplayString(sCode,

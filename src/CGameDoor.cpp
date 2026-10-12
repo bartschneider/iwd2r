@@ -1,3 +1,4 @@
+// Modified for iwd2r; see NOTICE.md
 #include "CGameDoor.h"
 
 #include "CAIScript.h"
@@ -656,7 +657,7 @@ void CGameDoor::Marshal(CAreaFileDoorObject** pDoorObject)
         }
 
         // FIXME: Unsafe x64 conversion.
-        (*pDoorObject)->m_closedSearchSquaresStart = reinterpret_cast<DWORD>(pPoints);
+        (*pDoorObject)->m_closedSearchSquaresStart = static_cast<DWORD>(reinterpret_cast<DWORD_PTR>(pPoints));
         (*pDoorObject)->m_closedSearchSquaresCount = m_nClosedSearch;
     }
 
@@ -673,7 +674,7 @@ void CGameDoor::Marshal(CAreaFileDoorObject** pDoorObject)
         }
 
         // FIXME: Unsafe x64 conversion.
-        (*pDoorObject)->m_openSearchSquaresStart = reinterpret_cast<DWORD>(pPoints);
+        (*pDoorObject)->m_openSearchSquaresStart = static_cast<DWORD>(reinterpret_cast<DWORD_PTR>(pPoints));
         (*pDoorObject)->m_openSearchSquaresCount = m_nOpenSearch;
     }
 
@@ -690,7 +691,7 @@ void CGameDoor::Marshal(CAreaFileDoorObject** pDoorObject)
         }
 
         // FIXME: Unsafe x64 conversion.
-        (*pDoorObject)->m_closedSelectionPointStart = reinterpret_cast<DWORD>(pPoints);
+        (*pDoorObject)->m_closedSelectionPointStart = static_cast<DWORD>(reinterpret_cast<DWORD_PTR>(pPoints));
         (*pDoorObject)->m_closedSelectionPointCount = m_nClosedPolygon;
     }
 
@@ -707,7 +708,7 @@ void CGameDoor::Marshal(CAreaFileDoorObject** pDoorObject)
         }
 
         // FIXME: Unsafe x64 conversion.
-        (*pDoorObject)->m_openSelectionPointStart = reinterpret_cast<DWORD>(pPoints);
+        (*pDoorObject)->m_openSelectionPointStart = static_cast<DWORD>(reinterpret_cast<DWORD_PTR>(pPoints));
         (*pDoorObject)->m_openSelectionPointCount = m_nOpenPolygon;
     }
 

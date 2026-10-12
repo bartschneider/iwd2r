@@ -1,3 +1,4 @@
+// Modified for iwd2r; see NOTICE.md
 #include "CProjectile.h"
 
 #include "CBaldurChitin.h"
@@ -151,7 +152,7 @@ void CProjectile::PlaySound(CResRef resRef, BOOL loop, BOOL fireAndForget)
         if (fireAndForget) {
             m_sound.SetFireForget(TRUE);
         }
-        m_sound.SetChannel(15, reinterpret_cast<DWORD>(m_pArea));
+        m_sound.SetChannel(15, reinterpret_cast<DWORD_PTR>(m_pArea));
         m_sound.Play(m_pos.x, m_pos.y, 0, FALSE);
     }
 }

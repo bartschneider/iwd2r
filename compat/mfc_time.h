@@ -1,6 +1,8 @@
 // iwd2r. Distributed under LICENSE.md.
 #pragma once
 
+#include "compat/mfc_string.h"
+
 #include <ctime>
 
 class CTimeSpan {
@@ -49,6 +51,8 @@ public:
     int GetSecond() const;
     // 1 = Sunday.
     int GetDayOfWeek() const;
+    // strftime over the local time, as MFC's CTime::Format.
+    CString Format(const char* format) const;
 
     CTimeSpan operator-(const CTime& other) const { return CTimeSpan(m_time - other.m_time); }
     bool operator==(const CTime& other) const { return m_time == other.m_time; }

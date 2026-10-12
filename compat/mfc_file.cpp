@@ -179,10 +179,19 @@ CString CFile::GetFilePath() const
     return CString(m_path.c_str());
 }
 
+void CFile::SetFilePath(const char* path) { m_path = path ? path : ""; }
+
 CString CFile::GetFileName() const
 {
     const size_t slash = m_path.find_last_of("/\\");
     return CString(slash == std::string::npos ? m_path.c_str() : m_path.c_str() + slash + 1);
+}
+
+BOOL CFile::GetStatus(CFileStatus& status) const
+{
+    if (m_hFile == hFileNull)
+        return FALSE;
+    return GetStatus(m_path.c_str(), status);
 }
 
 BOOL CFile::GetStatus(const char* path, CFileStatus& status)

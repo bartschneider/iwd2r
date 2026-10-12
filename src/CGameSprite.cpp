@@ -1,3 +1,4 @@
+// Modified for iwd2r; see NOTICE.md
 #include "CGameSprite.h"
 
 #include "CAIScript.h"
@@ -2148,7 +2149,7 @@ void CGameSprite::AIUpdate()
                             cSound.SetResRef(field_7408, TRUE, TRUE);
                             cSound.m_nPitchVariance = 5;
                             cSound.m_nVolumeVariance = 20;
-                            cSound.SetChannel(3, reinterpret_cast<DWORD>(m_pArea));
+                            cSound.SetChannel(3, reinterpret_cast<DWORD_PTR>(m_pArea));
                             if (!cSound.GetLooping()) {
                                 cSound.SetFireForget(TRUE);
                             }
@@ -2208,7 +2209,7 @@ void CGameSprite::AIUpdate()
                             cSound.SetResRef(CResRef(field_7410), TRUE, TRUE);
                             cSound.m_nPitchVariance = 5;
                             cSound.m_nVolumeVariance = 20;
-                            cSound.SetChannel(14, reinterpret_cast<DWORD>(m_pArea));
+                            cSound.SetChannel(14, reinterpret_cast<DWORD_PTR>(m_pArea));
                             if (!cSound.GetLooping()) {
                                 cSound.SetFireForget(TRUE);
                             }
@@ -2276,7 +2277,7 @@ void CGameSprite::AIUpdate()
                             cSound.SetResRef(CResRef(field_7418), TRUE, TRUE);
                             cSound.m_nPitchVariance = 5;
                             cSound.m_nVolumeVariance = 20;
-                            cSound.SetChannel(14, reinterpret_cast<DWORD>(m_pArea));
+                            cSound.SetChannel(14, reinterpret_cast<DWORD_PTR>(m_pArea));
                             if (!cSound.GetLooping()) {
                                 cSound.SetFireForget(TRUE);
                             }
@@ -2288,7 +2289,7 @@ void CGameSprite::AIUpdate()
                             cSound.SetResRef(CResRef(field_7428), TRUE, TRUE);
                             cSound.m_nPitchVariance = 5;
                             cSound.m_nVolumeVariance = 20;
-                            cSound.SetChannel(14, reinterpret_cast<DWORD>(m_pArea));
+                            cSound.SetChannel(14, reinterpret_cast<DWORD_PTR>(m_pArea));
                             if (!cSound.GetLooping()) {
                                 cSound.SetFireForget(TRUE);
                             }
@@ -2333,7 +2334,7 @@ void CGameSprite::AIUpdate()
                             cSound.SetResRef(field_7420, TRUE, TRUE);
                             cSound.m_nPitchVariance = 5;
                             cSound.m_nVolumeVariance = 20;
-                            cSound.SetChannel(13, reinterpret_cast<DWORD>(m_pArea));
+                            cSound.SetChannel(13, reinterpret_cast<DWORD_PTR>(m_pArea));
                             if (!cSound.GetLooping()) {
                                 cSound.SetFireForget(TRUE);
                             }
@@ -2352,7 +2353,7 @@ void CGameSprite::AIUpdate()
                             cSound.SetResRef(field_7408, TRUE, TRUE);
                             cSound.m_nPitchVariance = 5;
                             cSound.m_nVolumeVariance = 20;
-                            cSound.SetChannel(3, reinterpret_cast<DWORD>(m_pArea));
+                            cSound.SetChannel(3, reinterpret_cast<DWORD_PTR>(m_pArea));
                             if (!cSound.GetLooping()) {
                                 cSound.SetFireForget(TRUE);
                             }
@@ -3883,18 +3884,18 @@ void CGameSprite::SetFootstepChannel()
 {
     if (g_pBaldurChitin->GetObjectGame()->GetCharacterPortraitNum(m_id) == -1) {
         for (int index = 0; index < 2; index++) {
-            m_sndWalk[index].SetChannel(19, reinterpret_cast<DWORD>(m_pArea));
-            m_sndArmor[index].SetChannel(20, reinterpret_cast<DWORD>(m_pArea));
+            m_sndWalk[index].SetChannel(19, reinterpret_cast<DWORD_PTR>(m_pArea));
+            m_sndArmor[index].SetChannel(20, reinterpret_cast<DWORD_PTR>(m_pArea));
         }
-        m_sndReady.SetChannel(19, reinterpret_cast<DWORD>(m_pArea));
-        m_sndDeath.SetChannel(15, reinterpret_cast<DWORD>(m_pArea));
+        m_sndReady.SetChannel(19, reinterpret_cast<DWORD_PTR>(m_pArea));
+        m_sndDeath.SetChannel(15, reinterpret_cast<DWORD_PTR>(m_pArea));
     } else {
         for (int index = 0; index < 2; index++) {
-            m_sndWalk[index].SetChannel(18, reinterpret_cast<DWORD>(m_pArea));
-            m_sndArmor[index].SetChannel(20, reinterpret_cast<DWORD>(m_pArea));
+            m_sndWalk[index].SetChannel(18, reinterpret_cast<DWORD_PTR>(m_pArea));
+            m_sndArmor[index].SetChannel(20, reinterpret_cast<DWORD_PTR>(m_pArea));
         }
-        m_sndReady.SetChannel(18, reinterpret_cast<DWORD>(m_pArea));
-        m_sndDeath.SetChannel(15, reinterpret_cast<DWORD>(m_pArea));
+        m_sndReady.SetChannel(18, reinterpret_cast<DWORD_PTR>(m_pArea));
+        m_sndDeath.SetChannel(15, reinterpret_cast<DWORD_PTR>(m_pArea));
     }
 }
 
@@ -4976,7 +4977,7 @@ void CGameSprite::RenderPortrait(const CPoint& cpRenderPosition, const CSize& sz
     CPoint ptIcon(r3.left, r3.bottom);
     POSITION pos = m_portraitIcons.GetHeadPosition();
     while (pos != NULL) {
-        SHORT nIcon = static_cast<SHORT>(reinterpret_cast<INT>(m_portraitIcons.GetNext(pos)));
+        SHORT nIcon = static_cast<SHORT>(static_cast<INT>(reinterpret_cast<INT_PTR>(m_portraitIcons.GetNext(pos))));
         if (nIcon < m_portraitIconVidCell.GetNumberSequences(FALSE)) {
             m_portraitIconVidCell.SequenceSet(nIcon + 65);
             m_portraitIconVidCell.FrameSet(0);
@@ -6143,7 +6144,7 @@ void CGameSprite::UpdateSpriteEffect()
                 if (field_7548[nIndex].IsEndOfSequence(FALSE)) {
                     m_sndSpriteEffect.Stop();
                     m_sndSpriteEffect.SetResRef(CResRef("MISC_01C"), TRUE, TRUE);
-                    m_sndSpriteEffect.SetChannel(14, reinterpret_cast<DWORD>(m_pArea));
+                    m_sndSpriteEffect.SetChannel(14, reinterpret_cast<DWORD_PTR>(m_pArea));
                     m_sndSpriteEffect.Play(m_pos.x, m_pos.y, 0, FALSE);
 
                     nNumberSequences = field_7548[nIndex].GetNumberSequences(FALSE);
@@ -6220,7 +6221,7 @@ void CGameSprite::UpdateSpriteEffect()
                         } else {
                             field_9088[IWD_VFX_SEVEN_EYES].SetResRef(CResRef("AFT_M15"), TRUE, TRUE);
                         }
-                        field_9088[IWD_VFX_SEVEN_EYES].SetChannel(14, reinterpret_cast<DWORD>(m_pArea));
+                        field_9088[IWD_VFX_SEVEN_EYES].SetChannel(14, reinterpret_cast<DWORD_PTR>(m_pArea));
                         field_9088[IWD_VFX_SEVEN_EYES].Play(m_pos.x, m_pos.y, 0, FALSE);
                     }
                 }
@@ -6238,7 +6239,7 @@ void CGameSprite::UpdateSpriteEffect()
                 break;
             default:
                 if (!field_9088[nIndex].IsSoundPlaying()) {
-                    field_9088[nIndex].SetChannel(14, reinterpret_cast<DWORD>(m_pArea));
+                    field_9088[nIndex].SetChannel(14, reinterpret_cast<DWORD_PTR>(m_pArea));
                     field_9088[nIndex].Play(m_pos.x, m_pos.y, 0, FALSE);
                 }
                 if (field_7548[nIndex].IsEndOfSequence(FALSE)) {
@@ -6422,7 +6423,7 @@ void CGameSprite::Marshal(CAreaFileCreature** pCreature)
     Marshal(&creatureData, &creatureSize, &((*pCreature)->m_facing), TRUE, TRUE);
 
     // FIXME: Unsafe x64 conversion.
-    (*pCreature)->m_creatureOffset = reinterpret_cast<DWORD>(creatureData);
+    (*pCreature)->m_creatureOffset = static_cast<DWORD>(reinterpret_cast<DWORD_PTR>(creatureData));
     (*pCreature)->m_creatureSize = creatureSize;
 
     (*pCreature)->m_numberTimesTalkedTo = m_nNumberOfTimesTalkedTo;
@@ -6506,7 +6507,7 @@ void CGameSprite::Marshal(CSavedGamePartyCreature& partyCreature, BOOLEAN bNetwo
     Marshal(&pCreature, &nCreatureSize, &facing, TRUE, TRUE);
 
     // FIXME: Unsafe x64 conversion.
-    partyCreature.m_creatureOffset = reinterpret_cast<DWORD>(pCreature);
+    partyCreature.m_creatureOffset = static_cast<DWORD>(reinterpret_cast<DWORD_PTR>(pCreature));
     partyCreature.m_creatureSize = nCreatureSize;
     partyCreature.m_creatureFacing = facing;
 
@@ -9349,7 +9350,7 @@ void CGameSprite::DisplayTextRef(STRREF nameRef, STRREF textRef, COLORREF nameCo
         if (!strResText.cSound.GetLooping()) {
             strResText.cSound.SetFireForget(TRUE);
         }
-        strResText.cSound.SetChannel(14, reinterpret_cast<DWORD>(m_pArea));
+        strResText.cSound.SetChannel(14, reinterpret_cast<DWORD_PTR>(m_pArea));
         strResText.cSound.Play(GetPos().x, GetPos().y, 0, FALSE);
     }
 
@@ -10246,7 +10247,7 @@ void CGameSprite::PlaySound(const CResRef& res)
         cSound.SetFireForget(TRUE);
     }
 
-    cSound.SetChannel(14, reinterpret_cast<DWORD>(m_pArea));
+    cSound.SetChannel(14, reinterpret_cast<DWORD_PTR>(m_pArea));
     cSound.Play(GetPos().x, GetPos().y, 0, FALSE);
 }
 
@@ -10712,7 +10713,7 @@ void CGameSprite::FeedBack(WORD nFeedBackId, LONG a3, LONG a4, LONG a5, LONG a6,
                 if (!strRes.cSound.GetLooping()) {
                     strRes.cSound.SetFireForget(TRUE);
                 }
-                strRes.cSound.SetChannel(14, reinterpret_cast<DWORD>(m_pArea));
+                strRes.cSound.SetChannel(14, reinterpret_cast<DWORD_PTR>(m_pArea));
                 strRes.cSound.Play(m_pos.x, m_pos.y, 0, FALSE);
             }
 
@@ -10734,7 +10735,7 @@ void CGameSprite::FeedBack(WORD nFeedBackId, LONG a3, LONG a4, LONG a5, LONG a6,
                 if (!strRes.cSound.GetLooping()) {
                     strRes.cSound.SetFireForget(TRUE);
                 }
-                strRes.cSound.SetChannel(14, reinterpret_cast<DWORD>(m_pArea));
+                strRes.cSound.SetChannel(14, reinterpret_cast<DWORD_PTR>(m_pArea));
                 strRes.cSound.Play(m_pos.x, m_pos.y, 0, FALSE);
             }
 
@@ -10760,7 +10761,7 @@ void CGameSprite::FeedBack(WORD nFeedBackId, LONG a3, LONG a4, LONG a5, LONG a6,
                 if (!strRes.cSound.GetLooping()) {
                     strRes.cSound.SetFireForget(TRUE);
                 }
-                strRes.cSound.SetChannel(14, reinterpret_cast<DWORD>(m_pArea));
+                strRes.cSound.SetChannel(14, reinterpret_cast<DWORD_PTR>(m_pArea));
                 strRes.cSound.Play(m_pos.x, m_pos.y, 0, FALSE);
             }
 
@@ -10774,7 +10775,7 @@ void CGameSprite::FeedBack(WORD nFeedBackId, LONG a3, LONG a4, LONG a5, LONG a6,
                 if (!strRes.cSound.GetLooping()) {
                     strRes.cSound.SetFireForget(TRUE);
                 }
-                strRes.cSound.SetChannel(14, reinterpret_cast<DWORD>(m_pArea));
+                strRes.cSound.SetChannel(14, reinterpret_cast<DWORD_PTR>(m_pArea));
                 strRes.cSound.Play(m_pos.x, m_pos.y, 0, FALSE);
             }
         }
@@ -10788,7 +10789,7 @@ void CGameSprite::FeedBack(WORD nFeedBackId, LONG a3, LONG a4, LONG a5, LONG a6,
                 if (!strRes1.cSound.GetLooping()) {
                     strRes1.cSound.SetFireForget(TRUE);
                 }
-                strRes1.cSound.SetChannel(14, reinterpret_cast<DWORD>(m_pArea));
+                strRes1.cSound.SetChannel(14, reinterpret_cast<DWORD_PTR>(m_pArea));
                 strRes1.cSound.Play(m_pos.x, m_pos.y, 0, FALSE);
             }
 
@@ -10844,7 +10845,7 @@ void CGameSprite::FeedBack(WORD nFeedBackId, LONG a3, LONG a4, LONG a5, LONG a6,
                 if (!strRes.cSound.GetLooping()) {
                     strRes.cSound.SetFireForget(TRUE);
                 }
-                strRes.cSound.SetChannel(14, reinterpret_cast<DWORD>(m_pArea));
+                strRes.cSound.SetChannel(14, reinterpret_cast<DWORD_PTR>(m_pArea));
                 strRes.cSound.Play(m_pos.x, m_pos.y, 0, FALSE);
             }
 
@@ -10862,7 +10863,7 @@ void CGameSprite::FeedBack(WORD nFeedBackId, LONG a3, LONG a4, LONG a5, LONG a6,
                 if (!strRes.cSound.GetLooping()) {
                     strRes.cSound.SetFireForget(TRUE);
                 }
-                strRes.cSound.SetChannel(14, reinterpret_cast<DWORD>(m_pArea));
+                strRes.cSound.SetChannel(14, reinterpret_cast<DWORD_PTR>(m_pArea));
                 strRes.cSound.Play(m_pos.x, m_pos.y, 0, FALSE);
             }
 

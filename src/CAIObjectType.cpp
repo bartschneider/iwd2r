@@ -1,3 +1,4 @@
+// Modified for iwd2r; see NOTICE.md
 #include "CAIObjectType.h"
 
 #include "CAIUtil.h"
@@ -1036,7 +1037,7 @@ LONG CAIObjectType::sub_40CED0(CGameAIBase* caller, BOOL checkBackList) const
                 FALSE,
                 FALSE);
             if (targets.GetCount() != 0) {
-                nId = reinterpret_cast<LONG>(targets.GetHead());
+                nId = static_cast<LONG>(reinterpret_cast<INT_PTR>(targets.GetHead()));
             }
         }
     } else {

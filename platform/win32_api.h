@@ -489,6 +489,12 @@ int lstrcmpA(LPCSTR a, LPCSTR b);
 int lstrcmpiA(LPCSTR a, LPCSTR b);
 // Single-byte code page: never a lead byte.
 BOOL IsDBCSLeadByte(BYTE testChar);
+// ASCII letters and digits only.
+BOOL IsCharAlphaNumericA(CHAR ch);
+// No access checking: only a null pointer with a nonzero size is bad.
+BOOL IsBadReadPtr(const void* pointer, UINT_PTR size);
+// No sockets are started, so there is nothing to clean up; returns 0.
+int WSACleanup();
 // Writes at most 1024 bytes including the terminator, like Win32.
 int wsprintfA(LPSTR buffer, LPCSTR format, ...);
 
@@ -522,5 +528,9 @@ HANDLE OpenProcess(DWORD access, BOOL inherit, DWORD processId);
 // nothing writes to it.
 BOOL CreateProcessA(LPCSTR application, LPCSTR commandLine, LPVOID processAttributes, LPVOID threadAttributes, BOOL inheritHandles, DWORD creationFlags, LPVOID environment, LPCSTR currentDirectory, LPSTARTUPINFOA startupInfo, LPPROCESS_INFORMATION processInfo);
 HINSTANCE ShellExecuteA(HWND hWnd, LPCSTR operation, LPCSTR file, LPCSTR parameters, LPCSTR directory, INT showCommand);
+
+// <mmsystem.h> maps the unsuffixed name to the ANSI one, so an engine member
+// named PlaySound is spelled PlaySoundA at one call site.
+#define PlaySound PlaySoundA
 
 #include "platform/imm_stub.h"

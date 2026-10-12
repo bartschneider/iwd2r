@@ -45,6 +45,8 @@
 #include <direct.h>
 #include <io.h>
 #else
+#include "compat/path_hook.h"
+
 #include <fcntl.h>
 #include <strings.h>
 #include <sys/stat.h>
@@ -99,6 +101,10 @@ typedef DWORD_PTR* PDWORD_PTR;
 #define MAX_PATH 260
 #define INFINITE 0xFFFFFFFFu
 #define DWORD_MAX 0xFFFFFFFFu
+// intsafe.h and winnt.h limits the engine uses.
+#define SHORT_MAX 32767
+#define WORD_MAX 0xFFFFu
+#define MAXDWORD 0xFFFFFFFFu
 #define WAIT_OBJECT_0 0
 #define WAIT_ABANDONED 0x80
 #define WAIT_TIMEOUT 0x102
@@ -265,10 +271,12 @@ typedef HIMC__* HIMC;
 #define strnicmp(a, b, n) strncasecmp(a, b, n)
 #define _vsnprintf vsnprintf
 #define _snprintf snprintf
-#define _chdir chdir
 #define _getcwd getcwd
-#define _access access
-inline int _mkdir(const char* path) { return mkdir(path, 0777); }
+// Through the path resolver, as every other file access: the engine passes
+// Windows paths (drive letters, backslashes) to these.
+inline int _chdir(const char* path) { return chdir(compat::ResolvePath(path).c_str()); }
+inline int _access(const char* path, int mode) { return access(compat::ResolvePath(path).c_str(), mode); }
+inline int _mkdir(const char* path) { return mkdir(compat::ResolvePath(path).c_str(), 0777); }
 // The MSVC CRT's current offset of a file descriptor.
 inline long tell(int fd) { return static_cast<long>(lseek(fd, 0, SEEK_CUR)); }
 #endif

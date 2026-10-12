@@ -1,3 +1,4 @@
+// Modified for iwd2r; see NOTICE.md
 #include "CGameAnimationTypeMonsterMulti.h"
 
 #include "CBaldurChitin.h"
@@ -216,7 +217,7 @@ CGameAnimationTypeMonsterMulti::CGameAnimationTypeMonsterMulti(USHORT animationI
 
             m_g2VidCellBase[quad].SetResRef(CResRef(m_resRef + '2' + sSuffix + m_splitBamChar + m_splitDirectionBamChar), m_bDoubleBlit, TRUE, TRUE);
 
-            m_g2VidCellBase[quad].m_cPalette.m_nAUCounterBase = reinterpret_cast<int>(m_g2VidCellBase);
+            m_g2VidCellBase[quad].m_cPalette.m_nAUCounterBase = static_cast<int>(reinterpret_cast<INT_PTR>(m_g2VidCellBase));
         }
     } else {
         for (BYTE quad = 0; quad < m_nQuadrants; quad++) {
@@ -228,11 +229,11 @@ CGameAnimationTypeMonsterMulti::CGameAnimationTypeMonsterMulti(USHORT animationI
             m_g4VidCellBase[quad].SetResRef(CResRef(m_resRef + "G4" + sSuffix), m_bDoubleBlit, TRUE, TRUE);
             m_g5VidCellBase[quad].SetResRef(CResRef(m_resRef + "G5" + sSuffix), m_bDoubleBlit, TRUE, TRUE);
 
-            m_g1VidCellBase[quad].m_cPalette.m_nAUCounterBase = reinterpret_cast<int>(m_g1VidCellBase);
-            m_g2VidCellBase[quad].m_cPalette.m_nAUCounterBase = reinterpret_cast<int>(m_g2VidCellBase);
-            m_g3VidCellBase[quad].m_cPalette.m_nAUCounterBase = reinterpret_cast<int>(m_g3VidCellBase);
-            m_g4VidCellBase[quad].m_cPalette.m_nAUCounterBase = reinterpret_cast<int>(m_g4VidCellBase);
-            m_g5VidCellBase[quad].m_cPalette.m_nAUCounterBase = reinterpret_cast<int>(m_g5VidCellBase);
+            m_g1VidCellBase[quad].m_cPalette.m_nAUCounterBase = static_cast<int>(reinterpret_cast<INT_PTR>(m_g1VidCellBase));
+            m_g2VidCellBase[quad].m_cPalette.m_nAUCounterBase = static_cast<int>(reinterpret_cast<INT_PTR>(m_g2VidCellBase));
+            m_g3VidCellBase[quad].m_cPalette.m_nAUCounterBase = static_cast<int>(reinterpret_cast<INT_PTR>(m_g3VidCellBase));
+            m_g4VidCellBase[quad].m_cPalette.m_nAUCounterBase = static_cast<int>(reinterpret_cast<INT_PTR>(m_g4VidCellBase));
+            m_g5VidCellBase[quad].m_cPalette.m_nAUCounterBase = static_cast<int>(reinterpret_cast<INT_PTR>(m_g5VidCellBase));
         }
     }
 
