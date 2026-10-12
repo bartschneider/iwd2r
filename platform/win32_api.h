@@ -54,3 +54,24 @@ MMRESULT timeSetEvent(UINT delayMs, UINT resolution, LPTIMECALLBACK callback, DW
 MMRESULT timeKillEvent(UINT id);
 MMRESULT timeBeginPeriod(UINT period);
 MMRESULT timeEndPeriod(UINT period);
+
+// ---- fs.cpp: file attributes, enumeration, directories, drives ----
+
+HANDLE FindFirstFileA(LPCSTR pattern, WIN32_FIND_DATAA* data);
+BOOL FindNextFileA(HANDLE find, WIN32_FIND_DATAA* data);
+BOOL FindClose(HANDLE find);
+
+DWORD GetFileAttributesA(LPCSTR path);
+BOOL DeleteFileA(LPCSTR path);
+BOOL CopyFileA(LPCSTR source, LPCSTR destination, BOOL failIfExists);
+BOOL MoveFileA(LPCSTR source, LPCSTR destination);
+BOOL CreateDirectoryA(LPCSTR path, LPVOID attributes);
+
+BOOL GetDiskFreeSpaceA(LPCSTR root, DWORD* sectorsPerCluster, DWORD* bytesPerSector, DWORD* freeClusters, DWORD* totalClusters);
+DWORD GetCurrentDirectoryA(DWORD size, LPSTR buffer);
+BOOL SetCurrentDirectoryA(LPCSTR path);
+DWORD GetModuleFileNameA(HMODULE module, LPSTR buffer, DWORD size);
+
+DWORD GetLogicalDrives();
+UINT GetDriveTypeA(LPCSTR root);
+BOOL GetVolumeInformationA(LPCSTR root, LPSTR volumeName, DWORD volumeNameSize, DWORD* serial, DWORD* maxComponentLength, DWORD* flags, LPSTR fileSystemName, DWORD fileSystemNameSize);

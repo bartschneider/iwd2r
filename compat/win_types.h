@@ -68,6 +68,26 @@ typedef HWND__* HWND;
 struct HINSTANCE__;
 typedef HINSTANCE__* HINSTANCE;
 typedef HINSTANCE HMODULE;
+
+struct FILETIME {
+    DWORD dwLowDateTime;
+    DWORD dwHighDateTime;
+};
+
+struct WIN32_FIND_DATAA {
+    DWORD dwFileAttributes;
+    FILETIME ftCreationTime, ftLastAccessTime, ftLastWriteTime;
+    DWORD nFileSizeHigh, nFileSizeLow;
+    char cFileName[MAX_PATH];
+    char cAlternateFileName[14];
+};
+
+#define INVALID_HANDLE_VALUE ((HANDLE)(intptr_t)-1)
+#define INVALID_FILE_ATTRIBUTES 0xFFFFFFFFu
+#define FILE_ATTRIBUTE_READONLY 0x01
+#define FILE_ATTRIBUTE_DIRECTORY 0x10
+#define FILE_ATTRIBUTE_NORMAL 0x80
+#define DRIVE_NO_ROOT_DIR 1
 struct HDC__;
 typedef HDC__* HDC;
 struct HFONT__;
