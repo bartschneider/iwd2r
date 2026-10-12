@@ -147,6 +147,15 @@ struct WIN32_FIND_DATAA {
 #define DRIVE_NO_ROOT_DIR 1
 #define DRIVE_CDROM 5
 
+#define GMEM_FIXED 0x0000
+#define GMEM_MOVEABLE 0x0002
+#define GMEM_ZEROINIT 0x0040
+#define GMEM_SHARE 0x2000
+#define GHND (GMEM_MOVEABLE | GMEM_ZEROINIT)
+#define GPTR (GMEM_FIXED | GMEM_ZEROINIT)
+
+#define CF_TEXT 1
+
 typedef WORD LANGID;
 #define MAKELANGID(p, s) ((LANGID)((((WORD)(s)) << 10) | (WORD)(p)))
 #define PRIMARYLANGID(lgid) ((WORD)(lgid) & 0x3FF)
@@ -172,6 +181,7 @@ typedef WORD LANGID;
 #define TRUNCATE_EXISTING 5
 
 #define ERROR_SUCCESS 0
+#define NO_ERROR 0
 #define ERROR_FILE_NOT_FOUND 2
 #define ERROR_PATH_NOT_FOUND 3
 #define ERROR_ACCESS_DENIED 5

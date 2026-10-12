@@ -8,6 +8,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -497,5 +498,35 @@ TEST_CASE("window inert process, GDI and locale stubs", "[window]")
     SetLastError(0);
     CHECK(OpenProcess(PROCESS_ALL_ACCESS, FALSE, GetCurrentProcessId()) == NULL);
     CHECK(GetLastError() == ERROR_ACCESS_DENIED);
+    SetLastError(0);
+}
+
+TEST_CASE("window GlobalAlloc blocks round-trip and the clipboard is closed", "[window][stubs]")
+{
+    HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, 64);
+    REQUIRE(memory != NULL);
+    unsigned char* bytes = static_cast<unsigned char*>(GlobalLock(memory));
+    REQUIRE(bytes != NULL);
+    bool zero = true;
+    for (int i = 0; i < 64; ++i)
+        zero = zero && bytes[i] == 0;
+    CHECK(zero);
+    std::memcpy(bytes, "clipboard text", 15);
+    CHECK(std::string(static_cast<const char*>(GlobalLock(memory))) == "clipboard text");
+    SetLastError(5);
+    CHECK(GlobalUnlock(memory) == FALSE);
+    CHECK(GetLastError() == NO_ERROR);
+    CHECK(GlobalFree(memory) == NULL);
+
+    HGLOBAL plain = GlobalAlloc(GMEM_FIXED, 8);
+    REQUIRE(plain != NULL);
+    CHECK(GlobalFree(plain) == NULL);
+
+    CHECK(OpenClipboard(NULL) == FALSE);
+    CHECK(GetClipboardData(CF_TEXT) == NULL);
+    CHECK(SetClipboardData(CF_TEXT, NULL) == NULL);
+    CHECK(IsClipboardFormatAvailable(CF_TEXT) == FALSE);
+    CHECK(EmptyClipboard() == FALSE);
+    CHECK(CloseClipboard() == FALSE);
     SetLastError(0);
 }

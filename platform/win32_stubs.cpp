@@ -8,6 +8,7 @@
 #include <cctype>
 #include <cstdarg>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 namespace {
@@ -180,6 +181,39 @@ int wsprintfA(LPSTR buffer, LPCSTR format, ...)
 DWORD GetLastError() { return t_lastError; }
 
 void SetLastError(DWORD error) { t_lastError = error; }
+
+HGLOBAL GlobalAlloc(UINT flags, SIZE_T bytes)
+{
+    // A zero-byte request still yields a distinct block.
+    const size_t size = bytes > 0 ? bytes : 1;
+    return (flags & GMEM_ZEROINIT) ? std::calloc(1, size) : std::malloc(size);
+}
+
+LPVOID GlobalLock(HGLOBAL memory) { return memory; }
+
+BOOL GlobalUnlock(HGLOBAL)
+{
+    SetLastError(NO_ERROR);
+    return FALSE;
+}
+
+HGLOBAL GlobalFree(HGLOBAL memory)
+{
+    std::free(memory);
+    return NULL;
+}
+
+BOOL OpenClipboard(HWND) { return FALSE; }
+
+BOOL CloseClipboard() { return FALSE; }
+
+BOOL EmptyClipboard() { return FALSE; }
+
+HANDLE GetClipboardData(UINT) { return NULL; }
+
+HANDLE SetClipboardData(UINT, HANDLE) { return NULL; }
+
+BOOL IsClipboardFormatAvailable(UINT) { return FALSE; }
 
 LANGID GetSystemDefaultLangID() { return MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US); }
 

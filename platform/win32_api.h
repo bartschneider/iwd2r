@@ -401,6 +401,23 @@ int wsprintfA(LPSTR buffer, LPCSTR format, ...);
 DWORD GetLastError();
 void SetLastError(DWORD error);
 
+// Global memory: every block is fixed, so the handle is the pointer. Backed
+// by malloc (calloc with GMEM_ZEROINIT); the engine uses it for clipboard text.
+HGLOBAL GlobalAlloc(UINT flags, SIZE_T bytes);
+LPVOID GlobalLock(HGLOBAL memory);
+// FALSE with NO_ERROR, as Win32 reports for a block that is no longer locked.
+BOOL GlobalUnlock(HGLOBAL memory);
+// Frees the block and returns NULL.
+HGLOBAL GlobalFree(HGLOBAL memory);
+
+// No clipboard: OpenClipboard fails, so the engine skips copy and paste.
+BOOL OpenClipboard(HWND owner);
+BOOL CloseClipboard();
+BOOL EmptyClipboard();
+HANDLE GetClipboardData(UINT format);
+HANDLE SetClipboardData(UINT format, HANDLE memory);
+BOOL IsClipboardFormatAvailable(UINT format);
+
 // English (United States), 0x0409.
 LANGID GetSystemDefaultLangID();
 
