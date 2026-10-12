@@ -1,8 +1,8 @@
 # Subsystem map
 
-Generated from commit `6537c72` by `tools/gen_map.py`. Do not edit; CI runs `python3 -I tools/gen_map.py --check`.
+Generated from commit `0f66555` by `tools/gen_map.py`. Do not edit; CI runs `python3 -I tools/gen_map.py --check`.
 
-Totals: 466 files, 271355 lines, 369 `TODO: Incomplete`, 9998 address comments.
+Totals: 466 files, 271429 lines, 369 `TODO: Incomplete`, 9998 address comments.
 
 | Family | Files | Lines | `TODO: Incomplete` | Address comments | Platform headers included |
 |---|---:|---:|---:|---:|---|
@@ -17,5 +17,5 @@ Totals: 466 files, 271355 lines, 369 `TODO: Incomplete`, 9998 address comments.
 | Engine core | 10 | 6986 | 11 | 413 | data_dir.h, fs.h, window.h |
 | Other | 83 | 24583 | 66 | 1335 | — |
 | compat | 25 | 3603 | 0 | 0 | win32_api.h |
-| platform | 32 | 6906 | 0 | 0 | affinity.h, clock.h, data_dir.h, ddraw_shim.h, dsound_shim.h, fs.h, gl_compat.h, handles.h, imm_stub.h, png.h, present.h, script.h, win32_api.h, window.h |
-| **Total** | 466 | 271355 | 369 | 9998 | |
+| platform | 32 | 6980 | 0 | 0 | affinity.h, clock.h, data_dir.h, ddraw_shim.h, dsound_shim.h, fs.h, gl_compat.h, handles.h, imm_stub.h, png.h, present.h, script.h, win32_api.h, window.h |
+| **Total** | 466 | 271429 | 369 | 9998 | |
