@@ -1005,3 +1005,27 @@ Push the branch and confirm all four jobs are green before declaring project 1 d
 ## Manual check
 
 (Appended by Task 21 step 5 and Task 22 step 3.)
+
+### Task 21: headless runs against the real install (2026-10-12)
+
+Ruling R21: no display is reachable from the implementer (WSL has no WSLg, and a window on the Windows desktop cannot be seen), so step 5 ran headless with `IWD2R_SMOKE_FRAMES=300` against `C:\Games\Icewind Dale II` (the user's IWD2EE install). The INI files were backed up first and restored afterwards.
+
+| Platform | Build | Command | Exit code | Hash line | Banner |
+|---|---|---|---|---|---|
+| Linux (WSL2) | linux-gcc, RelWithDebInfo | `SDL_VIDEO_DRIVER=dummy SDL_AUDIO_DRIVER=dummy IWD2_DATA=... IWD2R_SMOKE_FRAMES=300 ./build/linux-gcc/iwd2r` | 0 | `framebuffer-hash: 16fe678f282a063e` | `BEGIN LOGGING SESSION` |
+| Linux (WSL2) | linux-clang, RelWithDebInfo | same | 0 | `framebuffer-hash: 16fe678f282a063e` | yes |
+| Linux (WSL2), `Full Screen=0` | linux-gcc | same | 0 | `1992366f4cdd973e`, then `c1a7d222523b573e` (windowed: not stable between runs) | yes |
+| Windows host | windows-msvc-x64, RelWithDebInfo | `set IWD2_DATA=C:\Games\Icewind Dale II&& set IWD2R_SMOKE_FRAMES=300&& iwd2r.exe` | 0 | `framebuffer-hash: 63d1e53302479eff` | yes |
+| Windows host | windows-msvc-x86, RelWithDebInfo | same | 0 | `framebuffer-hash: 63d1e53302479eff` | yes |
+
+The fullscreen Linux hash was the same over four runs (GCC and Clang); the two Windows builds agree with each other. Linux and Windows differ, which project 1 allows. An all-black 800x600 frame would hash to `2bf050200a5e1325`, so the frames are not blank, but nothing here proves which screen was showing.
+
+The runs need one INI change: the install's `icewind2.ini` has `Resolution=1366` (an IWD2EE setting). The decompiled engine only knows 800, 1024, 1600 and 2048: 1366 falls to the 800x600 layout while `CVideo::SCREENWIDTH` stays 1366, and `CScreenConnection::EnableMainPanel` then dereferences the missing border panel -5 (NULL, `CUIPanel::SetEnabled`, segfault before the first frame). All the runs above used `Resolution=800` in the install's INI, which was then restored. The crash follows from the decompiled code's own logic, not from a shim, but a user who keeps this INI sees it.
+
+Files created or modified in the install by the runs (from `find -newer marker`):
+
+- `icewind2.ini`: rewritten by the engine on exit (`First Run=0` became `1`), plus the `Resolution` edit; restored from the backup.
+- `temp/default.toh`, `temp/default.tot`: the engine's talk-table override files, as the original creates them.
+- A directory named `\` in the install root, created by the first Linux run: `CDimm::WriteSetUp` calls `_mkdir("\\")` (the decompiled loop passes a one-character string). On Windows `_chdir("\\")` reaches the drive root and nothing is created; on Linux the shim's `_mkdir` did not resolve paths. Fixed in this task (`_chdir`/`_mkdir`/`_access` now go through the resolver, which maps `\` to `/`). The directory is still in the install (nothing in the install is deleted by the implementer). Windows shows it under a private-use character name; it is empty and safe to delete.
+
+Pending the user (visual check, plan step 5): the start screen appears; the options and keymaps screens open; the character editor opens; Escape and the window's close button exit with code 0; all of this with `Full Screen=0` and `Full Screen=1`, on Windows (`build\windows-msvc-x64\RelWithDebInfo\iwd2r.exe` with `IWD2_DATA` set) and, where a display is available, on Linux. None of these screens could be checked here.
