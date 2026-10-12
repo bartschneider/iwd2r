@@ -119,7 +119,8 @@ namespace {
     std::string FoldCase(const std::string& path)
     {
         // A native absolute path: "/..." or, on Windows, "X:/...".
-        const size_t rootLength = (!path.empty() && path[0] == '/') ? 1 : (HasDrive(path) && path.size() > 2 && path[2] == '/') ? 3 : 0;
+        const size_t rootLength = (!path.empty() && path[0] == '/') ? 1 : (HasDrive(path) && path.size() > 2 && path[2] == '/') ? 3
+                                                                                                                                : 0;
         const bool absolute = rootLength > 0;
         // Relative paths are looked up under the data root (the engine's working directory).
         const std::string base = absolute ? std::string() : g_dataRoot;

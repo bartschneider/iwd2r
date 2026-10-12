@@ -65,7 +65,8 @@ TEST_CASE("start screen smoke", "[data]")
     std::remove(out.c_str());
     const std::string text = ss.str();
 
-    INFO("output:\n" << text);
+    INFO("output:\n"
+        << text);
     // Status 124 means coreutils timeout killed the run.
     REQUIRE(status == 0);
     std::smatch m;

@@ -48,7 +48,9 @@ bool EqualNoCase(const std::string& a, const std::string& b)
     return true;
 }
 
-enum class Kind { Other, Header, Pair };
+enum class Kind { Other,
+    Header,
+    Pair };
 
 struct Parsed {
     Kind kind = Kind::Other;

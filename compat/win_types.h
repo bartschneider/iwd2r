@@ -146,7 +146,7 @@ struct WIN32_FIND_DATAA {
     char cAlternateFileName[14];
 };
 
-#define INVALID_HANDLE_VALUE ((HANDLE)(intptr_t)-1)
+#define INVALID_HANDLE_VALUE ((HANDLE)(intptr_t) - 1)
 #define INVALID_FILE_ATTRIBUTES 0xFFFFFFFFu
 #define FILE_ATTRIBUTE_READONLY 0x01
 #define FILE_ATTRIBUTE_DIRECTORY 0x10

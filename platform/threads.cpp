@@ -1,14 +1,14 @@
 // iwd2r. Distributed under LICENSE.md.
 #define NOMINMAX
-#include "platform/win32_api.h"
 #include "platform/handles.h"
+#include "platform/win32_api.h"
 
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstdio>
-#include <mutex>
 #include <memory>
+#include <mutex>
 #include <new>
 #include <system_error>
 #include <thread>
@@ -40,7 +40,11 @@ HANDLE const kCurrentProcess = reinterpret_cast<HANDLE>(static_cast<intptr_t>(-1
 HANDLE const kCurrentThread = reinterpret_cast<HANDLE>(static_cast<intptr_t>(-2));
 
 struct HandleObject {
-    enum class Kind { Thread, Event, Semaphore, Mutex, File } kind;
+    enum class Kind { Thread,
+        Event,
+        Semaphore,
+        Mutex,
+        File } kind;
 
     explicit HandleObject(Kind k)
         : kind(k)

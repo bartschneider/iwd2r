@@ -19,30 +19,30 @@ ClockSource::~ClockSource() = default;
 
 namespace {
 
-using SteadyClock = std::chrono::steady_clock;
+    using SteadyClock = std::chrono::steady_clock;
 
-class DefaultSource : public ClockSource {
-public:
-    uint64_t NowMs() override
+    class DefaultSource : public ClockSource {
+    public:
+        uint64_t NowMs() override
+        {
+            static const SteadyClock::time_point start = SteadyClock::now();
+            return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(SteadyClock::now() - start).count());
+        }
+    };
+
+    DefaultSource& DefaultInstance()
     {
-        static const SteadyClock::time_point start = SteadyClock::now();
-        return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(SteadyClock::now() - start).count());
+        // Immortal on purpose: timer threads may still read the clock while the
+        // timer registry is being torn down during static destruction.
+        static DefaultSource* instance = new DefaultSource;
+        return *instance;
     }
-};
 
-DefaultSource& DefaultInstance()
-{
-    // Immortal on purpose: timer threads may still read the clock while the
-    // timer registry is being torn down during static destruction.
-    static DefaultSource* instance = new DefaultSource;
-    return *instance;
-}
-
-std::atomic<ClockSource*>& CurrentSource()
-{
-    static std::atomic<ClockSource*> current { nullptr };
-    return current;
-}
+    std::atomic<ClockSource*>& CurrentSource()
+    {
+        static std::atomic<ClockSource*> current { nullptr };
+        return current;
+    }
 
 } // namespace
 

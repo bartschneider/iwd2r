@@ -163,7 +163,6 @@ bool Fetch(LPMSG msg, HWND hWnd, UINT filterMin, UINT filterMax, bool remove)
     return false;
 }
 
-
 // Display events only set displayChanged; the pump coalesces them into one
 // WM_DISPLAYCHANGE.
 void Translate(const SDL_Event& e, bool& displayChanged)

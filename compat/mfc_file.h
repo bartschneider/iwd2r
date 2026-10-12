@@ -26,8 +26,15 @@ public:
         typeText = 0x4000,
         typeBinary = 0x8000
     };
-    enum SeekPosition { begin = 0, current = 1, end = 2 };
-    enum Attribute { normal = 0x00, readOnly = 0x01, hidden = 0x02, system = 0x04, directory = 0x10, archive = 0x20 };
+    enum SeekPosition { begin = 0,
+        current = 1,
+        end = 2 };
+    enum Attribute { normal = 0x00,
+        readOnly = 0x01,
+        hidden = 0x02,
+        system = 0x04,
+        directory = 0x10,
+        archive = 0x20 };
 
     static const HANDLE hFileNull;
 
@@ -66,7 +73,9 @@ public:
     HANDLE m_hFile;
 
 private:
-    enum LastOp { opNone, opRead, opWrite };
+    enum LastOp { opNone,
+        opRead,
+        opWrite };
 
     std::string m_path;
     mutable int m_lastOp;

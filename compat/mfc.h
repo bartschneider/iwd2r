@@ -8,13 +8,13 @@
 // shims and the engine use first, so later includes of them are no-ops.
 #include <algorithm>
 #include <bitset>
+#include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <chrono>
-#include <condition_variable>
 #include <functional>
 #include <iostream>
 #include <limits>
@@ -29,21 +29,21 @@
 #include <utility>
 #include <vector>
 
-#include "win_types.h"
-#include "mfc_string.h"
+#include "ini.h"
+#include "mfc_array.h"
+#include "mfc_file.h"
+#include "mfc_filefind.h"
 #include "mfc_geometry.h"
 #include "mfc_list.h"
-#include "mfc_array.h"
 #include "mfc_map.h"
-#include "mfc_time.h"
-#include "mfc_file.h"
-#include "mfc_sync.h"
-#include "mfc_wnd.h"
 #include "mfc_resource.h"
-#include "ini.h"
+#include "mfc_string.h"
+#include "mfc_sync.h"
+#include "mfc_time.h"
+#include "mfc_wnd.h"
 #include "path_hook.h"
 #include "platform/win32_api.h"
-#include "mfc_filefind.h"
+#include "win_types.h"
 
 #define ASSERT(x) ((void)0)
 #define TRACE(...) ((void)0)
