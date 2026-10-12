@@ -96,6 +96,33 @@ int SetBkMode(HDC, int) { return 0; }
 
 BOOL GetTextExtentPoint32A(HDC, LPCSTR, int, LPSIZE) { return FALSE; }
 
+HPEN CreatePen(int, int, COLORREF) { return NULL; }
+
+HBRUSH CreateSolidBrush(COLORREF) { return NULL; }
+
+BOOL Polygon(HDC, const POINT*, int) { return FALSE; }
+
+BOOL GetTextMetricsA(HDC, LPTEXTMETRICA metrics)
+{
+    if (metrics)
+        std::memset(metrics, 0, sizeof(*metrics));
+    return FALSE;
+}
+
+LONG GetWindowLongA(HWND, int) { return 0; }
+
+LONG SetWindowLongA(HWND, int, LONG) { return 0; }
+
+BOOL AdjustWindowRectEx(LPRECT rect, DWORD, BOOL, DWORD) { return rect != NULL ? TRUE : FALSE; }
+
+HMENU GetMenu(HWND) { return NULL; }
+
+BOOL OpenIcon(HWND) { return TRUE; }
+
+BOOL EnumDisplaySettingsA(LPCSTR, DWORD, LPDEVMODEA) { return FALSE; }
+
+LONG ChangeDisplaySettingsA(LPDEVMODEA mode, DWORD) { return mode == NULL ? DISP_CHANGE_SUCCESSFUL : DISP_CHANGE_FAILED; }
+
 DWORD GetFileVersionInfoSizeA(LPCSTR, LPDWORD handle)
 {
     if (handle)
@@ -256,3 +283,5 @@ UINT ImmGetDescriptionA(HKL, LPSTR description, UINT bufferLength)
         description[0] = '\0';
     return 0;
 }
+
+HKL ActivateKeyboardLayout(HKL, UINT) { return NULL; }

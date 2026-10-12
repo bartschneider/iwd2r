@@ -7,6 +7,8 @@
 #include "music/music.h"
 #include "music/sectionsize.h"
 
+#include "compat/path_hook.h"
+
 typedef struct FadeSound {
     Sound* sound;
     int deltaVolume;
@@ -204,7 +206,7 @@ size_t soundReadData(int fd, void* buf, size_t size)
 // 0x7D15B0
 int soundOpenData(char* fname, int mode)
 {
-    return open(fname, mode);
+    return open(compat::ResolvePath(fname).c_str(), mode);
 }
 
 // 0x7D15D0
@@ -1684,7 +1686,7 @@ void soundClearFades()
 // NOTE: Inlined.
 int soundGetVolume(Sound* sound)
 {
-    long volume;
+    LONG volume;
     int v1;
     int v2;
     int diff;

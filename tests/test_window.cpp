@@ -2,6 +2,8 @@
 #define NOMINMAX
 #include <catch2/catch_test_macros.hpp>
 
+#include "compat/mfc_wnd.h"
+#include "platform/gl_compat.h"
 #include "platform/present.h"
 #include "platform/win32_api.h"
 #include "platform/window.h"
@@ -529,4 +531,89 @@ TEST_CASE("window GlobalAlloc blocks round-trip and the clipboard is closed", "[
     CHECK(EmptyClipboard() == FALSE);
     CHECK(CloseClipboard() == FALSE);
     SetLastError(0);
+}
+
+TEST_CASE("window work area is the whole screen", "[window]")
+{
+    TestWindow w;
+    RECT work = { -1, -1, -1, -1 };
+    REQUIRE(SystemParametersInfoA(SPI_GETWORKAREA, 0, &work, 0) == TRUE);
+    CHECK(work.left == 0);
+    CHECK(work.top == 0);
+    CHECK(work.right == 320);
+    CHECK(work.bottom == 200);
+    CHECK(SystemParametersInfoA(SPI_GETWORKAREA, 0, NULL, 0) == FALSE);
+}
+
+TEST_CASE("window CWnd converts points and rectangles", "[window]")
+{
+    TestWindow w;
+    REQUIRE(SetWindowPos(w.hwnd, HWND_TOP, 10, 20, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE));
+    CWnd wnd;
+    wnd.Attach(w.hwnd);
+
+    POINT p = { 5, 6 };
+    wnd.ClientToScreen(&p);
+    CHECK(p.x == 15);
+    CHECK(p.y == 26);
+    wnd.ScreenToClient(&p);
+    CHECK(p.x == 5);
+    CHECK(p.y == 6);
+
+    RECT r = { 1, 2, 3, 4 };
+    wnd.ClientToScreen(&r);
+    CHECK(r.left == 11);
+    CHECK(r.top == 22);
+    CHECK(r.right == 13);
+    CHECK(r.bottom == 24);
+    wnd.ScreenToClient(&r);
+    CHECK(r.left == 1);
+    CHECK(r.top == 2);
+    CHECK(r.right == 3);
+    CHECK(r.bottom == 4);
+
+    CWnd none;
+    POINT q = { 7, 8 };
+    none.ClientToScreen(&q);
+    CHECK(q.x == 7);
+    CHECK(q.y == 8);
+    wnd.Detach();
+}
+
+TEST_CASE("window inert frame, display mode, GDI, pixel format and keyboard layout stubs", "[window][stubs]")
+{
+    CHECK(GetWindowLongA(NULL, GWL_STYLE) == 0);
+    CHECK(SetWindowLongA(NULL, GWL_EXSTYLE, 5) == 0);
+    RECT r = { 0, 0, 800, 600 };
+    CHECK(AdjustWindowRectEx(&r, WS_CAPTION, FALSE, 0) == TRUE);
+    CHECK(r.left == 0);
+    CHECK(r.top == 0);
+    CHECK(r.right == 800);
+    CHECK(r.bottom == 600);
+    CHECK(GetMenu(NULL) == NULL);
+    CHECK(OpenIcon(NULL) == TRUE);
+
+    DEVMODEA dm = {};
+    dm.dmSize = sizeof(dm);
+    CHECK(EnumDisplaySettingsA(NULL, 0, &dm) == FALSE);
+    CHECK(ChangeDisplaySettingsA(&dm, CDS_RESET | CDS_FULLSCREEN) == DISP_CHANGE_FAILED);
+    CHECK(ChangeDisplaySettingsA(NULL, 0) == DISP_CHANGE_SUCCESSFUL);
+
+    TEXTMETRICA tm;
+    std::memset(&tm, 0x5A, sizeof(tm));
+    CHECK(GetTextMetricsA(NULL, &tm) == FALSE);
+    CHECK(tm.tmHeight == 0);
+    CHECK(tm.tmDescent == 0);
+    CHECK(CreatePen(PS_SOLID, 1, 0) == NULL);
+    CHECK(CreateSolidBrush(0) == NULL);
+    POINT pts[3] = { { 0, 0 }, { 1, 0 }, { 0, 1 } };
+    CHECK(Polygon(NULL, pts, 3) == FALSE);
+
+    PIXELFORMATDESCRIPTOR pfd = {};
+    pfd.nSize = sizeof(pfd);
+    CHECK(ChoosePixelFormat(NULL, &pfd) == 0);
+    CHECK(SetPixelFormat(NULL, 1, &pfd) == FALSE);
+    CHECK(SwapBuffers(NULL) == FALSE);
+
+    CHECK(ActivateKeyboardLayout(reinterpret_cast<HKL>(static_cast<INT_PTR>(HKL_NEXT)), KLF_REORDER) == NULL);
 }

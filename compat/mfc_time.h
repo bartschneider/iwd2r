@@ -36,6 +36,9 @@ public:
     }
 
     static CTime GetCurrentTime() { return CTime(std::time(nullptr)); }
+    // ATL's CTime::GetTickCount, which the resource cache calls: the current
+    // time, the same as GetCurrentTime.
+    static CTime GetTickCount() { return GetCurrentTime(); }
 
     time_t GetTime() const { return m_time; }
     int GetYear() const;

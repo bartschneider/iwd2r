@@ -44,6 +44,7 @@ public:
     void operator-=(SIZE s) { Offset(-s.cx, -s.cy); }
 
     CPoint operator+(SIZE s) const { return CPoint(x + s.cx, y + s.cy); }
+    CPoint operator+(POINT p) const { return CPoint(x + p.x, y + p.y); }
     CPoint operator-(SIZE s) const { return CPoint(x - s.cx, y - s.cy); }
     inline CSize operator-(POINT p) const;
 };

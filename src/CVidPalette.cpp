@@ -1,3 +1,4 @@
+// Modified for iwd2r; see NOTICE.md
 #include "CVidPalette.h"
 
 #include "CChitin.h"
@@ -562,7 +563,7 @@ void CVidPalette::SetAUCounter()
 {
     int nBase = m_nAUCounterBase;
     if (nBase == 0) {
-        nBase = reinterpret_cast<int>(m_pPalette);
+        nBase = static_cast<int>(reinterpret_cast<INT_PTR>(m_pPalette));
     }
     m_nAUCounter = nBase + g_pChitin->nAUCounter;
 }

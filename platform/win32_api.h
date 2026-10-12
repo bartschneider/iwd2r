@@ -268,10 +268,12 @@ BOOL CloseWindow(HWND hWnd);
 #define SPI_GETSCREENSAVEACTIVE 0x0010
 #define SPI_SETSCREENSAVEACTIVE 0x0011
 #define SPI_GETKEYBOARDDELAY 0x0016
+#define SPI_GETWORKAREA 0x0030
 #define SPI_GETWHEELSCROLLLINES 0x0068
 
 // Reports Windows defaults: keyboard delay 1, keyboard speed 31, wheel
-// scroll lines 3, screen saver active. Setting the screen saver flag is
+// scroll lines 3, screen saver active; the work area is the whole screen,
+// (0, 0) to GetSystemMetrics(SM_CXSCREEN, SM_CYSCREEN). Setting the screen saver flag is
 // accepted and ignored. Anything else returns FALSE.
 BOOL SystemParametersInfoA(UINT action, UINT param, LPVOID value, UINT winIni);
 inline BOOL SystemParametersInfo(UINT action, UINT param, LPVOID value, UINT winIni) { return SystemParametersInfoA(action, param, value, winIni); }
@@ -281,6 +283,65 @@ UINT GetDoubleClickTime();
 
 // No other application windows exist; always NULL.
 HWND FindWindowA(LPCSTR className, LPCSTR windowName);
+
+// --- win32_stubs.cpp: inert window styles, frames, menus and display modes ---
+
+#define GWL_STYLE (-16)
+#define GWL_EXSTYLE (-20)
+
+// Window styles are not stored: GetWindowLongA reads 0 and SetWindowLongA
+// returns 0 (the previous value) without changing anything.
+LONG GetWindowLongA(HWND hWnd, int index);
+LONG SetWindowLongA(HWND hWnd, int index, LONG value);
+// Windows have no frame here: the rectangle is left unchanged, TRUE.
+BOOL AdjustWindowRectEx(LPRECT rect, DWORD style, BOOL menu, DWORD exStyle);
+// No window has a menu; always NULL.
+HMENU GetMenu(HWND hWnd);
+// Accepted and ignored, TRUE. Only the unsupported 3D fullscreen path calls it.
+BOOL OpenIcon(HWND hWnd);
+
+#define DM_BITSPERPEL 0x00040000
+#define DM_PELSWIDTH 0x00080000
+#define DM_PELSHEIGHT 0x00100000
+#define DM_DISPLAYFREQUENCY 0x00400000
+
+#define CDS_FULLSCREEN 0x00000004
+#define CDS_RESET 0x40000000
+
+#define DISP_CHANGE_SUCCESSFUL 0
+#define DISP_CHANGE_FAILED (-1)
+
+struct DEVMODEA {
+    BYTE dmDeviceName[32];
+    WORD dmSpecVersion;
+    WORD dmDriverVersion;
+    WORD dmSize;
+    WORD dmDriverExtra;
+    DWORD dmFields;
+    LONG dmPositionX;
+    LONG dmPositionY;
+    DWORD dmDisplayOrientation;
+    DWORD dmDisplayFixedOutput;
+    SHORT dmColor;
+    SHORT dmDuplex;
+    SHORT dmYResolution;
+    SHORT dmTTOption;
+    SHORT dmCollate;
+    BYTE dmFormName[32];
+    WORD dmLogPixels;
+    DWORD dmBitsPerPel;
+    DWORD dmPelsWidth;
+    DWORD dmPelsHeight;
+    DWORD dmDisplayFlags;
+    DWORD dmDisplayFrequency;
+};
+typedef DEVMODEA* LPDEVMODEA;
+
+// No display modes are enumerated (FALSE) and none can be set
+// (DISP_CHANGE_FAILED); a NULL mode, which restores the registry mode, is
+// accepted with DISP_CHANGE_SUCCESSFUL.
+BOOL EnumDisplaySettingsA(LPCSTR deviceName, DWORD modeNum, LPDEVMODEA mode);
+LONG ChangeDisplaySettingsA(LPDEVMODEA mode, DWORD flags);
 
 // --- win32_stubs.cpp: inert DLL, version, GDI, COM, string and process calls ---
 
@@ -378,6 +439,39 @@ COLORREF SetTextColor(HDC hdc, COLORREF color);
 COLORREF SetBkColor(HDC hdc, COLORREF color);
 int SetBkMode(HDC hdc, int mode);
 BOOL GetTextExtentPoint32A(HDC hdc, LPCSTR text, int count, LPSIZE size);
+
+#define PS_SOLID 0
+
+struct TEXTMETRICA {
+    LONG tmHeight;
+    LONG tmAscent;
+    LONG tmDescent;
+    LONG tmInternalLeading;
+    LONG tmExternalLeading;
+    LONG tmAveCharWidth;
+    LONG tmMaxCharWidth;
+    LONG tmWeight;
+    LONG tmOverhang;
+    LONG tmDigitizedAspectX;
+    LONG tmDigitizedAspectY;
+    BYTE tmFirstChar;
+    BYTE tmLastChar;
+    BYTE tmDefaultChar;
+    BYTE tmBreakChar;
+    BYTE tmItalic;
+    BYTE tmUnderlined;
+    BYTE tmStruckOut;
+    BYTE tmPitchAndFamily;
+    BYTE tmCharSet;
+};
+typedef TEXTMETRICA* LPTEXTMETRICA;
+
+// No GDI drawing: pens and brushes are NULL, Polygon draws nothing (FALSE),
+// and GetTextMetricsA zero-fills the metrics and returns FALSE.
+HPEN CreatePen(int style, int width, COLORREF color);
+HBRUSH CreateSolidBrush(COLORREF color);
+BOOL Polygon(HDC hdc, const POINT* points, int count);
+BOOL GetTextMetricsA(HDC hdc, LPTEXTMETRICA metrics);
 
 DWORD GetFileVersionInfoSizeA(LPCSTR filename, LPDWORD handle);
 BOOL GetFileVersionInfoA(LPCSTR filename, DWORD handle, DWORD size, LPVOID data);

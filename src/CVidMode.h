@@ -101,8 +101,8 @@ public:
     /* 0048 */ virtual BOOL DrawThickLine(INT nXFrom, INT nYFrom, INT nXTo, INT nYTo, UINT nSurface, CRect& rSurface, int a8, COLORREF rgbColor);
     /* 004C */ virtual BOOL DrawThickLine(INT nXFrom, INT nYFrom, INT nXTo, INT nYTo, const DDSURFACEDESC& ddsd, CRect& rSurface, int a8, COLORREF rgbColor, BOOLEAN bClipped);
     /* 0050 */ virtual BOOL DrawThickLine16(INT nXFrom, INT nYFrom, INT nXTo, INT nYTo, WORD* pSurface, LONG lpitch, CRect& rSurface, int a8, unsigned short color, BOOLEAN bClipped);
-    /* 0054 */ virtual BOOL DrawThickLine24(INT nXFrom, INT nYFrom, INT nXTo, INT nYTo, BYTE* pSurface, LONG lpitch, CRect& rSurface, int a8, unsigned long color, BOOLEAN bClipped);
-    /* 0058 */ virtual BOOL DrawThickLine32(INT nXFrom, INT nYFrom, INT nXTo, INT nYTo, DWORD* pSurface, LONG lpitch, CRect& rSurface, int a8, unsigned long color, BOOLEAN bClipped);
+    /* 0054 */ virtual BOOL DrawThickLine24(INT nXFrom, INT nYFrom, INT nXTo, INT nYTo, BYTE* pSurface, LONG lpitch, CRect& rSurface, int a8, DWORD color, BOOLEAN bClipped);
+    /* 0058 */ virtual BOOL DrawThickLine32(INT nXFrom, INT nYFrom, INT nXTo, INT nYTo, DWORD* pSurface, LONG lpitch, CRect& rSurface, int a8, DWORD color, BOOLEAN bClipped);
     /* 005C */ virtual BOOL ActivateVideoMode(CVidMode* pPrevVidMode, HWND hWnd, BOOLEAN bFullscreen);
     /* 0060 */ virtual BOOLEAN SetClipper(IDirectDrawClipper* lpDirectDrawClipper);
     /* 0064 */ virtual BOOL CreateSurfaces(BOOLEAN bFullscreen);
@@ -117,11 +117,11 @@ public:
     /* 0088 */ virtual BOOL DrawEllipse(const CPoint& ptCenter, const CSize& axis, const CRect& rClip, COLORREF rgbColor);
     /* 008C */ virtual void DrawLightingEffect(const DDSURFACEDESC& ddsd, const CPoint& a3, const CSize& a4, unsigned long a5, unsigned long a6);
     /* 0090 */ virtual BOOL DrawPoints(CPoint* pPoints, INT nPoints, WORD* pSurface, LONG lPitch, const CRect& rSurface, COLORREF rgbColor, BOOL bClipped);
-    /* 0094 */ virtual BOOL DrawLine(INT nXFrom, INT nYFrom, INT nXTo, INT nYTo, const DDSURFACEDESC& ddsd, const CRect& rSurface, unsigned long, BOOLEAN bClipped);
+    /* 0094 */ virtual BOOL DrawLine(INT nXFrom, INT nYFrom, INT nXTo, INT nYTo, const DDSURFACEDESC& ddsd, const CRect& rSurface, COLORREF, BOOLEAN bClipped);
     /* 0098 */ virtual BOOL DrawLine(INT nXFrom, INT nYFrom, INT nXTo, INT nYTo, UINT nSurface, const CRect& rSurface, COLORREF rgbColor);
     /* 009C */ virtual BOOL DrawLine16(INT nXFrom, INT nYFrom, INT nXTo, INT nYTo, WORD* pSurface, LONG lpitch, const CRect& rSurface, unsigned short color, BOOLEAN bClipped);
-    /* 00A0 */ virtual BOOL DrawLine24(INT nXFrom, INT nYFrom, INT nXTo, INT nYTo, BYTE* pSurface, LONG lpitch, const CRect& rSurface, unsigned long color, BOOLEAN bClipped);
-    /* 00A4 */ virtual BOOL DrawLine32(INT nXFrom, INT nYFrom, INT nXTo, INT nYTo, DWORD* pSurface, LONG lpitch, const CRect& rSurface, unsigned long color, BOOLEAN bClipped);
+    /* 00A0 */ virtual BOOL DrawLine24(INT nXFrom, INT nYFrom, INT nXTo, INT nYTo, BYTE* pSurface, LONG lpitch, const CRect& rSurface, DWORD color, BOOLEAN bClipped);
+    /* 00A4 */ virtual BOOL DrawLine32(INT nXFrom, INT nYFrom, INT nXTo, INT nYTo, DWORD* pSurface, LONG lpitch, const CRect& rSurface, DWORD color, BOOLEAN bClipped);
     /* 00A8 */ virtual BOOL DrawRect(const CRect& r, UINT nSurface, const CRect& rClip, COLORREF rgbColor);
     /* 00B0 */ virtual BOOL OutlinePoly(const CPoint* pPoly, SHORT nVertices, const CRect& rSurface, COLORREF rgbColor, const CPoint& ptOffset);
     /* 00B4 */ virtual BOOL EraseScreen(UINT nSurface, COLORREF rgbColor);

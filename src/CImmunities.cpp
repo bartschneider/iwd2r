@@ -1,3 +1,4 @@
+// Modified for iwd2r; see NOTICE.md
 #include "CImmunities.h"
 
 #include "CGameEffect.h"
@@ -471,7 +472,7 @@ BOOL CImmunitiesProjectile::OnList(DWORD projectileType)
 {
     POSITION pos = GetHeadPosition();
     while (pos != NULL) {
-        DWORD node = reinterpret_cast<DWORD>(GetNext(pos));
+        DWORD node = static_cast<DWORD>(reinterpret_cast<INT_PTR>(GetNext(pos)));
         if (node == projectileType) {
             return TRUE;
         }
@@ -486,7 +487,7 @@ CImmunitiesProjectile& CImmunitiesProjectile::operator=(const CImmunitiesProject
 
     POSITION pos = other.GetHeadPosition();
     while (pos != NULL) {
-        DWORD projectileType = reinterpret_cast<DWORD>(other.GetNext(pos));
+        DWORD projectileType = static_cast<DWORD>(reinterpret_cast<INT_PTR>(other.GetNext(pos)));
         AddTail(reinterpret_cast<DWORD*>(projectileType));
     }
 

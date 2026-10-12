@@ -15,6 +15,14 @@ TEST_CASE("misc CTime current time is close to time()", "[misc]")
     REQUIRE(diff <= 5);
 }
 
+TEST_CASE("misc CTime GetTickCount is the current time", "[misc]")
+{
+    CTime t = CTime::GetTickCount();
+    long long diff = static_cast<long long>(time(nullptr)) - static_cast<long long>(t.GetTime());
+    REQUIRE(diff >= -5);
+    REQUIRE(diff <= 5);
+}
+
 TEST_CASE("misc CTime hour matches localtime", "[misc]")
 {
     time_t value = 86400 * 365;

@@ -824,6 +824,7 @@ BOOL SystemParametersInfoA(UINT action, UINT, LPVOID value, UINT)
     case SPI_GETKEYBOARDSPEED:
     case SPI_GETWHEELSCROLLLINES:
     case SPI_GETSCREENSAVEACTIVE:
+    case SPI_GETWORKAREA:
         if (!value)
             return FALSE;
         break;
@@ -845,6 +846,14 @@ BOOL SystemParametersInfoA(UINT action, UINT, LPVOID value, UINT)
         return TRUE;
     case SPI_SETSCREENSAVEACTIVE:
         return TRUE;
+    case SPI_GETWORKAREA: {
+        RECT* work = static_cast<RECT*>(value);
+        work->left = 0;
+        work->top = 0;
+        work->right = GetSystemMetrics(SM_CXSCREEN);
+        work->bottom = GetSystemMetrics(SM_CYSCREEN);
+        return TRUE;
+    }
     default:
         return FALSE;
     }

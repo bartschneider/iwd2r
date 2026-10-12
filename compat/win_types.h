@@ -233,6 +233,8 @@ typedef void* HGDIOBJ;
 typedef HANDLE HGLOBAL;
 struct HBRUSH__;
 typedef HBRUSH__* HBRUSH;
+struct HPEN__;
+typedef HPEN__* HPEN;
 struct HPALETTE__;
 typedef HPALETTE__* HPALETTE;
 struct HICON__;
@@ -257,6 +259,10 @@ typedef HIMC__* HIMC;
 #define __declspec(x)
 #define _stricmp strcasecmp
 #define _strnicmp strncasecmp
+// Older MSVC CRT spellings the music library uses.
+#define stricmp strcasecmp
+#define strcmpi strcasecmp
+#define strnicmp strncasecmp
 #define _vsnprintf vsnprintf
 #define _snprintf snprintf
 #define _chdir chdir

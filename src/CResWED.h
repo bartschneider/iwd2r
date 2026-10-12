@@ -1,3 +1,4 @@
+// Modified for iwd2r; see NOTICE.md
 #ifndef CRESWED_H_
 #define CRESWED_H_
 
@@ -6,8 +7,8 @@
 
 class CResWED : public CRes {
 public:
-    CResWED::CResWED();
-    CResWED::~CResWED();
+    CResWED();
+    ~CResWED();
     void* Demand();
     ULONG GetNumTiledObjects();
     WORD* GetScreenPolyData();

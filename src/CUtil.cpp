@@ -1,3 +1,4 @@
+// Modified for iwd2r; see NOTICE.md
 #include "CUtil.h"
 
 #include <zlib.h>
@@ -15,7 +16,9 @@ int CUtil::Compress(BYTE* pDest, DWORD* nDestSize, const BYTE* pSrc, DWORD nSrcS
     CSingleLock compressionLock(&ZLIB_CRITICAL_SECTION, FALSE);
     compressionLock.Lock(INFINITE);
 
-    int err = compress2(pDest, nDestSize, pSrc, nSrcSize, nLevel);
+    uLongf nDestLen = *nDestSize;
+    int err = compress2(pDest, &nDestLen, pSrc, nSrcSize, nLevel);
+    *nDestSize = static_cast<DWORD>(nDestLen);
 
     compressionLock.Unlock();
 
@@ -28,7 +31,9 @@ int CUtil::Uncompress(BYTE* dest, DWORD* destLen, const BYTE* source, DWORD sour
     CSingleLock decompressionLock(&ZLIB_CRITICAL_SECTION, FALSE);
     decompressionLock.Lock(INFINITE);
 
-    int err = uncompress(dest, destLen, source, sourceLen);
+    uLongf nDestLen = *destLen;
+    int err = uncompress(dest, &nDestLen, source, sourceLen);
+    *destLen = static_cast<DWORD>(nDestLen);
 
     decompressionLock.Unlock();
 

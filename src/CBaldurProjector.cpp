@@ -1,3 +1,4 @@
+// Modified for iwd2r; see NOTICE.md
 #include "CBaldurProjector.h"
 
 #include "CBaldurChitin.h"
@@ -257,7 +258,7 @@ void CBaldurProjector::EngineActivated()
     g_pBaldurChitin->cSoundMixer.StartSong(-1, 5);
 
     if (m_hBink == NULL) {
-        m_pfnBinkSetSoundSystem(m_pfnBinkOpenDirectSound, reinterpret_cast<unsigned int>(pSoundMixer->m_pDirectSound));
+        m_pfnBinkSetSoundSystem(m_pfnBinkOpenDirectSound, reinterpret_cast<UINT_PTR>(pSoundMixer->m_pDirectSound));
         m_hBink = m_pfnBinkOpen(m_sCurrentMovieFileName, 0x4000);
 
         if (m_hBink == NULL) {

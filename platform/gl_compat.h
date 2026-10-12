@@ -113,3 +113,87 @@ HGLRC WINAPI wglCreateContext(HDC hdc);
 BOOL WINAPI wglDeleteContext(HGLRC context);
 BOOL WINAPI wglMakeCurrent(HDC hdc, HGLRC context);
 PROC WINAPI wglGetProcAddress(LPCSTR name);
+
+// GDI pixel formats, as in <wingdi.h>. No pixel format exists:
+// ChoosePixelFormat returns 0, SetPixelFormat and SwapBuffers FALSE.
+#define PFD_TYPE_RGBA 0
+#define PFD_DOUBLEBUFFER 0x00000001
+#define PFD_DRAW_TO_WINDOW 0x00000004
+#define PFD_SUPPORT_OPENGL 0x00000020
+#define PFD_MAIN_PLANE 0
+
+struct PIXELFORMATDESCRIPTOR {
+    WORD nSize;
+    WORD nVersion;
+    DWORD dwFlags;
+    BYTE iPixelType;
+    BYTE cColorBits;
+    BYTE cRedBits;
+    BYTE cRedShift;
+    BYTE cGreenBits;
+    BYTE cGreenShift;
+    BYTE cBlueBits;
+    BYTE cBlueShift;
+    BYTE cAlphaBits;
+    BYTE cAlphaShift;
+    BYTE cAccumBits;
+    BYTE cAccumRedBits;
+    BYTE cAccumGreenBits;
+    BYTE cAccumBlueBits;
+    BYTE cAccumAlphaBits;
+    BYTE cDepthBits;
+    BYTE cStencilBits;
+    BYTE cAuxBuffers;
+    BYTE iLayerType;
+    BYTE bReserved;
+    DWORD dwLayerMask;
+    DWORD dwVisibleMask;
+    DWORD dwDamageMask;
+};
+typedef PIXELFORMATDESCRIPTOR* LPPIXELFORMATDESCRIPTOR;
+
+struct LAYERPLANEDESCRIPTOR {
+    WORD nSize;
+    WORD nVersion;
+    DWORD dwFlags;
+    BYTE iPixelType;
+    BYTE cColorBits;
+    BYTE cRedBits;
+    BYTE cRedShift;
+    BYTE cGreenBits;
+    BYTE cGreenShift;
+    BYTE cBlueBits;
+    BYTE cBlueShift;
+    BYTE cAlphaBits;
+    BYTE cAlphaShift;
+    BYTE cAccumBits;
+    BYTE cAccumRedBits;
+    BYTE cAccumGreenBits;
+    BYTE cAccumBlueBits;
+    BYTE cAccumAlphaBits;
+    BYTE cDepthBits;
+    BYTE cStencilBits;
+    BYTE cAuxBuffers;
+    BYTE iLayerPlane;
+    BYTE bReserved;
+    COLORREF crTransparent;
+};
+typedef LAYERPLANEDESCRIPTOR* LPLAYERPLANEDESCRIPTOR;
+
+struct POINTFLOAT {
+    FLOAT x;
+    FLOAT y;
+};
+
+struct GLYPHMETRICSFLOAT {
+    FLOAT gmfBlackBoxX;
+    FLOAT gmfBlackBoxY;
+    POINTFLOAT gmfptGlyphOrigin;
+    FLOAT gmfCellIncX;
+    FLOAT gmfCellIncY;
+};
+typedef GLYPHMETRICSFLOAT* LPGLYPHMETRICSFLOAT;
+
+int WINAPI ChoosePixelFormat(HDC hdc, const PIXELFORMATDESCRIPTOR* pfd);
+BOOL WINAPI SetPixelFormat(HDC hdc, int format, const PIXELFORMATDESCRIPTOR* pfd);
+BOOL WINAPI SwapBuffers(HDC hdc);

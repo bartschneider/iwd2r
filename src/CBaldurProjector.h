@@ -1,3 +1,4 @@
+// Modified for iwd2r; see NOTICE.md
 #ifndef CBALDURPROJECTOR_H_
 #define CBALDURPROJECTOR_H_
 
@@ -27,7 +28,7 @@ typedef void(__stdcall BinkClose)(HBINK bnk);
 typedef void(__stdcall BinkGetSummary)(HBINK bnk, void* summary);
 typedef int(__stdcall BinkCopyToBuffer)(HBINK bnk, void* dest, int pitch, unsigned int height, unsigned int x, unsigned int y, unsigned int flags);
 typedef void*(__stdcall BinkOpenDirectSound)(unsigned int param);
-typedef int(__stdcall BinkSetSoundSystem)(void* open, unsigned int param);
+typedef int(__stdcall BinkSetSoundSystem)(BinkOpenDirectSound* open, UINT_PTR param);
 typedef int(__stdcall BinkSetSoundOnOff)(HBINK bnk, int onoff);
 typedef int(__stdcall BinkWait)(HBINK bnk);
 typedef char*(__stdcall BinkGetError)();

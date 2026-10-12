@@ -15,6 +15,14 @@
 #define IME_CMODE_KATAKANA 0x0002
 #define IME_CMODE_FULLSHAPE 0x0008
 
+#define IMN_CHANGECANDIDATE 0x0003
+#define IMN_CLOSECANDIDATE 0x0004
+#define IMN_OPENCANDIDATE 0x0005
+#define IMN_SETOPENSTATUS 0x0008
+
+#define HKL_NEXT 1
+#define KLF_REORDER 0x00000008
+
 struct CANDIDATELIST {
     DWORD dwSize;
     DWORD dwStyle;
@@ -35,3 +43,5 @@ BOOL ImmGetOpenStatus(HIMC context);
 BOOL ImmSetOpenStatus(HIMC context, BOOL open);
 DWORD ImmGetCandidateListA(HIMC context, DWORD index, LPCANDIDATELIST list, DWORD bufferLength);
 UINT ImmGetDescriptionA(HKL layout, LPSTR description, UINT bufferLength);
+// One keyboard layout only: nothing to switch to, so NULL (failure).
+HKL ActivateKeyboardLayout(HKL layout, UINT flags);

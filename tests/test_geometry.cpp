@@ -162,6 +162,9 @@ TEST_CASE("cpoint", "[geometry]")
     REQUIRE(CPoint(1, 2) + CSize(3, 4) == CPoint(4, 6));
     REQUIRE(CPoint(4, 6) - CSize(3, 4) == CPoint(1, 2));
     REQUIRE(CPoint(4, 6) - CPoint(1, 2) == CSize(3, 4));
+    REQUIRE(CPoint(1, 2) + CPoint(3, 4) == CPoint(4, 6));
+    const POINT offset = { 10, 20 };
+    REQUIRE(CPoint(1, 2) + offset == CPoint(11, 22));
     REQUIRE(CPoint(DWORD(0x00020001)) == CPoint(1, 2));
     REQUIRE(CPoint(DWORD(0xFFFFFFFE)) == CPoint(-2, -1));
     REQUIRE(CPoint(CSize(7, 8)) == CPoint(7, 8));

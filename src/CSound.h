@@ -25,7 +25,7 @@ public:
     BOOL ExclusiveStop();
     DWORD GetPlayTime();
     BOOL ResetVolume();
-    BOOL SetChannel(int nNewChannel, DWORD nArea);
+    BOOL SetChannel(int nNewChannel, DWORD_PTR nArea);
 
     BOOL IsSoundPlaying();
     BOOL Play(BOOL bReplay);
@@ -62,7 +62,7 @@ public:
     /* 0054 */ BOOL m_b3DPositioning;
     /* 0058 */ IDirectSoundBuffer* pSoundBuffer; // #guess
     /* 005C */ BOOL m_bFireForget;
-    /* 0060 */ DWORD m_nArea;
+    /* 0060 */ DWORD_PTR m_nArea;
 };
 
 #endif /* CSOUND_H_ */

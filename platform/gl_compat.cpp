@@ -53,3 +53,7 @@ HGLRC WINAPI wglCreateContext(HDC) { return NULL; }
 BOOL WINAPI wglDeleteContext(HGLRC) { return TRUE; }
 BOOL WINAPI wglMakeCurrent(HDC, HGLRC) { return FALSE; }
 PROC WINAPI wglGetProcAddress(LPCSTR) { return NULL; }
+
+int WINAPI ChoosePixelFormat(HDC, const PIXELFORMATDESCRIPTOR*) { return 0; }
+BOOL WINAPI SetPixelFormat(HDC, int, const PIXELFORMATDESCRIPTOR*) { return FALSE; }
+BOOL WINAPI SwapBuffers(HDC) { return FALSE; }

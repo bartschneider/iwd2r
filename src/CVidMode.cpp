@@ -1,3 +1,4 @@
+// Modified for iwd2r; see NOTICE.md
 #include "CVidMode.h"
 
 #include "CChitin.h"
@@ -1084,7 +1085,7 @@ BOOL CVidMode::LockSurface(UINT nIndex, LPDDSURFACEDESC pSurfaceDesc, const CRec
 
     // __FILE__: C:\Projects\Icewind2\src\chitin\ChVideo.cpp
     // __LINE__: 5071
-    UTIL_ASSERT(g_pChitin->cVideo.GetBitsPerPixels() == 24 || !((LONG)(pSurfaceDesc->lpSurface) & 0x00000001));
+    UTIL_ASSERT(g_pChitin->cVideo.GetBitsPerPixels() == 24 || !(static_cast<LONG>(reinterpret_cast<INT_PTR>(pSurfaceDesc->lpSurface)) & 0x00000001));
 
     return hr == DD_OK;
 }

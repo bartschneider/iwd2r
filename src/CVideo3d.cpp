@@ -1,3 +1,4 @@
+// Modified for iwd2r; see NOTICE.md
 #include "CVideo3d.h"
 
 #include "CChitin.h"
@@ -2435,7 +2436,7 @@ void CVidMode::AddDisposableTexture(INT nTextureId)
 
     POSITION pos = m_lDisposableTextureIds.GetHeadPosition();
     while (pos != NULL) {
-        INT nCurrTextureId = reinterpret_cast<INT>(m_lDisposableTextureIds.GetNext(pos));
+        INT nCurrTextureId = static_cast<INT>(reinterpret_cast<INT_PTR>(m_lDisposableTextureIds.GetNext(pos)));
         if (nCurrTextureId == nTextureId) {
             break;
         }
@@ -2455,7 +2456,7 @@ void CVidMode::DeleteDisposableTextures()
     lock.Lock(INFINITE);
 
     while (!m_lDisposableTextureIds.IsEmpty()) {
-        GLuint texture = static_cast<GLuint>(reinterpret_cast<INT>(m_lDisposableTextureIds.RemoveHead()));
+        GLuint texture = static_cast<GLuint>(reinterpret_cast<INT_PTR>(m_lDisposableTextureIds.RemoveHead()));
         CVideo3d::glDeleteTextures(1, &texture);
         g_pChitin->GetCurrentVideoMode()->CheckResults3d(0);
     }
