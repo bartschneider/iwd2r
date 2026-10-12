@@ -1,6 +1,6 @@
 # iwd2r. Distributed under LICENSE.md.
 """Tests for tools/check_notices.py, tools/gen_map.py and the pure parts of
-tools/play.py.
+tools/play.py and tools/realinput.py.
 
 Run from the repository root: python3 -I tests/test_tools.py
 
@@ -11,9 +11,12 @@ directory afterwards.
 
 import contextlib
 import datetime
+import glob
 import importlib.util
 import io
+import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -173,15 +176,20 @@ class GenMapTest(unittest.TestCase):
         self.assertEqual(self.run_gen('--check').returncode, 1)
 
 
-def load_play():
+def load_tool(name):
     spec = importlib.util.spec_from_file_location(
-        'play', os.path.join(ROOT, 'tools', 'play.py'))
+        name, os.path.join(ROOT, 'tools', name + '.py'))
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-play = load_play()
+play = load_tool('play')
+realinput = load_tool('realinput')
+
+
+def scenario_files():
+    return sorted(glob.glob(os.path.join(ROOT, 'scenarios', '*.txt')))
 
 
 class PlayArgsTest(unittest.TestCase):
@@ -300,6 +308,209 @@ class PlayIniBackupTest(unittest.TestCase):
                          ['icewind2.ini'])
         self.assertEqual(self.read('icewind2.ini'),
                          b'[Program Options]\r\nResolution=1366\r\n')
+
+
+class ScenarioParseTest(unittest.TestCase):
+    def test_every_verb(self):
+        actions = realinput.parse_scenario(
+            '# comment\n'
+            '\n'
+            'WAIT 60   # trailing\n'
+            'click 10 20\r\n'
+            'RClick 3 4\n'
+            'move 0 0\n'
+            'key escape\n'
+            'key a\n'
+            'type Hello  World 2\n'
+            'shot 01_start\n'
+            'quit\n')
+        self.assertEqual(actions, [
+            {'op': 'wait', 'frames': 60, 'line': 3},
+            {'op': 'click', 'x': 10, 'y': 20, 'line': 4},
+            {'op': 'rclick', 'x': 3, 'y': 4, 'line': 5},
+            {'op': 'move', 'x': 0, 'y': 0, 'line': 6},
+            {'op': 'key', 'key': 'ESCAPE', 'line': 7},
+            {'op': 'key', 'key': 'A', 'line': 8},
+            {'op': 'type', 'text': 'Hello  World 2', 'line': 9},
+            {'op': 'shot', 'name': '01_start', 'line': 10},
+            {'op': 'quit', 'line': 11},
+        ])
+
+    def test_errors_name_the_line(self):
+        cases = [
+            ('wait\n', 'line 1: wait needs one frame count'),
+            ('wait -1\n', 'line 1: wait needs one frame count'),
+            ('wait 1 2\n', 'line 1: wait needs one frame count'),
+            ('\nclick 1\n', 'line 2: click needs X Y (non-negative integers)'),
+            ('rclick a b\n', 'line 1: rclick needs X Y (non-negative integers)'),
+            ('move 1 -2\n', 'line 1: move needs X Y (non-negative integers)'),
+            ('key\n', 'line 1: key needs one key name'),
+            ('key NOPE\n', "line 1: unknown key 'NOPE'"),
+            ('key !\n', "line 1: unknown key '!'"),
+            ('type\n', 'line 1: type needs text'),
+            ('type a-b\n', "line 1: type supports letters, digits and spaces, not '-'"),
+            ('shot\n', 'line 1: shot needs one name'),
+            ('shot a/b\n', 'line 1: shot name must not contain a path'),
+            ('shot c:x\n', 'line 1: shot name must not contain a path'),
+            ('quit now\n', 'line 1: quit takes no arguments'),
+            ('wait 1\n\n# x\njump 1\n', "line 4: unknown command 'jump'"),
+        ]
+        for text, message in cases:
+            with self.assertRaises(realinput.ScenarioError, msg=text) as cm:
+                realinput.parse_scenario(text)
+            self.assertEqual(str(cm.exception), message)
+
+    def test_shipped_scenarios_parse(self):
+        for path in scenario_files():
+            self.assertTrue(realinput.load_scenario(path), path)
+
+    def test_keysym_table_covers_every_key_name(self):
+        self.assertEqual(set(realinput.X_KEYSYM), set(realinput.KEY_VK))
+        used = set()
+        for path in scenario_files():
+            used |= {a['key'] for a in realinput.load_scenario(path)
+                     if a['op'] == 'key'}
+        self.assertIn('ESCAPE', used)
+        for name in used:
+            self.assertTrue(realinput.keysym_for_name(name), name)
+        self.assertEqual(realinput.keysym_for_name('ESCAPE'), 'Escape')
+        self.assertEqual(realinput.keysym_for_name('return'), 'Return')
+        self.assertEqual(realinput.keysym_for_name('SPACE'), 'space')
+        self.assertEqual(realinput.keysym_for_name('BACK'), 'BackSpace')
+        self.assertEqual(realinput.keysym_for_name('F12'), 'F12')
+        self.assertEqual(realinput.keysym_for_name('q'), 'q')
+        self.assertEqual(realinput.keysym_for_name('7'), '7')
+        self.assertIsNone(realinput.keysym_for_name('?'))
+
+    def test_vk_names_match_script_cpp(self):
+        # Every name in platform/script.cpp's kNamedKeys, and no other.
+        with open(os.path.join(ROOT, 'platform', 'script.cpp')) as f:
+            text = f.read()
+        names = set(re.findall(r'\{ "([A-Z0-9_]+)", VK_', text))
+        self.assertEqual(names, set(realinput.KEY_VK))
+        self.assertEqual(realinput.vk_for_name('escape'), 0x1B)
+        self.assertEqual(realinput.vk_for_name('z'), ord('Z'))
+        self.assertEqual(realinput.vk_for_name('NOPE'), 0)
+
+    def test_windows_actions(self):
+        actions = realinput.parse_scenario('key LEFT\ntype aB 1\nclick 5 6\n')
+        out = realinput.windows_actions(actions)
+        self.assertEqual(out[0], {'op': 'key', 'line': 1, 'key': 'LEFT',
+                                  'vk': 0x25, 'extended': True,
+                                  'shift': False})
+        self.assertEqual([(a['vk'], a['shift']) for a in out[1:5]],
+                         [(0x41, False), (0x42, True), (0x20, False),
+                          (0x31, False)])
+        self.assertEqual(out[5], {'op': 'click', 'x': 5, 'y': 6, 'line': 3})
+        json.dumps(out)  # serialisable
+
+    def test_describe_round_trips(self):
+        text = 'wait 5\nclick 1 2\nkey TAB\ntype ab\nshot x\nquit\n'
+        actions = realinput.parse_scenario(text)
+        self.assertEqual('\n'.join(realinput.describe(a) for a in actions)
+                         + '\n', text)
+
+
+class XvfbDisplayTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.x11 = os.path.join(self._tmp.name, '.X11-unix')
+        self.locks = self._tmp.name
+        os.makedirs(self.x11)
+
+    def pick(self, **kw):
+        return realinput.pick_display(x11_dir=self.x11, lock_dir=self.locks,
+                                      abstract=kw.pop('abstract', set()),
+                                      **kw)
+
+    def touch(self, path):
+        open(path, 'w').close()
+
+    def test_first_free_from_90(self):
+        self.assertEqual(self.pick(), 90)
+
+    def test_skips_sockets_locks_taken_and_abstract(self):
+        self.touch(os.path.join(self.x11, 'X90'))
+        self.touch(os.path.join(self.locks, '.X91-lock'))
+        self.assertEqual(self.pick(), 92)
+        self.assertEqual(self.pick(taken={92}), 93)
+        self.assertEqual(self.pick(taken={92}, abstract={93}), 94)
+        self.assertEqual(self.pick(start=10), 10)
+
+    def test_none_free(self):
+        with self.assertRaises(RuntimeError):
+            self.pick(limit=2, taken={90, 91})
+
+    def test_abstract_sockets_from_proc_net_unix(self):
+        path = os.path.join(self._tmp.name, 'unix')
+        with open(path, 'w') as f:
+            f.write('Num RefCount Protocol Flags Type St Inode Path\n'
+                    '0000: 00000002 00000000 00010000 0001 01 1 @/tmp/.X11-unix/X91\n'
+                    '0000: 00000002 00000000 00010000 0001 01 2 /tmp/.X11-unix/X0\n'
+                    '0000: 00000002 00000000 00010000 0001 01 3 @/tmp/.X11-unix/X100\n')
+        self.assertEqual(realinput.abstract_x_sockets(path), {91, 100})
+        self.assertEqual(realinput.abstract_x_sockets(path + '-missing'), set())
+
+    def test_screen_and_cpu(self):
+        self.assertEqual(realinput.screen_size(800), (800, 600))
+        self.assertEqual(realinput.screen_size(1024), (1024, 768))
+        self.assertEqual(realinput.job_cpu(0, {3, 1}), 1)
+        self.assertEqual(realinput.job_cpu(3, {3, 1}), 3)
+
+
+class FakeGame:
+    pid = 4242
+
+    def __init__(self):
+        self.code = None
+
+    def poll(self):
+        return self.code
+
+
+class XDriverTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.calls = []
+        self.lines = []
+        self.game = FakeGame()
+        self.driver = realinput.XDriver(
+            7, self.game, self._tmp.name, self._tmp.name, self.lines.append,
+            deadline=1e12, run=self.fake_run, sleep=lambda s: None)
+        self.driver.window = 0x50
+
+    def fake_run(self, cmd, timeout=30):
+        self.calls.append(cmd)
+        if cmd[:2] == ['xdotool', 'search']:
+            return 0, '80\n'
+        return 0, ''
+
+    def xdo(self):
+        return [c[1:] for c in self.calls if c[0] == 'xdotool'
+                and c[1] != 'search']
+
+    def test_click_is_real_pointer_input(self):
+        self.driver.do({'op': 'click', 'x': 645, 'y': 262, 'line': 1})
+        self.assertEqual(self.xdo(), [
+            ['mousemove', '--window', '80', '645', '262'],
+            ['mousedown', '1'], ['mouseup', '1']])
+
+    def test_rclick_and_key(self):
+        self.driver.window = 80
+        self.driver.do({'op': 'rclick', 'x': 1, 'y': 2, 'line': 1})
+        self.driver.do({'op': 'key', 'key': 'ESCAPE', 'line': 2})
+        self.assertEqual(self.xdo()[1:], [
+            ['mousedown', '3'], ['mouseup', '3'],
+            ['keydown', 'Escape'], ['keyup', 'Escape']])
+
+    def test_game_exit_ends_the_run(self):
+        self.game.code = 0
+        self.assertEqual(self.driver.run([{'op': 'wait', 'frames': 1,
+                                           'line': 1}]), 'game exited')
+
+
 
 
 if __name__ == '__main__':
