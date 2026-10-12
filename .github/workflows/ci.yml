@@ -1,0 +1,117 @@
+name: CI
+
+on:
+  push:
+    branches: [main, first]
+  pull_request:
+
+jobs:
+  linux-gcc:
+    runs-on: ubuntu-24.04
+    env:
+      SDL_VIDEO_DRIVER: dummy
+      SDL_AUDIO_DRIVER: dummy
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # tools/check_notices.py diffs against an old base commit
+      - name: Install packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build clang clang-format pkg-config libasound2-dev libpulse-dev libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxkbcommon-dev libdrm-dev libgbm-dev libgl1-mesa-dev libegl1-mesa-dev libwayland-dev libdecor-0-dev libudev-dev libdbus-1-dev libpipewire-0.3-dev
+      - name: Choose dependency directory
+        shell: bash
+        run: echo "FETCH_DIR=$(echo "$RUNNER_TEMP" | tr '\\' '/')/fetch" >> "$GITHUB_ENV"
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.FETCH_DIR }}
+          key: fetch-${{ runner.os }}-linux-gcc-${{ hashFiles('CMakeLists.txt') }}
+      - name: Configure
+        run: cmake --preset linux-gcc -DFETCHCONTENT_BASE_DIR="${{ env.FETCH_DIR }}"
+      - name: Build
+        run: cmake --build --preset linux-gcc
+      - name: Test
+        run: ctest --preset linux-gcc --output-on-failure
+      - name: Tool tests
+        run: python3 -I tests/test_tools.py
+      - name: Notice lines
+        run: python3 -I tools/check_notices.py
+      - name: Subsystem map
+        run: python3 -I tools/gen_map.py --check
+      - name: Format check
+        run: |
+          files=$(git diff --name-only --diff-filter=d 4fa36bc -- '*.cpp' '*.h' | grep -v '^src/' || true)
+          if [ -n "$files" ]; then clang-format --dry-run --Werror $files; fi
+
+  linux-clang:
+    runs-on: ubuntu-24.04
+    env:
+      SDL_VIDEO_DRIVER: dummy
+      SDL_AUDIO_DRIVER: dummy
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # tools/check_notices.py diffs against an old base commit
+      - name: Install packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build clang clang-format pkg-config libasound2-dev libpulse-dev libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxkbcommon-dev libdrm-dev libgbm-dev libgl1-mesa-dev libegl1-mesa-dev libwayland-dev libdecor-0-dev libudev-dev libdbus-1-dev libpipewire-0.3-dev
+      - name: Choose dependency directory
+        shell: bash
+        run: echo "FETCH_DIR=$(echo "$RUNNER_TEMP" | tr '\\' '/')/fetch" >> "$GITHUB_ENV"
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.FETCH_DIR }}
+          key: fetch-${{ runner.os }}-linux-clang-${{ hashFiles('CMakeLists.txt') }}
+      - name: Configure
+        run: cmake --preset linux-clang -DFETCHCONTENT_BASE_DIR="${{ env.FETCH_DIR }}"
+      - name: Build
+        run: cmake --build --preset linux-clang
+      - name: Test
+        run: ctest --preset linux-clang --output-on-failure
+
+  windows-x64:
+    runs-on: windows-latest
+    env:
+      SDL_VIDEO_DRIVER: dummy
+      SDL_AUDIO_DRIVER: dummy
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # tools/check_notices.py diffs against an old base commit
+      - name: Choose dependency directory
+        shell: bash
+        run: echo "FETCH_DIR=$(echo "$RUNNER_TEMP" | tr '\\' '/')/fetch" >> "$GITHUB_ENV"
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.FETCH_DIR }}
+          key: fetch-${{ runner.os }}-windows-x64-${{ hashFiles('CMakeLists.txt') }}
+      - name: Configure
+        run: cmake --preset windows-x64 -DFETCHCONTENT_BASE_DIR="${{ env.FETCH_DIR }}"
+      - name: Build
+        run: cmake --build --preset windows-x64
+      - name: Test
+        run: ctest --preset windows-x64 --output-on-failure
+
+  windows-x86:
+    runs-on: windows-latest
+    env:
+      SDL_VIDEO_DRIVER: dummy
+      SDL_AUDIO_DRIVER: dummy
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # tools/check_notices.py diffs against an old base commit
+      - name: Choose dependency directory
+        shell: bash
+        run: echo "FETCH_DIR=$(echo "$RUNNER_TEMP" | tr '\\' '/')/fetch" >> "$GITHUB_ENV"
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.FETCH_DIR }}
+          key: fetch-${{ runner.os }}-windows-x86-${{ hashFiles('CMakeLists.txt') }}
+      - name: Configure
+        run: cmake --preset windows-x86 -DFETCHCONTENT_BASE_DIR="${{ env.FETCH_DIR }}"
+      - name: Build
+        run: cmake --build --preset windows-x86
+      - name: Test
+        run: ctest --preset windows-x86 --output-on-failure
