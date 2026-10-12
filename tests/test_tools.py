@@ -1,6 +1,6 @@
 # iwd2r. Distributed under LICENSE.md.
 """Tests for tools/check_notices.py, tools/gen_map.py and the pure parts of
-tools/play.py and tools/realinput.py.
+tools/play.py, tools/realinput.py and tools/winsandbox.py.
 
 Run from the repository root: python3 -I tests/test_tools.py
 
@@ -17,10 +17,12 @@ import io
 import json
 import os
 import re
+import struct
 import subprocess
 import sys
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CHECKER = os.path.join(ROOT, 'tools', 'check_notices.py')
@@ -186,6 +188,7 @@ def load_tool(name):
 
 play = load_tool('play')
 realinput = load_tool('realinput')
+winsandbox = load_tool('winsandbox')
 
 
 def scenario_files():
@@ -511,6 +514,162 @@ class XDriverTest(unittest.TestCase):
                                            'line': 1}]), 'game exited')
 
 
+class SandboxWsbTest(unittest.TestCase):
+    def test_wsb_is_well_formed_with_the_mapped_folders(self):
+        folders = [(r'C:\b', winsandbox.BOX_BIN, True),
+                   (r'C:\Users\thier\iwd2r-vm\game', winsandbox.BOX_GAME,
+                    False),
+                   (r'C:\r & s', winsandbox.BOX_RESULTS, False),
+                   (r'C:\t', winsandbox.BOX_TOOLS, True)]
+        root = ET.fromstring(winsandbox.make_wsb(folders,
+                                                 winsandbox.logon_command()))
+        self.assertEqual(root.tag, 'Configuration')
+        self.assertEqual(root.findtext('Networking'), 'Disable')
+        self.assertEqual(root.findtext('vGPU'), 'Enable')
+        self.assertEqual(root.findtext('MemoryInMB'), '4096')
+        mapped = [(m.findtext('HostFolder'), m.findtext('SandboxFolder'),
+                   m.findtext('ReadOnly'))
+                  for m in root.find('MappedFolders')]
+        self.assertEqual(mapped, [
+            (r'C:\b', r'C:\iwd2r\bin', 'true'),
+            (r'C:\Users\thier\iwd2r-vm\game', r'C:\iwd2r\game', 'false'),
+            (r'C:\r & s', r'C:\iwd2r\results', 'false'),
+            (r'C:\t', r'C:\iwd2r\tools', 'true')])
+        command = root.find('LogonCommand').findtext('Command')
+        self.assertIn(r'C:\iwd2r\tools\driver.ps1', command)
+        self.assertIn('-ExecutionPolicy Bypass', command)
+
+    def test_driver_config_and_inputs(self):
+        cfg = winsandbox.driver_config(['A/B=1', 'C/D=2'], 180, 30, 'x')
+        self.assertEqual(cfg['ini_override'], 'A/B=1;C/D=2')
+        self.assertEqual(cfg['exe'], r'C:\iwd2r\bin\iwd2r.exe')
+        self.assertEqual(cfg['actions'], r'C:\iwd2r\tools\actions.json')
+        with tempfile.TemporaryDirectory() as tmp:
+            winsandbox.write_inputs(tmp, cfg, [{'op': 'quit', 'line': 1}])
+            self.assertEqual(sorted(os.listdir(tmp)),
+                             ['actions.json', 'config.json', 'driver.ps1'])
+            with open(os.path.join(tmp, 'driver.ps1')) as f:
+                self.assertEqual(f.readline().strip(), NEW_HASH)
+
+    def test_start_batch(self):
+        self.assertEqual(winsandbox.start_batch(r'C:\r\run.wsb'),
+                         '@echo off\nstart "" '
+                         '"C:\\Windows\\System32\\WindowsSandbox.exe" '
+                         '"C:\\r\\run.wsb"\n')
+
+    def test_available(self):
+        self.assertFalse(winsandbox.available('/nonexistent/WindowsSandbox.exe'))
+        self.assertIn('Containers-DisposableClientVM', winsandbox.ENABLE_HINT)
+
+
+class SandboxCacheTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.src = os.path.join(self._tmp.name, 'install')
+        self.cache = os.path.join(self._tmp.name, 'cache')
+        os.makedirs(self.src)
+        self.write(self.src, 'CHITIN.KEY', b'KEY1', 1000)
+
+    def write(self, directory, name, data, mtime=None):
+        os.makedirs(directory, exist_ok=True)
+        path = os.path.join(directory, name)
+        with open(path, 'wb') as f:
+            f.write(data)
+        if mtime is not None:
+            os.utime(path, (mtime, mtime))
+
+    def test_refresh_decision(self):
+        self.assertTrue(winsandbox.cache_needs_refresh(self.src, self.cache))
+        self.write(self.cache, 'chitin.key', b'KEY1', 1000)
+        self.assertFalse(winsandbox.cache_needs_refresh(self.src, self.cache))
+        self.write(self.cache, 'chitin.key', b'KEY1', 1001)
+        self.assertTrue(winsandbox.cache_needs_refresh(self.src, self.cache))
+        self.write(self.cache, 'chitin.key', b'KEY12', 1000)
+        self.assertTrue(winsandbox.cache_needs_refresh(self.src, self.cache))
+
+    def test_source_without_key_is_an_error(self):
+        with self.assertRaises(FileNotFoundError):
+            winsandbox.cache_needs_refresh(self.cache, self.src)
+
+    def test_reset_inis_copies_from_the_install(self):
+        self.write(self.src, 'icewind2.ini', b'orig')
+        self.write(self.cache, 'icewind2.ini', b'changed by a run')
+        self.assertEqual(winsandbox.reset_cache_inis(self.src, self.cache),
+                         ['icewind2.ini'])
+        with open(os.path.join(self.cache, 'icewind2.ini'), 'rb') as f:
+            self.assertEqual(f.read(), b'orig')
+
+
+def tiny_pe(dlls):
+    """A minimal PE32+ image whose import directory names dlls."""
+    data = bytearray(0x600)
+    data[0:2] = b'MZ'
+    struct.pack_into('<I', data, 0x3C, 0x40)
+    data[0x40:0x44] = b'PE\0\0'
+    struct.pack_into('<HH12xHH', data, 0x44, 0x8664, 1, 0xF0, 0x22)
+    opt = 0x58
+    struct.pack_into('<H', data, opt, 0x20B)
+    struct.pack_into('<II', data, opt + 112 + 8, 0x1000, 20 * (len(dlls) + 1))
+    section = opt + 0xF0
+    data[section:section + 8] = b'.idata\0\0'
+    struct.pack_into('<IIII', data, section + 8, 0x200, 0x1000, 0x200, 0x400)
+    name_rva = 0x1100
+    for i, dll in enumerate(dlls):
+        struct.pack_into('<IIIII', data, 0x400 + 20 * i, 0, 0, 0, name_rva, 0)
+        at = 0x400 + name_rva - 0x1000
+        data[at:at + len(dll) + 1] = dll.encode() + b'\0'
+        name_rva += 0x20
+    return bytes(data)
+
+
+class SandboxRuntimeTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.dir = self._tmp.name
+
+    def test_pe_imports(self):
+        path = os.path.join(self.dir, 'a.exe')
+        with open(path, 'wb') as f:
+            f.write(tiny_pe(['KERNEL32.dll', 'VCRUNTIME140.dll']))
+        self.assertEqual(winsandbox.pe_imports(path),
+                         ['KERNEL32.dll', 'VCRUNTIME140.dll'])
+        with open(path, 'wb') as f:
+            f.write(b'not a PE')
+        with self.assertRaises(ValueError):
+            winsandbox.pe_imports(path)
+
+    def test_deploy_copies_only_the_imported_runtime(self):
+        crt = os.path.join(self.dir, 'Redist', '14.40.1', 'x64',
+                           'Microsoft.VC143.CRT')
+        newer = os.path.join(self.dir, 'Redist', '14.44.2', 'x64',
+                             'Microsoft.VC143.CRT')
+        for d in (crt, newer):
+            os.makedirs(d)
+            for name in ('vcruntime140.dll', 'vcruntime140_1.dll',
+                         'msvcp140.dll', 'concrt140.dll'):
+                with open(os.path.join(d, name), 'w') as f:
+                    f.write(d)
+        self.assertEqual(winsandbox.find_redist(
+            os.path.join(self.dir, 'Redist')), newer)
+        out = os.path.join(self.dir, 'bin')
+        os.makedirs(out)
+        exe = os.path.join(out, 'iwd2r.exe')
+        with open(exe, 'wb') as f:
+            f.write(tiny_pe(['KERNEL32.dll', 'MSVCP140.dll',
+                             'VCRUNTIME140.dll', 'VCRUNTIME140_1.dll']))
+        names = winsandbox.deploy_runtime(exe, lambda m: None,
+                                          os.path.join(self.dir, 'Redist'))
+        self.assertEqual(names, ['msvcp140.dll', 'vcruntime140.dll',
+                                 'vcruntime140_1.dll'])
+        self.assertEqual(sorted(os.listdir(out)),
+                         ['iwd2r.exe', 'msvcp140.dll', 'vcruntime140.dll',
+                          'vcruntime140_1.dll'])
+        with open(exe, 'wb') as f:
+            f.write(tiny_pe(['KERNEL32.dll']))
+        self.assertEqual(winsandbox.deploy_runtime(exe, lambda m: None,
+                                                   self.dir), [])
 
 
 if __name__ == '__main__':
