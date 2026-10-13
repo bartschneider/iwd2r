@@ -5,6 +5,7 @@
 #include "CCreatureFile.h"
 #include "CGameAnimationType.h"
 #include "CGameButtonList.h"
+#include "CResCHR.h"
 #include "CGameArea.h"
 #include "CGameEffect.h"
 #include "CGameObjectArray.h"
@@ -1031,7 +1032,7 @@ void CScreenCreateChar::UpdateMainPanel(CGameSprite* pSprite)
                             for (UINT nIndex = 0; nIndex < pSprite->m_spells.GetSpellsAtLevel(nClassIndex, nLevel)->m_List.size(); nIndex++) {
                                 UINT nID = pSprite->m_spells.GetSpellsAtLevel(nClassIndex, nLevel)->Get(nIndex)->m_nID;
 
-                                CSpell cSpell(g_pBaldurChitin->GetObjectGame()->m_spells.Get(nID));
+                                CSpell cSpell(g_pBaldurChitin->GetObjectGame()->m_spells.Get636(nID));
                                 if (cSpell.pRes != NULL) {
                                     cSpell.Demand();
                                     STRREF strName = cSpell.GetGenericName();
