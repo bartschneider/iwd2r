@@ -674,6 +674,158 @@ void RealizeRange(CaseContext& ctx)
     }
 }
 
+// CVidPalette::RealizeResource(pDestPalette, nBpp, dwFlags, pAffectArgs)
+// (0x7C04B0), `ret 0x10` at 0x7C0CB0.
+using RealizeResourceFn = void(__fastcall*)(void* self, void* edx, uint32_t* pDest, int32_t nBpp, uint32_t dwFlags,
+    void* pAffectArgs);
+constexpr uintptr_t kRealizeResource = 0x7C04B0;
+constexpr size_t kPaletteEntriesOffset = 0xC;
+
+// CVidPalette::RealizeResource (0x7C04B0) at 32 bpp: a resource palette
+// of 256 random entries (entry 0 sometimes 0xFF00, entry 1 sometimes black,
+// for the reserved-entry flags 0x400000 and 0x800000), range 0's tint, add
+// and light each absent, steady (period 1; 0 also for the add) or pulsing
+// (period 2 to 30), the suppress mask, every flag bit the function and its
+// callees read (including the add flag 0x40000 and the combined tint
+// 0x30000), and the video mode's fade, brightness, gamma and global tint.
+// The palette comes from the original's constructor (0x7BEEA0, type 0) with
+// m_pPalette, m_nEntries and m_nAUCounterBase set; all 256 destination
+// entries are compared.
+void RealizeResource(CaseContext& ctx)
+{
+    VideoFixture video(ctx);
+    Picks picks(ctx.seed, 0x5265616C52657300ull); // "RealRes"
+    const uint32_t kFlagBits[] = { 0x8, 0x10000, 0x20000, 0x40000, 0x80000, 0x200000, 0x2000000, 0x400000,
+        0x800000 };
+
+    for (int n = 0; n < 200 + ctx.iterations; ++n) {
+        ModeValues values;
+        values.fade = static_cast<uint8_t>(picks.Between(0, 3) == 0 ? picks.Between(0, CVidMode::NUM_FADE_FRAMES)
+                                                                    : CVidMode::NUM_FADE_FRAMES);
+        values.globalTint = picks.Between(0, 2) == 0 ? 0xFFFFFF : (picks.Bits() & 0xFFFFFF);
+        values.brightness = static_cast<uint8_t>(picks.Between(0, 2) == 0 ? picks.Between(0, 255) : 0);
+        values.gamma = static_cast<uint8_t>(picks.Between(0, 2) == 0 ? picks.Between(0, 40) : 0);
+        const int32_t auCounter = picks.Between(0, 100000);
+        const int32_t auBase = picks.Between(1, 1 << 24);
+        uint32_t dwFlags = 0;
+        for (const uint32_t bit : kFlagBits) {
+            if (picks.Between(0, 2) == 0) {
+                dwFlags |= bit;
+            }
+        }
+
+        RGBQUAD entries[256];
+        for (RGBQUAD& entry : entries) {
+            const uint32_t bits = picks.Bits();
+            std::memcpy(&entry, &bits, sizeof(entry));
+        }
+        if (picks.Between(0, 1)) {
+            const uint32_t green = 0xFF00;
+            std::memcpy(&entries[0], &green, 4);
+        }
+        if (picks.Between(0, 1)) {
+            std::memset(&entries[1], 0, 4);
+        }
+
+        uint32_t colors[3];
+        for (uint32_t& color : colors) {
+            color = picks.Bits() & 0xFFFFFF;
+        }
+        bool present[3];
+        uint32_t rangeColors[3];
+        uint8_t periods[3];
+        for (int kind = 0; kind < 3; ++kind) {
+            present[kind] = picks.Between(0, 2) != 0;
+            rangeColors[kind] = picks.Bits() & 0xFFFFFF;
+            const int32_t form = picks.Between(0, 2);
+            if (form == 0) {
+                periods[kind] = static_cast<uint8_t>(kind == 1 && picks.Between(0, 1) ? 0 : 1);
+            } else {
+                periods[kind] = static_cast<uint8_t>(picks.Between(2, 30));
+            }
+        }
+        const uint8_t suppress = static_cast<uint8_t>(picks.Bits());
+
+        char inputs[220];
+        std::snprintf(inputs, sizeof(inputs),
+            "input %d: dwFlags 0x%X, fade %u, tint 0x%X, brightness %u, gamma %u, AU %d+%d, suppress 0x%X, "
+            "range tint %d/%u add %d/%u light %d/%u",
+            n, dwFlags, values.fade, values.globalTint, values.brightness, values.gamma, auBase, auCounter, suppress,
+            present[0], periods[0], present[1], periods[1], present[2], periods[2]);
+        ctx.SetInputs(inputs);
+
+        uint32_t* originalDest = nullptr;
+        ctx.CallOriginal([&] {
+            Put<uint8_t>(video.mode, kFadeOffset, values.fade);
+            Put<uint32_t>(video.mode, kGlobalTintOffset, values.globalTint);
+            Put<uint8_t>(video.mode, kBrightnessOffset, values.brightness);
+            Put<uint8_t>(video.mode, kGammaOffset, values.gamma);
+            Put<int32_t>(video.chitin, kAUCounterOffset, auCounter);
+
+            uint8_t* palette = OriginalBlock(kPaletteSize);
+            reinterpret_cast<PaletteCtorFn>(kPaletteCtor)(palette, nullptr, 0);
+            uint8_t* paletteEntries = OriginalBlock(sizeof(entries));
+            std::memcpy(paletteEntries, entries, sizeof(entries));
+            Put<uint32_t>(palette, kPalettePaletteOffset,
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(paletteEntries)));
+            Put<int32_t>(palette, kPaletteEntriesOffset, 256);
+            Put<int32_t>(palette, kPaletteBaseOffset, auBase);
+
+            uint8_t* affect = OriginalBlock(kAffectSize);
+            Put<uint32_t>(affect, 0x0, colors[0]);
+            Put<uint32_t>(affect, 0x4, colors[1]);
+            Put<uint32_t>(affect, 0x8, colors[2]);
+            const size_t pointerOffsets[3] = { 0x0C, 0x30, 0x54 };
+            const size_t periodOffsets[3] = { 0x28, 0x4C, 0x70 };
+            uint8_t* targets = OriginalBlock(3 * 4);
+            for (int kind = 0; kind < 3; ++kind) {
+                uint8_t* target = targets + kind * 4;
+                Put<uint32_t>(target, 0, rangeColors[kind]);
+                Put<uint32_t>(affect, pointerOffsets[kind],
+                    present[kind] ? static_cast<uint32_t>(reinterpret_cast<uintptr_t>(target)) : 0u);
+                Put<uint8_t>(affect, periodOffsets[kind], periods[kind]);
+            }
+            Put<uint8_t>(affect, 0x77, suppress);
+
+            originalDest = reinterpret_cast<uint32_t*>(OriginalBlock(256 * 4));
+            reinterpret_cast<RealizeResourceFn>(kRealizeResource)(palette, nullptr, originalDest, 32, dwFlags, affect);
+        });
+
+        video.oursMode->m_nFade = values.fade;
+        video.oursMode->rgbGlobalTint = values.globalTint;
+        video.oursMode->m_nBrightnessCorrection = values.brightness;
+        video.oursMode->m_nGammaCorrection = values.gamma;
+        video.oursChitin->nAUCounter = auCounter;
+
+        RGBQUAD oursEntries[256];
+        std::memcpy(oursEntries, entries, sizeof(entries));
+        CVidPalette palette(CVidPalette::TYPE_RESOURCE);
+        palette.m_pPalette = oursEntries;
+        palette.m_nEntries = 256;
+        palette.m_nAUCounterBase = auBase;
+
+        CVIDIMG_PALETTEAFFECT affect;
+        std::memset(&affect, 0, sizeof(affect));
+        affect.rgbTintColor = colors[0];
+        affect.rgbAddColor = colors[1];
+        affect.rgbLightColor = colors[2];
+        COLORREF targets[3] = { rangeColors[0], rangeColors[1], rangeColors[2] };
+        affect.pRangeTints[0] = present[0] ? &targets[0] : nullptr;
+        affect.aRangeTintPeriods[0] = periods[0];
+        affect.pRangeAdds[0] = present[1] ? &targets[1] : nullptr;
+        affect.aRangeAddPeriods[0] = periods[1];
+        affect.pRangeLights[0] = present[2] ? &targets[2] : nullptr;
+        affect.aRangeLightPeriods[0] = periods[2];
+        affect.suppressTints = suppress;
+
+        DWORD oursDest[256] = {};
+        palette.RealizeResource(oursDest, 32, dwFlags, &affect);
+        palette.m_pPalette = nullptr;
+        ctx.CountInputs(1);
+        CompareArrays(ctx, originalDest, oursDest, 256);
+    }
+}
+
 // CVidPoly::FillConvexPoly(pSurface, lPitch, rClip, dwColor, dwFlags, ptRef)
 // (0x7C0F40), `ret 0x18`; CVidPoly::CVidPoly (0x7C0DB0), plain ret. It
 // reads m_pVertices (4) and m_nVertices (8) and picks its span function from
@@ -995,6 +1147,7 @@ void CellBrightness(CaseContext& ctx)
 ORACLE_CASE("vid/hline_shaded32", HLineShaded32);
 ORACLE_CASE("vid/hline_shaded_mirrored32", HLineShadedMirrored32);
 ORACLE_CASE("vid/realize_range", RealizeRange);
+ORACLE_CASE("vid/realize_resource", RealizeResource);
 ORACLE_CASE("vid/thick_line32", ThickLine32);
 ORACLE_CASE("vid/brightness_contrast", BrightnessContrast);
 ORACLE_CASE("vid/lighting_effect32", LightingEffect32);

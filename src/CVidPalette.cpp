@@ -1131,19 +1131,21 @@ void CVidPalette::RealizeResource(DWORD* pDestPalette, INT nBpp, DWORD dwFlags, 
     BOOL bTint = GetTint(rgbTint, pAffectArgs, nTintShift, nTintMax, dwFlags);
     if (pAffectArgs != NULL) {
         if (pAffectArgs->pRangeTints[0] != NULL) {
+            // NOTE: The tint products are unsigned 32-bit (0x7C0687): with
+            // 0x30000 the tint reaches 0xFFFF * 255.
             if (pAffectArgs->aRangeTintPeriods[0] == 1) {
-                rgbTint.rgbRed *= GetRValue(*pAffectArgs->pRangeTints[0]);
-                rgbTint.rgbGreen *= GetGValue(*pAffectArgs->pRangeTints[0]);
-                rgbTint.rgbBlue *= GetBValue(*pAffectArgs->pRangeTints[0]);
+                rgbTint.rgbRed = static_cast<INT>(static_cast<DWORD>(rgbTint.rgbRed) * GetRValue(*pAffectArgs->pRangeTints[0]));
+                rgbTint.rgbGreen = static_cast<INT>(static_cast<DWORD>(rgbTint.rgbGreen) * GetGValue(*pAffectArgs->pRangeTints[0]));
+                rgbTint.rgbBlue = static_cast<INT>(static_cast<DWORD>(rgbTint.rgbBlue) * GetBValue(*pAffectArgs->pRangeTints[0]));
             } else {
                 nTintPercentage = m_nAUCounter % (2 * pAffectArgs->aRangeTintPeriods[0]);
                 if (nTintPercentage > pAffectArgs->aRangeTintPeriods[0]) {
                     nTintPercentage = 2 * pAffectArgs->aRangeTintPeriods[0] - nTintPercentage;
                 }
 
-                rgbTint.rgbRed *= NO_TINT - nTintPercentage * (NO_TINT - GetRValue(*pAffectArgs->pRangeTints[0])) / pAffectArgs->aRangeTintPeriods[0];
-                rgbTint.rgbGreen *= NO_TINT - nTintPercentage * (NO_TINT - GetGValue(*pAffectArgs->pRangeTints[0])) / pAffectArgs->aRangeTintPeriods[0];
-                rgbTint.rgbBlue *= NO_TINT - nTintPercentage * (NO_TINT - GetBValue(*pAffectArgs->pRangeTints[0])) / pAffectArgs->aRangeTintPeriods[0];
+                rgbTint.rgbRed = static_cast<INT>(static_cast<DWORD>(rgbTint.rgbRed) * static_cast<DWORD>(NO_TINT - nTintPercentage * (NO_TINT - GetRValue(*pAffectArgs->pRangeTints[0])) / pAffectArgs->aRangeTintPeriods[0]));
+                rgbTint.rgbGreen = static_cast<INT>(static_cast<DWORD>(rgbTint.rgbGreen) * static_cast<DWORD>(NO_TINT - nTintPercentage * (NO_TINT - GetGValue(*pAffectArgs->pRangeTints[0])) / pAffectArgs->aRangeTintPeriods[0]));
+                rgbTint.rgbBlue = static_cast<INT>(static_cast<DWORD>(rgbTint.rgbBlue) * static_cast<DWORD>(NO_TINT - nTintPercentage * (NO_TINT - GetBValue(*pAffectArgs->pRangeTints[0])) / pAffectArgs->aRangeTintPeriods[0]));
             }
 
             bTint = TRUE;
@@ -1158,19 +1160,22 @@ void CVidPalette::RealizeResource(DWORD* pDestPalette, INT nBpp, DWORD dwFlags, 
     BOOL bAdd = GetAdd(rgbInv, pAffectArgs, nAddShift, dwFlags);
     if (pAffectArgs != NULL) {
         if (pAffectArgs->pRangeAdds[0] != NULL) {
+            // NOTE: The complements are bytes, 255 - x (0x7C07A4, 0x7C0751); a steady
+            // add sets the add percentage to its period (0 or 1).
             if (pAffectArgs->aRangeAddPeriods[0] == 1 || pAffectArgs->aRangeAddPeriods[0] == 0) {
-                rgbInv.rgbRed *= ~GetRValue(*pAffectArgs->pRangeAdds[0]);
-                rgbInv.rgbGreen *= ~GetGValue(*pAffectArgs->pRangeAdds[0]);
-                rgbInv.rgbBlue *= ~GetBValue(*pAffectArgs->pRangeAdds[0]);
+                rgbInv.rgbRed *= static_cast<BYTE>(~GetRValue(*pAffectArgs->pRangeAdds[0]));
+                rgbInv.rgbGreen *= static_cast<BYTE>(~GetGValue(*pAffectArgs->pRangeAdds[0]));
+                rgbInv.rgbBlue *= static_cast<BYTE>(~GetBValue(*pAffectArgs->pRangeAdds[0]));
+                nAddPercentage = pAffectArgs->aRangeAddPeriods[0];
             } else {
                 nAddPercentage = m_nAUCounter % (2 * pAffectArgs->aRangeAddPeriods[0]);
                 if (nAddPercentage > pAffectArgs->aRangeAddPeriods[0]) {
                     nAddPercentage = 2 * pAffectArgs->aRangeAddPeriods[0] - nAddPercentage;
                 }
 
-                rgbInv.rgbRed *= ~(nAddPercentage * GetRValue(*pAffectArgs->pRangeAdds[0]) / pAffectArgs->aRangeAddPeriods[0]);
-                rgbInv.rgbGreen *= ~(nAddPercentage * GetGValue(*pAffectArgs->pRangeAdds[0]) / pAffectArgs->aRangeAddPeriods[0]);
-                rgbInv.rgbBlue *= ~(nAddPercentage * GetBValue(*pAffectArgs->pRangeAdds[0]) / pAffectArgs->aRangeAddPeriods[0]);
+                rgbInv.rgbRed *= static_cast<BYTE>(~static_cast<BYTE>(static_cast<DWORD>(nAddPercentage * GetRValue(*pAffectArgs->pRangeAdds[0])) / pAffectArgs->aRangeAddPeriods[0]));
+                rgbInv.rgbGreen *= static_cast<BYTE>(~static_cast<BYTE>(static_cast<DWORD>(nAddPercentage * GetGValue(*pAffectArgs->pRangeAdds[0])) / pAffectArgs->aRangeAddPeriods[0]));
+                rgbInv.rgbBlue *= static_cast<BYTE>(~static_cast<BYTE>(static_cast<DWORD>(nAddPercentage * GetBValue(*pAffectArgs->pRangeAdds[0])) / pAffectArgs->aRangeAddPeriods[0]));
             }
 
             bAdd = TRUE;
@@ -1204,14 +1209,16 @@ void CVidPalette::RealizeResource(DWORD* pDestPalette, INT nBpp, DWORD dwFlags, 
 
         if ((pAffectArgs->suppressTints & CVidPalette::m_SuppressTintMasks[0]) != 0) {
             if (nLightPercentage != 0 || nAddPercentage != 0) {
+                // NOTE: The products are unsigned, then divided signed
+                // (0x7C090D).
                 if (nLightPercentage > nAddPercentage) {
-                    rgbTint.rgbRed += nLightPercentage * (nTintMax - rgbTint.rgbRed) / pAffectArgs->aRangeLightPeriods[0];
-                    rgbTint.rgbGreen += nLightPercentage * (nTintMax - rgbTint.rgbGreen) / pAffectArgs->aRangeLightPeriods[0];
-                    rgbTint.rgbBlue += nLightPercentage * (nTintMax - rgbTint.rgbBlue) / pAffectArgs->aRangeLightPeriods[0];
+                    rgbTint.rgbRed += static_cast<INT>(static_cast<DWORD>(nTintMax - rgbTint.rgbRed) * nLightPercentage) / pAffectArgs->aRangeLightPeriods[0];
+                    rgbTint.rgbGreen += static_cast<INT>(static_cast<DWORD>(nTintMax - rgbTint.rgbGreen) * nLightPercentage) / pAffectArgs->aRangeLightPeriods[0];
+                    rgbTint.rgbBlue += static_cast<INT>(static_cast<DWORD>(nTintMax - rgbTint.rgbBlue) * nLightPercentage) / pAffectArgs->aRangeLightPeriods[0];
                 } else {
-                    rgbTint.rgbRed += nAddPercentage * (nTintMax - rgbTint.rgbRed) / pAffectArgs->aRangeAddPeriods[0];
-                    rgbTint.rgbGreen += nAddPercentage * (nTintMax - rgbTint.rgbGreen) / pAffectArgs->aRangeAddPeriods[0];
-                    rgbTint.rgbBlue += nAddPercentage * (nTintMax - rgbTint.rgbBlue) / pAffectArgs->aRangeAddPeriods[0];
+                    rgbTint.rgbRed += static_cast<INT>(static_cast<DWORD>(nTintMax - rgbTint.rgbRed) * nAddPercentage) / pAffectArgs->aRangeAddPeriods[0];
+                    rgbTint.rgbGreen += static_cast<INT>(static_cast<DWORD>(nTintMax - rgbTint.rgbGreen) * nAddPercentage) / pAffectArgs->aRangeAddPeriods[0];
+                    rgbTint.rgbBlue += static_cast<INT>(static_cast<DWORD>(nTintMax - rgbTint.rgbBlue) * nAddPercentage) / pAffectArgs->aRangeAddPeriods[0];
                 }
 
                 if (pVidMode->m_nFade != CVidMode::NUM_FADE_FRAMES) {
@@ -1266,9 +1273,9 @@ void CVidPalette::RealizeResource(DWORD* pDestPalette, INT nBpp, DWORD dwFlags, 
         }
 
         if (bTint) {
-            rgb.rgbRed = (rgbTint.rgbRed * rgb.rgbRed) >> nTintShift;
-            rgb.rgbGreen = (rgbTint.rgbGreen * rgb.rgbGreen) >> nTintShift;
-            rgb.rgbBlue = (rgbTint.rgbBlue * rgb.rgbBlue) >> nTintShift;
+            rgb.rgbRed = static_cast<BYTE>((static_cast<DWORD>(rgbTint.rgbRed) * rgb.rgbRed) >> nTintShift);
+            rgb.rgbGreen = static_cast<BYTE>((static_cast<DWORD>(rgbTint.rgbGreen) * rgb.rgbGreen) >> nTintShift);
+            rgb.rgbBlue = static_cast<BYTE>((static_cast<DWORD>(rgbTint.rgbBlue) * rgb.rgbBlue) >> nTintShift);
         }
 
         if (bAdd) {
