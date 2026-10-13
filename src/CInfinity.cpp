@@ -15,6 +15,7 @@
 #include "CVidPoly.h"
 #include "CVideo3d.h"
 #include "CVisibility.h"
+#include "render/api.h"
 
 // 0x851928
 const DWORD CInfTileSet::USE_COLORKEY = 1;
@@ -1759,11 +1760,11 @@ BOOL CInfinity::FXRenderClippingPolys(INT nPosX, INT nPosY, INT nPosZ, const CPo
     }
 
     DWORD aPolys[5];
-    aPolys[0] = -1;
-    aPolys[1] = -1;
-    aPolys[2] = -1;
-    aPolys[3] = -1;
-    aPolys[4] = -1;
+    aPolys[0] = 0xFFFFFFFF;
+    aPolys[1] = 0xFFFFFFFF;
+    aPolys[2] = 0xFFFFFFFF;
+    aPolys[3] = 0xFFFFFFFF;
+    aPolys[4] = 0xFFFFFFFF;
 
     INT nLeft = rGCBounds.left / 640;
     INT nTop = rGCBounds.top / 480;
@@ -1824,7 +1825,7 @@ BOOL CInfinity::FXRenderClippingPolys(INT nPosX, INT nPosY, INT nPosZ, const CPo
                 // NOTE: The original's duplicate check stops at the first
                 // entry that is set, so it never finds a polygon (0x5CE6D8).
                 for (INT nPrev = 0; nPrev < nPolys; nPrev++) {
-                    if (aPolys[nPrev] != -1) {
+                    if (aPolys[nPrev] != 0xFFFFFFFF) {
                         break;
                     }
 
@@ -3542,18 +3543,25 @@ DWORD CInfinity::RenderMessageScreen(CVidMode* pNewVidMode, INT nSurface)
 
         IDirectDrawSurface* pSurface = pNewVidMode->pSurfaces[nSurface];
 
-        DDBLTFX fx;
-        fx.dwSize = sizeof(fx);
-        fx.dwFillColor = pNewVidMode->ConvertToSurfaceRGB(pNewVidMode->ApplyBrightnessContrast(RGB(0, 0, 0)));
+        COLORREF rgbBlack = pNewVidMode->ApplyBrightnessContrast(RGB(0, 0, 0));
 
-        HRESULT hr;
-        do {
-            hr = g_pBaldurChitin->cVideo.cVidBlitter.Blt(pSurface, &rViewPort, NULL, NULL, DDBLT_WAIT | DDBLT_COLORFILL, &fx);
-            pNewVidMode->CheckResults(hr);
-        } while (hr == DDERR_SURFACELOST || hr == DDERR_WASSTILLDRAWING);
+        // The render API sees the fill as a filled DrawRect, as
+        // CVidMode::EraseScreen's (src/render/api.h); the label still
+        // renders below.
+        if (auto* b = render::Active(); !(b && b->Clipped(rViewPort).DrawRect(rViewPort, rgbBlack, true))) {
+            DDBLTFX fx;
+            fx.dwSize = sizeof(fx);
+            fx.dwFillColor = pNewVidMode->ConvertToSurfaceRGB(rgbBlack);
 
-        // NOTE: The original fills the viewport a second time (0x5D283B).
-        g_pBaldurChitin->cVideo.cVidBlitter.Blt(pSurface, &rViewPort, NULL, NULL, DDBLT_WAIT | DDBLT_COLORFILL, &fx);
+            HRESULT hr;
+            do {
+                hr = g_pBaldurChitin->cVideo.cVidBlitter.Blt(pSurface, &rViewPort, NULL, NULL, DDBLT_WAIT | DDBLT_COLORFILL, &fx);
+                pNewVidMode->CheckResults(hr);
+            } while (hr == DDERR_SURFACELOST || hr == DDERR_WASSTILLDRAWING);
+
+            // NOTE: The original fills the viewport a second time (0x5D283B).
+            g_pBaldurChitin->cVideo.cVidBlitter.Blt(pSurface, &rViewPort, NULL, NULL, DDBLT_WAIT | DDBLT_COLORFILL, &fx);
+        }
     }
 
     label.Render(TRUE);
