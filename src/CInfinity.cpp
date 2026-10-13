@@ -7,6 +7,9 @@
 #include "CResWED.h"
 #include "CScreenWorld.h"
 #include "CTiledObject.h"
+#include "CUIControlLabel.h"
+#include "CUIManager.h"
+#include "CUIPanel.h"
 #include "CUtil.h"
 #include "CVidInf.h"
 #include "CVidPoly.h"
@@ -3492,7 +3495,68 @@ void CInfinity::SetMessageScreen(CResRef resRef, DWORD strText, DWORD nDuration)
 // 0x5D2530
 DWORD CInfinity::RenderMessageScreen(CVidMode* pNewVidMode, INT nSurface)
 {
-    // TODO: Incomplete.
+    // A panel over the viewport holding one label with the message.
+    UI_PANELHEADER panelInfo;
+    panelInfo.nPanelID = 0;
+    panelInfo.x = static_cast<WORD>(rViewPort.left);
+    panelInfo.y = static_cast<WORD>(rViewPort.top);
+    panelInfo.nWidth = static_cast<WORD>(rViewPort.right - rViewPort.left);
+    panelInfo.nHeight = static_cast<WORD>(rViewPort.bottom - rViewPort.top);
+    panelInfo.nType = 0;
+    panelInfo.nControls = 0;
+    memset(panelInfo.refMosaic, 0, RESREF_SIZE);
+    panelInfo.nFirstControl = 0;
+    panelInfo.wFlags = 0;
+
+    UI_CONTROL_LABEL labelInfo;
+    labelInfo.base.nID = 0;
+    labelInfo.base.x = 1;
+    labelInfo.base.y = 1;
+    labelInfo.base.nWidth = static_cast<WORD>(rViewPort.right - rViewPort.left - 1);
+    labelInfo.base.nHeight = static_cast<WORD>(rViewPort.bottom - rViewPort.top - 1);
+    labelInfo.base.nType = 0;
+    labelInfo.nText = m_strMessageText;
+    memset(labelInfo.refTextFont, 0, RESREF_SIZE);
+    memcpy(labelInfo.refTextFont, "REALMS", 6);
+    labelInfo.nForegroundColor = 0;
+    labelInfo.nBackgroundColor = 0;
+    labelInfo.nTextFlags = 0x146;
+
+    CUIManager manager;
+    manager.m_bDoubleSize = g_pBaldurChitin->field_4A2C;
+
+    CUIPanel panel(&manager, &panelInfo);
+    CUIControlLabel label(&panel, &labelInfo);
+
+    if (m_vbMessageScreen.pRes != NULL) {
+        m_vbMessageScreen.RenderDirect(0, rViewPort.left, rViewPort.top, rViewPort, 0, FALSE);
+    } else {
+        if (nSurface >= pNewVidMode->GetNumSurfaces()) {
+            return RENDER_ERROR;
+        }
+
+        if (static_cast<UINT>(nSurface) >= pNewVidMode->m_nSurfaces
+            || pNewVidMode->pSurfaces[nSurface] == NULL) {
+            return RENDER_ERROR;
+        }
+
+        IDirectDrawSurface* pSurface = pNewVidMode->pSurfaces[nSurface];
+
+        DDBLTFX fx;
+        fx.dwSize = sizeof(fx);
+        fx.dwFillColor = pNewVidMode->ConvertToSurfaceRGB(pNewVidMode->ApplyBrightnessContrast(RGB(0, 0, 0)));
+
+        HRESULT hr;
+        do {
+            hr = g_pBaldurChitin->cVideo.cVidBlitter.Blt(pSurface, &rViewPort, NULL, NULL, DDBLT_WAIT | DDBLT_COLORFILL, &fx);
+            pNewVidMode->CheckResults(hr);
+        } while (hr == DDERR_SURFACELOST || hr == DDERR_WASSTILLDRAWING);
+
+        // NOTE: The original fills the viewport a second time (0x5D283B).
+        g_pBaldurChitin->cVideo.cVidBlitter.Blt(pSurface, &rViewPort, NULL, NULL, DDBLT_WAIT | DDBLT_COLORFILL, &fx);
+    }
+
+    label.Render(TRUE);
 
     return RENDER_MESSAGESCREEN;
 }
