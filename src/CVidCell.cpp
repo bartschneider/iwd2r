@@ -2165,7 +2165,133 @@ BOOL CVidCell::sub_7D0C60(BYTE* pSurface, LONG lPitch, DWORD dwFlags)
 // 0x7D1190
 BOOL CVidCell::sub_7D1190(DWORD* pSurface, LONG lPitch, DWORD dwFlags)
 {
-    // TODO: Incomplete.
+    DWORD rgbPalette[256];
+    int nWidth = m_pFrame->nWidth;
+    int nHeight = m_pFrame->nHeight;
+
+    if (nHeight == 0 || nWidth == 0) {
+        return TRUE;
+    }
+
+    // In pixels.
+    LONG nRowJump = (lPitch >> 2) - nWidth;
+
+    BYTE* pFrameData = pRes->GetFrameData(m_pFrame, m_bDoubleSize);
+
+    if (!m_bPaletteChanged) {
+        m_cPalette.SetPalette(pRes->m_pPalette, 256, CVidPalette::TYPE_RESOURCE);
+    }
+
+    m_cPalette.Realize(rgbPalette, 32, dwFlags, &m_paletteAffects, 255);
+
+    if (!m_bShadowOn) {
+        rgbPalette[CVidPalette::SHADOW_ENTRY] = g_pChitin->GetCurrentVideoMode()->field_24;
+    }
+
+    BAMHEADER* pBamHeader = pRes->m_bCacheHeader
+        ? pRes->m_pBamHeaderCopy
+        : pRes->m_pBamHeader;
+    BYTE nTransparentColor = pBamHeader->nTransparentColor;
+
+    // NOTE: The original is hand-written assembly; the run decoding below
+    // walks the same pixels.
+    if (pRes->GetCompressed(m_pFrame, m_bDoubleSize)) {
+        // In bytes.
+        nRowJump = lPitch - nWidth * 4;
+
+        int nRunLength = 0;
+        int pos = 0;
+        for (int y = 0; y < nHeight; y++) {
+            int nRemainingWidth = nWidth;
+            while (nRemainingWidth != 0) {
+                BYTE nColor = pFrameData[pos];
+                if (nColor == nTransparentColor) {
+                    if (nRunLength == 0) {
+                        nRunLength = pFrameData[pos + 1] + 1;
+                    }
+
+                    if (nRemainingWidth == nRunLength) {
+                        pos += 2;
+
+                        pSurface += nRemainingWidth;
+                        nRunLength = 0;
+                        nRemainingWidth = 0;
+                    } else if (nRemainingWidth > nRunLength) {
+                        pos += 2;
+
+                        pSurface += nRunLength;
+                        nRemainingWidth -= nRunLength;
+                        nRunLength = 0;
+                    } else {
+                        pSurface += nRemainingWidth;
+                        nRunLength -= nRemainingWidth;
+                        nRemainingWidth = 0;
+                    }
+                } else {
+                    pos++;
+
+                    // Dark colours are skipped, bright ones drawn opaque,
+                    // the rest blended by their brightness over pixels no
+                    // brighter than that.
+                    DWORD rgb = rgbPalette[nColor];
+                    DWORD nSum = ((rgb >> 16) & 0xFF) + (rgb & 0xFF) + ((rgb >> 8) & 0xFF);
+                    if (nSum > 0x81) {
+                        if (nSum >= 0x28C) {
+                            *pSurface = rgb;
+                        } else {
+                            DWORD nAlpha = (nSum * 0x2A) >> 7;
+                            DWORD nDest = *pSurface;
+                            DWORD nEighths = (nDest >> 3) & 0x1F1F1F;
+                            BYTE nDestSum = static_cast<BYTE>(nEighths + (nEighths >> 8) + (nEighths >> 16));
+                            if (nAlpha >= nDestSum) {
+                                DWORD nInverse = nAlpha ^ 0xFF;
+                                DWORD nSrc = rgb & 0xFFFFFF;
+                                nDest &= 0xFFFFFF;
+                                DWORD nRed = (((nSrc >> 16) * nAlpha + (nDest >> 16) * nInverse) << 8) & 0xFF0000;
+                                DWORD nRedGreen = ((((rgb >> 8) & 0xFF) * nAlpha | nRed) + ((nDest >> 8) & 0xFF) * nInverse) & 0xFFFF00;
+                                DWORD nBlue = (((rgb & 0xFF) * nAlpha + (nDest & 0xFF) * nInverse) >> 8) & 0xFF;
+                                *pSurface = nRedGreen | nBlue;
+                            }
+                        }
+                    }
+                    pSurface++;
+                    nRemainingWidth--;
+                }
+            }
+            pSurface = reinterpret_cast<DWORD*>(reinterpret_cast<BYTE*>(pSurface) + nRowJump);
+        }
+    } else {
+        // NOTE: The original walks nHeight + 1 rows of nWidth + 1 pixels
+        // with no transparency test (0x7D13ED), and the row jump is for
+        // nWidth pixels, so each row starts one pixel further right. It also
+        // stores the pixel's brightness in an unread global (0x8BDDF8).
+        int pos = 0;
+        if (nHeight >= 0) {
+            for (int y = nHeight + 1; y != 0; y--) {
+                if (nWidth >= 0) {
+                    for (int x = nWidth + 1; x != 0; x--) {
+                        DWORD rgb = rgbPalette[pFrameData[pos]];
+                        DWORD nDest = *pSurface;
+                        INT nDestBrightness = static_cast<INT>((nDest & 0xFF) + ((nDest >> 8) & 0xFF) + ((nDest >> 16) & 0xFF)) >> 3;
+                        INT nBrightness = static_cast<INT>((rgb & 0xFF) + ((rgb >> 16) & 0xFF) + ((rgb >> 8) & 0xFF)) / 3;
+                        if (nBrightness >= nDestBrightness) {
+                            INT nInverse = 255 - nBrightness;
+                            INT nBlue = (static_cast<INT>(nDest & 0xFF) * nInverse + static_cast<INT>(rgb & 0xFF) * nBrightness) >> 8;
+                            INT nGreen = (static_cast<INT>((nDest >> 8) & 0xFF) * nInverse + static_cast<INT>((rgb >> 8) & 0xFF) * nBrightness) >> 8;
+                            INT nRed = (static_cast<INT>((rgb >> 16) & 0xFF) * nBrightness + static_cast<INT>((nDest >> 16) & 0xFF) * nInverse) >> 8;
+                            *pSurface = (nDest & 0xFF000000)
+                                | ((nRed & 0xFF) << 16)
+                                | ((nGreen & 0xFF) << 8)
+                                | (nBlue & 0xFF);
+                        }
+                        pSurface++;
+                        pos++;
+                    }
+                }
+                pSurface += nRowJump;
+            }
+        }
+    }
 
     return TRUE;
 }
