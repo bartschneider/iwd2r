@@ -4,6 +4,12 @@
 #include "oracle/runner/registry.h"
 #include "vanilla_config.h"
 
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+
+#include <cstring>
+#include <intrin.h>
 #include <string>
 #include <vector>
 
@@ -94,10 +100,87 @@ void Crash(CaseContext& ctx)
     ctx.Fail(ctx.Inputs(), "an access violation", "returned normally");
 }
 
+// An exception registration on the stack whose handler lives in executable
+// private memory, as every handler of the mapped original does (its image is
+// MEM_PRIVATE, not MEM_IMAGE). The handler counts its calls and returns
+// ExceptionContinueSearch. A fault below it must reach the runner's __except
+// through it: the handler ran at least once and the crash was recorded. With
+// DEP on, x86 Windows refuses such handlers and the process dies instead.
+struct Registration {
+    Registration* next;
+    void* handler;
+};
+
+// C4733: the registration is deliberately not a SafeSEH handler of this
+// image; it stands in for a handler in the mapped original.
+#pragma warning(push)
+#pragma warning(disable : 4733)
+void OriginalSehFrame(CaseContext& ctx)
+{
+    auto* page = static_cast<uint8_t*>(VirtualAlloc(nullptr, 0x1000, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE));
+    if (!page) {
+        ctx.Fail("VirtualAlloc", "an executable page", "none");
+        return;
+    }
+    auto* counter = reinterpret_cast<volatile uint32_t*>(page + 0x20);
+    const uint32_t counterAddress = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(counter));
+    // inc dword [counter]; mov eax, 1; ret
+    const uint8_t stub[] = { 0xFF, 0x05, 0, 0, 0, 0, 0xB8, 1, 0, 0, 0, 0xC3 };
+    std::memcpy(page, stub, sizeof(stub));
+    std::memcpy(page + 2, &counterAddress, 4);
+    FlushInstructionCache(GetCurrentProcess(), page, sizeof(stub));
+    ctx.SetInputs("fault at 0x10 below a registration with handler at private " + oracle::Show(counterAddress - 0x20));
+    try {
+        ctx.CallOriginal([page] {
+            Registration registration;
+            registration.next = reinterpret_cast<Registration*>(static_cast<uintptr_t>(__readfsdword(0)));
+            registration.handler = page;
+            __writefsdword(0, static_cast<unsigned long>(reinterpret_cast<uintptr_t>(&registration)));
+            *reinterpret_cast<volatile uint32_t*>(static_cast<uintptr_t>(0x10)) = 1;
+            __writefsdword(0, static_cast<unsigned long>(reinterpret_cast<uintptr_t>(registration.next)));
+        });
+    } catch (const CaseCrashed&) {
+        if (*counter == 0) {
+            ctx.Fail(ctx.Inputs(), "the private handler called", "never called");
+        }
+        throw;
+    }
+    ctx.Fail(ctx.Inputs(), "an access violation", "returned normally");
+}
+#pragma warning(pop)
+
+// CDungeonMaster::TimerSynchronousUpdate (0x599760, thiscall) registers a
+// __CxxFrameHandler frame (handler stub 0x8217B8, no try blocks) and then
+// reads [this+4] while its state is still -1. With this = 0x10 it faults at
+// 0x599779 under a real original C++ EH frame.
+void OriginalCxxFrame(CaseContext& ctx)
+{
+    using Method = void(__fastcall*)(void* self, void* unused);
+    ctx.SetInputs("CDungeonMaster::TimerSynchronousUpdate(this 0x10)");
+    ctx.CallOriginal([] {
+        reinterpret_cast<Method>(static_cast<uintptr_t>(0x599760))(reinterpret_cast<void*>(0x10), nullptr);
+    });
+    ctx.Fail(ctx.Inputs(), "an access violation", "returned normally");
+}
+
+// AfxThrowMemoryException (0x7FB057): `throw &_simpleMemoryException` through
+// the original _CxxThrowException (0x7E8930) with the original's ThrowInfo
+// for CMemoryException* (0x8A1848). Nothing in the call catches it.
+void OriginalThrow(CaseContext& ctx)
+{
+    using Throw = void(__cdecl*)();
+    ctx.SetInputs("AfxThrowMemoryException()");
+    ctx.CallOriginal([] { reinterpret_cast<Throw>(static_cast<uintptr_t>(0x7FB057))(); });
+    ctx.Fail(ctx.Inputs(), "an uncaught original C++ throw", "returned normally");
+}
+
 } // namespace
 
 // The crash runs before must_fail, so the report shows a case after a fault
 // still running in the same process.
 ORACLE_CASE("selftest/isolation", Isolation);
 ORACLE_CASE_EXPECT("selftest/crash", Crash, OracleExpect::Crash);
+ORACLE_CASE_EXPECT("selftest/original_seh_frame", OriginalSehFrame, OracleExpect::Crash);
+ORACLE_CASE_EXPECT("selftest/original_cxx_frame", OriginalCxxFrame, OracleExpect::Crash);
+ORACLE_CASE_EXPECT("selftest/original_throw", OriginalThrow, OracleExpect::Crash);
 ORACLE_CASE_EXPECT("selftest/must_fail", MustFail, OracleExpect::Fail);

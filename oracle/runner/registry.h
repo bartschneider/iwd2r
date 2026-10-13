@@ -8,6 +8,20 @@
 //
 // The runner runs the cases of one file per process (--file <file>), restoring
 // the original's .data and its rand state before each.
+//
+// What a restore does not cover, and so what cases must respect:
+// - Heap objects are not restored. A case may allocate (and leak) through the
+//   original, but must not free or resize anything reachable from the
+//   snapshot-era .data: the restore would bring back a pointer to a freed
+//   block. After each case the runner validates the original's CRT heap
+//   (HeapValidate). In practice Windows' heap terminates the process on the
+//   corruption it finds (fail-fast, 0xC0000374) rather than returning FALSE:
+//   the parent then prints the status and exits 11, and the report's
+//   "running" field names the case. A FALSE return is reported as a crash
+//   ("heap corrupt after case") and the file's remaining cases are skipped.
+// - Of the thread's _tiddata only the rand state (_holdrand) is restored.
+//   strtok's position, errno/_doserrno, the asctime/gmtime buffers and the
+//   other per-thread fields carry over from case to case.
 #pragma once
 
 #include "oracle/runner/generators.h"
@@ -62,6 +76,16 @@ struct OracleCrash {
     std::string inputs;
     uint32_t code = 0; // the exception code, such as 0xC0000005
     uint32_t address = 0; // where it was raised
+    std::string kind; // "fault", "original C++ throw" or "heap corrupt after case"
+    std::string type; // an original C++ throw's type, such as .PAVCMemoryException@@
+};
+
+// What CallGuarded saw. Plain data: it is filled inside an exception filter.
+struct GuardedFault {
+    uint32_t code;
+    uint32_t address;
+    bool originalThrow; // a C++ throw whose ThrowInfo is in the original image
+    char type[128];
 };
 
 // Thrown by CallOriginal after a fault, caught by the runner: the case stops,
@@ -73,9 +97,11 @@ struct CaseCrashed : std::runtime_error {
     }
 };
 
-// Calls thunk(arg) under __try/__except. On a fault returns false and fills
-// code and address. Defined in snapshot.cpp, the runner's one SEH function.
-bool CallGuarded(void (*thunk)(void*), void* arg, uint32_t* code, uint32_t* address);
+// Calls thunk(arg) under __try/__except. On a fault, or a C++ exception thrown
+// by the original (ThrowInfo inside its image), returns false and fills
+// *fault. The runner's own C++ throws pass through. Defined in snapshot.cpp,
+// the runner's one SEH function.
+bool CallGuarded(void (*thunk)(void*), void* arg, GuardedFault* fault);
 
 class CaseContext {
 public:
@@ -126,13 +152,13 @@ public:
     template <class F>
     void CallOriginal(F&& fn)
     {
-        uint32_t code = 0;
-        uint32_t address = 0;
+        GuardedFault fault = {};
         using Fn = std::remove_reference_t<F>;
         auto thunk = [](void* arg) { (*static_cast<Fn*>(arg))(); };
-        if (!CallGuarded(thunk, const_cast<void*>(static_cast<const void*>(&fn)), &code, &address)) {
+        if (!CallGuarded(thunk, const_cast<void*>(static_cast<const void*>(&fn)), &fault)) {
             crashed_ = true;
-            crash_ = OracleCrash { inputs_, code, address };
+            crash_ = OracleCrash { inputs_, fault.code, fault.address,
+                fault.originalThrow ? "original C++ throw" : "fault", fault.type };
             throw CaseCrashed();
         }
     }
@@ -147,6 +173,12 @@ public:
     long long FailureCount() const { return failureCount_; }
     const std::vector<OracleFailure>& Failures() const { return failures_; }
     bool Crashed() const { return crashed_; }
+    // Records a crash found after the case, such as a corrupt heap.
+    void SetCrash(const OracleCrash& crash)
+    {
+        crashed_ = true;
+        crash_ = crash;
+    }
     const OracleCrash& Crash() const { return crash_; }
 
     static constexpr size_t kKeptFailures = 20;
@@ -170,3 +202,6 @@ struct DataRange {
 bool TakeSnapshot(DataRange data, std::string* error);
 // Puts the snapshot back. The runner calls it before every case.
 void RestoreData();
+// HeapValidate on the original's CRT heap (_crtheap); the runner calls it
+// after every case.
+bool OriginalHeapValid();

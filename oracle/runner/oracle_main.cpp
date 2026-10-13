@@ -1,8 +1,9 @@
 // iwd2r_oracle: maps the vanilla iwd2.exe at 0x400000 and enters it through its
 // own CRT, whose call to WinMain is redirected to OracleMain.
 //
-//   iwd2r_oracle.exe [<iwd2.exe>] --file <name> [--seed N] [--iterations N] [--out <dir>]
+//   iwd2r_oracle.exe [<iwd2.exe>] --file <name> [--seed N] [--iterations N] [--out <dir>] [--timeout S]
 //   iwd2r_oracle.exe [<iwd2.exe>] --selftest [--test-bad-callsite] [--test-bad-target] [--test-occupy]
+//                    [--test-hang] [--timeout S]
 //   iwd2r_oracle.exe --list
 //
 // The exe defaults to iwd2.exe in the current folder.
@@ -11,8 +12,10 @@
 // original rand with the low 32 bits of --seed (default 1), snapshots .data
 // and the thread's rand state, and before each case restores them. Each case
 // prints one line; the report goes to <out>/<name>.json (default: the current
-// folder). --iterations (default 10000) bounds unbounded generators. --list
-// prints the case file names, one per line.
+// folder), rewritten after every case with "complete": false until the end.
+// --iterations (default 10000) bounds unbounded generators. --list prints the
+// case file names, one per line. --timeout S (default none) makes the parent
+// kill the child's job after S seconds and exit 10.
 //
 // --selftest prints machine-checkable lines that tools/oracle.py compares with
 // the exe file: `mem <addr> <dword>` for a few image addresses, `import <addr>
@@ -20,8 +23,9 @@
 // the original rand() after the original srand(1).
 // --test-bad-callsite patches one byte past the recorded WinMain call site and
 // must be refused; --test-bad-target expects a wrong WinMain address at the
-// right call site and must be refused too; --test-occupy takes 0x400000 before the reservation and
-// must be reported with the occupant's name.
+// right call site and must be refused too; --test-occupy takes 0x400000
+// before the reservation and must be reported with the occupant's name;
+// --test-hang makes OracleMain sleep forever, for --timeout.
 //
 // The program runs twice: the parent starts a suspended copy with --child,
 // reserves 0x400000-0xA21000 in it, then resumes it and passes on its exit
@@ -31,7 +35,9 @@
 // Exit codes: 0 success (every case as declared), 1 usage or load error, 3 an
 // unresolved import was called, 4 the image range is occupied, 5 wrong MD5,
 // 6 call site refused, 7 a case did not do what it declared, 8 the snapshot
-// was used off its thread.
+// was used off its thread, 9 DEP could not be turned off, 10 --timeout ran
+// out, 11 the child died of an exception no handler caught (the status is
+// printed; Windows' heap fail-fast, 0xC0000374, is one).
 #include "oracle/loader/pe.h"
 #include "oracle/runner/registry.h"
 #include "oracle/runner/report.h"
@@ -55,8 +61,29 @@ namespace {
 
 constexpr uint32_t kTestOccupyAddress = 0x400000;
 constexpr const char* kChildFlag = "--child";
+constexpr int kExitTimeout = 10;
+constexpr int kExitChildDied = 11;
+
+const char* StatusName(DWORD code)
+{
+    switch (code) {
+    case 0xC0000005u:
+        return "access violation";
+    case 0xC00000FDu:
+        return "stack overflow";
+    case 0xC0000374u:
+        return "heap corruption";
+    case 0xC0000409u:
+        return "fail-fast or stack buffer overrun";
+    case 0xE06D7363u:
+        return "uncaught C++ exception";
+    default:
+        return "unknown";
+    }
+}
 
 bool g_selftest = false;
+bool g_testHang = false; // --test-hang: OracleMain never returns
 PeImage g_image;
 std::string g_file; // --file
 uint64_t g_seed = 1;
@@ -67,7 +94,7 @@ std::string g_out = ".";
 // range in it before any of its code runs; resumes it and returns its exit
 // code. The child cannot reserve the range itself: by the time its first TLS
 // callback runs, Windows has mapped NLS tables at 0x400000.
-int RunChild(bool occupy)
+int RunChild(bool occupy, unsigned timeoutSeconds)
 {
     std::string command = std::string(GetCommandLineA()) + " " + kChildFlag;
     STARTUPINFOA startup = {};
@@ -125,11 +152,27 @@ int RunChild(bool occupy)
         return 4;
     }
     ResumeThread(child.hThread);
-    WaitForSingleObject(child.hProcess, INFINITE);
+    const DWORD waited
+        = WaitForSingleObject(child.hProcess, timeoutSeconds ? static_cast<DWORD>(timeoutSeconds) * 1000 : INFINITE);
+    if (waited != WAIT_OBJECT_0) {
+        TerminateJobObject(job, kExitTimeout);
+        WaitForSingleObject(child.hProcess, 10000);
+        std::fprintf(stderr, "oracle: timed out after %u s; the runner child was killed\n", timeoutSeconds);
+        std::fflush(stderr);
+        return kExitTimeout;
+    }
     DWORD code = 1;
     GetExitCodeProcess(child.hProcess, &code);
     CloseHandle(child.hThread);
     CloseHandle(child.hProcess);
+    // An exception status means the child died, e.g. by a fail-fast that no
+    // handler can catch. WSL passes only the low byte of an exit code on, so
+    // name the status here and exit with a code of our own.
+    if (code >= 0xC0000000u || code == 0xE06D7363u) {
+        std::fprintf(stderr, "oracle: the runner child died with exception 0x%08lX (%s)\n", code, StatusName(code));
+        std::fflush(stderr);
+        return kExitChildDied;
+    }
     return static_cast<int>(code);
 }
 
@@ -228,12 +271,36 @@ std::vector<std::string> CaseFiles()
 const char* Outcome(const CaseResult& r)
 {
     if (r.crashed) {
-        return r.expect == OracleExpect::Crash ? "crashed (expected)" : "CRASHED";
+        return AsExpected(r) ? "crashed (expected)" : "CRASHED";
     }
     if (r.failureCount > 0) {
         return r.expect == OracleExpect::Fail ? "failed (expected)" : "FAILED";
     }
     return r.expect == OracleExpect::Pass ? "passed" : "PASSED (expected to fail)";
+}
+
+std::string ReportPath()
+{
+    return g_out + "\\" + g_file + ".json";
+}
+
+// Writes the report through a temporary file and a rename, so a reader never
+// sees half of it.
+bool WriteReport(const std::vector<CaseResult>& results, bool complete, const char* running = nullptr)
+{
+    const std::string path = ReportPath();
+    const std::string temp = path + ".tmp";
+    const std::string json = ReportJson(g_file, g_seed, g_iterations, results, complete, running);
+    std::FILE* out = std::fopen(temp.c_str(), "wb");
+    const bool written = out && std::fwrite(json.data(), 1, json.size(), out) == json.size();
+    if (out && std::fclose(out) != 0) {
+        return false;
+    }
+    if (!written || !MoveFileExA(temp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING)) {
+        std::fprintf(stderr, "oracle: cannot write %s\n", path.c_str());
+        return false;
+    }
+    return true;
 }
 
 // Runs the cases of g_file. Called from OracleMain on the original's main
@@ -263,10 +330,20 @@ int RunCases()
     std::printf("oracle: %s, seed %llu, iterations %d\n", g_file.c_str(), static_cast<unsigned long long>(g_seed),
         g_iterations);
     std::vector<CaseResult> results;
+    // The report is rewritten after every case, so a killed process leaves the
+    // finished ones behind ("complete": false).
+    if (!WriteReport(results, false)) {
+        return 1;
+    }
     bool allExpected = true;
     for (const OracleCase& c : OracleCases()) {
         if (CaseFileName(c) != g_file) {
             continue;
+        }
+        // Names the case in the report while it runs, so a process that dies
+        // in it (a heap fail-fast, say) still says where.
+        if (!WriteReport(results, false, c.id)) {
+            return 1;
         }
         RestoreData();
         CaseContext ctx(g_seed, g_iterations);
@@ -276,6 +353,12 @@ int RunCases()
             // Recorded in ctx; the next case starts from the snapshot.
         } catch (const std::exception& e) {
             ctx.Fail(ctx.Inputs(), "no C++ exception", std::string("exception: ") + e.what());
+        }
+        const bool heapValid = OriginalHeapValid();
+        if (!heapValid) {
+            const OracleCrash before = ctx.Crash();
+            ctx.SetCrash(OracleCrash { ctx.Inputs(), before.code, before.address, kHeapCorrupt,
+                ctx.Crashed() ? "after a " + before.kind : "" });
         }
         CaseResult r;
         r.id = c.id;
@@ -293,20 +376,24 @@ int RunCases()
                 r.failures[i].inputs.c_str(), r.failures[i].original.c_str(), r.failures[i].ours.c_str());
         }
         if (r.crashed) {
-            std::printf("    seed %llu, inputs %s: exception 0x%08X at 0x%08X\n",
-                static_cast<unsigned long long>(g_seed), r.crash.inputs.c_str(), r.crash.code, r.crash.address);
+            std::printf("    seed %llu, inputs %s: %s%s%s, exception 0x%08X at 0x%08X\n",
+                static_cast<unsigned long long>(g_seed), r.crash.inputs.c_str(), r.crash.kind.c_str(),
+                r.crash.type.empty() ? "" : " ", r.crash.type.c_str(), r.crash.code, r.crash.address);
         }
         std::fflush(stdout);
         results.push_back(std::move(r));
+        if (!WriteReport(results, false)) {
+            return 1;
+        }
+        if (!heapValid) {
+            std::printf("oracle: the original's heap is corrupt; the file's remaining cases are not run\n");
+            break;
+        }
     }
-    const std::string path = g_out + "\\" + g_file + ".json";
-    std::FILE* out = std::fopen(path.c_str(), "wb");
-    const std::string json = ReportJson(g_file, g_seed, g_iterations, results);
-    if (!out || std::fwrite(json.data(), 1, json.size(), out) != json.size() || std::fclose(out) != 0) {
-        std::fprintf(stderr, "oracle: cannot write %s\n", path.c_str());
+    if (!WriteReport(results, true)) {
         return 1;
     }
-    std::printf("oracle: wrote %s\n", path.c_str());
+    std::printf("oracle: wrote %s\n", ReportPath().c_str());
     return allExpected ? 0 : 7;
 }
 
@@ -334,6 +421,10 @@ std::string CaseFileName(const OracleCase& c)
 int __stdcall OracleMain(HINSTANCE, HINSTANCE, LPSTR, int)
 {
     int code = 1;
+    if (g_testHang) {
+        std::fflush(stdout);
+        Sleep(INFINITE);
+    }
     if (g_selftest) {
         code = SelfTest();
     } else {
@@ -352,6 +443,7 @@ int main(int argc, char** argv)
     bool occupy = false;
     bool child = false;
     bool list = false;
+    unsigned timeoutSeconds = 0;
     bool usage = false;
     for (int i = 1; i < argc && !usage; ++i) {
         const bool hasValue = i + 1 < argc;
@@ -362,6 +454,10 @@ int main(int argc, char** argv)
             badCallSite = true;
         } else if (std::strcmp(argv[i], "--test-bad-target") == 0) {
             badTarget = true;
+        } else if (std::strcmp(argv[i], "--test-hang") == 0) {
+            g_testHang = true;
+        } else if (std::strcmp(argv[i], "--timeout") == 0 && hasValue) {
+            timeoutSeconds = ParseUnsigned(argv[++i], &ok);
         } else if (std::strcmp(argv[i], "--test-occupy") == 0) {
             occupy = true;
         } else if (std::strcmp(argv[i], kChildFlag) == 0) {
@@ -407,13 +503,29 @@ int main(int argc, char** argv)
     }
     if (usage || (g_selftest && !g_file.empty())) {
         std::fprintf(stderr,
-            "usage: iwd2r_oracle [<iwd2.exe>] --file <name> [--seed N] [--iterations N] [--out <dir>]\n"
-            "       iwd2r_oracle [<iwd2.exe>] --selftest [--test-bad-callsite] [--test-bad-target] [--test-occupy]\n"
+            "usage: iwd2r_oracle [<iwd2.exe>] --file <name> [--seed N] [--iterations N] [--out <dir>] "
+            "[--timeout S]\n"
+            "       iwd2r_oracle [<iwd2.exe>] --selftest [--test-bad-callsite] [--test-bad-target] [--test-occupy] "
+            "[--test-hang] [--timeout S]\n"
             "       iwd2r_oracle --list\n");
         return 1;
     }
     if (!child) {
-        return RunChild(occupy);
+        return RunChild(occupy, timeoutSeconds);
+    }
+    // The original's SEH and C++ EH handlers live in the mapped image, which
+    // is private memory, not a loaded image. With DEP on, x86 Windows rejects
+    // such handlers during dispatch and the process dies before reaching the
+    // runner's __except. The runner links with /NXCOMPAT:NO; make sure.
+    SetProcessDEPPolicy(0);
+    DWORD depFlags = 0;
+    BOOL depPermanent = FALSE;
+    if (!GetProcessDEPPolicy(GetCurrentProcess(), &depFlags, &depPermanent) || depFlags != 0) {
+        std::fprintf(stderr,
+            "oracle: DEP is on for the runner (flags 0x%lX, permanent %d); the original's exception handlers would be "
+            "refused. Set the system DEP policy to OptIn or OptOut with an exception for iwd2r_oracle.exe\n",
+            depFlags, depPermanent);
+        return 9;
     }
     std::string error;
     if (!CheckImageRangeReserved(&error)) {

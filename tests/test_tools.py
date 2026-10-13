@@ -1172,12 +1172,14 @@ class OracleSelftestTest(unittest.TestCase):
         runs = {name: pattern for name, _, _, _, pattern
                 in oracle.SELFTEST_RUNS}
         self.assertEqual(list(runs), ['selftest', 'wrong WinMain call site',
-                                      'wrong WinMain target',
+                                      'wrong WinMain target', 'timeout',
                                       'range pre-occupied', 'wrong MD5'])
         messages = {
             'wrong WinMain call site':
                 'oracle: refusing to patch the WinMain call: byte at '
                 '0x007E9B44 is 0xA8, not a call (0xE8)',
+            'timeout':
+                'oracle: timed out after 3 s; the runner child was killed',
             'wrong WinMain target':
                 'oracle: refusing to patch the WinMain call: call at '
                 '0x007E9B43 targets 0x004218F0, expected WinMain at '
@@ -1200,7 +1202,7 @@ class OracleSelftestTest(unittest.TestCase):
         self.assertEqual(vanilla['md5'], oracle.vanilla_md5())
         self.assertRegex(vanilla['md5'], r'^[0-9a-f]{32}$')
         for key in ('winmain_call_site', 'winmain', 'srand', 'rand',
-                    'getptd'):
+                    'getptd', 'crt_heap'):
             self.assertRegex(vanilla[key], r'^0x[0-9A-F]+$', key)
             self.assertIn(key, vanilla['notes'])
         ranges = [(int(a, 16), int(b, 16)) for a, b in vanilla['crt_ranges']]
@@ -1216,9 +1218,14 @@ class OracleSelftestTest(unittest.TestCase):
         # _holdrand: offset 0x14 of _tiddata (0x74 bytes).
         self.assertEqual(vanilla['tiddata_rand'], ['0x14', '0x18'])
         self.assertIn('tiddata_rand', vanilla['notes'])
+        # _crtheap lies inside a CRT range, so restores never touch it.
+        heap = int(vanilla['crt_heap'], 16)
+        self.assertTrue(any(start <= heap and heap + 4 <= end
+                            for start, end in ranges))
 
 
-def oracle_case(name, expect='pass', failures=0, crashed=False):
+def oracle_case(name, expect='pass', failures=0, crashed=False,
+                kind='fault'):
     return {'case': name, 'expect': expect, 'iterations': 10,
             'passed': not failures and not crashed,
             'failure_count': failures,
@@ -1226,7 +1233,13 @@ def oracle_case(name, expect='pass', failures=0, crashed=False):
             * min(failures, 1),
             'crashed': crashed,
             'crash': {'inputs': 'x', 'exception': '0xC0000005',
-                      'address': '0x00000010'} if crashed else None}
+                      'address': '0x00000010', 'kind': kind, 'type': ''}
+            if crashed else None}
+
+
+def oracle_report(cases, complete=True, running=None):
+    return {'file': 'f', 'complete': complete, 'running': running,
+            'seed': 1, 'iterations': 100, 'cases': cases}
 
 
 class OracleReportTest(unittest.TestCase):
@@ -1237,7 +1250,8 @@ class OracleReportTest(unittest.TestCase):
                 oracle_case('selftest/must_fail', 'fail', failures=100)]
 
     def merge(self, *runs):
-        return oracle.merge_reports(1, 100, list(runs))
+        return oracle.merge_reports(
+            1, 100, [run if len(run) == 4 else run + (None,) for run in runs])
 
     def test_case_ok(self):
         self.assertTrue(oracle.case_ok(oracle_case('a')))
@@ -1249,10 +1263,18 @@ class OracleReportTest(unittest.TestCase):
                                                     crashed=True)))
         self.assertTrue(oracle.case_ok(oracle_case('a', 'crash',
                                                    crashed=True)))
+        # A declared crash with a mismatch beside it, or one that left the
+        # heap corrupt, is not what was declared.
+        self.assertFalse(oracle.case_ok(oracle_case('a', 'crash', failures=1,
+                                                    crashed=True)))
+        self.assertFalse(oracle.case_ok(oracle_case(
+            'a', 'crash', crashed=True, kind=oracle.HEAP_CORRUPT)))
+        self.assertTrue(oracle.case_ok(oracle_case(
+            'a', 'crash', crashed=True, kind='original C++ throw')))
         self.assertFalse(oracle.case_ok(oracle_case('a', 'crash')))
 
     def test_selftest_passes_with_expected_lists(self):
-        merged = self.merge(('selftest', 0, {'cases': self.SELFTEST}))
+        merged = self.merge(('selftest', 0, oracle_report(self.SELFTEST)))
         self.assertTrue(merged['passed'])
         self.assertEqual(merged['expected_failures'], ['selftest/must_fail'])
         self.assertEqual(merged['expected_crashes'], ['selftest/crash'])
@@ -1264,7 +1286,7 @@ class OracleReportTest(unittest.TestCase):
     def test_must_fail_passing_fails_the_run(self):
         cases = self.SELFTEST[:2] + [oracle_case('selftest/must_fail',
                                                  'fail')]
-        merged = self.merge(('selftest', 7, {'cases': cases}))
+        merged = self.merge(('selftest', 7, oracle_report(cases)))
         self.assertFalse(merged['passed'])
         self.assertEqual(merged['unexpected'], ['selftest/must_fail'])
         self.assertEqual(merged['expected_failures'], [])
@@ -1275,21 +1297,50 @@ class OracleReportTest(unittest.TestCase):
     def test_unexpected_failure_or_crash_fails_the_run(self):
         for case in (oracle_case('rand/x', failures=3),
                      oracle_case('rand/x', crashed=True)):
-            merged = self.merge(('rand', 7, {'cases': [case]}))
+            merged = self.merge(('rand', 7, oracle_report([case])))
             self.assertFalse(merged['passed'])
             self.assertEqual(merged['unexpected'], ['rand/x'])
 
     def test_missing_report_or_timeout_fails_the_run(self):
-        merged = self.merge(('selftest', 0, {'cases': self.SELFTEST}),
+        merged = self.merge(('selftest', 0, oracle_report(self.SELFTEST)),
                             ('rand', 3221225477, None), ('ui', None, None))
         self.assertFalse(merged['passed'])
         self.assertEqual(merged['unexpected'], ['rand', 'ui'])
         self.assertEqual([f['ok'] for f in merged['files']],
                          [True, False, False])
-        self.assertEqual(merged['files'][2]['error'], 'timed out')
+        self.assertEqual(merged['files'][2]['error'], 'no report (timed out)')
+
+    def test_incomplete_report_keeps_cases_and_names_the_running_one(self):
+        report = oracle_report(self.SELFTEST[:1], complete=False,
+                               running='selftest/crash')
+        for code, died, ended in (
+                (11, '0xC0000374 (heap corruption)',
+                 'the process died with 0xC0000374 (heap corruption)'),
+                (10, None, 'timed out')):
+            merged = self.merge(('selftest', code, report, died))
+            self.assertFalse(merged['passed'])
+            self.assertEqual([c['case'] for c in merged['cases']],
+                             ['selftest/isolation', 'selftest/crash'])
+            self.assertEqual(merged['unexpected'], ['selftest/crash',
+                                                    'selftest'])
+            self.assertEqual(merged['files'][0]['error'],
+                             'incomplete report (%s)' % ended)
+            self.assertIn(ended, merged['cases'][1]['crash']['kind'])
+
+    def test_read_report_rejects_bad_json(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, 'r.json')
+            self.assertIsNone(oracle.read_report(path))
+            for text in ('{"cases": [', '[]', '{"cases": 3}'):
+                with open(path, 'w') as f:
+                    f.write(text)
+                self.assertIsNone(oracle.read_report(path), text)
+            with open(path, 'w') as f:
+                json.dump(oracle_report([]), f)
+            self.assertEqual(oracle.read_report(path)['cases'], [])
 
     def test_exit_code_must_agree(self):
-        merged = self.merge(('selftest', 7, {'cases': self.SELFTEST}))
+        merged = self.merge(('selftest', 7, oracle_report(self.SELFTEST)))
         self.assertFalse(merged['passed'])
         self.assertIn('exit code 7', merged['files'][0]['error'])
 

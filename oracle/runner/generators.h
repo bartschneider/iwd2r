@@ -11,6 +11,7 @@
 // inputs on every platform and compiler.
 #pragma once
 
+#include <cassert>
 #include <cstdint>
 #include <initializer_list>
 #include <optional>
@@ -123,9 +124,12 @@ public:
     RandomGen(uint64_t seed, T lo, T hi)
         : state_(seed)
         , lo_(lo)
-        , span_(static_cast<uint64_t>(static_cast<Unsigned>(hi) - static_cast<Unsigned>(lo)) + 1)
+        // hi - lo is taken back to Unsigned before widening: for 8- and
+        // 16-bit T the subtraction is done in int and can be negative.
+        , span_(static_cast<uint64_t>(static_cast<Unsigned>(static_cast<Unsigned>(hi) - static_cast<Unsigned>(lo))) + 1)
         , ranged_(true)
     {
+        assert(lo <= hi);
     }
 
     std::optional<T> Next()

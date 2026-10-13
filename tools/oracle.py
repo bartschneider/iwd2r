@@ -32,12 +32,17 @@ declared to crash (selftest/crash) under expected_crashes. The run fails
 (exit 1) if any case does not do what it declared, or a runner process ends
 without its report.
 
---selftest checks the loader itself in five runs: the self-test, whose image
+--selftest checks the loader itself in six runs: the self-test, whose image
 bytes and rand() value are checked against the exe file read here; a run with
 a wrong WinMain call site and one with a wrong expected WinMain target, both
-of which must be refused; a run with 0x400000 taken first, which must name the
+of which must be refused; a run that hangs, which the runner's --timeout must
+kill (exit 10); a run with 0x400000 taken first, which must name the
 occupant; and a run on a file that is not the vanilla exe, which must be
 refused by MD5. It exits 1 if any run fails.
+
+Each case file's runner gets --timeout 600: the runner itself kills its child
+process (through its job) and exits 10, reported as "timed out". Reports are
+rewritten after every case, so a killed run keeps its finished cases.
 
 Standard library only.
 """
@@ -69,7 +74,9 @@ ORACLE_PRESET = 'windows-msvc-x86'
 RUNNER_REL = 'build/windows-msvc-x86/oracle/RelWithDebInfo/iwd2r_oracle.exe'
 SELFTEST_RAND = 41  # VC6 rand() after srand(1)
 RUNS_DIR = os.path.join(ROOT, 'runs')
-FILE_TIMEOUT = 600  # seconds for one case file's process
+FILE_TIMEOUT = 600  # seconds for one case file, enforced by the runner
+EXIT_TIMEOUT = 10  # the runner's exit code when --timeout ran out
+HEAP_CORRUPT = 'heap corrupt after case'
 
 
 def ghidra_version():
@@ -281,6 +288,9 @@ SELFTEST_RUNS = (
      ['--selftest', '--test-bad-target'], 6,
      r'refusing to patch the WinMain call: call at 0x007E9B43 targets '
      r'0x004218F0, expected WinMain at 0x00421900'),
+    ('timeout', 'vanilla',
+     ['--selftest', '--test-hang', '--timeout', '3'], EXIT_TIMEOUT,
+     r'timed out after 3 s; the runner child was killed'),
     ('range pre-occupied', 'vanilla', ['--selftest', '--test-occupy'], 4,
      r'occupied by private memory at 0x00400000-'),
     ('wrong MD5', 'runner', ['--selftest'], 5,
@@ -332,25 +342,35 @@ def case_ok(case):
     if expect == 'fail':
         return not case['crashed'] and case['failure_count'] > 0
     if expect == 'crash':
-        return case['crashed']
+        crash = case.get('crash') or {}
+        return (case['crashed'] and case['failure_count'] == 0
+                and crash.get('kind') != HEAP_CORRUPT)
     return not case['crashed'] and case['failure_count'] == 0
 
 
 def merge_reports(seed, iterations, runs):
     """Merge the runner's per-file reports into oracle.json.
 
-    runs is [(file, exit code or None on a timeout, report dict or None)].
-    A file is ok when its report exists, every case did what it declared, and
-    the exit code agrees (0 when all did, 7 when not)."""
+    runs is [(file, exit code or None when the process had to be killed
+    here, report dict or None, the status the runner printed when its child
+    died of an exception, or None)]. A file is ok when its report is complete,
+    every case did what it declared, and the exit code agrees (0 when all
+    did, 7 when not). The cases of an incomplete report (a process killed or
+    dead part way) are still merged."""
     merged = {'seed': seed, 'iterations': iterations, 'files': [],
               'cases': [], 'expected_failures': [], 'expected_crashes': [],
               'unexpected': [], 'passed': True}
-    for name, code, report in runs:
+    for name, code, report, died in runs:
         entry = {'file': name, 'exit_code': code}
+        if code is None or code == EXIT_TIMEOUT:
+            ended = 'timed out'
+        elif died:
+            ended = 'the process died with %s' % died
+        else:
+            ended = 'exit code %s' % code
         if report is None:
             entry['ok'] = False
-            entry['error'] = ('timed out' if code is None else
-                              'no report (exit code %s)' % code)
+            entry['error'] = 'no report (%s)' % ended
             merged['unexpected'].append(name)
         else:
             all_ok = True
@@ -364,9 +384,23 @@ def merge_reports(seed, iterations, runs):
                     merged['expected_failures'].append(case['case'])
                 elif case['expect'] == 'crash':
                     merged['expected_crashes'].append(case['case'])
-            entry['ok'] = all_ok and code == (0 if all_ok else 7)
-            if all_ok and not entry['ok']:
-                entry['error'] = 'exit code %s with every case as declared' % code
+            complete = report.get('complete', False)
+            if not complete and report.get('running'):
+                # The case the process was in when it died or was killed.
+                case = {'case': report['running'], 'file': name,
+                        'expect': '?', 'iterations': 0, 'passed': False,
+                        'failure_count': 0, 'failures': [], 'crashed': True,
+                        'crash': {'inputs': '', 'exception': died or '?',
+                                  'address': '?', 'kind': 'process ended: '
+                                  + ended, 'type': ''}}
+                merged['cases'].append(case)
+                merged['unexpected'].append(case['case'])
+            entry['ok'] = complete and all_ok and code == (0 if all_ok else 7)
+            if not complete:
+                entry['error'] = 'incomplete report (%s)' % ended
+                merged['unexpected'].append(name)
+            elif all_ok and not entry['ok']:
+                entry['error'] = '%s with every case as declared' % ended
                 merged['unexpected'].append(name)
         merged['files'].append(entry)
         merged['passed'] = merged['passed'] and entry['ok']
@@ -395,11 +429,14 @@ def summary_lines(merged):
                 lines.append('    seed %d  inputs %s\n      original %s\n'
                              '      ours     %s' % (merged['seed'], f['inputs'],
                                                     f['original'], f['ours']))
-            if case['crash']:
-                lines.append('    seed %d  inputs %s\n      exception %s at %s'
-                             % (merged['seed'], case['crash']['inputs'],
-                                case['crash']['exception'],
-                                case['crash']['address']))
+            crash = case['crash']
+            if crash:
+                kind = ' '.join(x for x in (crash.get('kind'),
+                                            crash.get('type')) if x)
+                lines.append('    seed %d  inputs %s\n      %s: exception %s '
+                             'at %s' % (merged['seed'], crash['inputs'],
+                                        kind or 'crash', crash['exception'],
+                                        crash['address']))
     for entry in merged['files']:
         if entry.get('error'):
             lines.append('file %s: %s' % (entry['file'], entry['error']))
@@ -422,6 +459,17 @@ def runner_path():
     return runner
 
 
+def read_report(path):
+    """A runner report, or None if it is missing or not valid JSON."""
+    try:
+        with open(path) as f:
+            report = json.load(f)
+    except (OSError, ValueError):
+        return None
+    return report if isinstance(report, dict) and \
+        isinstance(report.get('cases'), list) else None
+
+
 def run_cases(args):
     import play
     runner = runner_path()
@@ -438,41 +486,47 @@ def run_cases(args):
     out_dir = os.path.join(ORACLE_DIR, 'out', os.path.basename(run_dir))
     os.makedirs(out_dir)
     runs = []
-    for name in files:
-        command = [runner, win_path(exe), '--file', name,
-                   '--seed', str(args.seed), '--iterations',
-                   str(args.iterations), '--out', win_path(out_dir)]
-        print('== %s' % name)
-        try:
-            r = subprocess.run(command, cwd=ORACLE_DIR, capture_output=True,
-                               text=True, timeout=FILE_TIMEOUT)
-            code, stdout, stderr = r.returncode, r.stdout, r.stderr
-        except subprocess.TimeoutExpired as e:
-            code = None
-            stdout = e.stdout.decode() if isinstance(e.stdout, bytes) else \
-                (e.stdout or '')
-            stderr = e.stderr.decode() if isinstance(e.stderr, bytes) else \
-                (e.stderr or '')
-        for line in stdout.splitlines():
-            print('  %s' % line)
-        for line in stderr.splitlines():
-            print('  stderr: %s' % line)
-        path = os.path.join(out_dir, name + '.json')
-        report = None
-        if os.path.isfile(path):
-            with open(path) as f:
-                report = json.load(f)
-        runs.append((name, code, report))
+    try:
+        for name in files:
+            runs.append(run_case_file(runner, exe, name, args, out_dir))
+    finally:
+        shutil.rmtree(out_dir, ignore_errors=True)
     merged = merge_reports(args.seed, args.iterations, runs)
     with open(os.path.join(run_dir, 'oracle.json'), 'w') as f:
         json.dump(merged, f, indent=2)
         f.write('\n')
-    shutil.rmtree(out_dir)
     for line in summary_lines(merged):
         print(line)
     print('report: %s' % os.path.relpath(os.path.join(run_dir, 'oracle.json'),
                                          ROOT))
     return 0 if merged['passed'] else 1
+
+
+def run_case_file(runner, exe, name, args, out_dir):
+    """Run one case file in a fresh runner; (name, exit code, report)."""
+    command = [runner, win_path(exe), '--file', name,
+               '--seed', str(args.seed), '--iterations', str(args.iterations),
+               '--out', win_path(out_dir), '--timeout', str(FILE_TIMEOUT)]
+    print('== %s' % name)
+    try:
+        # The runner kills its own child at FILE_TIMEOUT; this is a backstop.
+        r = subprocess.run(command, cwd=ORACLE_DIR, capture_output=True,
+                           text=True, timeout=FILE_TIMEOUT + 60)
+        code, stdout, stderr = r.returncode, r.stdout, r.stderr
+    except subprocess.TimeoutExpired as e:
+        code = None
+        stdout = e.stdout.decode() if isinstance(e.stdout, bytes) else \
+            (e.stdout or '')
+        stderr = e.stderr.decode() if isinstance(e.stderr, bytes) else \
+            (e.stderr or '')
+    for line in stdout.splitlines():
+        print('  %s' % line)
+    for line in stderr.splitlines():
+        print('  stderr: %s' % line)
+    died = re.search(r'child died with exception (0x[0-9A-F]{8} \([^)]*\))',
+                     stderr)
+    return (name, code, read_report(os.path.join(out_dir, name + '.json')),
+            died.group(1) if died else None)
 
 
 def cmd_run(args):

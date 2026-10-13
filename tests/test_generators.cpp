@@ -64,3 +64,29 @@ TEST_CASE("Random is deterministic per seed and pinned to splitmix64", "[oracle]
     }
     CHECK_FALSE(oracle::RandomGen<int>::kBounded);
 }
+
+TEST_CASE("Random ranges of 8- and 16-bit types cross zero and the sign bit", "[oracle]")
+{
+    // Every value appears and none falls outside, for ranges whose hi - lo
+    // would be negative or truncated if computed in int.
+    auto covers = [](auto gen, long lo, long hi) {
+        std::vector<int> seen(static_cast<size_t>(hi - lo + 1));
+        for (auto value : Take(gen, 20000)) {
+            const long v = static_cast<long>(value);
+            REQUIRE(v >= lo);
+            REQUIRE(v <= hi);
+            seen[static_cast<size_t>(v - lo)] = 1;
+        }
+        for (int hit : seen) {
+            CHECK(hit == 1);
+        }
+    };
+    covers(oracle::Random<int8_t>(42, -3, 3), -3, 3);
+    covers(oracle::Random<int8_t>(42, -128, 127), -128, 127);
+    covers(oracle::Random<int16_t>(42, -300, 300), -300, 300);
+    covers(oracle::Random<int16_t>(42, -32768, -32700), -32768, -32700);
+    covers(oracle::Random<uint16_t>(42, 32700, 32900), 32700, 32900);
+    covers(oracle::Random<uint8_t>(42, 100, 200), 100, 200);
+    // The first draws are pinned: lo + splitmix64(42) % span.
+    CHECK(Take(oracle::Random<int8_t>(42, -3, 3), 2) == std::vector<int8_t> { 2, 2 });
+}

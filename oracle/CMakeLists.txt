@@ -10,7 +10,7 @@ if(WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 4)
     set(vanilla_json "${CMAKE_CURRENT_SOURCE_DIR}/loader/vanilla.json")
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${vanilla_json}")
     file(READ "${vanilla_json}" json)
-    foreach(key md5 winmain_call_site winmain srand rand getptd)
+    foreach(key md5 winmain_call_site winmain srand rand getptd crt_heap)
         string(JSON VANILLA_${key} GET "${json}" ${key})
     endforeach()
     string(JSON VANILLA_tiddata_rand_start GET "${json}" tiddata_rand 0)
@@ -33,6 +33,8 @@ constexpr uint32_t kVanillaWinMain = @VANILLA_winmain@u;
 constexpr uint32_t kVanillaSrand = @VANILLA_srand@u;
 constexpr uint32_t kVanillaRand = @VANILLA_rand@u;
 constexpr uint32_t kVanillaGetptd = @VANILLA_getptd@u;
+// The dword holding the CRT's heap handle (_crtheap).
+constexpr uint32_t kVanillaCrtHeap = @VANILLA_crt_heap@u;
 // [start, end) offsets of the rand state in the thread's _tiddata.
 constexpr uint32_t kVanillaTiddataRandStart = @VANILLA_tiddata_rand_start@u;
 constexpr uint32_t kVanillaTiddataRandEnd = @VANILLA_tiddata_rand_end@u;
@@ -50,7 +52,9 @@ constexpr uint32_t kVanillaCrtRanges[][2] = {
     target_include_directories(iwd2r_oracle PRIVATE "${PROJECT_SOURCE_DIR}"
         "${CMAKE_CURRENT_BINARY_DIR}/generated")
     target_link_libraries(iwd2r_oracle PRIVATE bcrypt)
-    target_link_options(iwd2r_oracle PRIVATE /BASE:0x10000000 /DYNAMICBASE:NO /FIXED)
+    # /NXCOMPAT:NO: the original's exception handlers run from private memory,
+    # which x86 handler validation refuses while DEP is on (oracle_main.cpp).
+    target_link_options(iwd2r_oracle PRIVATE /BASE:0x10000000 /DYNAMICBASE:NO /FIXED /NXCOMPAT:NO)
     set_property(TARGET iwd2r_oracle PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
     iwd2r_strict_warnings(iwd2r_oracle)
 endif()

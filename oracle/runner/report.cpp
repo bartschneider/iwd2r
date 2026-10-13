@@ -49,15 +49,20 @@ bool AsExpected(const CaseResult& result)
     case OracleExpect::Fail:
         return !result.crashed && result.failureCount > 0;
     case OracleExpect::Crash:
-        return result.crashed;
+        // The declared crash, with no mismatch beside it and no damage left
+        // behind.
+        return result.crashed && result.failureCount == 0 && result.crash.kind != kHeapCorrupt;
     default:
         return !result.crashed && result.failureCount == 0;
     }
 }
 
-std::string ReportJson(const std::string& file, uint64_t seed, int iterations, const std::vector<CaseResult>& results)
+std::string ReportJson(const std::string& file, uint64_t seed, int iterations, const std::vector<CaseResult>& results,
+    bool complete, const char* running)
 {
-    std::string out = "{\n  \"file\": " + Quote(file) + ",\n  \"seed\": " + std::to_string(seed)
+    std::string out = "{\n  \"file\": " + Quote(file) + ",\n  \"complete\": " + (complete ? "true" : "false")
+        + ",\n  \"running\": " + (running ? Quote(running) : std::string("null"))
+        + ",\n  \"seed\": " + std::to_string(seed)
         + ",\n  \"iterations\": " + std::to_string(iterations) + ",\n  \"cases\": [";
     for (size_t i = 0; i < results.size(); ++i) {
         const CaseResult& r = results[i];
@@ -75,7 +80,8 @@ std::string ReportJson(const std::string& file, uint64_t seed, int iterations, c
         out += std::string("], \"crashed\": ") + (r.crashed ? "true" : "false") + ", \"crash\": ";
         if (r.crashed) {
             out += "{\"inputs\": " + Quote(r.crash.inputs) + ", \"exception\": " + Hex(r.crash.code)
-                + ", \"address\": " + Hex(r.crash.address) + "}";
+                + ", \"address\": " + Hex(r.crash.address) + ", \"kind\": " + Quote(r.crash.kind)
+                + ", \"type\": " + Quote(r.crash.type) + "}";
         } else {
             out += "null";
         }
