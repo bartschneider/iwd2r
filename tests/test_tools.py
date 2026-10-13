@@ -1345,6 +1345,207 @@ class OracleReportTest(unittest.TestCase):
         self.assertIn('exit code 7', merged['files'][0]['error'])
 
 
+VANILLA_BYTES = b'MZ vanilla iwd2.exe'
+VANILLA_TEST_MD5 = 'fcc0314ffee2d07c22e20be35c5b7023'
+WEIDU_LOG = ('// Log of Currently Installed WeiDU Mods\r\n'
+             '// The top of the file is the \'oldest\' mod\r\n'
+             '~IWD2EE/IWD2EE.TP2~ #0 #1000 // IWD2EE Core\r\n'
+             '~IWD2EE/IWD2EE.TP2~ #0 #0 // Class Revisions\r\n'
+             '~IWD2EE/IWD2EE.TP2~ #0 #96 // Add PnP Wizard Spell Learning\r\n')
+INI = ('[Alias]\r\n'
+       'HD0:=C:\\Games\\Icewind Dale II\\\r\n'
+       'CD1:=C:\\Games\\Icewind Dale II\\Data\\\r\n'
+       'CD2:=c:\\games\\icewind dale ii\\CD2\\\r\n'
+       '[Program Options]\r\n'
+       'Resolution=1366\r\n'
+       'Last Resolution=1366x768\r\n')
+
+
+class OracleVanillaTest(unittest.TestCase):
+    """tools/oracle.py vanilla: the checks on the vanilla copy."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.game = self.tmp.name
+        self.write('CHITIN.KEY', b'KEY V1  ')
+        self.write('iwd2.exe', VANILLA_BYTES)
+        self.write('WeiDU.log', b'// Log of Currently Installed WeiDU Mods\r\n')
+        self.write('icewind2.ini', oracle.rewrite_ini(
+            INI, oracle.INSTALL_WIN, 'C:\\copy').encode())
+        os.makedirs(os.path.join(self.game, 'Override'))
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def write(self, rel, data):
+        path = os.path.join(self.game, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'wb') as f:
+            f.write(data)
+
+    def verify(self):
+        return oracle.verify_vanilla(self.game, VANILLA_TEST_MD5)
+
+    def test_md5_constant(self):
+        import hashlib
+        self.assertEqual(hashlib.md5(VANILLA_BYTES).hexdigest(),
+                         VANILLA_TEST_MD5)
+
+    def test_clean_copy_passes(self):
+        self.assertEqual(self.verify(), [])
+
+    def test_no_weidu_log_passes(self):
+        os.remove(os.path.join(self.game, 'WeiDU.log'))
+        self.assertEqual(self.verify(), [])
+
+    def test_ieex_dll_fails(self):
+        self.write('IEex.dll', b'x')
+        failures = self.verify()
+        self.assertEqual(len(failures), 1)
+        self.assertIn('IEex.dll', failures[0])
+
+    def test_ieex_anywhere_fails(self):
+        self.write('Override/IEex_Core.lua', b'x')
+        self.write('Override/ieexhelper.DLL', b'x')
+        failures = self.verify()
+        self.assertEqual(len(failures), 2)
+        self.assertTrue(any('IEex_Core.lua' in f for f in failures))
+        self.assertTrue(any('ieexhelper.DLL' in f for f in failures))
+
+    def test_weidu_log_listing_iwd2ee_fails(self):
+        self.write('WeiDU.log', WEIDU_LOG.encode())
+        failures = self.verify()
+        self.assertEqual(len(failures), 1)
+        self.assertIn('WeiDU.log', failures[0])
+        self.assertIn('IWD2EE.TP2', failures[0])
+
+    def test_wrong_exe_md5_fails(self):
+        os.remove(os.path.join(self.game, 'iwd2.exe'))
+        self.write('IWD2.exe', b'MZ patched by IWD2EE')
+        failures = self.verify()
+        self.assertEqual(len(failures), 1)
+        self.assertIn('IWD2.exe', failures[0])
+        self.assertIn('MD5', failures[0])
+
+    def test_exe_name_is_case_insensitive(self):
+        os.remove(os.path.join(self.game, 'iwd2.exe'))
+        self.write('IWD2.EXE', VANILLA_BYTES)
+        self.assertEqual(self.verify(), [])
+
+    def test_missing_exe_fails(self):
+        os.remove(os.path.join(self.game, 'iwd2.exe'))
+        failures = self.verify()
+        self.assertEqual(len(failures), 1)
+        self.assertIn('iwd2.exe', failures[0])
+
+    def test_missing_chitin_key_fails(self):
+        os.remove(os.path.join(self.game, 'CHITIN.KEY'))
+        self.assertEqual(len(self.verify()), 1)
+
+    def test_ini_pointing_at_install_fails(self):
+        self.write('icewind2.ini', INI.encode())
+        failures = self.verify()
+        self.assertTrue(failures)
+        self.assertTrue(all('icewind2.ini' in f for f in failures))
+
+    def test_any_ini_pointing_at_install_fails(self):
+        self.write('ddraw.ini', b'path=c:\\GAMES\\Icewind Dale II\\x\r\n')
+        failures = self.verify()
+        self.assertEqual(len(failures), 1)
+        self.assertIn('ddraw.ini', failures[0])
+
+    def test_resolution_must_be_800(self):
+        self.write('icewind2.ini', INI.replace(
+            'C:\\Games\\Icewind Dale II', 'C:\\copy').replace(
+            'c:\\games\\icewind dale ii', 'C:\\copy').encode())
+        failures = self.verify()
+        self.assertEqual(len(failures), 1)
+        self.assertIn('Resolution', failures[0])
+
+    def test_iwd2ee_leftovers_fail(self):
+        for rel in ('IWD2EE.exe', 'Setup-iwd2ee.exe', 'SETUP-IWD2EE.DEBUG',
+                    'iwd2ee/backup/1000/iwd2.exe'):
+            self.write(rel, b'x')
+        failures = self.verify()
+        for rel in ('IWD2EE.exe', 'Setup-iwd2ee.exe', 'SETUP-IWD2EE.DEBUG',
+                    'iwd2ee'):
+            self.assertTrue(any(rel in f for f in failures), rel)
+
+    def test_rewrite_ini(self):
+        text = oracle.rewrite_ini(INI, oracle.INSTALL_WIN,
+                                  'C:\\Users\\thier\\iwd2r-oracle\\game')
+        self.assertEqual(text, (
+            '[Alias]\r\n'
+            'HD0:=C:\\Users\\thier\\iwd2r-oracle\\game\\\r\n'
+            'CD1:=C:\\Users\\thier\\iwd2r-oracle\\game\\Data\\\r\n'
+            'CD2:=C:\\Users\\thier\\iwd2r-oracle\\game\\CD2\\\r\n'
+            '[Program Options]\r\n'
+            'Resolution=800\r\n'
+            'Last Resolution=1366x768\r\n'))
+
+    def test_weidu_components(self):
+        self.assertEqual(oracle.weidu_components(WEIDU_LOG),
+                         [('IWD2EE/IWD2EE.TP2', 0, 1000),
+                          ('IWD2EE/IWD2EE.TP2', 0, 0),
+                          ('IWD2EE/IWD2EE.TP2', 0, 96)])
+
+    def test_uninstall_bat(self):
+        bat = oracle.uninstall_bat(
+            'C:\\copy', 'Setup-iwd2ee.exe',
+            oracle.weidu_components(WEIDU_LOG), 'C:\\log.txt')
+        self.assertEqual(bat.splitlines(), [
+            '@echo off',
+            'cd /d "C:\\copy" || exit /b 1',
+            '"Setup-iwd2ee.exe" --noautoupdate --no-exit-pause --skip-at-view '
+            '--language 0 --log "C:\\log.txt" --force-uninstall-list '
+            '1000 0 96 < nul',
+            'exit /b %errorlevel%'])
+
+    def test_leftovers(self):
+        for rel in ('IEex.dll', 'IEexHelper.dll', 'IEexHelperGUI.dll',
+                    'IEex.ini', 'IEex.log', 'IWD2EE.exe', 'Setup-iwd2ee.exe',
+                    'Setup-iwd2ee_mod_compatibility_patch.exe',
+                    'SETUP-IWD2EE.DEBUG', 'Override/IEex_Core.lua',
+                    'Override/IEex_INI.lua', 'Override/AR1000.ARE',
+                    'iwd2ee/iwd2ee.tp2',
+                    'iwd2ee_mod_compatibility_patch/x.tp2', 'binkw32.dll',
+                    'Shaders/readme.txt'):
+            self.write(rel, b'x')
+        self.assertEqual(oracle.leftovers(self.game), sorted([
+            'IEex.dll', 'IEexHelper.dll', 'IEexHelperGUI.dll', 'IEex.ini',
+            'IEex.log', 'IWD2EE.exe', 'Setup-iwd2ee.exe',
+            'Setup-iwd2ee_mod_compatibility_patch.exe', 'SETUP-IWD2EE.DEBUG',
+            'Override/IEex_Core.lua', 'Override/IEex_INI.lua', 'iwd2ee',
+            'iwd2ee_mod_compatibility_patch', 'Shaders']))
+
+    def test_ensure_keeps_a_marked_copy(self):
+        with open(os.path.join(self.game, oracle.MARKER), 'w') as f:
+            f.write('{}')
+        built = []
+        self.assertEqual(oracle.ensure_vanilla(game=self.game,
+                                               build=built.append),
+                         self.game)
+        self.assertEqual(built, [])
+
+    def test_ensure_rebuilds_without_marker(self):
+        built = []
+        oracle.ensure_vanilla(game=self.game, build=built.append)
+        self.assertEqual(built, [self.game])
+
+    def test_ensure_rebuilds_on_request(self):
+        with open(os.path.join(self.game, oracle.MARKER), 'w') as f:
+            f.write('{}')
+        built = []
+        oracle.ensure_vanilla(rebuild=True, game=self.game,
+                              build=built.append)
+        self.assertEqual(built, [self.game])
+
+    def test_marker_is_ignored_by_verification(self):
+        with open(os.path.join(self.game, oracle.MARKER), 'w') as f:
+            f.write('{}')
+        self.assertEqual(self.verify(), [])
+
+
 class PlayBuildWindowsDefaultsTest(unittest.TestCase):
     def test_defaults_build_the_game(self):
         import inspect

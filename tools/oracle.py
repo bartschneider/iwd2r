@@ -7,6 +7,7 @@ Usage (from WSL, in the repository):
   python3 tools/oracle.py build
   python3 tools/oracle.py run --selftest
   python3 tools/oracle.py run [--file selftest] [--seed N] [--iterations N]
+  python3 tools/oracle.py vanilla [--rebuild]
 
 evidence writes a draft docs/evidence/<ADDR>.md for one function of the
 vanilla exe: the front matter (address, name, an empty oracle_case,
@@ -44,6 +45,17 @@ Each case file's runner gets --timeout 600: the runner itself kills its child
 process (through its job) and exits 10, reported as "timed out". Reports are
 rewritten after every case, so a killed run keeps its finished cases.
 
+vanilla builds C:/Users/thier/iwd2r-oracle/game, a vanilla copy of the game
+for the original engine: rsync of the real install (read only, never written),
+WeiDU's uninstall of every IWD2EE component run inside the copy, deletion of
+the IEex and IWD2EE files WeiDU does not track, and icewind2.ini's [Alias]
+paths pointed at the copy with Resolution=800. The copy is verified (no IEex
+file, no IWD2EE in WeiDU.log, the vanilla iwd2.exe MD5, no INI naming the
+install, the install's WeiDU.log and icewind2.ini unchanged) and only then
+gets the marker game/vanilla.ok. A copy without the marker (an interrupted
+build) or --rebuild is deleted and built from scratch; run without --selftest
+builds it when the marker is missing. The log goes to runs/<stamp>/.
+
 Standard library only.
 """
 
@@ -70,6 +82,13 @@ VERSIONS = os.path.join(HERE, 'ghidra', 'versions.json')
 VANILLA_JSON = os.path.join(ROOT, 'oracle', 'loader', 'vanilla.json')
 VANILLA_EXE = os.path.expanduser('~/.local/share/iwd2r/vanilla/iwd2.exe')
 ORACLE_DIR = '/mnt/c/Users/thier/iwd2r-oracle'
+INSTALL = '/mnt/c/Games/Icewind Dale II'
+INSTALL_WIN = 'C:\\Games\\Icewind Dale II'
+GAME_DIR = ORACLE_DIR + '/game'
+MARKER = 'vanilla.ok'
+WEIDU_SETUP = 'Setup-iwd2ee.exe'
+WEIDU_TIMEOUT = 3600  # seconds for the whole uninstall
+VANILLA_RESOLUTION = '800'
 ORACLE_PRESET = 'windows-msvc-x86'
 RUNNER_REL = 'build/windows-msvc-x86/oracle/RelWithDebInfo/iwd2r_oracle.exe'
 SELFTEST_RAND = 41  # VC6 rand() after srand(1)
@@ -472,6 +491,7 @@ def read_report(path):
 
 def run_cases(args):
     import play
+    ensure_vanilla()
     runner = runner_path()
     exe = stage_vanilla(args.vanilla)
     if args.file:
@@ -560,6 +580,289 @@ def cmd_run(args):
     return 1 if failed else 0
 
 
+# ---------------------------------------------------------------------------
+# The vanilla copy of the game (oracle.py vanilla)
+
+# Files IWD2EE and IEex leave that WeiDU does not track, by name in the root
+# of the copy (case-insensitive glob), and the ones in Override/. Shaders is
+# cnc-ddraw's, copied from iwd2ee/ddrawfix with the ddraw.dll WeiDU removes.
+LEFTOVER_ROOT = ('ieex*.dll', 'ieex.ini', 'ieex.log', 'iwd2ee.exe',
+                 'setup-iwd2ee*.exe', 'setup-iwd2ee.debug', 'iwd2ee',
+                 'iwd2ee_mod_compatibility_patch', 'shaders')
+LEFTOVER_OVERRIDE = ('ieex_*.lua',)
+WEIDU_LINE = re.compile(r'^~([^~]+)~\s+#(\d+)\s+#(\d+)')
+
+
+def weidu_components(text):
+    """The installed components a WeiDU.log lists, oldest first, as
+    (tp2, language, component)."""
+    out = []
+    for line in text.splitlines():
+        m = WEIDU_LINE.match(line.strip())
+        if m:
+            out.append((m.group(1), int(m.group(2)), int(m.group(3))))
+    return out
+
+
+def rewrite_ini(text, old, new):
+    """An INI's text with every path under old (a Windows path, any case)
+    moved under new, and Resolution= set to VANILLA_RESOLUTION."""
+    text = re.sub(re.escape(old), lambda m: new, text, flags=re.IGNORECASE)
+    return re.sub(r'^(Resolution=)[^\r\n]*', r'\g<1>' + VANILLA_RESOLUTION,
+                  text, flags=re.MULTILINE)
+
+
+def _matches(name, patterns):
+    import fnmatch
+    return any(fnmatch.fnmatch(name.lower(), p) for p in patterns)
+
+
+def leftovers(game):
+    """The untracked IWD2EE and IEex files in game, relative paths (sorted).
+    A folder is listed once, not its contents."""
+    out = [n for n in os.listdir(game) if _matches(n, LEFTOVER_ROOT)]
+    for override in os.listdir(game):
+        if override.lower() == 'override' and \
+                os.path.isdir(os.path.join(game, override)):
+            out += [override + '/' + n
+                    for n in os.listdir(os.path.join(game, override))
+                    if _matches(n, LEFTOVER_OVERRIDE)]
+    return sorted(out)
+
+
+def read_text(path):
+    with open(path, 'rb') as f:
+        return f.read().decode('latin-1')
+
+
+def verify_vanilla(game, md5, install_win=INSTALL_WIN):
+    """Every reason game is not a clean vanilla copy (empty when it is)."""
+    failures = []
+    names = {n.lower(): n for n in os.listdir(game)}
+    if 'chitin.key' not in names:
+        failures.append('no CHITIN.KEY')
+    exe = names.get('iwd2.exe')
+    if exe is None:
+        failures.append('no iwd2.exe')
+    elif file_md5(os.path.join(game, exe)) != md5:
+        failures.append('%s has MD5 %s, not the vanilla %s'
+                        % (exe, file_md5(os.path.join(game, exe)), md5))
+    log = names.get('weidu.log')
+    if log is not None:
+        comps = [(tp2, comp) for tp2, _, comp in weidu_components(
+            read_text(os.path.join(game, log)))
+            if tp2.lower().endswith('iwd2ee.tp2')]
+        if comps:
+            failures.append('%s still lists %s components %s' % (
+                log, comps[0][0], ' '.join(str(c) for _, c in comps)))
+    left = leftovers(game)
+    for rel in left:
+        failures.append('IWD2EE leftover %s' % rel)
+    for dirpath, dirnames, filenames in os.walk(game):
+        dirnames.sort()
+        for name in sorted(filenames):
+            path = os.path.join(dirpath, name)
+            rel = os.path.relpath(path, game).replace(os.sep, '/')
+            low = name.lower()
+            if any(rel == x or rel.startswith(x + '/') for x in left):
+                continue
+            if low.startswith('ieex'):
+                failures.append('IEex file %s' % rel)
+            if low.endswith('.ini') and \
+                    install_win.lower() in read_text(path).lower():
+                failures.append('%s still refers to %s' % (rel, install_win))
+    ini = names.get('icewind2.ini')
+    if ini is None:
+        failures.append('no icewind2.ini')
+    elif not re.search(r'^Resolution=%s\s*$' % VANILLA_RESOLUTION,
+                       read_text(os.path.join(game, ini)), re.MULTILINE):
+        failures.append('%s does not set Resolution=%s'
+                        % (ini, VANILLA_RESOLUTION))
+    return failures
+
+
+def uninstall_bat(game_win, setup, components, log_win):
+    """The batch file that runs WeiDU's uninstall inside the copy."""
+    numbers = ' '.join(str(c) for _, _, c in components)
+    languages = sorted({lang for _, lang, _ in components})
+    if len(languages) != 1:
+        raise ValueError('components in several languages: %s' % languages)
+    return '\n'.join([
+        '@echo off',
+        'cd /d "%s" || exit /b 1' % game_win,
+        '"%s" --noautoupdate --no-exit-pause --skip-at-view --language %d '
+        '--log "%s" --force-uninstall-list %s < nul'
+        % (setup, languages[0], log_win, numbers),
+        'exit /b %errorlevel%',
+    ]) + '\n'
+
+
+def ini_resolution(path):
+    m = re.search(r'^Resolution=([^\r\n]*)', read_text(path), re.MULTILINE)
+    return m.group(1) if m else None
+
+
+def install_state(install=INSTALL):
+    """What the real install must still look like after a build."""
+    return {'WeiDU.log md5': file_md5(os.path.join(install, 'WeiDU.log')),
+            'icewind2.ini md5': file_md5(os.path.join(install,
+                                                      'icewind2.ini')),
+            'icewind2.ini Resolution': ini_resolution(
+                os.path.join(install, 'icewind2.ini'))}
+
+
+def say(log, message):
+    print(message)
+    log.write(message + '\n')
+    log.flush()
+
+
+def prove_separate(game, install, log):
+    """Exit unless game is a real directory of its own, not a link or
+    junction to install."""
+    import play
+    for path in (ORACLE_DIR, game):
+        if os.path.islink(path):
+            sys.exit('oracle: %s is a link; refusing to run WeiDU' % path)
+    if os.path.realpath(game) != os.path.abspath(game):
+        sys.exit('oracle: %s resolves to %s' % (game, os.path.realpath(game)))
+    if os.path.samefile(game, install):
+        sys.exit('oracle: %s is the install itself' % game)
+    probe = '.iwd2r-copy-probe-%d' % os.getpid()
+    with open(os.path.join(game, probe), 'w') as f:
+        f.write('probe\n')
+    leaked = os.path.exists(os.path.join(install, probe))
+    os.remove(os.path.join(game, probe))
+    if leaked:
+        sys.exit('oracle: a file written to %s appeared in %s' % (game,
+                                                                   install))
+    # Windows' own view: dir /AL lists the reparse points (junctions,
+    # symlinks) among the oracle folder's entries.
+    r = subprocess.run([play.CMD_EXE, '/c', 'dir', '/AL', '/B',
+                        play.wslpath('-w', ORACLE_DIR)], cwd=ORACLE_DIR,
+                       capture_output=True, text=True)
+    if os.path.basename(game).lower() in r.stdout.lower().split():
+        sys.exit('oracle: Windows lists %s as a reparse point' % game)
+    say(log, 'copy is separate: no link, own inode, probe file not in the '
+        'install, no reparse point in %s' % play.wslpath('-w', ORACLE_DIR))
+
+
+def build_vanilla(game, install=INSTALL, md5=None):
+    """Copy install to game, uninstall IWD2EE there, clean up and verify;
+    write the marker only when the copy is clean. Exits on failure."""
+    import play
+    md5 = md5 or vanilla_md5()
+    run_dir = play.make_run_folder(RUNS_DIR, datetime.datetime.now())
+    with open(os.path.join(run_dir, 'vanilla.log'), 'w') as log:
+        before = install_state(install)
+        say(log, 'install before: %s' % json.dumps(before))
+        marker = os.path.join(game, MARKER)
+        if os.path.lexists(marker):
+            os.remove(marker)
+        if os.path.islink(game):
+            sys.exit('oracle: %s is a link; remove it by hand' % game)
+        if os.path.exists(game):
+            say(log, 'removing the old copy %s' % game)
+            shutil.rmtree(game)
+        os.makedirs(game)
+        prove_separate(game, install, log)
+        say(log, 'copying %s to %s' % (install, game))
+        if play.stream(['rsync', '-a', '--delete', install + '/', game + '/'],
+                       log) != 0:
+            sys.exit('oracle: rsync failed')
+        prove_separate(game, install, log)
+        game_win = play.wslpath('-w', game)
+        if game_win.lower().startswith(INSTALL_WIN.lower()):
+            sys.exit('oracle: %s is inside the install' % game_win)
+        names = {n.lower(): n for n in os.listdir(game)}
+        setup = names.get(WEIDU_SETUP.lower())
+        components = weidu_components(read_text(
+            os.path.join(game, names['weidu.log']))) \
+            if 'weidu.log' in names else []
+        say(log, 'WeiDU.log lists %d components: %s' % (
+            len(components), ' '.join(str(c) for _, _, c in components)))
+        others = [c for c in components
+                  if not c[0].lower().endswith('iwd2ee.tp2')]
+        if others:
+            sys.exit('oracle: WeiDU.log lists components of other mods: %s'
+                     % others)
+        if components:
+            if setup is None:
+                sys.exit('oracle: no %s in the copy' % WEIDU_SETUP)
+            weidu_log = os.path.join(ORACLE_DIR, 'vanilla-weidu.log')
+            bat = os.path.join(ORACLE_DIR, 'vanilla-uninstall.bat')
+            script = uninstall_bat(game_win, setup, components,
+                                   play.wslpath('-w', weidu_log))
+            with open(bat, 'w', newline='\r\n') as f:
+                f.write(script)
+            say(log, 'running WeiDU in %s: %s' % (game_win,
+                                                   script.splitlines()[2]))
+            code = play.stream([play.CMD_EXE, '/c', play.wslpath('-w', bat)],
+                               log, cwd=game, stdin=subprocess.DEVNULL)
+            if os.path.exists(weidu_log):
+                shutil.copyfile(weidu_log,
+                                os.path.join(run_dir, 'weidu-uninstall.log'))
+            say(log, 'WeiDU exit code %d' % code)
+            if code != 0:
+                sys.exit('oracle: WeiDU uninstall failed (exit %d); see %s'
+                         % (code, run_dir))
+        for rel in leftovers(game):
+            path = os.path.join(game, rel)
+            say(log, 'deleting leftover %s' % rel)
+            if os.path.isdir(path) and not os.path.islink(path):
+                shutil.rmtree(path)
+            else:
+                os.remove(path)
+        for name in os.listdir(game):
+            path = os.path.join(game, name)
+            if name.lower().endswith('.ini') and os.path.isfile(path):
+                text = read_text(path)
+                new = rewrite_ini(text, INSTALL_WIN, game_win) \
+                    if name.lower() == 'icewind2.ini' else \
+                    re.sub(re.escape(INSTALL_WIN), lambda m: game_win, text,
+                           flags=re.IGNORECASE)
+                if new != text:
+                    say(log, 'rewrote %s' % name)
+                    with open(path, 'wb') as f:
+                        f.write(new.encode('latin-1'))
+        override = os.path.join(game, names.get('override', 'Override'))
+        rest = sorted(os.listdir(override)) if os.path.isdir(override) else []
+        say(log, 'Override holds %d files: %s' % (len(rest), ' '.join(rest)))
+        failures = verify_vanilla(game, md5)
+        after = install_state(install)
+        say(log, 'install after: %s' % json.dumps(after))
+        if after != before:
+            failures.append('the real install changed: %s -> %s'
+                            % (before, after))
+        for failure in failures:
+            say(log, 'FAIL %s' % failure)
+        if failures:
+            sys.exit('oracle: the vanilla copy failed verification; see %s'
+                     % os.path.relpath(run_dir, ROOT))
+        say(log, 'verified: %s is vanilla (iwd2.exe MD5 %s)' % (game, md5))
+        with open(marker, 'w') as f:
+            json.dump({'md5': md5, 'install': before,
+                       'built': datetime.datetime.now().isoformat(
+                           timespec='seconds')}, f, indent=2)
+            f.write('\n')
+        say(log, 'wrote %s' % marker)
+    return game
+
+
+def ensure_vanilla(rebuild=False, game=GAME_DIR, build=build_vanilla):
+    """The vanilla copy's path, building it first when it has no marker
+    (never built, or an interrupted build) or rebuild is set."""
+    if rebuild or not os.path.isfile(os.path.join(game, MARKER)):
+        build(game)
+    return game
+
+
+def cmd_vanilla(args):
+    game = ensure_vanilla(args.rebuild)
+    print('vanilla copy: %s' % game)
+    return 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     sub = ap.add_subparsers(dest='command', required=True)
@@ -585,6 +888,11 @@ def main(argv=None):
     run.add_argument('--vanilla', default=VANILLA_EXE,
                      help='the vanilla iwd2.exe (default %(default)s)')
     run.set_defaults(run=cmd_run)
+    van = sub.add_parser('vanilla', help='build the verified vanilla copy '
+                         'of the game')
+    van.add_argument('--rebuild', action='store_true',
+                     help='delete the copy and build it again')
+    van.set_defaults(run=cmd_vanilla)
     args = ap.parse_args(argv)
     return args.run(args)
 
