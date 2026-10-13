@@ -143,6 +143,36 @@ int Scale() { return platform::present::WindowScale(); }
 int ToEngine(int desktopPixels) { return desktopPixels / Scale(); }
 int ToDesktop(int enginePixels) { return enginePixels * Scale(); }
 
+// UI scaling (InitScreen's uiScale): the UI panels' scale and where the
+// regions for the current screen come from.
+struct RegionState {
+    int uiScale = 1;
+    platform::window::RegionSource source = nullptr;
+};
+
+RegionState& UiRegions()
+{
+    static RegionState state;
+    return state;
+}
+
+bool SameRect(const RECT& a, const RECT& b)
+{
+    return a.left == b.left && a.top == b.top && a.right == b.right && a.bottom == b.bottom;
+}
+
+bool SameRegions(const std::vector<platform::compose::Region>& a, const std::vector<platform::compose::Region>& b)
+{
+    if (a.size() != b.size())
+        return false;
+    for (size_t i = 0; i < a.size(); i++) {
+        if (!SameRect(a[i].frame, b[i].frame) || !SameRect(a[i].window, b[i].window) || a[i].scale != b[i].scale
+            || a[i].ui != b[i].ui)
+            return false;
+    }
+    return true;
+}
+
 // The dummy and offscreen drivers have no real desktop: no global mouse, no
 // message boxes.
 bool Headless()
@@ -266,6 +296,7 @@ void Translate(const SDL_Event& e, bool& displayChanged)
             EnqueueMessage(WM_CLOSE, 0, 0);
             break;
         case SDL_EVENT_WINDOW_RESIZED:
+            platform::window::RefreshRegions();
             EnqueueMessage(WM_SIZE, SIZE_RESTORED, MAKELONG(ToEngine(e.window.data1), ToEngine(e.window.data2)));
             break;
         case SDL_EVENT_WINDOW_MOVED:
@@ -281,6 +312,7 @@ void Translate(const SDL_Event& e, bool& displayChanged)
             int w = 0;
             int h = 0;
             SDL_GetWindowSize(rec->window, &w, &h);
+            platform::window::RefreshRegions();
             EnqueueMessage(WM_SIZE, SIZE_RESTORED, MAKELONG(ToEngine(w), ToEngine(h)));
             break;
         }
@@ -368,10 +400,14 @@ void PumpEvents()
             Translate(e, displayChanged);
         if (displayChanged) {
             RefreshDesktopSize();
+            RefreshRegions();
             const SIZE desktop = platform::present::DesktopSize();
             EnqueueMessage(WM_DISPLAYCHANGE, 32, MAKELONG(ToEngine(desktop.cx), ToEngine(desktop.cy)));
         }
     }
+    // The engine switches screens (world, full UI) and the world screen its
+    // view size between pumps; the regions follow before the next present.
+    RefreshRegions();
     platform::present::PresentIfDirty();
     CheckSmoke();
     // The control channel and the script run once per presented frame (the
@@ -406,15 +442,65 @@ bool NativeDesktopSize(int* width, int* height)
     return true;
 }
 
-bool InitScreen(int width, int height, int scale)
+bool InitScreen(int width, int height, int scale, int uiScale)
 {
     platform::present::SetScreenSize(width, height);
     platform::present::SetWindowScale(scale);
+    UiRegions().uiScale = uiScale >= 1 ? uiScale : platform::present::WindowScale();
+    RefreshRegions();
     SDL_SetHint(SDL_HINT_QUIT_ON_LAST_WINDOW_CLOSE, "0");
     if (!VideoUp() && !SDL_Init(SDL_INIT_VIDEO))
         return false;
     RefreshDesktopSize();
     return true;
+}
+
+void SetRegionSource(RegionSource source)
+{
+    UiRegions().source = source;
+    if (source) {
+        RefreshRegions();
+    } else if (!platform::present::Regions().empty()) {
+        // The source's owner is going away: back to the whole frame.
+        platform::present::SetRegions({});
+    }
+}
+
+void RefreshRegions()
+{
+    const RegionState& r = UiRegions();
+    const int worldScale = platform::present::WindowScale();
+    if (r.uiScale == worldScale) {
+        // Equal scales: the presenter's own path, untouched.
+        if (!platform::present::Regions().empty())
+            platform::present::SetRegions({});
+        return;
+    }
+    // The window in pixels: the live window's client area (not while
+    // minimised, when it has none), else the virtual screen at the world
+    // scale, which is what CreateWindowExA will make.
+    const SIZE screen = platform::present::ScreenSize();
+    SIZE window = { screen.cx * worldScale, screen.cy * worldScale };
+    WindowRecord* rec = S().current;
+    if (rec && VideoUp()) {
+        if (rec->minimized || (SDL_GetWindowFlags(rec->window) & SDL_WINDOW_MINIMIZED))
+            return;
+        int w = 0;
+        int h = 0;
+        SDL_GetWindowSize(rec->window, &w, &h);
+        if (w > 0 && h > 0) {
+            window.cx = w;
+            window.cy = h;
+        }
+    }
+    std::vector<platform::compose::Region> regions;
+    if (r.source) {
+        regions = r.source(window);
+    } else {
+        regions = platform::compose::Layout(screen, window, r.uiScale, worldScale, {}, nullptr);
+    }
+    if (!SameRegions(regions, platform::present::Regions()))
+        platform::present::SetRegions(std::move(regions));
 }
 
 HWND MainWindow()
@@ -530,6 +616,7 @@ HWND CreateWindowExA(DWORD exStyle, LPCSTR className, LPCSTR title, DWORD style,
         platform::window::EnqueueMessage(WM_SIZE, SIZE_RESTORED, MAKELONG(ToEngine(cw), ToEngine(ch)));
         platform::window::EnqueueMessage(WM_MOVE, 0, MAKELONG(ToEngine(wx), ToEngine(wy)));
     }
+    platform::window::RefreshRegions();
 
     if (!s.smokeEnvRead) {
         s.smokeEnvRead = true;

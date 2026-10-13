@@ -2,6 +2,12 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "ScreenLayout.h"
+#include "platform/compose.h"
+#include "platform/present.h"
+#include "platform/win32_api.h"
+#include "platform/window.h"
+
+#include <SDL3/SDL.h>
 
 #include <cstring>
 #include <string>
@@ -413,4 +419,459 @@ TEST_CASE("layout resolves the scale", "[layout]")
             }
         }
     }
+}
+
+namespace {
+
+using platform::compose::Region;
+
+bool SameLayoutRect(const LayoutRect& a, const LayoutRect& b)
+{
+    return a.left == b.left && a.top == b.top && a.right == b.right && a.bottom == b.bottom;
+}
+
+// Every field the engine reads.
+void CheckSameLayout(const ScreenLayout& a, const ScreenLayout& b)
+{
+    CHECK(a.screenWidth == b.screenWidth);
+    CHECK(a.screenHeight == b.screenHeight);
+    CHECK(SameLayoutRect(a.stru_8E7538, b.stru_8E7538));
+    CHECK(SameLayoutRect(a.stru_8E7548, b.stru_8E7548));
+    CHECK(SameLayoutRect(a.stru_8E7958, b.stru_8E7958));
+    CHECK(SameLayoutRect(a.stru_8E7988, b.stru_8E7988));
+    CHECK(SameLayoutRect(a.stru_8E79A8, b.stru_8E79A8));
+    CHECK(SameLayoutRect(a.stru_8E79B8, b.stru_8E79B8));
+    CHECK(SameLayoutRect(a.stru_8E79C8, b.stru_8E79C8));
+    CHECK(SameLayoutRect(a.stru_8E79E0, b.stru_8E79E0));
+    CHECK(SameLayoutRect(a.stru_8E79F8, b.stru_8E79F8));
+    CHECK(SameLayoutRect(a.stru_8E7A10, b.stru_8E7A10));
+    CHECK(std::string(a.guiExt) == b.guiExt);
+    for (int i = 0; i < 4; i++) {
+        CHECK(std::string(a.borderMosaic[i]) == b.borderMosaic[i]);
+        CHECK(a.borderPanels[i].x == b.borderPanels[i].x);
+        CHECK(a.borderPanels[i].y == b.borderPanels[i].y);
+        CHECK(a.borderPanels[i].width == b.borderPanels[i].width);
+        CHECK(a.borderPanels[i].height == b.borderPanels[i].height);
+        CHECK(a.borderPanels[i].anchorX == b.borderPanels[i].anchorX);
+        CHECK(a.borderPanels[i].anchorY == b.borderPanels[i].anchorY);
+    }
+    CHECK(a.field_4A28 == b.field_4A28);
+    CHECK(a.field_4A2C == b.field_4A2C);
+    CHECK(a.logicalWidth == b.logicalWidth);
+    CHECK(a.logicalHeight == b.logicalHeight);
+    CHECK(a.worldUiShiftX == b.worldUiShiftX);
+    CHECK(a.worldUiShiftY == b.worldUiShiftY);
+    CHECK(a.dialogAutoScrollRange == b.dialogAutoScrollRange);
+}
+
+bool Inside(const RECT& r, float x, float y)
+{
+    return x >= r.left && x < r.right && y >= r.top && y < r.bottom;
+}
+
+const Region* WorldRegion(const std::vector<Region>& regions)
+{
+    for (const Region& r : regions) {
+        if (!r.ui) {
+            return &r;
+        }
+    }
+    return nullptr;
+}
+
+const Region* UiRegion(const std::vector<Region>& regions)
+{
+    for (const Region& r : regions) {
+        if (r.ui) {
+            return &r;
+        }
+    }
+    return nullptr;
+}
+
+}
+
+TEST_CASE("default_world_scale_equals_scale", "[layout]")
+{
+    const int sizes[][2] = { { 800, 600 }, { 1024, 768 }, { 1600, 1200 }, { 2048, 1536 }, { 1920, 1080 }, { 1366, 768 } };
+    for (const auto& size : sizes) {
+        for (int s = 1; s <= iwd2r::kMaxScale; s++) {
+            INFO(size[0] << "x" << size[1] << " at scale " << s);
+            // The same layout as ever (the original tables at the four sizes,
+            // pinned value by value above).
+            const ScreenLayout l = ComputeScreenLayout(size[0], size[1], s, s);
+            CheckSameLayout(l, ComputeScreenLayout(size[0], size[1]));
+            CHECK(l.uiScale == s);
+            CHECK(l.worldScale == s);
+            CHECK(l.uiWidth == size[0]);
+            CHECK(l.uiHeight == size[1]);
+
+            // One region, the whole frame on the whole window, on every
+            // screen.
+            const SIZE window = { size[0] * s, size[1] * s };
+            for (iwd2r::ScreenKind kind : { iwd2r::SCREEN_FULL_UI, iwd2r::SCREEN_WORLD }) {
+                const std::vector<Region> regions = iwd2r::RegionsFor(l, kind, l.stru_8E79B8.bottom, window);
+                REQUIRE(regions.size() == 1);
+                CHECK(regions[0].frame.right == size[0]);
+                CHECK(regions[0].frame.bottom == size[1]);
+                CHECK(regions[0].window.right == window.cx);
+                CHECK(regions[0].window.bottom == window.cy);
+                CHECK(regions[0].scale == s);
+            }
+        }
+    }
+
+    // World Scale absent: the screen size as ever; the scales recorded.
+    const ScreenSize a = ResolveScreenSize(2560, 1440, 2, 2560, 1440);
+    const ScreenSize b = ResolveScreenSize(2560, 1440, 2, 2560, 1440, "");
+    for (const ScreenSize& r : { a, b }) {
+        REQUIRE(r.ok);
+        CHECK(r.scale == 2);
+        CHECK(r.uiScale == 2);
+        CHECK(r.worldScale == 2);
+        CHECK(r.width == 1280);
+        CHECK(r.height == 720);
+        CHECK(r.outputWidth == 2560);
+    }
+}
+
+TEST_CASE("world_viewport_excludes_reserved_rects", "[layout]")
+{
+    // 1920x1080 at Scale=2, World Scale=1: the engine sees 1920x1080.
+    const ScreenSize size = ResolveScreenSize(1920, 1080, 2, 1920, 1080, "1");
+    REQUIRE(size.ok);
+    CHECK(size.width == 1920);
+    CHECK(size.height == 1080);
+    CHECK(size.scale == 1);
+    CHECK(size.uiScale == 2);
+    CHECK(size.worldScale == 1);
+    CHECK(size.outputWidth == 1920);
+
+    const ScreenLayout l = ComputeScreenLayout(1920, 1080, 2, 1);
+    CHECK(l.uiWidth == 960);
+    CHECK(l.uiHeight == 540);
+    // The UI at 2x has 960x540 frame pixels: the 800x600 panels (GUIW08),
+    // centred in the band's 960 columns, bottom-anchored.
+    CHECK(std::string(l.guiExt) == "08");
+    CHECK(l.field_4A28 == 0);
+    CHECK(l.field_4A2C == 0);
+    CHECK(l.worldUiShiftX == 80);
+    CHECK(l.worldUiShiftY == 480);
+    CHECK(l.worldUiShiftX + 800 <= l.uiWidth);
+
+    // The toolbar (167 deep) reserves twice its depth.
+    CheckRect(l.stru_8E79B8, 0, 0, 1920, 1080 - 2 * 167);
+    CheckRect(l.stru_8E7958, 0, 0, 1920, 1080 - 2 * 284);
+    CheckRect(l.stru_8E7988, 0, 0, 1920, 1080 - 2 * 139);
+    CheckRect(l.stru_8E79F8, 0, 0, 1920, 1080 - 2 * 124);
+    CheckRect(l.stru_8E7548, 0, 0, 1920, 1080);
+    REQUIRE(l.uiPanelRects.size() == 1);
+    CHECK(l.uiPanelRects[0].top == 1080 - 167);
+    CHECK(l.uiPanelRects[0].bottom == 1080);
+    CHECK(l.uiPanelRects[0].left == 0);
+    CHECK(l.uiPanelRects[0].right == 1920);
+
+    const SIZE window = { 1920, 1080 };
+    const std::vector<Region> regions = iwd2r::RegionsFor(l, iwd2r::SCREEN_WORLD, l.stru_8E79B8.bottom, window);
+    REQUIRE(regions.size() == 2);
+    CHECK(platform::compose::Tiles(regions, window));
+    const Region* world = WorldRegion(regions);
+    const Region* ui = UiRegion(regions);
+    REQUIRE(world != nullptr);
+    REQUIRE(ui != nullptr);
+    // The world: the viewport at 1x, its bottom the toolbar band's top.
+    CHECK(world->scale == 1);
+    CHECK(world->frame.top == 0);
+    CHECK(world->frame.right == 1920);
+    CHECK(world->frame.bottom == l.stru_8E79B8.bottom);
+    CHECK(world->window.bottom == l.stru_8E79B8.bottom);
+    // The toolbar band: 2 x 167 window rows across the window, showing the
+    // band's first 960 columns (the centred panels) at 2x.
+    CHECK(ui->scale == 2);
+    CHECK(ui->window.top == world->window.bottom);
+    CHECK(ui->window.bottom - ui->window.top == 2 * 167);
+    CHECK(ui->window.left == 0);
+    CHECK(ui->window.right == 1920);
+    CHECK(ui->frame.left == 0);
+    CHECK(ui->frame.right == 960);
+    CHECK(ui->frame.top == 1080 - 167);
+    CHECK(ui->frame.bottom == 1080);
+
+    // The dialog panel's viewport reserves its own depth; the hidden
+    // interface none.
+    const std::vector<Region> dialog = iwd2r::RegionsFor(l, iwd2r::SCREEN_WORLD, l.stru_8E7958.bottom, window);
+    REQUIRE(dialog.size() == 2);
+    CHECK(WorldRegion(dialog)->frame.bottom == 1080 - 2 * 284);
+    CHECK(UiRegion(dialog)->frame.top == 1080 - 284);
+    CHECK(platform::compose::Tiles(dialog, window));
+    const std::vector<Region> hidden = iwd2r::RegionsFor(l, iwd2r::SCREEN_WORLD, l.stru_8E7548.bottom, window);
+    REQUIRE(hidden.size() == 1);
+    CHECK_FALSE(hidden[0].ui);
+    CHECK(hidden[0].frame.bottom == 1080);
+
+    // A full-UI screen: the 800x600 UI does not fit 1080 rows at 2x, so
+    // it is shown at the world scale, the whole frame as ever.
+    CHECK(l.worldUiScale == 2);
+    CHECK(l.fullUiScale == 1);
+    CHECK(size.worldUiScale == 2);
+    CHECK(size.fullUiScale == 1);
+    CHECK(size.notices.size() == 1);
+    CHECK(l.fullUiRect.left == 560);
+    CHECK(l.fullUiRect.top == 240);
+    CHECK(l.fullUiRect.right == 1360);
+    CHECK(l.fullUiRect.bottom == 840);
+    const std::vector<Region> full = iwd2r::RegionsFor(l, iwd2r::SCREEN_FULL_UI, 0, window);
+    REQUIRE(full.size() == 1);
+    CHECK_FALSE(full[0].ui);
+    CHECK(full[0].scale == 1);
+    CHECK(full[0].frame.right == 1920);
+    CHECK(full[0].window.right == 1920);
+    CHECK(full[0].window.bottom == 1080);
+
+    // At 2560x1440 it fits at 2x: centred.
+    const ScreenLayout q = ComputeScreenLayout(2560, 1440, 2, 1);
+    CHECK(q.fullUiScale == 2);
+    const SIZE qwin = { 2560, 1440 };
+    const std::vector<Region> qfull = iwd2r::RegionsFor(q, iwd2r::SCREEN_FULL_UI, 0, qwin);
+    REQUIRE(qfull.size() == 1);
+    CHECK(qfull[0].ui);
+    CHECK(qfull[0].scale == 2);
+    CHECK(qfull[0].frame.left == 880);
+    CHECK(qfull[0].frame.top == 420);
+    CHECK(qfull[0].frame.right == 1680);
+    CHECK(qfull[0].frame.bottom == 1020);
+    CHECK(qfull[0].window.left == 480);
+    CHECK(qfull[0].window.top == 120);
+    CHECK(qfull[0].window.right == 2080);
+    CHECK(qfull[0].window.bottom == 1320);
+
+    // The clamps the rulings name: 1920x1080 at 3/1 shows the world
+    // screen's panels at 2; 1366x768 at 2/1 at 1, which is the world
+    // scale, so the layout and the regions are the old ones.
+    const ScreenSize s31 = ResolveScreenSize(1920, 1080, 3, 1920, 1080, "1");
+    REQUIRE(s31.ok);
+    CHECK(s31.worldUiScale == 2);
+    CHECK(s31.fullUiScale == 1);
+    CHECK(ComputeScreenLayout(1920, 1080, 3, 1).worldUiScale == 2);
+    const ScreenSize s1366 = ResolveScreenSize(1366, 768, 2, 1366, 768, "1");
+    REQUIRE(s1366.ok);
+    CHECK(s1366.worldUiScale == 1);
+    CHECK(s1366.fullUiScale == 1);
+    CHECK(s1366.notices.size() == 2);
+    const ScreenLayout l1366 = ComputeScreenLayout(1366, 768, 2, 1);
+    CheckSameLayout(l1366, ComputeScreenLayout(1366, 768, 1, 1));
+    const SIZE w1366 = { 1366, 768 };
+    CHECK(iwd2r::RegionsFor(l1366, iwd2r::SCREEN_WORLD, l1366.stru_8E79B8.bottom, w1366).size() == 1);
+
+    // Every UI scale over every world scale at the common sizes: the
+    // world viewports clear the reserved bands, the regions tile, and the
+    // world screen's toolbar lies inside the columns its region shows.
+    const int sizes[][2] = { { 1920, 1080 }, { 2560, 1440 }, { 3840, 2160 }, { 1600, 1200 }, { 1366, 768 } };
+    for (const auto& output : sizes) {
+        for (int ui = 1; ui <= 4; ui++) {
+            for (int ws = 1; ws <= 4; ws++) {
+                const ScreenSize r = ResolveScreenSize(output[0], output[1], ui, output[0], output[1], std::to_string(ws).c_str());
+                if (!r.ok) {
+                    continue;
+                }
+                INFO(output[0] << "x" << output[1] << " ui " << ui << " world " << ws);
+                CHECK(r.worldScale <= r.uiScale);
+                CHECK(r.worldUiScale >= r.worldScale);
+                CHECK(r.worldUiScale <= r.uiScale);
+                const ScreenLayout x = ComputeScreenLayout(r.width, r.height, r.uiScale, r.worldScale);
+                CHECK(x.worldUiScale == r.worldUiScale);
+                CHECK(x.fullUiScale == r.fullUiScale);
+                CHECK(x.worldUiShiftX >= 0);
+                const SIZE win = { r.outputWidth, r.outputHeight };
+                const std::vector<Region> rs = iwd2r::RegionsFor(x, iwd2r::SCREEN_WORLD, x.stru_8E79B8.bottom, win);
+                CHECK(platform::compose::Tiles(rs, win));
+                const Region* w = WorldRegion(rs);
+                REQUIRE(w != nullptr);
+                if (x.fullUiScale == r.worldScale) {
+                    CHECK(platform::compose::Tiles(iwd2r::RegionsFor(x, iwd2r::SCREEN_FULL_UI, 0, win), win));
+                }
+                if (x.worldUiScale == r.worldScale) {
+                    // The old layout and the whole frame.
+                    CHECK(rs.size() == 1);
+                    CHECK(w->frame.bottom == r.height);
+                    continue;
+                }
+                CHECK(x.stru_8E79B8.bottom == r.height - iwd2r::ReservedDepth(167, x.worldUiScale, r.worldScale));
+                CHECK(w->frame.bottom == x.stru_8E79B8.bottom);
+                const Region* u = UiRegion(rs);
+                REQUIRE(u != nullptr);
+                const int panelWidth = std::string(x.guiExt) == "10" ? 1024 : 800;
+                const RECT toolbar = { x.worldUiShiftX, r.height - 167, x.worldUiShiftX + panelWidth, r.height };
+                CHECK(toolbar.left >= u->frame.left);
+                CHECK(toolbar.right <= u->frame.right);
+                CHECK(toolbar.top >= u->frame.top);
+                CHECK(toolbar.bottom <= u->frame.bottom);
+            }
+        }
+    }
+}
+
+TEST_CASE("auto_world_scale", "[layout]")
+{
+    CHECK(iwd2r::ResolveWorldScale(NULL, 2) == 2);
+    CHECK(iwd2r::ResolveWorldScale("", 3) == 3);
+    CHECK(iwd2r::ResolveWorldScale(" ", 1) == 1);
+    CHECK(iwd2r::ResolveWorldScale("auto", 1) == 1);
+    CHECK(iwd2r::ResolveWorldScale("auto", 2) == 1);
+    CHECK(iwd2r::ResolveWorldScale("AUTO", 4) == 1);
+    CHECK(iwd2r::ResolveWorldScale("3", 1) == 3);
+    CHECK(iwd2r::ResolveWorldScale("1", 2) == 1);
+    CHECK(iwd2r::ResolveWorldScale("5", 2) == iwd2r::kScaleInvalid);
+    CHECK(iwd2r::ResolveWorldScale("0", 2) == iwd2r::kScaleInvalid);
+    CHECK(iwd2r::ResolveWorldScale("x", 2) == iwd2r::kScaleInvalid);
+
+    // Scale=auto at 2560x1440 gives 2; World Scale=auto then 1: the world at
+    // the desktop's resolution, the UI at 2x.
+    ScreenSize r = ResolveScreenSize(2560, 1440, iwd2r::kScaleAuto, 2560, 1440, "auto");
+    REQUIRE(r.ok);
+    CHECK(r.uiScale == 2);
+    CHECK(r.worldScale == 1);
+    CHECK(r.scale == 1);
+    CHECK(r.width == 2560);
+    CHECK(r.height == 1440);
+    // Scale 1: auto keeps 1.
+    r = ResolveScreenSize(1920, 1080, 1, 1920, 1080, "auto");
+    REQUIRE(r.ok);
+    CHECK(r.uiScale == 1);
+    CHECK(r.worldScale == 1);
+    // World Scale above Scale is clamped to it, with a notice.
+    r = ResolveScreenSize(1920, 1080, 1, 1920, 1080, "2");
+    REQUIRE(r.ok);
+    CHECK(r.worldScale == 1);
+    CHECK(r.width == 1920);
+    REQUIRE(r.notices.size() == 1);
+    CHECK(r.notices[0].find("World Scale=2") != std::string::npos);
+    r = ResolveScreenSize(3840, 2160, 1, 3840, 2160, "2");
+    REQUIRE(r.ok);
+    CHECK(r.worldScale == 1);
+    CHECK(ComputeScreenLayout(3840, 2160, 1, 2).worldScale == 1);
+    // A world scale leaving under 800x600 inside is an error naming it.
+    r = ResolveScreenSize(1920, 1080, 4, 1920, 1080, "2");
+    CHECK_FALSE(r.ok);
+    CHECK(r.error.find("World Scale=2") != std::string::npos);
+    CHECK_FALSE(ResolveScreenSize(1920, 1080, 2, 1920, 1080, "9").ok);
+    // Defaults print nothing.
+    CHECK(ResolveScreenSize(2560, 1440, 2, 2560, 1440).notices.empty());
+    // Scale 2 alone is still too small at 1920x1080; with World Scale=1 it
+    // runs.
+    CHECK_FALSE(ResolveScreenSize(1920, 1080, 2, 1920, 1080).ok);
+    CHECK(ResolveScreenSize(1920, 1080, 2, 1920, 1080, "1").ok);
+
+    // Reserved depths: whole pixels, never under the panel, at 3 over 2.
+    CHECK(iwd2r::ReservedDepth(167, 2, 1) == 334);
+    CHECK(iwd2r::ReservedDepth(167, 3, 2) == 251);
+    CHECK(iwd2r::ReservedDepth(167, 1, 2) == 167);
+    CHECK(iwd2r::ReservedDepth(0, 2, 1) == 0);
+}
+
+namespace {
+
+ScreenLayout& ResizeLayout()
+{
+    static ScreenLayout l = ComputeScreenLayout(1920, 1080, 2, 1);
+    return l;
+}
+
+std::vector<Region> ResizeSource(SIZE window)
+{
+    return iwd2r::RegionsFor(ResizeLayout(), iwd2r::SCREEN_WORLD, ResizeLayout().stru_8E79B8.bottom, window);
+}
+
+LRESULT CALLBACK IgnoringProc(HWND, UINT, WPARAM, LPARAM) { return 0; }
+
+void DrainMessages()
+{
+    MSG m;
+    while (PeekMessageA(&m, NULL, 0, 0, PM_REMOVE) && m.message != WM_QUIT) {
+    }
+}
+
+}
+
+TEST_CASE("resize_recomputes_regions", "[layout]")
+{
+    SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
+    REQUIRE(platform::window::InitScreen(1920, 1080, 1, 2));
+    WNDCLASSEXA wc = {};
+    wc.cbSize = sizeof(wc);
+    wc.lpfnWndProc = IgnoringProc;
+    wc.lpszClassName = "LayoutResize";
+    REQUIRE(RegisterClassExA(&wc) != 0);
+    HWND hwnd = CreateWindowExA(0, "LayoutResize", "t", WS_POPUP, 0, 0, 1920, 1080, NULL, NULL, NULL, NULL);
+    REQUIRE(hwnd != NULL);
+    platform::window::SetRegionSource(ResizeSource);
+    platform::window::PumpEvents();
+    DrainMessages();
+
+    // The toolbar's 1x rectangle in the frame (GUIW08's bottom panels at
+    // their shift) and where its region shows it.
+    const ScreenLayout& l = ResizeLayout();
+    const RECT toolbar = { l.worldUiShiftX, 1080 - 167, l.worldUiShiftX + 800, 1080 };
+    auto Check = [&](int windowWidth, int windowHeight) {
+        INFO("window " << windowWidth << "x" << windowHeight);
+        // The 1920x1080 output letterboxed (centred) in the window.
+        const int ox = (windowWidth - 1920) / 2;
+        const int oy = (windowHeight - 1080) / 2;
+        std::vector<Region> regions = platform::present::Regions();
+        for (Region& r : regions) {
+            r.window.left -= ox;
+            r.window.right -= ox;
+            r.window.top -= oy;
+            r.window.bottom -= oy;
+        }
+        const SIZE output = { 1920, 1080 };
+        CHECK(platform::compose::Tiles(regions, output));
+        const Region* ui = UiRegion(platform::present::Regions());
+        REQUIRE(ui != nullptr);
+        CHECK(ui->window.left == ox);
+        CHECK(ui->window.right == ox + 1920);
+        CHECK(ui->window.bottom == oy + 1080);
+        CHECK(ui->window.bottom - ui->window.top == 2 * 167);
+        // The toolbar's centre in the window, as the presenter draws the
+        // region, maps back inside the toolbar.
+        const float cx = ui->window.left + ((toolbar.left + toolbar.right) / 2.0f - ui->frame.left) * ui->scale;
+        const float cy = ui->window.top + ((toolbar.top + toolbar.bottom) / 2.0f - ui->frame.top) * ui->scale;
+        CHECK(Inside(ui->window, cx, cy));
+        float fx = 0.0f;
+        float fy = 0.0f;
+        platform::present::WindowToFrame(cx, cy, &fx, &fy);
+        CHECK(Inside(toolbar, fx, fy));
+        // The world above it at 1x.
+        platform::present::WindowToFrame(ox + 100.0f, oy + 100.0f, &fx, &fy);
+        CHECK(fx == 100.0f);
+        CHECK(fy == 100.0f);
+    };
+    Check(1920, 1080);
+
+    // The user resizes the window: WM_SIZE, and the regions follow.
+    SDL_Window* sdl = nullptr;
+    {
+        int count = 0;
+        SDL_Window** windows = SDL_GetWindows(&count);
+        sdl = count > 0 ? windows[count - 1] : nullptr;
+        SDL_free(windows);
+    }
+    REQUIRE(sdl != nullptr);
+    REQUIRE(SDL_SetWindowSize(sdl, 2400, 1350));
+    SDL_SyncWindow(sdl);
+    platform::window::PumpEvents();
+    MSG m;
+    bool sized = false;
+    while (PeekMessageA(&m, NULL, 0, 0, PM_REMOVE) && m.message != WM_QUIT) {
+        sized = sized || m.message == WM_SIZE;
+    }
+    CHECK(sized);
+    Check(2400, 1350);
+
+    // Back to equal scales: no regions, the presenter's own path.
+    platform::window::SetRegionSource(nullptr);
+    DestroyWindow(hwnd);
+    DrainMessages();
+    REQUIRE(platform::window::InitScreen(1024, 768, 1, 1));
+    CHECK(platform::present::Regions().empty());
 }

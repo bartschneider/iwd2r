@@ -295,12 +295,27 @@ ORIGINAL_HEIGHTS = {800: 600, 1024: 768, 1600: 1200, 2048: 1536}
 MAX_SCALE = 4
 
 
-def resolve_screen(width, height, scale, desktop):
+def resolve_world_scale(value, ui_scale):
+    """Python port of iwd2r::ResolveWorldScale: World Scale (None or '' for
+    the UI scale, 'auto' for 1 when the UI scale is 2 or more, else 1-4)."""
+    text = '' if value is None else str(value).strip().lower()
+    if not text:
+        return ui_scale
+    if text == 'auto':
+        return 1 if ui_scale >= 2 else ui_scale
+    if text in ('1', '2', '3', '4'):
+        return int(text)
+    raise ValueError('World Scale must be 1, 2, 3, 4 or auto: %r' % value)
+
+
+def resolve_screen(width, height, scale, desktop, world_scale=None):
     """Python port of iwd2r::ResolveScreenSize (src/ScreenLayout.cpp).
 
     width: an int or 'desktop'; height: an int or None; scale: 1-4 or
-    'auto'; desktop: (w, h). Returns a dict with output_width,
-    output_height, scale, width, height (the engine's internal screen).
+    'auto' (Scale, the UI's); desktop: (w, h); world_scale: World Scale
+    (None for Scale's value). Returns a dict with output_width,
+    output_height, scale (window pixels per engine pixel: the world scale),
+    ui_scale, world_scale, width, height (the engine's internal screen).
     Raises ValueError below the 800x600 minimum."""
     if width == 'desktop':
         width = desktop[0]
@@ -317,12 +332,31 @@ def resolve_screen(width, height, scale, desktop):
                 scale = s
                 break
     scale = int(scale)
-    w, h = width // scale, height // scale
+    # World Scale never exceeds Scale (the engine clamps it).
+    world = min(resolve_world_scale(world_scale, scale), scale)
+    w, h = width // world, height // world
     if w < 800 or h < 600:
         raise ValueError('%dx%d at scale %d is %dx%d inside; the minimum is '
-                         '800x600' % (width, height, scale, w, h))
-    return {'output_width': w * scale, 'output_height': h * scale,
-            'scale': scale, 'width': w, 'height': h}
+                         '800x600' % (width, height, world, w, h))
+    world_ui, full_ui = effective_ui_scales(w * world, h * world, scale, world)
+    return {'output_width': w * world, 'output_height': h * world,
+            'scale': world, 'ui_scale': scale, 'world_scale': world,
+            'world_ui_scale': world_ui, 'full_ui_scale': full_ui,
+            'width': w, 'height': h}
+
+
+# The deepest world-screen panel band (iwd2r::kDeepestWorldPanel).
+DEEPEST_WORLD_PANEL = 284
+
+
+def effective_ui_scales(output_width, output_height, ui, world):
+    """Python port of iwd2r::EffectiveUiScales: the UI scales the world
+    screen's panels and the 800x600 screens are shown at, the largest up to
+    Scale that fits the output, never below the world scale."""
+    def fit(height):
+        return max(min(ui, output_width // 800, output_height // height),
+                   world)
+    return fit(DEEPEST_WORLD_PANEL), fit(600)
 
 
 def ui_to_screen(x, y, width, height):
@@ -333,13 +367,44 @@ def ui_to_screen(x, y, width, height):
     return ((width - 800 * k) // 2 + x * k, (height - 600 * k) // 2 + y * k)
 
 
+def full_ui_window_point(x, y, geometry):
+    """A point in the 800x600 UI in the window when the UI has a scale of
+    its own (World Scale != Scale): the full-UI screens' one region,
+    platform::compose::Layout's, the UI centred in the frame (never doubled)
+    shown at the UI scale centred in the window, cropped about its centre
+    to whole engine pixels. Raises ValueError for a point the crop hides."""
+    ui = geometry.get('full_ui_scale', geometry['ui_scale'])
+    out = []
+    for value, extent, size in ((x, geometry['width'], 800),
+                                (y, geometry['height'], 600)):
+        window = extent * geometry['scale']
+        lo = (extent - size) // 2
+        fit = max(min(size, window // ui), 0)
+        start = lo + (size - fit) // 2
+        frame = lo + value
+        if not start <= frame < start + fit:
+            raise ValueError('UI point (%d, %d) is outside the part of the '
+                             'UI the window shows at scale %d' % (x, y, ui))
+        out.append((window - fit * ui) // 2 + (frame - start) * ui)
+    return out[0], out[1]
+
+
 def window_point(action, geometry):
     """The window (client area) pixel for a move/click action: UI
-    coordinates placed on the engine's screen, then times the scale."""
+    coordinates placed on the engine's screen, then times the scale (with
+    a UI scale of its own, through the full-UI region: full_ui_window_point;
+    screen coordinates are then taken as world points, times the world
+    scale)."""
     if geometry is None:
         geometry = {'width': 800, 'height': 600, 'scale': 1}
     x, y = action['x'], action['y']
     if action.get('ui', True):
+        # The engine lays out with a UI scale of its own when the world
+        # screen's panels get one (the full-UI scale may still be the
+        # world's).
+        if geometry.get('world_ui_scale', geometry.get(
+                'ui_scale', geometry['scale'])) != geometry['scale']:
+            return full_ui_window_point(x, y, geometry)
         x, y = ui_to_screen(x, y, geometry['width'], geometry['height'])
     return x * geometry['scale'], y * geometry['scale']
 

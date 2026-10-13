@@ -154,10 +154,16 @@ def vm_height(resolution, sets):
 
 
 def vm_geometry(resolution, scale, sets):
-    """The screen of a --vm run (realinput.resolve_screen). Raises
-    ValueError below 800x600 inside."""
+    """The screen of a --vm run (realinput.resolve_screen), with the Scale
+    and World Scale the --set entries give winning over scale. Raises
+    ValueError below 800x600 inside or for a bad scale."""
+    scale_set = set_value(sets, 'Program Options/Scale')
+    if scale_set is not None:
+        scale = scale_arg(scale_set.strip())
     return realinput.resolve_screen(resolution, vm_height(resolution, sets),
-                                    scale, VM_DESKTOP)
+                                    scale, VM_DESKTOP,
+                                    set_value(sets,
+                                              'Program Options/World Scale'))
 
 
 def parse_args(argv):
@@ -240,7 +246,7 @@ def parse_args(argv):
     if args.vm:
         try:
             vm_geometry(args.resolution, args.scale or 1, args.sets)
-        except ValueError as e:
+        except (ValueError, argparse.ArgumentTypeError) as e:
             ap.error(str(e))
     return args
 
@@ -682,9 +688,10 @@ def main_vm(args, argv):
             sys.exit('play: %s' % e)
     data = resolve_data(args.data)
     overrides, geometry = vm_overrides(args)
-    log('screen: %dx%d inside, scale %d, output %dx%d' % (
+    log('screen: %dx%d inside, scale %d (UI %d), output %dx%d' % (
         geometry['width'], geometry['height'], geometry['scale'],
-        geometry['output_width'], geometry['output_height']))
+        geometry['ui_scale'], geometry['output_width'],
+        geometry['output_height']))
     run_root = make_run_folder(os.path.join(ROOT, 'runs'),
                                datetime.datetime.now())
     platforms = ['linux', 'windows'] if args.vm == 'all' else [args.vm]

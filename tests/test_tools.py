@@ -568,6 +568,71 @@ class ScenarioParseTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             r(1920, 1080, 2, (1920, 1080))
 
+    def test_world_scale_geometry(self):
+        r = realinput.resolve_screen
+        # World Scale absent: as ever.
+        g = r(2560, 1440, 2, (2560, 1440))
+        self.assertEqual((g['scale'], g['ui_scale'], g['world_scale'],
+                          g['world_ui_scale'], g['full_ui_scale']),
+                         (2, 2, 2, 2, 2))
+        # Scale 2, World Scale 1 at 1920x1080: the engine sees the output;
+        # the world screen's panels at 2, the 800x600 screens at 1 (600
+        # rows do not fit 1080 at 2).
+        g = r(1920, 1080, 2, (1920, 1080), '1')
+        self.assertEqual((g['width'], g['height'], g['scale'],
+                          g['ui_scale'], g['world_ui_scale'],
+                          g['full_ui_scale'], g['output_width']),
+                         (1920, 1080, 1, 2, 2, 1, 1920))
+        self.assertEqual(r(2560, 1440, 'auto', (2560, 1440),
+                           'auto')['world_scale'], 1)
+        self.assertEqual(r(1920, 1080, 1, (1920, 1080), 'auto')['scale'], 1)
+        self.assertEqual(r(3840, 2160, 2, (3840, 2160), '')['scale'], 2)
+        # World Scale above Scale is clamped.
+        self.assertEqual(r(1920, 1080, 1, (1920, 1080), '2')['scale'], 1)
+        with self.assertRaises(ValueError):
+            r(1920, 1080, 4, (1920, 1080), '2')
+        with self.assertRaises(ValueError):
+            r(1920, 1080, 2, (1920, 1080), '5')
+        # The clamps: 1920x1080 at 3/1 shows the world panels at 2;
+        # 1366x768 at 2/1 everything at 1.
+        g31 = r(1920, 1080, 3, (1920, 1080), '1')
+        self.assertEqual((g31['world_ui_scale'], g31['full_ui_scale']),
+                         (2, 1))
+        g1366 = r(1366, 768, 2, (1920, 1080), '1')
+        self.assertEqual((g1366['world_ui_scale'], g1366['full_ui_scale']),
+                         (1, 1))
+        click = {'op': 'click', 'x': 645, 'y': 410, 'ui': True}
+        # At 1920x1080 2/1 the 800x600 screens are shown at 1, centred.
+        self.assertEqual(realinput.window_point(click, g),
+                         (560 + 645, 240 + 410))
+        self.assertEqual(realinput.window_point(click, g1366),
+                         ((1366 - 800) // 2 + 645, (768 - 600) // 2 + 410))
+        # 2560x1440 at 2/1: centred at 2x.
+        g2 = r(2560, 1440, 2, (2560, 1440), '1')
+        self.assertEqual(g2['full_ui_scale'], 2)
+        self.assertEqual(realinput.window_point(click, g2),
+                         (480 + 645 * 2, 120 + 410 * 2))
+        # 1600x1200 at 2/1 (the original height): the UI fills the window.
+        g16 = r(1600, None, 2, (1920, 1080), '1')
+        self.assertEqual((g16['height'], g16['full_ui_scale']), (1200, 2))
+        self.assertEqual(realinput.window_point(click, g16),
+                         (645 * 2, 410 * 2))
+        # A crop: a 1100-high window at 2x shows 550 of the 600 rows.
+        gc = r(1920, 1100, 2, (1920, 1100), '1')
+        self.assertEqual(gc['full_ui_scale'], 1)
+        gc = dict(gc, full_ui_scale=2)
+        with self.assertRaises(ValueError):
+            realinput.window_point(dict(click, y=10), gc)
+        # Screen points are world points.
+        self.assertEqual(realinput.window_point(
+            dict(click, ui=False), g), (645, 410))
+        # play.py takes Scale and World Scale from --set.
+        g = play.vm_geometry(1920, 1, ['Program Options/Scale=2',
+                                       'Program Options/World Scale=1'])
+        self.assertEqual((g['ui_scale'], g['world_scale'], g['width']),
+                         (2, 1, 1920))
+        self.assertEqual(play.vm_geometry(2560, 2, [])['ui_scale'], 2)
+
     def test_describe_round_trips(self):
         text = ('wait 5\nclick 1 2\norigin screen\nmove 3 4\nkey TAB\n'
                 'type ab\nshot x\nquit\n')
