@@ -8,7 +8,7 @@
 #include "CItem.h"
 #include "CScreenCreateChar.h"
 #include "ScreenLayout.h"
-#include "install_ini_backup.h"
+#include "data_view.h"
 #include "platform/data_dir.h"
 #include "platform/window.h"
 
@@ -16,6 +16,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -42,7 +43,29 @@ bool StartEngine(std::string& error)
     setenv("SDL_VIDEO_DRIVER", "dummy", 1);
     setenv("SDL_AUDIO_DRIVER", "dummy", 1);
 #endif
-    if (!platform::ResolveDataDir()) {
+    // The engine writes into its data folder (temp/, cache/, the INI files):
+    // it starts on a private view, which lives until the process ends.
+    static std::unique_ptr<DataView> view;
+    const char* install = std::getenv("IWD2_DATA");
+    if (install != nullptr && *install != '\0') {
+        const std::string original = install;
+        view = std::make_unique<DataView>(original);
+#ifdef _WIN32
+        _putenv_s("IWD2_DATA", view->Path().c_str());
+#else
+        setenv("IWD2_DATA", view->Path().c_str(), 1);
+#endif
+        const bool found = platform::ResolveDataDir();
+#ifdef _WIN32
+        _putenv_s("IWD2_DATA", original.c_str());
+#else
+        setenv("IWD2_DATA", original.c_str(), 1);
+#endif
+        if (!found) {
+            startError = "data folder not found";
+            return false;
+        }
+    } else if (!platform::ResolveDataDir()) {
         startError = "data folder not found";
         return false;
     }
@@ -148,8 +171,6 @@ TEST_CASE("CHARBASE.CRE survives Unmarshal and Marshal", "[cre][data]")
     if (env == nullptr || *env == '\0') {
         SKIP("[iwd2r-skip] IWD2_DATA unset");
     }
-    InstallIniBackup backup(env);
-
     std::string error;
     REQUIRE(StartEngine(error));
     INFO(error);
@@ -239,8 +260,6 @@ TEST_CASE("a CRE whose equipped item is missing loads with that slot empty", "[c
     if (env == nullptr || *env == '\0') {
         SKIP("[iwd2r-skip] IWD2_DATA unset");
     }
-    InstallIniBackup backup(env);
-
     std::string error;
     REQUIRE(StartEngine(error));
     INFO(error);
@@ -284,8 +303,6 @@ TEST_CASE("a fresh character's effect list runs as Character Generation runs it"
     if (env == nullptr || *env == '\0') {
         SKIP("[iwd2r-skip] IWD2_DATA unset");
     }
-    InstallIniBackup backup(env);
-
     std::string error;
     REQUIRE(StartEngine(error));
     INFO(error);
@@ -316,8 +333,6 @@ TEST_CASE("Marshal without all items skips a type 0x3A item and keeps the slot n
     if (env == nullptr || *env == '\0') {
         SKIP("[iwd2r-skip] IWD2_DATA unset");
     }
-    InstallIniBackup backup(env);
-
     std::string error;
     REQUIRE(StartEngine(error));
     INFO(error);
