@@ -71,11 +71,13 @@ void CVidImage::SetPolyColor(DWORD dwFlags)
 }
 
 // NOTE: The pulse phase of the range tints, adds and lights below starts
-// from the image's address, as in the original (nAUCounter + this).
+// from the image's address, as in the original (nAUCounter + this, a 32-bit
+// add and a signed idiv). The add wraps in 32 bits as the original's does;
+// on 64-bit only the address's low 32 bits count (docs/64bit-cast-sites.md).
 static INT PulsePhase(const CVidImage* pImage, BYTE nPeriod)
 {
-    INT nPhase = static_cast<INT>(g_pChitin->nAUCounter + static_cast<INT>(reinterpret_cast<uintptr_t>(pImage)))
-        % static_cast<INT>(nPeriod * 2);
+    DWORD nSum = static_cast<DWORD>(g_pChitin->nAUCounter) + static_cast<DWORD>(reinterpret_cast<uintptr_t>(pImage));
+    INT nPhase = static_cast<INT>(nSum) % static_cast<INT>(nPeriod * 2);
     if (static_cast<INT>(nPeriod) < nPhase) {
         nPhase = nPeriod * 2 - nPhase;
     }
