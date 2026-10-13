@@ -66,3 +66,12 @@ These are in `oracle/replay/` and `tools/`.
 ## Project 4 follow-ups
 
 - Spatial real-time upscaling filters for the presenter: AMD FSR 1.0 (EASU + RCAS) and NVIDIA Image Scaling, both MIT, as `Scale Filter=fsr|nis` with a `Sharpness` key. Planned as project 4 Task 2b after the GPU presenter lands. DLSS and other temporal upscalers do not fit (no motion vectors, depth or jitter in a 2D sprite engine).
+
+### Render API
+
+The guards in `src/render/api.h` leave these for the renderer that first draws the world through a backend.
+
+- **Tiles.** `CVidTile::Render` only fills the VRAM tile cache on a miss, at (0, 0), without the stencil tile or fog. Each frame's tiles reach the screen through `CInfTileSet::Render` (0x5CB4A0) and `CInfTileSet::RenderBlack` (0x5CB630). A screen-level renderer must guard those two, with the tile, the destination and the stencil.
+- **FX groups.** FX draws arrive in FX-surface coordinates. The placement comes from `FXPrep` (ptPos, ptReference, mirror flags 0x10/0x20) and the composite from `FXUnlock` and `CInfinity::FXBltFrom`. A backend needs begin-group and end-group calls at `FXPrep` and `FXUnlock`.
+- **Pointer.** `RenderPointer` draws its cell to the front surface in screen coordinates, and it reaches the backend as an ordinary `DrawCell`. Add a `DrawPointer` primitive, or pass `nSurface`.
+- **Frames and layers.** Nothing in the engine calls `BeginFrame`, `EndFrame` or `SetLayer` yet.
