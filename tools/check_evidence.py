@@ -1,0 +1,161 @@
+# iwd2r. Distributed under LICENSE.md.
+"""Require decompiler evidence for every engine function a change touches.
+
+Usage: python3 -I tools/check_evidence.py [--base REV] [--repo DIR]
+
+A touched function is a labelled function (a `// 0xADDR` comment directly
+above a definition, the rule of tools/ghidra/labels.py) in a src/**/*.cpp file
+whose lines changed in `git diff <base>...HEAD`. A function spans from its
+address comment to the first line after its definition that starts with `}`.
+Changes outside every span (includes, globals, comments between functions),
+changes in headers, and deleted functions or files are ignored; files new in
+the branch count in full. Only committed changes are compared.
+
+Each touched function needs docs/evidence/<ADDR>.md at HEAD (ADDR in upper-case
+hex without 0x, docs/evidence/README.md has the format) whose front matter has
+a non-empty `oracle_case` or `exemption`. Prints each offending function and
+exits 1, else exits 0.
+"""
+
+import argparse
+import os
+import re
+import subprocess
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                'ghidra'))
+import labels  # noqa: E402
+
+EVIDENCE_DIR = 'docs/evidence'
+HUNK = re.compile(r'^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@')
+
+
+def git(repo, *args, check=True):
+    return subprocess.run(['git', *args], cwd=repo, check=check,
+                          capture_output=True, text=True)
+
+
+def front_matter(text):
+    """The key/value pairs of a leading `---` block ({} if there is none).
+    Values lose surrounding whitespace and one pair of matching quotes."""
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != '---':
+        return {}
+    result = {}
+    for line in lines[1:]:
+        if line.strip() == '---':
+            return result
+        key, sep, value = line.partition(':')
+        if not sep or not key.strip():
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in '"\'':
+            value = value[1:-1]
+        result[key.strip()] = value
+    return {}
+
+
+def evidence_name(address):
+    return f'{address:X}.md'
+
+
+def spans(lines):
+    """(first, last, address, name) line indexes of each labelled function."""
+    defs = labels.definitions(lines)
+    result = []
+    for k, (start, def_line, address, name) in enumerate(defs):
+        limit = defs[k + 1][0] if k + 1 < len(defs) else len(lines)
+        end = limit - 1
+        for j in range(def_line + 1, limit):
+            if lines[j].startswith('}'):
+                end = j
+                break
+        result.append((start, end, address, name))
+    return result
+
+
+def changed_lines(diff):
+    """{path: [(first, last, deletion)]} of 0-based new-file line ranges.
+    A pure deletion after new line c becomes (c-1, c, True): the two lines
+    around the gap, which touch a function only when both lie inside it (so
+    deleting a whole function touches nothing)."""
+    result = {}
+    path = None
+    for line in diff.splitlines():
+        if line.startswith('+++ '):
+            target = line[4:]
+            path = target[2:] if target.startswith('b/') else None
+            if path is not None:
+                result.setdefault(path, [])
+            continue
+        m = HUNK.match(line)
+        if not m or path is None:
+            continue
+        start, count = int(m.group(1)), int(m.group(2) or '1')
+        if count:
+            result[path].append((start - 1, start + count - 2, False))
+        elif start > 0:
+            result[path].append((start - 1, start, True))
+    return result
+
+
+def touched(repo, base):
+    """(path, address, name) of each labelled function changed since base."""
+    diff = git(repo, 'diff', '--unified=0', '--no-color', '--no-ext-diff',
+               '-M', f'{base}...HEAD', '--', 'src/').stdout
+    result = []
+    for path, ranges in sorted(changed_lines(diff).items()):
+        if not path.endswith('.cpp') or not ranges:
+            continue
+        lines = git(repo, 'show', f'HEAD:{path}').stdout.splitlines()
+        for first, last, address, name in spans(lines):
+            if any(first <= lo and hi <= last if deletion
+                   else lo <= last and first <= hi
+                   for lo, hi, deletion in ranges):
+                result.append((path, address, name))
+    return result
+
+
+def problem(repo, address):
+    """Why the evidence for address is insufficient, or None."""
+    rel = f'{EVIDENCE_DIR}/{evidence_name(address)}'
+    r = git(repo, 'show', f'HEAD:{rel}', check=False)
+    if r.returncode != 0:
+        return f'no {rel}'
+    fields = front_matter(r.stdout)
+    recorded = fields.get('address', '')
+    try:
+        if recorded and int(recorded, 16) != address:
+            return f'{rel} records address {recorded}'
+    except ValueError:
+        return f'{rel} has a malformed address {recorded!r}'
+    if not fields.get('oracle_case') and not fields.get('exemption'):
+        return f'{rel} has neither oracle_case nor exemption'
+    return None
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
+    ap.add_argument('--base', default='origin/main')
+    ap.add_argument('--repo', default='.')
+    args = ap.parse_args(argv)
+
+    errors = []
+    found = touched(args.repo, args.base)
+    for path, address, name in found:
+        why = problem(args.repo, address)
+        if why:
+            errors.append(f'{path}: 0x{address:X} {name}: {why}')
+    for line in errors:
+        print(line)
+    if errors:
+        print(f'{len(errors)} touched function(s) lack evidence; '
+              'see docs/evidence/README.md')
+        return 1
+    print(f'{len(found)} touched function(s), all with evidence')
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

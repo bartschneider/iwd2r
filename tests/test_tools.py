@@ -1,6 +1,7 @@
 # iwd2r. Distributed under LICENSE.md.
-"""Tests for tools/check_notices.py, tools/gen_map.py and the pure parts of
-tools/play.py, tools/realinput.py and tools/winsandbox.py.
+"""Tests for tools/check_notices.py, tools/gen_map.py, tools/check_evidence.py
+and the pure parts of tools/play.py, tools/realinput.py, tools/winsandbox.py,
+tools/oracle.py and tools/ghidra/labels.py.
 
 Run from the repository root: python3 -I tests/test_tools.py
 
@@ -912,6 +913,232 @@ class LabelsTest(unittest.TestCase):
         self.assertEqual(labels.merge(ours, ieex),
                          [(0x401000, 'Foo'), (0x402000, 'ieex_Foo'),
                           (0x403000, 'Bar'), (0x5845D0, 'IcewindMisc::Roll')])
+
+
+EVIDENCE_CHECKER = os.path.join(ROOT, 'tools', 'check_evidence.py')
+TWO_FUNCTIONS = ('// iwd2r. Distributed under LICENSE.md.\n'
+                 '#include "a.h"\n'
+                 '\n'
+                 '// 0x401000\n'
+                 'int A::f(int x)\n'
+                 '{\n'
+                 '    return x;\n'
+                 '}\n'
+                 '\n'
+                 '// 0x401020\n'
+                 'int A::g(int x)\n'
+                 '{\n'
+                 '    return x + 1;\n'
+                 '}\n')
+
+
+class CheckEvidenceTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.repo = self._tmp.name
+        self.addCleanup(self._tmp.cleanup)
+        self.git('init', '-q')
+        self.git('config', 'user.name', 'Test')
+        self.git('config', 'user.email', 'test@example.com')
+        self.git('config', 'commit.gpgsign', 'false')
+        self.write('src/a.cpp', TWO_FUNCTIONS)
+        self.commit('base')
+        self.base = self.git('rev-parse', 'HEAD').strip()
+
+    def git(self, *args):
+        return subprocess.run(['git', *args], cwd=self.repo, check=True,
+                              capture_output=True, text=True).stdout
+
+    def write(self, rel, text):
+        path = os.path.join(self.repo, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'w') as f:
+            f.write(text)
+
+    def commit(self, message='change'):
+        self.git('add', '-A')
+        self.git('commit', '-q', '--allow-empty', '-m', message)
+
+    def check(self):
+        return subprocess.run([sys.executable, '-I', EVIDENCE_CHECKER,
+                               '--base', self.base],
+                              cwd=self.repo, capture_output=True, text=True)
+
+    def evidence(self, addr, extra):
+        self.write(f'docs/evidence/{addr}.md',
+                   '---\n'
+                   f'address: 0x{addr}\n'
+                   'name: A::f\n'
+                   f'{extra}\n'
+                   'ghidra_version: 12.1.4\n'
+                   '---\n\n## Notes\n')
+
+    def test_unchanged_passes(self):
+        self.commit()
+        self.assertEqual(self.check().returncode, 0)
+
+    def test_body_change_without_evidence_fails(self):
+        self.write('src/a.cpp', TWO_FUNCTIONS.replace('return x;',
+                                                      'return x * 2;'))
+        self.commit()
+        r = self.check()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn('0x401000', r.stdout)
+        self.assertNotIn('0x401020', r.stdout)
+
+    def test_body_change_with_exemption_passes(self):
+        self.write('src/a.cpp', TWO_FUNCTIONS.replace('return x;',
+                                                      'return x * 2;'))
+        self.evidence('401000', 'exemption: "pure data"')
+        self.commit()
+        r = self.check()
+        self.assertEqual(r.returncode, 0, r.stdout)
+
+    def test_evidence_without_case_or_exemption_fails(self):
+        self.write('src/a.cpp', TWO_FUNCTIONS.replace('return x;',
+                                                      'return x * 2;'))
+        self.evidence('401000', 'oracle_case:')
+        self.commit()
+        r = self.check()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn('0x401000', r.stdout)
+        self.assertIn('oracle_case', r.stdout)
+
+    def test_evidence_with_oracle_case_passes(self):
+        self.write('src/a.cpp', TWO_FUNCTIONS.replace('return x;',
+                                                      'return x * 2;'))
+        self.evidence('401000', 'oracle_case: rand/roll')
+        self.commit()
+        self.assertEqual(self.check().returncode, 0)
+
+    def test_pure_deletion_inside_body_counts(self):
+        self.write('src/a.cpp', TWO_FUNCTIONS.replace('    return x + 1;\n',
+                                                      ''))
+        self.commit()
+        r = self.check()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn('0x401020', r.stdout)
+
+    def test_change_outside_functions_passes(self):
+        self.write('src/a.cpp', TWO_FUNCTIONS.replace(
+            '#include "a.h"\n', '#include "a.h"\n#include "b.h"\n\n'
+            'static int counter;\n').replace(
+            '}\n\n// 0x401020', '}\n\nint between = 3;\n\n// 0x401020'))
+        self.commit()
+        r = self.check()
+        self.assertEqual(r.returncode, 0, r.stdout)
+
+    def test_header_change_passes(self):
+        self.write('src/a.h', '// 0x401000\nint f()\n{\n    return 1;\n}\n')
+        self.commit()
+        self.assertEqual(self.check().returncode, 0)
+
+    def test_deleted_function_ignored(self):
+        self.write('src/a.cpp', TWO_FUNCTIONS.replace(
+            '\n// 0x401020\nint A::g(int x)\n{\n    return x + 1;\n}\n', ''))
+        self.commit()
+        r = self.check()
+        self.assertEqual(r.returncode, 0, r.stdout)
+
+    def test_deleted_file_ignored(self):
+        os.remove(os.path.join(self.repo, 'src/a.cpp'))
+        self.commit()
+        self.assertEqual(self.check().returncode, 0)
+
+    def test_new_file_included(self):
+        self.write('src/b.cpp', '// 0x402000\nvoid B::h()\n{\n}\n')
+        self.commit()
+        r = self.check()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn('0x402000', r.stdout)
+        self.assertIn('src/b.cpp', r.stdout)
+
+    def test_uncommitted_change_ignored(self):
+        self.write('src/a.cpp', TWO_FUNCTIONS.replace('return x;',
+                                                      'return x * 2;'))
+        self.assertEqual(self.check().returncode, 0)
+
+
+check_evidence = load_tool('check_evidence')
+oracle = load_tool('oracle')
+
+SCRIPT_OUTPUT = ('function\t0x5845D0\tIcewindMisc::Roll\n'
+                 'caller\t0x45A000\tCGameSprite::Foo\t0x45A123\n'
+                 'caller\t<none>\t<data>\t0x84E000\n'
+                 'callee\t0x7B2A10\trand\n'
+                 'code\n'
+                 '\n'
+                 'int __cdecl IcewindMisc::Roll(int param_1,int param_2)\n'
+                 '\n'
+                 '{\n'
+                 '  return 0;\n'
+                 '}\n'
+                 '\n')
+
+
+class EvidenceFormatTest(unittest.TestCase):
+    def test_front_matter(self):
+        text = ('---\naddress: 0x5845D0\nname: IcewindMisc::Roll\n'
+                'oracle_case:\nexemption: "pure data"\n'
+                "quoted: 'x'\n---\n\n## Notes\nkey: not front matter\n")
+        self.assertEqual(check_evidence.front_matter(text),
+                         {'address': '0x5845D0', 'name': 'IcewindMisc::Roll',
+                          'oracle_case': '', 'exemption': 'pure data',
+                          'quoted': 'x'})
+
+    def test_front_matter_missing(self):
+        self.assertEqual(check_evidence.front_matter('# Title\n'), {})
+        self.assertEqual(check_evidence.front_matter('---\na: 1\n'), {})
+
+    def test_evidence_name(self):
+        self.assertEqual(check_evidence.evidence_name(0x5845D0), '5845D0.md')
+
+    def test_parse_script_output(self):
+        parsed = oracle.parse_decompile(SCRIPT_OUTPUT)
+        self.assertEqual(parsed['matches'], [])
+        self.assertEqual(parsed['function'], (0x5845D0, 'IcewindMisc::Roll'))
+        self.assertEqual(parsed['callers'],
+                         [('0x45A000', 'CGameSprite::Foo', '0x45A123'),
+                          ('<none>', '<data>', '0x84E000')])
+        self.assertEqual(parsed['callees'], [('0x7B2A10', 'rand')])
+        self.assertEqual(parsed['code'],
+                         'int __cdecl IcewindMisc::Roll(int param_1,'
+                         'int param_2)\n\n{\n  return 0;\n}')
+
+    def test_parse_ambiguous(self):
+        parsed = oracle.parse_decompile(
+            'match\t0x401000\tA::f\nmatch\t0x401020\tA::f\n')
+        self.assertEqual(parsed['matches'],
+                         [('0x401000', 'A::f'), ('0x401020', 'A::f')])
+        self.assertIsNone(parsed['function'])
+
+    def test_render(self):
+        text = oracle.render_evidence(oracle.parse_decompile(SCRIPT_OUTPUT),
+                                      '12.1.4')
+        self.assertTrue(text.startswith(
+            '---\naddress: 0x5845D0\nname: IcewindMisc::Roll\n'
+            'oracle_case:\nghidra_version: 12.1.4\n---\n'))
+        self.assertEqual(check_evidence.front_matter(text)['address'],
+                         '0x5845D0')
+        for heading in ('## Decompiled (Ghidra)', '## Callers',
+                        '## Callees', '## Notes'):
+            self.assertIn('\n' + heading + '\n', text)
+        self.assertIn('```c\nint __cdecl IcewindMisc::Roll(int param_1,'
+                      'int param_2)\n\n{\n  return 0;\n}\n```\n', text)
+        self.assertIn('- 0x45A000 CGameSprite::Foo (call at 0x45A123)\n',
+                      text)
+        self.assertIn('- 0x84E000 (not in a function)\n', text)
+        self.assertIn('- 0x7B2A10 rand\n', text)
+        self.assertLess(text.index('## Callers'), text.index('## Callees'))
+
+    def test_render_empty_lists(self):
+        parsed = oracle.parse_decompile('function\t0x401000\tf\ncode\n{}\n')
+        text = oracle.render_evidence(parsed, '12.1.4')
+        self.assertIn('## Callers\n\nNone.\n', text)
+        self.assertIn('## Callees\n\nNone.\n', text)
+
+    def test_ghidra_version(self):
+        self.assertEqual(oracle.ghidra_version(), '12.1.4')
 
 
 if __name__ == '__main__':

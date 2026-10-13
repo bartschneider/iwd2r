@@ -3,7 +3,9 @@
 
 ours(src_dir) reads the `// 0xADDR` comments above function definitions in
 src/**/*.cpp, ieex(db_path) reads IEex's function_names.db, and merge()
-combines them with our names taking precedence.
+combines them with our names taking precedence. definitions(lines) gives the
+line positions of the labelled definitions; tools/check_evidence.py uses it
+so both tools agree on what a labelled function is.
 """
 
 import os
@@ -32,22 +34,29 @@ def _definition_name(line):
     return m.group(1) if m else None
 
 
-def _scan(lines):
+def definitions(lines):
+    """(address_line, definition_line, address, name) for each `// 0xADDR`
+    line directly above a function definition (0-based line indexes)."""
     found = []
     for i, line in enumerate(lines):
         m = ADDRESS.match(line)
         if not m:
             continue
-        for follow in lines[i + 1:i + 1 + LOOKAHEAD]:
+        for j in range(i + 1, min(i + 1 + LOOKAHEAD, len(lines))):
+            follow = lines[j]
             if ADDRESS.match(follow) or follow.startswith(('{', '}')):
                 break
             name = _definition_name(follow)
             if name:
-                found.append((int(m.group(1), 16), name))
+                found.append((i, j, int(m.group(1), 16), name))
                 break
             if follow.strip() and not follow.lstrip().startswith('//'):
                 break
     return found
+
+
+def _scan(lines):
+    return [(addr, name) for _, _, addr, name in definitions(lines)]
 
 
 def ours(src_dir):
