@@ -16,6 +16,8 @@ public:
     int GetIntValue();
 };
 
+static_assert(sizeof(CVariable) == 0x54, "CVariable size");
+
 class CVariableHashBase {
 public:
     static int PRIME[];
