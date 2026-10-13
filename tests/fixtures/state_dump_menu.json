@@ -4,5 +4,6 @@
   "screen": "connection",
   "rng_state": 1,
   "globals": {"au_counter": 61, "fullscreen": 0, "in_async_update": 0, "ai_stalled_frames": 0, "reinitializing": 0, "ai_rng_state": 3861535683},
-  "chargen": null
+  "chargen": null,
+  "world": null
 }

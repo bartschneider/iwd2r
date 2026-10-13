@@ -92,6 +92,15 @@ static_assert(kField_create_char_skill_points.type == ReplayType::k_i32, "");
 static_assert(kField_create_char_memory_extra.type == ReplayType::k_i32, "");
 static_assert(kField_sprite_feats.type == ReplayType::k_u32 && kField_sprite_feats.count == 3, "");
 static_assert(kField_sprite_portrait.type == ReplayType::k_resref, "");
+static_assert(kField_visible_area.type == ReplayType::k_u8, "");
+static_assert(kField_game_areas.type == ReplayType::k_ptr && kField_game_areas.count == 12, "");
+static_assert(kField_character_portraits.type == ReplayType::k_i32 && kField_character_portraits.count == 6, "");
+static_assert(kField_characters_count.type == ReplayType::k_i16, "");
+static_assert(kField_area_resref.type == ReplayType::k_resref, "");
+static_assert(kField_sprite_pos.type == ReplayType::k_i32 && kField_sprite_pos.count == 2, "");
+static_assert(kField_sprite_hp.type == ReplayType::k_i16, "");
+static_assert(kField_sprite_max_hp.type == ReplayType::k_i16, "");
+static_assert(kField_sprite_skills.type == ReplayType::k_u8 && kField_sprite_skills.count == 64, "");
 
 // The virtual clock (platform/replay_clock.h, shared with our engine's
 // replay mode): kClockBase at the start, then 1000 / kFramesPerSecond ms per
@@ -306,9 +315,10 @@ std::string Number(long long value)
     return std::to_string(value);
 }
 
-// The object the create_char screen edits: CGameObjectArray::GetShare's
-// THREAD_ASYNCH lookup, without the call. 0 when the id does not resolve.
-uint32_t ChargenSprite(uint32_t chitin, int32_t id)
+// The sprite an object id names (the create_char screen's, a party
+// member's): CGameObjectArray::GetShare's THREAD_ASYNCH lookup, without the
+// call. 0 when the id does not resolve.
+uint32_t SpriteById(uint32_t chitin, int32_t id)
 {
     bool ok = true;
     const uint32_t game = ReadU32(At(chitin, kField_object_game), &ok);
@@ -349,7 +359,7 @@ std::string ChargenJson(uint32_t chitin, uint32_t screen)
     std::string abilities = "null";
     std::string feats = "null";
     std::string portrait = "null";
-    const uint32_t sprite = ChargenSprite(chitin, spriteId);
+    const uint32_t sprite = SpriteById(chitin, spriteId);
     if (sprite) {
         bool spriteOk = true;
         race = Number(ReadU8(At(sprite, kField_sprite_race), &spriteOk));
@@ -377,6 +387,66 @@ std::string ChargenJson(uint32_t chitin, uint32_t screen)
     return "{\"race\": " + race + ", \"subrace\": " + subrace + ", \"class\": " + klass + ", \"abilities\": "
         + abilities + ", \"rolls\": " + rolls + ", \"skill_points\": " + Number(skillPoints) + ", \"feats\": " + feats
         + ", \"portrait\": " + portrait + "}";
+}
+
+// One party member: its values are null when the id does not resolve or a
+// read fails.
+std::string PartyMemberJson(uint32_t chitin, int32_t id)
+{
+    std::string values = "\"x\": null, \"y\": null, \"hp\": null, \"max_hp\": null, \"skills\": null";
+    const uint32_t sprite = SpriteById(chitin, id);
+    if (sprite) {
+        bool ok = true;
+        const int32_t x = ReadI32(At(sprite, kField_sprite_pos), &ok);
+        const int32_t y = ReadI32(At(sprite, kField_sprite_pos) + 4, &ok);
+        const int16_t hp = ReadI16(At(sprite, kField_sprite_hp), &ok);
+        const int16_t maxHp = ReadI16(At(sprite, kField_sprite_max_hp), &ok);
+        std::string skills = "[";
+        for (uint32_t i = 0; i < kField_sprite_skills.count; ++i) {
+            skills += (i ? ", " : "") + Number(ReadU8(At(sprite, kField_sprite_skills) + i, &ok));
+        }
+        skills += "]";
+        if (ok) {
+            values = "\"x\": " + Number(x) + ", \"y\": " + Number(y) + ", \"hp\": " + Number(hp)
+                + ", \"max_hp\": " + Number(maxHp) + ", \"skills\": " + skills;
+        }
+    }
+    return "{\"id\": " + Number(id) + ", " + values + "}";
+}
+
+// The area on view and the party: CInfGame::GetVisibleArea and
+// GetCharacterId read without the calls. null when CInfGame cannot be read.
+std::string WorldJson(uint32_t chitin)
+{
+    bool ok = true;
+    const uint32_t game = ReadU32(At(chitin, kField_object_game), &ok);
+    const uint8_t visible = ReadU8(At(game, kField_visible_area), &ok);
+    int16_t count = ReadI16(At(game, kField_characters_count), &ok);
+    if (!ok) {
+        return "null";
+    }
+    std::string area = "\"\"";
+    if (visible < kField_game_areas.count) {
+        bool areaOk = true;
+        const uint32_t pArea = ReadU32(At(game, kField_game_areas) + 4u * visible, &areaOk);
+        char resref[8] = {};
+        if (areaOk && pArea && SafeRead(At(pArea, kField_area_resref), resref, sizeof(resref))) {
+            area = JsonString(resref, strnlen(resref, sizeof(resref)));
+        }
+    }
+    if (count < 0) {
+        count = 0;
+    }
+    if (count > static_cast<int16_t>(kField_character_portraits.count)) {
+        count = static_cast<int16_t>(kField_character_portraits.count);
+    }
+    std::string party = "[";
+    for (int16_t i = 0; i < count; ++i) {
+        const int32_t id = ReadI32(At(game, kField_character_portraits) + 4u * i, &ok);
+        party += (i ? ", " : "") + PartyMemberJson(chitin, id);
+    }
+    party += "]";
+    return ok ? "{\"area\": " + area + ", \"party\": " + party + "}" : "null";
 }
 
 // The dump of the current frame; checkpoint is null for a periodic dump.
@@ -415,7 +485,9 @@ std::string DumpJson(const char* checkpoint)
         + ", \"ai_rng_state\": "
         + (inputTiddata && aiOk ? Number(aiRng) : std::string("null")) + "},\n";
     const bool chargen = std::strcmp(screen, "create_char") == 0;
-    json += "  \"chargen\": " + (chargen ? ChargenJson(chitin, active) : std::string("null")) + "\n}\n";
+    json += "  \"chargen\": " + (chargen ? ChargenJson(chitin, active) : std::string("null")) + ",\n";
+    const bool world = std::strcmp(screen, "world") == 0;
+    json += "  \"world\": " + (world ? WorldJson(chitin) : std::string("null")) + "\n}\n";
     return json;
 }
 

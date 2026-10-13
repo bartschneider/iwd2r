@@ -19,10 +19,13 @@ under "x-fields", one entry per field:
 
 Offsets come from the layout comments in our headers under --src (default
 src/): a member line starts with `/* NNNN */` or `/* 0xNNNN */`, the offset
-from the start of the object, base classes included. The member's declared
+from the start of the object, base classes included, so a class also has
+its base classes' commented members. The member's declared
 type gives the field type: u8, i8, u16, i16, u32, i32, ptr (any pointer),
-resref (RESREF, 8 bytes); an array member adds "count". Methods (anything
-with a parenthesis) are ignored.
+resref (RESREF, 8 bytes); an array member adds "count". Two classes the
+original lays out as plain values count as such: CResRef is a resref and
+CPoint is i32 with count 2 (x, y). Methods (anything with a parenthesis)
+are ignored.
 
 fields.json maps each field to {"base", "offset", "type"} (plus "count"):
 base is the class name, or the global's address for a global; offset is a
@@ -61,11 +64,17 @@ SCALARS = {
     'ULONG': ('u32', 4), 'STRREF': ('u32', 4), 'COLORREF': ('u32', 4),
     'RESREF': ('resref', 8),
 }
+# Classes laid out as plain values -> (field type, element size, elements).
+VALUES = {
+    'CResRef': ('resref', 8, 1),
+    'CPoint': ('i32', 4, 2),
+}
 PTR_SIZE = 4  # the original is 32-bit
 
 MEMBER_LINE = re.compile(
     r'^\s*/\*\s*(?:0x)?([0-9A-Fa-f]+)\s*\*/\s*([^;]*);')
 DECL = re.compile(r'^(.*?)\b([A-Za-z_]\w*)\s*((?:\[[^\]]*\]\s*)*)$')
+BASE = re.compile(r'\b(?:public|protected|private)\s+([A-Za-z_]\w*)')
 DEFINE = re.compile(r'^\s*#define\s+([A-Za-z_]\w*)\s+(\d+)\s*$', re.M)
 
 
@@ -86,7 +95,18 @@ class Member:
         or an unknown type."""
         if '*' in self.type_name:
             return 'ptr', PTR_SIZE
+        if self.type_name in VALUES:
+            return VALUES[self.type_name][:2]
         return SCALARS.get(self.type_name, (None, None))
+
+    def elements(self):
+        """The number of field-type elements: the array count times the
+        elements of one value (2 for a CPoint); None for a single one."""
+        per_value = 1
+        if '*' not in self.type_name and self.type_name in VALUES:
+            per_value = VALUES[self.type_name][2]
+        n = (self.count or 1) * per_value
+        return n if self.count or n > 1 else None
 
 
 class Headers:
@@ -125,11 +145,11 @@ class Headers:
         for path, text in sorted(self.texts.items()):
             m = pattern.search(text)
             if m:
-                found = (path, text, m.end())
+                found = (path, text, m.end(), m.group(0))
                 break
         if found is None:
             raise FieldError('no class %s in the headers' % name)
-        path, text, start = found
+        path, text, start, head = found
         depth, i = 1, start
         while depth and i < len(text):
             depth += {'{': 1, '}': -1}.get(text[i], 0)
@@ -153,6 +173,17 @@ class Headers:
                     count *= self._dimension(dim, where)
             members[decl.group(2)] = Member(int(m.group(1), 16), type_name,
                                             decl.group(2), count, where)
+        # A base class's members are at the offsets their comments give
+        # (offsets count from the start of the object, bases included);
+        # the class's own members win. A base without comments adds none.
+        for base in BASE.findall(head.split(':', 1)[1] if ':' in head
+                                 else ''):
+            try:
+                inherited = self.members(base)
+            except FieldError:
+                continue
+            for member_name, member in inherited.items():
+                members.setdefault(member_name, member)
         if not members:
             raise FieldError('class %s (%s) has no /* NNNN */ member '
                              'comments' % (name, path))
@@ -185,7 +216,7 @@ class Headers:
                 raise FieldError('sizeof %s: member %s has a class type (%s)'
                                  % (class_name, member.name,
                                     member.type_name))
-            end = max(end, member.offset + size * (member.count or 1))
+            end = max(end, member.offset + size * (member.elements() or 1))
             widest = max(widest, min(size, 4))
         return (end + widest - 1) // widest * widest
 
@@ -223,8 +254,8 @@ def generate(schema, headers, globals_):
                                         member.type_name))
                 entry = {'base': spec['class'], 'offset': '0x%04X' % offset,
                          'type': kind}
-                if member.count:
-                    entry['count'] = member.count
+                if member.elements():
+                    entry['count'] = member.elements()
         except (KeyError, TypeError) as e:
             raise FieldError('field %s: malformed spec %r (%s)'
                              % (field, spec, e))

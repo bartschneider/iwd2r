@@ -2121,6 +2121,15 @@ public:
         };
         WORD m_word;
     };
+    /* 0044 */ CResRef m_area;
+    /* 004C */ CPoint m_pos;
+    /* 0054 */ CPoint m_corners[2];
+};
+
+class CBigThing : public CThing {
+public:
+    /* 0010 */ SHORT m_nKindOverride; // shadows nothing: a new name
+    /* 0064 */ BYTE m_extra;
 };
 """,
     'CEntry.h': """class CEntry {
@@ -2176,6 +2185,28 @@ class GenFieldsTest(unittest.TestCase):
             'high': {'base': 'CThing', 'offset': '0x0041', 'type': 'u8'},
             'kind': {'base': 'CThing', 'offset': '0x0014', 'type': 'u8'},
             'count': {'base': 'CThing', 'offset': '0x0016', 'type': 'i16'},
+        })
+
+    def test_value_classes_and_bases(self):
+        out = self.generate({
+            'area': {'class': 'CThing', 'member': 'm_area'},
+            'pos': {'class': 'CThing', 'member': 'm_pos'},
+            'corners': {'class': 'CThing', 'member': 'm_corners'},
+            'extra': {'class': 'CBigThing', 'member': 'm_extra'},
+            'inherited': {'class': 'CBigThing', 'member': 'm_bOn'},
+            'through': {'class': 'CBigThing', 'member': 'm_part.m_nCount'},
+        })
+        self.assertEqual(out, {
+            'area': {'base': 'CThing', 'offset': '0x0044', 'type': 'resref'},
+            'pos': {'base': 'CThing', 'offset': '0x004C', 'type': 'i32',
+                    'count': 2},
+            'corners': {'base': 'CThing', 'offset': '0x0054', 'type': 'i32',
+                        'count': 4},
+            'extra': {'base': 'CBigThing', 'offset': '0x0064', 'type': 'u8'},
+            'inherited': {'base': 'CBigThing', 'offset': '0x0038',
+                          'type': 'u8'},
+            'through': {'base': 'CBigThing', 'offset': '0x0016',
+                        'type': 'i16'},
         })
 
     def test_global_and_sizeof(self):
@@ -2315,7 +2346,7 @@ class MiniSchemaTest(unittest.TestCase):
                 'globals': {'au_counter': 61, 'fullscreen': 0,
                             'in_async_update': 0, 'ai_stalled_frames': 0,
                             'reinitializing': 0, 'ai_rng_state': None},
-                'chargen': None}
+                'chargen': None, 'world': None}
         self.assertEqual(minischema.validate(dump, schema), [])
         dump['chargen'] = {'race': 1, 'subrace': 0, 'class': 5,
                            'abilities': [10, 11, 12, 13, 14, 15],
@@ -2328,6 +2359,30 @@ class MiniSchemaTest(unittest.TestCase):
             "$.screen: 'nowhere' is not one of %s"
             % schema['properties']['screen']['enum'],
             '$.chargen.abilities: 1 items, fewer than 6'])
+
+    def test_replay_schema_world(self):
+        with open(os.path.join(ROOT, 'oracle', 'replay', 'schema.json')) as f:
+            schema = json.load(f)
+        member = {'id': 65536, 'x': 1046, 'y': 1258, 'hp': 9, 'max_hp': 12,
+                  'skills': [0] * 64}
+        dump = {'frame': 1500, 'checkpoint': 'world', 'screen': 'world',
+                'rng_state': 1,
+                'globals': {'au_counter': 1498, 'fullscreen': 0,
+                            'in_async_update': 0, 'ai_stalled_frames': 0,
+                            'reinitializing': 0, 'ai_rng_state': 7},
+                'chargen': None,
+                'world': {'area': 'AR1000', 'party': [member]}}
+        self.assertEqual(minischema.validate(dump, schema), [])
+        dump['world']['party'].append(
+            {'id': 131073, 'x': None, 'y': None, 'hp': None, 'max_hp': None,
+             'skills': None})
+        self.assertEqual(minischema.validate(dump, schema), [])
+        dump['world']['party'][0] = dict(member, hp='9')
+        self.assertEqual(minischema.validate(dump, schema), [
+            "$.world.party[0].hp: '9' is not of type integer or null"])
+        del dump['world']
+        self.assertEqual(minischema.validate(dump, schema),
+                         ["$: missing required property 'world'"])
 
     def test_every_engine_field_is_a_screen(self):
         with open(os.path.join(ROOT, 'oracle', 'replay', 'schema.json')) as f:
@@ -2536,14 +2591,15 @@ class OracleReplayCompareTest(unittest.TestCase):
                                               'state_dump_*.json')))
         self.assertEqual([os.path.basename(p) for p in paths], [
             'state_dump_chargen.json', 'state_dump_menu.json',
-            'state_dump_periodic.json'])
+            'state_dump_periodic.json', 'state_dump_world.json'])
         for path in paths:
             with open(path) as f:
                 dump = json.load(f)
             self.assertEqual(minischema.validate(dump, schema), [], path)
 
     def test_screens(self):
-        self.assertEqual(oracle.load_screens(), ['connection', 'create_char'])
+        self.assertEqual(oracle.load_screens(),
+                         ['connection', 'create_char', 'world'])
         enum = self.schema()['properties']['screen']['enum']
         for screen in oracle.load_screens():
             self.assertIn(screen, enum)
