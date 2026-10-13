@@ -40,6 +40,7 @@ These are in `build_vanilla` and `verify_vanilla` in `tools/oracle.py`.
 - `dialog.tlk` and the 188 Override files restored from the install have no reference MD5, so a wrong file there would not be noticed.
 - The `mpsave/` folder is kept in the copy.
 - UTF-16 INI files and a `resolution=` key in another case are not handled by the INI preparation.
+- The vanilla copy drifts across runs while its marker stays valid. Both engines write cache files and INI state into it, and only `replay compare` backs up and restores the INIs; `replay record` alone does not. `ensure_vanilla` checks only the marker (`verify_vanilla` runs when the copy is built), so a later run can start from a different state. Snapshot the writable files (the INIs and the cache) around every run, or add a drift check against the manifest the marker was written from.
 
 ## Recorder
 
@@ -53,10 +54,12 @@ These are in `oracle/replay/` and `tools/`.
 - `GetKeyState(VK_CAPITAL)` is not hooked, so Caps Lock state comes from the host.
 - `tools/gen_fields.py` does not handle template pointers or declarations with several declarators; such fields are skipped or misread.
 - `tools/minischema.py` does not handle array-form `items`, so a schema using them is not validated.
+- The replay mode's timers and clock have no data-free test: `platform::replay::SetTimer`, `KillTimer`, `FireTimers` (including its re-arm of periodic timers) and the virtual wall clock (`WallClock`, `NowMs`) in `platform/replay.cpp` are exercised only by the Windows `replay compare`, so a regression there shows up only as a timing difference against the original. `tests/test_clock.cpp` covers the real-time clock, not these.
 
 ## Tooling
 
 - All worktrees share one Windows build folder, `C:\Users\thier\iwd2r-build`.
+- `ORACLE_DIR` in `tools/oracle.py` and `WIN_CHECKOUT` in `tools/play.py` are hardcoded to `/mnt/c/Users/thier/...`, so the Windows side works only for this user. Derive them from `%USERPROFILE%` (through `cmd.exe /c echo` or `wslvar`) or an environment variable.
 - Windows Sandbox real-input mode (`--vm windows`) is untested. It needs the Windows feature enabled and a reboot.
 - `replay compare` reports a `known_differences.json` entry that matched nothing, but does not fail on it. An entry carries no scenario, so one valid for another scenario would look stale. It stays a warning until entries carry a `scenario` field.
 - Consider a data-gated test through `CRuleTables::GetClassStringMixed` (the fighter-type string choice: Barbarian 34, otherwise 16799). The id choice is confirmed by the disassembly noted in `docs/evidence/544120.md` and exercised by the chargen replay.
