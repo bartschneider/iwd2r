@@ -11,9 +11,10 @@ Usage (from WSL, in the repository):
   python3 tools/oracle.py vanilla [--rebuild]
   python3 tools/oracle.py replay record <scenario> [--seed N] [--timeout S]
                                         [--dump-every N] [--test-steal-focus N]
-                                        [--test-no-focus-guard]
+                                        [--test-no-focus-guard] [--host]
   python3 tools/oracle.py replay compare <scenario> [--seed N] [--timeout S]
                                          [--dump-every N] [--no-build]
+                                         [--host]
 
 evidence writes a draft docs/evidence/<ADDR>.md for each function named, all
 in one Ghidra run: the front matter (address, name, an empty oracle_case,
@@ -98,6 +99,19 @@ activation messages reach the game, to show what the focus guard prevents.
 On Ctrl+C only this run's injector is killed (by the pid it prints first),
 which closes its job and so kills its game.
 
+The original runs inside Windows Sandbox, one fresh sandbox per recording
+(tools/winsandbox.py run_replay, tools/sandbox/replay-driver.ps1), so it
+never takes the focus on the desktop and no stray click reaches it. The
+sandbox maps the oracle build output (C:\\iwd2r\\oracle) and the run's
+inputs (C:\\iwd2r\\tools) read-only, and the vanilla copy (at its own path,
+which its icewind2.ini names) and a results folder (C:\\iwd2r\\results)
+read-write. The driver replaces the sandbox's DirectPlay stubs with the
+host's DirectPlay files (iwd2.exe imports DPLAYX.dll), runs the injector
+with the host mode's arguments and timeout, and writes done.txt; the
+dumps come back to the same runs/<stamp>/ folder, the driver's files to
+its sandbox/ subfolder. --host runs the original on the host's desktop
+instead, for debugging.
+
 replay compare runs the scenario twice with the same seed: in the original
 as replay record does (into runs/<stamp>/original), then in our engine
 (build/linux-gcc/iwd2r, built first unless --no-build) headless on the same
@@ -120,8 +134,11 @@ on either side; runs/<stamp>/compare.json keeps the result.
 
 The vanilla copy is shared by every worktree: replay record and replay
 compare each hold C:/Users/thier/iwd2r-oracle/replay.lock for the whole run,
-and building the copy holds vanilla.lock beside it (tools/filelock.py). A
-run that has to wait says so on stderr after 5 seconds.
+and building the copy holds vanilla.lock beside it (tools/filelock.py). In
+the sandbox, a recording also holds C:/Users/thier/iwd2r-vm/sandbox.lock
+(one sandbox at a time, shared with play.py --vm windows), always taken
+inside replay.lock. A run that has to wait says so on stderr after 5
+seconds.
 
 Standard library only.
 """
@@ -1370,11 +1387,28 @@ def run_injector(command, env, backstop):
         raise
 
 
+def recorder_env(script_win, replay_dir_win, seed, dump_every,
+                 steal_focus=None, no_focus_guard=False):
+    """The recorder's environment (oracle/replay/recorder.cpp), with
+    Windows paths, in both modes."""
+    names = {'IWD2R_SCRIPT': script_win,
+             'IWD2R_REPLAY_DIR': replay_dir_win,
+             'IWD2R_DUMP_EVERY': str(dump_every),
+             'IWD2R_SEED': str(seed)}
+    if steal_focus:
+        names['IWD2R_TEST_STEAL_FOCUS'] = str(steal_focus)
+    if no_focus_guard:
+        names['IWD2R_TEST_NO_FOCUS_GUARD'] = '1'
+    return names
+
+
 def record_original(script, actions, seed, timeout, dump_every, run_dir,
-                    subdir='replay', steal_focus=None, no_focus_guard=False):
+                    subdir='replay', steal_focus=None, no_focus_guard=False,
+                    sandbox=True):
     """Record script in the original with the recorder DLL into
-    run_dir/subdir; prints the run as replay record does and returns its
-    exit code (0, 1 or INJECTOR_TIMEOUT)."""
+    run_dir/subdir, inside Windows Sandbox (record_in_sandbox) or with
+    sandbox False on the host's desktop; prints the run as replay record
+    does and returns its exit code (0, 1 or INJECTOR_TIMEOUT)."""
     import play
     build = os.path.join(play.WIN_CHECKOUT, REPLAY_DIR_REL)
     injector = os.path.join(build, INJECTOR)
@@ -1387,44 +1421,99 @@ def record_original(script, actions, seed, timeout, dump_every, run_dir,
     with open(REPLAY_SCHEMA) as f:
         schema = json.load(f)
     stamp = os.path.basename(run_dir)
+    out_dir = os.path.join(run_dir, subdir)
+    print('replay %s (%d actions), seed %d, timeout %d s, dumps every %d '
+          'frames, %s' % (os.path.relpath(script, ROOT), len(actions), seed,
+                          timeout, dump_every,
+                          'in Windows Sandbox' if sandbox else 'on the host'))
+    extra = {}
+    if sandbox:
+        code, stdout, stderr, extra = record_in_sandbox(
+            build, game, script, seed, timeout, dump_every, stamp, subdir,
+            out_dir, steal_focus, no_focus_guard)
+    else:
+        code, stdout, stderr = record_on_host(
+            injector, recorder, game, script, seed, timeout, dump_every,
+            stamp, out_dir, steal_focus, no_focus_guard)
+    for line in stdout.splitlines():
+        print('  %s' % line)
+    for line in stderr.splitlines():
+        print('  stderr: %s' % line)
+    status = read_status(out_dir)
+    result, summary = replay_outcome(code, status, timeout)
+    if extra.get('sandbox_error'):
+        summary = 'sandbox: %s; %s' % (extra['sandbox_error'], summary)
+        if result == 0:
+            result = 1
+    report = dict({'scenario': os.path.relpath(script, ROOT), 'seed': seed,
+                   'timeout': timeout, 'dump_every': dump_every,
+                   'mode': 'sandbox' if sandbox else 'host',
+                   'injector_exit_code': code, 'status': status,
+                   'outcome': summary}, **extra)
+    return finish_replay(out_dir, schema, actions, result, summary, report)
+
+
+def record_on_host(injector, recorder, game, script, seed, timeout,
+                   dump_every, stamp, out_dir, steal_focus, no_focus_guard):
+    """The host mode: the injector runs on the host's desktop, the recorder
+    writes into REPLAYS_DIR/<stamp>, moved to out_dir afterwards. Returns
+    (exit code or None, stdout, stderr)."""
     replay_dir = os.path.join(REPLAYS_DIR, stamp)
     os.makedirs(replay_dir)
     shutil.copyfile(script, os.path.join(replay_dir, 'scenario.txt'))
     env = dict(os.environ)
-    names = {'IWD2R_SCRIPT': win_path(os.path.join(replay_dir,
-                                                   'scenario.txt')),
-             'IWD2R_REPLAY_DIR': win_path(replay_dir),
-             'IWD2R_DUMP_EVERY': str(dump_every),
-             'IWD2R_SEED': str(seed)}
-    if steal_focus:
-        names['IWD2R_TEST_STEAL_FOCUS'] = str(steal_focus)
-    if no_focus_guard:
-        names['IWD2R_TEST_NO_FOCUS_GUARD'] = '1'
+    names = recorder_env(win_path(os.path.join(replay_dir, 'scenario.txt')),
+                         win_path(replay_dir), seed, dump_every,
+                         steal_focus, no_focus_guard)
     env.update(names)
     env['WSLENV'] = ':'.join([v for v in env.get('WSLENV', '').split(':')
                               if v] + sorted(names))
     command = [injector, win_path(os.path.join(game, 'iwd2.exe')),
                win_path(game), win_path(recorder),
                '--timeout', str(timeout)]
-    print('replay %s (%d actions), seed %d, timeout %d s, dumps every %d '
-          'frames' % (os.path.relpath(script, ROOT), len(actions), seed,
-                      timeout, dump_every))
     print('running %s' % ' '.join(command))
     code, stdout, stderr = run_injector(command, env, timeout + 60)
-    for line in stdout.splitlines():
-        print('  %s' % line)
-    for line in stderr.splitlines():
-        print('  stderr: %s' % line)
-    status = read_status(replay_dir)
-    result, summary = replay_outcome(code, status, timeout)
-    out_dir = os.path.join(run_dir, subdir)
     shutil.copytree(replay_dir, out_dir)
     shutil.rmtree(replay_dir, ignore_errors=True)
-    report = {'scenario': os.path.relpath(script, ROOT), 'seed': seed,
-              'timeout': timeout, 'dump_every': dump_every,
-              'injector_exit_code': code, 'status': status,
-              'outcome': summary}
-    return finish_replay(out_dir, schema, actions, result, summary, report)
+    return code, stdout, stderr
+
+
+def sandbox_log(message):
+    print('sandbox: %s' % message, flush=True)
+
+
+def record_in_sandbox(build, game, script, seed, timeout, dump_every, stamp,
+                      subdir, out_dir, steal_focus, no_focus_guard):
+    """The default mode: one fresh Windows Sandbox per recording
+    (winsandbox.run_replay, tools/sandbox/replay-driver.ps1), holding
+    winsandbox.SANDBOX_LOCK inside the caller's REPLAY_LOCK. Returns (exit
+    code or None, stdout, stderr, extra report fields)."""
+    import winsandbox
+    if not winsandbox.available():
+        sys.exit('oracle: %s; or record on the host with --host'
+                 % winsandbox.ENABLE_HINT.replace('play: ', '', 1))
+    winsandbox.deploy_runtime(os.path.join(build, INJECTOR), sandbox_log,
+                              arch='x86')
+    env = recorder_env(winsandbox.BOX_REPLAY_DIR + '\\scenario.txt',
+                       winsandbox.BOX_REPLAY_DIR, seed, dump_every,
+                       steal_focus, no_focus_guard)
+    host_run = os.path.join(winsandbox.VM_ROOT, 'replays',
+                            '%s-%s' % (stamp, subdir))
+    with filelock.hold(winsandbox.SANDBOX_LOCK, 'sandbox'):
+        try:
+            result = winsandbox.run_replay(build, game, script, env,
+                                           timeout, host_run, out_dir,
+                                           sandbox_log)
+        except RuntimeError as e:  # setting the run up failed
+            sys.exit('oracle: %s' % e)
+    shutil.rmtree(host_run, ignore_errors=True)
+    print('sandbox: %.1f s from start to results (logs in %s)'
+          % (result['seconds'], os.path.relpath(
+              os.path.join(out_dir, 'sandbox'), ROOT)))
+    extra = {'sandbox_seconds': round(result['seconds'], 1)}
+    if result['error']:
+        extra['sandbox_error'] = result['error']
+    return result['code'], result['stdout'], result['stderr'], extra
 
 
 def finish_replay(out_dir, schema, actions, result, summary, report):
@@ -1480,7 +1569,8 @@ def replay_record(args):
     run_dir = play.make_run_folder(RUNS_DIR, datetime.datetime.now())
     return record_original(script, actions, args.seed, args.timeout,
                            args.dump_every, run_dir, 'replay',
-                           args.test_steal_focus, args.test_no_focus_guard)
+                           args.test_steal_focus, args.test_no_focus_guard,
+                           sandbox=not args.host)
 
 
 # ---------------------------------------------------------------------------
@@ -1759,7 +1849,8 @@ def replay_compare(args):
     try:
         print('== the original')
         original = record_original(script, actions, args.seed, args.timeout,
-                                   args.dump_every, run_dir, 'original')
+                                   args.dump_every, run_dir, 'original',
+                                   sandbox=not args.host)
         play.restore_inis(backup, game, ini_names)
         print('== ours')
         ours = run_ours(exe, game, script, actions, args.seed, args.timeout,
@@ -1847,6 +1938,11 @@ def seed_arg(text):
     return value
 
 
+HOST_HELP = ('run the original on the host\'s desktop instead of in Windows '
+             'Sandbox (for debugging: it takes the focus, and a stray click '
+             'lands in the recording)')
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     sub = ap.add_subparsers(dest='command', required=True)
@@ -1901,6 +1997,7 @@ def main(argv=None):
                         'foreground at frame N')
     record.add_argument('--test-no-focus-guard', action='store_true',
                         help='test: let activation messages reach the game')
+    record.add_argument('--host', action='store_true', help=HOST_HELP)
     record.set_defaults(run=cmd_replay_record)
     compare = replay_sub.add_parser(
         'compare', help='run a scenario in the original and in our engine '
@@ -1920,6 +2017,7 @@ def main(argv=None):
                          'none (default %(default)s)')
     compare.add_argument('--no-build', action='store_true',
                          help='use the existing build/linux-gcc/iwd2r')
+    compare.add_argument('--host', action='store_true', help=HOST_HELP)
     compare.set_defaults(run=cmd_replay_compare)
     args = ap.parse_args(argv)
     return args.run(args)

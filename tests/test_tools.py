@@ -2769,7 +2769,7 @@ class SharedLockTest(unittest.TestCase):
         locks = LockRecorder()
         seen = []
 
-        def fake_record(script, actions, *rest):
+        def fake_record(script, actions, *rest, **kw):
             seen.append((os.path.basename(script), list(locks.held)))
             return 0
 
@@ -2844,6 +2844,218 @@ class SharedLockTest(unittest.TestCase):
             ('reset', [lock]), ('run', names[0], [lock]),
             ('reset', [lock]), ('run', names[1], [lock])])
         self.assertEqual(locks.paths, [(lock, 'sandbox')] * 3)
+
+
+class SandboxReplayTest(unittest.TestCase):
+    """replay record/compare in Windows Sandbox (winsandbox.run_replay,
+    tools/sandbox/replay-driver.ps1), with the sandbox stubbed."""
+
+    GAME = r'C:\Users\thier\iwd2r-oracle\game'
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp = self._tmp.name
+
+    def test_wsb_maps_the_replay_folders(self):
+        folders = winsandbox.replay_folders(r'C:\b\oracle', self.GAME,
+                                            r'C:\vm\results',
+                                            r'C:\vm\tools')
+        root = ET.fromstring(winsandbox.make_wsb(
+            folders, winsandbox.replay_logon_command()))
+        mapped = [(m.findtext('HostFolder'), m.findtext('SandboxFolder'),
+                   m.findtext('ReadOnly'))
+                  for m in root.find('MappedFolders')]
+        self.assertEqual(mapped, [
+            (r'C:\b\oracle', r'C:\iwd2r\oracle', 'true'),
+            # Its own path: icewind2.ini's [Alias] paths name it.
+            (self.GAME, self.GAME, 'false'),
+            (r'C:\vm\results', r'C:\iwd2r\results', 'false'),
+            (r'C:\vm\tools', r'C:\iwd2r\tools', 'true')])
+        self.assertEqual(root.findtext('Networking'), 'Disable')
+        self.assertEqual(
+            root.find('LogonCommand').findtext('Command'),
+            r'powershell.exe -NoProfile -ExecutionPolicy Bypass -File '
+            r'C:\iwd2r\tools\replay-driver.ps1 -Config '
+            r'C:\iwd2r\tools\config.json')
+
+    def test_driver_config(self):
+        env = oracle.recorder_env(
+            winsandbox.BOX_REPLAY_DIR + '\\scenario.txt',
+            winsandbox.BOX_REPLAY_DIR, 1, 30)
+        self.assertEqual(env, {
+            'IWD2R_SCRIPT': r'C:\iwd2r\results\replay\scenario.txt',
+            'IWD2R_REPLAY_DIR': r'C:\iwd2r\results\replay',
+            'IWD2R_DUMP_EVERY': '30', 'IWD2R_SEED': '1'})
+        self.assertEqual(oracle.recorder_env('s', 'd', 7, 0, 40, True), {
+            'IWD2R_SCRIPT': 's', 'IWD2R_REPLAY_DIR': 'd',
+            'IWD2R_DUMP_EVERY': '0', 'IWD2R_SEED': '7',
+            'IWD2R_TEST_STEAL_FOCUS': '40',
+            'IWD2R_TEST_NO_FOCUS_GUARD': '1'})
+        cfg = winsandbox.replay_driver_config(self.GAME, env, 180)
+        self.assertEqual(cfg, {
+            'injector': r'C:\iwd2r\oracle\injector.exe',
+            'recorder': r'C:\iwd2r\oracle\recorder.dll',
+            'exe': self.GAME + r'\iwd2.exe',
+            'workdir': self.GAME,
+            'replay_dir': r'C:\iwd2r\results\replay',
+            'results': r'C:\iwd2r\results',
+            'env': env,
+            'timeout': 180,
+            'backstop': 240,
+            'exclusions': [r'C:\iwd2r\oracle', self.GAME,
+                           r'C:\iwd2r\results'],
+            'stop_audio': False,
+            'directplay': r'C:\iwd2r\tools\directplay',
+            'shutdown': True})
+        self.assertTrue(os.path.isfile(winsandbox.REPLAY_DRIVER))
+
+    def test_stage_directplay(self):
+        source = os.path.join(self.tmp, 'SysWOW64')
+        os.makedirs(source)
+        for name in winsandbox.DIRECTPLAY_FILES:
+            with open(os.path.join(source, name.upper()), 'w') as f:
+                f.write(name)
+        target = os.path.join(self.tmp, 'tools', 'directplay')
+        self.assertEqual(winsandbox.stage_directplay(target, source),
+                         list(winsandbox.DIRECTPLAY_FILES))
+        self.assertEqual(sorted(os.listdir(target)),
+                         sorted(winsandbox.DIRECTPLAY_FILES))
+        os.remove(os.path.join(source, 'DPLAYX.DLL'))
+        with self.assertRaisesRegex(RuntimeError, 'dplayx.dll'):
+            winsandbox.stage_directplay(target, source)
+
+    def test_results_copy_plan(self):
+        plan = winsandbox.replay_copy_plan(
+            '/r', '/run/replay', ['driver.log', 'done.txt'],
+            ['status.txt', 'checkpoint-start.json'])
+        self.assertEqual(plan, [
+            ('/r/replay/checkpoint-start.json',
+             '/run/replay/checkpoint-start.json'),
+            ('/r/replay/status.txt', '/run/replay/status.txt'),
+            ('/r/done.txt', '/run/replay/sandbox/done.txt'),
+            ('/r/driver.log', '/run/replay/sandbox/driver.log')])
+
+    def record(self, argv, replace_run=None):
+        """Runs oracle.main(argv) with everything outside stubbed; returns
+        (exit code, events, locks)."""
+        from unittest import mock
+        locks = LockRecorder()
+        events = []
+        build = os.path.join(self.tmp, 'win')
+        out = os.path.join(build, oracle.REPLAY_DIR_REL)
+        os.makedirs(out)
+        for name in (oracle.INJECTOR, oracle.RECORDER):
+            open(os.path.join(out, name), 'w').close()
+        game = os.path.join(self.tmp, 'game')
+        os.makedirs(game)
+        dump = {'frame': 10, 'globals': {'reinitializing': 0,
+                                         'ai_stalled_frames': 0}}
+
+        def run_replay(build_dir, game_dir, script, env, timeout, host_run,
+                       out_dir, log):
+            events.append(('sandbox', list(locks.held), env['IWD2R_SEED'],
+                           build_dir == out))
+            os.makedirs(out_dir)
+            with open(os.path.join(out_dir, 'status.txt'), 'w') as f:
+                f.write('frame=10\nstate=finished\n')
+            with open(os.path.join(out_dir, 'checkpoint-start.json'),
+                      'w') as f:
+                json.dump(dump, f)
+            return {'code': 0, 'stdout': 'injector: pid 1', 'stderr': '',
+                    'error': None, 'seconds': 31.0}
+
+        def record_on_host(*a):
+            events.append(('host', list(locks.held)))
+            out_dir = a[8]
+            os.makedirs(out_dir)
+            with open(os.path.join(out_dir, 'checkpoint-start.json'),
+                      'w') as f:
+                json.dump(dump, f)
+            return 0, '', ''
+
+        # The play module oracle.py imports (tools/ is on its sys.path).
+        oracle_play = __import__('play')
+        sandbox = types.SimpleNamespace(
+            available=lambda: True, ENABLE_HINT='play: off',
+            VM_ROOT=os.path.join(self.tmp, 'vm'),
+            SANDBOX_LOCK=os.path.join(self.tmp, 'vm', 'sandbox.lock'),
+            BOX_REPLAY_DIR=winsandbox.BOX_REPLAY_DIR,
+            deploy_runtime=lambda exe, log, arch: events.append(
+                ('runtime', os.path.basename(exe), arch)),
+            run_replay=replace_run or run_replay)
+        with LockRecorder.patch(oracle, locks), \
+                mock.patch.dict(sys.modules, {'winsandbox': sandbox}), \
+                mock.patch.object(oracle_play, 'WIN_CHECKOUT', build), \
+                mock.patch.object(oracle, 'ensure_vanilla', lambda: game), \
+                mock.patch.object(oracle, 'prepare_replay_ini',
+                                  lambda g: None), \
+                mock.patch.object(oracle, 'record_on_host', record_on_host), \
+                mock.patch.object(oracle, 'RUNS_DIR',
+                                  os.path.join(self.tmp, 'runs')), \
+                mock.patch.object(oracle, 'check_dumps', lambda d, schema: {
+                    n: [] for n in os.listdir(d)
+                    if n.startswith('checkpoint-')}), \
+                contextlib.redirect_stdout(io.StringIO()):
+            code = oracle.main(argv)
+        return code, events, locks, sandbox
+
+    def test_record_in_sandbox_takes_both_locks_in_order(self):
+        code, events, locks, sandbox = self.record(
+            ['replay', 'record', 'start_screen', '--seed', '3'])
+        self.assertEqual(code, 0)
+        self.assertEqual(locks.paths, [(oracle.REPLAY_LOCK, 'replay'),
+                                       (sandbox.SANDBOX_LOCK, 'sandbox')])
+        self.assertEqual(events, [
+            ('runtime', 'injector.exe', 'x86'),
+            ('sandbox', [oracle.REPLAY_LOCK, sandbox.SANDBOX_LOCK], '3',
+             True)])
+        self.assertEqual(locks.held, [])
+        run = glob.glob(os.path.join(self.tmp, 'runs', '*', 'replay'))[0]
+        with open(os.path.join(run, 'replay.json')) as f:
+            report = json.load(f)
+        self.assertEqual(report['mode'], 'sandbox')
+        self.assertEqual(report['sandbox_seconds'], 31.0)
+        self.assertEqual(report['missing_checkpoints'], [])
+
+    def test_host_switch(self):
+        code, events, locks, _ = self.record(
+            ['replay', 'record', 'start_screen', '--host'])
+        self.assertEqual(code, 0)
+        self.assertEqual(events, [('host', [oracle.REPLAY_LOCK])])
+        self.assertEqual(locks.paths, [(oracle.REPLAY_LOCK, 'replay')])
+        run = glob.glob(os.path.join(self.tmp, 'runs', '*', 'replay'))[0]
+        with open(os.path.join(run, 'replay.json')) as f:
+            self.assertEqual(json.load(f)['mode'], 'host')
+
+    def test_compare_passes_the_host_switch(self):
+        from unittest import mock
+        seen = []
+        with mock.patch.object(oracle, 'replay_compare',
+                               lambda a: seen.append(a.host) or 0), \
+                LockRecorder.patch(oracle, LockRecorder()):
+            oracle.main(['replay', 'compare', 'chargen_replay'])
+            oracle.main(['replay', 'compare', 'chargen_replay', '--host'])
+        self.assertEqual(seen, [False, True])
+
+    def test_sandbox_error_fails_the_run(self):
+        def failing(build_dir, game_dir, script, env, timeout, host_run,
+                    out_dir, log):
+            os.makedirs(out_dir)
+            return {'code': None, 'stdout': '', 'stderr': '',
+                    'error': 'sandbox timeout: no done.txt after 420 s',
+                    'seconds': 420.0}
+        code, _, _, _ = self.record(['replay', 'record', 'start_screen'],
+                                    failing)
+        self.assertEqual(code, oracle.INJECTOR_TIMEOUT)
+        run = glob.glob(os.path.join(self.tmp, 'runs', '*', 'replay'))[0]
+        with open(os.path.join(run, 'replay.json')) as f:
+            report = json.load(f)
+        self.assertEqual(report['sandbox_error'],
+                         'sandbox timeout: no done.txt after 420 s')
+        self.assertTrue(report['outcome'].startswith(
+            'sandbox: sandbox timeout'))
+        self.assertEqual(report['missing_checkpoints'], ['start'])
 
 
 class OracleReplayTest(unittest.TestCase):
