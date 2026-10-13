@@ -742,7 +742,7 @@ BOOL CDimm::CompressDirectory(const CString& sTempDir, const CString& sSaveDir)
             DWORD nFileNameLength = static_cast<DWORD>(strlen(findFileData.cFileName)) + 1;
 
             sFileName = findFileData.cFileName;
-            if (sMainSaveFileName != findFileData.cFileName
+            if (sMainSaveFileName.CompareNoCase(findFileData.cFileName) != 0
                 && strnicmp(findFileData.cFileName, "ICEWIND2.GAM", 10) != 0
                 && strnicmp(sFileName.Right(3), "BMP", 3) != 0
                 && strnicmp(findFileData.cFileName, "WORLDMAP.WMP", 12) != 0
@@ -756,11 +756,11 @@ BOOL CDimm::CompressDirectory(const CString& sTempDir, const CString& sSaveDir)
 
                 DWORD nSrcSize = static_cast<DWORD>(input.GetLength());
 
-                // NOTE: The original allocates only when a file is larger
-                // than the buffers, so an empty first file leaves them unset
-                // and it compresses into no buffer. NTFS lists the area files
-                // first; our directory order is the file system's, so an
-                // empty file can come first here. Allocate then as well.
+                // NOTE: Deviation. The original allocates only when a file
+                // is larger than the buffers, so an empty file listed first
+                // (FindFirstFileA lists in NTFS order, as the original sees
+                // it) would go to `compress` with no buffer. Allocate while
+                // the buffers are unset as well.
                 if (nSrcSize > nMaxSrcSize || pSrc == NULL) {
                     if (pSrc != NULL) {
                         delete[] pSrc;
@@ -834,7 +834,7 @@ BOOL CDimm::CompressDirectory(const CString& sTempDir, const CString& sSaveDir)
     do {
         if ((findFileData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != FILE_ATTRIBUTE_DIRECTORY) {
             sFileName = findFileData.cFileName;
-            if (sMainSaveFileName != findFileData.cFileName
+            if (sMainSaveFileName.CompareNoCase(findFileData.cFileName) != 0
                 && strnicmp(findFileData.cFileName, "ICEWIND2.GAM", 10) != 0
                 && strnicmp(sFileName.Right(3), "BMP", 3) != 0
                 && strnicmp(findFileData.cFileName, "WORLDMAP.WMP", 12) != 0
