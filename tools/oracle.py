@@ -29,9 +29,15 @@ or every case file the runner lists, one fresh runner process per file. Each
 process writes <file>.json under C:/Users/thier/iwd2r-oracle/out/<stamp>;
 they are merged into runs/<stamp>/oracle.json and summarised. A case declared
 to fail (selftest/must_fail) is listed under expected_failures and one
-declared to crash (selftest/crash) under expected_crashes. The run fails
+declared to crash (selftest/crash) under expected_crashes. A case declared
+pending (ORACLE_CASE_PENDING, with its reason) is listed under pending when it
+did what a passing case does; one with no body is not run. The run fails
 (exit 1) if any case does not do what it declared, or a runner process ends
 without its report.
+
+Before the cases run, the 2DA texts they read (TABLES) are extracted from the
+vanilla copy by tools/bif.py into C:/Users/thier/iwd2r-oracle/tables, which
+the runner gets as --tables.
 
 --selftest checks the loader itself in six runs: the self-test, whose image
 bytes and rand() value are checked against the exe file read here; a run with
@@ -75,6 +81,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(HERE, 'ghidra'))
 sys.path.insert(0, HERE)
+import bif  # noqa: E402
 import check_evidence  # noqa: E402
 
 EVIDENCE_DIR = os.path.join(ROOT, 'docs', 'evidence')
@@ -85,6 +92,10 @@ ORACLE_DIR = '/mnt/c/Users/thier/iwd2r-oracle'
 INSTALL = '/mnt/c/Games/Icewind Dale II'
 INSTALL_WIN = 'C:\\Games\\Icewind Dale II'
 GAME_DIR = ORACLE_DIR + '/game'
+TABLES_DIR = ORACLE_DIR + '/tables'
+# The game text the cases read (runner --tables), extracted from the vanilla
+# copy by tools/bif.py before every run. Never committed.
+TABLES = ('XPLEVEL.2DA',)
 MARKER = 'vanilla.ok'
 WEIDU_SETUP = 'Setup-iwd2ee.exe'
 WEIDU_TIMEOUT = 3600  # seconds for the whole uninstall
@@ -378,7 +389,7 @@ def merge_reports(seed, iterations, runs):
     dead part way) are still merged."""
     merged = {'seed': seed, 'iterations': iterations, 'files': [],
               'cases': [], 'expected_failures': [], 'expected_crashes': [],
-              'unexpected': [], 'passed': True}
+              'pending': [], 'unexpected': [], 'passed': True}
     for name, code, report, died in runs:
         entry = {'file': name, 'exit_code': code}
         if code is None or code == EXIT_TIMEOUT:
@@ -403,6 +414,9 @@ def merge_reports(seed, iterations, runs):
                     merged['expected_failures'].append(case['case'])
                 elif case['expect'] == 'crash':
                     merged['expected_crashes'].append(case['case'])
+                elif case.get('pending'):
+                    merged['pending'].append('%s: %s' % (case['case'],
+                                                         case['pending']))
             complete = report.get('complete', False)
             if not complete and report.get('running'):
                 # The case the process was in when it died or was killed.
@@ -438,6 +452,10 @@ def summary_lines(merged):
             state = 'passed'
         if case_ok(case):
             state += ' (expected)' if case['expect'] != 'pass' else ''
+            if case.get('pending'):
+                state = ('pending: %s' % case['pending'] if not
+                         case['iterations'] else '%s, pending: %s'
+                         % (state, case['pending']))
         else:
             state = state.upper() + (' (expected %s)' % case['expect']
                                      if case['expect'] != 'pass' else '')
@@ -459,14 +477,18 @@ def summary_lines(merged):
     for entry in merged['files']:
         if entry.get('error'):
             lines.append('file %s: %s' % (entry['file'], entry['error']))
-    counts = {'pass': 0, 'expected': 0}
+    counts = {'pass': 0, 'expected': 0, 'pending': 0}
     for case in merged['cases']:
         if case_ok(case):
-            counts['pass' if case['expect'] == 'pass' else 'expected'] += 1
-    lines.append('%d passed, %d expected failures or crashes, %d unexpected; '
-                 'run %s' % (counts['pass'], counts['expected'],
-                             len(merged['unexpected']),
-                             'PASSED' if merged['passed'] else 'FAILED'))
+            if case['expect'] != 'pass':
+                counts['expected'] += 1
+            else:
+                counts['pending' if case.get('pending') else 'pass'] += 1
+    lines.append('%d passed, %d expected failures or crashes, %d pending, '
+                 '%d unexpected; run %s'
+                 % (counts['pass'], counts['expected'], counts['pending'],
+                    len(merged['unexpected']),
+                    'PASSED' if merged['passed'] else 'FAILED'))
     return lines
 
 
@@ -489,9 +511,18 @@ def read_report(path):
         isinstance(report.get('cases'), list) else None
 
 
+def extract_tables(game, out_dir=TABLES_DIR, names=TABLES):
+    """Drop the 2DA texts the cases read under out_dir (Override first,
+    then the KEY/BIFF archives of the vanilla copy)."""
+    try:
+        return bif.extract_to(game, out_dir, names)
+    except (bif.BifError, OSError) as e:
+        sys.exit('oracle: cannot extract the case tables: %s' % e)
+
+
 def run_cases(args):
     import play
-    ensure_vanilla()
+    extract_tables(ensure_vanilla())
     runner = runner_path()
     exe = stage_vanilla(args.vanilla)
     if args.file:
@@ -526,7 +557,8 @@ def run_case_file(runner, exe, name, args, out_dir):
     """Run one case file in a fresh runner; (name, exit code, report)."""
     command = [runner, win_path(exe), '--file', name,
                '--seed', str(args.seed), '--iterations', str(args.iterations),
-               '--out', win_path(out_dir), '--timeout', str(FILE_TIMEOUT)]
+               '--out', win_path(out_dir), '--tables', win_path(TABLES_DIR),
+               '--timeout', str(FILE_TIMEOUT)]
     print('== %s' % name)
     try:
         # The runner kills its own child at FILE_TIMEOUT; this is a backstop.

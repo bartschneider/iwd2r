@@ -5,6 +5,12 @@
 //
 //   ORACLE_CASE("rand/sequence", RandSequence);
 //   ORACLE_CASE_EXPECT("selftest/must_fail", MustFail, OracleExpect::Fail);
+//   ORACLE_CASE_PENDING("tables/load", nullptr, "needs engine state");
+//
+// A pending case is one that cannot compare the original with ours yet; its
+// reason goes into the report's "pending" list. With a body it runs and must
+// pass like any case (an original-only check, say); without one (nullptr)
+// it is listed and not run.
 //
 // The runner runs the cases of one file per process (--file <file>), restoring
 // the original's .data and its rand state before each.
@@ -19,6 +25,9 @@
 //   the parent then prints the status and exits 11, and the report's
 //   "running" field names the case. A FALSE return is reported as a crash
 //   ("heap corrupt after case") and the file's remaining cases are skipped.
+// - Allocator state is not restored either: the CRT heap's globals and MFC's
+//   CFixedAlloc pools that CString buffers come from (vanilla.json's
+//   crt_ranges), so original strings a case builds stay valid in later cases.
 // - Of the thread's _tiddata only the rand state (_holdrand) is restored.
 //   strtok's position, errno/_doserrno, the asctime/gmtime buffers and the
 //   other per-thread fields carry over from case to case.
@@ -43,8 +52,9 @@ class CaseContext;
 struct OracleCase {
     const char* id; // "<file>/<name>"
     const char* file; // __FILE__ of the case file; its stem is the file name
-    void (*run)(CaseContext&);
+    void (*run)(CaseContext&); // nullptr: a pending case that is not run
     OracleExpect expect = OracleExpect::Pass;
+    const char* pending = nullptr; // why the case is pending, or nullptr
 };
 
 // Every registered case, in registration order.
@@ -54,9 +64,10 @@ std::vector<OracleCase>& OracleCases();
 std::string CaseFileName(const OracleCase& c);
 
 struct OracleRegistrar {
-    OracleRegistrar(const char* id, const char* file, void (*run)(CaseContext&), OracleExpect expect)
+    OracleRegistrar(const char* id, const char* file, void (*run)(CaseContext&), OracleExpect expect,
+        const char* pending = nullptr)
     {
-        OracleCases().push_back(OracleCase { id, file, run, expect });
+        OracleCases().push_back(OracleCase { id, file, run, expect, pending });
     }
 };
 
@@ -65,6 +76,8 @@ struct OracleRegistrar {
 #define ORACLE_CASE_EXPECT(id, fn, expect) \
     static OracleRegistrar ORACLE_CONCAT(g_oracleCase, __LINE__)(id, __FILE__, fn, expect)
 #define ORACLE_CASE(id, fn) ORACLE_CASE_EXPECT(id, fn, OracleExpect::Pass)
+#define ORACLE_CASE_PENDING(id, fn, reason) \
+    static OracleRegistrar ORACLE_CONCAT(g_oracleCase, __LINE__)(id, __FILE__, fn, OracleExpect::Pass, reason)
 
 struct OracleFailure {
     std::string inputs;
@@ -113,6 +126,9 @@ public:
 
     uint64_t seed;
     int iterations;
+    // The folder of extracted game text (--tables), without a trailing
+    // separator; empty when the runner was given none.
+    std::string tables;
 
     // Records a mismatch. All are counted; the first kKeptFailures are kept
     // for the report.

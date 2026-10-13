@@ -1340,6 +1340,38 @@ class OracleReportTest(unittest.TestCase):
                 json.dump(oracle_report([]), f)
             self.assertEqual(oracle.read_report(path)['cases'], [])
 
+    def test_pending_cases_are_listed_without_failing(self):
+        cases = [oracle_case('tables/getat'),
+                 dict(oracle_case('tables/load'), iterations=0,
+                      pending='needs engine state'),
+                 dict(oracle_case('pending/save'),
+                      pending='ours not implemented')]
+        merged = self.merge(('tables', 0, oracle_report(cases)))
+        self.assertTrue(merged['passed'])
+        self.assertEqual(merged['pending'],
+                         ['tables/load: needs engine state',
+                          'pending/save: ours not implemented'])
+        lines = oracle.summary_lines(merged)
+        self.assertIn('tables/load                      pending: needs engine '
+                      'state, 0 inputs', lines[1])
+        self.assertIn('passed, pending: ours not implemented', lines[2])
+        self.assertEqual(lines[-1], '1 passed, 0 expected failures or '
+                         'crashes, 2 pending, 0 unexpected; run PASSED')
+
+    def test_a_failing_pending_case_fails_the_run(self):
+        case = dict(oracle_case('pending/save', failures=1),
+                    pending='ours not implemented')
+        merged = self.merge(('pending', 7, oracle_report([case])))
+        self.assertFalse(merged['passed'])
+        self.assertEqual(merged['pending'], [])
+        self.assertEqual(merged['unexpected'], ['pending/save'])
+
+    def test_extract_tables_exits_with_the_reason(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(SystemExit) as e:
+                oracle.extract_tables(tmp, os.path.join(tmp, 'out'))
+            self.assertIn('no CHITIN.KEY', str(e.exception))
+
     def test_exit_code_must_agree(self):
         merged = self.merge(('selftest', 7, oracle_report(self.SELFTEST)))
         self.assertFalse(merged['passed'])
@@ -1842,6 +1874,107 @@ class PlayBuildWindowsDefaultsTest(unittest.TestCase):
         self.assertEqual(params['target'].default, 'iwd2r')
         self.assertEqual(params['exe_rel'].default, play.WIN_EXE_REL)
         self.assertEqual(params['bat_name'].default, 'play-build.bat')
+
+
+bif = load_tool('bif')
+
+
+def make_key(bifs, resources):
+    """A KEY V1: bifs is [name], resources [(resref, type, bif, file)]."""
+    header = 24
+    names = b''.join(n.encode() + b'\0' for n in bifs)
+    obif = header
+    oname = obif + 12 * len(bifs)
+    ores = oname + len(names)
+    out = b'KEY V1  ' + struct.pack('<4I', len(bifs), len(resources), obif,
+                                    ores)
+    pos = oname
+    for n in bifs:
+        out += struct.pack('<IIHH', 0, pos, len(n) + 1, 1)
+        pos += len(n) + 1
+    out += names
+    for resref, rtype, b, f in resources:
+        out += struct.pack('<8sHI', resref.encode(), rtype, (b << 20) | f)
+    return out
+
+
+def make_biff(files):
+    """A BIFF V1 holding [(file index, bytes)]."""
+    offset = 20
+    data_start = offset + 16 * len(files)
+    out = b'BIFFV1  ' + struct.pack('<3I', len(files), 0, offset)
+    body = b''
+    for index, data in files:
+        out += struct.pack('<IIIHH', index, data_start + len(body),
+                           len(data), 0x3F4, 0)
+        body += data
+    return out + body
+
+
+class BifTest(unittest.TestCase):
+    """tools/bif.py on a synthetic CHITIN.KEY and BIFF."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.game = self._tmp.name
+        os.makedirs(os.path.join(self.game, 'Data'))
+        os.makedirs(os.path.join(self.game, 'CD2', 'Data'))
+        os.makedirs(os.path.join(self.game, 'Override'))
+        key = make_key(['data\\Main.bif', 'data\\Extra.bif'],
+                       [('XPLEVEL', 0x3F4, 0, 1), ('SKILLS', 0x3F4, 1, 0),
+                        ('XPLEVEL', 0x3F0, 0, 0), ('MISSING', 0x3F4, 5, 0)])
+        self.write('CHITIN.KEY', key)
+        self.write('Data/MAIN.BIF', make_biff([(0, b'ids'), (1, b'2DA xp')]))
+        self.write('CD2/Data/Extra.bif', make_biff([(0, b'2DA skills')]))
+
+    def write(self, rel, data):
+        with open(os.path.join(self.game, rel), 'wb') as f:
+            f.write(data)
+
+    def test_parse_key(self):
+        with open(os.path.join(self.game, 'CHITIN.KEY'), 'rb') as f:
+            bifs, resources = bif.parse_key(f.read())
+        self.assertEqual(bifs, ['data/Main.bif', 'data/Extra.bif'])
+        self.assertEqual(resources[('XPLEVEL', 0x3F4)], (0, 1))
+        self.assertEqual(resources[('XPLEVEL', 0x3F0)], (0, 0))
+
+    def test_extract_from_biff_by_type_and_case(self):
+        self.assertEqual(bif.extract(self.game, 'xplevel.2da'), b'2DA xp')
+        self.assertEqual(bif.extract(self.game, 'XPLEVEL.IDS'), b'ids')
+
+    def test_extract_from_a_cd_folder(self):
+        self.assertEqual(bif.extract(self.game, 'SKILLS.2DA'), b'2DA skills')
+
+    def test_override_wins(self):
+        self.write('Override/XPLevel.2da', b'override')
+        self.assertEqual(bif.extract(self.game, 'XPLEVEL.2DA'), b'override')
+
+    def test_errors(self):
+        for name, message in (('NOPE.2DA', 'not in CHITIN.KEY'),
+                              ('MISSING.2DA', 'archive 5 of 2'),
+                              ('XPLEVEL.WAV', 'unknown resource type')):
+            with self.assertRaisesRegex(bif.BifError, message):
+                bif.extract(self.game, name)
+        self.write('Data/MAIN.BIF', b'BIFCV1.0' + bytes(16))
+        with self.assertRaisesRegex(bif.BifError, 'not a BIFF V1'):
+            bif.extract(self.game, 'XPLEVEL.2DA')
+        with self.assertRaisesRegex(bif.BifError, 'not a KEY V1'):
+            bif.parse_key(b'KEY V2  ' + bytes(16))
+        with self.assertRaisesRegex(bif.BifError, 'past the end'):
+            bif.parse_key(b'KEY V1  ' + struct.pack('<4I', 9, 0, 24, 24))
+        with self.assertRaisesRegex(bif.BifError, 'no file 7'):
+            bif.read_biff(make_biff([(0, b'x')]), 7)
+        with self.assertRaisesRegex(bif.BifError, 'past the end'):
+            bif.read_biff(make_biff([(0, b'xyz')])[:-1], 0)
+
+    def test_extract_to_writes_upper_case_names(self):
+        out = os.path.join(self.game, 'out')
+        paths = bif.extract_to(self.game, out, ['xplevel.2da'])
+        self.assertEqual(paths, [os.path.join(out, 'XPLEVEL.2DA')])
+        with open(paths[0], 'rb') as f:
+            self.assertEqual(f.read(), b'2DA xp')
+        self.assertEqual(os.listdir(out), ['XPLEVEL.2DA'])
 
 
 if __name__ == '__main__':

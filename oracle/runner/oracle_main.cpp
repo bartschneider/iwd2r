@@ -1,7 +1,8 @@
 // iwd2r_oracle: maps the vanilla iwd2.exe at 0x400000 and enters it through its
 // own CRT, whose call to WinMain is redirected to OracleMain.
 //
-//   iwd2r_oracle.exe [<iwd2.exe>] --file <name> [--seed N] [--iterations N] [--out <dir>] [--timeout S]
+//   iwd2r_oracle.exe [<iwd2.exe>] --file <name> [--seed N] [--iterations N] [--out <dir>] [--tables <dir>]
+//                    [--timeout S]
 //   iwd2r_oracle.exe [<iwd2.exe>] --selftest [--test-bad-callsite] [--test-bad-target] [--test-occupy]
 //                    [--test-hang] [--timeout S]
 //   iwd2r_oracle.exe --list
@@ -13,7 +14,9 @@
 // and the thread's rand state, and before each case restores them. Each case
 // prints one line; the report goes to <out>/<name>.json (default: the current
 // folder), rewritten after every case with "complete": false until the end.
-// --iterations (default 10000) bounds unbounded generators. --list prints the
+// --iterations (default 10000) bounds unbounded generators. --tables names the
+// folder of game text the cases read (CaseContext::tables; tools/oracle.py
+// extracts it from the vanilla copy). --list prints the
 // case file names, one per line. --timeout S (default none) makes the parent
 // kill the child's job after S seconds and exit 10.
 //
@@ -89,6 +92,7 @@ std::string g_file; // --file
 uint64_t g_seed = 1;
 int g_iterations = 10000;
 std::string g_out = ".";
+std::string g_tables; // --tables
 
 // Starts this program again, suspended, with --child; reserves the vanilla
 // range in it before any of its code runs; resumes it and returns its exit
@@ -270,6 +274,9 @@ std::vector<std::string> CaseFiles()
 
 const char* Outcome(const CaseResult& r)
 {
+    if (r.pending && !r.crashed && r.failureCount == 0) {
+        return r.iterations ? "passed, pending" : "pending";
+    }
     if (r.crashed) {
         return AsExpected(r) ? "crashed (expected)" : "CRASHED";
     }
@@ -347,8 +354,11 @@ int RunCases()
         }
         RestoreData();
         CaseContext ctx(g_seed, g_iterations);
+        ctx.tables = g_tables;
         try {
-            c.run(ctx);
+            if (c.run) {
+                c.run(ctx);
+            }
         } catch (const CaseCrashed&) {
             // Recorded in ctx; the next case starts from the snapshot.
         } catch (const std::exception& e) {
@@ -363,14 +373,15 @@ int RunCases()
         CaseResult r;
         r.id = c.id;
         r.expect = c.expect;
+        r.pending = c.pending;
         r.iterations = ctx.InputsRun();
         r.failureCount = ctx.FailureCount();
         r.failures = ctx.Failures();
         r.crashed = ctx.Crashed();
         r.crash = ctx.Crash();
         allExpected = allExpected && AsExpected(r);
-        std::printf("%-32s %s (%lld inputs, %lld failures)\n", r.id.c_str(), Outcome(r), r.iterations,
-            r.failureCount);
+        std::printf("%-32s %s (%lld inputs, %lld failures)%s%s\n", r.id.c_str(), Outcome(r), r.iterations,
+            r.failureCount, r.pending ? ": " : "", r.pending ? r.pending : "");
         for (size_t i = 0; i < r.failures.size() && i < 3; ++i) {
             std::printf("    seed %llu, inputs %s: original %s, ours %s\n", static_cast<unsigned long long>(g_seed),
                 r.failures[i].inputs.c_str(), r.failures[i].original.c_str(), r.failures[i].ours.c_str());
@@ -468,6 +479,11 @@ int main(int argc, char** argv)
             g_file = argv[++i];
         } else if (std::strcmp(argv[i], "--out") == 0 && hasValue) {
             g_out = argv[++i];
+        } else if (std::strcmp(argv[i], "--tables") == 0 && hasValue) {
+            g_tables = argv[++i];
+            while (!g_tables.empty() && (g_tables.back() == '\\' || g_tables.back() == '/')) {
+                g_tables.pop_back();
+            }
         } else if (std::strcmp(argv[i], "--seed") == 0 && hasValue) {
             char* end = nullptr;
             g_seed = std::strtoull(argv[++i], &end, 0);
@@ -504,7 +520,7 @@ int main(int argc, char** argv)
     if (usage || (g_selftest && !g_file.empty())) {
         std::fprintf(stderr,
             "usage: iwd2r_oracle [<iwd2.exe>] --file <name> [--seed N] [--iterations N] [--out <dir>] "
-            "[--timeout S]\n"
+            "[--tables <dir>] [--timeout S]\n"
             "       iwd2r_oracle [<iwd2.exe>] --selftest [--test-bad-callsite] [--test-bad-target] [--test-occupy] "
             "[--test-hang] [--timeout S]\n"
             "       iwd2r_oracle --list\n");
