@@ -2887,7 +2887,7 @@ void CInfGame::Unmarshal(BYTE* pGame, LONG nGame, BOOLEAN bProgressBarInPlace)
         UTIL_ASSERT(cnt <= (DWORD)nGame);
     }
 
-    if (strcmp(sFileVersion, "V1.1") != 0) {
+    if (sFileVersion.CompareNoCase("V1.1") != 0) {
         POSITION pos = field_4BDC.GetHeadPosition();
         while (pos != NULL) {
             POSITION posOld = pos;

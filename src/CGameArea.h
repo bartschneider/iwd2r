@@ -45,7 +45,12 @@ public:
     WORD m_fogProbability;
     WORD m_lightningProbability;
     WORD m_windSpeed;
-    DWORD field_4C;
+    // NOTE: CGameArea::Unmarshal reads 0x4C and 0x4D as party-level bounds
+    // and stores the party level in 0x4E.
+    BYTE field_4C;
+    BYTE field_4D;
+    BYTE field_4E;
+    BYTE field_4F;
     DWORD field_50;
     DWORD field_54;
     DWORD field_58;
@@ -180,6 +185,7 @@ public:
     void IncrHeightDynamic(const CPoint& point);
     void DecrHeightDynamic(const CPoint& point);
     COLORREF GetTintColor(const CPoint& cPoint, BYTE listType);
+    void Marshal(BYTE** pArea, DWORD* nArea, BOOLEAN bProgressBarInPlace);
     void Unmarshal(BYTE* pArea, LONG areaSize, const CString& sName, BOOLEAN bProgressBarInPlace);
     void ProgressBarCallback(DWORD dwSize, BOOLEAN bInitialize);
     void SetListenPosition();
@@ -296,6 +302,7 @@ public:
     /* 0A56 */ CTypedPtrList<CPtrList, POSITION> m_lVertSortBackRemove;
     /* 0A72 */ CTypedPtrList<CPtrList, POSITION> m_lVertSortFlightRemove;
     /* 0A8E */ CTypedPtrList<CPtrList, CTiledObject*> m_lTiledObjects;
+    /* 0AAA */ CTypedPtrList<CPtrList, int*> field_AAA; // NOTE: Object ids; only Marshal reads it.
     /* 0AC6 */ CPoint m_ptOldViewPos;
     /* 0ACE */ CVariableHash m_variables;
     /* 0ADA */ CNamedCreatureVariableHash m_namedCreatures;
