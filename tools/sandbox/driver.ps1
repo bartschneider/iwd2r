@@ -183,13 +183,43 @@ function Sleep-Frames([double]$frames) {
     }
 }
 
+# Runs a file operation on the control folder again while Windows refuses it
+# for a moment: a file the engine just deleted can stay pending deletion
+# (longer in the sandbox's mapped folder), and creating or opening that name
+# meanwhile fails with "Access is denied".
+# Windows PowerShell wraps a cmdlet's error in its own exception type, so the
+# whole InnerException chain is checked rather than the outer type.
+function Is-TransientIo($record) {
+    $e = $record.Exception
+    while ($e -ne $null) {
+        if ($e -is [System.UnauthorizedAccessException] -or $e -is [System.IO.IOException]) { return $true }
+        $e = $e.InnerException
+    }
+    return $false
+}
+
+function Retry-Io([scriptblock]$operation) {
+    $end = (Get-Date).AddSeconds(5)
+    while ($true) {
+        try {
+            return & $operation
+        } catch {
+            if (-not (Is-TransientIo $_) -or (Get-Date) -gt $end) { throw }
+            Start-Sleep -Milliseconds 20
+        }
+    }
+}
+
 # Creates control\<name> and waits for the engine to delete it (it does on
 # its next presented frame).
 function Request([string]$name, [double]$seconds) {
     $path = Join-Path $cfg.control $name
-    Set-Content -LiteralPath $path -Value '' -Encoding ASCII
+    Retry-Io { Set-Content -LiteralPath $path -Value '' -Encoding ASCII -ErrorAction Stop }
     $end = (Get-Date).AddSeconds($seconds)
-    while (Test-Path -LiteralPath $path) {
+    # File.Exists, not Test-Path: Windows PowerShell's Test-Path throws
+    # "Access is denied" on a file the engine is still deleting, while
+    # File.Exists answers false, which is right since the engine handled it.
+    while ([System.IO.File]::Exists($path)) {
         Check
         if ((Get-Date) -gt $end) { throw "engine did not answer $name in $seconds s" }
         Start-Sleep -Milliseconds 10
@@ -198,7 +228,8 @@ function Request([string]$name, [double]$seconds) {
 
 function Engine-Frames {
     Request 'frames.req' ($deadline - (Get-Date)).TotalSeconds
-    return [int](Get-Content -Raw -LiteralPath (Join-Path $cfg.control 'frames.txt')).Trim()
+    $answer = Join-Path $cfg.control 'frames.txt'
+    return [int](Retry-Io { Get-Content -Raw -LiteralPath $answer -ErrorAction Stop }).Trim()
 }
 
 function Wait-Frames([int]$frames) {
@@ -275,7 +306,7 @@ function Screen-Shot([string]$name) {
 
 function Engine-Shot([string]$name) {
     Request "shot-$name.req" 60
-    if (-not (Test-Path -LiteralPath (Join-Path $cfg.results "$name.png"))) {
+    if (-not [System.IO.File]::Exists((Join-Path $cfg.results "$name.png"))) {
         throw "engine wrote no $name.png"
     }
     Log "  wrote $name.png"
@@ -365,6 +396,12 @@ try {
         $env:IWD2R_SHOT_DIR = $cfg.results
         $env:IWD2R_CONTROL_DIR = $cfg.control
         Remove-Item Env:IWD2R_SCRIPT -ErrorAction SilentlyContinue
+        # The sandbox's sound reaches the host's speakers, and every sandbox
+        # boots unmuted, so one press of the volume-mute key silences it. The
+        # game still gets a normal audio device.
+        [IwdInput]::Key(0xAD, $true, $true)
+        [IwdInput]::Key(0xAD, $false, $true)
+        Log 'muted the sandbox'
         $script:game = Start-Process -FilePath $cfg.exe -WorkingDirectory $cfg.data -PassThru -NoNewWindow `
             -RedirectStandardOutput (Join-Path $cfg.results 'log.txt') `
             -RedirectStandardError (Join-Path $cfg.results 'stderr.txt')
@@ -390,6 +427,9 @@ try {
     $errorText = "$_"
     if ($script:game -ne $null -and $script:game.HasExited) { $exitCode = $script:game.ExitCode }
     Log "driver error: $errorText"
+    Log "  exception $($_.Exception.GetType().FullName); inner $($_.Exception.InnerException)"
+    Log "  at $($_.InvocationInfo.ScriptLineNumber): $($_.InvocationInfo.Line.Trim())"
+    Log "  stack $($_.ScriptStackTrace -replace '\r?\n', ' <- ')"
 } finally {
     if ($script:game -ne $null -and -not $script:game.HasExited) {
         Stop-Process -Id $script:game.Id -Force -ErrorAction SilentlyContinue

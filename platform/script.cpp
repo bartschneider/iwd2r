@@ -207,13 +207,15 @@ void PollControl()
     }
     if (framesRequested) {
         // Written aside and renamed, so a reader never sees a partial file.
+        // rename replaces frames.txt in one step; deleting it first would
+        // leave it pending deletion on Windows, where opening a file in that
+        // state fails with "Access is denied".
         const fs::path answer = fs::path(dir) / "frames.txt";
         const fs::path temp = fs::path(dir) / "frames.tmp";
         {
             std::ofstream out(temp, std::ios::binary | std::ios::trunc);
             out << platform::present::PresentedFrames() << "\n";
         }
-        fs::remove(answer, ec);
         fs::rename(temp, answer, ec);
         fs::remove(fs::path(dir) / "frames.req", ec);
     }
