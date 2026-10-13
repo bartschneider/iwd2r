@@ -746,11 +746,61 @@ void CVidPoly::DrawHLineShadedMirrored24(void* pSurface, int xMin, int xMax, DWO
 // 0x7D6EB0
 void CVidPoly::DrawHLineShaded32(void* pSurface, int xMin, int xMax, DWORD dwColor, const CRect& rSurface, const CPoint& ptRef)
 {
-    // TODO: Incomplete.
+    DWORD nRed = (dwColor >> 16) & 0xFF;
+    DWORD nGreen = (dwColor >> 8) & 0xFF;
+    DWORD nBlue = dwColor & 0xFF;
+    DWORD nIntensity = (nRed + nBlue + nGreen) / 3;
+
+    int width = xMax - xMin + 1;
+    if (xMax - xMin >= 0 && width > 0) {
+        DWORD* pSurface32 = reinterpret_cast<DWORD*>(pSurface) + xMin;
+
+        do {
+            DWORD nPixel = *pSurface32;
+            DWORD nPixelRed = (nPixel >> 16) & 0xFF;
+            DWORD nPixelGreen = (nPixel >> 8) & 0xFF;
+            DWORD nPixelBlue = nPixel & 0xFF;
+            DWORD nSum = nPixelBlue + nPixelGreen + nPixelRed;
+            if (nSum > 31 && static_cast<DWORD>(static_cast<INT>(nSum) >> 3) <= nIntensity) {
+                INT nInverse = 255 - nIntensity;
+                *pSurface32 = ((((nRed * nIntensity + nInverse * nPixelRed) >> 8) << 8
+                                   | ((nGreen * nIntensity + nInverse * nPixelGreen) >> 8))
+                                  << 8)
+                    | ((nBlue * nIntensity + nInverse * nPixelBlue) >> 8);
+            }
+            pSurface32++;
+            width--;
+        } while (width != 0);
+    }
 }
 
 // 0x7D6FD0
 void CVidPoly::DrawHLineShadedMirrored32(void* pSurface, int xMin, int xMax, DWORD dwColor, const CRect& rSurface, const CPoint& ptRef)
 {
-    // TODO: Incomplete.
+    DWORD nRed = (dwColor >> 16) & 0xFF;
+    DWORD nGreen = (dwColor >> 8) & 0xFF;
+    DWORD nBlue = dwColor & 0xFF;
+    DWORD nIntensity = (nBlue + nRed + nGreen) / 3;
+
+    int width = xMax - xMin + 1;
+    if (xMax - xMin >= 0 && width > 0) {
+        DWORD* pSurface32 = reinterpret_cast<DWORD*>(pSurface) + 1 + (rSurface.right - rSurface.left - xMin);
+
+        do {
+            pSurface32--;
+            DWORD nPixel = *pSurface32;
+            DWORD nPixelRed = (nPixel >> 16) & 0xFF;
+            DWORD nPixelGreen = (nPixel >> 8) & 0xFF;
+            DWORD nPixelBlue = nPixel & 0xFF;
+            DWORD nSum = nPixelBlue + nPixelGreen + nPixelRed;
+            if (nSum > 31 && static_cast<DWORD>(static_cast<INT>(nSum) >> 3) <= nIntensity) {
+                INT nInverse = 255 - nIntensity;
+                *pSurface32 = ((((nRed * nIntensity + nInverse * nPixelRed) >> 8) << 8
+                                   | ((nGreen * nIntensity + nInverse * nPixelGreen) >> 8))
+                                  << 8)
+                    | ((nBlue * nIntensity + nInverse * nPixelBlue) >> 8);
+            }
+            width--;
+        } while (width != 0);
+    }
 }
