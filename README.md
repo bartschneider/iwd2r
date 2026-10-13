@@ -81,7 +81,7 @@ What lands in `runs/<YYYYMMDD-HHMMSS>/` (one subfolder per scenario with `--suit
 
 #### Pending scenarios
 
-`scenarios/pending/` holds scenarios our engine cannot finish yet, such as a milestone's exit scenario (`world_entry.txt`: character generation through Party Formation into the start area). They are recorded in the original (`python3 tools/oracle.py replay record scenarios/pending/world_entry.txt`) and run by path, but `--suite` and the `replay compare` gate take only `scenarios/*.txt`. A pending scenario moves to `scenarios/` when it passes.
+`scenarios/pending/` holds scenarios our engine cannot finish yet, such as a milestone's exit scenario (`world_entry.txt`: character generation through Party Formation into the start area). They are recorded in the original (`python3 tools/oracle.py replay record scenarios/pending/world_entry.txt`) and run by path, but `--suite` takes only `scenarios/*.txt`, and the integration gate compares only those. A pending scenario moves to `scenarios/` when it passes.
 
 #### Parallel work streams
 
