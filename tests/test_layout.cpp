@@ -3,6 +3,11 @@
 
 #include "ScreenLayout.h"
 #include "platform/compose.h"
+#include "platform/present.h"
+#include "platform/win32_api.h"
+#include "platform/window.h"
+
+#include <SDL3/SDL.h>
 
 #include <cstring>
 #include <string>
@@ -459,6 +464,11 @@ void CheckSameLayout(const ScreenLayout& a, const ScreenLayout& b)
     CHECK(a.dialogAutoScrollRange == b.dialogAutoScrollRange);
 }
 
+bool Inside(const RECT& r, float x, float y)
+{
+    return x >= r.left && x < r.right && y >= r.top && y < r.bottom;
+}
+
 const Region* WorldRegion(const std::vector<Region>& regions)
 {
     for (const Region& r : regions) {
@@ -688,4 +698,101 @@ TEST_CASE("auto_world_scale", "[layout]")
     CHECK(iwd2r::ReservedDepth(167, 3, 2) == 251);
     CHECK(iwd2r::ReservedDepth(167, 1, 2) == 167);
     CHECK(iwd2r::ReservedDepth(0, 2, 1) == 0);
+}
+
+namespace {
+
+ScreenLayout& ResizeLayout()
+{
+    static ScreenLayout l = ComputeScreenLayout(1920, 1080, 2, 1);
+    return l;
+}
+
+std::vector<Region> ResizeSource(SIZE window)
+{
+    return iwd2r::RegionsFor(ResizeLayout(), iwd2r::SCREEN_WORLD, ResizeLayout().stru_8E79B8.bottom, window);
+}
+
+LRESULT CALLBACK IgnoringProc(HWND, UINT, WPARAM, LPARAM) { return 0; }
+
+void DrainMessages()
+{
+    MSG m;
+    while (PeekMessageA(&m, NULL, 0, 0, PM_REMOVE) && m.message != WM_QUIT) {
+    }
+}
+
+}
+
+TEST_CASE("resize_recomputes_regions", "[layout]")
+{
+    SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
+    REQUIRE(platform::window::InitScreen(1920, 1080, 1, 2));
+    WNDCLASSEXA wc = {};
+    wc.cbSize = sizeof(wc);
+    wc.lpfnWndProc = IgnoringProc;
+    wc.lpszClassName = "LayoutResize";
+    REQUIRE(RegisterClassExA(&wc) != 0);
+    HWND hwnd = CreateWindowExA(0, "LayoutResize", "t", WS_POPUP, 0, 0, 1920, 1080, NULL, NULL, NULL, NULL);
+    REQUIRE(hwnd != NULL);
+    platform::window::SetRegionSource(ResizeSource);
+    platform::window::PumpEvents();
+    DrainMessages();
+
+    // The toolbar's 1x rectangle in the frame (GUIW08's bottom panels at
+    // their shift) and where its region shows it.
+    const ScreenLayout& l = ResizeLayout();
+    const RECT toolbar = { l.worldUiShiftX, 1080 - 167, l.worldUiShiftX + 800, 1080 };
+    auto Check = [&](int windowWidth, int windowHeight) {
+        INFO("window " << windowWidth << "x" << windowHeight);
+        const std::vector<Region>& regions = platform::present::Regions();
+        const SIZE window = { windowWidth, windowHeight };
+        CHECK(platform::compose::Tiles(regions, window));
+        const Region* ui = UiRegion(regions);
+        REQUIRE(ui != nullptr);
+        CHECK(ui->window.right == windowWidth);
+        CHECK(ui->window.bottom == windowHeight);
+        CHECK(ui->window.bottom - ui->window.top == 2 * 167);
+        // The toolbar's centre in the window, as the presenter draws the
+        // region, maps back inside the toolbar.
+        const float cx = ui->window.left + ((toolbar.left + toolbar.right) / 2.0f - ui->frame.left) * ui->scale;
+        const float cy = ui->window.top + ((toolbar.top + toolbar.bottom) / 2.0f - ui->frame.top) * ui->scale;
+        CHECK(Inside(ui->window, cx, cy));
+        float fx = 0.0f;
+        float fy = 0.0f;
+        platform::present::WindowToFrame(cx, cy, &fx, &fy);
+        CHECK(Inside(toolbar, fx, fy));
+        // The world above it at 1x.
+        platform::present::WindowToFrame(100.0f, 100.0f, &fx, &fy);
+        CHECK(fx == 100.0f);
+        CHECK(fy == 100.0f);
+    };
+    Check(1920, 1080);
+
+    // The user resizes the window: WM_SIZE, and the regions follow.
+    SDL_Window* sdl = nullptr;
+    {
+        int count = 0;
+        SDL_Window** windows = SDL_GetWindows(&count);
+        sdl = count > 0 ? windows[count - 1] : nullptr;
+        SDL_free(windows);
+    }
+    REQUIRE(sdl != nullptr);
+    REQUIRE(SDL_SetWindowSize(sdl, 2400, 1350));
+    SDL_SyncWindow(sdl);
+    platform::window::PumpEvents();
+    MSG m;
+    bool sized = false;
+    while (PeekMessageA(&m, NULL, 0, 0, PM_REMOVE) && m.message != WM_QUIT) {
+        sized = sized || m.message == WM_SIZE;
+    }
+    CHECK(sized);
+    Check(2400, 1350);
+
+    // Back to equal scales: no regions, the presenter's own path.
+    platform::window::SetRegionSource(nullptr);
+    DestroyWindow(hwnd);
+    DrainMessages();
+    REQUIRE(platform::window::InitScreen(1024, 768, 1, 1));
+    CHECK(platform::present::Regions().empty());
 }

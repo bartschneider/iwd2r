@@ -511,6 +511,44 @@ class ScenarioParseTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             r(1920, 1080, 2, (1920, 1080))
 
+    def test_world_scale_geometry(self):
+        r = realinput.resolve_screen
+        # World Scale absent: as ever.
+        g = r(2560, 1440, 2, (2560, 1440))
+        self.assertEqual((g['scale'], g['ui_scale'], g['world_scale']),
+                         (2, 2, 2))
+        # Scale 2, World Scale 1 at 1920x1080: the engine sees the output.
+        g = r(1920, 1080, 2, (1920, 1080), '1')
+        self.assertEqual((g['width'], g['height'], g['scale'],
+                          g['ui_scale'], g['output_width']),
+                         (1920, 1080, 1, 2, 1920))
+        self.assertEqual(r(2560, 1440, 'auto', (2560, 1440),
+                           'auto')['world_scale'], 1)
+        self.assertEqual(r(1920, 1080, 1, (1920, 1080), 'auto')['scale'], 1)
+        self.assertEqual(r(3840, 2160, 2, (3840, 2160), '')['scale'], 2)
+        with self.assertRaises(ValueError):
+            r(1920, 1080, 1, (1920, 1080), '2')
+        with self.assertRaises(ValueError):
+            r(1920, 1080, 2, (1920, 1080), '5')
+        # The full-UI region: 800x600 centred at (560, 240), at 2x centred
+        # in the window, rows cropped to the 540 that fit (270..809).
+        click = {'op': 'click', 'x': 645, 'y': 410, 'ui': True}
+        self.assertEqual(realinput.window_point(click, g),
+                         (160 + 645 * 2, (240 + 410 - 270) * 2))
+        self.assertEqual(realinput.window_point(
+            dict(click, x=0, y=30), g), (160, 0))
+        with self.assertRaises(ValueError):
+            realinput.window_point(dict(click, y=10), g)
+        # Screen points are world points.
+        self.assertEqual(realinput.window_point(
+            dict(click, ui=False), g), (645, 410))
+        # play.py takes Scale and World Scale from --set.
+        g = play.vm_geometry(1920, 1, ['Program Options/Scale=2',
+                                       'Program Options/World Scale=1'])
+        self.assertEqual((g['ui_scale'], g['world_scale'], g['width']),
+                         (2, 1, 1920))
+        self.assertEqual(play.vm_geometry(2560, 2, [])['ui_scale'], 2)
+
     def test_describe_round_trips(self):
         text = ('wait 5\nclick 1 2\norigin screen\nmove 3 4\nkey TAB\n'
                 'type ab\nshot x\nquit\n')

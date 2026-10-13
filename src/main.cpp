@@ -33,8 +33,9 @@ int iwd2r_main(int argc, char** argv)
     // Ruling R27: the window's client area is the engine's screen, so
     // GetSystemMetrics(SM_CXSCREEN) must report the game resolution before
     // CBaldurChitin's constructor reads it. The window is that screen times
-    // the scale.
-    if (!platform::window::InitScreen(screen.width, screen.height, screen.scale)) {
+    // the scale (World Scale, which defaults to Scale); the UI panels are
+    // shown at Scale (screen.uiScale).
+    if (!platform::window::InitScreen(screen.width, screen.height, screen.scale, screen.uiScale)) {
         platform::ReportFatal("SDL video could not start.", "iwd2r");
         return 4;
     }
@@ -60,6 +61,11 @@ int iwd2r_main(int argc, char** argv)
     if (baldurChitin.field_1932 != 0) {
         return 0;
     }
+
+    // The constructor applied the layout; the presenter's regions follow
+    // the screen the engine shows from here (only while World Scale differs
+    // from Scale).
+    platform::window::SetRegionSource(iwd2r::CurrentRegions);
 
     baldurChitin.Init(NULL);
     int rc = baldurChitin.WinMain(NULL, NULL, cmdLine.data(), SW_SHOW);
