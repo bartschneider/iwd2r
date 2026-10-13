@@ -308,8 +308,6 @@ TEST_CASE("a CRE's equipped item survives Unmarshal and Marshal", "[cre][data]")
     if (env == nullptr || *env == '\0') {
         SKIP("[iwd2r-skip] IWD2_DATA unset");
     }
-    InstallIniBackup backup(env);
-
     std::string error;
     REQUIRE(StartEngine(error));
     INFO(error);
