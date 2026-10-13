@@ -19,19 +19,6 @@ Engine sites where a pointer is stored in, or read back from, a 32-bit integer a
 | `src/CVidPalette.cpp:565` | `m_pPalette` as the palette base `nBase` | Palette-cache key |
 | `src/CVidMode.cpp:1087` | `lpSurface` low bits in a `UTIL_ASSERT` | Parity assert; only bit 0 is tested, so truncation is exact |
 | `src/CResFile.cpp:113` | `field_20 + 2` returned as a `DWORD` | Unreachable |
-| `src/CGameSprite.cpp:6425` | `creatureData` in packed `m_creatureOffset` | Packed marshalling field; live crash once the area-save consumer exists |
-| `src/CGameSprite.cpp:6509` | `pCreature` in `CSavedGamePartyCreature::m_creatureOffset` | Peer-request path: written here, read back as a pointer at `CMessage.cpp:2148` |
-| `src/CMessage.cpp:2148` | `m_creatureOffset` read back as `BYTE*` | Peer-request path: dereferences the truncated pointer from `CGameSprite.cpp:6509` |
-| `src/CInfGame.cpp:1934` | party `m_creatureOffset` read back as `BYTE*` (CInfGame::Marshal) | Consumer of `CGameSprite.cpp:6509`; resolves an `iwd2r::UnmarshalPtr` handle (compat/marshal_ptr.h); an unknown handle gives NULL and the bytes stay zero |
-| `src/CInfGame.cpp:1973` | global creature `m_creatureOffset` read back as `BYTE*` (CInfGame::Marshal) | Consumer, as above |
-| `src/CGameArea.cpp:2219` | creature `m_creatureOffset` read back as `BYTE*` (CGameArea::Marshal) | Consumer of `CGameSprite.cpp:6425`; `UnmarshalPtr` |
-| `src/CGameArea.cpp:2261` | container `m_pickPointStart` read back as `CAreaPoint*` | Consumer of `CGameContainer.cpp:777`; `UnmarshalPtr` |
-| `src/CGameArea.cpp:2280` | door `m_openSelectionPointStart` read back | Consumer of `CGameDoor.cpp:710`; `UnmarshalPtr` |
-| `src/CGameArea.cpp:2291` | door `m_closedSelectionPointStart` read back | Consumer of `CGameDoor.cpp:693`; `UnmarshalPtr` |
-| `src/CGameArea.cpp:2302` | door `m_openSearchSquaresStart` read back | Consumer of `CGameDoor.cpp:676`; `UnmarshalPtr` |
-| `src/CGameArea.cpp:2313` | door `m_closedSearchSquaresStart` read back | Consumer of `CGameDoor.cpp:659`; `UnmarshalPtr` |
-| `src/CGameArea.cpp:2331` | trigger `m_pickPointStart` read back | Consumer for CGameTrigger's marshal (0x4CFF70, not in the tree yet; dead until it lands); `UnmarshalPtr` |
-| `src/CGameArea.cpp:2401` | container `m_startingItem` read back as `CCreatureFileItem*` | Consumer of `CGameContainer.cpp:801`; `UnmarshalPtr` |
 | `src/CVidImage.cpp:79` | `pImage` added to `nAUCounter` as the pulse phase | Animation phase seed: the add wraps in 32 bits as the original's does, but on 64-bit only the low 32 bits count and the signed `%` can go negative when bit 31 is set |
 
 ## Resolved by compat/marshal_ptr.h
@@ -47,7 +34,20 @@ Project 3 chose a side table for the packed marshalling fields: the producers st
 | `src/CGameDoor.cpp:693` (CGameDoor::Marshal) | `pPoints` in packed `m_closedSelectionPointStart` |
 | `src/CGameDoor.cpp:710` (CGameDoor::Marshal) | `pPoints` in packed `m_openSelectionPointStart` |
 | `src/CGameTrigger.cpp` (CGameTrigger::Marshal, 0x4CFF70) | `pPoints` in packed `m_pickPointStart` |
+| `src/CGameSprite.cpp:6427` (CGameSprite::Marshal, area creature) | `creatureData` in packed `m_creatureOffset` |
+| `src/CGameSprite.cpp:6701` (CGameSprite::Marshal 0x70BEE0, party creature) | `pCreature` in `CSavedGamePartyCreature::m_creatureOffset` |
 
-`src/CGameSprite.cpp:6425` (`creatureData` in `m_creatureOffset`) stays in the table above until its owner converts it; the sprite-extras stream has, pending merge.
+Consumers that resolve the handles with `iwd2r::UnmarshalPtr` (a handle the table does not know gives NULL, and the block stays zero):
+
+| Site | What is read back |
+|---|---|
+| `src/CInfGame.cpp:1941` (CInfGame::Marshal) | party `m_creatureOffset` as `BYTE*` |
+| `src/CInfGame.cpp:1980` (CInfGame::Marshal) | global creature `m_creatureOffset` as `BYTE*` |
+| `src/CMessage.cpp:2151` (CBaldurMessage::DemandCharacterSlotReply) | party `m_creatureOffset` as `BYTE*` |
+| `src/CGameArea.cpp:2219` (CGameArea::Marshal) | creature `m_creatureOffset` as `BYTE*` |
+| `src/CGameArea.cpp:2261` (CGameArea::Marshal) | container `m_pickPointStart` |
+| `src/CGameArea.cpp:2280`, `:2291`, `:2302`, `:2313` (CGameArea::Marshal) | the four door point starts |
+| `src/CGameArea.cpp:2331` (CGameArea::Marshal) | trigger `m_pickPointStart` |
+| `src/CGameArea.cpp:2401` (CGameArea::Marshal) | container `m_startingItem` |
 
 The palette keys still need a 64-bit-safe hash.

@@ -6695,8 +6695,10 @@ void CGameSprite::Marshal(CSavedGamePartyCreature& partyCreature, BOOLEAN bNetwo
     WORD facing;
     Marshal(&pCreature, &nCreatureSize, &facing, TRUE, TRUE);
 
-    // FIXME: Unsafe x64 conversion.
-    partyCreature.m_creatureOffset = static_cast<DWORD>(reinterpret_cast<DWORD_PTR>(pCreature));
+    // NOTE: A 32-bit handle (compat/marshal_ptr.h) where the original stores
+    // the pointer; CInfGame::Marshal and CBaldurMessage::
+    // DemandCharacterSlotReply resolve it.
+    partyCreature.m_creatureOffset = iwd2r::MarshalPtr(pCreature);
     partyCreature.m_creatureSize = nCreatureSize;
     partyCreature.m_creatureFacing = facing;
 
