@@ -966,7 +966,10 @@ int MessageBoxA(HWND hWnd, LPCSTR text, LPCSTR caption, UINT type)
     const int escapeId = buttons[count - 1].buttonID;
     // Headless, and always in the replay mode (as the recorder answers the
     // original's), the first button without showing anything.
-    if (Headless() || platform::replay::Active())
+    // Likewise under a script or a state dump: nobody is there to click.
+    const char* script = std::getenv("IWD2R_SCRIPT");
+    const char* dump = std::getenv("IWD2R_STATE_DUMP");
+    if (Headless() || platform::replay::Active() || (script != nullptr && *script != '\0') || (dump != nullptr && *dump != '\0'))
         return defaultId;
     buttons[0].flags |= SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT;
     buttons[count - 1].flags |= SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT;

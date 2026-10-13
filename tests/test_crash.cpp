@@ -3,6 +3,7 @@
 
 #include "install_ini_backup.h"
 #include "platform/crash.h"
+#include "platform/win32_api.h"
 
 #include <chrono>
 #include <cstdlib>
@@ -25,6 +26,22 @@ TEST_CASE("MessageBoxA stderr line is caption then text", "[crash]")
     CHECK(std::string(line) == "MessageBoxA: iwd2r: Assertion failed: x\n");
     platform::crash::FormatMessageBoxLine(nullptr, nullptr, line, sizeof(line));
     CHECK(std::string(line) == "MessageBoxA: : \n");
+}
+
+TEST_CASE("MessageBoxA under a script returns the default button without a window", "[crash]")
+{
+#ifdef _WIN32
+    _putenv_s("IWD2R_SCRIPT", "x.txt");
+#else
+    setenv("IWD2R_SCRIPT", "x.txt", 1);
+#endif
+    CHECK(MessageBoxA(NULL, "Are you sure?", "iwd2r", MB_YESNO) == IDYES);
+    CHECK(MessageBoxA(NULL, "Sure.", "iwd2r", MB_OK) == IDOK);
+#ifdef _WIN32
+    _putenv_s("IWD2R_SCRIPT", "");
+#else
+    unsetenv("IWD2R_SCRIPT");
+#endif
 }
 
 #ifndef _WIN32
