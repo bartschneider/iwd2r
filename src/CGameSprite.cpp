@@ -28,6 +28,7 @@
 #include "IcewindCGameEffects.h"
 #include "IcewindCVisualEffect.h"
 #include "IcewindMisc.h"
+#include "marshal_ptr.h"
 #include "msvc_atol.h"
 
 // 0x85BB38
@@ -6422,8 +6423,8 @@ void CGameSprite::Marshal(CAreaFileCreature** pCreature)
     LONG creatureSize;
     Marshal(&creatureData, &creatureSize, &((*pCreature)->m_facing), TRUE, TRUE);
 
-    // FIXME: Unsafe x64 conversion.
-    (*pCreature)->m_creatureOffset = static_cast<DWORD>(reinterpret_cast<DWORD_PTR>(creatureData));
+    // NOTE: The original stores the pointer; a 32-bit handle on every build.
+    (*pCreature)->m_creatureOffset = iwd2r::MarshalPtr(creatureData);
     (*pCreature)->m_creatureSize = creatureSize;
 
     (*pCreature)->m_numberTimesTalkedTo = m_nNumberOfTimesTalkedTo;
