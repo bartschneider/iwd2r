@@ -10,8 +10,10 @@
 #define IWD2R_SCREENLAYOUT_H_
 
 #include <string>
+#include <vector>
 
 #include "mfc.h"
+#include "platform/compose.h"
 
 class CVidMosaic;
 
@@ -82,6 +84,28 @@ struct ScreenLayout {
     // 0x6902D4): the original's 700 * 700 at its four resolutions, IEex's
     // (w / 2)^2 + (h / 2)^2 elsewhere.
     long dialogAutoScrollRange;
+
+    // UI scaling (Program Options/Scale and World Scale): window pixels per
+    // engine pixel for the UI panels and for the world. The engine's screen
+    // is the window divided by worldScale. With equal scales every field
+    // above is what it has always been and the presenter shows the whole
+    // frame at that scale.
+    int uiScale;
+    int worldScale;
+
+    // The world screen's UI panels as compose::Layout takes them: their 1x
+    // rectangles in frame coordinates, one full-width band along the bottom
+    // edge as deep as the toolbar (the panels themselves sit in the band's
+    // first uiWidth columns, see worldUiShiftX). WorldPanelRects gives the
+    // band for another viewport (dialog, death, hidden interface).
+    std::vector<RECT> uiPanelRects;
+    // A full-UI screen's 1x rectangle: the 800x600 UI centred in the frame,
+    // where every screen but the world screen shifts its panels.
+    RECT fullUiRect;
+    // The frame size the UI panels have at uiScale: the frame times
+    // worldScale / uiScale, the frame itself with equal scales.
+    int uiWidth;
+    int uiHeight;
 };
 
 // The original's dialog auto-scroll constant (cmp edx, 490000 at 0x484BA0).
@@ -91,8 +115,56 @@ const long kOriginalDialogAutoScrollRange = 490000;
 const int kMinScreenWidth = 800;
 const int kMinScreenHeight = 600;
 
-// width x height must be at least kMinScreenWidth x kMinScreenHeight.
+// width x height (the engine's internal size, the window / worldScale) must
+// be at least kMinScreenWidth x kMinScreenHeight.
+//
+// uiScale == worldScale gives exactly the layout ComputeScreenLayout has
+// always given (the original's table at its four sizes). Otherwise the
+// generalised layout at every size (the engine never doubles its own UI,
+// field_4A28/field_4A2C stay 0) with:
+// - guiExt chosen and the world screen's panels centred for the UI's size
+//   (uiWidth x uiHeight), so they lie within the columns the UI band shows;
+// - every world viewport's distance from the bottom (a bottom panel's
+//   depth) reserved at depth x max(uiScale, worldScale) / worldScale,
+//   rounded up, as compose::Layout reserves it, so the world never covers a
+//   scaled panel.
+ScreenLayout ComputeScreenLayout(int width, int height, int uiScale, int worldScale);
+
+// At the scales ReadScreenSize last resolved (1 and 1 before it runs), for
+// CBaldurChitin's constructor.
 ScreenLayout ComputeScreenLayout(int width, int height);
+
+// The frame rows a bottom panel depth pixels deep reserves:
+// ceil(depth x max(uiScale, worldScale) / worldScale), never less than depth.
+int ReservedDepth(int depth, int uiScale, int worldScale);
+
+// The world screen's UI panels (as uiPanelRects) for a world viewport whose
+// bottom edge is viewportBottom: a full-width bottom band whose reserved
+// depth is the viewport's distance from the frame bottom. Empty when the
+// viewport reaches the bottom (the interface hidden).
+std::vector<RECT> WorldPanelRects(const ScreenLayout& layout, int viewportBottom);
+
+// Which kind of screen the engine shows: the world screen, whose UI manager
+// is initialised with field_4A2C ("world UI drawn double size"; GUIW08 or
+// GUIW10, the panels along the bottom edge and the area behind them), or a
+// full-UI screen, every screen initialised with field_4A28 (start,
+// character generation, inventory, character record, options, map,
+// journal, store, load/save...) and the progress screen, which draw one
+// 800x600 UI centred in the border mosaics.
+enum ScreenKind {
+    SCREEN_FULL_UI = 0,
+    SCREEN_WORLD = 1,
+};
+
+// The composition regions (compose::Layout) of a screen of that kind in a
+// window of that size. viewportBottom is the world viewport's bottom edge
+// (SCREEN_WORLD only). One region showing the whole frame when the scales
+// are equal.
+std::vector<platform::compose::Region> RegionsFor(const ScreenLayout& layout, ScreenKind kind, int viewportBottom, SIZE window);
+
+// RegionsFor the current layout and the screen the engine shows now (the
+// active engine, the world screen's view size, the progress screen).
+std::vector<platform::compose::Region> CurrentRegions(SIZE window);
 
 // True for the four sizes the original's switch handles.
 bool IsOriginalResolution(int width, int height);
@@ -117,22 +189,30 @@ int ParseHeight(const char* value);
 // else kScaleInvalid.
 int ParseScale(const char* value);
 
+// World Scale for a resolved Scale (uiScale, 1-4): NULL or "" gives
+// uiScale, "auto" 1 when uiScale is 2 or more (else uiScale), 1-4 their
+// value, anything else kScaleInvalid.
+int ResolveWorldScale(const char* value, int uiScale);
+
 struct ScreenSize {
     bool ok;
     std::string error; // why, when !ok
 
     int outputWidth; // the window or fullscreen display: internal * scale
     int outputHeight;
-    int scale;
+    int scale; // window pixels per engine pixel: worldScale
     int width; // the engine's (internal) screen
     int height;
+    int uiScale; // Scale, resolved
+    int worldScale; // World Scale, resolved (scale)
 };
 
 // The decision main and CBaldurChitin's constructor share.
 //
 // iniWidth: ParseResolution's result. iniHeight: ParseHeight's result (0
 // when the key is absent). iniScale: ParseScale's result. desktopWidth and
-// desktopHeight: the primary display's size, 0 when unknown.
+// desktopHeight: the primary display's size, 0 when unknown. worldScale:
+// the World Scale text (ResolveWorldScale), NULL for the value of Scale.
 //
 // The requested (output) size is the width, or the desktop for
 // kResolutionDesktop, with Height when given, else the original 4:3 height
@@ -140,12 +220,15 @@ struct ScreenSize {
 // desktop is unknown). The internal size is the output divided by the
 // scale; auto picks the largest factor up to kMaxScale that keeps the
 // internal height at least 720 and the internal size at least 800x600 (1
-// when none does). An internal size below 800x600 is an error.
-ScreenSize ResolveScreenSize(int iniWidth, int iniHeight, int iniScale, int desktopWidth, int desktopHeight);
+// when none does). The internal size is the output divided by the world
+// scale (the UI scale unless World Scale says otherwise). An internal size
+// below 800x600 is an error.
+ScreenSize ResolveScreenSize(int iniWidth, int iniHeight, int iniScale, int desktopWidth, int desktopHeight,
+    const char* worldScale = NULL);
 
-// Reads Program Options/Resolution, Height and Scale from iniFile (through
-// the INI override like every other read) and the primary display's size,
-// and resolves them.
+// Reads Program Options/Resolution, Height, Scale and World Scale from
+// iniFile (through the INI override like every other read) and the primary
+// display's size, and resolves them.
 ScreenSize ReadScreenSize(const char* iniFile);
 
 // The Resolution value as the INI had it, for the engine to write back on
