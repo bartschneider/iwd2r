@@ -37,17 +37,48 @@ namespace {
     // memory: bytes B, G, R, X.
     const SDL_GPUTextureFormat kFormat = SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM;
 
-    // The fragment shaders' uniform block (std140: two vec4).
+    // The fragment shaders' uniform block (std140: vec4s). params is read
+    // by nis.frag only (x: sharpness).
     struct RegionUniforms {
         float frameRect[4]; // left, top, right, bottom in texels
         float dest[4]; // destination origin x, y; scale x, y
+        float params[4];
+    };
+
+    // fsr_rcas.frag's uniform block.
+    struct RcasUniforms {
+        float clipRect[4]; // left, top, right, bottom in output pixels
+        float params[4]; // x: RCAS's linear sharpness
+    };
+
+    // The pipelines, one per fragment shader.
+    enum Pipeline {
+        kNearest,
+        kSharp,
+        kSmooth,
+        kEasu,
+        kRcas,
+        kNis,
+        kPipelineCount,
+    };
+    const char* const kFragments[kPipelineCount] = { "nearest.frag", "sharp.frag", "smooth.frag", "fsr_easu.frag", "fsr_rcas.frag", "nis.frag" };
+
+    // One region's draw, recorded by DrawRegion and issued by EndFrame.
+    struct Draw {
+        Filter filter;
+        SDL_GPUViewport viewport;
+        SDL_Rect scissor;
+        SDL_Rect covered; // the pixels whose centres the viewport covers, inside the scissor
+        RegionUniforms u;
     };
 
     // The SDL3 GPU presenter: the frame is uploaded into a sampled texture,
-    // each region is drawn as a viewport-sized triangle with one of three
-    // filter pipelines into a render target the output's size, and the
-    // target is blitted to the swapchain. Without a window (or for a
-    // Readback frame) the target is the result.
+    // each region is drawn as a viewport-sized triangle with its filter's
+    // pipeline into a render target the output's size, and the target is
+    // blitted to the swapchain. Without a window (or for a Readback frame)
+    // the target is the result. FSR takes two passes: EASU draws its
+    // regions into an intermediate texture the output's size, then RCAS
+    // draws them from there into the target.
     class GpuBackend : public Backend {
     public:
         bool Init(SDL_Window* window) override
@@ -90,6 +121,7 @@ namespace {
                 cmd_ = nullptr;
             }
             SDL_WaitForGPUIdle(device_);
+            draws_.clear();
             for (SDL_GPUGraphicsPipeline*& p : pipelines_) {
                 if (p)
                     SDL_ReleaseGPUGraphicsPipeline(device_, p);
@@ -104,10 +136,17 @@ namespace {
                 SDL_ReleaseGPUTexture(device_, frame_);
             if (target_)
                 SDL_ReleaseGPUTexture(device_, target_);
+            if (easu_)
+                SDL_ReleaseGPUTexture(device_, easu_);
             if (upload_)
                 SDL_ReleaseGPUTransferBuffer(device_, upload_);
             frame_ = nullptr;
             target_ = nullptr;
+            easu_ = nullptr;
+            targetW_ = targetH_ = 0;
+            easuW_ = easuH_ = 0;
+            frameW_ = frameH_ = 0;
+            uploadSize_ = 0;
             upload_ = nullptr;
             if (window_)
                 SDL_ReleaseWindowFromGPUDevice(device_, window_);
@@ -122,6 +161,7 @@ namespace {
             pass_ = nullptr;
             swapchain_ = nullptr;
             uploaded_ = false;
+            draws_.clear();
             const testing::GpuFault fault = testing::TakeAcquireFault();
             if (fault == testing::GpuFault::Acquire || fault == testing::GpuFault::AcquireOnce)
                 return Lose("swapchain acquire failed (test hook)");
@@ -220,8 +260,6 @@ namespace {
         {
             if (!cmd_ || !uploaded_)
                 return;
-            if (!pass_ && !BeginPass())
-                return;
             const RECT& f = region.frame;
             const float fw = static_cast<float>(f.right - f.left);
             const float fh = static_cast<float>(f.bottom - f.top);
@@ -252,31 +290,36 @@ namespace {
             if (x1 <= x0 || y1 <= y0)
                 return;
 
-            const int index = filter == Filter::Sharp ? 1 : filter == Filter::Smooth ? 2
-                                                                                     : 0;
-            SDL_BindGPUGraphicsPipeline(pass_, pipelines_[index]);
-            const SDL_GPUViewport viewport = { dest.x, dest.y, dest.w, dest.h, 0.0f, 1.0f };
-            SDL_SetGPUViewport(pass_, &viewport);
-            const SDL_Rect scissor = { x0, y0, x1 - x0, y1 - y0 };
-            SDL_SetGPUScissor(pass_, &scissor);
-            SDL_GPUTextureSamplerBinding binding = {};
-            binding.texture = frame_;
-            binding.sampler = samplers_[index == 0 ? 0 : 1];
-            SDL_BindGPUFragmentSamplers(pass_, 0, &binding, 1);
-            const RegionUniforms u = {
+            Draw d = {};
+            d.filter = filter;
+            d.viewport = { dest.x, dest.y, dest.w, dest.h, 0.0f, 1.0f };
+            d.scissor = { x0, y0, x1 - x0, y1 - y0 };
+            // The pixels rasterised: centres inside the viewport, in the
+            // scissor. RCAS reads EASU's output only inside them.
+            const int cx0 = std::max(x0, static_cast<int>(std::ceil(dest.x - 0.5f)));
+            const int cy0 = std::max(y0, static_cast<int>(std::ceil(dest.y - 0.5f)));
+            const int cx1 = std::min(x1, static_cast<int>(std::ceil(dest.x + dest.w - 0.5f)));
+            const int cy1 = std::min(y1, static_cast<int>(std::ceil(dest.y + dest.h - 0.5f)));
+            d.covered = { cx0, cy0, std::max(cx1 - cx0, 1), std::max(cy1 - cy0, 1) };
+            d.u = {
                 { static_cast<float>(f.left), static_cast<float>(f.top), static_cast<float>(f.right), static_cast<float>(f.bottom) },
                 { dest.x, dest.y, dest.w / fw, dest.h / fh },
+                { sharpness, 0.0f, 0.0f, 0.0f },
             };
-            SDL_PushGPUFragmentUniformData(cmd_, 0, &u, sizeof(u));
-            SDL_DrawGPUPrimitives(pass_, 3, 1, 0, 0);
+            draws_.push_back(d);
         }
 
         void EndFrame() override
         {
             if (!cmd_)
                 return;
-            if (!pass_ && !BeginPass())
+            if (!EasuPass())
                 return;
+            if (!BeginPass(target_))
+                return;
+            for (const Draw& d : draws_)
+                Issue(d);
+            draws_.clear();
             SDL_EndGPURenderPass(pass_);
             pass_ = nullptr;
             if (swapchain_) {
@@ -416,10 +459,88 @@ namespace {
             return r->w > 0.0f && r->h > 0.0f;
         }
 
-        bool BeginPass()
+        // FSR's first pass: every FSR region's EASU into easu_.
+        bool EasuPass()
+        {
+            const bool any = std::any_of(draws_.begin(), draws_.end(), [](const Draw& d) { return d.filter == Filter::Fsr; });
+            if (!any)
+                return true;
+            if (!EnsureTexture(easu_, easuW_, easuH_, outW_, outH_, SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER)) {
+                Abandon();
+                Lose("no FSR intermediate texture");
+                return false;
+            }
+            if (!BeginPass(easu_))
+                return false;
+            for (const Draw& d : draws_) {
+                if (d.filter != Filter::Fsr)
+                    continue;
+                SDL_BindGPUGraphicsPipeline(pass_, pipelines_[kEasu]);
+                SDL_SetGPUViewport(pass_, &d.viewport);
+                SDL_SetGPUScissor(pass_, &d.scissor);
+                SDL_GPUTextureSamplerBinding binding = {};
+                binding.texture = frame_;
+                binding.sampler = samplers_[0];
+                SDL_BindGPUFragmentSamplers(pass_, 0, &binding, 1);
+                SDL_PushGPUFragmentUniformData(cmd_, 0, &d.u, sizeof(d.u));
+                SDL_DrawGPUPrimitives(pass_, 3, 1, 0, 0);
+            }
+            SDL_EndGPURenderPass(pass_);
+            pass_ = nullptr;
+            return true;
+        }
+
+        // One region into the target.
+        void Issue(const Draw& d)
+        {
+            int index = kNearest;
+            SDL_GPUTexture* texture = frame_;
+            SDL_GPUSampler* sampler = samplers_[1];
+            switch (d.filter) {
+            case Filter::Nearest:
+                sampler = samplers_[0];
+                break;
+            case Filter::Sharp:
+                index = kSharp;
+                break;
+            case Filter::Smooth:
+                index = kSmooth;
+                break;
+            case Filter::Fsr:
+                index = kRcas;
+                texture = easu_;
+                sampler = samplers_[0];
+                break;
+            case Filter::Nis:
+                index = kNis;
+                break;
+            }
+            SDL_BindGPUGraphicsPipeline(pass_, pipelines_[index]);
+            SDL_SetGPUViewport(pass_, &d.viewport);
+            SDL_SetGPUScissor(pass_, &d.scissor);
+            SDL_GPUTextureSamplerBinding binding = {};
+            binding.texture = texture;
+            binding.sampler = sampler;
+            SDL_BindGPUFragmentSamplers(pass_, 0, &binding, 1);
+            if (d.filter == Filter::Fsr) {
+                const SDL_Rect& c = d.covered;
+                const RcasUniforms r = {
+                    { static_cast<float>(c.x), static_cast<float>(c.y), static_cast<float>(c.x + c.w), static_cast<float>(c.y + c.h) },
+                    { d.u.params[0], 0.0f, 0.0f, 0.0f },
+                };
+                SDL_PushGPUFragmentUniformData(cmd_, 0, &r, sizeof(r));
+            } else {
+                SDL_PushGPUFragmentUniformData(cmd_, 0, &d.u, sizeof(d.u));
+                if (d.filter == Filter::Nis)
+                    SDL_PushGPUFragmentUniformData(cmd_, 1, NisCoefficients(), static_cast<Uint32>(NisCoefficientsSize()));
+            }
+            SDL_DrawGPUPrimitives(pass_, 3, 1, 0, 0);
+        }
+
+        bool BeginPass(SDL_GPUTexture* texture)
         {
             SDL_GPUColorTargetInfo target = {};
-            target.texture = target_;
+            target.texture = texture;
             target.clear_color = { 0.0f, 0.0f, 0.0f, 1.0f };
             target.load_op = SDL_GPU_LOADOP_CLEAR;
             target.store_op = SDL_GPU_STOREOP_STORE;
@@ -482,10 +603,10 @@ namespace {
                 error = std::string("the quad shader does not load: ") + SDL_GetError();
                 return false;
             }
-            const char* const frags[3] = { "nearest.frag", "sharp.frag", "smooth.frag" };
+            const char* const* frags = kFragments;
             bool ok = true;
-            for (int i = 0; i < 3 && ok; i++) {
-                SDL_GPUShader* frag = MakeShader(frags[i], SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
+            for (int i = 0; i < kPipelineCount && ok; i++) {
+                SDL_GPUShader* frag = MakeShader(frags[i], SDL_GPU_SHADERSTAGE_FRAGMENT, 1, i == kNis ? 2 : 1);
                 if (!frag) {
                     error = std::string(frags[i]) + " does not load: " + SDL_GetError();
                     ok = false;
@@ -534,7 +655,7 @@ namespace {
 
         SDL_GPUDevice* device_ = nullptr;
         SDL_Window* window_ = nullptr;
-        SDL_GPUGraphicsPipeline* pipelines_[3] = {}; // nearest, sharp, smooth
+        SDL_GPUGraphicsPipeline* pipelines_[kPipelineCount] = {};
         SDL_GPUSampler* samplers_[2] = {}; // nearest, linear
         SDL_GPUTexture* frame_ = nullptr;
         int frameW_ = 0;
@@ -544,6 +665,10 @@ namespace {
         SDL_GPUTexture* target_ = nullptr;
         int targetW_ = 0;
         int targetH_ = 0;
+        SDL_GPUTexture* easu_ = nullptr; // FSR: EASU's output, the target's size
+        int easuW_ = 0;
+        int easuH_ = 0;
+        std::vector<Draw> draws_;
         // The frame being recorded.
         SDL_GPUCommandBuffer* cmd_ = nullptr;
         SDL_GPUTexture* swapchain_ = nullptr;

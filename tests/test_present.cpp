@@ -5,6 +5,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -34,6 +35,7 @@ struct OffscreenVideo {
         present::SetBackend(BackendKind::Classic);
         present::SetRegions({});
         present::SetFilter(Filter::Nearest);
+        present::SetSharpness(0.5f);
         present::SetPrimary(nullptr, 0, 0);
         SDL_Quit();
         SDL_ResetHint(SDL_HINT_VIDEO_DRIVER);
@@ -57,6 +59,49 @@ std::vector<uint32_t> Upscaled(const std::vector<uint32_t>& px, int w, int h, in
         for (int x = 0; x < w * s; x++)
             out[static_cast<size_t>(y) * static_cast<size_t>(w * s) + static_cast<size_t>(x)] = px[static_cast<size_t>(y / s) * static_cast<size_t>(w) + static_cast<size_t>(x / s)];
     return out;
+}
+
+// A picture with edges at every angle and smooth areas: a gradient, a disc
+// and diagonal stripes, so the upscalers have edges to work on.
+std::vector<uint32_t> Picture(int w, int h)
+{
+    std::vector<uint32_t> px(static_cast<size_t>(w) * static_cast<size_t>(h));
+    for (int y = 0; y < h; y++) {
+        for (int x = 0; x < w; x++) {
+            uint32_t r = static_cast<uint32_t>(x * 255 / (w - 1));
+            uint32_t g = static_cast<uint32_t>(y * 255 / (h - 1));
+            uint32_t b = 64;
+            const int dx = x - w / 3;
+            const int dy = y - h / 2;
+            if (dx * dx + dy * dy < (h / 4) * (h / 4)) {
+                r = 240;
+                g = 220;
+                b = 40;
+            } else if (x > w / 2 && ((x + y) / 6) % 2 == 0) {
+                r = 20;
+                g = 20;
+                b = 200;
+            }
+            px[static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)] = (r << 16) | (g << 8) | b;
+        }
+    }
+    return px;
+}
+
+// The mean absolute difference per channel between two images of the same
+// size.
+double MeanDifference(const std::vector<uint32_t>& a, const std::vector<uint32_t>& b)
+{
+    REQUIRE(a.size() == b.size());
+    double sum = 0.0;
+    for (size_t i = 0; i < a.size(); i++) {
+        for (int shift = 0; shift < 24; shift += 8) {
+            const int ca = static_cast<int>((a[i] >> shift) & 0xFFu);
+            const int cb = static_cast<int>((b[i] >> shift) & 0xFFu);
+            sum += ca > cb ? ca - cb : cb - ca;
+        }
+    }
+    return sum / (3.0 * static_cast<double>(a.size()));
 }
 
 platform::compose::Region MakeRegion(RECT frame, LONG wx, LONG wy, LONG ww, LONG wh, int scale)
@@ -297,6 +342,94 @@ TEST_CASE("toggle_switches_and_reports", "[present]")
     SDL_DestroyWindow(window);
 }
 
+TEST_CASE("fsr_and_nis_pipelines_build", "[present]")
+{
+    OffscreenVideo video;
+    REQUIRE(video.ok);
+    std::string why;
+    auto b = OffscreenGpu(640, 480, why);
+    if (!b)
+        SKIP("no SDL GPU device: " << why);
+    const std::vector<uint32_t> px = Picture(320, 240);
+    const std::vector<platform::compose::Region> whole = { present::WholeFrameRegion(320, 240) };
+    int w = 0;
+    int h = 0;
+    const std::vector<uint32_t> nearest = Draw(*b, px, 320, 240, whole, Filter::Nearest, &w, &h);
+    REQUIRE(Mismatches(nearest, Upscaled(px, 320, 240, 2)) == 0);
+    std::vector<uint32_t> outs[2];
+    const Filter filters[2] = { Filter::Fsr, Filter::Nis };
+    for (int i = 0; i < 2; i++) {
+        INFO("filter " << (i == 0 ? "fsr" : "nis"));
+        outs[i] = Draw(*b, px, 320, 240, whole, filters[i], &w, &h);
+        CHECK(w == 640);
+        CHECK(h == 480);
+        // Not blank: as many distinct colours as a real upscale has.
+        std::vector<uint32_t> sorted = outs[i];
+        std::sort(sorted.begin(), sorted.end());
+        const size_t colours = static_cast<size_t>(std::unique(sorted.begin(), sorted.end()) - sorted.begin());
+        CHECK(colours > 1000);
+        // Close to the nearest upscale, but not equal to it.
+        const double diff = MeanDifference(outs[i], nearest);
+        CHECK(diff > 0.0);
+        CHECK(diff < 8.0);
+        CHECK(Mismatches(outs[i], nearest) > 0);
+    }
+    CHECK(Mismatches(outs[0], outs[1]) > 0);
+
+    // Two regions: each is filtered inside its own frame rectangle, and the
+    // slack around them stays black.
+    const std::vector<platform::compose::Region> split = {
+        MakeRegion({ 0, 0, 160, 240 }, 0, 0, 320, 480, 2),
+        MakeRegion({ 160, 0, 320, 240 }, 322, 0, 318, 480, 2),
+    };
+    for (Filter f : filters) {
+        const std::vector<uint32_t> out = Draw(*b, px, 320, 240, split, f, &w, &h);
+        CHECK(out[static_cast<size_t>(100) * 640 + 320] == 0);
+        CHECK(out[static_cast<size_t>(100) * 640 + 321] == 0);
+        CHECK(out[static_cast<size_t>(100) * 640 + 100] != 0);
+        CHECK(out[static_cast<size_t>(100) * 640 + 400] != 0);
+    }
+
+    // The three plain filters are unchanged by the FSR pass in the same
+    // backend: nearest still matches the upscale.
+    CHECK(Mismatches(Draw(*b, px, 320, 240, whole, Filter::Nearest, &w, &h), nearest) == 0);
+    b->Shutdown();
+}
+
+TEST_CASE("sharpness_changes_output", "[present]")
+{
+    OffscreenVideo video;
+    REQUIRE(video.ok);
+    std::string why;
+    auto b = OffscreenGpu(640, 480, why);
+    if (!b)
+        SKIP("no SDL GPU device: " << why);
+    const std::vector<uint32_t> px = Picture(320, 240);
+    const std::vector<platform::compose::Region> whole = { present::WholeFrameRegion(320, 240) };
+    int w = 0;
+    int h = 0;
+    for (Filter f : { Filter::Fsr, Filter::Nis }) {
+        INFO("filter " << (f == Filter::Fsr ? "fsr" : "nis"));
+        b->sharpness = 0.0f;
+        const std::vector<uint32_t> soft = Draw(*b, px, 320, 240, whole, f, &w, &h);
+        b->sharpness = 1.0f;
+        const std::vector<uint32_t> sharp = Draw(*b, px, 320, 240, whole, f, &w, &h);
+        b->sharpness = 0.0f;
+        const std::vector<uint32_t> again = Draw(*b, px, 320, 240, whole, f, &w, &h);
+        CHECK(Mismatches(soft, sharp) > 0);
+        CHECK(Mismatches(soft, again) == 0);
+    }
+    b->Shutdown();
+
+    // The front clamps and hands the value to the backend.
+    present::SetSharpness(2.0f);
+    CHECK(present::CurrentSharpness() == 1.0f);
+    present::SetSharpness(-1.0f);
+    CHECK(present::CurrentSharpness() == 0.0f);
+    present::SetSharpness(0.5f);
+    CHECK(present::CurrentSharpness() == 0.5f);
+}
+
 TEST_CASE("presenter settings parse", "[present]")
 {
     BackendKind kind = BackendKind::Classic;
@@ -314,7 +447,26 @@ TEST_CASE("presenter settings parse", "[present]")
     CHECK(filter == Filter::Smooth);
     CHECK(present::ParseFilter("nearest", &filter));
     CHECK(filter == Filter::Nearest);
+    CHECK(present::ParseFilter(" FSR ", &filter));
+    CHECK(filter == Filter::Fsr);
+    CHECK(present::ParseFilter("nis", &filter));
+    CHECK(filter == Filter::Nis);
     CHECK_FALSE(present::ParseFilter("", &filter));
+    CHECK_FALSE(present::ParseFilter("dlss", &filter));
+    float sharpness = -1.0f;
+    CHECK(present::ParseSharpness("0.25", &sharpness));
+    CHECK(sharpness == 0.25f);
+    CHECK(present::ParseSharpness(" 1 ", &sharpness));
+    CHECK(sharpness == 1.0f);
+    CHECK(present::ParseSharpness("0", &sharpness));
+    CHECK(sharpness == 0.0f);
+    CHECK_FALSE(present::ParseSharpness("1.5", &sharpness));
+    CHECK_FALSE(present::ParseSharpness("-0.1", &sharpness));
+    CHECK_FALSE(present::ParseSharpness("sharp", &sharpness));
+    CHECK_FALSE(present::ParseSharpness("0.5x", &sharpness));
+    CHECK_FALSE(present::ParseSharpness("nan", &sharpness));
+    CHECK_FALSE(present::ParseSharpness("", &sharpness));
+    CHECK(sharpness == 0.0f);
     CHECK(std::string(present::BackendKindName(BackendKind::Gpu)) == "gpu");
 }
 

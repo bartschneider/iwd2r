@@ -24,18 +24,23 @@ enum class BackendKind {
 
 // How the gpu backend scales the frame (Program Options/Scale Filter):
 // nearest, sharp (nearest at texel centres, linear within one output pixel
-// of each texel edge) or smooth (bilinear). The classic backend is always
-// nearest.
+// of each texel edge), smooth (bilinear), fsr (AMD FidelityFX Super
+// Resolution 1.0: EASU upscaling, then RCAS sharpening) or nis (NVIDIA
+// Image Scaling). The classic backend is always nearest.
 enum class Filter {
     Nearest,
     Sharp,
     Smooth,
+    Fsr,
+    Nis,
 };
 
-// "auto", "gpu", "classic" and "nearest", "sharp", "smooth", any case,
-// surrounding blanks ignored; false for anything else.
+// "auto", "gpu", "classic" and "nearest", "sharp", "smooth", "fsr", "nis",
+// any case, surrounding blanks ignored; false for anything else.
 bool ParseBackendKind(const char* text, BackendKind* kind);
 bool ParseFilter(const char* text, Filter* filter);
+// A Sharpness value: a number from 0 to 1; false for anything else.
+bool ParseSharpness(const char* text, float* sharpness);
 const char* BackendKindName(BackendKind kind);
 
 // Chooses the backend. With a target window it switches now: a gpu (or
@@ -49,6 +54,11 @@ BackendKind ActiveBackend();
 BackendKind ToggleBackend();
 void SetFilter(Filter filter);
 Filter CurrentFilter();
+// How much the fsr and nis filters sharpen (Program Options/Sharpness),
+// 0 (none) to 1 (most), clamped; 0.5 until set. fsr: RCAS's linear amount
+// (0 off, 1 its maximum, 0.5 one stop below it); nis: the SDK's sharpness.
+void SetSharpness(float sharpness);
+float CurrentSharpness();
 
 // The window frames are presented to, or nullptr for none. Changing it
 // shuts the previous window's backend down (the gpu device releases the

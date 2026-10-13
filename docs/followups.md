@@ -65,8 +65,6 @@ These are in `oracle/replay/` and `tools/`.
 
 ## Project 4 follow-ups
 
-- Spatial real-time upscaling filters for the presenter: AMD FSR 1.0 (EASU + RCAS) and NVIDIA Image Scaling, both MIT, as `Scale Filter=fsr|nis` with a `Sharpness` key. Planned as project 4 Task 2b after the GPU presenter lands. DLSS and other temporal upscalers do not fit (no motion vectors, depth or jitter in a 2D sprite engine).
-
 ### Render API
 
 The guards in `src/render/api.h` leave these for the renderer that first draws the world through a backend.
