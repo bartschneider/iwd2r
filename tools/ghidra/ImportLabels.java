@@ -1,6 +1,8 @@
 // Applies function names from a labels file written by make_project.py.
 // Arguments: <labels.tsv> <summary.txt>. Each labels line is
-// "ADDR<TAB>SOURCE<TAB>NAME" with ADDR in hex and SOURCE "ours" or "ieex".
+// "ADDR<TAB>SOURCE<TAB>NAME" with ADDR in hex and SOURCE "ours", "extra"
+// (tools/ghidra/extra_labels.txt) or "ieex". Ours and extra names are applied
+// as USER_DEFINED, IEex's as IMPORTED.
 // A function is created at ADDR if none exists; NAME ("A::B::f") becomes the
 // function's primary name inside namespace A::B. Safe to run before analysis
 // (as a pre-script), after it, or again on an existing project.
@@ -35,6 +37,7 @@ public class ImportLabels extends GhidraScript {
             throw new IllegalArgumentException("usage: ImportLabels.java <labels.tsv> <summary.txt>");
         }
         Tally ours = new Tally();
+        Tally extra = new Tally();
         Tally ieex = new Tally();
         List<String> failures = new ArrayList<>();
         renamed.clear();
@@ -48,8 +51,8 @@ public class ImportLabels extends GhidraScript {
                 if (f.length != 3) {
                     continue;
                 }
-                Tally t = f[1].equals("ours") ? ours : ieex;
-                SourceType source = f[1].equals("ours") ? SourceType.USER_DEFINED : SourceType.IMPORTED;
+                Tally t = f[1].equals("ours") ? ours : f[1].equals("extra") ? extra : ieex;
+                SourceType source = t == ieex ? SourceType.IMPORTED : SourceType.USER_DEFINED;
                 String error = apply(Long.parseLong(f[0], 16), f[2], source, t);
                 if (error != null) {
                     t.failed++;
@@ -59,6 +62,7 @@ public class ImportLabels extends GhidraScript {
         }
         try (PrintWriter out = new PrintWriter(args[1])) {
             report(out, "ours", ours);
+            report(out, "extra", extra);
             report(out, "ieex", ieex);
             for (String r : renamed) {
                 out.println("renamed\t" + r);
@@ -68,6 +72,7 @@ public class ImportLabels extends GhidraScript {
             }
         }
         println("ours: " + summary(ours));
+        println("extra: " + summary(extra));
         println("ieex: " + summary(ieex));
     }
 

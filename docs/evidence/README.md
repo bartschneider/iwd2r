@@ -55,3 +55,49 @@ definition, the rule `tools/ghidra/labels.py` uses for the Ghidra labels) to
 the first following line that starts with `}`. A committed change to any line
 of a span touches the function. Changes between functions, in headers, and
 deleted functions are ignored; `src/` files new in the branch count in full.
+
+## Pending cases
+
+A function ours does not implement yet, or one whose original needs engine
+state no fixture can honestly provide, gets a pending case instead of a
+comparison:
+
+    ORACLE_CASE_PENDING("pending/roll_hit_points", RollHitPoints,
+        "ours not implemented (...); original-only determinism check");
+    ORACLE_CASE_PENDING("pending/hit", nullptr,
+        "ours not implemented (...); needs engine state (...)");
+
+Its evidence file sets `oracle_case` to the pending case, and the Notes say
+why it is pending.
+
+- **With a body.** Only when the original runs on a fixture the case builds:
+  a zeroed block of the original object's size with just the members the
+  function reads filled in (no faked engine globals, sprites, items or effect
+  lists). The body seeds the original's `srand`, calls the function, seeds
+  again with the same value and calls it with the same inputs, and requires
+  the same result and the same following `rand` value. It must run at least
+  one input: a body that runs none fails as `PENDING (ran 0 inputs)`.
+- **Without a body** (`nullptr`): the case is listed, not run, and its
+  reason names the state the function needs.
+
+`python3 tools/oracle.py run` lists both under `pending` and does not fail
+for them. Functions found for a pending case that `src/` does not define yet
+are named in `tools/ghidra/extra_labels.txt` (one `0xADDR NAME` line, with a
+comment saying how the function was identified), which
+`tools/ghidra/make_project.py` applies below our `src/` names and above
+IEex's.
+
+When ours is written, the pending case becomes a comparison case in the case
+file of its class, and `oracle_case` follows it. Once `src/` defines the
+function, its `extra_labels.txt` line can go.
+
+`oracle/cases/pending.cpp` holds project 3's combat functions:
+
+| Function | Case | Body |
+|---|---|---|
+| 0x4A42F0 CGameEffect::CheckSave | pending/check_save | none: g_pBaldurChitin's game, sprite vtables, feats, the object array |
+| 0x72DE60 CGameSprite::ProcessEffectList (rolls the save d20s) | pending/save_rolls | none: the whole effect list |
+| 0x73B760 CGameSprite::Hit (attack d20 against AC) | pending/hit | none: equipped CItems, sprites, the game's options |
+| 0x547020 CRuleTables::GetIterativeAttackBonus | pending/iterative_attack_bonus | determinism check |
+| 0x73D560 CGameSprite::Damage (weapon damage dice) | pending/damage | none: equipped CItems, the target's animation, the message handler |
+| 0x542A90 CRuleTables::RollHitPoints | pending/roll_hit_points | determinism check |

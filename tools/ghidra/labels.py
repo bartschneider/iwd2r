@@ -1,8 +1,10 @@
 """Function labels for the vanilla iwd2.exe Ghidra project.
 
 ours(src_dir) reads the `// 0xADDR` comments above function definitions in
-src/**/*.cpp, ieex(db_path) reads IEex's function_names.db, and merge()
-combines them with our names taking precedence. definitions(lines) gives the
+src/**/*.cpp, extra(path) reads tools/ghidra/extra_labels.txt (functions we
+identified but have not ported yet), ieex(db_path) reads IEex's
+function_names.db, and merge() combines them: our names first, then the extra
+names, then IEex's. definitions(lines) gives the
 line positions of the labelled definitions; tools/check_evidence.py uses it
 so both tools agree on what a labelled function is.
 """
@@ -84,11 +86,31 @@ def ieex(db_path):
     return result
 
 
-def merge(ours, ieex):
-    """One name per address, sorted by address. Our names win; an IEex name
-    equal to one of our names elsewhere gets the prefix ieex_."""
+def extra(path):
+    """(address, name) from `0xADDR NAME` lines; blank lines and lines
+    starting with # (the evidence for each name) are skipped."""
+    result = []
+    with open(path, encoding='utf-8') as f:
+        for number, line in enumerate(f, 1):
+            text = line.strip()
+            if not text or text.startswith('#'):
+                continue
+            parts = text.split()
+            if len(parts) != 2 or not re.fullmatch(r'0x[0-9A-Fa-f]+', parts[0]):
+                raise ValueError('%s:%d: expected "0xADDR NAME": %r'
+                                 % (path, number, text))
+            result.append((int(parts[0], 16), parts[1]))
+    return result
+
+
+def merge(ours, ieex, extra=()):
+    """One name per address, sorted by address. Our names win, then the extra
+    names; an IEex name equal to one of those names elsewhere gets the prefix
+    ieex_."""
     merged = {}
     for addr, name in ours:
+        merged.setdefault(addr, name)
+    for addr, name in extra:
         merged.setdefault(addr, name)
     taken = set(merged.values())
     for addr, name in ieex:

@@ -1,11 +1,13 @@
 """Create (or refresh) the Ghidra project for the vanilla iwd2.exe.
 
-    python3 tools/ghidra/make_project.py [--src DIR] [--ieex DB] [--exe EXE]
+    python3 tools/ghidra/make_project.py [--src DIR] [--extra FILE] [--ieex DB]
+                                         [--exe EXE]
 
 The project lives at ~/.local/share/iwd2r/ghidra-projects/iwd2/ ($IWD2R_HOME
 overrides ~/.local/share/iwd2r). On the first run the vanilla exe is copied to
 $IWD2R_HOME/vanilla/iwd2.exe (MD5 checked; the install is only read), imported,
-labelled by ImportLabels.java as a pre-script, fully analysed, and labelled
+labelled by ImportLabels.java as a pre-script (names from src/, then
+tools/ghidra/extra_labels.txt, then IEex's), fully analysed, and labelled
 again as a post-script. Later runs re-apply the labels to the existing project
 without re-importing or re-analysing it.
 """
@@ -34,6 +36,7 @@ PROJECT_NAME = 'iwd2'
 PROGRAM = 'iwd2.exe'
 VANILLA = os.path.join(HOME, 'vanilla', PROGRAM)
 INSTALL_EXE = '/mnt/c/Games/Icewind Dale II/iwd2ee/backup/1000/iwd2.exe'
+EXTRA_LABELS = os.path.join(HERE, 'extra_labels.txt')
 IEEX_DB = '/mnt/c/Games/Icewind Dale II/function_names.db'
 VANILLA_MD5 = '200f038bec3ed50a964d68b3f0f1f0e7'
 MAXMEM = '8G'
@@ -82,25 +85,32 @@ def headless(args, log):
         return subprocess.run(cmd, env=env, capture_output=True, text=True)
 
 
-def write_labels(path, src, db):
+def write_labels(path, src, db, extra_path=EXTRA_LABELS):
+    """labels.tsv: ADDR, source (ours, extra or ieex) and name per line."""
     ours = labels.ours(src)
+    extra = labels.extra(extra_path)
     ieex = labels.ieex(db)
-    merged = labels.merge(ours, ieex)
+    merged = labels.merge(ours, ieex, extra)
     ours_addrs = {a for a, _ in ours}
+    extra_addrs = {a for a, _ in extra} - ours_addrs
     with open(path, 'w') as f:
         for addr, name in merged:
-            source = 'ours' if addr in ours_addrs else 'ieex'
+            source = ('ours' if addr in ours_addrs else
+                      'extra' if addr in extra_addrs else 'ieex')
             f.write(f'{addr:X}\t{source}\t{name}\n')
+    named = ours_addrs | extra_addrs
     prefixed = sum(1 for a, n in merged
-                   if a not in ours_addrs and n.startswith('ieex_'))
+                   if a not in named and n.startswith('ieex_'))
     return {'ours_lines': len(ours), 'ours': len(ours_addrs),
+            'extra_lines': len(extra), 'extra': len(extra_addrs),
             'ieex_lines': len(ieex),
-            'ieex': len(merged) - len(ours_addrs), 'prefixed': prefixed}
+            'ieex': len(merged) - len(named), 'prefixed': prefixed}
 
 
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument('--src', default=os.path.join(ROOT, 'src'))
+    p.add_argument('--extra', default=EXTRA_LABELS)
     p.add_argument('--ieex', default=IEEX_DB)
     p.add_argument('--exe', default=INSTALL_EXE)
     a = p.parse_args(argv)
@@ -111,9 +121,10 @@ def main(argv=None):
     os.makedirs(PROJECT_DIR, exist_ok=True)
     tsv = os.path.join(PROJECT_DIR, 'labels.tsv')
     summary = os.path.join(PROJECT_DIR, 'labels-summary.txt')
-    counts = write_labels(tsv, a.src, a.ieex)
+    counts = write_labels(tsv, a.src, a.ieex, a.extra)
     print(f"labels: ours {counts['ours']} addresses "
           f"({counts['ours_lines']} definitions), "
+          f"extra {counts['extra']} of {counts['extra_lines']}, "
           f"ieex {counts['ieex']} of {counts['ieex_lines']} named "
           f"({counts['prefixed']} prefixed ieex_)")
 

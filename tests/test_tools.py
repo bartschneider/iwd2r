@@ -820,6 +820,40 @@ class LabelsTest(unittest.TestCase):
                           '0x401090 CResWED_Construct\r\n')
         self.assertEqual(labels.ieex(path), [(0x401090, 'CResWED_Construct')])
 
+    def test_extra_reads_names_and_skips_comments(self):
+        path = self.write('extra_labels.txt',
+                          '# how 0x547020 was identified\n'
+                          '\n'
+                          '0x547020 CRuleTables::GetIterativeAttackBonus\n'
+                          '  0x4a42f0   CGameEffect::CheckSave  \n')
+        self.assertEqual(labels.extra(path),
+                         [(0x547020, 'CRuleTables::GetIterativeAttackBonus'),
+                          (0x4A42F0, 'CGameEffect::CheckSave')])
+        for bad in ('547020 NoPrefix\n', '0x547020\n', '0x1 a b\n'):
+            path = self.write('extra_labels.txt', bad)
+            with self.assertRaisesRegex(ValueError, 'extra_labels.txt:1'):
+                labels.extra(path)
+
+    def test_merge_ranks_ours_then_extra_then_ieex(self):
+        ours = [(0x5845D0, 'IcewindMisc::Roll')]
+        extra = [(0x5845D0, 'Extra::Loses'), (0x4A42F0, 'CGameEffect::CheckSave'),
+                 (0x547020, 'Bar')]
+        ieex = [(0x4A42F0, 'CGameEffect_CheckSave'), (0x403000, 'Bar'),
+                (0x404000, 'Baz')]
+        self.assertEqual(labels.merge(ours, ieex, extra),
+                         [(0x403000, 'ieex_Bar'), (0x404000, 'Baz'),
+                          (0x4A42F0, 'CGameEffect::CheckSave'),
+                          (0x547020, 'Bar'),
+                          (0x5845D0, 'IcewindMisc::Roll')])
+
+    def test_committed_extra_labels_parse_and_are_not_ours(self):
+        path = os.path.join(ROOT, 'tools', 'ghidra', 'extra_labels.txt')
+        extra = labels.extra(path)
+        self.assertTrue(extra)
+        ours = {a for a, _ in labels.ours(os.path.join(ROOT, 'src'))}
+        self.assertEqual([a for a, _ in extra if a in ours], [])
+        self.assertEqual(len({a for a, _ in extra}), len(extra))
+
     def test_merge_prefers_ours_and_prefixes_collisions(self):
         ours = [(0x5845D0, 'IcewindMisc::Roll'), (0x401000, 'Foo')]
         ieex = [(0x5845D0, 'IcewindMisc_Roll'), (0x402000, 'Foo'),

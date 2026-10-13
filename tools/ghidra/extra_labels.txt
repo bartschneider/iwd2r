@@ -1,0 +1,47 @@
+# Names for functions of the vanilla iwd2.exe that src/ does not define yet.
+# make_project.py applies them below our src/ names and above IEex's. One
+# "0xADDR NAME" per line; the comment above each line says how the function
+# was identified (objdump of the vanilla exe, the Ghidra decompilation, and
+# docs/evidence/<ADDR>.md).
+
+# IEex calls it CGameEffect_CheckSave. Its third to sixth arguments point to
+# the four save roll bytes CGameSprite::ProcessEffectList (0x72DE60) rolls
+# into the sprite at 0x70F6-0x70F9 (rand() % 20 + 1). It adds the save
+# bonus the effect's flags (+0x3C bits 4, 8, 0x10) select to the roll and
+# compares the sum with 10 + the effect's fields +0x14 and +0x40 (a natural
+# 20 always saves, a 1 never), then calls CGameSprite_DisplaySaveString
+# (0x765830). Evidence: 4A42F0.md.
+0x4A42F0 CGameEffect::CheckSave
+
+# IEex calls it CGameSprite_Hit. It rolls the attack d20 with
+# CUtil::UtilRandInt(20, luck) + 1 (0x73BA6D), adds the attack bonus
+# (CRuleTables::sub_546B60 and 0x547020) and compares it with the target's AC
+# (CGameSprite::GetAC 0x723CC0); a natural 20 hits, and a second d20 confirms
+# a critical. Its asserts name nAttackCount, curWeapon, curAttack and target.
+# Evidence: 73B760.md.
+0x73B760 CGameSprite::Hit
+
+# IEex calls it CGameSprite_Damage. It rolls the weapon's (and launcher's)
+# damage dice with CUtil::UtilRandInt(ability dice size, luck) + 1, once per
+# die (0x73D6DE, 0x73D745), adds the strength modifier
+# (CRuleTables::GetAbilityScoreModifier) and builds the damage effect.
+# Evidence: 73D560.md.
+0x73D560 CGameSprite::Damage
+
+# Unnamed (FUN_00547020). max(0, nBonus - nStep * nAttack): CGameSprite::Hit
+# calls it (0x73BB8A) with the base attack bonus and step CRuleTables::
+# sub_546B60 returned and the attack's index in the round (nAttackCount - 1);
+# CScreenCharacter::UpdateEquipmentInformation calls it for the record
+# screen's attack bonus list. ecx (a CRuleTables) is set by every caller but
+# not read. Evidence: 547020.md.
+0x547020 CRuleTables::GetIterativeAttackBonus
+
+# Unnamed (FUN_00542a90). Rolls hit points from (nSides, nRolls, nLevel, a4,
+# nModifier): at nLevel 1 or below nSides * nRolls; otherwise per roll three
+# draws of rand() % nSides, and when the third + 1 is below a4, a4, else
+# three more draws and the last + 1; nModifier is added only when nRolls is
+# 0. ecx is not read. Its only caller, 0x542B40, reads SIDES, ROLLS
+# and MODIFIER from a class hit point table (the CStrings at 0x8DEE58,
+# 0x8DF150 and 0x8DF094, built from "SIDES", "ROLLS" and "MODIFIER" at
+# 0x53A920-0x53A9A5) for each level. Evidence: 542A90.md.
+0x542A90 CRuleTables::RollHitPoints
