@@ -53,7 +53,7 @@ tools/check_evidence.py    the "done" rule as a check
 
 A 32-bit Windows executable built with the existing `windows-msvc-x86` preset, linked at base `0x10000000` with `/FIXED:NO /DYNAMICBASE`.
 
-1. **Reserve.** The first thing the process does (from a TLS callback, before the CRT and any DLL that might allocate) is `VirtualAlloc(0x400000, 0x621000, MEM_RESERVE)`. If the range is taken, the runner exits with a clear error.
+1. **Reserve.** Windows maps the code-page table `C_1252.NLS` at `0x400000` before any code of ours runs (TLS callbacks included), so the runner reserves the range from outside. It starts a copy of itself suspended with `--child` inside a kill-on-close job object, reserves `0x400000`-`0xA21000` there with `VirtualAllocEx(MEM_RESERVE)`, and resumes it. The child confirms the reservation is intact before mapping. If the range is taken, the runner exits with an error naming the module that holds it.
 2. **Map.** Copy each section from the file to its virtual address, zero-fill virtual sizes beyond raw sizes, and set page protections from the section characteristics.
 3. **Resolve imports.** Walk the import directory; `LoadLibraryA` each DLL and fill the IAT with `GetProcAddress` results (by name and by ordinal).
 4. **Patch the entry.** The CRT startup calls `WinMain` once. Its call site is located once with Ghidra and recorded in `oracle/loader/vanilla.json` together with the exe's MD5; the loader refuses any exe whose MD5 differs. The loader rewrites that `call` to target `OracleMain` (a `__stdcall` function with `WinMain`'s signature in the runner).
@@ -76,7 +76,7 @@ A case declares: the original function's address and signature (calling conventi
 
 ### 4.4 Random numbers
 
-- The original's `rand` state lives in its `.data`; the oracle seeds it through the original's own `srand` (address from Ghidra) and restores `.data` between cases.
+- The original's `rand` state is not in `.data`: VC6's multithreaded CRT keeps `_holdrand` per thread, at offset `0x14` of the thread's `_tiddata` (from `_getptd()`). The oracle seeds it through the original's own `srand` (address from Ghidra), and the per-case snapshot saves and restores the main thread's `_tiddata` fields along with `.data`.
 - Our engine on Linux currently calls glibc's `rand`, whose sequence differs from VC6's. That is a faithfulness bug: the same seed produces different dice on Linux. `compat/msvc_rand` provides VC6's LCG as `iwd2r_rand`/`iwd2r_srand`, with per-thread state as VC6's multithreaded CRT keeps it, and `compat/mfc.h` maps `rand`/`srand` to them for engine code on every platform. A unit test pins the first values for seeds 0, 1 and 42 to VC6's known outputs, and an oracle case compares 100,000 consecutive values against the original's `rand`.
 
 ### 4.5 Vanilla data
@@ -105,7 +105,7 @@ A case declares: the original function's address and signature (calling conventi
 
 - **Data-free, in CI:** loader parsing against a small synthetic PE32 built by a Python script at test time; `msvc_rand` values; schema validation; `check_evidence.py` on fixture repositories.
 - **Local, needs the game:** the function suite, the RNG oracle case, replay record and compare. `tools/oracle.py` runs them; results in `runs/`.
-- **Self-test of the oracle:** a case that seeds the original's `rand`, draws 1,000 values, restores `.data`, and draws again, requiring identical sequences (proving isolation works); and a deliberately wrong case that must fail, so a silently passing oracle is detectable.
+- **Self-test of the oracle:** a case that seeds the original's `rand`, draws 1,000 values, restores `.data` and the thread's `_tiddata`, and draws again, requiring identical sequences (proving isolation works); and a deliberately wrong case that must fail, so a silently passing oracle is detectable.
 
 ## 6. Success criteria
 
@@ -124,7 +124,7 @@ A case declares: the original function's address and signature (calling conventi
 
 ## 8. Risks
 
-- **The `0x400000` range may already be in use** by something injected into every process (security software). Mitigation: reservation from a TLS callback; a clear error naming the culprit module if it fails.
+- **The `0x400000` range may already be in use** by something injected into every process (security software). Mitigation: the parent reserves the range in a suspended child before it runs; a clear error naming the culprit module if it fails.
 - **Static constructors with side effects** in the original could touch files or the registry during CRT initialisation. Mitigation: the oracle runs inside the vanilla data copy as working directory; any such effect is logged and reviewed once.
 - **Address map errors.** Our `/* 0xNNNN */` layout comments are hand-recovered and may be wrong in places; a wrong offset produces a false difference, not a false match, and the evidence workflow corrects the comment.
 - **WeiDU uninstall** might leave residue. Mitigation: the verification in 4.5, plus a hash list of the original GOG files if available from GOG's manifest.
