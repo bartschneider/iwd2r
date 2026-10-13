@@ -271,3 +271,5 @@ LAB_007aeb9b:
 ## Notes
 
 Ours adds one line at the top of the body, the render API dispatch guard (src/render/api.h): with a backend installed it calls Backend::DrawCell (the cell, its current frame, (x, y), its palette, dwFlags, nTransVal; clip rClip) and returns when the backend handled it; with none, the classic renderer, render::Active() is null, the guard falls through and the rest of the body is the decompiled one, unchanged. A handled call returns render::CellHandled(*this), the body's own tail: when the frame is fetched it releases the resource and clears m_pFrame, so the demand count is what the body would leave.
+
+Render task 5, fix round 1: the 32-bpp translucent call to sub_7D0950 passes the bytes it may write, CVidCell::SurfaceExtent(ddsd), the surface this body locked (its first row to the end of its last). Ours only: the original's helper writes past the frame on raw frames, and ours keeps those writes inside the locked surface (ruling P4-10; docs/evidence/7D0950.md).

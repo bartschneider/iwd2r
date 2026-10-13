@@ -7,10 +7,15 @@
 #include "CResWED.h"
 #include "CScreenWorld.h"
 #include "CTiledObject.h"
+#include "CUIControlLabel.h"
+#include "CUIManager.h"
+#include "CUIPanel.h"
 #include "CUtil.h"
 #include "CVidInf.h"
+#include "CVidPoly.h"
 #include "CVideo3d.h"
 #include "CVisibility.h"
+#include "render/api.h"
 
 // 0x851928
 const DWORD CInfTileSet::USE_COLORKEY = 1;
@@ -1716,9 +1721,165 @@ BOOL CInfinity::FXRender(CVidCell* pVidCell, INT nRefPointX, INT nRefPointY, DWO
 // 0x5CE350
 BOOL CInfinity::FXRenderClippingPolys(INT nPosX, INT nPosY, INT nPosZ, const CPoint& ptRef, const CRect& rGCBounds, BOOLEAN bDithered, DWORD dwBlitFlags)
 {
-    // TODO: Incomplete.
+    if (g_pChitin->GetCurrentVideoMode()->m_nFade == 0) {
+        return TRUE;
+    }
 
-    return FALSE;
+    CVidPoly cPoly;
+    BOOLEAN bResult = FALSE;
+    INT nPolys = 0;
+
+    if (pResWED == NULL) {
+        return FALSE;
+    }
+
+    DWORD dwFlags = (bDithered ? 1 : 0) + 1;
+
+    if ((dwBlitFlags & 0x10) != 0) {
+        dwFlags |= 0x4;
+    }
+
+    if ((dwBlitFlags & 0x20) != 0) {
+        dwFlags |= 0x8;
+    }
+
+    WORD* pScreenPolyData = pResWED->GetScreenPolyData();
+    if (pScreenPolyData == NULL) {
+        return FALSE;
+    }
+
+    // The WED's screen sections are 640x480.
+    INT nSectionsX = nAreaX / 640;
+    if (nAreaX % 640 != 0) {
+        nSectionsX++;
+    }
+
+    INT nSectionsY = nAreaY / 480;
+    if (nAreaY % 480 != 0) {
+        nSectionsY++;
+    }
+
+    DWORD aPolys[5];
+    aPolys[0] = 0xFFFFFFFF;
+    aPolys[1] = 0xFFFFFFFF;
+    aPolys[2] = 0xFFFFFFFF;
+    aPolys[3] = 0xFFFFFFFF;
+    aPolys[4] = 0xFFFFFFFF;
+
+    INT nLeft = rGCBounds.left / 640;
+    INT nTop = rGCBounds.top / 480;
+    INT nRight = rGCBounds.right / 640;
+    INT nBottom = rGCBounds.bottom / 480;
+
+    for (INT y = nTop; y <= nBottom && y < nSectionsY; y++) {
+        for (INT x = nLeft; x <= nRight && x < nSectionsX; x++) {
+            INT nSection = y * nSectionsX + x;
+            for (INT nIndex = 0; nIndex < pResWED->m_pScreenSectionList[nSection].nNumPolys; nIndex++) {
+                BOOL bFound = FALSE;
+                DWORD nPoly = pScreenPolyData[pResWED->m_pScreenSectionList[nSection].nStartingPoly + nIndex];
+                WED_POLYLIST* pPoly = &(pResWED->m_pPolyList[nPoly]);
+
+                if ((pPoly->nType & 0x2) != 0) {
+                    continue;
+                }
+
+                // The polygon's first edge, left end first.
+                WED_POLYPOINT* pLeft = &(pResWED->m_pPolyPoints[pPoly->nStartingPoint]);
+                WED_POLYPOINT* pRight = &(pResWED->m_pPolyPoints[pPoly->nStartingPoint + 1]);
+                if (pLeft->x > pRight->x) {
+                    WED_POLYPOINT* pTemp = pLeft;
+                    pLeft = pRight;
+                    pRight = pTemp;
+                }
+
+                CRect rPoly(pPoly->nLeft, pPoly->nTop, pPoly->nRight, pPoly->nBottom);
+                CRect rIntersect;
+                if (!IntersectRect(&rIntersect, &rPoly, &rGCBounds)) {
+                    continue;
+                }
+
+                // A wall polygon covers the object only when the object is
+                // behind its edge.
+                if ((pPoly->nType & 0x1) != 0) {
+                    if ((dwBlitFlags & 0x400) != 0) {
+                        continue;
+                    }
+
+                    if (pLeft->y == pRight->y) {
+                        if (nPosY >= pLeft->y) {
+                            continue;
+                        }
+                    } else {
+                        if (pLeft->x == pRight->x) {
+                            continue;
+                        }
+
+                        INT nSide = (nPosX - pLeft->x) * (pRight->y - pLeft->y)
+                            + (nPosY - pLeft->y) * (pLeft->x - pRight->x);
+                        if (nSide < 0) {
+                            continue;
+                        }
+                    }
+                }
+
+                // NOTE: The original's duplicate check stops at the first
+                // entry that is set, so it never finds a polygon (0x5CE6D8).
+                for (INT nPrev = 0; nPrev < nPolys; nPrev++) {
+                    if (aPolys[nPrev] != 0xFFFFFFFF) {
+                        break;
+                    }
+
+                    if (aPolys[nPrev] == nPoly) {
+                        bFound = TRUE;
+                    }
+                }
+
+                if (bFound) {
+                    continue;
+                }
+
+                if (nPolys < 5) {
+                    aPolys[nPolys++] = nPoly;
+                }
+
+                if ((pPoly->nType & 0x4) != 0) {
+                    cPoly.SetPoly(reinterpret_cast<WORD*>(&(pResWED->m_pPolyPoints[pPoly->nStartingPoint + 2])),
+                        static_cast<WORD>(pPoly->nNumPoints - 2));
+                } else {
+                    cPoly.SetPoly(reinterpret_cast<WORD*>(&(pResWED->m_pPolyPoints[pPoly->nStartingPoint])),
+                        static_cast<WORD>(pPoly->nNumPoints));
+                }
+
+                CRect rClip(rGCBounds.left,
+                    rGCBounds.top + nPosZ,
+                    rGCBounds.right,
+                    rGCBounds.bottom + nPosZ);
+
+                CVidInf* pVidInf = static_cast<CVidInf*>(g_pChitin->GetCurrentVideoMode());
+                if ((pPoly->nType & 0x8) != 0) {
+                    CPoint ptPoly(ptRef.x + nPosX, ptRef.y + nPosY);
+                    cPoly.FillConvexPoly(reinterpret_cast<WORD*>(pVidInf->GetLockedSurface()),
+                        pVidInf->GetSurfacePitch(),
+                        rClip,
+                        pVidMode->field_24,
+                        dwFlags,
+                        ptPoly);
+                } else {
+                    CPoint ptPoly(ptRef.x + nPosX, ptRef.y + nPosY);
+                    cPoly.FillPoly(reinterpret_cast<WORD*>(pVidInf->GetLockedSurface()),
+                        pVidInf->GetSurfacePitch(),
+                        rClip,
+                        pVidMode->field_24,
+                        dwFlags,
+                        ptPoly);
+                }
+
+                bResult = TRUE;
+            }
+        }
+    }
+
+    return bResult;
 }
 
 // 0x5CE930
@@ -3335,7 +3496,75 @@ void CInfinity::SetMessageScreen(CResRef resRef, DWORD strText, DWORD nDuration)
 // 0x5D2530
 DWORD CInfinity::RenderMessageScreen(CVidMode* pNewVidMode, INT nSurface)
 {
-    // TODO: Incomplete.
+    // A panel over the viewport holding one label with the message.
+    UI_PANELHEADER panelInfo;
+    panelInfo.nPanelID = 0;
+    panelInfo.x = static_cast<WORD>(rViewPort.left);
+    panelInfo.y = static_cast<WORD>(rViewPort.top);
+    panelInfo.nWidth = static_cast<WORD>(rViewPort.right - rViewPort.left);
+    panelInfo.nHeight = static_cast<WORD>(rViewPort.bottom - rViewPort.top);
+    panelInfo.nType = 0;
+    panelInfo.nControls = 0;
+    memset(panelInfo.refMosaic, 0, RESREF_SIZE);
+    panelInfo.nFirstControl = 0;
+    panelInfo.wFlags = 0;
+
+    UI_CONTROL_LABEL labelInfo;
+    labelInfo.base.nID = 0;
+    labelInfo.base.x = 1;
+    labelInfo.base.y = 1;
+    labelInfo.base.nWidth = static_cast<WORD>(rViewPort.right - rViewPort.left - 1);
+    labelInfo.base.nHeight = static_cast<WORD>(rViewPort.bottom - rViewPort.top - 1);
+    labelInfo.base.nType = 0;
+    labelInfo.nText = m_strMessageText;
+    memset(labelInfo.refTextFont, 0, RESREF_SIZE);
+    memcpy(labelInfo.refTextFont, "REALMS", 6);
+    labelInfo.nForegroundColor = 0;
+    labelInfo.nBackgroundColor = 0;
+    labelInfo.nTextFlags = 0x146;
+
+    CUIManager manager;
+    manager.m_bDoubleSize = g_pBaldurChitin->field_4A2C;
+
+    CUIPanel panel(&manager, &panelInfo);
+    CUIControlLabel label(&panel, &labelInfo);
+
+    if (m_vbMessageScreen.pRes != NULL) {
+        m_vbMessageScreen.RenderDirect(0, rViewPort.left, rViewPort.top, rViewPort, 0, FALSE);
+    } else {
+        if (nSurface >= pNewVidMode->GetNumSurfaces()) {
+            return RENDER_ERROR;
+        }
+
+        if (static_cast<UINT>(nSurface) >= pNewVidMode->m_nSurfaces
+            || pNewVidMode->pSurfaces[nSurface] == NULL) {
+            return RENDER_ERROR;
+        }
+
+        IDirectDrawSurface* pSurface = pNewVidMode->pSurfaces[nSurface];
+
+        COLORREF rgbBlack = pNewVidMode->ApplyBrightnessContrast(RGB(0, 0, 0));
+
+        // The render API sees the fill as a filled DrawRect, as
+        // CVidMode::EraseScreen's (src/render/api.h); the label still
+        // renders below.
+        if (auto* b = render::Active(); !(b && b->Clipped(rViewPort).DrawRect(rViewPort, rgbBlack, true))) {
+            DDBLTFX fx;
+            fx.dwSize = sizeof(fx);
+            fx.dwFillColor = pNewVidMode->ConvertToSurfaceRGB(rgbBlack);
+
+            HRESULT hr;
+            do {
+                hr = g_pBaldurChitin->cVideo.cVidBlitter.Blt(pSurface, &rViewPort, NULL, NULL, DDBLT_WAIT | DDBLT_COLORFILL, &fx);
+                pNewVidMode->CheckResults(hr);
+            } while (hr == DDERR_SURFACELOST || hr == DDERR_WASSTILLDRAWING);
+
+            // NOTE: The original fills the viewport a second time (0x5D283B).
+            g_pBaldurChitin->cVideo.cVidBlitter.Blt(pSurface, &rViewPort, NULL, NULL, DDBLT_WAIT | DDBLT_COLORFILL, &fx);
+        }
+    }
+
+    label.Render(TRUE);
 
     return RENDER_MESSAGESCREEN;
 }

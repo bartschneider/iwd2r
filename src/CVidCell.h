@@ -69,11 +69,20 @@ public:
     BOOL Blt8To32(DWORD* pSurface, LONG lPitch, const CPoint& pt, const CRect& rClip, DWORD dwFlags, const CPoint& ptSource, INT nTransVal);
     BOOL Blt8To32ClearShadow(DWORD* pSurface, LONG lPitch, DWORD dwFlags);
     BOOL Blt8To32Brightest(DWORD* pSurface, LONG lPitch, DWORD dwFlags);
-    BOOL sub_7D0950(DWORD* pSurface, LONG lPitch, DWORD dwFlags, INT nTransVal);
+    // The bytes a draw may touch: the locked surface, or (both null) the
+    // frame's own footprint. Ours only; see sub_7D0950 and sub_7D1190.
+    struct SurfaceRange {
+        const BYTE* pBegin;
+        const BYTE* pEnd;
+    };
+    static SurfaceRange SurfaceExtent(const void* pSurface, LONG lPitch);
+    static SurfaceRange SurfaceExtent(const DDSURFACEDESC& ddsd);
+
+    BOOL sub_7D0950(DWORD* pSurface, LONG lPitch, DWORD dwFlags, INT nTransVal, const SurfaceRange& range);
 
     BOOL sub_7B49D0(WORD* pSurface, LONG lPitch, DWORD dwFlags);
     BOOL sub_7D0C60(BYTE* pSurface, LONG lPitch, DWORD dwFlags);
-    BOOL sub_7D1190(DWORD* pSurface, LONG lPitch, DWORD dwFlags);
+    BOOL sub_7D1190(DWORD* pSurface, LONG lPitch, DWORD dwFlags, const SurfaceRange& range);
 
     static void RenderTexture(INT x, INT y, const CRect& rFxRect, CSize dataPitch, const CRect& rClip, DWORD dwFlags);
     BOOL Render3d(INT nRefPtX, INT nRefPtY, DWORD dwFlags, INT nTransVal);

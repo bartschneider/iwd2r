@@ -112,9 +112,21 @@
 //   CVidMode::DrawLine(..., ddsd, ...) 0x797B80, DrawEllipse(..., ddsd, ...)
 //     0x7961D0, DrawRecticle(rd, ddsd, ...) 0x798930: the locked-surface
 //     halves of the guarded functions (and of FXPrep's debug outline).
-//   CVidPoly::FillPoly 0x7C13A0: called only by CVidCell::Render(nSurface)
-//     for its occlusion polygons and by CVidInf::FXUnlock for the FX
-//     rectangle, both inside guarded or compositing code.
+//   CVidPoly::FillPoly 0x7C13A0 and FillConvexPoly 0x7C0F40: called by
+//     CVidCell::Render(nSurface) for its occlusion polygons, by
+//     CVidInf::FXUnlock for the FX rectangle (guarded or compositing code),
+//     by CVidInf::BKRenderConvexPoly (guarded), and by
+//     CInfinity::FXRenderClippingPolys (below).
+//   CInfinity::FXRenderClippingPolys 0x5CE350: fills the WED wall polygons
+//     that cover an object straight into the FX surface with the shadow
+//     colour, between FXPrep and FXUnlock: a mask for the FX composite, not
+//     a screen draw. A backend that handles FX draws needs it with the FX
+//     begin-group and end-group calls (docs/followups.md, FX groups).
+//   CInfinity::RenderMessageScreen 0x5D2530: its viewport fill is passed
+//     to the backend as a filled DrawRect at the fill (as EraseScreen's), the
+//     message bitmap goes through CVidBitmap::RenderDirect (DrawBitmap) and
+//     the label through CVidFont::TextOut (DrawText); the function itself is
+//     not one draw, so it has no guard at its top.
 //   CVidInf::RenderPointer() 0x79F6A0, RenderPointer(nSurface) 0x79F950 and
 //     RenderPointerImage 0x79FBA0: the pointer and its count digits are drawn
 //     with CVidCell::Render(nSurface), which dispatches each cell; the rest is

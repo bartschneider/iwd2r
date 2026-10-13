@@ -9,10 +9,7 @@ These items were found while building the harness (project 2) and parked. The fi
 - **`CGameSprite::CheckAranceFailure` (0x7243F0).** The original compares 16-bit values. Ours compares 32-bit values. The case needs engine state and is pending.
 - **`ProcessEffectList` (0x72DE60).** The address is labelled twice in `src/`: `sub_72DE60` (an empty stub) and `ProcessEffectList`. The Feats step (`UpdateFeatsPanel`, 0x60E3E0) still calls the empty stub, so replays diverge at the feats step.
 - **`SetStat`, DEX case (0x7600F6).** The original sets `field_562C` and calls `ProcessEffectList`, which rolls 5 dice. Ours does neither.
-- **`FillConvexPoly` (0x7C10D5).** Three differences:
-  - the initial left error term should be `nLeftAdjUp - nLeftDy`; ours uses `nRightAdjUp`;
-  - `nRightDy` and `nLeftDy` start from the minimum Y, not `nMaxYPt`;
-  - when `Dy <= 0` the original leaves Run, AdjUp and ErrTerm unset.
+- **`FillPoly` (0x7C13A0).** Still a stub that returns FALSE. `CInfinity::FXRenderClippingPolys` fills non-convex wall polygons with it, so those do not cover sprites yet; `FillConvexPoly` (fixed, docs/evidence/7C0F40.md) covers the convex ones.
 - **`au_counter` after New Game loads.** It lags the frame count by 1 in ours and by 2 in the original. The replay compare reports it and does not compare it.
 - **State dump coverage.** The dump lacks gender, alignment, class levels and skills. Widen the schema, and add a screenshot comparison to `replay compare`.
 - **Pending oracle cases that need engine state:** `CheckSave` (0x4A42F0), `ProcessEffectList` (0x72DE60), `Hit` (0x73B760), `Damage` (0x73D560), `C2DArray::Load` (0x402B70) and `CheckAranceFailure` (0x7243F0). See the table in [docs/evidence/README.md](evidence/README.md).
@@ -73,6 +70,6 @@ These are in `oracle/replay/` and `tools/`.
 The guards in `src/render/api.h` leave these for the renderer that first draws the world through a backend.
 
 - **Tiles.** `CVidTile::Render` only fills the VRAM tile cache on a miss, at (0, 0), without the stencil tile or fog. Each frame's tiles reach the screen through `CInfTileSet::Render` (0x5CB4A0) and `CInfTileSet::RenderBlack` (0x5CB630). A screen-level renderer must guard those two, with the tile, the destination and the stencil.
-- **FX groups.** FX draws arrive in FX-surface coordinates. The placement comes from `FXPrep` (ptPos, ptReference, mirror flags 0x10/0x20) and the composite from `FXUnlock` and `CInfinity::FXBltFrom`. A backend needs begin-group and end-group calls at `FXPrep` and `FXUnlock`.
+- **FX groups.** FX draws arrive in FX-surface coordinates. The placement comes from `FXPrep` (ptPos, ptReference, mirror flags 0x10/0x20) and the composite from `FXUnlock` and `CInfinity::FXBltFrom`. A backend needs begin-group and end-group calls at `FXPrep` and `FXUnlock`. `CInfinity::FXRenderClippingPolys` (0x5CE350) writes the wall-occlusion mask into the FX surface between them with `FillConvexPoly`/`FillPoly`, unguarded; the group calls must carry it too.
 - **Pointer.** `RenderPointer` draws its cell to the front surface in screen coordinates, and it reaches the backend as an ordinary `DrawCell`. Add a `DrawPointer` primitive, or pass `nSurface`.
 - **Frames and layers.** Nothing in the engine calls `BeginFrame`, `EndFrame` or `SetLayer` yet.

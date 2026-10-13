@@ -77,6 +77,7 @@ public:
     static void RenderQuad(const VERTEX_DESC* pVertices, INT nVertices);
     static void RenderBlackFade3d();
     void ScanLine32(DWORD* pSurface, UINT nMajorAxis, UINT nMinorAxis, INT nMajorAxisAdjust, INT nMinorAxisAdjust, DWORD color);
+    void sub_7CC130(DWORD* pSurface, UINT nMajorAxis, UINT nMinorAxis, INT nMajorAxisAdjust, INT nMinorAxisAdjust, UINT nThickness, DWORD color);
 
     CVidMode();
     /* 0000 */ virtual BOOLEAN SaveScreen();

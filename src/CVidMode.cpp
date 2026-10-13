@@ -283,15 +283,18 @@ DWORD CVidMode::ConvertToSurfaceRGB(COLORREF rgb)
 // 0x795E00
 COLORREF CVidMode::ApplyBrightnessContrast(COLORREF rgb)
 {
+    // NOTE: The complements are bytes (0x795E10).
     if (m_nBrightnessCorrection != 0) {
         BYTE v1 = ~m_nBrightnessCorrection;
-        rgb = RGB(~((v1 * ~GetRValue(rgb)) >> 8),
-            ~((v1 * ~GetGValue(rgb)) >> 8),
-            ~((v1 * ~GetBValue(rgb)) >> 8));
+        rgb = RGB(~static_cast<BYTE>((v1 * static_cast<BYTE>(~GetRValue(rgb))) >> 8),
+            ~static_cast<BYTE>((v1 * static_cast<BYTE>(~GetGValue(rgb))) >> 8),
+            ~static_cast<BYTE>((v1 * static_cast<BYTE>(~GetBValue(rgb))) >> 8));
     }
 
+    // NOTE: The scale is an int, so a correction above 247 does not wrap
+    // (0x795E87).
     if (m_nGammaCorrection != 0) {
-        BYTE v2 = m_nGammaCorrection + (1 << CVidPalette::LIGHT_SCALE);
+        INT v2 = m_nGammaCorrection + (1 << CVidPalette::LIGHT_SCALE);
         rgb = RGB(min((v2 * GetRValue(rgb)) >> CVidPalette::LIGHT_SCALE, 255),
             min((v2 * GetGValue(rgb)) >> CVidPalette::LIGHT_SCALE, 255),
             min((v2 * GetBValue(rgb)) >> CVidPalette::LIGHT_SCALE, 255));
@@ -1107,7 +1110,10 @@ BOOL CVidMode::PolyLine(INT nSurface, CRect& rSurface, LPPOINT lpPoints, int nCo
     UTIL_ASSERT(nSurface != -1 && (nThickness > 0));
 
     DDSURFACEDESC ddsd;
-    if (!LockSurface(nSurface, &ddsd, rSurface)) {
+    ddsd.dwSize = sizeof(ddsd);
+    // NOTE: The lock's result is returned when no segment is drawn.
+    bResult = LockSurface(nSurface, &ddsd, rSurface);
+    if (!bResult) {
         return FALSE;
     }
 
@@ -1126,7 +1132,7 @@ BOOL CVidMode::PolyLine(INT nSurface, CRect& rSurface, LPPOINT lpPoints, int nCo
                     lpPoints[1].x,
                     lpPoints[1].y,
                     reinterpret_cast<DWORD*>(ddsd.lpSurface),
-                    ddsd.lPitch / 4,
+                    ddsd.lPitch >> 2,
                     rSurface,
                     (GetRValue(rgbColor) << m_dwRBitShift) | (GetGValue(rgbColor) << m_dwGBitShift) | (GetBValue(rgbColor) << m_dwBBitShift),
                     FALSE);
@@ -1140,7 +1146,7 @@ BOOL CVidMode::PolyLine(INT nSurface, CRect& rSurface, LPPOINT lpPoints, int nCo
                     lpPoints[1].x,
                     lpPoints[1].y,
                     reinterpret_cast<DWORD*>(ddsd.lpSurface),
-                    ddsd.lPitch / 4,
+                    ddsd.lPitch >> 2,
                     rSurface,
                     nThickness,
                     (GetRValue(rgbColor) << m_dwRBitShift) | (GetGValue(rgbColor) << m_dwGBitShift) | (GetBValue(rgbColor) << m_dwBBitShift),
@@ -1505,10 +1511,206 @@ LONG CVidMode::DrawEllipseVOctant32(LONG x, LONG y, INT nArcLength, DWORD* pSurf
     return x;
 }
 
+// A light pool: an ellipse of half-axes a5 centred on a4 whose pixels are
+// scaled by a factor rising from the edge toward the centre. a6 is the
+// light's colour, a7 the ambient colour (tinted by the global tint).
+//
 // 0x7CAC60
 void CVidMode::DrawLightingEffect32(DWORD* pSurface, LONG lPitch, const CPoint& a4, const CSize& a5, unsigned long a6, unsigned long a7)
 {
-    // TODO: Incomplete.
+    // The scale starts at 64 and a pixel is scaled by it >> 6 (.rdata
+    // 0x85DE38, 0x85DE3A).
+    const BYTE nBase = 64;
+    const BYTE nShift = 6;
+
+    LONG nHeight = a5.cy;
+    if (nHeight == 0) {
+        // NOTE: The original allocates the pixel list first and leaks it
+        // here (0x7CAC8E); ours allocates after this test.
+        return;
+    }
+
+    BYTE* pPixelBuffer = new BYTE[a5.cx > a5.cy ? a5.cx : a5.cy];
+    BYTE* pPixelList = pPixelBuffer;
+
+    DWORD rgbAmbient;
+    if (rgbGlobalTint != RGB(CVidPalette::NO_TINT, CVidPalette::NO_TINT, CVidPalette::NO_TINT)) {
+        rgbAmbient = (((((rgbGlobalTint >> 16) & 0xFF) * ((a7 >> 16) & 0xFF)) >> 8) & 0xFF) << 16
+            | ((((a7 >> 8) & 0xFF) * ((rgbGlobalTint >> 8) & 0xFF)) & 0xFF00)
+            | ((((a7 & 0xFF) * (rgbGlobalTint & 0xFF)) >> 8) & 0xFF);
+    } else {
+        rgbAmbient = a7;
+    }
+
+    // Each channel brightens to the light's colour plus half the ambient's
+    // shortfall, rounded down to a multiple of the height above the base.
+    BYTE nRed = 255;
+    if (static_cast<INT>(a6 & 0xFF) + ((255 - static_cast<INT>(rgbAmbient & 0xFF)) >> 1) <= 255) {
+        nRed = static_cast<BYTE>((a6 & 0xFF) + ((255 - static_cast<INT>(rgbAmbient & 0xFF)) >> 1));
+    }
+
+    BYTE nGreen = 255;
+    if (static_cast<INT>((a6 >> 8) & 0xFF) + ((255 - static_cast<INT>((rgbAmbient >> 8) & 0xFF)) >> 1) <= 255) {
+        nGreen = static_cast<BYTE>(((a6 >> 8) & 0xFF) + ((255 - static_cast<INT>((rgbAmbient >> 8) & 0xFF)) >> 1));
+    }
+
+    BYTE nBlue = 255;
+    if (static_cast<INT>((a6 >> 16) & 0xFF) + ((255 - static_cast<INT>((rgbAmbient >> 16) & 0xFF)) >> 1) <= 255) {
+        nBlue = static_cast<BYTE>(((a6 >> 16) & 0xFF) + ((255 - static_cast<INT>((rgbAmbient >> 16) & 0xFF)) >> 1));
+    }
+
+    nRed = nRed > nBase ? static_cast<BYTE>((nRed - nBase) / nHeight * static_cast<BYTE>(nHeight)) : 0;
+    nGreen = nGreen > nBase ? static_cast<BYTE>((nGreen - nBase) / nHeight * static_cast<BYTE>(nHeight)) : 0;
+    nBlue = nBlue > nBase ? static_cast<BYTE>((nBlue - nBase) / nHeight * static_cast<BYTE>(nHeight)) : 0;
+
+    if (nRed == 0 && nGreen == 0 && nBlue == 0) {
+        // NOTE: The original leaks the pixel list here (0x7CAE2C); ours
+        // frees it.
+        delete[] pPixelBuffer;
+        return;
+    }
+
+    // Writes one pixel scaled by (nScaleRed, nScaleGreen, nScaleBlue) >> 6,
+    // each channel at most 255; the top byte ends up clear.
+    auto Scale = [nShift](DWORD* pPixel, BYTE nScaleRed, BYTE nScaleGreen, BYTE nScaleBlue) {
+        DWORD nPixel = *pPixel;
+        INT r = static_cast<INT>((nPixel & 0xFF) * nScaleRed) >> nShift;
+        if (r >= 255) {
+            r = 255;
+        }
+        INT g = static_cast<INT>(((nPixel >> 8) & 0xFF) * nScaleGreen) >> nShift;
+        if (g >= 255) {
+            g = 255;
+        }
+        INT b = static_cast<INT>(((nPixel >> 16) & 0xFF) * nScaleBlue) >> nShift;
+        if (b >= 255) {
+            b = 255;
+        }
+        *pPixel = ((static_cast<DWORD>(b) << 8 | static_cast<DWORD>(g)) << 8) | static_cast<DWORD>(r);
+    };
+
+    // The upper and lower caps: rows from the top (and the bottom) toward
+    // the centre, each a ramp up and down that widens by a pixel to the
+    // left as the arc steps.
+    LONG nArc = GetEllipseArcPixelList(a5.cx, a5.cy, pPixelList);
+    DWORD* pRow = pSurface + (a4.y - nHeight) * lPitch + a4.x;
+    BYTE nStepRed = static_cast<BYTE>(nRed / nHeight);
+    BYTE nStepGreen = static_cast<BYTE>(nGreen / nHeight);
+    BYTE nStepBlue = static_cast<BYTE>(nBlue / nHeight);
+
+    for (SHORT nHalf = 0; nHalf < 2; nHalf++) {
+        BYTE nRowRed = nStepRed;
+        BYTE nRowGreen = nStepGreen;
+        BYTE nRowBlue = nStepBlue;
+
+        for (INT nWidth = 1; nWidth - 1 < nArc; nWidth++) {
+            if (pPixelList[nWidth - 1] != 0) {
+                DWORD* pPixel = pRow;
+                BYTE nDeltaRed = static_cast<BYTE>(nRowRed / nWidth);
+                BYTE nDeltaGreen = static_cast<BYTE>(nRowGreen / nWidth);
+                BYTE nDeltaBlue = static_cast<BYTE>(nRowBlue / nWidth);
+                BYTE nScaleRed = nBase;
+                BYTE nScaleGreen = nBase;
+                BYTE nScaleBlue = nBase;
+
+                for (SHORT x = 0; x < nWidth; x++) {
+                    nScaleRed += nDeltaRed;
+                    nScaleGreen += nDeltaGreen;
+                    nScaleBlue += nDeltaBlue;
+                    Scale(pPixel++, nScaleRed, nScaleGreen, nScaleBlue);
+                }
+
+                for (SHORT x = 0; x < nWidth - 1; x++) {
+                    nScaleRed -= nDeltaRed;
+                    nScaleGreen -= nDeltaGreen;
+                    nScaleBlue -= nDeltaBlue;
+                    Scale(pPixel++, nScaleRed, nScaleGreen, nScaleBlue);
+                }
+
+                pRow += lPitch;
+                nRowRed += nStepRed;
+                nRowGreen += nStepGreen;
+                nRowBlue += nStepBlue;
+            }
+            pRow--;
+        }
+
+        if (nHalf == 0) {
+            pRow = pSurface + (a4.y + nHeight) * lPitch + a4.x;
+        }
+
+        lPitch = -lPitch;
+    }
+
+    // The middle band: rows from the centre outward, a ramp up across the
+    // full width and down across half of it, narrowing as the arc steps.
+    nArc = GetEllipseArcPixelList(a5.cy, a5.cx, pPixelList);
+    LONG nWidth = a5.cx;
+    pRow = pSurface + a4.y * lPitch - nWidth + a4.x;
+
+    for (SHORT nHalf = 0; nHalf < 2; nHalf++) {
+        BYTE nRowRed = nRed;
+        BYTE nRowGreen = nGreen;
+        BYTE nRowBlue = nBlue;
+
+        if (nArc > 0) {
+            LONG nFalling = nWidth - 1;
+            for (INT nIndex = 0; nIndex < nArc; nIndex++) {
+                // NOTE: The original divides by zero here once the band has
+                // no width left (0x7CB20C); ours stops drawing.
+                if (nWidth == 0) {
+                    delete[] pPixelBuffer;
+                    return;
+                }
+
+                DWORD* pPixel = pRow;
+                BYTE nDeltaRed = static_cast<BYTE>(nRowRed / nWidth);
+                BYTE nDeltaGreen = static_cast<BYTE>(nRowGreen / nWidth);
+                BYTE nDeltaBlue = static_cast<BYTE>(nRowBlue / nWidth);
+                BYTE nScaleRed = nBase;
+                BYTE nScaleGreen = nBase;
+                BYTE nScaleBlue = nBase;
+
+                for (SHORT x = 0; x < nWidth; x++) {
+                    nScaleRed += nDeltaRed;
+                    nScaleGreen += nDeltaGreen;
+                    nScaleBlue += nDeltaBlue;
+                    Scale(pPixel++, nScaleRed, nScaleGreen, nScaleBlue);
+                }
+
+                LONG nDown = nFalling >> 1;
+                for (SHORT x = 0; x < nDown; x++) {
+                    nScaleRed -= nDeltaRed;
+                    nScaleGreen -= nDeltaGreen;
+                    nScaleBlue -= nDeltaBlue;
+                    Scale(pPixel++, nScaleRed, nScaleGreen, nScaleBlue);
+                }
+
+                if (pPixelList[nIndex] != 0) {
+                    pRow++;
+                    nWidth--;
+                    nFalling--;
+                }
+
+                pRow -= lPitch;
+                nRowRed -= nStepRed;
+                nRowGreen -= nStepGreen;
+                nRowBlue -= nStepBlue;
+            }
+        }
+
+        if (nHalf == 0) {
+            // The lower half starts a row below the centre, without the
+            // first arc step.
+            pRow = pSurface + (a4.y + 1) * lPitch - a5.cx + a4.x + pPixelList[0];
+            nWidth = a5.cx - pPixelList[0];
+            nArc--;
+            pPixelList++;
+            lPitch = -lPitch;
+        }
+    }
+
+    delete[] pPixelBuffer;
 }
 
 // 0x7CB510
@@ -1911,9 +2113,235 @@ void CVidMode::ScanLine32(DWORD* pSurface, UINT nMajorAxis, UINT nMinorAxis, INT
 // 0x7CBE70
 BOOL CVidMode::DrawThickLine32(INT nXFrom, INT nYFrom, INT nXTo, INT nYTo, DWORD* pSurface, LONG lPitch, CRect& rSurface, int a8, DWORD color, BOOLEAN bClipped)
 {
-    // TODO: Incomplete.
+    INT nCount = a8 + 1;
+    INT nHalf = nCount >> 1;
+    INT nStep = 1;
+    INT nDeltaX;
+    INT nDeltaY;
 
-    return FALSE;
+    if (!bClipped) {
+        CRect rClip;
+        rClip.left = rSurface.left + nHalf;
+        rClip.top = rSurface.top + nHalf;
+        rClip.right = rSurface.right - nHalf;
+        rClip.bottom = rSurface.bottom - nHalf;
+        if (!ClipLine(nXFrom, nYFrom, nXTo, nYTo, rClip)) {
+            return FALSE;
+        }
+    }
+
+    if (nYFrom > nYTo) {
+        INT t;
+
+        t = nXTo;
+        nXTo = nXFrom;
+        nXFrom = t;
+
+        t = nYTo;
+        nYTo = nYFrom;
+        nYFrom = t;
+    }
+
+    nDeltaX = nXTo - nXFrom;
+    if (nDeltaX < 0) {
+        nDeltaX = nXFrom - nXTo;
+        nStep = -1;
+    }
+
+    nDeltaY = nYTo - nYFrom;
+
+    // The line's first pixel moved back half the thickness across and up.
+    pSurface += lPitch * (nYFrom - rSurface.top) - rSurface.left + nXFrom;
+    if (nStep > 0) {
+        pSurface -= nHalf;
+    } else {
+        pSurface += nHalf;
+    }
+    pSurface -= nHalf * lPitch;
+
+    if (nDeltaX == 0) {
+        // NOTE: Each column starts a row below the previous one.
+        if (a8 >= 0) {
+            do {
+                if (nDeltaY >= 0) {
+                    INT n = nDeltaY + 1;
+                    do {
+                        *pSurface = color;
+                        pSurface += lPitch;
+                        n--;
+                    } while (n != 0);
+                }
+                pSurface += 1 - nDeltaY * lPitch;
+                nCount--;
+            } while (nCount != 0);
+            return TRUE;
+        }
+    } else if (nDeltaY == 0) {
+        // NOTE: Each row starts a column after the previous one.
+        if (a8 >= 0) {
+            do {
+                if (nDeltaX >= 0) {
+                    INT n = nDeltaX + 1;
+                    do {
+                        *pSurface = color;
+                        pSurface += nStep;
+                        n--;
+                    } while (n != 0);
+                }
+                nCount--;
+                pSurface += lPitch - nDeltaX * nStep;
+            } while (nCount != 0);
+            return TRUE;
+        }
+    } else if (nDeltaX == nDeltaY) {
+        INT nRow = 0;
+        INT nRun = a8 - 1;
+        if (a8 > 0) {
+            do {
+                nRun += nRow < nDeltaX ? 1 : 0;
+                for (INT n = nRun; n > 0; n--) {
+                    *pSurface = color;
+                    pSurface += nStep;
+                }
+                nRow++;
+                pSurface += lPitch - nRun * nStep;
+            } while (nRow < a8);
+        }
+
+        pSurface += nStep;
+
+        INT nRows = nDeltaY - ((a8 & 1) != 0 ? a8 : a8 - 1);
+        if (nRows > 0) {
+            do {
+                for (INT n = nRun; n > 0; n--) {
+                    *pSurface = color;
+                    pSurface += nStep;
+                }
+                nRows--;
+                pSurface += lPitch - (nRun - 1) * nStep;
+            } while (nRows != 0);
+        }
+
+        if (a8 > 0) {
+            INT nAdvance = (1 - nRun) * nStep + lPitch;
+            INT nLeft = a8;
+            do {
+                for (INT n = nRun; n > 0; n--) {
+                    *pSurface = color;
+                    pSurface += nStep;
+                }
+                pSurface += nAdvance;
+                nRun--;
+                nAdvance += nStep;
+                nLeft--;
+            } while (nLeft != 0);
+            return TRUE;
+        }
+    } else {
+        if (nDeltaY > nDeltaX) {
+            sub_7CC130(pSurface, nDeltaY, nDeltaX, lPitch, nStep, a8, color);
+        } else {
+            sub_7CC130(pSurface, nDeltaX, nDeltaY, nStep, lPitch, a8, color);
+        }
+    }
+
+    return TRUE;
+}
+
+// A run-length sliced line nThickness pixels wide (Abrash's): runs along the
+// major axis, nMinorAxis + 1 slices across it.
+//
+// 0x7CC130
+void CVidMode::sub_7CC130(DWORD* pSurface, UINT nMajorAxis, UINT nMinorAxis, INT nMajorAxisAdjust, INT nMinorAxisAdjust, UINT nThickness, DWORD color)
+{
+    UINT nWholeStep = nMajorAxis / nMinorAxis;
+    INT nAdjUp = (nMajorAxis % nMinorAxis) * 2;
+    INT nAdjDown = nMinorAxis * 2;
+    INT nErrorTerm = (nAdjUp >> 1) - nAdjDown;
+    UINT nFinalPixelCount = (nWholeStep >> 1) + 1;
+    UINT nInitialPixelCount = nFinalPixelCount;
+
+    if (nAdjUp == 0 && (nWholeStep & 1) == 0) {
+        nInitialPixelCount--;
+    }
+
+    if ((nWholeStep & 1) != 0) {
+        nErrorTerm += nMinorAxis;
+    }
+
+    // The leading edge of the slices runs nLead pixels from the start, the
+    // trailing edge nTrail; the trailing edge starts moving once the first
+    // nThickness - 1 slices are down.
+    INT nTrailErrorTerm = nErrorTerm;
+    UINT nTrail = 0;
+    UINT nTrailRun = nInitialPixelCount;
+    UINT nLead = (nThickness & ~1) + nInitialPixelCount;
+
+    for (UINT n = nLead; n != 0; n--) {
+        *pSurface = color;
+        pSurface += nMajorAxisAdjust;
+    }
+    pSurface += nMinorAxisAdjust - static_cast<INT>(nLead) * nMajorAxisAdjust;
+
+    UINT nWait = nThickness - 2;
+    for (UINT nSlice = nMinorAxis - 1; nSlice != 0; nSlice--) {
+        UINT nRunLength = nWholeStep;
+        nErrorTerm += nAdjUp;
+        if (nErrorTerm > 0) {
+            nRunLength = nWholeStep + 1;
+            nErrorTerm -= nAdjDown;
+        }
+
+        nLead += nRunLength;
+        if (nTrail < nLead) {
+            for (UINT n = nLead - nTrail; n != 0; n--) {
+                *pSurface = color;
+                pSurface += nMajorAxisAdjust;
+            }
+        }
+        pSurface -= static_cast<INT>(nLead - nTrail) * nMajorAxisAdjust;
+
+        if (nWait == 0) {
+            pSurface += static_cast<INT>(nTrailRun) * nMajorAxisAdjust;
+            nTrail += nTrailRun;
+            nTrailRun = nWholeStep;
+            nTrailErrorTerm += nAdjUp;
+            if (nTrailErrorTerm > 0) {
+                nTrailRun = nWholeStep + 1;
+                nTrailErrorTerm -= nAdjDown;
+            }
+        } else {
+            nWait--;
+        }
+
+        pSurface += nMinorAxisAdjust;
+    }
+
+    nLead += nFinalPixelCount;
+    for (UINT nSlice = 0; nSlice < nThickness; nSlice++) {
+        if (nTrail < nLead) {
+            for (UINT n = nLead - nTrail; n != 0; n--) {
+                *pSurface = color;
+                pSurface += nMajorAxisAdjust;
+            }
+        }
+        pSurface -= static_cast<INT>(nLead - nTrail) * nMajorAxisAdjust;
+
+        if (nSlice == nThickness - 1) {
+            nTrailRun = nFinalPixelCount;
+        }
+
+        pSurface += static_cast<INT>(nTrailRun) * nMajorAxisAdjust;
+        nTrail += nTrailRun;
+        nTrailRun = nWholeStep;
+        nTrailErrorTerm += nAdjUp;
+        if (nTrailErrorTerm > 0) {
+            nTrailRun = nWholeStep + 1;
+            nTrailErrorTerm -= nAdjDown;
+        }
+
+        pSurface += nMinorAxisAdjust;
+    }
 }
 
 // 0x799E20
