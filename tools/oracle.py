@@ -158,7 +158,8 @@ GAME_DIR = ORACLE_DIR + '/game'
 TABLES_DIR = ORACLE_DIR + '/tables'
 # The game text the cases read (runner --tables), extracted from the vanilla
 # copy by tools/bif.py before every run. Never committed.
-TABLES = ('XPLEVEL.2DA',)
+TABLES = ('XPLEVEL.2DA', 'HPWAR.2DA', 'HPWIZ.2DA', 'HPPRS.2DA', 'HPROG.2DA',
+          'HPMONK.2DA')
 MARKER = 'vanilla.ok'
 WEIDU_SETUP = 'Setup-iwd2ee.exe'
 WEIDU_TIMEOUT = 3600  # seconds for the whole uninstall

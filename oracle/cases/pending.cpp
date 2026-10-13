@@ -1,6 +1,6 @@
 // Pending cases for project 3 (combat): saving throws, the attack roll and
-// attack bonus, damage and hit point dice. Ours does not implement these
-// functions yet, so nothing is compared with ours. A case runs the original
+// attack bonus and damage. Ours does not implement these functions yet, so
+// nothing is compared with ours. A case runs the original
 // alone where it can on a fixture built here (R11b): the same seed and inputs
 // twice, and the two results (and the rand value after each call, which
 // shows both calls drew alike) must be equal. In the report a failure's
@@ -45,14 +45,6 @@ using IterativeAttackBonusFn = int32_t(__fastcall*)(const void* self, void* edx,
     int32_t nAttack);
 constexpr uintptr_t kGetIterativeAttackBonus = 0x547020;
 
-// CRuleTables::RollHitPoints (0x542A90): (nSides, nRolls, nLevel, a4,
-// nModifier). __thiscall with five stack arguments, `ret 0x14` at 0x542B30;
-// ecx is never read or written. INT in eax. nSides 0 is asserted
-// (CUtil::UtilAssert, 0x780C00) and divides by zero, so it is not an input.
-using RollHitPointsFn = int32_t(__fastcall*)(const void* self, void* edx, int32_t nSides, int32_t nRolls,
-    int32_t nLevel, int32_t a4, int32_t nModifier);
-constexpr uintptr_t kRollHitPoints = 0x542A90;
-
 void OriginalSrand(unsigned int seed)
 {
     reinterpret_cast<Srand>(static_cast<uintptr_t>(kVanillaSrand))(seed);
@@ -63,9 +55,9 @@ int OriginalRand()
     return reinterpret_cast<Rand>(static_cast<uintptr_t>(kVanillaRand))();
 }
 
-// The original CRuleTables both functions are called on: a zeroed block of
-// its size from the original's operator new. Neither reads it (above), so no
-// member is filled in. Leaked, like every original object the cases build.
+// The original CRuleTables GetIterativeAttackBonus is called on: a zeroed
+// block of its size from the original's operator new. It is not read
+// (above), so no member is filled in. Leaked, like every original object the cases build.
 const void* RuleTablesFixture(CaseContext& ctx)
 {
     void* at = nullptr;
@@ -166,46 +158,10 @@ void IterativeAttackBonus(CaseContext& ctx)
     }
 }
 
-// CRuleTables::RollHitPoints (0x542A90), original only: nSides 1, 2, 3, 4,
-// 6, 8, 10, 12, 20 and 100 by nRolls -1, 0, 1, 2, 5 and 20 by nLevel 0, 1, 2
-// and 30 by a4 0, 1, 4 and 21 by nModifier -3, 0 and 5, then --iterations
-// random tuples, each from its own srand seed.
-void RollHitPoints(CaseContext& ctx)
-{
-    const void* rules = RuleTablesFixture(ctx);
-    Picks picks(ctx.seed, 0x526F6C6C48500000ull); // "RollHP"
-    auto check = [&](int32_t sides, int32_t rolls, int32_t level, int32_t a4, int32_t modifier) {
-        CheckTwice(ctx, "RollHitPoints(" + Args({ sides, rolls, level, a4, modifier }) + ")", picks.Bits(), [&] {
-            return reinterpret_cast<RollHitPointsFn>(kRollHitPoints)(rules, nullptr, sides, rolls, level, a4,
-                modifier);
-        });
-    };
-    for (const int32_t sides : { 1, 2, 3, 4, 6, 8, 10, 12, 20, 100 }) {
-        for (const int32_t rolls : { -1, 0, 1, 2, 5, 20 }) {
-            for (const int32_t level : { 0, 1, 2, 30 }) {
-                for (const int32_t a4 : { 0, 1, 4, 21 }) {
-                    for (const int32_t modifier : { -3, 0, 5 }) {
-                        check(sides, rolls, level, a4, modifier);
-                    }
-                }
-            }
-        }
-    }
-    for (int i = 0; i < ctx.iterations; ++i) {
-        const int32_t sides = picks.Between(1, 100);
-        const int32_t rolls = picks.Between(-2, 40);
-        const int32_t level = picks.Between(-1, 40);
-        const int32_t a4 = picks.Between(-2, 101);
-        check(sides, rolls, level, a4, picks.Between(-10, 10));
-    }
-}
-
 } // namespace
 
 ORACLE_CASE_PENDING("pending/iterative_attack_bonus", IterativeAttackBonus,
     "ours not implemented (CRuleTables::GetIterativeAttackBonus 0x547020); original-only determinism check");
-ORACLE_CASE_PENDING("pending/roll_hit_points", RollHitPoints,
-    "ours not implemented (CRuleTables::RollHitPoints 0x542A90); original-only determinism check");
 // CGameEffect::CheckSave (0x4A42F0) first reads g_pBaldurChitin (0x8CF6DC)
 // ->m_pObjectGame, then the target sprite's virtual GetAIType, its feats
 // (0x763150), class levels and, for some effects, the game's object array

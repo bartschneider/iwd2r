@@ -1,8 +1,10 @@
 #include "CScreenCreateChar.h"
 
+#include "CAIScript.h"
 #include "CBaldurChitin.h"
 #include "CCreatureFile.h"
 #include "CGameAnimationType.h"
+#include "CGameButtonList.h"
 #include "CGameArea.h"
 #include "CGameEffect.h"
 #include "CGameObjectArray.h"
@@ -4311,6 +4313,7 @@ void CScreenCreateChar::CompleteCharacterAbilities(CGameSprite* pSprite)
     pSprite->ProcessEffectList();
 
     INT nHitPoints = ruleTables.GetStartingHitPoints(typeAI,
+        DStats,
         *pSprite->GetDerivedStats(),
         pSprite->GetBaseStats()->m_CONBase);
 
