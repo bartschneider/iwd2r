@@ -6150,7 +6150,169 @@ BYTE CInfGame::GetFrameRate()
 // 0x5BE900
 void CInfGame::SynchronousUpdate()
 {
-    // TODO: Incomplete.
+    if (field_366E) {
+        CResHelper<CResBitmap, 1> cScreenFile;
+        CResHelper<CResBitmap, 1> cPortraitFile;
+        CVidBitmap vbPortrait;
+        BYTE* pScreenData = NULL;
+        BYTE* pPortraitData = NULL;
+        CString sDir;
+
+        if (field_50D8 && !field_50DC) {
+            CString sSource;
+            CString sDest;
+
+            sSource = GetDirSaveRoot() + "default\\" + "ICEWIND2.BMP";
+            sDest = GetDirSave() + "ICEWIND2.BMP";
+            CopyFileA(sSource, sDest, FALSE);
+            DeleteFileA(sSource);
+
+            for (INT nPortrait = 0; nPortrait < 6; nPortrait++) {
+                sSource.Format("%sdefault\\%s%d.BMP", (LPCSTR)GetDirSaveRoot(), "PORTRT", nPortrait);
+                sDest.Format("%s%s%d.BMP", (LPCSTR)GetDirSave(), "PORTRT", nPortrait);
+                CopyFileA(sSource, sDest, FALSE);
+                DeleteFileA(sSource);
+            }
+
+            field_366E = 0;
+            field_50D8 = FALSE;
+            return;
+        }
+
+        CGameArea* pVisibleArea = m_gameAreas[m_visibleArea];
+        if (pVisibleArea != NULL) {
+            EnterCriticalSection(&(pVisibleArea->field_214));
+            pVisibleArea->SetListManipulationThreadId(GetCurrentThreadId());
+        }
+
+        EnterCriticalSection(&(m_gameAreas[m_visibleArea]->field_1FC));
+
+        Sleep(100);
+
+        CSingleLock lock(&(g_pBaldurChitin->m_pEngineWorld->GetManager()->field_36), FALSE);
+        lock.Lock(INFINITE);
+
+        CVidMode* pVidMode = g_pChitin->pActiveEngine != NULL ? g_pChitin->pActiveEngine->pVidMode : NULL;
+        BYTE nBrightnessCorrection = pVidMode->m_nBrightnessCorrection;
+        pVidMode->m_nBrightnessCorrection = 0;
+        BYTE nGammaCorrection = pVidMode->m_nGammaCorrection;
+        pVidMode->m_nGammaCorrection = 0;
+
+        m_gameAreas[m_visibleArea]->m_cInfinity.pVRPool->InvalidateAll();
+        pVidMode->LoadFogOWarSurfaces(FOGOWAR_RESREF);
+
+        field_366E = 0;
+
+        BOOL bCacheStatus = CCacheStatus::dword_8D0BA8;
+        CCacheStatus::dword_8D0BA8 = FALSE;
+        g_pBaldurChitin->m_pEngineWorld->SaveScreen();
+        CCacheStatus::dword_8D0BA8 = bCacheStatus;
+
+        LONG nScreenData = 0;
+        pVidMode->PrintSurfaceToBmp(pScreenData, 0, CInfinity::stru_8E79A8, nScreenData, 5);
+
+        if (!field_50DC && g_pChitin->cNetwork.GetServiceProvider() != CNetwork::SERV_PROV_NULL) {
+            sDir = GetDirSave();
+        } else if (!g_pChitin->cVideo.m_bIs3dAccelerated) {
+            sDir = GetDirSaveRoot() + "default\\";
+        } else if (field_50DC) {
+            sDir = GetDirSave();
+            field_50DC = FALSE;
+            field_50D8 = FALSE;
+        } else {
+            sDir = GetDirSaveRoot() + "default\\";
+            field_50D8 = TRUE;
+        }
+
+        if (pScreenData != NULL) {
+            // NOTE: Uninline.
+            cScreenFile.SetResRef(CResRef("ICEWIND2"), TRUE, TRUE);
+            static_cast<CRes*>(cScreenFile.GetRes())->Write(sDir, pScreenData, nScreenData);
+            delete[] pScreenData;
+        }
+
+        WORD nPortrait = 0;
+        for (INT nCharacter = 0; nCharacter < 6; nCharacter++) {
+            LONG nCharacterId = m_characters[nCharacter];
+            if (nCharacterId == CGameObjectArray::INVALID_INDEX) {
+                continue;
+            }
+
+            CGameSprite* pSprite;
+            BYTE rc;
+            do {
+                rc = m_cObjectArray.GetShare(nCharacterId,
+                    CGameObjectArray::THREAD_1,
+                    reinterpret_cast<CGameObject**>(&pSprite),
+                    INFINITE);
+            } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+            if (rc != CGameObjectArray::SUCCESS) {
+                continue;
+            }
+
+            vbPortrait.SetResRef(CResRef(pSprite->m_baseStats.m_portraitSmall), TRUE, TRUE);
+            vbPortrait.m_bDoubleSize = FALSE;
+
+            if (vbPortrait.GetRes() == NULL) {
+                vbPortrait.SetResRef(CResRef(SILHOUETTE_PORTRAIT_SM), TRUE, TRUE);
+                vbPortrait.m_bDoubleSize = g_pBaldurChitin->field_4A28;
+            }
+
+            if (vbPortrait.GetBitCount(FALSE) != 24 && vbPortrait.GetBitCount(FALSE) != 8) {
+                vbPortrait.SetResRef(CResRef(SILHOUETTE_PORTRAIT_SM), TRUE, TRUE);
+                vbPortrait.m_bDoubleSize = g_pBaldurChitin->field_4A28;
+            }
+
+            m_cObjectArray.ReleaseShare(nCharacterId,
+                CGameObjectArray::THREAD_1,
+                INFINITE);
+
+            CSize size;
+            vbPortrait.GetImageDimensions(size, FALSE);
+
+            CRect rPortrait;
+            SetRect(&rPortrait, 0, 0, size.cx, size.cy);
+
+            vbPortrait.RenderDirect(2, 0, 0, rPortrait, 0, FALSE);
+
+            LONG nPortraitData = 0;
+            pPortraitData = NULL;
+            pVidMode->PrintSurfaceToBmp(pPortraitData, 2, rPortrait, nPortraitData, 2);
+
+            if (pPortraitData != NULL) {
+                CString sPortrait;
+                sPortrait.Format("%s%d", "PORTRT", nPortrait);
+
+                // NOTE: Uninline.
+                cPortraitFile.SetResRef(CResRef(sPortrait), TRUE, TRUE);
+                static_cast<CRes*>(cPortraitFile.GetRes())->Write(sDir, pPortraitData, nPortraitData);
+
+                nPortrait++;
+                delete[] pPortraitData;
+            }
+        }
+
+        g_pChitin->cDimm.RemoveFromDirectoryList(GetDirSave(), TRUE);
+
+        pVidMode->m_nBrightnessCorrection = nBrightnessCorrection;
+        pVidMode->m_nGammaCorrection = nGammaCorrection;
+
+        m_gameAreas[m_visibleArea]->m_cInfinity.pVRPool->InvalidateAll();
+        pVidMode->LoadFogOWarSurfaces(FOGOWAR_RESREF);
+
+        lock.Unlock();
+
+        LeaveCriticalSection(&(m_gameAreas[m_visibleArea]->field_1FC));
+
+        pVisibleArea = m_gameAreas[m_visibleArea];
+        if (pVisibleArea != NULL) {
+            pVisibleArea->SetListManipulationThreadId(0);
+            LeaveCriticalSection(&(pVisibleArea->field_214));
+        }
+    }
+
+    DestroyDisposableItems();
 }
 
 // 0x5C0520
