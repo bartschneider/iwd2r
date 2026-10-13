@@ -61,7 +61,44 @@ namespace {
         kNis,
         kPipelineCount,
     };
-    const char* const kFragments[kPipelineCount] = { "nearest.frag", "sharp.frag", "smooth.frag", "fsr_easu.frag", "fsr_rcas.frag", "nis.frag" };
+    // Each pipeline's fragment shader and its uniform buffer count.
+    struct PipelineInfo {
+        const char* fragment;
+        Uint32 uniformBuffers;
+    };
+    const PipelineInfo kPipelines[kPipelineCount] = {
+        { "nearest.frag", 1 },
+        { "sharp.frag", 1 },
+        { "smooth.frag", 1 },
+        { "fsr_easu.frag", 1 },
+        { "fsr_rcas.frag", 1 },
+        { "nis.frag", 2 }, // Region, Coefficients
+    };
+
+    // How a filter draws into the target.
+    struct FilterInfo {
+        Pipeline pipeline;
+        bool linear; // the linear sampler (else nearest)
+        bool easu; // FSR: an EASU pass first; the target pass reads its output with RcasUniforms
+        bool coefficients; // NIS: push the coefficient tables as uniform buffer 1
+    };
+
+    FilterInfo Describe(Filter filter)
+    {
+        switch (filter) {
+        case Filter::Nearest:
+            break;
+        case Filter::Sharp:
+            return { kSharp, true, false, false };
+        case Filter::Smooth:
+            return { kSmooth, true, false, false };
+        case Filter::Fsr:
+            return { kRcas, false, true, false };
+        case Filter::Nis:
+            return { kNis, true, false, true };
+        }
+        return { kNearest, false, false, false };
+    }
 
     // One region's draw, recorded by DrawRegion and issued by EndFrame.
     struct Draw {
@@ -462,7 +499,7 @@ namespace {
         // FSR's first pass: every FSR region's EASU into easu_.
         bool EasuPass()
         {
-            const bool any = std::any_of(draws_.begin(), draws_.end(), [](const Draw& d) { return d.filter == Filter::Fsr; });
+            const bool any = std::any_of(draws_.begin(), draws_.end(), [](const Draw& d) { return Describe(d.filter).easu; });
             if (!any)
                 return true;
             if (!EnsureTexture(easu_, easuW_, easuH_, outW_, outH_, SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER)) {
@@ -473,7 +510,7 @@ namespace {
             if (!BeginPass(easu_))
                 return false;
             for (const Draw& d : draws_) {
-                if (d.filter != Filter::Fsr)
+                if (!Describe(d.filter).easu)
                     continue;
                 SDL_BindGPUGraphicsPipeline(pass_, pipelines_[kEasu]);
                 SDL_SetGPUViewport(pass_, &d.viewport);
@@ -493,28 +530,10 @@ namespace {
         // One region into the target.
         void Issue(const Draw& d)
         {
-            int index = kNearest;
-            SDL_GPUTexture* texture = frame_;
-            SDL_GPUSampler* sampler = samplers_[1];
-            switch (d.filter) {
-            case Filter::Nearest:
-                sampler = samplers_[0];
-                break;
-            case Filter::Sharp:
-                index = kSharp;
-                break;
-            case Filter::Smooth:
-                index = kSmooth;
-                break;
-            case Filter::Fsr:
-                index = kRcas;
-                texture = easu_;
-                sampler = samplers_[0];
-                break;
-            case Filter::Nis:
-                index = kNis;
-                break;
-            }
+            const FilterInfo info = Describe(d.filter);
+            const int index = info.pipeline;
+            SDL_GPUTexture* texture = info.easu ? easu_ : frame_;
+            SDL_GPUSampler* sampler = samplers_[info.linear ? 1 : 0];
             SDL_BindGPUGraphicsPipeline(pass_, pipelines_[index]);
             SDL_SetGPUViewport(pass_, &d.viewport);
             SDL_SetGPUScissor(pass_, &d.scissor);
@@ -522,7 +541,7 @@ namespace {
             binding.texture = texture;
             binding.sampler = sampler;
             SDL_BindGPUFragmentSamplers(pass_, 0, &binding, 1);
-            if (d.filter == Filter::Fsr) {
+            if (info.easu) {
                 const SDL_Rect& c = d.covered;
                 const RcasUniforms r = {
                     { static_cast<float>(c.x), static_cast<float>(c.y), static_cast<float>(c.x + c.w), static_cast<float>(c.y + c.h) },
@@ -531,7 +550,7 @@ namespace {
                 SDL_PushGPUFragmentUniformData(cmd_, 0, &r, sizeof(r));
             } else {
                 SDL_PushGPUFragmentUniformData(cmd_, 0, &d.u, sizeof(d.u));
-                if (d.filter == Filter::Nis)
+                if (info.coefficients)
                     SDL_PushGPUFragmentUniformData(cmd_, 1, NisCoefficients(), static_cast<Uint32>(NisCoefficientsSize()));
             }
             SDL_DrawGPUPrimitives(pass_, 3, 1, 0, 0);
@@ -603,12 +622,12 @@ namespace {
                 error = std::string("the quad shader does not load: ") + SDL_GetError();
                 return false;
             }
-            const char* const* frags = kFragments;
             bool ok = true;
             for (int i = 0; i < kPipelineCount && ok; i++) {
-                SDL_GPUShader* frag = MakeShader(frags[i], SDL_GPU_SHADERSTAGE_FRAGMENT, 1, i == kNis ? 2 : 1);
+                const char* name = kPipelines[i].fragment;
+                SDL_GPUShader* frag = MakeShader(name, SDL_GPU_SHADERSTAGE_FRAGMENT, 1, kPipelines[i].uniformBuffers);
                 if (!frag) {
-                    error = std::string(frags[i]) + " does not load: " + SDL_GetError();
+                    error = std::string(name) + " does not load: " + SDL_GetError();
                     ok = false;
                     break;
                 }
@@ -625,7 +644,7 @@ namespace {
                 pipelines_[i] = SDL_CreateGPUGraphicsPipeline(device_, &info);
                 SDL_ReleaseGPUShader(device_, frag);
                 if (!pipelines_[i]) {
-                    error = std::string("the ") + frags[i] + " pipeline cannot be created: " + SDL_GetError();
+                    error = std::string("the ") + name + " pipeline cannot be created: " + SDL_GetError();
                     ok = false;
                 }
             }
