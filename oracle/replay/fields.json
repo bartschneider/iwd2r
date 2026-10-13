@@ -231,22 +231,22 @@
   },
   "sprite_dex": {
     "base": "CGameSprite",
-    "offset": "0x0803",
+    "offset": "0x0805",
     "type": "u8"
   },
   "sprite_con": {
     "base": "CGameSprite",
-    "offset": "0x0804",
+    "offset": "0x0806",
     "type": "u8"
   },
   "sprite_int": {
     "base": "CGameSprite",
-    "offset": "0x0805",
+    "offset": "0x0803",
     "type": "u8"
   },
   "sprite_wis": {
     "base": "CGameSprite",
-    "offset": "0x0806",
+    "offset": "0x0804",
     "type": "u8"
   },
   "sprite_chr": {
