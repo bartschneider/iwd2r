@@ -7105,7 +7105,15 @@ void CGameSprite::Unmarshal(BYTE* pCreature, LONG creatureSize, WORD facing, int
     }
 
     if (bNeedUpgrade) {
-        // TODO: Incomplete.
+        // TODO: Incomplete. The original upgrades older creature files in
+        // place (0x70D013-0x70D1B6): a "CRE V2.0" or "CRE V9.2" file is
+        // copied into a buffer 0xCA bytes larger (bAlloced) and converted to
+        // V2.1 by 0x5A7740; a "CRE V2.1" file then grows by 0x240 plus what
+        // 0x5A69B0 returns for it and is converted to V2.2 by 0x5A7940
+        // (through 0x5A3DB0 and 0x5A5060). Those converters are InfGame.cpp
+        // functions src/ does not define yet. Every CRE of the vanilla data
+        // (1655 in CHITIN.KEY and Override) is V2.2, apart from four V9.1
+        // files the original rejects as corrupt.
     }
 
     ClearMarshal(TRUE);
@@ -7138,8 +7146,9 @@ void CGameSprite::Unmarshal(BYTE* pCreature, LONG creatureSize, WORD facing, int
     GetAnimation()->SetAnimationType(m_baseStats.m_animationType, m_baseStats.m_colors, facing);
 
     if (GetAnimation()->GetListType() == LIST_FLIGHT) {
-        // NOTE: Uninline.
-        SetFacing(4 * ((facing + 2) / 4));
+        // NOTE: Uninline. The facing is rounded to a multiple of 4 and
+        // wrapped to 0..15 (0x70D2FE-0x70D322).
+        SetFacing((4 * ((facing + 2) / 4)) % 16);
     }
 
     m_vbPortraitSmall.SetResRef(CResRef(m_baseStats.m_portraitSmall), TRUE, TRUE);
@@ -7288,7 +7297,7 @@ void CGameSprite::Unmarshal(BYTE* pCreature, LONG creatureSize, WORD facing, int
                 const CResRef& resRef = g_pBaldurChitin->GetObjectGame()->m_spells.Get(pSpell->field_0);
                 if (memcmp(resRef.GetResRef(), "**", strlen("**")) == 0) {
                     CString sError;
-                    sError.Format("*** %s has OBSOLETE DOMAIN SPELL FILE: %s.\n",
+                    sError.Format("*** %s has OBSOLETE SPELL FILE: %s.\n",
                         m_scriptName,
                         (LPCSTR)resRef.GetResRefStr());
                 } else {
