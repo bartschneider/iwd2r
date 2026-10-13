@@ -35,6 +35,7 @@
 #include "CItem.h"
 #include "CResItem.h"
 #include "CRuleTables.h"
+#include "CSound.h"
 #include "msvc_rand.h"
 #ifdef _MSC_VER
 #pragma warning(pop)
@@ -50,6 +51,7 @@
 #include <cstring>
 #include <fstream>
 #include <iterator>
+#include <new>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -550,14 +552,15 @@ void TierUpgrade(CaseContext& ctx)
 // (0x18, 0x1A, 0x1C) to 1. CItem::sub_4EA4A0(CString& sResRef): `ret 4` at
 // 0x4EA4FC; reads the name (CString::GetBuffer 0x7FCFFE, _strnicmp
 // 0x7EA8C0) and m_useCount1 and m_useCount2, writes those two and may call
-// rand (0x7E8160). The resource helper (pRes at 0x4) is not read.
+// rand (0x7E8160). The resource helper (pRes at 0x8, after the vtable and
+// bLoading) is not read.
 using ItemCtorFn = void*(__fastcall*)(void* self, void* edx);
 constexpr uintptr_t kItemCtor = 0x4E7840;
 using UseCountRollFn = void(__fastcall*)(void* self, void* edx, const void* resRef);
 constexpr uintptr_t kUseCountRoll = 0x4EA4A0;
 // CItem is 0xEE bytes (m_numSounds at 0xEC).
 constexpr size_t kItemSize = 0x100;
-constexpr size_t kItemResOffset = 0x4;
+constexpr size_t kItemResOffset = 0x8;
 constexpr size_t kUseCountsOffset = 0x18;
 
 using Srand = void(__cdecl*)(unsigned int);
@@ -680,8 +683,188 @@ void UseCountRoll(CaseContext& ctx)
     }
 }
 
+// ---------------------------------------------------------------------------
+// CItem::CItem() (0x4E7840)
+
+// The original CItem: its vtable (0x84CED0) at 0, then CResHelper's
+// bLoading 0x4, pRes 0x8 and cResRef 0xC, m_nAbilities 0x14, m_useCount1-3
+// 0x18-0x1C, m_wear 0x1E, m_flags 0x20, m_useSound[2] from 0x24 (0x64 bytes
+// each, built by the eh vector constructor iterator with CSound::CSound
+// 0x7A8BB0) and m_numSounds 0xEC. A CSound: CObject's vtable (0x85E6C8),
+// CResHelper's bLoading 0x4, pRes 0x8, cResRef 0xC, then the members from
+// 0x14 at the offsets CSound.h gives. CSound::CSound also stores
+// &g_pChitin->cSoundMixer (g_pChitin + 0x3C8) in the static
+// CSound::m_pSoundMixer (0x9060EC).
+constexpr size_t kItemSoundsOffset = 0x24;
+constexpr size_t kSoundSize = 0x64;
+constexpr uintptr_t kSoundMixer = 0x9060EC;
+constexpr size_t kChitinSoundMixerOffset = 0x3C8;
+
+// Named fields as text, one per line, so a mismatch names the field.
+struct Fields {
+    std::string text;
+    void Add(const std::string& name, uint32_t value) { text += name + " " + Hex(value) + "\n"; }
+    void AddResRef(const std::string& name, const uint8_t* bytes)
+    {
+        text += name + " " + Quoted(std::string(reinterpret_cast<const char*>(bytes), 8)) + "\n";
+    }
+};
+
+template <class T>
+uint32_t At(const uint8_t* base, size_t offset)
+{
+    T value;
+    std::memcpy(&value, base + offset, sizeof(T));
+    return static_cast<uint32_t>(value);
+}
+
+// The CSound members CSound::CSound writes, by name, from an original CSound.
+void OriginalSoundFields(Fields& f, const std::string& prefix, const uint8_t* sound)
+{
+    f.Add(prefix + "bLoading", At<uint32_t>(sound, 0x4));
+    f.Add(prefix + "pRes", At<uint32_t>(sound, 0x8));
+    f.AddResRef(prefix + "cResRef", sound + 0xC);
+    const struct {
+        const char* name;
+        size_t offset;
+    } members[] = { { "m_bPositionedSound", 0x14 }, { "m_nBuffer", 0x18 }, { "m_dwFrequency", 0x1C },
+        { "m_nRange", 0x20 }, { "m_nRangeVolume", 0x24 }, { "m_nXCoordinate", 0x28 }, { "m_nYCoordinate", 0x2C },
+        { "m_nZCoordinate", 0x30 }, { "m_nPan", 0x34 }, { "m_nVolume", 0x38 }, { "field_3C", 0x3C },
+        { "m_nChannel", 0x40 }, { "m_nPriority", 0x44 }, { "m_nLooping", 0x48 }, { "m_nPitchVariance", 0x4C },
+        { "m_nVolumeVariance", 0x50 }, { "m_b3DPositioning", 0x54 }, { "pSoundBuffer", 0x58 },
+        { "m_bFireForget", 0x5C }, { "m_nArea", 0x60 } };
+    for (const auto& m : members) {
+        f.Add(prefix + m.name, At<uint32_t>(sound, m.offset));
+    }
+}
+
+void OursSoundFields(Fields& f, const std::string& prefix, const CSound& sound)
+{
+    f.Add(prefix + "bLoading", static_cast<uint32_t>(sound.bLoading));
+    f.Add(prefix + "pRes", Address(sound.pRes));
+    f.AddResRef(prefix + "cResRef", sound.cResRef.GetResRef());
+    f.Add(prefix + "m_bPositionedSound", static_cast<uint32_t>(sound.m_bPositionedSound));
+    f.Add(prefix + "m_nBuffer", static_cast<uint32_t>(sound.m_nBuffer));
+    f.Add(prefix + "m_dwFrequency", static_cast<uint32_t>(sound.m_dwFrequency));
+    f.Add(prefix + "m_nRange", static_cast<uint32_t>(sound.m_nRange));
+    f.Add(prefix + "m_nRangeVolume", static_cast<uint32_t>(sound.m_nRangeVolume));
+    f.Add(prefix + "m_nXCoordinate", static_cast<uint32_t>(sound.m_nXCoordinate));
+    f.Add(prefix + "m_nYCoordinate", static_cast<uint32_t>(sound.m_nYCoordinate));
+    f.Add(prefix + "m_nZCoordinate", static_cast<uint32_t>(sound.m_nZCoordinate));
+    f.Add(prefix + "m_nPan", static_cast<uint32_t>(sound.m_nPan));
+    f.Add(prefix + "m_nVolume", static_cast<uint32_t>(sound.m_nVolume));
+    f.Add(prefix + "field_3C", static_cast<uint32_t>(sound.field_3C));
+    f.Add(prefix + "m_nChannel", static_cast<uint32_t>(sound.m_nChannel));
+    f.Add(prefix + "m_nPriority", static_cast<uint32_t>(sound.m_nPriority));
+    f.Add(prefix + "m_nLooping", static_cast<uint32_t>(sound.m_nLooping));
+    f.Add(prefix + "m_nPitchVariance", static_cast<uint32_t>(sound.m_nPitchVariance));
+    f.Add(prefix + "m_nVolumeVariance", static_cast<uint32_t>(sound.m_nVolumeVariance));
+    f.Add(prefix + "m_b3DPositioning", static_cast<uint32_t>(sound.m_b3DPositioning));
+    f.Add(prefix + "pSoundBuffer", Address(sound.pSoundBuffer));
+    f.Add(prefix + "m_bFireForget", static_cast<uint32_t>(sound.m_bFireForget));
+    f.Add(prefix + "m_nArea", static_cast<uint32_t>(sound.m_nArea));
+}
+
+// CItem::CItem() at 0x4E7840: on storage filled with each fill byte (0x00,
+// 0xCD, 0xFF), so a field the constructor leaves alone shows the fill, both
+// sides construct a CItem; every field the original writes is compared by
+// name (the helper's bLoading, pRes and cResRef, m_nAbilities, the three use
+// counts, m_wear, m_flags, m_numSounds, and every member of both CSounds),
+// and so is CSound::m_pSoundMixer, shown relative to g_pChitin (both sides'
+// point at a zeroed block). The vtable pointers are not compared: ours has
+// no vtable of its own (the original's CItem has a virtual destructor) and
+// its CObject vtable is our build's.
+void ItemConstructor(CaseContext& ctx)
+{
+    ChitinRestore restore;
+    uint8_t* originalChitin = nullptr;
+    ctx.SetInputs("pointing g_pChitin at zeroed blocks");
+    ctx.CallOriginal([&] {
+        originalChitin = OriginalBlock(kChitinSize);
+        const uint32_t pointer = Address(originalChitin);
+        std::memcpy(reinterpret_cast<void*>(kChitin), &pointer, 4);
+    });
+    auto* oursChitin = static_cast<unsigned char*>(::operator new(sizeof(CChitin)));
+    std::memset(oursChitin, 0, sizeof(CChitin));
+    g_pChitin = reinterpret_cast<CChitin*>(oursChitin);
+
+    for (const uint8_t fill : { uint8_t { 0x00 }, uint8_t { 0xCD }, uint8_t { 0xFF } }) {
+        ctx.SetInputs("CItem() on storage filled with " + Hex(fill));
+        Fields original;
+        ctx.CallOriginal([&] {
+            const uint32_t staleMixer = 0xDEADBEEF;
+            std::memcpy(reinterpret_cast<void*>(kSoundMixer), &staleMixer, 4);
+            auto* item = static_cast<uint8_t*>(OriginalNew(kItemSize));
+            std::memset(item, fill, kItemSize);
+            reinterpret_cast<ItemCtorFn>(kItemCtor)(item, nullptr);
+            original.Add("bLoading", At<uint32_t>(item, 0x4));
+            original.Add("pRes", At<uint32_t>(item, 0x8));
+            original.AddResRef("cResRef", item + 0xC);
+            original.Add("m_nAbilities", At<uint32_t>(item, 0x14));
+            original.Add("m_useCount1", At<uint16_t>(item, 0x18));
+            original.Add("m_useCount2", At<uint16_t>(item, 0x1A));
+            original.Add("m_useCount3", At<uint16_t>(item, 0x1C));
+            original.Add("m_wear", At<uint16_t>(item, 0x1E));
+            original.Add("m_flags", At<uint32_t>(item, 0x20));
+            for (int i = 0; i < 2; ++i) {
+                OriginalSoundFields(original, "m_useSound[" + std::to_string(i) + "].",
+                    item + kItemSoundsOffset + i * kSoundSize);
+            }
+            original.Add("m_numSounds", At<uint16_t>(item, 0xEC));
+            const uint32_t mixer = At<uint32_t>(reinterpret_cast<const uint8_t*>(kSoundMixer), 0);
+            if (mixer == Address(originalChitin) + kChitinSoundMixerOffset) {
+                original.text += "CSound::m_pSoundMixer &g_pChitin->cSoundMixer\n";
+            } else {
+                original.Add("CSound::m_pSoundMixer", mixer);
+            }
+        });
+
+        CSound::m_pSoundMixer = reinterpret_cast<CSoundMixer*>(static_cast<uintptr_t>(0xDEADBEEF));
+        auto* storage = static_cast<unsigned char*>(::operator new(sizeof(CItem)));
+        std::memset(storage, fill, sizeof(CItem));
+        const CItem* item = new (storage) CItem(); // leaked: its destructor reaches g_pChitin's resources
+        Fields ours;
+        ours.Add("bLoading", static_cast<uint32_t>(item->bLoading));
+        ours.Add("pRes", Address(item->pRes));
+        ours.AddResRef("cResRef", item->cResRef.GetResRef());
+        ours.Add("m_nAbilities", static_cast<uint32_t>(item->m_nAbilities));
+        ours.Add("m_useCount1", item->m_useCount1);
+        ours.Add("m_useCount2", item->m_useCount2);
+        ours.Add("m_useCount3", item->m_useCount3);
+        ours.Add("m_wear", item->m_wear);
+        ours.Add("m_flags", static_cast<uint32_t>(item->m_flags));
+        for (int i = 0; i < 2; ++i) {
+            OursSoundFields(ours, "m_useSound[" + std::to_string(i) + "].", item->m_useSound[i]);
+        }
+        ours.Add("m_numSounds", static_cast<uint16_t>(item->m_numSounds));
+        if (CSound::m_pSoundMixer == &g_pChitin->cSoundMixer) {
+            ours.text += "CSound::m_pSoundMixer &g_pChitin->cSoundMixer\n";
+        } else {
+            ours.Add("CSound::m_pSoundMixer", Address(CSound::m_pSoundMixer));
+        }
+        CSound::m_pSoundMixer = nullptr;
+
+        ctx.CountInputs(1);
+        // One failure per differing field.
+        size_t a = 0;
+        size_t b = 0;
+        while (a < original.text.size() || b < ours.text.size()) {
+            const size_t ea = original.text.find('\n', a);
+            const size_t eb = ours.text.find('\n', b);
+            const std::string la = a < original.text.size() ? original.text.substr(a, ea - a) : "";
+            const std::string lb = b < ours.text.size() ? ours.text.substr(b, eb - b) : "";
+            if (la != lb) {
+                ctx.Fail(ctx.Inputs(), la, lb);
+            }
+            a = ea == std::string::npos ? original.text.size() : ea + 1;
+            b = eb == std::string::npos ? ours.text.size() : eb + 1;
+        }
+    }
+}
+
 } // namespace
 
 ORACLE_CASE("items/res_item_parse", ResItemParse);
 ORACLE_CASE("items/tier_upgrade", TierUpgrade);
 ORACLE_CASE("items/use_count_roll", UseCountRoll);
+ORACLE_CASE("items/ctor", ItemConstructor);
