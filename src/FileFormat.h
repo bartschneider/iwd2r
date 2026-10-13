@@ -562,20 +562,30 @@ public:
     /* 0284 */ RESREF m_scriptSpecial3;
     /* 028C */ RESREF m_scriptMovement;
     /* 0294 */ BOOLEAN field_294;
+    /* 0295 */ unsigned char field_295[77];
     /* 02E2 */ BOOLEAN field_2E2;
+    /* 02E3 */ unsigned char field_2E3;
     /* 02E4 */ SHORT field_2E4;
     /* 02E6 */ SHORT field_2E6;
-    /* 02E8 */ SHORT field_2E8;
+    /* 02E8 */ BYTE field_2E8;
     /* 02E9 */ BYTE field_2E9;
     /* 02EA */ BOOLEAN field_2EA[6];
+    /* 02F0 */ unsigned char field_2F0[7];
     /* 02F7 */ BOOLEAN field_2F7;
     /* 02F8 */ BOOLEAN field_2F8;
     /* 02F9 */ BYTE field_2F9;
     /* 02FA */ BYTE m_fadeSpeed;
     /* 02FB */ unsigned char field_2FB;
     /* 02FC */ unsigned char field_2FC;
+    /* 02FD */ unsigned char field_2FD[2];
     /* 02FF */ unsigned char field_2FF;
+    /* 0300 */ unsigned char field_300[124];
 };
+
+// The original copies 0xDF dwords (CGameSprite::Unmarshal 0x70D1D2,
+// CGameSprite::Marshal 0x70B5FC, CScreenCreateChar::CompleteCharacterSkills
+// 0x612F90).
+static_assert(sizeof(CCreatureFileHeader) == 0x37C, "CCreatureFileHeader size");
 
 #pragma pack(push)
 #pragma pack(2)
@@ -746,6 +756,11 @@ public:
     DWORD nUnused[32];
 };
 
+// The original's double sits at +0x2C unaligned (CVariable::CVariable
+// 0x5505A0 copies it as two dwords at +0x2C and +0x30).
+#pragma pack(push)
+#pragma pack(2)
+
 class CAreaVariable {
 public:
     CAreaVariable()
@@ -761,6 +776,10 @@ public:
     /* 002C */ double m_floatValue;
     /* 0034 */ SCRIPTNAME m_stringValue;
 };
+
+#pragma pack(pop)
+
+static_assert(sizeof(CAreaVariable) == 0x54, "CAreaVariable size");
 
 // Seen in `CScreenStore::OpenBag`.
 #define CSTOREFILEHEADER_STORETYPE_BAG 4

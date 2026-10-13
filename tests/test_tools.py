@@ -1,5 +1,5 @@
 """Tests for tools/gen_map.py, tools/check_evidence.py, tools/gen_fields.py,
-tools/minischema.py and the pure parts of tools/play.py, tools/realinput.py,
+tools/minischema.py, tools/shaders.py and the pure parts of tools/play.py, tools/realinput.py,
 tools/winsandbox.py, tools/oracle.py and tools/ghidra/labels.py.
 
 Run from the repository root: python3 -I tests/test_tools.py
@@ -27,6 +27,7 @@ import xml.etree.ElementTree as ET
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GEN_MAP = os.path.join(ROOT, 'tools', 'gen_map.py')
+SHADERS_TOOL = os.path.join(ROOT, 'tools', 'shaders.py')
 
 
 class GenMapTest(unittest.TestCase):
@@ -219,6 +220,14 @@ class PlayArgsTest(unittest.TestCase):
         env = play.child_env({}, '/data', [], False, None, None, '/shots',
                              sound=True)
         self.assertNotIn('IWD2R_AUDIO', env)
+        self.assertNotIn('IWD2R_SHOT_PRESENTED', env)
+        env = play.child_env({}, '/data', [], False, None, None, '/shots',
+                             shot_presented=True)
+        self.assertEqual(env['IWD2R_SHOT_PRESENTED'], '1')
+
+    def test_shot_presented_flag(self):
+        self.assertFalse(play.parse_args([]).shot_presented)
+        self.assertTrue(play.parse_args(['--shot-presented']).shot_presented)
 
     def test_batch_set_escapes_percent(self):
         self.assertEqual(play.batch_set('X', 'a & b 100%'), 'set "X=a & b 100%%"')
@@ -227,6 +236,47 @@ class PlayArgsTest(unittest.TestCase):
         self.assertEqual(play.sync_list(['a.cpp', 'build/x', 'runs/1/log.txt',
                                          'tools/build/y', '']),
                          ['a.cpp', 'tools/build/y'])
+
+
+class ShadersTest(unittest.TestCase):
+    """tools/shaders.py --check against the committed blobs (it fetches the
+    pinned glslang into $IWD2R_HOME/glslang when absent)."""
+
+    def run_check(self, *args):
+        return subprocess.run([sys.executable, '-I', SHADERS_TOOL, '--check', *args],
+                              capture_output=True, text=True)
+
+    def test_shaders_check_detects_stale_blob(self):
+        real = self.run_check()
+        self.assertEqual(real.returncode, 0, real.stdout + real.stderr)
+        src = os.path.join(ROOT, 'platform', 'shaders')
+        with tempfile.TemporaryDirectory() as tmp:
+            for name in os.listdir(src):
+                with open(os.path.join(src, name), 'rb') as a, \
+                        open(os.path.join(tmp, name), 'wb') as b:
+                    b.write(a.read())
+            self.assertEqual(self.run_check('--dir', tmp).returncode, 0)
+            blob = os.path.join(tmp, 'sharp.frag.spv')
+            with open(blob, 'r+b') as f:
+                f.seek(40)
+                byte = f.read(1)
+                f.seek(40)
+                f.write(bytes([byte[0] ^ 0x01]))
+            stale = self.run_check('--dir', tmp)
+            self.assertEqual(stale.returncode, 1)
+            self.assertIn('sharp.frag.spv does not match its source', stale.stdout)
+            os.remove(blob)
+            missing = self.run_check('--dir', tmp)
+            self.assertEqual(missing.returncode, 1)
+            self.assertIn('sharp.frag.spv is missing', missing.stdout)
+
+    def test_pinned_release_has_checksums(self):
+        with open(os.path.join(ROOT, 'tools', 'shaders_versions.json')) as f:
+            pin = json.load(f)['glslang']
+        self.assertTrue(pin['version'])
+        for key in ('linux-x86_64', 'windows-x86_64'):
+            self.assertIn(pin['version'], pin[key]['url'])
+            self.assertRegex(pin[key]['sha256'], r'^[0-9a-f]{64}$')
 
 
 class PlayRunFolderTest(unittest.TestCase):
@@ -517,6 +567,71 @@ class ScenarioParseTest(unittest.TestCase):
             r(640, 480, 1, (1920, 1080))
         with self.assertRaises(ValueError):
             r(1920, 1080, 2, (1920, 1080))
+
+    def test_world_scale_geometry(self):
+        r = realinput.resolve_screen
+        # World Scale absent: as ever.
+        g = r(2560, 1440, 2, (2560, 1440))
+        self.assertEqual((g['scale'], g['ui_scale'], g['world_scale'],
+                          g['world_ui_scale'], g['full_ui_scale']),
+                         (2, 2, 2, 2, 2))
+        # Scale 2, World Scale 1 at 1920x1080: the engine sees the output;
+        # the world screen's panels at 2, the 800x600 screens at 1 (600
+        # rows do not fit 1080 at 2).
+        g = r(1920, 1080, 2, (1920, 1080), '1')
+        self.assertEqual((g['width'], g['height'], g['scale'],
+                          g['ui_scale'], g['world_ui_scale'],
+                          g['full_ui_scale'], g['output_width']),
+                         (1920, 1080, 1, 2, 2, 1, 1920))
+        self.assertEqual(r(2560, 1440, 'auto', (2560, 1440),
+                           'auto')['world_scale'], 1)
+        self.assertEqual(r(1920, 1080, 1, (1920, 1080), 'auto')['scale'], 1)
+        self.assertEqual(r(3840, 2160, 2, (3840, 2160), '')['scale'], 2)
+        # World Scale above Scale is clamped.
+        self.assertEqual(r(1920, 1080, 1, (1920, 1080), '2')['scale'], 1)
+        with self.assertRaises(ValueError):
+            r(1920, 1080, 4, (1920, 1080), '2')
+        with self.assertRaises(ValueError):
+            r(1920, 1080, 2, (1920, 1080), '5')
+        # The clamps: 1920x1080 at 3/1 shows the world panels at 2;
+        # 1366x768 at 2/1 everything at 1.
+        g31 = r(1920, 1080, 3, (1920, 1080), '1')
+        self.assertEqual((g31['world_ui_scale'], g31['full_ui_scale']),
+                         (2, 1))
+        g1366 = r(1366, 768, 2, (1920, 1080), '1')
+        self.assertEqual((g1366['world_ui_scale'], g1366['full_ui_scale']),
+                         (1, 1))
+        click = {'op': 'click', 'x': 645, 'y': 410, 'ui': True}
+        # At 1920x1080 2/1 the 800x600 screens are shown at 1, centred.
+        self.assertEqual(realinput.window_point(click, g),
+                         (560 + 645, 240 + 410))
+        self.assertEqual(realinput.window_point(click, g1366),
+                         ((1366 - 800) // 2 + 645, (768 - 600) // 2 + 410))
+        # 2560x1440 at 2/1: centred at 2x.
+        g2 = r(2560, 1440, 2, (2560, 1440), '1')
+        self.assertEqual(g2['full_ui_scale'], 2)
+        self.assertEqual(realinput.window_point(click, g2),
+                         (480 + 645 * 2, 120 + 410 * 2))
+        # 1600x1200 at 2/1 (the original height): the UI fills the window.
+        g16 = r(1600, None, 2, (1920, 1080), '1')
+        self.assertEqual((g16['height'], g16['full_ui_scale']), (1200, 2))
+        self.assertEqual(realinput.window_point(click, g16),
+                         (645 * 2, 410 * 2))
+        # A crop: a 1100-high window at 2x shows 550 of the 600 rows.
+        gc = r(1920, 1100, 2, (1920, 1100), '1')
+        self.assertEqual(gc['full_ui_scale'], 1)
+        gc = dict(gc, full_ui_scale=2)
+        with self.assertRaises(ValueError):
+            realinput.window_point(dict(click, y=10), gc)
+        # Screen points are world points.
+        self.assertEqual(realinput.window_point(
+            dict(click, ui=False), g), (645, 410))
+        # play.py takes Scale and World Scale from --set.
+        g = play.vm_geometry(1920, 1, ['Program Options/Scale=2',
+                                       'Program Options/World Scale=1'])
+        self.assertEqual((g['ui_scale'], g['world_scale'], g['width']),
+                         (2, 1, 1920))
+        self.assertEqual(play.vm_geometry(2560, 2, [])['ui_scale'], 2)
 
     def test_describe_round_trips(self):
         text = ('wait 5\nclick 1 2\norigin screen\nmove 3 4\nkey TAB\n'
@@ -2776,7 +2891,7 @@ class SharedLockTest(unittest.TestCase):
         locks = LockRecorder()
         seen = []
 
-        def fake_record(script, actions, *rest):
+        def fake_record(script, actions, *rest, **kw):
             seen.append((os.path.basename(script), list(locks.held)))
             return 0
 
@@ -2851,6 +2966,218 @@ class SharedLockTest(unittest.TestCase):
             ('reset', [lock]), ('run', names[0], [lock]),
             ('reset', [lock]), ('run', names[1], [lock])])
         self.assertEqual(locks.paths, [(lock, 'sandbox')] * 3)
+
+
+class SandboxReplayTest(unittest.TestCase):
+    """replay record/compare in Windows Sandbox (winsandbox.run_replay,
+    tools/sandbox/replay-driver.ps1), with the sandbox stubbed."""
+
+    GAME = r'C:\Users\thier\iwd2r-oracle\game'
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp = self._tmp.name
+
+    def test_wsb_maps_the_replay_folders(self):
+        folders = winsandbox.replay_folders(r'C:\b\oracle', self.GAME,
+                                            r'C:\vm\results',
+                                            r'C:\vm\tools')
+        root = ET.fromstring(winsandbox.make_wsb(
+            folders, winsandbox.replay_logon_command()))
+        mapped = [(m.findtext('HostFolder'), m.findtext('SandboxFolder'),
+                   m.findtext('ReadOnly'))
+                  for m in root.find('MappedFolders')]
+        self.assertEqual(mapped, [
+            (r'C:\b\oracle', r'C:\iwd2r\oracle', 'true'),
+            # Its own path: icewind2.ini's [Alias] paths name it.
+            (self.GAME, self.GAME, 'false'),
+            (r'C:\vm\results', r'C:\iwd2r\results', 'false'),
+            (r'C:\vm\tools', r'C:\iwd2r\tools', 'true')])
+        self.assertEqual(root.findtext('Networking'), 'Disable')
+        self.assertEqual(
+            root.find('LogonCommand').findtext('Command'),
+            r'powershell.exe -NoProfile -ExecutionPolicy Bypass -File '
+            r'C:\iwd2r\tools\replay-driver.ps1 -Config '
+            r'C:\iwd2r\tools\config.json')
+
+    def test_driver_config(self):
+        env = oracle.recorder_env(
+            winsandbox.BOX_REPLAY_DIR + '\\scenario.txt',
+            winsandbox.BOX_REPLAY_DIR, 1, 30)
+        self.assertEqual(env, {
+            'IWD2R_SCRIPT': r'C:\iwd2r\results\replay\scenario.txt',
+            'IWD2R_REPLAY_DIR': r'C:\iwd2r\results\replay',
+            'IWD2R_DUMP_EVERY': '30', 'IWD2R_SEED': '1'})
+        self.assertEqual(oracle.recorder_env('s', 'd', 7, 0, 40, True), {
+            'IWD2R_SCRIPT': 's', 'IWD2R_REPLAY_DIR': 'd',
+            'IWD2R_DUMP_EVERY': '0', 'IWD2R_SEED': '7',
+            'IWD2R_TEST_STEAL_FOCUS': '40',
+            'IWD2R_TEST_NO_FOCUS_GUARD': '1'})
+        cfg = winsandbox.replay_driver_config(self.GAME, env, 180)
+        self.assertEqual(cfg, {
+            'injector': r'C:\iwd2r\oracle\injector.exe',
+            'recorder': r'C:\iwd2r\oracle\recorder.dll',
+            'exe': self.GAME + r'\iwd2.exe',
+            'workdir': self.GAME,
+            'replay_dir': r'C:\iwd2r\results\replay',
+            'results': r'C:\iwd2r\results',
+            'env': env,
+            'timeout': 180,
+            'backstop': 240,
+            'exclusions': [r'C:\iwd2r\oracle', self.GAME,
+                           r'C:\iwd2r\results'],
+            'stop_audio': False,
+            'directplay': r'C:\iwd2r\tools\directplay',
+            'shutdown': True})
+        self.assertTrue(os.path.isfile(winsandbox.REPLAY_DRIVER))
+
+    def test_stage_directplay(self):
+        source = os.path.join(self.tmp, 'SysWOW64')
+        os.makedirs(source)
+        for name in winsandbox.DIRECTPLAY_FILES:
+            with open(os.path.join(source, name.upper()), 'w') as f:
+                f.write(name)
+        target = os.path.join(self.tmp, 'tools', 'directplay')
+        self.assertEqual(winsandbox.stage_directplay(target, source),
+                         list(winsandbox.DIRECTPLAY_FILES))
+        self.assertEqual(sorted(os.listdir(target)),
+                         sorted(winsandbox.DIRECTPLAY_FILES))
+        os.remove(os.path.join(source, 'DPLAYX.DLL'))
+        with self.assertRaisesRegex(RuntimeError, 'dplayx.dll'):
+            winsandbox.stage_directplay(target, source)
+
+    def test_results_copy_plan(self):
+        plan = winsandbox.replay_copy_plan(
+            '/r', '/run/replay', ['driver.log', 'done.txt'],
+            ['status.txt', 'checkpoint-start.json'])
+        self.assertEqual(plan, [
+            ('/r/replay/checkpoint-start.json',
+             '/run/replay/checkpoint-start.json'),
+            ('/r/replay/status.txt', '/run/replay/status.txt'),
+            ('/r/done.txt', '/run/replay/sandbox/done.txt'),
+            ('/r/driver.log', '/run/replay/sandbox/driver.log')])
+
+    def record(self, argv, replace_run=None):
+        """Runs oracle.main(argv) with everything outside stubbed; returns
+        (exit code, events, locks)."""
+        from unittest import mock
+        locks = LockRecorder()
+        events = []
+        build = os.path.join(self.tmp, 'win')
+        out = os.path.join(build, oracle.REPLAY_DIR_REL)
+        os.makedirs(out)
+        for name in (oracle.INJECTOR, oracle.RECORDER):
+            open(os.path.join(out, name), 'w').close()
+        game = os.path.join(self.tmp, 'game')
+        os.makedirs(game)
+        dump = {'frame': 10, 'globals': {'reinitializing': 0,
+                                         'ai_stalled_frames': 0}}
+
+        def run_replay(build_dir, game_dir, script, env, timeout, host_run,
+                       out_dir, log):
+            events.append(('sandbox', list(locks.held), env['IWD2R_SEED'],
+                           build_dir == out))
+            os.makedirs(out_dir)
+            with open(os.path.join(out_dir, 'status.txt'), 'w') as f:
+                f.write('frame=10\nstate=finished\n')
+            with open(os.path.join(out_dir, 'checkpoint-start.json'),
+                      'w') as f:
+                json.dump(dump, f)
+            return {'code': 0, 'stdout': 'injector: pid 1', 'stderr': '',
+                    'error': None, 'seconds': 31.0}
+
+        def record_on_host(*a):
+            events.append(('host', list(locks.held)))
+            out_dir = a[8]
+            os.makedirs(out_dir)
+            with open(os.path.join(out_dir, 'checkpoint-start.json'),
+                      'w') as f:
+                json.dump(dump, f)
+            return 0, '', ''
+
+        # The play module oracle.py imports (tools/ is on its sys.path).
+        oracle_play = __import__('play')
+        sandbox = types.SimpleNamespace(
+            available=lambda: True, ENABLE_HINT='play: off',
+            VM_ROOT=os.path.join(self.tmp, 'vm'),
+            SANDBOX_LOCK=os.path.join(self.tmp, 'vm', 'sandbox.lock'),
+            BOX_REPLAY_DIR=winsandbox.BOX_REPLAY_DIR,
+            deploy_runtime=lambda exe, log, arch: events.append(
+                ('runtime', os.path.basename(exe), arch)),
+            run_replay=replace_run or run_replay)
+        with LockRecorder.patch(oracle, locks), \
+                mock.patch.dict(sys.modules, {'winsandbox': sandbox}), \
+                mock.patch.object(oracle_play, 'WIN_CHECKOUT', build), \
+                mock.patch.object(oracle, 'ensure_vanilla', lambda: game), \
+                mock.patch.object(oracle, 'prepare_replay_ini',
+                                  lambda g: None), \
+                mock.patch.object(oracle, 'record_on_host', record_on_host), \
+                mock.patch.object(oracle, 'RUNS_DIR',
+                                  os.path.join(self.tmp, 'runs')), \
+                mock.patch.object(oracle, 'check_dumps', lambda d, schema: {
+                    n: [] for n in os.listdir(d)
+                    if n.startswith('checkpoint-')}), \
+                contextlib.redirect_stdout(io.StringIO()):
+            code = oracle.main(argv)
+        return code, events, locks, sandbox
+
+    def test_record_in_sandbox_takes_both_locks_in_order(self):
+        code, events, locks, sandbox = self.record(
+            ['replay', 'record', 'start_screen', '--seed', '3'])
+        self.assertEqual(code, 0)
+        self.assertEqual(locks.paths, [(oracle.REPLAY_LOCK, 'replay'),
+                                       (sandbox.SANDBOX_LOCK, 'sandbox')])
+        self.assertEqual(events, [
+            ('runtime', 'injector.exe', 'x86'),
+            ('sandbox', [oracle.REPLAY_LOCK, sandbox.SANDBOX_LOCK], '3',
+             True)])
+        self.assertEqual(locks.held, [])
+        run = glob.glob(os.path.join(self.tmp, 'runs', '*', 'replay'))[0]
+        with open(os.path.join(run, 'replay.json')) as f:
+            report = json.load(f)
+        self.assertEqual(report['mode'], 'sandbox')
+        self.assertEqual(report['sandbox_seconds'], 31.0)
+        self.assertEqual(report['missing_checkpoints'], [])
+
+    def test_host_switch(self):
+        code, events, locks, _ = self.record(
+            ['replay', 'record', 'start_screen', '--host'])
+        self.assertEqual(code, 0)
+        self.assertEqual(events, [('host', [oracle.REPLAY_LOCK])])
+        self.assertEqual(locks.paths, [(oracle.REPLAY_LOCK, 'replay')])
+        run = glob.glob(os.path.join(self.tmp, 'runs', '*', 'replay'))[0]
+        with open(os.path.join(run, 'replay.json')) as f:
+            self.assertEqual(json.load(f)['mode'], 'host')
+
+    def test_compare_passes_the_host_switch(self):
+        from unittest import mock
+        seen = []
+        with mock.patch.object(oracle, 'replay_compare',
+                               lambda a: seen.append(a.host) or 0), \
+                LockRecorder.patch(oracle, LockRecorder()):
+            oracle.main(['replay', 'compare', 'chargen_replay'])
+            oracle.main(['replay', 'compare', 'chargen_replay', '--host'])
+        self.assertEqual(seen, [False, True])
+
+    def test_sandbox_error_fails_the_run(self):
+        def failing(build_dir, game_dir, script, env, timeout, host_run,
+                    out_dir, log):
+            os.makedirs(out_dir)
+            return {'code': None, 'stdout': '', 'stderr': '',
+                    'error': 'sandbox timeout: no done.txt after 420 s',
+                    'seconds': 420.0}
+        code, _, _, _ = self.record(['replay', 'record', 'start_screen'],
+                                    failing)
+        self.assertEqual(code, oracle.INJECTOR_TIMEOUT)
+        run = glob.glob(os.path.join(self.tmp, 'runs', '*', 'replay'))[0]
+        with open(os.path.join(run, 'replay.json')) as f:
+            report = json.load(f)
+        self.assertEqual(report['sandbox_error'],
+                         'sandbox timeout: no done.txt after 420 s')
+        self.assertTrue(report['outcome'].startswith(
+            'sandbox: sandbox timeout'))
+        self.assertEqual(report['missing_checkpoints'], ['start'])
 
 
 class OracleReplayTest(unittest.TestCase):

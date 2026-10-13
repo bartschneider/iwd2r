@@ -58,6 +58,36 @@ void CGameAnimation::EquipArmor(CHAR armorLevel, BYTE* colorRangeValues)
     m_animation->EquipArmor(armorLevel, colorRangeValues);
 }
 
+// NOTE: Inlined.
+void CGameAnimation::EquipHelmet(const CString& resRef, BYTE* colorRangeValues)
+{
+    // __FILE__: .\Include\ObjAnimation.h
+    // __LINE__: 2076
+    UTIL_ASSERT(m_animation != NULL);
+
+    m_animation->EquipHelmet(resRef, colorRangeValues);
+}
+
+// NOTE: Inlined.
+void CGameAnimation::EquipShield(const CString& resRef, BYTE* colorRangeValues)
+{
+    // __FILE__: .\Include\ObjAnimation.h
+    // __LINE__: 2077
+    UTIL_ASSERT(m_animation != NULL);
+
+    m_animation->EquipShield(resRef, colorRangeValues);
+}
+
+// NOTE: Inlined.
+void CGameAnimation::EquipWeapon(const CString& resRef, BYTE* colorRangeValues, DWORD itemFlags, const WORD* pAttackProb)
+{
+    // __FILE__: .\Include\ObjAnimation.h
+    // __LINE__: 2078
+    UTIL_ASSERT(m_animation != NULL);
+
+    m_animation->EquipWeapon(resRef, colorRangeValues, itemFlags, pAttackProb);
+}
+
 // 0x45B690
 USHORT CGameAnimation::GetAnimationId()
 {

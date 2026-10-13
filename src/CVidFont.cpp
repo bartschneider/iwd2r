@@ -3,6 +3,7 @@
 #include "CUtil.h"
 #include "CVidInf.h"
 #include "CVideo3d.h"
+#include "render/api.h"
 
 // 0x8FB974
 BOOLEAN CVidFont::byte_8FB974[12];
@@ -325,6 +326,7 @@ void CVidFont::RealizePalette(COLORREF rgbForegroundColor, COLORREF rgbBackgroun
 // 0x793720
 BOOL CVidFont::TextOut(const CString& sString, int x, int y, const CRect& rClip, INT nSurface)
 {
+    if (auto* b = render::Active(); b && b->Clipped(rClip).DrawText(*this, sString, { x, y }, 0)) return TRUE;
     int length = sString.GetLength();
     for (int index = 0; index < length; index++) {
         SequenceSet(sString.GetAt(index) - 1);

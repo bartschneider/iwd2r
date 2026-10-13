@@ -70,10 +70,10 @@ int CResItem::GetAbilityEffectNo(int nAbility)
 }
 
 // 0x4016D0
-int CResItem::GetAbilityNo()
+int CResItem::GetEquipedEffectNo()
 {
     if (m_bParsed) {
-        return m_pHeader->abilityCount;
+        return m_pHeader->equipedEffectCount;
     }
 
     return -1;
@@ -83,26 +83,42 @@ int CResItem::GetAbilityNo()
 BOOL CResItem::Parse(void* pData)
 {
     if (pData == NULL) {
-        return FALSE;
+        return m_bParsed;
     }
 
     m_pHeader = reinterpret_cast<ITEM_HEADER*>(pData);
-    if (m_pHeader->nFileType != 'ITM ') {
+    if (memcmp(&(m_pHeader->nFileType), "ITM ", 4) == 0) {
+        if (memcmp(&(m_pHeader->nFileVersion), "V2.0", 4) == 0) {
+            m_pEffects = reinterpret_cast<ITEM_EFFECT*>(reinterpret_cast<unsigned char*>(pData) + m_pHeader->effectsOffset);
+            m_pAbilities = reinterpret_cast<ITEM_ABILITY*>(reinterpret_cast<unsigned char*>(pData) + m_pHeader->abilityOffset);
+
+            m_bParsed = TRUE;
+
+            return TRUE;
+        } else {
+            // __FILE__: C:\Projects\Icewind2\src\Baldur\BalDataTypes.cpp
+            // __LINE__: 1369
+            UTIL_ASSERT_MSG(FALSE, CString("Item file version isn't ") + CString("ITM V2.0") + CString(": ") + CString(reinterpret_cast<const char*>(m_pDimmKeyTableEntry->resRef.GetResRef()), RESREF_SIZE) + CString(".ITM"));
+
+            return FALSE;
+        }
+    } else {
         // __FILE__: C:\Projects\Icewind2\src\Baldur\BalDataTypes.cpp
         // __LINE__: 1356
         UTIL_ASSERT_MSG(FALSE, CString("Item file header type isn't 'ITM '") + CString(": ") + CString(reinterpret_cast<const char*>(m_pDimmKeyTableEntry->resRef.GetResRef()), RESREF_SIZE) + CString(".ITM"));
+
+        return FALSE;
+    }
+}
+
+// 0x401B60
+ITEM_EFFECT* CResItem::GetEquipedEffect(int nEffect)
+{
+    if (m_bParsed) {
+        if (nEffect >= 0 && nEffect < m_pHeader->equipedEffectCount) {
+            return &(m_pEffects[nEffect]);
+        }
     }
 
-    if (m_pHeader->nFileVersion != 'V2.0') {
-        // __FILE__: C:\Projects\Icewind2\src\Baldur\BalDataTypes.cpp
-        // __LINE__: 1369
-        UTIL_ASSERT_MSG(FALSE, CString("Item file version isn't ") + CString("ITM V2.0") + CString(": ") + CString(reinterpret_cast<const char*>(m_pDimmKeyTableEntry->resRef.GetResRef()), RESREF_SIZE) + CString(".ITM"));
-    }
-
-    m_pEffects = reinterpret_cast<ITEM_EFFECT*>(reinterpret_cast<unsigned char*>(pData) + m_pHeader->effectsOffset);
-    m_pAbilities = reinterpret_cast<ITEM_ABILITY*>(reinterpret_cast<unsigned char*>(pData) + m_pHeader->abilityOffset);
-
-    m_bParsed = TRUE;
-
-    return m_bParsed;
+    return NULL;
 }

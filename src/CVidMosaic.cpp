@@ -3,6 +3,7 @@
 #include "CUtil.h"
 #include "CVidInf.h"
 #include "CVideo3d.h"
+#include "render/api.h"
 
 // 0x7B0AA0
 CVidMosaic::CVidMosaic()
@@ -39,6 +40,7 @@ void CVidMosaic::GetSize(CSize& frameSize, BOOL bDemanded)
 // 0x7B0C80
 BOOL CVidMosaic::Render(INT nSurface, int x, int y, const CRect& rMosaic, const CRect& rClip, DWORD dwFlags, BOOL bDemanded)
 {
+    if (auto* b = render::Active(); b && b->Clipped(rClip).DrawMosaic(*this, { x, y }, rMosaic, dwFlags)) return TRUE;
     if (rClip.IsRectNull()) {
         return TRUE;
     }

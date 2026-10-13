@@ -12,6 +12,7 @@
 #include "CScreenWorld.h"
 #include "CUtil.h"
 #include "CVidPoly.h"
+#include "marshal_ptr.h"
 
 // 0x8D3988
 const CResRef CGameContainer::RESREF_AR6051("AR6051");
@@ -773,8 +774,8 @@ void CGameContainer::Marshal(CAreaFileContainer** pContainerObject)
             pPoints[cnt].m_yPos = static_cast<WORD>(m_pPolygon[cnt].y);
         }
 
-        // FIXME: Unsafe x64 conversion.
-        (*pContainerObject)->m_pickPointStart = static_cast<DWORD>(reinterpret_cast<DWORD_PTR>(pPoints));
+        // The game-file writers resolve the handle (compat/marshal_ptr.h).
+        (*pContainerObject)->m_pickPointStart = iwd2r::MarshalPtr(pPoints);
         (*pContainerObject)->m_pickPointCount = m_nPolygon;
     }
 
@@ -797,8 +798,8 @@ void CGameContainer::Marshal(CAreaFileContainer** pContainerObject)
             // __LINE__: 2064
             UTIL_ASSERT(pItems != NULL)
 
-            // FIXME: Unsafe x64 conversion.
-            (*pContainerObject)->m_startingItem = static_cast<DWORD>(reinterpret_cast<DWORD_PTR>(pItems));
+            // The game-file writers resolve the handle (compat/marshal_ptr.h).
+            (*pContainerObject)->m_startingItem = iwd2r::MarshalPtr(pItems);
             (*pContainerObject)->m_itemCount = cnt;
 
             cnt = 0;

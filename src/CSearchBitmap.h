@@ -28,6 +28,7 @@ public:
     void Uninit();
     void SnapshotInit(const BYTE* terrainTable, BYTE* snapshotDynamicCost, BYTE sourceSide, BYTE snapshotPersonalSpace);
     BYTE SnapshotGetCost(CPoint point, BOOL bBump);
+    CPoint GetNearestOpenSquare(CPoint pt, const BYTE* terrainTable, BYTE personalSpace, SHORT nDirection);
     void SnapshotRemoveObject(CPoint point, BYTE personalSpaceRange, BOOL bBumpable);
     void SnapshotAddObjectDiagonals(CPoint point, BYTE personalSpaceRange, BOOL bBumpable);
     void AddObject(const CPoint& point, BYTE sourceSide, BYTE personalSpaceRange, BOOL bBumpable, BOOLEAN& bOnSearchMap);

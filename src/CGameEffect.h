@@ -300,6 +300,9 @@ public:
     /* 0024 */ virtual void OnRemove(CGameSprite* pSprite);
 
     BOOL Compare(const CGameEffect& other);
+    BOOL sub_4A3310(CGameSprite* pSprite, BYTE* pRoll1, BYTE* pRoll2, BYTE* pRoll3, BYTE* pRoll4, BYTE* pProbabilityRoll);
+    void sub_4A3FF0(CGameSprite* pSprite);
+    BOOL sub_4A4FC0(CGameEffect* pOther, BOOL bCheckSource);
     void PlaySound(const CResRef& soundResRef, CGameSprite* pSprite);
     BOOL CheckExpiration();
     ITEM_EFFECT* GetItemEffect();
@@ -482,6 +485,7 @@ public:
     CGameEffectHeal();
     CGameEffectHeal(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;
 };
 
 class CGameEffectHitPoints : public CGameEffect {

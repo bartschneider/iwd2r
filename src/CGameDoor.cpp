@@ -10,6 +10,7 @@
 #include "CScreenWorld.h"
 #include "CUtil.h"
 #include "CVidPoly.h"
+#include "marshal_ptr.h"
 
 // 0x8D41D8
 const LONG CGameDoor::RANGE_DOOR = 16
@@ -655,8 +656,8 @@ void CGameDoor::Marshal(CAreaFileDoorObject** pDoorObject)
             pPoints[cnt].m_yPos = static_cast<WORD>(m_pClosedSearch[cnt].y);
         }
 
-        // FIXME: Unsafe x64 conversion.
-        (*pDoorObject)->m_closedSearchSquaresStart = static_cast<DWORD>(reinterpret_cast<DWORD_PTR>(pPoints));
+        // The game-file writers resolve the handle (compat/marshal_ptr.h).
+        (*pDoorObject)->m_closedSearchSquaresStart = iwd2r::MarshalPtr(pPoints);
         (*pDoorObject)->m_closedSearchSquaresCount = m_nClosedSearch;
     }
 
@@ -672,8 +673,8 @@ void CGameDoor::Marshal(CAreaFileDoorObject** pDoorObject)
             pPoints[cnt].m_yPos = static_cast<WORD>(m_pOpenSearch[cnt].y);
         }
 
-        // FIXME: Unsafe x64 conversion.
-        (*pDoorObject)->m_openSearchSquaresStart = static_cast<DWORD>(reinterpret_cast<DWORD_PTR>(pPoints));
+        // The game-file writers resolve the handle (compat/marshal_ptr.h).
+        (*pDoorObject)->m_openSearchSquaresStart = iwd2r::MarshalPtr(pPoints);
         (*pDoorObject)->m_openSearchSquaresCount = m_nOpenSearch;
     }
 
@@ -689,8 +690,8 @@ void CGameDoor::Marshal(CAreaFileDoorObject** pDoorObject)
             pPoints[cnt].m_yPos = static_cast<WORD>(m_pClosedPolygon[cnt].y);
         }
 
-        // FIXME: Unsafe x64 conversion.
-        (*pDoorObject)->m_closedSelectionPointStart = static_cast<DWORD>(reinterpret_cast<DWORD_PTR>(pPoints));
+        // The game-file writers resolve the handle (compat/marshal_ptr.h).
+        (*pDoorObject)->m_closedSelectionPointStart = iwd2r::MarshalPtr(pPoints);
         (*pDoorObject)->m_closedSelectionPointCount = m_nClosedPolygon;
     }
 
@@ -706,8 +707,8 @@ void CGameDoor::Marshal(CAreaFileDoorObject** pDoorObject)
             pPoints[cnt].m_yPos = static_cast<WORD>(m_pOpenPolygon[cnt].y);
         }
 
-        // FIXME: Unsafe x64 conversion.
-        (*pDoorObject)->m_openSelectionPointStart = static_cast<DWORD>(reinterpret_cast<DWORD_PTR>(pPoints));
+        // The game-file writers resolve the handle (compat/marshal_ptr.h).
+        (*pDoorObject)->m_openSelectionPointStart = iwd2r::MarshalPtr(pPoints);
         (*pDoorObject)->m_openSelectionPointCount = m_nOpenPolygon;
     }
 

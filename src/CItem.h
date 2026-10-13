@@ -33,6 +33,7 @@ public:
     void Equip(CGameSprite* pSprite, LONG slotNum, BOOL animationOnly);
     void Unequip(CGameSprite* pSprite, LONG slotNum, BOOL recalculateEffects, BOOL animationOnly);
     WORD GetAnimationType();
+    BYTE sub_4E9250(CString& sAnimation, CGameSprite* pSprite);
     ITEM_ABILITY* GetAbility(INT nAbility);
     CGameEffect* GetAbilityEffect(LONG abilityNum, LONG effectNum, CGameObject* pObject);
     WORD GetItemType();
@@ -59,6 +60,7 @@ public:
     BYTE GetMinWISRequired();
     BYTE GetMinCONRequired();
     BYTE GetMinCHRRequired();
+    void sub_4EA4A0(CString& sResRef);
     void sub_4EA580(CUIControlTextDisplay* pText, COLORREF rgbColor);
 
     CItem& operator=(const CItem& other);

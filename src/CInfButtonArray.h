@@ -39,6 +39,8 @@ public:
     void UpdateButtons();
     void OnLButtonPressed(int buttonID);
     void OnRButtonPressed(int buttonID);
+    void UpdateCustomizableButtonTypes(INT* pButtonList);
+    void UpdateSelectedWeaponSet(BYTE nIndex);
 
     void SetSelectedButton(INT nSelectedButton);
 
@@ -50,6 +52,8 @@ public:
     /* 197E */ INT m_nSelectedButton;
     /* 1982 */ int m_nState;
     /* 19B2 */ int field_19B2;
+    /* 19B6 */ INT m_customizableButtonTypes[9];
+    /* 19E8 */ BYTE m_nSelectedWeaponSet;
 };
 
 #endif /* CINFBUTTONARRAY_H_ */

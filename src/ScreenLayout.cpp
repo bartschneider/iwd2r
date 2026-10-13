@@ -1,10 +1,15 @@
 #include "ScreenLayout.h"
 
+#include "CBaldurChitin.h"
+#include "CInfinity.h"
+#include "CScreenWorld.h"
 #include "CVidMosaic.h"
 #include "platform/window.h"
 
+#include <cassert>
 #include <cctype>
 #include <climits>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
@@ -188,8 +193,50 @@ namespace {
 
     ScreenLayout& Current()
     {
-        static ScreenLayout layout = ComputeScreenLayout(800, 600);
+        static ScreenLayout layout = ComputeScreenLayout(800, 600, 1, 1);
         return layout;
+    }
+
+    // The scales ReadScreenSize resolved last.
+    int& ResolvedUiScale()
+    {
+        static int scale = 1;
+        return scale;
+    }
+
+    int& ResolvedWorldScale()
+    {
+        static int scale = 1;
+        return scale;
+    }
+
+    // The bottom panels' depths at every non-original size (the 800x600 and
+    // 1024x768 tables agree): the toolbar under the world viewport.
+    const int kToolbarDepth = 167;
+
+    RECT MakeRect(int left, int top, int right, int bottom)
+    {
+        RECT r;
+        r.left = left;
+        r.top = top;
+        r.right = right;
+        r.bottom = bottom;
+        return r;
+    }
+
+    // The UI-scaling fields every layout carries.
+    void SetRegionFields(ScreenLayout& l, int uiScale, int worldScale, const EffectiveScales& eff)
+    {
+        l.uiScale = uiScale;
+        l.worldScale = worldScale;
+        l.worldUiScale = eff.worldUi;
+        l.fullUiScale = eff.fullUi;
+        l.uiWidth = static_cast<int>(static_cast<long long>(l.screenWidth) * worldScale / eff.worldUi);
+        l.uiHeight = static_cast<int>(static_cast<long long>(l.screenHeight) * worldScale / eff.worldUi);
+        const int ux = (l.screenWidth - kUiWidth) / 2;
+        const int uy = (l.screenHeight - kUiHeight) / 2;
+        l.fullUiRect = MakeRect(ux, uy, ux + kUiWidth, uy + kUiHeight);
+        l.uiPanelRects = WorldPanelRects(l, l.stru_8E79B8.bottom);
     }
 
 }
@@ -202,38 +249,90 @@ bool IsOriginalResolution(int width, int height)
         || (width == 2048 && height == 1536);
 }
 
-ScreenLayout ComputeScreenLayout(int width, int height)
+int ReservedDepth(int depth, int uiScale, int worldScale)
 {
-    ScreenLayout l;
-    std::memset(&l, 0, sizeof(l));
-    if (OriginalLayout(width, height, l)) {
+    uiScale = uiScale >= 1 ? uiScale : 1;
+    worldScale = worldScale >= 1 ? worldScale : 1;
+    if (depth <= 0) {
+        return 0;
+    }
+    const int scale = uiScale > worldScale ? uiScale : worldScale;
+    return (depth * scale + worldScale - 1) / worldScale;
+}
+
+EffectiveScales EffectiveUiScales(int outputWidth, int outputHeight, int uiScale, int worldScale)
+{
+    uiScale = uiScale >= 1 ? uiScale : 1;
+    worldScale = worldScale >= 1 ? worldScale : 1;
+    if (worldScale > uiScale) {
+        worldScale = uiScale;
+    }
+    auto fit = [&](int height) {
+        int s = uiScale;
+        if (outputWidth / kUiWidth < s) {
+            s = outputWidth / kUiWidth;
+        }
+        if (outputHeight / height < s) {
+            s = outputHeight / height;
+        }
+        return s > worldScale ? s : worldScale;
+    };
+    EffectiveScales e;
+    e.worldUi = fit(kDeepestWorldPanel);
+    e.fullUi = fit(kUiHeight);
+    return e;
+}
+
+ScreenLayout ComputeScreenLayout(int width, int height, int uiScale, int worldScale)
+{
+    uiScale = uiScale >= 1 ? uiScale : 1;
+    worldScale = worldScale >= 1 ? worldScale : 1;
+    if (worldScale > uiScale) {
+        worldScale = uiScale;
+    }
+    const EffectiveScales eff = EffectiveUiScales(width * worldScale, height * worldScale, uiScale, worldScale);
+    const bool scaled = eff.worldUi != worldScale || eff.fullUi != worldScale;
+
+    ScreenLayout l {};
+    if (!scaled && OriginalLayout(width, height, l)) {
+        SetRegionFields(l, uiScale, worldScale, eff);
         return l;
     }
+    // The world screen's panels' scale is the one the layout reserves for.
+    const int panelScale = eff.worldUi;
 
     // Any other size: one engine pixel per screen pixel (no double size),
     // the 800x600 UI centred, every rectangle as the original's 800x600 and
     // 1024x768 tables have it (the two agree: each keeps its offsets from the
     // bottom and right edges), so the world viewport spans the full width and
     // the height above the bottom panels.
+    //
+    // With a UI scale of its own the UI is laid out for the frame at that
+    // scale (uiWidth x uiHeight) and every bottom offset is the depth the
+    // panel reserves at it.
     l.screenWidth = width;
     l.screenHeight = height;
     l.logicalWidth = width;
     l.logicalHeight = height;
     l.field_4A28 = 0;
     l.field_4A2C = 0;
-    l.guiExt = width >= 1024 && height >= 768 ? "10" : "08";
+    const int uiWidth = static_cast<int>(static_cast<long long>(width) * worldScale / panelScale);
+    const int uiHeight = static_cast<int>(static_cast<long long>(height) * worldScale / panelScale);
+    l.guiExt = uiWidth >= 1024 && uiHeight >= 768 ? "10" : "08";
     SetStoneMosaics(l, true);
 
-    l.stru_8E7538 = R(0, 0, width - 64, height - 110);
+    auto bottom = [&](int depth) { return height - ReservedDepth(depth, panelScale, worldScale); };
+    auto right = [&](int depth) { return width - ReservedDepth(depth, panelScale, worldScale); };
+    l.stru_8E7538 = R(0, 0, right(64), bottom(110));
     l.stru_8E7548 = R(0, 0, width, height);
-    l.stru_8E7958 = R(0, 0, width, height - 284);
-    l.stru_8E7988 = R(0, 0, width, height - 139);
+    l.stru_8E7958 = R(0, 0, width, bottom(284));
+    l.stru_8E7988 = R(0, 0, width, bottom(139));
     l.stru_8E79A8 = R((width - 512) / 2, (height - 384) / 2 - 42, (width - 512) / 2 + 512, (height - 384) / 2 - 42 + 384);
-    l.stru_8E79B8 = R(0, 0, width, height - 167);
-    l.stru_8E79C8 = R(0, 0, width, height - 60);
-    l.stru_8E79E0 = R(0, 0, width, height - 107);
-    l.stru_8E79F8 = R(0, 0, width, height - 124);
-    l.stru_8E7A10 = R(0, 0, width - 64, height - 246);
+    l.stru_8E79B8 = R(0, 0, width, bottom(kToolbarDepth));
+    l.stru_8E79C8 = R(0, 0, width, bottom(60));
+    l.stru_8E79E0 = R(0, 0, width, bottom(107));
+    l.stru_8E79F8 = R(0, 0, width, bottom(124));
+    l.stru_8E7A10 = R(0, 0, right(64), bottom(246));
 
     // The UI's top-left corner, where every screen but the world screen
     // shifts its panels ((SCREENWIDTH - 800) / 2, (SCREENHEIGHT - 600) / 2).
@@ -247,16 +346,104 @@ ScreenLayout ComputeScreenLayout(int width, int height)
     l.borderPanels[BORDER_TOP] = { ux, 0, kUiWidth, uy, ux, fy };
     l.borderPanels[BORDER_BOTTOM] = { ux, uy + kUiHeight, kUiWidth, height - uy - kUiHeight, ux, uy + kUiHeight };
 
+    // The world screen's panels bottom-centred in the columns the UI band
+    // shows (the whole width with equal scales): compose::Layout shows a
+    // full-width bottom band's first uiWidth columns.
     const int worldWidth = l.guiExt[0] == '1' ? 1024 : 800;
     const int worldHeight = l.guiExt[0] == '1' ? 768 : 600;
-    l.worldUiShiftX = (width - worldWidth) / 2;
+    l.worldUiShiftX = (uiWidth - worldWidth) / 2;
     l.worldUiShiftY = height - worldHeight;
 
     // IEex_Extern_InitResolution: just outside the viewport.
     const double hw = width / 2.0;
     const double hh = height / 2.0;
     l.dialogAutoScrollRange = static_cast<long>(hw * hw + hh * hh);
+    SetRegionFields(l, uiScale, worldScale, eff);
     return l;
+}
+
+ScreenLayout ComputeScreenLayout(int width, int height)
+{
+    return ComputeScreenLayout(width, height, ResolvedUiScale(), ResolvedWorldScale());
+}
+
+std::vector<RECT> WorldPanelRects(const ScreenLayout& l, int viewportBottom)
+{
+    const int reserved = l.screenHeight - viewportBottom;
+    if (reserved <= 0 || viewportBottom <= 0) {
+        return {};
+    }
+    // The deepest panel whose reserved depth fits above the viewport's
+    // bottom: the panel itself when the viewport is one of the layout's.
+    int depth = 1;
+    while (depth < l.screenHeight && ReservedDepth(depth + 1, l.worldUiScale, l.worldScale) <= reserved) {
+        depth++;
+    }
+    return { MakeRect(0, l.screenHeight - depth, l.screenWidth, l.screenHeight) };
+}
+
+std::vector<platform::compose::Region> RegionsFor(const ScreenLayout& l, ScreenKind kind, int viewportBottom, SIZE window)
+{
+    using platform::compose::Region;
+    SIZE frame;
+    frame.cx = l.screenWidth;
+    frame.cy = l.screenHeight;
+    // The letterboxed output: the frame at the world scale, centred.
+    SIZE output;
+    output.cx = frame.cx * l.worldScale;
+    output.cy = frame.cy * l.worldScale;
+    const LONG ox = (window.cx - output.cx) / 2;
+    const LONG oy = (window.cy - output.cy) / 2;
+
+    std::vector<Region> regions;
+    if (kind == SCREEN_FULL_UI) {
+        regions = platform::compose::Layout(frame, output, l.fullUiScale, l.worldScale, {}, &l.fullUiRect);
+    } else {
+        regions = platform::compose::Layout(frame, output, l.worldUiScale, l.worldScale, WorldPanelRects(l, viewportBottom), NULL);
+        if (!platform::compose::Tiles(regions, output)) {
+            // Spec section 6: a world screen's panels must leave a
+            // rectangle for the world.
+            assert(!"world screen regions do not tile the window");
+            static bool reported = false;
+            if (!reported) {
+                reported = true;
+                std::fprintf(stderr, "iwd2r: the world screen's UI panels do not tile the window; showing it at World Scale\n");
+            }
+            regions = platform::compose::Layout(frame, output, l.worldScale, l.worldScale, {}, NULL);
+        }
+    }
+    for (Region& r : regions) {
+        r.window.left += ox;
+        r.window.right += ox;
+        r.window.top += oy;
+        r.window.bottom += oy;
+    }
+    return regions;
+}
+
+std::vector<platform::compose::Region> CurrentRegions(SIZE window)
+{
+    const ScreenLayout& l = Current();
+    ScreenKind kind = SCREEN_FULL_UI;
+    int viewportBottom = l.stru_8E79B8.bottom;
+    // Our hook reads the engine's state rather than being called from its
+    // screen switches: the active engine is the world screen and no
+    // progress screen covers it.
+    if (g_pBaldurChitin != NULL
+        && g_pBaldurChitin->m_pEngineWorld != NULL
+        && g_pBaldurChitin->pActiveEngine == g_pBaldurChitin->m_pEngineWorld
+        && !g_pBaldurChitin->cProgressBar.m_bProgressBarActivated) {
+        kind = SCREEN_WORLD;
+        // The view size the world screen asked for last (SetNewViewSize),
+        // (0, 0, 1, 1) until it first does; the toolbar's viewport before.
+        const CRect& view = g_pBaldurChitin->m_pEngineWorld->m_newViewSize;
+        if (view.bottom > 1) {
+            viewportBottom = view.bottom;
+        } else {
+            viewportBottom = CInfinity::stru_8E79B8.bottom;
+        }
+    }
+    return RegionsFor(l, kind, viewportBottom, window);
 }
 
 int ParseResolution(const char* value)
@@ -294,7 +481,21 @@ int ParseScale(const char* value)
     return n >= 1 && n <= kMaxScale ? n : kScaleInvalid;
 }
 
-ScreenSize ResolveScreenSize(int iniWidth, int iniHeight, int iniScale, int desktopWidth, int desktopHeight)
+int ResolveWorldScale(const char* value, int uiScale)
+{
+    const std::string s = Trim(value);
+    if (s.empty()) {
+        return uiScale;
+    }
+    if (EqualsIgnoreCase(s, "auto")) {
+        return uiScale >= 2 ? 1 : uiScale;
+    }
+    const int n = PositiveNumber(s);
+    return n >= 1 && n <= kMaxScale ? n : kScaleInvalid;
+}
+
+ScreenSize ResolveScreenSize(int iniWidth, int iniHeight, int iniScale, int desktopWidth, int desktopHeight,
+    const char* worldScaleText)
 {
     ScreenSize r;
     r.ok = false;
@@ -303,6 +504,10 @@ ScreenSize ResolveScreenSize(int iniWidth, int iniHeight, int iniScale, int desk
     r.scale = 1;
     r.width = 0;
     r.height = 0;
+    r.uiScale = 1;
+    r.worldScale = 1;
+    r.worldUiScale = 1;
+    r.fullUiScale = 1;
 
     const bool desktopKnown = desktopWidth > 0 && desktopHeight > 0;
 
@@ -368,21 +573,50 @@ ScreenSize ResolveScreenSize(int iniWidth, int iniHeight, int iniScale, int desk
         }
     }
 
-    r.scale = scale;
-    r.width = width / scale;
-    r.height = height / scale;
-    r.outputWidth = r.width * scale;
-    r.outputHeight = r.height * scale;
+    int worldScale = ResolveWorldScale(worldScaleText, scale);
+    if (worldScale == kScaleInvalid) {
+        r.error = "World Scale in icewind2.ini must be 1, 2, 3, 4 or \"auto\", or absent.";
+        return r;
+    }
+    if (worldScale > scale) {
+        // The UI is never smaller than the world.
+        r.notices.push_back("World Scale=" + std::to_string(worldScale) + " is above Scale=" + std::to_string(scale)
+            + "; using World Scale=" + std::to_string(scale) + ".");
+        worldScale = scale;
+    }
+
+    r.uiScale = scale;
+    r.worldScale = worldScale;
+    r.scale = worldScale;
+    r.width = width / worldScale;
+    r.height = height / worldScale;
+    r.outputWidth = r.width * worldScale;
+    r.outputHeight = r.height * worldScale;
+    const EffectiveScales eff = EffectiveUiScales(r.outputWidth, r.outputHeight, scale, worldScale);
+    r.worldUiScale = eff.worldUi;
+    r.fullUiScale = eff.fullUi;
+    const std::string size = std::to_string(r.outputWidth) + "x" + std::to_string(r.outputHeight);
+    if (eff.worldUi < scale) {
+        r.notices.push_back("The world screen's panels do not fit " + size + " at Scale=" + std::to_string(scale)
+            + "; showing them at " + std::to_string(eff.worldUi) + ".");
+    }
+    if (eff.fullUi < scale) {
+        r.notices.push_back("The 800x600 screens do not fit " + size + " at Scale=" + std::to_string(scale)
+            + "; showing them at " + std::to_string(eff.fullUi) + ".");
+    }
 
     if (r.width < kMinScreenWidth || r.height < kMinScreenHeight) {
         r.error = "The screen size " + std::to_string(width) + "x" + std::to_string(height);
-        if (scale > 1) {
+        if (worldScale != scale) {
+            r.error += " at World Scale=" + std::to_string(worldScale) + " gives an internal screen of "
+                + std::to_string(r.width) + "x" + std::to_string(r.height) + ";";
+        } else if (scale > 1) {
             r.error += " at Scale=" + std::to_string(scale) + " gives an internal screen of "
                 + std::to_string(r.width) + "x" + std::to_string(r.height) + ";";
         } else {
             r.error += " is too small;";
         }
-        r.error += " iwd2r needs at least 800x600. Set Resolution (and Height, Scale) in"
+        r.error += " iwd2r needs at least 800x600. Set Resolution (and Height, Scale, World Scale) in"
                    " the [Program Options] section of icewind2.ini.";
         return r;
     }
@@ -400,16 +634,23 @@ ScreenSize ReadScreenSize(const char* iniFile)
     char resolution[64];
     char height[64];
     char scale[64];
+    char worldScale[64];
     GetPrivateProfileStringA("Program Options", "Resolution", "800", resolution, sizeof(resolution), iniFile);
     GetPrivateProfileStringA("Program Options", "Height", "", height, sizeof(height), iniFile);
     GetPrivateProfileStringA("Program Options", "Scale", "1", scale, sizeof(scale), iniFile);
+    GetPrivateProfileStringA("Program Options", "World Scale", "", worldScale, sizeof(worldScale), iniFile);
     IniResolution() = Trim(resolution);
 
     int desktopWidth = 0;
     int desktopHeight = 0;
     platform::window::NativeDesktopSize(&desktopWidth, &desktopHeight);
 
-    return ResolveScreenSize(ParseResolution(resolution), ParseHeight(height), ParseScale(scale), desktopWidth, desktopHeight);
+    const ScreenSize r = ResolveScreenSize(ParseResolution(resolution), ParseHeight(height), ParseScale(scale), desktopWidth, desktopHeight, worldScale);
+    if (r.ok) {
+        ResolvedUiScale() = r.uiScale;
+        ResolvedWorldScale() = r.worldScale;
+    }
+    return r;
 }
 
 const std::string& IniResolutionText()

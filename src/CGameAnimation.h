@@ -18,6 +18,9 @@ public:
     void CalculateFxRect(CRect& rFx, CPoint& ptReference, LONG posZ);
     void ChangeDirection(SHORT nDirection);
     void EquipArmor(CHAR armorLevel, BYTE* colorRangeValues);
+    void EquipHelmet(const CString& resRef, BYTE* colorRangeValues);
+    void EquipShield(const CString& resRef, BYTE* colorRangeValues);
+    void EquipWeapon(const CString& resRef, BYTE* colorRangeValues, DWORD itemFlags, const WORD* pAttackProb);
     void GetAnimationResRef(CString& resRef, BYTE range);
     BOOLEAN CanLieDown();
     BOOLEAN DetectedByInfravision();

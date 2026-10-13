@@ -154,10 +154,16 @@ def vm_height(resolution, sets):
 
 
 def vm_geometry(resolution, scale, sets):
-    """The screen of a --vm run (realinput.resolve_screen). Raises
-    ValueError below 800x600 inside."""
+    """The screen of a --vm run (realinput.resolve_screen), with the Scale
+    and World Scale the --set entries give winning over scale. Raises
+    ValueError below 800x600 inside or for a bad scale."""
+    scale_set = set_value(sets, 'Program Options/Scale')
+    if scale_set is not None:
+        scale = scale_arg(scale_set.strip())
     return realinput.resolve_screen(resolution, vm_height(resolution, sets),
-                                    scale, VM_DESKTOP)
+                                    scale, VM_DESKTOP,
+                                    set_value(sets,
+                                              'Program Options/World Scale'))
 
 
 def parse_args(argv):
@@ -191,6 +197,9 @@ def parse_args(argv):
                     help='exit after N presented frames (IWD2R_SMOKE_FRAMES)')
     ap.add_argument('--script', metavar='FILE',
                     help='input script (see platform/script.h)')
+    ap.add_argument('--shot-presented', action='store_true',
+                    help='each screenshot also writes <name>-presented.png, '
+                    'the frame as the presenter drew it (IWD2R_SHOT_PRESENTED)')
     ap.add_argument('--data', metavar='PATH',
                     help='install directory (default: IWD2_DATA, else '
                     + DEFAULT_DATA + ')')
@@ -237,7 +246,7 @@ def parse_args(argv):
     if args.vm:
         try:
             vm_geometry(args.resolution, args.scale or 1, args.sets)
-        except ValueError as e:
+        except (ValueError, argparse.ArgumentTypeError) as e:
             ap.error(str(e))
     return args
 
@@ -319,7 +328,7 @@ def restore_inis(backup_dir, install, names):
 
 
 def child_env(base, data, overrides, headless, frames, script, shot_dir,
-              sound=False):
+              sound=False, shot_presented=False):
     """The variables the game gets on top of base (a dict)."""
     env = dict(base)
     env['IWD2_DATA'] = data
@@ -336,6 +345,8 @@ def child_env(base, data, overrides, headless, frames, script, shot_dir,
         env['IWD2R_SMOKE_FRAMES'] = str(frames)
     if script:
         env['IWD2R_SCRIPT'] = script
+    if shot_presented:
+        env['IWD2R_SHOT_PRESENTED'] = '1'
     return env
 
 
@@ -552,7 +563,7 @@ def run_linux_vm(args, argv, scenarios, data, overrides, base_dir, nested,
     names = backup_inis(data, backup)
     log('backed up %d INI files to %s' % (len(names), backup))
     base_env = child_env(os.environ, data, overrides, False, None, None,
-                         base_dir)
+                         base_dir, shot_presented=args.shot_presented)
     taken = set()
     abort = threading.Event()
     rows = {}
@@ -677,9 +688,10 @@ def main_vm(args, argv):
             sys.exit('play: %s' % e)
     data = resolve_data(args.data)
     overrides, geometry = vm_overrides(args)
-    log('screen: %dx%d inside, scale %d, output %dx%d' % (
+    log('screen: %dx%d inside, scale %d (UI %d), output %dx%d' % (
         geometry['width'], geometry['height'], geometry['scale'],
-        geometry['output_width'], geometry['output_height']))
+        geometry['ui_scale'], geometry['output_width'],
+        geometry['output_height']))
     run_root = make_run_folder(os.path.join(ROOT, 'runs'),
                                datetime.datetime.now())
     platforms = ['linux', 'windows'] if args.vm == 'all' else [args.vm]
@@ -776,7 +788,8 @@ def main(argv):
             if args.linux:
                 view = dataview.make_view(data, os.path.join(run_dir, 'data'))
                 env = child_env(os.environ, view, overrides, headless,
-                                args.frames, script, run_dir, args.sound)
+                                args.frames, script, run_dir, args.sound,
+                                args.shot_presented)
                 try:
                     code = run_linux(exe, env, log_file)
                 finally:
@@ -794,7 +807,8 @@ def main(argv):
                 view = dataview.make_view(data, os.path.join(win_run, 'data'))
                 env_vars = child_env({}, wslpath('-w', view), overrides,
                                      headless, args.frames, win_script,
-                                     wslpath('-w', win_run), args.sound)
+                                     wslpath('-w', win_run), args.sound,
+                                     args.shot_presented)
                 try:
                     code = run_windows(exe, env_vars, win_run, log_file)
                 finally:

@@ -13,6 +13,7 @@
 #include "platform/window.h"
 
 #include <climits>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -141,14 +142,6 @@ std::string Differences(const std::vector<BYTE>& a, const std::vector<BYTE>& b, 
     return out;
 }
 
-// See the comment at the round trip: the base attack bonus and the number
-// of attacks, +0x48 and +0x49 of the header, which starts at `base`.
-void MaskAttacks(std::vector<BYTE>& bytes, size_t base)
-{
-    bytes[base + 0x48] = 0;
-    bytes[base + 0x49] = 0;
-}
-
 std::vector<BYTE> MarshalSprite(CGameSprite* pSprite)
 {
     BYTE* pData = NULL;
@@ -163,6 +156,19 @@ std::vector<BYTE> MarshalSprite(CGameSprite* pSprite)
     return bytes;
 }
 
+}
+
+TEST_CASE("the creature header has the original's size", "[cre]")
+{
+    // CGameSprite::Unmarshal (0x70D1D2) and Marshal (0x70B5FC) copy 0xDF
+    // dwords; a CRE V2.2's offsets block follows at 8 + 0x37C = 900.
+    STATIC_REQUIRE(sizeof(CCreatureFileHeader) == 0x37C);
+    STATIC_REQUIRE(offsetof(CCreatureFileHeader, field_2E2) == 0x2E2);
+    STATIC_REQUIRE(offsetof(CCreatureFileHeader, field_2E8) == 0x2E8);
+    STATIC_REQUIRE(offsetof(CCreatureFileHeader, field_2F8) == 0x2F8);
+    STATIC_REQUIRE(offsetof(CCreatureFileHeader, m_fadeSpeed) == 0x2FA);
+    STATIC_REQUIRE(offsetof(CCreatureFileHeader, field_2FC) == 0x2FC);
+    STATIC_REQUIRE(offsetof(CCreatureFileHeader, field_2FF) == 0x2FF);
 }
 
 TEST_CASE("CHARBASE.CRE survives Unmarshal and Marshal", "[cre][data]")
@@ -233,10 +239,14 @@ TEST_CASE("CHARBASE.CRE survives Unmarshal and Marshal", "[cre][data]")
         }
     }
     // Unmarshal fills a base attack bonus (+0x48) and number of attacks
-    // (+0x49) of 0 from CRuleTables::sub_546B60 (0x546B60), which ours does
-    // not implement yet: its results are not compared.
-    MaskAttacks(header, 0);
-    MaskAttacks(expected, 0);
+    // (+0x49) of 0 from CRuleTables::sub_546B60 (0x546B60): a level 1
+    // fighter has +1 and one attack.
+    CHECK(original[8 + 0x48] == 0);
+    CHECK(original[8 + 0x49] == 0);
+    CHECK(pBStats->m_attackBase == 1);
+    CHECK(pBStats->m_numberOfAttacksBase == 1);
+    expected[0x48] = pBStats->m_attackBase;
+    expected[0x49] = pBStats->m_numberOfAttacksBase;
     CHECK(Differences(header, expected, 8) == "");
 
     CGameSprite* pSecond = MakeSprite(first);
@@ -249,8 +259,6 @@ TEST_CASE("CHARBASE.CRE survives Unmarshal and Marshal", "[cre][data]")
     REQUIRE(first.size() >= 900 + 0x10);
     memset(&second[900 + 0xC], 0, 4);
     memset(&first[900 + 0xC], 0, 4);
-    MaskAttacks(second, 8);
-    MaskAttacks(first, 8);
     CHECK(Differences(second, first, 0) == "");
 }
 
@@ -291,10 +299,72 @@ TEST_CASE("a CRE whose equipped item is missing loads with that slot empty", "[c
 
     CGameSprite* pSprite = MakeSprite(bytes);
     REQUIRE(pSprite != NULL);
-    // NOTE: Until CItem(CResRef, ...) (0x4E7E90) sets the item's resource,
-    // every item, present or not, comes out empty here, so this pins only
-    // the "no crash" half until then.
     CHECK(pSprite->m_equipment.m_items[CGameSpriteEquipment::SLOT_HELMET] == NULL);
+}
+
+TEST_CASE("a CRE's equipped item survives Unmarshal and Marshal", "[cre][data]")
+{
+    const char* env = std::getenv("IWD2_DATA");
+    if (env == nullptr || *env == '\0') {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+
+    std::vector<BYTE> original = LoadCharBase();
+    REQUIRE(original.size() > 900);
+
+    // Append one item, 00AMUL01 (an amulet with no equipped effects), and
+    // equip it in the first misc slot (CCreatureFileEquipment +0x24).
+    std::vector<BYTE> bytes = original;
+    DWORD equipmentOffset;
+    DWORD itemCount;
+    memcpy(&equipmentOffset, &bytes[900 + 0x28E], 4);
+    memcpy(&itemCount, &bytes[900 + 0x296], 4);
+    REQUIRE(itemCount == 0);
+
+    CCreatureFileItem item;
+    memcpy(item.m_itemId, "00AMUL01", RESREF_SIZE);
+    item.m_usageCount[0] = 1;
+    const DWORD newOffset = static_cast<DWORD>(bytes.size());
+    bytes.insert(bytes.end(), reinterpret_cast<BYTE*>(&item), reinterpret_cast<BYTE*>(&item) + sizeof(item));
+    const DWORD one = 1;
+    memcpy(&bytes[900 + 0x292], &newOffset, 4);
+    memcpy(&bytes[900 + 0x296], &one, 4);
+    const size_t miscOffset = offsetof(CCreatureFileEquipment, m_miscItem);
+    const WORD slot = 0;
+    memcpy(&bytes[equipmentOffset + miscOffset], &slot, sizeof(slot));
+
+    CGameSprite* pSprite = MakeSprite(bytes);
+    REQUIRE(pSprite != NULL);
+    CItem* pItem = pSprite->m_equipment.m_items[CGameSpriteEquipment::SLOT_MISC];
+    REQUIRE(pItem != NULL);
+    CHECK(pItem->GetResRef() == CResRef("00AMUL01"));
+
+    std::vector<BYTE> first = MarshalSprite(pSprite);
+    REQUIRE(first.size() > 900);
+    DWORD outOffset;
+    DWORD outCount;
+    DWORD outEquipment;
+    memcpy(&outOffset, &first[900 + 0x292], 4);
+    memcpy(&outCount, &first[900 + 0x296], 4);
+    memcpy(&outEquipment, &first[900 + 0x28E], 4);
+    REQUIRE(outCount == 1);
+    REQUIRE(outOffset + sizeof(CCreatureFileItem) <= first.size());
+    CHECK(memcmp(&first[outOffset], "00AMUL01", RESREF_SIZE) == 0);
+    WORD outSlot;
+    memcpy(&outSlot, &first[outEquipment + miscOffset], sizeof(outSlot));
+    CHECK(outSlot == 0);
+
+    // A second pass gives the same bytes, apart from the object id.
+    CGameSprite* pSecond = MakeSprite(first);
+    REQUIRE(pSecond != NULL);
+    std::vector<BYTE> second = MarshalSprite(pSecond);
+    REQUIRE(second.size() >= 900 + 0x10);
+    memset(&second[900 + 0xC], 0, 4);
+    memset(&first[900 + 0xC], 0, 4);
+    CHECK(Differences(second, first, 0) == "");
 }
 
 TEST_CASE("a fresh character's effect list runs as Character Generation runs it", "[cre][data]")
@@ -342,16 +412,11 @@ TEST_CASE("Marshal without all items skips a type 0x3A item and keeps the slot n
     const CString sFound("00GBGA01");
     const CString sOther("00AMUL01");
 
-    // Our CItem(CResRef, ...) constructor (0x4E7E90 in src/CItem.cpp) does
-    // not set the item's resource yet, so no item has a type; and
-    // CResItem::Parse (0x4016F0) compares the header with 'ITM ' as a
-    // multi-character constant (0x49544D20) where the original compares
-    // 0x204D5449. Until both are fixed this case cannot load an item.
+    // CItem(CResRef, ...) (0x4E7E90) sets the item's resource and
+    // CResItem::Parse (0x4016F0) accepts the 'ITM ' header.
     {
         CItem probe(CResRef(sOther), 0, 0, 0, 0, 0);
-        if (probe.GetResRef() == "") {
-            SKIP("[iwd2r-skip] CItem(CResRef, ...) does not load the item yet");
-        }
+        REQUIRE(probe.GetResRef() == CResRef(sOther));
     }
 
     std::vector<BYTE> original = LoadCharBase();

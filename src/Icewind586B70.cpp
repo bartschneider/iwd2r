@@ -218,6 +218,23 @@ void Icewind586B70::Entry::Clear()
     field_8 = false;
 }
 
+// Returns the ids in the first field of the entries whose two fields are
+// both set.
+//
+// 0x587510
+std::vector<int> Icewind586B70::sub_587510()
+{
+    std::vector<int> ids;
+
+    for (std::vector<Entry>::iterator it = mEntries.begin(); it != mEntries.end(); it++) {
+        if (it->field_0 != 0 && it->field_4 != 0) {
+            ids.push_back(it->field_0);
+        }
+    }
+
+    return ids;
+}
+
 // 0x587610
 int Icewind586B70::GetCount()
 {

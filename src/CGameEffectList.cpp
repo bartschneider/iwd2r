@@ -30,6 +30,23 @@ POSITION CGameEffectList::GetPosCurrent()
     return m_posCurrent;
 }
 
+// 0x4C0830
+BOOL CGameEffectList::sub_4C0830(CGameEffect* pEffect)
+{
+    POSITION pos = GetHeadPosition();
+    while (pos != NULL) {
+        POSITION posOld = pos;
+        CGameEffect* pNode = GetNext(pos);
+        if (pEffect->sub_4A4FC0(pNode, FALSE)) {
+            RemoveAt(posOld);
+            delete pNode;
+            return TRUE;
+        }
+    }
+
+    return FALSE;
+}
+
 // 0x4C08E0
 void CGameEffectList::RemoveAllOfType(CGameSprite* pSprite, WORD effectID, POSITION posLeave, LONG effectAmount)
 {

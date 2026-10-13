@@ -3,6 +3,9 @@
 #pragma once
 
 #include "compat/win_types.h"
+#include "platform/compose.h"
+
+#include <vector>
 
 namespace platform::window {
 
@@ -26,11 +29,31 @@ void EnqueueMessage(UINT message, WPARAM wParam, LPARAM lParam);
 // Sets the virtual screen (the game resolution, width x height) that
 // GetSystemMetrics(SM_CXSCREEN) reports and CreateWindowExA's window takes,
 // and starts SDL video so the desktop size is known before the engine reads
-// SM_CXFULLSCREEN. scale (Program Options/Scale) is the number of desktop
-// pixels per engine pixel: the window is width x height times scale, and
-// every window size, position and desktop size the engine sees is in engine
-// pixels. False when SDL video cannot start.
-bool InitScreen(int width, int height, int scale = 1);
+// SM_CXFULLSCREEN. scale (Program Options/World Scale, else Scale) is the
+// number of desktop pixels per engine pixel: the window is width x height
+// times scale, and every window size, position and desktop size the engine
+// sees is in engine pixels. uiScale (the largest scale a UI panel is shown
+// at, the Scale that fits; 0 for scale) is the UI panels' scale: when it
+// differs from scale the presenter composes
+// regions (platform/compose.h), installed here with compose::Layout (the
+// whole frame as the world until SetRegionSource gives the screen's panels)
+// and again on WM_SIZE, WM_DISPLAYCHANGE and every pump, where a change of
+// screen shows. False when SDL video cannot start.
+bool InitScreen(int width, int height, int scale = 1, int uiScale = 0);
+
+// The regions for a window of the given size (pixels), for the screen the
+// engine shows now: src/ScreenLayout's CurrentRegions.
+using RegionSource = std::vector<compose::Region> (*)(SIZE window);
+
+// Installs the region source and refreshes the regions; nullptr removes it
+// and the regions. Only used while the UI and world scales differ; with
+// equal scales no regions are installed and the presenter shows the frame
+// as it always has.
+void SetRegionSource(RegionSource source);
+
+// Recomputes the regions for the current window and screen and installs
+// them (present::SetRegions) when they changed.
+void RefreshRegions();
 
 // The primary display's native desktop size in pixels (starting SDL video
 // when needed), for Resolution=desktop. False, with zeros, when unknown.

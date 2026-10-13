@@ -28,6 +28,8 @@
 #include "IcewindCGameEffects.h"
 #include "IcewindCVisualEffect.h"
 #include "IcewindMisc.h"
+#include "marshal_ptr.h"
+#include "msvc_atol.h"
 
 // 0x85BB38
 const BYTE CGameSprite::DIR_S = 0;
@@ -6421,8 +6423,8 @@ void CGameSprite::Marshal(CAreaFileCreature** pCreature)
     LONG creatureSize;
     Marshal(&creatureData, &creatureSize, &((*pCreature)->m_facing), TRUE, TRUE);
 
-    // FIXME: Unsafe x64 conversion.
-    (*pCreature)->m_creatureOffset = static_cast<DWORD>(reinterpret_cast<DWORD_PTR>(creatureData));
+    // NOTE: The original stores the pointer; a 32-bit handle on every build.
+    (*pCreature)->m_creatureOffset = iwd2r::MarshalPtr(creatureData);
     (*pCreature)->m_creatureSize = creatureSize;
 
     (*pCreature)->m_numberTimesTalkedTo = m_nNumberOfTimesTalkedTo;
@@ -9021,7 +9023,52 @@ SHORT CGameSprite::GetLayOnHandsAmount()
 // 0x71B9C0
 void CGameSprite::AddSpecialAbility(const CResRef& cResInnateSpell, BOOL feedBack)
 {
-    // TODO: Incomplete.
+    if (g_pChitin->cDimm.m_cKeyTable.FindKey(cResInnateSpell, 1006, TRUE) == NULL) {
+        return;
+    }
+
+    // NOTE: The original reads the game's lists directly (+0x4C00, +0x4C08,
+    // +0x4C10).
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    WORD nFeedBackId = FEEDBACK_GAINEDSPECIALABILITY;
+    UINT nID = 0;
+
+    if (pGame->m_songs.Find(cResInnateSpell, nID) == TRUE) {
+        unsigned int a2 = 0;
+        unsigned int a3 = 1;
+        unsigned int a4 = 1;
+        UINT nSongID = 0;
+        nFeedBackId = FEEDBACK_GAINEDBARDSONG;
+        if (pGame->m_songs.Find(cResInnateSpell, nSongID) == TRUE) {
+            m_songs.Add(nSongID, a4, a3, a2);
+        }
+    } else if (pGame->m_shapeshifts.Find(cResInnateSpell, nID) == TRUE) {
+        unsigned int a2 = 0;
+        unsigned int a3 = 0;
+        unsigned int a4 = 0;
+        UINT nShapeID = 0;
+        if (pGame->m_shapeshifts.Find(cResInnateSpell, nShapeID) == TRUE) {
+            m_shapeshifts.Add(nShapeID, a2, a3, a4);
+        }
+    } else if (pGame->m_innateSpells.Find(cResInnateSpell, nID) == TRUE) {
+        unsigned int a2 = 1;
+        unsigned int a3 = 1;
+        unsigned int a4 = 0;
+        UINT nInnateID = 0;
+        if (pGame->m_innateSpells.Find(cResInnateSpell, nInnateID) == TRUE) {
+            m_innateSpells.Add(nInnateID, a2, a3, a4);
+        }
+    }
+
+    if (feedBack == TRUE) {
+        // NOTE: Inlined CSpell::CSpell.
+        CSpell cSpell(cResInnateSpell);
+        cSpell.Demand();
+        if (cSpell.pRes != NULL) {
+            FeedBack(nFeedBackId, 0, 0, 0, cSpell.GetGenericName(), 0, 0);
+        }
+        cSpell.Release();
+    }
 }
 
 // 0x71BC60
@@ -10212,6 +10259,124 @@ SHORT CGameSprite::TakeItemBags(const CString& sName, LONG number, SHORT slotNum
     return numTaken;
 }
 
+// 0x722820
+void CGameSprite::sub_722820()
+{
+    CAIObjectType typeAI(m_startTypeAI);
+
+    switch (typeAI.m_nRace) {
+    case CAIOBJECTTYPE_R_HUMAN:
+        if (typeAI.m_nSubRace == 1 || typeAI.m_nSubRace == 2) {
+            m_baseStats.m_generalState |= STATE_INFRAVISION;
+        }
+        break;
+    case CAIOBJECTTYPE_R_ELF:
+        switch (typeAI.m_nSubRace) {
+        case 0:
+            break;
+        case 1:
+            m_baseStats.m_generalState |= STATE_INFRAVISION;
+            break;
+        case 2:
+            break;
+        default:
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjCreature.cpp
+        // __LINE__: 23869
+        UTIL_ASSERT(FALSE);
+            break;
+        }
+        break;
+    case CAIOBJECTTYPE_R_HALF_ELF:
+        if (typeAI.m_nSubRace != 0) {
+            // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjCreature.cpp
+            // __LINE__: 23887
+            UTIL_ASSERT(FALSE);
+        }
+        break;
+    case CAIOBJECTTYPE_R_DWARF:
+        m_baseStats.m_generalState |= STATE_INFRAVISION;
+        if (typeAI.m_nSubRace != 0 && typeAI.m_nSubRace != 1 && typeAI.m_nSubRace != 2) {
+            // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjCreature.cpp
+            // __LINE__: 23918
+            UTIL_ASSERT(FALSE);
+        }
+        break;
+    case CAIOBJECTTYPE_R_HALFLING:
+        if (typeAI.m_nSubRace != 0 && typeAI.m_nSubRace != 1 && typeAI.m_nSubRace != 2) {
+            // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjCreature.cpp
+            // __LINE__: 23946
+            UTIL_ASSERT(FALSE);
+        }
+        break;
+    case CAIOBJECTTYPE_R_GNOME:
+        switch (typeAI.m_nSubRace) {
+        case 0:
+            break;
+        case 1:
+            m_baseStats.m_generalState |= STATE_INFRAVISION | STATE_NONDETECTION;
+            m_baseStats.field_3E = 14;
+            break;
+        default:
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjCreature.cpp
+        // __LINE__: 23977
+        UTIL_ASSERT(FALSE);
+            break;
+        }
+        break;
+    case CAIOBJECTTYPE_R_HALF_ORC:
+        m_baseStats.m_generalState |= STATE_INFRAVISION;
+        if (typeAI.m_nSubRace != 0) {
+            // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjCreature.cpp
+            // __LINE__: 23998
+            UTIL_ASSERT(FALSE);
+        }
+        break;
+    default:
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjCreature.cpp
+        // __LINE__: 24006
+        UTIL_ASSERT(FALSE);
+        break;
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    const CRuleTables& ruleTables = pGame->GetRuleTables();
+
+    CString sRace = ruleTables.GetRaceString(typeAI.m_nRace, typeAI.m_nSubRace);
+    CString sAbilities = ruleTables.m_tRaceSpAb.GetAt(CRuleTables::SPECIAL_ABILITIES_FILE, sRace);
+    if (strcmp(sAbilities, "*") != 0) {
+        C2DArray tAbilities;
+        tAbilities.Load(CResRef(sAbilities));
+
+        for (UINT nRow = 0; nRow < static_cast<UINT>(tAbilities.GetHeight()); nRow++) {
+            CResRef cResAbility(tAbilities.GetAt(CPoint(0, nRow)));
+            if (strcmp(cResAbility.GetResRefStr(), "*") != 0) {
+                // NOTE: The original's atol (0x7E7B03) is VC6's, which wraps on overflow.
+                UINT nCount = iwd2r_atol(tAbilities.GetAt(CPoint(1, nRow)));
+                if (nCount == 1) {
+                    UINT nID = 0;
+                    if (pGame->m_innateSpells.Find(cResAbility, nID) == TRUE) {
+                        BOOL bKnown = FALSE;
+                        for (UINT nIndex = 0; nIndex < m_innateSpells.m_List.size(); nIndex++) {
+                            if (m_innateSpells.m_List[nIndex].m_nID == nID) {
+                                bKnown = TRUE;
+                                break;
+                            }
+                        }
+
+                        if (!bKnown) {
+                            AddSpecialAbility(cResAbility, FALSE);
+                        }
+                    }
+                } else {
+                    for (; nCount != 0; nCount--) {
+                        AddSpecialAbility(cResAbility, FALSE);
+                    }
+                }
+            }
+        }
+    }
+}
+
 // Returns `TRUE` if object contains quest items or containers (such as potion
 // bags). See STREF #26585.
 //
@@ -10343,6 +10508,211 @@ INT CGameSprite::sub_723F60()
     // TODO: Incomplete.
 
     return 0;
+}
+
+// 0x71E240
+void CGameSprite::sub_71E240(CCreatureFileHeader& oldBaseStats, CDerivedStats& oldDStats)
+{
+    // CGAMESPRITE_FEAT_AEGIS_OF_RIME
+    if ((oldBaseStats.m_feats[0] & 0x1) == 0 && (m_baseStats.m_feats[0] & 0x1) != 0) {
+        m_baseStats.m_resistColdBase += 5;
+        if (m_baseStats.m_resistColdBase < 0) {
+            m_baseStats.m_resistColdBase = 0;
+        } else if (m_baseStats.m_resistColdBase > 100) {
+            m_baseStats.m_resistColdBase = 100;
+        }
+    }
+
+    // CGAMESPRITE_FEAT_AQUA_MORTIS
+    if ((oldBaseStats.m_feats[0] & 0x4) == 0 && (m_baseStats.m_feats[0] & 0x4) != 0) {
+        m_baseStats.m_resistAcidBase += 5;
+        if (m_baseStats.m_resistAcidBase < 0) {
+            m_baseStats.m_resistAcidBase = 0;
+        } else if (m_baseStats.m_resistAcidBase > 100) {
+            m_baseStats.m_resistAcidBase = 100;
+        }
+    }
+
+    // CGAMESPRITE_FEAT_BULLHEADED
+    if ((oldBaseStats.m_feats[0] & 0x80) == 0 && (m_baseStats.m_feats[0] & 0x80) != 0) {
+        m_baseStats.m_saveVSWillBase += 1;
+    }
+
+    // CGAMESPRITE_FEAT_DISCIPLINE
+    if ((oldBaseStats.m_feats[0] & 0x8000) == 0 && (m_baseStats.m_feats[0] & 0x8000) != 0) {
+        m_baseStats.m_saveVSWillBase += 1;
+    }
+
+    // CGAMESPRITE_FEAT_GREAT_FORTITUDE
+    if ((oldBaseStats.m_feats[0] & 0x4000000) == 0 && (m_baseStats.m_feats[0] & 0x4000000) != 0) {
+        m_baseStats.m_saveVSFortitudeBase += 2;
+    }
+
+    // CGAMESPRITE_FEAT_IRON_WILL
+    if ((oldBaseStats.m_feats[1] & 0x4) == 0 && (m_baseStats.m_feats[1] & 0x4) != 0) {
+        m_baseStats.m_saveVSWillBase += 2;
+    }
+
+    // CGAMESPRITE_FEAT_LIGHTNING_REFLEXES
+    if ((oldBaseStats.m_feats[1] & 0x8) == 0 && (m_baseStats.m_feats[1] & 0x8) != 0) {
+        m_baseStats.m_saveVSReflexBase += 2;
+    }
+
+    // CGAMESPRITE_FEAT_LUCK_OF_HEROES
+    if ((oldBaseStats.m_feats[1] & 0x20) == 0 && (m_baseStats.m_feats[1] & 0x20) != 0) {
+        m_baseStats.m_saveVSReflexBase += 1;
+        m_baseStats.m_saveVSFortitudeBase += 1;
+        m_baseStats.m_saveVSWillBase += 1;
+    }
+
+    // CGAMESPRITE_FEAT_SCION_OF_STORMS
+    if ((oldBaseStats.m_feats[1] & 0x80000) == 0 && (m_baseStats.m_feats[1] & 0x80000) != 0) {
+        m_baseStats.m_resistElectricityBase += 5;
+        if (m_baseStats.m_resistElectricityBase < 0) {
+            m_baseStats.m_resistElectricityBase = 0;
+        } else if (m_baseStats.m_resistElectricityBase > 100) {
+            m_baseStats.m_resistElectricityBase = 100;
+        }
+    }
+
+    // CGAMESPRITE_FEAT_SNAKE_BLOOD
+    if ((oldBaseStats.m_feats[1] & 0x8000000) == 0 && (m_baseStats.m_feats[1] & 0x8000000) != 0) {
+        m_baseStats.m_saveVSReflexBase += 1;
+    }
+
+    // CGAMESPRITE_FEAT_SPIRIT_OF_FLAME
+    if ((oldBaseStats.m_feats[2] & 0x2) == 0 && (m_baseStats.m_feats[2] & 0x2) != 0) {
+        m_baseStats.m_resistFireBase += 5;
+        if (m_baseStats.m_resistFireBase < 0) {
+            m_baseStats.m_resistFireBase = 0;
+        } else if (m_baseStats.m_resistFireBase > 100) {
+            m_baseStats.m_resistFireBase = 100;
+        }
+    }
+
+    // CGAMESPRITE_FEAT_ENVENOM_WEAPON
+    if ((oldBaseStats.m_feats[0] & 0x20000) == 0 && (m_baseStats.m_feats[0] & 0x20000) != 0) {
+        AddSpecialAbility(SPIN231, FALSE);
+    }
+
+    // CGAMESPRITE_FEAT_MAXIMIZED_ATTACKS
+    if ((oldBaseStats.m_feats[1] & 0x2000) == 0 && (m_baseStats.m_feats[1] & 0x2000) != 0) {
+        AddSpecialAbility(SPIN197, FALSE);
+    }
+
+    // CGAMESPRITE_FEAT_WILDSHAPE_BOAR
+    if ((oldBaseStats.m_feats[2] & 0x100) == 0 && (m_baseStats.m_feats[2] & 0x100) != 0) {
+        AddSpecialAbility(SPIN111, FALSE);
+    }
+
+    // CGAMESPRITE_FEAT_WILDSHAPE_PANTHER
+    if ((oldBaseStats.m_feats[2] & 0x200) == 0 && (m_baseStats.m_feats[2] & 0x200) != 0) {
+        AddSpecialAbility(SPIN245, FALSE);
+    }
+
+    // CGAMESPRITE_FEAT_WILDSHAPE_SHAMBLER
+    if ((oldBaseStats.m_feats[2] & 0x400) == 0 && (m_baseStats.m_feats[2] & 0x400) != 0) {
+        AddSpecialAbility(SPIN246, FALSE);
+    }
+
+    if (sub_763150(CGAMESPRITE_FEAT_STUNNING_FIST) == TRUE) {
+        INT nLevel = m_derivedStats.GetClassMaskLevel(0xFFF);
+
+        INT nStart;
+        if ((oldBaseStats.m_feats[2] & 0x8) == 0 && (m_baseStats.m_feats[2] & 0x8) != 0) {
+            nStart = 1;
+        } else {
+            nStart = oldDStats.GetClassMaskLevel(0xFFF);
+        }
+
+        for (; nStart <= nLevel; nStart++) {
+            if (nStart % 4 == 0) {
+                AddSpecialAbility(SPIN232, FALSE);
+            }
+        }
+    }
+
+    // CGAMESPRITE_FEAT_POWER_ATTACK
+    if ((oldBaseStats.m_feats[1] & 0x8000) == 0 && (m_baseStats.m_feats[1] & 0x8000) != 0) {
+        AddSpecialAbility(SPIN275, FALSE);
+    }
+
+    // CGAMESPRITE_FEAT_EXPERTISE
+    if ((oldBaseStats.m_feats[0] & 0x80000) == 0 && (m_baseStats.m_feats[0] & 0x80000) != 0) {
+        AddSpecialAbility(SPIN276, FALSE);
+    }
+
+    // CGAMESPRITE_FEAT_ARTERIAL_STRIKE
+    if ((oldBaseStats.m_feats[0] & 0x20) == 0 && (m_baseStats.m_feats[0] & 0x20) != 0) {
+        AddSpecialAbility(SPIN277, FALSE);
+    }
+
+    // CGAMESPRITE_FEAT_HAMSTRING
+    if ((oldBaseStats.m_feats[0] & 0x8000000) == 0 && (m_baseStats.m_feats[0] & 0x8000000) != 0) {
+        AddSpecialAbility(SPIN278, FALSE);
+    }
+
+    // CGAMESPRITE_FEAT_RAPID_SHOT
+    if ((oldBaseStats.m_feats[1] & 0x20000) == 0 && (m_baseStats.m_feats[1] & 0x20000) != 0) {
+        AddSpecialAbility(SPIN279, FALSE);
+    }
+
+    INT nDelta;
+
+    // CGAMESPRITE_FEAT_TOUGHNESS
+    if ((m_baseStats.m_feats[2] & 0x20) != 0) {
+        nDelta = m_baseStats.m_featToughness - oldBaseStats.m_featToughness;
+        if (nDelta != 0) {
+            m_baseStats.m_hitPoints += static_cast<SHORT>(nDelta) * 3;
+            m_baseStats.m_maxHitPointsBase += static_cast<SHORT>(nDelta) * 3;
+        }
+    }
+
+    // CGAMESPRITE_FEAT_EXTRA_RAGE
+    if ((m_baseStats.m_feats[0] & 0x100000) != 0) {
+        nDelta = m_baseStats.m_featExtraRage - oldBaseStats.m_featExtraRage;
+        if (nDelta != 0) {
+            CResRef cResRage;
+            if (m_derivedStats.GetClassLevel(CAIOBJECTTYPE_C_BARBARIAN) < 15
+                || oldDStats.GetClassLevel(CAIOBJECTTYPE_C_BARBARIAN) > 14) {
+                cResRage = SPIN236;
+            } else {
+                cResRage = SPIN260;
+            }
+
+            for (; nDelta > 0; nDelta--) {
+                AddSpecialAbility(cResRage, FALSE);
+            }
+        }
+    }
+
+    // CGAMESPRITE_FEAT_EXTRA_SMITING
+    if ((m_baseStats.m_feats[0] & 0x400000) != 0) {
+        nDelta = m_baseStats.m_featExtraSmiting - oldBaseStats.m_featExtraSmiting;
+        if (nDelta != 0) {
+            for (; nDelta > 0; nDelta--) {
+                AddSpecialAbility(SPIN152, FALSE);
+            }
+        }
+    }
+
+    // CGAMESPRITE_FEAT_EXTRA_TURNING
+    if ((m_baseStats.m_feats[0] & 0x800000) != 0) {
+        nDelta = m_baseStats.m_featExtraTurning - oldBaseStats.m_featExtraTurning;
+        if (nDelta != 0) {
+            for (; nDelta > 0; nDelta--) {
+                AddSpecialAbility(SPIN970, FALSE);
+            }
+        }
+    }
+}
+
+// NOTE: The original's body is empty (`ret 8`); its address is shared with
+// CBaldurEngine::SetChatEditBoxStatus by identical code folding.
+//
+// 0x71E750
+void CGameSprite::sub_71E750(CCreatureFileHeader& oldBaseStats, CDerivedStats& oldDStats)
+{
 }
 
 // 0x71E760
@@ -10837,6 +11207,66 @@ BOOL CGameSprite::ProcessEffectList()
         }
 
         field_72A2--;
+    }
+}
+
+// 0x733050
+void CGameSprite::AddEffect(CGameEffect* pEffect, BYTE list, BOOL noSave, BOOL immediateApply)
+{
+    if (pEffect->m_effectID == 150) {
+        if (pEffect != NULL) {
+            delete pEffect;
+        }
+        return;
+    }
+
+    if (m_derivedStats.m_spellStates.test(SPLSTATE_OTILUKES_RESILIENT_SPHERE)
+        && pEffect->m_effectID != 58
+        && pEffect->m_effectID != 402
+        && pEffect->m_effectID != 146
+        && pEffect->m_effectID != 148) {
+        if (pEffect != NULL) {
+            delete pEffect;
+        }
+        return;
+    }
+
+    // NOTE: Inlined CAIObjectType::Equal.
+    if (GetAIType().Equal(CAIObjectType::NOT_SPRITE)) {
+        return;
+    }
+
+    if (!pEffect->sub_4A3310(this, &field_70F6, &field_70F7, &field_70F8, &field_70F9, &field_70FA)
+        && !noSave) {
+        if (pEffect != NULL) {
+            delete pEffect;
+        }
+    } else {
+        field_562C = 1;
+
+        if (immediateApply) {
+            m_tempStats = m_derivedStats;
+                    pEffect->ResolveEffect(this);
+                    if (pEffect->m_done) {
+                if (pEffect != NULL) {
+                    delete pEffect;
+                }
+                return;
+            }
+        }
+
+        // NOTE: The duration type is the WORD constant at 0x8491AC (2).
+        if (list != EFFECT_LIST_TIMED) {
+            m_equipedEffectList.AddTail(pEffect);
+        } else if (pEffect->m_durationType == 2) {
+            m_equipedEffectList.AddTail(pEffect);
+        } else {
+            m_timedEffectList.AddTail(pEffect);
+        }
+    }
+
+    if (!g_pBaldurChitin->GetObjectGame()->GetWorldTimer()->m_active && immediateApply) {
+        ProcessEffectList();
     }
 }
 
@@ -12803,9 +13233,115 @@ SHORT CGameSprite::SetDialog()
 }
 
 // 0x74F830
-void CGameSprite::SelectWeaponAbility(unsigned char a1, unsigned char a2, unsigned char a3, unsigned char a4)
+void CGameSprite::SelectWeaponAbility(unsigned char buttonNum, unsigned char abilityNum, unsigned char feedBack, unsigned char retry)
 {
-    // TODO: Incomplete.
+    BYTE nOldSlot = m_equipment.m_selectedWeapon;
+    BYTE nOldAbility = static_cast<BYTE>(m_equipment.m_selectedWeaponAbility);
+
+    CItem* pOldItem = m_equipment.m_items[m_equipment.m_selectedWeapon];
+    if (pOldItem != NULL) {
+        if ((pOldItem->GetFlagsFile() & 0x10) != 0 && feedBack) {
+            FeedBack(FEEDBACK_ITEMCURSED, 0, 0, 0, -1, 0, 0);
+            return;
+        }
+
+        pOldItem->Demand();
+
+        ITEM_ABILITY* ability = pOldItem->GetAbility(m_equipment.m_selectedWeaponAbility);
+        SHORT launcherSlot;
+        if (ability != NULL) {
+            CItem* pLauncher = GetLauncher(ability, launcherSlot);
+            if (pLauncher != NULL) {
+                pLauncher->Unequip(this, launcherSlot, TRUE, FALSE);
+            }
+        }
+
+        pOldItem->Unequip(this, m_equipment.m_selectedWeapon, TRUE, FALSE);
+        pOldItem->Release();
+    }
+
+    m_equipment.m_selectedWeapon = buttonNum;
+    m_nTempSelectedWeapon = buttonNum;
+    m_nTempSelectedWeaponAbility = abilityNum;
+
+    BOOL bEquipped = FALSE;
+    m_equipment.m_selectedWeaponAbility = abilityNum;
+
+    CItem* pItem = m_equipment.m_items[buttonNum];
+    if (pItem != NULL) {
+        pItem->Demand();
+
+        ITEM_ABILITY* ability = pItem->GetAbility(m_equipment.m_selectedWeaponAbility);
+        if (ability != NULL) {
+            if ((ability->type & 0xFF) == 4) {
+                for (INT nSlot = CGameSpriteEquipment::SLOT_AMMO; nSlot < CGameSpriteEquipment::SLOT_AMMO + 4; nSlot++) {
+                    CItem* pAmmo = m_equipment.m_items[nSlot];
+                    if (pAmmo != NULL) {
+                        pAmmo->Demand();
+
+                        for (INT nAbility = 0; nAbility < 3; nAbility++) {
+                            ITEM_ABILITY* ammoAbility = pAmmo->GetAbility(nAbility);
+                            if (ammoAbility != NULL
+                                && (ammoAbility->type & 0xFF) != 4
+                                && CheckLauncherType(ammoAbility, pItem)) {
+                                SelectWeaponAbility(static_cast<BYTE>(nSlot),
+                                    static_cast<BYTE>(nAbility),
+                                    feedBack,
+                                    TRUE);
+                                pAmmo->Release();
+                                pItem->Release();
+                                return;
+                            }
+                        }
+
+                        pAmmo->Release();
+                    }
+                }
+            } else {
+                if (CheckLauncherType(ability, NULL)) {
+                    SHORT launcherSlot;
+                    CItem* pLauncher = GetLauncher(ability, launcherSlot);
+                    if (pLauncher != NULL) {
+                        pLauncher->Equip(this, launcherSlot, FALSE);
+                    }
+
+                    pItem->Equip(this, m_equipment.m_selectedWeapon, FALSE);
+                    bEquipped = TRUE;
+                }
+            }
+        }
+
+        pItem->Release();
+    }
+
+    if (bEquipped) {
+        if (InControl() && g_pChitin->cNetwork.GetSessionOpen() == TRUE) {
+            CMessage* message = new CMessageSpriteEquipment(this, m_id, m_id);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        }
+    } else {
+        if (retry) {
+            SelectWeaponAbility(nOldSlot, nOldAbility, feedBack, FALSE);
+        } else {
+            if (nOldSlot == CGameSpriteEquipment::SLOT_FIST) {
+                // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjCreatureAI.cpp
+                // __LINE__: 18870
+                UTIL_ASSERT_MSG(FALSE, "Failed equiping Weapon::Fist");
+            } else {
+                SelectWeaponAbility(CGameSpriteEquipment::SLOT_FIST, 0, feedBack, TRUE);
+            }
+
+            if (InControl() && g_pChitin->cNetwork.GetSessionOpen() == TRUE) {
+                CMessage* message = new CMessageSpriteEquipment(this, m_id, m_id);
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+            }
+        }
+    }
+
+    if ((GetActiveStats()->m_generalState & STATE_DEAD) == 0) {
+        CMessage* message = new CMessageSetSequence(static_cast<BYTE>(GetIdleSequence()), m_id, m_id);
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+    }
 }
 
 // 0x756930
@@ -13013,7 +13549,7 @@ SHORT CGameSprite::sub_75F240()
 {
     m_baseStats.field_2E4 = static_cast<SHORT>(m_pos.x);
     m_baseStats.field_2E6 = static_cast<SHORT>(m_pos.y);
-    m_baseStats.field_2E8 = m_nDirection;
+    m_baseStats.field_2E8 = static_cast<BYTE>(m_nDirection);
     return ACTION_DONE;
 }
 
