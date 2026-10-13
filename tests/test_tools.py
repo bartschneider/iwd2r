@@ -21,6 +21,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
 import xml.etree.ElementTree as ET
 
@@ -1596,7 +1597,8 @@ class OracleSafeTargetTest(unittest.TestCase):
     def why(self, game, install=None, oracle_dir=None):
         return oracle.unsafe_target(
             game, install or self.install, oracle_dir or self.oracle_dir,
-            reparse=lambda p: p.rstrip('/') in self.reparse)
+            reparse=lambda p: ('%s is a reparse point' % p
+                               if p.rstrip('/') in self.reparse else None))
 
     def test_safe(self):
         self.assertIsNone(self.why(self.game))
@@ -1656,6 +1658,180 @@ class OracleSafeTargetTest(unittest.TestCase):
     def test_missing_game_is_fine(self):
         os.rmdir(self.game)
         self.assertIsNone(self.why(self.game))
+
+
+def fake_cmd(returncode=0, stdout='', stderr='', raises=None):
+    calls = []
+
+    def run(argv):
+        calls.append(argv)
+        if raises:
+            raise raises
+        return types.SimpleNamespace(returncode=returncode, stdout=stdout,
+                                     stderr=stderr)
+    run.calls = calls
+    return run
+
+
+class OracleWindowsReparseTest(unittest.TestCase):
+    """tools/oracle.py: windows_reparse fails closed."""
+
+    GAME = '/mnt/c/Users/thier/iwd2r-oracle/game'
+
+    def check(self, run, path=GAME):
+        return oracle.windows_reparse(path, run=run)
+
+    def test_asks_dir_on_the_parent(self):
+        run = fake_cmd(0, 'other\r\n')
+        self.assertIsNone(self.check(run))
+        self.assertEqual(run.calls, [['dir', '/AL', '/B',
+                                      'C:\\Users\\thier\\iwd2r-oracle']])
+
+    def test_exit_0_naming_the_target(self):
+        reason = self.check(fake_cmd(0, 'junk\r\nGAME\r\n'))
+        self.assertIn('is a reparse point', reason)
+
+    def test_exit_0_without_the_target(self):
+        self.assertIsNone(self.check(fake_cmd(0, 'game2\r\nout\r\n')))
+
+    def test_exit_1_file_not_found(self):
+        self.assertIsNone(self.check(fake_cmd(1, '', 'File Not Found\r\n')))
+
+    def test_exit_1_other_stderr(self):
+        reason = self.check(fake_cmd(
+            1, '', 'The system cannot find the file specified.\r\n'))
+        self.assertIn('cannot tell', reason)
+        self.assertIn('cannot find the file', reason)
+
+    def test_nonzero_exit_with_stdout(self):
+        self.assertIn('cannot tell', self.check(fake_cmd(1, 'game\r\n',
+                                                         'File Not Found')))
+        self.assertIn('exit 2', self.check(fake_cmd(2, 'x', '')))
+
+    def test_missing_cmd_exe(self):
+        reason = self.check(fake_cmd(raises=FileNotFoundError(
+            2, 'No such file', '/mnt/c/Windows/System32/cmd.exe')))
+        self.assertIn('cannot run cmd.exe', reason)
+
+    def test_timeout(self):
+        reason = self.check(fake_cmd(raises=subprocess.TimeoutExpired(
+            'cmd.exe', 60)))
+        self.assertIn('timed out', reason)
+
+    def test_path_off_drvfs(self):
+        run = fake_cmd(0, '')
+        for path in ('/home/thier/game', '/tmp/x', '/mnt/c', 'relative/game',
+                     '/mnt/wsl/game'):
+            self.assertIn('not on a Windows drive', self.check(run, path),
+                          path)
+        self.assertEqual(run.calls, [])
+
+    def test_drvfs_win(self):
+        self.assertEqual(oracle.drvfs_win('/mnt/c/Users/thier/'),
+                         'C:\\Users\\thier')
+        self.assertEqual(oracle.drvfs_win('/mnt/d'), 'D:\\')
+        self.assertIsNone(oracle.drvfs_win('/home/thier'))
+
+
+class OracleBuildOrderTest(unittest.TestCase):
+    """tools/oracle.py vanilla: build_vanilla runs the guard before every
+    destructive step, and a refusing guard stops it before any."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        base = os.path.realpath(self.tmp.name)
+        self.oracle_dir = os.path.join(base, 'oracle')
+        self.game = os.path.join(self.oracle_dir, 'game')
+        self.install = os.path.join(base, 'install')
+        files = {'CHITIN.KEY': b'KEY', 'IWD2.exe': b'MZ patched',
+                 'WeiDU.log': WEIDU_LOG.encode(), 'icewind2.ini': INI.encode(),
+                 'Setup-iwd2ee.exe': b'MZ', 'IEex.ini': b'x',
+                 'Shaders/readme.txt': b'x', 'Override/a.itm': b'x'}
+        for rel, data in files.items():
+            path = os.path.join(self.install, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, 'wb') as f:
+                f.write(data)
+        os.makedirs(self.game)
+        with open(os.path.join(self.game, 'old.txt'), 'w') as f:
+            f.write('old copy')
+        self.events = []
+        self.guard_raises = False
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def guard(self, game, install):
+        self.events.append('guard')
+        if self.guard_raises:
+            raise SystemExit('oracle: refusing to touch the copy: test')
+
+    def remove_tree(self, path):
+        self.events.append('rmtree')
+        import shutil
+        shutil.rmtree(path)
+
+    def rsync(self, install, game, log):
+        self.events.append('rsync')
+        import shutil
+        shutil.copytree(install, game, dirs_exist_ok=True)
+        return 0
+
+    def weidu(self, bat, game, log):
+        self.events.append('weidu')
+        os.remove(os.path.join(game, 'IWD2.exe'))
+        with open(os.path.join(game, 'iwd2.exe'), 'wb') as f:
+            f.write(VANILLA_BYTES)
+        with open(os.path.join(game, 'WeiDU.log'), 'w') as f:
+            f.write('// Log of Currently Installed WeiDU Mods\n')
+        return 0
+
+    def delete(self, path):
+        self.events.append('delete ' + os.path.basename(path))
+        os.remove(path) if os.path.isfile(path) else \
+            __import__('shutil').rmtree(path)
+
+    def build(self):
+        from unittest import mock
+        patches = [
+            mock.patch.object(oracle, 'ORACLE_DIR', self.oracle_dir),
+            mock.patch.object(oracle, 'RUNS_DIR',
+                              os.path.join(self.tmp.name, 'runs')),
+            mock.patch.object(oracle, 'assert_safe_target', self.guard),
+            mock.patch.object(oracle, 'remove_tree', self.remove_tree),
+            mock.patch.object(oracle, 'rsync_copy', self.rsync),
+            mock.patch.object(oracle, 'run_weidu', self.weidu),
+            mock.patch.object(oracle, 'delete_leftover', self.delete),
+            mock.patch.object(oracle, 'prove_separate',
+                              lambda game, install, log: None),
+            mock.patch.object(oracle, 'win_path',
+                              lambda p: 'X:' + p.replace('/', '\\')),
+        ]
+        with contextlib.ExitStack() as stack:
+            for p in patches:
+                stack.enter_context(p)
+            stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
+            return oracle.build_vanilla(self.game, self.install,
+                                        md5=VANILLA_TEST_MD5)
+
+    def test_guard_before_each_destructive_step(self):
+        self.assertEqual(self.build(), self.game)
+        self.assertEqual(self.events, [
+            'guard', 'rmtree', 'guard', 'rsync', 'guard', 'weidu',
+            'guard', 'delete IEex.ini', 'guard', 'delete Setup-iwd2ee.exe',
+            'guard', 'delete Shaders'])
+        self.assertTrue(oracle.marker_ok(self.game, VANILLA_TEST_MD5))
+        self.assertFalse(os.path.exists(os.path.join(self.game, 'old.txt')))
+
+    def test_refusing_guard_stops_before_anything(self):
+        self.guard_raises = True
+        with open(os.path.join(self.game, oracle.MARKER), 'w') as f:
+            f.write('{"md5": "kept"}')
+        with self.assertRaises(SystemExit):
+            self.build()
+        self.assertEqual(self.events, ['guard'])
+        self.assertEqual(sorted(os.listdir(self.game)),
+                         sorted([oracle.MARKER, 'old.txt']))
 
 
 class PlayBuildWindowsDefaultsTest(unittest.TestCase):

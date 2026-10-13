@@ -729,20 +729,55 @@ def _resolved(path):
     return out or '/'
 
 
-def windows_reparse(path):
-    """Whether Windows lists path as a reparse point (junction, symlink):
-    dir /AL /B on its parent through cmd.exe. Paths off drvfs are False."""
+def drvfs_win(path):
+    """The Windows path of a /mnt/<drive>/... path, or None."""
+    m = re.match(r'^/mnt/([A-Za-z])(/.*)?$', path.rstrip('/') or '/')
+    if not m:
+        return None
+    return '%s:\\%s' % (m.group(1).upper(),
+                         (m.group(2) or '').strip('/').replace('/', '\\'))
+
+
+def run_cmd(argv):
+    """Run a cmd.exe command line; a CompletedProcess."""
     import play
-    if not path.startswith('/mnt/'):
-        return False
-    parent, name = os.path.split(path.rstrip('/'))
-    if not os.path.isdir(parent):
-        return False
-    r = subprocess.run([play.CMD_EXE, '/c', 'dir', '/AL', '/B',
-                        play.wslpath('-w', parent)], cwd=parent,
-                       capture_output=True, text=True, errors='replace')
-    return name.lower() in (line.strip().lower()
-                            for line in r.stdout.splitlines())
+    return subprocess.run([play.CMD_EXE, '/c'] + argv, cwd='/mnt/c',
+                          capture_output=True, text=True, errors='replace',
+                          timeout=60)
+
+
+def windows_reparse(path, run=run_cmd):
+    """None when Windows says path is not a reparse point (junction,
+    symlink), else the reason to refuse. Fails closed: dir /AL /B on the
+    parent must exit 0 without naming path, or exit 1 with exactly "File
+    Not Found" and no output; anything else, or a path off drvfs, refuses."""
+    path = path.rstrip('/')
+    parent, name = os.path.split(path)
+    win_parent = drvfs_win(parent)
+    if win_parent is None or not name:
+        return '%s is not on a Windows drive (/mnt/<drive>/)' % path
+    try:
+        r = run(['dir', '/AL', '/B', win_parent])
+    except FileNotFoundError as e:
+        return 'cannot run cmd.exe to check %s for reparse points: %s' % (
+            path, e)
+    except subprocess.TimeoutExpired:
+        return 'cmd.exe timed out checking %s for reparse points' % path
+    except OSError as e:
+        return 'cannot check %s for reparse points: %s' % (path, e)
+    stdout, stderr = r.stdout or '', r.stderr or ''
+    if r.returncode == 0:
+        listed = [line.strip().lower() for line in stdout.splitlines()]
+        if name.lower() in listed:
+            return '%s is a reparse point' % path
+        return None
+    if r.returncode == 1 and not stdout.strip() and \
+            stderr.strip() == 'File Not Found':
+        return None
+    return ('dir /AL /B %s gave exit %d, stdout %r, stderr %r; cannot tell '
+            'whether %s is a reparse point' % (win_parent, r.returncode,
+                                               stdout[:200], stderr[:200],
+                                               path))
 
 
 def unsafe_target(game, install, oracle_dir=ORACLE_DIR,
@@ -760,8 +795,9 @@ def unsafe_target(game, install, oracle_dir=ORACLE_DIR,
     for path in (game.rstrip('/'), oracle_dir.rstrip('/')):
         if os.path.islink(path):
             return '%s is a symlink' % path
-        if reparse(path):
-            return '%s is a reparse point' % path
+        reason = reparse(path)
+        if reason:
+            return reason
     return None
 
 
@@ -806,7 +842,6 @@ def write_marker(game, data):
 def prove_separate(game, install, log):
     """Exit unless game is a real directory of its own, not a link or
     junction to install."""
-    import play
     for path in (ORACLE_DIR, game):
         if os.path.islink(path):
             sys.exit('oracle: %s is a link; refusing to run WeiDU' % path)
@@ -822,15 +857,37 @@ def prove_separate(game, install, log):
     if leaked:
         sys.exit('oracle: a file written to %s appeared in %s' % (game,
                                                                    install))
-    # Windows' own view: dir /AL lists the reparse points (junctions,
-    # symlinks) among the oracle folder's entries.
-    r = subprocess.run([play.CMD_EXE, '/c', 'dir', '/AL', '/B',
-                        play.wslpath('-w', ORACLE_DIR)], cwd=ORACLE_DIR,
-                       capture_output=True, text=True)
-    if os.path.basename(game).lower() in r.stdout.lower().split():
-        sys.exit('oracle: Windows lists %s as a reparse point' % game)
+    # Windows' own view of the copy (fails closed).
+    reason = windows_reparse(game)
+    if reason:
+        sys.exit('oracle: %s' % reason)
     say(log, 'copy is separate: no link, own inode, probe file not in the '
-        'install, no reparse point in %s' % play.wslpath('-w', ORACLE_DIR))
+        'install, Windows lists no reparse point at %s' % drvfs_win(game))
+
+
+# The destructive steps of build_vanilla, as functions so tests can record
+# them.
+def remove_tree(path):
+    shutil.rmtree(path)
+
+
+def rsync_copy(install, game, log):
+    import play
+    return play.stream(['rsync', '-a', '--delete', install + '/',
+                        game + '/'], log)
+
+
+def run_weidu(bat, game, log):
+    import play
+    return play.stream([play.CMD_EXE, '/c', win_path(bat)], log, cwd=game,
+                       stdin=subprocess.DEVNULL)
+
+
+def delete_leftover(path):
+    if os.path.isdir(path) and not os.path.islink(path):
+        shutil.rmtree(path)
+    else:
+        os.remove(path)
 
 
 def build_vanilla(game, install=INSTALL, md5=None):
@@ -839,6 +896,7 @@ def build_vanilla(game, install=INSTALL, md5=None):
     import play
     md5 = md5 or vanilla_md5()
     run_dir = play.make_run_folder(RUNS_DIR, datetime.datetime.now())
+    os.makedirs(ORACLE_DIR, exist_ok=True)
     with open(os.path.join(run_dir, 'vanilla.log'), 'w') as log:
         before = install_state(install)
         say(log, 'install before: %s' % json.dumps(before))
@@ -848,13 +906,12 @@ def build_vanilla(game, install=INSTALL, md5=None):
             os.remove(marker)
         if os.path.exists(game):
             say(log, 'removing the old copy %s' % game)
-            shutil.rmtree(game)
+            remove_tree(game)
         os.makedirs(game)
         prove_separate(game, install, log)
         say(log, 'copying %s to %s' % (install, game))
         assert_safe_target(game, install)
-        if play.stream(['rsync', '-a', '--delete', install + '/', game + '/'],
-                       log) != 0:
+        if rsync_copy(install, game, log) != 0:
             sys.exit('oracle: rsync failed')
         prove_separate(game, install, log)
         links = links_in(game)
@@ -862,7 +919,7 @@ def build_vanilla(game, install=INSTALL, md5=None):
             sys.exit('oracle: the copy holds links or junctions: %s'
                      % ' '.join(links))
         say(log, 'no symlinks or junctions in the copy')
-        game_win = play.wslpath('-w', game)
+        game_win = win_path(game)
         if game_win.lower().startswith(INSTALL_WIN.lower()):
             sys.exit('oracle: %s is inside the install' % game_win)
         names = {n.lower(): n for n in os.listdir(game)}
@@ -883,14 +940,13 @@ def build_vanilla(game, install=INSTALL, md5=None):
             weidu_log = os.path.join(ORACLE_DIR, 'vanilla-weidu.log')
             bat = os.path.join(ORACLE_DIR, 'vanilla-uninstall.bat')
             script = uninstall_bat(game_win, setup, components,
-                                   play.wslpath('-w', weidu_log))
+                                   win_path(weidu_log))
             with open(bat, 'w', newline='\r\n') as f:
                 f.write(script)
             say(log, 'running WeiDU in %s: %s' % (game_win,
                                                    script.splitlines()[2]))
             assert_safe_target(game, install)
-            code = play.stream([play.CMD_EXE, '/c', play.wslpath('-w', bat)],
-                               log, cwd=game, stdin=subprocess.DEVNULL)
+            code = run_weidu(bat, game, log)
             if os.path.exists(weidu_log):
                 shutil.copyfile(weidu_log,
                                 os.path.join(run_dir, 'weidu-uninstall.log'))
@@ -902,10 +958,7 @@ def build_vanilla(game, install=INSTALL, md5=None):
             path = os.path.join(game, rel)
             say(log, 'deleting leftover %s' % rel)
             assert_safe_target(game, install)
-            if os.path.isdir(path) and not os.path.islink(path):
-                shutil.rmtree(path)
-            else:
-                os.remove(path)
+            delete_leftover(path)
         for name in os.listdir(game):
             path = os.path.join(game, name)
             if name.lower().endswith('.ini') and os.path.isfile(path):
