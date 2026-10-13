@@ -32,8 +32,10 @@
 #endif
 #include "CChitin.h"
 #include "CDimmKeyTable.h"
+#include "CItem.h"
 #include "CResItem.h"
 #include "CRuleTables.h"
+#include "msvc_rand.h"
 #ifdef _MSC_VER
 #pragma warning(pop)
 #endif
@@ -41,6 +43,7 @@
 #include "oracle/runner/compare.h"
 #include "oracle/runner/generators.h"
 #include "oracle/runner/registry.h"
+#include "vanilla_config.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -540,7 +543,145 @@ void TierUpgrade(CaseContext& ctx)
     ::operator delete(storage);
 }
 
+// ---------------------------------------------------------------------------
+// CItem::sub_4EA4A0 (0x4EA4A0)
+
+// CItem::CItem() (0x4E7840): this in ecx, plain ret; sets m_useCount1-3
+// (0x18, 0x1A, 0x1C) to 1. CItem::sub_4EA4A0(CString& sResRef): `ret 4` at
+// 0x4EA4FC; reads the name (CString::GetBuffer 0x7FCFFE, _strnicmp
+// 0x7EA8C0) and m_useCount1 and m_useCount2, writes those two and may call
+// rand (0x7E8160). The resource helper (pRes at 0x4) is not read.
+using ItemCtorFn = void*(__fastcall*)(void* self, void* edx);
+constexpr uintptr_t kItemCtor = 0x4E7840;
+using UseCountRollFn = void(__fastcall*)(void* self, void* edx, const void* resRef);
+constexpr uintptr_t kUseCountRoll = 0x4EA4A0;
+// CItem is 0xEE bytes (m_numSounds at 0xEC).
+constexpr size_t kItemSize = 0x100;
+constexpr size_t kItemResOffset = 0x4;
+constexpr size_t kUseCountsOffset = 0x18;
+
+using Srand = void(__cdecl*)(unsigned int);
+using Rand = int(__cdecl*)();
+
+void OriginalSrand(unsigned int seed)
+{
+    reinterpret_cast<Srand>(static_cast<uintptr_t>(kVanillaSrand))(seed);
+}
+
+int OriginalRand()
+{
+    return reinterpret_cast<Rand>(static_cast<uintptr_t>(kVanillaRand))();
+}
+
+std::string UseCounts(const uint16_t (&counts)[3])
+{
+    return std::to_string(counts[0]) + "/" + std::to_string(counts[1]) + "/" + std::to_string(counts[2]);
+}
+
+struct ItemPair {
+    uint8_t* original;
+    CItem* ours;
+};
+
+// Both sides' CItem from their default constructors, each holding a parsed
+// CResItem of `itemFile` the way CResHelper holds its resource (pRes), which
+// the function does not read.
+ItemPair MakeItems(CaseContext& ctx, const uint8_t* itemFile, const std::string& name)
+{
+    ItemPair pair {};
+    ParsePair res = MakeResItems(ctx, name);
+    ctx.CallOriginal([&] {
+        reinterpret_cast<ParseFn>(kParse)(res.original, nullptr, itemFile);
+        pair.original = OriginalBlock(kItemSize);
+        reinterpret_cast<ItemCtorFn>(kItemCtor)(pair.original, nullptr);
+        const uint32_t pointer = Address(res.original);
+        std::memcpy(pair.original + kItemResOffset, &pointer, 4);
+    });
+    res.ours->Parse(const_cast<uint8_t*>(itemFile));
+    pair.ours = new CItem();
+    pair.ours->pRes = res.ours;
+    return pair;
+}
+
+void CompareUseCountRoll(CaseContext& ctx, const ItemPair& items, const std::string& resRef, uint16_t useCount1,
+    uint16_t useCount2, unsigned int seed)
+{
+    const uint16_t useCount3 = 5;
+    ctx.SetInputs("srand(" + std::to_string(seed) + "), use counts " + std::to_string(useCount1) + "/"
+        + std::to_string(useCount2) + "/" + std::to_string(useCount3) + ", sub_4EA4A0(" + Quoted(resRef) + ")");
+
+    uint16_t original[3] = {};
+    std::string originalName;
+    int originalNext = 0;
+    ctx.CallOriginal([&] {
+        const uint16_t counts[3] = { useCount1, useCount2, useCount3 };
+        std::memcpy(items.original + kUseCountsOffset, counts, sizeof(counts));
+        const void* name = OriginalString(resRef);
+        OriginalSrand(seed);
+        reinterpret_cast<UseCountRollFn>(kUseCountRoll)(items.original, nullptr, name);
+        originalNext = OriginalRand();
+        std::memcpy(original, items.original + kUseCountsOffset, sizeof(original));
+        originalName = OriginalText(name);
+    });
+
+    items.ours->m_useCount1 = useCount1;
+    items.ours->m_useCount2 = useCount2;
+    items.ours->m_useCount3 = useCount3;
+    CString name(resRef.c_str());
+    iwd2r_srand(seed);
+    items.ours->sub_4EA4A0(name);
+    const int oursNext = iwd2r_rand();
+    const uint16_t ours[3] = { items.ours->m_useCount1, items.ours->m_useCount2, items.ours->m_useCount3 };
+
+    ctx.CountInputs(1);
+    const std::string originalText = "use counts " + UseCounts(original) + ", name " + Quoted(originalName)
+        + ", next rand " + std::to_string(originalNext);
+    const std::string oursText = "use counts " + UseCounts(ours) + ", name " + Quoted(static_cast<const char*>(name))
+        + ", next rand " + std::to_string(oursNext);
+    if (originalText != oursText) {
+        ctx.Fail(ctx.Inputs(), originalText, oursText);
+    }
+}
+
+// CItem::sub_4EA4A0 at 0x4EA4A0, which CItem's constructors call on the
+// item's name to roll the use count of the random gem bags. Per item (the
+// long sword, the scroll, MISC07, each a CItem holding its parsed CResItem):
+// the names 00RTAVE1 in three cases, other 00RTAVE and 00RIITM names (the
+// seven-letter 00RIITM branch reads the terminator, so it never rolls), the
+// item's own name and names of other lengths, by m_useCount1 and
+// m_useCount2 0, 1, 2, 7, 0x7FFF, 0x8000 and 0xFFFF (m_useCount3 5), each
+// from its own srand seed; then --iterations random counts and names. The
+// three use counts, the name and the rand value drawn after are compared.
+void UseCountRoll(CaseContext& ctx)
+{
+    const char* const names[] = { "00RTAVE1", "00rtave1", "00RtAvE1", "00RTAVE2", "00RTAVE3", "00RTAVE",
+        "00RTAVE10", "00RTAVE1 ", "0RTAVE1", "00RIITM", "00riitm", "00RIITM1", "00RIITM5", "00RIITM9", "00RIITM0",
+        "00RIITMX", "00RIIT", "", "MISC07", "00SWDL01", "00SCRL01", "00GBGA01" };
+    const uint16_t counts[] = { 0, 1, 2, 7, 0x7FFF, 0x8000, 0xFFFF };
+    uint64_t state = ctx.seed ^ 0x5573654300000000ull; // "UseC"
+    auto bits = [&] { return static_cast<uint32_t>(oracle::SplitMix64(&state)); };
+
+    for (const char* item : { "00SWDL01", "00SCRL01", "MISC07" }) {
+        const uint8_t* file = Leaked(ctx, ReadGameFile(ctx, std::string(item) + ".ITM"));
+        const ItemPair items = MakeItems(ctx, file, item);
+        for (const char* name : names) {
+            for (const uint16_t useCount1 : counts) {
+                for (const uint16_t useCount2 : counts) {
+                    CompareUseCountRoll(ctx, items, name, useCount1, useCount2, bits());
+                }
+            }
+        }
+        for (int i = 0; i < ctx.iterations; ++i) {
+            const std::string name = names[bits() % (sizeof(names) / sizeof(names[0]))];
+            const uint16_t useCount1 = static_cast<uint16_t>(bits());
+            const uint16_t useCount2 = static_cast<uint16_t>(bits() % 4 == 0 ? 0 : bits());
+            CompareUseCountRoll(ctx, items, name, useCount1, useCount2, bits());
+        }
+    }
+}
+
 } // namespace
 
 ORACLE_CASE("items/res_item_parse", ResItemParse);
 ORACLE_CASE("items/tier_upgrade", TierUpgrade);
+ORACLE_CASE("items/use_count_roll", UseCountRoll);
