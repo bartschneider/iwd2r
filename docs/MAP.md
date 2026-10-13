@@ -1,8 +1,8 @@
 # Subsystem map
 
-Generated from commit `06b3606` by `tools/gen_map.py`. Do not edit; CI runs `python3 -I tools/gen_map.py --check`.
+Generated from commit `d30a671` by `tools/gen_map.py`. Do not edit; CI runs `python3 -I tools/gen_map.py --check`.
 
-Totals: 483 files, 273475 lines, 372 `TODO: Incomplete`, 9999 address comments.
+Totals: 483 files, 273816 lines, 371 `TODO: Incomplete`, 10002 address comments.
 
 | Family | Files | Lines | `TODO: Incomplete` | Address comments | Platform headers included |
 |---|---:|---:|---:|---:|---|
@@ -10,7 +10,7 @@ Totals: 483 files, 273475 lines, 372 `TODO: Incomplete`, 9999 address comments.
 | Game | 103 | 83061 | 89 | 2466 | — |
 | Screens | 36 | 63906 | 74 | 2022 | — |
 | UI | 28 | 11598 | 13 | 514 | — |
-| Video | 34 | 22243 | 75 | 1100 | ddraw_shim.h, gl_compat.h |
+| Video | 34 | 22584 | 74 | 1103 | ddraw_shim.h, gl_compat.h |
 | Resources | 63 | 10566 | 1 | 328 | dsound_shim.h |
 | Sound | 20 | 7822 | 0 | 266 | dsound_shim.h, win32_api.h |
 | Messaging | 10 | 22512 | 37 | 1148 | — |
@@ -18,4 +18,4 @@ Totals: 483 files, 273475 lines, 372 `TODO: Incomplete`, 9999 address comments.
 | Other | 86 | 25388 | 66 | 1336 | state_dump.h, window.h |
 | compat | 31 | 3722 | 0 | 0 | win32_api.h |
 | platform | 40 | 7934 | 0 | 0 | affinity.h, clock.h, data_dir.h, ddraw_shim.h, dsound_shim.h, fs.h, gl_compat.h, handles.h, imm_stub.h, input_settings.h, png.h, present.h, replay.h, replay_clock.h, script.h, script_core.h, state_dump.h, win32_api.h, window.h |
-| **Total** | 483 | 273475 | 372 | 9999 | |
+| **Total** | 483 | 273816 | 371 | 10002 | |

@@ -6,6 +6,8 @@
 #include "CVidInf.h"
 #include "CVideo3d.h"
 
+#include <cstdint>
+
 // 0x85E838
 const INT CVidTile::BYTES_PER_TEXEL = 4;
 
@@ -66,6 +68,199 @@ void CVidImage::SetPolyColor(DWORD dwFlags)
 {
     CVideo3d::glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
     g_pChitin->GetCurrentVideoMode()->CheckResults3d(0);
+}
+
+// NOTE: The pulse phase of the range tints, adds and lights below starts
+// from the image's address, as in the original (nAUCounter + this).
+static INT PulsePhase(const CVidImage* pImage, BYTE nPeriod)
+{
+    INT nPhase = static_cast<INT>(g_pChitin->nAUCounter + static_cast<INT>(reinterpret_cast<uintptr_t>(pImage)))
+        % static_cast<INT>(nPeriod * 2);
+    if (static_cast<INT>(nPeriod) < nPhase) {
+        nPhase = nPeriod * 2 - nPhase;
+    }
+    return nPhase;
+}
+
+// #guess
+// 0x7B4230
+BOOL CVidImage::GetTint(DWORD& nRed, DWORD& nGreen, DWORD& nBlue, INT& nShiftBack, DWORD dwFlags)
+{
+    INT nMaxValue = 255;
+    BOOL bResult = FALSE;
+    INT nLightPhase = 0;
+    INT nAddPhase = 0;
+
+    COLORREF rgbGlobalTintColor = g_pChitin->GetCurrentVideoMode()->GetGlobalTintColor();
+
+    if ((dwFlags & 0x20000) != 0) {
+        if ((dwFlags & 0x10000) != 0) {
+            nMaxValue = 255 * 255;
+            nRed = GetRValue(m_paletteAffects.rgbTintColor) * GetRValue(rgbGlobalTintColor);
+            nGreen = GetGValue(m_paletteAffects.rgbTintColor) * GetGValue(rgbGlobalTintColor);
+            nBlue = GetBValue(m_paletteAffects.rgbTintColor) * GetBValue(rgbGlobalTintColor);
+            nShiftBack = 16;
+        } else {
+            nMaxValue = 255;
+            nRed = GetRValue(m_paletteAffects.rgbTintColor);
+            nGreen = GetGValue(m_paletteAffects.rgbTintColor);
+            nBlue = GetBValue(m_paletteAffects.rgbTintColor);
+            nShiftBack = 8;
+        }
+        bResult = TRUE;
+    } else if ((dwFlags & 0x10000) != 0) {
+        nMaxValue = 255;
+        nRed = GetRValue(rgbGlobalTintColor);
+        nGreen = GetGValue(rgbGlobalTintColor);
+        nBlue = GetBValue(rgbGlobalTintColor);
+        nShiftBack = 8;
+        bResult = TRUE;
+    }
+
+    COLORREF* pRangeTint = m_paletteAffects.pRangeTints[0];
+    if (pRangeTint != NULL) {
+        BYTE nPeriod = m_paletteAffects.aRangeTintPeriods[0];
+        if (nPeriod == 1) {
+            nRed = GetRValue(*pRangeTint) * nRed;
+            nGreen = GetGValue(*pRangeTint) * nGreen;
+            nBlue = GetBValue(*pRangeTint) * nBlue;
+        } else {
+            INT nPhase = PulsePhase(this, nPeriod);
+            nRed = (255 - static_cast<INT>((255 - GetRValue(*pRangeTint)) * nPhase) / nPeriod) * nRed;
+            nGreen = (255 - static_cast<INT>((255 - GetGValue(*pRangeTint)) * nPhase) / nPeriod) * nGreen;
+            nBlue = (255 - static_cast<INT>((255 - GetBValue(*pRangeTint)) * nPhase) / nPeriod) * nBlue;
+        }
+        bResult = TRUE;
+        nShiftBack += 8;
+        nMaxValue *= 255;
+    }
+
+    if (m_paletteAffects.pRangeAdds[0] != NULL) {
+        BYTE nPeriod = m_paletteAffects.aRangeAddPeriods[0];
+        if (nPeriod == 1 || nPeriod == 0) {
+            nAddPhase = nPeriod;
+        } else {
+            nAddPhase = PulsePhase(this, nPeriod);
+        }
+    }
+
+    if (m_paletteAffects.pRangeLights[0] != NULL) {
+        BYTE nPeriod = m_paletteAffects.aRangeLightPeriods[0];
+        if (nPeriod == 1) {
+            nLightPhase = 1;
+        } else {
+            nLightPhase = PulsePhase(this, nPeriod);
+        }
+    }
+
+    if ((m_paletteAffects.suppressTints & CVidPalette::m_SuppressTintMasks[0]) != 0
+        && (nLightPhase != 0 || nAddPhase != 0)) {
+        INT nPhase;
+        BYTE nPeriod;
+        if (nAddPhase < nLightPhase) {
+            nPhase = nLightPhase;
+            nPeriod = m_paletteAffects.aRangeLightPeriods[0];
+        } else {
+            nPhase = nAddPhase;
+            nPeriod = m_paletteAffects.aRangeAddPeriods[0];
+        }
+        nRed = static_cast<INT>((nMaxValue - nRed) * nPhase) / nPeriod + nRed;
+        nGreen = static_cast<INT>((nMaxValue - nGreen) * nPhase) / nPeriod + nGreen;
+        nBlue = static_cast<INT>((nMaxValue - nBlue) * nPhase) / nPeriod + nBlue;
+    }
+
+    return bResult;
+}
+
+// #guess
+// 0x7B4600
+BOOL CVidImage::GetAdd(DWORD& nRed, DWORD& nGreen, DWORD& nBlue, INT& nShiftBack, DWORD dwFlags)
+{
+    BYTE nBrightnessCorrection = g_pChitin->GetCurrentVideoMode()->m_nBrightnessCorrection;
+    BOOL bResult = FALSE;
+
+    if ((dwFlags & 0x40000) != 0) {
+        if (nBrightnessCorrection != 0) {
+            DWORD nInv = static_cast<BYTE>(~nBrightnessCorrection);
+            nRed = static_cast<BYTE>(~GetRValue(m_paletteAffects.rgbAddColor)) * nInv;
+            nGreen = static_cast<BYTE>(~GetGValue(m_paletteAffects.rgbAddColor)) * nInv;
+            nBlue = static_cast<BYTE>(~GetBValue(m_paletteAffects.rgbAddColor)) * nInv;
+            nShiftBack = 16;
+        } else {
+            nRed = static_cast<BYTE>(~GetRValue(m_paletteAffects.rgbAddColor));
+            nGreen = static_cast<BYTE>(~GetGValue(m_paletteAffects.rgbAddColor));
+            nBlue = static_cast<BYTE>(~GetBValue(m_paletteAffects.rgbAddColor));
+            nShiftBack = 8;
+        }
+        bResult = TRUE;
+    } else if (nBrightnessCorrection != 0) {
+        DWORD nInv = static_cast<BYTE>(~nBrightnessCorrection);
+        nRed = nInv;
+        nGreen = nInv;
+        nBlue = nInv;
+        nShiftBack = 8;
+        bResult = TRUE;
+    }
+
+    COLORREF* pRangeAdd = m_paletteAffects.pRangeAdds[0];
+    if (pRangeAdd != NULL) {
+        BYTE nPeriod = m_paletteAffects.aRangeAddPeriods[0];
+        BYTE nBlueAdd;
+        if (nPeriod == 1 || nPeriod == 0) {
+            nRed = static_cast<BYTE>(~GetRValue(*pRangeAdd)) * nRed;
+            nGreen = static_cast<BYTE>(~GetGValue(*pRangeAdd)) * nGreen;
+            nBlueAdd = GetBValue(*pRangeAdd);
+        } else {
+            INT nPhase = PulsePhase(this, nPeriod);
+            nRed = static_cast<BYTE>(~static_cast<BYTE>(static_cast<INT>(GetRValue(*pRangeAdd) * nPhase) / nPeriod)) * nRed;
+            nGreen = static_cast<BYTE>(~static_cast<BYTE>(static_cast<INT>(GetGValue(*pRangeAdd) * nPhase) / nPeriod)) * nGreen;
+            nBlueAdd = static_cast<BYTE>(static_cast<INT>(GetBValue(*pRangeAdd) * nPhase) / nPeriod);
+        }
+        nBlue = static_cast<BYTE>(~nBlueAdd) * nBlue;
+        nShiftBack += 8;
+        return TRUE;
+    }
+
+    return bResult;
+}
+
+// #guess
+// 0x7B4800
+BOOL CVidImage::GetLight(INT& nRed, INT& nGreen, INT& nBlue, DWORD dwFlags)
+{
+    BYTE nGammaCorrection = g_pChitin->GetCurrentVideoMode()->m_nGammaCorrection;
+    BOOL bResult = FALSE;
+
+    if ((dwFlags & 0x200000) != 0) {
+        nRed += GetRValue(m_paletteAffects.rgbLightColor) + nGammaCorrection;
+        nGreen += GetGValue(m_paletteAffects.rgbLightColor) + nGammaCorrection;
+        nBlue += GetBValue(m_paletteAffects.rgbLightColor) + nGammaCorrection;
+        bResult = TRUE;
+    } else if (nGammaCorrection != 0) {
+        nRed += nGammaCorrection;
+        nGreen += nGammaCorrection;
+        nBlue += nGammaCorrection;
+        bResult = TRUE;
+    }
+
+    COLORREF* pRangeLight = m_paletteAffects.pRangeLights[0];
+    if (pRangeLight == NULL) {
+        return bResult;
+    }
+
+    BYTE nPeriod = m_paletteAffects.aRangeLightPeriods[0];
+    if (nPeriod != 1) {
+        INT nPhase = PulsePhase(this, nPeriod);
+        nRed += static_cast<INT>(GetRValue(*pRangeLight) * nPhase) / nPeriod;
+        nGreen += static_cast<INT>(GetGValue(*pRangeLight) * nPhase) / nPeriod;
+        nBlue += static_cast<INT>(GetBValue(*pRangeLight) * nPhase) / nPeriod;
+        return TRUE;
+    }
+
+    nRed += GetRValue(*pRangeLight);
+    nGreen += GetGValue(*pRangeLight);
+    nBlue += GetBValue(*pRangeLight);
+    return TRUE;
 }
 
 // -----------------------------------------------------------------------------

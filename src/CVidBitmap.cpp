@@ -468,9 +468,151 @@ BOOL CVidBitmap::BltBmp24To32(DWORD* pSurface, LONG lPitch, BYTE* pData, const C
 // 0x7CD870
 BOOL CVidBitmap::BltBmp24To32Tint(DWORD* pSurface, LONG lPitch, BYTE* pData, const CSize& bmpSize, LONG nDataJump, DWORD dwFlags)
 {
-    // TODO: Incomplete.
+    CVidMode* pVidMode = g_pChitin->GetCurrentVideoMode();
 
-    return FALSE;
+    DWORD nTintRed = 255;
+    DWORD nTintGreen = 255;
+    DWORD nTintBlue = 255;
+    INT nTintShift = 0;
+
+    DWORD nAddRed = 1;
+    DWORD nAddGreen = 1;
+    DWORD nAddBlue = 1;
+    INT nAddShift = 0;
+
+    INT nLightRed = 1 << CVidPalette::LIGHT_SCALE;
+    INT nLightGreen = 1 << CVidPalette::LIGHT_SCALE;
+    INT nLightBlue = 1 << CVidPalette::LIGHT_SCALE;
+
+    BYTE nRShift = static_cast<BYTE>(pVidMode->m_dwRBitShift);
+    BYTE nGShift = static_cast<BYTE>(pVidMode->m_dwGBitShift);
+    BYTE nBShift = static_cast<BYTE>(pVidMode->m_dwBBitShift);
+
+    BOOL bTint = GetTint(nTintRed, nTintGreen, nTintBlue, nTintShift, dwFlags);
+    BOOL bAdd = GetAdd(nAddRed, nAddGreen, nAddBlue, nAddShift, dwFlags);
+    BOOL bLight = GetLight(nLightRed, nLightGreen, nLightBlue, dwFlags);
+
+    // NOTE: The original runs both loops body first (do-while); RenderDirect
+    // never passes an empty size.
+    if ((dwFlags & 0x1) != 0) {
+        COLORREF rgbBlack = pVidMode->ApplyBrightnessContrast(RGB(0, 0, 0));
+
+        for (LONG y = 0; y < bmpSize.cy; y++) {
+            for (LONG x = 0; x < bmpSize.cx; x++) {
+                BYTE r = pData[2];
+                BYTE g = pData[1];
+                BYTE b = pData[0];
+
+                // Pure green is the transparent colour.
+                if (r != 0 || g != 255 || b != 0) {
+                    BYTE a;
+                    if ((dwFlags & 0x4) != 0 && r == 0 && g == 0 && b == 0) {
+                        // Shadow: half black over what is there.
+                        a = 0x80; // 0x85E6F2
+                        r = static_cast<BYTE>((((*pSurface >> nRShift) & 0xFF) + GetRValue(rgbBlack)) << 7 >> 8);
+                        g = static_cast<BYTE>((((*pSurface >> nGShift) & 0xFF) + GetGValue(rgbBlack)) << 7 >> 8);
+                        b = static_cast<BYTE>((((*pSurface >> nBShift) & 0xFF) + GetBValue(rgbBlack)) << 7 >> 8);
+                    } else {
+                        a = 0xFF;
+
+                        if ((dwFlags & 0x80000) != 0) {
+                            r = static_cast<BYTE>((r + g + b) >> 2);
+                            g = r;
+                            b = r;
+                        }
+
+                        if (bTint) {
+                            r = static_cast<BYTE>(static_cast<INT>(r * nTintRed) >> nTintShift);
+                            g = static_cast<BYTE>(static_cast<INT>(g * nTintGreen) >> nTintShift);
+                            b = static_cast<BYTE>(static_cast<INT>(b * nTintBlue) >> nTintShift);
+                        }
+
+                        if (bAdd) {
+                            r = ~static_cast<BYTE>((static_cast<BYTE>(~r) * nAddRed) >> nAddShift);
+                            g = ~static_cast<BYTE>((static_cast<BYTE>(~g) * nAddGreen) >> nAddShift);
+                            b = ~static_cast<BYTE>((static_cast<BYTE>(~b) * nAddBlue) >> nAddShift);
+                        }
+
+                        if (bLight) {
+                            INT nValue = (r * nLightRed) >> CVidPalette::LIGHT_SCALE;
+                            r = nValue > 255 ? 255 : static_cast<BYTE>(nValue);
+                            nValue = (g * nLightGreen) >> CVidPalette::LIGHT_SCALE;
+                            g = nValue > 255 ? 255 : static_cast<BYTE>(nValue);
+                            nValue = (b * nLightBlue) >> CVidPalette::LIGHT_SCALE;
+                            b = nValue > 255 ? 255 : static_cast<BYTE>(nValue);
+
+                            // Keep it off the transparent colour.
+                            if (r == 0 && g == 255 && b == 0) {
+                                g = 254;
+                            }
+                        }
+                    }
+
+                    *pSurface = (b << nBShift) | (g << nGShift) | (r << nRShift) | (static_cast<DWORD>(a) << 24);
+                }
+
+                pSurface++;
+                pData += 3;
+            }
+
+            pSurface -= (lPitch >> 2) + bmpSize.cx;
+            pData += nDataJump;
+        }
+    } else {
+        // NOTE: Inline assembly in the original, on whole registers: the
+        // add step inverts only the low byte and the light step clamps only
+        // the low byte, so higher bits carry into the pixel as there.
+        for (LONG y = 0; y < bmpSize.cy; y++) {
+            for (LONG x = 0; x < bmpSize.cx; x++) {
+                DWORD r = pData[2];
+                DWORD g = pData[1];
+                DWORD b = pData[0];
+
+                if ((dwFlags & 0x80000) != 0) {
+                    r = (r + g + b) >> 2;
+                    g = r;
+                    b = r;
+                }
+
+                if (bTint) {
+                    r = (r * nTintRed) >> nTintShift;
+                    g = (g * nTintGreen) >> nTintShift;
+                    b = (b * nTintBlue) >> nTintShift;
+                }
+
+                if (bAdd) {
+                    r = (((r ^ 0xFF) * nAddRed) >> nAddShift) ^ 0xFF;
+                    g = (((g ^ 0xFF) * nAddGreen) >> nAddShift) ^ 0xFF;
+                    b = (((b ^ 0xFF) * nAddBlue) >> nAddShift) ^ 0xFF;
+                }
+
+                if (bLight) {
+                    r = (r * nLightRed) >> 3;
+                    g = (g * nLightGreen) >> 3;
+                    b = (b * nLightBlue) >> 3;
+                    if ((r & 0xFF00) != 0) {
+                        r |= 0xFF;
+                    }
+                    if ((g & 0xFF00) != 0) {
+                        g |= 0xFF;
+                    }
+                    if ((b & 0xFF00) != 0) {
+                        b |= 0xFF;
+                    }
+                }
+
+                *pSurface = (r << nRShift) | (g << nGShift) | (b << nBShift);
+
+                pSurface++;
+                pData += 3;
+            }
+
+            pSurface = reinterpret_cast<DWORD*>(reinterpret_cast<BYTE*>(pSurface) - (lPitch + bmpSize.cx * 4));
+            pData += nDataJump;
+        }
+    }
+
+    return TRUE;
 }
 
 // 0x7C6800
