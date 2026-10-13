@@ -9,6 +9,7 @@
 #include "CTiledObject.h"
 #include "CUtil.h"
 #include "CVidInf.h"
+#include "CVidPoly.h"
 #include "CVideo3d.h"
 #include "CVisibility.h"
 
@@ -1716,9 +1717,165 @@ BOOL CInfinity::FXRender(CVidCell* pVidCell, INT nRefPointX, INT nRefPointY, DWO
 // 0x5CE350
 BOOL CInfinity::FXRenderClippingPolys(INT nPosX, INT nPosY, INT nPosZ, const CPoint& ptRef, const CRect& rGCBounds, BOOLEAN bDithered, DWORD dwBlitFlags)
 {
-    // TODO: Incomplete.
+    if (g_pChitin->GetCurrentVideoMode()->m_nFade == 0) {
+        return TRUE;
+    }
 
-    return FALSE;
+    CVidPoly cPoly;
+    BOOLEAN bResult = FALSE;
+    INT nPolys = 0;
+
+    if (pResWED == NULL) {
+        return FALSE;
+    }
+
+    DWORD dwFlags = (bDithered ? 1 : 0) + 1;
+
+    if ((dwBlitFlags & 0x10) != 0) {
+        dwFlags |= 0x4;
+    }
+
+    if ((dwBlitFlags & 0x20) != 0) {
+        dwFlags |= 0x8;
+    }
+
+    WORD* pScreenPolyData = pResWED->GetScreenPolyData();
+    if (pScreenPolyData == NULL) {
+        return FALSE;
+    }
+
+    // The WED's screen sections are 640x480.
+    INT nSectionsX = nAreaX / 640;
+    if (nAreaX % 640 != 0) {
+        nSectionsX++;
+    }
+
+    INT nSectionsY = nAreaY / 480;
+    if (nAreaY % 480 != 0) {
+        nSectionsY++;
+    }
+
+    DWORD aPolys[5];
+    aPolys[0] = -1;
+    aPolys[1] = -1;
+    aPolys[2] = -1;
+    aPolys[3] = -1;
+    aPolys[4] = -1;
+
+    INT nLeft = rGCBounds.left / 640;
+    INT nTop = rGCBounds.top / 480;
+    INT nRight = rGCBounds.right / 640;
+    INT nBottom = rGCBounds.bottom / 480;
+
+    for (INT y = nTop; y <= nBottom && y < nSectionsY; y++) {
+        for (INT x = nLeft; x <= nRight && x < nSectionsX; x++) {
+            INT nSection = y * nSectionsX + x;
+            for (INT nIndex = 0; nIndex < pResWED->m_pScreenSectionList[nSection].nNumPolys; nIndex++) {
+                BOOL bFound = FALSE;
+                DWORD nPoly = pScreenPolyData[pResWED->m_pScreenSectionList[nSection].nStartingPoly + nIndex];
+                WED_POLYLIST* pPoly = &(pResWED->m_pPolyList[nPoly]);
+
+                if ((pPoly->nType & 0x2) != 0) {
+                    continue;
+                }
+
+                // The polygon's first edge, left end first.
+                WED_POLYPOINT* pLeft = &(pResWED->m_pPolyPoints[pPoly->nStartingPoint]);
+                WED_POLYPOINT* pRight = &(pResWED->m_pPolyPoints[pPoly->nStartingPoint + 1]);
+                if (pLeft->x > pRight->x) {
+                    WED_POLYPOINT* pTemp = pLeft;
+                    pLeft = pRight;
+                    pRight = pTemp;
+                }
+
+                CRect rPoly(pPoly->nLeft, pPoly->nTop, pPoly->nRight, pPoly->nBottom);
+                CRect rIntersect;
+                if (!IntersectRect(&rIntersect, &rPoly, &rGCBounds)) {
+                    continue;
+                }
+
+                // A wall polygon covers the object only when the object is
+                // behind its edge.
+                if ((pPoly->nType & 0x1) != 0) {
+                    if ((dwBlitFlags & 0x400) != 0) {
+                        continue;
+                    }
+
+                    if (pLeft->y == pRight->y) {
+                        if (nPosY >= pLeft->y) {
+                            continue;
+                        }
+                    } else {
+                        if (pLeft->x == pRight->x) {
+                            continue;
+                        }
+
+                        INT nSide = (nPosX - pLeft->x) * (pRight->y - pLeft->y)
+                            + (nPosY - pLeft->y) * (pLeft->x - pRight->x);
+                        if (nSide < 0) {
+                            continue;
+                        }
+                    }
+                }
+
+                // NOTE: The original's duplicate check stops at the first
+                // entry that is set, so it never finds a polygon (0x5CE6D8).
+                for (INT nPrev = 0; nPrev < nPolys; nPrev++) {
+                    if (aPolys[nPrev] != -1) {
+                        break;
+                    }
+
+                    if (aPolys[nPrev] == nPoly) {
+                        bFound = TRUE;
+                    }
+                }
+
+                if (bFound) {
+                    continue;
+                }
+
+                if (nPolys < 5) {
+                    aPolys[nPolys++] = nPoly;
+                }
+
+                if ((pPoly->nType & 0x4) != 0) {
+                    cPoly.SetPoly(reinterpret_cast<WORD*>(&(pResWED->m_pPolyPoints[pPoly->nStartingPoint + 2])),
+                        static_cast<WORD>(pPoly->nNumPoints - 2));
+                } else {
+                    cPoly.SetPoly(reinterpret_cast<WORD*>(&(pResWED->m_pPolyPoints[pPoly->nStartingPoint])),
+                        static_cast<WORD>(pPoly->nNumPoints));
+                }
+
+                CRect rClip(rGCBounds.left,
+                    rGCBounds.top + nPosZ,
+                    rGCBounds.right,
+                    rGCBounds.bottom + nPosZ);
+
+                CVidInf* pVidInf = static_cast<CVidInf*>(g_pChitin->GetCurrentVideoMode());
+                if ((pPoly->nType & 0x8) != 0) {
+                    CPoint ptPoly(ptRef.x + nPosX, ptRef.y + nPosY);
+                    cPoly.FillConvexPoly(reinterpret_cast<WORD*>(pVidInf->GetLockedSurface()),
+                        pVidInf->GetSurfacePitch(),
+                        rClip,
+                        pVidMode->field_24,
+                        dwFlags,
+                        ptPoly);
+                } else {
+                    CPoint ptPoly(ptRef.x + nPosX, ptRef.y + nPosY);
+                    cPoly.FillPoly(reinterpret_cast<WORD*>(pVidInf->GetLockedSurface()),
+                        pVidInf->GetSurfacePitch(),
+                        rClip,
+                        pVidMode->field_24,
+                        dwFlags,
+                        ptPoly);
+                }
+
+                bResult = TRUE;
+            }
+        }
+    }
+
+    return bResult;
 }
 
 // 0x5CE930
