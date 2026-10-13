@@ -37,6 +37,7 @@
 #include "CUIPanel.h"
 #include "CUtil.h"
 #include "compat/marshal_ptr.h"
+#include "compat/path_hook.h"
 #include "Icewind586B70.h"
 #include "IcewindMisc.h"
 
@@ -8342,7 +8343,10 @@ CStringList* CInfGame::GetImportCharacters()
                         break;
                     }
 
-                    FILE* stream = fopen(GetDirCharacters() + findFileData.cFileName, "rb");
+                    // NOTE: The original passes the Windows path to fopen as is;
+                    // ResolvePath maps it onto the install (an identity on
+                    // Windows), as the shimmed file APIs do.
+                    FILE* stream = fopen(compat::ResolvePath(GetDirCharacters() + findFileData.cFileName).c_str(), "rb");
                     if (stream != NULL) {
                         unsigned char data[8];
                         size_t bytesRead = fread(data, 1, sizeof(data), stream);
