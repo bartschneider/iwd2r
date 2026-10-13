@@ -1084,6 +1084,14 @@ SCRIPT_OUTPUT = ('function\t0x5845D0\tIcewindMisc::Roll\n'
                  '}\n'
                  '\n')
 
+TWO_QUERIES = ('QUERY\tIcewindMisc::Roll\n' + SCRIPT_OUTPUT
+               + 'QUERY\t0x4B1000\n'
+               'function\t0x4B1000\tCRuleTables::GetXPCap\n'
+               'caller\t0x4B2000\tCRuleTables::Bar\t0x4B2010\n'
+               'code\n'
+               'int CRuleTables::GetXPCap(void)\n'
+               '{}\n')
+
 
 class EvidenceFormatTest(unittest.TestCase):
     def test_front_matter(self):
@@ -1103,7 +1111,7 @@ class EvidenceFormatTest(unittest.TestCase):
         self.assertEqual(check_evidence.evidence_name(0x5845D0), '5845D0.md')
 
     def test_parse_script_output(self):
-        parsed = oracle.parse_decompile(SCRIPT_OUTPUT)
+        parsed = oracle.parse_decompile(SCRIPT_OUTPUT)[0]
         self.assertEqual(parsed['matches'], [])
         self.assertEqual(parsed['function'], (0x5845D0, 'IcewindMisc::Roll'))
         self.assertEqual(parsed['callers'],
@@ -1116,14 +1124,14 @@ class EvidenceFormatTest(unittest.TestCase):
 
     def test_parse_ambiguous(self):
         parsed = oracle.parse_decompile(
-            'match\t0x401000\tA::f\nmatch\t0x401020\tA::f\n')
+            'match\t0x401000\tA::f\nmatch\t0x401020\tA::f\n')[0]
         self.assertEqual(parsed['matches'],
                          [('0x401000', 'A::f'), ('0x401020', 'A::f')])
         self.assertIsNone(parsed['function'])
 
     def test_render(self):
-        text = oracle.render_evidence(oracle.parse_decompile(SCRIPT_OUTPUT),
-                                      '12.1.4')
+        text = oracle.render_evidence(
+            oracle.parse_decompile(SCRIPT_OUTPUT)[0], '12.1.4')
         self.assertTrue(text.startswith(
             '---\naddress: 0x5845D0\nname: IcewindMisc::Roll\n'
             'oracle_case:\nghidra_version: 12.1.4\n---\n'))
@@ -1141,13 +1149,200 @@ class EvidenceFormatTest(unittest.TestCase):
         self.assertLess(text.index('## Callers'), text.index('## Callees'))
 
     def test_render_empty_lists(self):
-        parsed = oracle.parse_decompile('function\t0x401000\tf\ncode\n{}\n')
+        parsed = oracle.parse_decompile(
+            'function\t0x401000\tf\ncode\n{}\n')[0]
         text = oracle.render_evidence(parsed, '12.1.4')
         self.assertIn('## Callers\n\nNone.\n', text)
         self.assertIn('## Callees\n\nNone.\n', text)
 
     def test_ghidra_version(self):
         self.assertEqual(oracle.ghidra_version(), '12.1.4')
+
+    def test_parse_decompile_several_queries(self):
+        entries = oracle.parse_decompile(TWO_QUERIES)
+        self.assertEqual([e['query'] for e in entries],
+                         ['IcewindMisc::Roll', '0x4B1000'])
+        roll, cap = entries
+        self.assertEqual(roll['function'], (0x5845D0, 'IcewindMisc::Roll'))
+        self.assertEqual(roll['callers'],
+                         [('0x45A000', 'CGameSprite::Foo', '0x45A123'),
+                          ('<none>', '<data>', '0x84E000')])
+        self.assertEqual(roll['callees'], [('0x7B2A10', 'rand')])
+        self.assertEqual(roll['code'],
+                         'int __cdecl IcewindMisc::Roll(int param_1,'
+                         'int param_2)\n\n{\n  return 0;\n}')
+        self.assertEqual(cap['function'], (0x4B1000, 'CRuleTables::GetXPCap'))
+        self.assertEqual(cap['callers'],
+                         [('0x4B2000', 'CRuleTables::Bar', '0x4B2010')])
+        self.assertEqual(cap['callees'], [])
+        self.assertEqual(cap['code'], 'int CRuleTables::GetXPCap(void)\n{}')
+
+    def test_parse_decompile_query_kinds(self):
+        entries = oracle.parse_decompile(
+            'QUERY\tA::f\nmatch\t0x401000\tA::f\nmatch\t0x401020\tA::f\n'
+            'QUERY\tNope::g\n')
+        self.assertEqual(len(entries), 2)
+        self.assertEqual(len(entries[0]['matches']), 2)
+        self.assertIsNone(entries[0]['function'])
+        self.assertEqual(entries[1]['query'], 'Nope::g')
+        self.assertIsNone(entries[1]['function'])
+        self.assertEqual(entries[1]['matches'], [])
+
+
+class EvidenceCommandTest(unittest.TestCase):
+    """oracle.py evidence FUNC...: one stubbed Ghidra run, a file each."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.dir = os.path.join(self._tmp.name, 'docs', 'evidence')
+        self.calls = []
+
+        def fake_decompile(queries):
+            self.calls.append(list(queries))
+            return self.output
+
+        self.output = TWO_QUERIES
+        for name, value in (('EVIDENCE_DIR', self.dir),
+                            ('ROOT', self._tmp.name),
+                            ('decompile', fake_decompile),
+                            ('ghidra_version', lambda: '12.1.4')):
+            old = getattr(oracle, name)
+            setattr(oracle, name, value)
+            self.addCleanup(setattr, oracle, name, old)
+
+    def run_evidence(self, *argv):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = oracle.main(['evidence', *argv])
+        return code, out.getvalue()
+
+    def path(self, address):
+        return os.path.join(self.dir, address + '.md')
+
+    def test_evidence_writes_each_function(self):
+        code, out = self.run_evidence('IcewindMisc::Roll', '0x4B1000')
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.calls, [['IcewindMisc::Roll', '0x4B1000']])
+        with open(self.path('5845D0')) as f:
+            self.assertIn('name: IcewindMisc::Roll\n', f.read())
+        with open(self.path('4B1000')) as f:
+            self.assertIn('name: CRuleTables::GetXPCap\n', f.read())
+
+        # Without --force an existing file is kept and the run fails; with
+        # it, each file is replaced.
+        with open(self.path('5845D0'), 'w') as f:
+            f.write('kept\n')
+        os.remove(self.path('4B1000'))
+        code, out = self.run_evidence('IcewindMisc::Roll', '0x4B1000')
+        self.assertEqual(code, 1)
+        self.assertIn('5845D0.md exists; --force replaces it', out)
+        with open(self.path('5845D0')) as f:
+            self.assertEqual(f.read(), 'kept\n')
+        self.assertTrue(os.path.exists(self.path('4B1000')))
+        code, out = self.run_evidence('IcewindMisc::Roll', '0x4B1000',
+                                      '--force')
+        self.assertEqual(code, 0, out)
+        with open(self.path('5845D0')) as f:
+            self.assertIn('name: IcewindMisc::Roll\n', f.read())
+
+    def test_evidence_lists_ambiguous_and_missing(self):
+        self.output = (TWO_QUERIES.split('QUERY\t0x4B1000')[0]
+                       + 'QUERY\tA::f\nmatch\t0x401000\tA::f\n'
+                       'match\t0x401020\tA::f\nQUERY\tNope::g\n')
+        code, out = self.run_evidence('IcewindMisc::Roll', 'A::f', 'Nope::g')
+        self.assertEqual(code, 1)
+        self.assertIn('A::f names 2 functions; pass one address:', out)
+        self.assertIn('  0x401020 A::f', out)
+        self.assertIn('no function Nope::g in the Ghidra project', out)
+        self.assertTrue(os.path.exists(self.path('5845D0')))
+        self.assertEqual(sorted(os.listdir(self.dir)), ['5845D0.md'])
+
+
+filelock = load_tool('filelock')
+
+
+class FileLockTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.path = os.path.join(self._tmp.name, 'sub', 'x.lock')
+
+    def test_hold_blocks_second_holder(self):
+        import threading
+        held = threading.Event()
+        release = threading.Event()
+
+        def holder():
+            with filelock.hold(self.path, 'x'):
+                held.set()
+                release.wait(10)
+
+        t = threading.Thread(target=holder)
+        t.start()
+        try:
+            self.assertTrue(held.wait(10))
+            with self.assertRaises(TimeoutError):
+                with filelock.hold(self.path, 'x', timeout=0.2):
+                    pass
+        finally:
+            release.set()
+            t.join(10)
+        with filelock.hold(self.path, 'x', timeout=0.2):
+            pass
+
+    def test_hold_reports_waiting(self):
+        import threading
+        held = threading.Event()
+        release = threading.Event()
+
+        def holder():
+            with filelock.hold(self.path, 'ghidra'):
+                held.set()
+                release.wait(10)
+
+        t = threading.Thread(target=holder)
+        t.start()
+        old = filelock.WAIT_NOTICE
+        filelock.WAIT_NOTICE = 0.05
+        err = io.StringIO()
+        try:
+            self.assertTrue(held.wait(10))
+            with contextlib.redirect_stderr(err):
+                with self.assertRaises(TimeoutError):
+                    with filelock.hold(self.path, 'ghidra', timeout=0.3):
+                        pass
+        finally:
+            filelock.WAIT_NOTICE = old
+            release.set()
+            t.join(10)
+        self.assertEqual(err.getvalue(),
+                         f'ghidra: waiting for {self.path}\n')
+
+    def test_headless_holds_ghidra_lock(self):
+        make_project = load_ghidra_tool('make_project')
+        self.assertEqual(os.path.normpath(make_project.LOCK_PATH),
+                         os.path.join(os.path.dirname(
+                             make_project.PROJECT_DIR), 'iwd2.lock'))
+        project = os.path.join(self._tmp.name, 'projects', 'iwd2')
+        make_project.PROJECT_DIR = project
+        make_project.LOCK_PATH = self.path
+        seen = []
+
+        def fake_run(cmd, **kwargs):
+            try:
+                with filelock.hold(self.path, 'test', timeout=0):
+                    seen.append('free')
+            except TimeoutError:
+                seen.append('held')
+            return subprocess.CompletedProcess(cmd, 0, '', '')
+
+        make_project.subprocess = types.SimpleNamespace(
+            run=fake_run, CompletedProcess=subprocess.CompletedProcess)
+        make_project.headless(['-x'], 'log')
+        self.assertEqual(seen, ['held'])
+        with filelock.hold(self.path, 'test', timeout=0):
+            pass
 
 
 def load_test_script(name):

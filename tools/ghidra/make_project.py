@@ -24,6 +24,8 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.dirname(HERE))
+import filelock  # noqa: E402
 import labels  # noqa: E402
 
 HOME = os.environ.get('IWD2R_HOME',
@@ -33,6 +35,8 @@ HEADLESS = os.path.join(GHIDRA, 'support', 'analyzeHeadless')
 JDK = '/usr/lib/jvm/java-21-openjdk-amd64'
 PROJECT_DIR = os.path.join(HOME, 'ghidra-projects', 'iwd2')
 PROJECT_NAME = 'iwd2'
+# One headless Ghidra at a time across every worktree (filelock.hold).
+LOCK_PATH = os.path.join(PROJECT_DIR, '..', 'iwd2.lock')
 PROGRAM = 'iwd2.exe'
 VANILLA = os.path.join(HOME, 'vanilla', PROGRAM)
 INSTALL_EXE = '/mnt/c/Games/Icewind Dale II/iwd2ee/backup/1000/iwd2.exe'
@@ -71,7 +75,8 @@ def headless(args, log):
     """Run analyzeHeadless on the project; returns the CompletedProcess.
 
     Ghidra refuses project paths with an element starting with '.', such as
-    ~/.local, so the project is reached through a temporary symlink."""
+    ~/.local, so the project is reached through a temporary symlink. The run
+    holds LOCK_PATH, so a second worktree's run waits for this one."""
     env = dict(os.environ, JAVA_HOME=JDK, GHIDRA_HEADLESS_MAXMEM=MAXMEM)
     env['PATH'] = os.path.join(JDK, 'bin') + os.pathsep + env.get('PATH', '')
     with tempfile.TemporaryDirectory(prefix='iwd2r-ghidra-') as tmp:
@@ -82,7 +87,9 @@ def headless(args, log):
         os.symlink(PROJECT_DIR, link)
         cmd = [HEADLESS, link, PROJECT_NAME, *args,
                '-scriptPath', HERE, '-log', log]
-        return subprocess.run(cmd, env=env, capture_output=True, text=True)
+        with filelock.hold(LOCK_PATH, 'ghidra'):
+            return subprocess.run(cmd, env=env, capture_output=True,
+                                  text=True)
 
 
 def write_labels(path, src, db, extra_path=EXTRA_LABELS):

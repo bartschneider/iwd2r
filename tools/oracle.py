@@ -4,6 +4,7 @@ Usage (from WSL, in the repository):
 
   python3 tools/oracle.py evidence 0x5845D0
   python3 tools/oracle.py evidence IcewindMisc::Roll
+  python3 tools/oracle.py evidence 0x5845D0 CRuleTables::GetXPCap [--force]
   python3 tools/oracle.py build
   python3 tools/oracle.py run --selftest
   python3 tools/oracle.py run [--file selftest] [--seed N] [--iterations N]
@@ -14,14 +15,16 @@ Usage (from WSL, in the repository):
   python3 tools/oracle.py replay compare <scenario> [--seed N] [--timeout S]
                                          [--dump-every N] [--no-build]
 
-evidence writes a draft docs/evidence/<ADDR>.md for one function of the
-vanilla exe: the front matter (address, name, an empty oracle_case,
+evidence writes a draft docs/evidence/<ADDR>.md for each function named, all
+in one Ghidra run: the front matter (address, name, an empty oracle_case,
 ghidra_version), Ghidra's decompilation, the callers and the callees. It reads
 the labelled Ghidra project that tools/ghidra/make_project.py creates, opened
-read-only through tools/ghidra/DecompileToEvidence.java. An existing evidence
-file is kept unless --force is given. A name shared by several functions
-(overloads) lists them and asks for an address. Fill in oracle_case or
-exemption and the Notes by hand (docs/evidence/README.md).
+read-only through tools/ghidra/DecompileToEvidence.java; Ghidra runs one at a
+time across worktrees (make_project.py's lock). An existing evidence file is
+kept unless --force is given. A name shared by several functions (overloads)
+lists them and asks for an address. Such names, missing ones and kept files
+are listed, and the command exits 1 after writing the rest. Fill in
+oracle_case or exemption and the Notes by hand (docs/evidence/README.md).
 
 build syncs the checkout to the Windows build folder (play.py's route) and
 builds the 32-bit runner iwd2r_oracle, the replay injector and the recorder
@@ -184,28 +187,51 @@ def ghidra_version():
 def parse_decompile(text):
     """Parse DecompileToEvidence.java's output file.
 
-    Returns {'matches': [(addr, name)], 'function': (address, name) or None,
-    'callers': [(addr, name, from)], 'callees': [(addr, name)], 'code': str}.
-    Addresses other than the function's stay strings as the script wrote
-    them."""
-    result = {'matches': [], 'function': None, 'callers': [], 'callees': [],
-              'code': ''}
-    lines = text.splitlines()
-    for i, line in enumerate(lines):
+    Returns a list with one entry per QUERY record, in order:
+    {'query': str, 'matches': [(addr, name)], 'function': (address, name) or
+    None, 'callers': [(addr, name, from)], 'callees': [(addr, name)],
+    'code': str}. Addresses other than the function's stay strings as the
+    script wrote them. Records before the first QUERY record (or a file with
+    none) form an entry whose query is None."""
+    entries = []
+    entry = None
+    in_code = False
+    code = []
+
+    def finish():
+        if entry is not None:
+            entry['code'] = '\n'.join(code).strip('\n')
+
+    for line in text.splitlines():
         kind, _, rest = line.partition('\t')
+        if kind == 'QUERY':
+            finish()
+            entry = {'query': rest, 'matches': [], 'function': None,
+                     'callers': [], 'callees': [], 'code': ''}
+            entries.append(entry)
+            in_code = False
+            code = []
+            continue
+        if entry is None:
+            entry = {'query': None, 'matches': [], 'function': None,
+                     'callers': [], 'callees': [], 'code': ''}
+            entries.append(entry)
+        if in_code:
+            code.append(line)
+            continue
         fields = rest.split('\t')
         if kind == 'code':
-            result['code'] = '\n'.join(lines[i + 1:]).strip('\n')
-            break
-        if kind == 'match':
-            result['matches'].append((fields[0], fields[1]))
+            in_code = True
+        elif kind == 'match':
+            entry['matches'].append((fields[0], fields[1]))
         elif kind == 'function':
-            result['function'] = (int(fields[0], 16), fields[1])
+            entry['function'] = (int(fields[0], 16), fields[1])
         elif kind == 'caller':
-            result['callers'].append((fields[0], fields[1], fields[2]))
+            entry['callers'].append((fields[0], fields[1], fields[2]))
         elif kind == 'callee':
-            result['callees'].append((fields[0], fields[1]))
-    return result
+            entry['callees'].append((fields[0], fields[1]))
+    finish()
+    return entries
 
 
 def render_evidence(parsed, version):
@@ -245,8 +271,9 @@ def render_evidence(parsed, version):
     return '\n'.join(out)
 
 
-def decompile(query):
-    """Run DecompileToEvidence.java on the Ghidra project for query."""
+def decompile(queries):
+    """Run DecompileToEvidence.java once on the Ghidra project for every
+    query; returns the output file's text."""
     import make_project as mp
     if not mp.project_exists():
         sys.exit('oracle: no Ghidra project; run tools/ghidra/make_project.py')
@@ -254,8 +281,8 @@ def decompile(query):
     with tempfile.TemporaryDirectory(prefix='iwd2r-evidence-') as tmp:
         out = os.path.join(tmp, 'evidence.txt')
         r = mp.headless(['-process', mp.PROGRAM, '-noanalysis', '-readOnly',
-                         '-postScript', 'DecompileToEvidence.java', query,
-                         out], log)
+                         '-postScript', 'DecompileToEvidence.java', out,
+                         *queries], log)
         if (r.returncode != 0 or 'ERROR REPORT' in r.stdout
                 or not os.path.exists(out)):
             sys.stderr.write(r.stdout[-4000:] + r.stderr[-4000:])
@@ -265,28 +292,38 @@ def decompile(query):
 
 
 def cmd_evidence(args):
-    parsed = parse_decompile(decompile(args.function))
-    if len(parsed['matches']) > 1:
-        print(f'{args.function} names {len(parsed["matches"])} functions; '
-              'pass one address:')
-        for addr, name in parsed['matches']:
-            print(f'  {addr} {name}')
-        return 1
-    if parsed['function'] is None:
-        print(f'oracle: no function {args.function} in the Ghidra project')
-        return 1
-    address, name = parsed['function']
-    path = os.path.join(EVIDENCE_DIR, check_evidence.evidence_name(address))
-    rel = os.path.relpath(path, ROOT)
-    if os.path.exists(path) and not args.force:
-        print(f'oracle: {rel} exists; --force replaces it')
-        return 1
-    os.makedirs(EVIDENCE_DIR, exist_ok=True)
-    with open(path, 'w') as f:
-        f.write(render_evidence(parsed, ghidra_version()))
-    print(f'wrote {rel} (0x{address:X} {name}); fill in oracle_case or '
-          'exemption and the Notes')
-    return 0
+    """Draft every function in one Ghidra run. Ambiguous, missing and
+    existing (without --force) functions are listed and skipped; the
+    command then exits 1 after writing the rest."""
+    entries = parse_decompile(decompile(args.function))
+    failed = False
+    for entry in entries:
+        query = entry['query']
+        if len(entry['matches']) > 1:
+            print(f'{query} names {len(entry["matches"])} functions; '
+                  'pass one address:')
+            for addr, name in entry['matches']:
+                print(f'  {addr} {name}')
+            failed = True
+            continue
+        if entry['function'] is None:
+            print(f'oracle: no function {query} in the Ghidra project')
+            failed = True
+            continue
+        address, name = entry['function']
+        path = os.path.join(EVIDENCE_DIR,
+                            check_evidence.evidence_name(address))
+        rel = os.path.relpath(path, ROOT)
+        if os.path.exists(path) and not args.force:
+            print(f'oracle: {rel} exists; --force replaces it')
+            failed = True
+            continue
+        os.makedirs(EVIDENCE_DIR, exist_ok=True)
+        with open(path, 'w') as f:
+            f.write(render_evidence(entry, ghidra_version()))
+        print(f'wrote {rel} (0x{address:X} {name}); fill in oracle_case or '
+              'exemption and the Notes')
+    return 1 if failed else 0
 
 
 def vanilla_md5():
@@ -1773,9 +1810,11 @@ def seed_arg(text):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     sub = ap.add_subparsers(dest='command', required=True)
-    ev = sub.add_parser('evidence', help='draft docs/evidence/<ADDR>.md')
-    ev.add_argument('function', help='address (0x5845D0) or full name '
-                    '(IcewindMisc::Roll)')
+    ev = sub.add_parser('evidence', help='draft docs/evidence/<ADDR>.md '
+                        'for one or more functions')
+    ev.add_argument('function', nargs='+', help='address (0x5845D0) or full '
+                    'name (IcewindMisc::Roll); several are drafted in one '
+                    'Ghidra run')
     ev.add_argument('--force', action='store_true',
                     help='replace an existing evidence file')
     ev.set_defaults(run=cmd_evidence)

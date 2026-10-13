@@ -1,15 +1,18 @@
-// Decompiles one function for tools/oracle.py evidence.
-// Arguments: <query> <output file>. The query is a hex address such as
+// Decompiles functions for tools/oracle.py evidence.
+// Arguments: <output file> <query>... Each query is a hex address such as
 // 0x5845D0 (a function entry) or a full name such as IcewindMisc::Roll.
 // The output file is tab-separated, one record per line (addresses in the
-// `// 0xADDR` form of src, upper-case hex without leading zeros):
+// `// 0xADDR` form of src, upper-case hex without leading zeros). Each query
+// starts with a QUERY record, followed by that query's records:
+//   QUERY\tTEXT                    the query as given
 //   match\t0xADDR\tNAME            each function the query names, when there
 //                                  are several (nothing else follows)
 //   function\t0xADDR\tNAME         the function
 //   caller\t0xADDR\tNAME\t0xFROM   a reference to the entry from inside a
 //                                  function (<none>\t<data> outside one)
 //   callee\t0xADDR\tNAME           a function it calls
-//   code                           then Ghidra's C output to the end
+//   code                           then Ghidra's C output up to the next
+//                                  QUERY record or the end
 // No function record means the query matched nothing.
 //@category iwd2r
 
@@ -37,40 +40,60 @@ public class DecompileToEvidence extends GhidraScript {
     @Override
     protected void run() throws Exception {
         String[] args = getScriptArgs();
-        if (args.length != 2) {
-            throw new IllegalArgumentException("usage: DecompileToEvidence.java <query> <output>");
+        if (args.length < 2) {
+            throw new IllegalArgumentException("usage: DecompileToEvidence.java <output> <query>...");
         }
-        List<Function> found = findFunctions(args[0]);
-        try (PrintWriter out = new PrintWriter(args[1], "UTF-8")) {
-            if (found.size() > 1) {
-                for (Function f : found) {
-                    out.println("match\t" + hex(f.getEntryPoint()) + "\t" + f.getName(true));
-                }
-                return;
+        DecompInterface decomp = new DecompInterface();
+        try (PrintWriter out = new PrintWriter(args[0], "UTF-8")) {
+            decomp.setOptions(new DecompileOptions());
+            decomp.toggleCCode(true);
+            decomp.toggleSyntaxTree(true);
+            decomp.setSimplificationStyle("decompile");
+            boolean opened = decomp.openProgram(currentProgram);
+            for (int i = 1; i < args.length; i++) {
+                out.println("QUERY\t" + args[i]);
+                writeQuery(out, args[i], opened ? decomp : null, decomp.getLastMessage());
             }
-            if (found.isEmpty()) {
-                return;
-            }
-            Function func = found.get(0);
-            out.println("function\t" + hex(func.getEntryPoint()) + "\t" + func.getName(true));
-            for (Reference ref : getReferencesTo(func.getEntryPoint())) {
-                Function caller = getFunctionContaining(ref.getFromAddress());
-                if (caller != null) {
-                    out.println("caller\t" + hex(caller.getEntryPoint()) + "\t" + caller.getName(true)
-                        + "\t" + hex(ref.getFromAddress()));
-                }
-                else {
-                    out.println("caller\t<none>\t<data>\t" + hex(ref.getFromAddress()));
-                }
-            }
-            List<Function> callees = new ArrayList<>(func.getCalledFunctions(monitor));
-            callees.sort(Comparator.comparing(Function::getEntryPoint));
-            for (Function callee : callees) {
-                out.println("callee\t" + hex(callee.getEntryPoint()) + "\t" + callee.getName(true));
-            }
-            out.println("code");
-            out.print(decompile(func));
         }
+        finally {
+            decomp.dispose();
+        }
+    }
+
+    private void writeQuery(PrintWriter out, String query, DecompInterface decomp, String openError)
+            throws Exception {
+        List<Function> found = findFunctions(query);
+        if (found.size() > 1) {
+            for (Function f : found) {
+                out.println("match\t" + hex(f.getEntryPoint()) + "\t" + f.getName(true));
+            }
+            return;
+        }
+        if (found.isEmpty()) {
+            return;
+        }
+        Function func = found.get(0);
+        out.println("function\t" + hex(func.getEntryPoint()) + "\t" + func.getName(true));
+        for (Reference ref : getReferencesTo(func.getEntryPoint())) {
+            Function caller = getFunctionContaining(ref.getFromAddress());
+            if (caller != null) {
+                out.println("caller\t" + hex(caller.getEntryPoint()) + "\t" + caller.getName(true)
+                    + "\t" + hex(ref.getFromAddress()));
+            }
+            else {
+                out.println("caller\t<none>\t<data>\t" + hex(ref.getFromAddress()));
+            }
+        }
+        List<Function> callees = new ArrayList<>(func.getCalledFunctions(monitor));
+        callees.sort(Comparator.comparing(Function::getEntryPoint));
+        for (Function callee : callees) {
+            out.println("callee\t" + hex(callee.getEntryPoint()) + "\t" + callee.getName(true));
+        }
+        out.println("code");
+        String code = decomp == null
+            ? "// decompiler failed to open the program: " + openError + "\n"
+            : decompile(decomp, func);
+        out.print(code.endsWith("\n") ? code : code + "\n");
     }
 
     private List<Function> findFunctions(String query) {
@@ -97,25 +120,12 @@ public class DecompileToEvidence extends GhidraScript {
         return result;
     }
 
-    private String decompile(Function func) {
-        DecompInterface decomp = new DecompInterface();
-        try {
-            decomp.setOptions(new DecompileOptions());
-            decomp.toggleCCode(true);
-            decomp.toggleSyntaxTree(true);
-            decomp.setSimplificationStyle("decompile");
-            if (!decomp.openProgram(currentProgram)) {
-                return "// decompiler failed to open the program: " + decomp.getLastMessage() + "\n";
-            }
-            DecompileResults res = decomp.decompileFunction(func, TIMEOUT_SECONDS, monitor);
-            if (!res.decompileCompleted() || res.getDecompiledFunction() == null) {
-                return "// decompilation failed: " + res.getErrorMessage() + "\n";
-            }
-            return res.getDecompiledFunction().getC();
+    private String decompile(DecompInterface decomp, Function func) {
+        DecompileResults res = decomp.decompileFunction(func, TIMEOUT_SECONDS, monitor);
+        if (!res.decompileCompleted() || res.getDecompiledFunction() == null) {
+            return "// decompilation failed: " + res.getErrorMessage() + "\n";
         }
-        finally {
-            decomp.dispose();
-        }
+        return res.getDecompiledFunction().getC();
     }
 
     private static String hex(Address addr) {
