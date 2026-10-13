@@ -1110,7 +1110,10 @@ BOOL CVidMode::PolyLine(INT nSurface, CRect& rSurface, LPPOINT lpPoints, int nCo
     UTIL_ASSERT(nSurface != -1 && (nThickness > 0));
 
     DDSURFACEDESC ddsd;
-    if (!LockSurface(nSurface, &ddsd, rSurface)) {
+    ddsd.dwSize = sizeof(ddsd);
+    // NOTE: The lock's result is returned when no segment is drawn.
+    bResult = LockSurface(nSurface, &ddsd, rSurface);
+    if (!bResult) {
         return FALSE;
     }
 
@@ -1129,7 +1132,7 @@ BOOL CVidMode::PolyLine(INT nSurface, CRect& rSurface, LPPOINT lpPoints, int nCo
                     lpPoints[1].x,
                     lpPoints[1].y,
                     reinterpret_cast<DWORD*>(ddsd.lpSurface),
-                    ddsd.lPitch / 4,
+                    ddsd.lPitch >> 2,
                     rSurface,
                     (GetRValue(rgbColor) << m_dwRBitShift) | (GetGValue(rgbColor) << m_dwGBitShift) | (GetBValue(rgbColor) << m_dwBBitShift),
                     FALSE);
@@ -1143,7 +1146,7 @@ BOOL CVidMode::PolyLine(INT nSurface, CRect& rSurface, LPPOINT lpPoints, int nCo
                     lpPoints[1].x,
                     lpPoints[1].y,
                     reinterpret_cast<DWORD*>(ddsd.lpSurface),
-                    ddsd.lPitch / 4,
+                    ddsd.lPitch >> 2,
                     rSurface,
                     nThickness,
                     (GetRValue(rgbColor) << m_dwRBitShift) | (GetGValue(rgbColor) << m_dwGBitShift) | (GetBValue(rgbColor) << m_dwBBitShift),
