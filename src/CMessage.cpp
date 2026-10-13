@@ -2395,7 +2395,7 @@ BOOLEAN CBaldurMessage::RemoveSignalsFromQueue(BYTE signalType, BYTE signalData)
     nStartNewQueue = 0;
     nEndNewQueue = 0;
     for (cnt = 0; cnt < m_nSignalQueueSize; cnt++) {
-        if (m_pnSignalFrom[cnt] != -1) {
+        if (m_pnSignalFrom[cnt] != static_cast<BYTE>(0xFF)) {
             if (m_pnSignalType[cnt] == signalType && m_pnSignalData[cnt] == signalData) {
                 m_pnSignalFrom[cnt] = -1;
                 m_pnSignalType[cnt] = 0;
@@ -2504,7 +2504,10 @@ BOOLEAN CBaldurMessage::NonBlockingWaitForSignal(BYTE signalType, BYTE signalToW
         return -1;
     }
 
-    // NOTE: The original reads only the low byte of the host player number.
+    // NOTE: Deviation. The original reads only the low byte of the host
+    // player number, which makes its `== -1` test dead, and a host of -1
+    // (0xFF) would then index past its eight-byte array and corrupt the
+    // stack. Ours reads the whole INT and maps -1 to 0.
     INT nHostPlayer = g_pChitin->cNetwork.m_nHostPlayer;
     if (nHostPlayer == -1) {
         nHostPlayer = 0;
