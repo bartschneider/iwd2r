@@ -4,6 +4,7 @@
 // window procedure.
 #define NOMINMAX
 #include "platform/window.h"
+#include "platform/crash.h"
 
 #include "platform/data_dir.h"
 #include "platform/input_settings.h"
@@ -424,8 +425,7 @@ void SetSmokeFrames(int n)
 void InstallFatalMessageBox()
 {
     platform::SetFatalMessageHandler([](const char* text, const char* caption) {
-        // Also on stderr: headless, the message box shows nothing.
-        std::fprintf(stderr, "%s: %s\n", caption, text);
+        // MessageBoxA writes the line to stderr itself.
         MessageBoxA(NULL, text, caption, MB_OK | MB_ICONERROR);
     });
 }
@@ -929,6 +929,14 @@ HKL GetKeyboardLayout(DWORD) { return reinterpret_cast<HKL>(static_cast<uintptr_
 
 int MessageBoxA(HWND hWnd, LPCSTR text, LPCSTR caption, UINT type)
 {
+    // First, whatever happens next: headless, a box shows nothing, and the
+    // text is what the log needs.
+    {
+        char line[2048];
+        platform::crash::FormatMessageBoxLine(caption, text, line, sizeof(line));
+        std::fputs(line, stderr);
+        std::fflush(stderr);
+    }
     SDL_MessageBoxButtonData buttons[3] = {};
     int count = 0;
     auto add = [&](int id, const char* label) {
