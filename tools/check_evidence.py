@@ -14,7 +14,9 @@ the branch count in full. Only committed changes are compared.
 Each touched function needs docs/evidence/<ADDR>.md at HEAD (ADDR in upper-case
 hex without 0x, docs/evidence/README.md has the format) whose front matter has
 a non-empty `oracle_case` or `exemption`. Prints each offending function and
-exits 1, else exits 0.
+exits 1, else exits 0. A base that is not a commit or shares no history with
+HEAD (a force push, or a `before` missing from the clone) is reported on
+stderr and skipped with exit 0.
 """
 
 import argparse
@@ -32,8 +34,18 @@ HUNK = re.compile(r'^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@')
 
 
 def git(repo, *args, check=True):
-    return subprocess.run(['git', *args], cwd=repo, check=check,
-                          capture_output=True, text=True)
+    return subprocess.run(['git', '-c', 'core.quotePath=false', *args],
+                          cwd=repo, check=check, capture_output=True,
+                          text=True)
+
+
+def diffable(repo, base):
+    """Whether base is a commit sharing history with HEAD."""
+    r = git(repo, 'rev-parse', '--verify', '--quiet', f'{base}^{{commit}}',
+            check=False)
+    if r.returncode != 0:
+        return False
+    return git(repo, 'merge-base', base, 'HEAD', check=False).returncode == 0
 
 
 def front_matter(text):
@@ -84,7 +96,7 @@ def changed_lines(diff):
     path = None
     for line in diff.splitlines():
         if line.startswith('+++ '):
-            target = line[4:]
+            target = line[4:].rstrip('\t')
             path = target[2:] if target.startswith('b/') else None
             if path is not None:
                 result.setdefault(path, [])
@@ -141,6 +153,10 @@ def main(argv=None):
     ap.add_argument('--repo', default='.')
     args = ap.parse_args(argv)
 
+    if not diffable(args.repo, args.base):
+        print(f'check_evidence: cannot diff against {args.base}; skipping',
+              file=sys.stderr)
+        return 0
     errors = []
     found = touched(args.repo, args.base)
     for path, address, name in found:

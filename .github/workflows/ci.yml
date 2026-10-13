@@ -40,12 +40,16 @@ jobs:
         run: python3 -I tools/gen_map.py --check
       - name: Decompiler evidence (pull request)
         if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: |
-          git fetch origin ${{ github.base_ref }}
-          python3 -I tools/check_evidence.py --base origin/${{ github.base_ref }}
+          git fetch origin "$BASE_REF"
+          python3 -I tools/check_evidence.py --base "origin/$BASE_REF"
       - name: Decompiler evidence (push)
         if: github.event_name == 'push' && github.event.before != '0000000000000000000000000000000000000000'
-        run: python3 -I tools/check_evidence.py --base ${{ github.event.before }}
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: python3 -I tools/check_evidence.py --base "$BEFORE"
       - name: Format check
         run: |
           files=$(git diff --name-only --diff-filter=d 4fa36bc -- '*.cpp' '*.h' | grep -v '^src/' || true)

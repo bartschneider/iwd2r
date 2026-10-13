@@ -1053,6 +1053,43 @@ class CheckEvidenceTest(unittest.TestCase):
         self.assertIn('0x402000', r.stdout)
         self.assertIn('src/b.cpp', r.stdout)
 
+    def check_base(self, base):
+        return subprocess.run([sys.executable, '-I', EVIDENCE_CHECKER,
+                               '--base', base],
+                              cwd=self.repo, capture_output=True, text=True)
+
+    def test_unknown_base_skips(self):
+        self.write('src/a.cpp', TWO_FUNCTIONS.replace('return x;',
+                                                      'return x * 2;'))
+        self.commit()
+        r = self.check_base('1234567890abcdef1234567890abcdef12345678')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn('cannot diff against', r.stderr)
+
+    def test_unrelated_base_skips(self):
+        branch = self.git('symbolic-ref', '--short', 'HEAD').strip()
+        self.git('checkout', '-q', '--orphan', 'other')
+        self.git('rm', '-rq', '--cached', '.')
+        self.write('other.txt', 'x\n')
+        self.git('add', 'other.txt')
+        self.git('commit', '-q', '-m', 'unrelated')
+        other = self.git('rev-parse', 'HEAD').strip()
+        self.git('checkout', '-q', '-f', branch)
+        self.write('src/a.cpp', TWO_FUNCTIONS.replace('return x;',
+                                                      'return x * 2;'))
+        self.commit()
+        r = self.check_base(other)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn('cannot diff against', r.stderr)
+
+    def test_path_with_space_and_non_ascii(self):
+        self.write('src/sub dir/\u00e9t\u00e9.cpp',
+                   '// 0x402000\nvoid B::h()\n{\n}\n')
+        self.commit()
+        r = self.check()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn('src/sub dir/\u00e9t\u00e9.cpp: 0x402000', r.stdout)
+
     def test_uncommitted_change_ignored(self):
         self.write('src/a.cpp', TWO_FUNCTIONS.replace('return x;',
                                                       'return x * 2;'))
