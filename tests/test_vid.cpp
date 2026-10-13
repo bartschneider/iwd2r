@@ -13,6 +13,7 @@
 #include "CVidPoly.h"
 #include "CWarp.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <memory>
@@ -245,5 +246,101 @@ TEST_CASE("cell_blend_raw_frames_stay_in_the_surface", "[vid]")
     g_pChitin->pActiveEngine = nullptr;
     ::operator delete(cellStorage);
     ::operator delete(resStorage);
+    ::operator delete(static_cast<void*>(engine));
+}
+
+// The same through CVidCell::SurfaceExtent: the current CVidInf's locked
+// description (a 6x8 rectangle at (3, 2) of a 16-pixel-pitch surface, as
+// BKLock locks the viewport) gives the bytes from its first pixel to the end
+// of its last row. A raw 4x4 frame drawn at the rectangle's (4, 2) by
+// sub_7D1190 walks 5 rows of 5 pixels, 17 pixels apart: pixels outside the
+// locked bytes stay as they were, and pixels whose frame data index is past
+// the 16 bytes of the frame stay as they were too (the original reads the
+// bytes after the frame data; here those are index 9, white, which would
+// brighten them). The frame data also ends its buffer exactly, so a read
+// past it is out of bounds for a sanitizer.
+TEST_CASE("cell_blend_raw_frames_through_the_locked_surface", "[vid]")
+{
+    ChitinScope scope;
+    CWarp* engine = reinterpret_cast<CWarp*>(::operator new(sizeof(CWarp)));
+    std::memset(static_cast<void*>(engine), 0, sizeof(CWarp));
+    auto mode = std::make_unique<CVidInf>();
+    mode->m_dwRBitShift = 16;
+    mode->m_dwGBitShift = 8;
+    mode->m_dwBBitShift = 0;
+    engine->pVidMode = mode.get();
+    g_pChitin->pActiveEngine = engine;
+
+    constexpr int kPitch = 16;
+    std::vector<DWORD> surface(kPitch * 12, 0x00101010);
+    DWORD* locked = surface.data() + 2 * kPitch + 3;
+    mode->m_SurfaceDesc.lpSurface = locked;
+    mode->m_SurfaceDesc.lPitch = kPitch * 4;
+    mode->m_SurfaceDesc.dwWidth = 8;
+    mode->m_SurfaceDesc.dwHeight = 6;
+
+    const CVidCell::SurfaceRange range = CVidCell::SurfaceExtent(locked, kPitch * 4);
+    const BYTE* first = reinterpret_cast<const BYTE*>(locked);
+    REQUIRE(range.pBegin == first);
+    REQUIRE(range.pEnd == first + 5 * kPitch * 4 + 8 * 4);
+    // Another pointer is not the locked surface.
+    CHECK(CVidCell::SurfaceExtent(surface.data(), kPitch * 4).pBegin == nullptr);
+
+    std::vector<RGBQUAD> palette(256);
+    palette[9] = RGBQUAD { 255, 255, 255, 0 };
+    palette[3] = RGBQUAD { 200, 200, 200, 0 };
+    FRAMEENTRY frame = {};
+    frame.nWidth = 4;
+    frame.nHeight = 4;
+    frame.nOffset = 0x20 | 0x80000000;
+
+    for (int sentinel = 0; sentinel < 2; ++sentinel) {
+        // Without a sentinel the frame data ends the buffer; with one, 16
+        // bytes of index 9 follow it.
+        std::vector<BYTE> bam(0x20 + 16 + (sentinel != 0 ? 16 : 0), 9);
+        std::memset(bam.data(), 0, 0x20);
+        bam[0xB] = 255;
+        std::memset(bam.data() + 0x20, 3, 16);
+
+        auto* resStorage = static_cast<unsigned char*>(::operator new(sizeof(CResCell)));
+        std::memset(resStorage, 0, sizeof(CResCell));
+        auto* res = reinterpret_cast<CResCell*>(resStorage);
+        res->m_bParsed = TRUE;
+        res->m_pBamHeader = reinterpret_cast<BAMHEADER*>(bam.data());
+        res->m_pPalette = palette.data();
+        auto* cellStorage = static_cast<unsigned char*>(::operator new(sizeof(CVidCell)));
+        std::memset(cellStorage, 0, sizeof(CVidCell));
+        auto* cell = reinterpret_cast<CVidCell*>(cellStorage);
+        static_cast<CResHelper<CResCell, 1000>*>(cell)->pRes = res;
+        cell->m_pFrame = &frame;
+        cell->m_bShadowOn = TRUE;
+
+        std::fill(surface.begin(), surface.end(), 0x00101010);
+        DWORD* at = locked + 2 * kPitch + 4;
+        CHECK(cell->sub_7D1190(at, kPitch * 4, 0, range));
+
+        std::vector<bool> drawn(surface.size(), false);
+        for (int pos = 0; pos < 25; ++pos) {
+            DWORD* pixel = at + (pos / 5) * (kPitch + 1) + pos % 5;
+            const BYTE* b = reinterpret_cast<const BYTE*>(pixel);
+            const bool inside = b >= range.pBegin && b + 4 <= range.pEnd;
+            if (pos < 16 && inside) {
+                drawn[static_cast<size_t>(pixel - surface.data())] = true;
+            }
+        }
+        for (size_t i = 0; i < surface.size(); ++i) {
+            INFO("pixel " << i << ", sentinel " << sentinel);
+            if (drawn[i]) {
+                CHECK(surface[i] != 0x00101010);
+            } else {
+                CHECK(surface[i] == 0x00101010);
+            }
+        }
+
+        ::operator delete(cellStorage);
+        ::operator delete(resStorage);
+    }
+
+    g_pChitin->pActiveEngine = nullptr;
     ::operator delete(static_cast<void*>(engine));
 }
