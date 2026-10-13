@@ -3,6 +3,7 @@
 #include "CBaldurChitin.h"
 #include "CGameSprite.h"
 #include "CInfGame.h"
+#include "CMessage.h"
 #include "CUtil.h"
 #include "IcewindMisc.h"
 
@@ -1383,6 +1384,25 @@ CGameEffect* IcewindCGameEffectRodOfSmiting::Copy()
 IcewindCGameEffectMagicalRest::IcewindCGameEffectMagicalRest(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target)
     : CGameEffect(effect, source, sourceID, target, FALSE)
 {
+}
+
+// 0x566BA0
+BOOL IcewindCGameEffectMagicalRest::ApplyEffect(CGameSprite* pSprite)
+{
+    pSprite->GetBaseStats()->m_fatigue = 0;
+
+    CGameEffect* pEffect = IcewindMisc::CreateEffectRemoveAllOfType(pSprite, 93, 0);
+    CMessage* message = new CMessageAddEffect(pEffect, pSprite->GetId(), pSprite->GetId());
+    g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+    pSprite->GetTimedEffectList()->RemoveAllOfType(pSprite,
+        142,
+        pSprite->GetTimedEffectList()->GetPosCurrent(),
+        39);
+
+    m_done = TRUE;
+
+    return TRUE;
 }
 
 // 0x4A0320

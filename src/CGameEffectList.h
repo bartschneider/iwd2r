@@ -12,6 +12,7 @@ public:
     ~CGameEffectList() override;
 
     POSITION GetPosCurrent();
+    BOOL sub_4C0830(CGameEffect* pEffect);
     void RemoveAllOfType(CGameSprite* pSprite, WORD effectID, POSITION posLeave, LONG effectAmount);
     void RemoveAllEffectsIgnoreMoreThenPermanent(POSITION posLeave, BOOL checkDispellable, BOOL useLevelDiff, BYTE prob, BYTE dispelLevel);
     ULONG Marshal(BYTE** ptrPtr, BYTE version, BOOL moreThenPermanentOnly);
