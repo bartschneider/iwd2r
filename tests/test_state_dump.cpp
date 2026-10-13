@@ -3,7 +3,7 @@
 
 #include "compat/msvc_rand.h"
 #include "compat/msvc_time.h"
-#include "install_ini_backup.h"
+#include "data_view.h"
 #include "platform/replay.h"
 #include "platform/replay_clock.h"
 #include "platform/script_core.h"
@@ -158,7 +158,7 @@ TEST_CASE("state dump JSON matches the golden dumps", "[dump]")
     member.maxHp = 12;
     member.skills[1] = 4;
     member.skills[5] = 2;
-    member.skills[13] = 255;
+    member.skills[13] = -1;
     world.engine.world.party.push_back(member);
     platform::state_dump::PartyMember missing;
     missing.id = 0x20001;
@@ -296,18 +296,19 @@ TEST_CASE("replay mode dumps the start screen checkpoint", "[dump][data]")
     const std::string script = (fs::path(IWD2R_SOURCE_DIR) / "scenarios" / "start_screen.txt").string();
     const std::string out = (dir / "log.txt").string();
     const std::string overrides = "Program Options/Resolution=800;Program Options/Full Screen=0";
+    // The engine writes into its data folder: it runs on a private view.
+    DataView view(data);
     int raw = 0;
     {
-        InstallIniBackup backup(data);
 #ifdef _WIN32
         const std::string cmd = "set SDL_VIDEO_DRIVER=dummy&& set SDL_AUDIO_DRIVER=dummy&& set IWD2R_SCRIPT=" + script
             + "&& set IWD2R_SHOT_DIR=" + dir.string() + "&& set IWD2R_STATE_DUMP=" + dir.string()
-            + "&& set IWD2R_SEED=1&& set \"IWD2R_INI_OVERRIDE=" + overrides + "\"&& set IWD2_DATA=" + data + "&& \"" IWD2R_EXE "\" > \"" + out + "\" 2>&1";
+            + "&& set IWD2R_SEED=1&& set \"IWD2R_INI_OVERRIDE=" + overrides + "\"&& set IWD2_DATA=" + view.Path() + "&& \"" IWD2R_EXE "\" > \"" + out + "\" 2>&1";
         const std::string full = "\"" + cmd + "\"";
 #else
         const std::string full = "SDL_VIDEO_DRIVER=dummy SDL_AUDIO_DRIVER=dummy IWD2R_SCRIPT=\"" + script
             + "\" IWD2R_SHOT_DIR=\"" + dir.string() + "\" IWD2R_STATE_DUMP=\"" + dir.string()
-            + "\" IWD2R_SEED=1 IWD2R_INI_OVERRIDE=\"" + overrides + "\" IWD2_DATA=\"" + data + "\" timeout 150 \"" IWD2R_EXE "\" > \"" + out + "\" 2>&1";
+            + "\" IWD2R_SEED=1 IWD2R_INI_OVERRIDE=\"" + overrides + "\" IWD2_DATA=\"" + view.Path() + "\" timeout 150 \"" IWD2R_EXE "\" > \"" + out + "\" 2>&1";
 #endif
         raw = std::system(full.c_str());
     }
@@ -328,7 +329,7 @@ TEST_CASE("replay mode dumps the start screen checkpoint", "[dump][data]")
     REQUIRE(checkpoint
         == "{\n  \"frame\": 61,\n  \"checkpoint\": \"start\",\n  \"screen\": \"connection\",\n  \"rng_state\": 1,\n"
            "  \"globals\": {\"au_counter\": 61, \"fullscreen\": 0, \"in_async_update\": 0, \"ai_stalled_frames\": 0, "
-           "\"reinitializing\": 0, \"ai_rng_state\": 3861535683},\n  \"chargen\": null\n}\n");
+           "\"reinitializing\": 0, \"ai_rng_state\": 3861535683},\n  \"chargen\": null,\n  \"world\": null\n}\n");
     REQUIRE(periodic.find("\"frame\": 30,") != std::string::npos);
     REQUIRE(statusText == "frame=61\nscript_line=0\nstate=finished\n");
 }

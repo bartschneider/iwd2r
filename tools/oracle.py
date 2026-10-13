@@ -144,6 +144,7 @@ sys.path.insert(0, os.path.join(HERE, 'ghidra'))
 sys.path.insert(0, HERE)
 import bif  # noqa: E402
 import check_evidence  # noqa: E402
+import dataview  # noqa: E402
 import filelock  # noqa: E402
 import minischema  # noqa: E402
 
@@ -158,7 +159,8 @@ GAME_DIR = ORACLE_DIR + '/game'
 TABLES_DIR = ORACLE_DIR + '/tables'
 # The game text the cases read (runner --tables), extracted from the vanilla
 # copy by tools/bif.py before every run. Never committed.
-TABLES = ('XPLEVEL.2DA',)
+TABLES = ('XPLEVEL.2DA', 'HPWAR.2DA', 'HPWIZ.2DA', 'HPPRS.2DA', 'HPROG.2DA',
+          'HPMONK.2DA', 'SPLAUTOP.2DA')
 MARKER = 'vanilla.ok'
 WEIDU_SETUP = 'Setup-iwd2ee.exe'
 WEIDU_TIMEOUT = 3600  # seconds for the whole uninstall
@@ -767,10 +769,12 @@ def weidu_components(text):
 
 def rewrite_ini(text, old, new):
     """An INI's text with every path under old (a Windows path, any case)
-    moved under new, and Resolution= set to VANILLA_RESOLUTION."""
+    moved under new, Resolution= set to VANILLA_RESOLUTION, and the volume
+    keys set to 0 (mute_ini)."""
     text = re.sub(re.escape(old), lambda m: new, text, flags=re.IGNORECASE)
-    return re.sub(r'^(Resolution=)[^\r\n]*', r'\g<1>' + VANILLA_RESOLUTION,
+    text = re.sub(r'^(Resolution=)[^\r\n]*', r'\g<1>' + VANILLA_RESOLUTION,
                   text, flags=re.MULTILINE)
+    return mute_ini(text)
 
 
 def _matches(name, patterns):
@@ -1176,17 +1180,31 @@ def cmd_vanilla(args):
 # ---------------------------------------------------------------------------
 # Replays in the original (oracle.py replay record)
 
+VOLUME_KEYS = ('Volume Movie', 'Volume Music', 'Volume Voices',
+               'Volume Ambients', 'Volume SFX')
+
+
+def mute_ini(text):
+    """icewind2.ini's text with every volume key set to 0: the original runs
+    on the host's desktop during recordings and would play through the
+    speakers. Keys that are absent stay absent."""
+    return re.sub(r'^(Volume (?:Movie|Music|Voices|Ambients|SFX)=)[^\r\n]*',
+                  r'\g<1>0', text, flags=re.MULTILINE)
+
+
 def replay_ini(text):
     """icewind2.ini's text for a recording: windowed (Full Screen=0) at
-    Resolution=VANILLA_RESOLUTION, everything else kept. Raises ValueError
-    when either key is missing, rather than guessing where it belongs."""
+    Resolution=VANILLA_RESOLUTION, muted, everything else kept. Raises
+    ValueError when either key is missing, rather than guessing where it
+    belongs."""
     for key in ('Full Screen', 'Resolution'):
         if not re.search(r'^%s=' % key, text, re.MULTILINE):
             raise ValueError('icewind2.ini has no %s= line' % key)
     text = re.sub(r'^(Full Screen=)[^\r\n]*', r'\g<1>0', text,
                   flags=re.MULTILINE)
-    return re.sub(r'^(Resolution=)[^\r\n]*',
+    text = re.sub(r'^(Resolution=)[^\r\n]*',
                   r'\g<1>' + VANILLA_RESOLUTION, text, flags=re.MULTILINE)
+    return mute_ini(text)
 
 
 def prepare_replay_ini(game, install=INSTALL):
@@ -1518,7 +1536,11 @@ def run_ours(exe, game, script, actions, seed, timeout, dump_every, run_dir,
     out_dir = os.path.join(run_dir, subdir)
     os.makedirs(out_dir)
     shutil.copyfile(script, os.path.join(out_dir, 'scenario.txt'))
-    env = our_env(os.environ, game, script, out_dir, seed, dump_every)
+    # A private view of the game folder: engines at once do not share its
+    # temp/cache folders, and it is never written (IWD2R_KEEP_DATA_VIEW=1
+    # keeps the view in the run folder).
+    view = dataview.make_view(game, os.path.join(run_dir, 'data-' + subdir))
+    env = our_env(os.environ, view, script, out_dir, seed, dump_every)
     print('ours %s (%d actions), seed %d, timeout %d s, dumps every %d '
           'frames' % (os.path.relpath(script, ROOT), len(actions), seed,
                       timeout, dump_every))
@@ -1536,6 +1558,9 @@ def run_ours(exe, game, script, actions, seed, timeout, dump_every, run_dir,
         except KeyboardInterrupt:
             proc.kill()
             raise
+        finally:
+            if os.environ.get('IWD2R_KEEP_DATA_VIEW') != '1':
+                dataview.remove_view(view)
     status = read_status(out_dir)
     result, summary = our_outcome(code, status, timeout)
     report = {'scenario': os.path.relpath(script, ROOT), 'seed': seed,

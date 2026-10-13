@@ -6472,9 +6472,197 @@ void CGameSprite::Marshal(CAreaFileCreature** pCreature)
 // 0x70B2F0
 void CGameSprite::Marshal(BYTE** pCreature, LONG* creatureSize, WORD* facing, BOOLEAN a4, BOOLEAN a5)
 {
+    CCreatureFileEquipment equipment;
+    CCreatureFileItem* pItems;
+    DWORD nItems;
+    BYTE* pEffects;
+    ULONG nEffects;
+    ULONG nEffectsSize;
+    CCreatureFileOffsets* offsets;
+    DWORD cnt;
+    DWORD nIndex;
+    UINT nClass;
+    UINT nLevel;
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjCreature.cpp
+    // __LINE__: 11953
     UTIL_ASSERT(pCreature != NULL && creatureSize != NULL && facing != NULL);
 
-    // TODO: Incomplete.
+    // The file holds hit points without the Constitution bonus.
+    m_baseStats.m_hitPoints -= static_cast<SHORT>(m_nHPCONBonusTotalOld);
+    m_baseStats.m_maxHitPointsBase -= static_cast<SHORT>(m_nHPCONBonusTotalOld);
+    m_derivedStats.m_nMaxHitPoints -= static_cast<SHORT>(m_nHPCONBonusTotalOld);
+
+    m_baseStats.m_effectVersion = 1;
+
+    *pCreature = NULL;
+    memset(&equipment, 0, sizeof(equipment));
+    *creatureSize = 0;
+    *facing = m_nDirection;
+
+    for (nClass = 0; nClass < CSPELLLIST_NUM_CLASSES; nClass++) {
+        for (nLevel = 0; nLevel < CSPELLLIST_MAX_LEVELS; nLevel++) {
+            *creatureSize += sizeof(CCreatureFileSpell) * static_cast<LONG>(m_spells.m_spellsByClass[nClass].m_lists[nLevel].m_List.size())
+                + sizeof(unsigned int)
+                + sizeof(unsigned int);
+        }
+    }
+
+    for (nLevel = 0; nLevel < CSPELLLIST_MAX_LEVELS; nLevel++) {
+        *creatureSize += sizeof(CCreatureFileSpell) * static_cast<LONG>(m_domainSpells.m_lists[nLevel].m_List.size())
+            + sizeof(unsigned int)
+            + sizeof(unsigned int);
+    }
+
+    *creatureSize += sizeof(CCreatureFileSpell) * static_cast<LONG>(m_innateSpells.m_List.size())
+        + sizeof(unsigned int)
+        + sizeof(unsigned int);
+    *creatureSize += sizeof(CCreatureFileSpell) * static_cast<LONG>(m_songs.m_List.size())
+        + sizeof(unsigned int)
+        + sizeof(unsigned int);
+    *creatureSize += sizeof(CCreatureFileSpell) * static_cast<LONG>(m_shapeshifts.m_List.size())
+        + sizeof(unsigned int)
+        + sizeof(unsigned int);
+
+    m_equipment.Marshal(&equipment, &pItems, &nItems, a5);
+    *creatureSize += sizeof(CCreatureFileEquipment) + sizeof(CCreatureFileItem) * nItems;
+
+    if (a4) {
+        m_pLocalVariables->MarshalToCharacter(this);
+    } else {
+        // The magic weapon slot is not saved (0x70B539).
+        equipment.m_miscItem[27] = 0xFFFF;
+    }
+
+    nEffects = m_timedEffectList.Marshal(&pEffects, 1, a4 == FALSE);
+    nEffects /= sizeof(CGameEffectBase);
+    nEffectsSize = sizeof(CGameEffectBase) * nEffects;
+
+    m_baseStats.field_2F8 = static_cast<BOOLEAN>(m_removeFromArea);
+
+    *creatureSize += nEffectsSize + 900 + sizeof(CCreatureFileOffsets);
+
+    *pCreature = new BYTE[*creatureSize];
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjCreature.cpp
+    // __LINE__: 12051
+    UTIL_ASSERT(*pCreature != NULL);
+
+    memset(*pCreature, 0, *creatureSize);
+    memcpy(*pCreature, "CRE V2.2", 8);
+
+    m_baseStats.m_subrace = m_startTypeAI.m_nSubRace;
+    memcpy(*pCreature + 8, &m_baseStats, sizeof(m_baseStats));
+
+    offsets = reinterpret_cast<CCreatureFileOffsets*>(*pCreature + 900);
+    offsets->m_enemyAlly = m_startTypeAI.m_nEnemyAlly;
+    offsets->m_general = m_liveTypeAI.m_nGeneral;
+    offsets->m_race = m_startTypeAI.m_nRace;
+    offsets->m_class = m_startTypeAI.m_nClass;
+    offsets->m_specifics = m_startTypeAI.m_nSpecific;
+    offsets->m_gender = m_startTypeAI.m_nGender;
+    offsets->m_alignment = m_startTypeAI.m_nAlignment;
+    offsets->m_instance = m_startTypeAI.m_nInstance;
+    offsets->m_avClass = m_startTypeAI.m_nAvClass;
+    offsets->m_classMask = m_startTypeAI.m_nClassMask;
+    memcpy(offsets->m_specialCase, m_startTypeAI.m_SpecialCase, 5);
+    strncpy(offsets->m_name, m_scriptName, SCRIPTNAME_SIZE);
+    m_dialog.GetResRef(offsets->m_dialog);
+
+    cnt = 900 + sizeof(CCreatureFileOffsets);
+
+    for (nClass = 0; nClass < CSPELLLIST_NUM_CLASSES; nClass++) {
+        for (nLevel = 0; nLevel < CSPELLLIST_MAX_LEVELS; nLevel++) {
+            CGameSpriteSpellList* pList = &(m_spells.m_spellsByClass[nClass].m_lists[nLevel]);
+
+            offsets->m_spellListOffset[nClass][nLevel] = cnt;
+            offsets->m_spellListCount[nClass][nLevel] = static_cast<DWORD>(pList->m_List.size());
+            for (nIndex = 0; nIndex < offsets->m_spellListCount[nClass][nLevel]; nIndex++) {
+                memcpy(*pCreature + cnt, &(pList->m_List[nIndex]), sizeof(CCreatureFileSpell));
+                cnt += sizeof(CCreatureFileSpell);
+            }
+
+            *reinterpret_cast<unsigned int*>(*pCreature + cnt) = pList->field_14;
+            *reinterpret_cast<unsigned int*>(*pCreature + cnt + 4) = pList->field_18;
+            cnt += sizeof(unsigned int) + sizeof(unsigned int);
+        }
+    }
+
+    for (nLevel = 0; nLevel < CSPELLLIST_MAX_LEVELS; nLevel++) {
+        CGameSpriteSpellList* pList = &(m_domainSpells.m_lists[nLevel]);
+
+        offsets->m_domainListOffset[nLevel] = cnt;
+        offsets->m_domainListCount[nLevel] = static_cast<DWORD>(pList->m_List.size());
+        for (nIndex = 0; nIndex < offsets->m_domainListCount[nLevel]; nIndex++) {
+            memcpy(*pCreature + cnt, &(pList->m_List[nIndex]), sizeof(CCreatureFileSpell));
+            cnt += sizeof(CCreatureFileSpell);
+        }
+
+        *reinterpret_cast<unsigned int*>(*pCreature + cnt) = pList->field_14;
+        *reinterpret_cast<unsigned int*>(*pCreature + cnt + 4) = pList->field_18;
+        cnt += sizeof(unsigned int) + sizeof(unsigned int);
+    }
+
+    offsets->m_innateListOffset = cnt;
+    offsets->m_innateListCount = static_cast<DWORD>(m_innateSpells.m_List.size());
+    for (nIndex = 0; nIndex < offsets->m_innateListCount; nIndex++) {
+        memcpy(*pCreature + cnt, &(m_innateSpells.m_List[nIndex]), sizeof(CCreatureFileSpell));
+        cnt += sizeof(CCreatureFileSpell);
+    }
+    *reinterpret_cast<unsigned int*>(*pCreature + cnt) = m_innateSpells.field_14;
+    *reinterpret_cast<unsigned int*>(*pCreature + cnt + 4) = m_innateSpells.field_18;
+    cnt += sizeof(unsigned int) + sizeof(unsigned int);
+
+    offsets->m_songListOffset = cnt;
+    offsets->m_songListCount = static_cast<DWORD>(m_songs.m_List.size());
+    for (nIndex = 0; nIndex < offsets->m_songListCount; nIndex++) {
+        memcpy(*pCreature + cnt, &(m_songs.m_List[nIndex]), sizeof(CCreatureFileSpell));
+        cnt += sizeof(CCreatureFileSpell);
+    }
+    *reinterpret_cast<unsigned int*>(*pCreature + cnt) = m_songs.field_14;
+    *reinterpret_cast<unsigned int*>(*pCreature + cnt + 4) = m_songs.field_18;
+    cnt += sizeof(unsigned int) + sizeof(unsigned int);
+
+    offsets->m_shapeListOffset = cnt;
+    offsets->m_shapeListCount = static_cast<DWORD>(m_shapeshifts.m_List.size());
+    for (nIndex = 0; nIndex < offsets->m_shapeListCount; nIndex++) {
+        memcpy(*pCreature + cnt, &(m_shapeshifts.m_List[nIndex]), sizeof(CCreatureFileSpell));
+        cnt += sizeof(CCreatureFileSpell);
+    }
+    *reinterpret_cast<unsigned int*>(*pCreature + cnt) = m_shapeshifts.field_14;
+    *reinterpret_cast<unsigned int*>(*pCreature + cnt + 4) = m_shapeshifts.field_18;
+    cnt += sizeof(unsigned int) + sizeof(unsigned int);
+
+    offsets->m_equipmentListOffset = cnt;
+    memcpy(*pCreature + cnt, &equipment, sizeof(CCreatureFileEquipment));
+    cnt += sizeof(CCreatureFileEquipment);
+
+    if (nItems != 0) {
+        offsets->m_itemListOffset = cnt;
+        offsets->m_itemListCount = nItems;
+        memcpy(*pCreature + cnt, pItems, sizeof(CCreatureFileItem) * nItems);
+        cnt += sizeof(CCreatureFileItem) * nItems;
+        delete[] pItems;
+    }
+
+    if (nEffects != 0) {
+        offsets->m_effectListCount = nEffects;
+        offsets->m_effectListOffset = cnt;
+        memcpy(*pCreature + cnt, pEffects, nEffectsSize);
+        cnt += nEffectsSize;
+        delete[] reinterpret_cast<CGameEffectBase*>(pEffects);
+    }
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjCreature.cpp
+    // __LINE__: 12187
+    UTIL_ASSERT(cnt == (DWORD)*creatureSize);
+
+    m_baseStats.m_hitPoints += static_cast<SHORT>(m_nHPCONBonusTotalOld);
+    m_baseStats.m_maxHitPointsBase += static_cast<SHORT>(m_nHPCONBonusTotalOld);
+    m_derivedStats.m_nMaxHitPoints += static_cast<SHORT>(m_nHPCONBonusTotalOld);
+
+    m_equipedEffectList.RemoveAllOfType(this, CGAMEEFFECT_JUMPTOAREA, m_equipedEffectList.m_posCurrent, -1);
+    m_timedEffectList.RemoveAllOfType(this, CGAMEEFFECT_JUMPTOAREA, m_timedEffectList.m_posCurrent, -1);
 }
 
 // 0x70BEE0
@@ -6920,7 +7108,15 @@ void CGameSprite::Unmarshal(BYTE* pCreature, LONG creatureSize, WORD facing, int
     }
 
     if (bNeedUpgrade) {
-        // TODO: Incomplete.
+        // TODO: Incomplete. The original upgrades older creature files in
+        // place (0x70D013-0x70D1B6): a "CRE V2.0" or "CRE V9.2" file is
+        // copied into a buffer 0xCA bytes larger (bAlloced) and converted to
+        // V2.1 by 0x5A7740; a "CRE V2.1" file then grows by 0x240 plus what
+        // 0x5A69B0 returns for it and is converted to V2.2 by 0x5A7940
+        // (through 0x5A3DB0 and 0x5A5060). Those converters are InfGame.cpp
+        // functions src/ does not define yet. Every CRE of the vanilla data
+        // (1655 in CHITIN.KEY and Override) is V2.2, apart from four V9.1
+        // files the original rejects as corrupt.
     }
 
     ClearMarshal(TRUE);
@@ -6953,8 +7149,9 @@ void CGameSprite::Unmarshal(BYTE* pCreature, LONG creatureSize, WORD facing, int
     GetAnimation()->SetAnimationType(m_baseStats.m_animationType, m_baseStats.m_colors, facing);
 
     if (GetAnimation()->GetListType() == LIST_FLIGHT) {
-        // NOTE: Uninline.
-        SetFacing(4 * ((facing + 2) / 4));
+        // NOTE: Uninline. The facing is rounded to a multiple of 4 and
+        // wrapped to 0..15 (0x70D2FE-0x70D322).
+        SetFacing((4 * ((facing + 2) / 4)) % 16);
     }
 
     m_vbPortraitSmall.SetResRef(CResRef(m_baseStats.m_portraitSmall), TRUE, TRUE);
@@ -7103,7 +7300,7 @@ void CGameSprite::Unmarshal(BYTE* pCreature, LONG creatureSize, WORD facing, int
                 const CResRef& resRef = g_pBaldurChitin->GetObjectGame()->m_spells.Get(pSpell->field_0);
                 if (memcmp(resRef.GetResRef(), "**", strlen("**")) == 0) {
                     CString sError;
-                    sError.Format("*** %s has OBSOLETE DOMAIN SPELL FILE: %s.\n",
+                    sError.Format("*** %s has OBSOLETE SPELL FILE: %s.\n",
                         m_scriptName,
                         (LPCSTR)resRef.GetResRefStr());
                 } else {
@@ -10148,12 +10345,6 @@ INT CGameSprite::sub_723F60()
     return 0;
 }
 
-// 0x72DE60
-void CGameSprite::sub_72DE60()
-{
-    // TODO: Incomplete.
-}
-
 // 0x71E760
 void CGameSprite::sub_71E760(CDerivedStats& DStats, int a2)
 {
@@ -10230,6 +10421,17 @@ STRREF CGameSprite::GetNameRef()
     }
 
     return strName;
+}
+
+// 0x727B40
+BOOL CGameSprite::sub_727B40()
+{
+    CItem* pItem = m_equipment.m_items[CGameSpriteEquipment::SLOT_WEAPON + 2 * m_nWeaponSet];
+    CItem* pSecondItem = m_equipment.m_items[CGameSpriteEquipment::SLOT_WEAPON + 2 * m_nWeaponSet + 1];
+    if (pItem != NULL && ((pItem->GetFlagsFile() & 0x2) != 0 || pSecondItem != NULL)) {
+        return FALSE;
+    }
+    return TRUE;
 }
 
 // 0x728270
@@ -10548,27 +10750,88 @@ BOOL CGameSprite::ProcessEffectList()
             field_70F9 = rand() % 20 + 1;
             field_70FA = rand() % 100;
 
-            // TODO: Incomplete: the encumbrance check (GetCarriedWeight,
-            // CRuleTables::GetEncumbranceMod) and the two
-            // CGameEffectList::CheckEffects calls also enter the block below.
-            if (field_562C || m_bHPCONBonusTotalUpdate) {
+            // Whether the carried weight no longer matches the animation's
+            // move scale (0x72DFC4-0x72E1A6).
+            BOOL bEncumbranceChanged = FALSE;
+            if (g_pBaldurChitin->GetObjectGame()->GetCharacterPortraitNum(m_id) != -1) {
+                DWORD nWeight = GetCarriedWeight();
+                const CRuleTables& ruleTables = g_pBaldurChitin->GetObjectGame()->GetRuleTables();
+                SHORT nAllowance = static_cast<SHORT>(ruleTables.m_tStrengthMod.GetAtLong(CPoint(3, m_derivedStats.m_nSTR)));
+
+                // NOTE: The original computes on the x87 stack in double
+                // precision from the two values rounded to float, and
+                // truncates (0x72E05B-0x72E080).
+                DWORD nMaxWeight = static_cast<DWORD>(static_cast<double>(static_cast<float>(ruleTables.GetEncumbranceMod(this)))
+                    / 100.0
+                    * static_cast<double>(static_cast<float>(nAllowance)));
+
+                if (nWeight > nMaxWeight * 120 / 100) {
+                    // NOTE: Uninline.
+                    bEncumbranceChanged = GetAnimation()->GetMoveScale() != 0;
+                } else if (nWeight > nMaxWeight) {
+                    // NOTE: Uninline.
+                    bEncumbranceChanged = GetAnimation()->GetMoveScale() != (GetAnimation()->GetMoveScaleDefault() >> 1);
+                } else {
+                    // NOTE: Uninline.
+                    bEncumbranceChanged = GetAnimation()->GetMoveScale() < GetAnimation()->GetMoveScaleDefault();
+                }
+            }
+
+            if (m_timedEffectList.CheckEffects()
+                || m_equipedEffectList.CheckEffects()
+                || field_562C
+                || bEncumbranceChanged
+                || m_bHPCONBonusTotalUpdate) {
                 field_562C = FALSE;
                 m_tempStats = m_derivedStats;
 
-                // TODO: Incomplete: the animation updates, the messages, the
-                // portrait update and the AI actions around HandleEffects.
+                // NOTE: Uninline.
+                field_72EA = GetAnimation()->GetMoveScale();
+                field_72EC = m_derivedStats.m_generalState;
+
+                // NOTE: Uninline.
+                GetAnimation()->ResetMoveScale();
+
+                // TODO: Incomplete (0x72E270-0x72E70E): the move scale
+                // bonuses (monk levels, feat 0xC) when the animation moves,
+                // the color ranges (m_hasColorRangeEffects), the color
+                // effects (m_hasColorEffects), the animation change with
+                // its search bitmap update and sequence reset (field_5640),
+                // and their messages. The sequence reset calls SetSequence
+                // (0x707230) twice, which can draw rand (0x7077AE), so a
+                // creature whose animation changes here leaves our rand
+                // state behind the original's.
+
+                m_hasColorRangeEffects = FALSE;
+                m_hasColorEffects = FALSE;
+                field_5640 = FALSE;
+                m_portraitIcons.RemoveAll();
+
+                g_pBaldurChitin->GetObjectGame()->UpdatePortrait(g_pBaldurChitin->GetObjectGame()->GetCharacterPortraitNum(m_id), 1);
+
                 bResult = HandleEffects();
+
+                m_bForceVisualEffects = TRUE;
+
+                // TODO: Incomplete (0x72E759-0x72FB24): the AI actions and
+                // messages that follow a change of state (the general
+                // state against field_72EC, the current action).
             }
 
-            // TODO: Incomplete: the active engine's notification (vtable
-            // +0x108) and the animation state at 0x72EA and 0x72EC.
+            g_pBaldurChitin->GetActiveEngine()->UpdateCharacterStatus(m_id);
+
+            // NOTE: Uninline.
+            field_72EA = GetAnimation()->GetMoveScale();
+            field_72EC = m_derivedStats.m_generalState;
         }
 
         if (field_72A2 < 1) {
             m_bAllowEffectListCall = TRUE;
 
-            // TODO: Incomplete: HandlePersistantEffects (0x733200) while
-            // the world timer runs.
+            if (g_pBaldurChitin->GetObjectGame()->GetWorldTimer()->m_active) {
+                // TODO: Incomplete: HandlePersistantEffects (0x733200, with
+                // 1; 0x72FBA7-0x72FBC3), which src/ does not define yet.
+            }
 
             return bResult;
         }
@@ -10631,8 +10894,8 @@ void CGameSprite::ClearAI(BOOLEAN bSetSequence)
 BOOL CGameSprite::HandleEffects()
 {
     BOOL bRetry;
-    BOOL v1;
-    BOOL v2;
+    BOOL bResult;
+    UINT nSkill;
 
     do {
         bRetry = FALSE;
@@ -10646,12 +10909,39 @@ BOOL CGameSprite::HandleEffects()
 
         m_activeImprisonment = TRUE;
 
-        // TODO: Incomplete.
-        v1 = FALSE;
-        v2 = FALSE;
+        // TODO: Incomplete. The original takes the visual effect object
+        // field_72E2 from the object array (GetDeny, retried while it
+        // reports busy) and marks its effects for deletion with 0x555200
+        // before ReleaseDeny (0x7345C2-0x734634); IcewindCVisualEffect
+        // has no port of 0x555200 yet.
+
+        m_bonusStats.BonusInit();
+
+        bResult = m_equipedEffectList.HandleList(this) & 1;
+        if (m_equipedEffectList.m_retry) {
+            bRetry = TRUE;
+        }
+
+        bResult &= m_timedEffectList.HandleList(this);
+        if (m_timedEffectList.m_retry) {
+            bRetry = TRUE;
+        }
+
+        m_derivedStats += m_bonusStats;
+
+        for (nSkill = 0; nSkill < 16; nSkill++) {
+            m_derivedStats.m_nSkills[nSkill] += static_cast<signed char>(sub_763E40(nSkill));
+            if (m_derivedStats.m_nSkills[nSkill] < 1) {
+                m_derivedStats.m_nSkills[nSkill] = 0;
+            }
+        }
+
+        if (g_pBaldurChitin->GetActiveEngine()->GetSelectedCharacter() == g_pBaldurChitin->GetObjectGame()->GetCharacterPortraitNum(m_id)) {
+            g_pBaldurChitin->GetObjectGame()->m_cButtonArray.UpdateState();
+        }
     } while (bRetry);
 
-    return v1 && v2;
+    return bResult;
 }
 
 // 0x7349A0
@@ -13082,6 +13372,8 @@ SHORT CGameSprite::SetAtOffset(DWORD stat, DWORD value, BOOL modify)
             m_baseStats.m_DEXBase = static_cast<BYTE>(value);
             m_derivedStats.m_nDEX = static_cast<SHORT>(value);
         }
+        field_562C = TRUE;
+        ProcessEffectList();
         return 1;
     case STAT_CON:
         if (modify == TRUE) {
@@ -14340,6 +14632,163 @@ int CGameSprite::GetExtraSkillPoints(BYTE nClass)
     }
 
     return sp;
+}
+
+// 0x763E40
+INT CGameSprite::sub_763E40(UINT nSkill)
+{
+    const CRuleTables& ruleTables = g_pBaldurChitin->GetObjectGame()->GetRuleTables();
+    INT nBonus;
+    INT nScore;
+
+    LONG bUntrained = ruleTables.m_tSkills.GetAtLong(CPoint(3, nSkill));
+
+    nBonus = 0;
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjCreatureAI.cpp
+    // __LINE__: 30444
+    UTIL_ASSERT(nSkill < 16);
+
+    if (m_baseStats.m_skills[nSkill] == 0 && bUntrained == 0) {
+        return 0;
+    }
+
+    if (m_derivedStats.HasClass(CAIOBJECTTYPE_C_CLERIC)) {
+        UINT nColumn;
+        switch (m_baseStats.m_specialization & 0xFF8000) {
+        case 0x8000:
+            nColumn = 0;
+            break;
+        case 0x10000:
+            nColumn = 1;
+            break;
+        case 0x20000:
+            nColumn = 2;
+            break;
+        case 0x40000:
+            nColumn = 3;
+            break;
+        case 0x80000:
+            nColumn = 4;
+            break;
+        case 0x100000:
+            nColumn = 5;
+            break;
+        case 0x200000:
+            nColumn = 6;
+            break;
+        case 0x400000:
+            nColumn = 7;
+            break;
+        case 0x800000:
+            nColumn = 8;
+            break;
+        default:
+            nColumn = nSkill;
+            break;
+        }
+
+        nBonus = ruleTables.m_tSkills.GetAtLong(CPoint(nColumn + 15, nSkill));
+    }
+
+    switch (nSkill) {
+    case 0:
+        if (m_typeAI.m_nRace == CAIOBJECTTYPE_R_GNOME && m_typeAI.m_nSubRace == 0) {
+            nBonus += 2;
+        }
+        if (m_derivedStats.HasClass(CAIOBJECTTYPE_C_BARD)) {
+            nBonus++;
+        }
+        return ruleTables.GetAbilityScoreModifier(m_derivedStats.m_nINT) + nBonus;
+    case 1:
+    case 2:
+    case 14:
+        if (m_typeAI.m_nRace == CAIOBJECTTYPE_R_HUMAN
+            && m_typeAI.m_nSubRace == 2
+            && nSkill == 2) {
+            nBonus += 2;
+        }
+        return ruleTables.GetAbilityScoreModifier(m_derivedStats.m_nCHR) + nBonus;
+    case 3:
+        nScore = ruleTables.GetAbilityScoreModifier(m_derivedStats.m_nCON);
+        if (sub_763150(15)) {
+            nScore += 2;
+        }
+        if (sub_763150(9)) {
+            nScore += 4;
+        }
+        return nScore;
+    case 4:
+        if (sub_763150(10)) {
+            nBonus += 2;
+        }
+        return ruleTables.GetAbilityScoreModifier(m_derivedStats.m_nCHR) + nBonus;
+    case 5:
+        return ruleTables.GetAbilityScoreModifier(m_derivedStats.m_nINT);
+    case 6:
+        if (m_typeAI.m_nRace == CAIOBJECTTYPE_R_HUMAN) {
+            if (m_typeAI.m_nSubRace == 2) {
+                nBonus += 2;
+            }
+        } else if (m_typeAI.m_nRace == CAIOBJECTTYPE_R_GNOME && m_typeAI.m_nSubRace == 1) {
+            nBonus += 2;
+        }
+        nScore = m_derivedStats.m_nDEX;
+        break;
+    case 7:
+        if (sub_763150(7)) {
+            nBonus += 2;
+        }
+        return ruleTables.GetAbilityScoreModifier(m_derivedStats.m_nCHR) + nBonus;
+    case 8:
+        if (m_derivedStats.HasClass(CAIOBJECTTYPE_C_BARD)) {
+            nBonus++;
+        }
+        return ruleTables.GetAbilityScoreModifier(m_derivedStats.m_nINT) + nBonus;
+    case 9:
+        if (m_typeAI.m_nRace == CAIOBJECTTYPE_R_HALFLING
+            || (m_typeAI.m_nRace == CAIOBJECTTYPE_R_DWARF && m_typeAI.m_nSubRace == 2)) {
+            nBonus += 4;
+        }
+        nScore = m_derivedStats.m_nDEX;
+        break;
+    case 10:
+    case 11:
+        nScore = m_derivedStats.m_nDEX;
+        break;
+    case 12:
+        switch (m_typeAI.m_nRace) {
+        case CAIOBJECTTYPE_R_ELF:
+        case CAIOBJECTTYPE_R_DWARF:
+            return ruleTables.GetAbilityScoreModifier(m_derivedStats.m_nINT) + nBonus + 2;
+        case CAIOBJECTTYPE_R_HALF_ELF:
+            nBonus++;
+            break;
+        case CAIOBJECTTYPE_R_GNOME:
+            if (m_typeAI.m_nRace == CAIOBJECTTYPE_R_GNOME && m_typeAI.m_nSubRace == 1) {
+                return ruleTables.GetAbilityScoreModifier(m_derivedStats.m_nINT) + nBonus + 2;
+            }
+            break;
+        }
+        return ruleTables.GetAbilityScoreModifier(m_derivedStats.m_nINT) + nBonus;
+    case 13:
+        if (sub_763150(10)) {
+            nBonus += 2;
+        }
+        if (m_derivedStats.HasClass(CAIOBJECTTYPE_C_BARD)) {
+            nBonus++;
+        }
+        return ruleTables.GetAbilityScoreModifier(m_derivedStats.m_nINT) + nBonus;
+    case 15:
+        if (sub_763150(25)) {
+            nBonus += 2;
+        }
+        return ruleTables.GetAbilityScoreModifier(m_derivedStats.m_nWIS) + nBonus;
+    default:
+        return 0;
+    }
+
+    return sub_724010(ruleTables.GetAbilityScoreModifier(nScore)) + nBonus;
 }
 
 // 0x764270

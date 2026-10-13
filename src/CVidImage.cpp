@@ -5,6 +5,7 @@
 #include "CUtil.h"
 #include "CVidInf.h"
 #include "CVideo3d.h"
+#include "render/api.h"
 
 #include <cstdint>
 
@@ -288,6 +289,7 @@ void CVidTile::SetRes(CResTile* pNewResTiles)
 // 0x7B1780
 BOOL CVidTile::Render(LPDIRECTDRAWSURFACE pSurface, INT x, INT y, const CRect& rClip, DWORD dwFlags)
 {
+    if (auto* b = render::Active(); b && b->Clipped(rClip).DrawTile(*this, { x, y }, dwFlags)) return TRUE;
     LONG nDataJump = 0;
 
     // __FILE__: C:\Projects\Icewind2\src\chitin\ChVidImage.cpp
@@ -421,6 +423,7 @@ BOOL CVidTile::Render(LPDIRECTDRAWSURFACE pSurface, INT x, INT y, const CRect& r
 // 0x7B1B30
 BOOL CVidTile::Render(LPDIRECTDRAWSURFACE pSurface, INT x, INT y, CResTile* pResStencil, const CRect& rClip, DWORD dwFlags)
 {
+    if (auto* b = render::Active(); b && b->Clipped(rClip).DrawTile(*this, { x, y }, dwFlags)) return TRUE;
     LONG nDataJump = 0;
 
     // __FILE__: C:\Projects\Icewind2\src\chitin\ChVidImage.cpp

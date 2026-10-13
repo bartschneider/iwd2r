@@ -34,7 +34,7 @@ Give iwd2r a modern presentation path and the seam that later renderers plug int
 `platform/present` becomes a front with two backends behind the existing API (`Present`, `PresentIfDirty`, `SetPresentTarget`, `SetFullscreen`, `SetDisplayMode`, `WindowToFrame`, `FrameToWindow`, `FrameSize`, `PrimaryFrame`, `HashPrimary`, `PresentedFrames`):
 
 - **classic:** the current SDL_Renderer path, unchanged.
-- **gpu:** `SDL_CreateGPUDevice` on the window, a swapchain, one sampled texture for the back buffer (uploaded each presented frame through a transfer buffer), a fullscreen-quad pipeline with one of three fragment shaders: nearest, sharp-bilinear (nearest at the pixel centres, linear within one output pixel of each edge, the crisp-pixels filter), smooth (bilinear).
+- **gpu:** `SDL_CreateGPUDevice` on the window, a swapchain, one sampled texture for the back buffer (uploaded each presented frame through a transfer buffer), a fullscreen-quad pipeline with one of five fragment shaders: nearest, sharp-bilinear (nearest at the pixel centres, linear within one output pixel of each edge, the crisp-pixels filter), smooth (bilinear), and two spatial upscalers that sharpen the classic frame without motion vectors or depth: AMD FidelityFX Super Resolution 1.0 (EASU plus RCAS, MIT) and NVIDIA Image Scaling (MIT). Both run on any GPU. Temporal upscalers such as DLSS do not fit a 2D sprite engine, which has no motion vectors, depth or jitter, and are out of scope.
 
 Both backends take the same CPU buffer and share the viewport math, so `PrimaryFrame`, `HashPrimary`, screenshots and hit-testing are unchanged. `PresentedFrames` counts in both. The gpu backend releases its device in `SetPresentTarget(nullptr)` before the window is destroyed.
 
@@ -64,7 +64,7 @@ Day one has two backends: **classic**, which is the absence of a backend (every 
 
 ### 4.4 Settings and toggle
 
-INI keys under `[Program Options]`: `Presenter=auto|gpu|classic` (auto: gpu when a device can be created, else classic), `Scale Filter=nearest|sharp|smooth` (gpu only; classic is nearest), `World Scale=1..4|auto` (default: the value of `Scale`; `auto` means 1 when `Scale` resolves to 2 or more, otherwise the value of `Scale`). All three are also `IWD2R_INI_OVERRIDE` keys for the harness. A hotkey, Ctrl+Shift+R, flips the presenter at runtime and prints the new choice on stderr; the options screen gains no new controls in this project.
+INI keys under `[Program Options]`: `Presenter=auto|gpu|classic` (auto: gpu when a device can be created, else classic), `Scale Filter=nearest|sharp|smooth|fsr|nis` (gpu only; classic is nearest; `fsr` and `nis` add a `Sharpness=0..1` key, default 0.5), `World Scale=1..4|auto` (default: the value of `Scale`; `auto` means 1 when `Scale` resolves to 2 or more, otherwise the value of `Scale`). All three are also `IWD2R_INI_OVERRIDE` keys for the harness. A hotkey, Ctrl+Shift+R, flips the presenter at runtime and prints the new choice on stderr; the options screen gains no new controls in this project.
 
 ## 5. Components
 
@@ -73,7 +73,7 @@ INI keys under `[Program Options]`: `Presenter=auto|gpu|classic` (auto: gpu when
 | `platform/present.h`, `present.cpp` | the front: backend selection, region composition, viewport math, the public API as today |
 | `platform/present_classic.cpp` | the SDL_Renderer backend, moved from `present.cpp` unchanged |
 | `platform/present_gpu.cpp` | the SDL3 GPU backend |
-| `platform/shaders/*.vert`, `*.frag` (GLSL 450), `platform/shaders/*.spv` | the quad vertex shader, the three filter fragment shaders, their compiled SPIR-V |
+| `platform/shaders/*.vert`, `*.frag` (GLSL 450), `platform/shaders/*.spv` | the quad vertex shader, the five filter fragment shaders (FSR 1.0 and NIS ported from their MIT sources), their compiled SPIR-V |
 | `tools/shaders.py` | regenerates the `.spv` files with `glslangValidator` and checks they match the sources (`--check`) |
 | `src/ScreenLayout.h`, `.cpp` | the second scale, the region list, the reserved rectangles |
 | `src/render/api.h`, `render.cpp` | the interface, `Mode`, `Set`, `Dispatch` |

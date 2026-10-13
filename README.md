@@ -60,6 +60,14 @@ python3 tools/play.py --linux --headless --script scenarios/options.txt
 
 Options are flags, never INI edits: `--windowed` (default) or `--fullscreen`, `--resolution W|desktop` (default 800), `--scale 1|2|3|4|auto` (the `Scale` key), `--set "Section/Key=Value"` for anything else (`--set "Program Options/Height=1080"` for the height), `--frames N`, `--data PATH`. They reach the engine through `IWD2R_INI_OVERRIDE`. Each run writes `runs/<YYYYMMDD-HHMMSS>/` with `log.txt` (the game's output), the screenshots, `ini-backup/` and `summary.txt`. Every `*.ini` in the install is backed up before the run and restored byte-identical afterwards, also on Ctrl-C, because the engine rewrites `icewind2.ini` on exit. Script commands (`wait`, `click`, `rclick`, `move`, `key`, `type`, `shot`, `quit`, `origin`) are documented in `platform/script.h`; the starter scenarios are in `scenarios/`. Click and move coordinates are in the original's 800x600 UI by default (`origin ui`): at larger sizes the UI is centred, and the engine (or the real-input driver) adds the centring offset, so one scenario clicks the same buttons at every resolution; `origin screen` switches to screen pixels.
 
+#### Desktop runs
+
+A run that would open a window on your desktop (`--windowed`, `--fullscreen`, or a Linux run with a display) refuses unless `IWD2R_DESKTOP_OK=1` is set. Automated runs use `--headless`, `--vm linux` or `--vm windows` instead, so an agent's run never steals focus from you. To play yourself:
+
+```
+IWD2R_DESKTOP_OK=1 python3 tools/play.py --windowed --data "/mnt/c/Games/Icewind Dale II" --sound
+```
+
 #### Real-input runs (`--vm`)
 
 `--vm` runs the same scenario files with genuine operating-system input in an isolated display, so nothing appears on your desktop: mouse and keyboard events travel OS → SDL → window shim → engine, as a player's do, and the in-engine script (`IWD2R_SCRIPT`) stays off.
@@ -123,6 +131,8 @@ SDL_VIDEO_DRIVER=dummy SDL_AUDIO_DRIVER=dummy IWD2R_SMOKE_FRAMES=300 ./build/lin
 
 ## Verification
 
+GitHub Actions is disabled while the parallel streams push often (`gh workflow disable CI`; `gh workflow enable CI` turns it back on). `tools/gates.sh` runs the same steps locally, with `--windows` for the Windows builds, and every integration into `first` runs it.
+
 The oracle checks our engine against the original game's own code. The original `iwd2.exe` runs for real on Windows; ours runs next to it; the results are compared. A function counts as done only when it compiles, matches the original, and has an evidence file. The design is in [docs/superpowers/specs/2026-10-12-iwd2r-verification-harness-design.md](docs/superpowers/specs/2026-10-12-iwd2r-verification-harness-design.md) and the reasons for its runtime in [ADR 0003](docs/adr/0003-oracle-runtime.md). Parked items are in [docs/followups.md](docs/followups.md).
 
 `tools/ghidra/setup.sh`, `oracle.py evidence` and `check_evidence.py` work on Linux and WSL. The runner, the vanilla copy and the replays need a Windows host with your own copy of the game, driven from WSL. Nothing from the game is committed. Results go to `runs/<YYYYMMDD-HHMMSS>/`, which is not committed either.
@@ -154,6 +164,7 @@ CI runs the parts that need no game data: the PE loader tests (`[pe]`), the VC6 
 - The speaker-portrait click in world dialog panels, which forwarded to the multiplayer screen, is now a no-op.
 - The start screen is the original's connection screen with its multiplayer entry hidden.
 - `C2DArray::LoadText` has no counterpart in the original. The original parses 2DA text only inside `C2DArray::Load` (0x402B70), after fetching it through its resource manager; ours splits that parse into `LoadText`, unchanged, so the tests and the oracle's table cases can build tables from text without a resource manager. `Load` calls it, so the engine's behaviour is the same.
+- The drawing entry points of the `CVid*` classes (`CVidCell::Render`, `CVidTile::Render`, `CVidFont::TextOut`, `CVidMode`'s line, rectangle, ellipse, recticle, outline, polyline, erase and fade functions, `CVidInf`'s `BK*` and `FX*` functions and `RenderFlash`, `CVidMosaic::Render`, `CVidBitmap::RenderDirect`; the list and the helpers left alone are in `src/render/api.h`) start with one line the original does not have: a guard that hands the call to an installed render backend and returns when the backend handled it (the two inlined fade functions instead end with a line that reports the fade level). It lets later renderers draw the same calls another way (larger textures, a GPU) without changing the decompiled bodies. With no backend installed, the default, every guard falls through and the bodies draw into the back buffer exactly as before. Each guarded function's evidence file carries the exemption "render API dispatch guard".
 
 ## License
 

@@ -107,7 +107,6 @@ function, its `extra_labels.txt` line can go.
 | 0x73B760 CGameSprite::Hit (attack d20 against AC) | pending/hit | none: equipped CItems, sprites, the game's options |
 | 0x547020 CRuleTables::GetIterativeAttackBonus | pending/iterative_attack_bonus | determinism check |
 | 0x73D560 CGameSprite::Damage (weapon damage dice) | pending/damage | none: equipped CItems, the target's animation, the message handler |
-| 0x542A90 CRuleTables::RollHitPoints | pending/roll_hit_points | determinism check |
 
 ## Replays and known differences
 

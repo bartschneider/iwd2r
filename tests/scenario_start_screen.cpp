@@ -3,7 +3,7 @@
 
 #include "ScreenLayout.h"
 #include "compat/ini.h"
-#include "install_ini_backup.h"
+#include "data_view.h"
 
 #include <zlib.h>
 
@@ -89,14 +89,15 @@ TEST_CASE("start screen scenario screenshot", "[data][scenario]")
     const std::string script = (std::filesystem::path(IWD2R_SOURCE_DIR) / "scenarios" / "start_screen.txt").string();
     const std::string out = (shots / "log.txt").string();
 
+    // The engine writes into its data folder: it runs on a private view.
+    DataView view(data);
     int raw = 0;
     {
-        InstallIniBackup backup(data);
 #ifdef _WIN32
-        const std::string cmd = "set SDL_VIDEO_DRIVER=dummy&& set SDL_AUDIO_DRIVER=dummy&& set IWD2R_SCRIPT=" + script + "&& set IWD2R_SHOT_DIR=" + shots.string() + "&& set IWD2_DATA=" + data + "&& \"" IWD2R_EXE "\" > \"" + out + "\" 2>&1";
+        const std::string cmd = "set SDL_VIDEO_DRIVER=dummy&& set SDL_AUDIO_DRIVER=dummy&& set IWD2R_SCRIPT=" + script + "&& set IWD2R_SHOT_DIR=" + shots.string() + "&& set IWD2_DATA=" + view.Path() + "&& \"" IWD2R_EXE "\" > \"" + out + "\" 2>&1";
         const std::string full = "\"" + cmd + "\"";
 #else
-        const std::string full = "SDL_VIDEO_DRIVER=dummy SDL_AUDIO_DRIVER=dummy IWD2R_SCRIPT=\"" + script + "\" IWD2R_SHOT_DIR=\"" + shots.string() + "\" IWD2_DATA=\"" + data + "\" timeout 150 \"" IWD2R_EXE "\" > \"" + out + "\" 2>&1";
+        const std::string full = "SDL_VIDEO_DRIVER=dummy SDL_AUDIO_DRIVER=dummy IWD2R_SCRIPT=\"" + script + "\" IWD2R_SHOT_DIR=\"" + shots.string() + "\" IWD2_DATA=\"" + view.Path() + "\" timeout 150 \"" IWD2R_EXE "\" > \"" + out + "\" 2>&1";
 #endif
         raw = std::system(full.c_str());
     }
