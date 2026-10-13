@@ -17,7 +17,10 @@
 // storage, our CVidInf and CVidPalette from their constructors; g_pChitin is
 // put back when the case ends. Original objects are never freed.
 //
-// FillConvexPoly's polygon comes
+// The cell blends (sub_7D0950, sub_7D1190) run on a synthetic BAM: zeroed
+// CVidCell and CResCell blocks holding only the members the functions read
+// (R10b), the header, palette, frame entry and frame data in the original's
+// memory on its side and in ours on ours. FillConvexPoly's polygon comes
 // from the original's CVidPoly constructor (0x7C0DB0); its only global is
 // g_pChitin->cVideo.m_nBpp, set in the zeroed chitin.
 //
@@ -28,6 +31,8 @@
 #pragma warning(disable : 4121 4201)
 #endif
 #include "CChitin.h"
+#include "CResCell.h"
+#include "CVidCell.h"
 #include "CVidInf.h"
 #include "CVidPalette.h"
 #include "CVidPoly.h"
@@ -799,6 +804,192 @@ void FillConvexPoly(CaseContext& ctx)
     }
 }
 
+// CVidCell::sub_7D0950(pSurface, lPitch, dwFlags, nTransVal) (0x7D0950),
+// `ret 0x10`, and sub_7D1190(pSurface, lPitch, dwFlags) (0x7D1190), `ret 0xc`.
+using CellTransFn = int32_t(__fastcall*)(void* self, void* edx, uint32_t* pSurface, int32_t lPitch, uint32_t dwFlags,
+    int32_t nTransVal);
+using CellBrightFn = int32_t(__fastcall*)(void* self, void* edx, uint32_t* pSurface, int32_t lPitch, uint32_t dwFlags);
+constexpr uintptr_t kCellTrans = 0x7D0950;
+constexpr uintptr_t kCellBright = 0x7D1190;
+// The members they read: CVidCell m_cPalette (8), m_paletteAffects (0x2C),
+// pRes (0xA8), m_bPaletteChanged (0xCC), m_pFrame (0xD0), m_bShadowOn (0xD4),
+// m_bDoubleSize (0xD6); CResCell m_bParsed (0x50), m_pBamHeader (0x54),
+// m_pPalette (0x6A), m_bCacheHeader (0x7E); the BAM header's
+// nTransparentColor (0xB); the video mode's field_24 (the shadow colour).
+constexpr size_t kCellSize = 0x100;
+constexpr size_t kResCellSize = 0x100;
+constexpr size_t kShadowColorOffset = 0x24;
+constexpr int kCellCanvas = 64;
+constexpr int kFrameDataOffset = 0x20;
+
+// A frame of nWidth x nHeight palette indices.
+std::vector<uint8_t> RunLengthEncode(const std::vector<uint8_t>& pixels, uint8_t transparent)
+{
+    std::vector<uint8_t> out;
+    for (size_t i = 0; i < pixels.size();) {
+        if (pixels[i] == transparent) {
+            size_t run = 1;
+            while (i + run < pixels.size() && pixels[i + run] == transparent && run < 256) {
+                ++run;
+            }
+            out.push_back(transparent);
+            out.push_back(static_cast<uint8_t>(run - 1));
+            i += run;
+        } else {
+            out.push_back(pixels[i++]);
+        }
+    }
+    return out;
+}
+
+// sub_7D0950 (translucent) and sub_7D1190 (brightness-blended) on a
+// synthetic BAM: a zeroed CResCell holding only the parsed flag, the header
+// (its transparent index) and the palette, one frame entry, and the frame
+// data RLE compressed or raw (the frame entry's offset bit 31). The frame is
+// drawn at (8, 8) of a 64x64 canvas of random pixels, each channel at least
+// 8, with the cell's shadow on or off and the video mode's shadow colour
+// random. Raw frames bring out the original's walks outside the frame (rows
+// four times apart in sub_7D0950, an extra row and column in sub_7D1190);
+// the canvas is large enough that they stay inside it, so ours, bounded to
+// the canvas, must draw the same pixels. sub_7D1190 reads past the raw data
+// into bytes that are 0 (a black palette entry), which the bright canvas
+// keeps unchanged; ours skips those pixels (docs/evidence/7D1190.md).
+void CellBlend(CaseContext& ctx, bool translucent, uint64_t salt)
+{
+    VideoFixture video(ctx);
+    uint8_t* cell = nullptr;
+    uint8_t* res = nullptr;
+    uint8_t* bam = nullptr;
+    uint8_t* palette = nullptr;
+    uint8_t* frame = nullptr;
+    uint32_t* canvas = nullptr;
+    constexpr size_t kBamSize = 0x1000;
+    ctx.SetInputs("building the original's cell");
+    ctx.CallOriginal([&] {
+        cell = OriginalBlock(kCellSize);
+        res = OriginalBlock(kResCellSize);
+        bam = OriginalBlock(kBamSize);
+        palette = OriginalBlock(256 * 4);
+        frame = OriginalBlock(12);
+        canvas = reinterpret_cast<uint32_t*>(OriginalBlock(kCellCanvas * kCellCanvas * 4));
+        Put<uint32_t>(res, 0x50, 1);
+        Put<uint32_t>(res, 0x54, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(bam)));
+        Put<uint32_t>(res, 0x6A, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(palette)));
+        Put<uint32_t>(cell, 0xA8, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(res)));
+        Put<uint32_t>(cell, 0xD0, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(frame)));
+    });
+
+    auto* oursCellStorage = static_cast<unsigned char*>(::operator new(sizeof(CVidCell)));
+    std::memset(oursCellStorage, 0, sizeof(CVidCell));
+    auto* oursResStorage = static_cast<unsigned char*>(::operator new(sizeof(CResCell)));
+    std::memset(oursResStorage, 0, sizeof(CResCell));
+    auto* oursCell = reinterpret_cast<CVidCell*>(oursCellStorage);
+    auto* oursRes = reinterpret_cast<CResCell*>(oursResStorage);
+    std::vector<uint8_t> oursBam(kBamSize);
+    std::vector<RGBQUAD> oursPalette(256);
+    FRAMEENTRY oursFrame = {};
+    oursRes->m_bParsed = TRUE;
+    oursRes->m_pBamHeader = reinterpret_cast<BAMHEADER*>(oursBam.data());
+    oursRes->m_pPalette = oursPalette.data();
+    static_cast<CResHelper<CResCell, 1000>*>(oursCell)->pRes = oursRes;
+    oursCell->m_pFrame = &oursFrame;
+
+    std::vector<DWORD> mine(kCellCanvas * kCellCanvas);
+    Picks picks(ctx.seed, salt);
+    const uint32_t kFlags[] = { 0, 0x10000, 0x80000, 0x200000 };
+    const int count = 400 + ctx.iterations / 20;
+    for (int n = 0; n < count; ++n) {
+        const int width = picks.Between(1, 8);
+        const int height = picks.Between(1, 4);
+        const bool compressed = picks.Between(0, 1) != 0;
+        const uint8_t transparent = static_cast<uint8_t>(picks.Between(1, 255));
+        const uint8_t shadowOn = static_cast<uint8_t>(picks.Between(0, 1));
+        const uint32_t shadow = picks.Bits() & 0xFFFFFF;
+        const uint32_t dwFlags = kFlags[picks.Between(0, 3)];
+        const int32_t nTransVal = picks.Between(0, 256);
+        std::vector<uint8_t> pixels(static_cast<size_t>(width * height));
+        for (uint8_t& p : pixels) {
+            const int32_t k = picks.Between(0, 5);
+            p = k == 0 ? transparent : (k == 1 ? 1 : static_cast<uint8_t>(picks.Between(1, 255)));
+        }
+        const std::vector<uint8_t> data = compressed ? RunLengthEncode(pixels, transparent) : pixels;
+        std::vector<uint8_t> image(kBamSize, 0);
+        image[0xB] = transparent;
+        std::memcpy(image.data() + kFrameDataOffset, data.data(), data.size());
+        std::vector<RGBQUAD> colors(256);
+        for (RGBQUAD& c : colors) {
+            const uint32_t bits = picks.Bits();
+            std::memcpy(&c, &bits, 4);
+        }
+        std::memset(&colors[0], 0, sizeof(RGBQUAD)); // the bytes after raw data
+        // Light and dark colours both occur.
+        for (int i = 0; i < 256; i += 3) {
+            colors[i].rgbRed >>= 2;
+            colors[i].rgbGreen >>= 2;
+            colors[i].rgbBlue >>= 2;
+        }
+        FRAMEENTRY entry = {};
+        entry.nWidth = static_cast<WORD>(width);
+        entry.nHeight = static_cast<WORD>(height);
+        entry.nOffset = static_cast<DWORD>(kFrameDataOffset) | (compressed ? 0u : 0x80000000u);
+        for (DWORD& pixel : mine) {
+            pixel = picks.Bits() | 0x080808;
+        }
+
+        char inputs[200];
+        std::snprintf(inputs, sizeof(inputs),
+            "input %d: %dx%d %s, transparent %u, shadow %s 0x%06X, flags 0x%X, nTransVal %d", n, width, height,
+            compressed ? "RLE" : "raw", transparent, shadowOn ? "on" : "off", shadow, dwFlags, nTransVal);
+        ctx.SetInputs(inputs);
+        const int32_t start = 8 * kCellCanvas + 8;
+        int32_t originalResult = 0;
+        ctx.CallOriginal([&] {
+            std::memcpy(bam, image.data(), kBamSize);
+            std::memcpy(palette, colors.data(), 256 * 4);
+            std::memcpy(frame, &entry, sizeof(entry));
+            std::memcpy(canvas, mine.data(), mine.size() * 4);
+            Put<uint8_t>(cell, 0xD4, shadowOn);
+            Put<uint32_t>(video.mode, kShadowColorOffset, shadow);
+            if (translucent) {
+                originalResult = reinterpret_cast<CellTransFn>(kCellTrans)(cell, nullptr, canvas + start,
+                    kCellCanvas * 4, dwFlags, nTransVal);
+            } else {
+                originalResult = reinterpret_cast<CellBrightFn>(kCellBright)(cell, nullptr, canvas + start,
+                    kCellCanvas * 4, dwFlags);
+            }
+        });
+        std::memcpy(oursBam.data(), image.data(), kBamSize);
+        std::memcpy(oursPalette.data(), colors.data(), 256 * 4);
+        oursFrame = entry;
+        oursCell->m_bShadowOn = shadowOn;
+        video.oursMode->field_24 = shadow;
+        const auto* begin = reinterpret_cast<const BYTE*>(mine.data());
+        const CVidCell::SurfaceRange range = { begin, begin + mine.size() * 4 };
+        BOOL oursResult;
+        if (translucent) {
+            oursResult = oursCell->sub_7D0950(mine.data() + start, kCellCanvas * 4, dwFlags, nTransVal, range);
+        } else {
+            oursResult = oursCell->sub_7D1190(mine.data() + start, kCellCanvas * 4, dwFlags, range);
+        }
+        ctx.CountInputs(1);
+        if (oracle::Compare(ctx, originalResult, static_cast<int32_t>(oursResult))) {
+            CompareArrays(ctx, canvas, mine.data(), kCellCanvas * kCellCanvas);
+        }
+    }
+    ::operator delete(oursResStorage);
+    ::operator delete(oursCellStorage);
+}
+
+void CellTranslucent(CaseContext& ctx)
+{
+    CellBlend(ctx, true, 0x43656C6C54000000ull); // "CellT"
+}
+
+void CellBrightness(CaseContext& ctx)
+{
+    CellBlend(ctx, false, 0x43656C6C42000000ull); // "CellB"
+}
+
 } // namespace
 
 ORACLE_CASE("vid/hline_shaded32", HLineShaded32);
@@ -808,3 +999,5 @@ ORACLE_CASE("vid/thick_line32", ThickLine32);
 ORACLE_CASE("vid/brightness_contrast", BrightnessContrast);
 ORACLE_CASE("vid/lighting_effect32", LightingEffect32);
 ORACLE_CASE("vid/fill_convex_poly", FillConvexPoly);
+ORACLE_CASE("vid/cell_translucent32", CellTranslucent);
+ORACLE_CASE("vid/cell_brightness32", CellBrightness);

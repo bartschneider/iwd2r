@@ -1250,10 +1250,11 @@ void CVidPalette::RealizeResource(DWORD* pDestPalette, INT nBpp, DWORD dwFlags, 
     for (INT nIndex = nReservedEntries; nIndex < 256; nIndex++) {
         RGBQUAD rgb = m_pPalette[nIndex];
 
+        // Grey: all three channels (0x7C0B80); ours kept the blue.
         if ((dwFlags & 0x80000) != 0) {
             rgb.rgbRed = (rgb.rgbRed + rgb.rgbGreen + rgb.rgbBlue) / 4;
             rgb.rgbGreen = rgb.rgbRed;
-            rgb.rgbBlue = rgb.rgbBlue;
+            rgb.rgbBlue = rgb.rgbRed;
         }
 
         if ((dwFlags & 0x2000000) != 0) {
