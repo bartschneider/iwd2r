@@ -112,3 +112,10 @@ TEST_CASE("ParsePe rejects an import table outside the file", "[pe]")
     Put32(&file, kOptionalHeader + 96 + 8, 0x2F00); // import directory RVA
     CHECK(ParseError(file) == "import descriptor at RVA 0x2F00 is outside the file");
 }
+
+TEST_CASE("ParsePe rejects headers larger than the image", "[pe]")
+{
+    std::vector<uint8_t> file = TestPe();
+    Put32(&file, kOptionalHeader + 60, 0x4000); // SizeOfHeaders
+    CHECK(ParseError(file) == "SizeOfHeaders 0x4000 exceeds SizeOfImage 0x3000");
+}

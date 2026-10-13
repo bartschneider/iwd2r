@@ -169,6 +169,9 @@ bool ParsePe(const std::vector<uint8_t>& file, PeImage* out, std::string* error)
     image.imageBase = r.U32(opt + 28);
     image.imageSize = r.U32(opt + 56);
     image.headersSize = r.U32(opt + 60);
+    if (image.headersSize > image.imageSize) {
+        return Fail(error, "SizeOfHeaders " + Hex(image.headersSize) + " exceeds SizeOfImage " + Hex(image.imageSize));
+    }
     const uint32_t directoryCount = r.U32(opt + 92);
     uint32_t importRva = 0;
     if (directoryCount > kImportDirectory && optionalSize >= 96 + 8 * (kImportDirectory + 1)) {

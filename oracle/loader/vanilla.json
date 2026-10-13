@@ -4,6 +4,8 @@
   "winmain": "0x4218F0",
   "srand": "0x7E8153",
   "rand": "0x7E8160",
+  "getptd": "0x7EDB13",
+  "tiddata_rand": ["0x14", "0x18"],
   "crt_ranges": [
     ["0x8C23F0", "0x8C23F4"],
     ["0x8C23F8", "0x8C24B8"],
@@ -20,6 +22,8 @@
     "winmain": "Ghidra label WinMain (tools/ghidra/query.py WinMain), the target of the call above.",
     "srand": "FUN_007e8153, unlabelled in the project: call _getptd (0x7EDB13); mov ecx,[esp+4]; mov [eax+0x14],ecx; ret. It stores the seed in the same per-thread field (_tiddata._holdrand, offset 0x14) that rand reads, which is VC6's multithreaded srand.",
     "rand": "Ghidra label _rand. The only use of the LCG constant 0x343FD in .text: call _getptd; [eax+0x14] = [eax+0x14]*0x343FD+0x269EC3; return (state>>16)&0x7FFF. The state is per thread (in the heap-allocated _tiddata), not in .data.",
+    "getptd": "FUN_007edb13, unlabelled in the project (query.py _getptd: not found; 0x7EDB13: FUN_007edb13). It is VC6's _getptd: GetLastError (IAT 0x847284); TlsGetValue([_tlsindex 0x8C23F0]) (IAT 0x8471C0); if null, _calloc_crt(1, 0x74), TlsSetValue (IAT 0x8471B8), _initptd (0x7EDB00), _tid = GetCurrentThreadId (IAT 0x847288), _thandle = -1, else _amsg_exit(0x10); SetLastError (IAT 0x84714C); returns the _tiddata. srand (0x7E8153) and rand (0x7E8160) both call it and use [eax+0x14]. Found from the call in rand, confirmed by objdump -d of 0x7EDB13-0x7EDB7A. The oracle calls it once at the snapshot, on the thread that runs the cases.",
+    "tiddata_rand": "[start, end) offsets in _tiddata of the per-thread rand state: _holdrand at 0x14 (VC6 mtdll.h: _tid 0x0, _thandle 0x4, _terrno 0x8, _tdoserrno 0xC, _fpds 0x10, _holdrand 0x14), the only field rand and srand touch. RestoreData puts it back with .data.",
     "crt_ranges": [
       "0x8C23F0 _tlsindex: TlsAlloc result stored by _mtinit (FUN_007edaac), read by _getptd (FUN_007edb13); initialised to 0xFFFFFFFF.",
       "0x8C23F8 _locktable: 48 LPCRITICAL_SECTION slots (_TOTAL_LOCKS), indexed [eax*4+0x8C23F8] by _lock/_mtinitlocks around 0x7EDDE4; slots 1, 9, 13 and 17 point at the static critical sections below; the next data (0x8C24C0) is unrelated.",

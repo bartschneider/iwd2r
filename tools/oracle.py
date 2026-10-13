@@ -7,6 +7,7 @@ Usage (from WSL, in the repository):
   python3 tools/oracle.py evidence IcewindMisc::Roll
   python3 tools/oracle.py build
   python3 tools/oracle.py run --selftest
+  python3 tools/oracle.py run [--file selftest] [--seed N] [--iterations N]
 
 evidence writes a draft docs/evidence/<ADDR>.md for one function of the
 vanilla exe: the front matter (address, name, an empty oracle_case,
@@ -21,10 +22,21 @@ build syncs the checkout to the Windows build folder (play.py's route) and
 builds the 32-bit runner iwd2r_oracle with the windows-msvc-x86 preset.
 
 run copies the vanilla iwd2.exe (MD5 from oracle/loader/vanilla.json) to
-C:/Users/thier/iwd2r-oracle and runs the runner on it. --selftest makes
-four runs: the self-test, whose image bytes and rand() value are checked
-against the exe file read here; a run with a wrong WinMain call site, which
-must be refused; a run with 0x400000 taken first, which must name the
+C:/Users/thier/iwd2r-oracle and runs the runner on it.
+
+Without --selftest it runs comparison cases: the case file named by --file,
+or every case file the runner lists, one fresh runner process per file. Each
+process writes <file>.json under C:/Users/thier/iwd2r-oracle/out/<stamp>;
+they are merged into runs/<stamp>/oracle.json and summarised. A case declared
+to fail (selftest/must_fail) is listed under expected_failures and one
+declared to crash (selftest/crash) under expected_crashes. The run fails
+(exit 1) if any case does not do what it declared, or a runner process ends
+without its report.
+
+--selftest checks the loader itself in five runs: the self-test, whose image
+bytes and rand() value are checked against the exe file read here; a run with
+a wrong WinMain call site and one with a wrong expected WinMain target, both
+of which must be refused; a run with 0x400000 taken first, which must name the
 occupant; and a run on a file that is not the vanilla exe, which must be
 refused by MD5. It exits 1 if any run fails.
 
@@ -32,6 +44,7 @@ Standard library only.
 """
 
 import argparse
+import datetime
 import hashlib
 import json
 import os
@@ -56,6 +69,8 @@ ORACLE_DIR = '/mnt/c/Users/thier/iwd2r-oracle'
 ORACLE_PRESET = 'windows-msvc-x86'
 RUNNER_REL = 'build/windows-msvc-x86/oracle/RelWithDebInfo/iwd2r_oracle.exe'
 SELFTEST_RAND = 41  # VC6 rand() after srand(1)
+RUNS_DIR = os.path.join(ROOT, 'runs')
+FILE_TIMEOUT = 600  # seconds for one case file's process
 
 
 def ghidra_version():
@@ -263,6 +278,10 @@ SELFTEST_RUNS = (
      ['--selftest', '--test-bad-callsite'], 6,
      r'refusing to patch the WinMain call: byte at 0x007E9B44 is 0x[0-9A-F]{2}'
      r', not a call'),
+    ('wrong WinMain target', 'vanilla',
+     ['--selftest', '--test-bad-target'], 6,
+     r'refusing to patch the WinMain call: call at 0x007E9B43 targets '
+     r'0x004218F0, expected WinMain at 0x00421900'),
     ('range pre-occupied', 'vanilla', ['--selftest', '--test-occupy'], 4,
      r'occupied by private memory at 0x00400000-'),
     ('wrong MD5', 'runner', ['--selftest'], 5,
@@ -308,14 +327,161 @@ def cmd_build(args):
     return 0
 
 
-def cmd_run(args):
+def case_ok(case):
+    """Whether a case did what it declared (its "expect")."""
+    expect = case.get('expect', 'pass')
+    if expect == 'fail':
+        return not case['crashed'] and case['failure_count'] > 0
+    if expect == 'crash':
+        return case['crashed']
+    return not case['crashed'] and case['failure_count'] == 0
+
+
+def merge_reports(seed, iterations, runs):
+    """Merge the runner's per-file reports into oracle.json.
+
+    runs is [(file, exit code or None on a timeout, report dict or None)].
+    A file is ok when its report exists, every case did what it declared, and
+    the exit code agrees (0 when all did, 7 when not)."""
+    merged = {'seed': seed, 'iterations': iterations, 'files': [],
+              'cases': [], 'expected_failures': [], 'expected_crashes': [],
+              'unexpected': [], 'passed': True}
+    for name, code, report in runs:
+        entry = {'file': name, 'exit_code': code}
+        if report is None:
+            entry['ok'] = False
+            entry['error'] = ('timed out' if code is None else
+                              'no report (exit code %s)' % code)
+            merged['unexpected'].append(name)
+        else:
+            all_ok = True
+            for case in report['cases']:
+                case = dict(case, file=name)
+                merged['cases'].append(case)
+                if not case_ok(case):
+                    all_ok = False
+                    merged['unexpected'].append(case['case'])
+                elif case['expect'] == 'fail':
+                    merged['expected_failures'].append(case['case'])
+                elif case['expect'] == 'crash':
+                    merged['expected_crashes'].append(case['case'])
+            entry['ok'] = all_ok and code == (0 if all_ok else 7)
+            if all_ok and not entry['ok']:
+                entry['error'] = 'exit code %s with every case as declared' % code
+                merged['unexpected'].append(name)
+        merged['files'].append(entry)
+        merged['passed'] = merged['passed'] and entry['ok']
+    return merged
+
+
+def summary_lines(merged):
+    """The readable summary of a merged report."""
+    lines = []
+    for case in merged['cases']:
+        if case['crashed']:
+            state = 'crashed'
+        elif case['failure_count']:
+            state = 'failed'
+        else:
+            state = 'passed'
+        if case_ok(case):
+            state += ' (expected)' if case['expect'] != 'pass' else ''
+        else:
+            state = state.upper() + (' (expected %s)' % case['expect']
+                                     if case['expect'] != 'pass' else '')
+        lines.append('%-32s %s, %d inputs, %d failures' % (
+            case['case'], state, case['iterations'], case['failure_count']))
+        if not case_ok(case) or case['expect'] != 'pass':
+            for f in case['failures'][:3]:
+                lines.append('    seed %d  inputs %s\n      original %s\n'
+                             '      ours     %s' % (merged['seed'], f['inputs'],
+                                                    f['original'], f['ours']))
+            if case['crash']:
+                lines.append('    seed %d  inputs %s\n      exception %s at %s'
+                             % (merged['seed'], case['crash']['inputs'],
+                                case['crash']['exception'],
+                                case['crash']['address']))
+    for entry in merged['files']:
+        if entry.get('error'):
+            lines.append('file %s: %s' % (entry['file'], entry['error']))
+    counts = {'pass': 0, 'expected': 0}
+    for case in merged['cases']:
+        if case_ok(case):
+            counts['pass' if case['expect'] == 'pass' else 'expected'] += 1
+    lines.append('%d passed, %d expected failures or crashes, %d unexpected; '
+                 'run %s' % (counts['pass'], counts['expected'],
+                             len(merged['unexpected']),
+                             'PASSED' if merged['passed'] else 'FAILED'))
+    return lines
+
+
+def runner_path():
     import play
-    if not args.selftest:
-        print('oracle: no comparison suites yet; pass --selftest')
-        return 1
     runner = os.path.join(play.WIN_CHECKOUT, RUNNER_REL)
     if not os.path.isfile(runner):
         sys.exit('oracle: no %s; run tools/oracle.py build' % runner)
+    return runner
+
+
+def run_cases(args):
+    import play
+    runner = runner_path()
+    exe = stage_vanilla(args.vanilla)
+    if args.file:
+        files = [args.file]
+    else:
+        r = subprocess.run([runner, '--list'], capture_output=True, text=True,
+                           timeout=60)
+        if r.returncode != 0:
+            sys.exit('oracle: %s --list failed: %s' % (runner, r.stderr))
+        files = r.stdout.split()
+    run_dir = play.make_run_folder(RUNS_DIR, datetime.datetime.now())
+    out_dir = os.path.join(ORACLE_DIR, 'out', os.path.basename(run_dir))
+    os.makedirs(out_dir)
+    runs = []
+    for name in files:
+        command = [runner, win_path(exe), '--file', name,
+                   '--seed', str(args.seed), '--iterations',
+                   str(args.iterations), '--out', win_path(out_dir)]
+        print('== %s' % name)
+        try:
+            r = subprocess.run(command, cwd=ORACLE_DIR, capture_output=True,
+                               text=True, timeout=FILE_TIMEOUT)
+            code, stdout, stderr = r.returncode, r.stdout, r.stderr
+        except subprocess.TimeoutExpired as e:
+            code = None
+            stdout = e.stdout.decode() if isinstance(e.stdout, bytes) else \
+                (e.stdout or '')
+            stderr = e.stderr.decode() if isinstance(e.stderr, bytes) else \
+                (e.stderr or '')
+        for line in stdout.splitlines():
+            print('  %s' % line)
+        for line in stderr.splitlines():
+            print('  stderr: %s' % line)
+        path = os.path.join(out_dir, name + '.json')
+        report = None
+        if os.path.isfile(path):
+            with open(path) as f:
+                report = json.load(f)
+        runs.append((name, code, report))
+    merged = merge_reports(args.seed, args.iterations, runs)
+    with open(os.path.join(run_dir, 'oracle.json'), 'w') as f:
+        json.dump(merged, f, indent=2)
+        f.write('\n')
+    shutil.rmtree(out_dir)
+    for line in summary_lines(merged):
+        print(line)
+    print('report: %s' % os.path.relpath(os.path.join(run_dir, 'oracle.json'),
+                                         ROOT))
+    return 0 if merged['passed'] else 1
+
+
+def cmd_run(args):
+    if not args.selftest:
+        return run_cases(args)
+    if args.file:
+        sys.exit('oracle: --selftest and --file do not go together')
+    runner = runner_path()
     exe = stage_vanilla(args.vanilla)
     with open(exe, 'rb') as f:
         data = f.read()
@@ -355,6 +521,14 @@ def main(argv=None):
     run = sub.add_parser('run', help='run the runner on the vanilla exe')
     run.add_argument('--selftest', action='store_true',
                      help='check the loader: image bytes, rand(), refusals')
+    run.add_argument('--file', help='run one case file (oracle/cases/<file>'
+                     '.cpp); default every case file')
+    run.add_argument('--seed', type=int, default=1,
+                     help='seed for the original rand and the generators '
+                     '(default %(default)s)')
+    run.add_argument('--iterations', type=int, default=10000,
+                     help='inputs per unbounded generator '
+                     '(default %(default)s)')
     run.add_argument('--vanilla', default=VANILLA_EXE,
                      help='the vanilla iwd2.exe (default %(default)s)')
     run.set_defaults(run=cmd_run)

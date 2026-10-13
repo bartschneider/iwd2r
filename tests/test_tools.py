@@ -1259,11 +1259,16 @@ class OracleSelftestTest(unittest.TestCase):
         runs = {name: pattern for name, _, _, _, pattern
                 in oracle.SELFTEST_RUNS}
         self.assertEqual(list(runs), ['selftest', 'wrong WinMain call site',
+                                      'wrong WinMain target',
                                       'range pre-occupied', 'wrong MD5'])
         messages = {
             'wrong WinMain call site':
                 'oracle: refusing to patch the WinMain call: byte at '
                 '0x007E9B44 is 0xA8, not a call (0xE8)',
+            'wrong WinMain target':
+                'oracle: refusing to patch the WinMain call: call at '
+                '0x007E9B43 targets 0x004218F0, expected WinMain at '
+                '0x00421900',
             'range pre-occupied':
                 'oracle: cannot reserve 0x00400000-0x00A21000 for iwd2.exe: '
                 'occupied by private memory at 0x00400000-0x00401000 '
@@ -1281,7 +1286,8 @@ class OracleSelftestTest(unittest.TestCase):
             vanilla = json.load(f)
         self.assertEqual(vanilla['md5'], oracle.vanilla_md5())
         self.assertRegex(vanilla['md5'], r'^[0-9a-f]{32}$')
-        for key in ('winmain_call_site', 'winmain', 'srand', 'rand'):
+        for key in ('winmain_call_site', 'winmain', 'srand', 'rand',
+                    'getptd'):
             self.assertRegex(vanilla[key], r'^0x[0-9A-F]+$', key)
             self.assertIn(key, vanilla['notes'])
         ranges = [(int(a, 16), int(b, 16)) for a, b in vanilla['crt_ranges']]
@@ -1294,6 +1300,85 @@ class OracleSelftestTest(unittest.TestCase):
             self.assertGreaterEqual(start, 0x8A5000)
             self.assertLessEqual(end, 0xA1AE81)
         self.assertEqual(len(vanilla['notes']['crt_ranges']), len(ranges))
+        # _holdrand: offset 0x14 of _tiddata (0x74 bytes).
+        self.assertEqual(vanilla['tiddata_rand'], ['0x14', '0x18'])
+        self.assertIn('tiddata_rand', vanilla['notes'])
+
+
+def oracle_case(name, expect='pass', failures=0, crashed=False):
+    return {'case': name, 'expect': expect, 'iterations': 10,
+            'passed': not failures and not crashed,
+            'failure_count': failures,
+            'failures': [{'inputs': '1', 'original': '41', 'ours': '42'}]
+            * min(failures, 1),
+            'crashed': crashed,
+            'crash': {'inputs': 'x', 'exception': '0xC0000005',
+                      'address': '0x00000010'} if crashed else None}
+
+
+class OracleReportTest(unittest.TestCase):
+    """tools/oracle.py run: merging the runner's per-file reports."""
+
+    SELFTEST = [oracle_case('selftest/isolation'),
+                oracle_case('selftest/crash', 'crash', crashed=True),
+                oracle_case('selftest/must_fail', 'fail', failures=100)]
+
+    def merge(self, *runs):
+        return oracle.merge_reports(1, 100, list(runs))
+
+    def test_case_ok(self):
+        self.assertTrue(oracle.case_ok(oracle_case('a')))
+        self.assertFalse(oracle.case_ok(oracle_case('a', failures=1)))
+        self.assertFalse(oracle.case_ok(oracle_case('a', crashed=True)))
+        self.assertTrue(oracle.case_ok(oracle_case('a', 'fail', failures=1)))
+        self.assertFalse(oracle.case_ok(oracle_case('a', 'fail')))
+        self.assertFalse(oracle.case_ok(oracle_case('a', 'fail', failures=1,
+                                                    crashed=True)))
+        self.assertTrue(oracle.case_ok(oracle_case('a', 'crash',
+                                                   crashed=True)))
+        self.assertFalse(oracle.case_ok(oracle_case('a', 'crash')))
+
+    def test_selftest_passes_with_expected_lists(self):
+        merged = self.merge(('selftest', 0, {'cases': self.SELFTEST}))
+        self.assertTrue(merged['passed'])
+        self.assertEqual(merged['expected_failures'], ['selftest/must_fail'])
+        self.assertEqual(merged['expected_crashes'], ['selftest/crash'])
+        self.assertEqual(merged['unexpected'], [])
+        self.assertEqual([c['file'] for c in merged['cases']],
+                         ['selftest'] * 3)
+        self.assertIn('run PASSED', oracle.summary_lines(merged)[-1])
+
+    def test_must_fail_passing_fails_the_run(self):
+        cases = self.SELFTEST[:2] + [oracle_case('selftest/must_fail',
+                                                 'fail')]
+        merged = self.merge(('selftest', 7, {'cases': cases}))
+        self.assertFalse(merged['passed'])
+        self.assertEqual(merged['unexpected'], ['selftest/must_fail'])
+        self.assertEqual(merged['expected_failures'], [])
+        lines = oracle.summary_lines(merged)
+        self.assertIn('PASSED (expected fail)', '\n'.join(lines))
+        self.assertIn('run FAILED', lines[-1])
+
+    def test_unexpected_failure_or_crash_fails_the_run(self):
+        for case in (oracle_case('rand/x', failures=3),
+                     oracle_case('rand/x', crashed=True)):
+            merged = self.merge(('rand', 7, {'cases': [case]}))
+            self.assertFalse(merged['passed'])
+            self.assertEqual(merged['unexpected'], ['rand/x'])
+
+    def test_missing_report_or_timeout_fails_the_run(self):
+        merged = self.merge(('selftest', 0, {'cases': self.SELFTEST}),
+                            ('rand', 3221225477, None), ('ui', None, None))
+        self.assertFalse(merged['passed'])
+        self.assertEqual(merged['unexpected'], ['rand', 'ui'])
+        self.assertEqual([f['ok'] for f in merged['files']],
+                         [True, False, False])
+        self.assertEqual(merged['files'][2]['error'], 'timed out')
+
+    def test_exit_code_must_agree(self):
+        merged = self.merge(('selftest', 7, {'cases': self.SELFTEST}))
+        self.assertFalse(merged['passed'])
+        self.assertIn('exit code 7', merged['files'][0]['error'])
 
 
 class PlayBuildWindowsDefaultsTest(unittest.TestCase):
