@@ -21,6 +21,16 @@ namespace testing {
 
     GpuFault CurrentGpuFault() { return Fault(); }
 
+    namespace {
+        bool& SkipRcasFlag()
+        {
+            static bool skip = false;
+            return skip;
+        }
+    }
+
+    void SetSkipRcas(bool skip) { SkipRcasFlag() = skip; }
+
     GpuFault TakeAcquireFault()
     {
         const GpuFault f = Fault();
@@ -531,7 +541,9 @@ namespace {
         void Issue(const Draw& d)
         {
             const FilterInfo info = Describe(d.filter);
-            const int index = info.pipeline;
+            // The test hook copies EASU's output with the nearest shader.
+            const bool easuOnly = info.easu && testing::SkipRcasFlag();
+            const int index = easuOnly ? kNearest : info.pipeline;
             SDL_GPUTexture* texture = info.easu ? easu_ : frame_;
             SDL_GPUSampler* sampler = samplers_[info.linear ? 1 : 0];
             SDL_BindGPUGraphicsPipeline(pass_, pipelines_[index]);
@@ -541,7 +553,15 @@ namespace {
             binding.texture = texture;
             binding.sampler = sampler;
             SDL_BindGPUFragmentSamplers(pass_, 0, &binding, 1);
-            if (info.easu) {
+            if (easuOnly) {
+                const SDL_Rect& c = d.covered;
+                const RegionUniforms copy = {
+                    { static_cast<float>(c.x), static_cast<float>(c.y), static_cast<float>(c.x + c.w), static_cast<float>(c.y + c.h) },
+                    { static_cast<float>(c.x), static_cast<float>(c.y), 1.0f, 1.0f },
+                    { 0.0f, 0.0f, 0.0f, 0.0f },
+                };
+                SDL_PushGPUFragmentUniformData(cmd_, 0, &copy, sizeof(copy));
+            } else if (info.easu) {
                 const SDL_Rect& c = d.covered;
                 const RcasUniforms r = {
                     { static_cast<float>(c.x), static_cast<float>(c.y), static_cast<float>(c.x + c.w), static_cast<float>(c.y + c.h) },

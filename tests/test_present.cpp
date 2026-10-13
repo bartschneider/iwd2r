@@ -32,6 +32,7 @@ struct OffscreenVideo {
         present::SetPresentTarget(nullptr);
         present::testing::UseOffscreen(0, 0);
         present::testing::SetGpuFault(GpuFault::None);
+        present::testing::SetSkipRcas(false);
         present::SetBackend(BackendKind::Classic);
         present::SetRegions({});
         present::SetFilter(Filter::Nearest);
@@ -382,12 +383,29 @@ TEST_CASE("fsr_and_nis_pipelines_build", "[present]")
         MakeRegion({ 0, 0, 160, 240 }, 0, 0, 320, 480, 2),
         MakeRegion({ 160, 0, 320, 240 }, 322, 0, 318, 480, 2),
     };
+    // The right half's content changes; the left region's pixels do not,
+    // since its taps are clamped to its own frame rectangle.
+    std::vector<uint32_t> changed = px;
+    for (int y = 0; y < 240; y++)
+        for (int x = 160; x < 320; x++)
+            changed[static_cast<size_t>(y) * 320 + static_cast<size_t>(x)] ^= 0xFFFFFFu;
     for (Filter f : filters) {
         const std::vector<uint32_t> out = Draw(*b, px, 320, 240, split, f, &w, &h);
         CHECK(out[static_cast<size_t>(100) * 640 + 320] == 0);
         CHECK(out[static_cast<size_t>(100) * 640 + 321] == 0);
         CHECK(out[static_cast<size_t>(100) * 640 + 100] != 0);
         CHECK(out[static_cast<size_t>(100) * 640 + 400] != 0);
+        const std::vector<uint32_t> other = Draw(*b, changed, 320, 240, split, f, &w, &h);
+        size_t leftDiffs = 0;
+        size_t rightDiffs = 0;
+        for (int y = 0; y < 480; y++) {
+            for (int x = 0; x < 640; x++) {
+                const size_t i = static_cast<size_t>(y) * 640 + static_cast<size_t>(x);
+                (x < 320 ? leftDiffs : rightDiffs) += out[i] != other[i] ? 1 : 0;
+            }
+        }
+        CHECK(leftDiffs == 0);
+        CHECK(rightDiffs > 0);
     }
 
     // The three plain filters are unchanged by the FSR pass in the same
@@ -428,6 +446,29 @@ TEST_CASE("sharpness_changes_output", "[present]")
     CHECK(present::CurrentSharpness() == 0.0f);
     present::SetSharpness(0.5f);
     CHECK(present::CurrentSharpness() == 0.5f);
+}
+
+TEST_CASE("rcas_at_sharpness_0_keeps_easu_output", "[present]")
+{
+    OffscreenVideo video;
+    REQUIRE(video.ok);
+    std::string why;
+    auto b = OffscreenGpu(640, 480, why);
+    if (!b)
+        SKIP("no SDL GPU device: " << why);
+    const std::vector<uint32_t> px = Picture(320, 240);
+    const std::vector<platform::compose::Region> whole = { present::WholeFrameRegion(320, 240) };
+    int w = 0;
+    int h = 0;
+    present::testing::SetSkipRcas(true);
+    const std::vector<uint32_t> easu = Draw(*b, px, 320, 240, whole, Filter::Fsr, &w, &h);
+    present::testing::SetSkipRcas(false);
+    b->sharpness = 0.0f;
+    const std::vector<uint32_t> rcas0 = Draw(*b, px, 320, 240, whole, Filter::Fsr, &w, &h);
+    CHECK(Mismatches(easu, rcas0) == 0);
+    b->sharpness = 1.0f;
+    CHECK(Mismatches(easu, Draw(*b, px, 320, 240, whole, Filter::Fsr, &w, &h)) > 0);
+    b->Shutdown();
 }
 
 TEST_CASE("rcas_sharpens_beside_saturated_channels", "[present]")

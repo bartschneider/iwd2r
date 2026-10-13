@@ -90,6 +90,9 @@ namespace testing {
     GpuFault TakeAcquireFault(); // the gpu backend: consumes AcquireOnce
     GpuFault CurrentGpuFault();
 
+    // The gpu backend's FSR filter shows EASU's output without RCAS.
+    void SetSkipRcas(bool skip);
+
     // Runs the front's backend without a window, presenting into an
     // offscreen target of w x h (0 x 0 stops it). The backend is chosen as
     // SetBackend would choose it with a window.
