@@ -6529,6 +6529,9 @@ void CGameSprite::Marshal(BYTE** pCreature, LONG* creatureSize, WORD* facing, BO
 
     if (a4) {
         m_pLocalVariables->MarshalToCharacter(this);
+    } else {
+        // The magic weapon slot is not saved (0x70B539).
+        equipment.m_miscItem[27] = 0xFFFF;
     }
 
     nEffects = m_timedEffectList.Marshal(&pEffects, 1, a4 == FALSE);
@@ -10794,7 +10797,10 @@ BOOL CGameSprite::ProcessEffectList()
                 // the color ranges (m_hasColorRangeEffects), the color
                 // effects (m_hasColorEffects), the animation change with
                 // its search bitmap update and sequence reset (field_5640),
-                // and their messages.
+                // and their messages. The sequence reset calls SetSequence
+                // (0x707230) twice, which can draw rand (0x7077AE), so a
+                // creature whose animation changes here leaves our rand
+                // state behind the original's.
 
                 m_hasColorRangeEffects = FALSE;
                 m_hasColorEffects = FALSE;
