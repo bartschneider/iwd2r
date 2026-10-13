@@ -694,8 +694,11 @@ BOOL CDimm::DirectoryRemoveFiles(const CString& sDirectoryName)
     return bResult;
 }
 
+// NOTE: `sSaveDir` is not read: the archive is always ICEWIND2.SAV
+// (SaveGame passes its temp save folder as both).
+//
 // 0x784A50
-BOOL CDimm::CompressDirectory(const CString& sTempDir)
+BOOL CDimm::CompressDirectory(const CString& sTempDir, const CString& sSaveDir)
 {
     CString sResolvedTempDir;
     CString sMainSaveFileName;

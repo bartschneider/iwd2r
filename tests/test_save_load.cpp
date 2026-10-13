@@ -261,7 +261,7 @@ TEST_CASE("CompressDirectory packs a directory that UncompressDirectory restores
     WriteAll(source.path() / "EMPTY.ARE", {});
     WriteAll(source.path() / "ICEWIND2.GAM", game);
 
-    REQUIRE(g_pChitin->cDimm.CompressDirectory(source.Dir()));
+    REQUIRE(g_pChitin->cDimm.CompressDirectory(source.Dir(), source.Dir()));
 
     // The packed files are gone; the game file stays and is not packed.
     CHECK(std::filesystem::exists(source.path() / "ICEWIND2.SAV"));
