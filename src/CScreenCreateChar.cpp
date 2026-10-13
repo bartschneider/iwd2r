@@ -2888,7 +2888,7 @@ void CScreenCreateChar::UpdateFeatsPanel(CUIPanel* pPanel, CGameSprite* pSprite)
         m_nExtraFeats);
 
     pSprite->field_562C = 1;
-    pSprite->sub_72DE60();
+    pSprite->ProcessEffectList();
 
     m_nTopFeat = min(m_nTopFeat, FEAT_COUNT - FEAT_SLOTS);
 
@@ -10817,13 +10817,17 @@ BOOL CUIControlButtonCharGenFeatsCircle::Render(BOOL bForce)
         // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenCreateChar.cpp
         // __LINE__: 17848
         UTIL_ASSERT(bResult);
-    }
 
-    pCreateChar->UpdatePopupPanel(pCreateChar->GetTopPopup()->m_nID, pSprite);
+        g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(nGameSprite,
+            CGameObjectArray::THREAD_1,
+            INFINITE);
+
+        return TRUE;
+    }
 
     g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(nGameSprite,
         CGameObjectArray::THREAD_1,
         INFINITE);
 
-    return TRUE;
+    return FALSE;
 }
