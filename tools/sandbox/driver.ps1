@@ -162,6 +162,68 @@ Add-Type -TypeDefinition $source -Language CSharp
 Add-Type -AssemblyName System.Drawing
 Add-Type -AssemblyName System.Windows.Forms
 
+# Mutes the sandbox's default playback device through Core Audio. This mutes
+# every sound in the sandbox, unlike a mute key press, which only toggles
+# and cannot be checked.
+Add-Type -Language CSharp -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+
+[Guid("5CDF2C82-841E-4546-9722-0CF74078229A"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown), ComImport]
+interface IAudioEndpointVolume {
+    int RegisterControlChangeNotify(IntPtr notify);
+    int UnregisterControlChangeNotify(IntPtr notify);
+    int GetChannelCount(out uint count);
+    int SetMasterVolumeLevel(float level, ref Guid context);
+    int SetMasterVolumeLevelScalar(float level, ref Guid context);
+    int GetMasterVolumeLevel(out float level);
+    int GetMasterVolumeLevelScalar(out float level);
+    int SetChannelVolumeLevel(uint channel, float level, ref Guid context);
+    int SetChannelVolumeLevelScalar(uint channel, float level, ref Guid context);
+    int GetChannelVolumeLevel(uint channel, out float level);
+    int GetChannelVolumeLevelScalar(uint channel, out float level);
+    int SetMute([MarshalAs(UnmanagedType.Bool)] bool mute, ref Guid context);
+    int GetMute([MarshalAs(UnmanagedType.Bool)] out bool mute);
+}
+
+[Guid("D666063F-1587-4E43-81F1-B948E807363F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown), ComImport]
+interface IMMDevice {
+    int Activate(ref Guid iid, int context, IntPtr parameters, [MarshalAs(UnmanagedType.IUnknown)] out object result);
+}
+
+[Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown), ComImport]
+interface IMMDeviceEnumerator {
+    int EnumAudioEndpoints(int flow, int mask, out IntPtr devices);
+    int GetDefaultAudioEndpoint(int flow, int role, out IMMDevice device);
+}
+
+[ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")]
+class MMDeviceEnumerator { }
+
+public static class IwdAudio {
+    // Returns "muted", or why the device could not be muted.
+    public static string MuteDefaultOutput() {
+        var enumerator = (IMMDeviceEnumerator)new MMDeviceEnumerator();
+        IMMDevice device;
+        // eRender = 0, eConsole = 0
+        int hr = enumerator.GetDefaultAudioEndpoint(0, 0, out device);
+        if (hr != 0) return string.Format("no playback device (0x{0:X8})", hr);
+        Guid iid = typeof(IAudioEndpointVolume).GUID;
+        object result;
+        hr = device.Activate(ref iid, 23 /* CLSCTX_ALL */, IntPtr.Zero, out result);
+        if (hr != 0) return string.Format("no volume control (0x{0:X8})", hr);
+        var volume = (IAudioEndpointVolume)result;
+        Guid context = Guid.Empty;
+        hr = volume.SetMute(true, ref context);
+        if (hr != 0) return string.Format("SetMute failed (0x{0:X8})", hr);
+        bool muted;
+        hr = volume.GetMute(out muted);
+        if (hr != 0) return string.Format("GetMute failed (0x{0:X8})", hr);
+        return muted ? "muted" : "still unmuted";
+    }
+}
+'@
+
 $script:game = $null
 $script:window = [IntPtr]::Zero
 $script:baseline = @()
@@ -390,18 +452,17 @@ try {
     if ($DryRun) {
         Log "would run $($cfg.exe) with IWD2_DATA=$($cfg.data) IWD2R_INI_OVERRIDE=$($cfg.ini_override)"
     } else {
+        # The sandbox's sound reaches the host's speakers. Mute its whole
+        # output before anything else runs.
+        $muteState = 'failed'
+        try { $muteState = [IwdAudio]::MuteDefaultOutput() } catch { $muteState = "failed: $_" }
+        Log "sandbox audio: $muteState"
         New-Item -ItemType Directory -Force -Path $cfg.control | Out-Null
         $env:IWD2_DATA = $cfg.data
         $env:IWD2R_INI_OVERRIDE = $cfg.ini_override
         $env:IWD2R_SHOT_DIR = $cfg.results
         $env:IWD2R_CONTROL_DIR = $cfg.control
         Remove-Item Env:IWD2R_SCRIPT -ErrorAction SilentlyContinue
-        # The sandbox's sound reaches the host's speakers, and every sandbox
-        # boots unmuted, so one press of the volume-mute key silences it. The
-        # game still gets a normal audio device.
-        [IwdInput]::Key(0xAD, $true, $true)
-        [IwdInput]::Key(0xAD, $false, $true)
-        Log 'muted the sandbox'
         $script:game = Start-Process -FilePath $cfg.exe -WorkingDirectory $cfg.data -PassThru -NoNewWindow `
             -RedirectStandardOutput (Join-Path $cfg.results 'log.txt') `
             -RedirectStandardError (Join-Path $cfg.results 'stderr.txt')
