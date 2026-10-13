@@ -25,6 +25,7 @@
 #include "CStore.h"
 #include "CUIPanel.h"
 #include "CUtil.h"
+#include "compat/marshal_ptr.h"
 
 // NOTE: Might be static in `CMessage`.
 //
@@ -2145,13 +2146,21 @@ BOOLEAN CBaldurMessage::DemandCharacterSlotReply(CString& sSendTo, SHORT nCharac
     cnt += sizeof(BOOLEAN);
 
     if (bSendCharInfo == TRUE) {
-        BYTE* pCreature = reinterpret_cast<BYTE*>(partyCreature.m_creatureOffset);
+        // NOTE: CGameSprite::Marshal stores a 32-bit handle
+        // (compat/marshal_ptr.h) where the original stores the pointer. A
+        // handle the table does not know gives NULL, and the block is then
+        // sent as zeros, as the other consumers leave it.
+        BYTE* pCreature = static_cast<BYTE*>(iwd2r::UnmarshalPtr(partyCreature.m_creatureOffset));
         partyCreature.m_creatureOffset = dwCreatureDataLoc;
 
         memcpy(pMessage + cnt, &partyCreature, sizeof(CSavedGamePartyCreature));
         cnt += sizeof(CSavedGamePartyCreature);
 
-        memcpy(pMessage + cnt, pCreature, partyCreature.m_creatureSize);
+        if (pCreature != NULL) {
+            memcpy(pMessage + cnt, pCreature, partyCreature.m_creatureSize);
+        } else {
+            memset(pMessage + cnt, 0, partyCreature.m_creatureSize);
+        }
         cnt += partyCreature.m_creatureSize;
 
         delete pCreature;

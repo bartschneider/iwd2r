@@ -5228,7 +5228,7 @@ BOOL CScreenCreateChar::IsNameOnExportList(CString sName)
     while (pos != NULL) {
         // FIXME: Unnecessary copy.
         sCharacter = m_pCharacters->GetNext(pos);
-        if (sCharacter == sName) {
+        if (sCharacter.CompareNoCase(sName) == 0) {
             return TRUE;
         }
     }

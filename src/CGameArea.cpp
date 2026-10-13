@@ -25,6 +25,7 @@
 #include "CSpawn.h"
 #include "CTiledObject.h"
 #include "CUtil.h"
+#include "compat/marshal_ptr.h"
 #include "CVidPoly.h"
 
 // 0x8D212C
@@ -1770,6 +1771,728 @@ COLORREF CGameArea::GetTintColor(const CPoint& cPoint, BYTE listType)
     return rgbColor;
 }
 
+// 0x471630
+void CGameArea::Marshal(BYTE** pArea, DWORD* nArea, BOOLEAN bProgressBarInPlace)
+{
+    CTypedPtrList<CPtrList, CAreaFileStaticObject*> lStatics;
+    CTypedPtrList<CPtrList, CAreaFileSoundObject*> lSounds;
+    CTypedPtrList<CPtrList, CAreaFileRandomMonsterSpawningPoint*> lSpawnings;
+    CTypedPtrList<CPtrList, CAreaFileContainer*> lContainers;
+    CTypedPtrList<CPtrList, CAreaFileTriggerObject*> lTriggers;
+    CTypedPtrList<CPtrList, CAreaFileDoorObject*> lDoors;
+    CTypedPtrList<CPtrList, CAreaFileCreature*> lCreatures;
+    CAreaFileStaticObject* pStaticObject;
+    CAreaFileSoundObject* pSoundObject;
+    CAreaFileRandomMonsterSpawningPoint* pSpawningObject;
+    CAreaFileContainer* pContainerObject;
+    CAreaFileTriggerObject* pTriggerObject;
+    CAreaFileDoorObject* pDoorObject;
+    CAreaFileCreature* pCreature;
+    CGameObject* pObject;
+    POSITION pos;
+    LONG nObjectId;
+    DWORD nObjects;
+    DWORD dwProgressUnit = 0;
+    DWORD nCreatureData;
+    WORD nPoints;
+    DWORD nItems;
+    BYTE* pVisibility;
+    DWORD nVisibility;
+    CVariable* pVariables;
+    WORD nVariables;
+    DWORD cnt;
+    DWORD nIndex;
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameArea.cpp
+    // __LINE__: 4239
+    UTIL_ASSERT(pArea != NULL && nArea != NULL);
+
+    nPoints = 0;
+    nItems = 0;
+    nCreatureData = 0;
+
+    field_AAA.RemoveAll();
+
+    if (g_pBaldurChitin->GetObjectGame()->m_pGameAreaMaster == this) {
+        // TODO: Incomplete. The original calls 0x5170F0 on the game's
+        // `m_cMoveList` and `m_cLimboList` with this area (it re-applies an
+        // effect to each listed sprite); CMoveList does not have it yet.
+    }
+
+    if (bProgressBarInPlace == TRUE) {
+        dwProgressUnit = CInfGame::PROGRESSBAR_AREA_ADDITIONAL / 25;
+        ProgressBarCallback(0, TRUE);
+    }
+
+    *pArea = NULL;
+    *nArea = 0;
+
+    if (g_pChitin->cNetwork.GetSessionOpen() == TRUE
+        && !g_pChitin->cNetwork.GetSessionHosting()) {
+        ProgressBarCallback(CInfGame::PROGRESSBAR_AREA_ADDITIONAL, FALSE);
+        return;
+    }
+
+    // FLIGHT LIST (sounds, spawning points, creatures)
+    nObjects = m_lVertSortFlight.GetCount();
+    pos = m_lVertSortFlight.GetTailPosition();
+    while (pos != NULL) {
+        nObjectId = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSortFlight.GetPrev(pos)));
+        if (m_pGame->GetObjectArray()->GetShare(nObjectId,
+                CGameObjectArray::THREAD_ASYNCH,
+                &pObject,
+                INFINITE)
+            == CGameObjectArray::SUCCESS) {
+            switch (pObject->GetObjectType()) {
+            case 0x00: // CGameObject::TYPE_NONE
+            case 0x50: // CGameObject::TYPE_TEXT
+                break;
+            case 0x01: // CGameObject::TYPE_AIBASE
+            case 0x11: // CGameObject::TYPE_CONTAINER
+            case 0x21: // CGameObject::TYPE_DOOR
+            case 0x30: // CGameObject::TYPE_STATIC
+            case 0x40: // CGameObject::TYPE_OBJECT_MARKER
+            case 0x41: // CGameObject::TYPE_TRIGGER
+                // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameArea.cpp
+                // __LINE__: 4317
+                UTIL_ASSERT(FALSE);
+                break;
+            case 0x10: // CGameObject::TYPE_SOUND
+                static_cast<CGameSound*>(pObject)->Marshal(&pSoundObject);
+                lSounds.AddTail(pSoundObject);
+                break;
+            case 0x20: // CGameObject::TYPE_SPAWNING
+                static_cast<CGameSpawning*>(pObject)->Marshal(&pSpawningObject);
+                lSpawnings.AddTail(pSpawningObject);
+                break;
+            case 0x31: // CGameObject::TYPE_SPRITE
+                static_cast<CGameSprite*>(pObject)->Marshal(&pCreature);
+                lCreatures.AddTail(pCreature);
+                nCreatureData += pCreature->m_creatureSize;
+                break;
+            default:
+                // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameArea.cpp
+                // __LINE__: 4337
+                UTIL_ASSERT(FALSE);
+                break;
+            }
+
+            m_pGame->GetObjectArray()->ReleaseShare(nObjectId,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+
+            if (bProgressBarInPlace == TRUE && nObjects != 0) {
+                ProgressBarCallback(4 * dwProgressUnit / nObjects, FALSE);
+            }
+        }
+    }
+
+    if (bProgressBarInPlace == TRUE && nObjects == 0) {
+        ProgressBarCallback(4 * dwProgressUnit, FALSE);
+    }
+
+    // FRONT LIST (doors, statics, creatures, triggers)
+    nObjects = m_lVertSort.GetCount();
+    pos = m_lVertSort.GetTailPosition();
+    while (pos != NULL) {
+        nObjectId = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSort.GetPrev(pos)));
+        if (m_pGame->GetObjectArray()->GetShare(nObjectId,
+                CGameObjectArray::THREAD_ASYNCH,
+                &pObject,
+                INFINITE)
+            == CGameObjectArray::SUCCESS) {
+            switch (pObject->GetObjectType()) {
+            case 0x00: // CGameObject::TYPE_NONE
+            case 0x01: // CGameObject::TYPE_AIBASE
+            case 0x50: // CGameObject::TYPE_TEXT
+                break;
+            case 0x10: // CGameObject::TYPE_SOUND
+            case 0x11: // CGameObject::TYPE_CONTAINER
+            case 0x20: // CGameObject::TYPE_SPAWNING
+            case 0x40: // CGameObject::TYPE_OBJECT_MARKER
+                // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameArea.cpp
+                // __LINE__: 4372
+                UTIL_ASSERT(FALSE);
+                break;
+            case 0x21: // CGameObject::TYPE_DOOR
+                static_cast<CGameDoor*>(pObject)->Marshal(&pDoorObject);
+                lDoors.AddTail(pDoorObject);
+                nPoints += pDoorObject->m_closedSearchSquaresCount
+                    + pDoorObject->m_openSearchSquaresCount
+                    + pDoorObject->m_closedSelectionPointCount
+                    + pDoorObject->m_openSelectionPointCount;
+                break;
+            case 0x30: // CGameObject::TYPE_STATIC
+                static_cast<CGameStatic*>(pObject)->Marshal(&pStaticObject);
+                lStatics.AddTail(pStaticObject);
+                break;
+            case 0x31: // CGameObject::TYPE_SPRITE
+                if (!static_cast<CGameSprite*>(pObject)->m_bGlobal) {
+                    static_cast<CGameSprite*>(pObject)->Marshal(&pCreature);
+                    lCreatures.AddTail(pCreature);
+                    nCreatureData += pCreature->m_creatureSize;
+                }
+                break;
+            case 0x41: // CGameObject::TYPE_TRIGGER
+                // TODO: Incomplete. The original marshals the trigger here
+                // (0x4CFF70, CGameTrigger, not in our tree yet), adds it to
+                // `lTriggers` and counts its pick points.
+                break;
+            default:
+                // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameArea.cpp
+                // __LINE__: 4405
+                UTIL_ASSERT(FALSE);
+                break;
+            }
+
+            m_pGame->GetObjectArray()->ReleaseShare(nObjectId,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+
+            if (bProgressBarInPlace == TRUE && nObjects != 0) {
+                ProgressBarCallback(4 * dwProgressUnit / nObjects, FALSE);
+            }
+        }
+    }
+
+    if (bProgressBarInPlace == TRUE && nObjects == 0) {
+        ProgressBarCallback(4 * dwProgressUnit, FALSE);
+    }
+
+    nObjects = field_AAA.GetCount();
+    pos = field_AAA.GetTailPosition();
+    while (pos != NULL) {
+        nObjectId = static_cast<LONG>(reinterpret_cast<INT_PTR>(field_AAA.GetPrev(pos)));
+        if (m_pGame->GetObjectArray()->GetDeny(nObjectId,
+                CGameObjectArray::THREAD_ASYNCH,
+                &pObject,
+                INFINITE)
+            == CGameObjectArray::SUCCESS) {
+            switch (pObject->GetObjectType()) {
+            case 0x00: // CGameObject::TYPE_NONE
+            case 0x01: // CGameObject::TYPE_AIBASE
+            case 0x50: // CGameObject::TYPE_TEXT
+                break;
+            case 0x10: // CGameObject::TYPE_SOUND
+            case 0x11: // CGameObject::TYPE_CONTAINER
+            case 0x20: // CGameObject::TYPE_SPAWNING
+            case 0x21: // CGameObject::TYPE_DOOR
+            case 0x30: // CGameObject::TYPE_STATIC
+            case 0x40: // CGameObject::TYPE_OBJECT_MARKER
+            case 0x41: // CGameObject::TYPE_TRIGGER
+                // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameArea.cpp
+                // __LINE__: 4444
+                UTIL_ASSERT(FALSE);
+                break;
+            case 0x31: // CGameObject::TYPE_SPRITE
+                if (!static_cast<CGameSprite*>(pObject)->m_bGlobal) {
+                    static_cast<CGameSprite*>(pObject)->Marshal(&pCreature);
+                    lCreatures.AddTail(pCreature);
+                    nCreatureData += pCreature->m_creatureSize;
+                }
+                break;
+            default:
+                // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameArea.cpp
+                // __LINE__: 4457
+                UTIL_ASSERT(FALSE);
+                break;
+            }
+
+            m_pGame->GetObjectArray()->ReleaseDeny(nObjectId,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+
+            if (bProgressBarInPlace == TRUE && nObjects != 0) {
+                ProgressBarCallback(4 * dwProgressUnit / nObjects, FALSE);
+            }
+        }
+    }
+
+    field_AAA.RemoveAll();
+
+    // BACK LIST (containers, sounds, spawning points, creatures, triggers)
+    nObjects = m_lVertSortBack.GetCount();
+    pos = m_lVertSortBack.GetTailPosition();
+    while (pos != NULL) {
+        nObjectId = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSortBack.GetPrev(pos)));
+        if (m_pGame->GetObjectArray()->GetShare(nObjectId,
+                CGameObjectArray::THREAD_ASYNCH,
+                &pObject,
+                INFINITE)
+            == CGameObjectArray::SUCCESS) {
+            switch (pObject->GetObjectType()) {
+            case 0x00: // CGameObject::TYPE_NONE
+            case 0x01: // CGameObject::TYPE_AIBASE
+            case 0x40: // CGameObject::TYPE_OBJECT_MARKER
+            case 0x50: // CGameObject::TYPE_TEXT
+                break;
+            case 0x21: // CGameObject::TYPE_DOOR
+            case 0x30: // CGameObject::TYPE_STATIC
+                // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameArea.cpp
+                // __LINE__: 4488
+                UTIL_ASSERT(FALSE);
+                break;
+            case 0x10: // CGameObject::TYPE_SOUND
+                static_cast<CGameSound*>(pObject)->Marshal(&pSoundObject);
+                lSounds.AddTail(pSoundObject);
+                break;
+            case 0x11: // CGameObject::TYPE_CONTAINER
+                static_cast<CGameContainer*>(pObject)->Marshal(&pContainerObject);
+                lContainers.AddTail(pContainerObject);
+                nPoints += pContainerObject->m_pickPointCount;
+                nItems += pContainerObject->m_itemCount;
+                break;
+            case 0x20: // CGameObject::TYPE_SPAWNING
+                static_cast<CGameSpawning*>(pObject)->Marshal(&pSpawningObject);
+                lSpawnings.AddTail(pSpawningObject);
+                break;
+            case 0x31: // CGameObject::TYPE_SPRITE
+                if (!static_cast<CGameSprite*>(pObject)->m_bGlobal) {
+                    static_cast<CGameSprite*>(pObject)->Marshal(&pCreature);
+                    lCreatures.AddTail(pCreature);
+                    nCreatureData += pCreature->m_creatureSize;
+                }
+                break;
+            case 0x41: // CGameObject::TYPE_TRIGGER
+                // TODO: Incomplete. The original marshals the trigger here
+                // (0x4CFF70, CGameTrigger, not in our tree yet), adds it to
+                // `lTriggers` and counts its pick points.
+                break;
+            default:
+                // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameArea.cpp
+                // __LINE__: 4524
+                UTIL_ASSERT(FALSE);
+                break;
+            }
+
+            m_pGame->GetObjectArray()->ReleaseShare(nObjectId,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+
+            if (bProgressBarInPlace == TRUE && nObjects != 0) {
+                ProgressBarCallback(4 * dwProgressUnit / nObjects, FALSE);
+            }
+        }
+    }
+
+    if (bProgressBarInPlace == TRUE && nObjects == 0) {
+        ProgressBarCallback(4 * dwProgressUnit, FALSE);
+    }
+
+    pVisibility = NULL;
+    nVisibility = 0;
+    m_visibility.Marshal(&pVisibility, &nVisibility);
+
+    pVariables = NULL;
+    nVariables = 0;
+    m_variables.Marshal(&pVariables, &nVariables);
+
+    *nArea += nCreatureData
+        + nVisibility
+        + sizeof(CCreatureFileItem) * nItems
+        + sizeof(CAreaFileDoorObject) * lDoors.GetCount()
+        + sizeof(CAreaFileRandomMonsterSpawningPoint) * lSpawnings.GetCount()
+        + sizeof(CVariable) * nVariables
+        + sizeof(CAreaFileCreature) * lCreatures.GetCount()
+        + sizeof(CAreaFileTriggerObject) * lTriggers.GetCount()
+        + sizeof(CAreaFileContainer) * lContainers.GetCount()
+        + sizeof(CAreaFileSoundObject) * lSounds.GetCount()
+        + sizeof(CAreaFileStaticObject) * lStatics.GetCount()
+        + sizeof(CAreaPoint) * nPoints;
+    *nArea += 8 + sizeof(CAreaFileHeader) + sizeof(CAreaFileOffsets) + sizeof(CAreaSoundsAndMusic) + sizeof(CAreaFileRestEncounter)
+        + sizeof(CAreaFileCharacterEntryPoint) * m_entryPoints.GetCount();
+    *nArea += sizeof(CAreaUserNote) * m_cGameAreaNotes.m_areaNoteList.GetCount();
+
+    *pArea = new BYTE[*nArea];
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameArea.cpp
+    // __LINE__: 4562
+    UTIL_ASSERT(*pArea != NULL);
+
+    memset(*pArea, 0, *nArea);
+
+    cnt = 0;
+    memcpy(*pArea, "AREAV9.1", 8);
+    cnt += 8;
+
+    m_header.m_lastSaved = m_pGame->GetWorldTimer()->m_gameTime / CTimerWorld::TIMESCALE_MSEC_PER_SEC;
+    memcpy(*pArea + cnt, &m_header, sizeof(CAreaFileHeader));
+    cnt += sizeof(CAreaFileHeader);
+
+    CAreaFileOffsets* pOffsets = reinterpret_cast<CAreaFileOffsets*>(*pArea + cnt);
+    cnt += sizeof(CAreaFileOffsets);
+
+    memcpy(*pArea + cnt, &m_headerSound, sizeof(CAreaSoundsAndMusic));
+    pOffsets->m_areaSoundsAndMusicOffset = cnt;
+    cnt += sizeof(CAreaSoundsAndMusic);
+
+    memcpy(*pArea + cnt, &m_headerRestEncounter, sizeof(CAreaFileRestEncounter));
+    pOffsets->m_restingEncounterOffset = cnt;
+    cnt += sizeof(CAreaFileRestEncounter);
+
+    if (bProgressBarInPlace == TRUE) {
+        ProgressBarCallback(dwProgressUnit, FALSE);
+    }
+
+    // VISIBILITY
+    if (nVisibility > 0) {
+        memcpy(*pArea + cnt, pVisibility, nVisibility);
+        pOffsets->m_visibilityMapOffset = cnt;
+        pOffsets->m_visibilityMapCount = nVisibility;
+        cnt += nVisibility;
+        delete[] pVisibility;
+    }
+
+    if (bProgressBarInPlace == TRUE) {
+        ProgressBarCallback(dwProgressUnit, FALSE);
+    }
+
+    // STATICS
+    if (lStatics.GetCount() > 0) {
+        pOffsets->m_staticObjectListOffset = cnt;
+        pOffsets->m_staticObjectListCount = lStatics.GetCount();
+
+        pos = lStatics.GetHeadPosition();
+        while (pos != NULL) {
+            pStaticObject = lStatics.GetNext(pos);
+            memcpy(*pArea + cnt, pStaticObject, sizeof(CAreaFileStaticObject));
+            cnt += sizeof(CAreaFileStaticObject);
+            delete pStaticObject;
+        }
+
+        lStatics.RemoveAll();
+    }
+
+    if (bProgressBarInPlace == TRUE) {
+        ProgressBarCallback(dwProgressUnit, FALSE);
+    }
+
+    // SOUNDS
+    if (lSounds.GetCount() > 0) {
+        pOffsets->m_soundObjectOffset = cnt;
+        pOffsets->m_soundObjectCount = static_cast<WORD>(lSounds.GetCount());
+
+        pos = lSounds.GetHeadPosition();
+        while (pos != NULL) {
+            pSoundObject = lSounds.GetNext(pos);
+            memcpy(*pArea + cnt, pSoundObject, sizeof(CAreaFileSoundObject));
+            cnt += sizeof(CAreaFileSoundObject);
+            delete pSoundObject;
+        }
+
+        lSounds.RemoveAll();
+    }
+
+    if (bProgressBarInPlace == TRUE) {
+        ProgressBarCallback(dwProgressUnit, FALSE);
+    }
+
+    // SPAWNING POINTS
+    if (lSpawnings.GetCount() > 0) {
+        pOffsets->m_randomMonsterSpawningPointTableOffset = cnt;
+        pOffsets->m_randomMonsterSpawningPointTableCount = lSpawnings.GetCount();
+
+        pos = lSpawnings.GetHeadPosition();
+        while (pos != NULL) {
+            pSpawningObject = lSpawnings.GetNext(pos);
+            memcpy(*pArea + cnt, pSpawningObject, sizeof(CAreaFileRandomMonsterSpawningPoint));
+            cnt += sizeof(CAreaFileRandomMonsterSpawningPoint);
+            delete pSpawningObject;
+        }
+
+        lSpawnings.RemoveAll();
+    }
+
+    if (bProgressBarInPlace == TRUE) {
+        ProgressBarCallback(dwProgressUnit, FALSE);
+    }
+
+    // CREATURES
+    if (lCreatures.GetCount() > 0) {
+        pos = lCreatures.GetHeadPosition();
+        while (pos != NULL) {
+            pCreature = lCreatures.GetNext(pos);
+
+            // NOTE: The marshal stores a 32-bit handle (compat/marshal_ptr.h)
+            // where the original stores the pointer. A handle the table does
+            // not know gives NULL, and the bytes then stay zero.
+            BYTE* pCreatureData = static_cast<BYTE*>(iwd2r::UnmarshalPtr(pCreature->m_creatureOffset));
+            if (pCreatureData != NULL) {
+                memcpy(*pArea + cnt, pCreatureData, pCreature->m_creatureSize);
+            }
+            delete[] pCreatureData;
+
+            pCreature->m_creatureOffset = cnt;
+            cnt += pCreature->m_creatureSize;
+        }
+
+        pOffsets->m_creatureTableOffset = cnt;
+        pOffsets->m_creatureTableCount = static_cast<WORD>(lCreatures.GetCount());
+
+        pos = lCreatures.GetHeadPosition();
+        while (pos != NULL) {
+            pCreature = lCreatures.GetNext(pos);
+            memcpy(*pArea + cnt, pCreature, sizeof(CAreaFileCreature));
+            cnt += sizeof(CAreaFileCreature);
+            delete pCreature;
+        }
+
+        lCreatures.RemoveAll();
+    }
+
+    if (bProgressBarInPlace == TRUE) {
+        ProgressBarCallback(dwProgressUnit, FALSE);
+    }
+
+    // POINTS
+    if (nPoints > 0) {
+        pOffsets->m_pointsOffset = cnt;
+        pOffsets->m_pointsCount = nPoints;
+
+        nIndex = 0;
+
+        pos = lContainers.GetHeadPosition();
+        while (pos != NULL) {
+            pContainerObject = lContainers.GetNext(pos);
+            if (pContainerObject->m_pickPointCount > 0) {
+                // NOTE: The marshal stores a 32-bit handle (compat/marshal_ptr.h)
+                // where the original stores the pointer. A handle the table does
+                // not know gives NULL, and the bytes then stay zero.
+                CAreaPoint* pPoints = static_cast<CAreaPoint*>(iwd2r::UnmarshalPtr(pContainerObject->m_pickPointStart));
+                if (pPoints != NULL) {
+                    memcpy(*pArea + cnt, pPoints, sizeof(CAreaPoint) * pContainerObject->m_pickPointCount);
+                }
+                delete[] pPoints;
+                pContainerObject->m_pickPointStart = nIndex;
+                cnt += sizeof(CAreaPoint) * pContainerObject->m_pickPointCount;
+                nIndex += pContainerObject->m_pickPointCount;
+            }
+        }
+
+        pos = lDoors.GetHeadPosition();
+        while (pos != NULL) {
+            pDoorObject = lDoors.GetNext(pos);
+
+            // NOTE: The marshal stores a 32-bit handle (compat/marshal_ptr.h)
+            // where the original stores the pointer. A handle the table does
+            // not know gives NULL, and the bytes then stay zero.
+            if (pDoorObject->m_openSelectionPointCount > 0) {
+                CAreaPoint* pPoints = static_cast<CAreaPoint*>(iwd2r::UnmarshalPtr(pDoorObject->m_openSelectionPointStart));
+                if (pPoints != NULL) {
+                    memcpy(*pArea + cnt, pPoints, sizeof(CAreaPoint) * pDoorObject->m_openSelectionPointCount);
+                }
+                delete[] pPoints;
+                pDoorObject->m_openSelectionPointStart = nIndex;
+                cnt += sizeof(CAreaPoint) * pDoorObject->m_openSelectionPointCount;
+                nIndex += pDoorObject->m_openSelectionPointCount;
+            }
+
+            if (pDoorObject->m_closedSelectionPointCount > 0) {
+                CAreaPoint* pPoints = static_cast<CAreaPoint*>(iwd2r::UnmarshalPtr(pDoorObject->m_closedSelectionPointStart));
+                if (pPoints != NULL) {
+                    memcpy(*pArea + cnt, pPoints, sizeof(CAreaPoint) * pDoorObject->m_closedSelectionPointCount);
+                }
+                delete[] pPoints;
+                pDoorObject->m_closedSelectionPointStart = nIndex;
+                cnt += sizeof(CAreaPoint) * pDoorObject->m_closedSelectionPointCount;
+                nIndex += pDoorObject->m_closedSelectionPointCount;
+            }
+
+            if (pDoorObject->m_openSearchSquaresCount > 0) {
+                CAreaPoint* pPoints = static_cast<CAreaPoint*>(iwd2r::UnmarshalPtr(pDoorObject->m_openSearchSquaresStart));
+                if (pPoints != NULL) {
+                    memcpy(*pArea + cnt, pPoints, sizeof(CAreaPoint) * pDoorObject->m_openSearchSquaresCount);
+                }
+                delete[] pPoints;
+                pDoorObject->m_openSearchSquaresStart = nIndex;
+                cnt += sizeof(CAreaPoint) * pDoorObject->m_openSearchSquaresCount;
+                nIndex += pDoorObject->m_openSearchSquaresCount;
+            }
+
+            if (pDoorObject->m_closedSearchSquaresCount > 0) {
+                CAreaPoint* pPoints = static_cast<CAreaPoint*>(iwd2r::UnmarshalPtr(pDoorObject->m_closedSearchSquaresStart));
+                if (pPoints != NULL) {
+                    memcpy(*pArea + cnt, pPoints, sizeof(CAreaPoint) * pDoorObject->m_closedSearchSquaresCount);
+                }
+                delete[] pPoints;
+                pDoorObject->m_closedSearchSquaresStart = nIndex;
+                cnt += sizeof(CAreaPoint) * pDoorObject->m_closedSearchSquaresCount;
+                nIndex += pDoorObject->m_closedSearchSquaresCount;
+            }
+        }
+
+        pos = lTriggers.GetHeadPosition();
+        while (pos != NULL) {
+            pTriggerObject = lTriggers.GetNext(pos);
+            if (pTriggerObject->m_pickPointCount > 0) {
+                // NOTE: The marshal stores a 32-bit handle (compat/marshal_ptr.h)
+                // where the original stores the pointer. A handle the table does
+                // not know gives NULL, and the bytes then stay zero.
+                CAreaPoint* pPoints = static_cast<CAreaPoint*>(iwd2r::UnmarshalPtr(pTriggerObject->m_pickPointStart));
+                if (pPoints != NULL) {
+                    memcpy(*pArea + cnt, pPoints, sizeof(CAreaPoint) * pTriggerObject->m_pickPointCount);
+                }
+                delete[] pPoints;
+                pTriggerObject->m_pickPointStart = nIndex;
+                cnt += sizeof(CAreaPoint) * pTriggerObject->m_pickPointCount;
+                nIndex += pTriggerObject->m_pickPointCount;
+            }
+        }
+    }
+
+    if (bProgressBarInPlace == TRUE) {
+        ProgressBarCallback(dwProgressUnit, FALSE);
+    }
+
+    // DOORS
+    if (lDoors.GetCount() > 0) {
+        pOffsets->m_doorObjectListOffset = cnt;
+        pOffsets->m_doorObjectListCount = lDoors.GetCount();
+
+        pos = lDoors.GetHeadPosition();
+        while (pos != NULL) {
+            pDoorObject = lDoors.GetNext(pos);
+            memcpy(*pArea + cnt, pDoorObject, sizeof(CAreaFileDoorObject));
+            cnt += sizeof(CAreaFileDoorObject);
+            delete pDoorObject;
+        }
+
+        lDoors.RemoveAll();
+    }
+
+    if (bProgressBarInPlace == TRUE) {
+        ProgressBarCallback(dwProgressUnit, FALSE);
+    }
+
+    // TRIGGERS
+    if (lTriggers.GetCount() > 0) {
+        pOffsets->m_triggerObjectListOffset = cnt;
+        pOffsets->m_triggerObjectListCount = static_cast<WORD>(lTriggers.GetCount());
+
+        pos = lTriggers.GetHeadPosition();
+        while (pos != NULL) {
+            pTriggerObject = lTriggers.GetNext(pos);
+            memcpy(*pArea + cnt, pTriggerObject, sizeof(CAreaFileTriggerObject));
+            cnt += sizeof(CAreaFileTriggerObject);
+            delete pTriggerObject;
+        }
+
+        lTriggers.RemoveAll();
+    }
+
+    if (bProgressBarInPlace == TRUE) {
+        ProgressBarCallback(dwProgressUnit, FALSE);
+    }
+
+    // ITEMS
+    if (nItems > 0) {
+        pOffsets->m_itemObjectsOffset = cnt;
+        pOffsets->m_itemObjectsCount = static_cast<WORD>(nItems);
+
+        nIndex = 0;
+
+        pos = lContainers.GetHeadPosition();
+        while (pos != NULL) {
+            pContainerObject = lContainers.GetNext(pos);
+            if (pContainerObject->m_itemCount > 0) {
+                // NOTE: The marshal stores a 32-bit handle (compat/marshal_ptr.h)
+                // where the original stores the pointer. A handle the table does
+                // not know gives NULL, and the bytes then stay zero.
+                CCreatureFileItem* pItems = static_cast<CCreatureFileItem*>(iwd2r::UnmarshalPtr(pContainerObject->m_startingItem));
+                if (pItems != NULL) {
+                    memcpy(*pArea + cnt, pItems, sizeof(CCreatureFileItem) * pContainerObject->m_itemCount);
+                }
+                delete[] pItems;
+                pContainerObject->m_startingItem = nIndex;
+                cnt += sizeof(CCreatureFileItem) * pContainerObject->m_itemCount;
+                nIndex += pContainerObject->m_itemCount;
+            }
+        }
+    }
+
+    if (bProgressBarInPlace == TRUE) {
+        ProgressBarCallback(dwProgressUnit, FALSE);
+    }
+
+    // CONTAINERS
+    if (lContainers.GetCount() > 0) {
+        pOffsets->m_containerListOffset = cnt;
+        pOffsets->m_containerListCount = static_cast<WORD>(lContainers.GetCount());
+
+        pos = lContainers.GetHeadPosition();
+        while (pos != NULL) {
+            pContainerObject = lContainers.GetNext(pos);
+            memcpy(*pArea + cnt, pContainerObject, sizeof(CAreaFileContainer));
+            cnt += sizeof(CAreaFileContainer);
+            delete pContainerObject;
+        }
+
+        lContainers.RemoveAll();
+    }
+
+    if (bProgressBarInPlace == TRUE) {
+        ProgressBarCallback(dwProgressUnit, FALSE);
+    }
+
+    // VARIABLES
+    if (nVariables > 0) {
+        pOffsets->m_areaScriptVariablesOffset = cnt;
+        pOffsets->m_areaScriptVariablesCount = nVariables;
+        memcpy(*pArea + cnt, pVariables, sizeof(CVariable) * nVariables);
+        cnt += sizeof(CVariable) * nVariables;
+        delete[] pVariables;
+    }
+
+    if (bProgressBarInPlace == TRUE) {
+        ProgressBarCallback(dwProgressUnit, FALSE);
+    }
+
+    // ENTRY POINTS
+    if (m_entryPoints.GetCount() > 0) {
+        pOffsets->m_characterEntryPointTableOffset = cnt;
+        pOffsets->m_characterEntryPointTableCount = m_entryPoints.GetCount();
+
+        pos = m_entryPoints.GetHeadPosition();
+        while (pos != NULL) {
+            CAreaFileCharacterEntryPoint* pEntryPoint = m_entryPoints.GetNext(pos);
+            memcpy(*pArea + cnt, pEntryPoint, sizeof(CAreaFileCharacterEntryPoint));
+            cnt += sizeof(CAreaFileCharacterEntryPoint);
+        }
+    }
+
+    // USER NOTES
+    if (m_cGameAreaNotes.m_areaNoteList.GetCount() > 0) {
+        pOffsets->m_userMapNotesCount = m_cGameAreaNotes.m_areaNoteList.GetCount();
+        pOffsets->m_userMapNotesOffset = cnt;
+        m_cGameAreaNotes.Marshal(pArea, cnt);
+    } else {
+        pOffsets->m_userMapNotesOffset = 0;
+        pOffsets->m_userMapNotesCount = 0;
+    }
+
+    if (bProgressBarInPlace == TRUE) {
+        ProgressBarCallback(dwProgressUnit, FALSE);
+    }
+
+    CGameAIBase* pAIArea;
+    if (m_pGame->GetObjectArray()->GetShare(m_nAIIndex,
+            CGameObjectArray::THREAD_ASYNCH,
+            reinterpret_cast<CGameObject**>(&pAIArea),
+            INFINITE)
+        == CGameObjectArray::SUCCESS) {
+        CResRef cResScript = pAIArea->m_movementScript->m_cResRef;
+        cResScript.GetResRef(pOffsets->m_script);
+    }
+
+    m_pGame->GetObjectArray()->ReleaseShare(m_nAIIndex,
+        CGameObjectArray::THREAD_ASYNCH,
+        INFINITE);
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameArea.cpp
+    // __LINE__: 4913
+    UTIL_ASSERT(cnt == (DWORD)*nArea);
+}
+
 // 0x472DE0
 void CGameArea::Unmarshal(BYTE* pArea, LONG areaSize, const CString& sName, BOOLEAN bProgressBarInPlace)
 {
@@ -1948,7 +2671,57 @@ void CGameArea::Unmarshal(BYTE* pArea, LONG areaSize, const CString& sName, BOOL
 
     mpSpawner = new CSpawnFile(&INIFile);
 
-    // TODO: Incomplete.
+    INT nPartyLevel = g_pBaldurChitin->GetObjectGame()->GetAveragePartyLevel();
+    INT nDifficulty;
+    if (nPartyLevel < m_header.field_4D) {
+        nDifficulty = (nPartyLevel >= m_header.field_4C) + 1;
+    } else {
+        nDifficulty = 3;
+    }
+
+    POSITION posAreaLevel = g_pBaldurChitin->GetObjectGame()->field_4BDC.GetHeadPosition();
+    CInfGameAreaLevel* pAreaLevel = NULL;
+    while (posAreaLevel != NULL) {
+        pAreaLevel = g_pBaldurChitin->GetObjectGame()->field_4BDC.GetNext(posAreaLevel);
+        if (pAreaLevel != NULL && pAreaLevel->m_sArea.CompareNoCase(cStr) == 0) {
+            break;
+        }
+        pAreaLevel = NULL;
+    }
+
+    if (pAreaLevel != NULL) {
+        if ((pAreaLevel->m_dwFlags & 0x1) != 0) {
+            nDifficulty = pAreaLevel->m_nLevel;
+        } else if ((pAreaLevel->m_dwFlags & 0x2) != 0) {
+            nDifficulty += pAreaLevel->m_nLevel;
+        }
+
+        // NOTE: The original dereferences a NULL entry here after removing
+        // it; there are none.
+        posAreaLevel = g_pBaldurChitin->GetObjectGame()->field_4BDC.GetHeadPosition();
+        while (posAreaLevel != NULL) {
+            POSITION posOld = posAreaLevel;
+            CInfGameAreaLevel* pEntry = g_pBaldurChitin->GetObjectGame()->field_4BDC.GetNext(posAreaLevel);
+            if (pEntry == NULL) {
+                g_pBaldurChitin->GetObjectGame()->field_4BDC.RemoveAt(posOld);
+                continue;
+            }
+
+            if (pEntry->m_sArea.CompareNoCase(cStr) == 0) {
+                g_pBaldurChitin->GetObjectGame()->field_4BDC.RemoveAt(posOld);
+                delete pEntry;
+            }
+        }
+    }
+
+    BYTE nDifficultyMask;
+    if (nDifficulty < 3) {
+        nDifficultyMask = (nDifficulty >= 2) + 1;
+    } else {
+        nDifficultyMask = 4;
+    }
+
+    m_header.field_4E = static_cast<BYTE>(nPartyLevel);
 
     // CREATURES
     CCreatureFile creatureData;
@@ -1978,8 +2751,11 @@ void CGameArea::Unmarshal(BYTE* pArea, LONG areaSize, const CString& sName, BOOL
                 // __LINE__: 5211
                 UTIL_ASSERT(pCreature->m_creatureSize == 0);
 
-                if (pCreature->m_expirationTime == -1
-                    || pCreature->m_expirationTime * CTimerWorld::TIMESCALE_MSEC_PER_SEC > m_pGame->GetWorldTimer()->m_gameTime) {
+                // NOTE: The byte at 0x2F holds the difficulties the creature
+                // appears at.
+                if ((pCreature->structureAlignment1[0] & nDifficultyMask) != 0
+                    && (pCreature->m_expirationTime == -1
+                        || pCreature->m_expirationTime * CTimerWorld::TIMESCALE_MSEC_PER_SEC > m_pGame->GetWorldTimer()->m_gameTime)) {
                     // NOTE: Uninline.
                     creatureData.SetResRef(CResRef(pCreature->m_creatureData), TRUE, TRUE);
 
@@ -2464,7 +3240,7 @@ void CGameArea::Unmarshal(BYTE* pArea, LONG areaSize, const CString& sName, BOOL
 
     CVariable* pRevealed = g_pBaldurChitin->GetObjectGame()->GetVariables()->FindKey(sExtraVarName);
     if (pRevealed != NULL) {
-        if (pRevealed == 0) {
+        if (pRevealed->m_intValue == 0) {
             pRevealed->m_intValue = 1;
         }
     } else {

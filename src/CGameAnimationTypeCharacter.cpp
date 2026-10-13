@@ -811,15 +811,15 @@ void CGameAnimationTypeCharacter::ChangeDirection(SHORT nDirection)
     }
 
     if (m_currentVidCellHelmet != NULL) {
-        m_currentVidCellShield = m_currentVidCellShieldBase;
+        m_currentVidCellHelmet = m_currentVidCellHelmetBase;
 
         if (m_currentBamDirection > m_extendDirectionTest) {
-            m_currentVidCellShield->SequenceSet(9 * m_currentBamSequence - m_currentBamDirection + 16);
+            m_currentVidCellHelmet->SequenceSet(9 * m_currentBamSequence - m_currentBamDirection + 16);
         } else {
-            m_currentVidCellShield->SequenceSet(9 * m_currentBamSequence + m_currentBamDirection);
+            m_currentVidCellHelmet->SequenceSet(9 * m_currentBamSequence + m_currentBamDirection);
         }
 
-        m_currentVidCellShield->FrameSet(nFrame);
+        m_currentVidCellHelmet->FrameSet(nFrame);
     }
 }
 
@@ -934,6 +934,8 @@ void CGameAnimationTypeCharacter::EquipHelmet(const CString& resRef, BYTE* color
                 colorRangeValues[colorRange],
                 *g_pBaldurChitin->GetObjectGame()->GetMasterBitmap());
         }
+
+        m_currentVidCellHelmet = m_currentVidCellHelmetBase;
 
         if (m_currentBamDirection > m_extendDirectionTest) {
             m_currentVidCellHelmet->SequenceSet(9 * m_currentBamSequence - m_currentBamDirection + 16);
