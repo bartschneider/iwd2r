@@ -62,3 +62,7 @@ These are in `oracle/replay/` and `tools/`.
 - Windows Sandbox real-input mode (`--vm windows`) is untested. It needs the Windows feature enabled and a reboot.
 - `replay compare` reports a `known_differences.json` entry that matched nothing, but does not fail on it. An entry carries no scenario, so one valid for another scenario would look stale. It stays a warning until entries carry a `scenario` field.
 - Consider a data-gated test through `CRuleTables::GetClassStringMixed` (the fighter-type string choice: Barbarian 34, otherwise 16799). The id choice is confirmed by the disassembly noted in `docs/evidence/544120.md` and exercised by the chargen replay.
+
+## Project 4 follow-ups
+
+- Spatial real-time upscaling filters for the presenter: AMD FSR 1.0 (EASU + RCAS) and NVIDIA Image Scaling, both MIT, as `Scale Filter=fsr|nis` with a `Sharpness` key. Planned as project 4 Task 2b after the GPU presenter lands. DLSS and other temporal upscalers do not fit (no motion vectors, depth or jitter in a 2D sprite engine).

@@ -384,8 +384,12 @@ public:
     void GetBaseSkillPoints(const CAIObjectType& typeAI, CDerivedStats& DStats, BYTE& nPickPockets, BYTE& nOpenLocks, BYTE& nFindTraps, BYTE& nMoveSilently, BYTE& nHide, BYTE& nUseMagicDevice) const;
     INT FindSavingThrow(CDerivedStats& stats, const CString& sSavingThrow) const;
     INT GetSavingThrow(const CAIObjectType& typeAI, CDerivedStats& DStats, BYTE nCON, const CString& sSavingThrow) const;
+    INT RollHitPoints(INT nSides, INT nRolls, INT nLevel, INT nMinRoll, INT nModifier) const;
+    INT sub_542B40(const C2DArray& tHitPoints, BYTE nOldLevel, BYTE nNewLevel, INT nMinRoll, INT nDivisor, BOOL bFixedSides, INT nFixedSides) const;
+    INT sub_542CB0(INT nClass, CDerivedStats& oldDStats, CDerivedStats& newDStats, INT nMinRoll, INT nDivisor) const;
+    CResRef sub_545EB0(BYTE nLevel, BYTE nIndex) const;
     INT GetHPCONBonusTotal(const CAIObjectType& typeAI, CDerivedStats& DStats, BYTE nCON) const;
-    INT GetStartingHitPoints(const CAIObjectType& typeAI, CDerivedStats& DStats, BYTE nCON) const;
+    INT GetStartingHitPoints(const CAIObjectType& typeAI, CDerivedStats& oldDStats, CDerivedStats& newDStats, BYTE nCON) const;
     INT GetStartingGold(CGameSprite* pSprite) const;
     INT GetStartingExperiencePoints(CGameSprite* pSprite) const;
     INT GetMaxKnownSpells(const BYTE& nClass, const CAIObjectType& typeAI, CDerivedStats& DStats, DWORD nSpecialization, UINT nLevel, INT& nMaxSpells) const;

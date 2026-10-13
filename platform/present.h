@@ -3,6 +3,7 @@
 #pragma once
 
 #include "compat/win_types.h"
+#include "platform/compose.h"
 
 #include <SDL3/SDL.h>
 
@@ -53,11 +54,20 @@ void SetDisplayMode(int w, int h);
 // fullscreen. Before the first frame is presented or without a renderer
 // (the dummy video driver before a present), a division (multiplication) by
 // WindowScale().
+//
+// With regions set (SetRegions), both map through compose's piecewise
+// mapping instead.
 void WindowToFrame(float x, float y, float* fx, float* fy);
 void FrameToWindow(float fx, float fy, float* x, float* y);
 
+// The regions of the back buffer to composite into the window (from
+// compose::Layout); empty, the default, presents the whole frame as before.
+void SetRegions(std::vector<compose::Region> regions);
+const std::vector<compose::Region>& Regions();
+
 // The size of the last presented frame, when WindowToFrame maps through a
-// renderer; false while it is the identity.
+// renderer; with regions set and no frame presented yet, the extent of the
+// regions' frame rectangles; false while the mapping is the identity.
 bool FrameSize(int* w, int* h);
 
 // Uploads one XRGB8888 frame and presents it. Without a target window it only

@@ -11,6 +11,7 @@
 #include <fstream>
 #include <set>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -213,6 +214,51 @@ TEST_CASE("fs find enumerates matching entries", "[fs]")
     REQUIRE(h != INVALID_HANDLE_VALUE);
     CHECK(std::string(data.cFileName) == "c.txt");
     FindClose(h);
+}
+
+namespace {
+
+std::vector<std::string> FindAll(const std::string& pattern, std::vector<DWORD>* attributes = nullptr)
+{
+    std::vector<std::string> names;
+    WIN32_FIND_DATAA data {};
+    HANDLE h = FindFirstFileA(pattern.c_str(), &data);
+    if (h == INVALID_HANDLE_VALUE)
+        return names;
+    do {
+        names.push_back(data.cFileName);
+        if (attributes)
+            attributes->push_back(data.dwFileAttributes);
+    } while (FindNextFileA(h, &data));
+    FindClose(h);
+    return names;
+}
+
+}
+
+// Windows lists "." and ".." first for "*" and "*.*" in a non-root directory,
+// so CDimm::DirectoryCopyFiles of an empty mpsave\default succeeds.
+TEST_CASE("fs find lists the dot entries first for star patterns", "[fs]")
+{
+    TempTree tree;
+    stdfs::create_directories(tree.root / "Empty");
+    const std::string empty = tree.str() + "/Empty";
+
+    std::vector<DWORD> attributes;
+    CHECK(FindAll(empty + "/*", &attributes) == std::vector<std::string> { ".", ".." });
+    for (DWORD a : attributes)
+        CHECK((a & FILE_ATTRIBUTE_DIRECTORY) != 0);
+    CHECK(FindAll(empty + "/*.*") == std::vector<std::string> { ".", ".." });
+    CHECK(FindAll(empty + "\\*.*") == std::vector<std::string> { ".", ".." });
+
+    WIN32_FIND_DATAA data {};
+    CHECK(FindFirstFileA((empty + "/*.sav").c_str(), &data) == INVALID_HANDLE_VALUE);
+    CHECK(FindFirstFileA((tree.str() + "/Missing/*").c_str(), &data) == INVALID_HANDLE_VALUE);
+
+    Touch(tree.root / "One" / "ICEWIND2.GAM");
+    CHECK(FindAll(tree.str() + "/One/*") == std::vector<std::string> { ".", "..", "ICEWIND2.GAM" });
+    CHECK(FindAll(tree.str() + "/One/*.*") == std::vector<std::string> { ".", "..", "ICEWIND2.GAM" });
+    CHECK(FindAll(tree.str() + "/One/*.GAM") == std::vector<std::string> { "ICEWIND2.GAM" });
 }
 
 TEST_CASE("fs attributes copy move delete and directories", "[fs]")

@@ -311,7 +311,7 @@
   "sprite_skills": {
     "base": "CGameSprite",
     "offset": "0x0A64",
-    "type": "u8",
+    "type": "i8",
     "count": 64
   }
 }

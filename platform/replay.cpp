@@ -3,6 +3,7 @@
 
 #include "compat/msvc_rand.h"
 #include "compat/msvc_time.h"
+#include "platform/crash.h"
 #include "platform/data_dir.h"
 #include "platform/present.h"
 #include "platform/replay_clock.h"
@@ -234,6 +235,7 @@ void Checkpoint(const std::string& name, int line)
 // The recorder's OnFrame, step for step.
 void OnFrame()
 {
+    platform::crash::MaybeTestCrash();
     if (!Active())
         return;
     (void)g_wallClockInstalled;

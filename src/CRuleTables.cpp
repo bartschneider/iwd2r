@@ -1930,6 +1930,147 @@ INT CRuleTables::GetSavingThrow(const CAIObjectType& typeAI, CDerivedStats& DSta
     return nSavingThrow;
 }
 
+// 0x542A90
+INT CRuleTables::RollHitPoints(INT nSides, INT nRolls, INT nLevel, INT nMinRoll, INT nModifier) const
+{
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\CRuleTables.cpp
+    // __LINE__: 2294
+    UTIL_ASSERT(nSides != 0);
+
+    INT nHitPoints = 0;
+    if (nLevel < 2) {
+        nHitPoints = nSides * nRolls;
+    } else {
+        for (INT nRoll = nRolls; nRoll > 0; nRoll--) {
+            // NOTE: The original draws three numbers per die and keeps the
+            // third; a third below nMinRoll gives nMinRoll, otherwise the die
+            // is drawn again the same way.
+            static_cast<void>(rand() % nSides);
+            static_cast<void>(rand() % nSides);
+            INT nValue = rand() % nSides + 1;
+            if (nMinRoll <= nValue) {
+                static_cast<void>(rand() % nSides);
+                static_cast<void>(rand() % nSides);
+                nValue = rand() % nSides + 1;
+            } else {
+                nValue = nMinRoll;
+            }
+            nHitPoints += nValue;
+        }
+    }
+
+    if (nRolls == 0) {
+        nHitPoints += nModifier;
+    }
+
+    return nHitPoints;
+}
+
+// 0x542B40
+INT CRuleTables::sub_542B40(const C2DArray& tHitPoints, BYTE nOldLevel, BYTE nNewLevel, INT nMinRoll, INT nDivisor, BOOL bFixedSides, INT nFixedSides) const
+{
+    CString sLevel;
+    INT nHitPoints = 0;
+
+    for (INT nLevel = nOldLevel + 1; nLevel <= nNewLevel; nLevel++) {
+        sLevel.Format("%d", nLevel);
+
+        // NOTE: The original's atol (0x7E7B03) is VC6's, which wraps on overflow.
+        INT nSides = iwd2r_atol(tHitPoints.GetAt(SIDES, sLevel));
+        INT nRolls = iwd2r_atol(tHitPoints.GetAt(ROLLS, sLevel));
+        INT nValue = iwd2r_atol(tHitPoints.GetAt(MODIFIER, sLevel));
+
+        if (bFixedSides) {
+            nSides = nFixedSides;
+        }
+
+        if (!g_pBaldurChitin->GetObjectGame()->GetOptions()->m_bMaxHP) {
+            nValue = RollHitPoints(nSides, nRolls, nLevel, nMinRoll, nValue);
+        } else if (nRolls != 0) {
+            nValue = nRolls * nSides;
+        }
+
+        nValue /= nDivisor;
+        if (nValue < 1) {
+            nValue = 1;
+        }
+
+        nHitPoints += nValue;
+    }
+
+    if (nOldLevel < nNewLevel && nHitPoints < 1) {
+        nHitPoints = 1;
+    }
+
+    return nHitPoints;
+}
+
+// 0x542CB0
+INT CRuleTables::sub_542CB0(INT nClass, CDerivedStats& oldDStats, CDerivedStats& newDStats, INT nMinRoll, INT nDivisor) const
+{
+    oldDStats.GetClassLevel(nClass);
+    if (static_cast<BYTE>(newDStats.GetClassLevel(nClass)) == 0) {
+        return 0;
+    }
+
+    INT nFixedSides = 0;
+    BOOL bFixedSides = FALSE;
+
+    switch (nClass) {
+    case CAIOBJECTTYPE_C_BARBARIAN:
+        bFixedSides = TRUE;
+        nFixedSides = 12;
+        // FALLTHROUGH
+    case CAIOBJECTTYPE_C_FIGHTER:
+    case CAIOBJECTTYPE_C_PALADIN:
+    case CAIOBJECTTYPE_C_RANGER:
+        return sub_542B40(m_tHitPointsWarrior,
+            static_cast<BYTE>(oldDStats.GetClassLevel(nClass)),
+            static_cast<BYTE>(newDStats.GetClassLevel(nClass)),
+            nMinRoll,
+            nDivisor,
+            bFixedSides,
+            nFixedSides);
+    case CAIOBJECTTYPE_C_BARD:
+    case CAIOBJECTTYPE_C_ROGUE:
+        return sub_542B40(m_tHitPointsRogue,
+            static_cast<BYTE>(oldDStats.GetClassLevel(nClass)),
+            static_cast<BYTE>(newDStats.GetClassLevel(nClass)),
+            nMinRoll,
+            nDivisor,
+            FALSE,
+            0);
+    case CAIOBJECTTYPE_C_CLERIC:
+    case CAIOBJECTTYPE_C_DRUID:
+        return sub_542B40(m_tHitPointsPriest,
+            static_cast<BYTE>(oldDStats.GetClassLevel(nClass)),
+            static_cast<BYTE>(newDStats.GetClassLevel(nClass)),
+            nMinRoll,
+            nDivisor,
+            FALSE,
+            0);
+    case CAIOBJECTTYPE_C_MONK:
+        return sub_542B40(m_tHitPointsMonk,
+            static_cast<BYTE>(oldDStats.GetClassLevel(nClass)),
+            static_cast<BYTE>(newDStats.GetClassLevel(nClass)),
+            nMinRoll,
+            nDivisor,
+            FALSE,
+            0);
+    case CAIOBJECTTYPE_C_SORCERER:
+    case CAIOBJECTTYPE_C_WIZARD:
+        return sub_542B40(m_tHitPointsWizard,
+            static_cast<BYTE>(oldDStats.GetClassLevel(nClass)),
+            static_cast<BYTE>(newDStats.GetClassLevel(nClass)),
+            nMinRoll,
+            nDivisor,
+            FALSE,
+            0);
+    }
+
+    return 0;
+}
+
 // 0x542F20
 INT CRuleTables::GetHPCONBonusTotal(const CAIObjectType& typeAI, CDerivedStats& DStats, BYTE nCON) const
 {
@@ -1948,11 +2089,17 @@ INT CRuleTables::GetHPCONBonusTotal(const CAIObjectType& typeAI, CDerivedStats& 
 }
 
 // 0x542FA0
-INT CRuleTables::GetStartingHitPoints(const CAIObjectType& typeAI, CDerivedStats& DStats, BYTE nCON) const
+INT CRuleTables::GetStartingHitPoints(const CAIObjectType& typeAI, CDerivedStats& oldDStats, CDerivedStats& newDStats, BYTE nCON) const
 {
-    // TODO: Incomplete.
+    INT nHitPoints = 0;
 
-    return 0;
+    for (INT nClass = 1; nClass <= CAIOBJECT_CLASS_MAX; nClass++) {
+        if (static_cast<INT>(newDStats.GetClassLevel(nClass)) > 0) {
+            nHitPoints += sub_542CB0(nClass, oldDStats, newDStats, 1, 1);
+        }
+    }
+
+    return nHitPoints;
 }
 
 // 0x542FE0
@@ -3247,6 +3394,29 @@ DWORD CRuleTables::GetSkillDescription(DWORD id) const
     }
 
     return -1;
+}
+
+// 0x545EB0
+CResRef CRuleTables::sub_545EB0(BYTE nLevel, BYTE nIndex) const
+{
+    INT nColumn = nLevel - 1;
+    if (nColumn > 8) {
+        nColumn = 8;
+    } else if (nColumn < 0) {
+        nColumn = 0;
+    }
+
+    // NOTE: The row is clamped to the table's height, not below it: an index
+    // at or past the last spell reads the default.
+    SHORT nRow = m_tSpellAutomaticPicker.GetHeight() < nIndex
+        ? m_tSpellAutomaticPicker.GetHeight()
+        : nIndex;
+    if (nRow < 0) {
+        nRow = 0;
+    }
+
+    CString sResRef = m_tSpellAutomaticPicker.GetAt(CPoint(static_cast<BYTE>(nColumn), static_cast<BYTE>(nRow)));
+    return CResRef(sResRef);
 }
 
 // 0x545FD0

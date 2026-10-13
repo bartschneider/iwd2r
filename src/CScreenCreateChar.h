@@ -32,6 +32,8 @@ public:
     static const DWORD MALE_PORTRAITS_COUNT;
     static const char* FEMALE_PORTRAITS[];
     static const DWORD FEMALE_PORTRAITS_COUNT;
+    static const BYTE AUTO_PICK_SPELLS[9];
+    static const BYTE AUTO_PICK_SPECIALIST_SPELLS[9];
     static const CString TOKEN_NUMBER;
     static const CString TOKEN_MINIMUM;
     static const CString TOKEN_MAXIMUM;
@@ -156,6 +158,7 @@ public:
     void SummonPopup(DWORD dwPopupId, CGameSprite* pSprite);
     void DismissPopup(CGameSprite* pSprite);
     void sub_617D80();
+    BOOL sub_618D10(BYTE nLevel, CGameSprite* pSprite);
     void UpdateClassEntry(CUIControlTextDisplay* pText, const CAIObjectType& typeAI, CDerivedStats* DStats, DWORD nSpecialization, BYTE nClass, DWORD dwFlags);
     int GetRaceFeatColumn(BYTE nRace, BYTE nSubRace);
 
