@@ -706,6 +706,23 @@ def main_vm(args, argv):
     return failed[0] if failed else 0
 
 
+DESKTOP_OK = 'IWD2R_DESKTOP_OK'
+
+
+def desktop_refusal(headless, env):
+    """Why a run that would open a window on the desktop is refused, or None.
+
+    Agents drive the game headless, under Xvfb (--vm linux) or in Windows
+    Sandbox (--vm windows); a window on the user's desktop steals focus and
+    a stray click lands in the run. A person who wants the window sets
+    IWD2R_DESKTOP_OK=1."""
+    if headless or env.get(DESKTOP_OK) == '1':
+        return None
+    return ('play: this run would open a window on the desktop; set %s=1 '
+            'to allow it, or use --headless, --vm linux or --vm windows'
+            % DESKTOP_OK)
+
+
 def main(argv):
     args = parse_args(argv)
     if args.vm:
@@ -715,6 +732,9 @@ def main(argv):
             and not os.environ.get('WAYLAND_DISPLAY'):
         log('no DISPLAY or WAYLAND_DISPLAY: running headless')
         headless = True
+    refusal = desktop_refusal(headless, os.environ)
+    if refusal:
+        sys.exit(refusal)
     data = resolve_data(args.data)
     script = os.path.abspath(args.script) if args.script else None
     if script and not os.path.isfile(script):

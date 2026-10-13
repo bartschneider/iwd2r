@@ -194,6 +194,12 @@ class PlayArgsTest(unittest.TestCase):
         overrides, g = vm('--resolution', 'desktop')
         self.assertEqual((g['width'], g['height']), play.VM_DESKTOP)
 
+    def test_desktop_refusal(self):
+        self.assertIsNone(play.desktop_refusal(True, {}))
+        self.assertIsNone(play.desktop_refusal(False, {'IWD2R_DESKTOP_OK': '1'}))
+        self.assertIn('IWD2R_DESKTOP_OK', play.desktop_refusal(False, {}))
+        self.assertIn('--vm windows', play.desktop_refusal(False, {'IWD2R_DESKTOP_OK': '0'}))
+
     def test_child_env(self):
         env = play.child_env({'PATH': '/bin'}, '/data', ['A/B=1', 'C/D=2'],
                              True, 300, '/s.txt', '/shots')
