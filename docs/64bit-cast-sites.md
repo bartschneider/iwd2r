@@ -25,29 +25,31 @@ Engine sites where a pointer is stored in, or read back from, a 32-bit integer a
 
 Project 3 chose a side table for the packed marshalling fields: the producers store a 32-bit handle from `iwd2r::MarshalPtr`, and the consumers that read the fields back as pointers before the area file is written (`CGameArea::Marshal`, `CGameArea::Unmarshal`) resolve it with `iwd2r::UnmarshalPtr`. `ResetMarshalPtrs` empties the table at the start of each save (`CInfGame::SaveGame`).
 
-| Site | What is stored |
-|---|---|
-| `src/CGameContainer.cpp:777` (CGameContainer::Marshal) | `pPoints` in packed `m_pickPointStart` |
-| `src/CGameContainer.cpp:801` (CGameContainer::Marshal) | `pItems` in packed `m_startingItem` |
-| `src/CGameDoor.cpp:659` (CGameDoor::Marshal) | `pPoints` in packed `m_closedSearchSquaresStart` |
-| `src/CGameDoor.cpp:676` (CGameDoor::Marshal) | `pPoints` in packed `m_openSearchSquaresStart` |
-| `src/CGameDoor.cpp:693` (CGameDoor::Marshal) | `pPoints` in packed `m_closedSelectionPointStart` |
-| `src/CGameDoor.cpp:710` (CGameDoor::Marshal) | `pPoints` in packed `m_openSelectionPointStart` |
-| `src/CGameTrigger.cpp` (CGameTrigger::Marshal, 0x4CFF70) | `pPoints` in packed `m_pickPointStart` |
-| `src/CGameSprite.cpp:6427` (CGameSprite::Marshal, area creature) | `creatureData` in packed `m_creatureOffset` |
-| `src/CGameSprite.cpp:6701` (CGameSprite::Marshal 0x70BEE0, party creature) | `pCreature` in `CSavedGamePartyCreature::m_creatureOffset` |
+Sites are named by file and function, with the statement as the anchor to search for; line numbers drifted with every merge.
 
-Consumers that resolve the handles with `iwd2r::UnmarshalPtr` (a handle the table does not know gives NULL, and the block stays zero):
+| Site | Anchor | What is stored |
+|---|---|---|
+| `src/CGameContainer.cpp`, CGameContainer::Marshal | `m_pickPointStart = iwd2r::MarshalPtr(pPoints)` | `pPoints` in packed `m_pickPointStart` |
+| `src/CGameContainer.cpp`, CGameContainer::Marshal | `m_startingItem = iwd2r::MarshalPtr(pItems)` | `pItems` in packed `m_startingItem` |
+| `src/CGameDoor.cpp`, CGameDoor::Marshal | `m_closedSearchSquaresStart = iwd2r::MarshalPtr(pPoints)` | `pPoints` in packed `m_closedSearchSquaresStart` |
+| `src/CGameDoor.cpp`, CGameDoor::Marshal | `m_openSearchSquaresStart = iwd2r::MarshalPtr(pPoints)` | `pPoints` in packed `m_openSearchSquaresStart` |
+| `src/CGameDoor.cpp`, CGameDoor::Marshal | `m_closedSelectionPointStart = iwd2r::MarshalPtr(pPoints)` | `pPoints` in packed `m_closedSelectionPointStart` |
+| `src/CGameDoor.cpp`, CGameDoor::Marshal | `m_openSelectionPointStart = iwd2r::MarshalPtr(pPoints)` | `pPoints` in packed `m_openSelectionPointStart` |
+| `src/CGameTrigger.cpp`, CGameTrigger::Marshal (0x4CFF70) | `m_pickPointStart = iwd2r::MarshalPtr(pPoints)` | `pPoints` in packed `m_pickPointStart` |
+| `src/CGameSprite.cpp`, CGameSprite::Marshal (area creature) | `m_creatureOffset = iwd2r::MarshalPtr(creatureData)` | `creatureData` in packed `m_creatureOffset` |
+| `src/CGameSprite.cpp`, CGameSprite::Marshal (0x70BEE0, party creature) | `m_creatureOffset = iwd2r::MarshalPtr(pCreature)` | `pCreature` in `CSavedGamePartyCreature::m_creatureOffset` |
 
-| Site | What is read back |
-|---|---|
-| `src/CInfGame.cpp:1941` (CInfGame::Marshal) | party `m_creatureOffset` as `BYTE*` |
-| `src/CInfGame.cpp:1980` (CInfGame::Marshal) | global creature `m_creatureOffset` as `BYTE*` |
-| `src/CMessage.cpp:2151` (CBaldurMessage::DemandCharacterSlotReply) | party `m_creatureOffset` as `BYTE*` |
-| `src/CGameArea.cpp:2219` (CGameArea::Marshal) | creature `m_creatureOffset` as `BYTE*` |
-| `src/CGameArea.cpp:2261` (CGameArea::Marshal) | container `m_pickPointStart` |
-| `src/CGameArea.cpp:2280`, `:2291`, `:2302`, `:2313` (CGameArea::Marshal) | the four door point starts |
-| `src/CGameArea.cpp:2331` (CGameArea::Marshal) | trigger `m_pickPointStart` |
-| `src/CGameArea.cpp:2401` (CGameArea::Marshal) | container `m_startingItem` |
+Consumers that resolve the handles with `iwd2r::UnmarshalPtr`. Each checks for NULL (a handle the table does not know), and the block then stays zero:
+
+| Site | Anchor | What is read back |
+|---|---|---|
+| `src/CInfGame.cpp`, CInfGame::Marshal | `UnmarshalPtr(partyCreatures[cnt3].m_creatureOffset)` | party `m_creatureOffset` as `BYTE*` |
+| `src/CInfGame.cpp`, CInfGame::Marshal | `UnmarshalPtr(pGlobalCreature[nGlobal].m_creatureOffset)` | global creature `m_creatureOffset` as `BYTE*` |
+| `src/CMessage.cpp`, CBaldurMessage::DemandCharacterSlotReply | `UnmarshalPtr(partyCreature.m_creatureOffset)` | party `m_creatureOffset` as `BYTE*` |
+| `src/CGameArea.cpp`, CGameArea::Marshal | `UnmarshalPtr(pCreature->m_creatureOffset)` | creature `m_creatureOffset` as `BYTE*` |
+| `src/CGameArea.cpp`, CGameArea::Marshal | `UnmarshalPtr(pContainerObject->m_pickPointStart)` | container `m_pickPointStart` |
+| `src/CGameArea.cpp`, CGameArea::Marshal | `UnmarshalPtr(pDoorObject->m_openSelectionPointStart)` and the other three door starts | the four door point starts |
+| `src/CGameArea.cpp`, CGameArea::Marshal | `UnmarshalPtr(pTriggerObject->m_pickPointStart)` | trigger `m_pickPointStart` |
+| `src/CGameArea.cpp`, CGameArea::Marshal | `UnmarshalPtr(pContainerObject->m_startingItem)` | container `m_startingItem` |
 
 The palette keys still need a 64-bit-safe hash.
