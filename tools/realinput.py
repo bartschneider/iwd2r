@@ -28,6 +28,8 @@ import subprocess
 import threading
 import time
 
+import dataview
+
 # The engine updates (and the in-engine script advances) 30 times a second;
 # `wait N` is N of those frames.
 FRAME_RATE = 30
@@ -441,42 +443,15 @@ def pick_display(start=90, x11_dir='/tmp/.X11-unix', lock_dir='/tmp',
                        % (start, start + limit - 1))
 
 
-# Install folders the engine writes while it runs (relative to the install,
-# its working directory): parallel runs each get empty ones of their own.
-PRIVATE_DIRS = ('cache', 'temp', 'tempsave')
-
-
 def make_install_view(install, view):
-    """Builds view as a private view of install for one parallel run: a
-    symlink to every top-level entry, except the folders the engine writes
-    (PRIVATE_DIRS, created empty) and the *.ini files (copied), so parallel
-    games neither race on the cache and temp folders nor rewrite each
-    other's INI files."""
-    os.makedirs(view)
-    for name in sorted(os.listdir(install)):
-        src = os.path.join(install, name)
-        dst = os.path.join(view, name)
-        if name.lower() in PRIVATE_DIRS and os.path.isdir(src):
-            os.mkdir(dst)
-        elif name.lower().endswith('.ini') and os.path.isfile(src):
-            shutil.copy2(src, dst)
-        else:
-            os.symlink(src, dst)
-    return view
+    """A private view of install for one run (tools/dataview.py)."""
+    return dataview.make_view(install, view)
 
 
 def remove_install_view(view):
     """Deletes a view made by make_install_view without following its
     links into the install."""
-    if not os.path.isdir(view) or os.path.islink(view):
-        return
-    for name in os.listdir(view):
-        path = os.path.join(view, name)
-        if os.path.islink(path) or not os.path.isdir(path):
-            os.unlink(path)
-        else:
-            shutil.rmtree(path)
-    os.rmdir(view)
+    dataview.remove_view(view)
 
 
 def missing_tools():

@@ -89,6 +89,10 @@ target_link_libraries(iwd2r_engine PRIVATE iwd2r_compat iwd2r_platform ${ZLIB_LI
 add_executable(iwd2r platform/entry.cpp $<TARGET_OBJECTS:iwd2r_engine>)
 target_include_directories(iwd2r PRIVATE "${PROJECT_SOURCE_DIR}")
 target_link_libraries(iwd2r PRIVATE iwd2r_platform iwd2r_compat ${ZLIB_LIBRARIES})
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # backtrace_symbols_fd resolves names from the dynamic symbol table.
+    target_link_options(iwd2r PRIVATE -Wl,--export-dynamic)
+endif()
 iwd2r_strict_warnings(iwd2r)
 add_subdirectory(oracle)
 add_subdirectory(tests)

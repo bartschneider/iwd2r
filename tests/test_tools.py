@@ -102,6 +102,7 @@ def load_tool(name):
 
 play = load_tool('play')
 realinput = load_tool('realinput')
+dataview = load_tool('dataview')
 winsandbox = load_tool('winsandbox')
 
 
@@ -193,6 +194,12 @@ class PlayArgsTest(unittest.TestCase):
         self.assertEqual((g['width'], g['height'], g['scale']), (1280, 720, 3))
         overrides, g = vm('--resolution', 'desktop')
         self.assertEqual((g['width'], g['height']), play.VM_DESKTOP)
+
+    def test_desktop_refusal(self):
+        self.assertIsNone(play.desktop_refusal(True, {}))
+        self.assertIsNone(play.desktop_refusal(False, {'IWD2R_DESKTOP_OK': '1'}))
+        self.assertIn('IWD2R_DESKTOP_OK', play.desktop_refusal(False, {}))
+        self.assertIn('--vm windows', play.desktop_refusal(False, {'IWD2R_DESKTOP_OK': '0'}))
 
     def test_child_env(self):
         env = play.child_env({'PATH': '/bin'}, '/data', ['A/B=1', 'C/D=2'],
@@ -2914,6 +2921,16 @@ class SharedLockTest(unittest.TestCase):
 class OracleReplayTest(unittest.TestCase):
     """The pure parts of tools/oracle.py replay record."""
 
+    def test_mute_ini_zeroes_every_volume_key(self):
+        text = ('Volume Movie=85\r\nVolume Music=60\r\nVolume Voices=100\r\n'
+                'Volume Ambients=70\r\nVolume SFX=80\r\nOther=1\r\n')
+        self.assertEqual(oracle.mute_ini(text),
+                         'Volume Movie=0\r\nVolume Music=0\r\nVolume Voices=0\r\n'
+                         'Volume Ambients=0\r\nVolume SFX=0\r\nOther=1\r\n')
+        self.assertEqual(oracle.mute_ini('Resolution=800\r\n'), 'Resolution=800\r\n')
+        self.assertIn('Volume SFX=0', oracle.replay_ini(
+            'Full Screen=1\r\nResolution=1366\r\nVolume SFX=80\r\n'))
+
     def test_replay_ini(self):
         text = '[Program Options]\r\nFull Screen=1\r\nResolution=1366\r\n' \
             'Last Full Screen=1\r\n'
@@ -3416,6 +3433,120 @@ class KnownDifferencesTest(unittest.TestCase):
             dirs[0], dirs[1], ['cp'], ['connection'], known)
         self.assertEqual(failures, 0)
         self.assertEqual(oracle.stale_known(known, hits), [known[1]])
+
+
+class DataViewTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp = self._tmp.name
+        self.data = os.path.join(self.tmp, 'install')
+        for rel, text in (('CHITIN.KEY', 'k'), ('Data/a.bif', 'b'),
+                          ('icewind2.ini', 'a=1'), ('Keymap.INI', 'k=1'),
+                          ('Temp/stale', 's'), ('cache/c', 'c'),
+                          ('mpsave/default/s.sav', 'sv'),
+                          ('Characters/A.CHR', 'chr'),
+                          ('Sounds/x.wav', 'w'), ('Scripts/x.bs', 's')):
+            path = os.path.join(self.data, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, 'w') as f:
+                f.write(text)
+
+    def read(self, *parts):
+        with open(os.path.join(*parts)) as f:
+            return f.read()
+
+    def test_rules_file_lists_the_writable_entries(self):
+        rules = dataview.load_rules()
+        self.assertEqual(rules['empty_dirs'], [
+            'temp', 'tempsave', 'cache', 'save', 'ScrnShot'])
+        self.assertEqual(rules['copied_dirs'], ['mpsave', 'Characters'])
+        self.assertEqual(rules['copied_files'], ['*.ini'])
+
+    def test_read_only_entries_are_links_writable_ones_are_real(self):
+        view = dataview.make_view(self.data, os.path.join(self.tmp, 'view'))
+        for name in ('CHITIN.KEY', 'Data', 'Sounds', 'Scripts'):
+            self.assertTrue(os.path.islink(os.path.join(view, name)), name)
+        for name in ('Temp', 'cache', 'tempsave', 'save', 'ScrnShot'):
+            path = os.path.join(view, name)
+            self.assertTrue(os.path.isdir(path) and not os.path.islink(path),
+                            name)
+            self.assertEqual(os.listdir(path), [], name)
+        for name in ('mpsave', 'Characters'):
+            self.assertFalse(os.path.islink(os.path.join(view, name)), name)
+        self.assertEqual(self.read(view, 'mpsave/default/s.sav'), 'sv')
+        self.assertEqual(self.read(view, 'Characters/A.CHR'), 'chr')
+
+    def test_inis_are_copied_not_linked(self):
+        view = dataview.make_view(self.data, os.path.join(self.tmp, 'view'))
+        for name in ('icewind2.ini', 'Keymap.INI'):
+            self.assertFalse(os.path.islink(os.path.join(view, name)))
+        with open(os.path.join(view, 'icewind2.ini'), 'w') as f:
+            f.write('changed')
+        self.assertEqual(self.read(self.data, 'icewind2.ini'), 'a=1')
+
+    def test_engine_writes_stay_in_the_view(self):
+        view = dataview.make_view(self.data, os.path.join(self.tmp, 'view'))
+        with open(os.path.join(view, 'Temp', 't'), 'w') as f:
+            f.write('t')
+        os.remove(os.path.join(view, 'mpsave/default/s.sav'))
+        self.assertEqual(os.listdir(os.path.join(self.data, 'Temp')),
+                         ['stale'])
+        self.assertTrue(os.path.exists(
+            os.path.join(self.data, 'mpsave/default/s.sav')))
+
+    def test_make_view_is_idempotent(self):
+        view = dataview.make_view(self.data, os.path.join(self.tmp, 'view'))
+        with open(os.path.join(view, 'icewind2.ini'), 'w') as f:
+            f.write('changed')
+        with open(os.path.join(view, 'Temp', 't'), 'w') as f:
+            f.write('t')
+        again = dataview.make_view(self.data, view)
+        self.assertEqual(again, view)
+        self.assertEqual(self.read(view, 'icewind2.ini'), 'changed')
+        self.assertEqual(os.listdir(os.path.join(view, 'Temp')), ['t'])
+        self.assertTrue(os.path.islink(os.path.join(view, 'Data')))
+
+    def test_missing_writable_folders_are_created(self):
+        view = dataview.make_view(self.data, os.path.join(self.tmp, 'view'))
+        for name in ('tempsave', 'save', 'ScrnShot'):
+            self.assertTrue(os.path.isdir(os.path.join(view, name)), name)
+
+    def test_refuses_a_view_inside_the_data_folder(self):
+        with self.assertRaises(ValueError):
+            dataview.make_view(self.data, os.path.join(self.data, 'view'))
+        with self.assertRaises(ValueError):
+            dataview.make_view(self.data, self.tmp)
+        self.assertFalse(os.path.exists(os.path.join(self.data, 'view')))
+
+    def test_remove_view_leaves_the_install_alone(self):
+        view = dataview.make_view(self.data, os.path.join(self.tmp, 'view'))
+        dataview.remove_view(view)
+        self.assertFalse(os.path.exists(view))
+        self.assertEqual(self.read(self.data, 'Data/a.bif'), 'b')
+        self.assertEqual(self.read(self.data, 'cache/c'), 'c')
+        self.assertEqual(self.read(self.data, 'mpsave/default/s.sav'), 'sv')
+        dataview.remove_view(view)
+
+    def test_windows_drive_detection(self):
+        self.assertTrue(dataview.on_windows_drive('/mnt/c/x/y'))
+        self.assertFalse(dataview.on_windows_drive('/mnt/wsl/x'))
+        self.assertFalse(dataview.on_windows_drive('/tmp/x'))
+
+    def test_windows_links_are_junctions_and_hard_links(self):
+        calls = []
+        orig = dataview._junction
+        dataview._junction = lambda target, link: (
+            calls.append((target, link)), os.symlink(target, link))
+        self.addCleanup(setattr, dataview, '_junction', orig)
+        view = dataview.make_view(self.data, os.path.join(self.tmp, 'view'),
+                                  windows=True)
+        self.assertEqual(sorted(os.path.basename(c[1]) for c in calls),
+                         ['Data', 'Scripts', 'Sounds'])
+        key = os.path.join(view, 'CHITIN.KEY')
+        self.assertFalse(os.path.islink(key))
+        self.assertTrue(os.path.samefile(
+            key, os.path.join(self.data, 'CHITIN.KEY')))
 
 
 if __name__ == '__main__':

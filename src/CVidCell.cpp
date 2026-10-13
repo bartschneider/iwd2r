@@ -5,6 +5,7 @@
 #include "CVidMode.h"
 #include "CVidPoly.h"
 #include "CVideo3d.h"
+#include "render/api.h"
 
 // 0x8BAC88
 DWORD CVidCell::dword_8BAC88 = -1;
@@ -851,6 +852,7 @@ BOOL CVidCell::Render(WORD* pSurface, LONG lPitch, INT nRefPointX, INT nRefPoint
 // 0x7AEAD0
 BOOL CVidCell::Render(INT nSurface, int x, int y, const CRect& rClip, CVidPoly* pClipPoly, int nPolys, DWORD dwFlags, int nTransVal)
 {
+    if (auto* b = render::Active(); b && b->Clipped(rClip).DrawCell(*this, m_nCurrentFrame, { x, y }, &m_cPalette, dwFlags, nTransVal)) return render::CellHandled(*this);
     BOOL bSuccess;
 
     if (g_pChitin->cVideo.m_bIs3dAccelerated) {

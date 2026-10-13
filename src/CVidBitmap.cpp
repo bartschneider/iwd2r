@@ -4,6 +4,7 @@
 #include "CUtil.h"
 #include "CVidInf.h"
 #include "CVideo3d.h"
+#include "render/api.h"
 
 // 0x7B2A40
 CVidBitmap::CVidBitmap()
@@ -170,6 +171,7 @@ void CVidBitmap::SetRes(CResBitmap* pResBmp)
 // 0x7B3190
 BOOL CVidBitmap::RenderDirect(INT nSurface, INT x, INT y, const CRect& rClip, DWORD dwFlags, BOOLEAN bDemanded)
 {
+    if (auto* b = render::Active(); b && b->Clipped(rClip).DrawBitmap(*this, { x, y }, dwFlags)) return TRUE;
     if (g_pChitin->cVideo.Is3dAccelerated()) {
         return RenderDirect3d(x, y, rClip, dwFlags, bDemanded);
     }

@@ -1,0 +1,6 @@
+{
+  "comment": "Entries of an install's top folder that the engine writes. A private view (tools/dataview.py, tests/data_view.cpp) makes each a real folder or file of its own; every other entry is a link to the install. Names and patterns match without regard to case. Found by reading the writers in src/: CInfGame.cpp (temp, tempsave, save, mpsave via DirectoryRemoveFiles/DirectoryCopyFiles/UncompressDirectory), CDimm.cpp (DirectoryCopyFiles, DirectoryRemoveFiles, UncompressDirectory and the generic writer at 2646: characters and saves), CResCache.cpp (cache), CVidInf.cpp (ScrnShot), CGameJournal.cpp (save), compat/ini.cpp (the INI files).",
+  "empty_dirs": ["temp", "tempsave", "cache", "save", "ScrnShot"],
+  "copied_dirs": ["mpsave", "Characters"],
+  "copied_files": ["*.ini"]
+}

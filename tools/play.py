@@ -32,6 +32,13 @@ still backed up before the run and restored byte-identical afterwards (also
 on Ctrl-C), because the engine rewrites icewind2.ini on exit as the original
 does.
 
+Every run starts the engine on a private view of the install
+(tools/dataview.py): links to the install plus real, private temp/, cache/,
+INI files and the other folders the engine writes, in the run folder's data/
+(on the Windows drive for Windows runs). Runs at once do not collide, and
+the install is never written. The view is removed after the run unless
+--keep-data-view is given.
+
 Each run gets runs/<YYYYMMDD-HHMMSS>/ in the repository: log.txt (the game's
 stdout and stderr), the screenshots, ini-backup/ and summary.txt. The exit
 code is the game's.
@@ -55,6 +62,7 @@ import time
 # The sibling modules (python3 -I does not put the script's folder on the
 # path).
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import dataview  # noqa: E402
 import filelock  # noqa: E402
 import realinput  # noqa: E402
 import winsandbox  # noqa: E402
@@ -194,6 +202,9 @@ def parse_args(argv):
                     + DEFAULT_DATA + ')')
     ap.add_argument('--no-build', action='store_true',
                     help='run the existing build without syncing or building')
+    ap.add_argument('--keep-data-view', action='store_true',
+                    help='keep the run\'s private data/ view of the install '
+                    '(removed after the run otherwise)')
     ap.add_argument('--vm', choices=VM_MODES,
                     help='real OS input in an isolated display: linux (Xvfb '
                     '+ xdotool), windows (Windows Sandbox) or all')
@@ -309,7 +320,7 @@ def restore_inis(backup_dir, install, names):
                 have = f.read()
         if have != want:
             changed.append(name)
-        shutil.copy2(src, dst)
+            shutil.copy2(src, dst)
     return changed
 
 
@@ -572,21 +583,18 @@ def run_linux_vm(args, argv, scenarios, data, overrides, base_dir, nested,
         prepare_scenario_dir(run_dir, path, actions)
         log('linux: %s on Xvfb (real input)' % name)
         env = base_env
-        view = None
-        if args.jobs > 1:
-            # Parallel games would share the install's cache and temp
-            # folders and INI files: each gets a private view of it.
-            view = realinput.make_install_view(
-                data, os.path.join(run_dir, 'install'))
-            env = dict(base_env, IWD2_DATA=view)
+        # Games at once would share the install's cache and temp folders
+        # and INI files: each gets a private view of it.
+        view = dataview.make_view(data, os.path.join(run_dir, 'data'))
+        env = dict(base_env, IWD2_DATA=view)
         try:
             result = realinput.run_scenario(
                 exe, env, actions, run_dir, geometry, args.timeout,
                 taken, cwd=ROOT, abort=abort,
                 cpu=realinput.job_cpu(slot, cpus) if args.jobs > 1 else None)
         finally:
-            if view:
-                realinput.remove_install_view(view)
+            if not args.keep_data_view:
+                dataview.remove_view(view)
         write_vm_summary(run_dir, argv, 'linux-vm', path, overrides, result)
         log('linux: %s exit %s in %.1f s%s' % (
             name, result['code'], result['seconds'],
@@ -713,6 +721,23 @@ def main_vm(args, argv):
     return failed[0] if failed else 0
 
 
+DESKTOP_OK = 'IWD2R_DESKTOP_OK'
+
+
+def desktop_refusal(headless, env):
+    """Why a run that would open a window on the desktop is refused, or None.
+
+    Agents drive the game headless, under Xvfb (--vm linux) or in Windows
+    Sandbox (--vm windows); a window on the user's desktop steals focus and
+    a stray click lands in the run. A person who wants the window sets
+    IWD2R_DESKTOP_OK=1."""
+    if headless or env.get(DESKTOP_OK) == '1':
+        return None
+    return ('play: this run would open a window on the desktop; set %s=1 '
+            'to allow it, or use --headless, --vm linux or --vm windows'
+            % DESKTOP_OK)
+
+
 def main(argv):
     args = parse_args(argv)
     if args.vm:
@@ -722,6 +747,9 @@ def main(argv):
             and not os.environ.get('WAYLAND_DISPLAY'):
         log('no DISPLAY or WAYLAND_DISPLAY: running headless')
         headless = True
+    refusal = desktop_refusal(headless, os.environ)
+    if refusal:
+        sys.exit(refusal)
     data = resolve_data(args.data)
     script = os.path.abspath(args.script) if args.script else None
     if script and not os.path.isfile(script):
@@ -753,9 +781,14 @@ def main(argv):
     try:
         with open(log_path, 'w') as log_file:
             if args.linux:
-                env = child_env(os.environ, data, overrides, headless,
+                view = dataview.make_view(data, os.path.join(run_dir, 'data'))
+                env = child_env(os.environ, view, overrides, headless,
                                 args.frames, script, run_dir, args.sound)
-                code = run_linux(exe, env, log_file)
+                try:
+                    code = run_linux(exe, env, log_file)
+                finally:
+                    if not args.keep_data_view:
+                        dataview.remove_view(view)
             else:
                 win_run = os.path.join(WIN_CHECKOUT, 'runs',
                                        os.path.basename(run_dir))
@@ -764,14 +797,18 @@ def main(argv):
                 if script:
                     shutil.copy2(script, os.path.join(win_run, 'script.txt'))
                     win_script = wslpath('-w', os.path.join(win_run, 'script.txt'))
-                env_vars = child_env({}, wslpath('-w', data), overrides,
+                # The view is on the Windows drive: junctions and hard links.
+                view = dataview.make_view(data, os.path.join(win_run, 'data'))
+                env_vars = child_env({}, wslpath('-w', view), overrides,
                                      headless, args.frames, win_script,
                                      wslpath('-w', win_run), args.sound)
                 try:
                     code = run_windows(exe, env_vars, win_run, log_file)
                 finally:
+                    if not args.keep_data_view:
+                        dataview.remove_view(view)
                     for name in os.listdir(win_run):
-                        if name not in ('run.bat', 'script.txt'):
+                        if name not in ('run.bat', 'script.txt', 'data'):
                             shutil.copy2(os.path.join(win_run, name),
                                          os.path.join(run_dir, name))
     except KeyboardInterrupt:

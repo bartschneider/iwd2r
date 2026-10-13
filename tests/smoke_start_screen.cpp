@@ -3,7 +3,7 @@
 
 #include "ScreenLayout.h"
 #include "compat/ini.h"
-#include "install_ini_backup.h"
+#include "data_view.h"
 
 #include <chrono>
 #include <cstdio>
@@ -59,24 +59,19 @@ TEST_CASE("start screen smoke", "[data]")
         SKIP("[iwd2r-skip] icewind2.ini asks for a screen iwd2r refuses: " << screen.error);
     }
 
-    WARN("The engine writes into the install directory when it runs (cache files, temp/), as the original game does on every launch; the INI files are restored afterwards.");
+    // The engine writes into its data folder when it runs (cache files, temp/, the INI files), as the original does: it runs on a private view.
+    DataView view(data);
 
     const std::string out = (std::filesystem::temp_directory_path() / ("iwd2r-smoke-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".txt")).string();
 #ifdef _WIN32
     // No timeout on Windows.
-    const std::string cmd = "set SDL_VIDEO_DRIVER=dummy&& set SDL_AUDIO_DRIVER=dummy&& set IWD2R_SMOKE_FRAMES=300&& set IWD2_DATA=" + data + "&& \"" IWD2R_EXE "\" > \"" + out + "\" 2>&1";
+    const std::string cmd = "set SDL_VIDEO_DRIVER=dummy&& set SDL_AUDIO_DRIVER=dummy&& set IWD2R_SMOKE_FRAMES=300&& set IWD2_DATA=" + view.Path() + "&& \"" IWD2R_EXE "\" > \"" + out + "\" 2>&1";
     const std::string full = "\"" + cmd + "\"";
 #else
     // coreutils timeout bounds the run to 120 seconds.
-    const std::string full = "SDL_VIDEO_DRIVER=dummy SDL_AUDIO_DRIVER=dummy IWD2R_SMOKE_FRAMES=300 IWD2_DATA=\"" + data + "\" timeout 120 \"" IWD2R_EXE "\" > \"" + out + "\" 2>&1";
+    const std::string full = "SDL_VIDEO_DRIVER=dummy SDL_AUDIO_DRIVER=dummy IWD2R_SMOKE_FRAMES=300 IWD2_DATA=\"" + view.Path() + "\" timeout 120 \"" IWD2R_EXE "\" > \"" + out + "\" 2>&1";
 #endif
-    int raw = 0;
-    {
-        // Run with IWD2R_INI_OVERRIDE, the engine would write the overridden
-        // values into the player's INI on exit.
-        InstallIniBackup backup(data);
-        raw = std::system(full.c_str());
-    }
+    const int raw = std::system(full.c_str());
 #ifdef _WIN32
     const int status = raw;
 #else
