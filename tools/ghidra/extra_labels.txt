@@ -35,13 +35,3 @@
 # screen's attack bonus list. ecx (a CRuleTables) is set by every caller but
 # not read. Evidence: 547020.md.
 0x547020 CRuleTables::GetIterativeAttackBonus
-
-# Unnamed (FUN_00542a90). Rolls hit points from (nSides, nRolls, nLevel, a4,
-# nModifier): at nLevel 1 or below nSides * nRolls; otherwise per roll three
-# draws of rand() % nSides, and when the third + 1 is below a4, a4, else
-# three more draws and the last + 1; nModifier is added only when nRolls is
-# 0. ecx is not read. Its only caller, 0x542B40, reads SIDES, ROLLS
-# and MODIFIER from a class hit point table (the CStrings at 0x8DEE58,
-# 0x8DF150 and 0x8DF094, built from "SIDES", "ROLLS" and "MODIFIER" at
-# 0x53A920-0x53A9A5) for each level. Evidence: 542A90.md.
-0x542A90 CRuleTables::RollHitPoints
