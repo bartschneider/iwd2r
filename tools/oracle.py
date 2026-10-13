@@ -660,6 +660,12 @@ def verify_vanilla(game, md5, install_win=INSTALL_WIN):
         failures.append('IWD2EE leftover %s' % rel)
     for dirpath, dirnames, filenames in os.walk(game):
         dirnames.sort()
+        for name in dirnames:
+            rel = os.path.relpath(os.path.join(dirpath, name),
+                                  game).replace(os.sep, '/')
+            if name.lower().startswith('ieex') and \
+                    not any(rel == x or rel.startswith(x + '/') for x in left):
+                failures.append('IEex folder %s' % rel)
         for name in sorted(filenames):
             path = os.path.join(dirpath, name)
             rel = os.path.relpath(path, game).replace(os.sep, '/')
@@ -717,6 +723,86 @@ def say(log, message):
     log.flush()
 
 
+def _resolved(path):
+    """path resolved through links, case-folded, no trailing separator."""
+    out = os.path.normcase(os.path.realpath(path)).lower().rstrip('/\\')
+    return out or '/'
+
+
+def windows_reparse(path):
+    """Whether Windows lists path as a reparse point (junction, symlink):
+    dir /AL /B on its parent through cmd.exe. Paths off drvfs are False."""
+    import play
+    if not path.startswith('/mnt/'):
+        return False
+    parent, name = os.path.split(path.rstrip('/'))
+    if not os.path.isdir(parent):
+        return False
+    r = subprocess.run([play.CMD_EXE, '/c', 'dir', '/AL', '/B',
+                        play.wslpath('-w', parent)], cwd=parent,
+                       capture_output=True, text=True, errors='replace')
+    return name.lower() in (line.strip().lower()
+                            for line in r.stdout.splitlines())
+
+
+def unsafe_target(game, install, oracle_dir=ORACLE_DIR,
+                  reparse=windows_reparse):
+    """Why game may not be deleted, rsynced into or run in, or None."""
+    g, i, o = _resolved(game), _resolved(install), _resolved(oracle_dir)
+    if g == i:
+        return '%s is the install %s' % (game, install)
+    if g.startswith(i + '/'):
+        return '%s is inside the install %s' % (game, install)
+    if i.startswith(g + '/'):
+        return 'the install %s is inside %s' % (install, game)
+    if os.path.dirname(g) != o:
+        return '%s (%s) is not directly in %s' % (game, g, oracle_dir)
+    for path in (game.rstrip('/'), oracle_dir.rstrip('/')):
+        if os.path.islink(path):
+            return '%s is a symlink' % path
+        if reparse(path):
+            return '%s is a reparse point' % path
+    return None
+
+
+def assert_safe_target(game, install):
+    reason = unsafe_target(game, install)
+    if reason:
+        sys.exit('oracle: refusing to touch the copy: %s' % reason)
+
+
+def links_in(root):
+    """Every symlink under root (relative paths). On drvfs, Windows
+    junctions and symlinks show up as symlinks too."""
+    out = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        for name in dirnames + filenames:
+            if os.path.islink(os.path.join(dirpath, name)):
+                out.append(os.path.relpath(os.path.join(dirpath, name), root))
+    return sorted(out)
+
+
+def marker_ok(game, md5=None):
+    """Whether game has a marker that parses and names the vanilla MD5."""
+    try:
+        with open(os.path.join(game, MARKER)) as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return False
+    return isinstance(data, dict) and data.get('md5') == (md5 or vanilla_md5())
+
+
+def write_marker(game, data):
+    """Write the marker atomically: a temporary name, then a rename."""
+    tmp = os.path.join(game, MARKER + '.tmp')
+    with open(tmp, 'w') as f:
+        json.dump(data, f, indent=2)
+        f.write('\n')
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, os.path.join(game, MARKER))
+
+
 def prove_separate(game, install, log):
     """Exit unless game is a real directory of its own, not a link or
     junction to install."""
@@ -756,21 +842,26 @@ def build_vanilla(game, install=INSTALL, md5=None):
     with open(os.path.join(run_dir, 'vanilla.log'), 'w') as log:
         before = install_state(install)
         say(log, 'install before: %s' % json.dumps(before))
+        assert_safe_target(game, install)
         marker = os.path.join(game, MARKER)
         if os.path.lexists(marker):
             os.remove(marker)
-        if os.path.islink(game):
-            sys.exit('oracle: %s is a link; remove it by hand' % game)
         if os.path.exists(game):
             say(log, 'removing the old copy %s' % game)
             shutil.rmtree(game)
         os.makedirs(game)
         prove_separate(game, install, log)
         say(log, 'copying %s to %s' % (install, game))
+        assert_safe_target(game, install)
         if play.stream(['rsync', '-a', '--delete', install + '/', game + '/'],
                        log) != 0:
             sys.exit('oracle: rsync failed')
         prove_separate(game, install, log)
+        links = links_in(game)
+        if links:
+            sys.exit('oracle: the copy holds links or junctions: %s'
+                     % ' '.join(links))
+        say(log, 'no symlinks or junctions in the copy')
         game_win = play.wslpath('-w', game)
         if game_win.lower().startswith(INSTALL_WIN.lower()):
             sys.exit('oracle: %s is inside the install' % game_win)
@@ -797,6 +888,7 @@ def build_vanilla(game, install=INSTALL, md5=None):
                 f.write(script)
             say(log, 'running WeiDU in %s: %s' % (game_win,
                                                    script.splitlines()[2]))
+            assert_safe_target(game, install)
             code = play.stream([play.CMD_EXE, '/c', play.wslpath('-w', bat)],
                                log, cwd=game, stdin=subprocess.DEVNULL)
             if os.path.exists(weidu_log):
@@ -809,6 +901,7 @@ def build_vanilla(game, install=INSTALL, md5=None):
         for rel in leftovers(game):
             path = os.path.join(game, rel)
             say(log, 'deleting leftover %s' % rel)
+            assert_safe_target(game, install)
             if os.path.isdir(path) and not os.path.islink(path):
                 shutil.rmtree(path)
             else:
@@ -840,19 +933,18 @@ def build_vanilla(game, install=INSTALL, md5=None):
             sys.exit('oracle: the vanilla copy failed verification; see %s'
                      % os.path.relpath(run_dir, ROOT))
         say(log, 'verified: %s is vanilla (iwd2.exe MD5 %s)' % (game, md5))
-        with open(marker, 'w') as f:
-            json.dump({'md5': md5, 'install': before,
-                       'built': datetime.datetime.now().isoformat(
-                           timespec='seconds')}, f, indent=2)
-            f.write('\n')
+        write_marker(game, {'md5': md5, 'install': before,
+                            'built': datetime.datetime.now().isoformat(
+                                timespec='seconds')})
         say(log, 'wrote %s' % marker)
     return game
 
 
 def ensure_vanilla(rebuild=False, game=GAME_DIR, build=build_vanilla):
     """The vanilla copy's path, building it first when it has no marker
-    (never built, or an interrupted build) or rebuild is set."""
-    if rebuild or not os.path.isfile(os.path.join(game, MARKER)):
+    (never built, or an interrupted build), a marker that does not parse
+    or name the vanilla MD5, or rebuild is set."""
+    if rebuild or not marker_ok(game):
         build(game)
     return game
 

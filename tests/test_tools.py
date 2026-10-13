@@ -1518,9 +1518,13 @@ class OracleVanillaTest(unittest.TestCase):
             'Override/IEex_Core.lua', 'Override/IEex_INI.lua', 'iwd2ee',
             'iwd2ee_mod_compatibility_patch', 'Shaders']))
 
-    def test_ensure_keeps_a_marked_copy(self):
+    def mark(self, text=None):
         with open(os.path.join(self.game, oracle.MARKER), 'w') as f:
-            f.write('{}')
+            f.write(json.dumps({'md5': oracle.vanilla_md5()})
+                    if text is None else text)
+
+    def test_ensure_keeps_a_marked_copy(self):
+        self.mark()
         built = []
         self.assertEqual(oracle.ensure_vanilla(game=self.game,
                                                build=built.append),
@@ -1533,17 +1537,125 @@ class OracleVanillaTest(unittest.TestCase):
         self.assertEqual(built, [self.game])
 
     def test_ensure_rebuilds_on_request(self):
-        with open(os.path.join(self.game, oracle.MARKER), 'w') as f:
-            f.write('{}')
+        self.mark()
         built = []
         oracle.ensure_vanilla(rebuild=True, game=self.game,
                               build=built.append)
         self.assertEqual(built, [self.game])
 
+    def test_ensure_rebuilds_on_a_bad_marker(self):
+        for text in ('', '{"md5": ', '[]', '{}', '{"md5": "0"}'):
+            self.mark(text)
+            built = []
+            oracle.ensure_vanilla(game=self.game, build=built.append)
+            self.assertEqual(built, [self.game], text)
+
+    def test_write_marker_is_atomic(self):
+        oracle.write_marker(self.game, {'md5': oracle.vanilla_md5()})
+        self.assertTrue(oracle.marker_ok(self.game))
+        self.assertFalse(os.path.exists(
+            os.path.join(self.game, oracle.MARKER + '.tmp')))
+
+    def test_ieex_folder_fails(self):
+        os.makedirs(os.path.join(self.game, 'Override', 'IEex_stuff'))
+        failures = self.verify()
+        self.assertEqual(len(failures), 1)
+        self.assertIn('IEex_stuff', failures[0])
+
+    def test_links_in(self):
+        os.symlink(os.path.join(self.game, 'Override'),
+                   os.path.join(self.game, 'Data'))
+        os.symlink(os.path.join(self.game, 'iwd2.exe'),
+                   os.path.join(self.game, 'Override', 'x.exe'))
+        self.assertEqual(oracle.links_in(self.game),
+                         ['Data', os.path.join('Override', 'x.exe')])
+
     def test_marker_is_ignored_by_verification(self):
         with open(os.path.join(self.game, oracle.MARKER), 'w') as f:
             f.write('{}')
         self.assertEqual(self.verify(), [])
+
+
+class OracleSafeTargetTest(unittest.TestCase):
+    """tools/oracle.py vanilla: the guard before deleting or writing the
+    copy."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        base = os.path.realpath(self.tmp.name)
+        self.oracle_dir = os.path.join(base, 'oracle')
+        self.install = os.path.join(base, 'Games', 'Icewind Dale II')
+        self.game = os.path.join(self.oracle_dir, 'game')
+        for path in (self.oracle_dir, self.install, self.game):
+            os.makedirs(path, exist_ok=True)
+        self.reparse = set()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def why(self, game, install=None, oracle_dir=None):
+        return oracle.unsafe_target(
+            game, install or self.install, oracle_dir or self.oracle_dir,
+            reparse=lambda p: p.rstrip('/') in self.reparse)
+
+    def test_safe(self):
+        self.assertIsNone(self.why(self.game))
+        self.assertIsNone(self.why(self.game + '/'))
+
+    def test_equal_paths(self):
+        self.assertIn('is the install', self.why(self.install))
+
+    def test_child_of_install(self):
+        self.assertIn('inside the install',
+                      self.why(os.path.join(self.install, 'game')))
+
+    def test_parent_of_install(self):
+        self.assertIn('the install', self.why(os.path.dirname(self.install)))
+
+    def test_case_and_trailing_slash_variants(self):
+        self.assertIn('is the install', self.why(self.install + '/'))
+        self.assertIn('is the install', self.why(
+            self.install, install=self.install.upper() + '//'))
+        self.assertIn('inside the install', self.why(
+            os.path.join(self.install.swapcase(), 'Data'),
+            oracle_dir=self.install.swapcase()))
+        self.assertIn('the install', self.why(
+            os.path.dirname(self.install).upper() + '/',
+            install=self.install))
+
+    def test_symlinked_game_dir(self):
+        os.rmdir(self.game)
+        os.symlink(self.install, self.game)
+        self.assertIn('is the install', self.why(self.game))
+        os.remove(self.game)
+        elsewhere = os.path.join(self.oracle_dir, 'elsewhere')
+        os.makedirs(elsewhere)
+        os.symlink(elsewhere, self.game)
+        self.assertIn('symlink', self.why(self.game))
+
+    def test_symlinked_oracle_dir(self):
+        real = self.oracle_dir + '-real'
+        os.rename(self.oracle_dir, real)
+        os.symlink(real, self.oracle_dir)
+        self.assertIn('symlink', self.why(
+            os.path.join(self.oracle_dir, 'game'),
+            oracle_dir=self.oracle_dir))
+
+    def test_reparse_point(self):
+        self.reparse.add(self.game)
+        self.assertIn('reparse point', self.why(self.game))
+        self.reparse = {self.oracle_dir}
+        self.assertIn('reparse point', self.why(self.game))
+
+    def test_game_outside_oracle_dir(self):
+        other = os.path.join(os.path.dirname(self.oracle_dir), 'game')
+        self.assertIn('not directly in', self.why(other))
+        self.assertIn('not directly in', self.why(
+            os.path.join(self.game, 'deeper')))
+
+    def test_missing_game_is_fine(self):
+        os.rmdir(self.game)
+        self.assertIsNone(self.why(self.game))
 
 
 class PlayBuildWindowsDefaultsTest(unittest.TestCase):
