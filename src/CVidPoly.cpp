@@ -245,7 +245,7 @@ BOOL CVidPoly::FillConvexPoly(WORD* pSurface, LONG lPitch, const CRect& rClipRec
         }
 
         // NOTE: Signed compare.
-        if (static_cast<LONG>(nMinYPt) >= rClip.top && static_cast<LONG>(nMinYPt) < rClip.bottom) {
+        if (static_cast<LONG>(nMinYPt) >= rClip.top && static_cast<LONG>(nMinYPt) <= rClip.bottom) {
             INT xMin;
             INT xMax;
             if (nLeftX > nRightX) {
@@ -413,7 +413,7 @@ void CVidPoly::DrawHLineDithered16(void* pSurface, int xMin, int xMax, DWORD dwC
             }
         }
 
-        width /= 2;
+        width = (width + 1) / 2;
         for (int x = 0; x < width; x++) {
             *pSurface16 = static_cast<unsigned short>(dwColor);
             pSurface16 += 2;
@@ -442,7 +442,7 @@ void CVidPoly::DrawHLineDitheredMirrored16(void* pSurface, int xMin, int xMax, D
             }
         }
 
-        width /= 2;
+        width = (width + 1) / 2;
         for (int x = 0; x < width; x++) {
             *pSurface16 = static_cast<unsigned short>(dwColor);
             pSurface16 -= 2;
@@ -588,7 +588,7 @@ void CVidPoly::DrawHLineDithered24(void* pSurface, int xMin, int xMax, DWORD dwC
             }
         }
 
-        width /= 2;
+        width = (width + 1) / 2;
         for (int x = 0; x < width; x++) {
             pSurface8[0] = GetRValue(dwColor);
             pSurface8[1] = GetGValue(dwColor);
@@ -619,7 +619,7 @@ void CVidPoly::DrawHLineDitheredMirrored24(void* pSurface, int xMin, int xMax, D
             }
         }
 
-        width /= 2;
+        width = (width + 1) / 2;
         for (int x = 0; x < width; x++) {
             pSurface8[0] = GetRValue(dwColor);
             pSurface8[1] = GetGValue(dwColor);
@@ -686,7 +686,7 @@ void CVidPoly::DrawHLineDithered32(void* pSurface, int xMin, int xMax, DWORD dwC
                 }
             }
 
-            width /= 2;
+            width = (width + 1) / 2;
             for (int x = 0; x < width; x++) {
                 *pSurface32 = dwColor;
                 pSurface32 += 2;
@@ -722,7 +722,7 @@ void CVidPoly::DrawHLineDitheredMirrored32(void* pSurface, int xMin, int xMax, D
                 }
             }
 
-            width /= 2;
+            width = (width + 1) / 2;
             for (int x = 0; x < width; x++) {
                 *pSurface32 = dwColor;
                 pSurface32 -= 2;
