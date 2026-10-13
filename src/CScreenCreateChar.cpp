@@ -4116,8 +4116,7 @@ void CScreenCreateChar::UpdateCharacterStats(CGameSprite* pSprite)
     pSprite->GetDerivedStats()->m_classMask = 0;
     pSprite->GetDerivedStats()->m_nXP = 0;
 
-    // TODO: Incomplete.
-    // DStats = *pSprite->GetDerivedStats();
+    DStats = *pSprite->GetDerivedStats();
 
     ruleTables.GetNextLevel(typeAI.m_nClass, *pSprite->GetDerivedStats(), pSprite);
 
@@ -4256,7 +4255,56 @@ void CScreenCreateChar::UpdateCharacterStats(CGameSprite* pSprite)
     pSprite->GetBaseStats()->m_resistCrushingBase += static_cast<BYTE>(atol(ruleTables.m_tClassRsMd.GetAt(CRuleTables::BLUDGEONING, sClass)));
     pSprite->GetBaseStats()->m_resistPiercingBase += static_cast<BYTE>(atol(ruleTables.m_tClassRsMd.GetAt(CRuleTables::PIERCING, sClass)));
 
-    // TODO: Incomplete (base skills).
+    if (typeAI.m_nClass == CAIOBJECTTYPE_C_CLERIC) {
+        // The cleric's domain picks the column after the 15 class columns of
+        // SKILLS.2DA.
+        INT nDomain;
+        switch (pSprite->GetSpecialization()) {
+        case 0x8000:
+            nDomain = 0;
+            break;
+        case 0x10000:
+            nDomain = 1;
+            break;
+        case 0x20000:
+            nDomain = 2;
+            break;
+        case 0x40000:
+            nDomain = 3;
+            break;
+        case 0x80000:
+            nDomain = 4;
+            break;
+        case 0x100000:
+            nDomain = 5;
+            break;
+        case 0x200000:
+            nDomain = 6;
+            break;
+        case 0x400000:
+            nDomain = 7;
+            break;
+        case 0x800000:
+            nDomain = 8;
+            break;
+        default:
+            // NOTE: The original falls back to the second value
+            // sub_546B60 wrote.
+            nDomain = v2;
+            break;
+        }
+
+        for (INT nSkill = 0; nSkill < ruleTables.m_tSkills.GetHeight(); nSkill++) {
+            INT nValue = atol(ruleTables.m_tSkills.GetAt(CPoint(nDomain + 15, nSkill)));
+            INT nSkillValue = pSprite->GetSkillValue(nSkill);
+            if (nValue > 0) {
+                if (nValue > nSkillValue) {
+                    nSkillValue = nValue;
+                }
+                pSprite->SetSkillValue(nSkill, nSkillValue);
+            }
+        }
+    }
 
     UpdateCharacterAppearance();
 }
