@@ -44,17 +44,24 @@ constexpr uint32_t kVanillaCrtRanges[][2] = {
 ")
 
     # The runner's own image sits at a fixed 0x10000000, out of the vanilla
-    # range. It links the CRT statically: no runtime DLLs to deploy beside it,
-    # and fewer modules competing for low addresses.
-    # Case files register themselves (ORACLE_CASE); add new ones here.
+    # range. Our engine's objects are linked in (not entry.cpp), so cases call
+    # the original and ours side by side; the engine, the shims and SDL are
+    # built against the DLL CRT, so the runner uses it too (the x86 runtime
+    # DLLs ship with Windows' VC++ redistributable and Visual Studio). Our
+    # static constructors run under that CRT, the original's under its own;
+    # they share no state.
+    # Case files register themselves (ORACLE_CASE); add new ones here. Files
+    # that include engine headers must not include <windows.h> (compat's
+    # win_types.h defines the same names): selftest_ours.cpp is the bridge
+    # selftest.cpp uses.
     add_executable(iwd2r_oracle runner/oracle_main.cpp runner/snapshot.cpp runner/report.cpp
-        loader/pe.cpp loader/map_win32.cpp cases/selftest.cpp)
+        loader/pe.cpp loader/map_win32.cpp cases/selftest.cpp cases/selftest_ours.cpp
+        $<TARGET_OBJECTS:iwd2r_engine>)
     target_include_directories(iwd2r_oracle PRIVATE "${PROJECT_SOURCE_DIR}"
-        "${CMAKE_CURRENT_BINARY_DIR}/generated")
-    target_link_libraries(iwd2r_oracle PRIVATE bcrypt)
+        "${PROJECT_SOURCE_DIR}/src" "${CMAKE_CURRENT_BINARY_DIR}/generated")
+    target_link_libraries(iwd2r_oracle PRIVATE iwd2r_platform iwd2r_compat ${ZLIB_LIBRARIES} bcrypt)
     # /NXCOMPAT:NO: the original's exception handlers run from private memory,
     # which x86 handler validation refuses while DEP is on (oracle_main.cpp).
     target_link_options(iwd2r_oracle PRIVATE /BASE:0x10000000 /DYNAMICBASE:NO /FIXED /NXCOMPAT:NO)
-    set_property(TARGET iwd2r_oracle PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
     iwd2r_strict_warnings(iwd2r_oracle)
 endif()

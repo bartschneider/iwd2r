@@ -1,5 +1,7 @@
 // Self-test of the oracle runner: isolation between cases works, a wrong
-// result is seen, and a fault in original code is caught and reported.
+// result is seen, a fault in original code is caught and reported, and our
+// engine objects are linked in.
+#include "oracle/cases/selftest_ours.h"
 #include "oracle/runner/compare.h"
 #include "oracle/runner/registry.h"
 #include "vanilla_config.h"
@@ -174,6 +176,19 @@ void OriginalThrow(CaseContext& ctx)
     ctx.Fail(ctx.Inputs(), "an uncaught original C++ throw", "returned normally");
 }
 
+// Our engine is linked into the runner: our IcewindMisc::Roll(3, 6) after our
+// srand(1) draws the VC6 sequence 41, 18467, 6334 (6 + 6 + 5 = 17), and our
+// generator's next value is 26500. This proves the link only; rand.cpp
+// compares ours with the original.
+void OursLinked(CaseContext& ctx)
+{
+    ctx.SetInputs("ours: iwd2r_srand(1), IcewindMisc::Roll(3, 6)");
+    oracle::Compare(ctx, 17, selftest_ours::SeededRoll(1, 3, 6));
+    ctx.SetInputs("ours: iwd2r_rand() after the roll");
+    oracle::Compare(ctx, 26500, selftest_ours::NextRand());
+    ctx.CountInputs(2);
+}
+
 } // namespace
 
 // The crash runs before must_fail, so the report shows a case after a fault
@@ -184,3 +199,4 @@ ORACLE_CASE_EXPECT("selftest/original_seh_frame", OriginalSehFrame, OracleExpect
 ORACLE_CASE_EXPECT("selftest/original_cxx_frame", OriginalCxxFrame, OracleExpect::Crash);
 ORACLE_CASE_EXPECT("selftest/original_throw", OriginalThrow, OracleExpect::Crash);
 ORACLE_CASE_EXPECT("selftest/must_fail", MustFail, OracleExpect::Fail);
+ORACLE_CASE("selftest/ours_linked", OursLinked);
