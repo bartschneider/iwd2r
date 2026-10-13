@@ -21,6 +21,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <map>
 #include <memory>
 #include <string>
 #include <thread>
@@ -275,6 +276,43 @@ std::string SavedGame()
     return ReadFile(Child(Child(g_view, "mpsave"), "default") / "ICEWIND2.GAM");
 }
 
+// Every file SaveGame left in mpsave/default, by upper-case name.
+std::map<std::string, std::string> SavedFiles()
+{
+    std::map<std::string, std::string> files;
+    std::error_code ec;
+    for (const auto& entry : fs::directory_iterator(Child(Child(g_view, "mpsave"), "default"), ec)) {
+        std::string name = entry.path().filename().string();
+        for (char& c : name)
+            c = static_cast<char>(toupper(static_cast<unsigned char>(c)));
+        files[name] = ReadFile(entry.path());
+    }
+    return files;
+}
+
+// Checks an AREAV9.1 file's creature table (offset 0x64, count 0x68, 0x110
+// bytes each): every creature carries its CRE, so a producer whose 64-bit
+// handle did not resolve (compat/marshal_ptr.h) shows up here instead of as
+// a silent zero block. Returns the creature count.
+int CheckAreaCreatures(const std::string& are)
+{
+    REQUIRE(are.size() >= 0x6A);
+    CHECK(are.compare(0, 8, "AREAV9.1") == 0);
+    const uint32_t table = Le32(are, 0x64);
+    const uint16_t count = Le16(are, 0x68);
+    REQUIRE(table + 0x110 * count <= are.size());
+    for (uint16_t n = 0; n < count; n++) {
+        const uint32_t at = table + 0x110 * n;
+        const uint32_t offset = Le32(are, at + 0x88);
+        const uint32_t size = Le32(are, at + 0x8C);
+        INFO("creature " << n << " " << are.substr(at, 32).c_str());
+        CHECK(size > 0);
+        REQUIRE(offset + size <= are.size());
+        CHECK(are.compare(offset, 8, "CRE V2.2") == 0);
+    }
+    return count;
+}
+
 // Checks the GAMEV2.2 layout CInfGame::Marshal writes.
 void CheckGameFile(const std::string& gam)
 {
@@ -346,18 +384,34 @@ TEST_CASE("gam: SaveGame's game file loads back and saves again byte for byte", 
     pGame->SetupCharacters(FALSE);
     REQUIRE(pGame->m_pGameAreaMaster != NULL);
     REQUIRE(pSprite->GetArea() == pGame->m_pGameAreaMaster);
+    // As Party Formation's Done does before it saves: SortLists moves the
+    // objects the area load queued onto the lists CGameArea::Marshal walks.
+    for (int n = 0; n < CINFGAME_MAX_AREAS; n++) {
+        if (pGame->m_gameAreas[n] != NULL)
+            pGame->m_gameAreas[n]->SortLists();
+    }
 
     REQUIRE(pGame->SaveGame(FALSE, FALSE, FALSE));
+    const std::map<std::string, std::string> firstFiles = SavedFiles();
     const std::string first = SavedGame();
     CheckGameFile(first);
+    REQUIRE(firstFiles.count("AR1000.ARE") == 1);
+    // AR1000 (the Targos docks) has creatures; the area-side producers and
+    // the eight UnmarshalPtr consumers in CGameArea::Marshal carry them.
+    CHECK(CheckAreaCreatures(firstFiles.at("AR1000.ARE")) > 0);
     CHECK(Le32(first, 0x24) == 1);
     CHECK(first.compare(0x58, 6, std::string("AR1000", 6)) == 0);
     CHECK(first.compare(0xB4 + 0x18, 6, std::string("AR1000", 6)) == 0);
 
     // A second save of the same game writes the same bytes.
     REQUIRE(pGame->SaveGame(FALSE, FALSE, FALSE));
-    const std::string second = SavedGame();
-    CHECK(second == first);
+    const std::map<std::string, std::string> secondFiles = SavedFiles();
+    CHECK(secondFiles.size() == firstFiles.size());
+    for (const auto& [name, bytes] : firstFiles) {
+        INFO(name);
+        REQUIRE(secondFiles.count(name) == 1);
+        CHECK(secondFiles.at(name) == bytes);
+    }
 
     // Unmarshal of the written file (through LoadGame, which reads it from
     // the save folder) gives the same master area and party count.
@@ -369,7 +423,12 @@ TEST_CASE("gam: SaveGame's game file loads back and saves again byte for byte", 
     CHECK(LoadedAreas(pGame) == 1);
 }
 
-TEST_CASE("gam: a game file naming a second unsaved area loads only the master area", "[gam][data]")
+// A load-robustness check. The real two-area save (LoadArea AR1001 beside
+// AR1000, SaveGame, check 0x40 and what 0x5AC430 writes for each loaded
+// area, reload) is deferred to M2/M3: AR1001's creatures carry effect 261,
+// whose ApplyEffect (IcewindCGameEffectImmunityToEffectAndResource) is not
+// ported yet.
+TEST_CASE("gam: loading a game file that names an unsaved second area does not assert", "[gam][data]")
 {
     if (DataDir() == nullptr) {
         SKIP("[iwd2r-skip] IWD2_DATA unset");
@@ -441,8 +500,12 @@ TEST_CASE("gam: SetupCharacters twice adds the party once", "[gam][data]")
     CHECK(placed.x != -1);
     CHECK(TimesInArea(pSprite->GetArea(), id) == 1);
 
+    // SetupCharacters zeroes every member's gold unconditionally, so gold
+    // set between the calls proves the second call's body ran.
+    pSprite->m_baseStats.m_gold = 123;
     pGame->UpdateCharacterSlots();
     pGame->SetupCharacters(FALSE);
+    CHECK(pSprite->m_baseStats.m_gold == 0);
     CHECK(pGame->m_nCharacters == 1);
     CHECK(pGame->m_characters[0] == id);
     CHECK(pGame->m_characters[1] == CGameObjectArray::INVALID_INDEX);
@@ -482,6 +545,19 @@ TEST_CASE("gam: character export overwrites a junk PROBE.CHR and numbers past a 
     std::ofstream(characters / "PROBE.CHR", std::ios::binary) << "junk";
 
     CGameSprite* pSprite = NewGameWithOneCharacter(cre, "Probe");
+    // Non-zero values where a premade has zeros, so that each header offset
+    // below is pinned by a value and not by the zeroed buffer.
+    pSprite->m_quickWeapons[1].m_abilityId.m_itemNum = 11;
+    pSprite->m_quickWeapons[1].m_abilityId.m_abilityNum = 1;
+    pSprite->m_quickItems[0].m_abilityId.m_itemNum = 15;
+    pSprite->m_quickItems[0].m_abilityId.m_abilityNum = 2;
+    pSprite->m_quickSpells[0].m_abilityId.field_1D = 7;
+    pSprite->m_quickSpells[0].m_abilityId.field_1E = 9;
+    pSprite->m_quickSpells[8].m_abilityId.field_1D = 3;
+    pSprite->m_quickSpells[8].m_abilityId.field_1E = 4;
+    pSprite->m_secondarySounds = CResRef("PROBESND");
+    memset(pSprite->field_725A, 0, sizeof(pSprite->field_725A));
+    memcpy(pSprite->field_725A, "PROBESET", 8);
     REQUIRE(g_pBaldurChitin->m_pEngineCreateChar->ExportCharacter(pSprite));
 
     const std::string chr = ReadFile(characters / "PROBE.CHR");
@@ -509,7 +585,20 @@ TEST_CASE("gam: character export overwrites a junk PROBE.CHR and numbers past a 
         pSprite->m_quickSongs[n].m_abilityId.m_res.GetResRef(resref);
         CHECK(memcmp(chr.data() + 0xF6 + RESREF_SIZE * n, resref, RESREF_SIZE) == 0);
         CHECK(static_cast<int>(Le32(chr, 0x13E + 4 * n)) == pSprite->field_3D14[n]);
+        CHECK(static_cast<BYTE>(chr[0x164 + n]) == pSprite->m_quickSpells[n].m_abilityId.field_1D);
+        CHECK(static_cast<BYTE>(chr[0x16D + n]) == static_cast<BYTE>(pSprite->m_quickSpells[n].m_abilityId.field_1E));
     }
+    CHECK(static_cast<BYTE>(chr[0x164]) == 7);
+    CHECK(static_cast<BYTE>(chr[0x16D]) == 9);
+    CHECK(static_cast<BYTE>(chr[0x164 + 8]) == 3);
+    CHECK(static_cast<BYTE>(chr[0x16D + 8]) == 4);
+    CHECK(static_cast<SHORT>(Le16(chr, 0x30 + 2 * 1)) == 11);
+    CHECK(static_cast<SHORT>(Le16(chr, 0x40 + 2 * 1)) == 1);
+    CHECK(static_cast<SHORT>(Le16(chr, 0xA2)) == 15);
+    CHECK(static_cast<SHORT>(Le16(chr, 0xA8)) == 2);
+    // The secondary sounds resref (0x17C) and the sound set name (0x184).
+    CHECK(chr.compare(0x17C, 8, "PROBESND") == 0);
+    CHECK(chr.compare(0x184, 9, std::string("PROBESET\0", 9)) == 0);
     for (int n = 0; n < 3; n++) {
         CHECK(static_cast<SHORT>(Le16(chr, 0xA2 + 2 * n)) == pSprite->m_quickItems[n].m_abilityId.m_itemNum);
         CHECK(static_cast<SHORT>(Le16(chr, 0xA8 + 2 * n)) == pSprite->m_quickItems[n].m_abilityId.m_abilityNum);
