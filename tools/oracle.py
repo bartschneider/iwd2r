@@ -11,7 +11,8 @@ Usage (from WSL, in the repository):
   python3 tools/oracle.py vanilla [--rebuild]
   python3 tools/oracle.py replay record <scenario> [--seed N] [--timeout S]
                                         [--dump-every N] [--test-steal-focus N]
-                                        [--test-no-focus-guard] [--host]
+                                        [--test-no-focus-guard]
+                                        [--test-slow-reads MS] [--host]
   python3 tools/oracle.py replay compare <scenario> [--seed N] [--timeout S]
                                          [--dump-every N] [--no-build]
                                          [--host]
@@ -92,10 +93,16 @@ last frame the recorder reached (its status.txt) and exits 10. Any other
 failure exits 1: a dump that does not validate, a game exit code other than
 0, a scenario that did not finish, a scenario checkpoint with no dump, or a
 checkpoint dump that breaks the recorder's invariant (invariant_problem:
-not reinitializing, and no frame without an AI update of its own or one in
-progress, ai_stalled_frames 0). --test-steal-focus N makes a window of the
+not reinitializing, no frame without an AI update of its own,
+ai_stalled_frames 0, and no load in progress, loading and in_async_update
+0). The calls a load draws from inside an AI update are held, not frames:
+the clock stands still for them and no timer fires, so a load costs the
+same AI updates on every machine (platform/replay_clock.h FrameGate,
+globals.loads and held_frames). --test-steal-focus N makes a window of the
 recorder take the foreground at frame N, and --test-no-focus-guard lets
-activation messages reach the game, to show what the focus guard prevents.
+activation messages reach the game, to show what the focus guard prevents;
+--test-slow-reads MS slows every ReadFile off the main thread by MS ms, to
+show a slower disk does not change the dumps.
 On Ctrl+C only this run's injector is killed (by the pid it prints first),
 which closes its job and so kills its game.
 
@@ -122,9 +129,9 @@ focus model), into runs/<stamp>/ours. The copy's INI files are restored
 before and after our run, so both sides start from the same ones. Both
 sides' dumps get replay record's checks (schema, invariant, every
 checkpoint present). Then every scenario checkpoint is compared field by
-field (lists element by element); frame, au_counter, ai_stalled_frames and
-in_async_update are timing, reported and not compared. A checkpoint is
-compared when its screen on either side is listed in
+field (lists element by element); frame, au_counter, ai_stalled_frames,
+in_async_update and held_frames are timing, reported and not compared. A
+checkpoint is compared when its screen on either side is listed in
 oracle/replay/screens.json; a difference elsewhere is shown as not enabled.
 A difference listed in oracle/replay/known_differences.json (field,
 checkpoint or "*", reason, evidence) is reported as KNOWN and does not
@@ -1318,11 +1325,14 @@ def invariant_problem(name, dump):
     """Why a checkpoint dump breaks the recorder's invariant, or None.
 
     The invariant (schema.json "globals"): the game is not reinitializing,
-    and no frame so far stalled (ai_stalled_frames is 0). The virtual clock
-    wakes the AI thread once per frame, so each frame has an AI update of
-    its own unless it was drawn while one was still running, as a load
-    does. A focus loss stops the AI updates from counting while frames go
-    on: those frames are stalls."""
+    no frame so far stalled (ai_stalled_frames is 0), and no load is in
+    progress (in_async_update and loading are 0). The virtual clock wakes
+    the AI thread once per frame, so each frame has an AI update of its
+    own; the calls a load draws from inside an AI update are held, not
+    frames (platform/replay_clock.h FrameGate). A focus loss stops the AI
+    updates from counting while frames go on: those frames are stalls. A
+    checkpoint taken while the progress bar is up (loading) or inside an
+    AI update would land in the middle of a load."""
     g = dump.get('globals') or {}
     frame = dump.get('frame')
     if g.get('reinitializing'):
@@ -1333,6 +1343,10 @@ def invariant_problem(name, dump):
         return ('%s: %s frames by frame %s had no AI update (au_counter %s):'
                 ' the AI thread stalled' % (name, g.get('ai_stalled_frames'),
                                             frame, g.get('au_counter')))
+    if g.get('loading') or g.get('in_async_update'):
+        return ('%s: a load is in progress at frame %s (loading %s, '
+                'in_async_update %s): the checkpoint lands inside it'
+                % (name, frame, g.get('loading'), g.get('in_async_update')))
     return None
 
 
@@ -1390,7 +1404,7 @@ def run_injector(command, env, backstop):
 
 
 def recorder_env(script_win, replay_dir_win, seed, dump_every,
-                 steal_focus=None, no_focus_guard=False):
+                 steal_focus=None, no_focus_guard=False, slow_reads=None):
     """The recorder's environment (oracle/replay/recorder.cpp), with
     Windows paths, in both modes."""
     names = {'IWD2R_SCRIPT': script_win,
@@ -1401,12 +1415,14 @@ def recorder_env(script_win, replay_dir_win, seed, dump_every,
         names['IWD2R_TEST_STEAL_FOCUS'] = str(steal_focus)
     if no_focus_guard:
         names['IWD2R_TEST_NO_FOCUS_GUARD'] = '1'
+    if slow_reads:
+        names['IWD2R_TEST_SLOW_READS'] = str(slow_reads)
     return names
 
 
 def record_original(script, actions, seed, timeout, dump_every, run_dir,
                     subdir='replay', steal_focus=None, no_focus_guard=False,
-                    sandbox=True):
+                    sandbox=True, slow_reads=None):
     """Record script in the original with the recorder DLL into
     run_dir/subdir, inside Windows Sandbox (record_in_sandbox) or with
     sandbox False on the host's desktop; prints the run as replay record
@@ -1432,11 +1448,12 @@ def record_original(script, actions, seed, timeout, dump_every, run_dir,
     if sandbox:
         code, stdout, stderr, extra = record_in_sandbox(
             build, game, script, seed, timeout, dump_every, stamp, subdir,
-            out_dir, steal_focus, no_focus_guard)
+            out_dir, steal_focus, no_focus_guard, slow_reads=slow_reads)
     else:
         code, stdout, stderr = record_on_host(
             injector, recorder, game, script, seed, timeout, dump_every,
-            stamp, out_dir, steal_focus, no_focus_guard)
+            stamp, out_dir, steal_focus, no_focus_guard,
+            slow_reads=slow_reads)
     for line in stdout.splitlines():
         print('  %s' % line)
     for line in stderr.splitlines():
@@ -1456,7 +1473,8 @@ def record_original(script, actions, seed, timeout, dump_every, run_dir,
 
 
 def record_on_host(injector, recorder, game, script, seed, timeout,
-                   dump_every, stamp, out_dir, steal_focus, no_focus_guard):
+                   dump_every, stamp, out_dir, steal_focus, no_focus_guard,
+                   slow_reads=None):
     """The host mode: the injector runs on the host's desktop, the recorder
     writes into REPLAYS_DIR/<stamp>, moved to out_dir afterwards. Returns
     (exit code or None, stdout, stderr)."""
@@ -1466,7 +1484,7 @@ def record_on_host(injector, recorder, game, script, seed, timeout,
     env = dict(os.environ)
     names = recorder_env(win_path(os.path.join(replay_dir, 'scenario.txt')),
                          win_path(replay_dir), seed, dump_every,
-                         steal_focus, no_focus_guard)
+                         steal_focus, no_focus_guard, slow_reads)
     env.update(names)
     env['WSLENV'] = ':'.join([v for v in env.get('WSLENV', '').split(':')
                               if v] + sorted(names))
@@ -1485,7 +1503,8 @@ def sandbox_log(message):
 
 
 def record_in_sandbox(build, game, script, seed, timeout, dump_every, stamp,
-                      subdir, out_dir, steal_focus, no_focus_guard):
+                      subdir, out_dir, steal_focus, no_focus_guard,
+                      slow_reads=None):
     """The default mode: one fresh Windows Sandbox per recording
     (winsandbox.run_replay, tools/sandbox/replay-driver.ps1), holding
     winsandbox.SANDBOX_LOCK inside the caller's REPLAY_LOCK. Returns (exit
@@ -1498,7 +1517,7 @@ def record_in_sandbox(build, game, script, seed, timeout, dump_every, stamp,
                               arch='x86')
     env = recorder_env(winsandbox.BOX_REPLAY_DIR + '\\scenario.txt',
                        winsandbox.BOX_REPLAY_DIR, seed, dump_every,
-                       steal_focus, no_focus_guard)
+                       steal_focus, no_focus_guard, slow_reads)
     host_run = os.path.join(winsandbox.VM_ROOT, 'replays',
                             '%s-%s' % (stamp, subdir))
     with filelock.hold(winsandbox.SANDBOX_LOCK, 'sandbox'):
@@ -1572,7 +1591,8 @@ def replay_record(args):
     return record_original(script, actions, args.seed, args.timeout,
                            args.dump_every, run_dir, 'replay',
                            args.test_steal_focus, args.test_no_focus_guard,
-                           sandbox=not args.host)
+                           sandbox=not args.host,
+                           slow_reads=args.test_slow_reads)
 
 
 # ---------------------------------------------------------------------------
@@ -1664,7 +1684,7 @@ def run_ours(exe, game, script, actions, seed, timeout, dump_every, run_dir,
 # the AI thread's updates line up with it are timing (ruling R13c), and the
 # invariant on them is enforced on each side by finish_replay.
 TIMING_FIELDS = ('frame', 'globals.au_counter', 'globals.ai_stalled_frames',
-                 'globals.in_async_update')
+                 'globals.in_async_update', 'globals.held_frames')
 SCREENS_JSON = os.path.join(ROOT, 'oracle', 'replay', 'screens.json')
 KNOWN_DIFFERENCES = os.path.join(ROOT, 'oracle', 'replay',
                                  'known_differences.json')
@@ -2006,6 +2026,10 @@ def main(argv=None):
                         'foreground at frame N')
     record.add_argument('--test-no-focus-guard', action='store_true',
                         help='test: let activation messages reach the game')
+    record.add_argument('--test-slow-reads', type=positive_int, metavar='MS',
+                        help='test: from the first frame on, every '
+                        'ReadFile off the main thread sleeps MS ms first (a '
+                        'slow disk)')
     record.add_argument('--host', action='store_true', help=HOST_HELP)
     record.set_defaults(run=cmd_replay_record)
     compare = replay_sub.add_parser(

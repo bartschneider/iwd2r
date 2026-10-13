@@ -93,6 +93,7 @@ namespace {
     std::atomic<DWORD> g_mainThread { 0 };
     uint32_t g_stalledFrames = 0;
     int32_t g_lastAu = 0;
+    clock::FrameGate g_gate;
     bool g_haveScript = false;
     bool g_scriptFinished = false;
     // The rand state of the first thread other than the main one to poll
@@ -139,6 +140,8 @@ namespace {
         }
         s.rngState = iwd2r_rand_state(); // the main thread's
         s.aiStalledFrames = g_stalledFrames;
+        s.loads = g_gate.Loads();
+        s.heldFrames = g_gate.HeldFrames();
         if (const unsigned int* ai = g_inputRandState.load()) {
             s.hasAiRngState = true;
             // The AI thread owns this state. It is not proven idle here,
@@ -232,6 +235,34 @@ void Checkpoint(const std::string& name, int line)
     WriteDump(name.c_str());
 }
 
+namespace {
+
+    // The recorder's IsFrame: the frame gate's question for this call.
+    bool IsFrame(const state_dump::DumpSource* source)
+    {
+        if (g_frame.load() == 0 || !source || !source->Ready())
+            return true;
+        state_dump::AiState ai;
+        source->ReadAi(&ai);
+        const uint32_t loadsBefore = g_gate.Loads();
+        if (!g_gate.Counts(ai.auCounter, ai.inAsyncUpdate != 0, ai.loading != 0)) {
+            if (g_gate.Stretch() == 1)
+                Say("frames held: drawn inside AI update %s",
+                    std::to_string(ai.auCounter) + (ai.loading ? " (progress bar up)" : " (progress bar down)"));
+            else if (g_gate.Stretch() == 0)
+                Say("frame held: the redraw the end of AI update %s asked for, after a frame already counted for it",
+                    std::to_string(ai.auCounter));
+            if (g_gate.Loads() != loadsBefore)
+                Say("load %s", std::to_string(g_gate.Loads()) + ": AI update " + std::to_string(ai.auCounter));
+            return false;
+        }
+        if (g_gate.EndedStretch())
+            Say("%s", std::to_string(g_gate.EndedStretch()) + " calls held inside the last AI update; frames go on (au_counter " + std::to_string(ai.auCounter) + ")");
+        return true;
+    }
+
+}
+
 // The recorder's OnFrame, step for step.
 void OnFrame()
 {
@@ -239,6 +270,9 @@ void OnFrame()
     if (!Active())
         return;
     (void)g_wallClockInstalled;
+    const state_dump::DumpSource* source = state_dump::Source();
+    if (!IsFrame(source))
+        return;
     const uint32_t frame = ++g_frame;
     if (frame == 1) {
         g_mainThread = GetCurrentThreadId();
@@ -261,16 +295,15 @@ void OnFrame()
     {
         // As the recorder: a frame with no AI update since the previous one
         // and none in progress is a stall.
-        const state_dump::DumpSource* source = state_dump::Source();
         if (source && source->Ready()) {
-            state_dump::EngineState engine;
-            source->Read(&engine);
-            if (engine.auCounter == g_lastAu && engine.inAsyncUpdate == 0) {
+            state_dump::AiState ai;
+            source->ReadAi(&ai);
+            if (ai.auCounter == g_lastAu && ai.inAsyncUpdate == 0) {
                 if (g_stalledFrames++ == 0)
                     Say("AI stall: no AI update since the previous frame (au_counter %s)",
-                        std::to_string(engine.auCounter));
+                        std::to_string(ai.auCounter));
             }
-            g_lastAu = engine.auCounter;
+            g_lastAu = ai.auCounter;
         }
     }
     const unsigned every = Settings().dumpEvery;

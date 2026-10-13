@@ -14,7 +14,7 @@
   "additionalProperties": false,
   "properties": {
     "frame": {
-      "description": "Frames since the start: one per call of the main thread's per-frame function (CBaldurChitin::SynchronousUpdate in the original).",
+      "description": "Frames since the start: one per call of the main thread's per-frame function (CBaldurChitin::SynchronousUpdate in the original) that the frame gate counts (platform/replay_clock.h FrameGate: not the calls drawn while the AI thread is inside an update, as a load draws its progress).",
       "type": "integer",
       "minimum": 0
     },
@@ -64,6 +64,9 @@
         "in_async_update",
         "ai_stalled_frames",
         "reinitializing",
+        "loading",
+        "loads",
+        "held_frames",
         "ai_rng_state"
       ],
       "additionalProperties": false,
@@ -79,11 +82,11 @@
           "maximum": 255
         },
         "in_async_update": {
-          "description": "CChitin::m_bInAsynchronousUpdate: nonzero when the dump was taken while the AI thread was inside an AsynchronousUpdate (a load that redraws its progress bar), so the state may be mid-update.",
+          "description": "CChitin::m_bInAsynchronousUpdate: nonzero when the dump was taken while the AI thread was inside an AsynchronousUpdate. The frame gate holds every such call, so a dump always has 0.",
           "type": "integer"
         },
         "ai_stalled_frames": {
-          "description": "Frames so far with no AI update since the previous frame and none in progress. The virtual clock wakes the AI thread once per frame, so every frame has an AI update of its own (au_counter goes up) unless it was drawn while one was still running (in_async_update, a load redrawing its progress). A stall means the AI thread ran without counting (m_bReInitializing after a focus loss) or not at all.",
+          "description": "Frames so far with no AI update since the previous frame. The virtual clock wakes the AI thread once per frame, so every frame has an AI update of its own (au_counter goes up); frames drawn from inside an update (a load redrawing its progress) are held, not counted (held_frames). A stall means the AI thread ran without counting (m_bReInitializing after a focus loss) or not at all.",
           "type": "integer",
           "minimum": 0
         },
@@ -92,6 +95,22 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 255
+        },
+        "loading": {
+          "description": "CChitin::cProgressBar.m_bProgressBarActivated: nonzero while the progress screen of a load is up (CBaldurChitin::SetProgressBar 0x425710 sets and clears it; CChitin::SynchronousUpdate 0x790B70 then draws the progress screen instead of the engine). tools/oracle.py fails a checkpoint dump taken while it is set.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
+        },
+        "loads": {
+          "description": "Loads so far: AI updates during which the main thread drew a frame from inside the update while the progress bar was up (platform/replay_clock.h FrameGate). Such frames are held: not counted, no clock step, no timers.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "held_frames": {
+          "description": "Calls of the per-frame function held so far (platform/replay_clock.h FrameGate): drawn while the AI thread was inside an update, as a load redraws its progress. Their number depends on the machine's speed; they are not frames, the clock does not move for them and no timer fires.",
+          "type": "integer",
+          "minimum": 0
         },
         "ai_rng_state": {
           "description": "The rand state (_holdrand) of the thread that polls input, the AI thread in the original (CChitin::AsynchronousUpdate calls GetCursorPos there), which is where clicks and key presses, and so character generation, call rand; null until that thread has polled input once. VC6 starts every thread at 1; it is not seeded.",
@@ -103,7 +122,7 @@
           "maximum": 4294967295
         }
       },
-      "description": "The recorder's invariant (tools/oracle.py checks it on every checkpoint dump): reinitializing is 0 and ai_stalled_frames is 0. au_counter may fall behind frame by the frames a load draws from inside an AI update (deterministically), never by a stall."
+      "description": "The recorder's invariant (tools/oracle.py checks it on every checkpoint dump): reinitializing, ai_stalled_frames, in_async_update and loading are 0. au_counter follows frame one for one, never behind by a stall; held_frames is timing, loads is compared."
     },
     "chargen": {
       "description": "Character generation, null unless the screen is create_char. The sprite values are null while the screen has no sprite (m_nGameSprite does not resolve in the object array).",
@@ -308,6 +327,10 @@
     "reinitializing": {
       "class": "CChitin",
       "member": "m_bReInitializing"
+    },
+    "progress_bar_active": {
+      "class": "CChitin",
+      "member": "cProgressBar.m_bProgressBarActivated"
     },
     "object_game": {
       "class": "CBaldurChitin",

@@ -2,7 +2,7 @@
   "frame": 30,
   "screen": "create_char",
   "rng_state": 4294967295,
-  "globals": {"au_counter": 28, "fullscreen": 1, "in_async_update": 1, "ai_stalled_frames": 2, "reinitializing": 0, "ai_rng_state": null},
+  "globals": {"au_counter": 28, "fullscreen": 1, "in_async_update": 1, "ai_stalled_frames": 2, "reinitializing": 0, "loading": 1, "loads": 0, "held_frames": 0, "ai_rng_state": null},
   "chargen": {"race": null, "subrace": null, "class": null, "abilities": null, "rolls": [1, 2, 3, 4, 5, 6, -7], "skill_points": -1, "feats": null, "portrait": null},
   "world": null
 }

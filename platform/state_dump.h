@@ -6,8 +6,8 @@
 //
 // The platform layer does not know the engine's classes: the engine
 // registers a DumpSource (src/StateDumpSources.cpp) that reads them, and the
-// replay mode adds what it owns (the frame, the checkpoint, the rand states
-// and the stall count).
+// replay mode adds what it owns (the frame, the checkpoint, the rand states,
+// the stall count and the frame gate's counts).
 #pragma once
 
 #include <cstdint>
@@ -60,6 +60,8 @@ struct EngineState {
     int fullscreen = 0;
     int32_t inAsyncUpdate = 0;
     int reinitializing = 0;
+    // CChitin::cProgressBar.m_bProgressBarActivated (schema.json "loading").
+    int loading = 0;
     // Only on the create_char screen.
     bool hasChargen = false;
     Chargen chargen;
@@ -75,18 +77,32 @@ struct Snapshot {
     std::string checkpoint;
     uint32_t rngState = 0;
     uint32_t aiStalledFrames = 0;
+    // platform/replay_clock.h FrameGate: Loads() and HeldFrames().
+    uint32_t loads = 0;
+    uint32_t heldFrames = 0;
     // Null until the input thread has polled once.
     bool hasAiRngState = false;
     uint32_t aiRngState = 0;
     EngineState engine;
 };
 
+// What the frame gate and the stall count read on every call of the frame.
+struct AiState {
+    int32_t auCounter = 0;
+    int32_t inAsyncUpdate = 0;
+    int loading = 0;
+};
+
 // The engine's side, registered once at start-up. Read runs on the main
-// thread, at the start of a frame, while the AI thread waits.
+// thread, at the start of a frame, while the AI thread waits. ReadAi runs
+// at the start of every call of the frame, held ones included, while the
+// AI thread may be inside an update: it reads only the three members, in
+// FrameGate::Counts's order.
 class DumpSource {
 public:
     virtual ~DumpSource();
     virtual void Read(EngineState* out) const = 0;
+    virtual void ReadAi(AiState* out) const = 0;
     // False while the engine has no CBaldurChitin (g_pBaldurChitin null):
     // Read then reports nothing, and the stall count skips the frame.
     virtual bool Ready() const = 0;

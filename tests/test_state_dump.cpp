@@ -128,6 +128,7 @@ TEST_CASE("state dump JSON matches the golden dumps", "[dump]")
     periodic.engine.auCounter = 28;
     periodic.engine.fullscreen = 1;
     periodic.engine.inAsyncUpdate = 1;
+    periodic.engine.loading = 1;
     periodic.engine.hasChargen = true;
     periodic.engine.chargen.sprite = false;
     const int rolls[7] = { 1, 2, 3, 4, 5, 6, -7 };
@@ -147,6 +148,8 @@ TEST_CASE("state dump JSON matches the golden dumps", "[dump]")
     world.aiRngState = 77;
     world.engine.screen = "world";
     world.engine.auCounter = 1498;
+    world.loads = 1;
+    world.heldFrames = 13;
     world.engine.hasWorld = true;
     world.engine.world.area = "AR1000";
     platform::state_dump::PartyMember member;
@@ -218,6 +221,66 @@ TEST_CASE("replay clock constants", "[dump]")
     // The epoch is midnight UTC of the wall clock's date.
     REQUIRE(rc::kWallClockEpoch
         == DaysFromCivil(rc::kWallClockYear, rc::kWallClockMonth, rc::kWallClockDay) * 86400);
+}
+
+// The frame gate (both sides' replay mode): what a load looks like from the
+// main thread, and the two ways its end can reach it.
+TEST_CASE("frame gate holds the calls drawn inside an AI update", "[dump]")
+{
+    platform::replay_clock::FrameGate gate;
+    // Normal frames: one AI update each.
+    REQUIRE(gate.Counts(10, false, false));
+    REQUIRE(gate.Counts(11, false, false));
+    // A load: AI update 12 redraws its progress three times, the first
+    // before the progress bar is up.
+    REQUIRE_FALSE(gate.Counts(12, true, false));
+    REQUIRE(gate.Stretch() == 1);
+    REQUIRE(gate.Loads() == 0);
+    REQUIRE_FALSE(gate.Counts(12, true, true));
+    REQUIRE(gate.Loads() == 1);
+    REQUIRE_FALSE(gate.Counts(12, true, true));
+    REQUIRE(gate.Loads() == 1); // the same update: one load
+    REQUIRE(gate.HeldFrames() == 3);
+    // The update ends; the redraw it asks for counts.
+    REQUIRE(gate.Counts(12, false, false));
+    REQUIRE(gate.EndedStretch() == 3);
+    REQUIRE(gate.Stretch() == 0);
+    // The next update follows as usual.
+    REQUIRE(gate.Counts(13, false, false));
+    REQUIRE(gate.EndedStretch() == 0);
+    REQUIRE(gate.HeldFrames() == 3);
+}
+
+TEST_CASE("frame gate holds the end of a load that raced its last redraw", "[dump]")
+{
+    platform::replay_clock::FrameGate gate;
+    REQUIRE(gate.Counts(10, false, false));
+    REQUIRE_FALSE(gate.Counts(11, true, true));
+    // The load's last redraw was taken after the update ended: it counts,
+    // for update 11.
+    REQUIRE(gate.Counts(11, false, false));
+    // The redraw the update's end asked for comes next with au_counter
+    // unchanged: held, so update 11 has one frame either way.
+    REQUIRE_FALSE(gate.Counts(11, false, false));
+    REQUIRE(gate.HeldFrames() == 2);
+    REQUIRE(gate.Counts(12, false, false));
+    // Only right after a held stretch: elsewhere a call with no AI update
+    // counts (a stall, which the replay mode reports).
+    REQUIRE(gate.Counts(12, false, false));
+    REQUIRE(gate.HeldFrames() == 2);
+    REQUIRE(gate.Loads() == 1);
+}
+
+TEST_CASE("frame gate after a load: an update that already ran counts", "[dump]")
+{
+    platform::replay_clock::FrameGate gate;
+    REQUIRE_FALSE(gate.Counts(5, true, true));
+    REQUIRE(gate.Counts(5, false, true)); // a multi-update load: the bar stays up
+    // The next update already started when the call reads the gate: held.
+    REQUIRE_FALSE(gate.Counts(6, true, true));
+    REQUIRE(gate.Loads() == 2);
+    REQUIRE(gate.Counts(6, false, false));
+    REQUIRE(gate.Counts(7, false, false));
 }
 
 // ctest never sets IWD2R_STATE_DUMP: everything stays as without the
@@ -329,7 +392,7 @@ TEST_CASE("replay mode dumps the start screen checkpoint", "[dump][data]")
     REQUIRE(checkpoint
         == "{\n  \"frame\": 61,\n  \"checkpoint\": \"start\",\n  \"screen\": \"connection\",\n  \"rng_state\": 1,\n"
            "  \"globals\": {\"au_counter\": 61, \"fullscreen\": 0, \"in_async_update\": 0, \"ai_stalled_frames\": 0, "
-           "\"reinitializing\": 0, \"ai_rng_state\": 3861535683},\n  \"chargen\": null,\n  \"world\": null\n}\n");
+           "\"reinitializing\": 0, \"loading\": 0, \"loads\": 0, \"held_frames\": 0, \"ai_rng_state\": 3861535683},\n  \"chargen\": null,\n  \"world\": null\n}\n");
     REQUIRE(periodic.find("\"frame\": 30,") != std::string::npos);
     REQUIRE(statusText == "frame=61\nscript_line=0\nstate=finished\n");
 }
