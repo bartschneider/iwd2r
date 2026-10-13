@@ -283,15 +283,18 @@ DWORD CVidMode::ConvertToSurfaceRGB(COLORREF rgb)
 // 0x795E00
 COLORREF CVidMode::ApplyBrightnessContrast(COLORREF rgb)
 {
+    // NOTE: The complements are bytes (0x795E10).
     if (m_nBrightnessCorrection != 0) {
         BYTE v1 = ~m_nBrightnessCorrection;
-        rgb = RGB(~((v1 * ~GetRValue(rgb)) >> 8),
-            ~((v1 * ~GetGValue(rgb)) >> 8),
-            ~((v1 * ~GetBValue(rgb)) >> 8));
+        rgb = RGB(~static_cast<BYTE>((v1 * static_cast<BYTE>(~GetRValue(rgb))) >> 8),
+            ~static_cast<BYTE>((v1 * static_cast<BYTE>(~GetGValue(rgb))) >> 8),
+            ~static_cast<BYTE>((v1 * static_cast<BYTE>(~GetBValue(rgb))) >> 8));
     }
 
+    // NOTE: The scale is an int, so a correction above 247 does not wrap
+    // (0x795E87).
     if (m_nGammaCorrection != 0) {
-        BYTE v2 = m_nGammaCorrection + (1 << CVidPalette::LIGHT_SCALE);
+        INT v2 = m_nGammaCorrection + (1 << CVidPalette::LIGHT_SCALE);
         rgb = RGB(min((v2 * GetRValue(rgb)) >> CVidPalette::LIGHT_SCALE, 255),
             min((v2 * GetGValue(rgb)) >> CVidPalette::LIGHT_SCALE, 255),
             min((v2 * GetBValue(rgb)) >> CVidPalette::LIGHT_SCALE, 255));

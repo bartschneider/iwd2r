@@ -239,7 +239,50 @@ void HLineShadedMirrored32(CaseContext& ctx)
     HLineShaded(ctx, kDrawHLineShadedMirrored32, true, 0x484C696E654D0000ull); // "HLineM"
 }
 
+// CVidMode::ApplyBrightnessContrast(rgb) (0x795E00), `ret 4` at 0x795F02:
+// reads m_nBrightnessCorrection (0xA8) and m_nGammaCorrection (0xA9).
+using BrightnessFn = uint32_t(__fastcall*)(void* self, void* edx, uint32_t rgb);
+constexpr uintptr_t kApplyBrightnessContrast = 0x795E00;
+
+// ApplyBrightnessContrast over every brightness and gamma byte with random
+// colours (and black, which RealizeRange passes). The video mode is a
+// CVidInf from the original's constructor.
+void BrightnessContrast(CaseContext& ctx)
+{
+    uint8_t* mode = nullptr;
+    ctx.SetInputs("building the original's video mode");
+    ctx.CallOriginal([&] {
+        mode = OriginalBlock(kVidInfSize);
+        reinterpret_cast<VidInfCtorFn>(kVidInfCtor)(mode, nullptr);
+    });
+    CVidInf ours;
+    Picks picks(ctx.seed, 0x4272696768740000ull); // "Bright"
+    for (int brightness = 0; brightness < 256; ++brightness) {
+        for (int gamma = 0; gamma < 256; ++gamma) {
+            for (int i = 0; i < 4; ++i) {
+                const uint32_t rgb = i == 0 ? 0u : (picks.Bits() & 0xFFFFFF);
+                ctx.SetInputs("brightness " + std::to_string(brightness) + ", gamma " + std::to_string(gamma)
+                    + ", rgb " + Hex(rgb));
+                uint32_t original = 0;
+                ctx.CallOriginal([&] {
+                    Put<uint8_t>(mode, kBrightnessOffset, static_cast<uint8_t>(brightness));
+                    Put<uint8_t>(mode, kGammaOffset, static_cast<uint8_t>(gamma));
+                    original = reinterpret_cast<BrightnessFn>(kApplyBrightnessContrast)(mode, nullptr, rgb);
+                });
+                ours.m_nBrightnessCorrection = static_cast<BYTE>(brightness);
+                ours.m_nGammaCorrection = static_cast<BYTE>(gamma);
+                const uint32_t mine = ours.ApplyBrightnessContrast(rgb);
+                ctx.CountInputs(1);
+                if (original != mine) {
+                    ctx.Fail(ctx.Inputs(), Hex(original), Hex(mine));
+                }
+            }
+        }
+    }
+}
+
 } // namespace
 
 ORACLE_CASE("vid/hline_shaded32", HLineShaded32);
 ORACLE_CASE("vid/hline_shaded_mirrored32", HLineShadedMirrored32);
+ORACLE_CASE("vid/brightness_contrast", BrightnessContrast);
