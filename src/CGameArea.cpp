@@ -25,6 +25,7 @@
 #include "CSpawn.h"
 #include "CTiledObject.h"
 #include "CUtil.h"
+#include "compat/marshal_ptr.h"
 #include "CVidPoly.h"
 
 // 0x8D212C
@@ -2212,11 +2213,13 @@ void CGameArea::Marshal(BYTE** pArea, DWORD* nArea, BOOLEAN bProgressBarInPlace)
         while (pos != NULL) {
             pCreature = lCreatures.GetNext(pos);
 
-            // FIXME: Unsafe x64 conversion (docs/64bit-cast-sites.md):
-            // CGameSprite::Marshal keeps the creature data pointer in the
-            // packed `m_creatureOffset`.
-            BYTE* pCreatureData = reinterpret_cast<BYTE*>(static_cast<DWORD_PTR>(pCreature->m_creatureOffset));
-            memcpy(*pArea + cnt, pCreatureData, pCreature->m_creatureSize);
+            // NOTE: The marshal stores a 32-bit handle (compat/marshal_ptr.h)
+            // where the original stores the pointer. A handle the table does
+            // not know gives NULL, and the bytes then stay zero.
+            BYTE* pCreatureData = static_cast<BYTE*>(iwd2r::UnmarshalPtr(pCreature->m_creatureOffset));
+            if (pCreatureData != NULL) {
+                memcpy(*pArea + cnt, pCreatureData, pCreature->m_creatureSize);
+            }
             delete[] pCreatureData;
 
             pCreature->m_creatureOffset = cnt;
@@ -2252,11 +2255,13 @@ void CGameArea::Marshal(BYTE** pArea, DWORD* nArea, BOOLEAN bProgressBarInPlace)
         while (pos != NULL) {
             pContainerObject = lContainers.GetNext(pos);
             if (pContainerObject->m_pickPointCount > 0) {
-                // FIXME: Unsafe x64 conversion (docs/64bit-cast-sites.md):
-                // CGameContainer::Marshal keeps the points pointer in the
-                // packed `m_pickPointStart`.
-                CAreaPoint* pPoints = reinterpret_cast<CAreaPoint*>(static_cast<DWORD_PTR>(pContainerObject->m_pickPointStart));
-                memcpy(*pArea + cnt, pPoints, sizeof(CAreaPoint) * pContainerObject->m_pickPointCount);
+                // NOTE: The marshal stores a 32-bit handle (compat/marshal_ptr.h)
+                // where the original stores the pointer. A handle the table does
+                // not know gives NULL, and the bytes then stay zero.
+                CAreaPoint* pPoints = static_cast<CAreaPoint*>(iwd2r::UnmarshalPtr(pContainerObject->m_pickPointStart));
+                if (pPoints != NULL) {
+                    memcpy(*pArea + cnt, pPoints, sizeof(CAreaPoint) * pContainerObject->m_pickPointCount);
+                }
                 delete[] pPoints;
                 pContainerObject->m_pickPointStart = nIndex;
                 cnt += sizeof(CAreaPoint) * pContainerObject->m_pickPointCount;
@@ -2268,12 +2273,14 @@ void CGameArea::Marshal(BYTE** pArea, DWORD* nArea, BOOLEAN bProgressBarInPlace)
         while (pos != NULL) {
             pDoorObject = lDoors.GetNext(pos);
 
-            // FIXME: Unsafe x64 conversion (docs/64bit-cast-sites.md):
-            // CGameDoor::Marshal keeps the points pointers in the packed
-            // `*Start` fields.
+            // NOTE: The marshal stores a 32-bit handle (compat/marshal_ptr.h)
+            // where the original stores the pointer. A handle the table does
+            // not know gives NULL, and the bytes then stay zero.
             if (pDoorObject->m_openSelectionPointCount > 0) {
-                CAreaPoint* pPoints = reinterpret_cast<CAreaPoint*>(static_cast<DWORD_PTR>(pDoorObject->m_openSelectionPointStart));
-                memcpy(*pArea + cnt, pPoints, sizeof(CAreaPoint) * pDoorObject->m_openSelectionPointCount);
+                CAreaPoint* pPoints = static_cast<CAreaPoint*>(iwd2r::UnmarshalPtr(pDoorObject->m_openSelectionPointStart));
+                if (pPoints != NULL) {
+                    memcpy(*pArea + cnt, pPoints, sizeof(CAreaPoint) * pDoorObject->m_openSelectionPointCount);
+                }
                 delete[] pPoints;
                 pDoorObject->m_openSelectionPointStart = nIndex;
                 cnt += sizeof(CAreaPoint) * pDoorObject->m_openSelectionPointCount;
@@ -2281,8 +2288,10 @@ void CGameArea::Marshal(BYTE** pArea, DWORD* nArea, BOOLEAN bProgressBarInPlace)
             }
 
             if (pDoorObject->m_closedSelectionPointCount > 0) {
-                CAreaPoint* pPoints = reinterpret_cast<CAreaPoint*>(static_cast<DWORD_PTR>(pDoorObject->m_closedSelectionPointStart));
-                memcpy(*pArea + cnt, pPoints, sizeof(CAreaPoint) * pDoorObject->m_closedSelectionPointCount);
+                CAreaPoint* pPoints = static_cast<CAreaPoint*>(iwd2r::UnmarshalPtr(pDoorObject->m_closedSelectionPointStart));
+                if (pPoints != NULL) {
+                    memcpy(*pArea + cnt, pPoints, sizeof(CAreaPoint) * pDoorObject->m_closedSelectionPointCount);
+                }
                 delete[] pPoints;
                 pDoorObject->m_closedSelectionPointStart = nIndex;
                 cnt += sizeof(CAreaPoint) * pDoorObject->m_closedSelectionPointCount;
@@ -2290,8 +2299,10 @@ void CGameArea::Marshal(BYTE** pArea, DWORD* nArea, BOOLEAN bProgressBarInPlace)
             }
 
             if (pDoorObject->m_openSearchSquaresCount > 0) {
-                CAreaPoint* pPoints = reinterpret_cast<CAreaPoint*>(static_cast<DWORD_PTR>(pDoorObject->m_openSearchSquaresStart));
-                memcpy(*pArea + cnt, pPoints, sizeof(CAreaPoint) * pDoorObject->m_openSearchSquaresCount);
+                CAreaPoint* pPoints = static_cast<CAreaPoint*>(iwd2r::UnmarshalPtr(pDoorObject->m_openSearchSquaresStart));
+                if (pPoints != NULL) {
+                    memcpy(*pArea + cnt, pPoints, sizeof(CAreaPoint) * pDoorObject->m_openSearchSquaresCount);
+                }
                 delete[] pPoints;
                 pDoorObject->m_openSearchSquaresStart = nIndex;
                 cnt += sizeof(CAreaPoint) * pDoorObject->m_openSearchSquaresCount;
@@ -2299,8 +2310,10 @@ void CGameArea::Marshal(BYTE** pArea, DWORD* nArea, BOOLEAN bProgressBarInPlace)
             }
 
             if (pDoorObject->m_closedSearchSquaresCount > 0) {
-                CAreaPoint* pPoints = reinterpret_cast<CAreaPoint*>(static_cast<DWORD_PTR>(pDoorObject->m_closedSearchSquaresStart));
-                memcpy(*pArea + cnt, pPoints, sizeof(CAreaPoint) * pDoorObject->m_closedSearchSquaresCount);
+                CAreaPoint* pPoints = static_cast<CAreaPoint*>(iwd2r::UnmarshalPtr(pDoorObject->m_closedSearchSquaresStart));
+                if (pPoints != NULL) {
+                    memcpy(*pArea + cnt, pPoints, sizeof(CAreaPoint) * pDoorObject->m_closedSearchSquaresCount);
+                }
                 delete[] pPoints;
                 pDoorObject->m_closedSearchSquaresStart = nIndex;
                 cnt += sizeof(CAreaPoint) * pDoorObject->m_closedSearchSquaresCount;
@@ -2312,9 +2325,13 @@ void CGameArea::Marshal(BYTE** pArea, DWORD* nArea, BOOLEAN bProgressBarInPlace)
         while (pos != NULL) {
             pTriggerObject = lTriggers.GetNext(pos);
             if (pTriggerObject->m_pickPointCount > 0) {
-                // FIXME: Unsafe x64 conversion (docs/64bit-cast-sites.md).
-                CAreaPoint* pPoints = reinterpret_cast<CAreaPoint*>(static_cast<DWORD_PTR>(pTriggerObject->m_pickPointStart));
-                memcpy(*pArea + cnt, pPoints, sizeof(CAreaPoint) * pTriggerObject->m_pickPointCount);
+                // NOTE: The marshal stores a 32-bit handle (compat/marshal_ptr.h)
+                // where the original stores the pointer. A handle the table does
+                // not know gives NULL, and the bytes then stay zero.
+                CAreaPoint* pPoints = static_cast<CAreaPoint*>(iwd2r::UnmarshalPtr(pTriggerObject->m_pickPointStart));
+                if (pPoints != NULL) {
+                    memcpy(*pArea + cnt, pPoints, sizeof(CAreaPoint) * pTriggerObject->m_pickPointCount);
+                }
                 delete[] pPoints;
                 pTriggerObject->m_pickPointStart = nIndex;
                 cnt += sizeof(CAreaPoint) * pTriggerObject->m_pickPointCount;
@@ -2378,11 +2395,13 @@ void CGameArea::Marshal(BYTE** pArea, DWORD* nArea, BOOLEAN bProgressBarInPlace)
         while (pos != NULL) {
             pContainerObject = lContainers.GetNext(pos);
             if (pContainerObject->m_itemCount > 0) {
-                // FIXME: Unsafe x64 conversion (docs/64bit-cast-sites.md):
-                // CGameContainer::Marshal keeps the items pointer in the
-                // packed `m_startingItem`.
-                CCreatureFileItem* pItems = reinterpret_cast<CCreatureFileItem*>(static_cast<DWORD_PTR>(pContainerObject->m_startingItem));
-                memcpy(*pArea + cnt, pItems, sizeof(CCreatureFileItem) * pContainerObject->m_itemCount);
+                // NOTE: The marshal stores a 32-bit handle (compat/marshal_ptr.h)
+                // where the original stores the pointer. A handle the table does
+                // not know gives NULL, and the bytes then stay zero.
+                CCreatureFileItem* pItems = static_cast<CCreatureFileItem*>(iwd2r::UnmarshalPtr(pContainerObject->m_startingItem));
+                if (pItems != NULL) {
+                    memcpy(*pArea + cnt, pItems, sizeof(CCreatureFileItem) * pContainerObject->m_itemCount);
+                }
                 delete[] pItems;
                 pContainerObject->m_startingItem = nIndex;
                 cnt += sizeof(CCreatureFileItem) * pContainerObject->m_itemCount;

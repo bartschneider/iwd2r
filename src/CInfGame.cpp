@@ -36,6 +36,7 @@
 #include "CUIManager.h"
 #include "CUIPanel.h"
 #include "CUtil.h"
+#include "compat/marshal_ptr.h"
 #include "Icewind586B70.h"
 #include "IcewindMisc.h"
 
@@ -1414,6 +1415,10 @@ BOOL CInfGame::SaveGame(BOOLEAN bProgressBarRequired, BOOLEAN bProgressBarInPlac
     DWORD nData;
     INT cnt;
 
+    // NOTE: Not in the original: a save is one marshal pass for the handles
+    // that stand in for pointers in 32-bit file fields (compat/marshal_ptr.h).
+    iwd2r::ResetMarshalPtrs();
+
     bResult = TRUE;
 
     for (cnt = 0; cnt < CINFGAME_MAX_AREAS; cnt++) {
@@ -1923,11 +1928,13 @@ void CInfGame::Marshal(BYTE** pGame, DWORD* nGame, BOOLEAN bProgressBarInPlace)
             memcpy(pPartyCreature, &(partyCreatures[cnt3]), sizeof(CSavedGamePartyCreature));
 
             if (partyCreatures[cnt3].m_creatureSize != 0) {
-                // FIXME: Unsafe x64 conversion (docs/64bit-cast-sites.md):
-                // CGameSprite::Marshal keeps the creature data pointer in
-                // the packed `m_creatureOffset`.
-                BYTE* pCreatureData = reinterpret_cast<BYTE*>(static_cast<DWORD_PTR>(partyCreatures[cnt3].m_creatureOffset));
-                memcpy(*pGame + cnt, pCreatureData, partyCreatures[cnt3].m_creatureSize);
+                // NOTE: The marshal stores a 32-bit handle (compat/marshal_ptr.h)
+                // where the original stores the pointer. A handle the table does
+                // not know gives NULL, and the bytes then stay zero.
+                BYTE* pCreatureData = static_cast<BYTE*>(iwd2r::UnmarshalPtr(partyCreatures[cnt3].m_creatureOffset));
+                if (pCreatureData != NULL) {
+                    memcpy(*pGame + cnt, pCreatureData, partyCreatures[cnt3].m_creatureSize);
+                }
                 delete[] pCreatureData;
 
                 pPartyCreature->m_creatureOffset = cnt;
@@ -1960,9 +1967,13 @@ void CInfGame::Marshal(BYTE** pGame, DWORD* nGame, BOOLEAN bProgressBarInPlace)
         memcpy(pSavedCreature, &(pGlobalCreature[nGlobal]), sizeof(CSavedGamePartyCreature));
 
         if (pGlobalCreature[nGlobal].m_creatureSize != 0) {
-            // FIXME: Unsafe x64 conversion (docs/64bit-cast-sites.md).
-            BYTE* pCreatureData = reinterpret_cast<BYTE*>(static_cast<DWORD_PTR>(pGlobalCreature[nGlobal].m_creatureOffset));
-            memcpy(*pGame + cnt, pCreatureData, pGlobalCreature[nGlobal].m_creatureSize);
+            // NOTE: The marshal stores a 32-bit handle (compat/marshal_ptr.h)
+            // where the original stores the pointer. A handle the table does
+            // not know gives NULL, and the bytes then stay zero.
+            BYTE* pCreatureData = static_cast<BYTE*>(iwd2r::UnmarshalPtr(pGlobalCreature[nGlobal].m_creatureOffset));
+            if (pCreatureData != NULL) {
+                memcpy(*pGame + cnt, pCreatureData, pGlobalCreature[nGlobal].m_creatureSize);
+            }
             delete[] pCreatureData;
 
             pSavedCreature->m_creatureOffset = cnt;
@@ -2821,49 +2832,49 @@ void CInfGame::CharacterExport(LONG nCharacterId, CString sFileName)
     strncpy(reinterpret_cast<char*>(pHeader), pSprite->GetName(), SCRIPTNAME_SIZE);
 
     for (INT nWeapon = 0; nWeapon < 8; nWeapon++) {
-        *reinterpret_cast<SHORT*>(pHeader + 0x20 + 2 * nWeapon) = pSprite->m_quickWeapons[nWeapon].m_abilityId.m_itemNum;
-        *reinterpret_cast<SHORT*>(pHeader + 0x30 + 2 * nWeapon) = pSprite->m_quickWeapons[nWeapon].m_abilityId.m_abilityNum;
-        pHeader[0x194 + nWeapon] = pSprite->field_3D3A[nWeapon];
+        *reinterpret_cast<SHORT*>(pHeader + 0x28 + 2 * nWeapon) = pSprite->m_quickWeapons[nWeapon].m_abilityId.m_itemNum;
+        *reinterpret_cast<SHORT*>(pHeader + 0x38 + 2 * nWeapon) = pSprite->m_quickWeapons[nWeapon].m_abilityId.m_abilityNum;
+        pHeader[0x19C + nWeapon] = pSprite->field_3D3A[nWeapon];
     }
 
     for (INT nSpell = 0; nSpell < 9; nSpell++) {
-        pSprite->m_quickSpells[nSpell].m_abilityId.m_res.GetResRef(pHeader + 0x40 + RESREF_SIZE * nSpell);
-        pHeader[0x88 + nSpell] = pSprite->m_quickSpells[nSpell].m_abilityId.m_nClass;
-        pHeader[0x154 + nSpell] = pSprite->m_quickSpells[nSpell].m_abilityId.field_1D;
-        pHeader[0x15D + nSpell] = static_cast<BYTE>(pSprite->m_quickSpells[nSpell].m_abilityId.field_1E);
+        pSprite->m_quickSpells[nSpell].m_abilityId.m_res.GetResRef(pHeader + 0x48 + RESREF_SIZE * nSpell);
+        pHeader[0x90 + nSpell] = pSprite->m_quickSpells[nSpell].m_abilityId.m_nClass;
+        pHeader[0x15C + nSpell] = pSprite->m_quickSpells[nSpell].m_abilityId.field_1D;
+        pHeader[0x165 + nSpell] = static_cast<BYTE>(pSprite->m_quickSpells[nSpell].m_abilityId.field_1E);
     }
 
     for (INT nItem = 0; nItem < 3; nItem++) {
-        *reinterpret_cast<SHORT*>(pHeader + 0x92 + 2 * nItem) = pSprite->m_quickItems[nItem].m_abilityId.m_itemNum;
-        *reinterpret_cast<SHORT*>(pHeader + 0x98 + 2 * nItem) = pSprite->m_quickItems[nItem].m_abilityId.m_abilityNum;
+        *reinterpret_cast<SHORT*>(pHeader + 0x9A + 2 * nItem) = pSprite->m_quickItems[nItem].m_abilityId.m_itemNum;
+        *reinterpret_cast<SHORT*>(pHeader + 0xA0 + 2 * nItem) = pSprite->m_quickItems[nItem].m_abilityId.m_abilityNum;
     }
 
     for (INT nInnate = 0; nInnate < 9; nInnate++) {
-        pSprite->m_quickInnates[nInnate].m_abilityId.m_res.GetResRef(pHeader + 0x9E + RESREF_SIZE * nInnate);
+        pSprite->m_quickInnates[nInnate].m_abilityId.m_res.GetResRef(pHeader + 0xA6 + RESREF_SIZE * nInnate);
     }
 
     for (INT nSong = 0; nSong < 9; nSong++) {
-        pSprite->m_quickSongs[nSong].m_abilityId.m_res.GetResRef(pHeader + 0xE6 + RESREF_SIZE * nSong);
+        pSprite->m_quickSongs[nSong].m_abilityId.m_res.GetResRef(pHeader + 0xEE + RESREF_SIZE * nSong);
     }
 
     for (INT nButton = 0; nButton < 9; nButton++) {
-        *reinterpret_cast<int*>(pHeader + 0x12E + 4 * nButton) = pSprite->field_3D14[nButton];
+        *reinterpret_cast<int*>(pHeader + 0x136 + 4 * nButton) = pSprite->field_3D14[nButton];
     }
 
-    pHeader[0x152] = pSprite->m_nLastSpellbookClassIndex;
-    pHeader[0x153] = pSprite->m_nLastSpellbookSpellLevel;
-    pHeader[0x168] = pSprite->m_nLastSong;
+    pHeader[0x15A] = pSprite->m_nLastSpellbookClassIndex;
+    pHeader[0x15B] = pSprite->m_nLastSpellbookSpellLevel;
+    pHeader[0x170] = pSprite->m_nLastSong;
 
-    *reinterpret_cast<DWORD*>(pHeader + 0x18) = 0x224;
-    *reinterpret_cast<DWORD*>(pHeader + 0x1C) = nCharacter;
+    *reinterpret_cast<DWORD*>(pHeader + 0x20) = 0x224;
+    *reinterpret_cast<DWORD*>(pHeader + 0x24) = nCharacter;
 
     CResRef cResSounds;
     cResSounds = pSprite->m_secondarySounds;
-    cResSounds.GetResRef(pHeader + 0x16C);
+    cResSounds.GetResRef(pHeader + 0x174);
 
     CString sSounds;
     sSounds = reinterpret_cast<char*>(pSprite->field_725A);
-    memcpy(pHeader + 0x174, static_cast<LPCSTR>(sSounds), sSounds.GetLength());
+    memcpy(pHeader + 0x17C, static_cast<LPCSTR>(sSounds), sSounds.GetLength());
 
     memcpy(pExportCharacter + 0x224, pCharacter, nCharacter);
     delete[] pCharacter;

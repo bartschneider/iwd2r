@@ -28,6 +28,16 @@ Engine sites where a pointer is stored in, or read back from, a 32-bit integer a
 | `src/CGameSprite.cpp:6425` | `creatureData` in packed `m_creatureOffset` | Packed marshalling field; live crash once the area-save consumer exists |
 | `src/CGameSprite.cpp:6509` | `pCreature` in `CSavedGamePartyCreature::m_creatureOffset` | Peer-request path: written here, read back as a pointer at `CMessage.cpp:2148` |
 | `src/CMessage.cpp:2148` | `m_creatureOffset` read back as `BYTE*` | Peer-request path: dereferences the truncated pointer from `CGameSprite.cpp:6509` |
+| `src/CInfGame.cpp:1934` | party `m_creatureOffset` read back as `BYTE*` (CInfGame::Marshal) | Consumer of `CGameSprite.cpp:6509`; resolves an `iwd2r::UnmarshalPtr` handle (compat/marshal_ptr.h); an unknown handle gives NULL and the bytes stay zero |
+| `src/CInfGame.cpp:1973` | global creature `m_creatureOffset` read back as `BYTE*` (CInfGame::Marshal) | Consumer, as above |
+| `src/CGameArea.cpp:2219` | creature `m_creatureOffset` read back as `BYTE*` (CGameArea::Marshal) | Consumer of `CGameSprite.cpp:6425`; `UnmarshalPtr` |
+| `src/CGameArea.cpp:2261` | container `m_pickPointStart` read back as `CAreaPoint*` | Consumer of `CGameContainer.cpp:777`; `UnmarshalPtr` |
+| `src/CGameArea.cpp:2280` | door `m_openSelectionPointStart` read back | Consumer of `CGameDoor.cpp:710`; `UnmarshalPtr` |
+| `src/CGameArea.cpp:2291` | door `m_closedSelectionPointStart` read back | Consumer of `CGameDoor.cpp:693`; `UnmarshalPtr` |
+| `src/CGameArea.cpp:2302` | door `m_openSearchSquaresStart` read back | Consumer of `CGameDoor.cpp:676`; `UnmarshalPtr` |
+| `src/CGameArea.cpp:2313` | door `m_closedSearchSquaresStart` read back | Consumer of `CGameDoor.cpp:659`; `UnmarshalPtr` |
+| `src/CGameArea.cpp:2331` | trigger `m_pickPointStart` read back | Consumer for CGameTrigger's marshal (0x4CFF70, not in the tree yet; dead until it lands); `UnmarshalPtr` |
+| `src/CGameArea.cpp:2401` | container `m_startingItem` read back as `CCreatureFileItem*` | Consumer of `CGameContainer.cpp:801`; `UnmarshalPtr` |
 | `src/CVidImage.cpp:79` | `pImage` added to `nAUCounter` as the pulse phase | Animation phase seed: the add wraps in 32 bits as the original's does, but on 64-bit only the low 32 bits count and the signed `%` can go negative when bit 31 is set |
 
 Project 3 should replace the packed-field pointers with offsets or a side table before writing area saves, and give the palette keys a 64-bit-safe hash.
