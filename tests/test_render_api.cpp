@@ -1,6 +1,7 @@
 #define NOMINMAX
 #include <catch2/catch_test_macros.hpp>
 
+#include "CChitin.h"
 #include "CParticle.h"
 #include "CVidBitmap.h"
 #include "CVidCell.h"
@@ -103,6 +104,18 @@ TEST_CASE("base_backend_handles_nothing", "[render]")
     REQUIRE_FALSE(base.Flash(RECT { 0, 0, 1, 1 }, 0));
 }
 
+TEST_CASE("cell_guard_tail_with_no_frame", "[render]")
+{
+    // A handled cell draw whose caller had not fetched a frame leaves nothing
+    // to release (the body's own GetFrame did not run); the release path is
+    // covered with real resources by the start-screen case.
+    CVidCell cell;
+    REQUIRE(cell.m_pFrame == NULL);
+    REQUIRE(render::CellHandled(cell) == TRUE);
+    REQUIRE(render::CellHandled(cell, FALSE) == TRUE);
+    REQUIRE(cell.m_pFrame == NULL);
+}
+
 // Every guarded entry point, called on objects that own no surface or
 // resource: the guard must dispatch exactly one draw and return before the
 // body runs (each body dereferences g_pChitin or a locked surface, which a
@@ -191,14 +204,17 @@ TEST_CASE("every_entry_point_dispatches", "[render]")
         REQUIRE(SameRect(erase.rect, CRect(0, 0, CVideo::SCREENWIDTH, CVideo::SCREENHEIGHT)));
     }
 
-    SECTION("CVidMode::UpdateFade reports the level and still advances")
+    SECTION("CVidMode::SetFade and UpdateFade report the level after the change")
     {
         CVidInf inf;
-        inf.SetFade(TRUE, 0);
-        const int before = inf.m_nFade;
-        const rec::Fade f = DispatchOnce<rec::Fade>([&] { inf.UpdateFade(); });
-        REQUIRE(f.amount == before);
-        REQUIRE(inf.m_nFade == before - 1);
+        const rec::Fade set = DispatchOnce<rec::Fade>([&] { inf.SetFade(TRUE, 0); });
+        REQUIRE(set.amount == CVidMode::NUM_FADE_FRAMES);
+        REQUIRE(inf.m_nFade == CVidMode::NUM_FADE_FRAMES);
+        const rec::Fade step = DispatchOnce<rec::Fade>([&] { inf.UpdateFade(); });
+        REQUIRE(inf.m_nFade == CVidMode::NUM_FADE_FRAMES - 1);
+        REQUIRE(step.amount == inf.m_nFade);
+        const rec::Fade in = DispatchOnce<rec::Fade>([&] { inf.SetFade(FALSE, 0); });
+        REQUIRE(in.amount == 0);
     }
 
     SECTION("CVidInf FX")
@@ -270,6 +286,7 @@ TEST_CASE("every_entry_point_dispatches", "[render]")
         REQUIRE(cp.points.size() == 4);
         REQUIRE(SamePoint(cp.points[2], 150, 260));
         REQUIRE(cp.fill);
+        REQUIRE(cp.flags == 0x2);
         REQUIRE(SameRect(cp.clip, absolute));
 
         CVidFont font;
@@ -317,6 +334,87 @@ TEST_CASE("every_entry_point_dispatches", "[render]")
     }
 }
 
+namespace {
+
+// While the engine draws the start screen, the first time a control's button
+// cell (a real CVidCell with a loaded resource) reaches the backend, this
+// backend calls the guarded cell entry points on it itself and checks their
+// tails: afterwards the cell's m_pFrame is NULL and its resource's demand
+// count (CRes::field_40, which CDimm::Demand raises and CDimm::Release
+// lowers) is what the body would have left. The probe restores the cell as
+// it found it (no frame fetched), so the engine's own draw continues as
+// before.
+class TailCheckingBackend : public rec::Backend {
+public:
+    int probes = 0;
+    std::vector<std::string> failures;
+
+    bool DrawCell(const CVidCell& cell, int frame, POINT pos, const CVidPalette* palette, DWORD flags, int transVal) override
+    {
+        if (m_probing) {
+            m_nested++;
+            return true;
+        }
+        rec::Backend::DrawCell(cell, frame, pos, palette, flags, transVal);
+        if (probes == 0 && cell.pRes != NULL && cell.m_pFrame == NULL && std::get<rec::Cell>(calls.back()).resref == "GBTNMED2")
+            Probe(const_cast<CVidCell&>(cell));
+        return true;
+    }
+
+private:
+    // name: the entry point; fetch: how the caller fetched the frame before
+    // the call (0 none, 1 GetFrame(FALSE), 2 the caller's own Demand and
+    // GetFrame(TRUE)); expected: the demand count after, relative to before.
+    template <typename F>
+    void Run(const char* name, CVidCell& cell, int fetch, int expected, F&& call)
+    {
+        const int before = cell.pRes->field_40;
+        if (fetch == 1)
+            cell.GetFrame(FALSE);
+        if (fetch == 2) {
+            cell.pRes->Demand();
+            cell.GetFrame(TRUE);
+        }
+        m_nested = 0;
+        call();
+        const int after = cell.pRes->field_40;
+        if (m_nested != 1)
+            failures.push_back(std::string(name) + ": dispatched " + std::to_string(m_nested) + " times");
+        if (cell.m_pFrame != NULL)
+            failures.push_back(std::string(name) + ": m_pFrame left set");
+        if (after - before != expected)
+            failures.push_back(std::string(name) + " (fetch " + std::to_string(fetch) + "): demand count " + std::to_string(before) + " -> " + std::to_string(after));
+        // Give back the caller's own demand (fetch 2), as that caller would.
+        if (fetch == 2)
+            cell.pRes->Release();
+        cell.m_pFrame = NULL;
+    }
+
+    void Probe(CVidCell& cell)
+    {
+        probes++;
+        m_probing = true;
+        CVidInf* inf = static_cast<CVidInf*>(g_pChitin->GetCurrentVideoMode());
+        const CRect clip(0, 0, 100, 100);
+        for (int fetch = 0; fetch < 2; fetch++) {
+            Run("CVidCell::Render", cell, fetch, 0, [&] { cell.Render(0, 10, 10, clip, NULL, 0, 0, -1); });
+            Run("BKRender", cell, fetch, 0, [&] { inf->BKRender(&cell, 10, 10, 0, -1); });
+            Run("FXRender", cell, fetch, 0, [&] { inf->FXRender(&cell, 10, 10, 0, -1); });
+            Run("BKRender clip", cell, fetch, 0, [&] { inf->BKRender(&cell, 10, 10, clip, FALSE, 0); });
+            Run("FXRender clip", cell, fetch, 0, [&] { inf->FXRender(&cell, 10, 10, clip, FALSE, 0); });
+        }
+        // bDemanded: the caller holds the demand, the body keeps it.
+        Run("BKRender clip demanded", cell, 2, 1, [&] { inf->BKRender(&cell, 10, 10, clip, TRUE, 0); });
+        Run("FXRender clip demanded", cell, 2, 1, [&] { inf->FXRender(&cell, 10, 10, clip, TRUE, 0); });
+        m_probing = false;
+    }
+
+    bool m_probing = false;
+    int m_nested = 0;
+};
+
+}
+
 TEST_CASE("recording_backend_receives_start_screen_draws", "[render][data]")
 {
     const char* env = std::getenv("IWD2_DATA");
@@ -350,7 +448,8 @@ TEST_CASE("recording_backend_receives_start_screen_draws", "[render][data]")
     SetEnv("IWD2_DATA", data.c_str());
 
     const std::filesystem::path cwd = std::filesystem::current_path();
-    rec::Scope scope;
+    TailCheckingBackend backend;
+    render::Backend* previous = render::Set(&backend);
     int rc = -1;
     {
         InstallIniBackup backup(data);
@@ -359,13 +458,21 @@ TEST_CASE("recording_backend_receives_start_screen_draws", "[render][data]")
         rc = iwd2r_main(1, argv);
     }
     std::filesystem::current_path(cwd);
+    render::Set(previous);
     REQUIRE(rc == 0);
+
+    // The handled cell draws left their frames and demands as the bodies
+    // would have.
+    REQUIRE(backend.probes == 1);
+    for (const std::string& failure : backend.failures)
+        FAIL_CHECK(failure);
+    REQUIRE(backend.failures.empty());
 
     const RECT whole { 0, 0, screen.width, screen.height };
     auto inside = [](const POINT& p, const RECT& r) { return p.x >= r.left && p.x < r.right && p.y >= r.top && p.y < r.bottom; };
 
     // The background: the start screen's mosaic, at the screen's origin.
-    const std::vector<rec::Mosaic> mosaics = scope.backend.Of<rec::Mosaic>();
+    const std::vector<rec::Mosaic> mosaics = backend.Of<rec::Mosaic>();
     REQUIRE_FALSE(mosaics.empty());
     for (const rec::Mosaic& m : mosaics)
         REQUIRE(inside(m.pos, whole));
@@ -373,7 +480,7 @@ TEST_CASE("recording_backend_receives_start_screen_draws", "[render][data]")
     // The panel's buttons: each control draws its BAM with the control's
     // rectangle as the clip, so a cell is inside its clip and the clip inside
     // the screen. The start panel has seven buttons (GUISTART.CHU).
-    const std::vector<rec::Cell> cells = scope.backend.Of<rec::Cell>();
+    const std::vector<rec::Cell> cells = backend.Of<rec::Cell>();
     REQUIRE_FALSE(cells.empty());
     std::set<std::tuple<std::string, LONG, LONG, LONG, LONG>> buttons;
     for (const rec::Cell& c : cells) {
@@ -391,7 +498,7 @@ TEST_CASE("recording_backend_receives_start_screen_draws", "[render][data]")
 
     // The labels: every string on the screen, and at least one inside a
     // button's rectangle (the button captions).
-    const std::vector<rec::Text> texts = scope.backend.Of<rec::Text>();
+    const std::vector<rec::Text> texts = backend.Of<rec::Text>();
     REQUIRE_FALSE(texts.empty());
     bool captioned = false;
     for (const rec::Text& t : texts) {

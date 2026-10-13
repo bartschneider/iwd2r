@@ -1,5 +1,6 @@
 #include "render/api.h"
 
+#include "CVidCell.h"
 #include "CVidPoly.h"
 
 namespace render {
@@ -13,6 +14,25 @@ Backend* Set(Backend* backend)
     Backend* previous = detail::active;
     detail::active = backend;
     return previous;
+}
+
+BOOL CellHandled(CVidCell& cell)
+{
+    if (cell.m_pFrame != NULL) {
+        cell.pRes->Release();
+        cell.m_pFrame = NULL;
+    }
+    return TRUE;
+}
+
+BOOL CellHandled(CVidCell& cell, BOOLEAN bDemanded)
+{
+    if (cell.m_pFrame != NULL) {
+        cell.m_pFrame = NULL;
+        if (!bDemanded)
+            cell.pRes->Release();
+    }
+    return TRUE;
 }
 
 std::vector<POINT> Vertices(const CVidPoly& poly)

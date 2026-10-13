@@ -62,3 +62,12 @@ These are in `oracle/replay/` and `tools/`.
 - Windows Sandbox real-input mode (`--vm windows`) is untested. It needs the Windows feature enabled and a reboot.
 - `replay compare` reports a `known_differences.json` entry that matched nothing, but does not fail on it. An entry carries no scenario, so one valid for another scenario would look stale. It stays a warning until entries carry a `scenario` field.
 - Consider a data-gated test through `CRuleTables::GetClassStringMixed` (the fighter-type string choice: Barbarian 34, otherwise 16799). The id choice is confirmed by the disassembly noted in `docs/evidence/544120.md` and exercised by the chargen replay.
+
+## Render API (project 4)
+
+The guards in `src/render/api.h` leave these for the renderer that first draws the world through a backend.
+
+- **Tiles.** `CVidTile::Render` only fills the VRAM tile cache on a miss, at (0, 0), without the stencil tile or fog. Each frame's tiles reach the screen through `CInfTileSet::Render` (0x5CB4A0) and `CInfTileSet::RenderBlack` (0x5CB630). A screen-level renderer must guard those two, with the tile, the destination and the stencil.
+- **FX groups.** FX draws arrive in FX-surface coordinates. The placement comes from `FXPrep` (ptPos, ptReference, mirror flags 0x10/0x20) and the composite from `FXUnlock` and `CInfinity::FXBltFrom`. A backend needs begin-group and end-group calls at `FXPrep` and `FXUnlock`.
+- **Pointer.** `RenderPointer` draws its cell to the front surface in screen coordinates, and it reaches the backend as an ordinary `DrawCell`. Add a `DrawPointer` primitive, or pass `nSurface`.
+- **Frames and layers.** Nothing in the engine calls `BeginFrame`, `EndFrame` or `SetLayer` yet.

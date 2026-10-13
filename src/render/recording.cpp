@@ -74,9 +74,9 @@ bool Backend::DrawEllipse(POINT centre, SIZE axes, COLORREF colour)
     return true;
 }
 
-bool Backend::DrawPoly(const POINT* pts, int n, COLORREF colour, bool fill)
+bool Backend::DrawPoly(const POINT* pts, int n, COLORREF colour, bool fill, DWORD flags)
 {
-    calls.push_back(Poly { Copy(pts, n), colour, fill, m_clip });
+    calls.push_back(Poly { Copy(pts, n), colour, fill, flags, m_clip });
     return true;
 }
 

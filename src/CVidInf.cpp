@@ -1192,7 +1192,7 @@ void CVidInf::FXClear(LPVOID pSurface, INT nSize)
 // 0x79D100
 BOOL CVidInf::FXRender(CVidCell* pVidCell, INT nRefPointX, INT nRefPointY, DWORD dwFlags, INT nTransValue)
 {
-    if (auto* b = render::Active(); b && b->Clipped(m_rLockedRect).DrawCell(*pVidCell, pVidCell->m_nCurrentFrame, { nRefPointX, nRefPointY }, &pVidCell->m_cPalette, dwFlags, nTransValue)) return TRUE;
+    if (auto* b = render::Active(); b && b->Clipped(m_rLockedRect).DrawCell(*pVidCell, pVidCell->m_nCurrentFrame, { nRefPointX, nRefPointY }, &pVidCell->m_cPalette, dwFlags, nTransValue)) return render::CellHandled(*pVidCell);
     if (g_pChitin->cVideo.m_bIs3dAccelerated) {
         return pVidCell->FXRender3d(nRefPointX, nRefPointY, m_rLockedRect, dwFlags | 0x40, nTransValue, 0);
     }
@@ -1207,7 +1207,7 @@ BOOL CVidInf::FXRender(CVidCell* pVidCell, INT nRefPointX, INT nRefPointY, DWORD
 // 0x79D180
 BOOL CVidInf::FXRender(CVidCell* pVidCell, INT nRefPtX, INT nRefPtY, const CRect& rClip, BOOLEAN a5, DWORD dwFlags)
 {
-    if (auto* b = render::Active(); b && b->Clipped(rClip).DrawCell(*pVidCell, pVidCell->m_nCurrentFrame, { nRefPtX, nRefPtY }, &pVidCell->m_cPalette, dwFlags, -1)) return TRUE;
+    if (auto* b = render::Active(); b && b->Clipped(rClip).DrawCell(*pVidCell, pVidCell->m_nCurrentFrame, { nRefPtX, nRefPtY }, &pVidCell->m_cPalette, dwFlags, -1)) return render::CellHandled(*pVidCell, a5);
     if (g_pChitin->cVideo.m_bIs3dAccelerated) {
         return pVidCell->FXRender3d(nRefPtX,
             nRefPtY,
@@ -1540,7 +1540,7 @@ BOOL CVidInf::BKUnlock()
 // 0x79DE50
 BOOL CVidInf::BKRender(CVidCell* pVidCell, INT x, INT y, const CRect& rClip, BOOLEAN bDemanded, DWORD dwFlags)
 {
-    if (auto* b = render::Active(); b && b->Clipped(render::At(rClip, m_rLockedRect)).DrawCell(*pVidCell, pVidCell->m_nCurrentFrame, render::At(x, y, m_rLockedRect), &pVidCell->m_cPalette, dwFlags, -1)) return TRUE;
+    if (auto* b = render::Active(); b && b->Clipped(render::At(rClip, m_rLockedRect)).DrawCell(*pVidCell, pVidCell->m_nCurrentFrame, render::At(x, y, m_rLockedRect), &pVidCell->m_cPalette, dwFlags, -1)) return render::CellHandled(*pVidCell, bDemanded);
     if (g_pChitin->cVideo.m_bIs3dAccelerated) {
         memset(CVideo3d::texImageData, 0, sizeof(DWORD) * CVIDINF_FX_WIDTH * CVIDINF_FX_HEIGHT);
 
@@ -1571,7 +1571,7 @@ BOOL CVidInf::BKRender(CVidCell* pVidCell, INT x, INT y, const CRect& rClip, BOO
 // 0x79DF60
 BOOL CVidInf::BKRender(CVidCell* pVidCell, INT x, INT y, DWORD dwFlags, INT nTransVal)
 {
-    if (auto* b = render::Active(); b && b->Clipped(m_rLockedRect).DrawCell(*pVidCell, pVidCell->m_nCurrentFrame, render::At(x, y, m_rLockedRect), &pVidCell->m_cPalette, dwFlags, nTransVal)) return TRUE;
+    if (auto* b = render::Active(); b && b->Clipped(m_rLockedRect).DrawCell(*pVidCell, pVidCell->m_nCurrentFrame, render::At(x, y, m_rLockedRect), &pVidCell->m_cPalette, dwFlags, nTransVal)) return render::CellHandled(*pVidCell);
     if (g_pChitin->cVideo.m_bIs3dAccelerated) {
         if (g_pChitin->cVideo.field_13A) {
             memset(CVideo3d::texImageData, 0, sizeof(DWORD) * CVIDINF_FX_WIDTH * m_rLockedRect.Height());
@@ -1664,7 +1664,7 @@ BOOL CVidInf::BKRenderLine(int nXFrom, int nYFrom, int nXTo, int nYTo, const CRe
 // 0x79E2D0
 BOOL CVidInf::BKRenderConvexPoly(CVidPoly* pPoly, const CRect& rClipRect, DWORD dwColor, DWORD dwFlags, const CPoint& ptRef)
 {
-    if (auto* b = render::Active(); b && b->Clipped(rClipRect).DrawPoly(render::Vertices(*pPoly).data(), pPoly->m_nVertices, dwColor, true)) return TRUE;
+    if (auto* b = render::Active(); b && b->Clipped(rClipRect).DrawPoly(render::Vertices(*pPoly).data(), pPoly->m_nVertices, dwColor, true, dwFlags)) return TRUE;
     if (g_pChitin->cVideo.Is3dAccelerated()) {
         return pPoly->FillConvexPoly3d(rClipRect, dwColor, dwFlags, ptRef);
     }

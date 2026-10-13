@@ -67,6 +67,7 @@ struct Poly {
     std::vector<POINT> points;
     COLORREF colour;
     bool fill;
+    DWORD flags;
     RECT clip;
 };
 struct Fade {
@@ -130,7 +131,7 @@ public:
     bool DrawLine(POINT a, POINT b, COLORREF colour) override;
     bool DrawRect(const RECT& rect, COLORREF colour, bool fill) override;
     bool DrawEllipse(POINT centre, SIZE axes, COLORREF colour) override;
-    bool DrawPoly(const POINT* pts, int n, COLORREF colour, bool fill) override;
+    bool DrawPoly(const POINT* pts, int n, COLORREF colour, bool fill, DWORD flags) override;
     bool Fade(int amount) override;
     bool Flash(const RECT& rect, COLORREF colour) override;
     bool DrawMosaic(const CVidMosaic& mosaic, POINT pos, const RECT& src, DWORD flags) override;

@@ -6,6 +6,10 @@
 //
 //     if (auto* b = render::Active(); b && b->DrawCell(...)) return TRUE;
 //
+// (the CVidCell guards return render::CellHandled(...) instead of TRUE; see
+// below). The inlined CVidMode::UpdateFade and SetFade, which have no
+// address, report the new fade level with one line at their end instead.
+//
 // so with no backend installed Active() is null, every guard falls through
 // and the decompiled body draws exactly as before. With a backend installed
 // the guard hands it the call; when the backend returns true the function
@@ -24,19 +28,45 @@
 // surface locked at m_rLockedRect with positions relative to it; their guards
 // add the locked rectangle's origin, as the original's 3d path does, so the
 // backend sees back-buffer coordinates (BKRenderConvexPoly's vertices and
-// clip are already absolute there, also as in the 3d path). The
-// CVidInf::FX* functions draw into the FX surface that FXUnlock and
-// CInfinity::FXBltFrom later composite onto the back buffer; their guards
-// pass the FX-surface coordinates unchanged, so a backend that accepts them
-// also owns that composite (FXPrep, FXLock, FXUnlock and FXBltFrom are not
-// guarded yet).
+// clip are already absolute there, also as in the 3d path).
+//
+// The CVidInf::FX* functions draw into the FX surface, and their guards pass
+// FX-surface coordinates unchanged. The placement on screen is not in the
+// call: FXPrep chooses the FX rectangle from ptPos and ptReference and the
+// mirror flags 0x10/0x20, and FXUnlock (with CInfinity::FXBltFrom) composites
+// the FX surface onto the back buffer. Neither is guarded, so a backend that
+// handles FX draws cannot place them yet; it needs begin-group and end-group
+// calls at FXPrep and FXUnlock (docs/followups.md).
+//
+// The pointer: CVidInf::RenderPointer draws its cell with
+// CVidCell::Render(CVIDINF_SURFACE_FRONT, ...) in screen coordinates, so it
+// reaches the backend as a DrawCell that looks like any back-buffer draw; the
+// surface is not passed (docs/followups.md: a DrawPointer primitive or the
+// surface number).
+//
+// What a handling backend inherits. When a backend handles a call the body
+// does not run, so the backend takes over what the body would have done
+// besides drawing:
+//   - It fetches the BAM frame itself (CVidCell::GetFrame and a matching
+//     release, or its own decoder). cell.m_pFrame may be NULL on entry; when
+//     it is not, the caller demanded the resource and the body would have
+//     released it. The CVidCell guards end with render::CellHandled, which
+//     does exactly the body's tail (release and clear m_pFrame), so demands
+//     stay balanced.
+//   - CVidFont::TextOut(sString, x, y, rClip, nSurface) is one DrawText: the
+//     body's per-character SequenceSet and FrameSet do not run, so the font's
+//     current sequence and frame are left as they were.
+//   - The CVidMosaic::Render and CVidMode::EraseScreen guards run before the
+//     bodies' early-outs (a null clip; a surface number out of range or a
+//     missing surface), so the backend also sees calls the body would have
+//     ignored.
 //
 // Guarded entry points, the outermost call the engine makes for each kind of
 // drawing (one dispatch per drawing call):
 //
 //   CVidCell::Render(nSurface, ...)               0x7AEAD0  DrawCell
-//   CVidTile::Render(pSurface, ...)               0x7B1780  DrawTile
-//   CVidTile::Render(pSurface, ..., pResStencil)  0x7B1B30  DrawTile
+//   CVidTile::Render(pSurface, ...)               0x7B1780  DrawTile (*)
+//   CVidTile::Render(pSurface, ..., pResStencil)  0x7B1B30  DrawTile (*)
 //   CVidFont::TextOut(sString, x, y, ..., nSurface) 0x793720 DrawText
 //   CVidMode::DrawLine(..., nSurface, ...)        0x797A30  DrawLine
 //   CVidMode::DrawRect                            0x7980E0  DrawRect
@@ -46,6 +76,7 @@
 //   CVidMode::PolyLine                            0x79A080  DrawPolyLine
 //   CVidMode::EraseScreen                         0x7999B0  DrawRect (filled)
 //   CVidMode::UpdateFade (inlined, no address)              Fade
+//   CVidMode::SetFade (inlined, no address)                 Fade
 //   CVidInf::FXRender (cell)                      0x79D100  DrawCell
 //   CVidInf::FXRender (cell, clip)                0x79D180  DrawCell
 //   CVidInf::FXRender (particle)                  0x79D220  DrawParticle
@@ -61,6 +92,13 @@
 //   CVidInf::RenderFlash                          0x79F520  Flash
 //   CVidMosaic::Render                            0x7B0C80  DrawMosaic
 //   CVidBitmap::RenderDirect                      0x7B3190  DrawBitmap
+//
+// (*) Not a screen-level tile draw. CVidTile::Render fills the VRAM tile cache
+// from CInfTileSet::RenderToPrimary on a cache miss only, at (0, 0) of the
+// cache surface, without the stencil tile (the second overload's pResStencil)
+// or fog. Each frame's tiles reach the screen through CInfTileSet::Render
+// (0x5CB4A0) and CInfTileSet::RenderBlack, which blit from that cache; a
+// screen-level renderer must guard those instead (docs/followups.md).
 //
 // Internal helpers, not guarded because a guarded caller already dispatches
 // them (guarding both levels would dispatch a declined call twice):
@@ -139,12 +177,16 @@ struct Backend {
     // fill false draws the outline.
     virtual bool DrawRect(const RECT&, COLORREF, bool /*fill*/) { return false; }
     virtual bool DrawEllipse(POINT /*centre*/, SIZE /*axes*/, COLORREF) { return false; }
-    // A closed polygon; fill false draws the outline.
-    virtual bool DrawPoly(const POINT* /*pts*/, int /*n*/, COLORREF, bool /*fill*/) { return false; }
-    // The fade level once per UpdateFade, from 0 (black) to
-    // CVidMode::NUM_FADE_FRAMES (none). A notification: the return value is
-    // ignored and the classic fade state always advances, because screens
-    // wait on it (CVidMode::GetFullyFaded).
+    // A closed polygon; fill false draws the outline. flags are the fill
+    // flags CVidPoly::FillConvexPoly takes (BKRenderConvexPoly's dwFlags;
+    // CUIPanel passes 0x2, translucent, as FillConvexPoly3d reads it); 0 for
+    // OutlinePoly.
+    virtual bool DrawPoly(const POINT* /*pts*/, int /*n*/, COLORREF, bool /*fill*/, DWORD /*flags*/) { return false; }
+    // The fade level after each UpdateFade step and after each SetFade, from
+    // 0 (black) to CVidMode::NUM_FADE_FRAMES (none). A notification at the
+    // end of those inlined functions: the return value is ignored and the
+    // classic fade state always changes, because screens wait on it
+    // (CVidMode::GetFullyFaded).
     virtual bool Fade(int /*amount*/) { return false; }
     virtual bool Flash(const RECT&, COLORREF) { return false; }
 
@@ -210,6 +252,17 @@ inline RECT At(const RECT& r, const RECT& origin)
 {
     return RECT { origin.left + r.left, origin.top + r.top, origin.left + r.right, origin.top + r.bottom };
 }
+
+// The tail of a handled CVidCell draw, as the body's own tail:
+// CVidCell::Render(nSurface, ...) (0x7AEAD0) and the pSurface overload
+// 0x7AE5D0 (BKRender and FXRender without a clip) release the resource and
+// clear m_pFrame when the frame was fetched (here: when the caller had
+// fetched it, since the body's own GetFrame did not run). Returns TRUE.
+BOOL CellHandled(CVidCell& cell);
+
+// The same for the pSurface overload 0x7AF060 (BKRender and FXRender with a
+// clip): clears m_pFrame and releases only when bDemanded is FALSE.
+BOOL CellHandled(CVidCell& cell, BOOLEAN bDemanded);
 
 // A CVidPoly's m_nVertices vertices as points (zeros when it has none).
 std::vector<POINT> Vertices(const CVidPoly& poly);

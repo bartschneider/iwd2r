@@ -270,4 +270,4 @@ LAB_007aeb9b:
 
 ## Notes
 
-Ours adds one line at the top of the body, the render API dispatch guard (src/render/api.h): with a backend installed it calls Backend::DrawCell (the cell, its current frame, (x, y), its palette, dwFlags, nTransVal; clip rClip) and returns when the backend handled it; with none, the classic renderer, render::Active() is null, the guard falls through and the rest of the body is the decompiled one, unchanged.
+Ours adds one line at the top of the body, the render API dispatch guard (src/render/api.h): with a backend installed it calls Backend::DrawCell (the cell, its current frame, (x, y), its palette, dwFlags, nTransVal; clip rClip) and returns when the backend handled it; with none, the classic renderer, render::Active() is null, the guard falls through and the rest of the body is the decompiled one, unchanged. A handled call returns render::CellHandled(*this), the body's own tail: when the frame is fetched it releases the resource and clears m_pFrame, so the demand count is what the body would leave.

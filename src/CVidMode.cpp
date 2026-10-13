@@ -880,7 +880,7 @@ BOOL CVidMode::DrawThickLine16(INT nXFrom, INT nYFrom, INT nXTo, INT nYTo, WORD*
 // 0x799540
 BOOL CVidMode::OutlinePoly(const CPoint* pPoly, SHORT nVertices, const CRect& rSurface, COLORREF rgbColor, const CPoint& ptOffset)
 {
-    if (auto* b = render::Active(); b && b->Clipped(rSurface).DrawPoly(render::Minus(pPoly, nVertices, ptOffset).data(), nVertices, rgbColor, false)) return TRUE;
+    if (auto* b = render::Active(); b && b->Clipped(rSurface).DrawPoly(render::Minus(pPoly, nVertices, ptOffset).data(), nVertices, rgbColor, false, 0)) return TRUE;
     // TODO: Incomplete.
 
     return FALSE;
@@ -1977,7 +1977,6 @@ BOOL CVidMode::GetFullyFaded()
 // NOTE: Inlined.
 void CVidMode::UpdateFade()
 {
-    if (auto* b = render::Active()) b->Fade(m_nFade);
     if (m_bFadeTo) {
         if (m_nFade > 0) {
             m_nFade--;
@@ -1987,6 +1986,7 @@ void CVidMode::UpdateFade()
             m_nFade++;
         }
     }
+    if (auto* b = render::Active()) b->Fade(m_nFade);
 }
 
 // FIXME: `rgbFade` is misleading (both type and meaning). This function is
@@ -2007,4 +2007,5 @@ void CVidMode::SetFade(BOOL bFadeTo, COLORREF rgbFade)
     } else {
         m_nFade = 0;
     }
+    if (auto* b = render::Active()) b->Fade(m_nFade);
 }
