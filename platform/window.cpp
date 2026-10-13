@@ -450,7 +450,12 @@ bool InitScreen(int width, int height, int scale, int uiScale)
 void SetRegionSource(RegionSource source)
 {
     UiRegions().source = source;
-    RefreshRegions();
+    if (source) {
+        RefreshRegions();
+    } else if (!platform::present::Regions().empty()) {
+        // The source's owner is going away: back to the whole frame.
+        platform::present::SetRegions({});
+    }
 }
 
 void RefreshRegions()

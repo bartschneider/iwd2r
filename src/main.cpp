@@ -2,6 +2,7 @@
 
 #include "mfc.h"
 
+#include <cstdio>
 #include <iostream>
 #include <string>
 
@@ -29,13 +30,16 @@ int iwd2r_main(int argc, char** argv)
         platform::ReportFatal(screen.error.c_str(), "iwd2r");
         return 3;
     }
+    for (const std::string& notice : screen.notices) {
+        std::fprintf(stderr, "iwd2r: %s\n", notice.c_str());
+    }
 
     // Ruling R27: the window's client area is the engine's screen, so
     // GetSystemMetrics(SM_CXSCREEN) must report the game resolution before
     // CBaldurChitin's constructor reads it. The window is that screen times
     // the scale (World Scale, which defaults to Scale); the UI panels are
-    // shown at Scale (screen.uiScale).
-    if (!platform::window::InitScreen(screen.width, screen.height, screen.scale, screen.uiScale)) {
+    // shown at the Scale that fits (screen.worldUiScale, fullUiScale).
+    if (!platform::window::InitScreen(screen.width, screen.height, screen.scale, screen.worldUiScale)) {
         platform::ReportFatal("SDL video could not start.", "iwd2r");
         return 4;
     }
@@ -64,8 +68,11 @@ int iwd2r_main(int argc, char** argv)
 
     // The constructor applied the layout; the presenter's regions follow
     // the screen the engine shows from here (only while World Scale differs
-    // from Scale).
+    // from Scale), until baldurChitin goes out of scope.
     platform::window::SetRegionSource(iwd2r::CurrentRegions);
+    struct RegionSourceGuard {
+        ~RegionSourceGuard() { platform::window::SetRegionSource(nullptr); }
+    } regionSourceGuard;
 
     baldurChitin.Init(NULL);
     int rc = baldurChitin.WinMain(NULL, NULL, cmdLine.data(), SW_SHOW);

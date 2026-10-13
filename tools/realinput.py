@@ -330,14 +330,31 @@ def resolve_screen(width, height, scale, desktop, world_scale=None):
                 scale = s
                 break
     scale = int(scale)
-    world = resolve_world_scale(world_scale, scale)
+    # World Scale never exceeds Scale (the engine clamps it).
+    world = min(resolve_world_scale(world_scale, scale), scale)
     w, h = width // world, height // world
     if w < 800 or h < 600:
         raise ValueError('%dx%d at scale %d is %dx%d inside; the minimum is '
                          '800x600' % (width, height, world, w, h))
+    world_ui, full_ui = effective_ui_scales(w * world, h * world, scale, world)
     return {'output_width': w * world, 'output_height': h * world,
             'scale': world, 'ui_scale': scale, 'world_scale': world,
+            'world_ui_scale': world_ui, 'full_ui_scale': full_ui,
             'width': w, 'height': h}
+
+
+# The deepest world-screen panel band (iwd2r::kDeepestWorldPanel).
+DEEPEST_WORLD_PANEL = 284
+
+
+def effective_ui_scales(output_width, output_height, ui, world):
+    """Python port of iwd2r::EffectiveUiScales: the UI scales the world
+    screen's panels and the 800x600 screens are shown at, the largest up to
+    Scale that fits the output, never below the world scale."""
+    def fit(height):
+        return max(min(ui, output_width // 800, output_height // height),
+                   world)
+    return fit(DEEPEST_WORLD_PANEL), fit(600)
 
 
 def ui_to_screen(x, y, width, height):
@@ -354,7 +371,7 @@ def full_ui_window_point(x, y, geometry):
     platform::compose::Layout's, the UI centred in the frame (never doubled)
     shown at the UI scale centred in the window, cropped about its centre
     to whole engine pixels. Raises ValueError for a point the crop hides."""
-    ui = geometry['ui_scale']
+    ui = geometry.get('full_ui_scale', geometry['ui_scale'])
     out = []
     for value, extent, size in ((x, geometry['width'], 800),
                                 (y, geometry['height'], 600)):
@@ -380,7 +397,11 @@ def window_point(action, geometry):
         geometry = {'width': 800, 'height': 600, 'scale': 1}
     x, y = action['x'], action['y']
     if action.get('ui', True):
-        if geometry.get('ui_scale', geometry['scale']) != geometry['scale']:
+        # The engine lays out with a UI scale of its own when the world
+        # screen's panels get one (the full-UI scale may still be the
+        # world's).
+        if geometry.get('world_ui_scale', geometry.get(
+                'ui_scale', geometry['scale'])) != geometry['scale']:
             return full_ui_window_point(x, y, geometry)
         x, y = ui_to_screen(x, y, geometry['width'], geometry['height'])
     return x * geometry['scale'], y * geometry['scale']

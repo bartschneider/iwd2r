@@ -87,23 +87,35 @@ struct ScreenLayout {
 
     // UI scaling (Program Options/Scale and World Scale): window pixels per
     // engine pixel for the UI panels and for the world. The engine's screen
-    // is the window divided by worldScale. With equal scales every field
-    // above is what it has always been and the presenter shows the whole
-    // frame at that scale.
+    // is the window divided by worldScale. uiScale is Scale as resolved;
+    // worldUiScale and fullUiScale are the scales the world screen's panels
+    // and the full-UI screens are shown at (EffectiveUiScales). When both
+    // equal worldScale every field above is what it has always been and the
+    // presenter shows the whole frame at that scale.
     int uiScale;
     int worldScale;
+    int worldUiScale;
+    int fullUiScale;
 
     // The world screen's UI panels as compose::Layout takes them: their 1x
     // rectangles in frame coordinates, one full-width band along the bottom
     // edge as deep as the toolbar (the panels themselves sit in the band's
     // first uiWidth columns, see worldUiShiftX). WorldPanelRects gives the
     // band for another viewport (dialog, death, hidden interface).
+    //
+    // Assumption: every GUIW08/GUIW10 panel the world screen shows lies in
+    // one full-width band along the bottom edge whose depth is the distance
+    // from the world screen's requested view size (SetNewViewSize) to the
+    // frame bottom, as the original's viewport rectangles (toolbar 167,
+    // dialog 284, death 139, container 124) imply. A panel elsewhere would
+    // be shown at the world scale inside the world region.
     std::vector<RECT> uiPanelRects;
     // A full-UI screen's 1x rectangle: the 800x600 UI centred in the frame,
     // where every screen but the world screen shifts its panels.
     RECT fullUiRect;
-    // The frame size the UI panels have at uiScale: the frame times
-    // worldScale / uiScale, the frame itself with equal scales.
+    // The frame size the world screen's panels have at worldUiScale: the
+    // frame times worldScale / worldUiScale, the frame itself with equal
+    // scales.
     int uiWidth;
     int uiHeight;
 };
@@ -115,17 +127,37 @@ const long kOriginalDialogAutoScrollRange = 490000;
 const int kMinScreenWidth = 800;
 const int kMinScreenHeight = 600;
 
+// The deepest world-screen panel band (the dialog panel's, 284 rows).
+const int kDeepestWorldPanel = 284;
+
+struct EffectiveScales {
+    int worldUi; // the world screen's panels
+    int fullUi; // the full-UI screens
+};
+
+// The UI scales actually used in an output (window) of outputWidth x
+// outputHeight, never below worldScale (worldScale <= uiScale):
+// - world screen: the largest scale up to uiScale at which the 800-wide
+//   panels fit the width and the deepest panel band the height,
+//   min(uiScale, W / 800, H / kDeepestWorldPanel);
+// - full-UI screens: the largest scale up to uiScale at which the 800x600
+//   UI (fullUiRect; guiExt only selects GUIW) fits, min(uiScale, W / 800,
+//   H / 600).
+EffectiveScales EffectiveUiScales(int outputWidth, int outputHeight, int uiScale, int worldScale);
+
 // width x height (the engine's internal size, the window / worldScale) must
-// be at least kMinScreenWidth x kMinScreenHeight.
+// be at least kMinScreenWidth x kMinScreenHeight. worldScale above uiScale
+// is taken as uiScale.
 //
-// uiScale == worldScale gives exactly the layout ComputeScreenLayout has
-// always given (the original's table at its four sizes). Otherwise the
-// generalised layout at every size (the engine never doubles its own UI,
-// field_4A28/field_4A2C stay 0) with:
+// When EffectiveUiScales gives worldScale for both kinds of screen, exactly
+// the layout ComputeScreenLayout has always given (the original's table at
+// its four sizes). Otherwise the generalised layout at every size (the
+// engine never doubles its own UI, field_4A28/field_4A2C stay 0) with, at
+// worldUiScale:
 // - guiExt chosen and the world screen's panels centred for the UI's size
 //   (uiWidth x uiHeight), so they lie within the columns the UI band shows;
 // - every world viewport's distance from the bottom (a bottom panel's
-//   depth) reserved at depth x max(uiScale, worldScale) / worldScale,
+//   depth) reserved at depth x max(worldUiScale, worldScale) / worldScale,
 //   rounded up, as compose::Layout reserves it, so the world never covers a
 //   scaled panel.
 ScreenLayout ComputeScreenLayout(int width, int height, int uiScale, int worldScale);
@@ -158,8 +190,13 @@ enum ScreenKind {
 
 // The composition regions (compose::Layout) of a screen of that kind in a
 // window of that size. viewportBottom is the world viewport's bottom edge
-// (SCREEN_WORLD only). One region showing the whole frame when the scales
-// are equal.
+// (SCREEN_WORLD only). The regions cover the letterboxed output, the frame
+// times worldScale centred in the window (the window itself unless it was
+// resized or is a fullscreen display of another size); the presenter
+// clears the rest. One region showing the whole frame when the screen's UI
+// scale equals worldScale. World screens whose regions do not tile (a
+// panel outside the bottom band) assert in a debug build and fall back to
+// that one region in a release build, with a line on stderr.
 std::vector<platform::compose::Region> RegionsFor(const ScreenLayout& layout, ScreenKind kind, int viewportBottom, SIZE window);
 
 // RegionsFor the current layout and the screen the engine shows now (the
@@ -191,7 +228,8 @@ int ParseScale(const char* value);
 
 // World Scale for a resolved Scale (uiScale, 1-4): NULL or "" gives
 // uiScale, "auto" 1 when uiScale is 2 or more (else uiScale), 1-4 their
-// value, anything else kScaleInvalid.
+// value, anything else kScaleInvalid. ResolveScreenSize clamps a value
+// above uiScale to uiScale.
 int ResolveWorldScale(const char* value, int uiScale);
 
 struct ScreenSize {
@@ -204,7 +242,12 @@ struct ScreenSize {
     int width; // the engine's (internal) screen
     int height;
     int uiScale; // Scale, resolved
-    int worldScale; // World Scale, resolved (scale)
+    int worldScale; // World Scale, resolved and clamped to uiScale (scale)
+    int worldUiScale; // EffectiveUiScales for the output
+    int fullUiScale;
+    // One line each for the clamps applied (World Scale above Scale, the UI
+    // scale lowered to fit), for main to print on stderr.
+    std::vector<std::string> notices;
 };
 
 // The decision main and CBaldurChitin's constructor share.
