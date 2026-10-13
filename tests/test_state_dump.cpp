@@ -328,7 +328,7 @@ TEST_CASE("replay mode dumps the start screen checkpoint", "[dump][data]")
     REQUIRE(checkpoint
         == "{\n  \"frame\": 61,\n  \"checkpoint\": \"start\",\n  \"screen\": \"connection\",\n  \"rng_state\": 1,\n"
            "  \"globals\": {\"au_counter\": 61, \"fullscreen\": 0, \"in_async_update\": 0, \"ai_stalled_frames\": 0, "
-           "\"reinitializing\": 0, \"ai_rng_state\": 3861535683},\n  \"chargen\": null\n}\n");
+           "\"reinitializing\": 0, \"ai_rng_state\": 3861535683},\n  \"chargen\": null,\n  \"world\": null\n}\n");
     REQUIRE(periodic.find("\"frame\": 30,") != std::string::npos);
     REQUIRE(statusText == "frame=61\nscript_line=0\nstate=finished\n");
 }
