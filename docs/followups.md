@@ -67,7 +67,6 @@ These are in `oracle/replay/` and `tools/`.
 ## Project 4 follow-ups
 
 - **Real-GPU runs in a Hyper-V VM (GPU-P).** Windows Sandbox shares the host GPU through GPU partitioning but picks the adapter itself (the AMD iGPU on a hybrid machine, no Vulkan), so `Presenter=gpu` never runs on the RTX there. A Generation 2 Hyper-V VM under `C:\Users\thier\iwd2r-vm` with `Add-VMGpuPartitionAdapter -InstancePath <RTX>` and the host's NVIDIA driver store copied into the guest runs our engine on the real GPU with real Vulkan, driven headlessly over PowerShell Direct (`Invoke-Command -VMName`) like the sandbox driver. Needs one admin setup by the user (Hyper-V is present on this host: Windows 11 Pro, vmms running). Planned as `play.py --vm hyperv` after project 4 Task 6.
-- Spatial real-time upscaling filters for the presenter: AMD FSR 1.0 (EASU + RCAS) and NVIDIA Image Scaling, both MIT, as `Scale Filter=fsr|nis` with a `Sharpness` key. Planned as project 4 Task 2b after the GPU presenter lands. DLSS and other temporal upscalers do not fit (no motion vectors, depth or jitter in a 2D sprite engine).
 
 ### Render API
 

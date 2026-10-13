@@ -50,6 +50,7 @@ struct Backend {
     // Set by the front.
     bool letterbox = false; // the whole-frame region is letterboxed, not stretched
     int windowScale = 1; // WindowScale(): the classic texture is nearest above 1
+    float sharpness = 0.5f; // CurrentSharpness(): the fsr and nis filters
     bool offscreen = false; // EndFrame does not show the frame (Readback only)
     int offscreenWidth = 0; // the target size without a window
     int offscreenHeight = 0;
@@ -62,6 +63,11 @@ struct Backend {
 // The compiled SPIR-V of platform/shaders/<name> (e.g. "quad.vert"),
 // embedded at configure time; false for an unknown name.
 bool ShaderCode(const char* name, const unsigned char** code, size_t* size);
+
+// NVIDIA Image Scaling's coefficient tables in nis.frag's Coefficients
+// block layout (present_nis.cpp).
+const void* NisCoefficients();
+size_t NisCoefficientsSize();
 
 std::unique_ptr<Backend> MakeClassicBackend();
 std::unique_ptr<Backend> MakeGpuBackend();
@@ -83,6 +89,9 @@ namespace testing {
     void SetGpuFault(GpuFault fault);
     GpuFault TakeAcquireFault(); // the gpu backend: consumes AcquireOnce
     GpuFault CurrentGpuFault();
+
+    // The gpu backend's FSR filter shows EASU's output without RCAS.
+    void SetSkipRcas(bool skip);
 
     // Runs the front's backend without a window, presenting into an
     // offscreen target of w x h (0 x 0 stops it). The backend is chosen as

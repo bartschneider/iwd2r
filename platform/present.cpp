@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
+#include <cstdlib>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -21,6 +22,7 @@ namespace {
         BackendKind requested = BackendKind::Classic;
         BackendKind active = BackendKind::Classic;
         Filter filter = Filter::Nearest;
+        float sharpness = 0.5f;
         // A device loss was already answered with a rebuild.
         bool rebuilt = false;
         int skipped = 0;
@@ -167,6 +169,7 @@ namespace {
         Backend& b = *s.backend;
         b.letterbox = s.fullscreen;
         b.windowScale = s.scale;
+        b.sharpness = s.sharpness;
         b.offscreen = offscreen;
         b.lost = false;
         bool drawn = false;
@@ -252,8 +255,25 @@ bool ParseFilter(const char* text, Filter* filter)
         *filter = Filter::Sharp;
     else if (s == "smooth")
         *filter = Filter::Smooth;
+    else if (s == "fsr")
+        *filter = Filter::Fsr;
+    else if (s == "nis")
+        *filter = Filter::Nis;
     else
         return false;
+    return true;
+}
+
+bool ParseSharpness(const char* text, float* sharpness)
+{
+    const std::string s = Lower(text);
+    if (s.empty())
+        return false;
+    char* end = nullptr;
+    const float v = std::strtof(s.c_str(), &end);
+    if (end != s.c_str() + s.size() || !(v >= 0.0f && v <= 1.0f))
+        return false;
+    *sharpness = v;
     return true;
 }
 
@@ -289,6 +309,14 @@ BackendKind ToggleBackend()
 void SetFilter(Filter filter) { S().filter = filter; }
 
 Filter CurrentFilter() { return S().filter; }
+
+void SetSharpness(float sharpness)
+{
+    S().sharpness = sharpness > 1.0f ? 1.0f : sharpness >= 0.0f ? sharpness
+                                                                : 0.0f;
+}
+
+float CurrentSharpness() { return S().sharpness; }
 
 void SetPresentTarget(SDL_Window* window)
 {

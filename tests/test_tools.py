@@ -270,6 +270,32 @@ class ShadersTest(unittest.TestCase):
             self.assertEqual(missing.returncode, 1)
             self.assertIn('sharp.frag.spv is missing', missing.stdout)
 
+    def test_shaders_check_covers_new_blobs(self):
+        src = os.path.join(ROOT, 'platform', 'shaders')
+        new = ('fsr_easu.frag', 'fsr_rcas.frag', 'nis.frag')
+        for name in new:
+            self.assertTrue(os.path.isfile(os.path.join(src, name + '.spv')), name)
+        # Every shader is embedded by platform/CMakeLists.txt.
+        with open(os.path.join(ROOT, 'platform', 'CMakeLists.txt')) as f:
+            listed = re.search(r'set\(IWD2R_SHADERS ([^)]*)\)', f.read()).group(1).split()
+        self.assertEqual(sorted(listed), sorted(n for n in os.listdir(src)
+                                                if n.endswith(('.vert', '.frag'))))
+        with tempfile.TemporaryDirectory() as tmp:
+            for name in os.listdir(src):
+                with open(os.path.join(src, name), 'rb') as a, \
+                        open(os.path.join(tmp, name), 'wb') as b:
+                    b.write(a.read())
+            for name in new:
+                with open(os.path.join(tmp, name + '.spv'), 'r+b') as f:
+                    f.seek(40)
+                    byte = f.read(1)
+                    f.seek(40)
+                    f.write(bytes([byte[0] ^ 0x01]))
+            stale = self.run_check('--dir', tmp)
+            self.assertEqual(stale.returncode, 1)
+            for name in new:
+                self.assertIn('%s.spv does not match its source' % name, stale.stdout)
+
     def test_pinned_release_has_checksums(self):
         with open(os.path.join(ROOT, 'tools', 'shaders_versions.json')) as f:
             pin = json.load(f)['glslang']
