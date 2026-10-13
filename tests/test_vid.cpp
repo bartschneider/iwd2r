@@ -7,9 +7,15 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "CChitin.h"
+#include "CResCell.h"
+#include "CVidCell.h"
+#include "CVidInf.h"
 #include "CVidPoly.h"
+#include "CWarp.h"
 
 #include <cstdint>
+#include <cstring>
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -173,4 +179,71 @@ TEST_CASE("draw_hline_shaded32_blends", "[vid]")
     poly.DrawHLineShadedMirrored32(mirrored, 0, 0, color, CRect(0, 0, 5, 1), CPoint(0, 0));
     CHECK(mirrored[4] == 0x00808080);
     CHECK(mirrored[5] == ((blend(90, 0x80) << 16) | (blend(60, 0x80) << 8) | blend(30, 0x80)));
+}
+
+// The uncompressed paths of the 32-bpp cell blends walk outside the frame
+// as the original does (rows four times apart in sub_7D0950, an extra row
+// and column in sub_7D1190). Ours writes only inside the range it is given
+// (ruling P4-10): a raw frame at the bottom right of an 8x8 surface leaves
+// the guard pixels after it untouched, and sub_7D1190 reads no frame data
+// past the frame.
+TEST_CASE("cell_blend_raw_frames_stay_in_the_surface", "[vid]")
+{
+    ChitinScope scope;
+    CWarp* engine = reinterpret_cast<CWarp*>(::operator new(sizeof(CWarp)));
+    std::memset(static_cast<void*>(engine), 0, sizeof(CWarp));
+    auto mode = std::make_unique<CVidInf>();
+    mode->m_dwRBitShift = 16;
+    mode->m_dwGBitShift = 8;
+    mode->m_dwBBitShift = 0;
+    engine->pVidMode = mode.get();
+    g_pChitin->pActiveEngine = engine;
+
+    // A 4x4 raw frame of palette index 9 (bright white), transparent 255.
+    std::vector<BYTE> bam(0x40, 0);
+    bam[0xB] = 255;
+    std::memset(bam.data() + 0x20, 9, 16);
+    std::vector<RGBQUAD> palette(256);
+    palette[9] = RGBQUAD { 255, 255, 255, 0 };
+    FRAMEENTRY frame = {};
+    frame.nWidth = 4;
+    frame.nHeight = 4;
+    frame.nOffset = 0x20 | 0x80000000;
+
+    auto* resStorage = static_cast<unsigned char*>(::operator new(sizeof(CResCell)));
+    std::memset(resStorage, 0, sizeof(CResCell));
+    auto* res = reinterpret_cast<CResCell*>(resStorage);
+    res->m_bParsed = TRUE;
+    res->m_pBamHeader = reinterpret_cast<BAMHEADER*>(bam.data());
+    res->m_pPalette = palette.data();
+    auto* cellStorage = static_cast<unsigned char*>(::operator new(sizeof(CVidCell)));
+    std::memset(cellStorage, 0, sizeof(CVidCell));
+    auto* cell = reinterpret_cast<CVidCell*>(cellStorage);
+    static_cast<CResHelper<CResCell, 1000>*>(cell)->pRes = res;
+    cell->m_pFrame = &frame;
+    cell->m_bShadowOn = TRUE;
+
+    for (int translucent = 0; translucent < 2; ++translucent) {
+        // An 8x8 surface followed by guard pixels.
+        std::vector<DWORD> pixels(8 * 8 + 4096, 0x00101010);
+        const BYTE* begin = reinterpret_cast<const BYTE*>(pixels.data());
+        const CVidCell::SurfaceRange range = { begin, begin + 8 * 8 * 4 };
+        DWORD* at = pixels.data() + 4 * 8 + 4;
+        if (translucent != 0) {
+            CHECK(cell->sub_7D0950(at, 8 * 4, 0, 128, range));
+        } else {
+            CHECK(cell->sub_7D1190(at, 8 * 4, 0, range));
+        }
+        for (size_t i = 8 * 8; i < pixels.size(); ++i) {
+            INFO("guard pixel " << i << ", translucent " << translucent);
+            REQUIRE(pixels[i] == 0x00101010);
+        }
+        // The frame's first pixel is drawn.
+        CHECK(pixels[4 * 8 + 4] != 0x00101010);
+    }
+
+    g_pChitin->pActiveEngine = nullptr;
+    ::operator delete(cellStorage);
+    ::operator delete(resStorage);
+    ::operator delete(static_cast<void*>(engine));
 }

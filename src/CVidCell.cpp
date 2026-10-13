@@ -717,7 +717,8 @@ BOOL CVidCell::Render(WORD* pSurface, LONG lPitch, INT nRefPointX, INT nRefPoint
                     + lPitch / 4 * (nRefPointY - m_pFrame->nCenterY)
                     + (nRefPointX - m_pFrame->nCenterX),
                 lPitch,
-                dwFlags);
+                dwFlags,
+                SurfaceExtent(pSurface, lPitch));
             break;
         default:
             bSuccess = FALSE;
@@ -752,7 +753,8 @@ BOOL CVidCell::Render(WORD* pSurface, LONG lPitch, INT nRefPointX, INT nRefPoint
                         + (nRefPointX - m_pFrame->nCenterX),
                     lPitch,
                     dwFlags,
-                    nTransVal);
+                    nTransVal,
+                    SurfaceExtent(pSurface, lPitch));
                 break;
             default:
                 bSuccess = FALSE;
@@ -944,7 +946,8 @@ BOOL CVidCell::Render(INT nSurface, int x, int y, const CRect& rClip, CVidPoly* 
                 bSuccess = sub_7D0950(reinterpret_cast<DWORD*>(ddsd.lpSurface),
                     ddsd.lPitch,
                     dwFlags,
-                    nTransVal);
+                    nTransVal,
+                    SurfaceExtent(ddsd));
                 break;
             default:
                 bSuccess = FALSE;
@@ -2030,8 +2033,66 @@ BOOL CVidCell::Blt8To32Brightest(DWORD* pSurface, LONG lPitch, DWORD dwFlags)
     return TRUE;
 }
 
+namespace {
+
+// The bytes from the first row's start to the last row's end of a block of
+// nHeight rows of nWidth pixels, lPitch bytes apart, ordered.
+CVidCell::SurfaceRange RangeOf(const void* pFirstPixel, LONG lPitch, int nWidth, int nHeight)
+{
+    if (pFirstPixel == NULL || nWidth <= 0 || nHeight <= 0) {
+        return CVidCell::SurfaceRange { NULL, NULL };
+    }
+
+    const BYTE* pFirst = static_cast<const BYTE*>(pFirstPixel);
+    const BYTE* pLastRow = pFirst + static_cast<ptrdiff_t>(lPitch) * (nHeight - 1);
+    return pFirst <= pLastRow ? CVidCell::SurfaceRange { pFirst, pLastRow + nWidth * 4 }
+                              : CVidCell::SurfaceRange { pLastRow, pFirst + nWidth * 4 };
+}
+
+// When range is unknown (null), the frame's footprint at pFrame.
+CVidCell::SurfaceRange Bounded(const CVidCell::SurfaceRange& range, const DWORD* pFrame, LONG lPitch, int nWidth, int nHeight)
+{
+    if (range.pBegin != NULL) {
+        return range;
+    }
+
+    return RangeOf(pFrame, lPitch, nWidth, nHeight);
+}
+
+bool Writable(const CVidCell::SurfaceRange& range, const DWORD* pPixel)
+{
+    const BYTE* p = reinterpret_cast<const BYTE*>(pPixel);
+    return reinterpret_cast<uintptr_t>(p) >= reinterpret_cast<uintptr_t>(range.pBegin)
+        && reinterpret_cast<uintptr_t>(p) + 4 <= reinterpret_cast<uintptr_t>(range.pEnd);
+}
+
+}
+
+// The locked back or FX surface that CVidInf::BKRender and FXRender pass
+// to CVidCell::Render(pSurface, ...): the current video mode's locked
+// description when pSurface is its start, otherwise unknown.
+CVidCell::SurfaceRange CVidCell::SurfaceExtent(const void* pSurface, LONG lPitch)
+{
+    CVidInf* pVidInf = static_cast<CVidInf*>(g_pChitin->GetCurrentVideoMode());
+    if (pVidInf != NULL
+        && pVidInf->m_SurfaceDesc.lpSurface == pSurface
+        && pVidInf->m_SurfaceDesc.lPitch == lPitch) {
+        return RangeOf(pSurface,
+            lPitch,
+            static_cast<int>(pVidInf->m_SurfaceDesc.dwWidth),
+            static_cast<int>(pVidInf->m_SurfaceDesc.dwHeight));
+    }
+
+    return SurfaceRange { NULL, NULL };
+}
+
+CVidCell::SurfaceRange CVidCell::SurfaceExtent(const DDSURFACEDESC& ddsd)
+{
+    return RangeOf(ddsd.lpSurface, ddsd.lPitch, static_cast<int>(ddsd.dwWidth), static_cast<int>(ddsd.dwHeight));
+}
+
 // 0x7D0950
-BOOL CVidCell::sub_7D0950(DWORD* pSurface, LONG lPitch, DWORD dwFlags, INT nTransVal)
+BOOL CVidCell::sub_7D0950(DWORD* pSurface, LONG lPitch, DWORD dwFlags, INT nTransVal, const SurfaceRange& range)
 {
     int nWidth = m_pFrame->nWidth;
     int nHeight = m_pFrame->nHeight;
@@ -2119,11 +2180,17 @@ BOOL CVidCell::sub_7D0950(DWORD* pSurface, LONG lPitch, DWORD dwFlags, INT nTran
         }
     } else {
         // Every pixel is blended (no shadow test) and keeps its top byte.
+        //
+        // NOTE: Ours skips the pixels outside the surface (or, when the
+        // surface is unknown, the frame's footprint): with the original's
+        // row stride (below) every row after the first lands outside the
+        // frame, and the original writes past the surface (ruling P4-10).
+        SurfaceRange rWritable = Bounded(range, pSurface, lPitch, nWidth, nHeight);
         int pos = 0;
         for (int y = nHeight; y > 0; y--) {
             for (int x = nWidth; x > 0; x--) {
                 BYTE nColor = pFrameData[pos];
-                if (nColor != nTransparentColor) {
+                if (nColor != nTransparentColor && Writable(rWritable, pSurface)) {
                     DWORD rgb = CVidImage::rgbTempPal[nColor];
                     DWORD nDest = *pSurface;
                     INT nRed = static_cast<INT>(((rgb >> 16) & 0xFF) * nInverse + ((nDest >> 16) & 0xFF) * nTransVal) >> 8;
@@ -2163,7 +2230,7 @@ BOOL CVidCell::sub_7D0C60(BYTE* pSurface, LONG lPitch, DWORD dwFlags)
 }
 
 // 0x7D1190
-BOOL CVidCell::sub_7D1190(DWORD* pSurface, LONG lPitch, DWORD dwFlags)
+BOOL CVidCell::sub_7D1190(DWORD* pSurface, LONG lPitch, DWORD dwFlags, const SurfaceRange& range)
 {
     DWORD rgbPalette[256];
     int nWidth = m_pFrame->nWidth;
@@ -2265,11 +2332,24 @@ BOOL CVidCell::sub_7D1190(DWORD* pSurface, LONG lPitch, DWORD dwFlags)
         // with no transparency test (0x7D13ED), and the row jump is for
         // nWidth pixels, so each row starts one pixel further right. It also
         // stores the pixel's brightness in an unread global (0x8BDDF8).
+        //
+        // NOTE: Ours reads no frame data past the nWidth * nHeight bytes of
+        // the frame and writes no pixel outside the surface (or, when the
+        // surface is unknown, the frame's footprint); those pixels are
+        // skipped (ruling P4-10).
+        SurfaceRange rWritable = Bounded(range, pSurface, lPitch, nWidth, nHeight);
+        int nFrameBytes = nWidth * nHeight;
         int pos = 0;
         if (nHeight >= 0) {
             for (int y = nHeight + 1; y != 0; y--) {
                 if (nWidth >= 0) {
                     for (int x = nWidth + 1; x != 0; x--) {
+                        if (pos >= nFrameBytes || !Writable(rWritable, pSurface)) {
+                            pSurface++;
+                            pos++;
+                            continue;
+                        }
+
                         DWORD rgb = rgbPalette[pFrameData[pos]];
                         DWORD nDest = *pSurface;
                         INT nDestBrightness = static_cast<INT>((nDest & 0xFF) + ((nDest >> 8) & 0xFF) + ((nDest >> 16) & 0xFF)) >> 3;
