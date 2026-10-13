@@ -6,7 +6,10 @@
 // It reproduces the replay recorder's model of the original
 // (oracle/replay/recorder.cpp) exactly:
 //   - the frame is a call of CBaldurChitin::SynchronousUpdate, which calls
-//     OnFrame first (the recorder's trampoline at 0x425FB0);
+//     OnFrame first (the recorder's trampoline at 0x425FB0), unless the
+//     frame gate holds it (platform/replay_clock.h FrameGate: a call drawn
+//     while the AI thread is inside an update, as a load redraws its
+//     progress), and then OnFrame returns at once;
 //   - the clock (GetTickCount, timeGetTime) is virtual: kClockBase, then one
 //     step per frame (platform/replay_clock.h, shared with the recorder);
 //   - timeSetEvent timers run on that clock, fired by OnFrame on the main

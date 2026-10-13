@@ -3,7 +3,7 @@
   "checkpoint": "world",
   "screen": "world",
   "rng_state": 12345,
-  "globals": {"au_counter": 1498, "fullscreen": 0, "in_async_update": 0, "ai_stalled_frames": 0, "reinitializing": 0, "ai_rng_state": 77},
+  "globals": {"au_counter": 1498, "fullscreen": 0, "in_async_update": 0, "ai_stalled_frames": 0, "reinitializing": 0, "loading": 0, "loads": 1, "held_frames": 13, "ai_rng_state": 77},
   "chargen": null,
   "world": {"area": "AR1000", "party": [{"id": 65536, "x": 1046, "y": 1258, "hp": 9, "max_hp": 12, "skills": [0, 4, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]}, {"id": 131073, "x": null, "y": null, "hp": null, "max_hp": null, "skills": null}]}
 }

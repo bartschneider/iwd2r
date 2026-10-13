@@ -11,15 +11,22 @@
 //   IWD2R_TEST_STEAL_FOCUS=N  test: a window of the recorder's takes the
 //                      foreground at frame N
 //   IWD2R_TEST_NO_FOCUS_GUARD=1  test: activation messages reach the game
+//   IWD2R_TEST_SLOW_READS=MS  test: from the first frame on, every ReadFile
+//                      of a thread other than the main one sleeps MS ms
+//                      first (a slow disk)
 //
 // The frame: the original's main thread calls CBaldurChitin::SynchronousUpdate
 // once per AI update (vanilla.json "frame_hook"). Its first instruction, a
 // 5-byte jmp to CChitin::SynchronousUpdate, becomes a jmp to FrameTrampoline,
-// which calls OnFrame and then takes the original jmp. OnFrame counts the
-// frame, runs the scenario step, writes the due dumps and status.txt, then
-// advances the virtual clock and fires the due timeSetEvent callbacks, which
-// wake the AI thread for the next AsynchronousUpdate. Dumps are written only
-// there, on the main thread, while the AI thread waits for that wake-up.
+// which calls OnFrame and then takes the original jmp. OnFrame first asks
+// the frame gate (platform/replay_clock.h FrameGate) whether the call is a
+// frame: a call drawn while the AI thread is inside an update (a load
+// redrawing its progress) is held, and OnFrame returns at once. For a frame
+// it counts the frame, runs the scenario step, writes the due dumps and
+// status.txt, then advances the virtual clock and fires the due
+// timeSetEvent callbacks, which wake the AI thread for the next
+// AsynchronousUpdate. Dumps are written only there, on the main thread,
+// while the AI thread waits for that wake-up.
 //
 // Hooked imports (the exe's IAT): input GetAsyncKeyState, GetCursorPos,
 // SetCursorPos, PeekMessageA, GetMessageA; time timeGetTime, GetTickCount,
@@ -34,7 +41,9 @@
 // indices pass through); RegisterClassExA (the game window's class gets the
 // focus guard, GuardProc: activation messages are sent straight to the
 // window procedure, past the message hooks) and CreateWindowExA (notes the
-// game window). An import the exe does not have is logged and skipped.
+// game window); ReadFile (passed through, slowed only by
+// IWD2R_TEST_SLOW_READS). An import the exe does not have is logged and
+// skipped.
 // Real keyboard and mouse input never reaches the game: the hooks
 // answer from the scenario, and the message hooks drop keyboard and mouse
 // messages.
@@ -80,6 +89,7 @@ static_assert(kField_au_counter.type == ReplayType::k_i32, "");
 static_assert(kField_fullscreen.type == ReplayType::k_u8, "");
 static_assert(kField_in_async_update.type == ReplayType::k_i32, "");
 static_assert(kField_reinitializing.type == ReplayType::k_u8, "");
+static_assert(kField_progress_bar_active.type == ReplayType::k_u8, "");
 static_assert(kField_object_game.type == ReplayType::k_ptr, "");
 static_assert(kField_objects_array.type == ReplayType::k_ptr, "");
 static_assert(kField_objects_max_index.type == ReplayType::k_i16, "");
@@ -131,10 +141,14 @@ std::atomic<DWORD> g_now { kClockBase };
 std::atomic<DWORD> g_mainThread { 0 };
 std::atomic<HWND> g_window { nullptr };
 std::atomic<bool> g_wrongThreadLogged { false };
+// Which calls of the frame hook are frames (main thread).
+platform::replay_clock::FrameGate g_gate;
 // The game window's own procedure, behind the focus guard (GuardProc).
 std::atomic<WNDPROC> g_gameProc { nullptr };
 bool g_focusGuard = true; // off only with IWD2R_TEST_NO_FOCUS_GUARD
 uint32_t g_stealFocusFrame = 0; // IWD2R_TEST_STEAL_FOCUS
+unsigned g_slowReadsMs = 0; // IWD2R_TEST_SLOW_READS
+std::atomic<uint32_t> g_slowedReads { 0 };
 std::string g_dir;
 unsigned g_dumpEvery = 30;
 unsigned g_seed = 1;
@@ -167,11 +181,13 @@ using TimeSetEventFn = MMRESULT(WINAPI*)(UINT, UINT, LPTIMECALLBACK, DWORD_PTR, 
 using TimeKillEventFn = MMRESULT(WINAPI*)(UINT);
 using LoadLibraryAFn = HMODULE(WINAPI*)(LPCSTR);
 using MessageBoxAFn = int(WINAPI*)(HWND, LPCSTR, LPCSTR, UINT);
+using ReadFileFn = BOOL(WINAPI*)(HANDLE, LPVOID, DWORD, LPDWORD, LPOVERLAPPED);
 
 PeekMessageAFn g_realPeekMessageA = nullptr;
 GetMessageAFn g_realGetMessageA = nullptr;
 TimeKillEventFn g_realTimeKillEvent = nullptr;
 LoadLibraryAFn g_realLoadLibraryA = nullptr;
+ReadFileFn g_realReadFile = nullptr;
 
 void Log(const char* format, ...)
 {
@@ -470,6 +486,7 @@ std::string DumpJson(const char* checkpoint)
     const uint8_t fullscreen = chitin ? ReadU8(At(chitin, kField_fullscreen), &ok) : 0;
     const int32_t inAsync = chitin ? ReadI32(At(chitin, kField_in_async_update), &ok) : 0;
     const uint8_t reinitializing = chitin ? ReadU8(At(chitin, kField_reinitializing), &ok) : 0;
+    const uint8_t loading = chitin ? ReadU8(At(chitin, kField_progress_bar_active), &ok) : 0;
     if (!ok) {
         Log("dump: some fields could not be read (CBaldurChitin at 0x%08X)", chitin);
     }
@@ -481,7 +498,8 @@ std::string DumpJson(const char* checkpoint)
     json += "  \"rng_state\": " + Number(rng) + ",\n";
     json += "  \"globals\": {\"au_counter\": " + Number(auCounter) + ", \"fullscreen\": " + Number(fullscreen)
         + ", \"in_async_update\": " + Number(inAsync) + ", \"ai_stalled_frames\": " + Number(g_stalledFrames)
-        + ", \"reinitializing\": " + Number(reinitializing)
+        + ", \"reinitializing\": " + Number(reinitializing) + ", \"loading\": " + Number(loading)
+        + ", \"loads\": " + Number(g_gate.Loads()) + ", \"held_frames\": " + Number(g_gate.HeldFrames())
         + ", \"ai_rng_state\": "
         + (inputTiddata && aiOk ? Number(aiRng) : std::string("null")) + "},\n";
     const bool chargen = std::strcmp(screen, "create_char") == 0;
@@ -725,8 +743,54 @@ void FireTimers()
     }
 }
 
+// The frame gate's question for this call: false when it is held.
+bool IsFrame()
+{
+    if (g_frame.load() == 0) {
+        return true; // the first call sets the recorder up
+    }
+    bool ok = true;
+    const uint32_t chitin = ReadU32(kField_baldur_chitin.address, &ok);
+    if (!ok || !chitin) {
+        return true;
+    }
+    // In this order: see FrameGate::Counts.
+    const int32_t au = ReadI32(At(chitin, kField_au_counter), &ok);
+    const int32_t inAsync = ReadI32(At(chitin, kField_in_async_update), &ok);
+    const uint8_t progress = ReadU8(At(chitin, kField_progress_bar_active), &ok);
+    if (!ok) {
+        return true;
+    }
+    const uint32_t loadsBefore = g_gate.Loads();
+    if (!g_gate.Counts(au, inAsync != 0, progress != 0)) {
+        if (g_gate.Stretch() == 1) {
+            Log("frames held: drawn inside AI update %d (progress bar %s)", au, progress ? "up" : "down");
+        } else if (g_gate.Stretch() == 0) {
+            Log("frame held: the redraw the end of AI update %d asked for, after a frame already counted for it", au);
+        }
+        if (g_gate.Loads() != loadsBefore) {
+            Log("load %u: AI update %d", g_gate.Loads(), au);
+        }
+        if (g_slowReadsMs) {
+            Log("test: held call %u of AI update %d, %u reads slowed so far", g_gate.Stretch(), au,
+                g_slowedReads.load());
+        }
+        return false;
+    }
+    if (g_gate.EndedStretch()) {
+        Log("%u calls held inside the last AI update; frames go on (au_counter %d)", g_gate.EndedStretch(), au);
+        if (g_slowReadsMs) {
+            Log("test: %u reads slowed so far", g_slowedReads.load());
+        }
+    }
+    return true;
+}
+
 extern "C" void __cdecl OnFrame()
 {
+    if (!IsFrame()) {
+        return;
+    }
     const uint32_t frame = ++g_frame;
     if (frame == 1) {
         g_mainThread = GetCurrentThreadId();
@@ -776,11 +840,11 @@ extern "C" void __cdecl OnFrame()
         }
     }
     {
-        // Every frame must have had an AI update since the previous frame,
-        // or one still in progress (a load redrawing its progress from
-        // inside AsynchronousUpdate). A frame with neither is a stall: the
-        // AI thread ran without counting (m_bReInitializing, a focus loss)
-        // or did not run.
+        // Every frame must have had an AI update since the previous frame
+        // (the gate holds the calls drawn from inside one, as a load
+        // redrawing its progress from inside AsynchronousUpdate). A frame
+        // without one is a stall: the AI thread ran without counting
+        // (m_bReInitializing, a focus loss) or did not run.
         bool ok = true;
         const uint32_t chitin = ReadU32(kField_baldur_chitin.address, &ok);
         if (chitin) {
@@ -1025,6 +1089,19 @@ HMODULE WINAPI HookLoadLibraryA(LPCSTR name)
     return g_realLoadLibraryA(name);
 }
 
+// IWD2R_TEST_SLOW_READS: a slow disk, from the first frame on, for every
+// thread but the main one (the AI thread loads the areas), to show that a
+// load's timing does not reach the dumps.
+BOOL WINAPI HookReadFile(HANDLE file, LPVOID buffer, DWORD size, LPDWORD read, LPOVERLAPPED overlapped)
+{
+    const DWORD mainThread = g_mainThread.load();
+    if (g_slowReadsMs && mainThread != 0 && GetCurrentThreadId() != mainThread) {
+        ++g_slowedReads;
+        Sleep(g_slowReadsMs);
+    }
+    return g_realReadFile(file, buffer, size, read, overlapped);
+}
+
 int WINAPI HookMessageBoxA(HWND, LPCSTR text, LPCSTR caption, UINT type)
 {
     // Our engine's headless answer (platform/window.cpp): the first button.
@@ -1161,6 +1238,8 @@ Hook g_hooks[] = {
     { "KERNEL32.dll", "LoadLibraryA", reinterpret_cast<void*>(&HookLoadLibraryA),
         reinterpret_cast<void**>(&g_realLoadLibraryA), true, false },
     { "USER32.dll", "MessageBoxA", reinterpret_cast<void*>(&HookMessageBoxA), nullptr, false, false },
+    { "KERNEL32.dll", "ReadFile", reinterpret_cast<void*>(&HookReadFile), reinterpret_cast<void**>(&g_realReadFile),
+        false, false },
     { "USER32.dll", "GetDoubleClickTime", reinterpret_cast<void*>(&HookGetDoubleClickTime), nullptr, true, false },
     { "USER32.dll", "GetSystemMetrics", reinterpret_cast<void*>(&HookGetSystemMetrics),
         reinterpret_cast<void**>(&g_realGetSystemMetrics), true, false },
@@ -1305,6 +1384,14 @@ bool Start()
         }
         g_stealFocusFrame = value;
         Log("test: the focus will be stolen at frame %u", value);
+    }
+    const std::string slow = Env("IWD2R_TEST_SLOW_READS");
+    if (!slow.empty()) {
+        if (!ParseUnsigned(slow, &g_slowReadsMs) || g_slowReadsMs == 0) {
+            Log("FATAL: IWD2R_TEST_SLOW_READS=%s is not a number of ms", slow.c_str());
+            return false;
+        }
+        Log("test: ReadFile off the main thread sleeps %u ms first", g_slowReadsMs);
     }
     if (!Env("IWD2R_TEST_NO_FOCUS_GUARD").empty()) {
         g_focusGuard = false;

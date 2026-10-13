@@ -166,12 +166,24 @@ public:
         out->fullscreen = chitin->m_bFullscreen;
         out->inAsyncUpdate = chitin->m_bInAsynchronousUpdate;
         out->reinitializing = chitin->m_bReInitializing;
+        out->loading = chitin->cProgressBar.m_bProgressBarActivated;
         out->hasChargen = out->screen == "create_char";
         if (out->hasChargen)
             ReadChargen(chitin, chitin->m_pEngineCreateChar, &out->chargen);
         out->hasWorld = out->screen == "world";
         if (out->hasWorld)
             ReadWorld(chitin, &out->world);
+    }
+
+    void ReadAi(platform::state_dump::AiState* out) const override
+    {
+        CBaldurChitin* chitin = g_pBaldurChitin;
+        if (!chitin)
+            return;
+        // The AI thread writes these: volatile reads, in this order.
+        out->auCounter = *static_cast<volatile LONG*>(&chitin->nAUCounter);
+        out->inAsyncUpdate = *static_cast<volatile BOOL*>(&chitin->m_bInAsynchronousUpdate);
+        out->loading = *static_cast<volatile BOOLEAN*>(&chitin->cProgressBar.m_bProgressBarActivated);
     }
 };
 

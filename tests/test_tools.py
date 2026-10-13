@@ -2599,7 +2599,8 @@ class MiniSchemaTest(unittest.TestCase):
                 'rng_state': 1,
                 'globals': {'au_counter': 61, 'fullscreen': 0,
                             'in_async_update': 0, 'ai_stalled_frames': 0,
-                            'reinitializing': 0, 'ai_rng_state': None},
+                            'reinitializing': 0, 'loading': 0, 'loads': 0,
+                            'held_frames': 0, 'ai_rng_state': None},
                 'chargen': None, 'world': None}
         self.assertEqual(minischema.validate(dump, schema), [])
         dump['chargen'] = {'race': 1, 'subrace': 0, 'class': 5,
@@ -2623,7 +2624,8 @@ class MiniSchemaTest(unittest.TestCase):
                 'rng_state': 1,
                 'globals': {'au_counter': 1498, 'fullscreen': 0,
                             'in_async_update': 0, 'ai_stalled_frames': 0,
-                            'reinitializing': 0, 'ai_rng_state': 7},
+                            'reinitializing': 0, 'loading': 0, 'loads': 1,
+                            'held_frames': 13, 'ai_rng_state': 7},
                 'chargen': None,
                 'world': {'area': 'AR1000', 'party': [member]}}
         self.assertEqual(minischema.validate(dump, schema), [])
@@ -2899,6 +2901,9 @@ class SandboxReplayTest(unittest.TestCase):
             'IWD2R_DUMP_EVERY': '0', 'IWD2R_SEED': '7',
             'IWD2R_TEST_STEAL_FOCUS': '40',
             'IWD2R_TEST_NO_FOCUS_GUARD': '1'})
+        self.assertEqual(oracle.recorder_env('s', 'd', 7, 0,
+                                             slow_reads=20)
+                         ['IWD2R_TEST_SLOW_READS'], '20')
         cfg = winsandbox.replay_driver_config(self.GAME, env, 180)
         self.assertEqual(cfg, {
             'injector': r'C:\iwd2r\oracle\injector.exe',
@@ -2972,7 +2977,7 @@ class SandboxReplayTest(unittest.TestCase):
             return {'code': 0, 'stdout': 'injector: pid 1', 'stderr': '',
                     'error': None, 'seconds': 31.0}
 
-        def record_on_host(*a):
+        def record_on_host(*a, **kw):
             events.append(('host', list(locks.held)))
             out_dir = a[8]
             os.makedirs(out_dir)
@@ -3024,6 +3029,19 @@ class SandboxReplayTest(unittest.TestCase):
         self.assertEqual(report['mode'], 'sandbox')
         self.assertEqual(report['sandbox_seconds'], 31.0)
         self.assertEqual(report['missing_checkpoints'], [])
+
+    def test_slow_reads_reach_the_recorder(self):
+        seen = []
+
+        def run(build_dir, game_dir, script, env, timeout, host_run,
+                out_dir, log):
+            seen.append(env.get('IWD2R_TEST_SLOW_READS'))
+            os.makedirs(out_dir)
+            return {'code': None, 'stdout': '', 'stderr': '',
+                    'error': 'stop', 'seconds': 1.0}
+        self.record(['replay', 'record', 'start_screen',
+                     '--test-slow-reads', '15'], run)
+        self.assertEqual(seen, ['15'])
 
     def test_host_switch(self):
         code, events, locks, _ = self.record(
@@ -3187,6 +3205,18 @@ class OracleReplayTest(unittest.TestCase):
         self.assertEqual(oracle.invariant_problem('c', dump(61, 61, 0, 1)),
                          'c: reinitializing is 1 at frame 61: the game '
                          'stopped updating (a focus loss?)')
+        # A checkpoint inside a load: the progress bar up, or the AI thread
+        # inside an update.
+        loading = dump(61, 61)
+        loading['globals'].update(loading=1, in_async_update=0)
+        self.assertEqual(oracle.invariant_problem('c', loading),
+                         'c: a load is in progress at frame 61 (loading 1, '
+                         'in_async_update 0): the checkpoint lands inside it')
+        loading['globals'].update(loading=0, in_async_update=1)
+        self.assertIn('a load is in progress',
+                      oracle.invariant_problem('c', loading))
+        loading['globals'].update(in_async_update=0, loads=3)
+        self.assertIsNone(oracle.invariant_problem('c', loading))
         with tempfile.TemporaryDirectory() as tmp:
             for name, d in (('checkpoint-a.json', dump(5, 5)),
                             ('checkpoint-b.json', dump(9, 3, 6)),
@@ -3319,7 +3349,7 @@ class OracleReplayCompareTest(unittest.TestCase):
         # Timing is reported, never compared (ruling R13c).
         other.update(frame=9, checkpoint='b')
         other['globals'].update(au_counter=1, ai_stalled_frames=3,
-                                in_async_update=1)
+                                in_async_update=1, held_frames=4)
         self.assertEqual(oracle.field_differences(dump, other), [])
         other['globals']['ai_rng_state'] = 8
         other['chargen']['abilities'] = [1, 3, 4]
@@ -3341,7 +3371,8 @@ class OracleReplayCompareTest(unittest.TestCase):
         return {'frame': frame, 'screen': screen, 'rng_state': rng,
                 'globals': {'au_counter': au, 'ai_stalled_frames': 0,
                             'in_async_update': 0, 'reinitializing': 0,
-                            'fullscreen': 0, 'ai_rng_state': 3},
+                            'fullscreen': 0, 'loading': 0, 'loads': 1,
+                            'held_frames': 2, 'ai_rng_state': 3},
                 'chargen': None}
 
     def test_compare_checkpoints(self):
@@ -3368,19 +3399,19 @@ class OracleReplayCompareTest(unittest.TestCase):
                                                   8)])
         self.assertEqual(lines, [
             'checkpoint menu (connection): match (frame 10/10, au_counter '
-            '10/9, ai_stalled_frames 0/0, in_async_update 0/0; '
-            'original/ours)',
+            '10/9, ai_stalled_frames 0/0, in_async_update 0/0, held_frames '
+            '2/2; original/ours)',
             'checkpoint party (single_player): different, screen not '
             'enabled (frame 10/10, au_counter 10/10, ai_stalled_frames 0/0, '
-            'in_async_update 0/0; original/ours)',
+            'in_async_update 0/0, held_frames 2/2; original/ours)',
             '  diff rng_state: original 1, ours 2',
             'checkpoint chargen (create_char): DIFFERENT (frame 10/10, '
-            'au_counter 10/10, ai_stalled_frames 0/0, in_async_update 0/0; '
-            'original/ours)',
+            'au_counter 10/10, ai_stalled_frames 0/0, in_async_update 0/0, '
+            'held_frames 2/2; original/ours)',
             '  DIFF rng_state: original 5, ours 7',
             'checkpoint known (create_char): match (frame 10/10, au_counter '
-            '10/10, ai_stalled_frames 0/0, in_async_update 0/0; '
-            'original/ours)',
+            '10/10, ai_stalled_frames 0/0, in_async_update 0/0, held_frames '
+            '2/2; original/ours)',
             '  KNOWN rng_state: original 6, ours 8 (project 3; evidence '
             '0x72DE60)',
             'checkpoint gone: MISSING on our side'])
