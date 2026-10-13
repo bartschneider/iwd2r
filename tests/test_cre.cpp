@@ -5,6 +5,7 @@
 #include "CCreatureFile.h"
 #include "CGameSprite.h"
 #include "CInfGame.h"
+#include "CItem.h"
 #include "CScreenCreateChar.h"
 #include "ScreenLayout.h"
 #include "install_ini_backup.h"
@@ -187,6 +188,11 @@ TEST_CASE("CHARBASE.CRE survives Unmarshal and Marshal", "[cre][data]")
     memcpy(&maxHp, &original[0x26], sizeof(maxHp));
     // In memory they carry the Constitution bonus, which Marshal (0x70B2F0)
     // takes off again.
+    CHECK(hp == 10);
+    CHECK(maxHp == 10);
+    CHECK(pSprite->m_nHPCONBonusTotalOld == -1);
+    CHECK(pBStats->m_hitPoints == 9);
+    CHECK(pBStats->m_maxHitPointsBase == 9);
     CHECK(pBStats->m_hitPoints == hp + pSprite->m_nHPCONBonusTotalOld);
     CHECK(pBStats->m_maxHitPointsBase == maxHp + pSprite->m_nHPCONBonusTotalOld);
 
@@ -266,6 +272,9 @@ TEST_CASE("a CRE whose equipped item is missing loads with that slot empty", "[c
 
     CGameSprite* pSprite = MakeSprite(bytes);
     REQUIRE(pSprite != NULL);
+    // NOTE: Until CItem(CResRef, ...) (0x4E7E90) sets the item's resource,
+    // every item, present or not, comes out empty here, so this pins only
+    // the "no crash" half until then.
     CHECK(pSprite->m_equipment.m_items[CGameSpriteEquipment::SLOT_HELMET] == NULL);
 }
 
@@ -299,4 +308,67 @@ TEST_CASE("a fresh character's effect list runs as Character Generation runs it"
     for (int nSkill = 0; nSkill < 16; nSkill++) {
         CHECK(pSprite->m_derivedStats.m_nSkills[nSkill] >= 0);
     }
+}
+
+TEST_CASE("Marshal without all items skips a type 0x3A item and keeps the slot numbers", "[cre][data]")
+{
+    const char* env = std::getenv("IWD2_DATA");
+    if (env == nullptr || *env == '\0') {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    InstallIniBackup backup(env);
+
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+
+    // 00GBGA01 is of type 0x3A in the vanilla data; 00AMUL01 (an amulet)
+    // is not.
+    const CString sFound("00GBGA01");
+    const CString sOther("00AMUL01");
+
+    // Our CItem(CResRef, ...) constructor (0x4E7E90 in src/CItem.cpp) does
+    // not set the item's resource yet, so no item has a type; and
+    // CResItem::Parse (0x4016F0) compares the header with 'ITM ' as a
+    // multi-character constant (0x49544D20) where the original compares
+    // 0x204D5449. Until both are fixed this case cannot load an item.
+    {
+        CItem probe(CResRef(sOther), 0, 0, 0, 0, 0);
+        if (probe.GetResRef() == "") {
+            SKIP("[iwd2r-skip] CItem(CResRef, ...) does not load the item yet");
+        }
+    }
+
+    std::vector<BYTE> original = LoadCharBase();
+    REQUIRE(original.size() > 900);
+    CGameSprite* pSprite = MakeSprite(original);
+    REQUIRE(pSprite != NULL);
+
+    // A type-0x3A item in the first misc slot and an ordinary one in the
+    // second, so the second's number depends on the first being skipped.
+    pSprite->m_equipment.m_items[CGameSpriteEquipment::SLOT_MISC] = new CItem(CResRef(sFound), 0, 0, 0, 0, 0);
+    pSprite->m_equipment.m_items[CGameSpriteEquipment::SLOT_MISC + 1] = new CItem(CResRef(sOther), 0, 0, 0, 0, 0);
+    REQUIRE(pSprite->m_equipment.m_items[CGameSpriteEquipment::SLOT_MISC]->GetItemType() == 0x3A);
+    REQUIRE(pSprite->m_equipment.m_items[CGameSpriteEquipment::SLOT_MISC + 1]->GetItemType() != 0x3A);
+
+    CCreatureFileEquipment equipment;
+    CCreatureFileItem* pItems = NULL;
+    DWORD nItems = 0;
+    pSprite->m_equipment.Marshal(&equipment, &pItems, &nItems, FALSE);
+
+    // The fist is not counted and the 0x3A item is left out: one item, at 0.
+    CHECK(nItems == 1);
+    CHECK(equipment.m_miscItem[0] == 0xFFFF);
+    CHECK(equipment.m_miscItem[1] == 0);
+    REQUIRE(pItems != NULL);
+    CHECK(CResRef(pItems[0].m_itemId) == CResRef(sOther));
+    delete[] pItems;
+
+    // With all items both are written, in slot order.
+    pItems = NULL;
+    pSprite->m_equipment.Marshal(&equipment, &pItems, &nItems, TRUE);
+    CHECK(nItems == 2);
+    CHECK(equipment.m_miscItem[0] == 0);
+    CHECK(equipment.m_miscItem[1] == 1);
+    delete[] pItems;
 }
