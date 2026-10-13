@@ -38,7 +38,7 @@
 | `platform/present_backend.h` | presenter | the backend interface |
 | `platform/present_classic.cpp` | presenter | the SDL_Renderer backend (moved) |
 | `platform/present_gpu.cpp` | presenter | the SDL3 GPU backend, offscreen path for tests |
-| `platform/shaders/quad.vert`, `nearest.frag`, `sharp.frag`, `smooth.frag`, `*.spv` | presenter | shaders and blobs |
+| `platform/shaders/quad.vert`, `nearest.frag`, `sharp.frag`, `smooth.frag`, `fsr_easu.frag`, `fsr_rcas.frag`, `nis.frag`, `*.spv` | presenter | shaders and blobs |
 | `tools/shaders.py` | presenter | compile and `--check`; downloads glslang into `$IWD2R_HOME/glslang` if absent |
 | `platform/window.cpp` (key handler, mapping call sites) | presenter (hotkey), layout (mapping) — coordinated by line ranges | hotkey; mouse mapping |
 | `src/ScreenLayout.h`, `.cpp` | layout | `World Scale`, reserved rects, the region list |
@@ -77,6 +77,16 @@
 - [ ] **Step 1: Tests.** `test_tools.py`: `test_shaders_check_detects_stale_blob` (a temp copy with one byte changed in a `.spv` fails `--check`; the real tree passes). `[present]` Catch2: `gpu_offscreen_identity` (device without window; upload a 320×240 synthetic frame with every pixel distinct; `DrawRegion` of the full frame at scale 1 nearest into the offscreen target; `Readback` equals the input byte for byte; skipped with a message when `SDL_CreateGPUDevice` returns null); `gpu_identity_sharp_integer_scale` (scale 2 sharp equals nearest-upscaled input); `fallback_when_no_device` (`SetBackend(gpu)` with device creation forced to fail through a test hook → `ActiveBackend() == classic`, Review Focus 2 with the hook failing at pipeline creation instead); `skipped_frame_on_acquire_failure` (test hook makes acquire fail once; `PresentedFrames` still increments; no crash; Review Focus 3); `toggle_switches_and_reports`.
 - [ ] **Step 2:** run (fail). **Step 3:** implement: move the SDL_Renderer code into `present_classic.cpp` behind `Backend`; write the shaders and `shaders.py`; the gpu backend; the INI keys; the hotkey Ctrl+Shift+R in `window.cpp`'s key handler calling `present::ToggleBackend()` and printing `presenter: gpu|classic` to stderr; CI's Linux jobs `apt-get install mesa-vulkan-drivers` so lavapipe runs the offscreen tests. **Step 4:** run (pass) on Linux; on Windows (`python3 tools/play.py --windowed --set "Program Options/Presenter=gpu"` plus `IWD2R_SHOT_PRESENTED=1` through `--set` is not an env; add `--shot-presented` to `play.py` in this stream) the start screen's `-presented.png` equals the CPU shot; the smoke hash and `--vm linux --suite` unchanged with defaults.
 - [ ] **Step 5: Commits** per piece: "Split the presenter into a front and the classic backend", "Add the SDL GPU presenter with nearest, sharp and smooth filters", "Compile the presenter shaders and check their blobs", "Toggle the presenter at runtime".
+
+### Task 2b: FSR 1.0 and NIS filters (after Task 2 merges; presenter owner)
+
+**Files:** `platform/shaders/fsr_easu.frag`, `fsr_rcas.frag`, `nis.frag` and their `.spv`; `platform/present_gpu.cpp` (two-pass path for FSR: EASU into an intermediate texture at the output size, then RCAS), `platform/present.cpp` (the `Filter` enum gains `Fsr` and `Nis`; `Sharpness` setting), `src/main.cpp` INI line `Sharpness`, `tests/test_present.cpp`, `tests/test_tools.py` (shader check covers the new blobs), README Run section, `docs/followups.md` (remove the entry).
+
+**Interfaces:** `Filter::Fsr`, `Filter::Nis`; `present::SetSharpness(float)` in 0..1 (default 0.5); the INI keys `Scale Filter=fsr|nis` and `Sharpness`. Sources: AMD FidelityFX FSR 1.0 (`ffx_fsr1.h`, MIT) ported to GLSL 450 as two fragment shaders; NVIDIA Image Scaling SDK (`NIS_Scaler.h`, MIT) ported as one fragment shader with its coefficient texture baked into the shader or uploaded once. Attribution for both goes in `docs/THIRD_PARTY.md` (create it) as their licences require; nothing else about the notice rule changes.
+
+- [ ] **Step 1: Tests** (`[present]`): `fsr_and_nis_pipelines_build` (offscreen device; both filters render a 320×240 frame to 640×480 without error, output is not blank, and differs from nearest by more than 0 and less than a loose bound); `sharpness_changes_output` (RCAS at 0 and 1 differ); `shaders_check_covers_new_blobs` in `test_tools.py`.
+- [ ] **Step 2–4:** run (fail), implement, run (pass); `tools/shaders.py --check` passes; the default path and the three existing filters are unchanged (their identity tests still pass).
+- [ ] **Step 5: Commit** "Add the FSR 1.0 and NIS presenter filters".
 
 ### Task 3: Stream layout
 
