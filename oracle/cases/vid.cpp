@@ -36,9 +36,9 @@
 #include "oracle/runner/generators.h"
 #include "oracle/runner/registry.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
-#include <algorithm>
 #include <cstring>
 #include <new>
 #include <string>
@@ -496,7 +496,7 @@ void RealizeRange(CaseContext& ctx)
     auto check = [&](int n) {
         ModeValues values;
         values.fade = static_cast<uint8_t>(picks.Between(0, 3) == 0 ? picks.Between(0, CVidMode::NUM_FADE_FRAMES)
-                                                                   : CVidMode::NUM_FADE_FRAMES);
+                                                                    : CVidMode::NUM_FADE_FRAMES);
         values.globalTint = picks.Between(0, 2) == 0 ? 0xFFFFFF : (picks.Bits() & 0xFFFFFF);
         values.brightness = static_cast<uint8_t>(picks.Between(0, 2) == 0 ? picks.Between(0, 255) : 0);
         values.gamma = static_cast<uint8_t>(picks.Between(0, 2) == 0 ? picks.Between(0, 40) : 0);
