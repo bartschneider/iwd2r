@@ -1,5 +1,5 @@
 """Tests for tools/gen_map.py, tools/check_evidence.py, tools/gen_fields.py,
-tools/minischema.py and the pure parts of tools/play.py, tools/realinput.py,
+tools/minischema.py, tools/shaders.py and the pure parts of tools/play.py, tools/realinput.py,
 tools/winsandbox.py, tools/oracle.py and tools/ghidra/labels.py.
 
 Run from the repository root: python3 -I tests/test_tools.py
@@ -27,6 +27,7 @@ import xml.etree.ElementTree as ET
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GEN_MAP = os.path.join(ROOT, 'tools', 'gen_map.py')
+SHADERS_TOOL = os.path.join(ROOT, 'tools', 'shaders.py')
 
 
 class GenMapTest(unittest.TestCase):
@@ -220,6 +221,47 @@ class PlayArgsTest(unittest.TestCase):
         self.assertEqual(play.sync_list(['a.cpp', 'build/x', 'runs/1/log.txt',
                                          'tools/build/y', '']),
                          ['a.cpp', 'tools/build/y'])
+
+
+class ShadersTest(unittest.TestCase):
+    """tools/shaders.py --check against the committed blobs (it fetches the
+    pinned glslang into $IWD2R_HOME/glslang when absent)."""
+
+    def run_check(self, *args):
+        return subprocess.run([sys.executable, '-I', SHADERS_TOOL, '--check', *args],
+                              capture_output=True, text=True)
+
+    def test_shaders_check_detects_stale_blob(self):
+        real = self.run_check()
+        self.assertEqual(real.returncode, 0, real.stdout + real.stderr)
+        src = os.path.join(ROOT, 'platform', 'shaders')
+        with tempfile.TemporaryDirectory() as tmp:
+            for name in os.listdir(src):
+                with open(os.path.join(src, name), 'rb') as a, \
+                        open(os.path.join(tmp, name), 'wb') as b:
+                    b.write(a.read())
+            self.assertEqual(self.run_check('--dir', tmp).returncode, 0)
+            blob = os.path.join(tmp, 'sharp.frag.spv')
+            with open(blob, 'r+b') as f:
+                f.seek(40)
+                byte = f.read(1)
+                f.seek(40)
+                f.write(bytes([byte[0] ^ 0x01]))
+            stale = self.run_check('--dir', tmp)
+            self.assertEqual(stale.returncode, 1)
+            self.assertIn('sharp.frag.spv does not match its source', stale.stdout)
+            os.remove(blob)
+            missing = self.run_check('--dir', tmp)
+            self.assertEqual(missing.returncode, 1)
+            self.assertIn('sharp.frag.spv is missing', missing.stdout)
+
+    def test_pinned_release_has_checksums(self):
+        with open(os.path.join(ROOT, 'tools', 'shaders_versions.json')) as f:
+            pin = json.load(f)['glslang']
+        self.assertTrue(pin['version'])
+        for key in ('linux-x86_64', 'windows-x86_64'):
+            self.assertIn(pin['version'], pin[key]['url'])
+            self.assertRegex(pin[key]['sha256'], r'^[0-9a-f]{64}$')
 
 
 class PlayRunFolderTest(unittest.TestCase):
