@@ -42,7 +42,15 @@ int CUtil::Uncompress(BYTE* dest, DWORD* destLen, const BYTE* source, DWORD sour
 // 0x780C00
 void CUtil::UtilAssert(int nLineNumber, const char* szFileName, const char* pExp, const char* pText)
 {
-    const char* fileName = strrchr(szFileName, '\\') + 1;
+    // NOTE: Portability: the original takes the name after the last '\\'
+    // only; GCC and Clang spell __FILE__ with '/', where that would be a bad
+    // pointer, so the last separator of either kind is used.
+    const char* fileName = strrchr(szFileName, '\\');
+    const char* slash = strrchr(szFileName, '/');
+    if (fileName == NULL || (slash != NULL && slash > fileName)) {
+        fileName = slash;
+    }
+    fileName = fileName != NULL ? fileName + 1 : szFileName;
     if (pText == NULL) {
         pText = "no msg.";
     }

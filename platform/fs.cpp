@@ -390,6 +390,21 @@ HANDLE FindFirstFileA(LPCSTR pattern, WIN32_FIND_DATAA* data)
     if (ec)
         return INVALID_HANDLE_VALUE;
     auto record = std::make_unique<platform::fs::FindRecord>();
+    // Win32 lists "." and ".." first in a directory other than a root when the
+    // pattern is "*" or "*.*"; the engine skips them by name or by the
+    // directory attribute, and relies on them to tell an empty directory from
+    // a missing one (CDimm::DirectoryCopyFiles of an empty mpsave\default).
+    const stdfs::path searched = dir.empty() ? stdfs::current_path(ec) : stdfs::path(dir);
+    if ((wildcard == "*" || wildcard == "*.*") && !ec && searched.has_relative_path()) {
+        for (const char* dots : { ".", ".." }) {
+            WIN32_FIND_DATAA entry;
+            if (platform::fs::FillFindData(searched / dots, entry)) {
+                std::strncpy(entry.cFileName, dots, MAX_PATH - 1);
+                record->entries.push_back(entry);
+            }
+        }
+    }
+    ec.clear();
     for (const stdfs::directory_iterator end; iter != end; iter.increment(ec)) {
         if (ec)
             break;
