@@ -48,6 +48,12 @@
 #include "mfc_filefind.h"
 // clang-format on
 
+// Engine code gets the VC6 C runtime's rand sequence on every platform. The standard
+// headers above are already included, so they keep the real declarations.
+#include "msvc_rand.h"
+#define rand() iwd2r_rand()
+#define srand(seed) iwd2r_srand(seed)
+
 #define ASSERT(x) ((void)0)
 #define TRACE(...) ((void)0)
 #define VERIFY(x) ((void)(x))

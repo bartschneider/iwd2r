@@ -1,8 +1,8 @@
 # Subsystem map
 
-Generated from commit `392bae4` by `tools/gen_map.py`. Do not edit; CI runs `python3 -I tools/gen_map.py --check`.
+Generated from commit `2b62dec` by `tools/gen_map.py`. Do not edit; CI runs `python3 -I tools/gen_map.py --check`.
 
-Totals: 468 files, 272374 lines, 369 `TODO: Incomplete`, 9999 address comments.
+Totals: 470 files, 272412 lines, 369 `TODO: Incomplete`, 9999 address comments.
 
 | Family | Files | Lines | `TODO: Incomplete` | Address comments | Platform headers included |
 |---|---:|---:|---:|---:|---|
@@ -16,6 +16,6 @@ Totals: 468 files, 272374 lines, 369 `TODO: Incomplete`, 9999 address comments.
 | Messaging | 10 | 22516 | 37 | 1148 | — |
 | Engine core | 10 | 7012 | 11 | 413 | data_dir.h, fs.h, window.h |
 | Other | 85 | 25259 | 66 | 1336 | window.h |
-| compat | 25 | 3603 | 0 | 0 | win32_api.h |
+| compat | 27 | 3641 | 0 | 0 | win32_api.h |
 | platform | 32 | 7074 | 0 | 0 | affinity.h, clock.h, data_dir.h, ddraw_shim.h, dsound_shim.h, fs.h, gl_compat.h, handles.h, imm_stub.h, png.h, present.h, script.h, win32_api.h, window.h |
-| **Total** | 468 | 272374 | 369 | 9999 | |
+| **Total** | 470 | 272412 | 369 | 9999 | |
