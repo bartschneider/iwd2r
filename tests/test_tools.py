@@ -3195,8 +3195,12 @@ class OracleReplayTest(unittest.TestCase):
                 'au_counter': au, 'ai_stalled_frames': stalled,
                 'reinitializing': reinit}}
         self.assertIsNone(oracle.invariant_problem('c', dump(61, 61)))
-        # A load draws frames from inside an AI update: au_counter lags.
-        self.assertIsNone(oracle.invariant_problem('c', dump(156, 154)))
+        # The calls a load draws from inside an AI update are held, not
+        # counted (FrameGate): au_counter equals frame, and held_frames
+        # counts them apart.
+        held = dump(156, 156)
+        held['globals'].update(held_frames=15, loads=1)
+        self.assertIsNone(oracle.invariant_problem('c', held))
         self.assertEqual(oracle.invariant_problem('c', dump(61, 40, 21)),
                          'c: 21 frames by frame 61 had no AI update '
                          '(au_counter 40): the AI thread stalled')

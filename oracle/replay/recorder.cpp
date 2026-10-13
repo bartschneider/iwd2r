@@ -41,9 +41,8 @@
 // indices pass through); RegisterClassExA (the game window's class gets the
 // focus guard, GuardProc: activation messages are sent straight to the
 // window procedure, past the message hooks) and CreateWindowExA (notes the
-// game window); ReadFile (passed through, slowed only by
-// IWD2R_TEST_SLOW_READS). An import the exe does not have is logged and
-// skipped.
+// game window); ReadFile only with IWD2R_TEST_SLOW_READS. An import the
+// exe does not have is logged and skipped.
 // Real keyboard and mouse input never reaches the game: the hooks
 // answer from the scenario, and the message hooks drop keyboard and mouse
 // messages.
@@ -1216,6 +1215,8 @@ struct Hook {
     void** real; // receives the original, or nullptr
     bool required; // the recorder cannot work without it
     bool hooked;
+    // Installed only while this is nonzero (a test switch); nullptr: always.
+    const unsigned* onlyIf = nullptr;
 };
 
 Hook g_hooks[] = {
@@ -1238,8 +1239,10 @@ Hook g_hooks[] = {
     { "KERNEL32.dll", "LoadLibraryA", reinterpret_cast<void*>(&HookLoadLibraryA),
         reinterpret_cast<void**>(&g_realLoadLibraryA), true, false },
     { "USER32.dll", "MessageBoxA", reinterpret_cast<void*>(&HookMessageBoxA), nullptr, false, false },
+    // Only with IWD2R_TEST_SLOW_READS: otherwise the original's reads stay
+    // untouched.
     { "KERNEL32.dll", "ReadFile", reinterpret_cast<void*>(&HookReadFile), reinterpret_cast<void**>(&g_realReadFile),
-        false, false },
+        false, false, &g_slowReadsMs },
     { "USER32.dll", "GetDoubleClickTime", reinterpret_cast<void*>(&HookGetDoubleClickTime), nullptr, true, false },
     { "USER32.dll", "GetSystemMetrics", reinterpret_cast<void*>(&HookGetSystemMetrics),
         reinterpret_cast<void**>(&g_realGetSystemMetrics), true, false },
@@ -1285,7 +1288,7 @@ bool HookImports(std::string* error)
             }
             const auto* byName = reinterpret_cast<const IMAGE_IMPORT_BY_NAME*>(base + names->u1.AddressOfData);
             for (Hook& hook : g_hooks) {
-                if (_stricmp(dll, hook.dll) != 0 || std::strcmp(reinterpret_cast<const char*>(byName->Name), hook.name)
+                if ((hook.onlyIf && !*hook.onlyIf) || _stricmp(dll, hook.dll) != 0 || std::strcmp(reinterpret_cast<const char*>(byName->Name), hook.name)
                     || hook.hooked) {
                     continue;
                 }
@@ -1305,7 +1308,7 @@ bool HookImports(std::string* error)
         }
     }
     for (const Hook& hook : g_hooks) {
-        if (hook.hooked) {
+        if (hook.hooked || (hook.onlyIf && !*hook.onlyIf)) {
             continue;
         }
         if (hook.required) {

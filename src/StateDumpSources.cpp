@@ -180,7 +180,14 @@ public:
         CBaldurChitin* chitin = g_pBaldurChitin;
         if (!chitin)
             return;
-        // The AI thread writes these: volatile reads, in this order.
+        // The AI thread writes these. volatile only keeps the compiler from
+        // merging or reordering the reads; the order the hardware sees is
+        // x86's, where loads are not reordered with loads and the writer's
+        // store order suffices. An ARM build needs acquire loads here and
+        // release stores on the AI thread (std::atomic_ref) or a fence:
+        // otherwise the gate could read in_async_update before au_counter,
+        // hold the update's last redraw, and the run would hang until its
+        // timeout.
         out->auCounter = *static_cast<volatile LONG*>(&chitin->nAUCounter);
         out->inAsyncUpdate = *static_cast<volatile BOOL*>(&chitin->m_bInAsynchronousUpdate);
         out->loading = *static_cast<volatile BOOLEAN*>(&chitin->cProgressBar.m_bProgressBarActivated);

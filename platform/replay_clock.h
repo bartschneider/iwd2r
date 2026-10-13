@@ -68,6 +68,14 @@ constexpr int64_t WallClockSeconds(uint32_t tick)
 // ended and the two requests did not merge). Every other call counts, as
 // before the gate.
 //
+// The echo rule covers one call only. The interleaving it misses: a raced
+// end-of-load frame F counts for update N; the next call C sees au N+1 and
+// counts it, correctly; a further call D, before update N+2 starts, sees au
+// N+1 with inUpdate 0 and the echo flag already cleared, and counts a
+// second frame for N+1. That does not drift silently: D is a stall (no AI
+// update since the previous frame), so ai_stalled_frames becomes 1 and
+// tools/oracle.py's invariant fails every later checkpoint.
+//
 // The main thread cannot wait inside the frame for the load to finish: the
 // load waits for the main thread (sub_59FA00 spins while
 // m_bInSynchronousUpdate, 0x193E, is set, and WinMain sets it around the
@@ -76,7 +84,14 @@ constexpr int64_t WallClockSeconds(uint32_t tick)
 //
 // A load (Loads()): an AI update during which a call was held while
 // CChitin::cProgressBar.m_bProgressBarActivated (0x1986, set only by
-// CBaldurChitin::SetProgressBar 0x425710) was set.
+// CBaldurChitin::SetProgressBar 0x425710) was set. It assumes the bar is
+// cleared within the load's own AI update, which holds for the load the
+// replays reach today (SetProgressBar TRUE and FALSE at
+// src/CScreenSinglePlayer.cpp:1384 and 1642, both inside
+// CScreenSinglePlayer::OnMainDoneButtonClick 0x6629E0). A load that keeps
+// the bar up across updates would make the count depend on which updates
+// happened to draw a held call; it must then become a count of the bar's
+// rising edges.
 class FrameGate {
 public:
     // auCounter, inUpdate and progressBar: CChitin::nAUCounter,
