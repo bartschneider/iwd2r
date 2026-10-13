@@ -510,7 +510,9 @@ public:
     /* 0138 */ int field_138;
     /* 013C */ int field_13C;
     /* 0140 */ int m_nMirrorImages;
-    /* 0144 */ BYTE m_nSkills[64];
+    // Signed: CheckLimits (0x4468F0) and GetAtOffset (0x446DD0) read them
+    // with movsx (0x446A2C, 0x446EBC).
+    /* 0144 */ signed char m_nSkills[64];
     /* 0184 */ BOOL m_bPreventAISlowDown;
 };
 
@@ -557,6 +559,7 @@ public:
     /* 02AC */ CImmunitiesItemTypeEquipList field_2AC;
     /* 02C8 */ CImmunitiesProjectile m_cBounceProjectile;
     /* 02E4 */ CImmunitiesEffect m_cBounceEffect;
+    /* 0300 */ CImmunitiesSpellLevel m_cBounceSpellLevel;
     /* 03C8 */ CImmunitiesProjectile field_3C8;
     /* 03E4 */ CImmunitiesProjectile field_3E4;
     /* 0400 */ CImmunitiesProjectile field_400;
@@ -574,7 +577,7 @@ public:
     /* 0574 */ CColorRanges m_appliedColorRanges;
     /* 0590 */ CColorEffects m_appliedColorEffects;
     /* 05AC */ CGameSpriteSpells m_spells;
-    /* 0DA8 */ int field_DA8;
+    /* 0CAC */ CGameSpriteGroupedSpellList m_domainSpells;
     /* 0DAC */ BOOL m_disabledButtons[40];
     /* 0E4C */ BOOL m_disabledSpellTypes[3];
 };

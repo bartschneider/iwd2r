@@ -541,7 +541,6 @@ public:
     void sub_723BF0(BOOLEAN a1, BOOLEAN a2);
     INT GetAC();
     INT sub_723F60();
-    void sub_72DE60();
     void sub_71E760(CDerivedStats& DStats, int a2);
     int sub_71F6E0();
     const CString& GetName();
@@ -698,6 +697,8 @@ public:
     void sub_726330(UINT nFeatNumber, INT nValue);
     void sub_726570();
     INT sub_726800();
+    BOOL sub_727B40();
+    INT sub_763E40(UINT nSkill);
     void sub_726810(BYTE nWeaponSet);
     BYTE GetLastSong();
 
@@ -977,6 +978,8 @@ public:
     /* 72DE */ int field_72DE;
     /* 72E2 */ LONG field_72E2;
     /* 72E6 */ CGameButtonList* m_internalButtonList;
+    /* 72EA */ WORD field_72EA;
+    /* 72EC */ DWORD field_72EC;
     /* 72F0 */ CList<CGameSpriteSoundEntry, CGameSpriteSoundEntry> field_72F0;
     /* 730C */ CList<CGameSpriteSoundEntry, CGameSpriteSoundEntry> field_730C;
     /* 7328 */ CList<CGameSpriteSoundEntry, CGameSpriteSoundEntry> field_7328;

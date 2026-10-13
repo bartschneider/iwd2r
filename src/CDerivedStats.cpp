@@ -10,11 +10,57 @@
 // 0x443B30
 CDerivedStats::CDerivedStats()
 {
-    // TODO: Incomplete.
+    // NOTE: The members are constructed by their own constructors.
+
+    // TODO: Incomplete. Members our header does not declare yet: the two
+    // 10-entry arrays at +0x328 and +0x378 (zeroed at 0x443CA3 and
+    // 0x443CB9), the tree at +0x470 (0x443D71, 0x448C40), the list at
+    // +0x490 (0x443DA1, 0x4490E0) and the vector of 0x24-byte entries at
+    // +0x49C (0x443DC1-0x443DD3); and, after BonusInit, their emptying
+    // (0x443FD5 and 0x443FE0 with 0x4E7050, the tree at 0x444031, the list
+    // up to 0x44407B).
 
     BonusInit();
 
-    // TODO: Incomplete.
+    // NOTE: The same emptying of the lists as in Reload (0x443F25-0x4440CA),
+    // on lists that are empty here.
+    m_cImmunitiesProjectile.RemoveAll();
+    m_cImmunitiesEffect.ClearAll();
+    m_cImmunitiesAIType.ClearAll();
+    m_cImmunitiesSpellLevel.ClearAll();
+    m_cImmunitiesWeapon.ClearAll();
+    m_cToHitBonusList.ClearAll();
+    m_cDamageBonusList.ClearAll();
+    m_cImmunitiesItemEquip.ClearAll();
+    m_cImmunitiesItemTypeEquip.ClearAll();
+    field_290.ClearAll();
+    field_2AC.ClearAll();
+    m_appliedColorRanges.ClearAll();
+    m_appliedColorEffects.ClearAll();
+    m_cBounceProjectile.RemoveAll();
+    m_cBounceEffect.ClearAll();
+    m_cBounceSpellLevel.ClearAll();
+    field_3C8.RemoveAll();
+    field_3E4.RemoveAll();
+    field_400.RemoveAll();
+    field_41C.RemoveAll();
+    m_cImmunitiesItemUse.ClearAll();
+    m_cImmunitiesItemTypeUse.ClearAll();
+    m_naturalImmunities.clear();
+    field_4AC.RemoveAll();
+    field_4C8.RemoveAll();
+    field_4E4.RemoveAll();
+    field_500.RemoveAll();
+    field_51C.RemoveAll();
+    field_538.RemoveAll();
+
+    // NOTE: Folded with CImmunitiesEffect::ClearAll (0x4E6E80).
+    POSITION pos = m_cRegeneratedPersistantEffectList.GetHeadPosition();
+    while (pos != NULL) {
+        CPersistantEffect* pEffect = m_cRegeneratedPersistantEffectList.GetNext(pos);
+        delete pEffect;
+    }
+    m_cRegeneratedPersistantEffectList.RemoveAll();
 }
 
 // 0x5D6650
@@ -35,13 +81,18 @@ void CDerivedStats::Reload(CGameSprite* pSprite, CCreatureFileHeader* pCreature,
     field_6 = 0;
     field_8 = 0;
     field_A = 0;
-    field_C = pCreature->field_3E;
+    field_C = pCreature->field_3E - 10;
     m_nACCrushingMod = pCreature->m_armorClassCrushingAdjustment;
     m_nACMissileMod = pCreature->m_armorClassMissileAdjustment;
     m_nACPiercingMod = pCreature->m_armorClassPiercingAdjustment;
     m_nACSlashingMod = pCreature->m_armorClassSlashingAdjustment;
 
-    // TODO: Incomplete.
+    // TODO: Incomplete. The original empties the vector of 0x24-byte entries
+    // at +0x49C (FUN_00448B00, 0x444181) and, when the header's field_1B4
+    // is not 0, adds one built from it (5 * field_1B4, or 15 with 1 for 6)
+    // with six flag values 0, 0x100000, 0x1000000, 0x2000000, 0x4000000
+    // and 0x8000000 (0x444186-0x444306). Our header does not declare the
+    // vector yet.
 
     m_nCriticalHitBonus = 0;
     m_nTHAC0 = 0;
@@ -118,6 +169,7 @@ void CDerivedStats::Reload(CGameSprite* pSprite, CCreatureFileHeader* pCreature,
     m_visualEffects.reset();
     m_bCasterHold = FALSE;
     m_nEncumberance = 0;
+    m_nMissileTHAC0Bonus = 0;
     m_nMagicDamageResistance = pCreature->m_resistMagicDamageBase;
     m_nResistPoison = 0;
     m_bDoNotJump = FALSE;
@@ -154,11 +206,64 @@ void CDerivedStats::Reload(CGameSprite* pSprite, CCreatureFileHeader* pCreature,
     m_nMirrorImages = 0;
     m_bPreventAISlowDown = FALSE;
 
-    // TODO: Incomplete.
+    m_cImmunitiesProjectile.RemoveAll();
+    m_cImmunitiesEffect.ClearAll();
+    m_cImmunitiesAIType.ClearAll();
+    m_cImmunitiesSpellLevel.ClearAll();
+    m_cImmunitiesWeapon.ClearAll();
+    m_cToHitBonusList.ClearAll();
+    m_cDamageBonusList.ClearAll();
+    m_cImmunitiesItemEquip.ClearAll();
+    m_cImmunitiesItemTypeEquip.ClearAll();
+    field_290.ClearAll();
+    field_2AC.ClearAll();
+    m_appliedColorRanges.ClearAll();
+    m_appliedColorEffects.ClearAll();
+    m_cBounceProjectile.RemoveAll();
+    m_cBounceEffect.ClearAll();
+    m_cBounceSpellLevel.ClearAll();
+
+    // TODO: Incomplete. The arrays at +0x328 and +0x378 (ClearAll 0x4E7050
+    // at 0x4446C9 and 0x4446D4), not declared in our header.
+
+    field_3C8.RemoveAll();
+    field_3E4.RemoveAll();
+    field_400.RemoveAll();
+    field_41C.RemoveAll();
+    m_cImmunitiesItemUse.ClearAll();
+    m_cImmunitiesItemTypeUse.ClearAll();
+
+    // TODO: Incomplete. The tree at +0x470 (emptied at 0x44471B-0x444730),
+    // not declared in our header.
 
     m_naturalImmunities.clear();
 
-    // TODO: Incomplete.
+    // TODO: Incomplete. The list at +0x490 (emptied from 0x444751), not
+    // declared in our header.
+
+    // NOTE: See BonusInit.
+    field_4AC.RemoveAll();
+    field_4C8.RemoveAll();
+    field_4E4.RemoveAll();
+    field_500.RemoveAll();
+    field_51C.RemoveAll();
+    field_538.RemoveAll();
+
+    // NOTE: Folded with CImmunitiesEffect::ClearAll (0x4E6E80).
+    POSITION pos = m_cRegeneratedPersistantEffectList.GetHeadPosition();
+    while (pos != NULL) {
+        CPersistantEffect* pEffect = m_cRegeneratedPersistantEffectList.GetNext(pos);
+        delete pEffect;
+    }
+    m_cRegeneratedPersistantEffectList.RemoveAll();
+
+    // NOTE: The original copies through 0x4450A0 and 0x444D10, which build
+    // a copy on the stack and destroy it (0x4447D2, 0x444806).
+    if (pSpells != NULL) {
+        m_spells = *pSpells;
+    }
+
+    m_domainSpells = *pDomainSpells;
 
     for (int buttonIndex = 0; buttonIndex < 40; buttonIndex++) {
         m_disabledButtons[buttonIndex] = FALSE;
@@ -206,7 +311,82 @@ void CDerivedStats::Reload(CGameSprite* pSprite, CCreatureFileHeader* pCreature,
             m_naturalImmunities.insert(CGAMEEFFECT_POISON);
         }
 
-        // TODO: Incomplete.
+        if (pSprite->m_derivedStats.m_monkLevel >= 20) {
+            // TODO: Incomplete. The original adds an entry to the vector at
+            // +0x49C (value 0x14, 1; the same six flag values as above;
+            // 0x4449D1-0x444ADF).
+        }
+
+        // NOTE: 42 is the last misc slot (SLOT_MISC + 27), the magic weapon
+        // slot (0x444AE4 `cmp BYTE PTR [edi+0x4ba4],0x2a`).
+        if (pSprite->m_equipment.m_selectedWeapon != CGameSpriteEquipment::SLOT_MISC + 27) {
+            if (pSprite->m_equipment.m_items[pSprite->sub_726800()] != NULL) {
+                if (pSprite->m_equipment.m_items[pSprite->sub_726800()]->GetItemType() != 0x2F
+                    && pSprite->m_equipment.m_items[pSprite->sub_726800()]->GetItemType() != 0x35
+                    && pSprite->m_equipment.m_items[pSprite->sub_726800()]->GetItemType() != 0x31
+                    && pSprite->m_equipment.m_items[pSprite->sub_726800()]->GetItemType() != 0x29
+                    && m_nNumberOfAttacks < 5) {
+                    m_nNumberOfAttacks++;
+                }
+            }
+        }
+
+        INT nRanks = pSprite->sub_726270(0x13);
+        if (nRanks > 0
+            && pSprite->m_equipment.m_items[pSprite->m_equipment.m_selectedWeapon] != NULL) {
+            CItem* pItem = pSprite->m_equipment.m_items[pSprite->m_equipment.m_selectedWeapon];
+            if (pItem->Demand() == TRUE) {
+                ITEM_ABILITY* pAbility = pItem->GetAbility(pSprite->m_equipment.m_selectedWeaponAbility);
+                if (pAbility != NULL && static_cast<BYTE>(pAbility->type) == 1) {
+                    field_C += static_cast<SHORT>(nRanks);
+                }
+                pItem->Release();
+            }
+        }
+
+        if (pSprite->sub_726270(0x31) > 0) {
+            BOOLEAN bRanged = FALSE;
+            CItem* pItem = pSprite->m_equipment.m_items[pSprite->m_equipment.m_selectedWeapon];
+            ITEM_ABILITY* pAbility;
+            if (pItem == NULL) {
+                pAbility = NULL;
+            } else {
+                pItem->Demand();
+                pAbility = pItem->GetAbility(pSprite->m_equipment.m_selectedWeaponAbility);
+            }
+
+            // NOTE: The original reads the ability without checking it
+            // (0x444C2F-0x444C31); ours does not read through NULL.
+            if (pAbility != NULL
+                && (static_cast<BYTE>(pAbility->type) == 4
+                    || static_cast<BYTE>(pAbility->type) == 2)) {
+                bRanged = TRUE;
+            }
+
+            if (pItem != NULL) {
+                pItem->Release();
+            }
+
+            if (bRanged == TRUE && m_nNumberOfAttacks < 5) {
+                m_nNumberOfAttacks++;
+            }
+        }
+
+        if (pSprite->sub_763150(0x10)) {
+            field_C++;
+        }
+
+        if (pSprite->sub_763150(0xD)) {
+            if (pSprite->sub_727B40()) {
+                m_nACMissileMod++;
+            }
+        }
+
+        signed char v1 = static_cast<signed char>(pSprite->sub_7240A0());
+        signed char v2 = static_cast<signed char>(pSprite->sub_724170());
+        m_nSkills[6] += v2 + v1;
+        m_nSkills[9] += v2 + v1;
+        m_nSkills[11] += v2 + v1;
     }
 }
 
@@ -224,7 +404,9 @@ CDerivedStats& CDerivedStats::operator=(const CDerivedStats& other)
     m_nACPiercingMod = other.m_nACPiercingMod;
     m_nACSlashingMod = other.m_nACSlashingMod;
 
-    // TODO: Incomplete (copying unknown STL container).
+    // TODO: Incomplete. The original copies the vector of 0x24-byte
+    // entries at +0x49C (ending at 0x44550B), which our header does not
+    // declare yet (see Reload).
 
     m_nCriticalHitBonus = other.m_nCriticalHitBonus;
     m_nTHAC0 = other.m_nTHAC0;
@@ -300,6 +482,18 @@ CDerivedStats& CDerivedStats::operator=(const CDerivedStats& other)
     m_DamageBonusLeft = other.m_DamageBonusLeft;
     m_nStoneSkins = other.m_nStoneSkins;
     m_spellStates = other.m_spellStates;
+    m_visualEffects = other.m_visualEffects;
+    m_nDamageModFire = other.m_nDamageModFire;
+    m_nDamageModCold = other.m_nDamageModCold;
+    m_nDamageModElectricity = other.m_nDamageModElectricity;
+    m_nDamageModAcid = other.m_nDamageModAcid;
+    m_nDamageModMagic = other.m_nDamageModMagic;
+    m_nDamageModPoison = other.m_nDamageModPoison;
+    m_nDamageModSlashing = other.m_nDamageModSlashing;
+    m_nDamageModPiercing = other.m_nDamageModPiercing;
+    m_nDamageModCrushing = other.m_nDamageModCrushing;
+    m_nDamageModMissile = other.m_nDamageModMissile;
+    field_124 = other.field_124;
     m_cImmunitiesProjectile = other.m_cImmunitiesProjectile;
     m_cImmunitiesEffect = other.m_cImmunitiesEffect;
     m_cImmunitiesAIType = other.m_cImmunitiesAIType;
@@ -315,9 +509,11 @@ CDerivedStats& CDerivedStats::operator=(const CDerivedStats& other)
     m_appliedColorEffects = other.m_appliedColorEffects;
     m_cBounceProjectile = other.m_cBounceProjectile;
     m_cBounceEffect = other.m_cBounceEffect;
-    // m_cBounceSpellLevel = other.m_cBounceSpellLevel;
-    // m_cBounceProjectileLevelDec = other.m_cBounceProjectileLevelDec;
-    // m_cImmunitiesProjectileLevelDec = other.m_cImmunitiesProjectileLevelDec;
+    m_cBounceSpellLevel = other.m_cBounceSpellLevel;
+
+    // TODO: Incomplete. The arrays at +0x328 and +0x378 (0x4E7070), not
+    // declared in our header.
+
     field_3C8 = other.field_3C8;
     field_3E4 = other.field_3E4;
     field_400 = other.field_400;
@@ -325,18 +521,13 @@ CDerivedStats& CDerivedStats::operator=(const CDerivedStats& other)
     m_cImmunitiesItemUse = other.m_cImmunitiesItemUse;
     m_cImmunitiesItemTypeUse = other.m_cImmunitiesItemTypeUse;
 
-    // TODO: Incomplete (copying unknown STL container).
+    // TODO: Incomplete. The tree at +0x470 (0x445A7D-0x445B00), not
+    // declared in our header.
 
     m_naturalImmunities = other.m_naturalImmunities;
 
-    // TODO: Incomplete (copying unknown STL container).
-
-    // field_4AC = other.field_4AC;
-    // field_4C8 = other.field_4C8;
-    // field_4E4 = other.field_4E4;
-    // field_500 = other.field_500;
-    // field_51C = other.field_51C;
-    // field_538 = other.field_538;
+    // TODO: Incomplete. The list at +0x490 and the six lists at +0x4AC to
+    // +0x538 (0x4E7680, 0x4E7720; 0x445CC4-0x445D1E), whose element types are unknown.
 
     field_128 = other.field_128;
     field_12C = other.field_12C;
@@ -347,9 +538,11 @@ CDerivedStats& CDerivedStats::operator=(const CDerivedStats& other)
     m_nMirrorImages = other.m_nMirrorImages;
 
     memcpy(m_nSkills, other.m_nSkills, sizeof(m_nSkills));
+    m_bPreventAISlowDown = other.m_bPreventAISlowDown;
 
-    // field_5AC = other.field_5AC;
-    // field_CAC = other.field_CAC;
+    // NOTE: See Reload.
+    m_spells = other.m_spells;
+    m_domainSpells = other.m_domainSpells;
 
     // NOTE: Original code uses loop.
     memcpy(m_disabledButtons, other.m_disabledButtons, sizeof(m_disabledButtons));
@@ -374,8 +567,11 @@ void CDerivedStats::BonusInit()
     m_nACCrushingMod = 0;
     m_nACMissileMod = 0;
     m_nACPiercingMod = 0;
+    m_nACSlashingMod = 0;
 
-    // TODO: Incomplete.
+    // TODO: Incomplete. The original empties a vector of 0x24-byte entries
+    // at +0x49C (0x445EB4, FUN_00448BD0) that our header does not declare
+    // yet; Reload adds to it (see 4440F0.md).
 
     m_nCriticalHitBonus = 0;
     m_nTHAC0 = 0;
@@ -476,9 +672,81 @@ void CDerivedStats::BonusInit()
     m_nMirrorImages = 0;
     m_bPreventAISlowDown = FALSE;
 
-    // TODO: Incomplete.
+    m_cImmunitiesProjectile.RemoveAll();
+    m_cImmunitiesEffect.ClearAll();
+    m_cImmunitiesAIType.ClearAll();
+    m_cImmunitiesSpellLevel.ClearAll();
+    m_cImmunitiesWeapon.ClearAll();
+    m_cToHitBonusList.ClearAll();
+    m_cDamageBonusList.ClearAll();
+    m_cImmunitiesItemEquip.ClearAll();
+    m_cImmunitiesItemTypeEquip.ClearAll();
+    field_290.ClearAll();
+    field_2AC.ClearAll();
+    m_appliedColorRanges.ClearAll();
+    m_appliedColorEffects.ClearAll();
+    m_cBounceProjectile.RemoveAll();
+    m_cBounceEffect.ClearAll();
+    m_cBounceSpellLevel.ClearAll();
 
-    field_DA8 = 0;
+    // TODO: Incomplete. Two 10-entry arrays of 8-byte entries at +0x328
+    // and +0x378 (ClearAll 0x4E7050), not declared in our header.
+
+    field_3C8.RemoveAll();
+    field_3E4.RemoveAll();
+    field_400.RemoveAll();
+    field_41C.RemoveAll();
+    m_cImmunitiesItemUse.ClearAll();
+    m_cImmunitiesItemTypeUse.ClearAll();
+
+    // TODO: Incomplete. A tree container at +0x470 (emptied at 0x4461E3),
+    // not declared in our header.
+
+    m_naturalImmunities.clear();
+
+    // TODO: Incomplete. A list of { CResRef, CResRef, 3 DWORDs } at +0x490
+    // (emptied at 0x4462E3), not declared in our header.
+
+    // NOTE: The original's ClearAll (0x4E71B0) deletes each element; the
+    // element types of these lists are unknown and nothing adds to them.
+    field_4AC.RemoveAll();
+    field_4C8.RemoveAll();
+    field_4E4.RemoveAll();
+    field_500.RemoveAll();
+    field_51C.RemoveAll();
+    field_538.RemoveAll();
+
+    // NOTE: Folded with CImmunitiesEffect::ClearAll (0x4E6E80).
+    POSITION pos = m_cRegeneratedPersistantEffectList.GetHeadPosition();
+    while (pos != NULL) {
+        CPersistantEffect* pEffect = m_cRegeneratedPersistantEffectList.GetNext(pos);
+        delete pEffect;
+    }
+    m_cRegeneratedPersistantEffectList.RemoveAll();
+
+    UINT nClass;
+    UINT nLevel;
+    for (nClass = 0; nClass < CSPELLLIST_NUM_CLASSES; nClass++) {
+        for (nLevel = 0; nLevel < CSPELLLIST_MAX_LEVELS; nLevel++) {
+            CGameSpriteSpellList* pList = &(m_spells.m_spellsByClass[nClass].m_lists[nLevel]);
+            if (pList->m_List.size() != 0) {
+                pList->m_List.clear();
+                pList->field_14 = 0;
+                pList->field_18 = 0;
+            }
+        }
+        m_spells.m_spellsByClass[nClass].m_nHighestLevel = 0;
+    }
+
+    for (nLevel = 0; nLevel < CSPELLLIST_MAX_LEVELS; nLevel++) {
+        CGameSpriteSpellList* pList = &(m_domainSpells.m_lists[nLevel]);
+        if (pList->m_List.size() != 0) {
+            pList->m_List.clear();
+            pList->field_14 = 0;
+            pList->field_18 = 0;
+        }
+    }
+    m_domainSpells.m_nHighestLevel = 0;
 
     m_barbarianLevel = 0;
     m_bardLevel = 0;
