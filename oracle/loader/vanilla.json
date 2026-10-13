@@ -1,0 +1,34 @@
+{
+  "md5": "200f038bec3ed50a964d68b3f0f1f0e7",
+  "winmain_call_site": "0x7E9B43",
+  "winmain": "0x4218F0",
+  "srand": "0x7E8153",
+  "rand": "0x7E8160",
+  "crt_ranges": [
+    ["0x8C23F0", "0x8C23F4"],
+    ["0x8C23F8", "0x8C24B8"],
+    ["0x8C2530", "0x8C27B0"],
+    ["0x8C2960", "0x8C4984"],
+    ["0xA189B8", "0xA18A18"],
+    ["0xA19B00", "0xA19C28"],
+    ["0xA19C40", "0xA1AC40"],
+    ["0xA1AE70", "0xA1AE78"]
+  ],
+  "notes": {
+    "md5": "md5sum of the vanilla iwd2.exe that IWD2EE keeps in iwd2ee/backup/1000 (spec section 3). The loader refuses any other exe.",
+    "winmain_call_site": "The CRT entry is 0x7E9A68 (AddressOfEntryPoint 0x3E9A68). Its Ghidra decompilation calls WinMain(GetModuleHandleA(0), 0, cmdline, nShowCmd) once, then exit(0x7E9DDD) with the result. Disassembly of the entry: 7E9B42 push eax; 7E9B43 e8 a8 7d c3 ff call 0x4218F0. A scan of .text finds no other E8 call to 0x4218F0.",
+    "winmain": "Ghidra label WinMain (tools/ghidra/query.py WinMain), the target of the call above.",
+    "srand": "FUN_007e8153, unlabelled in the project: call _getptd (0x7EDB13); mov ecx,[esp+4]; mov [eax+0x14],ecx; ret. It stores the seed in the same per-thread field (_tiddata._holdrand, offset 0x14) that rand reads, which is VC6's multithreaded srand.",
+    "rand": "Ghidra label _rand. The only use of the LCG constant 0x343FD in .text: call _getptd; [eax+0x14] = [eax+0x14]*0x343FD+0x269EC3; return (state>>16)&0x7FFF. The state is per thread (in the heap-allocated _tiddata), not in .data.",
+    "crt_ranges": [
+      "0x8C23F0 _tlsindex: TlsAlloc result stored by _mtinit (FUN_007edaac), read by _getptd (FUN_007edb13); initialised to 0xFFFFFFFF.",
+      "0x8C23F8 _locktable: 48 LPCRITICAL_SECTION slots (_TOTAL_LOCKS), indexed [eax*4+0x8C23F8] by _lock/_mtinitlocks around 0x7EDDE4; slots 1, 9, 13 and 17 point at the static critical sections below; the next data (0x8C24C0) is unrelated.",
+      "0x8C2530 _iob: 20 FILE structures of 0x20 bytes; stdin, stdout and stderr are pushed as 0x8C2530, 0x8C2550 and 0x8C2570, and _flsall/_fcloseall walk to 0x8C27B0 (0x7F000D).",
+      "0x8C2960 old small-block heap (VC5 __old_sbh_region_list, 0x2020 bytes, used in FUN_007f1d3f) and __old_sbh_p_starting_region at 0x8C4980. Unused when the system heap is selected, listed for completeness.",
+      "0xA189B8 the four static CRITICAL_SECTIONs (0x18 bytes each) that _mtinitlocks (FUN_007eddb4) initialises through _locktable.",
+      "0xA19B00 __pioinfo[64] (filled by _ioinit, FUN_007f2979), 0xA19C00 _nhandle, 0xA19C04..0xA19C1C the VC6 small-block-heap globals set by __sbh_heap_init (FUN_007f11f8: sizeHeaderList, pHeaderDefer, pHeaderScan, cntHeaderList, indGroupDefer, pHeaderList, threshold), 0xA19C20 _crtheap (HeapCreate in _heap_init, FUN_007f119b), 0xA19C24 __active_heap (FUN_007f1053, __heap_select; it returns 1, the system heap, on NT 5 and later).",
+      "0xA19C40 _bufin: the static 0x1000-byte stdin buffer that _iob[0] points at in the file's initialised data.",
+      "0xA1AE70 __onexitend and 0xA1AE74 __onexitbegin: the atexit table, a heap block that _onexit reallocates (0x7E744E..0x7E7501)."
+    ]
+  }
+}

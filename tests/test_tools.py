@@ -1178,5 +1178,133 @@ class EvidenceFormatTest(unittest.TestCase):
         self.assertEqual(oracle.ghidra_version(), '12.1.4')
 
 
+def load_test_script(name):
+    spec = importlib.util.spec_from_file_location(
+        name, os.path.join(ROOT, 'tests', name + '.py'))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+make_test_pe = load_test_script('make_test_pe')
+
+
+class OracleSelftestTest(unittest.TestCase):
+    """tools/oracle.py run --selftest: the checks on the runner's output,
+    against the PE that tests/make_test_pe.py writes (base 0x10000000)."""
+
+    def setUp(self):
+        self.pe = make_test_pe.build()
+
+    def test_file_offset(self):
+        self.assertEqual(oracle.file_offset(self.pe, 0x10001000), 0x200)
+        self.assertEqual(oracle.file_offset(self.pe, 0x10002048), 0x448)
+        # Past .text's virtual size, and outside every section.
+        self.assertIsNone(oracle.file_offset(self.pe, 0x10001010))
+        self.assertIsNone(oracle.file_offset(self.pe, 0x10005000))
+        self.assertEqual(oracle.file_dword(self.pe, 0x10001000), 0xC3)
+
+    def selftest(self, lines):
+        # check_selftest requires the 0x847000 line; the fixture has no such
+        # address, so it is reported and filtered out here.
+        results = oracle.check_selftest('\n'.join(lines) + '\n', self.pe)
+        missing = [r for r in results if 'no mem line' in r[1]]
+        self.assertEqual(len(missing), 1)
+        return [r for r in results if r not in missing]
+
+    def test_matching_output_passes(self):
+        results = self.selftest([
+            'mem 10001000 000000c3',
+            'mem 10002048 77001234',
+            'import 10002048 KERNEL32.dll!GetTickCount 77001234',
+            'rand 41'])
+        self.assertEqual([ok for ok, _ in results], [True, True, True])
+
+    def test_wrong_bytes_fail(self):
+        results = self.selftest(['mem 10001000 000000c4', 'rand 41'])
+        self.assertEqual([ok for ok, _ in results], [False, True])
+
+    def test_iat_slot_must_match_getprocaddress_and_name(self):
+        for mem, imp in (
+                # Resolved elsewhere than GetProcAddress says.
+                ('77001234', 'KERNEL32.dll!GetTickCount 77009999'),
+                # The file's slot names another function.
+                ('77001234', 'KERNEL32.dll!Sleep 77001234'),
+                # Unresolved (GetProcAddress gave nothing).
+                ('00000000', 'KERNEL32.dll!GetTickCount 00000000'),
+                # Never patched: still the file's hint/name RVA.
+                ('000020a0', 'KERNEL32.dll!GetTickCount 77001234')):
+            results = self.selftest(['mem 10002048 ' + mem,
+                                     'import 10002048 ' + imp, 'rand 41'])
+            self.assertFalse(results[0][0], (mem, imp))
+
+    def test_rand_must_be_41(self):
+        for lines in (['rand 42'], []):
+            results = self.selftest(lines)
+            self.assertEqual(results[-1][0], False)
+
+    def test_missing_rdata_line_fails(self):
+        results = oracle.check_selftest('rand 41\n', self.pe)
+        self.assertFalse(all(ok for ok, _ in results))
+
+    def test_evaluate_run(self):
+        self.assertEqual(oracle.evaluate_run(0, None, 0, ''),
+                         (True, 'exit code 0'))
+        self.assertFalse(oracle.evaluate_run(0, None, 4, '')[0])
+        self.assertFalse(oracle.evaluate_run(6, 'refusing', 6, 'other')[0])
+        self.assertTrue(oracle.evaluate_run(6, 'refusing', 6,
+                                            'oracle: refusing to patch')[0])
+
+    def test_run_patterns_match_runner_messages(self):
+        runs = {name: pattern for name, _, _, _, pattern
+                in oracle.SELFTEST_RUNS}
+        self.assertEqual(list(runs), ['selftest', 'wrong WinMain call site',
+                                      'range pre-occupied', 'wrong MD5'])
+        messages = {
+            'wrong WinMain call site':
+                'oracle: refusing to patch the WinMain call: byte at '
+                '0x007E9B44 is 0xA8, not a call (0xE8)',
+            'range pre-occupied':
+                'oracle: cannot reserve 0x00400000-0x00A21000 for iwd2.exe: '
+                'occupied by private memory at 0x00400000-0x00401000 '
+                '(allocation base 0x00400000)',
+            'wrong MD5':
+                'oracle: C:\\x\\iwd2r_oracle.exe has MD5 '
+                '396ba0b7eaf32b3081f6d5d3de720d39; the oracle needs the '
+                'vanilla iwd2.exe (200f038bec3ed50a964d68b3f0f1f0e7)',
+        }
+        for name, message in messages.items():
+            self.assertRegex(message, runs[name])
+
+    def test_vanilla_json(self):
+        with open(oracle.VANILLA_JSON) as f:
+            vanilla = json.load(f)
+        self.assertEqual(vanilla['md5'], oracle.vanilla_md5())
+        self.assertRegex(vanilla['md5'], r'^[0-9a-f]{32}$')
+        for key in ('winmain_call_site', 'winmain', 'srand', 'rand'):
+            self.assertRegex(vanilla[key], r'^0x[0-9A-F]+$', key)
+            self.assertIn(key, vanilla['notes'])
+        ranges = [(int(a, 16), int(b, 16)) for a, b in vanilla['crt_ranges']]
+        self.assertEqual(ranges, sorted(ranges))
+        for (_, end), (next_start, _) in zip(ranges, ranges[1:]):
+            self.assertLessEqual(end, next_start)
+        for start, end in ranges:
+            # Inside .data (0x8A5000-0xA1AE81).
+            self.assertLess(start, end)
+            self.assertGreaterEqual(start, 0x8A5000)
+            self.assertLessEqual(end, 0xA1AE81)
+        self.assertEqual(len(vanilla['notes']['crt_ranges']), len(ranges))
+
+
+class PlayBuildWindowsDefaultsTest(unittest.TestCase):
+    def test_defaults_build_the_game(self):
+        import inspect
+        params = inspect.signature(play.build_windows).parameters
+        self.assertEqual(params['preset'].default, 'windows-msvc-x64')
+        self.assertEqual(params['target'].default, 'iwd2r')
+        self.assertEqual(params['exe_rel'].default, play.WIN_EXE_REL)
+        self.assertEqual(params['bat_name'].default, 'play-build.bat')
+
+
 if __name__ == '__main__':
     unittest.main()

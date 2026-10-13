@@ -5,6 +5,8 @@ Usage (from WSL, in the repository):
 
   python3 tools/oracle.py evidence 0x5845D0
   python3 tools/oracle.py evidence IcewindMisc::Roll
+  python3 tools/oracle.py build
+  python3 tools/oracle.py run --selftest
 
 evidence writes a draft docs/evidence/<ADDR>.md for one function of the
 vanilla exe: the front matter (address, name, an empty oracle_case,
@@ -15,12 +17,28 @@ file is kept unless --force is given. A name shared by several functions
 (overloads) lists them and asks for an address. Fill in oracle_case or
 exemption and the Notes by hand (docs/evidence/README.md).
 
+build syncs the checkout to the Windows build folder (play.py's route) and
+builds the 32-bit runner iwd2r_oracle with the windows-msvc-x86 preset.
+
+run copies the vanilla iwd2.exe (MD5 from oracle/loader/vanilla.json) to
+C:/Users/thier/iwd2r-oracle and runs the runner on it. --selftest makes
+four runs: the self-test, whose image bytes and rand() value are checked
+against the exe file read here; a run with a wrong WinMain call site, which
+must be refused; a run with 0x400000 taken first, which must name the
+occupant; and a run on a file that is not the vanilla exe, which must be
+refused by MD5. It exits 1 if any run fails.
+
 Standard library only.
 """
 
 import argparse
+import hashlib
 import json
 import os
+import re
+import shutil
+import struct
+import subprocess
 import sys
 import tempfile
 
@@ -32,6 +50,12 @@ import check_evidence  # noqa: E402
 
 EVIDENCE_DIR = os.path.join(ROOT, 'docs', 'evidence')
 VERSIONS = os.path.join(HERE, 'ghidra', 'versions.json')
+VANILLA_JSON = os.path.join(ROOT, 'oracle', 'loader', 'vanilla.json')
+VANILLA_EXE = os.path.expanduser('~/.local/share/iwd2r/vanilla/iwd2.exe')
+ORACLE_DIR = '/mnt/c/Users/thier/iwd2r-oracle'
+ORACLE_PRESET = 'windows-msvc-x86'
+RUNNER_REL = 'build/windows-msvc-x86/oracle/RelWithDebInfo/iwd2r_oracle.exe'
+SELFTEST_RAND = 41  # VC6 rand() after srand(1)
 
 
 def ghidra_version():
@@ -149,6 +173,174 @@ def cmd_evidence(args):
     return 0
 
 
+def vanilla_md5():
+    with open(VANILLA_JSON) as f:
+        return json.load(f)['md5']
+
+
+def file_md5(path):
+    with open(path, 'rb') as f:
+        return hashlib.md5(f.read()).hexdigest()
+
+
+def pe_sections(data):
+    """(image base, [(rva, virtual size, raw offset, raw size)]) of a PE32."""
+    pe = struct.unpack_from('<I', data, 0x3C)[0]
+    count, opt_size = struct.unpack_from('<H', data, pe + 6)[0], \
+        struct.unpack_from('<H', data, pe + 20)[0]
+    base = struct.unpack_from('<I', data, pe + 24 + 28)[0]
+    table = pe + 24 + opt_size
+    sections = [struct.unpack_from('<IIII', data, table + 40 * i + 8)
+                for i in range(count)]
+    return base, [(rva, vsize, off, raw) for vsize, rva, raw, off in sections]
+
+
+def file_offset(data, address):
+    """The file offset of a virtual address, or None outside raw data."""
+    base, sections = pe_sections(data)
+    rva = address - base
+    for sec_rva, vsize, off, raw in sections:
+        if sec_rva <= rva < sec_rva + min(raw, vsize or raw):
+            return off + rva - sec_rva
+    return None
+
+
+def file_dword(data, address):
+    off = file_offset(data, address)
+    return None if off is None else struct.unpack_from('<I', data, off)[0]
+
+
+def check_selftest(stdout, data):
+    """Check the runner's --selftest lines against the exe file bytes.
+
+    Returns a list of (ok, message). `mem A V` must equal the file's dword at
+    A, unless an `import A dll!name P` line marks A as an IAT slot: then V
+    must be P (nonzero), and the file's slot must name the same function."""
+    mems, imports, rand = {}, {}, None
+    for line in stdout.splitlines():
+        fields = line.split()
+        if len(fields) == 3 and fields[0] == 'mem':
+            mems[int(fields[1], 16)] = int(fields[2], 16)
+        elif len(fields) == 4 and fields[0] == 'import':
+            imports[int(fields[1], 16)] = (fields[2], int(fields[3], 16))
+        elif len(fields) == 2 and fields[0] == 'rand':
+            rand = int(fields[1])
+    results = []
+    if 0x847000 not in mems:
+        results.append((False, 'no mem line for 0x00847000 (.rdata start)'))
+    for address, value in sorted(mems.items()):
+        where = '0x%08X' % address
+        if address in imports:
+            name, resolved = imports[address]
+            hint_rva = file_dword(data, address)
+            off = None if hint_rva is None or hint_rva & 0x80000000 else \
+                file_offset(data, pe_sections(data)[0] + hint_rva + 2)
+            file_name = data[off:data.index(b'\0', off)].decode('ascii') \
+                if off is not None else '#%d' % ((hint_rva or 0) & 0xFFFF)
+            ok = (value == resolved and resolved != 0
+                  and name.split('!', 1)[-1] == file_name)
+            results.append((ok, '%s IAT slot %s = %08x (GetProcAddress %08x, '
+                            'file names %s)' % (where, name, value, resolved,
+                                                file_name)))
+        else:
+            expected = file_dword(data, address)
+            results.append((value == expected,
+                            '%s = %08x (file %s)' % (
+                                where, value, 'none' if expected is None
+                                else '%08x' % expected)))
+    results.append((rand == SELFTEST_RAND,
+                     'rand() after srand(1) = %s (expected %d)'
+                     % (rand, SELFTEST_RAND)))
+    return results
+
+
+# The --selftest runs: (name, input, runner flags, expected exit code, a
+# regular expression stderr must match or None). input is 'vanilla' for the
+# staged iwd2.exe or 'runner' to feed the runner its own exe (wrong MD5).
+SELFTEST_RUNS = (
+    ('selftest', 'vanilla', ['--selftest'], 0, None),
+    ('wrong WinMain call site', 'vanilla',
+     ['--selftest', '--test-bad-callsite'], 6,
+     r'refusing to patch the WinMain call: byte at 0x007E9B44 is 0x[0-9A-F]{2}'
+     r', not a call'),
+    ('range pre-occupied', 'vanilla', ['--selftest', '--test-occupy'], 4,
+     r'occupied by private memory at 0x00400000-'),
+    ('wrong MD5', 'runner', ['--selftest'], 5,
+     r'has MD5 [0-9a-f]{32}; the oracle needs the vanilla iwd2\.exe'),
+)
+
+
+def evaluate_run(expected_code, pattern, code, stderr):
+    """(ok, reason) for one runner exit."""
+    if code != expected_code:
+        return False, 'exit code %d, expected %d' % (code, expected_code)
+    if pattern and not re.search(pattern, stderr):
+        return False, 'stderr does not match %r' % pattern
+    return True, 'exit code %d' % code
+
+
+def win_path(path):
+    return subprocess.run(['wslpath', '-w', path], check=True,
+                          capture_output=True, text=True).stdout.strip()
+
+
+def stage_vanilla(source):
+    """Copy the vanilla exe to ORACLE_DIR after checking its MD5."""
+    if not os.path.isfile(source):
+        sys.exit('oracle: no vanilla exe at %s' % source)
+    md5 = vanilla_md5()
+    if file_md5(source) != md5:
+        sys.exit('oracle: %s is not the vanilla iwd2.exe (MD5 %s)'
+                 % (source, md5))
+    os.makedirs(ORACLE_DIR, exist_ok=True)
+    target = os.path.join(ORACLE_DIR, 'iwd2.exe')
+    if not os.path.isfile(target) or file_md5(target) != md5:
+        shutil.copyfile(source, target)
+    return target
+
+
+def cmd_build(args):
+    import play
+    play.sync_windows()
+    exe = play.build_windows(preset=ORACLE_PRESET, target='iwd2r_oracle',
+                             exe_rel=RUNNER_REL, bat_name='oracle-build.bat')
+    print('built %s' % win_path(exe))
+    return 0
+
+
+def cmd_run(args):
+    import play
+    if not args.selftest:
+        print('oracle: no comparison suites yet; pass --selftest')
+        return 1
+    runner = os.path.join(play.WIN_CHECKOUT, RUNNER_REL)
+    if not os.path.isfile(runner):
+        sys.exit('oracle: no %s; run tools/oracle.py build' % runner)
+    exe = stage_vanilla(args.vanilla)
+    with open(exe, 'rb') as f:
+        data = f.read()
+    failed = 0
+    for name, source, flags, expected_code, pattern in SELFTEST_RUNS:
+        target = win_path(exe if source == 'vanilla' else runner)
+        r = subprocess.run([runner, target, *flags], cwd=ORACLE_DIR,
+                           capture_output=True, text=True, timeout=120)
+        ok, reason = evaluate_run(expected_code, pattern, r.returncode,
+                                  r.stderr)
+        print('%s: %s (%s)' % (name, 'PASS' if ok else 'FAIL', reason))
+        for line in r.stderr.splitlines():
+            print('  stderr: %s' % line)
+        if expected_code == 0:
+            for line in r.stdout.splitlines():
+                print('  stdout: %s' % line)
+            for check_ok, message in check_selftest(r.stdout, data):
+                print('  %s %s' % ('ok  ' if check_ok else 'FAIL', message))
+                ok = ok and check_ok
+        failed += not ok
+    print('%d of %d runs passed' % (len(SELFTEST_RUNS) - failed,
+                                    len(SELFTEST_RUNS)))
+    return 1 if failed else 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     sub = ap.add_subparsers(dest='command', required=True)
@@ -158,6 +350,14 @@ def main(argv=None):
     ev.add_argument('--force', action='store_true',
                     help='replace an existing evidence file')
     ev.set_defaults(run=cmd_evidence)
+    build = sub.add_parser('build', help='build the 32-bit runner on Windows')
+    build.set_defaults(run=cmd_build)
+    run = sub.add_parser('run', help='run the runner on the vanilla exe')
+    run.add_argument('--selftest', action='store_true',
+                     help='check the loader: image bytes, rand(), refusals')
+    run.add_argument('--vanilla', default=VANILLA_EXE,
+                     help='the vanilla iwd2.exe (default %(default)s)')
+    run.set_defaults(run=cmd_run)
     args = ap.parse_args(argv)
     return args.run(args)
 

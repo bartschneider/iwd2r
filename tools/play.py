@@ -372,34 +372,37 @@ def sync_windows():
         sys.exit('play: rsync failed')
 
 
-def build_windows():
+def build_windows(preset=WIN_PRESET, target='iwd2r', exe_rel=WIN_EXE_REL,
+                  bat_name='play-build.bat'):
+    """Builds target with the Windows CMake preset in WIN_CHECKOUT; returns
+    the WSL path of exe_rel. Defaults build the game (play.py's use)."""
     for path in (VCVARS, CMAKE_WIN):
         if not os.path.exists(wslpath('-u', path)):
             sys.exit('play: missing %s' % path)
     win_root = wslpath('-w', WIN_CHECKOUT)
     configured = os.path.isfile(os.path.join(
-        WIN_CHECKOUT, 'build', WIN_PRESET, 'CMakeCache.txt'))
+        WIN_CHECKOUT, 'build', preset, 'CMakeCache.txt'))
     lines = [
         '@echo off',
         'call "%s" >nul || exit /b 1' % VCVARS,
         'cd /d "%s" || exit /b 1' % win_root,
     ]
     if not configured:
-        lines.append('"%s" --preset %s || exit /b 1' % (CMAKE_WIN, WIN_PRESET))
-    lines.append('"%s" --build --preset %s --target iwd2r || exit /b 1'
-                 % (CMAKE_WIN, WIN_PRESET))
-    bat = os.path.join(WIN_CHECKOUT, 'play-build.bat')
+        lines.append('"%s" --preset %s || exit /b 1' % (CMAKE_WIN, preset))
+    lines.append('"%s" --build --preset %s --target %s || exit /b 1'
+                 % (CMAKE_WIN, preset, target))
+    bat = os.path.join(WIN_CHECKOUT, bat_name)
     with open(bat, 'w', newline='\r\n') as f:
         f.write('\n'.join(lines) + '\n')
     if not configured:
         log('first Windows build: configuring and compiling SDL3 takes several '
             'minutes')
-    log('building %s with MSVC (target iwd2r)' % WIN_PRESET)
+    log('building %s with MSVC (target %s)' % (preset, target))
     started = time.time()
     if stream([CMD_EXE, '/c', wslpath('-w', bat)], cwd=WIN_CHECKOUT) != 0:
         sys.exit('play: Windows build failed')
     log('build done in %.0f s' % (time.time() - started))
-    exe = os.path.join(WIN_CHECKOUT, WIN_EXE_REL)
+    exe = os.path.join(WIN_CHECKOUT, exe_rel)
     if not os.path.isfile(exe):
         sys.exit('play: build produced no %s' % exe)
     return exe
