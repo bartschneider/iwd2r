@@ -151,6 +151,9 @@ TEST_CASE("script parser reports errors with line numbers", "[script]")
              "checkpoint a*\n", "checkpoint \xC3\xA9\n" })
         CHECK(ParseError(bad) == "line 1: checkpoint name must be letters, digits, _ or -");
     CHECK(ParseOk("checkpoint Party_formation-2\n")[0].text == "Party_formation-2");
+    CHECK(ParseError("checkpoint a\nwait 1\ncheckpoint a\n") == "line 3: duplicate checkpoint 'a' (first on line 1)");
+    CHECK(ParseError("checkpoint Chargen\ncheckpoint CHARGEN\n") == "line 2: duplicate checkpoint 'CHARGEN' (first on line 1)");
+    CHECK(ParseOk("checkpoint a\ncheckpoint a_2\n").size() == 2);
 }
 
 TEST_CASE("script checkpoint is parsed and takes no frame", "[script]")

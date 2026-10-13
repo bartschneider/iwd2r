@@ -5,6 +5,7 @@
 #include <cerrno>
 #include <climits>
 #include <cstdlib>
+#include <map>
 #include <sstream>
 
 namespace {
@@ -157,6 +158,8 @@ bool Parse(const std::string& text, std::vector<Command>& commands, std::string&
         return false;
     };
     bool ui = true;
+    // Checkpoint names, upper-cased, and the line each first appeared on.
+    std::map<std::string, int> checkpoints;
     while (std::getline(in, raw)) {
         ++line;
         const size_t hash = raw.find('#');
@@ -221,6 +224,11 @@ bool Parse(const std::string& text, std::vector<Command>& commands, std::string&
                 if (!std::isalnum(static_cast<unsigned char>(ch)) && ch != '_' && ch != '-')
                     return fail("checkpoint name must be letters, digits, _ or -");
             }
+            // Names are compared case-insensitively, as the dump files they
+            // name may land on a case-insensitive file system.
+            const auto first = checkpoints.emplace(Upper(c.text), line);
+            if (!first.second)
+                return fail("duplicate checkpoint '" + c.text + "' (first on line " + std::to_string(first.first->second) + ")");
         } else if (v == "ORIGIN") {
             c.verb = Verb::Origin;
             const std::string mode = args.size() == 1 ? Upper(args[0]) : std::string();

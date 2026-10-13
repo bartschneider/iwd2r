@@ -155,6 +155,7 @@ def parse_scenario(text):
     """
     actions = []
     ui = True
+    checkpoints = {}  # upper-cased name -> the line it first appeared on
     for number, raw in enumerate(text.split('\n'), 1):
         if raw.endswith('\r'):
             raw = raw[:-1]
@@ -208,6 +209,10 @@ def parse_scenario(text):
                 fail('checkpoint needs one name')
             if not re.fullmatch(r'[A-Za-z0-9_-]+', args[0]):
                 fail('checkpoint name must be letters, digits, _ or -')
+            first = checkpoints.setdefault(args[0].upper(), number)
+            if first != number:
+                fail("duplicate checkpoint '%s' (first on line %d)"
+                     % (args[0], first))
             actions.append({'op': 'checkpoint', 'name': args[0],
                             'line': number})
         elif v == 'ORIGIN':

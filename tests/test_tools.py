@@ -372,6 +372,10 @@ class ScenarioParseTest(unittest.TestCase):
              'line 1: checkpoint name must be letters, digits, _ or -'),
             ('checkpoint \u00e9\n',
              'line 1: checkpoint name must be letters, digits, _ or -'),
+            ('checkpoint a\nwait 1\ncheckpoint a\n',
+             "line 3: duplicate checkpoint 'a' (first on line 1)"),
+            ('checkpoint Chargen\ncheckpoint CHARGEN\n',
+             "line 2: duplicate checkpoint 'CHARGEN' (first on line 1)"),
             ('origin\n', 'line 1: origin needs ui or screen'),
             ('origin top\n', 'line 1: origin needs ui or screen'),
             ('wait 1\n\n# x\njump 1\n', "line 4: unknown command 'jump'"),
@@ -2676,6 +2680,51 @@ class OracleReplayCompareTest(unittest.TestCase):
         self.assertEqual(oracle.our_outcome(0, running, 20)[0], 1)
         self.assertEqual(oracle.our_outcome(5, {}, 20), (
             1, 'our engine exited with code 5 (last frame ?)'))
+
+    def test_compare_counts(self):
+        screens = ['create_char']
+        with tempfile.TemporaryDirectory() as tmp:
+            a = os.path.join(tmp, 'original')
+            b = os.path.join(tmp, 'ours')
+            self.write_dumps(a, {'menu': self.dump('connection', rng=1),
+                                 'party': self.dump('single_player', rng=1),
+                                 'same': self.dump('single_player'),
+                                 'chargen': self.dump('create_char')})
+            self.write_dumps(b, {'menu': self.dump('connection', rng=2),
+                                 'party': self.dump('single_player', rng=2),
+                                 'same': self.dump('single_player'),
+                                 'chargen': self.dump('create_char')})
+            counts = {}
+            lines, failures, hits = oracle.compare_checkpoints(
+                a, b, ['menu', 'party', 'same', 'chargen'], screens, [],
+                counts)
+        self.assertEqual(failures, 0)
+        self.assertEqual(counts, {'enabled': 1, 'outside': 2})
+
+    def test_compare_verdict(self):
+        self.assertEqual(oracle.compare_verdict(
+            0, 0, 0, [], {'enabled': 18, 'outside': 0}),
+            ['result: MATCH at 18 of 18 checkpoints'])
+        self.assertEqual(oracle.compare_verdict(
+            0, 0, 0, [], {'enabled': 18, 'outside': 2}),
+            ['result: MATCH at 18 of 18 checkpoints',
+             'note: 2 checkpoints differed outside the enabled screens'])
+        self.assertEqual(oracle.compare_verdict(
+            0, 0, 0, [('cp', 'f', 1, 2, {})], {'enabled': 3, 'outside': 1}),
+            ['result: MATCH at 3 of 3 checkpoints, with 1 known difference',
+             'note: 1 checkpoint differed outside the enabled screens'])
+        self.assertEqual(oracle.compare_verdict(
+            2, 0, 1, [], {'enabled': 3, 'outside': 0}),
+            ['result: DIFFERENT: 2 differences; a run failed (original 0, '
+             'ours 1)'])
+
+    def test_run_arguments(self):
+        for args in (['--seed', '-1'], ['--seed', '4294967296'],
+                     ['--seed', 'x'], ['--iterations', '0'],
+                     ['--iterations', '-5'], ['--iterations', '1.5']):
+            with self.assertRaises(SystemExit, msg=args), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                oracle.main(['run'] + args)
 
     def test_compare_arguments(self):
         for args in (['--timeout', '0'], ['--seed', '-1'],

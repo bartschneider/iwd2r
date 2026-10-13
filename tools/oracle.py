@@ -1587,7 +1587,8 @@ def known_entry(known, checkpoint, field):
     return None
 
 
-def compare_checkpoints(original_dir, our_dir, names, screens, known):
+def compare_checkpoints(original_dir, our_dir, names, screens, known,
+                        counts=None):
     """Compare the checkpoint dumps of two replay folders.
 
     Returns (lines, failures, known_hits): the report lines, the number of
@@ -1595,7 +1596,13 @@ def compare_checkpoints(original_dir, our_dir, names, screens, known):
     checkpoint whose screen on either side is in screens, or a dump missing
     on one side) and the known differences met. A difference at a
     checkpoint where neither side is on an enabled screen is reported as
-    not enabled and does not fail."""
+    not enabled and does not fail. A dict passed as counts receives
+    'enabled', the checkpoints present on both sides with an enabled
+    screen, and 'outside', the other present checkpoints that differed."""
+    if counts is None:
+        counts = {}
+    counts['enabled'] = 0
+    counts['outside'] = 0
     lines = []
     failures = 0
     known_hits = []
@@ -1620,6 +1627,8 @@ def compare_checkpoints(original_dir, our_dir, names, screens, known):
             flatten(ours).get(t, '?')) for t in TIMING_FIELDS)
         enabled = original.get('screen') in screens or \
             ours.get('screen') in screens
+        if enabled:
+            counts['enabled'] += 1
         diffs = field_differences(original, ours)
         unknown = []
         for field, va, vb in diffs:
@@ -1635,6 +1644,7 @@ def compare_checkpoints(original_dir, our_dir, names, screens, known):
             failures += len(unknown)
         else:
             state = 'different, screen not enabled'
+            counts['outside'] += 1
         lines.append('checkpoint %s (%s): %s (%s; original/ours)' % (
             name, original.get('screen'), state, timing))
         for field, va, vb in unknown:
@@ -1681,9 +1691,10 @@ def cmd_replay_compare(args):
         play.restore_inis(backup, game, ini_names)
     print('== compare %s, seed %d (screens compared: %s)' % (
         os.path.relpath(script, ROOT), args.seed, ', '.join(screens)))
+    counts = {}
     lines, failures, known_hits = compare_checkpoints(
         os.path.join(run_dir, 'original'), os.path.join(run_dir, 'ours'),
-        names, screens, known)
+        names, screens, known, counts)
     for line in lines:
         print(line)
     for entry in stale_known(known, known_hits):
@@ -1701,9 +1712,23 @@ def cmd_replay_compare(args):
     with open(os.path.join(run_dir, 'compare.json'), 'w') as f:
         json.dump(report, f, indent=2)
         f.write('\n')
+    for line in compare_verdict(failures, original, ours, known_hits,
+                                counts):
+        print(line)
+    print('compare: %s' % os.path.relpath(run_dir, ROOT))
+    return 0 if failures == 0 and original == 0 and ours == 0 else 1
+
+
+def compare_verdict(failures, original, ours, known_hits, counts):
+    """The result lines of replay compare: failures and known_hits from
+    compare_checkpoints, original and ours the two runs' exit codes, and
+    counts the dict compare_checkpoints filled. A match counts only the
+    checkpoints on enabled screens; a second line says how many others
+    differed."""
     runs_ok = original == 0 and ours == 0
     if failures == 0 and runs_ok:
-        verdict = 'MATCH at %d of %d checkpoints' % (len(names), len(names))
+        verdict = 'MATCH at %d of %d checkpoints' % (counts['enabled'],
+                                                     counts['enabled'])
         if known_hits:
             verdict += ', with %d known difference%s' % (
                 len(known_hits), '' if len(known_hits) == 1 else 's')
@@ -1713,9 +1738,12 @@ def cmd_replay_compare(args):
         if not runs_ok:
             verdict += '; a run failed (original %d, ours %d)' % (original,
                                                                   ours)
-    print('result: %s' % verdict)
-    print('compare: %s' % os.path.relpath(run_dir, ROOT))
-    return 0 if failures == 0 and runs_ok else 1
+    lines = ['result: %s' % verdict]
+    if counts['outside']:
+        lines.append('note: %d checkpoint%s differed outside the enabled '
+                     'screens' % (counts['outside'],
+                                  '' if counts['outside'] == 1 else 's'))
+    return lines
 
 
 def positive_int(text):
@@ -1758,10 +1786,10 @@ def main(argv=None):
                      help='check the loader: image bytes, rand(), refusals')
     run.add_argument('--file', help='run one case file (oracle/cases/<file>'
                      '.cpp); default every case file')
-    run.add_argument('--seed', type=int, default=1,
+    run.add_argument('--seed', type=seed_arg, default=1,
                      help='seed for the original rand and the generators '
                      '(default %(default)s)')
-    run.add_argument('--iterations', type=int, default=10000,
+    run.add_argument('--iterations', type=positive_int, default=10000,
                      help='inputs per unbounded generator '
                      '(default %(default)s)')
     run.add_argument('--vanilla', default=VANILLA_EXE,
