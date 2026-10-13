@@ -63,6 +63,7 @@ These are in `oracle/replay/` and `tools/`.
 
 ## Project 4 follow-ups
 
+- **`CVidBlitter::SoftBlt` (0x7B7280) and `SoftSrcKeyBlt` (0x7B74F0).** Still stubs. `CVidBlitter::Init` selects them only at 16 bpp (every other depth takes `DxBlt`), and iwd2r runs at 32 bpp, so nothing reaches them; porting them needs `IDirectDrawSurface::GetSurfaceDesc` in `platform/ddraw_shim.h` and two `DDSURFACEDESC` members in `CVidBlitter.h`. Ruling P4-9.
 - **Real-GPU runs in a Hyper-V VM (GPU-P).** Windows Sandbox shares the host GPU through GPU partitioning but picks the adapter itself (the AMD iGPU on a hybrid machine, no Vulkan), so `Presenter=gpu` never runs on the RTX there. A Generation 2 Hyper-V VM under `C:\Users\thier\iwd2r-vm` with `Add-VMGpuPartitionAdapter -InstancePath <RTX>` and the host's NVIDIA driver store copied into the guest runs our engine on the real GPU with real Vulkan, driven headlessly over PowerShell Direct (`Invoke-Command -VMName`) like the sandbox driver. Needs one admin setup by the user (Hyper-V is present on this host: Windows 11 Pro, vmms running). Planned as `play.py --vm hyperv` after project 4 Task 6.
 
 ### Render API
