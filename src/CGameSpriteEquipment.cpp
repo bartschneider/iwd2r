@@ -94,9 +94,240 @@ void CGameSpriteEquipment::ClearMarshal(BOOL bUnequip)
 }
 
 // 0x7124C0
-void CGameSpriteEquipment::Marshal()
+void CGameSpriteEquipment::Marshal(CCreatureFileEquipment* pHeader, CCreatureFileItem** pItems, DWORD* nItems, BOOL bAllItems)
 {
-    // TODO: Incomplete.
+    INT nIndex;
+    INT nAbility;
+    BYTE nSlot;
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjCreature.cpp
+    // __LINE__: 15053
+    UTIL_ASSERT(pHeader != NULL && pItems != NULL && nItems != NULL);
+
+    memset(pHeader, 0xFF, sizeof(CCreatureFileEquipment));
+    pHeader->m_selectedWeapon = 1000;
+    pHeader->m_selectedWeaponAbility = 0;
+
+    *pItems = NULL;
+    nSlot = 0;
+    *nItems = 0;
+
+    for (nIndex = 0; nIndex < 51; nIndex++) {
+        if (m_items[nIndex] != NULL
+            && (bAllItems || m_items[nIndex]->GetItemType() != 0x3A)) {
+            (*nItems)++;
+        }
+    }
+
+    // NOTE: The fist is not saved.
+    (*nItems)--;
+    if (*nItems == 0) {
+        return;
+    }
+
+    *pItems = new CCreatureFileItem[*nItems];
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjCreature.cpp
+    // __LINE__: 15077
+    UTIL_ASSERT(*pItems != NULL);
+
+    if (m_items[SLOT_HELMET] != NULL) {
+        if (bAllItems
+            || (m_items[SLOT_HELMET]->GetItemType() != 0x3A
+                && (m_items[SLOT_HELMET]->GetFlagsFile() & 0x800) == 0)) {
+            m_items[SLOT_HELMET]->GetResRef().GetResRef((*pItems)[nSlot].m_itemId);
+            for (nAbility = 0; nAbility < 3; nAbility++) {
+                (*pItems)[nSlot].m_usageCount[nAbility] = m_items[SLOT_HELMET]->GetUsageCount(nAbility);
+            }
+            (*pItems)[nSlot].m_wear = m_items[SLOT_HELMET]->m_wear;
+            (*pItems)[nSlot].m_dynamicFlags = m_items[SLOT_HELMET]->m_flags;
+            pHeader->m_helmetItem = nSlot;
+        }
+        nSlot++;
+    }
+    if (m_items[SLOT_ARMOR] != NULL) {
+        if (bAllItems
+            || (m_items[SLOT_ARMOR]->GetItemType() != 0x3A
+                && (m_items[SLOT_ARMOR]->GetFlagsFile() & 0x800) == 0)) {
+            m_items[SLOT_ARMOR]->GetResRef().GetResRef((*pItems)[nSlot].m_itemId);
+            for (nAbility = 0; nAbility < 3; nAbility++) {
+                (*pItems)[nSlot].m_usageCount[nAbility] = m_items[SLOT_ARMOR]->GetUsageCount(nAbility);
+            }
+            (*pItems)[nSlot].m_wear = m_items[SLOT_ARMOR]->m_wear;
+            (*pItems)[nSlot].m_dynamicFlags = m_items[SLOT_ARMOR]->m_flags;
+            pHeader->m_armorItem = nSlot;
+        }
+        nSlot++;
+    }
+    if (m_items[SLOT_SHIELD] != NULL) {
+        if (bAllItems
+            || (m_items[SLOT_SHIELD]->GetItemType() != 0x3A
+                && (m_items[SLOT_SHIELD]->GetFlagsFile() & 0x800) == 0)) {
+            m_items[SLOT_SHIELD]->GetResRef().GetResRef((*pItems)[nSlot].m_itemId);
+            for (nAbility = 0; nAbility < 3; nAbility++) {
+                (*pItems)[nSlot].m_usageCount[nAbility] = m_items[SLOT_SHIELD]->GetUsageCount(nAbility);
+            }
+            (*pItems)[nSlot].m_wear = m_items[SLOT_SHIELD]->m_wear;
+            (*pItems)[nSlot].m_dynamicFlags = m_items[SLOT_SHIELD]->m_flags;
+            pHeader->m_shieldItem = nSlot;
+        }
+        nSlot++;
+    }
+    if (m_items[SLOT_GAUNTLETS] != NULL) {
+        if (bAllItems
+            || (m_items[SLOT_GAUNTLETS]->GetItemType() != 0x3A
+                && (m_items[SLOT_GAUNTLETS]->GetFlagsFile() & 0x800) == 0)) {
+            m_items[SLOT_GAUNTLETS]->GetResRef().GetResRef((*pItems)[nSlot].m_itemId);
+            for (nAbility = 0; nAbility < 3; nAbility++) {
+                (*pItems)[nSlot].m_usageCount[nAbility] = m_items[SLOT_GAUNTLETS]->GetUsageCount(nAbility);
+            }
+            (*pItems)[nSlot].m_wear = m_items[SLOT_GAUNTLETS]->m_wear;
+            (*pItems)[nSlot].m_dynamicFlags = m_items[SLOT_GAUNTLETS]->m_flags;
+            pHeader->m_gauntletsItem = nSlot;
+        }
+        nSlot++;
+    }
+    if (m_items[SLOT_RING_LEFT] != NULL) {
+        if (bAllItems
+            || (m_items[SLOT_RING_LEFT]->GetItemType() != 0x3A
+                && (m_items[SLOT_RING_LEFT]->GetFlagsFile() & 0x800) == 0)) {
+            m_items[SLOT_RING_LEFT]->GetResRef().GetResRef((*pItems)[nSlot].m_itemId);
+            for (nAbility = 0; nAbility < 3; nAbility++) {
+                (*pItems)[nSlot].m_usageCount[nAbility] = m_items[SLOT_RING_LEFT]->GetUsageCount(nAbility);
+            }
+            (*pItems)[nSlot].m_wear = m_items[SLOT_RING_LEFT]->m_wear;
+            (*pItems)[nSlot].m_dynamicFlags = m_items[SLOT_RING_LEFT]->m_flags;
+            pHeader->m_ringLeftItem = nSlot;
+        }
+        nSlot++;
+    }
+    if (m_items[SLOT_RING_RIGHT] != NULL) {
+        if (bAllItems
+            || (m_items[SLOT_RING_RIGHT]->GetItemType() != 0x3A
+                && (m_items[SLOT_RING_RIGHT]->GetFlagsFile() & 0x800) == 0)) {
+            m_items[SLOT_RING_RIGHT]->GetResRef().GetResRef((*pItems)[nSlot].m_itemId);
+            for (nAbility = 0; nAbility < 3; nAbility++) {
+                (*pItems)[nSlot].m_usageCount[nAbility] = m_items[SLOT_RING_RIGHT]->GetUsageCount(nAbility);
+            }
+            (*pItems)[nSlot].m_wear = m_items[SLOT_RING_RIGHT]->m_wear;
+            (*pItems)[nSlot].m_dynamicFlags = m_items[SLOT_RING_RIGHT]->m_flags;
+            pHeader->m_ringRightItem = nSlot;
+        }
+        nSlot++;
+    }
+    if (m_items[SLOT_AMULET] != NULL) {
+        if (bAllItems
+            || (m_items[SLOT_AMULET]->GetItemType() != 0x3A
+                && (m_items[SLOT_AMULET]->GetFlagsFile() & 0x800) == 0)) {
+            m_items[SLOT_AMULET]->GetResRef().GetResRef((*pItems)[nSlot].m_itemId);
+            for (nAbility = 0; nAbility < 3; nAbility++) {
+                (*pItems)[nSlot].m_usageCount[nAbility] = m_items[SLOT_AMULET]->GetUsageCount(nAbility);
+            }
+            (*pItems)[nSlot].m_wear = m_items[SLOT_AMULET]->m_wear;
+            (*pItems)[nSlot].m_dynamicFlags = m_items[SLOT_AMULET]->m_flags;
+            pHeader->m_amuletItem = nSlot;
+        }
+        nSlot++;
+    }
+    if (m_items[SLOT_BELT] != NULL) {
+        if (bAllItems
+            || (m_items[SLOT_BELT]->GetItemType() != 0x3A
+                && (m_items[SLOT_BELT]->GetFlagsFile() & 0x800) == 0)) {
+            m_items[SLOT_BELT]->GetResRef().GetResRef((*pItems)[nSlot].m_itemId);
+            for (nAbility = 0; nAbility < 3; nAbility++) {
+                (*pItems)[nSlot].m_usageCount[nAbility] = m_items[SLOT_BELT]->GetUsageCount(nAbility);
+            }
+            (*pItems)[nSlot].m_wear = m_items[SLOT_BELT]->m_wear;
+            (*pItems)[nSlot].m_dynamicFlags = m_items[SLOT_BELT]->m_flags;
+            pHeader->m_beltItem = nSlot;
+        }
+        nSlot++;
+    }
+    if (m_items[SLOT_BOOTS] != NULL) {
+        if (bAllItems
+            || (m_items[SLOT_BOOTS]->GetItemType() != 0x3A
+                && (m_items[SLOT_BOOTS]->GetFlagsFile() & 0x800) == 0)) {
+            m_items[SLOT_BOOTS]->GetResRef().GetResRef((*pItems)[nSlot].m_itemId);
+            for (nAbility = 0; nAbility < 3; nAbility++) {
+                (*pItems)[nSlot].m_usageCount[nAbility] = m_items[SLOT_BOOTS]->GetUsageCount(nAbility);
+            }
+            (*pItems)[nSlot].m_wear = m_items[SLOT_BOOTS]->m_wear;
+            (*pItems)[nSlot].m_dynamicFlags = m_items[SLOT_BOOTS]->m_flags;
+            pHeader->m_bootsItem = nSlot;
+        }
+        nSlot++;
+    }
+    if (m_items[SLOT_CLOAK] != NULL) {
+        if (bAllItems
+            || (m_items[SLOT_CLOAK]->GetItemType() != 0x3A
+                && (m_items[SLOT_CLOAK]->GetFlagsFile() & 0x800) == 0)) {
+            m_items[SLOT_CLOAK]->GetResRef().GetResRef((*pItems)[nSlot].m_itemId);
+            for (nAbility = 0; nAbility < 3; nAbility++) {
+                (*pItems)[nSlot].m_usageCount[nAbility] = m_items[SLOT_CLOAK]->GetUsageCount(nAbility);
+            }
+            (*pItems)[nSlot].m_wear = m_items[SLOT_CLOAK]->m_wear;
+            (*pItems)[nSlot].m_dynamicFlags = m_items[SLOT_CLOAK]->m_flags;
+            pHeader->m_cloakItem = nSlot;
+        }
+        nSlot++;
+    }
+    for (nIndex = 0; nIndex < 8; nIndex++) {
+        if (m_items[SLOT_WEAPON + nIndex] != NULL) {
+            if (bAllItems
+                || (m_items[SLOT_WEAPON + nIndex]->GetItemType() != 0x3A
+                    && (m_items[SLOT_WEAPON + nIndex]->GetFlagsFile() & 0x800) == 0)) {
+                m_items[SLOT_WEAPON + nIndex]->GetResRef().GetResRef((*pItems)[nSlot].m_itemId);
+                for (nAbility = 0; nAbility < 3; nAbility++) {
+                    (*pItems)[nSlot].m_usageCount[nAbility] = m_items[SLOT_WEAPON + nIndex]->GetUsageCount(nAbility);
+                }
+                (*pItems)[nSlot].m_wear = m_items[SLOT_WEAPON + nIndex]->m_wear;
+                (*pItems)[nSlot].m_dynamicFlags = m_items[SLOT_WEAPON + nIndex]->m_flags;
+                pHeader->m_weaponItem[nIndex] = nSlot;
+            }
+            nSlot++;
+        }
+    }
+    for (nIndex = 0; nIndex < 4; nIndex++) {
+        if (m_items[SLOT_AMMO + nIndex] != NULL) {
+            if (bAllItems
+                || (m_items[SLOT_AMMO + nIndex]->GetItemType() != 0x3A
+                    && (m_items[SLOT_AMMO + nIndex]->GetFlagsFile() & 0x800) == 0)) {
+                m_items[SLOT_AMMO + nIndex]->GetResRef().GetResRef((*pItems)[nSlot].m_itemId);
+                for (nAbility = 0; nAbility < 3; nAbility++) {
+                    (*pItems)[nSlot].m_usageCount[nAbility] = m_items[SLOT_AMMO + nIndex]->GetUsageCount(nAbility);
+                }
+                (*pItems)[nSlot].m_wear = m_items[SLOT_AMMO + nIndex]->m_wear;
+                (*pItems)[nSlot].m_dynamicFlags = m_items[SLOT_AMMO + nIndex]->m_flags;
+                pHeader->m_ammoItem[nIndex] = nSlot;
+            }
+            nSlot++;
+        }
+    }
+    for (nIndex = 0; nIndex < 28; nIndex++) {
+        if (m_items[SLOT_MISC + nIndex] != NULL) {
+            if (bAllItems
+                || (m_items[SLOT_MISC + nIndex]->GetItemType() != 0x3A
+                    && (m_items[SLOT_MISC + nIndex]->GetFlagsFile() & 0x800) == 0)) {
+                m_items[SLOT_MISC + nIndex]->GetResRef().GetResRef((*pItems)[nSlot].m_itemId);
+                for (nAbility = 0; nAbility < 3; nAbility++) {
+                    (*pItems)[nSlot].m_usageCount[nAbility] = m_items[SLOT_MISC + nIndex]->GetUsageCount(nAbility);
+                }
+                (*pItems)[nSlot].m_wear = m_items[SLOT_MISC + nIndex]->m_wear;
+                (*pItems)[nSlot].m_dynamicFlags = m_items[SLOT_MISC + nIndex]->m_flags;
+                pHeader->m_miscItem[nIndex] = nSlot;
+            }
+            nSlot++;
+        }
+    }
+
+    if (m_selectedWeapon != SLOT_FIST) {
+        pHeader->m_selectedWeapon = m_selectedWeapon - SLOT_WEAPON;
+        pHeader->m_selectedWeaponAbility = m_selectedWeaponAbility;
+    }
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjCreature.cpp
+    // __LINE__: 15347
+    UTIL_ASSERT(nSlot == *nItems);
 }
 
 // 0x713040
