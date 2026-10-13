@@ -127,6 +127,12 @@ const char* CScreenCreateChar::FEMALE_PORTRAITS[] = {
 // 0x853B30
 const DWORD CScreenCreateChar::FEMALE_PORTRAITS_COUNT = sizeof(FEMALE_PORTRAITS) / sizeof(FEMALE_PORTRAITS[0]);
 
+// 0x853B34
+const BYTE CScreenCreateChar::AUTO_PICK_SPELLS[9] = { 4, 4, 4, 4, 4, 4, 4, 4, 4 };
+
+// 0x853B40
+const BYTE CScreenCreateChar::AUTO_PICK_SPECIALIST_SPELLS[9] = { 1, 1, 1, 1, 1, 1, 1, 1, 1 };
+
 // 0x8F3B7C
 const CString CScreenCreateChar::TOKEN_NUMBER("number");
 
@@ -6235,7 +6241,272 @@ void CScreenCreateChar::CancelEngine()
 // 0x617D80
 void CScreenCreateChar::sub_617D80()
 {
-    // TODO: Incomplete.
+    // NOTE: The original reads the sprite id of the character creation
+    // engine, not of `this`.
+    LONG nGameSprite = g_pBaldurChitin->m_pEngineCreateChar->m_nGameSprite;
+
+    CGameSprite* pSprite;
+    BYTE rc;
+    do {
+        rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetDeny(nGameSprite,
+            CGameObjectArray::THREAD_ASYNCH,
+            reinterpret_cast<CGameObject**>(&pSprite),
+            INFINITE);
+    } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+    if (rc != CGameObjectArray::SUCCESS) {
+        return;
+    }
+
+    m_nSpellLevel = 1;
+
+    CAIObjectType typeAI(pSprite->m_startTypeAI);
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    const CRuleTables& ruleTables = pGame->GetRuleTables();
+
+    // NOTE: Unused.
+    CResRef v1;
+
+    INT nMaxKnownSpellsBonus = 0;
+    INT nMaxKnownSpells = 0;
+    if (typeAI.m_nClass == CAIOBJECTTYPE_C_BARD || typeAI.m_nClass == CAIOBJECTTYPE_C_SORCERER) {
+        BYTE nClass = typeAI.m_nClass;
+        nMaxKnownSpells = ruleTables.GetMaxKnownSpells(nClass,
+                              typeAI,
+                              pSprite->m_derivedStats,
+                              pSprite->m_baseStats.m_specialization,
+                              m_nSpellLevel,
+                              nMaxKnownSpellsBonus)
+            + nMaxKnownSpellsBonus;
+    }
+
+    do {
+        BYTE nClass = typeAI.m_nClass;
+        UINT nLevel = m_nSpellLevel - 1;
+        CGameSpriteSpellList* pSpells = pSprite->GetSpellsAtLevel(nClass, nLevel);
+
+        // A specialist wizard keeps at least one spell of the school.
+        if ((pSprite->GetSpecialization() & 0x4000) == 0 && sub_618D10(m_nSpellLevel, pSprite)) {
+            BOOL bSchoolSpellKnown = FALSE;
+            for (UINT nIndex = 0; !pSpells->m_List.empty() && nIndex < pSpells->m_List.size(); nIndex++) {
+                UINT nID = pSpells->Get(nIndex)->m_nID;
+
+                CSpell cSpell(pGame->m_spells.Get(nID));
+                cSpell.Demand();
+                if (pSprite->IsSpellSchool(cSpell.GetSchool())) {
+                    cSpell.Release();
+                    bSchoolSpellKnown = TRUE;
+                    break;
+                }
+                cSpell.Release();
+            }
+
+            if (!bSchoolSpellKnown) {
+                CTypedPtrList<CPtrList, CResRef*> lSchoolSpells(10);
+
+                if (m_nExtraSpells < 1) {
+                    nClass = typeAI.m_nClass;
+                    nLevel = m_nSpellLevel - 1;
+
+                    // NOTE: Uninline.
+                    pSpells = pSprite->GetSpellsAtLevel(nClass, nLevel);
+                    UINT nID = pSpells->Get(1)->m_nID;
+
+                    CResRef resRef = pGame->m_spells.Get(nID);
+                    nLevel = m_nSpellLevel - 1;
+                    pSprite->RemoveKnownSpell(nClass, nLevel, resRef, 1, 0, 0);
+                }
+
+                lSchoolSpells.RemoveAll();
+
+                BYTE nIndex = 0;
+                UINT nWizardIndex;
+                do {
+                    BYTE nCurrent = nIndex++;
+                    nWizardIndex = pGame->GetSpellcasterIndex(CAIObjectType::C_WIZARD);
+
+                    // __FILE__: .\Include\InfGame.h
+                    // __LINE__: 772
+                    UTIL_ASSERT(m_nSpellLevel - 1 < CSPELLLIST_MAX_LEVELS);
+
+                    UINT nID = pGame->m_spellsByClass[nWizardIndex].m_lists[m_nSpellLevel - 1].Get(nCurrent);
+
+                    CSpell cSpell(pGame->m_spells.Get(nID));
+                    if (cSpell.Demand()) {
+                        if (cSpell.cResRef != "spwi402"
+                            && cSpell.CheckUsableBy(pSprite)
+                            && pSprite->IsSpellSchool(cSpell.GetSchool())) {
+                            lSchoolSpells.AddTail(new CResRef(cSpell.cResRef));
+                        }
+                        cSpell.Release();
+                    }
+
+                    nWizardIndex = pGame->GetSpellcasterIndex(CAIObjectType::C_WIZARD);
+
+                    // __FILE__: .\Include\InfGame.h
+                    // __LINE__: 772
+                    UTIL_ASSERT(m_nSpellLevel - 1 < CSPELLLIST_MAX_LEVELS);
+                } while (nIndex < pGame->m_spellsByClass[nWizardIndex].m_lists[m_nSpellLevel - 1].m_nCount);
+
+                if (lSchoolSpells.GetCount() != 0) {
+                    BOOLEAN bAdded;
+                    do {
+                        INT nCount = lSchoolSpells.GetCount();
+                        BYTE nPick = nCount != 0 ? static_cast<BYTE>(rand() % nCount) : 0;
+
+                        POSITION pos = lSchoolSpells.GetHeadPosition();
+                        CResRef* pResRef;
+                        BYTE nNode = 0;
+                        BOOL bMore;
+                        do {
+                            pResRef = lSchoolSpells.GetNext(pos);
+                            bMore = nNode < nPick;
+                            nNode++;
+                        } while (bMore);
+
+                        CSpell cSpell(*pResRef);
+                        cSpell.Demand();
+                        if (!pSprite->IsSpellSchool(cSpell.GetSchool())) {
+                            // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenCreateChar.cpp
+                            // __LINE__: 10274
+                            UTIL_ASSERT(FALSE);
+                            break;
+                        }
+                        cSpell.Release();
+
+                        nClass = typeAI.m_nClass;
+                        nLevel = m_nSpellLevel - 1;
+                        bAdded = pSprite->AddKnownSpell(nClass, nLevel, *pResRef, nMaxKnownSpells, 0, 0);
+                        if (bAdded) {
+                            m_nExtraSpells--;
+
+                            CUIPanel* pPanel = m_cUIManager.GetPanel(GetTopPopup()->m_nID);
+                            for (DWORD nButton = 2; nButton < 26; nButton++) {
+                                CUIControlButtonCharGenKnownArcaneSpellSelection* pButton = static_cast<CUIControlButtonCharGenKnownArcaneSpellSelection*>(pPanel->GetControl(nButton));
+
+                                // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenCreateChar.cpp
+                                // __LINE__: 10291
+                                UTIL_ASSERT(pButton != NULL);
+
+                                if (pButton->m_bEnabled && pButton->m_spellResRef == *pResRef) {
+                                    pButton->SetSelected(TRUE);
+                                    break;
+                                }
+                            }
+                        }
+                    } while (!bAdded);
+                }
+
+                while (lSchoolSpells.GetCount() > 0) {
+                    delete lSchoolSpells.RemoveHead();
+                }
+            }
+        }
+
+        BYTE nIndex = 0;
+        while (m_nExtraSpells > 0) {
+            BYTE nCurrent = nIndex++;
+            CResRef resRef = ruleTables.sub_545EB0(m_nSpellLevel, nCurrent);
+
+            CSpell cSpell(resRef);
+            cSpell.Demand();
+
+            if (cSpell.pRes != NULL && (cSpell.GetNotUsableBy() & pSprite->GetSpecialization()) != 0) {
+                cSpell.Release();
+            } else if (cSpell.cResRef == "spwi402") {
+                cSpell.Release();
+            } else if (!cSpell.CheckUsableBy(pSprite)) {
+                cSpell.Release();
+            } else {
+                UINT nID = 0;
+                if (pGame->m_spells.Find(resRef, nID) == TRUE) {
+                    nClass = typeAI.m_nClass;
+                    UINT nSpellLevel = m_nSpellLevel - 1;
+                    UINT nFound = 0;
+                    if (!pSprite->GetSpells(nClass)->Find(nID, nSpellLevel, nFound)) {
+                        nSpellLevel = m_nSpellLevel - 1;
+                        nClass = typeAI.m_nClass;
+                        if (pSprite->AddKnownSpell(nClass, nSpellLevel, resRef, nMaxKnownSpells, 0, 0) == TRUE) {
+                            m_nExtraSpells--;
+
+                            CUIPanel* pPanel = m_cUIManager.GetPanel(GetTopPopup()->m_nID);
+                            for (DWORD nButton = 2; nButton < 26; nButton++) {
+                                CUIControlButtonCharGenKnownArcaneSpellSelection* pButton = static_cast<CUIControlButtonCharGenKnownArcaneSpellSelection*>(pPanel->GetControl(nButton));
+
+                                // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenCreateChar.cpp
+                                // __LINE__: 10367
+                                UTIL_ASSERT(pButton != NULL);
+
+                                if (pButton->m_bEnabled && pButton->m_spellResRef == resRef) {
+                                    pButton->SetSelected(TRUE);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                cSpell.Release();
+            }
+        }
+
+        m_nSpellLevel++;
+        if (m_nSpellLevel > field_14A3) {
+            break;
+        }
+
+        // NOTE: The two class numbers below are 5 and 19, which no IWD2
+        // class has (fighter is 5); the tables are the bard's and the
+        // sorcerer's known spells.
+        if (typeAI.m_nClass == 5) {
+            INT nClassLevel = pSprite->m_derivedStats.GetClassLevel(CAIObjectType::C_BARD);
+            m_nExtraSpells = atol(ruleTables.m_tKnownSpellsBard.GetAt(CPoint(m_nSpellLevel - 1, nClassLevel - 1)));
+        } else if (typeAI.m_nClass == 19) {
+            INT nClassLevel = pSprite->m_derivedStats.GetClassLevel(CAIObjectType::C_SORCERER);
+            m_nExtraSpells = atol(ruleTables.m_tKnownSpellsSorcerer.GetAt(CPoint(m_nSpellLevel - 1, nClassLevel - 1)));
+        } else {
+            m_nExtraSpells = AUTO_PICK_SPELLS[m_nSpellLevel - 1];
+            if ((pSprite->GetSpecialization() & 0x3FC0) != 0) {
+                m_nExtraSpells += AUTO_PICK_SPECIALIST_SPELLS[m_nSpellLevel - 1];
+            }
+        }
+    } while (m_nSpellLevel <= field_14A3);
+
+    UpdatePopupPanel(GetTopPopup()->m_nID, pSprite);
+
+    g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(nGameSprite,
+        CGameObjectArray::THREAD_ASYNCH,
+        INFINITE);
+}
+
+// 0x618D10
+BOOL CScreenCreateChar::sub_618D10(BYTE nLevel, CGameSprite* pSprite)
+{
+    CResRef resRef;
+
+    for (BYTE nIndex = 0;; nIndex++) {
+        CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+        UINT nWizardIndex = pGame->GetSpellcasterIndex(CAIObjectType::C_WIZARD);
+
+        // __FILE__: .\Include\InfGame.h
+        // __LINE__: 772
+        UTIL_ASSERT(nLevel - 1 < CSPELLLIST_MAX_LEVELS);
+
+        if (nIndex >= pGame->m_spellsByClass[nWizardIndex].m_lists[nLevel - 1].m_nCount) {
+            return FALSE;
+        }
+
+        UINT nID = pGame->m_spellsByClass[nWizardIndex].m_lists[nLevel - 1].Get(nIndex);
+        resRef = pGame->m_spells.Get(nID);
+
+        CSpell cSpell(resRef);
+        if (cSpell.Demand()) {
+            if (pSprite->IsSpellSchool(cSpell.GetSchool())) {
+                cSpell.Release();
+                return TRUE;
+            }
+            cSpell.Release();
+        }
+    }
 }
 
 // 0x619030

@@ -45,6 +45,7 @@
 #include "vanilla_config.h"
 
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <initializer_list>
@@ -80,6 +81,14 @@ constexpr uintptr_t kGetStartingHitPoints = 0x542FA0;
 using RollHitPointsFn = int32_t(__fastcall*)(const void* self, void* edx, int32_t nSides, int32_t nRolls,
     int32_t nLevel, int32_t nMinRoll, int32_t nModifier);
 constexpr uintptr_t kRollHitPoints = 0x542A90;
+
+// CRuleTables::sub_545EB0(BYTE nLevel, BYTE nIndex) (0x545EB0): returns a
+// CResRef through the hidden pointer pushed first, `ret 0xc` at 0x545FCB; it
+// writes the eight bytes itself (0x545FA4) and returns the pointer in eax.
+// Reads only this+0x1858, the C2DArray m_tSpellAutomaticPicker.
+using SpellPickFn = void*(__fastcall*)(const void* self, void* edx, void* result, uint32_t nLevel, uint32_t nIndex);
+constexpr uintptr_t kSpellPick = 0x545EB0;
+constexpr size_t kSpellPickerOffset = 0x1858;
 
 // g_pBaldurChitin, CBaldurChitin::m_pObjectGame and CInfGame's
 // m_cOptions.m_bMaxHP (sub_542B40 at 0x542C0E).
@@ -416,7 +425,60 @@ void RollHitPoints(CaseContext& ctx)
     ::operator delete(storage);
 }
 
+std::string ResRefText(const uint8_t* bytes)
+{
+    std::string text;
+    for (int i = 0; i < 8; ++i) {
+        char hex[4];
+        std::snprintf(hex, sizeof(hex), "%02X", bytes[i]);
+        text += hex;
+    }
+    return text;
+}
+
+// CRuleTables::sub_545EB0 (0x545EB0), the automatic spell picker's lookup,
+// with the game's SPLAUTOP.2DA: every nLevel and nIndex byte (the level
+// clamped to the nine columns, the index past the rows reading the default).
+// Both sides' rule tables hold only that table; the eight bytes of the
+// CResRef are compared.
+void SpellAutomaticPicker(CaseContext& ctx)
+{
+    auto* storage = static_cast<unsigned char*>(::operator new(sizeof(CRuleTables)));
+    std::memset(storage, 0, sizeof(CRuleTables));
+    auto* ours = reinterpret_cast<CRuleTables*>(storage);
+    new (&ours->m_tSpellAutomaticPicker) C2DArray();
+    ours->m_tSpellAutomaticPicker.LoadText(CString(ReadTable(ctx, "SPLAUTOP.2DA").c_str()));
+
+    const uint8_t* original = nullptr;
+    ctx.SetInputs("building the original's CRuleTables");
+    ctx.CallOriginal([&] {
+        uint8_t* rules = OriginalBlock(kRuleTablesSize);
+        FillOriginalTable(rules + kSpellPickerOffset, ours->m_tSpellAutomaticPicker);
+        original = rules;
+    });
+
+    for (uint32_t level = 0; level <= 255; ++level) {
+        for (uint32_t index = 0; index <= 255; ++index) {
+            ctx.SetInputs("sub_545EB0(" + std::to_string(level) + ", " + std::to_string(index) + ")");
+            uint8_t originalBytes[8] = {};
+            ctx.CallOriginal([&] {
+                reinterpret_cast<SpellPickFn>(kSpellPick)(original, nullptr, originalBytes, level, index);
+            });
+            const CResRef result = ours->sub_545EB0(static_cast<BYTE>(level), static_cast<BYTE>(index));
+            uint8_t oursBytes[8];
+            std::memcpy(oursBytes, result.GetResRef(), 8);
+            ctx.CountInputs(1);
+            const std::string a = ResRefText(originalBytes);
+            const std::string b = ResRefText(oursBytes);
+            if (a != b) {
+                ctx.Fail(ctx.Inputs(), a, b);
+            }
+        }
+    }
+}
+
 } // namespace
 
+ORACLE_CASE("rules/spell_automatic_picker", SpellAutomaticPicker);
 ORACLE_CASE("rules/starting_hp", StartingHitPoints);
 ORACLE_CASE("rules/roll_hit_points", RollHitPoints);

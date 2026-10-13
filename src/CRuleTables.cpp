@@ -3396,6 +3396,29 @@ DWORD CRuleTables::GetSkillDescription(DWORD id) const
     return -1;
 }
 
+// 0x545EB0
+CResRef CRuleTables::sub_545EB0(BYTE nLevel, BYTE nIndex) const
+{
+    INT nColumn = nLevel - 1;
+    if (nColumn > 8) {
+        nColumn = 8;
+    } else if (nColumn < 0) {
+        nColumn = 0;
+    }
+
+    // NOTE: The row is clamped to the table's height, not below it: an index
+    // at or past the last spell reads the default.
+    SHORT nRow = m_tSpellAutomaticPicker.GetHeight() < nIndex
+        ? m_tSpellAutomaticPicker.GetHeight()
+        : nIndex;
+    if (nRow < 0) {
+        nRow = 0;
+    }
+
+    CString sResRef = m_tSpellAutomaticPicker.GetAt(CPoint(static_cast<BYTE>(nColumn), static_cast<BYTE>(nRow)));
+    return CResRef(sResRef);
+}
+
 // 0x545FD0
 INT CRuleTables::GetLoadingHint(INT nHintNumber) const
 {
