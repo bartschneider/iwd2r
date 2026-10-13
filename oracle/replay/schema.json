@@ -265,15 +265,15 @@
                 ]
               },
               "skills": {
-                "description": "m_derivedStats.m_nSkills, the 64 skill bytes as stored (unsigned; the original reads them as signed chars, so a negative skill shows as 256 + it).",
+                "description": "m_derivedStats.m_nSkills, the 64 skill bytes as signed chars, as the original reads them (movsx).",
                 "type": [
                   "array",
                   "null"
                 ],
                 "items": {
                   "type": "integer",
-                  "minimum": 0,
-                  "maximum": 255
+                  "minimum": -128,
+                  "maximum": 127
                 },
                 "minItems": 64,
                 "maxItems": 64

@@ -158,7 +158,7 @@ TEST_CASE("state dump JSON matches the golden dumps", "[dump]")
     member.maxHp = 12;
     member.skills[1] = 4;
     member.skills[5] = 2;
-    member.skills[13] = 255;
+    member.skills[13] = -1;
     world.engine.world.party.push_back(member);
     platform::state_dump::PartyMember missing;
     missing.id = 0x20001;
