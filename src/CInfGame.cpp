@@ -4576,7 +4576,65 @@ BOOL CInfGame::SelectCharacter(LONG characterId, BOOLEAN bPlaySelectSound)
 // 0x5ADAE0
 void CInfGame::SelectToolbar()
 {
-    // TODO: Incomplete.
+    m_nState = 0;
+    m_cButtonArray.m_nSelectedButton = 100;
+
+    switch (m_group.GetCount()) {
+    case 0:
+        m_cButtonArray.SetState(0, 0);
+        break;
+    case 1: {
+        LONG* pGroupList = m_group.GetGroupList();
+        if (pGroupList == NULL) {
+            m_cButtonArray.SetState(0, 0);
+            delete[] pGroupList;
+            return;
+        }
+
+        CGameSprite* pSprite;
+        BYTE rc;
+        do {
+            rc = m_cObjectArray.GetShare(pGroupList[0],
+                CGameObjectArray::THREAD_ASYNCH,
+                reinterpret_cast<CGameObject**>(&pSprite),
+                INFINITE);
+        } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+        if (rc != CGameObjectArray::SUCCESS) {
+            m_cButtonArray.SetState(0, 0);
+            delete[] pGroupList;
+            return;
+        }
+
+        if (IcewindMisc::IsPC(pSprite) == TRUE) {
+            // TODO: Incomplete. The original copies the sprite's nine
+            // customizable button types (`field_3D14`) into the button array
+            // (0x595E70) and then its weapon set (`m_nWeaponSet`, 0x595F70);
+            // CInfButtonArray has neither yet.
+            m_cButtonArray.SetState(114, 0);
+        } else {
+            // TODO: Incomplete. The original sets the button array's weapon
+            // set from `m_nWeaponSet` here (0x595F70, not in CInfButtonArray
+            // yet).
+            m_cButtonArray.SetState(110, 0);
+        }
+
+        m_cObjectArray.ReleaseShare(pGroupList[0],
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+        delete[] pGroupList;
+        break;
+    }
+    default:
+        m_cButtonArray.SetState(110, 0);
+        break;
+    }
+
+    // NOTE: 0x691130 (CScreenWorld's active panel id, not in our tree yet)
+    // returns `field_EA4`.
+    if (g_pBaldurChitin->m_pEngineWorld->field_EA4 == 8) {
+        g_pBaldurChitin->m_pEngineWorld->StopContainer();
+    }
 }
 
 // 0x5ADC90
