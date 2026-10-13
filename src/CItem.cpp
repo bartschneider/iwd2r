@@ -20,9 +20,9 @@ CItem::CItem()
     m_nAbilities = 0;
     m_numSounds = 0;
     m_wear = 0;
-    m_useCount1 = 0;
-    m_useCount2 = 0;
-    m_useCount3 = 0;
+    m_useCount1 = 1;
+    m_useCount2 = 1;
+    m_useCount3 = 1;
 }
 
 // 0x4E7900

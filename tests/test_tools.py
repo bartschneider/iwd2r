@@ -2403,9 +2403,11 @@ class BifTest(unittest.TestCase):
         os.makedirs(os.path.join(self.game, 'Override'))
         key = make_key(['data\\Main.bif', 'data\\Extra.bif'],
                        [('XPLEVEL', 0x3F4, 0, 1), ('SKILLS', 0x3F4, 1, 0),
-                        ('XPLEVEL', 0x3F0, 0, 0), ('MISSING', 0x3F4, 5, 0)])
+                        ('XPLEVEL', 0x3F0, 0, 0), ('MISSING', 0x3F4, 5, 0),
+                        ('00SWDL01', 0x3ED, 0, 2)])
         self.write('CHITIN.KEY', key)
-        self.write('Data/MAIN.BIF', make_biff([(0, b'ids'), (1, b'2DA xp')]))
+        self.write('Data/MAIN.BIF', make_biff([(0, b'ids'), (1, b'2DA xp'),
+                                               (2, b'ITM V2.0')]))
         self.write('CD2/Data/Extra.bif', make_biff([(0, b'2DA skills')]))
 
     def write(self, rel, data):
@@ -2422,6 +2424,7 @@ class BifTest(unittest.TestCase):
     def test_extract_from_biff_by_type_and_case(self):
         self.assertEqual(bif.extract(self.game, 'xplevel.2da'), b'2DA xp')
         self.assertEqual(bif.extract(self.game, 'XPLEVEL.IDS'), b'ids')
+        self.assertEqual(bif.extract(self.game, '00swdl01.itm'), b'ITM V2.0')
 
     def test_extract_from_a_cd_folder(self):
         self.assertEqual(bif.extract(self.game, 'SKILLS.2DA'), b'2DA skills')
