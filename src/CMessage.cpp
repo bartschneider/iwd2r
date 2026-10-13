@@ -4840,7 +4840,7 @@ BOOLEAN CBaldurMessage::GetDialogRequestPending()
     return m_bDialogRequestPending;
 }
 
-// 0x4F4F50
+// 0x4F4F60
 BOOLEAN CBaldurMessage::GetDialogReplyReturned()
 {
     return m_bDialogReplyReturned;
@@ -4934,7 +4934,32 @@ CMessageHandler::~CMessageHandler()
 // 0x4EE020
 void CMessageHandler::AsynchronousUpdate()
 {
-    // TODO: Incomplete.
+    if (g_pChitin->cNetwork.GetServiceProvider() == CNetwork::SERV_PROV_NULL
+        || !g_pBaldurChitin->GetObjectGame()->field_4BD4) {
+        while (m_messageList.GetCount() != 0) {
+            CMessage* message = m_messageList.RemoveHead();
+            message->Run();
+            delete message;
+        }
+    }
+
+    // NOTE: The original then fetches every message other players sent while
+    // `cNetwork.m_bConnectionEstablished` and dispatches it by type and
+    // subtype. Omitted: single player only (docs/adr/0002-single-player-only.md).
+
+    if (g_pChitin->cNetwork.GetSessionHosting() == TRUE) {
+        g_pBaldurChitin->GetBaldurMessage()->PurgeDroppedPlayers();
+        g_pBaldurChitin->GetBaldurMessage()->ObjectControl();
+    }
+
+    if (g_pBaldurChitin->GetBaldurMessage()->GetDialogRequestPending() == TRUE) {
+        if (g_pBaldurChitin->GetBaldurMessage()->GetDialogReplyReturned() == TRUE) {
+            g_pBaldurChitin->GetBaldurMessage()->SetDialogReplyUpdates(g_pBaldurChitin->GetBaldurMessage()->GetDialogReplyUpdates() - 1);
+            if (g_pBaldurChitin->GetBaldurMessage()->GetDialogReplyUpdates() < 0) {
+                g_pBaldurChitin->GetBaldurMessage()->CancelDialogRequestToServer();
+            }
+        }
+    }
 }
 
 // 0x4F7110
@@ -5084,15 +5109,95 @@ SHORT CMessageHandler::AddMessage(CMessage* message, BOOL bForcePassThrough, SHO
 // 0x4F7620
 SHORT CMessageHandler::Broadcast(CMessage* message, BOOLEAN bSendMessageToSelf, BOOLEAN bIgnoreObjectControl)
 {
-    // TODO: Incomplete.
+    CGameObject* pObject;
+    LONG nTargetId = message->m_targetId;
 
-    return -1;
+    BYTE rc;
+    do {
+        rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(nTargetId,
+            CGameObjectArray::THREAD_ASYNCH,
+            &pObject,
+            INFINITE);
+    } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+    if (rc != CGameObjectArray::SUCCESS) {
+        pObject = NULL;
+    }
+
+    if (bIgnoreObjectControl == TRUE
+        || (pObject != NULL
+            && (g_pChitin->cNetwork.GetServiceProvider() == CNetwork::SERV_PROV_NULL
+                || g_pChitin->cNetwork.m_idLocalPlayer == pObject->m_remotePlayerID))) {
+        // NOTE: Under a network service provider with a connection
+        // established, the original marshals the message here and sends it to
+        // every other player. Omitted: single player only
+        // (docs/adr/0002-single-player-only.md).
+
+        if (bSendMessageToSelf == TRUE) {
+            m_messageList.AddTail(message);
+        } else {
+            delete message;
+        }
+    } else {
+        if (bSendMessageToSelf == TRUE) {
+            m_messageList.AddTail(message);
+        } else {
+            delete message;
+        }
+    }
+
+    if (rc == CGameObjectArray::SUCCESS) {
+        g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(nTargetId,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+    }
+
+    return 0;
 }
 
 // 0x4F7830
 SHORT CMessageHandler::Send(CMessage* message)
 {
-    // TODO: Incomplete.
+    CGameObject* pObject;
+    LONG nTargetId = message->m_targetId;
+
+    if (nTargetId != CGameObjectArray::INVALID_INDEX) {
+        BYTE rc;
+        do {
+            rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(nTargetId,
+                CGameObjectArray::THREAD_ASYNCH,
+                &pObject,
+                INFINITE);
+        } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+        if (rc == CGameObjectArray::SUCCESS) {
+            BOOL bDelete = FALSE;
+
+            if (g_pChitin->cNetwork.GetServiceProvider() == CNetwork::SERV_PROV_NULL
+                || g_pChitin->cNetwork.m_idLocalPlayer == pObject->m_remotePlayerID) {
+                m_messageList.AddTail(message);
+            } else {
+                // NOTE: The original marshals the message and sends it to the
+                // player who controls the object, falling back to the host.
+                // Omitted: single player only
+                // (docs/adr/0002-single-player-only.md); the message is
+                // dropped as the original drops it once sent.
+                bDelete = TRUE;
+            }
+
+            g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(nTargetId,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+
+            if (bDelete) {
+                delete message;
+            }
+
+            return 0;
+        }
+    }
+
+    delete message;
 
     return -1;
 }
