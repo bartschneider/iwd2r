@@ -421,6 +421,7 @@ public:
     /* 0048 */ void RemoveFromArea() override;
     /* 004C */ void Render(CGameArea* pArea, CVidMode* pVidMode, INT nSurface) override;
     /* 0058 */ void SetCursor(LONG nToolTip) override;
+    /* 0078 */ void AddEffect(CGameEffect* pEffect, BYTE list, BOOL noSave, BOOL immediateApply) override;
     /* 007C */ void ClearAI(BOOLEAN bSetSequence) override;
     /* 0094 */ void SetScript(SHORT level, CAIScript* script) override;
     /* 009C */ const BYTE* GetVisibleTerrainTable() override;
@@ -535,12 +536,15 @@ public:
     void sub_720B50(CMemINIValue* a1, CMemINIValue* a2);
     SHORT FindItemBags(const CString& sName, LONG number, BOOL checkForIdentified);
     SHORT TakeItemBags(const CString& sName, LONG number, SHORT slotNum);
+    void sub_722820();
     BOOL HaveUnexportableItems();
     void SetMonkAbilities();
     LONG GetLevel();
     void sub_723BF0(BOOLEAN a1, BOOLEAN a2);
     INT GetAC();
     INT sub_723F60();
+    void sub_71E240(CCreatureFileHeader& oldBaseStats, CDerivedStats& oldDStats);
+    void sub_71E750(CCreatureFileHeader& oldBaseStats, CDerivedStats& oldDStats);
     void sub_71E760(CDerivedStats& DStats, int a2);
     int sub_71F6E0();
     const CString& GetName();
@@ -581,7 +585,7 @@ public:
     SHORT GroupAttack(CGameSprite* pTarget);
     SHORT Enemy();
     SHORT SetDialog();
-    void SelectWeaponAbility(unsigned char a1, unsigned char a2, unsigned char a3, unsigned char a4);
+    void SelectWeaponAbility(unsigned char buttonNum, unsigned char abilityNum, unsigned char feedBack, unsigned char retry);
     void sub_756930(CItem* pItem, CItem* pLauncher);
     SHORT EquipItem();
     SHORT FindTraps();

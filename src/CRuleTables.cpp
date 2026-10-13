@@ -10,6 +10,9 @@
 #include "CUtil.h"
 #include "msvc_atol.h"
 
+// 0x8DE8C8
+const CString CRuleTables::RANDOM_TREASURE_TIERS("lmrvvvvv");
+
 // 0x8DF018
 const DWORD CRuleTables::TIME_RESTING = 8
     * CTimerWorld::TIMESCALE_MSEC_PER_SEC
@@ -3485,6 +3488,100 @@ const C2DArray* CRuleTables::GetClassAbilityTable(BYTE nClass, DWORD nSpecialist
     UTIL_ASSERT_MSG(FALSE, "GetClassAbilityTable Being  called incorrectly");
 }
 
+// 0x5461E0
+CString CRuleTables::sub_5461E0(const CString& sResRef, const CString& sUpgrade) const
+{
+    CString sNewResRef(sResRef);
+
+    if (sNewResRef.GetLength() > 2
+        && sNewResRef[sNewResRef.GetLength() - 2] == '_'
+        && sUpgrade.GetLength() > 1
+        && tolower(sUpgrade[0]) == 'u'
+        && tolower(sUpgrade[1]) == 'p') {
+        int nTier = RANDOM_TREASURE_TIERS.Find(static_cast<char>(tolower(sNewResRef[sNewResRef.GetLength() - 1])));
+        if (nTier >= 0) {
+            int nSteps;
+            switch (tolower(sUpgrade[sUpgrade.GetLength() - 1])) {
+            case 'p':
+                if (sUpgrade.GetLength() > 2) {
+                    return sNewResRef;
+                }
+                // FALLTHROUGH
+            case '1':
+                nSteps = 1;
+                break;
+            case '2':
+                nSteps = 2;
+                break;
+            case '3':
+                nSteps = 3;
+                break;
+            default:
+                return sNewResRef;
+            }
+
+            if (sNewResRef[sNewResRef.GetLength() - 1] != RANDOM_TREASURE_TIERS[nSteps + nTier]) {
+                sNewResRef = sNewResRef.Left(sNewResRef.GetLength() - 1);
+                sNewResRef += RANDOM_TREASURE_TIERS[nSteps + nTier];
+            }
+        }
+    }
+
+    return sNewResRef;
+}
+
+// 0x5463E0
+BOOL CRuleTables::sub_5463E0(CString& sResRef) const
+{
+    CString sSearch(sResRef);
+
+    const C2DArray* pTable = &m_tRtNorm;
+    if (g_pBaldurChitin->GetObjectGame()->GetOptions()->m_nNightmareMode == 1) {
+        pTable = &m_tRtFury;
+    }
+
+    CPoint ptLocation;
+    if (pTable->Find(sSearch, ptLocation) != TRUE || ptLocation.x != -1) {
+        return FALSE;
+    }
+
+    // NOTE: The original keeps the index of the last filled column, not the
+    // number of filled columns, so the last entry of a row is never picked
+    // unless it is the only one.
+    int nLast = 0;
+    for (int x = 0; x < pTable->GetWidth(); x++) {
+        CString sEntry = pTable->GetAt(CPoint(x, ptLocation.y));
+        if (sEntry.GetLength() == 0 || strcmp(sEntry, "*") == 0) {
+            break;
+        }
+        nLast = x;
+    }
+
+    int nPick = nLast != 0 ? rand() % nLast : 0;
+
+    CString sNewResRef = pTable->GetAt(CPoint(nPick, ptLocation.y));
+    if (sNewResRef.GetLength() > 1
+        && tolower(sNewResRef[0]) == 'u'
+        && tolower(sNewResRef[1]) == 'p') {
+        CString sUpgraded = sub_5461E0(sSearch, sNewResRef);
+        if (_stricmp(sUpgraded, sResRef) != 0) {
+            sub_5463E0(sUpgraded);
+            sResRef = sUpgraded;
+        } else {
+            sResRef = "no_drop";
+        }
+    } else {
+        sResRef = sNewResRef;
+        if (strcmp(sResRef, "") == 0) {
+            return FALSE;
+        }
+
+        sub_5463E0(sResRef);
+    }
+
+    return TRUE;
+}
+
 // 0x546680
 STRREF CRuleTables::GetSpeechStringRef(CString& sSoundSet, INT nSpeech) const
 {
@@ -3584,7 +3681,105 @@ INT CRuleTables::GetEncumbranceMod(CGameSprite* pSprite) const
 // 0x546B60
 void CRuleTables::sub_546B60(CGameSprite* pSprite, int& a2, int& a3, int& a4, BOOL a5) const
 {
-    // TODO: Incomplete.
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\CRuleTables.cpp
+    // __LINE__: 6731
+    UTIL_ASSERT(pSprite != NULL);
+
+    CDerivedStats* pDStats = pSprite->GetDerivedStats();
+    const CAIObjectType& typeAI = pSprite->GetAIType();
+
+    a2 = 0;
+    a3 = 0;
+    a4 = 5;
+
+    if ((typeAI.m_nClassMask & CLASSMASK_BARBARIAN) != 0) {
+        a2 += iwd2r_atol(m_tBAATFGT.GetAt(CPoint(0, pDStats->GetClassLevel(CAIOBJECTTYPE_C_BARBARIAN) - 1)));
+    }
+
+    if ((typeAI.m_nClassMask & CLASSMASK_BARD) != 0) {
+        a2 += iwd2r_atol(m_tBAATNFG.GetAt(CPoint(0, pDStats->GetClassLevel(CAIOBJECTTYPE_C_BARD) - 1)));
+    }
+
+    if ((typeAI.m_nClassMask & CLASSMASK_CLERIC) != 0) {
+        a2 += iwd2r_atol(m_tBAATNFG.GetAt(CPoint(0, pDStats->GetClassLevel(CAIOBJECTTYPE_C_CLERIC) - 1)));
+    }
+
+    if ((typeAI.m_nClassMask & CLASSMASK_DRUID) != 0) {
+        a2 += iwd2r_atol(m_tBAATNFG.GetAt(CPoint(0, pDStats->GetClassLevel(CAIOBJECTTYPE_C_DRUID) - 1)));
+    }
+
+    if ((typeAI.m_nClassMask & CLASSMASK_FIGHTER) != 0) {
+        a2 += iwd2r_atol(m_tBAATFGT.GetAt(CPoint(0, pDStats->GetClassLevel(CAIOBJECTTYPE_C_FIGHTER) - 1)));
+    }
+
+    if ((typeAI.m_nClassMask & CLASSMASK_PALADIN) != 0) {
+        a2 += iwd2r_atol(m_tBAATFGT.GetAt(CPoint(0, pDStats->GetClassLevel(CAIOBJECTTYPE_C_PALADIN) - 1)));
+    }
+
+    if ((typeAI.m_nClassMask & CLASSMASK_RANGER) != 0) {
+        a2 += iwd2r_atol(m_tBAATFGT.GetAt(CPoint(0, pDStats->GetClassLevel(CAIOBJECTTYPE_C_RANGER) - 1)));
+    }
+
+    if ((typeAI.m_nClassMask & CLASSMASK_ROGUE) != 0) {
+        a2 += iwd2r_atol(m_tBAATNFG.GetAt(CPoint(0, pDStats->GetClassLevel(CAIOBJECTTYPE_C_ROGUE) - 1)));
+    }
+
+    if ((typeAI.m_nClassMask & CLASSMASK_SORCERER) != 0) {
+        a2 += iwd2r_atol(m_tBAATMAG.GetAt(CPoint(0, pDStats->GetClassLevel(CAIOBJECTTYPE_C_SORCERER) - 1)));
+    }
+
+    if ((typeAI.m_nClassMask & CLASSMASK_WIZARD) != 0) {
+        a2 += iwd2r_atol(m_tBAATMAG.GetAt(CPoint(0, pDStats->GetClassLevel(CAIOBJECTTYPE_C_WIZARD) - 1)));
+    }
+
+    if ((typeAI.m_nClassMask & CLASSMASK_MONK) != 0) {
+        INT nMonkLevel = pDStats->GetClassLevel(CAIOBJECTTYPE_C_MONK);
+
+        const C2DArray* pTable;
+        if (a2 == 0
+            && pSprite->GetEquipment()->m_selectedWeapon == CGameSpriteEquipment::SLOT_FIST
+            && pSprite->GetEquipment()->m_items[CGameSpriteEquipment::SLOT_ARMOR] == NULL) {
+            a4 = 3;
+            pTable = &m_tBAATMKU;
+        } else {
+            pTable = &m_tBAATNFG;
+        }
+
+        a2 += iwd2r_atol(pTable->GetAt(CPoint(0, nMonkLevel - 1)));
+    }
+
+    if (a5 == TRUE) {
+        if (pSprite->GetDerivedStats()->m_spellStates.test(SPLSTATE_FEAT_RAPID_SHOT) == TRUE) {
+            CItem* pItem = pSprite->GetEquipment()->m_items[pSprite->GetEquipment()->m_selectedWeapon];
+
+            ITEM_ABILITY* ability;
+            if (pItem != NULL) {
+                pItem->Demand();
+                ability = pItem->GetAbility(pSprite->GetEquipment()->m_selectedWeaponAbility);
+            } else {
+                ability = NULL;
+            }
+
+            // NOTE: The original reads the ability without a NULL check
+            // (0x546FC0).
+            if (ability != NULL
+                && ((ability->type & 0xFF) == 4 || (ability->type & 0xFF) == 2)) {
+                a2 += 5;
+            }
+
+            if (pItem != NULL) {
+                pItem->Release();
+            }
+        }
+    }
+
+    a3 = (a2 - 1) / a4 + 1;
+    if (a3 >= 4) {
+        a3 = 4;
+    }
+    if (a3 <= 0) {
+        a3 = 0;
+    }
 }
 
 // FIXME: For unknown reason `nClass` and `nLevel` params are passed as

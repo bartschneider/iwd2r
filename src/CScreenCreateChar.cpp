@@ -4713,12 +4713,10 @@ void CScreenCreateChar::CompleteCharacterSkills(CGameSprite* pSprite)
         delete pButtons;
     }
 
-    // TODO: Incomplete. The original builds a zeroed CCreatureFileHeader
-    // (the stats before the feats were picked) and a CDerivedStats and
-    // passes both to CGameSprite::sub_71E240 (0x71E240), which adds the base
-    // stat bonuses of every newly picked feat, then to the empty CGameSprite
-    // function at 0x71E750 (`ret 8`). Neither is in src/ yet (CGameSprite.cpp
-    // belongs to the creature-file stream); see docs/evidence/612DE0.md.
+    CCreatureFileHeader oldBaseStats;
+    CDerivedStats oldDStats;
+    pSprite->sub_71E240(oldBaseStats, oldDStats);
+    pSprite->sub_71E750(oldBaseStats, oldDStats);
 
     pSprite->field_562C = 1;
     pSprite->ProcessEffectList();
@@ -4738,9 +4736,7 @@ void CScreenCreateChar::CompleteCharacterWrapup(CGameSprite* pSprite)
 
     pSprite->GetBaseStats()->m_reputation = ruleTables.GetStartingReputation(typeAI.m_nAlignment) * CInfGame::REPUTATION_MULTIPLIER;
 
-    // TODO: Incomplete. The original calls CGameSprite::sub_722820
-    // (0x722820) here; it is not in src/ yet (CGameSprite.cpp belongs to the
-    // creature-file stream).
+    pSprite->sub_722820();
 
     UINT nClassIndex;
     UINT nLevel;

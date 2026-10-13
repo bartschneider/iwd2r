@@ -368,6 +368,7 @@ public:
     static const CString TOKEN_FIGHTERTYPE;
     static const CString DLGINST;
     static const CString SCRINST;
+    static const CString RANDOM_TREASURE_TIERS;
 
     CRuleTables();
     ~CRuleTables();
@@ -439,6 +440,8 @@ public:
     INT GetLoadingHint(INT nHintNumber) const;
     INT GetNumLoadingHints() const;
     const C2DArray* GetClassAbilityTable(BYTE nClass, DWORD nSpecialist) const;
+    CString sub_5461E0(const CString& sResRef, const CString& sUpgrade) const;
+    BOOL sub_5463E0(CString& sResRef) const;
     STRREF GetSpeechStringRef(CString& sSoundSet, INT nSpeech) const;
     BOOLEAN IsHatedRace(const CAIObjectType& typeAI, const CCreatureFileHeader& BStats) const;
     BOOLEAN IsHatedRace(BYTE& nRace, const CCreatureFileHeader& BStats) const;

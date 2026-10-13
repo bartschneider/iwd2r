@@ -8,6 +8,7 @@
 #include "CGameSprite.h"
 #include "CInfGame.h"
 #include "CScreenWorld.h"
+#include "CSevenEyes.h"
 #include "CSpell.h"
 #include "CUtil.h"
 #include "CVidPalette.h"
@@ -1124,6 +1125,16 @@ CGameEffect::CGameEffect(ITEM_EFFECT* effect, const CPoint& source, LONG sourceI
     m_source = source;
     m_sourceID = sourceID;
     m_target = target;
+    m_done = FALSE;
+    m_compareIdOnly = FALSE;
+    m_compareIdAndFlagsOnly = FALSE;
+    m_forceRepass = FALSE;
+    field_188 = 0;
+    field_118 = m_duration;
+
+    // NOTE: Object offset +0xCC, the first-call flag the effects in
+    // IcewindCGameEffects.cpp test as m_secondaryType.
+    m_secondaryType = 1;
 }
 
 // 0x499B10
@@ -1150,7 +1161,71 @@ BOOL CGameEffect::ApplyEffect(CGameSprite* pSprite)
 // 0x4A3030
 BOOL CGameEffect::ResolveEffect(CGameSprite* pSprite)
 {
-    return FALSE;
+    // NOTE: Inlined CAIObjectType::Equal.
+    if (pSprite->GetAIType().Equal(CAIObjectType::NOT_SPRITE)) {
+        return FALSE;
+    }
+
+    ULONG nGameTime = g_pBaldurChitin->GetObjectGame()->GetWorldTimer()->m_gameTime;
+
+    switch (m_durationType) {
+    case 0x1000:
+        if (m_duration <= nGameTime) {
+            m_done = TRUE;
+            OnRemove(pSprite);
+            return TRUE;
+        }
+        break;
+    case 0:
+        m_durationType = 0x1000;
+        m_duration = nGameTime + m_duration * 15;
+        break;
+    case 3:
+        m_durationType = 6;
+        m_duration = nGameTime + m_duration * 15;
+        return TRUE;
+    case 4:
+        m_durationType = 7;
+        m_duration = nGameTime + m_duration * 15;
+        return TRUE;
+    case 5:
+        m_durationType = 8;
+        m_duration = nGameTime + m_duration * 15;
+        return TRUE;
+    case 6:
+        if (nGameTime < m_duration) {
+            return TRUE;
+        }
+        m_durationType = 0x1000;
+        m_duration = nGameTime + field_118 * 15;
+        sub_4A3FF0(pSprite);
+        DisplayString(pSprite);
+        break;
+    case 7:
+        if (nGameTime < m_duration) {
+            return TRUE;
+        }
+        m_durationType = 1;
+        sub_4A3FF0(pSprite);
+        DisplayString(pSprite);
+        break;
+    case 8:
+        if (nGameTime < m_duration) {
+            return TRUE;
+        }
+        m_durationType = 2;
+        sub_4A3FF0(pSprite);
+        DisplayString(pSprite);
+        break;
+    }
+
+    BOOL bResult = ApplyEffect(pSprite);
+
+    // NOTE: Object offset +0xCC, the first-call flag the effects in
+    // IcewindCGameEffects.cpp test as m_secondaryType.
+    m_secondaryType = 0;
+
+    return bResult;
 }
 
 // 0x799E60
@@ -1307,6 +1382,308 @@ void CGameEffect::AddColorEffect(CGameSprite* pSprite, BYTE r, BYTE g, BYTE b, B
 void CGameEffect::AddColorEffect(CGameSprite* pSprite, BYTE r, BYTE g, BYTE b)
 {
     AddColorEffect(pSprite, r, g, b, 1);
+}
+
+// 0x4A3310
+BOOL CGameEffect::sub_4A3310(CGameSprite* pSprite, BYTE* pRoll1, BYTE* pRoll2, BYTE* pRoll3, BYTE* pRoll4, BYTE* pProbabilityRoll)
+{
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+    if (((pSprite->m_baseStats.m_flags & 0x20000) != 0
+            && ((m_sourceFlags & 0x400) != 0
+                || m_effectID == 12
+                || m_effectID == 13
+                || m_effectID == 3
+                || m_effectID == 5
+                || m_effectID == 38
+                || m_effectID == 39
+                || m_effectID == 55
+                || m_effectID == 58
+                || m_effectID == 60
+                || m_effectID == 72
+                || m_effectID == 74
+                || m_effectID == 76
+                || m_effectID == 40
+                || m_effectID == 45
+                || m_effectID == 78
+                || m_effectID == 80
+                || m_effectID == 82
+                || m_effectID == 110
+                || m_effectID == 128
+                || m_effectID == 109
+                || m_effectID == 134
+                || m_effectID == 135
+                || m_effectID == 136
+                || m_effectID == 137
+                || m_effectID == 154
+                || m_effectID == 157
+                || m_effectID == 158
+                || m_effectID == 160
+                || m_effectID == 165
+                || m_effectID == 168
+                || m_effectID == 172
+                || m_effectID == 177
+                || m_effectID == 255
+                || m_effectID == 256
+                || m_effectID == 257
+                || m_effectID == 263
+                || m_effectID == 241
+                || m_effectID == 245
+                || m_effectID == 247
+                || m_effectID == 250
+                || m_effectID == 264
+                || m_effectID == 277
+                || m_effectID == 278
+                || m_effectID == 279
+                || m_effectID == 280
+                || m_effectID == 281
+                || m_effectID == 282
+                || m_effectID == 284
+                || m_effectID == 285
+                || m_effectID == 293
+                || m_effectID == 294
+                || m_effectID == 295
+                || m_effectID == 400
+                || m_effectID == 404
+                || m_effectID == 405
+                || m_effectID == 412
+                || m_effectID == 414
+                || m_effectID == 416
+                || m_effectID == 419
+                || m_effectID == 420
+                || m_effectID == 424
+                || m_effectID == 425
+                || m_effectID == 428
+                || m_effectID == 431
+                || m_effectID == 25
+                || m_effectID == 24
+                || m_effectID == 435))
+        || (m_effectAmount < 0 && (m_effectID == 18 || m_effectID == 23))
+        || (m_effectAmount > 0 && (m_effectID == 93 || m_effectID == 94))) {
+        if (m_sourceID == CGameObjectArray::INVALID_INDEX) {
+            return FALSE;
+        }
+
+        // TODO: Incomplete. The original takes the source object's share
+        // (0x4A362B), marks a party source hostile through
+        // CGameSprite::sub_6F50A0 (0x6F50A0, not in src/) and sends the
+        // target two trigger messages (0x20 and 0x02) before it returns.
+        return FALSE;
+    }
+
+    // NOTE: The original draws a number here and discards it (0x4A38A6).
+    rand();
+
+    if (m_probabilityUpper < *pProbabilityRoll) {
+        return FALSE;
+    }
+
+    if (*pProbabilityRoll < m_probabilityLower) {
+        return FALSE;
+    }
+
+    // TODO: Incomplete. The original looks m_sourceRes up in the
+    // CDerivedStats container at +0x470 (0x4A3920-0x4A39A0) and rejects the
+    // effect when it is there. CDerivedStats does not declare that container
+    // yet (nothing in src/ fills it), so the lookup is taken as a miss.
+
+    if (CSevenEyes::CheckEyeOfStone(pSprite, this) == TRUE
+        || CSevenEyes::CheckEyeOfSpirit(pSprite, this) == TRUE
+        || CSevenEyes::CheckEyeOfMind(pSprite, this) == TRUE
+        || CSevenEyes::CheckEyeOfFortitude(pSprite, this) == TRUE
+        || CSevenEyes::CheckEyeOfVenom(pSprite, this) == TRUE
+        || CSevenEyes::CheckEyeOfMage(pSprite, this) == TRUE
+        || CSevenEyes::CheckEyeOfSword(pSprite, this) == TRUE) {
+        return FALSE;
+    }
+
+    BYTE nEnemyAlly = pSprite->GetAIType().m_nEnemyAlly;
+    const BYTE* pSourceRes = m_sourceRes.GetResRef();
+    if (nEnemyAlly <= CAIObjectType::EA_GOODCUTOFF
+        && pSourceRes[0] != '\0'
+        && memcmp(pSourceRes, "SPWI420", 7) == 0
+        && pGame->GetCharacterPortraitNum(pSprite->GetId()) != -1
+        && (pSprite->m_derivedStats.m_generalState & STATE_DEAD) == 0
+        && pSprite->m_derivedStats.GetClassLevel(CAIOBJECTTYPE_C_PALADIN) >= 2) {
+        if (m_effectID == 24 && m_sourceRes.GetResRefStr().GetLength() != 0) {
+            // NOTE: Inlined CSpell::CSpell.
+            CSpell cSpell(m_sourceRes);
+            pSprite->FeedBack(CGameSprite::FEEDBACK_IMMUNE_TO_RESOURCE, 0, 0, 0, cSpell.GetGenericName(), 0, 0);
+        }
+
+        // NOTE: The original releases a share it did not take here
+        // (0x4A3B96).
+        pGame->GetObjectArray()->ReleaseShare(m_sourceID,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+        return FALSE;
+    }
+
+    if (pSprite->m_derivedStats.m_naturalImmunities.find(m_effectID) != pSprite->m_derivedStats.m_naturalImmunities.end()) {
+        CGameObject* pSource;
+        BYTE rc = pGame->GetObjectArray()->GetShare(m_sourceID,
+            CGameObjectArray::THREAD_ASYNCH,
+            &pSource,
+            INFINITE);
+        if (rc != CGameObjectArray::SUCCESS) {
+            return FALSE;
+        }
+
+        if (m_sourceRes.GetResRefStr().GetLength() != 0) {
+            FeedBackImmuneToResource(pSprite, m_sourceRes);
+
+            CGameEffect* pImmunity = IcewindMisc::CreateEffectImmunitySpell(pSource,
+                m_sourceRes.GetResRef(),
+                0,
+                0,
+                0,
+                2);
+            pImmunity->m_casterLevel = m_casterLevel;
+            pSprite->AddEffect(pImmunity, CGameAIBase::EFFECT_LIST_TIMED, TRUE, TRUE);
+        }
+
+        pGame->GetObjectArray()->ReleaseShare(m_sourceID,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+        return FALSE;
+    }
+
+    if (m_savingThrow != 0 && m_sourceID != CGameObjectArray::INVALID_INDEX) {
+        CGameObject* pSource;
+        BYTE rc;
+        do {
+            rc = pGame->GetObjectArray()->GetShare(m_sourceID,
+                CGameObjectArray::THREAD_ASYNCH,
+                &pSource,
+                INFINITE);
+        } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+        if (rc != CGameObjectArray::SUCCESS) {
+            return FALSE;
+        }
+
+        // TODO: Incomplete. The original adds the source sprite's save
+        // adjustment (GetSaveAdjustmentForSourceSprite 0x547040) and, for
+        // SPWI420's source, 0x547620 to m_saveMod (0x4A3D80-0x4A3E29). Neither
+        // is in src/.
+
+        pGame->GetObjectArray()->ReleaseShare(m_sourceID,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+    }
+
+    // TODO: Incomplete. The original calls CheckSave (0x4A42F0, vtable
+    // +0x18) with the four save rolls here and rejects the effect when the
+    // save is made. It is not in src/ (pending/check_save); the effect is
+    // taken as not saved against.
+
+    if (pSprite->m_derivedStats.m_cImmunitiesEffect.OnList(this)) {
+        return FALSE;
+    }
+
+    BYTE nSpellLevel = static_cast<BYTE>(m_spellLevel);
+    if (nSpellLevel < 9 && pSprite->m_derivedStats.m_cImmunitiesSpellLevel.m_levels[nSpellLevel]) {
+        UINT nID = 0;
+        if (m_spellLevel != 1) {
+            return FALSE;
+        }
+
+        if (pGame->m_innateSpells.Find(m_res, nID) != TRUE
+            && pGame->m_songs.Find(m_res, nID) != TRUE
+            && pGame->m_shapeshifts.Find(m_res, nID) != TRUE) {
+            return FALSE;
+        }
+    }
+
+    if (!UsesDice()) {
+        if (m_maxLevel != 0 && pSprite->m_derivedStats.GetClassMaskLevel(0xFFF) > m_maxLevel) {
+            return FALSE;
+        }
+
+        if (m_minLevel > 0xFFFF) {
+            m_minLevel = 0;
+        }
+
+        if (pSprite->m_derivedStats.GetClassMaskLevel(0xFFF) < m_minLevel) {
+            return FALSE;
+        }
+    }
+
+    if (m_durationType == 0x1000
+        || m_durationType == 0
+        || m_durationType == 1
+        || m_durationType == 2
+        || m_durationType == 9) {
+        sub_4A3FF0(pSprite);
+        DisplayString(pSprite);
+    }
+
+    return TRUE;
+}
+
+// 0x4A3FF0
+void CGameEffect::sub_4A3FF0(CGameSprite* pSprite)
+{
+    if ((m_sourceFlags & 0x400) != 0 && m_sourceID != CGameObjectArray::INVALID_INDEX) {
+        // TODO: Incomplete. The original takes the source object's share,
+        // marks a party source hostile through CGameSprite::sub_6F50A0
+        // (0x6F50A0, not in src/) and sends the target trigger messages
+        // (0x20 for effect 12, then 0x02).
+    }
+
+    // TODO: Incomplete. The original ends with the effect's vtable +0x10
+    // call (an empty `ret 4` in CGameEffect, 0x799E60), which our
+    // CGameEffect does not declare.
+}
+
+// 0x4A4FC0
+BOOL CGameEffect::sub_4A4FC0(CGameEffect* pOther, BOOL bCheckSource)
+{
+    if (strcmp(m_sourceRes.GetResRefStr(), pOther->m_sourceRes.GetResRefStr()) != 0) {
+        return FALSE;
+    }
+
+    if (m_effectID != pOther->m_effectID) {
+        return FALSE;
+    }
+
+    if (m_effectAmount != pOther->m_effectAmount) {
+        return FALSE;
+    }
+
+    if (m_dwFlags != pOther->m_dwFlags) {
+        return FALSE;
+    }
+
+    if (m_durationType != pOther->m_durationType) {
+        return FALSE;
+    }
+
+    if (m_duration != pOther->m_duration) {
+        return FALSE;
+    }
+
+    if ((m_source.x != pOther->m_source.x || m_source.y != pOther->m_source.y) && bCheckSource) {
+        return FALSE;
+    }
+
+    if (m_sourceID != pOther->m_sourceID && bCheckSource) {
+        return FALSE;
+    }
+
+    if (m_targetType != pOther->m_targetType) {
+        return FALSE;
+    }
+
+    if (m_probabilityUpper != pOther->m_probabilityUpper) {
+        return FALSE;
+    }
+
+    if (m_probabilityLower != pOther->m_probabilityLower) {
+        return FALSE;
+    }
+
+    return m_spellLevel == pOther->m_spellLevel;
 }
 
 // 0x48C5B0
@@ -2494,6 +2871,155 @@ CGameEffectHeal::CGameEffectHeal()
 CGameEffectHeal::CGameEffectHeal(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target)
     : CGameEffect(effect, source, sourceID, target, TRUE)
 {
+}
+
+// 0x4AE200
+BOOL CGameEffectHeal::ApplyEffect(CGameSprite* pSprite)
+{
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+    // NOTE: The original computes the direction to the source and discards
+    // it (0x4AE213).
+    pSprite->GetDirection(m_source);
+
+    DWORD dwFlags = m_dwFlags;
+    WORD nMode = static_cast<WORD>(m_dwFlags);
+
+    INT nRolled = 0;
+    for (BYTE nDie = 0; nDie < m_numDice; nDie++) {
+        nRolled += CUtil::UtilRandInt(m_diceSize, pSprite->m_tempStats.m_nLuck) + 1;
+    }
+    m_effectAmount += nRolled;
+
+    if (pSprite->m_baseStats.m_hitPoints < 1) {
+        if ((dwFlags & 0xFFFF0000) != 0x10000) {
+            m_done = TRUE;
+            return TRUE;
+        }
+
+        // A Raise Dead (effect 32) applied at once.
+        ITEM_EFFECT* effect = new ITEM_EFFECT;
+        memset(effect, 0, sizeof(ITEM_EFFECT));
+        effect->effectID = 32;
+        effect->dwFlags = 0x2B;
+        effect->probabilityUpper = 100;
+        CGameEffect* pRaise = CGameEffect::DecodeEffect(effect, CPoint(-1, -1), -1, CPoint(-1, -1));
+        delete effect;
+        pRaise->ApplyEffect(pSprite);
+        if (pRaise != NULL) {
+            delete pRaise;
+        }
+    }
+
+    INT nAmount;
+    CGameObject* pSource;
+    BYTE rc;
+    switch (nMode) {
+    case 0:
+        if (m_secondaryType) {
+            nAmount = m_effectAmount;
+            if (pSprite->m_baseStats.m_hitPoints + nAmount > pSprite->m_derivedStats.m_nMaxHitPoints) {
+                nAmount = pSprite->m_derivedStats.m_nMaxHitPoints - pSprite->m_baseStats.m_hitPoints;
+            }
+
+            if (nAmount > 0 && pGame->GetCharacterPortraitNum(pSprite->GetId()) != -1) {
+                // TODO: Incomplete. The original shows the healed amount
+                // through 0x4A4D80 (not in src/).
+            }
+        }
+
+        nAmount = pSprite->m_baseStats.m_hitPoints + m_effectAmount;
+        if (static_cast<UINT>(nAmount) > 0x7FFF) {
+            nAmount = 0x7FFF;
+        }
+        pSprite->m_baseStats.m_hitPoints = static_cast<SHORT>(nAmount);
+        break;
+    case 1:
+        nAmount = pSprite->m_tempStats.m_nMaxHitPoints;
+        if (m_effectAmount < nAmount) {
+            nAmount = m_effectAmount;
+        }
+        if (nAmount < pSprite->m_baseStats.m_hitPoints) {
+            nAmount = pSprite->m_baseStats.m_hitPoints;
+        }
+        nAmount -= pSprite->m_baseStats.m_hitPoints;
+
+        if (m_secondaryType && nAmount > 0 && pGame->GetCharacterPortraitNum(pSprite->GetId()) != -1) {
+            // TODO: Incomplete. The healed amount display (0x4A4D80).
+        }
+
+        pSprite->m_baseStats.m_hitPoints += static_cast<SHORT>(nAmount);
+        break;
+    case 2:
+        nAmount = pSprite->m_tempStats.m_nMaxHitPoints * m_effectAmount / 100;
+        if (nAmount < pSprite->m_baseStats.m_hitPoints) {
+            nAmount = pSprite->m_baseStats.m_hitPoints;
+        }
+
+        if (m_secondaryType
+            && nAmount - pSprite->m_baseStats.m_hitPoints > 0
+            && pGame->GetCharacterPortraitNum(pSprite->GetId()) != -1) {
+            // TODO: Incomplete. The healed amount display (0x4A4D80).
+        }
+
+        pSprite->m_baseStats.m_hitPoints += static_cast<SHORT>(pSprite->m_tempStats.m_nMaxHitPoints * m_effectAmount / 100);
+        break;
+    case 3:
+    case 4:
+    case 5:
+        if (m_secondaryType) {
+            do {
+                rc = pGame->GetObjectArray()->GetShare(m_sourceID,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    &pSource,
+                    INFINITE);
+            } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+            nAmount = 1;
+            if (rc == CGameObjectArray::SUCCESS) {
+                CGameSprite* pSourceSprite = static_cast<CGameSprite*>(pSource);
+                const CRuleTables& ruleTables = pGame->GetRuleTables();
+                if (nMode == 3) {
+                    nAmount = ruleTables.GetLayOnHandsAmount(pSourceSprite->GetAIType(), pSourceSprite->m_derivedStats);
+                } else if (nMode == 4) {
+                    nAmount = ruleTables.GetWholenessOfBodyAmount(pSourceSprite->GetAIType(), pSourceSprite->m_derivedStats);
+                } else {
+                    nAmount = ruleTables.GetLathanderRenewalAmount(pSourceSprite->GetAIType(), pSourceSprite->m_derivedStats);
+                }
+                pGame->GetObjectArray()->ReleaseShare(m_sourceID,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    INFINITE);
+
+                if (pSprite->m_baseStats.m_hitPoints + m_effectAmount > pSprite->m_derivedStats.m_nMaxHitPoints) {
+                    nAmount = pSprite->m_derivedStats.m_nMaxHitPoints - pSprite->m_baseStats.m_hitPoints;
+                }
+            }
+
+            if (nAmount > 0) {
+                m_effectAmount = nAmount;
+                if (pGame->GetCharacterPortraitNum(pSprite->GetId()) != -1) {
+                    // TODO: Incomplete. The healed amount display (0x4A4D80).
+                }
+            }
+        }
+
+        pSprite->m_baseStats.m_hitPoints += static_cast<SHORT>(m_effectAmount);
+        break;
+    }
+
+    if (pSprite->m_baseStats.m_hitPoints > pSprite->m_tempStats.m_nMaxHitPoints) {
+        pSprite->m_baseStats.m_hitPoints = pSprite->m_tempStats.m_nMaxHitPoints;
+    }
+
+    pGame->UpdatePortrait(pGame->GetCharacterPortraitNum(pSprite->GetId()), 1);
+
+    // NOTE: Inlined CGameObject::InControl.
+    if (pSprite->InControl()) {
+        pSprite->m_bSendSpriteUpdate = TRUE;
+    }
+
+    m_done = TRUE;
+    return TRUE;
 }
 
 // 0x4943A0

@@ -1,12 +1,17 @@
 #include "CItem.h"
 
+#include "CBaldurChitin.h"
 #include "CGameEffect.h"
 #include "CGameSprite.h"
 #include "CImmunities.h"
+#include "CInfGame.h"
 #include "CUtil.h"
 
 // 0x8D828C
 const CString CItem::VALUE("VALUE");
+
+// 0x8D86B0
+static BYTE byte_8D86B0[7];
 
 // 0x4E7840
 CItem::CItem()
@@ -45,7 +50,23 @@ CItem::CItem(CResRef id, WORD useCount1, WORD useCount2, WORD useCount3, int wea
     m_useCount2 = useCount2;
     m_useCount3 = useCount3;
 
-    // TODO: Incomplete.
+    sub_4EA4A0(sResRef);
+    g_pBaldurChitin->GetObjectGame()->GetRuleTables().sub_5463E0(sResRef);
+
+    if (_stricmp(sResRef, "no_drop") == 0) {
+        sResRef = "";
+    }
+
+    if (strcmp(sResRef, "MISC07") == 0) {
+        if (m_useCount1 == 0) {
+            m_useCount1 = 1;
+        } else {
+            m_useCount1 += m_useCount2 != 0 ? rand() % m_useCount2 : 0;
+        }
+        m_useCount2 = 0;
+    }
+
+    CResHelper<CResItem, 1005>::SetResRef(CResRef(sResRef), TRUE, TRUE);
 
     // NOTE: Uninline.
     if (GetMaxStackable() > 1) {
@@ -254,13 +275,219 @@ void CItem::SetUsageCount(INT nAbility, WORD nUseCount)
 // 0x4E8860
 void CItem::Equip(CGameSprite* pSprite, LONG slotNum, BOOL animationOnly)
 {
-    // TODO: Incomplete.
+    if (cResRef == "") {
+        return;
+    }
+
+    BOOL bNested = pSprite->field_7544;
+    if (!bNested) {
+        pSprite->field_7540 = 0;
+        pSprite->field_7544 = 1;
+    }
+
+    if (pRes != NULL) {
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\CItem.cpp
+        // __LINE__: 1026
+        UTIL_ASSERT(pRes->Demand());
+
+        CString sAnimation;
+        BYTE* colorRangeValues = pSprite->m_baseStats.m_colors;
+
+        if (pSprite->GetAnimation() != NULL && pSprite->GetAnimation()->m_animation != NULL) {
+            switch (sub_4E9250(sAnimation, pSprite)) {
+            case 1:
+                // NOTE: Inlined CGameAnimation::EquipArmor.
+                if (strcmp(sAnimation, "") == 0) {
+                    pSprite->GetAnimation()->EquipArmor('1', colorRangeValues);
+                } else {
+                    pSprite->GetAnimation()->EquipArmor(sAnimation[0], colorRangeValues);
+                }
+                break;
+            case 2:
+                pSprite->GetAnimation()->EquipHelmet(sAnimation, colorRangeValues);
+                break;
+            case 3:
+                pSprite->GetAnimation()->EquipShield(sAnimation, colorRangeValues);
+                break;
+            case 4:
+                if (slotNum == 43
+                    || slotNum == 45
+                    || slotNum == 47
+                    || slotNum == 49
+                    || slotNum == 42) {
+                    WORD nAbility = pSprite->GetEquipment()->m_selectedWeaponAbility;
+                    if (cResRef != "" && pRes != NULL) {
+                        // __FILE__: C:\Projects\Icewind2\src\Baldur\CItem.cpp
+                        // __LINE__: 1478
+                        UTIL_ASSERT(pRes->GetDemands() > 0);
+
+                        ITEM_ABILITY* ability = pRes->GetAbility(nAbility);
+                        if (ability != NULL && (ability->type & 0xFF) != 0) {
+                            pSprite->GetAnimation()->EquipWeapon(sAnimation,
+                                colorRangeValues,
+                                pRes->m_pHeader->itemFlags,
+                                ability->attackProbability);
+                            break;
+                        }
+                    }
+
+                    // __FILE__: C:\Projects\Icewind2\src\Baldur\CItem.cpp
+                    // __LINE__: 1067
+                    UTIL_ASSERT(FALSE);
+                } else if (slotNum == 44
+                    || slotNum == 46
+                    || slotNum == 48
+                    || slotNum == 50) {
+                    sAnimation += "O";
+
+                    // NOTE: Uninline.
+                    GetAbilityCount();
+
+                    WORD nAbility = pSprite->GetEquipment()->m_selectedWeaponAbility;
+                    ITEM_ABILITY* ability = NULL;
+                    if (nAbility < m_nAbilities) {
+                        if (cResRef != "" && pRes != NULL) {
+                            // __FILE__: C:\Projects\Icewind2\src\Baldur\CItem.cpp
+                            // __LINE__: 1478
+                            UTIL_ASSERT(pRes->GetDemands() > 0);
+
+                            ability = pRes->GetAbility(nAbility);
+                            if (ability != NULL && (ability->type & 0xFF) == 0) {
+                                ability = NULL;
+                            }
+                        }
+                    } else {
+                        if (cResRef != "" && pRes != NULL) {
+                            // __FILE__: C:\Projects\Icewind2\src\Baldur\CItem.cpp
+                            // __LINE__: 1478
+                            UTIL_ASSERT(pRes->GetDemands() > 0);
+
+                            ability = pRes->GetAbility(0);
+                            if (ability != NULL && (ability->type & 0xFF) == 0) {
+                                ability = NULL;
+                            }
+                        }
+                    }
+
+                    if (ability != NULL) {
+                        pSprite->GetAnimation()->EquipWeapon(sAnimation,
+                            colorRangeValues,
+                            pRes->m_pHeader->itemFlags | 0x400,
+                            ability->attackProbability);
+                        break;
+                    }
+
+                    // __FILE__: C:\Projects\Icewind2\src\Baldur\CItem.cpp
+                    // __LINE__: 1093
+                    UTIL_ASSERT(FALSE);
+                }
+                break;
+            }
+        }
+
+        if (!animationOnly) {
+            for (INT nIndex = 0; nIndex < pRes->GetEquipedEffectNo(); nIndex++) {
+                CGameEffect* pEffect = CGameEffect::DecodeEffect(pRes->GetEquipedEffect(nIndex),
+                    CPoint(-1, -1),
+                    -1,
+                    CPoint(-1, -1));
+                pEffect->field_188 = 1;
+                pEffect->m_sourceID = pSprite->GetId();
+                pEffect->m_flags |= 0x2;
+                pEffect->m_casterLevel = 10;
+                pEffect->m_sourceRes = cResRef;
+
+                // NOTE: The duration type is the WORD constant at 0x8491AC (2).
+                pSprite->AddEffect(pEffect,
+                    pEffect->m_durationType == 2
+                        ? CGameAIBase::EFFECT_LIST_EQUIPED
+                        : CGameAIBase::EFFECT_LIST_TIMED,
+                    FALSE,
+                    TRUE);
+            }
+        }
+
+        pRes->Release();
+    }
+
+    if (!bNested) {
+        if (pSprite->field_7540) {
+            Equip(pSprite, slotNum, TRUE);
+        }
+        pSprite->field_7544 = 0;
+    }
 }
 
 // 0x4E8DF0
 void CItem::Unequip(CGameSprite* pSprite, LONG slotNum, BOOL recalculateEffects, BOOL animationOnly)
 {
-    // TODO: Incomplete.
+    WORD attackProbability[6] = { 34, 33, 33, 0, 0, 0 };
+
+    if (cResRef == "") {
+        return;
+    }
+
+    if (pRes == NULL) {
+        return;
+    }
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\CItem.cpp
+    // __LINE__: 1164
+    UTIL_ASSERT(pRes->Demand());
+
+    if (!animationOnly) {
+        for (INT nIndex = 0; nIndex < pRes->GetEquipedEffectNo(); nIndex++) {
+            CGameEffect* pEffect = CGameEffect::DecodeEffect(pRes->GetEquipedEffect(nIndex),
+                CPoint(-1, -1),
+                -1,
+                CPoint(-1, -1));
+            pEffect->m_sourceID = pSprite->GetId();
+            pEffect->m_sourceRes = pRes->GetResRef();
+
+            // NOTE: The duration type is the WORD constant at 0x8491AC (2).
+            if (pEffect->m_durationType == 2) {
+                pSprite->GetEquipedEffectList()->sub_4C0830(pEffect);
+            }
+
+            if (pEffect != NULL) {
+                delete pEffect;
+            }
+        }
+
+        if (pRes->GetEquipedEffectNo() > 0) {
+            pSprite->field_562C = 1;
+            if (recalculateEffects
+                && !g_pBaldurChitin->GetObjectGame()->GetWorldTimer()->m_active) {
+                pSprite->ProcessEffectList();
+            }
+        }
+    }
+
+    CString sAnimation;
+    if (pSprite->GetAnimation() != NULL && pSprite->GetAnimation()->m_animation != NULL) {
+        switch (sub_4E9250(sAnimation, pSprite)) {
+        case 1:
+            // NOTE: Inlined CGameAnimation::EquipArmor.
+            pSprite->GetAnimation()->EquipArmor('1', pSprite->m_baseStats.m_colors);
+            break;
+        case 2:
+            pSprite->GetAnimation()->EquipHelmet(CString(""), byte_8D86B0);
+            break;
+        case 3:
+            pSprite->GetAnimation()->EquipShield(CString(""), byte_8D86B0);
+            break;
+        case 4:
+            if (slotNum == static_cast<BYTE>(pSprite->sub_726800())) {
+                pSprite->GetAnimation()->EquipWeapon(CString(""), byte_8D86B0, 0x400, attackProbability);
+                pSprite->GetAnimation()->EquipShield(CString(""), byte_8D86B0);
+            } else {
+                pSprite->GetAnimation()->EquipWeapon(CString(""), byte_8D86B0, 0, attackProbability);
+            }
+            break;
+        }
+    }
+
+    pRes->Release();
 }
 
 // 0x4E91F0
@@ -282,6 +509,145 @@ WORD CItem::GetAnimationType()
     pRes->Release();
 
     return animationType;
+}
+
+// 0x4E9250
+BYTE CItem::sub_4E9250(CString& sAnimation, CGameSprite* pSprite)
+{
+    BYTE nType = 0;
+
+    sAnimation = "";
+
+    ITEM_HEADER* pHeader = pRes->m_pHeader;
+    switch (pHeader->itemType) {
+    case 0:
+        if (1) {
+            CString sCode("");
+            sCode = reinterpret_cast<const char*>(pRes->m_pHeader->animationType);
+            if (strcmp(sCode, "S1") == 0
+                || strcmp(sCode, "FS") == 0
+                || strcmp(sCode, "S2") == 0
+                || strcmp(sCode, "AX") == 0
+                || strcmp(sCode, "BW") == 0
+                || strcmp(sCode, "CL") == 0
+                || strcmp(sCode, "FL") == 0
+                || strcmp(sCode, "WH") == 0
+                || strcmp(sCode, "HB") == 0
+                || strcmp(sCode, "MC") == 0
+                || strcmp(sCode, "MS") == 0
+                || strcmp(sCode, "SP") == 0
+                || strcmp(sCode, "SL") == 0
+                || strcmp(sCode, "CB") == 0
+                || strcmp(sCode, "DD") == 0
+                || strcmp(sCode, "QS") == 0
+                || strcmp(sCode, "SS") == 0) {
+                nType = 4;
+                sAnimation = reinterpret_cast<const char*>(pRes->m_pHeader->animationType);
+            }
+        }
+        break;
+    case 1:
+    case 3:
+    case 4:
+    case 5:
+    case 6:
+    case 8:
+    case 9:
+    case 10:
+    case 11:
+    case 12:
+    case 13:
+    case 14:
+    case 31:
+    case 32:
+    case 33:
+    case 34:
+    case 35:
+    case 36:
+    case 37:
+    case 38:
+    case 40:
+    case 42:
+    case 43:
+    case 45:
+    case 46:
+    case 48:
+    case 50:
+    case 51:
+    case 52:
+    case 54:
+    case 55:
+    case 56:
+    case 58:
+    case 59:
+    case 70:
+    case 71:
+    case 73:
+        break;
+    case 7:
+    case 72:
+        nType = 2;
+        sAnimation = reinterpret_cast<const char*>(pHeader->animationType);
+        break;
+    case 15:
+    case 16:
+    case 17:
+    case 18:
+    case 19:
+    case 20:
+    case 21:
+    case 22:
+    case 23:
+    case 25:
+    case 26:
+    case 27:
+    case 29:
+    case 30:
+    case 44:
+    case 57:
+    case 69:
+        nType = 4;
+        sAnimation = reinterpret_cast<const char*>(pHeader->animationType);
+        break;
+    case 24:
+    case 28:
+        nType = 4;
+        break;
+    case 41:
+    case 47:
+    case 49:
+    case 53:
+        nType = 3;
+        sAnimation = reinterpret_cast<const char*>(pHeader->animationType);
+        break;
+    case 60:
+    case 61:
+    case 62:
+    case 63:
+    case 64:
+    case 65:
+    case 66:
+    case 67:
+    case 68:
+        nType = 1;
+        if ((pHeader->animationType[1] == 'W' && (pSprite->m_baseStats.m_animationType & 0xF00) != 0x200)
+            || (pHeader->animationType[1] != 'W' && (pSprite->m_baseStats.m_animationType & 0xF00) == 0x200)) {
+            sAnimation = CString("1");
+        } else {
+            sAnimation = CString(static_cast<char>(pHeader->animationType[0]), 1);
+        }
+        break;
+    default:
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\CItem.cpp
+        // __LINE__: 1440
+        UTIL_ASSERT(FALSE);
+        break;
+    }
+
+    sAnimation.TrimLeft();
+    sAnimation.TrimRight();
+
+    return nType;
 }
 
 // 0x4E9610
@@ -856,6 +1222,41 @@ BYTE CItem::GetMinCHRRequired()
     }
 
     return nValue;
+}
+
+// 0x4EA4A0
+void CItem::sub_4EA4A0(CString& sResRef)
+{
+    if (sResRef.GetLength() == 7
+        && _strnicmp(sResRef.GetBuffer(1), "00RIITM", 7) == 0) {
+        // NOTE: The original reads the terminator of the 7-character name,
+        // so this always returns.
+        if (sResRef.GetBuffer(1)[7] < '1' || sResRef.GetBuffer(1)[7] > '9') {
+            return;
+        }
+    } else {
+        if (sResRef.GetLength() != 8) {
+            return;
+        }
+
+        if (_strnicmp(sResRef.GetBuffer(1), "00RTAVE1", 8) != 0) {
+            return;
+        }
+    }
+
+    if (m_useCount1 == 0) {
+        m_useCount2 = 0;
+        m_useCount1 = 1;
+        return;
+    }
+
+    if (m_useCount2 != 0) {
+        m_useCount1 = rand() % m_useCount2 + m_useCount1;
+        m_useCount2 = 0;
+        return;
+    }
+
+    m_useCount2 = 0;
 }
 
 // 0x4EA580
