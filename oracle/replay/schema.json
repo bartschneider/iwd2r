@@ -61,6 +61,8 @@
         "au_counter",
         "fullscreen",
         "in_async_update",
+        "ai_stalled_frames",
+        "reinitializing",
         "ai_rng_state"
       ],
       "additionalProperties": false,
@@ -79,6 +81,17 @@
           "description": "CChitin::m_bInAsynchronousUpdate: nonzero when the dump was taken while the AI thread was inside an AsynchronousUpdate (a load that redraws its progress bar), so the state may be mid-update.",
           "type": "integer"
         },
+        "ai_stalled_frames": {
+          "description": "Frames so far with no AI update since the previous frame and none in progress. The virtual clock wakes the AI thread once per frame, so every frame has an AI update of its own (au_counter goes up) unless it was drawn while one was still running (in_async_update, a load redrawing its progress). A stall means the AI thread ran without counting (m_bReInitializing after a focus loss) or not at all.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "reinitializing": {
+          "description": "CChitin::m_bReInitializing: nonzero while the game is not updating (OnAltTab(FALSE) on focus loss sets it, and AsynchronousUpdate then neither counts nor polls input).",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
+        },
         "ai_rng_state": {
           "description": "The rand state (_holdrand) of the thread that polls input, the AI thread in the original (CChitin::AsynchronousUpdate calls GetCursorPos there), which is where clicks and key presses, and so character generation, call rand; null until that thread has polled input once. VC6 starts every thread at 1; it is not seeded.",
           "type": [
@@ -88,7 +101,8 @@
           "minimum": 0,
           "maximum": 4294967295
         }
-      }
+      },
+      "description": "The recorder's invariant (tools/oracle.py checks it on every checkpoint dump): reinitializing is 0 and ai_stalled_frames is 0. au_counter may fall behind frame by the frames a load draws from inside an AI update (deterministically), never by a stall."
     },
     "chargen": {
       "description": "Character generation, null unless the screen is create_char. The sprite values are null while the screen has no sprite (m_nGameSprite does not resolve in the object array).",
@@ -206,6 +220,10 @@
     "in_async_update": {
       "class": "CChitin",
       "member": "m_bInAsynchronousUpdate"
+    },
+    "reinitializing": {
+      "class": "CChitin",
+      "member": "m_bReInitializing"
     },
     "object_game": {
       "class": "CBaldurChitin",

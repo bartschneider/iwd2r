@@ -1,0 +1,20 @@
+# Clicks through the start menu into Character Generation, with a checkpoint
+# on each screen (the replay recorder's proof that clicks reach the
+# original). Coordinates for Resolution=800, as in character_editor.txt.
+wait 60
+checkpoint menu
+# New Game (645,262): the Select Party screen.
+click 645 262
+wait 90
+checkpoint select_party
+# Done (537,562) with New Party selected: Party Formation.
+click 537 562
+wait 60
+checkpoint party_formation
+# The first slot's Create Character (530,100): Character Generation.
+click 530 100
+wait 90
+checkpoint chargen
+shot chargen
+# Quitting from Character Generation exits cleanly (character_editor.txt).
+quit

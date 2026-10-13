@@ -8,6 +8,9 @@
 //   IWD2R_SCRIPT       the scenario (platform/script.h's format), optional
 //   IWD2R_DUMP_EVERY   a dump every N frames (default 30; 0: none)
 //   IWD2R_SEED         the seed for the original srand (default 1)
+//   IWD2R_TEST_STEAL_FOCUS=N  test: a window of the recorder's takes the
+//                      foreground at frame N
+//   IWD2R_TEST_NO_FOCUS_GUARD=1  test: activation messages reach the game
 //
 // The frame: the original's main thread calls CBaldurChitin::SynchronousUpdate
 // once per AI update (vanilla.json "frame_hook"). Its first instruction, a
@@ -25,8 +28,14 @@
 // original seeds its AI thread's rand with time()); and LoadLibraryA (binkw32 refused, so the
 // movies are skipped as in our engine, whose LoadLibraryA returns NULL) and
 // MessageBoxA (answered with its first button without showing it, as our
-// engine does headless). An import the exe does not have is logged and
-// skipped. Real keyboard and mouse input never reaches the game: the hooks
+// engine does headless); GetDoubleClickTime, GetSystemMetrics and
+// SystemParametersInfoA (the double-click, button-swap, key-repeat and
+// wheel settings fixed to our engine's, platform/input_settings.h; other
+// indices pass through); RegisterClassExA (the game window's class gets the
+// focus guard, GuardProc: activation messages are sent straight to the
+// window procedure, past the message hooks) and CreateWindowExA (notes the
+// game window). An import the exe does not have is logged and skipped.
+// Real keyboard and mouse input never reaches the game: the hooks
 // answer from the scenario, and the message hooks drop keyboard and mouse
 // messages.
 //
@@ -46,6 +55,7 @@
 #include <mmsystem.h>
 
 #include "oracle/replay/recorder_script.h"
+#include "platform/input_settings.h"
 #include "replay_fields.h"
 #include "vanilla_config.h"
 
@@ -68,6 +78,7 @@ static_assert(kField_active_engine.type == ReplayType::k_ptr, "");
 static_assert(kField_au_counter.type == ReplayType::k_i32, "");
 static_assert(kField_fullscreen.type == ReplayType::k_u8, "");
 static_assert(kField_in_async_update.type == ReplayType::k_i32, "");
+static_assert(kField_reinitializing.type == ReplayType::k_u8, "");
 static_assert(kField_object_game.type == ReplayType::k_ptr, "");
 static_assert(kField_objects_array.type == ReplayType::k_ptr, "");
 static_assert(kField_objects_max_index.type == ReplayType::k_i16, "");
@@ -101,9 +112,18 @@ struct Timer {
 
 // Recorder state. g_frame and g_now are read on every thread.
 std::atomic<uint32_t> g_frame { 0 };
+// Frames with no AI update since the previous frame and none in progress
+// (main thread; see OnFrame), and au_counter at the previous frame.
+uint32_t g_stalledFrames = 0;
+int32_t g_lastAu = 0;
 std::atomic<DWORD> g_now { kClockBase };
-DWORD g_mainThread = 0;
-HWND g_window = nullptr;
+std::atomic<DWORD> g_mainThread { 0 };
+std::atomic<HWND> g_window { nullptr };
+std::atomic<bool> g_wrongThreadLogged { false };
+// The game window's own procedure, behind the focus guard (GuardProc).
+std::atomic<WNDPROC> g_gameProc { nullptr };
+bool g_focusGuard = true; // off only with IWD2R_TEST_NO_FOCUS_GUARD
+uint32_t g_stealFocusFrame = 0; // IWD2R_TEST_STEAL_FOCUS
 std::string g_dir;
 unsigned g_dumpEvery = 30;
 unsigned g_seed = 1;
@@ -377,6 +397,7 @@ std::string DumpJson(const char* checkpoint)
     const int32_t auCounter = chitin ? ReadI32(At(chitin, kField_au_counter), &ok) : 0;
     const uint8_t fullscreen = chitin ? ReadU8(At(chitin, kField_fullscreen), &ok) : 0;
     const int32_t inAsync = chitin ? ReadI32(At(chitin, kField_in_async_update), &ok) : 0;
+    const uint8_t reinitializing = chitin ? ReadU8(At(chitin, kField_reinitializing), &ok) : 0;
     if (!ok) {
         Log("dump: some fields could not be read (CBaldurChitin at 0x%08X)", chitin);
     }
@@ -387,7 +408,9 @@ std::string DumpJson(const char* checkpoint)
     json += "  \"screen\": \"" + std::string(screen) + "\",\n";
     json += "  \"rng_state\": " + Number(rng) + ",\n";
     json += "  \"globals\": {\"au_counter\": " + Number(auCounter) + ", \"fullscreen\": " + Number(fullscreen)
-        + ", \"in_async_update\": " + Number(inAsync) + ", \"ai_rng_state\": "
+        + ", \"in_async_update\": " + Number(inAsync) + ", \"ai_stalled_frames\": " + Number(g_stalledFrames)
+        + ", \"reinitializing\": " + Number(reinitializing)
+        + ", \"ai_rng_state\": "
         + (inputTiddata && aiOk ? Number(aiRng) : std::string("null")) + "},\n";
     const bool chargen = std::strcmp(screen, "create_char") == 0;
     json += "  \"chargen\": " + (chargen ? ChargenJson(chitin, active) : std::string("null")) + "\n}\n";
@@ -425,7 +448,8 @@ void WriteStatus()
 bool WriteWindowShot(const std::string& name, std::string* why)
 {
     RECT rect;
-    if (!g_window || !GetClientRect(g_window, &rect) || rect.right <= 0 || rect.bottom <= 0) {
+    const HWND window = g_window.load();
+    if (!window || !GetClientRect(window, &rect) || rect.right <= 0 || rect.bottom <= 0) {
         *why = "no game window";
         return false;
     }
@@ -451,9 +475,9 @@ bool WriteWindowShot(const std::string& name, std::string* why)
         return false;
     }
     HGDIOBJ old = SelectObject(memory, bitmap);
-    HDC windowDc = GetDC(g_window);
+    HDC windowDc = GetDC(window);
     const BOOL printed = BitBlt(memory, 0, 0, width, height, windowDc, 0, 0, SRCCOPY);
-    ReleaseDC(g_window, windowDc);
+    ReleaseDC(window, windowDc);
     GdiFlush();
     const DWORD stride = (static_cast<DWORD>(width) * 3 + 3) & ~3u;
     const DWORD imageSize = stride * static_cast<DWORD>(height);
@@ -494,14 +518,14 @@ public:
     void Quit(int line) override
     {
         MSG msg = {};
-        msg.hwnd = g_window;
+        msg.hwnd = g_window.load();
         msg.message = WM_CLOSE;
         msg.time = g_now.load();
         msg.pt.x = g_lastX.load();
         msg.pt.y = g_lastY.load();
         std::lock_guard<std::mutex> lock(g_messageMutex);
         g_messages.push_back(msg);
-        Log("line %d: quit: WM_CLOSE queued for window %p", line, static_cast<void*>(g_window));
+        Log("line %d: quit: WM_CLOSE queued for window %p", line, static_cast<void*>(msg.hwnd));
     }
 
     void Checkpoint(const std::string& name, int line) override
@@ -511,6 +535,36 @@ public:
     }
 };
 
+// The focus guard. Activation messages are sent, not posted, so the message
+// hooks never see them: they go straight to the window procedure. There,
+// WM_ACTIVATEAPP(FALSE) calls OnAltTab(FALSE), which sets m_bReInitializing,
+// and AsynchronousUpdate stops counting and polling input while frames go
+// on; WM_ACTIVATEAPP(TRUE) calls OnAltTab(TRUE), which re-activates the
+// engine. Either would make a recording depend on where the user's focus
+// was. The guard swallows every WM_ACTIVATEAPP, WM_ACTIVATE(WA_INACTIVE) and
+// WM_KILLFOCUS, from the window's creation on (it replaces the procedure in
+// the window class's registration, HookRegisterClassExA), so the game
+// behaves as active throughout, as our engine does headless (no focus
+// events).
+LRESULT CALLBACK GuardProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    const bool focus = message == WM_ACTIVATEAPP || message == WM_KILLFOCUS
+        || (message == WM_ACTIVATE && LOWORD(wParam) == WA_INACTIVE);
+    if (focus) {
+        const char* name = message == WM_ACTIVATEAPP ? "WM_ACTIVATEAPP"
+            : message == WM_KILLFOCUS                ? "WM_KILLFOCUS"
+                                                     : "WM_ACTIVATE";
+        if (g_focusGuard) {
+            Log("focus guard: swallowed %s(%u)", name, static_cast<unsigned>(LOWORD(wParam)));
+            return 0;
+        }
+        Log("focus guard off: %s(%u) passed to the game", name, static_cast<unsigned>(LOWORD(wParam)));
+    }
+    const WNDPROC game = g_gameProc.load();
+    return game ? CallWindowProcA(game, window, message, wParam, lParam)
+                : DefWindowProcA(window, message, wParam, lParam);
+}
+
 BOOL CALLBACK FindGameWindow(HWND window, LPARAM)
 {
     RECT rect;
@@ -519,6 +573,50 @@ BOOL CALLBACK FindGameWindow(HWND window, LPARAM)
         return FALSE;
     }
     return TRUE;
+}
+
+// Makes window the foreground window, attaching to the current foreground
+// window's input queue first (SetForegroundWindow alone is refused to a
+// process that is not in the foreground). Test switches only.
+void ForceForeground(HWND window)
+{
+    const HWND current = GetForegroundWindow();
+    const DWORD currentThread = current ? GetWindowThreadProcessId(current, nullptr) : 0;
+    const DWORD self = GetCurrentThreadId();
+    const bool attach = currentThread && currentThread != self && AttachThreadInput(self, currentThread, TRUE);
+    BringWindowToTop(window);
+    SetForegroundWindow(window);
+    SetFocus(window);
+    if (attach) {
+        AttachThreadInput(self, currentThread, FALSE);
+    }
+}
+
+LRESULT CALLBACK ThiefProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    return DefWindowProcA(window, message, wParam, lParam);
+}
+
+// IWD2R_TEST_STEAL_FOCUS: a window of the recorder's own, on a thread of its
+// own, takes the foreground from the game, as another application would.
+DWORD WINAPI FocusThief(LPVOID)
+{
+    WNDCLASSA wc = {};
+    wc.lpfnWndProc = ThiefProc;
+    wc.hInstance = GetModuleHandleA(nullptr);
+    wc.lpszClassName = "iwd2rFocusThief";
+    wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+    RegisterClassA(&wc);
+    HWND thief = CreateWindowExA(0, wc.lpszClassName, "iwd2r focus thief (recorder test)",
+        WS_OVERLAPPEDWINDOW | WS_VISIBLE, 0, 0, 320, 120, nullptr, nullptr, wc.hInstance, nullptr);
+    ForceForeground(thief);
+    Log("focus thief %p created; the foreground window is now %p (game %p)", static_cast<void*>(thief),
+        static_cast<void*>(GetForegroundWindow()), static_cast<void*>(g_window.load()));
+    MSG msg;
+    while (GetMessageA(&msg, nullptr, 0, 0) > 0) {
+        DispatchMessageA(&msg);
+    }
+    return 0;
 }
 
 void FireTimers()
@@ -559,21 +657,36 @@ extern "C" void __cdecl OnFrame()
     if (frame == 1) {
         g_mainThread = GetCurrentThreadId();
         reinterpret_cast<void(__cdecl*)(unsigned int)>(static_cast<uintptr_t>(kVanillaSrand))(g_seed);
-        Log("first frame on thread %lu; srand(%u) on it", g_mainThread, g_seed);
+        Log("first frame on thread %lu; srand(%u) on it", g_mainThread.load(), g_seed);
+    } else if (GetCurrentThreadId() != g_mainThread.load() && !g_wrongThreadLogged.exchange(true)) {
+        // The dumps and the scenario assume the main thread (the AI thread
+        // waits only for it); say so once if that ever breaks.
+        Log("WARNING: the frame hook ran on thread %lu, not the main thread %lu", GetCurrentThreadId(),
+            g_mainThread.load());
     }
-    if (!g_window) {
+    if (!g_window.load()) {
         EnumThreadWindows(GetCurrentThreadId(), FindGameWindow, 0);
-        if (g_window) {
-            RECT rect;
-            GetClientRect(g_window, &rect);
-            Log("game window %p, client %ldx%ld", static_cast<void*>(g_window), rect.right, rect.bottom);
+    }
+    if (frame == 1 && g_window.load()) {
+        RECT rect;
+        GetClientRect(g_window.load(), &rect);
+        Log("game window %p, client %ldx%ld", static_cast<void*>(g_window.load()), rect.right, rect.bottom);
+        if (g_stealFocusFrame) {
+            // The test starts from a game that has the focus, so the thief
+            // has something to take.
+            ForceForeground(g_window.load());
+            Log("test: game window made foreground (foreground %p)", static_cast<void*>(GetForegroundWindow()));
         }
+    }
+    if (g_stealFocusFrame && frame == g_stealFocusFrame) {
+        Log("test: stealing the focus");
+        CloseHandle(CreateThread(nullptr, 0, FocusThief, nullptr, 0, nullptr));
     }
     if (frame == 1 && g_haveScript) {
         int width = 800;
         int height = 600;
         RECT rect;
-        if (g_window && GetClientRect(g_window, &rect)) {
+        if (g_window.load() && GetClientRect(g_window.load(), &rect)) {
             width = rect.right;
             height = rect.bottom;
         }
@@ -586,6 +699,25 @@ extern "C" void __cdecl OnFrame()
         if (recorder::AdvanceScript(events) || !recorder::ScriptRunning()) {
             g_scriptFinished = true;
             Log("scenario finished");
+        }
+    }
+    {
+        // Every frame must have had an AI update since the previous frame,
+        // or one still in progress (a load redrawing its progress from
+        // inside AsynchronousUpdate). A frame with neither is a stall: the
+        // AI thread ran without counting (m_bReInitializing, a focus loss)
+        // or did not run.
+        bool ok = true;
+        const uint32_t chitin = ReadU32(kField_baldur_chitin.address, &ok);
+        if (chitin) {
+            const int32_t au = ReadI32(At(chitin, kField_au_counter), &ok);
+            const int32_t inAsync = ReadI32(At(chitin, kField_in_async_update), &ok);
+            if (ok && au == g_lastAu && inAsync == 0) {
+                if (g_stalledFrames++ == 0) {
+                    Log("AI stall: no AI update since the previous frame (au_counter %d)", au);
+                }
+            }
+            g_lastAu = au;
         }
     }
     if (g_dumpEvery && frame % g_dumpEvery == 0) {
@@ -616,7 +748,8 @@ extern "C" __declspec(naked) void FrameTrampoline()
 
 void NoteInputThread()
 {
-    if (g_mainThread != 0 && GetCurrentThreadId() != g_mainThread && g_inputTiddata.load() == 0) {
+    const DWORD mainThread = g_mainThread.load();
+    if (mainThread != 0 && GetCurrentThreadId() != mainThread && g_inputTiddata.load() == 0) {
         g_inputTiddata = OriginalTiddata();
         Log("input polled on thread %lu; its _tiddata is 0x%08X", GetCurrentThreadId(), g_inputTiddata.load());
     }
@@ -644,8 +777,8 @@ BOOL WINAPI HookGetCursorPos(LPPOINT point)
     }
     point->x = g_lastX.load();
     point->y = g_lastY.load();
-    if (g_window) {
-        ClientToScreen(g_window, point);
+    if (const HWND window = g_window.load()) {
+        ClientToScreen(window, point);
     }
     return TRUE;
 }
@@ -655,8 +788,8 @@ BOOL WINAPI HookSetCursorPos(int x, int y)
     // The real cursor stays where the user has it; the game's own moves
     // become the scenario cursor until the scenario sets one.
     POINT point = { x, y };
-    if (g_window) {
-        ScreenToClient(g_window, &point);
+    if (const HWND window = g_window.load()) {
+        ScreenToClient(window, &point);
     }
     g_lastX = point.x;
     g_lastY = point.y;
@@ -673,7 +806,7 @@ bool IsUserInput(UINT message)
 // matches the filter.
 bool TakeSynthesized(LPMSG msg, HWND window, UINT first, UINT last, bool remove)
 {
-    if (GetCurrentThreadId() != g_mainThread) {
+    if (GetCurrentThreadId() != g_mainThread.load()) {
         return false;
     }
     std::lock_guard<std::mutex> lock(g_messageMutex);
@@ -833,6 +966,96 @@ int WINAPI HookMessageBoxA(HWND, LPCSTR text, LPCSTR caption, UINT type)
     return answer;
 }
 
+// The system input settings: our engine's fixed values
+// (platform/input_settings.h, shared with platform/window.cpp), so double
+// clicks and key repeats take the same frames on every machine. Anything
+// else goes to the real function.
+UINT WINAPI HookGetDoubleClickTime()
+{
+    return platform::input_settings::kDoubleClickTime;
+}
+
+using GetSystemMetricsFn = int(WINAPI*)(int);
+GetSystemMetricsFn g_realGetSystemMetrics = nullptr;
+
+int WINAPI HookGetSystemMetrics(int index)
+{
+    switch (index) {
+    case SM_CXDOUBLECLK:
+        return platform::input_settings::kDoubleClickWidth;
+    case SM_CYDOUBLECLK:
+        return platform::input_settings::kDoubleClickHeight;
+    case SM_SWAPBUTTON:
+        return platform::input_settings::kSwapButton;
+    default:
+        return g_realGetSystemMetrics(index);
+    }
+}
+
+using SystemParametersInfoAFn = BOOL(WINAPI*)(UINT, UINT, PVOID, UINT);
+SystemParametersInfoAFn g_realSystemParametersInfoA = nullptr;
+
+BOOL WINAPI HookSystemParametersInfoA(UINT action, UINT param, PVOID value, UINT flags)
+{
+    switch (action) {
+    case SPI_GETKEYBOARDDELAY:
+    case SPI_GETKEYBOARDSPEED:
+        if (!value) {
+            return FALSE;
+        }
+        *static_cast<int*>(value) = action == SPI_GETKEYBOARDDELAY ? platform::input_settings::kKeyboardDelay
+                                                                   : platform::input_settings::kKeyboardSpeed;
+        return TRUE;
+    case SPI_GETWHEELSCROLLLINES:
+        if (!value) {
+            return FALSE;
+        }
+        *static_cast<UINT*>(value) = platform::input_settings::kWheelScrollLines;
+        return TRUE;
+    default:
+        return g_realSystemParametersInfoA(action, param, value, flags);
+    }
+}
+
+// The game window's class (ChitinClass, CChitin::InitApplication in
+// src/CChitin.cpp) is registered with GuardProc in front of its procedure,
+// so the guard sees every message from the window's creation on, the
+// activation sent while CreateWindowExA shows it included.
+using RegisterClassExAFn = ATOM(WINAPI*)(const WNDCLASSEXA*);
+RegisterClassExAFn g_realRegisterClassExA = nullptr;
+
+ATOM WINAPI HookRegisterClassExA(const WNDCLASSEXA* wc)
+{
+    if (wc && wc->lpszClassName && HIWORD(reinterpret_cast<uintptr_t>(wc->lpszClassName))
+        && _stricmp(wc->lpszClassName, "ChitinClass") == 0 && !g_gameProc.load()) {
+        WNDCLASSEXA guarded = *wc;
+        g_gameProc = wc->lpfnWndProc;
+        guarded.lpfnWndProc = GuardProc;
+        Log("window class %s registered behind the focus guard (%s)", wc->lpszClassName,
+            g_focusGuard ? "on" : "off: test");
+        return g_realRegisterClassExA(&guarded);
+    }
+    return g_realRegisterClassExA(wc);
+}
+
+using CreateWindowExAFn = HWND(WINAPI*)(DWORD, LPCSTR, LPCSTR, DWORD, int, int, int, int, HWND, HMENU, HINSTANCE,
+    LPVOID);
+CreateWindowExAFn g_realCreateWindowExA = nullptr;
+
+// Notes the game window as soon as it exists.
+HWND WINAPI HookCreateWindowExA(DWORD exStyle, LPCSTR className, LPCSTR title, DWORD style, int x, int y, int width,
+    int height, HWND parent, HMENU menu, HINSTANCE instance, LPVOID param)
+{
+    HWND window = g_realCreateWindowExA(exStyle, className, title, style, x, y, width, height, parent, menu, instance,
+        param);
+    if (window && !parent && className && HIWORD(reinterpret_cast<uintptr_t>(className))
+        && _stricmp(className, "ChitinClass") == 0) {
+        g_window = window;
+        Log("game window %p created", static_cast<void*>(window));
+    }
+    return window;
+}
+
 struct Hook {
     const char* dll;
     const char* name;
@@ -862,6 +1085,15 @@ Hook g_hooks[] = {
     { "KERNEL32.dll", "LoadLibraryA", reinterpret_cast<void*>(&HookLoadLibraryA),
         reinterpret_cast<void**>(&g_realLoadLibraryA), true, false },
     { "USER32.dll", "MessageBoxA", reinterpret_cast<void*>(&HookMessageBoxA), nullptr, false, false },
+    { "USER32.dll", "GetDoubleClickTime", reinterpret_cast<void*>(&HookGetDoubleClickTime), nullptr, true, false },
+    { "USER32.dll", "GetSystemMetrics", reinterpret_cast<void*>(&HookGetSystemMetrics),
+        reinterpret_cast<void**>(&g_realGetSystemMetrics), true, false },
+    { "USER32.dll", "SystemParametersInfoA", reinterpret_cast<void*>(&HookSystemParametersInfoA),
+        reinterpret_cast<void**>(&g_realSystemParametersInfoA), true, false },
+    { "USER32.dll", "CreateWindowExA", reinterpret_cast<void*>(&HookCreateWindowExA),
+        reinterpret_cast<void**>(&g_realCreateWindowExA), true, false },
+    { "USER32.dll", "RegisterClassExA", reinterpret_cast<void*>(&HookRegisterClassExA),
+        reinterpret_cast<void**>(&g_realRegisterClassExA), true, false },
 };
 
 bool WriteCode(uint32_t address, const void* bytes, size_t size)
@@ -987,6 +1219,20 @@ bool Start()
     if (!seed.empty() && !ParseUnsigned(seed, &g_seed)) {
         Log("FATAL: IWD2R_SEED=%s is not a number", seed.c_str());
         return false;
+    }
+    const std::string steal = Env("IWD2R_TEST_STEAL_FOCUS");
+    if (!steal.empty()) {
+        unsigned value = 0;
+        if (!ParseUnsigned(steal, &value) || value == 0) {
+            Log("FATAL: IWD2R_TEST_STEAL_FOCUS=%s is not a frame number", steal.c_str());
+            return false;
+        }
+        g_stealFocusFrame = value;
+        Log("test: the focus will be stolen at frame %u", value);
+    }
+    if (!Env("IWD2R_TEST_NO_FOCUS_GUARD").empty()) {
+        g_focusGuard = false;
+        Log("test: focus guard OFF (activation messages reach the game)");
     }
     const std::string script = Env("IWD2R_SCRIPT");
     if (!script.empty()) {

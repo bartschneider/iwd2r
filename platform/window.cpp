@@ -6,6 +6,7 @@
 #include "platform/window.h"
 
 #include "platform/data_dir.h"
+#include "platform/input_settings.h"
 #include "platform/present.h"
 #include "platform/script.h"
 #include "platform/win32_api.h"
@@ -672,9 +673,11 @@ int GetSystemMetrics(int index)
         RefreshDesktopSize();
         return ToEngine(platform::present::DesktopSize().cy);
     case SM_CXDOUBLECLK:
+        return platform::input_settings::kDoubleClickWidth;
     case SM_CYDOUBLECLK:
-        return 4;
+        return platform::input_settings::kDoubleClickHeight;
     case SM_SWAPBUTTON:
+        return platform::input_settings::kSwapButton;
     default:
         return 0;
     }
@@ -973,13 +976,13 @@ BOOL SystemParametersInfoA(UINT action, UINT, LPVOID value, UINT)
     }
     switch (action) {
     case SPI_GETKEYBOARDDELAY:
-        *static_cast<int*>(value) = 1;
+        *static_cast<int*>(value) = platform::input_settings::kKeyboardDelay;
         return TRUE;
     case SPI_GETKEYBOARDSPEED:
-        *static_cast<int*>(value) = 31;
+        *static_cast<int*>(value) = platform::input_settings::kKeyboardSpeed;
         return TRUE;
     case SPI_GETWHEELSCROLLLINES:
-        *static_cast<UINT*>(value) = 3;
+        *static_cast<UINT*>(value) = platform::input_settings::kWheelScrollLines;
         return TRUE;
     case SPI_GETSCREENSAVEACTIVE:
         *static_cast<BOOL*>(value) = TRUE;
@@ -999,6 +1002,6 @@ BOOL SystemParametersInfoA(UINT action, UINT, LPVOID value, UINT)
     }
 }
 
-UINT GetDoubleClickTime() { return 500; }
+UINT GetDoubleClickTime() { return platform::input_settings::kDoubleClickTime; }
 
 HWND FindWindowA(LPCSTR, LPCSTR) { return NULL; }

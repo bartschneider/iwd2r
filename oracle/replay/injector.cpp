@@ -17,7 +17,12 @@
 // 11 the game died of an exception (the status is printed; WSL keeps only
 // the low byte of an exit code); 12 the DLL could not be loaded (the remote
 // LoadLibraryA returned NULL: the recorder refused to start, see its
-// recorder.log, or the DLL is missing).
+// recorder.log, or the DLL is missing); 13 waiting for the game failed
+// (WAIT_FAILED; the game is killed).
+//
+// The first line on stdout is "injector: pid <N>", this process's id, so a
+// caller that is interrupted can kill exactly this run (killing the
+// injector closes the job, which kills the game).
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
@@ -34,6 +39,7 @@ constexpr int kExitUsage = 1;
 constexpr int kExitTimeout = 10;
 constexpr int kExitChildDied = 11;
 constexpr int kExitInjectFailed = 12;
+constexpr int kExitWaitFailed = 13;
 constexpr DWORD kInjectWaitMs = 60000;
 
 const char* StatusName(DWORD code)
@@ -53,6 +59,30 @@ const char* StatusName(DWORD code)
         return "unknown";
     }
 }
+
+// Closes a handle when it goes out of scope.
+class Handle {
+public:
+    Handle() = default;
+    explicit Handle(HANDLE h)
+        : h_(h)
+    {
+    }
+    Handle(const Handle&) = delete;
+    Handle& operator=(const Handle&) = delete;
+    ~Handle() { Reset(nullptr); }
+    void Reset(HANDLE h)
+    {
+        if (h_ && h_ != INVALID_HANDLE_VALUE) {
+            CloseHandle(h_);
+        }
+        h_ = h;
+    }
+    HANDLE Get() const { return h_; }
+
+private:
+    HANDLE h_ = nullptr;
+};
 
 // One argument quoted for a Windows command line (CommandLineToArgvW rules).
 std::string Quote(const std::string& arg)
@@ -79,16 +109,11 @@ std::string Quote(const std::string& arg)
     return out + "\"";
 }
 
-int Fail(const char* what, PROCESS_INFORMATION* child, HANDLE job)
+int Fail(const char* what)
 {
     const DWORD error = GetLastError();
     std::fprintf(stderr, "injector: %s: error %lu\n", what, error);
     std::fflush(stderr);
-    if (job) {
-        TerminateJobObject(job, kExitUsage);
-    } else if (child && child->hProcess) {
-        TerminateProcess(child->hProcess, kExitUsage);
-    }
     return kExitUsage;
 }
 
@@ -96,32 +121,41 @@ int Fail(const char* what, PROCESS_INFORMATION* child, HANDLE job)
 // at the same address in every process of one boot, so this process's
 // LoadLibraryA is the child's. Returns the remote thread's exit code (the low
 // 32 bits of the module handle; 0 when the load failed), or -1 when the
-// remote thread could not run.
+// remote thread could not run or did not end in time. The remote copy of
+// the path is freed on every path (the caller kills the child on failure).
 int64_t RemoteLoad(HANDLE process, const std::string& dll, DWORD* error)
 {
     const SIZE_T size = dll.size() + 1;
     void* remote = VirtualAllocEx(process, nullptr, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
-    if (!remote || !WriteProcessMemory(process, remote, dll.c_str(), size, nullptr)) {
+    if (!remote) {
         *error = GetLastError();
         return -1;
     }
-    auto* load = reinterpret_cast<LPTHREAD_START_ROUTINE>(
-        reinterpret_cast<void*>(GetProcAddress(GetModuleHandleA("kernel32.dll"), "LoadLibraryA")));
-    HANDLE thread = CreateRemoteThread(process, nullptr, 0, load, remote, 0, nullptr);
-    if (!thread) {
+    int64_t result = -1;
+    if (!WriteProcessMemory(process, remote, dll.c_str(), size, nullptr)) {
         *error = GetLastError();
-        return -1;
+    } else {
+        auto* load = reinterpret_cast<LPTHREAD_START_ROUTINE>(
+            reinterpret_cast<void*>(GetProcAddress(GetModuleHandleA("kernel32.dll"), "LoadLibraryA")));
+        Handle thread(CreateRemoteThread(process, nullptr, 0, load, remote, 0, nullptr));
+        if (!thread.Get()) {
+            *error = GetLastError();
+        } else {
+            const DWORD waited = WaitForSingleObject(thread.Get(), kInjectWaitMs);
+            if (waited == WAIT_OBJECT_0) {
+                DWORD code = 0;
+                GetExitCodeThread(thread.Get(), &code);
+                result = code;
+            } else {
+                *error = waited == WAIT_FAILED ? GetLastError() : WAIT_TIMEOUT;
+                // The thread may still read the path: stop it first.
+                TerminateThread(thread.Get(), 0);
+                WaitForSingleObject(thread.Get(), 5000);
+            }
+        }
     }
-    if (WaitForSingleObject(thread, kInjectWaitMs) != WAIT_OBJECT_0) {
-        *error = WAIT_TIMEOUT;
-        CloseHandle(thread);
-        return -1;
-    }
-    DWORD code = 0;
-    GetExitCodeThread(thread, &code);
-    CloseHandle(thread);
     VirtualFreeEx(process, remote, 0, MEM_RELEASE);
-    return code;
+    return result;
 }
 
 } // namespace
@@ -153,11 +187,13 @@ int main(int argc, char** argv)
         std::fprintf(stderr, "usage: injector <exe> <workdir> <dll> [--timeout S] [-- <game arguments>]\n");
         return kExitUsage;
     }
+    std::printf("injector: pid %lu\n", GetCurrentProcessId());
+    std::fflush(stdout);
     char exe[MAX_PATH];
     char dll[MAX_PATH];
     if (!GetFullPathNameA(positional[0].c_str(), MAX_PATH, exe, nullptr)
         || !GetFullPathNameA(positional[2].c_str(), MAX_PATH, dll, nullptr)) {
-        return Fail("cannot resolve the exe or DLL path", nullptr, nullptr);
+        return Fail("cannot resolve the exe or DLL path");
     }
     if (GetFileAttributesA(dll) == INVALID_FILE_ATTRIBUTES) {
         std::fprintf(stderr, "injector: no DLL %s\n", dll);
@@ -172,11 +208,11 @@ int main(int argc, char** argv)
     // already inside the job, as RunChild in oracle/runner/oracle_main.cpp
     // does, so there is no moment in which a suspended game can be left
     // behind.
-    HANDLE job = CreateJobObjectA(nullptr, nullptr);
+    Handle job(CreateJobObjectA(nullptr, nullptr));
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits = {};
     limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-    if (!job || !SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits, sizeof(limits))) {
-        return Fail("cannot create the kill-on-close job", nullptr, nullptr);
+    if (!job.Get() || !SetInformationJobObject(job.Get(), JobObjectExtendedLimitInformation, &limits, sizeof(limits))) {
+        return Fail("cannot create the kill-on-close job");
     }
     SIZE_T attributeSize = 0;
     InitializeProcThreadAttributeList(nullptr, 1, 0, &attributeSize);
@@ -184,25 +220,34 @@ int main(int argc, char** argv)
     STARTUPINFOEXA startupEx = {};
     startupEx.StartupInfo.cb = sizeof(startupEx);
     startupEx.lpAttributeList = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(attributeBuffer.data());
-    if (!InitializeProcThreadAttributeList(startupEx.lpAttributeList, 1, 0, &attributeSize)
-        || !UpdateProcThreadAttribute(startupEx.lpAttributeList, 0, PROC_THREAD_ATTRIBUTE_JOB_LIST, &job, sizeof(job),
-            nullptr, nullptr)) {
-        return Fail("cannot put the game in its job", nullptr, nullptr);
+    HANDLE jobHandle = job.Get();
+    if (!InitializeProcThreadAttributeList(startupEx.lpAttributeList, 1, 0, &attributeSize)) {
+        return Fail("cannot put the game in its job");
     }
-    PROCESS_INFORMATION child = {};
+    if (!UpdateProcThreadAttribute(startupEx.lpAttributeList, 0, PROC_THREAD_ATTRIBUTE_JOB_LIST, &jobHandle,
+            sizeof(jobHandle), nullptr, nullptr)) {
+        const int code = Fail("cannot put the game in its job");
+        DeleteProcThreadAttributeList(startupEx.lpAttributeList);
+        return code;
+    }
+    PROCESS_INFORMATION info = {};
     // nullptr environment: the game gets this process's, IWD2R_* included.
     const BOOL created = CreateProcessA(exe, command.data(), nullptr, nullptr, FALSE,
         CREATE_SUSPENDED | EXTENDED_STARTUPINFO_PRESENT, nullptr, positional[1].c_str(), &startupEx.StartupInfo,
-        &child);
+        &info);
+    const DWORD createError = GetLastError();
     DeleteProcThreadAttributeList(startupEx.lpAttributeList);
     if (!created) {
-        return Fail("cannot start the game suspended in its job", nullptr, nullptr);
+        SetLastError(createError);
+        return Fail("cannot start the game suspended in its job");
     }
+    Handle process(info.hProcess);
+    Handle thread(info.hThread);
     DWORD error = 0;
-    const int64_t loaded = RemoteLoad(child.hProcess, dll, &error);
+    const int64_t loaded = RemoteLoad(process.Get(), dll, &error);
     if (loaded <= 0) {
-        TerminateJobObject(job, kExitInjectFailed);
-        WaitForSingleObject(child.hProcess, 10000);
+        TerminateJobObject(job.Get(), kExitInjectFailed);
+        WaitForSingleObject(process.Get(), 10000);
         if (loaded < 0) {
             std::fprintf(stderr, "injector: cannot run LoadLibraryA in the game: error %lu\n", error);
         } else {
@@ -213,22 +258,28 @@ int main(int argc, char** argv)
         std::fflush(stderr);
         return kExitInjectFailed;
     }
-    std::printf("injector: %s loaded into %s (pid %lu)\n", dll, exe, child.dwProcessId);
+    std::printf("injector: %s loaded into %s (pid %lu)\n", dll, exe, info.dwProcessId);
     std::fflush(stdout);
-    ResumeThread(child.hThread);
+    ResumeThread(thread.Get());
     const DWORD waited
-        = WaitForSingleObject(child.hProcess, timeoutSeconds ? static_cast<DWORD>(timeoutSeconds) * 1000 : INFINITE);
+        = WaitForSingleObject(process.Get(), timeoutSeconds ? static_cast<DWORD>(timeoutSeconds) * 1000 : INFINITE);
+    if (waited == WAIT_FAILED) {
+        const DWORD waitError = GetLastError();
+        TerminateJobObject(job.Get(), kExitWaitFailed);
+        WaitForSingleObject(process.Get(), 10000);
+        std::fprintf(stderr, "injector: waiting for the game failed: error %lu; the game was killed\n", waitError);
+        std::fflush(stderr);
+        return kExitWaitFailed;
+    }
     if (waited != WAIT_OBJECT_0) {
-        TerminateJobObject(job, kExitTimeout);
-        WaitForSingleObject(child.hProcess, 10000);
+        TerminateJobObject(job.Get(), kExitTimeout);
+        WaitForSingleObject(process.Get(), 10000);
         std::fprintf(stderr, "injector: timed out after %u s; the game was killed\n", timeoutSeconds);
         std::fflush(stderr);
         return kExitTimeout;
     }
     DWORD code = 1;
-    GetExitCodeProcess(child.hProcess, &code);
-    CloseHandle(child.hThread);
-    CloseHandle(child.hProcess);
+    GetExitCodeProcess(process.Get(), &code);
     if (code >= 0xC0000000u || code == 0xE06D7363u) {
         std::fprintf(stderr, "injector: the game died with exception 0x%08lX (%s)\n", code, StatusName(code));
         std::fflush(stderr);

@@ -367,7 +367,11 @@ class ScenarioParseTest(unittest.TestCase):
             ('checkpoint\n', 'line 1: checkpoint needs one name'),
             ('checkpoint a b\n', 'line 1: checkpoint needs one name'),
             ('checkpoint a/b\n',
-             'line 1: checkpoint name must not contain a path'),
+             'line 1: checkpoint name must be letters, digits, _ or -'),
+            ('checkpoint a.b\n',
+             'line 1: checkpoint name must be letters, digits, _ or -'),
+            ('checkpoint \u00e9\n',
+             'line 1: checkpoint name must be letters, digits, _ or -'),
             ('origin\n', 'line 1: origin needs ui or screen'),
             ('origin top\n', 'line 1: origin needs ui or screen'),
             ('wait 1\n\n# x\njump 1\n', "line 4: unknown command 'jump'"),
@@ -2301,7 +2305,8 @@ class MiniSchemaTest(unittest.TestCase):
         dump = {'frame': 61, 'checkpoint': 'start', 'screen': 'connection',
                 'rng_state': 1,
                 'globals': {'au_counter': 61, 'fullscreen': 0,
-                            'in_async_update': 0, 'ai_rng_state': None},
+                            'in_async_update': 0, 'ai_stalled_frames': 0,
+                            'reinitializing': 0, 'ai_rng_state': None},
                 'chargen': None}
         self.assertEqual(minischema.validate(dump, schema), [])
         dump['chargen'] = {'race': 1, 'subrace': 0, 'class': 5,
@@ -2420,6 +2425,86 @@ class OracleReplayTest(unittest.TestCase):
             {'op': 'quit', 'line': 6}])
         with self.assertRaises(SystemExit):
             oracle.scenario_path('no_such_scenario')
+
+    def test_invariant(self):
+        def dump(frame, au, stalled=0, reinit=0):
+            return {'frame': frame, 'globals': {
+                'au_counter': au, 'ai_stalled_frames': stalled,
+                'reinitializing': reinit}}
+        self.assertIsNone(oracle.invariant_problem('c', dump(61, 61)))
+        # A load draws frames from inside an AI update: au_counter lags.
+        self.assertIsNone(oracle.invariant_problem('c', dump(156, 154)))
+        self.assertEqual(oracle.invariant_problem('c', dump(61, 40, 21)),
+                         'c: 21 frames by frame 61 had no AI update '
+                         '(au_counter 40): the AI thread stalled')
+        self.assertIn('None frames', oracle.invariant_problem(
+            'c', {'frame': 1, 'globals': {}}))
+        self.assertEqual(oracle.invariant_problem('c', dump(61, 61, 0, 1)),
+                         'c: reinitializing is 1 at frame 61: the game '
+                         'stopped updating (a focus loss?)')
+        with tempfile.TemporaryDirectory() as tmp:
+            for name, d in (('checkpoint-a.json', dump(5, 5)),
+                            ('checkpoint-b.json', dump(9, 3, 6)),
+                            ('frame-30.json', dump(30, 1, 29))):
+                with open(os.path.join(tmp, name), 'w') as f:
+                    json.dump(d, f)
+            dumps = {'checkpoint-a.json': [], 'checkpoint-b.json': [],
+                     'frame-30.json': []}
+            self.assertEqual(oracle.invariant_problems(tmp, dumps), [
+                'checkpoint-b.json: 6 frames by frame 9 had no AI update '
+                '(au_counter 3): the AI thread stalled'])
+            # A dump that failed the schema is reported there, not here.
+            dumps['checkpoint-b.json'] = ['bad']
+            self.assertEqual(oracle.invariant_problems(tmp, dumps), [])
+
+    def test_missing_checkpoints(self):
+        dumps = {'checkpoint-menu.json': [], 'frame-30.json': []}
+        self.assertEqual(oracle.missing_checkpoints(['menu', 'chargen'],
+                                                    dumps), ['chargen'])
+        self.assertEqual(oracle.missing_checkpoints([], dumps), [])
+
+    def test_record_arguments(self):
+        for args in (['--timeout', '0'], ['--timeout', '-5'],
+                     ['--seed', '-1'], ['--seed', '4294967296'],
+                     ['--dump-every', '-1'], ['--test-steal-focus', '0']):
+            with self.assertRaises(SystemExit, msg=args), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                oracle.main(['replay', 'record', 'start_screen'] + args)
+        self.assertEqual(oracle.seed_arg('4294967295'), 4294967295)
+        self.assertEqual(oracle.positive_int('20'), 20)
+        self.assertEqual(oracle.non_negative_int('0'), 0)
+
+    def test_scenario_checkpoint_names(self):
+        self.assertEqual(realinput.parse_scenario(
+            'checkpoint Party_formation-2\n'),
+            [{'op': 'checkpoint', 'name': 'Party_formation-2', 'line': 1}])
+        actions = realinput.load_scenario(
+            os.path.join(ROOT, 'scenarios', 'replay_click.txt'))
+        self.assertEqual([a['name'] for a in actions
+                          if a['op'] == 'checkpoint'],
+                         ['menu', 'select_party', 'party_formation',
+                          'chargen'])
+
+    def test_input_settings_shared(self):
+        # Our engine (platform/window.cpp) and the recorder answer the
+        # input settings from the one header, never with literals.
+        with open(os.path.join(ROOT, 'platform', 'input_settings.h')) as f:
+            names = re.findall(r'constexpr \w+ (k\w+) = ', f.read())
+        self.assertEqual(names, [
+            'kDoubleClickTime', 'kDoubleClickWidth', 'kDoubleClickHeight',
+            'kSwapButton', 'kKeyboardDelay', 'kKeyboardSpeed',
+            'kWheelScrollLines'])
+        for rel in ('platform/window.cpp', 'oracle/replay/recorder.cpp'):
+            with open(os.path.join(ROOT, rel)) as f:
+                text = f.read()
+            self.assertIn('#include "platform/input_settings.h"', text, rel)
+            for name in names:
+                self.assertIn('platform::input_settings::%s' % name, text,
+                              '%s does not use %s' % (rel, name))
+        with open(os.path.join(ROOT, 'platform', 'window.cpp')) as f:
+            text = f.read()
+        self.assertIn('UINT GetDoubleClickTime() { return '
+                      'platform::input_settings::kDoubleClickTime; }', text)
 
     def test_start_screen_has_its_checkpoint(self):
         actions = realinput.load_scenario(

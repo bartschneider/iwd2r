@@ -206,8 +206,8 @@ def parse_scenario(text):
         elif v == 'CHECKPOINT':
             if len(args) != 1:
                 fail('checkpoint needs one name')
-            if any(c in args[0] for c in '/\\:'):
-                fail('checkpoint name must not contain a path')
+            if not re.fullmatch(r'[A-Za-z0-9_-]+', args[0]):
+                fail('checkpoint name must be letters, digits, _ or -')
             actions.append({'op': 'checkpoint', 'name': args[0],
                             'line': number})
         elif v == 'ORIGIN':

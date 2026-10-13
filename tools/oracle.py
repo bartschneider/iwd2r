@@ -9,7 +9,8 @@ Usage (from WSL, in the repository):
   python3 tools/oracle.py run [--file selftest] [--seed N] [--iterations N]
   python3 tools/oracle.py vanilla [--rebuild]
   python3 tools/oracle.py replay record <scenario> [--seed N] [--timeout S]
-                                        [--dump-every N]
+                                        [--dump-every N] [--test-steal-focus N]
+                                        [--test-no-focus-guard]
 
 evidence writes a draft docs/evidence/<ADDR>.md for one function of the
 vanilla exe: the front matter (address, name, an empty oracle_case,
@@ -82,8 +83,15 @@ runs/<stamp>/replay/. Every dump is validated against
 oracle/replay/schema.json (tools/minischema.py). The injector kills the game
 after --timeout seconds (default 180) and exits 10; the run then reports the
 last frame the recorder reached (its status.txt) and exits 10. Any other
-failure (a dump that does not validate, a game exit code other than 0, a
-scenario that did not finish) exits 1.
+failure exits 1: a dump that does not validate, a game exit code other than
+0, a scenario that did not finish, a scenario checkpoint with no dump, or a
+checkpoint dump that breaks the recorder's invariant (invariant_problem:
+not reinitializing, and no frame without an AI update of its own or one in
+progress, ai_stalled_frames 0). --test-steal-focus N makes a window of the
+recorder take the foreground at frame N, and --test-no-focus-guard lets
+activation messages reach the game, to show what the focus guard prevents.
+On Ctrl+C only this run's injector is killed (by the pid it prints first),
+which closes its job and so kills its game.
 
 Standard library only.
 """
@@ -141,6 +149,7 @@ REPLAY_DUMP_EVERY = 30
 INJECTOR_TIMEOUT = 10  # the injector's exit code when --timeout ran out
 INJECTOR_DIED = 11
 INJECTOR_NO_DLL = 12
+INJECTOR_WAIT_FAILED = 13
 
 
 def ghidra_version():
@@ -1187,12 +1196,89 @@ def replay_outcome(code, status, timeout):
         return 1, 'the game died of an exception (%s)' % where
     if code == INJECTOR_NO_DLL:
         return 1, 'the recorder did not load (see recorder.log)'
+    if code == INJECTOR_WAIT_FAILED:
+        return 1, 'the injector could not wait for the game (%s)' % where
     if code != 0:
         return 1, 'the game exited with code %d (%s)' % (code, where)
     if status.get('state') == 'running':
         return 1, 'the game exited before the scenario finished (%s)' % where
     return 0, 'the game exited with code 0 (%s, scenario %s)' % (
         where, status.get('state', '?'))
+
+
+def invariant_problem(name, dump):
+    """Why a checkpoint dump breaks the recorder's invariant, or None.
+
+    The invariant (schema.json "globals"): the game is not reinitializing,
+    and no frame so far stalled (ai_stalled_frames is 0). The virtual clock
+    wakes the AI thread once per frame, so each frame has an AI update of
+    its own unless it was drawn while one was still running, as a load
+    does. A focus loss stops the AI updates from counting while frames go
+    on: those frames are stalls."""
+    g = dump.get('globals') or {}
+    frame = dump.get('frame')
+    if g.get('reinitializing'):
+        return ('%s: reinitializing is %s at frame %s: the game stopped '
+                'updating (a focus loss?)' % (name, g['reinitializing'],
+                                              frame))
+    if g.get('ai_stalled_frames') != 0:
+        return ('%s: %s frames by frame %s had no AI update (au_counter %s):'
+                ' the AI thread stalled' % (name, g.get('ai_stalled_frames'),
+                                            frame, g.get('au_counter')))
+    return None
+
+
+def invariant_problems(replay_dir, dumps):
+    """invariant_problem for every schema-valid checkpoint dump."""
+    out = []
+    for name in sorted(dumps):
+        if not name.startswith('checkpoint-') or dumps[name]:
+            continue
+        with open(os.path.join(replay_dir, name)) as f:
+            problem = invariant_problem(name, json.load(f))
+        if problem:
+            out.append(problem)
+    return out
+
+
+def missing_checkpoints(expected, dumps):
+    """The scenario's checkpoint names with no checkpoint-<name>.json."""
+    return [n for n in expected if 'checkpoint-%s.json' % n not in dumps]
+
+
+def kill_windows_pid(pid):
+    """Kill one Windows process (and so the injector's job) by id."""
+    import play
+    subprocess.run([play.CMD_EXE, '/c', 'taskkill', '/F', '/PID', str(pid)],
+                   cwd=ORACLE_DIR, capture_output=True)
+
+
+def run_injector(command, env, backstop):
+    """Run the injector; (exit code or None, stdout, stderr). Its first line
+    names its Windows pid: on Ctrl+C, or when the backstop timeout runs out
+    (the injector kills the game at --timeout itself), exactly that process
+    is killed, which closes its job and so kills this run's game."""
+    proc = subprocess.Popen(command, cwd=ORACLE_DIR, env=env,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            text=True)
+    pid = None
+    try:
+        first = proc.stdout.readline()
+        m = re.match(r'injector: pid (\d+)', first)
+        pid = int(m.group(1)) if m else None
+        out, err = proc.communicate(timeout=backstop)
+        return proc.returncode, first + out, err
+    except subprocess.TimeoutExpired:
+        if pid:
+            kill_windows_pid(pid)
+        proc.kill()
+        out, err = proc.communicate()
+        return None, out, err
+    except KeyboardInterrupt:
+        if pid:
+            kill_windows_pid(pid)
+        proc.kill()
+        raise
 
 
 def cmd_replay_record(args):
@@ -1224,6 +1310,10 @@ def cmd_replay_record(args):
              'IWD2R_REPLAY_DIR': win_path(replay_dir),
              'IWD2R_DUMP_EVERY': str(args.dump_every),
              'IWD2R_SEED': str(args.seed)}
+    if args.test_steal_focus:
+        names['IWD2R_TEST_STEAL_FOCUS'] = str(args.test_steal_focus)
+    if args.test_no_focus_guard:
+        names['IWD2R_TEST_NO_FOCUS_GUARD'] = '1'
     env.update(names)
     env['WSLENV'] = ':'.join([v for v in env.get('WSLENV', '').split(':')
                               if v] + sorted(names))
@@ -1234,19 +1324,7 @@ def cmd_replay_record(args):
           'frames' % (os.path.relpath(script, ROOT), len(actions), args.seed,
                       args.timeout, args.dump_every))
     print('running %s' % ' '.join(command))
-    try:
-        # The injector kills the game at --timeout; this is a backstop.
-        r = subprocess.run(command, cwd=ORACLE_DIR, env=env,
-                           capture_output=True, text=True,
-                           timeout=args.timeout + 60)
-        code, stdout, stderr = r.returncode, r.stdout, r.stderr
-    except subprocess.TimeoutExpired:
-        code, stdout, stderr = None, '', ''
-    except KeyboardInterrupt:
-        # Killing the injector closes its job, which kills the game.
-        subprocess.run([play.CMD_EXE, '/c', 'taskkill', '/F', '/IM',
-                        INJECTOR], cwd=ORACLE_DIR, capture_output=True)
-        raise
+    code, stdout, stderr = run_injector(command, env, args.timeout + 60)
     for line in stdout.splitlines():
         print('  %s' % line)
     for line in stderr.splitlines():
@@ -1254,6 +1332,9 @@ def cmd_replay_record(args):
     status = read_status(replay_dir)
     result, summary = replay_outcome(code, status, args.timeout)
     dumps = check_dumps(replay_dir, schema)
+    broken = invariant_problems(replay_dir, dumps)
+    expected = [a['name'] for a in actions if a['op'] == 'checkpoint']
+    missing = missing_checkpoints(expected, dumps)
     out_dir = os.path.join(run_dir, 'replay')
     shutil.copytree(replay_dir, out_dir)
     shutil.rmtree(replay_dir, ignore_errors=True)
@@ -1262,7 +1343,8 @@ def cmd_replay_record(args):
               'timeout': args.timeout, 'dump_every': args.dump_every,
               'injector_exit_code': code, 'status': status,
               'outcome': summary, 'dumps': sorted(dumps),
-              'invalid_dumps': invalid}
+              'invalid_dumps': invalid, 'invariant_broken': broken,
+              'missing_checkpoints': missing}
     with open(os.path.join(out_dir, 'replay.json'), 'w') as f:
         json.dump(report, f, indent=2)
         f.write('\n')
@@ -1274,10 +1356,39 @@ def cmd_replay_record(args):
     for name, errors in sorted(invalid.items()):
         for error in errors[:5]:
             print('  INVALID %s: %s' % (name, error))
+    for problem in broken:
+        print('  INVARIANT %s' % problem)
+    if missing:
+        print('  MISSING checkpoint dumps: %s'
+              % ' '.join('checkpoint-%s.json' % n for n in missing))
     print('replay: %s' % os.path.relpath(out_dir, ROOT))
-    if result == 0 and invalid:
+    if result == 0 and (invalid or broken or missing):
         result = 1
     return result
+
+
+def positive_int(text):
+    value = int(text) if re.fullmatch(r'\d+', text) else 0
+    if value <= 0:
+        raise argparse.ArgumentTypeError('expected a positive integer: %r'
+                                         % text)
+    return value
+
+
+def non_negative_int(text):
+    if not re.fullmatch(r'\d+', text):
+        raise argparse.ArgumentTypeError('expected an integer >= 0: %r'
+                                         % text)
+    return int(text)
+
+
+def seed_arg(text):
+    """--seed: the original srand takes an unsigned 32-bit seed."""
+    value = non_negative_int(text)
+    if value > 0xFFFFFFFF:
+        raise argparse.ArgumentTypeError('expected a seed below 2^32: %r'
+                                         % text)
+    return value
 
 
 def main(argv=None):
@@ -1316,15 +1427,22 @@ def main(argv=None):
                                    'original with the recorder DLL')
     record.add_argument('scenario', help='scenarios/<name>.txt by name, '
                         'or a path')
-    record.add_argument('--seed', type=int, default=1,
+    record.add_argument('--seed', type=seed_arg, default=1,
                         help='seed for the original srand (default '
                         '%(default)s)')
-    record.add_argument('--timeout', type=int, default=REPLAY_TIMEOUT,
+    record.add_argument('--timeout', type=positive_int,
+                        default=REPLAY_TIMEOUT,
                         help='seconds before the game is killed (default '
                         '%(default)s)')
-    record.add_argument('--dump-every', type=int, default=REPLAY_DUMP_EVERY,
+    record.add_argument('--dump-every', type=non_negative_int,
+                        default=REPLAY_DUMP_EVERY,
                         help='a dump every N frames, 0 for none (default '
                         '%(default)s)')
+    record.add_argument('--test-steal-focus', type=positive_int, metavar='N',
+                        help='test: a window of the recorder takes the '
+                        'foreground at frame N')
+    record.add_argument('--test-no-focus-guard', action='store_true',
+                        help='test: let activation messages reach the game')
     record.set_defaults(run=cmd_replay_record)
     args = ap.parse_args(argv)
     return args.run(args)

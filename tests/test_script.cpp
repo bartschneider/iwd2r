@@ -147,8 +147,10 @@ TEST_CASE("script parser reports errors with line numbers", "[script]")
     CHECK(ParseError("quit now\n").rfind("line 1: quit", 0) == 0);
     CHECK(ParseError("checkpoint\n") == "line 1: checkpoint needs one name");
     CHECK(ParseError("checkpoint a b\n") == "line 1: checkpoint needs one name");
-    CHECK(ParseError("checkpoint a\\b\n") == "line 1: checkpoint name must not contain a path");
-    CHECK(ParseError("checkpoint c:x\n") == "line 1: checkpoint name must not contain a path");
+    for (const char* bad : { "checkpoint a\\b\n", "checkpoint c:x\n", "checkpoint ../x\n", "checkpoint a.b\n",
+             "checkpoint a*\n", "checkpoint \xC3\xA9\n" })
+        CHECK(ParseError(bad) == "line 1: checkpoint name must be letters, digits, _ or -");
+    CHECK(ParseOk("checkpoint Party_formation-2\n")[0].text == "Party_formation-2");
 }
 
 TEST_CASE("script checkpoint is parsed and takes no frame", "[script]")

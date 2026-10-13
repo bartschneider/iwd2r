@@ -216,8 +216,11 @@ bool Parse(const std::string& text, std::vector<Command>& commands, std::string&
             if (args.size() != 1)
                 return fail("checkpoint needs one name");
             c.text = args[0];
-            if (c.text.find_first_of("/\\:") != std::string::npos)
-                return fail("checkpoint name must not contain a path");
+            // It names a file, checkpoint-<NAME>.json.
+            for (char ch : c.text) {
+                if (!std::isalnum(static_cast<unsigned char>(ch)) && ch != '_' && ch != '-')
+                    return fail("checkpoint name must be letters, digits, _ or -");
+            }
         } else if (v == "ORIGIN") {
             c.verb = Verb::Origin;
             const std::string mode = args.size() == 1 ? Upper(args[0]) : std::string();
