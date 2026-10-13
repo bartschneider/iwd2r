@@ -132,6 +132,8 @@ def parse_args(argv):
         prog='play.py', description='Build and run iwd2r.')
     ap.add_argument('--linux', action='store_true',
                     help='build and run build/linux-gcc instead of Windows')
+    ap.add_argument('--sound', action='store_true',
+                    help='let the game play sound (runs are silent otherwise)')
     ap.add_argument('--headless', action='store_true',
                     help='SDL dummy video and audio drivers (no window)')
     mode = ap.add_mutually_exclusive_group()
@@ -279,12 +281,17 @@ def restore_inis(backup_dir, install, names):
     return changed
 
 
-def child_env(base, data, overrides, headless, frames, script, shot_dir):
+def child_env(base, data, overrides, headless, frames, script, shot_dir,
+              sound=False):
     """The variables the game gets on top of base (a dict)."""
     env = dict(base)
     env['IWD2_DATA'] = data
     env['IWD2R_INI_OVERRIDE'] = ';'.join(overrides)
     env['IWD2R_SHOT_DIR'] = shot_dir
+    # Silent unless --sound: on WSL with WSLg the game's audio reaches the
+    # Windows speakers.
+    if not sound:
+        env['IWD2R_AUDIO'] = 'null'
     if headless:
         env['SDL_VIDEO_DRIVER'] = 'dummy'
         env['SDL_AUDIO_DRIVER'] = 'dummy'
@@ -712,7 +719,7 @@ def main(argv):
         with open(log_path, 'w') as log_file:
             if args.linux:
                 env = child_env(os.environ, data, overrides, headless,
-                                args.frames, script, run_dir)
+                                args.frames, script, run_dir, args.sound)
                 code = run_linux(exe, env, log_file)
             else:
                 win_run = os.path.join(WIN_CHECKOUT, 'runs',
@@ -724,7 +731,7 @@ def main(argv):
                     win_script = wslpath('-w', os.path.join(win_run, 'script.txt'))
                 env_vars = child_env({}, wslpath('-w', data), overrides,
                                      headless, args.frames, win_script,
-                                     wslpath('-w', win_run))
+                                     wslpath('-w', win_run), args.sound)
                 try:
                     code = run_windows(exe, env_vars, win_run, log_file)
                 finally:

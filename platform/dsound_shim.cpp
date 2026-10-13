@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <mutex>
@@ -151,7 +152,11 @@ public:
     HRESULT Init()
     {
         ma_engine_config config = ma_engine_config_init();
-        if (g_useNullBackend.load()) {
+        // IWD2R_AUDIO=null keeps automated runs silent: no audio hardware
+        // is opened, and buffers are still consumed in real time.
+        const char* audio = std::getenv("IWD2R_AUDIO");
+        const bool nullFromEnvironment = audio != nullptr && std::strcmp(audio, "null") == 0;
+        if (g_useNullBackend.load() || nullFromEnvironment) {
             ma_backend backends[] = { ma_backend_null };
             if (ma_context_init(backends, 1, nullptr, &m_context) != MA_SUCCESS)
                 return E_FAIL;

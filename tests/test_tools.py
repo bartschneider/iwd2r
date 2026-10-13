@@ -208,6 +208,10 @@ class PlayArgsTest(unittest.TestCase):
         env = play.child_env({}, '/data', [], False, None, None, '/shots')
         for name in ('SDL_VIDEO_DRIVER', 'IWD2R_SMOKE_FRAMES', 'IWD2R_SCRIPT'):
             self.assertNotIn(name, env)
+        self.assertEqual(env['IWD2R_AUDIO'], 'null')
+        env = play.child_env({}, '/data', [], False, None, None, '/shots',
+                             sound=True)
+        self.assertNotIn('IWD2R_AUDIO', env)
 
     def test_batch_set_escapes_percent(self):
         self.assertEqual(play.batch_set('X', 'a & b 100%'), 'set "X=a & b 100%%"')
