@@ -14,6 +14,7 @@
 #include "platform/data_dir.h"
 #include "platform/window.h"
 
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -108,6 +109,35 @@ public:
 private:
     std::filesystem::path m_path;
 };
+
+// The names packed into a "SAV V1.0" archive, in order.
+std::vector<std::string> SavNames(const std::vector<char>& sav)
+{
+    std::vector<std::string> names;
+    size_t at = 8;
+    while (at + 4 <= sav.size()) {
+        uint32_t length = 0;
+        std::memcpy(&length, sav.data() + at, 4);
+        at += 4;
+        names.emplace_back(sav.data() + at);
+        at += length;
+        uint32_t compressed = 0;
+        std::memcpy(&compressed, sav.data() + at + 4, 4);
+        at += 8 + compressed;
+    }
+    return names;
+}
+
+// The one file in `dir` whose name matches `name` ignoring case.
+std::filesystem::path FindNoCase(const std::filesystem::path& dir, const std::string& name)
+{
+    for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+        if (CString(entry.path().filename().string().c_str()).CompareNoCase(name.c_str()) == 0) {
+            return entry.path();
+        }
+    }
+    return {};
+}
 
 CVariable MakeVariable(const char* name, LONG value)
 {
@@ -279,6 +309,99 @@ TEST_CASE("CompressDirectory packs a directory that UncompressDirectory restores
     CHECK(ReadAll(target.path() / "EMPTY.ARE").empty());
     CHECK_FALSE(std::filesystem::exists(target.path() / "ICEWIND2.GAM"));
     CHECK_FALSE(std::filesystem::exists(target.path() / "ICEWIND2.SAV"));
+}
+
+TEST_CASE("CompressDirectory skips the save, game, bitmap and map files in any case", "[dimm][data]")
+{
+    const char* env = std::getenv("IWD2_DATA");
+    if (env == nullptr || *env == '\0') {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    InstallIniBackup backup(env);
+    std::string error;
+    REQUIRE(StartEngine(error));
+
+    TempDir source("dimm-skip");
+    const std::vector<char> junk = { 'o', 'l', 'd' };
+    const std::vector<char> area = { 'A', 'R', 'E', 'A' };
+    WriteAll(source.path() / "icewind2.sav", junk); // a lower-case archive left behind
+    WriteAll(source.path() / "AR1000.ARE", area);
+    WriteAll(source.path() / "SHOT.BMP", junk);
+    WriteAll(source.path() / "WORLDMAP.WMP", junk);
+    WriteAll(source.path() / "EXPMAP.WMP", junk);
+    WriteAll(source.path() / "ICEWIND2.GAM", junk);
+
+    REQUIRE(g_pChitin->cDimm.CompressDirectory(source.Dir(), source.Dir()));
+
+    const std::filesystem::path sav = FindNoCase(source.path(), "ICEWIND2.SAV");
+    REQUIRE(!sav.empty());
+    const std::vector<char> bytes = ReadAll(sav);
+    REQUIRE(bytes.size() >= 8);
+    CHECK(std::string(bytes.data(), 8) == "SAV V1.0");
+    CHECK(SavNames(bytes) == std::vector<std::string> { "AR1000.ARE" });
+
+    CHECK_FALSE(std::filesystem::exists(source.path() / "AR1000.ARE"));
+    CHECK(std::filesystem::exists(source.path() / "SHOT.BMP"));
+    CHECK(std::filesystem::exists(source.path() / "WORLDMAP.WMP"));
+    CHECK(std::filesystem::exists(source.path() / "EXPMAP.WMP"));
+    CHECK(std::filesystem::exists(source.path() / "ICEWIND2.GAM"));
+}
+
+TEST_CASE("RemoveSignalsFromQueue keeps only the live signals", "[msg][data]")
+{
+    const char* env = std::getenv("IWD2_DATA");
+    if (env == nullptr || *env == '\0') {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    InstallIniBackup backup(env);
+    std::string error;
+    REQUIRE(StartEngine(error));
+
+    CBaldurMessage* pMessage = g_pBaldurChitin->GetBaldurMessage();
+    const BYTE size = pMessage->m_nSignalQueueSize;
+    REQUIRE(size > 2);
+
+    // Empty slots hold 0xFF as the sender.
+    for (BYTE i = 0; i < size; i++) {
+        pMessage->m_pnSignalFrom[i] = 0xFF;
+        pMessage->m_pnSignalType[i] = 0;
+        pMessage->m_pnSignalData[i] = 0;
+    }
+    pMessage->m_pnSignalFrom[0] = 1;
+    pMessage->m_pnSignalType[0] = 'S';
+    pMessage->m_pnSignalData[0] = 7;
+    pMessage->m_pnSignalFrom[1] = 2;
+    pMessage->m_pnSignalType[1] = 'S';
+    pMessage->m_pnSignalData[1] = 8;
+    pMessage->m_nSignalQueueStart = 0;
+    pMessage->m_nSignalQueueEnd = 2;
+
+    REQUIRE(pMessage->RemoveSignalsFromQueue('S', 7));
+    CHECK(pMessage->m_nSignalQueueStart == 0);
+    CHECK(pMessage->m_nSignalQueueEnd == 1);
+    CHECK(pMessage->m_pnSignalFrom[0] == 2);
+    CHECK(pMessage->m_pnSignalData[0] == 8);
+    CHECK(pMessage->m_pnSignalFrom[1] == 0xFF);
+
+    // A full queue of other signals: the end stays inside the arrays, so the
+    // next signal goes to a slot of m_pnSignalFrom, not past it.
+    for (BYTE i = 0; i < size; i++) {
+        pMessage->m_pnSignalFrom[i] = 3;
+        pMessage->m_pnSignalType[i] = 'S';
+        pMessage->m_pnSignalData[i] = 9;
+    }
+    pMessage->m_pnSignalData[size - 1] = 10;
+    REQUIRE(pMessage->RemoveSignalsFromQueue('S', 10));
+    CHECK(pMessage->m_nSignalQueueEnd == size - 1);
+    CHECK(pMessage->m_pnSignalFrom[size - 1] == 0xFF);
+
+    for (BYTE i = 0; i < size; i++) {
+        pMessage->m_pnSignalFrom[i] = 0xFF;
+        pMessage->m_pnSignalType[i] = 0;
+        pMessage->m_pnSignalData[i] = 0;
+    }
+    pMessage->m_nSignalQueueStart = 0;
+    pMessage->m_nSignalQueueEnd = 0;
 }
 
 TEST_CASE("CWorldMap::Marshal writes back the world map it read", "[worldmap][data]")
