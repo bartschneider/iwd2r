@@ -9,8 +9,9 @@
 //
 // A pending case is one that cannot compare the original with ours yet; its
 // reason goes into the report's "pending" list. With a body it runs and must
-// pass like any case (an original-only check, say); without one (nullptr)
-// it is listed and not run.
+// pass like any case (an original-only check, say), and must run at least
+// one input: one that runs none fails ("PENDING (ran 0 inputs)"). Without a
+// body (nullptr) it is listed and not run.
 //
 // The runner runs the cases of one file per process (--file <file>), restoring
 // the original's .data and its rand state before each.
@@ -28,6 +29,12 @@
 // - Allocator state is not restored either: the CRT heap's globals and MFC's
 //   CFixedAlloc pools that CString buffers come from (vanilla.json's
 //   crt_ranges), so original strings a case builds stay valid in later cases.
+//   The hazard this leaves: a global CString in .data that a case assigns to
+//   (or that original code the case calls assigns to) frees its old buffer
+//   into the unrestored pool, and the next restore puts back the pointer to
+//   that freed node, which the pool hands out again. So cases must not assign
+//   to, or call original code that assigns to, CStrings (or other heap
+//   owners) living in snapshot-era .data; build their own strings instead.
 // - Of the thread's _tiddata only the rand state (_holdrand) is restored.
 //   strtok's position, errno/_doserrno, the asctime/gmtime buffers and the
 //   other per-thread fields carry over from case to case.

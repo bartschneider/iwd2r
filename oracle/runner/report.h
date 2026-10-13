@@ -10,6 +10,7 @@ struct CaseResult {
     std::string id;
     OracleExpect expect = OracleExpect::Pass;
     const char* pending = nullptr;
+    bool hasBody = true; // false: a pending case without a body, not run
     long long iterations = 0;
     long long failureCount = 0;
     std::vector<OracleFailure> failures;
@@ -25,7 +26,7 @@ constexpr const char* kHeapCorrupt = "heap corrupt after case";
 bool AsExpected(const CaseResult& result);
 
 // {"file", "complete", "running", "seed", "iterations", "cases": [{case, expect,
-// pending (the reason, or null), iterations, passed, failure_count, failures:
+// pending (the reason, or null), has_body, iterations, passed, failure_count, failures:
 // [{inputs, original, ours}], crashed, crash: {inputs, exception, address,
 // kind, type} or null}]}.
 // complete is false while cases are still to run; running names the case in

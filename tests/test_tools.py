@@ -1358,6 +1358,33 @@ class OracleReportTest(unittest.TestCase):
         self.assertEqual(lines[-1], '1 passed, 0 expected failures or '
                          'crashes, 2 pending, 0 unexpected; run PASSED')
 
+    def test_a_pending_case_whose_body_ran_nothing_fails_the_run(self):
+        listed = dict(oracle_case('pending/hit'), iterations=0,
+                      has_body=False, pending='needs engine state')
+        empty = dict(oracle_case('pending/roll', failures=1), iterations=0,
+                     has_body=True, pending='ours not implemented')
+        # Even without the runner's own failure, 0 inputs is not a pass.
+        quiet = dict(oracle_case('pending/quiet'), iterations=0,
+                     has_body=True, pending='ours not implemented')
+        merged = self.merge(('pending', 7, oracle_report([listed, empty,
+                                                          quiet])))
+        self.assertFalse(merged['passed'])
+        self.assertEqual(merged['pending'],
+                         ['pending/hit: needs engine state'])
+        self.assertEqual(merged['unexpected'], ['pending/roll',
+                                                'pending/quiet'])
+        lines = oracle.summary_lines(merged)
+        self.assertIn('pending/hit                      pending: needs '
+                      'engine state, 0 inputs', lines[0])
+        text = '\n'.join(lines)
+        self.assertIn('pending/roll                     PENDING (ran 0 '
+                      'inputs): ours not implemented, 0 inputs, 1 failures',
+                      text)
+        self.assertIn('pending/quiet                    PENDING (ran 0 '
+                      'inputs)', text)
+        self.assertEqual(lines[-1], '0 passed, 0 expected failures or '
+                         'crashes, 1 pending, 2 unexpected; run FAILED')
+
     def test_a_failing_pending_case_fails_the_run(self):
         case = dict(oracle_case('pending/save', failures=1),
                     pending='ours not implemented')
@@ -1967,6 +1994,32 @@ class BifTest(unittest.TestCase):
             bif.read_biff(make_biff([(0, b'x')]), 7)
         with self.assertRaisesRegex(bif.BifError, 'past the end'):
             bif.read_biff(make_biff([(0, b'xyz')])[:-1], 0)
+
+    def test_truncated_biff_header(self):
+        for data in (b'BIFFV1  ', b'BIFFV1  ' + bytes(11)):
+            with self.assertRaisesRegex(bif.BifError, 'BIFF header truncated'):
+                bif.read_biff(data, 0)
+
+    def test_truncated_biff_table(self):
+        whole = make_biff([(0, b'x'), (1, b'y')])
+        with self.assertRaisesRegex(bif.BifError,
+                                    'file entries run past the end'):
+            bif.read_biff(whole[:20 + 16 + 8], 1)
+        # Through extract: a BifError, never a struct.error.
+        self.write('Data/MAIN.BIF', whole[:20 + 16])
+        with self.assertRaisesRegex(bif.BifError, 'run past the end'):
+            bif.extract(self.game, 'XPLEVEL.2DA')
+
+    def test_bad_key_name_offset(self):
+        key = bytearray(make_key(['data\\Main.bif'], []))
+        struct.pack_into('<I', key, 24 + 4, len(key) + 100)
+        with self.assertRaisesRegex(bif.BifError,
+                                    'bif 0 name .* past the end'):
+            bif.parse_key(bytes(key))
+        key = bytearray(make_key(['data\\Main.bif'], []))
+        struct.pack_into('<H', key, 24 + 8, 0xFFFF)
+        with self.assertRaisesRegex(bif.BifError, 'length 65535'):
+            bif.parse_key(bytes(key))
 
     def test_extract_to_writes_upper_case_names(self):
         out = os.path.join(self.game, 'out')

@@ -69,6 +69,7 @@ std::string ReportJson(const std::string& file, uint64_t seed, int iterations, c
         out += i ? ",\n" : "\n";
         out += "    {\"case\": " + Quote(r.id) + ", \"expect\": " + Quote(ExpectName(r.expect))
             + ", \"pending\": " + (r.pending ? Quote(r.pending) : std::string("null"))
+            + ", \"has_body\": " + (r.hasBody ? "true" : "false")
             + ", \"iterations\": " + std::to_string(r.iterations)
             + ", \"passed\": " + (!r.crashed && r.failureCount == 0 ? "true" : "false")
             + ", \"failure_count\": " + std::to_string(r.failureCount) + ", \"failures\": [";

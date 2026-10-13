@@ -37,6 +37,9 @@ def parse_key(data):
     for i in range(nbif):
         _, name_off, name_len, _ = struct.unpack_from('<IIHH', data,
                                                       obif + 12 * i)
+        if name_off + name_len > len(data):
+            raise BifError('KEY bif %d name (offset %d, length %d) runs past '
+                           'the end of the file' % (i, name_off, name_len))
         name = data[name_off:name_off + name_len].split(b'\0', 1)[0]
         bifs.append(name.decode('latin-1').replace('\\', '/'))
     resources = {}
@@ -51,7 +54,11 @@ def read_biff(data, file_index):
     """The bytes of file `file_index` in a BIFF V1 archive."""
     if data[:8] != b'BIFFV1  ':
         raise BifError('not a BIFF V1 archive (%r)' % data[:8])
+    if len(data) < 20:
+        raise BifError('BIFF header truncated')
     nfiles, _, offset = struct.unpack_from('<3I', data, 8)
+    if offset + 16 * nfiles > len(data):
+        raise BifError('BIFF file entries run past the end of the archive')
     for i in range(nfiles):
         locator, start, size, _ = struct.unpack_from('<IIIH', data,
                                                      offset + 16 * i)

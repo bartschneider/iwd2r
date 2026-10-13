@@ -272,8 +272,18 @@ std::vector<std::string> CaseFiles()
     return files;
 }
 
+// A pending case with a body that ran no input: the runner fails it (see
+// RunCases), so that it is never mistaken for a listed case.
+bool RanNothing(const CaseResult& r)
+{
+    return r.pending && r.hasBody && r.iterations == 0 && !r.crashed;
+}
+
 const char* Outcome(const CaseResult& r)
 {
+    if (RanNothing(r)) {
+        return "PENDING (ran 0 inputs)";
+    }
     if (r.pending && !r.crashed && r.failureCount == 0) {
         return r.iterations ? "passed, pending" : "pending";
     }
@@ -374,11 +384,15 @@ int RunCases()
         r.id = c.id;
         r.expect = c.expect;
         r.pending = c.pending;
+        r.hasBody = c.run != nullptr;
         r.iterations = ctx.InputsRun();
-        r.failureCount = ctx.FailureCount();
-        r.failures = ctx.Failures();
         r.crashed = ctx.Crashed();
         r.crash = ctx.Crash();
+        if (RanNothing(r) && ctx.FailureCount() == 0) {
+            ctx.Fail("", "a pending case with a body runs at least one input", "ran 0 inputs");
+        }
+        r.failureCount = ctx.FailureCount();
+        r.failures = ctx.Failures();
         allExpected = allExpected && AsExpected(r);
         std::printf("%-32s %s (%lld inputs, %lld failures)%s%s\n", r.id.c_str(), Outcome(r), r.iterations,
             r.failureCount, r.pending ? ": " : "", r.pending ? r.pending : "");

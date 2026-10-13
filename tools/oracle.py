@@ -31,7 +31,9 @@ they are merged into runs/<stamp>/oracle.json and summarised. A case declared
 to fail (selftest/must_fail) is listed under expected_failures and one
 declared to crash (selftest/crash) under expected_crashes. A case declared
 pending (ORACLE_CASE_PENDING, with its reason) is listed under pending when it
-did what a passing case does; one with no body is not run. The run fails
+did what a passing case does; one with no body is not run, and one with a body
+that ran no input ("has_body" true, 0 iterations) is unexpected and shown as
+PENDING (ran 0 inputs). The run fails
 (exit 1) if any case does not do what it declared, or a runner process ends
 without its report.
 
@@ -366,8 +368,16 @@ def cmd_build(args):
     return 0
 
 
+def ran_nothing(case):
+    """A pending case with a body that ran no input: it checked nothing."""
+    return bool(case.get('pending') and case.get('has_body')
+                and not case['iterations'] and not case['crashed'])
+
+
 def case_ok(case):
     """Whether a case did what it declared (its "expect")."""
+    if ran_nothing(case):
+        return False
     expect = case.get('expect', 'pass')
     if expect == 'fail':
         return not case['crashed'] and case['failure_count'] > 0
@@ -450,7 +460,9 @@ def summary_lines(merged):
             state = 'failed'
         else:
             state = 'passed'
-        if case_ok(case):
+        if ran_nothing(case):
+            state = 'PENDING (ran 0 inputs): %s' % case['pending']
+        elif case_ok(case):
             state += ' (expected)' if case['expect'] != 'pass' else ''
             if case.get('pending'):
                 state = ('pending: %s' % case['pending'] if not
