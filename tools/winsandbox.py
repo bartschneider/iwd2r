@@ -159,10 +159,10 @@ def pe_imports(path):
     return names
 
 
-def find_redist(root=REDIST_ROOT):
-    """The newest Microsoft.VC*.CRT x64 folder under the VS redist root, or
-    None."""
-    found = glob.glob(os.path.join(root, '*', 'x64', 'Microsoft.VC*.CRT'))
+def find_redist(root=REDIST_ROOT, arch='x64'):
+    """The newest Microsoft.VC*.CRT folder for arch (x64 or x86) under the
+    VS redist root, or None."""
+    found = glob.glob(os.path.join(root, '*', arch, 'Microsoft.VC*.CRT'))
 
     def version(path):
         parts = os.path.basename(os.path.dirname(os.path.dirname(path)))
@@ -181,15 +181,16 @@ def runtime_dlls(imports, redist_dir):
     return sorted(n for n in os.listdir(redist_dir) if n.lower() in wanted)
 
 
-def deploy_runtime(exe, log, redist_root=REDIST_ROOT):
-    """Copies the MSVC runtime DLLs exe imports next to it, so the sandbox
-    needs no installer. Returns the names copied or already current."""
+def deploy_runtime(exe, log, redist_root=REDIST_ROOT, arch='x64'):
+    """Copies the MSVC runtime DLLs (of arch) exe imports next to it, so the
+    sandbox needs no installer. Returns the names copied or already
+    current."""
     imports = pe_imports(exe)
     if not any(n.lower().startswith(('vcruntime', 'msvcp', 'concrt'))
                for n in imports):
         log('%s links the MSVC runtime statically' % os.path.basename(exe))
         return []
-    redist = find_redist(redist_root)
+    redist = find_redist(redist_root, arch)
     if not redist:
         raise RuntimeError('no MSVC redist folder under %s' % redist_root)
     names = runtime_dlls(imports, redist)
@@ -291,10 +292,10 @@ def sandbox_running():
     return any(n.lower() in out for n in TASKKILL_NAMES)
 
 
-def close_sandbox(log):
-    """Waits for the sandbox to close itself (the driver shuts it down),
-    then kills it."""
-    end = time.time() + CLOSE_TIMEOUT
+def close_sandbox(log, timeout=CLOSE_TIMEOUT):
+    """Waits up to timeout seconds for the sandbox to close itself (the
+    driver shuts it down), then kills it."""
+    end = time.time() + timeout
     while time.time() < end:
         if not sandbox_running():
             return
@@ -303,6 +304,34 @@ def close_sandbox(log):
     for name in TASKKILL_NAMES:
         subprocess.run([CMD_EXE, '/c', 'taskkill', '/IM', name, '/F'],
                        capture_output=True, cwd='/mnt/c')
+
+
+def start_sandbox(host_run, wsb, log):
+    """Starts Windows Sandbox with the .wsb file wsb (under host_run) without
+    waiting for it. Raises RuntimeError when a sandbox is already running."""
+    if sandbox_running():
+        raise RuntimeError('a Windows Sandbox is already running (only '
+                           'one can run at a time)')
+    log('starting Windows Sandbox with %s' % wslpath_w(wsb))
+    # A batch file keeps start's empty title argument intact (WSL would
+    # escape the quotes of a command-line argument with backslashes, which
+    # cmd.exe does not understand).
+    bat = os.path.join(host_run, 'start.bat')
+    with open(bat, 'w', newline='\r\n') as f:
+        f.write(start_batch(wslpath_w(wsb)))
+    subprocess.run([CMD_EXE, '/c', wslpath_w(bat)], cwd='/mnt/c', check=True)
+
+
+def wait_done(results, timeout):
+    """Waits for the driver's results/done.txt; RuntimeError (with
+    "timeout") after timeout seconds."""
+    done = os.path.join(results, 'done.txt')
+    end = time.time() + timeout
+    while not os.path.exists(done):
+        if time.time() > end:
+            raise RuntimeError('sandbox timeout: no done.txt after %d s'
+                               % timeout)
+        time.sleep(2)
 
 
 def run_scenario(exe, game_cache, actions, overrides, scenario, run_dir,
@@ -329,25 +358,8 @@ def run_scenario(exe, game_cache, actions, overrides, scenario, run_dir,
         f.write(make_wsb(folders, logon_command()))
     shutil.copy2(wsb, os.path.join(run_dir, 'run.wsb'))
     try:
-        if sandbox_running():
-            raise RuntimeError('a Windows Sandbox is already running (only '
-                               'one can run at a time)')
-        log('starting Windows Sandbox with %s' % wslpath_w(wsb))
-        # A batch file keeps start's empty title argument intact (WSL would
-        # escape the quotes of a command-line argument with backslashes,
-        # which cmd.exe does not understand).
-        bat = os.path.join(host_run, 'start.bat')
-        with open(bat, 'w', newline='\r\n') as f:
-            f.write(start_batch(wslpath_w(wsb)))
-        subprocess.run([CMD_EXE, '/c', wslpath_w(bat)], cwd='/mnt/c',
-                       check=True)
-        done = os.path.join(results, 'done.txt')
-        end = time.time() + DONE_TIMEOUT
-        while not os.path.exists(done):
-            if time.time() > end:
-                raise RuntimeError('sandbox timeout: no done.txt after %d s'
-                                   % DONE_TIMEOUT)
-            time.sleep(2)
+        start_sandbox(host_run, wsb, log)
+        wait_done(results, DONE_TIMEOUT)
         code_text = read_text(os.path.join(results, 'exitcode.txt'))
         if code_text.lstrip('-').isdigit():
             result['code'] = int(code_text)
@@ -377,5 +389,174 @@ def run_scenario(exe, game_cache, actions, overrides, scenario, run_dir,
                 result['code'] = 124
             elif not result['code']:
                 result['code'] = 1
+        result['seconds'] = time.time() - started
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Replays of the original (oracle.py replay record/compare)
+#
+#   host                                       sandbox
+#   oracle build output (read-only)            C:\iwd2r\oracle
+#   C:\Users\thier\iwd2r-oracle\game (rw)       the same path
+#   <run>\results (rw)                         C:\iwd2r\results
+#   <run>\tools (read-only)                    C:\iwd2r\tools
+#
+# The game folder keeps its own path inside the sandbox: its icewind2.ini's
+# [Alias] paths name it.
+
+REPLAY_DRIVER = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             'sandbox', 'replay-driver.ps1')
+BOX_ORACLE = r'C:\iwd2r\oracle'
+BOX_REPLAY_DIR = BOX_RESULTS + r'\replay'
+# The driver kills the injector this long after the injector's own timeout
+# should have ended the run, as run_injector does on the host.
+REPLAY_BACKSTOP = 60
+# Seconds the host allows on top of the driver's backstop for the sandbox to
+# boot, run the driver and shut down, before it gives up on done.txt.
+REPLAY_BOOT_ALLOWANCE = 180
+# driver.ps1 stops the sandbox's audio services because a muted device can
+# still be heard on the host. A recording keeps them: without a device the
+# original skips a periodic 40 ms multimedia timer it starts on the host
+# when the world loads (recorder.log); the device is muted and the copy's
+# icewind2.ini has every volume at 0 (oracle.replay_ini), so nothing is
+# heard. True stops them as driver.ps1 does.
+REPLAY_STOP_AUDIO = False
+# The driver's shutdown rarely closes the sandbox within CLOSE_TIMEOUT; a
+# replay's results are complete once done.txt exists (the driver writes it
+# last), so the sandbox is killed after this many seconds.
+REPLAY_CLOSE_TIMEOUT = 5
+# The host's 32-bit DirectPlay (the optional feature the original needs:
+# iwd2.exe imports DPLAYX.dll), which the sandbox lacks and cannot enable;
+# copied into the tools folder for replay-driver.ps1 to install.
+HOST_SYSWOW64 = '/mnt/c/Windows/SysWOW64'
+DIRECTPLAY_FILES = ('dplayx.dll', 'dpmodemx.dll', 'dpwsockx.dll',
+                    'dplaysvr.exe', 'dpnet.dll', 'dpnaddr.dll',
+                    'dpnhpast.dll', 'dpnhupnp.dll', 'dpnlobby.dll',
+                    'dpnsvr.exe')
+
+
+def replay_folders(build_win, game_win, results_win, tools_win):
+    """The .wsb mapped folders of a replay: (host, sandbox, read_only)."""
+    return [(build_win, BOX_ORACLE, True),
+            (game_win, game_win, False),
+            (results_win, BOX_RESULTS, False),
+            (tools_win, BOX_TOOLS, True)]
+
+
+def replay_logon_command():
+    return ('powershell.exe -NoProfile -ExecutionPolicy Bypass -File '
+            '%s\\replay-driver.ps1 -Config %s\\config.json'
+            % (BOX_TOOLS, BOX_TOOLS))
+
+
+def replay_driver_config(game_win, env, timeout):
+    """config.json for replay-driver.ps1 (paths are the sandbox's). env: the
+    recorder's environment (oracle.recorder_env). The injector gets the
+    arguments the host mode gives it."""
+    return {
+        'injector': BOX_ORACLE + '\\injector.exe',
+        'recorder': BOX_ORACLE + '\\recorder.dll',
+        'exe': game_win + '\\iwd2.exe',
+        'workdir': game_win,
+        'replay_dir': BOX_REPLAY_DIR,
+        'results': BOX_RESULTS,
+        'env': env,
+        'timeout': timeout,
+        'backstop': timeout + REPLAY_BACKSTOP,
+        'exclusions': [BOX_ORACLE, game_win, BOX_RESULTS],
+        'stop_audio': REPLAY_STOP_AUDIO,
+        'directplay': BOX_TOOLS + '\\directplay',
+        'shutdown': True,
+    }
+
+
+def replay_copy_plan(results, out_dir, names, replay_names):
+    """(source, destination) pairs that bring a replay's results home:
+    results/replay/<name> (the dumps, recorder.log, status.txt,
+    scenario.txt) to out_dir/<name>, where the host mode puts them, and the
+    driver's own files (results/<name>) to out_dir/sandbox/<name>."""
+    plan = [(os.path.join(results, 'replay', n), os.path.join(out_dir, n))
+            for n in sorted(replay_names)]
+    plan += [(os.path.join(results, n), os.path.join(out_dir, 'sandbox', n))
+             for n in sorted(names)]
+    return plan
+
+
+def stage_directplay(target, source=HOST_SYSWOW64, names=DIRECTPLAY_FILES):
+    """Copies the host's DirectPlay files into target; RuntimeError naming
+    the ones the host lacks (DirectPlay is then off on the host too: enable
+    it under Windows Features, Legacy Components)."""
+    have = {n.lower(): n for n in os.listdir(source)}
+    missing = [n for n in names if n.lower() not in have]
+    if missing:
+        raise RuntimeError('the host has no %s in %s; enable DirectPlay '
+                           '(Windows Features, Legacy Components)'
+                           % (', '.join(missing), source))
+    os.makedirs(target, exist_ok=True)
+    for name in names:
+        shutil.copyfile(os.path.join(source, have[name.lower()]),
+                        os.path.join(target, name))
+    return list(names)
+
+
+def files_in(directory):
+    try:
+        return [n for n in os.listdir(directory)
+                if os.path.isfile(os.path.join(directory, n))]
+    except OSError:
+        return []
+
+
+def run_replay(build_dir, game, script, env, timeout, host_run, out_dir,
+               log):
+    """Runs one recording of the original in a fresh sandbox: the injector
+    and recorder from build_dir, the game folder game (a WSL path), the
+    scenario file script, the recorder's environment env (sandbox paths).
+    host_run is a new folder under VM_ROOT; the results are copied into
+    out_dir (replay_copy_plan). Returns {'code': the injector's exit code
+    or None, 'stdout', 'stderr', 'error': the driver's or the host's error
+    or None, 'seconds'}."""
+    started = time.time()
+    result = {'code': None, 'stdout': '', 'stderr': '', 'error': None,
+              'seconds': 0.0}
+    results = os.path.join(host_run, 'results')
+    tools = os.path.join(host_run, 'tools')
+    os.makedirs(os.path.join(results, 'replay'))
+    os.makedirs(tools)
+    shutil.copyfile(script, os.path.join(results, 'replay', 'scenario.txt'))
+    game_win = wslpath_w(game)
+    with open(os.path.join(tools, 'config.json'), 'w') as f:
+        json.dump(replay_driver_config(game_win, env, timeout), f, indent=1)
+    shutil.copy2(REPLAY_DRIVER, os.path.join(tools, 'replay-driver.ps1'))
+    stage_directplay(os.path.join(tools, 'directplay'))
+    wsb = os.path.join(host_run, 'run.wsb')
+    with open(wsb, 'w', newline='\r\n') as f:
+        f.write(make_wsb(replay_folders(wslpath_w(build_dir), game_win,
+                                        wslpath_w(results),
+                                        wslpath_w(tools)),
+                         replay_logon_command()))
+    try:
+        start_sandbox(host_run, wsb, log)
+        wait_done(results, timeout + REPLAY_BACKSTOP + REPLAY_BOOT_ALLOWANCE)
+        code_text = read_text(os.path.join(results, 'exitcode.txt'))
+        if code_text.lstrip('-').isdigit():
+            result['code'] = int(code_text)
+        error = read_text(os.path.join(results, 'error.txt'))
+        if error:
+            result['error'] = 'driver: %s' % error
+    except RuntimeError as e:
+        result['error'] = str(e)
+    finally:
+        close_sandbox(log, REPLAY_CLOSE_TIMEOUT)
+        for name, key in (('injector-stdout.txt', 'stdout'),
+                          ('injector-stderr.txt', 'stderr')):
+            result[key] = read_text(os.path.join(results, name))
+        os.makedirs(os.path.join(out_dir, 'sandbox'), exist_ok=True)
+        for src, dst in replay_copy_plan(
+                results, out_dir, files_in(results),
+                files_in(os.path.join(results, 'replay'))):
+            shutil.copy2(src, dst)
+        shutil.copy2(wsb, os.path.join(out_dir, 'sandbox', 'run.wsb'))
         result['seconds'] = time.time() - started
     return result
