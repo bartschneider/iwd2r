@@ -239,6 +239,95 @@ void HLineShadedMirrored32(CaseContext& ctx)
     HLineShaded(ctx, kDrawHLineShadedMirrored32, true, 0x484C696E654D0000ull); // "HLineM"
 }
 
+// CVidMode::DrawThickLine32(nXFrom, nYFrom, nXTo, nYTo, pSurface, lPitch,
+// rSurface, a8, color, bClipped) (0x7CBE70), `ret 0x28`. It reads no member;
+// ecx goes on to the slice helper 0x7CC130, which ignores it.
+using ThickLineFn = int32_t(__fastcall*)(void* self, void* edx, int32_t nXFrom, int32_t nYFrom, int32_t nXTo,
+    int32_t nYTo, uint32_t* pSurface, int32_t lPitch, const void* rSurface, int32_t a8, uint32_t color,
+    uint32_t bClipped);
+constexpr uintptr_t kDrawThickLine32 = 0x7CBE70;
+constexpr int kCanvas = 96;
+constexpr int kMargin = 16;
+
+// DrawThickLine32 (and its slice helper 0x7CC130) on a 96x96 canvas whose
+// surface rectangle leaves a 16-pixel margin: vertical, horizontal,
+// diagonal and general lines in every direction, thickness 0 to 9, clipped
+// by the function (bClipped FALSE, endpoints anywhere on the canvas) or
+// already inside the rectangle (bClipped TRUE). The whole canvas and the
+// result are compared.
+void ThickLine32(CaseContext& ctx)
+{
+    uint8_t* self = nullptr;
+    uint32_t* canvas = nullptr;
+    uint8_t* rect = nullptr;
+    ctx.SetInputs("building the original's canvas");
+    ctx.CallOriginal([&] {
+        self = OriginalBlock(kVidInfSize);
+        canvas = reinterpret_cast<uint32_t*>(OriginalBlock(kCanvas * kCanvas * 4));
+        rect = OriginalBlock(16);
+    });
+    const int32_t r[4] = { kMargin, kMargin, kCanvas - kMargin, kCanvas - kMargin };
+    std::memcpy(rect, r, sizeof(r));
+    CVidInf ours;
+    CRect rSurface(r[0], r[1], r[2], r[3]);
+    std::vector<DWORD> mine(kCanvas * kCanvas);
+    Picks picks(ctx.seed, 0x546869636B4C0000ull); // "ThickL"
+    int n = 0;
+
+    auto check = [&](int32_t x1, int32_t y1, int32_t x2, int32_t y2, int32_t a8, bool bClipped) {
+        const uint32_t color = picks.Bits() | 1;
+        std::memset(canvas, 0, kCanvas * kCanvas * 4);
+        std::fill(mine.begin(), mine.end(), 0);
+        ctx.SetInputs("input " + std::to_string(n++) + ": DrawThickLine32(" + std::to_string(x1) + ", "
+            + std::to_string(y1) + ", " + std::to_string(x2) + ", " + std::to_string(y2) + ", a8 "
+            + std::to_string(a8) + ", bClipped " + std::to_string(bClipped) + ")");
+        // pSurface is the surface rectangle's top left (lPitch in pixels).
+        int32_t originalResult = 0;
+        ctx.CallOriginal([&] {
+            originalResult = reinterpret_cast<ThickLineFn>(kDrawThickLine32)(self, nullptr, x1, y1, x2, y2,
+                canvas + kMargin * kCanvas + kMargin, kCanvas, rect, a8, color, bClipped ? 1u : 0u);
+        });
+        const BOOL oursResult = ours.DrawThickLine32(x1, y1, x2, y2, mine.data() + kMargin * kCanvas + kMargin,
+            kCanvas, rSurface, a8, color, bClipped ? TRUE : FALSE);
+        ctx.CountInputs(1);
+        if (oracle::Compare(ctx, originalResult, static_cast<int32_t>(oursResult))) {
+            CompareArrays(ctx, canvas, mine.data(), kCanvas * kCanvas);
+        }
+    };
+
+    const int32_t lo = kMargin;
+    const int32_t hi = kCanvas - kMargin - 1;
+    for (int32_t a8 = 0; a8 <= 9; ++a8) {
+        const int32_t half = (a8 + 1) >> 1;
+        // Inside the rectangle shrunk by half the thickness, for bClipped.
+        const int32_t in0 = lo + half;
+        const int32_t in1 = hi - half;
+        for (int i = 0; i < 8; ++i) {
+            const int32_t x = picks.Between(in0, in1);
+            const int32_t y = picks.Between(in0, in1);
+            const int32_t len = picks.Between(0, 20);
+            check(x, y, x, picks.Between(in0, in1), a8, true); // vertical
+            check(x, y, picks.Between(in0, in1), y, a8, true); // horizontal
+            const int32_t dx = picks.Between(0, 1) ? 1 : -1;
+            const int32_t dy = picks.Between(0, 1) ? 1 : -1;
+            int32_t x2 = x + dx * len;
+            int32_t y2 = y + dy * len;
+            if (x2 >= in0 && x2 <= in1 && y2 >= in0 && y2 <= in1) {
+                check(x, y, x2, y2, a8, true); // diagonal
+            }
+            check(x, y, picks.Between(in0, in1), picks.Between(in0, in1), a8, true); // general
+        }
+    }
+    for (int i = 0; i < ctx.iterations; ++i) {
+        const int32_t a8 = picks.Between(0, 9);
+        const int32_t x1 = picks.Between(0, kCanvas - 1);
+        const int32_t y1 = picks.Between(0, kCanvas - 1);
+        const int32_t x2 = picks.Between(0, 3) == 0 ? x1 : picks.Between(0, kCanvas - 1);
+        const int32_t y2 = picks.Between(0, 3) == 0 ? y1 : picks.Between(0, kCanvas - 1);
+        check(x1, y1, x2, y2, a8, false);
+    }
+}
+
 // CVidMode::ApplyBrightnessContrast(rgb) (0x795E00), `ret 4` at 0x795F02:
 // reads m_nBrightnessCorrection (0xA8) and m_nGammaCorrection (0xA9).
 using BrightnessFn = uint32_t(__fastcall*)(void* self, void* edx, uint32_t rgb);
@@ -493,4 +582,5 @@ void RealizeRange(CaseContext& ctx)
 ORACLE_CASE("vid/hline_shaded32", HLineShaded32);
 ORACLE_CASE("vid/hline_shaded_mirrored32", HLineShadedMirrored32);
 ORACLE_CASE("vid/realize_range", RealizeRange);
+ORACLE_CASE("vid/thick_line32", ThickLine32);
 ORACLE_CASE("vid/brightness_contrast", BrightnessContrast);

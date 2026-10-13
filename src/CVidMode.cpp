@@ -1914,9 +1914,235 @@ void CVidMode::ScanLine32(DWORD* pSurface, UINT nMajorAxis, UINT nMinorAxis, INT
 // 0x7CBE70
 BOOL CVidMode::DrawThickLine32(INT nXFrom, INT nYFrom, INT nXTo, INT nYTo, DWORD* pSurface, LONG lPitch, CRect& rSurface, int a8, DWORD color, BOOLEAN bClipped)
 {
-    // TODO: Incomplete.
+    INT nCount = a8 + 1;
+    INT nHalf = nCount >> 1;
+    INT nStep = 1;
+    INT nDeltaX;
+    INT nDeltaY;
 
-    return FALSE;
+    if (!bClipped) {
+        CRect rClip;
+        rClip.left = rSurface.left + nHalf;
+        rClip.top = rSurface.top + nHalf;
+        rClip.right = rSurface.right - nHalf;
+        rClip.bottom = rSurface.bottom - nHalf;
+        if (!ClipLine(nXFrom, nYFrom, nXTo, nYTo, rClip)) {
+            return FALSE;
+        }
+    }
+
+    if (nYFrom > nYTo) {
+        INT t;
+
+        t = nXTo;
+        nXTo = nXFrom;
+        nXFrom = t;
+
+        t = nYTo;
+        nYTo = nYFrom;
+        nYFrom = t;
+    }
+
+    nDeltaX = nXTo - nXFrom;
+    if (nDeltaX < 0) {
+        nDeltaX = nXFrom - nXTo;
+        nStep = -1;
+    }
+
+    nDeltaY = nYTo - nYFrom;
+
+    // The line's first pixel moved back half the thickness across and up.
+    pSurface += lPitch * (nYFrom - rSurface.top) - rSurface.left + nXFrom;
+    if (nStep > 0) {
+        pSurface -= nHalf;
+    } else {
+        pSurface += nHalf;
+    }
+    pSurface -= nHalf * lPitch;
+
+    if (nDeltaX == 0) {
+        // NOTE: Each column starts a row below the previous one.
+        if (a8 >= 0) {
+            do {
+                if (nDeltaY >= 0) {
+                    INT n = nDeltaY + 1;
+                    do {
+                        *pSurface = color;
+                        pSurface += lPitch;
+                        n--;
+                    } while (n != 0);
+                }
+                pSurface += 1 - nDeltaY * lPitch;
+                nCount--;
+            } while (nCount != 0);
+            return TRUE;
+        }
+    } else if (nDeltaY == 0) {
+        // NOTE: Each row starts a column after the previous one.
+        if (a8 >= 0) {
+            do {
+                if (nDeltaX >= 0) {
+                    INT n = nDeltaX + 1;
+                    do {
+                        *pSurface = color;
+                        pSurface += nStep;
+                        n--;
+                    } while (n != 0);
+                }
+                nCount--;
+                pSurface += lPitch - nDeltaX * nStep;
+            } while (nCount != 0);
+            return TRUE;
+        }
+    } else if (nDeltaX == nDeltaY) {
+        INT nRow = 0;
+        INT nRun = a8 - 1;
+        if (a8 > 0) {
+            do {
+                nRun += nRow < nDeltaX ? 1 : 0;
+                for (INT n = nRun; n > 0; n--) {
+                    *pSurface = color;
+                    pSurface += nStep;
+                }
+                nRow++;
+                pSurface += lPitch - nRun * nStep;
+            } while (nRow < a8);
+        }
+
+        pSurface += nStep;
+
+        INT nRows = nDeltaY - ((a8 & 1) != 0 ? a8 : a8 - 1);
+        if (nRows > 0) {
+            do {
+                for (INT n = nRun; n > 0; n--) {
+                    *pSurface = color;
+                    pSurface += nStep;
+                }
+                nRows--;
+                pSurface += lPitch - (nRun - 1) * nStep;
+            } while (nRows != 0);
+        }
+
+        if (a8 > 0) {
+            INT nAdvance = (1 - nRun) * nStep + lPitch;
+            INT nLeft = a8;
+            do {
+                for (INT n = nRun; n > 0; n--) {
+                    *pSurface = color;
+                    pSurface += nStep;
+                }
+                pSurface += nAdvance;
+                nRun--;
+                nAdvance += nStep;
+                nLeft--;
+            } while (nLeft != 0);
+            return TRUE;
+        }
+    } else {
+        if (nDeltaY > nDeltaX) {
+            sub_7CC130(pSurface, nDeltaY, nDeltaX, lPitch, nStep, a8, color);
+        } else {
+            sub_7CC130(pSurface, nDeltaX, nDeltaY, nStep, lPitch, a8, color);
+        }
+    }
+
+    return TRUE;
+}
+
+// A run-length sliced line nThickness pixels wide (Abrash's): runs along the
+// major axis, nMinorAxis + 1 slices across it.
+//
+// 0x7CC130
+void CVidMode::sub_7CC130(DWORD* pSurface, UINT nMajorAxis, UINT nMinorAxis, INT nMajorAxisAdjust, INT nMinorAxisAdjust, UINT nThickness, DWORD color)
+{
+    UINT nWholeStep = nMajorAxis / nMinorAxis;
+    INT nAdjUp = (nMajorAxis % nMinorAxis) * 2;
+    INT nAdjDown = nMinorAxis * 2;
+    INT nErrorTerm = (nAdjUp >> 1) - nAdjDown;
+    UINT nFinalPixelCount = (nWholeStep >> 1) + 1;
+    UINT nInitialPixelCount = nFinalPixelCount;
+
+    if (nAdjUp == 0 && (nWholeStep & 1) == 0) {
+        nInitialPixelCount--;
+    }
+
+    if ((nWholeStep & 1) != 0) {
+        nErrorTerm += nMinorAxis;
+    }
+
+    // The leading edge of the slices runs nLead pixels from the start, the
+    // trailing edge nTrail; the trailing edge starts moving once the first
+    // nThickness - 1 slices are down.
+    INT nTrailErrorTerm = nErrorTerm;
+    UINT nTrail = 0;
+    UINT nTrailRun = nInitialPixelCount;
+    UINT nLead = (nThickness & ~1) + nInitialPixelCount;
+
+    for (UINT n = nLead; n != 0; n--) {
+        *pSurface = color;
+        pSurface += nMajorAxisAdjust;
+    }
+    pSurface += nMinorAxisAdjust - static_cast<INT>(nLead) * nMajorAxisAdjust;
+
+    UINT nWait = nThickness - 2;
+    for (UINT nSlice = nMinorAxis - 1; nSlice != 0; nSlice--) {
+        UINT nRunLength = nWholeStep;
+        nErrorTerm += nAdjUp;
+        if (nErrorTerm > 0) {
+            nRunLength = nWholeStep + 1;
+            nErrorTerm -= nAdjDown;
+        }
+
+        nLead += nRunLength;
+        if (nTrail < nLead) {
+            for (UINT n = nLead - nTrail; n != 0; n--) {
+                *pSurface = color;
+                pSurface += nMajorAxisAdjust;
+            }
+        }
+        pSurface -= static_cast<INT>(nLead - nTrail) * nMajorAxisAdjust;
+
+        if (nWait == 0) {
+            pSurface += static_cast<INT>(nTrailRun) * nMajorAxisAdjust;
+            nTrail += nTrailRun;
+            nTrailRun = nWholeStep;
+            nTrailErrorTerm += nAdjUp;
+            if (nTrailErrorTerm > 0) {
+                nTrailRun = nWholeStep + 1;
+                nTrailErrorTerm -= nAdjDown;
+            }
+        } else {
+            nWait--;
+        }
+
+        pSurface += nMinorAxisAdjust;
+    }
+
+    nLead += nFinalPixelCount;
+    for (UINT nSlice = 0; nSlice < nThickness; nSlice++) {
+        if (nTrail < nLead) {
+            for (UINT n = nLead - nTrail; n != 0; n--) {
+                *pSurface = color;
+                pSurface += nMajorAxisAdjust;
+            }
+        }
+        pSurface -= static_cast<INT>(nLead - nTrail) * nMajorAxisAdjust;
+
+        if (nSlice == nThickness - 1) {
+            nTrailRun = nFinalPixelCount;
+        }
+
+        pSurface += static_cast<INT>(nTrailRun) * nMajorAxisAdjust;
+        nTrail += nTrailRun;
+        nTrailRun = nWholeStep;
+        nTrailErrorTerm += nAdjUp;
+        if (nTrailErrorTerm > 0) {
+            nTrailRun = nWholeStep + 1;
+            nTrailErrorTerm -= nAdjDown;
+        }
+
+        pSurface += nMinorAxisAdjust;
+    }
 }
 
 // 0x799E20
