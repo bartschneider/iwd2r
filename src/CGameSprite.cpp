@@ -10519,13 +10519,62 @@ void CGameSprite::ResolveTargetPoint(const CAIAction* curAction, POSITION pos)
 // 0x72DE60
 BOOL CGameSprite::ProcessEffectList()
 {
-    // TODO: Incomplete.
+    if (g_pChitin->cNetwork.GetServiceProvider() != CNetwork::SERV_PROV_NULL
+        && g_pChitin->cNetwork.m_idLocalPlayer != m_remotePlayerID) {
+        return FALSE;
+    }
 
-    // NOTE: This functions is huge. The next function call is necessary to
-    // move on with character editor.
-    HandleEffects();
+    BOOL bResult = TRUE;
 
-    return FALSE;
+    if (!m_bAllowEffectListCall) {
+        field_72A2++;
+        return TRUE;
+    }
+
+    while (1) {
+        m_bAllowEffectListCall = FALSE;
+
+        if (field_72A2 > 4) {
+            field_72A2 = 5;
+        }
+
+        if (((m_id ^ field_44A) & 0xF) == 0 || field_562C || m_bHPCONBonusTotalUpdate) {
+            m_lastRegenerationTime = g_pBaldurChitin->GetObjectGame()->GetWorldTimer()->m_gameTime;
+
+            // The saving throw rolls (CGameEffect::CheckSave reads them).
+            field_70F6 = rand() % 20 + 1;
+            field_70F7 = rand() % 20 + 1;
+            field_70F8 = rand() % 20 + 1;
+            field_70F9 = rand() % 20 + 1;
+            field_70FA = rand() % 100;
+
+            // TODO: Incomplete: the encumbrance check (GetCarriedWeight,
+            // CRuleTables::GetEncumbranceMod) and the two
+            // CGameEffectList::CheckEffects calls also enter the block below.
+            if (field_562C || m_bHPCONBonusTotalUpdate) {
+                field_562C = FALSE;
+
+                // TODO: Incomplete: the derived stats copy, the animation
+                // updates, the messages, the portrait update and the AI
+                // actions around HandleEffects.
+                bResult = HandleEffects();
+            }
+
+            // TODO: Incomplete: the active engine's notification (vtable
+            // +0x108) and the animation state at 0x72EA and 0x72EC.
+        }
+
+        if (field_72A2 < 1) {
+            m_bAllowEffectListCall = TRUE;
+
+            // TODO: Incomplete: HandlePersistantEffects (0x733200) while
+            // the world timer runs.
+
+            return bResult;
+        }
+
+        field_72A2--;
+    }
 }
 
 // 0x733290
