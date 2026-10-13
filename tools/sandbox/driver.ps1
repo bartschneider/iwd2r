@@ -457,6 +457,17 @@ try {
         $muteState = 'failed'
         try { $muteState = [IwdAudio]::MuteDefaultOutput() } catch { $muteState = "failed: $_" }
         Log "sandbox audio: $muteState"
+        # A muted device can still be heard on the host on some systems, so
+        # the sandbox's audio service is stopped too. The sandbox user is an
+        # administrator; the game then runs without an audio device.
+        foreach ($service in 'Audiosrv', 'AudioEndpointBuilder') {
+            try {
+                Stop-Service -Name $service -Force -ErrorAction Stop
+                Log "stopped $service"
+            } catch {
+                Log "could not stop ${service}: $_"
+            }
+        }
         New-Item -ItemType Directory -Force -Path $cfg.control | Out-Null
         $env:IWD2_DATA = $cfg.data
         $env:IWD2R_INI_OVERRIDE = $cfg.ini_override
