@@ -6,6 +6,7 @@
 #include "CVidImage.h"
 #include "CVidPoly.h"
 #include "CVideo3d.h"
+#include "render/api.h"
 
 #define SEVEN_EIGHT_ZERO 780
 
@@ -1191,6 +1192,7 @@ void CVidInf::FXClear(LPVOID pSurface, INT nSize)
 // 0x79D100
 BOOL CVidInf::FXRender(CVidCell* pVidCell, INT nRefPointX, INT nRefPointY, DWORD dwFlags, INT nTransValue)
 {
+    if (auto* b = render::Active(); b && b->Clipped(m_rLockedRect).DrawCell(*pVidCell, pVidCell->m_nCurrentFrame, { nRefPointX, nRefPointY }, &pVidCell->m_cPalette, dwFlags, nTransValue)) return TRUE;
     if (g_pChitin->cVideo.m_bIs3dAccelerated) {
         return pVidCell->FXRender3d(nRefPointX, nRefPointY, m_rLockedRect, dwFlags | 0x40, nTransValue, 0);
     }
@@ -1205,6 +1207,7 @@ BOOL CVidInf::FXRender(CVidCell* pVidCell, INT nRefPointX, INT nRefPointY, DWORD
 // 0x79D180
 BOOL CVidInf::FXRender(CVidCell* pVidCell, INT nRefPtX, INT nRefPtY, const CRect& rClip, BOOLEAN a5, DWORD dwFlags)
 {
+    if (auto* b = render::Active(); b && b->Clipped(rClip).DrawCell(*pVidCell, pVidCell->m_nCurrentFrame, { nRefPtX, nRefPtY }, &pVidCell->m_cPalette, dwFlags, -1)) return TRUE;
     if (g_pChitin->cVideo.m_bIs3dAccelerated) {
         return pVidCell->FXRender3d(nRefPtX,
             nRefPtY,
@@ -1232,6 +1235,7 @@ BOOL CVidInf::FXRender(CVidCell* pVidCell, INT nRefPtX, INT nRefPtY, const CRect
 // 0x79D220
 BOOL CVidInf::FXRender(CParticle* pParticle, const CRect& rClip, USHORT nFlag, USHORT nBlobSize)
 {
+    if (auto* b = render::Active(); b && b->Clipped(rClip).DrawParticle(*pParticle, { 0, 0 }, nFlag, nBlobSize)) return TRUE;
     if (g_pChitin->cVideo.m_bIs3dAccelerated) {
         CVideo3d::glEnable(GL_TEXTURE_2D);
         g_pChitin->GetCurrentVideoMode()->CheckResults3d(0);
@@ -1283,6 +1287,7 @@ BOOL CVidInf::FXRender(CParticle* pParticle, const CRect& rClip, USHORT nFlag, U
 // 0x79D450
 BOOL CVidInf::FXRender(CPoint* pPoints, INT nPoints, const CRect& rSurface, COLORREF rgbColor, BOOL bClipped)
 {
+    if (auto* b = render::Active(); b && b->Clipped(rSurface).DrawPoints(pPoints, nPoints, rgbColor)) return TRUE;
     if (g_pChitin->cVideo.m_bIs3dAccelerated) {
         CVideo3d::glEnable(GL_TEXTURE_2D);
         g_pChitin->GetCurrentVideoMode()->CheckResults3d(0);
@@ -1366,6 +1371,7 @@ BOOL CVidInf::FXLock(CRect& rFXRect, DWORD dwFlags)
 // 0x79D970
 BOOL CVidInf::FXTextOut(CVidFont* pFont, const CString& sString, INT x, INT y, const CRect& rClip, DWORD dwFlags, BOOL bDemanded)
 {
+    if (auto* b = render::Active(); b && b->Clipped(rClip).DrawText(*pFont, sString, { x, y }, dwFlags)) return TRUE;
     if (g_pChitin->cVideo.Is3dAccelerated()) {
         LONG lPitch = g_pChitin->cVideo.field_13A
             ? CVidTile::BYTES_PER_TEXEL * CVIDINF_FX_WIDTH
@@ -1534,6 +1540,7 @@ BOOL CVidInf::BKUnlock()
 // 0x79DE50
 BOOL CVidInf::BKRender(CVidCell* pVidCell, INT x, INT y, const CRect& rClip, BOOLEAN bDemanded, DWORD dwFlags)
 {
+    if (auto* b = render::Active(); b && b->Clipped(render::At(rClip, m_rLockedRect)).DrawCell(*pVidCell, pVidCell->m_nCurrentFrame, render::At(x, y, m_rLockedRect), &pVidCell->m_cPalette, dwFlags, -1)) return TRUE;
     if (g_pChitin->cVideo.m_bIs3dAccelerated) {
         memset(CVideo3d::texImageData, 0, sizeof(DWORD) * CVIDINF_FX_WIDTH * CVIDINF_FX_HEIGHT);
 
@@ -1564,6 +1571,7 @@ BOOL CVidInf::BKRender(CVidCell* pVidCell, INT x, INT y, const CRect& rClip, BOO
 // 0x79DF60
 BOOL CVidInf::BKRender(CVidCell* pVidCell, INT x, INT y, DWORD dwFlags, INT nTransVal)
 {
+    if (auto* b = render::Active(); b && b->Clipped(m_rLockedRect).DrawCell(*pVidCell, pVidCell->m_nCurrentFrame, render::At(x, y, m_rLockedRect), &pVidCell->m_cPalette, dwFlags, nTransVal)) return TRUE;
     if (g_pChitin->cVideo.m_bIs3dAccelerated) {
         if (g_pChitin->cVideo.field_13A) {
             memset(CVideo3d::texImageData, 0, sizeof(DWORD) * CVIDINF_FX_WIDTH * m_rLockedRect.Height());
@@ -1592,6 +1600,7 @@ BOOL CVidInf::BKRender(CVidCell* pVidCell, INT x, INT y, DWORD dwFlags, INT nTra
 // 0x79E060
 BOOL CVidInf::BKRender(CParticle* pParticle, const CRect& rClip, USHORT nFlag, USHORT nBlobSize)
 {
+    if (auto* b = render::Active(); b && b->Clipped(render::At(rClip, m_rLockedRect)).DrawParticle(*pParticle, m_rLockedRect.TopLeft(), nFlag, nBlobSize)) return TRUE;
     if (g_pChitin->cVideo.m_bIs3dAccelerated) {
         pParticle->Render3d(rClip, m_rLockedRect, nFlag, nBlobSize);
         return TRUE;
@@ -1607,6 +1616,7 @@ BOOL CVidInf::BKRender(CParticle* pParticle, const CRect& rClip, USHORT nFlag, U
 // 0x79E0D0
 BOOL CVidInf::BKRenderEllipse(const CPoint& ptCenter, const CSize& axes, const CRect& rClip, COLORREF rgbColor)
 {
+    if (auto* b = render::Active(); b && b->Clipped(render::At(rClip, m_rLockedRect)).DrawEllipse(render::At(ptCenter.x, ptCenter.y, m_rLockedRect), axes, rgbColor)) return TRUE;
     if (g_pChitin->cVideo.m_bIs3dAccelerated) {
         CRect rNewClip(rClip);
         rNewClip.OffsetRect(m_rLockedRect.TopLeft());
@@ -1625,6 +1635,7 @@ BOOL CVidInf::BKRenderEllipse(const CPoint& ptCenter, const CSize& axes, const C
 // 0x79E1D0
 BOOL CVidInf::BKRenderLine(int nXFrom, int nYFrom, int nXTo, int nYTo, const CRect& rSurface, COLORREF rgbColor)
 {
+    if (auto* b = render::Active(); b && b->Clipped(render::At(rSurface, m_rLockedRect)).DrawLine(render::At(nXFrom, nYFrom, m_rLockedRect), render::At(nXTo, nYTo, m_rLockedRect), rgbColor)) return TRUE;
     if (g_pChitin->cVideo.m_bIs3dAccelerated) {
         CRect rNewSurface(rSurface);
         rNewSurface.OffsetRect(m_rLockedRect.TopLeft());
@@ -1653,6 +1664,7 @@ BOOL CVidInf::BKRenderLine(int nXFrom, int nYFrom, int nXTo, int nYTo, const CRe
 // 0x79E2D0
 BOOL CVidInf::BKRenderConvexPoly(CVidPoly* pPoly, const CRect& rClipRect, DWORD dwColor, DWORD dwFlags, const CPoint& ptRef)
 {
+    if (auto* b = render::Active(); b && b->Clipped(rClipRect).DrawPoly(render::Vertices(*pPoly).data(), pPoly->m_nVertices, dwColor, true)) return TRUE;
     if (g_pChitin->cVideo.Is3dAccelerated()) {
         return pPoly->FillConvexPoly3d(rClipRect, dwColor, dwFlags, ptRef);
     }
@@ -1672,6 +1684,7 @@ BOOL CVidInf::BKRenderConvexPoly(CVidPoly* pPoly, const CRect& rClipRect, DWORD 
 // 0x79E340
 BOOL CVidInf::BKTextOut(CVidFont* pFont, const CString& sString, int x, int y, const CRect& rClip, DWORD dwFlags, BOOL bDemanded)
 {
+    if (auto* b = render::Active(); b && b->Clipped(render::At(rClip, m_rLockedRect)).DrawText(*pFont, sString, render::At(x, y, m_rLockedRect), dwFlags)) return TRUE;
     if (g_pChitin->cVideo.m_bIs3dAccelerated) {
         CRect rNewClip;
         rNewClip.left = m_rLockedRect.left + rClip.left;
@@ -1975,6 +1988,7 @@ BOOL CVidInf::RenderPointer()
 // 0x79F520
 void CVidInf::RenderFlash(UINT nSurface, COLORREF rgbColor, unsigned char a4, const CRect& rClip)
 {
+    if (auto* b = render::Active(); b && b->Flash(rClip, rgbColor)) return;
     if (g_pChitin->cVideo.Is3dAccelerated()) {
         RenderFlash3d(rgbColor, rClip);
         return;

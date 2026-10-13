@@ -4,6 +4,7 @@
 #include "CUtil.h"
 #include "CVidCell.h"
 #include "CVideo3d.h"
+#include "render/api.h"
 
 typedef struct CVIDMODE_CLIP_OUTCODE {
     unsigned int all;
@@ -345,6 +346,7 @@ INT CVidMode::ApplyFadeAmount(INT nColor)
 // 0x796050
 BOOL CVidMode::DrawEllipse(const CPoint& ptCenter, const CSize& axis, const CRect& rClip, COLORREF rgbColor)
 {
+    if (auto* b = render::Active(); b && b->Clipped(rClip).DrawEllipse(ptCenter, axis, rgbColor)) return TRUE;
     if (g_pChitin->cVideo.m_bIs3dAccelerated) {
         return DrawEllipse3d(ptCenter, axis, rClip, rgbColor);
     }
@@ -484,6 +486,7 @@ BOOL CVidMode::DrawPoints(CPoint* pPoints, INT nPoints, WORD* pSurface, LONG lPi
 // 0x797A30
 BOOL CVidMode::DrawLine(INT nXFrom, INT nYFrom, INT nXTo, INT nYTo, UINT nSurface, const CRect& rSurface, COLORREF rgbColor)
 {
+    if (auto* b = render::Active(); b && b->Clipped(rSurface).DrawLine({ nXFrom, nYFrom }, { nXTo, nYTo }, rgbColor)) return TRUE;
     if (g_pChitin->cVideo.m_bIs3dAccelerated) {
         return DrawLine3d(nXFrom, nYFrom, nXTo, nYTo, rSurface, rgbColor);
     }
@@ -562,6 +565,7 @@ BOOL CVidMode::DrawLine16(INT nXFrom, INT nYFrom, INT nXTo, INT nYTo, WORD* pSur
 // 0x7980E0
 BOOL CVidMode::DrawRect(const CRect& r, UINT nSurface, const CRect& rClip, COLORREF rgbColor)
 {
+    if (auto* b = render::Active(); b && b->Clipped(rClip).DrawRect(r, rgbColor, false)) return TRUE;
     if (g_pChitin->cVideo.Is3dAccelerated()) {
         return DrawRect3d(r, rClip, rgbColor);
     }
@@ -717,6 +721,7 @@ BOOL CVidMode::DrawRect(const CRect& r, UINT nSurface, const CRect& rClip, COLOR
 // 0x798780
 BOOL CVidMode::DrawRecticle(const CVIDMODE_RECTICLE_DESCRIPTION& rd, const CRect& rClip, COLORREF rgbColor)
 {
+    if (auto* b = render::Active(); b && b->Clipped(rClip).DrawRecticle(rd, rgbColor)) return TRUE;
     if (g_pChitin->cVideo.m_bIs3dAccelerated) {
         return DrawRecticle3d(rd, rClip, rgbColor);
     }
@@ -875,6 +880,7 @@ BOOL CVidMode::DrawThickLine16(INT nXFrom, INT nYFrom, INT nXTo, INT nYTo, WORD*
 // 0x799540
 BOOL CVidMode::OutlinePoly(const CPoint* pPoly, SHORT nVertices, const CRect& rSurface, COLORREF rgbColor, const CPoint& ptOffset)
 {
+    if (auto* b = render::Active(); b && b->Clipped(rSurface).DrawPoly(render::Minus(pPoly, nVertices, ptOffset).data(), nVertices, rgbColor, false)) return TRUE;
     // TODO: Incomplete.
 
     return FALSE;
@@ -884,6 +890,7 @@ BOOL CVidMode::OutlinePoly(const CPoint* pPoly, SHORT nVertices, const CRect& rS
 // 0x7999B0
 BOOL CVidMode::EraseScreen(UINT nSurface, COLORREF rgbColor)
 {
+    if (auto* b = render::Active(); b && b->Clipped(CRect(0, 0, CVideo::SCREENWIDTH, CVideo::SCREENHEIGHT)).DrawRect(CRect(0, 0, CVideo::SCREENWIDTH, CVideo::SCREENHEIGHT), rgbColor, true)) return TRUE;
     if (nSurface >= m_nSurfaces) {
         return FALSE;
     }
@@ -1092,6 +1099,7 @@ BOOL CVidMode::LockSurface(UINT nIndex, LPDDSURFACEDESC pSurfaceDesc, const CRec
 // 0x79A080
 BOOL CVidMode::PolyLine(INT nSurface, CRect& rSurface, LPPOINT lpPoints, int nCount, COLORREF rgbColor, int nThickness)
 {
+    if (auto* b = render::Active(); b && b->Clipped(rSurface).DrawPolyLine(lpPoints, nCount, rgbColor, nThickness)) return TRUE;
     BOOL bResult;
 
     // __FILE__: C:\Projects\Icewind2\src\chitin\ChVideo.cpp
@@ -1969,6 +1977,7 @@ BOOL CVidMode::GetFullyFaded()
 // NOTE: Inlined.
 void CVidMode::UpdateFade()
 {
+    if (auto* b = render::Active()) b->Fade(m_nFade);
     if (m_bFadeTo) {
         if (m_nFade > 0) {
             m_nFade--;
