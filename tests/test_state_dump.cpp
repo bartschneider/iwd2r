@@ -264,14 +264,12 @@ TEST_CASE("replay mode dumps the start screen checkpoint", "[dump][data]")
 #ifdef _WIN32
         const std::string cmd = "set SDL_VIDEO_DRIVER=dummy&& set SDL_AUDIO_DRIVER=dummy&& set IWD2R_SCRIPT=" + script
             + "&& set IWD2R_SHOT_DIR=" + dir.string() + "&& set IWD2R_STATE_DUMP=" + dir.string()
-            + "&& set IWD2R_SEED=1&& set \"IWD2R_INI_OVERRIDE=" + overrides + "\"&& set IWD2_DATA=" + data + "&& \""
-            IWD2R_EXE "\" > \"" + out + "\" 2>&1";
+            + "&& set IWD2R_SEED=1&& set \"IWD2R_INI_OVERRIDE=" + overrides + "\"&& set IWD2_DATA=" + data + "&& \"" IWD2R_EXE "\" > \"" + out + "\" 2>&1";
         const std::string full = "\"" + cmd + "\"";
 #else
         const std::string full = "SDL_VIDEO_DRIVER=dummy SDL_AUDIO_DRIVER=dummy IWD2R_SCRIPT=\"" + script
             + "\" IWD2R_SHOT_DIR=\"" + dir.string() + "\" IWD2R_STATE_DUMP=\"" + dir.string()
-            + "\" IWD2R_SEED=1 IWD2R_INI_OVERRIDE=\"" + overrides + "\" IWD2_DATA=\"" + data + "\" timeout 150 \""
-            IWD2R_EXE "\" > \"" + out + "\" 2>&1";
+            + "\" IWD2R_SEED=1 IWD2R_INI_OVERRIDE=\"" + overrides + "\" IWD2_DATA=\"" + data + "\" timeout 150 \"" IWD2R_EXE "\" > \"" + out + "\" 2>&1";
 #endif
         raw = std::system(full.c_str());
     }

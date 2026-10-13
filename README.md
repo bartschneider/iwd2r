@@ -14,13 +14,13 @@ Bring your own copy of Icewind Dale II: Complete from GOG. The DRM-free GOG vers
 | # | Project | State |
 |---|---|---|
 | 1 | Portability foundation | Implemented on branch `first`, pending final review and a visual check |
-| 2 | Verification harness | Not started |
+| 2 | Verification harness | Implemented on branch `first` |
 | 3 | Finish the simulation | Not started |
 | 4 | Render API and classic renderer | Not started |
 | 5 | IEex native layer and Lua API | Not started |
 | 6 | Remaster renderer | Not started |
 
-Current numbers: four presets build; 211 tests pass on Linux; the start screen is reached headlessly on Linux and Windows.
+Current numbers: four presets build; 245 tests pass on Linux; the start screen is reached headlessly on Linux and Windows.
 
 Engine sites that still truncate pointers to 32 bits on 64-bit targets are listed for project 3 in [docs/64bit-cast-sites.md](docs/64bit-cast-sites.md).
 
@@ -112,6 +112,22 @@ Headless smoke run, which prints a framebuffer hash:
 ```
 SDL_VIDEO_DRIVER=dummy SDL_AUDIO_DRIVER=dummy IWD2R_SMOKE_FRAMES=300 ./build/linux-gcc/iwd2r
 ```
+
+## Verification
+
+The oracle checks our engine against the original game's own code. The original `iwd2.exe` runs for real on Windows; ours runs next to it; the results are compared. A function counts as done only when it compiles, matches the original, and has an evidence file. The design is in [docs/superpowers/specs/2026-10-12-iwd2r-verification-harness-design.md](docs/superpowers/specs/2026-10-12-iwd2r-verification-harness-design.md) and the reasons for its runtime in [ADR 0003](docs/adr/0003-oracle-runtime.md). Parked items are in [docs/followups.md](docs/followups.md).
+
+Everything here needs a Windows host with your own copy of the game, driven from WSL. Nothing from the game is committed. Results go to `runs/<YYYYMMDD-HHMMSS>/`, which is not committed either.
+
+- **Ghidra.** `tools/ghidra/setup.sh` installs pinned Ghidra, Node.js and REA under `~/.local/share/iwd2r/`, with no sudo. `tools/ghidra/make_project.py` builds the labelled project: our `// 0xADDR` names first, then IEex's.
+- **Vanilla copy.** `python3 tools/oracle.py vanilla` copies your install to `C:\Users\thier\iwd2r-oracle\game`, runs IWD2EE's uninstaller there, and checks that `iwd2.exe` has the vanilla MD5. Your install is never changed. `--rebuild` starts over.
+- **Function oracle.** `python3 tools/oracle.py build` builds the 32-bit runner. `python3 tools/oracle.py run` maps the vanilla exe into it and calls the original's functions and ours with the same inputs. `--file NAME` runs one case file from `oracle/cases/`, `--seed` and `--iterations` set the sweep, and `--selftest` checks the loader. It writes `runs/<stamp>/oracle.json` and exits 1 on any mismatch or crash.
+- **Replays.** `python3 tools/oracle.py replay record scenarios/chargen_replay.txt` plays a scenario in the original with a recorder DLL and writes state dumps. `replay compare` plays it in both engines with the same seed and compares every `checkpoint` line field by field. Our engine runs a deterministic replay mode when `IWD2R_STATE_DUMP` names a folder. Screens compared are listed in `oracle/replay/screens.json` (`connection`, `create_char`); `oracle/replay/known_differences.json` lists accepted differences.
+- **Evidence.** `python3 tools/oracle.py evidence 0x5845D0` drafts `docs/evidence/5845D0.md` from the Ghidra project. `python3 tools/check_evidence.py --base origin/main` fails when a changed function has no evidence file. See [docs/evidence/README.md](docs/evidence/README.md).
+
+The "done" rule: every function you change under `src/` that carries a `// 0xADDR` comment needs an evidence file with an oracle case or a written reason for none. CI enforces it.
+
+CI runs the parts that need no game data: the PE loader tests (`[pe]`), the VC6 `rand` tests (`[rand]`), the oracle generator tests (`[oracle]`), the state dump and replay tests (`[dump]`), `tests/test_tools.py` and the evidence check. The runner itself needs the vanilla exe, so it runs only on your machine.
 
 ## Deviations from the original
 

@@ -397,6 +397,7 @@ public:
     int GetStartRotation(INT nCharacterSlot) const;
     CList<STRREF, STRREF>* GetChapterText(const CResRef& cResText, BYTE nChapter) const;
     void GetClassStringLower(BYTE nClass, DWORD a2, DWORD a3, CString& sClass, int a5) const;
+    static STRREF GetFighterTypeStrRef(BYTE nClass, DWORD dwFlags);
     void GetClassStringMixed(BYTE nClass, DWORD nSpecialist, DWORD dwFlags, CString& sClass, int a5) const;
     void GetScriptDescription(const CString& sScript, CString& sTitle, CString& sDescription) const;
     void GetCharacterStateDescription(INT nState, CString& sDescription) const;

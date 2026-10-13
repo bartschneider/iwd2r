@@ -10557,7 +10557,7 @@ BOOL CGameSprite::ProcessEffectList()
                 // TODO: Incomplete: the derived stats copy, the animation
                 // updates, the messages, the portrait update and the AI
                 // actions around HandleEffects.
-                bResult = HandleEffects();
+                HandleEffects();
             }
 
             // TODO: Incomplete: the active engine's notification (vtable

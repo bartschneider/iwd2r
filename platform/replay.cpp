@@ -140,7 +140,11 @@ namespace {
         s.aiStalledFrames = g_stalledFrames;
         if (const unsigned int* ai = g_inputRandState.load()) {
             s.hasAiRngState = true;
-            s.aiRngState = *ai;
+            // The AI thread owns this state. It is not proven idle here,
+            // but in_async_update is 0 at every checkpoint, so it is not
+            // inside its update. The volatile read keeps the compiler from
+            // caching or splitting the load; it adds no ordering.
+            s.aiRngState = *static_cast<const volatile unsigned int*>(ai);
         }
         if (const state_dump::DumpSource* source = state_dump::Source())
             source->Read(&s.engine);

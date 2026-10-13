@@ -2731,5 +2731,65 @@ class OracleReplayCompareTest(unittest.TestCase):
         self.assertIn('platform::replay::SetTimer(', text)
 
 
+class KnownDifferencesTest(unittest.TestCase):
+    """tools/oracle.py replay compare: known_differences.json checks."""
+
+    def write(self, entries):
+        folder = tempfile.mkdtemp()
+        self.addCleanup(__import__('shutil').rmtree, folder)
+        path = os.path.join(folder, 'known.json')
+        with open(path, 'w') as f:
+            json.dump(entries, f)
+        return path
+
+    def entry(self, evidence='docs/evidence/README.md', field='a.b',
+              checkpoint='*'):
+        return {'field': field, 'checkpoint': checkpoint, 'reason': 'r',
+                'evidence': evidence}
+
+    def test_existing_evidence_loads(self):
+        known = oracle.load_known(self.write([self.entry()]))
+        self.assertEqual(len(known), 1)
+
+    def test_missing_evidence_file_is_refused(self):
+        path = self.write([self.entry(evidence='docs/evidence/NOPE.md')])
+        with self.assertRaises(SystemExit) as raised:
+            oracle.load_known(path)
+        self.assertIn('NOPE.md', str(raised.exception))
+
+    def test_evidence_by_address(self):
+        oracle.load_known(self.write([self.entry(evidence='0x72DE60')]))
+        with self.assertRaises(SystemExit):
+            oracle.load_known(self.write([self.entry(evidence='0x1')]))
+
+    def test_committed_file_loads(self):
+        oracle.load_known()
+
+    def test_stale_entries_are_the_unmatched_ones(self):
+        used = self.entry(field='x')
+        unused = self.entry(field='y')
+        hits = [('cp', 'x', 1, 2, used)]
+        self.assertEqual(oracle.stale_known([used, unused], hits), [unused])
+        self.assertEqual(oracle.stale_known([used], hits), [])
+        self.assertEqual(oracle.stale_known([], []), [])
+
+    def test_known_hit_is_not_stale_end_to_end(self):
+        folder = tempfile.mkdtemp()
+        self.addCleanup(__import__('shutil').rmtree, folder)
+        dirs = []
+        for side, value in (('o', 1), ('u', 2)):
+            d = os.path.join(folder, side)
+            os.mkdir(d)
+            with open(os.path.join(d, 'checkpoint-cp.json'), 'w') as f:
+                json.dump({'screen': 'connection', 'v': value}, f)
+            dirs.append(d)
+        known = [self.entry(field='v', checkpoint='cp'),
+                 self.entry(field='w', checkpoint='cp')]
+        lines, failures, hits = oracle.compare_checkpoints(
+            dirs[0], dirs[1], ['cp'], ['connection'], known)
+        self.assertEqual(failures, 0)
+        self.assertEqual(oracle.stale_known(known, hits), [known[1]])
+
+
 if __name__ == '__main__':
     unittest.main()

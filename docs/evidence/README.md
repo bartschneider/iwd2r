@@ -101,3 +101,7 @@ function, its `extra_labels.txt` line can go.
 | 0x547020 CRuleTables::GetIterativeAttackBonus | pending/iterative_attack_bonus | determinism check |
 | 0x73D560 CGameSprite::Damage (weapon damage dice) | pending/damage | none: equipped CItems, the target's animation, the message handler |
 | 0x542A90 CRuleTables::RollHitPoints | pending/roll_hit_points | determinism check |
+
+## Replays and known differences
+
+`python3 tools/oracle.py replay compare <scenario>` compares our engine with the original at every `checkpoint` line of a scenario. A difference that is understood and accepted goes in `oracle/replay/known_differences.json` as `field`, `checkpoint` (a name, or `"*"`), `reason` and `evidence`. The `evidence` value is an address such as `0x72DE60` or a path, and the file must exist under `docs/evidence/`, or the command stops. The compare prints a `STALE` line for any entry that matched no difference, so remove it. The file is empty now.

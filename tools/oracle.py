@@ -1541,10 +1541,20 @@ def load_screens(path=SCREENS_JSON):
     return screens
 
 
+def known_evidence_path(evidence):
+    """The evidence file an entry names: an address such as 0x72DE60 or a
+    path relative to the repository."""
+    if re.fullmatch(r'0[xX][0-9A-Fa-f]+', evidence):
+        return os.path.join(ROOT, 'docs', 'evidence',
+                            evidence[2:].upper() + '.md')
+    return os.path.join(ROOT, evidence)
+
+
 def load_known(path=KNOWN_DIFFERENCES):
     """known_differences.json: a list of {field, checkpoint, reason,
     evidence}; field is a flatten() path, checkpoint a scenario checkpoint
-    name or "*" for every checkpoint."""
+    name or "*" for every checkpoint. evidence names an existing file under
+    docs/evidence, by address or path."""
     with open(path) as f:
         known = json.load(f)
     keys = {'field', 'checkpoint', 'reason', 'evidence'}
@@ -1555,7 +1565,17 @@ def load_known(path=KNOWN_DIFFERENCES):
                 isinstance(entry[k], str) and entry[k] for k in keys):
             sys.exit('oracle: %s: each entry needs exactly %s, non-empty: %r'
                      % (path, ', '.join(sorted(keys)), entry))
+    for entry in known:
+        if not os.path.isfile(known_evidence_path(entry['evidence'])):
+            sys.exit('oracle: %s: the evidence file %s does not exist'
+                     % (path, entry['evidence']))
     return known
+
+
+def stale_known(known, known_hits):
+    """The known_differences entries that matched no difference."""
+    used = {id(hit[4]) for hit in known_hits}
+    return [entry for entry in known if id(entry) not in used]
 
 
 def known_entry(known, checkpoint, field):
@@ -1666,6 +1686,13 @@ def cmd_replay_compare(args):
         names, screens, known)
     for line in lines:
         print(line)
+    for entry in stale_known(known, known_hits):
+        stale = ('STALE known difference: %s at %s matched nothing; '
+                 'remove it from %s' % (
+                     entry['field'], entry['checkpoint'],
+                     os.path.relpath(KNOWN_DIFFERENCES, ROOT)))
+        lines.append(stale)
+        print(stale)
     report = {'scenario': os.path.relpath(script, ROOT), 'seed': args.seed,
               'original_result': original, 'our_result': ours,
               'lines': lines, 'failures': failures,
