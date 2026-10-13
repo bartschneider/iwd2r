@@ -2682,7 +2682,17 @@ class OracleReplayCompareTest(unittest.TestCase):
                      ['--dump-every', 'x']):
             with self.assertRaises(SystemExit, msg=args), \
                     contextlib.redirect_stderr(io.StringIO()):
-                oracle.main(['replay', 'compare', 'replay_click'] + args)
+                oracle.main(['replay', 'compare', 'chargen_replay'] + args)
+
+    def test_chargen_scenario(self):
+        actions = realinput.load_scenario(
+            os.path.join(ROOT, 'scenarios', 'chargen_replay.txt'))
+        names = [a['name'] for a in actions if a['op'] == 'checkpoint']
+        self.assertEqual(names[:2], ['menu', 'chargen'])
+        self.assertEqual(names[-1], 'abilities_done')
+        self.assertEqual(len(names), len(set(names)))
+        self.assertEqual(actions[-1], {'op': 'quit', 'line':
+                                       actions[-1]['line']})
 
     def test_replay_clock_shared(self):
         # Our replay mode (platform/replay.cpp, platform/clock.cpp) and the

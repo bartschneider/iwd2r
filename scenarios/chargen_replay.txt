@@ -1,0 +1,91 @@
+# Character generation, step by step, with a checkpoint after each choice:
+# the scenario tools/oracle.py replay compare runs in the original and in
+# our engine (Task 13). Gender, appearance, race, class, alignment, then
+# the abilities (IWD2's are point-buy: each + or - is a checkpoint), and it
+# stops before the name. Coordinates for Resolution=800.
+wait 60
+checkpoint menu
+# New Game (645,262), then Done (537,562) with New Party selected, then the
+# first slot's Create Character (530,100).
+click 645 262
+wait 90
+click 537 562
+wait 60
+click 530 100
+wait 90
+checkpoint chargen
+# Gender (400,128): Male (400,286), Next (536,562) to Appearance.
+click 400 128
+wait 30
+click 400 286
+wait 20
+checkpoint male
+click 536 562
+wait 30
+checkpoint appearance
+# Next keeps the first portrait and returns to the main menu.
+click 536 562
+wait 30
+checkpoint gender_done
+# Race (400,163): Elf (400,198), which is a Moon Elf, then Next.
+click 400 163
+wait 30
+click 400 198
+wait 20
+checkpoint elf
+click 536 562
+wait 30
+checkpoint race_done
+# Class (400,198): Fighter (400,268), then Next.
+click 400 198
+wait 30
+click 400 268
+wait 20
+checkpoint fighter
+click 536 562
+wait 30
+checkpoint class_done
+# Alignment (400,233): Chaotic Good (400,198), then Next.
+click 400 233
+wait 30
+click 400 198
+wait 20
+checkpoint chaotic_good
+click 536 562
+wait 30
+checkpoint alignment_done
+# Abilities (400,268): + at x 499 and - at x 517, rows at y 170 (STR),
+# 206 (DEX), 242 (CON), 278 (INT), 314 (WIS), 350 (CHA).
+click 400 268
+wait 30
+checkpoint abilities
+click 499 170
+wait 20
+checkpoint str_up_1
+click 499 170
+wait 20
+checkpoint str_up_2
+click 499 170
+wait 20
+checkpoint str_up_3
+click 499 242
+wait 20
+checkpoint con_up
+click 517 278
+wait 20
+checkpoint int_down
+click 517 350
+wait 20
+checkpoint cha_down
+# Next (536,562) with points left asks "You have some unallocated points
+# left. Are you sure you want to continue?"; Yes (338,331) keeps the
+# abilities and returns to the main menu, which offers Skills.
+click 536 562
+wait 30
+checkpoint points_prompt
+click 338 331
+wait 30
+checkpoint abilities_done
+shot chargen_abilities_done
+# Stop before the name. WM_CLOSE: the quit confirmation takes its default.
+quit

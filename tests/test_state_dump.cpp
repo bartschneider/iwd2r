@@ -215,9 +215,11 @@ TEST_CASE("replay mode is off without IWD2R_STATE_DUMP", "[dump]")
     REQUIRE(timeKillEvent(id) == MMSYSERR_INVALPARAM); // a fired one-shot is gone
 }
 
-TEST_CASE("checkpoint lines parse for the replay drivers", "[dump]")
+namespace {
+
+std::vector<std::string> CheckpointNames(const char* scenario)
 {
-    const std::string script = ReadFile(fs::path(IWD2R_SOURCE_DIR) / "scenarios" / "replay_click.txt");
+    const std::string script = ReadFile(fs::path(IWD2R_SOURCE_DIR) / "scenarios" / scenario);
     std::vector<platform::script::Command> commands;
     std::string error;
     REQUIRE(platform::script::Parse(script, commands, error));
@@ -226,7 +228,20 @@ TEST_CASE("checkpoint lines parse for the replay drivers", "[dump]")
         if (c.verb == platform::script::Verb::Checkpoint)
             names.push_back(c.text);
     }
-    REQUIRE(names == std::vector<std::string> { "menu", "select_party", "party_formation", "chargen" });
+    return names;
+}
+
+}
+
+TEST_CASE("checkpoint lines parse for the replay drivers", "[dump]")
+{
+    REQUIRE(CheckpointNames("replay_click.txt")
+        == std::vector<std::string> { "menu", "select_party", "party_formation", "chargen" });
+    const std::vector<std::string> chargen = CheckpointNames("chargen_replay.txt");
+    REQUIRE(chargen.size() == 20);
+    REQUIRE(chargen.front() == "menu");
+    REQUIRE(chargen[1] == "chargen");
+    REQUIRE(chargen.back() == "abilities_done");
 }
 
 // End to end: our engine in the replay mode on the start screen scenario
