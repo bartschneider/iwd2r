@@ -10,7 +10,7 @@
 #include "CWorldMap.h"
 #include "Icewind586B70.h"
 #include "ScreenLayout.h"
-#include "install_ini_backup.h"
+#include "data_view.h"
 #include "platform/data_dir.h"
 #include "platform/window.h"
 
@@ -20,11 +20,15 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <memory>
 #include <random>
 #include <string>
 #include <vector>
 
 namespace {
+
+// The private view the engine runs on (what IWD2_DATA points at inside it).
+std::string g_view;
 
 // The engine in this process, as iwd2r_main builds it, without its threads.
 // Built once and leaked: the engine's globals live until the process ends.
@@ -46,7 +50,31 @@ bool StartEngine(std::string& error)
     setenv("SDL_VIDEO_DRIVER", "dummy", 1);
     setenv("SDL_AUDIO_DRIVER", "dummy", 1);
 #endif
-    if (!platform::ResolveDataDir()) {
+    // The engine writes into its data folder (temp/, cache/, the INI files):
+    // it starts on a private view, which lives until the process ends.
+    static std::unique_ptr<DataView> view;
+    const char* install = std::getenv("IWD2_DATA");
+    if (install != nullptr && *install != '\0') {
+        const std::string original = install;
+        view = std::make_unique<DataView>(original);
+        g_view = view->Path();
+#ifdef _WIN32
+        _putenv_s("IWD2_DATA", view->Path().c_str());
+#else
+        setenv("IWD2_DATA", view->Path().c_str(), 1);
+#endif
+        const bool found = platform::ResolveDataDir();
+#ifdef _WIN32
+        _putenv_s("IWD2_DATA", original.c_str());
+#else
+        setenv("IWD2_DATA", original.c_str(), 1);
+#endif
+        if (!found) {
+            startError = "data folder not found";
+            error = startError;
+            return false;
+        }
+    } else if (!platform::ResolveDataDir()) {
         startError = "data folder not found";
         error = startError;
         return false;
@@ -205,7 +233,6 @@ TEST_CASE("CVariableHash::Marshal round trips through AddKey", "[vars][data]")
     if (env == nullptr || *env == '\0') {
         SKIP("[iwd2r-skip] IWD2_DATA unset");
     }
-    InstallIniBackup backup(env);
     std::string error;
     REQUIRE(StartEngine(error));
 
@@ -272,7 +299,6 @@ TEST_CASE("CompressDirectory packs a directory that UncompressDirectory restores
     if (env == nullptr || *env == '\0') {
         SKIP("[iwd2r-skip] IWD2_DATA unset");
     }
-    InstallIniBackup backup(env);
     std::string error;
     REQUIRE(StartEngine(error));
 
@@ -317,7 +343,6 @@ TEST_CASE("CompressDirectory skips the save, game, bitmap and map files in any c
     if (env == nullptr || *env == '\0') {
         SKIP("[iwd2r-skip] IWD2_DATA unset");
     }
-    InstallIniBackup backup(env);
     std::string error;
     REQUIRE(StartEngine(error));
 
@@ -353,7 +378,6 @@ TEST_CASE("RemoveSignalsFromQueue keeps only the live signals", "[msg][data]")
     if (env == nullptr || *env == '\0') {
         SKIP("[iwd2r-skip] IWD2_DATA unset");
     }
-    InstallIniBackup backup(env);
     std::string error;
     REQUIRE(StartEngine(error));
 
@@ -410,7 +434,6 @@ TEST_CASE("CWorldMap::Marshal writes back the world map it read", "[worldmap][da
     if (env == nullptr || *env == '\0') {
         SKIP("[iwd2r-skip] IWD2_DATA unset");
     }
-    InstallIniBackup backup(env);
     std::string error;
     REQUIRE(StartEngine(error));
 
@@ -426,7 +449,7 @@ TEST_CASE("CWorldMap::Marshal writes back the world map it read", "[worldmap][da
 
     // SaveGame passes CInfGame::m_sTempDir; the engine's file writer wants
     // its backslashed form. The data folder is the test's private view.
-    const std::filesystem::path written_path = std::filesystem::path(env) / "temp" / "WORLDMAP.WMP";
+    const std::filesystem::path written_path = std::filesystem::path(g_view) / "temp" / "WORLDMAP.WMP";
     std::error_code ec;
     std::filesystem::remove(written_path, ec);
 
@@ -447,7 +470,6 @@ TEST_CASE("NonBlockingWaitForSignal waits for each visible player's signal", "[m
     if (env == nullptr || *env == '\0') {
         SKIP("[iwd2r-skip] IWD2_DATA unset");
     }
-    InstallIniBackup backup(env);
     std::string error;
     REQUIRE(StartEngine(error));
 
