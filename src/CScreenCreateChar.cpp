@@ -4348,7 +4348,50 @@ void CScreenCreateChar::CompleteCharacterAbilities(CGameSprite* pSprite)
 // 0x612DE0
 void CScreenCreateChar::CompleteCharacterSkills(CGameSprite* pSprite)
 {
-    // TODO: Incomplete.
+    const CRuleTables& ruleTables = g_pBaldurChitin->GetObjectGame()->GetRuleTables();
+
+    RemoveItems(pSprite);
+
+    pSprite->GetBaseStats()->m_gold = ruleTables.GetStartingGold(pSprite);
+
+    if (pSprite->GetAIType().m_nClass != CAIOBJECTTYPE_C_MONK) {
+        pSprite->GetEquipment()->m_items[43] = new CItem(CResRef("00STAF01"), 0, 0, 0, 0, 0);
+        pSprite->SelectWeaponAbility(43, 0, 1, 1);
+
+        CGameButtonList* pButtons = pSprite->GetItemUsages(43, 1, 0);
+        POSITION pos = pButtons->GetHeadPosition();
+        if (pos != NULL) {
+            CButtonData* pButtonData = pButtons->GetNext(pos);
+
+            CButtonData buttonData = *pButtonData;
+            pSprite->m_quickWeapons[0] = buttonData;
+
+            if (pButtonData->m_abilityId.m_itemNum >= 11 && pButtonData->m_abilityId.m_itemNum <= 14) {
+                pSprite->field_3D3A[0] = static_cast<unsigned char>(pButtonData->m_abilityId.m_itemNum);
+            } else {
+                pSprite->field_3D3A[0] = 0;
+            }
+
+            delete pButtonData;
+
+            while (pos != NULL) {
+                delete pButtons->GetNext(pos);
+            }
+        }
+
+        pButtons->RemoveAll();
+        delete pButtons;
+    }
+
+    // TODO: Incomplete. The original builds a zeroed CCreatureFileHeader
+    // (the stats before the feats were picked) and a CDerivedStats and
+    // passes both to CGameSprite::sub_71E240 (0x71E240), which adds the base
+    // stat bonuses of every newly picked feat, then to the empty CGameSprite
+    // function at 0x71E750 (`ret 8`). Neither is in src/ yet (CGameSprite.cpp
+    // belongs to the creature-file stream); see docs/evidence/612DE0.md.
+
+    pSprite->field_562C = 1;
+    pSprite->ProcessEffectList();
 }
 
 // 0x613310
