@@ -261,6 +261,24 @@ TEST_CASE("fs find lists the dot entries first for star patterns", "[fs]")
     CHECK(FindAll(tree.str() + "/One/*.GAM") == std::vector<std::string> { "ICEWIND2.GAM" });
 }
 
+TEST_CASE("fs find lists names in NTFS's upper-case order", "[fs]")
+{
+    TempTree tree;
+    Touch(tree.root / "Order" / "a.txt");
+    Touch(tree.root / "Order" / "B.txt");
+    Touch(tree.root / "Order" / "_x");
+    Touch(tree.root / "Order" / "Ab");
+    // Upper-cased: "A.TXT" < "AB" ('.' < 'B') < "B.TXT" < "_X" ('_' after letters).
+    CHECK(FindAll(tree.str() + "/Order/*") == std::vector<std::string> { ".", "..", "a.txt", "Ab", "B.txt", "_x" });
+    CHECK(FindAll(tree.str() + "/Order/*.txt") == std::vector<std::string> { "a.txt", "B.txt" });
+    if (tree.caseSensitive) {
+        // Same upper-cased name: the raw name decides.
+        Touch(tree.root / "Ties" / "ab");
+        Touch(tree.root / "Ties" / "AB");
+        CHECK(FindAll(tree.str() + "/Ties/*") == std::vector<std::string> { ".", "..", "AB", "ab" });
+    }
+}
+
 TEST_CASE("fs attributes copy move delete and directories", "[fs]")
 {
     TempTree tree;

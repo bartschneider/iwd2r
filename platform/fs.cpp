@@ -417,6 +417,27 @@ HANDLE FindFirstFileA(LPCSTR pattern, WIN32_FIND_DATAA* data)
         if (platform::fs::FillFindData(iter->path(), entry))
             record->entries.push_back(entry);
     }
+    // NTFS lists a directory in its $UpCase collation: names compared byte by
+    // byte after upper-casing (so '_' sorts after the letters). The engine
+    // inherits that order (CDimm::CompressDirectory packs files in it), so
+    // sort the snapshot the same way, after the dot entries; ties, possible
+    // only on a case-sensitive file system, go by the raw name.
+    const size_t dots = static_cast<size_t>(std::count_if(record->entries.begin(), record->entries.end(),
+        [](const WIN32_FIND_DATAA& e) { return std::strcmp(e.cFileName, ".") == 0 || std::strcmp(e.cFileName, "..") == 0; }));
+    std::sort(record->entries.begin() + static_cast<std::ptrdiff_t>(dots), record->entries.end(),
+        [](const WIN32_FIND_DATAA& a, const WIN32_FIND_DATAA& b) {
+            for (size_t i = 0;; ++i) {
+                unsigned char ca = static_cast<unsigned char>(a.cFileName[i]);
+                unsigned char cb = static_cast<unsigned char>(b.cFileName[i]);
+                const unsigned char ua = ca >= 'a' && ca <= 'z' ? static_cast<unsigned char>(ca - 'a' + 'A') : ca;
+                const unsigned char ub = cb >= 'a' && cb <= 'z' ? static_cast<unsigned char>(cb - 'a' + 'A') : cb;
+                if (ua != ub)
+                    return ua < ub;
+                if (ca == '\0')
+                    break;
+            }
+            return std::strcmp(a.cFileName, b.cFileName) < 0;
+        });
     if (record->entries.empty())
         return INVALID_HANDLE_VALUE;
     *data = record->entries[0];
