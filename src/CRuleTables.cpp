@@ -2410,6 +2410,7 @@ void CRuleTables::GetClassStringMixed(BYTE nClass, DWORD nSpecialist, DWORD dwFl
     case SPECMASK_WIZARD_TRANSMUTER:
         strMageSchool = 12788; // "Transmuter"
         break;
+    case 0:
     case SPECMASK_WIZARD_UNIVERSAL:
         strMageSchool = 9987; // "Wizard"
         break;
@@ -2418,10 +2419,8 @@ void CRuleTables::GetClassStringMixed(BYTE nClass, DWORD nSpecialist, DWORD dwFl
         break;
     }
 
-    if (strMageSchool != -1) {
-        g_pBaldurChitin->GetTlkTable().Fetch(strMageSchool, strRes);
-        g_pBaldurChitin->GetTlkTable().SetToken(TOKEN_MAGESCHOOL, strRes.szText);
-    }
+    g_pBaldurChitin->GetTlkTable().Fetch(strMageSchool, strRes);
+    g_pBaldurChitin->GetTlkTable().SetToken(TOKEN_MAGESCHOOL, strRes.szText);
 
     STRREF strFighterType;
     if ((dwFlags & 0x200) != 0) {
@@ -2431,10 +2430,10 @@ void CRuleTables::GetClassStringMixed(BYTE nClass, DWORD nSpecialist, DWORD dwFl
     } else {
         switch (nClass) {
         case CAIOBJECTTYPE_C_BARBARIAN:
-            strFighterType = 16799; // "Fighter"
+            strFighterType = 34; // "Barbarian"
             break;
         default:
-            strFighterType = 34; // "Barbarian"
+            strFighterType = 16799; // "Fighter"
             break;
         }
     }
