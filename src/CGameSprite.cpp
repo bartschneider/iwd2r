@@ -10553,11 +10553,11 @@ BOOL CGameSprite::ProcessEffectList()
             // CGameEffectList::CheckEffects calls also enter the block below.
             if (field_562C || m_bHPCONBonusTotalUpdate) {
                 field_562C = FALSE;
+                m_tempStats = m_derivedStats;
 
-                // TODO: Incomplete: the derived stats copy, the animation
-                // updates, the messages, the portrait update and the AI
-                // actions around HandleEffects.
-                HandleEffects();
+                // TODO: Incomplete: the animation updates, the messages, the
+                // portrait update and the AI actions around HandleEffects.
+                bResult = HandleEffects();
             }
 
             // TODO: Incomplete: the active engine's notification (vtable
