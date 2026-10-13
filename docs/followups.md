@@ -8,11 +8,8 @@ These items were found while building the harness (project 2) and parked. The fi
 - **`atol`.** The original's `atol` is VC6's. Our engine maps it only in `C2DArray::GetAtLong` and `CRuleTables::GetNextLevelXP`. Other call sites should use it too. Consider mapping `atol` in `compat/mfc.h` the way `rand` is, with oracle coverage.
 - **Upper-casing.** The original upper-cases by code page (`_mbsupr`). Ours handles ASCII only.
 - **`CGameSprite::CheckAranceFailure` (0x7243F0).** The original compares 16-bit values. Ours compares 32-bit values. The case needs engine state and is pending.
-- **`ProcessEffectList` (0x72DE60).** The address is labelled twice in `src/`: `sub_72DE60` (an empty stub) and `ProcessEffectList`. The Feats step (`UpdateFeatsPanel`, 0x60E3E0) still calls the empty stub, so replays diverge at the feats step.
-- **`SetStat`, DEX case (0x7600F6).** The original sets `field_562C` and calls `ProcessEffectList`, which rolls 5 dice. Ours does neither.
 - **`FillPoly` (0x7C13A0).** Still a stub that returns FALSE. `CInfinity::FXRenderClippingPolys` fills non-convex wall polygons with it, so those do not cover sprites yet; `FillConvexPoly` (fixed, docs/evidence/7C0F40.md) covers the convex ones.
-- **`au_counter` after New Game loads.** It lags the frame count by 1 in ours and by 2 in the original. The replay compare reports it and does not compare it.
-- **State dump coverage.** The dump lacks gender, alignment, class levels and skills. Widen the schema, and add a screenshot comparison to `replay compare`.
+- **State dump coverage.** The dump lacks gender, alignment and class levels. Widen the schema, and add a screenshot comparison to `replay compare`.
 - **Pending oracle cases that need engine state:** `CheckSave` (0x4A42F0), `ProcessEffectList` (0x72DE60), `Hit` (0x73B760), `Damage` (0x73D560), `C2DArray::Load` (0x402B70) and `CheckAranceFailure` (0x7243F0). See the table in [docs/evidence/README.md](evidence/README.md).
 
 ## Runner
@@ -48,7 +45,7 @@ These are in `oracle/replay/` and `tools/`.
 - `oracle.py` reads the injector's pid with a blocking `readline` that has no timeout, so a stuck injector hangs the run.
 - A swallowed `WM_KILLFOCUS` skips the `SetCursor` call the original would have made.
 - `g_lastAu` starts at 0, so the first stall count can be off by one.
-- Loads are deterministic in the replay model (`platform/replay_clock.h` `FrameGate`): the calls a load draws from inside an AI update are held (no frame, no clock step, no timer), so `au_counter` now equals `frame` and a load costs the same AI updates on every machine (sandbox world_entry identical with every ReadFile off the main thread slowed by 1 ms). Open: a host recording of `scenarios/pending/world_entry.txt` made after the change, to confirm the host matches the sandbox (the pre-change host recordings `runs/20261013-143300`/`-143324` differ in `ai_rng_state` from chapter on). `held_frames` still varies between machines; it is a timing field.
+- Loads are deterministic in the replay model (`platform/replay_clock.h` `FrameGate`): the calls a load draws from inside an AI update are held (no frame, no clock step, no timer), so `au_counter` now equals `frame` and a load costs the same AI updates on every machine (sandbox world_entry identical with every ReadFile off the main thread slowed by 1 ms). Open: a host recording of `scenarios/world_entry.txt` made after the change, to confirm the host matches the sandbox (the pre-change host recordings `runs/20261013-143300`/`-143324` differ in `ai_rng_state` from chapter on). `held_frames` still varies between machines; it is a timing field.
 - `GetKeyState(VK_CAPITAL)` is not hooked, so Caps Lock state comes from the host.
 - `tools/gen_fields.py` does not handle template pointers or declarations with several declarators; such fields are skipped or misread.
 - `tools/minischema.py` does not handle array-form `items`, so a schema using them is not validated.
