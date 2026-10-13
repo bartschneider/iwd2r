@@ -405,8 +405,8 @@ class PlayVmArgsTest(unittest.TestCase):
             self.assertEqual(play.suite_files(tmp),
                              [os.path.join(tmp, 'a.txt'),
                               os.path.join(tmp, 'b.txt')])
-        self.assertNotIn('world_entry',
-                         [play.scenario_name(p) for p in play.suite_files()])
+        self.assertIn('world_entry',
+                      [play.scenario_name(p) for p in play.suite_files()])
 
     def test_table(self):
         text = play.format_table('linux', [('a', 0, 1.25, 3),
@@ -494,7 +494,7 @@ class ScenarioParseTest(unittest.TestCase):
 
     def test_world_entry_checkpoints(self):
         actions = realinput.load_scenario(os.path.join(
-            ROOT, 'scenarios', 'pending', 'world_entry.txt'))
+            ROOT, 'scenarios', 'world_entry.txt'))
         names = [a['name'] for a in actions if a['op'] == 'checkpoint']
         chargen = [a['name'] for a in realinput.load_scenario(os.path.join(
             ROOT, 'scenarios', 'chargen_replay.txt')) if a['op'] == 'checkpoint']
