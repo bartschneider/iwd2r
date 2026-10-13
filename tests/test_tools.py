@@ -17,6 +17,7 @@ import io
 import json
 import os
 import re
+import shutil
 import struct
 import subprocess
 import sys
@@ -3837,6 +3838,14 @@ class DataViewTest(unittest.TestCase):
         view = dataview.make_view(self.data, os.path.join(self.tmp, 'view'))
         for name in ('tempsave', 'save', 'ScrnShot'):
             self.assertTrue(os.path.isdir(os.path.join(view, name)), name)
+
+    def test_missing_copied_folders_are_created_empty(self):
+        shutil.rmtree(os.path.join(self.data, 'mpsave'))
+        view = dataview.make_view(self.data, os.path.join(self.tmp, 'view'))
+        path = os.path.join(view, 'mpsave')
+        self.assertTrue(os.path.isdir(path) and not os.path.islink(path))
+        self.assertEqual(os.listdir(path), [])
+        self.assertFalse(os.path.exists(os.path.join(self.data, 'mpsave')))
 
     def test_refuses_a_view_inside_the_data_folder(self):
         with self.assertRaises(ValueError):

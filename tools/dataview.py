@@ -118,8 +118,10 @@ def make_view(data_dir, view_dir, rules=None, windows=None):
             shutil.copy2(src, dst)
         else:
             _link(src, dst, windows)
-    # Writable folders the install lacks still exist in the view.
-    for name in rules['empty_dirs']:
+    # Writable folders the install lacks still exist in the view, empty
+    # (an install made without saves has no mpsave, and New Game's
+    # LoadGame asserts when it cannot copy mpsave/default into temp).
+    for name in rules['empty_dirs'] + rules['copied_dirs']:
         if name.lower() not in present:
             os.makedirs(os.path.join(view_dir, name), exist_ok=True)
     return view_dir
