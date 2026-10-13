@@ -1,3 +1,5 @@
+#define NOMINMAX
+#include "platform/gpu_probe.h"
 #include "platform/present.h"
 #include "platform/present_backend.h"
 
@@ -6,7 +8,11 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <memory>
 #include <string>
 #include <vector>
@@ -18,10 +24,40 @@ using present::testing::GpuFault;
 
 namespace {
 
+// Sets (value nullptr: unsets) an environment variable for one scope.
+struct ScopedEnv {
+    std::string name;
+    bool had = false;
+    std::string old;
+    ScopedEnv(const char* n, const char* value)
+        : name(n)
+    {
+        const char* v = std::getenv(n);
+        had = v != nullptr;
+        old = v ? v : "";
+        Set(value);
+    }
+    ~ScopedEnv() { Set(had ? old.c_str() : nullptr); }
+    void Set(const char* value)
+    {
+#ifdef _WIN32
+        _putenv_s(name.c_str(), value ? value : "");
+#else
+        if (value)
+            setenv(name.c_str(), value, 1);
+        else
+            unsetenv(name.c_str());
+#endif
+    }
+};
+
 // SDL's offscreen video driver: windows without a display, and Vulkan
 // through VK_EXT_headless_surface (lavapipe on CI) for the gpu backend.
+// The tests create the device in-process (IWD2R_GPU_PROBE=skip) unless a
+// test sets the probe up itself.
 struct OffscreenVideo {
     bool ok = false;
+    ScopedEnv probe { "IWD2R_GPU_PROBE", "skip" };
     OffscreenVideo()
     {
         SDL_SetHintWithPriority(SDL_HINT_VIDEO_DRIVER, "offscreen", SDL_HINT_OVERRIDE);
@@ -29,6 +65,7 @@ struct OffscreenVideo {
     }
     ~OffscreenVideo()
     {
+        present::testing::SetProbeExe(nullptr);
         present::SetPresentTarget(nullptr);
         present::testing::UseOffscreen(0, 0);
         present::testing::SetGpuFault(GpuFault::None);
@@ -554,3 +591,159 @@ TEST_CASE("whole frame rect follows SDL's logical presentation", "[present]")
     CHECK(r.w == 1600.0f);
     CHECK(r.h == 1000.0f);
 }
+
+TEST_CASE("probe_fail_falls_back_to_classic", "[present]")
+{
+    OffscreenVideo video;
+    REQUIRE(video.ok);
+    ScopedEnv fail("IWD2R_GPU_PROBE", "fail");
+    SDL_Window* window = SDL_CreateWindow("present probe", 320, 240, SDL_WINDOW_HIDDEN);
+    REQUIRE(window != nullptr);
+    std::vector<uint32_t> px = Distinct(320, 240);
+    present::SetPresentTarget(window);
+    for (BackendKind kind : { BackendKind::Gpu, BackendKind::Auto }) {
+        INFO("kind " << present::BackendKindName(kind));
+        present::SetBackend(kind);
+        CHECK(present::ActiveBackend() == BackendKind::Classic);
+        // The stderr line is "presenter: gpu unavailable (<this>), using classic".
+        CHECK(present::testing::LastFallbackReason() == "probe: forced by IWD2R_GPU_PROBE=fail");
+        const int frames = present::PresentedFrames();
+        present::Present(px.data(), 320, 240, 320 * 4);
+        CHECK(present::PresentedFrames() == frames + 1);
+    }
+    // The hotkey runs the same probe.
+    present::SetBackend(BackendKind::Classic);
+    CHECK(present::ToggleBackend() == BackendKind::Classic);
+    CHECK(present::testing::LastFallbackReason() == "probe: forced by IWD2R_GPU_PROBE=fail");
+    present::SetPresentTarget(nullptr);
+    SDL_DestroyWindow(window);
+}
+
+TEST_CASE("probe_skip_starts_gpu", "[present]")
+{
+    OffscreenVideo video;
+    REQUIRE(video.ok);
+    present::SetBackend(BackendKind::Gpu);
+    present::testing::UseOffscreen(320, 240);
+    if (present::ActiveBackend() != BackendKind::Gpu)
+        SKIP("no SDL GPU device: " << present::testing::LastFallbackReason());
+    CHECK(present::testing::LastFallbackReason().empty());
+}
+
+TEST_CASE("probe_exe_reports_the_device", "[present]")
+{
+    // The real executable's --probe-gpu: ok on a Vulkan device (lavapipe
+    // through the offscreen driver), unavailable without Vulkan (dummy).
+    {
+        ScopedEnv driver("SDL_VIDEO_DRIVER", "offscreen");
+        const platform::gpu_probe::Result r = platform::gpu_probe::Run(IWD2R_EXE, 10000);
+        INFO("line: " << r.line << "; reason: " << r.reason);
+        CHECK(r.outcome != platform::gpu_probe::Outcome::Crashed);
+        CHECK(r.outcome != platform::gpu_probe::Outcome::TimedOut);
+        if (r.outcome == platform::gpu_probe::Outcome::Ok)
+            CHECK(r.line.rfind("probe-gpu: ok ", 0) == 0);
+        else
+            WARN("no Vulkan device for the probe here: " << r.reason);
+    }
+    {
+        ScopedEnv driver("SDL_VIDEO_DRIVER", "dummy");
+        const platform::gpu_probe::Result r = platform::gpu_probe::Run(IWD2R_EXE, 10000);
+        INFO("line: " << r.line << "; reason: " << r.reason);
+        CHECK(r.outcome == platform::gpu_probe::Outcome::Failed);
+        CHECK(r.line.rfind("probe-gpu: unavailable ", 0) == 0);
+    }
+}
+
+#ifndef _WIN32
+
+#include <unistd.h>
+
+namespace {
+
+// An executable shell script in a fresh temporary directory.
+std::string Script(const char* name, const char* body)
+{
+    namespace fs = std::filesystem;
+    const fs::path dir = fs::temp_directory_path() / ("iwd2r-probe-" + std::to_string(::getpid()));
+    fs::create_directories(dir);
+    const fs::path path = dir / name;
+    {
+        std::ofstream f(path);
+        f << "#!/bin/sh\n"
+          << body << "\n";
+    }
+    fs::permissions(path, fs::perms::owner_all);
+    return path.string();
+}
+
+}
+
+TEST_CASE("probe_child_outcomes", "[present]")
+{
+    namespace probe = platform::gpu_probe;
+    probe::Result r = probe::Run("/bin/false", 10000);
+    CHECK(r.outcome == probe::Outcome::Failed);
+    CHECK(r.reason == "exited with code 1");
+
+    const auto start = std::chrono::steady_clock::now();
+    r = probe::Run("/bin/sleep", 300, { "30" });
+    CHECK(r.outcome == probe::Outcome::TimedOut);
+    CHECK(r.reason == "timed out");
+    CHECK(std::chrono::steady_clock::now() - start < std::chrono::seconds(5));
+
+    r = probe::Run(Script("ok.sh", "echo noise; echo 'probe-gpu: ok fake'"), 10000);
+    CHECK(r.outcome == probe::Outcome::Ok);
+    CHECK(r.line == "probe-gpu: ok fake");
+    CHECK(r.reason == "ok fake");
+
+    r = probe::Run(Script("no.sh", "echo 'probe-gpu: unavailable no device here'; exit 1"), 10000);
+    CHECK(r.outcome == probe::Outcome::Failed);
+    CHECK(r.reason == "no device here");
+
+    r = probe::Run(Script("crash.sh", "kill -SEGV $$"), 10000);
+    CHECK(r.outcome == probe::Outcome::Crashed);
+    CHECK(r.reason == "crashed");
+
+    // Exit 0 without the ok line is not a pass.
+    r = probe::Run("/bin/true", 10000);
+    CHECK(r.outcome == probe::Outcome::Failed);
+
+    r = probe::Run("/nonexistent/iwd2r", 10000);
+    CHECK(r.outcome == probe::Outcome::Failed);
+    CHECK(r.reason.rfind("could not start", 0) == 0);
+}
+
+TEST_CASE("probe_child_gates_the_device", "[present]")
+{
+    OffscreenVideo video;
+    REQUIRE(video.ok);
+    ScopedEnv unset("IWD2R_GPU_PROBE", nullptr);
+    std::vector<uint32_t> px = Distinct(320, 240);
+    present::SetPrimary(&px, 320, 240);
+
+    present::testing::SetProbeExe(Script("crash.sh", "kill -SEGV $$").c_str());
+    present::SetBackend(BackendKind::Auto);
+    present::testing::UseOffscreen(320, 240);
+    CHECK(present::ActiveBackend() == BackendKind::Classic);
+    CHECK(present::testing::LastFallbackReason() == "probe: crashed");
+
+    // The session keeps the verdict: a second start (the hotkey's) does not
+    // run the child again.
+    present::SetBackend(BackendKind::Gpu);
+    CHECK(present::ActiveBackend() == BackendKind::Classic);
+    CHECK(present::testing::LastFallbackReason() == "probe: crashed");
+
+    present::testing::SetProbeExe(Script("no.sh", "echo 'probe-gpu: unavailable no device here'; exit 1").c_str());
+    present::SetBackend(BackendKind::Gpu);
+    CHECK(present::ActiveBackend() == BackendKind::Classic);
+    CHECK(present::testing::LastFallbackReason() == "probe: no device here");
+
+    // A passing probe lets the device be created in-process.
+    present::testing::SetProbeExe(Script("ok.sh", "echo 'probe-gpu: ok fake'").c_str());
+    present::SetBackend(BackendKind::Gpu);
+    if (present::ActiveBackend() != BackendKind::Gpu)
+        SKIP("no SDL GPU device: " << present::testing::LastFallbackReason());
+    CHECK(present::testing::LastFallbackReason().empty());
+}
+
+#endif
