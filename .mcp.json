@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "rea": {
+      "type": "stdio",
+      "command": "${HOME}/.local/share/iwd2r/node/bin/node",
+      "args": ["${HOME}/.local/share/iwd2r/rea/node_modules/rea-agents/scripts/rea.mjs", "mcp"],
+      "env": {
+        "GHIDRA_INSTALL_DIR": "${HOME}/.local/share/iwd2r/ghidra",
+        "JAVA_HOME": "/usr/lib/jvm/java-21-openjdk-amd64",
+        "REA_ANALYSIS_PROVIDER": "ghidra"
+      }
+    }
+  }
+}
