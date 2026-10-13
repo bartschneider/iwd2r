@@ -313,7 +313,7 @@ Run RunScenario(const std::string& view, const fs::path& script)
     fs::create_directories(shots);
     const fs::path out = fs::path(view).parent_path() / "log.txt";
     const std::string full = "SDL_VIDEO_DRIVER=dummy SDL_AUDIO_DRIVER=dummy IWD2R_AUDIO=null IWD2R_SCRIPT=\"" + script.string()
-        + "\" IWD2R_SHOT_DIR=\"" + shots.string() + "\" IWD2_DATA=\"" + view + "\" timeout 170 \"" IWD2R_EXE "\" > \""
+        + "\" IWD2R_SHOT_DIR=\"" + shots.string() + "\" IWD2_DATA=\"" + view + "\" timeout 150 \"" IWD2R_EXE "\" > \""
         + out.string() + "\" 2>&1";
     const int raw = std::system(full.c_str());
     Run run;
