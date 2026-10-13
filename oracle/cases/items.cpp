@@ -33,11 +33,13 @@
 #include "CChitin.h"
 #include "CDimmKeyTable.h"
 #include "CResItem.h"
+#include "CRuleTables.h"
 #ifdef _MSC_VER
 #pragma warning(pop)
 #endif
 
 #include "oracle/runner/compare.h"
+#include "oracle/runner/generators.h"
 #include "oracle/runner/registry.h"
 
 #include <cstdint>
@@ -367,6 +369,178 @@ void ResItemParse(CaseContext& ctx)
     }
 }
 
+// ---------------------------------------------------------------------------
+// CRuleTables::sub_5461E0 (0x5461E0)
+
+// sub_5461E0(const CString& sResRef, const CString& sUpgrade): the CString
+// comes back through the hidden pointer pushed first, `ret 0xc` at 0x54637F;
+// ecx is never read. The tier letters are the CString at 0x8DE8C8, built
+// from "lmrvvvvv" by the static initializer at 0x5461A0, which has run when
+// the runner takes its snapshot.
+using TierUpgradeFn = void*(__fastcall*)(const void* self, void* edx, void* result, const void* resRef,
+    const void* upgrade);
+constexpr uintptr_t kTierUpgrade = 0x5461E0;
+// CString::CString(LPCSTR) (0x7FCC88): this in ecx, the text at [esp+4],
+// ret 4.
+using OriginalCStringFn = void(__fastcall*)(void* self, void* edx, const char* text);
+constexpr uintptr_t kOriginalCString = 0x7FCC88;
+
+// An original CString holding text, in leaked original memory.
+const void* OriginalString(const std::string& text)
+{
+    void* at = OriginalNew(4);
+    reinterpret_cast<OriginalCStringFn>(kOriginalCString)(at, nullptr, text.c_str());
+    return at;
+}
+
+const char* OriginalText(const void* cstring)
+{
+    return *static_cast<const char* const*>(cstring);
+}
+
+// The whitespace-separated words of a 2DA text past its two header lines:
+// the column labels, then each row's label and cells. Plain input words; the
+// function under test reads no table.
+std::vector<std::string> TableWords(const std::string& text, std::vector<std::string>* rowLabels)
+{
+    std::vector<std::string> words;
+    size_t line = 0;
+    size_t at = 0;
+    while (at < text.size()) {
+        size_t end = text.find('\n', at);
+        if (end == std::string::npos) {
+            end = text.size();
+        }
+        if (line >= 2) {
+            bool first = true;
+            size_t i = at;
+            while (i < end) {
+                while (i < end && (text[i] == ' ' || text[i] == '\t' || text[i] == '\r')) {
+                    ++i;
+                }
+                size_t j = i;
+                while (j < end && text[j] != ' ' && text[j] != '\t' && text[j] != '\r') {
+                    ++j;
+                }
+                if (j > i) {
+                    words.push_back(text.substr(i, j - i));
+                    if (first && line >= 3 && rowLabels) {
+                        rowLabels->push_back(words.back());
+                    }
+                    first = false;
+                }
+                i = j;
+            }
+        }
+        ++line;
+        at = end + 1;
+    }
+    return words;
+}
+
+void AddUnique(std::vector<std::string>& list, const std::string& word)
+{
+    for (const std::string& known : list) {
+        if (known == word) {
+            return;
+        }
+    }
+    list.push_back(word);
+}
+
+void CompareTierUpgrade(CaseContext& ctx, const void* originalThis, const CRuleTables* ours,
+    const std::string& resRef, const std::string& upgrade)
+{
+    ctx.SetInputs("sub_5461E0(" + Quoted(resRef) + ", " + Quoted(upgrade) + ")");
+    std::string original;
+    ctx.CallOriginal([&] {
+        void* result = OriginalBlock(4);
+        reinterpret_cast<TierUpgradeFn>(kTierUpgrade)(originalThis, nullptr, result, OriginalString(resRef),
+            OriginalString(upgrade));
+        original = OriginalText(result);
+    });
+    const CString result = ours->sub_5461E0(CString(resRef.c_str()), CString(upgrade.c_str()));
+    ctx.CountInputs(1);
+    const std::string oursText = static_cast<const char*>(result);
+    if (original != oursText) {
+        ctx.Fail(ctx.Inputs(), Quoted(original), Quoted(oursText));
+    }
+}
+
+// CRuleTables::sub_5461E0 at 0x5461E0, the random treasure tier upgrade
+// sub_5463E0 applies to an "UP" cell of RT_NORM or RT_FURY. The resrefs: the
+// row labels of RT_NORM.2DA, RT_FURY.2DA and RNDTRES.2DA (each tier, l m r
+// v), stems ending in "_" and every tier letter in either case, a letter not
+// in any tier, a digit or another "_", and names too short or without the
+// "_" second from the end. The upgrades: every cell of those tables that
+// starts with "up" in any case (the game's are all "UP"), "up1" to "up3",
+// "upp" and the other tails the switch refuses, "u", "", and words that are
+// not upgrades. Every resref with every upgrade, then --iterations random
+// pairs over the letters that matter. Ours runs on zeroed CRuleTables
+// storage (it reads no member); the original gets a zeroed block.
+void TierUpgrade(CaseContext& ctx)
+{
+    std::vector<std::string> resRefs;
+    std::vector<std::string> upgrades = { "", "u", "U", "p", "up", "UP", "Up", "uP", "up1", "UP1", "up2", "Up2",
+        "up3", "uP3", "up0", "up4", "up9", "upp", "UPP", "upP", "uppp", "upl", "upx", "up_", "up12", "up13",
+        "up21", "upgrade", "uq1", "pu1", "down", "1", "u p1", "UP\xE9" };
+    for (const char* table : { "RT_NORM.2DA", "RT_FURY.2DA", "RNDTRES.2DA" }) {
+        const std::vector<uint8_t> bytes = ReadGameFile(ctx, table);
+        std::vector<std::string> labels;
+        for (const std::string& word : TableWords(std::string(bytes.begin(), bytes.end()), &labels)) {
+            if (word.size() >= 2 && (word[0] == 'u' || word[0] == 'U') && (word[1] == 'p' || word[1] == 'P')) {
+                AddUnique(upgrades, word);
+            }
+        }
+        for (const std::string& label : labels) {
+            AddUnique(resRefs, label);
+        }
+    }
+    for (const char* stem : { "RT01_", "rt99_", "a_", "_", "__", "X_Y_" }) {
+        for (const char tier : std::string("lmrvLMRVnaz0_")) {
+            AddUnique(resRefs, std::string(stem) + tier);
+        }
+    }
+    for (const char* name : { "", "l", "_l", "L_", "ab", "RT01L", "RT0_1L", "RT01_", "RT01_LL", "RT01__", "RT01_l ",
+             "00SWDL01", "no_drop", "RT01_\xE9" }) {
+        AddUnique(resRefs, name);
+    }
+
+    const uint8_t* originalThis = nullptr;
+    ctx.CallOriginal([&] { originalThis = OriginalBlock(0x10); });
+    auto* storage = static_cast<unsigned char*>(::operator new(sizeof(CRuleTables)));
+    std::memset(storage, 0, sizeof(CRuleTables));
+    const CRuleTables* ours = reinterpret_cast<const CRuleTables*>(storage);
+
+    for (const std::string& resRef : resRefs) {
+        for (const std::string& upgrade : upgrades) {
+            CompareTierUpgrade(ctx, originalThis, ours, resRef, upgrade);
+        }
+    }
+    uint64_t state = ctx.seed ^ 0x5469657255700000ull; // "TierUp"
+    const std::string letters = "lmrvLMRVuUpP0123_ax";
+    auto word = [&](size_t maxLength) {
+        std::string text(static_cast<size_t>(oracle::SplitMix64(&state) % (maxLength + 1)), ' ');
+        for (char& c : text) {
+            c = letters[static_cast<size_t>(oracle::SplitMix64(&state) % letters.size())];
+        }
+        return text;
+    };
+    for (int i = 0; i < ctx.iterations; ++i) {
+        std::string resRef = word(8);
+        if (resRef.size() >= 2 && oracle::SplitMix64(&state) % 2) {
+            resRef[resRef.size() - 2] = '_';
+        }
+        std::string upgrade = word(4);
+        if (oracle::SplitMix64(&state) % 2) {
+            upgrade = (oracle::SplitMix64(&state) % 2 ? "up" : "Up") + upgrade;
+        }
+        CompareTierUpgrade(ctx, originalThis, ours, resRef, upgrade);
+    }
+    ::operator delete(storage);
+}
+
 } // namespace
 
 ORACLE_CASE("items/res_item_parse", ResItemParse);
+ORACLE_CASE("items/tier_upgrade", TierUpgrade);
