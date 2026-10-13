@@ -10836,8 +10836,8 @@ void CGameSprite::ClearAI(BOOLEAN bSetSequence)
 BOOL CGameSprite::HandleEffects()
 {
     BOOL bRetry;
-    BOOL v1;
-    BOOL v2;
+    BOOL bResult;
+    UINT nSkill;
 
     do {
         bRetry = FALSE;
@@ -10851,12 +10851,39 @@ BOOL CGameSprite::HandleEffects()
 
         m_activeImprisonment = TRUE;
 
-        // TODO: Incomplete.
-        v1 = FALSE;
-        v2 = FALSE;
+        // TODO: Incomplete. The original takes the visual effect object
+        // field_72E2 from the object array (GetDeny, retried while it
+        // reports busy) and marks its effects for deletion with 0x555200
+        // before ReleaseDeny (0x7345C2-0x734634); IcewindCVisualEffect
+        // has no port of 0x555200 yet.
+
+        m_bonusStats.BonusInit();
+
+        bResult = m_equipedEffectList.HandleList(this) & 1;
+        if (m_equipedEffectList.m_retry) {
+            bRetry = TRUE;
+        }
+
+        bResult &= m_timedEffectList.HandleList(this);
+        if (m_timedEffectList.m_retry) {
+            bRetry = TRUE;
+        }
+
+        m_derivedStats += m_bonusStats;
+
+        for (nSkill = 0; nSkill < 16; nSkill++) {
+            m_derivedStats.m_nSkills[nSkill] += static_cast<signed char>(sub_763E40(nSkill));
+            if (m_derivedStats.m_nSkills[nSkill] < 1) {
+                m_derivedStats.m_nSkills[nSkill] = 0;
+            }
+        }
+
+        if (g_pBaldurChitin->GetActiveEngine()->GetSelectedCharacter() == g_pBaldurChitin->GetObjectGame()->GetCharacterPortraitNum(m_id)) {
+            g_pBaldurChitin->GetObjectGame()->m_cButtonArray.UpdateState();
+        }
     } while (bRetry);
 
-    return v1 && v2;
+    return bResult;
 }
 
 // 0x7349A0
@@ -14545,6 +14572,163 @@ int CGameSprite::GetExtraSkillPoints(BYTE nClass)
     }
 
     return sp;
+}
+
+// 0x763E40
+INT CGameSprite::sub_763E40(UINT nSkill)
+{
+    const CRuleTables& ruleTables = g_pBaldurChitin->GetObjectGame()->GetRuleTables();
+    INT nBonus;
+    INT nScore;
+
+    LONG bUntrained = ruleTables.m_tSkills.GetAtLong(CPoint(3, nSkill));
+
+    nBonus = 0;
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjCreatureAI.cpp
+    // __LINE__: 30444
+    UTIL_ASSERT(nSkill < 16);
+
+    if (m_baseStats.m_skills[nSkill] == 0 && bUntrained == 0) {
+        return 0;
+    }
+
+    if (m_derivedStats.HasClass(CAIOBJECTTYPE_C_CLERIC)) {
+        UINT nColumn;
+        switch (m_baseStats.m_specialization & 0xFF8000) {
+        case 0x8000:
+            nColumn = 0;
+            break;
+        case 0x10000:
+            nColumn = 1;
+            break;
+        case 0x20000:
+            nColumn = 2;
+            break;
+        case 0x40000:
+            nColumn = 3;
+            break;
+        case 0x80000:
+            nColumn = 4;
+            break;
+        case 0x100000:
+            nColumn = 5;
+            break;
+        case 0x200000:
+            nColumn = 6;
+            break;
+        case 0x400000:
+            nColumn = 7;
+            break;
+        case 0x800000:
+            nColumn = 8;
+            break;
+        default:
+            nColumn = nSkill;
+            break;
+        }
+
+        nBonus = ruleTables.m_tSkills.GetAtLong(CPoint(nColumn + 15, nSkill));
+    }
+
+    switch (nSkill) {
+    case 0:
+        if (m_typeAI.m_nRace == CAIOBJECTTYPE_R_GNOME && m_typeAI.m_nSubRace == 0) {
+            nBonus += 2;
+        }
+        if (m_derivedStats.HasClass(CAIOBJECTTYPE_C_BARD)) {
+            nBonus++;
+        }
+        return ruleTables.GetAbilityScoreModifier(m_derivedStats.m_nINT) + nBonus;
+    case 1:
+    case 2:
+    case 14:
+        if (m_typeAI.m_nRace == CAIOBJECTTYPE_R_HUMAN
+            && m_typeAI.m_nSubRace == 2
+            && nSkill == 2) {
+            nBonus += 2;
+        }
+        return ruleTables.GetAbilityScoreModifier(m_derivedStats.m_nCHR) + nBonus;
+    case 3:
+        nScore = ruleTables.GetAbilityScoreModifier(m_derivedStats.m_nCON);
+        if (sub_763150(15)) {
+            nScore += 2;
+        }
+        if (sub_763150(9)) {
+            nScore += 4;
+        }
+        return nScore;
+    case 4:
+        if (sub_763150(10)) {
+            nBonus += 2;
+        }
+        return ruleTables.GetAbilityScoreModifier(m_derivedStats.m_nCHR) + nBonus;
+    case 5:
+        return ruleTables.GetAbilityScoreModifier(m_derivedStats.m_nINT);
+    case 6:
+        if (m_typeAI.m_nRace == CAIOBJECTTYPE_R_HUMAN) {
+            if (m_typeAI.m_nSubRace == 2) {
+                nBonus += 2;
+            }
+        } else if (m_typeAI.m_nRace == CAIOBJECTTYPE_R_GNOME && m_typeAI.m_nSubRace == 1) {
+            nBonus += 2;
+        }
+        nScore = m_derivedStats.m_nDEX;
+        break;
+    case 7:
+        if (sub_763150(7)) {
+            nBonus += 2;
+        }
+        return ruleTables.GetAbilityScoreModifier(m_derivedStats.m_nCHR) + nBonus;
+    case 8:
+        if (m_derivedStats.HasClass(CAIOBJECTTYPE_C_BARD)) {
+            nBonus++;
+        }
+        return ruleTables.GetAbilityScoreModifier(m_derivedStats.m_nINT) + nBonus;
+    case 9:
+        if (m_typeAI.m_nRace == CAIOBJECTTYPE_R_HALFLING
+            || (m_typeAI.m_nRace == CAIOBJECTTYPE_R_DWARF && m_typeAI.m_nSubRace == 2)) {
+            nBonus += 4;
+        }
+        nScore = m_derivedStats.m_nDEX;
+        break;
+    case 10:
+    case 11:
+        nScore = m_derivedStats.m_nDEX;
+        break;
+    case 12:
+        switch (m_typeAI.m_nRace) {
+        case CAIOBJECTTYPE_R_ELF:
+        case CAIOBJECTTYPE_R_DWARF:
+            return ruleTables.GetAbilityScoreModifier(m_derivedStats.m_nINT) + nBonus + 2;
+        case CAIOBJECTTYPE_R_HALF_ELF:
+            nBonus++;
+            break;
+        case CAIOBJECTTYPE_R_GNOME:
+            if (m_typeAI.m_nRace == CAIOBJECTTYPE_R_GNOME && m_typeAI.m_nSubRace == 1) {
+                return ruleTables.GetAbilityScoreModifier(m_derivedStats.m_nINT) + nBonus + 2;
+            }
+            break;
+        }
+        return ruleTables.GetAbilityScoreModifier(m_derivedStats.m_nINT) + nBonus;
+    case 13:
+        if (sub_763150(10)) {
+            nBonus += 2;
+        }
+        if (m_derivedStats.HasClass(CAIOBJECTTYPE_C_BARD)) {
+            nBonus++;
+        }
+        return ruleTables.GetAbilityScoreModifier(m_derivedStats.m_nINT) + nBonus;
+    case 15:
+        if (sub_763150(25)) {
+            nBonus += 2;
+        }
+        return ruleTables.GetAbilityScoreModifier(m_derivedStats.m_nWIS) + nBonus;
+    default:
+        return 0;
+    }
+
+    return sub_724010(ruleTables.GetAbilityScoreModifier(nScore)) + nBonus;
 }
 
 // 0x764270

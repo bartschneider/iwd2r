@@ -268,3 +268,35 @@ TEST_CASE("a CRE whose equipped item is missing loads with that slot empty", "[c
     REQUIRE(pSprite != NULL);
     CHECK(pSprite->m_equipment.m_items[CGameSpriteEquipment::SLOT_HELMET] == NULL);
 }
+
+TEST_CASE("a fresh character's effect list runs as Character Generation runs it", "[cre][data]")
+{
+    const char* env = std::getenv("IWD2_DATA");
+    if (env == nullptr || *env == '\0') {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    InstallIniBackup backup(env);
+
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+
+    std::vector<BYTE> original = LoadCharBase();
+    REQUIRE(original.size() > 900);
+
+    // CScreenCreateChar::StartCreateChar (0x610540) makes the sprite, then
+    // sets field_562C and calls ProcessEffectList (0x72DE60), which reloads
+    // the derived stats through HandleEffects (0x734550).
+    CGameSprite* pSprite = MakeSprite(original);
+    REQUIRE(pSprite != NULL);
+    const SHORT hp = pSprite->GetBaseStats()->m_hitPoints;
+    pSprite->field_562C = 1;
+    pSprite->ProcessEffectList();
+
+    CHECK(pSprite->field_562C == 0);
+    CHECK(pSprite->GetBaseStats()->m_hitPoints == hp);
+    CHECK(pSprite->m_derivedStats.m_nSTR == original[0x266]);
+    for (int nSkill = 0; nSkill < 16; nSkill++) {
+        CHECK(pSprite->m_derivedStats.m_nSkills[nSkill] >= 0);
+    }
+}

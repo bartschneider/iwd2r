@@ -699,6 +699,7 @@ public:
     void sub_726570();
     INT sub_726800();
     BOOL sub_727B40();
+    INT sub_763E40(UINT nSkill);
     void sub_726810(BYTE nWeaponSet);
     BYTE GetLastSong();
 
