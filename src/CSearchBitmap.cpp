@@ -448,6 +448,107 @@ BYTE CSearchBitmap::SnapshotGetCost(CPoint point, BOOL bBump)
     return CPathSearch::COST_IMPASSABLE - 1;
 }
 
+// NOTE: The name is a guess: the square nearest to `pt` that a creature
+// with `terrainTable` and `personalSpace` can stand on, searched in rings of
+// growing radius. A `nDirection` from 0 to 14 keeps each ring to the half
+// facing that way; when that finds nothing the search runs again with no
+// direction. With no open square it returns `pt`.
+//
+// 0x548B80
+CPoint CSearchBitmap::GetNearestOpenSquare(CPoint pt, const BYTE* terrainTable, BYTE personalSpace, SHORT nDirection)
+{
+    BOOL bDirectional = FALSE;
+    SHORT nTableIndex;
+
+    for (SHORT nRadius = 0; nRadius < m_GridSquareDimensions.cx && nRadius < m_GridSquareDimensions.cy; nRadius++) {
+        SHORT nLeft = -nRadius;
+        SHORT nRight = nRadius;
+        SHORT nTop = -nRadius;
+        SHORT nBottom = nRadius;
+
+        switch (nDirection) {
+        case 0:
+            nTop = 0;
+            bDirectional = TRUE;
+            break;
+        case 2:
+            nTop = 0;
+            nRight = 0;
+            bDirectional = TRUE;
+            break;
+        case 4:
+            nRight = 0;
+            bDirectional = TRUE;
+            break;
+        case 6:
+            nRight = 0;
+            nBottom = 0;
+            bDirectional = TRUE;
+            break;
+        case 8:
+            nBottom = 0;
+            bDirectional = TRUE;
+            break;
+        case 10:
+            nLeft = 0;
+            nBottom = 0;
+            bDirectional = TRUE;
+            break;
+        case 12:
+            nLeft = 0;
+            bDirectional = TRUE;
+            break;
+        case 14:
+            nLeft = 0;
+            nTop = 0;
+            bDirectional = TRUE;
+            break;
+        }
+
+        LONG nMinX = max(pt.x + nLeft, 0);
+        LONG nMaxX = min(pt.x + nRight, m_GridSquareDimensions.cx);
+        LONG nMinY = max(pt.y + nTop, 0);
+        LONG nMaxY = min(pt.y + nBottom, m_GridSquareDimensions.cy);
+
+        SHORT x;
+        SHORT y;
+
+        // Top row.
+        for (x = static_cast<SHORT>(nMinX); x <= nMaxX; x++) {
+            if (GetCost(CPoint(x, nMinY), terrainTable, personalSpace, nTableIndex, TRUE) != CPathSearch::COST_IMPASSABLE) {
+                return CPoint(x, nMinY);
+            }
+        }
+
+        // The sides of the rows between.
+        LONG nStep = nMaxX - nMinX;
+        if (nStep < 2) {
+            nStep = 1;
+        }
+
+        for (y = static_cast<SHORT>(nMinY + 1); y <= nMaxY - 1; y++) {
+            for (x = static_cast<SHORT>(nMinX); x <= nMaxX; x = static_cast<SHORT>(x + nStep)) {
+                if (GetCost(CPoint(x, y), terrainTable, personalSpace, nTableIndex, TRUE) != CPathSearch::COST_IMPASSABLE) {
+                    return CPoint(x, y);
+                }
+            }
+        }
+
+        // Bottom row.
+        for (x = static_cast<SHORT>(nMinX); x <= nMaxX; x++) {
+            if (GetCost(CPoint(x, nMaxY), terrainTable, personalSpace, nTableIndex, TRUE) != CPathSearch::COST_IMPASSABLE) {
+                return CPoint(x, nMaxY);
+            }
+        }
+    }
+
+    if (bDirectional) {
+        return GetNearestOpenSquare(pt, terrainTable, personalSpace, -1);
+    }
+
+    return pt;
+}
+
 // 0x548EE0
 void CSearchBitmap::AddDoor(CPoint* pPoints, USHORT nPoints, BOOL bOpaque)
 {
