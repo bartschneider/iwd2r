@@ -13,6 +13,7 @@
 #include "CInfCursor.h"
 #include "CItem.h"
 #include "CPathSearch.h"
+#include "CResCache.h"
 #include "CScreenChapter.h"
 #include "CScreenCharacter.h"
 #include "CScreenInventory.h"
@@ -1842,11 +1843,285 @@ BOOL CInfGame::BackupQuickSave()
 }
 
 // 0x5AC430
-BOOL CInfGame::SaveGame(unsigned char a1, unsigned char a2, unsigned char a3)
+BOOL CInfGame::SaveGame(BOOLEAN bProgressBarRequired, BOOLEAN bProgressBarInPlace, BOOLEAN bSaveScreen)
 {
-    // TODO: Incomplete.
+    CGameFile cGameFile;
+    BOOL bResult;
+    DWORD dwSectorsPerCluster;
+    DWORD dwBytesPerSector;
+    DWORD dwNumberOfFreeClusters;
+    DWORD dwTotalNumberOfClusters;
+    ULARGE_INTEGER nFreeBytesAvailable;
+    ULARGE_INTEGER nTotalNumberOfBytes;
+    HMODULE hModule;
+    BYTE* pData;
+    DWORD nData;
+    INT cnt;
 
-    return FALSE;
+    bResult = TRUE;
+
+    for (cnt = 0; cnt < CINFGAME_MAX_AREAS; cnt++) {
+        if (m_gameAreas[cnt] != NULL) {
+            m_gameAreas[cnt]->sub_47A190();
+        }
+    }
+
+    if (strcmp(m_sSaveGame, "") == 0) {
+        return FALSE;
+    }
+
+    if (GetDiskFreeSpaceA(NULL, &dwSectorsPerCluster, &dwBytesPerSector, &dwNumberOfFreeClusters, &dwTotalNumberOfClusters) != TRUE
+        || dwSectorsPerCluster * dwNumberOfFreeClusters < CBaldurChitin::MINIMUM_DRIVE_SECTORS
+        || dwSectorsPerCluster * dwNumberOfFreeClusters < CBaldurChitin::MINIMUM_DRIVE_SPACE / dwBytesPerSector) {
+        hModule = LoadLibraryA("kernel32.dll");
+        if (hModule == NULL) {
+            if (bProgressBarInPlace) {
+                g_pChitin->SetProgressBar(FALSE, 0, 0, 0, FALSE, 0, FALSE, 0, FALSE, FALSE, 255);
+            }
+
+            g_pBaldurChitin->m_dwCloseConfirmationStrId = 11790;
+            g_pBaldurChitin->m_dwCloseConfirmationFlags = 0x34;
+            PostMessageA(g_pBaldurChitin->cWnd.GetSafeHwnd(), WM_CLOSE, 0, 0);
+            return FALSE;
+        }
+
+        BOOL bHaveGetDiskFreeSpaceExA = GetProcAddress(hModule, "GetDiskFreeSpaceExA") != NULL;
+        CResCache::pfnGetDiskFreeSpaceExA = reinterpret_cast<GetDiskFreeSpaceExAFunc*>(GetProcAddress(hModule, "GetDiskFreeSpaceExA"));
+
+        if (!bHaveGetDiskFreeSpaceExA
+            || !CResCache::pfnGetDiskFreeSpaceExA(NULL, &nFreeBytesAvailable, &nTotalNumberOfBytes, NULL)
+            || (nFreeBytesAvailable.HighPart == 0 && nFreeBytesAvailable.LowPart < CBaldurChitin::MINIMUM_DRIVE_SPACE)) {
+            if (bProgressBarInPlace) {
+                g_pChitin->SetProgressBar(FALSE, 0, 0, 0, FALSE, 0, FALSE, 0, FALSE, FALSE, 255);
+            }
+
+            g_pBaldurChitin->m_dwCloseConfirmationStrId = 11790;
+            g_pBaldurChitin->m_dwCloseConfirmationFlags = 0x34;
+            PostMessageA(g_pBaldurChitin->cWnd.GetSafeHwnd(), WM_CLOSE, 0, 0);
+            FreeLibrary(hModule);
+            return FALSE;
+        }
+
+        FreeLibrary(hModule);
+    }
+
+    if (!bProgressBarInPlace && bProgressBarRequired == TRUE) {
+        sub_59FA00(TRUE);
+        g_pChitin->SetProgressBar(TRUE, 9890, 0, 0, FALSE, 0, FALSE, 0, FALSE, FALSE, 255);
+        g_pChitin->cProgressBar.m_nActionProgress = 0;
+        g_pChitin->cProgressBar.m_nActionTarget = 5000000;
+        g_pChitin->cProgressBar.m_bDisableMinibars = TRUE;
+    }
+
+    // TODO: Incomplete. The original calls 0x5170F0 on `m_cMoveList` and
+    // `m_cLimboList` with the master area here (CMoveList, not in our tree
+    // yet).
+
+    if (bProgressBarInPlace || bProgressBarRequired) {
+        ProgressBarCallback(0, TRUE);
+        g_pChitin->cProgressBar.AddActionTarget(2500000);
+
+        // NOTE: The original also requires the multiplayer screen's startup
+        // flag to be clear. That screen is gone (ADR 0002); its flag is clear
+        // in single player.
+        if (g_pChitin->cNetwork.GetSessionOpen() == TRUE) {
+            g_pChitin->cProgressBar.AddActionTarget(6000000);
+        }
+
+        for (cnt = 0; cnt < CINFGAME_MAX_AREAS; cnt++) {
+            if (m_gameAreas[cnt] != NULL && (m_gameAreas[cnt]->m_header.m_flags & 0x1) == 0) {
+                g_pChitin->cProgressBar.AddActionTarget(3000000);
+            }
+        }
+    }
+
+    // NOTE: See above for the multiplayer screen's startup flag.
+    if (g_pChitin->cNetwork.GetSessionOpen() == TRUE) {
+        g_pBaldurChitin->m_pEngineWorld->StartSaveGameMultiplayerHost();
+        g_pBaldurChitin->GetBaldurMessage()->UpdateDemandCharacters(TRUE, 0, bProgressBarRequired | bProgressBarInPlace);
+        g_pBaldurChitin->GetBaldurMessage()->PurgeDroppedPlayers();
+        g_pBaldurChitin->GetBaldurMessage()->BroadcastUpdateCharacterSlot(TRUE, 0, bProgressBarRequired | bProgressBarInPlace);
+        g_pBaldurChitin->GetBaldurMessage()->RequestClientSignal(CBaldurMessage::SIGNAL_END_MAJOR_EVENT);
+    }
+
+    if (bSaveScreen) {
+        field_366E = 1;
+    }
+
+    // TODO: Incomplete. The original asks Icewind586B70 for its list of ids
+    // (0x587510) and passes each to a CBaldurMessage multiplayer helper
+    // (0x43D8D0, which returns at once without a network session); neither is
+    // in our tree yet.
+
+    Icewind586B70::Instance()->sub_587190();
+
+    g_pBaldurChitin->GetActiveEngine()->GetManager()->InvalidateRect(NULL);
+    g_pBaldurChitin->m_cCachingStatus.InvalidateScreen();
+
+    if (bProgressBarInPlace) {
+        ProgressBarCallback(312500, FALSE);
+        ProgressBarCallback(312500, FALSE);
+    } else if (bProgressBarRequired) {
+        ProgressBarCallback(312500, FALSE);
+    }
+
+    for (cnt = 0; cnt < 12; cnt++) {
+        if (m_aServerStore[cnt] != NULL) {
+            m_aServerStore[cnt]->Marshal(m_sTempDir);
+        }
+    }
+
+    BOOLEAN bProgressBar = bProgressBarRequired | bProgressBarInPlace;
+
+    pData = NULL;
+    Marshal(&pData, &nData, bProgressBar);
+    if (pData != NULL) {
+        // NOTE: Uninline.
+        cGameFile.SetResRef(CResRef("ICEWIND2"), TRUE, TRUE);
+        static_cast<CRes*>(cGameFile.GetRes())->Write(m_sTempDir, pData, nData);
+        delete[] pData;
+    } else {
+        bResult = FALSE;
+    }
+
+    for (cnt = 0; cnt < CINFGAME_MAX_AREAS; cnt++) {
+        if (m_gameAreas[cnt] != NULL && (m_gameAreas[cnt]->m_header.m_flags & 0x1) == 0) {
+            BYTE* pAreaData = NULL;
+            DWORD nAreaData = 0;
+            m_gameAreas[cnt]->Marshal(&pAreaData, &nAreaData, bProgressBar);
+            if (pAreaData != NULL) {
+                CAreaFile cAreaFile;
+
+                // NOTE: Uninline.
+                cAreaFile.SetResRef(m_gameAreas[cnt]->m_resRef, TRUE, TRUE);
+                static_cast<CRes*>(cAreaFile.GetRes())->Write(m_sTempDir, pAreaData, nAreaData);
+                delete[] pAreaData;
+            } else {
+                bResult = FALSE;
+            }
+        }
+    }
+
+    // TODO: Incomplete. The original writes the world map here (0x558F40 on
+    // `m_cWorldMap` with `m_sTempDir`; CWorldMap, not in our tree yet).
+
+    g_pBaldurChitin->GetTlkTable().m_override.Save();
+    g_pBaldurChitin->GetTlkTable().m_override.CloseFiles();
+
+    if (bResult) {
+        if (!g_pChitin->cDimm.DirectoryCopyFiles(m_sTempDir, m_sTempSaveDir)) {
+            bResult = FALSE;
+        } else {
+            // TODO: Incomplete. The original packs the copied area files into
+            // ICEWIND2.SAV here (0x784A50, CDimm, not in our tree yet) and
+            // fails the save when that fails. Without it the area files are
+            // copied loose and LoadGame's UncompressDirectory drops them.
+            if (!g_pChitin->cDimm.DirectoryRemoveFiles(GetDirSave())
+                || !g_pChitin->cDimm.DirectoryCopyFiles(m_sTempSaveDir, GetDirSave())) {
+                bResult = FALSE;
+            }
+        }
+    }
+
+    g_pChitin->cDimm.DirectoryRemoveFiles(m_sTempSaveDir);
+
+    g_pBaldurChitin->GetTlkTable().m_override.Open(CString("temp//default.toh"), CString("temp//default.tot"));
+
+    if (bProgressBarInPlace || bProgressBarRequired) {
+        ProgressBarCallback(312500, FALSE);
+    }
+
+    EnterCriticalSection(&(g_pChitin->field_314));
+    g_pChitin->cDimm.m_cKeyTable.RescanEverything();
+    LeaveCriticalSection(&(g_pChitin->field_314));
+
+    if (bProgressBarInPlace || bProgressBarRequired) {
+        ProgressBarCallback(312500, FALSE);
+    }
+
+    SaveOptions();
+    g_pBaldurChitin->SaveOptions();
+
+    m_nLastSaveTime = m_worldTime.m_gameTime;
+
+    // NOTE: See above for the multiplayer screen's startup flag.
+    if (g_pChitin->cNetwork.GetSessionOpen() == TRUE) {
+        if (g_pChitin->cNetwork.GetServiceProvider() != CNetwork::SERV_PROV_NULL) {
+            g_pChitin->cProgressBar.m_nWaitingReason = 19714;
+            g_pChitin->cProgressBar.m_bWaiting = TRUE;
+        }
+
+        while (g_pBaldurChitin->m_pEngineWorld->m_bHardPaused == TRUE
+            && g_pChitin->cNetwork.GetSessionOpen() == TRUE) {
+            g_pBaldurChitin->m_pEngineWorld->CheckEndOfHardPause();
+            g_pBaldurChitin->GetBaldurMessage()->HandleBlockingMessages();
+            g_pChitin->m_bDisplayStale = TRUE;
+
+            if (g_pChitin->cNetwork.GetServiceProvider() == CNetwork::SERV_PROV_NULL) {
+                SynchronousUpdate();
+            } else {
+                SleepEx(60, FALSE);
+            }
+        }
+
+        if (!g_pChitin->cNetwork.GetSessionOpen()) {
+            if (bProgressBarInPlace || bProgressBarRequired) {
+                g_pChitin->SetProgressBar(FALSE, 0, 0, 0, FALSE, 0, FALSE, 0, FALSE, FALSE, 255);
+            }
+
+            return TRUE;
+        }
+
+        g_pChitin->cProgressBar.m_bWaiting = FALSE;
+        g_pBaldurChitin->m_cCachingStatus.InvalidateScreen();
+    }
+
+    if (bProgressBarInPlace || bProgressBarRequired) {
+        ProgressBarCallback(1250000, FALSE);
+    }
+
+    if (!bProgressBarInPlace && bProgressBarRequired == TRUE) {
+        g_pChitin->cProgressBar.m_nActionProgress = g_pChitin->cProgressBar.m_nActionTarget;
+        g_pChitin->cProgressBar.m_bDisableMinibars = TRUE;
+        g_pChitin->m_bDisplayStale = TRUE;
+        sub_59FA00(TRUE);
+        g_pChitin->SetProgressBar(FALSE, 0, 0, 0, FALSE, 0, FALSE, 0, FALSE, FALSE, 255);
+    }
+
+    if (bResult) {
+        if (GetDiskFreeSpaceA(NULL, &dwSectorsPerCluster, &dwBytesPerSector, &dwNumberOfFreeClusters, &dwTotalNumberOfClusters) != TRUE
+            || dwSectorsPerCluster * dwNumberOfFreeClusters < CBaldurChitin::MINIMUM_DRIVE_SECTORS
+            || dwSectorsPerCluster * dwNumberOfFreeClusters < CBaldurChitin::MINIMUM_DRIVE_SPACE / dwBytesPerSector) {
+            hModule = LoadLibraryA("kernel32.dll");
+            if (hModule == NULL) {
+                g_pBaldurChitin->m_dwCloseConfirmationStrId = 10249;
+                g_pBaldurChitin->m_dwCloseConfirmationFlags = 0x10;
+                PostMessageA(g_pBaldurChitin->cWnd.GetSafeHwnd(), WM_CLOSE, 0, 0);
+                return FALSE;
+            }
+
+            BOOL bHaveGetDiskFreeSpaceExA = GetProcAddress(hModule, "GetDiskFreeSpaceExA") != NULL;
+            CResCache::pfnGetDiskFreeSpaceExA = reinterpret_cast<GetDiskFreeSpaceExAFunc*>(GetProcAddress(hModule, "GetDiskFreeSpaceExA"));
+
+            if (!bHaveGetDiskFreeSpaceExA
+                || !CResCache::pfnGetDiskFreeSpaceExA(NULL, &nFreeBytesAvailable, &nTotalNumberOfBytes, NULL)
+                || (nFreeBytesAvailable.HighPart == 0 && nFreeBytesAvailable.LowPart < CBaldurChitin::MINIMUM_DRIVE_SPACE)) {
+                g_pBaldurChitin->m_dwCloseConfirmationStrId = 10249;
+                g_pBaldurChitin->m_dwCloseConfirmationFlags = 0x10;
+                PostMessageA(g_pBaldurChitin->cWnd.GetSafeHwnd(), WM_CLOSE, 0, 0);
+                FreeLibrary(hModule);
+                return FALSE;
+            }
+
+            FreeLibrary(hModule);
+        }
+    } else {
+        g_pBaldurChitin->m_dwCloseConfirmationStrId = 23554;
+        g_pBaldurChitin->m_dwCloseConfirmationFlags = 0x34;
+        PostMessageA(g_pBaldurChitin->cWnd.GetSafeHwnd(), WM_CLOSE, 0, 0);
+    }
+
+    return TRUE;
 }
 
 // 0x5A3230
