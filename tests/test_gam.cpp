@@ -383,8 +383,11 @@ TEST_CASE("gam: a game file naming a second unsaved area loads only the master a
         SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
     }
 
-    // Review Focus 2: the party member stands in AR1001, an area the save has
-    // no ARE for; only the master area AR1000 loads, and nothing asserts.
+    // Review Focus 2: the game file also names AR1001 (as the current world
+    // area, offset 0x40), an area the save has no ARE for. CInfGame::
+    // Unmarshal loads only the master area AR1000 (the party member stands
+    // there), and nothing asserts. A party member standing in AR1001 would
+    // load it from the game data instead (CGameSprite::Unmarshal).
     CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
     NewGameWithOneCharacter(cre, "Probe");
     pGame->UpdateCharacterSlots();
@@ -394,7 +397,8 @@ TEST_CASE("gam: a game file naming a second unsaved area loads only the master a
     const fs::path file = Child(Child(g_view, "mpsave"), "default") / "ICEWIND2.GAM";
     std::string gam = ReadFile(file);
     CheckGameFile(gam);
-    gam.replace(0xB4 + 0x18, 8, std::string("AR1001\0\0", 8));
+    CHECK(gam.compare(0x40, 6, std::string("AR1000", 6)) == 0);
+    gam.replace(0x40, 8, std::string("AR1001\0\0", 8));
     std::ofstream(file, std::ios::binary | std::ios::trunc) << gam;
     std::error_code ec;
     for (const auto& entry : fs::directory_iterator(file.parent_path(), ec)) {
