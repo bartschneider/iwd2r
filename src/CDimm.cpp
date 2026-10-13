@@ -2833,7 +2833,7 @@ BOOL CDimm::WriteResourceWithData(const CString& sDirName, CRes* pRes, LPVOID lp
     CResRef cResRef = pRes->GetResRef();
     USHORT nType = pRes->GetType();
 
-    sBaseName = cResRef.GetResRef();
+    sBaseName = cResRef.GetResRefStr();
     g_pChitin->TranslateType(nType, sExtension);
     sFileName = sBaseName + "." + sExtension;
 
