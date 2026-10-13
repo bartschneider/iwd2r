@@ -5388,7 +5388,113 @@ INT CInfGame::GetCharacterSlotFromId(LONG nCharacterId)
 // 0x5BD6B0
 void CInfGame::UpdateCharacterSlots()
 {
-    // TODO: Incomplete.
+    INT nSlot;
+    INT nIndex;
+    INT nPortraits;
+    LONG nCharacterId;
+    CGameSprite* pSprite;
+    BYTE rc;
+
+    m_nCharacters = 0;
+
+    for (nSlot = 0; nSlot < 6; nSlot++) {
+        nCharacterId = m_characters[nSlot];
+        if (nCharacterId != CGameObjectArray::INVALID_INDEX
+            && (!g_pChitin->cNetwork.GetSessionOpen()
+                || m_multiplayerSettings.GetCharacterStatus(nSlot) == CMultiplayerSettings::CHARSTATUS_CHARACTER)) {
+            do {
+                rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetDeny(nCharacterId,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    reinterpret_cast<CGameObject**>(&pSprite),
+                    INFINITE);
+            } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+            if (rc != CGameObjectArray::SUCCESS) {
+                return;
+            }
+
+            m_characters[m_nCharacters] = nCharacterId;
+
+            if (g_pChitin->cNetwork.GetSessionHosting() == TRUE) {
+                m_multiplayerSettings.SetCharacterControlledByPlayer(m_nCharacters,
+                    m_multiplayerSettings.GetCharacterControlledByPlayer(nSlot),
+                    FALSE,
+                    FALSE);
+
+                if (m_multiplayerSettings.GetCharacterStatus(nSlot) == CMultiplayerSettings::CHARSTATUS_CHARACTER) {
+                    m_multiplayerSettings.SignalCharacterStatus(m_nCharacters,
+                        CMultiplayerSettings::CHARSTATUS_SIGNAL_IMPORTED,
+                        TRUE,
+                        FALSE);
+                } else {
+                    m_multiplayerSettings.SignalCharacterStatus(m_nCharacters,
+                        CMultiplayerSettings::CHARSTATUS_SIGNAL_DELETED,
+                        TRUE,
+                        FALSE);
+                }
+
+                m_multiplayerSettings.SetCharacterReady(m_nCharacters, TRUE, FALSE);
+            }
+
+            pSprite->m_cGameStats.RecordJoinParty();
+            EnablePortrait(static_cast<BYTE>(m_nCharacters), TRUE);
+            UpdatePortraitToolTip(m_nCharacters, pSprite->GetNameRef());
+
+            g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(nCharacterId,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+
+            m_nCharacters++;
+        }
+    }
+
+    // Keep the portrait order of the characters still in the party.
+    nPortraits = 0;
+    for (nSlot = 0; nSlot < 6; nSlot++) {
+        for (nIndex = 0; nIndex < m_nCharacters; nIndex++) {
+            if (m_characters[nIndex] == m_characterPortraits[nSlot]) {
+                m_characterPortraits[nPortraits] = m_characters[nIndex];
+                nPortraits++;
+                break;
+            }
+        }
+    }
+
+    // Append the characters that have no portrait yet.
+    for (nIndex = 0; nPortraits < m_nCharacters; nIndex++) {
+        if (nIndex >= m_nCharacters) {
+            break;
+        }
+
+        for (nSlot = 0; nSlot < 6; nSlot++) {
+            if (m_characters[nIndex] == m_characterPortraits[nSlot]) {
+                break;
+            }
+        }
+
+        if (nSlot == 6) {
+            m_characterPortraits[nPortraits] = m_characters[nIndex];
+            nPortraits++;
+        }
+    }
+
+    for (nSlot = m_nCharacters; nSlot < 6; nSlot++) {
+        m_characters[nSlot] = CGameObjectArray::INVALID_INDEX;
+        m_characterPortraits[nSlot] = CGameObjectArray::INVALID_INDEX;
+
+        if (g_pChitin->cNetwork.GetSessionHosting() == TRUE) {
+            m_multiplayerSettings.SetCharacterControlledByPlayer(nSlot, 0, FALSE, FALSE);
+            m_multiplayerSettings.SignalCharacterStatus(nSlot,
+                CMultiplayerSettings::CHARSTATUS_SIGNAL_DELETED,
+                TRUE,
+                FALSE);
+            m_multiplayerSettings.SetCharacterReady(nSlot, FALSE, FALSE);
+        }
+    }
+
+    if (g_pChitin->cNetwork.GetSessionHosting() == TRUE) {
+        g_pBaldurChitin->GetBaldurMessage()->SendFullSettingsToClients(CString(""));
+    }
 }
 
 // 0x5BD9D0
@@ -5565,7 +5671,128 @@ void CInfGame::AddPartyGold(LONG dwAddPartyGold)
 // 0x5BF6A0
 void CInfGame::SetupCharacters(BOOLEAN bProgressBarInPlace)
 {
-    // TODO: Incomplete.
+    CNetwork* pNetwork = &(g_pChitin->cNetwork);
+    CResRef cResArea;
+    CString sArea;
+    CPoint ptView;
+    CGameArea* pArea;
+    CGameSprite* pSprite;
+    LONG nCharacterId;
+    SHORT nCharacterSlot;
+    CPoint ptStart;
+    int nStartRotation;
+
+    const CRuleTables& ruleTables = g_pBaldurChitin->GetObjectGame()->GetRuleTables();
+    ruleTables.GetStartArea(cResArea, ptView);
+    cResArea.CopyToString(sArea);
+
+    if (m_bFromNewGame) {
+        pArea = LoadArea(sArea, 255, TRUE, bProgressBarInPlace);
+
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\InfGame.cpp
+        // __LINE__: 17025
+        UTIL_ASSERT(pArea != NULL);
+
+        pArea->m_cInfinity.SetViewPosition(ptView.x - (pArea->m_cInfinity.rViewPort.right - pArea->m_cInfinity.rViewPort.left) / 2,
+            ptView.y - (pArea->m_cInfinity.rViewPort.bottom - pArea->m_cInfinity.rViewPort.top) / 2,
+            TRUE);
+    } else {
+        pArea = LoadArea(m_multiplayerSettings.GetAreaStartName(), 255, FALSE, bProgressBarInPlace);
+
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\InfGame.cpp
+        // __LINE__: 17032
+        UTIL_ASSERT(pArea != NULL);
+    }
+
+    for (nCharacterSlot = 0; nCharacterSlot < 6; nCharacterSlot++) {
+        nCharacterId = nCharacterSlot < 6
+            ? m_characters[nCharacterSlot]
+            : CGameObjectArray::INVALID_INDEX;
+
+        if (pNetwork->m_bIsHost
+            && m_multiplayerSettings.GetCharacterStatus(nCharacterSlot) != CMultiplayerSettings::CHARSTATUS_CHARACTER) {
+            continue;
+        }
+
+        if (nCharacterId == CGameObjectArray::INVALID_INDEX) {
+            continue;
+        }
+
+        if (m_cObjectArray.GetDeny(nCharacterId,
+                CGameObjectArray::THREAD_ASYNCH,
+                reinterpret_cast<CGameObject**>(&pSprite),
+                INFINITE)
+            != CGameObjectArray::SUCCESS) {
+            continue;
+        }
+
+        if (nCharacterSlot == 0 && m_nReputation / REPUTATION_MULTIPLIER < 0) {
+            m_nReputation = ruleTables.GetStartingReputation(pSprite->m_startTypeAI.m_nAlignment) * 10;
+            m_nReputation = m_nReputation > 200 ? 200 : m_nReputation;
+            m_nReputation = m_nReputation < 10 ? 10 : m_nReputation;
+        }
+
+        pSprite->m_baseStats.m_gold = 0;
+
+        if (pSprite->GetPos().x == -1 && pSprite->GetPos().y == -1) {
+            if (m_bFromNewGame) {
+                ptStart = ruleTables.GetStartPoint(nCharacterSlot);
+                nStartRotation = ruleTables.GetStartRotation(nCharacterSlot);
+            } else if (pNetwork->m_bConnectionEstablished) {
+                // TODO: Incomplete. The original asks the area's search map
+                // for the nearest open square to this one (0x548B80 on
+                // `pArea->m_search`, with the sprite's terrain table and the
+                // animation's personal space; not in our tree yet). A new
+                // single-player game takes the branch above.
+                ptStart.x = (m_multiplayerSettings.m_ptAreaStart.x / CPathSearch::GRID_SQUARE_SIZEX) * CPathSearch::GRID_SQUARE_SIZEX;
+                ptStart.y = (m_multiplayerSettings.m_ptAreaStart.y / CPathSearch::GRID_SQUARE_SIZEY) * CPathSearch::GRID_SQUARE_SIZEY;
+            } else {
+                ptStart.x = -1;
+                ptStart.y = -1;
+            }
+
+            m_bInLoadGame = TRUE;
+
+            BOOL bMusicThreadPriorityChanged = FALSE;
+            int nMusicThreadPriority = GetThreadPriority(g_pChitin->m_hMusicThread);
+
+            if (GetPrivateProfileIntA("Program Options", "Volume Music", 0, g_pChitin->GetIniFileName())) {
+                bMusicThreadPriorityChanged = SetThreadPriority(g_pChitin->m_hMusicThread, 15);
+            }
+
+            if (pSprite->GetArea() != NULL) {
+                pSprite->RemoveFromArea();
+            }
+
+            if ((pSprite->m_baseStats.m_generalState & STATE_DEAD) != 0
+                && pSprite->GetAnimation()->CanLieDown()) {
+                pSprite->AddToArea(pArea, ptStart, 0, CGameObject::LIST_BACK);
+            } else {
+                pSprite->AddToArea(pArea, ptStart, 0, CGameObject::LIST_FRONT);
+            }
+
+            if (m_bFromNewGame) {
+                pSprite->SetFacing(static_cast<SHORT>(nStartRotation));
+            }
+
+            m_gameSave.m_cResCurrentWorldArea = pArea->m_resRef;
+            m_gameSave.m_nCurrentWorldLink = -1;
+
+            m_bInLoadGame = FALSE;
+
+            if (bMusicThreadPriorityChanged == TRUE) {
+                SetThreadPriority(g_pChitin->m_hMusicThread, nMusicThreadPriority);
+            }
+        }
+
+        m_cObjectArray.ReleaseDeny(nCharacterId,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+    }
+
+    if (m_characters[0] != CGameObjectArray::INVALID_INDEX) {
+        SetProtagonist(m_characters[0]);
+    }
 }
 
 // 0x5BFC40
