@@ -10,10 +10,15 @@
 // 0x443B30
 CDerivedStats::CDerivedStats()
 {
-    // NOTE: The members are constructed by their own constructors; the
-    // original also zeroes the arrays at +0x328 and +0x378 and builds the
-    // tree at +0x470, the list at +0x490 and the vector at +0x49C, which
-    // our header does not declare yet (see BonusInit).
+    // NOTE: The members are constructed by their own constructors.
+
+    // TODO: Incomplete. Members our header does not declare yet: the two
+    // 10-entry arrays at +0x328 and +0x378 (zeroed at 0x443CA3 and
+    // 0x443CB9), the tree at +0x470 (0x443D71, 0x448C40), the list at
+    // +0x490 (0x443DA1, 0x4490E0) and the vector of 0x24-byte entries at
+    // +0x49C (0x443DC1-0x443DD3); and, after BonusInit, their emptying
+    // (0x443FD5 and 0x443FE0 with 0x4E7050, the tree at 0x444031, the list
+    // up to 0x44407B).
 
     BonusInit();
 
@@ -218,7 +223,8 @@ void CDerivedStats::Reload(CGameSprite* pSprite, CCreatureFileHeader* pCreature,
     m_cBounceEffect.ClearAll();
     m_cBounceSpellLevel.ClearAll();
 
-    // TODO: Incomplete. The arrays at +0x328 and +0x378 (see BonusInit).
+    // TODO: Incomplete. The arrays at +0x328 and +0x378 (ClearAll 0x4E7050
+    // at 0x4446C9 and 0x4446D4), not declared in our header.
 
     field_3C8.RemoveAll();
     field_3E4.RemoveAll();
@@ -227,11 +233,13 @@ void CDerivedStats::Reload(CGameSprite* pSprite, CCreatureFileHeader* pCreature,
     m_cImmunitiesItemUse.ClearAll();
     m_cImmunitiesItemTypeUse.ClearAll();
 
-    // TODO: Incomplete. The tree at +0x470 (see BonusInit).
+    // TODO: Incomplete. The tree at +0x470 (emptied at 0x44471B-0x444730),
+    // not declared in our header.
 
     m_naturalImmunities.clear();
 
-    // TODO: Incomplete. The list at +0x490 (see BonusInit).
+    // TODO: Incomplete. The list at +0x490 (emptied from 0x444751), not
+    // declared in our header.
 
     // NOTE: See BonusInit.
     field_4AC.RemoveAll();
@@ -309,7 +317,9 @@ void CDerivedStats::Reload(CGameSprite* pSprite, CCreatureFileHeader* pCreature,
             // 0x4449D1-0x444ADF).
         }
 
-        if (pSprite->m_equipment.m_selectedWeapon != 42) {
+        // NOTE: 42 is the last misc slot (SLOT_MISC + 27), the magic weapon
+        // slot (0x444AE4 `cmp BYTE PTR [edi+0x4ba4],0x2a`).
+        if (pSprite->m_equipment.m_selectedWeapon != CGameSpriteEquipment::SLOT_MISC + 27) {
             if (pSprite->m_equipment.m_items[pSprite->sub_726800()] != NULL) {
                 if (pSprite->m_equipment.m_items[pSprite->sub_726800()]->GetItemType() != 0x2F
                     && pSprite->m_equipment.m_items[pSprite->sub_726800()]->GetItemType() != 0x35
