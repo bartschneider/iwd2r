@@ -64,7 +64,7 @@ Day one has two backends: **classic**, which is the absence of a backend (every 
 
 ### 4.4 Settings and toggle
 
-INI keys under `[Program Options]`: `Presenter=auto|gpu|classic` (auto: gpu when a device can be created, else classic), `Scale Filter=nearest|sharp|smooth` (gpu only; classic is nearest), `World Scale=1..4|auto` (default: the value of `Scale`). All three are also `IWD2R_INI_OVERRIDE` keys for the harness. A hotkey, Ctrl+Shift+R, flips the presenter at runtime and prints the new choice on stderr; the options screen gains no new controls in this project.
+INI keys under `[Program Options]`: `Presenter=auto|gpu|classic` (auto: gpu when a device can be created, else classic), `Scale Filter=nearest|sharp|smooth` (gpu only; classic is nearest), `World Scale=1..4|auto` (default: the value of `Scale`; `auto` means 1 when `Scale` resolves to 2 or more, otherwise the value of `Scale`). All three are also `IWD2R_INI_OVERRIDE` keys for the harness. A hotkey, Ctrl+Shift+R, flips the presenter at runtime and prints the new choice on stderr; the options screen gains no new controls in this project.
 
 ## 5. Components
 

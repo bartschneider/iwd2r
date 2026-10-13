@@ -10,7 +10,9 @@ Usage (from WSL, in the repository):
 display instead of the in-engine script: `linux` on an Xvfb display driven
 with xdotool (tools/realinput.py), `windows` in Windows Sandbox driven with
 SendInput (tools/winsandbox.py, tools/sandbox/driver.ps1), `all` both.
---suite runs every scenarios/*.txt.
+--suite runs every scenarios/*.txt, not the subfolders: scenarios/pending/
+holds scenarios our engine cannot finish yet (a milestone's exit scenario),
+which move up to scenarios/ when they pass.
 
 Windows runs (the default) copy the working tree (tracked files plus modified
 and untracked non-ignored ones) into a persistent checkout, build it there
@@ -190,7 +192,8 @@ def parse_args(argv):
                     help='real OS input in an isolated display: linux (Xvfb '
                     '+ xdotool), windows (Windows Sandbox) or all')
     ap.add_argument('--suite', action='store_true',
-                    help='with --vm: run every scenarios/*.txt')
+                    help='with --vm: run every scenarios/*.txt '
+                    '(not scenarios/pending/)')
     ap.add_argument('--jobs', type=int, default=1, metavar='N',
                     help='with --vm linux --suite: scenarios run at once '
                     '(default 1)')

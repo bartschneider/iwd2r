@@ -79,6 +79,14 @@ How commands map to input: `click`/`rclick`/`move` move the real pointer to the 
 
 What lands in `runs/<YYYYMMDD-HHMMSS>/` (one subfolder per scenario with `--suite`, under `linux/` and `windows/` with `--vm all`): `driver.log` (every action with timestamps), `log.txt` (the game's output), `script.txt`, `actions.json` (the parsed scenario), both kinds of screenshots and `summary.txt`; Linux runs add `xvfb.log` and `ini-backup/`, Windows runs `run.wsb`. A suite writes `suite.txt` with the table (scenario, exit code, duration, screenshot count). The exit code is the game's, 124 on a timeout, or non-zero when the driver failed; Xvfb, the game and the sandbox are closed on every exit path, including Ctrl-C.
 
+#### Pending scenarios
+
+`scenarios/pending/` holds scenarios our engine cannot finish yet, such as a milestone's exit scenario (`world_entry.txt`: character generation through Party Formation into the start area). They are recorded in the original (`python3 tools/oracle.py replay record scenarios/pending/world_entry.txt`) and run by path, but `--suite` and the `replay compare` gate take only `scenarios/*.txt`. A pending scenario moves to `scenarios/` when it passes.
+
+#### Parallel work streams
+
+`tools/worktree.sh new <stream>` creates the worktree `/home/thier/iwd2-re-worktrees/p3-<stream>` on branch `p3/<stream>` from `first` and prints its path; `tools/worktree.sh done <stream>` removes it and deletes the branch once the branch is merged into `first`, and refuses otherwise. Each worktree builds on Windows in its own folder (`C:\Users\thier\iwd2r-build-p3-<stream>`). Shared resources are locked (`tools/filelock.py`): the Ghidra project (one headless run at a time), the vanilla copy's replays and its build (`C:\Users\thier\iwd2r-oracle\replay.lock`, `vanilla.lock`) and Windows Sandbox; a command that has to wait says so after 5 seconds.
+
 ### Manual
 
 Point the engine at your install with `IWD2_DATA`:

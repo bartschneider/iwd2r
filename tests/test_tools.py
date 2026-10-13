@@ -311,6 +311,19 @@ class PlayVmArgsTest(unittest.TestCase):
         self.assertIn('start_screen',
                       [play.scenario_name(p) for p in play.suite_files()])
 
+    def test_suite_ignores_pending(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for rel in ('a.txt', 'pending/x.txt', 'b.txt'):
+                os.makedirs(os.path.dirname(os.path.join(tmp, rel)),
+                            exist_ok=True)
+                with open(os.path.join(tmp, rel), 'w') as f:
+                    f.write('wait 1\n')
+            self.assertEqual(play.suite_files(tmp),
+                             [os.path.join(tmp, 'a.txt'),
+                              os.path.join(tmp, 'b.txt')])
+        self.assertNotIn('world_entry',
+                         [play.scenario_name(p) for p in play.suite_files()])
+
     def test_table(self):
         text = play.format_table('linux', [('a', 0, 1.25, 3),
                                            ('bb', 124, 180.0, 0)])
@@ -390,8 +403,21 @@ class ScenarioParseTest(unittest.TestCase):
             self.assertEqual(str(cm.exception), message)
 
     def test_shipped_scenarios_parse(self):
-        for path in scenario_files():
+        pending = glob.glob(os.path.join(ROOT, 'scenarios', 'pending',
+                                         '*.txt'))
+        for path in scenario_files() + pending:
             self.assertTrue(realinput.load_scenario(path), path)
+
+    def test_world_entry_checkpoints(self):
+        actions = realinput.load_scenario(os.path.join(
+            ROOT, 'scenarios', 'pending', 'world_entry.txt'))
+        names = [a['name'] for a in actions if a['op'] == 'checkpoint']
+        chargen = [a['name'] for a in realinput.load_scenario(os.path.join(
+            ROOT, 'scenarios', 'chargen_replay.txt')) if a['op'] == 'checkpoint']
+        self.assertEqual(names, chargen + [
+            'skills_done', 'feats_done', 'named', 'party_formation', 'world',
+            'world_settled'])
+        self.assertEqual(actions[-1]['op'], 'quit')
 
     def test_keysym_table_covers_every_key_name(self):
         self.assertEqual(set(realinput.X_KEYSYM), set(realinput.KEY_VK))
@@ -2604,6 +2630,74 @@ class WinCheckoutTest(unittest.TestCase):
         self.assertEqual(play.win_checkout(
             '/home/u/iwd2-re-worktrees/p3-x',
             {'IWD2R_WIN_CHECKOUT': ''}), base + '-p3-x')
+
+
+class WorktreeScriptTest(unittest.TestCase):
+    """tools/worktree.sh in a throwaway repository with a first branch."""
+
+    SCRIPT = os.path.join(ROOT, 'tools', 'worktree.sh')
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.repo = os.path.join(self._tmp.name, 'repo')
+        self.base = os.path.join(self._tmp.name, 'worktrees')
+        os.makedirs(self.repo)
+        self.git('init', '-q', '-b', 'first')
+        self.commit(self.repo, 'a.txt', 'one')
+
+    def git(self, *args, cwd=None):
+        env = dict(os.environ, GIT_AUTHOR_NAME='t', GIT_AUTHOR_EMAIL='t@t',
+                   GIT_COMMITTER_NAME='t', GIT_COMMITTER_EMAIL='t@t',
+                   GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM='1')
+        return subprocess.run(['git', *args], cwd=cwd or self.repo, env=env,
+                              check=True, capture_output=True, text=True)
+
+    def commit(self, where, name, text):
+        with open(os.path.join(where, name), 'w') as f:
+            f.write(text)
+        self.git('add', name, cwd=where)
+        self.git('commit', '-qm', name, cwd=where)
+
+    def script(self, *args):
+        env = dict(os.environ, IWD2R_WORKTREES=self.base,
+                   GIT_AUTHOR_NAME='t', GIT_AUTHOR_EMAIL='t@t',
+                   GIT_COMMITTER_NAME='t', GIT_COMMITTER_EMAIL='t@t',
+                   GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM='1')
+        return subprocess.run(['bash', self.SCRIPT, *args], cwd=self.repo,
+                              env=env, capture_output=True, text=True)
+
+    def branches(self):
+        return self.git('branch', '--format=%(refname:short)').stdout.split()
+
+    def test_worktree_script_new_and_done(self):
+        r = self.script('new', 'chargen')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        path = os.path.join(self.base, 'p3-chargen')
+        self.assertEqual(r.stdout, path + '\n')
+        self.assertTrue(os.path.isfile(os.path.join(path, 'a.txt')))
+        self.assertIn('p3/chargen', self.branches())
+        self.assertEqual(
+            self.git('rev-parse', 'HEAD', cwd=path).stdout,
+            self.git('rev-parse', 'first').stdout)
+        self.assertNotEqual(self.script('new', 'chargen').returncode, 0)
+
+        self.commit(path, 'b.txt', 'two')
+        r = self.script('done', 'chargen')
+        self.assertEqual(r.returncode, 1)
+        self.assertIn('not merged into first', r.stderr)
+        self.assertTrue(os.path.isdir(path))
+        self.assertIn('p3/chargen', self.branches())
+
+        self.git('merge', '-q', '--no-edit', 'p3/chargen')
+        r = self.script('done', 'chargen')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse(os.path.exists(path))
+        self.assertNotIn('p3/chargen', self.branches())
+
+    def test_bad_stream_name(self):
+        self.assertEqual(self.script('new', '../x').returncode, 2)
+        self.assertEqual(self.script('nope', 'x').returncode, 2)
 
 
 class SharedLockTest(unittest.TestCase):
