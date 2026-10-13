@@ -191,6 +191,17 @@ realinput = load_tool('realinput')
 winsandbox = load_tool('winsandbox')
 
 
+def load_ghidra_tool(name):
+    spec = importlib.util.spec_from_file_location(
+        name, os.path.join(ROOT, 'tools', 'ghidra', name + '.py'))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+labels = load_ghidra_tool('labels')
+
+
 def scenario_files():
     return sorted(glob.glob(os.path.join(ROOT, 'scenarios', '*.txt')))
 
@@ -838,6 +849,69 @@ class SandboxRuntimeTest(unittest.TestCase):
             f.write(tiny_pe(['KERNEL32.dll']))
         self.assertEqual(winsandbox.deploy_runtime(exe, lambda m: None,
                                                    self.dir), [])
+
+
+class LabelsTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.dir = self._tmp.name
+        self.addCleanup(self._tmp.cleanup)
+
+    def write(self, rel, text):
+        path = os.path.join(self.dir, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'w') as f:
+            f.write(text)
+        return path
+
+    def test_ours_reads_method_after_address(self):
+        self.write('src/IcewindMisc.cpp',
+                   '#include "IcewindMisc.h"\n\n'
+                   '// 0x5845D0\n'
+                   'INT IcewindMisc::Roll(INT nRolls, INT nSides)\n'
+                   '{\n    return 0;\n}\n')
+        self.assertEqual(labels.ours(os.path.join(self.dir, 'src')),
+                         [(0x5845D0, 'IcewindMisc::Roll')])
+
+    def test_ours_skips_address_without_definition(self):
+        self.write('src/a.cpp',
+                   'void f()\n{\n'
+                   '// 0x401000\n'
+                   '\n'
+                   '}\n'
+                   'int g()\n{\n}\n')
+        self.assertEqual(labels.ours(os.path.join(self.dir, 'src')), [])
+
+    def test_ours_names(self):
+        self.write('src/sub/b.cpp',
+                   '// 0x401010\n'
+                   '// NOTE: Inlined.\n'
+                   'static int Helper(char* s)\n{\n}\n'
+                   '// 0x401020\n'
+                   'CFoo::~CFoo()\n{\n}\n'
+                   '// 0x401030\n'
+                   'BOOL CResRef::operator!=(const char* pName) const\n{\n}\n'
+                   '// 0x8CF6E0\n'
+                   'static const CString ScopeStr("::");\n'
+                   '// 0x8BA28C\n'
+                   'int CFoo::PRIME[] = {\n    1,\n};\n')
+        self.assertEqual(labels.ours(os.path.join(self.dir, 'src')),
+                         [(0x401010, 'Helper'), (0x401020, 'CFoo::~CFoo'),
+                          (0x401030, 'CResRef::operator!=')])
+
+    def test_ieex_skips_placeholders(self):
+        path = self.write('function_names.db',
+                          '0x401000 FUN_00401000\r\n'
+                          '0x401090 CResWED_Construct\r\n')
+        self.assertEqual(labels.ieex(path), [(0x401090, 'CResWED_Construct')])
+
+    def test_merge_prefers_ours_and_prefixes_collisions(self):
+        ours = [(0x5845D0, 'IcewindMisc::Roll'), (0x401000, 'Foo')]
+        ieex = [(0x5845D0, 'IcewindMisc_Roll'), (0x402000, 'Foo'),
+                (0x403000, 'Bar')]
+        self.assertEqual(labels.merge(ours, ieex),
+                         [(0x401000, 'Foo'), (0x402000, 'ieex_Foo'),
+                          (0x403000, 'Bar'), (0x5845D0, 'IcewindMisc::Roll')])
 
 
 if __name__ == '__main__':
