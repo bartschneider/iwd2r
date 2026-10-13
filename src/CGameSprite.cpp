@@ -13314,6 +13314,8 @@ SHORT CGameSprite::SetAtOffset(DWORD stat, DWORD value, BOOL modify)
             m_baseStats.m_DEXBase = static_cast<BYTE>(value);
             m_derivedStats.m_nDEX = static_cast<SHORT>(value);
         }
+        field_562C = TRUE;
+        ProcessEffectList();
         return 1;
     case STAT_CON:
         if (modify == TRUE) {
