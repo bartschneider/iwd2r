@@ -144,6 +144,7 @@ sys.path.insert(0, os.path.join(HERE, 'ghidra'))
 sys.path.insert(0, HERE)
 import bif  # noqa: E402
 import check_evidence  # noqa: E402
+import dataview  # noqa: E402
 import filelock  # noqa: E402
 import minischema  # noqa: E402
 
@@ -1535,7 +1536,11 @@ def run_ours(exe, game, script, actions, seed, timeout, dump_every, run_dir,
     out_dir = os.path.join(run_dir, subdir)
     os.makedirs(out_dir)
     shutil.copyfile(script, os.path.join(out_dir, 'scenario.txt'))
-    env = our_env(os.environ, game, script, out_dir, seed, dump_every)
+    # A private view of the game folder: engines at once do not share its
+    # temp/cache folders, and it is never written (IWD2R_KEEP_DATA_VIEW=1
+    # keeps the view in the run folder).
+    view = dataview.make_view(game, os.path.join(run_dir, 'data-' + subdir))
+    env = our_env(os.environ, view, script, out_dir, seed, dump_every)
     print('ours %s (%d actions), seed %d, timeout %d s, dumps every %d '
           'frames' % (os.path.relpath(script, ROOT), len(actions), seed,
                       timeout, dump_every))
@@ -1553,6 +1558,9 @@ def run_ours(exe, game, script, actions, seed, timeout, dump_every, run_dir,
         except KeyboardInterrupt:
             proc.kill()
             raise
+        finally:
+            if os.environ.get('IWD2R_KEEP_DATA_VIEW') != '1':
+                dataview.remove_view(view)
     status = read_status(out_dir)
     result, summary = our_outcome(code, status, timeout)
     report = {'scenario': os.path.relpath(script, ROOT), 'seed': seed,

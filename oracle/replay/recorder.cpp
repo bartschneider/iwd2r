@@ -100,7 +100,7 @@ static_assert(kField_area_resref.type == ReplayType::k_resref, "");
 static_assert(kField_sprite_pos.type == ReplayType::k_i32 && kField_sprite_pos.count == 2, "");
 static_assert(kField_sprite_hp.type == ReplayType::k_i16, "");
 static_assert(kField_sprite_max_hp.type == ReplayType::k_i16, "");
-static_assert(kField_sprite_skills.type == ReplayType::k_u8 && kField_sprite_skills.count == 64, "");
+static_assert(kField_sprite_skills.type == ReplayType::k_i8 && kField_sprite_skills.count == 64, "");
 
 // The virtual clock (platform/replay_clock.h, shared with our engine's
 // replay mode): kClockBase at the start, then 1000 / kFramesPerSecond ms per
@@ -403,7 +403,7 @@ std::string PartyMemberJson(uint32_t chitin, int32_t id)
         const int16_t maxHp = ReadI16(At(sprite, kField_sprite_max_hp), &ok);
         std::string skills = "[";
         for (uint32_t i = 0; i < kField_sprite_skills.count; ++i) {
-            skills += (i ? ", " : "") + Number(ReadU8(At(sprite, kField_sprite_skills) + i, &ok));
+            skills += (i ? ", " : "") + Number(static_cast<int8_t>(ReadU8(At(sprite, kField_sprite_skills) + i, &ok)));
         }
         skills += "]";
         if (ok) {

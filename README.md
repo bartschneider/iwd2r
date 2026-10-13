@@ -131,6 +131,8 @@ SDL_VIDEO_DRIVER=dummy SDL_AUDIO_DRIVER=dummy IWD2R_SMOKE_FRAMES=300 ./build/lin
 
 ## Verification
 
+GitHub Actions is disabled while the parallel streams push often (`gh workflow disable CI`; `gh workflow enable CI` turns it back on). `tools/gates.sh` runs the same steps locally, with `--windows` for the Windows builds, and every integration into `first` runs it.
+
 The oracle checks our engine against the original game's own code. The original `iwd2.exe` runs for real on Windows; ours runs next to it; the results are compared. A function counts as done only when it compiles, matches the original, and has an evidence file. The design is in [docs/superpowers/specs/2026-10-12-iwd2r-verification-harness-design.md](docs/superpowers/specs/2026-10-12-iwd2r-verification-harness-design.md) and the reasons for its runtime in [ADR 0003](docs/adr/0003-oracle-runtime.md). Parked items are in [docs/followups.md](docs/followups.md).
 
 `tools/ghidra/setup.sh`, `oracle.py evidence` and `check_evidence.py` work on Linux and WSL. The runner, the vanilla copy and the replays need a Windows host with your own copy of the game, driven from WSL. Nothing from the game is committed. Results go to `runs/<YYYYMMDD-HHMMSS>/`, which is not committed either.
@@ -162,6 +164,7 @@ CI runs the parts that need no game data: the PE loader tests (`[pe]`), the VC6 
 - The speaker-portrait click in world dialog panels, which forwarded to the multiplayer screen, is now a no-op.
 - The start screen is the original's connection screen with its multiplayer entry hidden.
 - `C2DArray::LoadText` has no counterpart in the original. The original parses 2DA text only inside `C2DArray::Load` (0x402B70), after fetching it through its resource manager; ours splits that parse into `LoadText`, unchanged, so the tests and the oracle's table cases can build tables from text without a resource manager. `Load` calls it, so the engine's behaviour is the same.
+- The drawing entry points of the `CVid*` classes (`CVidCell::Render`, `CVidTile::Render`, `CVidFont::TextOut`, `CVidMode`'s line, rectangle, ellipse, recticle, outline, polyline, erase and fade functions, `CVidInf`'s `BK*` and `FX*` functions and `RenderFlash`, `CVidMosaic::Render`, `CVidBitmap::RenderDirect`; the list and the helpers left alone are in `src/render/api.h`) start with one line the original does not have: a guard that hands the call to an installed render backend and returns when the backend handled it (the two inlined fade functions instead end with a line that reports the fade level). It lets later renderers draw the same calls another way (larger textures, a GPU) without changing the decompiled bodies. With no backend installed, the default, every guard falls through and the bodies draw into the back buffer exactly as before. Each guarded function's evidence file carries the exemption "render API dispatch guard".
 
 ## License
 
