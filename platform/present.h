@@ -1,5 +1,6 @@
 // Internal: presents the DirectDraw shim's primary surface through SDL. Used
-// by the shim, the window code and the smoke hook; never included by src/.
+// by the shim, the window code and the smoke hook; in src/ only by
+// iwd2r_main, which sets the presenter from the INI.
 #pragma once
 
 #include "compat/win_types.h"
@@ -12,8 +13,46 @@
 
 namespace platform::present {
 
+// Which backend draws the frames: classic (SDL_Renderer, the original
+// path), gpu (SDL3 GPU, Vulkan through SPIR-V shaders), or auto (gpu when a
+// device can be made for the window, else classic). Program Options/Presenter.
+enum class BackendKind {
+    Auto,
+    Gpu,
+    Classic,
+};
+
+// How the gpu backend scales the frame (Program Options/Scale Filter):
+// nearest, sharp (nearest at texel centres, linear within one output pixel
+// of each texel edge) or smooth (bilinear). The classic backend is always
+// nearest.
+enum class Filter {
+    Nearest,
+    Sharp,
+    Smooth,
+};
+
+// "auto", "gpu", "classic" and "nearest", "sharp", "smooth", any case,
+// surrounding blanks ignored; false for anything else.
+bool ParseBackendKind(const char* text, BackendKind* kind);
+bool ParseFilter(const char* text, Filter* filter);
+const char* BackendKindName(BackendKind kind);
+
+// Chooses the backend. With a target window it switches now: a gpu (or
+// auto) choice that cannot start falls back to classic with one stderr line
+// saying why. Without a window the choice waits for SetPresentTarget.
+void SetBackend(BackendKind kind);
+// The backend drawing now: Gpu or Classic (Classic before a window).
+BackendKind ActiveBackend();
+// Switches between gpu and classic (the Ctrl+Shift+R hotkey) and returns
+// the backend now active (classic again when gpu cannot start).
+BackendKind ToggleBackend();
+void SetFilter(Filter filter);
+Filter CurrentFilter();
+
 // The window frames are presented to, or nullptr for none. Changing it
-// destroys the renderer and texture made for the previous window.
+// shuts the previous window's backend down (the gpu device releases the
+// window) and starts the chosen backend on the new one.
 void SetPresentTarget(SDL_Window* window);
 
 // The virtual screen the engine sees in windowed mode: the game resolution
@@ -71,8 +110,18 @@ const std::vector<compose::Region>& Regions();
 bool FrameSize(int* w, int* h);
 
 // Uploads one XRGB8888 frame and presents it. Without a target window it only
-// counts the frame.
+// counts the frame. A frame the backend cannot draw (a minimised window, a
+// failed swapchain acquire) is skipped but still counted; a gpu device lost
+// during a frame is rebuilt once, and lost again falls back to classic.
 void Present(const uint32_t* xrgb, int width, int height, int pitchBytes);
+
+// Frames Present counted but the backend skipped.
+int SkippedFrames();
+
+// Draws the registered primary through the active backend without showing
+// it and reads the result back (window size, XRGB8888): the presented
+// frame, for IWD2R_SHOT_PRESENTED. False with no backend or primary.
+bool ReadbackPresented(std::vector<uint32_t>* xrgb, int* width, int* height);
 
 void MarkPrimaryDirty();
 

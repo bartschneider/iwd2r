@@ -18,7 +18,7 @@ jobs:
       - name: Install packages
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake ninja-build clang clang-format pkg-config libasound2-dev libpulse-dev libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxkbcommon-dev libdrm-dev libgbm-dev libgl1-mesa-dev libegl1-mesa-dev libwayland-dev libdecor-0-dev libudev-dev libdbus-1-dev libpipewire-0.3-dev
+          sudo apt-get install -y build-essential cmake ninja-build clang clang-format pkg-config libasound2-dev libpulse-dev libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxkbcommon-dev libdrm-dev libgbm-dev libgl1-mesa-dev libegl1-mesa-dev libwayland-dev libdecor-0-dev libudev-dev libdbus-1-dev libpipewire-0.3-dev mesa-vulkan-drivers
       - name: Choose dependency directory
         shell: bash
         run: echo "FETCH_DIR=$(echo "$RUNNER_TEMP" | tr '\\' '/')/fetch" >> "$GITHUB_ENV"
@@ -36,6 +36,8 @@ jobs:
         run: python3 -I tests/test_tools.py
       - name: Subsystem map
         run: python3 -I tools/gen_map.py --check
+      - name: Shader blobs
+        run: python3 -I tools/shaders.py --check
       - name: Decompiler evidence (pull request)
         if: github.event_name == 'pull_request'
         env:
@@ -65,7 +67,7 @@ jobs:
       - name: Install packages
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake ninja-build clang pkg-config libasound2-dev libpulse-dev libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxkbcommon-dev libdrm-dev libgbm-dev libgl1-mesa-dev libegl1-mesa-dev libwayland-dev libdecor-0-dev libudev-dev libdbus-1-dev libpipewire-0.3-dev
+          sudo apt-get install -y build-essential cmake ninja-build clang pkg-config libasound2-dev libpulse-dev libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxkbcommon-dev libdrm-dev libgbm-dev libgl1-mesa-dev libegl1-mesa-dev libwayland-dev libdecor-0-dev libudev-dev libdbus-1-dev libpipewire-0.3-dev mesa-vulkan-drivers
       - name: Choose dependency directory
         shell: bash
         run: echo "FETCH_DIR=$(echo "$RUNNER_TEMP" | tr '\\' '/')/fetch" >> "$GITHUB_ENV"

@@ -322,6 +322,13 @@ void Translate(const SDL_Event& e, bool& displayChanged)
         return;
     }
     if (e.type == SDL_EVENT_KEY_DOWN) {
+        // Ctrl+Shift+R flips the presenter between gpu and classic; not a
+        // key press for the engine.
+        if (e.key.scancode == SDL_SCANCODE_R && (e.key.mod & SDL_KMOD_CTRL) != 0 && (e.key.mod & SDL_KMOD_SHIFT) != 0) {
+            if (!e.key.repeat)
+                std::fprintf(stderr, "presenter: %s\n", platform::present::BackendKindName(platform::present::ToggleBackend()));
+            return;
+        }
         // Auto-repeat is not a new press: the engine times its own repeat.
         if (!e.key.repeat)
             MarkKeyPressed(e.key.scancode);
