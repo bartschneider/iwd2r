@@ -1399,6 +1399,13 @@ LONG CInfGame::ImportCharacter(const CString& sFileName, INT nIndex)
     return 0;
 }
 
+// NOTE: SaveGame (0x5AC430), Marshal (0x5A3230), the two party-entry
+// converters (0x5A79E0, 0x5A7BF0) and Unmarshal (0x5A7E40) sit here, before
+// GetDirSounds (0x5A1A80), out of address order. Placed at their addresses,
+// git's default diff aligns the new bodies against CanSaveGame,
+// BackupQuickSave or GetSaveGames, and tools/check_evidence.py would count
+// those unchanged functions as touched.
+
 // 0x5AC430
 BOOL CInfGame::SaveGame(BOOLEAN bProgressBarRequired, BOOLEAN bProgressBarInPlace, BOOLEAN bSaveScreen)
 {
