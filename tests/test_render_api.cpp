@@ -13,7 +13,7 @@
 #include "CVidPoly.h"
 #include "ScreenLayout.h"
 #include "compat/ini.h"
-#include "install_ini_backup.h"
+#include "data_view.h"
 #include "main.h"
 #include "render/api.h"
 #include "render/recording.h"
@@ -421,7 +421,10 @@ TEST_CASE("recording_backend_receives_start_screen_draws", "[render][data]")
     if (env == nullptr || *env == '\0') {
         SKIP("[iwd2r-skip] IWD2_DATA unset");
     }
-    const std::string data = env;
+    // A private view of the data: the engine writes cache and temp files
+    // as the original does, and parallel runs must not share them.
+    DataView view(env);
+    const std::string data = view.Path();
 
     // The screen the engine will use, as smoke_start_screen.cpp resolves it
     // (headless, the dummy video driver reports a 1024x768 desktop).
@@ -437,8 +440,6 @@ TEST_CASE("recording_backend_receives_start_screen_draws", "[render][data]")
         SKIP("[iwd2r-skip] icewind2.ini asks for a screen iwd2r refuses: " << screen.error);
     }
 
-    WARN("The engine writes into the install directory when it runs (cache files, temp/), as the original game does on every launch; the INI files are restored afterwards.");
-
     // The engine runs in this process (the backend must be installed in the
     // process that draws) until the window pump's smoke countdown closes it.
     SetEnv("SDL_VIDEO_DRIVER", "dummy");
@@ -452,7 +453,6 @@ TEST_CASE("recording_backend_receives_start_screen_draws", "[render][data]")
     render::Backend* previous = render::Set(&backend);
     int rc = -1;
     {
-        InstallIniBackup backup(data);
         char arg0[] = "iwd2r";
         char* argv[] = { arg0, nullptr };
         rc = iwd2r_main(1, argv);
