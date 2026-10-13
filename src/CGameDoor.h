@@ -42,6 +42,9 @@ public:
     /* 05E8 */ CPoint m_ptDest2;
     /* 05F0 */ RESREF m_scriptRes;
     /* 05F8 */ CTiledObject m_tiledObject;
+    // The door's own name (the ARE door's name); it hides
+    // CGameAIBase::m_scriptName, which the original leaves unset for a door.
+    /* 0610 */ SCRIPTNAME m_scriptName;
     /* 0630 */ STRREF m_strNotPickable;
     /* 0634 */ SHORT m_hitPoints;
     /* 0636 */ SHORT m_armourClass;
