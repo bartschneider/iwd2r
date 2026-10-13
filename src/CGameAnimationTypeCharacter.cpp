@@ -935,6 +935,8 @@ void CGameAnimationTypeCharacter::EquipHelmet(const CString& resRef, BYTE* color
                 *g_pBaldurChitin->GetObjectGame()->GetMasterBitmap());
         }
 
+        m_currentVidCellHelmet = m_currentVidCellHelmetBase;
+
         if (m_currentBamDirection > m_extendDirectionTest) {
             m_currentVidCellHelmet->SequenceSet(9 * m_currentBamSequence - m_currentBamDirection + 16);
         } else {
