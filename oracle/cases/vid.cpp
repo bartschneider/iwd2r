@@ -281,8 +281,216 @@ void BrightnessContrast(CaseContext& ctx)
     }
 }
 
+// The video mode both sides read.
+struct ModeValues {
+    uint8_t fade;
+    uint32_t globalTint;
+    uint8_t brightness;
+    uint8_t gamma;
+};
+
+// Puts our g_pChitin back when the case ends.
+struct ChitinRestore {
+    CChitin* saved = g_pChitin;
+    ~ChitinRestore() { g_pChitin = saved; }
+};
+
+// CVidPalette::RealizeRange (0x7BF870) at 32 bpp: a range palette of 256
+// random entries, the seven ranges each with or without a tint, an add and a
+// light (pulsing or steady), the suppress mask, the global tint, add and
+// light flags, grey and the 0x2000000 shading, and the video mode's fade,
+// brightness, gamma and global tint. All 256 destination entries are
+// compared.
+void RealizeRange(CaseContext& ctx)
+{
+    ChitinRestore restore;
+    Picks picks(ctx.seed, 0x5265616C52616E00ull); // "RealRan"
+
+    uint8_t* chitin = nullptr;
+    uint8_t* engine = nullptr;
+    uint8_t* mode = nullptr;
+    ctx.SetInputs("building the original's chitin and video mode");
+    ctx.CallOriginal([&] {
+        chitin = OriginalBlock(kChitinSize);
+        engine = OriginalBlock(kEngineSize);
+        mode = OriginalBlock(kVidInfSize);
+        reinterpret_cast<VidInfCtorFn>(kVidInfCtor)(mode, nullptr);
+        Put<uint32_t>(engine, kEngineVidModeOffset, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(mode)));
+        Put<uint32_t>(chitin, kActiveEngineOffset, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(engine)));
+        Put<uint32_t>(chitin, kIs3dOffset, 0);
+        Put<uint32_t>(mode, kRShiftOffset, 16);
+        Put<uint32_t>(mode, kGShiftOffset, 8);
+        Put<uint32_t>(mode, kBShiftOffset, 0);
+        *reinterpret_cast<uint32_t*>(kChitin) = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(chitin));
+    });
+
+    auto* oursChitinStorage = static_cast<unsigned char*>(::operator new(sizeof(CChitin)));
+    std::memset(oursChitinStorage, 0, sizeof(CChitin));
+    auto* oursEngineStorage = static_cast<unsigned char*>(::operator new(sizeof(CWarp)));
+    std::memset(oursEngineStorage, 0, sizeof(CWarp));
+    auto* oursChitin = reinterpret_cast<CChitin*>(oursChitinStorage);
+    auto* oursEngine = reinterpret_cast<CWarp*>(oursEngineStorage);
+    auto* oursMode = new CVidInf();
+    oursMode->m_dwRBitShift = 16;
+    oursMode->m_dwGBitShift = 8;
+    oursMode->m_dwBBitShift = 0;
+    oursEngine->pVidMode = oursMode;
+    oursChitin->pActiveEngine = oursEngine;
+    g_pChitin = oursChitin;
+
+    const uint32_t kFlagBits[] = { 0x1, 0x8, 0x10000, 0x20000, 0x40000, 0x80000, 0x200000, 0x2000000 };
+
+    auto check = [&](int n) {
+        ModeValues values;
+        values.fade = static_cast<uint8_t>(picks.Between(0, 3) == 0 ? picks.Between(0, CVidMode::NUM_FADE_FRAMES)
+                                                                   : CVidMode::NUM_FADE_FRAMES);
+        values.globalTint = picks.Between(0, 2) == 0 ? 0xFFFFFF : (picks.Bits() & 0xFFFFFF);
+        values.brightness = static_cast<uint8_t>(picks.Between(0, 2) == 0 ? picks.Between(0, 255) : 0);
+        values.gamma = static_cast<uint8_t>(picks.Between(0, 2) == 0 ? picks.Between(0, 40) : 0);
+        const int32_t auCounter = picks.Between(0, 100000);
+        const int32_t auBase = picks.Between(1, 1 << 24);
+        const uint32_t subRanges = static_cast<uint32_t>(picks.Between(0, 1));
+        uint32_t dwFlags = 0;
+        for (const uint32_t bit : kFlagBits) {
+            if (picks.Between(0, 2) == 0) {
+                dwFlags |= bit;
+            }
+        }
+        const uint32_t nTransVal = picks.Between(0, 1) ? 0xFF000000u : 0u;
+
+        RGBQUAD entries[256];
+        for (RGBQUAD& entry : entries) {
+            const uint32_t bits = picks.Bits();
+            std::memcpy(&entry, &bits, sizeof(entry));
+        }
+
+        // The affect arguments: colours, then per range a tint, an add and
+        // a light, each absent, steady (period 1; 0 also for the add) or
+        // pulsing (period 2 to 30).
+        uint32_t colors[3];
+        for (uint32_t& color : colors) {
+            color = picks.Bits() & 0xFFFFFF;
+        }
+        uint32_t rangeColors[3][7] = {};
+        bool present[3][7] = {};
+        uint8_t periods[3][7] = {};
+        for (int kind = 0; kind < 3; ++kind) {
+            for (int range = 0; range < 7; ++range) {
+                present[kind][range] = picks.Between(0, 2) != 0;
+                rangeColors[kind][range] = picks.Bits() & 0xFFFFFF;
+                const int32_t form = picks.Between(0, 2);
+                if (form == 0) {
+                    periods[kind][range] = static_cast<uint8_t>(kind == 1 && picks.Between(0, 1) ? 0 : 1);
+                } else {
+                    periods[kind][range] = static_cast<uint8_t>(picks.Between(2, 30));
+                }
+            }
+        }
+        // A range without an add keeps the previous range's add percentage,
+        // and a suppressed range then divides by its own add period: with a
+        // period of 0 the original divides by zero (0x7BFEC1). Inputs with
+        // an add period of 0 suppress nothing.
+        bool zeroAddPeriod = false;
+        for (int range = 0; range < 7; ++range) {
+            zeroAddPeriod = zeroAddPeriod || periods[1][range] == 0;
+        }
+        const uint8_t suppress = zeroAddPeriod ? 0 : static_cast<uint8_t>(picks.Bits());
+
+        char inputs[200];
+        std::snprintf(inputs, sizeof(inputs),
+            "input %d: dwFlags 0x%X, nTransVal 0x%X, fade %u, tint 0x%X, brightness %u, gamma %u, AU %d+%d, "
+            "subranges %u, suppress 0x%X",
+            n, dwFlags, nTransVal, values.fade, values.globalTint, values.brightness, values.gamma, auBase,
+            auCounter, subRanges, suppress);
+        ctx.SetInputs(inputs);
+
+        uint32_t* originalDest = nullptr;
+        ctx.CallOriginal([&] {
+            Put<uint8_t>(mode, kFadeOffset, values.fade);
+            Put<uint32_t>(mode, kGlobalTintOffset, values.globalTint);
+            Put<uint8_t>(mode, kBrightnessOffset, values.brightness);
+            Put<uint8_t>(mode, kGammaOffset, values.gamma);
+            Put<int32_t>(chitin, kAUCounterOffset, auCounter);
+
+            uint8_t* palette = OriginalBlock(kPaletteSize);
+            reinterpret_cast<PaletteCtorFn>(kPaletteCtor)(palette, nullptr, 1);
+            Put<int32_t>(palette, kPaletteBaseOffset, auBase);
+            Put<uint32_t>(palette, kPaletteSubRangesOffset, subRanges);
+            auto* paletteEntries = reinterpret_cast<uint8_t*>(
+                static_cast<uintptr_t>(Get<uint32_t>(palette, kPalettePaletteOffset)));
+            std::memcpy(paletteEntries, entries, sizeof(entries));
+
+            uint8_t* affect = OriginalBlock(kAffectSize);
+            Put<uint32_t>(affect, 0x0, colors[0]);
+            Put<uint32_t>(affect, 0x4, colors[1]);
+            Put<uint32_t>(affect, 0x8, colors[2]);
+            const size_t pointerOffsets[3] = { 0x0C, 0x30, 0x54 };
+            const size_t periodOffsets[3] = { 0x28, 0x4C, 0x70 };
+            uint8_t* targets = OriginalBlock(3 * 7 * 4);
+            for (int kind = 0; kind < 3; ++kind) {
+                for (int range = 0; range < 7; ++range) {
+                    uint8_t* target = targets + (kind * 7 + range) * 4;
+                    Put<uint32_t>(target, 0, rangeColors[kind][range]);
+                    Put<uint32_t>(affect, pointerOffsets[kind] + range * 4,
+                        present[kind][range] ? static_cast<uint32_t>(reinterpret_cast<uintptr_t>(target)) : 0u);
+                    Put<uint8_t>(affect, periodOffsets[kind] + range, periods[kind][range]);
+                }
+            }
+            Put<uint8_t>(affect, 0x77, suppress);
+
+            originalDest = reinterpret_cast<uint32_t*>(OriginalBlock(256 * 4));
+            reinterpret_cast<RealizeRangeFn>(kRealizeRange)(palette, nullptr, originalDest, 32, dwFlags, affect,
+                nTransVal);
+        });
+
+        oursMode->m_nFade = values.fade;
+        oursMode->rgbGlobalTint = values.globalTint;
+        oursMode->m_nBrightnessCorrection = values.brightness;
+        oursMode->m_nGammaCorrection = values.gamma;
+        oursChitin->nAUCounter = auCounter;
+
+        CVidPalette palette(CVidPalette::TYPE_RANGE);
+        palette.m_nAUCounterBase = auBase;
+        palette.m_bSubRangesCalculated = static_cast<BOOL>(subRanges);
+        std::memcpy(palette.m_pPalette, entries, sizeof(entries));
+
+        CVIDIMG_PALETTEAFFECT affect;
+        std::memset(&affect, 0, sizeof(affect));
+        affect.rgbTintColor = colors[0];
+        affect.rgbAddColor = colors[1];
+        affect.rgbLightColor = colors[2];
+        COLORREF targets[3][7];
+        for (int range = 0; range < 7; ++range) {
+            for (int kind = 0; kind < 3; ++kind) {
+                targets[kind][range] = rangeColors[kind][range];
+            }
+            affect.pRangeTints[range] = present[0][range] ? &targets[0][range] : nullptr;
+            affect.aRangeTintPeriods[range] = periods[0][range];
+            affect.pRangeAdds[range] = present[1][range] ? &targets[1][range] : nullptr;
+            affect.aRangeAddPeriods[range] = periods[1][range];
+            affect.pRangeLights[range] = present[2][range] ? &targets[2][range] : nullptr;
+            affect.aRangeLightPeriods[range] = periods[2][range];
+        }
+        affect.suppressTints = suppress;
+
+        DWORD oursDest[256] = {};
+        palette.RealizeRange(oursDest, 32, dwFlags, &affect, nTransVal);
+        ctx.CountInputs(1);
+        CompareArrays(ctx, originalDest, oursDest, 256);
+    };
+
+    for (int i = 0; i < 64 + ctx.iterations; ++i) {
+        check(i);
+    }
+
+    // oursMode is left alive: its destructor is not part of the case.
+    ::operator delete(oursEngineStorage);
+    ::operator delete(oursChitinStorage);
+}
+
 } // namespace
 
 ORACLE_CASE("vid/hline_shaded32", HLineShaded32);
 ORACLE_CASE("vid/hline_shaded_mirrored32", HLineShadedMirrored32);
+ORACLE_CASE("vid/realize_range", RealizeRange);
 ORACLE_CASE("vid/brightness_contrast", BrightnessContrast);
