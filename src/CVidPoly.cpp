@@ -165,16 +165,14 @@ BOOL CVidPoly::FillConvexPoly(WORD* pSurface, LONG lPitch, const CRect& rClipRec
         nRightXDir = -1;
         nRightDx = -nRightDx;
     }
-    nRightDy = m_pVertices[nRightIndex].y - nMaxYPt;
+    nRightDy = m_pVertices[nRightIndex].y - nMinYPt;
 
+    // NOTE: With nRightDy <= 0 (a flat top) Run, AdjUp and ErrTerm stay
+    // unset: the loop's first step recomputes them (0x7C1058).
     if (nRightDy > 0) {
         nRightRun = nRightDx / nRightDy;
         nRightAdjUp = nRightDx % nRightDy;
         nRightErrTerm = nRightAdjUp - nRightDy;
-    } else {
-        nRightRun = nRightDx;
-        nRightAdjUp = nRightDx;
-        nRightErrTerm = nRightDx;
     }
 
     nLeftDx = m_pVertices[nLeftIndex].x - nLeftX;
@@ -182,26 +180,24 @@ BOOL CVidPoly::FillConvexPoly(WORD* pSurface, LONG lPitch, const CRect& rClipRec
         nLeftXDir = -1;
         nLeftDx = -nLeftDx;
     }
-    nLeftDy = m_pVertices[nLeftIndex].y - nMaxYPt;
+    nLeftDy = m_pVertices[nLeftIndex].y - nMinYPt;
 
     if (nLeftDy > 0) {
         nLeftRun = nLeftDx / nLeftDy;
         nLeftAdjUp = nLeftDx % nLeftDy;
-        nLeftErrTerm = nRightAdjUp - nLeftDy;
-    } else {
-        nLeftRun = nLeftDx;
-        nLeftAdjUp = nLeftDx;
-        nLeftErrTerm = nLeftDx;
+        nLeftErrTerm = nLeftAdjUp - nLeftDy;
     }
 
+    // NOTE: The row offsets are signed (32-bit int in the original): a
+    // polygon starting above the clip moves the pointer back.
     if ((dwFlags & 0x8) != 0) {
-        pSurface = reinterpret_cast<WORD*>(reinterpret_cast<BYTE*>(pSurface) + lPitch * (rClip.bottom - nMinYPt));
+        pSurface = reinterpret_cast<WORD*>(reinterpret_cast<BYTE*>(pSurface) + lPitch * (rClip.bottom - static_cast<LONG>(nMinYPt)));
         lPitch = -lPitch;
     } else {
-        pSurface = reinterpret_cast<WORD*>(reinterpret_cast<BYTE*>(pSurface) + lPitch * (nMinYPt - rClip.top));
+        pSurface = reinterpret_cast<WORD*>(reinterpret_cast<BYTE*>(pSurface) + lPitch * (static_cast<LONG>(nMinYPt) - rClip.top));
     }
 
-    ptRefAdjusted.y += nMinYPt - rClip.top;
+    ptRefAdjusted.y += static_cast<LONG>(nMinYPt) - rClip.top;
 
     while (nMinYPt <= nMaxYPt) {
         if (nMinYPt == m_pVertices[nRightIndex].y) {
@@ -268,14 +264,14 @@ BOOL CVidPoly::FillConvexPoly(WORD* pSurface, LONG lPitch, const CRect& rClipRec
         nLeftErrTerm += nLeftAdjUp;
         if (nLeftErrTerm > 0) {
             nLeftX += nLeftXDir;
-            nLeftErrTerm -= nLeftAdjUp + nLeftDx;
+            nLeftErrTerm -= nLeftDy;
         }
 
         nRightX += nRightRun * nRightXDir;
         nRightErrTerm += nRightAdjUp;
         if (nRightErrTerm > 0) {
             nRightX += nRightXDir;
-            nRightErrTerm -= nRightAdjUp + nRightDx;
+            nRightErrTerm -= nRightDy;
         }
 
         nMinYPt++;
