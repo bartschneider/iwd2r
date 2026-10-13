@@ -2033,7 +2033,115 @@ BOOL CVidCell::Blt8To32Brightest(DWORD* pSurface, LONG lPitch, DWORD dwFlags)
 // 0x7D0950
 BOOL CVidCell::sub_7D0950(DWORD* pSurface, LONG lPitch, DWORD dwFlags, INT nTransVal)
 {
-    // TODO: Incomplete.
+    int nWidth = m_pFrame->nWidth;
+    int nHeight = m_pFrame->nHeight;
+
+    if (nHeight == 0 || nWidth == 0) {
+        return TRUE;
+    }
+
+    DWORD rgbShadow = g_pChitin->GetCurrentVideoMode()->field_24;
+    DWORD nInverse = 256 - nTransVal;
+
+    // __FILE__: C:\Projects\Icewind2\src\chitin\ChVidImage24.cpp
+    // __LINE__: 6515
+    UTIL_ASSERT(nTransVal <= 256);
+
+    // In bytes.
+    LONG nRowJump = lPitch - nWidth * 4;
+
+    BYTE* pFrameData = pRes->GetFrameData(m_pFrame, m_bDoubleSize);
+
+    if (!m_bPaletteChanged) {
+        m_cPalette.SetPalette(pRes->m_pPalette, 256, CVidPalette::TYPE_RESOURCE);
+    }
+
+    m_cPalette.Realize(CVidImage::rgbTempPal, 32, dwFlags, &m_paletteAffects, 255);
+
+    if (!m_bShadowOn) {
+        CVidImage::rgbTempPal[CVidPalette::SHADOW_ENTRY] = rgbShadow;
+    }
+
+    BAMHEADER* pBamHeader = pRes->m_bCacheHeader
+        ? pRes->m_pBamHeaderCopy
+        : pRes->m_pBamHeader;
+    BYTE nTransparentColor = pBamHeader->nTransparentColor;
+
+    // NOTE: The original is hand-written assembly; the run decoding below
+    // walks the same pixels.
+    if (pRes->GetCompressed(m_pFrame, m_bDoubleSize)) {
+        int nRunLength = 0;
+        int pos = 0;
+        for (int y = 0; y < nHeight; y++) {
+            int nRemainingWidth = nWidth;
+            while (nRemainingWidth != 0) {
+                BYTE nColor = pFrameData[pos];
+                if (nColor == nTransparentColor) {
+                    if (nRunLength == 0) {
+                        nRunLength = pFrameData[pos + 1] + 1;
+                    }
+
+                    if (nRemainingWidth == nRunLength) {
+                        pos += 2;
+
+                        pSurface += nRemainingWidth;
+                        nRunLength = 0;
+                        nRemainingWidth = 0;
+                    } else if (nRemainingWidth > nRunLength) {
+                        pos += 2;
+
+                        pSurface += nRunLength;
+                        nRemainingWidth -= nRunLength;
+                        nRunLength = 0;
+                    } else {
+                        pSurface += nRemainingWidth;
+                        nRunLength -= nRemainingWidth;
+                        nRemainingWidth = 0;
+                    }
+                } else {
+                    pos++;
+
+                    // The shadow colour is drawn opaque, everything else
+                    // blended; the top byte ends up clear.
+                    DWORD rgb = CVidImage::rgbTempPal[nColor] & 0xFFFFFF;
+                    if (rgb != rgbShadow) {
+                        DWORD nDest = *pSurface;
+                        DWORD nRed = ((rgb >> 16) & 0xFF) * nInverse + ((nDest >> 16) & 0xFF) * nTransVal;
+                        DWORD nGreen = ((rgb >> 8) & 0xFF) * nInverse + ((nDest >> 8) & 0xFF) * nTransVal;
+                        DWORD nBlue = (rgb & 0xFF) * nInverse + (nDest & 0xFF) * nTransVal;
+                        rgb = ((nRed << 8) & 0xFFFF0000) | (nGreen & 0xFF00) | ((nBlue >> 8) & 0xFF);
+                    }
+                    *pSurface++ = rgb;
+                    nRemainingWidth--;
+                }
+            }
+            pSurface = reinterpret_cast<DWORD*>(reinterpret_cast<BYTE*>(pSurface) + nRowJump);
+        }
+    } else {
+        // Every pixel is blended (no shadow test) and keeps its top byte.
+        int pos = 0;
+        for (int y = nHeight; y > 0; y--) {
+            for (int x = nWidth; x > 0; x--) {
+                BYTE nColor = pFrameData[pos];
+                if (nColor != nTransparentColor) {
+                    DWORD rgb = CVidImage::rgbTempPal[nColor];
+                    DWORD nDest = *pSurface;
+                    INT nRed = static_cast<INT>(((rgb >> 16) & 0xFF) * nInverse + ((nDest >> 16) & 0xFF) * nTransVal) >> 8;
+                    INT nGreen = static_cast<INT>(((rgb >> 8) & 0xFF) * nInverse + ((nDest >> 8) & 0xFF) * nTransVal) >> 8;
+                    INT nBlue = static_cast<INT>((rgb & 0xFF) * nInverse + (nDest & 0xFF) * nTransVal) >> 8;
+                    *pSurface = (nDest & 0xFF000000)
+                        | ((nRed & 0xFF) << 16)
+                        | ((nGreen & 0xFF) << 8)
+                        | (nBlue & 0xFF);
+                }
+                pSurface++;
+                pos++;
+            }
+            // NOTE: The original steps the row jump, a byte count, in
+            // pixels (0x7D0C3F): rows land four times too far apart.
+            pSurface += nRowJump;
+        }
+    }
 
     return TRUE;
 }
