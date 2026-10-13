@@ -10753,27 +10753,85 @@ BOOL CGameSprite::ProcessEffectList()
             field_70F9 = rand() % 20 + 1;
             field_70FA = rand() % 100;
 
-            // TODO: Incomplete: the encumbrance check (GetCarriedWeight,
-            // CRuleTables::GetEncumbranceMod) and the two
-            // CGameEffectList::CheckEffects calls also enter the block below.
-            if (field_562C || m_bHPCONBonusTotalUpdate) {
+            // Whether the carried weight no longer matches the animation's
+            // move scale (0x72DFC4-0x72E1A6).
+            BOOL bEncumbranceChanged = FALSE;
+            if (g_pBaldurChitin->GetObjectGame()->GetCharacterPortraitNum(m_id) != -1) {
+                DWORD nWeight = GetCarriedWeight();
+                const CRuleTables& ruleTables = g_pBaldurChitin->GetObjectGame()->GetRuleTables();
+                SHORT nAllowance = static_cast<SHORT>(ruleTables.m_tStrengthMod.GetAtLong(CPoint(3, m_derivedStats.m_nSTR)));
+
+                // NOTE: The original computes on the x87 stack in double
+                // precision from the two values rounded to float, and
+                // truncates (0x72E05B-0x72E080).
+                DWORD nMaxWeight = static_cast<DWORD>(static_cast<double>(static_cast<float>(ruleTables.GetEncumbranceMod(this)))
+                    / 100.0
+                    * static_cast<double>(static_cast<float>(nAllowance)));
+
+                if (nWeight > nMaxWeight * 120 / 100) {
+                    // NOTE: Uninline.
+                    bEncumbranceChanged = GetAnimation()->GetMoveScale() != 0;
+                } else if (nWeight > nMaxWeight) {
+                    // NOTE: Uninline.
+                    bEncumbranceChanged = GetAnimation()->GetMoveScale() != (GetAnimation()->GetMoveScaleDefault() >> 1);
+                } else {
+                    // NOTE: Uninline.
+                    bEncumbranceChanged = GetAnimation()->GetMoveScale() < GetAnimation()->GetMoveScaleDefault();
+                }
+            }
+
+            if (m_timedEffectList.CheckEffects()
+                || m_equipedEffectList.CheckEffects()
+                || field_562C
+                || bEncumbranceChanged
+                || m_bHPCONBonusTotalUpdate) {
                 field_562C = FALSE;
                 m_tempStats = m_derivedStats;
 
-                // TODO: Incomplete: the animation updates, the messages, the
-                // portrait update and the AI actions around HandleEffects.
+                // NOTE: Uninline.
+                field_72EA = GetAnimation()->GetMoveScale();
+                field_72EC = m_derivedStats.m_generalState;
+
+                // NOTE: Uninline.
+                GetAnimation()->ResetMoveScale();
+
+                // TODO: Incomplete (0x72E270-0x72E70E): the move scale
+                // bonuses (monk levels, feat 0xC) when the animation moves,
+                // the color ranges (m_hasColorRangeEffects), the color
+                // effects (m_hasColorEffects), the animation change with
+                // its search bitmap update and sequence reset (field_5640),
+                // and their messages.
+
+                m_hasColorRangeEffects = FALSE;
+                m_hasColorEffects = FALSE;
+                field_5640 = FALSE;
+                m_portraitIcons.RemoveAll();
+
+                g_pBaldurChitin->GetObjectGame()->UpdatePortrait(g_pBaldurChitin->GetObjectGame()->GetCharacterPortraitNum(m_id), 1);
+
                 bResult = HandleEffects();
+
+                m_bForceVisualEffects = TRUE;
+
+                // TODO: Incomplete (0x72E759-0x72FB24): the AI actions and
+                // messages that follow a change of state (the general
+                // state against field_72EC, the current action).
             }
 
-            // TODO: Incomplete: the active engine's notification (vtable
-            // +0x108) and the animation state at 0x72EA and 0x72EC.
+            g_pBaldurChitin->GetActiveEngine()->UpdateCharacterStatus(m_id);
+
+            // NOTE: Uninline.
+            field_72EA = GetAnimation()->GetMoveScale();
+            field_72EC = m_derivedStats.m_generalState;
         }
 
         if (field_72A2 < 1) {
             m_bAllowEffectListCall = TRUE;
 
-            // TODO: Incomplete: HandlePersistantEffects (0x733200) while
-            // the world timer runs.
+            if (g_pBaldurChitin->GetObjectGame()->GetWorldTimer()->m_active) {
+                // TODO: Incomplete: HandlePersistantEffects (0x733200, with
+                // 1; 0x72FBA7-0x72FBC3), which src/ does not define yet.
+            }
 
             return bResult;
         }
