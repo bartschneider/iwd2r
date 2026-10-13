@@ -1,14 +1,13 @@
 # iwd2r
 
-iwd2r (Icewind Dale 2 Resurrected) is a cross-platform port of the decompiled Icewind Dale II engine from [alexbatalov/iwd2-re](https://github.com/alexbatalov/iwd2-re). It builds natively on Linux and Windows, runs the original simulation underneath, and is meant to grow a high-fidelity renderer with a runtime toggle back to the classic 2D look and support for the IWD2EE mod. It is a modified version of iwd2-re; see [NOTICE.md](NOTICE.md).
+iwd2r (Icewind Dale 2 Resurrected) is a cross-platform port of the decompiled Icewind Dale II engine from [alexbatalov/iwd2-re](https://github.com/alexbatalov/iwd2-re). It builds natively on Linux and Windows, runs the original simulation underneath, and is meant to grow a high-fidelity renderer with a runtime toggle back to the classic 2D look and the IWD2EE mod built in. iwd2r is a modified version of iwd2-re.
 
 ## What this repository does not contain
 
 - No game content.
 - No original binary.
-- No IWD2EE files.
 
-Bring your own copy of Icewind Dale II: Complete from GOG. The DRM-free GOG version is the reference.
+Bring your own copy of Icewind Dale II: Complete from GOG. The DRM-free GOG version is the reference. That is all a player needs: IWD2EE is part of iwd2r's own source, and its edits to the game's files are applied on the player's machine.
 
 ## Status
 
@@ -133,7 +132,7 @@ SDL_VIDEO_DRIVER=dummy SDL_AUDIO_DRIVER=dummy IWD2R_SMOKE_FRAMES=300 ./build/lin
 
 ## License
 
-[LICENSE.md](LICENSE.md): the Sustainable Use License 1.0 applies to the whole repository, including new code. [NOTICE.md](NOTICE.md) records the modification. The original game, Icewind Dale II, is the property of its rights holders and is not included.
+[LICENSE.md](LICENSE.md): the Sustainable Use License 1.0 applies to the whole repository, including new code. The original game, Icewind Dale II, is the property of its rights holders and is not included.
 
 ## References
 
@@ -141,4 +140,4 @@ SDL_VIDEO_DRIVER=dummy SDL_AUDIO_DRIVER=dummy IWD2R_SMOKE_FRAMES=300 ./build/lin
 - IESDP, for file formats.
 - GemRB, as a behavioral reference only (GPL; nothing is copied).
 - benilla, as a pattern reference for the data environment variable, no bundled assets and generated-map conventions.
-- IWD2EE, the mod this engine targets; it is not included.
+- IWD2EE, the mod this engine ships; its code is part of iwd2r.
