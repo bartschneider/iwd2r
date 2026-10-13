@@ -913,9 +913,11 @@ void CVidPalette::RealizeRange(DWORD* pDestPalette, INT nBpp, DWORD dwFlags, CVI
 
     for (int range = 0; range < 7; range++) {
         // The pulse of each range is offset by 1 << range (0x7BFBFB).
-        DWORD rgbRangeTintRed;
-        DWORD rgbRangeTintGreen;
-        DWORD rgbRangeTintBlue;
+        // NOTE: The range values are read only when their pointer is set;
+        // initialised only to quiet -Wmaybe-uninitialized.
+        DWORD rgbRangeTintRed = 0;
+        DWORD rgbRangeTintGreen = 0;
+        DWORD rgbRangeTintBlue = 0;
         if (pAffectArgs->pRangeTints[range] != NULL) {
             BYTE nPeriod = pAffectArgs->aRangeTintPeriods[range];
             if (nPeriod == 1) {
@@ -934,7 +936,7 @@ void CVidPalette::RealizeRange(DWORD* pDestPalette, INT nBpp, DWORD dwFlags, CVI
             }
         }
 
-        RGBQUAD rgbRangeInv;
+        RGBQUAD rgbRangeInv = {};
         if (pAffectArgs->pRangeAdds[range] != NULL) {
             BYTE nPeriod = pAffectArgs->aRangeAddPeriods[range];
             if (nPeriod == 1 || nPeriod == 0) {
@@ -956,9 +958,9 @@ void CVidPalette::RealizeRange(DWORD* pDestPalette, INT nBpp, DWORD dwFlags, CVI
 
         // The range light keeps the previous range's percentage when this
         // range has none (0x7BFDB0).
-        DWORD rgbRangeLightRed;
-        DWORD rgbRangeLightGreen;
-        DWORD rgbRangeLightBlue;
+        DWORD rgbRangeLightRed = 0;
+        DWORD rgbRangeLightGreen = 0;
+        DWORD rgbRangeLightBlue = 0;
         if (pAffectArgs->pRangeLights[range] != NULL) {
             BYTE nPeriod = pAffectArgs->aRangeLightPeriods[range];
             if (nPeriod == 1) {
@@ -1091,8 +1093,8 @@ void CVidPalette::RealizeRange(DWORD* pDestPalette, INT nBpp, DWORD dwFlags, CVI
                 | (cTmpPalette.m_pPalette[index].rgbRed << pVidMode->m_dwRBitShift)
                 | (cTmpPalette.m_pPalette[index].rgbGreen << pVidMode->m_dwGBitShift)
                 | (cTmpPalette.m_pPalette[index].rgbBlue << pVidMode->m_dwBBitShift);
-            if (color == (255 << pVidMode->m_dwGBitShift)) {
-                color = 254 << pVidMode->m_dwGBitShift;
+            if (color == (255u << pVidMode->m_dwGBitShift)) {
+                color = 254u << pVidMode->m_dwGBitShift;
             }
             pDestPalette[index] = color;
         }
