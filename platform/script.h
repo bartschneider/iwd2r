@@ -15,9 +15,11 @@
 //                 IWD2R_SHOT_DIR (default: the working directory, which is
 //                 the install directory once the engine has started)
 //   checkpoint NAME
-//                 a named point for state dumps: the replay recorder
-//                 (oracle/replay) writes checkpoint-NAME.json there; the
-//                 engine does nothing with it yet
+//                 a named point for state dumps: checkpoint-NAME.json is
+//                 written there, by the replay recorder in the original
+//                 (oracle/replay) and by our engine's replay mode
+//                 (platform/replay.h, IWD2R_STATE_DUMP); outside the replay
+//                 mode the engine does nothing with it
 //   quit          post WM_CLOSE
 //   origin ui|screen
 //                 how later X Y are read: ui (the default) is the
@@ -26,7 +28,9 @@
 //                 script clicks the same buttons at every resolution;
 //                 screen is the engine's screen pixels
 //
-// The script advances once per presented frame. While it runs, the injected
+// The script advances once per presented frame; in the replay mode
+// (platform/replay.h) once per engine frame instead, from frame 1, as the
+// replay recorder advances it in the original. While it runs, the injected
 // cursor replaces the real mouse and injected keys read as down before the
 // real keyboard; once it ends, real input takes over again. A press or a
 // cursor move is held until the engine has polled it at least once (bounded
@@ -43,16 +47,26 @@ namespace platform::script {
 // Starts running already parsed commands (replacing any running script).
 void Start(std::vector<Command> commands);
 
-// Reads and parses the file named by IWD2R_SCRIPT, if set, and starts it.
-// On a read or parse error reports one line through platform::ReportFatal
-// and exits the process with code 5.
+// Reads and parses the file named by IWD2R_SCRIPT, if set, and starts it
+// (in the replay mode: keeps it for StartPending). On a read or parse error
+// reports one line through platform::ReportFatal and exits the process with
+// code 5.
 void StartFromEnvironment();
+
+// Replay mode: starts the script StartFromEnvironment kept, for a screen of
+// width x height. True when there was one.
+bool StartPending(int width, int height);
 
 // Stops the running script and clears the injected input.
 void Stop();
 
-// Runs the script for one presented frame. Called by the window pump.
-void Advance();
+// Runs the script for one frame. Called by the window pump once per
+// presented frame, or by the replay mode once per engine frame. True on the
+// frame it finishes.
+bool Advance();
+
+// The script line of the step in progress, 0 when none.
+int Line();
 
 // The external control channel, active only when IWD2R_CONTROL_DIR is set:
 // for every request file shot-<NAME>.req in that directory, writes the

@@ -4,6 +4,7 @@
 #include "platform/data_dir.h"
 #include "platform/png.h"
 #include "platform/present.h"
+#include "platform/replay.h"
 #include "platform/window.h"
 
 #include <cstdio>
@@ -70,13 +71,20 @@ public:
         platform::window::EnqueueMessage(WM_CLOSE, 0, 0);
     }
 
-    // Recorded by the replay recorder; nothing to do here yet.
-    void Checkpoint(const std::string&, int) override { }
+    // The replay mode writes the dump; otherwise nothing to do.
+    void Checkpoint(const std::string& name, int line) override
+    {
+        if (platform::replay::Active())
+            platform::replay::Checkpoint(name, line);
+    }
 };
 
 struct Runtime {
     std::mutex mutex;
     platform::script::Player player;
+    // Replay mode: the parsed script, until frame 1 starts it.
+    std::vector<Command> pending;
+    bool hasPending = false;
 };
 
 Runtime& R()
@@ -112,7 +120,25 @@ void StartFromEnvironment()
         Fail(std::string(path) + ": " + error);
     std::printf("script: %s (%zu commands)\n", path, commands.size());
     std::fflush(stdout);
+    if (platform::replay::Active()) {
+        Runtime& r = R();
+        std::lock_guard<std::mutex> lock(r.mutex);
+        r.pending = std::move(commands);
+        r.hasPending = true;
+        return;
+    }
     Start(std::move(commands));
+}
+
+bool StartPending(int width, int height)
+{
+    Runtime& r = R();
+    std::lock_guard<std::mutex> lock(r.mutex);
+    if (!r.hasPending)
+        return false;
+    r.hasPending = false;
+    r.player.Start(r.pending, width, height);
+    return true;
 }
 
 void Stop()
@@ -122,7 +148,7 @@ void Stop()
     r.player.Stop();
 }
 
-void Advance()
+bool Advance()
 {
     Runtime& r = R();
     std::lock_guard<std::mutex> lock(r.mutex);
@@ -130,7 +156,16 @@ void Advance()
     if (r.player.Advance(effects)) {
         std::printf("script: finished\n");
         std::fflush(stdout);
+        return true;
     }
+    return false;
+}
+
+int Line()
+{
+    Runtime& r = R();
+    std::lock_guard<std::mutex> lock(r.mutex);
+    return r.player.Line();
 }
 
 bool Running()

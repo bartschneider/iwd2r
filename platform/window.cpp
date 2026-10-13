@@ -8,6 +8,7 @@
 #include "platform/data_dir.h"
 #include "platform/input_settings.h"
 #include "platform/present.h"
+#include "platform/replay.h"
 #include "platform/script.h"
 #include "platform/win32_api.h"
 
@@ -223,9 +224,28 @@ bool Fetch(LPMSG msg, HWND hWnd, UINT filterMin, UINT filterMax, bool remove)
 
 // Display events only set displayChanged; the pump coalesces them into one
 // WM_DISPLAYCHANGE.
+// In the replay mode (platform/replay.h) focus and real input never reach
+// the engine, as the replay recorder's focus guard and message hooks keep
+// them from the original.
+bool ReplayDrops(const SDL_Event& e)
+{
+    switch (e.type) {
+    case SDL_EVENT_WINDOW_FOCUS_GAINED:
+    case SDL_EVENT_WINDOW_FOCUS_LOST:
+    case SDL_EVENT_MOUSE_WHEEL:
+    case SDL_EVENT_MOUSE_BUTTON_DOWN:
+    case SDL_EVENT_KEY_DOWN:
+        return true;
+    default:
+        return false;
+    }
+}
+
 void Translate(const SDL_Event& e, bool& displayChanged)
 {
     using platform::window::EnqueueMessage;
+    if (platform::replay::Active() && ReplayDrops(e))
+        return;
     WindowRecord* rec = S().current;
     const SDL_WindowID id = rec ? SDL_GetWindowID(rec->window) : 0;
 
@@ -346,10 +366,13 @@ void PumpEvents()
     }
     platform::present::PresentIfDirty();
     CheckSmoke();
-    // The control channel and the script run once per presented frame.
+    // The control channel and the script run once per presented frame (the
+    // replay mode advances the script from its own frame instead).
     const int frames = platform::present::PresentedFrames();
     if (S().scriptFrame < frames)
         platform::script::PollControl();
+    if (platform::replay::Active())
+        S().scriptFrame = frames;
     while (S().scriptFrame < frames) {
         S().scriptFrame++;
         platform::script::Advance();
@@ -795,6 +818,10 @@ BOOL GetCursorPos(LPPOINT point)
         return FALSE;
     point->x = 0;
     point->y = 0;
+    if (platform::replay::Active()) {
+        *point = platform::replay::Cursor();
+        return TRUE;
+    }
     // A running script's cursor is already in the engine's coordinates.
     if (platform::script::InjectedCursor(point))
         return TRUE;
@@ -822,6 +849,10 @@ BOOL GetCursorPos(LPPOINT point)
 // Warps to a point in the engine's screen coordinates, within the window.
 BOOL SetCursorPos(int x, int y)
 {
+    if (platform::replay::Active()) {
+        platform::replay::SetCursor(x, y);
+        return TRUE;
+    }
     WindowRecord* rec = S().current;
     if (!VideoUp() || !rec)
         return FALSE;
@@ -847,6 +878,8 @@ int ShowCursor(BOOL show)
 
 SHORT GetAsyncKeyState(int vk)
 {
+    if (platform::replay::Active())
+        return platform::replay::Key(vk);
     SHORT injected = 0;
     if (platform::script::InjectedKey(vk, &injected))
         return injected;
@@ -923,7 +956,9 @@ int MessageBoxA(HWND hWnd, LPCSTR text, LPCSTR caption, UINT type)
     }
     const int defaultId = buttons[0].buttonID;
     const int escapeId = buttons[count - 1].buttonID;
-    if (Headless())
+    // Headless, and always in the replay mode (as the recorder answers the
+    // original's), the first button without showing anything.
+    if (Headless() || platform::replay::Active())
         return defaultId;
     buttons[0].flags |= SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT;
     buttons[count - 1].flags |= SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT;

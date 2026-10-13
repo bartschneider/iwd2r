@@ -3,13 +3,22 @@
 
 namespace {
 
+// The local time, or UTC while the replay mode's virtual wall clock runs
+// (its time zone is UTC, as the replay recorder makes the original's).
 tm localBreakdown(time_t t)
 {
     tm result = {};
+    const bool utc = iwd2r_wall_clock_is_virtual();
 #ifdef _WIN32
-    localtime_s(&result, &t);
+    if (utc)
+        gmtime_s(&result, &t);
+    else
+        localtime_s(&result, &t);
 #else
-    localtime_r(&t, &result);
+    if (utc)
+        gmtime_r(&t, &result);
+    else
+        localtime_r(&t, &result);
 #endif
     return result;
 }

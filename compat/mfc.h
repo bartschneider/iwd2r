@@ -52,6 +52,10 @@
 #include "msvc_rand.h"
 #define rand() iwd2r_rand()
 #define srand(seed) iwd2r_srand(seed)
+// And time() through iwd2r_time (compat/msvc_time.h), which the replay mode
+// makes virtual; <ctime> is already included above.
+#include "msvc_time.h"
+#define time(out) iwd2r_time(out)
 
 #define ASSERT(x) ((void)0)
 #define TRACE(...) ((void)0)

@@ -44,6 +44,7 @@
 #include "ScreenLayout.h"
 #include "resource.h"
 #include "platform/fs.h"
+#include "platform/replay.h"
 
 #define FILE_NAME ".\\Icewind2.ini"
 #define PROGRAM_OPTIONS_SECTION_KEY "Program Options"
@@ -2179,6 +2180,10 @@ BOOLEAN CBaldurChitin::GetGameSpyResponse(BYTE type, BYTE** pData, DWORD* dwSize
 // 0x425FB0
 void CBaldurChitin::SynchronousUpdate()
 {
+    // iwd2r: the replay mode's frame (platform/replay.h), where the replay
+    // recorder hooks the original; a no-op unless IWD2R_STATE_DUMP is set.
+    platform::replay::OnFrame();
+
     CChitin::SynchronousUpdate();
 }
 

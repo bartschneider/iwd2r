@@ -20,3 +20,8 @@ unsigned int iwd2r_rand_state()
 {
     return g_state;
 }
+
+const unsigned int* iwd2r_rand_state_address()
+{
+    return &g_state;
+}

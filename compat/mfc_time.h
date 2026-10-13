@@ -1,6 +1,7 @@
 #pragma once
 
 #include "compat/mfc_string.h"
+#include "compat/msvc_time.h"
 
 #include <ctime>
 
@@ -36,7 +37,8 @@ public:
     {
     }
 
-    static CTime GetCurrentTime() { return CTime(std::time(nullptr)); }
+    // The current time through iwd2r_time (virtual in the replay mode).
+    static CTime GetCurrentTime() { return CTime(iwd2r_time(nullptr)); }
     // ATL's CTime::GetTickCount, which the resource cache calls: the current
     // time, the same as GetCurrentTime.
     static CTime GetTickCount() { return GetCurrentTime(); }
@@ -50,7 +52,8 @@ public:
     int GetSecond() const;
     // 1 = Sunday.
     int GetDayOfWeek() const;
-    // strftime over the local time, as MFC's CTime::Format.
+    // strftime over the local time, as MFC's CTime::Format (UTC under the
+    // replay mode's virtual wall clock).
     CString Format(const char* format) const;
 
     CTimeSpan operator-(const CTime& other) const { return CTimeSpan(m_time - other.m_time); }

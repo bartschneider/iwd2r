@@ -11,6 +11,8 @@ Usage (from WSL, in the repository):
   python3 tools/oracle.py replay record <scenario> [--seed N] [--timeout S]
                                         [--dump-every N] [--test-steal-focus N]
                                         [--test-no-focus-guard]
+  python3 tools/oracle.py replay compare <scenario> [--seed N] [--timeout S]
+                                         [--dump-every N] [--no-build]
 
 evidence writes a draft docs/evidence/<ADDR>.md for one function of the
 vanilla exe: the front matter (address, name, an empty oracle_case,
@@ -92,6 +94,26 @@ recorder take the foreground at frame N, and --test-no-focus-guard lets
 activation messages reach the game, to show what the focus guard prevents.
 On Ctrl+C only this run's injector is killed (by the pid it prints first),
 which closes its job and so kills its game.
+
+replay compare runs the scenario twice with the same seed: in the original
+as replay record does (into runs/<stamp>/original), then in our engine
+(build/linux-gcc/iwd2r, built first unless --no-build) headless on the same
+vanilla copy, with Resolution=800 and Full Screen=0 as INI overrides and the
+deterministic replay mode on (IWD2R_STATE_DUMP, platform/replay.h: the
+recorder's frame, virtual clock and wall clock, timers, seeding, input and
+focus model), into runs/<stamp>/ours. The copy's INI files are restored
+before and after our run, so both sides start from the same ones. Both
+sides' dumps get replay record's checks (schema, invariant, every
+checkpoint present). Then every scenario checkpoint is compared field by
+field (lists element by element); frame, au_counter, ai_stalled_frames and
+in_async_update are timing, reported and not compared. A checkpoint is
+compared when its screen on either side is listed in
+oracle/replay/screens.json; a difference elsewhere is shown as not enabled.
+A difference listed in oracle/replay/known_differences.json (field,
+checkpoint or "*", reason, evidence) is reported as KNOWN and does not
+fail. It exits 0 on a match (known differences allowed) and 1 on any other
+difference in an enabled screen, a missing checkpoint dump, or a failed run
+on either side; runs/<stamp>/compare.json keeps the result.
 
 Standard library only.
 """
@@ -1281,14 +1303,12 @@ def run_injector(command, env, backstop):
         raise
 
 
-def cmd_replay_record(args):
+def record_original(script, actions, seed, timeout, dump_every, run_dir,
+                    subdir='replay', steal_focus=None, no_focus_guard=False):
+    """Record script in the original with the recorder DLL into
+    run_dir/subdir; prints the run as replay record does and returns its
+    exit code (0, 1 or INJECTOR_TIMEOUT)."""
     import play
-    script = scenario_path(args.scenario)
-    import realinput
-    try:
-        actions = realinput.load_scenario(script)
-    except realinput.ScenarioError as e:
-        sys.exit('oracle: %s' % e)
     build = os.path.join(play.WIN_CHECKOUT, REPLAY_DIR_REL)
     injector = os.path.join(build, INJECTOR)
     recorder = os.path.join(build, RECORDER)
@@ -1299,7 +1319,6 @@ def cmd_replay_record(args):
     prepare_replay_ini(game)
     with open(REPLAY_SCHEMA) as f:
         schema = json.load(f)
-    run_dir = play.make_run_folder(RUNS_DIR, datetime.datetime.now())
     stamp = os.path.basename(run_dir)
     replay_dir = os.path.join(REPLAYS_DIR, stamp)
     os.makedirs(replay_dir)
@@ -1308,43 +1327,50 @@ def cmd_replay_record(args):
     names = {'IWD2R_SCRIPT': win_path(os.path.join(replay_dir,
                                                    'scenario.txt')),
              'IWD2R_REPLAY_DIR': win_path(replay_dir),
-             'IWD2R_DUMP_EVERY': str(args.dump_every),
-             'IWD2R_SEED': str(args.seed)}
-    if args.test_steal_focus:
-        names['IWD2R_TEST_STEAL_FOCUS'] = str(args.test_steal_focus)
-    if args.test_no_focus_guard:
+             'IWD2R_DUMP_EVERY': str(dump_every),
+             'IWD2R_SEED': str(seed)}
+    if steal_focus:
+        names['IWD2R_TEST_STEAL_FOCUS'] = str(steal_focus)
+    if no_focus_guard:
         names['IWD2R_TEST_NO_FOCUS_GUARD'] = '1'
     env.update(names)
     env['WSLENV'] = ':'.join([v for v in env.get('WSLENV', '').split(':')
                               if v] + sorted(names))
     command = [injector, win_path(os.path.join(game, 'iwd2.exe')),
                win_path(game), win_path(recorder),
-               '--timeout', str(args.timeout)]
+               '--timeout', str(timeout)]
     print('replay %s (%d actions), seed %d, timeout %d s, dumps every %d '
-          'frames' % (os.path.relpath(script, ROOT), len(actions), args.seed,
-                      args.timeout, args.dump_every))
+          'frames' % (os.path.relpath(script, ROOT), len(actions), seed,
+                      timeout, dump_every))
     print('running %s' % ' '.join(command))
-    code, stdout, stderr = run_injector(command, env, args.timeout + 60)
+    code, stdout, stderr = run_injector(command, env, timeout + 60)
     for line in stdout.splitlines():
         print('  %s' % line)
     for line in stderr.splitlines():
         print('  stderr: %s' % line)
     status = read_status(replay_dir)
-    result, summary = replay_outcome(code, status, args.timeout)
-    dumps = check_dumps(replay_dir, schema)
-    broken = invariant_problems(replay_dir, dumps)
-    expected = [a['name'] for a in actions if a['op'] == 'checkpoint']
-    missing = missing_checkpoints(expected, dumps)
-    out_dir = os.path.join(run_dir, 'replay')
+    result, summary = replay_outcome(code, status, timeout)
+    out_dir = os.path.join(run_dir, subdir)
     shutil.copytree(replay_dir, out_dir)
     shutil.rmtree(replay_dir, ignore_errors=True)
-    invalid = {name: errors for name, errors in dumps.items() if errors}
-    report = {'scenario': os.path.relpath(script, ROOT), 'seed': args.seed,
-              'timeout': args.timeout, 'dump_every': args.dump_every,
+    report = {'scenario': os.path.relpath(script, ROOT), 'seed': seed,
+              'timeout': timeout, 'dump_every': dump_every,
               'injector_exit_code': code, 'status': status,
-              'outcome': summary, 'dumps': sorted(dumps),
-              'invalid_dumps': invalid, 'invariant_broken': broken,
-              'missing_checkpoints': missing}
+              'outcome': summary}
+    return finish_replay(out_dir, schema, actions, result, summary, report)
+
+
+def finish_replay(out_dir, schema, actions, result, summary, report):
+    """Check a replay's dumps in out_dir (schema, invariant, the scenario's
+    checkpoints), write out_dir/replay.json and print the summary; the exit
+    code: result, or 1 when result is 0 and a check failed."""
+    dumps = check_dumps(out_dir, schema)
+    broken = invariant_problems(out_dir, dumps)
+    expected = [a['name'] for a in actions if a['op'] == 'checkpoint']
+    missing = missing_checkpoints(expected, dumps)
+    invalid = {name: errors for name, errors in dumps.items() if errors}
+    report = dict(report, dumps=sorted(dumps), invalid_dumps=invalid,
+                  invariant_broken=broken, missing_checkpoints=missing)
     with open(os.path.join(out_dir, 'replay.json'), 'w') as f:
         json.dump(report, f, indent=2)
         f.write('\n')
@@ -1365,6 +1391,304 @@ def cmd_replay_record(args):
     if result == 0 and (invalid or broken or missing):
         result = 1
     return result
+
+
+def load_actions(script):
+    import realinput
+    try:
+        return realinput.load_scenario(script)
+    except realinput.ScenarioError as e:
+        sys.exit('oracle: %s' % e)
+
+
+def cmd_replay_record(args):
+    import play
+    script = scenario_path(args.scenario)
+    actions = load_actions(script)
+    run_dir = play.make_run_folder(RUNS_DIR, datetime.datetime.now())
+    return record_original(script, actions, args.seed, args.timeout,
+                           args.dump_every, run_dir, 'replay',
+                           args.test_steal_focus, args.test_no_focus_guard)
+
+
+# ---------------------------------------------------------------------------
+# Replay comparison (oracle.py replay compare)
+
+def our_overrides():
+    """The INI overrides our engine runs a comparison with: the copy's
+    resolution, windowed, as the recorder runs the original."""
+    return ['Program Options/Resolution=%s' % VANILLA_RESOLUTION,
+            'Program Options/Full Screen=0']
+
+
+def our_env(base, game, script, out_dir, seed, dump_every):
+    """Our engine's environment for a comparison run: headless (SDL dummy
+    drivers), the scenario, and the deterministic replay mode
+    (IWD2R_STATE_DUMP, platform/replay.h) dumping into out_dir."""
+    import play
+    # Absolute: the engine changes into the game folder at start-up.
+    env = play.child_env(base, game, our_overrides(), True, None,
+                         os.path.abspath(script), os.path.abspath(out_dir))
+    for name in ('IWD2R_SMOKE_FRAMES', 'IWD2R_CONTROL_DIR'):
+        env.pop(name, None)
+    env['IWD2R_STATE_DUMP'] = os.path.abspath(out_dir)
+    env['IWD2R_SEED'] = str(seed)
+    env['IWD2R_DUMP_EVERY'] = str(dump_every)
+    return env
+
+
+def our_outcome(code, status, timeout):
+    """(exit code for oracle.py, one-line summary) of our engine's run."""
+    where = 'last frame %s' % status.get('frame', '?')
+    if status.get('script_line'):
+        where += ', scenario line %s' % status['script_line']
+    if code is None:
+        return (INJECTOR_TIMEOUT, 'our engine timed out after %d s and was '
+                'killed (%s)' % (timeout, where))
+    if code != 0:
+        return 1, 'our engine exited with code %d (%s)' % (code, where)
+    if status.get('state') != 'finished':
+        return 1, 'our engine exited before the scenario finished (%s)' % \
+            where
+    return 0, 'our engine exited with code 0 (%s, scenario finished)' % where
+
+
+def run_ours(exe, game, script, actions, seed, timeout, dump_every, run_dir,
+             subdir='ours'):
+    """Run script in our engine's replay mode into run_dir/subdir; prints
+    the run as record_original does and returns its exit code."""
+    with open(REPLAY_SCHEMA) as f:
+        schema = json.load(f)
+    out_dir = os.path.join(run_dir, subdir)
+    os.makedirs(out_dir)
+    shutil.copyfile(script, os.path.join(out_dir, 'scenario.txt'))
+    env = our_env(os.environ, game, script, out_dir, seed, dump_every)
+    print('ours %s (%d actions), seed %d, timeout %d s, dumps every %d '
+          'frames' % (os.path.relpath(script, ROOT), len(actions), seed,
+                      timeout, dump_every))
+    print('running %s headless on %s' % (os.path.relpath(exe, ROOT), game))
+    log_path = os.path.join(out_dir, 'log.txt')
+    with open(log_path, 'w') as log:
+        proc = subprocess.Popen([exe], cwd=ROOT, env=env, stdout=log,
+                                stderr=subprocess.STDOUT)
+        try:
+            code = proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+            code = None
+        except KeyboardInterrupt:
+            proc.kill()
+            raise
+    status = read_status(out_dir)
+    result, summary = our_outcome(code, status, timeout)
+    report = {'scenario': os.path.relpath(script, ROOT), 'seed': seed,
+              'timeout': timeout, 'dump_every': dump_every,
+              'exit_code': code, 'status': status, 'outcome': summary,
+              'overrides': our_overrides()}
+    return finish_replay(out_dir, schema, actions, result, summary, report)
+
+
+# Reported for each checkpoint, never compared: when a frame lands and how
+# the AI thread's updates line up with it are timing (ruling R13c), and the
+# invariant on them is enforced on each side by finish_replay.
+TIMING_FIELDS = ('frame', 'globals.au_counter', 'globals.ai_stalled_frames',
+                 'globals.in_async_update')
+SCREENS_JSON = os.path.join(ROOT, 'oracle', 'replay', 'screens.json')
+KNOWN_DIFFERENCES = os.path.join(ROOT, 'oracle', 'replay',
+                                 'known_differences.json')
+
+
+def flatten(value, prefix=''):
+    """A dump as {field path: value}: objects by dotted keys, lists by
+    [index] (chargen.abilities[2]), so each difference names one value."""
+    out = {}
+    if isinstance(value, dict):
+        for key, item in value.items():
+            out.update(flatten(item, '%s.%s' % (prefix, key) if prefix
+                               else key))
+    elif isinstance(value, list):
+        for i, item in enumerate(value):
+            out.update(flatten(item, '%s[%d]' % (prefix, i)))
+    else:
+        out[prefix] = value
+    return out
+
+
+def field_differences(original, ours):
+    """[(field, original value, our value)] over every compared field (all
+    but 'checkpoint' and TIMING_FIELDS), in field order; a field one side
+    lacks reads as '<missing>'."""
+    a = flatten(original)
+    b = flatten(ours)
+    out = []
+    for name in sorted(set(a) | set(b)):
+        if name == 'checkpoint' or name in TIMING_FIELDS:
+            continue
+        va = a.get(name, '<missing>')
+        vb = b.get(name, '<missing>')
+        if va != vb:
+            out.append((name, va, vb))
+    return out
+
+
+def load_screens(path=SCREENS_JSON):
+    with open(path) as f:
+        screens = json.load(f)
+    if not isinstance(screens, list) or not all(isinstance(s, str)
+                                                for s in screens):
+        sys.exit('oracle: %s must be a list of screen names' % path)
+    return screens
+
+
+def load_known(path=KNOWN_DIFFERENCES):
+    """known_differences.json: a list of {field, checkpoint, reason,
+    evidence}; field is a flatten() path, checkpoint a scenario checkpoint
+    name or "*" for every checkpoint."""
+    with open(path) as f:
+        known = json.load(f)
+    keys = {'field', 'checkpoint', 'reason', 'evidence'}
+    if not isinstance(known, list):
+        sys.exit('oracle: %s must be a list' % path)
+    for entry in known:
+        if not isinstance(entry, dict) or set(entry) != keys or not all(
+                isinstance(entry[k], str) and entry[k] for k in keys):
+            sys.exit('oracle: %s: each entry needs exactly %s, non-empty: %r'
+                     % (path, ', '.join(sorted(keys)), entry))
+    return known
+
+
+def known_entry(known, checkpoint, field):
+    """The known difference covering field at checkpoint, or None."""
+    for entry in known:
+        if entry['field'] == field and entry['checkpoint'] in ('*',
+                                                               checkpoint):
+            return entry
+    return None
+
+
+def compare_checkpoints(original_dir, our_dir, names, screens, known):
+    """Compare the checkpoint dumps of two replay folders.
+
+    Returns (lines, failures, known_hits): the report lines, the number of
+    differences that fail the comparison (outside known_differences, at a
+    checkpoint whose screen on either side is in screens, or a dump missing
+    on one side) and the known differences met. A difference at a
+    checkpoint where neither side is on an enabled screen is reported as
+    not enabled and does not fail."""
+    lines = []
+    failures = 0
+    known_hits = []
+    for name in names:
+        file_name = 'checkpoint-%s.json' % name
+        dumps = []
+        for folder in (original_dir, our_dir):
+            try:
+                with open(os.path.join(folder, file_name)) as f:
+                    dumps.append(json.load(f))
+            except (OSError, ValueError):
+                dumps.append(None)
+        original, ours = dumps
+        if original is None or ours is None:
+            lines.append('checkpoint %s: MISSING on %s' % (
+                name, 'both sides' if original is None and ours is None
+                else 'the original' if original is None else 'our side'))
+            failures += 1
+            continue
+        timing = ', '.join('%s %s/%s' % (
+            t.split('.')[-1], flatten(original).get(t, '?'),
+            flatten(ours).get(t, '?')) for t in TIMING_FIELDS)
+        enabled = original.get('screen') in screens or \
+            ours.get('screen') in screens
+        diffs = field_differences(original, ours)
+        unknown = []
+        for field, va, vb in diffs:
+            entry = known_entry(known, name, field)
+            if entry:
+                known_hits.append((name, field, va, vb, entry))
+            else:
+                unknown.append((field, va, vb))
+        if not unknown:
+            state = 'match'
+        elif enabled:
+            state = 'DIFFERENT'
+            failures += len(unknown)
+        else:
+            state = 'different, screen not enabled'
+        lines.append('checkpoint %s (%s): %s (%s; original/ours)' % (
+            name, original.get('screen'), state, timing))
+        for field, va, vb in unknown:
+            lines.append('  %s %s: original %s, ours %s' % (
+                'DIFF' if enabled else 'diff', field, json.dumps(va),
+                json.dumps(vb)))
+        for hit in known_hits:
+            if hit[0] == name:
+                lines.append('  KNOWN %s: original %s, ours %s (%s; '
+                             'evidence %s)' % (hit[1], json.dumps(hit[2]),
+                                               json.dumps(hit[3]),
+                                               hit[4]['reason'],
+                                               hit[4]['evidence']))
+    return lines, failures, known_hits
+
+
+def cmd_replay_compare(args):
+    import play
+    script = scenario_path(args.scenario)
+    actions = load_actions(script)
+    names = [a['name'] for a in actions if a['op'] == 'checkpoint']
+    if not names:
+        sys.exit('oracle: %s has no checkpoint lines to compare' % script)
+    screens = load_screens()
+    known = load_known()
+    exe = os.path.join(ROOT, 'build', play.LINUX_PRESET, 'iwd2r') \
+        if args.no_build else play.build_linux()
+    game = ensure_vanilla()
+    prepare_replay_ini(game)
+    run_dir = play.make_run_folder(RUNS_DIR, datetime.datetime.now())
+    # Both sides start from the same INI files: the original rewrites
+    # icewind2.ini on exit, and so does ours.
+    backup = os.path.join(run_dir, 'ini-backup')
+    ini_names = play.backup_inis(game, backup)
+    try:
+        print('== the original')
+        original = record_original(script, actions, args.seed, args.timeout,
+                                   args.dump_every, run_dir, 'original')
+        play.restore_inis(backup, game, ini_names)
+        print('== ours')
+        ours = run_ours(exe, game, script, actions, args.seed, args.timeout,
+                        args.dump_every, run_dir, 'ours')
+    finally:
+        play.restore_inis(backup, game, ini_names)
+    print('== compare %s, seed %d (screens compared: %s)' % (
+        os.path.relpath(script, ROOT), args.seed, ', '.join(screens)))
+    lines, failures, known_hits = compare_checkpoints(
+        os.path.join(run_dir, 'original'), os.path.join(run_dir, 'ours'),
+        names, screens, known)
+    for line in lines:
+        print(line)
+    report = {'scenario': os.path.relpath(script, ROOT), 'seed': args.seed,
+              'original_result': original, 'our_result': ours,
+              'lines': lines, 'failures': failures,
+              'known': [{'checkpoint': h[0], 'field': h[1], 'original': h[2],
+                         'ours': h[3]} for h in known_hits]}
+    with open(os.path.join(run_dir, 'compare.json'), 'w') as f:
+        json.dump(report, f, indent=2)
+        f.write('\n')
+    runs_ok = original == 0 and ours == 0
+    if failures == 0 and runs_ok:
+        verdict = 'MATCH at %d of %d checkpoints' % (len(names), len(names))
+        if known_hits:
+            verdict += ', with %d known difference%s' % (
+                len(known_hits), '' if len(known_hits) == 1 else 's')
+    else:
+        verdict = 'DIFFERENT: %d difference%s' % (
+            failures, '' if failures == 1 else 's')
+        if not runs_ok:
+            verdict += '; a run failed (original %d, ours %d)' % (original,
+                                                                  ours)
+    print('result: %s' % verdict)
+    print('compare: %s' % os.path.relpath(run_dir, ROOT))
+    return 0 if failures == 0 and runs_ok else 1
 
 
 def positive_int(text):
@@ -1444,6 +1768,25 @@ def main(argv=None):
     record.add_argument('--test-no-focus-guard', action='store_true',
                         help='test: let activation messages reach the game')
     record.set_defaults(run=cmd_replay_record)
+    compare = replay_sub.add_parser(
+        'compare', help='run a scenario in the original and in our engine '
+        'with the same seed and compare every checkpoint')
+    compare.add_argument('scenario', help='scenarios/<name>.txt by name, '
+                         'or a path')
+    compare.add_argument('--seed', type=seed_arg, default=1,
+                         help='seed for both sides\' main-thread srand '
+                         '(default %(default)s)')
+    compare.add_argument('--timeout', type=positive_int,
+                         default=REPLAY_TIMEOUT,
+                         help='seconds before either side is killed '
+                         '(default %(default)s)')
+    compare.add_argument('--dump-every', type=non_negative_int,
+                         default=REPLAY_DUMP_EVERY,
+                         help='a dump every N frames on both sides, 0 for '
+                         'none (default %(default)s)')
+    compare.add_argument('--no-build', action='store_true',
+                         help='use the existing build/linux-gcc/iwd2r')
+    compare.set_defaults(run=cmd_replay_compare)
     args = ap.parse_args(argv)
     return args.run(args)
 

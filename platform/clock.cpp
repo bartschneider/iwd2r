@@ -1,5 +1,6 @@
 #define NOMINMAX
 #include "platform/clock.h"
+#include "platform/replay.h"
 #include "platform/win32_api.h"
 
 #include <atomic>
@@ -213,6 +214,10 @@ TimerRegistry& Registry()
 
 DWORD TickCount()
 {
+    // The replay mode's virtual clock (platform/replay.h) overrides any
+    // source.
+    if (platform::replay::Active())
+        return platform::replay::NowMs();
     platform::ClockSource* source = platform::CurrentSource().load();
     if (!source)
         source = platform::DefaultClockSource();
@@ -249,11 +254,16 @@ MMRESULT timeSetEvent(UINT delayMs, UINT, LPTIMECALLBACK callback, DWORD_PTR use
 {
     if (!callback)
         return 0;
+    // The replay mode fires timers from its frame, on the virtual clock.
+    if (platform::replay::Active())
+        return platform::replay::SetTimer(delayMs, callback, user, flags);
     return Registry().Start(delayMs, callback, user, flags);
 }
 
 MMRESULT timeKillEvent(UINT id)
 {
+    if (platform::replay::Active())
+        return platform::replay::KillTimer(id) ? TIMERR_NOERROR : MMSYSERR_INVALPARAM;
     return Registry().Kill(id);
 }
 

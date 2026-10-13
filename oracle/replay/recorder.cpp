@@ -56,6 +56,7 @@
 
 #include "oracle/replay/recorder_script.h"
 #include "platform/input_settings.h"
+#include "platform/replay_clock.h"
 #include "replay_fields.h"
 #include "vanilla_config.h"
 
@@ -92,11 +93,12 @@ static_assert(kField_create_char_memory_extra.type == ReplayType::k_i32, "");
 static_assert(kField_sprite_feats.type == ReplayType::k_u32 && kField_sprite_feats.count == 3, "");
 static_assert(kField_sprite_portrait.type == ReplayType::k_resref, "");
 
-// The virtual clock: kClockBase at the start, then 1000 / kFramesPerSecond
-// ms per frame (CChitin::TIMER_UPDATES_PER_SECOND, 30 by default), exact on
-// average (frame N reads kClockBase + N * 1000 / 30).
-constexpr DWORD kClockBase = 0x01000000;
-constexpr DWORD kFramesPerSecond = 30;
+// The virtual clock (platform/replay_clock.h, shared with our engine's
+// replay mode): kClockBase at the start, then 1000 / kFramesPerSecond ms per
+// frame (CChitin::TIMER_UPDATES_PER_SECOND, 30 by default), exact on average
+// (frame N reads kClockBase + N * 1000 / 30).
+constexpr DWORD kClockBase = platform::replay_clock::kClockBase;
+constexpr DWORD kFramesPerSecond = platform::replay_clock::kFramesPerSecond;
 
 // The timer ids handed out for timeSetEvent.
 constexpr UINT kFirstTimerId = 0x7100;
@@ -724,7 +726,7 @@ extern "C" void __cdecl OnFrame()
         WriteDump(nullptr);
     }
     WriteStatus();
-    g_now = kClockBase + static_cast<DWORD>(static_cast<uint64_t>(frame) * 1000 / kFramesPerSecond);
+    g_now = platform::replay_clock::TickAfterFrame(frame);
     FireTimers();
 }
 
@@ -868,17 +870,19 @@ DWORD WINAPI HookTime()
     return g_now.load();
 }
 
-// The wall clock: kWallClockStart plus the virtual clock's milliseconds, the
-// same as local and as UTC time (GetTimeZoneInformation answers UTC). The
+// The wall clock: kWallClockYear-Month-Day (platform/replay_clock.h) plus
+// the virtual clock's milliseconds, the same as local and as UTC time
+// (GetTimeZoneInformation answers UTC), so time() reads
+// replay_clock::WallClockSeconds, as in our engine's replay mode. The
 // original seeds the AI thread's rand with srand(time(NULL)) when the main
 // menu starts (CScreenConnection::TimerAsynchronousUpdate, 0x5FB3E0), and
 // VC6's time() reads GetLocalTime and the time zone.
 void VirtualWallClock(LPSYSTEMTIME out)
 {
     SYSTEMTIME start = {};
-    start.wYear = 2002;
-    start.wMonth = 8;
-    start.wDay = 27; // Icewind Dale II's release
+    start.wYear = platform::replay_clock::kWallClockYear;
+    start.wMonth = platform::replay_clock::kWallClockMonth;
+    start.wDay = platform::replay_clock::kWallClockDay; // Icewind Dale II's release
     FILETIME file;
     SystemTimeToFileTime(&start, &file);
     ULARGE_INTEGER t;

@@ -409,5 +409,6 @@ set(IWD2R_ENGINE_SOURCES
     "src/main.cpp"
     "src/ScreenLayout.cpp"
     "src/ScreenLayout.h"
+    "src/StateDumpSources.cpp"
     "src/resource.h"
 )

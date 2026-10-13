@@ -2513,5 +2513,213 @@ class OracleReplayTest(unittest.TestCase):
                       actions)
 
 
+class OracleReplayCompareTest(unittest.TestCase):
+    """Our engine's state dump and tools/oracle.py replay compare."""
+
+    def schema(self):
+        with open(os.path.join(ROOT, 'oracle', 'replay', 'schema.json')) as f:
+            return json.load(f)
+
+    def test_golden_dumps_validate(self):
+        # tests/test_state_dump.cpp requires the writer to produce exactly
+        # these files; here they must satisfy the recorder's schema.
+        schema = self.schema()
+        paths = sorted(glob.glob(os.path.join(ROOT, 'tests', 'fixtures',
+                                              'state_dump_*.json')))
+        self.assertEqual([os.path.basename(p) for p in paths], [
+            'state_dump_chargen.json', 'state_dump_menu.json',
+            'state_dump_periodic.json'])
+        for path in paths:
+            with open(path) as f:
+                dump = json.load(f)
+            self.assertEqual(minischema.validate(dump, schema), [], path)
+
+    def test_screens(self):
+        self.assertEqual(oracle.load_screens(), ['connection', 'create_char'])
+        enum = self.schema()['properties']['screen']['enum']
+        for screen in oracle.load_screens():
+            self.assertIn(screen, enum)
+
+    def test_known_differences_file(self):
+        self.assertEqual(oracle.load_known(), [])
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, 'k.json')
+            good = [{'field': 'globals.ai_rng_state', 'checkpoint': '*',
+                     'reason': 'r', 'evidence': '0x72DE60'}]
+            with open(path, 'w') as f:
+                json.dump(good, f)
+            self.assertEqual(oracle.load_known(path), good)
+            for bad in ({}, [{'field': 'x'}],
+                        [dict(good[0], reason='')],
+                        [dict(good[0], extra='x')]):
+                with open(path, 'w') as f:
+                    json.dump(bad, f)
+                with self.assertRaises(SystemExit), \
+                        contextlib.redirect_stderr(io.StringIO()):
+                    oracle.load_known(path)
+
+    def test_flatten_and_differences(self):
+        dump = {'frame': 5, 'checkpoint': 'a', 'screen': 'create_char',
+                'globals': {'au_counter': 4, 'ai_stalled_frames': 0,
+                            'in_async_update': 0, 'ai_rng_state': 7},
+                'chargen': {'abilities': [1, 2], 'portrait': None}}
+        self.assertEqual(oracle.flatten(dump), {
+            'frame': 5, 'checkpoint': 'a', 'screen': 'create_char',
+            'globals.au_counter': 4, 'globals.ai_stalled_frames': 0,
+            'globals.in_async_update': 0, 'globals.ai_rng_state': 7,
+            'chargen.abilities[0]': 1, 'chargen.abilities[1]': 2,
+            'chargen.portrait': None})
+        other = json.loads(json.dumps(dump))
+        # Timing is reported, never compared (ruling R13c).
+        other.update(frame=9, checkpoint='b')
+        other['globals'].update(au_counter=1, ai_stalled_frames=3,
+                                in_async_update=1)
+        self.assertEqual(oracle.field_differences(dump, other), [])
+        other['globals']['ai_rng_state'] = 8
+        other['chargen']['abilities'] = [1, 3, 4]
+        other['chargen'] = dict(other['chargen'], portrait='X')
+        self.assertEqual(oracle.field_differences(dump, other), [
+            ('chargen.abilities[1]', 2, 3),
+            ('chargen.abilities[2]', '<missing>', 4),
+            ('chargen.portrait', None, 'X'),
+            ('globals.ai_rng_state', 7, 8)])
+
+    def write_dumps(self, folder, dumps):
+        os.makedirs(folder)
+        for name, dump in dumps.items():
+            with open(os.path.join(folder, 'checkpoint-%s.json' % name),
+                      'w') as f:
+                json.dump(dump, f)
+
+    def dump(self, screen, rng=1, au=10, frame=10):
+        return {'frame': frame, 'screen': screen, 'rng_state': rng,
+                'globals': {'au_counter': au, 'ai_stalled_frames': 0,
+                            'in_async_update': 0, 'reinitializing': 0,
+                            'fullscreen': 0, 'ai_rng_state': 3},
+                'chargen': None}
+
+    def test_compare_checkpoints(self):
+        screens = ['connection', 'create_char']
+        with tempfile.TemporaryDirectory() as tmp:
+            a = os.path.join(tmp, 'original')
+            b = os.path.join(tmp, 'ours')
+            self.write_dumps(a, {'menu': self.dump('connection'),
+                                 'party': self.dump('single_player', rng=1),
+                                 'chargen': self.dump('create_char', rng=5),
+                                 'known': self.dump('create_char', rng=6),
+                                 'gone': self.dump('connection')})
+            self.write_dumps(b, {'menu': self.dump('connection', au=9),
+                                 'party': self.dump('single_player', rng=2),
+                                 'chargen': self.dump('create_char', rng=7),
+                                 'known': self.dump('create_char', rng=8)})
+            known = [{'field': 'rng_state', 'checkpoint': 'known',
+                      'reason': 'project 3', 'evidence': '0x72DE60'}]
+            lines, failures, hits = oracle.compare_checkpoints(
+                a, b, ['menu', 'party', 'chargen', 'known', 'gone'], screens,
+                known)
+        self.assertEqual(failures, 2)
+        self.assertEqual([h[:4] for h in hits], [('known', 'rng_state', 6,
+                                                  8)])
+        self.assertEqual(lines, [
+            'checkpoint menu (connection): match (frame 10/10, au_counter '
+            '10/9, ai_stalled_frames 0/0, in_async_update 0/0; '
+            'original/ours)',
+            'checkpoint party (single_player): different, screen not '
+            'enabled (frame 10/10, au_counter 10/10, ai_stalled_frames 0/0, '
+            'in_async_update 0/0; original/ours)',
+            '  diff rng_state: original 1, ours 2',
+            'checkpoint chargen (create_char): DIFFERENT (frame 10/10, '
+            'au_counter 10/10, ai_stalled_frames 0/0, in_async_update 0/0; '
+            'original/ours)',
+            '  DIFF rng_state: original 5, ours 7',
+            'checkpoint known (create_char): match (frame 10/10, au_counter '
+            '10/10, ai_stalled_frames 0/0, in_async_update 0/0; '
+            'original/ours)',
+            '  KNOWN rng_state: original 6, ours 8 (project 3; evidence '
+            '0x72DE60)',
+            'checkpoint gone: MISSING on our side'])
+
+    def test_known_entry_wildcard(self):
+        known = [{'field': 'f', 'checkpoint': '*', 'reason': 'r',
+                  'evidence': 'e'}]
+        self.assertIs(oracle.known_entry(known, 'any', 'f'), known[0])
+        self.assertIsNone(oracle.known_entry(known, 'any', 'g'))
+
+    def test_our_env(self):
+        base = {'PATH': '/bin', 'IWD2R_SMOKE_FRAMES': '5',
+                'IWD2R_CONTROL_DIR': '/x'}
+        env = oracle.our_env(base, '/game', 'scenarios/s.txt', 'runs/r/ours',
+                             7, 30)
+        self.assertNotIn('IWD2R_SMOKE_FRAMES', env)
+        self.assertNotIn('IWD2R_CONTROL_DIR', env)
+        self.assertEqual(env['IWD2_DATA'], '/game')
+        self.assertEqual(env['SDL_VIDEO_DRIVER'], 'dummy')
+        self.assertEqual(env['IWD2R_SCRIPT'],
+                         os.path.abspath('scenarios/s.txt'))
+        self.assertEqual(env['IWD2R_STATE_DUMP'],
+                         os.path.abspath('runs/r/ours'))
+        self.assertEqual(env['IWD2R_SHOT_DIR'], env['IWD2R_STATE_DUMP'])
+        self.assertEqual(env['IWD2R_SEED'], '7')
+        self.assertEqual(env['IWD2R_DUMP_EVERY'], '30')
+        self.assertEqual(env['IWD2R_INI_OVERRIDE'],
+                         'Program Options/Resolution=800;'
+                         'Program Options/Full Screen=0')
+        self.assertEqual(base['IWD2R_SMOKE_FRAMES'], '5')
+
+    def test_our_outcome(self):
+        done = {'frame': 951, 'script_line': 0, 'state': 'finished'}
+        self.assertEqual(oracle.our_outcome(0, done, 180), (
+            0, 'our engine exited with code 0 (last frame 951, scenario '
+            'finished)'))
+        running = {'frame': 40, 'script_line': 9, 'state': 'running'}
+        self.assertEqual(oracle.our_outcome(None, running, 20)[0], 10)
+        self.assertEqual(oracle.our_outcome(0, running, 20)[0], 1)
+        self.assertEqual(oracle.our_outcome(5, {}, 20), (
+            1, 'our engine exited with code 5 (last frame ?)'))
+
+    def test_compare_arguments(self):
+        for args in (['--timeout', '0'], ['--seed', '-1'],
+                     ['--dump-every', 'x']):
+            with self.assertRaises(SystemExit, msg=args), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                oracle.main(['replay', 'compare', 'replay_click'] + args)
+
+    def test_replay_clock_shared(self):
+        # Our replay mode (platform/replay.cpp, platform/clock.cpp) and the
+        # recorder run the one clock, from the one header.
+        with open(os.path.join(ROOT, 'platform', 'replay_clock.h')) as f:
+            header = f.read()
+        values = dict(re.findall(r'constexpr \w+ (k\w+) = (\w+);', header))
+        self.assertEqual(values, {
+            'kClockBase': '0x01000000', 'kFramesPerSecond': '30',
+            'kWallClockYear': '2002', 'kWallClockMonth': '8',
+            'kWallClockDay': '27', 'kWallClockEpoch': '1030406400'})
+        import calendar
+        self.assertEqual(calendar.timegm((2002, 8, 27, 0, 0, 0)),
+                         int(values['kWallClockEpoch']))
+        uses = {
+            'oracle/replay/recorder.cpp': [
+                'replay_clock::kClockBase', 'replay_clock::kFramesPerSecond',
+                'replay_clock::TickAfterFrame', 'replay_clock::kWallClockYear',
+                'replay_clock::kWallClockMonth',
+                'replay_clock::kWallClockDay'],
+            'platform/replay.cpp': [
+                'clock::kClockBase', 'clock::TickAfterFrame',
+                'clock::WallClockSeconds'],
+        }
+        for rel, names in uses.items():
+            with open(os.path.join(ROOT, rel)) as f:
+                text = f.read()
+            self.assertIn('#include "platform/replay_clock.h"', text, rel)
+            for name in names:
+                self.assertIn(name, text, '%s does not use %s' % (rel, name))
+            self.assertNotIn('0x01000000', text, rel)
+            self.assertIsNone(re.search(r'wYear = \d', text), rel)
+        with open(os.path.join(ROOT, 'platform', 'clock.cpp')) as f:
+            text = f.read()
+        self.assertIn('platform::replay::NowMs()', text)
+        self.assertIn('platform::replay::SetTimer(', text)
+
+
 if __name__ == '__main__':
     unittest.main()
