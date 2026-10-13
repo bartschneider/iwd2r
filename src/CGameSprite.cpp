@@ -10426,6 +10426,17 @@ STRREF CGameSprite::GetNameRef()
     return strName;
 }
 
+// 0x727B40
+BOOL CGameSprite::sub_727B40()
+{
+    CItem* pItem = m_equipment.m_items[CGameSpriteEquipment::SLOT_WEAPON + 2 * m_nWeaponSet];
+    CItem* pSecondItem = m_equipment.m_items[CGameSpriteEquipment::SLOT_WEAPON + 2 * m_nWeaponSet + 1];
+    if (pItem != NULL && ((pItem->GetFlagsFile() & 0x2) != 0 || pSecondItem != NULL)) {
+        return FALSE;
+    }
+    return TRUE;
+}
+
 // 0x728270
 void CGameSprite::PlaySound(const CResRef& res)
 {
