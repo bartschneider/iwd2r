@@ -48,7 +48,7 @@ PENDING (ran 0 inputs). The run fails
 (exit 1) if any case does not do what it declared, or a runner process ends
 without its report.
 
-Before the cases run, the 2DA texts they read (TABLES) are extracted from the
+Before the cases run, the game files they read (TABLES) are extracted from the
 vanilla copy by tools/bif.py into C:/Users/thier/iwd2r-oracle/tables, which
 the runner gets as --tables.
 
@@ -181,10 +181,12 @@ INSTALL = '/mnt/c/Games/Icewind Dale II'
 INSTALL_WIN = 'C:\\Games\\Icewind Dale II'
 GAME_DIR = ORACLE_DIR + '/game'
 TABLES_DIR = ORACLE_DIR + '/tables'
-# The game text the cases read (runner --tables), extracted from the vanilla
+# The game files the cases read (runner --tables), extracted from the vanilla
 # copy by tools/bif.py before every run. Never committed.
 TABLES = ('XPLEVEL.2DA', 'HPWAR.2DA', 'HPWIZ.2DA', 'HPPRS.2DA', 'HPROG.2DA',
-          'HPMONK.2DA', 'SPLAUTOP.2DA')
+          'HPMONK.2DA', 'SPLAUTOP.2DA', 'RT_NORM.2DA', 'RT_FURY.2DA',
+          'RNDTRES.2DA', '00SWDL01.ITM', '00CHAN01.ITM', '00SCRL01.ITM',
+          '00POTN01.ITM', '00AMUL01.ITM', '00GBGA01.ITM', 'MISC07.ITM')
 MARKER = 'vanilla.ok'
 WEIDU_SETUP = 'Setup-iwd2ee.exe'
 WEIDU_TIMEOUT = 3600  # seconds for the whole uninstall
