@@ -14,6 +14,10 @@
 //   shot NAME     write the current primary surface as NAME.png into
 //                 IWD2R_SHOT_DIR (default: the working directory, which is
 //                 the install directory once the engine has started)
+//   checkpoint NAME
+//                 a named point for state dumps: the replay recorder
+//                 (oracle/replay) writes checkpoint-NAME.json there; the
+//                 engine does nothing with it yet
 //   quit          post WM_CLOSE
 //   origin ui|screen
 //                 how later X Y are read: ui (the default) is the
@@ -29,51 +33,12 @@
 // by kObserveTimeoutFrames), so the engine's input thread cannot miss it.
 #pragma once
 
-#include "compat/win_types.h"
+#include "platform/script_core.h"
 
 #include <string>
 #include <vector>
 
 namespace platform::script {
-
-enum class Verb { Wait,
-    Click,
-    RClick,
-    Move,
-    Key,
-    Type,
-    Shot,
-    Quit,
-    Origin };
-
-struct Command {
-    Verb verb = Verb::Wait;
-    int line = 0;
-    int x = 0; // wait: the frame count
-    int y = 0;
-    int vk = 0; // key
-    std::string text; // type, shot
-    bool ui = true; // move, click, rclick: X Y in UI coordinates; origin: the mode set
-};
-
-// A point in the original's 800x600 UI coordinates on a screen of
-// screenWidth x screenHeight engine pixels: offset by the centred UI's
-// corner ((w - 800) / 2, (h - 600) / 2), and doubled at 1600x1200 and
-// 2048x1536, where the original draws the UI double size.
-POINT UiToScreen(int x, int y, int screenWidth, int screenHeight);
-
-// Frames a press, release or move waits for the engine to poll it before
-// the script moves on regardless.
-constexpr int kObserveTimeoutFrames = 60;
-
-// The virtual key for a name: a VK_* name without the prefix (ESCAPE,
-// RETURN, SPACE, F1, LEFT...), one letter or one digit; case-insensitive.
-// 0 when unknown.
-int VKForName(const std::string& name);
-
-// Parses a script. On an unknown or malformed line returns false with error
-// set to "line N: <reason>".
-bool Parse(const std::string& text, std::vector<Command>& commands, std::string& error);
 
 // Starts running already parsed commands (replacing any running script).
 void Start(std::vector<Command> commands);

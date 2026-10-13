@@ -1,0 +1,263 @@
+{
+  "baldur_chitin": {
+    "base": "0x8CF6DC",
+    "offset": "0x0000",
+    "type": "ptr"
+  },
+  "active_engine": {
+    "base": "CChitin",
+    "offset": "0x03C4",
+    "type": "ptr"
+  },
+  "au_counter": {
+    "base": "CChitin",
+    "offset": "0x190E",
+    "type": "i32"
+  },
+  "fullscreen": {
+    "base": "CChitin",
+    "offset": "0x00E1",
+    "type": "u8"
+  },
+  "in_async_update": {
+    "base": "CChitin",
+    "offset": "0x1912",
+    "type": "i32"
+  },
+  "object_game": {
+    "base": "CBaldurChitin",
+    "offset": "0x1C54",
+    "type": "ptr"
+  },
+  "engine_dm": {
+    "base": "CBaldurChitin",
+    "offset": "0x1C58",
+    "type": "ptr"
+  },
+  "engine_projector": {
+    "base": "CBaldurChitin",
+    "offset": "0x1C5C",
+    "type": "ptr"
+  },
+  "engine_character": {
+    "base": "CBaldurChitin",
+    "offset": "0x1C60",
+    "type": "ptr"
+  },
+  "engine_create_char": {
+    "base": "CBaldurChitin",
+    "offset": "0x1C64",
+    "type": "ptr"
+  },
+  "engine_inventory": {
+    "base": "CBaldurChitin",
+    "offset": "0x1C68",
+    "type": "ptr"
+  },
+  "engine_journal": {
+    "base": "CBaldurChitin",
+    "offset": "0x1C6C",
+    "type": "ptr"
+  },
+  "engine_load": {
+    "base": "CBaldurChitin",
+    "offset": "0x1C70",
+    "type": "ptr"
+  },
+  "engine_map": {
+    "base": "CBaldurChitin",
+    "offset": "0x1C74",
+    "type": "ptr"
+  },
+  "engine_options": {
+    "base": "CBaldurChitin",
+    "offset": "0x1C78",
+    "type": "ptr"
+  },
+  "engine_save": {
+    "base": "CBaldurChitin",
+    "offset": "0x1C7C",
+    "type": "ptr"
+  },
+  "engine_spellbook": {
+    "base": "CBaldurChitin",
+    "offset": "0x1C80",
+    "type": "ptr"
+  },
+  "engine_start": {
+    "base": "CBaldurChitin",
+    "offset": "0x1C84",
+    "type": "ptr"
+  },
+  "engine_world": {
+    "base": "CBaldurChitin",
+    "offset": "0x1C88",
+    "type": "ptr"
+  },
+  "engine_store": {
+    "base": "CBaldurChitin",
+    "offset": "0x1C8C",
+    "type": "ptr"
+  },
+  "engine_single_player": {
+    "base": "CBaldurChitin",
+    "offset": "0x1C94",
+    "type": "ptr"
+  },
+  "engine_connection": {
+    "base": "CBaldurChitin",
+    "offset": "0x1C98",
+    "type": "ptr"
+  },
+  "engine_world_map": {
+    "base": "CBaldurChitin",
+    "offset": "0x1C9C",
+    "type": "ptr"
+  },
+  "engine_chapter": {
+    "base": "CBaldurChitin",
+    "offset": "0x1CA0",
+    "type": "ptr"
+  },
+  "engine_movies": {
+    "base": "CBaldurChitin",
+    "offset": "0x1CA4",
+    "type": "ptr"
+  },
+  "engine_keymaps": {
+    "base": "CBaldurChitin",
+    "offset": "0x1CA8",
+    "type": "ptr"
+  },
+  "objects_array": {
+    "base": "CInfGame",
+    "offset": "0x374C",
+    "type": "ptr"
+  },
+  "objects_max_index": {
+    "base": "CInfGame",
+    "offset": "0x3754",
+    "type": "i16"
+  },
+  "objects_next_id": {
+    "base": "CInfGame",
+    "offset": "0x3756",
+    "type": "i16"
+  },
+  "object_entry_id": {
+    "base": "CGameObjectArrayEntry",
+    "offset": "0x0006",
+    "type": "i16"
+  },
+  "object_entry_ptr": {
+    "base": "CGameObjectArrayEntry",
+    "offset": "0x0008",
+    "type": "ptr"
+  },
+  "object_entry_size": {
+    "base": "CGameObjectArrayEntry",
+    "offset": "0x000C",
+    "type": "size"
+  },
+  "create_char_sprite": {
+    "base": "CScreenCreateChar",
+    "offset": "0x04E2",
+    "type": "i32"
+  },
+  "create_char_skill_points": {
+    "base": "CScreenCreateChar",
+    "offset": "0x04F2",
+    "type": "i32"
+  },
+  "create_char_memory_str": {
+    "base": "CScreenCreateChar",
+    "offset": "0x056F",
+    "type": "u8"
+  },
+  "create_char_memory_dex": {
+    "base": "CScreenCreateChar",
+    "offset": "0x0571",
+    "type": "u8"
+  },
+  "create_char_memory_con": {
+    "base": "CScreenCreateChar",
+    "offset": "0x0572",
+    "type": "u8"
+  },
+  "create_char_memory_int": {
+    "base": "CScreenCreateChar",
+    "offset": "0x0573",
+    "type": "u8"
+  },
+  "create_char_memory_wis": {
+    "base": "CScreenCreateChar",
+    "offset": "0x0574",
+    "type": "u8"
+  },
+  "create_char_memory_chr": {
+    "base": "CScreenCreateChar",
+    "offset": "0x0575",
+    "type": "u8"
+  },
+  "create_char_memory_extra": {
+    "base": "CScreenCreateChar",
+    "offset": "0x0576",
+    "type": "i32"
+  },
+  "sprite_race": {
+    "base": "CGameSprite",
+    "offset": "0x3E3C",
+    "type": "u8"
+  },
+  "sprite_subrace": {
+    "base": "CGameSprite",
+    "offset": "0x3E3D",
+    "type": "u8"
+  },
+  "sprite_class": {
+    "base": "CGameSprite",
+    "offset": "0x3E3E",
+    "type": "u8"
+  },
+  "sprite_str": {
+    "base": "CGameSprite",
+    "offset": "0x0802",
+    "type": "u8"
+  },
+  "sprite_dex": {
+    "base": "CGameSprite",
+    "offset": "0x0803",
+    "type": "u8"
+  },
+  "sprite_con": {
+    "base": "CGameSprite",
+    "offset": "0x0804",
+    "type": "u8"
+  },
+  "sprite_int": {
+    "base": "CGameSprite",
+    "offset": "0x0805",
+    "type": "u8"
+  },
+  "sprite_wis": {
+    "base": "CGameSprite",
+    "offset": "0x0806",
+    "type": "u8"
+  },
+  "sprite_chr": {
+    "base": "CGameSprite",
+    "offset": "0x0807",
+    "type": "u8"
+  },
+  "sprite_feats": {
+    "base": "CGameSprite",
+    "offset": "0x075C",
+    "type": "u32",
+    "count": 3
+  },
+  "sprite_portrait": {
+    "base": "CGameSprite",
+    "offset": "0x05D8",
+    "type": "resref"
+  }
+}

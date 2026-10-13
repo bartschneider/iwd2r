@@ -1,6 +1,6 @@
-"""Tests for tools/gen_map.py, tools/check_evidence.py
-and the pure parts of tools/play.py, tools/realinput.py, tools/winsandbox.py,
-tools/oracle.py and tools/ghidra/labels.py.
+"""Tests for tools/gen_map.py, tools/check_evidence.py, tools/gen_fields.py,
+tools/minischema.py and the pure parts of tools/play.py, tools/realinput.py,
+tools/winsandbox.py, tools/oracle.py and tools/ghidra/labels.py.
 
 Run from the repository root: python3 -I tests/test_tools.py
 
@@ -332,6 +332,7 @@ class ScenarioParseTest(unittest.TestCase):
             'key a\n'
             'type Hello  World 2\n'
             'shot 01_start\n'
+            'Checkpoint start\n'
             'quit\n')
         self.assertEqual(actions, [
             {'op': 'wait', 'frames': 60, 'line': 3},
@@ -342,7 +343,8 @@ class ScenarioParseTest(unittest.TestCase):
             {'op': 'key', 'key': 'A', 'line': 8},
             {'op': 'type', 'text': 'Hello  World 2', 'line': 9},
             {'op': 'shot', 'name': '01_start', 'line': 10},
-            {'op': 'quit', 'line': 11},
+            {'op': 'checkpoint', 'name': 'start', 'line': 11},
+            {'op': 'quit', 'line': 12},
         ])
 
     def test_errors_name_the_line(self):
@@ -362,6 +364,10 @@ class ScenarioParseTest(unittest.TestCase):
             ('shot a/b\n', 'line 1: shot name must not contain a path'),
             ('shot c:x\n', 'line 1: shot name must not contain a path'),
             ('quit now\n', 'line 1: quit takes no arguments'),
+            ('checkpoint\n', 'line 1: checkpoint needs one name'),
+            ('checkpoint a b\n', 'line 1: checkpoint needs one name'),
+            ('checkpoint a/b\n',
+             'line 1: checkpoint name must not contain a path'),
             ('origin\n', 'line 1: origin needs ui or screen'),
             ('origin top\n', 'line 1: origin needs ui or screen'),
             ('wait 1\n\n# x\njump 1\n', "line 4: unknown command 'jump'"),
@@ -393,9 +399,9 @@ class ScenarioParseTest(unittest.TestCase):
         self.assertEqual(realinput.keysym_for_name('7'), '7')
         self.assertIsNone(realinput.keysym_for_name('?'))
 
-    def test_vk_names_match_script_cpp(self):
-        # Every name in platform/script.cpp's kNamedKeys, and no other.
-        with open(os.path.join(ROOT, 'platform', 'script.cpp')) as f:
+    def test_vk_names_match_script_core_cpp(self):
+        # Every name in platform/script_core.cpp's kNamedKeys, and no other.
+        with open(os.path.join(ROOT, 'platform', 'script_core.cpp')) as f:
             text = f.read()
         names = set(re.findall(r'\{ "([A-Z0-9_]+)", VK_', text))
         self.assertEqual(names, set(realinput.KEY_VK))
@@ -421,6 +427,12 @@ class ScenarioParseTest(unittest.TestCase):
         self.assertEqual(out, [
             {'op': 'click', 'x': (240 + 5) * 2, 'y': (60 + 6) * 2, 'line': 1},
             {'op': 'click', 'x': 10, 'y': 12, 'line': 3}])
+        # driver.ps1 knows no checkpoint; it is dropped like origin.
+        out = realinput.windows_actions(realinput.parse_scenario(
+            'checkpoint a\nwait 2\n'))
+        self.assertEqual(out, [{'op': 'wait', 'frames': 2, 'line': 2}])
+        self.assertEqual(realinput.describe(
+            {'op': 'checkpoint', 'name': 'a'}), 'checkpoint a')
 
     def test_origin_and_window_points(self):
         actions = realinput.parse_scenario(
@@ -2062,6 +2074,358 @@ class BifTest(unittest.TestCase):
         with open(paths[0], 'rb') as f:
             self.assertEqual(f.read(), b'2DA xp')
         self.assertEqual(os.listdir(out), ['XPLEVEL.2DA'])
+
+
+gen_fields = load_tool('gen_fields')
+minischema = load_tool('minischema')
+
+FIXTURE_HEADERS = {
+    'CThing.h': """#define THING_SLOTS 3
+
+class CPart;
+
+class CPart {
+public:
+    /* 0000 */ CString m_sName;
+    /* 0004 */ BYTE m_nKind;
+    /* 0006 */ SHORT m_nCount;
+};
+
+class CThing : public CBase {
+public:
+    CThing();
+    /* 0000 */ virtual void Update(); // a method: ignored
+    /* 0x0010 */ CPart m_part;
+    /* 0020 */ CThing* m_pNext; // a #guess comment
+    /* 0024 */ DWORD m_flags[THING_SLOTS];
+    /* 0030 */ RESREF m_portrait;
+    /* 0038 */ BOOLEAN m_bOn;
+    int m_noComment;
+    /* 003C */ INT m_nValue;
+    /* 0040 */ union {
+        struct {
+            /* 0040 */ BYTE m_low;
+            /* 0041 */ BYTE m_high;
+        };
+        WORD m_word;
+    };
+};
+""",
+    'CEntry.h': """class CEntry {
+public:
+    /* 0000 */ BYTE m_counts[3];
+    /* 0006 */ SHORT m_id;
+    /* 0008 */ CThing* m_ptr;
+};
+class CThingHolder { // CThing is not CThingHolder
+public:
+    /* 0000 */ int m_unused;
+};
+""",
+}
+
+
+class GenFieldsTest(unittest.TestCase):
+    """tools/gen_fields.py on a fixture header."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.src = os.path.join(self.tmp.name, 'src')
+        os.makedirs(self.src)
+        for name, text in FIXTURE_HEADERS.items():
+            with open(os.path.join(self.src, name), 'w') as f:
+                f.write(text)
+        self.headers = gen_fields.Headers(self.src)
+
+    def generate(self, fields, globals_=None):
+        return gen_fields.generate({'x-fields': fields}, self.headers,
+                                   globals_ or {})
+
+    def test_members_types_and_offsets(self):
+        out = self.generate({
+            'next': {'class': 'CThing', 'member': 'm_pNext'},
+            'flags': {'class': 'CThing', 'member': 'm_flags'},
+            'portrait': {'class': 'CThing', 'member': 'm_portrait'},
+            'on': {'class': 'CThing', 'member': 'm_bOn'},
+            'value': {'class': 'CThing', 'member': 'm_nValue'},
+            'high': {'class': 'CThing', 'member': 'm_high'},
+            'kind': {'class': 'CThing', 'member': 'm_part.m_nKind'},
+            'count': {'class': 'CThing', 'member': 'm_part.m_nCount'},
+        })
+        self.assertEqual(out, {
+            'next': {'base': 'CThing', 'offset': '0x0020', 'type': 'ptr'},
+            'flags': {'base': 'CThing', 'offset': '0x0024', 'type': 'u32',
+                      'count': 3},
+            'portrait': {'base': 'CThing', 'offset': '0x0030',
+                         'type': 'resref'},
+            'on': {'base': 'CThing', 'offset': '0x0038', 'type': 'u8'},
+            'value': {'base': 'CThing', 'offset': '0x003C', 'type': 'i32'},
+            'high': {'base': 'CThing', 'offset': '0x0041', 'type': 'u8'},
+            'kind': {'base': 'CThing', 'offset': '0x0014', 'type': 'u8'},
+            'count': {'base': 'CThing', 'offset': '0x0016', 'type': 'i16'},
+        })
+
+    def test_global_and_sizeof(self):
+        out = self.generate({
+            'thing': {'global': 'g_pThing', 'type': 'ptr'},
+            'entry_size': {'class': 'CEntry', 'sizeof': True},
+        }, {'g_pThing': '0x8cf6dc'})
+        self.assertEqual(out, {
+            'thing': {'base': '0x8CF6DC', 'offset': '0x0000', 'type': 'ptr'},
+            'entry_size': {'base': 'CEntry', 'offset': '0x000C',
+                           'type': 'size'}})
+
+    def test_errors_name_the_field(self):
+        cases = [
+            ({'class': 'CNope', 'member': 'm_x'}, 'no class CNope'),
+            ({'class': 'CThing', 'member': 'm_noComment'},
+             'no commented member m_noComment'),
+            ({'class': 'CThing', 'member': 'Update'},
+             'no commented member Update'),
+            ({'class': 'CThing', 'member': 'm_part'},
+             'has type CPart, not a scalar'),
+            ({'class': 'CThing', 'member': 'm_pNext.m_x'},
+             'is not a class member'),
+            ({'global': 'g_missing', 'type': 'ptr'}, 'no address for global'),
+            ({'global': 'g_pThing'}, 'needs a "type"'),
+            ({'class': 'CThing', 'sizeof': True}, 'has a class type'),
+            ({'member': 'm_x'}, 'malformed spec'),
+        ]
+        for spec, message in cases:
+            with self.assertRaises(gen_fields.FieldError, msg=spec) as cm:
+                self.generate({'f': spec}, {'g_pThing': '0x1'})
+            self.assertIn('field f: ', str(cm.exception))
+            self.assertIn(message, str(cm.exception))
+
+    def test_check_and_write(self):
+        schema = os.path.join(self.tmp.name, 'schema.json')
+        vanilla = os.path.join(self.tmp.name, 'vanilla.json')
+        out = os.path.join(self.tmp.name, 'fields.json')
+        with open(schema, 'w') as f:
+            json.dump({'x-fields': {'on': {'class': 'CThing',
+                                           'member': 'm_bOn'}}}, f)
+        with open(vanilla, 'w') as f:
+            json.dump({}, f)
+        args = ['--schema', schema, '--src', self.src, '--vanilla', vanilla,
+                '--out', out]
+        with contextlib.redirect_stdout(io.StringIO()) as text:
+            self.assertEqual(gen_fields.main(args + ['--check']), 1)
+            self.assertEqual(gen_fields.main(args), 0)
+            self.assertEqual(gen_fields.main(args + ['--check']), 0)
+        with open(out) as f:
+            self.assertEqual(json.load(f), {'on': {
+                'base': 'CThing', 'offset': '0x0038', 'type': 'u8'}})
+        with open(out, 'a') as f:
+            f.write(' ')
+        with contextlib.redirect_stdout(io.StringIO()) as text:
+            self.assertEqual(gen_fields.main(args + ['--check']), 1)
+        self.assertIn('out of date', text.getvalue())
+
+    def test_repository_fields_are_current(self):
+        # oracle/replay/fields.json matches the schema and src/ headers.
+        with contextlib.redirect_stdout(io.StringIO()) as text:
+            code = gen_fields.main(['--check'])
+        self.assertEqual(code, 0, text.getvalue())
+
+    def test_repository_offsets(self):
+        # Offsets checked against the vanilla exe's disassembly
+        # (vanilla.json notes, oracle/replay/recorder.cpp).
+        with open(os.path.join(ROOT, 'oracle', 'replay', 'fields.json')) as f:
+            fields = json.load(f)
+        self.assertEqual(fields['baldur_chitin']['base'], '0x8CF6DC')
+        self.assertEqual(fields['active_engine']['offset'], '0x03C4')
+        self.assertEqual(fields['engine_connection']['offset'], '0x1C98')
+        self.assertEqual(fields['engine_start']['offset'], '0x1C84')
+        self.assertEqual(fields['objects_array']['offset'], '0x374C')
+        self.assertEqual(fields['object_entry_size']['offset'], '0x000C')
+        self.assertEqual(fields['object_entry_id']['offset'], '0x0006')
+        self.assertEqual(fields['object_entry_ptr']['offset'], '0x0008')
+
+
+class MiniSchemaTest(unittest.TestCase):
+    SCHEMA = {
+        '$schema': 'https://json-schema.org/draft/2020-12/schema',
+        'title': 't', 'x-fields': {'ignored': True},
+        'type': 'object', 'required': ['n', 'tags'],
+        'additionalProperties': False,
+        'properties': {
+            'n': {'type': 'integer', 'minimum': 0, 'maximum': 9},
+            'name': {'type': ['string', 'null'], 'maxLength': 3},
+            'kind': {'type': 'string', 'enum': ['a', 'b']},
+            'tags': {'type': 'array', 'items': {'type': 'integer'},
+                     'minItems': 1, 'maxItems': 2},
+            'free': {'type': 'object'},
+        },
+    }
+
+    def errors(self, value):
+        return minischema.validate(value, self.SCHEMA)
+
+    def test_valid(self):
+        self.assertEqual(self.errors({'n': 0, 'tags': [1]}), [])
+        self.assertEqual(self.errors({'n': 9, 'name': None, 'kind': 'b',
+                                      'tags': [1, 2], 'free': {'x': 1}}), [])
+
+    def test_each_keyword(self):
+        cases = [
+            ({'tags': [1]}, "$: missing required property 'n'"),
+            ({'n': 1, 'tags': [1], 'more': 1}, '$.more: unexpected property'),
+            ({'n': True, 'tags': [1]}, '$.n: True is not of type integer'),
+            ({'n': 1.0, 'tags': [1]}, '$.n: 1.0 is not of type integer'),
+            ({'n': -1, 'tags': [1]}, '$.n: -1 is below the minimum 0'),
+            ({'n': 10, 'tags': [1]}, '$.n: 10 is above the maximum 9'),
+            ({'n': 1, 'tags': [1], 'name': 5},
+             '$.name: 5 is not of type string or null'),
+            ({'n': 1, 'tags': [1], 'name': 'long'},
+             '$.name: longer than 3 characters'),
+            ({'n': 1, 'tags': [1], 'kind': 'c'},
+             "$.kind: 'c' is not one of ['a', 'b']"),
+            ({'n': 1, 'tags': []}, '$.tags: 0 items, fewer than 1'),
+            ({'n': 1, 'tags': [1, 2, 3]}, '$.tags: 3 items, more than 2'),
+            ({'n': 1, 'tags': [1, 'x']},
+             "$.tags[1]: 'x' is not of type integer"),
+            ([], '$: [] is not of type object'),
+        ]
+        for value, message in cases:
+            self.assertEqual(self.errors(value), [message], value)
+
+    def test_unsupported_keyword_is_an_error(self):
+        self.assertEqual(minischema.validate(1, {'type': 'integer',
+                                                 'multipleOf': 2}),
+                         ['$: unsupported schema keywords multipleOf'])
+
+    def test_replay_schema(self):
+        with open(os.path.join(ROOT, 'oracle', 'replay', 'schema.json')) as f:
+            schema = json.load(f)
+        dump = {'frame': 61, 'checkpoint': 'start', 'screen': 'connection',
+                'rng_state': 1,
+                'globals': {'au_counter': 61, 'fullscreen': 0,
+                            'in_async_update': 0, 'ai_rng_state': None},
+                'chargen': None}
+        self.assertEqual(minischema.validate(dump, schema), [])
+        dump['chargen'] = {'race': 1, 'subrace': 0, 'class': 5,
+                           'abilities': [10, 11, 12, 13, 14, 15],
+                           'rolls': [0, 0, 0, 0, 0, 0, 0], 'skill_points': 4,
+                           'feats': [0, 1, 4294967295], 'portrait': 'MAN1L'}
+        self.assertEqual(minischema.validate(dump, schema), [])
+        dump['chargen']['abilities'] = [10]
+        dump['screen'] = 'nowhere'
+        self.assertEqual(minischema.validate(dump, schema), [
+            "$.screen: 'nowhere' is not one of %s"
+            % schema['properties']['screen']['enum'],
+            '$.chargen.abilities: 1 items, fewer than 6'])
+
+    def test_every_engine_field_is_a_screen(self):
+        with open(os.path.join(ROOT, 'oracle', 'replay', 'schema.json')) as f:
+            schema = json.load(f)
+        screens = {f[len('engine_'):] for f in schema['x-fields']
+                   if f.startswith('engine_')}
+        self.assertEqual(set(schema['properties']['screen']['enum']),
+                         screens | {'none', 'unknown'})
+
+
+class OracleReplayTest(unittest.TestCase):
+    """The pure parts of tools/oracle.py replay record."""
+
+    def test_replay_ini(self):
+        text = '[Program Options]\r\nFull Screen=1\r\nResolution=1366\r\n' \
+            'Last Full Screen=1\r\n'
+        self.assertEqual(oracle.replay_ini(text),
+                         '[Program Options]\r\nFull Screen=0\r\n'
+                         'Resolution=800\r\nLast Full Screen=1\r\n')
+        self.assertEqual(oracle.replay_ini(oracle.replay_ini(text)),
+                         oracle.replay_ini(text))
+        for broken in ('Resolution=800\n', 'Full Screen=1\n'):
+            with self.assertRaises(ValueError):
+                oracle.replay_ini(broken)
+
+    def test_prepare_replay_ini_guards_and_writes_the_copy(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmp:
+            game = os.path.join(tmp, 'game')
+            os.makedirs(game)
+            ini = os.path.join(game, 'Icewind2.ini')
+            with open(ini, 'wb') as f:
+                f.write(b'Full Screen=1\r\nResolution=800\r\n')
+            calls = []
+            with mock.patch.object(oracle, 'assert_safe_target',
+                                   lambda g, i: calls.append((g, i))), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                oracle.prepare_replay_ini(game, '/install')
+            self.assertEqual(calls, [(game, '/install')])
+            with open(ini, 'rb') as f:
+                self.assertEqual(f.read(),
+                                 b'Full Screen=0\r\nResolution=800\r\n')
+
+            def refuse(g, i):
+                raise SystemExit('refused')
+            with open(ini, 'wb') as f:
+                f.write(b'Full Screen=1\r\nResolution=800\r\n')
+            with mock.patch.object(oracle, 'assert_safe_target', refuse):
+                with self.assertRaises(SystemExit):
+                    oracle.prepare_replay_ini(game, '/install')
+            with open(ini, 'rb') as f:
+                self.assertEqual(f.read(),
+                                 b'Full Screen=1\r\nResolution=800\r\n')
+
+    def test_parse_status(self):
+        self.assertEqual(oracle.parse_status(
+            'frame=21046\nscript_line=5\nstate=running\n'),
+            {'frame': 21046, 'script_line': 5, 'state': 'running'})
+        self.assertEqual(oracle.parse_status(''), {})
+
+    def test_replay_outcome(self):
+        running = {'frame': 21046, 'script_line': 5, 'state': 'running'}
+        self.assertEqual(oracle.replay_outcome(10, running, 20), (
+            10, 'timed out after 20 s; the game was killed (last frame '
+            '21046, scenario line 5)'))
+        self.assertEqual(oracle.replay_outcome(None, {}, 20)[0], 10)
+        self.assertIn('last frame ?', oracle.replay_outcome(None, {}, 20)[1])
+        done = {'frame': 61, 'script_line': 0, 'state': 'finished'}
+        self.assertEqual(oracle.replay_outcome(0, done, 180), (
+            0, 'the game exited with code 0 (last frame 61, scenario '
+            'finished)'))
+        self.assertEqual(oracle.replay_outcome(0, running, 180)[0], 1)
+        self.assertEqual(oracle.replay_outcome(11, done, 180)[0], 1)
+        self.assertEqual(oracle.replay_outcome(12, {}, 180), (
+            1, 'the recorder did not load (see recorder.log)'))
+        self.assertEqual(oracle.replay_outcome(3, done, 180)[0], 1)
+
+    def test_check_dumps(self):
+        schema = {'type': 'object', 'required': ['frame']}
+        with tempfile.TemporaryDirectory() as tmp:
+            for name, text in (('frame-30.json', '{"frame": 30}'),
+                               ('checkpoint-a.json', '{}'),
+                               ('checkpoint-b.json', '{'),
+                               ('replay.json', '{}'),
+                               ('status.txt', 'frame=1')):
+                with open(os.path.join(tmp, name), 'w') as f:
+                    f.write(text)
+            out = oracle.check_dumps(tmp, schema)
+        self.assertEqual(sorted(out), ['checkpoint-a.json',
+                                       'checkpoint-b.json', 'frame-30.json'])
+        self.assertEqual(out['frame-30.json'], [])
+        self.assertEqual(out['checkpoint-a.json'],
+                         ["$: missing required property 'frame'"])
+        self.assertTrue(out['checkpoint-b.json'][0].startswith('not JSON'))
+
+    def test_scenario_path(self):
+        self.assertEqual(oracle.scenario_path('start_screen'),
+                         os.path.join(ROOT, 'scenarios', 'start_screen.txt'))
+        hang = os.path.join(ROOT, 'oracle', 'replay', 'hang.txt')
+        self.assertEqual(oracle.scenario_path(hang), hang)
+        self.assertEqual(realinput.load_scenario(hang), [
+            {'op': 'wait', 'frames': 100000, 'line': 5},
+            {'op': 'quit', 'line': 6}])
+        with self.assertRaises(SystemExit):
+            oracle.scenario_path('no_such_scenario')
+
+    def test_start_screen_has_its_checkpoint(self):
+        actions = realinput.load_scenario(
+            os.path.join(ROOT, 'scenarios', 'start_screen.txt'))
+        self.assertIn({'op': 'checkpoint', 'name': 'start', 'line': 4},
+                      actions)
 
 
 if __name__ == '__main__':

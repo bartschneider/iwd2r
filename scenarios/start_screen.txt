@@ -1,5 +1,7 @@
 # Start screen: the main menu after loading.
 wait 60
+# The replay recorder (oracle.py replay record) dumps the state here.
+checkpoint start
 # start.png: snowy backdrop, Icewind Dale II logo, and the menu panel on the
 # right (Game Mode / Single Player, Begin Game: New Game, Load Game, Quick
 # Load, Join Game (disabled), Options, Quit Game).

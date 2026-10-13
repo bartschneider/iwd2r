@@ -11,13 +11,13 @@ class CGameObjectArrayEntry {
 public:
     CGameObjectArrayEntry();
 
-    BYTE m_shareCounts[CGAMEOBJECTARRAYENTRY_MAXTHREADS];
-    BYTE m_denyCounts[CGAMEOBJECTARRAYENTRY_MAXTHREADS];
-    SHORT m_objectId;
+    /* 0000 */ BYTE m_shareCounts[CGAMEOBJECTARRAYENTRY_MAXTHREADS];
+    /* 0003 */ BYTE m_denyCounts[CGAMEOBJECTARRAYENTRY_MAXTHREADS];
+    /* 0006 */ SHORT m_objectId;
     union {
-        CGameObject* m_objectPtr;
-        DWORD m_objectIntPtr;
-        SHORT m_nextDeletedArrayIndex;
+        /* 0008 */ CGameObject* m_objectPtr;
+        /* 0008 */ DWORD m_objectIntPtr;
+        /* 0008 */ SHORT m_nextDeletedArrayIndex;
     };
 };
 

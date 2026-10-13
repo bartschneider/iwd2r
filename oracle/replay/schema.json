@@ -1,0 +1,399 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "iwd2r replay state dump",
+  "description": "One state dump of a replay: frame-<N>.json every IWD2R_DUMP_EVERY frames and checkpoint-<NAME>.json at a scenario's checkpoint lines. The recorder (oracle/replay/recorder.cpp) writes it from the original; Task 13's platform/state_dump writes it from our engine. x-fields names where each value lives; tools/gen_fields.py turns it into fields.json with the offsets from our headers' /* NNNN */ comments.",
+  "type": "object",
+  "required": [
+    "frame",
+    "screen",
+    "rng_state",
+    "globals",
+    "chargen"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "frame": {
+      "description": "Frames since the start: one per call of the main thread's per-frame function (CBaldurChitin::SynchronousUpdate in the original).",
+      "type": "integer",
+      "minimum": 0
+    },
+    "checkpoint": {
+      "description": "The checkpoint's name, in checkpoint dumps only.",
+      "type": "string"
+    },
+    "screen": {
+      "description": "The active engine (CChitin::pActiveEngine) named by the CBaldurChitin::m_pEngine* member it equals; none when there is no active engine, unknown when it is none of them.",
+      "type": "string",
+      "enum": [
+        "none",
+        "unknown",
+        "dm",
+        "projector",
+        "character",
+        "create_char",
+        "inventory",
+        "journal",
+        "load",
+        "map",
+        "options",
+        "save",
+        "spellbook",
+        "start",
+        "world",
+        "store",
+        "single_player",
+        "connection",
+        "world_map",
+        "chapter",
+        "movies",
+        "keymaps"
+      ]
+    },
+    "rng_state": {
+      "description": "The main thread's rand state (_tiddata._holdrand in the original's VC6 CRT).",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
+    "globals": {
+      "type": "object",
+      "required": [
+        "au_counter",
+        "fullscreen",
+        "in_async_update",
+        "ai_rng_state"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "au_counter": {
+          "description": "CChitin::nAUCounter: AI updates (AsynchronousUpdate calls) so far.",
+          "type": "integer"
+        },
+        "fullscreen": {
+          "description": "CChitin::m_bFullscreen.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
+        },
+        "in_async_update": {
+          "description": "CChitin::m_bInAsynchronousUpdate: nonzero when the dump was taken while the AI thread was inside an AsynchronousUpdate (a load that redraws its progress bar), so the state may be mid-update.",
+          "type": "integer"
+        },
+        "ai_rng_state": {
+          "description": "The rand state (_holdrand) of the thread that polls input, the AI thread in the original (CChitin::AsynchronousUpdate calls GetCursorPos there), which is where clicks and key presses, and so character generation, call rand; null until that thread has polled input once. VC6 starts every thread at 1; it is not seeded.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 4294967295
+        }
+      }
+    },
+    "chargen": {
+      "description": "Character generation, null unless the screen is create_char. The sprite values are null while the screen has no sprite (m_nGameSprite does not resolve in the object array).",
+      "type": [
+        "object",
+        "null"
+      ],
+      "required": [
+        "race",
+        "subrace",
+        "class",
+        "abilities",
+        "rolls",
+        "skill_points",
+        "feats",
+        "portrait"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "race": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 255,
+          "description": "The sprite's m_startTypeAI.m_nRace."
+        },
+        "subrace": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 255,
+          "description": "m_startTypeAI.m_nSubRace."
+        },
+        "class": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 255,
+          "description": "m_startTypeAI.m_nClass."
+        },
+        "abilities": {
+          "description": "m_baseStats.m_STRBase, DEX, CON, INT, WIS, CHR; null without a sprite.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 255
+          },
+          "minItems": 6,
+          "maxItems": 6
+        },
+        "rolls": {
+          "description": "The screen's stored ability set (CScreenCreateChar::m_nMemorySTR, DEX, CON, INT, WIS, CHR, then m_nMemoryExtra). IWD2 abilities are point-buy; these are the only stored roll values.",
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "minItems": 7,
+          "maxItems": 7
+        },
+        "skill_points": {
+          "description": "CScreenCreateChar::m_nExtraSkillPoints.",
+          "type": "integer"
+        },
+        "feats": {
+          "description": "The sprite's m_baseStats.m_feats bit masks (3 dwords); null without a sprite.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          "minItems": 3,
+          "maxItems": 3
+        },
+        "portrait": {
+          "description": "The sprite's m_baseStats.m_portraitLarge resref; null without a sprite.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  },
+  "x-fields": {
+    "baldur_chitin": {
+      "global": "g_pBaldurChitin",
+      "type": "ptr"
+    },
+    "active_engine": {
+      "class": "CChitin",
+      "member": "pActiveEngine"
+    },
+    "au_counter": {
+      "class": "CChitin",
+      "member": "nAUCounter"
+    },
+    "fullscreen": {
+      "class": "CChitin",
+      "member": "m_bFullscreen"
+    },
+    "in_async_update": {
+      "class": "CChitin",
+      "member": "m_bInAsynchronousUpdate"
+    },
+    "object_game": {
+      "class": "CBaldurChitin",
+      "member": "m_pObjectGame"
+    },
+    "engine_dm": {
+      "class": "CBaldurChitin",
+      "member": "m_pEngineDM"
+    },
+    "engine_projector": {
+      "class": "CBaldurChitin",
+      "member": "m_pEngineProjector"
+    },
+    "engine_character": {
+      "class": "CBaldurChitin",
+      "member": "m_pEngineCharacter"
+    },
+    "engine_create_char": {
+      "class": "CBaldurChitin",
+      "member": "m_pEngineCreateChar"
+    },
+    "engine_inventory": {
+      "class": "CBaldurChitin",
+      "member": "m_pEngineInventory"
+    },
+    "engine_journal": {
+      "class": "CBaldurChitin",
+      "member": "m_pEngineJournal"
+    },
+    "engine_load": {
+      "class": "CBaldurChitin",
+      "member": "m_pEngineLoad"
+    },
+    "engine_map": {
+      "class": "CBaldurChitin",
+      "member": "m_pEngineMap"
+    },
+    "engine_options": {
+      "class": "CBaldurChitin",
+      "member": "m_pEngineOptions"
+    },
+    "engine_save": {
+      "class": "CBaldurChitin",
+      "member": "m_pEngineSave"
+    },
+    "engine_spellbook": {
+      "class": "CBaldurChitin",
+      "member": "m_pEngineSpellbook"
+    },
+    "engine_start": {
+      "class": "CBaldurChitin",
+      "member": "m_pEngineStart"
+    },
+    "engine_world": {
+      "class": "CBaldurChitin",
+      "member": "m_pEngineWorld"
+    },
+    "engine_store": {
+      "class": "CBaldurChitin",
+      "member": "m_pEngineStore"
+    },
+    "engine_single_player": {
+      "class": "CBaldurChitin",
+      "member": "m_pEngineSinglePlayer"
+    },
+    "engine_connection": {
+      "class": "CBaldurChitin",
+      "member": "m_pEngineConnection"
+    },
+    "engine_world_map": {
+      "class": "CBaldurChitin",
+      "member": "m_pEngineWorldMap"
+    },
+    "engine_chapter": {
+      "class": "CBaldurChitin",
+      "member": "m_pEngineChapter"
+    },
+    "engine_movies": {
+      "class": "CBaldurChitin",
+      "member": "m_pEngineMovies"
+    },
+    "engine_keymaps": {
+      "class": "CBaldurChitin",
+      "member": "m_pEngineKeymaps"
+    },
+    "objects_array": {
+      "class": "CInfGame",
+      "member": "m_cObjectArray.m_pArray"
+    },
+    "objects_max_index": {
+      "class": "CInfGame",
+      "member": "m_cObjectArray.m_nMaxArrayIndex"
+    },
+    "objects_next_id": {
+      "class": "CInfGame",
+      "member": "m_cObjectArray.m_nNextObjectId"
+    },
+    "object_entry_id": {
+      "class": "CGameObjectArrayEntry",
+      "member": "m_objectId"
+    },
+    "object_entry_ptr": {
+      "class": "CGameObjectArrayEntry",
+      "member": "m_objectPtr"
+    },
+    "object_entry_size": {
+      "class": "CGameObjectArrayEntry",
+      "sizeof": true
+    },
+    "create_char_sprite": {
+      "class": "CScreenCreateChar",
+      "member": "m_nGameSprite"
+    },
+    "create_char_skill_points": {
+      "class": "CScreenCreateChar",
+      "member": "m_nExtraSkillPoints"
+    },
+    "create_char_memory_str": {
+      "class": "CScreenCreateChar",
+      "member": "m_nMemorySTR"
+    },
+    "create_char_memory_dex": {
+      "class": "CScreenCreateChar",
+      "member": "m_nMemoryDEX"
+    },
+    "create_char_memory_con": {
+      "class": "CScreenCreateChar",
+      "member": "m_nMemoryCON"
+    },
+    "create_char_memory_int": {
+      "class": "CScreenCreateChar",
+      "member": "m_nMemoryINT"
+    },
+    "create_char_memory_wis": {
+      "class": "CScreenCreateChar",
+      "member": "m_nMemoryWIS"
+    },
+    "create_char_memory_chr": {
+      "class": "CScreenCreateChar",
+      "member": "m_nMemoryCHR"
+    },
+    "create_char_memory_extra": {
+      "class": "CScreenCreateChar",
+      "member": "m_nMemoryExtra"
+    },
+    "sprite_race": {
+      "class": "CGameSprite",
+      "member": "m_startTypeAI.m_nRace"
+    },
+    "sprite_subrace": {
+      "class": "CGameSprite",
+      "member": "m_startTypeAI.m_nSubRace"
+    },
+    "sprite_class": {
+      "class": "CGameSprite",
+      "member": "m_startTypeAI.m_nClass"
+    },
+    "sprite_str": {
+      "class": "CGameSprite",
+      "member": "m_baseStats.m_STRBase"
+    },
+    "sprite_dex": {
+      "class": "CGameSprite",
+      "member": "m_baseStats.m_DEXBase"
+    },
+    "sprite_con": {
+      "class": "CGameSprite",
+      "member": "m_baseStats.m_CONBase"
+    },
+    "sprite_int": {
+      "class": "CGameSprite",
+      "member": "m_baseStats.m_INTBase"
+    },
+    "sprite_wis": {
+      "class": "CGameSprite",
+      "member": "m_baseStats.m_WISBase"
+    },
+    "sprite_chr": {
+      "class": "CGameSprite",
+      "member": "m_baseStats.m_CHRBase"
+    },
+    "sprite_feats": {
+      "class": "CGameSprite",
+      "member": "m_baseStats.m_feats"
+    },
+    "sprite_portrait": {
+      "class": "CGameSprite",
+      "member": "m_baseStats.m_portraitLarge"
+    }
+  }
+}

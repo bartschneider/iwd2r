@@ -89,8 +89,9 @@ TEST_CASE("script parser reads every verb", "[script]")
         "key 7\n"
         "type Ab 9\n"
         "shot start_screen\n"
-        "Quit\n");
-    REQUIRE(c.size() == 11);
+        "Quit\n"
+        "checkpoint chargen_done\n");
+    REQUIRE(c.size() == 12);
     CHECK(c[0].verb == Verb::Wait);
     CHECK(c[0].x == 60);
     CHECK(c[0].line == 3);
@@ -113,6 +114,8 @@ TEST_CASE("script parser reads every verb", "[script]")
     CHECK(c[9].text == "start_screen");
     CHECK(c[10].verb == Verb::Quit);
     CHECK(c[10].line == 13);
+    CHECK(c[11].verb == Verb::Checkpoint);
+    CHECK(c[11].text == "chargen_done");
 }
 
 TEST_CASE("script key names", "[script]")
@@ -142,6 +145,56 @@ TEST_CASE("script parser reports errors with line numbers", "[script]")
     CHECK(ParseError("shot\n").rfind("line 1: shot", 0) == 0);
     CHECK(ParseError("shot ../x\n").rfind("line 1: shot name", 0) == 0);
     CHECK(ParseError("quit now\n").rfind("line 1: quit", 0) == 0);
+    CHECK(ParseError("checkpoint\n") == "line 1: checkpoint needs one name");
+    CHECK(ParseError("checkpoint a b\n") == "line 1: checkpoint needs one name");
+    CHECK(ParseError("checkpoint a\\b\n") == "line 1: checkpoint name must not contain a path");
+    CHECK(ParseError("checkpoint c:x\n") == "line 1: checkpoint name must not contain a path");
+}
+
+TEST_CASE("script checkpoint is parsed and takes no frame", "[script]")
+{
+    const std::vector<Command> c = ParseOk("Checkpoint start\nwait 1\n");
+    REQUIRE(c.size() == 2);
+    CHECK(c[0].verb == Verb::Checkpoint);
+    CHECK(c[0].text == "start");
+    CHECK(c[0].line == 1);
+
+    // The engine does nothing at a checkpoint (the replay recorder dumps
+    // there): it is instant, like shot, and the wait after it starts at once.
+    platform::script::Start(c);
+    platform::script::Advance(); // checkpoint, then wait 1 starts
+    CHECK(platform::script::Running());
+    platform::script::Advance();
+    CHECK_FALSE(platform::script::Running());
+}
+
+namespace {
+
+struct RecordingEffects : platform::script::Effects {
+    std::vector<std::string> calls;
+    void Shot(const std::string& name, int line) override { calls.push_back("shot " + name + " " + std::to_string(line)); }
+    void Quit(int line) override { calls.push_back("quit " + std::to_string(line)); }
+    void Checkpoint(const std::string& name, int line) override
+    {
+        calls.push_back("checkpoint " + name + " " + std::to_string(line));
+    }
+};
+
+}
+
+TEST_CASE("script player calls its driver's effects", "[script]")
+{
+    platform::script::Player player;
+    RecordingEffects effects;
+    player.Start(ParseOk("checkpoint a\nwait 1\nshot b\ncheckpoint c\nquit\n"), 800, 600);
+    CHECK(player.Line() == 1);
+    CHECK_FALSE(player.Advance(effects)); // checkpoint a, then wait 1 starts
+    CHECK(effects.calls == std::vector<std::string> { "checkpoint a 1" });
+    CHECK(player.Line() == 2);
+    CHECK(player.Advance(effects)); // the rest is instant: finished
+    CHECK(effects.calls == std::vector<std::string> { "checkpoint a 1", "shot b 3", "checkpoint c 4", "quit 5" });
+    CHECK_FALSE(player.Running());
+    CHECK(player.Line() == 0);
 }
 
 TEST_CASE("script origin selects UI or screen coordinates", "[script]")

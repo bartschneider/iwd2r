@@ -1,6 +1,6 @@
 """Scenario files driven with genuine operating-system input.
 
-The scenario format is the one platform/script.cpp reads (see
+The scenario format is the one platform/script_core.cpp reads (see
 platform/script.h); parse_scenario() is its Python port and turns a file into
 an action list. Two executors consume that list:
 
@@ -32,7 +32,7 @@ import time
 # `wait N` is N of those frames.
 FRAME_RATE = 30
 
-# Frames a click or key is held and settled, as platform/script.cpp does.
+# Frames a click or key is held and settled, as platform/script_core.cpp does.
 MOVE_SETTLE_FRAMES = 1
 HOLD_FRAMES = 2
 SETTLE_FRAMES = 2
@@ -49,8 +49,8 @@ QUIT_RETRY = 10.0
 # Default per-scenario timeout in seconds.
 DEFAULT_TIMEOUT = 180
 
-# The virtual-key names platform/script.cpp accepts (kNamedKeys), with their
-# Win32 VK codes. Letters and digits are handled in vk_for_name.
+# The virtual-key names platform/script_core.cpp accepts (kNamedKeys), with
+# their Win32 VK codes. Letters and digits are handled in vk_for_name.
 KEY_VK = {
     'BACK': 0x08, 'TAB': 0x09, 'RETURN': 0x0D, 'SHIFT': 0x10,
     'CONTROL': 0x11, 'MENU': 0x12, 'ESCAPE': 0x1B, 'SPACE': 0x20,
@@ -146,7 +146,9 @@ def parse_scenario(text):
     'line'), accepting exactly what platform::script::Parse accepts.
 
     Actions: wait {frames}, move/click/rclick {x, y, ui}, key {key}, type
-    {text}, shot {name}, quit, origin {ui}. ui is True when X Y are in the
+    {text}, shot {name}, checkpoint {name}, quit, origin {ui}. A checkpoint
+    is where the replay recorder (oracle/replay) dumps state; the drivers
+    here pass over it. ui is True when X Y are in the
     original's 800x600 UI coordinates (the default, or after `origin ui`),
     False for screen pixels (after `origin screen`). Raises ScenarioError on
     the first bad line.
@@ -201,6 +203,13 @@ def parse_scenario(text):
             if any(c in args[0] for c in '/\\:'):
                 fail('shot name must not contain a path')
             actions.append({'op': 'shot', 'name': args[0], 'line': number})
+        elif v == 'CHECKPOINT':
+            if len(args) != 1:
+                fail('checkpoint needs one name')
+            if any(c in args[0] for c in '/\\:'):
+                fail('checkpoint name must not contain a path')
+            actions.append({'op': 'checkpoint', 'name': args[0],
+                            'line': number})
         elif v == 'ORIGIN':
             mode = args[0].upper() if len(args) == 1 else ''
             if mode not in ('UI', 'SCREEN'):
@@ -232,7 +241,7 @@ def windows_actions(actions, geometry=None):
     pointer coordinates are window pixels (window_point)."""
     out = []
     for a in actions:
-        if a['op'] == 'origin':
+        if a['op'] in ('origin', 'checkpoint'):
             continue
         if a['op'] in ('move', 'click', 'rclick'):
             x, y = window_point(a, geometry)
@@ -267,6 +276,8 @@ def describe(action):
         return 'type %s' % action['text']
     if op == 'shot':
         return 'shot %s' % action['name']
+    if op == 'checkpoint':
+        return 'checkpoint %s' % action['name']
     if op == 'origin':
         return 'origin %s' % ('ui' if action['ui'] else 'screen')
     return op

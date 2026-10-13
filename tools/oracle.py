@@ -8,6 +8,8 @@ Usage (from WSL, in the repository):
   python3 tools/oracle.py run --selftest
   python3 tools/oracle.py run [--file selftest] [--seed N] [--iterations N]
   python3 tools/oracle.py vanilla [--rebuild]
+  python3 tools/oracle.py replay record <scenario> [--seed N] [--timeout S]
+                                        [--dump-every N]
 
 evidence writes a draft docs/evidence/<ADDR>.md for one function of the
 vanilla exe: the front matter (address, name, an empty oracle_case,
@@ -19,7 +21,8 @@ file is kept unless --force is given. A name shared by several functions
 exemption and the Notes by hand (docs/evidence/README.md).
 
 build syncs the checkout to the Windows build folder (play.py's route) and
-builds the 32-bit runner iwd2r_oracle with the windows-msvc-x86 preset.
+builds the 32-bit runner iwd2r_oracle, the replay injector and the recorder
+DLL with the windows-msvc-x86 preset.
 
 run copies the vanilla iwd2.exe (MD5 from oracle/loader/vanilla.json) to
 C:/Users/thier/iwd2r-oracle and runs the runner on it.
@@ -64,6 +67,24 @@ gets the marker game/vanilla.ok. A copy without the marker (an interrupted
 build) or --rebuild is deleted and built from scratch; run without --selftest
 builds it when the marker is missing. The log goes to runs/<stamp>/.
 
+replay record runs the original iwd2.exe of the vanilla copy (built first
+when it has no marker) under a scenario (scenarios/<name>.txt or a path, the
+format of platform/script.h) with the recorder DLL injected
+(oracle/replay/injector.cpp, recorder.cpp): windowed (the copy's
+icewind2.ini gets Full Screen=0 and keeps Resolution=800), with the copy as
+its working directory, a virtual clock, scenario input instead of the real
+mouse and keyboard, and the original srand seeded with --seed (default 1).
+It writes frame-<N>.json every --dump-every frames (default 30, 0 for none)
+and checkpoint-<NAME>.json at the scenario's checkpoint lines, under
+C:/Users/thier/iwd2r-oracle/replays/<stamp>, then moves them with
+recorder.log, status.txt and replay.json (the summary) to
+runs/<stamp>/replay/. Every dump is validated against
+oracle/replay/schema.json (tools/minischema.py). The injector kills the game
+after --timeout seconds (default 180) and exits 10; the run then reports the
+last frame the recorder reached (its status.txt) and exits 10. Any other
+failure (a dump that does not validate, a game exit code other than 0, a
+scenario that did not finish) exits 1.
+
 Standard library only.
 """
 
@@ -85,6 +106,7 @@ sys.path.insert(0, os.path.join(HERE, 'ghidra'))
 sys.path.insert(0, HERE)
 import bif  # noqa: E402
 import check_evidence  # noqa: E402
+import minischema  # noqa: E402
 
 EVIDENCE_DIR = os.path.join(ROOT, 'docs', 'evidence')
 VERSIONS = os.path.join(HERE, 'ghidra', 'versions.json')
@@ -109,6 +131,16 @@ RUNS_DIR = os.path.join(ROOT, 'runs')
 FILE_TIMEOUT = 600  # seconds for one case file, enforced by the runner
 EXIT_TIMEOUT = 10  # the runner's exit code when --timeout ran out
 HEAP_CORRUPT = 'heap corrupt after case'
+REPLAY_DIR_REL = 'build/windows-msvc-x86/oracle/RelWithDebInfo'
+INJECTOR = 'injector.exe'
+RECORDER = 'recorder.dll'
+REPLAYS_DIR = ORACLE_DIR + '/replays'
+REPLAY_SCHEMA = os.path.join(ROOT, 'oracle', 'replay', 'schema.json')
+REPLAY_TIMEOUT = 180  # seconds, enforced by the injector
+REPLAY_DUMP_EVERY = 30
+INJECTOR_TIMEOUT = 10  # the injector's exit code when --timeout ran out
+INJECTOR_DIED = 11
+INJECTOR_NO_DLL = 12
 
 
 def ghidra_version():
@@ -362,9 +394,16 @@ def stage_vanilla(source):
 def cmd_build(args):
     import play
     play.sync_windows()
-    exe = play.build_windows(preset=ORACLE_PRESET, target='iwd2r_oracle',
+    exe = play.build_windows(preset=ORACLE_PRESET,
+                             target='iwd2r_oracle iwd2r_injector '
+                             'iwd2r_recorder',
                              exe_rel=RUNNER_REL, bat_name='oracle-build.bat')
     print('built %s' % win_path(exe))
+    for name in (INJECTOR, RECORDER):
+        path = os.path.join(play.WIN_CHECKOUT, REPLAY_DIR_REL, name)
+        if not os.path.isfile(path):
+            sys.exit('oracle: the build produced no %s' % path)
+        print('built %s' % win_path(path))
     return 0
 
 
@@ -1052,6 +1091,195 @@ def cmd_vanilla(args):
     return 0
 
 
+# ---------------------------------------------------------------------------
+# Replays in the original (oracle.py replay record)
+
+def replay_ini(text):
+    """icewind2.ini's text for a recording: windowed (Full Screen=0) at
+    Resolution=VANILLA_RESOLUTION, everything else kept. Raises ValueError
+    when either key is missing, rather than guessing where it belongs."""
+    for key in ('Full Screen', 'Resolution'):
+        if not re.search(r'^%s=' % key, text, re.MULTILINE):
+            raise ValueError('icewind2.ini has no %s= line' % key)
+    text = re.sub(r'^(Full Screen=)[^\r\n]*', r'\g<1>0', text,
+                  flags=re.MULTILINE)
+    return re.sub(r'^(Resolution=)[^\r\n]*',
+                  r'\g<1>' + VANILLA_RESOLUTION, text, flags=re.MULTILINE)
+
+
+def prepare_replay_ini(game, install=INSTALL):
+    """Set the copy's icewind2.ini up for a recording (replay_ini); only the
+    copy is written, after the same guard as every write to it."""
+    assert_safe_target(game, install)
+    names = {n.lower(): n for n in os.listdir(game)}
+    if 'icewind2.ini' not in names:
+        sys.exit('oracle: the copy has no icewind2.ini')
+    path = os.path.join(game, names['icewind2.ini'])
+    text = read_text(path)
+    try:
+        new = replay_ini(text)
+    except ValueError as e:
+        sys.exit('oracle: %s: %s' % (path, e))
+    if new != text:
+        with open(path, 'wb') as f:
+            f.write(new.encode('latin-1'))
+        print('set Full Screen=0, Resolution=%s in %s'
+              % (VANILLA_RESOLUTION, path))
+
+
+def scenario_path(name):
+    """scenarios/<name>.txt, or name itself when it is a file."""
+    if os.path.isfile(name):
+        return name
+    path = os.path.join(ROOT, 'scenarios', name + '.txt')
+    if not os.path.isfile(path):
+        sys.exit('oracle: no scenario %s (looked for %s)' % (name, path))
+    return path
+
+
+def parse_status(text):
+    """The recorder's status.txt as a dict (frame and script_line as ints)."""
+    out = {}
+    for line in text.splitlines():
+        key, sep, value = line.partition('=')
+        if sep:
+            out[key.strip()] = int(value) if value.strip().isdigit() \
+                else value.strip()
+    return out
+
+
+def read_status(replay_dir):
+    try:
+        with open(os.path.join(replay_dir, 'status.txt')) as f:
+            return parse_status(f.read())
+    except OSError:
+        return {}
+
+
+def check_dumps(replay_dir, schema):
+    """{file name: [schema errors]} for every dump in replay_dir."""
+    out = {}
+    for name in sorted(os.listdir(replay_dir)):
+        if not (name.endswith('.json') and (name.startswith('frame-')
+                                             or name.startswith(
+                                                 'checkpoint-'))):
+            continue
+        try:
+            with open(os.path.join(replay_dir, name)) as f:
+                dump = json.load(f)
+        except ValueError as e:
+            out[name] = ['not JSON: %s' % e]
+            continue
+        out[name] = minischema.validate(dump, schema)
+    return out
+
+
+def replay_outcome(code, status, timeout):
+    """(exit code for oracle.py, one-line summary) of an injector exit."""
+    where = 'last frame %s' % status.get('frame', '?')
+    if status.get('script_line'):
+        where += ', scenario line %s' % status['script_line']
+    if code is None or code == INJECTOR_TIMEOUT:
+        return (INJECTOR_TIMEOUT,
+                'timed out after %d s; the game was killed (%s)'
+                % (timeout, where))
+    if code == INJECTOR_DIED:
+        return 1, 'the game died of an exception (%s)' % where
+    if code == INJECTOR_NO_DLL:
+        return 1, 'the recorder did not load (see recorder.log)'
+    if code != 0:
+        return 1, 'the game exited with code %d (%s)' % (code, where)
+    if status.get('state') == 'running':
+        return 1, 'the game exited before the scenario finished (%s)' % where
+    return 0, 'the game exited with code 0 (%s, scenario %s)' % (
+        where, status.get('state', '?'))
+
+
+def cmd_replay_record(args):
+    import play
+    script = scenario_path(args.scenario)
+    import realinput
+    try:
+        actions = realinput.load_scenario(script)
+    except realinput.ScenarioError as e:
+        sys.exit('oracle: %s' % e)
+    build = os.path.join(play.WIN_CHECKOUT, REPLAY_DIR_REL)
+    injector = os.path.join(build, INJECTOR)
+    recorder = os.path.join(build, RECORDER)
+    for path in (injector, recorder):
+        if not os.path.isfile(path):
+            sys.exit('oracle: no %s; run tools/oracle.py build' % path)
+    game = ensure_vanilla()
+    prepare_replay_ini(game)
+    with open(REPLAY_SCHEMA) as f:
+        schema = json.load(f)
+    run_dir = play.make_run_folder(RUNS_DIR, datetime.datetime.now())
+    stamp = os.path.basename(run_dir)
+    replay_dir = os.path.join(REPLAYS_DIR, stamp)
+    os.makedirs(replay_dir)
+    shutil.copyfile(script, os.path.join(replay_dir, 'scenario.txt'))
+    env = dict(os.environ)
+    names = {'IWD2R_SCRIPT': win_path(os.path.join(replay_dir,
+                                                   'scenario.txt')),
+             'IWD2R_REPLAY_DIR': win_path(replay_dir),
+             'IWD2R_DUMP_EVERY': str(args.dump_every),
+             'IWD2R_SEED': str(args.seed)}
+    env.update(names)
+    env['WSLENV'] = ':'.join([v for v in env.get('WSLENV', '').split(':')
+                              if v] + sorted(names))
+    command = [injector, win_path(os.path.join(game, 'iwd2.exe')),
+               win_path(game), win_path(recorder),
+               '--timeout', str(args.timeout)]
+    print('replay %s (%d actions), seed %d, timeout %d s, dumps every %d '
+          'frames' % (os.path.relpath(script, ROOT), len(actions), args.seed,
+                      args.timeout, args.dump_every))
+    print('running %s' % ' '.join(command))
+    try:
+        # The injector kills the game at --timeout; this is a backstop.
+        r = subprocess.run(command, cwd=ORACLE_DIR, env=env,
+                           capture_output=True, text=True,
+                           timeout=args.timeout + 60)
+        code, stdout, stderr = r.returncode, r.stdout, r.stderr
+    except subprocess.TimeoutExpired:
+        code, stdout, stderr = None, '', ''
+    except KeyboardInterrupt:
+        # Killing the injector closes its job, which kills the game.
+        subprocess.run([play.CMD_EXE, '/c', 'taskkill', '/F', '/IM',
+                        INJECTOR], cwd=ORACLE_DIR, capture_output=True)
+        raise
+    for line in stdout.splitlines():
+        print('  %s' % line)
+    for line in stderr.splitlines():
+        print('  stderr: %s' % line)
+    status = read_status(replay_dir)
+    result, summary = replay_outcome(code, status, args.timeout)
+    dumps = check_dumps(replay_dir, schema)
+    out_dir = os.path.join(run_dir, 'replay')
+    shutil.copytree(replay_dir, out_dir)
+    shutil.rmtree(replay_dir, ignore_errors=True)
+    invalid = {name: errors for name, errors in dumps.items() if errors}
+    report = {'scenario': os.path.relpath(script, ROOT), 'seed': args.seed,
+              'timeout': args.timeout, 'dump_every': args.dump_every,
+              'injector_exit_code': code, 'status': status,
+              'outcome': summary, 'dumps': sorted(dumps),
+              'invalid_dumps': invalid}
+    with open(os.path.join(out_dir, 'replay.json'), 'w') as f:
+        json.dump(report, f, indent=2)
+        f.write('\n')
+    checkpoints = [n for n in sorted(dumps) if n.startswith('checkpoint-')]
+    print(summary)
+    print('%d dumps (%d checkpoints: %s), %d invalid'
+          % (len(dumps), len(checkpoints), ' '.join(checkpoints) or 'none',
+             len(invalid)))
+    for name, errors in sorted(invalid.items()):
+        for error in errors[:5]:
+            print('  INVALID %s: %s' % (name, error))
+    print('replay: %s' % os.path.relpath(out_dir, ROOT))
+    if result == 0 and invalid:
+        result = 1
+    return result
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     sub = ap.add_subparsers(dest='command', required=True)
@@ -1082,6 +1310,22 @@ def main(argv=None):
     van.add_argument('--rebuild', action='store_true',
                      help='delete the copy and build it again')
     van.set_defaults(run=cmd_vanilla)
+    replay = sub.add_parser('replay', help='replays in the original')
+    replay_sub = replay.add_subparsers(dest='replay_command', required=True)
+    record = replay_sub.add_parser('record', help='record a scenario in the '
+                                   'original with the recorder DLL')
+    record.add_argument('scenario', help='scenarios/<name>.txt by name, '
+                        'or a path')
+    record.add_argument('--seed', type=int, default=1,
+                        help='seed for the original srand (default '
+                        '%(default)s)')
+    record.add_argument('--timeout', type=int, default=REPLAY_TIMEOUT,
+                        help='seconds before the game is killed (default '
+                        '%(default)s)')
+    record.add_argument('--dump-every', type=int, default=REPLAY_DUMP_EVERY,
+                        help='a dump every N frames, 0 for none (default '
+                        '%(default)s)')
+    record.set_defaults(run=cmd_replay_record)
     args = ap.parse_args(argv)
     return args.run(args)
 

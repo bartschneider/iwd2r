@@ -1,0 +1,6 @@
+# Review Focus 5: a replay that cannot finish in time. Recorded with
+# `tools/oracle.py replay record oracle/replay/hang.txt --timeout 20`, the
+# injector must kill the game and the run must name the last frame reached.
+# (Not in scenarios/: play.py --suite would wait out the 100,000 frames.)
+wait 100000
+quit

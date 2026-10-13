@@ -7,6 +7,12 @@
   "getptd": "0x7EDB13",
   "tiddata_rand": ["0x14", "0x18"],
   "crt_heap": "0xA19C20",
+  "frame_hook": "0x425FB0",
+  "frame_hook_bytes": "E9BBAB3600",
+  "frame_hook_target": "0x790B70",
+  "globals": {
+    "g_pBaldurChitin": "0x8CF6DC"
+  },
   "crt_ranges": [
     ["0x8C23F0", "0x8C23F4"],
     ["0x8C23F8", "0x8C24B8"],
@@ -29,6 +35,10 @@
     "rand": "Ghidra label _rand. The only use of the LCG constant 0x343FD in .text: call _getptd; [eax+0x14] = [eax+0x14]*0x343FD+0x269EC3; return (state>>16)&0x7FFF. The state is per thread (in the heap-allocated _tiddata), not in .data.",
     "getptd": "FUN_007edb13, unlabelled in the project (query.py _getptd: not found; 0x7EDB13: FUN_007edb13). It is VC6's _getptd: GetLastError (IAT 0x847284); TlsGetValue([_tlsindex 0x8C23F0]) (IAT 0x8471C0); if null, _calloc_crt(1, 0x74), TlsSetValue (IAT 0x8471B8), _initptd (0x7EDB00), _tid = GetCurrentThreadId (IAT 0x847288), _thandle = -1, else _amsg_exit(0x10); SetLastError (IAT 0x84714C); returns the _tiddata. srand (0x7E8153) and rand (0x7E8160) both call it and use [eax+0x14]. Found from the call in rand, confirmed by objdump -d of 0x7EDB13-0x7EDB7A. The oracle calls it once at the snapshot, on the thread that runs the cases.",
     "tiddata_rand": "[start, end) offsets in _tiddata of the per-thread rand state: _holdrand at 0x14 (VC6 mtdll.h: _tid 0x0, _thandle 0x4, _terrno 0x8, _tdoserrno 0xC, _fpds 0x10, _holdrand 0x14), the only field rand and srand touch. RestoreData puts it back with .data.",
+    "frame_hook": "CBaldurChitin::SynchronousUpdate (our source: // 0x425FB0 above it in src/CBaldurChitin.cpp), the replay recorder's per-frame hook. It is slot 0 of CBaldurChitin's vtable (the dword at 0x847F90, in .rdata, is 0x425FB0; slot 1 at 0x847F94 is 0x790FE0 and slots 2.. are the GetIDS* functions at 0x422B80, 0x422B90...). CChitin::WinMain's message loop (0x7926B0) calls it through `call [edx]` at 0x79284B, on the main thread, after clearing m_bDisplayStale ([esi+0x193A]) and setting m_bInSynchronousUpdate ([esi+0x193E]); the AI thread (CBaldurChitin::MainAIThread) sets m_bDisplayStale after each AsynchronousUpdate, so it runs once per AI update at most. Its body is the single 5-byte instruction `E9 BB AB 36 00` (jmp 0x790B70, CChitin::SynchronousUpdate) followed by NOP padding to 0x425FC0: no other E8/E9 in .text targets 0x425FB0 and the vtable slot is the only data reference, so the recorder replaces that jmp with a jmp to its trampoline, which ends by jumping to 0x790B70 itself. Found with objdump -d -M intel of 0x425FB0-0x426000 and a scan of .text and .rdata for references.",
+    "frame_hook_bytes": "The 5 bytes at frame_hook in the vanilla exe; the recorder refuses to patch anything else.",
+    "frame_hook_target": "CChitin::SynchronousUpdate (// 0x790B70 in src/CChitin.cpp), where the jmp at frame_hook goes.",
+    "globals": "g_pBaldurChitin: CBaldurChitin::Init (0x421E40) stores `this` with `mov [0x8CF6DC], esi` at 0x422B2B and into g_pChitin (0x8CF6D8) at 0x422B31, then calls m_cCachingStatus.Init with `lea ecx, [esi+0x1D52]` (the /* 1D52 */ in src/CBaldurChitin.h) and m_cSwitchingCDStatus.Init with [esi+0x3970]; 14 reads of 0x8CF6DC are followed within three instructions by an access to +0x1C84 (m_pEngineStart).",
     "crt_heap": "_crtheap, the dword holding the CRT's Win32 heap handle. _heap_init (FUN_007f119b) does HeapCreate (IAT 0x847238) and stores the result with `mov ds:0xa19c20, eax` at 0x7F11B4; on failure it passes [0xA19C20] to HeapDestroy (IAT 0x847234). It is inside the 0xA19B00-0xA19C28 CRT range, so restores never touch it. The runner HeapValidates this heap after every case.",
     "crt_ranges": [
       "0x8C23F0 _tlsindex: TlsAlloc result stored by _mtinit (FUN_007edaac), read by _getptd (FUN_007edb13); initialised to 0xFFFFFFFF.",
