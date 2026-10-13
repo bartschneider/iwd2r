@@ -1523,13 +1523,15 @@ void CVidMode::DrawLightingEffect32(DWORD* pSurface, LONG lPitch, const CPoint& 
     const BYTE nBase = 64;
     const BYTE nShift = 6;
 
-    BYTE* pPixelList = new BYTE[a5.cx > a5.cy ? a5.cx : a5.cy];
-
     LONG nHeight = a5.cy;
     if (nHeight == 0) {
-        // NOTE: The original leaks the pixel list here (0x7CAC8E).
+        // NOTE: The original allocates the pixel list first and leaks it
+        // here (0x7CAC8E); ours allocates after this test.
         return;
     }
+
+    BYTE* pPixelBuffer = new BYTE[a5.cx > a5.cy ? a5.cx : a5.cy];
+    BYTE* pPixelList = pPixelBuffer;
 
     DWORD rgbAmbient;
     if (rgbGlobalTint != RGB(CVidPalette::NO_TINT, CVidPalette::NO_TINT, CVidPalette::NO_TINT)) {
@@ -1562,7 +1564,9 @@ void CVidMode::DrawLightingEffect32(DWORD* pSurface, LONG lPitch, const CPoint& 
     nBlue = nBlue > nBase ? static_cast<BYTE>((nBlue - nBase) / nHeight * static_cast<BYTE>(nHeight)) : 0;
 
     if (nRed == 0 && nGreen == 0 && nBlue == 0) {
-        // NOTE: The original leaks the pixel list here too (0x7CAE2C).
+        // NOTE: The original leaks the pixel list here (0x7CAE2C); ours
+        // frees it.
+        delete[] pPixelBuffer;
         return;
     }
 
@@ -1652,6 +1656,13 @@ void CVidMode::DrawLightingEffect32(DWORD* pSurface, LONG lPitch, const CPoint& 
         if (nArc > 0) {
             LONG nFalling = nWidth - 1;
             for (INT nIndex = 0; nIndex < nArc; nIndex++) {
+                // NOTE: The original divides by zero here once the band has
+                // no width left (0x7CB20C); ours stops drawing.
+                if (nWidth == 0) {
+                    delete[] pPixelBuffer;
+                    return;
+                }
+
                 DWORD* pPixel = pRow;
                 BYTE nDeltaRed = static_cast<BYTE>(nRowRed / nWidth);
                 BYTE nDeltaGreen = static_cast<BYTE>(nRowGreen / nWidth);
@@ -1699,7 +1710,7 @@ void CVidMode::DrawLightingEffect32(DWORD* pSurface, LONG lPitch, const CPoint& 
         }
     }
 
-    delete[] (pPixelList - 1);
+    delete[] pPixelBuffer;
 }
 
 // 0x7CB510
