@@ -2849,6 +2849,16 @@ class SharedLockTest(unittest.TestCase):
 class OracleReplayTest(unittest.TestCase):
     """The pure parts of tools/oracle.py replay record."""
 
+    def test_mute_ini_zeroes_every_volume_key(self):
+        text = ('Volume Movie=85\r\nVolume Music=60\r\nVolume Voices=100\r\n'
+                'Volume Ambients=70\r\nVolume SFX=80\r\nOther=1\r\n')
+        self.assertEqual(oracle.mute_ini(text),
+                         'Volume Movie=0\r\nVolume Music=0\r\nVolume Voices=0\r\n'
+                         'Volume Ambients=0\r\nVolume SFX=0\r\nOther=1\r\n')
+        self.assertEqual(oracle.mute_ini('Resolution=800\r\n'), 'Resolution=800\r\n')
+        self.assertIn('Volume SFX=0', oracle.replay_ini(
+            'Full Screen=1\r\nResolution=1366\r\nVolume SFX=80\r\n'))
+
     def test_replay_ini(self):
         text = '[Program Options]\r\nFull Screen=1\r\nResolution=1366\r\n' \
             'Last Full Screen=1\r\n'

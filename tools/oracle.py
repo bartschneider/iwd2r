@@ -767,10 +767,12 @@ def weidu_components(text):
 
 def rewrite_ini(text, old, new):
     """An INI's text with every path under old (a Windows path, any case)
-    moved under new, and Resolution= set to VANILLA_RESOLUTION."""
+    moved under new, Resolution= set to VANILLA_RESOLUTION, and the volume
+    keys set to 0 (mute_ini)."""
     text = re.sub(re.escape(old), lambda m: new, text, flags=re.IGNORECASE)
-    return re.sub(r'^(Resolution=)[^\r\n]*', r'\g<1>' + VANILLA_RESOLUTION,
+    text = re.sub(r'^(Resolution=)[^\r\n]*', r'\g<1>' + VANILLA_RESOLUTION,
                   text, flags=re.MULTILINE)
+    return mute_ini(text)
 
 
 def _matches(name, patterns):
@@ -1176,17 +1178,31 @@ def cmd_vanilla(args):
 # ---------------------------------------------------------------------------
 # Replays in the original (oracle.py replay record)
 
+VOLUME_KEYS = ('Volume Movie', 'Volume Music', 'Volume Voices',
+               'Volume Ambients', 'Volume SFX')
+
+
+def mute_ini(text):
+    """icewind2.ini's text with every volume key set to 0: the original runs
+    on the host's desktop during recordings and would play through the
+    speakers. Keys that are absent stay absent."""
+    return re.sub(r'^(Volume (?:Movie|Music|Voices|Ambients|SFX)=)[^\r\n]*',
+                  r'\g<1>0', text, flags=re.MULTILINE)
+
+
 def replay_ini(text):
     """icewind2.ini's text for a recording: windowed (Full Screen=0) at
-    Resolution=VANILLA_RESOLUTION, everything else kept. Raises ValueError
-    when either key is missing, rather than guessing where it belongs."""
+    Resolution=VANILLA_RESOLUTION, muted, everything else kept. Raises
+    ValueError when either key is missing, rather than guessing where it
+    belongs."""
     for key in ('Full Screen', 'Resolution'):
         if not re.search(r'^%s=' % key, text, re.MULTILINE):
             raise ValueError('icewind2.ini has no %s= line' % key)
     text = re.sub(r'^(Full Screen=)[^\r\n]*', r'\g<1>0', text,
                   flags=re.MULTILINE)
-    return re.sub(r'^(Resolution=)[^\r\n]*',
+    text = re.sub(r'^(Resolution=)[^\r\n]*',
                   r'\g<1>' + VANILLA_RESOLUTION, text, flags=re.MULTILINE)
+    return mute_ini(text)
 
 
 def prepare_replay_ini(game, install=INSTALL):
