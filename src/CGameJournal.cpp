@@ -1,4 +1,3 @@
-// Modified for iwd2r; see NOTICE.md
 #include "CGameJournal.h"
 
 #include "CBaldurChitin.h"

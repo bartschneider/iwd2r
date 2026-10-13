@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 // The screen layout CBaldurChitin's constructor sets up for a resolution, and
 // the decision of which resolution to use.
 //

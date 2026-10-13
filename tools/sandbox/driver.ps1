@@ -1,4 +1,3 @@
-# iwd2r. Distributed under LICENSE.md.
 <#
 .SYNOPSIS
 Runs one iwd2r scenario with real input inside Windows Sandbox.

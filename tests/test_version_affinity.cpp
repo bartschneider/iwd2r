@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 // The built-in version resource (ruling R28) and the single-core affinity pin
 // the engine fetches through GetProcAddress (ruling R29).
 #define NOMINMAX

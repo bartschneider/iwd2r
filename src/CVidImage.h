@@ -1,4 +1,3 @@
-// Modified for iwd2r; see NOTICE.md
 #ifndef CVIDIMAGE_H_
 #define CVIDIMAGE_H_
 

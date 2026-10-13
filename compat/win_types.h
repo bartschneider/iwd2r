@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 // Windows typedefs and helpers for the cross-platform port. This header is the
 // only source of these definitions on every platform; it includes no Windows
 // SDK header.

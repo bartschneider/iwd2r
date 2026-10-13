@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 #include "platform/affinity.h"
 
 #ifdef _WIN32

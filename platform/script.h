@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 // Internal: scripted input and screenshots for the window shim. A script
 // (IWD2R_SCRIPT) is a text file of commands, one per line; '#' starts a
 // comment, verbs are case-insensitive:

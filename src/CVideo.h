@@ -1,4 +1,3 @@
-// Modified for iwd2r; see NOTICE.md
 #ifndef CVIDEO_H_
 #define CVIDEO_H_
 

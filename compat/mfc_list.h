@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 // MFC CList, CPtrList, CObList, CStringList and CTypedPtrList. A POSITION is
 // the address of a list node, as in MFC, so positions stay valid across
 // removals of other elements.

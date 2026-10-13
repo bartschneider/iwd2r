@@ -1,4 +1,3 @@
-// Modified for iwd2r; see NOTICE.md
 #ifndef CSOUND_H_
 #define CSOUND_H_
 

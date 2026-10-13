@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 // DirectSound shim: the subset of the DirectSound API that the sound mixer,
 // voices and the streaming music player call, implemented on miniaudio. The
 // interfaces are plain C++ classes with virtual methods, not COM objects.

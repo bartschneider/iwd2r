@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 // Locates the player's own Icewind Dale II install (the directory holding CHITIN.KEY).
 #pragma once
 

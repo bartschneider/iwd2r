@@ -1,4 +1,3 @@
-// Modified for iwd2r; see NOTICE.md
 #ifndef CSOUNDMIXER_H_
 #define CSOUNDMIXER_H_
 

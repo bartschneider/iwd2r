@@ -1,4 +1,3 @@
-# iwd2r. Distributed under LICENSE.md.
 """Function labels for the vanilla iwd2.exe Ghidra project.
 
 ours(src_dir) reads the `// 0xADDR` comments above function definitions in

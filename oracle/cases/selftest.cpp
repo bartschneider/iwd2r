@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 // Self-test of the oracle runner: isolation between cases works, a wrong
 // result is seen, and a fault in original code is caught and reported.
 #include "oracle/runner/compare.h"

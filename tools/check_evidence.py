@@ -1,4 +1,3 @@
-# iwd2r. Distributed under LICENSE.md.
 """Require decompiler evidence for every engine function a change touches.
 
 Usage: python3 -I tools/check_evidence.py [--base REV] [--repo DIR]

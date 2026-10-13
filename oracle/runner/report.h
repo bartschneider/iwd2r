@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 // The JSON report one runner process writes for its case file.
 #pragma once
 

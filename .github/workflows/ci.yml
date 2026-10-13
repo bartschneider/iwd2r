@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # tools/check_notices.py diffs against an old base commit
+          fetch-depth: 0  # tools/check_evidence.py diffs against the push or pull-request base
       - name: Install packages
         run: |
           sudo apt-get update
@@ -34,8 +34,6 @@ jobs:
         run: ctest --preset linux-gcc --output-on-failure
       - name: Tool tests
         run: python3 -I tests/test_tools.py
-      - name: Notice lines
-        run: python3 -I tools/check_notices.py
       - name: Subsystem map
         run: python3 -I tools/gen_map.py --check
       - name: Decompiler evidence (pull request)
@@ -63,7 +61,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # tools/check_notices.py diffs against an old base commit
+          fetch-depth: 0  # tools/check_evidence.py diffs against the push or pull-request base
       - name: Install packages
         run: |
           sudo apt-get update
@@ -90,7 +88,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # tools/check_notices.py diffs against an old base commit
+          fetch-depth: 0  # tools/check_evidence.py diffs against the push or pull-request base
       - name: Choose dependency directory
         shell: bash
         run: echo "FETCH_DIR=$(echo "$RUNNER_TEMP" | tr '\\' '/')/fetch" >> "$GITHUB_ENV"
@@ -113,7 +111,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # tools/check_notices.py diffs against an old base commit
+          fetch-depth: 0  # tools/check_evidence.py diffs against the push or pull-request base
       - name: Choose dependency directory
         shell: bash
         run: echo "FETCH_DIR=$(echo "$RUNNER_TEMP" | tr '\\' '/')/fetch" >> "$GITHUB_ENV"

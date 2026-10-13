@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 // The engine's one popup window, its message queue and polled input, over
 // SDL3. SDL events become WM_* messages in a Win32-shaped queue that the
 // engine's PeekMessageA/GetMessageA loop drains and dispatches to its own

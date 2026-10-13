@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 #include "oracle/runner/report.h"
 
 #include <cstdio>

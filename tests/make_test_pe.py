@@ -1,4 +1,3 @@
-# iwd2r. Distributed under LICENSE.md.
 """Write the minimal PE32 that tests/test_pe.cpp parses.
 
 Usage: python3 tests/make_test_pe.py OUTPUT

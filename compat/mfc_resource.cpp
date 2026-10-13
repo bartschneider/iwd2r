@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 #include "mfc_resource.h"
 
 #include <cstring>

@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 // Deliberately no NOMINMAX: exercises the Windows-style min/max macros.
 #include <catch2/catch_test_macros.hpp>
 

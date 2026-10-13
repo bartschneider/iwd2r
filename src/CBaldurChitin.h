@@ -1,4 +1,3 @@
-// Modified for iwd2r; see NOTICE.md
 #ifndef CBALDURCHITIN_H_
 #define CBALDURCHITIN_H_
 

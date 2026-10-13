@@ -1,4 +1,3 @@
-# Modified for iwd2r; see NOTICE.md
 cmake_minimum_required(VERSION 3.28)
 
 project(iwd2r VERSION 0.1.0 LANGUAGES C CXX)

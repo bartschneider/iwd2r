@@ -1,4 +1,3 @@
-# iwd2r. Distributed under LICENSE.md.
 """Compare iwd2r with the original iwd2.exe and record decompiler evidence.
 
 Usage (from WSL, in the repository):

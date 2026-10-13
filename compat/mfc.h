@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 // Aggregator for the MFC and Win32 compatibility layer, standing in for the
 // engine's afxwin.h style includes.
 #pragma once

@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 #pragma once
 
 #include "compat/win_types.h"

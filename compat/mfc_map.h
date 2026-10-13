@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 // MFC CMapWordToPtr, CMapStringToString and CTypedPtrMap over
 // std::unordered_map. Iteration follows insertion order; a POSITION is the
 // sequence number of the next entry.

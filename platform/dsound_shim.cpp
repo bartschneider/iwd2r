@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 #define NOMINMAX
 #include "platform/dsound_shim.h"
 

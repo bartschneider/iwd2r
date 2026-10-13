@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 // MFC synchronization classes built on the standard library. Depends only on
 // win_types.h.
 #pragma once

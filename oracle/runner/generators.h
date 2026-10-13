@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 // Input generators for oracle cases. Portable and header-only, so the Linux
 // tests pin their sequences; the runner feeds them to CaseContext::ForEachInput.
 //

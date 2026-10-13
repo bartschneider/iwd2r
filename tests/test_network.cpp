@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 // The null-provider session sequence of CNetwork, linked against the engine.
 //
 // Fixture: `CNetwork n;` constructs without the chitin object, but the

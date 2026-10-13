@@ -1,4 +1,3 @@
-# iwd2r. Distributed under LICENSE.md.
 """Build and run iwd2r in one command, optionally driven by an input script.
 
 Usage (from WSL, in the repository):

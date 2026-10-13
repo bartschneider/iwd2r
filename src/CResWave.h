@@ -1,4 +1,3 @@
-// Modified for iwd2r; see NOTICE.md
 #ifndef CRESWAVE_H_
 #define CRESWAVE_H_
 

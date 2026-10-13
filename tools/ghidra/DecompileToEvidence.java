@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 // Decompiles one function for tools/oracle.py evidence.
 // Arguments: <query> <output file>. The query is a hex address such as
 // 0x5845D0 (a function entry) or a full name such as IcewindMisc::Roll.

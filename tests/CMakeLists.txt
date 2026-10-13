@@ -1,4 +1,3 @@
-# iwd2r. Distributed under LICENSE.md.
 # The minimal PE32 that test_pe.cpp parses, written by make_test_pe.py.
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/test_pe.bin"

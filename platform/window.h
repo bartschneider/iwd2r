@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 // Internal: the SDL side of the Win32 window shim in window.cpp. The
 // Win32-named functions themselves are declared in win32_api.h.
 #pragma once

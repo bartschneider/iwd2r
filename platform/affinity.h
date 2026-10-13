@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 // Internal: the native half of SetProcessAffinityMask (threads.cpp). Kept in
 // its own file because on Windows it includes <windows.h>, whose
 // declarations clash with the shim's Win32 names; src/ never sees it.

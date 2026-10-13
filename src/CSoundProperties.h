@@ -1,4 +1,3 @@
-// Modified for iwd2r; see NOTICE.md
 #ifndef CSOUNDPROPERTIES_H_
 #define CSOUNDPROPERTIES_H_
 

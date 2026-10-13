@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 // The VC6 C runtime's rand(): a per-thread linear congruential generator, so
 // engine code rolls the same dice on every platform as the original exe.
 #pragma once

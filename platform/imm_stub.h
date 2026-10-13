@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 // Input method (IMM32) calls the engine makes. No input method context ever
 // exists, so the engine's IME paths see "no context" and do nothing.
 // Implemented in win32_stubs.cpp.

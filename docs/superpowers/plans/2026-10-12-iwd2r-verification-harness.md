@@ -16,8 +16,8 @@
 - The real install `/mnt/c/Games/Icewind Dale II` is never modified. Oracle runs use the vanilla copy at `C:\Users\thier\iwd2r-oracle\game` (Task 7).
 - Oracle code is Windows x86 only, built with the `windows-msvc-x86` preset through the same cmd.exe route `tools/play.py` uses (`/mnt/c/Users/thier/iwd2r-build`). Data-free parts (parsers, schema, rand, checkers) also build and test on Linux and in CI.
 - Tools: OpenJDK 21 from apt (the user installs `openjdk-21-jdk-headless unzip`); Ghidra (latest stable release at execution time, version and SHA-256 recorded in `tools/ghidra/versions.json`) and Node.js 22 LTS install user-locally under `~/.local/share/iwd2r/` (Ubuntu 24.04's nodejs is v18, too old for REA).
-- Header lines: new C++ `// iwd2r. Distributed under LICENSE.md.`; new Python, shell and PowerShell `# iwd2r. Distributed under LICENSE.md.`; modified upstream files keep `// Modified for iwd2r; see NOTICE.md` once on line 1; never remove `// 0x...` comments.
-- `compat/`, `platform/`, `oracle/`, `tests/` build with `-Wall -Wextra -Werror` (MSVC `/W4 /WX`). `tools/check_notices.py`, `tools/gen_map.py --check` (regenerate `docs/MAP.md` when counts change) and the clang-format 18 check stay green.
+- No per-file notice or header lines (the user removed them on 2026-10-12; the README's statement that iwd2r modifies iwd2-re is the license's required notice). Never remove `// 0x...` comments.
+- `compat/`, `platform/`, `oracle/`, `tests/` build with `-Wall -Wextra -Werror` (MSVC `/W4 /WX`). `tools/gen_map.py --check` (regenerate `docs/MAP.md` when counts change) and the clang-format 18 check stay green.
 - Commits: one-line imperative subjects ending with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`. No pushes from tasks.
 
 ## Review Focus

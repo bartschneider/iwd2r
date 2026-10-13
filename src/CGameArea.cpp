@@ -1,4 +1,3 @@
-// Modified for iwd2r; see NOTICE.md
 #include "CGameArea.h"
 
 #include "CAIScript.h"

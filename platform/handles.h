@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 // Internal to the platform layer: kernel handles shared between threads.cpp,
 // which owns CloseHandle, and fs.cpp, which opens files.
 #pragma once

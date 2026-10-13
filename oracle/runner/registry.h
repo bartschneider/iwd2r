@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 // Oracle cases: registration, the per-case context, crash capture around calls
 // into the original, and the .data snapshot. 32-bit Windows only (runner).
 //

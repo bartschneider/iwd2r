@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 // Win32 private profile (INI) functions. File names pass through
 // compat::ResolvePath; documents are cached per resolved path.
 //

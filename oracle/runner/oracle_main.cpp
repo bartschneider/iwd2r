@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 // iwd2r_oracle: maps the vanilla iwd2.exe at 0x400000 and enters it through its
 // own CRT, whose call to WinMain is redirected to OracleMain.
 //

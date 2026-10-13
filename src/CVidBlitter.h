@@ -1,4 +1,3 @@
-// Modified for iwd2r; see NOTICE.md
 #ifndef CVIDBLITTER_H_
 #define CVIDBLITTER_H_
 

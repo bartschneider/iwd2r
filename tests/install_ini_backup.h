@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 // Test helper: keeps the install's INI files byte-identical across a game
 // run. The engine rewrites icewind2.ini on exit (with any
 // IWD2R_INI_OVERRIDE values it read), as the original does.

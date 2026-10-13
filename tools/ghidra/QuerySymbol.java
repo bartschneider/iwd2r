@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 // Prints, for each argument (a hex address such as 0x5845D0, or a name such as
 // IcewindMisc::Roll), one line per match:
 //   QUERY <arg>\t0xADDR\t<full name>\tfunction=yes|no

@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 #define NOMINMAX
 #include "compat/mfc_string.h"
 #include "compat/mfc_resource.h"

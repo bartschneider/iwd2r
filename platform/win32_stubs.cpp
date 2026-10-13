@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 // Inert Win32 calls: no DLLs, no GDI text, no COM, no input methods, no
 // child processes, no other processes. Each returns what Windows returns when the feature is
 // unavailable, so the engine falls back to its own paths.

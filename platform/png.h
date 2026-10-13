@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 // Internal: a minimal PNG writer for screenshots (8-bit RGB, one IDAT).
 #pragma once
 

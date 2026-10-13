@@ -1,4 +1,3 @@
-// Modified for iwd2r; see NOTICE.md
 #ifndef MUSIC_SOUND_H_
 #define MUSIC_SOUND_H_
 

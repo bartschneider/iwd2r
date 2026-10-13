@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 // Declarations of every Win32-named function the engine calls. All have C++
 // linkage on purpose so mangled names never collide with the MSVC CRT or
 // kernel32 symbols. One section per implementing file.

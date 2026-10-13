@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 // DirectDraw shim: the subset of the DirectDraw 2 API that the classic
 // renderer calls, implemented on 32-bpp XRGB8888 software surfaces. The
 // interfaces are plain C++ classes with virtual methods, not COM objects.

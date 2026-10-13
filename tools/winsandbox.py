@@ -1,4 +1,3 @@
-# iwd2r. Distributed under LICENSE.md.
 """Windows Sandbox runs for `play.py --vm windows`.
 
 Each scenario runs in a fresh, disposable Windows Sandbox: play.py builds

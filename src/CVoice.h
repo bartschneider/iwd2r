@@ -1,4 +1,3 @@
-// Modified for iwd2r; see NOTICE.md
 #ifndef CVOICE_H_
 #define CVOICE_H_
 

@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 // Comparators for oracle cases: show a value as text and record a mismatch.
 #pragma once
 

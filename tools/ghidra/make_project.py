@@ -1,4 +1,3 @@
-# iwd2r. Distributed under LICENSE.md.
 """Create (or refresh) the Ghidra project for the vanilla iwd2.exe.
 
     python3 tools/ghidra/make_project.py [--src DIR] [--ieex DB] [--exe EXE]

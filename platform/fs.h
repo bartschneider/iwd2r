@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 // Path resolution for every game file access: backslashes, drive-letter
 // re-rooting under the data root, and case-insensitive component lookup.
 #pragma once

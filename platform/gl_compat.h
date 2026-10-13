@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 // OpenGL 1.1, GLU and WGL declarations standing in for <gl/gl.h> and
 // <gl/glu.h>. The engine loads its GL entry points through GetProcAddress,
 // which returns NULL here, so its 3D mode never initializes; the functions in

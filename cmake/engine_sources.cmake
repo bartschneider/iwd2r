@@ -1,4 +1,3 @@
-# iwd2r. Distributed under LICENSE.md.
 # Engine source list for the iwd2r_engine object library.
 set(IWD2R_ENGINE_SOURCES
     "src/music/adecode.cpp"

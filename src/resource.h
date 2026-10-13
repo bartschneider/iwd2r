@@ -1,4 +1,3 @@
-// Modified for iwd2r; see NOTICE.md
 #ifndef RESOURCE_H_
 #define RESOURCE_H_
 

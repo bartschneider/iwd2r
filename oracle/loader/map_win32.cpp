@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 // Maps the vanilla iwd2.exe at 0x400000 in the 32-bit oracle process.
 #include "pe.h"
 

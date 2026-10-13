@@ -1,4 +1,3 @@
-# iwd2r. Distributed under LICENSE.md.
 # The function oracle. The PE parser is portable (its tests run everywhere);
 # the runner that maps the vanilla iwd2.exe at 0x400000 exists only in 32-bit
 # Windows builds.

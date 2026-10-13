@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 // Win32 virtual key <-> SDL scancode table for the window shim.
 #define NOMINMAX
 #include "platform/window.h"

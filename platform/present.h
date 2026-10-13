@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 // Internal: presents the DirectDraw shim's primary surface through SDL. Used
 // by the shim, the window code and the smoke hook; never included by src/.
 #pragma once

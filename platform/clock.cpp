@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 #define NOMINMAX
 #include "platform/clock.h"
 #include "platform/win32_api.h"

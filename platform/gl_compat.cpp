@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 // Inert OpenGL: the 3D mode is not supported by this port.
 #define NOMINMAX
 #include "platform/gl_compat.h"

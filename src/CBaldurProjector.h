@@ -1,4 +1,3 @@
-// Modified for iwd2r; see NOTICE.md
 #ifndef CBALDURPROJECTOR_H_
 #define CBALDURPROJECTOR_H_
 

@@ -1,4 +1,3 @@
-# iwd2r. Distributed under LICENSE.md.
 """Generate docs/MAP.md, a per-family map of the source tree.
 
 Usage: python3 -I tools/gen_map.py [--repo DIR] [--check]

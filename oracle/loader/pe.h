@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 // PE32 parsing (portable) and, on 32-bit Windows, mapping the vanilla iwd2.exe
 // at its own image base so its code runs in the oracle process.
 #pragma once

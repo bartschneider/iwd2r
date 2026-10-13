@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# iwd2r. Distributed under LICENSE.md.
 # Installs Ghidra, Node.js and REA under ~/.local/share/iwd2r (user-local, no sudo).
 # Idempotent: anything already present at the pinned version is left alone.
 set -euo pipefail

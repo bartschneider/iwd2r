@@ -1,4 +1,3 @@
-// Modified for iwd2r; see NOTICE.md
 #include "CVideo3d.h"
 
 #include "CChitin.h"

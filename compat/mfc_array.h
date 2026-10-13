@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 // MFC CArray, CPtrArray, CDWordArray, CObArray, CStringArray and CTypedPtrArray over std::vector.
 #pragma once
 

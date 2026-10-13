@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 #ifndef MAIN_H_
 #define MAIN_H_
 

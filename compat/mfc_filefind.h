@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 // MFC CFileFind over FindFirstFileA/FindNextFileA (platform/win32_api.h).
 // Header-only so iwd2r_compat does not link against the platform layer.
 #pragma once

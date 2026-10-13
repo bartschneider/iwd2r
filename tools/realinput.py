@@ -1,4 +1,3 @@
-# iwd2r. Distributed under LICENSE.md.
 """Scenario files driven with genuine operating-system input.
 
 The scenario format is the one platform/script.cpp reads (see

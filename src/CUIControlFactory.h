@@ -1,4 +1,3 @@
-// Modified for iwd2r; see NOTICE.md
 #ifndef CUICONTROLFACTORY_H_
 #define CUICONTROLFACTORY_H_
 

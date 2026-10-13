@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 #include "msvc_rand.h"
 
 namespace {

@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 // The .data snapshot of the original, its rand state, and the runner's one
 // __try/__except, which CaseContext::CallOriginal goes through.
 #include "oracle/runner/registry.h"

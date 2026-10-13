@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 // Applies function names from a labels file written by make_project.py.
 // Arguments: <labels.tsv> <summary.txt>. Each labels line is
 // "ADDR<TAB>SOURCE<TAB>NAME" with ADDR in hex and SOURCE "ours" or "ieex".

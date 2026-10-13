@@ -1,4 +1,3 @@
-# iwd2r. Distributed under LICENSE.md.
 find_package(Threads REQUIRED)
 # miniaudio's implementation: third-party code, so not held to the strict
 # warning level (MSVC /W4 warns in it).

@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 // Swappable millisecond clock behind GetTickCount and timeGetTime.
 #pragma once
 

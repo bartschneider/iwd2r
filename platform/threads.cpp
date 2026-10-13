@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 #define NOMINMAX
 // Order is deliberate: win32_api.h before handles.h (after NOMINMAX).
 // clang-format off

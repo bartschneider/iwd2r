@@ -1,4 +1,3 @@
-# iwd2r. Distributed under LICENSE.md.
 """Look up names or addresses in the vanilla iwd2.exe Ghidra project.
 
     python3 tools/ghidra/query.py 0x5845D0 IcewindMisc::Roll

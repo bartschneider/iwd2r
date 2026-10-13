@@ -1,4 +1,3 @@
-// iwd2r. Distributed under LICENSE.md.
 #include "compat/version.h"
 
 const char* iwd2r_version()
