@@ -20,7 +20,7 @@ Bring your own copy of Icewind Dale II: Complete from GOG. The DRM-free GOG vers
 | 5 | IEex native layer and Lua API | Not started |
 | 6 | Remaster renderer | Not started |
 
-Current numbers: four presets build; 245 tests pass on Linux; the start screen is reached headlessly on Linux and Windows.
+Current numbers: four presets build; 243 tests pass on Linux; the start screen is reached headlessly on Linux and Windows.
 
 Engine sites that still truncate pointers to 32 bits on 64-bit targets are listed for project 3 in [docs/64bit-cast-sites.md](docs/64bit-cast-sites.md).
 
@@ -117,7 +117,7 @@ SDL_VIDEO_DRIVER=dummy SDL_AUDIO_DRIVER=dummy IWD2R_SMOKE_FRAMES=300 ./build/lin
 
 The oracle checks our engine against the original game's own code. The original `iwd2.exe` runs for real on Windows; ours runs next to it; the results are compared. A function counts as done only when it compiles, matches the original, and has an evidence file. The design is in [docs/superpowers/specs/2026-10-12-iwd2r-verification-harness-design.md](docs/superpowers/specs/2026-10-12-iwd2r-verification-harness-design.md) and the reasons for its runtime in [ADR 0003](docs/adr/0003-oracle-runtime.md). Parked items are in [docs/followups.md](docs/followups.md).
 
-Everything here needs a Windows host with your own copy of the game, driven from WSL. Nothing from the game is committed. Results go to `runs/<YYYYMMDD-HHMMSS>/`, which is not committed either.
+`tools/ghidra/setup.sh`, `oracle.py evidence` and `check_evidence.py` work on Linux and WSL. The runner, the vanilla copy and the replays need a Windows host with your own copy of the game, driven from WSL. Nothing from the game is committed. Results go to `runs/<YYYYMMDD-HHMMSS>/`, which is not committed either.
 
 - **Ghidra.** `tools/ghidra/setup.sh` installs pinned Ghidra, Node.js and REA under `~/.local/share/iwd2r/`, with no sudo. `tools/ghidra/make_project.py` builds the labelled project: our `// 0xADDR` names first, then IEex's.
 - **Vanilla copy.** `python3 tools/oracle.py vanilla` copies your install to `C:\Users\thier\iwd2r-oracle\game`, runs IWD2EE's uninstaller there, and checks that `iwd2.exe` has the vanilla MD5. Your install is never changed. `--rebuild` starts over.

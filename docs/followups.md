@@ -19,37 +19,44 @@ These items were found while building the harness (project 2) and parked. The fi
 
 ## Runner
 
-- The original sees the runner's `hInstance` from `GetModuleHandle(NULL)`, not its own.
-- `crt_ranges` in `oracle/loader/vanilla.json` is not exhaustive.
-- Pages outside the image's sections stay read-write.
-- `WriteImage` restores one page's protection.
-- `assert(lo <= hi)` is compiled out in `RelWithDebInfo`.
-- A heap-corruption break writes `complete: true` into the report.
-- The timeout is a DWORD and can overflow.
-- `WAIT_FAILED` is reported as a timeout.
-- The compare step labels fixed expected values as "original".
-- The runner needs the x86 Visual C++ runtime.
-- A fault inside original code that holds a CRT lock leaves the lock held. The fresh process per file and the timeout contain it.
+These are in `oracle/runner/` and `oracle/loader/`.
+
+- The original's `GetModuleHandle(NULL)` returns the runner's `hInstance`, not the exe's. Original code that loads resources by module handle would look in the wrong place.
+- `crt_ranges` in `oracle/loader/vanilla.json` is not exhaustive. A C runtime variable outside the listed ranges is restored with `.data` before each case, which can desynchronise the CRT.
+- Pages outside the image's sections stay read-write. Writes there are not caught.
+- `WriteImage` restores the protection of one page only, so a write spanning pages with different protections leaves the later ones changed.
+- `assert(lo <= hi)` in the generators is compiled out in `RelWithDebInfo`, so a reversed range is not caught in the shipped build.
+- A heap-corruption break writes `complete: true` into the report, so a run cut short looks complete.
+- The per-file timeout is a DWORD and can overflow for very large values.
+- A `WAIT_FAILED` from the wait on the child is reported as a timeout, which hides the real error.
+- The compare step labels fixed expected values as "original", which misreads in the output of cases that check against constants.
+- The runner needs the x86 Visual C++ runtime on the host; `oracle.py build` copies only what the runner imports.
+- A fault inside original code that holds a CRT lock leaves the lock held, and later cases in the same file could hang. The fresh process per file and the timeout contain it.
 
 ## Vanilla copy
 
-- `dialog.tlk` and the 188 restored Override files have no reference MD5.
-- The `mpsave/` folder is kept.
-- UTF-16 INI files and a case-insensitive `Resolution=` key are not handled.
+These are in `build_vanilla` and `verify_vanilla` in `tools/oracle.py`.
+
+- `dialog.tlk` and the 188 Override files restored from the install have no reference MD5, so a wrong file there would not be noticed.
+- The `mpsave/` folder is kept in the copy.
+- UTF-16 INI files and a `resolution=` key in another case are not handled by the INI preparation.
 
 ## Recorder
 
-- The invariant is enforced on checkpoint dumps only.
-- Reading the injector's pid has no timeout.
-- A swallowed `WM_KILLFOCUS` skips `SetCursor`.
-- `g_lastAu` starts at 0.
-- The frame count drifts across loads. Key checkpoints on the screen settling.
-- `GetKeyState(VK_CAPITAL)` is not hooked.
-- `gen_fields` does not handle template pointers or declarations with several declarators.
-- `minischema` does not handle array-form `items`.
+These are in `oracle/replay/` and `tools/`.
+
+- The dump invariant (`recorder.cpp`) is enforced on checkpoint dumps only, not on periodic ones.
+- `oracle.py` reads the injector's pid with a blocking `readline` that has no timeout, so a stuck injector hangs the run.
+- A swallowed `WM_KILLFOCUS` skips the `SetCursor` call the original would have made.
+- `g_lastAu` starts at 0, so the first stall count can be off by one.
+- The frame count drifts across loads. Key checkpoints on the screen settling, not on frame numbers.
+- `GetKeyState(VK_CAPITAL)` is not hooked, so Caps Lock state comes from the host.
+- `tools/gen_fields.py` does not handle template pointers or declarations with several declarators; such fields are skipped or misread.
+- `tools/minischema.py` does not handle array-form `items`, so a schema using them is not validated.
 
 ## Tooling
 
 - All worktrees share one Windows build folder, `C:\Users\thier\iwd2r-build`.
 - Windows Sandbox real-input mode (`--vm windows`) is untested. It needs the Windows feature enabled and a reboot.
-- `replay compare` reports a `known_differences.json` entry that matched nothing, but does not fail on it.
+- `replay compare` reports a `known_differences.json` entry that matched nothing, but does not fail on it. An entry carries no scenario, so one valid for another scenario would look stale. It stays a warning until entries carry a `scenario` field.
+- Consider a data-gated test through `CRuleTables::GetClassStringMixed` (the fighter-type string choice: Barbarian 34, otherwise 16799). The id choice is confirmed by the disassembly noted in `docs/evidence/544120.md` and exercised by the chargen replay.

@@ -2379,25 +2379,6 @@ void CRuleTables::GetClassStringLower(BYTE nClass, DWORD nSpecialist, DWORD dwFl
     sClass = strRes.szText;
 }
 
-// The string behind the FIGHTERTYPE token of GetClassStringMixed (0x544120).
-STRREF CRuleTables::GetFighterTypeStrRef(BYTE nClass, DWORD dwFlags)
-{
-    if ((dwFlags & 0x200) != 0) {
-        return 10371; // "Fallen Paladin"
-    }
-
-    if ((dwFlags & 0x400) != 0) {
-        return 10369; // "Fallen Ranger"
-    }
-
-    switch (nClass) {
-    case CAIOBJECTTYPE_C_BARBARIAN:
-        return 34; // "Barbarian"
-    default:
-        return 16799; // "Fighter"
-    }
-}
-
 // 0x544120
 void CRuleTables::GetClassStringMixed(BYTE nClass, DWORD nSpecialist, DWORD dwFlags, CString& sClass, int a5) const
 {
@@ -2441,7 +2422,21 @@ void CRuleTables::GetClassStringMixed(BYTE nClass, DWORD nSpecialist, DWORD dwFl
     g_pBaldurChitin->GetTlkTable().Fetch(strMageSchool, strRes);
     g_pBaldurChitin->GetTlkTable().SetToken(TOKEN_MAGESCHOOL, strRes.szText);
 
-    STRREF strFighterType = GetFighterTypeStrRef(nClass, dwFlags);
+    STRREF strFighterType;
+    if ((dwFlags & 0x200) != 0) {
+        strFighterType = 10371; // "Fallen Paladin"
+    } else if ((dwFlags & 0x400) != 0) {
+        strFighterType = 10369; // "Fallen Ranger"
+    } else {
+        switch (nClass) {
+        case CAIOBJECTTYPE_C_BARBARIAN:
+            strFighterType = 34; // "Barbarian"
+            break;
+        default:
+            strFighterType = 16799; // "Fighter"
+            break;
+        }
+    }
 
     g_pBaldurChitin->GetTlkTable().Fetch(strFighterType, strRes);
     g_pBaldurChitin->GetTlkTable().SetToken(TOKEN_FIGHTERTYPE, strRes.szText);
