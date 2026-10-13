@@ -33,6 +33,7 @@
 #include "CUIPanel.h"
 #include "CUtil.h"
 #include "Icewind586B70.h"
+#include "IcewindMisc.h"
 
 #define FIFTY_THREE 53
 
@@ -5570,9 +5571,81 @@ void CInfGame::SetupCharacters(BOOLEAN bProgressBarInPlace)
 // 0x5BFC40
 LONG CInfGame::GetProtagonist()
 {
-    // TODO: Incomplete.
+    LONG nId;
+    SHORT nIndex;
+    CGameSprite* pSprite;
+    BYTE rc;
 
-    return CGameObjectArray::INVALID_INDEX;
+    if (!g_pBaldurChitin->m_pEngineWorld->m_internalLoadedDialog.field_54
+        || (nId = g_pBaldurChitin->m_pEngineWorld->m_internalLoadedDialog.m_characterIndex) == 0) {
+        nIndex = 0;
+        do {
+            nId = nIndex < m_nCharacters
+                ? m_characterPortraits[nIndex]
+                : CGameObjectArray::INVALID_INDEX;
+
+            do {
+                rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(nId,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    reinterpret_cast<CGameObject**>(&pSprite),
+                    INFINITE);
+            } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+            if (rc == CGameObjectArray::SUCCESS) {
+                if (pSprite->m_bSelected && !IcewindMisc::IsDead(pSprite)) {
+                    g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(nId,
+                        CGameObjectArray::THREAD_ASYNCH,
+                        INFINITE);
+                    if (nId != 0) {
+                        goto found;
+                    }
+                    break;
+                }
+
+                g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(nId,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    INFINITE);
+            }
+        } while (nIndex++ < m_nCharacters);
+
+        nIndex = 0;
+        do {
+            nId = nIndex < 6
+                ? m_characters[nIndex]
+                : CGameObjectArray::INVALID_INDEX;
+
+            do {
+                rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(nId,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    reinterpret_cast<CGameObject**>(&pSprite),
+                    INFINITE);
+            } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+            if (rc == CGameObjectArray::SUCCESS) {
+                if (!IcewindMisc::IsDead(pSprite)) {
+                    g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(nId,
+                        CGameObjectArray::THREAD_ASYNCH,
+                        INFINITE);
+                    if (nId != 0) {
+                        goto found;
+                    }
+                    break;
+                }
+
+                g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(nId,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    INFINITE);
+            }
+        } while (nIndex++ < m_nCharacters);
+
+        nId = m_characters[0];
+    }
+
+found:
+    CMessageSetProtagonist* pMessage = new CMessageSetProtagonist(nId, nId, nId);
+    g_pBaldurChitin->GetMessageHandler()->AddMessage(pMessage, FALSE);
+
+    return nId;
 }
 
 // 0x5BFE10
