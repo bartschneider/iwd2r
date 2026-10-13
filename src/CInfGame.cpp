@@ -13,7 +13,9 @@
 #include "CInfCursor.h"
 #include "CItem.h"
 #include "CPathSearch.h"
+#include "CResCHR.h"
 #include "CResCache.h"
+#include "CResText.h"
 #include "CScreenChapter.h"
 #include "CScreenCharacter.h"
 #include "CScreenInventory.h"
@@ -1396,452 +1398,6 @@ LONG CInfGame::ImportCharacter(const CString& sFileName, INT nIndex)
     return 0;
 }
 
-// 0x5A1A80
-CString CInfGame::GetDirSounds()
-{
-    return m_sSoundsDir;
-}
-
-// 0x5A1AB0
-void CInfGame::CharacterExport(LONG nCharacterId, CString sFileName)
-{
-    // TODO: Incomplete.
-}
-
-// 0x5A24D0
-CGameArea* CInfGame::LoadArea(CString areaName, BYTE nTravelScreenImageToUse, BOOLEAN bProgressBarRequired, BOOLEAN bProgressBarInPlace)
-{
-    CAreaFile areaData;
-    CString sLevel;
-    CString sResRef;
-    LONG highRequests;
-    LONG mediumRequests;
-    LONG lowRequests;
-    DWORD nTotalCachingRequirements;
-    BYTE cnt;
-    CGameArea* pArea;
-
-    areaName.MakeUpper();
-
-    pArea = GetArea(areaName);
-    if (pArea != NULL) {
-        if (bProgressBarInPlace) {
-            ProgressBarCallback(3000000, FALSE);
-        }
-        return pArea;
-    }
-
-    if (!bProgressBarInPlace) {
-        g_pChitin->m_bDisplayStale = TRUE;
-        SleepEx(25, FALSE);
-    }
-
-    BYTE nAverageLevel = 0;
-    for (SHORT nPortrait = 0; nPortrait < m_nCharacters; nPortrait++) {
-        CGameSprite* pSprite;
-        LONG nCharacterId = m_characterPortraits[nPortrait];
-        BYTE rc = m_cObjectArray.GetShare(nCharacterId,
-            CGameObjectArray::THREAD_ASYNCH,
-            reinterpret_cast<CGameObject**>(&pSprite),
-            INFINITE);
-        if (rc == CGameObjectArray::SUCCESS) {
-            nAverageLevel += pSprite->GetDerivedStats()->m_nLevel;
-            m_cObjectArray.ReleaseShare(nCharacterId,
-                CGameObjectArray::THREAD_ASYNCH,
-                INFINITE);
-        }
-    }
-
-    if (m_nCharacters > 0) {
-        sLevel.Format("%d", nAverageLevel / m_nCharacters);
-    }
-
-    highRequests = g_pChitin->cDimm.RequestsPendingCount(CDimm::PRIORITY_HIGH);
-    mediumRequests = g_pChitin->cDimm.RequestsPendingCount(CDimm::PRIORITY_MEDIUM);
-    lowRequests = g_pChitin->cDimm.RequestsPendingCount(CDimm::PRIORITY_LOW);
-
-    cnt = 0;
-    while (cnt < CINFGAME_MAX_AREAS) {
-        if (m_gameAreas[cnt] == NULL) {
-            break;
-        }
-        cnt++;
-    }
-
-    if (cnt >= CINFGAME_MAX_AREAS) {
-        return NULL;
-    }
-
-    m_gameAreas[cnt] = new CGameArea(cnt);
-    if (m_gameAreas[cnt] == NULL) {
-        return NULL;
-    }
-
-    if (nTravelScreenImageToUse != -1) {
-        m_nTravelScreenImageToUse = nTravelScreenImageToUse;
-    } else {
-        m_nTravelScreenImageToUse = rand() % 5;
-    }
-
-    if (g_pChitin->cNetwork.GetSessionOpen() == TRUE) {
-        if (g_pBaldurChitin->GetObjectGame()->GetMultiplayerSettings()->GetListenToJoinOption() == TRUE
-            && g_pBaldurChitin->GetActiveEngine() != g_pBaldurChitin->m_pEngineLoad) {
-            g_pBaldurChitin->GetBaldurMessage()->ResourceSuggestLoad(areaName,
-                1010,
-                m_nTravelScreenImageToUse | (bProgressBarInPlace | bProgressBarRequired) << 8);
-        }
-        SleepEx(200, FALSE);
-    }
-
-    g_pChitin->m_bDisplayStale = TRUE;
-    sub_59FA00(TRUE);
-
-    nTotalCachingRequirements = CachingRequirements(areaName);
-    if (bProgressBarRequired == TRUE || nTotalCachingRequirements > 0) {
-        bProgressBarRequired = TRUE;
-        nTotalCachingRequirements += 5000000;
-    } else {
-        bProgressBarRequired = FALSE;
-    }
-
-    nTotalCachingRequirements += 3000000;
-
-    if (bProgressBarInPlace == TRUE) {
-        if (bProgressBarRequired == TRUE) {
-            g_pChitin->cProgressBar.AddActionTarget(nTotalCachingRequirements - 3000000);
-        } else {
-            ProgressBarCallback(3000000 - nTotalCachingRequirements, FALSE);
-        }
-    }
-
-    if (g_pChitin->cNetwork.GetSessionOpen() == TRUE
-        && !g_pChitin->cNetwork.GetSessionHosting()
-        && !g_pBaldurChitin->GetBaldurMessage()->DemandResourceFromServer(areaName, 1010, TRUE, FALSE, TRUE)) {
-        g_pChitin->cNetwork.CloseSession(TRUE);
-        m_bInDestroyGame = TRUE;
-        delete m_gameAreas[cnt];
-        m_gameAreas[cnt] = NULL;
-        m_bInDestroyGame = FALSE;
-        return NULL;
-    }
-
-    if (bProgressBarRequired == TRUE
-        && !bProgressBarInPlace) {
-        field_1B86 = areaName;
-        g_pChitin->SetProgressBar(TRUE,
-            9886,
-            0,
-            0,
-            TRUE,
-            9885,
-            FALSE,
-            0,
-            FALSE,
-            FALSE,
-            255);
-        g_pChitin->cProgressBar.m_nActionProgress = 0;
-        g_pChitin->cProgressBar.m_nActionTarget = nTotalCachingRequirements;
-    }
-
-    CacheResFileWithResource(areaName);
-
-    if (g_pChitin->cNetwork.GetSessionOpen() == TRUE) {
-        if (!g_pChitin->cNetwork.GetSessionHosting()) {
-            if (bProgressBarInPlace || bProgressBarRequired) {
-                if (g_pChitin->cNetwork.GetServiceProvider() != CNetwork::SERV_PROV_NULL) {
-                    g_pChitin->cProgressBar.m_nWaitingReason = 16513;
-                    g_pChitin->cProgressBar.m_bWaiting = TRUE;
-                }
-
-                if (!g_pBaldurChitin->GetBaldurMessage()->DemandResourceFromServer(areaName, 1010, FALSE, TRUE, TRUE)) {
-                    g_pChitin->cNetwork.CloseSession(TRUE);
-                    g_pChitin->SetProgressBar(FALSE,
-                        0,
-                        0,
-                        0,
-                        FALSE,
-                        0,
-                        FALSE,
-                        0,
-                        FALSE,
-                        FALSE,
-                        255);
-                    m_bInDestroyGame = TRUE;
-                    delete m_gameAreas[cnt];
-                    m_gameAreas[cnt] = NULL;
-                    m_bInDestroyGame = FALSE;
-                }
-
-                if (bProgressBarInPlace || bProgressBarRequired) {
-                    g_pChitin->cProgressBar.m_bWaiting = FALSE;
-                    g_pBaldurChitin->m_cCachingStatus.InvalidateScreen();
-                }
-            }
-        }
-
-        if (g_pChitin->cNetwork.GetSessionOpen() == TRUE) {
-            m_gameAreas[cnt]->m_nInitialAreaID = 0;
-            g_pBaldurChitin->GetObjectGame()->m_nAreaFirstObject = -1;
-
-            // TODO: Unclear.
-            DWORD idPlayer = -1;
-            BOOLEAN bIDInUse = TRUE;
-            while (bIDInUse) {
-                bIDInUse = g_pChitin->cNetwork.FindPlayerLocationByID(idPlayer, FALSE) != -1;
-                for (INT nArea = 0; nArea < CINFGAME_MAX_AREAS; nArea++) {
-                    if (m_gameAreas[nArea] != NULL
-                        && m_gameAreas[nArea]->m_nInitialAreaID == idPlayer) {
-                        bIDInUse = TRUE;
-                        break;
-                    }
-                }
-                if (bIDInUse) {
-                    idPlayer--;
-                }
-            }
-
-            m_gameAreas[cnt]->m_nInitialAreaID = idPlayer;
-            m_nUniqueAreaID = idPlayer;
-        }
-    }
-
-    sub_59FA00(TRUE);
-
-    m_bInLoadArea = TRUE;
-
-    areaData.SetResRef(CResRef(areaName), TRUE, TRUE);
-    m_gameAreas[cnt]->m_resRef = areaName;
-    m_gameAreas[cnt]->m_cGameAreaNotes.m_rArea = CResRef(areaName);
-    m_gameAreas[cnt]->Unmarshal(areaData.GetData(),
-        areaData.GetDataSize(),
-        areaName,
-        bProgressBarInPlace);
-
-    areaData.ReleaseData();
-
-    if (g_pBaldurChitin->cNetwork.GetSessionHosting() == TRUE
-        && !g_pBaldurChitin->GetObjectGame()->m_bInLoadGame) {
-        m_gameAreas[cnt]->SortLists();
-        m_gameAreas[cnt]->EnterSpawn();
-    }
-
-    POSITION pos = m_lstGlobalCreatures.GetHeadPosition();
-    while (pos != NULL) {
-        CGameSprite* pSprite;
-        LONG iSprite = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lstGlobalCreatures.GetNext(pos)));
-        BYTE rc = m_cObjectArray.GetShare(iSprite,
-            CGameObjectArray::THREAD_ASYNCH,
-            reinterpret_cast<CGameObject**>(&pSprite),
-            INFINITE);
-        if (rc == CGameObjectArray::SUCCESS) {
-            if (pSprite->m_currentArea == areaName) {
-                // __FILE__: C:\Projects\Icewind2\src\Baldur\InfGame.cpp
-                // __LINE__: 4774
-                UTIL_ASSERT(pSprite->GetArea() == NULL);
-
-                rc = m_cObjectArray.GetDeny(iSprite,
-                    CGameObjectArray::THREAD_ASYNCH,
-                    reinterpret_cast<CGameObject**>(&pSprite),
-                    INFINITE);
-                if (rc == CGameObjectArray::SUCCESS) {
-                    if ((pSprite->GetBaseStats()->m_generalState & STATE_DEAD) != 0
-                        && pSprite->GetAnimation()->CanLieDown()) {
-                        pSprite->AddToArea(m_gameAreas[cnt],
-                            pSprite->GetPos(),
-                            0,
-                            CGameObject::LIST_BACK);
-                    } else {
-                        pSprite->AddToArea(m_gameAreas[cnt],
-                            pSprite->GetPos(),
-                            0,
-                            CGameObject::LIST_FRONT);
-                    }
-                    m_cObjectArray.ReleaseDeny(iSprite,
-                        CGameObjectArray::THREAD_ASYNCH,
-                        INFINITE);
-                }
-            }
-            m_cObjectArray.ReleaseShare(iSprite,
-                CGameObjectArray::THREAD_ASYNCH,
-                INFINITE);
-        }
-    }
-
-    m_bInLoadArea = FALSE;
-
-    m_gameAreas[cnt]->m_nFirstObject = g_pBaldurChitin->GetObjectGame()->m_nAreaFirstObject;
-
-    if (g_pChitin->cNetwork.GetSessionOpen() == TRUE
-        && g_pChitin->cNetwork.GetSessionHosting() == TRUE) {
-        g_pBaldurChitin->GetObjectGame()->GetRemoteObjectArray()->ChangeControlOnLoadGame();
-    }
-
-    if (bProgressBarRequired) {
-        if (g_pChitin->field_4C == 1 && !g_pChitin->m_bExitRSThread) {
-            int v1 = highRequests + mediumRequests + lowRequests;
-            int v6 = 0;
-            g_pChitin->cDimm.MoveRequests(CDimm::PRIORITY_HIGH, CDimm::PRIORITY_LOW, highRequests);
-            g_pChitin->cDimm.MoveRequests(CDimm::PRIORITY_MEDIUM, CDimm::PRIORITY_LOW, mediumRequests);
-            g_pChitin->cDimm.MoveRequests(CDimm::PRIORITY_LOW, CDimm::PRIORITY_LOW, lowRequests);
-            int v2 = g_pChitin->cDimm.RequestsPendingCount() - v1;
-            int v3 = v2;
-            while (v3 > 0) {
-                if (v6 >= 100) {
-                    break;
-                }
-
-                if (!g_pChitin->cDimm.ResumeServicing()
-                    || g_pChitin->cDimm.MemoryAlmostFull()) {
-                    int v4 = v1 - g_pChitin->cDimm.RequestsPendingCount();
-                    g_pChitin->cDimm.ReduceServicedList();
-                    v1 = g_pChitin->cDimm.RequestsPendingCount() + v4;
-                    g_pChitin->cDimm.ResumeServicing();
-                }
-
-                g_pChitin->cDimm.field_0 = 0;
-                g_pChitin->cDimm.field_4 = 0;
-                SleepEx(50, FALSE);
-
-                int v5 = g_pChitin->cDimm.RequestsPendingCount() - v1;
-                if (v5 != v3) {
-                    g_pChitin->cProgressBar.m_nActionProgress += (v3 - v5) * (5000000 / v2);
-                    v3 = v5;
-                    g_pChitin->m_bDisplayStale = TRUE;
-                }
-
-                v6++;
-            }
-        }
-
-        if (!bProgressBarInPlace && bProgressBarRequired == TRUE) {
-            g_pChitin->cProgressBar.m_nActionProgress = g_pChitin->cProgressBar.m_nActionTarget;
-            g_pChitin->cProgressBar.m_bDisableMinibars = TRUE;
-            g_pChitin->m_bDisplayStale = TRUE;
-            sub_59FA00(TRUE);
-            g_pChitin->SetProgressBar(FALSE,
-                0,
-                0,
-                0,
-                FALSE,
-                0,
-                FALSE,
-                0,
-                FALSE,
-                FALSE,
-                255);
-        }
-    }
-
-    m_nTravelScreenImageToUse = rand() % 5;
-
-    return m_gameAreas[cnt];
-}
-
-// 0x5AC110
-BOOLEAN CInfGame::CanSaveGame(STRREF& strError, BOOLEAN bInRestGame, BOOLEAN bInStore)
-{
-    if (!bInRestGame
-        && g_pChitin->cNetwork.GetSessionOpen() == TRUE
-        && !g_pChitin->cNetwork.GetSessionHosting()) {
-        // "Client machines are not allowed to save in a multiplayer game."
-        strError = 17194;
-        return FALSE;
-    }
-
-    if (g_pBaldurChitin->GetObjectGame()->GetGameSave()->m_mode == 386
-        || g_pBaldurChitin->GetObjectGame()->GetGameSave()->m_mode == 1282) {
-        // "Cannot save game while in dialog mode."
-        strError = 19253;
-        return FALSE;
-    }
-
-    if (g_pBaldurChitin->GetScreenWorld()->m_comingOutOfDialog > 0 && !bInStore) {
-        // "Cannot save game while in dialog mode."
-        strError = 19253;
-        return FALSE;
-    }
-
-    if (g_pBaldurChitin->GetObjectGame()->GetMultiplayerSettings()->m_bHostPermittedDialog == TRUE) {
-        // "Cannot save because dialog is about to start."
-        strError = 19254;
-        return FALSE;
-    }
-
-    if (g_pBaldurChitin->GetScreenWorld()->m_bHardPaused == TRUE) {
-        // "Cannot save during a rest, chapter information or movie."
-        strError = 19255;
-        return FALSE;
-    }
-
-    if (g_pBaldurChitin->GetActiveEngine() == g_pBaldurChitin->m_pEngineProjector
-        || g_pBaldurChitin->GetActiveEngine() == g_pBaldurChitin->m_pEngineChapter
-        || g_pBaldurChitin->GetObjectGame()->GetGameSave()->m_cutScene) {
-        // "Cannot save during a rest, chapter information or movie."
-        strError = 19255;
-        return FALSE;
-    }
-
-    if (!bInRestGame
-        && g_pBaldurChitin->GetActiveEngine() == g_pBaldurChitin->m_pEngineStore) {
-        // "Cannot save while someone is in the Store Screen."
-        strError = 10841;
-        return FALSE;
-    }
-
-    if (g_pChitin->cNetwork.GetServiceProvider() != CNetwork::SERV_PROV_NULL
-        && !bInRestGame
-        && sub_5C93E0() > 0) {
-        // "Cannot save while someone is in the Store Screen."
-        strError = 10841;
-        return FALSE;
-    }
-
-    if (g_pChitin->cNetwork.GetServiceProvider() != CNetwork::SERV_PROV_NULL
-        && !bInRestGame
-        && g_pBaldurChitin->GetObjectGame()->GetMultiplayerSettings()->sub_5186A0() > 0) {
-        // "Cannot save while someone is levelling up."
-        strError = 41397;
-        return FALSE;
-    }
-
-    if (g_pChitin->cNetwork.GetServiceProvider() != CNetwork::SERV_PROV_NULL
-        && !bInRestGame
-        && g_pBaldurChitin->GetObjectGame()->GetMultiplayerSettings()->sub_518560() > 0) {
-        // "Cannot save while someone is in the Inventory Screen."
-        strError = 26546;
-        return FALSE;
-    }
-
-    for (BYTE cnt = 0; cnt < CINFGAME_MAX_AREAS; cnt++) {
-        if (m_gameAreas[cnt] != NULL) {
-            if (!m_gameAreas[cnt]->CanSaveGame(strError)) {
-                return FALSE;
-            }
-        }
-    }
-
-    strError = -1;
-    return TRUE;
-}
-
-// 0x5AC340
-BOOL CInfGame::BackupQuickSave()
-{
-    BOOL bResult = FALSE;
-
-    m_sSaveGame = QUICK_SAVE_BACKUP_NAME;
-    CScreenCharacter::SAVE_NAME = QUICK_SAVE_BACKUP_NAME;
-
-    CString sDirSave = GetDirSave();
-    if (g_pChitin->cDimm.DirectoryRemoveFiles(sDirSave)) {
-        m_sSaveGame = QUICK_SAVE_NAME;
-        CScreenCharacter::SAVE_NAME = QUICK_SAVE_NAME;
-        bResult = g_pChitin->cDimm.DirectoryCopyFiles(GetDirSave(), sDirSave);
-    }
-
-    return bResult;
-}
-
 // 0x5AC430
 BOOL CInfGame::SaveGame(BOOLEAN bProgressBarRequired, BOOLEAN bProgressBarInPlace, BOOLEAN bSaveScreen)
 {
@@ -3216,6 +2772,585 @@ void CInfGame::Unmarshal(BYTE* pGame, LONG nGame, BOOLEAN bProgressBarInPlace)
     // __FILE__: C:\Projects\Icewind2\src\Baldur\InfGame.cpp
     // __LINE__: 7634
     UTIL_ASSERT(cnt == (DWORD)nGame);
+}
+
+// 0x5A1A80
+CString CInfGame::GetDirSounds()
+{
+    return m_sSoundsDir;
+}
+
+// 0x5A1AB0
+void CInfGame::CharacterExport(LONG nCharacterId, CString sFileName)
+{
+    CResHelper<CResCHR, 1018> cCharacterFile;
+    CResHelper<CResText, 1022> cBiographyFile;
+    BOOLEAN bTemporaryKey = FALSE;
+    CGameSprite* pSprite;
+    BYTE* pCharacter;
+    LONG nCharacter;
+    WORD facing;
+
+    if (m_cObjectArray.GetShare(nCharacterId,
+            CGameObjectArray::THREAD_ASYNCH,
+            reinterpret_cast<CGameObject**>(&pSprite),
+            INFINITE)
+        != CGameObjectArray::SUCCESS) {
+        return;
+    }
+
+    pCharacter = NULL;
+    pSprite->Marshal(&pCharacter, &nCharacter, &facing, FALSE, FALSE);
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\InfGame.cpp
+    // __LINE__: 4302
+    UTIL_ASSERT(pCharacter != NULL);
+
+    LONG nExportCharacter = nCharacter + 0x224;
+    BYTE* pExportCharacter = new BYTE[nExportCharacter];
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\InfGame.cpp
+    // __LINE__: 4307
+    UTIL_ASSERT(pExportCharacter != NULL);
+
+    memset(pExportCharacter, 0, nExportCharacter);
+    memcpy(pExportCharacter, "CHR V2.2", 8);
+
+    BYTE* pHeader = pExportCharacter + 8;
+    memset(pHeader, 0, SCRIPTNAME_SIZE);
+    strncpy(reinterpret_cast<char*>(pHeader), pSprite->GetName(), SCRIPTNAME_SIZE);
+
+    for (INT nWeapon = 0; nWeapon < 8; nWeapon++) {
+        *reinterpret_cast<SHORT*>(pHeader + 0x20 + 2 * nWeapon) = pSprite->m_quickWeapons[nWeapon].m_abilityId.m_itemNum;
+        *reinterpret_cast<SHORT*>(pHeader + 0x30 + 2 * nWeapon) = pSprite->m_quickWeapons[nWeapon].m_abilityId.m_abilityNum;
+        pHeader[0x194 + nWeapon] = pSprite->field_3D3A[nWeapon];
+    }
+
+    for (INT nSpell = 0; nSpell < 9; nSpell++) {
+        pSprite->m_quickSpells[nSpell].m_abilityId.m_res.GetResRef(pHeader + 0x40 + RESREF_SIZE * nSpell);
+        pHeader[0x88 + nSpell] = pSprite->m_quickSpells[nSpell].m_abilityId.m_nClass;
+        pHeader[0x154 + nSpell] = pSprite->m_quickSpells[nSpell].m_abilityId.field_1D;
+        pHeader[0x15D + nSpell] = static_cast<BYTE>(pSprite->m_quickSpells[nSpell].m_abilityId.field_1E);
+    }
+
+    for (INT nItem = 0; nItem < 3; nItem++) {
+        *reinterpret_cast<SHORT*>(pHeader + 0x92 + 2 * nItem) = pSprite->m_quickItems[nItem].m_abilityId.m_itemNum;
+        *reinterpret_cast<SHORT*>(pHeader + 0x98 + 2 * nItem) = pSprite->m_quickItems[nItem].m_abilityId.m_abilityNum;
+    }
+
+    for (INT nInnate = 0; nInnate < 9; nInnate++) {
+        pSprite->m_quickInnates[nInnate].m_abilityId.m_res.GetResRef(pHeader + 0x9E + RESREF_SIZE * nInnate);
+    }
+
+    for (INT nSong = 0; nSong < 9; nSong++) {
+        pSprite->m_quickSongs[nSong].m_abilityId.m_res.GetResRef(pHeader + 0xE6 + RESREF_SIZE * nSong);
+    }
+
+    for (INT nButton = 0; nButton < 9; nButton++) {
+        *reinterpret_cast<int*>(pHeader + 0x12E + 4 * nButton) = pSprite->field_3D14[nButton];
+    }
+
+    pHeader[0x152] = pSprite->m_nLastSpellbookClassIndex;
+    pHeader[0x153] = pSprite->m_nLastSpellbookSpellLevel;
+    pHeader[0x168] = pSprite->m_nLastSong;
+
+    *reinterpret_cast<DWORD*>(pHeader + 0x18) = 0x224;
+    *reinterpret_cast<DWORD*>(pHeader + 0x1C) = nCharacter;
+
+    CResRef cResSounds;
+    cResSounds = pSprite->m_secondarySounds;
+    cResSounds.GetResRef(pHeader + 0x16C);
+
+    CString sSounds;
+    sSounds = reinterpret_cast<char*>(pSprite->field_725A);
+    memcpy(pHeader + 0x174, static_cast<LPCSTR>(sSounds), sSounds.GetLength());
+
+    memcpy(pExportCharacter + 0x224, pCharacter, nCharacter);
+    delete[] pCharacter;
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\InfGame.cpp
+    // __LINE__: 4364
+    UTIL_ASSERT(nCharacter + 0x224 == nExportCharacter);
+
+    // NOTE: Uninline.
+    cCharacterFile.SetResRef(CResRef(sFileName), TRUE, TRUE);
+    if (cCharacterFile.GetResRef() == "") {
+        bTemporaryKey = TRUE;
+        g_pChitin->cDimm.AddTemporaryKey(m_sCharactersDir, CResRef(sFileName), 1018);
+
+        // NOTE: Uninline.
+        cCharacterFile.SetResRef(CResRef(sFileName), TRUE, TRUE);
+    }
+
+    static_cast<CRes*>(cCharacterFile.GetRes())->Write(m_sCharactersDir, pExportCharacter, nExportCharacter);
+
+    if (bTemporaryKey == TRUE) {
+        g_pChitin->cDimm.RemoveTemporaryKey(m_sCharactersDir, CResRef(sFileName), 1018);
+    }
+
+    delete[] pExportCharacter;
+
+    STR_RES strRes;
+    g_pBaldurChitin->GetTlkTable().Fetch(pSprite->m_baseStats.m_biography, strRes);
+
+    // NOTE: Uninline.
+    cBiographyFile.SetResRef(CResRef(sFileName), TRUE, TRUE);
+
+    bTemporaryKey = FALSE;
+    if (cBiographyFile.GetResRef() == "") {
+        bTemporaryKey = TRUE;
+        g_pChitin->cDimm.AddTemporaryKey(m_sCharactersDir, CResRef(sFileName), 1022);
+
+        // NOTE: Uninline.
+        cBiographyFile.SetResRef(CResRef(sFileName), TRUE, TRUE);
+    }
+
+    INT nLength = strRes.szText.GetLength();
+    static_cast<CRes*>(cBiographyFile.GetRes())->Write(m_sCharactersDir,
+        strRes.szText.GetBuffer(0),
+        nLength + (nLength > 0));
+
+    if (bTemporaryKey == TRUE) {
+        g_pChitin->cDimm.RemoveTemporaryKey(m_sCharactersDir, CResRef(sFileName), 1022);
+    }
+
+    m_cObjectArray.ReleaseShare(nCharacterId,
+        CGameObjectArray::THREAD_ASYNCH,
+        INFINITE);
+}
+
+// 0x5A24D0
+CGameArea* CInfGame::LoadArea(CString areaName, BYTE nTravelScreenImageToUse, BOOLEAN bProgressBarRequired, BOOLEAN bProgressBarInPlace)
+{
+    CAreaFile areaData;
+    CString sLevel;
+    CString sResRef;
+    LONG highRequests;
+    LONG mediumRequests;
+    LONG lowRequests;
+    DWORD nTotalCachingRequirements;
+    BYTE cnt;
+    CGameArea* pArea;
+
+    areaName.MakeUpper();
+
+    pArea = GetArea(areaName);
+    if (pArea != NULL) {
+        if (bProgressBarInPlace) {
+            ProgressBarCallback(3000000, FALSE);
+        }
+        return pArea;
+    }
+
+    if (!bProgressBarInPlace) {
+        g_pChitin->m_bDisplayStale = TRUE;
+        SleepEx(25, FALSE);
+    }
+
+    BYTE nAverageLevel = 0;
+    for (SHORT nPortrait = 0; nPortrait < m_nCharacters; nPortrait++) {
+        CGameSprite* pSprite;
+        LONG nCharacterId = m_characterPortraits[nPortrait];
+        BYTE rc = m_cObjectArray.GetShare(nCharacterId,
+            CGameObjectArray::THREAD_ASYNCH,
+            reinterpret_cast<CGameObject**>(&pSprite),
+            INFINITE);
+        if (rc == CGameObjectArray::SUCCESS) {
+            nAverageLevel += pSprite->GetDerivedStats()->m_nLevel;
+            m_cObjectArray.ReleaseShare(nCharacterId,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+        }
+    }
+
+    if (m_nCharacters > 0) {
+        sLevel.Format("%d", nAverageLevel / m_nCharacters);
+    }
+
+    highRequests = g_pChitin->cDimm.RequestsPendingCount(CDimm::PRIORITY_HIGH);
+    mediumRequests = g_pChitin->cDimm.RequestsPendingCount(CDimm::PRIORITY_MEDIUM);
+    lowRequests = g_pChitin->cDimm.RequestsPendingCount(CDimm::PRIORITY_LOW);
+
+    cnt = 0;
+    while (cnt < CINFGAME_MAX_AREAS) {
+        if (m_gameAreas[cnt] == NULL) {
+            break;
+        }
+        cnt++;
+    }
+
+    if (cnt >= CINFGAME_MAX_AREAS) {
+        return NULL;
+    }
+
+    m_gameAreas[cnt] = new CGameArea(cnt);
+    if (m_gameAreas[cnt] == NULL) {
+        return NULL;
+    }
+
+    if (nTravelScreenImageToUse != -1) {
+        m_nTravelScreenImageToUse = nTravelScreenImageToUse;
+    } else {
+        m_nTravelScreenImageToUse = rand() % 5;
+    }
+
+    if (g_pChitin->cNetwork.GetSessionOpen() == TRUE) {
+        if (g_pBaldurChitin->GetObjectGame()->GetMultiplayerSettings()->GetListenToJoinOption() == TRUE
+            && g_pBaldurChitin->GetActiveEngine() != g_pBaldurChitin->m_pEngineLoad) {
+            g_pBaldurChitin->GetBaldurMessage()->ResourceSuggestLoad(areaName,
+                1010,
+                m_nTravelScreenImageToUse | (bProgressBarInPlace | bProgressBarRequired) << 8);
+        }
+        SleepEx(200, FALSE);
+    }
+
+    g_pChitin->m_bDisplayStale = TRUE;
+    sub_59FA00(TRUE);
+
+    nTotalCachingRequirements = CachingRequirements(areaName);
+    if (bProgressBarRequired == TRUE || nTotalCachingRequirements > 0) {
+        bProgressBarRequired = TRUE;
+        nTotalCachingRequirements += 5000000;
+    } else {
+        bProgressBarRequired = FALSE;
+    }
+
+    nTotalCachingRequirements += 3000000;
+
+    if (bProgressBarInPlace == TRUE) {
+        if (bProgressBarRequired == TRUE) {
+            g_pChitin->cProgressBar.AddActionTarget(nTotalCachingRequirements - 3000000);
+        } else {
+            ProgressBarCallback(3000000 - nTotalCachingRequirements, FALSE);
+        }
+    }
+
+    if (g_pChitin->cNetwork.GetSessionOpen() == TRUE
+        && !g_pChitin->cNetwork.GetSessionHosting()
+        && !g_pBaldurChitin->GetBaldurMessage()->DemandResourceFromServer(areaName, 1010, TRUE, FALSE, TRUE)) {
+        g_pChitin->cNetwork.CloseSession(TRUE);
+        m_bInDestroyGame = TRUE;
+        delete m_gameAreas[cnt];
+        m_gameAreas[cnt] = NULL;
+        m_bInDestroyGame = FALSE;
+        return NULL;
+    }
+
+    if (bProgressBarRequired == TRUE
+        && !bProgressBarInPlace) {
+        field_1B86 = areaName;
+        g_pChitin->SetProgressBar(TRUE,
+            9886,
+            0,
+            0,
+            TRUE,
+            9885,
+            FALSE,
+            0,
+            FALSE,
+            FALSE,
+            255);
+        g_pChitin->cProgressBar.m_nActionProgress = 0;
+        g_pChitin->cProgressBar.m_nActionTarget = nTotalCachingRequirements;
+    }
+
+    CacheResFileWithResource(areaName);
+
+    if (g_pChitin->cNetwork.GetSessionOpen() == TRUE) {
+        if (!g_pChitin->cNetwork.GetSessionHosting()) {
+            if (bProgressBarInPlace || bProgressBarRequired) {
+                if (g_pChitin->cNetwork.GetServiceProvider() != CNetwork::SERV_PROV_NULL) {
+                    g_pChitin->cProgressBar.m_nWaitingReason = 16513;
+                    g_pChitin->cProgressBar.m_bWaiting = TRUE;
+                }
+
+                if (!g_pBaldurChitin->GetBaldurMessage()->DemandResourceFromServer(areaName, 1010, FALSE, TRUE, TRUE)) {
+                    g_pChitin->cNetwork.CloseSession(TRUE);
+                    g_pChitin->SetProgressBar(FALSE,
+                        0,
+                        0,
+                        0,
+                        FALSE,
+                        0,
+                        FALSE,
+                        0,
+                        FALSE,
+                        FALSE,
+                        255);
+                    m_bInDestroyGame = TRUE;
+                    delete m_gameAreas[cnt];
+                    m_gameAreas[cnt] = NULL;
+                    m_bInDestroyGame = FALSE;
+                }
+
+                if (bProgressBarInPlace || bProgressBarRequired) {
+                    g_pChitin->cProgressBar.m_bWaiting = FALSE;
+                    g_pBaldurChitin->m_cCachingStatus.InvalidateScreen();
+                }
+            }
+        }
+
+        if (g_pChitin->cNetwork.GetSessionOpen() == TRUE) {
+            m_gameAreas[cnt]->m_nInitialAreaID = 0;
+            g_pBaldurChitin->GetObjectGame()->m_nAreaFirstObject = -1;
+
+            // TODO: Unclear.
+            DWORD idPlayer = -1;
+            BOOLEAN bIDInUse = TRUE;
+            while (bIDInUse) {
+                bIDInUse = g_pChitin->cNetwork.FindPlayerLocationByID(idPlayer, FALSE) != -1;
+                for (INT nArea = 0; nArea < CINFGAME_MAX_AREAS; nArea++) {
+                    if (m_gameAreas[nArea] != NULL
+                        && m_gameAreas[nArea]->m_nInitialAreaID == idPlayer) {
+                        bIDInUse = TRUE;
+                        break;
+                    }
+                }
+                if (bIDInUse) {
+                    idPlayer--;
+                }
+            }
+
+            m_gameAreas[cnt]->m_nInitialAreaID = idPlayer;
+            m_nUniqueAreaID = idPlayer;
+        }
+    }
+
+    sub_59FA00(TRUE);
+
+    m_bInLoadArea = TRUE;
+
+    areaData.SetResRef(CResRef(areaName), TRUE, TRUE);
+    m_gameAreas[cnt]->m_resRef = areaName;
+    m_gameAreas[cnt]->m_cGameAreaNotes.m_rArea = CResRef(areaName);
+    m_gameAreas[cnt]->Unmarshal(areaData.GetData(),
+        areaData.GetDataSize(),
+        areaName,
+        bProgressBarInPlace);
+
+    areaData.ReleaseData();
+
+    if (g_pBaldurChitin->cNetwork.GetSessionHosting() == TRUE
+        && !g_pBaldurChitin->GetObjectGame()->m_bInLoadGame) {
+        m_gameAreas[cnt]->SortLists();
+        m_gameAreas[cnt]->EnterSpawn();
+    }
+
+    POSITION pos = m_lstGlobalCreatures.GetHeadPosition();
+    while (pos != NULL) {
+        CGameSprite* pSprite;
+        LONG iSprite = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lstGlobalCreatures.GetNext(pos)));
+        BYTE rc = m_cObjectArray.GetShare(iSprite,
+            CGameObjectArray::THREAD_ASYNCH,
+            reinterpret_cast<CGameObject**>(&pSprite),
+            INFINITE);
+        if (rc == CGameObjectArray::SUCCESS) {
+            if (pSprite->m_currentArea == areaName) {
+                // __FILE__: C:\Projects\Icewind2\src\Baldur\InfGame.cpp
+                // __LINE__: 4774
+                UTIL_ASSERT(pSprite->GetArea() == NULL);
+
+                rc = m_cObjectArray.GetDeny(iSprite,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    reinterpret_cast<CGameObject**>(&pSprite),
+                    INFINITE);
+                if (rc == CGameObjectArray::SUCCESS) {
+                    if ((pSprite->GetBaseStats()->m_generalState & STATE_DEAD) != 0
+                        && pSprite->GetAnimation()->CanLieDown()) {
+                        pSprite->AddToArea(m_gameAreas[cnt],
+                            pSprite->GetPos(),
+                            0,
+                            CGameObject::LIST_BACK);
+                    } else {
+                        pSprite->AddToArea(m_gameAreas[cnt],
+                            pSprite->GetPos(),
+                            0,
+                            CGameObject::LIST_FRONT);
+                    }
+                    m_cObjectArray.ReleaseDeny(iSprite,
+                        CGameObjectArray::THREAD_ASYNCH,
+                        INFINITE);
+                }
+            }
+            m_cObjectArray.ReleaseShare(iSprite,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+        }
+    }
+
+    m_bInLoadArea = FALSE;
+
+    m_gameAreas[cnt]->m_nFirstObject = g_pBaldurChitin->GetObjectGame()->m_nAreaFirstObject;
+
+    if (g_pChitin->cNetwork.GetSessionOpen() == TRUE
+        && g_pChitin->cNetwork.GetSessionHosting() == TRUE) {
+        g_pBaldurChitin->GetObjectGame()->GetRemoteObjectArray()->ChangeControlOnLoadGame();
+    }
+
+    if (bProgressBarRequired) {
+        if (g_pChitin->field_4C == 1 && !g_pChitin->m_bExitRSThread) {
+            int v1 = highRequests + mediumRequests + lowRequests;
+            int v6 = 0;
+            g_pChitin->cDimm.MoveRequests(CDimm::PRIORITY_HIGH, CDimm::PRIORITY_LOW, highRequests);
+            g_pChitin->cDimm.MoveRequests(CDimm::PRIORITY_MEDIUM, CDimm::PRIORITY_LOW, mediumRequests);
+            g_pChitin->cDimm.MoveRequests(CDimm::PRIORITY_LOW, CDimm::PRIORITY_LOW, lowRequests);
+            int v2 = g_pChitin->cDimm.RequestsPendingCount() - v1;
+            int v3 = v2;
+            while (v3 > 0) {
+                if (v6 >= 100) {
+                    break;
+                }
+
+                if (!g_pChitin->cDimm.ResumeServicing()
+                    || g_pChitin->cDimm.MemoryAlmostFull()) {
+                    int v4 = v1 - g_pChitin->cDimm.RequestsPendingCount();
+                    g_pChitin->cDimm.ReduceServicedList();
+                    v1 = g_pChitin->cDimm.RequestsPendingCount() + v4;
+                    g_pChitin->cDimm.ResumeServicing();
+                }
+
+                g_pChitin->cDimm.field_0 = 0;
+                g_pChitin->cDimm.field_4 = 0;
+                SleepEx(50, FALSE);
+
+                int v5 = g_pChitin->cDimm.RequestsPendingCount() - v1;
+                if (v5 != v3) {
+                    g_pChitin->cProgressBar.m_nActionProgress += (v3 - v5) * (5000000 / v2);
+                    v3 = v5;
+                    g_pChitin->m_bDisplayStale = TRUE;
+                }
+
+                v6++;
+            }
+        }
+
+        if (!bProgressBarInPlace && bProgressBarRequired == TRUE) {
+            g_pChitin->cProgressBar.m_nActionProgress = g_pChitin->cProgressBar.m_nActionTarget;
+            g_pChitin->cProgressBar.m_bDisableMinibars = TRUE;
+            g_pChitin->m_bDisplayStale = TRUE;
+            sub_59FA00(TRUE);
+            g_pChitin->SetProgressBar(FALSE,
+                0,
+                0,
+                0,
+                FALSE,
+                0,
+                FALSE,
+                0,
+                FALSE,
+                FALSE,
+                255);
+        }
+    }
+
+    m_nTravelScreenImageToUse = rand() % 5;
+
+    return m_gameAreas[cnt];
+}
+
+// 0x5AC110
+BOOLEAN CInfGame::CanSaveGame(STRREF& strError, BOOLEAN bInRestGame, BOOLEAN bInStore)
+{
+    if (!bInRestGame
+        && g_pChitin->cNetwork.GetSessionOpen() == TRUE
+        && !g_pChitin->cNetwork.GetSessionHosting()) {
+        // "Client machines are not allowed to save in a multiplayer game."
+        strError = 17194;
+        return FALSE;
+    }
+
+    if (g_pBaldurChitin->GetObjectGame()->GetGameSave()->m_mode == 386
+        || g_pBaldurChitin->GetObjectGame()->GetGameSave()->m_mode == 1282) {
+        // "Cannot save game while in dialog mode."
+        strError = 19253;
+        return FALSE;
+    }
+
+    if (g_pBaldurChitin->GetScreenWorld()->m_comingOutOfDialog > 0 && !bInStore) {
+        // "Cannot save game while in dialog mode."
+        strError = 19253;
+        return FALSE;
+    }
+
+    if (g_pBaldurChitin->GetObjectGame()->GetMultiplayerSettings()->m_bHostPermittedDialog == TRUE) {
+        // "Cannot save because dialog is about to start."
+        strError = 19254;
+        return FALSE;
+    }
+
+    if (g_pBaldurChitin->GetScreenWorld()->m_bHardPaused == TRUE) {
+        // "Cannot save during a rest, chapter information or movie."
+        strError = 19255;
+        return FALSE;
+    }
+
+    if (g_pBaldurChitin->GetActiveEngine() == g_pBaldurChitin->m_pEngineProjector
+        || g_pBaldurChitin->GetActiveEngine() == g_pBaldurChitin->m_pEngineChapter
+        || g_pBaldurChitin->GetObjectGame()->GetGameSave()->m_cutScene) {
+        // "Cannot save during a rest, chapter information or movie."
+        strError = 19255;
+        return FALSE;
+    }
+
+    if (!bInRestGame
+        && g_pBaldurChitin->GetActiveEngine() == g_pBaldurChitin->m_pEngineStore) {
+        // "Cannot save while someone is in the Store Screen."
+        strError = 10841;
+        return FALSE;
+    }
+
+    if (g_pChitin->cNetwork.GetServiceProvider() != CNetwork::SERV_PROV_NULL
+        && !bInRestGame
+        && sub_5C93E0() > 0) {
+        // "Cannot save while someone is in the Store Screen."
+        strError = 10841;
+        return FALSE;
+    }
+
+    if (g_pChitin->cNetwork.GetServiceProvider() != CNetwork::SERV_PROV_NULL
+        && !bInRestGame
+        && g_pBaldurChitin->GetObjectGame()->GetMultiplayerSettings()->sub_5186A0() > 0) {
+        // "Cannot save while someone is levelling up."
+        strError = 41397;
+        return FALSE;
+    }
+
+    if (g_pChitin->cNetwork.GetServiceProvider() != CNetwork::SERV_PROV_NULL
+        && !bInRestGame
+        && g_pBaldurChitin->GetObjectGame()->GetMultiplayerSettings()->sub_518560() > 0) {
+        // "Cannot save while someone is in the Inventory Screen."
+        strError = 26546;
+        return FALSE;
+    }
+
+    for (BYTE cnt = 0; cnt < CINFGAME_MAX_AREAS; cnt++) {
+        if (m_gameAreas[cnt] != NULL) {
+            if (!m_gameAreas[cnt]->CanSaveGame(strError)) {
+                return FALSE;
+            }
+        }
+    }
+
+    strError = -1;
+    return TRUE;
+}
+
+// 0x5AC340
+BOOL CInfGame::BackupQuickSave()
+{
+    BOOL bResult = FALSE;
+
+    m_sSaveGame = QUICK_SAVE_BACKUP_NAME;
+    CScreenCharacter::SAVE_NAME = QUICK_SAVE_BACKUP_NAME;
+
+    CString sDirSave = GetDirSave();
+    if (g_pChitin->cDimm.DirectoryRemoveFiles(sDirSave)) {
+        m_sSaveGame = QUICK_SAVE_NAME;
+        CScreenCharacter::SAVE_NAME = QUICK_SAVE_NAME;
+        bResult = g_pChitin->cDimm.DirectoryCopyFiles(GetDirSave(), sDirSave);
+    }
+
+    return bResult;
 }
 
 // 0x5A9680
