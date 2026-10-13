@@ -183,6 +183,9 @@ def parse_args(argv):
                     help='exit after N presented frames (IWD2R_SMOKE_FRAMES)')
     ap.add_argument('--script', metavar='FILE',
                     help='input script (see platform/script.h)')
+    ap.add_argument('--shot-presented', action='store_true',
+                    help='each screenshot also writes <name>-presented.png, '
+                    'the frame as the presenter drew it (IWD2R_SHOT_PRESENTED)')
     ap.add_argument('--data', metavar='PATH',
                     help='install directory (default: IWD2_DATA, else '
                     + DEFAULT_DATA + ')')
@@ -308,7 +311,7 @@ def restore_inis(backup_dir, install, names):
 
 
 def child_env(base, data, overrides, headless, frames, script, shot_dir,
-              sound=False):
+              sound=False, shot_presented=False):
     """The variables the game gets on top of base (a dict)."""
     env = dict(base)
     env['IWD2_DATA'] = data
@@ -325,6 +328,8 @@ def child_env(base, data, overrides, headless, frames, script, shot_dir,
         env['IWD2R_SMOKE_FRAMES'] = str(frames)
     if script:
         env['IWD2R_SCRIPT'] = script
+    if shot_presented:
+        env['IWD2R_SHOT_PRESENTED'] = '1'
     return env
 
 
@@ -541,7 +546,7 @@ def run_linux_vm(args, argv, scenarios, data, overrides, base_dir, nested,
     names = backup_inis(data, backup)
     log('backed up %d INI files to %s' % (len(names), backup))
     base_env = child_env(os.environ, data, overrides, False, None, None,
-                         base_dir)
+                         base_dir, shot_presented=args.shot_presented)
     taken = set()
     abort = threading.Event()
     rows = {}
@@ -747,7 +752,8 @@ def main(argv):
         with open(log_path, 'w') as log_file:
             if args.linux:
                 env = child_env(os.environ, data, overrides, headless,
-                                args.frames, script, run_dir, args.sound)
+                                args.frames, script, run_dir, args.sound,
+                                args.shot_presented)
                 code = run_linux(exe, env, log_file)
             else:
                 win_run = os.path.join(WIN_CHECKOUT, 'runs',
@@ -759,7 +765,8 @@ def main(argv):
                     win_script = wslpath('-w', os.path.join(win_run, 'script.txt'))
                 env_vars = child_env({}, wslpath('-w', data), overrides,
                                      headless, args.frames, win_script,
-                                     wslpath('-w', win_run), args.sound)
+                                     wslpath('-w', win_run), args.sound,
+                                     args.shot_presented)
                 try:
                     code = run_windows(exe, env_vars, win_run, log_file)
                 finally:

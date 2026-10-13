@@ -213,6 +213,14 @@ class PlayArgsTest(unittest.TestCase):
         env = play.child_env({}, '/data', [], False, None, None, '/shots',
                              sound=True)
         self.assertNotIn('IWD2R_AUDIO', env)
+        self.assertNotIn('IWD2R_SHOT_PRESENTED', env)
+        env = play.child_env({}, '/data', [], False, None, None, '/shots',
+                             shot_presented=True)
+        self.assertEqual(env['IWD2R_SHOT_PRESENTED'], '1')
+
+    def test_shot_presented_flag(self):
+        self.assertFalse(play.parse_args([]).shot_presented)
+        self.assertTrue(play.parse_args(['--shot-presented']).shot_presented)
 
     def test_batch_set_escapes_percent(self):
         self.assertEqual(play.batch_set('X', 'a & b 100%'), 'set "X=a & b 100%%"')

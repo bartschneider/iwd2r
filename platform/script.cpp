@@ -13,6 +13,8 @@
 #include <fstream>
 #include <iterator>
 #include <mutex>
+#include <string>
+#include <vector>
 
 namespace {
 
@@ -26,8 +28,9 @@ using platform::script::Command;
     std::_Exit(5);
 }
 
-// Writes the primary surface as <IWD2R_SHOT_DIR>/<name>.png. On failure
-// returns false with why set.
+// Writes the primary surface as <IWD2R_SHOT_DIR>/<name>.png, and with
+// IWD2R_SHOT_PRESENTED=1 the presented frame beside it. On failure returns
+// false with why set.
 bool WriteShot(const std::string& name, std::string& path, std::string& why)
 {
     std::string dir;
@@ -51,6 +54,23 @@ bool WriteShot(const std::string& name, std::string& path, std::string& why)
         return false;
     }
     why = std::to_string(w) + "x" + std::to_string(h);
+
+    // IWD2R_SHOT_PRESENTED=1: also the frame as the presenter draws it
+    // (<name>-presented.png), read back from the active backend.
+    const char* presented = std::getenv("IWD2R_SHOT_PRESENTED");
+    if (presented && std::string(presented) == "1") {
+        std::string shown = path.substr(0, path.size() - 4) + "-presented.png";
+        std::vector<uint32_t> out;
+        int pw = 0;
+        int ph = 0;
+        const char* backend = platform::present::BackendKindName(platform::present::ActiveBackend());
+        if (!platform::present::ReadbackPresented(&out, &pw, &ph))
+            why += ", no presented frame from " + std::string(backend);
+        else if (!platform::WritePng(shown.c_str(), out.data(), pw, ph, pw * 4))
+            why += ", cannot write " + shown;
+        else
+            why += ", presented " + std::to_string(pw) + "x" + std::to_string(ph) + " by " + backend;
+    }
     return true;
 }
 
