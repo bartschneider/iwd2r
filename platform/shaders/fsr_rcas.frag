@@ -47,17 +47,20 @@ void main()
     vec3 mx4 = max(vec3(Max3(b.r, d.r, f.r), Max3(b.g, d.g, f.g), Max3(b.b, d.b, f.b)), h);
     // Immediate constants for peak range.
     vec2 peakC = vec2(1.0, -1.0 * 4.0);
-    // Limiters, these need to be high precision RCPs. The denominators are
-    // kept off zero (an all-black or all-white ring), where FSR divides by
-    // zero and leans on the hardware's NaN handling, which SPIR-V leaves
-    // undefined; with the guard a 0/0 limit means no sharpening.
+    // Limiters, these need to be high precision RCPs. Where a ring channel
+    // is all 0 (mx4 == 0) FSR's hitMin is 0 * inf = NaN, and where it is all
+    // 1 (mn4 == 1) its hitMax is 0 * -inf = NaN; FSR relies on the
+    // hardware's max() returning the other operand, which SPIR-V leaves
+    // undefined. The denominators are kept off zero so no NaN is made, and
+    // the select picks the operand that hardware returns: the lobe is FSR's.
     vec3 hitMin = min(mn4, e) * (1.0 / max(4.0 * mx4, vec3(1.0 / 65536.0)));
     vec3 hitMax = (peakC.x - max(mx4, e)) * (1.0 / min(4.0 * mn4 + peakC.y, vec3(-1.0 / 65536.0)));
-    vec3 lobeRGB = max(-hitMin, hitMax);
+    vec3 lobeRGB = mix(mix(max(-hitMin, hitMax), -hitMin, equal(mn4, vec3(1.0))), hitMax, equal(mx4, vec3(0.0)));
     float lobe = max(float(-FSR_RCAS_LIMIT), min(Max3(lobeRGB.r, lobeRGB.g, lobeRGB.b), 0.0)) * params.x;
     // Resolve. FSR uses its medium precision rcp approximation here, which
     // is 0.3% low at lobe 0 and would darken every pixel at sharpness 0; the
-    // exact reciprocal keeps sharpness 0 an identity.
+    // exact reciprocal keeps sharpness 0 an identity. This is the one
+    // place the result differs from FSR's.
     float rcpL = 1.0 / (4.0 * lobe + 1.0);
     color = vec4((lobe * b + lobe * d + lobe * h + lobe * f + e) * rcpL, 1.0);
 }

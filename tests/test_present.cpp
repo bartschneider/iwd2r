@@ -430,6 +430,36 @@ TEST_CASE("sharpness_changes_output", "[present]")
     CHECK(present::CurrentSharpness() == 0.5f);
 }
 
+TEST_CASE("rcas_sharpens_beside_saturated_channels", "[present]")
+{
+    // Red is 0 (then 255) everywhere and green/blue carry detail: RCAS's
+    // red limiter is FSR's NaN case, where the hardware max() keeps the
+    // other operand, so sharpening must still apply.
+    OffscreenVideo video;
+    REQUIRE(video.ok);
+    std::string why;
+    auto b = OffscreenGpu(640, 480, why);
+    if (!b)
+        SKIP("no SDL GPU device: " << why);
+    const std::vector<platform::compose::Region> whole = { present::WholeFrameRegion(320, 240) };
+    int w = 0;
+    int h = 0;
+    for (uint32_t red : { 0u, 255u }) {
+        INFO("red " << red);
+        std::vector<uint32_t> px = Picture(320, 240);
+        for (uint32_t& p : px)
+            p = (p & 0xFFFFu) | (red << 16);
+        b->sharpness = 0.0f;
+        const std::vector<uint32_t> soft = Draw(*b, px, 320, 240, whole, Filter::Fsr, &w, &h);
+        b->sharpness = 1.0f;
+        const std::vector<uint32_t> sharp = Draw(*b, px, 320, 240, whole, Filter::Fsr, &w, &h);
+        CHECK(Mismatches(soft, sharp) > soft.size() / 20);
+        for (size_t i = 0; i < sharp.size(); i += 997)
+            CHECK(((sharp[i] >> 16) & 0xFFu) == red);
+    }
+    b->Shutdown();
+}
+
 TEST_CASE("presenter settings parse", "[present]")
 {
     BackendKind kind = BackendKind::Classic;
