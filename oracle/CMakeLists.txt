@@ -55,7 +55,7 @@ constexpr uint32_t kVanillaCrtRanges[][2] = {
     # win_types.h defines the same names): selftest_ours.cpp is the bridge
     # selftest.cpp uses.
     add_executable(iwd2r_oracle runner/oracle_main.cpp runner/snapshot.cpp runner/report.cpp
-        loader/pe.cpp loader/map_win32.cpp cases/selftest.cpp cases/selftest_ours.cpp
+        loader/pe.cpp loader/map_win32.cpp cases/selftest.cpp cases/selftest_ours.cpp cases/rand.cpp
         $<TARGET_OBJECTS:iwd2r_engine>)
     target_include_directories(iwd2r_oracle PRIVATE "${PROJECT_SOURCE_DIR}"
         "${PROJECT_SOURCE_DIR}/src" "${CMAKE_CURRENT_BINARY_DIR}/generated")
