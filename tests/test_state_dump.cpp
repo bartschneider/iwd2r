@@ -3,7 +3,7 @@
 
 #include "compat/msvc_rand.h"
 #include "compat/msvc_time.h"
-#include "install_ini_backup.h"
+#include "data_view.h"
 #include "platform/replay.h"
 #include "platform/replay_clock.h"
 #include "platform/script_core.h"
@@ -296,18 +296,19 @@ TEST_CASE("replay mode dumps the start screen checkpoint", "[dump][data]")
     const std::string script = (fs::path(IWD2R_SOURCE_DIR) / "scenarios" / "start_screen.txt").string();
     const std::string out = (dir / "log.txt").string();
     const std::string overrides = "Program Options/Resolution=800;Program Options/Full Screen=0";
+    // The engine writes into its data folder: it runs on a private view.
+    DataView view(data);
     int raw = 0;
     {
-        InstallIniBackup backup(data);
 #ifdef _WIN32
         const std::string cmd = "set SDL_VIDEO_DRIVER=dummy&& set SDL_AUDIO_DRIVER=dummy&& set IWD2R_SCRIPT=" + script
             + "&& set IWD2R_SHOT_DIR=" + dir.string() + "&& set IWD2R_STATE_DUMP=" + dir.string()
-            + "&& set IWD2R_SEED=1&& set \"IWD2R_INI_OVERRIDE=" + overrides + "\"&& set IWD2_DATA=" + data + "&& \"" IWD2R_EXE "\" > \"" + out + "\" 2>&1";
+            + "&& set IWD2R_SEED=1&& set \"IWD2R_INI_OVERRIDE=" + overrides + "\"&& set IWD2_DATA=" + view.Path() + "&& \"" IWD2R_EXE "\" > \"" + out + "\" 2>&1";
         const std::string full = "\"" + cmd + "\"";
 #else
         const std::string full = "SDL_VIDEO_DRIVER=dummy SDL_AUDIO_DRIVER=dummy IWD2R_SCRIPT=\"" + script
             + "\" IWD2R_SHOT_DIR=\"" + dir.string() + "\" IWD2R_STATE_DUMP=\"" + dir.string()
-            + "\" IWD2R_SEED=1 IWD2R_INI_OVERRIDE=\"" + overrides + "\" IWD2_DATA=\"" + data + "\" timeout 150 \"" IWD2R_EXE "\" > \"" + out + "\" 2>&1";
+            + "\" IWD2R_SEED=1 IWD2R_INI_OVERRIDE=\"" + overrides + "\" IWD2_DATA=\"" + view.Path() + "\" timeout 150 \"" IWD2R_EXE "\" > \"" + out + "\" 2>&1";
 #endif
         raw = std::system(full.c_str());
     }
