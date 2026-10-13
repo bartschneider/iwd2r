@@ -26,8 +26,8 @@ lists them and asks for an address. Such names, missing ones and kept files
 are listed, and the command exits 1 after writing the rest. Fill in
 oracle_case or exemption and the Notes by hand (docs/evidence/README.md).
 
-build syncs the checkout to the Windows build folder (play.py's route) and
-builds the 32-bit runner iwd2r_oracle, the replay injector and the recorder
+build syncs the checkout to this worktree's Windows build folder (play.py's
+route and play.win_checkout) and builds the 32-bit runner iwd2r_oracle, the replay injector and the recorder
 DLL with the windows-msvc-x86 preset.
 
 run copies the vanilla iwd2.exe (MD5 from oracle/loader/vanilla.json) to
@@ -118,6 +118,11 @@ fail. It exits 0 on a match (known differences allowed) and 1 on any other
 difference in an enabled screen, a missing checkpoint dump, or a failed run
 on either side; runs/<stamp>/compare.json keeps the result.
 
+The vanilla copy is shared by every worktree: replay record and replay
+compare each hold C:/Users/thier/iwd2r-oracle/replay.lock for the whole run,
+and building the copy holds vanilla.lock beside it (tools/filelock.py). A
+run that has to wait says so on stderr after 5 seconds.
+
 Standard library only.
 """
 
@@ -139,6 +144,7 @@ sys.path.insert(0, os.path.join(HERE, 'ghidra'))
 sys.path.insert(0, HERE)
 import bif  # noqa: E402
 import check_evidence  # noqa: E402
+import filelock  # noqa: E402
 import minischema  # noqa: E402
 
 EVIDENCE_DIR = os.path.join(ROOT, 'docs', 'evidence')
@@ -168,6 +174,10 @@ REPLAY_DIR_REL = 'build/windows-msvc-x86/oracle/RelWithDebInfo'
 INJECTOR = 'injector.exe'
 RECORDER = 'recorder.dll'
 REPLAYS_DIR = ORACLE_DIR + '/replays'
+# Shared by every worktree (filelock.hold): one replay of the vanilla copy at
+# a time, and one build of that copy.
+REPLAY_LOCK = ORACLE_DIR + '/replay.lock'
+VANILLA_LOCK = ORACLE_DIR + '/vanilla.lock'
 REPLAY_SCHEMA = os.path.join(ROOT, 'oracle', 'replay', 'schema.json')
 REPLAY_TIMEOUT = 180  # seconds, enforced by the injector
 REPLAY_DUMP_EVERY = 30
@@ -1147,9 +1157,13 @@ def build_vanilla(game, install=INSTALL, md5=None):
 def ensure_vanilla(rebuild=False, game=GAME_DIR, build=build_vanilla):
     """The vanilla copy's path, building it first when it has no marker
     (never built, or an interrupted build), a marker that does not parse
-    or name the vanilla MD5, or rebuild is set."""
+    or name the vanilla MD5, or rebuild is set. The build holds
+    VANILLA_LOCK, and the marker is checked again under it, so a copy
+    another worktree has just built is not built twice."""
     if rebuild or not marker_ok(game):
-        build(game)
+        with filelock.hold(VANILLA_LOCK, 'vanilla'):
+            if rebuild or not marker_ok(game):
+                build(game)
     return game
 
 
@@ -1439,6 +1453,11 @@ def load_actions(script):
 
 
 def cmd_replay_record(args):
+    with filelock.hold(REPLAY_LOCK, 'replay'):
+        return replay_record(args)
+
+
+def replay_record(args):
     import play
     script = scenario_path(args.scenario)
     actions = load_actions(script)
@@ -1699,6 +1718,11 @@ def compare_checkpoints(original_dir, our_dir, names, screens, known,
 
 
 def cmd_replay_compare(args):
+    with filelock.hold(REPLAY_LOCK, 'replay'):
+        return replay_compare(args)
+
+
+def replay_compare(args):
     import play
     script = scenario_path(args.scenario)
     actions = load_actions(script)

@@ -13,9 +13,16 @@ SendInput (tools/winsandbox.py, tools/sandbox/driver.ps1), `all` both.
 --suite runs every scenarios/*.txt.
 
 Windows runs (the default) copy the working tree (tracked files plus modified
-and untracked non-ignored ones) into a persistent checkout at
-C:\\Users\\thier\\iwd2r-build, build it there with MSVC, and launch the exe.
---linux builds and runs build/linux-gcc instead.
+and untracked non-ignored ones) into a persistent checkout, build it there
+with MSVC, and launch the exe. Each worktree has its own checkout:
+C:\\Users\\thier\\iwd2r-build for the `first` worktree,
+C:\\Users\\thier\\iwd2r-build-<worktree folder name> for any other, or
+$IWD2R_WIN_CHECKOUT (a WSL path) when set. --linux builds and runs
+build/linux-gcc instead.
+
+Windows Sandbox runs one sandbox at a time, so every --vm windows scenario
+holds C:\\Users\\thier\\iwd2r-vm\\sandbox.lock (tools/filelock.py) while it
+prepares the shared game cache and runs; another worktree's run waits.
 
 Game options never touch the INI files: they reach the engine through the
 IWD2R_INI_OVERRIDE environment variable. Every *.ini in the install root is
@@ -46,12 +53,28 @@ import time
 # The sibling modules (python3 -I does not put the script's folder on the
 # path).
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import filelock  # noqa: E402
 import realinput  # noqa: E402
 import winsandbox  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_DATA = '/mnt/c/Games/Icewind Dale II'
-WIN_CHECKOUT = '/mnt/c/Users/thier/iwd2r-build'
+WIN_BUILD_BASE = '/mnt/c/Users/thier/iwd2r-build'
+
+
+def win_checkout(root, env):
+    """The Windows build folder of the worktree at root: IWD2R_WIN_CHECKOUT
+    when set; the original folder for the `first` worktree, so it keeps its
+    build; iwd2r-build-<worktree name> for any other."""
+    if env.get('IWD2R_WIN_CHECKOUT'):
+        return env['IWD2R_WIN_CHECKOUT']
+    name = os.path.basename(os.path.normpath(root))
+    if name == 'first':
+        return WIN_BUILD_BASE
+    return WIN_BUILD_BASE + '-' + name
+
+
+WIN_CHECKOUT = win_checkout(ROOT, os.environ)
 CMD_EXE = '/mnt/c/Windows/System32/cmd.exe'
 VCVARS = r'C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat'
 CMAKE_WIN = r'C:\Program Files\CMake\bin\cmake.exe'
@@ -599,22 +622,24 @@ def run_windows_vm(args, argv, scenarios, data, overrides, base_dir, nested,
         print(winsandbox.ENABLE_HINT, flush=True)
         return None
     exe = build_windows_vm(args)
-    winsandbox.refresh_cache(data, winsandbox.GAME_CACHE, log)
+    with filelock.hold(winsandbox.SANDBOX_LOCK, 'sandbox'):
+        winsandbox.refresh_cache(data, winsandbox.GAME_CACHE, log)
     rows = []
     stamp = os.path.relpath(base_dir, os.path.join(ROOT, 'runs'))
     for path, actions in scenarios:
         name = scenario_name(path)
         run_dir = os.path.join(base_dir, name) if nested else base_dir
         prepare_scenario_dir(run_dir, path, actions)
-        winsandbox.reset_cache_inis(data, winsandbox.GAME_CACHE)
         host_run = os.path.join(winsandbox.VM_ROOT, 'runs', stamp, name)
         os.makedirs(host_run, exist_ok=True)
-        log('windows: %s in Windows Sandbox (real input)' % name)
-        result = winsandbox.run_scenario(
-            exe, winsandbox.GAME_CACHE,
-            realinput.windows_actions(actions, geometry),
-            overrides, name, run_dir, host_run, args.timeout,
-            realinput.FRAME_RATE, log)
+        with filelock.hold(winsandbox.SANDBOX_LOCK, 'sandbox'):
+            winsandbox.reset_cache_inis(data, winsandbox.GAME_CACHE)
+            log('windows: %s in Windows Sandbox (real input)' % name)
+            result = winsandbox.run_scenario(
+                exe, winsandbox.GAME_CACHE,
+                realinput.windows_actions(actions, geometry),
+                overrides, name, run_dir, host_run, args.timeout,
+                realinput.FRAME_RATE, log)
         write_vm_summary(run_dir, argv, 'windows-vm', path, overrides,
                          result)
         log('windows: %s exit %s in %.1f s%s' % (

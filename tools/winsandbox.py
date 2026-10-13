@@ -35,6 +35,8 @@ TASKKILL_NAMES = ('WindowsSandbox.exe', 'WindowsSandboxClient.exe',
                   'WindowsSandboxRemoteSession.exe')
 VM_ROOT = '/mnt/c/Users/thier/iwd2r-vm'
 GAME_CACHE = VM_ROOT + '/game'
+# One sandbox at a time across worktrees (filelock.hold in play.py).
+SANDBOX_LOCK = VM_ROOT + '/sandbox.lock'
 REDIST_ROOT = ('/mnt/c/Program Files/Microsoft Visual Studio/2022/Community/'
                'VC/Redist/MSVC')
 DRIVER = os.path.join(os.path.dirname(os.path.abspath(__file__)),

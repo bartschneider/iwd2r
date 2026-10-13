@@ -58,7 +58,6 @@ These are in `oracle/replay/` and `tools/`.
 
 ## Tooling
 
-- All worktrees share one Windows build folder, `C:\Users\thier\iwd2r-build`.
 - `ORACLE_DIR` in `tools/oracle.py` and `WIN_CHECKOUT` in `tools/play.py` are hardcoded to `/mnt/c/Users/thier/...`, so the Windows side works only for this user. Derive them from `%USERPROFILE%` (through `cmd.exe /c echo` or `wslvar`) or an environment variable.
 - Windows Sandbox real-input mode (`--vm windows`) is untested. It needs the Windows feature enabled and a reboot.
 - `replay compare` reports a `known_differences.json` entry that matched nothing, but does not fail on it. An entry carries no scenario, so one valid for another scenario would look stale. It stays a warning until entries carry a `scenario` field.

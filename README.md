@@ -46,7 +46,7 @@ cmake --preset linux-gcc && cmake --build --preset linux-gcc && ctest --preset l
 
 ### Play
 
-From WSL, one command syncs the working tree to a Windows checkout (`C:\Users\thier\iwd2r-build`), builds it with MSVC and opens the game window on the desktop:
+From WSL, one command syncs the working tree to a Windows checkout, builds it with MSVC and opens the game window on the desktop. Each worktree has its own checkout: `C:\Users\thier\iwd2r-build` for the `first` worktree, `C:\Users\thier\iwd2r-build-<worktree folder>` for any other, or `$IWD2R_WIN_CHECKOUT` when set:
 
 ```
 python3 tools/play.py
@@ -71,7 +71,7 @@ python3 tools/play.py --vm all --suite
 ```
 
 - `--vm linux` builds `linux-gcc`, starts `Xvfb :N` (N from 90 up) at the output size (the requested resolution; its height from `--set "Program Options/Height=H"`, else 4:3 for 800, 1024, 1600 and 2048, else 16:9; `--resolution desktop` is 1920x1080), runs the game windowed on it with the X11 video driver and drives it with xdotool (`tools/realinput.py`). One-time setup: `sudo apt-get install -y xvfb xdotool imagemagick`.
-- `--vm windows` runs each scenario in a fresh Windows Sandbox (`tools/winsandbox.py`, `tools/sandbox/driver.ps1`): the MSVC build from `C:\Users\thier\iwd2r-build` (with the MSVC runtime DLLs copied next to `iwd2r.exe`), a copy of the install in `C:\Users\thier\iwd2r-vm\game` (made once with rsync, refreshed when `CHITIN.KEY` changes; the real install is never mapped), networking off. The driver uses `SendInput` and captures the screen with System.Drawing. One-time setup, in an admin PowerShell, then reboot: `Enable-WindowsOptionalFeature -Online -FeatureName Containers-DisposableClientVM -All`. Only one sandbox runs at a time, so `--jobs` does not apply.
+- `--vm windows` runs each scenario in a fresh Windows Sandbox (`tools/winsandbox.py`, `tools/sandbox/driver.ps1`): the worktree's MSVC build (with the MSVC runtime DLLs copied next to `iwd2r.exe`), a copy of the install in `C:\Users\thier\iwd2r-vm\game` (made once with rsync, refreshed when `CHITIN.KEY` changes; the real install is never mapped), networking off. The driver uses `SendInput` and captures the screen with System.Drawing. One-time setup, in an admin PowerShell, then reboot: `Enable-WindowsOptionalFeature -Online -FeatureName Containers-DisposableClientVM -All`. Only one sandbox runs at a time, so `--jobs` does not apply, and each scenario holds `C:\Users\thier\iwd2r-vm\sandbox.lock`, so a run from another worktree waits.
 - `--vm all --suite` runs the suite on Linux, then on Windows when the sandbox is available, and prints both tables.
 - `--suite` runs every `scenarios/*.txt`; `--jobs N` (default 1) runs that many Linux scenarios at once, each on its own display and CPU core and in a private view of the install (links to its files, with its own `cache`, `temp`, `tempsave` and INI copies, since parallel games would otherwise race on them); `--timeout S` (default 180) bounds each scenario.
 

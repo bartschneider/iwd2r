@@ -1680,6 +1680,11 @@ class OracleVanillaTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.game = self.tmp.name
+        locks = tempfile.TemporaryDirectory()
+        self.addCleanup(locks.cleanup)
+        old = oracle.VANILLA_LOCK
+        oracle.VANILLA_LOCK = os.path.join(locks.name, 'vanilla.lock')
+        self.addCleanup(setattr, oracle, 'VANILLA_LOCK', old)
         self.write('CHITIN.KEY', b'KEY V1  ')
         self.write('iwd2.exe', VANILLA_BYTES)
         self.write('WeiDU.log', b'// Log of Currently Installed WeiDU Mods\r\n')
@@ -1862,6 +1867,27 @@ class OracleVanillaTest(unittest.TestCase):
             built = []
             oracle.ensure_vanilla(game=self.game, build=built.append)
             self.assertEqual(built, [self.game], text)
+
+    def test_ensure_builds_under_the_vanilla_lock(self):
+        held = []
+
+        def build(game):
+            try:
+                with filelock.hold(oracle.VANILLA_LOCK, 'test', timeout=0):
+                    held.append(False)
+            except TimeoutError:
+                held.append(True)
+        oracle.ensure_vanilla(game=self.game, build=build)
+        self.assertEqual(held, [True])
+
+    def test_ensure_rechecks_the_marker_under_the_lock(self):
+        # Another worktree finished the copy while this one waited.
+        built = []
+        locks = LockRecorder(on_enter=lambda path: self.mark())
+        with LockRecorder.patch(oracle, locks):
+            oracle.ensure_vanilla(game=self.game, build=built.append)
+        self.assertEqual(locks.paths, [(oracle.VANILLA_LOCK, 'vanilla')])
+        self.assertEqual(built, [])
 
     def test_write_marker_is_atomic(self):
         oracle.write_marker(self.game, {'md5': oracle.vanilla_md5()})
@@ -2531,6 +2557,144 @@ class MiniSchemaTest(unittest.TestCase):
                    if f.startswith('engine_')}
         self.assertEqual(set(schema['properties']['screen']['enum']),
                          screens | {'none', 'unknown'})
+
+
+class LockRecorder:
+    """A stand-in for filelock.hold that records (path, what) and whether
+    a lock is held at a given moment."""
+
+    def __init__(self, on_enter=None):
+        self.paths = []
+        self.held = []
+        self.on_enter = on_enter
+
+    @contextlib.contextmanager
+    def hold(self, path, what, timeout=None):
+        self.paths.append((path, what))
+        self.held.append(path)
+        if self.on_enter:
+            self.on_enter(path)
+        try:
+            yield
+        finally:
+            self.held.remove(path)
+
+    @staticmethod
+    def patch(module, recorder):
+        from unittest import mock
+        return mock.patch.object(module, 'filelock',
+                                 types.SimpleNamespace(hold=recorder.hold))
+
+
+class WinCheckoutTest(unittest.TestCase):
+    def test_win_checkout_defaults(self):
+        base = '/mnt/c/Users/thier/iwd2r-build'
+        self.assertEqual(play.win_checkout('/home/u/iwd2-re-worktrees/first',
+                                           {}), base)
+        self.assertEqual(play.win_checkout('/home/u/iwd2-re-worktrees/first/',
+                                           {}), base)
+        self.assertEqual(play.win_checkout(
+            '/home/u/iwd2-re-worktrees/p3-chargen', {}),
+            base + '-p3-chargen')
+        self.assertEqual(play.win_checkout('/home/u/iwd2-re', {}),
+                         base + '-iwd2-re')
+        self.assertEqual(play.win_checkout(
+            '/home/u/iwd2-re-worktrees/first',
+            {'IWD2R_WIN_CHECKOUT': '/mnt/c/x'}), '/mnt/c/x')
+        self.assertEqual(play.win_checkout(
+            '/home/u/iwd2-re-worktrees/p3-x',
+            {'IWD2R_WIN_CHECKOUT': ''}), base + '-p3-x')
+
+
+class SharedLockTest(unittest.TestCase):
+    """replay record/compare hold ORACLE_DIR/replay.lock; each --vm windows
+    scenario holds VM_ROOT/sandbox.lock."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp = self._tmp.name
+
+    def test_replay_holds_lock(self):
+        from unittest import mock
+        locks = LockRecorder()
+        seen = []
+
+        def fake_record(script, actions, *rest):
+            seen.append((os.path.basename(script), list(locks.held)))
+            return 0
+
+        with LockRecorder.patch(oracle, locks), \
+                mock.patch.object(oracle, 'record_original', fake_record), \
+                mock.patch.object(oracle, 'RUNS_DIR', self.tmp):
+            code = oracle.main(['replay', 'record', 'chargen_replay',
+                                '--seed', '1'])
+        self.assertEqual(code, 0)
+        self.assertEqual(locks.paths, [(oracle.REPLAY_LOCK, 'replay')])
+        self.assertEqual(oracle.REPLAY_LOCK,
+                         oracle.ORACLE_DIR + '/replay.lock')
+        self.assertEqual(seen, [('chargen_replay.txt', [oracle.REPLAY_LOCK])])
+        self.assertEqual(locks.held, [])
+
+    def test_replay_compare_holds_lock(self):
+        from unittest import mock
+        locks = LockRecorder()
+        seen = []
+
+        def fake_compare(args):
+            seen.append((args.scenario, list(locks.held)))
+            return 0
+
+        with LockRecorder.patch(oracle, locks), \
+                mock.patch.object(oracle, 'replay_compare', fake_compare):
+            code = oracle.main(['replay', 'compare', 'chargen_replay'])
+        self.assertEqual(code, 0)
+        self.assertEqual(seen, [('chargen_replay', [oracle.REPLAY_LOCK])])
+        self.assertEqual(locks.paths, [(oracle.REPLAY_LOCK, 'replay')])
+
+    def test_sandbox_run_holds_lock(self):
+        from unittest import mock
+        locks = LockRecorder()
+        events = []
+        vm_root = os.path.join(self.tmp, 'vm')
+        lock = vm_root + '/sandbox.lock'
+
+        def run_scenario(exe, cache, actions, overrides, name, run_dir,
+                         host_run, timeout, rate, log):
+            events.append(('run', name, list(locks.held)))
+            return {'code': 0, 'seconds': 1.0, 'error': None,
+                    'screen_shots': 0, 'engine_shots': 0}
+
+        sandbox = types.SimpleNamespace(
+            available=lambda: True, VM_ROOT=vm_root,
+            GAME_CACHE=vm_root + '/game', SANDBOX_LOCK=lock,
+            ENABLE_HINT='',
+            refresh_cache=lambda d, c, log: events.append(
+                ('refresh', list(locks.held))),
+            reset_cache_inis=lambda d, c: events.append(
+                ('reset', list(locks.held))),
+            run_scenario=run_scenario)
+        self.assertEqual(winsandbox.SANDBOX_LOCK,
+                         winsandbox.VM_ROOT + '/sandbox.lock')
+        scenarios = [(path, realinput.load_scenario(path))
+                     for path in scenario_files()[:2]]
+        base_dir = os.path.join(self.tmp, 'runs', 'stamp')
+        args = types.SimpleNamespace(timeout=10, no_build=True)
+        with LockRecorder.patch(play, locks), \
+                mock.patch.object(play, 'winsandbox', sandbox), \
+                mock.patch.object(play, 'ROOT', self.tmp), \
+                mock.patch.object(play, 'build_windows_vm',
+                                  lambda a: 'iwd2r.exe'), \
+                contextlib.redirect_stdout(io.StringIO()):
+            rows = play.run_windows_vm(args, [], scenarios, '/data', {},
+                                       base_dir, True, None)
+        self.assertEqual(len(rows), 2)
+        names = [play.scenario_name(p) for p, _ in scenarios]
+        self.assertEqual(events, [
+            ('refresh', [lock]),
+            ('reset', [lock]), ('run', names[0], [lock]),
+            ('reset', [lock]), ('run', names[1], [lock])])
+        self.assertEqual(locks.paths, [(lock, 'sandbox')] * 3)
 
 
 class OracleReplayTest(unittest.TestCase):
