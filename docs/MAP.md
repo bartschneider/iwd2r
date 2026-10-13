@@ -1,8 +1,8 @@
 # Subsystem map
 
-Generated from commit `a41b33f` by `tools/gen_map.py`. Do not edit; CI runs `python3 -I tools/gen_map.py --check`.
+Generated from commit `9145700` by `tools/gen_map.py`. Do not edit; CI runs `python3 -I tools/gen_map.py --check`.
 
-Totals: 487 files, 276603 lines, 361 `TODO: Incomplete`, 10013 address comments.
+Totals: 489 files, 276677 lines, 361 `TODO: Incomplete`, 10013 address comments.
 
 | Family | Files | Lines | `TODO: Incomplete` | Address comments | Platform headers included |
 |---|---:|---:|---:|---:|---|
@@ -16,6 +16,6 @@ Totals: 487 files, 276603 lines, 361 `TODO: Incomplete`, 10013 address comments.
 | Messaging | 10 | 22617 | 34 | 1148 | — |
 | Engine core | 10 | 7009 | 11 | 413 | data_dir.h, fs.h, replay.h, window.h |
 | Other | 86 | 25884 | 68 | 1342 | state_dump.h, window.h |
-| compat | 31 | 3722 | 0 | 0 | win32_api.h |
+| compat | 33 | 3796 | 0 | 0 | win32_api.h |
 | platform | 44 | 8706 | 0 | 0 | affinity.h, clock.h, compose.h, crash.h, data_dir.h, ddraw_shim.h, dsound_shim.h, fs.h, gl_compat.h, handles.h, imm_stub.h, input_settings.h, png.h, present.h, replay.h, replay_clock.h, script.h, script_core.h, state_dump.h, win32_api.h, window.h |
-| **Total** | 487 | 276603 | 361 | 10013 | |
+| **Total** | 489 | 276677 | 361 | 10013 | |

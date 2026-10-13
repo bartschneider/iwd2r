@@ -1,7 +1,7 @@
 #define NOMINMAX
 #include <catch2/catch_test_macros.hpp>
 
-#include "install_ini_backup.h"
+#include "data_view.h"
 #include "platform/crash.h"
 #include "platform/win32_api.h"
 
@@ -55,9 +55,9 @@ TEST_CASE("crash handler reports signal and backtrace", "[crash][data]")
     const std::string out = (std::filesystem::temp_directory_path() / ("iwd2r-crash-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".txt")).string();
     int raw = 0;
     {
-        InstallIniBackup backup(data);
+        DataView view(data);
         const std::string full = "SDL_VIDEO_DRIVER=dummy SDL_AUDIO_DRIVER=dummy IWD2R_AUDIO=null IWD2R_CRASH_TEST=1 IWD2R_SMOKE_FRAMES=300 IWD2_DATA=\""
-            + data + "\" timeout 120 \"" IWD2R_EXE "\" > \"" + out + "\" 2>&1";
+            + view.Path() + "\" timeout 120 \"" IWD2R_EXE "\" > \"" + out + "\" 2>&1";
         raw = std::system(full.c_str());
     }
     std::ifstream in(out);
