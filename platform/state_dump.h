@@ -12,6 +12,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace platform::state_dump {
 
@@ -30,6 +31,27 @@ struct Chargen {
     std::string portrait;
 };
 
+// One schema.json "world.party" entry.
+struct PartyMember {
+    int32_t id = 0;
+    // False while the id does not resolve in the object array: x, y, hp,
+    // max_hp and skills are then null.
+    bool sprite = false;
+    int32_t x = 0;
+    int32_t y = 0;
+    int hp = 0;
+    int maxHp = 0;
+    int skills[64] = {};
+};
+
+// schema.json "world".
+struct World {
+    // "" when there is no area on view.
+    std::string area;
+    // At most 6, in portrait order.
+    std::vector<PartyMember> party;
+};
+
 // What the engine's DumpSource reads.
 struct EngineState {
     // schema.json "screen": none, unknown or the m_pEngine* member's name.
@@ -41,6 +63,9 @@ struct EngineState {
     // Only on the create_char screen.
     bool hasChargen = false;
     Chargen chargen;
+    // Only on the world screen.
+    bool hasWorld = false;
+    World world;
 };
 
 // One dump.

@@ -7,6 +7,7 @@
 #include "mfc.h"
 
 #include "CBaldurChitin.h"
+#include "CGameArea.h"
 #include "CGameObjectArray.h"
 #include "CGameSprite.h"
 #include "CInfGame.h"
@@ -19,6 +20,8 @@ namespace {
 
 using platform::state_dump::Chargen;
 using platform::state_dump::EngineState;
+using platform::state_dump::PartyMember;
+using platform::state_dump::World;
 
 // The active engine named by the m_pEngine* member it equals, by the
 // recorder's names (fields.json engine_*) and in its order (the last match
@@ -62,10 +65,11 @@ const char* ScreenName(CBaldurChitin* chitin)
     return name;
 }
 
-// The object the create_char screen edits: CGameObjectArray::GetShare's
-// THREAD_ASYNCH lookup without the call (no share taken), the recorder's
-// ChargenSprite. nullptr when the id does not resolve.
-CGameSprite* ChargenSprite(CBaldurChitin* chitin, LONG id)
+// The sprite an object id names (the create_char screen's, a party
+// member's): CGameObjectArray::GetShare's THREAD_ASYNCH lookup without the
+// call (no share taken), the recorder's SpriteById. nullptr when the id does
+// not resolve.
+CGameSprite* SpriteById(CBaldurChitin* chitin, LONG id)
 {
     CInfGame* game = chitin->m_pObjectGame;
     if (!game)
@@ -90,7 +94,7 @@ void ReadChargen(CBaldurChitin* chitin, CScreenCreateChar* screen, Chargen* out)
         out->rolls[i] = memory[i];
     out->rolls[6] = screen->m_nMemoryExtra;
     out->skillPoints = screen->m_nExtraSkillPoints;
-    CGameSprite* sprite = ChargenSprite(chitin, screen->m_nGameSprite);
+    CGameSprite* sprite = SpriteById(chitin, screen->m_nGameSprite);
     out->sprite = sprite != nullptr;
     if (!sprite)
         return;
@@ -107,6 +111,43 @@ void ReadChargen(CBaldurChitin* chitin, CScreenCreateChar* screen, Chargen* out)
     char resref[sizeof(stats.m_portraitLarge) + 1] = {};
     std::memcpy(resref, &stats.m_portraitLarge, sizeof(stats.m_portraitLarge));
     out->portrait = resref;
+}
+
+// The area on view and the party, the recorder's WorldJson: GetVisibleArea
+// and GetCharacterId read without the calls.
+void ReadWorld(CBaldurChitin* chitin, World* out)
+{
+    CInfGame* game = chitin->m_pObjectGame;
+    if (!game)
+        return;
+    if (game->m_visibleArea < CINFGAME_MAX_AREAS) {
+        CGameArea* area = game->m_gameAreas[game->m_visibleArea];
+        if (area) {
+            char resref[RESREF_SIZE + 1] = {};
+            std::memcpy(resref, area->m_resRef.GetResRef(), RESREF_SIZE);
+            out->area = resref;
+        }
+    }
+    SHORT count = game->m_nCharacters;
+    if (count < 0)
+        count = 0;
+    if (count > 6)
+        count = 6;
+    for (SHORT i = 0; i < count; ++i) {
+        PartyMember member;
+        member.id = game->m_characterPortraits[i];
+        CGameSprite* sprite = SpriteById(chitin, member.id);
+        member.sprite = sprite != nullptr;
+        if (sprite) {
+            member.x = sprite->m_pos.x;
+            member.y = sprite->m_pos.y;
+            member.hp = sprite->m_baseStats.m_hitPoints;
+            member.maxHp = sprite->m_derivedStats.m_nMaxHitPoints;
+            for (int k = 0; k < 64; ++k)
+                member.skills[k] = sprite->m_derivedStats.m_nSkills[k];
+        }
+        out->party.push_back(member);
+    }
 }
 
 class EngineDumpSource : public platform::state_dump::DumpSource {
@@ -128,6 +169,9 @@ public:
         out->hasChargen = out->screen == "create_char";
         if (out->hasChargen)
             ReadChargen(chitin, chitin->m_pEngineCreateChar, &out->chargen);
+        out->hasWorld = out->screen == "world";
+        if (out->hasWorld)
+            ReadWorld(chitin, &out->world);
     }
 };
 

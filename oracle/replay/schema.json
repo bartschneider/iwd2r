@@ -8,7 +8,8 @@
     "screen",
     "rng_state",
     "globals",
-    "chargen"
+    "chargen",
+    "world"
   ],
   "additionalProperties": false,
   "properties": {
@@ -196,6 +197,89 @@
             "string",
             "null"
           ]
+        }
+      }
+    },
+    "world": {
+      "description": "The world screen, null unless the screen is world: the area on view and the party. A party member's values are null while its id does not resolve in the object array.",
+      "type": [
+        "object",
+        "null"
+      ],
+      "required": [
+        "area",
+        "party"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "area": {
+          "description": "The resref of CInfGame::m_gameAreas[m_visibleArea] (CInfGame::GetVisibleArea), its CGameArea::m_resRef; \"\" when there is no area on view.",
+          "type": "string"
+        },
+        "party": {
+          "description": "The party in portrait order: CInfGame::m_characterPortraits[0 .. m_nCharacters - 1] (CInfGame::GetCharacterId).",
+          "type": "array",
+          "maxItems": 6,
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "x",
+              "y",
+              "hp",
+              "max_hp",
+              "skills"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "description": "The object id (m_characterPortraits[i]).",
+                "type": "integer"
+              },
+              "x": {
+                "description": "CGameObject::m_pos.x.",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "y": {
+                "description": "CGameObject::m_pos.y.",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "hp": {
+                "description": "The current hit points, m_baseStats.m_hitPoints.",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "max_hp": {
+                "description": "The maximum hit points, m_derivedStats.m_nMaxHitPoints.",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "skills": {
+                "description": "m_derivedStats.m_nSkills, the 64 skill bytes as stored (unsigned; the original reads them as signed chars, so a negative skill shows as 256 + it).",
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 255
+                },
+                "minItems": 64,
+                "maxItems": 64
+              }
+            }
+          }
         }
       }
     }
@@ -412,6 +496,42 @@
     "sprite_portrait": {
       "class": "CGameSprite",
       "member": "m_baseStats.m_portraitLarge"
+    },
+    "visible_area": {
+      "class": "CInfGame",
+      "member": "m_visibleArea"
+    },
+    "game_areas": {
+      "class": "CInfGame",
+      "member": "m_gameAreas"
+    },
+    "character_portraits": {
+      "class": "CInfGame",
+      "member": "m_characterPortraits"
+    },
+    "characters_count": {
+      "class": "CInfGame",
+      "member": "m_nCharacters"
+    },
+    "area_resref": {
+      "class": "CGameArea",
+      "member": "m_resRef"
+    },
+    "sprite_pos": {
+      "class": "CGameSprite",
+      "member": "m_pos"
+    },
+    "sprite_hp": {
+      "class": "CGameSprite",
+      "member": "m_baseStats.m_hitPoints"
+    },
+    "sprite_max_hp": {
+      "class": "CGameSprite",
+      "member": "m_derivedStats.m_nMaxHitPoints"
+    },
+    "sprite_skills": {
+      "class": "CGameSprite",
+      "member": "m_derivedStats.m_nSkills"
     }
   }
 }

@@ -62,6 +62,22 @@ namespace {
             + ", \"portrait\": " + (c.sprite ? JsonString(c.portrait) : null) + "}";
     }
 
+    std::string WorldJson(const World& w)
+    {
+        const std::string null = "null";
+        std::string party = "[";
+        for (size_t i = 0; i < w.party.size(); ++i) {
+            const PartyMember& m = w.party[i];
+            party += std::string(i ? ", " : "") + "{\"id\": " + Number(m.id)
+                + ", \"x\": " + (m.sprite ? Number(m.x) : null) + ", \"y\": " + (m.sprite ? Number(m.y) : null)
+                + ", \"hp\": " + (m.sprite ? Number(m.hp) : null)
+                + ", \"max_hp\": " + (m.sprite ? Number(m.maxHp) : null)
+                + ", \"skills\": " + (m.sprite ? List(m.skills) : null) + "}";
+        }
+        party += "]";
+        return "{\"area\": " + JsonString(w.area) + ", \"party\": " + party + "}";
+    }
+
 }
 
 void SetSource(const DumpSource* source)
@@ -86,7 +102,8 @@ std::string ToJson(const Snapshot& s)
         + ", \"in_async_update\": " + Number(e.inAsyncUpdate) + ", \"ai_stalled_frames\": " + Number(s.aiStalledFrames)
         + ", \"reinitializing\": " + Number(e.reinitializing)
         + ", \"ai_rng_state\": " + (s.hasAiRngState ? Number(s.aiRngState) : std::string("null")) + "},\n";
-    json += "  \"chargen\": " + (e.hasChargen ? ChargenJson(e.chargen) : std::string("null")) + "\n}\n";
+    json += "  \"chargen\": " + (e.hasChargen ? ChargenJson(e.chargen) : std::string("null")) + ",\n";
+    json += "  \"world\": " + (e.hasWorld ? WorldJson(e.world) : std::string("null")) + "\n}\n";
     return json;
 }
 

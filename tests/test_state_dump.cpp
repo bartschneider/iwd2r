@@ -136,6 +136,44 @@ TEST_CASE("state dump JSON matches the golden dumps", "[dump]")
     periodic.engine.chargen.skillPoints = -1;
     periodic.engine.chargen.race = 99; // ignored without a sprite
     REQUIRE(platform::state_dump::ToJson(periodic) == Fixture("state_dump_periodic.json"));
+
+    // The world screen: one party member, and one whose id does not resolve.
+    Snapshot world;
+    world.frame = 1500;
+    world.hasCheckpoint = true;
+    world.checkpoint = "world";
+    world.rngState = 12345;
+    world.hasAiRngState = true;
+    world.aiRngState = 77;
+    world.engine.screen = "world";
+    world.engine.auCounter = 1498;
+    world.engine.hasWorld = true;
+    world.engine.world.area = "AR1000";
+    platform::state_dump::PartyMember member;
+    member.id = 0x10000;
+    member.sprite = true;
+    member.x = 1046;
+    member.y = 1258;
+    member.hp = 9;
+    member.maxHp = 12;
+    member.skills[1] = 4;
+    member.skills[5] = 2;
+    member.skills[13] = 255;
+    world.engine.world.party.push_back(member);
+    platform::state_dump::PartyMember missing;
+    missing.id = 0x20001;
+    missing.hp = 5; // ignored without a sprite
+    world.engine.world.party.push_back(missing);
+    REQUIRE(platform::state_dump::ToJson(world) == Fixture("state_dump_world.json"));
+}
+
+TEST_CASE("state dump world block with no area and no party", "[dump]")
+{
+    Snapshot s = MenuSnapshot();
+    s.engine.screen = "world";
+    s.engine.hasWorld = true;
+    REQUIRE(platform::state_dump::ToJson(s).find("\"world\": {\"area\": \"\", \"party\": []}\n}\n")
+        != std::string::npos);
 }
 
 TEST_CASE("state dump strings are escaped as the recorder escapes them", "[dump]")
