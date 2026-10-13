@@ -1006,6 +1006,12 @@ std::vector<uint8_t> RunLengthEncode(const std::vector<uint8_t>& pixels, uint8_t
 // the canvas, must draw the same pixels. sub_7D1190 reads past the raw data
 // into bytes that are 0 (a black palette entry), which the bright canvas
 // keeps unchanged; ours skips those pixels (docs/evidence/7D1190.md).
+//
+// The functions write members of the zeroed cells: the embedded m_cPalette
+// (plain data, no vtable), which SetPalette points at the resource palette
+// and Realize reads back. Ruling P4-11: under R10b that is acceptable, since
+// the written members are plain data and the case's comparison of the
+// whole canvas covers what Realize makes of them.
 void CellBlend(CaseContext& ctx, bool translucent, uint64_t salt)
 {
     VideoFixture video(ctx);
