@@ -1,6 +1,9 @@
 #define NOMINMAX
 #include "platform/present.h"
 
+#include <algorithm>
+#include <utility>
+
 namespace platform::present {
 
 namespace {
@@ -21,6 +24,7 @@ namespace {
         const std::vector<uint32_t>* primary = nullptr;
         int primaryWidth = 0;
         int primaryHeight = 0;
+        std::vector<compose::Region> regions;
     };
 
     State& S()
@@ -154,6 +158,8 @@ void SetDisplayMode(int w, int h)
 void WindowToFrame(float x, float y, float* fx, float* fy)
 {
     const State& s = S();
+    if (compose::WindowToFrame(s.regions, x, y, fx, fy))
+        return;
     if (s.renderer && s.texture && SDL_RenderCoordinatesFromWindow(s.renderer, x, y, fx, fy))
         return;
     *fx = x / static_cast<float>(s.scale);
@@ -163,19 +169,36 @@ void WindowToFrame(float x, float y, float* fx, float* fy)
 void FrameToWindow(float fx, float fy, float* x, float* y)
 {
     const State& s = S();
+    if (compose::FrameToWindow(s.regions, fx, fy, x, y))
+        return;
     if (s.renderer && s.texture && SDL_RenderCoordinatesToWindow(s.renderer, fx, fy, x, y))
         return;
     *x = fx * static_cast<float>(s.scale);
     *y = fy * static_cast<float>(s.scale);
 }
 
+void SetRegions(std::vector<compose::Region> regions) { S().regions = std::move(regions); }
+
+const std::vector<compose::Region>& Regions() { return S().regions; }
+
 bool FrameSize(int* w, int* h)
 {
     const State& s = S();
-    if (!s.renderer || !s.texture)
+    if (s.renderer && s.texture) {
+        *w = s.textureWidth;
+        *h = s.textureHeight;
+        return true;
+    }
+    if (s.regions.empty())
         return false;
-    *w = s.textureWidth;
-    *h = s.textureHeight;
+    LONG right = 0;
+    LONG bottom = 0;
+    for (const compose::Region& r : s.regions) {
+        right = std::max(right, r.frame.right);
+        bottom = std::max(bottom, r.frame.bottom);
+    }
+    *w = right;
+    *h = bottom;
     return true;
 }
 
