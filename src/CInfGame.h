@@ -94,6 +94,18 @@ public:
     /* 0048 */ UINT m_nHighestLevel;
 };
 
+// NOTE: The entries of `CInfGame::field_4BDC`, an IWD2 addition with no name
+// in the original: an area and an adjustment of the party level the area's
+// spawns use (`CGameArea::Unmarshal`). The game file stores each one as a
+// record (`CInfGame::Marshal`, `CInfGame::Unmarshal`).
+class CInfGameAreaLevel {
+public:
+    /* 0000 */ CString m_sArea;
+    /* 0004 */ DWORD m_dwFlags;
+    /* 0008 */ BYTE m_nLevel;
+    /* 0009 */ BYTE field_9[15];
+};
+
 class CInfGame {
 public:
     static const SHORT KILL_INNOCENT;
@@ -138,10 +150,11 @@ public:
     CString GetDirSounds();
     void CharacterExport(LONG nCharacterId, CString sFileName);
     CGameArea* LoadArea(CString areaName, BYTE nTravelScreenImageToUse, BOOLEAN bProgressBarRequired, BOOLEAN bProgressBarInPlace);
+    void Marshal(BYTE** pGame, DWORD* nGame, BOOLEAN bProgressBarInPlace);
     BOOLEAN CanSaveGame(STRREF& strError, BOOLEAN bInRestGame, BOOLEAN bInStore);
     BOOL BackupQuickSave();
     BOOL SaveGame(unsigned char a1, unsigned char a2, unsigned char a3);
-    BOOL Unmarshal(BYTE* pGame, LONG nGame, BOOLEAN bProgressBarInPlace);
+    void Unmarshal(BYTE* pGame, LONG nGame, BOOLEAN bProgressBarInPlace);
     void ProgressBarCallback(DWORD dwSize, BOOLEAN bInitialize);
     char sub_5A9780(BYTE nKey);
     BYTE sub_5A97D0(char ch);
@@ -474,7 +487,7 @@ public:
     /* 4BD5 */ BOOLEAN m_bExpansion; // NOTE: Can also be BYTE indicating number of expansion pack.
     /* 4BD6 */ BOOLEAN field_4BD6;
     /* 4BD8 */ DWORD m_nDifficultyLevel;
-    /* 4BDC */ CTypedPtrList<CPtrList, CString*> field_4BDC;
+    /* 4BDC */ CTypedPtrList<CPtrList, CInfGameAreaLevel*> field_4BDC;
     /* 4BF8 */ CSpellResRefList m_spells;
     /* 4C00 */ CSpellResRefList m_innateSpells;
     /* 4C08 */ CSpellResRefList m_songs;
