@@ -415,8 +415,8 @@ class ScenarioParseTest(unittest.TestCase):
         chargen = [a['name'] for a in realinput.load_scenario(os.path.join(
             ROOT, 'scenarios', 'chargen_replay.txt')) if a['op'] == 'checkpoint']
         self.assertEqual(names, chargen + [
-            'skills_done', 'feats_done', 'named', 'party_formation', 'world',
-            'world_settled'])
+            'skills_done', 'feats_done', 'named', 'party_formation',
+            'chapter', 'world', 'world_settled'])
         self.assertEqual(actions[-1]['op'], 'quit')
 
     def test_keysym_table_covers_every_key_name(self):
