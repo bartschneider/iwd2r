@@ -54,6 +54,7 @@ These are in `oracle/replay/` and `tools/`.
 - `GetKeyState(VK_CAPITAL)` is not hooked, so Caps Lock state comes from the host.
 - `tools/gen_fields.py` does not handle template pointers or declarations with several declarators; such fields are skipped or misread.
 - `tools/minischema.py` does not handle array-form `items`, so a schema using them is not validated.
+- A test that aborts inside the engine (an engine assertion, `_Exit`) leaves its `/tmp/iwd2r-view-*` folder behind: `DataView`'s destructor never runs. A normal Catch2 failure cleans up. Sweep stale views at the start of a run, or register the view for removal in the crash handler.
 - The replay mode's timers and clock have no data-free test: `platform::replay::SetTimer`, `KillTimer`, `FireTimers` (including its re-arm of periodic timers) and the virtual wall clock (`WallClock`, `NowMs`) in `platform/replay.cpp` are exercised only by the Windows `replay compare`, so a regression there shows up only as a timing difference against the original. `tests/test_clock.cpp` covers the real-time clock, not these.
 
 ## Tooling
