@@ -17,6 +17,10 @@
 // storage, our CVidInf and CVidPalette from their constructors; g_pChitin is
 // put back when the case ends. Original objects are never freed.
 //
+// FillConvexPoly's polygon comes
+// from the original's CVidPoly constructor (0x7C0DB0); its only global is
+// g_pChitin->cVideo.m_nBpp, set in the zeroed chitin.
+//
 // Calling conventions (objdump of the vanilla exe): __thiscall, called here
 // through __fastcall pointers whose edx argument is unused.
 #ifdef _MSC_VER
@@ -95,6 +99,9 @@ constexpr size_t kChitinSize = 0x2000;
 constexpr size_t kActiveEngineOffset = 0x3C4;
 constexpr size_t kIs3dOffset = 0x91C;
 constexpr size_t kAUCounterOffset = 0x190E;
+// CChitin::cVideo (0x7EA) starts with m_nBpp, which
+// CVidPoly::SetHLineFunction reads.
+constexpr size_t kBppOffset = 0x7EA;
 constexpr size_t kEngineSize = 0x10;
 constexpr size_t kEngineVidModeOffset = 0x4;
 // CVIDIMG_PALETTEAFFECT.
@@ -442,10 +449,63 @@ struct ModeValues {
     uint8_t gamma;
 };
 
-// Puts our g_pChitin back when the case ends.
-struct ChitinRestore {
+// The chitin and current video mode both sides read through g_pChitin
+// (header comment): the original's zeroed chitin and engine blocks and a
+// CVidInf from its constructor, at 32 bpp with shifts 16/8/0; ours the same
+// from zeroed CChitin and CWarp storage and our CVidInf. g_pChitin is put
+// back when the fixture goes; our CVidInf is left alive (its destructor is
+// not part of any case).
+struct VideoFixture {
+    explicit VideoFixture(CaseContext& ctx)
+    {
+        ctx.SetInputs("building the original's chitin and video mode");
+        ctx.CallOriginal([&] {
+            chitin = OriginalBlock(kChitinSize);
+            engine = OriginalBlock(kEngineSize);
+            mode = OriginalBlock(kVidInfSize);
+            reinterpret_cast<VidInfCtorFn>(kVidInfCtor)(mode, nullptr);
+            Put<uint32_t>(engine, kEngineVidModeOffset, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(mode)));
+            Put<uint32_t>(chitin, kActiveEngineOffset, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(engine)));
+            Put<uint32_t>(chitin, kIs3dOffset, 0);
+            Put<uint16_t>(chitin, kBppOffset, 32);
+            Put<uint32_t>(mode, kRShiftOffset, 16);
+            Put<uint32_t>(mode, kGShiftOffset, 8);
+            Put<uint32_t>(mode, kBShiftOffset, 0);
+            *reinterpret_cast<uint32_t*>(kChitin) = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(chitin));
+        });
+
+        oursChitinStorage = static_cast<unsigned char*>(::operator new(sizeof(CChitin)));
+        std::memset(oursChitinStorage, 0, sizeof(CChitin));
+        oursEngineStorage = static_cast<unsigned char*>(::operator new(sizeof(CWarp)));
+        std::memset(oursEngineStorage, 0, sizeof(CWarp));
+        oursChitin = reinterpret_cast<CChitin*>(oursChitinStorage);
+        auto* oursEngine = reinterpret_cast<CWarp*>(oursEngineStorage);
+        oursMode = new CVidInf();
+        oursMode->m_dwRBitShift = 16;
+        oursMode->m_dwGBitShift = 8;
+        oursMode->m_dwBBitShift = 0;
+        oursEngine->pVidMode = oursMode;
+        oursChitin->pActiveEngine = oursEngine;
+        oursChitin->cVideo.m_nBpp = 32;
+        g_pChitin = oursChitin;
+    }
+    ~VideoFixture()
+    {
+        g_pChitin = saved;
+        ::operator delete(oursEngineStorage);
+        ::operator delete(oursChitinStorage);
+    }
+    VideoFixture(const VideoFixture&) = delete;
+    VideoFixture& operator=(const VideoFixture&) = delete;
+
     CChitin* saved = g_pChitin;
-    ~ChitinRestore() { g_pChitin = saved; }
+    uint8_t* chitin = nullptr;
+    uint8_t* engine = nullptr;
+    uint8_t* mode = nullptr;
+    unsigned char* oursChitinStorage = nullptr;
+    unsigned char* oursEngineStorage = nullptr;
+    CChitin* oursChitin = nullptr;
+    CVidInf* oursMode = nullptr;
 };
 
 // CVidPalette::RealizeRange (0x7BF870) at 32 bpp: a range palette of 256
@@ -456,40 +516,12 @@ struct ChitinRestore {
 // compared.
 void RealizeRange(CaseContext& ctx)
 {
-    ChitinRestore restore;
+    VideoFixture video(ctx);
+    uint8_t* chitin = video.chitin;
+    uint8_t* mode = video.mode;
+    CChitin* oursChitin = video.oursChitin;
+    CVidInf* oursMode = video.oursMode;
     Picks picks(ctx.seed, 0x5265616C52616E00ull); // "RealRan"
-
-    uint8_t* chitin = nullptr;
-    uint8_t* engine = nullptr;
-    uint8_t* mode = nullptr;
-    ctx.SetInputs("building the original's chitin and video mode");
-    ctx.CallOriginal([&] {
-        chitin = OriginalBlock(kChitinSize);
-        engine = OriginalBlock(kEngineSize);
-        mode = OriginalBlock(kVidInfSize);
-        reinterpret_cast<VidInfCtorFn>(kVidInfCtor)(mode, nullptr);
-        Put<uint32_t>(engine, kEngineVidModeOffset, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(mode)));
-        Put<uint32_t>(chitin, kActiveEngineOffset, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(engine)));
-        Put<uint32_t>(chitin, kIs3dOffset, 0);
-        Put<uint32_t>(mode, kRShiftOffset, 16);
-        Put<uint32_t>(mode, kGShiftOffset, 8);
-        Put<uint32_t>(mode, kBShiftOffset, 0);
-        *reinterpret_cast<uint32_t*>(kChitin) = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(chitin));
-    });
-
-    auto* oursChitinStorage = static_cast<unsigned char*>(::operator new(sizeof(CChitin)));
-    std::memset(oursChitinStorage, 0, sizeof(CChitin));
-    auto* oursEngineStorage = static_cast<unsigned char*>(::operator new(sizeof(CWarp)));
-    std::memset(oursEngineStorage, 0, sizeof(CWarp));
-    auto* oursChitin = reinterpret_cast<CChitin*>(oursChitinStorage);
-    auto* oursEngine = reinterpret_cast<CWarp*>(oursEngineStorage);
-    auto* oursMode = new CVidInf();
-    oursMode->m_dwRBitShift = 16;
-    oursMode->m_dwGBitShift = 8;
-    oursMode->m_dwBBitShift = 0;
-    oursEngine->pVidMode = oursMode;
-    oursChitin->pActiveEngine = oursEngine;
-    g_pChitin = oursChitin;
 
     const uint32_t kFlagBits[] = { 0x1, 0x8, 0x10000, 0x20000, 0x40000, 0x80000, 0x200000, 0x2000000 };
 
@@ -635,10 +667,136 @@ void RealizeRange(CaseContext& ctx)
     for (int i = 0; i < 64 + ctx.iterations; ++i) {
         check(i);
     }
+}
 
-    // oursMode is left alive: its destructor is not part of the case.
-    ::operator delete(oursEngineStorage);
-    ::operator delete(oursChitinStorage);
+// CVidPoly::FillConvexPoly(pSurface, lPitch, rClip, dwColor, dwFlags, ptRef)
+// (0x7C0F40), `ret 0x18`; CVidPoly::CVidPoly (0x7C0DB0), plain ret. It
+// reads m_pVertices (4) and m_nVertices (8) and picks its span function from
+// g_pChitin->cVideo.m_nBpp.
+using FillConvexPolyFn = int32_t(__fastcall*)(void* self, void* edx, uint32_t* pSurface, int32_t lPitch,
+    const void* rClip, uint32_t dwColor, uint32_t dwFlags, const void* ptRef);
+constexpr uintptr_t kFillConvexPoly = 0x7C0F40;
+using VidPolyCtorFn = void*(__fastcall*)(void* self, void* edx);
+constexpr uintptr_t kVidPolyCtor = 0x7C0DB0;
+constexpr int kPolyCanvasW = 64;
+constexpr int kPolyCanvasH = 48;
+
+// FillConvexPoly on a 64x48 canvas of random pixels, clipped to a rectangle
+// inside it, the surface pointer at the clip's top left (as
+// CVidInf::BKRenderConvexPoly passes it): triangles with fractional edges in
+// both directions, flat tops and bottoms, polygons starting above or ending
+// below the clip, convex quadrilaterals, and the axis-aligned rectangle with
+// 0x2 (CUIPanel::RenderDither), each solid (0x1), dithered (0x2), shaded
+// (0x10), mirrored (0x4) and flipped (0x8). The result and the whole canvas
+// are compared.
+void FillConvexPoly(CaseContext& ctx)
+{
+    VideoFixture video(ctx);
+    uint8_t* poly = nullptr;
+    uint32_t* canvas = nullptr;
+    uint8_t* vertices = nullptr;
+    uint8_t* clip = nullptr;
+    uint8_t* ref = nullptr;
+    ctx.SetInputs("building the original's polygon and canvas");
+    ctx.CallOriginal([&] {
+        poly = OriginalBlock(kVidPolySize);
+        reinterpret_cast<VidPolyCtorFn>(kVidPolyCtor)(poly, nullptr);
+        canvas = reinterpret_cast<uint32_t*>(OriginalBlock(kPolyCanvasW * kPolyCanvasH * 4));
+        vertices = OriginalBlock(8 * 4);
+        clip = OriginalBlock(16);
+        ref = OriginalBlock(8);
+    });
+    CVidPoly ours;
+    std::vector<DWORD> mine(kPolyCanvasW * kPolyCanvasH);
+    Picks picks(ctx.seed, 0x46696C6C50000000ull); // "FillP"
+    const uint32_t kFlags[] = { 0x1, 0x2, 0x10, 0x1 | 0x4, 0x2 | 0x4, 0x1 | 0x8, 0x2 | 0x8, 0x10 | 0x8 };
+    int n = 0;
+
+    auto check = [&](const std::vector<CVIDPOLY_VERTEX>& points, const CRect& rClip, uint32_t dwFlags) {
+        const uint32_t color = picks.Bits() & 0xFFFFFF;
+        for (DWORD& pixel : mine) {
+            pixel = picks.Bits();
+        }
+        std::string text = "input " + std::to_string(n++) + ": flags " + Hex(dwFlags) + ", clip ("
+            + std::to_string(rClip.left) + "," + std::to_string(rClip.top) + ")-(" + std::to_string(rClip.right)
+            + "," + std::to_string(rClip.bottom) + "), vertices";
+        for (const CVIDPOLY_VERTEX& v : points) {
+            text += " (" + std::to_string(v.x) + "," + std::to_string(v.y) + ")";
+        }
+        ctx.SetInputs(text);
+        const int32_t r[4] = { rClip.left, rClip.top, rClip.right, rClip.bottom };
+        const int32_t pt[2] = { picks.Between(0, 7), picks.Between(0, 7) };
+        const int32_t offset = rClip.top * kPolyCanvasW + rClip.left;
+        int32_t originalResult = 0;
+        ctx.CallOriginal([&] {
+            std::memcpy(canvas, mine.data(), mine.size() * 4);
+            std::memcpy(vertices, points.data(), points.size() * 4);
+            std::memcpy(clip, r, sizeof(r));
+            std::memcpy(ref, pt, sizeof(pt));
+            Put<uint32_t>(poly, 4, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(vertices)));
+            Put<int32_t>(poly, 8, static_cast<int32_t>(points.size()));
+            originalResult = reinterpret_cast<FillConvexPolyFn>(kFillConvexPoly)(poly, nullptr, canvas + offset,
+                kPolyCanvasW * 4, clip, color, dwFlags, ref);
+        });
+        std::vector<CVIDPOLY_VERTEX> copy(points);
+        ours.SetPoly(copy.data(), static_cast<WORD>(copy.size()));
+        const BOOL oursResult = ours.FillConvexPoly(reinterpret_cast<WORD*>(mine.data() + offset), kPolyCanvasW * 4,
+            rClip, color, dwFlags, CPoint(pt[0], pt[1]));
+        ctx.CountInputs(1);
+        if (oracle::Compare(ctx, originalResult, static_cast<int32_t>(oursResult))) {
+            CompareArrays(ctx, canvas, mine.data(), kPolyCanvasW * kPolyCanvasH);
+        }
+    };
+
+    auto vertex = [](int x, int y) { return CVIDPOLY_VERTEX { static_cast<WORD>(x), static_cast<WORD>(y) }; };
+    const CRect kClips[] = { CRect(0, 0, kPolyCanvasW, kPolyCanvasH), CRect(4, 6, 60, 44), CRect(10, 12, 30, 20) };
+
+    for (const uint32_t dwFlags : kFlags) {
+        for (const CRect& rClip : kClips) {
+            // Fixed shapes: fractional edges both ways, a flat top, a flat
+            // bottom, one starting above the clip and ending below it, and
+            // the dithered rectangle.
+            check({ vertex(10, 0), vertex(13, 4), vertex(6, 4) }, rClip, dwFlags);
+            check({ vertex(12, 1), vertex(20, 13), vertex(3, 13) }, rClip, dwFlags);
+            check({ vertex(5, 3), vertex(40, 3), vertex(22, 30) }, rClip, dwFlags);
+            check({ vertex(25, 2), vertex(50, 33), vertex(7, 33) }, rClip, dwFlags);
+            check({ vertex(30, 0), vertex(55, 47), vertex(2, 40) }, rClip, dwFlags);
+            check({ vertex(2, 3), vertex(8, 3), vertex(8, 7), vertex(2, 7) }, rClip, dwFlags);
+            check({ vertex(0, 0), vertex(63, 0), vertex(63, 47), vertex(0, 47) }, rClip, dwFlags);
+        }
+    }
+    for (int i = 0; i < 200 + ctx.iterations / 10; ++i) {
+        const uint32_t dwFlags = kFlags[picks.Between(0, 7)];
+        const CRect rClip = kClips[picks.Between(0, 2)];
+        std::vector<CVIDPOLY_VERTEX> points;
+        if (picks.Between(0, 1) == 0) {
+            // A triangle, either winding, not all on one row.
+            for (int k = 0; k < 3; ++k) {
+                points.push_back(vertex(picks.Between(0, kPolyCanvasW - 1), picks.Between(0, kPolyCanvasH - 1)));
+            }
+            if (points[0].y == points[1].y && points[1].y == points[2].y) {
+                points[2].y = static_cast<WORD>((points[2].y + 5) % kPolyCanvasH);
+            }
+        } else {
+            // A convex quadrilateral: four points on an axis-aligned
+            // ellipse, in angle order.
+            const int cx = picks.Between(15, 48);
+            const int cy = picks.Between(12, 36);
+            const int rx = picks.Between(3, 15);
+            const int ry = picks.Between(3, 11);
+            static const int kCos[8] = { 100, 71, 0, -71, -100, -71, 0, 71 };
+            static const int kSin[8] = { 0, 71, 100, 71, 0, -71, -100, -71 };
+            int start = picks.Between(0, 1);
+            for (int k = 0; k < 4; ++k) {
+                const int a = start + 2 * k;
+                points.push_back(vertex(cx + rx * kCos[a] / 100, cy + ry * kSin[a] / 100));
+            }
+            if (picks.Between(0, 1)) {
+                std::reverse(points.begin(), points.end());
+            }
+        }
+        check(points, rClip, dwFlags);
+    }
 }
 
 } // namespace
@@ -649,3 +807,4 @@ ORACLE_CASE("vid/realize_range", RealizeRange);
 ORACLE_CASE("vid/thick_line32", ThickLine32);
 ORACLE_CASE("vid/brightness_contrast", BrightnessContrast);
 ORACLE_CASE("vid/lighting_effect32", LightingEffect32);
+ORACLE_CASE("vid/fill_convex_poly", FillConvexPoly);

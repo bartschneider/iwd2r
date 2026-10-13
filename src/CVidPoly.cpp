@@ -109,14 +109,16 @@ BOOL CVidPoly::FillConvexPoly(WORD* pSurface, LONG lPitch, const CRect& rClipRec
     UINT nLeftIndex;
     INT nRightDx;
     INT nRightDy;
-    UINT nRightAdjUp;
-    UINT nRightRun;
-    INT nRightErrTerm;
+    // NOTE: Initialised only to quiet -Wmaybe-uninitialized: with a flat
+    // top the original leaves these unset and the first row sets them.
+    UINT nRightAdjUp = 0;
+    UINT nRightRun = 0;
+    INT nRightErrTerm = 0;
     INT nLeftDx;
     INT nLeftDy;
-    UINT nLeftAdjUp;
-    UINT nLeftRun;
-    INT nLeftErrTerm;
+    UINT nLeftAdjUp = 0;
+    UINT nLeftRun = 0;
+    INT nLeftErrTerm = 0;
     SHORT nIndex;
     CRect rClip;
     CPoint ptRefAdjusted;
