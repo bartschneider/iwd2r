@@ -4,6 +4,7 @@ These items were found while building the harness (project 2) and parked. The fi
 
 ## Engine fidelity (project 3)
 
+- **Two-area save (M1 Review Focus 2).** The game-file test only checks that a GAM naming an unsaved second area loads without asserting. The real check — load AR1001 alongside AR1000 in-process, save, assert the GAM's current area and what `CInfGame::SaveGame` (0x5AC430) writes for each loaded area, reload — waits for effect 261 (`IcewindCGameEffectImmunityToEffectAndResource`) to get an `ApplyEffect`: AR1001's creatures carry it and loading the area asserts (M3).
 - **`atol`.** The original's `atol` is VC6's. Our engine maps it only in `C2DArray::GetAtLong` and `CRuleTables::GetNextLevelXP`. Other call sites should use it too. Consider mapping `atol` in `compat/mfc.h` the way `rand` is, with oracle coverage.
 - **Upper-casing.** The original upper-cases by code page (`_mbsupr`). Ours handles ASCII only.
 - **`CGameSprite::CheckAranceFailure` (0x7243F0).** The original compares 16-bit values. Ours compares 32-bit values. The case needs engine state and is pending.
