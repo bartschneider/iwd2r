@@ -1,6 +1,7 @@
 #include "C2DArray.h"
 
 #include "CAIUtil.h"
+#include "msvc_atol.h"
 
 #define TAB '\t'
 #define NEWLINE '\n'
@@ -71,103 +72,108 @@ void C2DArray::Load(const CResRef& cResRef)
         CString sText = pRes->GetText();
         pRes->Release();
 
-        sText.Replace(TAB, SPACE);
+        LoadText(sText);
+    }
+}
 
-        CString v1;
-        CString v2;
-        CString v3;
-        CString v4;
-        CString v5;
-        SHORT sizeX;
-        SHORT sizeY;
-        SHORT posX;
-        SHORT posY;
+void C2DArray::LoadText(CString sText)
+{
+    sText.Replace(TAB, SPACE);
 
-        v1 = CAIUtil::ReadAfterChar(sText, NEWLINE);
-        v5 = CAIUtil::ReadToChar(v1, NEWLINE);
-        v1 = CAIUtil::ReadAfterChar(v1, NEWLINE);
-        v5.TrimLeft();
-        v5.TrimRight();
-        m_default = v5;
+    CString v1;
+    CString v2;
+    CString v3;
+    CString v4;
+    CString v5;
+    SHORT sizeX;
+    SHORT sizeY;
+    SHORT posX;
+    SHORT posY;
 
-        v3 = CAIUtil::ReadToChar(v1, NEWLINE);
-        v1 = CAIUtil::ReadAfterChar(v1, NEWLINE);
-        v3.TrimLeft();
-        v3.TrimRight();
+    v1 = CAIUtil::ReadAfterChar(sText, NEWLINE);
+    v5 = CAIUtil::ReadToChar(v1, NEWLINE);
+    v1 = CAIUtil::ReadAfterChar(v1, NEWLINE);
+    v5.TrimLeft();
+    v5.TrimRight();
+    m_default = v5;
 
-        sizeX = 0;
-        v4 = v3;
-        while (v4.GetLength() > 0) {
-            sizeX++;
-            v4 = CAIUtil::ReadAfterChar(v4, SPACE);
-            v4.TrimLeft();
-            v4.TrimRight();
-        }
+    v3 = CAIUtil::ReadToChar(v1, NEWLINE);
+    v1 = CAIUtil::ReadAfterChar(v1, NEWLINE);
+    v3.TrimLeft();
+    v3.TrimRight();
 
-        m_nSizeX = sizeX;
+    sizeX = 0;
+    v4 = v3;
+    while (v4.GetLength() > 0) {
+        sizeX++;
+        v4 = CAIUtil::ReadAfterChar(v4, SPACE);
+        v4.TrimLeft();
+        v4.TrimRight();
+    }
 
-        if (m_pNamesX != NULL) {
-            delete[] m_pNamesX;
-        }
+    m_nSizeX = sizeX;
 
-        m_pNamesX = new CString[m_nSizeX];
+    if (m_pNamesX != NULL) {
+        delete[] m_pNamesX;
+    }
+
+    m_pNamesX = new CString[m_nSizeX];
+
+    posX = 0;
+    v4 = v3;
+    while (v4.GetLength() > 0) {
+        v5 = CAIUtil::ReadToChar(v4, SPACE);
+        m_pNamesX[posX] = v5;
+        m_pNamesX[posX].MakeUpper();
+        v4 = CAIUtil::ReadAfterChar(v4, SPACE);
+        v4.TrimLeft();
+        v4.TrimRight();
+        posX++;
+    }
+
+    sizeY = 0;
+    v2 = v1;
+    while (v2.GetLength() > 0) {
+        sizeY++;
+        v2 = CAIUtil::ReadAfterChar(v2, NEWLINE);
+    }
+
+    m_nSizeY = sizeY;
+
+    if (m_pNamesY != NULL) {
+        delete[] m_pNamesY;
+    }
+
+    m_pNamesY = new CString[m_nSizeY];
+
+    if (m_pArray != NULL) {
+        delete[] m_pArray;
+    }
+
+    m_pArray = new CString[m_nSizeX * m_nSizeY];
+
+    posY = 0;
+    v2 = v1;
+    while (v2.GetLength() > 0) {
+        v3 = CAIUtil::ReadToChar(v2, NEWLINE);
+        v2 = CAIUtil::ReadAfterChar(v2, NEWLINE);
+        v5 = CAIUtil::ReadToChar(v3, SPACE);
+        m_pNamesY[posY] = v5;
+        m_pNamesY[posY].MakeUpper();
+        v4 = CAIUtil::ReadAfterChar(v3, SPACE);
+        v4.TrimLeft();
+        v4.TrimRight();
 
         posX = 0;
-        v4 = v3;
-        while (v4.GetLength() > 0) {
+        while (v4.GetLength() > 0 && posX < m_nSizeX) {
             v5 = CAIUtil::ReadToChar(v4, SPACE);
-            m_pNamesX[posX] = v5;
-            m_pNamesX[posX].MakeUpper();
             v4 = CAIUtil::ReadAfterChar(v4, SPACE);
             v4.TrimLeft();
             v4.TrimRight();
+            m_pArray[posY * m_nSizeX + posX] = v5;
             posX++;
         }
-
-        sizeY = 0;
-        v2 = v1;
-        while (v2.GetLength() > 0) {
-            sizeY++;
-            v2 = CAIUtil::ReadAfterChar(v2, NEWLINE);
-        }
-
-        m_nSizeY = sizeY;
-
-        if (m_pNamesY != NULL) {
-            delete[] m_pNamesY;
-        }
-
-        m_pNamesY = new CString[m_nSizeY];
-
-        if (m_pArray != NULL) {
-            delete[] m_pArray;
-        }
-
-        m_pArray = new CString[m_nSizeX * m_nSizeY];
-
-        posY = 0;
-        v2 = v1;
-        while (v2.GetLength() > 0) {
-            v3 = CAIUtil::ReadToChar(v2, NEWLINE);
-            v2 = CAIUtil::ReadAfterChar(v2, NEWLINE);
-            v5 = CAIUtil::ReadToChar(v3, SPACE);
-            m_pNamesY[posY] = v5;
-            m_pNamesY[posY].MakeUpper();
-            v4 = CAIUtil::ReadAfterChar(v3, SPACE);
-            v4.TrimLeft();
-            v4.TrimRight();
-
-            posX = 0;
-            while (v4.GetLength() > 0 && posX < m_nSizeX) {
-                v5 = CAIUtil::ReadToChar(v4, SPACE);
-                v4 = CAIUtil::ReadAfterChar(v4, SPACE);
-                v4.TrimLeft();
-                v4.TrimRight();
-                m_pArray[posY * m_nSizeX + posX] = v5;
-                posX++;
-            }
-            posY++;
-        }
+        posY++;
     }
 }
 
@@ -199,12 +205,14 @@ LONG C2DArray::GetAtLong(const CPoint& coordinates) const
     LONG value;
 
     if (coordinates.x >= 0 && coordinates.x < m_nSizeX && coordinates.y >= 0 && coordinates.y < m_nSizeY) {
-        value = atol(m_pArray[coordinates.x + m_nSizeX * coordinates.y].GetBuffer(128));
+        // NOTE: The original's atol (0x7E7B03) is VC6's, which wraps on
+        // overflow.
+        value = iwd2r_atol(m_pArray[coordinates.x + m_nSizeX * coordinates.y].GetBuffer(128));
         m_pArray[coordinates.x + m_nSizeX * coordinates.y].ReleaseBuffer();
     } else {
         // FIXME: Unnecessary copy.
         CString string = GetDefault();
-        value = atol(string.GetBuffer(128));
+        value = iwd2r_atol(string.GetBuffer(128));
         string.ReleaseBuffer();
     }
 
@@ -297,7 +305,7 @@ BOOLEAN C2DArray::Find(CString& sSearchString, CPoint& ptLocation) const
     sString.MakeUpper();
 
     for (SHORT y = 0; y < m_nSizeY; y++) {
-        if (m_pNamesY->Compare(sString) == 0) {
+        if (m_pNamesY[y].Compare(sString) == 0) {
             ptLocation.x = -1;
             ptLocation.y = y;
             return TRUE;

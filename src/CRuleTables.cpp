@@ -8,6 +8,7 @@
 #include "CItem.h"
 #include "CTimerWorld.h"
 #include "CUtil.h"
+#include "msvc_atol.h"
 
 // 0x8DF018
 const DWORD CRuleTables::TIME_RESTING = 8
@@ -2196,7 +2197,8 @@ DWORD CRuleTables::GetNextLevelXP(BYTE nLevel) const
     char szLevel[80];
     sprintf(szLevel, "%d", nLevel);
 
-    return atol(m_tExperienceLevels.GetAt(CString(szLevel), sClassName));
+    // NOTE: The original's atol (0x7E7B03) is VC6's, which wraps on overflow.
+    return iwd2r_atol(m_tExperienceLevels.GetAt(CString(szLevel), sClassName));
 }
 
 // 0x5439B0

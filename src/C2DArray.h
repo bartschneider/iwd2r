@@ -11,6 +11,10 @@ public:
     BOOL Demand();
     BOOL Release();
     void Load(const CResRef& cResRef);
+    // The text parsing of Load, which the original inlines there after
+    // demanding the resource: fills the labels, cells and default from 2DA
+    // text without the resource manager.
+    void LoadText(CString sText);
     const CString& GetAt(const CString& nX, const CString& nY) const;
     LONG GetAtLong(const CPoint& coordinates) const;
     SHORT GetHeight() const { return m_nSizeY; }
