@@ -250,15 +250,17 @@ TEST_CASE("cell_blend_raw_frames_stay_in_the_surface", "[vid]")
 }
 
 // The same through CVidCell::SurfaceExtent: the current CVidInf's locked
-// description (a 6x8 rectangle at (3, 2) of a 16-pixel-pitch surface, as
-// BKLock locks the viewport) gives the bytes from its first pixel to the end
-// of its last row. A raw 4x4 frame drawn at the rectangle's (4, 2) by
-// sub_7D1190 walks 5 rows of 5 pixels, 17 pixels apart: pixels outside the
-// locked bytes stay as they were, and pixels whose frame data index is past
-// the 16 bytes of the frame stay as they were too (the original reads the
-// bytes after the frame data; here those are index 9, white, which would
-// brighten them). The frame data also ends its buffer exactly, so a read
-// past it is out of bounds for a sanitizer.
+// description (an 8x10 rectangle at (3, 2) of a 16-pixel-pitch surface of
+// 12 rows, as BKLock locks the viewport) gives the bytes from its first
+// pixel to the end of its last row. A raw 4x4 frame drawn at the
+// rectangle's (4, 2) by sub_7D1190 walks 5 rows of 5 pixels, 17 pixels
+// apart, all inside those bytes. Its first 16 pixels use the frame's data
+// and are drawn; the last 9 would use the bytes after the frame data (the
+// original reads them) and must stay as they were. In the second pass those
+// bytes are index 9, white, so without sub_7D1190's frame-data bound they
+// would be drawn and the test fails (checked by removing the bound). In the
+// first pass the frame data ends its buffer, which only a sanitizer would
+// notice being read past. Every other surface pixel stays as it was.
 TEST_CASE("cell_blend_raw_frames_through_the_locked_surface", "[vid]")
 {
     ChitinScope scope;
@@ -277,12 +279,12 @@ TEST_CASE("cell_blend_raw_frames_through_the_locked_surface", "[vid]")
     mode->m_SurfaceDesc.lpSurface = locked;
     mode->m_SurfaceDesc.lPitch = kPitch * 4;
     mode->m_SurfaceDesc.dwWidth = 8;
-    mode->m_SurfaceDesc.dwHeight = 6;
+    mode->m_SurfaceDesc.dwHeight = 10;
 
     const CVidCell::SurfaceRange range = CVidCell::SurfaceExtent(locked, kPitch * 4);
     const BYTE* first = reinterpret_cast<const BYTE*>(locked);
     REQUIRE(range.pBegin == first);
-    REQUIRE(range.pEnd == first + 5 * kPitch * 4 + 8 * 4);
+    REQUIRE(range.pEnd == first + 9 * kPitch * 4 + 8 * 4);
     // Another pointer is not the locked surface.
     CHECK(CVidCell::SurfaceExtent(surface.data(), kPitch * 4).pBegin == nullptr);
 
@@ -324,7 +326,10 @@ TEST_CASE("cell_blend_raw_frames_through_the_locked_surface", "[vid]")
             DWORD* pixel = at + (pos / 5) * (kPitch + 1) + pos % 5;
             const BYTE* b = reinterpret_cast<const BYTE*>(pixel);
             const bool inside = b >= range.pBegin && b + 4 <= range.pEnd;
-            if (pos < 16 && inside) {
+            // The whole walk is writable, so only the data bound keeps the
+            // last 9 pixels as they were.
+            REQUIRE(inside);
+            if (pos < 16) {
                 drawn[static_cast<size_t>(pixel - surface.data())] = true;
             }
         }
