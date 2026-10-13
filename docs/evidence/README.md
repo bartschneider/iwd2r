@@ -56,6 +56,13 @@ the first following line that starts with `}`. A committed change to any line
 of a span touches the function. Changes between functions, in headers, and
 deleted functions are ignored; `src/` files new in the branch count in full.
 
+Layout changes in headers are not detected: a struct whose fields move,
+change size or are renamed (such as a file format in `src/FileFormat.h`)
+touches no function span. File their evidence by hand, under the function
+that reads the layout, and say in its Notes which offsets changed and why
+(docs/evidence/4440F0.md, CDerivedStats::Reload, for the creature header's
+ability order).
+
 ## Pending cases
 
 A function ours does not implement yet, or one whose original needs engine

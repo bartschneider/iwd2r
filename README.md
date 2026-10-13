@@ -145,6 +145,7 @@ CI runs the parts that need no game data: the PE loader tests (`[pe]`), the VC6 
 - The assert-time thread suspension is cooperative only: a thread can suspend itself but cannot freeze others.
 - The speaker-portrait click in world dialog panels, which forwarded to the multiplayer screen, is now a no-op.
 - The start screen is the original's connection screen with its multiplayer entry hidden.
+- `C2DArray::LoadText` has no counterpart in the original. The original parses 2DA text only inside `C2DArray::Load` (0x402B70), after fetching it through its resource manager; ours splits that parse into `LoadText`, unchanged, so the tests and the oracle's table cases can build tables from text without a resource manager. `Load` calls it, so the engine's behaviour is the same.
 
 ## License
 

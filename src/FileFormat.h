@@ -545,7 +545,7 @@ public:
     /* 025B */ BYTE m_subrace;
     /* 025C */ unsigned char field_25C;
     /* 025D */ BYTE m_sex;
-    // The CRE V2.2 order, as CDerivedStats::operator= (0x4440F0) reads it.
+    // The CRE V2.2 order, as CDerivedStats::Reload (0x4440F0) reads it.
     /* 025E */ BYTE m_STRBase;
     /* 025F */ BYTE m_INTBase;
     /* 0260 */ BYTE m_WISBase;

@@ -76,6 +76,7 @@ void C2DArray::Load(const CResRef& cResRef)
     }
 }
 
+// A test and oracle seam with no counterpart in the original (see README).
 void C2DArray::LoadText(CString sText)
 {
     sText.Replace(TAB, SPACE);
