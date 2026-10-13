@@ -370,6 +370,70 @@ void BrightnessContrast(CaseContext& ctx)
     }
 }
 
+// CVidMode::DrawLightingEffect32(pSurface, lPitch, ptCenter, size, rgbLight,
+// rgbAmbient) (0x7CAC60), `ret 0x18` at 0x7CB4FE. It reads rgbGlobalTint
+// (0xA4) and calls GetEllipseArcPixelList through the vtable (0xC0).
+using LightingFn = void(__fastcall*)(void* self, void* edx, uint32_t* pSurface, int32_t lPitch, const void* pt,
+    const void* size, uint32_t a6, uint32_t a7);
+constexpr uintptr_t kDrawLightingEffect32 = 0x7CAC60;
+constexpr int kLightCanvas = 200;
+
+// DrawLightingEffect32 on a 200x200 canvas of random pixels, centred, with
+// half-axes 1 to 40 (height 0 draws nothing; width 0 divides by zero in the
+// original, 0x7CB20C), random light and ambient
+// colours, and the global tint none or random. The whole canvas is
+// compared. The video mode is a CVidInf from the original's constructor.
+void LightingEffect32(CaseContext& ctx)
+{
+    uint8_t* mode = nullptr;
+    uint32_t* canvas = nullptr;
+    uint8_t* pt = nullptr;
+    uint8_t* size = nullptr;
+    ctx.SetInputs("building the original's video mode and canvas");
+    ctx.CallOriginal([&] {
+        mode = OriginalBlock(kVidInfSize);
+        reinterpret_cast<VidInfCtorFn>(kVidInfCtor)(mode, nullptr);
+        canvas = reinterpret_cast<uint32_t*>(OriginalBlock(kLightCanvas * kLightCanvas * 4));
+        pt = OriginalBlock(8);
+        size = OriginalBlock(8);
+    });
+    CVidInf ours;
+    std::vector<DWORD> mine(kLightCanvas * kLightCanvas);
+    Picks picks(ctx.seed, 0x4C69676874000000ull); // "Light"
+    const int count = 200 + ctx.iterations / 20;
+    for (int n = 0; n < count; ++n) {
+        const int32_t cx = picks.Between(1, 40);
+        const int32_t cy = n < 4 ? 0 : picks.Between(1, 40);
+        const int32_t x = picks.Between(80, 120);
+        const int32_t y = picks.Between(80, 120);
+        const uint32_t a6 = picks.Bits() & 0xFFFFFF;
+        const uint32_t a7 = picks.Bits() & 0xFFFFFF;
+        const uint32_t tint = picks.Between(0, 1) ? 0xFFFFFFu : (picks.Bits() & 0xFFFFFF);
+        for (DWORD& pixel : mine) {
+            pixel = picks.Bits();
+        }
+        char inputs[160];
+        std::snprintf(inputs, sizeof(inputs),
+            "input %d: centre (%d, %d), axes (%d, %d), light 0x%06X, ambient 0x%06X, global tint 0x%06X", n, x, y,
+            cx, cy, a6, a7, tint);
+        ctx.SetInputs(inputs);
+        const int32_t p[2] = { x, y };
+        const int32_t sz[2] = { cx, cy };
+        ctx.CallOriginal([&] {
+            std::memcpy(canvas, mine.data(), mine.size() * 4);
+            std::memcpy(pt, p, sizeof(p));
+            std::memcpy(size, sz, sizeof(sz));
+            Put<uint32_t>(mode, kGlobalTintOffset, tint);
+            reinterpret_cast<LightingFn>(kDrawLightingEffect32)(mode, nullptr, canvas, kLightCanvas, pt, size, a6,
+                a7);
+        });
+        ours.rgbGlobalTint = tint;
+        ours.DrawLightingEffect32(mine.data(), kLightCanvas, CPoint(x, y), CSize(cx, cy), a6, a7);
+        ctx.CountInputs(1);
+        CompareArrays(ctx, canvas, mine.data(), kLightCanvas * kLightCanvas);
+    }
+}
+
 // The video mode both sides read.
 struct ModeValues {
     uint8_t fade;
@@ -584,3 +648,4 @@ ORACLE_CASE("vid/hline_shaded_mirrored32", HLineShadedMirrored32);
 ORACLE_CASE("vid/realize_range", RealizeRange);
 ORACLE_CASE("vid/thick_line32", ThickLine32);
 ORACLE_CASE("vid/brightness_contrast", BrightnessContrast);
+ORACLE_CASE("vid/lighting_effect32", LightingEffect32);
