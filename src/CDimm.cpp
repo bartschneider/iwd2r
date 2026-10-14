@@ -1116,7 +1116,10 @@ int CDimm::Dump(CRes* pRes, int a2, int a3)
             UTIL_ASSERT_MSG(pRes != NULL, "Attempting to free invalid resource.");
 
             if (pRes->m_pData != NULL) {
-                delete pRes->m_pData;
+                // NOTE: The original frees the data with operator delete,
+                // which in its CRT is `free`; the data comes from `malloc`
+                // (ServiceFromFile and Alloc), so ours uses `free`.
+                free(pRes->m_pData);
                 pRes->m_pData = NULL;
             }
 
@@ -1149,7 +1152,10 @@ int CDimm::Dump(CRes* pRes, int a2, int a3)
             UTIL_ASSERT_MSG(pRes != NULL, "Attempting to free invalid resource.");
 
             if (pRes->m_pData != NULL) {
-                delete pRes->m_pData;
+                // NOTE: The original frees the data with operator delete,
+                // which in its CRT is `free`; the data comes from `malloc`
+                // (ServiceFromFile and Alloc), so ours uses `free`.
+                free(pRes->m_pData);
                 pRes->m_pData = NULL;
             }
 
