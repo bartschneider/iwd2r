@@ -568,5 +568,20 @@
     "offset": "0x3816",
     "type": "i32",
     "count": 6
+  },
+  "sprite_timed_effects": {
+    "base": "CGameSprite",
+    "offset": "0x5532",
+    "type": "i32"
+  },
+  "sprite_equiped_effects": {
+    "base": "CGameSprite",
+    "offset": "0x5506",
+    "type": "i32"
+  },
+  "sprite_xp": {
+    "base": "CGameSprite",
+    "offset": "0x05B4",
+    "type": "u32"
   }
 }

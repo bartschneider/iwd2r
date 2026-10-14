@@ -298,6 +298,10 @@ void ReadProbe(platform::replay_probe::Frame* out)
             if (!sprite->m_queuedActions.IsEmpty())
                 o.queuedHead = sprite->m_queuedActions.GetHead()->m_actionID;
             o.triggers = sprite->m_pendingTriggers.GetCount();
+            o.timedEffects = sprite->m_timedEffectList.GetCount();
+            o.equipedEffects = sprite->m_equipedEffectList.GetCount();
+            o.xp = sprite->m_baseStats.m_xp;
+            o.hp = sprite->m_baseStats.m_hitPoints;
         } else if (o.type == CGameObject::TYPE_DOOR) {
             const CGameDoor* door = static_cast<CGameDoor*>(object);
             o.hasName = true;

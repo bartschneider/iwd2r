@@ -858,6 +858,18 @@
     "character_slots": {
       "class": "CInfGame",
       "member": "m_characters"
+    },
+    "sprite_timed_effects": {
+      "class": "CGameSprite",
+      "member": "m_timedEffectList.m_nCount"
+    },
+    "sprite_equiped_effects": {
+      "class": "CGameSprite",
+      "member": "m_equipedEffectList.m_nCount"
+    },
+    "sprite_xp": {
+      "class": "CGameSprite",
+      "member": "m_baseStats.m_xp"
     }
   }
 }

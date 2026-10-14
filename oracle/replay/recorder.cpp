@@ -161,6 +161,9 @@ static_assert(kField_sprite_queued_head.type == ReplayType::k_ptr, "");
 static_assert(kField_sprite_triggers_count.type == ReplayType::k_i32, "");
 static_assert(kField_action_id.type == ReplayType::k_i16, "");
 static_assert(kField_character_slots.type == ReplayType::k_i32 && kField_character_slots.count == 6, "");
+static_assert(kField_sprite_timed_effects.type == ReplayType::k_i32, "");
+static_assert(kField_sprite_equiped_effects.type == ReplayType::k_i32, "");
+static_assert(kField_sprite_xp.type == ReplayType::k_u32, "");
 static_assert(kField_area_characters.type == ReplayType::k_u8, "");
 static_assert(kField_area_view_x.type == ReplayType::k_i32, "");
 static_assert(kField_area_view_y.type == ReplayType::k_i32, "");
@@ -823,6 +826,10 @@ void ReadProbe(platform::replay_probe::Frame* out)
                 o.queuedHead = action ? ReadI16(At(action, kField_action_id), &entryOk) : -1;
             }
             o.triggers = ReadI32(At(object, kField_sprite_triggers_count), &entryOk);
+            o.timedEffects = ReadI32(At(object, kField_sprite_timed_effects), &entryOk);
+            o.equipedEffects = ReadI32(At(object, kField_sprite_equiped_effects), &entryOk);
+            o.xp = ReadU32(At(object, kField_sprite_xp), &entryOk);
+            o.hp = ReadI16(At(object, kField_sprite_hp), &entryOk);
         } else if (o.type == platform::replay_probe::kTypeDoor) {
             o.hasName = true;
             o.name = ReadName(At(object, kField_door_name));
