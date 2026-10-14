@@ -517,4 +517,3 @@ TEST_CASE("replay probe: the block both engines write", "[dump]")
            "vis 0 808100\n"
            "vis 1 ff0f10\n");
 }
-

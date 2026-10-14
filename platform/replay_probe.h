@@ -175,7 +175,7 @@ inline std::string Format(const Frame& f)
             out += " name " + o.name;
         if (o.sprite) {
             std::snprintf(line, sizeof(line), " last %u active %ld ai %ld imprisonment %ld visible_monster %ld field_294 %u state %08lx"
-                " action %d sequence %d queued %d next %d triggers %d",
+                                              " action %d sequence %d queued %d next %d triggers %d",
                 o.lastCharacters, static_cast<long>(o.active), static_cast<long>(o.activeAi),
                 static_cast<long>(o.activeImprisonment), static_cast<long>(o.visibleMonster), o.field294,
                 static_cast<unsigned long>(o.generalState), o.action, o.sequence, o.queued,
