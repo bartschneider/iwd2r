@@ -8,6 +8,7 @@
 #include "CMemINI.h"
 #include "CScreenCreateChar.h"
 #include "CSpawn.h"
+#include "CUtil.h"
 #include "CVisibility.h"
 #include "ScreenLayout.h"
 #include "data_view.h"
@@ -279,16 +280,60 @@ std::string SavedGame()
     return ReadFile(Child(Child(g_view, "mpsave"), "default") / "ICEWIND2.GAM");
 }
 
-// Every file SaveGame left in mpsave/default, by upper-case name.
+std::string Upper(std::string s)
+{
+    for (char& c : s)
+        c = static_cast<char>(toupper(static_cast<unsigned char>(c)));
+    return s;
+}
+
+// The files packed into a "SAV V1.0" archive (CDimm::CompressDirectory,
+// 0x784A50): per file its name length with the NUL, the name, the
+// uncompressed and the compressed size, then the zlib data. Keyed by
+// upper-case name; an entry that does not unpack is left out.
+std::map<std::string, std::string> UnpackSav(const std::string& sav)
+{
+    std::map<std::string, std::string> files;
+    if (sav.size() < 8 || sav.compare(0, 8, "SAV V1.0") != 0)
+        return files;
+    size_t at = 8;
+    while (at + 4 <= sav.size()) {
+        const uint32_t nameLength = Le32(sav, at);
+        at += 4;
+        if (nameLength == 0 || at + nameLength + 8 > sav.size())
+            break;
+        const std::string name = sav.substr(at, nameLength - 1);
+        at += nameLength;
+        const uint32_t size = Le32(sav, at);
+        const uint32_t packed = Le32(sav, at + 4);
+        at += 8;
+        if (at + packed > sav.size())
+            break;
+        std::string bytes(size, '\0');
+        DWORD length = size;
+        if (CUtil::Uncompress(reinterpret_cast<BYTE*>(bytes.data()), &length,
+                reinterpret_cast<const BYTE*>(sav.data() + at), packed)
+                == 0
+            && length == size) {
+            files[Upper(name)] = bytes;
+        }
+        at += packed;
+    }
+    return files;
+}
+
+// Every file SaveGame left in mpsave/default, by upper-case name, with the
+// files packed in ICEWIND2.SAV listed beside the archive itself.
 std::map<std::string, std::string> SavedFiles()
 {
     std::map<std::string, std::string> files;
     std::error_code ec;
     for (const auto& entry : fs::directory_iterator(Child(Child(g_view, "mpsave"), "default"), ec)) {
-        std::string name = entry.path().filename().string();
-        for (char& c : name)
-            c = static_cast<char>(toupper(static_cast<unsigned char>(c)));
-        files[name] = ReadFile(entry.path());
+        files[Upper(entry.path().filename().string())] = ReadFile(entry.path());
+    }
+    if (files.count("ICEWIND2.SAV") == 1) {
+        for (const auto& [name, bytes] : UnpackSav(files.at("ICEWIND2.SAV")))
+            files[name] = bytes;
     }
     return files;
 }

@@ -1580,11 +1580,11 @@ BOOL CInfGame::SaveGame(BOOLEAN bProgressBarRequired, BOOLEAN bProgressBarInPlac
     if (bResult) {
         if (!g_pChitin->cDimm.DirectoryCopyFiles(m_sTempDir, m_sTempSaveDir)) {
             bResult = FALSE;
+        } else if (!g_pChitin->cDimm.CompressDirectory(m_sTempSaveDir, m_sTempSaveDir)) {
+            // The area files are packed into ICEWIND2.SAV (0x784A50), which
+            // LoadGame's UncompressDirectory unpacks into temp again.
+            bResult = FALSE;
         } else {
-            // TODO: Incomplete. The original packs the copied area files into
-            // ICEWIND2.SAV here (0x784A50, CDimm, not in our tree yet) and
-            // fails the save when that fails. Without it the area files are
-            // copied loose and LoadGame's UncompressDirectory drops them.
             if (!g_pChitin->cDimm.DirectoryRemoveFiles(GetDirSave())
                 || !g_pChitin->cDimm.DirectoryCopyFiles(m_sTempSaveDir, GetDirSave())) {
                 bResult = FALSE;
