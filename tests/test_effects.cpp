@@ -149,9 +149,9 @@ BOOL Apply(CGameSprite* pSprite, WORD effectID, DWORD dwFlags, LONG amount, WORD
     CGameEffect* pEffect = Make(effectID, dwFlags, amount, durationType);
     pEffect->m_secondaryType = secondary;
     REQUIRE(pEffect->ApplyEffect(pSprite) == TRUE);
-    // NOTE: CGameEffect's destructor is not virtual (as in the original);
-    // the tests leak their effects rather than delete through the base.
-    return pEffect->m_done;
+    BOOL done = pEffect->m_done;
+    delete pEffect;
+    return done;
 }
 
 }
