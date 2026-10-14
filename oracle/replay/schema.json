@@ -834,6 +834,10 @@
     "sprite_general_state": {
       "class": "CGameSprite",
       "member": "m_derivedStats.m_generalState"
+    },
+    "sprite_sequence": {
+      "class": "CGameSprite",
+      "member": "m_nSequence"
     }
   }
 }

@@ -537,5 +537,10 @@
     "base": "CGameSprite",
     "offset": "0x0920",
     "type": "u32"
+  },
+  "sprite_sequence": {
+    "base": "CGameSprite",
+    "offset": "0x5348",
+    "type": "i16"
   }
 }

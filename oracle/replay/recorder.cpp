@@ -155,6 +155,7 @@ static_assert(kField_sprite_active_imprisonment.type == ReplayType::k_i32, "");
 static_assert(kField_sprite_visible_monster.type == ReplayType::k_i32, "");
 static_assert(kField_sprite_field_294.type == ReplayType::k_u8, "");
 static_assert(kField_sprite_general_state.type == ReplayType::k_u32, "");
+static_assert(kField_sprite_sequence.type == ReplayType::k_i16, "");
 static_assert(kField_area_characters.type == ReplayType::k_u8, "");
 static_assert(kField_area_view_x.type == ReplayType::k_i32, "");
 static_assert(kField_area_view_y.type == ReplayType::k_i32, "");
@@ -804,6 +805,8 @@ void ReadProbe(platform::replay_probe::Frame* out)
             o.visibleMonster = ReadI32(At(object, kField_sprite_visible_monster), &entryOk);
             o.field294 = ReadU8(At(object, kField_sprite_field_294), &entryOk);
             o.generalState = ReadU32(At(object, kField_sprite_general_state), &entryOk);
+            o.action = ReadI16(At(object, kField_sprite_action), &entryOk);
+            o.sequence = ReadI16(At(object, kField_sprite_sequence), &entryOk);
         } else if (o.type == platform::replay_probe::kTypeDoor) {
             o.hasName = true;
             o.name = ReadName(At(object, kField_door_name));
