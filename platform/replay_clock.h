@@ -45,10 +45,32 @@ constexpr int64_t WallClockSeconds(uint32_t tick)
 // The order inside a frame. Both sides fire a frame's due timers when
 // CChitin::SynchronousUpdate returns (the recorder's OnFrameEnd, ours
 // platform::replay::OnFrameEnd), not when the frame starts. The timer wakes
-// the AI thread, so the AI update of frame N runs after the main thread has
-// drawn frame N and before frame N+1 starts (the main thread waits for the
-// update's m_bDisplayStale). The clock still advances at the start of the
-// frame, so the frame's render and the AI update read the same time.
+// the AI thread, so the AI update of frame N normally runs after the main
+// thread has drawn frame N and before frame N+1 starts (the main thread
+// waits for the update's m_bDisplayStale). The clock still advances at the
+// start of the frame, so the frame's render and the AI update read the
+// same time.
+//
+// The order is not guaranteed. CBaldurChitin::MainAIThread (0x4242B0)
+// waits for the timer with WaitForSingleObject(m_eventTimer, 100) (push
+// 0x64 at 0x4244D8); on a timeout it goes on to its tick test
+// (0x424549-0x424572, at least 23 ms since its last update), which passes
+// because the clock has already moved. So the order holds only while the
+// main thread's frame takes less real time than that 100 ms wait. A longer
+// frame (a slow first render, disk I/O, a sanitizer build, a scheduling
+// hiccup) lets the update start during the render again. Both sides catch
+// it: OnFrameEnd counts a frame whose au_counter moved since the frame
+// began, or with an update in progress, in the dump's ai_overlap_frames,
+// and tools/oracle.py fails a checkpoint with any.
+//
+// Held calls are another matter: they overlap an AI update by design. They
+// are drawn while the AI thread is inside an update that asked for a
+// redraw: CGameArea::ProgressBarCallback (0x474E10) during a load,
+// CResCache::CopyFile (0x78C4F0), and the blackout fade's loop in
+// CScreenWorld::TimerAsynchronousUpdate, which sets m_bDisplayStale and
+// sleeps 60 ms twenty times. The frame gate holds them: they are not
+// frames, fire no timers and do not reach the overlap check (counted in
+// held_frames instead).
 //
 // Why: with the timers fired at the start of the frame, the AI update ran
 // beside the main thread's render, and the order of the two came from the
@@ -59,9 +81,10 @@ constexpr int64_t WallClockSeconds(uint32_t tick)
 // in SortLists and returns early if m_firstRender is still 1 after it. The
 // original's main thread got there first in walk_and_talk's frame 1498 (its
 // AI thread drew 185 rand() calls, a full update); ours spent 2.4 ms in the
-// UI render before it, and its AI thread, woken 16 us after the timer, got
-// there first (2 calls). Serializing the two removes the race on both sides
-// and keeps the order the original showed.
+// UI render before it, and its AI thread, woken 17 us after the timer, got
+// there first (2 calls). Firing the timers after the render narrows the
+// race to frames longer than the 100 ms wait on both sides, which
+// ai_overlap_frames reports, and keeps the order the original showed.
 //
 // The frame gate: which calls of CBaldurChitin::SynchronousUpdate count as
 // frames. Both sides ask it at the start of each call after the first, and

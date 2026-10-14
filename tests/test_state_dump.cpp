@@ -124,6 +124,7 @@ TEST_CASE("state dump JSON matches the golden dumps", "[dump]")
     periodic.frame = 30;
     periodic.rngState = 0xFFFFFFFFu;
     periodic.aiStalledFrames = 2;
+    periodic.aiOverlapFrames = 3;
     periodic.engine.screen = "create_char";
     periodic.engine.auCounter = 28;
     periodic.engine.fullscreen = 1;
@@ -428,7 +429,7 @@ TEST_CASE("replay mode dumps the start screen checkpoint", "[dump][data]")
     REQUIRE(status == 0);
     REQUIRE(checkpoint
         == "{\n  \"frame\": 61,\n  \"checkpoint\": \"start\",\n  \"screen\": \"connection\",\n  \"rng_state\": 1,\n"
-           "  \"globals\": {\"au_counter\": 61, \"fullscreen\": 0, \"in_async_update\": 0, \"ai_stalled_frames\": 0, "
+           "  \"globals\": {\"au_counter\": 61, \"fullscreen\": 0, \"in_async_update\": 0, \"ai_stalled_frames\": 0, \"ai_overlap_frames\": 0, "
            "\"reinitializing\": 0, \"loading\": 0, \"loads\": 0, \"held_frames\": 0, \"ai_rng_state\": 3861535683},\n  \"chargen\": null,\n  \"world\": null\n}\n");
     REQUIRE(periodic.find("\"frame\": 30,") != std::string::npos);
     REQUIRE(statusText == "frame=61\nscript_line=0\nstate=finished\n");

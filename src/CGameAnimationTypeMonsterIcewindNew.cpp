@@ -7,6 +7,8 @@
 
 // 0x6E8180
 CGameAnimationTypeMonsterIcewindNew::CGameAnimationTypeMonsterIcewindNew(USHORT animationID, BYTE* colorRangeValues, WORD facing)
+    : m_charPalette(CVidPalette::TYPE_RANGE)
+    , m_weaponPalette(CVidPalette::TYPE_RANGE)
 {
     field_34E6 = 0;
     m_renderWeapons = TRUE;
@@ -577,17 +579,17 @@ void CGameAnimationTypeMonsterIcewindNew::EquipWeapon(const CString& resRef, BYT
                 if ((m_animationID & 0x2) != 0) {
                     m_a4VidCellWeaponBase.SetResRef(CResRef(m_resRef + resRef[0] + "A4"), FALSE, TRUE, TRUE);
                 }
-                m_sdVidCellWeaponBase.SetResRef(CResRef(m_resRef + resRef[0] + "SDe"), FALSE, TRUE, TRUE);
+                m_deVidCellWeaponBase.SetResRef(CResRef(m_resRef + resRef[0] + "SDe"), FALSE, TRUE, FALSE);
                 m_ghVidCellWeaponBase.SetResRef(CResRef(m_resRef + resRef[0] + "GH"), FALSE, TRUE, TRUE);
                 m_slVidCellWeaponBase.SetResRef(CResRef(m_resRef + resRef[0] + "Sl"), FALSE, TRUE, TRUE);
                 m_guVidCellWeaponBase.SetResRef(CResRef(m_resRef + resRef[0] + "Gu"), FALSE, TRUE, TRUE);
                 if ((m_animationID & 0x1) != 0) {
-                    m_spVidCellWeaponBase.SetResRef(CResRef(m_resRef + resRef[0] + "Sp"), FALSE, TRUE, TRUE);
-                    m_caVidCellWeaponBase.SetResRef(CResRef(m_resRef + resRef[0] + "Ca"), FALSE, TRUE, TRUE);
+                    m_spVidCellWeaponBase.SetResRef(CResRef(m_resRef + resRef[0] + "Sp"), FALSE, TRUE, FALSE);
+                    m_caVidCellWeaponBase.SetResRef(CResRef(m_resRef + resRef[0] + "Ca"), FALSE, TRUE, FALSE);
                 }
                 m_scVidCellWeaponBase.SetResRef(CResRef(m_resRef + resRef[0] + "Sc"), FALSE, TRUE, TRUE);
                 m_sdVidCellWeaponBase.SetResRef(CResRef(m_resRef + resRef[0] + "Sd"), FALSE, TRUE, TRUE);
-                m_twVidCellWeaponBase.SetResRef(CResRef(m_resRef + resRef[0] + "Tw"), FALSE, TRUE, TRUE);
+                m_twVidCellWeaponBase.SetResRef(CResRef(m_resRef + resRef[0] + "Tw"), FALSE, TRUE, FALSE);
                 m_wkVidCellWeaponBase.SetResRef(CResRef(m_resRef + resRef[0] + "Wk"), FALSE, TRUE, TRUE);
 
                 if (!MIRROR_BAM) {
@@ -601,17 +603,17 @@ void CGameAnimationTypeMonsterIcewindNew::EquipWeapon(const CString& resRef, BYT
                     if ((m_animationID & 0x2) != 0) {
                         m_a4VidCellWeaponExtend.SetResRef(CResRef(m_resRef + resRef[0] + "A4E"), FALSE, TRUE, TRUE);
                     }
-                    m_sdVidCellWeaponExtend.SetResRef(CResRef(m_resRef + resRef[0] + "DeE"), FALSE, TRUE, TRUE);
+                    m_deVidCellWeaponExtend.SetResRef(CResRef(m_resRef + resRef[0] + "DeE"), FALSE, TRUE, FALSE);
                     m_ghVidCellWeaponExtend.SetResRef(CResRef(m_resRef + resRef[0] + "GHE"), FALSE, TRUE, TRUE);
                     m_slVidCellWeaponExtend.SetResRef(CResRef(m_resRef + resRef[0] + "SlE"), FALSE, TRUE, TRUE);
                     m_guVidCellWeaponExtend.SetResRef(CResRef(m_resRef + resRef[0] + "GuE"), FALSE, TRUE, TRUE);
                     if ((m_animationID & 0x1) != 0) {
-                        m_spVidCellWeaponExtend.SetResRef(CResRef(m_resRef + resRef[0] + "SpE"), FALSE, TRUE, TRUE);
-                        m_caVidCellWeaponExtend.SetResRef(CResRef(m_resRef + resRef[0] + "CaE"), FALSE, TRUE, TRUE);
+                        m_spVidCellWeaponExtend.SetResRef(CResRef(m_resRef + resRef[0] + "SpE"), FALSE, TRUE, FALSE);
+                        m_caVidCellWeaponExtend.SetResRef(CResRef(m_resRef + resRef[0] + "CaE"), FALSE, TRUE, FALSE);
                     }
                     m_scVidCellWeaponExtend.SetResRef(CResRef(m_resRef + resRef[0] + "ScE"), FALSE, TRUE, TRUE);
                     m_sdVidCellWeaponExtend.SetResRef(CResRef(m_resRef + resRef[0] + "SdE"), FALSE, TRUE, TRUE);
-                    m_twVidCellWeaponExtend.SetResRef(CResRef(m_resRef + resRef[0] + "TwE"), FALSE, TRUE, TRUE);
+                    m_twVidCellWeaponExtend.SetResRef(CResRef(m_resRef + resRef[0] + "TwE"), FALSE, TRUE, FALSE);
                     m_wkVidCellWeaponExtend.SetResRef(CResRef(m_resRef + resRef[0] + "WkE"), FALSE, TRUE, TRUE);
                 }
 
@@ -627,10 +629,10 @@ void CGameAnimationTypeMonsterIcewindNew::EquipWeapon(const CString& resRef, BYT
             if (!MIRROR_BAM && m_currentBamDirection > m_extendDirectionTest) {
                 m_currentVidCellWeapon = m_currentVidCellWeaponExtend;
             } else {
-                m_currentVidCellWeapon = m_currentVidCellBase;
+                m_currentVidCellWeapon = m_currentVidCellWeaponBase;
             }
 
-            if (!MIRROR_BAM && m_currentBamDirection > m_extendDirectionTest) {
+            if (MIRROR_BAM && m_currentBamDirection > m_extendDirectionTest) {
                 m_currentVidCellWeapon->SequenceSet(8 * m_currentBamSequence + ((17 - m_currentBamDirection) % 16) / 2);
             } else {
                 m_currentVidCellWeapon->SequenceSet(8 * m_currentBamSequence + m_currentBamDirection / 2);
@@ -826,7 +828,7 @@ void CGameAnimationTypeMonsterIcewindNew::ClearColorEffects(BYTE colorRange)
 {
     // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjAnimation.cpp
     // __LINE__: 28375
-    UTIL_ASSERT(FALSE);
+    UTIL_ASSERT(m_currentVidCell != NULL);
 
     switch (colorRange & 0xF0) {
     case 0x00:
