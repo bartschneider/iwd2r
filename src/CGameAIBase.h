@@ -149,6 +149,7 @@ public:
     void ProcessPendingTriggers();
 
     void sub_481890(CRect* r, CArray<CRect*>& ary);
+    void DecodeSpell(LONG nSpellId, CString& sResRef);
     void FireSpell(const CResRef& resRef, CGameObject* target);
     void FireSpellPoint(const CResRef& resRef, const CPoint& ptTarget);
     static CVariable* GetGlobalVariable(const CString& sScope, const CString& sName, int a3);

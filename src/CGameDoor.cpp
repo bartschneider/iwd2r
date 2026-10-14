@@ -205,7 +205,7 @@ CGameDoor::CGameDoor(CGameArea* pArea, CAreaFileDoorObject* pDoorObject, CAreaPo
     m_ptOpenDest.x = (pDoorObject->m_openBoundingRectLeft + pDoorObject->m_openBoundingRectRight) / 2;
     m_ptOpenDest.y = pDoorObject->m_openBoundingRectBottom;
 
-    m_nClosedSearch = pDoorObject->m_openSearchSquaresCount;
+    m_nClosedSearch = pDoorObject->m_closedSearchSquaresCount;
     if (m_nClosedSearch != 0) {
         m_pClosedSearch = new CPoint[m_nClosedSearch];
 
@@ -329,6 +329,13 @@ CGameDoor::~CGameDoor()
         }
     }
     field_6F2.SetSize(0);
+}
+
+// 0x47C830
+BOOLEAN CGameDoor::CanSaveGame(STRREF& strError)
+{
+    strError = -1;
+    return TRUE;
 }
 
 // 0x487460

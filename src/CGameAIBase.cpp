@@ -1571,6 +1571,41 @@ void CGameAIBase::SetScript(SHORT level, CAIScript* script)
     }
 }
 
+// 0x45D3E0
+void CGameAIBase::DecodeSpell(LONG nSpellId, CString& sResRef)
+{
+    if (nSpellId == 0) {
+        nSpellId = field_588;
+        if (nSpellId == 0) {
+            sResRef = "";
+            return;
+        }
+    }
+
+    CString sSpell("");
+    sSpell += "SP";
+
+    if (nSpellId / 1000 == 1) {
+        sSpell += "PR";
+    } else if (nSpellId / 1000 == 2) {
+        sSpell += "WI";
+    } else if (nSpellId / 1000 == 3) {
+        sSpell += "IN";
+    } else {
+        sSpell = "MARW";
+
+        // NOTE: The original formats this message and drops it (no assert,
+        // no log), 0x45D4AD-0x45D4D8.
+        CString sError;
+        sError.Format("Invalid or missing spell ID (check SPELL.IDS): %d", nSpellId);
+    }
+
+    CString sNumber;
+    sNumber.Format("%03d", nSpellId % 1000);
+    sSpell += sNumber;
+    sResRef = sSpell;
+}
+
 // 0x45D6A0
 void CGameAIBase::ApplyTriggers()
 {

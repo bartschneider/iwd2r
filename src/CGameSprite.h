@@ -413,6 +413,7 @@ public:
     /* 000C */ void AIUpdate() override;
     /* 0014 */ LONG GetTargetId() override;
     /* 0018 */ void GetNextWaypoint(CPoint* pt) override;
+    /* 0028 */ BOOLEAN CanSaveGame(STRREF& strError) override;
     /* 0034 */ BOOL IsOver(const CPoint& pt) override;
     /* 0038 */ BOOL DoesIntersect(CRect r);
     /* 003C */ BOOL OnSearchMap() override;
@@ -427,6 +428,7 @@ public:
     /* 007C */ void ClearAI(BOOLEAN bSetSequence) override;
     /* 0084 */ SHORT ExecuteAction() override;
     /* 008C */ void ProcessAI() override;
+    /* 0090 */ void SetCurrAction(const CAIAction& action) override;
     /* 0094 */ void SetScript(SHORT level, CAIScript* script) override;
     /* 009C */ const BYTE* GetVisibleTerrainTable() override;
     /* 00A0 */ const BYTE* GetTerrainTable() override;
@@ -538,6 +540,7 @@ public:
     void GetNumInventoryPersonalSlots(INT& nUsedSlots, INT& nTotalSlots);
     void SetModalState(BYTE modalState, BOOL bUpdateToolbar);
     BOOL sub_7202E0();
+    BOOL sub_727720(const CResRef& resRef, BYTE& nClass, DWORD& nSpecialization, BYTE& nLevel);
     BOOL sub_71CFF0();
     void sub_71D0B0();
     void sub_72FBF0();

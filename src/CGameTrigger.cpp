@@ -166,6 +166,13 @@ CGameTrigger::~CGameTrigger()
     field_630.SetSize(0);
 }
 
+// 0x47C830
+BOOLEAN CGameTrigger::CanSaveGame(STRREF& strError)
+{
+    strError = -1;
+    return TRUE;
+}
+
 // 0x4CD220
 BOOLEAN CGameTrigger::DoAIUpdate(BOOLEAN active, LONG counter)
 {
