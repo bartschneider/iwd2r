@@ -780,9 +780,12 @@ void CScreenLoad::RefreshGameSlots()
     CString sResText;
     CString sName;
     CString sFileName;
-    ULONG nGameTime;
-    INT nChapter;
-    BYTE nSex; // NOTE: Unused.
+    // NOTE: The original leaves these uninitialized: a save whose game file
+    // cannot be read takes the previous save's values (and the first one
+    // takes whatever the stack held). iwd2r starts them at zero.
+    ULONG nGameTime = 0;
+    INT nChapter = 0;
+    BYTE nSex = 0; // NOTE: Only passed to the empty call below.
 
     FreeGameSlots();
 
@@ -813,7 +816,7 @@ void CScreenLoad::RefreshGameSlots()
                 m_aGameSlots[nIndex]->m_sSlotName = sFileName;
             }
 
-            sDirName = pGame->GetDirSaveRoot() + m_aGameSlots[nIndex]->m_sFileName + "/";
+            sDirName = pGame->GetDirSaveRoot() + m_aGameSlots[nIndex]->m_sFileName + "\\";
 
             if (g_pChitin->cDimm.ServiceFromFile(&cResGame, sDirName + "ICEWIND2.GAM")) {
                 BYTE* pGameData = reinterpret_cast<BYTE*>(cResGame.m_pData);
@@ -923,6 +926,9 @@ void CScreenLoad::RefreshGameSlots()
                 m_aGameSlots[nIndex]->m_cBmpResPortrait5.m_pData = NULL;
             }
 
+            // NOTE: The original calls an empty CInfGame member here (0x71E750,
+            // `ret 8`) with `cResPortrait` and `nSex`; it does nothing.
+
             m_aGameSlots[nIndex]->m_cResPortrait = cResPortrait;
             m_aGameSlots[nIndex]->m_sCharacterName = sName;
             m_aGameSlots[nIndex]->m_nTime = nGameTime;
@@ -943,6 +949,10 @@ void CScreenLoad::RefreshGameSlots()
 // 0x63D460
 BOOL CScreenLoad::DrawScreenShot(INT nSlot, const CRect& rArea, const CRect& rClip)
 {
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenLoad.cpp
+    // __LINE__: 1579
+    UTIL_ASSERT(0 <= nSlot && nSlot < GAME_SLOTS);
+
     CVidBitmap vbScreenShot(CResRef(""), g_pBaldurChitin->field_4A28);
 
     INT nGameSlot = nSlot + m_nTopGameSlot;
@@ -976,6 +986,10 @@ BOOL CScreenLoad::DrawScreenShot(INT nSlot, const CRect& rArea, const CRect& rCl
 // 0x63D720
 BOOL CScreenLoad::DrawPortrait(USHORT nPortrait, INT nSlot, const CRect& rArea, const CRect& rClip)
 {
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenLoad.cpp
+    // __LINE__: 1628
+    UTIL_ASSERT(0 <= nSlot && nSlot < GAME_SLOTS);
+
     CVidBitmap vbPortrait(CResRef(""), g_pBaldurChitin->field_4A28);
 
     INT nGameSlot = nSlot + m_nTopGameSlot;
@@ -1031,11 +1045,11 @@ BOOL CScreenLoad::DrawPortrait(USHORT nPortrait, INT nSlot, const CRect& rArea, 
 
         return TRUE;
     case 3:
-        if (m_aGameSlots[nGameSlot]->m_cBmpResPortrait2.m_pData == NULL) {
+        if (m_aGameSlots[nGameSlot]->m_cBmpResPortrait3.m_pData == NULL) {
             return FALSE;
         }
 
-        vbPortrait.SetRes(&(m_aGameSlots[nGameSlot]->m_cBmpResPortrait2));
+        vbPortrait.SetRes(&(m_aGameSlots[nGameSlot]->m_cBmpResPortrait3));
         vbPortrait.pRes->DemandLoadedBitmap();
         bResult = vbPortrait.RenderDirect(0, rArea.left, rArea.top, rClip, 0, 1);
         vbPortrait.pRes->ReleaseLoadedBitmap();

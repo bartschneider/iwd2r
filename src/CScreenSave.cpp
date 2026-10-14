@@ -1,6 +1,7 @@
 #include "CScreenSave.h"
 
 #include "CBaldurChitin.h"
+#include "CCreatureFile.h"
 #include "CGameArea.h"
 #include "CGameSprite.h"
 #include "CInfCursor.h"
@@ -99,14 +100,14 @@ CScreenSave::CScreenSave()
     m_pVirtualKeys[47] = CKeyInfo(VK_DELETE, 0, 0);
     m_pVirtualKeys[48] = CKeyInfo(VK_NUMPAD0, -1, 0);
     m_pVirtualKeys[49] = CKeyInfo(VK_NUMPAD1, -1, 0);
-    m_pVirtualKeys[50] = CKeyInfo(VK_NUMPAD2, -1, 0);
-    m_pVirtualKeys[51] = CKeyInfo(VK_NUMPAD3, -1, 0);
-    m_pVirtualKeys[52] = CKeyInfo(VK_NUMPAD4, -1, 0);
+    m_pVirtualKeys[50] = CKeyInfo(VK_NUMPAD2, 0, 0);
+    m_pVirtualKeys[51] = CKeyInfo(VK_NUMPAD3, 0, 0);
+    m_pVirtualKeys[52] = CKeyInfo(VK_NUMPAD4, 0, 0);
     m_pVirtualKeys[53] = CKeyInfo(VK_NUMPAD5, -1, 0);
-    m_pVirtualKeys[54] = CKeyInfo(VK_NUMPAD6, -1, 0);
+    m_pVirtualKeys[54] = CKeyInfo(VK_NUMPAD6, 0, 0);
     m_pVirtualKeys[55] = CKeyInfo(VK_NUMPAD7, -1, 0);
-    m_pVirtualKeys[56] = CKeyInfo(VK_NUMPAD8, -1, 0);
-    m_pVirtualKeys[57] = CKeyInfo(VK_NUMPAD9, -1, 0);
+    m_pVirtualKeys[56] = CKeyInfo(VK_NUMPAD8, 0, 0);
+    m_pVirtualKeys[57] = CKeyInfo(VK_NUMPAD9, 0, 0);
     m_pVirtualKeys[58] = CKeyInfo(VK_MULTIPLY, -1, 0);
     m_pVirtualKeys[59] = CKeyInfo(VK_ADD, -1, 0);
     m_pVirtualKeys[60] = CKeyInfo(VK_SEPARATOR, -1, 0);
@@ -459,7 +460,7 @@ void CScreenSave::OnKeyDown(SHORT nKeysFlags)
     }
 }
 
-// 0x63B9B0
+// 0x66A540
 void CScreenSave::TimerAsynchronousUpdate()
 {
     g_pBaldurChitin->m_pEngineWorld->AsynchronousUpdate(FALSE);
@@ -524,7 +525,14 @@ void CScreenSave::UpdateMainPanel()
         // __LINE__: 813
         UTIL_ASSERT(pButton != NULL);
 
-        pButton->SetEnabled(nGameSlot < m_nNumGameSlots);
+        // NOTE: Inlining. Only a slot with a save can be deleted: the new
+        // save slot at the end of the list has no file name.
+
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenSave.cpp
+        // __LINE__: 963
+        UTIL_ASSERT(0 <= nSlot && nSlot < GAME_SLOTS);
+
+        pButton->SetEnabled(nGameSlot < m_nNumGameSlots && m_aGameSlots[nGameSlot]->m_sFileName != "");
 
         pButton = static_cast<CUIControlButton*>(pPanel->GetControl(1 + nSlot));
 
@@ -680,7 +688,6 @@ BOOL CScreenSave::IsDoneButtonClickable()
             bClickable = sString != "";
         }
         break;
-    case 0:
     case 2:
     case 3:
         bClickable = TRUE;
@@ -689,6 +696,9 @@ BOOL CScreenSave::IsDoneButtonClickable()
         // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenSave.cpp
         // __LINE__ 1110
         UTIL_ASSERT(FALSE);
+
+        // iwd2r: the original returns whatever its register held.
+        bClickable = FALSE;
     }
 
     return bClickable;
@@ -734,9 +744,11 @@ void CScreenSave::OnDoneButtonClick()
                 UTIL_ASSERT(pEdit != NULL);
 
                 sSlotName = pEdit->GetText();
+                sSlotName.TrimLeft();
+                sSlotName.TrimRight();
 
                 BOOL bSave;
-                if (sSlotName.FindOneOf(".?:<>|*/\"") < 0) {
+                if (sSlotName.FindOneOf(".?:<>|*/\\\"") < 0) {
                     if (sSlotName.CompareNoCase("aux") != 0
                         && sSlotName.CompareNoCase("con") != 0
                         && sSlotName.CompareNoCase("prn") != 0) {
@@ -744,11 +756,13 @@ void CScreenSave::OnDoneButtonClick()
                         bSave = TRUE;
                     } else {
                         m_dwErrorTextId = 17132;
+                        m_strErrorButtonText[0] = 11973;
                         SummonPopup(3);
                         bSave = FALSE;
                     }
                 } else {
                     m_dwErrorTextId = 17133;
+                    m_strErrorButtonText[0] = 11973;
                     SummonPopup(3);
                     bSave = FALSE;
                 }
@@ -794,7 +808,6 @@ void CScreenSave::OnCancelButtonClick()
     UTIL_ASSERT(pPanel != NULL);
 
     switch (pPanel->m_nID) {
-    case 0:
     case 2:
     case 3:
         DismissPopup();
@@ -879,7 +892,194 @@ void CScreenSave::FreeGameSlots()
 // 0x65BCF0
 void CScreenSave::RefreshGameSlots()
 {
-    // TODO: Incomplete.
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    const CRuleTables& rule = pGame->GetRuleTables();
+
+    CStringList* pGames = pGame->GetSaveGames();
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenSave.cpp
+    // __LINE__: 1433
+    UTIL_ASSERT(pGames != NULL);
+
+    CVariable cVariable;
+    CResRef cResPortrait;
+    CResGame cResGame;
+    CResRef v1; // NOTE: Unused.
+    CString sDirName;
+    CString sChapter;
+    CString sResText;
+    CString sName;
+    CString sFileName;
+    // NOTE: The original leaves these uninitialized: a save whose game file
+    // cannot be read takes the previous save's values (and the first one
+    // takes whatever the stack held). iwd2r starts them at zero.
+    ULONG nGameTime = 0;
+    INT nChapter = 0;
+    BYTE nSex = 0;
+
+    FreeGameSlots();
+
+    // One slot more than there are saves: the last one is the empty slot a
+    // new save goes into.
+    m_nNumGameSlots = pGames->GetCount() + 1;
+    m_aGameSlots.SetSize(m_nNumGameSlots);
+
+    m_nMaxSlotNumber = -1;
+    m_nTopGameSlot = max(min(m_nTopGameSlot, m_nNumGameSlots - GAME_SLOTS), 0);
+
+    INT nIndex = 0;
+
+    POSITION pos = pGames->GetHeadPosition();
+    while (pos != NULL) {
+        sFileName = pGames->GetAt(pos);
+        if (sFileName != "default") {
+            m_aGameSlots[nIndex] = new CScreenSaveGameSlot();
+            m_aGameSlots[nIndex]->m_sFileName = sFileName;
+
+            CString sNumber = m_aGameSlots[nIndex]->m_sFileName.SpanIncluding("0123456789");
+            if (m_aGameSlots[nIndex]->m_sFileName[sNumber.GetLength()] == '-') {
+                m_aGameSlots[nIndex]->m_sSlotName = m_aGameSlots[nIndex]->m_sFileName.Right(m_aGameSlots[nIndex]->m_sFileName.GetLength() - sNumber.GetLength() - 1);
+
+                // NOTE: Numbers 1 to 3 (the quick saves and the auto save)
+                // never raise the highest slot number.
+                INT nNumber = atol(sNumber);
+                if (nNumber > m_nMaxSlotNumber && nNumber >= 4) {
+                    m_nMaxSlotNumber = nNumber;
+                }
+            } else {
+                m_aGameSlots[nIndex]->m_sSlotName = m_aGameSlots[nIndex]->m_sFileName;
+            }
+
+            sDirName = pGame->GetDirSaveRoot() + m_aGameSlots[nIndex]->m_sFileName + "\\";
+
+            if (g_pChitin->cDimm.ServiceFromFile(&cResGame, sDirName + "ICEWIND2.GAM")) {
+                BYTE* pGameData = reinterpret_cast<BYTE*>(cResGame.m_pData);
+                CSavedGameHeader* pSavedGameHeader = reinterpret_cast<CSavedGameHeader*>(pGameData + 8);
+                CSavedGamePartyCreature* pCreature = reinterpret_cast<CSavedGamePartyCreature*>(pGameData + pSavedGameHeader->m_partyCreatureTableOffset);
+                CCreatureFileHeader* pCreatureFileHeader;
+                if (pCreature->m_creatureResRef[0] != '\0') {
+                    // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenSave.cpp
+                    // __LINE__: 1508
+                    UTIL_ASSERT(pCreature->m_creatureSize == 0);
+
+                    CCreatureFile cCreatureFile;
+                    cCreatureFile.SetResRef(pCreature->m_creatureResRef, TRUE, TRUE);
+
+                    pCreatureFileHeader = reinterpret_cast<CCreatureFileHeader*>(cCreatureFile.GetData() + 8);
+                    cResPortrait = pCreatureFileHeader->m_portraitSmall;
+                    nSex = pCreatureFileHeader->m_sex;
+
+                    cCreatureFile.ReleaseData();
+                } else {
+                    pCreatureFileHeader = reinterpret_cast<CCreatureFileHeader*>(pGameData + pCreature->m_creatureOffset + 8);
+                    cResPortrait = pCreatureFileHeader->m_portraitSmall;
+                    nSex = pCreatureFileHeader->m_sex;
+                }
+
+                if (pCreatureFileHeader->m_name == -1) {
+                    sName = pCreature->m_name;
+                } else {
+                    sName = FetchString(pCreatureFileHeader->m_name);
+                }
+
+                nGameTime = pSavedGameHeader->m_worldTime * CTimerWorld::TIMESCALE_MSEC_PER_SEC;
+
+                CFileStatus cFileStatus;
+                if (g_pChitin->cDimm.LocalGetFileStatus(sDirName + "ICEWIND2.GAM", cFileStatus) == TRUE) {
+                    m_aGameSlots[nIndex]->field_314 = cFileStatus.m_mtime.Format("%a, %b %d, %Y - %I:%M %p");
+                }
+
+                nChapter = -1;
+                for (DWORD nVariable = 0; nVariable < pSavedGameHeader->m_globalVariablesCount; nVariable++) {
+                    CAreaVariable* pAreaVariable = reinterpret_cast<CAreaVariable*>(pGameData + pSavedGameHeader->m_globalVariablesOffset) + nVariable;
+
+                    // NOTE: Looks odd, probably inlined assignment.
+                    if (&cVariable != pAreaVariable) {
+                        strncpy(cVariable.m_name, pAreaVariable->m_name, SCRIPTNAME_SIZE);
+                        cVariable.m_type = pAreaVariable->m_type;
+                        cVariable.m_resRefType = pAreaVariable->m_resRefType;
+                        cVariable.m_dwValue = pAreaVariable->m_dwValue;
+                        cVariable.m_intValue = pAreaVariable->m_intValue;
+                        cVariable.m_floatValue = pAreaVariable->m_floatValue;
+                        strncpy(cVariable.m_stringValue, pAreaVariable->m_stringValue, SCRIPTNAME_SIZE);
+                    }
+
+                    if (cVariable.GetName() == CInfGame::CHAPTER_GLOBAL) {
+                        nChapter = cVariable.m_intValue;
+                    }
+                }
+
+                if (nChapter < 0) {
+                    nChapter = 0;
+                }
+
+                sResText = "chapters";
+
+                CList<STRREF, STRREF>* pList = rule.GetChapterText(CResRef(sResText), nChapter);
+
+                // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenSave.cpp
+                // __LINE__: 1573
+                UTIL_ASSERT(pList != NULL);
+
+                if (pList->GetCount() > 0) {
+                    sChapter = FetchString(pList->GetHead());
+                }
+
+                delete pList;
+
+                // NOTE: Looks unsafe.
+                free(cResGame.m_pData);
+                cResGame.m_pData = NULL;
+            }
+
+            if (!g_pChitin->cDimm.ServiceFromFile(&(m_aGameSlots[nIndex]->m_cResScreenShot), sDirName + "ICEWIND2.BMP")) {
+                m_aGameSlots[nIndex]->m_cResScreenShot.m_pData = NULL;
+            }
+
+            if (!g_pChitin->cDimm.ServiceFromFile(&(m_aGameSlots[nIndex]->m_cBmpResPortrait0), sDirName + "PORTRT0.BMP")) {
+                m_aGameSlots[nIndex]->m_cBmpResPortrait0.m_pData = NULL;
+            }
+
+            if (!g_pChitin->cDimm.ServiceFromFile(&(m_aGameSlots[nIndex]->m_cBmpResPortrait1), sDirName + "PORTRT1.BMP")) {
+                m_aGameSlots[nIndex]->m_cBmpResPortrait1.m_pData = NULL;
+            }
+
+            if (!g_pChitin->cDimm.ServiceFromFile(&(m_aGameSlots[nIndex]->m_cBmpResPortrait2), sDirName + "PORTRT2.BMP")) {
+                m_aGameSlots[nIndex]->m_cBmpResPortrait2.m_pData = NULL;
+            }
+
+            if (!g_pChitin->cDimm.ServiceFromFile(&(m_aGameSlots[nIndex]->m_cBmpResPortrait3), sDirName + "PORTRT3.BMP")) {
+                m_aGameSlots[nIndex]->m_cBmpResPortrait3.m_pData = NULL;
+            }
+
+            if (!g_pChitin->cDimm.ServiceFromFile(&(m_aGameSlots[nIndex]->m_cBmpResPortrait4), sDirName + "PORTRT4.BMP")) {
+                m_aGameSlots[nIndex]->m_cBmpResPortrait4.m_pData = NULL;
+            }
+
+            if (!g_pChitin->cDimm.ServiceFromFile(&(m_aGameSlots[nIndex]->m_cBmpResPortrait5), sDirName + "PORTRT5.BMP")) {
+                m_aGameSlots[nIndex]->m_cBmpResPortrait5.m_pData = NULL;
+            }
+
+            // NOTE: The original calls an empty CInfGame member here (0x71E750,
+            // `ret 8`) with `cResPortrait` and `nSex`; it does nothing.
+
+            m_aGameSlots[nIndex]->m_cResPortrait = cResPortrait;
+            m_aGameSlots[nIndex]->m_sCharacterName = sName;
+            m_aGameSlots[nIndex]->m_nTime = nGameTime;
+            m_aGameSlots[nIndex]->m_nChapter = nChapter;
+            m_aGameSlots[nIndex]->m_sChapter = sChapter;
+
+            nIndex++;
+        }
+
+        pGames->GetNext(pos);
+    }
+
+    // The empty slot for a new save.
+    m_nNumGameSlots = nIndex + 1;
+    m_aGameSlots[m_nNumGameSlots - 1] = new CScreenSaveGameSlot();
+
+    delete pGames;
 }
 
 // 0x65C850
@@ -962,11 +1162,11 @@ BOOL CScreenSave::DrawPortrait(USHORT nPortrait, INT nSlot, const CRect& rArea, 
 
         return TRUE;
     case 3:
-        if (m_aGameSlots[nSlot]->m_cBmpResPortrait2.m_pData == NULL) {
+        if (m_aGameSlots[nSlot]->m_cBmpResPortrait3.m_pData == NULL) {
             return FALSE;
         }
 
-        vbPortrait.SetRes(&(m_aGameSlots[nSlot]->m_cBmpResPortrait2));
+        vbPortrait.SetRes(&(m_aGameSlots[nSlot]->m_cBmpResPortrait3));
         vbPortrait.pRes->DemandLoadedBitmap();
         bResult = vbPortrait.RenderDirect(0, rArea.left, rArea.top, rClip, 0, 1);
         vbPortrait.pRes->ReleaseLoadedBitmap();
@@ -1087,7 +1287,6 @@ void CScreenSave::ResetPopupPanel(DWORD dwPanelId)
     case 1:
         ResetSaveAsPanel(pPanel);
         break;
-    case 0:
     case 2:
     case 3:
         ResetErrorPanel(pPanel);
@@ -1107,7 +1306,6 @@ void CScreenSave::UpdatePopupPanel(DWORD dwPanelId)
         // NOTE: Uninline.
         UpdateSaveAsPanel();
         break;
-    case 0:
     case 2:
     case 3:
         break;
@@ -1229,14 +1427,19 @@ void CScreenSave::ResetSaveAsPanel(CUIPanel* pPanel)
     if (rc == CGameObjectArray::SUCCESS) {
         m_aGameSlots[nGameSlot]->m_cResPortrait = pSprite->GetBaseStats()->m_portraitSmall;
 
-        // NOTE: Uninline.
-        m_aGameSlots[nGameSlot]->m_sCharacterName = pSprite->GetName();
+        // NOTE: Inlined `GetName`, without its caching of the name.
+        if (pSprite->GetBaseStats()->m_name != -1) {
+            m_aGameSlots[nGameSlot]->m_sCharacterName = FetchString(pSprite->GetBaseStats()->m_name);
+        } else {
+            m_aGameSlots[nGameSlot]->m_sCharacterName = pSprite->GetName();
+        }
 
         // FIXME: Unused.
         ULONG nTimeWithParty;
         pSprite->m_cGameStats.GetTimeWithParty(nTimeWithParty);
 
-        // TODO: Probably a bug, releasing `iPicked` instead of `nCharacterId`.
+        // NOTE: Original bug: it releases the visible area's `m_iPicked`
+        // instead of `nCharacterId`, so the protagonist's share is kept.
         pGame->GetObjectArray()->ReleaseShare(pGame->GetVisibleArea()->m_iPicked,
             CGameObjectArray::THREAD_ASYNCH,
             INFINITE);
@@ -1272,7 +1475,8 @@ void CScreenSave::ResetSaveAsPanel(CUIPanel* pPanel)
 
     UpdateLabel(pPanel,
         0x10000004,
-        m_aGameSlots[nGameSlot]->m_sChapter,
+        "%s, %s",
+        (LPCSTR)m_aGameSlots[nGameSlot]->m_sChapter,
         (LPCSTR)sTime);
 
     CUIControlButton* pButton = static_cast<CUIControlButton*>(pPanel->GetControl(7));
@@ -1388,6 +1592,7 @@ void CScreenSave::OnErrorButtonClick(INT nButton)
             // __LINE__: 2392
             UTIL_ASSERT(FALSE);
         }
+        break;
     case 17132:
     case 17133:
         switch (nButton) {
@@ -1482,6 +1687,9 @@ void CScreenSave::SaveGame(INT nGameSlot, const CString& sSlotName)
         // __LINE__: 2619
         UTIL_ASSERT(FALSE);
     }
+
+    // NOTE: Uninline.
+    StopSave();
 }
 
 // NOTE: Inlined.
@@ -1684,7 +1892,7 @@ BOOL CUIControlButtonSaveScreenShot::Render(BOOL bForce)
     rArea.left = m_pPanel->m_ptOrigin.x + m_ptOrigin.x;
     rArea.top = m_pPanel->m_ptOrigin.y + m_ptOrigin.y;
 
-    return pSave->DrawScreenShot(m_nID - 1, rArea, rClip);
+    return pSave->DrawScreenShot(nGameSlot, rArea, rClip);
 }
 
 // 0x65EB50
@@ -1907,7 +2115,7 @@ void CUIControlScrollBarSaveGames::UpdateMainPanel()
 
 // -----------------------------------------------------------------------------
 
-// 0x065F350
+// 0x65F350
 CUIControlButtonSavePopupDone::CUIControlButtonSavePopupDone(CUIPanel* panel, UI_CONTROL_BUTTON* controlInfo)
     : CUIControlButton(panel, controlInfo, LBUTTON, 0)
 {
