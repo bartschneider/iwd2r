@@ -375,3 +375,52 @@ TEST_CASE("spell immunity (206, 290) stays on while it has a resource", "[effect
 
     delete pSprite;
 }
+
+TEST_CASE("damage (12) takes resistances and leaves the living awake", "[effects][data]")
+{
+    REQUIRE_ENGINE();
+    CGameSprite* pSprite = MakeSprite();
+    pSprite->m_baseStats.m_hitPoints = 30;
+    pSprite->m_baseStats.m_maxHitPointsBase = 30;
+    pSprite->m_tempStats.m_nMaxHitPoints = 30;
+    pSprite->m_baseStats.m_generalState = 0;
+
+    // Magic and poison damage start no sprite effect (blood and the
+    // elemental effects need an effect palette this fixture does not set
+    // up), so they carry the checks.
+    SECTION("magic, mode 0, less the magic damage resistance")
+    {
+        pSprite->m_tempStats.m_nMagicDamageResistance = 2;
+        Apply(pSprite, CGAMEEFFECT_DAMAGE, 0x400000, 7, 0);
+        CHECK(pSprite->m_baseStats.m_hitPoints == 25);
+        CHECK(pSprite->field_5582 == 5);
+    }
+
+    SECTION("poison less the poison resistance; a resistance above the amount does nothing")
+    {
+        pSprite->m_tempStats.m_nResistPoison = 3;
+        Apply(pSprite, CGAMEEFFECT_DAMAGE, 0x200000, 9, 0);
+        CHECK(pSprite->m_baseStats.m_hitPoints == 24);
+        pSprite->m_tempStats.m_nResistPoison = 20;
+        Apply(pSprite, CGAMEEFFECT_DAMAGE, 0x200000, 9, 0);
+        CHECK(pSprite->m_baseStats.m_hitPoints == 24);
+    }
+
+    SECTION("mode 3 halves, mode 2 is a percentage of the current hit points")
+    {
+        Apply(pSprite, CGAMEEFFECT_DAMAGE, 0x400003, 9, 0);
+        CHECK(pSprite->m_baseStats.m_hitPoints == 26);
+        Apply(pSprite, CGAMEEFFECT_DAMAGE, 0x400002, 50, 0);
+        CHECK(pSprite->m_baseStats.m_hitPoints == 13);
+    }
+
+    SECTION("a cut scene stops it")
+    {
+        g_pBaldurChitin->GetObjectGame()->m_gameSave.m_cutScene = TRUE;
+        CHECK(Apply(pSprite, CGAMEEFFECT_DAMAGE, 0x400000, 7, 0) == TRUE);
+        g_pBaldurChitin->GetObjectGame()->m_gameSave.m_cutScene = FALSE;
+        CHECK(pSprite->m_baseStats.m_hitPoints == 30);
+    }
+
+    delete pSprite;
+}

@@ -3,6 +3,7 @@
 #include "CAIScript.h"
 #include "CBaldurChitin.h"
 #include "CBaldurProjector.h"
+#include "CBlood.h"
 #include "CGameAnimationType.h"
 #include "CGameArea.h"
 #include "CGameSprite.h"
@@ -3872,6 +3873,474 @@ CGameEffect* CGameEffectDeath::Copy()
     delete effect;
     copy->CopyFromBase(this);
     return copy;
+}
+
+// 0x4AB510
+BOOL CGameEffectDeath::ApplyEffect(CGameSprite* pSprite)
+{
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CMessage* message;
+    CGameObject* pObject;
+    BYTE rc;
+
+    BOOLEAN bDestroy = FALSE;
+
+    // NOTE: Inlined CGameAnimation::IsInvulnerable (ObjAnimation.h line
+    // 2100 asserts m_animation).
+    if (pSprite->GetAnimation()->m_animation->IsInvulnerable()) {
+        m_done = TRUE;
+        return TRUE;
+    }
+
+    if (field_18C == 0 && pGame->m_gameSave.m_cutScene == TRUE) {
+        m_done = TRUE;
+        return TRUE;
+    }
+
+    // TODO: Incomplete. The original calls CGameSprite 0x6F5330 here (not
+    // in src/; it resets sprite state at +0x54A4..+0x54B4 and +0x50BA).
+
+    if ((pSprite->m_derivedStats.m_generalState & STATE_DEAD) != 0) {
+        if (pSprite->m_nSequence == CGameSprite::SEQ_SLEEP) {
+            pSprite->SetSequence(CGameSprite::SEQ_TWITCH);
+            m_done = TRUE;
+            return TRUE;
+        }
+
+        if (pSprite->m_nSequence != CGameSprite::SEQ_DIE
+            && pSprite->m_nSequence != CGameSprite::SEQ_TWITCH) {
+            pSprite->SetSequence(CGameSprite::SEQ_DIE);
+        }
+
+        m_done = TRUE;
+        return TRUE;
+    }
+
+    pSprite->AutoPause(16);
+
+    if (pGame->GetCharacterPortraitNum(pSprite->GetId()) != -1) {
+        g_pBaldurChitin->m_pEngineWorld->StartDeathReaction(CString(reinterpret_cast<const char*>(pSprite->m_scriptName)));
+    }
+
+    if ((pSprite->m_baseStats.m_flags & 0x2000) != 0) {
+        pGame->ReadyCharacterTerminationSequence(1, -1);
+    } else {
+        // The game ends when no other party member is alive.
+        BOOLEAN bPartyAlive = FALSE;
+        for (BYTE nIndex = 0; nIndex < 6; nIndex++) {
+            // NOTE: An inlined accessor of m_characters with a bounds check
+            // (0x4AB6C6).
+            LONG nCharacterId = nIndex < 6
+                ? pGame->m_characters[nIndex]
+                : CGameObjectArray::INVALID_INDEX;
+            if (nCharacterId != pSprite->GetId() && nCharacterId != CGameObjectArray::INVALID_INDEX) {
+                do {
+                    rc = pGame->GetObjectArray()->GetShare(nCharacterId,
+                        CGameObjectArray::THREAD_ASYNCH,
+                        &pObject,
+                        INFINITE);
+                } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+                if (rc == CGameObjectArray::SUCCESS) {
+                    if (static_cast<CGameSprite*>(pObject)->m_baseStats.m_hitPoints > 0) {
+                        bPartyAlive = TRUE;
+                    }
+
+                    pGame->GetObjectArray()->ReleaseShare(nCharacterId,
+                        CGameObjectArray::THREAD_ASYNCH,
+                        INFINITE);
+                }
+            }
+        }
+
+        if (!bPartyAlive) {
+            pGame->ReadyCharacterTerminationSequence(2, -1);
+        }
+    }
+
+    pSprite->m_hasColorEffects = TRUE;
+
+    // The death cry; with gore off the original plays sound 6 instead of
+    // SOUND_DYING (the BYTE at 0x85BB69).
+    if (pGame->GetOptions()->m_nGore != 0) {
+        if (!pSprite->field_70FE) {
+            message = new CMessagePlaySound(CGameSprite::SOUND_DYING, TRUE, FALSE, pSprite->GetId(), pSprite->GetId());
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        }
+    } else {
+        if (!pSprite->field_70FE) {
+            message = new CMessagePlaySound(6, TRUE, FALSE, pSprite->GetId(), pSprite->GetId());
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        }
+    }
+
+    pSprite->m_animationRunning = TRUE;
+
+    pSprite->m_timedEffectList.RemoveAllOfType(pSprite, CGAMEEFFECT_HOLDCREATURE, pSprite->m_timedEffectList.m_posCurrent, -1);
+    pSprite->m_equipedEffectList.RemoveAllOfType(pSprite, CGAMEEFFECT_HOLDCREATURE, pSprite->m_equipedEffectList.m_posCurrent, -1);
+    pSprite->m_equipedEffectList.RemoveAllOfType(pSprite, CGAMEEFFECT_PORTRAITICON, pSprite->m_equipedEffectList.m_posCurrent, 13);
+    pSprite->m_timedEffectList.RemoveAllOfType(pSprite, CGAMEEFFECT_PORTRAITICON, pSprite->m_timedEffectList.m_posCurrent, 13);
+
+    SHORT nDirection = pSprite->GetDirection(m_source);
+    LONG nPosZ = pSprite->m_posZ;
+    BOOL bStatue = FALSE;
+
+    if (m_dwFlags == 0x10) {
+        // A stone death: the original queues another death, flags 4 (0x40
+        // with gore), delayed (duration type 4) by 5.
+        ITEM_EFFECT* effect = new ITEM_EFFECT;
+        memset(effect, 0, sizeof(ITEM_EFFECT));
+        effect->effectID = CGAMEEFFECT_DEATH;
+        effect->probabilityUpper = 100;
+        effect->dwFlags = (pGame->GetOptions()->m_nGore != 0 ? 0x3C : 0) + 4;
+        effect->durationType = 4;
+        effect->duration = 5;
+
+        CGameEffect* pEffect = CGameEffect::DecodeEffect(effect, pSprite->GetPos(), pSprite->GetId(), CPoint(-1, -1));
+        message = new CMessageAddEffect(pEffect->Copy(), pSprite->GetId(), pSprite->GetId());
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        if (pEffect != NULL) {
+            delete pEffect;
+        }
+        delete effect;
+    }
+
+    if (m_dwFlags == 0x20) {
+        // A frozen death: likewise with flags 0x80.
+        ITEM_EFFECT* effect = new ITEM_EFFECT;
+        memset(effect, 0, sizeof(ITEM_EFFECT));
+        effect->effectID = CGAMEEFFECT_DEATH;
+        effect->probabilityUpper = 100;
+        effect->dwFlags = 0x80;
+        effect->durationType = 4;
+        effect->duration = 5;
+
+        CGameEffect* pEffect = CGameEffect::DecodeEffect(effect, pSprite->GetPos(), pSprite->GetId(), CPoint(-1, -1));
+        message = new CMessageAddEffect(pEffect->Copy(), pSprite->GetId(), pSprite->GetId());
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        if (pEffect != NULL) {
+            delete pEffect;
+        }
+        delete effect;
+    }
+
+    // NOTE: Inlined CGameObject::InControl.
+    if (pSprite->InControl() && g_pChitin->cNetwork.m_bConnectionEstablished == TRUE) {
+        message = new CMessageSpriteDeath(m_dwFlags, pSprite->GetId(), pSprite->GetId());
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+    }
+
+    if (pSprite->InControl()) {
+        CAITrigger trigger(CAITRIGGER_DIE, pSprite->GetAIType(), 0);
+        message = new CMessageSetTrigger(trigger, pSprite->GetId(), pSprite->GetId());
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+    }
+
+    BYTE nShatterType = 0xFF;
+
+    pSprite->m_timedEffectList.RemoveAllEffectsIgnoreMoreThenPermanent(pSprite->m_timedEffectList.m_posCurrent, TRUE, FALSE, 0, 0);
+
+    pSprite->m_derivedStats.m_generalState &= ~0x4000;
+    pSprite->m_baseStats.m_generalState &= ~0x4000;
+    pSprite->m_derivedStats.m_generalState &= ~0x80000;
+    pSprite->m_baseStats.m_generalState &= ~0x80000;
+
+    pSprite->m_timedEffectList.RemoveAllOfType(pSprite, CGAMEEFFECT_DISEASE, pSprite->m_timedEffectList.m_posCurrent, -1);
+    pSprite->m_equipedEffectList.RemoveAllOfType(pSprite, CGAMEEFFECT_DISEASE, pSprite->m_equipedEffectList.m_posCurrent, -1);
+    pSprite->m_timedEffectList.RemoveAllOfType(pSprite, CGAMEEFFECT_POISON, pSprite->m_timedEffectList.m_posCurrent, -1);
+    pSprite->m_equipedEffectList.RemoveAllOfType(pSprite, CGAMEEFFECT_POISON, pSprite->m_equipedEffectList.m_posCurrent, -1);
+    pSprite->m_equipedEffectList.RemoveAllOfType(pSprite, CGAMEEFFECT_PORTRAITICON, pSprite->m_equipedEffectList.m_posCurrent, 6);
+    pSprite->m_timedEffectList.RemoveAllOfType(pSprite, CGAMEEFFECT_PORTRAITICON, pSprite->m_timedEffectList.m_posCurrent, 6);
+    pSprite->m_equipedEffectList.RemoveAllOfType(pSprite, CGAMEEFFECT_PORTRAITICON, pSprite->m_equipedEffectList.m_posCurrent, 7);
+    pSprite->m_timedEffectList.RemoveAllOfType(pSprite, CGAMEEFFECT_PORTRAITICON, pSprite->m_timedEffectList.m_posCurrent, 7);
+    pSprite->m_timedEffectList.RemoveAllOfType(pSprite, CGAMEEFFECT_GREASEPOOL, pSprite->m_timedEffectList.m_posCurrent, -1);
+    pSprite->m_timedEffectList.RemoveAllOfType(pSprite, CGAMEEFFECT_ENTANGLE, pSprite->m_timedEffectList.m_posCurrent, -1);
+    pSprite->m_timedEffectList.RemoveAllOfType(pSprite, CGAMEEFFECT_WEBHOLD, pSprite->m_timedEffectList.m_posCurrent, -1);
+
+    // NOTE: The original passes the timed list's current position to the
+    // equipped list's calls below (0x4ABE10..0x4ABE3C).
+    pSprite->m_equipedEffectList.RemoveAllOfType(pSprite, CGAMEEFFECT_GREASEPOOL, pSprite->m_timedEffectList.m_posCurrent, -1);
+    pSprite->m_equipedEffectList.RemoveAllOfType(pSprite, CGAMEEFFECT_ENTANGLE, pSprite->m_timedEffectList.m_posCurrent, -1);
+    pSprite->m_equipedEffectList.RemoveAllOfType(pSprite, CGAMEEFFECT_WEBHOLD, pSprite->m_timedEffectList.m_posCurrent, -1);
+
+    if (pSprite->Orderable(FALSE)) {
+        pSprite->Unselect();
+        pGame->UpdatePortrait(pGame->GetCharacterPortraitNum(pSprite->GetId()), 1);
+        pGame->SelectToolbar();
+
+        // NOTE: Inlined CGameObject::InControl.
+        if (pSprite->InControl()) {
+            pSprite->m_bSendSpriteUpdate = TRUE;
+        }
+    }
+
+    // Without gore every death but stone, frozen and the persistent ones is
+    // a plain one.
+    if (pGame->GetOptions()->m_nGore == 0) {
+        switch (m_dwFlags) {
+        case 0x0:
+        case 0x1:
+        case 0x2:
+        case 0x8:
+        case 0x40:
+        case 0x80:
+        case 0x100:
+            m_dwFlags = 4;
+            break;
+        }
+    }
+
+    // Some animations have no gore sequences.
+    CString sResRef;
+    pSprite->GetAnimation()->m_animation->GetAnimationResRef(sResRef, CGameAnimationType::RANGE_BODY);
+    if (strcmp(sResRef, "MGEN") == 0
+        || strcmp(sResRef, "MKG1") == 0
+        || strcmp(sResRef, "MKG2") == 0
+        || strcmp(sResRef, "MKG3") == 0) {
+        m_dwFlags = 4;
+    }
+
+    pSprite->m_derivedStats.m_bDoNotJump = TRUE;
+
+    switch (m_dwFlags) {
+    case 0x0:
+        pSprite->m_baseStats.m_hitPoints = -10;
+        pSprite->m_baseStats.m_generalState |= 0xC00;
+        pSprite->m_derivedStats.m_generalState |= 0xC00;
+        break;
+    case 0x1:
+        // Burning.
+        pSprite->m_baseStats.m_hitPoints = -10;
+        pSprite->m_baseStats.m_generalState |= 0xA00;
+        pSprite->m_derivedStats.m_generalState |= 0xA00;
+        pSprite->m_persistantEffects.AddTail(new CPersistantEffectFireDeath());
+        break;
+    case 0x2:
+        pSprite->m_baseStats.m_hitPoints = -10;
+        pSprite->m_baseStats.m_generalState |= 0x900;
+        pSprite->m_derivedStats.m_generalState |= 0x900;
+        break;
+    case 0x4:
+        pSprite->m_baseStats.m_hitPoints = 0;
+        pSprite->m_baseStats.m_generalState |= STATE_DEAD;
+        pSprite->m_derivedStats.m_generalState |= STATE_DEAD;
+        pSprite->AddBlood(0, nDirection, CBlood::GUSH_HIGH);
+        pSprite->SetSequence(CGameSprite::SEQ_DIE);
+        break;
+    case 0x8:
+    case 0x400:
+        // Chunks.
+        bDestroy = TRUE;
+        pSprite->m_baseStats.m_hitPoints = -10;
+        pSprite->m_baseStats.m_generalState |= 0x900;
+        pSprite->m_derivedStats.m_generalState |= 0x900;
+        pSprite->SetSequence(CGameSprite::SEQ_DIE);
+
+        // NOTE: Inlined CGameAnimation::GetColorChunks (ObjAnimation.h line
+        // 2085).
+        if (pSprite->GetAnimation()->m_animation->GetColorChunks() == 0xFF) {
+            pSprite->AddBlood(0, nDirection, CBlood::GUSH_HIGH);
+        } else {
+            PlaySound(CResRef("GORE"), pSprite);
+            nShatterType = 2;
+        }
+        break;
+    case 0x10:
+        // Stone.
+        pSprite->m_baseStats.m_hitPoints = 0;
+        pSprite->m_baseStats.m_generalState |= STATE_STONE_DEATH;
+        pSprite->m_derivedStats.m_generalState |= STATE_STONE_DEATH;
+        pSprite->m_animationRunning = FALSE;
+
+        // NOTE: Inlined CGameAnimation::IsFalseColor (line 2099) and
+        // SetColorRange (line 2111).
+        if (pSprite->GetAnimation()->m_animation->IsFalseColor()) {
+            pSprite->m_hasColorRangeEffects = TRUE;
+            for (INT nRange = 0; nRange < 7; nRange++) {
+                CColorRange* pColorRange = new CColorRange();
+                pColorRange->m_range = static_cast<BYTE>(nRange);
+                pColorRange->m_color = CVidPalette::STONE;
+                pSprite->m_derivedStats.m_appliedColorRanges.AddTail(pColorRange);
+
+                pSprite->GetAnimation()->m_animation->SetColorRange(static_cast<BYTE>(nRange), CVidPalette::STONE);
+            }
+        }
+
+        bStatue = TRUE;
+        break;
+    case 0x20:
+        // Frozen: a statue with gore, else a plain death.
+        pSprite->m_baseStats.m_hitPoints = 0;
+        if (pGame->GetOptions()->m_nGore == 0) {
+            pSprite->m_baseStats.m_generalState |= STATE_DEAD;
+            pSprite->m_derivedStats.m_generalState |= STATE_DEAD;
+            pSprite->SetSequence(CGameSprite::SEQ_DIE);
+        } else {
+            pSprite->m_baseStats.m_generalState |= STATE_FROZEN_DEATH;
+            pSprite->m_derivedStats.m_generalState |= STATE_FROZEN_DEATH;
+            pSprite->m_animationRunning = FALSE;
+            bStatue = TRUE;
+        }
+
+        // NOTE: Inlined CGameAnimation::IsFalseColor and SetColorRange.
+        if (pSprite->GetAnimation()->m_animation->IsFalseColor()) {
+            pSprite->m_hasColorRangeEffects = TRUE;
+            for (INT nRange = 0; nRange < 7; nRange++) {
+                CColorRange* pColorRange = new CColorRange();
+                pColorRange->m_range = static_cast<BYTE>(nRange);
+                pColorRange->m_color = CVidPalette::ICE;
+                pSprite->m_derivedStats.m_appliedColorRanges.AddTail(pColorRange);
+
+                pSprite->GetAnimation()->m_animation->SetColorRange(static_cast<BYTE>(nRange), CVidPalette::ICE);
+            }
+        }
+        break;
+    case 0x40:
+        // Shattered statue.
+        pSprite->m_baseStats.m_hitPoints = -10;
+        pSprite->m_baseStats.m_generalState |= 0x900;
+        pSprite->m_derivedStats.m_generalState |= 0x900;
+        pSprite->SetSequence(CGameSprite::SEQ_DIE);
+        PlaySound(CResRef("SHATTER"), pSprite);
+        nShatterType = 1;
+
+        // TODO: Incomplete. The original adds two stone explosion particles
+        // (CParticle 0x51AE40, type 0x84D5EC) at the effect's source and its
+        // mirror, sized by the sprite's fx rect; CParticle is not in src/.
+        (void)nPosZ;
+        break;
+    case 0x80:
+        // Shattered ice.
+        pSprite->m_baseStats.m_hitPoints = -10;
+        pSprite->m_baseStats.m_generalState |= 0x900;
+        pSprite->m_derivedStats.m_generalState |= 0x900;
+        PlaySound(CResRef("SHATTER"), pSprite);
+        nShatterType = 0;
+
+        // TODO: Incomplete. The ice explosion particles (CParticle 0x51AE40,
+        // type 0x84D5EA), as for 0x40.
+        break;
+    case 0x100:
+        // Electrocuted.
+        pSprite->m_baseStats.m_hitPoints = -10;
+        pSprite->m_baseStats.m_generalState |= 0xA00;
+        pSprite->m_derivedStats.m_generalState |= 0xA00;
+        pSprite->m_persistantEffects.AddTail(new CPersistantEffectElectricDeath());
+        break;
+    case 0x200:
+        bDestroy = TRUE;
+        // fall through
+    case 0x800:
+        pSprite->m_baseStats.m_hitPoints = -10;
+        pSprite->m_baseStats.m_generalState |= STATE_DEAD;
+        pSprite->m_derivedStats.m_generalState |= STATE_DEAD;
+        pSprite->SetSequence(CGameSprite::SEQ_DIE);
+        break;
+    default:
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameEffect.cpp
+        // __LINE__: 7596
+        UTIL_ASSERT_MSG(FALSE, "Weird death type");
+        break;
+    }
+
+    if (!bStatue) {
+        if (pSprite->GetVertListType() == CGameObject::LIST_BACK) {
+            pSprite->m_derivedStats.m_generalState |= STATE_SLEEPING;
+        }
+
+        pSprite->MoveToBack();
+
+        if (nShatterType != 0xFF) {
+            if (pSprite->m_baseStats.m_hitPoints <= -30
+                && pGame->GetCharacterPortraitNum(pSprite->GetId()) != -1) {
+                // TODO: Incomplete. CGameSprite 0x70A810 (Shatter,
+                // nShatterType) is not in src/.
+            } else if (pSprite->m_baseStats.m_hitPoints <= -10) {
+                // TODO: Incomplete. CGameSprite 0x70A810 (Shatter,
+                // nShatterType) is not in src/.
+            }
+        }
+
+        if (bDestroy == TRUE) {
+            message = new CMessageAddAction(CAIAction(21, CPoint(-1, -1), 0, -1), pSprite->GetId(), pSprite->GetId());
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        }
+
+        CAIObjectType typeAI;
+        typeAI.Set(pSprite->GetAIType());
+        typeAI.m_nGeneral = CAIObjectType::G_DEAD;
+        pSprite->SetAIType(typeAI, FALSE, FALSE);
+        typeAI.Set(pSprite->m_startTypeAI);
+        typeAI.m_nGeneral = CAIObjectType::G_DEAD;
+        pSprite->m_startTypeAI.Set(typeAI);
+
+        // NOTE: Inlined CGameObject::InControl.
+        if (pSprite->InControl()) {
+            // TODO: Incomplete. CGameSprite 0x754EE0 (DropInventory, "",
+            // FALSE) is not in src/.
+        }
+
+        if (pGame->GetCharacterPortraitNum(pSprite->GetId()) == -1) {
+            if ((pSprite->m_baseStats.m_flags & 0x2) != 0) {
+                pSprite->m_expirationTime = pGame->GetWorldTimer()->m_gameTime;
+
+                // TODO: Incomplete. CGameSprite 0x754EE0 (DropInventory,
+                // "", TRUE) is not in src/.
+            }
+        } else if (pSprite->InControl()) {
+            message = new CMessageVisibilityMapMove(FALSE, pSprite->GetId(), pSprite->GetId());
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        }
+    } else {
+        CAIObjectType typeAI;
+        typeAI.Set(pSprite->GetAIType());
+        typeAI.m_nGeneral = CAIObjectType::G_FROZEN;
+        pSprite->SetAIType(typeAI, FALSE, FALSE);
+        typeAI.Set(pSprite->m_startTypeAI);
+        typeAI.m_nGeneral = CAIObjectType::G_FROZEN;
+        pSprite->m_startTypeAI.Set(typeAI);
+
+        if (pGame->GetCharacterPortraitNum(pSprite->GetId()) == -1) {
+            if ((pSprite->m_baseStats.m_flags & 0x2) != 0) {
+                pSprite->m_expirationTime = pGame->GetWorldTimer()->m_gameTime;
+            }
+        } else if (pSprite->InControl()) {
+            message = new CMessageVisibilityMapMove(FALSE, pSprite->GetId(), pSprite->GetId());
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        }
+    }
+
+    pSprite->ClearAI(FALSE);
+    pSprite->SetCurrAction(CAIAction::NULL_ACTION);
+    pSprite->DropPath();
+    pSprite->DropSearchRequest();
+    pSprite->m_talkingCounter = 0;
+
+    pGame->UpdatePortrait(pGame->GetCharacterPortraitNum(pSprite->GetId()), 1);
+
+    // NOTE: Inlined CGameObject::InControl.
+    if (pSprite->InControl()) {
+        pSprite->m_bSendSpriteUpdate = TRUE;
+    }
+
+    pSprite->field_7110 = 0;
+
+    // NOTE: The BYTE at 0x85BC7E (10).
+    pSprite->m_baseStats.m_morale = 10;
+
+    // TODO: Incomplete. The original calls
+    // Icewind586B70::Instance()->CSummonLimitStruct_Unsummon(pSprite)
+    // (0x586DC0, not in src/) and queues a message of subtype 89 (vtable
+    // 0x84C3A8, not in src/) for the sprite.
+    Icewind586B70::Instance()->Remove(pSprite);
+
+    // TODO: Incomplete. The original queues a message of subtype 96 (vtable
+    // 0x84C38C, not in src/) for the sprite.
+
+    m_done = TRUE;
+
+    // NOTE: The original returns 0 here (0x4AD202).
+    return FALSE;
 }
 
 // 0x4ADC90
@@ -13655,7 +14124,10 @@ void CPersistantEffect::PlaySound(const CResRef& res, CGameSprite* pSprite)
 // 0x4AD280
 CPersistantEffectBurningDeath::CPersistantEffectBurningDeath()
 {
+    m_persistantType = 1;
+    m_counter = 0;
     m_charredDegree = CVidPalette::NO_TINT;
+    m_done = FALSE;
     m_charredIncrement = 0;
 }
 
