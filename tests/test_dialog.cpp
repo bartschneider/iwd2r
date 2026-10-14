@@ -1,6 +1,9 @@
 #define NOMINMAX
 #include <catch2/catch_test_macros.hpp>
 
+#include "CAICondition.h"
+#include "CAIResponse.h"
+#include "CAIScriptFile.h"
 #include "CAITrigger.h"
 #include "CBaldurChitin.h"
 #include "CGameArea.h"
@@ -429,4 +432,44 @@ TEST_CASE("dialog: FetchRumor reads the tavern's rumor file and nothing from a m
         CHECK(nIndex == -1);
         WARN("RandomNum is a status trigger: CGameSprite::EvaluateStatusTrigger is not ported yet");
     }
+}
+
+TEST_CASE("dialog: the script parser reads a trigger's object and number and an action's arguments", "[dialog][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+
+    CAIScriptFile scriptFile;
+
+    // One object parameter (TRIGGER.IDS 0x4051 Dead(O:Object*), case 4 of
+    // CAIScriptFile::ParseTrigger 0x410B40): the object is the cause.
+    scriptFile.ParseConditionalString(CString("Dead(\"Hedron\")\n"));
+    INFO(static_cast<const char*>(scriptFile.m_errors));
+    REQUIRE(scriptFile.m_curCondition->m_triggerList.GetCount() == 1);
+    CAITrigger* pTrigger = scriptFile.m_curCondition->m_triggerList.GetHead();
+    CHECK(pTrigger->m_triggerID == 0x4051);
+    CHECK(pTrigger->m_triggerCause.m_sName == "Hedron");
+    CHECK(pTrigger->m_flags == 0);
+
+    // One number (0x4039 NumTimesTalkedTo(I:Num*), case 6), negated.
+    scriptFile.ParseConditionalString(CString("!NumTimesTalkedTo(2)\n"));
+    REQUIRE(scriptFile.m_curCondition->m_triggerList.GetCount() == 1);
+    pTrigger = scriptFile.m_curCondition->m_triggerList.GetHead();
+    CHECK(pTrigger->m_triggerID == 0x4039);
+    CHECK(pTrigger->m_specificID == 2);
+    CHECK(pTrigger->m_flags == 1);
+
+    // An action with a string and a number (ACTION.IDS 238
+    // AddXPVar(S:VarTableEntry*,I:Strref*)), the name in any case.
+    scriptFile.ParseResponseString(CString("AddXpVar(\"Level_1_Easy\",2578)\n"));
+    INFO(static_cast<const char*>(scriptFile.m_errors));
+    REQUIRE(scriptFile.m_curResponse->m_actionList.GetCount() == 1);
+    CAIAction* pAction = scriptFile.m_curResponse->m_actionList.GetHead();
+    CHECK(pAction->m_actionID == 238);
+    CHECK(pAction->m_string1 == "Level_1_Easy");
+    CHECK(pAction->m_specificID == 2578);
 }

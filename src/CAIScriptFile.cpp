@@ -276,8 +276,8 @@ SHORT CAIScriptFile::ParseTrigger(CString sData)
 
     switch (triggerType) {
     case 4:
-        triggerIdLine = triggerIdLine.Left(triggerIdLine.GetLength() - 1);
-        if (triggerIdLine.IsEmpty()) {
+        element = restOfLine.Left(restOfLine.GetLength() - 1);
+        if (element.IsEmpty()) {
             ParseError(CString("Missing First Parameter"));
             return -1;
         }
