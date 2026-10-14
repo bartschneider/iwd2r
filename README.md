@@ -15,12 +15,12 @@ Bring your own copy of Icewind Dale II: Complete from GOG. The DRM-free GOG vers
 |---|---|---|
 | 1 | Portability foundation | Implemented on branch `first`, pending final review and a visual check |
 | 2 | Verification harness | Implemented on branch `first` |
-| 3 | Finish the simulation | Not started |
+| 3 | Finish the simulation | In progress on branch `first`: a new party now reaches the world (M1); next is M2, move and interact |
 | 4 | Render API and classic renderer | Not started |
 | 5 | IEex native layer and Lua API | Not started |
 | 6 | Remaster renderer | Not started |
 
-Current numbers: four presets build; 243 tests pass on Linux; the start screen is reached headlessly on Linux and Windows.
+Current numbers: four presets build; 317 tests pass on Linux; a new character reaches the start area (AR1000) headlessly on Linux.
 
 Engine sites that still truncate pointers to 32 bits on 64-bit targets are listed for project 3 in [docs/64bit-cast-sites.md](docs/64bit-cast-sites.md).
 
