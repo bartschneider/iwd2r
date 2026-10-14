@@ -142,3 +142,9 @@ The guards in `src/render/api.h` leave these for the renderer that first draws t
 - `CanRestParty`'s last check, `CGameObjectArray` 0x5C9300 (no resting while any sprite has spell state 46 or 47), is a TODO that always passes.
 - Store and character files now load (their byte-reversed signature checks were fixed), and so do EFF and cell-header resources. The three apply-EFF effects (177, 182, 183) now apply EFF files and draw `rand()`; an EFF holding an effect id `DecodeEffect` does not know dereferences NULL, as in the original.
 - `CBaldurChitin::AllocResObject` has no special class for resource types 1021 and 1022 (the biography); `ImportCharacter` works around it.
+
+## Save and load screens (from project 3, milestone 4, save-screens)
+
+- `CMoveList::Marshal` (0x5170F0), now called by `CInfGame::SaveGame`, still has a TODO to add the sprite id to the area's `field_AAA` (src/CMoveList.cpp); until it is ported a creature with a pending move is not saved with the master area.
+- `scenarios/pending/save_load_screens.txt` saves and loads through Options headless but has no checkpoints yet, so a replay compares only the exit code.
+- `CVidInf::PrintSurfaceToBmp` reads the DirectDraw surfaces; if the render API's GPU backend ever presents normal runs, screenshots would come out empty. Its 3d variant (0x7BE5A0) is not ported because iwd2r refuses the 3d mode.
