@@ -35,6 +35,7 @@ CGameAnimationTypeMonsterLarge::CGameAnimationTypeMonsterLarge(USHORT animationI
     m_g1VidCellBase.SetResRef(CResRef(m_resRef + "G1"), FALSE, TRUE, TRUE);
     m_g2VidCellBase.SetResRef(CResRef(m_resRef + "G2"), FALSE, TRUE, TRUE);
     m_g3VidCellBase.SetResRef(CResRef(m_resRef + "G3"), FALSE, TRUE, TRUE);
+    m_currentVidCellBase = &m_g1VidCellBase;
 
     if (!MIRROR_BAM) {
         // NOTE: Uninline.
@@ -44,7 +45,7 @@ CGameAnimationTypeMonsterLarge::CGameAnimationTypeMonsterLarge(USHORT animationI
     }
 
     m_currentVidCellExtend = &m_g1VidCellExtend;
-    m_currentVidCell = &m_g1VidCellBase;
+    m_currentVidCell = m_currentVidCellBase;
 
     if (m_falseColor) {
         for (BYTE colorRange = 0; colorRange < CVidPalette::NUM_RANGES; colorRange++) {
