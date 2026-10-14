@@ -10987,7 +10987,10 @@ void CGameSprite::ProcessPendingTriggers()
         if (sub_7202E0() && (m_baseStats.m_flags & 0x80000000) == 0) {
             // TODO: Incomplete: the original goes on to
             // CGameAIBase::ProcessPendingTriggers (0x45CA10), which runs the
-            // sprite's scripts; src/ does not port it yet.
+            // sprite's scripts; src/ does not port it yet. COORDINATOR: when
+            // the ai-dispatch stream lands that base function, replace this
+            // comment with `CGameAIBase::ProcessPendingTriggers();` or every
+            // sprite script silently stops running.
         }
     }
 }
@@ -12007,6 +12010,8 @@ void CGameSprite::ProcessAI()
     }
 }
 
+// NOTE: placed before 0x72DE60, out of address order, to keep clear of the
+// movement stream's insertion after ProcessEffectList; move after the wave.
 // 0x72FBF0
 void CGameSprite::sub_72FBF0()
 {
