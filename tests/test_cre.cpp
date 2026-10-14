@@ -452,3 +452,84 @@ TEST_CASE("Marshal without all items skips a type 0x3A item and keeps the slot n
     CHECK(equipment.m_miscItem[1] == 1);
     delete[] pItems;
 }
+
+namespace {
+
+// The bytes of a creature's CRE through the engine's resource system.
+std::vector<BYTE> LoadCre(const char* resRef)
+{
+    CCreatureFile file;
+    file.SetResRef(CResRef(resRef), TRUE, TRUE);
+    BYTE* data = file.GetData();
+    std::vector<BYTE> bytes;
+    if (data != NULL) {
+        bytes.assign(data, data + file.GetDataSize());
+    }
+    file.Release();
+    return bytes;
+}
+
+}
+
+TEST_CASE("creatures 10GUTHE and 12OGR construct from their CRE", "[cre][data]")
+{
+    const char* env = std::getenv("IWD2_DATA");
+    if (env == nullptr || *env == '\0') {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+
+    for (const char* resRef : { "10GUTHE", "12OGR" }) {
+        INFO(resRef);
+        std::vector<BYTE> bytes = LoadCre(resRef);
+        REQUIRE(bytes.size() > 900);
+        CGameSprite* pSprite = MakeSprite(bytes);
+        REQUIRE(pSprite != NULL);
+    }
+}
+
+// A manual sweep, hidden from the default run: constructs every creature
+// named in IWD2R_CRE_LIST (separated by spaces, commas or newlines),
+// printing each name before it is built, so a crash names its creature.
+TEST_CASE("every creature in IWD2R_CRE_LIST constructs from its CRE", "[.][cre-sweep][data]")
+{
+    const char* env = std::getenv("IWD2_DATA");
+    const char* list = std::getenv("IWD2R_CRE_LIST");
+    if (env == nullptr || *env == '\0' || list == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA or IWD2R_CRE_LIST unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+
+    std::string names(list);
+    for (char& c : names) {
+        if (c == ',' || c == '\n' || c == '\r' || c == '\t') {
+            c = ' ';
+        }
+    }
+    size_t at = 0;
+    while (at < names.size()) {
+        size_t end = names.find(' ', at);
+        if (end == std::string::npos) {
+            end = names.size();
+        }
+        const std::string resRef = names.substr(at, end - at);
+        at = end + 1;
+        if (resRef.empty()) {
+            continue;
+        }
+        fprintf(stderr, "cre-sweep: constructing %s\n", resRef.c_str());
+        fflush(stderr);
+        std::vector<BYTE> bytes = LoadCre(resRef.c_str());
+        CHECK(bytes.size() > 900);
+        if (bytes.size() > 900) {
+            CGameSprite* pSprite = MakeSprite(bytes);
+            CHECK(pSprite != NULL);
+        }
+        fprintf(stderr, "cre-sweep: built %s\n", resRef.c_str());
+        fflush(stderr);
+    }
+}
