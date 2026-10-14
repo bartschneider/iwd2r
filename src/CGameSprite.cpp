@@ -18100,8 +18100,9 @@ SHORT CGameSprite::sub_75F3D0(int a1)
             return ACTION_DONE;
         }
 
-        // NOTE: sub_40CCA0 takes a share of the object that is never
-        // released, as in the original.
+        // NOTE: sub_40CCA0 shares the object and nothing releases it, as in
+        // the original. For THREAD_ASYNCH no share count is taken, so the
+        // missing release is harmless.
         if (m_typeAI.sub_40CCA0(this, TRUE) != NULL) {
             // NOTE: Uninline (no NULL check of the marker in the original).
             m_pArea->m_pObjectMarker->RemoveObject(m_id);
@@ -18144,7 +18145,7 @@ SHORT CGameSprite::sub_75F3D0(int a1)
             -1);
     }
 
-    // NOTE: As above, the share is not released.
+    // NOTE: As above, the share is not released (THREAD_ASYNCH: no count).
     if (m_typeAI.sub_40CCA0(this, TRUE) != NULL) {
         // NOTE: Uninline.
         m_pArea->m_pObjectMarker->RemoveObject(m_id);

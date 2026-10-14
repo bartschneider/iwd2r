@@ -229,8 +229,10 @@ void ReadWorld(CBaldurChitin* chitin, World* out)
 void ReadProbe(platform::replay_probe::Frame* out)
 {
     CBaldurChitin* chitin = g_pBaldurChitin;
-    if (!chitin)
+    if (!chitin) {
+        out->screen = "none";
         return;
+    }
     out->screen = ScreenName(chitin);
     CInfGame* game = chitin->m_pObjectGame;
     if (!game)
