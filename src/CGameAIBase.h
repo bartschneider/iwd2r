@@ -23,6 +23,17 @@ class CVariable;
 
 class CGameAIBase : public CGameObject {
 public:
+    // The codes `ExecuteAction` and the action handlers return (0x8485C4 to
+    // 0x8485CE), which `DoAction` and `ProcessPendingTriggers` act on:
+    //   ACTION_DONE (-1)          the action finished; the next one starts.
+    //   ACTION_NORMAL (0)         still running; scripts are not consulted
+    //                             (ProcessPendingTriggers returns at once).
+    //   ACTION_INTERRUPTABLE (1)  still running; a pending interrupt
+    //                             (m_interrupt) moves on to the next action.
+    //   ACTION_NO_ACTION (2)      NoAction (the action id 0).
+    //   ACTION_ERROR (-2)         the action failed or is unknown; the next
+    //                             one starts.
+    //   ACTION_STOPPED (-3)       stopped; the next one starts.
     static const SHORT ACTION_DONE;
     static const SHORT ACTION_INTERRUPTABLE;
     static const SHORT ACTION_NORMAL;
@@ -40,7 +51,9 @@ public:
     /* 0000 */ ~CGameAIBase() override;
     /* 002C */ BOOLEAN CompressTime(DWORD deltaTime) override;
     /* 0048 */ void RemoveFromArea() override;
+    /* 0064 */ BOOL EvaluateStatusTrigger(const CAITrigger& trigger) override;
     /* 006C */ virtual void ClearActions(BOOL a1);
+    /* 0070 */ virtual void SetTargetObject(CGameObject* pTarget);
     /* 0074 */ virtual void AddAction(const CAIAction& action);
     /* 0078 */ virtual void AddEffect(CGameEffect* pEffect, BYTE list, BOOL noSave, BOOL immediateApply);
     /* 007C */ virtual void ClearAI(BOOLEAN a1);
@@ -111,6 +124,18 @@ public:
     SHORT SpawnPtDeactivate(CGameSpawning* target);
     SHORT SpawnPtSpawn(CGameSpawning* target);
     SHORT StaticStart(CGameStatic* target, BOOL bStart);
+    SHORT PlaySound(LONG x, LONG y, BOOL bPoint);
+    SHORT SetGlobal();
+    SHORT IncrementGlobal();
+    SHORT SetGlobalTimer();
+    SHORT StartCutScene();
+    SHORT ClearAllActions();
+    SHORT IncrementChapter();
+    SHORT MultiPlayerSync();
+    SHORT OpenDoor(CGameDoor* pDoor);
+    SHORT CloseDoor(CGameDoor* pDoor);
+    CGameObject* GetTargetShareType(BYTE type);
+    CGameObject* GetTargetShareAIType(const CAIObjectType& typeAI, BYTE type);
 
     SCRIPTNAME& GetScriptName();
     void SetTrigger(const CAITrigger& trigger);
@@ -119,6 +144,7 @@ public:
     void ResetCurrResponse();
     CAIAction& GetNextAction(CAIAction& action);
     void InsertResponse(CAIResponse& response, BOOL checkCurrentResponse, BOOL clearActions);
+    void ProcessPendingTriggers();
 
     void sub_481890(CRect* r, CArray<CRect*>& ary);
     void FireSpell(const CResRef& resRef, CGameObject* target);

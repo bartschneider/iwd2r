@@ -9,6 +9,7 @@
 #include "CGameContainer.h"
 #include "CGameDoor.h"
 #include "CGameEffect.h"
+#include "CGameSound.h"
 #include "CGameSpawning.h"
 #include "CGameSprite.h"
 #include "CGameStatic.h"
@@ -20,6 +21,14 @@
 #include "CScreenWorld.h"
 #include "CSpell.h"
 #include "CTimerWorld.h"
+#include "CAIConditionResponse.h"
+#include "CAIUtil.h"
+#include "CMessage.h"
+#include "CPathSearch.h"
+#include "CScreenChapter.h"
+#include "CSound.h"
+#include "C2DArray.h"
+#include "CWeather.h"
 #include "CUtil.h"
 #include "CVariableHash.h"
 
@@ -289,12 +298,833 @@ void CGameAIBase::DoAction()
     }
 }
 
+// NOTE: Inlined in `ExecuteAction` for the actions whose target is the
+// action's actee of any type: the actee if it is not immune to the caller,
+// shared, and handed to the caller's target hook (vtable + 0x70).
+static CGameObject* ExecuteActionGetActee(CGameAIBase* pCaller)
+{
+    CGameObject* pTarget = pCaller->m_curAction.m_acteeID.sub_40CCA0(pCaller, FALSE);
+    if (pTarget != NULL
+        && pTarget->GetObjectType() == CGameObject::TYPE_SPRITE
+        && static_cast<CGameSprite*>(pTarget)->m_derivedStats.m_cImmunitiesAIType.OnList(pCaller->m_typeAI)) {
+        g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(pTarget->m_id,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+        pTarget = NULL;
+    }
+
+    pCaller->SetTargetObject(pTarget);
+
+    return pTarget;
+}
+
 // 0x44DC10
 SHORT CGameAIBase::ExecuteAction()
 {
-    // TODO: Incomplete.
+    CGameObject* pTarget = NULL;
+    SHORT returnValue = ACTION_ERROR;
+    BOOL bShare = FALSE;
+    CString sError;
+    CMessage* message;
 
-    return ACTION_ERROR;
+    if (m_curAction.m_actionID == 178) {
+        // BreakInstants.
+        SetCurrAction(GetNextAction(m_aiAction));
+    }
+
+    switch (m_curAction.m_actionID) {
+    case 0:
+        // NoAction
+        returnValue = ACTION_NO_ACTION;
+        goto done;
+    case 1:
+        // ActionOverride: the jump table's entry is the epilogue.
+        goto done;
+    case 7:
+    case 228:
+        // CreateCreature
+        // TODO: 0x44E231-0x44E23F calls 0x4608A0 (not ported).
+        goto done;
+    case 16:
+        // GiveOrder
+        pTarget = GetTargetShareType(CGameObject::TYPE_AIBASE);
+        bShare = TRUE;
+        returnValue = GiveOrder(static_cast<CGameAIBase*>(pTarget));
+        goto release;
+    case 26:
+        // PlaySound
+        returnValue = PlaySound(0, 0, FALSE);
+        goto done;
+    case 320:
+        // PlaySoundPoint
+        returnValue = PlaySound(m_curAction.m_dest.x, m_curAction.m_dest.y, TRUE);
+        goto done;
+    case 30:
+    case 306:
+        // SetGlobal, SetGlobalRandom
+        returnValue = SetGlobal();
+        goto done;
+    case 36:
+    case 178:
+    case 234:
+    case 246:
+        // Continue, BreakInstants, Debug, Log
+        returnValue = ACTION_DONE;
+        goto done;
+    case 49:
+    case 264:
+        // MoveViewPoint, MoveViewPointUntilDone
+        returnValue = MoveViewPoint();
+        goto done;
+    case 50:
+        // MoveViewObject
+        pTarget = ExecuteActionGetActee(this);
+        if (pTarget == NULL) {
+            returnValue = ACTION_ERROR;
+            goto release;
+        }
+        bShare = TRUE;
+        returnValue = MoveViewObject(pTarget);
+        goto release;
+    case 51:
+        returnValue = ClickLButtonPoint();
+        goto done;
+    case 52:
+        pTarget = ExecuteActionGetActee(this);
+        bShare = TRUE;
+        returnValue = ClickLButtonObject(pTarget);
+        goto release;
+    case 53:
+        returnValue = ClickRButtonPoint();
+        goto done;
+    case 54:
+        pTarget = ExecuteActionGetActee(this);
+        bShare = TRUE;
+        returnValue = ClickRButtonObject(pTarget);
+        goto release;
+    case 55:
+        returnValue = DoubleClickLButtonPoint();
+        goto done;
+    case 56:
+        pTarget = ExecuteActionGetActee(this);
+        bShare = TRUE;
+        returnValue = DoubleClickLButtonObject(pTarget);
+        goto release;
+    case 57:
+        returnValue = DoubleClickRButtonPoint();
+        goto done;
+    case 58:
+        pTarget = ExecuteActionGetActee(this);
+        bShare = TRUE;
+        returnValue = DoubleClickRButtonObject(pTarget);
+        goto release;
+    case 59:
+        // TODO: MoveCursorPoint reaches MoveCursor (0x45F6D0), still a stub
+        // that answers ACTION_DONE.
+        returnValue = MoveCursorPoint();
+        goto done;
+    case 252:
+        // ChangeCurrentScript: ChangeAIScript at the current script level.
+        m_curAction.m_specificID = m_curScriptNum;
+        // FALLTHROUGH
+    case 60:
+        // ChangeAIScript
+        returnValue = ChangeAIScript();
+        goto done;
+    case 232:
+        // StartRandomTimer
+        {
+            // NOTE: The SHORT at 0x8477EC (61, StartTimer).
+            m_curAction.m_actionID = 61;
+            LONG nMin = m_curAction.m_specificID2 < m_curAction.m_specificID3
+                ? m_curAction.m_specificID2
+                : m_curAction.m_specificID3;
+            LONG nMax = m_curAction.m_specificID2 > m_curAction.m_specificID3
+                ? m_curAction.m_specificID2
+                : m_curAction.m_specificID3;
+            LONG nRange = nMax - nMin + 1;
+            if (nRange == 0) {
+                m_curAction.m_specificID2 = nMin;
+            } else {
+                m_curAction.m_specificID2 = rand() % nRange + nMin;
+            }
+        }
+        // FALLTHROUGH
+    case 61:
+        // StartTimer
+        returnValue = StartTimer();
+        goto done;
+    case 62:
+        // SendTrigger
+        pTarget = ExecuteActionGetActee(this);
+        bShare = TRUE;
+        returnValue = SendTrigger(static_cast<CGameAIBase*>(pTarget));
+        goto release;
+    case 63:
+    case 205:
+        // Wait
+        returnValue = Wait();
+        goto done;
+    case 64:
+        // UndoExplore
+        message = new CMessageSetAreaExplored(FALSE, m_id, m_id);
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        returnValue = ACTION_DONE;
+        goto done;
+    case 65:
+        // Explore
+        message = new CMessageSetAreaExplored(TRUE, m_id, m_id);
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        returnValue = ACTION_DONE;
+        goto done;
+    case 66:
+        // DayNight
+        g_pBaldurChitin->GetObjectGame()->m_worldTime.AdvanceCurrentTime(CTimerWorld::TIMESCALE_MIN_PER_HOUR
+            * CTimerWorld::TIMESCALE_SEC_PER_MIN
+            * CTimerWorld::TIMESCALE_MSEC_PER_SEC
+            * m_curAction.m_specificID);
+        returnValue = ACTION_DONE;
+        goto done;
+    case 67:
+        // Weather
+        g_pBaldurChitin->m_pEngineWorld->m_weather.SetCurrentWeather(m_pArea,
+            g_pBaldurChitin->GetObjectGame()->m_worldTime.m_gameTime,
+            static_cast<BYTE>(m_curAction.m_specificID));
+        returnValue = ACTION_DONE;
+        goto done;
+    case 68:
+        // CallLightning
+        // TODO: 0x44E7A1-0x44E885 (the effect message) not ported.
+        goto done;
+    case 82:
+        // CreateItem
+        // TODO: 0x44EEAB-0x44EEB9 calls 0x4633A0 (not ported).
+        goto done;
+    case 285:
+        // SmallWaitRandom
+        {
+            LONG nMin = m_curAction.m_specificID;
+            LONG nMax = m_curAction.m_specificID2;
+            if (nMin > nMax) {
+                nMin = m_curAction.m_specificID2;
+                nMax = m_curAction.m_specificID;
+            }
+            LONG nRange = nMax - nMin;
+            LONG nRandom;
+            if (nRange == 0) {
+                nRandom = 0;
+            } else {
+                nRandom = rand() % nRange;
+            }
+            m_curAction.m_specificID = nRandom + nMin;
+        }
+        // FALLTHROUGH
+    case 83:
+        // SmallWait
+        returnValue = SmallWait();
+        goto done;
+    case 106:
+    case 212:
+        // Shout
+        returnValue = Shout();
+        goto done;
+    case 109:
+        // IncrementGlobal
+        returnValue = IncrementGlobal();
+        goto done;
+    case 113:
+    case 181:
+        // ForceSpell, ReallyForceSpell
+        // TODO: 0x44E885-0x44E8AE calls 0x461190 (not ported).
+        goto done;
+    case 114:
+        // ForceSpellPoint
+        // TODO: 0x44E8AE-0x44E8BC calls 0x461B80 (not ported).
+        goto done;
+    case 115:
+    case 307:
+    case 308:
+        // SetGlobalTimer, SetGlobalTimerRandom, SetGlobalTimerOnce
+        returnValue = SetGlobalTimer();
+        goto done;
+    case 116:
+    case 188:
+    case 193:
+    case 204:
+        // TakePartyItem, TakePartyItemAll, TakePartyItemRange,
+        // TakePartyItemNum
+        // TODO: 0x44EF37-0x44EF45 calls 0x463B30 (not ported).
+        goto done;
+    case 117:
+        returnValue = TakePartyGold();
+        goto done;
+    case 118:
+    case 171:
+        // GivePartyGold, GiveGoldForce
+        returnValue = GivePartyGold();
+        goto done;
+    case 120:
+        returnValue = StartCutScene();
+        goto done;
+    case 121:
+        // StartCutSceneMode
+        message = new CMessageCutSceneModeStatus(TRUE, m_id, m_id);
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        returnValue = ACTION_DONE;
+        goto done;
+    case 122:
+        // EndCutSceneMode
+        message = new CMessageCutSceneModeStatus(FALSE, m_id, m_id);
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        returnValue = ACTION_DONE;
+        goto done;
+    case 123:
+        returnValue = ClearAllActions();
+        goto done;
+    case 125:
+        // Deactivate
+        pTarget = ExecuteActionGetActee(this);
+        bShare = TRUE;
+        if (pTarget != NULL
+            && g_pBaldurChitin->GetObjectGame()->GetCharacterPortraitNum(pTarget->m_id) == -1) {
+            message = new CMessageSetActive(FALSE, m_id, pTarget->m_id);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        }
+        returnValue = ACTION_DONE;
+        goto release;
+    case 126:
+        // Activate
+        pTarget = ExecuteActionGetActee(this);
+        bShare = TRUE;
+        if (pTarget != NULL) {
+            message = new CMessageSetActive(TRUE, m_id, pTarget->m_id);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        }
+        returnValue = ACTION_DONE;
+        goto release;
+    case 131:
+        // Kill
+        // TODO: 0x44EA6E-0x44EB32 (CGameSprite::sub_761650 and the effect
+        // message) not ported.
+        goto done;
+    case 132:
+        // VerbalConstant
+        pTarget = GetTargetShareType(CGameObject::TYPE_SPRITE);
+        bShare = TRUE;
+        if (pTarget != NULL) {
+            message = new CMessageVerbalConstant(m_curAction.m_specificID, m_id, pTarget->m_id);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        }
+        returnValue = ACTION_DONE;
+        goto release;
+    case 133:
+        // ClearActions
+        // TODO: 0x44EC0A-0x44EE8B not ported.
+        goto done;
+    case 136:
+        // UnlockScroll
+        g_pBaldurChitin->m_pEngineWorld->m_scrollLockId = CGameObjectArray::INVALID_INDEX;
+        returnValue = ACTION_DONE;
+        goto done;
+    case 140:
+        // GiveItemCreate
+        // TODO: 0x44EEB9-0x44EF37 calls 0x464EB0 (not ported).
+        goto done;
+    case 141:
+        // GivePartyGoldGlobal
+        // TODO: 0x44EF53-0x44EF61 calls 0x465220 (not ported).
+        goto done;
+    case 143:
+        // OpenDoor
+        pTarget = GetTargetShareType(CGameObject::TYPE_DOOR);
+        bShare = TRUE;
+        returnValue = OpenDoor(static_cast<CGameDoor*>(pTarget));
+        goto release;
+    case 144:
+        // CloseDoor
+        pTarget = GetTargetShareType(CGameObject::TYPE_DOOR);
+        bShare = TRUE;
+        returnValue = CloseDoor(static_cast<CGameDoor*>(pTarget));
+        goto release;
+    case 151:
+        // DisplayString
+        pTarget = GetTargetShareType(CGameObject::TYPE_AIBASE);
+        bShare = TRUE;
+        returnValue = DisplayString(static_cast<CGameAIBase*>(pTarget));
+        goto release;
+    case 153:
+    case 154:
+    case 155:
+    case 156:
+    case 157:
+    case 158:
+    case 159:
+        // ChangeEnemyAlly, ChangeGeneral, ChangeRace, ChangeClass,
+        // ChangeSpecifics, ChangeGender, ChangeAlignment
+        // TODO: 0x44EF89-0x44FB82 not ported.
+        goto done;
+    case 160:
+        // ApplySpell
+        // TODO: 0x44FB82-0x44FC12 calls 0x462470 (not ported).
+        goto done;
+    case 161:
+        // IncrementChapter
+        if (m_curAction.m_specificID2 == 0) {
+            m_curAction.m_specificID = -1;
+        }
+        returnValue = IncrementChapter();
+        goto done;
+    case 162:
+        // ReputationSet
+        {
+            CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+            SHORT nAdjustment = static_cast<SHORT>((m_curAction.m_specificID - pGame->m_nReputation / CInfGame::REPUTATION_MULTIPLIER)
+                * CInfGame::REPUTATION_MULTIPLIER);
+            pGame->ReputationAdjustment(nAdjustment, FALSE);
+        }
+        returnValue = ACTION_DONE;
+        goto done;
+    case 163:
+        // ReputationInc
+        g_pBaldurChitin->GetObjectGame()->ReputationAdjustment(static_cast<SHORT>(m_curAction.m_specificID * CInfGame::REPUTATION_MULTIPLIER),
+            FALSE);
+        returnValue = ACTION_DONE;
+        goto done;
+    case 164:
+        // AddexperienceParty
+        // TODO: 0x44FC9A-0x44FCBE calls CInfGame 0x5C0BB0 (not ported).
+        goto done;
+    case 165:
+        // AddexperiencePartyGlobal
+        // TODO: 0x44FCBE-0x44FCCC calls 0x465D50 (not ported).
+        goto done;
+    case 167:
+        returnValue = StartMovie();
+        goto done;
+    case 169:
+        returnValue = DestroyItem();
+        goto done;
+    case 170:
+        returnValue = RevealAreaOnMap();
+        goto done;
+    case 172:
+        // ChangeTileState
+        pTarget = GetTargetShareType(CGameObject::TYPE_TILED_OBJECT);
+        bShare = TRUE;
+        returnValue = ChangeTileState(static_cast<CGameTiledObject*>(pTarget));
+        goto release;
+    case 173:
+        // AddJournalEntry
+        g_pBaldurChitin->GetObjectGame()->m_cJournal.AddEntry(m_curAction.m_specificID, 0);
+        returnValue = ACTION_DONE;
+        goto done;
+    case 177:
+        // TriggerActivation
+        pTarget = GetTargetShareType(CGameObject::TYPE_TRIGGER);
+        bShare = TRUE;
+        returnValue = TriggerActivation(static_cast<CGameTrigger*>(pTarget));
+        goto release;
+    case 183:
+        returnValue = MultiPlayerSync();
+        goto done;
+    case 185:
+        // SetMasterArea
+        // TODO: 0x44FDCF-0x44FED7 not ported.
+        goto done;
+    case 265:
+        // ExpansionEndCredits
+        CInfGame::byte_8E7528 = TRUE;
+        // FALLTHROUGH
+    case 186:
+        // EndCredits
+        g_pBaldurChitin->m_pEngineWorld->ReadyEndCredits(FALSE);
+        returnValue = ACTION_DONE;
+        goto done;
+    case 187:
+        returnValue = StartMusic();
+        goto done;
+    case 189:
+        // LeaveAreaLUAPanic
+        // TODO: 0x44FF15-0x44FF23 calls 0x466910 (not ported).
+        goto done;
+    case 190:
+        returnValue = FinalSave();
+        goto done;
+    case 195:
+        // Lock
+        pTarget = GetTargetShareType(CGameObject::TYPE_AIBASE);
+        bShare = TRUE;
+        returnValue = Lock(static_cast<CGameAIBase*>(pTarget));
+        goto release;
+    case 196:
+        // Unlock
+        pTarget = GetTargetShareType(CGameObject::TYPE_AIBASE);
+        bShare = TRUE;
+        returnValue = Unlock(static_cast<CGameAIBase*>(pTarget));
+        goto release;
+    case 197:
+        // MoveGlobal
+        pTarget = GetTargetShareType(CGameObject::TYPE_SPRITE);
+        bShare = TRUE;
+        returnValue = MoveGlobal(static_cast<CGameSprite*>(pTarget));
+        goto release;
+    case 199:
+        // TextScreen
+        // TODO: 0x44FFB9-0x450093 not ported.
+        goto done;
+    case 201:
+        // DetectSecretDoor
+        pTarget = GetTargetShareType(CGameObject::TYPE_DOOR);
+        bShare = TRUE;
+        returnValue = DetectSecretDoor(static_cast<CGameDoor*>(pTarget));
+        goto release;
+    case 202:
+        returnValue = FadeToColor();
+        goto done;
+    case 203:
+        returnValue = FadeFromColor();
+        goto done;
+    case 253:
+        // FadeToAndFromColor
+        returnValue = sub_467970();
+        goto done;
+    case 209:
+        // SpawnPtActivate
+        pTarget = GetTargetShareType(CGameObject::TYPE_SPAWNING);
+        bShare = TRUE;
+        returnValue = SpawnPtActivate(static_cast<CGameSpawning*>(pTarget));
+        goto release;
+    case 210:
+        // SpawnPtDeactivate
+        pTarget = GetTargetShareType(CGameObject::TYPE_SPAWNING);
+        bShare = TRUE;
+        returnValue = SpawnPtDeactivate(static_cast<CGameSpawning*>(pTarget));
+        goto release;
+    case 211:
+        // SpawnPtSpawn
+        pTarget = GetTargetShareType(CGameObject::TYPE_SPAWNING);
+        bShare = TRUE;
+        returnValue = SpawnPtSpawn(static_cast<CGameSpawning*>(pTarget));
+        goto release;
+    case 213:
+        // StaticStart
+        pTarget = GetTargetShareType(CGameObject::TYPE_STATIC);
+        bShare = TRUE;
+        returnValue = StaticStart(static_cast<CGameStatic*>(pTarget), TRUE);
+        goto release;
+    case 214:
+        // StaticStop
+        pTarget = GetTargetShareType(CGameObject::TYPE_STATIC);
+        bShare = TRUE;
+        returnValue = StaticStart(static_cast<CGameStatic*>(pTarget), FALSE);
+        goto release;
+    case 216:
+        // The familiar's join (CMessageFamiliarAdd TRUE).
+        message = new CMessageFamiliarAdd(TRUE, m_id, m_id);
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        returnValue = ACTION_DONE;
+        goto done;
+    case 217:
+        // The familiar's leave (CMessageFamiliarAdd FALSE).
+        message = new CMessageFamiliarAdd(FALSE, m_id, m_id);
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        returnValue = ACTION_DONE;
+        goto done;
+    case 218:
+        if (GetObjectType() != CGameObject::TYPE_SPRITE) {
+            returnValue = ACTION_ERROR;
+            goto done;
+        }
+        AutoPause(0x100);
+        returnValue = ACTION_DONE;
+        goto done;
+    case 220:
+    case 226:
+        // TODO: 0x45026E-0x45027C calls 0x464200 (not ported).
+        goto done;
+    case 227:
+        // TODO: 0x44E23F-0x44E267 calls 0x460D70 (not ported).
+        goto done;
+    case 230:
+        // RestParty
+        g_pBaldurChitin->GetObjectGame()->RestParty(1, 1);
+        returnValue = ACTION_DONE;
+        goto done;
+    case 233:
+        // HideCreature
+        // TODO: 0x452035-0x4520ED not ported.
+        goto done;
+    case 235:
+        // PlaySequence
+        // TODO: 0x450B52-0x450BD9 not ported.
+        goto done;
+    case 238:
+        // AddXPVar
+        // TODO: 0x4508CE-0x450B52 not ported.
+        goto done;
+    case 241:
+        // FloatMessage
+        // TODO: 0x4507E1-0x4508CE not ported.
+        goto done;
+    case 242:
+        // ChangeStat
+        // TODO: 0x4523BA-0x45248C not ported.
+        goto done;
+    case 243:
+        // IncrementGlobalOnce
+        // TODO: 0x450299-0x450648 not ported.
+        goto done;
+    case 244:
+        // DeleteJournalEntry
+        // TODO: 0x450648-0x45066E not ported.
+        goto done;
+    case 245:
+        // JournalEntryDone
+        // TODO: 0x45066E-0x450694 not ported.
+        goto done;
+    case 247:
+        // BitGlobal
+        // TODO: 0x450694-0x4506A2 calls 0x4688A0 (not ported).
+        goto done;
+    case 248:
+        // GlobalBitGlobal
+        // TODO: 0x4506A2-0x4506B0 calls 0x469040 (not ported).
+        goto done;
+    case 251:
+        // DropInventoryEX
+        // TODO: 0x45248C-0x452575 not ported.
+        goto done;
+    case 254:
+        // SetHP
+        pTarget = GetTargetShareType(CGameObject::TYPE_SPRITE);
+        if (pTarget != NULL) {
+            CGameSprite* pSprite = static_cast<CGameSprite*>(pTarget);
+            bShare = TRUE;
+            if ((pSprite->m_derivedStats.m_generalState & STATE_DEAD) == 0) {
+                if (m_curAction.m_specificID > pSprite->m_derivedStats.GetAtOffset(STAT_MAXHITPOINTS)) {
+                    pSprite->m_baseStats.m_hitPoints = static_cast<SHORT>(pSprite->m_derivedStats.GetAtOffset(STAT_MAXHITPOINTS));
+                } else {
+                    pSprite->m_baseStats.m_hitPoints = static_cast<SHORT>(m_curAction.m_specificID);
+                }
+            }
+        }
+        returnValue = ACTION_DONE;
+        goto release;
+    case 258:
+        // RestUntilHealed
+        // TODO: 0x450BD9-0x450CEB not ported.
+        goto done;
+    case 259:
+        // SetVisualRange
+        // TODO: 0x450CEB-0x450D24 not ported.
+        goto done;
+    case 260:
+        // JumpToPointInstant
+        // TODO: 0x450D24-0x450D61 not ported.
+        goto done;
+    case 266:
+        // DisplayMessage
+        // TODO: 0x450D61-0x450E19 not ported.
+        goto done;
+    case 267:
+        // ExportParty
+        // TODO: 0x450E19-0x450FBC not ported.
+        goto done;
+    case 268:
+        // ClearPartyEffects
+        // TODO: 0x450FBC-0x451096 not ported.
+        goto done;
+    case 270:
+        // ClearSpriteEffects
+        // TODO: 0x451096-0x4510C3 not ported.
+        goto done;
+    case 271:
+        // StopJoinRequests
+        if (field_596 == 0) {
+            field_595 = g_pBaldurChitin->GetObjectGame()->GetMultiplayerSettings()->GetListenToJoinOption();
+            g_pBaldurChitin->GetObjectGame()->GetMultiplayerSettings()->SetListenToJoinOption(FALSE, TRUE);
+            field_596++;
+        }
+        returnValue = ACTION_DONE;
+        goto done;
+    case 272:
+        // ResetJoinRequests
+        g_pBaldurChitin->GetObjectGame()->GetMultiplayerSettings()->SetListenToJoinOption(field_595, TRUE);
+        field_596 = 0;
+        returnValue = ACTION_DONE;
+        goto done;
+    case 273:
+        // HideGUI
+        // TODO: 0x45114E-0x4511D5 not ported.
+        goto done;
+    case 274:
+        // UnhideGUI
+        // TODO: 0x4511D5-0x451282 not ported.
+        goto done;
+    case 275:
+        // SaveGame
+        // TODO: 0x451282-0x4512E9 not ported.
+        goto done;
+    case 278:
+        // DropInventoryEXExclude
+        // TODO: 0x4512E9-0x451362 not ported.
+        goto done;
+    case 279:
+        // AdvanceTime
+        // TODO: 0x4513D8-0x451427 not ported.
+        goto done;
+    case 280:
+        // TODO: 0x451427-0x4514FB not ported.
+        goto done;
+    case 281:
+        // MarkObject
+        // TODO: 0x451362-0x45139D not ported.
+        goto done;
+    case 282:
+        // OverrideAreaDifficulty
+        // TODO: 0x44E042-0x44E12E not ported.
+        goto done;
+    case 283:
+        // SetCriticalPathObject
+        // TODO: 0x44E12E-0x44E223 not ported.
+        goto done;
+    case 284:
+        // SetScriptName
+        // TODO: 0x44DCDA-0x44E042 not ported.
+        goto done;
+    case 286:
+        // AllowAreaResting
+        if (m_pArea == NULL) {
+            goto done;
+        }
+        if (m_curAction.m_specificID != 0) {
+            m_pArea->m_header.m_flags &= ~0x2;
+        } else {
+            m_pArea->m_header.m_flags |= 0x2;
+        }
+        returnValue = ACTION_DONE;
+        goto done;
+    case 287:
+        // SetHPPercent
+        // TODO: 0x4514FB-0x451638 not ported.
+        goto done;
+    case 288:
+        // SetDoorFlag
+        // TODO: 0x451638-0x4516C3 not ported.
+        goto done;
+    case 289:
+        // SpellCastEffect
+        // TODO: 0x4516C3-0x45176D not ported.
+        goto done;
+    case 290:
+        // SpellHitEffectPoint
+        // TODO: 0x45176D-0x451805 not ported.
+        goto done;
+    case 291:
+        // SpellHitEffectSprite
+        // TODO: 0x451805-0x45189C not ported.
+        goto done;
+    case 292:
+        // ChunkCreature
+        // TODO: 0x45189C-0x45197F not ported.
+        goto done;
+    case 293:
+        // UnHide
+        // TODO: 0x45197F-0x451D30 not ported.
+        goto done;
+    case 294:
+        // XEquipItem
+        // TODO: 0x451D30-0x451D7F not ported.
+        goto done;
+    case 295:
+        // TransferInventory
+        // TODO: 0x451D7F-0x451DED not ported.
+        goto done;
+    case 296:
+        // ChangeStoreMarkup
+        // TODO: 0x451DED-0x451E5F not ported.
+        goto done;
+    case 297:
+        // ScreenShake
+        // TODO: 0x451E5F-0x451EAA not ported.
+        goto done;
+    case 298:
+        // FaceSavedLocation
+        // TODO: 0x451FA3-0x452035 not ported.
+        goto done;
+    case 301:
+        // SetExtendedNight
+        // TODO: 0x4520ED-0x45216A not ported.
+        goto done;
+    case 303:
+        // SetRestEncounterChance
+        // TODO: 0x45216A-0x452253 not ported.
+        goto done;
+    case 304:
+        // AddHP
+        // TODO: 0x45074B-0x4507E1 not ported.
+        goto done;
+    case 305:
+        // SetMyTarget
+        // TODO: 0x45139D-0x4513D8 not ported.
+        goto done;
+    case 312:
+        // SetApparentNameSTRREF
+        // TODO: 0x451EAA-0x451F37 not ported.
+        goto done;
+    case 313:
+        // SetRegularNameSTRREF
+        // TODO: 0x451F37-0x451FA3 not ported.
+        goto done;
+    case 314:
+        // EndGame
+        // TODO: 0x452253-0x4522F2 not ported.
+        goto done;
+    case 315:
+        // AddExperiencePartyCR
+        // TODO: 0x4522F2-0x452310 not ported.
+        goto done;
+    case 316:
+        // AddFeat
+        // TODO: 0x452318-0x4523BA not ported.
+        goto done;
+    case 318:
+        // SetCreatureAreaFlag
+        // TODO: 0x452575-0x4525EA not ported.
+        goto done;
+    case 323:
+        // WaitAnimation
+        // TODO: 0x4525EA-0x45262C not ported.
+        goto done;
+    case 324:
+        returnValue = SetMusic();
+        goto done;
+    case 325:
+        // SetAreaFlags
+        // TODO: 0x45262C-0x4526AA not ported.
+        goto done;
+    default:
+        sError.Format("Error: Action number: %d not implemented", m_curAction.GetActionID());
+        returnValue = ACTION_ERROR;
+        goto done;
+    }
+
+release:
+    if (pTarget != NULL) {
+        if (bShare) {
+            g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(pTarget->GetId(),
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+        } else {
+            g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(pTarget->GetId(),
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+        }
+    }
+
+done:
+    SetLastActionReturn(returnValue);
+    return returnValue;
 }
 
 // 0x45C300
@@ -334,7 +1164,248 @@ void CGameAIBase::InsertResponse(CAIResponse& response, BOOL checkCurrentRespons
 // 0x45C730
 void CGameAIBase::ProcessAI()
 {
-    // TODO: Incomplete.
+    if (g_pChitin->cNetwork.GetServiceProvider() != CNetwork::SERV_PROV_NULL
+        && g_pChitin->cNetwork.m_idLocalPlayer != m_remotePlayerID) {
+        return;
+    }
+
+    if (m_curAction.m_actionID == CAIAction::NO_ACTION) {
+        if (m_queuedActions.GetCount() != 0) {
+            SetCurrAction(GetNextAction(m_aiAction));
+            m_interrupt = FALSE;
+            if (m_curAction.m_actionID != CAIAction::NO_ACTION) {
+                goto rand_value;
+            }
+        }
+        m_inCutScene = FALSE;
+    }
+
+rand_value:
+    m_randValue = rand() % 0x7FFF;
+
+    if (!g_pBaldurChitin->GetObjectGame()->m_worldTime.m_active && !m_firstCall) {
+        // The game is paused: only instant actions run.
+        if (m_curAction.m_actionID == CAIAction::NO_ACTION) {
+            SetCurrAction(GetNextAction(m_aiAction));
+            m_interrupt = FALSE;
+        }
+
+        BOOL bInstant = g_pBaldurChitin->GetObjectGame()->GetRuleTables().m_lInstantActions.Find(m_curAction.m_actionID) != NULL;
+        if (g_pChitin->cNetwork.m_bConnectionEstablished == TRUE
+            && m_curAction.m_actionID == 110) {
+            return;
+        }
+
+        while (bInstant) {
+            DoAction();
+
+            bInstant = g_pBaldurChitin->GetObjectGame()->GetRuleTables().m_lInstantActions.Find(m_curAction.m_actionID) != NULL;
+            if (g_pChitin->cNetwork.m_bConnectionEstablished == TRUE
+                && m_curAction.m_actionID == 110) {
+                return;
+            }
+        }
+        return;
+    }
+
+    field_44A++;
+    if (((m_id ^ field_44A) & 0xF) == 0) {
+        CheckTimers(1);
+    }
+
+    if (((field_44A ^ m_id) & 0xF) != 0 && !m_firstCall && !m_forceActionPick) {
+        goto do_actions;
+    }
+
+    field_54C++;
+    m_firstCall = FALSE;
+    m_forceActionPick = FALSE;
+
+    if (m_curAction.m_actionID != CAIAction::NO_ACTION && m_pendingTriggers.GetCount() == 0) {
+        if (field_550 < 120 && field_552 <= 0) {
+            field_550++;
+            goto do_actions;
+        }
+    }
+
+    if (m_pendingTriggers.GetCount() != 0) {
+        field_552 = 5;
+    }
+
+    ProcessPendingTriggers();
+
+    if (field_552 > 0) {
+        field_552--;
+    }
+    field_550 = 0;
+
+do_actions:
+    if (m_curAction.m_actionID == CAIAction::NO_ACTION) {
+        SetCurrAction(GetNextAction(m_aiAction));
+        m_interrupt = FALSE;
+    }
+
+    if (m_posVertList == NULL) {
+        return;
+    }
+
+    BOOL bInstant;
+    do {
+        DoAction();
+
+        bInstant = g_pBaldurChitin->GetObjectGame()->GetRuleTables().m_lInstantActions.Find(m_curAction.m_actionID) != NULL;
+        if (g_pChitin->cNetwork.m_bConnectionEstablished == TRUE
+            && m_curAction.m_actionID == 110) {
+            break;
+        }
+    } while (bInstant);
+}
+
+// 0x45CA10
+void CGameAIBase::ProcessPendingTriggers()
+{
+    BOOL bContinue = FALSE;
+
+    if (m_inCutScene) {
+        return;
+    }
+
+    if (m_nLastActionReturn == ACTION_NORMAL) {
+        return;
+    }
+
+    CAIResponse* pResponse = NULL;
+    CAIResponse response;
+    SHORT nScriptLevel = 0;
+
+    // NOTE: Unused.
+    CTypedPtrList<CPtrList, CAITrigger*> unused;
+    CAITrigger unusedTrigger(CAITRIGGER_SEE, 0);
+
+    ApplyTriggers();
+
+    if (m_overrideScript != NULL) {
+        pResponse = m_overrideScript->Find(m_pendingTriggers, this);
+    }
+
+    if ((!g_pBaldurChitin->GetObjectGame()->m_bPartyAI
+            && g_pBaldurChitin->GetObjectGame()->GetCharacterPortraitNum(m_id) != -1)
+        || m_curAction.m_actionID == 27
+        || m_curAction.m_actionID == 87
+        || (m_curAction.m_actionID == CAIAction::MOVETOPOINT && m_curAction.m_specificID3 == 1)) {
+        // A party member without party AI, or one following the player's
+        // order (ProtectPoint 27, ProtectObject 87, MoveToPoint with
+        // specifics3 1): only the override script.
+        if (pResponse != NULL) {
+            if (!pResponse->m_actionList.IsEmpty()) {
+                pResponse->m_scriptNum = 0;
+                InsertResponse(*pResponse, TRUE, TRUE);
+
+                POSITION pos = m_pendingTriggers.GetHeadPosition();
+                while (pos != NULL) {
+                    CAITrigger* pTrigger = m_pendingTriggers.GetNext(pos);
+                    if (pTrigger != NULL) {
+                        delete pTrigger;
+                    }
+                }
+                m_pendingTriggers.RemoveAll();
+            }
+
+            delete pResponse;
+        }
+        return;
+    }
+
+    BOOL bEndsInContinue;
+
+    if (pResponse != NULL) {
+        response.Add(*pResponse);
+        bEndsInContinue = pResponse->InListEnd(CAIAction::CONTINUE);
+    } else {
+        bEndsInContinue = FALSE;
+    }
+
+    if (pResponse == NULL || pResponse->m_actionList.IsEmpty() || bEndsInContinue) {
+        bContinue = TRUE;
+    }
+
+    BOOL bNotCharmed = TRUE;
+    if (GetObjectType() == CGameObject::TYPE_SPRITE) {
+        CGameSprite* pSprite = static_cast<CGameSprite*>(this);
+        if ((pSprite->m_derivedStats.m_generalState & STATE_CHARMED) != 0
+            && pSprite->m_startTypeAI.m_nEnemyAlly != pSprite->m_liveTypeAI.m_nEnemyAlly) {
+            bNotCharmed = FALSE;
+        }
+    }
+
+    if (bContinue && bNotCharmed) {
+        CAIScript* scripts[5] = {
+            m_special1Script,
+            m_teamScript,
+            m_special2Script,
+            m_combatScript,
+            m_special3Script,
+        };
+
+        for (int index = 0; index < 5; index++) {
+            if (pResponse != NULL) {
+                delete pResponse;
+                pResponse = NULL;
+            }
+
+            nScriptLevel = static_cast<SHORT>(index + 1);
+
+            CAIScript* pScript = scripts[index];
+            if (pScript != NULL && pScript->m_caList.GetCount() != 0) {
+                pResponse = pScript->Find(m_pendingTriggers, this);
+                if (pResponse != NULL) {
+                    response.Add(*pResponse);
+                    bEndsInContinue = pResponse->InListEnd(CAIAction::CONTINUE);
+                } else {
+                    bEndsInContinue = FALSE;
+                }
+
+                if (pResponse != NULL && !pResponse->m_actionList.IsEmpty() && !bEndsInContinue) {
+                    goto insert;
+                }
+
+                bContinue = TRUE;
+            }
+        }
+
+        if (pResponse != NULL) {
+            delete pResponse;
+            pResponse = NULL;
+        }
+
+        nScriptLevel = 6;
+        if (m_movementScript != NULL && m_movementScript->m_caList.GetCount() != 0) {
+            pResponse = m_movementScript->Find(m_pendingTriggers, this);
+            if (pResponse != NULL) {
+                response.Add(*pResponse);
+                pResponse->InListEnd(CAIAction::CONTINUE);
+            }
+        }
+    }
+
+insert:
+    if (!response.m_actionList.IsEmpty()) {
+        response.m_scriptNum = nScriptLevel;
+        InsertResponse(response, TRUE, TRUE);
+
+        POSITION pos = m_pendingTriggers.GetHeadPosition();
+        while (pos != NULL) {
+            CAITrigger* pTrigger = m_pendingTriggers.GetNext(pos);
+            if (pTrigger != NULL) {
+                delete pTrigger;
+            }
+        }
+        m_pendingTriggers.RemoveAll();
+    }
+
+    if (pResponse != NULL) {
+        delete pResponse;
+    }
 }
 
 // 0x45D130
@@ -1677,7 +2748,7 @@ SHORT CGameAIBase::sub_467970()
 // 0x4679E0
 SHORT CGameAIBase::SpawnPtActivate(CGameSpawning* target)
 {
-    if (target != NULL) {
+    if (target == NULL) {
         return ACTION_ERROR;
     }
 
@@ -1698,7 +2769,7 @@ SHORT CGameAIBase::SpawnPtActivate(CGameSpawning* target)
 // 0x467A80
 SHORT CGameAIBase::SpawnPtDeactivate(CGameSpawning* target)
 {
-    if (target != NULL) {
+    if (target == NULL) {
         return ACTION_ERROR;
     }
 
@@ -1719,7 +2790,7 @@ SHORT CGameAIBase::SpawnPtDeactivate(CGameSpawning* target)
 // 0x467B10
 SHORT CGameAIBase::SpawnPtSpawn(CGameSpawning* target)
 {
-    if (target != NULL) {
+    if (target == NULL) {
         return ACTION_ERROR;
     }
 
@@ -1740,7 +2811,7 @@ SHORT CGameAIBase::SpawnPtSpawn(CGameSpawning* target)
 // 0x467BB0
 SHORT CGameAIBase::StaticStart(CGameStatic* target, BOOL bStart)
 {
-    if (target != NULL) {
+    if (target == NULL) {
         return ACTION_ERROR;
     }
 
@@ -1748,11 +2819,15 @@ SHORT CGameAIBase::StaticStart(CGameStatic* target, BOOL bStart)
         return ACTION_ERROR;
     }
 
-    // TODO: Check, not sure if that's right.
+    // NOTE: The original compares bStart with the flag bit itself
+    // (`and ecx,8; cmp ebx,ecx` at 0x467BEE), so StaticStart (TRUE, 1)
+    // never matches the bit (8) and never sends; StaticStop (FALSE) sends
+    // only to a static whose bit is clear. Kept as the original does.
     if (bStart == (target->m_header.m_dwFlags & 0x8)) {
         CMessageStaticStart* pMessage = new CMessageStaticStart(bStart,
             m_id,
             target->GetId());
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(pMessage, FALSE);
     }
 
     return ACTION_DONE;
@@ -1860,9 +2935,40 @@ void CGameAIBase::FireSpellPoint(const CResRef& resRef, const CPoint& ptTarget)
 // 0x4686C0
 CVariable* CGameAIBase::GetGlobalVariable(const CString& sScope, const CString& sName, int a3)
 {
-    // TODO: Incomplete.
+    CString sScopeUpper(sScope);
+    CString sNameUpper(sName);
+    sScopeUpper.MakeUpper();
+    sNameUpper.MakeUpper();
 
-    return NULL;
+    CVariable var;
+    CVariable* pVariable;
+
+    if (strcmp(sScopeUpper, "GLOBAL") == 0) {
+        pVariable = g_pBaldurChitin->GetObjectGame()->GetVariables()->FindKey(sNameUpper);
+        if (pVariable != NULL) {
+            return pVariable;
+        }
+
+        var.SetName(sNameUpper);
+        var.m_intValue = 0;
+        g_pBaldurChitin->GetObjectGame()->m_variables.AddKey(var);
+    } else {
+        CGameArea* pArea = g_pBaldurChitin->GetObjectGame()->GetArea(sScopeUpper);
+        if (pArea != NULL) {
+            pVariable = pArea->GetVariables()->FindKey(sNameUpper);
+            if (pVariable != NULL) {
+                return pVariable;
+            }
+        }
+
+        // NOTE: A variable missing from an area is added to the game's
+        // (GLOBAL) table, as the original does.
+        var.SetName(sNameUpper);
+        var.m_intValue = 0;
+        g_pBaldurChitin->GetObjectGame()->m_variables.AddKey(var);
+    }
+
+    return g_pBaldurChitin->GetObjectGame()->GetVariables()->FindKey(sNameUpper);
 }
 
 // 0x4530F0
@@ -1951,4 +3057,1106 @@ BOOLEAN CGameAIGame::CanSaveGame(STRREF& strError)
 BOOLEAN CGameAIGame::CompressTime(DWORD deltaTime)
 {
     return TRUE;
+}
+
+// -----------------------------------------------------------------------------
+
+// NOTE: The original's message that sets (or increments) a script variable
+// on every machine (vtable 0x84882C, 0x1E bytes). Its comm type is
+// BROADCAST_FORCED, so the local player runs it too. Marshal and Unmarshal
+// (0x50A4D0, 0x50A6C0) are the network path and are omitted (single player
+// only, docs/adr/0002-single-player-only.md). It lives here, next to the
+// actions that send it, until CMessage.cpp has an owner to take it.
+class CMessageSetVariable : public CMessage {
+public:
+    CMessageSetVariable(const CString& sScope, const CString& sName, LONG nValue, LONG caller, LONG target)
+        : CMessage(caller, target)
+    {
+        m_sScope = sScope;
+        m_sName = sName;
+        m_nValue = nValue;
+        m_bIncrement = FALSE;
+        m_dwFlags = 0;
+    }
+
+    SHORT GetCommType() override { return BROADCAST_FORCED; }
+    BYTE GetMsgType() override { return CBaldurMessage::MSG_TYPE_CMESSAGE; }
+    // NOTE: The BYTE at 0x84CF0C (53).
+    BYTE GetMsgSubType() override { return 53; }
+    void Run() override;
+
+    /* 000C */ CString m_sScope;
+    /* 0010 */ CString m_sName;
+    /* 0014 */ LONG m_nValue;
+    /* 0018 */ BOOLEAN m_bIncrement;
+    /* 001A */ DWORD m_dwFlags;
+};
+
+// 0x50A820
+void CMessageSetVariable::Run()
+{
+    CGameObject* pObject;
+    BYTE rc;
+
+    do {
+        rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetDeny(m_targetId,
+            CGameObjectArray::THREAD_ASYNCH,
+            &pObject,
+            INFINITE);
+    } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+    if (pObject != NULL && (m_dwFlags & 0x6) != 0) {
+        if ((m_dwFlags & 0x2) != 0) {
+            CGameArea* pArea = g_pBaldurChitin->GetObjectGame()->GetArea(m_sScope);
+            if (pArea != NULL) {
+                pArea->GetNamedCreatures()->RemoveKey(m_sName, TRUE, pObject->m_id);
+            }
+        }
+
+        if ((m_dwFlags & 0x4) != 0) {
+            g_pBaldurChitin->GetObjectGame()->GetNamedCreatures()->RemoveKey(m_sName, TRUE, pObject->m_id);
+        }
+
+        g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(m_targetId,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+        return;
+    }
+
+    if (strcmp(m_sScope, "GLOBAL") == 0) {
+        CVariable* pVariable = g_pBaldurChitin->GetObjectGame()->GetVariables()->FindKey(m_sName);
+        if (pVariable != NULL) {
+            if (m_bIncrement == TRUE) {
+                pVariable->m_intValue += m_nValue;
+            } else {
+                pVariable->m_intValue = m_nValue;
+            }
+        } else {
+            CVariable* pNew = new CVariable();
+            pNew->SetName(m_sName);
+            pNew->m_intValue = m_nValue;
+            g_pBaldurChitin->GetObjectGame()->m_variables.AddKey(*pNew);
+            delete pNew;
+        }
+    }
+
+    // NOTE: The original goes on to the LOCALS and area checks after a GLOBAL
+    // variable, as it does here.
+    if (rc != CGameObjectArray::SUCCESS) {
+        return;
+    }
+
+    if (strcmp(m_sScope, "LOCALS") == 0) {
+        if (pObject != NULL && pObject->GetObjectType() == CGameObject::TYPE_SPRITE) {
+            CGameSprite* pSprite = static_cast<CGameSprite*>(pObject);
+            CString sName(m_sName);
+            CVariable* pVariable = pSprite->GetLocalVariables()->FindKey(sName);
+            if (pVariable != NULL) {
+                if (m_bIncrement == TRUE) {
+                    pVariable->m_intValue += m_nValue;
+                } else {
+                    pVariable->m_intValue = m_nValue;
+                }
+            } else {
+                CVariable* pNew = new CVariable();
+                pNew->SetName(sName);
+                pNew->m_intValue = m_nValue;
+                pSprite->GetLocalVariables()->AddKey(*pNew);
+                delete pNew;
+            }
+        }
+    } else {
+        if (strcmp(m_sScope, "MYAREA") == 0) {
+            // NOTE: The area's name is read as a C string from the start of
+            // the area (its header's RESREF), as the original does.
+            m_sScope = reinterpret_cast<const char*>(pObject->m_pArea->m_header.m_areaName);
+        }
+
+        CGameArea* pArea = g_pBaldurChitin->GetObjectGame()->GetArea(m_sScope);
+        if (pArea != NULL) {
+            CVariable* pVariable = pArea->GetVariables()->FindKey(m_sName);
+            if (pVariable != NULL) {
+                if (m_bIncrement == TRUE) {
+                    pVariable->m_intValue += m_nValue;
+                } else {
+                    pVariable->m_intValue = m_nValue;
+                }
+            } else {
+                CVariable* pNew = new CVariable();
+                pNew->SetName(m_sName);
+                pNew->m_intValue = m_nValue;
+                pArea->m_variables.AddKey(*pNew);
+                delete pNew;
+            }
+        }
+    }
+
+    g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(m_targetId,
+        CGameObjectArray::THREAD_ASYNCH,
+        INFINITE);
+}
+
+// -----------------------------------------------------------------------------
+
+// 0x45BDD0
+CGameObject* CGameAIBase::GetTargetShareType(BYTE type)
+{
+    CGameObject* pObject = m_curAction.m_acteeID.sub_40CCA0(this, FALSE);
+    if (pObject != NULL
+        && pObject->GetObjectType() == CGameObject::TYPE_SPRITE
+        && static_cast<CGameSprite*>(pObject)->m_derivedStats.m_cImmunitiesAIType.OnList(m_typeAI)) {
+        g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(pObject->m_id,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+        pObject = NULL;
+    }
+
+    SetTargetObject(pObject);
+
+    if (pObject != NULL) {
+        BYTE objectType = pObject->GetObjectType();
+        if (objectType != type && type != CGameObject::TYPE_AIBASE && type != CGameObject::TYPE_NONE) {
+            g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(pObject->m_id,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+            SetTargetObject(NULL);
+            return NULL;
+        }
+
+        if (type == CGameObject::TYPE_AIBASE && (pObject->GetObjectType() & CGameObject::TYPE_AIBASE) == 0) {
+            g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(pObject->m_id,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+            SetTargetObject(NULL);
+            return NULL;
+        }
+
+        if (GetObjectType() == CGameObject::TYPE_SPRITE
+            && g_pBaldurChitin->GetObjectGame()->GetCharacterPortraitNum(m_id) == -1
+            && (static_cast<CGameSprite*>(this)->m_derivedStats.m_generalState & STATE_BLIND) != 0
+            && pObject->GetObjectType() == CGameObject::TYPE_SPRITE) {
+            // A blind non-party sprite reaches only what is next to it.
+            const CPoint& ptTarget = pObject->GetPos();
+            CPoint ptTargetGrid(ptTarget.x / CPathSearch::GRID_SQUARE_SIZEX, ptTarget.y / CPathSearch::GRID_SQUARE_SIZEY);
+            CPoint ptGrid(m_pos.x / CPathSearch::GRID_SQUARE_SIZEX, m_pos.y / CPathSearch::GRID_SQUARE_SIZEY);
+            LONG nSquares = CAIUtil::CountSquares(ptGrid, ptTargetGrid);
+            if (nSquares > static_cast<CGameSprite*>(this)->m_animation.GetPersonalSpace() / 2 + 4) {
+                g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(pObject->m_id,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    INFINITE);
+                SetTargetObject(NULL);
+                return NULL;
+            }
+        }
+    }
+
+    SetTargetObject(pObject);
+    return pObject;
+}
+
+// 0x45C030
+CGameObject* CGameAIBase::GetTargetShareAIType(const CAIObjectType& typeAI, BYTE type)
+{
+    CGameObject* pObject = typeAI.sub_40CCA0(this, FALSE);
+    if (pObject != NULL
+        && pObject->GetObjectType() == CGameObject::TYPE_SPRITE
+        && static_cast<CGameSprite*>(pObject)->m_derivedStats.m_cImmunitiesAIType.OnList(m_typeAI)) {
+        g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(pObject->m_id,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+        pObject = NULL;
+    }
+
+    SetTargetObject(pObject);
+
+    if (pObject != NULL) {
+        BYTE objectType = pObject->GetObjectType();
+        if (objectType != type && type != CGameObject::TYPE_AIBASE && type != CGameObject::TYPE_NONE) {
+            g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(pObject->m_id,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+            SetTargetObject(NULL);
+            return NULL;
+        }
+
+        if (type == CGameObject::TYPE_AIBASE && (pObject->GetObjectType() & CGameObject::TYPE_AIBASE) == 0) {
+            g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(pObject->m_id,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+            SetTargetObject(NULL);
+            return NULL;
+        }
+
+        if (GetObjectType() == CGameObject::TYPE_SPRITE
+            && g_pBaldurChitin->GetObjectGame()->GetCharacterPortraitNum(m_id) == -1
+            && (static_cast<CGameSprite*>(this)->m_derivedStats.m_generalState & STATE_BLIND) != 0
+            && pObject->GetObjectType() == CGameObject::TYPE_SPRITE) {
+            // A blind non-party sprite reaches only what is next to it.
+            const CPoint& ptTarget = pObject->GetPos();
+            CPoint ptTargetGrid(ptTarget.x / CPathSearch::GRID_SQUARE_SIZEX, ptTarget.y / CPathSearch::GRID_SQUARE_SIZEY);
+            CPoint ptGrid(m_pos.x / CPathSearch::GRID_SQUARE_SIZEX, m_pos.y / CPathSearch::GRID_SQUARE_SIZEY);
+            LONG nSquares = CAIUtil::CountSquares(ptGrid, ptTargetGrid);
+            if (nSquares > static_cast<CGameSprite*>(this)->m_animation.GetPersonalSpace() / 2 + 4) {
+                g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(pObject->m_id,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    INFINITE);
+                SetTargetObject(NULL);
+                return NULL;
+            }
+        }
+    }
+
+    SetTargetObject(pObject);
+    return pObject;
+}
+
+// 0x799E60
+void CGameAIBase::SetTargetObject(CGameObject* pTarget)
+{
+}
+
+// 0x45EB60
+SHORT CGameAIBase::PlaySound(LONG x, LONG y, BOOL bPoint)
+{
+    CSound sound;
+
+    if (!bPoint) {
+        x = m_pos.x;
+        y = m_pos.y;
+    }
+
+    sound.SetResRef(CResRef(m_curAction.GetString1()), TRUE, TRUE);
+
+    if (sound.GetLooping()) {
+        return ACTION_ERROR;
+    }
+
+    // NOTE: A connected host sends the sound to the other players here
+    // (vtable 0x848B5C). Omitted: single player only
+    // (docs/adr/0002-single-player-only.md).
+
+    sound.SetFireForget(TRUE);
+    sound.SetChannel(2, reinterpret_cast<DWORD_PTR>(m_pArea));
+    sound.Play(x, y, 0, FALSE);
+
+    return ACTION_DONE;
+}
+
+// 0x45EDE0
+SHORT CGameAIBase::SetGlobal()
+{
+    CString sString1 = m_curAction.GetString1();
+    sString1.MakeUpper();
+    CString sScope = sString1.Left(6);
+    CString sName = sString1.Right(sString1.GetLength() - 6);
+    CVariable var;
+    CMessage* message;
+
+    if (m_curAction.m_actionID == 306) {
+        // SetGlobalRandom
+        sName = sString1.Right(sString1.GetLength() - 7);
+
+        LONG nMin = m_curAction.m_specificID;
+        LONG nMax = m_curAction.m_specificID2;
+        if (nMin < nMax) {
+            m_curAction.m_specificID = rand() % (nMax - nMin + 1) + nMin;
+        } else if (nMin > nMax) {
+            m_curAction.m_specificID = rand() % (nMin - nMax + 1) + nMax;
+        }
+    }
+
+    LONG nValue = m_curAction.m_specificID;
+
+    if (strcmp(sScope, "GLOBAL") == 0) {
+        CVariable* pVariable = g_pBaldurChitin->GetObjectGame()->GetVariables()->FindKey(sName);
+        if (pVariable != NULL) {
+            pVariable->m_intValue = nValue;
+        } else {
+            var.SetName(sName);
+            var.m_intValue = nValue;
+            g_pBaldurChitin->GetObjectGame()->m_variables.AddKey(var);
+        }
+
+        message = new CMessageSetVariable(sScope, sName, nValue, m_id, m_id);
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+    } else if (strcmp(sScope, "LOCALS") == 0) {
+        if (GetObjectType() == CGameObject::TYPE_SPRITE) {
+            CGameSprite* pSprite = static_cast<CGameSprite*>(this);
+            CString sLocalName(sName);
+            CVariable* pVariable = pSprite->GetLocalVariables()->FindKey(sLocalName);
+            if (pVariable != NULL) {
+                pVariable->m_intValue = nValue;
+            } else {
+                var.SetName(sLocalName);
+                var.m_intValue = nValue;
+                pSprite->GetLocalVariables()->AddKey(var);
+            }
+
+            message = new CMessageSetVariable(sScope, sLocalName, nValue, m_id, m_id);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        }
+    } else {
+        if (strcmp(sScope, "MYAREA") == 0) {
+            // NOTE: The area's name is read as a C string from the start of
+            // the area (its header's RESREF), as the original does.
+            sScope = reinterpret_cast<const char*>(m_pArea->m_header.m_areaName);
+        }
+
+        CGameArea* pArea = g_pBaldurChitin->GetObjectGame()->GetArea(sScope);
+        if (pArea != NULL) {
+            CVariable* pVariable = pArea->GetVariables()->FindKey(sName);
+            if (pVariable != NULL) {
+                pVariable->m_intValue = nValue;
+            } else {
+                var.SetName(sName);
+                var.m_intValue = nValue;
+                pArea->m_variables.AddKey(var);
+            }
+
+            message = new CMessageSetVariable(sScope, sName, nValue, m_id, m_id);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        }
+    }
+
+    return ACTION_DONE;
+}
+
+// 0x460300
+SHORT CGameAIBase::IncrementGlobal()
+{
+    CString sString1 = m_curAction.GetString1();
+    sString1.MakeUpper();
+    CString sScope = sString1.Left(6);
+    CString sName = sString1.Right(sString1.GetLength() - 6);
+    CMessage* message;
+
+    if (strcmp(sScope, "GLOBAL") == 0) {
+        CVariable* pVariable = g_pBaldurChitin->GetObjectGame()->GetVariables()->FindKey(sName);
+        if (pVariable != NULL) {
+            pVariable->m_intValue += m_curAction.m_specificID;
+            message = new CMessageSetVariable(sScope, sName, pVariable->m_intValue, m_id, m_id);
+        } else {
+            CVariable var;
+            var.SetName(sName);
+            var.m_intValue += m_curAction.m_specificID;
+            g_pBaldurChitin->GetObjectGame()->m_variables.AddKey(var);
+            message = new CMessageSetVariable(sScope, sName, var.m_intValue, m_id, m_id);
+        }
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+    } else if (strcmp(sScope, "LOCALS") == 0) {
+        if (GetObjectType() == CGameObject::TYPE_SPRITE) {
+            CGameSprite* pSprite = static_cast<CGameSprite*>(this);
+            CString sLocalName(sName);
+            CVariable var;
+            CVariable* pVariable = pSprite->GetLocalVariables()->FindKey(sLocalName);
+            if (pVariable == NULL) {
+                var.SetName(sLocalName);
+                var.m_intValue = m_curAction.m_specificID;
+                pSprite->GetLocalVariables()->AddKey(var);
+                pVariable = &var;
+            } else {
+                pVariable->m_intValue += m_curAction.m_specificID;
+            }
+
+            message = new CMessageSetVariable(sScope, sLocalName, pVariable->m_intValue, m_id, m_id);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        }
+    } else {
+        if (strcmp(sScope, "MYAREA") == 0) {
+            // NOTE: The area's name is read as a C string from the start of
+            // the area (its header's RESREF), as the original does.
+            sScope = reinterpret_cast<const char*>(m_pArea->m_header.m_areaName);
+        }
+
+        CGameArea* pArea = g_pBaldurChitin->GetObjectGame()->GetArea(sScope);
+        if (pArea != NULL) {
+            CVariable* pVariable = pArea->GetVariables()->FindKey(sName);
+            if (pVariable == NULL) {
+                CVariable var;
+                var.SetName(sName);
+                var.m_intValue = m_curAction.m_specificID;
+                pArea->m_variables.AddKey(var);
+                message = new CMessageSetVariable(sScope, sName, var.m_intValue, m_id, m_id);
+            } else {
+                pVariable->m_intValue += m_curAction.m_specificID;
+                message = new CMessageSetVariable(sScope, sName, pVariable->m_intValue, m_id, m_id);
+            }
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        }
+    }
+
+    return ACTION_DONE;
+}
+
+// 0x462910
+SHORT CGameAIBase::SetGlobalTimer()
+{
+    CString sString1 = m_curAction.GetString1();
+    sString1.MakeUpper();
+    CString sScope = sString1.Left(6);
+    CString sName = sString1.Right(sString1.GetLength() - 6);
+    CMessage* message;
+
+    if (m_curAction.m_actionID == 307) {
+        // SetGlobalTimerRandom
+        sName = sString1.Right(sString1.GetLength() - 7);
+
+        LONG nMin = m_curAction.m_specificID;
+        LONG nMax = m_curAction.m_specificID2;
+        if (nMin < nMax) {
+            m_curAction.m_specificID = rand() % (nMax - nMin + 1) + nMin;
+        } else if (nMin > nMax) {
+            m_curAction.m_specificID = rand() % (nMin - nMax + 1) + nMax;
+        }
+    }
+
+    LONG nTime = m_curAction.m_specificID;
+
+    if (strcmp(sScope, "GLOBAL") == 0) {
+        CVariable* pVariable = g_pBaldurChitin->GetObjectGame()->GetVariables()->FindKey(sName);
+        if (pVariable == NULL) {
+            CVariable var;
+            var.SetName(sName);
+            var.m_intValue = g_pBaldurChitin->GetObjectGame()->m_worldTime.m_gameTime
+                + nTime * CTimerWorld::TIMESCALE_MSEC_PER_SEC;
+            g_pBaldurChitin->GetObjectGame()->m_variables.AddKey(var);
+            message = new CMessageSetVariable(sScope, sName, var.m_intValue, m_id, m_id);
+        } else {
+            if (m_curAction.m_actionID == 308) {
+                // SetGlobalTimerOnce: a running timer is kept.
+                return ACTION_DONE;
+            }
+
+            pVariable->m_intValue = g_pBaldurChitin->GetObjectGame()->m_worldTime.m_gameTime
+                + nTime * CTimerWorld::TIMESCALE_MSEC_PER_SEC;
+            message = new CMessageSetVariable(sScope, sName, pVariable->m_intValue, m_id, m_id);
+        }
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+    } else if (strcmp(sScope, "LOCALS") == 0) {
+        if (GetObjectType() == CGameObject::TYPE_SPRITE) {
+            CGameSprite* pSprite = static_cast<CGameSprite*>(this);
+            CString sLocalName(sName);
+            CVariable var;
+            CVariable* pVariable = pSprite->GetLocalVariables()->FindKey(sLocalName);
+            if (pVariable == NULL) {
+                var.SetName(sLocalName);
+                var.m_intValue = g_pBaldurChitin->GetObjectGame()->m_worldTime.m_gameTime
+                    + nTime * CTimerWorld::TIMESCALE_MSEC_PER_SEC;
+                pSprite->GetLocalVariables()->AddKey(var);
+                pVariable = &var;
+            } else if (m_curAction.m_actionID != 308) {
+                pVariable->m_intValue = g_pBaldurChitin->GetObjectGame()->m_worldTime.m_gameTime
+                    + nTime * CTimerWorld::TIMESCALE_MSEC_PER_SEC;
+            }
+
+            // NOTE: SetGlobalTimerOnce on a running LOCALS timer still sends
+            // the message, as the original does.
+            message = new CMessageSetVariable(sScope, sLocalName, pVariable->m_intValue, m_id, m_id);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        }
+    } else {
+        if (strcmp(sScope, "MYAREA") == 0) {
+            // NOTE: The area's name is read as a C string from the start of
+            // the area (its header's RESREF), as the original does.
+            sScope = reinterpret_cast<const char*>(m_pArea->m_header.m_areaName);
+        }
+
+        CGameArea* pArea = g_pBaldurChitin->GetObjectGame()->GetArea(sScope);
+        if (pArea == NULL) {
+            return ACTION_DONE;
+        }
+
+        CVariable* pVariable = pArea->GetVariables()->FindKey(sName);
+        if (pVariable != NULL) {
+            if (m_curAction.m_actionID == 308) {
+                return ACTION_DONE;
+            }
+
+            pVariable->m_intValue = g_pBaldurChitin->GetObjectGame()->m_worldTime.m_gameTime
+                + nTime * CTimerWorld::TIMESCALE_MSEC_PER_SEC;
+            message = new CMessageSetVariable(sScope, sName, pVariable->m_intValue, m_id, m_id);
+        } else {
+            CVariable var;
+            var.SetName(sName);
+            var.m_intValue = g_pBaldurChitin->GetObjectGame()->m_worldTime.m_gameTime
+                + nTime * CTimerWorld::TIMESCALE_MSEC_PER_SEC;
+            pArea->m_variables.AddKey(var);
+            message = new CMessageSetVariable(sScope, sName, var.m_intValue, m_id, m_id);
+        }
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+    }
+
+    return ACTION_DONE;
+}
+
+// -----------------------------------------------------------------------------
+
+// 0x462F90
+SHORT CGameAIBase::StartCutScene()
+{
+    if (strcmp(m_curAction.GetString1(), "") == 0) {
+        return ACTION_ERROR;
+    }
+
+    CAIScript* pScript = new CAIScript(CResRef(m_curAction.GetString1()));
+
+    POSITION pos = pScript->m_caList.GetHeadPosition();
+    while (pos != NULL) {
+        CAIConditionResponse* pConditionResponse = pScript->m_caList.GetNext(pos);
+        if (pConditionResponse->m_responseSet.m_responseList.GetCount() != 0) {
+            CAIResponse* pResponse = pConditionResponse->m_responseSet.m_responseList.GetHead();
+            if (pResponse->m_actionList.GetCount() != 0) {
+                CAIAction* pAction = pResponse->m_actionList.RemoveHead();
+                pAction->Decode(this);
+
+                CGameObject* pActor = pAction->m_acteeID.sub_40CB20(this, CGameObject::TYPE_AIBASE, FALSE);
+                if (pActor != NULL) {
+                    CMessage* message = new CMessageInsertResponse(*pResponse, FALSE, FALSE, FALSE, m_id, pActor->m_id);
+                    g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+                    if ((pActor->GetObjectType() & CGameObject::TYPE_AIBASE) != 0) {
+                        message = new CMessageSetInCutScene(TRUE, m_id, pActor->m_id);
+                        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+                    }
+
+                    g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(pActor->m_id,
+                        CGameObjectArray::THREAD_ASYNCH,
+                        INFINITE);
+                }
+
+                if (pAction != NULL) {
+                    delete pAction;
+                }
+            }
+        }
+    }
+
+    if (pScript != NULL) {
+        delete pScript;
+    }
+
+    return ACTION_DONE;
+}
+
+// 0x4637B0
+SHORT CGameAIBase::ClearAllActions()
+{
+    POSITION pos = m_pArea->m_lVertSort.GetTailPosition();
+    while (pos != NULL) {
+        LONG nObjectId = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_pArea->m_lVertSort.GetPrev(pos)));
+        if (nObjectId == m_id) {
+            continue;
+        }
+
+        CGameObject* pObject;
+        if (g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(nObjectId,
+                CGameObjectArray::THREAD_ASYNCH,
+                &pObject,
+                INFINITE)
+            != CGameObjectArray::SUCCESS) {
+            continue;
+        }
+
+        BYTE objectType = pObject->GetObjectType();
+        if (objectType == CGameObject::TYPE_AIBASE || objectType == CGameObject::TYPE_SPRITE) {
+            if (pObject != NULL) {
+                CMessage* message = new CMessageClearActions(m_id, pObject->m_id);
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+            }
+
+            CAIAction action(CAIAction::NO_ACTION, CPoint(-1, -1), 0, -1);
+            action.m_specificID3 = 0;
+            CMessage* message = new CMessageAddAction(action, m_id, pObject->m_id);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        }
+
+        g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(nObjectId,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+    }
+
+    return ACTION_DONE;
+}
+
+// 0x4658A0
+SHORT CGameAIBase::IncrementChapter()
+{
+    CScreenChapter* pChapter = g_pBaldurChitin->m_pEngineChapter;
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameAIBaseActions.cpp
+    // __LINE__: 3423
+    UTIL_ASSERT(pChapter != NULL);
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameAIBaseActions.cpp
+    // __LINE__: 3425
+    UTIL_ASSERT(pGame != NULL);
+
+    CResRef cResText("Chapters");
+
+    BYTE nChapter = static_cast<BYTE>(m_curAction.m_specificID);
+    if (m_curAction.m_specificID == -1) {
+        CVariable* pChapterVariable = pGame->GetVariables()->FindKey(CInfGame::CHAPTER_GLOBAL);
+        BYTE nCurrent = pChapterVariable != NULL ? static_cast<BYTE>(pChapterVariable->m_intValue) : 0;
+        nChapter = nCurrent + 1;
+    }
+
+    // NOTE: A connected client asks the host for the chapter here
+    // (0x434BA0), and a connected host announces it to the clients
+    // (CScreenChapter::StartChapterMultiplayerHost and the journal entry).
+    // Omitted: single player only (docs/adr/0002-single-player-only.md).
+
+    CVariable* pChapterVariable = pGame->GetVariables()->FindKey(CInfGame::CHAPTER_GLOBAL);
+    if (pChapterVariable != NULL) {
+        pChapterVariable->m_intValue = nChapter;
+    }
+
+    pChapter->StartChapter(cResText);
+    g_pBaldurChitin->GetActiveEngine()->SelectEngine(pChapter);
+
+    C2DArray tChapters;
+    tChapters.Load(CResRef("chapters"));
+    STRREF strEntry = tChapters.GetAtLong(CPoint(1, nChapter + 1));
+    pGame->m_cJournal.AddEntry(strEntry, 0);
+
+    return ACTION_DONE;
+}
+
+// 0x466750
+SHORT CGameAIBase::MultiPlayerSync()
+{
+    if (g_pChitin->cNetwork.GetServiceProvider() == CNetwork::SERV_PROV_NULL) {
+        return ACTION_DONE;
+    }
+
+    if (!g_pChitin->cNetwork.m_bConnectionEstablished) {
+        return ACTION_DONE;
+    }
+
+    // NOTE: The rest synchronises the players of a session (0x46677B to
+    // 0x4668A5). Omitted: single player only
+    // (docs/adr/0002-single-player-only.md).
+    return ACTION_DONE;
+}
+
+// 0x466220
+SHORT CGameAIBase::OpenDoor(CGameDoor* pDoor)
+{
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+    if (pDoor == NULL) {
+        return ACTION_ERROR;
+    }
+
+    if ((pDoor->m_dwFlags & 0x1) != 0) {
+        return ACTION_DONE;
+    }
+
+    pDoor->GetCloserDestPt(m_pos);
+
+    // NOTE: An object the local player does not control asks its owner to
+    // open the door (vtable 0x848C58). Omitted: single player only
+    // (docs/adr/0002-single-player-only.md); without a service provider the
+    // original never takes that path either.
+    if (g_pChitin->cNetwork.GetServiceProvider() != CNetwork::SERV_PROV_NULL
+        && g_pChitin->cNetwork.m_idLocalPlayer != pDoor->m_remotePlayerID) {
+        return ACTION_DONE;
+    }
+
+    BYTE rc;
+    CGameObject* pObject;
+    do {
+        rc = pGame->GetObjectArray()->GetDeny(pDoor->m_id,
+            CGameObjectArray::THREAD_ASYNCH,
+            &pObject,
+            INFINITE);
+    } while (rc == CGameObjectArray::SHARED);
+
+    if (rc != CGameObjectArray::SUCCESS) {
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameAIBaseActions.cpp
+        // __LINE__: 3796
+        UTIL_ASSERT(FALSE);
+        return ACTION_ERROR;
+    }
+
+    CAITrigger trigger(CAITrigger::OPENED, m_typeAI, 0);
+
+    CMessage* message = new CMessageSetTrigger(trigger, m_id, pDoor->m_id);
+    g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+    pDoor->ToggleDoor(m_typeAI, GetObjectType() != CGameObject::TYPE_SPRITE);
+
+    pGame->GetObjectArray()->ReleaseDeny(pDoor->m_id,
+        CGameObjectArray::THREAD_ASYNCH,
+        INFINITE);
+
+    return ACTION_DONE;
+}
+
+// 0x4664E0
+SHORT CGameAIBase::CloseDoor(CGameDoor* pDoor)
+{
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+    if (pDoor == NULL) {
+        return ACTION_ERROR;
+    }
+
+    if ((pDoor->m_dwFlags & 0x1) == 0) {
+        return ACTION_DONE;
+    }
+
+    pDoor->GetCloserDestPt(m_pos);
+
+    // NOTE: An object the local player does not control asks its owner to
+    // close the door (vtable 0x848C58). Omitted: single player only
+    // (docs/adr/0002-single-player-only.md); without a service provider the
+    // original never takes that path either.
+    if (g_pChitin->cNetwork.GetServiceProvider() != CNetwork::SERV_PROV_NULL
+        && g_pChitin->cNetwork.m_idLocalPlayer != pDoor->m_remotePlayerID) {
+        return ACTION_DONE;
+    }
+
+    BYTE rc;
+    CGameObject* pObject;
+    do {
+        rc = pGame->GetObjectArray()->GetDeny(pDoor->m_id,
+            CGameObjectArray::THREAD_ASYNCH,
+            &pObject,
+            INFINITE);
+    } while (rc == CGameObjectArray::SHARED);
+
+    if (rc != CGameObjectArray::SUCCESS) {
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameAIBaseActions.cpp
+        // __LINE__: 3876
+        UTIL_ASSERT(FALSE);
+        return ACTION_ERROR;
+    }
+
+    CAITrigger trigger(CAITRIGGER_CLOSED, m_typeAI, 0);
+
+    CMessage* message = new CMessageSetTrigger(trigger, m_id, pDoor->m_id);
+    g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+    pDoor->ToggleDoor(m_typeAI, GetObjectType() != CGameObject::TYPE_SPRITE);
+
+    pGame->GetObjectArray()->ReleaseDeny(pDoor->m_id,
+        CGameObjectArray::THREAD_ASYNCH,
+        INFINITE);
+
+    return ACTION_DONE;
+}
+
+// 0x453840
+BOOL CGameAIBase::EvaluateStatusTrigger(const CAITrigger& trigger)
+{
+    CAITrigger triggerCopy(trigger);
+    BOOL bResult = FALSE;
+    CGameObject* pObject = NULL;
+    CGameObject* pObject2 = NULL;
+    BOOL bNoRelease = FALSE;
+    CString sScope;
+    CString sName;
+    CString sString;
+    CString sUnused;
+
+    switch (triggerCopy.m_triggerID) {
+    case 0x4023:
+        // True
+        return TRUE;
+    case 0x4030:
+    case 0x40C8:
+        // False, HasInnateAbility
+        bResult = FALSE;
+        break;
+    case 0x400F:
+        // Global
+        sString = triggerCopy.m_string1;
+        sString.MakeUpper();
+        sScope = sString.Left(6);
+        sName = sString.Right(sString.GetLength() - 6);
+        if (strcmp(sScope, "GLOBAL") == 0) {
+            CVariable* pVariable = g_pBaldurChitin->GetObjectGame()->GetVariables()->FindKey(sName);
+            if (pVariable != NULL) {
+                bResult = pVariable->m_intValue == triggerCopy.m_specificID;
+            } else {
+                bResult = triggerCopy.m_specificID == 0;
+            }
+        } else if (strcmp(sScope, "LOCALS") == 0) {
+            if (GetObjectType() != CGameObject::TYPE_SPRITE) {
+                bResult = FALSE;
+                break;
+            }
+
+            CVariable* pVariable = static_cast<CGameSprite*>(this)->GetLocalVariables()->FindKey(sName);
+            if (pVariable != NULL) {
+                bResult = pVariable->m_intValue == triggerCopy.m_specificID;
+            } else {
+                bResult = triggerCopy.m_specificID == 0;
+            }
+        } else {
+            if (strcmp(sScope, "MYAREA") == 0) {
+                // NOTE: The area's name is read as a C string from the start
+                // of the area (its header's RESREF), as the original does.
+                sScope = reinterpret_cast<const char*>(m_pArea->m_header.m_areaName);
+            }
+
+            CGameArea* pArea = g_pBaldurChitin->GetObjectGame()->GetArea(sScope);
+            if (pArea == NULL) {
+                break;
+            }
+
+            CVariable* pVariable = pArea->GetVariables()->FindKey(sName);
+            if (pVariable != NULL) {
+                bResult = pVariable->m_intValue == triggerCopy.m_specificID;
+            } else {
+                bResult = triggerCopy.m_specificID == 0;
+            }
+        }
+        break;
+    case 0x4034:
+        // GlobalGT
+        sString = triggerCopy.m_string1;
+        sString.MakeUpper();
+        sScope = sString.Left(6);
+        sName = sString.Right(sString.GetLength() - 6);
+        if (strcmp(sScope, "GLOBAL") == 0) {
+            CVariable* pVariable = g_pBaldurChitin->GetObjectGame()->GetVariables()->FindKey(sName);
+            if (pVariable != NULL) {
+                bResult = pVariable->m_intValue > triggerCopy.m_specificID;
+            } else {
+                bResult = triggerCopy.m_specificID < 0;
+            }
+        } else if (strcmp(sScope, "LOCALS") == 0) {
+            if (GetObjectType() != CGameObject::TYPE_SPRITE) {
+                bResult = FALSE;
+                break;
+            }
+
+            CVariable* pVariable = static_cast<CGameSprite*>(this)->GetLocalVariables()->FindKey(sName);
+            if (pVariable != NULL) {
+                bResult = pVariable->GetIntValue() > triggerCopy.GetSpecifics();
+            } else {
+                bResult = triggerCopy.GetSpecifics() < 0;
+            }
+        } else {
+            if (strcmp(sScope, "MYAREA") == 0) {
+                // NOTE: As in Global.
+                sScope = reinterpret_cast<const char*>(m_pArea->m_header.m_areaName);
+            }
+
+            CGameArea* pArea = g_pBaldurChitin->GetObjectGame()->GetArea(sScope);
+            if (pArea == NULL) {
+                break;
+            }
+
+            CVariable* pVariable = pArea->GetVariables()->FindKey(sName);
+            if (pVariable != NULL) {
+                bResult = pVariable->GetIntValue() > triggerCopy.GetSpecifics();
+            } else {
+                bResult = triggerCopy.GetSpecifics() < 0;
+            }
+        }
+        break;
+    case 0x4035:
+        // GlobalLT
+        sString = triggerCopy.m_string1;
+        sString.MakeUpper();
+        sScope = sString.Left(6);
+        sName = sString.Right(sString.GetLength() - 6);
+        if (strcmp(sScope, "GLOBAL") == 0) {
+            CVariable* pVariable = g_pBaldurChitin->GetObjectGame()->GetVariables()->FindKey(sName);
+            if (pVariable != NULL) {
+                bResult = pVariable->GetIntValue() < triggerCopy.GetSpecifics();
+            } else {
+                bResult = triggerCopy.GetSpecifics() > 0;
+            }
+        } else if (strcmp(sScope, "LOCALS") == 0) {
+            if (GetObjectType() != CGameObject::TYPE_SPRITE) {
+                bResult = FALSE;
+                break;
+            }
+
+            CVariable* pVariable = static_cast<CGameSprite*>(this)->GetLocalVariables()->FindKey(sName);
+            if (pVariable != NULL) {
+                bResult = pVariable->GetIntValue() < triggerCopy.GetSpecifics();
+            } else {
+                bResult = triggerCopy.GetSpecifics() > 0;
+            }
+        } else {
+            if (strcmp(sScope, "MYAREA") == 0) {
+                // NOTE: As in Global.
+                sScope = reinterpret_cast<const char*>(m_pArea->m_header.m_areaName);
+            }
+
+            CGameArea* pArea = g_pBaldurChitin->GetObjectGame()->GetArea(sScope);
+            if (pArea == NULL) {
+                break;
+            }
+
+            CVariable* pVariable = pArea->GetVariables()->FindKey(sName);
+            if (pVariable != NULL) {
+                bResult = pVariable->GetIntValue() < triggerCopy.GetSpecifics();
+            } else {
+                bResult = triggerCopy.GetSpecifics() > 0;
+            }
+        }
+        break;
+    case 0x4040:
+        // GlobalTimerExpired: the name in string1, the scope in string2.
+        {
+            sString = triggerCopy.m_string2;
+            sString.MakeUpper();
+            sScope = sString.Left(6);
+            sName = triggerCopy.m_string1;
+
+            CVariable* pVariable;
+            if (sScope == "GLOBAL") {
+                pVariable = g_pBaldurChitin->GetObjectGame()->GetVariables()->FindKey(sName);
+            } else if (sScope == "LOCALS") {
+                if (GetObjectType() != CGameObject::TYPE_SPRITE) {
+                    bResult = FALSE;
+                    break;
+                }
+                pVariable = static_cast<CGameSprite*>(this)->GetLocalVariables()->FindKey(sName);
+            } else {
+                if (sScope == "MYAREA") {
+                    sScope = reinterpret_cast<const char*>(m_pArea->GetHeader());
+                }
+
+                CGameArea* pArea = g_pBaldurChitin->GetObjectGame()->GetArea(sScope);
+                if (pArea == NULL) {
+                    break;
+                }
+                pVariable = pArea->GetVariables()->FindKey(sName);
+            }
+
+            if (pVariable == NULL) {
+                bResult = TRUE;
+                break;
+            }
+
+            ULONG nGameTime = g_pBaldurChitin->GetObjectGame()->GetWorldTimer()->m_gameTime;
+            bResult = static_cast<ULONG>(pVariable->GetIntValue()) < nGameTime;
+        }
+        break;
+    case 0x400D:
+        // Exists
+        triggerCopy.m_triggerCause.Decode(this);
+        pObject2 = triggerCopy.m_triggerCause.sub_40D0F0(this, TRUE);
+        bResult = pObject2 != NULL;
+        break;
+    case 0x4051:
+        // Dead: no such object, not a sprite, or a sprite dead now or by
+        // its base state.
+        triggerCopy.Decode(this);
+        pObject2 = triggerCopy.GetCause().sub_40D0F0(this, TRUE);
+        if (pObject2 == NULL
+            || pObject2->GetObjectType() != CGameObject::TYPE_SPRITE
+            || (static_cast<CGameSprite*>(pObject2)->GetDerivedStats()->m_generalState & STATE_DEAD) != 0
+            || (static_cast<CGameSprite*>(pObject2)->GetBaseStats()->m_generalState & STATE_DEAD) != 0) {
+            bResult = TRUE;
+        } else {
+            bResult = FALSE;
+        }
+        break;
+    case 0x40D7:
+        // IsActive: a sound, a sprite or an info trigger that is active.
+        triggerCopy.Decode(this);
+        pObject2 = triggerCopy.GetCause().sub_40CCA0(this, FALSE);
+        if (pObject2 != NULL) {
+            BYTE objectType = pObject2->GetObjectType();
+            if (objectType == CGameObject::TYPE_SOUND) {
+                bResult = static_cast<CGameSound*>(pObject2)->IsActive();
+            } else if (objectType == CGameObject::TYPE_SPRITE) {
+                bResult = static_cast<CGameSprite*>(pObject2)->GetActive();
+            } else if (objectType == CGameObject::TYPE_TRIGGER) {
+                bResult = static_cast<WORD>(static_cast<CGameTrigger*>(pObject2)->sub_45B950());
+            }
+        }
+        break;
+    case 0x4047:
+        // RandomNum(range, value): the object's random value of this
+        // update. NOTE: a range of 0 divides by zero, as in the original.
+        bResult = m_randValue % triggerCopy.GetSpecifics() + 1 == triggerCopy.m_specific2;
+        break;
+    case 0x4048:
+        // RandomNumGT
+        bResult = m_randValue % triggerCopy.GetSpecifics() + 1 > triggerCopy.m_specific2;
+        break;
+    case 0x4049:
+        // RandomNumLT
+        bResult = m_randValue % triggerCopy.GetSpecifics() + 1 < triggerCopy.m_specific2;
+        break;
+    case 0x40D1:
+        // EntirePartyOnMap
+        {
+            CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+            INT nCharacters = pGame->m_nCharacters;
+            if (nCharacters <= 0) {
+                break;
+            }
+
+            bResult = TRUE;
+            for (SHORT nIndex = 0; nIndex < nCharacters && bResult == TRUE; nIndex++) {
+                CGameArea* pArea = m_pArea;
+                pGame = g_pBaldurChitin->GetObjectGame();
+                LONG nCharacterId = nIndex < pGame->m_nCharacters
+                    ? pGame->m_characterPortraits[nIndex]
+                    : CGameObjectArray::INVALID_INDEX;
+
+                // NOTE: The original keeps the object of the previous
+                // character when the share fails, and its epilogue releases
+                // the last one a second time (a no-op on the AI thread).
+                pGame->GetObjectArray()->GetShare(nCharacterId,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    &pObject,
+                    INFINITE);
+                if (pObject != NULL) {
+                    if ((static_cast<CGameSprite*>(pObject)->m_derivedStats.m_generalState & STATE_DEAD) == 0
+                        && pObject->m_pArea != pArea) {
+                        bResult = FALSE;
+                    }
+
+                    g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(nCharacterId,
+                        CGameObjectArray::THREAD_ASYNCH,
+                        INFINITE);
+                } else {
+                    bResult = FALSE;
+                }
+            }
+        }
+        break;
+    case 0x40D2:
+        // AreaRestDisabled
+        if (m_pArea != NULL && (m_pArea->m_header.m_flags & 0x2) != 0) {
+            bResult = TRUE;
+        }
+        break;
+    case 0x40EF:
+        // InCutsceneMode
+        bResult = g_pBaldurChitin->GetObjectGame()->GetGameSave()->m_mode == 0x142;
+        break;
+    default:
+        // TODO: Every trigger not listed above (the byte table 0x45B0C4 and
+        // the jump table 0x45AE40, cases 0x453BDE-0x45AD4C) is not ported;
+        // it answers FALSE until it is.
+        bResult = FALSE;
+        break;
+    }
+
+    if (pObject != NULL && !bNoRelease) {
+        g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(pObject->GetId(),
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+    }
+
+    if (pObject2 != NULL) {
+        g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(pObject2->GetId(),
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+    }
+
+    return bResult;
 }

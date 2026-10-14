@@ -3,6 +3,7 @@
 
 #include "CGameAIBase.h"
 #include "CResRef.h"
+#include "CSound.h"
 #include "CTiledObject.h"
 #include "FileFormat.h"
 
@@ -15,6 +16,7 @@ public:
     /* 000C */ void AIUpdate() override;
     /* 0030 */ void DebugDump(const CString& message, BOOLEAN bEchoToScreen) override;
     /* 0034 */ BOOL IsOver(const CPoint& pt) override;
+    /* 0040 */ void OnActionButton(const CPoint& pt) override;
     /* 0048 */ void RemoveFromArea() override;
     /* 0058 */ void SetCursor(LONG nToolTip) override;
 
@@ -24,6 +26,8 @@ public:
     DWORD GetFlags();
     void SetFlags(DWORD dwFlags);
     BOOL sub_45B700();
+    void ToggleDoor(const CAIObjectType& cause, BOOL bForce);
+    const CPoint& GetCloserDestPt(const CPoint& pt);
 
     /* 0598 */ CResRef m_resID;
     /* 05A0 */ CRect m_rOpenBounding;
@@ -62,6 +66,7 @@ public:
     /* 0664 */ SHORT m_drawPoly;
     /* 0666 */ CPoint m_ptOpenDest;
     /* 066E */ CPoint m_ptClosedDest;
+    /* 0676 */ CSound m_sound;
     /* 06DA */ CArray<CRect*> field_6DA;
     /* 06EE */ CAreaPoint* field_6EE;
     /* 06F2 */ CArray<CRect*> field_6F2;
