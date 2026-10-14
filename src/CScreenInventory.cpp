@@ -3590,7 +3590,166 @@ void CScreenInventory::PlaySwapSound(CItem* pOldItem, CItem* pNewItem)
 // 0x62C4E0
 void CScreenInventory::CancelEngine()
 {
-    // TODO: Incomplete.
+    BOOL bSwapped = FALSE;
+    INT nButtonId;
+
+    while (GetTopPopup() != NULL) {
+        OnCancelButtonClick();
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+    CItem* pItem;
+    STRREF description;
+    CResRef cResIcon;
+    CResRef cResItem;
+    WORD wCount;
+
+    if (m_pTempItem != NULL) {
+        // The item in hand goes back where it came from, else into a free
+        // personal slot, else to the ground, else away.
+        INT nOldSelectedCharacter = m_nSelectedCharacter;
+        m_nSelectedCharacter = field_510;
+        field_528 = 1;
+
+        MapButtonIdToItemInfo(field_514, pItem, description, cResIcon, cResItem, wCount);
+
+        BOOL bDone = FALSE;
+        if (pItem == NULL) {
+            BeginSwap();
+            BOOL bResult = SwapWithSlot(field_514, FALSE, 0xFFFF, TRUE);
+            EndSwap();
+
+            if (bResult && m_pTempItem == NULL) {
+                bDone = TRUE;
+            }
+        }
+
+        if (!bDone) {
+            for (nButtonId = 30; nButtonId <= 80 && !bSwapped; nButtonId++) {
+                if (MapButtonIdToItemInfo(nButtonId, pItem, description, cResIcon, cResItem, wCount)) {
+                    switch (nButtonId) {
+                    case 30:
+                    case 31:
+                    case 32:
+                    case 33:
+                    case 34:
+                    case 35:
+                    case 36:
+                    case 37:
+                    case 38:
+                    case 39:
+                    case 40:
+                    case 41:
+                    case 42:
+                    case 43:
+                    case 44:
+                    case 45:
+                    case 73:
+                    case 74:
+                    case 75:
+                    case 76:
+                    case 77:
+                    case 78:
+                    case 79:
+                    case 80:
+                        if (pItem == NULL) {
+                            BeginSwap();
+                            bSwapped = SwapWithSlot(nButtonId, FALSE, 0xFFFF, TRUE);
+                            EndSwap();
+                        }
+                        break;
+                    }
+                }
+            }
+
+            if (!bSwapped || m_pTempItem != NULL) {
+                LONG nGroundPile = FetchGroundPile(static_cast<SHORT>(m_nSelectedCharacter), TRUE);
+                BOOL bDropped = FALSE;
+                if (nGroundPile != CGameObjectArray::INVALID_INDEX) {
+                    STRREF strError;
+                    BOOLEAN bResult = CInfGame_SwapItemGround(pGame,
+                        nGroundPile,
+                        SHORT_MAX,
+                        m_pTempItem,
+                        strError,
+                        0xFFFF,
+                        FALSE);
+
+                    CMessageContainerAddItem* pMessage = new CMessageContainerAddItem(CItem(),
+                        SHORT_MAX,
+                        TRUE,
+                        nGroundPile,
+                        nGroundPile);
+                    g_pBaldurChitin->GetMessageHandler()->AddMessage(pMessage, FALSE);
+
+                    if (bResult && m_pTempItem == NULL) {
+                        bDropped = TRUE;
+                    }
+                }
+
+                if (!bDropped) {
+                    if ((m_pTempItem->GetFlagsFile() & 0x1) != 0) {
+                        // A critical item takes the place of one that is not.
+                        bSwapped = FALSE;
+                        for (nButtonId = 30; nButtonId <= 80 && !bSwapped; nButtonId++) {
+                            if (MapButtonIdToItemInfo(nButtonId, pItem, description, cResIcon, cResItem, wCount)) {
+                                switch (nButtonId) {
+                                case 30:
+                                case 31:
+                                case 32:
+                                case 33:
+                                case 34:
+                                case 35:
+                                case 36:
+                                case 37:
+                                case 38:
+                                case 39:
+                                case 40:
+                                case 41:
+                                case 42:
+                                case 43:
+                                case 44:
+                                case 45:
+                                case 73:
+                                case 74:
+                                case 75:
+                                case 76:
+                                case 77:
+                                case 78:
+                                case 79:
+                                case 80:
+                                    // NOTE: The original reads the flags of an
+                                    // empty slot's NULL item and faults;
+                                    // bounded here by skipping it (P4-10).
+                                    if (pItem != NULL && (pItem->GetFlagsFile() & 0x1) == 0) {
+                                        BeginSwap();
+                                        bSwapped = SwapWithSlot(nButtonId, FALSE, 0xFFFF, TRUE);
+                                        EndSwap();
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (!bSwapped || m_pTempItem != NULL) {
+                            pGame->AddDisposableItem(m_pTempItem);
+                            m_pTempItem = NULL;
+                        }
+                    } else {
+                        pGame->AddDisposableItem(m_pTempItem);
+                        m_pTempItem = NULL;
+                    }
+                }
+            }
+        }
+
+        m_nSelectedCharacter = nOldSelectedCharacter;
+        field_510 = -1;
+        field_514 = -1;
+    }
+
+    FlushGroundPiles();
 }
 
 // 0x62C900
@@ -3641,6 +3800,8 @@ void CScreenInventory::CheckMultiPlayerViewable()
                 if (g_pChitin->cNetwork.GetSessionOpen()) {
                     m_bMultiPlayerViewable = g_pChitin->cNetwork.GetSessionHosting()
                         || pGame->m_singlePlayerPermissions.GetSinglePermission(CGamePermission::LEADER);
+                } else {
+                    m_bMultiPlayerViewable = FALSE;
                 }
             }
         } else {
@@ -3745,6 +3906,10 @@ BOOL CScreenInventory::IsCharacterInRange(INT nPortraitNum)
     // __LINE__: 5872
     UTIL_ASSERT(pGame != NULL);
 
+    if (field_510 < 0) {
+        return TRUE;
+    }
+
     nSprite = pGame->GetCharacterId(field_510);
 
     do {
@@ -3836,7 +4001,10 @@ void CScreenInventory::UpdateRequesterPanel()
         // __LINE__: 9310
         UTIL_ASSERT(pEdit != NULL);
 
-        m_nRequesterAmount = min(m_nRequesterAmount, wCount);
+        // NOTE: Signed compare.
+        if (static_cast<INT>(m_nRequesterAmount) >= static_cast<INT>(wCount)) {
+            m_nRequesterAmount = wCount;
+        }
 
         char buffer[80];
         sprintf(buffer, "%d", m_nRequesterAmount);
@@ -3942,7 +4110,7 @@ void CScreenInventory::UpdateAbilitiesPanel()
         POSITION pos = m_pAbilities != NULL
             ? m_pAbilities->GetHeadPosition()
             : NULL;
-        for (INT nIndex = 1; nIndex < 3; nIndex++) {
+        for (INT nIndex = 0; nIndex < 3; nIndex++) {
             CUIControlButtonInventoryAbilitiesAbility* pAbility = static_cast<CUIControlButtonInventoryAbilitiesAbility*>(pPanel->GetControl(nIndex + 1));
 
             // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenInventory.cpp
@@ -4085,6 +4253,10 @@ BOOL CScreenInventory::SwapWithAppearance()
     case 73:
         slotId = 12;
         break;
+    case 7:
+    case 72:
+        slotId = 13;
+        break;
     case 10:
         slotId = FindFreePersonalSlot(22, 23, 1, TRUE);
         break;
@@ -4179,6 +4351,10 @@ BOOL CScreenInventory::SwapWithAppearance()
         // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenInventory.cpp
         // __LINE__: 8613
         UTIL_ASSERT(FALSE);
+
+        // NOTE: The original goes on with its `this` pointer as the button
+        // id; bounded here (P4-10).
+        return FALSE;
     }
 
     BeginSwap();
@@ -4396,6 +4572,7 @@ INT CScreenInventory::MapInventoryIdToButtonId(INT nInventoryId)
         // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenInventory.cpp
         // __LINE__: 9010
         UTIL_ASSERT(FALSE);
+        return -1;
     }
 }
 
@@ -4486,6 +4663,10 @@ BOOL CScreenInventory::MapButtonIdToItemInfo(INT nButton, CItem*& pItem, STRREF&
                     cResIcon,
                     cResItem,
                     wCount);
+            } else {
+                // NOTE: The original leaves the caller's item pointer as it
+                // was (stack garbage in every caller); bounded here (P4-10).
+                pItem = NULL;
             }
         }
         return TRUE;
