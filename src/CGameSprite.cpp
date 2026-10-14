@@ -10,6 +10,7 @@
 #include "CGameButtonList.h"
 #include "CGameContainer.h"
 #include "CGameDoor.h"
+#include "CGameTimer.h"
 #include "CInfCursor.h"
 #include "CInfGame.h"
 #include "CItem.h"
@@ -2663,7 +2664,7 @@ void CGameSprite::AIUpdateWalk()
 
         if (m_currentSearchRequest->m_serviceState == CSearchRequest::STATE_WAITING) {
             if (m_currentSearchRequest->m_collisionDelay > 1) {
-                m_currentSearchRequest--;
+                m_currentSearchRequest->m_collisionDelay--;
                 pathLock.Unlock();
                 return;
             }
@@ -2777,10 +2778,12 @@ void CGameSprite::AIUpdateWalk()
         }
 
         pathLock.Unlock();
+    }
 
-        if (m_pPath == NULL) {
-            return;
-        }
+    // No path (none yet, none found, or dropped): no step (0x6F95A6, on
+    // every route).
+    if (m_pPath == NULL) {
+        return;
     }
 
     if ((m_posDest.x / 8 == (m_pos.x + 4) / 8 && m_posDest.y / 6 == (m_pos.y + 3) / 6)
@@ -2802,39 +2805,47 @@ void CGameSprite::AIUpdateWalk()
             }
             return;
         }
-    }
 
-    CPoint goal;
-    CPathSearch::PositionToPoint(m_pPath[m_currPath++], &goal);
-    m_posDest.x = goal.x * CPathSearch::GRID_SQUARE_SIZEX + CPathSearch::GRID_SQUARE_SIZEX / 2;
-    m_posDest.y = goal.y * CPathSearch::GRID_SQUARE_SIZEY + CPathSearch::GRID_SQUARE_SIZEY / 2;
+        // The next node: the sprite heads for its centre. The distance and
+        // the step are taken in the 4/3-scaled space (a search square is
+        // 16 by 16 there), as m_posExact is.
+        CPoint goal;
+        CPathSearch::PositionToPoint(m_pPath[m_currPath], &goal);
+        m_currPath++;
+        m_posDest.x = goal.x * CPathSearch::GRID_SQUARE_SIZEX + CPathSearch::GRID_SQUARE_SIZEX / 2;
+        m_posDest.y = goal.y * CPathSearch::GRID_SQUARE_SIZEY + CPathSearch::GRID_SQUARE_SIZEY / 2;
 
-    int scale = static_cast<int>(sqrt((m_posDest.x - m_pos.x) * (m_posDest.x - m_pos.x) + (m_posDest.y - 4 * m_pos.y / 3) * (m_posDest.y - 4 * m_pos.y / 3)) + 0.5);
-    if (scale == 0) {
-        // NOTE: Uninline.
-        DropPath();
+        LONG dx = m_posDest.x - m_pos.x;
+        LONG dy = goal.y * CPathSearch::GRID_SQUARE_SIZEX + CPathSearch::GRID_SQUARE_SIZEX / 2 - 4 * m_pos.y / 3;
 
-        // NOTE: Uninline.
-        SetIdleSequence();
+        // NOTE: __ftol truncates the square root.
+        int scale = static_cast<int>(sqrt(static_cast<double>(dx * dx + dy * dy)));
+        if (scale == 0) {
+            // NOTE: Uninline.
+            DropPath();
 
-        return;
-    }
+            // NOTE: Uninline.
+            SetIdleSequence();
 
-    if (m_animation.GetMoveScale() > 8) {
-        if (scale >= m_animation.GetMoveScale()) {
-            scale = (scale + m_animation.GetMoveScale() / 2) / m_animation.GetMoveScale();
-        } else {
-            scale = 1;
+            return;
         }
 
-        m_posDelta.x = ((m_animation.GetMoveScale() * (m_posDest.x - m_pos.x)) << EXACT_SCALE) / scale;
-        m_posDelta.y = ((m_animation.GetMoveScale() * (m_posDest.y - m_pos.y)) << EXACT_SCALE) / scale;
-    } else {
-        m_posDelta.x = ((m_animation.GetMoveScale() * (m_posDest.x - m_pos.x)) << EXACT_SCALE) / scale;
-        m_posDelta.y = ((m_animation.GetMoveScale() * (m_posDest.y - m_pos.y)) << EXACT_SCALE) / scale;
-    }
+        if (m_animation.GetMoveScale() < 9) {
+            m_posDelta.x = dx * m_animation.GetMoveScale() * (1 << EXACT_SCALE) / scale;
+            m_posDelta.y = dy * m_animation.GetMoveScale() * (1 << EXACT_SCALE) / scale;
+        } else {
+            if (scale < m_animation.GetMoveScale()) {
+                scale = 1;
+            } else {
+                scale = (m_animation.GetMoveScale() / 2 + scale) / m_animation.GetMoveScale();
+            }
 
-    SetDirection(m_posDest);
+            m_posDelta.x = dx * (1 << EXACT_SCALE) / scale;
+            m_posDelta.y = dy * (1 << EXACT_SCALE) / scale;
+        }
+
+        SetDirection(m_posDest);
+    }
 
     m_turningAbout = !m_walkBackwards
         && abs(m_nNewDirection - m_nDirection) >= 5
@@ -3022,6 +3033,7 @@ void CGameSprite::SetPath(LONG* pPath, SHORT nPath)
     m_pPath = pPath;
     m_currPath = 1;
     m_posDest.x = m_pos.x + 4;
+    m_walkBackwards = FALSE;
     m_posDest.y = m_pos.y + 3;
 
     // NOTE: Uninline.
@@ -3030,7 +3042,9 @@ void CGameSprite::SetPath(LONG* pPath, SHORT nPath)
     // NOTE: Uninline.
     CPathSearch::PositionToPoint(m_pPath[nPath - 1], &goal);
 
-    if (abs(goal.x - start.x) <= 4 && abs(goal.y - start.y <= 4) && nPath <= 4) {
+    // A short path (within 4 squares each way, at most 4 nodes) is walked
+    // backwards.
+    if (abs(goal.y - start.y) <= 4 && abs(goal.x - start.x) <= 4 && nPath <= 4) {
         m_walkBackwards = TRUE;
     }
 
@@ -3040,9 +3054,244 @@ void CGameSprite::SetPath(LONG* pPath, SHORT nPath)
 // 0x6FA900
 BOOL CGameSprite::ClearBumpPath(const CPoint& start, const CPoint& goal)
 {
-    // TODO: Incomplete.
+    if (GetAIType().m_nEnemyAlly > CAIObjectType::EA_GOODCUTOFF) {
+        return FALSE;
+    }
 
-    return FALSE;
+    CSearchBitmap* pSearch = &(m_pArea->m_search);
+    CTypedPtrList<CPtrList, LONG*> targets(10);
+    BOOL bTargetsFound = FALSE;
+
+    // The squares around a bumped creature in the order they are tried:
+    // first the square in the direction of this creature's step, last the
+    // one it comes from. Index (dy + 1) * 3 + (dx + 1); 4, the creature's
+    // own square, is never tried.
+    BYTE order[9];
+    order[0] = static_cast<BYTE>((goal.x - start.x) + (goal.y - start.y) * 3 + 4);
+    order[1] = 1;
+    order[2] = 2;
+    order[3] = 3;
+    order[4] = 255;
+    order[5] = 5;
+    order[6] = 6;
+    order[7] = 7;
+    // NOTE: The original writes these two on the stack unchecked; a start
+    // and goal more than one square apart would write outside the table
+    // (the callers pass neighbouring squares). Bounded here.
+    INT nForward = (goal.y - start.y) * 3 + (goal.x - start.x) + 4;
+    if (nForward >= 0 && nForward < 9) {
+        order[nForward] = 0;
+    }
+    order[8] = static_cast<BYTE>((start.x - goal.x) + (start.y - goal.y) * 3 + 4);
+    INT nBackward = (start.y - goal.y) * 3 + (start.x - goal.x) + 4;
+    if (nBackward >= 0 && nBackward < 9) {
+        order[nBackward] = 8;
+    }
+
+    if (start.x == goal.x && start.y == goal.y) {
+        return TRUE;
+    }
+
+    SHORT nTableIndex;
+    if (pSearch->GetCost(goal, GetTerrainTable(), m_animation.GetPersonalSpace(), nTableIndex, FALSE) == CPathSearch::COST_IMPASSABLE) {
+        return FALSE;
+    }
+
+    INT radius = (m_animation.GetPersonalSpace() - 2) / 2;
+    for (SHORT dx = static_cast<SHORT>(-radius); dx <= static_cast<SHORT>(radius); dx++) {
+        if (dx + goal.x < 0 || dx + goal.x >= pSearch->m_GridSquareDimensions.cx) {
+            continue;
+        }
+
+        for (SHORT dy = static_cast<SHORT>(-radius); dy <= static_cast<SHORT>(radius); dy++) {
+            // NOTE: The original bounds the row by the width (`cmp ebp,
+            // [search+0xE6]` at 0x6FAB39), not the height.
+            if (dy + goal.y < 0 || dy + goal.y >= pSearch->m_GridSquareDimensions.cx) {
+                continue;
+            }
+
+            if (abs(dx) + abs(dy) > static_cast<SHORT>(radius) + 1) {
+                continue;
+            }
+
+            BYTE nBumps = pSearch->m_pDynamicCost[(dy + goal.y) * pSearch->m_GridSquareDimensions.cx + goal.x + dx] >> 1;
+            if (nBumps > 7) {
+                return FALSE;
+            }
+
+            if (!bTargetsFound) {
+                bTargetsFound = TRUE;
+                CPoint center(goal.x * CPathSearch::GRID_SQUARE_SIZEX + CPathSearch::GRID_SQUARE_SIZEX / 2,
+                    goal.y * CPathSearch::GRID_SQUARE_SIZEY + CPathSearch::GRID_SQUARE_SIZEY / 2);
+                m_pArea->GetAllInRange(m_posVertList,
+                    center,
+                    CAIObjectType::ANYONE,
+                    static_cast<SHORT>((m_animation.GetPersonalSpace() + 11) / 2 * CPathSearch::GRID_SQUARE_SIZEX),
+                    m_terrainTable,
+                    targets,
+                    FALSE,
+                    FALSE);
+            }
+
+            POSITION pos = targets.GetHeadPosition();
+            while (pos != NULL) {
+                if (nBumps == 0) {
+                    break;
+                }
+
+                POSITION posCurrent = pos;
+                LONG nBumpedId = static_cast<LONG>(reinterpret_cast<INT_PTR>(targets.GetNext(pos)));
+
+                CGameSprite* pBumped;
+                BYTE rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(nBumpedId,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    reinterpret_cast<CGameObject**>(&pBumped),
+                    INFINITE);
+                if (rc != CGameObjectArray::SUCCESS) {
+                    continue;
+                }
+
+                if (pBumped->field_54A8 && !pBumped->field_54B8) {
+                    CPoint ptBumpedSquare(pBumped->m_pos.x / CPathSearch::GRID_SQUARE_SIZEX,
+                        pBumped->m_pos.y / CPathSearch::GRID_SQUARE_SIZEY);
+                    SHORT bumpedRadius = pBumped->m_animation.GetPersonalSpace() >> 1;
+
+                    BOOL bOnSquare = FALSE;
+                    for (SHORT ddx = -bumpedRadius; ddx <= bumpedRadius && !bOnSquare; ddx++) {
+                        for (SHORT ddy = -bumpedRadius; ddy <= bumpedRadius; ddy++) {
+                            if (ptBumpedSquare.x + ddx == goal.x + dx
+                                && ptBumpedSquare.y + ddy == goal.y + dy) {
+                                bOnSquare = TRUE;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (bOnSquare) {
+                        CPoint ptBumped(pBumped->GetPos().x / CPathSearch::GRID_SQUARE_SIZEX,
+                            pBumped->GetPos().y / CPathSearch::GRID_SQUARE_SIZEY);
+
+                        // This creature stands on the goal while the bumped
+                        // one looks for a square.
+                        pSearch->AddObject(goal,
+                            m_typeAI.GetEnemyAlly(),
+                            m_animation.GetPersonalSpace(),
+                            field_54A8,
+                            field_7430);
+
+                        do {
+                            rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetDeny(nBumpedId,
+                                CGameObjectArray::THREAD_ASYNCH,
+                                reinterpret_cast<CGameObject**>(&pBumped),
+                                INFINITE);
+                        } while (rc == CGameObjectArray::SHARED);
+
+                        if (rc == CGameObjectArray::SUCCESS) {
+                            pSearch->RemoveObject(ptBumped,
+                                pBumped->GetAIType().m_nEnemyAlly,
+                                pBumped->m_animation.GetPersonalSpace(),
+                                pBumped->field_54A8,
+                                pBumped->field_7430);
+
+                            BYTE nOrder;
+                            for (nOrder = 0; nOrder < 9; nOrder++) {
+                                BYTE nSquare = order[nOrder];
+                                if (nSquare == 255) {
+                                    continue;
+                                }
+
+                                CPoint ptTry(nSquare % 3 - 1 + ptBumped.x, nSquare / 3 - 1 + ptBumped.y);
+                                SHORT nTryTableIndex;
+                                if (pSearch->GetCost(ptTry, pBumped->GetTerrainTable(), pBumped->m_animation.GetPersonalSpace(), nTryTableIndex, TRUE) == CPathSearch::COST_IMPASSABLE) {
+                                    continue;
+                                }
+
+                                pSearch->AddObject(ptBumped,
+                                    pBumped->GetAIType().m_nEnemyAlly,
+                                    pBumped->m_animation.GetPersonalSpace(),
+                                    pBumped->field_54A8,
+                                    pBumped->field_7430);
+                                pBumped->JumpToPoint(CPoint(ptTry.x * CPathSearch::GRID_SQUARE_SIZEX + CPathSearch::GRID_SQUARE_SIZEX / 2,
+                                                         ptTry.y * CPathSearch::GRID_SQUARE_SIZEY + CPathSearch::GRID_SQUARE_SIZEY / 2),
+                                    TRUE);
+                                if (!pBumped->m_bBumped) {
+                                    pBumped->m_bBumped = TRUE;
+                                    pBumped->m_ptBumpedFrom = ptBumped;
+                                }
+                                targets.RemoveAt(posCurrent);
+                                nBumps--;
+                                break;
+                            }
+
+                            if (nOrder == 9) {
+                                // No free square: the bumped creature
+                                // bumps in turn.
+                                field_54B8 = TRUE;
+
+                                for (nOrder = 0; nOrder < 9; nOrder++) {
+                                    BYTE nSquare = order[nOrder];
+                                    if (nSquare == 255) {
+                                        continue;
+                                    }
+
+                                    CPoint ptTry(nSquare % 3 - 1 + ptBumped.x, nSquare / 3 - 1 + ptBumped.y);
+                                    if (!pBumped->ClearBumpPath(ptBumped, ptTry)) {
+                                        continue;
+                                    }
+
+                                    pSearch->AddObject(ptBumped,
+                                        pBumped->GetAIType().m_nEnemyAlly,
+                                        pBumped->m_animation.GetPersonalSpace(),
+                                        pBumped->field_54A8,
+                                        pBumped->field_7430);
+                                    pBumped->JumpToPoint(CPoint(ptTry.x * CPathSearch::GRID_SQUARE_SIZEX + CPathSearch::GRID_SQUARE_SIZEX / 2,
+                                                             ptTry.y * CPathSearch::GRID_SQUARE_SIZEY + CPathSearch::GRID_SQUARE_SIZEY / 2),
+                                        TRUE);
+                                    if (!pBumped->m_bBumped) {
+                                        pBumped->m_bBumped = TRUE;
+                                        pBumped->m_ptBumpedFrom = ptBumped;
+                                    }
+                                    targets.RemoveAt(posCurrent);
+                                    nBumps--;
+                                    break;
+                                }
+
+                                field_54B8 = FALSE;
+
+                                if (nOrder == 9) {
+                                    pSearch->AddObject(ptBumped,
+                                        pBumped->GetAIType().m_nEnemyAlly,
+                                        pBumped->m_animation.GetPersonalSpace(),
+                                        pBumped->field_54A8,
+                                        pBumped->field_7430);
+                                }
+                            }
+
+                            g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(nBumpedId,
+                                CGameObjectArray::THREAD_ASYNCH,
+                                INFINITE);
+                        }
+
+                        pSearch->RemoveObject(goal,
+                            m_typeAI.GetEnemyAlly(),
+                            m_animation.GetPersonalSpace(),
+                            field_54A8,
+                            field_7430);
+                    }
+                }
+
+                g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(nBumpedId,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    INFINITE);
+            }
+
+            if (nBumps != 0) {
+                return FALSE;
+            }
+        }
+    }
+
+    return TRUE;
 }
 
 // 0x6FB440
@@ -3776,7 +4025,479 @@ BOOL CGameSprite::CanSpeak(BOOL ignoreDeath, BOOL ignoreSilence)
 // 0x7011E0
 void CGameSprite::PlaySound(BYTE soundID, BOOL showText, BOOL showCircle, BOOL overrideOption)
 {
-    // TODO: Incomplete.
+    STR_RES strRes;
+    BYTE nSoundIndex;
+
+    // NOTE: Uninline.
+    BYTE channel = GetChannel();
+
+    // Whether the voice is played without a position (the selection and
+    // the "select action" voices).
+    BOOL bUnpositioned = FALSE;
+
+    if (!CanSpeak(soundID == SOUND_DYING, FALSE)) {
+        return;
+    }
+
+    // NOTE: Every pick below is an inlined helper that draws rand() only
+    // when the count is not zero; the callers have already checked it.
+    SHORT nSounds;
+    INT nIndex;
+
+    switch (soundID) {
+    case 1:
+        nSounds = GetNumSounds(0, 2);
+        if (nSounds == 0) {
+            return;
+        }
+        nIndex = nSounds != 0 ? rand() % nSounds : 0;
+        g_pBaldurChitin->GetTlkTable().Fetch(m_baseStats.m_speech[nIndex], strRes);
+        nSoundIndex = static_cast<BYTE>(nIndex);
+        if (channel == 13) {
+            strRes.cSound.SetChannel(13, reinterpret_cast<DWORD_PTR>(m_pArea));
+        } else {
+            strRes.cSound.SetChannel(channel, 0);
+        }
+        break;
+    case 2:
+        nSounds = GetNumSounds(7, 2);
+        if (nSounds == 0) {
+            return;
+        }
+        nIndex = nSounds != 0 ? rand() % nSounds : 0;
+        g_pBaldurChitin->GetTlkTable().Fetch(m_baseStats.m_speech[7 + nIndex], strRes);
+        nSoundIndex = static_cast<BYTE>(nIndex + 7);
+        strRes.cSound.SetChannel(channel, reinterpret_cast<DWORD_PTR>(m_pArea));
+        break;
+    case 3:
+        nSounds = GetNumSounds(9, 2);
+        if (nSounds == 0) {
+            return;
+        }
+        nIndex = nSounds != 0 ? rand() % nSounds : 0;
+        g_pBaldurChitin->GetTlkTable().Fetch(m_baseStats.m_speech[9 + nIndex], strRes);
+        nSoundIndex = static_cast<BYTE>(nIndex + 9);
+        strRes.cSound.SetChannel(channel, reinterpret_cast<DWORD_PTR>(m_pArea));
+        break;
+    case 4:
+        nSounds = GetNumSounds(11, 2);
+        if (nSounds == 0) {
+            return;
+        }
+        nIndex = nSounds != 0 ? rand() % nSounds : 0;
+        g_pBaldurChitin->GetTlkTable().Fetch(m_baseStats.m_speech[11 + nIndex], strRes);
+        nSoundIndex = static_cast<BYTE>(nIndex + 11);
+        strRes.cSound.SetChannel(channel, reinterpret_cast<DWORD_PTR>(m_pArea));
+        break;
+    case 5:
+        if (g_pBaldurChitin->GetObjectGame()->GetCharacterPortraitNum(m_id) == -1) {
+            if (g_pBaldurChitin->m_pEngineWorld->m_nBattleCryTimeOut >= 1) {
+                return;
+            }
+            g_pBaldurChitin->m_pEngineWorld->m_nBattleCryTimeOut = 30;
+        }
+
+        if (!g_pBaldurChitin->GetObjectGame()->GetOptions()->m_bAttackSounds
+            || m_attackSoundDeadzone > 0) {
+            return;
+        }
+
+        m_attackSoundDeadzone = 90;
+
+        if (!field_70FC) {
+            nSounds = GetNumSounds(2, 5);
+            if (nSounds == 0) {
+                return;
+            }
+            nIndex = nSounds != 0 ? rand() % nSounds : 0;
+            g_pBaldurChitin->GetTlkTable().Fetch(m_baseStats.m_speech[2 + nIndex], strRes);
+            nSoundIndex = static_cast<BYTE>(nIndex + 2);
+            strRes.cSound.SetChannel(channel, reinterpret_cast<DWORD_PTR>(m_pArea));
+            break;
+        }
+
+        if (field_7360.GetCount() == 0) {
+            return;
+        }
+
+        {
+            CSound sound;
+            CString sSound;
+            INT nCount = field_7360.GetCount();
+            nIndex = nCount != 0 ? rand() % nCount : 0;
+
+            // NOTE: Inlined CList::GetAt(FindIndex(nIndex)), which reads
+            // the entry at offset 8 of a null node when the index is out of
+            // range; the index here is always in range.
+            POSITION pos = field_7360.FindIndex(nIndex);
+            sSound = field_7360.GetAt(pos).field_0;
+
+            sound.SetResRef(CResRef(sSound), TRUE, TRUE);
+            sound.m_nPitchVariance = 5;
+            sound.m_nVolumeVariance = 20;
+            sound.SetChannel(channel, reinterpret_cast<DWORD_PTR>(m_pArea));
+            if (!sound.GetLooping()) {
+                sound.SetFireForget(TRUE);
+            }
+            sound.Play(m_pos.x, m_pos.y, 0, FALSE);
+        }
+        return;
+    case 6:
+        if (!field_70FD) {
+            nSounds = GetNumSounds(33, 3);
+            if (nSounds == 0) {
+                return;
+            }
+            nIndex = nSounds != 0 ? rand() % nSounds : 0;
+            g_pBaldurChitin->GetTlkTable().Fetch(m_baseStats.m_speech[33 + nIndex], strRes);
+            nSoundIndex = static_cast<BYTE>(nIndex + 33);
+            if (channel == 13) {
+                strRes.cSound.SetChannel(13, reinterpret_cast<DWORD_PTR>(m_pArea));
+            } else {
+                strRes.cSound.SetChannel(channel, 0);
+            }
+            break;
+        }
+
+        if (field_737C.GetCount() != 0) {
+            nIndex = rand() % field_737C.GetCount();
+
+            // NOTE: Inlined CList::GetAt(FindIndex(nIndex)).
+            POSITION pos = field_737C.FindIndex(nIndex);
+            const CGameSpriteSoundEntry& entry = field_737C.GetAt(pos);
+            field_7410 = entry.field_0;
+            field_7414 = entry.field_4;
+        }
+        return;
+    case SOUND_DYING:
+        nSounds = GetNumSounds(36, 2);
+        if (nSounds == 0) {
+            return;
+        }
+        nIndex = nSounds != 0 ? rand() % nSounds : 0;
+        g_pBaldurChitin->GetTlkTable().Fetch(m_baseStats.m_speech[36 + nIndex], strRes);
+        nSoundIndex = static_cast<BYTE>(nIndex + 36);
+        if (channel == 13) {
+            strRes.cSound.SetChannel(13, reinterpret_cast<DWORD_PTR>(m_pArea));
+        } else {
+            strRes.cSound.SetChannel(channel, 0);
+        }
+        break;
+    case 8:
+        nSounds = GetNumSounds(13, 2);
+        if (nSounds == 0) {
+            return;
+        }
+        nIndex = nSounds != 0 ? rand() % nSounds : 0;
+        g_pBaldurChitin->GetTlkTable().Fetch(m_baseStats.m_speech[13 + nIndex], strRes);
+        nSoundIndex = static_cast<BYTE>(nIndex + 13);
+        if (channel == 13) {
+            strRes.cSound.SetChannel(13, reinterpret_cast<DWORD_PTR>(m_pArea));
+        } else {
+            strRes.cSound.SetChannel(channel, 0);
+        }
+        break;
+    case SOUND_SELECT:
+        if (!field_7100) {
+            DWORD nFrequency = g_pBaldurChitin->GetObjectGame()->GetOptions()->m_nSelectionSoundsFrequency;
+            BOOL bPlay = FALSE;
+            bUnpositioned = TRUE;
+
+            if (nFrequency == 2) {
+                if (rand() % 5 == 0) {
+                    bPlay = TRUE;
+                }
+            } else if (nFrequency == 3) {
+                bPlay = TRUE;
+            }
+
+            if (!overrideOption && !bPlay) {
+                return;
+            }
+
+            if (field_710C < 9) {
+                nSounds = GetNumSounds(15, 7);
+                if (nSounds < 1) {
+                    nIndex = 0;
+                } else {
+                    nIndex = field_710A % nSounds;
+                }
+                g_pBaldurChitin->GetTlkTable().Fetch(m_baseStats.m_speech[15 + nIndex], strRes);
+                nSoundIndex = static_cast<BYTE>(nIndex + 15);
+                if (channel == 13) {
+                    strRes.cSound.SetChannel(6, reinterpret_cast<DWORD_PTR>(m_pArea));
+                } else {
+                    strRes.cSound.SetChannel(channel, 0);
+                }
+                field_710A++;
+                field_710C++;
+            } else {
+                g_pBaldurChitin->GetTlkTable().Fetch(m_baseStats.m_speech[29 + field_710E], strRes);
+                nSoundIndex = static_cast<BYTE>(field_710E + 29);
+                if (channel == 13) {
+                    strRes.cSound.SetChannel(6, reinterpret_cast<DWORD_PTR>(m_pArea));
+                } else {
+                    strRes.cSound.SetChannel(channel, 0);
+                }
+                field_710E++;
+                if (GetNumSounds(29, 4) <= field_710E) {
+                    field_710E = 0;
+                    field_710C = 0;
+                }
+                field_710A = 0;
+            }
+            break;
+        }
+
+        if (field_73D0.GetCount() == 0) {
+            return;
+        }
+
+        {
+            CSound sound;
+            CString sSound;
+            INT nCount = field_73D0.GetCount();
+            nIndex = nCount != 0 ? rand() % nCount : 0;
+
+            // NOTE: Inlined CList::GetAt(FindIndex(nIndex)).
+            POSITION pos = field_73D0.FindIndex(nIndex);
+            sSound = field_73D0.GetAt(pos).field_0;
+
+            sound.SetResRef(CResRef(sSound), TRUE, TRUE);
+            sound.m_nPitchVariance = 5;
+            sound.m_nVolumeVariance = 20;
+            sound.SetChannel(channel, reinterpret_cast<DWORD_PTR>(m_pArea));
+            if (!sound.GetLooping()) {
+                sound.SetFireForget(TRUE);
+            }
+            sound.Play(m_pos.x, m_pos.y, 0, FALSE);
+        }
+        return;
+    case 10:
+        bUnpositioned = TRUE;
+        nSounds = GetNumSounds(15, 7);
+        if (nSounds == 0) {
+            return;
+        }
+        nIndex = nSounds != 0 ? rand() % nSounds : 0;
+        g_pBaldurChitin->GetTlkTable().Fetch(m_baseStats.m_speech[15 + nIndex], strRes);
+        nSoundIndex = static_cast<BYTE>(nIndex + 15);
+        if (channel == 13) {
+            strRes.cSound.SetChannel(6, reinterpret_cast<DWORD_PTR>(m_pArea));
+        } else {
+            strRes.cSound.SetChannel(channel, 0);
+        }
+        break;
+    case SOUND_SELECT_ACTION: {
+        DWORD nFrequency = g_pBaldurChitin->GetObjectGame()->GetOptions()->m_nCommandSoundsFrequency;
+        BOOL bPlay = FALSE;
+
+        if (nFrequency == 2) {
+            if (m_firstActionSound) {
+                bPlay = TRUE;
+            }
+        } else if (nFrequency == 3) {
+            bPlay = TRUE;
+        }
+
+        if (!overrideOption && !bPlay) {
+            return;
+        }
+
+        nSounds = GetNumSounds(22, 7);
+        if (nSounds == 0) {
+            return;
+        }
+        nIndex = nSounds != 0 ? rand() % nSounds : 0;
+        g_pBaldurChitin->GetTlkTable().Fetch(m_baseStats.m_speech[22 + nIndex], strRes);
+        nSoundIndex = static_cast<BYTE>(nIndex + 22);
+        strRes.cSound.SetChannel(channel, reinterpret_cast<DWORD_PTR>(m_pArea));
+        m_firstActionSound = FALSE;
+        break;
+    }
+    case 12:
+        bUnpositioned = TRUE;
+        nSounds = GetNumSounds(29, 4);
+        if (nSounds == 0) {
+            return;
+        }
+        nIndex = nSounds != 0 ? rand() % nSounds : 0;
+        g_pBaldurChitin->GetTlkTable().Fetch(m_baseStats.m_speech[29 + nIndex], strRes);
+        nSoundIndex = static_cast<BYTE>(nIndex + 29);
+        strRes.cSound.SetChannel(channel, reinterpret_cast<DWORD_PTR>(m_pArea));
+        if (channel == 13) {
+            strRes.cSound.SetChannel(6, reinterpret_cast<DWORD_PTR>(m_pArea));
+        } else {
+            strRes.cSound.SetChannel(channel, 0);
+        }
+        break;
+    case SOUND_REACT_TO_DEATH:
+        nSounds = GetNumSounds(38, 2);
+        if (nSounds == 0) {
+            return;
+        }
+        nIndex = nSounds != 0 ? rand() % nSounds : 0;
+        g_pBaldurChitin->GetTlkTable().Fetch(m_baseStats.m_speech[38 + nIndex], strRes);
+        nSoundIndex = static_cast<BYTE>(nIndex + 38);
+        strRes.cSound.SetChannel(channel, reinterpret_cast<DWORD_PTR>(m_pArea));
+        break;
+    case 14:
+        if (m_attackSoundDeadzone >= 1) {
+            return;
+        }
+        m_attackSoundDeadzone = 90;
+        nSounds = GetNumSounds(40, 4);
+        if (nSounds == 0) {
+            return;
+        }
+        nIndex = nSounds != 0 ? rand() % nSounds : 0;
+        g_pBaldurChitin->GetTlkTable().Fetch(m_baseStats.m_speech[40 + nIndex], strRes);
+        nSoundIndex = static_cast<BYTE>(nIndex + 40);
+        strRes.cSound.SetChannel(channel, reinterpret_cast<DWORD_PTR>(m_pArea));
+        break;
+    case 15:
+        nSounds = GetNumSounds(44, 20);
+        if (nSounds == 0) {
+            return;
+        }
+        nIndex = nSounds != 0 ? rand() % nSounds : 0;
+        g_pBaldurChitin->GetTlkTable().Fetch(m_baseStats.m_speech[44 + nIndex], strRes);
+        nSoundIndex = static_cast<BYTE>(nIndex + 44);
+        strRes.cSound.SetChannel(channel, reinterpret_cast<DWORD_PTR>(m_pArea));
+        break;
+    case 16:
+        nSounds = GetNumSounds(40, 2);
+        if (nSounds == 0) {
+            return;
+        }
+        nIndex = nSounds != 0 ? rand() % nSounds : 0;
+        g_pBaldurChitin->GetTlkTable().Fetch(m_baseStats.m_speech[40 + nIndex], strRes);
+        nSoundIndex = static_cast<BYTE>(nIndex + 40);
+        strRes.cSound.SetChannel(channel, reinterpret_cast<DWORD_PTR>(m_pArea));
+        break;
+    default:
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjCreature.cpp
+        // __LINE__: 7005
+        UTIL_ASSERT(FALSE);
+
+        // NOTE: The original goes on into the common part with no string
+        // resource (a null pointer: ebp is still 0 at 0x702071) and faults;
+        // bounded here.
+        return;
+    }
+
+    COLORREF nameColor = CVidPalette::RANGE_COLORS[m_baseStats.m_colors[CVIDPALETTE_RANGE_MAIN_CLOTH]];
+    BOOL bSubtitles = TRUE;
+    if (!g_pBaldurChitin->GetObjectGame()->GetOptions()->m_bSubtitles) {
+        bSubtitles = FALSE;
+    }
+
+    strRes.szText.TrimLeft();
+
+    if (m_secondarySounds != "") {
+        if (bSubtitles) {
+            CString sSoundSet(reinterpret_cast<const char*>(field_725A));
+            STRREF strRef = g_pBaldurChitin->GetObjectGame()->GetRuleTables().GetSpeechStringRef(sSoundSet, nSoundIndex);
+            if (strRef != -1) {
+                STR_RES strResSpeech;
+                g_pBaldurChitin->GetTlkTable().Fetch(strRef, strResSpeech);
+                if (strResSpeech.szText.GetLength() == 0) {
+                    strRes.szText = "";
+                } else {
+                    strRes.szText = strResSpeech.szText;
+                }
+            }
+        }
+
+        CString sSoundName;
+        CString sSoundSetName;
+        BOOL bCustom = g_pBaldurChitin->GetObjectGame()->GetRuleTables().GetCustomSound(sSoundName, nSoundIndex);
+        m_secondarySounds.CopyToString(sSoundSetName);
+        sSoundName.TrimLeft();
+        sSoundName.TrimRight();
+        sSoundName = sSoundSetName + sSoundName;
+
+        if (!bCustom) {
+            strRes.cSound.SetResRef(CResRef(sSoundName), TRUE, TRUE);
+        } else {
+            CResRef cResRef(sSoundName);
+            if (g_pBaldurChitin->cDimm.m_cKeyTable.FindKey(cResRef, 4, TRUE) != NULL) {
+                strRes.cSound.SetResRef(cResRef, TRUE, TRUE);
+            }
+        }
+    }
+
+    // NOTE: The original reads an uninitialized stack byte (0xA3 off esp,
+    // tested at 0x7027C9) as "played" when the voice has no resource or is
+    // already playing; it only decides whether m_talkingCounter is set when
+    // showCircle is given. Taken as FALSE here.
+    BOOL bPlayed = FALSE;
+
+    if (m_typeAI.GetEnemyAlly() == CAIObjectType::EA_PC) {
+        if (strRes.cSound.GetRes() != NULL) {
+            if (!strRes.cSound.GetLooping()) {
+                strRes.cSound.SetFireForget(TRUE);
+            }
+
+            if (strRes.cSound.Play(FALSE) && showCircle) {
+                if ((strRes.cSound.GetPlayTime() / 33 & ~1) < 600) {
+                    m_talkingCounter = strRes.cSound.GetPlayTime() / 66;
+                } else {
+                    m_talkingCounter = 300;
+                }
+            }
+        }
+    } else {
+        if (strRes.cSound.GetRes() != NULL) {
+            if (!strRes.cSound.GetLooping()) {
+                strRes.cSound.SetFireForget(TRUE);
+            }
+
+            if (strRes.cSound.m_nArea != 0) {
+                if (bUnpositioned) {
+                    if (!m_sndVoice.IsSoundPlaying() || m_sndVoice.GetResRef() != strRes.cSound.GetResRef()) {
+                        m_sndVoice.Stop();
+                        m_sndVoice.SetResRef(strRes.cSound.GetResRef(), TRUE, TRUE);
+                        m_sndVoice.SetChannel(strRes.cSound.m_nChannel, 0);
+                        bPlayed = m_sndVoice.Play(FALSE);
+                    }
+                } else {
+                    if (!m_sndVoice.IsSoundPlaying() || m_sndVoice.GetResRef() != strRes.cSound.GetResRef()) {
+                        m_sndVoice.Stop();
+                        m_sndVoice.SetResRef(strRes.cSound.GetResRef(), TRUE, TRUE);
+                        m_sndVoice.SetChannel(strRes.cSound.m_nChannel, reinterpret_cast<DWORD_PTR>(m_pArea));
+                        bPlayed = m_sndVoice.Play(m_pos.x, m_pos.y, 0, FALSE);
+                    }
+                }
+            } else {
+                if (!m_sndVoice.IsSoundPlaying() || m_sndVoice.GetResRef() != strRes.cSound.GetResRef()) {
+                    m_sndVoice.Stop();
+                    m_sndVoice.SetResRef(strRes.cSound.GetResRef(), TRUE, TRUE);
+                    m_sndVoice.SetChannel(strRes.cSound.m_nChannel, 0);
+                    bPlayed = m_sndVoice.Play(FALSE);
+                }
+            }
+        }
+
+        // NOTE: The play time is the string resource's sound's, not the
+        // voice's (`lea edi, [ebp+4]` at 0x7027DF).
+        if (bPlayed && showCircle) {
+            if ((strRes.cSound.GetPlayTime() / 33 & ~1) < 600) {
+                m_talkingCounter = strRes.cSound.GetPlayTime() / 66;
+            } else {
+                m_talkingCounter = 300;
+            }
+        }
+    }
+
+    if (strcmp(strRes.szText, "") != 0 && showText && bSubtitles) {
+        g_pBaldurChitin->GetScreenWorld()->DisplayText(m_sName,
+            strRes.szText,
+            nameColor,
+            nameColor,
+            -1,
+            FALSE);
+    }
 }
 
 // 0x702900
@@ -9729,7 +10450,128 @@ void CGameSprite::GetNumInventoryPersonalSlots(INT& nUsedSlots, INT& nTotalSlots
 // 0x71FC00
 void CGameSprite::SetModalState(BYTE modalState, BOOL bUpdateToolbar)
 {
-    // TODO: Incomplete.
+    if (modalState == m_nModalState) {
+        return;
+    }
+
+    switch (m_nModalState) {
+    case 1:
+        // The battle song ends. With the Lingering Song feat (0x24) the song
+        // lingers on everyone in range instead of the "battle song ends"
+        // feedback.
+        if (sub_763150(CGAMESPRITE_FEAT_LINGERING_SONG) != 1) {
+            FeedBack(FEEDBACK_BATTLESONGEND, 0, 0, 0, -1, 0, 0);
+            break;
+        }
+
+        if ((m_derivedStats.m_generalState & STATE_SILENCED) == 0
+            && (m_baseStats.m_generalState & STATE_SILENCED) == 0
+            && g_pBaldurChitin->GetObjectGame()->GetGameSave()->m_cutScene != TRUE) {
+            UINT nSongIndex = m_nLastSong;
+
+            // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjCreature.cpp
+            // __LINE__: 22207
+            UTIL_ASSERT_MSG(nSongIndex < g_pBaldurChitin->GetObjectGame()->m_songs.m_nCount,
+                "Invalid Song Index");
+
+            CResRef songResRef = g_pBaldurChitin->GetObjectGame()->m_songs.Get(nSongIndex);
+
+            // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjCreature.cpp
+            // __LINE__: 22209
+            UTIL_ASSERT(songResRef != "");
+
+            CSpell cSpell(songResRef);
+            cSpell.Demand();
+
+            if (cSpell.GetCasterType() != 5) {
+                cSpell.Release();
+                break;
+            }
+
+            FeedBack(FEEDBACK_LINGERINGSONG, 0, 0, 0, cSpell.GetGenericName(), 0, 0);
+
+            SPELL_ABILITY* pAbility = cSpell.GetAbility(0);
+
+            CTypedPtrList<CPtrList, LONG*> targets(10);
+            m_pArea->GetAllInRange(GetVertListPos(),
+                GetPos(),
+                CAIObjectType::ANYONE,
+                400,
+                GetTerrainTable(),
+                targets,
+                TRUE,
+                FALSE);
+            m_pArea->GetAllInRangeBack(GetPos(),
+                CAIObjectType::ANYONE,
+                400,
+                GetTerrainTable(),
+                targets,
+                TRUE,
+                FALSE,
+                FALSE);
+            targets.AddTail(reinterpret_cast<LONG*>(static_cast<INT_PTR>(m_id)));
+
+            POSITION pos = targets.GetHeadPosition();
+            while (pos != NULL) {
+                LONG nTargetId = static_cast<LONG>(reinterpret_cast<INT_PTR>(targets.GetNext(pos)));
+
+                CGameObject* pObject;
+                BYTE rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(nTargetId,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    &pObject,
+                    INFINITE);
+                if (rc != CGameObjectArray::SUCCESS) {
+                    continue;
+                }
+
+                if (pObject->GetObjectType() == CGameObject::TYPE_SPRITE) {
+                    CGameSprite* pTarget = static_cast<CGameSprite*>(pObject);
+                    if ((songResRef != "SPIN147"
+                            || (IcewindMisc::sub_585230(this, pTarget) != TRUE
+                                && IcewindMisc::sud_585070(pTarget) != TRUE
+                                && !pTarget->m_derivedStats.m_spellStates.test(SPLSTATE_DEAFENED)))
+                        && IcewindMisc::sub_585230(this, pTarget)) {
+                        // TODO: Incomplete (0x720004-0x7201A0): one effect
+                        // per effect of the song's first ability
+                        // (CSpell_DecodeEffect, 0x54A510, with the caster's
+                        // position and id, IcewindMisc::sub_5860F0, a
+                        // permanent effect of duration type 7 made timed for
+                        // 200 ticks), each wrapped in a CMessageAddEffect
+                        // (vtable 0x8487CC) and all sent as one CMessageGroup
+                        // (0x5152C0). Neither CSpell_DecodeEffect nor
+                        // CMessageGroup is in src/ yet.
+                        (void)pAbility;
+                    }
+                }
+
+                g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(nTargetId,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    INFINITE);
+            }
+
+            cSpell.Release();
+        }
+        break;
+    case 2:
+        FeedBack(FEEDBACK_SEARCHEND, 0, 0, 0, -1, 0, 0);
+        break;
+    case 3:
+        if (m_bHiding) {
+            FeedBack(FEEDBACK_LEAVING_SHADOWS, 0, 0, 0, -1, 0, 0);
+            m_bHiding = FALSE;
+        }
+        break;
+    case 4:
+        FeedBack(FEEDBACK_TURNUNDEADEND, 0, 0, 0, -1, 0, 0);
+        break;
+    }
+
+    m_nModalState = modalState;
+
+    if (bUpdateToolbar
+        && g_pBaldurChitin->GetObjectGame()->GetGroup()->GetGroupLeader() == m_id) {
+        g_pBaldurChitin->GetObjectGame()->GetButtonArray()->UpdateButtons();
+    }
 }
 
 // 0x7202E0
@@ -12945,9 +13787,27 @@ BOOL CGameSprite::ProcessEffectList()
                 // NOTE: Uninline.
                 GetAnimation()->ResetMoveScale();
 
-                // TODO: Incomplete (0x72E270-0x72E70E): the move scale
-                // bonuses (monk levels, feat 0xC) when the animation moves,
-                // the color ranges (m_hasColorRangeEffects), the color
+                // The move scale bonuses (0x72E270-0x72E3A8): a barbarian
+                // not in heavy armour moves at 1.2 times (in floats,
+                // truncated), a monk unarmoured (or in armour sub_724690(0)
+                // allows) one more per three monk levels, Dash one more.
+                if (GetAnimation()->GetMoveScale() > 0) {
+                    INT nMoveScale = GetAnimation()->GetMoveScale();
+                    if (m_typeAI.IsClassValid(CAIOBJECTTYPE_C_BARBARIAN) && !sub_724690(3)) {
+                        nMoveScale = static_cast<INT>(static_cast<float>(nMoveScale) * 1.2f);
+                    }
+                    if (GetAIType().IsClassValid(CAIOBJECTTYPE_C_MONK)
+                        && (m_equipment.m_items[1] == NULL || sub_724690(0))) {
+                        nMoveScale += m_derivedStats.GetClassLevel(CAIOBJECTTYPE_C_MONK) / 3;
+                    }
+                    if (sub_763150(CGAMESPRITE_FEAT_DASH)) {
+                        nMoveScale++;
+                    }
+                    GetAnimation()->SetMoveScale(static_cast<BYTE>(nMoveScale));
+                }
+
+                // TODO: Incomplete (0x72E3A8-0x72E70E): the color ranges
+                // (m_hasColorRangeEffects), the color
                 // effects (m_hasColorEffects), the animation change with
                 // its search bitmap update and sequence reset (field_5640),
                 // and their messages. The sequence reset calls SetSequence
@@ -13088,6 +13948,220 @@ void CGameSprite::CheckModal()
         // TODO: 0x730EC4-0x731B04 not ported (turn undead).
         break;
     }
+}
+
+// NOTE: The sprite's override of the status triggers (the vtable at
+// 0x85BDD4, slot 0x64). Any trigger it does not know goes to
+// CGameAIBase::EvaluateStatusTrigger (0x453840).
+//
+// 0x731B30
+BOOL CGameSprite::EvaluateStatusTrigger(const CAITrigger& trigger)
+{
+    CAITrigger triggerCopy(trigger);
+    BOOL bResult = FALSE;
+
+    switch (triggerCopy.m_triggerID) {
+    case 0x400A: // Alignment
+        triggerCopy.m_triggerCause.Decode(this);
+        switch (triggerCopy.m_specificID) {
+        case 1:
+        case 2:
+        case 3:
+            bResult = (triggerCopy.m_triggerCause.m_nAlignment & 0xF) == triggerCopy.m_specificID;
+            break;
+        case 0x10:
+        case 0x20:
+        case 0x30:
+            bResult = (triggerCopy.m_triggerCause.m_nAlignment & 0xF0) == triggerCopy.m_specificID;
+            break;
+        default:
+            bResult = triggerCopy.m_triggerCause.m_nAlignment == triggerCopy.m_specificID;
+            break;
+        }
+        break;
+    case 0x4031: // HaveSpell
+        // TODO: Incomplete (0x731C09-0x731C8E): CGameAIBase_DecodeSpell
+        // and sub_725330 over the sprite's spells.
+        bResult = FALSE;
+        break;
+    case 0x4032: // HaveAnySpells
+        // TODO: Incomplete (0x731D53-0x731FCF): GetSpells,
+        // GetSpellsAtLevel and the grouped spell lists.
+        bResult = FALSE;
+        break;
+    case 0x40E2: // SetMarkedSpell
+        if (trigger.m_specificID == 0) {
+            field_588 = 0;
+        } else if (field_588 == 0) {
+            // TODO: Incomplete (0x731CC5-0x731D26): the spell's resref
+            // through CGameAIBase_DecodeSpell (0x45D3E0) and, when not
+            // empty and sub_725330 (0x725330) finds it among the sprite's
+            // spells, field_588 = the trigger's specific.
+        }
+        bResult = TRUE;
+        break;
+    case 0x4039: // NumTimesTalkedTo
+        bResult = m_nNumberOfTimesTalkedTo == triggerCopy.m_specificID;
+        break;
+    case 0x403A: // NumTimesTalkedToGT
+        bResult = triggerCopy.m_specificID < m_nNumberOfTimesTalkedTo;
+        break;
+    case 0x403B: // NumTimesTalkedToLT
+        bResult = m_nNumberOfTimesTalkedTo < triggerCopy.m_specificID;
+        break;
+    case 0x4058: // HaveUsableWeaponEquipped
+        // TODO: Incomplete (0x732016-0x732193): the selected weapon's
+        // ability (CItem::Demand, GetAbility, GetUsageCount).
+        bResult = FALSE;
+        break;
+    case 0x4063: // InWeaponRange
+        // TODO: Incomplete (0x732237-0x732661): the weapon's range against
+        // the target from CGameAIBase_GetTargetShareAIType.
+        bResult = FALSE;
+        break;
+    case 0x40F3: // IsFacingObject
+        // TODO: Incomplete (0x732662-0x7326B1): the target from
+        // CGameAIBase_GetTargetShareAIType.
+        bResult = FALSE;
+        break;
+    case 0x40A0: // Internal
+    case 0x40A1: // InternalGT
+    case 0x40A2: // InternalLT
+    case 0x40A3: // School
+    case 0x40A4: // IsWeaponRanged
+    case 0x40B1: // ModalState
+        // TODO: Incomplete (0x7329D8-0x732C3F): the target from
+        // CGameAIBase_GetTargetShareAIType and its members.
+        bResult = FALSE;
+        break;
+    case 0x40F2: // IsSpellTargetValid
+        // TODO: Incomplete (0x732C40-0x732CA1): CGameSprite_CanTarget and
+        // CGameSprite_IsSpellTargetValid on the target.
+        bResult = FALSE;
+        break;
+    case 0x40F8: // OutOfAmmo
+        // TODO: Incomplete (0x732CA2-0x732E62): the selected weapon's
+        // ability and usage count.
+        bResult = FALSE;
+        break;
+    case 0x4059: // NumTimesInteracted
+        if (triggerCopy.m_specificID < 24) {
+            bResult = m_nNumberOfTimesInteractedWith[triggerCopy.m_specificID] == triggerCopy.m_specific2;
+        } else {
+            bResult = FALSE;
+        }
+        break;
+    case 0x405A: // NumTimesInteractedGT
+        if (triggerCopy.m_specificID < 24) {
+            bResult = triggerCopy.m_specific2 < m_nNumberOfTimesInteractedWith[triggerCopy.m_specificID];
+        } else {
+            bResult = FALSE;
+        }
+        break;
+    case 0x405B: // NumTimesInteractedLT
+        if (triggerCopy.m_specificID < 24) {
+            bResult = m_nNumberOfTimesInteractedWith[triggerCopy.m_specificID] < triggerCopy.m_specific2;
+        } else {
+            bResult = FALSE;
+        }
+        break;
+    case 0x4062: // InteractingWith
+        // NOTE: The original decodes the sprite's own m_interactingWith
+        // (0x73220F), not the trigger's object.
+        m_interactingWith.Decode(this);
+        bResult = m_interactingWith.OfType(triggerCopy.m_triggerCause, FALSE, FALSE);
+        break;
+    case 0x406D: // UnselectableVariable
+        bResult = static_cast<DWORD>(m_nUnselectableCounter) == static_cast<DWORD>(triggerCopy.m_specificID);
+        break;
+    case 0x406E: // UnselectableVariableGT
+        bResult = triggerCopy.m_specificID < m_nUnselectableCounter;
+        break;
+    case 0x406F: // UnselectableVariableLT
+        bResult = m_nUnselectableCounter < triggerCopy.m_specificID;
+        break;
+    case 0x4097: { // TimerActive
+        POSITION pos = m_timers.GetHeadPosition();
+        while (pos != NULL) {
+            CGameTimer* pTimer = m_timers.GetNext(pos);
+            if (pTimer != NULL && static_cast<LONG>(pTimer->m_id) == triggerCopy.m_specificID) {
+                bResult = TRUE;
+            }
+        }
+        break;
+    }
+    case 0x4098: { // ClassEx
+        triggerCopy.m_triggerCause.Decode(this);
+        DWORD mask = triggerCopy.m_triggerCause.m_nClassMask;
+        LONG nClass = triggerCopy.m_specificID;
+        if (((mask & 0x1) != 0 && (nClass == 1 || nClass == 0xCD))
+            || ((mask & 0x2) != 0 && (nClass == 2 || nClass == 0xCA))
+            || ((mask & 0x4) != 0 && (nClass == 3 || nClass == 0xCB))
+            || ((mask & 0x8) != 0 && (nClass == 4 || nClass == 0xCB || nClass == 0xCC))
+            || ((mask & 0x10) != 0 && (nClass == 5 || nClass == 0xCD))) {
+            bResult = TRUE;
+            break;
+        }
+
+        bResult = FALSE;
+        if ((mask & 0x20) != 0 && nClass == 6) {
+            bResult = TRUE;
+            break;
+        }
+        if ((mask & 0x40) != 0) {
+            if (nClass == 7 || nClass == 0xCD || nClass == 0xCE) {
+                bResult = TRUE;
+                break;
+            }
+        }
+        if ((mask & 0x80) != 0) {
+            if (nClass == 8 || nClass == 0xCD || nClass == 0xCF) {
+                bResult = TRUE;
+                break;
+            }
+        }
+        if ((mask & 0x100) != 0) {
+            if (nClass == 9 || nClass == 0xD0) {
+                bResult = TRUE;
+                break;
+            }
+        }
+        if ((mask & 0x200) != 0) {
+            if (nClass == 10 || nClass == 0xD1) {
+                bResult = TRUE;
+                break;
+            }
+        }
+        if ((mask & 0x400) != 0 && (nClass == 11 || nClass == 0xD1)) {
+            bResult = TRUE;
+        }
+        break;
+    }
+    case 0x4099: // NearSavedLocation
+        if (m_baseStats.field_2E4 != 0 && m_baseStats.field_2E6 != 0) {
+            INT dx = static_cast<INT>(GetPos().x - static_cast<USHORT>(m_baseStats.field_2E4)) / CPathSearch::GRID_SQUARE_SIZEX;
+            INT dy = static_cast<INT>(GetPos().y - static_cast<USHORT>(m_baseStats.field_2E6)) / CPathSearch::GRID_SQUARE_SIZEY;
+            if (dy * dy + dx * dx <= triggerCopy.m_specificID * triggerCopy.m_specificID) {
+                bResult = TRUE;
+            }
+        }
+        break;
+    case 0x40E0: // IsMarkedSpell
+        bResult = trigger.m_specificID == field_588;
+        break;
+    case 0x40F1: // ForceMarkedSpell
+        if (field_588 != trigger.m_specificID) {
+            field_588 = trigger.m_specificID;
+        }
+        bResult = TRUE;
+        break;
+    default:
+        // Global, GlobalGT, GlobalLT, RandomNum and the other base triggers.
+        bResult = CGameAIBase::EvaluateStatusTrigger(trigger);
+        break;
+    }
+
+    return bResult;
 }
 
 // 0x733050
@@ -15387,7 +16461,171 @@ SHORT CGameSprite::PlayDead()
 // 0x745950
 SHORT CGameSprite::JumpToPoint(CPoint dest, BOOL spriteUpdate)
 {
-    // TODO: Incomplete.
+    CPoint ptGrid(dest.x / CPathSearch::GRID_SQUARE_SIZEX, dest.y / CPathSearch::GRID_SQUARE_SIZEY);
+    CPoint ptDest = dest;
+
+    if (m_pArea == NULL) {
+        return ACTION_ERROR;
+    }
+
+    // NOTE: A point past the area's right or bottom edge goes to 0, not to
+    // the edge; the original compares with the low words of nAreaX and
+    // nAreaY.
+    if (static_cast<SHORT>(m_pArea->GetInfinity()->nAreaX) < dest.x) {
+        dest.x = 0;
+    }
+
+    if (static_cast<SHORT>(m_pArea->GetInfinity()->nAreaY) < dest.y) {
+        dest.y = 0;
+    }
+
+    BOOL bMoved = FALSE;
+    CPoint ptSearch(dest.x / CPathSearch::GRID_SQUARE_SIZEX, dest.y / CPathSearch::GRID_SQUARE_SIZEY);
+
+    if (m_pPath != NULL) {
+        CMessage* message = new CMessageDropPath(m_id, m_id);
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+    }
+
+    switch (m_listType) {
+    case CGAMEOBJECT_LIST_FRONT:
+        if (m_active && m_activeAI && m_activeImprisonment) {
+            m_pArea->m_search.RemoveObject(CPoint(m_pos.x / CPathSearch::GRID_SQUARE_SIZEX,
+                                               m_pos.y / CPathSearch::GRID_SQUARE_SIZEY),
+                m_typeAI.GetEnemyAlly(),
+                m_animation.GetPersonalSpace(),
+                field_54A8,
+                field_7430);
+        }
+        break;
+    case CGAMEOBJECT_LIST_BACK:
+        if (m_active
+            && m_activeAI
+            && m_activeImprisonment
+            && (m_derivedStats.m_generalState & STATE_SLEEPING) != 0) {
+            m_pArea->m_search.RemoveObject(CPoint(m_pos.x / CPathSearch::GRID_SQUARE_SIZEX,
+                                               m_pos.y / CPathSearch::GRID_SQUARE_SIZEY),
+                m_typeAI.GetEnemyAlly(),
+                m_animation.GetPersonalSpace(),
+                field_54A8,
+                field_7430);
+        }
+        break;
+    case CGAMEOBJECT_LIST_FLIGHT:
+        break;
+    default:
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjCreature.cpp
+        // __LINE__: 14822
+        UTIL_ASSERT(FALSE);
+    }
+
+    CPoint ptOpen = ptSearch;
+    if (!m_derivedStats.m_bDoNotJump) {
+        USHORT animationID = m_animation.GetAnimationId();
+        if ((animationID & 0xF000) == 0x4000 && animationID >= 0x4400) {
+            ptOpen = m_pArea->m_search.GetNearestOpenSquare(ptSearch,
+                m_visibleTerrainTable,
+                m_animation.GetPersonalSpace(),
+                -1);
+        } else {
+            ptOpen = m_pArea->m_search.GetNearestOpenSquare(ptSearch,
+                m_terrainTable,
+                m_animation.GetPersonalSpace(),
+                -1);
+        }
+    }
+
+    // NOTE: The comparison is with the square of the destination as given,
+    // before the edge check.
+    if (ptOpen.x == ptGrid.x && ptOpen.y == ptGrid.y) {
+        m_pos.x = ptDest.x;
+        m_pos.y = ptDest.y;
+    } else {
+        bMoved = TRUE;
+        m_pos.x = ptOpen.x * CPathSearch::GRID_SQUARE_SIZEX;
+        m_pos.y = ptOpen.y * CPathSearch::GRID_SQUARE_SIZEY;
+    }
+
+    m_posExact.x = m_pos.x << EXACT_SCALE;
+    m_posExact.y = (m_pos.y << (EXACT_SCALE + 2)) / 3;
+
+    InitBlur();
+
+    switch (m_listType) {
+    case CGAMEOBJECT_LIST_FRONT:
+        if (m_active && m_activeAI && m_activeImprisonment) {
+            m_pArea->m_search.AddObject(CPoint(m_pos.x / CPathSearch::GRID_SQUARE_SIZEX,
+                                            m_pos.y / CPathSearch::GRID_SQUARE_SIZEY),
+                m_typeAI.GetEnemyAlly(),
+                m_animation.GetPersonalSpace(),
+                field_54A8,
+                field_7430);
+        }
+        break;
+    case CGAMEOBJECT_LIST_BACK:
+        if (m_active
+            && m_activeAI
+            && m_activeImprisonment
+            && (m_derivedStats.m_generalState & STATE_SLEEPING) != 0) {
+            m_pArea->m_search.AddObject(CPoint(m_pos.x / CPathSearch::GRID_SQUARE_SIZEX,
+                                            m_pos.y / CPathSearch::GRID_SQUARE_SIZEY),
+                m_typeAI.GetEnemyAlly(),
+                m_animation.GetPersonalSpace(),
+                field_54A8,
+                field_7430);
+        }
+        break;
+    case CGAMEOBJECT_LIST_FLIGHT:
+        break;
+    default:
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjCreature.cpp
+        // __LINE__: 14869
+        UTIL_ASSERT(FALSE);
+    }
+
+    if (g_pBaldurChitin->GetObjectGame()->GetCharacterPortraitNum(m_id) != -1
+        && (!g_pBaldurChitin->GetObjectGame()->GetGameSave()->field_1AC || InControl())) {
+        m_pArea->m_visibility.UpDate(m_posLastVisMapEntry,
+            m_pos,
+            m_id,
+            m_visibleTerrainTable);
+        m_posLastVisMapEntry = m_pos;
+    }
+
+    if ((m_derivedStats.m_generalState & STATE_SILENCED) == 0
+        && (g_pBaldurChitin->GetObjectGame()->GetOptions()->m_bFootStepsSounds
+            || g_pBaldurChitin->GetObjectGame()->GetCharacterPortraitNum(m_id) == -1)
+        && m_nSequence != CGAMESPRITE_SEQ_DIE
+        && m_nSequence != CGAMESPRITE_SEQ_TWITCH
+        && m_nSequence != CGAMESPRITE_SEQ_SLEEP
+        && m_nSequence != CGAMESPRITE_SEQ_WALK
+        && m_nSequence != CGAMESPRITE_SEQ_AWAKE) {
+        if (!m_sndReady.IsSoundPlaying()) {
+            char* pSndReady = m_animation.GetSndReady();
+            if (*pSndReady != '\0') {
+                m_sndReady.SetResRef(CResRef(pSndReady), TRUE, TRUE);
+                delete pSndReady;
+                m_sndReady.SetLoopingFlag(1);
+                m_sndReady.Play(m_pos.x, m_pos.y, m_posZ, FALSE);
+            }
+        }
+    } else {
+        m_sndReady.Stop();
+    }
+
+    if (spriteUpdate && InControl()) {
+        CMessage* message = new CMessageSpriteUpdate(this, m_id, m_id);
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+    }
+
+    if (g_pChitin->cNetwork.GetSessionOpen() == TRUE
+        && g_pBaldurChitin->GetActiveEngine() == g_pBaldurChitin->m_pEngineMap
+        && g_pBaldurChitin->GetObjectGame()->GetCharacterPortraitNum(m_id) != -1
+        && bMoved) {
+        BYTE nPortrait = static_cast<BYTE>(g_pBaldurChitin->GetObjectGame()->GetCharacterPortraitNum(m_id));
+        CUIControlButtonMapAreaMap* pMap = static_cast<CUIControlButtonMapAreaMap*>(g_pBaldurChitin->m_pEngineMap->GetManager()->GetPanel(2)->GetControl(2));
+        pMap->field_7DA |= 1 << nPortrait;
+    }
 
     return ACTION_DONE;
 }

@@ -531,6 +531,15 @@ CGameAnimationTypeCharacter::CGameAnimationTypeCharacter(USHORT animationID, BYT
     ChangeDirection(facing);
 }
 
+// NOTE: The character animations walk smoothed paths (the shared "return
+// TRUE" at 0x49FC40 in their vtable at 0x85B7E4, slot 0x58).
+//
+// 0x49FC40
+BOOL CGameAnimationTypeCharacter::GetPathSmooth()
+{
+    return TRUE;
+}
+
 // 0x6C5D70
 CGameAnimationTypeCharacter::~CGameAnimationTypeCharacter()
 {

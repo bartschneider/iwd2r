@@ -431,6 +431,7 @@ public:
     /* 00A0 */ const BYTE* GetTerrainTable() override;
     /* 00B0 */ void AutoPause(DWORD type) override;
     /* 00B4 */ BOOL GetCanSeeInvisible() override;
+    BOOL EvaluateStatusTrigger(const CAITrigger& trigger) override;
     /* 00B8 */ virtual void SetTarget(const CPoint& target, BOOL collisionPath);
     /* 00BC */ virtual void SetAIType(const CAIObjectType& typeAI, BOOL updateLive, BOOL updateStart);
     /* 00C0 */ virtual void ResetAITypeLive();
@@ -781,6 +782,8 @@ public:
     /* 4DFF */ BYTE m_currSndArmor;
     /* 4E00 */ CSound m_sndReady;
     /* 4E64 */ CSound m_sndDeath;
+    /* 4EC8 */ CSound field_4EC8;
+    /* 4F2C */ CSound m_sndVoice;
     /* 4F90 */ CSound m_sndSpriteEffect;
     /* 4FF4 */ int m_nNumberOfTimesTalkedTo;
     /* 4FF8 */ BOOL m_bSeenPartyBefore;

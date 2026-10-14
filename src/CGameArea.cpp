@@ -204,17 +204,117 @@ void CGameArea::AddObject(LONG id, BYTE listType)
 // 0x46A3D0
 BOOL CGameArea::AdjustTarget(CPoint start, POINT* goal, BYTE personalSpace, SHORT tolerance)
 {
-    // TODO: Incomplete.
+    if (start.x == goal->x && start.y == goal->y) {
+        return FALSE;
+    }
 
-    return FALSE;
+    // Walks from the goal toward the start, one search square along the
+    // longer axis per step, to the first square that is explored and
+    // passable.
+    CPoint pt(goal->x, goal->y);
+    LONG dy = start.y - pt.y;
+    LONG dx = start.x - pt.x;
+    LONG stepX;
+    LONG stepY;
+
+    if (abs(dy) < abs(dx)) {
+        stepX = (pt.x < start.x ? 1 : -1) * (1 << CGameSprite::EXACT_SCALE);
+        stepY = dy * (1 << CGameSprite::EXACT_SCALE) / abs(dx);
+    } else {
+        stepX = dx * (1 << CGameSprite::EXACT_SCALE) / abs(dy);
+        stepY = (pt.y < start.y ? 1 : -1) * (1 << CGameSprite::EXACT_SCALE);
+    }
+
+    LONG exactX = pt.x * (1 << CGameSprite::EXACT_SCALE) + (1 << (CGameSprite::EXACT_SCALE - 1));
+    LONG exactY = pt.y * (1 << CGameSprite::EXACT_SCALE) + (1 << (CGameSprite::EXACT_SCALE - 1));
+
+    while (1) {
+        if (pt.x == start.x && pt.y == start.y) {
+            return FALSE;
+        }
+
+        if (tolerance-- <= 0) {
+            return FALSE;
+        }
+
+        SHORT nTile = static_cast<SHORT>(static_cast<SHORT>((pt.y * CPathSearch::GRID_SQUARE_SIZEY + CPathSearch::GRID_SQUARE_SIZEY / 2) / CVisibilityMap::SQUARE_SIZEY) * m_visibility.m_nWidth
+            + (pt.x * CPathSearch::GRID_SQUARE_SIZEX + CPathSearch::GRID_SQUARE_SIZEX / 2) / CVisibilityMap::SQUARE_SIZEX);
+        if (m_visibility.IsTileExplored(nTile)) {
+            SHORT nTableIndex;
+            if (m_search.GetCost(pt, CGameObject::DEFAULT_TERRAIN_TABLE, personalSpace, nTableIndex, TRUE) != CPathSearch::COST_IMPASSABLE) {
+                break;
+            }
+        }
+
+        exactX += stepX;
+        pt.x = exactX >> CGameSprite::EXACT_SCALE;
+        exactY += stepY;
+        pt.y = exactY >> CGameSprite::EXACT_SCALE;
+    }
+
+    if (pt.x == start.x && pt.y == start.y) {
+        return FALSE;
+    }
+
+    goal->x = pt.x;
+    goal->y = pt.y;
+
+    return TRUE;
 }
 
 // 0x46A630
 BOOL CGameArea::SnapshotAdjustTarget(CPoint start, POINT* goal, BOOL bBump, SHORT tolerance)
 {
-    // TODO: Incomplete.
+    if (start.x == goal->x && start.y == goal->y) {
+        return FALSE;
+    }
 
-    return FALSE;
+    // AdjustTarget on the search thread's snapshot: no explored test, and
+    // the cost from the snapshot of the dynamic costs.
+    CPoint pt(goal->x, goal->y);
+    LONG dy = start.y - pt.y;
+    LONG dx = start.x - pt.x;
+    LONG stepX;
+    LONG stepY;
+
+    if (abs(dy) < abs(dx)) {
+        stepX = (pt.x < start.x ? 1 : -1) * (1 << CGameSprite::EXACT_SCALE);
+        stepY = dy * (1 << CGameSprite::EXACT_SCALE) / abs(dx);
+    } else {
+        stepX = dx * (1 << CGameSprite::EXACT_SCALE) / abs(dy);
+        stepY = (pt.y < start.y ? 1 : -1) * (1 << CGameSprite::EXACT_SCALE);
+    }
+
+    LONG exactX = pt.x * (1 << CGameSprite::EXACT_SCALE) + (1 << (CGameSprite::EXACT_SCALE - 1));
+    LONG exactY = pt.y * (1 << CGameSprite::EXACT_SCALE) + (1 << (CGameSprite::EXACT_SCALE - 1));
+
+    while (1) {
+        if (pt.x == start.x && pt.y == start.y) {
+            return FALSE;
+        }
+
+        if (tolerance-- <= 0) {
+            return FALSE;
+        }
+
+        if (m_search.SnapshotGetCost(pt, bBump) != CPathSearch::COST_IMPASSABLE) {
+            break;
+        }
+
+        exactY += stepY;
+        exactX += stepX;
+        pt.x = exactX >> CGameSprite::EXACT_SCALE;
+        pt.y = exactY >> CGameSprite::EXACT_SCALE;
+    }
+
+    if (pt.x == start.x && pt.y == start.y) {
+        return FALSE;
+    }
+
+    goal->x = pt.x;
+    goal->y = pt.y;
+
+    return TRUE;
 }
 
 // 0x46A7B0
@@ -497,9 +597,501 @@ LONG CGameArea::GetGroundPile(const CPoint& ptPos)
 // 0x46B160
 LONG CGameArea::GetNearest(LONG startObject, const CAIObjectType& type, SHORT range, const BYTE* terrainTable, BOOL checkLOS, BOOL seeInvisible, BOOL ignoreSleeping, BYTE nNearest, BOOL ignoreDead)
 {
-    // TODO: Incomplete.
+    // NOTE: `nNearest` is the search's mode: 0 finds the nearest, 1 the
+    // farthest (and since the vertical scan stops once a side is as far as
+    // the best so far, which starts at 0, mode 1 finds nothing), any other
+    // value nothing. `ignoreDead` (the name is a guess) keeps only summoned
+    // creatures when it is 1; dead creatures are always left out.
+    LONG nFound = CGameObjectArray::INVALID_INDEX;
+    CAIObjectType callerType;
+    DWORD dwSkipStates = STATE_DEAD;
+    BOOL bRaceBE = type.m_nRace == 0xBE;
 
-    return -1;
+    if (ignoreSleeping) {
+        dwSkipStates = STATE_DEAD | STATE_SLEEPING;
+    }
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameArea.cpp
+    // __LINE__: 852
+    UTIL_ASSERT(terrainTable != NULL);
+
+    CGameObject* pObject;
+    BYTE rc = m_pGame->GetObjectArray()->GetShare(startObject,
+        CGameObjectArray::THREAD_ASYNCH,
+        &pObject,
+        INFINITE);
+    if (rc != CGameObjectArray::SUCCESS) {
+        return CGameObjectArray::INVALID_INDEX;
+    }
+
+    callerType.Set(pObject->GetAIType());
+
+    if (pObject->GetPos().x < 0 || pObject->GetPos().y < 0) {
+        m_pGame->GetObjectArray()->ReleaseShare(startObject,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+        return CGameObjectArray::INVALID_INDEX;
+    }
+
+    if (type.m_nLocationType != 0 && (pObject->GetObjectType() & 0x1) != 0) {
+        CPoint pt;
+        INT nRadius;
+        if (type.sub_40CD80(static_cast<CGameAIBase*>(pObject), pt, nRadius) == TRUE) {
+            m_pGame->GetObjectArray()->ReleaseShare(startObject,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+            return sub_46DAE0(pt.x, pt.y, type, nRadius, terrainTable, checkLOS, seeInvisible, nNearest, ignoreDead);
+        }
+    }
+
+    if (pObject->GetVertListType() != CGameObject::LIST_FRONT) {
+        CPoint pt = pObject->GetPos();
+        m_pGame->GetObjectArray()->ReleaseShare(startObject,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+        return sub_46DAE0(pt.x, pt.y, type, range, terrainTable, checkLOS, seeInvisible, nNearest, ignoreDead);
+    }
+
+    CPoint ptStart = pObject->GetPos();
+    INT xStart = pObject->GetPos().x;
+    INT yStart = 4 * pObject->GetPos().y / 3;
+
+    SHORT nTile = static_cast<SHORT>(ptStart.y / CVisibilityMap::SQUARE_SIZEY * m_visibility.m_nWidth
+        + ptStart.x / CVisibilityMap::SQUARE_SIZEX);
+    if (nTile >= m_visibility.m_nWidth * m_visibility.m_nHeight) {
+        // NOTE: The original formats "Illegal position (%d,%d)" into a new
+        // buffer and frees it unused.
+        m_pGame->GetObjectArray()->ReleaseShare(startObject,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+        return CGameObjectArray::INVALID_INDEX;
+    }
+
+    POSITION posVertList = pObject->GetVertListPos();
+
+    m_pGame->GetObjectArray()->ReleaseShare(startObject,
+        CGameObjectArray::THREAD_ASYNCH,
+        INFINITE);
+
+    if (posVertList == NULL) {
+        return CGameObjectArray::INVALID_INDEX;
+    }
+
+    if (checkLOS) {
+        if (m_pGame->GetCharacterPortraitNum(startObject) == -1) {
+            if (!m_visibility.IsTileExplored(nTile)) {
+                return CGameObjectArray::INVALID_INDEX;
+            }
+        } else {
+            if (!m_visibility.IsTileVisible(nTile)) {
+                return CGameObjectArray::INVALID_INDEX;
+            }
+        }
+    }
+
+    LONG nBest;
+    if (nNearest == 0) {
+        nBest = range * range + 1;
+    } else {
+        nBest = 0;
+    }
+
+    // NOTE: The original reads the node's links directly; any vertical list
+    // walks a node the same way.
+    POSITION posPrev = posVertList;
+    m_lVertSort.GetPrev(posPrev);
+    POSITION posNext = posVertList;
+    m_lVertSort.GetNext(posNext);
+
+    // One object: a sprite in range, alive, visible to the caller, above
+    // ground, not ignoring the caller's type, of the type, in sight when
+    // asked, and nearer (or farther) than the best so far. Returns FALSE when
+    // it is out of range vertically, which ends its side.
+    auto Check = [&](LONG nId, CGameObject* pTarget) -> BOOL {
+        if (pTarget->GetVertListPos() == NULL) {
+            return TRUE;
+        }
+
+        INT xTarget = pTarget->GetPos().x;
+        LONG dy = (yStart - 4 * pTarget->GetPos().y / 3) * (yStart - 4 * pTarget->GetPos().y / 3);
+        if (dy >= nBest) {
+            return FALSE;
+        }
+
+        if (pTarget->GetObjectType() != CGameObject::TYPE_SPRITE) {
+            return TRUE;
+        }
+
+        CGameSprite* pSprite = static_cast<CGameSprite*>(pTarget);
+        BYTE nRace = pSprite->GetAIType().m_nRace;
+        if ((pSprite->m_derivedStats.m_generalState & dwSkipStates) != 0
+            || !pSprite->IsVisibleToCaller(seeInvisible)
+            || !pSprite->GetAnimation()->GetAboveGround()
+            || pSprite->m_derivedStats.m_cImmunitiesAIType.OnList(callerType)
+            || pSprite->GetBaseStats()->field_294 == 1
+            || (ignoreDead == 1 && (pSprite->m_derivedStats.m_generalState & STATE_SUMMONED_CREATURE) == 0)
+            || (nRace == 0xBE && !bRaceBE)
+            || (pSprite->GetObjectType() == CGameObject::TYPE_SPRITE
+                && (!pSprite->m_active || !pSprite->m_activeAI || !pSprite->m_activeImprisonment))) {
+            return TRUE;
+        }
+
+        if (!pSprite->GetAIType().OfType(type, FALSE, FALSE)) {
+            return TRUE;
+        }
+
+        if (checkLOS && !CheckLOS(ptStart, pSprite->GetPos(), terrainTable, TRUE)) {
+            return TRUE;
+        }
+
+        LONG nDistance = (xStart - xTarget) * (xStart - xTarget) + dy;
+        if (nNearest == 0) {
+            if (nDistance < nBest) {
+                nBest = nDistance;
+                nFound = nId;
+            }
+        } else if (nNearest == 1) {
+            if (nDistance > nBest) {
+                nBest = nDistance;
+                nFound = nId;
+            }
+        }
+
+        return TRUE;
+    };
+
+    while (1) {
+        if (posPrev == NULL && posNext == NULL) {
+            return nFound;
+        }
+
+        if (posPrev != NULL) {
+            LONG nId = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSort.GetPrev(posPrev)));
+
+            CGameObject* pTarget;
+            rc = m_pGame->GetObjectArray()->GetShare(nId,
+                CGameObjectArray::THREAD_ASYNCH,
+                &pTarget,
+                INFINITE);
+            if (rc != CGameObjectArray::SUCCESS) {
+                continue;
+            }
+
+            if (!Check(nId, pTarget)) {
+                posPrev = NULL;
+            }
+
+            m_pGame->GetObjectArray()->ReleaseShare(nId,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+
+            if (posNext == NULL) {
+                continue;
+            }
+        }
+
+        LONG nId = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSort.GetNext(posNext)));
+
+        CGameObject* pTarget;
+        rc = m_pGame->GetObjectArray()->GetShare(nId,
+            CGameObjectArray::THREAD_ASYNCH,
+            &pTarget,
+            INFINITE);
+        if (rc != CGameObjectArray::SUCCESS) {
+            continue;
+        }
+
+        if (!Check(nId, pTarget)) {
+            posNext = NULL;
+        }
+
+        m_pGame->GetObjectArray()->ReleaseShare(nId,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+    }
+}
+
+// NOTE: The name is the Ghidra project's: the nearest active creature whose
+// dialog (m_dialog or field_56E4) is `dialog`, from `startObject` within
+// `range`: first the front list outward from the caller's node (or the whole
+// front list from its head when the caller is not on it), then the back
+// list from its head. CGameDialogSprite::Reload passes the larger of the
+// area's width and height as the range.
+//
+// 0x46C460
+LONG CGameArea::GetNearestDialogMatch(LONG startObject, CResRef dialog, LONG range)
+{
+    LONG nBest = range * range + 1;
+    LONG nFound = CGameObjectArray::INVALID_INDEX;
+    CAIObjectType callerType;
+
+    CGameObject* pObject;
+    BYTE rc = m_pGame->GetObjectArray()->GetShare(startObject,
+        CGameObjectArray::THREAD_ASYNCH,
+        &pObject,
+        INFINITE);
+    if (rc != CGameObjectArray::SUCCESS) {
+        return CGameObjectArray::INVALID_INDEX;
+    }
+
+    // NOTE: The caller's type is copied and never read.
+    callerType.Set(pObject->GetAIType());
+    BYTE listType = pObject->GetVertListType();
+    INT x = pObject->GetPos().x;
+    INT y = 4 * pObject->GetPos().y / 3;
+    POSITION posVertList = pObject->GetVertListPos();
+
+    m_pGame->GetObjectArray()->ReleaseShare(startObject,
+        CGameObjectArray::THREAD_ASYNCH,
+        INFINITE);
+
+    POSITION posPrev;
+    POSITION posNext;
+    if (listType == CGameObject::LIST_FRONT) {
+        // NOTE: The original reads the node's links unchecked; a caller on
+        // the front list type with no node would fault. Bounded: no
+        // neighbours.
+        posPrev = posVertList;
+        posNext = posVertList;
+        if (posVertList != NULL) {
+            m_lVertSort.GetPrev(posPrev);
+            m_lVertSort.GetNext(posNext);
+        }
+    } else {
+        posNext = m_lVertSort.GetHeadPosition();
+        posPrev = NULL;
+    }
+
+    // One creature on the front list. Returns FALSE when it is out of range
+    // vertically, which ends its side.
+    auto Check = [&](LONG nId, CGameSprite* pSprite) -> BOOL {
+        if (!pSprite->m_active
+            || !pSprite->m_activeAI
+            || !pSprite->m_activeImprisonment
+            || pSprite->GetVertListPos() == NULL) {
+            return TRUE;
+        }
+
+        const CPoint& pt = pSprite->GetPos();
+        LONG dy = (y - 4 * pt.y / 3) * (y - 4 * pt.y / 3);
+        if (dy >= nBest) {
+            return FALSE;
+        }
+
+        if (pSprite->m_dialog == dialog || pSprite->field_56E4 == dialog) {
+            LONG nDistance = (x - pt.x) * (x - pt.x) + dy;
+            if (nDistance < nBest) {
+                nBest = nDistance;
+                nFound = nId;
+            }
+        }
+
+        return TRUE;
+    };
+
+    while (posPrev != NULL || posNext != NULL) {
+        if (posPrev != NULL) {
+            LONG nId = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSort.GetPrev(posPrev)));
+            rc = m_pGame->GetObjectArray()->GetShare(nId,
+                CGameObjectArray::THREAD_ASYNCH,
+                &pObject,
+                INFINITE);
+            if (rc != CGameObjectArray::SUCCESS) {
+                continue;
+            }
+
+            if (pObject->GetObjectType() != CGameObject::TYPE_SPRITE) {
+                // NOTE: This leaves the round without the side below.
+                m_pGame->GetObjectArray()->ReleaseShare(nId,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    INFINITE);
+                continue;
+            }
+
+            if (!Check(nId, static_cast<CGameSprite*>(pObject))) {
+                posPrev = NULL;
+            }
+
+            m_pGame->GetObjectArray()->ReleaseShare(nId,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+
+            if (posNext == NULL) {
+                continue;
+            }
+        }
+
+        LONG nId = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSort.GetNext(posNext)));
+        rc = m_pGame->GetObjectArray()->GetShare(nId,
+            CGameObjectArray::THREAD_ASYNCH,
+            &pObject,
+            INFINITE);
+        if (rc != CGameObjectArray::SUCCESS) {
+            continue;
+        }
+
+        if (pObject->GetObjectType() == CGameObject::TYPE_SPRITE
+            && !Check(nId, static_cast<CGameSprite*>(pObject))) {
+            posNext = NULL;
+        }
+
+        m_pGame->GetObjectArray()->ReleaseShare(nId,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+    }
+
+    // The back list (the dead and the sleeping): no imprisonment test.
+    POSITION pos = m_lVertSortBack.GetHeadPosition();
+    while (pos != NULL) {
+        LONG nId = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSortBack.GetNext(pos)));
+        rc = m_pGame->GetObjectArray()->GetShare(nId,
+            CGameObjectArray::THREAD_ASYNCH,
+            &pObject,
+            INFINITE);
+        if (rc != CGameObjectArray::SUCCESS) {
+            continue;
+        }
+
+        if (pObject->GetObjectType() == CGameObject::TYPE_SPRITE && pObject->GetVertListPos() != NULL) {
+            CGameSprite* pSprite = static_cast<CGameSprite*>(pObject);
+            const CPoint& pt = pSprite->GetPos();
+            LONG dy = (y - 4 * pt.y / 3) * (y - 4 * pt.y / 3);
+            if (dy < nBest) {
+                if (pSprite->m_active
+                    && pSprite->m_activeAI
+                    && (pSprite->m_dialog == dialog || pSprite->field_56E4 == dialog)) {
+                    LONG nDistance = (x - pt.x) * (x - pt.x) + dy;
+                    if (nDistance < nBest) {
+                        nBest = nDistance;
+                        nFound = nId;
+                    }
+                }
+            } else {
+                pos = NULL;
+            }
+        }
+
+        m_pGame->GetObjectArray()->ReleaseShare(nId,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+    }
+
+    return nFound;
+}
+
+// NOTE: Walks the vertical list outward from `posVertList` (the caller's
+// own node, which it skips), one object above and one below per round, and
+// stops a side once an object on it is out of range vertically: the list is
+// sorted by y.
+//
+// 0x46CD20
+void CGameArea::GetAllInRange(POSITION posVertList, const CPoint& center, const CAIObjectType& type, SHORT range, const BYTE* terrainTable, CTypedPtrList<CPtrList, LONG*>& targets, BOOL lineOfSight, BOOL checkForNonSprites)
+{
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameArea.cpp
+    // __LINE__: 1849
+    UTIL_ASSERT(terrainTable != NULL);
+
+    CPoint pt;
+    pt.x = center.x;
+    pt.y = 4 * center.y / 3;
+
+    // NOTE: The original reads the node's links directly; any vertical list
+    // walks a node the same way.
+    POSITION posNext = posVertList;
+    m_lVertSort.GetNext(posNext);
+    POSITION posPrev = posVertList;
+    m_lVertSort.GetPrev(posPrev);
+
+    // One object: in range, of the type, in sight, active and above ground.
+    // Returns FALSE when it is out of range vertically, which ends its side.
+    auto Check = [&](CGameObject* pObject) -> BOOL {
+        if (pObject->GetVertListPos() == NULL) {
+            return TRUE;
+        }
+
+        const CPoint& ptObject = pObject->GetPos();
+        LONG dy = (pt.y - 4 * ptObject.y / 3) * (pt.y - 4 * ptObject.y / 3);
+        if (dy >= range * range + 1) {
+            return FALSE;
+        }
+
+        if ((pt.x - ptObject.x) * (pt.x - ptObject.x) + dy < range * range + 1
+            && pObject->GetAIType().OfType(type, checkForNonSprites, !checkForNonSprites)
+            && (!lineOfSight
+                || CheckLOS(center, pObject->GetPos(), terrainTable, FALSE))
+            && (pObject->GetObjectType() != CGameObject::TYPE_SPRITE
+                || (static_cast<CGameSprite*>(pObject)->m_active
+                    && static_cast<CGameSprite*>(pObject)->m_activeAI))
+            && (pObject->GetObjectType() != CGameObject::TYPE_SPRITE
+                || static_cast<CGameSprite*>(pObject)->GetAnimation()->GetAboveGround())) {
+            targets.AddTail(reinterpret_cast<LONG*>(static_cast<INT_PTR>(pObject->GetId())));
+        }
+
+        return TRUE;
+    };
+
+    while (1) {
+        if (posPrev == NULL && posNext == NULL) {
+            return;
+        }
+
+        if (posPrev != NULL) {
+            LONG nId = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSort.GetPrev(posPrev)));
+
+            CGameObject* pObject;
+            BYTE rc = m_pGame->GetObjectArray()->GetShare(nId,
+                CGameObjectArray::THREAD_ASYNCH,
+                &pObject,
+                INFINITE);
+            if (rc != CGameObjectArray::SUCCESS) {
+                continue;
+            }
+
+            if (pObject->GetObjectType() == CGameObject::TYPE_SPRITE
+                && static_cast<CGameSprite*>(pObject)->GetBaseStats()->field_294 == 1) {
+                // NOTE: This skip leaves the round without the side below
+                // (0x46CDF4 jumps to the release at 0x46D119).
+                m_pGame->GetObjectArray()->ReleaseShare(nId,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    INFINITE);
+                continue;
+            }
+
+            if (!Check(pObject)) {
+                posPrev = NULL;
+            }
+
+            m_pGame->GetObjectArray()->ReleaseShare(nId,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+
+            if (posNext == NULL) {
+                continue;
+            }
+        }
+
+        LONG nId = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSort.GetNext(posNext)));
+
+        CGameObject* pObject;
+        BYTE rc = m_pGame->GetObjectArray()->GetShare(nId,
+            CGameObjectArray::THREAD_ASYNCH,
+            &pObject,
+            INFINITE);
+        if (rc != CGameObjectArray::SUCCESS) {
+            continue;
+        }
+
+        if (pObject->GetObjectType() != CGameObject::TYPE_SPRITE
+            || static_cast<CGameSprite*>(pObject)->GetBaseStats()->field_294 != 1) {
+            if (!Check(pObject)) {
+                posNext = NULL;
+            }
+        }
+
+        m_pGame->GetObjectArray()->ReleaseShare(nId,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+    }
 }
 
 // 0x46D140
@@ -736,9 +1328,102 @@ void CGameArea::GetAllInPoly(const CRect& rBounding, CPoint* pPoly, SHORT nPoly,
 // 0x46DAE0
 LONG CGameArea::sub_46DAE0(INT x, INT y, const CAIObjectType& type, int a4, const BYTE* terrainTable, int a6, int a7, int a8, int a9)
 {
-    // TODO: Incomplete.
+    // NOTE: The arguments as GetNearest's: a4 the range, a6 checkLOS, a7
+    // seeInvisible, a8 the mode (0 nearest, 1 farthest), a9 summoned
+    // creatures only.
+    SHORT range = static_cast<SHORT>(a4);
+    BOOL bRaceBE = type.m_nRace == 0xBE;
 
-    return -1;
+    if (x < 0 || y < 0) {
+        return CGameObjectArray::INVALID_INDEX;
+    }
+
+    LONG nBest;
+    if (a8 == 0) {
+        nBest = range * range + 1;
+    } else {
+        nBest = 0;
+    }
+
+    POSITION pos = m_lVertSort.GetHeadPosition();
+    LONG nFound = CGameObjectArray::INVALID_INDEX;
+    INT yScaled = 4 * y / 3;
+
+    if (pos == NULL) {
+        return CGameObjectArray::INVALID_INDEX;
+    }
+
+    do {
+        LONG nId = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSort.GetNext(pos)));
+
+        CGameObject* pObject;
+        BYTE rc = m_pGame->GetObjectArray()->GetShare(nId,
+            CGameObjectArray::THREAD_ASYNCH,
+            &pObject,
+            INFINITE);
+        if (rc == CGameObjectArray::SUCCESS) {
+            BYTE nObjectType = pObject->GetObjectType();
+            if (pObject->GetAIType().m_nRace != 0xBE || bRaceBE == TRUE) {
+                CPoint ptObject(pObject->GetPos().x, 4 * pObject->GetPos().y / 3);
+                if (yScaled - ptObject.y <= range) {
+                    if (ptObject.y - yScaled > range) {
+                        // The list is sorted by y: the rest are farther.
+                        m_pGame->GetObjectArray()->ReleaseShare(nId,
+                            CGameObjectArray::THREAD_ASYNCH,
+                            INFINITE);
+                        return nFound;
+                    }
+
+                    if (type.sub_40D920(ptObject)) {
+                        BOOL bCandidate;
+                        if (nObjectType == CGameObject::TYPE_SPRITE) {
+                            CGameSprite* pSprite = static_cast<CGameSprite*>(pObject);
+                            bCandidate = pSprite->m_active
+                                && pSprite->m_activeAI
+                                && pSprite->m_activeImprisonment
+                                && pSprite->GetAnimation()->GetAboveGround()
+                                && pSprite->IsVisibleToCaller(a7);
+                        } else {
+                            bCandidate = TRUE;
+                        }
+
+                        // NOTE: With a9 the original reads the general
+                        // state at 0x920 of any object, a sprite's derived
+                        // state; another object's bytes there are not a
+                        // state. Ours reads it for sprites and takes 0 for
+                        // the others.
+                        DWORD dwState = nObjectType == CGameObject::TYPE_SPRITE
+                            ? static_cast<CGameSprite*>(pObject)->m_derivedStats.m_generalState
+                            : 0;
+
+                        if (bCandidate
+                            && pObject->GetAIType().OfType(type, FALSE, FALSE)
+                            && (a9 == 0 || (dwState & STATE_SUMMONED_CREATURE) != 0)
+                            && (!a6 || CheckLOS(CPoint(x, y), pObject->GetPos(), terrainTable, FALSE))) {
+                            LONG nDistance = (ptObject.x - x) * (ptObject.x - x) + (ptObject.y - yScaled) * (ptObject.y - yScaled);
+                            if (a8 == 0) {
+                                if (nDistance < nBest) {
+                                    nBest = nDistance;
+                                    nFound = nId;
+                                }
+                            } else if (a8 == 1) {
+                                if (nDistance > nBest) {
+                                    nBest = nDistance;
+                                    nFound = nId;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            m_pGame->GetObjectArray()->ReleaseShare(nId,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+        }
+    } while (pos != NULL);
+
+    return nFound;
 }
 
 // 0x46F5A0

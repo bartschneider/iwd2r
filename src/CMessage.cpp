@@ -10578,6 +10578,7 @@ CMessageSetPath::CMessageSetPath(LONG position, LONG* pPath, SHORT nPath, SHORT 
 
     m_currDest = currDest;
     m_sAreaString = sAreaString;
+    m_position = position;
     if (nPath > 0) {
         m_currPath = currPath;
         m_pPath = new LONG[nPath];
@@ -10614,6 +10615,54 @@ BYTE CMessageSetPath::GetMsgType()
 BYTE CMessageSetPath::GetMsgSubType()
 {
     return CBaldurMessage::MSG_SUBTYPE_CMESSAGE_SET_PATH;
+}
+
+// 0x5084C0
+void CMessageSetPath::Run()
+{
+    CGameSprite* pSprite;
+
+    BYTE rc;
+    do {
+        rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetDeny(m_targetId,
+            CGameObjectArray::THREAD_ASYNCH,
+            reinterpret_cast<CGameObject**>(&pSprite),
+            INFINITE);
+    } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+    if (rc != CGameObjectArray::SUCCESS) {
+        return;
+    }
+
+    if (pSprite->GetObjectType() == CGameObject::TYPE_SPRITE
+        && pSprite->GetArea() != NULL
+        && g_pBaldurChitin->GetObjectGame()->GetArea(m_sAreaString) == pSprite->GetArea()) {
+        POINT pt;
+        CPathSearch::PositionToPoint(m_position, &pt);
+
+        CPoint pos = pSprite->GetPos();
+        BOOL bOnPath = TRUE;
+        if (pos.x / CPathSearch::GRID_SQUARE_SIZEX != pt.x || pos.y / CPathSearch::GRID_SQUARE_SIZEY != pt.y) {
+            // A sprite that is no longer where its path starts is moved
+            // there only in a session; alone, the path is dropped.
+            if (!g_pChitin->cNetwork.m_bConnectionEstablished) {
+                bOnPath = FALSE;
+            } else {
+                pSprite->JumpToPoint(CPoint(pt.x * CPathSearch::GRID_SQUARE_SIZEX, pt.y * CPathSearch::GRID_SQUARE_SIZEY), FALSE);
+            }
+        }
+
+        if (bOnPath) {
+            pSprite->SetPath(m_pPath, m_nPath);
+            pSprite->m_currPath = m_currPath;
+            pSprite->InitializeWalkingSound();
+            m_pPath = NULL;
+        }
+    }
+
+    g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(m_targetId,
+        CGameObjectArray::THREAD_ASYNCH,
+        INFINITE);
 }
 
 // -----------------------------------------------------------------------------

@@ -126,5 +126,57 @@ void CMoveList::CheckLoad(CGameArea* pArea)
 // 0x517300
 void CMoveList::AIUpdate()
 {
-    // TODO: Incomplete.
+    POSITION pos = GetHeadPosition();
+    while (pos != NULL) {
+        POSITION posCurrent = pos;
+        CMoveListEntry* pNode = GetNext(pos);
+
+        if (pNode->m_nDelay > 0) {
+            pNode->m_nDelay--;
+        }
+
+        if (pNode->m_nDelay > 0) {
+            continue;
+        }
+
+        RemoveAt(posCurrent);
+
+        CString sArea;
+        pNode->m_areaResRef.CopyToString(sArea);
+
+        CGameArea* pArea = g_pBaldurChitin->GetObjectGame()->GetArea(sArea);
+        if (pArea == NULL) {
+            // The area is not loaded: the move waits in the game's move
+            // list until the area loads (CMoveList::CheckLoad).
+            g_pBaldurChitin->GetObjectGame()->m_cMoveList.AddTail(pNode);
+            continue;
+        }
+
+        CGameSprite* pSprite;
+
+        BYTE rc;
+        do {
+            rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetDeny(pNode->m_nSpriteId,
+                CGameObjectArray::THREAD_ASYNCH,
+                reinterpret_cast<CGameObject**>(&pSprite),
+                INFINITE);
+        } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+        if (rc == CGameObjectArray::SUCCESS) {
+            pSprite->MoveOntoArea(pArea, pNode->m_ptDestination, pNode->m_nFacing);
+
+            g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(pNode->m_nSpriteId,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+
+            delete pNode;
+        }
+
+        // NOTE: When the sprite cannot be had, the original leaks the node,
+        // already removed, and skips its update of the position it removes
+        // next (`mov ebx, edi` at 0x517467 is jumped over from 0x5173F8):
+        // the next expired node's RemoveAt gets this stale position again,
+        // a double removal of freed memory. Bounded here: the node leaks
+        // and the iteration continues with valid positions.
+    }
 }

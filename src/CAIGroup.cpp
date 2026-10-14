@@ -423,7 +423,308 @@ CAIGroup::CAIGroup(SHORT id)
 // 0x404D00
 void CAIGroup::GroupAction(CAIAction action, BOOL override, CAIAction* leaderAction)
 {
-    // TODO: Incomplete.
+    BOOL bLeader = TRUE;
+
+    POSITION pos = m_memberList.GetHeadPosition();
+    while (pos != NULL) {
+        LONG memberId = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_memberList.GetNext(pos)));
+
+        CGameSprite* pSprite;
+
+        BYTE rc;
+        do {
+            rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetDeny(memberId,
+                CGameObjectArray::THREAD_ASYNCH,
+                reinterpret_cast<CGameObject**>(&pSprite),
+                INFINITE);
+        } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+        if (rc != CGameObjectArray::SUCCESS) {
+            continue;
+        }
+
+        if (override) {
+            pSprite->ClearActions(FALSE);
+            pSprite->m_interrupt = TRUE;
+        }
+
+        pSprite->m_userCommandPause = CGameSprite::USER_OVERRIDE_COUNT;
+        pSprite->m_triggerId = CGameObjectArray::INVALID_INDEX;
+
+        if (bLeader) {
+            bLeader = FALSE;
+
+            const CAIAction& memberAction = leaderAction != NULL ? *leaderAction : action;
+            if (memberAction.m_actionID == CAIAction::MOVETOPOINT
+                && pSprite->m_derivedStats.m_nEncumberance == 2) {
+                pSprite->FeedBack(CGameSprite::FEEDBACK_TOOHEAVY_STOPPED, 1, 0, 0, -1, 0, 0);
+            } else {
+                CMessage* message = new CMessageAddAction(memberAction,
+                    pSprite->GetId(),
+                    pSprite->GetId());
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+            }
+
+            if (override && action.m_actionID != CAIAction::GROUPATTACK) {
+                pSprite->PlaySound(CGameSprite::SOUND_SELECT_ACTION, TRUE, FALSE, FALSE);
+            }
+        } else {
+            if (action.m_actionID == CAIAction::MOVETOPOINT
+                && pSprite->m_derivedStats.m_nEncumberance == 2) {
+                pSprite->FeedBack(CGameSprite::FEEDBACK_TOOHEAVY_STOPPED, 1, 0, 0, -1, 0, 0);
+            } else {
+                CMessage* message = new CMessageAddAction(action,
+                    pSprite->GetId(),
+                    pSprite->GetId());
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+            }
+        }
+
+        pSprite->m_inFormation = TRUE;
+
+        g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(memberId,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+    }
+}
+
+// NOTE: The name is a guess: the offsets of the group's members from the
+// leader for a formation, in thousandths of a search square, turned toward
+// `nDirection`. Formations 0 and 1 use the T table; 12 (FORMATION_NONE)
+// takes the members' own places relative to the leader, as does any member
+// past the twelfth. Without `bAtLeastSix` there is one offset per member
+// (at least one); with it at least six. The caller frees the array.
+//
+// 0x405370
+CPoint* CAIGroup::GetOffsets(SHORT formationType, SHORT nDirection, BOOL bAtLeastSix)
+{
+    INT nMembers = m_memberList.GetCount();
+    BYTE nOffsets;
+    if (!bAtLeastSix) {
+        nOffsets = static_cast<BYTE>(nMembers);
+        if (nMembers < 2) {
+            nOffsets = 1;
+        }
+    } else if (nMembers < 7) {
+        nOffsets = 6;
+    } else {
+        nOffsets = static_cast<BYTE>(nMembers);
+    }
+
+    CPoint* pOffsets = new CPoint[nOffsets];
+    for (INT index = 0; index < nOffsets; index++) {
+        pOffsets[index].x = 0;
+        pOffsets[index].y = 0;
+    }
+
+    LONG* pIds = NULL;
+    CPoint ptLeader(-1, -1);
+
+    if (nOffsets == 1) {
+        return pOffsets;
+    }
+
+    if (!m_memberList.IsEmpty()) {
+        LONG leaderId = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_memberList.GetHead()));
+
+        CGameObject* pLeader;
+        BYTE rc;
+        do {
+            rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(leaderId,
+                CGameObjectArray::THREAD_ASYNCH,
+                &pLeader,
+                INFINITE);
+        } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+        if (rc != CGameObjectArray::SUCCESS) {
+            return pOffsets;
+        }
+
+        ptLeader = pLeader->GetPos();
+
+        g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(pLeader->GetId(),
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+    }
+
+    if (nOffsets > 12) {
+        pIds = new LONG[nMembers];
+        LONG* pId = pIds;
+        POSITION pos = m_memberList.GetHeadPosition();
+        while (pos != NULL) {
+            *pId++ = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_memberList.GetNext(pos)));
+        }
+    }
+
+    if (formationType == FORMATION_NONE) {
+        if (pIds != NULL) {
+            delete[] pIds;
+        }
+
+        if (nMembers == 0) {
+            return pOffsets;
+        }
+
+        pIds = new LONG[nMembers];
+        LONG* pId = pIds;
+        POSITION pos = m_memberList.GetHeadPosition();
+        while (pos != NULL) {
+            *pId++ = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_memberList.GetNext(pos)));
+        }
+    }
+
+    pOffsets[0].x = 0;
+    pOffsets[0].y = 0;
+
+    // A member's place relative to the leader, in search squares; FALSE when
+    // the object array refuses it.
+    // NOTE: With FORMATION_NONE and at least six offsets for fewer
+    // members, the original reads member ids past the end of its array
+    // (unchecked). Bounded: an index past the members counts as a member the
+    // object array refuses, leaving (0, 0) unscaled, the visible result of
+    // a refused id.
+    auto MemberOffset = [&](INT index, CPoint& offset) -> BOOL {
+        if (pIds == NULL || index >= nMembers) {
+            return FALSE;
+        }
+
+        LONG id = pIds[index];
+        CGameObject* pMember;
+        BYTE rc;
+        do {
+            rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(id,
+                CGameObjectArray::THREAD_ASYNCH,
+                &pMember,
+                INFINITE);
+        } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+        if (rc != CGameObjectArray::SUCCESS) {
+            return FALSE;
+        }
+
+        offset.x = (pMember->GetPos().x - ptLeader.x) / CPathSearch::GRID_SQUARE_SIZEX;
+        offset.y = (pMember->GetPos().y - ptLeader.y) / CPathSearch::GRID_SQUARE_SIZEY;
+
+        g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(id,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+        return TRUE;
+    };
+
+    for (INT index = 0; index < nOffsets; index++) {
+        if (index >= 12) {
+            if (MemberOffset(index, pOffsets[index])) {
+                pOffsets[index].x *= 1000;
+                pOffsets[index].y *= 1000;
+            }
+            continue;
+        }
+
+        switch (formationType) {
+        case 0:
+        case CAIGROUP_FORMATION_T:
+            pOffsets[index] = FORMATION_T_OFFSETS[index];
+            break;
+        case CAIGROUP_FORMATION_GATHER:
+            pOffsets[index] = FORMATION_GATHER_OFFSETS[index];
+            break;
+        case CAIGROUP_FORMATION_4AND2:
+            pOffsets[index] = FORMATION_4AND2_OFFSETS[index];
+            break;
+        case CAIGROUP_FORMATION_3BY2:
+            pOffsets[index] = FORMATION_3BY2_OFFSETS[index];
+            break;
+        case CAIGROUP_FORMATION_PROTECT:
+            pOffsets[index] = FORMATION_PROTECT_OFFSETS[index];
+            break;
+        case CAIGROUP_FORMATION_2BY3:
+            pOffsets[index] = FORMATION_2BY3_OFFSETS[index];
+            break;
+        case CAIGROUP_FORMATION_RANK:
+            pOffsets[index] = FORMATION_RANK_OFFSETS[index];
+            break;
+        case CAIGROUP_FORMATION_V:
+            pOffsets[index] = FORMATION_V_OFFSETS[index];
+            break;
+        case CAIGROUP_FORMATION_WEDGE:
+            pOffsets[index] = FORMATION_WEDGE_OFFSETS[index];
+            break;
+        case CAIGROUP_FORMATION_S:
+            pOffsets[index] = FORMATION_S_OFFSETS[index];
+            break;
+        case CAIGROUP_FORMATION_LINE:
+            pOffsets[index] = FORMATION_LINE_OFFSETS[index];
+            break;
+        case 12:
+            if (!MemberOffset(index, pOffsets[index])) {
+                continue;
+            }
+            break;
+        }
+
+        pOffsets[index].x *= 1000;
+        pOffsets[index].y *= 1000;
+    }
+
+    RotateOffsets(pOffsets, nOffsets, nDirection);
+
+    if (pIds != NULL) {
+        delete[] pIds;
+    }
+
+    return pOffsets;
+}
+
+// x87 __ftol (0x7E812C): truncation toward zero, and the integer indefinite
+// 0x80000000 for a NaN or a value out of range.
+static LONG Ftol(double value)
+{
+    if (!(value > -2147483649.0 && value < 2147483648.0)) {
+        return static_cast<LONG>(0x80000000u);
+    }
+    return static_cast<LONG>(value);
+}
+
+// NOTE: The name is a guess: turns each offset about the leader by
+// `nDirection` * 2 degrees, through its length and angle (acos of |x| over
+// the length, put in its quadrant).
+//
+// NOTE (precision): the original's sin and cos are x87 fsin/fcos and its
+// products x87 arithmetic; ours are doubles. A product a hair from a whole
+// number can truncate one apart (docs/evidence/4058E0.md;
+// group/rotate_offsets lets only that through).
+//
+// 0x4058E0
+void CAIGroup::RotateOffsets(CPoint* pOffsets, SHORT nOffsets, SHORT nDirection)
+{
+    const double pi = 3.1415926535;
+    double offset = static_cast<double>(nDirection * 2) * pi / 360.0;
+
+    for (INT index = 0; index < nOffsets; index++) {
+        LONG x = pOffsets[index].x;
+        LONG y = pOffsets[index].y;
+        double length = sqrt(static_cast<double>(y * y + x * x));
+        double ratio = static_cast<double>(abs(x)) / length;
+        // NOTE: An offset of (0, 0) divides 0 by 0. The original's CRT acos
+        // (0x7E7F64) takes the NaN through its domain error path and the
+        // offset comes out (0, 0) (seen in group/rotate_offsets); ours
+        // takes the angle as 0, which gives the same.
+        double angle = ratio != ratio ? 0.0 : acos(ratio);
+
+        if (x < 0) {
+            if (y < 0) {
+                angle = angle + pi;
+            } else {
+                angle = pi - angle;
+            }
+        } else if (y < 0) {
+            angle = 6.283185307 - angle;
+        }
+
+        angle = angle + offset;
+        pOffsets[index].x = Ftol(cos(angle) * length);
+        pOffsets[index].y = Ftol(sin(angle) * length);
+    }
 }
 
 // 0x4052D0
@@ -971,7 +1272,125 @@ void CAIGroup::FollowLeader(CPoint target, BOOL additive)
 // 0x409820
 void CAIGroup::HandleFollowPath(LONG* pPath, INT nPath, CPoint target, CPoint start, BOOL additive)
 {
-    // TODO: Incomplete.
+    // NOTE: CAIAction's constants at 0x847826 (89, Follow) and 0x84783A (99,
+    // an action with no ACTION.IDS entry), which CAIAction.h does not
+    // declare.
+    const SHORT FOLLOW = 89;
+    const SHORT ACTION_99 = 99;
+
+    CTypedPtrList<CPtrList, CAIAction*> actions(10);
+    BOOL bLeader = TRUE;
+    SHORT nIndex = 0;
+
+    POSITION pos = m_memberList.GetHeadPosition();
+    while (pos != NULL) {
+        LONG memberId = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_memberList.GetNext(pos)));
+
+        CGameSprite* pSprite;
+
+        BYTE rc;
+        do {
+            rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetDeny(memberId,
+                CGameObjectArray::THREAD_ASYNCH,
+                reinterpret_cast<CGameObject**>(&pSprite),
+                INFINITE);
+        } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+        if (rc != CGameObjectArray::SUCCESS) {
+            continue;
+        }
+
+        if (bLeader) {
+            bLeader = FALSE;
+
+            // NOTE: The original calls GetPos through the vtable here and
+            // drops the result (0x4098DE).
+            pSprite->GetPos();
+
+            if (pos != NULL) {
+                POSITION posNext = pos;
+                LONG nextId = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_memberList.GetNext(posNext)));
+
+                // The leader is the caller, the next member the target
+                // (m_targetId at +4 holds the next member, 0x409908).
+                CMessage* message = new CMessageStartFollow(memberId, nextId);
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+            }
+        } else {
+            CAIAction* pAction = new CAIAction(FOLLOW, target, nIndex, -1);
+            // NOTE: The original stores the start's y as the second
+            // specific (0x409A2F); its x is never read.
+            pAction->m_specificID2 = start.y;
+            actions.AddTail(pAction);
+
+            if (!additive) {
+                actions.AddTail(new CAIAction(CAIAction::SMALLWAIT, CPoint(-1, -1), 5, -1));
+
+                pAction = new CAIAction(ACTION_99, CPoint(-1, -1), 0, -1);
+                if (pos != NULL) {
+                    POSITION posNext = pos;
+                    pSprite->m_followLeaderNext = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_memberList.GetNext(posNext)));
+                }
+                actions.AddTail(pAction);
+
+                pSprite->ClearStoredPaths();
+                pSprite->m_userCommandPause = CGameSprite::USER_OVERRIDE_COUNT;
+                pSprite->m_triggerId = CGameObjectArray::INVALID_INDEX;
+                pSprite->m_interrupt = TRUE;
+
+                while (!actions.IsEmpty()) {
+                    pAction = actions.RemoveHead();
+                    pSprite->AddAction(*pAction);
+                    delete pAction;
+                }
+            } else {
+                pSprite->m_userCommandPause = CGameSprite::USER_OVERRIDE_COUNT;
+                pSprite->m_triggerId = CGameObjectArray::INVALID_INDEX;
+
+                SHORT actionID = pSprite->m_curAction.m_actionID;
+                if (actionID != CAIAction::MOVETOPOINT
+                    && actionID != CAIAction::FACE
+                    && actionID != CAIAction::SMALLWAIT
+                    && actionID != FOLLOW
+                    && actionID != CAIAction::MOVETOPOINTNORECTICLE) {
+                    actions.AddTail(new CAIAction(CAIAction::SMALLWAIT, CPoint(-1, -1), 5, -1));
+
+                    pAction = new CAIAction(ACTION_99, CPoint(-1, -1), 0, -1);
+                    if (pos != NULL) {
+                        POSITION posNext = pos;
+                        pSprite->m_followLeaderNext = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_memberList.GetNext(posNext)));
+                    }
+                    actions.AddTail(pAction);
+
+                    pSprite->ClearStoredPaths();
+                    pSprite->m_interrupt = TRUE;
+                }
+
+                while (!actions.IsEmpty()) {
+                    pAction = actions.RemoveTail();
+                    pSprite->InsertAction(*pAction);
+                    delete pAction;
+                }
+            }
+
+            actions.RemoveAll();
+
+            // NOTE: A plain operator new block, as CGameSprite::
+            // ClearStoredPaths deletes it.
+            int* pPathCopy = static_cast<int*>(::operator new(sizeof(LONG) * nPath));
+            memcpy(pPathCopy, pPath, sizeof(LONG) * nPath);
+            pSprite->m_pPathTemp.AddTail(pPathCopy);
+            pSprite->m_nPathTemp.AddTail(reinterpret_cast<int*>(static_cast<INT_PTR>(nPath)));
+        }
+
+        pSprite->m_inFormation = TRUE;
+
+        g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(memberId,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+
+        nIndex++;
+    }
 }
 
 // 0x68C000
