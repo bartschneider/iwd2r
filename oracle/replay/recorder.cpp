@@ -27,9 +27,12 @@
 // CChitin::SynchronousUpdate itself and, when it returns, OnFrameEnd fires
 // the due timeSetEvent callbacks, which wake the AI thread for the next
 // AsynchronousUpdate: the AI update of a frame runs after the main thread's
-// frame (its render included), never beside it (platform/replay_clock.h,
-// "The order inside a frame"). Dumps are written only in OnFrame, on the
-// main thread, while the AI thread waits for that wake-up.
+// frame (its render included) while the frame takes less real time than
+// the AI thread's 100 ms wait; OnFrameEnd counts a frame where it did not
+// in ai_overlap_frames (platform/replay_clock.h, "The order inside a
+// frame"). Calls the frame gate holds overlap an update by design and are
+// counted apart (held_frames). Dumps are written only in OnFrame, on the
+// main thread, while the AI thread normally waits for that wake-up.
 //
 // Hooked imports (the exe's IAT): input GetAsyncKeyState, GetCursorPos,
 // SetCursorPos, PeekMessageA, GetMessageA; time timeGetTime, GetTickCount,
@@ -161,6 +164,10 @@ std::atomic<uint32_t> g_frame { 0 };
 // (main thread; see OnFrame), and au_counter at the previous frame.
 uint32_t g_stalledFrames = 0;
 int32_t g_lastAu = 0;
+// Frames whose AI update began before the frame's render ended (main
+// thread; see OnFrameEnd), and whether g_lastAu was read for this frame.
+uint32_t g_overlapFrames = 0;
+bool g_haveFrameAu = false;
 std::atomic<DWORD> g_now { kClockBase };
 std::atomic<DWORD> g_mainThread { 0 };
 std::atomic<HWND> g_window { nullptr };
@@ -651,6 +658,7 @@ std::string DumpJson(const char* checkpoint)
     json += "  \"rng_state\": " + Number(rng) + ",\n";
     json += "  \"globals\": {\"au_counter\": " + Number(auCounter) + ", \"fullscreen\": " + Number(fullscreen)
         + ", \"in_async_update\": " + Number(inAsync) + ", \"ai_stalled_frames\": " + Number(g_stalledFrames)
+        + ", \"ai_overlap_frames\": " + Number(g_overlapFrames)
         + ", \"reinitializing\": " + Number(reinitializing) + ", \"loading\": " + Number(loading)
         + ", \"loads\": " + Number(g_gate.Loads()) + ", \"held_frames\": " + Number(g_gate.HeldFrames())
         + ", \"ai_rng_state\": "
@@ -1058,6 +1066,7 @@ extern "C" void __cdecl OnFrame()
         // without one is a stall: the AI thread ran without counting
         // (m_bReInitializing, a focus loss) or did not run.
         bool ok = true;
+        g_haveFrameAu = false;
         const uint32_t chitin = ReadU32(kField_baldur_chitin.address, &ok);
         if (chitin) {
             const int32_t au = ReadI32(At(chitin, kField_au_counter), &ok);
@@ -1068,6 +1077,10 @@ extern "C" void __cdecl OnFrame()
                 }
             }
             g_lastAu = au;
+            // Read before the clock moves: until then the AI thread's tick
+            // test (0x424549-0x424572) keeps it from starting an update,
+            // so OnFrameEnd compares against a settled count.
+            g_haveFrameAu = ok;
         }
     }
     if (g_dumpEvery && frame % g_dumpEvery == 0) {
@@ -1082,12 +1095,37 @@ extern "C" void __cdecl OnFrame()
 // fires the due timers now, so the AI update they wake runs after the
 // frame's render (platform/replay_clock.h, "The order inside a frame"). A
 // held call fires nothing, as before.
+//
+// The order holds only while the frame takes less real time than the AI
+// thread's wait: MainAIThread waits WaitForSingleObject(m_eventTimer, 100)
+// (push 0x64 at 0x4244D8), and on a timeout its tick test passes, since
+// OnFrame has already moved the clock. An update that started that way
+// shows here as au_counter moved since OnFrame, or one in progress; such a
+// frame counts in ai_overlap_frames, and tools/oracle.py fails a checkpoint
+// with any. Held calls never get here (g_frameCounted is false for them):
+// they are drawn from inside an AI update by design and counted apart, in
+// held_frames.
 extern "C" void __cdecl OnFrameEnd()
 {
     if (!g_frameCounted) {
         return;
     }
     g_frameCounted = false;
+    if (g_haveFrameAu) {
+        bool ok = true;
+        const uint32_t chitin = ReadU32(kField_baldur_chitin.address, &ok);
+        if (chitin) {
+            const int32_t au = ReadI32(At(chitin, kField_au_counter), &ok);
+            const int32_t inAsync = ReadI32(At(chitin, kField_in_async_update), &ok);
+            if (ok && (au != g_lastAu || inAsync != 0)) {
+                if (g_overlapFrames++ == 0) {
+                    Log("AI overlap: frame %u's AI update began before its render ended (au_counter %d at its "
+                        "start, %d now, in_async_update %d)",
+                        g_frame.load(), g_lastAu, au, inAsync);
+                }
+            }
+        }
+    }
     FireTimers();
 }
 

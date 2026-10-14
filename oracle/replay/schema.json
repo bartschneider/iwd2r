@@ -63,6 +63,7 @@
         "fullscreen",
         "in_async_update",
         "ai_stalled_frames",
+        "ai_overlap_frames",
         "reinitializing",
         "loading",
         "loads",
@@ -87,6 +88,11 @@
         },
         "ai_stalled_frames": {
           "description": "Frames so far with no AI update since the previous frame. The virtual clock wakes the AI thread once per frame, so every frame has an AI update of its own (au_counter goes up); frames drawn from inside an update (a load redrawing its progress) are held, not counted (held_frames). A stall means the AI thread ran without counting (m_bReInitializing after a focus loss) or not at all.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "ai_overlap_frames": {
+          "description": "Frames so far whose AI update began before the frame's render ended. Both sides wake the AI thread when the frame's SynchronousUpdate returns (platform/replay_clock.h, \"The order inside a frame\"), but the AI thread also wakes when its 100 ms wait times out (CBaldurChitin::MainAIThread 0x4242B0), and the clock has already moved, so a frame that takes longer than that lets an update run beside the render. Counted at the end of each frame that counted: au_counter moved since the frame began, or an update is in progress. Held calls are drawn from inside an update by design and do not count here (held_frames).",
           "type": "integer",
           "minimum": 0
         },
@@ -122,7 +128,7 @@
           "maximum": 4294967295
         }
       },
-      "description": "The recorder's invariant (tools/oracle.py checks it on every checkpoint dump): reinitializing, ai_stalled_frames, in_async_update and loading are 0. au_counter follows frame one for one, never behind by a stall; held_frames is timing, loads is compared."
+      "description": "The recorder's invariant (tools/oracle.py checks it on every checkpoint dump): reinitializing, ai_stalled_frames, ai_overlap_frames, in_async_update and loading are 0. au_counter follows frame one for one, never behind by a stall; held_frames is timing, loads is compared."
     },
     "chargen": {
       "description": "Character generation, null unless the screen is create_char. The sprite values are null while the screen has no sprite (m_nGameSprite does not resolve in the object array).",

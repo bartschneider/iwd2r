@@ -16,8 +16,10 @@
 //     OnFrameEnd, which CBaldurChitin::SynchronousUpdate calls after
 //     CChitin::SynchronousUpdate returns (the recorder's FrameTrampoline
 //     calls it there too), so the AI thread wakes once per frame and its
-//     update runs after the frame's render, never beside it
-//     (platform/replay_clock.h, "The order inside a frame");
+//     update runs after the frame's render while the frame takes less
+//     than the AI thread's 100 ms wait; OnFrameEnd counts a frame where
+//     it did not in ai_overlap_frames (platform/replay_clock.h, "The order
+//     inside a frame");
 //   - time() (and CTime) reads a virtual wall clock derived from it, UTC;
 //   - frame 1 seeds the main thread's rand with IWD2R_SEED (default 1), as
 //     the recorder runs the original's srand;

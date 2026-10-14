@@ -2902,6 +2902,7 @@ class MiniSchemaTest(unittest.TestCase):
                 'rng_state': 1,
                 'globals': {'au_counter': 61, 'fullscreen': 0,
                             'in_async_update': 0, 'ai_stalled_frames': 0,
+                            'ai_overlap_frames': 0,
                             'reinitializing': 0, 'loading': 0, 'loads': 0,
                             'held_frames': 0, 'ai_rng_state': None},
                 'chargen': None, 'world': None}
@@ -2927,6 +2928,7 @@ class MiniSchemaTest(unittest.TestCase):
                 'rng_state': 1,
                 'globals': {'au_counter': 1498, 'fullscreen': 0,
                             'in_async_update': 0, 'ai_stalled_frames': 0,
+                            'ai_overlap_frames': 0,
                             'reinitializing': 0, 'loading': 0, 'loads': 1,
                             'held_frames': 13, 'ai_rng_state': 7},
                 'chargen': None,
@@ -3687,6 +3689,16 @@ class OracleReplayTest(unittest.TestCase):
                          '(au_counter 40): the AI thread stalled')
         self.assertIn('None frames', oracle.invariant_problem(
             'c', {'frame': 1, 'globals': {}}))
+        # An AI update that began before its frame's render ended (the AI
+        # thread's 100 ms wait timed out during a long frame).
+        overlap = dump(61, 61)
+        overlap['globals'].update(ai_overlap_frames=2)
+        self.assertEqual(oracle.invariant_problem('c', overlap),
+                         'c: 2 frames by frame 61 had their AI update begin '
+                         'before their render ended: the frame order did '
+                         'not hold')
+        overlap['globals'].update(ai_overlap_frames=0)
+        self.assertIsNone(oracle.invariant_problem('c', overlap))
         self.assertEqual(oracle.invariant_problem('c', dump(61, 61, 0, 1)),
                          'c: reinitializing is 1 at frame 61: the game '
                          'stopped updating (a focus loss?)')
@@ -3834,7 +3846,8 @@ class OracleReplayCompareTest(unittest.TestCase):
         # Timing is reported, never compared (ruling R13c).
         other.update(frame=9, checkpoint='b')
         other['globals'].update(au_counter=1, ai_stalled_frames=3,
-                                in_async_update=1, held_frames=4)
+                                ai_overlap_frames=2, in_async_update=1,
+                                held_frames=4)
         self.assertEqual(oracle.field_differences(dump, other), [])
         other['globals']['ai_rng_state'] = 8
         other['chargen']['abilities'] = [1, 3, 4]
@@ -3855,6 +3868,7 @@ class OracleReplayCompareTest(unittest.TestCase):
     def dump(self, screen, rng=1, au=10, frame=10):
         return {'frame': frame, 'screen': screen, 'rng_state': rng,
                 'globals': {'au_counter': au, 'ai_stalled_frames': 0,
+                            'ai_overlap_frames': 0,
                             'in_async_update': 0, 'reinitializing': 0,
                             'fullscreen': 0, 'loading': 0, 'loads': 1,
                             'held_frames': 2, 'ai_rng_state': 3},
@@ -3884,19 +3898,20 @@ class OracleReplayCompareTest(unittest.TestCase):
                                                   8)])
         self.assertEqual(lines, [
             'checkpoint menu (connection): match (frame 10/10, au_counter '
-            '10/9, ai_stalled_frames 0/0, in_async_update 0/0, held_frames '
-            '2/2; original/ours)',
+            '10/9, ai_stalled_frames 0/0, ai_overlap_frames 0/0, '
+            'in_async_update 0/0, held_frames 2/2; original/ours)',
             'checkpoint party (single_player): different, screen not '
             'enabled (frame 10/10, au_counter 10/10, ai_stalled_frames 0/0, '
-            'in_async_update 0/0, held_frames 2/2; original/ours)',
+            'ai_overlap_frames 0/0, in_async_update 0/0, held_frames 2/2; '
+            'original/ours)',
             '  diff rng_state: original 1, ours 2',
             'checkpoint chargen (create_char): DIFFERENT (frame 10/10, '
-            'au_counter 10/10, ai_stalled_frames 0/0, in_async_update 0/0, '
-            'held_frames 2/2; original/ours)',
+            'au_counter 10/10, ai_stalled_frames 0/0, ai_overlap_frames 0/0, '
+            'in_async_update 0/0, held_frames 2/2; original/ours)',
             '  DIFF rng_state: original 5, ours 7',
             'checkpoint known (create_char): match (frame 10/10, au_counter '
-            '10/10, ai_stalled_frames 0/0, in_async_update 0/0, held_frames '
-            '2/2; original/ours)',
+            '10/10, ai_stalled_frames 0/0, ai_overlap_frames 0/0, '
+            'in_async_update 0/0, held_frames 2/2; original/ours)',
             '  KNOWN rng_state: original 6, ours 8 (project 3; evidence '
             '0x72DE60)',
             'checkpoint gone: MISSING on our side'])

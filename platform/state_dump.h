@@ -101,6 +101,9 @@ struct Snapshot {
     std::string checkpoint;
     uint32_t rngState = 0;
     uint32_t aiStalledFrames = 0;
+    // Frames whose AI update began before the frame's render ended
+    // (platform/replay.cpp OnFrameEnd).
+    uint32_t aiOverlapFrames = 0;
     // platform/replay_clock.h FrameGate: Loads() and HeldFrames().
     uint32_t loads = 0;
     uint32_t heldFrames = 0;
@@ -119,8 +122,9 @@ struct AiState {
 
 // The engine's side, registered once at start-up. Read runs on the main
 // thread, at the start of a frame, while the AI thread waits. ReadAi runs
-// at the start of every call of the frame, held ones included, while the
-// AI thread may be inside an update: it reads only the three members, in
+// at the start of every call of the frame, held ones included, and at the
+// end of every call that counted (the overlap check), while the AI thread
+// may be inside an update: it reads only the three members, in
 // FrameGate::Counts's order.
 class DumpSource {
 public:
