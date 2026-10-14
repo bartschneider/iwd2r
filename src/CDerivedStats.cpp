@@ -1425,13 +1425,13 @@ LONG CDamageReduction::Apply(LONG nDamage)
         // NOTE: The whole pool comes off the damage here, even when it is
         // larger than the amount (see 447C20.md). Kept.
         //
-        // NOTE: Use-after-free kept from the original (see 447C20.md): the
-        // first sub_4C0830 may delete m_sourceEffectPtr, which the second
-        // call dereferences again. m_pPool points into that effect too, and
-        // every derived stats copy (m_derivedStats, m_tempStats,
-        // m_bonusStats) keeps m_pPool and m_sourceEffectPtr dangling until
-        // the next ProcessEffectList rebuild, including GetBest and
-        // GetEffectiveAmount on m_derivedStats from the character screen.
+        // NOTE: In the original the first sub_4C0830 may delete
+        // m_sourceEffectPtr, which the second call dereferences again;
+        // m_pPool points into that effect too, and every derived stats copy
+        // (m_derivedStats, m_tempStats, m_bonusStats) keeps m_pPool and
+        // m_sourceEffectPtr dangling until the next ProcessEffectList
+        // rebuild, including GetBest and GetEffectiveAmount on
+        // m_derivedStats from the character screen (see 447C20.md).
         nDamage -= *m_pPool;
         *m_pPool = 0;
 
@@ -1443,8 +1443,19 @@ LONG CDamageReduction::Apply(LONG nDamage)
         // __LINE__: 2207
         UTIL_ASSERT(m_sourceEffectPtr != 0);
 
-        m_sourceCreaturePtr->m_equipedEffectList.sub_4C0830(m_sourceEffectPtr);
-        m_sourceCreaturePtr->m_timedEffectList.sub_4C0830(m_sourceEffectPtr);
+        // DEVIATION (ruling M3-10): the original calls both lists'
+        // sub_4C0830 and keeps the entry. Its freed pool reads 0, so later
+        // hits subtract 0 and select the same way; ours skips the second
+        // call once the first has deleted the effect and neutralizes the
+        // entry, so it never reads, writes or deletes through stale
+        // pointers. Play is unchanged.
+        if (!m_sourceCreaturePtr->m_equipedEffectList.sub_4C0830(m_sourceEffectPtr)) {
+            m_sourceCreaturePtr->m_timedEffectList.sub_4C0830(m_sourceEffectPtr);
+        }
+
+        m_nAmount = 0;
+        m_pPool = NULL;
+        m_sourceEffectPtr = NULL;
     }
 
     if (nDamage < 0) {

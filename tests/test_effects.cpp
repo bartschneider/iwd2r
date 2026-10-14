@@ -835,3 +835,40 @@ TEST_CASE("check add rejects a resource immunity and adds the source's save adju
 
     delete pSprite;
 }
+
+TEST_CASE("stoneskin's exhausted pool removes only its effect and later hits take full damage", "[effects][data]")
+{
+    REQUIRE_ENGINE();
+    CGameSprite* pSprite = MakeSprite();
+    pSprite->m_derivedStats.m_damageReductions.clear();
+
+    // An unrelated effect and the stoneskin, both on the timed list.
+    CGameEffect* pOther = Make(CGAMEEFFECT_STR, 0, 1, 0);
+    pSprite->m_timedEffectList.AddTail(pOther);
+    CGameEffect* pStoneSkin = Make(CGAMEEFFECT_STONESKINS, 0, 0, 0);
+    pStoneSkin->m_secondaryType = TRUE;
+    pStoneSkin->m_casterLevel = 4;
+    pSprite->m_timedEffectList.AddTail(pStoneSkin);
+    REQUIRE(pStoneSkin->ApplyEffect(pSprite) == TRUE);
+    REQUIRE(pSprite->m_derivedStats.m_damageReductions.size() == 1);
+    REQUIRE(pStoneSkin->m_effectAmount2 == 40);
+
+    // One hit larger than the pool: the whole pool comes off (60 - 40), the
+    // stoneskin is removed and the entry is neutralized (ruling M3-10).
+    CHECK(pSprite->m_derivedStats.m_damageReductions.Apply(60, 0, 0) == 20);
+    REQUIRE(pSprite->m_timedEffectList.GetCount() == 1);
+    CHECK(pSprite->m_timedEffectList.GetHead() == pOther);
+    CHECK(pSprite->m_equipedEffectList.GetCount() == 0);
+    const CDamageReduction& entry = pSprite->m_derivedStats.m_damageReductions[0];
+    CHECK(entry.m_nAmount == 0);
+    CHECK(entry.m_pPool == nullptr);
+    CHECK(entry.m_sourceEffectPtr == nullptr);
+
+    // A second hit before the rebuild takes full damage and deletes nothing.
+    CHECK(pSprite->m_derivedStats.m_damageReductions.Apply(15, 0, 0) == 15);
+    CHECK(pSprite->m_timedEffectList.GetCount() == 1);
+    CHECK(pSprite->m_timedEffectList.GetHead() == pOther);
+    CHECK(pOther->m_effectID == CGAMEEFFECT_STR);
+
+    delete pSprite;
+}

@@ -3735,6 +3735,8 @@ BOOL CGameEffectDamage::ApplyEffect(CGameSprite* pSprite)
                     (*it)->m_sourceRes = m_sourceRes;
                     (*it)->m_target = ptPos;
                     (*it)->m_casterLevel = m_casterLevel;
+                    // NOTE: Unchecked, as the original calls vtable +0x78 on
+                    // the source whatever its type (0x4A8AC3).
                     static_cast<CGameAIBase*>(pSource)->AddEffect(*it, CGameAIBase::EFFECT_LIST_TIMED, TRUE, TRUE);
                 }
             }

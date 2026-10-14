@@ -373,14 +373,16 @@ class CGameEffectBerserk : public CGameEffect {
 public:
     CGameEffectBerserk(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
-    BOOL ApplyEffect(CGameSprite* pSprite) override;    void OnRemove(CGameSprite* pSprite) override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;
+    void OnRemove(CGameSprite* pSprite) override;
 };
 
 class CGameEffectBarbarianRage : public CGameEffect {
 public:
     CGameEffectBarbarianRage(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
-    BOOL ApplyEffect(CGameSprite* pSprite) override;    void OnRemove(CGameSprite* pSprite) override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;
+    void OnRemove(CGameSprite* pSprite) override;
 };
 
 class CGameEffectCalm : public CGameEffect {
