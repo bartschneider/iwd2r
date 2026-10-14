@@ -1198,6 +1198,9 @@ TEST_CASE("objects: Delete clears the entry and Add reuses its slot with a new i
     REQUIRE(StartEngine(error));
     INFO(error);
 
+    // Delete also drops the index from the game's remote object array
+    // (CGameRemoteObjectArray::Delete); without a session that array holds
+    // nothing for these indices, so the call changes nothing here.
     CGameObjectArray array(4, 2);
     CGameObject* objects[3] = { new CGameObject(), new CGameObject(), new CGameObject() };
     LONG ids[3];
