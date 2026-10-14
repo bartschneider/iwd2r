@@ -39,15 +39,15 @@ CStore::~CStore()
     m_lInventory.RemoveAll();
 
     if (m_pBuyTypes != NULL) {
-        delete m_pBuyTypes;
+        delete[] m_pBuyTypes;
     }
 
     if (m_pDrinks != NULL) {
-        delete m_pDrinks;
+        delete[] m_pDrinks;
     }
 
     if (m_pSpells != NULL) {
-        delete m_pSpells;
+        delete[] m_pSpells;
     }
 }
 
@@ -62,17 +62,26 @@ void CStore::SetResRef(const CResRef& resRef)
     }
     m_lInventory.RemoveAll();
 
+    // NOTE: The original frees the three arrays without clearing the
+    // pointers, so a store reloaded without drinks (or spells, or buy types)
+    // keeps a freed pointer that the destructor frees again. Bounded here
+    // (ruling P4-10): the pointers are cleared.
     if (m_pBuyTypes != NULL) {
-        delete m_pBuyTypes;
+        delete[] m_pBuyTypes;
+        m_pBuyTypes = NULL;
     }
 
     if (m_pDrinks != NULL) {
-        delete m_pDrinks;
+        delete[] m_pDrinks;
+        m_pDrinks = NULL;
     }
 
     if (m_pSpells != NULL) {
-        delete m_pSpells;
+        delete[] m_pSpells;
+        m_pSpells = NULL;
     }
+
+    m_resRef = resRef;
 
     storeData.SetResRef(resRef, TRUE, TRUE);
 
@@ -111,24 +120,30 @@ void CStore::SetResRef(const CResRef& resRef)
         // __LINE__: 247
         UTIL_ASSERT(cnt <= nData);
 
-        // NOTE: Original code is slightly different.
-        for (DWORD nIndex = 0; nIndex < m_header.m_nInventoryCount; nIndex++) {
-            CStoreFileItem* pItem = new CStoreFileItem;
+        // NOTE: The original counts the header's inventory count down to
+        // read the items in file order; it is left at 0xFFFFFFFF after a
+        // store with items and at 0 after one without.
+        if (m_header.m_nInventoryCount > 0) {
+            DWORD nItems = m_header.m_nInventoryCount;
+            while (m_header.m_nInventoryCount-- > 0) {
+                CStoreFileItem* pItem = new CStoreFileItem;
 
-            // __FILE__: C:\Projects\Icewind2\src\Baldur\CStore.cpp
-            // __LINE__: 256
-            UTIL_ASSERT(pItem);
+                // __FILE__: C:\Projects\Icewind2\src\Baldur\CStore.cpp
+                // __LINE__: 256
+                UTIL_ASSERT(pItem);
 
-            memcpy(pItem, pData + m_header.m_nInventoryOffset + sizeof(CStoreFileItem) * nIndex, sizeof(CStoreFileItem));
-            m_lInventory.AddTail(pItem);
+                memcpy(pItem,
+                    pData + m_header.m_nInventoryOffset + sizeof(CStoreFileItem) * (nItems - m_header.m_nInventoryCount - 1),
+                    sizeof(CStoreFileItem));
+                m_lInventory.AddTail(pItem);
 
-            cnt += sizeof(CStoreFileItem);
+                cnt += sizeof(CStoreFileItem);
 
-            // __FILE__: C:\Projects\Icewind2\src\Baldur\CStore.cpp
-            // __LINE__: 260
-            UTIL_ASSERT(cnt <= nData);
+                // __FILE__: C:\Projects\Icewind2\src\Baldur\CStore.cpp
+                // __LINE__: 260
+                UTIL_ASSERT(cnt <= nData);
+            }
         }
-        m_header.m_nInventoryCount = 0;
 
         m_nBuyTypes = m_header.m_nBuyTypesCount;
         if (m_nBuyTypes != 0) {
@@ -149,7 +164,7 @@ void CStore::SetResRef(const CResRef& resRef)
 
         m_nDrinks = m_header.m_drinkCount;
         if (m_nDrinks != 0) {
-            m_pDrinks = new CStoreFileDrinks();
+            m_pDrinks = new CStoreFileDrinks[m_nDrinks];
 
             // __FILE__: C:\Projects\Icewind2\src\Baldur\CStore.cpp
             // __LINE__: 278
@@ -166,7 +181,7 @@ void CStore::SetResRef(const CResRef& resRef)
 
         m_nSpells = m_header.m_spellCount;
         if (m_nSpells != 0) {
-            m_pSpells = new CStoreFileSpell;
+            m_pSpells = new CStoreFileSpell[m_nSpells];
 
             // __FILE__: C:\Projects\Icewind2\src\Baldur\CStore.cpp
             // __LINE__: 288
@@ -184,15 +199,96 @@ void CStore::SetResRef(const CResRef& resRef)
         // __FILE__: C:\Projects\Icewind2\src\Baldur\CStore.cpp
         // __LINE__: 294
         UTIL_ASSERT(cnt == nData);
-
-        storeData.Release();
     }
+
+    storeData.Release();
 }
 
 // 0x54B9A0
 void CStore::Marshal(const CString& sDirName)
 {
-    // TODO: Incomplete.
+    sub_54CF80();
+
+    CStoreFile storeData;
+
+    DWORD nData = sizeof(CStoreFileHeader) + 8
+        + sizeof(CStoreFileItem) * m_lInventory.GetCount()
+        + sizeof(DWORD) * m_nBuyTypes
+        + sizeof(CStoreFileDrinks) * m_nDrinks
+        + sizeof(CStoreFileSpell) * m_nSpells;
+
+    BYTE* pData = new BYTE[nData];
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\CStore.cpp
+    // __LINE__: 339
+    UTIL_ASSERT(pData != NULL);
+
+    memset(pData, 0, nData);
+
+    // NOTE: The version written is the constant at 0x8A8748, not
+    // `m_pVersion`.
+    memcpy(pData, "STORV9.0", 8);
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\CStore.cpp
+    // __LINE__: 346
+    UTIL_ASSERT(8 <= nData);
+
+    CStoreFileHeader* pHeader = reinterpret_cast<CStoreFileHeader*>(pData + 8);
+    memcpy(pHeader, &m_header, sizeof(CStoreFileHeader));
+
+    DWORD cnt = sizeof(CStoreFileHeader) + 8;
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\CStore.cpp
+    // __LINE__: 350
+    UTIL_ASSERT(cnt <= nData);
+
+    pHeader->m_nInventoryOffset = cnt;
+    pHeader->m_nInventoryCount = m_lInventory.GetCount();
+
+    POSITION pos = m_lInventory.GetHeadPosition();
+    for (INT nIndex = 0; pos != NULL && nIndex < m_lInventory.GetCount(); nIndex++) {
+        CStoreFileItem* pStoreItem = m_lInventory.GetNext(pos);
+        memcpy(pData + cnt, pStoreItem, sizeof(CStoreFileItem));
+        cnt += sizeof(CStoreFileItem);
+
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\CStore.cpp
+        // __LINE__: 359
+        UTIL_ASSERT(cnt <= nData);
+    }
+
+    pHeader->m_nbuyTypesOffset = cnt;
+    pHeader->m_nBuyTypesCount = m_nBuyTypes;
+    memcpy(pData + cnt, m_pBuyTypes, sizeof(DWORD) * m_nBuyTypes);
+    cnt += sizeof(DWORD) * m_nBuyTypes;
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\CStore.cpp
+    // __LINE__: 366
+    UTIL_ASSERT(cnt <= nData);
+
+    pHeader->m_drinkOffset = cnt;
+    pHeader->m_drinkCount = m_nDrinks;
+    memcpy(pData + cnt, m_pDrinks, sizeof(CStoreFileDrinks) * m_nDrinks);
+    cnt += sizeof(CStoreFileDrinks) * m_nDrinks;
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\CStore.cpp
+    // __LINE__: 372
+    UTIL_ASSERT(cnt <= nData);
+
+    pHeader->m_spellOffset = cnt;
+    pHeader->m_spellCount = m_nSpells;
+    memcpy(pData + cnt, m_pSpells, sizeof(CStoreFileSpell) * m_nSpells);
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\CStore.cpp
+    // __LINE__: 378
+    UTIL_ASSERT(cnt + sizeof(CStoreFileSpell) * m_nSpells == nData);
+
+    storeData.SetResRef(m_resRef, TRUE, TRUE);
+
+    // NOTE: The original writes through the resource without checking it;
+    // a store whose resource is gone crashes there.
+    storeData.pRes->Write(sDirName, pData, nData);
+
+    delete[] pData;
 }
 
 // 0x54BDC0
@@ -537,9 +633,21 @@ void sub_54CCB0()
 }
 
 // 0x54CF80
-void sub_54CF80()
+void CStore::sub_54CF80()
 {
-    // TODO: Incomplete.
+    // NOTE: The loop runs on an index against the shrinking count, so the
+    // items after a removed one are not all visited (as the original).
+    if (m_lInventory.GetCount() != 0) {
+        POSITION pos = m_lInventory.GetHeadPosition();
+        for (INT nIndex = 0; nIndex < m_lInventory.GetCount(); nIndex++) {
+            POSITION posCurrent = pos;
+            CStoreFileItem* pStoreItem = m_lInventory.GetNext(pos);
+            if (pStoreItem != NULL && pStoreItem->m_nInStock == 0) {
+                delete pStoreItem;
+                m_lInventory.RemoveAt(posCurrent);
+            }
+        }
+    }
 }
 
 // 0x54CFE0

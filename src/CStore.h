@@ -29,6 +29,7 @@ public:
     void CompressItems();
     BOOL GetSpell(INT nIndex, CResRef& spellResRef, DWORD& dwCost);
     BOOL GetDrink(INT nIndex, STRREF& strName, DWORD& dwCost, DWORD& dwRumorChance);
+    void sub_54CF80();
 
     static void InvalidateStore(const CResRef& resRef);
 
@@ -45,7 +46,7 @@ public:
     /* 011C */ CStoreFileSpell* m_pSpells;
     /* 0120 */ DWORD m_nSpells;
     /* 0124 */ BYTE m_pVersion[8];
-    /* 0128 */ BOOL m_bLocalCopy;
+    /* 012C */ BOOL m_bLocalCopy;
 };
 
 class CStoreFile : public CResHelper<CResStore, 1014> {

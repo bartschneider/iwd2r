@@ -13,6 +13,7 @@
 #include "CScreenCreateChar.h"
 #include "CScreenInventory.h"
 #include "CScreenWorld.h"
+#include "CStore.h"
 #include "ScreenLayout.h"
 #include "data_view.h"
 #include "platform/data_dir.h"
@@ -35,7 +36,8 @@
 #include <vector>
 
 // Resting: CInfGame::CanRestParty (0x5C1E30), RestParty (0x5C1160) and
-// RestPartyPrivate (0x5C1350) on a new game's party in AR1000.
+// RestPartyPrivate (0x5C1350) on a new game's party in AR1000. Stores:
+// CStore::SetResRef (0x54B2A0) and Marshal (0x54B9A0).
 
 namespace {
 
@@ -457,4 +459,100 @@ TEST_CASE("rest: with healing on rest the clock runs by the party's wounds and t
     }
 
     CInfGame::m_bHealPartyOnRest = heal;
+}
+
+namespace {
+
+// The bytes of a file in the view's temp folder; empty when there is none.
+std::vector<char> TempFile(const char* name)
+{
+    std::error_code ec;
+    for (const auto& entry : fs::directory_iterator(g_view, ec)) {
+        if (Lower(entry.path().filename().string()) != "temp") {
+            continue;
+        }
+        for (const auto& file : fs::directory_iterator(entry.path(), ec)) {
+            if (Lower(file.path().filename().string()) == Lower(name)) {
+                std::ifstream in(file.path(), std::ios::binary);
+                return std::vector<char>((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+            }
+        }
+    }
+    return std::vector<char>();
+}
+
+uint32_t Dword(const std::vector<char>& d, size_t at)
+{
+    uint32_t value;
+    std::memcpy(&value, d.data() + at, sizeof(value));
+    return value;
+}
+
+}
+
+TEST_CASE("store: Marshal writes the store SetResRef read, without its sold-out items", "[store][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+    CStore store(CResRef("11OSWALD"));
+    CHECK(store.m_resRef == CResRef("11OSWALD"));
+    REQUIRE(memcmp(store.m_pVersion, "STORV9.0", 8) == 0);
+    REQUIRE(store.m_lInventory.GetCount() > 0);
+    // The count read down to the items is left wrapped.
+    CHECK(store.m_header.m_nInventoryCount == 0xFFFFFFFF);
+    CHECK(store.m_bLocalCopy == FALSE);
+
+    // One item sold out: Marshal drops it.
+    CResRef soldOut(store.m_lInventory.GetHead()->m_itemId);
+    const DWORD stock = store.m_lInventory.GetHead()->m_nInStock;
+    store.m_lInventory.GetHead()->m_nInStock = 0;
+    const INT nItems = store.m_lInventory.GetCount();
+
+    store.Marshal(pGame->m_sTempDir);
+    CHECK(store.m_lInventory.GetCount() == nItems - 1);
+
+    std::vector<char> bytes = TempFile("11OSWALD.STO");
+    REQUIRE(bytes.size() == 8 + sizeof(CStoreFileHeader) + sizeof(CStoreFileItem) * (nItems - 1) + sizeof(DWORD) * store.m_nBuyTypes + sizeof(CStoreFileDrinks) * store.m_nDrinks + sizeof(CStoreFileSpell) * store.m_nSpells);
+    CHECK(std::memcmp(bytes.data(), "STORV9.0", 8) == 0);
+    CHECK(Dword(bytes, 8 + 0x2C) == 0xF0);
+    CHECK(Dword(bytes, 8 + 0x30) == static_cast<uint32_t>(nItems - 1));
+    CHECK(Dword(bytes, 8 + 0x24) == 0xF0 + sizeof(CStoreFileItem) * (nItems - 1));
+    CHECK(Dword(bytes, 8 + 0x28) == store.m_nBuyTypes);
+    CHECK(Dword(bytes, 8 + 0x44) == Dword(bytes, 8 + 0x24) + sizeof(DWORD) * store.m_nBuyTypes);
+    CHECK(Dword(bytes, 8 + 0x48) == store.m_nDrinks);
+    CHECK(Dword(bytes, 8 + 0x68) == Dword(bytes, 8 + 0x44) + sizeof(CStoreFileDrinks) * store.m_nDrinks);
+    CHECK(Dword(bytes, 8 + 0x6C) == store.m_nSpells);
+
+    // The resource now lives in the temp folder: a store read from it is
+    // the one written, a local copy, and writes the same bytes again.
+    CStore reread(CResRef("11OSWALD"));
+    CHECK(reread.m_bLocalCopy == TRUE);
+    REQUIRE(reread.m_lInventory.GetCount() == nItems - 1);
+    POSITION pos = reread.m_lInventory.GetHeadPosition();
+    POSITION posOld = store.m_lInventory.GetHeadPosition();
+    while (pos != NULL) {
+        CStoreFileItem* pItem = reread.m_lInventory.GetNext(pos);
+        CStoreFileItem* pOld = store.m_lInventory.GetNext(posOld);
+        CHECK(std::memcmp(pItem, pOld, sizeof(CStoreFileItem)) == 0);
+        CHECK(CResRef(pItem->m_itemId) != soldOut);
+    }
+    CHECK(reread.m_nBuyTypes == store.m_nBuyTypes);
+    CHECK(reread.m_nDrinks == store.m_nDrinks);
+    CHECK(reread.m_nSpells == store.m_nSpells);
+    if (store.m_nDrinks != 0) {
+        CHECK(std::memcmp(reread.m_pDrinks, store.m_pDrinks, sizeof(CStoreFileDrinks) * store.m_nDrinks) == 0);
+    }
+    if (store.m_nSpells != 0) {
+        CHECK(std::memcmp(reread.m_pSpells, store.m_pSpells, sizeof(CStoreFileSpell) * store.m_nSpells) == 0);
+    }
+
+    reread.Marshal(pGame->m_sTempDir);
+    CHECK(TempFile("11OSWALD.STO") == bytes);
+    (void)stock;
 }
