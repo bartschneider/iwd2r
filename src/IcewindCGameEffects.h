@@ -367,12 +367,14 @@ class IcewindCGameEffectShroudOfFlame : public CGameEffect {
 public:
     IcewindCGameEffectShroudOfFlame(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;
 };
 
 class IcewindCGameEffectAnimalRage : public CGameEffect {
 public:
     IcewindCGameEffectAnimalRage(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;
 };
 
 class IcewindCGameEffectTurnUndead : public CGameEffect {
@@ -517,6 +519,7 @@ class IcewindCGameEffectFireshield : public CGameEffect {
 public:
     IcewindCGameEffectFireshield(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;
 };
 
 class IcewindCGameEffectDeathWard : public CGameEffect {
@@ -611,6 +614,7 @@ class IcewindCGameEffectAegis : public CGameEffect {
 public:
     IcewindCGameEffectAegis(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;
     void OnRemove(CGameSprite* pSprite) override;
 };
 
@@ -626,6 +630,7 @@ class IcewindCGameEffectWhenStruck : public CGameEffect {
 public:
     IcewindCGameEffectWhenStruck(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;
 };
 
 class IcewindCGameEffectProjectile : public CGameEffect {

@@ -511,3 +511,91 @@ TEST_CASE("effects-iwd: mace of disruption (284) and rod of smiting (291) spare 
     }
     CHECK(g_pBaldurChitin->m_cMessageHandler.m_messageList.IsEmpty());
 }
+
+TEST_CASE("effects-iwd: shroud of flame (278) sets its state and adds its burning once", "[effects][data]")
+{
+    PROBE_OR_SKIP(pSprite);
+    CDerivedStats* pStats = pSprite->GetDerivedStats();
+    pStats->m_spellStates.reset(SPLSTATE_SHROUD_OF_FLAME);
+    INT_PTR before = pStats->m_cRegeneratedPersistantEffectList.GetCount();
+    std::unique_ptr<CGameEffect> pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_SHROUDOFFLAME, 0, 0);
+    CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+    CHECK(pStats->m_spellStates.test(SPLSTATE_SHROUD_OF_FLAME));
+    CHECK(pStats->m_visualEffects.test(IWD_VFX_SHROUD_OF_FLAME));
+    CHECK(HasPortraitIcon(pSprite, 98));
+    REQUIRE(pStats->m_cRegeneratedPersistantEffectList.GetCount() == before + 1);
+    CHECK(dynamic_cast<CPersistantEffect84C4D4*>(pStats->m_cRegeneratedPersistantEffectList.GetTail()) != nullptr);
+    // Already burning: only done.
+    CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+    CHECK(pEffect->m_done == TRUE);
+    CHECK(pStats->m_cRegeneratedPersistantEffectList.GetCount() == before + 1);
+    delete pStats->m_cRegeneratedPersistantEffectList.RemoveTail();
+    pStats->m_spellStates.reset(SPLSTATE_SHROUD_OF_FLAME);
+    pStats->m_visualEffects.reset(IWD_VFX_SHROUD_OF_FLAME);
+}
+
+TEST_CASE("effects-iwd: animal rage (279) type 1 sets the rage state", "[effects][data]")
+{
+    PROBE_OR_SKIP(pSprite);
+    pSprite->GetDerivedStats()->m_spellStates.reset(SPLSTATE_ANIMAL_RAGE);
+    std::unique_ptr<CGameEffect> pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_ANIMALRAGE, 1, 0);
+    CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+    CHECK(pSprite->GetDerivedStats()->m_spellStates.test(SPLSTATE_ANIMAL_RAGE));
+    pSprite->GetDerivedStats()->m_spellStates.reset(SPLSTATE_ANIMAL_RAGE);
+    // Type 0 looks for a nearby enemy; the start area has none in range of
+    // the party member, so it only marks the sprite.
+    pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_ANIMALRAGE, 0, 0);
+    CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+    CHECK(pSprite->field_562C == 1);
+}
+
+TEST_CASE("effects-iwd: aegis (426) raises the resistances and saves once", "[effects][data]")
+{
+    PROBE_OR_SKIP(pSprite);
+    CDerivedStats* pStats = pSprite->GetDerivedStats();
+    pStats->m_spellStates.reset(SPLSTATE_AEGIS);
+    const SHORT fire = pStats->m_nResistFire;
+    const SHORT magic = pStats->m_nResistMagic;
+    const SHORT will = pStats->m_nSaveVSWill;
+    const SHORT slashing = pStats->m_nResistSlashing;
+    std::unique_ptr<CGameEffect> pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_AEGIS, 0, 0);
+    pEffect->m_secondaryType = 1;
+    CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+    CHECK(pStats->m_nResistFire == fire + 15);
+    CHECK(pStats->m_nResistMagic == magic + 3);
+    CHECK(pStats->m_nSaveVSWill == will + 2);
+    CHECK(pStats->m_nResistSlashing == slashing + 10);
+    CHECK(pStats->m_nStoneSkins >= 8);
+    CHECK(pStats->m_naturalImmunities.count(218) == 1);
+    CHECK(pStats->m_naturalImmunities.count(176) == 1);
+    CHECK(HasPortraitIcon(pSprite, 119));
+    // A second application changes nothing.
+    CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+    CHECK(pStats->m_nResistFire == fire + 15);
+    pStats->m_spellStates.reset(SPLSTATE_AEGIS);
+}
+
+TEST_CASE("effects-iwd: fire shield (406) red and blue set their states", "[effects][data]")
+{
+    PROBE_OR_SKIP(pSprite);
+    CDerivedStats* pStats = pSprite->GetDerivedStats();
+    pStats->m_spellStates.reset(SPLSTATE_RED_FIRESHIELD);
+    pStats->m_spellStates.reset(SPLSTATE_BLUE_FIRESHIELD);
+    std::unique_ptr<CGameEffect> pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_FIRESHIELD, 0, 0);
+    pEffect->m_done = TRUE;
+    CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+    CHECK(pStats->m_spellStates.test(SPLSTATE_RED_FIRESHIELD));
+    CHECK(pStats->m_visualEffects.test(IWD_VFX_FIRE_SHIELD_RED));
+    CHECK(HasPortraitIcon(pSprite, 121));
+    CHECK(pEffect->m_done == FALSE);
+    pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_FIRESHIELD, 1, 0);
+    CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+    CHECK(pStats->m_spellStates.test(SPLSTATE_BLUE_FIRESHIELD));
+    CHECK(pStats->m_visualEffects.test(IWD_VFX_FIRE_SHIELD_BLUE));
+    CHECK(HasPortraitIcon(pSprite, 122));
+    pStats->m_spellStates.reset(SPLSTATE_RED_FIRESHIELD);
+    pStats->m_spellStates.reset(SPLSTATE_BLUE_FIRESHIELD);
+
+    pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_WHENSTRUCK, 0, 0);
+    CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+}

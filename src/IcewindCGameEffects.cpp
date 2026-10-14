@@ -1,11 +1,12 @@
 #include "IcewindCGameEffects.h"
 
 #include "CBaldurChitin.h"
+#include "CGameArea.h"
 #include "CGameSprite.h"
 #include "CInfGame.h"
 #include "CMessage.h"
-#include "CUtil.h"
 #include "CProjectile.h"
+#include "CUtil.h"
 #include "IcewindMisc.h"
 
 #include <list>
@@ -1390,6 +1391,39 @@ CGameEffect* IcewindCGameEffectShroudOfFlame::Copy()
     return copy;
 }
 
+// 0x565CB0
+BOOL IcewindCGameEffectShroudOfFlame::ApplyEffect(CGameSprite* pSprite)
+{
+    if (IcewindMisc::IsDead(pSprite) == TRUE) {
+        m_done = TRUE;
+    } else if (pSprite->GetDerivedStats()->m_spellStates.test(SPLSTATE_SHROUD_OF_FLAME) == true) {
+        m_done = TRUE;
+    } else {
+        if (m_secondaryType != 0) {
+            m_special = g_pBaldurChitin->GetObjectGame()->GetWorldTimer()->m_gameTime;
+            DisplayStringRef(pSprite, 7879);
+        }
+
+        pSprite->GetDerivedStats()->m_spellStates.set(SPLSTATE_SHROUD_OF_FLAME, true);
+        pSprite->GetDerivedStats()->m_visualEffects[IWD_VFX_SHROUD_OF_FLAME] = true;
+
+        // NOTE: Uninline.
+        AddPortraitIcon(pSprite, 98);
+
+        AddColorEffect(pSprite, 160, 0, 0, 1);
+
+        CPersistantEffect84C4D4* pEffect = new CPersistantEffect84C4D4(100,
+            105,
+            m_special,
+            m_duration);
+        pEffect->m_sourceID = m_sourceID;
+        strcpy(reinterpret_cast<char*>(pEffect->field_29), m_sourceRes.GetResRefStr());
+        pSprite->GetDerivedStats()->m_cRegeneratedPersistantEffectList.AddTail(pEffect);
+    }
+
+    return TRUE;
+}
+
 // -----------------------------------------------------------------------------
 
 // 0x49F970
@@ -1406,6 +1440,69 @@ CGameEffect* IcewindCGameEffectAnimalRage::Copy()
     delete effect;
     copy->CopyFromBase(this);
     return copy;
+}
+
+// 0x565E50
+BOOL IcewindCGameEffectAnimalRage::ApplyEffect(CGameSprite* pSprite)
+{
+    if (m_dwFlags == 1) {
+        pSprite->GetDerivedStats()->m_spellStates.set(SPLSTATE_ANIMAL_RAGE, true);
+    } else if (IcewindMisc::IsDead(pSprite) == TRUE) {
+        m_done = TRUE;
+    } else if (!pSprite->GetTimedEffectList()->IsTypeOnList(CGAMEEFFECT_BERSERK)) {
+        pSprite->field_562C = 1;
+        if (pSprite->GetArea() != NULL && pSprite->GetVertListPos() != NULL) {
+            CTypedPtrList<CPtrList, LONG*> targets(10);
+            pSprite->GetArea()->GetAllInRange(pSprite->GetVertListPos(),
+                pSprite->GetPos(),
+                CAIObjectType::ANYONE,
+                275,
+                pSprite->GetTerrainTable(),
+                targets,
+                TRUE,
+                FALSE);
+            pSprite->GetArea()->GetAllInRangeBack(pSprite->GetPos(),
+                CAIObjectType::ANYONE,
+                275,
+                pSprite->GetTerrainTable(),
+                targets,
+                TRUE,
+                FALSE,
+                FALSE);
+
+            POSITION pos = targets.GetHeadPosition();
+            while (pos != NULL) {
+                LONG nTargetId = static_cast<LONG>(reinterpret_cast<INT_PTR>(targets.GetNext(pos)));
+
+                CGameSprite* pTarget;
+                BYTE rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(nTargetId,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    reinterpret_cast<CGameObject**>(&pTarget),
+                    INFINITE);
+                if (rc == CGameObjectArray::SUCCESS) {
+                    if (IcewindMisc::sub_5852A0(pSprite, pTarget) == TRUE) {
+                        pSprite->EquipMostDamagingMelee();
+
+                        g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(nTargetId,
+                            CGameObjectArray::THREAD_ASYNCH,
+                            INFINITE);
+
+                        if (rand() % 100 < 5) {
+                            CGameEffect* pBerserk = IcewindMisc::CreateEffectBerserk(pSprite, 21, 0, 0);
+                            pSprite->AddEffect(pBerserk, CGameAIBase::EFFECT_LIST_TIMED, TRUE, TRUE);
+                        }
+                        break;
+                    }
+
+                    g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(nTargetId,
+                        CGameObjectArray::THREAD_ASYNCH,
+                        INFINITE);
+                }
+            }
+        }
+    }
+
+    return TRUE;
 }
 
 // -----------------------------------------------------------------------------
@@ -2799,6 +2896,57 @@ CGameEffect* IcewindCGameEffectFireshield::Copy()
     return copy;
 }
 
+// 0x568D00
+BOOL IcewindCGameEffectFireshield::ApplyEffect(CGameSprite* pSprite)
+{
+    if (m_secondaryType != 0) {
+        DisplayStringRef(pSprite, 736);
+    }
+
+    if (m_dwFlags == 0) {
+        if (pSprite->GetDerivedStats()->m_spellStates.test(SPLSTATE_RED_FIRESHIELD) == true) {
+            return TRUE;
+        }
+
+        // NOTE: Uninline.
+        AddPortraitIcon(pSprite, 121);
+
+        pSprite->GetDerivedStats()->m_spellStates.set(SPLSTATE_RED_FIRESHIELD, true);
+        pSprite->GetDerivedStats()->m_visualEffects.set(IWD_VFX_FIRE_SHIELD_RED, true);
+        pSprite->GetDerivedStats()->m_visualEffects.set(IWD_VFX_28, true);
+
+        // TODO: Incomplete. The original appends {m_sourceRes, m_res,
+        // m_casterLevel, m_target} to the derived stats' when-struck list
+        // (CDerivedStats +0x494, sprite +0xDB4; FUN_0056BE50 the list
+        // insertion), which CDerivedStats.h does not declare yet.
+
+        // NOTE: The entry is sent to the other players here (vtable
+        // 0x84D45C). Omitted: single player only
+        // (docs/adr/0002-single-player-only.md).
+    } else if (m_dwFlags == 1) {
+        if (pSprite->GetDerivedStats()->m_spellStates.test(SPLSTATE_BLUE_FIRESHIELD) == true) {
+            return TRUE;
+        }
+
+        // NOTE: Uninline.
+        AddPortraitIcon(pSprite, 122);
+
+        pSprite->GetDerivedStats()->m_spellStates.set(SPLSTATE_BLUE_FIRESHIELD, true);
+        pSprite->GetDerivedStats()->m_visualEffects.set(IWD_VFX_FIRE_SHIELD_BLUE, true);
+        pSprite->GetDerivedStats()->m_visualEffects.set(IWD_VFX_29, true);
+
+        // TODO: Incomplete. The when-struck entry as above.
+
+        // NOTE: The entry is sent to the other players here (vtable
+        // 0x84D45C). Omitted: single player only
+        // (docs/adr/0002-single-player-only.md).
+    }
+
+    m_done = FALSE;
+
+    return TRUE;
+}
+
 // -----------------------------------------------------------------------------
 
 // 0x4A0E20
@@ -3434,6 +3582,68 @@ CGameEffect* IcewindCGameEffectAegis::Copy()
     return copy;
 }
 
+// 0x56A230
+BOOL IcewindCGameEffectAegis::ApplyEffect(CGameSprite* pSprite)
+{
+    CDerivedStats* pStats = pSprite->GetDerivedStats();
+
+    if (pStats->m_spellStates.test(SPLSTATE_AEGIS) == true) {
+        return TRUE;
+    }
+
+    pStats->m_spellStates.set(SPLSTATE_AEGIS, true);
+
+    // NOTE: Uninline.
+    AddPortraitIcon(pSprite, 119);
+
+    pStats->m_nResistFire += 15;
+    pStats->m_nResistCold += 15;
+    pStats->m_nResistElectricity += 15;
+    pStats->m_nResistAcid += 15;
+    sub_4C3F30(pSprite, 5);
+    pStats->m_nResistMagic += 3;
+    pStats->m_nSaveVSFortitude += 2;
+    pStats->m_nSaveVSReflex += 2;
+    pStats->m_nSaveVSWill += 2;
+
+    pStats->m_naturalImmunities.insert(218);
+
+    if (m_secondaryType != 0) {
+        m_effectAmount = 8;
+    }
+
+    if (pStats->m_nStoneSkins <= m_effectAmount) {
+        pStats->m_nStoneSkins = m_effectAmount;
+    }
+    if (pStats->m_nStoneSkins > 0) {
+        pSprite->SetColorRange(14);
+    }
+
+    pStats->m_nResistCrushing += 10;
+    pStats->m_nResistPiercing += 10;
+    pStats->m_nResistSlashing += 10;
+
+    // NOTE: Using `set` (with bounds check). The original sets bit 6, the
+    // minor globe's.
+    pStats->m_visualEffects.set(IWD_VFX_MINOR_GLOBE_OF_INVULNERABILITY, true);
+
+    pStats->field_1E0 = 1;
+    pStats->field_1E4 = 1;
+    pStats->field_1E8 = 1;
+
+    AddColorEffect(pSprite, 128, 96, 96, 30);
+
+    pStats->m_naturalImmunities.insert(154);
+    pStats->m_naturalImmunities.insert(158);
+    pStats->m_naturalImmunities.insert(157);
+    pStats->m_naturalImmunities.insert(109);
+    pStats->m_naturalImmunities.insert(40);
+    // NOTE: Inlined `std::set::insert` (0x44AB10).
+    pStats->m_naturalImmunities.insert(176);
+
+    return TRUE;
+}
+
 // 0x56B6E0
 void IcewindCGameEffectAegis::OnRemove(CGameSprite* pSprite)
 {
@@ -3496,6 +3706,21 @@ CGameEffect* IcewindCGameEffectWhenStruck::Copy()
     delete effect;
     copy->CopyFromBase(this);
     return copy;
+}
+
+// 0x56A5A0
+BOOL IcewindCGameEffectWhenStruck::ApplyEffect(CGameSprite* pSprite)
+{
+    // TODO: Incomplete. The original appends {m_sourceRes, m_res,
+    // m_casterLevel, m_target} to the derived stats' when-struck list
+    // (CDerivedStats +0x494, sprite +0xDB4; FUN_004490E0 the node, the count
+    // at sprite +0xDB8), which CDerivedStats.h does not declare yet.
+    (void)pSprite;
+
+    // NOTE: The entry is sent to the other players here (vtable 0x84D45C).
+    // Omitted: single player only (docs/adr/0002-single-player-only.md).
+
+    return TRUE;
 }
 
 // -----------------------------------------------------------------------------
