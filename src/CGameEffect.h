@@ -306,6 +306,7 @@ public:
     void PlaySound(const CResRef& soundResRef, CGameSprite* pSprite);
     BOOL CheckExpiration();
     ITEM_EFFECT* GetItemEffect();
+    void sub_4A4D80(CGameSprite* pSprite, INT nAmount);
     void DisplayStringRef(CGameSprite* pSprite, STRREF str);
     void AddColorEffect(CGameSprite* pSprite, BYTE r, BYTE g, BYTE b, BYTE periodLength);
     void AddColorEffect(CGameSprite* pSprite, BYTE r, BYTE g, BYTE b);
@@ -447,8 +448,12 @@ public:
     CGameEffectDamage();
     CGameEffectDamage(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;
 
     void sub_4A7750(CGameSprite* pSprite);
+    void sub_4A8DF0(DWORD dwDamageType, CGameSprite* pSprite);
+    void sub_4AA6D0(CGameSprite* pSprite, INT nResisted);
+    void sub_4AB0A0(CGameSprite* pSprite, INT nAmount);
 };
 
 class CGameEffectDeath : public CGameEffect {
