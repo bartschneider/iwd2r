@@ -46,7 +46,8 @@ BOOL CResCHR::Parse(void* pData)
     }
 
     EXPORT_CHARACTER_HEADER* header = reinterpret_cast<EXPORT_CHARACTER_HEADER*>(pData);
-    if (header->nFileType != 'CHR ') {
+    // NOTE: "CHR " read little-endian (0x40231C).
+    if (header->nFileType != 0x20524843) {
         // NOTE: Looks like deviation from similar `Parse` methods.
         return FALSE;
     }

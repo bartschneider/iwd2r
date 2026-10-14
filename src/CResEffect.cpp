@@ -35,7 +35,8 @@ BOOL CResEffect::Parse(void* pData)
     }
 
     DWORD* header = reinterpret_cast<DWORD*>(pData);
-    if (header[0] != 'EFF ' || header[1] != 'V2.0') {
+    // NOTE: "EFF " and "V2.0" read little-endian (0x4028C2, 0x4028CA).
+    if (header[0] != 0x20464645 || header[1] != 0x302E3256) {
         return FALSE;
     }
 

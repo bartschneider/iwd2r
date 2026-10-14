@@ -35,7 +35,9 @@ BOOL CResStore::Parse(void* pData)
     }
 
     DWORD* header = reinterpret_cast<DWORD*>(pData);
-    if ((header[0] != 'STOR' && header[0] != 'STOO') || header[1] != 'V9.0') {
+    // NOTE: The signature as the file's bytes read little-endian: "STOR" or
+    // "STOO", then "V9.0" (0x4026D4-0x4026E2).
+    if ((header[0] != 0x524F5453 && header[0] != 0x4F4F5453) || header[1] != 0x302E3956) {
         return FALSE;
     }
 
