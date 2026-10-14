@@ -2772,10 +2772,12 @@ void CGameSprite::AIUpdateWalk()
         }
 
         pathLock.Unlock();
+    }
 
-        if (m_pPath == NULL) {
-            return;
-        }
+    // No path (none yet, none found, or dropped): no step (0x6F95A6, on
+    // every route).
+    if (m_pPath == NULL) {
+        return;
     }
 
     if ((m_posDest.x / 8 == (m_pos.x + 4) / 8 && m_posDest.y / 6 == (m_pos.y + 3) / 6)

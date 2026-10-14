@@ -652,3 +652,49 @@ TEST_CASE("move: the first click-to-move of walk_and_talk steps where the origin
     CHECK(pSprite->m_pPath == NULL);
     CHECK(pSprite->m_currentSearchRequest == NULL);
 }
+
+TEST_CASE("move: AIUpdateWalk leaves a sprite with no path where it is", "[move][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<CGameSprite*> party = NewGameWithParty(1);
+    if (party.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    CGameSprite* pSprite = party[0];
+    REQUIRE(pSprite->GetArea() != NULL);
+    pSprite->GetArea()->SortLists();
+    ExploreArea(pSprite);
+
+    // Idle: no path, no request.
+    REQUIRE(pSprite->m_pPath == NULL);
+    REQUIRE(pSprite->m_currentSearchRequest == NULL);
+    const CPoint idle = pSprite->GetPos();
+    const SHORT sequence = pSprite->m_nSequence;
+    for (int frame = 0; frame < 20; frame++) {
+        pSprite->AIUpdateWalk();
+    }
+    CHECK(pSprite->GetPos() == idle);
+    CHECK(pSprite->m_nSequence == sequence);
+    CHECK(pSprite->m_pPath == NULL);
+
+    // A walk whose path is dropped half way stops where it is.
+    const CPoint goal(145 * CPathSearch::GRID_SQUARE_SIZEX + CPathSearch::GRID_SQUARE_SIZEX / 2,
+        75 * CPathSearch::GRID_SQUARE_SIZEY + CPathSearch::GRID_SQUARE_SIZEY / 2);
+    pSprite->m_curDest = goal;
+    pSprite->SetTarget(goal, FALSE);
+    Walk(pSprite, 4);
+    REQUIRE(pSprite->m_pPath != NULL);
+    pSprite->DropPath();
+    const CPoint dropped = pSprite->GetPos();
+    for (int frame = 0; frame < 20; frame++) {
+        pSprite->AIUpdateWalk();
+    }
+    CHECK(pSprite->GetPos() == dropped);
+    CHECK(pSprite->m_pPath == NULL);
+}
