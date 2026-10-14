@@ -3,6 +3,7 @@
 
 #include "CBaldurChitin.h"
 #include "CGameArea.h"
+#include "CGameObjectArray.h"
 #include "CGameSprite.h"
 #include "CInfGame.h"
 #include "CMemINI.h"
@@ -338,6 +339,44 @@ std::map<std::string, std::string> SavedFiles()
     return files;
 }
 
+// The object id of the sprite in `pArea` whose script name is `name`, or -1.
+LONG SpriteId(CGameArea* pArea, const char* name)
+{
+    LONG found = -1;
+    CGameObjectArray* pArray = g_pBaldurChitin->GetObjectGame()->GetObjectArray();
+    for (SHORT n = 0; n <= pArray->m_nMaxArrayIndex && found == -1; n++) {
+        const LONG id = (static_cast<LONG>(n) << 16) | static_cast<USHORT>(pArray->m_pArray[n].m_objectId);
+        CGameObject* pObject;
+        if (pArray->m_pArray[n].m_objectId == -1
+            || pArray->GetShare(id, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) != CGameObjectArray::SUCCESS)
+            continue;
+        if (pObject->GetArea() == pArea && pObject->GetObjectType() == CGameObject::TYPE_SPRITE
+            && CString(static_cast<CGameSprite*>(pObject)->GetScriptName()).CompareNoCase(name) == 0)
+            found = id;
+        pArray->ReleaseShare(id, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+    }
+    return found;
+}
+
+// How many objects of each type (CGameObject::TYPE_*) the object array holds
+// in `pArea`.
+std::map<int, int> ObjectTypesIn(CGameArea* pArea)
+{
+    std::map<int, int> types;
+    CGameObjectArray* pArray = g_pBaldurChitin->GetObjectGame()->GetObjectArray();
+    for (SHORT n = 0; n <= pArray->m_nMaxArrayIndex; n++) {
+        const LONG id = (static_cast<LONG>(n) << 16) | static_cast<USHORT>(pArray->m_pArray[n].m_objectId);
+        CGameObject* pObject;
+        if (pArray->m_pArray[n].m_objectId == -1
+            || pArray->GetShare(id, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) != CGameObjectArray::SUCCESS)
+            continue;
+        if (pObject->GetArea() == pArea)
+            types[pObject->GetObjectType()]++;
+        pArray->ReleaseShare(id, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+    }
+    return types;
+}
+
 // Checks an AREAV9.1 file's creature table (offset 0x64, count 0x68, 0x110
 // bytes each): every creature carries its CRE, so a producer whose 64-bit
 // handle did not resolve (compat/marshal_ptr.h) shows up here instead of as
@@ -469,6 +508,134 @@ TEST_CASE("gam: SaveGame's game file loads back and saves again byte for byte", 
     CHECK(pGame->m_pGameAreaMaster->m_resRef == "AR1000");
     CHECK(pGame->m_nCharacters == 1);
     CHECK(LoadedAreas(pGame) == 1);
+}
+
+// Party Formation's Done saves and loads the game back (CScreenSinglePlayer::
+// OnMainDoneButtonClick, 0x6629E0); the world starts on the reloaded area.
+// SaveGame packs the area files into ICEWIND2.SAV (0x784A50), LoadGame
+// unpacks them, and the area comes back from its CGameArea::Marshal
+// (0x471630): every door, trigger, container, sound and static, and the
+// creatures in Marshal's order (the order that fixes their object ids).
+TEST_CASE("gam: SaveGame packs AR1000 into ICEWIND2.SAV and LoadGame brings back every object", "[gam][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    NewGameWithOneCharacter(cre, "Probe");
+    pGame->UpdateCharacterSlots();
+    pGame->SetupCharacters(FALSE);
+    REQUIRE(pGame->m_pGameAreaMaster != NULL);
+    for (int n = 0; n < CINFGAME_MAX_AREAS; n++) {
+        if (pGame->m_gameAreas[n] != NULL)
+            pGame->m_gameAreas[n]->SortLists();
+    }
+    const std::map<int, int> before = ObjectTypesIn(pGame->m_pGameAreaMaster);
+    // AR1000 (difficulty Normal): 35 creatures and the party member, 6
+    // doors, 17 triggers, 25 containers, 14 sounds, 9 statics.
+    CHECK(before.at(CGameObject::TYPE_DOOR) == 6);
+    CHECK(before.at(CGameObject::TYPE_TRIGGER) == 17);
+
+    REQUIRE(pGame->SaveGame(FALSE, FALSE, FALSE));
+    const fs::path dir = Child(Child(g_view, "mpsave"), "default");
+    CHECK(fs::exists(Child(dir, "ICEWIND2.SAV")));
+    CHECK_FALSE(fs::exists(Child(dir, "AR1000.ARE")));
+    const std::map<std::string, std::string> packed = UnpackSav(ReadFile(Child(dir, "ICEWIND2.SAV")));
+    REQUIRE(packed.count("AR1000.ARE") == 1);
+    const std::string are = packed.at("AR1000.ARE");
+    REQUIRE(are.size() >= 0xB8);
+    CHECK(Le16(are, 0x6A) == 17); // triggers
+    CHECK(Le32(are, 0xB4) == 6); // doors
+    CHECK(CheckAreaCreatures(are) == 35);
+
+    pGame->DestroyGame(FALSE, FALSE);
+    pGame->LoadGame(FALSE, FALSE);
+    REQUIRE(pGame->m_pGameAreaMaster != NULL);
+    CHECK(pGame->m_pGameAreaMaster->m_resRef == "AR1000");
+    // The reload took the saved area (its header's save time is set).
+    CHECK(pGame->m_pGameAreaMaster->m_header.m_lastSaved != 0);
+    // The object ids follow from the reload's creation order: the game's
+    // AI object, the area's object marker, then the creatures as Marshal
+    // wrote them. Hedron (the opening dialog's speaker) is the fifteenth:
+    // the original's world_entry recording has him as 0x100010.
+    CHECK(SpriteId(pGame->m_pGameAreaMaster, "Hedron") == 0x100010);
+    const std::map<int, int> after = ObjectTypesIn(pGame->m_pGameAreaMaster);
+    for (const auto& [type, count] : before) {
+        INFO("object type " << type);
+        CHECK(after.count(type) == 1);
+        if (after.count(type) == 1)
+            CHECK(after.at(type) == count);
+    }
+}
+
+// CGameArea::SortLists (0x4794E0) merges the objects AddToArea queued into
+// the y-sorted front list: each queued object goes on once, every front
+// object stays, and the list is in y order. (Ours once merged the front part
+// from the queued part's start, which put a queued object on twice and
+// dropped the last front object, AR1000_Door4, from the saved area.)
+TEST_CASE("gam: SortLists merges a queued object into the front list once and keeps every front object", "[gam][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CGameSprite* pSprite = NewGameWithOneCharacter(cre, "Probe");
+    pGame->UpdateCharacterSlots();
+    pGame->SetupCharacters(FALSE);
+    CGameArea* pArea = pGame->m_pGameAreaMaster;
+    REQUIRE(pArea != NULL);
+    pArea->SortLists();
+    REQUIRE(pArea->m_lVertSortAdd.IsEmpty());
+
+    // Queue the party member again as AddToArea does: off the front list,
+    // onto the queue.
+    REQUIRE(TimesInArea(pArea, pSprite->GetId()) == 1);
+    pArea->m_lVertSort.RemoveAt(pSprite->GetVertListPos());
+    pArea->m_lVertSortAdd.AddTail(reinterpret_cast<int*>(static_cast<INT_PTR>(pSprite->GetId())));
+    std::vector<LONG> front;
+    POSITION pos = pArea->m_lVertSort.GetHeadPosition();
+    while (pos != NULL)
+        front.push_back(static_cast<LONG>(reinterpret_cast<INT_PTR>(pArea->m_lVertSort.GetNext(pos))));
+    REQUIRE(front.size() > 2);
+
+    pArea->SortLists();
+    CHECK(pArea->m_lVertSortAdd.IsEmpty());
+    CHECK(pArea->m_lVertSort.GetCount() == static_cast<INT_PTR>(front.size() + 1));
+    CHECK(TimesInArea(pArea, pSprite->GetId()) == 1);
+    for (LONG id : front) {
+        INFO("object 0x" << std::hex << id);
+        CHECK(TimesInArea(pArea, id) == 1);
+    }
+    LONG lastY = INT_MIN;
+    pos = pArea->m_lVertSort.GetHeadPosition();
+    while (pos != NULL) {
+        POSITION here = pos;
+        const LONG id = static_cast<LONG>(reinterpret_cast<INT_PTR>(pArea->m_lVertSort.GetNext(pos)));
+        CGameObject* pObject;
+        REQUIRE(pGame->GetObjectArray()->GetShare(id, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) == CGameObjectArray::SUCCESS);
+        CHECK(pObject->GetPos().y >= lastY);
+        CHECK(pObject->GetVertListPos() == here);
+        lastY = pObject->GetPos().y;
+        pGame->GetObjectArray()->ReleaseShare(id, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+    }
 }
 
 // A load-robustness check. The real two-area save (LoadArea AR1001 beside

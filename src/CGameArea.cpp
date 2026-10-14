@@ -1934,9 +1934,9 @@ void CGameArea::Marshal(BYTE** pArea, DWORD* nArea, BOOLEAN bProgressBarInPlace)
                 }
                 break;
             case 0x41: // CGameObject::TYPE_TRIGGER
-                // TODO: Incomplete. The original marshals the trigger here
-                // (0x4CFF70, CGameTrigger, not in our tree yet), adds it to
-                // `lTriggers` and counts its pick points.
+                static_cast<CGameTrigger*>(pObject)->Marshal(&pTriggerObject);
+                lTriggers.AddTail(pTriggerObject);
+                nPoints += pTriggerObject->m_pickPointCount;
                 break;
             default:
                 // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameArea.cpp
@@ -2054,9 +2054,9 @@ void CGameArea::Marshal(BYTE** pArea, DWORD* nArea, BOOLEAN bProgressBarInPlace)
                 }
                 break;
             case 0x41: // CGameObject::TYPE_TRIGGER
-                // TODO: Incomplete. The original marshals the trigger here
-                // (0x4CFF70, CGameTrigger, not in our tree yet), adds it to
-                // `lTriggers` and counts its pick points.
+                static_cast<CGameTrigger*>(pObject)->Marshal(&pTriggerObject);
+                lTriggers.AddTail(pTriggerObject);
+                nPoints += pTriggerObject->m_pickPointCount;
                 break;
             default:
                 // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameArea.cpp
@@ -2535,7 +2535,13 @@ void CGameArea::Unmarshal(BYTE* pArea, LONG areaSize, const CString& sName, BOOL
         deltaTime = 0;
     }
 
-    memcpy(m_header.m_areaName, (LPCSTR)sName, RESREF_SIZE);
+    // NOTE: The original copies the eight bytes of its third argument, a
+    // resref field (two dwords, 0x472DE0). Ours gets the name as a CString,
+    // whose buffer may be shorter ("AR1000" is seven bytes with its NUL), so
+    // the name is copied up to eight characters and the rest zeroed, as a
+    // resref field pads it.
+    memset(m_header.m_areaName, 0, RESREF_SIZE);
+    memcpy(m_header.m_areaName, (LPCSTR)sName, min(sName.GetLength(), RESREF_SIZE));
 
     CString cStr(CString((char*)m_header.m_areaName, RESREF_SIZE).GetBuffer(RESREF_SIZE + 1));
 
@@ -4929,11 +4935,15 @@ void CGameArea::SortLists()
             // __LINE__: 8268
             UTIL_ASSERT(cnt == nFront + nFrontAdd);
 
+            // The front objects follow the `nFrontAdd` queued ones in
+            // `pObjects`: a bubble sort of them by y (a pass with no swap
+            // ends it), then a merge with the queued ones, which go first
+            // on equal y (0x4794E0).
             if (nFront > 1) {
                 for (cnt = 0; cnt < nFront - 1; cnt++) {
                     BOOL bDone = TRUE;
 
-                    for (cnt2 = 1; cnt < nFront - cnt; cnt++) {
+                    for (cnt2 = 1; cnt2 < nFront - cnt; cnt2++) {
                         if (pObjects[nFrontAdd + cnt2 - 1]->GetPos().y > pObjects[nFrontAdd + cnt2]->GetPos().y) {
                             pObject = pObjects[nFrontAdd + cnt2 - 1];
                             pObjects[nFrontAdd + cnt2 - 1] = pObjects[nFrontAdd + cnt2];
@@ -4952,10 +4962,10 @@ void CGameArea::SortLists()
             cnt2 = 0;
             while (cnt < nFrontAdd || cnt2 < nFront) {
                 if (cnt2 != nFront
-                    && (cnt == nFrontAdd || pObjects[cnt]->GetPos().y > pObjects[cnt2]->GetPos().y)) {
-                    pos = m_lVertSort.AddTail(reinterpret_cast<int*>(pObjects[cnt2]->GetId()));
-                    pObjects[cnt2]->SetVertListPos(pos);
-                    m_pGame->GetObjectArray()->ReleaseShare(pObjects[cnt2]->GetId(),
+                    && (cnt == nFrontAdd || pObjects[cnt]->GetPos().y > pObjects[nFrontAdd + cnt2]->GetPos().y)) {
+                    pos = m_lVertSort.AddTail(reinterpret_cast<int*>(pObjects[nFrontAdd + cnt2]->GetId()));
+                    pObjects[nFrontAdd + cnt2]->SetVertListPos(pos);
+                    m_pGame->GetObjectArray()->ReleaseShare(pObjects[nFrontAdd + cnt2]->GetId(),
                         CGameObjectArray::THREAD_ASYNCH,
                         INFINITE);
                     cnt2++;
