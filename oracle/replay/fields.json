@@ -583,5 +583,35 @@
     "base": "CGameSprite",
     "offset": "0x05B4",
     "type": "u32"
+  },
+  "game_time": {
+    "base": "CInfGame",
+    "offset": "0x1B78",
+    "type": "u32"
+  },
+  "game_time_active": {
+    "base": "CInfGame",
+    "offset": "0x1B7C",
+    "type": "u8"
+  },
+  "sprite_timers_head": {
+    "base": "CGameSprite",
+    "offset": "0x0452",
+    "type": "ptr"
+  },
+  "sprite_timers_count": {
+    "base": "CGameSprite",
+    "offset": "0x045A",
+    "type": "i32"
+  },
+  "timer_time": {
+    "base": "CGameTimer",
+    "offset": "0x0000",
+    "type": "i32"
+  },
+  "timer_id": {
+    "base": "CGameTimer",
+    "offset": "0x0004",
+    "type": "u8"
   }
 }

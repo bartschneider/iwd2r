@@ -164,6 +164,11 @@ static_assert(kField_character_slots.type == ReplayType::k_i32 && kField_charact
 static_assert(kField_sprite_timed_effects.type == ReplayType::k_i32, "");
 static_assert(kField_sprite_equiped_effects.type == ReplayType::k_i32, "");
 static_assert(kField_sprite_xp.type == ReplayType::k_u32, "");
+static_assert(kField_game_time.type == ReplayType::k_u32, "");
+static_assert(kField_game_time_active.type == ReplayType::k_u8, "");
+static_assert(kField_sprite_timers_head.type == ReplayType::k_ptr, "");
+static_assert(kField_timer_time.type == ReplayType::k_i32, "");
+static_assert(kField_timer_id.type == ReplayType::k_u8, "");
 static_assert(kField_area_characters.type == ReplayType::k_u8, "");
 static_assert(kField_area_view_x.type == ReplayType::k_i32, "");
 static_assert(kField_area_view_y.type == ReplayType::k_i32, "");
@@ -753,6 +758,8 @@ void ReadProbe(platform::replay_probe::Frame* out)
     }
     out->characters = ReadI16(At(game, kField_characters_count), &ok);
     out->visibleArea = ReadU8(At(game, kField_visible_area), &ok);
+    out->gameTime = ReadU32(At(game, kField_game_time), &ok);
+    out->timeActive = ReadU8(At(game, kField_game_time_active), &ok);
     for (uint32_t i = 0; i < 6; ++i) {
         out->slots[i] = ReadI32(At(game, kField_character_slots) + 4u * i, &ok);
         out->portraits[i] = ReadI32(At(game, kField_character_portraits) + 4u * i, &ok);
@@ -830,6 +837,17 @@ void ReadProbe(platform::replay_probe::Frame* out)
             o.equipedEffects = ReadI32(At(object, kField_sprite_equiped_effects), &entryOk);
             o.xp = ReadU32(At(object, kField_sprite_xp), &entryOk);
             o.hp = ReadI16(At(object, kField_sprite_hp), &entryOk);
+            bool timersOk = true;
+            uint32_t node = ReadU32(At(object, kField_sprite_timers_head), &timersOk);
+            for (int n = 0; timersOk && node && n < kMaxListNodes; ++n) {
+                const uint32_t timer = ReadU32(At(node, kField_list_node_data), &timersOk);
+                node = ReadU32(At(node, kField_list_node_next), &timersOk);
+                if (timer) {
+                    const uint8_t id = ReadU8(At(timer, kField_timer_id), &timersOk);
+                    const int32_t time = ReadI32(At(timer, kField_timer_time), &timersOk);
+                    o.timers.emplace_back(id, time);
+                }
+            }
         } else if (o.type == platform::replay_probe::kTypeDoor) {
             o.hasName = true;
             o.name = ReadName(At(object, kField_door_name));
