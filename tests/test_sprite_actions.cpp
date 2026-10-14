@@ -510,6 +510,10 @@ TEST_CASE("sprite: PlayerDialog out of range walks to Hedron and the dialog open
     CAIObjectType hedron(0, 0, 0, 0, 0, 0, 0, 0, pHedron->GetId(), 0, 0);
     pCharacter->SetCurrAction(CAIAction(CAIAction::PLAYERDIALOG, hedron, 0, 0, 0));
     pCharacter->m_actionCount = 1;
+    // SetCurrAction (0x7338E0) draws the path counter, UtilRandInt(8,
+    // -luck); MoveToObject searches when it is a multiple of 8. Start the
+    // walk on the first call.
+    pCharacter->field_5616 = 0;
     CHECK(pCharacter->ExecuteAction() == CGameAIBase::ACTION_INTERRUPTABLE);
     CHECK(pCharacter->m_curDest == pHedron->GetPos());
     REQUIRE(pCharacter->m_currentSearchRequest != NULL);
