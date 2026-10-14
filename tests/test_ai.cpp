@@ -515,4 +515,8 @@ TEST_CASE("ai: CheckLimits keeps the morale recovery time and caps the morale br
     stats.m_nMoraleBreak = 25;
     stats.CheckLimits();
     CHECK(stats.m_nMoraleBreak == 20);
+    // The reputation compares unsigned: a negative one becomes 200.
+    stats.m_nReputation = -5;
+    stats.CheckLimits();
+    CHECK(stats.m_nReputation == 200);
 }
