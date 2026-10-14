@@ -16,6 +16,7 @@
 #include "CScreenCreateChar.h"
 #include "CScreenWorld.h"
 #include "CSearchBitmap.h"
+#include "CUtil.h"
 #include "ScreenLayout.h"
 #include "data_view.h"
 #include "platform/data_dir.h"
@@ -509,6 +510,10 @@ TEST_CASE("sprite: PlayerDialog out of range walks to Hedron and the dialog open
     CAIObjectType hedron(0, 0, 0, 0, 0, 0, 0, 0, pHedron->GetId(), 0, 0);
     pCharacter->SetCurrAction(CAIAction(CAIAction::PLAYERDIALOG, hedron, 0, 0, 0));
     pCharacter->m_actionCount = 1;
+    // SetCurrAction (0x7338E0) draws the path counter, UtilRandInt(8,
+    // -luck); MoveToObject searches when it is a multiple of 8. Start the
+    // walk on the first call.
+    pCharacter->field_5616 = 0;
     CHECK(pCharacter->ExecuteAction() == CGameAIBase::ACTION_INTERRUPTABLE);
     CHECK(pCharacter->m_curDest == pHedron->GetPos());
     REQUIRE(pCharacter->m_currentSearchRequest != NULL);
@@ -845,4 +850,229 @@ TEST_CASE("game: ClearCharacterSlot leaves an area count of 0xFF alone", "[ai][d
     CHECK(pGame->ClearCharacterSlot(nSlot) == TRUE);
     CHECK(pGame->m_characters[nSlot] == -1);
     CHECK(pArea->m_nCharacters == 0xFF);
+}
+
+TEST_CASE("area: CanSaveGame lets the party save next to doors and other objects", "[ai][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    CGameSprite* pCharacter = NewGameInStartArea(cre);
+    CGameArea* pArea = pCharacter->GetArea();
+    REQUIRE(pArea != NULL);
+    pArea->SortLists();
+
+    // Doors, containers, triggers, statics, sounds, texts and object
+    // markers share 0x47C830 in vtable slot 0x28: strError -1, TRUE.
+    const BYTE types[] = { CGameObject::TYPE_DOOR, CGameObject::TYPE_CONTAINER, CGameObject::TYPE_TRIGGER,
+        CGameObject::TYPE_STATIC, CGameObject::TYPE_SOUND };
+    int checked = 0;
+    for (BYTE type : types) {
+        for (CGameObject* pObject : ObjectsOfType(pArea, type)) {
+            STRREF strError = 0;
+            CHECK(pObject->CanSaveGame(strError) == TRUE);
+            CHECK(strError == static_cast<STRREF>(-1));
+            checked++;
+        }
+    }
+    CHECK(checked > 0);
+
+    // The start area with no enemy in sight: saving is allowed, and
+    // field_B16 (read by the idle sequence) is 0 as in the original.
+    STRREF strError = 0;
+    CHECK(pArea->CanSaveGame(strError) == TRUE);
+    CHECK(strError == static_cast<STRREF>(-1));
+}
+
+TEST_CASE("sprite: CanSaveGame refuses near a visible living enemy and during a dialog", "[ai][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    CGameSprite* pCharacter = NewGameInStartArea(cre);
+    CGameArea* pArea = pCharacter->GetArea();
+    REQUIRE(pArea != NULL);
+    pArea->SortLists();
+    CGameSprite* pHedron = FindSpeaker(pArea, "10HEDRON");
+    REQUIRE(pHedron != NULL);
+    REQUIRE(pHedron->m_baseStats.field_294 == 0);
+    REQUIRE((pHedron->m_baseStats.m_flags & 0x8000) == 0);
+    REQUIRE(g_pBaldurChitin->GetObjectGame()->GetGameSave()->m_cutScene == FALSE);
+
+    const BYTE ea = pHedron->m_typeAI.m_nEnemyAlly;
+    const SHORT canBeSeen = pHedron->m_canBeSeen;
+    pHedron->m_curAction = CAIAction::NULL_ACTION;
+    pHedron->m_currentActionId = 0;
+
+    // Not an enemy: TRUE.
+    STRREF strError = 0;
+    pHedron->m_typeAI.m_nEnemyAlly = CAIObjectType::EA_NEUTRAL;
+    pHedron->m_canBeSeen = 1;
+    CHECK(pHedron->CanSaveGame(strError) == TRUE);
+    CHECK(strError == static_cast<STRREF>(-1));
+
+    // An enemy in sight: 16501.
+    pHedron->m_typeAI.m_nEnemyAlly = CAIOBJECTTYPE_EA_ENEMY;
+    CHECK(pHedron->CanSaveGame(strError) == FALSE);
+    CHECK(strError == 16501);
+
+    // Out of sight, or dead: TRUE again.
+    pHedron->m_canBeSeen = 0;
+    CHECK(pHedron->CanSaveGame(strError) == TRUE);
+    pHedron->m_canBeSeen = 1;
+    pHedron->m_derivedStats.m_generalState |= STATE_DEAD;
+    CHECK(pHedron->CanSaveGame(strError) == TRUE);
+    CHECK(strError == static_cast<STRREF>(-1));
+    pHedron->m_derivedStats.m_generalState &= ~STATE_DEAD;
+
+    // In a dialog (Dialogue 8 or StartDialog 0x89, current or remembered),
+    // or with an action that cannot be interrupted: 16502.
+    pHedron->m_typeAI.m_nEnemyAlly = CAIObjectType::EA_NEUTRAL;
+    pHedron->m_curAction.m_actionID = CAIAction::DIALOGUE;
+    CHECK(pHedron->CanSaveGame(strError) == FALSE);
+    CHECK(strError == 16502);
+    pHedron->m_curAction.m_actionID = CAIAction::NO_ACTION;
+    pHedron->m_currentActionId = CAIAction::STARTDIALOG;
+    CHECK(pHedron->CanSaveGame(strError) == FALSE);
+    CHECK(strError == 16502);
+    pHedron->m_currentActionId = 0;
+    pHedron->m_curAction.m_internalFlags |= 0x1;
+    CHECK(pHedron->CanSaveGame(strError) == FALSE);
+    CHECK(strError == 16502);
+    pHedron->m_curAction.m_internalFlags &= ~0x1;
+
+    pHedron->m_typeAI.m_nEnemyAlly = ea;
+    pHedron->m_canBeSeen = canBeSeen;
+}
+
+TEST_CASE("sprite: SetCurrAction draws the path counter and decodes a spell action", "[ai][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    CGameSprite* pCharacter = NewGameInStartArea(cre);
+    CGameArea* pArea = pCharacter->GetArea();
+    REQUIRE(pArea != NULL);
+    pArea->SortLists();
+
+    // DecodeSpell (0x45D3E0): "SP" and the type by thousands, "MARW" for
+    // any other, then the rest as three digits; 0 takes the marked spell.
+    CString sResRef;
+    pCharacter->DecodeSpell(1101, sResRef);
+    CHECK(sResRef == "SPPR101");
+    pCharacter->DecodeSpell(2101, sResRef);
+    CHECK(sResRef == "SPWI101");
+    pCharacter->DecodeSpell(3005, sResRef);
+    CHECK(sResRef == "SPIN005");
+    pCharacter->DecodeSpell(4012, sResRef);
+    CHECK(sResRef == "MARW012");
+    pCharacter->field_588 = 0;
+    pCharacter->DecodeSpell(0, sResRef);
+    CHECK(sResRef == "");
+    pCharacter->field_588 = 2203;
+    pCharacter->DecodeSpell(0, sResRef);
+    CHECK(sResRef == "SPWI203");
+    pCharacter->field_588 = 0;
+
+    // MoveToPoint: the path counter is UtilRandInt(8, -luck) (0x733FE0),
+    // the first rand() SetCurrAction draws; the destination and the
+    // casting flags are reset.
+    const CPoint goal = pCharacter->GetPos();
+    srand(12345);
+    const LONG expected = CUtil::UtilRandInt(8, -pCharacter->m_derivedStats.m_nLuck);
+    srand(12345);
+    pCharacter->m_curDest = CPoint(1, 2);
+    pCharacter->m_bInCasting = TRUE;
+    pCharacter->SetCurrAction(CAIAction(CAIAction::MOVETOPOINT, goal, 0, -1));
+    CHECK(pCharacter->field_5616 == expected);
+    CHECK(pCharacter->m_curAction.m_actionID == CAIAction::MOVETOPOINT);
+    CHECK(pCharacter->m_curDest == CPoint(-1, -1));
+    CHECK(pCharacter->m_bInCasting == FALSE);
+
+    // A modal state survives MoveToPoint and ends with any other action.
+    pCharacter->m_nModalState = 1;
+    pCharacter->SetCurrAction(CAIAction(CAIAction::MOVETOPOINT, goal, 0, -1));
+    CHECK(pCharacter->m_nModalState == 1);
+    pCharacter->SetCurrAction(CAIAction(CAIAction::WAIT, CPoint(-1, -1), 0, -1));
+    CHECK(pCharacter->m_nModalState == 1);
+    pCharacter->SetCurrAction(CAIAction(CAIAction::ATTACK, CPoint(-1, -1), 0, -1));
+    CHECK(pCharacter->m_nModalState == 0);
+    ClearMessages();
+
+    // Spell 2101 with no class and no level: not in the character's lists,
+    // so the class is the spell's caster type (wizard 11) and the level the
+    // spell's own.
+    CAIAction spell(CAIAction::SPELL, CPoint(-1, -1), 2101, -1);
+    spell.m_specificID2 = 0;
+    spell.m_specificID3 = 0;
+    pCharacter->SetCurrAction(spell);
+    CHECK(pCharacter->m_curAction.m_actionID == CAIAction::SPELL);
+    CHECK((pCharacter->m_curAction.m_specificID2 & 0xFF) == CAIOBJECTTYPE_C_WIZARD);
+    CHECK(pCharacter->m_curAction.m_specificID3 == 1);
+    CHECK(pCharacter->m_curSpell == NULL);
+    ClearMessages();
+    pCharacter->SetCurrAction(CAIAction::NULL_ACTION);
+    ClearMessages();
+}
+
+TEST_CASE("door: a closed door marks its closed search squares in the search map", "[ai][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    CGameSprite* pCharacter = NewGameInStartArea(cre);
+    CGameArea* pArea = pCharacter->GetArea();
+    REQUIRE(pArea != NULL);
+
+    // AR1000's doors have no open search squares and 4-64 closed ones; the
+    // constructor (0x485AC0) takes the closed count from the record's
+    // +0x4E and marks them in the dynamic cost (0x80) while closed.
+    int checked = 0;
+    for (CGameObject* pObject : ObjectsOfType(pArea, CGameObject::TYPE_DOOR)) {
+        CGameDoor* pDoor = static_cast<CGameDoor*>(pObject);
+        if ((pDoor->m_dwFlags & 0x1) != 0) {
+            continue;
+        }
+        INFO("door " << (const char*)pDoor->m_scriptName);
+        CHECK(pDoor->m_nClosedSearch > 0);
+        CSearchBitmap& search = pArea->m_search;
+        for (WORD n = 0; n < pDoor->m_nClosedSearch; n++) {
+            const CPoint& pt = pDoor->m_pClosedSearch[n];
+            CHECK((search.m_pDynamicCost[pt.y * search.m_GridSquareDimensions.cx + pt.x] & 0x80) != 0);
+        }
+        checked++;
+    }
+    CHECK(checked > 0);
 }
