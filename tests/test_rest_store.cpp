@@ -9,6 +9,7 @@
 #include "CGameJournal.h"
 #include "CGameSprite.h"
 #include "CInfGame.h"
+#include "CItem.h"
 #include "CMessage.h"
 #include "CRuleTables.h"
 #include "CScreenCreateChar.h"
@@ -601,4 +602,207 @@ TEST_CASE("journal: Unmarshal keeps each record's character and Marshal writes t
     CHECK(out[1].m_character == 3);
     CHECK(out[2].m_strEntry == 1002);
     CHECK(out[2].m_character == 0xFF);
+}
+
+namespace {
+
+// The personal slots (18 to 41) of a sprite, emptied.
+void ClearPersonalSlots(CGameSprite* pSprite)
+{
+    for (int n = 18; n < 18 + CScreenInventory::PERSONAL_INVENTORY_SIZE; n++) {
+        pSprite->m_equipment.m_items[n] = NULL;
+    }
+}
+
+}
+
+TEST_CASE("inventory: SwapItemPersonalInventory places, takes, splits, stacks and refuses", "[inventory][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<CGameSprite*> party = NewGameWithParty(1);
+    if (party.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CGameSprite* pSprite = party[0];
+    ClearPersonalSlots(pSprite);
+
+    STRREF strError = 0;
+
+    // A slot outside the personal inventory: "Bad Slot Number".
+    CItem* pItem = new CItem(CResRef("00POTN01"), 0, 0, 0, 0, 0);
+    CHECK(pGame->SwapItemPersonalInventory(0, pItem, 5, strError, 1, FALSE, FALSE) == FALSE);
+    CHECK(strError == 9374);
+    CHECK(pItem != NULL);
+
+    // No slot given: the first empty one.
+    pSprite->m_equipment.m_items[18] = new CItem(CResRef("00GEM01"), 1, 0, 0, 0, 0);
+    CHECK(pGame->SwapItemPersonalInventory(0, pItem, 0x7FFF, strError, 1, FALSE, FALSE) == TRUE);
+    CHECK(strError == static_cast<STRREF>(-1));
+    CHECK(pItem == NULL);
+    REQUIRE(pSprite->m_equipment.m_items[19] != NULL);
+    CHECK(pSprite->m_equipment.m_items[19]->GetResRef() == CResRef("00POTN01"));
+
+    // Taking an item out of a slot: the hand gets it and the slot empties.
+    CHECK(pGame->SwapItemPersonalInventory(0, pItem, 19, strError, 1, FALSE, FALSE) == TRUE);
+    REQUIRE(pItem != NULL);
+    CHECK(pItem->GetResRef() == CResRef("00POTN01"));
+    CHECK(pSprite->m_equipment.m_items[19] == NULL);
+
+    CItem* pGems = pSprite->m_equipment.m_items[18];
+    const WORD nMax = pGems->GetMaxStackable();
+    if (nMax > 3) {
+        // Taking two of a stack of three splits it.
+        pGems->SetUsageCount(0, 3);
+        CItem* pHand = NULL;
+        CHECK(pGame->SwapItemPersonalInventory(0, pHand, 18, strError, 2, FALSE, FALSE) == TRUE);
+        REQUIRE(pHand != NULL);
+        CHECK(pHand->GetResRef() == CResRef("00GEM01"));
+        CHECK(pHand->GetUsageCount(0) == 2);
+        CHECK(pGems->GetUsageCount(0) == 1);
+
+        // Putting them back stacks them and empties the hand.
+        CHECK(pGame->SwapItemPersonalInventory(0, pHand, 18, strError, 2, FALSE, FALSE) == TRUE);
+        CHECK(pHand == NULL);
+        CHECK(pGems->GetUsageCount(0) == 3);
+
+        // Auto-stacking finds the stack for a gem given no slot.
+        pHand = new CItem(CResRef("00GEM01"), 1, 0, 0, 0, 0);
+        CHECK(pGame->SwapItemPersonalInventory(0, pHand, 0x7FFF, strError, 1, FALSE, TRUE) == TRUE);
+        CHECK(pHand == NULL);
+        CHECK(pGems->GetUsageCount(0) == 4);
+    }
+
+    // A full inventory: "Inventory Is Full".
+    for (int n = 18; n < 18 + CScreenInventory::PERSONAL_INVENTORY_SIZE; n++) {
+        if (pSprite->m_equipment.m_items[n] == NULL) {
+            pSprite->m_equipment.m_items[n] = new CItem(CResRef("00POTN02"), 1, 0, 0, 0, 0);
+        }
+    }
+    CHECK(pGame->SwapItemPersonalInventory(0, pItem, 0x7FFF, strError, 1, FALSE, FALSE) == FALSE);
+    CHECK(strError == 17999);
+    CHECK(pItem != NULL);
+    delete pItem;
+    ClearPersonalSlots(pSprite);
+}
+
+TEST_CASE("inventory: an item dropped on a bag goes into the bag's store", "[inventory][store][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<CGameSprite*> party = NewGameWithParty(1);
+    if (party.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CGameSprite* pSprite = party[0];
+    ClearPersonalSlots(pSprite);
+
+    CStore bag(CResRef("00GBGA01"));
+    REQUIRE(bag.GetType() == 4);
+    const INT nBefore = bag.GetNumItems();
+
+    pSprite->m_equipment.m_items[20] = new CItem(CResRef("00GBGA01"), 0, 0, 0, 0, 0);
+    CItem* pGem = new CItem(CResRef("00GEM01"), 1, 0, 0, 0, 0);
+    REQUIRE(bag.IsItemAcceptable(pGem));
+
+    STRREF strError = 0;
+    CHECK(pGame->SwapItemPersonalInventory(0, pGem, 20, strError, 1, FALSE, FALSE) == TRUE);
+    CHECK(strError == static_cast<STRREF>(-1));
+    CHECK(pGem == NULL);
+    // The bag itself stays in its slot.
+    REQUIRE(pSprite->m_equipment.m_items[20] != NULL);
+    CHECK(pSprite->m_equipment.m_items[20]->GetResRef() == CResRef("00GBGA01"));
+
+    // The bag's store was written to the temp folder with the gem in it.
+    CStore after(CResRef("00GBGA01"));
+    CHECK(after.GetNumItems() == nBefore + 1);
+    BOOL found = FALSE;
+    POSITION pos = after.m_lInventory.GetHeadPosition();
+    while (pos != NULL) {
+        if (CResRef(after.m_lInventory.GetNext(pos)->m_itemId) == CResRef("00GEM01")) {
+            found = TRUE;
+        }
+    }
+    CHECK(found);
+
+    // A bag in a bag: "Wrong Item Type", and the item goes nowhere.
+    CItem* pOtherBag = new CItem(CResRef("00GBGA02"), 0, 0, 0, 0, 0);
+    CHECK(pGame->SwapItemPersonalInventory(0, pOtherBag, 20, strError, 1, FALSE, FALSE) == FALSE);
+    CHECK(strError == 26285);
+    CHECK(pOtherBag != NULL);
+    CHECK(pSprite->m_equipment.m_items[20]->GetResRef() == CResRef("00GBGA01"));
+    delete pOtherBag;
+    ClearPersonalSlots(pSprite);
+}
+
+TEST_CASE("store: AddItemExt puts a sold item on its line or a new one", "[store][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+
+    CStore store(CResRef("11OSWALD"));
+    REQUIRE(store.GetType() != 4);
+
+    // An item without a resref is refused.
+    CItem empty;
+    CHECK(store.AddItemExt(empty, 1) == -1);
+
+    // A single item the store already lists (and does not have in infinite
+    // supply) raises its stock.
+    INT nIndex = 0;
+    CStoreFileItem* pLine = NULL;
+    POSITION pos = store.m_lInventory.GetHeadPosition();
+    while (pos != NULL) {
+        CStoreFileItem* pStoreItem = store.m_lInventory.GetNext(pos);
+        CItem probe(CResRef(pStoreItem->m_itemId), 0, 0, 0, 0, 0);
+        if ((pStoreItem->m_nStoreFlags & 0x1) == 0 && probe.GetMaxStackable() <= 1
+            && probe.GetResRef() == CResRef(pStoreItem->m_itemId)) {
+            pLine = pStoreItem;
+            break;
+        }
+        nIndex++;
+    }
+    if (pLine != NULL) {
+        const DWORD stock = pLine->m_nInStock;
+        CItem same(CResRef(pLine->m_itemId), 0, 0, 0, 0, 0);
+        CHECK(store.AddItemExt(same, 1) == nIndex);
+        CHECK(pLine->m_nInStock == stock + 1);
+    }
+
+    // A gem it does not list goes on a new line at the end.
+    const char* gems[] = { "00GEM01", "00GEM02", "00GEM03", "00GEM04", "00GEM05", "00GEM06", "00GEM07", "00GEM08" };
+    const char* unlisted = NULL;
+    for (const char* name : gems) {
+        if (store.GetItemIndex(CResRef(name)) == INT_MAX) {
+            unlisted = name;
+            break;
+        }
+    }
+    REQUIRE(unlisted != NULL);
+    const INT nLines = store.m_lInventory.GetCount();
+    CItem gem(CResRef(unlisted), 3, 0, 0, 0, 0);
+    CHECK(store.AddItemExt(gem, 1) == nLines);
+    REQUIRE(store.m_lInventory.GetCount() == nLines + 1);
+    CStoreFileItem* pNew = store.m_lInventory.GetTail();
+    CHECK(CResRef(pNew->m_itemId) == CResRef(unlisted));
+    // Gems (type 34) are kept as single units in stock.
+    CHECK(pNew->m_usageCount[0] == 1);
+    CHECK(pNew->m_nInStock == 3);
+    CHECK(gem.GetUsageCount(0) == 3);
 }

@@ -249,6 +249,7 @@ public:
     CString GetDirPortraits();
     CString GetDirCharacters();
     BYTE GetCharactersControlled();
+    INT AddItemToBag(const CResRef& cResBag, CItem* pItem, STRREF& strError);
     BOOLEAN RestParty(INT nHP, BOOLEAN bRenting);
     BOOLEAN RestPartyPrivate(INT nHP, BOOLEAN bRenting);
     BOOL CanRestParty(STRREF& strError, unsigned char bInStore, unsigned char a3, unsigned char a4);
