@@ -7,23 +7,28 @@
 #include "CAIScript.h"
 #include "CAITrigger.h"
 #include "CBaldurChitin.h"
+#include "CCreatureFile.h"
 #include "CGameAIBase.h"
 #include "CGameArea.h"
 #include "CGameDoor.h"
 #include "CGameObjectArray.h"
+#include "CGameSprite.h"
 #include "CInfGame.h"
 #include "CMessage.h"
+#include "CScreenCreateChar.h"
 #include "CVariableHash.h"
 #include "ScreenLayout.h"
 #include "data_view.h"
 #include "platform/data_dir.h"
 #include "platform/window.h"
 
+#include <climits>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <new>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -88,6 +93,10 @@ bool StartEngine(std::string& error)
         return false;
     }
     chitin->Init(NULL);
+    // The sprites' palettes read the video mode (CVidPalette::SetType), as
+    // tests/test_cre.cpp gives it.
+    chitin->m_pEngineCreateChar->SetVideoMode(0);
+    chitin->pActiveEngine = chitin->m_pEngineCreateChar;
     started = true;
     return true;
 }
@@ -112,6 +121,28 @@ CGameAIBase* AddAIObject()
         == CGameObjectArray::SUCCESS);
     pObject->m_id = id;
     return pObject;
+}
+
+// A live sprite from CHARBASE.CRE, made the way StartCreateChar makes it
+// (0x610540); its constructor adds it to the object array.
+CGameSprite* MakeSprite()
+{
+    CCreatureFile file;
+    file.SetResRef(CResRef("CHARBASE"), TRUE, TRUE);
+    BYTE* data = file.GetData();
+    REQUIRE(data != NULL);
+    std::vector<BYTE> bytes(data, data + file.GetDataSize());
+    file.Release();
+    return new CGameSprite(bytes.data(),
+        static_cast<LONG>(bytes.size()),
+        0,
+        0,
+        -1,
+        0,
+        0,
+        INT_MAX,
+        CPoint(-1, -1),
+        0);
 }
 
 // A door: zeroed storage with its members that own memory constructed and
@@ -248,6 +279,38 @@ TEST_CASE("ai: ExecuteAction answers NoAction, an unknown action and SetGlobal",
     CHECK(pCaller->EvaluateStatusTrigger(randomNumLT) == FALSE);
 
     ClearMessages();
+}
+
+TEST_CASE("ai: Dead and IsActive answer for a live sprite", "[ai][data]")
+{
+    REQUIRE_ENGINE();
+    CGameAIBase* pCaller = AddAIObject();
+    CGameSprite* pSprite = MakeSprite();
+    REQUIRE(pSprite->m_id != CGameObjectArray::INVALID_INDEX);
+    REQUIRE((pSprite->m_derivedStats.m_generalState & STATE_DEAD) == 0);
+    REQUIRE((pSprite->m_baseStats.m_generalState & STATE_DEAD) == 0);
+    CAIObjectType sprite(0, 0, 0, 0, 0, 0, 0, 0, pSprite->m_id, 0, 0);
+
+    // Alive in both states: not dead. Dead by its base state: dead.
+    CAITrigger dead(0x4051, sprite, 0);
+    CHECK(pCaller->EvaluateStatusTrigger(dead) == FALSE);
+    pSprite->m_baseStats.m_generalState |= STATE_DEAD;
+    CHECK(pCaller->EvaluateStatusTrigger(dead) == TRUE);
+    pSprite->m_baseStats.m_generalState &= ~STATE_DEAD;
+    pSprite->m_derivedStats.m_generalState |= STATE_DEAD;
+    CHECK(pCaller->EvaluateStatusTrigger(dead) == TRUE);
+    pSprite->m_derivedStats.m_generalState &= ~STATE_DEAD;
+
+    // IsActive reads the sprite's active flag.
+    CAITrigger isActive(0x40D7, sprite, 0);
+    pSprite->m_active = TRUE;
+    CHECK(pCaller->EvaluateStatusTrigger(isActive) == TRUE);
+    pSprite->m_active = FALSE;
+    CHECK(pCaller->EvaluateStatusTrigger(isActive) == FALSE);
+    // An AI object that is neither a sound, a sprite nor a trigger: FALSE.
+    CAIObjectType other(0, 0, 0, 0, 0, 0, 0, 0, pCaller->m_id, 0, 0);
+    CAITrigger isActiveOther(0x40D7, other, 0);
+    CHECK(pCaller->EvaluateStatusTrigger(isActiveOther) == FALSE);
 }
 
 TEST_CASE("ai: a compiled script reads its triggers and weighted responses", "[ai][data]")
