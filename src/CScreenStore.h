@@ -157,6 +157,10 @@ public:
     void UpdateSpellCost();
     BOOL IsBuyItemButtonClickable();
     void OnBuyItemButtonClick();
+    void BuyStoreItems();
+    void BuyBagItems();
+    void BuyContainerItems();
+    void BuyContainerBagItems();
     BOOL IsSellItemButtonClickable();
     void OnSellItemButtonClick();
     void sub_67A130();

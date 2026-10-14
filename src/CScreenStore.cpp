@@ -3003,10 +3003,769 @@ BOOL CScreenStore::IsBuyItemButtonClickable()
     return FALSE;
 }
 
+// The item types (0, 9, 11, 13, 34 and 71) that are bought per unit of the
+// stack and sold in full stacks.
+static BOOL IsUnitPricedItem(CItem& cItem)
+{
+    WORD nType = cItem.GetItemType();
+    return nType == 9
+        || nType == 71
+        || nType == 11
+        || nType == 13
+        || nType == 34
+        || nType == 0;
+}
+
 // 0x678050
 void CScreenStore::OnBuyItemButtonClick()
 {
-    // TODO: Incomplete.
+    CSingleLock renderLock(&(m_cUIManager.field_36), FALSE);
+    renderLock.Lock(INFINITE);
+
+    if (IsBuyItemButtonClickable()) {
+        // NOTE: The cases are not exclusive: a container store with a bag
+        // open runs three of them in turn (as the original).
+        if (m_pStore->GetType() == 4 && m_pBag != NULL) {
+            BuyContainerBagItems();
+        }
+
+        if (m_pStore->GetType() == 4) {
+            BuyContainerItems();
+        }
+
+        if (m_pBag != NULL) {
+            BuyBagItems();
+        } else {
+            BuyStoreItems();
+        }
+
+        renderLock.Unlock();
+    }
+}
+
+// 0x678110
+void CScreenStore::BuyStoreItems()
+{
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenStore.cpp
+    // __LINE__: 5099
+    UTIL_ASSERT(pGame != NULL);
+
+    INT nTopStoreItem = m_nTopStoreItem;
+    INT nTopGroupItem = m_nTopGroupItem;
+    CItem* pSwapSoundItem = NULL;
+    LONG nGold = static_cast<LONG>(pGame->GetGameSave()->m_nPartyGold);
+
+    if (m_nStoreCost > nGold) {
+        m_nErrorState = 2;
+        m_strErrorText = 11047;
+        m_strErrorButtonText[0] = 11973;
+        SummonPopup(10);
+        return;
+    }
+
+    // NOTE: The original leaves `bRemoved` uninitialized and carries it over
+    // from item to item; bounded here (P4-10).
+    BOOLEAN bRemoved = FALSE;
+    INT nStoreIndex = 0;
+
+    POSITION pos = m_lStoreItems.GetHeadPosition();
+    while (pos != NULL) {
+        CScreenStoreItem* pStoreItem = m_lStoreItems.GetNext(pos);
+        if (!pStoreItem->m_bSelected) {
+            nStoreIndex++;
+            continue;
+        }
+
+        CItem cItem;
+        CItem cStoreItem;
+
+        m_pStore->GetItem(nStoreIndex, cStoreItem);
+        cItem.SetResRef(cStoreItem.cResRef, TRUE);
+        cItem.m_useCount1 = cStoreItem.m_useCount1;
+        cItem.m_useCount2 = cStoreItem.m_useCount2;
+        cItem.m_useCount3 = cStoreItem.m_useCount3;
+        cItem.m_wear = cStoreItem.m_wear;
+        cItem.m_flags = cStoreItem.m_flags;
+
+        // NOTE: A random item that does not resolve is skipped without
+        // advancing the store index (as the original).
+        if (!m_pStore->sub_54CFE0(nStoreIndex, cItem)) {
+            continue;
+        }
+
+        DWORD dwFlags = cItem.m_flags;
+
+        DWORD nAmount;
+        if (cItem.GetMaxStackable() > 1) {
+            if (pStoreItem->m_nStoreCount > 1 && cItem.GetUsageCount(0) == 0) {
+                nAmount = pStoreItem->m_nCount;
+            } else {
+                nAmount = cItem.GetUsageCount(0) * pStoreItem->m_nCount;
+            }
+        } else {
+            nAmount = pStoreItem->m_nCount;
+        }
+
+        SHORT nSlot = CInfGame_FindEmptyItemPersonalInventory(pGame, static_cast<SHORT>(m_nSelectedCharacter));
+        while (nSlot >= 0) {
+            CItem* pNewItem = new CItem(cItem);
+
+            DWORD nCount;
+            if (pNewItem->GetMaxStackable() > 1) {
+                INT nMaxStackable = cItem.GetMaxStackable();
+
+                // NOTE: Only half a stack of most stackables is bought at once.
+                if (!IsUnitPricedItem(cItem)) {
+                    nMaxStackable /= 2;
+                }
+
+                nCount = min(static_cast<INT>(nAmount), nMaxStackable);
+                pNewItem->SetUsageCount(0, static_cast<WORD>(nCount));
+                nAmount -= nCount;
+            } else {
+                nAmount--;
+                nCount = 1;
+            }
+
+            STRREF strError;
+            if (!pGame->SwapItemPersonalInventory(static_cast<SHORT>(m_nSelectedCharacter), pNewItem, nSlot, strError, -1, FALSE, TRUE)) {
+                delete pNewItem;
+
+                // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenStore.cpp
+                // __LINE__: 5239
+                UTIL_ASSERT(FALSE);
+                break;
+            }
+
+            if (m_pStore->RemoveItemExt(cStoreItem.cResRef, dwFlags, nStoreIndex, nCount, &bRemoved) != 1) {
+                // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenStore.cpp
+                // __LINE__: 5232
+                UTIL_ASSERT(FALSE);
+                break;
+            }
+
+            if (pSwapSoundItem == NULL) {
+                pSwapSoundItem = new CItem(cItem);
+            }
+
+            CMessage* message = new CMessageStoreRemoveItem(m_pStore->m_resRef,
+                CResRef(cStoreItem.cResRef.GetResRef()),
+                dwFlags,
+                nStoreIndex,
+                nCount,
+                CGameObjectArray::INVALID_INDEX,
+                CGameObjectArray::INVALID_INDEX);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+            if (!g_pChitin->cNetwork.GetSessionHosting()) {
+                CStore::InvalidateStore(m_pStore->m_resRef);
+            } else {
+                CStore* pServerStore = pGame->GetServerStore(m_pStore->m_resRef);
+
+                // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenStore.cpp
+                // __LINE__: 5211
+                UTIL_ASSERT(pServerStore != NULL);
+
+                pServerStore->RemoveItemExt(cStoreItem.cResRef, dwFlags, nStoreIndex, nCount, NULL);
+            }
+
+            if (IsUnitPricedItem(cItem)) {
+                nGold -= pStoreItem->m_nSingleValue * nCount;
+            } else {
+                nGold -= pStoreItem->m_nSingleValue;
+            }
+
+            if (bRemoved == TRUE || nAmount == 0) {
+                break;
+            }
+
+            nSlot = CInfGame_FindEmptyItemPersonalInventory(pGame, static_cast<SHORT>(m_nSelectedCharacter));
+        }
+
+        pStoreItem->m_bSelected = FALSE;
+        if (!bRemoved) {
+            nStoreIndex++;
+        }
+    }
+
+    pGame->AddPartyGold(nGold - static_cast<LONG>(pGame->GetGameSave()->m_nPartyGold));
+
+    UpdateStoreItems();
+    UpdateGroupItems();
+
+    // NOTE: Uninline.
+    UpdateStoreCost();
+
+    // NOTE: Uninline.
+    UpdateGroupCost();
+
+    if (nTopStoreItem >= 0) {
+        if (m_nTopStoreItem <= nTopStoreItem && nTopStoreItem < m_nTopStoreItem + 6) {
+            nTopStoreItem = m_nTopStoreItem;
+        }
+
+        nTopStoreItem = min(max(m_lStoreItems.GetCount() - 6, 0), nTopStoreItem);
+
+        // NOTE: Uninline.
+        SetTopStoreItem(nTopStoreItem);
+    }
+
+    if (nTopGroupItem >= 0) {
+        if (m_nTopGroupItem <= nTopGroupItem && nTopGroupItem < m_nTopGroupItem + 6) {
+            nTopGroupItem = m_nTopGroupItem;
+        }
+
+        nTopGroupItem = min(max(m_lGroupItems.GetCount() - 6, 0), nTopGroupItem);
+
+        // NOTE: Uninline.
+        SetTopGroupItem(nTopGroupItem);
+    }
+
+    if (pSwapSoundItem != NULL) {
+        g_pBaldurChitin->m_pEngineInventory->PlaySwapSound(pSwapSoundItem, NULL);
+        delete pSwapSoundItem;
+    }
+
+    UpdateMainPanel();
+}
+
+// 0x678900
+void CScreenStore::BuyBagItems()
+{
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenStore.cpp
+    // __LINE__: 5308
+    UTIL_ASSERT(pGame != NULL);
+
+    INT nTopStoreItem = m_nTopStoreItem;
+    INT nTopGroupItem = m_nTopGroupItem;
+    CItem* pSwapSoundItem = NULL;
+    LONG nGold = static_cast<LONG>(pGame->GetGameSave()->m_nPartyGold);
+
+    if (m_nStoreCost > nGold) {
+        m_nErrorState = 2;
+        m_strErrorText = 11047;
+        m_strErrorButtonText[0] = 11973;
+        SummonPopup(10);
+        return;
+    }
+
+    // NOTE: The original leaves `bRemoved` uninitialized and carries it over
+    // from item to item; bounded here (P4-10).
+    BOOLEAN bRemoved = FALSE;
+    INT nStoreIndex = 0;
+
+    POSITION pos = m_lStoreItems.GetHeadPosition();
+    while (pos != NULL) {
+        CScreenStoreItem* pStoreItem = m_lStoreItems.GetNext(pos);
+        if (!pStoreItem->m_bSelected) {
+            nStoreIndex++;
+            continue;
+        }
+
+        CItem cItem;
+        CItem cStoreItem;
+
+        m_pStore->GetItem(nStoreIndex, cStoreItem);
+        cItem.SetResRef(cStoreItem.cResRef, TRUE);
+        cItem.m_useCount1 = cStoreItem.m_useCount1;
+        cItem.m_useCount2 = cStoreItem.m_useCount2;
+        cItem.m_useCount3 = cStoreItem.m_useCount3;
+        cItem.m_wear = cStoreItem.m_wear;
+        cItem.m_flags = cStoreItem.m_flags;
+
+        // NOTE: A random item that does not resolve is skipped without
+        // advancing the store index (as the original).
+        if (!m_pStore->sub_54CFE0(nStoreIndex, cItem)) {
+            continue;
+        }
+
+        DWORD dwFlags = cItem.m_flags;
+
+        DWORD nAmount;
+        if (cItem.GetMaxStackable() > 1) {
+            if (pStoreItem->m_nStoreCount > 1 && cItem.GetUsageCount(0) == 0) {
+                nAmount = pStoreItem->m_nCount;
+            } else {
+                nAmount = cItem.GetUsageCount(0) * pStoreItem->m_nCount;
+            }
+        } else {
+            nAmount = pStoreItem->m_nCount;
+        }
+
+        // NOTE: The items go to the bag, yet the loop also stops when the
+        // character has no free slot (as the original).
+        SHORT nSlot = CInfGame_FindEmptyItemPersonalInventory(pGame, static_cast<SHORT>(m_nSelectedCharacter));
+        while (nSlot >= 0) {
+            DWORD nCount;
+            if (cItem.GetMaxStackable() > 1) {
+                cItem.SetUsageCount(0, static_cast<WORD>(min(static_cast<INT>(nAmount), static_cast<INT>(cItem.GetMaxStackable()))));
+                if (static_cast<INT>(nAmount) < static_cast<INT>(cItem.GetMaxStackable())) {
+                    nCount = nAmount;
+                    nAmount = 0;
+                } else {
+                    nCount = cItem.GetMaxStackable();
+                    nAmount -= nCount;
+                }
+            } else {
+                nAmount--;
+                nCount = 1;
+            }
+
+            if (m_pBag->AddItemExt(cItem, 0x1) == -1) {
+                break;
+            }
+
+            CMessage* pAddMessage = new CMessageStoreAddItem(m_pBag->m_resRef,
+                cItem.GetItemFile(),
+                CGameObjectArray::INVALID_INDEX,
+                CGameObjectArray::INVALID_INDEX);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(pAddMessage, FALSE);
+
+            if (!g_pChitin->cNetwork.GetSessionHosting()) {
+                CStore::InvalidateStore(m_pBag->m_resRef);
+            } else {
+                CStore* pServerBag = pGame->GetServerStore(m_pBag->m_resRef);
+
+                // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenStore.cpp
+                // __LINE__: 5404
+                UTIL_ASSERT(pServerBag != NULL);
+
+                pServerBag->AddItemExt(cItem, 0x1);
+            }
+
+            if (m_pStore->RemoveItemExt(cStoreItem.cResRef, dwFlags, nStoreIndex, nCount, &bRemoved) != 1) {
+                // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenStore.cpp
+                // __LINE__: 5448
+                UTIL_ASSERT(FALSE);
+                break;
+            }
+
+            if (pSwapSoundItem == NULL) {
+                pSwapSoundItem = new CItem(cItem);
+            }
+
+            CMessage* message = new CMessageStoreRemoveItem(m_pStore->m_resRef,
+                CResRef(cStoreItem.cResRef.GetResRef()),
+                dwFlags,
+                nStoreIndex,
+                nCount,
+                CGameObjectArray::INVALID_INDEX,
+                CGameObjectArray::INVALID_INDEX);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+            if (!g_pChitin->cNetwork.GetSessionHosting()) {
+                CStore::InvalidateStore(m_pStore->m_resRef);
+            } else {
+                CStore* pServerStore = pGame->GetServerStore(m_pStore->m_resRef);
+
+                // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenStore.cpp
+                // __LINE__: 5427
+                UTIL_ASSERT(pServerStore != NULL);
+
+                pServerStore->RemoveItemExt(cStoreItem.cResRef, dwFlags, nStoreIndex, nCount, NULL);
+            }
+
+            if (IsUnitPricedItem(cItem)) {
+                nGold -= pStoreItem->m_nSingleValue * nCount;
+            } else {
+                nGold -= pStoreItem->m_nSingleValue;
+            }
+
+            if (bRemoved == TRUE || nAmount == 0) {
+                break;
+            }
+
+            nSlot = CInfGame_FindEmptyItemPersonalInventory(pGame, static_cast<SHORT>(m_nSelectedCharacter));
+        }
+
+        pStoreItem->m_bSelected = FALSE;
+        if (!bRemoved) {
+            nStoreIndex++;
+        }
+    }
+
+    pGame->AddPartyGold(nGold - static_cast<LONG>(pGame->GetGameSave()->m_nPartyGold));
+
+    UpdateStoreItems();
+    UpdateGroupItems();
+
+    // NOTE: Uninline.
+    UpdateStoreCost();
+
+    // NOTE: Uninline.
+    UpdateGroupCost();
+
+    if (nTopStoreItem >= 0) {
+        if (m_nTopStoreItem <= nTopStoreItem && nTopStoreItem < m_nTopStoreItem + 6) {
+            nTopStoreItem = m_nTopStoreItem;
+        }
+
+        nTopStoreItem = min(max(m_lStoreItems.GetCount() - 6, 0), nTopStoreItem);
+
+        // NOTE: Uninline.
+        SetTopStoreItem(nTopStoreItem);
+    }
+
+    if (nTopGroupItem >= 0) {
+        if (m_nTopGroupItem <= nTopGroupItem && nTopGroupItem < m_nTopGroupItem + 6) {
+            nTopGroupItem = m_nTopGroupItem;
+        }
+
+        nTopGroupItem = min(max(m_lGroupItems.GetCount() - 6, 0), nTopGroupItem);
+
+        // NOTE: Uninline.
+        SetTopGroupItem(nTopGroupItem);
+    }
+
+    if (pSwapSoundItem != NULL) {
+        g_pBaldurChitin->m_pEngineInventory->PlaySwapSound(pSwapSoundItem, NULL);
+        delete pSwapSoundItem;
+    }
+
+    UpdateMainPanel();
+}
+
+// 0x679170
+void CScreenStore::BuyContainerItems()
+{
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenStore.cpp
+    // __LINE__: 5517
+    UTIL_ASSERT(pGame != NULL);
+
+    INT nTopStoreItem = m_nTopStoreItem;
+    INT nTopGroupItem = m_nTopGroupItem;
+    CItem* pSwapSoundItem = NULL;
+
+    // NOTE: The original leaves `bRemoved` uninitialized and carries it over
+    // from item to item; bounded here (P4-10).
+    BOOLEAN bRemoved = FALSE;
+    INT nStoreIndex = 0;
+
+    POSITION pos = m_lStoreItems.GetHeadPosition();
+    while (pos != NULL) {
+        CScreenStoreItem* pStoreItem = m_lStoreItems.GetNext(pos);
+        if (!pStoreItem->m_bSelected) {
+            nStoreIndex++;
+            continue;
+        }
+
+        CItem cItem;
+        CItem cStoreItem;
+
+        m_pStore->GetItem(nStoreIndex, cStoreItem);
+        cItem.SetResRef(cStoreItem.cResRef, TRUE);
+        cItem.m_useCount1 = cStoreItem.m_useCount1;
+        cItem.m_useCount2 = cStoreItem.m_useCount2;
+        cItem.m_useCount3 = cStoreItem.m_useCount3;
+        cItem.m_wear = cStoreItem.m_wear;
+        cItem.m_flags = cStoreItem.m_flags;
+
+        // NOTE: A random item that does not resolve is skipped without
+        // advancing the store index (as the original).
+        if (!m_pStore->sub_54CFE0(nStoreIndex, cItem)) {
+            continue;
+        }
+
+        DWORD dwFlags = cItem.m_flags;
+
+        // NOTE: A container hands over a single unstackable item even when
+        // several are selected (as the original).
+        DWORD nAmount = 1;
+        if (cItem.GetMaxStackable() > 1) {
+            nAmount = pStoreItem->m_nCount;
+        }
+
+        SHORT nSlot = CInfGame_FindEmptyItemPersonalInventory(pGame, static_cast<SHORT>(m_nSelectedCharacter));
+        while (nSlot >= 0) {
+            CItem* pNewItem = new CItem(cItem);
+
+            DWORD nCount;
+            if (pNewItem->GetMaxStackable() > 1) {
+                INT nMaxStackable = cItem.GetMaxStackable();
+
+                nCount = min(static_cast<INT>(nAmount), nMaxStackable);
+                pNewItem->SetUsageCount(0, static_cast<WORD>(nCount));
+                nAmount -= nCount;
+            } else {
+                nAmount--;
+                nCount = 1;
+            }
+
+            STRREF strError;
+            if (!pGame->SwapItemPersonalInventory(static_cast<SHORT>(m_nSelectedCharacter), pNewItem, nSlot, strError, -1, FALSE, TRUE)) {
+                delete pNewItem;
+
+                // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenStore.cpp
+                // __LINE__: 5614
+                UTIL_ASSERT(FALSE);
+                break;
+            }
+
+            if (m_pStore->RemoveItemExt(cStoreItem.cResRef, dwFlags, nStoreIndex, nCount, &bRemoved) != 1) {
+                // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenStore.cpp
+                // __LINE__: 5607
+                UTIL_ASSERT(FALSE);
+                break;
+            }
+
+            if (pSwapSoundItem == NULL) {
+                pSwapSoundItem = new CItem(cItem);
+            }
+
+            CMessage* message = new CMessageStoreRemoveItem(m_pStore->m_resRef,
+                CResRef(cStoreItem.cResRef.GetResRef()),
+                dwFlags,
+                nStoreIndex,
+                nCount,
+                CGameObjectArray::INVALID_INDEX,
+                CGameObjectArray::INVALID_INDEX);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+            if (!g_pChitin->cNetwork.GetSessionHosting()) {
+                CStore::InvalidateStore(m_pStore->m_resRef);
+            } else {
+                CStore* pServerStore = pGame->GetServerStore(m_pStore->m_resRef);
+
+                // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenStore.cpp
+                // __LINE__: 5596
+                UTIL_ASSERT(pServerStore != NULL);
+
+                pServerStore->RemoveItemExt(cStoreItem.cResRef, dwFlags, nStoreIndex, nCount, NULL);
+            }
+
+            if (bRemoved == TRUE || nAmount == 0) {
+                break;
+            }
+
+            nSlot = CInfGame_FindEmptyItemPersonalInventory(pGame, static_cast<SHORT>(m_nSelectedCharacter));
+        }
+
+        pStoreItem->m_bSelected = FALSE;
+        if (!bRemoved) {
+            nStoreIndex++;
+        }
+    }
+
+    UpdateStoreItems();
+    UpdateGroupItems();
+
+    // NOTE: Uninline.
+    UpdateStoreCost();
+
+    // NOTE: Uninline.
+    UpdateGroupCost();
+
+    if (nTopStoreItem >= 0) {
+        if (m_nTopStoreItem <= nTopStoreItem && nTopStoreItem < m_nTopStoreItem + 6) {
+            nTopStoreItem = m_nTopStoreItem;
+        }
+
+        nTopStoreItem = min(max(m_lStoreItems.GetCount() - 6, 0), nTopStoreItem);
+
+        // NOTE: Uninline.
+        SetTopStoreItem(nTopStoreItem);
+    }
+
+    if (nTopGroupItem >= 0) {
+        if (m_nTopGroupItem <= nTopGroupItem && nTopGroupItem < m_nTopGroupItem + 6) {
+            nTopGroupItem = m_nTopGroupItem;
+        }
+
+        nTopGroupItem = min(max(m_lGroupItems.GetCount() - 6, 0), nTopGroupItem);
+
+        // NOTE: Uninline.
+        SetTopGroupItem(nTopGroupItem);
+    }
+
+    if (pSwapSoundItem != NULL) {
+        g_pBaldurChitin->m_pEngineInventory->PlaySwapSound(pSwapSoundItem, NULL);
+        delete pSwapSoundItem;
+    }
+
+    UpdateMainPanel();
+}
+
+// 0x679810
+void CScreenStore::BuyContainerBagItems()
+{
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenStore.cpp
+    // __LINE__: 5681
+    UTIL_ASSERT(pGame != NULL);
+
+    INT nTopStoreItem = m_nTopStoreItem;
+    INT nTopGroupItem = m_nTopGroupItem;
+    CItem* pSwapSoundItem = NULL;
+
+    // NOTE: The original leaves `bRemoved` uninitialized and carries it over
+    // from item to item; bounded here (P4-10).
+    BOOLEAN bRemoved = FALSE;
+    INT nStoreIndex = 0;
+
+    POSITION pos = m_lStoreItems.GetHeadPosition();
+    while (pos != NULL) {
+        CScreenStoreItem* pStoreItem = m_lStoreItems.GetNext(pos);
+        if (!pStoreItem->m_bSelected) {
+            nStoreIndex++;
+            continue;
+        }
+
+        CItem cItem;
+        CItem cStoreItem;
+
+        m_pStore->GetItem(nStoreIndex, cStoreItem);
+        cItem.SetResRef(cStoreItem.cResRef, TRUE);
+        cItem.m_useCount1 = cStoreItem.m_useCount1;
+        cItem.m_useCount2 = cStoreItem.m_useCount2;
+        cItem.m_useCount3 = cStoreItem.m_useCount3;
+        cItem.m_wear = cStoreItem.m_wear;
+        cItem.m_flags = cStoreItem.m_flags;
+
+        // NOTE: A random item that does not resolve is skipped without
+        // advancing the store index (as the original).
+        if (!m_pStore->sub_54CFE0(nStoreIndex, cItem)) {
+            continue;
+        }
+
+        DWORD dwFlags = cItem.m_flags;
+
+        // NOTE: A container hands over a single unstackable item even when
+        // several are selected (as the original).
+        DWORD nAmount = 1;
+        if (cItem.GetMaxStackable() > 1) {
+            nAmount = pStoreItem->m_nCount;
+        }
+
+        // NOTE: The items go to the bag, yet the loop also stops when the
+        // character has no free slot (as the original).
+        SHORT nSlot = CInfGame_FindEmptyItemPersonalInventory(pGame, static_cast<SHORT>(m_nSelectedCharacter));
+        while (nSlot >= 0) {
+            DWORD nCount;
+            if (cItem.GetMaxStackable() > 1) {
+                cItem.SetUsageCount(0, static_cast<WORD>(min(static_cast<INT>(nAmount), static_cast<INT>(cItem.GetMaxStackable()))));
+                if (static_cast<INT>(nAmount) < static_cast<INT>(cItem.GetMaxStackable())) {
+                    nCount = nAmount;
+                    nAmount = 0;
+                } else {
+                    nCount = cItem.GetMaxStackable();
+                    nAmount -= nCount;
+                }
+            } else {
+                nAmount--;
+                nCount = 1;
+            }
+
+            if (m_pBag->AddItemExt(cItem, 0x1) == -1) {
+                break;
+            }
+
+            CMessage* pAddMessage = new CMessageStoreAddItem(m_pBag->m_resRef,
+                cItem.GetItemFile(),
+                CGameObjectArray::INVALID_INDEX,
+                CGameObjectArray::INVALID_INDEX);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(pAddMessage, FALSE);
+
+            if (!g_pChitin->cNetwork.GetSessionHosting()) {
+                CStore::InvalidateStore(m_pBag->m_resRef);
+            } else {
+                CStore* pServerBag = pGame->GetServerStore(m_pBag->m_resRef);
+
+                // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenStore.cpp
+                // __LINE__: 5751
+                UTIL_ASSERT(pServerBag != NULL);
+
+                pServerBag->AddItemExt(cItem, 0x1);
+            }
+
+            if (m_pStore->RemoveItemExt(cStoreItem.cResRef, dwFlags, nStoreIndex, nCount, &bRemoved) != 1) {
+                // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenStore.cpp
+                // __LINE__: 5785
+                UTIL_ASSERT(FALSE);
+                break;
+            }
+
+            if (pSwapSoundItem == NULL) {
+                pSwapSoundItem = new CItem(cItem);
+            }
+
+            CMessage* message = new CMessageStoreRemoveItem(m_pStore->m_resRef,
+                CResRef(cStoreItem.cResRef.GetResRef()),
+                dwFlags,
+                nStoreIndex,
+                nCount,
+                CGameObjectArray::INVALID_INDEX,
+                CGameObjectArray::INVALID_INDEX);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+            if (!g_pChitin->cNetwork.GetSessionHosting()) {
+                CStore::InvalidateStore(m_pStore->m_resRef);
+            } else {
+                CStore* pServerStore = pGame->GetServerStore(m_pStore->m_resRef);
+
+                // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenStore.cpp
+                // __LINE__: 5774
+                UTIL_ASSERT(pServerStore != NULL);
+
+                pServerStore->RemoveItemExt(cStoreItem.cResRef, dwFlags, nStoreIndex, nCount, NULL);
+            }
+
+            if (bRemoved == TRUE || nAmount == 0) {
+                break;
+            }
+
+            nSlot = CInfGame_FindEmptyItemPersonalInventory(pGame, static_cast<SHORT>(m_nSelectedCharacter));
+        }
+
+        pStoreItem->m_bSelected = FALSE;
+        if (!bRemoved) {
+            nStoreIndex++;
+        }
+    }
+
+    UpdateStoreItems();
+    UpdateGroupItems();
+
+    // NOTE: Uninline.
+    UpdateStoreCost();
+
+    // NOTE: Uninline.
+    UpdateGroupCost();
+
+    if (nTopStoreItem >= 0) {
+        if (m_nTopStoreItem <= nTopStoreItem && nTopStoreItem < m_nTopStoreItem + 6) {
+            nTopStoreItem = m_nTopStoreItem;
+        }
+
+        nTopStoreItem = min(max(m_lStoreItems.GetCount() - 6, 0), nTopStoreItem);
+
+        // NOTE: Uninline.
+        SetTopStoreItem(nTopStoreItem);
+    }
+
+    if (nTopGroupItem >= 0) {
+        if (m_nTopGroupItem <= nTopGroupItem && nTopGroupItem < m_nTopGroupItem + 6) {
+            nTopGroupItem = m_nTopGroupItem;
+        }
+
+        nTopGroupItem = min(max(m_lGroupItems.GetCount() - 6, 0), nTopGroupItem);
+
+        // NOTE: Uninline.
+        SetTopGroupItem(nTopGroupItem);
+    }
+
+    if (pSwapSoundItem != NULL) {
+        g_pBaldurChitin->m_pEngineInventory->PlaySwapSound(pSwapSoundItem, NULL);
+        delete pSwapSoundItem;
+    }
+
+    UpdateMainPanel();
 }
 
 // 0x679F80
@@ -3053,17 +3812,22 @@ void CScreenStore::OnSellItemButtonClick()
     CSingleLock renderLock(&(m_cUIManager.field_36), FALSE);
     renderLock.Lock(INFINITE);
     if (IsSellItemButtonClickable()) {
+        // NOTE: The cases are not exclusive: a container store with a bag
+        // open runs three of them in turn (as the original).
         if (m_pStore->GetType() == 4 && m_pBag != NULL) {
             sub_67B030();
-        } else if (m_pStore->GetType() == 4) {
+        }
+
+        if (m_pStore->GetType() == 4) {
             sub_67ABF0();
-        } else if (m_pBag != NULL) {
+        }
+
+        if (m_pBag != NULL) {
             sub_67A5B0();
         } else {
             sub_67A130();
         }
-        // FIXME: Wrong placement for explicit unlock, should be outside of
-        // this condition.
+
         renderLock.Unlock();
     }
 }
@@ -3186,7 +3950,7 @@ void CScreenStore::sub_67A130()
         nTopGroupItem = min(max(m_lGroupItems.GetCount() - 6, 0), nTopGroupItem);
 
         // NOTE: Uninline.
-        SetTopGroupItem(0);
+        SetTopGroupItem(nTopGroupItem);
     }
 
     if (bPlaySound) {
@@ -3266,6 +4030,7 @@ void CScreenStore::sub_67A5B0()
                 // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenStore.cpp
                 // __LINE__: 6230
                 UTIL_ASSERT(FALSE);
+                break;
             }
 
             if (!bPlaySound) {
@@ -3300,6 +4065,8 @@ void CScreenStore::sub_67A5B0()
             }
 
             pStoreItem->m_bSelected = FALSE;
+        } else {
+            nIndex++;
         }
 
         m_lGroupItems.GetNext(pos);
@@ -3335,7 +4102,7 @@ void CScreenStore::sub_67A5B0()
         nTopGroupItem = min(max(m_lGroupItems.GetCount() - 6, 0), nTopGroupItem);
 
         // NOTE: Uninline.
-        SetTopGroupItem(0);
+        SetTopGroupItem(nTopGroupItem);
     }
 
     if (bPlaySound) {
@@ -3450,7 +4217,7 @@ void CScreenStore::sub_67ABF0()
         nTopGroupItem = min(max(m_lGroupItems.GetCount() - 6, 0), nTopGroupItem);
 
         // NOTE: Uninline.
-        SetTopGroupItem(0);
+        SetTopGroupItem(nTopGroupItem);
     }
 
     if (pSwapSoundItem != NULL) {
@@ -3520,6 +4287,7 @@ void CScreenStore::sub_67B030()
                 // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenStore.cpp
                 // __LINE__: 6516
                 UTIL_ASSERT(FALSE);
+                break;
             }
 
             if (pSwapSoundItem == NULL) {
@@ -3544,14 +4312,17 @@ void CScreenStore::sub_67B030()
 
                 pBag->RemoveItemExt(cItem.GetResRef(), dwFlags, nIndex, wCount, NULL);
             } else {
-                CStore::InvalidateStore(m_pBag->m_resRef);
+                // NOTE: The original invalidates the store here, not the bag.
+                CStore::InvalidateStore(m_pStore->m_resRef);
             }
 
-            if (v1) {
+            if (!v1) {
                 nIndex++;
             }
 
             pStoreItem->m_bSelected = FALSE;
+        } else {
+            nIndex++;
         }
 
         m_lGroupItems.GetNext(pos);
@@ -3585,7 +4356,7 @@ void CScreenStore::sub_67B030()
         nTopGroupItem = min(max(m_lGroupItems.GetCount() - 6, 0), nTopGroupItem);
 
         // NOTE: Uninline.
-        SetTopGroupItem(0);
+        SetTopGroupItem(nTopGroupItem);
     }
 
     if (pSwapSoundItem != NULL) {
