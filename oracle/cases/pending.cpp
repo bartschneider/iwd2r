@@ -187,3 +187,13 @@ ORACLE_CASE_PENDING("pending/hit", nullptr,
 ORACLE_CASE_PENDING("pending/damage", nullptr,
     "ours not implemented (CGameSprite::Damage 0x73D560); needs engine state (equipped CItems with loaded "
     "abilities, the target's animation, g_pBaldurChitin's game, the message handler)");
+// CGameDialogSprite::FetchRumor (0x483B70) loads the rumor DLG through
+// CGameDialogSprite::Load (0x482210: g_pChitin's resource manager, the
+// object array for the speaker's colour and name), parses its scripts with
+// CAIScriptFile (the IDS lists through the resource manager) and holds each
+// state's start condition against the sprite (RandomNum and the other status
+// triggers through the sprite's vtable). tests/test_dialog.cpp checks ours
+// with the game's 10SALTY.DLG (the only store rumor file, 10GOHAR.STO).
+ORACLE_CASE_PENDING("dialog/fetch_rumor", nullptr,
+    "needs engine state (g_pChitin's resource manager for the DLG and the IDS lists, the object array, a "
+    "sprite whose status triggers evaluate the start conditions)");

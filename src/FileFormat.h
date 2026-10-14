@@ -3,6 +3,8 @@
 
 #include "BalDataTypes.h"
 
+#include <cstddef>
+
 #define MAX_HATED_RACES 8
 
 #define CSPELLLIST_MAX_LEVELS 9
@@ -780,6 +782,15 @@ public:
 #pragma pack(pop)
 
 static_assert(sizeof(CAreaVariable) == 0x54, "CAreaVariable size");
+// The field offsets the ARE/GAM variable record and the CVariable copy
+// (0x5505A0) pin: a reorder must fail to compile, not corrupt saves.
+static_assert(offsetof(CAreaVariable, m_name) == 0x00, "CAreaVariable::m_name");
+static_assert(offsetof(CAreaVariable, m_type) == 0x20, "CAreaVariable::m_type");
+static_assert(offsetof(CAreaVariable, m_resRefType) == 0x22, "CAreaVariable::m_resRefType");
+static_assert(offsetof(CAreaVariable, m_dwValue) == 0x24, "CAreaVariable::m_dwValue");
+static_assert(offsetof(CAreaVariable, m_intValue) == 0x28, "CAreaVariable::m_intValue");
+static_assert(offsetof(CAreaVariable, m_floatValue) == 0x2C, "CAreaVariable::m_floatValue");
+static_assert(offsetof(CAreaVariable, m_stringValue) == 0x34, "CAreaVariable::m_stringValue");
 
 // Seen in `CScreenStore::OpenBag`.
 #define CSTOREFILEHEADER_STORETYPE_BAG 4

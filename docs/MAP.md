@@ -1,21 +1,21 @@
 # Subsystem map
 
-Generated from commit `1cb3b48` by `tools/gen_map.py`. Do not edit; CI runs `python3 -I tools/gen_map.py --check`.
+Generated from commit `61054b1` by `tools/gen_map.py`. Do not edit; CI runs `python3 -I tools/gen_map.py --check`.
 
-Totals: 511 files, 288405 lines, 347 `TODO: Incomplete`, 10051 address comments.
+Totals: 513 files, 291023 lines, 343 `TODO: Incomplete`, 10080 address comments.
 
 | Family | Files | Lines | `TODO: Incomplete` | Address comments | Platform headers included |
 |---|---:|---:|---:|---:|---|
-| AI | 22 | 7714 | 6 | 406 | — |
-| Game | 103 | 88195 | 92 | 2482 | — |
-| Screens | 36 | 64631 | 67 | 2025 | — |
-| UI | 28 | 11598 | 13 | 514 | — |
+| AI | 22 | 7718 | 6 | 406 | — |
+| Game | 103 | 89197 | 91 | 2488 | — |
+| Screens | 36 | 65271 | 65 | 2026 | — |
+| UI | 28 | 11681 | 12 | 514 | — |
 | Video | 34 | 23673 | 66 | 1106 | ddraw_shim.h, gl_compat.h |
-| Resources | 63 | 10760 | 1 | 332 | dsound_shim.h |
+| Resources | 63 | 10773 | 1 | 332 | dsound_shim.h |
 | Sound | 20 | 7822 | 0 | 266 | dsound_shim.h, win32_api.h |
-| Messaging | 10 | 22694 | 33 | 1148 | — |
-| Engine core | 10 | 7051 | 11 | 413 | data_dir.h, fs.h, present.h, replay.h, window.h |
-| Other | 90 | 28491 | 58 | 1358 | compose.h, state_dump.h, window.h |
+| Messaging | 10 | 23033 | 33 | 1170 | — |
+| Engine core | 10 | 7067 | 11 | 413 | data_dir.h, fs.h, present.h, replay.h, window.h |
+| Other | 90 | 28498 | 58 | 1358 | compose.h, state_dump.h, window.h |
 | compat | 33 | 3796 | 0 | 0 | win32_api.h |
-| platform | 62 | 11980 | 0 | 1 | affinity.h, clock.h, compose.h, crash.h, data_dir.h, ddraw_shim.h, dsound_shim.h, fs.h, gl_compat.h, handles.h, imm_stub.h, input_settings.h, png.h, present.h, present_backend.h, replay.h, replay_clock.h, script.h, script_core.h, state_dump.h, win32_api.h, window.h |
-| **Total** | 511 | 288405 | 347 | 10051 | |
+| platform | 64 | 12494 | 0 | 1 | affinity.h, clock.h, compose.h, crash.h, data_dir.h, ddraw_shim.h, dsound_shim.h, fs.h, gl_compat.h, gpu_probe.h, handles.h, imm_stub.h, input_settings.h, png.h, present.h, present_backend.h, replay.h, replay_clock.h, script.h, script_core.h, state_dump.h, win32_api.h, window.h |
+| **Total** | 513 | 291023 | 343 | 10080 | |
