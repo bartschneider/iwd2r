@@ -169,6 +169,7 @@ public:
     void sub_67B030();
     void OnIdentifyItemButtonClick();
     void OnBuySpellButtonClick();
+    BOOL CheckSpellUsable(SHORT nPortrait, const CResRef& cResSpell);
     void OnRentRoomButtonClick();
     void OnBuyDrinkButtonClick(INT nButton);
     void OnDoneButtonClick();
