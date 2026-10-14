@@ -10,6 +10,8 @@
 #include "CGameDialog.h"
 #include "CGameSprite.h"
 #include "CInfGame.h"
+#include "CMessage.h"
+#include "CResDLG.h"
 #include "CScreenCreateChar.h"
 #include "CScreenWorld.h"
 #include "ScreenLayout.h"
@@ -288,48 +290,94 @@ TEST_CASE("dialog: Hedron's opening conversation shows three responses and ends 
 
     CGameDialogSprite& dialog = pWorld->m_internalLoadedDialog;
 
-    // Load parses the file the way StartDialog will reuse it: 41 states, the
-    // first with three replies, ordered first by its trigger index.
+    // Load parses the file: 41 states, the first with three replies, each
+    // leading on in the same file, ordered first by its trigger index.
     dialog.Load(CResRef("10HEDRON"), pCharacter->GetId(), pHedron->GetId());
     REQUIRE(dialog.m_dialogEntries.GetSize() == 41);
     CHECK(dialog.m_dialogEntries[0]->GetSize() == 3);
     CHECK(dialog.m_dialogEntriesOrdered[0] == dialog.m_dialogEntries[0]);
-    CHECK(dialog.m_dialogEntries[0]->m_startCondition.m_triggerList.GetCount() == 1);
-    // A state without a start condition gets "False()" (0x4836F2).
-    CHECK(dialog.m_dialogEntries[1]->m_startCondition.m_triggerList.GetCount() == 1);
     CHECK(dialog.m_dialogEntries[0]->GetAt(0)->m_nextDialog == "10HEDRON");
     CHECK(dialog.m_dialogEntries[0]->GetAt(0)->m_nextEntryIndex == 1);
+    // State 0 starts on NumTimesTalkedTo(0) (TRIGGER.IDS 0x4039).
+    REQUIRE(dialog.m_dialogEntries[0]->m_startCondition.m_triggerList.GetCount() == 1);
+    CAITrigger* pStart = dialog.m_dialogEntries[0]->m_startCondition.m_triggerList.GetHead();
+    CHECK(pStart->m_triggerID == 0x4039);
+    CHECK(pStart->m_specificID == 0);
+    CHECK(pStart->m_flags == 0);
+    // A state without a start condition gets "False()" (0x4836F2).
+    CHECK(dialog.m_dialogEntries[1]->m_startCondition.m_triggerList.GetCount() == 1);
+    // State 25's reply: text, journal and AddXpVar("Level_1_Easy",2578)
+    // (ACTION.IDS 238), on to state 27.
+    REQUIRE(dialog.m_dialogEntries[25]->GetSize() == 1);
+    CGameDialogReply* pXpReply = dialog.m_dialogEntries[25]->GetAt(0);
+    CHECK(pXpReply->m_flags == 0x15);
+    CHECK(pXpReply->m_nextEntryIndex == 27);
+    REQUIRE(pXpReply->m_response.m_actionList.GetCount() == 1);
+    CHECK(pXpReply->m_response.m_actionList.GetHead()->m_actionID == 238);
+    CHECK(pXpReply->m_response.m_actionList.GetHead()->m_string1 == "Level_1_Easy");
+    CHECK(pXpReply->m_response.m_actionList.GetHead()->m_specificID == 2578);
 
     // Load parses every file it is given again: Unmarshal's ClearMarshal
     // empties m_file (0x483994) after Load set it, as in the original.
     CHECK(dialog.m_file == "");
 
-    // State 0's start condition, NumTimesTalkedTo(0), holds in a new game.
-    // It is a status trigger, which CGameSprite::EvaluateStatusTrigger (the
-    // movement stream's) answers; until that is ported no start condition
-    // holds, and StartDialog closes the dialog again (EndDialog(FALSE,
-    // FALSE)), leaving the world screen as it was.
-    const BOOL bPausedBefore = pWorld->m_bPaused;
-    if (!pWorld->StartDialog(pCharacter, pHedron, FALSE, FALSE)) {
+    // StartDialog opens the dialog exactly when a start condition holds for
+    // Hedron (CGameDialogSprite::StartDialog walks the ordered states).
+    BOOL bAnyHolds = FALSE;
+    for (INT n = 0; n < dialog.m_dialogEntriesOrdered.GetSize(); n++) {
+        CTypedPtrList<CPtrList, CAITrigger*> triggerList;
+        if (dialog.m_dialogEntriesOrdered[n]->m_startCondition.Hold(triggerList, pHedron)) {
+            bAnyHolds = TRUE;
+            break;
+        }
+    }
+
+    BOOL bStarted = pWorld->StartDialog(pCharacter, pHedron, FALSE, FALSE);
+    REQUIRE(bStarted == bAnyHolds);
+
+    // The file's bytes as the resource manager holds them, kept demanded
+    // so StartDialog's Load reads the same buffer.
+    CResHelper<CResDLG, 1011> file;
+    file.SetResRef(CResRef("10HEDRON"), TRUE, TRUE);
+    REQUIRE(file.GetRes() != NULL);
+    BYTE* pData = static_cast<BYTE*>(file.GetRes()->Demand());
+    REQUIRE(pData != NULL);
+    const DWORD nSize = file.GetRes()->m_nResSizeActual;
+    const std::string sTrigger = "NumTimesTalkedTo(0)";
+    BYTE* pTrigger = std::search(pData, pData + nSize, sTrigger.begin(), sTrigger.end());
+    REQUIRE(pTrigger != pData + nSize);
+
+    if (!bStarted) {
+        // No start condition held, so the dialog closed again
+        // (EndDialog(FALSE, FALSE)): the world screen is back.
         CHECK(pWorld->field_EA4 == -1);
-        CHECK(pWorld->m_bPaused == FALSE);
+        CHECK(dialog.field_54 == 0);
         CHECK_FALSE(dialog.m_waitingForResponse);
-        WARN("10HEDRON's start condition did not hold: CGameSprite::EvaluateStatusTrigger is not ported yet");
-        return;
+        WARN("NumTimesTalkedTo(0) did not hold: CGameSprite::EvaluateStatusTrigger is not ported yet; "
+             "the rest runs with an unknown trigger name in state 0, a condition without triggers");
+
+        // An unknown trigger name is a parse error that adds no trigger, so
+        // state 0's condition holds (CAICondition::Hold of an empty list).
+        pTrigger[15] = 'X';
+        REQUIRE(pWorld->StartDialog(pCharacter, pHedron, FALSE, FALSE));
     }
 
     // The dialog panel is up and the game paused; CMessageEnterDialog makes
-    // the entry show (EnterDialog, Handle).
+    // the entry show (EnterDialog, Handle). The dump reads `active` from
+    // field_54.
     CHECK(pWorld->field_EA4 == 7);
     CHECK(pWorld->m_bPaused);
     CHECK(pGame->GetGameSave()->m_mode == 0x502);
+    CHECK(dialog.field_54 == 1);
     RunMessages();
     CHECK(dialog.m_waitingForResponse);
     CHECK(dialog.m_currentEntryIndex == 0);
     CHECK(dialog.m_talkerIndex == pHedron->GetId());
     CHECK(ShownReplies(dialog) == 3);
 
-    // The first reply leads to state 1 of the same file (four replies).
+    // The first reply leads to state 1 of the same file (four replies):
+    // Pick, Reload, CMessagePickedDialogResponse, CMessageRemoveReplies,
+    // CMessageLoadDialog and CMessageEnterDialog.
     dialog.m_responseMarker = 0;
     dialog.AsynchronousUpdate();
     CHECK(dialog.m_responseMarker == -1);
@@ -337,19 +385,62 @@ TEST_CASE("dialog: Hedron's opening conversation shows three responses and ends 
     CHECK(dialog.m_waitingForResponse);
     CHECK(dialog.m_currentEntryIndex == 1);
     CHECK(ShownReplies(dialog) == 4);
+    CHECK(dialog.field_54 == 1);
     CHECK(pWorld->field_EA4 == 7);
 
-    // Ending half-way (the marker -2 the dialog button and the Enter/Escape
-    // keys pick when the entry offers no reply): the replies go, the world
-    // screen is back and the game runs as before the dialog.
+    // State 25, entered directly: its reply queues AddXpVar on Hedron
+    // (CMessageInsertResponse: not a DLGINST.IDS action, so it is inserted)
+    // and goes on to state 27.
+    g_pBaldurChitin->GetMessageHandler()->AddMessage(new CMessageEnterDialog(25, TRUE, pHedron->GetId(), pHedron->GetId()), FALSE);
+    RunMessages();
+    REQUIRE(dialog.m_currentEntryIndex == 25);
+    CHECK(ShownReplies(dialog) == 1);
+    pHedron->m_queuedActions.RemoveAll();
+    dialog.m_responseMarker = 0;
+    dialog.AsynchronousUpdate();
+    RunMessages();
+    CHECK(dialog.m_currentEntryIndex == 27);
+    REQUIRE(pHedron->m_queuedActions.GetCount() == 1);
+    CHECK(pHedron->m_queuedActions.GetHead()->m_actionID == 238);
+
+    // State 20's only reply sets a global (an instant DLGINST.IDS action,
+    // run at once and removed) and ends the dialog (flag 0x8): Pick returns
+    // nothing and AsynchronousUpdate ends the dialog.
+    g_pBaldurChitin->GetMessageHandler()->AddMessage(new CMessageEnterDialog(20, TRUE, pHedron->GetId(), pHedron->GetId()), FALSE);
+    RunMessages();
+    REQUIRE(dialog.m_currentEntryIndex == 20);
+    pHedron->m_queuedActions.RemoveAll();
+    dialog.m_responseMarker = 0;
+    dialog.AsynchronousUpdate();
+    RunMessages();
+    CHECK(pHedron->m_queuedActions.GetCount() == 0);
+    CHECK_FALSE(dialog.m_waitingForResponse);
+    CHECK(dialog.field_54 == 0);
+    CHECK(pWorld->field_EA4 == -1);
+    CHECK(pGame->GetGameSave()->m_mode == static_cast<DWORD>(-1));
+    // EndDialog always restarts the game (StartTime, m_bPaused = FALSE).
+    CHECK_FALSE(pWorld->m_bPaused);
+    CHECK(ShownReplies(dialog) == 0);
+
+    // Again, ended half-way with the marker -2 (what the dialog button and
+    // the Enter/Escape keys pick when the entry offers no reply).
+    REQUIRE(pWorld->StartDialog(pCharacter, pHedron, FALSE, FALSE));
+    RunMessages();
+    CHECK(ShownReplies(dialog) == 3);
+    CHECK(dialog.field_54 == 1);
     dialog.m_responseMarker = -2;
     dialog.AsynchronousUpdate();
     RunMessages();
     CHECK_FALSE(dialog.m_waitingForResponse);
+    CHECK(dialog.field_54 == 0);
     CHECK(pWorld->field_EA4 == -1);
-    CHECK(pGame->GetGameSave()->m_mode == static_cast<DWORD>(-1));
-    CHECK(pWorld->m_bPaused == bPausedBefore);
+    CHECK_FALSE(pWorld->m_bPaused);
     CHECK(ShownReplies(dialog) == 0);
+
+    if (!bStarted) {
+        pTrigger[15] = 'o';
+    }
+    file.GetRes()->Release();
 }
 
 TEST_CASE("dialog: TogglePauseGame pauses and unpauses the world and returns TRUE", "[dialog][data]")
