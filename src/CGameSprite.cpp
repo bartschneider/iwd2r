@@ -2101,14 +2101,16 @@ void CGameSprite::AIUpdate()
         if (m_active
             && m_activeAI
             && m_activeImprisonment
-            && ((pGame->GetWorldTimer()->m_gameTime / 2) & VISIBLE_DELAY) == ((m_id / 2) & VISIBLE_DELAY)) {
+            && (((pGame->GetWorldTimer()->m_gameTime / 2) & VISIBLE_DELAY) == ((m_id / 2) & VISIBLE_DELAY)
+                || m_lastCharacterCount != m_pArea->m_nCharacters)) {
             CheckIfVisible();
         }
     } else {
         if (m_active
             && m_activeAI
             && m_activeImprisonment
-            && (pGame->GetWorldTimer()->m_gameTime & VISIBLE_DELAY) == (m_id & VISIBLE_DELAY)) {
+            && ((pGame->GetWorldTimer()->m_gameTime & VISIBLE_DELAY) == (m_id & VISIBLE_DELAY)
+                || m_lastCharacterCount != m_pArea->m_nCharacters)) {
             CheckIfVisible();
         }
     }
