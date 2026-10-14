@@ -35,6 +35,7 @@
 #include "CGameDoor.h"
 #include "CGameObjectArray.h"
 #include "CInfGame.h"
+#include "CSearchBitmap.h"
 #include "CVariableHash.h"
 #ifdef _MSC_VER
 #pragma warning(pop)
@@ -587,8 +588,190 @@ void CloserDestPt(CaseContext& ctx)
     }
 }
 
+// ---------------------------------------------------------------------------
+// ai/named_add_key
+
+// CNamedCreatureVariableHash::AddKey(CVariable&) (0x550D10), `ret 4`, the
+// first virtual. Fixture (R10a): the original's hash from its constructor
+// (0x550A20) in a block from its operator new, ours from our constructor;
+// the variables are zeroed blocks with a name and a value. After each call
+// the return value and the variable's name (AddKey writes the stored form
+// back into it) are compared; after each round, every bucket's chain (the
+// entries' names and values, next at +0x54).
+constexpr size_t kNamedHashSize = 0x10;
+constexpr size_t kNamedEntryNext = 0x54;
+
+const char* const kAddKeyNames[] = { "Hedron", "HEDRON", "he dron", " Reig ", "reig", "", "   ",
+    "A_NAME_LONGER_THAN_THIRTY_TWO_CHARACTERS_X", "AN AME WITH MANY SPACES IN IT AND MORE THAN 32", "AR1000_Door5",
+    "ar1000_door5", "Probe", "p r o b e" };
+
+std::string RandomName(std::mt19937& rng)
+{
+    if (rng() % 2 == 0) {
+        return kAddKeyNames[rng() % (sizeof(kAddKeyNames) / sizeof(kAddKeyNames[0]))];
+    }
+    static const char kLetters[] = "abcXYZ_ 09";
+    std::string name;
+    const size_t length = rng() % 40;
+    for (size_t i = 0; i < length; ++i) {
+        name += kLetters[rng() % (sizeof(kLetters) - 1)];
+    }
+    return name;
+}
+
+void NamedAddKey(CaseContext& ctx)
+{
+    std::mt19937 rng(static_cast<uint32_t>(ctx.seed ^ 0x550D10u));
+    const int32_t kSizes[] = { 16, 64, 512 };
+    for (int round = 0; round < 60; ++round) {
+        const int32_t size = kSizes[round % 3];
+        std::vector<std::string> names;
+        std::vector<int32_t> values;
+        for (int i = 0; i < 12; ++i) {
+            names.push_back(RandomName(rng));
+            values.push_back(static_cast<int32_t>(rng() % 1000));
+        }
+
+        std::vector<std::string> original;
+        std::string originalTable;
+        ctx.SetInputs("round " + std::to_string(round) + ": the original's hash");
+        ctx.CallOriginal([&] {
+            uint8_t* hash = OriginalBlock(kNamedHashSize);
+            reinterpret_cast<HashCtorFn>(kNamedHashCtor)(hash, nullptr, size);
+            const uint32_t addKey = *reinterpret_cast<const uint32_t*>(static_cast<uintptr_t>(Get<uint32_t>(hash)));
+            for (size_t i = 0; i < names.size(); ++i) {
+                uint8_t* var = OriginalBlock(kVariableSize);
+                std::strncpy(reinterpret_cast<char*>(var), names[i].c_str(), 32);
+                Put<int32_t>(var + 0x28, values[i]);
+                const int32_t rc = reinterpret_cast<AddKeyFn>(static_cast<uintptr_t>(addKey))(hash, nullptr, var);
+                original.push_back(std::to_string(rc) + " "
+                    + std::string(reinterpret_cast<const char*>(var), strnlen(reinterpret_cast<const char*>(var), 32)));
+            }
+            const int32_t entries = Get<int32_t>(hash + 4);
+            const uint8_t* table = reinterpret_cast<const uint8_t*>(static_cast<uintptr_t>(Get<uint32_t>(hash + 8)));
+            for (int32_t b = 0; b < entries; ++b) {
+                const uint8_t* entry = reinterpret_cast<const uint8_t*>(static_cast<uintptr_t>(Get<uint32_t>(table + 4 * b)));
+                while (entry != nullptr) {
+                    originalTable += std::to_string(b) + ":"
+                        + std::string(reinterpret_cast<const char*>(entry), strnlen(reinterpret_cast<const char*>(entry), 32))
+                        + "=" + std::to_string(Get<int32_t>(entry + 0x28)) + " ";
+                    entry = reinterpret_cast<const uint8_t*>(static_cast<uintptr_t>(Get<uint32_t>(entry + kNamedEntryNext)));
+                }
+            }
+        });
+
+        CNamedCreatureVariableHash* ours = new CNamedCreatureVariableHash(size);
+        for (size_t i = 0; i < names.size(); ++i) {
+            ctx.SetInputs("round " + std::to_string(round) + " (size " + std::to_string(size) + "), call "
+                + std::to_string(i) + ": \"" + names[i] + "\" = " + std::to_string(values[i]));
+            CVariable var;
+            std::memset(&var, 0, sizeof(var));
+            std::strncpy(var.m_name, names[i].c_str(), 32);
+            var.m_intValue = values[i];
+            const BOOL rc = ours->AddKey(var);
+            ctx.CountInputs(1);
+            oracle::Compare(ctx, original[i], std::to_string(rc) + " " + std::string(var.m_name, strnlen(var.m_name, 32)));
+        }
+        std::string oursTable;
+        for (LONG b = 0; b < ours->m_nTableEntries; ++b) {
+            for (CNamedCreatureVariableHashEntry* entry = ours->m_hashEntries[b]; entry != NULL; entry = entry->m_pNext) {
+                oursTable += std::to_string(b) + ":"
+                    + std::string(entry->m_variable.m_name, strnlen(entry->m_variable.m_name, 32)) + "="
+                    + std::to_string(entry->m_variable.m_intValue) + " ";
+            }
+        }
+        ctx.SetInputs("round " + std::to_string(round) + " (size " + std::to_string(size) + "): the table");
+        oracle::Compare(ctx, originalTable, oursTable);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ai/door_blocker_points
+
+// CSearchBitmap 0x54A210(const CPoint& pt, BYTE nPersonalSpace, const CPoint*
+// pPoints, USHORT nPoints), `ret 0x10`, the answer in al. It reads only the
+// grid size (+0xE6, +0xEA). Fixture (R10b): a zeroed block from the
+// original's operator new with the size set; ours a zeroed CSearchBitmap
+// with m_GridSquareDimensions set.
+using DoorBlockerFn = uint8_t(__fastcall*)(void* self, void* edx, const int32_t* pt, uint32_t nPersonalSpace,
+    const int32_t* pPoints, uint32_t nPoints);
+constexpr uintptr_t kDoorBlocker = 0x54A210;
+constexpr size_t kSearchBitmapBlock = 0x100;
+
+void DoorBlockerPoints(CaseContext& ctx)
+{
+    std::mt19937 rng(static_cast<uint32_t>(ctx.seed ^ 0x54A210u));
+    uint8_t* block = nullptr;
+    ctx.CallOriginal([&] { block = OriginalBlock(kSearchBitmapBlock); });
+    auto* storage = static_cast<unsigned char*>(::operator new(sizeof(CSearchBitmap)));
+    std::memset(storage, 0, sizeof(CSearchBitmap));
+    CSearchBitmap* ours = reinterpret_cast<CSearchBitmap*>(storage);
+
+    const uint32_t kSpaces[] = { 0, 1, 2, 3, 5, 7, 9, 255 };
+    for (int i = 0; i < 4000; ++i) {
+        // Map sizes around AR1000's (200 x 192) and the 320 bound.
+        const int32_t width = 1 + static_cast<int32_t>(rng() % 330);
+        const int32_t height = 1 + static_cast<int32_t>(rng() % 330);
+        // Centres at the edges, inside, outside and past 320.
+        int32_t pt[2];
+        for (int k = 0; k < 2; ++k) {
+            const int32_t extent = k == 0 ? width : height;
+            switch (rng() % 6) {
+            case 0:
+                pt[k] = 0;
+                break;
+            case 1:
+                pt[k] = extent - 1;
+                break;
+            case 2:
+                pt[k] = static_cast<int32_t>(rng() % 3) - 2;
+                break;
+            case 3:
+                pt[k] = 318 + static_cast<int32_t>(rng() % 4);
+                break;
+            default:
+                pt[k] = static_cast<int32_t>(rng() % (extent + 4)) - 2;
+                break;
+            }
+        }
+        const uint32_t space = kSpaces[rng() % (sizeof(kSpaces) / sizeof(kSpaces[0]))];
+        // A few points near the centre (a door's closed squares).
+        const uint32_t count = rng() % 9;
+        std::vector<int32_t> points(2 * (count == 0 ? 1 : count));
+        for (uint32_t n = 0; n < count; ++n) {
+            points[2 * n] = pt[0] + static_cast<int32_t>(rng() % 15) - 7;
+            points[2 * n + 1] = pt[1] + static_cast<int32_t>(rng() % 15) - 7;
+        }
+        std::string inputs = "grid " + std::to_string(width) + "x" + std::to_string(height) + ", pt ("
+            + std::to_string(pt[0]) + "," + std::to_string(pt[1]) + "), space " + std::to_string(space) + ", points";
+        for (uint32_t n = 0; n < count; ++n) {
+            inputs += " (" + std::to_string(points[2 * n]) + "," + std::to_string(points[2 * n + 1]) + ")";
+        }
+        ctx.SetInputs(inputs);
+
+        uint32_t original = 0;
+        ctx.CallOriginal([&] {
+            Put<int32_t>(block + 0xE6, width);
+            Put<int32_t>(block + 0xEA, height);
+            original = reinterpret_cast<DoorBlockerFn>(kDoorBlocker)(block, nullptr, pt, space, points.data(), count);
+        });
+        ours->m_GridSquareDimensions.cx = width;
+        ours->m_GridSquareDimensions.cy = height;
+        std::vector<CPoint> ourPoints;
+        for (uint32_t n = 0; n < count; ++n) {
+            ourPoints.push_back(CPoint(points[2 * n], points[2 * n + 1]));
+        }
+        const uint32_t answer = ours->sub_54A210(CPoint(pt[0], pt[1]), static_cast<BYTE>(space),
+            ourPoints.empty() ? NULL : ourPoints.data(), static_cast<USHORT>(count));
+        ctx.CountInputs(1);
+        oracle::Compare(ctx, original & 0xFF, answer);
+    }
+}
+
 }
 
 ORACLE_CASE("ai/global_variable", GlobalVariable);
 ORACLE_CASE("ai/closer_dest_pt", CloserDestPt);
 ORACLE_CASE("ai/decode", Decode);
+ORACLE_CASE("ai/named_add_key", NamedAddKey);
+ORACLE_CASE("ai/door_blocker_points", DoorBlockerPoints);

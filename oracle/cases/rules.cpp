@@ -51,6 +51,7 @@
 #include <initializer_list>
 #include <iterator>
 #include <new>
+#include <random>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -477,8 +478,285 @@ void SpellAutomaticPicker(CaseContext& ctx)
     }
 }
 
+// ---------------------------------------------------------------------------
+// rules/check_limits
+
+// CDerivedStats::CheckLimits() (0x4468F0), plain ret at 0x446DC9: clamps the
+// fields below in place. Fixture (R10b): the original's side is a zeroed
+// block from its operator new, large enough for the last field read
+// (0x153); ours is a CDerivedStats from our constructor. Every field the
+// function reads is set on both sides by offset there and by name here, and
+// compared after the call.
+using CheckLimitsFn = void(__fastcall*)(void* self, void* edx);
+constexpr uintptr_t kCheckLimits = 0x4468F0;
+constexpr size_t kDerivedStatsBlock = 0x200;
+
+struct LimitField {
+    const char* name;
+    size_t offset;
+    int size; // 1, 2 or 4 bytes
+};
+
+const LimitField kLimitFields[] = {
+    { "generalState", 0x0, 4 },
+    { "maxHitPoints", 0x4, 2 },
+    { "acCrushing", 0xE, 2 },
+    { "acMissile", 0x10, 2 },
+    { "acPiercing", 0x12, 2 },
+    { "acSlashing", 0x14, 2 },
+    { "thac0", 0x18, 2 },
+    { "attacks", 0x1A, 2 },
+    { "saveFortitude", 0x1C, 2 },
+    { "saveReflex", 0x1E, 2 },
+    { "saveWill", 0x20, 2 },
+    { "fatigue", 0x38, 2 },
+    { "intoxication", 0x3A, 2 },
+    { "luck", 0x3C, 2 },
+    { "level", 0x46, 1 },
+    { "str", 0x54, 2 },
+    { "int", 0x56, 2 },
+    { "wis", 0x58, 2 },
+    { "dex", 0x5A, 2 },
+    { "con", 0x5C, 2 },
+    { "chr", 0x5E, 2 },
+    { "xpValue", 0x60, 4 },
+    { "xp", 0x64, 4 },
+    { "gold", 0x68, 4 },
+    { "moraleBreak", 0x6C, 4 },
+    { "moraleRecovery", 0x70, 4 },
+    { "reputation", 0x74, 2 },
+    { "damageBonus", 0x86, 2 },
+    { "spellFailureArcane", 0x88, 2 },
+    { "spellFailureDivine", 0x8A, 2 },
+    { "durationMage", 0x8C, 2 },
+    { "durationPriest", 0x8E, 2 },
+    { "turnUndead", 0x90, 2 },
+    { "backstab", 0x92, 2 },
+    { "layOnHands", 0x94, 2 },
+    { "translucent", 0xB2, 2 },
+    { "skill6", 0x14A, 1 },
+    { "skill9", 0x14D, 1 },
+    { "skill10", 0x14E, 1 },
+    { "skill11", 0x14F, 1 },
+    { "skill12", 0x150, 1 },
+    { "skill14", 0x152, 1 },
+    { "skill15", 0x153, 1 },
+};
+constexpr size_t kLimitFieldCount = sizeof(kLimitFields) / sizeof(kLimitFields[0]);
+
+// Our field i, as the bits of its type, through a reference to it.
+template <typename F>
+void OurLimitField(CDerivedStats& stats, size_t i, F f)
+{
+    switch (i) {
+    case 0:
+        f(stats.m_generalState);
+        break;
+    case 1:
+        f(stats.m_nMaxHitPoints);
+        break;
+    case 2:
+        f(stats.m_nACCrushingMod);
+        break;
+    case 3:
+        f(stats.m_nACMissileMod);
+        break;
+    case 4:
+        f(stats.m_nACPiercingMod);
+        break;
+    case 5:
+        f(stats.m_nACSlashingMod);
+        break;
+    case 6:
+        f(stats.m_nTHAC0);
+        break;
+    case 7:
+        f(stats.m_nNumberOfAttacks);
+        break;
+    case 8:
+        f(stats.m_nSaveVSFortitude);
+        break;
+    case 9:
+        f(stats.m_nSaveVSReflex);
+        break;
+    case 10:
+        f(stats.m_nSaveVSWill);
+        break;
+    case 11:
+        f(stats.m_nFatigue);
+        break;
+    case 12:
+        f(stats.m_nIntoxication);
+        break;
+    case 13:
+        f(stats.m_nLuck);
+        break;
+    case 14:
+        f(stats.m_nLevel);
+        break;
+    case 15:
+        f(stats.m_nSTR);
+        break;
+    case 16:
+        f(stats.m_nINT);
+        break;
+    case 17:
+        f(stats.m_nWIS);
+        break;
+    case 18:
+        f(stats.m_nDEX);
+        break;
+    case 19:
+        f(stats.m_nCON);
+        break;
+    case 20:
+        f(stats.m_nCHR);
+        break;
+    case 21:
+        f(stats.m_nXPValue);
+        break;
+    case 22:
+        f(stats.m_nXP);
+        break;
+    case 23:
+        f(stats.m_nGold);
+        break;
+    case 24:
+        f(stats.m_nMoraleBreak);
+        break;
+    case 25:
+        f(stats.m_nMoraleRecoveryTime);
+        break;
+    case 26:
+        f(stats.m_nReputation);
+        break;
+    case 27:
+        f(stats.m_nDamageBonus);
+        break;
+    case 28:
+        f(stats.m_nSpellFailureArcane);
+        break;
+    case 29:
+        f(stats.m_nSpellFailureDivine);
+        break;
+    case 30:
+        f(stats.m_nSpellDurationModMage);
+        break;
+    case 31:
+        f(stats.m_nSpellDurationModPriest);
+        break;
+    case 32:
+        f(stats.m_nTurnUndeadLevel);
+        break;
+    case 33:
+        f(stats.m_nBackstabDamageMultiplier);
+        break;
+    case 34:
+        f(stats.m_nLayOnHandsAmount);
+        break;
+    case 35:
+        f(stats.m_nTranslucent);
+        break;
+    case 36:
+        f(stats.m_nSkills[6]);
+        break;
+    case 37:
+        f(stats.m_nSkills[9]);
+        break;
+    case 38:
+        f(stats.m_nSkills[10]);
+        break;
+    case 39:
+        f(stats.m_nSkills[11]);
+        break;
+    case 40:
+        f(stats.m_nSkills[12]);
+        break;
+    case 41:
+        f(stats.m_nSkills[14]);
+        break;
+    case 42:
+        f(stats.m_nSkills[15]);
+        break;
+    }
+}
+
+// The values a field is set to: the clamps' bounds and their neighbours,
+// the sign boundaries and the type's extremes, then random bits.
+uint32_t LimitValue(std::mt19937& rng, int size)
+{
+    static const int32_t kEdges[] = { 0, 1, -1, 2, 5, 9, 10, 11, 19, 20, 21, 39, 40, 41, 49, 50, 51, 99, 100, 101,
+        127, 128, 199, 200, 201, 254, 255, 256, -20, -21, -40, -41, -128, -129, -255, -256, 0x7FFF, -0x8000,
+        0x7FFFFFFF, static_cast<int32_t>(0x80000000), static_cast<int32_t>(0xFFFFFFFF),
+        static_cast<int32_t>(0xFFFFFFFE) };
+    uint32_t value = (rng() % 3 == 0) ? rng() : static_cast<uint32_t>(kEdges[rng() % (sizeof(kEdges) / sizeof(kEdges[0]))]);
+    if (size == 1) {
+        value &= 0xFF;
+    } else if (size == 2) {
+        value &= 0xFFFF;
+    }
+    return value;
+}
+
+void CheckLimitsCase(CaseContext& ctx)
+{
+    std::mt19937 rng(static_cast<uint32_t>(ctx.seed ^ 0x4468F0u));
+    uint8_t* block = nullptr;
+    ctx.CallOriginal([&] {
+        block = static_cast<uint8_t*>(reinterpret_cast<OriginalNewFn>(kOriginalNew)(kDerivedStatsBlock));
+    });
+    CDerivedStats ours;
+
+    // A death state: the dead bit and others (0x800 and 0xFFFFFFFF).
+    const int rounds = ctx.iterations < 200 ? 200 : ctx.iterations;
+    for (int round = 0; round < rounds; ++round) {
+        uint32_t values[kLimitFieldCount];
+        std::string inputs = "round " + std::to_string(round) + ":";
+        for (size_t i = 0; i < kLimitFieldCount; ++i) {
+            values[i] = LimitValue(rng, kLimitFields[i].size);
+            if (i == 0 && round % 4 == 0) {
+                values[i] |= 0x800;
+            }
+            inputs += std::string(" ") + kLimitFields[i].name + "=" + std::to_string(values[i]);
+        }
+        ctx.SetInputs(inputs);
+
+        uint32_t original[kLimitFieldCount];
+        ctx.CallOriginal([&] {
+            std::memset(block, 0, kDerivedStatsBlock);
+            for (size_t i = 0; i < kLimitFieldCount; ++i) {
+                std::memcpy(block + kLimitFields[i].offset, &values[i], kLimitFields[i].size);
+            }
+            reinterpret_cast<CheckLimitsFn>(kCheckLimits)(block, nullptr);
+            for (size_t i = 0; i < kLimitFieldCount; ++i) {
+                original[i] = 0;
+                std::memcpy(&original[i], block + kLimitFields[i].offset, kLimitFields[i].size);
+            }
+        });
+
+        for (size_t i = 0; i < kLimitFieldCount; ++i) {
+            OurLimitField(ours, i, [&](auto& field) {
+                std::memcpy(&field, &values[i], sizeof(field));
+            });
+        }
+        ours.CheckLimits();
+        ctx.CountInputs(1);
+        for (size_t i = 0; i < kLimitFieldCount; ++i) {
+            uint32_t value = 0;
+            OurLimitField(ours, i, [&](auto& field) {
+                std::memcpy(&value, &field, sizeof(field));
+            });
+            if (!oracle::Compare(ctx, std::string(kLimitFields[i].name) + "=" + std::to_string(original[i]),
+                    std::string(kLimitFields[i].name) + "=" + std::to_string(value))) {
+                break;
+            }
+        }
+    }
+}
+
 } // namespace
 
 ORACLE_CASE("rules/spell_automatic_picker", SpellAutomaticPicker);
 ORACLE_CASE("rules/starting_hp", StartingHitPoints);
 ORACLE_CASE("rules/roll_hit_points", RollHitPoints);
+ORACLE_CASE("rules/check_limits", CheckLimitsCase);
