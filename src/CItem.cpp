@@ -28,13 +28,105 @@ CItem::CItem()
 // 0x4E7900
 CItem::CItem(const CItem& item)
 {
-    // TODO: Incomplete.
+    // NOTE: The original leaves m_nAbilities unset when the copy names a
+    // missing item (the inlined GetAbilityCount below assigns it only when
+    // the resref is empty or the resource exists). Zero it so that case
+    // reads a defined value.
+    m_nAbilities = 0;
+
+    m_useCount1 = item.m_useCount1;
+    m_useCount2 = item.m_useCount2;
+    m_useCount3 = item.m_useCount3;
+    m_numSounds = item.m_numSounds;
+    m_wear = item.m_wear;
+    m_flags = item.m_flags;
+
+    CString sResRef;
+    CResRef(item.cResRef).CopyToString(sResRef);
+
+    sub_4EA4A0(sResRef);
+    g_pBaldurChitin->GetObjectGame()->GetRuleTables().sub_5463E0(sResRef);
+
+    if (_stricmp(sResRef, "no_drop") == 0) {
+        sResRef = "";
+    }
+
+    if (strcmp(sResRef, "MISC07") == 0) {
+        if (m_useCount1 == 0) {
+            m_useCount1 = 1;
+        } else {
+            m_useCount1 += m_useCount2 != 0 ? rand() % m_useCount2 : 0;
+        }
+        m_useCount2 = 0;
+    }
+
+    CResHelper<CResItem, 1005>::SetResRef(CResRef(sResRef), TRUE, TRUE);
+
+    // NOTE: Uninline.
+    GetAbilityCount();
+
+    // NOTE: Uninline.
+    if (GetLoreValue() == 0) {
+        m_flags |= 0x1;
+    }
+
+    // NOTE: Unlike the other constructors, the copy does not set 0x8 on an
+    // unidentified item: the copied flags keep whatever the source had.
 }
 
 // 0x4E7B60
 CItem::CItem(const CCreatureFileItem& item)
 {
-    // TODO: Incomplete.
+    // NOTE: See the copy constructor: zeroed for a missing item.
+    m_nAbilities = 0;
+
+    CString sResRef;
+    CResRef(item.m_itemId).CopyToString(sResRef);
+    sResRef.MakeUpper();
+
+    m_useCount1 = item.m_usageCount[0];
+    m_useCount2 = item.m_usageCount[1];
+    m_useCount3 = item.m_usageCount[2];
+
+    sub_4EA4A0(sResRef);
+    g_pBaldurChitin->GetObjectGame()->GetRuleTables().sub_5463E0(sResRef);
+
+    if (_stricmp(sResRef, "no_drop") == 0) {
+        sResRef = "";
+    }
+
+    if (strcmp(sResRef, "MISC07") == 0) {
+        if (m_useCount1 == 0) {
+            m_useCount1 = 1;
+        } else {
+            m_useCount1 += m_useCount2 != 0 ? rand() % m_useCount2 : 0;
+        }
+        m_useCount2 = 0;
+    }
+
+    CResHelper<CResItem, 1005>::SetResRef(CResRef(sResRef), TRUE, TRUE);
+
+    // NOTE: Uninline.
+    if (GetMaxStackable() > 1) {
+        m_useCount1 = max(m_useCount1, 1);
+        m_useCount2 = max(m_useCount2, 1);
+        m_useCount3 = max(m_useCount3, 1);
+    }
+
+    m_wear = item.m_wear;
+    m_flags = item.m_dynamicFlags;
+
+    // NOTE: Uninline.
+    GetAbilityCount();
+
+    // NOTE: Uninline.
+    if (GetLoreValue() == 0) {
+        m_flags |= 0x1;
+    }
+
+    if ((m_flags & 0x1) == 0) {
+        m_flags |= 0x8;
+    }
 }
 
 // FIXME: `id` should be reference.
@@ -94,7 +186,14 @@ CItem::CItem(CResRef id, WORD useCount1, WORD useCount2, WORD useCount3, int wea
 // 0x4E8180
 CItem::~CItem()
 {
-    // TODO: Incomplete.
+    m_useCount1 = 1;
+    m_useCount2 = 1;
+    m_useCount3 = 1;
+    m_nAbilities = 0;
+    m_wear = 0;
+
+    // NOTE: The sounds and the CResHelper base (cancel the request, release
+    // the resource) are destroyed by the compiler, as in the original.
 }
 
 // 0x4E8240

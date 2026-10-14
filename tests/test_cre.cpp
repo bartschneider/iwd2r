@@ -18,6 +18,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <new>
 #include <string>
 #include <vector>
 
@@ -451,4 +452,197 @@ TEST_CASE("Marshal without all items skips a type 0x3A item and keeps the slot n
     CHECK(equipment.m_miscItem[0] == 0);
     CHECK(equipment.m_miscItem[1] == 1);
     delete[] pItems;
+}
+
+namespace {
+
+// The bytes of a creature's CRE through the engine's resource system.
+std::vector<BYTE> LoadCre(const char* resRef)
+{
+    CCreatureFile file;
+    file.SetResRef(CResRef(resRef), TRUE, TRUE);
+    BYTE* data = file.GetData();
+    std::vector<BYTE> bytes;
+    if (data != NULL) {
+        bytes.assign(data, data + file.GetDataSize());
+    }
+    file.Release();
+    return bytes;
+}
+
+}
+
+TEST_CASE("creatures 10GUTHE and 12OGR construct from their CRE", "[cre][data]")
+{
+    const char* env = std::getenv("IWD2_DATA");
+    if (env == nullptr || *env == '\0') {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+
+    for (const char* resRef : { "10GUTHE", "12OGR" }) {
+        INFO(resRef);
+        std::vector<BYTE> bytes = LoadCre(resRef);
+        REQUIRE(bytes.size() > 900);
+        CGameSprite* pSprite = MakeSprite(bytes);
+        REQUIRE(pSprite != NULL);
+    }
+}
+
+// A manual sweep, hidden from the default run: constructs every creature
+// named in IWD2R_CRE_LIST (separated by spaces, commas or newlines),
+// printing each name before it is built, so a crash names its creature.
+// Run it one creature per process under the memory cap (rule M3-3:
+// systemd-run --user --scope -p MemoryMax=... -p MemorySwapMax=0): the
+// unported effects of some creatures loop or assert while they load.
+TEST_CASE("every creature in IWD2R_CRE_LIST constructs from its CRE", "[.][cre-sweep][data]")
+{
+    const char* env = std::getenv("IWD2_DATA");
+    const char* list = std::getenv("IWD2R_CRE_LIST");
+    if (env == nullptr || *env == '\0' || list == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA or IWD2R_CRE_LIST unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+
+    std::string names(list);
+    for (char& c : names) {
+        if (c == ',' || c == '\n' || c == '\r' || c == '\t') {
+            c = ' ';
+        }
+    }
+    size_t at = 0;
+    while (at < names.size()) {
+        size_t end = names.find(' ', at);
+        if (end == std::string::npos) {
+            end = names.size();
+        }
+        const std::string resRef = names.substr(at, end - at);
+        at = end + 1;
+        if (resRef.empty()) {
+            continue;
+        }
+        fprintf(stderr, "cre-sweep: constructing %s\n", resRef.c_str());
+        fflush(stderr);
+        std::vector<BYTE> bytes = LoadCre(resRef.c_str());
+        CHECK(bytes.size() > 900);
+        if (bytes.size() > 900) {
+            CGameSprite* pSprite = MakeSprite(bytes);
+            CHECK(pSprite != NULL);
+        }
+        fprintf(stderr, "cre-sweep: built %s\n", resRef.c_str());
+        fflush(stderr);
+    }
+}
+
+// CItem's constructors from a CRE item record (0x4E7B60) and from another
+// item (0x4E7900), and its destructor (0x4E8180). 00AROW01 stacks to 40
+// and has lore 0; 00AROW03 stacks to 40 and has lore 4.
+TEST_CASE("CItem from a CRE record clamps stack counts and marks identification; a copy does neither", "[cre][item][data]")
+{
+    const char* env = std::getenv("IWD2_DATA");
+    if (env == nullptr || *env == '\0') {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+
+    CCreatureFileItem record;
+    memcpy(record.m_itemId, "00arow01", RESREF_SIZE);
+    record.m_wear = 3;
+    record.m_dynamicFlags = 0x10;
+
+    // Lore 0: flag 0x1 (identified), so no 0x8. A stackable item's counts
+    // are at least 1.
+    CItem unknown(record);
+    CHECK(unknown.GetResRef() == CResRef("00AROW01"));
+    CHECK(unknown.m_useCount1 == 1);
+    CHECK(unknown.m_useCount2 == 1);
+    CHECK(unknown.m_useCount3 == 1);
+    CHECK(unknown.m_wear == 3);
+    CHECK(unknown.m_flags == (0x10 | 0x1));
+    CHECK(unknown.m_nAbilities == unknown.GetAbilityCount());
+
+    // Lore 4 and flag 0x1 clear: 0x8 is set.
+    memcpy(record.m_itemId, "00AROW03", RESREF_SIZE);
+    record.m_usageCount[0] = 7;
+    record.m_dynamicFlags = 0;
+    CItem arrows(record);
+    CHECK(arrows.m_useCount1 == 7);
+    CHECK(arrows.m_flags == 0x8);
+
+    // The copy keeps the counts and flags as they are: no clamp, no 0x8.
+    arrows.m_useCount2 = 0;
+    arrows.m_flags = 0;
+    arrows.m_numSounds = 2;
+    CItem copy(arrows);
+    CHECK(copy.GetResRef() == CResRef("00AROW03"));
+    CHECK(copy.m_useCount1 == 7);
+    CHECK(copy.m_useCount2 == 0);
+    CHECK(copy.m_useCount3 == 1);
+    CHECK(copy.m_flags == 0);
+    CHECK(copy.m_numSounds == 2);
+    CHECK(copy.m_wear == 3);
+
+    // A copy of an item with lore 0 marks it identified.
+    unknown.m_flags = 0;
+    CItem copyUnknown(unknown);
+    CHECK(copyUnknown.m_flags == 0x1);
+
+    // The destructor resets the counts, the ability count and the wear.
+    alignas(CItem) unsigned char storage[sizeof(CItem)];
+    CItem* pItem = new (storage) CItem(record);
+    pItem->m_useCount1 = 9;
+    pItem->m_wear = 5;
+    pItem->~CItem();
+    CItem* pDead = reinterpret_cast<CItem*>(storage);
+    CHECK(pDead->m_useCount1 == 1);
+    CHECK(pDead->m_useCount2 == 1);
+    CHECK(pDead->m_useCount3 == 1);
+    CHECK(pDead->m_nAbilities == 0);
+    CHECK(pDead->m_wear == 0);
+}
+
+// CItem::Equip (0x4E8860) adds an item's equipped effects to the sprite's
+// equipped list; Unequip (0x4E8DF0) takes them out again. 00CIBBN1 is a
+// creature ring with one equipped effect (timing 2).
+TEST_CASE("CItem::Equip adds a ring's equipped effect and Unequip removes it", "[cre][item][data]")
+{
+    const char* env = std::getenv("IWD2_DATA");
+    if (env == nullptr || *env == '\0') {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+
+    std::vector<BYTE> bytes = LoadCharBase();
+    REQUIRE(bytes.size() > 900);
+    CGameSprite* pSprite = MakeSprite(bytes);
+    REQUIRE(pSprite != NULL);
+
+    CItem ring(CResRef("00CIBBN1"), 0, 0, 0, 0, 0);
+    REQUIRE(ring.pRes != NULL);
+    const INT_PTR before = pSprite->GetEquipedEffectList()->GetCount();
+
+    ring.Equip(pSprite, CGameSpriteEquipment::SLOT_RING_LEFT, FALSE);
+    CHECK(pSprite->GetEquipedEffectList()->GetCount() == before + 1);
+    CHECK(pSprite->field_7544 == 0);
+
+    // Animation only: no effects.
+    ring.Equip(pSprite, CGameSpriteEquipment::SLOT_RING_LEFT, TRUE);
+    CHECK(pSprite->GetEquipedEffectList()->GetCount() == before + 1);
+
+    ring.Unequip(pSprite, CGameSpriteEquipment::SLOT_RING_LEFT, FALSE, FALSE);
+    CHECK(pSprite->GetEquipedEffectList()->GetCount() == before);
+
+    // An empty item does nothing.
+    CItem none;
+    none.Equip(pSprite, CGameSpriteEquipment::SLOT_RING_LEFT, FALSE);
+    none.Unequip(pSprite, CGameSpriteEquipment::SLOT_RING_LEFT, FALSE, FALSE);
+    CHECK(pSprite->GetEquipedEffectList()->GetCount() == before);
 }
