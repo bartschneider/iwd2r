@@ -2,11 +2,9 @@
 # enters the world and ends the opening dialog (walk_and_talk.txt's steps up
 # to opening_done, without its checkpoints), saves into the empty slot
 # through Options, then loads that save through Options. Coordinates for
-# Resolution=800. Pending: our engine asserts in CInfGame::Marshal (0x5A3230,
-# "cnt3 == m_nCharacters") on the save, because CInfGame::AddCharacterToParty
-# (0x5BD070) does not put the member into m_characters (0x5BD1A9..0x5BD1C1)
-# and nothing else refills it after the Party Formation reload. With that
-# fixed the whole script runs (checked 2026-10-14 by patching it locally).
+# Resolution=800. Runs to the end headless since CInfGame::AddCharacterToParty
+# (0x5BD070) fills m_characters. Pending until it has checkpoints to compare
+# with the original.
 # walk_and_talk.txt to the end of the opening dialog (its comments say
 # what each step does).
 wait 60

@@ -1893,7 +1893,7 @@ BOOLEAN CVidInf::SaveScreen()
 
     if (!PrintSurfaceToBmp(data, 0, rClip, size, 1)) {
         if (data != NULL) {
-            delete data;
+            delete[] data;
         }
 
         return FALSE;
@@ -1904,14 +1904,14 @@ BOOLEAN CVidInf::SaveScreen()
     }
 
     if (!cFile.Open(sPath, CFile::OpenFlags::modeCreate | CFile::OpenFlags::modeWrite, NULL)) {
-        delete data;
+        delete[] data;
         return FALSE;
     }
 
     cFile.Write(data, size);
     cFile.Close();
 
-    delete data;
+    delete[] data;
     return TRUE;
 }
 
