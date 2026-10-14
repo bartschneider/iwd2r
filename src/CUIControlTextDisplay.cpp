@@ -570,6 +570,8 @@ void CUIControlTextDisplay::RemoveString(POSITION posBoss)
             m_posTopString = pos;
         }
 
+        m_plstStrings->RemoveAt(currentPos);
+
         if (pDisplayString != NULL) {
             delete pDisplayString;
         }
