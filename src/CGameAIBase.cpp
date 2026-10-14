@@ -1370,12 +1370,6 @@ void CGameAIBase::ProcessPendingTriggers()
                 }
 
                 bContinue = TRUE;
-            } else {
-                // NOTE: The first level does not test the flag; it is always
-                // set there.
-                if (!bContinue) {
-                    goto insert;
-                }
             }
         }
 
