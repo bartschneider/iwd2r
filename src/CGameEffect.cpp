@@ -23,6 +23,8 @@
 #include "IcewindMisc.h"
 
 #include <cstdio>
+#include <list>
+#include <string>
 
 // NOTE: Not used. It does not include many effects. Formatting is odd.
 //
@@ -242,7 +244,7 @@ CGameEffectBase::CGameEffectBase()
     m_projectileType = 0;
     m_slotNum = -1;
     m_casterLevel = 0;
-    m_firstCall = 0;
+    m_spellPenetrationBonus = 0;
     m_secondaryType = 1;
     memset(m_pad, 0, sizeof(m_pad));
 }
@@ -1521,10 +1523,10 @@ BOOL CGameEffect::sub_4A3310(CGameSprite* pSprite, BYTE* pRoll1, BYTE* pRoll2, B
         return FALSE;
     }
 
-    // TODO: Incomplete. The original looks m_sourceRes up in the
-    // CDerivedStats container at +0x470 (0x4A3920-0x4A39A0) and rejects the
-    // effect when it is there. CDerivedStats does not declare that container
-    // yet (nothing in src/ fills it), so the lookup is taken as a miss.
+    std::string sSourceRes(static_cast<const char*>(m_sourceRes.GetResRefStr()));
+    if (pSprite->m_derivedStats.m_resourceImmunities.find(sSourceRes) != pSprite->m_derivedStats.m_resourceImmunities.end()) {
+        return FALSE;
+    }
 
     if (CSevenEyes::CheckEyeOfStone(pSprite, this) == TRUE
         || CSevenEyes::CheckEyeOfSpirit(pSprite, this) == TRUE
@@ -1601,10 +1603,24 @@ BOOL CGameEffect::sub_4A3310(CGameSprite* pSprite, BYTE* pRoll1, BYTE* pRoll2, B
             return FALSE;
         }
 
-        // TODO: Incomplete. The original adds the source sprite's save
-        // adjustment (GetSaveAdjustmentForSourceSprite 0x547040) and, for
-        // SPWI420's source, 0x547620 to m_saveMod (0x4A3D80-0x4A3E29). Neither
-        // is in src/.
+        BYTE nClass = static_cast<BYTE>(m_casterLevel >> 8);
+        if (nClass != 0 && pSource->GetObjectType() == CGameObject::TYPE_SPRITE) {
+            const CRuleTables& ruleTables = pGame->GetRuleTables();
+            DWORD nSpecialization = 0;
+            if (nClass == CAIOBJECTTYPE_C_CLERIC) {
+                nSpecialization = ruleTables.GetSpecializationMask(CAIOBJECTTYPE_C_CLERIC, static_cast<BYTE>(m_casterLevel >> 16));
+            }
+
+            m_saveMod += ruleTables.GetSaveAdjustmentForSourceSprite(static_cast<CGameSprite*>(pSource),
+                m_sourceRes,
+                m_savingThrow,
+                nClass,
+                nSpecialization,
+                static_cast<BYTE>(m_casterLevel));
+        }
+
+        // TODO: Incomplete. For SPWI420's source the original adds 0x547620
+        // to m_saveMod (0x4A3DF7-0x4A3E29); not in src/.
 
         pGame->GetObjectArray()->ReleaseShare(m_sourceID,
             CGameObjectArray::THREAD_ASYNCH,
@@ -1780,7 +1796,7 @@ void CGameEffect::CopyFromBase(CGameEffectBase* pBase)
     m_slotNum = pBase->m_slotNum;
     memcpy(m_scriptName, pBase->m_scriptName, 32);
     m_casterLevel = pBase->m_casterLevel;
-    m_firstCall = pBase->m_firstCall;
+    m_spellPenetrationBonus = pBase->m_spellPenetrationBonus;
     m_secondaryType = pBase->m_secondaryType;
 }
 
@@ -2383,6 +2399,24 @@ BOOL CGameEffectBerserk::ApplyEffect(CGameSprite* pSprite)
     return TRUE;
 }
 
+// 0x4A5AB0
+void CGameEffectBerserk::OnRemove(CGameSprite* pSprite)
+{
+    if (m_dwFlags == 2) {
+        std::list<CGameEffect*> effects = IcewindMisc::GetSpellResrefEffects(pSprite,
+            reinterpret_cast<const BYTE*>("EffBR"),
+            static_cast<BYTE>(m_casterLevel));
+        for (std::list<CGameEffect*>::iterator it = effects.begin(); it != effects.end(); it++) {
+            (*it)->m_sourceRes = m_sourceRes;
+            (*it)->m_target = m_target;
+            (*it)->m_casterLevel = m_casterLevel;
+            pSprite->AddEffect(*it, CGameAIBase::EFFECT_LIST_TIMED, TRUE, TRUE);
+        }
+    }
+
+    PlaySound(CResRef("EFF_E05"), pSprite);
+}
+
 // -----------------------------------------------------------------------------
 
 // 0x4936E0
@@ -2417,6 +2451,25 @@ BOOL CGameEffectBarbarianRage::ApplyEffect(CGameSprite* pSprite)
     pSprite->GetDerivedStats()->m_disabledButtons[10] = TRUE;
     pSprite->GetDerivedStats()->m_disabledButtons[0] = TRUE;
     return TRUE;
+}
+
+// 0x4A5C50
+void CGameEffectBarbarianRage::OnRemove(CGameSprite* pSprite)
+{
+    if (pSprite->m_derivedStats.GetClassLevel(CAIOBJECTTYPE_C_BARBARIAN) < 20
+        && pSprite->m_derivedStats.m_naturalImmunities.find(CGAMEEFFECT_FATIGUE) == pSprite->m_derivedStats.m_naturalImmunities.end()) {
+        std::list<CGameEffect*> effects = IcewindMisc::GetSpellResrefEffects(pSprite,
+            reinterpret_cast<const BYTE*>("EffBBR"),
+            static_cast<BYTE>(m_casterLevel));
+        for (std::list<CGameEffect*>::iterator it = effects.begin(); it != effects.end(); it++) {
+            (*it)->m_sourceRes = m_sourceRes;
+            (*it)->m_target = m_target;
+            (*it)->m_casterLevel = m_casterLevel;
+            pSprite->AddEffect(*it, CGameAIBase::EFFECT_LIST_TIMED, TRUE, TRUE);
+        }
+    }
+
+    PlaySound(CResRef("EFF_E05"), pSprite);
 }
 
 // -----------------------------------------------------------------------------
@@ -3429,10 +3482,7 @@ BOOL CGameEffectDamage::ApplyEffect(CGameSprite* pSprite)
         }
 
         if (m_special != -1) {
-            // TODO: Incomplete. The original reduces the amount through the
-            // damage reduction table at m_derivedStats + 0x49C
-            // (0x448250(m_effectAmount, m_special, dwDamageType)); the
-            // table is not in CDerivedStats.h.
+            m_effectAmount = pSprite->m_derivedStats.m_damageReductions.Apply(m_effectAmount, m_special, dwDamageType);
         }
 
         if (m_effectAmount < 0) {
@@ -3678,11 +3728,15 @@ BOOL CGameEffectDamage::ApplyEffect(CGameSprite* pSprite)
                 &pSource,
                 INFINITE);
             if (rc == CGameObjectArray::SUCCESS) {
-                // TODO: Incomplete. The original fetches the "EffSE" effects
-                // of the source's spell m_sourceRes at m_casterLevel
-                // (GetSpellResrefEffects 0x586220, not in src/), aims each
-                // at ptPos with m_casterLevel and adds it to the source.
-                (void)ptPos;
+                std::list<CGameEffect*> effects = IcewindMisc::GetSpellResrefEffects(pSource,
+                    reinterpret_cast<const BYTE*>("EffSE"),
+                    static_cast<BYTE>(m_casterLevel));
+                for (std::list<CGameEffect*>::iterator it = effects.begin(); it != effects.end(); it++) {
+                    (*it)->m_sourceRes = m_sourceRes;
+                    (*it)->m_target = ptPos;
+                    (*it)->m_casterLevel = m_casterLevel;
+                    static_cast<CGameAIBase*>(pSource)->AddEffect(*it, CGameAIBase::EFFECT_LIST_TIMED, TRUE, TRUE);
+                }
             }
 
             // NOTE: The original releases the share even when GetShare
@@ -15226,9 +15280,7 @@ BOOL CGameEffectImmunitySpell::ApplyEffect(CGameSprite* pSprite)
         if (sRes.length() == 0) {
             m_done = TRUE;
         } else {
-            // TODO: Incomplete. The original inserts sRes into the spell
-            // immunity tree at m_derivedStats + 0x470 (0x4C4C90 at
-            // 0x4BFEFC); CDerivedStats.h does not declare the tree.
+            pSprite->m_derivedStats.m_resourceImmunities.insert(sRes);
 
             if (m_secondaryType && m_effectID == ICEWIND_CGAMEEFFECT_IMMUNITYSPELL) {
                 // NOTE: Inlined FeedBackImmuneToResource (0x4C4330), with
@@ -15874,12 +15926,17 @@ BOOL CGameEffectStoneSkins::ApplyEffect(CGameSprite* pSprite)
             m_effectAmount2 = nAmount;
         }
 
-        // TODO: Incomplete. The original adds a damage reduction entry for
-        // the physical damage types (0, 0x100000, 0x1000000, 0x2000000,
-        // 0x4000000, 0x8000000) of 10 / 5 with m_effectAmount2 as its pool
-        // to the table at m_derivedStats + 0x49C (0x447B60, 0x447E50,
-        // 0x447F10, 0x447F30, 0x448470); CDerivedStats.h does not declare
-        // the table.
+        // NOTE: The entry keeps pointers to m_effectAmount2 and this effect,
+        // which dangle once the effect is removed (see 447C20.md). Kept.
+        CDamageReduction reduction(10, 5);
+        reduction.AddDamageType(0);
+        reduction.AddDamageType(0x100000);
+        reduction.AddDamageType(0x1000000);
+        reduction.AddDamageType(0x2000000);
+        reduction.AddDamageType(0x4000000);
+        reduction.AddDamageType(0x8000000);
+        reduction.SetSource(&m_effectAmount2, pSprite, this);
+        pSprite->m_derivedStats.m_damageReductions.push_back(reduction);
     } else if (m_dwFlags == 1) {
         // Iron skins.
         if (m_secondaryType) {

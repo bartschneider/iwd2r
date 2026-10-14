@@ -9,6 +9,7 @@
 #include "CImmunities.h"
 #include "CInfGame.h"
 #include "CScreenCreateChar.h"
+#include "IcewindCGameEffects.h"
 #include "ScreenLayout.h"
 #include "data_view.h"
 #include "platform/data_dir.h"
@@ -670,6 +671,167 @@ TEST_CASE("fire resistance (30) adds a negative temporary bonus as a signed amou
     pSprite->m_baseStats.m_resistFireBase = 40;
     Apply(pSprite, CGAMEEFFECT_RESISTFIRE, 2, 50, 1);
     CHECK(pSprite->m_baseStats.m_resistFireBase == 20);
+
+    delete pSprite;
+}
+
+TEST_CASE("berserk (3) and barbarian rage (440) removal add the fatigue spell's effects", "[effects][data]")
+{
+    REQUIRE_ENGINE();
+
+    SECTION("berserk: only blood rage (2) fetches EffBR")
+    {
+        CGameSprite* pSprite = MakeSprite();
+        CGameEffect* pEffect = Make(CGAMEEFFECT_BERSERK, 0, 0, 0);
+        pEffect->m_casterLevel = 1;
+        pEffect->OnRemove(pSprite);
+        CHECK(pSprite->m_timedEffectList.GetCount() == 0);
+        delete pEffect;
+
+        pEffect = Make(CGAMEEFFECT_BERSERK, 2, 0, 0);
+        pEffect->m_casterLevel = 1;
+        pEffect->m_sourceRes = CResRef("SPCL321");
+        pEffect->OnRemove(pSprite);
+        CHECK(pSprite->m_timedEffectList.GetCount() > 0);
+        // EffBR's fatigue of 16.
+        CHECK(pSprite->m_baseStats.m_fatigue == 16);
+        POSITION pos = pSprite->m_timedEffectList.GetHeadPosition();
+        while (pos != NULL) {
+            CGameEffect* pAdded = pSprite->m_timedEffectList.GetNext(pos);
+            CHECK(pAdded->m_sourceRes == CResRef("SPCL321"));
+            CHECK(pAdded->m_casterLevel == 1);
+        }
+        delete pEffect;
+        delete pSprite;
+    }
+
+    SECTION("barbarian rage: EffBBR unless immune to fatigue")
+    {
+        CGameSprite* pSprite = MakeSprite();
+        REQUIRE(pSprite->m_derivedStats.GetClassLevel(CAIOBJECTTYPE_C_BARBARIAN) < 20);
+        CGameEffect* pEffect = Make(ICEWIND_CGAMEEFFECT_BARBARIANRAGE, 0, 0, 0);
+        pEffect->m_casterLevel = 1;
+        pSprite->m_derivedStats.m_naturalImmunities.insert(CGAMEEFFECT_FATIGUE);
+        pEffect->OnRemove(pSprite);
+        CHECK(pSprite->m_timedEffectList.GetCount() == 0);
+        pSprite->m_derivedStats.m_naturalImmunities.erase(CGAMEEFFECT_FATIGUE);
+        pEffect->OnRemove(pSprite);
+        CHECK(pSprite->m_timedEffectList.GetCount() > 0);
+        delete pEffect;
+        delete pSprite;
+    }
+}
+
+TEST_CASE("damage (12) goes through the damage reductions", "[effects][data]")
+{
+    REQUIRE_ENGINE();
+    CGameSprite* pSprite = MakeSprite();
+    pSprite->m_baseStats.m_hitPoints = 30;
+    pSprite->m_baseStats.m_maxHitPointsBase = 30;
+    pSprite->m_tempStats.m_nMaxHitPoints = 30;
+    pSprite->m_baseStats.m_generalState = 0;
+    CDamageReduction reduction(3, 5);
+    reduction.AddDamageType(0x400000);
+    pSprite->m_derivedStats.m_damageReductions.push_back(reduction);
+
+    // A +0 source (m_special 0): 7 - 3.
+    CGameEffect* pEffect = Make(CGAMEEFFECT_DAMAGE, 0x400000, 7, 0);
+    pEffect->m_special = 0;
+    REQUIRE(pEffect->ApplyEffect(pSprite) == TRUE);
+    CHECK(pSprite->m_baseStats.m_hitPoints == 26);
+    delete pEffect;
+
+    // m_special -1: no reduction.
+    pEffect = Make(CGAMEEFFECT_DAMAGE, 0x400000, 7, 0);
+    pEffect->m_special = static_cast<DWORD>(-1);
+    REQUIRE(pEffect->ApplyEffect(pSprite) == TRUE);
+    CHECK(pSprite->m_baseStats.m_hitPoints == 19);
+    delete pEffect;
+
+    // A +5 source passes the 3/+5.
+    pEffect = Make(CGAMEEFFECT_DAMAGE, 0x400000, 7, 0);
+    pEffect->m_special = 5;
+    REQUIRE(pEffect->ApplyEffect(pSprite) == TRUE);
+    CHECK(pSprite->m_baseStats.m_hitPoints == 12);
+    delete pEffect;
+
+    delete pSprite;
+}
+
+TEST_CASE("spell immunity (206) and stoneskin (218) fill the derived stats containers", "[effects][data]")
+{
+    REQUIRE_ENGINE();
+    CGameSprite* pSprite = MakeSprite();
+
+    CGameEffect* pEffect = Make(CGAMEEFFECT_IMMUNITYSPELL, 0, 0, 0);
+    pEffect->m_res = CResRef("SPWI112");
+    REQUIRE(pEffect->ApplyEffect(pSprite) == TRUE);
+    CHECK(pSprite->m_derivedStats.m_resourceImmunities.count("SPWI112") == 1);
+    CHECK(pSprite->m_derivedStats.m_naturalImmunities.count(0) == 0);
+    delete pEffect;
+
+    pSprite->m_derivedStats.m_damageReductions.clear();
+    // A secondary-type stoneskin sets its pool to 10 per caster level.
+    pEffect = Make(CGAMEEFFECT_STONESKINS, 0, 0, 0);
+    pEffect->m_secondaryType = TRUE;
+    pEffect->m_casterLevel = 4;
+    REQUIRE(pEffect->ApplyEffect(pSprite) == TRUE);
+    REQUIRE(pSprite->m_derivedStats.m_damageReductions.size() == 1);
+    CDamageReduction& entry = pSprite->m_derivedStats.m_damageReductions[0];
+    CHECK(entry.m_nAmount == 10);
+    CHECK(entry.m_nEnchantment == 5);
+    CHECK(entry.IsGeneric() == TRUE);
+    CHECK(entry.m_pPool == &pEffect->m_effectAmount2);
+    CHECK(entry.m_sourceCreaturePtr == pSprite);
+    CHECK(entry.m_sourceEffectPtr == pEffect);
+    CHECK(pEffect->m_effectAmount2 == 40);
+    CHECK(entry.GetEffectiveAmount() == 10);
+    // The pool absorbs 10 per hit until it runs out.
+    CHECK(pSprite->m_derivedStats.m_damageReductions.Apply(15, 0, 0) == 5);
+    CHECK(pEffect->m_effectAmount2 == 30);
+    pSprite->m_derivedStats.m_damageReductions.clear();
+    delete pEffect;
+
+    delete pSprite;
+}
+
+TEST_CASE("check add rejects a resource immunity and adds the source's save adjustment", "[effects][data]")
+{
+    REQUIRE_ENGINE();
+    CGameSprite* pSprite = MakeSprite();
+    BYTE roll1 = 10;
+    BYTE roll2 = 10;
+    BYTE roll3 = 10;
+    BYTE roll4 = 10;
+    BYTE probability = 50;
+
+    CGameEffect* pEffect = Make(CGAMEEFFECT_STR, 0, 1, 0);
+    pEffect->m_sourceRes = CResRef("SPWI999");
+    pSprite->m_derivedStats.m_resourceImmunities.insert("SPWI999");
+    CHECK(pEffect->sub_4A3310(pSprite, &roll1, &roll2, &roll3, &roll4, &probability) == FALSE);
+    pSprite->m_derivedStats.m_resourceImmunities.clear();
+    delete pEffect;
+
+    // A wizard source (class 11 in bits 8..15) with INT 18: +4.
+    pSprite->m_derivedStats.m_nINT = 18;
+    pEffect = Make(CGAMEEFFECT_STR, 0, 1, 0);
+    pEffect->m_sourceID = pSprite->GetId();
+    pEffect->m_savingThrow = 0x4;
+    pEffect->m_saveMod = 1;
+    pEffect->m_casterLevel = (CAIOBJECTTYPE_C_WIZARD << 8) | 5;
+    pEffect->sub_4A3310(pSprite, &roll1, &roll2, &roll3, &roll4, &probability);
+    CHECK(pEffect->m_saveMod == 5);
+    delete pEffect;
+
+    // No class: nothing added.
+    pEffect = Make(CGAMEEFFECT_STR, 0, 1, 0);
+    pEffect->m_sourceID = pSprite->GetId();
+    pEffect->m_savingThrow = 0x4;
+    pEffect->m_saveMod = 1;
+    pEffect->m_casterLevel = 5;
+    pEffect->sub_4A3310(pSprite, &roll1, &roll2, &roll3, &roll4, &probability);
+    CHECK(pEffect->m_saveMod == 1);
+    delete pEffect;
 
     delete pSprite;
 }

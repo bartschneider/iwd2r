@@ -440,7 +440,7 @@ TEST_CASE("spell ability effect", "[spell][data]")
         REQUIRE(pEffect != nullptr);
         const BYTE index = g_pBaldurChitin->GetObjectGame()->GetRuleTables().GetSpecializationIndex(CAIOBJECTTYPE_C_CLERIC, SPECMASK_CLERIC_HELM);
         CHECK(pEffect->m_casterLevel == (7u | (CAIOBJECTTYPE_C_CLERIC << 8) | (static_cast<DWORD>(index) << 16)));
-        CHECK(pEffect->m_firstCall == static_cast<DWORD>(pSprite->GetFeatValue(CGAMESPRITE_FEAT_SPELL_PENETRATION) << 1));
+        CHECK(pEffect->m_spellPenetrationBonus == static_cast<DWORD>(pSprite->GetFeatValue(CGAMESPRITE_FEAT_SPELL_PENETRATION) << 1));
 
         pEffect = spell.GetAbilityEffect(0, 0, pSprite, CAIOBJECTTYPE_C_WIZARD, 0, 0);
         REQUIRE(pEffect != nullptr);

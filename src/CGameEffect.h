@@ -277,7 +277,9 @@ public:
     /* 009C */ LONG m_slotNum;
     /* 00A0 */ SCRIPTNAME m_scriptName;
     /* 00C0 */ DWORD m_casterLevel;
-    /* 00C4 */ DWORD m_firstCall;
+    // Twice the caster's Spell Penetration feat (CSpell 0x54A510); CheckSave
+    // (0x4A42F0) reads it with the caster level.
+    /* 00C4 */ DWORD m_spellPenetrationBonus;
     /* 00C8 */ DWORD m_secondaryType;
     /* 00CC */ DWORD m_pad[15];
 };
@@ -371,14 +373,14 @@ class CGameEffectBerserk : public CGameEffect {
 public:
     CGameEffectBerserk(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
-    BOOL ApplyEffect(CGameSprite* pSprite) override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;    void OnRemove(CGameSprite* pSprite) override;
 };
 
 class CGameEffectBarbarianRage : public CGameEffect {
 public:
     CGameEffectBarbarianRage(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
-    BOOL ApplyEffect(CGameSprite* pSprite) override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;    void OnRemove(CGameSprite* pSprite) override;
 };
 
 class CGameEffectCalm : public CGameEffect {

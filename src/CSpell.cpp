@@ -253,9 +253,8 @@ CGameEffect* CSpell::GetAbilityEffect(LONG nAbility, LONG nEffect, CGameObject* 
 
                 pEffect->m_casterLevel = nCasterLevel;
 
-                // NOTE: Effect +0xC8, named m_firstCall in CGameEffect.h: twice
-                // the Spell Penetration feat (0x54A8D2).
-                pEffect->m_firstCall = pSprite->GetFeatValue(CGAMESPRITE_FEAT_SPELL_PENETRATION) << 1;
+                // NOTE: Twice the Spell Penetration feat (0x54A8D2).
+                pEffect->m_spellPenetrationBonus = pSprite->GetFeatValue(CGAMESPRITE_FEAT_SPELL_PENETRATION) << 1;
             } else {
                 pEffect->m_casterLevel = 1;
             }
