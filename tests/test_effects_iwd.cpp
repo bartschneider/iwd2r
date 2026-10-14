@@ -9,6 +9,7 @@
 #include "CMessage.h"
 #include "CProjectile850F9C.h"
 #include "CProjectileArea.h"
+#include "CProjectileSingleTarget.h"
 #include "CProjectileSpellHit.h"
 #include "CScreenCreateChar.h"
 #include "CScreenWorld.h"
@@ -16,6 +17,7 @@
 #include "CUIControlTextDisplay.h"
 #include "CVariableHash.h"
 #include "IcewindCGameEffects.h"
+#include "IcewindMisc.h"
 #include "ScreenLayout.h"
 #include "data_view.h"
 #include "platform/data_dir.h"
@@ -1016,10 +1018,38 @@ TEST_CASE("effects-iwd: gaze, wail and projectile effects fire their projectiles
     pArea->SortLists();
     CMessageHandler& handler = g_pBaldurChitin->m_cMessageHandler;
 
+    // Beholder dispel magic: a cone 600 wide and 300 long at five times the
+    // speed, aimed 300 ahead in the sprite's facing, with SpIn164's effects
+    // and the caster level.
     {
         std::unique_ptr<CGameEffect> pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_BEHOLDERDISPELMAGIC, 0, 0);
+        pEffect->m_casterLevel = 6;
         CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
         CHECK(pEffect->m_done == TRUE);
+        CProjectile850DDC* pCone = AddedOne<CProjectile850DDC>(pArea);
+        REQUIRE(pCone != nullptr);
+        CHECK(pCone->m_speed == 100);
+        CHECK(pCone->m_nWidth == 600);
+        CHECK(pCone->m_nLength == 300);
+        CHECK(pCone->m_nPuffs == 15);
+        CHECK(pCone->m_sourceId == pSprite->GetId());
+        CHECK(pCone->m_targetId == pSprite->GetId());
+        // Its far end is 300 from its source, towards the facing.
+        CPoint ptDirection = IcewindMisc::sub_584610(pSprite->m_nDirection);
+        CPoint ptAhead = IcewindMisc::sub_5847B0(pSprite->GetPos(), ptDirection.x, ptDirection.y, 300);
+        const LONG dx = ptAhead.x - pCone->m_ptSource.x;
+        const LONG dy = ptAhead.y - pCone->m_ptSource.y;
+        const LONG ex = pCone->m_ptEnd.x - pCone->m_ptSource.x;
+        const LONG ey = pCone->m_ptEnd.y - pCone->m_ptSource.y;
+        CHECK(ex * dx + ey * dy > 0);
+        CHECK(ex * ex + ey * ey <= 301 * 301);
+        CHECK(ex * ex + ey * ey >= 299 * 299);
+        std::vector<CGameEffect*> carried = Carried(pCone);
+        CHECK(carried.size() == SpellEffectCount("SpIn164", 1));
+        for (CGameEffect* pCarried : carried) {
+            CHECK(pCarried->m_sourceRes == CResRef("SpIn164"));
+            CHECK(pCarried->m_casterLevel == 6);
+        }
         RemoveAdded(pArea);
         ClearMessages();
     }

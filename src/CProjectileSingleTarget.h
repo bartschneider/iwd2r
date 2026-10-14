@@ -7,11 +7,15 @@
 #include "CVidPalette.h"
 #include "IcewindCVisualEffect.h"
 
+#include <string>
+#include <vector>
+
 // The animated projectile that flies to one target (vtable 0x850CAC). It has
 // the members of CProjectileBAM (0x52AD60) and an IcewindCVisualEffect; the
 // spell hit and area projectiles derive from it.
 class CProjectileSingleTarget : public CProjectile {
 public:
+    CProjectileSingleTarget();
     CProjectileSingleTarget(CResRef resRef);
     /* 0000 */ ~CProjectileSingleTarget() override;
     /* 000C */ void AIUpdate() override;
@@ -37,6 +41,52 @@ public:
     /* 02A0 */ BYTE field_2A0;
     /* 02A1 */ BYTE field_2A1;
     /* 02A2 */ IcewindCVisualEffect m_visualEffect;
+};
+
+// One puff of the cone's waves (vtable 0x850D54): a CProjectileSingleTarget
+// that flies to a point; only its destructor and DeliverEffects slots differ,
+// and both lead to the same functions.
+class CProjectile850D54 : public CProjectileSingleTarget {
+public:
+    CProjectile850D54(CResRef resRef);
+    /* 0078 */ void DeliverEffects() override;
+};
+
+// The cone (vtable 0x850DDC; effect 293, Beholder Dispel Magic). It flies
+// to its target point like a CProjectileSingleTarget, sends waves of puffs
+// to the points across its far end, and on arrival gives its effects to
+// every AI object in the cone in line of sight from its source.
+class CProjectile850DDC : public CProjectileSingleTarget {
+public:
+    CProjectile850DDC(const char* szAnimation, const char* szPuff);
+    /* 000C */ void AIUpdate() override;
+    /* 006C */ void Fire(CGameArea* pArea, LONG source, LONG target, CPoint targetPos, LONG nHeight, SHORT nType) override;
+    /* 0070 */ void OnArrival() override;
+    /* 0078 */ void DeliverEffects() override;
+    /* 0088 */ virtual void sub_88();
+
+    // The corners: the two at the source, then the two at the far end.
+    /* 02AE */ CPoint m_corners[4];
+    /* 02CE */ LONG m_nWidth;
+    /* 02D2 */ LONG m_nLength;
+    /* 02D6 */ LONG m_nPuffs;
+    /* 02DA */ LONG m_nHalfWidth;
+    /* 02DE */ std::string m_sPuff;
+    /* 02EE */ LONG field_2EE;
+    /* 02F2 */ std::vector<CPoint> m_puffPoints;
+    /* 0302 */ LONG m_nPuffSpacing;
+    /* 0306 */ LONG m_nPuffSpeed;
+    /* 030A */ LONG m_nPuffSpeedRandom;
+    /* 030E */ LONG m_nFrames;
+    /* 0312 */ LONG m_nWaveInterval;
+    /* 0316 */ BYTE m_bRandomPuffFrame;
+    /* 0317 */ BYTE field_317;
+    /* 0318 */ CPoint m_ptSource;
+    /* 0320 */ CPoint m_ptEnd;
+    /* 0328 */ LONG m_nHeight;
+    /* 032C */ WORD m_nType;
+    /* 032E */ LONG m_nFrame;
+    /* 0332 */ BOOLEAN m_bDelivered;
 };
 
 #endif /* CPROJECTILESINGLETARGET_H_ */

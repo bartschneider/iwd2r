@@ -8,6 +8,7 @@
 #include "CProjectile.h"
 #include "CProjectile850F9C.h"
 #include "CProjectileArea.h"
+#include "CProjectileSingleTarget.h"
 #include "CScreenWorld.h"
 #include "CUtil.h"
 #include "IcewindCVisualEffect.h"
@@ -2531,12 +2532,30 @@ BOOL IcewindCGameEffectBeholderDispelMagic::ApplyEffect(CGameSprite* pSprite)
         return TRUE;
     }
 
-    // TODO: Incomplete (0x566C6B-0x566DF0). The original builds its cone
-    // projectile (FUN_00579B40, not ported; +0x2CE = 600, +0x2D2 = 300, its
-    // speed times 5), aims it 300 ahead of the sprite in its facing
-    // (IcewindMisc::sub_584610 and sub_5847B0), adds the effects of SpIn164
-    // at level 1 (GetSpellResrefEffects 0x586220) with SpIn164 as their
-    // source resref and this caster level, and fires it.
+    // NOTE: The two strings are the empty string at 0x8C5CF8.
+    CProjectile850DDC* pProjectile = new CProjectile850DDC("", "");
+    pProjectile->m_speed *= 5;
+    pProjectile->m_nWidth = 600;
+    pProjectile->m_nLength = 300;
+
+    CPoint ptDirection = IcewindMisc::sub_584610(pSprite->m_nDirection);
+    CPoint ptTarget = IcewindMisc::sub_5847B0(pSprite->GetPos(), ptDirection.x, ptDirection.y, 300);
+
+    std::list<CGameEffect*> effects = IcewindMisc::GetSpellResrefEffects(pSprite,
+        reinterpret_cast<const BYTE*>(RESREF_BEHOLDER_DISPEL_MAGIC),
+        1);
+    for (std::list<CGameEffect*>::iterator it = effects.begin(); it != effects.end(); it++) {
+        (*it)->m_sourceRes = CResRef(CString(RESREF_BEHOLDER_DISPEL_MAGIC));
+        (*it)->m_casterLevel = m_casterLevel;
+        pProjectile->AddEffect(*it);
+    }
+
+    pProjectile->Fire(pSprite->GetArea(),
+        pSprite->GetId(),
+        pSprite->GetId(),
+        ptTarget,
+        0,
+        0);
 
     m_done = TRUE;
 
