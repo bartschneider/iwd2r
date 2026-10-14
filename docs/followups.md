@@ -112,3 +112,10 @@ The guards in `src/render/api.h` leave these for the renderer that first draws t
 - `sub_75E330` does not call `CheckQuickLists` (0x71ABA0); it only refreshes quick-list counts and the action bar.
 - `byte_8D86B0` is a file-static in both src/CGameSprite.cpp and src/CItem.cpp; the original has one never-written global. Both copies stay zero, so they cannot disagree, but one shared extern would be cleaner.
 - Weaker tests: the `m_active` test restates the formula; the trigger test skips the proximity-trap path (type 0, ENTERED/GetDeny); the weapon-set test never covers the launcher path; `CGameArea::OnActivation`'s fix has no unit test (the headless sound start segfaults) and is covered only by the replay's rand trace.
+
+## Creature animation and items (from project 3, milestone 3, items-anim)
+
+- Until `CGameEffectColorTintSolid::ApplyEffect` (0x4A7000) and `CGameEffectColorLightSolid::ApplyEffect` (0x4A71B0) advance their range pointer as the original does (0x4A7100), loading 00SSCYC or 53DRACAH allocates without bound. The fix is routed to the effects-core stream. Run creature sweeps one creature per process under the memory cap (`tests/test_cre.cpp` `[.][cre-sweep]`).
+- 15 sampled creatures assert in the base `CGameEffect::ApplyEffect` until effect opcodes 261, 98, 206 and 429 are ported (effects streams).
+- `CGameAnimationTypeMonsterIcewindNew` was compared with the original only where its constructor reaches (`Render`, `SetSequence` and the rest of `ClearColorEffects` were not); other animation files pass `bWarningIfMissing` TRUE everywhere, where the original passes 0 for some cells.
+- `CItem`: `m_nAbilities` is zeroed in the copy and CRE-record constructors (the original leaves it unset on a missing item) but not in the resref constructor 0x4E7E90; make it consistent. The destructor test reads fields after `~CItem`, which is undefined behaviour and would break under LTO. The 10GUTHE/12OGR test only checks that construction succeeds, not the palette type, weapon cell or mirror test.
