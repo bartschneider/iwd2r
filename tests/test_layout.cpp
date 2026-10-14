@@ -711,6 +711,134 @@ TEST_CASE("world_viewport_excludes_reserved_rects", "[layout]")
     }
 }
 
+namespace {
+
+// The world screen's panels as GUIW08.CHU and GUIW10.CHU define them (read
+// with tools/bif.py; every control lies inside its panel), each with the
+// world viewport CScreenWorld shows it over: the toolbar (comm 0 or 22 with
+// the action bar 1; chat 6 in comm's place; the multiplayer bar 9), the
+// container (8), death (17) and dialog (7, 19, 21) panels. The hidden
+// interface shows none.
+enum WorldViewport {
+    VIEW_TOOLBAR,
+    VIEW_CONTAINER,
+    VIEW_DEATH,
+    VIEW_DIALOG,
+};
+
+struct ChuPanel {
+    int id;
+    int x;
+    int y;
+    int w;
+    int h;
+    WorldViewport view;
+};
+
+const ChuPanel kGuiw08[] = {
+    { 0, 0, 493, 800, 107, VIEW_TOOLBAR },
+    { 1, 0, 433, 800, 60, VIEW_TOOLBAR },
+    { 7, 0, 316, 800, 284, VIEW_DIALOG },
+    { 8, 0, 476, 800, 124, VIEW_CONTAINER },
+    { 9, 0, 568, 800, 32, VIEW_TOOLBAR },
+    { 6, 0, 555, 800, 45, VIEW_TOOLBAR },
+    { 17, 0, 461, 800, 139, VIEW_DEATH },
+    { 19, 0, 316, 800, 284, VIEW_DIALOG },
+    { 21, 0, 316, 800, 284, VIEW_DIALOG },
+    { 22, 0, 493, 800, 107, VIEW_TOOLBAR },
+};
+
+const ChuPanel kGuiw10[] = {
+    { 0, 0, 661, 1024, 107, VIEW_TOOLBAR },
+    { 1, 0, 601, 1024, 60, VIEW_TOOLBAR },
+    { 7, 0, 484, 1024, 284, VIEW_DIALOG },
+    { 8, 0, 644, 1024, 124, VIEW_CONTAINER },
+    { 9, 112, 736, 786, 32, VIEW_TOOLBAR },
+    { 6, 112, 723, 912, 45, VIEW_TOOLBAR },
+    { 17, 0, 629, 1024, 139, VIEW_DEATH },
+    { 19, 0, 484, 1024, 284, VIEW_DIALOG },
+    { 21, 0, 484, 1024, 284, VIEW_DIALOG },
+    { 22, 0, 661, 1024, 107, VIEW_TOOLBAR },
+};
+
+int ViewportBottom(const ScreenLayout& l, WorldViewport view)
+{
+    switch (view) {
+    case VIEW_TOOLBAR:
+        return l.stru_8E79B8.bottom;
+    case VIEW_CONTAINER:
+        return l.stru_8E79F8.bottom;
+    case VIEW_DEATH:
+        return l.stru_8E7988.bottom;
+    case VIEW_DIALOG:
+        return l.stru_8E7958.bottom;
+    }
+    return l.screenHeight;
+}
+
+bool Inside(const RECT& inner, const RECT& outer)
+{
+    return inner.left >= outer.left && inner.right <= outer.right && inner.top >= outer.top && inner.bottom <= outer.bottom;
+}
+
+}
+
+TEST_CASE("world_panels_lie_in_the_band", "[layout]")
+{
+    // Every GUIW08/GUIW10 panel, where the world screen puts it (shifted by
+    // worldUiShiftX/Y, doubled where the original draws the world UI double
+    // size), lies inside the band WorldPanelRects gives for its viewport and
+    // inside the region that shows it: the UI region at the UI scale when
+    // the scales differ (nothing in the rows between the band's top and the
+    // world viewport's bottom, which no region shows), the whole frame
+    // otherwise.
+    struct Case {
+        int width;
+        int height;
+        int ui;
+        int world;
+    };
+    const Case cases[] = {
+        { 800, 600, 1, 1 },
+        { 1024, 768, 1, 1 },
+        { 1600, 1200, 1, 1 },
+        { 2048, 1536, 1, 1 },
+        { 1920, 1080, 1, 1 },
+        { 1920, 1080, 2, 1 },
+        { 1920, 1200, 2, 1 },
+        { 2560, 1440, 2, 1 },
+        { 2560, 1440, 3, 1 },
+        { 3840, 2160, 2, 1 },
+        { 3840, 2160, 4, 1 },
+        { 3840, 2160, 4, 2 },
+        { 1366, 768, 1, 1 },
+    };
+    for (const Case& c : cases) {
+        const ScreenLayout l = ComputeScreenLayout(c.width, c.height, c.ui, c.world);
+        const bool ten = std::string(l.guiExt) == "10";
+        const int d = l.field_4A2C ? 2 : 1;
+        const SIZE window = { c.width * c.world, c.height * c.world };
+        for (const ChuPanel& p : ten ? kGuiw10 : kGuiw08) {
+            INFO(c.width << "x" << c.height << " ui " << c.ui << " world " << c.world << " GUIW" << l.guiExt << " panel " << p.id);
+            const RECT panel = { p.x * d + l.worldUiShiftX, p.y * d + l.worldUiShiftY, (p.x + p.w) * d + l.worldUiShiftX, (p.y + p.h) * d + l.worldUiShiftY };
+            const int bottom = ViewportBottom(l, p.view);
+            const std::vector<RECT> band = iwd2r::WorldPanelRects(l, bottom);
+            REQUIRE(band.size() == 1);
+            CHECK(Inside(panel, band[0]));
+            const std::vector<Region> regions = iwd2r::RegionsFor(l, iwd2r::SCREEN_WORLD, bottom, window);
+            const Region* ui = UiRegion(regions);
+            if (l.worldUiScale == l.worldScale) {
+                REQUIRE(regions.size() == 1);
+                CHECK(Inside(panel, regions[0].frame));
+            } else {
+                REQUIRE(ui != nullptr);
+                CHECK(ui->scale == l.worldUiScale);
+                CHECK(Inside(panel, ui->frame));
+            }
+        }
+    }
+}
+
 TEST_CASE("auto_world_scale", "[layout]")
 {
     CHECK(iwd2r::ResolveWorldScale(NULL, 2) == 2);

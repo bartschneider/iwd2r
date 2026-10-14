@@ -17,7 +17,7 @@ import struct
 import sys
 
 # Resource types by extension (IESDP); add more as cases need them.
-TYPES = {'2DA': 0x3F4, 'IDS': 0x3F0, 'BCS': 0x3EF, 'INI': 0x802, 'ITM': 0x3ED}
+TYPES = {'2DA': 0x3F4, 'IDS': 0x3F0, 'BCS': 0x3EF, 'INI': 0x802, 'ITM': 0x3ED, 'CHU': 0x3EA}
 
 
 class BifError(Exception):
