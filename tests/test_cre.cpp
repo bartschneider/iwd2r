@@ -494,6 +494,9 @@ TEST_CASE("creatures 10GUTHE and 12OGR construct from their CRE", "[cre][data]")
 // A manual sweep, hidden from the default run: constructs every creature
 // named in IWD2R_CRE_LIST (separated by spaces, commas or newlines),
 // printing each name before it is built, so a crash names its creature.
+// Run it one creature per process under the memory cap (rule M3-3:
+// systemd-run --user --scope -p MemoryMax=... -p MemorySwapMax=0): the
+// unported effects of some creatures loop or assert while they load.
 TEST_CASE("every creature in IWD2R_CRE_LIST constructs from its CRE", "[.][cre-sweep][data]")
 {
     const char* env = std::getenv("IWD2_DATA");
