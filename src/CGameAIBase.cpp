@@ -997,9 +997,9 @@ SHORT CGameAIBase::ExecuteAction()
             goto done;
         }
         if (m_curAction.m_specificID != 0) {
-            m_pArea->m_header.m_areaType &= ~0x2;
+            m_pArea->m_header.m_flags &= ~0x2;
         } else {
-            m_pArea->m_header.m_areaType |= 0x2;
+            m_pArea->m_header.m_flags |= 0x2;
         }
         returnValue = ACTION_DONE;
         goto done;

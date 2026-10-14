@@ -202,6 +202,27 @@ TEST_CASE("ai: ExecuteAction answers NoAction, an unknown action and SetGlobal",
     missing.m_string1 = "GLOBALAI_NEVER_SET";
     CHECK(pCaller->EvaluateStatusTrigger(missing) == TRUE);
 
+    // AllowAreaResting(0) sets the area's no-rest flag (m_header.m_flags 2),
+    // which AreaRestDisabled reads; AllowAreaResting(1) clears it.
+    {
+        auto* area = static_cast<unsigned char*>(::operator new(sizeof(CGameArea)));
+        std::memset(area, 0, sizeof(CGameArea));
+        pCaller->m_pArea = reinterpret_cast<CGameArea*>(area);
+        CAIAction allowResting;
+        allowResting.m_actionID = 286;
+        allowResting.m_specificID = 0;
+        pCaller->SetCurrAction(allowResting);
+        CHECK(pCaller->ExecuteAction() == CGameAIBase::ACTION_DONE);
+        CAITrigger restDisabled(0x40D2, 0);
+        CHECK(pCaller->EvaluateStatusTrigger(restDisabled) == TRUE);
+        CHECK(pCaller->m_pArea->m_header.m_areaType == 0);
+        allowResting.m_specificID = 1;
+        pCaller->SetCurrAction(allowResting);
+        CHECK(pCaller->ExecuteAction() == CGameAIBase::ACTION_DONE);
+        CHECK(pCaller->EvaluateStatusTrigger(restDisabled) == FALSE);
+        pCaller->m_pArea = NULL;
+    }
+
     // RandomNum(6, n): the object's random value of this update, 1 to 6.
     pCaller->m_randValue = 15;
     CAITrigger randomNum(0x4047, 6);
