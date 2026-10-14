@@ -27,6 +27,21 @@ namespace {
 
     const char kPrefix[] = "probe-gpu: ";
 
+    // The probe prints one line: keep the first 4 KB of stdout, and drain
+    // (and drop) the rest so a chatty child never blocks on a full pipe.
+    const size_t kMaxOutput = 4096;
+    // Reads per drain: a child (or a grandchild holding the pipe) that never
+    // stops writing cannot hold the parent in one drain.
+    const int kMaxReadsPerDrain = 64;
+    // How often the parent looks at the child while waiting.
+    const int kSliceMs = 20;
+
+    void Keep(std::string& out, const char* data, size_t n)
+    {
+        if (out.size() < kMaxOutput)
+            out.append(data, n < kMaxOutput - out.size() ? n : kMaxOutput - out.size());
+    }
+
     // Fills line and reason from what the child printed and how it ended.
     void Finish(Result& r, const std::string& out, Outcome ended, const std::string& endedReason)
     {
@@ -137,12 +152,12 @@ Result Run(const std::string& exe, int timeoutMs, const std::vector<std::string>
     std::string out;
     auto drain = [&]() {
         DWORD avail = 0;
-        while (PeekNamedPipe(readEnd, nullptr, 0, nullptr, &avail, nullptr) && avail > 0) {
+        for (int reads = 0; reads < kMaxReadsPerDrain && PeekNamedPipe(readEnd, nullptr, 0, nullptr, &avail, nullptr) && avail > 0; reads++) {
             char buf[512];
             DWORD got = 0;
             if (!ReadFile(readEnd, buf, avail < sizeof(buf) ? avail : static_cast<DWORD>(sizeof(buf)), &got, nullptr) || got == 0)
                 break;
-            out.append(buf, got);
+            Keep(out, buf, got);
         }
     };
     // Drain while waiting, so a chatty child never blocks on a full pipe.
@@ -150,7 +165,7 @@ Result Run(const std::string& exe, int timeoutMs, const std::vector<std::string>
     DWORD wait = WAIT_TIMEOUT;
     for (;;) {
         drain();
-        wait = WaitForSingleObject(pi.hProcess, 20);
+        wait = WaitForSingleObject(pi.hProcess, kSliceMs);
         if (wait != WAIT_TIMEOUT || std::chrono::steady_clock::now() >= deadline)
             break;
     }
@@ -223,35 +238,55 @@ Result Run(const std::string& exe, int timeoutMs, const std::vector<std::string>
         return left > 0 ? static_cast<int>(left < INT_MAX ? left : INT_MAX) : 0;
     };
     std::string out;
-    bool eof = false;
-    while (!eof && remaining() > 0) {
-        pollfd p = { fds[0], POLLIN, 0 };
-        const int n = poll(&p, 1, remaining());
-        if (n < 0 && errno == EINTR)
-            continue;
-        if (n <= 0)
-            break;
-        char buf[512];
-        const ssize_t got = read(fds[0], buf, sizeof(buf));
-        if (got < 0 && errno == EINTR)
-            continue;
-        if (got <= 0)
-            eof = true;
-        else
-            out.append(buf, static_cast<size_t>(got));
-    }
-    close(fds[0]);
+    bool open = true; // the read end has not reached EOF
+    // Reads what is in the pipe now, waiting at most waitMs for the first byte.
+    auto drain = [&](int waitMs) {
+        for (int reads = 0; open && reads < kMaxReadsPerDrain; reads++) {
+            pollfd p = { fds[0], POLLIN, 0 };
+            const int n = poll(&p, 1, reads == 0 ? waitMs : 0);
+            if (n < 0 && errno == EINTR)
+                continue;
+            if (n <= 0)
+                return;
+            char buf[512];
+            const ssize_t got = read(fds[0], buf, sizeof(buf));
+            if (got < 0 && errno == EINTR)
+                continue;
+            if (got <= 0) {
+                open = false; // EOF (or an error): the exit decides the rest
+                return;
+            }
+            Keep(out, buf, static_cast<size_t>(got));
+        }
+    };
 
-    // stdout closed (or the deadline passed): wait for the exit until the
-    // deadline, then kill.
+    // The child's exit ends the wait, not EOF: a grandchild that inherited
+    // stdout would hold the pipe open. Drain in short slices meanwhile.
     int status = 0;
     pid_t done = 0;
     for (;;) {
         done = waitpid(pid, &status, WNOHANG);
+        if (done < 0 && errno == EINTR)
+            continue;
         if (done != 0 || remaining() <= 0)
             break;
-        usleep(5000);
+        const int slice = remaining() < kSliceMs ? remaining() : kSliceMs;
+        if (open)
+            drain(slice);
+        else
+            poll(nullptr, 0, slice);
     }
+    if (done == 0) {
+        // The deadline: kill before the read end closes, so the child cannot
+        // die of SIGPIPE in between and read as a crash.
+        kill(pid, SIGKILL);
+        while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {
+        }
+    } else {
+        drain(0); // what the child wrote before it exited
+    }
+    close(fds[0]);
+
     Outcome ended = Outcome::Failed;
     std::string why;
     if (done == pid) {
@@ -263,8 +298,6 @@ Result Run(const std::string& exe, int timeoutMs, const std::vector<std::string>
             why = "exited with code " + std::to_string(WIFEXITED(status) ? WEXITSTATUS(status) : -1);
         }
     } else if (done == 0) {
-        kill(pid, SIGKILL);
-        waitpid(pid, &status, 0);
         ended = Outcome::TimedOut;
     } else {
         why = std::string("lost the child: ") + std::strerror(errno);

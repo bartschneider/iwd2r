@@ -660,27 +660,47 @@ TEST_CASE("probe_exe_reports_the_device", "[present]")
 
 namespace {
 
-// An executable shell script in a fresh temporary directory.
-std::string Script(const char* name, const char* body)
-{
-    namespace fs = std::filesystem;
-    const fs::path dir = fs::temp_directory_path() / ("iwd2r-probe-" + std::to_string(::getpid()));
-    fs::create_directories(dir);
-    const fs::path path = dir / name;
+// A fresh temporary directory of executable shell scripts, removed with it.
+struct ScriptDir {
+    std::filesystem::path dir;
+    ScriptDir()
+        : dir(std::filesystem::temp_directory_path() / ("iwd2r-probe-" + std::to_string(::getpid())))
     {
-        std::ofstream f(path);
-        f << "#!/bin/sh\n"
-          << body << "\n";
+        std::filesystem::create_directories(dir);
     }
-    fs::permissions(path, fs::perms::owner_all);
-    return path.string();
-}
+    ~ScriptDir()
+    {
+        std::error_code ec;
+        std::filesystem::remove_all(dir, ec);
+    }
+    std::string Script(const char* name, const std::string& body) const
+    {
+        const std::filesystem::path path = dir / name;
+        {
+            std::ofstream f(path);
+            f << "#!/bin/sh\n"
+              << body << "\n";
+        }
+        std::filesystem::permissions(path, std::filesystem::perms::owner_all);
+        return path.string();
+    }
+    // The lines in a file the scripts append to (0 when it does not exist).
+    int Lines(const char* name) const
+    {
+        std::ifstream f(dir / name);
+        int n = 0;
+        for (std::string line; std::getline(f, line);)
+            n++;
+        return n;
+    }
+};
 
 }
 
 TEST_CASE("probe_child_outcomes", "[present]")
 {
     namespace probe = platform::gpu_probe;
+    const ScriptDir scripts;
     probe::Result r = probe::Run("/bin/false", 10000);
     CHECK(r.outcome == probe::Outcome::Failed);
     CHECK(r.reason == "exited with code 1");
@@ -691,16 +711,28 @@ TEST_CASE("probe_child_outcomes", "[present]")
     CHECK(r.reason == "timed out");
     CHECK(std::chrono::steady_clock::now() - start < std::chrono::seconds(5));
 
-    r = probe::Run(Script("ok.sh", "echo noise; echo 'probe-gpu: ok fake'"), 10000);
+    r = probe::Run(scripts.Script("ok.sh", "echo noise; echo 'probe-gpu: ok fake'"), 10000);
     CHECK(r.outcome == probe::Outcome::Ok);
     CHECK(r.line == "probe-gpu: ok fake");
     CHECK(r.reason == "ok fake");
 
-    r = probe::Run(Script("no.sh", "echo 'probe-gpu: unavailable no device here'; exit 1"), 10000);
+    r = probe::Run(scripts.Script("no.sh", "echo 'probe-gpu: unavailable no device here'; exit 1"), 10000);
     CHECK(r.outcome == probe::Outcome::Failed);
     CHECK(r.reason == "no device here");
 
-    r = probe::Run(Script("crash.sh", "kill -SEGV $$"), 10000);
+    // A grandchild holding the inherited stdout does not hold the parent:
+    // the child's exit ends the wait.
+    const auto held = std::chrono::steady_clock::now();
+    r = probe::Run(scripts.Script("held.sh", "sleep 5 & echo 'probe-gpu: ok fake'"), 10000);
+    CHECK(r.outcome == probe::Outcome::Ok);
+    CHECK(std::chrono::steady_clock::now() - held < std::chrono::seconds(3));
+
+    // Only the first 4 KB of output are kept, and a long output never blocks.
+    r = probe::Run(scripts.Script("chatty.sh", "head -c 200000 /dev/zero | tr '\\0' x; echo; echo 'probe-gpu: ok late'"), 10000);
+    CHECK(r.outcome == probe::Outcome::Failed);
+    CHECK(r.line.empty());
+
+    r = probe::Run(scripts.Script("crash.sh", "kill -SEGV $$"), 10000);
     CHECK(r.outcome == probe::Outcome::Crashed);
     CHECK(r.reason == "crashed");
 
@@ -720,8 +752,11 @@ TEST_CASE("probe_child_gates_the_device", "[present]")
     ScopedEnv unset("IWD2R_GPU_PROBE", nullptr);
     std::vector<uint32_t> px = Distinct(320, 240);
     present::SetPrimary(&px, 320, 240);
+    const ScriptDir scripts;
 
-    present::testing::SetProbeExe(Script("crash.sh", "kill -SEGV $$").c_str());
+    // The crashing child counts its runs.
+    const std::string counter = (scripts.dir / "runs").string();
+    present::testing::SetProbeExe(scripts.Script("crash.sh", "echo run >> '" + counter + "'; kill -SEGV $$").c_str());
     present::SetBackend(BackendKind::Auto);
     present::testing::UseOffscreen(320, 240);
     CHECK(present::ActiveBackend() == BackendKind::Classic);
@@ -729,17 +764,19 @@ TEST_CASE("probe_child_gates_the_device", "[present]")
 
     // The session keeps the verdict: a second start (the hotkey's) does not
     // run the child again.
+    CHECK(scripts.Lines("runs") == 1);
     present::SetBackend(BackendKind::Gpu);
     CHECK(present::ActiveBackend() == BackendKind::Classic);
     CHECK(present::testing::LastFallbackReason() == "probe: crashed");
+    CHECK(scripts.Lines("runs") == 1);
 
-    present::testing::SetProbeExe(Script("no.sh", "echo 'probe-gpu: unavailable no device here'; exit 1").c_str());
+    present::testing::SetProbeExe(scripts.Script("no.sh", "echo 'probe-gpu: unavailable no device here'; exit 1").c_str());
     present::SetBackend(BackendKind::Gpu);
     CHECK(present::ActiveBackend() == BackendKind::Classic);
     CHECK(present::testing::LastFallbackReason() == "probe: no device here");
 
     // A passing probe lets the device be created in-process.
-    present::testing::SetProbeExe(Script("ok.sh", "echo 'probe-gpu: ok fake'").c_str());
+    present::testing::SetProbeExe(scripts.Script("ok.sh", "echo 'probe-gpu: ok fake'").c_str());
     present::SetBackend(BackendKind::Gpu);
     if (present::ActiveBackend() != BackendKind::Gpu)
         SKIP("no SDL GPU device: " << present::testing::LastFallbackReason());
