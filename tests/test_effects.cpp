@@ -351,3 +351,27 @@ TEST_CASE("solid colour effects (51, 52) add one colour effect per range", "[eff
 
     delete pSprite;
 }
+
+TEST_CASE("spell immunity (206, 290) stays on while it has a resource", "[effects][data]")
+{
+    REQUIRE_ENGINE();
+    CGameSprite* pSprite = MakeSprite();
+
+    CGameEffect* pEffect = Make(CGAMEEFFECT_IMMUNITYSPELL, 0, 0, 0);
+    pEffect->m_res = CResRef("SPWI112");
+    REQUIRE(pEffect->ApplyEffect(pSprite) == TRUE);
+    CHECK(pEffect->m_done == FALSE);
+
+    CGameEffect* pEmpty = Make(CGAMEEFFECT_IMMUNITYSPELL, 0, 0, 0);
+    REQUIRE(pEmpty->ApplyEffect(pSprite) == TRUE);
+    CHECK(pEmpty->m_done == TRUE);
+
+    // Mode 1 ends the effect on a sprite that is not undead (Evaluate
+    // 0x4BF140 holds).
+    CGameEffect* pLiving = Make(CGAMEEFFECT_IMMUNITYSPELL, 1, 0, 0);
+    pLiving->m_res = CResRef("SPWI112");
+    REQUIRE(pLiving->ApplyEffect(pSprite) == TRUE);
+    CHECK(pLiving->m_done == TRUE);
+
+    delete pSprite;
+}

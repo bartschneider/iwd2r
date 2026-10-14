@@ -12595,6 +12595,51 @@ CGameEffect* CGameEffectImmunitySpell::Copy()
     return copy;
 }
 
+// 0x4BFE20
+BOOL CGameEffectImmunitySpell::ApplyEffect(CGameSprite* pSprite)
+{
+    if (Evaluate(pSprite) == TRUE) {
+        m_done = TRUE;
+    } else {
+        std::string sRes(static_cast<const char*>(m_res.GetResRefStr()));
+        if (sRes.length() == 0) {
+            m_done = TRUE;
+        } else {
+            // TODO: Incomplete. The original inserts sRes into the spell
+            // immunity tree at m_derivedStats + 0x470 (0x4C4C90 at
+            // 0x4BFEFC); CDerivedStats.h does not declare the tree.
+
+            if (m_secondaryType && m_effectID == ICEWIND_CGAMEEFFECT_IMMUNITYSPELL) {
+                // NOTE: Inlined FeedBackImmuneToResource (0x4C4330), with
+                // the key lookups not warning when missing.
+                if (g_pBaldurChitin->cDimm.m_cKeyTable.FindKey(m_sourceRes, 1005, FALSE)) {
+                    CItem* pItem = new CItem(m_sourceRes, 1, 0, 0, 0, 0);
+                    pSprite->FeedBack(CGameSprite::FEEDBACK_IMMUNE_TO_RESOURCE,
+                        0,
+                        0,
+                        0,
+                        pItem->GetIdentifiedName(),
+                        0,
+                        0);
+                    delete pItem;
+                } else if (g_pBaldurChitin->cDimm.m_cKeyTable.FindKey(m_sourceRes, 1006, FALSE)) {
+                    CSpell* pSpell = new CSpell(m_sourceRes);
+                    pSprite->FeedBack(CGameSprite::FEEDBACK_IMMUNE_TO_RESOURCE,
+                        0,
+                        0,
+                        0,
+                        pSpell->GetGenericName(),
+                        0,
+                        0);
+                    delete pSpell;
+                }
+            }
+        }
+    }
+
+    return TRUE;
+}
+
 // 0x4BF140
 BOOL CGameEffectImmunitySpell::Evaluate(CGameSprite* pSprite)
 {
