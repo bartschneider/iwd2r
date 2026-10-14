@@ -653,12 +653,14 @@ class CGameEffectSparkle : public CGameEffect {
 public:
     CGameEffectSparkle(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;
 };
 
 class CGameEffectSpellMemorizationMage : public CGameEffect {
 public:
     CGameEffectSpellMemorizationMage(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;
 };
 
 class CGameEffectStoneToFlesh : public CGameEffect {
@@ -811,6 +813,7 @@ class CGameEffectSpellMemoizationCleric : public CGameEffect {
 public:
     CGameEffectSpellMemoizationCleric(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;
 };
 
 class CGameEffectInfravision : public CGameEffect {
@@ -1333,6 +1336,7 @@ class CGameEffectPolymorph : public CGameEffect {
 public:
     CGameEffectPolymorph(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;
 };
 
 class CGameEffectForceVisible : public CGameEffect {
@@ -1430,6 +1434,7 @@ class CGameEffectReplaceSelf : public CGameEffect {
 public:
     CGameEffectReplaceSelf(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;
 };
 
 class CGameEffectPlayMovie : public CGameEffect {
@@ -1685,12 +1690,14 @@ class CGameEffectFeatCleave : public CGameEffect {
 public:
     CGameEffectFeatCleave(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;
 };
 
 class CGameEffectFindFamiliar : public CGameEffect {
 public:
     CGameEffectFindFamiliar(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;
 };
 
 class CGameEffectSeeInvisible : public CGameEffect {

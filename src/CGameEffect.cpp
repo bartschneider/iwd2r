@@ -6884,6 +6884,16 @@ CGameEffect* CGameEffectSparkle::Copy()
     return copy;
 }
 
+// 0x4B1700
+BOOL CGameEffectSparkle::ApplyEffect(CGameSprite* pSprite)
+{
+    // TODO: Incomplete. Not ported: it adds particle explosions (CParticle
+    // 0x51AE40) and calls CGameSprite 0x756770, none of them in src/; the
+    // override only keeps the effect from reaching the asserting base
+    // ApplyEffect.
+    return TRUE;
+}
+
 // -----------------------------------------------------------------------------
 
 // NOTE: Inlined.
@@ -6900,6 +6910,15 @@ CGameEffect* CGameEffectSpellMemorizationMage::Copy()
     delete effect;
     copy->CopyFromBase(this);
     return copy;
+}
+
+// 0x4B1960
+BOOL CGameEffectSpellMemorizationMage::ApplyEffect(CGameSprite* pSprite)
+{
+    // TODO: Incomplete. Not ported yet (the wizard's extra memorisation
+    // slots); until then the override only keeps the effect from reaching the
+    // asserting base ApplyEffect.
+    return TRUE;
 }
 
 // -----------------------------------------------------------------------------
@@ -8287,6 +8306,15 @@ CGameEffect* CGameEffectSpellMemoizationCleric::Copy()
     delete effect;
     copy->CopyFromBase(this);
     return copy;
+}
+
+// 0x4B41A0
+BOOL CGameEffectSpellMemoizationCleric::ApplyEffect(CGameSprite* pSprite)
+{
+    // TODO: Incomplete. Not ported yet (the priest's extra memorisation
+    // slots); until then the override only keeps the effect from reaching the
+    // asserting base ApplyEffect.
+    return TRUE;
 }
 
 // -----------------------------------------------------------------------------
@@ -12371,6 +12399,16 @@ CGameEffect* CGameEffectPolymorph::Copy()
     return copy;
 }
 
+// 0x4BB110
+BOOL CGameEffectPolymorph::ApplyEffect(CGameSprite* pSprite)
+{
+    // TODO: Incomplete. Not ported yet (a creature file swap through a new
+    // CGameSprite, CGameObjectArray::Delete and the search map); until then
+    // the override only keeps the effect from reaching the asserting base
+    // ApplyEffect.
+    return TRUE;
+}
+
 // -----------------------------------------------------------------------------
 
 // NOTE: Inlined.
@@ -13133,6 +13171,14 @@ CGameEffect* CGameEffectReplaceSelf::Copy()
     delete effect;
     copy->CopyFromBase(this);
     return copy;
+}
+
+// 0x4BD050
+BOOL CGameEffectReplaceSelf::ApplyEffect(CGameSprite* pSprite)
+{
+    // TODO: Incomplete. Not ported yet; until then the override only keeps the
+    // effect from reaching the asserting base ApplyEffect.
+    return TRUE;
 }
 
 // -----------------------------------------------------------------------------
@@ -14481,6 +14527,20 @@ CGameEffect* CGameEffectFeatCleave::Copy()
     return copy;
 }
 
+// 0x4B9AA0
+BOOL CGameEffectFeatCleave::ApplyEffect(CGameSprite* pSprite)
+{
+    if (!m_secondaryType) {
+        return TRUE;
+    }
+
+    // TODO: Incomplete. Not ported: it needs the area's nearest-enemy search
+    // (CGameArea 0x46DDC0, not in src/) to pick the next target; without one
+    // the original ends the effect (m_done).
+    m_done = TRUE;
+    return TRUE;
+}
+
 // -----------------------------------------------------------------------------
 
 // NOTE: Inlined.
@@ -14497,6 +14557,15 @@ CGameEffect* CGameEffectFindFamiliar::Copy()
     delete effect;
     copy->CopyFromBase(this);
     return copy;
+}
+
+// 0x4B9EB0
+BOOL CGameEffectFindFamiliar::ApplyEffect(CGameSprite* pSprite)
+{
+    // TODO: Incomplete. Not ported yet (the familiar summoning); until then
+    // the override only keeps the effect from reaching the asserting base
+    // ApplyEffect.
+    return TRUE;
 }
 
 // -----------------------------------------------------------------------------
