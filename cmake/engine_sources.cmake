@@ -214,6 +214,8 @@ set(IWD2R_ENGINE_SOURCES
     "src/CProgressBar.h"
     "src/CProjectile.cpp"
     "src/CProjectile.h"
+    "src/CProjectileArea.cpp"
+    "src/CProjectileArea.h"
     "src/CProjectileSingleTarget.cpp"
     "src/CProjectileSingleTarget.h"
     "src/CProjectileSpellHit.cpp"

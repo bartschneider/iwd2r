@@ -8,6 +8,7 @@
 #include "CInfGame.h"
 #include "CMessage.h"
 #include "CProjectile.h"
+#include "CProjectileArea.h"
 #include "CProjectileSpellHit.h"
 #include "CScreenCreateChar.h"
 #include "CScreenWorld.h"
@@ -526,5 +527,88 @@ TEST_CASE("projectile: a fired spell hit plays in the area and removes itself at
     }
     CHECK(removed);
 
+    ClearMessages();
+}
+
+TEST_CASE("projectile: an area projectile explodes and sends its effects to the targets in range", "[projectile][data]")
+{
+    PROBE_OR_SKIP(pSprite);
+    ClearMessages();
+
+    CProjectileArea* pArea = new CProjectileArea(300);
+    CHECK(pArea->m_nRadius == 300);
+    CHECK(pArea->m_nSecondaryType == 78);
+    CHECK(pArea->m_nDuration == 45);
+
+    pArea->TargetEnemy(pSprite);
+    CHECK(pArea->m_targetType.m_nEnemyAlly == CAIObjectType::EA_ENEMY);
+    pArea->TargetFriend(pSprite);
+    CHECK(pArea->m_targetType.m_nEnemyAlly == CAIObjectType::EA_ALLY);
+
+    pArea->AddEffect(Decode(pSprite, CGAMEEFFECT_AC, 0, 0).release());
+    pArea->Fire(pSprite->GetArea(), pSprite->GetId(), pSprite->GetId(), pSprite->GetPos(), 0, 0);
+    LONG id = pArea->GetId();
+    REQUIRE(id != CGameObjectArray::INVALID_INDEX);
+    CHECK(pArea->GetPos() == pSprite->GetPos());
+
+    // It does not travel: Fire explodes it where it is.
+    CHECK(pArea->m_bExploded == TRUE);
+    CHECK(g_pBaldurChitin->m_cMessageHandler.m_messageList.IsEmpty());
+
+    // The area puts it on its vertical list (as its AI update does between
+    // the frames); the next update finds the party member in range and fires
+    // the secondary projectile at it, which delivers a copy of the effect.
+    pSprite->GetArea()->SortLists();
+    pArea->AIUpdate();
+    CMessageGroup* pGroup = LastGroup();
+    REQUIRE(pGroup != nullptr);
+    CHECK(pGroup->GetTarget() == pSprite->GetId());
+    CHECK(pGroup->GetSource() == id);
+    REQUIRE(pGroup->m_messages.size() == 1);
+    CMessageAddEffect* pAdd = dynamic_cast<CMessageAddEffect*>(pGroup->m_messages.front());
+    REQUIRE(pAdd != nullptr);
+    CHECK(pAdd->m_effect->m_effectID == CGAMEEFFECT_AC);
+    CHECK(pArea->m_targetHits.count(pSprite->GetId()) == 1);
+    CHECK(pArea->m_targetHits[pSprite->GetId()] == 1);
+    ClearMessages();
+
+    // The next target search skips the sprite until it has been found ten
+    // times.
+    std::list<LONG> targets = pArea->GetTargets();
+    CHECK(targets.empty());
+    CHECK(pArea->m_targetHits[pSprite->GetId()] == 2);
+
+    // It removes itself when its duration runs out.
+    CGameObjectArray* pArray = g_pBaldurChitin->GetObjectGame()->GetObjectArray();
+    bool removed = false;
+    for (int frame = 0; frame < 100 && !removed; frame++) {
+        CGameObject* pObject;
+        if (pArray->GetShare(id, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) != CGameObjectArray::SUCCESS) {
+            removed = true;
+            break;
+        }
+        pArray->ReleaseShare(id, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+        pObject->AIUpdate();
+    }
+    CHECK(removed);
+
+    ClearMessages();
+}
+
+TEST_CASE("projectile: the cloak of fear area leaves its source out", "[projectile][data]")
+{
+    PROBE_OR_SKIP(pSprite);
+    ClearMessages();
+
+    CProjectileArea8504BC* pArea = new CProjectileArea8504BC(256);
+    pArea->m_sourceId = pSprite->GetId();
+    pArea->AddEffect(Decode(pSprite, CGAMEEFFECT_AC, 0, 0).release());
+    std::list<LONG> targets;
+    targets.push_back(pSprite->GetId());
+    pArea->ApplyToTargets(targets);
+    CHECK(targets.empty());
+    CHECK(LastGroup() == nullptr);
+
+    delete pArea;
     ClearMessages();
 }
