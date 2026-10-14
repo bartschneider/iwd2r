@@ -389,7 +389,8 @@ TEST_CASE("effects-iwd: apply effects list (402) stops on a failed condition and
     // added (stats-spell fix round 1: IcewindMisc::GetSpellResrefEffects).
     const INT before = pSprite->m_timedEffectList.GetCount();
     pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_APPLYEFFECTSLIST, 0, 0);
-    pEffect->m_res = "SPWI112";
+    // SPWI102: AC and timed effects of 3000 ticks.
+    pEffect->m_res = "SPWI102";
     pEffect->m_casterLevel = 20;
     CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
     CHECK(pEffect->m_done == TRUE);
