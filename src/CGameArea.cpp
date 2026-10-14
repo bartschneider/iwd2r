@@ -4032,7 +4032,11 @@ void CGameArea::OnActivation()
     m_cInfinity.m_nScrollDelay = CInfinity::SCROLL_DELAY;
     m_cInfinity.bRefreshVRamRect = TRUE;
 
-    if (g_pBaldurChitin->m_pEngineWorld->m_bPaused) {
+    // NOTE: The original stops the world timer when the world screen is
+    // not paused (`cmp [world+0x13E], 0; jnz` at 0x475133). The timer starts
+    // again at the area's first render (m_firstRender), so the AI updates of
+    // the countdown run with the world stopped.
+    if (!g_pBaldurChitin->m_pEngineWorld->m_bPaused) {
         g_pBaldurChitin->GetObjectGame()->GetWorldTimer()->StopTime();
     }
 
