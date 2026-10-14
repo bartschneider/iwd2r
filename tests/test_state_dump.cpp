@@ -6,6 +6,7 @@
 #include "data_view.h"
 #include "platform/replay.h"
 #include "platform/replay_clock.h"
+#include "platform/replay_probe.h"
 #include "platform/script_core.h"
 #include "platform/state_dump.h"
 #include "platform/win32_api.h"
@@ -434,3 +435,86 @@ TEST_CASE("replay mode dumps the start screen checkpoint", "[dump][data]")
     REQUIRE(periodic.find("\"frame\": 30,") != std::string::npos);
     REQUIRE(statusText == "frame=61\nscript_line=0\nstate=finished\n");
 }
+
+TEST_CASE("replay probe: IWD2R_PROBE's frame range", "[dump]")
+{
+    using platform::replay_probe::ParseRange;
+    using platform::replay_probe::Range;
+    Range r;
+    CHECK(ParseRange(nullptr, &r));
+    CHECK_FALSE(r.on);
+    CHECK(ParseRange("", &r));
+    CHECK_FALSE(r.Has(0));
+    REQUIRE(ParseRange("1496", &r));
+    CHECK(r.Has(1496));
+    CHECK_FALSE(r.Has(1495));
+    CHECK_FALSE(r.Has(1497));
+    REQUIRE(ParseRange("1490-1499", &r));
+    CHECK(r.Has(1490));
+    CHECK(r.Has(1499));
+    CHECK_FALSE(r.Has(1500));
+    CHECK_FALSE(ParseRange("9-1", &r));
+    CHECK_FALSE(ParseRange("-1", &r));
+    CHECK_FALSE(ParseRange("1-", &r));
+    CHECK_FALSE(ParseRange("1x", &r));
+    CHECK_FALSE(r.on);
+}
+
+TEST_CASE("replay probe: the block both engines write", "[dump]")
+{
+    platform::replay_probe::Frame f;
+    f.frame = 1496;
+    f.screen = "chapter";
+    f.characters = 1;
+    f.slots[0] = 7143533;
+    f.portraits[0] = 7143533;
+    f.area.present = true;
+    f.area.resref = "AR1000";
+    f.area.characters = 1;
+    f.area.width = 3;
+    f.area.height = 2;
+    f.area.size = 6;
+    f.area.range = 14;
+    f.area.ids[0] = 7143533;
+    for (int i = 1; i < 6; ++i)
+        f.area.ids[i] = -1;
+    f.area.map = { 0x80, 0x81, 0x00, 0xff, 0x0f, 0x10 };
+    platform::replay_probe::Object door;
+    door.index = 41;
+    door.id = 2687017;
+    door.type = platform::replay_probe::kTypeDoor;
+    door.x = 2377;
+    door.y = 601;
+    door.here = 1;
+    door.speed = 1;
+    door.hasName = true;
+    door.name = "AR1000_Door2";
+    platform::replay_probe::Object hint;
+    hint.index = 19;
+    hint.id = 1245203;
+    hint.type = platform::replay_probe::kTypeSprite;
+    hint.x = 2354;
+    hint.y = 608;
+    hint.here = 1;
+    hint.speed = 1;
+    hint.seen = 32;
+    hint.hasName = true;
+    hint.name = "Door_Hint_Text_01";
+    hint.sprite = true;
+    hint.lastCharacters = 1;
+    hint.active = hint.activeAi = hint.activeImprisonment = 1;
+    hint.field294 = 1;
+    hint.sequence = 6;
+    f.objects = { hint, door };
+    CHECK(platform::replay_probe::Format(f)
+        == "frame 1496 screen chapter\n"
+           "game characters 1 visible_area 0 slots 7143533,-1,-1,-1,-1,-1 portraits 7143533,-1,-1,-1,-1,-1\n"
+           "area AR1000 characters 1 view 0,0 vis 3x2 size 6 range 14 ids 7143533,-1,-1,-1,-1,-1\n"
+           "obj 19 1245203 type 49 pos 2354,608 here 1 list 0 seen 32 speed 1 inhibitor 0 name Door_Hint_Text_01"
+           " last 1 active 1 ai 1 imprisonment 1 visible_monster 0 field_294 1 state 00000000 action 0 sequence 6"
+           " queued 0 next -1 triggers 0\n"
+           "obj 41 2687017 type 33 pos 2377,601 here 1 list 0 seen 0 speed 1 inhibitor 0 name AR1000_Door2\n"
+           "vis 0 808100\n"
+           "vis 1 ff0f10\n");
+}
+
