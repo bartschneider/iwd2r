@@ -46,6 +46,7 @@ These are in `build_vanilla` and `verify_vanilla` in `tools/oracle.py`.
 - The `mpsave/` folder is kept in the copy.
 - UTF-16 INI files and a `resolution=` key in another case are not handled by the INI preparation.
 - The vanilla copy drifts across runs while its marker stays valid. Both engines write cache files and INI state into it, and only `replay compare` backs up and restores the INIs; `replay record` alone does not. `ensure_vanilla` checks only the marker (`verify_vanilla` runs when the copy is built), so a later run can start from a different state. Snapshot the writable files (the INIs and the cache) around every run, or add a drift check against the manifest the marker was written from.
+  - It already bit the Linux gate: the Linux test copy (`~/.local/share/iwd2r/game`) keeps its `icewind2.ini` aliases (`HD0:=C:\Users\thier\iwd2r-oracle\game\`), so tests read saved games and other state through them from the Windows oracle copy that replays write into. On 2026-10-14 the start-screen smoke hash changed with no code change (Load Game became enabled once saves existed there) and had to be re-pinned. Fix: point the test copy's aliases at itself, or give the smoke test its own empty save folder.
 
 ## Recorder
 
