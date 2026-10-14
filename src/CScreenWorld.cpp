@@ -218,9 +218,12 @@ CScreenWorld::CScreenWorld()
     m_comingOutOfDialog = 0;
     m_nAutoHideInterface = 0;
     m_nAutoUnhideInterface = 0;
+    field_11D0 = CInfinity::stru_8E79B8;
     field_11F0 = 1;
     field_11F4 = 1;
-    field_11D0 = CInfinity::stru_8E79B8;
+    field_11F8 = CInfinity::stru_8E79B8.bottom;
+    field_11FC = CInfinity::stru_8E79E0.bottom;
+    field_11EC = CInfinity::stru_8E79B8.right;
     m_nBlackOutCountDown = 0;
     field_1204 = 0;
 }

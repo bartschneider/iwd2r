@@ -239,6 +239,7 @@ public:
     /* 11CA */ BYTE m_nAutoHideInterface;
     /* 11CC */ INT m_nAutoUnhideInterface;
     /* 11D0 */ CRect field_11D0;
+    /* 11EC */ int field_11EC;
     /* 11F0 */ int field_11F0;
     /* 11F4 */ int field_11F4;
     /* 11F8 */ int field_11F8;
