@@ -15,6 +15,7 @@
 #include "CInfGame.h"
 #include "CScreenCreateChar.h"
 #include "CScreenWorld.h"
+#include "platform/replay.h"
 #include "platform/state_dump.h"
 
 #include <cstring>
@@ -223,6 +224,76 @@ void ReadWorld(CBaldurChitin* chitin, World* out)
     if (chitin->m_pEngineWorld)
         ReadDialog(chitin->m_pEngineWorld->m_internalLoadedDialog, &out->dialog);
 }
+
+// IWD2R_PROBE's block (platform/replay_probe.h), the recorder's ReadProbe.
+void ReadProbe(platform::replay_probe::Frame* out)
+{
+    CBaldurChitin* chitin = g_pBaldurChitin;
+    if (!chitin)
+        return;
+    out->screen = ScreenName(chitin);
+    CInfGame* game = chitin->m_pObjectGame;
+    if (!game)
+        return;
+    out->characters = game->m_nCharacters;
+    out->visibleArea = game->m_visibleArea;
+    CGameArea* area = game->m_visibleArea < CINFGAME_MAX_AREAS ? game->m_gameAreas[game->m_visibleArea] : nullptr;
+    if (area) {
+        platform::replay_probe::Area& a = out->area;
+        a.present = true;
+        char resref[RESREF_SIZE + 1] = {};
+        std::memcpy(resref, area->m_resRef.GetResRef(), RESREF_SIZE);
+        a.resref = resref;
+        a.characters = area->m_nCharacters;
+        a.viewX = area->m_cInfinity.nCurrentX;
+        a.viewY = area->m_cInfinity.nCurrentY;
+        const CVisibilityMap& visibility = area->m_visibility;
+        a.width = visibility.m_nWidth;
+        a.height = visibility.m_nHeight;
+        a.size = visibility.m_nMapSize;
+        a.range = visibility.field_E;
+        for (int i = 0; i < 6; ++i)
+            a.ids[i] = visibility.m_aCharacterIds[i];
+        if (visibility.m_pMap && visibility.m_nMapSize > 0)
+            a.map.assign(visibility.m_pMap, visibility.m_pMap + visibility.m_nMapSize);
+    }
+    const CGameObjectArray& objects = game->m_cObjectArray;
+    for (SHORT index = 0; objects.m_pArray && index <= objects.m_nMaxArrayIndex; ++index) {
+        const CGameObjectArrayEntry& entry = objects.m_pArray[index];
+        CGameObject* object = entry.m_objectPtr;
+        if (entry.m_objectId == -1 || !object)
+            continue;
+        platform::replay_probe::Object o;
+        o.index = index;
+        o.id = (static_cast<LONG>(index) << 16) | static_cast<WORD>(entry.m_objectId);
+        o.type = object->m_objectType;
+        o.x = object->m_pos.x;
+        o.y = object->m_pos.y;
+        o.here = area && object->m_pArea == area;
+        o.list = object->m_listType;
+        o.seen = object->m_canBeSeen;
+        o.speed = object->m_AISpeed;
+        o.inhibitor = object->m_AIInhibitor;
+        if (o.type == CGameObject::TYPE_SPRITE) {
+            const CGameSprite* sprite = static_cast<CGameSprite*>(object);
+            o.hasName = true;
+            o.name.assign(sprite->m_scriptName, strnlen(sprite->m_scriptName, SCRIPTNAME_SIZE));
+            o.sprite = true;
+            o.lastCharacters = sprite->m_lastCharacterCount;
+            o.active = sprite->m_active;
+            o.activeAi = sprite->m_activeAI;
+            o.activeImprisonment = sprite->m_activeImprisonment;
+            o.visibleMonster = sprite->m_bVisibleMonster;
+        } else if (o.type == CGameObject::TYPE_DOOR) {
+            const CGameDoor* door = static_cast<CGameDoor*>(object);
+            o.hasName = true;
+            o.name.assign(door->m_scriptName, strnlen(door->m_scriptName, SCRIPTNAME_SIZE));
+        }
+        out->objects.push_back(o);
+    }
+}
+
+const bool g_probeRegistered = (platform::replay::SetProbeSource(&ReadProbe), true);
 
 class EngineDumpSource : public platform::state_dump::DumpSource {
 public:

@@ -32,6 +32,7 @@
 // and status.txt (frame, script_line, state), all in IWD2R_STATE_DUMP.
 #pragma once
 
+#include "platform/replay_probe.h"
 #include "platform/win32_api.h"
 
 #include <cstdint>
@@ -72,5 +73,12 @@ POINT Cursor();
 SHORT Key(int vk);
 // SetCursorPos: the last cursor.
 void SetCursor(int x, int y);
+
+// The probe (platform/replay_probe.h): with IWD2R_PROBE naming frame N,
+// OnFrame calls the source after the frame's dump and appends the block to
+// probe.txt. src/StateDumpSources.cpp registers the engine's source;
+// without one nothing is written.
+using ProbeSource = void (*)(replay_probe::Frame* out);
+void SetProbeSource(ProbeSource source);
 
 }

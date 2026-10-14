@@ -429,5 +429,103 @@
     "base": "CGameDialogReply",
     "offset": "0x0058",
     "type": "ptr"
+  },
+  "object_pos": {
+    "base": "CGameObject",
+    "offset": "0x0006",
+    "type": "i32",
+    "count": 2
+  },
+  "object_area": {
+    "base": "CGameObject",
+    "offset": "0x0012",
+    "type": "ptr"
+  },
+  "object_list_type": {
+    "base": "CGameObject",
+    "offset": "0x001A",
+    "type": "u8"
+  },
+  "object_can_be_seen": {
+    "base": "CGameObject",
+    "offset": "0x0060",
+    "type": "i16"
+  },
+  "object_ai_speed": {
+    "base": "CGameObject",
+    "offset": "0x006A",
+    "type": "u8"
+  },
+  "object_ai_inhibitor": {
+    "base": "CGameObject",
+    "offset": "0x006C",
+    "type": "u8"
+  },
+  "sprite_name": {
+    "base": "CGameSprite",
+    "offset": "0x0554",
+    "type": "i8",
+    "count": 32
+  },
+  "sprite_last_character_count": {
+    "base": "CGameSprite",
+    "offset": "0x4BB4",
+    "type": "u8"
+  },
+  "sprite_active": {
+    "base": "CGameSprite",
+    "offset": "0x50A6",
+    "type": "i32"
+  },
+  "sprite_active_ai": {
+    "base": "CGameSprite",
+    "offset": "0x50AA",
+    "type": "i32"
+  },
+  "sprite_active_imprisonment": {
+    "base": "CGameSprite",
+    "offset": "0x50AE",
+    "type": "i32"
+  },
+  "sprite_visible_monster": {
+    "base": "CGameSprite",
+    "offset": "0x54A4",
+    "type": "i32"
+  },
+  "area_characters": {
+    "base": "CGameArea",
+    "offset": "0x01ED",
+    "type": "u8"
+  },
+  "area_view_x": {
+    "base": "CGameArea",
+    "offset": "0x055C",
+    "type": "i32"
+  },
+  "area_view_y": {
+    "base": "CGameArea",
+    "offset": "0x0560",
+    "type": "i32"
+  },
+  "area_visibility_width": {
+    "base": "CGameArea",
+    "offset": "0x0866",
+    "type": "i16"
+  },
+  "area_visibility_height": {
+    "base": "CGameArea",
+    "offset": "0x0868",
+    "type": "i16"
+  },
+  "area_visibility_range": {
+    "base": "CGameArea",
+    "offset": "0x086E",
+    "type": "i16"
+  },
+  "area_visibility_ids": {
+    "base": "CGameArea",
+    "offset": "0x08A0",
+    "type": "i32",
+    "count": 6
   }
 }

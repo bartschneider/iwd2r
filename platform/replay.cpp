@@ -41,6 +41,7 @@ namespace {
         std::string dir;
         unsigned dumpEvery = 30;
         unsigned seed = 1;
+        replay_probe::Range probe;
     };
 
     [[noreturn]] void Fail(const std::string& text)
@@ -81,6 +82,9 @@ namespace {
             const char* seed = std::getenv("IWD2R_SEED");
             if (seed && *seed && !ParseUnsigned(seed, &c.seed))
                 Fail(std::string("IWD2R_SEED=") + seed + " is not a number");
+            const char* probe = std::getenv("IWD2R_PROBE");
+            if (!replay_probe::ParseRange(probe, &c.probe))
+                Fail(std::string("IWD2R_PROBE=") + probe + " is not a frame or FIRST-LAST");
             return c;
         }();
         return config;
@@ -166,6 +170,27 @@ namespace {
             Say("cannot write %s", name);
         else if (checkpoint)
             Say("wrote %s", name);
+    }
+
+    std::atomic<ProbeSource> g_probeSource { nullptr };
+
+    // IWD2R_PROBE: the frame's block, appended to probe.txt.
+    void WriteProbe(uint32_t frame)
+    {
+        const ProbeSource source = g_probeSource.load();
+        if (!source || !Settings().probe.Has(frame))
+            return;
+        replay_probe::Frame f;
+        f.frame = frame;
+        source(&f);
+        std::FILE* out = std::fopen(PathIn("probe.txt").c_str(), "ab");
+        if (!out) {
+            Say("cannot write %s", "probe.txt");
+            return;
+        }
+        const std::string text = replay_probe::Format(f);
+        std::fwrite(text.data(), 1, text.size(), out);
+        std::fclose(out);
     }
 
     void WriteStatus()
@@ -313,9 +338,15 @@ void OnFrame()
     const unsigned every = Settings().dumpEvery;
     if (every && frame % every == 0)
         WriteDump(nullptr);
+    WriteProbe(frame);
     WriteStatus();
     g_now = clock::TickAfterFrame(frame);
     g_frameCounted = true;
+}
+
+void SetProbeSource(ProbeSource source)
+{
+    g_probeSource = source;
 }
 
 // The recorder's OnFrameEnd: the timers of a frame that counted fire once
