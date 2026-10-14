@@ -39,17 +39,6 @@ const char RESREF_EYE_OF_FORTITUDE[] = "SpIn131";
 // 0x8AEBE4
 const char RESREF_EYE_OF_STONE[] = "SpIn132";
 
-// TODO: Stub. GetSpellResrefEffects (0x586220, IcewindMisc's file) decodes
-// the spell's effects for the caster level through CSpell's effect decoder
-// (0x54A510), and neither is ported yet. Until then no effect comes back.
-static std::list<CGameEffect*> GetSpellResrefEffects(CGameObject* pObject, const BYTE* resRef, BYTE nLevel)
-{
-    (void)pObject;
-    (void)resRef;
-    (void)nLevel;
-    return std::list<CGameEffect*>();
-}
-
 // TODO: Stub. CInfGame's tracking lookup (CInfGame_B3AUTO_005466F0,
 // 0x5466F0, a CInfGame member not declared yet) finds the area in the
 // tracking table and, when the sprite's wilderness lore roll (d20 + the
@@ -1110,11 +1099,7 @@ BOOL IcewindCGameEffectImmunityToResource::ApplyEffect(CGameSprite* pSprite)
         return TRUE;
     }
 
-    // TODO: Incomplete. The original inserts the resref into the derived
-    // stats' set of resources the sprite is immune to (a std::set of
-    // std::string at CDerivedStats +0x470, sprite +0xD90; FUN_004C5870 the
-    // node insertion), which CDerivedStats.h does not declare yet.
-    (void)pSprite;
+    pSprite->GetDerivedStats()->m_resourceImmunities.insert(sRes);
 
     return TRUE;
 }
@@ -3231,7 +3216,7 @@ BOOL IcewindCGameEffectApplyEffectsList::ApplyEffect(CGameSprite* pSprite)
         return TRUE;
     }
 
-    std::list<CGameEffect*> effects = GetSpellResrefEffects(pSource,
+    std::list<CGameEffect*> effects = IcewindMisc::GetSpellResrefEffects(pSource,
         m_res.GetResRef(),
         static_cast<BYTE>(m_casterLevel));
 
@@ -3474,10 +3459,12 @@ BOOL IcewindCGameEffectFireshield::ApplyEffect(CGameSprite* pSprite)
         pSprite->GetDerivedStats()->m_visualEffects.set(IWD_VFX_FIRE_SHIELD_RED, true);
         pSprite->GetDerivedStats()->m_visualEffects.set(IWD_VFX_28, true);
 
-        // TODO: Incomplete. The original appends {m_sourceRes, m_res,
-        // m_casterLevel, m_target} to the derived stats' when-struck list
-        // (CDerivedStats +0x494, sprite +0xDB4; FUN_0056BE50 the list
-        // insertion), which CDerivedStats.h does not declare yet.
+        CWhenStruckEntry entry;
+        entry.m_sourceRes = m_sourceRes;
+        entry.m_res = m_res;
+        entry.m_casterLevel = static_cast<BYTE>(m_casterLevel);
+        entry.m_target = m_target;
+        pSprite->GetDerivedStats()->m_whenStruckList.push_back(entry);
 
         // NOTE: The entry is sent to the other players here (vtable
         // 0x84D45C). Omitted: single player only
@@ -3494,7 +3481,12 @@ BOOL IcewindCGameEffectFireshield::ApplyEffect(CGameSprite* pSprite)
         pSprite->GetDerivedStats()->m_visualEffects.set(IWD_VFX_FIRE_SHIELD_BLUE, true);
         pSprite->GetDerivedStats()->m_visualEffects.set(IWD_VFX_29, true);
 
-        // TODO: Incomplete. The when-struck entry as above.
+        CWhenStruckEntry entry;
+        entry.m_sourceRes = m_sourceRes;
+        entry.m_res = m_res;
+        entry.m_casterLevel = static_cast<BYTE>(m_casterLevel);
+        entry.m_target = m_target;
+        pSprite->GetDerivedStats()->m_whenStruckList.push_back(entry);
 
         // NOTE: The entry is sent to the other players here (vtable
         // 0x84D45C). Omitted: single player only
@@ -4344,11 +4336,12 @@ CGameEffect* IcewindCGameEffectWhenStruck::Copy()
 // 0x56A5A0
 BOOL IcewindCGameEffectWhenStruck::ApplyEffect(CGameSprite* pSprite)
 {
-    // TODO: Incomplete. The original appends {m_sourceRes, m_res,
-    // m_casterLevel, m_target} to the derived stats' when-struck list
-    // (CDerivedStats +0x494, sprite +0xDB4; FUN_004490E0 the node, the count
-    // at sprite +0xDB8), which CDerivedStats.h does not declare yet.
-    (void)pSprite;
+    CWhenStruckEntry entry;
+    entry.m_sourceRes = m_sourceRes;
+    entry.m_res = m_res;
+    entry.m_casterLevel = static_cast<BYTE>(m_casterLevel);
+    entry.m_target = m_target;
+    pSprite->GetDerivedStats()->m_whenStruckList.push_back(entry);
 
     // NOTE: The entry is sent to the other players here (vtable 0x84D45C).
     // Omitted: single player only (docs/adr/0002-single-player-only.md).
@@ -4614,16 +4607,28 @@ CGameEffect* IcewindCGameEffectDamageReduction::Copy()
 // 0x56ADC0
 BOOL IcewindCGameEffectDamageReduction::ApplyEffect(CGameSprite* pSprite)
 {
-    // TODO: Incomplete. The original pushes a damage reduction entry (0x24
-    // bytes: the amount, then m_dwFlags, and a set of the damage types 0,
-    // 0x100000, 0x1000000, 0x2000000, 0x4000000 and 0x8000000; the
-    // constructor 0x447B60, the insertion 0x447E50) onto the derived stats'
-    // damage reduction vector (CDerivedStats +0x49C, sprite +0xDBC; 0x447F30
-    // the push_back), which CDerivedStats.h does not declare yet. The amount
-    // is 5 * m_dwFlags when m_effectAmount is 0 (a type of 6 first becomes
-    // 3); otherwise the original passes its stack argument slot (the sprite
-    // pointer) (NOTE: to check when the vector lands).
-    (void)pSprite;
+    LONG nAmount;
+    if (m_effectAmount == 0) {
+        if (m_dwFlags == 6) {
+            m_dwFlags = 3;
+        }
+        nAmount = 5 * m_dwFlags;
+    } else {
+        // DEVIATION (ruling M3-8): the original takes the amount from its
+        // stack argument slot, the sprite pointer (0x56ADF8). That heap
+        // address absorbs everything in practice and changes from run to
+        // run; a constant does the same deterministically.
+        nAmount = 0x7FFFFFFF;
+    }
+
+    CDamageReduction reduction(nAmount, m_dwFlags);
+    reduction.AddDamageType(0);
+    reduction.AddDamageType(0x100000);
+    reduction.AddDamageType(0x1000000);
+    reduction.AddDamageType(0x2000000);
+    reduction.AddDamageType(0x4000000);
+    reduction.AddDamageType(0x8000000);
+    pSprite->GetDerivedStats()->m_damageReductions.push_back(reduction);
 
     return TRUE;
 }
@@ -4649,12 +4654,10 @@ CGameEffect* IcewindCGameEffectProtectionFromArrows::Copy()
 // 0x56AF80
 BOOL IcewindCGameEffectProtectionFromArrows::ApplyEffect(CGameSprite* pSprite)
 {
-    // TODO: Incomplete. The original pushes a damage reduction entry of 10
-    // with m_dwFlags and the damage types 0x4000000 and 0x2000000 (the
-    // constructor 0x447B60, the insertion 0x447E50) onto the derived stats'
-    // damage reduction vector (CDerivedStats +0x49C, sprite +0xDBC; 0x447F30
-    // the push_back), which CDerivedStats.h does not declare yet.
-    (void)pSprite;
+    CDamageReduction reduction(10, m_dwFlags);
+    reduction.AddDamageType(0x4000000);
+    reduction.AddDamageType(0x2000000);
+    pSprite->GetDerivedStats()->m_damageReductions.push_back(reduction);
 
     return TRUE;
 }

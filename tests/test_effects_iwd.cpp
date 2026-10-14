@@ -28,7 +28,9 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <list>
 #include <memory>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -382,6 +384,16 @@ TEST_CASE("effects-iwd: apply effects list (402) stops on a failed condition and
     pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_APPLYEFFECTSLIST, 41, 0);
     pEffect->m_sourceID = -1;
     CHECK(pEffect->ApplyEffect(pSprite) == FALSE);
+
+    // 0: no condition. The spell's effects are decoded from the source and
+    // added (stats-spell fix round 1: IcewindMisc::GetSpellResrefEffects).
+    const INT before = pSprite->m_timedEffectList.GetCount();
+    pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_APPLYEFFECTSLIST, 0, 0);
+    pEffect->m_res = "SPWI112";
+    pEffect->m_casterLevel = 20;
+    CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+    CHECK(pEffect->m_done == TRUE);
+    CHECK(pSprite->m_timedEffectList.GetCount() > before);
 }
 
 TEST_CASE("effects-iwd: Beltyn's burning blood (247) queues one delayed copy per further round", "[effects][data]")
@@ -611,6 +623,36 @@ TEST_CASE("effects-iwd: fire shield (406) red and blue set their states", "[effe
 
     pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_WHENSTRUCK, 0, 0);
     CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+
+    // Each of the three adds a when-struck entry (stats-spell fix round 1).
+    std::list<CWhenStruckEntry>& list = pStats->m_whenStruckList;
+    list.clear();
+    pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_FIRESHIELD, 0, 0);
+    pEffect->m_res = "SPWI403";
+    pEffect->m_sourceRes = "SPWI404";
+    pEffect->m_casterLevel = 0x30A;
+    pEffect->m_target = CPoint(5, 6);
+    CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+    REQUIRE(list.size() == 1);
+    CHECK(list.back().m_res == CResRef("SPWI403"));
+    CHECK(list.back().m_sourceRes == CResRef("SPWI404"));
+    CHECK(list.back().m_casterLevel == 0x0A);
+    CHECK(list.back().m_target == CPoint(5, 6));
+    pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_FIRESHIELD, 1, 0);
+    CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+    CHECK(list.size() == 2);
+    // Already shielded: nothing more.
+    pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_FIRESHIELD, 1, 0);
+    CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+    CHECK(list.size() == 2);
+    pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_WHENSTRUCK, 0, 0);
+    pEffect->m_res = "SPWI999";
+    CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+    REQUIRE(list.size() == 3);
+    CHECK(list.back().m_res == CResRef("SPWI999"));
+    pStats->m_spellStates.reset(SPLSTATE_RED_FIRESHIELD);
+    pStats->m_spellStates.reset(SPLSTATE_BLUE_FIRESHIELD);
+    list.clear();
 }
 
 TEST_CASE("effects-iwd: remove effect of resource (254) removes the timed effects of that source", "[effects][data]")
@@ -677,6 +719,15 @@ TEST_CASE("effects-iwd: immunity to resource (258) type 1 checks and clears the 
     pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_IMMUNITYTORESOURCE, 0, 0);
     CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
     CHECK(pEffect->m_done == TRUE);
+
+    // Type 0 with a resref: added to the resource immunities.
+    pSprite->GetDerivedStats()->m_resourceImmunities.clear();
+    pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_IMMUNITYTORESOURCE, 0, 0);
+    pEffect->m_res = "SPWI112";
+    CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+    CHECK(pEffect->m_done == FALSE);
+    CHECK(pSprite->GetDerivedStats()->m_resourceImmunities.count("SPWI112") == 1);
+    pSprite->GetDerivedStats()->m_resourceImmunities.clear();
 }
 
 TEST_CASE("effects-iwd: damage reduction (436) and protection from arrows (443) apply", "[effects][data]")
@@ -686,6 +737,36 @@ TEST_CASE("effects-iwd: damage reduction (436) and protection from arrows (443) 
     CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
     pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_PROTECTIONFORMARROWS, 0, 0);
     CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+
+    CDamageReductionList& list = pSprite->GetDerivedStats()->m_damageReductions;
+    list.clear();
+    pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_DAMAGEREDUCTION, 2, 0);
+    CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+    REQUIRE(list.size() == 1);
+    CHECK(list.back().m_nAmount == 10);
+    CHECK(list.back().m_nEnchantment == 2);
+    CHECK(list.back().m_damageTypes.size() == 6);
+    CHECK(list.back().IsGeneric() == TRUE);
+    // Type 6 becomes 3 first: 15/+3.
+    pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_DAMAGEREDUCTION, 6, 0);
+    CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+    CHECK(pEffect->m_dwFlags == 3);
+    CHECK(list.back().m_nAmount == 15);
+    CHECK(list.back().m_nEnchantment == 3);
+    // An amount: the DEVIATION's constant (ruling M3-8).
+    pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_DAMAGEREDUCTION, 4, 7);
+    CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+    CHECK(list.back().m_nAmount == 0x7FFFFFFF);
+    CHECK(list.back().m_nEnchantment == 4);
+    // Protection from arrows: 10/+flags against two types.
+    pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_PROTECTIONFORMARROWS, 5, 0);
+    CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+    REQUIRE(list.size() == 4);
+    CHECK(list.back().m_nAmount == 10);
+    CHECK(list.back().m_nEnchantment == 5);
+    CHECK(list.back().m_damageTypes == std::set<INT> { 0x2000000, 0x4000000 });
+    CHECK(list.back().IsGeneric() == FALSE);
+    list.clear();
 }
 
 TEST_CASE("effects-iwd: the aura and storm effects re-queue themselves and finish", "[effects][data]")
