@@ -4,6 +4,7 @@
 #include "CBaldurChitin.h"
 #include "CGameArea.h"
 #include "CGameObjectArray.h"
+#include "CGameSpawning.h"
 #include "CGameSprite.h"
 #include "CInfGame.h"
 #include "CMemINI.h"
@@ -994,8 +995,8 @@ TEST_CASE("vis: the party member in AR1000 explores its vision ellipse and moves
 // (header byte 0x4E) against the two bounds (0x4C, 0x4D); a spawn whose
 // area_diff_N key turns its band off spawns nothing and asserts nothing;
 // with the band on it creates create_qty creatures at the spawn point.
-// (Review Focus 5, CGameSpawning::Spawn's per-total-level table, is a
-// separate function, not ported yet: it needs CAIGroup 0x405370.)
+// (Review Focus 5, CGameSpawning::Spawn's per-total-level budget, has its
+// own tests below.)
 namespace {
 
 int ObjectsInArea(CGameArea* pArea)
@@ -1148,6 +1149,221 @@ TEST_CASE("spawn: the spec key's object type gates an INI spawn on the area's co
         std::unique_ptr<CMemINISection> p(section("[1.2", "1"));
         CSpawn spawn(p.get());
         CHECK_FALSE(spawn.DataIsValid);
+    }
+}
+
+// ARE spawn points (CGameSpawning::Spawn, 0x4C9CE0) on AR1000. There is no
+// per-level table: the budget is m_difficulty * total level / 100 against
+// the running sum of the creatures' m_nXP (the CRE's current-XP field, the
+// creature's power). The first creature always spawns; more of the picked
+// kind spawn while the sum stays within the budget, up to m_maxTypeNum. So
+// a total level whose budget covers no creature spawns exactly one and
+// asserts nothing (Review Focus 5). The gates (activated, the hour's bit,
+// the point's own tile visible) stop it before anything spawns.
+namespace {
+
+std::vector<LONG> SpritesInArea(CGameArea* pArea)
+{
+    std::vector<LONG> ids;
+    CTypedPtrList<CPtrList, int*>* lists[] = { &pArea->m_lVertSort, &pArea->m_lVertSortBack, &pArea->m_lVertSortFlight,
+        &pArea->m_lVertSortAdd, &pArea->m_lVertSortBackAdd, &pArea->m_lVertSortFlightAdd };
+    for (CTypedPtrList<CPtrList, int*>* list : lists) {
+        POSITION pos = list->GetHeadPosition();
+        while (pos != NULL) {
+            ids.push_back(static_cast<LONG>(reinterpret_cast<INT_PTR>(list->GetNext(pos))));
+        }
+    }
+    std::sort(ids.begin(), ids.end());
+    return ids;
+}
+
+// The resrefs of the sprites in `after` but not in `before`.
+std::vector<std::string> NewSprites(const std::vector<LONG>& before, const std::vector<LONG>& after)
+{
+    std::vector<LONG> added;
+    std::set_difference(after.begin(), after.end(), before.begin(), before.end(), std::back_inserter(added));
+    std::vector<std::string> names;
+    for (LONG id : added) {
+        CGameObject* pObject;
+        if (g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(id, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE)
+            != CGameObjectArray::SUCCESS) {
+            continue;
+        }
+        if (pObject->GetObjectType() == CGameObject::TYPE_SPRITE) {
+            CString name;
+            static_cast<CGameSprite*>(pObject)->m_resRef.CopyToString(name);
+            names.push_back(std::string(name));
+        }
+        g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(id, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+    }
+    return names;
+}
+
+// A spawn point at (1100, 700), out of the party's sight (2414, 897),
+// active at every hour, not spawn-once.
+CAreaFileRandomMonsterSpawningPoint SpawnPoint(std::initializer_list<const char*> creatures, WORD difficulty, WORD maxTypeNum)
+{
+    CAreaFileRandomMonsterSpawningPoint point;
+    strncpy(reinterpret_cast<char*>(point.m_scriptName), "ProbeSpawn", SCRIPTNAME_SIZE);
+    point.m_posX = 1100;
+    point.m_posY = 700;
+    WORD n = 0;
+    for (const char* creature : creatures) {
+        memcpy(point.m_randomCreature[n++], CResRef(creature).GetResRef(), RESREF_SIZE);
+    }
+    point.m_randomCreatureNum = n;
+    point.m_difficulty = difficulty;
+    point.m_maxTypeNum = maxTypeNum;
+    point.m_activated = 1;
+    point.m_timeOfDayVisible = 0xFFFFFF;
+    return point;
+}
+
+}
+
+TEST_CASE("spawn: a spawn point's budget is difficulty times the total level over the creatures' power", "[spawn][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CGameSprite* pSprite = NewGameWithOneCharacter(cre, "Probe");
+    pGame->UpdateCharacterSlots();
+    pGame->SetupCharacters(FALSE);
+    CGameArea* pArea = pSprite->GetArea();
+    REQUIRE(pArea != NULL);
+    REQUIRE_FALSE(pArea->m_visibility.IsTileVisible(pArea->m_visibility.PointToTile(CPoint(1100, 700))));
+
+    // The budget against the creatures' power.
+    {
+        // 10GOB's power (CRE current XP) is 1, 12GOBSH1's 3.
+        struct Row {
+            const char* creature;
+            WORD difficulty;
+            BYTE level;
+            WORD maxTypeNum;
+            size_t spawned;
+        };
+        const Row rows[] = {
+            // Level 0 with no party summed in is impossible here (0 means "sum
+            // the party"), so the empty budget comes from difficulty 0.
+            { "10GOB", 0, 20, 10, 1 }, // budget 0: the first creature only
+            { "10GOB", 100, 1, 10, 1 }, // budget 1
+            { "10GOB", 100, 3, 10, 3 }, // budget 3
+            { "10GOB", 50, 7, 10, 3 }, // budget 3 (350 / 100)
+            { "10GOB", 100, 9, 10, 9 }, // budget 9
+            { "10GOB", 100, 20, 10, 10 }, // capped by m_maxTypeNum
+            { "10GOB", 100, 20, 0, 0 }, // m_maxTypeNum 0: nothing
+            { "12GOBSH1", 100, 2, 10, 1 }, // budget 2 < 3: the first only
+            { "12GOBSH1", 100, 6, 10, 2 }, // budget 6 = 2 * 3: stops on equal
+            { "12GOBSH1", 100, 8, 10, 2 }, // budget 8: a third (9) is over
+        };
+        for (const Row& row : rows) {
+            INFO(row.creature << " difficulty " << row.difficulty << " level " << int(row.level) << " max "
+                              << row.maxTypeNum);
+            CAreaFileRandomMonsterSpawningPoint point = SpawnPoint({ row.creature }, row.difficulty, row.maxTypeNum);
+            CGameSpawning* pSpawning = new CGameSpawning(pArea, &point);
+            const std::vector<LONG> before = SpritesInArea(pArea);
+            pSpawning->Spawn(CPoint(2414, 897), row.level);
+            const std::vector<std::string> added = NewSprites(before, SpritesInArea(pArea));
+            CHECK(added.size() == row.spawned);
+            for (const std::string& name : added) {
+                CHECK(name == row.creature);
+            }
+            // Set whenever it ran to the end.
+            CHECK(pSpawning->field_136 == 1);
+        }
+    }
+
+    // Level 0 sums the party's levels.
+    {
+        const BYTE party = pSprite->m_derivedStats.GetLevel();
+        REQUIRE(party >= 1);
+        CAreaFileRandomMonsterSpawningPoint point = SpawnPoint({ "10GOB" }, 100, 40);
+        CGameSpawning* pSpawning = new CGameSpawning(pArea, &point);
+        const std::vector<LONG> before = SpritesInArea(pArea);
+        pSpawning->Spawn(CPoint(2414, 897), 0);
+        CHECK(NewSprites(before, SpritesInArea(pArea)).size() == party);
+    }
+
+    // A rejected pick falls back to the first creature.
+    {
+        // Budget 0: if rand picks 12GOBSH1 it is over budget at the first
+        // place and the loop restarts with 10GOB, which always spawns; if it
+        // picks 10GOB that spawns and a second is over. Either way, one 10GOB.
+        for (int n = 0; n < 8; n++) {
+            CAreaFileRandomMonsterSpawningPoint point = SpawnPoint({ "10GOB", "12GOBSH1" }, 0, 10);
+            CGameSpawning* pSpawning = new CGameSpawning(pArea, &point);
+            const std::vector<LONG> before = SpritesInArea(pArea);
+            pSpawning->Spawn(CPoint(2414, 897), 20);
+            const std::vector<std::string> added = NewSprites(before, SpritesInArea(pArea));
+            REQUIRE(added.size() == 1);
+            CHECK(added[0] == "10GOB");
+        }
+    }
+
+    // The gates spawn nothing and leave the point unspent.
+    {
+        CTimerWorld& timer = pGame->m_worldTime;
+        const ULONG saved = timer.m_gameTime;
+        // Hour 13 of the next day.
+        timer.m_gameTime = (timer.m_gameTime / CTimerWorld::TIMESCALE_MSEC_PER_DAY + 1) * CTimerWorld::TIMESCALE_MSEC_PER_DAY
+            + 13 * CTimerWorld::TIMESCALE_MSEC_PER_HOUR + 10;
+        REQUIRE(timer.GetCurrentHour() == 13);
+
+        CAreaFileRandomMonsterSpawningPoint point = SpawnPoint({ "10GOB" }, 100, 3);
+        point.m_timeOfDayVisible = 0xFFFFFF & ~(1u << 13);
+        CGameSpawning* pSpawning = new CGameSpawning(pArea, &point);
+        std::vector<LONG> before = SpritesInArea(pArea);
+        pSpawning->Spawn(CPoint(2414, 897), 3);
+        CHECK(NewSprites(before, SpritesInArea(pArea)).empty());
+        CHECK(pSpawning->field_136 == 0);
+
+        // The hour's bit on: it spawns.
+        pSpawning->m_spawningObject.m_timeOfDayVisible = 1u << 13;
+        pSpawning->Spawn(CPoint(2414, 897), 3);
+        CHECK(NewSprites(before, SpritesInArea(pArea)).size() == 3);
+        CHECK(pSpawning->field_136 == 1);
+
+        // Spawn-once (m_wFlags bit 0) after it spawned: nothing more.
+        pSpawning->m_spawningObject.m_wFlags = 1;
+        before = SpritesInArea(pArea);
+        pSpawning->Spawn(CPoint(2414, 897), 3);
+        CHECK(NewSprites(before, SpritesInArea(pArea)).empty());
+
+        // Not activated.
+        point.m_timeOfDayVisible = 0xFFFFFF;
+        point.m_activated = 0;
+        CGameSpawning* pInactive = new CGameSpawning(pArea, &point);
+        before = SpritesInArea(pArea);
+        pInactive->Spawn(CPoint(2414, 897), 3);
+        CHECK(NewSprites(before, SpritesInArea(pArea)).empty());
+        CHECK(pInactive->field_136 == 0);
+
+        timer.m_gameTime = saved;
+    }
+
+    // A point in the party's sight spawns nothing.
+    {
+        const CPoint start = pSprite->GetPos();
+        REQUIRE(pArea->m_visibility.IsTileVisible(pArea->m_visibility.PointToTile(start)));
+        CAreaFileRandomMonsterSpawningPoint point = SpawnPoint({ "10GOB" }, 100, 3);
+        point.m_posX = static_cast<WORD>(start.x);
+        point.m_posY = static_cast<WORD>(start.y);
+        CGameSpawning* pSpawning = new CGameSpawning(pArea, &point);
+        const std::vector<LONG> before = SpritesInArea(pArea);
+        pSpawning->Spawn(start, 3);
+        CHECK(NewSprites(before, SpritesInArea(pArea)).empty());
+        CHECK(pSpawning->field_136 == 0);
     }
 }
 
