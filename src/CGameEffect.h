@@ -356,6 +356,7 @@ class CGameEffectAttackNo : public CGameEffect {
 public:
     CGameEffectAttackNo(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;
 };
 
 class CGameEffectAwaken : public CGameEffect {
@@ -402,6 +403,7 @@ class CGameEffectCHR : public CGameEffect {
 public:
     CGameEffectCHR(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;
 };
 
 class CGameEffectColorChange : public CGameEffect {
@@ -511,12 +513,14 @@ class CGameEffectLore : public CGameEffect {
 public:
     CGameEffectLore(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;
 };
 
 class CGameEffectLuck : public CGameEffect {
 public:
     CGameEffectLuck(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;
 };
 
 class CGameEffectMorale : public CGameEffect {
@@ -724,6 +728,7 @@ class CGameEffectBaseAttackBonus : public CGameEffect {
 public:
     CGameEffectBaseAttackBonus(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;
 };
 
 class CGameEffectSlay : public CGameEffect {

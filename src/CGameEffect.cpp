@@ -2087,6 +2087,116 @@ CGameEffect* CGameEffectAttackNo::Copy()
     return copy;
 }
 
+// 0x4A52F0
+BOOL CGameEffectAttackNo::ApplyEffect(CGameSprite* pSprite)
+{
+    BYTE nBase;
+    INT nValue;
+    SHORT nAttacks;
+
+    switch (m_dwFlags) {
+    case 0:
+        if (m_durationType == 1) {
+            nBase = pSprite->m_baseStats.m_numberOfAttacksBase;
+            if (nBase < 5) {
+                nBase += static_cast<BYTE>(m_effectAmount);
+                pSprite->m_baseStats.m_numberOfAttacksBase = nBase;
+                if (nBase > 5) {
+                    pSprite->m_baseStats.m_numberOfAttacksBase = 5;
+                }
+            } else {
+                pSprite->m_baseStats.m_numberOfAttacksBase = static_cast<BYTE>(m_effectAmount) + nBase;
+            }
+            m_forceRepass = TRUE;
+            m_done = TRUE;
+            break;
+        }
+
+        pSprite->m_derivedStats.m_nNumberOfAttacks += static_cast<SHORT>(m_effectAmount);
+        m_done = FALSE;
+        break;
+    case 1:
+        if (m_durationType == 1) {
+            pSprite->m_baseStats.m_numberOfAttacksBase = static_cast<BYTE>(m_effectAmount);
+            m_forceRepass = TRUE;
+            m_done = TRUE;
+            break;
+        }
+
+        pSprite->m_derivedStats.m_nNumberOfAttacks = static_cast<BYTE>(m_effectAmount);
+        m_done = FALSE;
+        break;
+    case 2:
+        if (m_durationType == 1) {
+            nBase = pSprite->m_baseStats.m_numberOfAttacksBase;
+            if (nBase < 6) {
+                nValue = static_cast<SHORT>(m_effectAmount) * nBase;
+                nBase = static_cast<BYTE>(nValue / 100);
+                pSprite->m_baseStats.m_numberOfAttacksBase = nBase;
+                if (nBase > 5) {
+                    pSprite->m_baseStats.m_numberOfAttacksBase = 5;
+                }
+                nBase = pSprite->m_baseStats.m_numberOfAttacksBase;
+            } else {
+                nValue = (nBase - 5) * static_cast<SHORT>(m_effectAmount);
+                nBase = static_cast<BYTE>(nValue / 100) + 5;
+                pSprite->m_baseStats.m_numberOfAttacksBase = nBase;
+            }
+            if (nBase < 2) {
+                pSprite->m_baseStats.m_numberOfAttacksBase = 1;
+            }
+            m_forceRepass = TRUE;
+            m_done = TRUE;
+            break;
+        }
+
+        // NOTE: The original compares the derived number of attacks with 6
+        // but scales the base number.
+        if (pSprite->m_derivedStats.m_nNumberOfAttacks < 6) {
+            nValue = pSprite->m_baseStats.m_numberOfAttacksBase * static_cast<SHORT>(m_effectAmount);
+            nAttacks = static_cast<SHORT>(nValue / 100);
+            pSprite->m_derivedStats.m_nNumberOfAttacks = nAttacks;
+            if (nAttacks > 5) {
+                pSprite->m_derivedStats.m_nNumberOfAttacks = 5;
+            }
+            if (pSprite->m_derivedStats.m_nNumberOfAttacks < 0) {
+                pSprite->m_derivedStats.m_nNumberOfAttacks = 0;
+            }
+            if (pSprite->m_derivedStats.m_nNumberOfAttacks < 2) {
+                pSprite->m_derivedStats.m_nNumberOfAttacks = 1;
+            }
+        } else {
+            nValue = (pSprite->m_baseStats.m_numberOfAttacksBase - 5) * static_cast<SHORT>(m_effectAmount);
+            nAttacks = static_cast<SHORT>(nValue / 100 + 5);
+            pSprite->m_derivedStats.m_nNumberOfAttacks = nAttacks;
+            if (nAttacks < 2) {
+                pSprite->m_derivedStats.m_nNumberOfAttacks = 1;
+            }
+        }
+        m_done = FALSE;
+        break;
+    default:
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameEffect.cpp
+        // __LINE__: 3417
+        UTIL_ASSERT(FALSE);
+        break;
+    }
+
+    nBase = pSprite->m_baseStats.m_numberOfAttacksBase;
+    if (nBase > 4) {
+        nBase = 5;
+    }
+    pSprite->m_baseStats.m_numberOfAttacksBase = nBase;
+
+    nAttacks = pSprite->m_derivedStats.m_nNumberOfAttacks;
+    if (nAttacks > 4) {
+        nAttacks = 5;
+    }
+    pSprite->m_derivedStats.m_nNumberOfAttacks = nAttacks;
+
+    return TRUE;
+}
+
 // -----------------------------------------------------------------------------
 
 // NOTE: Inlined.
@@ -2293,6 +2403,102 @@ CGameEffect* CGameEffectCHR::Copy()
     delete effect;
     copy->CopyFromBase(this);
     return copy;
+}
+
+// 0x4A69E0
+BOOL CGameEffectCHR::ApplyEffect(CGameSprite* pSprite)
+{
+    SHORT nValue = 1;
+    SHORT nSum;
+
+    switch (m_dwFlags) {
+    case 0:
+        if (m_durationType == 1) {
+            nSum = static_cast<SHORT>(m_effectAmount) + pSprite->m_baseStats.m_CHRBase;
+            if (nSum > 0) {
+                nValue = nSum;
+                if (nSum > 40) {
+                    nValue = 40;
+                }
+            }
+            pSprite->m_baseStats.m_CHRBase = static_cast<BYTE>(nValue);
+            m_forceRepass = TRUE;
+            m_done = TRUE;
+            return TRUE;
+        }
+
+        // A temporary bonus counts only by its excess over the largest
+        // bonus already applied this pass (m_derivedStats.field_13C).
+        if (m_effectAmount < 1) {
+            if (m_effectAmount >= 0) {
+                m_done = FALSE;
+                return TRUE;
+            }
+            if (pSprite->m_derivedStats.field_13C <= m_effectAmount) {
+                return TRUE;
+            }
+        } else if (m_effectAmount <= pSprite->m_derivedStats.field_13C) {
+            return TRUE;
+        }
+        pSprite->m_bonusStats.m_nCHR += static_cast<SHORT>(m_effectAmount) - static_cast<SHORT>(pSprite->m_derivedStats.field_13C);
+        pSprite->m_derivedStats.field_13C = m_effectAmount;
+        m_done = FALSE;
+        return TRUE;
+    case 1:
+        nValue = static_cast<SHORT>(m_effectAmount);
+        if (m_durationType != 1) {
+            if (nValue < 1) {
+                pSprite->m_derivedStats.m_nCHR = 1;
+                m_done = FALSE;
+                return TRUE;
+            }
+            if (nValue > 40) {
+                nValue = 40;
+            }
+            pSprite->m_derivedStats.m_nCHR = nValue;
+            m_done = FALSE;
+            return TRUE;
+        }
+        if (nValue < 1) {
+            nValue = 1;
+        } else if (nValue > 40) {
+            nValue = 40;
+        }
+        pSprite->m_baseStats.m_CHRBase = static_cast<BYTE>(nValue);
+        m_forceRepass = TRUE;
+        m_done = TRUE;
+        return TRUE;
+    case 2:
+        if (m_durationType == 1) {
+            nValue = static_cast<SHORT>(static_cast<SHORT>(m_effectAmount) * pSprite->m_baseStats.m_CHRBase / 100);
+            if (nValue < 1) {
+                nValue = 1;
+            } else if (nValue > 40) {
+                nValue = 40;
+            }
+            pSprite->m_baseStats.m_CHRBase = static_cast<BYTE>(nValue);
+            m_forceRepass = TRUE;
+            m_done = TRUE;
+            return TRUE;
+        }
+        nValue = static_cast<SHORT>(pSprite->m_baseStats.m_CHRBase * static_cast<SHORT>(m_effectAmount) / 100);
+        if (nValue < 1) {
+            pSprite->m_derivedStats.m_nCHR = 1;
+            m_done = FALSE;
+            return TRUE;
+        }
+        if (nValue > 40) {
+            nValue = 40;
+        }
+        pSprite->m_derivedStats.m_nCHR = nValue;
+        m_done = FALSE;
+        return TRUE;
+    default:
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameEffect.cpp
+        // __LINE__: 4176
+        UTIL_ASSERT(FALSE);
+        return TRUE;
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -3148,6 +3354,80 @@ CGameEffect* CGameEffectLore::Copy()
     return copy;
 }
 
+// 0x4AEF50
+BOOL CGameEffectLore::ApplyEffect(CGameSprite* pSprite)
+{
+    // NOTE: Opcode 21 works on Knowledge (Arcana), skill 8.
+    signed char nValue;
+    INT nProduct;
+
+    switch (m_dwFlags) {
+    case 0:
+        if (m_durationType != 1) {
+            pSprite->m_bonusStats.m_nSkills[CGAMESPRITE_SKILL_KNOWLEDGE_ARCANA] += static_cast<signed char>(m_effectAmount);
+            m_done = FALSE;
+            break;
+        }
+        nValue = static_cast<signed char>(pSprite->m_baseStats.m_skills[CGAMESPRITE_SKILL_KNOWLEDGE_ARCANA] + static_cast<signed char>(m_effectAmount));
+        pSprite->m_baseStats.m_skills[CGAMESPRITE_SKILL_KNOWLEDGE_ARCANA] = nValue;
+        if (nValue > 100) {
+            pSprite->m_baseStats.m_skills[CGAMESPRITE_SKILL_KNOWLEDGE_ARCANA] = 100;
+        }
+        if (static_cast<signed char>(pSprite->m_baseStats.m_skills[CGAMESPRITE_SKILL_KNOWLEDGE_ARCANA]) < 0) {
+            pSprite->m_baseStats.m_skills[CGAMESPRITE_SKILL_KNOWLEDGE_ARCANA] = 0;
+        }
+        m_forceRepass = TRUE;
+        m_done = TRUE;
+        break;
+    case 1:
+    case 2:
+        if (m_dwFlags == 1) {
+            nValue = static_cast<signed char>(m_effectAmount);
+        } else if (m_durationType != 1) {
+            nProduct = static_cast<signed char>(pSprite->m_baseStats.m_skills[CGAMESPRITE_SKILL_KNOWLEDGE_ARCANA]) * static_cast<SHORT>(m_effectAmount);
+            nValue = static_cast<signed char>(nProduct / 100);
+        } else {
+            nProduct = static_cast<SHORT>(m_effectAmount) * static_cast<signed char>(pSprite->m_baseStats.m_skills[CGAMESPRITE_SKILL_KNOWLEDGE_ARCANA]);
+            nValue = static_cast<signed char>(nProduct / 100);
+        }
+
+        if (m_durationType != 1) {
+            pSprite->m_derivedStats.m_nSkills[CGAMESPRITE_SKILL_KNOWLEDGE_ARCANA] = nValue;
+            if (nValue > 100) {
+                pSprite->m_derivedStats.m_nSkills[CGAMESPRITE_SKILL_KNOWLEDGE_ARCANA] = 100;
+            }
+            if (pSprite->m_derivedStats.m_nSkills[CGAMESPRITE_SKILL_KNOWLEDGE_ARCANA] < 0) {
+                pSprite->m_derivedStats.m_nSkills[CGAMESPRITE_SKILL_KNOWLEDGE_ARCANA] = 0;
+            }
+            m_done = FALSE;
+            break;
+        }
+
+        pSprite->m_baseStats.m_skills[CGAMESPRITE_SKILL_KNOWLEDGE_ARCANA] = nValue;
+        if (nValue > 100) {
+            pSprite->m_baseStats.m_skills[CGAMESPRITE_SKILL_KNOWLEDGE_ARCANA] = 100;
+        }
+        if (static_cast<signed char>(pSprite->m_baseStats.m_skills[CGAMESPRITE_SKILL_KNOWLEDGE_ARCANA]) < 0) {
+            pSprite->m_baseStats.m_skills[CGAMESPRITE_SKILL_KNOWLEDGE_ARCANA] = 0;
+        }
+        m_forceRepass = TRUE;
+        m_done = TRUE;
+        break;
+    default:
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameEffect.cpp
+        // __LINE__: 8947
+        UTIL_ASSERT(FALSE);
+        break;
+    }
+
+    // NOTE: Inlined CGameObject::InControl.
+    if (pSprite->InControl()) {
+        pSprite->m_bSendSpriteUpdate = TRUE;
+    }
+
+    return TRUE;
+}
+
 // -----------------------------------------------------------------------------
 
 // NOTE: Inlined.
@@ -3164,6 +3444,90 @@ CGameEffect* CGameEffectLuck::Copy()
     delete effect;
     copy->CopyFromBase(this);
     return copy;
+}
+
+// 0x4AF210
+BOOL CGameEffectLuck::ApplyEffect(CGameSprite* pSprite)
+{
+    signed char nBase;
+    SHORT nValue;
+    INT nProduct;
+
+    switch (m_dwFlags) {
+    case 0:
+        if (m_durationType == 1) {
+            nBase = static_cast<signed char>(pSprite->m_baseStats.m_luckBase + static_cast<signed char>(m_effectAmount));
+            pSprite->m_baseStats.m_luckBase = nBase;
+            if (nBase > 20) {
+                pSprite->m_baseStats.m_luckBase = 20;
+            }
+            if (pSprite->m_baseStats.m_luckBase < -20) {
+                pSprite->m_baseStats.m_luckBase = -20;
+            }
+            m_forceRepass = TRUE;
+            m_done = TRUE;
+            return TRUE;
+        }
+        pSprite->m_bonusStats.m_nLuck += static_cast<SHORT>(m_effectAmount);
+        break;
+    case 1:
+        if (m_durationType == 1) {
+            nBase = static_cast<signed char>(m_effectAmount);
+            pSprite->m_baseStats.m_luckBase = nBase;
+            if (nBase > 20) {
+                pSprite->m_baseStats.m_luckBase = 20;
+            }
+            if (pSprite->m_baseStats.m_luckBase < -20) {
+                pSprite->m_baseStats.m_luckBase = -20;
+            }
+            m_forceRepass = TRUE;
+            m_done = TRUE;
+            return TRUE;
+        }
+        // NOTE: The original reads the amount as an unsigned byte, so a
+        // negative amount sets a large luck that the clamp brings to 20.
+        pSprite->m_derivedStats.m_nLuck = static_cast<BYTE>(m_effectAmount);
+        if (static_cast<BYTE>(m_effectAmount) > 20) {
+            pSprite->m_derivedStats.m_nLuck = 20;
+        }
+        if (pSprite->m_derivedStats.m_nLuck < -20) {
+            pSprite->m_derivedStats.m_nLuck = -20;
+        }
+        break;
+    case 2:
+        if (m_durationType == 1) {
+            nProduct = static_cast<SHORT>(m_effectAmount) * pSprite->m_baseStats.m_luckBase;
+            nBase = static_cast<signed char>(nProduct / 100);
+            pSprite->m_baseStats.m_luckBase = nBase;
+            if (nBase > 20) {
+                pSprite->m_baseStats.m_luckBase = 20;
+            }
+            if (pSprite->m_baseStats.m_luckBase < -20) {
+                pSprite->m_baseStats.m_luckBase = -20;
+            }
+            m_forceRepass = TRUE;
+            m_done = TRUE;
+            return TRUE;
+        }
+        nProduct = pSprite->m_baseStats.m_luckBase * static_cast<SHORT>(m_effectAmount);
+        nValue = static_cast<SHORT>(nProduct / 100);
+        pSprite->m_derivedStats.m_nLuck = nValue;
+        if (nValue > 20) {
+            pSprite->m_derivedStats.m_nLuck = 20;
+        }
+        if (pSprite->m_derivedStats.m_nLuck < -20) {
+            pSprite->m_derivedStats.m_nLuck = -20;
+        }
+        break;
+    default:
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameEffect.cpp
+        // __LINE__: 9178
+        UTIL_ASSERT(FALSE);
+        return TRUE;
+    }
+
+    m_done = FALSE;
+    return TRUE;
 }
 
 // -----------------------------------------------------------------------------
@@ -4861,6 +5225,79 @@ CGameEffect* CGameEffectBaseAttackBonus::Copy()
     delete effect;
     copy->CopyFromBase(this);
     return copy;
+}
+
+// 0x4B2D20
+BOOL CGameEffectBaseAttackBonus::ApplyEffect(CGameSprite* pSprite)
+{
+    SHORT nValue;
+
+    switch (m_dwFlags) {
+    case 0:
+        if (m_durationType != 1) {
+            pSprite->m_derivedStats.m_nTHAC0 += static_cast<SHORT>(m_effectAmount);
+            m_done = FALSE;
+            return TRUE;
+        }
+        nValue = static_cast<SHORT>(m_effectAmount) + static_cast<signed char>(pSprite->m_baseStats.m_attackBase);
+        if (nValue < 1) {
+            nValue = 1;
+        } else if (nValue > 40) {
+            nValue = 40;
+        }
+        break;
+    case 1:
+        nValue = static_cast<SHORT>(m_effectAmount);
+        if (m_durationType != 1) {
+            if (nValue > 0) {
+                if (nValue > 40) {
+                    nValue = 40;
+                }
+                pSprite->m_derivedStats.m_nTHAC0 = nValue;
+            } else {
+                pSprite->m_derivedStats.m_nTHAC0 = 1;
+            }
+            m_done = FALSE;
+            return TRUE;
+        }
+        if (nValue < 1) {
+            nValue = 1;
+        } else if (nValue > 40) {
+            nValue = 40;
+        }
+        break;
+    case 2:
+        if (m_durationType != 1) {
+            nValue = static_cast<SHORT>(static_cast<signed char>(pSprite->m_baseStats.m_attackBase) * static_cast<SHORT>(m_effectAmount) / 100);
+            if (nValue > 0) {
+                if (nValue > 40) {
+                    nValue = 40;
+                }
+                pSprite->m_derivedStats.m_nTHAC0 = nValue;
+            } else {
+                pSprite->m_derivedStats.m_nTHAC0 = 1;
+            }
+            m_done = FALSE;
+            return TRUE;
+        }
+        nValue = static_cast<SHORT>(static_cast<SHORT>(m_effectAmount) * static_cast<signed char>(pSprite->m_baseStats.m_attackBase) / 100);
+        if (nValue < 1) {
+            nValue = 1;
+        } else if (nValue > 40) {
+            nValue = 40;
+        }
+        break;
+    default:
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameEffect.cpp
+        // __LINE__: 11968
+        UTIL_ASSERT(FALSE);
+        return TRUE;
+    }
+
+    pSprite->m_baseStats.m_attackBase = static_cast<BYTE>(nValue);
+    m_forceRepass = TRUE;
+    m_done = TRUE;
+    return TRUE;
 }
 
 // -----------------------------------------------------------------------------
