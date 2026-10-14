@@ -9,7 +9,10 @@
 #include "CUtil.h"
 #include "IcewindMisc.h"
 
+#include <algorithm>
+#include <cctype>
 #include <list>
+#include <string>
 
 // NOTE: I'm not sure where these constants belong.
 
@@ -841,6 +844,57 @@ CGameEffect* IcewindCGameEffectRemoveEffectOfResource::Copy()
     return copy;
 }
 
+// 0x563A20
+BOOL IcewindCGameEffectRemoveEffectOfResource::ApplyEffect(CGameSprite* pSprite)
+{
+    // NOTE: The resrefs are compared as lowercase std::strings (tolower over
+    // the string's iterators, FUN_0056BDD0 the iterator).
+    std::string sRes(m_res.GetResRefStr());
+    std::transform(sRes.begin(), sRes.end(), sRes.begin(), ::tolower);
+
+    for (int nList = 0; nList < 2; nList++) {
+        CGameEffectList* pList;
+        switch (nList) {
+        case 0:
+            if (m_dwFlags != 0 && m_dwFlags != 1) {
+                continue;
+            }
+            pList = &(pSprite->m_equipedEffectList);
+            break;
+        case 1:
+            if (m_dwFlags != 0 && m_dwFlags != 2) {
+                continue;
+            }
+            pList = &(pSprite->m_timedEffectList);
+            break;
+        default:
+            // __FILE__: C:\Projects\Icewind2\src\Baldur\IcewindCGameEffects.cpp
+            // __LINE__: 3035
+            UTIL_ASSERT(FALSE);
+        }
+
+        POSITION pos = pList->GetHeadPosition();
+        while (pos != NULL) {
+            POSITION posCurrent = pos;
+            CGameEffect* pEffect = pList->GetNext(pos);
+
+            std::string sSourceRes(pEffect->m_sourceRes.GetResRefStr());
+            std::transform(sSourceRes.begin(), sSourceRes.end(), sSourceRes.begin(), ::tolower);
+
+            if (sRes.compare(sSourceRes) == 0) {
+                pList->RemoveAt(posCurrent);
+                if (pEffect != NULL) {
+                    delete pEffect;
+                }
+            }
+        }
+    }
+
+    m_done = TRUE;
+
+    return TRUE;
+}
+
 // -----------------------------------------------------------------------------
 
 // 0x49E5C0
@@ -893,6 +947,42 @@ CGameEffect* IcewindCGameEffectImmunityToResource::Copy()
     delete effect;
     copy->CopyFromBase(this);
     return copy;
+}
+
+// 0x564200
+BOOL IcewindCGameEffectImmunityToResource::ApplyEffect(CGameSprite* pSprite)
+{
+    if (m_dwFlags != 0) {
+        if (m_dwFlags == 1) {
+            CVariable* pVariable = g_pBaldurChitin->GetObjectGame()->GetVariables()->FindKey(m_res.GetResRefStr());
+            if (pVariable != NULL) {
+                if (pVariable->m_intValue == 0) {
+                    m_done = TRUE;
+                    return TRUE;
+                }
+
+                pVariable->m_intValue = 0;
+            }
+        } else {
+            // __FILE__: C:\Projects\Icewind2\src\Baldur\IcewindCGameEffects.cpp
+            // __LINE__: 3327
+            UTIL_ASSERT(FALSE);
+        }
+    }
+
+    std::string sRes(m_res.GetResRefStr());
+    if (sRes.length() == 0) {
+        m_done = TRUE;
+        return TRUE;
+    }
+
+    // TODO: Incomplete. The original inserts the resref into the derived
+    // stats' set of resources the sprite is immune to (a std::set of
+    // std::string at CDerivedStats +0x470, sprite +0xD90; FUN_004C5870 the
+    // node insertion), which CDerivedStats.h does not declare yet.
+    (void)pSprite;
+
+    return TRUE;
 }
 
 // -----------------------------------------------------------------------------
@@ -3948,6 +4038,23 @@ CGameEffect* IcewindCGameEffectDamageReduction::Copy()
     return copy;
 }
 
+// 0x56ADC0
+BOOL IcewindCGameEffectDamageReduction::ApplyEffect(CGameSprite* pSprite)
+{
+    // TODO: Incomplete. The original pushes a damage reduction entry (0x24
+    // bytes: the amount, then m_dwFlags, and a set of the damage types 0,
+    // 0x100000, 0x1000000, 0x2000000, 0x4000000 and 0x8000000; the
+    // constructor 0x447B60, the insertion 0x447E50) onto the derived stats'
+    // damage reduction vector (CDerivedStats +0x49C, sprite +0xDBC; 0x447F30
+    // the push_back), which CDerivedStats.h does not declare yet. The amount
+    // is 5 * m_dwFlags when m_effectAmount is 0 (a type of 6 first becomes
+    // 3); otherwise the original passes its stack argument slot (the sprite
+    // pointer) (NOTE: to check when the vector lands).
+    (void)pSprite;
+
+    return TRUE;
+}
+
 // -----------------------------------------------------------------------------
 
 // 0x4A21D0
@@ -3964,6 +4071,19 @@ CGameEffect* IcewindCGameEffectProtectionFromArrows::Copy()
     delete effect;
     copy->CopyFromBase(this);
     return copy;
+}
+
+// 0x56AF80
+BOOL IcewindCGameEffectProtectionFromArrows::ApplyEffect(CGameSprite* pSprite)
+{
+    // TODO: Incomplete. The original pushes a damage reduction entry of 10
+    // with m_dwFlags and the damage types 0x4000000 and 0x2000000 (the
+    // constructor 0x447B60, the insertion 0x447E50) onto the derived stats'
+    // damage reduction vector (CDerivedStats +0x49C, sprite +0xDBC; 0x447F30
+    // the push_back), which CDerivedStats.h does not declare yet.
+    (void)pSprite;
+
+    return TRUE;
 }
 
 // -----------------------------------------------------------------------------

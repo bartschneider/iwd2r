@@ -599,3 +599,78 @@ TEST_CASE("effects-iwd: fire shield (406) red and blue set their states", "[effe
     pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_WHENSTRUCK, 0, 0);
     CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
 }
+
+TEST_CASE("effects-iwd: remove effect of resource (254) removes the timed effects of that source", "[effects][data]")
+{
+    PROBE_OR_SKIP(pSprite);
+    CGameEffectList* pList = pSprite->GetTimedEffectList();
+    // Two effects from SPWI999 (one in other case) and one from SPWI998, on
+    // the timed list directly.
+    std::unique_ptr<CGameEffect> a = Decode(pSprite, ICEWIND_CGAMEEFFECT_FLOATTEXT, 1, 0);
+    std::unique_ptr<CGameEffect> b = Decode(pSprite, ICEWIND_CGAMEEFFECT_FLOATTEXT, 1, 0);
+    std::unique_ptr<CGameEffect> c = Decode(pSprite, ICEWIND_CGAMEEFFECT_FLOATTEXT, 1, 0);
+    a->m_sourceRes = "SPWI999";
+    b->m_sourceRes = "spwi999";
+    c->m_sourceRes = "SPWI998";
+    CGameEffect* pKept = c.get();
+    pList->AddTail(a.release());
+    pList->AddTail(b.release());
+    pList->AddTail(c.release());
+    const INT_PTR before = pList->GetCount();
+
+    // Type 1: the equipped list only; the timed ones stay.
+    std::unique_ptr<CGameEffect> pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_REMOVEEFFECTOFRESOURCE, 1, 0);
+    pEffect->m_res = "SpWi999";
+    CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+    CHECK(pEffect->m_done == TRUE);
+    CHECK(pList->GetCount() == before);
+
+    // Type 2: the timed list.
+    pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_REMOVEEFFECTOFRESOURCE, 2, 0);
+    pEffect->m_res = "SpWi999";
+    CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+    CHECK(pList->GetCount() == before - 2);
+    POSITION pos = pList->Find(pKept);
+    REQUIRE(pos != NULL);
+    pList->RemoveAt(pos);
+    std::unique_ptr<CGameEffect> kept(pKept);
+}
+
+TEST_CASE("effects-iwd: immunity to resource (258) type 1 checks and clears the variable", "[effects][data]")
+{
+    PROBE_OR_SKIP(pSprite);
+    CVariable var;
+    var.SetName(CString("IWD2RTST"));
+    var.m_intValue = 0;
+    g_pBaldurChitin->GetObjectGame()->m_variables.AddKey(var);
+    CVariable* pVariable = g_pBaldurChitin->GetObjectGame()->GetVariables()->FindKey(CString("IWD2RTST"));
+    REQUIRE(pVariable != NULL);
+
+    // Variable 0: done at once.
+    std::unique_ptr<CGameEffect> pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_IMMUNITYTORESOURCE, 1, 0);
+    pEffect->m_res = "IWD2RTST";
+    CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+    CHECK(pEffect->m_done == TRUE);
+
+    // Variable set: cleared, and the effect stays.
+    pVariable->m_intValue = 3;
+    pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_IMMUNITYTORESOURCE, 1, 0);
+    pEffect->m_res = "IWD2RTST";
+    CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+    CHECK(pEffect->m_done == FALSE);
+    CHECK(pVariable->m_intValue == 0);
+
+    // Type 0 without a resref: done.
+    pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_IMMUNITYTORESOURCE, 0, 0);
+    CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+    CHECK(pEffect->m_done == TRUE);
+}
+
+TEST_CASE("effects-iwd: damage reduction (436) and protection from arrows (443) apply", "[effects][data]")
+{
+    PROBE_OR_SKIP(pSprite);
+    std::unique_ptr<CGameEffect> pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_DAMAGEREDUCTION, 2, 0);
+    CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+    pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_PROTECTIONFORMARROWS, 0, 0);
+    CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+}
