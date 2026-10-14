@@ -129,3 +129,7 @@ void ParseCase(CaseContext& ctx)
 } // namespace
 
 ORACLE_CASE("spawn/parse_points", ParseCase);
+ORACLE_CASE_PENDING("spawn/spawn_point", nullptr,
+    "needs engine state (CGameSpawning::Spawn builds sprites from CRE resources through the original's "
+    "CGameSprite constructor, adds them to its object array and area, and reads the game's party, group, "
+    "visibility and search maps); ours covered by tests/test_gam.cpp [spawn][data]");

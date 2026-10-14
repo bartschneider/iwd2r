@@ -11,7 +11,7 @@ public:
     /* 002C */ BOOLEAN CompressTime(DWORD deltaTime) override;
     /* 0048 */ void RemoveFromArea() override;
 
-    void Spawn(const CPoint& ptFacingTowards, INT nTotalCharacterLevels);
+    void Spawn(const CPoint& ptFacingTowards, BYTE nTotalCharacterLevels);
     void Marshal(CAreaFileRandomMonsterSpawningPoint** pSpawningObject);
 
     /* 006E */ CAreaFileRandomMonsterSpawningPoint m_spawningObject;
