@@ -594,7 +594,7 @@ CGameEffect* IcewindMisc::CreateEffectDamage(CGameObject* pObject, DWORD dwFlags
         CPoint(-1, -1)));
 
     pEffect->m_source = pObject->GetPos();
-    pEffect->m_sourceID = pObject->m_id;
+    pEffect->m_sourceID = pObject->GetId();
 
     if (pObject->GetObjectType() == CGameObject::TYPE_SPRITE) {
         sub_5860F0(static_cast<CGameSprite*>(pObject), pEffect);
@@ -620,7 +620,7 @@ CGameEffect* IcewindMisc::CreateEffectImmunityToBackstab(CGameObject* pObject, D
         CPoint(-1, -1));
 
     pEffect->m_source = pObject->GetPos();
-    pEffect->m_sourceID = pObject->m_id;
+    pEffect->m_sourceID = pObject->GetId();
     pEffect->m_flags &= ~0x1;
 
     return pEffect;
@@ -645,7 +645,7 @@ CGameEffect* IcewindMisc::CreateEffectSTR(CGameObject* pObject, int effectAmount
         CPoint(-1, -1));
 
     pEffect->m_source = pObject->GetPos();
-    pEffect->m_sourceID = pObject->m_id;
+    pEffect->m_sourceID = pObject->GetId();
     pEffect->m_flags |= 0x1;
 
     return pEffect;
@@ -668,7 +668,7 @@ CGameEffect* IcewindMisc::CreateEffectBerserk(CGameObject* pObject, DWORD durati
         CPoint(-1, -1));
 
     pEffect->m_source = pObject->GetPos();
-    pEffect->m_sourceID = pObject->m_id;
+    pEffect->m_sourceID = pObject->GetId();
     pEffect->m_flags |= 0x1;
 
     return pEffect;
@@ -692,7 +692,7 @@ CGameEffect* IcewindMisc::CreateEffectPortraitIcon(CGameObject* pObject, DWORD d
         CPoint(-1, -1));
 
     pEffect->m_source = pObject->GetPos();
-    pEffect->m_sourceID = pObject->m_id;
+    pEffect->m_sourceID = pObject->GetId();
     pEffect->m_flags |= 0x1;
 
     return pEffect;
@@ -715,7 +715,7 @@ CGameEffect* IcewindMisc::CreateEffectDisplayString(CGameObject* pObject, int ef
         CPoint(-1, -1));
 
     pEffect->m_source = pObject->GetPos();
-    pEffect->m_sourceID = pObject->m_id;
+    pEffect->m_sourceID = pObject->GetId();
 
     return pEffect;
 }
@@ -737,7 +737,7 @@ CGameEffect* IcewindMisc::CreateEffectVisualSpellHit(CGameObject* pObject, DWORD
         CPoint(-1, -1));
 
     pEffect->m_source = pObject->GetPos();
-    pEffect->m_sourceID = pObject->m_id;
+    pEffect->m_sourceID = pObject->GetId();
 
     return pEffect;
 }
@@ -769,7 +769,7 @@ CGameEffect* IcewindMisc::CreateEffectHitPoints(CGameObject* pObject, int effect
         CPoint(-1, -1));
 
     pEffect->m_source = pObject->GetPos();
-    pEffect->m_sourceID = pObject->m_id;
+    pEffect->m_sourceID = pObject->GetId();
     pEffect->m_flags |= 0x1;
 
     return pEffect;
@@ -796,7 +796,7 @@ CGameEffect* IcewindMisc::CreateEffectImmunitySpell(CGameObject* pObject, const 
         CPoint(-1, -1));
 
     pEffect->m_source = pObject->GetPos();
-    pEffect->m_sourceID = pObject->m_id;
+    pEffect->m_sourceID = pObject->GetId();
 
     return pEffect;
 }
@@ -818,7 +818,7 @@ CGameEffect* IcewindMisc::CreateEffectRemoveAllOfType(CGameObject* pObject, DWOR
         CPoint(-1, -1));
 
     pEffect->m_source = pObject->GetPos();
-    pEffect->m_sourceID = pObject->m_id;
+    pEffect->m_sourceID = pObject->GetId();
 
     return pEffect;
 }
@@ -840,7 +840,7 @@ CGameEffect* IcewindMisc::CreateEffectConfusion(CGameObject* pObject, DWORD dura
         CPoint(-1, -1));
 
     pEffect->m_source = pObject->GetPos();
-    pEffect->m_sourceID = pObject->m_id;
+    pEffect->m_sourceID = pObject->GetId();
     pEffect->m_flags |= 0x1;
 
     return pEffect;
@@ -864,7 +864,7 @@ CGameEffect* IcewindMisc::CreateEffectStun(CGameObject* pObject, DWORD duration,
         CPoint(-1, -1));
 
     pEffect->m_source = pObject->GetPos();
-    pEffect->m_sourceID = pObject->m_id;
+    pEffect->m_sourceID = pObject->GetId();
     pEffect->m_flags |= 0x1;
 
     return pEffect;
@@ -887,7 +887,7 @@ CGameEffect* IcewindMisc::CreateEffectSkillUnsummon(CGameObject* pObject, DWORD 
         CPoint(-1, -1));
 
     pEffect->m_source = pObject->GetPos();
-    pEffect->m_sourceID = pObject->m_id;
+    pEffect->m_sourceID = pObject->GetId();
 
     return pEffect;
 }
