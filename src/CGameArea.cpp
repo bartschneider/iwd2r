@@ -4817,10 +4817,16 @@ void CGameArea::SortLists()
                 m_pGame->GetObjectArray()->ReleaseShare(iObject,
                     CGameObjectArray::THREAD_ASYNCH,
                     INFINITE);
-            } else if (rc != CGameObjectArray::DELETED) {
-                // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameArea.cpp
-                // __LINE__: 8076
-                UTIL_ASSERT(FALSE);
+            } else {
+                // A queued object deleted meanwhile is not sorted: one
+                // fewer queued object (`local_40 = iVar6 - 1`).
+                nFrontAdd--;
+
+                if (rc != CGameObjectArray::DELETED) {
+                    // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameArea.cpp
+                    // __LINE__: 8076
+                    UTIL_ASSERT(FALSE);
+                }
             }
         }
 

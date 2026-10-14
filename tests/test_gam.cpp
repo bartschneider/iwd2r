@@ -577,6 +577,16 @@ TEST_CASE("gam: SaveGame packs AR1000 into ICEWIND2.SAV and LoadGame brings back
     }
 }
 
+// The ids on the area's front list, head to tail.
+static std::vector<LONG> FrontIds(CGameArea* pArea)
+{
+    std::vector<LONG> ids;
+    POSITION pos = pArea->m_lVertSort.GetHeadPosition();
+    while (pos != NULL)
+        ids.push_back(static_cast<LONG>(reinterpret_cast<INT_PTR>(pArea->m_lVertSort.GetNext(pos))));
+    return ids;
+}
+
 // CGameArea::SortLists (0x4794E0) merges the objects AddToArea queued into
 // the y-sorted front list: each queued object goes on once, every front
 // object stays, and the list is in y order. (Ours once merged the front part
@@ -636,6 +646,46 @@ TEST_CASE("gam: SortLists merges a queued object into the front list once and ke
         lastY = pObject->GetPos().y;
         pGame->GetObjectArray()->ReleaseShare(id, CGameObjectArray::THREAD_ASYNCH, INFINITE);
     }
+}
+
+// A queued object deleted before SortLists (0x4794E0) runs is dropped and
+// counts as one fewer queued object (`local_40 = iVar6 - 1`): the front list
+// comes out as it was, with no slot of the sort array left unread.
+TEST_CASE("gam: SortLists drops a queued object deleted before the sort", "[gam][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    NewGameWithOneCharacter(cre, "Probe");
+    pGame->UpdateCharacterSlots();
+    pGame->SetupCharacters(FALSE);
+    CGameArea* pArea = pGame->m_pGameAreaMaster;
+    REQUIRE(pArea != NULL);
+    pArea->SortLists();
+    const std::vector<LONG> front = FrontIds(pArea);
+    REQUIRE(front.size() > 2);
+
+    // An object queued for the front list, then deleted from the array.
+    CGameObject* pObject = new CGameObject();
+    LONG id;
+    REQUIRE(pGame->GetObjectArray()->Add(&id, pObject, INFINITE) == CGameObjectArray::SUCCESS);
+    pArea->m_lVertSortAdd.AddTail(reinterpret_cast<int*>(static_cast<INT_PTR>(id)));
+    REQUIRE(pGame->GetObjectArray()->Delete(id, CGameObjectArray::THREAD_ASYNCH, NULL, INFINITE) == CGameObjectArray::SUCCESS);
+    delete pObject;
+
+    pArea->SortLists();
+    CHECK(pArea->m_lVertSortAdd.IsEmpty());
+    CHECK(FrontIds(pArea) == front);
 }
 
 // A load-robustness check. The real two-area save (LoadArea AR1001 beside
