@@ -106,11 +106,11 @@ int CVariableHashBase::Hash(CString sName)
 {
     int length = sName.GetLength();
     int v1 = 0;
-    int v2 = 0;
     int v3 = 1;
 
+    // Each character's low bits (& 0x2F) times its prime (0x54FB07).
     for (int index = 0; index < length && index < 32; index++) {
-        int v4 = PRIME[index] * ((v2 + length) & 0x2F);
+        int v4 = PRIME[index] * (static_cast<BYTE>(sName[index]) & 0x2F);
         v1 += v4;
         v3 *= v4 & (m_nTableEntries - 1);
     }
@@ -522,9 +522,17 @@ BOOL CNamedCreatureVariableHash::AddKey(CVariable& var)
     CString sName = var.GetName();
     CString sTemp;
 
-    for (int index = 0; index < sName.GetLength() && index < 32; index++) {
+    // The name is stored upper case without its spaces, at most 32
+    // characters of it (0x550D49-0x550DA2).
+    int nCount = 0;
+    for (int index = 0; index < sName.GetLength(); index++) {
+        if (nCount > 31) {
+            break;
+        }
+
         if (sName[index] != ' ') {
             sTemp += static_cast<char>(toupper(sName[index]));
+            nCount++;
         }
     }
 
@@ -532,18 +540,19 @@ BOOL CNamedCreatureVariableHash::AddKey(CVariable& var)
         return FALSE;
     }
 
-    int hash = Hash(sName);
+    var.SetName(sTemp);
 
-    if (m_hashEntries[hash] != NULL) {
-        CNamedCreatureVariableHashEntry* pCurr = m_hashEntries[hash];
-        while (pCurr != NULL) {
-            // FIXME: Unnecessary copying.
-            if (pCurr->m_variable.GetName() == sTemp) {
+    int hash = Hash(sTemp);
+
+    CNamedCreatureVariableHashEntry* pCurr = m_hashEntries[hash];
+    while (pCurr != NULL) {
+        if (pCurr->m_variable.GetName() == sTemp) {
+            if (&(pCurr->m_variable) != &var) {
                 pCurr->m_variable = var;
-                return TRUE;
             }
-            pCurr = pCurr->m_pNext;
+            return TRUE;
         }
+        pCurr = pCurr->m_pNext;
     }
 
     CNamedCreatureVariableHashEntry* pVar = new CNamedCreatureVariableHashEntry(var);
@@ -553,7 +562,6 @@ BOOL CNamedCreatureVariableHash::AddKey(CVariable& var)
         m_hashEntries[hash] = pVar;
     }
 
-    // FIXME: Probably wrong.
     return FALSE;
 }
 

@@ -8,6 +8,7 @@
 #include "CAITrigger.h"
 #include "CBaldurChitin.h"
 #include "CCreatureFile.h"
+#include "CDerivedStats.h"
 #include "CGameAIBase.h"
 #include "CGameArea.h"
 #include "CGameDoor.h"
@@ -465,4 +466,126 @@ TEST_CASE("ai: Allegiance, Range, See and the HP triggers answer both ways", "[a
     CHECK(pCaller->EvaluateStatusTrigger(hpOther) == FALSE);
 
     pCaller->m_pArea = NULL;
+}
+
+TEST_CASE("ai: the sprite's dispatcher runs its own actions and leaves the rest to the base", "[ai][data]")
+{
+    REQUIRE_ENGINE();
+    ClearMessages();
+    CGameSprite* pSprite = MakeSprite();
+
+    // NoAction (0): done, and counted (m_noActionCount, 0x72901E).
+    LONG nNoAction = pSprite->m_noActionCount;
+    pSprite->SetCurrAction(CAIAction::NULL_ACTION);
+    CHECK(pSprite->ExecuteAction() == CGameAIBase::ACTION_DONE);
+    CHECK(pSprite->m_noActionCount == nNoAction + 1);
+    CHECK(pSprite->m_nLastActionReturn == CGameAIBase::ACTION_DONE);
+
+    // Continue (36) and CutSceneId (127): done.
+    CAIAction action;
+    action.m_actionID = 36;
+    pSprite->SetCurrAction(action);
+    CHECK(pSprite->ExecuteAction() == CGameAIBase::ACTION_DONE);
+    action.m_actionID = 127;
+    pSprite->SetCurrAction(action);
+    CHECK(pSprite->ExecuteAction() == CGameAIBase::ACTION_DONE);
+
+    // SetDialogueRange(300) (256): the range Dialogue reads (+0x7106).
+    action.m_actionID = 256;
+    action.m_specificID = 300;
+    pSprite->SetCurrAction(action);
+    CHECK(pSprite->ExecuteAction() == CGameAIBase::ACTION_DONE);
+    CHECK(pSprite->field_7106 == 300);
+
+    // SetSavedLocationPoint (249) and MakeUnselectable (182).
+    action.m_actionID = 249;
+    action.m_specificID = 120;
+    action.m_specificID2 = 240;
+    action.m_specificID3 = 6;
+    pSprite->SetCurrAction(action);
+    CHECK(pSprite->ExecuteAction() == CGameAIBase::ACTION_DONE);
+    CHECK(pSprite->GetBaseStats()->field_2E4 == 120);
+    CHECK(pSprite->GetBaseStats()->field_2E6 == 240);
+    CHECK(pSprite->GetBaseStats()->field_2E8 == 6);
+    action.m_actionID = 182;
+    action.m_specificID = 2;
+    pSprite->SetCurrAction(action);
+    CHECK(pSprite->ExecuteAction() == CGameAIBase::ACTION_DONE);
+    CHECK(pSprite->m_nUnselectableCounter == 30);
+    pSprite->m_nUnselectableCounter = 0;
+
+    // Attack (3) is the sprite's but not ported yet: the case answers
+    // ACTION_ERROR (its TODO), it does not reach the base's error case.
+    action.m_actionID = CAIAction::ATTACK;
+    pSprite->SetCurrAction(action);
+    CHECK(pSprite->ExecuteAction() == CGameAIBase::ACTION_ERROR);
+
+    // SetGlobal (30) is the base's: the byte table sends it on.
+    CAIAction setGlobal;
+    setGlobal.m_actionID = 30;
+    setGlobal.m_string1 = "GLOBALai_sprite_var";
+    setGlobal.m_specificID = 7;
+    pSprite->SetCurrAction(setGlobal);
+    CHECK(pSprite->ExecuteAction() == CGameAIBase::ACTION_DONE);
+    CVariable* pVariable = g_pBaldurChitin->GetObjectGame()->GetVariables()->FindKey(CString("AI_SPRITE_VAR"));
+    REQUIRE(pVariable != NULL);
+    CHECK(pVariable->m_intValue == 7);
+
+    // An id above the table's 0x142 goes to the base as well (its own
+    // error case for an unknown id).
+    action.m_actionID = 400;
+    pSprite->SetCurrAction(action);
+    CHECK(pSprite->ExecuteAction() == CGameAIBase::ACTION_ERROR);
+
+    ClearMessages();
+}
+
+TEST_CASE("ai: a named creature is found by its name in any case", "[ai]")
+{
+    // AddKey (0x550D10) stores the name upper case without spaces and hashes
+    // that, as FindKey looks it up (Decode's "Hedron" in a cut scene).
+    CNamedCreatureVariableHash hash(64);
+    CVariable hedron;
+    hedron.SetName(CString("Hedron"));
+    hedron.m_intValue = 42;
+    CHECK(hash.AddKey(hedron) == FALSE);
+    CVariable* pFound = hash.FindKey(CString("HEDRON"));
+    REQUIRE(pFound != NULL);
+    CHECK(pFound->m_intValue == 42);
+    CHECK(pFound->GetName() == "HEDRON");
+    REQUIRE(hash.FindKey(CString("hedron")) != NULL);
+
+    // The same name again updates the entry and answers TRUE.
+    CVariable again;
+    again.SetName(CString("He dron"));
+    again.m_intValue = 43;
+    CHECK(hash.AddKey(again) == TRUE);
+    CHECK(hash.FindKey(CString("HEDRON"))->m_intValue == 43);
+}
+
+TEST_CASE("ai: CheckLimits keeps the morale recovery time and caps the morale break at 20", "[ai]")
+{
+    // 0x446C39-0x446C9E: XP, gold and the recovery time are clamped to
+    // 0xFFFFFFFF unsigned (no change), the morale break to 20 at most.
+    CDerivedStats stats;
+    stats.m_nXP = 1250;
+    stats.m_nGold = 87;
+    stats.m_nXPValue = 15;
+    stats.m_nMoraleRecoveryTime = 60;
+    stats.m_nMoraleBreak = 5;
+    stats.m_nReputation = 5;
+    stats.CheckLimits();
+    CHECK(stats.m_nXP == 1250);
+    CHECK(stats.m_nGold == 87);
+    CHECK(stats.m_nXPValue == 15);
+    CHECK(stats.m_nMoraleRecoveryTime == 60);
+    CHECK(stats.m_nMoraleBreak == 5);
+    CHECK(stats.m_nReputation == 10);
+    stats.m_nMoraleBreak = 25;
+    stats.CheckLimits();
+    CHECK(stats.m_nMoraleBreak == 20);
+    // The reputation compares unsigned: a negative one becomes 200.
+    stats.m_nReputation = -5;
+    stats.CheckLimits();
+    CHECK(stats.m_nReputation == 200);
 }

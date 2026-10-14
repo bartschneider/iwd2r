@@ -884,7 +884,7 @@ void CDerivedStats::CheckLimits()
     m_nSkills[15] = min(max(m_nSkills[15], -128), 127);
     m_nFatigue = min(max(m_nFatigue, 0), 100);
     m_nIntoxication = min(max(m_nIntoxication, 0), 100);
-    m_nLuck = min(max(m_nLuck, 0), 100);
+    m_nLuck = min(max(m_nLuck, -20), 20);
     m_nLevel = min(m_nLevel, 50);
     m_nSTR = min(max(m_nSTR, 1), 40);
     m_nINT = min(max(m_nINT, 1), 40);
@@ -892,12 +892,21 @@ void CDerivedStats::CheckLimits()
     m_nDEX = min(max(m_nDEX, 1), 40);
     m_nCON = min(max(m_nCON, 1), 40);
     m_nCHR = min(max(m_nCHR, 1), 40);
-    m_nXPValue = min(max(m_nXPValue, -1), 0);
-    m_nXP = min(max(m_nXP, -1), 0);
-    m_nGold = min(max(m_nGold, -1), 0);
-    m_nMoraleRecoveryTime = min(max(m_nMoraleRecoveryTime, -1), 0);
-    m_nReputation = min(max(m_nReputation, 10), 200);
-    m_nMoraleBreak = min(max(m_nMoraleBreak, 10), 200);
+    // NOTE: The original clamps the XP value, the XP, the gold and the
+    // morale recovery time to 0xFFFFFFFF as unsigned values (0x446C39-
+    // 0x446C6E), which changes nothing.
+    m_nXPValue = min(m_nXPValue, 0xFFFFFFFF);
+    m_nXP = min(m_nXP, 0xFFFFFFFF);
+    m_nGold = min(m_nGold, 0xFFFFFFFF);
+    m_nMoraleRecoveryTime = min(m_nMoraleRecoveryTime, 0xFFFFFFFF);
+    // NOTE: The reputation compares unsigned (0x446C78, 0x446C86): a
+    // negative value becomes 200.
+    if (static_cast<DWORD>(static_cast<LONG>(m_nReputation)) < 10) {
+        m_nReputation = 10;
+    } else if (static_cast<DWORD>(static_cast<LONG>(m_nReputation)) > 200) {
+        m_nReputation = 200;
+    }
+    m_nMoraleBreak = min(m_nMoraleBreak, 20);
     m_nDamageBonus = min(max(m_nDamageBonus, -128), 127);
     m_nSpellFailureArcane = min(max(m_nSpellFailureArcane, 0), 100);
     m_nSpellFailureDivine = min(max(m_nSpellFailureDivine, 0), 100);
@@ -906,7 +915,10 @@ void CDerivedStats::CheckLimits()
     m_nTurnUndeadLevel = max(m_nTurnUndeadLevel, 0);
     m_nBackstabDamageMultiplier = max(m_nBackstabDamageMultiplier, 0);
     m_nLayOnHandsAmount = max(m_nLayOnHandsAmount, 0);
-    m_nTranslucent = min(m_nTranslucent, 255);
+    // NOTE: Compared unsigned (0x446DB9): a negative value becomes 255.
+    if (static_cast<DWORD>(static_cast<LONG>(m_nTranslucent)) > 255) {
+        m_nTranslucent = 255;
+    }
 }
 
 // 0x446DD0

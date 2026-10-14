@@ -1118,3 +1118,47 @@ void SearchThreadMain(void* userInfo)
     CloseHandle(g_pBaldurChitin->GetObjectGame()->m_hSearchThread);
     g_pBaldurChitin->GetObjectGame()->m_hSearchThread = NULL;
 }
+
+// Whether any of the points lies in the square of side nPersonalSpace around
+// the search-map square pt (the square clipped to the map). Called by
+// CGameArea 0x47A1C0 for the door's closed squares.
+//
+// 0x54A210
+BOOLEAN CSearchBitmap::sub_54A210(const CPoint& pt, BYTE nPersonalSpace, const CPoint* pPoints, USHORT nPoints)
+{
+    if (pt.x < 0 || pt.y < 0 || pt.x >= 320 || pt.y >= 320) {
+        return FALSE;
+    }
+
+    LONG nRadius = (nPersonalSpace - 1) / 2;
+    LONG nLeft = pt.x - nRadius;
+    LONG nRight = pt.x + nRadius;
+    LONG nTop = pt.y - nRadius;
+    LONG nBottom = pt.y + nRadius;
+
+    // NOTE: A side clipped at 0 leaves the opposite side unclipped
+    // (0x54A26D, 0x54A284).
+    if (nLeft < 0) {
+        nLeft = 0;
+    } else if (nRight > m_GridSquareDimensions.cx - 1) {
+        nRight = m_GridSquareDimensions.cx - 1;
+    }
+
+    if (nTop < 0) {
+        nTop = 0;
+    } else if (nBottom > m_GridSquareDimensions.cy - 1) {
+        nBottom = m_GridSquareDimensions.cy - 1;
+    }
+
+    for (LONG y = nTop; y <= nBottom; y++) {
+        for (LONG x = nLeft; x <= nRight; x++) {
+            for (USHORT nIndex = 0; nIndex < nPoints; nIndex++) {
+                if (pPoints[nIndex].x == x && pPoints[nIndex].y == y) {
+                    return TRUE;
+                }
+            }
+        }
+    }
+
+    return FALSE;
+}
