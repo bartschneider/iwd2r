@@ -5,6 +5,7 @@
 #include "compat/ini.h"
 #include "data_view.h"
 
+#include <cctype>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -92,5 +93,17 @@ TEST_CASE("start screen smoke", "[data]")
     std::smatch m;
     const std::regex re("framebuffer-hash: ([0-9a-f]{16})(\\r?\\n|$)");
     REQUIRE(std::regex_search(text, m, re));
-    WARN("framebuffer-hash: " << m[1].str());
+    // IWD2R_SMOKE_HASH pins the frame (tools/gates.sh sets it from this
+    // machine's smoke-hash file: the hash depends on the game copy); unset,
+    // the hash is only reported.
+    const char* pinned = std::getenv("IWD2R_SMOKE_HASH");
+    std::string expected = pinned != nullptr ? pinned : "";
+    while (!expected.empty() && std::isspace(static_cast<unsigned char>(expected.back()))) {
+        expected.pop_back();
+    }
+    if (expected.empty()) {
+        WARN("framebuffer-hash: " << m[1].str());
+    } else {
+        REQUIRE(m[1].str() == expected);
+    }
 }

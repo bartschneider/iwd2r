@@ -239,6 +239,44 @@ TEST_CASE("gpu_offscreen_identity", "[present]")
     b->Shutdown();
 }
 
+TEST_CASE("classic_offscreen_identity", "[present]")
+{
+    // The classic presenter (the default) on the offscreen driver's hidden
+    // window: the frame as drawn, read back, is the input at Scale 1 and
+    // the nearest-neighbour upscale at Scale 2, through the whole-frame
+    // path and through a region.
+    OffscreenVideo video;
+    REQUIRE(video.ok);
+    std::vector<uint32_t> px = Distinct(320, 240);
+    present::SetPrimary(&px, 320, 240);
+    present::SetBackend(BackendKind::Classic);
+    for (int s = 1; s <= 2; s++) {
+        INFO("scale " << s);
+        present::SetWindowScale(s);
+        SDL_Window* window = SDL_CreateWindow("present classic", 320 * s, 240 * s, SDL_WINDOW_HIDDEN);
+        REQUIRE(window != nullptr);
+        present::SetPresentTarget(window);
+        REQUIRE(present::ActiveBackend() == BackendKind::Classic);
+        const std::vector<uint32_t> want = s == 1 ? px : Upscaled(px, 320, 240, s);
+        present::Present(px.data(), 320, 240, 320 * 4);
+        std::vector<uint32_t> out;
+        int w = 0;
+        int h = 0;
+        REQUIRE(present::ReadbackPresented(&out, &w, &h));
+        CHECK(w == 320 * s);
+        CHECK(h == 240 * s);
+        CHECK(Mismatches(out, want) == 0);
+
+        present::SetRegions({ MakeRegion({ 0, 0, 320, 240 }, 0, 0, 320 * s, 240 * s, s) });
+        out.clear();
+        REQUIRE(present::ReadbackPresented(&out, &w, &h));
+        CHECK(Mismatches(out, want) == 0);
+        present::SetRegions({});
+        present::SetPresentTarget(nullptr);
+        SDL_DestroyWindow(window);
+    }
+}
+
 TEST_CASE("gpu_identity_sharp_integer_scale", "[present]")
 {
     OffscreenVideo video;
