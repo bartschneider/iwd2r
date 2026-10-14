@@ -578,7 +578,17 @@ CPoint* CAIGroup::GetOffsets(SHORT formationType, SHORT nDirection, BOOL bAtLeas
 
     // A member's place relative to the leader, in search squares; FALSE when
     // the object array refuses it.
-    auto MemberOffset = [&](LONG id, CPoint& offset) -> BOOL {
+    // NOTE: With FORMATION_NONE and at least six offsets for fewer
+    // members, the original reads member ids past the end of its array
+    // (unchecked). Bounded: an index past the members counts as a member the
+    // object array refuses, leaving (0, 0) unscaled, the visible result of
+    // a refused id.
+    auto MemberOffset = [&](INT index, CPoint& offset) -> BOOL {
+        if (pIds == NULL || index >= nMembers) {
+            return FALSE;
+        }
+
+        LONG id = pIds[index];
         CGameObject* pMember;
         BYTE rc;
         do {
@@ -603,7 +613,7 @@ CPoint* CAIGroup::GetOffsets(SHORT formationType, SHORT nDirection, BOOL bAtLeas
 
     for (INT index = 0; index < nOffsets; index++) {
         if (index >= 12) {
-            if (MemberOffset(pIds[index], pOffsets[index])) {
+            if (MemberOffset(index, pOffsets[index])) {
                 pOffsets[index].x *= 1000;
                 pOffsets[index].y *= 1000;
             }
@@ -646,7 +656,7 @@ CPoint* CAIGroup::GetOffsets(SHORT formationType, SHORT nDirection, BOOL bAtLeas
             pOffsets[index] = FORMATION_LINE_OFFSETS[index];
             break;
         case 12:
-            if (!MemberOffset(pIds[index], pOffsets[index])) {
+            if (!MemberOffset(index, pOffsets[index])) {
                 continue;
             }
             break;
@@ -678,6 +688,11 @@ static LONG Ftol(double value)
 // NOTE: The name is a guess: turns each offset about the leader by
 // `nDirection` * 2 degrees, through its length and angle (acos of |x| over
 // the length, put in its quadrant).
+//
+// NOTE (precision): the original's sin and cos are x87 fsin/fcos and its
+// products x87 arithmetic; ours are doubles. A product a hair from a whole
+// number can truncate one apart (docs/evidence/4058E0.md;
+// group/rotate_offsets lets only that through).
 //
 // 0x4058E0
 void CAIGroup::RotateOffsets(CPoint* pOffsets, SHORT nOffsets, SHORT nDirection)
