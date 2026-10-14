@@ -1960,8 +1960,10 @@ BOOL IcewindCGameEffectTurnUndead::ApplyEffect(CGameSprite* pSprite)
     case 2:
         // NOTE: The inlined CGameEffectDeath default constructor (vtable
         // 0x8487E8, whose slot 1 is CGameEffectDeath::Copy 0x452E70): opcode
-        // 13, flags 8, from the turner. The original stores 0 to +0x18C
-        // where our CGameEffectDeath() stores 1. Its probability range is
+        // 13, flags 8, from the turner. The constructor sets +0x18C to 0 to
+        // match the original (the effects-core stream's fix to
+        // CGameEffectDeath()); the explicit store below is harmless and
+        // covers the branch until that fix merges. Its probability range is
         // 100/0 (CGameEffectBase), so the death applies.
         pEffect = new CGameEffectDeath();
         static_cast<CGameEffectDeath*>(pEffect)->field_18C = 0;
