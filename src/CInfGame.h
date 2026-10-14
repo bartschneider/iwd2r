@@ -246,6 +246,7 @@ public:
     static void StartCharacterTerminationSequence();
     void ReadyCharacterTerminationSequence(int a1, int a2);
     void FeedBack(SHORT feedBackId, LONG value, BOOLEAN a3);
+    LONG AddExperienceParty(DWORD nExperience, BOOLEAN a2, BOOLEAN bChallengeRating);
     CString GetDirPortraits();
     CString GetDirCharacters();
     BYTE GetCharactersControlled();

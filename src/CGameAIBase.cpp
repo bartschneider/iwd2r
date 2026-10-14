@@ -859,8 +859,38 @@ SHORT CGameAIBase::ExecuteAction()
         // TODO: 0x450B52-0x450BD9 not ported.
         goto done;
     case 238:
-        // AddXPVar
-        // TODO: 0x4508CE-0x450B52 not ported.
+        // AddXPVar (0x4508CE-0x450B52)
+        {
+            C2DArray tExperience;
+            tExperience.Load(CResRef("exptable"));
+
+            CString sLabel = m_curAction.GetString1();
+            CPoint ptLocation;
+            if (!tExperience.Find(sLabel, ptLocation, TRUE)) {
+                returnValue = ACTION_ERROR;
+                goto done;
+            }
+
+            // The row label is found with x = -1; the value is in column 0
+            // (`mov [esp+0x70], ebp` at 0x4509FE).
+            ptLocation.x = 0;
+
+            if (m_curAction.m_specificID != 0) {
+                STR_RES strRes;
+                if (g_pBaldurChitin->GetTlkTable().Fetch(m_curAction.m_specificID, strRes)) {
+                    g_pBaldurChitin->GetBaldurMessage()->DisplayText(CString(""),
+                        strRes.szText,
+                        RGB(200, 255, 200),
+                        RGB(200, 255, 200),
+                        -1,
+                        m_id,
+                        m_id);
+                }
+            }
+
+            g_pBaldurChitin->GetObjectGame()->AddExperienceParty(tExperience.GetAtLong(ptLocation), FALSE, FALSE);
+            returnValue = ACTION_DONE;
+        }
         goto done;
     case 241:
         // FloatMessage

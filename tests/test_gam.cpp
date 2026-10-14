@@ -1495,3 +1495,79 @@ TEST_CASE("objects: Delete clears the entry and Add reuses its slot with a new i
     delete objects[1];
     delete objects[2];
 }
+
+TEST_CASE("party: AddExperienceParty shares the experience among the living members", "[spawn][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CGameSprite* pSprite = NewGameWithOneCharacter(cre, "Probe");
+    pGame->UpdateCharacterSlots();
+    pGame->SetupCharacters(FALSE);
+    REQUIRE(pGame->GetNumCharacters() == 1);
+
+    // One living member: it gets everything, less its multiclass penalty.
+    const INT nPenalty = pSprite->GetMulticlassingPenalty();
+    const LONG nExpected = nPenalty > 0 ? (100 - nPenalty) * 2578 / 100 : 2578;
+    CHECK(pGame->AddExperienceParty(2578, FALSE, FALSE) == nExpected);
+
+    // The share goes out as an experience effect (104) message to the member.
+    const DWORD nBefore = pSprite->m_baseStats.m_xp;
+    g_pBaldurChitin->GetMessageHandler()->AsynchronousUpdate();
+    pSprite->ProcessEffectList();
+    CHECK(pSprite->m_baseStats.m_xp == nBefore + static_cast<DWORD>(nExpected));
+
+    // A dead party counts one member and gives nothing.
+    pSprite->m_derivedStats.m_generalState |= STATE_DEAD;
+    CHECK(pGame->AddExperienceParty(100, FALSE, FALSE) == 0);
+    pSprite->m_derivedStats.m_generalState &= ~STATE_DEAD;
+}
+
+TEST_CASE("party: AddXPVar gives the exptable row's experience (case 238)", "[spawn][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CGameSprite* pSprite = NewGameWithOneCharacter(cre, "Probe");
+    pGame->UpdateCharacterSlots();
+    pGame->SetupCharacters(FALSE);
+    REQUIRE(pGame->GetNumCharacters() == 1);
+
+    // EXPTABLE.2DA: Level_1_Easy is 300. No strref (0): no text.
+    const INT nPenalty = pSprite->GetMulticlassingPenalty();
+    const DWORD nExpected = nPenalty > 0 ? (100 - nPenalty) * 300 / 100 : 300;
+    const DWORD nBefore = pSprite->m_baseStats.m_xp;
+    pSprite->m_curAction = CAIAction(238, CString("Level_1_Easy"), CPoint(-1, -1), 0, 0);
+    CHECK(pSprite->CGameAIBase::ExecuteAction() == CGameAIBase::ACTION_DONE);
+    g_pBaldurChitin->GetMessageHandler()->AsynchronousUpdate();
+    pSprite->ProcessEffectList();
+    CHECK(pSprite->m_baseStats.m_xp == nBefore + nExpected);
+
+    // A row the table lacks is an error and gives nothing.
+    pSprite->m_curAction = CAIAction(238, CString("No_Such_Row"), CPoint(-1, -1), 0, 0);
+    CHECK(pSprite->CGameAIBase::ExecuteAction() == CGameAIBase::ACTION_ERROR);
+    g_pBaldurChitin->GetMessageHandler()->AsynchronousUpdate();
+    pSprite->ProcessEffectList();
+    CHECK(pSprite->m_baseStats.m_xp == nBefore + nExpected);
+    pSprite->m_curAction = CAIAction();
+}
