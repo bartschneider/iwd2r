@@ -2,10 +2,13 @@
 
 #include "CAIScript.h"
 #include "CBaldurChitin.h"
+#include "CAIGroup.h"
 #include "CGameArea.h"
 #include "CGameSprite.h"
 #include "CInfCursor.h"
 #include "CInfGame.h"
+#include "CMessage.h"
+#include "CTiledObject.h"
 #include "CPathSearch.h"
 #include "CScreenWorld.h"
 #include "CUtil.h"
@@ -773,4 +776,410 @@ void CGameDoor::SetFlags(DWORD dwFlags)
 BOOL CGameDoor::sub_45B700()
 {
     return m_dwFlags & 0x1;
+}
+
+// NOTE: Inlined in `ToggleDoor`: the strref a locked door reports, its own
+// text when it has one (flag 0x200), else 15874 (0x3E02).
+static STRREF ToggleDoorLockedText(CGameDoor* pDoor)
+{
+    if ((pDoor->m_dwFlags & 0x200) != 0 && static_cast<LONG>(pDoor->m_strNotPickable) > -1) {
+        return pDoor->m_strNotPickable;
+    }
+
+    return 15874;
+}
+
+// NOTE: Inlined in `ToggleDoor`: the priority of the door's sound from the
+// listener's distance.
+static BYTE ToggleDoorSoundPriority(const CPoint& ptListener, const CPoint& pos)
+{
+    LONG dx = ptListener.x - pos.x;
+    LONG dy = ptListener.y - pos.y;
+    LONG nPriority = 99 - ((dy * dy / 144 + dx * dx / 256) * 99) / 6400;
+    if (nPriority < 0) {
+        nPriority = 0;
+    }
+    return static_cast<BYTE>(nPriority);
+}
+
+// 0x489680
+void CGameDoor::ToggleDoor(const CAIObjectType& cause, BOOL bForce)
+{
+    BOOLEAN bCanToggle = TRUE;
+
+    // NOTE: Unused.
+    CString sUnused;
+    CSound soundUnused;
+
+    if (!bForce && (m_dwFlags & 0x2) != 0) {
+        // Locked.
+        if (m_keyType == "") {
+            CMessage* message = new CMessageDisplayTextRefSend(-1,
+                ToggleDoorLockedText(this),
+                0,
+                RGB(215, 215, 190),
+                -1,
+                m_id,
+                cause.m_nInstance);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+            return;
+        }
+
+        if (!PartyHasItem(m_keyType)) {
+            CGameObject* pObject;
+            BYTE rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(cause.m_nInstance,
+                CGameObjectArray::THREAD_ASYNCH,
+                &pObject,
+                INFINITE);
+            if (rc != CGameObjectArray::SUCCESS) {
+                CMessage* message = new CMessageDisplayTextRefSend(-1,
+                    ToggleDoorLockedText(this),
+                    0,
+                    RGB(215, 215, 190),
+                    -1,
+                    m_id,
+                    cause.m_nInstance);
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+                return;
+            }
+
+            if (pObject->GetObjectType() != CGameObject::TYPE_SPRITE) {
+                CMessage* message = new CMessageDisplayTextRefSend(-1,
+                    ToggleDoorLockedText(this),
+                    0,
+                    RGB(215, 215, 190),
+                    -1,
+                    m_id,
+                    cause.m_nInstance);
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+                g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(cause.m_nInstance,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    INFINITE);
+                return;
+            }
+
+            CGameSprite* pSprite = static_cast<CGameSprite*>(pObject);
+            CString sKey;
+            m_keyType.CopyToString(sKey);
+            if (pSprite->FindItemPersonal(sKey, 0, FALSE) == -1
+                && pSprite->FindItemBags(sKey, 0, FALSE) == -1) {
+                CMessage* message = new CMessageDisplayTextRefSend(-1,
+                    ToggleDoorLockedText(this),
+                    0,
+                    RGB(215, 215, 190),
+                    -1,
+                    m_id,
+                    cause.m_nInstance);
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+                g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(cause.m_nInstance,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    INFINITE);
+                return;
+            }
+
+            g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(cause.m_nInstance,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+        }
+    }
+
+    if ((m_dwFlags & 0x1) != 0) {
+        // Open: close it.
+        if (_strnicmp(reinterpret_cast<const char*>(m_pArea->m_header.m_areaName), "ar5004", 7) == 0) {
+            if (!m_pArea->m_search.CanToggleDoor(m_pClosedSearch, m_nClosedSearch)) {
+                // TODO: 0x4899A0-0x489DE1, the creature in the door's way
+                // in AR5004 is told to move (calls CGameArea 0x47A1C0, not
+                // ported).
+                return;
+            }
+        } else {
+            bCanToggle = m_pArea->m_search.CanToggleDoor(m_pClosedSearch, m_nClosedSearch);
+            if (!bCanToggle) {
+                return;
+            }
+        }
+
+        if (!m_sound.IsSoundPlaying()) {
+            if (m_closeSound != "") {
+                m_sound.SetResRef(m_closeSound, TRUE, TRUE);
+            } else if ((m_dwFlags & 0x80) != 0) {
+                m_sound.SetResRef(CResRef("AMB_D04B"), TRUE, TRUE);
+            } else {
+                m_sound.SetResRef(CResRef("AMB_D03B"), TRUE, TRUE);
+            }
+
+            m_sound.SetChannel(2, reinterpret_cast<DWORD_PTR>(m_pArea));
+
+            CPoint ptListener;
+            LONG nListenerZ;
+            g_pBaldurChitin->cSoundMixer.GetListenPosition(ptListener, nListenerZ);
+            m_sound.SetPriority(ToggleDoorSoundPriority(ptListener, m_pos));
+            m_sound.Play(m_pos.x, m_pos.y, m_posZ, FALSE);
+
+            // NOTE: The sound is sent to the other players here (vtable
+            // 0x84918C, BROADCAST_FORCED_OTHERS). Omitted: single player only
+            // (docs/adr/0002-single-player-only.md).
+        }
+
+        m_dwFlags &= ~0x1;
+        m_pos = m_ptOpenDest;
+        m_tiledObject.m_wAIState = CTiledObject::STATE_SECONDARY_TILE;
+
+        if (m_pOpenSearch != NULL) {
+            m_pArea->m_search.RemoveDoor(m_pOpenSearch, m_nOpenSearch);
+        }
+
+        if (m_pClosedSearch != NULL) {
+            m_pArea->m_search.AddDoor(m_pClosedSearch, m_nClosedSearch, (m_dwFlags >> 10) & 1);
+        }
+
+        if (g_pChitin->cNetwork.GetServiceProvider() == CNetwork::SERV_PROV_NULL
+            || g_pChitin->cNetwork.m_idLocalPlayer == m_remotePlayerID) {
+            CMessage* message = new CMessageDoorStatus(this, m_id, m_id);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        }
+
+        if (m_trapActivated != 0) {
+            CAITrigger trigger(CAITRIGGER_CLOSED, cause, 0);
+            m_pendingTriggers.AddTail(new CAITrigger(trigger));
+
+            if ((m_dwFlags & 0x4) == 0) {
+                m_trapActivated = 0;
+                CMessage* message = new CMessageDoorStatus(this, m_id, m_id);
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+            }
+        }
+    } else {
+        // Closed: open it.
+        if ((m_dwFlags & 0x1800) == 0x800) {
+            STRREF strNotPickable = m_strNotPickable;
+            if (static_cast<LONG>(strNotPickable) > -1) {
+                if (g_pChitin->cNetwork.GetServiceProvider() == CNetwork::SERV_PROV_NULL) {
+                    // TODO: 0x48A54A-0x48A556, the door's floating text
+                    // (CGameObject 0x4C80E0 with 10 and 5, not ported).
+                } else {
+                    // NOTE: A connected game sends the floating text
+                    // (CMessageFloatText). Omitted: single player only
+                    // (docs/adr/0002-single-player-only.md).
+                }
+
+                CMessage* message = new CMessageDisplayTextRefSend(-1,
+                    strNotPickable,
+                    0,
+                    RGB(215, 215, 190),
+                    -1,
+                    m_id,
+                    cause.m_nInstance);
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+            }
+
+            m_dwFlags |= 0x1000;
+            return;
+        }
+
+        if (!m_sound.IsSoundPlaying()) {
+            if (m_openSound != "") {
+                m_sound.SetResRef(m_openSound, TRUE, TRUE);
+            } else if ((m_dwFlags & 0x80) != 0) {
+                m_sound.SetResRef(CResRef("AMB_D04A"), TRUE, TRUE);
+            } else {
+                m_sound.SetResRef(CResRef("AMB_D03A"), TRUE, TRUE);
+            }
+
+            m_sound.SetChannel(2, reinterpret_cast<DWORD_PTR>(m_pArea));
+
+            CPoint ptListener;
+            LONG nListenerZ;
+            g_pBaldurChitin->cSoundMixer.GetListenPosition(ptListener, nListenerZ);
+            m_sound.SetPriority(ToggleDoorSoundPriority(ptListener, m_pos));
+            m_sound.Play(m_pos.x, m_pos.y, m_posZ, FALSE);
+
+            // NOTE: As above, the message to the other players is omitted.
+        }
+
+        m_dwFlags |= 0x1;
+        m_pos = m_ptClosedDest;
+        m_tiledObject.m_wAIState = CTiledObject::STATE_PRIMARY_TILE;
+
+        if (m_pClosedSearch != NULL) {
+            m_pArea->m_search.RemoveDoor(m_pClosedSearch, m_nClosedSearch);
+        }
+
+        if (m_pOpenSearch != NULL) {
+            m_pArea->m_search.AddDoor(m_pOpenSearch, m_nOpenSearch, (m_dwFlags >> 10) & 1);
+        }
+
+        if (g_pChitin->cNetwork.GetServiceProvider() == CNetwork::SERV_PROV_NULL
+            || g_pChitin->cNetwork.m_idLocalPlayer == m_remotePlayerID) {
+            CMessage* message = new CMessageDoorStatus(this, m_id, m_id);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        }
+
+        if (m_trapActivated != 0) {
+            CAITrigger trigger(CAITrigger::OPENED, cause, 0);
+            m_pendingTriggers.AddTail(new CAITrigger(trigger));
+
+            if ((m_dwFlags & 0x4) == 0) {
+                m_trapActivated = 0;
+                CMessage* message = new CMessageDoorStatus(this, m_id, m_id);
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+            }
+        }
+    }
+
+    if (bCanToggle && (m_dwFlags & 0x2) != 0) {
+        // Toggled while locked: unlocked, and the key taken when the door
+        // says so (flag 0x4000).
+        m_dwFlags &= ~0x2;
+        if ((m_dwFlags & 0x4000) != 0
+            && m_keyType != ""
+            && PartyHasItem(m_keyType)) {
+            // NOTE: The SHORT at 0x84785C (116, TakePartyItem).
+            m_curAction.m_actionID = 116;
+            m_curAction.SetString1(m_keyType.GetResRefStr());
+            // TODO: 0x48A48B calls TakePartyItem (0x463B30, not ported).
+        }
+    }
+}
+
+// 0x48B2C0
+const CPoint& CGameDoor::GetCloserDestPt(const CPoint& pt)
+{
+    LONG dy2 = pt.y - m_ptDest2.y;
+    LONG dx2 = pt.x - m_ptDest2.x;
+    LONG dy1 = pt.y - m_ptDest1.y;
+    LONG dx1 = pt.x - m_ptDest1.x;
+
+    if (dy2 * dy2 * 16 / 9 + dx2 * dx2 <= dy1 * dy1 * 16 / 9 + dx1 * dx1) {
+        return m_ptDest2;
+    }
+
+    return m_ptDest1;
+}
+
+// 0x487D10
+void CGameDoor::OnActionButton(const CPoint& pt)
+{
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CAIGroup* pGroup = &pGame->m_group;
+
+    if ((m_dwFlags & 0x80) != 0 && (m_dwFlags & 0x100) == 0) {
+        pGame->m_lastClick.x = -1;
+        pGame->m_lastClick.y = -1;
+        pGame->m_lastTarget = CGameObjectArray::INVALID_INDEX;
+        CGameObject::OnActionButton(pt);
+        return;
+    }
+
+    switch (pGame->m_nState) {
+    case 0:
+        break;
+    case 2:
+        pGame->m_lastClick.x = -1;
+        pGame->m_lastClick.y = -1;
+        pGame->m_lastTarget = CGameObjectArray::INVALID_INDEX;
+        // TODO: 0x487E10-0x488493, the special cursors on a door (spells,
+        // thieving, bashing; the switch on CInfGame::m_iconIndex at
+        // 0x488A1C/0x488A30) are not ported; the door does nothing.
+        return;
+    case 3:
+        pGame->m_lastClick.x = -1;
+        pGame->m_lastClick.y = -1;
+        pGame->m_lastTarget = CGameObjectArray::INVALID_INDEX;
+        CGameObject::OnActionButton(pt);
+        return;
+    default:
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameDoor.cpp
+        // __LINE__: 989
+        UTIL_ASSERT(FALSE);
+        return;
+    }
+
+    pGame->m_lastClick.x = -1;
+    pGame->m_lastClick.y = -1;
+    pGame->m_lastTarget = CGameObjectArray::INVALID_INDEX;
+
+    if (pGroup->GetCount() == 0) {
+        return;
+    }
+
+    // UseDoor (142) on this door, for the whole group.
+    CAIAction useDoor;
+    useDoor.m_actionID = 142;
+    useDoor.m_specificID = m_id;
+    useDoor.m_specificID2 = 0;
+    useDoor.m_specificID3 = 0;
+    useDoor.m_internalFlags = 0;
+    pGroup->GroupAction(useDoor, TRUE, NULL);
+
+    LONG* pGroupList = pGroup->GetGroupList();
+    LONG nRange = RANGE_DOOR;
+
+    if (pGroupList == NULL) {
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameDoor.cpp
+        // __LINE__: 857
+        UTIL_ASSERT(FALSE);
+        return;
+    }
+
+    CPoint ptDest;
+    SHORT nIndex;
+    for (nIndex = 0; nIndex < pGroup->GetCount(); nIndex++) {
+        CGameObject* pObject;
+        if (pGame->GetObjectArray()->GetShare(pGroupList[nIndex],
+                CGameObjectArray::THREAD_ASYNCH,
+                &pObject,
+                INFINITE)
+            != CGameObjectArray::SUCCESS) {
+            // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameDoor.cpp
+            // __LINE__: 865
+            UTIL_ASSERT(FALSE);
+            continue;
+        }
+
+        const CPoint& pos = pObject->GetPos();
+
+        // NOTE: Inlined `GetCloserDestPt`.
+        LONG dy1 = pos.y - m_ptDest1.y;
+        LONG dx1 = pos.x - m_ptDest1.x;
+        LONG dy2 = pos.y - m_ptDest2.y;
+        LONG dx2 = pos.x - m_ptDest2.x;
+        const CPoint* pDest = dy1 * dy1 * 16 / 9 + dx1 * dx1 < dy2 * dy2 * 16 / 9 + dx2 * dx2
+            ? &m_ptDest1
+            : &m_ptDest2;
+        ptDest = *pDest;
+
+        if (_strnicmp(reinterpret_cast<const char*>(m_pArea->m_header.m_areaName), "ar5004", 7) == 0) {
+            nRange = RANGE_DOOR / 10;
+        } else if (_strnicmp(reinterpret_cast<const char*>(m_pArea->m_header.m_areaName), "ar5202", 7) == 0) {
+            nRange = RANGE_DOOR / 5;
+        }
+
+        LONG dy = pos.y - ptDest.y;
+        LONG dx = pos.x - ptDest.x;
+        if (dy * dy * 16 / 9 + dx * dx <= nRange) {
+            pGame->GetObjectArray()->ReleaseShare(pGroupList[nIndex],
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+            break;
+        }
+
+        pGame->GetObjectArray()->ReleaseShare(pGroupList[nIndex],
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+    }
+
+    if (nIndex == pGroup->GetCount()) {
+        // Nobody is next to the door: the group walks to it first.
+        CAIAction moveToPoint;
+        moveToPoint.m_actionID = CAIAction::MOVETOPOINT;
+        moveToPoint.m_dest = ptDest;
+        moveToPoint.m_specificID = 0;
+        moveToPoint.m_specificID2 = -1;
+        moveToPoint.m_specificID3 = 0;
+        moveToPoint.m_internalFlags = 0;
+        pGroup->GroupAction(moveToPoint, FALSE, NULL);
+    }
+
+    delete pGroupList;
 }
