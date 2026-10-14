@@ -93,7 +93,14 @@ namespace {
     std::atomic<DWORD> g_mainThread { 0 };
     uint32_t g_stalledFrames = 0;
     int32_t g_lastAu = 0;
+    // As the recorder: frames whose AI update began before the frame's
+    // render ended, and whether g_lastAu was read for this frame.
+    uint32_t g_overlapFrames = 0;
+    bool g_haveFrameAu = false;
     clock::FrameGate g_gate;
+    // The current call of CBaldurChitin::SynchronousUpdate counted as a
+    // frame: OnFrameEnd fires its timers.
+    bool g_frameCounted = false;
     bool g_haveScript = false;
     bool g_scriptFinished = false;
     // The rand state of the first thread other than the main one to poll
@@ -140,6 +147,7 @@ namespace {
         }
         s.rngState = iwd2r_rand_state(); // the main thread's
         s.aiStalledFrames = g_stalledFrames;
+        s.aiOverlapFrames = g_overlapFrames;
         s.loads = g_gate.Loads();
         s.heldFrames = g_gate.HeldFrames();
         if (const unsigned int* ai = g_inputRandState.load()) {
@@ -296,6 +304,7 @@ void OnFrame()
     {
         // As the recorder: a frame with no AI update since the previous one
         // and none in progress is a stall.
+        g_haveFrameAu = false;
         if (source && source->Ready()) {
             state_dump::AiState ai;
             source->ReadAi(&ai);
@@ -305,6 +314,8 @@ void OnFrame()
                         std::to_string(ai.auCounter));
             }
             g_lastAu = ai.auCounter;
+            // Read before the clock moves, as the recorder does.
+            g_haveFrameAu = true;
         }
     }
     const unsigned every = Settings().dumpEvery;
@@ -312,6 +323,27 @@ void OnFrame()
         WriteDump(nullptr);
     WriteStatus();
     g_now = clock::TickAfterFrame(frame);
+    g_frameCounted = true;
+}
+
+// The recorder's OnFrameEnd: the timers of a frame that counted fire once
+// the frame is drawn. First, as the recorder: an AI update that began
+// before the render ended (the AI thread's 100 ms wait timed out during a
+// long frame) counts the frame in ai_overlap_frames.
+void OnFrameEnd()
+{
+    if (!Active() || !g_frameCounted)
+        return;
+    g_frameCounted = false;
+    const state_dump::DumpSource* source = state_dump::Source();
+    if (g_haveFrameAu && source && source->Ready()) {
+        state_dump::AiState ai;
+        source->ReadAi(&ai);
+        if (ai.auCounter != g_lastAu || ai.inAsyncUpdate != 0) {
+            if (g_overlapFrames++ == 0)
+                Say("AI overlap: %s", "this frame's AI update began before its render ended (au_counter " + std::to_string(g_lastAu) + " at its start, " + std::to_string(ai.auCounter) + " now, in_async_update " + std::to_string(ai.inAsyncUpdate) + ")");
+        }
+    }
     FireTimers();
 }
 

@@ -813,3 +813,36 @@ TEST_CASE("sprite: a weapon set change takes off the old set and selects the new
     }
     ClearMessages();
 }
+
+TEST_CASE("game: ClearCharacterSlot leaves an area count of 0xFF alone", "[ai][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    CGameSprite* pCharacter = NewGameInStartArea(cre);
+    CGameArea* pArea = pCharacter->GetArea();
+    REQUIRE(pArea != NULL);
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    INT nSlot = -1;
+    for (INT n = 0; n < CINFGAME_MAXCHARACTERS; n++) {
+        if (pGame->m_characters[n] == pCharacter->GetId()) {
+            nSlot = n;
+        }
+    }
+    REQUIRE(nSlot != -1);
+
+    // 0x5BD530 decrements the area's BYTE count unless it is 0xFF
+    // (`cmp al, 0xff; je` at 0x5BD61E), the value it starts from.
+    pArea->m_nCharacters = 0xFF;
+    CHECK(pGame->ClearCharacterSlot(nSlot) == TRUE);
+    CHECK(pGame->m_characters[nSlot] == -1);
+    CHECK(pArea->m_nCharacters == 0xFF);
+}

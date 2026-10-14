@@ -12,8 +12,14 @@
 //     progress), and then OnFrame returns at once;
 //   - the clock (GetTickCount, timeGetTime) is virtual: kClockBase, then one
 //     step per frame (platform/replay_clock.h, shared with the recorder);
-//   - timeSetEvent timers run on that clock, fired by OnFrame on the main
-//     thread, so the AI thread wakes once per frame;
+//   - timeSetEvent timers run on that clock, fired on the main thread by
+//     OnFrameEnd, which CBaldurChitin::SynchronousUpdate calls after
+//     CChitin::SynchronousUpdate returns (the recorder's FrameTrampoline
+//     calls it there too), so the AI thread wakes once per frame and its
+//     update runs after the frame's render while the frame takes less
+//     than the AI thread's 100 ms wait; OnFrameEnd counts a frame where
+//     it did not in ai_overlap_frames (platform/replay_clock.h, "The order
+//     inside a frame");
 //   - time() (and CTime) reads a virtual wall clock derived from it, UTC;
 //   - frame 1 seeds the main thread's rand with IWD2R_SEED (default 1), as
 //     the recorder runs the original's srand;
@@ -47,6 +53,11 @@ uint32_t Frame();
 // The frame: CBaldurChitin::SynchronousUpdate calls it first. Does nothing
 // unless Active().
 void OnFrame();
+
+// The end of the frame: CBaldurChitin::SynchronousUpdate calls it after
+// CChitin::SynchronousUpdate. When the call counted as a frame it fires the
+// due timers, waking the AI thread. Does nothing unless Active().
+void OnFrameEnd();
 
 // Writes checkpoint-<name>.json now (the scenario's checkpoint verb).
 void Checkpoint(const std::string& name, int line);
