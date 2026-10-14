@@ -274,6 +274,7 @@ void OnFrame()
     if (!IsFrame(source))
         return;
     const uint32_t frame = ++g_frame;
+    iwd2r_rand_trace_frame(frame);
     if (frame == 1) {
         g_mainThread = GetCurrentThreadId();
         iwd2r_srand(Settings().seed);

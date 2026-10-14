@@ -10,3 +10,6 @@ unsigned int iwd2r_rand_state();
 // thread (the replay dump reads the input thread's while that thread waits).
 // Valid until the thread exits.
 const unsigned int* iwd2r_rand_state_address();
+// The frame number IWD2R_RAND_TRACE writes with each call (docs/rand-trace.md);
+// the replay mode sets it every frame.
+void iwd2r_rand_trace_frame(unsigned int frame);

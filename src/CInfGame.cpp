@@ -3007,7 +3007,9 @@ CGameArea* CInfGame::LoadArea(CString areaName, BYTE nTravelScreenImageToUse, BO
         return NULL;
     }
 
-    if (nTravelScreenImageToUse != -1) {
+    // The original tests the byte as a signed char against -1; callers pass
+    // 255 (or -1) for "pick one", which rolls rand() here.
+    if (nTravelScreenImageToUse != 255) {
         m_nTravelScreenImageToUse = nTravelScreenImageToUse;
     } else {
         m_nTravelScreenImageToUse = rand() % 5;

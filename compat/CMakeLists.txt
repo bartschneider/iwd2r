@@ -1,3 +1,4 @@
 add_library(iwd2r_compat STATIC version.cpp win_types.cpp mfc_string.cpp path_hook.cpp mfc_time.cpp mfc_file.cpp mfc_resource.cpp ini.cpp msvc_rand.cpp msvc_time.cpp msvc_atol.cpp marshal_ptr.cpp)
 target_include_directories(iwd2r_compat PUBLIC "${PROJECT_SOURCE_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(iwd2r_compat PUBLIC ${CMAKE_DL_LIBS})
 iwd2r_strict_warnings(iwd2r_compat)

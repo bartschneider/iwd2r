@@ -3239,7 +3239,38 @@ void CScreenWorld::CancelEngine()
 // 0x693910
 void CScreenWorld::DeleteAreaMultiplayer()
 {
-    // TODO: Incomplete.
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CBaldurMessage* pMessage = g_pBaldurChitin->GetBaldurMessage();
+
+    if (!pMessage->m_bDeleteAreaPolling) {
+        // One roll every call: the slot the search for an unused area starts
+        // at, and the slot before it, where it stops.
+        BYTE nArea = static_cast<BYTE>(rand() % CINFGAME_MAX_AREAS);
+        BYTE nLast = nArea == 0 ? CINFGAME_MAX_AREAS - 1 : nArea - 1;
+
+        for (; nArea != nLast; nArea = (nArea + 1) % CINFGAME_MAX_AREAS) {
+            CGameArea* pArea = pGame->m_gameAreas[nArea];
+            if (pArea != NULL
+                && pArea->m_nCharacters == 0
+                && pArea != pGame->m_pGameAreaMaster) {
+                CString sArea;
+                pArea->m_resRef.CopyToString(sArea);
+                pArea->field_AE6 = 0;
+
+                // TODO: Incomplete. The original starts the delete-area poll
+                // for sArea here (0x43AE40, not in our tree yet).
+                break;
+            }
+        }
+    }
+
+    if (pMessage->m_bDeleteAreaPolling == TRUE) {
+        // TODO: Incomplete. The original resolves a running poll here
+        // (0x43B7E0, CBaldurMessage::DeleteAreaBallotResult 0x43B980 and
+        // DeleteArea when every vote says yes and another area is loaded) or
+        // re-sends it after m_dwDeleteAreaTimeout (0x43AE40). A poll never
+        // starts while 0x43AE40 is missing.
+    }
 }
 
 // 0x693C60
