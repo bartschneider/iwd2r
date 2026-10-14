@@ -22,12 +22,14 @@
 #pragma warning(push)
 #pragma warning(disable : 4121 4201)
 #endif
+#include "CAIGroup.h"
 #include "CGameSprite.h"
 #ifdef _MSC_VER
 #pragma warning(pop)
 #endif
 
 #include "oracle/runner/compare.h"
+#include "oracle/runner/generators.h"
 #include "oracle/runner/registry.h"
 
 #include <cstdint>
@@ -92,9 +94,59 @@ void IsVisibleToCaller(CaseContext& ctx)
     }
 }
 
+// CAIGroup::RotateOffsets(pOffsets, nOffsets, nDirection) (0x4058E0):
+// __stdcall, three stack arguments, `ret 0xc` at 0x405A09; reads and writes only the
+// array (R10b: an array in the original's memory).
+using RotateFn = void(__stdcall*)(void* pOffsets, int32_t nOffsets, int32_t nDirection);
+constexpr uintptr_t kRotateOffsets = 0x4058E0;
+
+// Offsets as GetOffsets makes them (thousandths of a search square, (0, 0)
+// for the leader, every quadrant and both axes), counts 1 to 12, directions
+// over the circle and beyond.
+void RotateOffsets(CaseContext& ctx)
+{
+    uint64_t state = ctx.seed ^ 0x4058E0ull;
+    oracle::RandomGen<uint32_t> bits(oracle::SplitMix64(&state));
+    auto between = [&](int32_t lo, int32_t hi) {
+        return static_cast<int32_t>(lo + static_cast<int32_t>(*bits.Next() % static_cast<uint32_t>(hi - lo + 1)));
+    };
+
+    int32_t* original = nullptr;
+    ctx.SetInputs("allocating the original's offsets");
+    ctx.CallOriginal([&] { original = reinterpret_cast<int32_t*>(OriginalBlock(12 * 8)); });
+
+    for (int i = 0; i < ctx.iterations; ++i) {
+        const int32_t count = between(1, 12);
+        const int32_t direction = between(-20, 400);
+        CPoint ours[12];
+        std::string inputs = "RotateOffsets(direction " + std::to_string(direction) + ",";
+        for (int32_t n = 0; n < count; ++n) {
+            const int32_t kind = between(0, 5);
+            ours[n].x = kind == 0 ? 0 : between(-6, 6) * 1000;
+            ours[n].y = kind == 1 ? 0 : between(-6, 6) * 1000;
+            if (n == 0 && between(0, 1) == 0) {
+                ours[n].x = 0;
+                ours[n].y = 0;
+            }
+            original[2 * n] = ours[n].x;
+            original[2 * n + 1] = ours[n].y;
+            inputs += " (" + std::to_string(ours[n].x) + "," + std::to_string(ours[n].y) + ")";
+        }
+        ctx.SetInputs(inputs + ")");
+        ctx.CallOriginal([&] { reinterpret_cast<RotateFn>(kRotateOffsets)(original, count, direction); });
+        CAIGroup::RotateOffsets(ours, static_cast<SHORT>(count), static_cast<SHORT>(direction));
+        ctx.CountInputs(1);
+        for (int32_t n = 0; n < count; ++n) {
+            oracle::Compare(ctx, std::to_string(original[2 * n]) + "," + std::to_string(original[2 * n + 1]),
+                std::to_string(ours[n].x) + "," + std::to_string(ours[n].y));
+        }
+    }
+}
+
 } // namespace
 
 ORACLE_CASE("move/visible_to_caller", IsVisibleToCaller);
+ORACLE_CASE("group/rotate_offsets", RotateOffsets);
 ORACLE_CASE_PENDING("move/follow_path", nullptr,
     "needs engine state (sprites from the original's CGameSprite constructor in its object array, the "
     "message handler); ours covered by tests/test_move.cpp");
