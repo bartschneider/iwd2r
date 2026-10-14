@@ -1420,6 +1420,9 @@ def recorder_env(script_win, replay_dir_win, seed, dump_every,
         names['IWD2R_TEST_NO_FOCUS_GUARD'] = '1'
     if slow_reads:
         names['IWD2R_TEST_SLOW_READS'] = str(slow_reads)
+    # docs/rand-trace.md: the recorder logs every rand() call to rand.txt.
+    if os.environ.get('IWD2R_RAND_TRACE', '0') not in ('', '0'):
+        names['IWD2R_RAND_TRACE'] = '1'
     return names
 
 

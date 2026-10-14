@@ -933,11 +933,70 @@ bool IsFrame()
     return true;
 }
 
+// ---------------------------------------------------------------------------
+// IWD2R_RAND_TRACE (docs/rand-trace.md): every rand() call as a line of
+// rand.txt, "frame thread caller" (the caller's return address, hex), written
+// by the frame hook. rand begins with a 5-byte call to _getptd; that call
+// becomes a jmp to RandTrampoline, which logs and then makes the call itself.
+
+CRITICAL_SECTION g_randLock;
+std::vector<uint32_t> g_randLog;
+bool g_randTrace = false;
+uint32_t g_randGetptd = kVanillaGetptd;
+uint32_t g_randContinue = kVanillaRand + 5;
+
+extern "C" void __cdecl LogRand(uint32_t caller)
+{
+    EnterCriticalSection(&g_randLock);
+    g_randLog.push_back(g_frame.load());
+    g_randLog.push_back(GetCurrentThreadId());
+    g_randLog.push_back(caller);
+    LeaveCriticalSection(&g_randLock);
+}
+
+extern "C" __declspec(naked) void RandTrampoline()
+{
+    __asm {
+        pushad
+        pushfd
+        push dword ptr [esp + 36]
+        call LogRand
+        add esp, 4
+        popfd
+        popad
+        call dword ptr [g_randGetptd]
+        jmp dword ptr [g_randContinue]
+    }
+}
+
+void FlushRandTrace()
+{
+    if (!g_randTrace) {
+        return;
+    }
+    std::vector<uint32_t> calls;
+    EnterCriticalSection(&g_randLock);
+    calls.swap(g_randLog);
+    LeaveCriticalSection(&g_randLock);
+    if (calls.empty()) {
+        return;
+    }
+    std::FILE* out = std::fopen(PathIn("rand.txt").c_str(), "a");
+    if (!out) {
+        return;
+    }
+    for (size_t i = 0; i + 2 < calls.size(); i += 3) {
+        std::fprintf(out, "%u %u %08x\n", calls[i], calls[i + 1], calls[i + 2]);
+    }
+    std::fclose(out);
+}
+
 extern "C" void __cdecl OnFrame()
 {
     if (!IsFrame()) {
         return;
     }
+    FlushRandTrace();
     const uint32_t frame = ++g_frame;
     if (frame == 1) {
         g_mainThread = GetCurrentThreadId();
@@ -1505,6 +1564,30 @@ bool HookFrame(std::string* error)
     return true;
 }
 
+// IWD2R_RAND_TRACE: replaces rand's call to _getptd with a jmp to
+// RandTrampoline, after checking the site holds that call.
+bool HookRand(std::string* error)
+{
+    const auto* site = reinterpret_cast<const uint8_t*>(static_cast<uintptr_t>(kVanillaRand));
+    int32_t rel = 0;
+    std::memcpy(&rel, site + 1, 4);
+    if (site[0] != 0xE8 || kVanillaRand + 5 + static_cast<uint32_t>(rel) != kVanillaGetptd) {
+        *error = "rand does not begin with a call to _getptd";
+        return false;
+    }
+    InitializeCriticalSection(&g_randLock);
+    uint8_t jump[5] = { 0xE9 };
+    const uint32_t newRel = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&RandTrampoline)) - (kVanillaRand + 5);
+    std::memcpy(jump + 1, &newRel, 4);
+    if (!WriteCode(kVanillaRand, jump, sizeof(jump))) {
+        *error = "cannot write the rand hook";
+        return false;
+    }
+    g_randTrace = true;
+    Log("rand trace: rand 0x%08X -> RandTrampoline, calls in rand.txt", kVanillaRand);
+    return true;
+}
+
 bool Start()
 {
     g_dir = Env("IWD2R_REPLAY_DIR");
@@ -1573,6 +1656,11 @@ bool Start()
     Log("dumps every %u frames, seed %u, virtual clock from %lu ms at %lu frames per second", g_dumpEvery, g_seed,
         kClockBase, kFramesPerSecond);
     std::string error;
+    const std::string randTrace = Env("IWD2R_RAND_TRACE");
+    if (!randTrace.empty() && randTrace != "0" && !HookRand(&error)) {
+        Log("FATAL: %s", error.c_str());
+        return false;
+    }
     if (!HookImports(&error) || !HookFrame(&error)) {
         Log("FATAL: %s", error.c_str());
         return false;
