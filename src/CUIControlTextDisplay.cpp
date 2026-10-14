@@ -130,7 +130,90 @@ void CUIControlTextDisplay::SetActive(BOOLEAN bActive)
 // 0x4E1F00
 void CUIControlTextDisplay::CopyDisplay(CUIControlTextDisplay* pOldDisplay)
 {
-    // TODO: Incomplete.
+    SHORT nIndex = 0;
+
+    if (!field_AB6) {
+        m_plstStrings = pOldDisplay->m_plstStrings;
+    }
+
+    field_A6C = pOldDisplay->field_A6C;
+    m_posHighlightedItem = NULL;
+
+    if (pOldDisplay != this && m_plstStrings != NULL) {
+        if (m_plstStrings->GetCount() < 1) {
+            m_posTopString = NULL;
+        } else {
+            // __FILE__: C:\Projects\Icewind2\src\Baldur\ChUIControls.cpp
+            // __LINE__: 5564
+            UTIL_ASSERT(pOldDisplay->m_posTopString != NULL);
+
+            if (m_size.cy < pOldDisplay->m_size.cy) {
+                // A smaller display keeps the old display's bottom line at
+                // its bottom.
+                POSITION pos = pOldDisplay->m_posTopString;
+                POSITION posTail = m_plstStrings->GetTailPosition();
+                if (pos != posTail) {
+                    do {
+                        if (nIndex == pOldDisplay->field_A6A - 1) {
+                            break;
+                        }
+
+                        m_plstStrings->GetNext(pos);
+                        nIndex++;
+                    } while (pos != posTail);
+                }
+
+                nIndex = 0;
+                m_posTopString = pos;
+
+                if (field_A6A != 1 && field_A6A - 1 >= 0) {
+                    do {
+                        if (m_plstStrings->GetCount() - 1 <= nIndex) {
+                            break;
+                        }
+
+                        m_plstStrings->GetPrev(m_posTopString);
+                        nIndex++;
+                    } while (nIndex < field_A6A - 1);
+                }
+            } else {
+                // A larger display keeps the old top line and fills its
+                // extra lines from above it.
+                POSITION pos = m_plstStrings->GetTailPosition();
+                while (pos != pOldDisplay->m_posTopString) {
+                    nIndex++;
+                    m_plstStrings->GetPrev(pos);
+                }
+
+                m_posTopString = pOldDisplay->m_posTopString;
+
+                while (nIndex < field_A6A - 1) {
+                    if (m_plstStrings->GetCount() - 1 <= nIndex) {
+                        break;
+                    }
+
+                    nIndex++;
+                    m_plstStrings->GetPrev(m_posTopString);
+                }
+            }
+        }
+
+        SHORT nTopIndex = 0;
+        POSITION pos = m_plstStrings->GetHeadPosition();
+        while (pos != NULL) {
+            if (pos == m_posTopString) {
+                break;
+            }
+
+            m_plstStrings->GetNext(pos);
+            nTopIndex++;
+        }
+
+        field_5A = nTopIndex;
+
+        // NOTE: Uninline.
+        AdjustScrollBar();
+    }
 }
 
 // 0x4E20F0
