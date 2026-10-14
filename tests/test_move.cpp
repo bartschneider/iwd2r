@@ -590,3 +590,65 @@ TEST_CASE("move: a sprite sent into a wall stops short and never loops", "[move]
     CHECK(Square(pSprite->GetPos()) != wallSquare);
     CHECK(TerrainPassable(pSprite, Square(pSprite->GetPos())));
 }
+
+// The original's walk_and_talk recording (seed 1, dumped every frame): after
+// the opening dialog the party member (Probe) stands at 2414,897; the click
+// on the deck sends it to search square (145, 75), and it walks a straight
+// smoothed line in nine steps of about 9.5 pixels (move scale 10), one step
+// every second frame (frames 2557-2573), stopping at 2328,905 with its
+// action cleared at frame 2575; `moved` (2643) has it there. These are the
+// positions after each step.
+TEST_CASE("move: the first click-to-move of walk_and_talk steps where the original's does", "[move][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<CGameSprite*> party = NewGameWithParty(1);
+    if (party.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    CGameSprite* pSprite = party[0];
+    REQUIRE(pSprite->GetArea() != NULL);
+    pSprite->GetArea()->SortLists();
+    ExploreArea(pSprite);
+    REQUIRE(pSprite->GetPos() == CPoint(2414, 897));
+    // The premade character is not Probe; it walks at Probe's move scale.
+    pSprite->GetAnimation()->SetMoveScale(10);
+    REQUIRE(pSprite->GetAnimation()->GetPathSmooth());
+
+    const CPoint goal(145 * CPathSearch::GRID_SQUARE_SIZEX + CPathSearch::GRID_SQUARE_SIZEX / 2,
+        75 * CPathSearch::GRID_SQUARE_SIZEY + CPathSearch::GRID_SQUARE_SIZEY / 2);
+    pSprite->m_curDest = goal;
+    pSprite->SetTarget(goal, FALSE);
+
+    std::vector<CPoint> steps;
+    CPoint last = pSprite->GetPos();
+    for (int frame = 0; frame < 200; frame++) {
+        Walk(pSprite, 1);
+        if (pSprite->GetPos() != last) {
+            last = pSprite->GetPos();
+            steps.push_back(last);
+        }
+        if (pSprite->m_pPath == NULL && pSprite->m_currentSearchRequest == NULL && frame > 0) {
+            break;
+        }
+    }
+
+    const CPoint original[] = { CPoint(2404, 897), CPoint(2394, 898), CPoint(2385, 899), CPoint(2375, 900),
+        CPoint(2366, 901), CPoint(2356, 902), CPoint(2347, 903), CPoint(2337, 904), CPoint(2328, 905) };
+    std::string ours;
+    for (const CPoint& pt : steps) {
+        ours += " " + std::to_string(pt.x) + "," + std::to_string(pt.y);
+    }
+    INFO("ours:" << ours);
+    REQUIRE(steps.size() == std::size(original));
+    for (size_t n = 0; n < steps.size(); n++) {
+        CHECK(steps[n] == original[n]);
+    }
+    CHECK(pSprite->m_pPath == NULL);
+    CHECK(pSprite->m_currentSearchRequest == NULL);
+}

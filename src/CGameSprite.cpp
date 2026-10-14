@@ -12020,9 +12020,27 @@ BOOL CGameSprite::ProcessEffectList()
                 // NOTE: Uninline.
                 GetAnimation()->ResetMoveScale();
 
-                // TODO: Incomplete (0x72E270-0x72E70E): the move scale
-                // bonuses (monk levels, feat 0xC) when the animation moves,
-                // the color ranges (m_hasColorRangeEffects), the color
+                // The move scale bonuses (0x72E270-0x72E3A8): a barbarian
+                // not in heavy armour moves at 1.2 times (in floats,
+                // truncated), a monk unarmoured (or in armour sub_724690(0)
+                // allows) one more per three monk levels, Dash one more.
+                if (GetAnimation()->GetMoveScale() > 0) {
+                    INT nMoveScale = GetAnimation()->GetMoveScale();
+                    if (m_typeAI.IsClassValid(CAIOBJECTTYPE_C_BARBARIAN) && !sub_724690(3)) {
+                        nMoveScale = static_cast<INT>(static_cast<float>(nMoveScale) * 1.2f);
+                    }
+                    if (GetAIType().IsClassValid(CAIOBJECTTYPE_C_MONK)
+                        && (m_equipment.m_items[1] == NULL || sub_724690(0))) {
+                        nMoveScale += m_derivedStats.GetClassLevel(CAIOBJECTTYPE_C_MONK) / 3;
+                    }
+                    if (sub_763150(CGAMESPRITE_FEAT_DASH)) {
+                        nMoveScale++;
+                    }
+                    GetAnimation()->SetMoveScale(static_cast<BYTE>(nMoveScale));
+                }
+
+                // TODO: Incomplete (0x72E3A8-0x72E70E): the color ranges
+                // (m_hasColorRangeEffects), the color
                 // effects (m_hasColorEffects), the animation change with
                 // its search bitmap update and sequence reset (field_5640),
                 // and their messages. The sequence reset calls SetSequence
