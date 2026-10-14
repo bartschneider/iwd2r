@@ -1308,6 +1308,7 @@ int CSpawnPointArray::Parse(const CString& sData)
                 pt.x = atoi(sPoint.Left(separatorPos));
                 pt.y = atoi(sPoint.Mid(separatorPos + 1));
                 Add(new CSpawnPoint(pt, facing));
+                count++;
             }
 
             sMutableString = sMutableString.Mid(closePos + 1);
