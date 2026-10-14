@@ -14,6 +14,7 @@
 #include "CInfCursor.h"
 #include "CInfGame.h"
 #include "CItem.h"
+#include "CObjectMarker.h"
 #include "CPathSearch.h"
 #include "CProjectile.h"
 #include "CScreenCharacter.h"
@@ -18083,11 +18084,93 @@ SHORT CGameSprite::ReturnToStartLoc()
 }
 
 // 0x75F3D0
+//
+// Hides (1) or shows (0) the creature: m_baseStats.field_294, the CRE's
+// byte 0x29C. The argument is read as a byte.
 SHORT CGameSprite::sub_75F3D0(int a1)
 {
-    // TODO: Incomplete.
+    const BYTE bHide = static_cast<BYTE>(a1);
 
-    return ACTION_ERROR;
+    if (m_id == 0 || m_pArea == NULL) {
+        return ACTION_ERROR;
+    }
+
+    if (bHide == 1) {
+        if (m_baseStats.field_294 == 1) {
+            return ACTION_DONE;
+        }
+
+        // NOTE: sub_40CCA0 takes a share of the object that is never
+        // released, as in the original.
+        if (m_typeAI.sub_40CCA0(this, TRUE) != NULL) {
+            // NOTE: Uninline (no NULL check of the marker in the original).
+            m_pArea->m_pObjectMarker->RemoveObject(m_id);
+        }
+
+        if (field_7430 == TRUE) {
+            m_pArea->m_search.RemoveObject(CPoint(m_pos.x / CPathSearch::GRID_SQUARE_SIZEX,
+                                               m_pos.y / CPathSearch::GRID_SQUARE_SIZEY),
+                m_typeAI.GetEnemyAlly(),
+                m_animation.GetPersonalSpace(),
+                field_54A8,
+                field_7430);
+        }
+
+        m_baseStats.field_294 = TRUE;
+        return ACTION_DONE;
+    }
+
+    if (bHide != 0) {
+        return ACTION_ERROR;
+    }
+
+    if (!m_baseStats.field_294) {
+        return ACTION_DONE;
+    }
+
+    // NOTE: The original looks for the nearest open square and never reads
+    // the result (0x75F65D; the local is overwritten at 0x75F715).
+    if ((m_animation.GetAnimationId() & 0xF000) == 0x4000 && m_animation.GetAnimationId() >= 0x4400) {
+        m_pArea->m_search.GetNearestOpenSquare(CPoint(m_pos.x / CPathSearch::GRID_SQUARE_SIZEX,
+                                                   m_pos.y / CPathSearch::GRID_SQUARE_SIZEY),
+            m_visibleTerrainTable,
+            m_animation.GetPersonalSpace(),
+            -1);
+    } else {
+        m_pArea->m_search.GetNearestOpenSquare(CPoint(m_pos.x / CPathSearch::GRID_SQUARE_SIZEX,
+                                                   m_pos.y / CPathSearch::GRID_SQUARE_SIZEY),
+            m_terrainTable,
+            m_animation.GetPersonalSpace(),
+            -1);
+    }
+
+    // NOTE: As above, the share is not released.
+    if (m_typeAI.sub_40CCA0(this, TRUE) != NULL) {
+        // NOTE: Uninline.
+        m_pArea->m_pObjectMarker->RemoveObject(m_id);
+    }
+
+    if (field_7430 == TRUE) {
+        m_pArea->m_search.RemoveObject(CPoint(m_pos.x / CPathSearch::GRID_SQUARE_SIZEX,
+                                           m_pos.y / CPathSearch::GRID_SQUARE_SIZEY),
+            m_typeAI.GetEnemyAlly(),
+            m_animation.GetPersonalSpace(),
+            field_54A8,
+            field_7430);
+    }
+
+    // NOTE: Uninline.
+    m_pArea->m_pObjectMarker->AddObject(m_id);
+
+    m_pArea->m_search.AddObject(CPoint(m_pos.x / CPathSearch::GRID_SQUARE_SIZEX,
+                                    m_pos.y / CPathSearch::GRID_SQUARE_SIZEY),
+        m_typeAI.GetEnemyAlly(),
+        m_animation.GetPersonalSpace(),
+        field_54A8,
+        field_7430);
+
+    m_baseStats.field_294 = FALSE;
+    return ACTION_DONE;
 }
 
 // 0x75F800

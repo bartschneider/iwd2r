@@ -1432,6 +1432,9 @@ def recorder_env(script_win, replay_dir_win, seed, dump_every,
     # docs/rand-trace.md: the recorder logs every rand() call to rand.txt.
     if os.environ.get('IWD2R_RAND_TRACE', '0') not in ('', '0'):
         names['IWD2R_RAND_TRACE'] = '1'
+    # platform/replay_probe.h: the probe's frames, probe.txt.
+    if os.environ.get('IWD2R_PROBE'):
+        names['IWD2R_PROBE'] = os.environ['IWD2R_PROBE']
     return names
 
 

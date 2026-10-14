@@ -1367,6 +1367,40 @@ TEST_CASE("spawn: a spawn point's budget is difficulty times the total level ove
     }
 }
 
+TEST_CASE("spawn: a spawn point lets the party save (0x47C830)", "[spawn][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CGameSprite* pSprite = NewGameWithOneCharacter(cre, "Probe");
+    pGame->UpdateCharacterSlots();
+    pGame->SetupCharacters(FALSE);
+    CGameArea* pArea = pSprite->GetArea();
+    REQUIRE(pArea != NULL);
+
+    // CGameSpawning's vtable (0x84C5B0) has 0x47C830 in slot 0x28:
+    // strError -1, TRUE, so the area does not refuse saving for it.
+    CAreaFileRandomMonsterSpawningPoint point = SpawnPoint({ "10GOB" }, 100, 1);
+    CGameSpawning* pSpawning = new CGameSpawning(pArea, &point);
+    STRREF strError = 0;
+    CHECK(pSpawning->CanSaveGame(strError) == TRUE);
+    CHECK(strError == static_cast<STRREF>(-1));
+
+    strError = 0;
+    CHECK(pArea->CanSaveGame(strError) == TRUE);
+    CHECK(strError == static_cast<STRREF>(-1));
+}
+
 #ifndef _WIN32
 TEST_CASE("gam: Party Formation's Done saves a game file the engine loads back", "[gam][data]")
 {

@@ -366,7 +366,10 @@ void CGameJournal::Marshal(CSavedGameJournalEntry* pSavedEntry)
 
             pSavedEntry->m_strEntry = pEntry->m_strText;
             pSavedEntry->m_time = pEntry->m_nTime;
+            // NOTE: The original stores the chapter as a WORD (0x4C6C7E),
+            // which clears the byte after it.
             pSavedEntry->m_chapter = static_cast<BYTE>(cnt);
+            pSavedEntry->m_read = 0;
             pSavedEntry->m_type = static_cast<BYTE>(pEntry->m_wType);
             pSavedEntry->m_character = pEntry->m_bCharacter;
             pSavedEntry++;
@@ -378,28 +381,32 @@ void CGameJournal::Marshal(CSavedGameJournalEntry* pSavedEntry)
 void CGameJournal::Unmarshal(CSavedGameJournalEntry* pSavedEntry, DWORD nSavedEntry)
 {
     for (DWORD cnt = 0; cnt < nSavedEntry; cnt++) {
+        // NOTE: The original reads the chapter as a WORD (0x4C6CF0), with
+        // the byte after it as its high byte, and indexes the chapter lists
+        // with it unchecked. Bounded (ruling P4-10): an index past the
+        // lists fails the assert.
+        WORD nChapter = pSavedEntry[cnt].m_chapter | (pSavedEntry[cnt].m_read << 8);
+
         // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameJournal.cpp
         // __LINE__: 735
-        UTIL_ASSERT(m_aChapters[(pSavedEntry + cnt)->m_chapter] != NULL);
+        UTIL_ASSERT(nChapter < NUM_CHAPTERS && m_aChapters[nChapter] != NULL);
 
-        CGameJournalEntry* pEntry = new CGameJournalEntry();
+        // NOTE: Inlined.
+        CGameJournalEntry* pEntry = new CGameJournalEntry(pSavedEntry[cnt].m_strEntry,
+            pSavedEntry[cnt].m_time,
+            pSavedEntry[cnt].m_type);
 
         // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameJournal.cpp
         // __LINE__: 737
         UTIL_ASSERT(pEntry != NULL);
 
-        pEntry->m_strText = pSavedEntry[cnt].m_strEntry;
-        pEntry->m_nTime = pSavedEntry[cnt].m_time;
-        pEntry->m_wType = pSavedEntry[cnt].m_type;
-
-        pEntry->m_bCharacter = -1;
         if (pSavedEntry[cnt].m_character != 0) {
-            pEntry->m_bCharacter = pEntry->m_bCharacter;
+            pEntry->m_bCharacter = pSavedEntry[cnt].m_character;
         } else {
             pEntry->m_bCharacter = 1;
         }
 
-        m_aChapters[pSavedEntry[cnt].m_chapter]->AddTail(pEntry);
+        m_aChapters[nChapter]->AddTail(pEntry);
     }
 }
 

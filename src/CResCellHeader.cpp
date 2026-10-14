@@ -122,7 +122,8 @@ BOOL CResCellHeader::Parse(void* pData)
     }
 
     BAMHEADER* pBamHeader = reinterpret_cast<BAMHEADER*>(pData);
-    if (pBamHeader->nFileType != 'BAH ' || pBamHeader->nFileVersion != 'V1  ') {
+    // NOTE: "BAH " and "V1  " read little-endian (0x77FF94, 0x77FF9F).
+    if (pBamHeader->nFileType != 0x20484142 || pBamHeader->nFileVersion != 0x20203156) {
         return FALSE;
     }
 

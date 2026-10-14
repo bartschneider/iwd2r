@@ -134,3 +134,11 @@ The guards in `src/render/api.h` leave these for the renderer that first draws t
 - Not ported: CheckAdd's SPWI420 part (0x547620); `CGameEffect::CheckSave` (0x4A42F0), the only reader of `m_spellPenetrationBonus`; the persistent effects' TODOs (0x4C1C00, 0x4C21E0, 0x4C2CB0, 0x4C3280); the derived-stats arrays at +0x328 and +0x378.
 - Projectiles: the decoder 0x51EAF0 sends about 380 unported types to the instant projectile (a temporary DEVIATION): effects land on the Fire frame and later object ids shift, so a combat replay diverges from the first unported projectile fired. `Render`, sparkle, the visual-effect and area-explosion objects are not ported (projectiles are invisible). Spell-hit types 45, 52, 57 and 72 return NULL (see the warning in `CProjectile.h`). The cone projectile 0x579B40 is missing, so effect 293 stays blocked.
 - Effect TODOs now wirable with the merged projectile classes (src/IcewindCGameEffects.cpp): 233, 235, 255, 256, 264, 449, 265, 294, 295, 417 (types 0 and 2) and 430 (partly).
+
+## Resting, stores and import (from project 3, milestone 4, rest-store)
+
+- Rest encounters: `CGameArea::CheckRestEncounter` (0x46FEA0) is not ported; `RestPartyPrivate` has a TODO where the original calls it, so a rest is never interrupted and draws none of the encounter's `rand()` calls.
+- The Rest action handler `CGameSprite` 0x7500F0 (spell memorization refresh after a rest) is not ported.
+- `CanRestParty`'s last check, `CGameObjectArray` 0x5C9300 (no resting while any sprite has spell state 46 or 47), is a TODO that always passes.
+- Store and character files now load (their byte-reversed signature checks were fixed), and so do EFF and cell-header resources. The three apply-EFF effects (177, 182, 183) now apply EFF files and draw `rand()`; an EFF holding an effect id `DecodeEffect` does not know dereferences NULL, as in the original.
+- `CBaldurChitin::AllocResObject` has no special class for resource types 1021 and 1022 (the biography); `ImportCharacter` works around it.
