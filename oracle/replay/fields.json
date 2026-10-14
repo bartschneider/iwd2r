@@ -542,5 +542,25 @@
     "base": "CGameSprite",
     "offset": "0x5348",
     "type": "i16"
+  },
+  "sprite_queued_count": {
+    "base": "CGameSprite",
+    "offset": "0x041E",
+    "type": "i32"
+  },
+  "sprite_queued_head": {
+    "base": "CGameSprite",
+    "offset": "0x0416",
+    "type": "ptr"
+  },
+  "sprite_triggers_count": {
+    "base": "CGameSprite",
+    "offset": "0x043A",
+    "type": "i32"
+  },
+  "action_id": {
+    "base": "CAIAction",
+    "offset": "0x0000",
+    "type": "i16"
   }
 }

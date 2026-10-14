@@ -16,7 +16,7 @@
 //   area RESREF characters C view X,Y vis WxH size S range R ids a,b,c,d,e,f
 //   obj INDEX ID type T pos X,Y here H list L seen S speed P inhibitor I
 //       [name NAME] [last C active A ai B imprisonment M visible_monster V
-//       field_294 F state S action A sequence Q]
+//       field_294 F state S action A sequence Q queued N next A triggers T]
 //   vis ROW HEX...
 //
 // - game: CInfGame::m_nCharacters and m_visibleArea.
@@ -31,7 +31,9 @@
 //   sprite (0x31) or door (0x21) adds its script name; a sprite adds
 //   m_lastCharacterCount, m_active, m_activeAI, m_activeImprisonment,
 //   m_bVisibleMonster, m_baseStats.field_294, m_derivedStats.m_generalState
-//   (hex), m_curAction.m_actionID and m_nSequence. One line per object.
+//   (hex), m_curAction.m_actionID, m_nSequence, the action queue's
+//   length and its head's m_actionID (-1 when empty), and the pending
+//   triggers' count. One line per object.
 // - vis: the area's visibility map, one line per row of m_nWidth tiles
 //   (bytes in hex: bit 7 explored, the low bits the visibility count);
 //   the rows past m_nMapSize, if any, are left out.
@@ -105,6 +107,9 @@ struct Object {
     uint32_t generalState = 0;
     int action = 0;
     int sequence = 0;
+    int queued = 0;
+    int queuedHead = -1;
+    int triggers = 0;
 };
 
 struct Area {
@@ -161,10 +166,11 @@ inline std::string Format(const Frame& f)
             out += " name " + o.name;
         if (o.sprite) {
             std::snprintf(line, sizeof(line), " last %u active %ld ai %ld imprisonment %ld visible_monster %ld field_294 %u state %08lx"
-                " action %d sequence %d",
+                " action %d sequence %d queued %d next %d triggers %d",
                 o.lastCharacters, static_cast<long>(o.active), static_cast<long>(o.activeAi),
                 static_cast<long>(o.activeImprisonment), static_cast<long>(o.visibleMonster), o.field294,
-                static_cast<unsigned long>(o.generalState), o.action, o.sequence);
+                static_cast<unsigned long>(o.generalState), o.action, o.sequence, o.queued,
+                o.queuedHead, o.triggers);
             out += line;
         }
         out += "\n";

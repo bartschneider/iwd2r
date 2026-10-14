@@ -838,6 +838,22 @@
     "sprite_sequence": {
       "class": "CGameSprite",
       "member": "m_nSequence"
+    },
+    "sprite_queued_count": {
+      "class": "CGameSprite",
+      "member": "m_queuedActions.m_nCount"
+    },
+    "sprite_queued_head": {
+      "class": "CGameSprite",
+      "member": "m_queuedActions.m_pNodeHead"
+    },
+    "sprite_triggers_count": {
+      "class": "CGameSprite",
+      "member": "m_pendingTriggers.m_nCount"
+    },
+    "action_id": {
+      "class": "CAIAction",
+      "member": "m_actionID"
     }
   }
 }

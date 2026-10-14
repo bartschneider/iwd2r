@@ -156,6 +156,10 @@ static_assert(kField_sprite_visible_monster.type == ReplayType::k_i32, "");
 static_assert(kField_sprite_field_294.type == ReplayType::k_u8, "");
 static_assert(kField_sprite_general_state.type == ReplayType::k_u32, "");
 static_assert(kField_sprite_sequence.type == ReplayType::k_i16, "");
+static_assert(kField_sprite_queued_count.type == ReplayType::k_i32, "");
+static_assert(kField_sprite_queued_head.type == ReplayType::k_ptr, "");
+static_assert(kField_sprite_triggers_count.type == ReplayType::k_i32, "");
+static_assert(kField_action_id.type == ReplayType::k_i16, "");
 static_assert(kField_area_characters.type == ReplayType::k_u8, "");
 static_assert(kField_area_view_x.type == ReplayType::k_i32, "");
 static_assert(kField_area_view_y.type == ReplayType::k_i32, "");
@@ -807,6 +811,13 @@ void ReadProbe(platform::replay_probe::Frame* out)
             o.generalState = ReadU32(At(object, kField_sprite_general_state), &entryOk);
             o.action = ReadI16(At(object, kField_sprite_action), &entryOk);
             o.sequence = ReadI16(At(object, kField_sprite_sequence), &entryOk);
+            o.queued = ReadI32(At(object, kField_sprite_queued_count), &entryOk);
+            const uint32_t head = ReadU32(At(object, kField_sprite_queued_head), &entryOk);
+            if (head) {
+                const uint32_t action = ReadU32(At(head, kField_list_node_data), &entryOk);
+                o.queuedHead = action ? ReadI16(At(action, kField_action_id), &entryOk) : -1;
+            }
+            o.triggers = ReadI32(At(object, kField_sprite_triggers_count), &entryOk);
         } else if (o.type == platform::replay_probe::kTypeDoor) {
             o.hasName = true;
             o.name = ReadName(At(object, kField_door_name));
