@@ -66,6 +66,7 @@ public:
     /* 0098 */ virtual SHORT GetVisualRange();
     /* 009C */ virtual const BYTE* GetVisibleTerrainTable();
     /* 00A0 */ virtual const BYTE* GetTerrainTable();
+    /* 00A4 */ virtual BOOL GetTriggerSprite(CAITrigger& trigger, CGameSprite** ppSprite);
     /* 00A8 */ virtual SHORT GetHelpRange();
     /* 00AC */ virtual void ApplyTriggers();
     /* 00B0 */ virtual void AutoPause(DWORD type);
@@ -124,6 +125,7 @@ public:
     SHORT SpawnPtDeactivate(CGameSpawning* target);
     SHORT SpawnPtSpawn(CGameSpawning* target);
     SHORT StaticStart(CGameStatic* target, BOOL bStart);
+    BOOL SeeTarget(CGameObject* pTarget, BOOL bSeeDead);
     SHORT PlaySound(LONG x, LONG y, BOOL bPoint);
     SHORT SetGlobal();
     SHORT IncrementGlobal();

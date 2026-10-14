@@ -16,6 +16,7 @@
 #include "CGameSprite.h"
 #include "CInfGame.h"
 #include "CMessage.h"
+#include "CPathSearch.h"
 #include "CScreenCreateChar.h"
 #include "CVariableHash.h"
 #include "ScreenLayout.h"
@@ -519,4 +520,71 @@ TEST_CASE("ai: CheckLimits keeps the morale recovery time and caps the morale br
     stats.m_nReputation = -5;
     stats.CheckLimits();
     CHECK(stats.m_nReputation == 200);
-}
+
+    TEST_CASE("ai: Allegiance, Range, See and the HP triggers answer both ways", "[ai][data]")
+    {
+        REQUIRE_ENGINE();
+        auto* areaStorage = static_cast<unsigned char*>(::operator new(sizeof(CGameArea)));
+        std::memset(areaStorage, 0, sizeof(CGameArea));
+        CGameArea* pArea = reinterpret_cast<CGameArea*>(areaStorage);
+
+        CGameAIBase* pCaller = AddAIObject();
+        pCaller->m_pArea = pArea;
+        pCaller->m_pos = CPoint(400, 300);
+        pCaller->m_typeAI.m_nEnemyAlly = 255;
+
+        // Allegiance(Myself, n): the caller's own enemy-ally byte.
+        CAIObjectType myself(0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0);
+        myself.m_SpecialCase[0] = 1;
+        CAITrigger enemy(0x400B, myself, 255);
+        CHECK(pCaller->EvaluateStatusTrigger(enemy) == TRUE);
+        CAITrigger neutral(0x400B, myself, 128);
+        CHECK(pCaller->EvaluateStatusTrigger(neutral) == FALSE);
+
+        // Range(object, 2, less than): within (2 + 1)^2 squared grid squares.
+        CGameAIBase* pTarget = AddAIObject();
+        pTarget->m_pArea = pArea;
+        pTarget->m_pos = CPoint(400 + 2 * CPathSearch::GRID_SQUARE_SIZEX, 300);
+        CAIObjectType target(0, 0, 0, 0, 0, 0, 0, 0, pTarget->m_id, 0, 0);
+        CAITrigger rangeNear(0x4018, target, 2);
+        rangeNear.m_specific2 = 2;
+        CHECK(pCaller->EvaluateStatusTrigger(rangeNear) == TRUE);
+        pTarget->m_pos = CPoint(400 + 5 * CPathSearch::GRID_SQUARE_SIZEX, 300);
+        CHECK(pCaller->EvaluateStatusTrigger(rangeNear) == FALSE);
+        CAITrigger rangeFar(0x4018, target, 2);
+        rangeFar.m_specific2 = 3;
+        CHECK(pCaller->EvaluateStatusTrigger(rangeFar) == TRUE);
+        // An unknown mode answers FALSE.
+        rangeFar.m_specific2 = 0;
+        CHECK(pCaller->EvaluateStatusTrigger(rangeFar) == FALSE);
+
+        // See: in the same area and on the caller's own point the line of
+        // sight holds at once (CGameArea::CheckLOS's start == goal); another
+        // area or beyond the visual range is not seen.
+        CAITrigger see(0x401C, target, 0);
+        pTarget->m_pos = pCaller->m_pos;
+        CHECK(pCaller->EvaluateStatusTrigger(see) == TRUE);
+        CHECK(pCaller->m_lSeen.GetInstance() == pTarget->m_id);
+        pTarget->m_pos = CPoint(400 + 1000 * CPathSearch::GRID_SQUARE_SIZEX, 300);
+        CHECK(pCaller->EvaluateStatusTrigger(see) == FALSE);
+        pTarget->m_pos = pCaller->m_pos;
+        pTarget->m_pArea = NULL;
+        CHECK(pCaller->EvaluateStatusTrigger(see) == FALSE);
+
+        // HP, HPGT, HPLT read a sprite's base hit points; not a sprite: FALSE.
+        CGameSprite* pSprite = MakeSprite();
+        pSprite->m_baseStats.m_hitPoints = 10;
+        CAIObjectType sprite(0, 0, 0, 0, 0, 0, 0, 0, pSprite->m_id, 0, 0);
+        CAITrigger hpgt(0x4011, sprite, 5);
+        CHECK(pCaller->EvaluateStatusTrigger(hpgt) == TRUE);
+        CAITrigger hpgtHigh(0x4011, sprite, 10);
+        CHECK(pCaller->EvaluateStatusTrigger(hpgtHigh) == FALSE);
+        CAITrigger hp(0x4010, sprite, 10);
+        CHECK(pCaller->EvaluateStatusTrigger(hp) == TRUE);
+        CAITrigger hplt(0x4012, sprite, 10);
+        CHECK(pCaller->EvaluateStatusTrigger(hplt) == FALSE);
+        CAITrigger hpOther(0x4011, target, 0);
+        CHECK(pCaller->EvaluateStatusTrigger(hpOther) == FALSE);
+
+        pCaller->m_pArea = NULL;
+    }

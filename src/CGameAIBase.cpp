@@ -3904,6 +3904,117 @@ BOOL CGameAIBase::EvaluateStatusTrigger(const CAITrigger& trigger)
             bResult = static_cast<ULONG>(pVariable->GetIntValue()) < nGameTime;
         }
         break;
+    case 0x400B:
+        // Allegiance: the decoded cause's enemy-ally byte.
+        triggerCopy.m_triggerCause.Decode(this);
+        bResult = triggerCopy.m_triggerCause.m_nEnemyAlly == triggerCopy.m_specificID;
+        break;
+    case 0x400C:
+        // Class
+        triggerCopy.m_triggerCause.Decode(this);
+        bResult = triggerCopy.m_triggerCause.IsClassValid(static_cast<BYTE>(triggerCopy.m_specificID));
+        break;
+    case 0x400E:
+        // General
+        triggerCopy.m_triggerCause.Decode(this);
+        bResult = triggerCopy.m_triggerCause.m_nGeneral == triggerCopy.m_specificID;
+        break;
+    case 0x404D:
+        // Gender
+        triggerCopy.m_triggerCause.Decode(this);
+        bResult = triggerCopy.m_triggerCause.m_nGender == triggerCopy.m_specificID;
+        break;
+    case 0x4010:
+    case 0x4011:
+    case 0x4012:
+        // HP, HPGT, HPLT: the cause's current hit points (base stats).
+        {
+            CGameSprite* pSprite = NULL;
+            bNoRelease = GetTriggerSprite(triggerCopy, &pSprite);
+            pObject = pSprite;
+            if (pSprite == NULL) {
+                // NOTE: The original leaves through its early epilogue
+                // (0x45AB7A) without releasing anything; nothing is shared.
+                return FALSE;
+            }
+
+            LONG nHitPoints = pSprite->GetBaseStats()->m_hitPoints;
+            if (triggerCopy.m_triggerID == 0x4010) {
+                bResult = nHitPoints == triggerCopy.GetSpecifics();
+            } else if (triggerCopy.m_triggerID == 0x4011) {
+                bResult = nHitPoints > triggerCopy.GetSpecifics();
+            } else {
+                bResult = nHitPoints < triggerCopy.GetSpecifics();
+            }
+        }
+        break;
+    case 0x4018:
+        // Range(object, range, mode): the squared search-grid distance to
+        // the object (a door's nearer walk-to point) against (range + 1)
+        // squared, by mode 1 equal, 2 less, 3 greater.
+        {
+            triggerCopy.Decode(this);
+            pObject2 = triggerCopy.GetCause().sub_40CB20(this, CGameObject::TYPE_AIBASE, FALSE);
+            if (pObject2 == NULL) {
+                return FALSE;
+            }
+
+            // NOTE: The original passes an unset stack CPoint to a door's
+            // GetCloserDestPt (0x454881); ours starts it at (0, 0).
+            CPoint pt(0, 0);
+            BYTE objectType = pObject2->GetObjectType();
+            if (objectType == CGameObject::TYPE_DOOR) {
+                pt = static_cast<CGameDoor*>(pObject2)->GetCloserDestPt(pt);
+            } else {
+                pt = pObject2->GetPos();
+            }
+
+            CPoint ptTarget(pt.x / CPathSearch::GRID_SQUARE_SIZEX, pt.y / CPathSearch::GRID_SQUARE_SIZEY);
+            const CPoint& pos = GetPos();
+            CPoint ptThis(pos.x / CPathSearch::GRID_SQUARE_SIZEX, pos.y / CPathSearch::GRID_SQUARE_SIZEY);
+            LONG nDistance = (ptTarget.x - ptThis.x) * (ptTarget.x - ptThis.x)
+                + (ptTarget.y - ptThis.y) * (ptTarget.y - ptThis.y);
+            LONG nRange = (triggerCopy.GetSpecifics() + 1) * (triggerCopy.GetSpecifics() + 1);
+
+            switch (triggerCopy.m_specific2) {
+            case 1:
+                bResult = nDistance == nRange;
+                break;
+            case 2:
+                bResult = nDistance < nRange;
+                break;
+            case 3:
+                bResult = nDistance > nRange;
+                break;
+            default:
+                bResult = FALSE;
+                goto release;
+            }
+
+            if (bResult == TRUE) {
+                sub_4530F0(pObject2->GetAIType());
+            }
+        }
+        break;
+    case 0x401C:
+        // See(object, seeDead)
+        triggerCopy.Decode(this);
+        pObject2 = triggerCopy.GetCause().sub_40CCA0(this, FALSE);
+        bResult = SeeTarget(pObject2, triggerCopy.GetSpecifics());
+        if (bResult == TRUE) {
+            if (!m_lSeen.Equal(pObject2->GetAIType())) {
+                if (g_pBaldurChitin->GetObjectGame()->GetCharacterPortraitNum(pObject2->GetId()) != -1) {
+                    m_canBeSeen = CGameObject::VISIBLE_DELAY * 4 + 4;
+                }
+
+                m_lSeen.Set(pObject2->GetAIType());
+                CMessage* message = new CMessageSetLastObject(pObject2->GetAIType(), CAITRIGGER_SEE, m_id, m_id);
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+            }
+
+            sub_4530F0(pObject2->GetAIType());
+        }
+        break;
     case 0x400D:
         // Exists
         triggerCopy.m_triggerCause.Decode(this);
@@ -4009,6 +4120,7 @@ BOOL CGameAIBase::EvaluateStatusTrigger(const CAITrigger& trigger)
         break;
     }
 
+release:
     if (pObject != NULL && !bNoRelease) {
         g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(pObject->GetId(),
             CGameObjectArray::THREAD_ASYNCH,
@@ -4023,3 +4135,66 @@ BOOL CGameAIBase::EvaluateStatusTrigger(const CAITrigger& trigger)
 
     return bResult;
 }
+
+// 0x45D050
+BOOL CGameAIBase::GetTriggerSprite(CAITrigger& trigger, CGameSprite** ppSprite)
+{
+    trigger.m_triggerCause.Decode(this);
+    *ppSprite = static_cast<CGameSprite*>(trigger.m_triggerCause.sub_40CB20(this, CGameObject::TYPE_SPRITE, FALSE));
+    if (*ppSprite != NULL && (*ppSprite)->GetAIType().Equal(CAIObjectType::NOT_SPRITE)) {
+        g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare((*ppSprite)->m_id,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+        *ppSprite = NULL;
+    }
+
+    return FALSE;
+}
+
+// 0x44DAC0
+BOOL CGameAIBase::SeeTarget(CGameObject* pTarget, BOOL bSeeDead)
+{
+    if (pTarget == NULL) {
+        return FALSE;
+    }
+
+    if (pTarget->m_pArea != m_pArea) {
+        return FALSE;
+    }
+
+    if (pTarget->GetObjectType() == CGameObject::TYPE_SPRITE) {
+        CGameSprite* pSprite = static_cast<CGameSprite*>(pTarget);
+        if (pSprite->m_baseStats.field_294) {
+            return FALSE;
+        }
+
+        if (!bSeeDead && (pSprite->m_derivedStats.m_generalState & STATE_DEAD) != 0) {
+            return FALSE;
+        }
+    }
+
+    BOOL bCheckIfExplored = FALSE;
+
+    const CPoint& ptTargetPos = pTarget->GetPos();
+    LONG nTargetX = ptTargetPos.x / CPathSearch::GRID_SQUARE_SIZEX;
+    LONG nTargetY = ptTargetPos.y / CPathSearch::GRID_SQUARE_SIZEY;
+    const CPoint& ptPos = GetPos();
+    LONG nX = ptPos.x / CPathSearch::GRID_SQUARE_SIZEX;
+    LONG nY = ptPos.y / CPathSearch::GRID_SQUARE_SIZEY;
+    LONG nDistance = (nY - nTargetY) * (nY - nTargetY) + (nX - nTargetX) * (nX - nTargetX);
+
+    if (pTarget->GetObjectType() == CGameObject::TYPE_SPRITE) {
+        bCheckIfExplored = static_cast<CGameSprite*>(pTarget)->Orderable(FALSE);
+    }
+
+    if (nDistance > GetVisualRange() * GetVisualRange()) {
+        return FALSE;
+    }
+
+    if (!m_pArea->CheckLOS(pTarget->GetPos(), GetPos(), GetVisibleTerrainTable(), static_cast<BOOLEAN>(bCheckIfExplored))) {
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
