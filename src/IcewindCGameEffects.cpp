@@ -8,6 +8,7 @@
 #include "CProjectile.h"
 #include "CScreenWorld.h"
 #include "CUtil.h"
+#include "IcewindCVisualEffect.h"
 #include "IcewindMisc.h"
 
 #include <algorithm>
@@ -175,6 +176,60 @@ CGameEffect* IcewindCGameEffectCastingGlow::Copy()
     delete effect;
     copy->CopyFromBase(this);
     return copy;
+}
+
+// 0x55E130
+BOOL IcewindCGameEffectCastingGlow::ApplyEffect(CGameSprite* pSprite)
+{
+    // The glow lasts what is left of the effect, in ticks, as a byte.
+    BYTE nDuration = static_cast<BYTE>(m_duration - g_pBaldurChitin->GetObjectGame()->GetWorldTimer()->m_gameTime);
+
+    IcewindCVisualEffect visualEffect;
+    visualEffect.sub_586A90(TRUE);
+
+    WORD nProjectileType = 0;
+    switch (m_dwFlags) {
+    case 1:
+        nProjectileType = 113; // AbjurCG
+        break;
+    case 2:
+        nProjectileType = 115; // ConjuCG
+        break;
+    case 3:
+        nProjectileType = 117; // DivinCG
+        break;
+    case 4:
+        nProjectileType = 112; // EnchaCG
+        break;
+    case 5:
+        nProjectileType = 114; // IllusCG
+        break;
+    case 6:
+        nProjectileType = 116; // InvocCG
+        break;
+    case 7:
+        nProjectileType = 110; // NecroCG
+        break;
+    case 8:
+        nProjectileType = 111; // AlterCG
+        break;
+    }
+
+    // TODO: Incomplete (0x55E199-0x55E806). For each school the original
+    // builds its casting glow projectile (FUN_0057CAC0 with the school's
+    // animation, AbjurCG and so on, the duration and the visual effect; not
+    // ported), queues CMessageFireProjectile (nProjectileType, at the sprite,
+    // the projectile's DetermineHeight, nDuration) and fires the projectile
+    // at the sprite at that height. NOTE: for a type outside 1-8 the original
+    // calls the sprite's own vtable slot 0x6C (ClearActions) in place of
+    // Fire, its projectile pointer still holding the sprite.
+    (void)pSprite;
+    (void)nDuration;
+    (void)nProjectileType;
+
+    m_done = TRUE;
+
+    return TRUE;
 }
 
 // -----------------------------------------------------------------------------

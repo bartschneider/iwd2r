@@ -769,3 +769,13 @@ TEST_CASE("effects-iwd: turn undead (280) and ranger tracking (286)", "[effects]
     CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
     CHECK(pEffect->m_done == TRUE);
 }
+
+TEST_CASE("effects-iwd: casting glow (235) finishes", "[effects][data]")
+{
+    PROBE_OR_SKIP(pSprite);
+    for (DWORD school = 0; school <= 9; school++) {
+        std::unique_ptr<CGameEffect> pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_CASTINGGLOW, school, 0);
+        CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+        CHECK(pEffect->m_done == TRUE);
+    }
+}
