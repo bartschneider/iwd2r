@@ -10,7 +10,7 @@ IWD2R_RAND_TRACE=1 python3 tools/oracle.py replay compare scenarios/pending/worl
 
 - **The original** (`oracle/replay/recorder.cpp`, `HookRand`): `rand` (0x7E8160)
   begins with a 5-byte call to `_getptd`; the recorder turns it into a jmp to a
-  trampoline that logs and makes the call itself. `replay/rand.txt` gets one
+  trampoline that logs and makes the call itself. ``runs/<stamp>/original/rand.txt` (after `replay compare`; the record output folder after `replay record`)` gets one
   line per call, `frame thread caller`: the frame number, the Windows thread
   id and the caller's return address (hex, a vanilla address; the function is
   the nearest `// 0xADDR` comment at or below it in `src/`, or
@@ -29,3 +29,5 @@ way (the replay frame), so a frame's calls can be compared site by site; the
 first call whose function differs is where the streams part.
 
 Off by default: the trace costs a file write per call.
+
+Notes: the recorder flushes its buffered calls at the start of each frame, so the calls of the last frame before the original exits are not written. On our side, with the trace on outside replay mode (no `IWD2R_STATE_DUMP`), `rand.txt` is written to the working folder, which is the game folder once the engine has changed into it.
