@@ -3365,6 +3365,7 @@ void CScreenCharacter::UpdateMiscInformation(CUIControlTextDisplay* pText, CGame
         } else {
             sFavouriteSpellName = "Bad spell resref";
         }
+        cSpell.Release();
     }
 
     UpdateText(pText,
@@ -5778,7 +5779,7 @@ void CScreenCharacter::ResetErrorPanel(CUIPanel* pPanel)
     strRes.cSound.SetFireForget(TRUE);
     strRes.cSound.Play(FALSE);
 
-    CUIControlTextDisplay* pText = static_cast<CUIControlTextDisplay*>(pPanel->GetControl(0));
+    CUIControlTextDisplay* pText = static_cast<CUIControlTextDisplay*>(pPanel->GetControl(3));
 
     // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenCharacter.cpp
     // __LINE__: 9842
@@ -5967,7 +5968,7 @@ void CScreenCharacter::RefreshScripts()
                 pos2 = lStandardScripts.GetHeadPosition();
                 while (pos2 != NULL) {
                     sOtherScript = lStandardScripts.GetAt(pos2);
-                    if (sOtherScript.Compare(sScript) < 0) {
+                    if (strcmp(sScript, sOtherScript) < 0) {
                         break;
                     }
                     lStandardScripts.GetNext(pos2);
@@ -5988,6 +5989,7 @@ void CScreenCharacter::RefreshScripts()
         m_pScripts->GetNext(pos1);
     }
 
+    m_pScripts->RemoveAll();
     m_pScripts->AddTail(&lStandardScripts);
     m_pScripts->AddTail(&lCustomScripts);
 
@@ -6096,15 +6098,17 @@ void CScreenCharacter::OnScriptItemSelect(INT nItem)
                 // __LINE__: 10204
                 UTIL_ASSERT(pText != NULL);
 
+                // NOTE: Each script takes two lines of the list (the entry
+                // and a blank line), hence the doubled index.
                 if (m_nScriptIndex != -1) {
-                    pText->SetItemTextColor(pText->GetItemBossPosition(m_nScriptIndex),
+                    pText->SetItemTextColor(pText->GetItemBossPosition(m_nScriptIndex * 2),
                         pText->m_rgbTextColor);
                 }
 
                 m_nScriptIndex = nItem;
 
                 if (m_nScriptIndex != -1) {
-                    pText->SetItemTextColor(pText->GetItemBossPosition(m_nScriptIndex),
+                    pText->SetItemTextColor(pText->GetItemBossPosition(m_nScriptIndex * 2),
                         CBaldurChitin::TEXTDISPLAY_COLOR_SELECT);
                 }
 
@@ -6134,7 +6138,7 @@ void CScreenCharacter::OnScriptItemSelect(INT nItem)
 
                 pDescriptionText->SetTopString(pDescriptionText->m_plstStrings->FindIndex(0));
 
-                UpdatePopupPanel(GetTopPopup()->m_nID, pSprite);
+                UpdatePopupPanel(pPanel->m_nID, pSprite);
             }
 
             pGame->GetObjectArray()->ReleaseDeny(nGameSprite,
@@ -7755,7 +7759,10 @@ CUIControlButtonCharacterAbilitiesPlusMinus::~CUIControlButtonCharacterAbilities
 {
 }
 
-// 0x619220
+// NOTE: Ghidra has no function at this address; the vtable (0x852734,
+// slot 0x18) points here.
+//
+// 0x5EDAB0
 BOOL CUIControlButtonCharacterAbilitiesPlusMinus::OnLButtonDown(CPoint pt)
 {
     CScreenCharacter* pCharacter = g_pBaldurChitin->m_pEngineCharacter;
@@ -7810,6 +7817,10 @@ BOOL CUIControlButtonCharacterAbilitiesPlusMinus::OnLButtonDown(CPoint pt)
         // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenCharacter.cpp
         // __LINE__: 14288
         UTIL_ASSERT(FALSE);
+
+        strHelp = -1;
+        nMin = 0;
+        nMax = 0;
     }
 
     if (!m_bActive) {
@@ -7920,8 +7931,8 @@ void CUIControlButtonCharacterAbilitiesPlusMinus::AdjustValue()
             }
         } else {
             if (*pValue > *pBase) {
-                if (*pBase > nMin) {
-                    (*pBase)--;
+                if (*pValue > nMin) {
+                    (*pValue)--;
                     pCharacter->m_nExtraAbilityPoints++;
                     pCharacter->UpdatePopupPanel(m_pPanel->m_nID, pSprite);
                 } else {
@@ -7986,6 +7997,10 @@ void CUIControlButtonCharacterAbilitiesHotArea::OnHotAreaClick(CPoint pt)
         // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenCharacter.cpp
         // __LINE__: 14541
         UTIL_ASSERT(FALSE);
+
+        strDescription = -1;
+        nMin = 0;
+        nMax = 0;
     }
 
     sValue.Format("%d", nMin);
@@ -8576,6 +8591,8 @@ void CUIControlButtonCharacterClassSelection::OnLButtonClick(CPoint pt)
             // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenCharacter.cpp
             // __LINE__: 12724
             UTIL_ASSERT(FALSE);
+
+            strDescription = -1;
         }
 
         CAIObjectType typeAI(pSprite->m_startTypeAI);
@@ -9059,7 +9076,7 @@ CUIControlTextDisplayCharacterScriptScripts::~CUIControlTextDisplayCharacterScri
 {
 }
 
-// 0x5ED130
+// 0x5ECE70
 void CUIControlTextDisplayCharacterScriptScripts::OnItemSelected(LONG lMarker)
 {
     CScreenCharacter* pCharacter = g_pBaldurChitin->m_pEngineCharacter;
@@ -9073,6 +9090,9 @@ void CUIControlTextDisplayCharacterScriptScripts::OnItemSelected(LONG lMarker)
     // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenCharacter.cpp
     // __LINE__: 13514
     UTIL_ASSERT(pGame != NULL);
+
+    CSingleLock renderLock(&(pCharacter->GetManager()->field_36), FALSE);
+    renderLock.Lock(INFINITE);
 
     INT nGameSprite = pGame->GetCharacterId(pCharacter->GetSelectedCharacter());
 
@@ -9093,6 +9113,8 @@ void CUIControlTextDisplayCharacterScriptScripts::OnItemSelected(LONG lMarker)
             CGameObjectArray::THREAD_ASYNCH,
             INFINITE);
     }
+
+    renderLock.Unlock();
 }
 
 // -----------------------------------------------------------------------------
@@ -9541,6 +9563,8 @@ void CUIControlButtonCharacterFeatsHotArea::OnHotAreaClick(CPoint pt)
         // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenCharacter.cpp
         // __LINE__: 17020
         UTIL_ASSERT(FALSE);
+
+        offset = -1;
     }
 
     const CRuleTables& ruleTables = g_pBaldurChitin->GetObjectGame()->GetRuleTables();
@@ -9757,6 +9781,7 @@ BOOL CUIControlButtonCharacterFeatsPlusMinus::OnLButtonDown(CPoint pt)
         // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenCharacter.cpp
         // __LINE__: 17366
         UTIL_ASSERT(FALSE);
+        offset = -1;
     }
 
     if (!m_bActive) {
@@ -10273,6 +10298,7 @@ BOOL CUIControlButtonCharacterSkillsPlusMinus::OnLButtonDown(CPoint pt)
         // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenCharacter.cpp
         // __LINE__: 18449
         UTIL_ASSERT(FALSE);
+        offset = -1;
     }
 
     if (!m_bActive) {
@@ -10456,6 +10482,8 @@ void CUIControlButtonCharacterSkillsHotArea::OnHotAreaClick(CPoint pt)
         // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenCharacter.cpp
         // __LINE__: 18703
         UTIL_ASSERT(FALSE);
+
+        offset = -1;
     }
 
     const CRuleTables& ruleTables = g_pBaldurChitin->GetObjectGame()->GetRuleTables();
