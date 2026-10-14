@@ -4,6 +4,7 @@
 #include "mfc.h"
 
 #include <bitset>
+#include <list>
 
 #include "BalDataTypes.h"
 #include "CAIAction.h"
@@ -121,6 +122,7 @@ public:
     static const BYTE MSG_SUBTYPE_CMESSAGE_WEAPON_IMMUNITIES_UPDATE;
     static const BYTE MSG_SUBTYPE_CMESSAGE_101;
     static const BYTE MSG_SUBTYPE_CMESSAGE_103;
+    static const BYTE MSG_SUBTYPE_CMESSAGE_GROUP;
     static const BYTE MSG_SUBTYPE_CMESSAGE_TOGGLE_INTERFACE;
     static const BYTE MSG_SUBTYPE_CMESSAGE_107;
     static const BYTE MSG_SUBTYPE_CMESSAGE_PICKED_DIALOG_RESPONSE;
@@ -1571,6 +1573,7 @@ public:
     SHORT GetCommType() override;
     BYTE GetMsgType() override;
     BYTE GetMsgSubType() override;
+    void Run() override;
 
     /* 000C */ WORD m_projectileType;
     /* 000E */ LONG m_projectileTargetId;
@@ -1872,6 +1875,20 @@ public:
     /* 0028 */ LONG m_nCharacterId;
     /* 002C */ DWORD m_nNextEntryIndex;
     /* 0030 */ BOOLEAN field_30;
+};
+
+// A message that runs a list of messages in order, sent as one (vtable
+// 0x84D564).
+class CMessageGroup : public CMessage {
+public:
+    CMessageGroup(const std::list<CMessage*>& messages, LONG caller, LONG target);
+    ~CMessageGroup() override;
+    SHORT GetCommType() override;
+    BYTE GetMsgType() override;
+    BYTE GetMsgSubType() override;
+    void Run() override;
+
+    /* 000C */ std::list<CMessage*> m_messages;
 };
 
 #endif /* CMESSAGE_H_ */

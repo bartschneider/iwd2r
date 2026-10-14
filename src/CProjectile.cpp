@@ -4,6 +4,51 @@
 #include "CGameEffect.h"
 #include "CGameSprite.h"
 #include "CInfGame.h"
+#include "CMessage.h"
+#include "CUtil.h"
+#include "IcewindCVisualEffect.h"
+
+#include <list>
+
+// 0x529490
+CProjectile::CProjectile()
+{
+    m_nSpellLevel = 0;
+    m_projectileType = 0;
+    m_speed = 0;
+    m_sourceId = 0;
+    m_targetId = 0;
+    m_nSparkleColour = 0;
+    m_driftDecay = 0;
+    field_E6 = 0;
+    m_pArea = NULL;
+    m_nStartHeight = 0;
+    m_nCurrentHeight = 0;
+    m_nStartDistance = 0;
+    field_17C = 0;
+    m_callBackProjectile = CGameObjectArray::INVALID_INDEX;
+    m_bHasHeight = FALSE;
+    m_bTrackTargetHeight = FALSE;
+    m_bSparkle = FALSE;
+    m_fireSoundRef = "";
+    m_loopFireSound = FALSE;
+    m_arrivalSoundRef = "";
+    m_loopArrivalSound = FALSE;
+    field_182 = CGameObjectArray::INVALID_INDEX;
+}
+
+// 0x51E9B0
+CProjectile::~CProjectile()
+{
+    POSITION pos = m_effectList.GetHeadPosition();
+    while (pos != NULL) {
+        CGameEffect* node = m_effectList.GetNext(pos);
+        if (node != NULL) {
+            delete node;
+        }
+    }
+    m_effectList.RemoveAll();
+}
 
 // 0x6A3130
 BOOLEAN CProjectile::IsProjectile()
@@ -30,6 +75,67 @@ void CProjectile::AddEffect(CGameEffect* pEffect)
 {
     pEffect->m_projectileType = m_projectileType;
     m_effectList.AddTail(pEffect);
+}
+
+// 0x51EAF0
+CProjectile* CProjectile::DecodeProjectile(WORD nProjectileType, CGameAIBase* pSprite, BYTE nUnknown)
+{
+    CProjectile* pProjectile = NULL;
+    CString sResRef;
+    CString sTemp1;
+    CString sTemp2;
+    IcewindCVisualEffect visualEffect;
+
+    if (nProjectileType > 0x1000) {
+        pProjectile = DecodeSpellHitProjectile(nProjectileType - 0x1001, NULL, FALSE);
+        pProjectile->m_projectileType = nProjectileType - 1;
+        return pProjectile;
+    }
+
+    switch (nProjectileType) {
+    case 1:
+        pProjectile = new CProjectile84D8B8();
+        break;
+    default:
+        if (static_cast<UINT>(nProjectileType - 1) > 0x181) {
+            // __FILE__: C:\Projects\Icewind2\src\Baldur\CProjectile.cpp
+            // __LINE__: 3127
+            UTIL_ASSERT(FALSE);
+        }
+
+        // TODO: Incomplete (0x51EB93-0x528DEF). The jump table at 0x528E7C
+        // builds one class per type, 2 to 386; only type 1 is ported. A
+        // type without its case takes the original's fallback below, the
+        // instant projectile, which delivers the effects on Fire without an
+        // animation.
+        (void)pSprite;
+        (void)nUnknown;
+        break;
+    }
+
+    if (pProjectile == NULL) {
+        pProjectile = new CProjectile84D8B8();
+    }
+
+    pProjectile->m_projectileType = nProjectileType - 1;
+
+    return pProjectile;
+}
+
+// 0x560310
+CProjectile* CProjectile::DecodeSpellHitProjectile(DWORD nType, CGameSprite* pSprite, BOOLEAN bPriest)
+{
+    // TODO: Incomplete (0x560380-0x563833). Only type 0 (the instant
+    // projectile) is ported.
+    (void)pSprite;
+    (void)bPriest;
+
+    switch (nType) {
+    case 0:
+        return new CProjectile84D8B8();
+    default:
+        return NULL;
+    }
 }
 
 // 0x529F10
@@ -122,7 +228,75 @@ void CProjectile::OnArrival()
 // 0x52A1A0
 void CProjectile::DeliverEffects()
 {
-    // TODO: Incomplete.
+    CGameObject* pObject;
+
+    BYTE rc;
+    do {
+        rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(m_targetId,
+            CGameObjectArray::THREAD_ASYNCH,
+            &pObject,
+            INFINITE);
+    } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+    if (rc != CGameObjectArray::SUCCESS) {
+        return;
+    }
+
+    if ((pObject->GetObjectType() & CGameObject::TYPE_AIBASE) == 0) {
+        POSITION pos = m_effectList.GetHeadPosition();
+        while (pos != NULL) {
+            CGameEffect* node = m_effectList.GetNext(pos);
+            if (node != NULL) {
+                delete node;
+            }
+        }
+        m_effectList.RemoveAll();
+
+        g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(m_targetId,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+        return;
+    }
+
+    if (pObject->GetObjectType() == CGameObject::TYPE_SPRITE) {
+        CGameSprite* pSprite = static_cast<CGameSprite*>(pObject);
+        if (pSprite->GetDerivedStats()->m_cImmunitiesProjectile.OnList(m_projectileType)
+            || (static_cast<BYTE>(m_nSpellLevel) < 9
+                && pSprite->GetDerivedStats()->m_cImmunitiesSpellLevel.m_levels[static_cast<BYTE>(m_nSpellLevel)] != FALSE)) {
+            POSITION pos = m_effectList.GetHeadPosition();
+            while (pos != NULL) {
+                CGameEffect* node = m_effectList.GetNext(pos);
+                if (node != NULL) {
+                    delete node;
+                }
+            }
+            m_effectList.RemoveAll();
+
+            CGameEffect::FeedBackImmuneToResource(pSprite, m_sourceRes);
+
+            g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(m_targetId,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+            return;
+        }
+    }
+
+    std::list<CMessage*> messages;
+
+    POSITION pos = m_effectList.GetHeadPosition();
+    while (pos != NULL) {
+        CGameEffect* node = m_effectList.GetNext(pos);
+        CMessage* message = new CMessageAddEffect(node, m_sourceId, m_targetId);
+        messages.push_back(message);
+    }
+    m_effectList.RemoveAll();
+
+    CMessage* message = new CMessageGroup(messages, m_sourceId, m_targetId);
+    g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+    g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(m_targetId,
+        CGameObjectArray::THREAD_ASYNCH,
+        INFINITE);
 }
 
 // 0x52A480
@@ -159,4 +333,26 @@ void CProjectile::PlaySound(CResRef resRef, BOOL loop, BOOL fireAndForget)
 // 0x78E730
 void CProjectile::CallBack()
 {
+}
+
+// -----------------------------------------------------------------------------
+
+// 0x530790
+CProjectile84D8B8::CProjectile84D8B8()
+{
+}
+
+// 0x529950
+void CProjectile84D8B8::Fire(CGameArea* pArea, LONG source, LONG target, CPoint targetPos, LONG nHeight, SHORT nType)
+{
+    m_targetId = target;
+    m_sourceId = source;
+    m_pArea = pArea;
+    m_callBackProjectile = CGameObjectArray::INVALID_INDEX;
+
+    OnArrival();
+
+    // NOTE: OnArrival's Delete fails (the projectile was never added to the
+    // object array), so the projectile deletes itself here.
+    delete this;
 }

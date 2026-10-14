@@ -15,6 +15,7 @@
 #include "CInfGame.h"
 #include "CItem.h"
 #include "CPathSearch.h"
+#include "CProjectile.h"
 #include "CScreenChapter.h"
 #include "CScreenConnection.h"
 #include "CScreenCreateChar.h"
@@ -343,6 +344,9 @@ const BYTE CBaldurMessage::MSG_SUBTYPE_CMESSAGE_WEAPON_IMMUNITIES_UPDATE = 102;
 
 // 0x84CF3E
 const BYTE CBaldurMessage::MSG_SUBTYPE_CMESSAGE_103 = 103;
+
+// 0x84CF40
+const BYTE CBaldurMessage::MSG_SUBTYPE_CMESSAGE_GROUP = 105;
 
 // 0x84CF41
 const BYTE CBaldurMessage::MSG_SUBTYPE_CMESSAGE_TOGGLE_INTERFACE = 106;
@@ -15017,6 +15021,70 @@ BYTE CMessageFireProjectile::GetMsgSubType()
     return CBaldurMessage::MSG_SUBTYPE_CMESSAGE_FIRE_PROJECTILE;
 }
 
+// 0x5007F0
+void CMessageFireProjectile::Run()
+{
+    CGameObject* pObject;
+
+    BYTE rc;
+    do {
+        rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetDeny(m_targetId,
+            CGameObjectArray::THREAD_ASYNCH,
+            &pObject,
+            INFINITE);
+    } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+    if (rc != CGameObjectArray::SUCCESS) {
+        return;
+    }
+
+    // NOTE: The firing object's own machine fired the projectile when it
+    // queued this message; the message only fires it on the other players'
+    // machines. Without a service provider (single player) it does nothing.
+    if (g_pChitin->cNetwork.GetServiceProvider() == CNetwork::SERV_PROV_NULL
+        || g_pChitin->cNetwork.m_idLocalPlayer == pObject->m_remotePlayerID) {
+        g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(m_targetId,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+        return;
+    }
+
+    if (pObject->GetArea() == NULL) {
+        g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(m_targetId,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+        return;
+    }
+
+    CProjectile* pProjectile;
+    if ((pObject->GetObjectType() & CGameObject::TYPE_AIBASE) != 0) {
+        pProjectile = CProjectile::DecodeProjectile(m_projectileType,
+            static_cast<CGameAIBase*>(pObject),
+            field_1E);
+    } else {
+        pProjectile = CProjectile::DecodeProjectile(m_projectileType,
+            NULL,
+            field_1E);
+    }
+
+    if (pProjectile->m_projectileType == 304) {
+        // TODO: The original stores field_20 in the projectile's +0x356
+        // member, a member of the class DecodeProjectile builds for type 305
+        // (not ported yet).
+    }
+
+    pProjectile->Fire(pObject->GetArea(),
+        pObject->GetId(),
+        m_projectileTargetId,
+        m_projectileTarget,
+        m_height,
+        0);
+
+    g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(m_targetId,
+        CGameObjectArray::THREAD_ASYNCH,
+        INFINITE);
+}
+
 // -----------------------------------------------------------------------------
 
 // 0x4F56B0
@@ -17392,4 +17460,50 @@ void CMessageSetVariable::Run()
     g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(m_targetId,
         CGameObjectArray::THREAD_ASYNCH,
         INFINITE);
+}
+
+// -----------------------------------------------------------------------------
+
+// 0x5152C0
+CMessageGroup::CMessageGroup(const std::list<CMessage*>& messages, LONG caller, LONG target)
+    : CMessage(caller, target)
+{
+    m_messages = messages;
+}
+
+// 0x515430
+CMessageGroup::~CMessageGroup()
+{
+    for (std::list<CMessage*>::iterator it = m_messages.begin(); it != m_messages.end(); ++it) {
+        if (*it != NULL) {
+            delete *it;
+            *it = NULL;
+        }
+    }
+}
+
+// 0x40A0D0
+SHORT CMessageGroup::GetCommType()
+{
+    return SEND;
+}
+
+// 0x40A0E0
+BYTE CMessageGroup::GetMsgType()
+{
+    return CBaldurMessage::MSG_TYPE_CMESSAGE;
+}
+
+// 0x515400
+BYTE CMessageGroup::GetMsgSubType()
+{
+    return CBaldurMessage::MSG_SUBTYPE_CMESSAGE_GROUP;
+}
+
+// 0x5157F0
+void CMessageGroup::Run()
+{
+    for (std::list<CMessage*>::iterator it = m_messages.begin(); it != m_messages.end(); ++it) {
+        (*it)->Run();
+    }
 }
