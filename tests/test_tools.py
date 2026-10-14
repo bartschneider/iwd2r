@@ -875,11 +875,73 @@ class SandboxCacheTest(unittest.TestCase):
     def test_refresh_decision(self):
         self.assertTrue(winsandbox.cache_needs_refresh(self.src, self.cache))
         self.write(self.cache, 'chitin.key', b'KEY1', 1000)
+        # The same CHITIN.KEY but nothing records the source: rebuilt.
+        self.assertEqual(winsandbox.cache_state(self.src, self.cache),
+                         'foreign')
+        winsandbox.write_source_record(self.src, self.cache)
         self.assertFalse(winsandbox.cache_needs_refresh(self.src, self.cache))
         self.write(self.cache, 'chitin.key', b'KEY1', 1001)
         self.assertTrue(winsandbox.cache_needs_refresh(self.src, self.cache))
         self.write(self.cache, 'chitin.key', b'KEY12', 1000)
         self.assertTrue(winsandbox.cache_needs_refresh(self.src, self.cache))
+
+    def refresh(self, source, lock=None):
+        lines = []
+        copied = winsandbox.refresh_cache(source, self.cache, lines.append,
+                                          lock=lock)
+        return copied, lines
+
+    def test_cache_rebuilt_when_the_source_marker_changes(self):
+        # A cache copied from the IWD2EE install (same CHITIN.KEY as the
+        # vanilla copy, other files) is deleted and rebuilt, not reused.
+        install = os.path.join(self._tmp.name, 'iwd2ee')
+        self.write(install, 'CHITIN.KEY', b'KEY1', 1000)
+        self.write(install, 'IEex.dll', b'mod')
+        self.write(self.src, 'vanilla.ok', b'{"md5": "a"}')
+        self.assertEqual(self.refresh(install)[0], True)
+        self.assertTrue(os.path.exists(os.path.join(self.cache, 'IEex.dll')))
+        held = []
+
+        @contextlib.contextmanager
+        def lock():
+            held.append('vanilla')
+            yield
+
+        copied, lines = self.refresh(self.src, lock)
+        self.assertTrue(copied)
+        self.assertEqual(held, ['vanilla'])
+        self.assertTrue(any('deleting it' in l for l in lines), lines)
+        self.assertTrue(any('rebuilding the game cache' in l and self.src in l
+                            for l in lines), lines)
+        self.assertFalse(os.path.exists(os.path.join(self.cache, 'IEex.dll')))
+        self.assertEqual(winsandbox.read_source_record(self.cache),
+                         {'source': self.src,
+                          'marker_sha256': winsandbox.source_record(
+                              self.src)['marker_sha256']})
+        self.assertIsNotNone(
+            winsandbox.read_source_record(self.cache)['marker_sha256'])
+        # Current now: no copy and no lock.
+        self.assertEqual(self.refresh(self.src, lock)[0], False)
+        self.assertEqual(held, ['vanilla'])
+        # A rebuilt vanilla copy (new marker) is copied again from scratch.
+        self.write(self.cache, 'stray.txt', b'x')
+        self.write(self.src, 'vanilla.ok', b'{"md5": "a", "built": "later"}')
+        self.assertEqual(winsandbox.cache_state(self.src, self.cache),
+                         'foreign')
+        self.assertEqual(self.refresh(self.src)[0], True)
+        self.assertFalse(os.path.exists(os.path.join(self.cache,
+                                                     'stray.txt')))
+        # The same source with a changed CHITIN.KEY is only resynced.
+        self.write(self.src, 'CHITIN.KEY', b'KEY2', 2000)
+        self.assertEqual(winsandbox.cache_state(self.src, self.cache),
+                         'stale')
+        copied, lines = self.refresh(self.src)
+        self.assertTrue(copied)
+        self.assertFalse(any('deleting it' in l for l in lines), lines)
+
+    def test_cache_is_never_its_own_source(self):
+        with self.assertRaises(ValueError):
+            winsandbox.refresh_cache(self.src, self.src, lambda m: None)
 
     def test_source_without_key_is_an_error(self):
         with self.assertRaises(FileNotFoundError):
@@ -2927,6 +2989,75 @@ class LockRecorder:
                                  types.SimpleNamespace(hold=recorder.hold))
 
 
+class DefaultDataTest(unittest.TestCase):
+    """play.py's default game data is a vanilla copy, never the install."""
+
+    def isfile(self, present):
+        return lambda path: path in present
+
+    def test_linux_default_is_the_local_copy(self):
+        env = {'HOME': '/home/u'}
+        local = '/home/u/.local/share/iwd2r/game'
+        self.assertEqual(play.linux_data(env), local)
+        self.assertEqual(play.default_data(
+            'linux', env, self.isfile({local + '/CHITIN.KEY'})), local)
+        env = {'HOME': '/home/u', 'IWD2R_HOME': '/srv/iwd2r'}
+        self.assertEqual(play.default_data(
+            'linux', env, self.isfile({'/srv/iwd2r/game/chitin.key'})),
+            '/srv/iwd2r/game')
+        # An empty IWD2R_HOME counts as unset, as in gates.sh.
+        self.assertEqual(play.linux_data({'HOME': '/h', 'IWD2R_HOME': ''}),
+                         '/h/.local/share/iwd2r/game')
+
+    def test_windows_default_is_the_verified_oracle_copy(self):
+        game = oracle.ORACLE_DIR + '/game'
+        self.assertEqual(play.WINDOWS_DATA, game)
+        seen = []
+
+        def marker_ok(path):
+            seen.append(path)
+            return True
+
+        self.assertEqual(play.default_data(
+            'windows', {}, self.isfile({game + '/CHITIN.KEY'}), marker_ok),
+            game)
+        self.assertEqual(seen, [game])
+
+    def test_install_is_never_the_default(self):
+        install = '/mnt/c/Games/Icewind Dale II'
+        present = self.isfile({install + '/CHITIN.KEY'})
+        for platform in ('linux', 'windows'):
+            with self.assertRaises(SystemExit) as e:
+                play.default_data(platform, {'HOME': '/home/u'}, present,
+                                  lambda p: True)
+            self.assertNotIn(install, str(e.exception))
+
+    def test_no_vanilla_copy_message(self):
+        for platform in ('linux', 'windows'):
+            with self.assertRaises(SystemExit) as e:
+                play.default_data(platform, {'HOME': '/home/u'},
+                                  self.isfile(set()), lambda p: False)
+            text = str(e.exception)
+            self.assertIn('tools/oracle.py vanilla', text)
+            self.assertIn('rsync -a --exclude temp', text)
+            self.assertIn('IWD2_DATA', text)
+        # A Windows copy without a verified marker is not used either.
+        game = play.WINDOWS_DATA
+        with self.assertRaises(SystemExit):
+            play.default_data('windows', {},
+                              self.isfile({game + '/CHITIN.KEY'}),
+                              lambda p: False)
+
+    def test_data_and_iwd2_data_override(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with open(os.path.join(tmp, 'CHITIN.KEY'), 'wb'):
+                pass
+            for platform in ('linux', 'windows'):
+                self.assertEqual(play.resolve_data(tmp, platform, {}), tmp)
+                self.assertEqual(play.resolve_data(
+                    None, platform, {'IWD2_DATA': tmp}), tmp)
+
+
 class WinCheckoutTest(unittest.TestCase):
     def test_win_checkout_defaults(self):
         base = '/mnt/c/Users/thier/iwd2r-build'
@@ -3078,7 +3209,7 @@ class SharedLockTest(unittest.TestCase):
             available=lambda: True, VM_ROOT=vm_root,
             GAME_CACHE=vm_root + '/game', SANDBOX_LOCK=lock,
             ENABLE_HINT='',
-            refresh_cache=lambda d, c, log: events.append(
+            refresh_cache=lambda d, c, log, lock=None: events.append(
                 ('refresh', list(locks.held))),
             reset_cache_inis=lambda d, c: events.append(
                 ('reset', list(locks.held))),
@@ -3100,10 +3231,9 @@ class SharedLockTest(unittest.TestCase):
         self.assertEqual(len(rows), 2)
         names = [play.scenario_name(p) for p, _ in scenarios]
         self.assertEqual(events, [
-            ('refresh', [lock]),
-            ('reset', [lock]), ('run', names[0], [lock]),
-            ('reset', [lock]), ('run', names[1], [lock])])
-        self.assertEqual(locks.paths, [(lock, 'sandbox')] * 3)
+            ('refresh', [lock]), ('reset', [lock]), ('run', names[0], [lock]),
+            ('refresh', [lock]), ('reset', [lock]), ('run', names[1], [lock])])
+        self.assertEqual(locks.paths, [(lock, 'sandbox')] * 2)
 
 
 class SandboxReplayTest(unittest.TestCase):
