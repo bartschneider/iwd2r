@@ -457,18 +457,21 @@ class IcewindCGameEffectBeholderDispelMagic : public CGameEffect {
 public:
     IcewindCGameEffectBeholderDispelMagic(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;
 };
 
 class IcewindCGameEffectHarpyWail : public CGameEffect {
 public:
     IcewindCGameEffectHarpyWail(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;
 };
 
 class IcewindCGameEffectJackalwereGaze : public CGameEffect {
 public:
     IcewindCGameEffectJackalwereGaze(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;
 };
 
 class IcewindCGameEffectSetGlobal : public CGameEffect {
@@ -572,6 +575,7 @@ class IcewindCGameEffectAreaOfEffect : public CGameEffect {
 public:
     IcewindCGameEffectAreaOfEffect(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;
 };
 
 class IcewindCGameEffectFreeAction : public CGameEffect {
@@ -644,6 +648,7 @@ class IcewindCGameEffectProjectile : public CGameEffect {
 public:
     IcewindCGameEffectProjectile(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;
 };
 
 class IcewindCGameEffectEnergyDrain : public CGameEffect {

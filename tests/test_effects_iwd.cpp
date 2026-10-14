@@ -711,3 +711,29 @@ TEST_CASE("effects-iwd: the aura and storm effects re-queue themselves and finis
         CHECK(delayed(id) == before + 2);
     }
 }
+
+TEST_CASE("effects-iwd: gaze, wail and projectile effects finish; area of effect 1 adds its persistant effect", "[effects][data]")
+{
+    PROBE_OR_SKIP(pSprite);
+    const WORD ids[] = { ICEWIND_CGAMEEFFECT_BEHOLDERDISPELMAGIC, ICEWIND_CGAMEEFFECT_HARPYWAIL, ICEWIND_CGAMEEFFECT_JACKALWEREGAZE, ICEWIND_CGAMEEFFECT_PROJECTILE };
+    for (WORD id : ids) {
+        std::unique_ptr<CGameEffect> pEffect = Decode(pSprite, id, 0, 0);
+        CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+        CHECK(pEffect->m_done == TRUE);
+    }
+
+    CDerivedStats* pStats = pSprite->GetDerivedStats();
+    INT_PTR before = pStats->m_cRegeneratedPersistantEffectList.GetCount();
+    std::unique_ptr<CGameEffect> pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_AREAOFEFFECT, 3, 10);
+    CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+    REQUIRE(pStats->m_cRegeneratedPersistantEffectList.GetCount() == before + 1);
+    CPersistantEffect84C4B4* pAdded = dynamic_cast<CPersistantEffect84C4B4*>(pStats->m_cRegeneratedPersistantEffectList.GetTail());
+    REQUIRE(pAdded != nullptr);
+    CHECK(pAdded->field_58.count(reinterpret_cast<void*>(static_cast<INT_PTR>(pSprite->GetId()))) == 1);
+    delete pStats->m_cRegeneratedPersistantEffectList.RemoveTail();
+
+    pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_AREAOFEFFECT, 0, 10);
+    pEffect->m_sourceID = -1;
+    CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+    CHECK(pEffect->m_done == TRUE);
+}

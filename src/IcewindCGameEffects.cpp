@@ -2208,6 +2208,26 @@ CGameEffect* IcewindCGameEffectBeholderDispelMagic::Copy()
     return copy;
 }
 
+// 0x566C20
+BOOL IcewindCGameEffectBeholderDispelMagic::ApplyEffect(CGameSprite* pSprite)
+{
+    if (IcewindMisc::IsDead(pSprite) == TRUE) {
+        m_done = TRUE;
+        return TRUE;
+    }
+
+    // TODO: Incomplete (0x566C6B-0x566DF0). The original builds its cone
+    // projectile (FUN_00579B40, not ported; +0x2CE = 600, +0x2D2 = 300, its
+    // speed times 5), aims it 300 ahead of the sprite in its facing
+    // (IcewindMisc::sub_584610 and sub_5847B0), adds the effects of SpIn164
+    // at level 1 (GetSpellResrefEffects 0x586220) with SpIn164 as their
+    // source resref and this caster level, and fires it.
+
+    m_done = TRUE;
+
+    return TRUE;
+}
+
 // -----------------------------------------------------------------------------
 
 // 0x4A04C0
@@ -2226,6 +2246,31 @@ CGameEffect* IcewindCGameEffectHarpyWail::Copy()
     return copy;
 }
 
+// 0x566E10
+BOOL IcewindCGameEffectHarpyWail::ApplyEffect(CGameSprite* pSprite)
+{
+    if (IcewindMisc::IsDead(pSprite) == TRUE) {
+        m_done = TRUE;
+        return TRUE;
+    }
+
+    CGameEffect* copy = Copy();
+    copy->m_duration = 7;
+    // NOTE: The duration type is the WORD constant at 0x8491B0 (4).
+    copy->m_durationType = 4;
+    pSprite->AddEffect(copy, CGameAIBase::EFFECT_LIST_TIMED, TRUE, TRUE);
+
+    // TODO: Incomplete. The original builds a CProjectileArea of type 300
+    // (0x56EDD0, not ported), names its sound (the string at 0x8ACB70 into
+    // its +0x4F6 string), adds the effects of SpIn166 at level 1
+    // (GetSpellResrefEffects 0x586220) with SpIn166 as their source resref
+    // and this caster level, and fires it at the sprite.
+
+    m_done = TRUE;
+
+    return TRUE;
+}
+
 // -----------------------------------------------------------------------------
 
 // 0x4A05B0
@@ -2242,6 +2287,33 @@ CGameEffect* IcewindCGameEffectJackalwereGaze::Copy()
     delete effect;
     copy->CopyFromBase(this);
     return copy;
+}
+
+// 0x567040
+BOOL IcewindCGameEffectJackalwereGaze::ApplyEffect(CGameSprite* pSprite)
+{
+    if (IcewindMisc::IsDead(pSprite) == TRUE) {
+        m_done = TRUE;
+        return TRUE;
+    }
+
+    CGameEffect* copy = Copy();
+    copy->m_duration = 7;
+    // NOTE: The duration type is the WORD constant at 0x8491B0 (4).
+    copy->m_durationType = 4;
+    pSprite->AddEffect(copy, CGameAIBase::EFFECT_LIST_TIMED, TRUE, TRUE);
+
+    CGameEffect* pString = IcewindMisc::CreateEffectDisplayString(pSprite, 26939, 0, 0);
+    pSprite->AddEffect(pString, CGameAIBase::EFFECT_LIST_TIMED, TRUE, TRUE);
+
+    // TODO: Incomplete. The original builds a CProjectileArea of type 300
+    // (0x56EDD0, not ported), adds the effects of SpIn179 at level 1
+    // (GetSpellResrefEffects 0x586220) with SpIn179 as their source resref,
+    // and fires it at the sprite.
+
+    m_done = TRUE;
+
+    return TRUE;
 }
 
 // -----------------------------------------------------------------------------
@@ -3537,6 +3609,79 @@ CGameEffect* IcewindCGameEffectAreaOfEffect::Copy()
     return copy;
 }
 
+// 0x569470
+BOOL IcewindCGameEffectAreaOfEffect::ApplyEffect(CGameSprite* pSprite)
+{
+    if (IcewindMisc::IsDead(pSprite) == TRUE) {
+        m_done = TRUE;
+        return TRUE;
+    }
+
+    switch (m_dwFlags) {
+    case 0:
+    case 2: {
+            CGameObject* pSource;
+            BYTE rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(m_sourceID,
+                CGameObjectArray::THREAD_ASYNCH,
+                &pSource,
+                INFINITE);
+            if (rc == CGameObjectArray::SUCCESS) {
+                // TODO: Incomplete. The original builds a CProjectileArea of
+                // type m_effectAmount (0x56EDD0, not ported); for type 2 it
+                // keeps the sprite out of its targets (FUN_004C45A0 inserts
+                // the sprite id into the projectile's set); it adds the
+                // effects of spell m_res at level 1 from the source
+                // (GetSpellResrefEffects 0x586220) with m_res as their source
+                // resref, and fires it from the source at the sprite.
+
+                g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(m_sourceID,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    INFINITE);
+                m_done = TRUE;
+            } else {
+                m_done = TRUE;
+            }
+        break;
+    }
+    case 1:
+    case 3: {
+            if (m_secondaryType != 0) {
+                m_special = g_pBaldurChitin->GetObjectGame()->GetWorldTimer()->m_gameTime;
+            }
+
+            CPersistantEffect84C4B4* pEffect;
+            // NOTE: The duration type is the WORD constant at 0x8491AA (1).
+            if (m_durationType == 1) {
+                pEffect = new CPersistantEffect84C4B4(m_res.GetResRefStr(),
+                    m_effectAmount,
+                    105,
+                    m_special,
+                    0);
+            } else {
+                pEffect = new CPersistantEffect84C4B4(m_res.GetResRefStr(),
+                    m_effectAmount,
+                    105,
+                    m_special,
+                    m_duration);
+            }
+
+            pEffect->m_sourceID = m_sourceID;
+            strcpy(reinterpret_cast<char*>(pEffect->field_29), m_sourceRes.GetResRefStr());
+
+            if (m_dwFlags == 3) {
+                // NOTE: Inlined `std::set::insert` (FUN_004C54E0); the set
+                // holds the ids of the sprites it leaves out.
+                pEffect->field_58.insert(reinterpret_cast<void*>(static_cast<INT_PTR>(pSprite->GetId())));
+            }
+
+            pSprite->GetDerivedStats()->m_cRegeneratedPersistantEffectList.AddTail(pEffect);
+        break;
+    }
+    }
+
+    return TRUE;
+}
+
 // -----------------------------------------------------------------------------
 
 // 0x4A14B0
@@ -4012,6 +4157,36 @@ CGameEffect* IcewindCGameEffectProjectile::Copy()
     delete effect;
     copy->CopyFromBase(this);
     return copy;
+}
+
+// 0x56A730
+BOOL IcewindCGameEffectProjectile::ApplyEffect(CGameSprite* pSprite)
+{
+    CGameObject* pSource;
+    BYTE rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(m_sourceID,
+        CGameObjectArray::THREAD_ASYNCH,
+        &pSource,
+        INFINITE);
+    if (rc != CGameObjectArray::SUCCESS) {
+        m_done = TRUE;
+        return TRUE;
+    }
+
+    // TODO: Incomplete (0x56A79D-0x56A88A). The original decodes projectile
+    // m_dwFlags + 1 for the sprite (CProjectile_DecodeProjectile 0x51EAF0,
+    // not ported), adds the effects of spell m_res at level 1 from the
+    // source (GetSpellResrefEffects 0x586220) with m_res as their source
+    // resref, this target point and caster level, and fires it from the
+    // source at the sprite.
+    (void)pSprite;
+
+    g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(m_sourceID,
+        CGameObjectArray::THREAD_ASYNCH,
+        INFINITE);
+
+    m_done = TRUE;
+
+    return TRUE;
 }
 
 // -----------------------------------------------------------------------------
