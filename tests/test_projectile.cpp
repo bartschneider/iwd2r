@@ -8,6 +8,7 @@
 #include "CInfGame.h"
 #include "CMessage.h"
 #include "CProjectile.h"
+#include "CProjectileSpellHit.h"
 #include "CScreenCreateChar.h"
 #include "CScreenWorld.h"
 #include "ScreenLayout.h"
@@ -446,6 +447,84 @@ TEST_CASE("projectile: CMessageFireProjectile runs without a service provider an
 
     handler.AsynchronousUpdate();
     CHECK(handler.m_messageList.IsEmpty());
+
+    ClearMessages();
+}
+
+TEST_CASE("projectile: the spell hit decoder builds the school's animation, sound and glow", "[projectile][data]")
+{
+    PROBE_OR_SKIP(pSprite);
+    ClearMessages();
+
+    INT nTimed = pSprite->m_timedEffectList.GetCount();
+    CProjectile* pProjectile = CProjectile::DecodeSpellHitProjectile(1, pSprite, FALSE);
+    CProjectileSpellHit* pSpellHit = dynamic_cast<CProjectileSpellHit*>(pProjectile);
+    REQUIRE(pSpellHit != nullptr);
+    CHECK(pSpellHit->m_fireSoundRef == "EFF_M02");
+    CHECK(pSpellHit->m_bPickRandomSequence == TRUE);
+    CHECK(pSpellHit->m_bDestroyOnEndOfSequence == TRUE);
+    CHECK(pSpellHit->m_bHasHeight == FALSE);
+    CHECK(pSprite->m_timedEffectList.GetCount() >= nTimed);
+    delete pSpellHit;
+
+    pProjectile = CProjectile::DecodeSpellHitProjectile(1, NULL, TRUE);
+    pSpellHit = dynamic_cast<CProjectileSpellHit*>(pProjectile);
+    REQUIRE(pSpellHit != nullptr);
+    CHECK(pSpellHit->m_fireSoundRef == "EFF_P01");
+    delete pSpellHit;
+
+    pProjectile = CProjectile::DecodeSpellHitProjectile(74, NULL, FALSE);
+    pSpellHit = dynamic_cast<CProjectileSpellHit*>(pProjectile);
+    REQUIRE(pSpellHit != nullptr);
+    CHECK(pSpellHit->m_bDrawBehind == TRUE);
+    CHECK(pSpellHit->m_bLoopingSequence == TRUE);
+    CHECK(pSpellHit->m_nLoopingSequence == 1);
+    CHECK(pSpellHit->m_nLoopCount == 0xA5);
+    CHECK(pSpellHit->m_bPickRandomSequence == FALSE);
+    CHECK(pSpellHit->m_bDestroyOnEndOfSequence == FALSE);
+    delete pSpellHit;
+
+    pProjectile = CProjectile::DecodeSpellHitProjectile(0, NULL, FALSE);
+    CHECK(dynamic_cast<CProjectile84D8B8*>(pProjectile) != nullptr);
+    delete pProjectile;
+
+    // DecodeProjectile hands a type above 0x1000 to the spell hit decoder.
+    pProjectile = CProjectile::DecodeProjectile(0x1002, NULL, 0);
+    CHECK(dynamic_cast<CProjectileSpellHit*>(pProjectile) != nullptr);
+    CHECK(pProjectile->m_projectileType == 0x1001);
+    delete pProjectile;
+
+    ClearMessages();
+}
+
+TEST_CASE("projectile: a fired spell hit plays in the area and removes itself at the end", "[projectile][data]")
+{
+    PROBE_OR_SKIP(pSprite);
+    ClearMessages();
+
+    CProjectile* pProjectile = CProjectile::DecodeSpellHitProjectile(9, NULL, FALSE);
+    REQUIRE(pProjectile != nullptr);
+    pProjectile->m_targetId = pSprite->GetId();
+    pProjectile->Fire(pSprite->GetArea(), pSprite->GetId(), pSprite->GetId(), pSprite->GetPos(), 0, 0);
+
+    LONG id = pProjectile->GetId();
+    REQUIRE(id != CGameObjectArray::INVALID_INDEX);
+    CHECK(pProjectile->GetPos().x == pSprite->GetPos().x);
+    CHECK(pProjectile->GetPos().y == pSprite->GetPos().y + 1);
+    CHECK(pProjectile->GetArea() == pSprite->GetArea());
+
+    CGameObjectArray* pArray = g_pBaldurChitin->GetObjectGame()->GetObjectArray();
+    bool removed = false;
+    for (int frame = 0; frame < 2000 && !removed; frame++) {
+        CGameObject* pObject;
+        if (pArray->GetShare(id, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) != CGameObjectArray::SUCCESS) {
+            removed = true;
+            break;
+        }
+        pArray->ReleaseShare(id, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+        pObject->AIUpdate();
+    }
+    CHECK(removed);
 
     ClearMessages();
 }

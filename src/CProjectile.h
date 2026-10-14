@@ -28,6 +28,8 @@ public:
     LONG DetermineHeight(CGameSprite* pSprite);
     SHORT GetDirection(CPoint target);
     void PlaySound(CResRef resRef, BOOL loop, BOOL fireAndForget);
+    static void GetSourcePosition(LONG nObjectId, CPoint& pt, BOOLEAN bLaunchOffset);
+    static SHORT GetLaunchOffset(CGameSprite* pSprite);
 
     /* 006E */ WORD m_projectileType;
     /* 0070 */ SHORT m_speed;

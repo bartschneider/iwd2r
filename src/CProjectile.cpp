@@ -1,14 +1,18 @@
 #include "CProjectile.h"
 
 #include "CBaldurChitin.h"
+#include "CGameContainer.h"
+#include "CGameDoor.h"
 #include "CGameEffect.h"
 #include "CGameSprite.h"
+#include "CGameTrigger.h"
 #include "CInfGame.h"
 #include "CMessage.h"
 #include "CUtil.h"
 #include "IcewindCVisualEffect.h"
 
 #include <list>
+#include <math.h>
 
 // 0x529490
 CProjectile::CProjectile()
@@ -88,6 +92,13 @@ CProjectile* CProjectile::DecodeProjectile(WORD nProjectileType, CGameAIBase* pS
 
     if (nProjectileType > 0x1000) {
         pProjectile = DecodeSpellHitProjectile(nProjectileType - 0x1001, NULL, FALSE);
+        if (pProjectile == NULL) {
+            // NOTE: The original writes the type through the NULL that
+            // DecodeSpellHitProjectile returns for a type it does not know
+            // (and, here, for the shaft and sunray types not ported yet).
+            // Bounded (ruling P4-10): the instant projectile takes its place.
+            pProjectile = new CProjectile84D8B8();
+        }
         pProjectile->m_projectileType = nProjectileType - 1;
         return pProjectile;
     }
@@ -120,22 +131,6 @@ CProjectile* CProjectile::DecodeProjectile(WORD nProjectileType, CGameAIBase* pS
     pProjectile->m_projectileType = nProjectileType - 1;
 
     return pProjectile;
-}
-
-// 0x560310
-CProjectile* CProjectile::DecodeSpellHitProjectile(DWORD nType, CGameSprite* pSprite, BOOLEAN bPriest)
-{
-    // TODO: Incomplete (0x560380-0x563833). Only type 0 (the instant
-    // projectile) is ported.
-    (void)pSprite;
-    (void)bPriest;
-
-    switch (nType) {
-    case 0:
-        return new CProjectile84D8B8();
-    default:
-        return NULL;
-    }
 }
 
 // 0x529F10
@@ -311,6 +306,119 @@ SHORT CProjectile::GetDirection(CPoint target)
     ptTarget.y = 4 * target.y / 3;
 
     return CGameSprite::GetDirection(ptStart, ptTarget);
+}
+
+// 0x52A640
+void CProjectile::GetSourcePosition(LONG nObjectId, CPoint& pt, BOOLEAN bLaunchOffset)
+{
+    CGameObject* pObject;
+
+    BYTE rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(nObjectId,
+        CGameObjectArray::THREAD_ASYNCH,
+        &pObject,
+        INFINITE);
+    if (rc != CGameObjectArray::SUCCESS) {
+        return;
+    }
+
+    switch (pObject->GetObjectType()) {
+    case 0x00:
+    case 0x01:
+    case 0x10:
+    case 0x20:
+    case 0x30:
+    case 0x31:
+    case 0x40:
+    case 0x50:
+        pt = pObject->GetPos();
+        break;
+    case 0x11:
+        pt = static_cast<CGameContainer*>(pObject)->m_posTrapOrigin;
+        break;
+    case 0x21:
+        pt.x = static_cast<CGameDoor*>(pObject)->m_posXTrapOrigin;
+        pt.y = static_cast<CGameDoor*>(pObject)->m_posYTrapOrigin;
+        break;
+    case 0x41:
+        pt = static_cast<CGameTrigger*>(pObject)->m_posTrapOrigin;
+        break;
+    default:
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\CProjectile.cpp
+        // __LINE__: 3590
+        UTIL_ASSERT(FALSE);
+        break;
+    }
+
+    if (bLaunchOffset && pObject->GetObjectType() == CGameObject::TYPE_SPRITE) {
+        CGameSprite* pSprite = static_cast<CGameSprite*>(pObject);
+        SHORT nOffset;
+
+        switch (pSprite->m_nDirection) {
+        case 0:
+        case 1:
+            pt.y += pSprite->GetAnimation()->GetEllipseRect().bottom >> 1;
+            break;
+        case 2:
+        case 3:
+            nOffset = GetLaunchOffset(pSprite);
+            pt.x += nOffset * -2;
+            pt.y += nOffset * 2;
+            break;
+        case 4:
+        case 5:
+            pt.x += pSprite->GetAnimation()->GetEllipseRect().right * -2;
+            pt.y += 1;
+            break;
+        case 6:
+        case 7:
+            nOffset = GetLaunchOffset(pSprite);
+            pt.x += nOffset * -2;
+            pt.y += nOffset * -2;
+            break;
+        case 8:
+        case 9:
+            pt.y += pSprite->GetAnimation()->GetEllipseRect().bottom * -2;
+            break;
+        case 10:
+        case 11:
+            nOffset = GetLaunchOffset(pSprite);
+            pt.x += nOffset * 2;
+            pt.y += nOffset * -2;
+            break;
+        case 12:
+        case 13:
+            pt.x += pSprite->GetAnimation()->GetEllipseRect().right * 2;
+            pt.y += 1;
+            break;
+        case 14:
+        case 15:
+            nOffset = GetLaunchOffset(pSprite);
+            pt.x += nOffset * 2;
+            pt.y += nOffset * 2;
+            break;
+        default:
+            // __FILE__: C:\Projects\Icewind2\src\Baldur\CProjectile.cpp
+            // __LINE__: 3664
+            UTIL_ASSERT(FALSE);
+            break;
+        }
+    }
+
+    g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(nObjectId,
+        CGameObjectArray::THREAD_ASYNCH,
+        INFINITE);
+}
+
+// NOTE: Inlined in GetSourcePosition (0x52A79A-0x52A889): the distance to
+// the sprite's ellipse along a diagonal, from its two radii. The products
+// are 16-bit, as in the original.
+SHORT CProjectile::GetLaunchOffset(CGameSprite* pSprite)
+{
+    const CRect& rEllipse = pSprite->GetAnimation()->GetEllipseRect();
+    SHORT a = static_cast<SHORT>(static_cast<SHORT>(rEllipse.right) * static_cast<SHORT>(rEllipse.right));
+    SHORT b = static_cast<SHORT>(static_cast<SHORT>(rEllipse.bottom) * static_cast<SHORT>(rEllipse.bottom));
+    LONG nProduct = (a * b) / (b + a);
+    return static_cast<SHORT>(static_cast<LONG>(sqrt(static_cast<double>(nProduct))));
 }
 
 // 0x52A4E0
