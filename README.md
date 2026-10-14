@@ -20,7 +20,7 @@ Bring your own copy of Icewind Dale II: Complete from GOG. The DRM-free GOG vers
 | 5 | IEex native layer and Lua API | Not started |
 | 6 | Remaster renderer | Not started |
 
-Current numbers: four presets build; 322 tests pass on Linux; character generation matches the original field for field through party formation, and a new party reaches the start area headlessly on Linux and in Windows Sandbox.
+Current numbers: four presets build; 317 tests pass on Linux; character generation matches the original field for field through party formation, and a new party reaches the start area headlessly on Linux and in Windows Sandbox.
 
 Engine sites that still truncate pointers to 32 bits on 64-bit targets are listed for project 3 in [docs/64bit-cast-sites.md](docs/64bit-cast-sites.md).
 
