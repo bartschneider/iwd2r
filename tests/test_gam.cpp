@@ -5,7 +5,9 @@
 #include "CGameArea.h"
 #include "CGameSprite.h"
 #include "CInfGame.h"
+#include "CMemINI.h"
 #include "CScreenCreateChar.h"
+#include "CSpawn.h"
 #include "CVisibility.h"
 #include "ScreenLayout.h"
 #include "data_view.h"
@@ -697,6 +699,81 @@ TEST_CASE("vis: the party member in AR1000 explores its vision ellipse and moves
     std::vector<BYTE> before(vis.m_pMap, vis.m_pMap + vis.m_nMapSize);
     vis.UpDate(moved, start, 0x7FFF, pSprite->GetVisibleTerrainTable());
     CHECK(std::equal(before.begin(), before.end(), vis.m_pMap));
+}
+
+// INI spawns (CSpawn.cpp): CSpawn::ExecuteSpawn on AR1000 with a section
+// built in memory. The area's difficulty band comes from the party level
+// (header byte 0x4E) against the two bounds (0x4C, 0x4D); a spawn whose
+// area_diff_N key turns its band off spawns nothing and asserts nothing
+// (Review Focus 5); with the band on it creates create_qty creatures at the
+// spawn point.
+namespace {
+
+int ObjectsInArea(CGameArea* pArea)
+{
+    int count = 0;
+    CTypedPtrList<CPtrList, int*>* lists[] = { &pArea->m_lVertSort, &pArea->m_lVertSortBack, &pArea->m_lVertSortFlight,
+        &pArea->m_lVertSortAdd, &pArea->m_lVertSortBackAdd, &pArea->m_lVertSortFlightAdd };
+    for (CTypedPtrList<CPtrList, int*>* list : lists) {
+        count += static_cast<int>(list->GetCount());
+    }
+    return count;
+}
+
+}
+
+TEST_CASE("spawn: an INI spawn whose difficulty band is off spawns nothing; on, it spawns its quantity", "[spawn][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CGameSprite* pSprite = NewGameWithOneCharacter(cre, "Probe");
+    pGame->UpdateCharacterSlots();
+    pGame->SetupCharacters(FALSE);
+    CGameArea* pArea = pSprite->GetArea();
+    REQUIRE(pArea != NULL);
+
+    // Band 1: the party level below the first bound.
+    pArea->m_header.field_4C = 4;
+    pArea->m_header.field_4D = 8;
+    pArea->m_header.field_4E = 1;
+
+    // A point well away from the party (2414,897), out of its sight.
+    CMemINISection section(CString("probe"));
+    section.Set(CString("cre_file"), CString("10JON"));
+    section.Set(CString("create_qty"), CString("2"));
+    section.Set(CString("spawn_point"), CString("[1100.700:4]"));
+    section.Set(CString("area_diff_1"), CString("0"));
+
+    const int before = ObjectsInArea(pArea);
+    {
+        CSpawn spawn(&section);
+        REQUIRE(spawn.DataIsValid);
+        CHECK(spawn.ExecuteSpawn(pArea) == 0);
+        CHECK(ObjectsInArea(pArea) == before);
+
+        // Bands 2 and 3 stay on (their keys are absent).
+        pArea->m_header.field_4E = 6;
+        CHECK(spawn.ExecuteSpawn(pArea) == 2);
+        CHECK(ObjectsInArea(pArea) == before + 2);
+    }
+
+    section.Set(CString("area_diff_3"), CString("0"));
+    pArea->m_header.field_4E = 30;
+    CSpawn spawn(&section);
+    REQUIRE(spawn.DataIsValid);
+    CHECK(spawn.ExecuteSpawn(pArea) == 0);
+    CHECK(ObjectsInArea(pArea) == before + 2);
 }
 
 #ifndef _WIN32
