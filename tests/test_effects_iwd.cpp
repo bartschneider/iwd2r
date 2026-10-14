@@ -9,6 +9,7 @@
 #include "CMessage.h"
 #include "CScreenCreateChar.h"
 #include "CScreenWorld.h"
+#include "CVariableHash.h"
 #include "IcewindCGameEffects.h"
 #include "ScreenLayout.h"
 #include "data_view.h"
@@ -421,4 +422,92 @@ TEST_CASE("effects-iwd: vampiric touch (241) with an unknown source only finishe
     CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
     CHECK(pEffect->m_done == TRUE);
     CHECK(pSprite->GetBaseStats()->m_hitPoints == hp);
+}
+
+TEST_CASE("effects-iwd: death ward (407) sets its state, icon and death immunity once", "[effects][data]")
+{
+    PROBE_OR_SKIP(pSprite);
+    CDerivedStats* pStats = pSprite->GetDerivedStats();
+    pStats->m_spellStates.reset(SPLSTATE_DEATH_WARD);
+    pStats->m_naturalImmunities.erase(ICEWIND_CGAMEEFFECT_MAGIC_DEATH);
+    std::unique_ptr<CGameEffect> pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_DEATHWARD, 0, 0);
+    pEffect->m_done = TRUE;
+    CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+    CHECK(pStats->m_spellStates.test(SPLSTATE_DEATH_WARD));
+    CHECK(pStats->m_naturalImmunities.count(ICEWIND_CGAMEEFFECT_MAGIC_DEATH) == 1);
+    CHECK(HasPortraitIcon(pSprite, 87));
+    CHECK(pEffect->m_done == FALSE);
+    // Already warded: returns before touching m_done.
+    pEffect->m_done = TRUE;
+    CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+    CHECK(pEffect->m_done == TRUE);
+    pStats->m_spellStates.reset(SPLSTATE_DEATH_WARD);
+    pStats->m_naturalImmunities.erase(ICEWIND_CGAMEEFFECT_MAGIC_DEATH);
+}
+
+TEST_CASE("effects-iwd: persistant effect (434) adds a CPersistantEffect84C4C4 with the source", "[effects][data]")
+{
+    PROBE_OR_SKIP(pSprite);
+    CDerivedStats* pStats = pSprite->GetDerivedStats();
+    INT_PTR before = pStats->m_cRegeneratedPersistantEffectList.GetCount();
+    std::unique_ptr<CGameEffect> pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_PERSISTANTEFFECT, 0, 2);
+    pEffect->m_sourceRes = "SPWI123";
+    CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+    REQUIRE(pStats->m_cRegeneratedPersistantEffectList.GetCount() == before + 1);
+    CPersistantEffect84C4C4* pAdded = dynamic_cast<CPersistantEffect84C4C4*>(pStats->m_cRegeneratedPersistantEffectList.GetTail());
+    REQUIRE(pAdded != nullptr);
+    CHECK(pAdded->m_sourceID == pSprite->GetId());
+    CHECK(strncmp(reinterpret_cast<const char*>(pAdded->field_29), "SPWI123", 8) == 0);
+    delete pStats->m_cRegeneratedPersistantEffectList.RemoveTail();
+}
+
+TEST_CASE("effects-iwd: restoration (447) picks the lowering ability effects", "[effects][data]")
+{
+    PROBE_OR_SKIP(pSprite);
+    std::unique_ptr<CGameEffect> pRestoration = Decode(pSprite, ICEWIND_CGAMEEFFECT_RESTORATION, 0, 0);
+    IcewindCGameEffectRestoration* pThis = static_cast<IcewindCGameEffectRestoration*>(pRestoration.get());
+    // A cumulative STR loss is picked, a gain is not, a set below the
+    // current score is picked; a different opcode never.
+    std::unique_ptr<CGameEffect> pStr = Decode(pSprite, CGAMEEFFECT_STR, 0, -2);
+    CHECK(pThis->sub_56B340(pStr.get(), pSprite) == TRUE);
+    pStr = Decode(pSprite, CGAMEEFFECT_STR, 1, 3);
+    pSprite->m_tempStats.m_nSTR = 10;
+    CHECK(pThis->sub_56B340(pStr.get(), pSprite) == TRUE);
+    pStr = Decode(pSprite, CGAMEEFFECT_STR, 2, 50);
+    CHECK(pThis->sub_56B340(pStr.get(), pSprite) == TRUE);
+    std::unique_ptr<CGameEffect> pOther = Decode(pSprite, CGAMEEFFECT_HASTE, 0, -2);
+    CHECK(pThis->sub_56B340(pOther.get(), pSprite) == FALSE);
+    CHECK(pRestoration->ApplyEffect(pSprite) == TRUE);
+    CHECK(pRestoration->m_done == TRUE);
+}
+
+TEST_CASE("effects-iwd: set global (296) sets RETURN_TO_LONELYWOOD and broadcasts it", "[effects][data]")
+{
+    PROBE_OR_SKIP(pSprite);
+    ClearMessages();
+    std::unique_ptr<CGameEffect> pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_SETGLOBAL, 0, 7);
+    CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+    CHECK(pEffect->m_done == TRUE);
+    CVariable* pVariable = g_pBaldurChitin->GetObjectGame()->GetVariables()->FindKey(CString("RETURN_TO_LONELYWOOD"));
+    REQUIRE(pVariable != NULL);
+    CHECK(pVariable->m_intValue == 7);
+    REQUIRE(g_pBaldurChitin->m_cMessageHandler.m_messageList.GetCount() == 1);
+    CHECK(dynamic_cast<CMessageSetVariable*>(g_pBaldurChitin->m_cMessageHandler.m_messageList.GetHead()) != nullptr);
+    ClearMessages();
+}
+
+TEST_CASE("effects-iwd: mace of disruption (284) and rod of smiting (291) spare a human", "[effects][data]")
+{
+    PROBE_OR_SKIP(pSprite);
+    ClearMessages();
+    // The party member is no undead, tanar'ri or golem: nothing is queued.
+    for (int n = 0; n < 20; n++) {
+        std::unique_ptr<CGameEffect> pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_MACEOFDISRUPTION, 0, 0);
+        CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+        CHECK(pEffect->m_done == TRUE);
+        pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_RODOFSMITING, 0, 0);
+        CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+        CHECK(pEffect->m_done == TRUE);
+    }
+    CHECK(g_pBaldurChitin->m_cMessageHandler.m_messageList.IsEmpty());
 }

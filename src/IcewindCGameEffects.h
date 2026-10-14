@@ -407,6 +407,7 @@ class IcewindCGameEffectMaceOfDisruption : public CGameEffect {
 public:
     IcewindCGameEffectMaceOfDisruption(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;
 };
 
 class IcewindCGameEffectRangerTracking : public CGameEffect {
@@ -433,6 +434,7 @@ class IcewindCGameEffectRodOfSmiting : public CGameEffect {
 public:
     IcewindCGameEffectRodOfSmiting(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;
 };
 
 class IcewindCGameEffectMagicalRest : public CGameEffect {
@@ -464,6 +466,7 @@ class IcewindCGameEffectSetGlobal : public CGameEffect {
 public:
     IcewindCGameEffectSetGlobal(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;
 };
 
 class IcewindCGameEffectHopelessness : public CGameEffect {
@@ -520,6 +523,7 @@ class IcewindCGameEffectDeathWard : public CGameEffect {
 public:
     IcewindCGameEffectDeathWard(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;
     void OnRemove(CGameSprite* pSprite) override;
 };
 
@@ -655,6 +659,7 @@ class IcewindCGameEffectPersistantEffect : public CGameEffect {
 public:
     IcewindCGameEffectPersistantEffect(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;
 };
 
 class IcewindCGameEffectDamageReduction : public CGameEffect {
@@ -688,6 +693,9 @@ class IcewindCGameEffectRestoration : public CGameEffect {
 public:
     IcewindCGameEffectRestoration(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;
+
+    BOOLEAN sub_56B340(CGameEffect* pEffect, CGameSprite* pSprite);
 };
 
 class IcewindCGameEffectAlicornLanceGlow : public CGameEffect {

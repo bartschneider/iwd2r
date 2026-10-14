@@ -1569,6 +1569,82 @@ CGameEffect* IcewindCGameEffectMaceOfDisruption::Copy()
     return copy;
 }
 
+// 0x566580
+BOOL IcewindCGameEffectMaceOfDisruption::ApplyEffect(CGameSprite* pSprite)
+{
+    INT nChance = 0;
+
+    if (pSprite->GetAIType().GetRace() == CAIOBJECTTYPE_R_GHOUL
+        || pSprite->GetAIType().GetRace() == CAIOBJECTTYPE_R_SKELETON
+        || pSprite->GetAIType().GetRace() == CAIOBJECTTYPE_R_UNDEAD) {
+        BYTE nLevel = pSprite->GetBaseStats()->m_characterLevel;
+        // NOTE: Level 4 has no case: a level 4 undead is never destroyed
+        // (original bug, kept).
+        if (nLevel < 4) {
+            nChance = 100;
+        } else if (nLevel == 5) {
+            nChance = 95;
+        } else if (nLevel == 6) {
+            nChance = 80;
+        } else if (nLevel == 7) {
+            nChance = 65;
+        } else if (nLevel == 8 || nLevel == 9) {
+            nChance = 50;
+        } else if (nLevel == 10) {
+            nChance = 35;
+        } else if (nLevel >= 11) {
+            nChance = 20;
+        }
+    }
+
+    if (pSprite->GetAIType().GetRace() == CAIOBJECTTYPE_R_TANARI) {
+        nChance = 5;
+    }
+
+    if (rand() % 100 < nChance) {
+        CGameObject* pSource;
+        BYTE rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(m_sourceID,
+            CGameObjectArray::THREAD_ASYNCH,
+            &pSource,
+            INFINITE);
+        if (rc == CGameObjectArray::SUCCESS) {
+            CGameEffect* pHit = IcewindMisc::CreateEffectVisualSpellHit(pSource, 84, static_cast<BYTE>(m_spellLevel), 0);
+            CMessage* message = new CMessageAddEffect(pHit, pSprite->GetId(), pSprite->GetId());
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+            ITEM_EFFECT* effect = new ITEM_EFFECT;
+            CGameEffect::ClearItemEffect(effect, CGAMEEFFECT_DEATH);
+            effect->dwFlags = 8;
+            // NOTE: The duration type is the WORD constant at 0x8491AA (1).
+            effect->durationType = 1;
+            effect->duration = 0;
+
+            CGameEffect* pDeath = CGameEffect::DecodeEffect(effect,
+                pSprite->GetPos(),
+                pSprite->GetId(),
+                CPoint(-1, -1));
+            CGameEffect* copy = pDeath->Copy();
+            copy->m_sourceID = m_sourceID;
+            message = new CMessageAddEffect(copy, pSprite->GetId(), pSprite->GetId());
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+            if (pDeath != NULL) {
+                delete pDeath;
+            }
+
+            delete effect;
+
+            g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(m_sourceID,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+        }
+    }
+
+    m_done = TRUE;
+
+    return TRUE;
+}
+
 // -----------------------------------------------------------------------------
 
 // 0x49FF20
@@ -1655,6 +1731,56 @@ CGameEffect* IcewindCGameEffectRodOfSmiting::Copy()
     delete effect;
     copy->CopyFromBase(this);
     return copy;
+}
+
+// 0x566960
+BOOL IcewindCGameEffectRodOfSmiting::ApplyEffect(CGameSprite* pSprite)
+{
+    CGameEffect* pEffect;
+    CMessage* message;
+
+    if (IcewindMisc::IsGolem(pSprite) == TRUE) {
+        if (rand() % 100 < 5) {
+            ITEM_EFFECT* effect = new ITEM_EFFECT;
+            CGameEffect::ClearItemEffect(effect, CGAMEEFFECT_DEATH);
+            effect->dwFlags = 8;
+            // NOTE: The duration type is the WORD constant at 0x8491AA (1).
+            effect->durationType = 1;
+            effect->duration = 0;
+
+            CGameEffect* pDeath = CGameEffect::DecodeEffect(effect,
+                pSprite->GetPos(),
+                pSprite->GetId(),
+                CPoint(-1, -1));
+            pDeath->m_flags |= 0x2;
+            CGameEffect* copy = pDeath->Copy();
+            copy->m_sourceID = m_sourceID;
+            message = new CMessageAddEffect(copy, pSprite->GetId(), pSprite->GetId());
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+            if (pDeath != NULL) {
+                delete pDeath;
+            }
+
+            delete effect;
+        } else {
+            pEffect = IcewindMisc::sub_585410(pSprite, 1, 8, 3, 0, 0);
+            pEffect->m_flags |= 0x2;
+            pEffect->m_sourceRes = m_sourceRes;
+            message = new CMessageAddEffect(pEffect, pSprite->GetId(), pSprite->GetId());
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        }
+    } else if (pSprite->GetAIType().GetRace() == CAIOBJECTTYPE_R_TANARI && rand() % 100 < 5) {
+        pEffect = IcewindMisc::sub_585410(pSprite, 8, 3, 0, 0, 0);
+        pEffect->m_flags |= 0x2;
+        pEffect->m_sourceRes = m_sourceRes;
+        message = new CMessageAddEffect(pEffect, pSprite->GetId(), pSprite->GetId());
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+    }
+
+    m_done = TRUE;
+
+    return TRUE;
 }
 
 // -----------------------------------------------------------------------------
@@ -1764,6 +1890,42 @@ CGameEffect* IcewindCGameEffectSetGlobal::Copy()
     delete effect;
     copy->CopyFromBase(this);
     return copy;
+}
+
+// 0x567230
+BOOL IcewindCGameEffectSetGlobal::ApplyEffect(CGameSprite* pSprite)
+{
+    CString sName;
+
+    if (m_dwFlags == 0) {
+        sName = "RETURN_TO_LONELYWOOD";
+    } else {
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\IcewindCGameEffects.cpp
+        // __LINE__: 5535
+        UTIL_ASSERT(FALSE);
+    }
+
+    CVariable var;
+
+    CVariable* pVariable = g_pBaldurChitin->GetObjectGame()->GetVariables()->FindKey(sName);
+    if (pVariable != NULL) {
+        pVariable->m_intValue = m_effectAmount;
+    } else {
+        var.SetName(sName);
+        var.m_intValue = m_effectAmount;
+        g_pBaldurChitin->GetObjectGame()->m_variables.AddKey(var);
+    }
+
+    CMessage* message = new CMessageSetVariable(CString("GLOBAL"),
+        sName,
+        m_effectAmount,
+        pSprite->GetId(),
+        pSprite->GetId());
+    g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+    m_done = TRUE;
+
+    return TRUE;
 }
 
 // -----------------------------------------------------------------------------
@@ -2655,6 +2817,30 @@ CGameEffect* IcewindCGameEffectDeathWard::Copy()
     return copy;
 }
 
+// 0x569090
+BOOL IcewindCGameEffectDeathWard::ApplyEffect(CGameSprite* pSprite)
+{
+    if (m_secondaryType != 0) {
+        DisplayStringRef(pSprite, 1309);
+    }
+
+    if (pSprite->GetDerivedStats()->m_spellStates.test(SPLSTATE_DEATH_WARD)) {
+        return TRUE;
+    }
+
+    pSprite->GetDerivedStats()->m_spellStates.set(SPLSTATE_DEATH_WARD, true);
+
+    // NOTE: Uninline.
+    AddPortraitIcon(pSprite, 87);
+
+    // NOTE: Inlined `std::set::insert` (0x44AB10).
+    pSprite->GetDerivedStats()->m_naturalImmunities.insert(ICEWIND_CGAMEEFFECT_MAGIC_DEATH);
+
+    m_done = FALSE;
+
+    return TRUE;
+}
+
 // 0x4BAF90
 void IcewindCGameEffectDeathWard::OnRemove(CGameSprite* pSprite)
 {
@@ -3491,6 +3677,34 @@ CGameEffect* IcewindCGameEffectPersistantEffect::Copy()
     return copy;
 }
 
+// 0x56AC20
+BOOL IcewindCGameEffectPersistantEffect::ApplyEffect(CGameSprite* pSprite)
+{
+    if (m_secondaryType != 0) {
+        m_special = g_pBaldurChitin->GetObjectGame()->GetWorldTimer()->m_gameTime;
+    }
+
+    CPersistantEffect84C4C4* pEffect;
+    // NOTE: The duration type is the WORD constant at 0x8491AA (1).
+    if (m_durationType == 1) {
+        pEffect = new CPersistantEffect84C4C4(m_res.GetResRefStr(),
+            15 * m_effectAmount,
+            m_special,
+            0);
+    } else {
+        pEffect = new CPersistantEffect84C4C4(m_res.GetResRefStr(),
+            15 * m_effectAmount,
+            m_special,
+            m_duration);
+    }
+
+    pEffect->m_sourceID = m_sourceID;
+    strcpy(reinterpret_cast<char*>(pEffect->field_29), m_sourceRes.GetResRefStr());
+    pSprite->GetDerivedStats()->m_cRegeneratedPersistantEffectList.AddTail(pEffect);
+
+    return TRUE;
+}
+
 // -----------------------------------------------------------------------------
 
 // 0x4A20E0
@@ -3624,6 +3838,113 @@ CGameEffect* IcewindCGameEffectRestoration::Copy()
     delete effect;
     copy->CopyFromBase(this);
     return copy;
+}
+
+// 0x56B240
+BOOL IcewindCGameEffectRestoration::ApplyEffect(CGameSprite* pSprite)
+{
+    if ((pSprite->GetDerivedStats()->m_generalState & STATE_DISEASED) != 0) {
+        RemoveAllOfType(pSprite, CGAMEEFFECT_DISEASE, 13);
+        RemoveAllOfType(pSprite, CGAMEEFFECT_DISEASE, 14);
+        RemoveAllOfType(pSprite, CGAMEEFFECT_DISEASE, 15);
+        RemoveAllOfType(pSprite, CGAMEEFFECT_DISEASE, 4);
+        RemoveAllOfType(pSprite, CGAMEEFFECT_DISEASE, 5);
+        RemoveAllOfType(pSprite, CGAMEEFFECT_DISEASE, 6);
+        RemoveAllOfType(pSprite, CGAMEEFFECT_DISEASE, 7);
+        RemoveAllOfType(pSprite, CGAMEEFFECT_DISEASE, 8);
+        RemoveAllOfType(pSprite, CGAMEEFFECT_DISEASE, 9);
+    }
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\IcewindCGameEffects.cpp
+    // __LINE__: 7075
+    UTIL_ASSERT(pSprite != NULL);
+
+    POSITION pos = pSprite->GetTimedEffectList()->GetHeadPosition();
+    while (pos != NULL) {
+        CGameEffect* pEffect = pSprite->GetTimedEffectList()->GetNext(pos);
+        if (sub_56B340(pEffect, pSprite) == TRUE) {
+            pSprite->GetTimedEffectList()->sub_4C0830(pEffect);
+        }
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    pGame->UpdatePortrait(pGame->GetCharacterPortraitNum(pSprite->GetId()), 1);
+
+    m_done = TRUE;
+
+    return TRUE;
+}
+
+// 0x56B340
+BOOLEAN IcewindCGameEffectRestoration::sub_56B340(CGameEffect* pEffect, CGameSprite* pSprite)
+{
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\IcewindCGameEffects.cpp
+    // __LINE__: 7096
+    UTIL_ASSERT(pEffect != NULL);
+
+    if (pEffect->m_effectID != CGAMEEFFECT_STR
+        && pEffect->m_effectID != CGAMEEFFECT_DEX
+        && pEffect->m_effectID != CGAMEEFFECT_CON
+        && pEffect->m_effectID != CGAMEEFFECT_INT
+        && pEffect->m_effectID != CGAMEEFFECT_WIS
+        && pEffect->m_effectID != CGAMEEFFECT_CHR) {
+        return FALSE;
+    }
+
+    LONG nStat;
+    switch (pEffect->m_dwFlags) {
+    case 0:
+        if (pEffect->m_effectAmount < 0) {
+            return TRUE;
+        }
+        // FALLTHROUGH
+    case 1:
+        switch (pEffect->m_effectID) {
+        case CGAMEEFFECT_STR:
+            nStat = pSprite->m_tempStats.m_nSTR;
+            break;
+        case CGAMEEFFECT_DEX:
+            nStat = pSprite->m_tempStats.m_nDEX;
+            break;
+        case CGAMEEFFECT_CON:
+            nStat = pSprite->m_tempStats.m_nCON;
+            break;
+        case CGAMEEFFECT_INT:
+            nStat = pSprite->m_tempStats.m_nINT;
+            break;
+        case CGAMEEFFECT_WIS:
+            nStat = pSprite->m_tempStats.m_nWIS;
+            break;
+        case CGAMEEFFECT_CHR:
+            nStat = pSprite->m_tempStats.m_nCHR;
+            break;
+        default:
+            // __FILE__: C:\Projects\Icewind2\src\Baldur\IcewindCGameEffects.cpp
+            // __LINE__: 7123
+            UTIL_ASSERT(FALSE);
+
+            // NOTE: Unreachable (the opcode was checked above). The original
+            // compares with its stale argument, the sprite pointer.
+            nStat = 0;
+            break;
+        }
+
+        if (pEffect->m_effectAmount < nStat) {
+            return TRUE;
+        }
+        // FALLTHROUGH
+    case 2:
+        if (pEffect->m_effectAmount < 100) {
+            return TRUE;
+        }
+        break;
+    }
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\IcewindCGameEffects.cpp
+    // __LINE__: 7133
+    UTIL_ASSERT(FALSE);
+
+    return FALSE;
 }
 
 // -----------------------------------------------------------------------------
