@@ -669,7 +669,8 @@ TEST_CASE("save screen: PrintSurfaceToBmp averages surface blocks into a bottom-
     // A 5 by 4 rectangle at 10,20: column x, row y has red 10 * x + y,
     // green 100 + y, blue 7.
     auto value = [](int x, int y, int channel) -> int {
-        return channel == 0 ? 10 * x + y : channel == 1 ? 100 + y : 7;
+        return channel == 0 ? 10 * x + y : channel == 1 ? 100 + y
+                                                        : 7;
     };
     const CRect rect(10, 20, 15, 24);
     DDSURFACEDESC ddsd;
