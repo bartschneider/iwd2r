@@ -23,7 +23,10 @@ export IWD2R_AUDIO=null SDL_AUDIO_DRIVER=dummy
 # Data tests read a Linux-local copy of the vanilla game when one exists:
 # the oracle's copy on the Windows drive is locked while a sandbox replay
 # maps it, which fails every engine-starting test with "bad key file".
-# Make it with: rsync -a --exclude temp --exclude cache --exclude tempsave
+# Its icewind2.ini [Alias] paths still name the oracle copy, but the engine maps
+# every drive path into the data root (platform/fs.cpp), so a Linux run never
+# reads the Windows drive; only state written into this copy by earlier runs
+# can move the smoke hash. Make it with: rsync -a --exclude temp --exclude cache --exclude tempsave
 #   --exclude mpsave --exclude ScrnShot /mnt/c/Users/thier/iwd2r-oracle/game/ ~/.local/share/iwd2r/game/
 LINUX_DATA="${IWD2R_HOME:-$HOME/.local/share/iwd2r}/game"
 if [ -z "${IWD2_DATA:-}" ] && [ -f "$LINUX_DATA/CHITIN.KEY" ]; then export IWD2_DATA="$LINUX_DATA"; fi
