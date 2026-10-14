@@ -3034,9 +3034,244 @@ void CGameSprite::SetPath(LONG* pPath, SHORT nPath)
 // 0x6FA900
 BOOL CGameSprite::ClearBumpPath(const CPoint& start, const CPoint& goal)
 {
-    // TODO: Incomplete.
+    if (GetAIType().m_nEnemyAlly > CAIObjectType::EA_GOODCUTOFF) {
+        return FALSE;
+    }
 
-    return FALSE;
+    CSearchBitmap* pSearch = &(m_pArea->m_search);
+    CTypedPtrList<CPtrList, LONG*> targets(10);
+    BOOL bTargetsFound = FALSE;
+
+    // The squares around a bumped creature in the order they are tried:
+    // first the square in the direction of this creature's step, last the
+    // one it comes from. Index (dy + 1) * 3 + (dx + 1); 4, the creature's
+    // own square, is never tried.
+    BYTE order[9];
+    order[0] = static_cast<BYTE>((goal.x - start.x) + (goal.y - start.y) * 3 + 4);
+    order[1] = 1;
+    order[2] = 2;
+    order[3] = 3;
+    order[4] = 255;
+    order[5] = 5;
+    order[6] = 6;
+    order[7] = 7;
+    // NOTE: The original writes these two on the stack unchecked; a start
+    // and goal more than one square apart would write outside the table
+    // (the callers pass neighbouring squares). Bounded here.
+    INT nForward = (goal.y - start.y) * 3 + (goal.x - start.x) + 4;
+    if (nForward >= 0 && nForward < 9) {
+        order[nForward] = 0;
+    }
+    order[8] = static_cast<BYTE>((start.x - goal.x) + (start.y - goal.y) * 3 + 4);
+    INT nBackward = (start.y - goal.y) * 3 + (start.x - goal.x) + 4;
+    if (nBackward >= 0 && nBackward < 9) {
+        order[nBackward] = 8;
+    }
+
+    if (start.x == goal.x && start.y == goal.y) {
+        return TRUE;
+    }
+
+    SHORT nTableIndex;
+    if (pSearch->GetCost(goal, GetTerrainTable(), m_animation.GetPersonalSpace(), nTableIndex, FALSE) == CPathSearch::COST_IMPASSABLE) {
+        return FALSE;
+    }
+
+    INT radius = (m_animation.GetPersonalSpace() - 2) / 2;
+    for (SHORT dx = static_cast<SHORT>(-radius); dx <= static_cast<SHORT>(radius); dx++) {
+        if (dx + goal.x < 0 || dx + goal.x >= pSearch->m_GridSquareDimensions.cx) {
+            continue;
+        }
+
+        for (SHORT dy = static_cast<SHORT>(-radius); dy <= static_cast<SHORT>(radius); dy++) {
+            // NOTE: The original bounds the row by the width (`cmp ebp,
+            // [search+0xE6]` at 0x6FAB39), not the height.
+            if (dy + goal.y < 0 || dy + goal.y >= pSearch->m_GridSquareDimensions.cx) {
+                continue;
+            }
+
+            if (abs(dx) + abs(dy) > static_cast<SHORT>(radius) + 1) {
+                continue;
+            }
+
+            BYTE nBumps = pSearch->m_pDynamicCost[(dy + goal.y) * pSearch->m_GridSquareDimensions.cx + goal.x + dx] >> 1;
+            if (nBumps > 7) {
+                return FALSE;
+            }
+
+            if (!bTargetsFound) {
+                bTargetsFound = TRUE;
+                CPoint center(goal.x * CPathSearch::GRID_SQUARE_SIZEX + CPathSearch::GRID_SQUARE_SIZEX / 2,
+                    goal.y * CPathSearch::GRID_SQUARE_SIZEY + CPathSearch::GRID_SQUARE_SIZEY / 2);
+                m_pArea->GetAllInRange(m_posVertList,
+                    center,
+                    CAIObjectType::ANYONE,
+                    static_cast<SHORT>((m_animation.GetPersonalSpace() + 11) / 2 * CPathSearch::GRID_SQUARE_SIZEX),
+                    m_terrainTable,
+                    targets,
+                    FALSE,
+                    FALSE);
+            }
+
+            POSITION pos = targets.GetHeadPosition();
+            while (pos != NULL) {
+                if (nBumps == 0) {
+                    break;
+                }
+
+                POSITION posCurrent = pos;
+                LONG nBumpedId = static_cast<LONG>(reinterpret_cast<INT_PTR>(targets.GetNext(pos)));
+
+                CGameSprite* pBumped;
+                BYTE rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(nBumpedId,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    reinterpret_cast<CGameObject**>(&pBumped),
+                    INFINITE);
+                if (rc != CGameObjectArray::SUCCESS) {
+                    continue;
+                }
+
+                if (pBumped->field_54A8 && !pBumped->field_54B8) {
+                    CPoint ptBumpedSquare(pBumped->m_pos.x / CPathSearch::GRID_SQUARE_SIZEX,
+                        pBumped->m_pos.y / CPathSearch::GRID_SQUARE_SIZEY);
+                    SHORT bumpedRadius = pBumped->m_animation.GetPersonalSpace() >> 1;
+
+                    BOOL bOnSquare = FALSE;
+                    for (SHORT ddx = -bumpedRadius; ddx <= bumpedRadius && !bOnSquare; ddx++) {
+                        for (SHORT ddy = -bumpedRadius; ddy <= bumpedRadius; ddy++) {
+                            if (ptBumpedSquare.x + ddx == goal.x + dx
+                                && ptBumpedSquare.y + ddy == goal.y + dy) {
+                                bOnSquare = TRUE;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (bOnSquare) {
+                        CPoint ptBumped(pBumped->GetPos().x / CPathSearch::GRID_SQUARE_SIZEX,
+                            pBumped->GetPos().y / CPathSearch::GRID_SQUARE_SIZEY);
+
+                        // This creature stands on the goal while the bumped
+                        // one looks for a square.
+                        pSearch->AddObject(goal,
+                            m_typeAI.GetEnemyAlly(),
+                            m_animation.GetPersonalSpace(),
+                            field_54A8,
+                            field_7430);
+
+                        do {
+                            rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetDeny(nBumpedId,
+                                CGameObjectArray::THREAD_ASYNCH,
+                                reinterpret_cast<CGameObject**>(&pBumped),
+                                INFINITE);
+                        } while (rc == CGameObjectArray::SHARED);
+
+                        if (rc == CGameObjectArray::SUCCESS) {
+                            pSearch->RemoveObject(ptBumped,
+                                pBumped->GetAIType().m_nEnemyAlly,
+                                pBumped->m_animation.GetPersonalSpace(),
+                                pBumped->field_54A8,
+                                pBumped->field_7430);
+
+                            BYTE nOrder;
+                            for (nOrder = 0; nOrder < 9; nOrder++) {
+                                BYTE nSquare = order[nOrder];
+                                if (nSquare == 255) {
+                                    continue;
+                                }
+
+                                CPoint ptTry(nSquare % 3 - 1 + ptBumped.x, nSquare / 3 - 1 + ptBumped.y);
+                                SHORT nTryTableIndex;
+                                if (pSearch->GetCost(ptTry, pBumped->GetTerrainTable(), pBumped->m_animation.GetPersonalSpace(), nTryTableIndex, TRUE) == CPathSearch::COST_IMPASSABLE) {
+                                    continue;
+                                }
+
+                                pSearch->AddObject(ptBumped,
+                                    pBumped->GetAIType().m_nEnemyAlly,
+                                    pBumped->m_animation.GetPersonalSpace(),
+                                    pBumped->field_54A8,
+                                    pBumped->field_7430);
+                                pBumped->JumpToPoint(CPoint(ptTry.x * CPathSearch::GRID_SQUARE_SIZEX + CPathSearch::GRID_SQUARE_SIZEX / 2,
+                                                         ptTry.y * CPathSearch::GRID_SQUARE_SIZEY + CPathSearch::GRID_SQUARE_SIZEY / 2),
+                                    TRUE);
+                                if (!pBumped->m_bBumped) {
+                                    pBumped->m_bBumped = TRUE;
+                                    pBumped->m_ptBumpedFrom = ptBumped;
+                                }
+                                targets.RemoveAt(posCurrent);
+                                nBumps--;
+                                break;
+                            }
+
+                            if (nOrder == 9) {
+                                // No free square: the bumped creature
+                                // bumps in turn.
+                                field_54B8 = TRUE;
+
+                                for (nOrder = 0; nOrder < 9; nOrder++) {
+                                    BYTE nSquare = order[nOrder];
+                                    if (nSquare == 255) {
+                                        continue;
+                                    }
+
+                                    CPoint ptTry(nSquare % 3 - 1 + ptBumped.x, nSquare / 3 - 1 + ptBumped.y);
+                                    if (!pBumped->ClearBumpPath(ptBumped, ptTry)) {
+                                        continue;
+                                    }
+
+                                    pSearch->AddObject(ptBumped,
+                                        pBumped->GetAIType().m_nEnemyAlly,
+                                        pBumped->m_animation.GetPersonalSpace(),
+                                        pBumped->field_54A8,
+                                        pBumped->field_7430);
+                                    pBumped->JumpToPoint(CPoint(ptTry.x * CPathSearch::GRID_SQUARE_SIZEX + CPathSearch::GRID_SQUARE_SIZEX / 2,
+                                                             ptTry.y * CPathSearch::GRID_SQUARE_SIZEY + CPathSearch::GRID_SQUARE_SIZEY / 2),
+                                        TRUE);
+                                    if (!pBumped->m_bBumped) {
+                                        pBumped->m_bBumped = TRUE;
+                                        pBumped->m_ptBumpedFrom = ptBumped;
+                                    }
+                                    targets.RemoveAt(posCurrent);
+                                    nBumps--;
+                                    break;
+                                }
+
+                                field_54B8 = FALSE;
+
+                                if (nOrder == 9) {
+                                    pSearch->AddObject(ptBumped,
+                                        pBumped->GetAIType().m_nEnemyAlly,
+                                        pBumped->m_animation.GetPersonalSpace(),
+                                        pBumped->field_54A8,
+                                        pBumped->field_7430);
+                                }
+                            }
+
+                            g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(nBumpedId,
+                                CGameObjectArray::THREAD_ASYNCH,
+                                INFINITE);
+                        }
+
+                        pSearch->RemoveObject(goal,
+                            m_typeAI.GetEnemyAlly(),
+                            m_animation.GetPersonalSpace(),
+                            field_54A8,
+                            field_7430);
+                    }
+                }
+
+                g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(nBumpedId,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    INFINITE);
+            }
+
+            if (nBumps != 0) {
+                return FALSE;
+            }
+        }
+    }
+
+    return TRUE;
 }
 
 // 0x6FB440
