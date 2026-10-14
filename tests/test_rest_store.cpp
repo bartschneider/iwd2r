@@ -806,3 +806,61 @@ TEST_CASE("store: AddItemExt puts a sold item on its line or a new one", "[store
     CHECK(pNew->m_nInStock == 3);
     CHECK(gem.GetUsageCount(0) == 3);
 }
+
+TEST_CASE("import: ImportCharacter builds the sprite of a CHR with its name, biography and quick slots", "[import][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    pGame->NewGame(FALSE, FALSE);
+
+    // The premade character AKCHAR1 (CHR and its biography RES).
+    fs::path chr;
+    std::error_code ec;
+    for (const auto& folder : fs::directory_iterator(g_view, ec)) {
+        if (Lower(folder.path().filename().string()) != "characters") {
+            continue;
+        }
+        for (const auto& file : fs::directory_iterator(folder.path(), ec)) {
+            if (Lower(file.path().filename().string()) == "akchar1.chr") {
+                chr = file.path();
+            }
+        }
+    }
+    if (chr.empty()) {
+        SKIP("[iwd2r-skip] no AKCHAR1.CHR in the Characters folder");
+    }
+    std::ifstream in(chr, std::ios::binary);
+    const std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    REQUIRE(bytes.compare(0, 8, "CHR V2.2") == 0);
+    const std::string name(bytes.c_str() + 8, strnlen(bytes.c_str() + 8, 32));
+
+    const DWORD gold = pGame->m_gameSave.m_nPartyGold;
+    // NOTE: The result is the sprite's id, which may be 0 (the first object
+    // of a new game) like the failure's.
+    const LONG nId = pGame->ImportCharacter(CString("AKCHAR1"), 2);
+
+    CGameSprite* pSprite = NULL;
+    REQUIRE(pGame->GetObjectArray()->GetShare(nId, CGameObjectArray::THREAD_ASYNCH, reinterpret_cast<CGameObject**>(&pSprite), INFINITE)
+        == CGameObjectArray::SUCCESS);
+    CHECK(std::string(static_cast<LPCSTR>(pSprite->m_sName)) == name);
+    // The biography goes into the user strings, at 0xF240 plus the index.
+    CHECK(pSprite->m_baseStats.m_biography == 0xF242u);
+    STR_RES strRes;
+    g_pBaldurChitin->GetTlkTable().Fetch(0xF242, strRes);
+    CHECK(strRes.szText.GetLength() > 0);
+    CHECK(pSprite->m_bGlobal == TRUE);
+    CHECK(pSprite->m_nLastSpellbookClassIndex == static_cast<BYTE>(bytes[8 + 0x15A]));
+    // The party gets the character's starting gold (rolled with rand() by
+    // CRuleTables::GetStartingGold).
+    CHECK(pGame->m_gameSave.m_nPartyGold > gold);
+    pGame->GetObjectArray()->ReleaseShare(nId, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+
+    // A file that is not there: 0.
+    CHECK(pGame->ImportCharacter(CString("NOSUCHCH"), 0) == 0);
+}

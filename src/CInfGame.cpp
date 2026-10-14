@@ -1400,7 +1400,202 @@ void CInfGame::CacheResFileWithResource(const CString& areaName)
 // 0x5A0F50
 LONG CInfGame::ImportCharacter(const CString& sFileName, INT nIndex)
 {
-    // TODO: Incomplete.
+    CResHelper<CResCHR, 1018> cCharacterFile;
+    BOOLEAN bTemporaryKey = FALSE;
+    // NOTE: The original allocates resources of type 1022 as a class of its
+    // own (vtable 0x8480C8, `Demand` 0x4029F0: the raw data, "parsed" when
+    // present); `CBaldurChitin::AllocResObject` does not have it yet, so the
+    // data is read through `CRes::Demand`.
+    CResHelper<CRes, 1022> cBiographyFile;
+    STR_RES strRes;
+
+    // NOTE: Uninline.
+    cCharacterFile.SetResRef(CResRef(sFileName), TRUE, TRUE);
+    if (cCharacterFile.GetResRef() == "") {
+        bTemporaryKey = TRUE;
+        g_pChitin->cDimm.AddTemporaryKey(m_sCharactersDir, CResRef(sFileName), 1018);
+
+        // NOTE: Uninline.
+        cCharacterFile.SetResRef(CResRef(sFileName), TRUE, TRUE);
+    }
+
+    BYTE* pData = cCharacterFile.GetRes() != NULL
+        ? reinterpret_cast<BYTE*>(cCharacterFile.GetRes()->Demand())
+        : NULL;
+
+    // NOTE: Inlined (0x720490): the resource's size, read between a
+    // `Demand` and a `Release`.
+    LONG nData = 0;
+    if (cCharacterFile.GetRes() != NULL) {
+        if (cCharacterFile.GetRes()->Demand() != NULL) {
+            nData = cCharacterFile.GetRes()->m_nResSizeActual;
+            cCharacterFile.GetRes()->Release();
+        }
+    }
+
+    if (pData != NULL && memcmp(pData, "CHR V2.2", 8) == 0) {
+        BYTE* pHeader = pData + 8;
+
+        LONG nCreature = nData - 0x224;
+
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\InfGame.cpp
+        // __LINE__: 4172
+        UTIL_ASSERT(nCreature > 0);
+
+        nCreature -= *reinterpret_cast<DWORD*>(pHeader + 0x24);
+
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\InfGame.cpp
+        // __LINE__: 4175
+        UTIL_ASSERT(nCreature >= 0);
+
+        CGameSprite* pSprite = new CGameSprite(pData + *reinterpret_cast<DWORD*>(pHeader + 0x20),
+            *reinterpret_cast<DWORD*>(pHeader + 0x24),
+            0,
+            0,
+            -1,
+            0,
+            0,
+            INT_MAX,
+            CPoint(-1, -1),
+            0);
+
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\InfGame.cpp
+        // __LINE__: 4180
+        UTIL_ASSERT(pSprite != NULL);
+
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\InfGame.cpp
+        // __LINE__: 4181
+        UTIL_ASSERT(nCreature == 0);
+
+        pSprite->SetResRef(CResRef(sFileName));
+
+        char szName[SCRIPTNAME_SIZE + 1];
+        memset(szName, 0, sizeof(szName));
+        strncpy(szName, reinterpret_cast<char*>(pHeader), SCRIPTNAME_SIZE);
+        pSprite->m_sName = CString(szName);
+
+        for (INT nWeapon = 0; nWeapon < 8; nWeapon++) {
+            pSprite->InitQuickItemData(*reinterpret_cast<WORD*>(pHeader + 0x28 + 2 * nWeapon),
+                *reinterpret_cast<WORD*>(pHeader + 0x38 + 2 * nWeapon),
+                pHeader[0x19C + nWeapon],
+                pSprite->m_quickWeapons[nWeapon]);
+        }
+
+        for (INT nSpell = 0; nSpell < 9; nSpell++) {
+            pSprite->InitQuickSpellData(CResRef(pHeader + 0x48 + RESREF_SIZE * nSpell),
+                1,
+                pSprite->m_quickSpells[nSpell],
+                pHeader[0x90 + nSpell],
+                pHeader[0x15C + nSpell],
+                pHeader[0x165 + nSpell]);
+        }
+
+        for (INT nItem = 0; nItem < 3; nItem++) {
+            pSprite->InitQuickItemData(*reinterpret_cast<WORD*>(pHeader + 0x9A + 2 * nItem),
+                *reinterpret_cast<WORD*>(pHeader + 0xA0 + 2 * nItem),
+                0,
+                pSprite->m_quickItems[nItem]);
+        }
+
+        for (INT nInnate = 0; nInnate < 9; nInnate++) {
+            pSprite->InitQuickSpellData(CResRef(pHeader + 0xA6 + RESREF_SIZE * nInnate),
+                2,
+                pSprite->m_quickInnates[nInnate],
+                0,
+                0,
+                0);
+        }
+
+        for (INT nSong = 0; nSong < 9; nSong++) {
+            pSprite->InitQuickSpellData(CResRef(pHeader + 0xEE + RESREF_SIZE * nSong),
+                3,
+                pSprite->m_quickSongs[nSong],
+                0,
+                0,
+                0);
+        }
+
+        for (INT nButton = 0; nButton < 9; nButton++) {
+            pSprite->field_3D14[nButton] = *reinterpret_cast<int*>(pHeader + 0x136 + 4 * nButton);
+        }
+
+        pSprite->m_nLastSpellbookClassIndex = pHeader[0x15A];
+        pSprite->m_nLastSpellbookSpellLevel = pHeader[0x15B];
+
+        if (bTemporaryKey == TRUE) {
+            g_pChitin->cDimm.RemoveTemporaryKey(m_sCharactersDir, CResRef(sFileName), 1018);
+        }
+
+        // NOTE: Uninline.
+        cBiographyFile.SetResRef(CResRef(sFileName), TRUE, TRUE);
+        if (cBiographyFile.GetResRef() != "") {
+            STRREF strId = 0xF240 + static_cast<BYTE>(nIndex);
+
+            const char* pText = cBiographyFile.GetRes() != NULL
+                ? reinterpret_cast<const char*>(cBiographyFile.GetRes()->Demand())
+                : NULL;
+            strRes.szText = CString(pText);
+            strRes.szText = strRes.szText.Left(cBiographyFile.GetRes()->nSize);
+
+            g_pBaldurChitin->GetTlkTable().m_override.AddUserEntry(strId, strRes);
+            pSprite->m_baseStats.m_biography = strId;
+
+            cBiographyFile.GetRes()->Release();
+        } else {
+            pSprite->m_baseStats.m_biography = -1;
+        }
+
+        BYTE nClass;
+
+        nClass = 3;
+        pSprite->AddKnownDivineSpells(nClass);
+
+        nClass = 4;
+        pSprite->AddKnownDivineSpells(nClass);
+
+        nClass = 7;
+        pSprite->AddKnownDivineSpells(nClass);
+
+        nClass = 8;
+        pSprite->AddKnownDivineSpells(nClass);
+
+        AddPartyGold(g_pBaldurChitin->GetObjectGame()->GetRuleTables().GetStartingGold(pSprite));
+
+        // NOTE: The sound set's folder name is read up to its terminator,
+        // which a name of 32 characters lacks (the original reads on into
+        // the header's next field).
+        CString sSounds(reinterpret_cast<char*>(pHeader + 0x17C));
+        INT nLength = sSounds.GetLength();
+        memcpy(pSprite->field_725A, sSounds.GetBuffer(nLength), min(nLength, 32));
+        if (nLength < 32) {
+            pSprite->field_725A[nLength] = '\0';
+        }
+
+        CString sSoundsDir = g_pBaldurChitin->GetObjectGame()->GetDirSounds() + sSounds + '\\';
+        g_pChitin->cDimm.AddToDirectoryList(sSoundsDir, TRUE);
+
+        pSprite->m_secondarySounds = CResRef(pHeader + 0x174);
+
+        cCharacterFile.GetRes()->dwFlags |= CRes::RES_FLAG_0x100;
+
+        // NOTE: Uninline.
+        cCharacterFile.Release();
+
+        pSprite->m_bGlobal = TRUE;
+        pSprite->sub_726810(pSprite->m_nWeaponSet);
+
+        return pSprite->m_id;
+    }
+
+    // NOTE: Uninline.
+    cCharacterFile.Release();
+
+    if (bTemporaryKey) {
+        g_pChitin->cDimm.RemoveTemporaryKey(m_sCharactersDir, CResRef(sFileName), 1018);
+
+        // NOTE: Uninline.
+        cCharacterFile.Release();
+    }
 
     return 0;
 }
