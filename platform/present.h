@@ -9,6 +9,7 @@
 #include <SDL3/SDL.h>
 
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 namespace platform::present {
@@ -63,10 +64,11 @@ BackendKind ActiveBackend();
 // included).
 BackendKind ToggleBackend();
 // The child side of the probe (`iwd2r --probe-gpu`, before anything else
-// starts SDL): starts SDL video, creates a GPU device for SPIR-V, builds the
-// nearest filter's pipeline, releases everything and prints one stdout
-// line, "probe-gpu: ok <driver> <device>" or "probe-gpu: unavailable
-// <reason>". Returns the exit code: 0 or 1.
+// starts SDL): starts SDL video and the gpu backend itself offscreen at 1x1
+// (the device, every filter's pipeline, the samplers), draws one frame,
+// releases everything and prints one stdout line, "probe-gpu: ok <driver>
+// <device>" or "probe-gpu: unavailable <reason>". The window is not claimed
+// here; that is left to the game's process. Returns the exit code: 0 or 1.
 int RunGpuProbe();
 void SetFilter(Filter filter);
 Filter CurrentFilter();
@@ -127,8 +129,10 @@ void FrameToWindow(float fx, float fy, float* x, float* y);
 
 // The regions of the back buffer to composite into the window (from
 // compose::Layout); empty, the default, presents the whole frame as before.
+// Regions returns the list as it is now, kept alive by the pointer even
+// after SetRegions replaces it (never null).
 void SetRegions(std::vector<compose::Region> regions);
-const std::vector<compose::Region>& Regions();
+std::shared_ptr<const std::vector<compose::Region>> Regions();
 
 // The size of the last presented frame, when WindowToFrame maps through a
 // renderer; with regions set and no frame presented yet, the extent of the
@@ -138,7 +142,9 @@ bool FrameSize(int* w, int* h);
 // Uploads one XRGB8888 frame and presents it. Without a target window it only
 // counts the frame. A frame the backend cannot draw (a minimised window, a
 // failed swapchain acquire) is skipped but still counted; a gpu device lost
-// during a frame is rebuilt once, and lost again falls back to classic.
+// during a frame is rebuilt once a run, and lost again falls back to classic
+// for the rest of the run: a new window (Alt+Enter) or the hotkey stays
+// classic.
 void Present(const uint32_t* xrgb, int width, int height, int pitchBytes);
 
 // Frames Present counted but the backend skipped.

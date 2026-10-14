@@ -61,19 +61,34 @@ int iwd2r_main(int argc, char** argv)
     char filter[32];
     char sharpness[32];
     GetPrivateProfileStringA("Program Options", "Presenter", "classic", presenter, sizeof(presenter), ".\\Icewind2.ini");
-    GetPrivateProfileStringA("Program Options", "Scale Filter", "nearest", filter, sizeof(filter), ".\\Icewind2.ini");
-    GetPrivateProfileStringA("Program Options", "Sharpness", "0.5", sharpness, sizeof(sharpness), ".\\Icewind2.ini");
+    GetPrivateProfileStringA("Program Options", "Scale Filter", "", filter, sizeof(filter), ".\\Icewind2.ini");
+    GetPrivateProfileStringA("Program Options", "Sharpness", "", sharpness, sizeof(sharpness), ".\\Icewind2.ini");
+    // Whether the INI sets them (an empty value counts as unset).
+    const bool filterSet = filter[0] != '\0';
+    const bool sharpnessSet = sharpness[0] != '\0';
+    const std::string filterText = filterSet ? filter : "nearest";
+    const std::string sharpnessText = sharpnessSet ? sharpness : "0.5";
     platform::present::BackendKind backend = platform::present::BackendKind::Classic;
     if (!platform::present::ParseBackendKind(presenter, &backend)) {
         std::cerr << "iwd2r: Presenter=" << presenter << " is not classic, gpu or auto; using classic" << std::endl;
     }
     platform::present::Filter scaleFilter = platform::present::Filter::Nearest;
-    if (!platform::present::ParseFilter(filter, &scaleFilter)) {
-        std::cerr << "iwd2r: Scale Filter=" << filter << " is not nearest, sharp, smooth, fsr or nis; using nearest" << std::endl;
+    if (!platform::present::ParseFilter(filterText.c_str(), &scaleFilter)) {
+        std::cerr << "iwd2r: Scale Filter=" << filterText << " is not nearest, sharp, smooth, fsr or nis; using nearest" << std::endl;
     }
     float sharpen = 0.5f;
-    if (!platform::present::ParseSharpness(sharpness, &sharpen)) {
-        std::cerr << "iwd2r: Sharpness=" << sharpness << " is not a number from 0 to 1; using 0.5" << std::endl;
+    if (!platform::present::ParseSharpness(sharpnessText.c_str(), &sharpen)) {
+        std::cerr << "iwd2r: Sharpness=" << sharpnessText << " is not a number from 0 to 1; using 0.5" << std::endl;
+    }
+    if (backend == platform::present::BackendKind::Classic && (filterSet || sharpnessSet)) {
+        std::string set;
+        if (filterSet) {
+            set = "Scale Filter=" + filterText;
+        }
+        if (sharpnessSet) {
+            set += std::string(filterSet ? ", " : "") + "Sharpness=" + sharpnessText;
+        }
+        std::cerr << "iwd2r: " << set << " ignored: the classic presenter has no filters (until Ctrl+Shift+R switches to gpu)" << std::endl;
     }
     platform::present::SetBackend(backend);
     platform::present::SetFilter(scaleFilter);

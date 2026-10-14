@@ -1,5 +1,7 @@
 #include "platform/gpu_probe.h"
 
+#include "platform/crash.h"
+
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -35,6 +37,21 @@ namespace {
     const int kMaxReadsPerDrain = 64;
     // How often the parent looks at the child while waiting.
     const int kSliceMs = 20;
+
+    // The child's environment: this process's, with IWD2R_CRASH_PREFIX set
+    // to probe-gpu so a crash in the child reads "probe-gpu crash: ..."
+    // before the parent's fallback line.
+    std::vector<std::string> ChildEnvironment(const std::vector<std::string>& own)
+    {
+        const std::string name = std::string(crash::kPrefixVariable) + "=";
+        std::vector<std::string> env;
+        for (const std::string& entry : own) {
+            if (entry.compare(0, name.size(), name) != 0)
+                env.push_back(entry);
+        }
+        env.push_back(name + "probe-gpu");
+        return env;
+    }
 
     void Keep(std::string& out, const char* data, size_t n)
     {
@@ -139,7 +156,19 @@ Result Run(const std::string& exe, int timeoutMs, const std::vector<std::string>
     PROCESS_INFORMATION pi = {};
     // SEM_NOGPFAULTERRORBOX: a crashing child exits without a WER dialog.
     const UINT oldMode = SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
-    const BOOL started = CreateProcessA(exe.c_str(), cmd.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi);
+    // The environment block: NAME=value strings, each ending in a NUL, then
+    // one more NUL.
+    std::vector<std::string> own;
+    if (char* block = GetEnvironmentStringsA()) {
+        for (const char* p = block; *p != '\0'; p += std::strlen(p) + 1)
+            own.push_back(p);
+        FreeEnvironmentStringsA(block);
+    }
+    std::string envBlock;
+    for (const std::string& entry : ChildEnvironment(own))
+        envBlock += entry + '\0';
+    envBlock += '\0';
+    const BOOL started = CreateProcessA(exe.c_str(), cmd.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW, envBlock.data(), nullptr, &si, &pi);
     SetErrorMode(oldMode);
     CloseHandle(writeEnd);
     if (!started) {
@@ -222,8 +251,16 @@ Result Run(const std::string& exe, int timeoutMs, const std::vector<std::string>
     posix_spawn_file_actions_init(&actions);
     // dup2 clears close-on-exec on the child's stdout; both pipe ends close.
     posix_spawn_file_actions_adddup2(&actions, fds[1], STDOUT_FILENO);
+    std::vector<std::string> own;
+    for (char** e = environ; *e != nullptr; e++)
+        own.push_back(*e);
+    const std::vector<std::string> env = ChildEnvironment(own);
+    std::vector<char*> envp;
+    for (const std::string& entry : env)
+        envp.push_back(const_cast<char*>(entry.c_str()));
+    envp.push_back(nullptr);
     pid_t pid = -1;
-    const int err = posix_spawn(&pid, exe.c_str(), &actions, nullptr, argv.data(), environ);
+    const int err = posix_spawn(&pid, exe.c_str(), &actions, nullptr, argv.data(), envp.data());
     posix_spawn_file_actions_destroy(&actions);
     close(fds[1]);
     if (err != 0) {

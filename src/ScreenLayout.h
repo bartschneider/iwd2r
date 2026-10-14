@@ -103,12 +103,19 @@ struct ScreenLayout {
     // first uiWidth columns, see worldUiShiftX). WorldPanelRects gives the
     // band for another viewport (dialog, death, hidden interface).
     //
-    // Assumption: every GUIW08/GUIW10 panel the world screen shows lies in
-    // one full-width band along the bottom edge whose depth is the distance
+    // Every GUIW08/GUIW10 panel the world screen shows lies in one
+    // full-width band along the bottom edge whose depth is the distance
     // from the world screen's requested view size (SetNewViewSize) to the
-    // frame bottom, as the original's viewport rectangles (toolbar 167,
-    // dialog 284, death 139, container 124) imply. A panel elsewhere would
-    // be shown at the world scale inside the world region.
+    // frame bottom: each panel lies within the bottom band (the action bar is stacked above the toolbar) and no deeper than the
+    // viewport it is shown over (toolbar 167 for the comm, action, chat and
+    // multiplayer bars, container 124, death 139, dialog 284), and every
+    // control lies inside its panel (tests/test_layout.cpp
+    // world_panels_lie_in_the_band holds the CHU rectangles). A panel
+    // outside the band would not be shown at the UI scale: with the UI
+    // scale above the world scale, no region shows the frame rows between
+    // the world viewport's bottom and the band's top (the reserved depth
+    // minus the band's), so a panel there would be hidden, and one above
+    // them would be shown at the world scale inside the world region.
     std::vector<RECT> uiPanelRects;
     // A full-UI screen's 1x rectangle: the 800x600 UI centred in the frame,
     // where every screen but the world screen shifts its panels.
