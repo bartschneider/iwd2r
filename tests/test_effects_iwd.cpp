@@ -17,8 +17,8 @@
 #include "platform/window.h"
 
 #include <algorithm>
-#include <bitset>
 #include <atomic>
+#include <bitset>
 #include <chrono>
 #include <climits>
 #include <cstdint>
@@ -223,7 +223,6 @@ CGameSprite* NewGameInStartArea(std::vector<BYTE>& bytes)
     return pSprite;
 }
 
-
 void ClearMessages()
 {
     CMessageHandler& handler = g_pBaldurChitin->m_cMessageHandler;
@@ -263,17 +262,17 @@ bool HasPortraitIcon(CGameSprite* pSprite, int icon)
     return pSprite->m_portraitIcons.Find(reinterpret_cast<int*>(static_cast<INT_PTR>(icon)), NULL) != NULL;
 }
 
-#define PROBE_OR_SKIP(pSprite)                                                  \
-    if (DataDir() == nullptr) {                                                  \
-        SKIP("[iwd2r-skip] IWD2_DATA unset");                                    \
-    }                                                                           \
-    std::string error;                                                          \
-    REQUIRE(StartEngine(error));                                                \
-    INFO(error);                                                                \
-    FramePump pump;                                                             \
-    CGameSprite* pSprite = Probe();                                             \
-    if (pSprite == NULL) {                                                      \
-        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");          \
+#define PROBE_OR_SKIP(pSprite)                                          \
+    if (DataDir() == nullptr) {                                         \
+        SKIP("[iwd2r-skip] IWD2_DATA unset");                           \
+    }                                                                   \
+    std::string error;                                                  \
+    REQUIRE(StartEngine(error));                                        \
+    INFO(error);                                                        \
+    FramePump pump;                                                     \
+    CGameSprite* pSprite = Probe();                                     \
+    if (pSprite == NULL) {                                              \
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder"); \
     }
 
 }
