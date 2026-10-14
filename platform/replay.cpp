@@ -341,9 +341,7 @@ void OnFrameEnd()
         source->ReadAi(&ai);
         if (ai.auCounter != g_lastAu || ai.inAsyncUpdate != 0) {
             if (g_overlapFrames++ == 0)
-                Say("AI overlap: %s", "this frame's AI update began before its render ended (au_counter "
-                        + std::to_string(g_lastAu) + " at its start, " + std::to_string(ai.auCounter)
-                        + " now, in_async_update " + std::to_string(ai.inAsyncUpdate) + ")");
+                Say("AI overlap: %s", "this frame's AI update began before its render ended (au_counter " + std::to_string(g_lastAu) + " at its start, " + std::to_string(ai.auCounter) + " now, in_async_update " + std::to_string(ai.inAsyncUpdate) + ")");
         }
     }
     FireTimers();
