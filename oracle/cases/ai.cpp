@@ -32,6 +32,7 @@
 #include "CBaldurChitin.h"
 #include "CGameAIBase.h"
 #include "CGameArea.h"
+#include "CGameDoor.h"
 #include "CGameObjectArray.h"
 #include "CInfGame.h"
 #include "CVariableHash.h"
@@ -533,7 +534,58 @@ void Decode(CaseContext& ctx)
     }
 }
 
+// ---------------------------------------------------------------------------
+// ai/closer_dest_pt
+
+// CGameDoor::GetCloserDestPt(const CPoint& pt) (0x48B2C0), `ret 4`: reads
+// the walk-to points at 0x5E0 and 0x5E8 and returns the address of one.
+using CloserDestFn = const int32_t*(__fastcall*)(void* self, void* edx, const int32_t* pt);
+constexpr uintptr_t kCloserDest = 0x48B2C0;
+constexpr size_t kDoorSize = 0x710;
+
+void CloserDestPt(CaseContext& ctx)
+{
+    std::mt19937 rng(static_cast<uint32_t>(ctx.seed ^ 0xD00Bu));
+    auto* storage = static_cast<unsigned char*>(::operator new(sizeof(CGameDoor)));
+    std::memset(storage, 0, sizeof(CGameDoor));
+    CGameDoor* ours = reinterpret_cast<CGameDoor*>(storage);
+    uint8_t* door = nullptr;
+    ctx.CallOriginal([&] { door = OriginalBlock(kDoorSize); });
+
+    for (int i = 0; i < 2000; ++i) {
+        // Mostly map-sized coordinates, sometimes equal distances.
+        int32_t v[6];
+        for (int32_t& x : v) {
+            x = static_cast<int32_t>(rng() % 4000);
+        }
+        if (i % 7 == 0) {
+            v[2] = 2 * v[0] - v[4];
+            v[3] = 2 * v[1] - v[5];
+        }
+        const int32_t pt[2] = { v[0], v[1] };
+        ctx.SetInputs("pt (" + std::to_string(v[0]) + "," + std::to_string(v[1]) + "), dest1 ("
+            + std::to_string(v[2]) + "," + std::to_string(v[3]) + "), dest2 (" + std::to_string(v[4]) + ","
+            + std::to_string(v[5]) + ")");
+        int original = 0;
+        ctx.CallOriginal([&] {
+            std::memcpy(door + 0x5E0, &v[2], 8);
+            std::memcpy(door + 0x5E8, &v[4], 8);
+            const int32_t* at = reinterpret_cast<CloserDestFn>(kCloserDest)(door, nullptr, pt);
+            original = at == reinterpret_cast<const int32_t*>(door + 0x5E0) ? 1
+                : at == reinterpret_cast<const int32_t*>(door + 0x5E8)       ? 2
+                                                                              : 0;
+        });
+        ours->m_ptDest1 = CPoint(v[2], v[3]);
+        ours->m_ptDest2 = CPoint(v[4], v[5]);
+        const CPoint& at = ours->GetCloserDestPt(CPoint(v[0], v[1]));
+        const int oursWhich = &at == &ours->m_ptDest1 ? 1 : &at == &ours->m_ptDest2 ? 2 : 0;
+        ctx.CountInputs(1);
+        oracle::Compare(ctx, original, oursWhich);
+    }
+}
+
 }
 
 ORACLE_CASE("ai/global_variable", GlobalVariable);
+ORACLE_CASE("ai/closer_dest_pt", CloserDestPt);
 ORACLE_CASE("ai/decode", Decode);
