@@ -3,6 +3,8 @@
 
 #include "mfc.h"
 
+#include "CAIObjectType.h"
+
 // NOTE: This unit has odd naming convention, inconsistent with other codebase.
 
 class CGameArea;
@@ -173,6 +175,7 @@ public:
     /* 0008 */ CString SectionAlias;
     /* 000C */ int SpawnFlags;
     /* 0010 */ BOOL DataIsValid;
+    /* 0014 */ CAIObjectType mSearchType;
     /* 0050 */ int mSearchQty;
     /* 0054 */ int mSearchRegion[4];
     /* 0064 */ CSpawnVar* mpSearchKeyVar;

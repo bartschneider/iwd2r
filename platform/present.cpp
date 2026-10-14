@@ -24,8 +24,12 @@ namespace {
         BackendKind active = BackendKind::Classic;
         Filter filter = Filter::Nearest;
         float sharpness = 0.5f;
-        // A device loss was already answered with a rebuild.
+        // A device loss was already answered with a rebuild (one per run).
         bool rebuilt = false;
+        // The gpu backend was lost and fell back to classic: classic for the
+        // rest of the run, whatever later asks for gpu (a new window, the
+        // hotkey).
+        bool gpuLost = false;
         // The child probe's verdict, kept for the session (probed: it ran).
         bool probed = false;
         bool probeOk = false;
@@ -47,9 +51,11 @@ namespace {
         const std::vector<uint32_t>* primary = nullptr;
         int primaryWidth = 0;
         int primaryHeight = 0;
-        // SetRegions runs on the main thread and Present may run on
-        // another: the list is replaced whole under the lock, and readers
-        // keep the snapshot they took.
+        // SetRegions and Present run on the main thread (the engine draws
+        // and flips in CChitin::SynchronousUpdate there), but the mouse
+        // mapping is read from the AI thread too (GetCursorPos in
+        // CChitin::AsynchronousUpdate): the list is replaced whole under the
+        // lock, and readers keep the snapshot they took.
         std::mutex regionsMutex;
         std::shared_ptr<const std::vector<compose::Region>> regions = std::make_shared<const std::vector<compose::Region>>();
     };
@@ -160,13 +166,14 @@ namespace {
     {
         State& s = S();
         StopBackend();
-        s.rebuilt = false;
         s.active = BackendKind::Classic;
         if (!HasTarget())
             return;
         std::string why;
         if (kind != BackendKind::Classic) {
-            if (ProbeAllows(why) && TryStart(MakeGpuBackend(), why)) {
+            if (s.gpuLost)
+                why = "lost earlier in this run";
+            else if (ProbeAllows(why) && TryStart(MakeGpuBackend(), why)) {
                 s.active = BackendKind::Gpu;
                 s.fallback.clear();
                 return;
@@ -178,9 +185,13 @@ namespace {
             std::fprintf(stderr, "presenter: classic unavailable (%s)\n", why.c_str());
     }
 
+    // A lost device: classic for the rest of the run (gpuLost).
     void FallBackToClassic(const std::string& reason)
     {
+        State& s = S();
         std::fprintf(stderr, "presenter: gpu %s, using classic\n", reason.c_str());
+        s.gpuLost = true;
+        s.fallback = "gpu " + reason;
         StartBackend(BackendKind::Classic);
     }
 
@@ -460,12 +471,7 @@ void SetRegions(std::vector<compose::Region> regions)
     s.regions.swap(list);
 }
 
-const std::vector<compose::Region>& Regions()
-{
-    // The main thread's own list: only SetRegions, on the same thread,
-    // replaces it.
-    return *RegionsSnapshot();
-}
+std::shared_ptr<const std::vector<compose::Region>> Regions() { return RegionsSnapshot(); }
 
 bool FrameSize(int* w, int* h)
 {
@@ -572,6 +578,13 @@ namespace testing {
     }
 
     std::string LastFallbackReason() { return S().fallback; }
+
+    void ForgetGpuLoss()
+    {
+        State& s = S();
+        s.gpuLost = false;
+        s.rebuilt = false;
+    }
 
     void UseOffscreen(int w, int h)
     {

@@ -62,9 +62,11 @@ struct OffscreenVideo {
     {
         SDL_SetHintWithPriority(SDL_HINT_VIDEO_DRIVER, "offscreen", SDL_HINT_OVERRIDE);
         ok = SDL_Init(SDL_INIT_VIDEO);
+        present::testing::ForgetGpuLoss();
     }
     ~OffscreenVideo()
     {
+        present::testing::ForgetGpuLoss();
         present::testing::SetProbeExe(nullptr);
         present::SetPresentTarget(nullptr);
         present::testing::UseOffscreen(0, 0);
@@ -75,6 +77,8 @@ struct OffscreenVideo {
         present::SetFilter(Filter::Nearest);
         present::SetSharpness(0.5f);
         present::SetPrimary(nullptr, 0, 0);
+        present::SetWindowScale(1);
+        present::SetFullscreen(false);
         SDL_Quit();
         SDL_ResetHint(SDL_HINT_VIDEO_DRIVER);
     }
@@ -220,7 +224,57 @@ TEST_CASE("gpu_offscreen_identity", "[present]")
     CHECK(Mismatches(out, px) == 0);
     out = Draw(*b, px, 320, 240, { present::WholeFrameRegion(320, 240) }, Filter::Smooth, &w, &h);
     CHECK(Mismatches(out, px) == 0);
+
+    // Fsr and nis draw a region at one texel per pixel with nearest: the
+    // native-resolution world is not sharpened.
+    const std::vector<uint32_t> picture = Picture(320, 240);
+    for (Filter f : { Filter::Fsr, Filter::Nis }) {
+        INFO("filter " << (f == Filter::Fsr ? "fsr" : "nis"));
+        b->sharpness = 1.0f;
+        out = Draw(*b, picture, 320, 240, { present::WholeFrameRegion(320, 240) }, f, &w, &h);
+        CHECK(Mismatches(out, picture) == 0);
+        out = Draw(*b, picture, 320, 240, { MakeRegion({ 0, 0, 320, 240 }, 0, 0, 320, 240, 1) }, f, &w, &h);
+        CHECK(Mismatches(out, picture) == 0);
+    }
     b->Shutdown();
+}
+
+TEST_CASE("classic_offscreen_identity", "[present]")
+{
+    // The classic presenter (the default) on the offscreen driver's hidden
+    // window: the frame as drawn, read back, is the input at Scale 1 and
+    // the nearest-neighbour upscale at Scale 2, through the whole-frame
+    // path and through a region.
+    OffscreenVideo video;
+    REQUIRE(video.ok);
+    std::vector<uint32_t> px = Distinct(320, 240);
+    present::SetPrimary(&px, 320, 240);
+    present::SetBackend(BackendKind::Classic);
+    for (int s = 1; s <= 2; s++) {
+        INFO("scale " << s);
+        present::SetWindowScale(s);
+        SDL_Window* window = SDL_CreateWindow("present classic", 320 * s, 240 * s, SDL_WINDOW_HIDDEN);
+        REQUIRE(window != nullptr);
+        present::SetPresentTarget(window);
+        REQUIRE(present::ActiveBackend() == BackendKind::Classic);
+        const std::vector<uint32_t> want = s == 1 ? px : Upscaled(px, 320, 240, s);
+        present::Present(px.data(), 320, 240, 320 * 4);
+        std::vector<uint32_t> out;
+        int w = 0;
+        int h = 0;
+        REQUIRE(present::ReadbackPresented(&out, &w, &h));
+        CHECK(w == 320 * s);
+        CHECK(h == 240 * s);
+        CHECK(Mismatches(out, want) == 0);
+
+        present::SetRegions({ MakeRegion({ 0, 0, 320, 240 }, 0, 0, 320 * s, 240 * s, s) });
+        out.clear();
+        REQUIRE(present::ReadbackPresented(&out, &w, &h));
+        CHECK(Mismatches(out, want) == 0);
+        present::SetRegions({});
+        present::SetPresentTarget(nullptr);
+        SDL_DestroyWindow(window);
+    }
 }
 
 TEST_CASE("gpu_identity_sharp_integer_scale", "[present]")
@@ -338,6 +392,102 @@ TEST_CASE("skipped_frame_on_acquire_failure", "[present]")
     CHECK(present::ActiveBackend() == BackendKind::Classic);
     present::Present(px.data(), 320, 240, 320 * 4);
     CHECK(present::PresentedFrames() == frames + 2);
+}
+
+TEST_CASE("device_loss_stays_classic", "[present]")
+{
+    // A device lost again after its rebuild: classic for the rest of the
+    // run. A new target (a recreated window) and the hotkey stay classic,
+    // and the rebuild budget is not renewed.
+    OffscreenVideo video;
+    REQUIRE(video.ok);
+    std::vector<uint32_t> px = Distinct(320, 240);
+    present::SetPrimary(&px, 320, 240);
+    present::SetBackend(BackendKind::Gpu);
+    present::testing::UseOffscreen(320, 240);
+    if (present::ActiveBackend() != BackendKind::Gpu)
+        SKIP("no SDL GPU device: " << present::testing::LastFallbackReason());
+    present::testing::SetGpuFault(GpuFault::AcquireOnce);
+    present::Present(px.data(), 320, 240, 320 * 4);
+    REQUIRE(present::ActiveBackend() == BackendKind::Gpu);
+    present::testing::SetGpuFault(GpuFault::AcquireOnce);
+    present::Present(px.data(), 320, 240, 320 * 4);
+    CHECK(present::ActiveBackend() == BackendKind::Classic);
+    present::testing::SetGpuFault(GpuFault::None);
+
+    // Offscreen again (a new target): still classic, which cannot start
+    // without a window.
+    present::testing::UseOffscreen(0, 0);
+    present::testing::UseOffscreen(320, 240);
+    CHECK(present::ActiveBackend() == BackendKind::Classic);
+    CHECK(present::testing::LastFallbackReason() == "lost earlier in this run");
+
+    // A window: classic draws; gpu (the request, the hotkey) does not
+    // come back.
+    present::testing::UseOffscreen(0, 0);
+    SDL_Window* window = SDL_CreateWindow("present lost", 320, 240, SDL_WINDOW_HIDDEN);
+    REQUIRE(window != nullptr);
+    present::SetPresentTarget(window);
+    CHECK(present::ActiveBackend() == BackendKind::Classic);
+    CHECK(present::ToggleBackend() == BackendKind::Classic);
+    const int frames = present::PresentedFrames();
+    const int skipped = present::SkippedFrames();
+    present::Present(px.data(), 320, 240, 320 * 4);
+    CHECK(present::PresentedFrames() == frames + 1);
+    CHECK(present::SkippedFrames() == skipped);
+    present::SetPresentTarget(nullptr);
+    SDL_DestroyWindow(window);
+
+    // Forgotten (tests only): gpu starts again.
+    present::testing::ForgetGpuLoss();
+    present::testing::UseOffscreen(320, 240);
+    CHECK(present::ActiveBackend() == BackendKind::Gpu);
+}
+
+TEST_CASE("null_swapchain_skips_without_rebuild", "[present]")
+{
+    // An acquire that succeeds without a swapchain texture (a minimised
+    // window): the frame is skipped and counted, nothing is rebuilt, the
+    // presenter stays gpu and draws once a texture comes back.
+    OffscreenVideo video;
+    REQUIRE(video.ok);
+    std::vector<uint32_t> px = Distinct(320, 240);
+    present::SetPrimary(&px, 320, 240);
+    present::SetBackend(BackendKind::Gpu);
+    present::testing::UseOffscreen(320, 240);
+    if (present::ActiveBackend() != BackendKind::Gpu)
+        SKIP("no SDL GPU device: " << present::testing::LastFallbackReason());
+    present::testing::SetGpuFault(GpuFault::NullSwapchain);
+    const int frames = present::PresentedFrames();
+    const int skipped = present::SkippedFrames();
+    for (int i = 0; i < 3; i++)
+        present::Present(px.data(), 320, 240, 320 * 4);
+    CHECK(present::PresentedFrames() == frames + 3);
+    CHECK(present::SkippedFrames() == skipped + 3);
+    CHECK(present::ActiveBackend() == BackendKind::Gpu);
+    present::testing::SetGpuFault(GpuFault::None);
+    present::Present(px.data(), 320, 240, 320 * 4);
+    CHECK(present::SkippedFrames() == skipped + 3);
+    std::vector<uint32_t> out;
+    int w = 0;
+    int h = 0;
+    REQUIRE(present::ReadbackPresented(&out, &w, &h));
+    CHECK(Mismatches(out, px) == 0);
+
+    // The rebuild was not spent: a loss now is still answered with one.
+    present::testing::SetGpuFault(GpuFault::AcquireOnce);
+    present::Present(px.data(), 320, 240, 320 * 4);
+    CHECK(present::ActiveBackend() == BackendKind::Gpu);
+}
+
+TEST_CASE("regions_snapshot_outlives_set_regions", "[present]")
+{
+    present::SetRegions({ MakeRegion({ 0, 0, 10, 10 }, 0, 0, 20, 20, 2) });
+    const auto held = present::Regions();
+    present::SetRegions({});
+    REQUIRE(held->size() == 1);
+    CHECK((*held)[0].scale == 2);
+    CHECK(present::Regions()->empty());
 }
 
 TEST_CASE("toggle_switches_and_reports", "[present]")
@@ -735,6 +885,15 @@ TEST_CASE("probe_child_outcomes", "[present]")
     r = probe::Run(scripts.Script("crash.sh", "kill -SEGV $$"), 10000);
     CHECK(r.outcome == probe::Outcome::Crashed);
     CHECK(r.reason == "crashed");
+
+    // The child runs with IWD2R_CRASH_PREFIX=probe-gpu (its crash line
+    // reads "probe-gpu crash: ..."), whatever this process has.
+    {
+        ScopedEnv mine("IWD2R_CRASH_PREFIX", "parent");
+        r = probe::Run(scripts.Script("env.sh", "echo \"probe-gpu: ok [$IWD2R_CRASH_PREFIX]\""), 10000);
+        CHECK(r.outcome == probe::Outcome::Ok);
+        CHECK(r.reason == "ok [probe-gpu]");
+    }
 
     // Exit 0 without the ok line is not a pass.
     r = probe::Run("/bin/true", 10000);

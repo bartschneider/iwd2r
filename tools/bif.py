@@ -7,7 +7,10 @@ the game's Override folder (any case) wins; otherwise the resource is looked
 up in CHITIN.KEY and read from its BIFF. The formats are IESDP's: KEY V1
 (bif entries of 12 bytes, resource entries of 14 bytes whose locator holds
 the bif index in bits 20-31 and the file index in bits 0-13) and BIFF V1
-(file entries of 16 bytes). Compressed archives (BIFC, BIF V1.0) are refused.
+(file entries of 16 bytes). A BIFC V1.0 archive (the search maps' archives
+are) is unpacked first: its uncompressed size, then blocks of (uncompressed
+size, compressed size, zlib data). The single-file compressed BIF V1.0 is
+refused.
 
 Standard library only. The extracted text is game data: never commit it.
 """
@@ -15,10 +18,11 @@ Standard library only. The extracted text is game data: never commit it.
 import os
 import struct
 import sys
+import zlib
 
 # Resource types by extension (IESDP); add more as cases need them.
-TYPES = {'2DA': 0x3F4, 'IDS': 0x3F0, 'BCS': 0x3EF, 'INI': 0x802, 'ITM': 0x3ED, 'DLG': 0x3F3,
-         'STO': 0x3F6, 'ARE': 0x3F2, 'CRE': 0x3F1}
+TYPES = {'BMP': 0x001, '2DA': 0x3F4, 'IDS': 0x3F0, 'BCS': 0x3EF, 'INI': 0x802, 'ITM': 0x3ED,
+         'DLG': 0x3F3, 'STO': 0x3F6, 'ARE': 0x3F2, 'CRE': 0x3F1, 'CHU': 0x3EA}
 
 
 class BifError(Exception):
@@ -49,6 +53,32 @@ def parse_key(data):
         resref = raw.split(b'\0', 1)[0].decode('latin-1').upper()
         resources[(resref, rtype)] = (locator >> 20, locator & 0x3FFF)
     return bifs, resources
+
+
+def unpack_bifc(data):
+    """The BIFF V1 archive inside a BIFC V1.0 one."""
+    if len(data) < 12:
+        raise BifError('BIFC header truncated')
+    total, = struct.unpack_from('<I', data, 8)
+    offset = 12
+    out = bytearray()
+    while len(out) < total:
+        if offset + 8 > len(data):
+            raise BifError('BIFC block runs past the end of the archive')
+        size, packed = struct.unpack_from('<II', data, offset)
+        offset += 8
+        if offset + packed > len(data):
+            raise BifError('BIFC block runs past the end of the archive')
+        try:
+            block = zlib.decompress(data[offset:offset + packed])
+        except zlib.error as e:
+            raise BifError('BIFC block does not inflate: %s' % e)
+        if len(block) != size:
+            raise BifError('BIFC block inflates to %d bytes, not %d'
+                           % (len(block), size))
+        out += block
+        offset += packed
+    return bytes(out)
 
 
 def read_biff(data, file_index):
@@ -126,7 +156,10 @@ def extract(game, filename):
         raise BifError('%s names archive %d of %d' % (filename, bif,
                                                        len(bifs)))
     with open(bif_path(game, bifs[bif]), 'rb') as f:
-        return read_biff(f.read(), index)
+        data = f.read()
+    if data[:8] == b'BIFCV1.0':
+        data = unpack_bifc(data)
+    return read_biff(data, index)
 
 
 def extract_to(game, out_dir, names):

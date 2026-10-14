@@ -224,14 +224,12 @@ namespace {
                     cmd_ = nullptr;
                     return Lose("swapchain acquire failed");
                 }
-                if (!swapchain_) {
-                    // Minimised or occluded: nothing to draw into, not a loss.
-                    SDL_SubmitGPUCommandBuffer(cmd_);
-                    cmd_ = nullptr;
-                    return false;
-                }
+                if (!swapchain_ || fault == testing::GpuFault::NullSwapchain)
+                    return NothingToDraw();
                 outW_ = static_cast<int>(w);
                 outH_ = static_cast<int>(h);
+            } else if (fault == testing::GpuFault::NullSwapchain) {
+                return NothingToDraw();
             } else if (window_) {
                 SDL_GetWindowSizeInPixels(window_, &outW_, &outH_);
             } else {
@@ -339,7 +337,10 @@ namespace {
                 return;
 
             Draw d = {};
-            d.filter = filter;
+            // A region drawn one texel per output pixel is shown as it is:
+            // fsr and nis would only sharpen the native-resolution world.
+            const bool identity = dest.w == fw && dest.h == fh;
+            d.filter = identity && (filter == Filter::Fsr || filter == Filter::Nis) ? Filter::Nearest : filter;
             d.viewport = { dest.x, dest.y, dest.w, dest.h, 0.0f, 1.0f };
             d.scissor = { x0, y0, x1 - x0, y1 - y0 };
             // The pixels rasterised: centres inside the viewport, in the
@@ -467,6 +468,14 @@ namespace {
             return true;
         }
 
+        // The driver and the device's name, "vulkan <name>".
+        std::string DeviceName() const
+        {
+            const char* driver = device_ ? SDL_GetGPUDeviceDriver(device_) : nullptr;
+            const char* name = device_ ? SDL_GetStringProperty(SDL_GetGPUDeviceProperties(device_), SDL_PROP_GPU_DEVICE_NAME_STRING, "") : "";
+            return std::string(driver ? driver : "?") + (name && *name ? std::string(" ") + name : std::string());
+        }
+
         bool FrameSize(int* w, int* h) override
         {
             if (lastFrameW_ <= 0 || lastFrameH_ <= 0)
@@ -484,6 +493,17 @@ namespace {
             const char* sdl = SDL_GetError();
             if (sdl && *sdl && std::strstr(why, "test hook") == nullptr)
                 error += std::string(": ") + sdl;
+            return false;
+        }
+
+        // Minimised or occluded (an acquire that succeeded without a
+        // swapchain texture): nothing to draw into, not a loss. The command
+        // buffer is submitted, as an acquired swapchain requires.
+        bool NothingToDraw()
+        {
+            SDL_SubmitGPUCommandBuffer(cmd_);
+            cmd_ = nullptr;
+            swapchain_ = nullptr;
             return false;
         }
 
@@ -730,78 +750,31 @@ namespace {
 
 std::unique_ptr<Backend> MakeGpuBackend() { return std::make_unique<GpuBackend>(); }
 
-namespace {
-
-    SDL_GPUShader* ProbeShader(SDL_GPUDevice* device, const char* name, SDL_GPUShaderStage stage, Uint32 samplers, Uint32 uniforms)
-    {
-        const unsigned char* code = nullptr;
-        size_t size = 0;
-        if (!ShaderCode(name, &code, &size))
-            return nullptr;
-        SDL_GPUShaderCreateInfo info = {};
-        info.code_size = size;
-        info.code = code;
-        info.entrypoint = "main";
-        info.format = SDL_GPU_SHADERFORMAT_SPIRV;
-        info.stage = stage;
-        info.num_samplers = samplers;
-        info.num_uniform_buffers = uniforms;
-        return SDL_CreateGPUShader(device, &info);
-    }
-
-    // The probe's work: a device and the nearest pipeline, as GpuBackend
-    // makes them. said is the line after "probe-gpu: "; false when the
-    // probe failed.
-    bool Probe(std::string& said)
-    {
-        if (!SDL_Init(SDL_INIT_VIDEO)) {
-            said = std::string("unavailable no SDL video: ") + SDL_GetError();
-            return false;
-        }
-        SDL_GPUDevice* device = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV, false, nullptr);
-        if (!device) {
-            said = std::string("unavailable no Vulkan device: ") + SDL_GetError();
-            return false;
-        }
-        SDL_GPUShader* vert = ProbeShader(device, "quad.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
-        SDL_GPUShader* frag = ProbeShader(device, kPipelines[kNearest].fragment, SDL_GPU_SHADERSTAGE_FRAGMENT, 1, kPipelines[kNearest].uniformBuffers);
-        SDL_GPUGraphicsPipeline* pipeline = nullptr;
-        if (vert && frag) {
-            SDL_GPUColorTargetDescription color = {};
-            color.format = kFormat;
-            SDL_GPUGraphicsPipelineCreateInfo info = {};
-            info.vertex_shader = vert;
-            info.fragment_shader = frag;
-            info.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
-            info.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
-            info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
-            info.target_info.color_target_descriptions = &color;
-            info.target_info.num_color_targets = 1;
-            pipeline = SDL_CreateGPUGraphicsPipeline(device, &info);
-        }
-        if (!pipeline)
-            said = std::string("unavailable the nearest pipeline cannot be created: ") + SDL_GetError();
-        if (pipeline)
-            SDL_ReleaseGPUGraphicsPipeline(device, pipeline);
-        if (frag)
-            SDL_ReleaseGPUShader(device, frag);
-        if (vert)
-            SDL_ReleaseGPUShader(device, vert);
-        if (pipeline) {
-            const char* driver = SDL_GetGPUDeviceDriver(device);
-            const char* name = SDL_GetStringProperty(SDL_GetGPUDeviceProperties(device), SDL_PROP_GPU_DEVICE_NAME_STRING, "");
-            said = std::string("ok ") + (driver ? driver : "?") + (name && *name ? std::string(" ") + name : std::string());
-        }
-        SDL_DestroyGPUDevice(device);
-        return pipeline != nullptr;
-    }
-
-}
-
 int RunGpuProbe()
 {
+    // The game's own backend, offscreen at 1x1: the device, every
+    // pipeline and sampler, and one frame drawn and submitted.
     std::string said;
-    const bool ok = Probe(said);
+    bool ok = false;
+    if (!SDL_Init(SDL_INIT_VIDEO)) {
+        said = std::string("unavailable no SDL video: ") + SDL_GetError();
+    } else {
+        GpuBackend backend;
+        backend.offscreen = true;
+        backend.offscreenWidth = 1;
+        backend.offscreenHeight = 1;
+        if (backend.Init(nullptr)) {
+            const uint32_t pixel = 0;
+            if (backend.BeginFrame()) {
+                backend.Upload(&pixel, 1, 1, 4);
+                backend.DrawRegion(WholeFrameRegion(1, 1), Filter::Nearest);
+                backend.EndFrame();
+            }
+            ok = !backend.lost;
+        }
+        said = ok ? "ok " + backend.DeviceName() : "unavailable " + backend.error;
+        backend.Shutdown();
+    }
     std::printf("probe-gpu: %s\n", said.c_str());
     std::fflush(stdout);
     return ok ? 0 : 1;

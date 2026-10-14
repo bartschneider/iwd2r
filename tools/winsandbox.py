@@ -2,7 +2,8 @@
 
 Each scenario runs in a fresh, disposable Windows Sandbox: play.py builds
 iwd2r.exe with MSVC (deploying the MSVC runtime DLLs next to it), keeps a copy
-of the install in a host cache (the real install is never mapped), writes a
+of the game data (by default the vanilla copy, never the IWD2EE install) in a
+host cache, rebuilt when its source changes (refresh_cache), writes a
 .wsb file that maps four folders and runs tools/sandbox/driver.ps1 at logon,
 starts the sandbox, waits for the driver's done.txt and closes it.
 
@@ -15,7 +16,9 @@ starts the sandbox, waits for the driver's done.txt and closes it.
 Standard library only.
 """
 
+import contextlib
 import glob
+import hashlib
 import json
 import os
 import shutil
@@ -75,30 +78,93 @@ def key_stat(directory):
     return None
 
 
-def cache_needs_refresh(source, cache):
-    """True when the cache is missing or its CHITIN.KEY differs from the
-    source's in mtime or size."""
+def source_record_path(cache):
+    """The file beside the cache that records what it was copied from."""
+    return cache.rstrip('/') + '.source.json'
+
+
+def source_record(source, marker='vanilla.ok'):
+    """What a cache copied from source records: the source's absolute path
+    and the SHA-256 of its vanilla marker (tools/oracle.py, None when the
+    source has none)."""
+    try:
+        with open(os.path.join(source, marker), 'rb') as f:
+            digest = hashlib.sha256(f.read()).hexdigest()
+    except OSError:
+        digest = None
+    return {'source': os.path.abspath(source), 'marker_sha256': digest}
+
+
+def read_source_record(cache):
+    try:
+        with open(source_record_path(cache)) as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def write_source_record(source, cache):
+    path = source_record_path(cache)
+    tmp = path + '.tmp'
+    with open(tmp, 'w') as f:
+        json.dump(source_record(source), f, indent=2)
+        f.write('\n')
+    os.replace(tmp, path)
+
+
+def cache_state(source, cache):
+    """'current'; 'stale' when the cache was copied from this source but its
+    CHITIN.KEY differs in mtime or size (an update: rsync it); 'foreign'
+    when it was copied from another source, another build of the vanilla
+    copy, or nothing records its source (rebuild it from scratch)."""
     want = key_stat(source)
     if want is None:
         raise FileNotFoundError('%s has no CHITIN.KEY' % source)
-    return key_stat(cache) != want
+    if read_source_record(cache) != source_record(source):
+        return 'foreign'
+    return 'current' if key_stat(cache) == want else 'stale'
 
 
-def refresh_cache(source, cache, log):
-    """Copies the install into the cache when needed (rsync keeps mtimes, so
-    the next comparison matches). Returns True when it copied."""
-    if not cache_needs_refresh(source, cache):
-        log('game cache %s is current' % cache)
+def cache_needs_refresh(source, cache):
+    return cache_state(source, cache) != 'current'
+
+
+def refresh_cache(source, cache, log, lock=None):
+    """Copies the source into the cache when needed (rsync keeps mtimes, so
+    the next comparison matches); a cache from another source is deleted
+    first, so nothing of it is reused. lock, when given, returns a context
+    manager held around the copy, and the state is checked again under it.
+    Returns True when it copied."""
+    if os.path.realpath(source) == os.path.realpath(cache):
+        raise ValueError('the game cache %s is its own source' % cache)
+    if cache_state(source, cache) == 'current':
+        log('game cache %s is current (from %s)' % (cache, source))
         return False
-    os.makedirs(cache, exist_ok=True)
-    log('copying the install to the game cache %s (about 1.9 GB, once)'
-        % cache)
-    started = time.time()
-    r = subprocess.run(['rsync', '-rt', '--delete', source.rstrip('/') + '/',
-                        cache.rstrip('/') + '/'])
-    if r.returncode != 0:
-        raise RuntimeError('rsync to the game cache failed')
-    log('game cache copied in %.0f s' % (time.time() - started))
+    with (lock() if lock else contextlib.nullcontext()):
+        state = cache_state(source, cache)
+        if state == 'current':
+            log('game cache %s is current (from %s)' % (cache, source))
+            return False
+        record = source_record_path(cache)
+        if os.path.exists(record):
+            os.remove(record)
+        if state == 'foreign' and os.path.isdir(cache):
+            log('game cache %s was not copied from %s: deleting it'
+                % (cache, source))
+            # Never remove the root or a folder that holds the source itself.
+            assert cache and os.path.realpath(cache) != os.sep and not (os.path.realpath(source) + os.sep).startswith(os.path.realpath(cache) + os.sep), cache
+            shutil.rmtree(cache)
+        os.makedirs(cache, exist_ok=True)
+        log('rebuilding the game cache %s from %s (about 1.9 GB)'
+            % (cache, source))
+        started = time.time()
+        r = subprocess.run(['rsync', '-rt', '--delete',
+                            source.rstrip('/') + '/', cache.rstrip('/') + '/'])
+        if r.returncode != 0:
+            raise RuntimeError('rsync to the game cache failed')
+        write_source_record(source, cache)
+        log('game cache copied in %.0f s' % (time.time() - started))
     return True
 
 
