@@ -6,6 +6,7 @@
 #include "CGameEffect.h"
 #include "CGameEffectList.h"
 #include "CGameSprite.h"
+#include "CImmunities.h"
 #include "CInfGame.h"
 #include "CScreenCreateChar.h"
 #include "ScreenLayout.h"
@@ -592,6 +593,62 @@ TEST_CASE("stoneskins (218), slay (55) and stone to flesh (43)", "[effects][data
         SHORT nHitPoints = pSprite->m_baseStats.m_hitPoints;
         CHECK(Apply(pSprite, CGAMEEFFECT_STONETOFLESH, 0, 0, 0) == TRUE);
         CHECK(pSprite->m_baseStats.m_hitPoints == nHitPoints);
+    }
+
+    delete pSprite;
+}
+
+TEST_CASE("apply effect (177) and the equip triggers (182, 183)", "[effects][data]")
+{
+    REQUIRE_ENGINE();
+    CGameSprite* pSprite = MakeSprite();
+
+    SECTION("177 with a type that does not match does nothing")
+    {
+        BYTE nRace = pSprite->GetAIType().m_nRace;
+        CGameEffect* pEffect = Make(CGAMEEFFECT_APPLYEFFECT, 4, nRace + 1, 0);
+        pEffect->m_res = CResRef("NOFILE");
+        REQUIRE(pEffect->ApplyEffect(pSprite) == TRUE);
+        CHECK(pEffect->m_done == FALSE);
+        delete pEffect;
+    }
+
+    SECTION("177 with a matching type and no such EFF file only looks it up")
+    {
+        BYTE nRace = pSprite->GetAIType().m_nRace;
+        CGameEffect* pEffect = Make(CGAMEEFFECT_APPLYEFFECT, 4, nRace, 0);
+        pEffect->m_res = CResRef("NOFILE");
+        REQUIRE(pEffect->ApplyEffect(pSprite) == TRUE);
+        CHECK(pEffect->m_done == FALSE);
+        delete pEffect;
+    }
+
+    SECTION("182 records the item and its EFF (none in the vanilla data)")
+    {
+        INT count = pSprite->m_derivedStats.field_290.GetCount();
+        CGameEffect* pEffect = Make(CGAMEEFFECT_APPLYEFFECTEQUIPITEM, 0, 0, 0);
+        pEffect->m_res = CResRef("00SWDL01");
+        pEffect->m_res2 = CResRef("NOFILE");
+        REQUIRE(pEffect->ApplyEffect(pSprite) == TRUE);
+        REQUIRE(pSprite->m_derivedStats.field_290.GetCount() == count + 1);
+        CImmunitiesItemEquip* pEntry = pSprite->m_derivedStats.field_290.GetTail();
+        CHECK(pEntry->m_res == CResRef("00SWDL01"));
+        CHECK(pEntry->m_error == static_cast<STRREF>(-1));
+        CHECK(pEntry->m_pEffect == NULL);
+        delete pEffect;
+    }
+
+    SECTION("183 records the item type and the error string")
+    {
+        INT count = pSprite->m_derivedStats.field_2AC.GetCount();
+        CGameEffect* pEffect = Make(CGAMEEFFECT_APPLYEFFECTEQUIPITEMTYPE, 0x14, 1234, 0);
+        pEffect->m_res = CResRef("NOFILE");
+        REQUIRE(pEffect->ApplyEffect(pSprite) == TRUE);
+        REQUIRE(pSprite->m_derivedStats.field_2AC.GetCount() == count + 1);
+        CImmunitiesItemTypeEquip* pEntry = pSprite->m_derivedStats.field_2AC.GetTail();
+        CHECK(pEntry->m_type == 0x14);
+        CHECK(pEntry->m_error == 1234);
+        delete pEffect;
     }
 
     delete pSprite;

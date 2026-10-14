@@ -11,6 +11,7 @@
 #include "CInfGame.h"
 #include "CPathSearch.h"
 #include "CProjectile.h"
+#include "CResEffect.h"
 #include "CScreenWorld.h"
 #include "CSevenEyes.h"
 #include "CSpell.h"
@@ -14065,6 +14066,94 @@ CGameEffect* CGameEffectApplyEffect::Copy()
     return copy;
 }
 
+// 0x4BE2A0
+BOOL CGameEffectApplyEffect::ApplyEffect(CGameSprite* pSprite)
+{
+    CAIObjectType typeAI;
+    typeAI.Set(pSprite->GetAIType());
+
+    CAIObjectType type(0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0);
+
+    // The EFF file applies when the sprite's object type has the amount in
+    // the field the mode names (an amount of 0 matches any).
+    BOOL bAlignment = FALSE;
+    BOOL bApply = FALSE;
+    switch (m_dwFlags) {
+    case 2:
+        type.m_nEnemyAlly = static_cast<BYTE>(m_effectAmount);
+        bApply = typeAI.OfType(type, FALSE, FALSE);
+        break;
+    case 3:
+        bApply = typeAI.m_nGeneral == static_cast<DWORD>(m_effectAmount) || m_effectAmount == 0;
+        break;
+    case 4:
+        bApply = typeAI.m_nRace == static_cast<DWORD>(m_effectAmount) || m_effectAmount == 0;
+        break;
+    case 5:
+        bApply = (typeAI.m_nClassMask & m_effectAmount) != 0 || m_effectAmount == 0;
+        break;
+    case 6:
+        bApply = typeAI.m_nSpecific == static_cast<DWORD>(m_effectAmount) || m_effectAmount == 0;
+        break;
+    case 7:
+        bApply = typeAI.m_nGender == static_cast<DWORD>(m_effectAmount) || m_effectAmount == 0;
+        break;
+    case 8:
+        // An amount of 1, 2, 3 names the good-evil axis, 0x10, 0x20, 0x30
+        // the law-chaos axis.
+        if (typeAI.m_nAlignment == static_cast<DWORD>(m_effectAmount) || m_effectAmount == 0) {
+            bAlignment = TRUE;
+        }
+
+        bApply = (m_effectAmount == 1 && (typeAI.m_nAlignment & 0xF) == 1)
+            || (m_effectAmount == 2 && (typeAI.m_nAlignment & 0xF) == 2)
+            || (m_effectAmount == 3 && (typeAI.m_nAlignment & 0xF) == 3)
+            || (m_effectAmount == 0x10 && (typeAI.m_nAlignment & 0xF0) == 0x10)
+            || (m_effectAmount == 0x20 && (typeAI.m_nAlignment & 0xF0) == 0x20)
+            || (m_effectAmount == 0x30 && (typeAI.m_nAlignment & 0xF0) == 0x30)
+            || bAlignment;
+        break;
+    }
+
+    if (!bApply) {
+        return TRUE;
+    }
+
+    // The effect stored in the EFF file m_res, applied now; it ends this
+    // one when it ends itself.
+    CResHelper<CResEffect, 1016> cFile;
+    cFile.SetResRef(m_res, TRUE, TRUE);
+    if (cFile.pRes != NULL) {
+        BYTE* pData = static_cast<BYTE*>(cFile.pRes->Demand());
+        if (pData == NULL) {
+            cFile.Release();
+        } else {
+            // NOTE: The original passes a record whose other fields are left
+            // uninitialised; CopyFromBase replaces them all.
+            ITEM_EFFECT effect;
+            memset(&effect, 0, sizeof(effect));
+            effect.effectID = *reinterpret_cast<WORD*>(pData + 0x10);
+
+            CGameEffect* pEffect = CGameEffect::DecodeEffect(&effect, CPoint(-1, -1), -1, CPoint(-1, -1));
+            pEffect->CopyFromBase(reinterpret_cast<CGameEffectBase*>(pData + 8));
+            pEffect->m_res.MakeUpper();
+            pEffect->m_res2.MakeUpper();
+            pEffect->m_res3.MakeUpper();
+            cFile.Release();
+
+            if (pEffect != NULL) {
+                pEffect->ApplyEffect(pSprite);
+                if (pEffect->m_done) {
+                    m_done = TRUE;
+                }
+                delete pEffect;
+            }
+        }
+    }
+
+    return TRUE;
+}
+
 // -----------------------------------------------------------------------------
 
 // NOTE: Inlined.
@@ -14273,6 +14362,46 @@ CGameEffect* CGameEffectApplyEffectEquipItem::Copy()
     return copy;
 }
 
+// 0x4BE9A0
+BOOL CGameEffectApplyEffectEquipItem::ApplyEffect(CGameSprite* pSprite)
+{
+    // Equipping the item m_res applies the EFF file m_res2.
+    CImmunitiesItemEquip* pEntry = new CImmunitiesItemEquip();
+    pEntry->m_error = -1;
+    pEntry->m_res = m_res;
+
+    CGameEffect* pEffect;
+    CResHelper<CResEffect, 1016> cFile;
+    cFile.SetResRef(m_res2, TRUE, TRUE);
+    if (cFile.pRes == NULL) {
+        pEffect = NULL;
+    } else {
+        BYTE* pData = static_cast<BYTE*>(cFile.pRes->Demand());
+        if (pData == NULL) {
+            cFile.Release();
+            pEffect = NULL;
+        } else {
+            // NOTE: The original passes a record whose other fields are left
+            // uninitialised; CopyFromBase replaces them all.
+            ITEM_EFFECT effect;
+            memset(&effect, 0, sizeof(effect));
+            effect.effectID = *reinterpret_cast<WORD*>(pData + 0x10);
+
+            pEffect = CGameEffect::DecodeEffect(&effect, CPoint(-1, -1), -1, CPoint(-1, -1));
+            pEffect->CopyFromBase(reinterpret_cast<CGameEffectBase*>(pData + 8));
+            pEffect->m_res.MakeUpper();
+            pEffect->m_res2.MakeUpper();
+            pEffect->m_res3.MakeUpper();
+            cFile.Release();
+        }
+    }
+
+    pEntry->m_pEffect = pEffect;
+    pSprite->m_derivedStats.field_290.AddTail(pEntry);
+
+    return TRUE;
+}
+
 // -----------------------------------------------------------------------------
 
 // NOTE: Inlined.
@@ -14289,6 +14418,46 @@ CGameEffect* CGameEffectApplyEffectEquipItemType::Copy()
     delete effect;
     copy->CopyFromBase(this);
     return copy;
+}
+
+// 0x4BEB60
+BOOL CGameEffectApplyEffectEquipItemType::ApplyEffect(CGameSprite* pSprite)
+{
+    // Equipping an item of type m_dwFlags applies the EFF file m_res.
+    CImmunitiesItemTypeEquip* pEntry = new CImmunitiesItemTypeEquip();
+    pEntry->m_error = m_effectAmount;
+    pEntry->m_type = m_dwFlags;
+
+    CGameEffect* pEffect;
+    CResHelper<CResEffect, 1016> cFile;
+    cFile.SetResRef(m_res, TRUE, TRUE);
+    if (cFile.pRes == NULL) {
+        pEffect = NULL;
+    } else {
+        BYTE* pData = static_cast<BYTE*>(cFile.pRes->Demand());
+        if (pData == NULL) {
+            cFile.Release();
+            pEffect = NULL;
+        } else {
+            // NOTE: The original passes a record whose other fields are left
+            // uninitialised; CopyFromBase replaces them all.
+            ITEM_EFFECT effect;
+            memset(&effect, 0, sizeof(effect));
+            effect.effectID = *reinterpret_cast<WORD*>(pData + 0x10);
+
+            pEffect = CGameEffect::DecodeEffect(&effect, CPoint(-1, -1), -1, CPoint(-1, -1));
+            pEffect->CopyFromBase(reinterpret_cast<CGameEffectBase*>(pData + 8));
+            pEffect->m_res.MakeUpper();
+            pEffect->m_res2.MakeUpper();
+            pEffect->m_res3.MakeUpper();
+            cFile.Release();
+        }
+    }
+
+    pEntry->m_pEffect = pEffect;
+    pSprite->m_derivedStats.field_2AC.AddTail(pEntry);
+
+    return TRUE;
 }
 
 // -----------------------------------------------------------------------------
