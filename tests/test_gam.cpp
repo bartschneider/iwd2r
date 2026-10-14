@@ -587,6 +587,16 @@ static std::vector<LONG> FrontIds(CGameArea* pArea)
     return ids;
 }
 
+// The y of object `id`.
+static LONG YOf(LONG id)
+{
+    CGameObject* pObject;
+    REQUIRE(g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(id, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) == CGameObjectArray::SUCCESS);
+    const LONG y = pObject->GetPos().y;
+    g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(id, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+    return y;
+}
+
 // CGameArea::SortLists (0x4794E0) merges the objects AddToArea queued into
 // the y-sorted front list: each queued object goes on once, every front
 // object stays, and the list is in y order. (Ours once merged the front part
@@ -626,24 +636,40 @@ TEST_CASE("gam: SortLists merges a queued object into the front list once and ke
         front.push_back(static_cast<LONG>(reinterpret_cast<INT_PTR>(pArea->m_lVertSort.GetNext(pos))));
     REQUIRE(front.size() > 2);
 
+    // The queued sprite takes the y of a front object in the middle: on a
+    // tie the queued object goes first (the merge takes it while its y is
+    // less than or equal to the front object's). The front part, already in
+    // y order, keeps its order through the bubble sort.
+    const LONG tieId = front[front.size() / 2];
+    const LONG tieY = YOf(tieId);
+    pSprite->m_pos.y = tieY;
+    std::vector<LONG> expected;
+    bool placed = false;
+    for (LONG id : front) {
+        if (!placed && YOf(id) >= tieY) {
+            expected.push_back(pSprite->GetId());
+            placed = true;
+        }
+        expected.push_back(id);
+    }
+    if (!placed)
+        expected.push_back(pSprite->GetId());
+
     pArea->SortLists();
     CHECK(pArea->m_lVertSortAdd.IsEmpty());
-    CHECK(pArea->m_lVertSort.GetCount() == static_cast<INT_PTR>(front.size() + 1));
+    CHECK(FrontIds(pArea) == expected);
     CHECK(TimesInArea(pArea, pSprite->GetId()) == 1);
     for (LONG id : front) {
         INFO("object 0x" << std::hex << id);
         CHECK(TimesInArea(pArea, id) == 1);
     }
-    LONG lastY = INT_MIN;
     pos = pArea->m_lVertSort.GetHeadPosition();
     while (pos != NULL) {
         POSITION here = pos;
         const LONG id = static_cast<LONG>(reinterpret_cast<INT_PTR>(pArea->m_lVertSort.GetNext(pos)));
         CGameObject* pObject;
         REQUIRE(pGame->GetObjectArray()->GetShare(id, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) == CGameObjectArray::SUCCESS);
-        CHECK(pObject->GetPos().y >= lastY);
         CHECK(pObject->GetVertListPos() == here);
-        lastY = pObject->GetPos().y;
         pGame->GetObjectArray()->ReleaseShare(id, CGameObjectArray::THREAD_ASYNCH, INFINITE);
     }
 }
