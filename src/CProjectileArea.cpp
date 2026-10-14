@@ -553,3 +553,74 @@ void CProjectileArea8504BC::ApplyToTargets(std::list<LONG>& targets)
 
     CProjectileArea::ApplyToTargets(targets);
 }
+
+// -----------------------------------------------------------------------------
+
+// 0x575CD0
+CProjectileArea8505F4::CProjectileArea8505F4(WORD nRadius)
+    : CProjectileArea(nRadius)
+{
+}
+
+// 0x575CF0
+void CProjectileArea8505F4::ApplyToTargets(std::list<LONG>& targets)
+{
+    for (std::list<LONG>::iterator it = targets.begin(); it != targets.end(); ++it) {
+        CGameObject* pObject;
+        BYTE rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(*it,
+            CGameObjectArray::THREAD_ASYNCH,
+            &pObject,
+            INFINITE);
+        if (rc != CGameObjectArray::SUCCESS) {
+            // NOTE: The original returns here, leaving the other targets
+            // (0x575D36).
+            return;
+        }
+
+        if (pObject->GetObjectType() == CGameObject::TYPE_SPRITE
+            && !static_cast<CGameSprite*>(pObject)->GetDerivedStats()->m_spellStates.test(SPLSTATE_MOLD_TOUCH)) {
+            CreateSecondary(*it);
+
+            g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(*it,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+
+            // One target only.
+            return;
+        }
+
+        g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(*it,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+    }
+}
+
+// -----------------------------------------------------------------------------
+
+// 0x575DD0
+CProjectileArea850690::CProjectileArea850690(WORD nRadius)
+    : CProjectileArea(nRadius)
+{
+}
+
+// 0x575DF0
+void CProjectileArea850690::ApplyToTargets(std::list<LONG>& targets)
+{
+    for (std::list<LONG>::iterator it = targets.begin(); it != targets.end(); ++it) {
+        CGameObject* pObject;
+        BYTE rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(*it,
+            CGameObjectArray::THREAD_ASYNCH,
+            &pObject,
+            INFINITE);
+        if (rc == CGameObjectArray::SUCCESS) {
+            if (pObject->GetObjectType() == CGameObject::TYPE_SPRITE
+                && !static_cast<CGameSprite*>(pObject)->GetDerivedStats()->m_spellStates.test(SPLSTATE_SHROUD_OF_FLAME)) {
+                CreateSecondary(*it);
+            }
+
+            g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(*it,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+        }
+    }
+}

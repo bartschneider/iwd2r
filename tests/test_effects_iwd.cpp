@@ -325,6 +325,37 @@ std::vector<CGameEffect*> Carried(CProjectile* pProjectile)
     return effects;
 }
 
+// How many effects GetSpellResrefEffects gives for this spell at this level
+// (the last ability whose minimum level is not above it).
+size_t SpellEffectCount(const char* szResRef, SHORT nLevel)
+{
+    CSpell spell { CResRef(szResRef) };
+    spell.Demand();
+    SHORT nAbility = 0;
+    while (nAbility < spell.GetAbilityCount() && spell.GetAbility(nAbility)->minCasterLevel <= nLevel) {
+        nAbility++;
+    }
+    nAbility--;
+    size_t count = nAbility >= 0 ? static_cast<size_t>(spell.GetAbility(nAbility)->effectCount) : 0;
+    spell.Release();
+    return count;
+}
+
+// Removes and deletes the sprite's timed effects with this source resref.
+void RemoveTimed(CGameSprite* pSprite, const CResRef& sourceRes)
+{
+    CGameEffectList& list = pSprite->m_timedEffectList;
+    POSITION pos = list.GetHeadPosition();
+    while (pos != NULL) {
+        POSITION current = pos;
+        CGameEffect* pEffect = list.GetNext(pos);
+        if (pEffect->m_sourceRes == sourceRes) {
+            list.RemoveAt(current);
+            delete pEffect;
+        }
+    }
+}
+
 #define PROBE_OR_SKIP(pSprite)                                          \
     if (DataDir() == nullptr) {                                         \
         SKIP("[iwd2r-skip] IWD2_DATA unset");                           \
@@ -1239,5 +1270,208 @@ TEST_CASE("effects-iwd: casting glow (235) queues its message and fires the scho
         CHECK(pGlow->m_bHasHeight == TRUE);
         RemoveAdded(pArea);
     }
+    ClearMessages();
+}
+
+TEST_CASE("effects-iwd: the area of effect tick (0x4C1C00) fires an area with the spell's effects", "[effects][data]")
+{
+    PROBE_OR_SKIP(pSprite);
+    ClearMessages();
+    CGameArea* pArea = pSprite->GetArea();
+    pArea->SortLists();
+    const LONG nGameTime = static_cast<LONG>(g_pBaldurChitin->GetObjectGame()->GetWorldTimer()->m_gameTime);
+
+    CPersistantEffect84C4B4 tick("SPWI112", 150, 105, nGameTime, 0);
+    tick.m_sourceID = pSprite->GetId();
+    memcpy(tick.field_29, "SPWI999X", 8);
+    tick.field_58.insert(reinterpret_cast<void*>(static_cast<INT_PTR>(pSprite->GetId())));
+
+    // Two periods: twice the spell's level 1 effects, each with field_29 as
+    // its source resref and the sprite's position as its target; the ids of
+    // field_58 are left out.
+    tick.ApplyEffect(pSprite, 2);
+    CProjectileArea* pProjectile = AddedOne<CProjectileArea>(pArea);
+    REQUIRE(pProjectile != nullptr);
+    CHECK(pProjectile->m_nRadius == 150);
+    CHECK(pProjectile->m_sourceId == pSprite->GetId());
+    CHECK(pProjectile->m_excludedTargets.count(pSprite->GetId()) == 1);
+    std::vector<CGameEffect*> carried = Carried(pProjectile);
+    CHECK(carried.size() == 2 * SpellEffectCount("SPWI112", 1));
+    for (CGameEffect* pCarried : carried) {
+        CHECK(pCarried->m_sourceRes == CResRef("SPWI999X"));
+        CHECK(pCarried->m_target == pSprite->GetPos());
+    }
+    RemoveAdded(pArea);
+
+    // From 100 on, field_44 once; it is empty, so an empty area is fired.
+    tick.ApplyEffect(pSprite, 100);
+    pProjectile = AddedOne<CProjectileArea>(pArea);
+    REQUIRE(pProjectile != nullptr);
+    CHECK(Carried(pProjectile).empty());
+    RemoveAdded(pArea);
+
+    // Without its source, nothing.
+    tick.m_sourceID = CGameObjectArray::INVALID_INDEX;
+    tick.ApplyEffect(pSprite, 1);
+    CHECK(Added(pArea).empty());
+    ClearMessages();
+}
+
+TEST_CASE("effects-iwd: the persistant effect tick (0x4C21E0) adds the spell's effects to the sprite", "[effects][data]")
+{
+    PROBE_OR_SKIP(pSprite);
+    ClearMessages();
+    const LONG nGameTime = static_cast<LONG>(g_pBaldurChitin->GetObjectGame()->GetWorldTimer()->m_gameTime);
+
+    CPersistantEffect84C4C4 tick("SPWI102", 105, nGameTime, 0);
+    tick.m_sourceID = pSprite->GetId();
+    memcpy(tick.field_29, "SPWI998X", 8);
+
+    const CResRef marker("SPWI998X");
+    auto marked = [&]() {
+        size_t n = 0;
+        POSITION pos = pSprite->m_timedEffectList.GetHeadPosition();
+        while (pos != NULL) {
+            if (pSprite->m_timedEffectList.GetNext(pos)->m_sourceRes == marker) {
+                n++;
+            }
+        }
+        return n;
+    };
+    RemoveTimed(pSprite, marker);
+
+    // One period: the spell's level 1 effects (those that stay on the timed
+    // list); two periods: twice as many.
+    tick.ApplyEffect(pSprite, 1);
+    const size_t count = marked();
+    REQUIRE(count > 0);
+    CHECK(count <= SpellEffectCount("SPWI102", 1));
+    RemoveTimed(pSprite, marker);
+    tick.ApplyEffect(pSprite, 2);
+    CHECK(marked() == 2 * count);
+    RemoveTimed(pSprite, marker);
+
+    // From 100 on: field_44, here empty, adds nothing.
+    tick.ApplyEffect(pSprite, 100);
+    CHECK(marked() == 0);
+    tick.field_44 = "SPWI102";
+    tick.ApplyEffect(pSprite, 100);
+    CHECK(marked() == count);
+    RemoveTimed(pSprite, marker);
+    ClearMessages();
+}
+
+TEST_CASE("effects-iwd: the shroud of flame tick (0x4C2CB0) fires its area after the first two ticks", "[effects][data]")
+{
+    PROBE_OR_SKIP(pSprite);
+    ClearMessages();
+    CGameArea* pArea = pSprite->GetArea();
+    pArea->SortLists();
+    const LONG nGameTime = static_cast<LONG>(g_pBaldurChitin->GetObjectGame()->GetWorldTimer()->m_gameTime);
+    const SHORT nHitPoints = pSprite->GetBaseStats()->m_hitPoints;
+
+    CPersistantEffect84C4D4 tick(40, 15, nGameTime - 30, nGameTime + 150);
+    tick.m_sourceID = pSprite->GetId();
+    memcpy(tick.field_29, "SPWI997X", 8);
+    tick.field_58.insert(reinterpret_cast<void*>(static_cast<INT_PTR>(77)));
+
+    // Not in the first two ticks after the start.
+    tick.field_18 = nGameTime;
+    tick.ApplyEffect(pSprite, 1);
+    CHECK(Added(pArea).empty());
+    tick.field_18 = nGameTime - 30;
+
+    // NOTE: Index 0 only. With a period to apply, the "EffSoF1" effects go
+    // to the sprite at once and reach CGameSprite::StartSpriteEffect
+    // (0x708280), whose port asserts on a successful allocation (its NULL
+    // checks are inverted; reported to CGameSprite.cpp's owner).
+    tick.ApplyEffect(pSprite, 0);
+    CProjectileArea850690* pProjectile = AddedOne<CProjectileArea850690>(pArea);
+    REQUIRE(pProjectile != nullptr);
+    CHECK(pProjectile->m_nRadius == 40);
+    CHECK(pProjectile->m_sourceId == pSprite->GetId());
+    CHECK(pProjectile->m_excludedTargets.count(pSprite->GetId()) == 1);
+    CHECK(pProjectile->m_excludedTargets.count(77) == 1);
+    CHECK(Carried(pProjectile).empty());
+    RemoveAdded(pArea);
+    RemoveTimed(pSprite, CResRef("SPWI997X"));
+    pSprite->GetBaseStats()->m_hitPoints = nHitPoints;
+    ClearMessages();
+}
+
+TEST_CASE("effects-iwd: the mold touch tick (0x4C3280) fires its area after the first two ticks", "[effects][data]")
+{
+    PROBE_OR_SKIP(pSprite);
+    ClearMessages();
+    CGameArea* pArea = pSprite->GetArea();
+    pArea->SortLists();
+    const LONG nGameTime = static_cast<LONG>(g_pBaldurChitin->GetObjectGame()->GetWorldTimer()->m_gameTime);
+
+    // No dice left: no damage, only the area.
+    CPersistantEffect84C484 tick(0, "", 60, 15, nGameTime - 30, 0);
+    tick.m_sourceID = pSprite->GetId();
+    memcpy(tick.field_29, "SPWI996X", 8);
+
+    tick.ApplyEffect(pSprite, 2);
+    CProjectileArea8505F4* pProjectile = AddedOne<CProjectileArea8505F4>(pArea);
+    REQUIRE(pProjectile != nullptr);
+    CHECK(pProjectile->m_nRadius == 60);
+    CHECK(pProjectile->m_excludedTargets.count(pSprite->GetId()) == 1);
+    std::vector<CGameEffect*> carried = Carried(pProjectile);
+    CHECK(carried.size() == 2 * SpellEffectCount("EffMT1", 1));
+    for (CGameEffect* pCarried : carried) {
+        CHECK(pCarried->m_sourceRes == CResRef("SPWI996X"));
+    }
+    RemoveAdded(pArea);
+
+    // In the first two ticks: no area.
+    tick.field_18 = nGameTime - 1;
+    tick.ApplyEffect(pSprite, 2);
+    CHECK(Added(pArea).empty());
+    ClearMessages();
+}
+
+TEST_CASE("effects-iwd: the mold touch and shroud of flame areas pick their targets", "[effects][data]")
+{
+    PROBE_OR_SKIP(pSprite);
+    ClearMessages();
+    CGameArea* pArea = pSprite->GetArea();
+    CDerivedStats* pStats = pSprite->GetDerivedStats();
+    std::list<LONG> targets;
+
+    // Mold touch: it stops at a target it cannot share.
+    CProjectileArea8505F4* pMold = new CProjectileArea8505F4(60);
+    pMold->Fire(pArea, pSprite->GetId(), pSprite->GetId(), pSprite->GetPos(), 0, 0);
+    pArea->SortLists();
+    targets = { CGameObjectArray::INVALID_INDEX, pSprite->GetId() };
+    pMold->ApplyToTargets(targets);
+    CHECK(Added(pArea).empty());
+    // A sprite in the mold touch state is skipped; one without it is struck.
+    pStats->m_spellStates.set(SPLSTATE_MOLD_TOUCH);
+    targets = { pSprite->GetId() };
+    pMold->ApplyToTargets(targets);
+    CHECK(Added(pArea).empty());
+    pStats->m_spellStates.reset(SPLSTATE_MOLD_TOUCH);
+    targets = { pSprite->GetId(), pSprite->GetId() };
+    pMold->ApplyToTargets(targets);
+    CHECK(Added(pArea).size() == 1);
+    RemoveAdded(pArea);
+    pMold->RemoveSelf();
+
+    // Shroud of flame: it goes past a target it cannot share and strikes
+    // every sprite not in the shroud of flame state.
+    CProjectileArea850690* pShroud = new CProjectileArea850690(40);
+    pShroud->Fire(pArea, pSprite->GetId(), pSprite->GetId(), pSprite->GetPos(), 0, 0);
+    pArea->SortLists();
+    targets = { CGameObjectArray::INVALID_INDEX, pSprite->GetId(), pSprite->GetId() };
+    pShroud->ApplyToTargets(targets);
+    CHECK(Added(pArea).size() == 2);
+    RemoveAdded(pArea);
+    pStats->m_spellStates.set(SPLSTATE_SHROUD_OF_FLAME);
+    targets = { pSprite->GetId() };
+    pShroud->ApplyToTargets(targets);
+    CHECK(Added(pArea).empty());
+    pStats->m_spellStates.reset(SPLSTATE_SHROUD_OF_FLAME);
+    pShroud->RemoveSelf();
     ClearMessages();
 }
