@@ -3,6 +3,7 @@
 
 #include "CAIAction.h"
 #include "CAIScript.h"
+#include "CAITrigger.h"
 #include "CBaldurChitin.h"
 #include "CGameAnimationTypeCharacter.h"
 #include "CGameArea.h"
@@ -1200,4 +1201,36 @@ TEST_CASE("animation: a two-handed weapon takes the two-handed stance and READY 
     CHECK(pAnimation->m_weaponCode == 5);
     pHedron->m_animation.SetSequence(7);
     CHECK(pAnimation->m_currentBamSequence == 3);
+}
+
+TEST_CASE("trigger: IsTeamBitOn tests the bits SetTeamBit sets (0x40E4)", "[ai][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    CGameSprite* pCharacter = NewGameInStartArea(cre);
+    REQUIRE(pCharacter->GetArea() != NULL);
+
+    // 0x455E44: the trigger's number ANDed with field_58C.
+    const CAITrigger teamBit64(0x40E4, 64);
+    pCharacter->field_58C = 0;
+    CHECK_FALSE(pCharacter->EvaluateStatusTrigger(teamBit64));
+
+    // SetTeamBit(64, TRUE) (case 310) turns it on; SetTeamBit(64, FALSE) off.
+    pCharacter->m_curAction = CAIAction(310, CPoint(-1, -1), 64, 1);
+    CHECK(pCharacter->ExecuteAction() == CGameAIBase::ACTION_DONE);
+    CHECK(pCharacter->EvaluateStatusTrigger(teamBit64));
+    CHECK_FALSE(pCharacter->EvaluateStatusTrigger(CAITrigger(0x40E4, 32)));
+    pCharacter->m_curAction = CAIAction(310, CPoint(-1, -1), 64, 0);
+    CHECK(pCharacter->ExecuteAction() == CGameAIBase::ACTION_DONE);
+    CHECK_FALSE(pCharacter->EvaluateStatusTrigger(teamBit64));
+    pCharacter->m_curAction = CAIAction();
 }

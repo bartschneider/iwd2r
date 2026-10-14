@@ -3797,6 +3797,10 @@ BOOL CGameAIBase::EvaluateStatusTrigger(const CAITrigger& trigger)
     case 0x4023:
         // True
         return TRUE;
+    case 0x40E4:
+        // IsTeamBitOn (0x455E44-0x455E58)
+        bResult = triggerCopy.m_specificID & sub_45B6D0();
+        break;
     case 0x4030:
     case 0x40C8:
         // False, HasInnateAbility
