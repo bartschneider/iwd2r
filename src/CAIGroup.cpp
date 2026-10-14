@@ -423,7 +423,69 @@ CAIGroup::CAIGroup(SHORT id)
 // 0x404D00
 void CAIGroup::GroupAction(CAIAction action, BOOL override, CAIAction* leaderAction)
 {
-    // TODO: Incomplete.
+    BOOL bLeader = TRUE;
+
+    POSITION pos = m_memberList.GetHeadPosition();
+    while (pos != NULL) {
+        LONG memberId = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_memberList.GetNext(pos)));
+
+        CGameSprite* pSprite;
+
+        BYTE rc;
+        do {
+            rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetDeny(memberId,
+                CGameObjectArray::THREAD_ASYNCH,
+                reinterpret_cast<CGameObject**>(&pSprite),
+                INFINITE);
+        } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+        if (rc != CGameObjectArray::SUCCESS) {
+            continue;
+        }
+
+        if (override) {
+            pSprite->ClearActions(FALSE);
+            pSprite->m_interrupt = TRUE;
+        }
+
+        pSprite->m_userCommandPause = CGameSprite::USER_OVERRIDE_COUNT;
+        pSprite->m_triggerId = CGameObjectArray::INVALID_INDEX;
+
+        if (bLeader) {
+            bLeader = FALSE;
+
+            const CAIAction& memberAction = leaderAction != NULL ? *leaderAction : action;
+            if (memberAction.m_actionID == CAIAction::MOVETOPOINT
+                && pSprite->m_derivedStats.m_nEncumberance == 2) {
+                pSprite->FeedBack(CGameSprite::FEEDBACK_TOOHEAVY_STOPPED, 1, 0, 0, -1, 0, 0);
+            } else {
+                CMessage* message = new CMessageAddAction(memberAction,
+                    pSprite->GetId(),
+                    pSprite->GetId());
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+            }
+
+            if (override && action.m_actionID != CAIAction::GROUPATTACK) {
+                pSprite->PlaySound(CGameSprite::SOUND_SELECT_ACTION, TRUE, FALSE, FALSE);
+            }
+        } else {
+            if (action.m_actionID == CAIAction::MOVETOPOINT
+                && pSprite->m_derivedStats.m_nEncumberance == 2) {
+                pSprite->FeedBack(CGameSprite::FEEDBACK_TOOHEAVY_STOPPED, 1, 0, 0, -1, 0, 0);
+            } else {
+                CMessage* message = new CMessageAddAction(action,
+                    pSprite->GetId(),
+                    pSprite->GetId());
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+            }
+        }
+
+        pSprite->m_inFormation = TRUE;
+
+        g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(memberId,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+    }
 }
 
 // 0x4052D0
@@ -907,7 +969,123 @@ void CAIGroup::FollowLeader(CPoint target, BOOL additive)
 // 0x409820
 void CAIGroup::HandleFollowPath(LONG* pPath, INT nPath, CPoint target, CPoint start, BOOL additive)
 {
-    // TODO: Incomplete.
+    // NOTE: CAIAction's constants at 0x847826 (89, Follow) and 0x84783A (99,
+    // an action with no ACTION.IDS entry), which CAIAction.h does not
+    // declare.
+    const SHORT FOLLOW = 89;
+    const SHORT ACTION_99 = 99;
+
+    CTypedPtrList<CPtrList, CAIAction*> actions(10);
+    BOOL bLeader = TRUE;
+    SHORT nIndex = 0;
+
+    POSITION pos = m_memberList.GetHeadPosition();
+    while (pos != NULL) {
+        LONG memberId = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_memberList.GetNext(pos)));
+
+        CGameSprite* pSprite;
+
+        BYTE rc;
+        do {
+            rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetDeny(memberId,
+                CGameObjectArray::THREAD_ASYNCH,
+                reinterpret_cast<CGameObject**>(&pSprite),
+                INFINITE);
+        } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+        if (rc != CGameObjectArray::SUCCESS) {
+            continue;
+        }
+
+        if (bLeader) {
+            bLeader = FALSE;
+
+            // NOTE: The original calls GetPos through the vtable here and
+            // drops the result (0x4098DE).
+            pSprite->GetPos();
+
+            if (pos != NULL) {
+                POSITION posNext = pos;
+                LONG nextId = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_memberList.GetNext(posNext)));
+
+                CMessage* message = new CMessageStartFollow(nextId, memberId);
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+            }
+        } else {
+            CAIAction* pAction = new CAIAction(FOLLOW, target, nIndex, -1);
+            // NOTE: The original stores the start's y as the second
+            // specific (0x409A2F); its x is never read.
+            pAction->m_specificID2 = start.y;
+            actions.AddTail(pAction);
+
+            if (!additive) {
+                actions.AddTail(new CAIAction(CAIAction::SMALLWAIT, CPoint(-1, -1), 5, -1));
+
+                pAction = new CAIAction(ACTION_99, CPoint(-1, -1), 0, -1);
+                if (pos != NULL) {
+                    POSITION posNext = pos;
+                    pSprite->m_followLeaderNext = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_memberList.GetNext(posNext)));
+                }
+                actions.AddTail(pAction);
+
+                pSprite->ClearStoredPaths();
+                pSprite->m_userCommandPause = CGameSprite::USER_OVERRIDE_COUNT;
+                pSprite->m_triggerId = CGameObjectArray::INVALID_INDEX;
+                pSprite->m_interrupt = TRUE;
+
+                while (!actions.IsEmpty()) {
+                    pAction = actions.RemoveHead();
+                    pSprite->AddAction(*pAction);
+                    delete pAction;
+                }
+            } else {
+                pSprite->m_userCommandPause = CGameSprite::USER_OVERRIDE_COUNT;
+                pSprite->m_triggerId = CGameObjectArray::INVALID_INDEX;
+
+                SHORT actionID = pSprite->m_curAction.m_actionID;
+                if (actionID != CAIAction::MOVETOPOINT
+                    && actionID != CAIAction::FACE
+                    && actionID != CAIAction::SMALLWAIT
+                    && actionID != FOLLOW
+                    && actionID != CAIAction::MOVETOPOINTNORECTICLE) {
+                    actions.AddTail(new CAIAction(CAIAction::SMALLWAIT, CPoint(-1, -1), 5, -1));
+
+                    pAction = new CAIAction(ACTION_99, CPoint(-1, -1), 0, -1);
+                    if (pos != NULL) {
+                        POSITION posNext = pos;
+                        pSprite->m_followLeaderNext = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_memberList.GetNext(posNext)));
+                    }
+                    actions.AddTail(pAction);
+
+                    pSprite->ClearStoredPaths();
+                    pSprite->m_interrupt = TRUE;
+                }
+
+                while (!actions.IsEmpty()) {
+                    pAction = actions.RemoveTail();
+                    pSprite->InsertAction(*pAction);
+                    delete pAction;
+                }
+            }
+
+            actions.RemoveAll();
+
+            // NOTE: A plain operator new block, as CGameSprite::
+            // ClearStoredPaths deletes it.
+            int* pPathCopy = static_cast<int*>(::operator new(sizeof(LONG) * nPath));
+            memcpy(pPathCopy, pPath, sizeof(LONG) * nPath);
+            pSprite->m_pPathTemp.AddTail(pPathCopy);
+            pSprite->m_nPathTemp.AddTail(reinterpret_cast<int*>(static_cast<INT_PTR>(nPath)));
+        }
+
+        pSprite->m_inFormation = TRUE;
+
+        g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(memberId,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+
+        nIndex++;
+    }
 }
 
 // 0x68C000
