@@ -8,6 +8,7 @@
 #include "CGameTrigger.h"
 #include "CInfGame.h"
 #include "CMessage.h"
+#include "CProjectileBAM.h"
 #include "CUtil.h"
 #include "IcewindCVisualEffect.h"
 
@@ -107,6 +108,9 @@ CProjectile* CProjectile::DecodeProjectile(WORD nProjectileType, CGameAIBase* pS
     case 1:
         pProjectile = new CProjectile84D8B8();
         break;
+    case 79:
+        pProjectile = new CProjectile84DF1C();
+        break;
     default:
         if (static_cast<UINT>(nProjectileType - 1) > 0x181) {
             // __FILE__: C:\Projects\Icewind2\src\Baldur\CProjectile.cpp
@@ -115,7 +119,8 @@ CProjectile* CProjectile::DecodeProjectile(WORD nProjectileType, CGameAIBase* pS
         }
 
         // TODO: Incomplete (0x51EB93-0x528DEF). The jump table at 0x528E7C
-        // builds one class per type, 2 to 386; only type 1 is ported. A
+        // builds one class per type, 2 to 386; only types 1 and 79 are
+        // ported. A
         // type without its case takes the original's fallback below, the
         // instant projectile, which delivers the effects on Fire without an
         // animation.

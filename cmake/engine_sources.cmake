@@ -216,6 +216,8 @@ set(IWD2R_ENGINE_SOURCES
     "src/CProjectile.h"
     "src/CProjectileArea.cpp"
     "src/CProjectileArea.h"
+    "src/CProjectileBAM.cpp"
+    "src/CProjectileBAM.h"
     "src/CProjectileSingleTarget.cpp"
     "src/CProjectileSingleTarget.h"
     "src/CProjectileSpellHit.cpp"
