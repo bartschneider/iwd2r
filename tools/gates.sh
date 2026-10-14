@@ -46,6 +46,19 @@ if ls /usr/lib/*/libvulkan_lvp.so /usr/lib/libvulkan_lvp.so /usr/lib64/libvulkan
     || { command -v vulkaninfo >/dev/null 2>&1 && vulkaninfo --summary 2>/dev/null | grep -qi llvmpipe; }; then
     LAVAPIPE=1
 fi
+# Engine tests run under a memory cap. A test that allocates without bound
+# (on 2026-10-14 a creature-construction sweep grew iwd2r_tests to ~29 GB)
+# otherwise triggers the kernel's OOM kill, which takes down the whole WSL
+# VM and every agent in it. Under the cap only the test process dies.
+# IWD2R_TEST_MEMORY_MAX overrides the limit; systemd-run must be available.
+TEST_MEMORY_MAX="${IWD2R_TEST_MEMORY_MAX:-8G}"
+capped() {
+    if ! command -v systemd-run >/dev/null 2>&1; then
+        echo "gates: systemd-run is missing; refusing to run engine tests without a memory cap" >&2
+        return 1
+    fi
+    systemd-run --user --scope -q -p MemoryMax="$TEST_MEMORY_MAX" -p MemorySwapMax=0 -- "$@"
+}
 failed=()
 step() {
     local name="$1"; shift
@@ -57,7 +70,7 @@ linux_preset() {
     [ -f "build/$preset/CMakeCache.txt" ] || cmake --preset "$preset" || return 1
     cmake --build --preset "$preset" || return 1
     log=$(mktemp)
-    ctest --preset "$preset" --output-on-failure | tee "$log"
+    capped ctest --preset "$preset" --output-on-failure | tee "$log"
     rc=${PIPESTATUS[0]}
     if [ "$LAVAPIPE" = 1 ]; then
         # The [present] cases ctest reports as skipped (each test is its own
