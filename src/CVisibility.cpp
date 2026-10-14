@@ -138,13 +138,23 @@ CVisibilityMap::~CVisibilityMap()
 // 0x551840
 BOOL CVisibilityMap::AddCharacter(const CPoint& pos, LONG charId, const BYTE* pVisibleTerrainTable)
 {
-    for (SHORT nIndex = 0; nIndex < 6; nIndex++) {
+    SHORT nIndex;
+    for (nIndex = 0; nIndex < 6; nIndex++) {
         if (m_aCharacterIds[nIndex] == CGameObjectArray::INVALID_INDEX) {
             m_aCharacterIds[nIndex] = charId;
-            PrivateAddCharacter(charId, 1 << nIndex, pVisibleTerrainTable);
-            return TRUE;
+            break;
+        }
+
+        if (m_aCharacterIds[nIndex] == charId) {
+            break;
         }
     }
+
+    if (nIndex != 6) {
+        PrivateAddCharacter(pos, 1 << nIndex, pVisibleTerrainTable);
+        return TRUE;
+    }
+
     return FALSE;
 }
 
@@ -926,16 +936,19 @@ void CVisibilityMap::Uninit()
 void CVisibilityMap::UpDate(const CPoint& ptOldPos, const CPoint& ptNewPos, LONG charId, const BYTE* pVisibleTerrainTable)
 {
     CPoint pt;
-    pt.x = ptNewPos.x / 32;
-    pt.y = ptNewPos.y / 32;
+    pt.x = ptOldPos.x / 32;
+    pt.y = ptOldPos.y / 32;
 
-    // NOTE: Uninline.
-    BYTE visId = GetCharacterPos(charId);
-
-    if (visId != -1) {
-        sub_553440(pt, visId);
-        sub_5535D0(pt, visId);
-        PrivateAddCharacter(charId, visId, pVisibleTerrainTable);
+    for (SHORT nIndex = 0; nIndex < 6; nIndex++) {
+        if (m_aCharacterIds[nIndex] == charId) {
+            // NOTE: The original compares the signed char 1 << nIndex with
+            // -1, which never matches.
+            BYTE visId = 1 << nIndex;
+            sub_553440(pt, visId);
+            sub_5535D0(pt, visId);
+            PrivateAddCharacter(ptNewPos, visId, pVisibleTerrainTable);
+            return;
+        }
     }
 }
 
