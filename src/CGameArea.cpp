@@ -4777,15 +4777,15 @@ void CGameArea::SortLists()
                 && g_pBaldurChitin->GetObjectGame()->GetVisibleArea() == this)) {
             bSort = TRUE;
 
-            if (nFront + nFrontAdd == 0) {
-                LeaveCriticalSection(&(g_pBaldurChitin->m_pEngineWorld->field_106));
-                return;
-            }
-
-            pObjects = new CGameObject*[nFront + nFrontAdd];
-            if (pObjects == NULL) {
-                LeaveCriticalSection(&(g_pBaldurChitin->m_pEngineWorld->field_106));
-                return;
+            // With nothing to sort the original allocates nothing and goes
+            // on to the back and flight lists.
+            if (nFront + nFrontAdd != 0) {
+                pObjects = new CGameObject*[nFront + nFrontAdd];
+                if (pObjects == NULL) {
+                    g_pBaldurChitin->GetObjectGame()->EndListManipulation(this);
+                    LeaveCriticalSection(&(g_pBaldurChitin->m_pEngineWorld->field_106));
+                    return;
+                }
             }
         } else {
             bSort = FALSE;
@@ -4928,13 +4928,15 @@ void CGameArea::SortLists()
                         INFINITE);
                 } while (rc == CGameObjectArray::DENIED);
 
-                if (rc == CGameObjectArray::SUCCESS) {
-                    pObjects[cnt++] = pObject;
-                } else {
+                if (rc != CGameObjectArray::SUCCESS) {
                     // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameArea.cpp
                     // __LINE__: 8263
                     UTIL_ASSERT(FALSE);
                 }
+
+                // NOTE: Stored after the assert as well, as the original
+                // does, so the count stays aligned.
+                pObjects[cnt++] = pObject;
             }
 
             m_lVertSort.RemoveAll();
