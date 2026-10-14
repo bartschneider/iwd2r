@@ -1262,7 +1262,7 @@ CGameObject* CAIObjectType::sub_40CCA0(CGameAIBase* caller, BOOL checkBackList) 
         nId = sub_40CED0(caller, checkBackList);
     }
 
-    // NOTE: The original starts the object at NULL (0x40D114); a failed
+    // NOTE: The original starts the object at NULL (0x40CCAA); a failed
     // share leaves it so.
     CGameObject* pObject = NULL;
     BYTE rc;
