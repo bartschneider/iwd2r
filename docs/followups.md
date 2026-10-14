@@ -156,3 +156,7 @@ The guards in `src/render/api.h` leave these for the renderer that first draws t
 - `DecodeProjectile`'s 14 cone cases can now call the cone projectile (0x579B40) instead of the instant fallback; 430 still takes the fallback for most types.
 - Shroud of Flame's EffSoF1/EffSoF2 path (index >= 1) has no test yet; it is reachable now that `StartSpriteEffect` asserts only on a failed allocation.
 - `Ftol` is duplicated in src/CProjectileSingleTarget.cpp and src/CAIGroup.cpp.
+
+## Crisp text at high resolutions (required)
+
+- The user requires readable, crisp text at desktop resolutions; upscaling the original's bitmap fonts (`Scale` 2 or 3, even with the `sharp` filter) is not good enough. Plan: draw text with a scalable font behind an option (the original's bitmap fonts stay the default look), sized from the UI scale. To design before building: which font (a licence-clean face close to the original's), where text is drawn (the CVidFont/BAM font paths the screens call), how line breaks and widths stay identical so layouts and replays do not change, and how it composes with the presenter's UI regions. Full AI-upscaled HD art (the HD classic project) stays a later, separate project.
