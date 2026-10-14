@@ -4769,8 +4769,10 @@ void CGameArea::SortLists()
         INT nFront = m_lVertSort.GetCount() - m_lVertSortRemove.GetCount();
 
         BOOLEAN bSort;
+        // The periodic re-sort runs while the byte at 0x3DA is clear
+        // (`*(char *)(this + 0x3da) != '\0'` skips it, 0x4794E0).
         if (nFrontAdd != 0
-            || (m_firstRender != 0
+            || (m_firstRender == 0
                 && m_pGame->GetWorldTimer()->m_gameTime % 5 == 0
                 && g_pBaldurChitin->GetObjectGame()->GetVisibleArea() == this)) {
             bSort = TRUE;
