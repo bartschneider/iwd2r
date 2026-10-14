@@ -2,6 +2,9 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "CAIAction.h"
+#include "CAIConditionResponse.h"
+#include "CAIResponse.h"
+#include "CAIScript.h"
 #include "CAITrigger.h"
 #include "CBaldurChitin.h"
 #include "CGameAIBase.h"
@@ -199,7 +202,38 @@ TEST_CASE("ai: ExecuteAction answers NoAction, an unknown action and SetGlobal",
     missing.m_string1 = "GLOBALAI_NEVER_SET";
     CHECK(pCaller->EvaluateStatusTrigger(missing) == TRUE);
 
+    // RandomNum(6, n): the object's random value of this update, 1 to 6.
+    pCaller->m_randValue = 15;
+    CAITrigger randomNum(0x4047, 6);
+    randomNum.m_specific2 = 15 % 6 + 1;
+    CHECK(pCaller->EvaluateStatusTrigger(randomNum) == TRUE);
+    CAITrigger randomNumLT(0x4049, 6);
+    randomNumLT.m_specific2 = 15 % 6 + 1;
+    CHECK(pCaller->EvaluateStatusTrigger(randomNumLT) == FALSE);
+
     ClearMessages();
+}
+
+TEST_CASE("ai: a compiled script reads its triggers and weighted responses", "[ai][data]")
+{
+    REQUIRE_ENGINE();
+    // AR1000.BCS's first block: OnCreation() and Global("HEALED_REIG",
+    // "MYAREA",0), one response of weight 100: SetHP and Continue.
+    CAIScript script(CResRef("AR1000"));
+    REQUIRE(script.m_caList.GetCount() > 0);
+    CAIConditionResponse* pFirst = script.m_caList.GetHead();
+    REQUIRE(pFirst->m_condition.m_triggerList.GetCount() == 2);
+    CHECK(pFirst->m_condition.m_triggerList.GetHead()->m_triggerID == CAITrigger::ONCREATION);
+    CAITrigger* pGlobal = pFirst->m_condition.m_triggerList.GetTail();
+    CHECK(pGlobal->m_triggerID == 0x400F);
+    CHECK(pGlobal->m_string1 == "MYAREAHEALED_REIG");
+    REQUIRE(pFirst->m_responseSet.m_responseList.GetCount() == 1);
+    CHECK(pFirst->m_responseSet.m_weightTotal == 100);
+    CAIResponse* pResponse = pFirst->m_responseSet.m_responseList.GetHead();
+    CHECK(pResponse->m_weight == 100);
+    REQUIRE(pResponse->m_actionList.GetCount() == 2);
+    CHECK(pResponse->m_actionList.GetHead()->m_actionID == 254);
+    CHECK(pResponse->m_actionList.GetTail()->m_actionID == CAIAction::CONTINUE);
 }
 
 TEST_CASE("ai: a locked door stays closed and says it is locked", "[ai][data]")

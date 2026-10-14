@@ -215,7 +215,7 @@ void CGameAIBase::CheckTimers(LONG cycles)
             // NOTE: Uninline.
             SetTrigger(trigger);
 
-            m_timers.RemoveAt(pos);
+            m_timers.RemoveAt(oldPos);
             delete pTimer;
         }
     }
@@ -4041,6 +4041,19 @@ BOOL CGameAIBase::EvaluateStatusTrigger(const CAITrigger& trigger)
             ULONG nGameTime = g_pBaldurChitin->GetObjectGame()->GetWorldTimer()->m_gameTime;
             bResult = static_cast<ULONG>(pVariable->GetIntValue()) < nGameTime;
         }
+        break;
+    case 0x4047:
+        // RandomNum(range, value): the object's random value of this
+        // update. NOTE: a range of 0 divides by zero, as in the original.
+        bResult = m_randValue % triggerCopy.GetSpecifics() + 1 == triggerCopy.m_specific2;
+        break;
+    case 0x4048:
+        // RandomNumGT
+        bResult = m_randValue % triggerCopy.GetSpecifics() + 1 > triggerCopy.m_specific2;
+        break;
+    case 0x4049:
+        // RandomNumLT
+        bResult = m_randValue % triggerCopy.GetSpecifics() + 1 < triggerCopy.m_specific2;
         break;
     case 0x40D1:
         // EntirePartyOnMap
