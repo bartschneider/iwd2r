@@ -420,6 +420,7 @@ public:
     /* 0044 */ void OnFormationButton(const CPoint& pt) override;
     /* 0048 */ void RemoveFromArea() override;
     /* 004C */ void Render(CGameArea* pArea, CVidMode* pVidMode, INT nSurface) override;
+    /* 0050 */ BOOLEAN DoAIUpdate(BOOLEAN active, LONG counter) override;
     /* 0058 */ void SetCursor(LONG nToolTip) override;
     /* 0078 */ void AddEffect(CGameEffect* pEffect, BYTE list, BOOL noSave, BOOL immediateApply) override;
     /* 0070 */ void SetTargetObject(CGameObject* pTarget) override;
@@ -721,6 +722,8 @@ public:
     BOOL sub_727B40();
     INT sub_763E40(UINT nSkill);
     void sub_726810(BYTE nWeaponSet);
+    void sub_726F20();
+    SHORT sub_75E330(CItem* pLauncher, BOOL bEquipMelee);
     BYTE GetLastSong();
 
     void GetQuickSpell(BYTE buttonNum, CButtonData& buttonData);
