@@ -12,6 +12,10 @@ These items were found while building the harness (project 2) and parked. The fi
 - **State dump coverage.** The dump lacks gender, alignment and class levels. Widen the schema, and add a screenshot comparison to `replay compare`.
 - **Pending oracle cases that need engine state:** `CheckSave` (0x4A42F0), `ProcessEffectList` (0x72DE60), `Hit` (0x73B760), `Damage` (0x73D560), `C2DArray::Load` (0x402B70) and `CheckAranceFailure` (0x7243F0). See the table in [docs/evidence/README.md](evidence/README.md).
 
+- **Resource signatures compared as big-endian DWORDs.** `CResEffect.cpp:38` ('EFF ', 'V2.0'), `CResStore.cpp:38` ('STOR', 'STOO', 'V9.0'), `CResCHR.cpp:49` ('CHR ') and `CResCellHeader.cpp:125` ('BAH ', 'V1  ') compare a file's first DWORDs with multi-character constants, whose value is the big-endian one; the original compares with the bytes read little-endian (as `CResDLG::Demand`, 0x402782: `cmp [edi], 0x20474C44`, fixed in M2's dialog-world stream; docs/evidence/402760.md). If nothing else gets around it, such a check refuses every real file. Check each against its decompile and fix with its own evidence.
+
+- **Remove the patched-DLG device in tests/test_dialog.cpp (M2).** The Hedron test patches one byte of the cached 10HEDRON.DLG (`TODO(remove)`, only when no start condition holds) so the dialog runs while `CGameSprite::EvaluateStatusTrigger` is unported; remove it once the movement stream's trigger evaluator lands.
+
 ## Runner
 
 These are in `oracle/runner/` and `oracle/loader/`.
