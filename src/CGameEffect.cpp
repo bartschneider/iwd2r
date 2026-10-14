@@ -5282,6 +5282,153 @@ CGameEffect* CGameEffectPoison::Copy()
     return copy;
 }
 
+// 0x4AF610
+BOOL CGameEffectPoison::ApplyEffect(CGameSprite* pSprite)
+{
+    pSprite->m_derivedStats.m_generalState |= STATE_POISONED;
+
+    if (m_secondaryType) {
+        // NOTE: Uninline.
+        DisplayStringRef(pSprite, m_dwFlags == 8 ? 37696 : 14662);
+    }
+
+    // NOTE: Uninline.
+    AddPortraitIcon(pSprite, 6);
+
+    if (m_secondaryType && m_dwFlags != 8) {
+        m_special = g_pBaldurChitin->GetObjectGame()->GetWorldTimer()->m_gameTime;
+    }
+
+    DWORD duration = m_durationType != 1 ? m_duration : 0;
+
+    // NOTE: The CPersistantEffect84C420 constructor (0x4C2570) is inlined at
+    // every site here.
+    CPersistantEffect84C420* pEffect;
+    switch (m_dwFlags) {
+    case 2:
+        pEffect = new CPersistantEffect84C420(0x200000,
+            m_effectAmount,
+            15,
+            m_special,
+            duration);
+        if (pEffect == NULL) {
+            // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameEffect.cpp
+            // __LINE__: 9425
+            UTIL_ASSERT_MSG(FALSE, "effectPtr != NULL");
+            return TRUE;
+        }
+        break;
+    case 3:
+        pEffect = new CPersistantEffect84C420(0x200000,
+            1,
+            m_effectAmount * 15,
+            m_special,
+            duration);
+        if (pEffect == NULL) {
+            // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameEffect.cpp
+            // __LINE__: 9431
+            UTIL_ASSERT_MSG(FALSE, "effectPtr != NULL");
+            return TRUE;
+        }
+        break;
+    case 5:
+        pEffect = new CPersistantEffect84C420(0x200000,
+            m_effectAmount,
+            735,
+            m_special,
+            duration);
+        if (pEffect == NULL) {
+            // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameEffect.cpp
+            // __LINE__: 9452
+            UTIL_ASSERT_MSG(FALSE, "effectPtr != NULL");
+            return TRUE;
+        }
+        break;
+    case 6:
+        // A paralysing poison, then as 4.
+        if (m_secondaryType) {
+            // NOTE: Uninline.
+            DisplayStringRef(pSprite, 14102);
+        }
+
+        pSprite->field_9D15 = 1;
+
+        // NOTE: Uninline.
+        AddPortraitIcon(pSprite, 13);
+
+        pSprite->m_derivedStats.m_spellStates.set(SPLSTATE_HELD, true);
+        pSprite->m_derivedStats.m_generalState |= STATE_HELPLESS;
+        // fall through
+    case 4:
+        pEffect = new CPersistantEffect84C420(0x200000,
+            m_effectAmount,
+            105,
+            m_special,
+            duration);
+        if (pEffect == NULL) {
+            // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameEffect.cpp
+            // __LINE__: 9447
+            UTIL_ASSERT_MSG(FALSE, "effectPtr != NULL");
+            return TRUE;
+        }
+        break;
+    case 7:
+        pEffect = new CPersistantEffect84C420(0x200000,
+            m_effectAmount,
+            m_effectAmount2,
+            m_special,
+            duration);
+        if (pEffect == NULL) {
+            // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameEffect.cpp
+            // __LINE__: 9457
+            UTIL_ASSERT_MSG(FALSE, "effectPtr != NULL");
+            return TRUE;
+        }
+        break;
+    case 8:
+        // Constitution poison: a CON change (effect 10) of the amount for 70
+        // ticks.
+        if (m_secondaryType) {
+            ITEM_EFFECT effect;
+            effect.effectID = CGAMEEFFECT_CON;
+            effect.targetType = 2;
+            effect.spellLevel = 10;
+            effect.effectAmount = m_effectAmount;
+            effect.dwFlags = 0;
+            effect.durationType = 0;
+            effect.duration = 70;
+            effect.probabilityUpper = 100;
+            effect.probabilityLower = 0;
+            memset(effect.res, 0, sizeof(effect.res));
+            effect.numDice = 0;
+            effect.diceSize = 0;
+            effect.savingThrow = 0;
+            effect.saveMod = 0;
+            effect.special = 0;
+
+            CGameEffect* pCON = CGameEffect::DecodeEffect(&effect, CPoint(-1, -1), -1, CPoint(-1, -1));
+            pCON->m_source = pSprite->GetPos();
+            pCON->m_sourceID = pSprite->GetId();
+            pCON->m_flags &= ~0x1;
+
+            CMessage* message = new CMessageAddEffect(pCON, pSprite->GetId(), pSprite->GetId());
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        }
+        return TRUE;
+    default:
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameEffect.cpp
+        // __LINE__: 9490
+        UTIL_ASSERT(FALSE);
+        return TRUE;
+    }
+
+    pEffect->m_sourceID = m_sourceID;
+    strcpy(reinterpret_cast<char*>(pEffect->field_29), m_sourceRes.GetResRefStr());
+    pSprite->GetDerivedStats()->m_cRegeneratedPersistantEffectList.AddTail(pEffect);
+
+    return TRUE;
+}
+
 // 0x4AFBF0
 void CGameEffectPoison::OnRemove(CGameSprite* pSprite)
 {
@@ -10078,6 +10225,97 @@ CGameEffect* CGameEffectCreateWeapon::Copy()
     return copy;
 }
 
+// 0x4B81B0
+BOOL CGameEffectCreateWeapon::ApplyEffect(CGameSprite* pSprite)
+{
+    // A summoned weapon. The cleric's DECASTA needs a free hand: with the
+    // off hand of the current weapon set taken it only tells so.
+    BYTE nShieldSlot = static_cast<BYTE>((pSprite->m_nWeaponSet + 22) * 2);
+    if (strcmp(m_res.GetResRefStr(), CString("DECASTA")) == 0
+        && pSprite->m_equipment.m_items[nShieldSlot] != NULL) {
+        COLORREF rgbNameColor = CVidPalette::RANGE_COLORS[pSprite->GetBaseStats()->m_colors[2]];
+
+        STR_RES strRes;
+        CString sText;
+        g_pBaldurChitin->GetTlkTable().Fetch(14796, strRes);
+        sText += strRes.szText + " : ";
+        g_pBaldurChitin->GetTlkTable().Fetch(9380, strRes);
+        sText += strRes.szText;
+
+        g_pBaldurChitin->GetBaldurMessage()->DisplayText(pSprite->GetName(),
+            sText,
+            rgbNameColor,
+            RGB(0xD7, 0xD7, 0xBE),
+            -1,
+            pSprite->GetId(),
+            pSprite->GetId());
+
+        m_done = TRUE;
+
+        // NOTE: The original returns 0 here (0x4B830F).
+        return FALSE;
+    }
+
+    // The weapon goes when the effect's time is up: a delayed Destroy
+    // Weapon (effect 112) of the same item.
+    ITEM_EFFECT* effect = new ITEM_EFFECT;
+    effect->effectID = CGAMEEFFECT_DESTROYWEAPON;
+    effect->targetType = 0;
+    effect->spellLevel = 0;
+    effect->effectAmount = 0;
+    effect->dwFlags = 0;
+    effect->probabilityUpper = 100;
+    effect->probabilityLower = 0;
+    effect->numDice = 0;
+    effect->diceSize = 0;
+    effect->savingThrow = 0;
+    effect->saveMod = 0;
+    effect->special = 0;
+    // NOTE: The original leaves the resref uninitialised (it is replaced
+    // below).
+    memset(effect->res, 0, sizeof(effect->res));
+    effect->durationType = 4;
+    effect->duration = (m_duration - g_pBaldurChitin->GetObjectGame()->GetWorldTimer()->m_gameTime) / 15;
+
+    CGameEffect* pDestroy = CGameEffect::DecodeEffect(effect, CPoint(-1, -1), -1, CPoint(-1, -1));
+    pDestroy->m_res = m_res;
+    pDestroy->m_flags |= 0x1;
+
+    if (m_effectAmount < 1) {
+        m_effectAmount = 1;
+    }
+
+    CItem* pItem = new CItem(m_res,
+        static_cast<WORD>(m_effectAmount),
+        static_cast<WORD>(m_effectAmount),
+        static_cast<WORD>(m_effectAmount),
+        0,
+        0);
+    if (pItem == NULL) {
+        delete effect;
+        return TRUE;
+    }
+
+    // Slot 42 holds the magic weapon.
+    if (pSprite->m_equipment.m_items[42] != NULL) {
+        sub_4B8730(pSprite, 42);
+    }
+
+    pSprite->m_equipment.m_items[42] = pItem;
+    pSprite->SelectWeaponAbility(42, 0, 1, 1);
+
+    if (m_durationType != 1) {
+        pDestroy->m_casterLevel = m_casterLevel;
+        pSprite->AddEffect(pDestroy, CGameAIBase::EFFECT_LIST_TIMED, TRUE, TRUE);
+    }
+
+    g_pBaldurChitin->GetObjectGame()->m_cButtonArray.ResetState();
+
+    m_done = TRUE;
+    delete effect;
+    return TRUE;
+}
+
 // -----------------------------------------------------------------------------
 
 // NOTE: Inlined.
@@ -10094,6 +10332,57 @@ CGameEffect* CGameEffectDestroyWeapon::Copy()
     delete effect;
     copy->CopyFromBase(this);
     return copy;
+}
+
+// 0x4B8580
+BOOL CGameEffectDestroyWeapon::ApplyEffect(CGameSprite* pSprite)
+{
+    pSprite->m_hasColorEffects = TRUE;
+    pSprite->m_hasColorRangeEffects = TRUE;
+    pSprite->field_5640 = 1;
+
+    INT nSlot = 0;
+    while (pSprite->m_equipment.m_items[nSlot] == NULL
+        || pSprite->m_equipment.m_items[nSlot]->cResRef != m_res) {
+        nSlot++;
+        if (nSlot > 50) {
+            pSprite->field_562C = 1;
+            m_done = TRUE;
+            return TRUE;
+        }
+    }
+
+    // NOTE: The original moves the selection to slot 10 and then compares
+    // the selection with the slot again below (0x4B8603, 0x4B866F).
+    if (pSprite->m_equipment.m_selectedWeapon == nSlot) {
+        pSprite->m_equipment.m_selectedWeapon = CGameSpriteEquipment::SLOT_FIST;
+    }
+
+    CItem* pItem = pSprite->m_equipment.m_items[nSlot];
+    pSprite->m_equipment.m_items[nSlot] = NULL;
+    pItem->Unequip(pSprite, nSlot, TRUE, FALSE);
+    g_pBaldurChitin->GetObjectGame()->AddDisposableItem(pItem);
+
+    // NOTE: Inlined CGameObject::InControl.
+    if (pSprite->InControl() && g_pChitin->cNetwork.m_bConnectionEstablished == TRUE) {
+        CMessage* message = new CMessageSpriteEquipment(pSprite, pSprite->GetId(), pSprite->GetId());
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+    }
+
+    if (pSprite->m_equipment.m_selectedWeapon == nSlot) {
+        pSprite->EquipMostDamagingMelee();
+    }
+
+    if (nSlot + 1 > 42 && nSlot + 1 < 51) {
+        pSprite->EquipMostDamagingMelee();
+    }
+
+    pSprite->field_562C = 1;
+
+    PlaySound(CResRef("EFF_M02"), pSprite);
+
+    m_done = TRUE;
+    return TRUE;
 }
 
 // -----------------------------------------------------------------------------
@@ -10463,6 +10752,80 @@ CGameEffect* CGameEffectCreateItem::Copy()
     return copy;
 }
 
+// 0x4B8BE0
+BOOL CGameEffectCreateItem::ApplyEffect(CGameSprite* pSprite)
+{
+    // The item goes when the effect's time is up: a delayed Destroy Item
+    // (effect 123) of the same resource.
+    ITEM_EFFECT* effect = new ITEM_EFFECT;
+    effect->effectID = CGAMEEFFECT_DESTROYITEM;
+    effect->targetType = 0;
+    effect->spellLevel = 0;
+    effect->effectAmount = 0;
+    effect->dwFlags = 0;
+    effect->probabilityUpper = 100;
+    effect->probabilityLower = 0;
+    effect->numDice = 0;
+    effect->diceSize = 0;
+    effect->savingThrow = 0;
+    effect->saveMod = 0;
+    effect->special = 0;
+    // NOTE: The original leaves the resref uninitialised (it is replaced
+    // below).
+    memset(effect->res, 0, sizeof(effect->res));
+    effect->durationType = 4;
+    effect->duration = (m_duration - g_pBaldurChitin->GetObjectGame()->GetWorldTimer()->m_gameTime) / 15;
+
+    CGameEffect* pDestroy = CGameEffect::DecodeEffect(effect, CPoint(-1, -1), -1, CPoint(-1, -1));
+    pDestroy->m_res = m_res;
+
+    if (!g_pBaldurChitin->cDimm.m_cKeyTable.FindKey(m_res, 1005, TRUE)) {
+        // NOTE: The original leaks the decoded effect and the record here.
+        m_done = TRUE;
+        return TRUE;
+    }
+
+    INT nSlot;
+    if (g_pBaldurChitin->GetObjectGame()->GetCharacterPortraitNum(pSprite->GetId()) == -1) {
+        // A creature: the first free slot from 15 (quick items and pack).
+        if (pSprite->GetObjectType() == CGameObject::TYPE_SPRITE) {
+            for (nSlot = 0; nSlot < 28; nSlot++) {
+                if (pSprite->m_equipment.m_items[CGameSpriteEquipment::SLOT_MISC + nSlot] == NULL) {
+                    pSprite->m_equipment.m_items[CGameSpriteEquipment::SLOT_MISC + nSlot] = new CItem(m_res,
+                        static_cast<WORD>(m_effectAmount),
+                        static_cast<WORD>(m_effectAmount),
+                        static_cast<WORD>(m_effectAmount),
+                        0,
+                        0);
+                    break;
+                }
+            }
+        }
+    } else {
+        // A party member: the first free pack slot (18 to 41).
+        for (nSlot = 0; nSlot < 24; nSlot++) {
+            if (pSprite->m_equipment.m_items[18 + nSlot] == NULL) {
+                pSprite->m_equipment.m_items[18 + nSlot] = new CItem(m_res,
+                    static_cast<WORD>(m_effectAmount),
+                    static_cast<WORD>(m_effectAmount),
+                    static_cast<WORD>(m_effectAmount),
+                    0,
+                    0);
+                break;
+            }
+        }
+    }
+
+    if (m_durationType != 1) {
+        pDestroy->m_casterLevel = m_casterLevel;
+        pSprite->AddEffect(pDestroy, CGameAIBase::EFFECT_LIST_TIMED, TRUE, TRUE);
+    }
+
+    m_done = TRUE;
+    delete effect;
+    return TRUE;
+}
+
 // -----------------------------------------------------------------------------
 
 // NOTE: Inlined.
@@ -10479,6 +10842,43 @@ CGameEffect* CGameEffectDestroyItem::Copy()
     delete effect;
     copy->CopyFromBase(this);
     return copy;
+}
+
+// 0x4B9010
+BOOL CGameEffectDestroyItem::ApplyEffect(CGameSprite* pSprite)
+{
+    INT nSlot = 0;
+    while (pSprite->m_equipment.m_items[nSlot] == NULL
+        || pSprite->m_equipment.m_items[nSlot]->cResRef != m_res) {
+        nSlot++;
+        if (nSlot > 50) {
+            pSprite->field_562C = 1;
+            m_done = TRUE;
+            return TRUE;
+        }
+    }
+
+    CItem* pItem = pSprite->m_equipment.m_items[nSlot];
+    pSprite->m_equipment.m_items[nSlot] = NULL;
+    pItem->Unequip(pSprite, nSlot, TRUE, FALSE);
+    g_pBaldurChitin->GetObjectGame()->AddDisposableItem(pItem);
+
+    pSprite->field_562C = 1;
+
+    // A quick item of the selected character: its button empties.
+    if (nSlot == 15 || nSlot == 16 || nSlot == 17) {
+        CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+        INT nPortrait = pGame->GetCharacterPortraitNum(pSprite->GetId());
+        if (g_pBaldurChitin->GetActiveEngine()->GetSelectedCharacter() == nPortrait) {
+            // NOTE: Inlined CGameSprite::SetQuickItem.
+            pSprite->SetQuickItem(static_cast<BYTE>(nSlot - 15), CButtonData());
+
+            pGame->m_cButtonArray.UpdateState();
+        }
+    }
+
+    m_done = TRUE;
+    return TRUE;
 }
 
 // -----------------------------------------------------------------------------
@@ -11184,6 +11584,56 @@ CGameEffect* CGameEffectReplaceItem::Copy()
     delete effect;
     copy->CopyFromBase(this);
     return copy;
+}
+
+// 0x4B8E70
+BOOL CGameEffectReplaceItem::ApplyEffect(CGameSprite* pSprite)
+{
+    ITEM_EFFECT* effect = new ITEM_EFFECT;
+    effect->effectID = CGAMEEFFECT_DESTROYITEM;
+    effect->targetType = 0;
+    effect->spellLevel = 0;
+    effect->effectAmount = 0;
+    effect->dwFlags = 0;
+    effect->probabilityUpper = 100;
+    effect->probabilityLower = 0;
+    effect->numDice = 0;
+    effect->diceSize = 0;
+    effect->savingThrow = 0;
+    effect->saveMod = 0;
+    effect->special = 0;
+    // NOTE: The original never sets the resref of this Destroy Item, so it
+    // names whatever the new block held and finds nothing; here it is
+    // empty, which finds nothing either.
+    memset(effect->res, 0, sizeof(effect->res));
+    effect->durationType = 4;
+    effect->duration = (m_duration - g_pBaldurChitin->GetObjectGame()->GetWorldTimer()->m_gameTime) / 15;
+
+    CGameEffect* pDestroy = CGameEffect::DecodeEffect(effect, CPoint(-1, -1), -1, CPoint(-1, -1));
+
+    CItem* pItem = new CItem(m_res, 0, 0, 0, 0, 0);
+    if (pItem == NULL) {
+        return TRUE;
+    }
+
+    if (pSprite->m_equipment.m_items[m_effectAmount] != NULL) {
+        pSprite->Unequip(static_cast<SHORT>(m_effectAmount));
+        if (pSprite->m_equipment.m_items[m_effectAmount] != NULL) {
+            delete pSprite->m_equipment.m_items[m_effectAmount];
+        }
+    }
+
+    pSprite->m_equipment.m_items[m_effectAmount] = pItem;
+    pSprite->Equip(static_cast<SHORT>(m_effectAmount));
+
+    if (m_durationType != 1) {
+        pDestroy->m_casterLevel = m_casterLevel;
+        pSprite->AddEffect(pDestroy, CGameAIBase::EFFECT_LIST_TIMED, TRUE, TRUE);
+    }
+
+    m_done = TRUE;
+    delete effect;
+    return TRUE;
 }
 
 // -----------------------------------------------------------------------------

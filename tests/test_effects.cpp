@@ -495,3 +495,52 @@ TEST_CASE("visible (47) ends invisibility; the folded no-op effects return 1", "
 
     delete pSprite;
 }
+
+TEST_CASE("poison (25) queues a timed poison damage", "[effects][data]")
+{
+    REQUIRE_ENGINE();
+    CGameSprite* pSprite = MakeSprite();
+    INT count = pSprite->m_derivedStats.m_cRegeneratedPersistantEffectList.GetCount();
+
+    CHECK(Apply(pSprite, CGAMEEFFECT_POISON, 2, 1, 0) == FALSE);
+    CHECK((pSprite->m_derivedStats.m_generalState & STATE_POISONED) != 0);
+    REQUIRE(pSprite->m_derivedStats.m_cRegeneratedPersistantEffectList.GetCount() == count + 1);
+    CPersistantEffect84C420* pPoison = static_cast<CPersistantEffect84C420*>(pSprite->m_derivedStats.m_cRegeneratedPersistantEffectList.GetTail());
+    CHECK(pPoison->field_34 == 0x200000);
+    CHECK(pPoison->field_38 == 1);
+    CHECK(pPoison->field_24 == 15);
+
+    // Mode 6 also holds the sprite, then poisons as mode 4 (every 105).
+    Apply(pSprite, CGAMEEFFECT_POISON, 6, 2, 0);
+    CHECK(pSprite->m_derivedStats.m_spellStates.test(SPLSTATE_HELD));
+    CHECK((pSprite->m_derivedStats.m_generalState & STATE_HELPLESS) != 0);
+    pPoison = static_cast<CPersistantEffect84C420*>(pSprite->m_derivedStats.m_cRegeneratedPersistantEffectList.GetTail());
+    CHECK(pPoison->field_24 == 105);
+
+    delete pSprite;
+}
+
+TEST_CASE("item effects create and destroy items", "[effects][data]")
+{
+    REQUIRE_ENGINE();
+    CGameSprite* pSprite = MakeSprite();
+
+    // A creature (no portrait) gets the item in the first free slot from 15.
+    for (int n = CGameSpriteEquipment::SLOT_MISC; n < 43; n++) {
+        pSprite->m_equipment.m_items[n] = NULL;
+    }
+    CGameEffect* pCreate = Make(CGAMEEFFECT_CREATEITEM, 0, 1, 1);
+    pCreate->m_res = CResRef("00POTN03");
+    REQUIRE(pCreate->ApplyEffect(pSprite) == TRUE);
+    CHECK(pCreate->m_done == TRUE);
+    REQUIRE(pSprite->m_equipment.m_items[CGameSpriteEquipment::SLOT_MISC] != NULL);
+    CHECK(pSprite->m_equipment.m_items[CGameSpriteEquipment::SLOT_MISC]->cResRef == CResRef("00POTN03"));
+
+    CGameEffect* pDestroy = Make(CGAMEEFFECT_DESTROYITEM, 0, 0, 1);
+    pDestroy->m_res = CResRef("00POTN03");
+    REQUIRE(pDestroy->ApplyEffect(pSprite) == TRUE);
+    CHECK(pSprite->m_equipment.m_items[CGameSpriteEquipment::SLOT_MISC] == NULL);
+    CHECK(pSprite->field_562C == 1);
+
+    delete pSprite;
+}
