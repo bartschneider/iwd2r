@@ -85,6 +85,7 @@ namespace testing {
         Pipeline, // the graphics pipeline cannot be created
         AcquireOnce, // the next frame's acquire fails, then works again
         Acquire, // every frame's acquire fails
+        NullSwapchain, // every frame's acquire succeeds without a texture (minimised)
     };
     void SetGpuFault(GpuFault fault);
     GpuFault TakeAcquireFault(); // the gpu backend: consumes AcquireOnce
@@ -99,6 +100,9 @@ namespace testing {
     // Why the last gpu (or auto) start fell back to classic, as the stderr
     // line gives it ("probe: ..." for the probe); empty after a gpu start.
     std::string LastFallbackReason();
+    // Forgets a device loss and the rebuild it used: gpu can start again
+    // (a run allows one rebuild and no gpu after a lost-again fallback).
+    void ForgetGpuLoss();
 
     // Runs the front's backend without a window, presenting into an
     // offscreen target of w x h (0 x 0 stops it). The backend is chosen as

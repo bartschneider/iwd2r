@@ -17,11 +17,15 @@ namespace platform::crash {
 
 namespace {
 
+    // FormatCrashPrefix's result for this process, set by Install: the
+    // handlers cannot read the environment.
+    char g_prefix[64] = "crash: ";
+
 #ifdef _WIN32
 
     LONG WINAPI Filter(EXCEPTION_POINTERS* info)
     {
-        std::fprintf(stderr, "crash: exception 0x%08lX at %p\n", static_cast<unsigned long>(info->ExceptionRecord->ExceptionCode),
+        std::fprintf(stderr, "%sexception 0x%08lX at %p\n", g_prefix, static_cast<unsigned long>(info->ExceptionRecord->ExceptionCode),
             info->ExceptionRecord->ExceptionAddress);
         std::fflush(stderr);
         return EXCEPTION_CONTINUE_SEARCH;
@@ -76,15 +80,18 @@ namespace {
 
     void Handler(int sig, siginfo_t* info, void*)
     {
-        WriteStr("crash: ");
+        WriteStr(g_prefix);
         WriteStr(SignalName(sig));
         WriteStr(" fault address ");
         WriteHex(static_cast<unsigned long long>(reinterpret_cast<unsigned long>(info != nullptr ? info->si_addr : nullptr)));
-        WriteStr("\ncrash: backtrace:\n");
+        WriteStr("\n");
+        WriteStr(g_prefix);
+        WriteStr("backtrace:\n");
         void* frames[64];
         const int n = ::backtrace(frames, 64);
         ::backtrace_symbols_fd(frames, n, 2);
-        WriteStr("crash: end of backtrace\n");
+        WriteStr(g_prefix);
+        WriteStr("end of backtrace\n");
         // SA_RESETHAND already restored the default action; re-raise so the exit
         // status is the signal's own (SIGSEGV reads as -11).
         ::signal(sig, SIG_DFL);
@@ -95,8 +102,17 @@ namespace {
 
 }
 
+void FormatCrashPrefix(const char* prefix, char* out, unsigned size)
+{
+    if (prefix != nullptr && *prefix != '\0')
+        std::snprintf(out, size, "%s crash: ", prefix);
+    else
+        std::snprintf(out, size, "crash: ");
+}
+
 void Install()
 {
+    FormatCrashPrefix(std::getenv(kPrefixVariable), g_prefix, sizeof(g_prefix));
 #ifdef _WIN32
     SetUnhandledExceptionFilter(Filter);
 #else

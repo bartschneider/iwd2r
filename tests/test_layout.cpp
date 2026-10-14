@@ -817,7 +817,9 @@ TEST_CASE("resize_recomputes_regions", "[layout]")
         // The 1920x1080 output letterboxed (centred) in the window.
         const int ox = (windowWidth - 1920) / 2;
         const int oy = (windowHeight - 1080) / 2;
-        std::vector<Region> regions = platform::present::Regions();
+        // A snapshot: SetRegions cannot free it while it is held.
+        const auto current = platform::present::Regions();
+        std::vector<Region> regions = *current;
         for (Region& r : regions) {
             r.window.left -= ox;
             r.window.right -= ox;
@@ -826,7 +828,7 @@ TEST_CASE("resize_recomputes_regions", "[layout]")
         }
         const SIZE output = { 1920, 1080 };
         CHECK(platform::compose::Tiles(regions, output));
-        const Region* ui = UiRegion(platform::present::Regions());
+        const Region* ui = UiRegion(*current);
         REQUIRE(ui != nullptr);
         CHECK(ui->window.left == ox);
         CHECK(ui->window.right == ox + 1920);
@@ -873,5 +875,5 @@ TEST_CASE("resize_recomputes_regions", "[layout]")
     DestroyWindow(hwnd);
     DrainMessages();
     REQUIRE(platform::window::InitScreen(1024, 768, 1, 1));
-    CHECK(platform::present::Regions().empty());
+    CHECK(platform::present::Regions()->empty());
 }
