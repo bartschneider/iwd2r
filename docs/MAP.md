@@ -1,6 +1,6 @@
 # Subsystem map
 
-Generated from commit `3db273f` by `tools/gen_map.py`. Do not edit; CI runs `python3 -I tools/gen_map.py --check`.
+Generated from commit `79f9895` by `tools/gen_map.py`. Do not edit; CI runs `python3 -I tools/gen_map.py --check`.
 
 Totals: 513 files, 295085 lines, 339 `TODO: Incomplete`, 10111 address comments.
 
