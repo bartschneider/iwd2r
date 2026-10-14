@@ -1915,6 +1915,150 @@ BOOLEAN CVidInf::SaveScreen()
     return TRUE;
 }
 
+// Writes the rectangle `r` of surface `nSurface` as a 24-bit BMP file image
+// into `data` (allocated here, `size` bytes), each output pixel the average
+// of an `nScale` by `nScale` block. The save uses it for the screenshot
+// (surface 0 at 1/5) and the party portraits (surface 2 at 1/2).
+//
+// 0x79EC20
+BOOLEAN CVidInf::PrintSurfaceToBmp(LPBYTE& data, int nSurface, const CRect& r, LONG& size, short nScale)
+{
+    if (g_pChitin->cVideo.m_bIs3dAccelerated) {
+        // NOTE: The original calls its 3d variant (0x7BE5A0) here, which
+        // reads the OpenGL frame buffer. iwd2r refuses the 3d mode (spec
+        // 4.3), so it is not ported.
+        data = NULL;
+        return FALSE;
+    }
+
+    INT nWidth = (r.right - r.left) / nScale;
+    INT nHeight = (r.bottom - r.top) / nScale;
+
+    INT nPadding = 0;
+    if ((-nWidth & 3) != 0) {
+        nPadding = 4 - (-nWidth & 3);
+    }
+
+    size = (nWidth + nPadding + nWidth * 2) * nHeight + sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER);
+    data = new BYTE[size];
+
+    // __FILE__: C:\Projects\Icewind2\src\chitin\ChVideo.cpp
+    // __LINE__: 9217
+    UTIL_ASSERT(data != NULL);
+
+    BITMAPFILEHEADER* pFileHeader = reinterpret_cast<BITMAPFILEHEADER*>(data);
+    pFileHeader->bfType = 0x4D42; // "BM"
+    pFileHeader->bfSize = size;
+    pFileHeader->bfReserved1 = 0;
+    pFileHeader->bfReserved2 = 0;
+    pFileHeader->bfOffBits = sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER);
+
+    BITMAPINFOHEADER* pInfoHeader = reinterpret_cast<BITMAPINFOHEADER*>(data + sizeof(BITMAPFILEHEADER));
+    pInfoHeader->biSize = sizeof(BITMAPINFOHEADER);
+    pInfoHeader->biWidth = nWidth;
+    pInfoHeader->biHeight = nHeight;
+    pInfoHeader->biPlanes = 1;
+    pInfoHeader->biBitCount = 24;
+    pInfoHeader->biCompression = 0;
+    pInfoHeader->biSizeImage = 0;
+    pInfoHeader->biXPelsPerMeter = 0;
+    pInfoHeader->biYPelsPerMeter = 0;
+    // NOTE: The original writes 0x1000000 colours used (a 24-bit image has
+    // no palette, so readers ignore it).
+    pInfoHeader->biClrUsed = 0x1000000;
+    pInfoHeader->biClrImportant = 0;
+
+    BYTE* pDest = data + sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER);
+
+    DDSURFACEDESC ddsd;
+    ddsd.dwSize = sizeof(ddsd);
+
+    CRect rLock;
+    rLock.CopyRect(&r);
+
+    if (!LockSurface(nSurface, &ddsd, rLock)) {
+        delete[] data;
+        data = NULL;
+        return FALSE;
+    }
+
+    BYTE* pSurface = reinterpret_cast<BYTE*>(ddsd.lpSurface);
+    LONG lPitch = ddsd.lPitch;
+
+    INT nBytesPerPixel;
+    switch (g_pChitin->cVideo.m_nBpp) {
+    case 16:
+        nBytesPerPixel = 2;
+        break;
+    case 24:
+        nBytesPerPixel = 3;
+        break;
+    case 32:
+        nBytesPerPixel = 4;
+        break;
+    default:
+        UnLockSurface(nSurface, ddsd.lpSurface);
+        delete[] data;
+        data = NULL;
+        return FALSE;
+    }
+
+    // The rows go bottom up, as a BMP stores them; the last column takes
+    // what is left of the rectangle's width.
+    for (INT nRow = nHeight - 1; nRow >= 0; nRow--) {
+        BYTE* pBlockRow = pSurface + nRow * nScale * lPitch;
+
+        for (INT nColumn = 0; nColumn < nWidth; nColumn++) {
+            INT nBlockWidth;
+            if (nColumn == nWidth - 1) {
+                nBlockWidth = r.right - (nWidth - 1) * nScale - r.left;
+            } else {
+                nBlockWidth = nScale;
+            }
+
+            INT nBlue = 0;
+            INT nGreen = 0;
+            INT nRed = 0;
+
+            for (INT y = 0; y < nScale; y++) {
+                BYTE* pPixel = pBlockRow + y * lPitch + nColumn * nScale * nBytesPerPixel;
+                for (INT x = 0; x < nBlockWidth; x++) {
+                    if (nBytesPerPixel == 2) {
+                        WORD nPixel = reinterpret_cast<WORD*>(pPixel)[x];
+                        nBlue += static_cast<WORD>((m_dwBBitMask & nPixel) >> (m_dwBBitShift & 0x1F));
+                        nGreen += static_cast<WORD>((m_dwGBitMask & nPixel) >> (m_dwGBitShift & 0x1F));
+                        nRed += static_cast<WORD>((m_dwRBitMask & nPixel) >> (m_dwRBitShift & 0x1F));
+                    } else {
+                        BYTE* pBytes = pPixel + x * nBytesPerPixel;
+                        nBlue += pBytes[m_dwBBitShift / 8];
+                        nGreen += pBytes[m_dwGBitShift / 8];
+                        nRed += pBytes[m_dwRBitShift / 8];
+                    }
+                }
+            }
+
+            INT nCount = nBlockWidth * nScale;
+            if (nBytesPerPixel == 2) {
+                pDest[0] = static_cast<BYTE>(((nBlue / nCount) << 8) >> (m_dwBBitCount & 0x1F));
+                pDest[1] = static_cast<BYTE>(((nGreen / nCount) << 8) >> (m_dwGBitCount & 0x1F));
+                pDest[2] = static_cast<BYTE>(((nRed / nCount) << 8) >> (m_dwRBitCount & 0x1F));
+            } else {
+                pDest[0] = static_cast<BYTE>(nBlue / nCount);
+                pDest[1] = static_cast<BYTE>(nGreen / nCount);
+                pDest[2] = static_cast<BYTE>(nRed / nCount);
+            }
+            pDest += 3;
+        }
+
+        // NOTE: The padding bytes are left as `new` gave them.
+        pDest += nPadding;
+    }
+
+    UnLockSurface(nSurface, ddsd.lpSurface);
+
+    return TRUE;
+}
+
 // 0x79F6A0
 BOOL CVidInf::RenderPointer()
 {

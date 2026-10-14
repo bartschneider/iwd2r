@@ -23,6 +23,7 @@
 #include <climits>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -617,5 +618,117 @@ TEST_CASE("save screen: a loaded party fills m_characters and saves from the wor
     const std::string bytes = ReadFile(gam);
     REQUIRE(bytes.size() >= 0xB4);
     CHECK(Le32(bytes, 0x24) == 1);
+    // CInfGame::SaveGame (0x5AC430) writes the world map with the save.
+    const std::string wmp = ReadFile(Child(Child(SaveRoot(), "000000004-Reloaded"), "WORLDMAP.WMP"));
+    REQUIRE(wmp.size() > 16);
+    CHECK(wmp.compare(0, 8, "WMAPV1.0") == 0);
     ClearSaves();
+}
+
+// CVidInf::PrintSurfaceToBmp (0x79EC20) writes a rectangle of a surface as a
+// 24-bit BMP, each pixel the average of an nScale-square block, the rows
+// bottom up, the last column taking what is left of the width. The test
+// gives the video mode one surface of the DirectDraw shim (XRGB8888, as the
+// running engine's surfaces are) and restores it after.
+TEST_CASE("save screen: PrintSurfaceToBmp averages surface blocks into a bottom-up 24-bit BMP", "[save][vid][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+
+    CVidMode* pVidMode = g_pChitin->GetCurrentVideoMode();
+    REQUIRE(pVidMode != NULL);
+
+    IDirectDraw* pDirectDraw = NULL;
+    REQUIRE(DirectDrawCreate(NULL, &pDirectDraw, NULL) == DD_OK);
+    DDSURFACEDESC desc;
+    memset(&desc, 0, sizeof(desc));
+    desc.dwSize = sizeof(desc);
+    desc.dwFlags = DDSD_CAPS | DDSD_HEIGHT | DDSD_WIDTH;
+    desc.ddsCaps.dwCaps = DDSCAPS_SYSTEMMEMORY | DDSCAPS_OFFSCREENPLAIN;
+    desc.dwWidth = 32;
+    desc.dwHeight = 32;
+    IDirectDrawSurface* pSurface = NULL;
+    REQUIRE(pDirectDraw->CreateSurface(&desc, &pSurface, NULL) == DD_OK);
+
+    const UINT nSurfacesBefore = pVidMode->m_nSurfaces;
+    IDirectDrawSurface** pSurfacesBefore = pVidMode->pSurfaces;
+    const USHORT nBppBefore = g_pChitin->cVideo.m_nBpp;
+    const DWORD shifts[3] = { pVidMode->m_dwRBitShift, pVidMode->m_dwGBitShift, pVidMode->m_dwBBitShift };
+    IDirectDrawSurface* surfaces[1] = { pSurface };
+    pVidMode->m_nSurfaces = 1;
+    pVidMode->pSurfaces = surfaces;
+    g_pChitin->cVideo.m_nBpp = 32;
+    pVidMode->m_dwRBitShift = 16;
+    pVidMode->m_dwGBitShift = 8;
+    pVidMode->m_dwBBitShift = 0;
+
+    // A 5 by 4 rectangle at 10,20: column x, row y has red 10 * x + y,
+    // green 100 + y, blue 7.
+    auto value = [](int x, int y, int channel) -> int {
+        return channel == 0 ? 10 * x + y : channel == 1 ? 100 + y : 7;
+    };
+    const CRect rect(10, 20, 15, 24);
+    DDSURFACEDESC ddsd;
+    ddsd.dwSize = sizeof(ddsd);
+    REQUIRE(pVidMode->LockSurface(0, &ddsd, rect));
+    for (int y = 0; y < 4; y++) {
+        DWORD* row = reinterpret_cast<DWORD*>(reinterpret_cast<BYTE*>(ddsd.lpSurface) + y * ddsd.lPitch);
+        for (int x = 0; x < 5; x++)
+            row[x] = (DWORD(value(x, y, 0)) << 16) | (DWORD(value(x, y, 1)) << 8) | DWORD(value(x, y, 2));
+    }
+    pVidMode->UnLockSurface(0, ddsd.lpSurface);
+
+    LPBYTE data = NULL;
+    LONG size = 0;
+    const BOOLEAN ok = pVidMode->PrintSurfaceToBmp(data, 0, rect, size, 2);
+
+    pVidMode->m_nSurfaces = nSurfacesBefore;
+    pVidMode->pSurfaces = pSurfacesBefore;
+    g_pChitin->cVideo.m_nBpp = nBppBefore;
+    pVidMode->m_dwRBitShift = shifts[0];
+    pVidMode->m_dwGBitShift = shifts[1];
+    pVidMode->m_dwBBitShift = shifts[2];
+    pSurface->Release();
+    pDirectDraw->Release();
+
+    REQUIRE(ok);
+    REQUIRE(data != NULL);
+    // 2 by 2 output pixels (the odd fifth column joins the second), rows of
+    // 6 bytes padded to 8.
+    CHECK(size == 54 + 8 * 2);
+    const std::string bmp(reinterpret_cast<char*>(data), static_cast<size_t>(size));
+    CHECK(bmp.compare(0, 2, "BM") == 0);
+    CHECK(Le32(bmp, 2) == static_cast<uint32_t>(size));
+    CHECK(Le32(bmp, 10) == 54);
+    CHECK(Le32(bmp, 14) == 40);
+    CHECK(Le32(bmp, 18) == 2);
+    CHECK(Le32(bmp, 22) == 2);
+    CHECK((static_cast<unsigned char>(bmp[28]) | (static_cast<unsigned char>(bmp[29]) << 8)) == 24);
+    CHECK(Le32(bmp, 46) == 0x1000000);
+
+    auto expect = [&](int col, int blockRow, int channel) -> int {
+        const int x0 = col * 2;
+        const int w = col == 1 ? 3 : 2;
+        int sum = 0;
+        for (int y = blockRow * 2; y < blockRow * 2 + 2; y++)
+            for (int x = x0; x < x0 + w; x++)
+                sum += value(x, y, channel);
+        return sum / (w * 2);
+    };
+    // The first stored row is the bottom block row.
+    for (int outRow = 0; outRow < 2; outRow++) {
+        const int blockRow = 1 - outRow;
+        for (int col = 0; col < 2; col++) {
+            const size_t at = 54 + static_cast<size_t>(outRow) * 8 + static_cast<size_t>(col) * 3;
+            INFO("row " << outRow << " col " << col);
+            CHECK(static_cast<unsigned char>(bmp[at + 0]) == expect(col, blockRow, 2));
+            CHECK(static_cast<unsigned char>(bmp[at + 1]) == expect(col, blockRow, 1));
+            CHECK(static_cast<unsigned char>(bmp[at + 2]) == expect(col, blockRow, 0));
+        }
+    }
+    delete[] data;
 }
