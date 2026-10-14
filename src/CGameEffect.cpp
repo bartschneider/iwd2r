@@ -13,6 +13,7 @@
 #include "CUtil.h"
 #include "CVidPalette.h"
 #include "IcewindCGameEffects.h"
+#include "Icewind586B70.h"
 #include "IcewindMisc.h"
 
 // NOTE: Not used. It does not include many effects. Formatting is odd.
@@ -2262,6 +2263,88 @@ CGameEffect* CGameEffectBerserk::Copy()
     return copy;
 }
 
+// 0x4A55E0
+BOOL CGameEffectBerserk::ApplyEffect(CGameSprite* pSprite)
+{
+    pSprite->m_derivedStats.m_generalState |= STATE_BERSERK;
+
+    if (m_dwFlags == 1) {
+        if (m_secondaryType) {
+            // NOTE: Uninline.
+            DisplayStringRef(pSprite, 14036);
+
+            pSprite->EquipMostDamagingMelee();
+        }
+
+        // NOTE: Uninline.
+        pSprite->AddPortraitIcon(4);
+
+        pSprite->m_derivedStats.m_spellStates.set(SPLSTATE_BERSERK_ALWAYS_ACTIVE, true);
+    } else if (m_dwFlags == 2) {
+        // Blood rage.
+        if (m_secondaryType) {
+            // NOTE: Uninline.
+            DisplayStringRef(pSprite, 14036);
+
+            pSprite->EquipMostDamagingMelee();
+        }
+
+        // NOTE: Uninline.
+        pSprite->AddPortraitIcon(76);
+
+        pSprite->m_derivedStats.m_spellStates.set(SPLSTATE_BERSERK_ALWAYS_ACTIVE, true);
+        pSprite->m_derivedStats.m_spellStates.set(SPLSTATE_BLOOD_RAGE, true);
+
+        pSprite->m_derivedStats.m_naturalImmunities.insert(17);
+        pSprite->m_derivedStats.m_naturalImmunities.insert(5);
+        pSprite->m_derivedStats.m_naturalImmunities.insert(39);
+        pSprite->m_derivedStats.m_naturalImmunities.insert(24);
+        pSprite->m_derivedStats.m_naturalImmunities.insert(109);
+        pSprite->m_derivedStats.m_naturalImmunities.insert(45);
+        pSprite->m_derivedStats.m_naturalImmunities.insert(128);
+        pSprite->m_derivedStats.m_naturalImmunities.insert(400);
+
+        // NOTE: The original tests the bonus stats' fields and updates the
+        // derived stats' ones (+0x128 and +0x130 of each).
+        if (pSprite->m_bonusStats.field_128 < 6) {
+            pSprite->m_bonusStats.m_nSTR += 6 - static_cast<SHORT>(pSprite->m_derivedStats.field_128);
+            pSprite->m_derivedStats.field_128 = 6;
+        }
+
+        if (pSprite->m_bonusStats.field_130 < 2) {
+            pSprite->m_bonusStats.m_nCON += 2 - static_cast<SHORT>(pSprite->m_derivedStats.field_130);
+            pSprite->m_derivedStats.field_130 = 2;
+        }
+
+        pSprite->m_derivedStats.m_spellStates.set(SPLSTATE_SUPPRESS_HP_INFO, true);
+
+        if (pSprite->GetAnimation()->GetMoveScale() != 0) {
+            pSprite->GetAnimation()->SetMoveScale(pSprite->GetAnimation()->GetMoveScaleDefault() + 2);
+
+            if (m_secondaryType) {
+                pSprite->DropPath();
+            }
+        }
+
+        AddColorEffect(pSprite, 128, 0, 0, 15);
+    } else {
+        if (m_secondaryType) {
+            // NOTE: Uninline.
+            DisplayStringRef(pSprite, 14036);
+        }
+
+        // NOTE: Uninline.
+        pSprite->AddPortraitIcon(4);
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    pGame->UpdatePortrait(pGame->GetCharacterPortraitNum(pSprite->GetId()), 1);
+
+    pSprite->sub_761650();
+
+    return TRUE;
+}
+
 // -----------------------------------------------------------------------------
 
 // 0x4936E0
@@ -3256,6 +3339,118 @@ CGameEffect* CGameEffectHitPoints::Copy()
     return copy;
 }
 
+// 0x4AE7C0
+BOOL CGameEffectHitPoints::ApplyEffect(CGameSprite* pSprite)
+{
+    if (pSprite->m_baseStats.m_hitPoints > 0
+        && (pSprite->m_tempStats.m_generalState & 0xF00) == 0
+        && (pSprite->m_tempStats.m_generalState & 0xC0) == 0) {
+        INT nRolled = 0;
+        for (BYTE nDie = 0; nDie < m_numDice; nDie++) {
+            nRolled += CUtil::UtilRandInt(m_diceSize, pSprite->m_tempStats.m_nLuck) + 1;
+        }
+        m_effectAmount += nRolled;
+
+        WORD nMax;
+        SHORT nValue;
+        SHORT nOld;
+        switch (m_dwFlags) {
+        case 0:
+            if (m_durationType == 1) {
+                pSprite->m_baseStats.m_maxHitPointsBase += static_cast<SHORT>(m_effectAmount);
+                pSprite->m_derivedStats.m_nMaxHitPoints += static_cast<SHORT>(m_effectAmount);
+                pSprite->m_baseStats.m_hitPoints += static_cast<SHORT>(m_effectAmount);
+                m_done = TRUE;
+                m_forceRepass = TRUE;
+                return TRUE;
+            }
+            pSprite->m_derivedStats.m_nMaxHitPoints += static_cast<SHORT>(m_effectAmount);
+            if (m_secondaryType) {
+                pSprite->m_baseStats.m_hitPoints += static_cast<SHORT>(m_effectAmount);
+            }
+            m_done = FALSE;
+            return TRUE;
+        case 1:
+        case 4:
+            // NOTE: The original reads the amount as an unsigned byte.
+            if (m_durationType == 1) {
+                pSprite->m_baseStats.m_maxHitPointsBase = static_cast<BYTE>(m_effectAmount);
+                m_forceRepass = TRUE;
+                m_done = TRUE;
+                return TRUE;
+            }
+            pSprite->m_derivedStats.m_nMaxHitPoints = static_cast<BYTE>(m_effectAmount);
+            m_done = FALSE;
+            return TRUE;
+        case 2:
+            if (m_durationType == 1) {
+                nMax = static_cast<WORD>(pSprite->m_baseStats.m_maxHitPointsBase * static_cast<SHORT>(m_effectAmount) / 100);
+                pSprite->m_baseStats.m_maxHitPointsBase = nMax;
+                if (nMax < 2) {
+                    pSprite->m_baseStats.m_maxHitPointsBase = 1;
+                }
+                nOld = pSprite->m_tempStats.m_nMaxHitPoints;
+                nMax = pSprite->m_baseStats.m_maxHitPointsBase;
+                if (static_cast<INT>(nMax) - nOld > 0) {
+                    pSprite->m_baseStats.m_hitPoints += nMax - nOld;
+                }
+                m_forceRepass = TRUE;
+                m_done = TRUE;
+                return TRUE;
+            }
+            nValue = static_cast<SHORT>(pSprite->m_baseStats.m_maxHitPointsBase * static_cast<SHORT>(m_effectAmount) / 100);
+            pSprite->m_derivedStats.m_nMaxHitPoints = nValue;
+            if (nValue < 2) {
+                pSprite->m_derivedStats.m_nMaxHitPoints = 1;
+            }
+            nOld = pSprite->m_tempStats.m_nMaxHitPoints;
+            nValue = pSprite->m_derivedStats.m_nMaxHitPoints;
+            if (nValue - nOld > 0) {
+                pSprite->m_baseStats.m_hitPoints += nValue - nOld;
+            }
+            m_done = FALSE;
+            return TRUE;
+        case 3:
+            if (m_durationType == 1) {
+                pSprite->m_baseStats.m_maxHitPointsBase += static_cast<SHORT>(m_effectAmount);
+                pSprite->m_derivedStats.m_nMaxHitPoints += static_cast<SHORT>(m_effectAmount);
+                m_done = TRUE;
+                m_forceRepass = TRUE;
+                return TRUE;
+            }
+            pSprite->m_derivedStats.m_nMaxHitPoints += static_cast<SHORT>(m_effectAmount);
+            m_done = FALSE;
+            return TRUE;
+        case 5:
+            if (m_durationType == 1) {
+                nMax = static_cast<WORD>(pSprite->m_baseStats.m_maxHitPointsBase * static_cast<SHORT>(m_effectAmount) / 100);
+                pSprite->m_baseStats.m_maxHitPointsBase = nMax;
+                if (nMax < 2) {
+                    pSprite->m_baseStats.m_maxHitPointsBase = 1;
+                }
+                m_forceRepass = TRUE;
+                m_done = TRUE;
+                return TRUE;
+            }
+            nValue = static_cast<SHORT>(pSprite->m_baseStats.m_maxHitPointsBase * static_cast<SHORT>(m_effectAmount) / 100);
+            pSprite->m_derivedStats.m_nMaxHitPoints = nValue;
+            if (nValue < 2) {
+                pSprite->m_derivedStats.m_nMaxHitPoints = 1;
+            }
+            m_done = FALSE;
+            return TRUE;
+        default:
+            // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameEffect.cpp
+            // __LINE__: 8586
+            UTIL_ASSERT(FALSE);
+            return TRUE;
+        }
+    }
+
+    m_done = TRUE;
+    return TRUE;
+}
+
 // -----------------------------------------------------------------------------
 
 // NOTE: Inlined.
@@ -3334,6 +3529,53 @@ CGameEffect* CGameEffectInvisible::Copy()
     delete effect;
     copy->CopyFromBase(this);
     return copy;
+}
+
+// 0x4AED10
+BOOL CGameEffectInvisible::ApplyEffect(CGameSprite* pSprite)
+{
+    if (m_secondaryType) {
+        if (m_dwFlags == 0) {
+            // NOTE: Uninline.
+            DisplayStringRef(pSprite, 14020);
+        } else if (m_dwFlags == 1) {
+            // NOTE: Uninline.
+            DisplayStringRef(pSprite, 14783);
+        }
+    }
+
+    pSprite->m_derivedStats.m_visualEffects.set(IWD_VFX_INVISIBILITY, true);
+
+    switch (m_dwFlags) {
+    case 0:
+    case 2:
+        if (m_durationType != 1) {
+            // NOTE: Uninline.
+            AddPortraitIcon(pSprite, 110);
+            pSprite->m_derivedStats.m_generalState |= STATE_INVISIBLE;
+            return TRUE;
+        }
+        pSprite->m_baseStats.m_generalState |= STATE_INVISIBLE;
+        break;
+    case 1:
+        if (m_durationType != 1) {
+            // NOTE: Uninline.
+            AddPortraitIcon(pSprite, 144);
+            pSprite->m_derivedStats.m_generalState |= STATE_INVISIBLE | STATE_IMPROVEDINVISIBILITY;
+            if (!IcewindMisc::IsEnemyNearby(pSprite)) {
+                pSprite->m_baseStats.field_2FC &= ~0x1;
+            }
+            return TRUE;
+        }
+        pSprite->m_baseStats.m_generalState |= STATE_INVISIBLE | STATE_IMPROVEDINVISIBILITY;
+        break;
+    default:
+        return TRUE;
+    }
+
+    m_forceRepass = TRUE;
+    m_done = TRUE;
+    return TRUE;
 }
 
 // -----------------------------------------------------------------------------
@@ -5679,6 +5921,81 @@ CGameEffect* CGameEffectSkillAlchemy::Copy()
     return copy;
 }
 
+// 0x4AF0B0
+BOOL CGameEffectSkillAlchemy::ApplyEffect(CGameSprite* pSprite)
+{
+    // NOTE: Opcode 61 works on Alchemy, skill 0; the same code as Lore
+    // (0x4AEF50) on another skill.
+    signed char nValue;
+    INT nProduct;
+
+    switch (m_dwFlags) {
+    case 0:
+        if (m_durationType != 1) {
+            pSprite->m_bonusStats.m_nSkills[CGAMESPRITE_SKILL_ALCHEMY] += static_cast<signed char>(m_effectAmount);
+            m_done = FALSE;
+            break;
+        }
+        nValue = static_cast<signed char>(pSprite->m_baseStats.m_skills[CGAMESPRITE_SKILL_ALCHEMY] + static_cast<signed char>(m_effectAmount));
+        pSprite->m_baseStats.m_skills[CGAMESPRITE_SKILL_ALCHEMY] = nValue;
+        if (nValue > 100) {
+            pSprite->m_baseStats.m_skills[CGAMESPRITE_SKILL_ALCHEMY] = 100;
+        }
+        if (static_cast<signed char>(pSprite->m_baseStats.m_skills[CGAMESPRITE_SKILL_ALCHEMY]) < 0) {
+            pSprite->m_baseStats.m_skills[CGAMESPRITE_SKILL_ALCHEMY] = 0;
+        }
+        m_forceRepass = TRUE;
+        m_done = TRUE;
+        break;
+    case 1:
+    case 2:
+        if (m_dwFlags == 1) {
+            nValue = static_cast<signed char>(m_effectAmount);
+        } else if (m_durationType != 1) {
+            nProduct = static_cast<signed char>(pSprite->m_baseStats.m_skills[CGAMESPRITE_SKILL_ALCHEMY]) * static_cast<SHORT>(m_effectAmount);
+            nValue = static_cast<signed char>(nProduct / 100);
+        } else {
+            nProduct = static_cast<SHORT>(m_effectAmount) * static_cast<signed char>(pSprite->m_baseStats.m_skills[CGAMESPRITE_SKILL_ALCHEMY]);
+            nValue = static_cast<signed char>(nProduct / 100);
+        }
+
+        if (m_durationType != 1) {
+            pSprite->m_derivedStats.m_nSkills[CGAMESPRITE_SKILL_ALCHEMY] = nValue;
+            if (nValue > 100) {
+                pSprite->m_derivedStats.m_nSkills[CGAMESPRITE_SKILL_ALCHEMY] = 100;
+            }
+            if (pSprite->m_derivedStats.m_nSkills[CGAMESPRITE_SKILL_ALCHEMY] < 0) {
+                pSprite->m_derivedStats.m_nSkills[CGAMESPRITE_SKILL_ALCHEMY] = 0;
+            }
+            m_done = FALSE;
+            break;
+        }
+
+        pSprite->m_baseStats.m_skills[CGAMESPRITE_SKILL_ALCHEMY] = nValue;
+        if (nValue > 100) {
+            pSprite->m_baseStats.m_skills[CGAMESPRITE_SKILL_ALCHEMY] = 100;
+        }
+        if (static_cast<signed char>(pSprite->m_baseStats.m_skills[CGAMESPRITE_SKILL_ALCHEMY]) < 0) {
+            pSprite->m_baseStats.m_skills[CGAMESPRITE_SKILL_ALCHEMY] = 0;
+        }
+        m_forceRepass = TRUE;
+        m_done = TRUE;
+        break;
+    default:
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameEffect.cpp
+        // __LINE__: 9062
+        UTIL_ASSERT(FALSE);
+        break;
+    }
+
+    // NOTE: Inlined CGameObject::InControl.
+    if (pSprite->InControl()) {
+        pSprite->m_bSendSpriteUpdate = TRUE;
+    }
+
+    return TRUE;
+}
+
 // -----------------------------------------------------------------------------
 
 // NOTE: Inlined.
@@ -5855,6 +6172,25 @@ CGameEffect* CGameEffectSkillUnsummon::Copy()
     delete effect;
     copy->CopyFromBase(this);
     return copy;
+}
+
+// 0x4B4BD0
+BOOL CGameEffectSkillUnsummon::ApplyEffect(CGameSprite* pSprite)
+{
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    if (pGame->GetCharacterPortraitNum(pSprite->GetId()) == -1) {
+        // TODO: Incomplete. The original calls
+        // Icewind586B70::Instance()->CSummonLimitStruct_Unsummon(pSprite)
+        // (0x586DC0, not in src/) and queues a message of subtype 89
+        // (vtable 0x84C3A8, not in src/) with the sprite's id as caller,
+        // target and payload.
+        Icewind586B70::Instance();
+
+        pSprite->m_removeFromArea = TRUE;
+    }
+
+    m_done = TRUE;
+    return TRUE;
 }
 
 // 0x4B4BB0
@@ -7699,6 +8035,62 @@ CGameEffect* CGameEffectRegeneration::Copy()
     delete effect;
     copy->CopyFromBase(this);
     return copy;
+}
+
+// 0x4B6620
+BOOL CGameEffectRegeneration::ApplyEffect(CGameSprite* pSprite)
+{
+    if (m_secondaryType) {
+        // NOTE: Uninline.
+        DisplayStringRef(pSprite, 11006);
+    }
+
+    // NOTE: Uninline.
+    AddPortraitIcon(pSprite, 42);
+
+    if (m_secondaryType) {
+        m_special = g_pBaldurChitin->GetObjectGame()->GetWorldTimer()->m_gameTime;
+    }
+
+    DWORD duration = m_durationType != 1 ? m_duration : 0;
+
+    CPersistantEffect84C494* pEffect;
+    switch (m_dwFlags) {
+    case 2:
+        pEffect = new CPersistantEffect84C494(m_effectAmount,
+            15,
+            m_special,
+            duration);
+        break;
+    case 3:
+        pEffect = new CPersistantEffect84C494(1,
+            m_effectAmount * 15,
+            m_special,
+            duration);
+        break;
+    case 4:
+        pEffect = new CPersistantEffect84C494(m_effectAmount,
+            105,
+            m_special,
+            duration);
+        break;
+    default:
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameEffect.cpp
+        // __LINE__: 14698
+        UTIL_ASSERT(FALSE);
+
+        // NOTE: The original goes on with the sprite as the new persistent
+        // effect: it writes the source id and the source resref into the
+        // sprite and adds the sprite to the list. Bounded here (ruling
+        // P4-10).
+        return TRUE;
+    }
+
+    pEffect->m_sourceID = m_sourceID;
+    strcpy(reinterpret_cast<char*>(pEffect->field_29), m_sourceRes.GetResRefStr());
+    pSprite->GetDerivedStats()->m_cRegeneratedPersistantEffectList.AddTail(pEffect);
+
+    return TRUE;
 }
 
 // -----------------------------------------------------------------------------
@@ -12648,6 +13040,12 @@ CPersistantEffect84C494::CPersistantEffect84C494(int a1, int a2, int a3, int a4)
     : CPersistantEffect84C4A4(a2, a3, a4)
 {
     field_34 = a1;
+
+    // NOTE: Seen inlined in CGameEffectRegeneration::ApplyEffect (0x4B6620):
+    // a first tick due at the start time moves one period on.
+    if (field_20 == field_18) {
+        field_20 = field_24 + field_18;
+    }
 }
 
 // NOTE: Inlined.

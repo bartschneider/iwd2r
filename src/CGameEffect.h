@@ -370,6 +370,7 @@ class CGameEffectBerserk : public CGameEffect {
 public:
     CGameEffectBerserk(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;
 };
 
 class CGameEffectBarbarianRage : public CGameEffect {
@@ -494,6 +495,7 @@ class CGameEffectHitPoints : public CGameEffect {
 public:
     CGameEffectHitPoints(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;
 };
 
 class CGameEffectINT : public CGameEffect {
@@ -507,6 +509,7 @@ class CGameEffectInvisible : public CGameEffect {
 public:
     CGameEffectInvisible(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;
 };
 
 class CGameEffectLore : public CGameEffect {
@@ -785,6 +788,7 @@ class CGameEffectSkillAlchemy : public CGameEffect {
 public:
     CGameEffectSkillAlchemy(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;
 };
 
 class CGameEffectSpellMemoizationCleric : public CGameEffect {
@@ -834,6 +838,7 @@ class CGameEffectSkillUnsummon : public CGameEffect {
 public:
     CGameEffectSkillUnsummon(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;
     void DisplayString(CGameSprite* pSprite) override;
 };
 
@@ -1051,6 +1056,7 @@ class CGameEffectRegeneration : public CGameEffect {
 public:
     CGameEffectRegeneration(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;
 };
 
 class CGameEffectDurationCasting : public CGameEffect {
