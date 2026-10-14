@@ -55,7 +55,9 @@ static std::list<CGameEffect*> GetSpellResrefEffects(CGameObject* pObject, const
 // tracking table and, when the sprite's wilderness lore roll (d20 + the
 // skill against the entry / 5 + 10) succeeds, returns the area's tracking
 // string. Until then it returns the original's fallback, 19534, the string
-// for an area missing from the table.
+// for an area missing from the table. For an area in the table and a sprite
+// with the skill, the original calls rand (0x546773) for that roll; the stub
+// does not, so it shifts the RNG stream until 0x5466F0 is ported.
 static STRREF GetTrackingString(CGameSprite* pSprite, CString& sAreaName)
 {
     (void)pSprite;
@@ -877,10 +879,18 @@ BOOL IcewindCGameEffectVisualSpellHit::ApplyEffect(CGameSprite* pSprite)
         pSprite->GetId(),
         pSprite->GetId(),
         0);
+    // TODO: CMessageFireProjectile has no Run yet. The original's,
+    // CMessageFireProjectile::Run (0x5007F0, vtable 0x84D4D8 +0x18), decodes
+    // the projectile (0x51EAF0) and fires it. In single player the message
+    // is queued locally and CMessageHandler::AsynchronousUpdate runs the base
+    // CMessage::Run, which asserts, until that Run is ported (the
+    // projectiles stream).
     g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
 
-    // NOTE: The original fires the projectile unconditionally. The guard
-    // stays until DecodeSpellHitProjectile (0x560310) is ported.
+    // DEVIATION: the original calls Fire on the decoded projectile
+    // unconditionally. The NULL check is only there because
+    // DecodeSpellHitProjectile (0x560310) is still a stub that returns NULL;
+    // remove it when 0x560310 is ported.
     if (pProjectile != NULL) {
         pProjectile->Fire(pSprite->GetArea(),
             pSprite->GetId(),
@@ -1897,7 +1907,13 @@ BOOL IcewindCGameEffectTurnUndead::ApplyEffect(CGameSprite* pSprite)
         if (nLevel > CalculateTurnUndeadFinalSourceRoll(pTurner)) {
             FeedBackImmuneToResource(pSprite, m_sourceRes);
             m_done = TRUE;
-            // NOTE: The original returns without releasing the turner.
+            // NOTE: The original returns here without releasing its share on
+            // the turner (original bug, kept). GetDeny only waits on other
+            // threads' shares, so this cannot stall a message; the hazards
+            // are the turner's share count staying above 0, which asserts in
+            // CGameObjectArray::Delete (CGameObjectArray.cpp:533-537) when the
+            // turner is deleted, and GetShare asserting once 255 shares pile
+            // up.
             return TRUE;
         }
 
@@ -1942,12 +1958,13 @@ BOOL IcewindCGameEffectTurnUndead::ApplyEffect(CGameSprite* pSprite)
         pSprite->GetDerivedStats()->field_C -= 2;
         break;
     case 2:
-        // NOTE: A bare CGameEffect (the inlined default constructor, vtable
-        // 0x8487E8) of opcode 13 (death), flags 8, from the turner. Its
-        // probability range is 0-0, so CGameSprite::AddEffect's checks
-        // likely drop it before the base ApplyEffect would assert.
-        pEffect = new CGameEffect();
-        pEffect->m_effectID = CGAMEEFFECT_DEATH;
+        // NOTE: The inlined CGameEffectDeath default constructor (vtable
+        // 0x8487E8, whose slot 1 is CGameEffectDeath::Copy 0x452E70): opcode
+        // 13, flags 8, from the turner. The original stores 0 to +0x18C
+        // where our CGameEffectDeath() stores 1. Its probability range is
+        // 100/0 (CGameEffectBase), so the death applies.
+        pEffect = new CGameEffectDeath();
+        static_cast<CGameEffectDeath*>(pEffect)->field_18C = 0;
         pEffect->m_effectAmount = 0;
         pEffect->m_dwFlags = 8;
         pEffect->m_sourceID = pTurner->GetId();
@@ -3775,9 +3792,10 @@ BOOL IcewindCGameEffectBleedingWounds::ApplyEffect(CGameSprite* pSprite)
         // __LINE__: 6408
         UTIL_ASSERT(FALSE);
 
-        // NOTE: Past the assertion the original adds its stale register (the
-        // sprite pointer) to the list as a persistant effect. Bounded: ours
-        // adds nothing.
+        // DEVIATION: past the assertion the original adds its stale register
+        // (the sprite pointer) to the list as a persistant effect, which
+        // would corrupt memory when the list runs. Bounded (ruling P4-10):
+        // ours adds nothing.
         return TRUE;
     }
 

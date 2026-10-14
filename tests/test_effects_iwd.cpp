@@ -9,6 +9,7 @@
 #include "CMessage.h"
 #include "CScreenCreateChar.h"
 #include "CScreenWorld.h"
+#include "CUIControlTextDisplay.h"
 #include "CVariableHash.h"
 #include "IcewindCGameEffects.h"
 #include "ScreenLayout.h"
@@ -340,7 +341,12 @@ TEST_CASE("effects-iwd: float text (283) queues the string's message only for ty
     CHECK(handler.m_messageList.IsEmpty());
 }
 
-TEST_CASE("effects-iwd: visual spell hit (233) queues the projectile message and is done", "[effects][data]")
+// 233 itself only queues CMessageFireProjectile and finishes. The queued
+// message cannot run yet: CMessageFireProjectile::Run (0x5007F0) is not
+// ported, so the base CMessage::Run would assert when the handler's
+// AsynchronousUpdate reached it. The case therefore checks the queue and
+// removes the message itself; it says nothing about the projectile firing.
+TEST_CASE("effects-iwd: visual spell hit (233) queues a CMessageFireProjectile and is done", "[effects][data]")
 {
     PROBE_OR_SKIP(pSprite);
     ClearMessages();
@@ -349,7 +355,15 @@ TEST_CASE("effects-iwd: visual spell hit (233) queues the projectile message and
     CHECK(pEffect->ApplyEffect(pSprite) == FALSE);
     CHECK(pEffect->m_done == TRUE);
     REQUIRE(handler.m_messageList.GetCount() == 1);
-    CHECK(dynamic_cast<CMessageFireProjectile*>(handler.m_messageList.GetHead()) != nullptr);
+    CMessageFireProjectile* message = dynamic_cast<CMessageFireProjectile*>(handler.m_messageList.GetHead());
+    REQUIRE(message != nullptr);
+    CHECK(message->m_projectileType == 0x1004);
+    CHECK(message->m_projectileTargetId == pSprite->GetId());
+    CHECK(message->m_projectileTarget == pSprite->GetPos());
+    CHECK(message->m_height == 0);
+    CHECK(message->GetSource() == pSprite->GetId());
+    CHECK(message->GetTarget() == pSprite->GetId());
+    // Removed here: running it needs CMessageFireProjectile::Run (0x5007F0).
     ClearMessages();
 }
 
@@ -737,7 +751,7 @@ TEST_CASE("effects-iwd: gaze, wail and projectile effects finish; area of effect
     CHECK(pEffect->m_done == TRUE);
 }
 
-TEST_CASE("effects-iwd: turn undead (280) and ranger tracking (286)", "[effects][data]")
+TEST_CASE("effects-iwd: turn undead (280) without a turner and type 1", "[effects][data]")
 {
     PROBE_OR_SKIP(pSprite);
     // The turner's id travels in the dice count; an unknown one returns
@@ -763,18 +777,105 @@ TEST_CASE("effects-iwd: turn undead (280) and ranger tracking (286)", "[effects]
     pStats->field_C = before;
     pStats->m_spellStates.reset(SPLSTATE_TURNED);
     pStats->m_spellStates.reset(SPLSTATE_179);
+}
 
-    pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_RANGERTRACKING, 0, 0);
+TEST_CASE("effects-iwd: turn undead (280) type 0 commands with a dominate effect", "[effects][data]")
+{
+    PROBE_OR_SKIP(pSprite);
+    ClearMessages();
+    CMessageHandler& handler = g_pBaldurChitin->m_cMessageHandler;
+    std::unique_ptr<CGameEffect> pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_TURNUNDEAD, 0, 0);
+    pEffect->m_numDice = static_cast<DWORD>(pSprite->GetId());
+    pEffect->m_secondaryType = 1;
+    pEffect->m_duration = 1234;
+    CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+    CHECK(pEffect->m_done == FALSE);
+    // The string (41023) goes by its own message; find the effect's.
+    CMessageAddEffect* message = nullptr;
+    POSITION pos = handler.m_messageList.GetHeadPosition();
+    while (pos != NULL) {
+        CMessage* pMessage = handler.m_messageList.GetNext(pos);
+        if (dynamic_cast<CMessageAddEffect*>(pMessage) != nullptr) {
+            CHECK(message == nullptr);
+            message = static_cast<CMessageAddEffect*>(pMessage);
+        }
+    }
+    REQUIRE(message != nullptr);
+    REQUIRE(message->m_effect != NULL);
+    CHECK(message->m_effect->m_effectID == ICEWIND_CGAMEEFFECT_DOMINATE);
+    CHECK(dynamic_cast<IcewindCGameEffectDominate*>(message->m_effect) != nullptr);
+    CHECK(message->m_effect->m_dwFlags == 4);
+    CHECK(message->m_effect->m_duration == 1234);
+    CHECK(message->m_effect->m_sourceID == pSprite->GetId());
+    CHECK(message->GetTarget() == pSprite->GetId());
+    ClearMessages();
+    pSprite->GetDerivedStats()->m_spellStates.reset(SPLSTATE_TURNED);
+}
+
+TEST_CASE("effects-iwd: turn undead (280) type 2 destroys with a CGameEffectDeath", "[effects][data]")
+{
+    PROBE_OR_SKIP(pSprite);
+    ClearMessages();
+    CMessageHandler& handler = g_pBaldurChitin->m_cMessageHandler;
+    std::unique_ptr<CGameEffect> pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_TURNUNDEAD, 2, 0);
+    pEffect->m_numDice = static_cast<DWORD>(pSprite->GetId());
+    pEffect->m_secondaryType = 0;
     CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
     CHECK(pEffect->m_done == TRUE);
+    REQUIRE(handler.m_messageList.GetCount() == 1);
+    CMessageAddEffect* message = dynamic_cast<CMessageAddEffect*>(handler.m_messageList.GetHead());
+    REQUIRE(message != nullptr);
+    CGameEffectDeath* pDeath = dynamic_cast<CGameEffectDeath*>(message->m_effect);
+    REQUIRE(pDeath != nullptr);
+    CHECK(pDeath->m_effectID == CGAMEEFFECT_DEATH);
+    CHECK(pDeath->m_effectAmount == 0);
+    CHECK(pDeath->m_dwFlags == 8);
+    CHECK(pDeath->m_sourceID == pSprite->GetId());
+    CHECK(pDeath->field_18C == 0);
+    CHECK(pDeath->m_probabilityUpper == 100);
+    CHECK(pDeath->m_probabilityLower == 0);
+    CHECK(pDeath->m_secondaryType == 1);
+    CHECK(message->GetTarget() == pSprite->GetId());
+    ClearMessages();
+    pSprite->GetDerivedStats()->m_spellStates.reset(SPLSTATE_TURNED);
+}
+
+TEST_CASE("effects-iwd: ranger tracking (286) shows the tracking string under the sprite's name", "[effects][data]")
+{
+    PROBE_OR_SKIP(pSprite);
+    CUIControlTextDisplay* pDisplay = g_pBaldurChitin->m_pEngineWorld->m_pActiveDialogDisplay;
+    REQUIRE(pDisplay != NULL);
+    REQUIRE(pDisplay->m_plstStrings != NULL);
+    const INT_PTR before = pDisplay->m_plstStrings->GetCount();
+    std::unique_ptr<CGameEffect> pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_RANGERTRACKING, 0, 0);
+    CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+    CHECK(pEffect->m_done == TRUE);
+    REQUIRE(pDisplay->m_plstStrings->GetCount() > before);
+    // The stubbed lookup (0x5466F0) gives the fallback 19534.
+    STR_RES strRes;
+    g_pBaldurChitin->m_cTlkTable.Fetch(19534, strRes);
+    bool found = false;
+    POSITION pos = pDisplay->m_plstStrings->GetHeadPosition();
+    while (pos != NULL) {
+        CDisplayString* pString = pDisplay->m_plstStrings->GetNext(pos);
+        if (!strRes.szText.IsEmpty() && pString->GetString().Find(strRes.szText) != -1) {
+            found = true;
+        }
+    }
+    CHECK(found);
 }
 
 TEST_CASE("effects-iwd: casting glow (235) finishes", "[effects][data]")
 {
     PROBE_OR_SKIP(pSprite);
     for (DWORD school = 0; school <= 9; school++) {
+        ClearMessages();
         std::unique_ptr<CGameEffect> pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_CASTINGGLOW, school, 0);
         CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
         CHECK(pEffect->m_done == TRUE);
+        CHECK(pEffect->m_dwFlags == school);
+        // The projectile and its CMessageFireProjectile are the TODO range
+        // (0x55E199-0x55E806): nothing is queued yet.
+        CHECK(g_pBaldurChitin->m_cMessageHandler.m_messageList.IsEmpty());
     }
 }
