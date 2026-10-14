@@ -24,6 +24,7 @@ import tempfile
 import types
 import unittest
 import xml.etree.ElementTree as ET
+import zlib
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GEN_MAP = os.path.join(ROOT, 'tools', 'gen_map.py')
@@ -2439,8 +2440,15 @@ class BifTest(unittest.TestCase):
                               ('XPLEVEL.WAV', 'unknown resource type')):
             with self.assertRaisesRegex(bif.BifError, message):
                 bif.extract(self.game, name)
-        self.write('Data/MAIN.BIF', b'BIFCV1.0' + bytes(16))
+        self.write('Data/MAIN.BIF', b'BIF V1.0' + bytes(16))
         with self.assertRaisesRegex(bif.BifError, 'not a BIFF V1'):
+            bif.extract(self.game, 'XPLEVEL.2DA')
+        self.write('Data/MAIN.BIF', b'BIFCV1.0' + struct.pack('<I', 9))
+        with self.assertRaisesRegex(bif.BifError, 'BIFC block runs past'):
+            bif.extract(self.game, 'XPLEVEL.2DA')
+        self.write('Data/MAIN.BIF', b'BIFCV1.0' + struct.pack('<3I', 9, 9, 4)
+                   + b'junk')
+        with self.assertRaisesRegex(bif.BifError, 'does not inflate'):
             bif.extract(self.game, 'XPLEVEL.2DA')
         with self.assertRaisesRegex(bif.BifError, 'not a KEY V1'):
             bif.parse_key(b'KEY V2  ' + bytes(16))
@@ -2450,6 +2458,18 @@ class BifTest(unittest.TestCase):
             bif.read_biff(make_biff([(0, b'x')]), 7)
         with self.assertRaisesRegex(bif.BifError, 'past the end'):
             bif.read_biff(make_biff([(0, b'xyz')])[:-1], 0)
+
+    def test_extract_from_a_compressed_archive(self):
+        biff = make_biff([(0, b'ids'), (1, b'2DA xp'), (2, b'ITM V2.0')])
+        half = len(biff) // 2
+        blocks = b''
+        for part in (biff[:half], biff[half:]):
+            packed = zlib.compress(part)
+            blocks += struct.pack('<II', len(part), len(packed)) + packed
+        self.write('Data/MAIN.BIF', b'BIFCV1.0' + struct.pack('<I', len(biff))
+                   + blocks)
+        self.assertEqual(bif.extract(self.game, 'xplevel.2da'), b'2DA xp')
+        self.assertEqual(bif.extract(self.game, '00swdl01.itm'), b'ITM V2.0')
 
     def test_truncated_biff_header(self):
         for data in (b'BIFFV1  ', b'BIFFV1  ' + bytes(11)):
