@@ -1129,3 +1129,37 @@ TEST_CASE("sprite: sub_75F3D0 hides and shows a creature", "[ai][data]")
     CHECK(pHint->sub_75F3D0(2) == CGameAIBase::ACTION_ERROR);
     CHECK(pHint->m_baseStats.field_294 == 1);
 }
+
+TEST_CASE("sprite: StartSpriteEffect allocates its arrays without asserting", "[ai][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    CGameSprite* pCharacter = NewGameInStartArea(cre);
+    REQUIRE(pCharacter->GetArea() != NULL);
+
+    // Fire (1) at intensity 2: base 0, random 2, so length * 1 entries.
+    // 0x708C0F and 0x708C65 assert only when an allocation fails.
+    pCharacter->StartSpriteEffect(1, 2, 10, FALSE);
+    const int length = pCharacter->m_spriteEffectSequenceLength;
+    REQUIRE(length > 0);
+    REQUIRE(pCharacter->m_pSpriteEffectArray != NULL);
+    REQUIRE(pCharacter->m_pSpriteEffectArrayPosition != NULL);
+    for (int i = 0; i < length; i++) {
+        CHECK(pCharacter->m_pSpriteEffectArray[i] == 0xFFFF);
+    }
+    CHECK(pCharacter->m_spriteEffectDuration == static_cast<BYTE>(length + 10 + 9));
+
+    // A second effect frees the first arrays and allocates new ones.
+    pCharacter->StartSpriteEffect(2, 1, 5, FALSE);
+    CHECK(pCharacter->m_pSpriteEffectArray != NULL);
+    CHECK(pCharacter->m_pSpriteEffectArrayPosition != NULL);
+}

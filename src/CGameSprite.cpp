@@ -6758,17 +6758,21 @@ void CGameSprite::StartSpriteEffect(BYTE spriteEffect, BYTE intensityLevel, BYTE
     int cnt = m_spriteEffectSequenceLength * (m_spriteEffectBaseIntensity + m_spriteEffectRandomIntensity - 1);
     if (m_spriteEffectSequenceLength * (m_spriteEffectBaseIntensity + m_spriteEffectRandomIntensity - 1) > 0) {
         m_pSpriteEffectArray = new USHORT[cnt];
-        if (m_pSpriteEffectArray != NULL) {
+        if (m_pSpriteEffectArray == NULL) {
             // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjCreature.cpp
             // __LINE__: 10332
             UTIL_ASSERT(FALSE);
+            return;
         }
 
         m_pSpriteEffectArrayPosition = new POINT[cnt];
-        if (m_pSpriteEffectArrayPosition != NULL) {
+        if (m_pSpriteEffectArrayPosition == NULL) {
             // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjCreature.cpp
             // __LINE__: 10338
             UTIL_ASSERT(FALSE);
+            delete m_pSpriteEffectArray;
+            m_pSpriteEffectArray = NULL;
+            return;
         }
 
         memset(m_pSpriteEffectArray, 0xFF, sizeof(USHORT) * cnt);
