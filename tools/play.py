@@ -586,6 +586,36 @@ def result_row(name, result):
             result['screen_shots'] + result['engine_shots'])
 
 
+def missing_shots(run_dir, actions, presented=False):
+    """The `shot NAME` lines of the scenario whose NAME.png (and, with
+    presented, NAME-presented.png) is not in run_dir, in script order."""
+    missing = []
+    for action in actions:
+        if action['op'] != 'shot' or action['name'] in missing:
+            continue
+        files = [action['name'] + '.png']
+        if presented:
+            files.append(action['name'] + '-presented.png')
+        if not all(os.path.isfile(os.path.join(run_dir, f)) for f in files):
+            missing.append(action['name'])
+    return missing
+
+
+def check_shots(result, run_dir, actions, presented=False):
+    """A scenario passes only when the game exited 0 and every shot it
+    asks for was written: an engine that quits early with 0 fails here with
+    code 1 and "missing shot NAME"."""
+    if result['code'] != 0:
+        return result
+    missing = missing_shots(run_dir, actions, presented)
+    if missing:
+        result['code'] = 1
+        error = 'missing shot ' + ', '.join(missing)
+        result['error'] = error if not result.get('error') \
+            else result['error'] + '; ' + error
+    return result
+
+
 def write_vm_summary(run_dir, argv, platform, script, overrides, result):
     shots = sorted(n for n in os.listdir(run_dir) if n.endswith('.png'))
     write_summary(run_dir, argv, platform, result['code'], overrides, script,
@@ -656,6 +686,7 @@ def run_linux_vm(args, argv, scenarios, data, overrides, base_dir, nested,
         finally:
             if not args.keep_data_view:
                 dataview.remove_view(view)
+        check_shots(result, run_dir, actions, args.shot_presented)
         write_vm_summary(run_dir, argv, 'linux-vm', path, overrides, result)
         log('linux: %s exit %s in %.1f s%s' % (
             name, result['code'], result['seconds'],
@@ -717,13 +748,17 @@ def run_windows_vm(args, argv, scenarios, data, overrides, base_dir, nested,
             winsandbox.refresh_cache(
                 data, winsandbox.GAME_CACHE, log,
                 lock=lambda: filelock.hold(oracle.VANILLA_LOCK, 'vanilla'))
-            winsandbox.reset_cache_inis(data, winsandbox.GAME_CACHE)
+            with filelock.hold(oracle.VANILLA_LOCK, 'vanilla'):
+                winsandbox.reset_cache_inis(data, winsandbox.GAME_CACHE)
             log('windows: %s in Windows Sandbox (real input)' % name)
             result = winsandbox.run_scenario(
                 exe, winsandbox.GAME_CACHE,
                 realinput.windows_actions(actions, geometry),
                 overrides, name, run_dir, host_run, args.timeout,
                 realinput.FRAME_RATE, log)
+        # --shot-presented is not passed into the sandbox, so only the
+        # engine's NAME.png is required there.
+        check_shots(result, run_dir, actions)
         write_vm_summary(run_dir, argv, 'windows-vm', path, overrides,
                          result)
         log('windows: %s exit %s in %.1f s%s' % (

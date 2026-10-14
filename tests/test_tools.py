@@ -3058,6 +3058,63 @@ class DefaultDataTest(unittest.TestCase):
                     None, platform, {'IWD2_DATA': tmp}), tmp)
 
 
+class ShotCheckTest(unittest.TestCase):
+    """A --vm scenario passes only with exit 0 and every shot written."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.run_dir = self._tmp.name
+        self.actions = realinput.load_scenario(os.path.join(
+            ROOT, 'scenarios', 'pending', 'world_entry.txt'))
+        self.assertIn('world', [a['name'] for a in self.actions
+                                if a['op'] == 'shot'])
+
+    def touch(self, name):
+        with open(os.path.join(self.run_dir, name), 'wb'):
+            pass
+
+    def result(self, code=0):
+        return {'code': code, 'error': None, 'seconds': 1.0,
+                'screen_shots': 0, 'engine_shots': 0}
+
+    def test_exit_0_without_the_shot_fails(self):
+        # The Windows world_entry run: the engine quit with 0 at the
+        # chapter step and wrote no shot.
+        for name in ('actions.json', 'driver.log', 'log.txt'):
+            self.touch(name)
+        self.touch('world-screen.png')  # the driver's capture is not enough
+        r = play.check_shots(self.result(), self.run_dir, self.actions)
+        self.assertEqual(r['code'], 1)
+        self.assertEqual(r['error'], 'missing shot world')
+        self.assertEqual(play.result_row('world_entry', r)[1], 1)
+
+    def test_all_shots_present_passes(self):
+        self.touch('world.png')
+        r = play.check_shots(self.result(), self.run_dir, self.actions)
+        self.assertEqual((r['code'], r['error']), (0, None))
+
+    def test_presented_shots_are_required_with_the_flag(self):
+        self.touch('world.png')
+        r = play.check_shots(self.result(), self.run_dir, self.actions, True)
+        self.assertEqual((r['code'], r['error']), (1, 'missing shot world'))
+        self.touch('world-presented.png')
+        r = play.check_shots(self.result(), self.run_dir, self.actions, True)
+        self.assertEqual(r['code'], 0)
+
+    def test_a_failing_exit_code_is_kept(self):
+        r = play.check_shots(self.result(124), self.run_dir, self.actions)
+        self.assertEqual((r['code'], r['error']), (124, None))
+
+    def test_every_suite_scenario_names_its_shots(self):
+        for path in scenario_files():
+            actions = realinput.load_scenario(path)
+            self.assertEqual(
+                play.missing_shots(self.run_dir, actions),
+                list(dict.fromkeys(a['name'] for a in actions
+                                   if a['op'] == 'shot')), path)
+
+
 class WinCheckoutTest(unittest.TestCase):
     def test_win_checkout_defaults(self):
         base = '/mnt/c/Users/thier/iwd2r-build'
@@ -3230,10 +3287,12 @@ class SharedLockTest(unittest.TestCase):
                                        base_dir, True, None)
         self.assertEqual(len(rows), 2)
         names = [play.scenario_name(p) for p, _ in scenarios]
+        both = [lock, oracle.VANILLA_LOCK]
         self.assertEqual(events, [
-            ('refresh', [lock]), ('reset', [lock]), ('run', names[0], [lock]),
-            ('refresh', [lock]), ('reset', [lock]), ('run', names[1], [lock])])
-        self.assertEqual(locks.paths, [(lock, 'sandbox')] * 2)
+            ('refresh', [lock]), ('reset', both), ('run', names[0], [lock]),
+            ('refresh', [lock]), ('reset', both), ('run', names[1], [lock])])
+        self.assertEqual(locks.paths, [(lock, 'sandbox'),
+                                       (oracle.VANILLA_LOCK, 'vanilla')] * 2)
 
 
 class SandboxReplayTest(unittest.TestCase):
