@@ -2502,6 +2502,15 @@ CGameEffect* CGameEffectSlipperyMind::Copy()
     return copy;
 }
 
+// 0x799C90
+BOOL CGameEffectSlipperyMind::ApplyEffect(CGameSprite* pSprite)
+{
+    // NOTE: The vtable's slot +8 is the shared "return 1" (ret 4) that
+    // identical code folding made of every such override; the effect works
+    // through the code that looks for it, not here.
+    return TRUE;
+}
+
 // -----------------------------------------------------------------------------
 
 // NOTE: Inlined.
@@ -6515,6 +6524,33 @@ CGameEffect* CGameEffectVisible::Copy()
     return copy;
 }
 
+// 0x4B2900
+BOOL CGameEffectVisible::ApplyEffect(CGameSprite* pSprite)
+{
+    // NOTE: Folded with CGameEffectDispelInvisible::ApplyEffect (the same
+    // address).
+    if ((pSprite->m_tempStats.m_generalState & STATE_NONDETECTION) == 0) {
+        pSprite->GetBaseStats()->m_generalState &= ~STATE_INVISIBLE;
+        pSprite->GetDerivedStats()->m_generalState &= ~STATE_INVISIBLE;
+
+        pSprite->GetBaseStats()->m_generalState &= ~STATE_IMPROVEDINVISIBILITY;
+        pSprite->GetDerivedStats()->m_generalState &= ~STATE_IMPROVEDINVISIBILITY;
+
+        pSprite->GetTimedEffectList()->RemoveAllOfType(pSprite,
+            CGAMEEFFECT_INVISIBLE,
+            pSprite->GetTimedEffectList()->GetPosCurrent(),
+            -1);
+        pSprite->GetEquipedEffectList()->RemoveAllOfType(pSprite,
+            CGAMEEFFECT_INVISIBLE,
+            pSprite->GetEquipedEffectList()->GetPosCurrent(),
+            -1);
+    }
+
+    m_done = TRUE;
+
+    return TRUE;
+}
+
 // -----------------------------------------------------------------------------
 
 // NOTE: Inlined.
@@ -10078,6 +10114,15 @@ CGameEffect* CGameEffectEquipWeapon::Copy()
     return copy;
 }
 
+// 0x799C90
+BOOL CGameEffectEquipWeapon::ApplyEffect(CGameSprite* pSprite)
+{
+    // NOTE: The vtable's slot +8 is the shared "return 1" (ret 4) that
+    // identical code folding made of every such override; the effect works
+    // through the code that looks for it, not here.
+    return TRUE;
+}
+
 // -----------------------------------------------------------------------------
 
 // NOTE: Inlined.
@@ -10094,6 +10139,15 @@ CGameEffect* CGameEffectDither::Copy()
     delete effect;
     copy->CopyFromBase(this);
     return copy;
+}
+
+// 0x799C90
+BOOL CGameEffectDither::ApplyEffect(CGameSprite* pSprite)
+{
+    // NOTE: The vtable's slot +8 is the shared "return 1" (ret 4) that
+    // identical code folding made of every such override; the effect works
+    // through the code that looks for it, not here.
+    return TRUE;
 }
 
 // -----------------------------------------------------------------------------
@@ -10183,6 +10237,15 @@ CGameEffect* CGameEffectShowCreatures::Copy()
     delete effect;
     copy->CopyFromBase(this);
     return copy;
+}
+
+// 0x799C90
+BOOL CGameEffectShowCreatures::ApplyEffect(CGameSprite* pSprite)
+{
+    // NOTE: The vtable's slot +8 is the shared "return 1" (ret 4) that
+    // identical code folding made of every such override; the effect works
+    // through the code that looks for it, not here.
+    return TRUE;
 }
 
 // -----------------------------------------------------------------------------
@@ -10371,6 +10434,15 @@ CGameEffect* CGameEffectVisualAnimationEffect::Copy()
     delete effect;
     copy->CopyFromBase(this);
     return copy;
+}
+
+// 0x799C90
+BOOL CGameEffectVisualAnimationEffect::ApplyEffect(CGameSprite* pSprite)
+{
+    // NOTE: The vtable's slot +8 is the shared "return 1" (ret 4) that
+    // identical code folding made of every such override; the effect works
+    // through the code that looks for it, not here.
+    return TRUE;
 }
 
 // -----------------------------------------------------------------------------
@@ -11307,6 +11379,14 @@ CGameEffect* CGameEffectIdentify::Copy()
     return copy;
 }
 
+// 0x4B9670
+BOOL CGameEffectIdentify::ApplyEffect(CGameSprite* pSprite)
+{
+    // NOTE: Folded with CGameEffectKnock::ApplyEffect (the same address).
+    m_done = TRUE;
+    return TRUE;
+}
+
 // -----------------------------------------------------------------------------
 
 // NOTE: Inlined.
@@ -11323,6 +11403,14 @@ CGameEffect* CGameEffectDetectTraps::Copy()
     delete effect;
     copy->CopyFromBase(this);
     return copy;
+}
+
+// 0x4B9670
+BOOL CGameEffectDetectTraps::ApplyEffect(CGameSprite* pSprite)
+{
+    // NOTE: Folded with CGameEffectKnock::ApplyEffect (the same address).
+    m_done = TRUE;
+    return TRUE;
 }
 
 // -----------------------------------------------------------------------------
@@ -12878,6 +12966,15 @@ CGameEffect* CGameEffectBounceProjectile::Copy()
     return copy;
 }
 
+// 0x799C90
+BOOL CGameEffectBounceProjectile::ApplyEffect(CGameSprite* pSprite)
+{
+    // NOTE: The vtable's slot +8 is the shared "return 1" (ret 4) that
+    // identical code folding made of every such override; the effect works
+    // through the code that looks for it, not here.
+    return TRUE;
+}
+
 // -----------------------------------------------------------------------------
 
 // NOTE: Inlined.
@@ -12894,6 +12991,15 @@ CGameEffect* CGameEffectBounceEffect::Copy()
     delete effect;
     copy->CopyFromBase(this);
     return copy;
+}
+
+// 0x799C90
+BOOL CGameEffectBounceEffect::ApplyEffect(CGameSprite* pSprite)
+{
+    // NOTE: The vtable's slot +8 is the shared "return 1" (ret 4) that
+    // identical code folding made of every such override; the effect works
+    // through the code that looks for it, not here.
+    return TRUE;
 }
 
 // -----------------------------------------------------------------------------
@@ -12914,6 +13020,15 @@ CGameEffect* CGameEffectBounceLevel::Copy()
     return copy;
 }
 
+// 0x799C90
+BOOL CGameEffectBounceLevel::ApplyEffect(CGameSprite* pSprite)
+{
+    // NOTE: The vtable's slot +8 is the shared "return 1" (ret 4) that
+    // identical code folding made of every such override; the effect works
+    // through the code that looks for it, not here.
+    return TRUE;
+}
+
 // -----------------------------------------------------------------------------
 
 // NOTE: Inlined.
@@ -12930,6 +13045,15 @@ CGameEffect* CGameEffectBounceLevelDecrement::Copy()
     delete effect;
     copy->CopyFromBase(this);
     return copy;
+}
+
+// 0x799C90
+BOOL CGameEffectBounceLevelDecrement::ApplyEffect(CGameSprite* pSprite)
+{
+    // NOTE: The vtable's slot +8 is the shared "return 1" (ret 4) that
+    // identical code folding made of every such override; the effect works
+    // through the code that looks for it, not here.
+    return TRUE;
 }
 
 // -----------------------------------------------------------------------------
@@ -12976,6 +13100,15 @@ CGameEffect* CGameEffectBounceSchool::Copy()
     return copy;
 }
 
+// 0x799C90
+BOOL CGameEffectBounceSchool::ApplyEffect(CGameSprite* pSprite)
+{
+    // NOTE: The vtable's slot +8 is the shared "return 1" (ret 4) that
+    // identical code folding made of every such override; the effect works
+    // through the code that looks for it, not here.
+    return TRUE;
+}
+
 // -----------------------------------------------------------------------------
 
 // NOTE: Inlined.
@@ -12992,6 +13125,15 @@ CGameEffect* CGameEffectBounceSecondaryType::Copy()
     delete effect;
     copy->CopyFromBase(this);
     return copy;
+}
+
+// 0x799C90
+BOOL CGameEffectBounceSecondaryType::ApplyEffect(CGameSprite* pSprite)
+{
+    // NOTE: The vtable's slot +8 is the shared "return 1" (ret 4) that
+    // identical code folding made of every such override; the effect works
+    // through the code that looks for it, not here.
+    return TRUE;
 }
 
 // -----------------------------------------------------------------------------
@@ -13405,6 +13547,15 @@ CGameEffect* CGameEffectBounceSpell::Copy()
     return copy;
 }
 
+// 0x799C90
+BOOL CGameEffectBounceSpell::ApplyEffect(CGameSprite* pSprite)
+{
+    // NOTE: The vtable's slot +8 is the shared "return 1" (ret 4) that
+    // identical code folding made of every such override; the effect works
+    // through the code that looks for it, not here.
+    return TRUE;
+}
+
 // -----------------------------------------------------------------------------
 
 // 0x49C1E0
@@ -13583,6 +13734,15 @@ CGameEffect* CGameEffectSecondaryCastList::Copy()
     return copy;
 }
 
+// 0x799C90
+BOOL CGameEffectSecondaryCastList::ApplyEffect(CGameSprite* pSprite)
+{
+    // NOTE: The vtable's slot +8 is the shared "return 1" (ret 4) that
+    // identical code folding made of every such override; the effect works
+    // through the code that looks for it, not here.
+    return TRUE;
+}
+
 // -----------------------------------------------------------------------------
 
 // 0x49C870
@@ -13601,6 +13761,15 @@ CGameEffect* CGameEffectVisualEffect::Copy()
     return copy;
 }
 
+// 0x799C90
+BOOL CGameEffectVisualEffect::ApplyEffect(CGameSprite* pSprite)
+{
+    // NOTE: The vtable's slot +8 is the shared "return 1" (ret 4) that
+    // identical code folding made of every such override; the effect works
+    // through the code that looks for it, not here.
+    return TRUE;
+}
+
 // -----------------------------------------------------------------------------
 
 // 0x49C960
@@ -13617,6 +13786,15 @@ CGameEffect* CGameEffectLevelDrain::Copy()
     delete effect;
     copy->CopyFromBase(this);
     return copy;
+}
+
+// 0x799C90
+BOOL CGameEffectLevelDrain::ApplyEffect(CGameSprite* pSprite)
+{
+    // NOTE: The vtable's slot +8 is the shared "return 1" (ret 4) that
+    // identical code folding made of every such override; the effect works
+    // through the code that looks for it, not here.
+    return TRUE;
 }
 
 // -----------------------------------------------------------------------------
@@ -13707,6 +13885,15 @@ CGameEffect* CGameEffectDispelSchool::Copy()
     return copy;
 }
 
+// 0x799C90
+BOOL CGameEffectDispelSchool::ApplyEffect(CGameSprite* pSprite)
+{
+    // NOTE: The vtable's slot +8 is the shared "return 1" (ret 4) that
+    // identical code folding made of every such override; the effect works
+    // through the code that looks for it, not here.
+    return TRUE;
+}
+
 // -----------------------------------------------------------------------------
 
 // 0x49CE10
@@ -13725,6 +13912,15 @@ CGameEffect* CGameEffectDispelSecondaryType::Copy()
     return copy;
 }
 
+// 0x799C90
+BOOL CGameEffectDispelSecondaryType::ApplyEffect(CGameSprite* pSprite)
+{
+    // NOTE: The vtable's slot +8 is the shared "return 1" (ret 4) that
+    // identical code folding made of every such override; the effect works
+    // through the code that looks for it, not here.
+    return TRUE;
+}
+
 // -----------------------------------------------------------------------------
 
 // 0x49CF00
@@ -13741,6 +13937,15 @@ CGameEffect* CGameEffectRandomTeleport::Copy()
     delete effect;
     copy->CopyFromBase(this);
     return copy;
+}
+
+// 0x799C90
+BOOL CGameEffectRandomTeleport::ApplyEffect(CGameSprite* pSprite)
+{
+    // NOTE: The vtable's slot +8 is the shared "return 1" (ret 4) that
+    // identical code folding made of every such override; the effect works
+    // through the code that looks for it, not here.
+    return TRUE;
 }
 
 // -----------------------------------------------------------------------------
@@ -13785,6 +13990,15 @@ CGameEffect* CGameEffectLevelRestoration::Copy()
     delete effect;
     copy->CopyFromBase(this);
     return copy;
+}
+
+// 0x799C90
+BOOL CGameEffectLevelRestoration::ApplyEffect(CGameSprite* pSprite)
+{
+    // NOTE: The vtable's slot +8 is the shared "return 1" (ret 4) that
+    // identical code folding made of every such override; the effect works
+    // through the code that looks for it, not here.
+    return TRUE;
 }
 
 // -----------------------------------------------------------------------------

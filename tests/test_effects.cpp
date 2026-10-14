@@ -424,3 +424,74 @@ TEST_CASE("damage (12) takes resistances and leaves the living awake", "[effects
 
     delete pSprite;
 }
+
+TEST_CASE("RemoveAllOfType removes the matching effects but the one to leave", "[effects][data]")
+{
+    REQUIRE_ENGINE();
+    CGameSprite* pSprite = MakeSprite();
+    CGameEffectList list;
+
+    CGameEffect* pFirst = Make(CGAMEEFFECT_LUCK, 0, 1, 0);
+    CGameEffect* pKeep = Make(CGAMEEFFECT_LUCK, 0, 2, 0);
+    CGameEffect* pOther = Make(CGAMEEFFECT_CHR, 0, 1, 0);
+    CGameEffect* pLast = Make(CGAMEEFFECT_LUCK, 0, 2, 0);
+    list.AddTail(pFirst);
+    POSITION posKeep = list.AddTail(pKeep);
+    list.AddTail(pOther);
+    list.AddTail(pLast);
+
+    SECTION("any amount")
+    {
+        list.RemoveAllOfType(pSprite, CGAMEEFFECT_LUCK, posKeep, -1);
+        REQUIRE(list.GetCount() == 2);
+        CHECK(list.GetHead() == pKeep);
+        CHECK(list.GetTail() == pOther);
+
+        // The node before the one to leave was visited: m_posNext is the
+        // node after it (0x4C097C).
+        POSITION posNext = posKeep;
+        list.GetNext(posNext);
+        CHECK(list.m_posNext == posNext);
+    }
+
+    SECTION("a given amount")
+    {
+        list.RemoveAllOfType(pSprite, CGAMEEFFECT_LUCK, posKeep, 2);
+        REQUIRE(list.GetCount() == 3);
+        CHECK(list.GetHead() == pFirst);
+        CHECK(list.GetTail() == pOther);
+
+        POSITION posNext = posKeep;
+        list.GetNext(posNext);
+        CHECK(list.m_posNext == posNext);
+    }
+
+    SECTION("no node to leave")
+    {
+        list.RemoveAllOfType(pSprite, CGAMEEFFECT_LUCK, NULL, -1);
+        REQUIRE(list.GetCount() == 1);
+        CHECK(list.GetHead() == pOther);
+    }
+
+    list.RemoveAll();
+    delete pSprite;
+}
+
+TEST_CASE("visible (47) ends invisibility; the folded no-op effects return 1", "[effects][data]")
+{
+    REQUIRE_ENGINE();
+    CGameSprite* pSprite = MakeSprite();
+
+    pSprite->m_tempStats.m_generalState = 0;
+    pSprite->m_baseStats.m_generalState |= STATE_INVISIBLE | STATE_IMPROVEDINVISIBILITY;
+    pSprite->m_derivedStats.m_generalState |= STATE_INVISIBLE;
+    CHECK(Apply(pSprite, CGAMEEFFECT_VISIBLE, 0, 0, 0) == TRUE);
+    CHECK((pSprite->m_baseStats.m_generalState & (STATE_INVISIBLE | STATE_IMPROVEDINVISIBILITY)) == 0);
+    CHECK((pSprite->m_derivedStats.m_generalState & STATE_INVISIBLE) == 0);
+
+    CHECK(Apply(pSprite, CGAMEEFFECT_IDENTIFY, 0, 0, 0) == TRUE);
+    CHECK(Apply(pSprite, CGAMEEFFECT_BOUNCESPELL, 0, 0, 0) == FALSE);
+    CHECK(Apply(pSprite, CGAMEEFFECT_LEVELDRAIN, 0, 0, 0) == FALSE);
+
+    delete pSprite;
+}
