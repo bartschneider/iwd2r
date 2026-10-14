@@ -8,6 +8,8 @@
 // 0x54B0E0
 CStore::CStore()
 {
+    memset(&m_header, 0, sizeof(m_header));
+
     m_nBuyTypes = 0;
     m_nDrinks = 0;
     m_nSpells = 0;
@@ -21,6 +23,8 @@ CStore::CStore()
 // 0x54B150
 CStore::CStore(const CResRef& resRef)
 {
+    memset(&m_header, 0, sizeof(m_header));
+
     m_pBuyTypes = NULL;
     m_pDrinks = NULL;
     m_pSpells = NULL;
@@ -334,7 +338,9 @@ DWORD CStore::GetItemSellValue(CItem& cItem, unsigned char a2)
 
         if (!v2) {
             dwMarkDown = m_header.m_nSellMarkDown - v1 * m_header.m_nAdditionalMarkDown;
-            if (dwMarkDown < 20) {
+
+            // NOTE: Signed compare.
+            if (static_cast<INT>(dwMarkDown) < 20) {
                 dwMarkDown = 20;
             }
         }
@@ -464,8 +470,7 @@ BOOL CStore::GetItem(INT nIndex, CItem& cItem)
         cItem.m_flags |= 0x1;
     }
 
-    // NOTE: Similar condition?
-    if ((pStoreItem->m_nStoreFlags & 0x1) != 0 || cItem.GetLoreValue() > 0) {
+    if ((pStoreItem->m_nStoreFlags & 0x1) == 0 && cItem.GetLoreValue() > 0) {
         cItem.m_flags |= 0x8;
     }
 
@@ -801,12 +806,6 @@ BOOL CStore::IsItemAcceptable(CItem* pItem)
     return FALSE;
 }
 
-// 0x54CAF0
-void sub_54CAF0()
-{
-    // TODO: Incomplete.
-}
-
 // 0x54C1D0
 INT CStore::RemoveItemExt(CResRef resRef, int dwFlags, int nIndex, int wCount, BOOLEAN* pbRemoved)
 {
@@ -914,15 +913,55 @@ void CStore::sub_54CF80()
 }
 
 // 0x54CFE0
-void sub_54CFE0()
+BOOLEAN CStore::sub_54CFE0(INT nIndex, CItem& cItem)
 {
-    // TODO: Incomplete.
+    // A random treasure item ("RNDTRES") resolves to a real one here.
+    CString sResRef(cItem.cResRef.GetResRef());
+
+    g_pBaldurChitin->GetObjectGame()->GetRuleTables().sub_5463E0(sResRef);
+
+    if (strcmp(sResRef, "") == 0) {
+        return FALSE;
+    }
+
+    cItem.SetResRef(CResRef(sResRef), TRUE);
+
+    if (cItem.cResRef == "") {
+        CString sError;
+        sError.Format("Random Treasure Item not found: %s", (LPCSTR)sResRef);
+        return FALSE;
+    }
+
+    sub_54D130(nIndex, cItem);
+
+    return TRUE;
 }
 
 // 0x54D130
-void sub_54D130()
+BOOLEAN CStore::sub_54D130(INT nIndex, CItem& cItem)
 {
-    // TODO: Incomplete.
+    POSITION pos = m_lInventory.FindIndex(nIndex);
+    if (pos == NULL) {
+        return FALSE;
+    }
+
+    CStoreFileItem* pStoreItem = m_lInventory.GetAt(pos);
+    cItem.m_wear = pStoreItem->m_wear;
+    cItem.m_flags = pStoreItem->m_dynamicFlags;
+
+    if (cItem.GetLoreValue() == 0 || (pStoreItem->m_nStoreFlags & 0x1) != 0) {
+        cItem.m_flags |= 0x1;
+    }
+
+    if ((pStoreItem->m_nStoreFlags & 0x1) == 0 && cItem.GetLoreValue() > 0) {
+        cItem.m_flags |= 0x8;
+    }
+
+    for (INT nAbility = 0; nAbility < 3; nAbility++) {
+        cItem.SetUsageCount(nAbility, pStoreItem->m_usageCount[nAbility]);
+    }
+
+    return TRUE;
 }
 
 // 0x54CCB0
