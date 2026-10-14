@@ -11633,6 +11633,22 @@ BOOL CGameSprite::sub_727B40()
     return TRUE;
 }
 
+// NOTE: The name is the Ghidra project's: whether a caller sees this
+// creature. Without seeing invisible, an invisible creature is hidden unless
+// the low bit of its creature header's field_2FC is set.
+//
+// 0x727B80
+BOOL CGameSprite::IsVisibleToCaller(BOOL bSeeInvisible)
+{
+    BOOL bVisible = TRUE;
+    if (!bSeeInvisible
+        && (m_derivedStats.m_generalState & STATE_INVISIBLE) != 0
+        && (m_baseStats.field_2FC & 0x1) == 0) {
+        bVisible = FALSE;
+    }
+    return bVisible;
+}
+
 // 0x728270
 void CGameSprite::PlaySound(const CResRef& res)
 {

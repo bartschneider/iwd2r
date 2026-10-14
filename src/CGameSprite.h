@@ -438,6 +438,7 @@ public:
     void AIUpdateWalk();
     void SetPath(LONG* pPath, SHORT nPath);
     BOOL ClearBumpPath(const CPoint& start, const CPoint& goal);
+    BOOL IsVisibleToCaller(BOOL bSeeInvisible);
     BOOL sub_6FB440();
     void AIUpdateFly();
     void ChangeDirection();
