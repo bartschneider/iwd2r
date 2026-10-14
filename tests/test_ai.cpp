@@ -158,6 +158,7 @@ CGameDoor* MakeDoor(DWORD dwFlags)
     new (&pDoor->m_sound) CSound();
     new (&pDoor->m_pendingTriggers) CTypedPtrList<CPtrList, CAITrigger*>();
     new (&pDoor->m_curAction) CAIAction();
+    new (&pDoor->m_typeAI) CAIObjectType();
     // The area: zeroed storage named AR1000, its search map empty (the door
     // has no search polygons).
     auto* area = static_cast<unsigned char*>(::operator new(sizeof(CGameArea)));
@@ -588,4 +589,201 @@ TEST_CASE("ai: CheckLimits keeps the morale recovery time and caps the morale br
     stats.m_nReputation = -5;
     stats.CheckLimits();
     CHECK(stats.m_nReputation == 200);
+}
+
+TEST_CASE("ai: See at a distance, a dead sprite, Range's equal mode, HP's edges and Class, General and Gender on Myself", "[ai][data]")
+{
+    REQUIRE_ENGINE();
+    ClearMessages();
+    auto* areaStorage = static_cast<unsigned char*>(::operator new(sizeof(CGameArea)));
+    std::memset(areaStorage, 0, sizeof(CGameArea));
+    CGameArea* pArea = reinterpret_cast<CGameArea*>(areaStorage);
+    // A 100 by 100 search grid open everywhere: every square's dynamic cost
+    // has bit 0x01, which GetLOSCost reads as the visible terrain table's
+    // entry 8 (5, passable). The visibility range is 14 squares.
+    pArea->m_search.m_GridSquareDimensions = CSize(100, 100);
+    std::vector<BYTE> dynamicCost(100 * 100, 0x01);
+    pArea->m_search.m_pDynamicCost = dynamicCost.data();
+    pArea->m_visibility.field_E = 14;
+
+    CGameAIBase* pCaller = AddAIObject();
+    pCaller->m_pArea = pArea;
+    pCaller->m_pos = CPoint(400, 300);
+
+    // See: a distinct target four search squares east is seen across open
+    // squares, and not across a wall square between them (dynamic cost
+    // 0x80: the visible terrain table's entry 0, impassable).
+    CGameAIBase* pTarget = AddAIObject();
+    pTarget->m_pArea = pArea;
+    pTarget->m_pos = CPoint(400 + 4 * CPathSearch::GRID_SQUARE_SIZEX, 300);
+    CAIObjectType target(0, 0, 0, 0, 0, 0, 0, 0, pTarget->m_id, 0, 0);
+    CAITrigger see(0x401C, target, 0);
+    CHECK(pCaller->EvaluateStatusTrigger(see) == TRUE);
+    CHECK(pCaller->m_lSeen.GetInstance() == pTarget->m_id);
+    const LONG wall = (300 / CPathSearch::GRID_SQUARE_SIZEY) * 100 + 400 / CPathSearch::GRID_SQUARE_SIZEX + 2;
+    dynamicCost[wall] = 0x80;
+    CHECK(pCaller->EvaluateStatusTrigger(see) == FALSE);
+    dynamicCost[wall] = 0x01;
+
+    // Range(object, 2, equal): exactly (2 + 1)^2 squared grid squares.
+    CAITrigger rangeEqual(0x4018, target, 2);
+    rangeEqual.m_specific2 = 1;
+    pTarget->m_pos = CPoint(400 + 3 * CPathSearch::GRID_SQUARE_SIZEX, 300);
+    CHECK(pCaller->EvaluateStatusTrigger(rangeEqual) == TRUE);
+    pTarget->m_pos = CPoint(400 + 2 * CPathSearch::GRID_SQUARE_SIZEX, 300);
+    CHECK(pCaller->EvaluateStatusTrigger(rangeEqual) == FALSE);
+
+    // A dead sprite is not seen unless the trigger asks for the dead too.
+    CGameSprite* pSprite = MakeSprite();
+    pSprite->m_pArea = pArea;
+    pSprite->m_pos = pCaller->m_pos;
+    CAIObjectType sprite(0, 0, 0, 0, 0, 0, 0, 0, pSprite->m_id, 0, 0);
+    CAITrigger seeLiving(0x401C, sprite, 0);
+    CAITrigger seeDead(0x401C, sprite, 1);
+    const DWORD state = pSprite->m_derivedStats.m_generalState;
+    CHECK(pCaller->EvaluateStatusTrigger(seeLiving) == TRUE);
+    pSprite->m_derivedStats.m_generalState = state | STATE_DEAD;
+    CHECK(pCaller->EvaluateStatusTrigger(seeLiving) == FALSE);
+    CHECK(pCaller->EvaluateStatusTrigger(seeDead) == TRUE);
+    pSprite->m_derivedStats.m_generalState = state;
+    pSprite->m_pArea = NULL;
+
+    // HP(..., 9) and HPLT(..., 11) on ten hit points.
+    pSprite->m_baseStats.m_hitPoints = 10;
+    CAITrigger hpNine(0x4010, sprite, 9);
+    CHECK(pCaller->EvaluateStatusTrigger(hpNine) == FALSE);
+    CAITrigger hpltEleven(0x4012, sprite, 11);
+    CHECK(pCaller->EvaluateStatusTrigger(hpltEleven) == TRUE);
+
+    // Class, General and Gender read the caller's own object type through
+    // Myself. Class is a mask bit (class n is bit n - 1).
+    pCaller->m_typeAI.m_nClassMask = 1 << (5 - 1);
+    pCaller->m_typeAI.m_nGeneral = 1;
+    pCaller->m_typeAI.m_nGender = 2;
+    CAIObjectType myself(0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0);
+    myself.m_SpecialCase[0] = 1;
+    CHECK(pCaller->EvaluateStatusTrigger(CAITrigger(0x400C, myself, 5)) == TRUE);
+    CHECK(pCaller->EvaluateStatusTrigger(CAITrigger(0x400C, myself, 3)) == FALSE);
+    CHECK(pCaller->EvaluateStatusTrigger(CAITrigger(0x400E, myself, 1)) == TRUE);
+    CHECK(pCaller->EvaluateStatusTrigger(CAITrigger(0x400E, myself, 2)) == FALSE);
+    CHECK(pCaller->EvaluateStatusTrigger(CAITrigger(0x404D, myself, 2)) == TRUE);
+    CHECK(pCaller->EvaluateStatusTrigger(CAITrigger(0x404D, myself, 1)) == FALSE);
+
+    pCaller->m_pArea = NULL;
+    pTarget->m_pArea = NULL;
+    pArea->m_search.m_pDynamicCost = NULL;
+    ClearMessages();
+}
+
+TEST_CASE("ai: the party specifiers decode to the party member the game picks", "[ai][data]")
+{
+    REQUIRE_ENGINE();
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CGameAIBase* pCaller = AddAIObject();
+    CGameSprite* pSprite = MakeSprite();
+    // Alive, level 3, ten of twenty hit points: every pick finds it.
+    pSprite->m_derivedStats.m_generalState &= ~STATE_DEAD;
+    pSprite->m_derivedStats.m_nLevel = 3;
+    pSprite->m_derivedStats.m_nMaxHitPoints = 20;
+    pSprite->m_baseStats.m_hitPoints = 10;
+    // StrongestOfMale counts only males (gender 1).
+    pSprite->m_typeAI.m_nGender = 1;
+
+    const SHORT nCharacters = pGame->m_nCharacters;
+    const LONG portrait = pGame->m_characterPortraits[0];
+
+    // No party: NOONE.
+    pGame->m_nCharacters = 0;
+    CAIObjectType nobody(0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0);
+    nobody.m_SpecialCase[0] = 4;
+    nobody.Decode(pCaller);
+    CHECK(nobody.Equal(CAIObjectType::NOONE));
+
+    pGame->m_nCharacters = 1;
+    pGame->m_characterPortraits[0] = pSprite->m_id;
+    // WeakestOf, StrongestOf, MostDamagedOf, LeastDamagedOf,
+    // StrongestOfMale, WorstAC, BestAC.
+    for (BYTE special : { 4, 5, 6, 7, 28, 47, 48 }) {
+        INFO("specifier " << static_cast<int>(special));
+        CAIObjectType type(0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0);
+        type.m_SpecialCase[0] = special;
+        type.Decode(pCaller);
+        CHECK(type.m_nInstance == pSprite->m_id);
+    }
+
+    // A woman is not the strongest male.
+    pSprite->m_typeAI.m_nGender = 2;
+    CAIObjectType male(0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0);
+    male.m_SpecialCase[0] = 28;
+    male.Decode(pCaller);
+    CHECK(male.Equal(CAIObjectType::NOONE));
+
+    pGame->m_nCharacters = nCharacters;
+    pGame->m_characterPortraits[0] = portrait;
+}
+
+TEST_CASE("ai: closing AR5004's door on a creature tells the creature to move and closes again", "[ai][data]")
+{
+    REQUIRE_ENGINE();
+    ClearMessages();
+    CGameAIBase* pClicker = AddAIObject();
+    CGameDoor* pDoor = MakeDoor(0x1);
+    CGameArea* pArea = pDoor->m_pArea;
+    std::memcpy(pArea->m_header.m_areaName, "AR5004", 6);
+    pArea->m_pGame = g_pBaldurChitin->GetObjectGame();
+    // The door's closed footprint is one search square, occupied (dynamic
+    // cost bit 0x02): CanToggleDoor refuses.
+    pArea->m_search.m_GridSquareDimensions = CSize(100, 100);
+    std::vector<BYTE> dynamicCost(100 * 100, 0);
+    pArea->m_search.m_pDynamicCost = dynamicCost.data();
+    CPoint closed(25, 25);
+    dynamicCost[25 * 100 + 25] = 0x02;
+    pDoor->m_pClosedSearch = &closed;
+    pDoor->m_nClosedSearch = 1;
+    CAIObjectType cause(0, 0, 0, 0, 0, 0, 0, 0, pClicker->m_id, 0, 0);
+
+    // Nobody found (the door is not in the object array): nothing is said
+    // and the door stays open.
+    pDoor->ToggleDoor(cause, FALSE);
+    CHECK((pDoor->m_dwFlags & 0x1) != 0);
+    CMessageHandler& handler = g_pBaldurChitin->m_cMessageHandler;
+    CHECK(handler.m_messageList.IsEmpty());
+
+    // The creature on that square, next to the door in the front list (an
+    // AI object in the array stands in for the door there).
+    CGameAIBase* pStandIn = AddAIObject();
+    pDoor->m_id = pStandIn->m_id;
+    new (&pArea->m_lVertSort) CTypedPtrList<CPtrList, int*>();
+    CGameSprite* pSprite = MakeSprite();
+    pSprite->m_pos = CPoint(25 * CPathSearch::GRID_SQUARE_SIZEX, 25 * CPathSearch::GRID_SQUARE_SIZEY);
+    pSprite->m_active = TRUE;
+    pSprite->m_activeAI = TRUE;
+    pSprite->m_activeImprisonment = TRUE;
+    // Its personal space comes from its animation (CHARBASE has none): a
+    // human male fighter, as character creation picks (0x6000).
+    pSprite->m_animation.SetAnimationType(0x6000, pSprite->m_baseStats.m_colors, 0);
+    pStandIn->m_posVertList = pArea->m_lVertSort.AddTail(reinterpret_cast<int*>(static_cast<INT_PTR>(pStandIn->m_id)));
+    pSprite->m_posVertList = pArea->m_lVertSort.AddTail(reinterpret_cast<int*>(static_cast<INT_PTR>(pSprite->m_id)));
+
+    pDoor->ToggleDoor(cause, FALSE);
+    CHECK((pDoor->m_dwFlags & 0x1) != 0);
+    REQUIRE(handler.m_messageList.GetCount() == 2);
+    auto* move = dynamic_cast<CMessageAddAction*>(handler.m_messageList.GetHead());
+    REQUIRE(move != nullptr);
+    CHECK(move->m_action.m_actionID == 292);
+    CHECK(move->m_action.m_acteeID.Equal(pSprite->GetAIType()));
+    CHECK(move->m_sourceId == pDoor->m_id);
+    CHECK(move->m_targetId == pDoor->m_id);
+    auto* close = dynamic_cast<CMessageAddAction*>(handler.m_messageList.GetTail());
+    REQUIRE(close != nullptr);
+    CHECK(close->m_action.m_actionID == 144);
+    CHECK(close->m_action.m_acteeID.Equal(pDoor->m_typeAI));
+    CHECK(close->m_sourceId == pDoor->m_id);
+    CHECK(close->m_targetId == pClicker->m_id);
+
+    pArea->m_lVertSort.RemoveAll();
+    pStandIn->m_posVertList = NULL;
+    pSprite->m_posVertList = NULL;
+    pArea->m_search.m_pDynamicCost = NULL;
+    ClearMessages();
 }
