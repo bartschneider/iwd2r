@@ -148,3 +148,11 @@ The guards in `src/render/api.h` leave these for the renderer that first draws t
 - `CMoveList::Marshal` (0x5170F0), now called by `CInfGame::SaveGame`, still has a TODO to add the sprite id to the area's `field_AAA` (src/CMoveList.cpp); until it is ported a creature with a pending move is not saved with the master area.
 - `scenarios/pending/save_load_screens.txt` saves and loads through Options headless but has no checkpoints yet, so a replay compares only the exit code.
 - `CVidInf::PrintSurfaceToBmp` reads the DirectDraw surfaces; if the render API's GPU backend ever presents normal runs, screenshots would come out empty. Its 3d variant (0x7BE5A0) is not ported because iwd2r refuses the 3d mode.
+
+## Effect wiring (from project 3, milestone 3, effect-wiring)
+
+- The cone projectile's Fire (0x579EF0) reproduces the original's x87 arithmetic in doubles in the same order. Nothing sets `-ffp-contract=off`, so on platforms whose compilers fuse multiply-add (aarch64 with GCC or Clang) a corner or puff point can move by one unit. Set it project-wide before any non-x86 build is compared with the original.
+- `CRuleTables` 0x547620 (the SPIN108 animal-empathy save adjustment) lives as a file-static in src/CGameEffect.cpp; it belongs in CRuleTables.
+- `DecodeProjectile`'s 14 cone cases can now call the cone projectile (0x579B40) instead of the instant fallback; 430 still takes the fallback for most types.
+- Shroud of Flame's EffSoF1/EffSoF2 path (index >= 1) has no test yet; it is reachable now that `StartSpriteEffect` asserts only on a failed allocation.
+- `Ftol` is duplicated in src/CProjectileSingleTarget.cpp and src/CAIGroup.cpp.
