@@ -414,7 +414,9 @@ void Decode(CaseContext& ctx)
         for (int i = 0; i < 16; ++i) {
             DecodeInput in;
             const int pickName = static_cast<int>(rng() % 5);
-            in.name = pickName == 0 ? "OBJECT3" : pickName == 1 ? "nobody" : pickName == 2 ? "object2" : "";
+            in.name = pickName == 0 ? "OBJECT3" : pickName == 1 ? "nobody"
+                : pickName == 2                                 ? "object2"
+                                                                : "";
             in.instance = rng() % 5 == 0 ? static_cast<int32_t>(rng() % kObjects) : -1;
             const int count = static_cast<int>(rng() % 4);
             std::memset(in.specials, 0, sizeof(in.specials));
@@ -572,13 +574,14 @@ void CloserDestPt(CaseContext& ctx)
             std::memcpy(door + 0x5E8, &v[4], 8);
             const int32_t* at = reinterpret_cast<CloserDestFn>(kCloserDest)(door, nullptr, pt);
             original = at == reinterpret_cast<const int32_t*>(door + 0x5E0) ? 1
-                : at == reinterpret_cast<const int32_t*>(door + 0x5E8)       ? 2
-                                                                              : 0;
+                : at == reinterpret_cast<const int32_t*>(door + 0x5E8)      ? 2
+                                                                            : 0;
         });
         ours->m_ptDest1 = CPoint(v[2], v[3]);
         ours->m_ptDest2 = CPoint(v[4], v[5]);
         const CPoint& at = ours->GetCloserDestPt(CPoint(v[0], v[1]));
-        const int oursWhich = &at == &ours->m_ptDest1 ? 1 : &at == &ours->m_ptDest2 ? 2 : 0;
+        const int oursWhich = &at == &ours->m_ptDest1 ? 1 : &at == &ours->m_ptDest2 ? 2
+                                                                                    : 0;
         ctx.CountInputs(1);
         oracle::Compare(ctx, original, oursWhich);
     }

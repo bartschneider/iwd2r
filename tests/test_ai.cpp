@@ -92,15 +92,15 @@ bool StartEngine(std::string& error)
     return true;
 }
 
-#define REQUIRE_ENGINE()                                    \
-    do {                                                    \
-        const char* env = std::getenv("IWD2_DATA");         \
-        if (env == nullptr || *env == '\0') {               \
-            SKIP("[iwd2r-skip] IWD2_DATA unset");           \
-        }                                                   \
-        std::string error;                                  \
-        INFO(error);                                        \
-        REQUIRE(StartEngine(error));                        \
+#define REQUIRE_ENGINE()                            \
+    do {                                            \
+        const char* env = std::getenv("IWD2_DATA"); \
+        if (env == nullptr || *env == '\0') {       \
+            SKIP("[iwd2r-skip] IWD2_DATA unset");   \
+        }                                           \
+        std::string error;                          \
+        INFO(error);                                \
+        REQUIRE(StartEngine(error));                \
     } while (0)
 
 // An AI object in the game's object array, as an area's objects are.
