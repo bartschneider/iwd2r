@@ -127,3 +127,10 @@ The guards in `src/render/api.h` leave these for the renderer that first draws t
 - Spell immunity (206/290) waits for the shared `CDerivedStats` immunity set from the stats-spell stream; opcodes 3, 12 and 440 wait for its shared `GetSpellResrefEffects`.
 - Dominate (263) and Summon (411) are not ported; their blockers are in docs/evidence/5645A0.md and 55F710.md.
 - Effect 233 (visual spell hit, the most common opcode) queues `CMessageFireProjectile`, whose `Run` (0x5007F0) is being ported by the projectiles stream; until then the queued message asserts.
+
+## Derived stats, spells and projectiles (from project 3, milestone 3)
+
+- Stoneskin (218) and other damage reductions: when the source effect leaves without its pool running out (dispel, `RemoveAllOfType`, expiry), the `m_damageReductions` entries keep pointers into the deleted effect until the next `ProcessEffectList` rebuild; a hit or a character-screen lookup in that window touches freed memory, as in the original. Ruling M3-10 only bounds the exhausted-pool path. A faithful-in-play fix would clear matching entries when the effect is removed.
+- Not ported: CheckAdd's SPWI420 part (0x547620); `CGameEffect::CheckSave` (0x4A42F0), the only reader of `m_spellPenetrationBonus`; the persistent effects' TODOs (0x4C1C00, 0x4C21E0, 0x4C2CB0, 0x4C3280); the derived-stats arrays at +0x328 and +0x378.
+- Projectiles: the decoder 0x51EAF0 sends about 380 unported types to the instant projectile (a temporary DEVIATION): effects land on the Fire frame and later object ids shift, so a combat replay diverges from the first unported projectile fired. `Render`, sparkle, the visual-effect and area-explosion objects are not ported (projectiles are invisible). Spell-hit types 45, 52, 57 and 72 return NULL (see the warning in `CProjectile.h`). The cone projectile 0x579B40 is missing, so effect 293 stays blocked.
+- Effect TODOs now wirable with the merged projectile classes (src/IcewindCGameEffects.cpp): 233, 235, 255, 256, 264, 449, 265, 294, 295, 417 (types 0 and 2) and 430 (partly).
