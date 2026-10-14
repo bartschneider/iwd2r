@@ -26,6 +26,12 @@ Windows Sandbox runs one sandbox at a time, so every --vm windows scenario
 holds C:\\Users\\thier\\iwd2r-vm\\sandbox.lock (tools/filelock.py) while it
 prepares the shared game cache and runs; another worktree's run waits.
 
+The game data is --data, else IWD2_DATA, else a vanilla copy: for Linux runs
+${IWD2R_HOME:-~/.local/share/iwd2r}/game (as tools/gates.sh), for Windows runs
+(the host build and --vm windows) C:\\Users\\thier\\iwd2r-oracle\\game, the
+verified copy `oracle.py vanilla` builds. When the copy is missing the run
+stops and says how to make it; the IWD2EE install is never the default.
+
 Game options never touch the INI files: they reach the engine through the
 IWD2R_INI_OVERRIDE environment variable. Every *.ini in the install root is
 still backed up before the run and restored byte-identical afterwards (also
@@ -64,11 +70,19 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import dataview  # noqa: E402
 import filelock  # noqa: E402
+import oracle  # noqa: E402
 import realinput  # noqa: E402
 import winsandbox  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DEFAULT_DATA = '/mnt/c/Games/Icewind Dale II'
+# The default game data is a vanilla copy, never the IWD2EE install under
+# /mnt/c/Games: Linux runs read a Linux-local copy (as tools/gates.sh does),
+# Windows runs the verified copy oracle.py vanilla builds. IWD2_DATA and
+# --data override both.
+WINDOWS_DATA = oracle.GAME_DIR
+LINUX_COPY_HINT = ('rsync -a --exclude temp --exclude cache --exclude '
+                   'tempsave --exclude mpsave --exclude ScrnShot '
+                   + oracle.GAME_DIR + '/ ~/.local/share/iwd2r/game/')
 WIN_BUILD_BASE = '/mnt/c/Users/thier/iwd2r-build'
 
 
@@ -201,8 +215,10 @@ def parse_args(argv):
                     help='each screenshot also writes <name>-presented.png, '
                     'the frame as the presenter drew it (IWD2R_SHOT_PRESENTED)')
     ap.add_argument('--data', metavar='PATH',
-                    help='install directory (default: IWD2_DATA, else '
-                    + DEFAULT_DATA + ')')
+                    help='install directory (default: IWD2_DATA, else the '
+                    'vanilla copy: $IWD2R_HOME/game or '
+                    '~/.local/share/iwd2r/game for Linux runs, '
+                    + WINDOWS_DATA + ' for Windows runs)')
     ap.add_argument('--no-build', action='store_true',
                     help='run the existing build without syncing or building')
     ap.add_argument('--keep-data-view', action='store_true',
@@ -387,13 +403,53 @@ def wslpath(flag, path):
                           capture_output=True, text=True).stdout.strip()
 
 
-def resolve_data(arg):
-    data = arg or os.environ.get('IWD2_DATA') or DEFAULT_DATA
+def linux_data(env):
+    """The Linux-local vanilla copy: ${IWD2R_HOME:-$HOME/.local/share/iwd2r}
+    /game, as in tools/gates.sh."""
+    home = env.get('IWD2R_HOME') or os.path.join(
+        env.get('HOME') or os.path.expanduser('~'), '.local', 'share',
+        'iwd2r')
+    return os.path.join(home, 'game')
+
+
+def has_key(directory, isfile=os.path.isfile):
+    return isfile(os.path.join(directory, 'CHITIN.KEY')) or \
+        isfile(os.path.join(directory, 'chitin.key'))
+
+
+def default_data(platform, env, isfile=os.path.isfile,
+                 marker_ok=oracle.marker_ok):
+    """The vanilla copy a run on platform ('linux' or 'windows') uses when
+    neither --data nor IWD2_DATA is given. Raises SystemExit naming how to
+    make it when it is missing: the install is never the fallback."""
+    if platform == 'linux':
+        data = linux_data(env)
+        if has_key(data, isfile):
+            return data
+        sys.exit('play: no vanilla copy of the game for Linux runs at %s '
+                 '(no CHITIN.KEY); build the verified copy with "python3 '
+                 'tools/oracle.py vanilla", then copy it as tools/gates.sh '
+                 'says: %s; or pass --data / set IWD2_DATA'
+                 % (data, LINUX_COPY_HINT))
+    data = WINDOWS_DATA
+    if has_key(data, isfile) and marker_ok(data):
+        return data
+    sys.exit('play: no verified vanilla copy of the game for Windows runs '
+             'at %s (CHITIN.KEY and %s); build it with "python3 '
+             'tools/oracle.py vanilla" (the Linux copy is made from it with: '
+             '%s); or pass --data / set IWD2_DATA'
+             % (data, oracle.MARKER, LINUX_COPY_HINT))
+
+
+def resolve_data(arg, platform, env=None):
+    """--data, else IWD2_DATA, else the platform's vanilla copy
+    (default_data)."""
+    env = os.environ if env is None else env
+    data = arg or env.get('IWD2_DATA') or default_data(platform, env)
     if re.match(r'^[A-Za-z]:[\\/]', data):
         data = wslpath('-u', data)
     data = os.path.abspath(data)
-    if not os.path.isfile(os.path.join(data, 'CHITIN.KEY')) and \
-            not os.path.isfile(os.path.join(data, 'chitin.key')):
+    if not has_key(data):
         sys.exit('play: %s has no CHITIN.KEY; pass --data' % data)
     return data
 
@@ -530,6 +586,36 @@ def result_row(name, result):
             result['screen_shots'] + result['engine_shots'])
 
 
+def missing_shots(run_dir, actions, presented=False):
+    """The `shot NAME` lines of the scenario whose NAME.png (and, with
+    presented, NAME-presented.png) is not in run_dir, in script order."""
+    missing = []
+    for action in actions:
+        if action['op'] != 'shot' or action['name'] in missing:
+            continue
+        files = [action['name'] + '.png']
+        if presented:
+            files.append(action['name'] + '-presented.png')
+        if not all(os.path.isfile(os.path.join(run_dir, f)) for f in files):
+            missing.append(action['name'])
+    return missing
+
+
+def check_shots(result, run_dir, actions, presented=False):
+    """A scenario passes only when the game exited 0 and every shot it
+    asks for was written: an engine that quits early with 0 fails here with
+    code 1 and "missing shot NAME"."""
+    if result['code'] != 0:
+        return result
+    missing = missing_shots(run_dir, actions, presented)
+    if missing:
+        result['code'] = 1
+        error = 'missing shot ' + ', '.join(missing)
+        result['error'] = error if not result.get('error') \
+            else result['error'] + '; ' + error
+    return result
+
+
 def write_vm_summary(run_dir, argv, platform, script, overrides, result):
     shots = sorted(n for n in os.listdir(run_dir) if n.endswith('.png'))
     write_summary(run_dir, argv, platform, result['code'], overrides, script,
@@ -600,6 +686,7 @@ def run_linux_vm(args, argv, scenarios, data, overrides, base_dir, nested,
         finally:
             if not args.keep_data_view:
                 dataview.remove_view(view)
+        check_shots(result, run_dir, actions, args.shot_presented)
         write_vm_summary(run_dir, argv, 'linux-vm', path, overrides, result)
         log('linux: %s exit %s in %.1f s%s' % (
             name, result['code'], result['seconds'],
@@ -644,8 +731,6 @@ def run_windows_vm(args, argv, scenarios, data, overrides, base_dir, nested,
         print(winsandbox.ENABLE_HINT, flush=True)
         return None
     exe = build_windows_vm(args)
-    with filelock.hold(winsandbox.SANDBOX_LOCK, 'sandbox'):
-        winsandbox.refresh_cache(data, winsandbox.GAME_CACHE, log)
     rows = []
     stamp = os.path.relpath(base_dir, os.path.join(ROOT, 'runs'))
     for path, actions in scenarios:
@@ -655,13 +740,25 @@ def run_windows_vm(args, argv, scenarios, data, overrides, base_dir, nested,
         host_run = os.path.join(winsandbox.VM_ROOT, 'runs', stamp, name)
         os.makedirs(host_run, exist_ok=True)
         with filelock.hold(winsandbox.SANDBOX_LOCK, 'sandbox'):
-            winsandbox.reset_cache_inis(data, winsandbox.GAME_CACHE)
+            # Checked for every scenario: another worktree's run may have
+            # refilled the shared cache from another source in between. The
+            # copy holds the vanilla copy's lock (never held while waiting
+            # for another lock, so taking it here cannot deadlock); no
+            # sandbox maps the copy while we hold the sandbox lock.
+            winsandbox.refresh_cache(
+                data, winsandbox.GAME_CACHE, log,
+                lock=lambda: filelock.hold(oracle.VANILLA_LOCK, 'vanilla'))
+            with filelock.hold(oracle.VANILLA_LOCK, 'vanilla'):
+                winsandbox.reset_cache_inis(data, winsandbox.GAME_CACHE)
             log('windows: %s in Windows Sandbox (real input)' % name)
             result = winsandbox.run_scenario(
                 exe, winsandbox.GAME_CACHE,
                 realinput.windows_actions(actions, geometry),
                 overrides, name, run_dir, host_run, args.timeout,
                 realinput.FRAME_RATE, log)
+        # --shot-presented is not passed into the sandbox, so only the
+        # engine's NAME.png is required there.
+        check_shots(result, run_dir, actions)
         write_vm_summary(run_dir, argv, 'windows-vm', path, overrides,
                          result)
         log('windows: %s exit %s in %.1f s%s' % (
@@ -686,7 +783,10 @@ def main_vm(args, argv):
             scenarios.append((path, realinput.load_scenario(path)))
         except realinput.ScenarioError as e:
             sys.exit('play: %s' % e)
-    data = resolve_data(args.data)
+    platforms = ['linux', 'windows'] if args.vm == 'all' else [args.vm]
+    datas = {p: resolve_data(args.data, p) for p in platforms}
+    for platform in platforms:
+        log('%s data: %s' % (platform, datas[platform]))
     overrides, geometry = vm_overrides(args)
     log('screen: %dx%d inside, scale %d (UI %d), output %dx%d' % (
         geometry['width'], geometry['height'], geometry['scale'],
@@ -694,7 +794,6 @@ def main_vm(args, argv):
         geometry['output_height']))
     run_root = make_run_folder(os.path.join(ROOT, 'runs'),
                                datetime.datetime.now())
-    platforms = ['linux', 'windows'] if args.vm == 'all' else [args.vm]
     tables = []
     codes = []
     try:
@@ -703,8 +802,8 @@ def main_vm(args, argv):
                 else run_root
             os.makedirs(base, exist_ok=True)
             runner = run_linux_vm if platform == 'linux' else run_windows_vm
-            rows = runner(args, argv, scenarios, data, overrides, base,
-                          args.suite, geometry)
+            rows = runner(args, argv, scenarios, datas[platform], overrides,
+                          base, args.suite, geometry)
             if rows is None:
                 tables.append('%s: not run (see above)\n' % platform)
                 codes.append(2 if args.vm != 'all' or platform == 'linux'
@@ -755,7 +854,8 @@ def main(argv):
     refusal = desktop_refusal(headless, os.environ)
     if refusal:
         sys.exit(refusal)
-    data = resolve_data(args.data)
+    data = resolve_data(args.data, 'linux' if args.linux else 'windows')
+    log('data: %s' % data)
     script = os.path.abspath(args.script) if args.script else None
     if script and not os.path.isfile(script):
         sys.exit('play: no script %s' % script)
