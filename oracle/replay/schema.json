@@ -220,14 +220,18 @@
       }
     },
     "world": {
-      "description": "The world screen, null unless the screen is world: the area on view and the party. A party member's values are null while its id does not resolve in the object array.",
+      "description": "The world screen, null unless the screen is world: the area on view, the party, the area's doors, the world screen's dialog and the area's explored tiles and creatures. A party member's values are null while its id does not resolve in the object array. With no area on view, doors is empty and explored_count and creatures are 0.",
       "type": [
         "object",
         "null"
       ],
       "required": [
         "area",
-        "party"
+        "party",
+        "doors",
+        "dialog",
+        "explored_count",
+        "creatures"
       ],
       "additionalProperties": false,
       "properties": {
@@ -247,7 +251,10 @@
               "y",
               "hp",
               "max_hp",
-              "skills"
+              "skills",
+              "action",
+              "modal",
+              "facing"
             ],
             "additionalProperties": false,
             "properties": {
@@ -296,9 +303,103 @@
                 },
                 "minItems": 64,
                 "maxItems": 64
+              },
+              "action": {
+                "description": "The current action's id, CGameAIBase::m_curAction.m_actionID (CAIAction::NO_ACTION, 0, when idle).",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "modal": {
+                "description": "The modal state, CGameSprite::m_nModalState (0 none).",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "facing": {
+                "description": "The direction it faces, CGameSprite::m_nDirection (0..15).",
+                "type": [
+                  "integer",
+                  "null"
+                ]
               }
             }
           }
+        },
+        "doors": {
+          "description": "The doors of the area on view in the order of its front vertical list (CGameArea::m_lVertSort, head to tail, where CGameDoor's constructor adds them): the objects on it whose CGameObject::m_objectType is TYPE_DOOR (0x21).",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "open",
+              "locked"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "description": "The door's name, CGameDoor::m_scriptName (the ARE door's name, up to 32 characters).",
+                "type": "string"
+              },
+              "open": {
+                "description": "CGameDoor::m_dwFlags bit 0 (open), 0 or 1.",
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "locked": {
+                "description": "CGameDoor::m_dwFlags bit 1 (locked), 0 or 1.",
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1
+              }
+            }
+          }
+        },
+        "dialog": {
+          "description": "The world screen's dialog, CScreenWorld::m_internalLoadedDialog (a CGameDialogSprite).",
+          "type": "object",
+          "required": [
+            "active",
+            "speaker",
+            "entry",
+            "responses"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "active": {
+              "description": "1 between CGameDialogSprite::StartDialog and EndDialog (its field_54), else 0.",
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "speaker": {
+              "description": "The object id of the sprite whose dialog runs, m_talkerIndex; -1 while not active.",
+              "type": "integer"
+            },
+            "entry": {
+              "description": "The current DLG state, m_currentEntryIndex; -1 while not active.",
+              "type": "integer"
+            },
+            "responses": {
+              "description": "While active and m_waitingForResponse: the replies of m_dialogEntries[m_currentEntryIndex] on display (CGameDialogReply::m_displayPosition set); else 0.",
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "explored_count": {
+          "description": "The tiles of the area's visibility map marked explored: the bytes of CGameArea::m_visibility.m_pMap[0 .. m_nMapSize - 1] with CVisibilityMap::EXPLORED_FLAG (0x80) set (CVisibilityMap::IsTileExplored).",
+          "type": "integer",
+          "minimum": 0
+        },
+        "creatures": {
+          "description": "The sprites in the area: the objects on its front, back and flight vertical lists (CGameArea::m_lVertSort, m_lVertSortBack, m_lVertSortFlight) whose CGameObject::m_objectType is TYPE_SPRITE (0x31), the party included.",
+          "type": "integer",
+          "minimum": 0
         }
       }
     }
@@ -555,6 +656,94 @@
     "sprite_skills": {
       "class": "CGameSprite",
       "member": "m_derivedStats.m_nSkills"
+    },
+    "sprite_action": {
+      "class": "CGameSprite",
+      "member": "m_curAction.m_actionID"
+    },
+    "sprite_modal": {
+      "class": "CGameSprite",
+      "member": "m_nModalState"
+    },
+    "sprite_facing": {
+      "class": "CGameSprite",
+      "member": "m_nDirection"
+    },
+    "object_type": {
+      "class": "CGameObject",
+      "member": "m_objectType"
+    },
+    "area_vert_sort": {
+      "class": "CGameArea",
+      "member": "m_lVertSort.m_pNodeHead"
+    },
+    "area_vert_sort_back": {
+      "class": "CGameArea",
+      "member": "m_lVertSortBack.m_pNodeHead"
+    },
+    "area_vert_sort_flight": {
+      "class": "CGameArea",
+      "member": "m_lVertSortFlight.m_pNodeHead"
+    },
+    "list_node_next": {
+      "class": "CPtrList::CNode",
+      "member": "pNext"
+    },
+    "list_node_data": {
+      "class": "CPtrList::CNode",
+      "member": "data"
+    },
+    "area_visibility_map": {
+      "class": "CGameArea",
+      "member": "m_visibility.m_pMap"
+    },
+    "area_visibility_size": {
+      "class": "CGameArea",
+      "member": "m_visibility.m_nMapSize"
+    },
+    "door_name": {
+      "class": "CGameDoor",
+      "member": "m_scriptName"
+    },
+    "door_flags": {
+      "class": "CGameDoor",
+      "member": "m_dwFlags"
+    },
+    "dialog_active": {
+      "class": "CScreenWorld",
+      "member": "m_internalLoadedDialog.field_54"
+    },
+    "dialog_talker": {
+      "class": "CScreenWorld",
+      "member": "m_internalLoadedDialog.m_talkerIndex"
+    },
+    "dialog_entry": {
+      "class": "CScreenWorld",
+      "member": "m_internalLoadedDialog.m_currentEntryIndex"
+    },
+    "dialog_waiting": {
+      "class": "CScreenWorld",
+      "member": "m_internalLoadedDialog.m_waitingForResponse"
+    },
+    "dialog_entries": {
+      "class": "CScreenWorld",
+      "member": "m_internalLoadedDialog.m_dialogEntries.m_pData"
+    },
+    "dialog_entries_size": {
+      "class": "CScreenWorld",
+      "member": "m_internalLoadedDialog.m_dialogEntries.m_nSize"
+    },
+    "dialog_replies": {
+      "class": "CGameDialogEntry",
+      "member": "m_pData"
+    },
+    "dialog_replies_size": {
+      "class": "CGameDialogEntry",
+      "member": "m_nSize"
+    },
+    "dialog_reply_shown": {
+      "class": "CGameDialogReply",
+      "member": "m_displayPosition"
     }
   }
 }

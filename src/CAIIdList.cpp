@@ -13,6 +13,10 @@ CAIIdList::CAIIdList()
 // 0x40A280
 CAIIdList::CAIIdList(CResRef id)
 {
+    m_pIdArray = NULL;
+    m_nArray = 0;
+    m_faster = FALSE;
+
     // NOTE: Uninline.
     SetResRef(id, TRUE, TRUE);
     LoadList(FALSE);
@@ -113,7 +117,7 @@ CAIId* CAIIdList::Find(CString name, BOOL caseSensitive) const
         funcName.TrimLeft();
         funcName.TrimRight();
 
-        if (!caseSensitive) {
+        if (caseSensitive) {
             if (name.Compare(funcName) == 0) {
                 return node;
             }

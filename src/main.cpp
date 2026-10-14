@@ -3,6 +3,8 @@
 #include "mfc.h"
 
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <string>
 
@@ -16,6 +18,19 @@
 
 int iwd2r_main(int argc, char** argv)
 {
+    // The presenter's GPU probe, run by the game itself in a child process
+    // (platform/present.h, SetBackend): nothing else starts. _Exit skips
+    // SDL_Quit and the static destructors, so a Vulkan stack that breaks
+    // the process after a failed device creation (Windows Sandbox's)
+    // cannot change the verdict already printed.
+    for (int index = 1; index < argc; index++) {
+        if (std::strcmp(argv[index], "--probe-gpu") == 0) {
+            const int code = platform::present::RunGpuProbe();
+            std::fflush(stdout);
+            std::_Exit(code);
+        }
+    }
+
     platform::window::InstallFatalMessageBox();
     // First: everything below reads icewind2.ini and game folders relative to the working directory.
     if (!platform::ResolveDataDir()) {
@@ -39,8 +54,9 @@ int iwd2r_main(int argc, char** argv)
     // Filter (nearest, sharp, smooth, fsr or nis) and Sharpness (0 to 1,
     // for fsr and nis): which presenter shows the frames and how the gpu
     // one scales them. Set before InitScreen makes the window. gpu and auto
-    // are opt-in: probing a broken Vulkan stack (Windows Sandbox's) crashes
-    // the process even when the probe fails.
+    // are opt-in; both run the GPU probe in a child process first, because
+    // loading a broken Vulkan stack (Windows Sandbox's) crashes the process
+    // even when the device creation fails.
     char presenter[32];
     char filter[32];
     char sharpness[32];

@@ -98,7 +98,7 @@ When ours is written, the pending case becomes a comparison case in the case
 file of its class, and `oracle_case` follows it. Once `src/` defines the
 function, its `extra_labels.txt` line can go.
 
-`oracle/cases/pending.cpp` holds project 3's combat functions:
+`oracle/cases/pending.cpp` holds project 3's combat functions and FetchRumor:
 
 | Function | Case | Body |
 |---|---|---|
@@ -107,6 +107,7 @@ function, its `extra_labels.txt` line can go.
 | 0x73B760 CGameSprite::Hit (attack d20 against AC) | pending/hit | none: equipped CItems, sprites, the game's options |
 | 0x547020 CRuleTables::GetIterativeAttackBonus | pending/iterative_attack_bonus | determinism check |
 | 0x73D560 CGameSprite::Damage (weapon damage dice) | pending/damage | none: equipped CItems, the target's animation, the message handler |
+| 0x483B70 CGameDialogSprite::FetchRumor | dialog/fetch_rumor | none: the resource manager (the DLG and the IDS lists), the object array, a sprite answering status triggers |
 
 ## Replays and known differences
 

@@ -7,6 +7,7 @@
 
 #include "BalDataTypes.h"
 #include "CAIAction.h"
+#include "CAIResponse.h"
 #include "CAITrigger.h"
 #include "CChatBuffer.h"
 #include "CColorEffects.h"
@@ -50,12 +51,15 @@ public:
     static const BYTE MSG_SUBTYPE_CMESSAGE_DOOR_STATUS;
     static const BYTE MSG_SUBTYPE_CMESSAGE_DROP_PATH;
     static const BYTE MSG_SUBTYPE_CMESSAGE_ENTER_DIALOG;
+    static const BYTE MSG_SUBTYPE_CMESSAGE_ENTER_DIALOG_MODE;
     static const BYTE MSG_SUBTYPE_CMESSAGE_ENTER_STORE_MODE;
     static const BYTE MSG_SUBTYPE_CMESSAGE_EXIT_DIALOG_MODE;
     static const BYTE MSG_SUBTYPE_CMESSAGE_EXIT_STORE_MODE;
     static const BYTE MSG_SUBTYPE_CMESSAGE_FIRE_PROJECTILE;
     static const BYTE MSG_SUBTYPE_CMESSAGE_INSERT_ACTION;
+    static const BYTE MSG_SUBTYPE_CMESSAGE_INSERT_RESPONSE;
     static const BYTE MSG_SUBTYPE_CMESSAGE_LEAVE_PARTY;
+    static const BYTE MSG_SUBTYPE_CMESSAGE_LOAD_DIALOG;
     static const BYTE MSG_SUBTYPE_CMESSAGE_PARTY_GOLD;
     static const BYTE MSG_SUBTYPE_CMESSAGE_PLAY_SOUND;
     static const BYTE MSG_SUBTYPE_CMESSAGE_PLAY_SOUND_REF;
@@ -119,6 +123,7 @@ public:
     static const BYTE MSG_SUBTYPE_CMESSAGE_103;
     static const BYTE MSG_SUBTYPE_CMESSAGE_TOGGLE_INTERFACE;
     static const BYTE MSG_SUBTYPE_CMESSAGE_107;
+    static const BYTE MSG_SUBTYPE_CMESSAGE_PICKED_DIALOG_RESPONSE;
     static const BYTE MSG_SUBTYPE_CMESSAGE_SET_AREA_TYPE;
     static const BYTE MSG_SUBTYPE_CMESSAGE_SET_AREA_REST_ENCOUNTER;
     static const BYTE MSG_SUBTYPE_CMESSAGE_SET_AREA_EXPLORED;
@@ -1773,6 +1778,70 @@ public:
     /* 000C */ WORD m_stat;
     /* 000E */ DWORD m_value;
     /* 0012 */ BOOLEAN m_modify;
+};
+
+// The dialog messages (0x68EA00 CScreenWorld::StartDialog, 0x483F00
+// CGameDialogSprite::AsynchronousUpdate, 0x485750 CGameDialogReply::Pick).
+// Marshal and Unmarshal are not ported: single player never sends them
+// (docs/adr/0002-single-player-only.md).
+
+class CMessageEnterDialogMode : public CMessage {
+public:
+    CMessageEnterDialogMode(DWORD nPartyGold, LONG caller, LONG target);
+    SHORT GetCommType() override;
+    BYTE GetMsgType() override;
+    BYTE GetMsgSubType() override;
+
+    /* 000C */ DWORD m_nPartyGold;
+};
+
+class CMessageLoadDialog : public CMessage {
+public:
+    CMessageLoadDialog(const CString& sDialog, LONG nTalkerId, LONG caller, LONG target);
+    ~CMessageLoadDialog() override;
+    SHORT GetCommType() override;
+    BYTE GetMsgType() override;
+    BYTE GetMsgSubType() override;
+    void Run() override;
+
+    /* 000C */ CString m_sDialog;
+    /* 0010 */ LONG m_nTalkerId;
+};
+
+class CMessageInsertResponse : public CMessage {
+public:
+    CMessageInsertResponse(const CAIResponse& response, BOOL checkCurrentResponse, BOOL clearActions, BOOL bInstantActions, LONG caller, LONG target);
+    ~CMessageInsertResponse() override;
+    SHORT GetCommType() override;
+    BYTE GetMsgType() override;
+    BYTE GetMsgSubType() override;
+    void Run() override;
+
+    /* 000C */ CAIResponse m_response;
+    /* 0030 */ BOOL m_checkCurrentResponse;
+    /* 0034 */ BOOL m_clearActions;
+    /* 0038 */ BOOL m_bInstantActions;
+};
+
+class CMessagePickedDialogResponse : public CMessage {
+public:
+    CMessagePickedDialogResponse(const CString& sName, LONG nEntryIndex, LONG nMarker, COLORREF rgbNameColor, LONG nRemoveRepliesTarget, const CString& sNextDialog, LONG nTalkerId, LONG nCharacterId, DWORD nNextEntryIndex, LONG caller, LONG target);
+    ~CMessagePickedDialogResponse() override;
+    SHORT GetCommType() override;
+    BYTE GetMsgType() override;
+    BYTE GetMsgSubType() override;
+    void Run() override;
+
+    /* 000C */ CString m_sName;
+    /* 0010 */ LONG m_nEntryIndex;
+    /* 0014 */ LONG m_nMarker;
+    /* 0018 */ COLORREF m_rgbNameColor;
+    /* 001C */ LONG m_nRemoveRepliesTarget;
+    /* 0020 */ CString m_sNextDialog;
+    /* 0024 */ LONG m_nTalkerId;
+    /* 0028 */ LONG m_nCharacterId;
+    /* 002C */ DWORD m_nNextEntryIndex;
+    /* 0030 */ BOOLEAN field_30;
 };
 
 #endif /* CMESSAGE_H_ */

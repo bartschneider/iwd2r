@@ -12311,8 +12311,8 @@ void CGameSprite::AddEffect(CGameEffect* pEffect, BYTE list, BOOL noSave, BOOL i
 
         if (immediateApply) {
             m_tempStats = m_derivedStats;
-                    pEffect->ResolveEffect(this);
-                    if (pEffect->m_done) {
+            pEffect->ResolveEffect(this);
+            if (pEffect->m_done) {
                 if (pEffect != NULL) {
                     delete pEffect;
                 }

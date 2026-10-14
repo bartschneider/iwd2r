@@ -134,6 +134,9 @@ const BYTE CBaldurMessage::MSG_SUBTYPE_CMESSAGE_DROP_PATH = 20;
 // 0x84CEEC
 const BYTE CBaldurMessage::MSG_SUBTYPE_CMESSAGE_ENTER_DIALOG = 21;
 
+// 0x84CEED
+const BYTE CBaldurMessage::MSG_SUBTYPE_CMESSAGE_ENTER_DIALOG_MODE = 22;
+
 // 0x84CEEE
 const BYTE CBaldurMessage::MSG_SUBTYPE_CMESSAGE_ENTER_STORE_MODE = 23;
 
@@ -149,8 +152,14 @@ const BYTE CBaldurMessage::MSG_SUBTYPE_CMESSAGE_FIRE_PROJECTILE = 26;
 // 0x84CEF2
 const BYTE CBaldurMessage::MSG_SUBTYPE_CMESSAGE_INSERT_ACTION = 27;
 
+// 0x84CEF3
+const BYTE CBaldurMessage::MSG_SUBTYPE_CMESSAGE_INSERT_RESPONSE = 28;
+
 // 0x84CEF4
 const BYTE CBaldurMessage::MSG_SUBTYPE_CMESSAGE_LEAVE_PARTY = 29;
+
+// 0x84CEF5
+const BYTE CBaldurMessage::MSG_SUBTYPE_CMESSAGE_LOAD_DIALOG = 30;
 
 // 0x84CEF6
 const BYTE CBaldurMessage::MSG_SUBTYPE_CMESSAGE_PARTY_GOLD = 31;
@@ -346,6 +355,9 @@ const BYTE CBaldurMessage::MSG_SUBTYPE_CMESSAGE_SET_AREA_TYPE = 109;
 
 // 0x84CF45
 const BYTE CBaldurMessage::MSG_SUBTYPE_CMESSAGE_SET_AREA_REST_ENCOUNTER = 110;
+
+// 0x84CF48
+const BYTE CBaldurMessage::MSG_SUBTYPE_CMESSAGE_PICKED_DIALOG_RESPONSE = 113;
 
 // 0x84CF49
 const BYTE CBaldurMessage::MSG_SUBTYPE_CMESSAGE_SET_AREA_EXPLORED = 114;
@@ -17016,4 +17028,262 @@ void CMessageChangeStat::Run()
             CGameObjectArray::THREAD_ASYNCH,
             INFINITE);
     }
+}
+
+// -----------------------------------------------------------------------------
+
+// NOTE: Inlined in `CScreenWorld::StartDialog` (0x68EE90).
+CMessageEnterDialogMode::CMessageEnterDialogMode(DWORD nPartyGold, LONG caller, LONG target)
+    : CMessage(caller, target)
+{
+    m_nPartyGold = nPartyGold;
+}
+
+// 0x4536E0
+SHORT CMessageEnterDialogMode::GetCommType()
+{
+    return BROADCAST_FORCED_OTHERS;
+}
+
+// 0x40A0E0
+BYTE CMessageEnterDialogMode::GetMsgType()
+{
+    return CBaldurMessage::MSG_TYPE_CMESSAGE;
+}
+
+// 0x4F5510
+BYTE CMessageEnterDialogMode::GetMsgSubType()
+{
+    return CBaldurMessage::MSG_SUBTYPE_CMESSAGE_ENTER_DIALOG_MODE;
+}
+
+// NOTE: Run (0x4FE5B0) is the other players' side of StartDialog; the
+// message is BROADCAST_FORCED_OTHERS, so single player never runs it.
+
+// -----------------------------------------------------------------------------
+
+// NOTE: Inlined in `CScreenWorld::StartDialog` (0x68F4EB).
+CMessageLoadDialog::CMessageLoadDialog(const CString& sDialog, LONG nTalkerId, LONG caller, LONG target)
+    : CMessage(caller, target)
+{
+    m_sDialog = sDialog;
+    m_nTalkerId = nTalkerId;
+}
+
+// 0x4F5B40
+CMessageLoadDialog::~CMessageLoadDialog()
+{
+}
+
+// 0x43E170
+SHORT CMessageLoadDialog::GetCommType()
+{
+    return BROADCAST_FORCED;
+}
+
+// 0x40A0E0
+BYTE CMessageLoadDialog::GetMsgType()
+{
+    return CBaldurMessage::MSG_TYPE_CMESSAGE;
+}
+
+// 0x4F5B10
+BYTE CMessageLoadDialog::GetMsgSubType()
+{
+    return CBaldurMessage::MSG_SUBTYPE_CMESSAGE_LOAD_DIALOG;
+}
+
+// 0x502EB0
+void CMessageLoadDialog::Run()
+{
+    CGameAIBase* pCharacter;
+    CGameAIBase* pTalker;
+    BYTE rc;
+
+    if (m_targetId != CGameObjectArray::INVALID_INDEX && m_nTalkerId != CGameObjectArray::INVALID_INDEX) {
+        do {
+            rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetDeny(m_targetId,
+                CGameObjectArray::THREAD_ASYNCH,
+                reinterpret_cast<CGameObject**>(&pCharacter),
+                INFINITE);
+        } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+        if (rc == CGameObjectArray::SUCCESS) {
+            do {
+                rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetDeny(m_nTalkerId,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    reinterpret_cast<CGameObject**>(&pTalker),
+                    INFINITE);
+            } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+            if (rc == CGameObjectArray::SUCCESS) {
+                pCharacter->m_lTalkedTo.Set(pTalker->GetAIType());
+                pTalker->m_lTalkedTo.Set(pCharacter->GetAIType());
+
+                g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(m_nTalkerId,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    INFINITE);
+
+                g_pBaldurChitin->GetScreenWorld()->GetInternalLoadedDialog()->Load(CResRef(m_sDialog),
+                    m_targetId,
+                    m_nTalkerId);
+            }
+
+            g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(m_targetId,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+
+// NOTE: Inlined in `CGameDialogReply::Pick` (0x4857A8).
+CMessageInsertResponse::CMessageInsertResponse(const CAIResponse& response, BOOL checkCurrentResponse, BOOL clearActions, BOOL bInstantActions, LONG caller, LONG target)
+    : CMessage(caller, target)
+{
+    m_response.Set(response);
+    m_checkCurrentResponse = checkCurrentResponse;
+    m_clearActions = clearActions;
+    m_bInstantActions = bInstantActions;
+}
+
+// 0x4632B0
+CMessageInsertResponse::~CMessageInsertResponse()
+{
+}
+
+// 0x40A0D0
+SHORT CMessageInsertResponse::GetCommType()
+{
+    return SEND;
+}
+
+// 0x40A0E0
+BYTE CMessageInsertResponse::GetMsgType()
+{
+    return CBaldurMessage::MSG_TYPE_CMESSAGE;
+}
+
+// 0x463280
+BYTE CMessageInsertResponse::GetMsgSubType()
+{
+    return CBaldurMessage::MSG_SUBTYPE_CMESSAGE_INSERT_RESPONSE;
+}
+
+// 0x502570
+void CMessageInsertResponse::Run()
+{
+    CGameAIBase* pObject;
+
+    BYTE rc;
+    do {
+        rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetDeny(m_targetId,
+            CGameObjectArray::THREAD_ASYNCH,
+            reinterpret_cast<CGameObject**>(&pObject),
+            INFINITE);
+    } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+    if (rc == CGameObjectArray::SUCCESS) {
+        if ((pObject->GetObjectType() & CGameObject::TYPE_AIBASE) != 0) {
+            if (m_bInstantActions == TRUE) {
+                // The response's dialog-instant actions (DLGINST.IDS) run
+                // now, each as the object's current action; the rest are
+                // queued below.
+                POSITION pos = m_response.m_actionList.GetHeadPosition();
+                while (pos != NULL) {
+                    CAIAction curAction;
+                    curAction = pObject->m_curAction;
+
+                    POSITION posAction = pos;
+                    CAIAction* pAction = m_response.m_actionList.GetNext(pos);
+                    pAction->m_internalFlags |= 0x2;
+
+                    if (g_pBaldurChitin->GetObjectGame()->GetRuleTables().m_lDLGINST.Find(pAction->GetActionID()) != NULL) {
+                        pObject->SetCurrAction(*pAction);
+                        pObject->ExecuteAction();
+                        m_response.m_actionList.RemoveAt(posAction);
+                        delete pAction;
+                    }
+
+                    pObject->SetCurrAction(curAction);
+                }
+            }
+
+            if (m_response.m_actionList.GetCount() > 0) {
+                pObject->InsertResponse(m_response, m_checkCurrentResponse, m_clearActions);
+            }
+        }
+
+        g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(m_targetId,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+    }
+}
+
+// -----------------------------------------------------------------------------
+
+// NOTE: Inlined in `CGameDialogSprite::AsynchronousUpdate` (0x4841A2).
+CMessagePickedDialogResponse::CMessagePickedDialogResponse(const CString& sName, LONG nEntryIndex, LONG nMarker, COLORREF rgbNameColor, LONG nRemoveRepliesTarget, const CString& sNextDialog, LONG nTalkerId, LONG nCharacterId, DWORD nNextEntryIndex, LONG caller, LONG target)
+    : CMessage(caller, target)
+{
+    m_nEntryIndex = nEntryIndex;
+    m_nMarker = nMarker;
+    m_rgbNameColor = rgbNameColor;
+    m_sName = sName;
+    m_nRemoveRepliesTarget = nRemoveRepliesTarget;
+    m_sNextDialog = sNextDialog;
+    m_nTalkerId = nTalkerId;
+    m_nCharacterId = nCharacterId;
+    m_nNextEntryIndex = nNextEntryIndex;
+    field_30 = FALSE;
+}
+
+// 0x4844F0
+CMessagePickedDialogResponse::~CMessagePickedDialogResponse()
+{
+}
+
+// 0x40A0D0
+SHORT CMessagePickedDialogResponse::GetCommType()
+{
+    return SEND;
+}
+
+// 0x40A0E0
+BYTE CMessagePickedDialogResponse::GetMsgType()
+{
+    return CBaldurMessage::MSG_TYPE_CMESSAGE;
+}
+
+// 0x4844C0
+BYTE CMessagePickedDialogResponse::GetMsgSubType()
+{
+    return CBaldurMessage::MSG_SUBTYPE_CMESSAGE_PICKED_DIALOG_RESPONSE;
+}
+
+// 0x4FDF80
+void CMessagePickedDialogResponse::Run()
+{
+    CMessage* pMessage;
+
+    pMessage = new CMessageRemoveReplies(m_nEntryIndex,
+        m_nMarker,
+        m_rgbNameColor,
+        m_sName,
+        m_nRemoveRepliesTarget,
+        m_nRemoveRepliesTarget);
+    g_pBaldurChitin->GetMessageHandler()->AddMessage(pMessage, FALSE, pMessage->GetCommType());
+
+    pMessage = new CMessageLoadDialog(m_sNextDialog,
+        m_nTalkerId,
+        m_nCharacterId,
+        m_nCharacterId);
+    g_pBaldurChitin->GetMessageHandler()->AddMessage(pMessage, FALSE, pMessage->GetCommType());
+
+    pMessage = new CMessageEnterDialog(m_nNextEntryIndex,
+        field_30,
+        m_targetId,
+        m_targetId);
+    g_pBaldurChitin->GetMessageHandler()->AddMessage(pMessage, FALSE, pMessage->GetCommType());
 }
