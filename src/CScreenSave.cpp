@@ -1099,7 +1099,7 @@ BOOL CScreenSave::DrawScreenShot(INT nSlot, const CRect& rArea, const CRect& rCl
     } else {
         vbScreenShot.SetResRef(CResRef("ICEWIND2"), TRUE, TRUE);
         vbScreenShot.m_bDoubleSize = g_pBaldurChitin->field_4A28;
-        vbScreenShot.RenderDirect(0, rArea.left, rArea.top, rClip, 0, 1);
+        vbScreenShot.RenderDirect(0, rArea.left, rArea.top, rClip, 0, FALSE);
     }
 
     return TRUE;
