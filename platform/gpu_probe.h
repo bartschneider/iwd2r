@@ -27,8 +27,9 @@ struct Result {
     std::string reason;
 };
 
-// Runs exe with args, stdout captured, stderr and the environment inherited,
-// for at most timeoutMs milliseconds.
+// Runs exe with args, stdout captured, stderr and the environment inherited
+// (with IWD2R_CRASH_PREFIX=probe-gpu added, platform/crash.h), for at most
+// timeoutMs milliseconds.
 Result Run(const std::string& exe, int timeoutMs, const std::vector<std::string>& args = { "--probe-gpu" });
 
 // The running executable's path (/proc/self/exe, GetModuleFileNameA);

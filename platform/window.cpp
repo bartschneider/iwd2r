@@ -460,7 +460,7 @@ void SetRegionSource(RegionSource source)
     UiRegions().source = source;
     if (source) {
         RefreshRegions();
-    } else if (!platform::present::Regions().empty()) {
+    } else if (!platform::present::Regions()->empty()) {
         // The source's owner is going away: back to the whole frame.
         platform::present::SetRegions({});
     }
@@ -472,7 +472,7 @@ void RefreshRegions()
     const int worldScale = platform::present::WindowScale();
     if (r.uiScale == worldScale) {
         // Equal scales: the presenter's own path, untouched.
-        if (!platform::present::Regions().empty())
+        if (!platform::present::Regions()->empty())
             platform::present::SetRegions({});
         return;
     }
@@ -499,7 +499,7 @@ void RefreshRegions()
     } else {
         regions = platform::compose::Layout(screen, window, r.uiScale, worldScale, {}, nullptr);
     }
-    if (!SameRegions(regions, platform::present::Regions()))
+    if (!SameRegions(regions, *platform::present::Regions()))
         platform::present::SetRegions(std::move(regions));
 }
 

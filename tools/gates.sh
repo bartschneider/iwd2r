@@ -27,6 +27,22 @@ export IWD2R_AUDIO=null SDL_AUDIO_DRIVER=dummy
 #   --exclude mpsave --exclude ScrnShot /mnt/c/Users/thier/iwd2r-oracle/game/ ~/.local/share/iwd2r/game/
 LINUX_DATA="${IWD2R_HOME:-$HOME/.local/share/iwd2r}/game"
 if [ -z "${IWD2_DATA:-}" ] && [ -f "$LINUX_DATA/CHITIN.KEY" ]; then export IWD2_DATA="$LINUX_DATA"; fi
+# The start-screen smoke test's frame hash depends on the game copy, so each
+# machine pins its own: tests/smoke_start_screen.cpp requires the hash in
+# IWD2R_SMOKE_HASH when it is set.
+SMOKE_HASH_FILE="${IWD2R_HOME:-$HOME/.local/share/iwd2r}/smoke-hash"
+if [ -z "${IWD2R_SMOKE_HASH:-}" ] && [ -f "$SMOKE_HASH_FILE" ]; then
+    IWD2R_SMOKE_HASH=$(tr -d ' \r\n' < "$SMOKE_HASH_FILE"); export IWD2R_SMOKE_HASH
+elif [ -z "${IWD2R_SMOKE_HASH:-}" ]; then
+    echo "gates: the smoke frame hash is not pinned; run build/linux-gcc/tests/iwd2r_tests \"start screen smoke\" and save the framebuffer-hash it prints in $SMOKE_HASH_FILE"
+fi
+# Lavapipe (Mesa's software Vulkan) runs the gpu presenter's tests: on a
+# machine that has it, a skipped [present] case means they did not run.
+LAVAPIPE=0
+if ls /usr/lib/*/libvulkan_lvp.so /usr/lib/libvulkan_lvp.so /usr/lib64/libvulkan_lvp.so >/dev/null 2>&1 \
+    || { command -v vulkaninfo >/dev/null 2>&1 && vulkaninfo --summary 2>/dev/null | grep -qi llvmpipe; }; then
+    LAVAPIPE=1
+fi
 failed=()
 step() {
     local name="$1"; shift
@@ -34,10 +50,27 @@ step() {
     if "$@"; then echo "--- $name: ok"; else echo "--- $name: FAILED"; failed+=("$name"); fi
 }
 linux_preset() {
-    local preset="$1"
+    local preset="$1" log rc skipped
     [ -f "build/$preset/CMakeCache.txt" ] || cmake --preset "$preset" || return 1
     cmake --build --preset "$preset" || return 1
-    ctest --preset "$preset" --output-on-failure
+    log=$(mktemp)
+    ctest --preset "$preset" --output-on-failure | tee "$log"
+    rc=${PIPESTATUS[0]}
+    if [ "$LAVAPIPE" = 1 ]; then
+        # The [present] cases ctest reports as skipped (each test is its own
+        # ctest entry, named as the TEST_CASE).
+        skipped=$("build/$preset/tests/iwd2r_tests" "[present]" --list-tests --verbosity quiet 2>/dev/null \
+            | while IFS= read -r name; do
+                [ -n "$name" ] && grep -F -- " $name " "$log" | grep -q 'Skipped' && echo "$name"
+            done)
+        if [ -n "$skipped" ]; then
+            echo "gates: lavapipe is installed but these gpu presenter tests were skipped (no Vulkan device in the test):"
+            echo "$skipped" | sed 's/^/  /'
+            rc=1
+        fi
+    fi
+    rm -f "$log"
+    return "$rc"
 }
 step "linux-gcc build and tests" linux_preset linux-gcc
 [ "$CLANG" = 1 ] && step "linux-clang build and tests" linux_preset linux-clang

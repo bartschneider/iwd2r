@@ -1,5 +1,6 @@
 #define NOMINMAX
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include "data_view.h"
 #include "platform/crash.h"
@@ -28,6 +29,18 @@ TEST_CASE("MessageBoxA stderr line is caption then text", "[crash]")
     CHECK(std::string(line) == "MessageBoxA: : \n");
 }
 
+TEST_CASE("crash lines start with the prefix the environment gives", "[crash]")
+{
+    char line[64];
+    platform::crash::FormatCrashPrefix("probe-gpu", line, sizeof(line));
+    CHECK(std::string(line) == "probe-gpu crash: ");
+    platform::crash::FormatCrashPrefix("", line, sizeof(line));
+    CHECK(std::string(line) == "crash: ");
+    platform::crash::FormatCrashPrefix(nullptr, line, sizeof(line));
+    CHECK(std::string(line) == "crash: ");
+    CHECK(std::string(platform::crash::kPrefixVariable) == "IWD2R_CRASH_PREFIX");
+}
+
 TEST_CASE("MessageBoxA under a script returns the default button without a window", "[crash]")
 {
 #ifdef _WIN32
@@ -52,11 +65,16 @@ TEST_CASE("crash handler reports signal and backtrace", "[crash][data]")
         SKIP("[iwd2r-skip] IWD2_DATA unset");
     }
     const std::string data = env;
+    // The probe child's prefix (IWD2R_CRASH_PREFIX, which gpu_probe::Run
+    // sets) starts every line; without it they start with "crash: ".
+    const bool prefixed = GENERATE(false, true);
+    INFO("prefixed " << prefixed);
     const std::string out = (std::filesystem::temp_directory_path() / ("iwd2r-crash-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".txt")).string();
     int raw = 0;
     {
         DataView view(data);
-        const std::string full = "SDL_VIDEO_DRIVER=dummy SDL_AUDIO_DRIVER=dummy IWD2R_AUDIO=null IWD2R_CRASH_TEST=1 IWD2R_SMOKE_FRAMES=300 IWD2_DATA=\""
+        const std::string full = "SDL_VIDEO_DRIVER=dummy SDL_AUDIO_DRIVER=dummy IWD2R_AUDIO=null IWD2R_CRASH_TEST=1 IWD2R_SMOKE_FRAMES=300 "
+            + std::string(prefixed ? "IWD2R_CRASH_PREFIX=probe-gpu " : "") + "IWD2_DATA=\""
             + view.Path() + "\" timeout 120 \"" IWD2R_EXE "\" > \"" + out + "\" 2>&1";
         raw = std::system(full.c_str());
     }
@@ -75,5 +93,11 @@ TEST_CASE("crash handler reports signal and backtrace", "[crash][data]")
     CHECK(text.find("SIGSEGV") != std::string::npos);
     CHECK(text.find("backtrace") != std::string::npos);
     CHECK(text.find("end of backtrace") != std::string::npos);
+    const std::string prefix = prefixed ? "probe-gpu crash: " : "crash: ";
+    CHECK(text.find(prefix + "SIGSEGV") != std::string::npos);
+    CHECK(text.find(prefix + "end of backtrace") != std::string::npos);
+    if (!prefixed) {
+        CHECK(text.find("probe-gpu crash") == std::string::npos);
+    }
 }
 #endif
