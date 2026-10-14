@@ -1,8 +1,11 @@
 #include "CGameAIBase.h"
 
+#include "C2DArray.h"
+#include "CAIConditionResponse.h"
 #include "CAIResponse.h"
 #include "CAIScript.h"
 #include "CAITrigger.h"
+#include "CAIUtil.h"
 #include "CBaldurChitin.h"
 #include "CBaldurProjector.h"
 #include "CGameArea.h"
@@ -17,20 +20,17 @@
 #include "CGameTimer.h"
 #include "CGameTrigger.h"
 #include "CInfGame.h"
-#include "CScreenCharacter.h"
-#include "CScreenWorld.h"
-#include "CSpell.h"
-#include "CTimerWorld.h"
-#include "CAIConditionResponse.h"
-#include "CAIUtil.h"
 #include "CMessage.h"
 #include "CPathSearch.h"
 #include "CScreenChapter.h"
+#include "CScreenCharacter.h"
+#include "CScreenWorld.h"
 #include "CSound.h"
-#include "C2DArray.h"
-#include "CWeather.h"
+#include "CSpell.h"
+#include "CTimerWorld.h"
 #include "CUtil.h"
 #include "CVariableHash.h"
+#include "CWeather.h"
 
 // 0x8485C4
 const SHORT CGameAIBase::ACTION_DONE = -1;
@@ -4262,4 +4262,3 @@ BOOL CGameAIBase::SeeTarget(CGameObject* pTarget, BOOL bSeeDead)
 
     return TRUE;
 }
-
