@@ -17478,6 +17478,11 @@ SHORT CGameSprite::sub_75E330(CItem* pLauncher, BOOL bEquipMelee)
 
     if (static_cast<SHORT>(nBest) == -1) {
         if (bEquipMelee == TRUE) {
+            // TODO: EquipMostDamagingMelee (0x75DFD0) is still a stub that
+            // returns ACTION_ERROR. The original picks the best melee weapon
+            // here (and re-enters sub_726810 at 0x75E0B4); ours equips
+            // nothing, so a non-PC with a launcher and no fitting ammunition
+            // keeps the launcher. Listed in docs/followups.md.
             EquipMostDamagingMelee();
             return CGameAIBase::ACTION_DONE;
         }
