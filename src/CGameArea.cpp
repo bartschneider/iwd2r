@@ -602,6 +602,121 @@ LONG CGameArea::GetNearest(LONG startObject, const CAIObjectType& type, SHORT ra
     return -1;
 }
 
+// NOTE: Walks the vertical list outward from `posVertList` (the caller's
+// own node, which it skips), one object above and one below per round, and
+// stops a side once an object on it is out of range vertically: the list is
+// sorted by y.
+//
+// 0x46CD20
+void CGameArea::GetAllInRange(POSITION posVertList, const CPoint& center, const CAIObjectType& type, SHORT range, const BYTE* terrainTable, CTypedPtrList<CPtrList, LONG*>& targets, BOOL lineOfSight, BOOL checkForNonSprites)
+{
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameArea.cpp
+    // __LINE__: 1849
+    UTIL_ASSERT(terrainTable != NULL);
+
+    CPoint pt;
+    pt.x = center.x;
+    pt.y = 4 * center.y / 3;
+
+    // NOTE: The original reads the node's links directly; any vertical list
+    // walks a node the same way.
+    POSITION posNext = posVertList;
+    m_lVertSort.GetNext(posNext);
+    POSITION posPrev = posVertList;
+    m_lVertSort.GetPrev(posPrev);
+
+    // One object: in range, of the type, in sight, active and above ground.
+    // Returns FALSE when it is out of range vertically, which ends its side.
+    auto Check = [&](CGameObject* pObject) -> BOOL {
+        if (pObject->GetVertListPos() == NULL) {
+            return TRUE;
+        }
+
+        const CPoint& ptObject = pObject->GetPos();
+        LONG dy = (pt.y - 4 * ptObject.y / 3) * (pt.y - 4 * ptObject.y / 3);
+        if (dy >= range * range + 1) {
+            return FALSE;
+        }
+
+        if ((pt.x - ptObject.x) * (pt.x - ptObject.x) + dy < range * range + 1
+            && pObject->GetAIType().OfType(type, checkForNonSprites, !checkForNonSprites)
+            && (!lineOfSight
+                || CheckLOS(center, pObject->GetPos(), terrainTable, FALSE))
+            && (pObject->GetObjectType() != CGameObject::TYPE_SPRITE
+                || (static_cast<CGameSprite*>(pObject)->m_active
+                    && static_cast<CGameSprite*>(pObject)->m_activeAI))
+            && (pObject->GetObjectType() != CGameObject::TYPE_SPRITE
+                || static_cast<CGameSprite*>(pObject)->GetAnimation()->GetAboveGround())) {
+            targets.AddTail(reinterpret_cast<LONG*>(static_cast<INT_PTR>(pObject->GetId())));
+        }
+
+        return TRUE;
+    };
+
+    while (1) {
+        if (posPrev == NULL && posNext == NULL) {
+            return;
+        }
+
+        if (posPrev != NULL) {
+            LONG nId = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSort.GetPrev(posPrev)));
+
+            CGameObject* pObject;
+            BYTE rc = m_pGame->GetObjectArray()->GetShare(nId,
+                CGameObjectArray::THREAD_ASYNCH,
+                &pObject,
+                INFINITE);
+            if (rc != CGameObjectArray::SUCCESS) {
+                continue;
+            }
+
+            if (pObject->GetObjectType() == CGameObject::TYPE_SPRITE
+                && static_cast<CGameSprite*>(pObject)->GetBaseStats()->field_294 == 1) {
+                // NOTE: This skip leaves the round without the side below
+                // (0x46CDF4 jumps to the release at 0x46D119).
+                m_pGame->GetObjectArray()->ReleaseShare(nId,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    INFINITE);
+                continue;
+            }
+
+            if (!Check(pObject)) {
+                posPrev = NULL;
+            }
+
+            m_pGame->GetObjectArray()->ReleaseShare(nId,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+
+            if (posNext == NULL) {
+                continue;
+            }
+        }
+
+        LONG nId = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSort.GetNext(posNext)));
+
+        CGameObject* pObject;
+        BYTE rc = m_pGame->GetObjectArray()->GetShare(nId,
+            CGameObjectArray::THREAD_ASYNCH,
+            &pObject,
+            INFINITE);
+        if (rc != CGameObjectArray::SUCCESS) {
+            continue;
+        }
+
+        if (pObject->GetObjectType() != CGameObject::TYPE_SPRITE
+            || static_cast<CGameSprite*>(pObject)->GetBaseStats()->field_294 != 1) {
+            if (!Check(pObject)) {
+                posNext = NULL;
+            }
+        }
+
+        m_pGame->GetObjectArray()->ReleaseShare(nId,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+    }
+}
+
 // 0x46D140
 void CGameArea::GetAllInRange(const CPoint& center, const CAIObjectType& type, SHORT range, const BYTE* terrainTable, CTypedPtrList<CPtrList, LONG*>& targets, BOOL lineOfSight, BOOL checkForNonSprites)
 {
