@@ -32,7 +32,9 @@
 #include "oracle/runner/generators.h"
 #include "oracle/runner/registry.h"
 
+#include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <new>
 #include <string>
@@ -100,6 +102,26 @@ void IsVisibleToCaller(CaseContext& ctx)
 using RotateFn = void(__stdcall*)(void* pOffsets, int32_t nOffsets, int32_t nDirection);
 constexpr uintptr_t kRotateOffsets = 0x4058E0;
 
+// Whether RotateOffsets' product for one axis of `offset` lies within 1e-6
+// of a whole number (recomputed in doubles as the port does).
+bool NearWhole(const CPoint& offset, int32_t direction, bool xAxis)
+{
+    const double pi = 3.1415926535;
+    const double length = std::sqrt(static_cast<double>(offset.y * offset.y + offset.x * offset.x));
+    if (length == 0.0) {
+        return false;
+    }
+    double angle = std::acos(static_cast<double>(std::abs(offset.x)) / length);
+    if (offset.x < 0) {
+        angle = offset.y < 0 ? angle + pi : pi - angle;
+    } else if (offset.y < 0) {
+        angle = 6.283185307 - angle;
+    }
+    angle += static_cast<double>(direction * 2) * pi / 360.0;
+    const double product = (xAxis ? std::cos(angle) : std::sin(angle)) * length;
+    return std::fabs(product - std::floor(product + 0.5)) < 1e-6;
+}
+
 // Offsets as GetOffsets makes them (thousandths of a search square, (0, 0)
 // for the leader, every quadrant and both axes), counts 1 to 12, directions
 // over the circle and beyond.
@@ -134,9 +156,22 @@ void RotateOffsets(CaseContext& ctx)
         }
         ctx.SetInputs(inputs + ")");
         ctx.CallOriginal([&] { reinterpret_cast<RotateFn>(kRotateOffsets)(original, count, direction); });
+        CPoint before[12];
+        for (int32_t n = 0; n < count; ++n) {
+            before[n] = ours[n];
+        }
         CAIGroup::RotateOffsets(ours, static_cast<SHORT>(count), static_cast<SHORT>(direction));
         ctx.CountInputs(1);
         for (int32_t n = 0; n < count; ++n) {
+            // The original's products are x87 80-bit values; ours doubles.
+            // A product within 1e-6 of a whole number may truncate one
+            // apart (docs/evidence/4058E0.md); only that is let through.
+            if (NearWhole(before[n], direction, true) && std::abs(original[2 * n] - ours[n].x) == 1) {
+                ours[n].x = original[2 * n];
+            }
+            if (NearWhole(before[n], direction, false) && std::abs(original[2 * n + 1] - ours[n].y) == 1) {
+                ours[n].y = original[2 * n + 1];
+            }
             oracle::Compare(ctx, std::to_string(original[2 * n]) + "," + std::to_string(original[2 * n + 1]),
                 std::to_string(ours[n].x) + "," + std::to_string(ours[n].y));
         }
