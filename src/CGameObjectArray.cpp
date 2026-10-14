@@ -424,6 +424,10 @@ BYTE CGameObjectArray::Delete(LONG index, BYTE threadNum, CGameObject** ptr, DWO
     // __LINE__: 881
     UTIL_ASSERT(threadNum == THREAD_ASYNCH);
 
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\InfGame.cpp
+    // __LINE__: 883
+    UTIL_ASSERT(threadNum < CGAMEOBJECTARRAYENTRY_MAXTHREADS);
+
     if (index == -1) {
         return BAD_INDEX;
     }
@@ -451,7 +455,7 @@ BYTE CGameObjectArray::Delete(LONG index, BYTE threadNum, CGameObject** ptr, DWO
     }
 
     for (BYTE otherThreadNum = 0; otherThreadNum < CGAMEOBJECTARRAYENTRY_MAXTHREADS; otherThreadNum++) {
-        if (otherThreadNum != THREAD_ASYNCH
+        if (otherThreadNum != threadNum
             && m_pArray[arrayIndex].m_shareCounts[otherThreadNum] != 0) {
             lock.Unlock();
             SleepEx(1, FALSE);
@@ -459,16 +463,24 @@ BYTE CGameObjectArray::Delete(LONG index, BYTE threadNum, CGameObject** ptr, DWO
         }
     }
 
-    // TODO: Incomplete.
+    // TODO: Incomplete. With a connection established (CNetwork 0x6E0) and
+    // the game's byte at 0x4889 clear, the original first sends the
+    // deletion through 0x430DC0 (CBaldurMessage, not in our tree yet).
 
     if (ptr != NULL) {
         *ptr = m_pArray[arrayIndex].m_objectPtr;
     }
 
-    m_pArray[arrayIndex].m_nextDeletedArrayIndex = m_deletedListHead;
+    // NOTE: The entry's share and deny counts are left as they are, as in
+    // the original. Its pointer slot takes the deleted list's old head,
+    // sign-extended (the original writes a dword there).
+    m_pArray[arrayIndex].m_objectId = -1;
+    m_pArray[arrayIndex].m_objectPtr = reinterpret_cast<CGameObject*>(static_cast<INT_PTR>(m_deletedListHead));
     m_deletedListHead = arrayIndex;
 
-    // TODO: Incomplete.
+    g_pBaldurChitin->GetObjectGame()->GetRemoteObjectArray()->Delete(index);
+
+    lock.Unlock();
 
     return SUCCESS;
 }

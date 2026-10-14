@@ -1108,3 +1108,61 @@ TEST_CASE("gam: Party Formation's Done saves a game file the engine loads back",
     CHECK(Le16(gam, 0xB4 + 0x22) == 897);
 }
 #endif
+
+// CGameObjectArray::Delete (0x59A530) on an array built by its constructor
+// (0x599870): the deleted entry's id becomes -1, so the old index reads as
+// DELETED; its slot heads the deleted list and the next Add (0x59A0F0)
+// reuses it with the next object id; Delete hands back the object.
+TEST_CASE("objects: Delete clears the entry and Add reuses its slot with a new id", "[objects][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+
+    CGameObjectArray array(4, 2);
+    CGameObject* objects[3] = { new CGameObject(), new CGameObject(), new CGameObject() };
+    LONG ids[3];
+    for (int n = 0; n < 3; n++)
+        REQUIRE(array.Add(&ids[n], objects[n], INFINITE) == CGameObjectArray::SUCCESS);
+    CHECK(ids[0] == 0x00000000);
+    CHECK(ids[1] == 0x00010001);
+    CHECK(ids[2] == 0x00020002);
+
+    CGameObject* pObject = NULL;
+    REQUIRE(array.Delete(ids[1], CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) == CGameObjectArray::SUCCESS);
+    CHECK(pObject == objects[1]);
+    CHECK(array.m_pArray[1].m_objectId == -1);
+    CHECK(array.m_deletedListHead == 1);
+    CHECK(array.m_pArray[1].m_nextDeletedArrayIndex == -1);
+
+    // The old index is gone; the others are untouched.
+    CHECK(array.GetShare(ids[1], CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) == CGameObjectArray::DELETED);
+    CHECK(array.Delete(ids[1], CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) == CGameObjectArray::DELETED);
+    CHECK(pObject == NULL);
+    REQUIRE(array.GetShare(ids[2], CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) == CGameObjectArray::SUCCESS);
+    CHECK(pObject == objects[2]);
+
+    // A share on another thread keeps the entry.
+    REQUIRE(array.GetShare(ids[2], CGameObjectArray::THREAD_1, &pObject, INFINITE) == CGameObjectArray::SUCCESS);
+    CHECK(array.Delete(ids[2], CGameObjectArray::THREAD_ASYNCH, NULL, INFINITE) == CGameObjectArray::SHARED);
+    REQUIRE(array.ReleaseShare(ids[2], CGameObjectArray::THREAD_1, INFINITE) == CGameObjectArray::SUCCESS);
+
+    // Deleting a second entry chains the list: slot 2, then slot 1.
+    REQUIRE(array.Delete(ids[2], CGameObjectArray::THREAD_ASYNCH, NULL, INFINITE) == CGameObjectArray::SUCCESS);
+    CHECK(array.m_deletedListHead == 2);
+    CHECK(array.m_pArray[2].m_nextDeletedArrayIndex == 1);
+
+    LONG reused;
+    CGameObject* pNew = new CGameObject();
+    REQUIRE(array.Add(&reused, pNew, INFINITE) == CGameObjectArray::SUCCESS);
+    CHECK(reused == 0x00020003);
+    CHECK(array.m_deletedListHead == 1);
+    REQUIRE(array.GetShare(reused, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) == CGameObjectArray::SUCCESS);
+    CHECK(pObject == pNew);
+
+    delete objects[1];
+    delete objects[2];
+}
