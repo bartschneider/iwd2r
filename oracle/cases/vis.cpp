@@ -581,6 +581,42 @@ void ClearHorizontalCase(CaseContext& ctx)
     ClearCase(ctx, kClearHorizontal, false);
 }
 
+// UpDate's order without PrivateAddCharacter's sound-mixer tail: the six
+// members' sweeps, then for each member in turn a move of a few tiles (and
+// one far one): both clears around the old tile, then both sweeps around the
+// new position, compared after each step; indoor and outdoor.
+void UpdateOrderCase(CaseContext& ctx)
+{
+    VisPair pair = MakeVisPair(ctx);
+    SetDynamicCost(pair, false);
+    const CPoint steps[] = { { 40, 0 }, { 0, 36 }, { -70, -50 }, { 33, 24 }, { 400, -300 }, { -5, 3 } };
+    for (bool outDoor : { false, true }) {
+        SetOutDoor(pair, outDoor);
+        ClearTiles(pair);
+        CPoint positions[6];
+        for (int i = 0; i < 6; i++) {
+            positions[i] = kPositions[i];
+            ctx.SetInputs(Describe("party sweeps", positions[i], outDoor, false));
+            Sweep(ctx, pair, kSweepVertical, true, positions[i], static_cast<uint8_t>(1 << i));
+            Sweep(ctx, pair, kSweepHorizontal, false, positions[i], static_cast<uint8_t>(1 << i));
+        }
+        for (int round = 0; round < 3; round++) {
+            for (int i = 0; i < 6; i++) {
+                const CPoint from = positions[i];
+                const CPoint to(from.x + steps[(i + round) % 6].x, from.y + steps[(i + round) % 6].y);
+                const uint8_t charId = static_cast<uint8_t>(1 << i);
+                ctx.SetInputs(Describe("UpDate's clears at the old tile", from, outDoor, false));
+                Clear(ctx, pair, kClearVertical, true, from, charId);
+                Clear(ctx, pair, kClearHorizontal, false, from, charId);
+                ctx.SetInputs(Describe("UpDate's sweeps at the new position", to, outDoor, false));
+                Sweep(ctx, pair, kSweepVertical, true, to, charId);
+                Sweep(ctx, pair, kSweepHorizontal, false, to, charId);
+                positions[i] = to;
+            }
+        }
+    }
+}
+
 // The explored-tile count both sides' sweeps leave for the start party, the
 // value the replay's world.explored_count reads: compared, and printed for
 // the report.
@@ -609,4 +645,5 @@ ORACLE_CASE("vis/sweep_vertical", SweepVerticalCase);
 ORACLE_CASE("vis/sweep_horizontal", SweepHorizontalCase);
 ORACLE_CASE("vis/clear_vertical", ClearVerticalCase);
 ORACLE_CASE("vis/clear_horizontal", ClearHorizontalCase);
+ORACLE_CASE("vis/update_order", UpdateOrderCase);
 ORACLE_CASE("vis/party_explored", PartyExploredCase);
