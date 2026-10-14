@@ -48,8 +48,8 @@ public:
     /* 00C6 */ CCriticalSection m_critSect;
     /* 00E6 */ CSize m_GridSquareDimensions;
     /* 00EE */ CGameArea* m_pArea;
-    /* 00F2 */ BYTE m_snapshotPersonalSpace;
-    /* 00F3 */ BYTE m_sourceSide;
+    /* 00F2 */ BYTE m_sourceSide;
+    /* 00F3 */ BYTE m_snapshotPersonalSpace;
 };
 
 class CSearchRequest {

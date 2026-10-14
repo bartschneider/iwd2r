@@ -677,9 +677,7 @@ static LONG Ftol(double value)
 
 // NOTE: The name is a guess: turns each offset about the leader by
 // `nDirection` * 2 degrees, through its length and angle (acos of |x| over
-// the length, put in its quadrant). An offset of (0, 0) has no angle: 0/0 is
-// a NaN, and the original's __ftol turns the NaN results into 0x80000000
-// (reproduced by Ftol).
+// the length, put in its quadrant).
 //
 // 0x4058E0
 void CAIGroup::RotateOffsets(CPoint* pOffsets, SHORT nOffsets, SHORT nDirection)
@@ -691,7 +689,12 @@ void CAIGroup::RotateOffsets(CPoint* pOffsets, SHORT nOffsets, SHORT nDirection)
         LONG x = pOffsets[index].x;
         LONG y = pOffsets[index].y;
         double length = sqrt(static_cast<double>(y * y + x * x));
-        double angle = acos(static_cast<double>(abs(x)) / length);
+        double ratio = static_cast<double>(abs(x)) / length;
+        // NOTE: An offset of (0, 0) divides 0 by 0. The original's CRT acos
+        // (0x7E7F64) takes the NaN through its domain error path and the
+        // offset comes out (0, 0) (seen in group/rotate_offsets); ours
+        // takes the angle as 0, which gives the same.
+        double angle = ratio != ratio ? 0.0 : acos(ratio);
 
         if (x < 0) {
             if (y < 0) {

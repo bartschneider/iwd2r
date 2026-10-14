@@ -10,7 +10,8 @@
 // bitmap (0x76C: the CVidBitmap's pRes at +0xA4, m_nBitCount at +0xB0 and
 // m_bDoubleSize at +0xB6; m_pDynamicCost +0xBA, m_snapshotDynamicCost +0xBE,
 // m_snapshotTerrainTable +0xC2, m_GridSquareDimensions +0xE6, m_pArea +0xEE,
-// m_snapshotPersonalSpace +0xF2, m_sourceSide +0xF3). The original's area
+// m_sourceSide +0xF2, m_snapshotPersonalSpace +0xF3: SnapshotGetCost tests
+// the byte at +0xF2 against 16 and takes the radius from +0xF3). The original's area
 // is a zeroed block from its operator new holding only those members; its
 // CResBitmap is a zeroed block parsed by the original's own
 // CResBitmap::Parse (0x77F1C0) from the file's bytes copied into its memory.
@@ -247,8 +248,8 @@ void CompareOne(CaseContext& ctx, Fixture& f, bool snapshot, int32_t sx, int32_t
     int32_t originalGoal[2] = { gx, gy };
     int32_t originalResult = 0;
     ctx.CallOriginal([&] {
-        Put<uint8_t>(f.original, kSearch + 0xF2, personalSpace);
-        Put<uint8_t>(f.original, kSearch + 0xF3, sourceSide);
+        Put<uint8_t>(f.original, kSearch + 0xF2, sourceSide);
+        Put<uint8_t>(f.original, kSearch + 0xF3, personalSpace);
         originalResult = reinterpret_cast<AdjustFn>(snapshot ? kSnapshotAdjustTarget : kAdjustTarget)(f.original,
             nullptr, sx, sy, originalGoal, arg, tolerance);
     });
