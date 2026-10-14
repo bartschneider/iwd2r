@@ -237,6 +237,10 @@ void ReadProbe(platform::replay_probe::Frame* out)
         return;
     out->characters = game->m_nCharacters;
     out->visibleArea = game->m_visibleArea;
+    for (int i = 0; i < 6; ++i) {
+        out->slots[i] = game->m_characters[i];
+        out->portraits[i] = game->m_characterPortraits[i];
+    }
     CGameArea* area = game->m_visibleArea < CINFGAME_MAX_AREAS ? game->m_gameAreas[game->m_visibleArea] : nullptr;
     if (area) {
         platform::replay_probe::Area& a = out->area;

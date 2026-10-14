@@ -12,14 +12,15 @@
 // dumps) appends one block to probe.txt:
 //
 //   frame N screen NAME
-//   game characters C visible_area V
+//   game characters C visible_area V slots a,b,c,d,e,f portraits a,b,c,d,e,f
 //   area RESREF characters C view X,Y vis WxH size S range R ids a,b,c,d,e,f
 //   obj INDEX ID type T pos X,Y here H list L seen S speed P inhibitor I
 //       [name NAME] [last C active A ai B imprisonment M visible_monster V
 //       field_294 F state S action A sequence Q queued N next A triggers T]
 //   vis ROW HEX...
 //
-// - game: CInfGame::m_nCharacters and m_visibleArea.
+// - game: CInfGame::m_nCharacters, m_visibleArea, m_characters (the
+//   party slots Player1..6 resolve through) and m_characterPortraits.
 // - area: the area on view (m_gameAreas[m_visibleArea]): m_resRef,
 //   m_nCharacters, the viewport's m_cInfinity.nCurrentX/Y, and its
 //   CVisibilityMap's m_nWidth, m_nHeight, m_nMapSize, field_E (the
@@ -131,6 +132,8 @@ struct Frame {
     std::string screen;
     int characters = 0;
     unsigned visibleArea = 0;
+    int32_t slots[6] = { -1, -1, -1, -1, -1, -1 };
+    int32_t portraits[6] = { -1, -1, -1, -1, -1, -1 };
     Area area;
     std::vector<Object> objects;
 };
@@ -145,7 +148,13 @@ inline std::string Format(const Frame& f)
     char line[512];
     std::snprintf(line, sizeof(line), "frame %u screen %s\n", f.frame, f.screen.c_str());
     out += line;
-    std::snprintf(line, sizeof(line), "game characters %d visible_area %u\n", f.characters, f.visibleArea);
+    std::snprintf(line, sizeof(line),
+        "game characters %d visible_area %u slots %ld,%ld,%ld,%ld,%ld,%ld portraits %ld,%ld,%ld,%ld,%ld,%ld\n",
+        f.characters, f.visibleArea, static_cast<long>(f.slots[0]), static_cast<long>(f.slots[1]),
+        static_cast<long>(f.slots[2]), static_cast<long>(f.slots[3]), static_cast<long>(f.slots[4]),
+        static_cast<long>(f.slots[5]), static_cast<long>(f.portraits[0]), static_cast<long>(f.portraits[1]),
+        static_cast<long>(f.portraits[2]), static_cast<long>(f.portraits[3]), static_cast<long>(f.portraits[4]),
+        static_cast<long>(f.portraits[5]));
     out += line;
     const Area& a = f.area;
     if (a.present) {

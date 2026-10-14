@@ -160,6 +160,7 @@ static_assert(kField_sprite_queued_count.type == ReplayType::k_i32, "");
 static_assert(kField_sprite_queued_head.type == ReplayType::k_ptr, "");
 static_assert(kField_sprite_triggers_count.type == ReplayType::k_i32, "");
 static_assert(kField_action_id.type == ReplayType::k_i16, "");
+static_assert(kField_character_slots.type == ReplayType::k_i32 && kField_character_slots.count == 6, "");
 static_assert(kField_area_characters.type == ReplayType::k_u8, "");
 static_assert(kField_area_view_x.type == ReplayType::k_i32, "");
 static_assert(kField_area_view_y.type == ReplayType::k_i32, "");
@@ -749,6 +750,10 @@ void ReadProbe(platform::replay_probe::Frame* out)
     }
     out->characters = ReadI16(At(game, kField_characters_count), &ok);
     out->visibleArea = ReadU8(At(game, kField_visible_area), &ok);
+    for (uint32_t i = 0; i < 6; ++i) {
+        out->slots[i] = ReadI32(At(game, kField_character_slots) + 4u * i, &ok);
+        out->portraits[i] = ReadI32(At(game, kField_character_portraits) + 4u * i, &ok);
+    }
     uint32_t area = 0;
     if (out->visibleArea < kField_game_areas.count) {
         area = ReadU32(At(game, kField_game_areas) + 4u * out->visibleArea, &ok);

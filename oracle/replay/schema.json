@@ -854,6 +854,10 @@
     "action_id": {
       "class": "CAIAction",
       "member": "m_actionID"
+    },
+    "character_slots": {
+      "class": "CInfGame",
+      "member": "m_characters"
     }
   }
 }

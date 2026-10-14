@@ -562,5 +562,11 @@
     "base": "CAIAction",
     "offset": "0x0000",
     "type": "i16"
+  },
+  "character_slots": {
+    "base": "CInfGame",
+    "offset": "0x3816",
+    "type": "i32",
+    "count": 6
   }
 }
