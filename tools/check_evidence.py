@@ -113,8 +113,10 @@ def changed_lines(diff):
 
 def touched(repo, base):
     """(path, address, name) of each labelled function changed since base."""
+    # --minimal: git's default diff gives up on optimality in large files
+    # with big insertions and reports untouched neighbouring functions.
     diff = git(repo, 'diff', '--unified=0', '--no-color', '--no-ext-diff',
-               '-M', f'{base}...HEAD', '--', 'src/').stdout
+               '--minimal', '-M', f'{base}...HEAD', '--', 'src/').stdout
     result = []
     for path, ranges in sorted(changed_lines(diff).items()):
         if not path.endswith('.cpp') or not ranges:

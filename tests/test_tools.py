@@ -1235,6 +1235,43 @@ class CheckEvidenceTest(unittest.TestCase):
         self.commit()
         self.assertEqual(self.check().returncode, 0)
 
+    def test_large_insertions_touch_only_changed_functions(self):
+        # git's default diff gives up on the shortest edit script for big
+        # insertions that repeat their neighbours' lines (as the effect
+        # ports in src/CGameEffect.cpp did) and reports untouched functions
+        # as changed; check_evidence diffs with --minimal.
+        def source(new):
+            lines = ['// fixture']
+            for i in range(300):
+                if new and i % 20 == 0 and i > 0:
+                    lines += ['', f'int A::n{i}(int x)', '{']
+                    for k in range(50):
+                        lines += ['    if (x == 0) {', '        return x;',
+                                  '    }', f'    return x + {k % 3};']
+                    lines += ['}']
+                changed = ' // changed' if new and i == 150 else ''
+                lines += ['', f'// 0x{0x401000 + i * 0x20:X}',
+                          f'int A::f{i}(int x)', '{', '    if (x == 0) {',
+                          '        return x;', '    }',
+                          f'    return x + {i % 3};{changed}', '}']
+            return '\n'.join(lines) + '\n'
+
+        self.write('src/a.cpp', source(False))
+        self.commit('base')
+        self.base = self.git('rev-parse', 'HEAD').strip()
+        self.write('src/a.cpp', source(True))
+        self.evidence(f'{0x401000 + 150 * 0x20:X}', 'exemption: "fixture"')
+        self.commit()
+
+        default = self.git('diff', '--unified=0', self.base, '--', 'src/')
+        self.assertGreater(sum(1 for line in default.splitlines()
+                               if line.startswith('-') and
+                               not line.startswith('---')), 1)
+
+        r = self.check()
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertIn('1 touched function(s)', r.stdout)
+
     def test_pure_deletion_inside_body_counts(self):
         self.write('src/a.cpp', TWO_FUNCTIONS.replace('    return x + 1;\n',
                                                       ''))
