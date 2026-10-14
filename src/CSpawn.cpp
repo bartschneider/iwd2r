@@ -690,7 +690,47 @@ void CSpawn::Read(CMemINISection* pSection)
 
     // NOTE: Uninline.
     if (GetINIKey(pSection, SpecKey, sValue)) {
-        // TODO: Incomplete.
+        int pos = sValue.Find('[');
+        if (pos >= 0) {
+            CStringArray Values;
+            int aValues[8] = { 0 };
+
+            sValue = sValue.Mid(pos + 1);
+
+            pos = sValue.Find(']');
+            if (pos <= 0) {
+                // NOTE: An unclosed object type ends the read here: the
+                // spawn stays invalid (Zark cleared DataIsValid).
+                return;
+            }
+
+            sValue = sValue.Left(pos);
+
+            int nValues = ReadValues(sValue, Values);
+            for (int index = 0; index < nValues && index < 8; index++) {
+                aValues[index] = atoi(Values[index]);
+            }
+
+            mSearchType.Set(CAIObjectType(static_cast<BYTE>(aValues[0]),
+                static_cast<BYTE>(aValues[1]),
+                static_cast<BYTE>(aValues[2]),
+                static_cast<BYTE>(aValues[3]),
+                static_cast<BYTE>(aValues[4]),
+                static_cast<BYTE>(aValues[5]),
+                static_cast<BYTE>(aValues[6]),
+                static_cast<BYTE>(aValues[7]),
+                -1,
+                0,
+                0));
+            field_13E = TRUE;
+        } else {
+            CAIObjectType type(0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0);
+            sValue.TrimRight();
+            sValue.TrimLeft();
+            mSearchType.Set(type);
+            mSearchType.m_sName = sValue;
+            field_13E = TRUE;
+        }
     } else {
         field_13E = FALSE;
     }
