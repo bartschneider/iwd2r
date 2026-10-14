@@ -764,6 +764,8 @@ public:
     /* 4DFF */ BYTE m_currSndArmor;
     /* 4E00 */ CSound m_sndReady;
     /* 4E64 */ CSound m_sndDeath;
+    /* 4EC8 */ CSound field_4EC8;
+    /* 4F2C */ CSound m_sndVoice;
     /* 4F90 */ CSound m_sndSpriteEffect;
     /* 4FF4 */ int m_nNumberOfTimesTalkedTo;
     /* 4FF8 */ BOOL m_bSeenPartyBefore;
