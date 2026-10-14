@@ -25,15 +25,26 @@ bool DataViewGlob(const std::string& pattern, const std::string& name);
 // is inside view, or when a link cannot be made.
 void MakeDataView(const std::filesystem::path& data, const std::filesystem::path& view, const DataViewRules& rules);
 
+// The rules with every save folder empty in the view: mpsave (the save root,
+// CInfGame::m_sMultiplayerSaveDir, which the main menu's Quick Load and the
+// load screen read) is made an empty folder instead of a copy of the
+// install's; save and tempsave are empty under the shared rules already. A
+// test whose result must not depend on saves earlier runs left in the
+// install uses it.
+DataViewRules WithoutSaves(DataViewRules rules);
+
 // Deletes a view without following its links into the install.
 void RemoveDataView(const std::filesystem::path& view);
 
 // A view in a fresh temporary folder, removed by the destructor unless the
 // environment variable IWD2R_KEEP_DATA_VIEW is 1. Path() is what IWD2_DATA
-// should be for the engine.
+// should be for the engine. With Saves::None the view has no saves
+// (WithoutSaves).
 class DataView {
 public:
-    explicit DataView(const std::string& data);
+    enum class Saves { FromInstall,
+        None };
+    explicit DataView(const std::string& data, Saves saves = Saves::FromInstall);
     ~DataView();
     DataView(const DataView&) = delete;
     DataView& operator=(const DataView&) = delete;

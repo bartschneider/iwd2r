@@ -183,6 +183,16 @@ void MakeDataView(const fs::path& data, const fs::path& view, const DataViewRule
     }
 }
 
+DataViewRules WithoutSaves(DataViewRules rules)
+{
+    const std::string root = "mpsave";
+    auto& copied = rules.copiedDirs;
+    copied.erase(std::remove_if(copied.begin(), copied.end(), [&](const std::string& n) { return Lower(n) == root; }), copied.end());
+    if (std::none_of(rules.emptyDirs.begin(), rules.emptyDirs.end(), [&](const std::string& n) { return Lower(n) == root; }))
+        rules.emptyDirs.push_back(root);
+    return rules;
+}
+
 void RemoveDataView(const fs::path& view)
 {
     std::error_code ec;
@@ -208,7 +218,7 @@ void RemoveDataView(const fs::path& view)
     fs::remove(view, ec);
 }
 
-DataView::DataView(const std::string& data)
+DataView::DataView(const std::string& data, Saves saves)
 {
     static int counter = 0;
 #ifdef _WIN32
@@ -220,7 +230,8 @@ DataView::DataView(const std::string& data)
     m_root = fs::temp_directory_path() / ("iwd2r-view-" + std::to_string(pid) + "-" + std::to_string(stamp) + "-" + std::to_string(counter++));
     const fs::path rules = fs::path(IWD2R_SOURCE_DIR) / "tools" / "dataview_rules.json";
     const fs::path view = m_root / "data";
-    MakeDataView(data, view, LoadDataViewRules(rules));
+    const DataViewRules loaded = LoadDataViewRules(rules);
+    MakeDataView(data, view, saves == Saves::None ? WithoutSaves(loaded) : loaded);
     m_path = view.string();
 }
 

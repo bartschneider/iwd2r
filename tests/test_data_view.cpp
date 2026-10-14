@@ -126,3 +126,34 @@ TEST_CASE("DataView is a temporary view removed with it", "[dataview]")
     std::error_code ec;
     fs::remove_all(tmp, ec);
 }
+
+TEST_CASE("a data view without saves has empty save folders", "[dataview]")
+{
+    const fs::path tmp = TempFolder();
+    const fs::path data = tmp / "install";
+    Write(data / "CHITIN.KEY", "key");
+    Write(data / "MPSave" / "000000002-Quick-Save" / "ICEWIND2.GAM", "GAMEV2.2");
+    Write(data / "save" / "s" / "ICEWIND2.GAM", "GAMEV2.2");
+    Write(data / "Characters" / "A.CHR", "chr");
+    const DataViewRules rules = WithoutSaves(LoadDataViewRules(fs::path(IWD2R_SOURCE_DIR) / "tools" / "dataview_rules.json"));
+    CHECK(rules.copiedDirs == std::vector<std::string> { "Characters" });
+    const fs::path view = tmp / "view";
+    MakeDataView(data, view, rules);
+    for (const char* name : { "MPSave", "save", "tempsave" }) {
+        INFO(name);
+        CHECK(fs::is_directory(view / name));
+        CHECK_FALSE(IsLink(view / name));
+        CHECK(fs::is_empty(view / name));
+    }
+    CHECK(Read(view / "Characters" / "A.CHR") == "chr");
+    RemoveDataView(view);
+    CHECK(Read(data / "MPSave" / "000000002-Quick-Save" / "ICEWIND2.GAM") == "GAMEV2.2");
+
+    // The DataView form.
+    {
+        DataView saveless(data.string(), DataView::Saves::None);
+        CHECK(fs::is_empty(fs::path(saveless.Path()) / "MPSave"));
+    }
+    std::error_code ec;
+    fs::remove_all(tmp, ec);
+}

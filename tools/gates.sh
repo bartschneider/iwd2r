@@ -25,14 +25,17 @@ export IWD2R_AUDIO=null SDL_AUDIO_DRIVER=dummy
 # maps it, which fails every engine-starting test with "bad key file".
 # Its icewind2.ini [Alias] paths still name the oracle copy, but the engine maps
 # every drive path into the data root (platform/fs.cpp), so a Linux run never
-# reads the Windows drive; only state written into this copy by earlier runs
-# can move the smoke hash. Make it with: rsync -a --exclude temp --exclude cache --exclude tempsave
+# reads the Windows drive. Make it with: rsync -a --exclude temp --exclude cache --exclude tempsave
 #   --exclude mpsave --exclude ScrnShot /mnt/c/Users/thier/iwd2r-oracle/game/ ~/.local/share/iwd2r/game/
+# Tests never write the copy: every engine-starting test runs on a private
+# view of it (tests/data_view.h), and copy_unchanged below fails a preset whose
+# tests changed it anyway.
 LINUX_DATA="${IWD2R_HOME:-$HOME/.local/share/iwd2r}/game"
 if [ -z "${IWD2_DATA:-}" ] && [ -f "$LINUX_DATA/CHITIN.KEY" ]; then export IWD2_DATA="$LINUX_DATA"; fi
 # The start-screen smoke test's frame hash depends on the game copy, so each
 # machine pins its own: tests/smoke_start_screen.cpp requires the hash in
-# IWD2R_SMOKE_HASH when it is set.
+# IWD2R_SMOKE_HASH when it is set. The test fixes what else the menu reads
+# (noon local time: the day background; no saves: Quick Load disabled).
 SMOKE_HASH_FILE="${IWD2R_HOME:-$HOME/.local/share/iwd2r}/smoke-hash"
 if [ -z "${IWD2R_SMOKE_HASH:-}" ] && [ -f "$SMOKE_HASH_FILE" ]; then
     IWD2R_SMOKE_HASH=$(tr -d ' \r\n' < "$SMOKE_HASH_FILE"); export IWD2R_SMOKE_HASH
@@ -58,6 +61,30 @@ capped() {
         return 1
     fi
     systemd-run --user --scope -q -p MemoryMax="$TEST_MEMORY_MAX" -p MemorySwapMax=0 -- "$@"
+}
+# The copy's state (every entry's path, type, size and modification time),
+# taken before the first preset's tests. A test that writes the copy makes
+# later runs depend on it (2026-10-13: Characters/PROBE*, Party.ini and the
+# INI files), so a change fails the preset and lists what changed.
+copy_manifest() {
+    find "$IWD2_DATA/" -printf '%P\t%y\t%s\t%T@\n' 2>/dev/null | LC_ALL=C sort
+}
+COPY_MANIFEST=""
+if [ -n "${IWD2_DATA:-}" ] && [ -d "$IWD2_DATA" ]; then
+    COPY_MANIFEST=$(mktemp); copy_manifest > "$COPY_MANIFEST"
+fi
+copy_unchanged() {
+    [ -n "$COPY_MANIFEST" ] || return 0
+    local now
+    now=$(mktemp); copy_manifest > "$now"
+    if ! cmp -s "$COPY_MANIFEST" "$now"; then
+        echo "gates: the tests changed the game copy $IWD2_DATA (< before, > after; path, type, size, mtime):"
+        diff "$COPY_MANIFEST" "$now" | grep '^[<>]' | head -50
+        # The next preset reports only its own changes.
+        mv "$now" "$COPY_MANIFEST"
+        return 1
+    fi
+    rm -f "$now"
 }
 failed=()
 step() {
@@ -86,6 +113,7 @@ linux_preset() {
         fi
     fi
     rm -f "$log"
+    copy_unchanged || rc=1
     return "$rc"
 }
 step "linux-gcc build and tests" linux_preset linux-gcc
@@ -108,6 +136,7 @@ if [ "$WINDOWS" = 1 ]; then
     step "windows x86 build" python3 tools/oracle.py build
     step "windows x64 build" python3 -c "import sys; sys.path.insert(0, 'tools'); import play; play.sync_windows(); play.build_windows()"
 fi
+[ -n "$COPY_MANIFEST" ] && rm -f "$COPY_MANIFEST"
 echo
 if [ ${#failed[@]} -eq 0 ]; then echo "gates: all passed"; exit 0; fi
 echo "gates: FAILED: ${failed[*]}"; exit 1
