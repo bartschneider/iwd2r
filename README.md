@@ -16,7 +16,7 @@ Bring your own copy of Icewind Dale II: Complete from GOG. The DRM-free GOG vers
 | 1 | Portability foundation | Done |
 | 2 | Verification harness | Done |
 | 3 | Finish the simulation | In progress: milestone 1 (a new party enters the world) in final integration; milestone 2 (move and interact) executing |
-| 4 | Render API and classic renderer | Implemented; whole-project review pending |
+| 4 | Render API and classic renderer | Done (classic presenter default; SDL3 GPU presenter opt-in with nearest/sharp/smooth/FSR/NIS filters; the HD classic renderer is a later project) |
 | 5 | IEex native layer and Lua API | Not started |
 | 6 | Remaster renderer | Not started |
 
