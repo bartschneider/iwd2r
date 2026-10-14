@@ -186,23 +186,23 @@ SHORT CAIScriptFile::ParseOneLine(CString sLine)
             ParseError("Misplaced END.");
         }
     } else if (sLine == COMMENT) {
-        if (sLine.GetLength() != 0) {
-            switch (m_parseMode) {
-            case 0:
-                ParseError("Statement out side of IF END.");
-                break;
-            case 1:
-                ParseTrigger(sLine);
-                break;
-            case 2:
-                action = ParseAction(sLine);
-                m_curResponse->Add(action);
-                break;
-            default:
-                ParseError("Unknown Mode");
-                m_parseMode = -1;
-                break;
-            }
+        // Nothing to parse.
+    } else if (sLine.GetLength() != 0) {
+        switch (m_parseMode) {
+        case 0:
+            ParseError("Statement out side of IF END.");
+            break;
+        case 1:
+            ParseTrigger(sLine);
+            break;
+        case 2:
+            action = ParseAction(sLine);
+            m_curResponse->Add(action);
+            break;
+        default:
+            ParseError("Unknown Mode");
+            m_parseMode = -1;
+            break;
         }
     }
 
@@ -251,8 +251,8 @@ SHORT CAIScriptFile::ParseTrigger(CString sData)
         return -1;
     }
 
-    element = ReadAfterChar(element, '(');
-    if (element.IsEmpty()) {
+    restOfLine = ReadAfterChar(sData, '(');
+    if (restOfLine.IsEmpty()) {
         ParseError("Invalid trigger: Nothing after opening bracket '('");
         return -1;
     }
