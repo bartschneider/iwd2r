@@ -1454,9 +1454,144 @@ void CScreenWorld::TimerSynchronousUpdate()
 }
 
 // 0x68DFD0
-BOOL CScreenWorld::TogglePauseGame(char a2, char a3, int a4)
+BOOL CScreenWorld::TogglePauseGame(char bVisualPause, char bSendMessage, int idPlayerPausing)
 {
-    // TODO: Incomplete.
+    STR_RES strRes;
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+    if (g_pChitin->cNetwork.GetSessionOpen() == TRUE
+        && !g_pChitin->cNetwork.GetSessionHosting()
+        && bSendMessage == TRUE) {
+        if (!pGame->m_singlePlayerPermissions.GetSinglePermission(CGamePermission::PAUSING)) {
+            STR_RES strNoPermission;
+            g_pBaldurChitin->GetTlkTable().Fetch(20701, strNoPermission);
+            DisplayText(CString(""),
+                strNoPermission.szText,
+                RGB(255, 0, 0),
+                RGB(255, 0, 0),
+                -1,
+                FALSE);
+            return FALSE;
+        }
+
+        g_pBaldurChitin->GetBaldurMessage()->SendPauseRequestToServer(bVisualPause, m_bPaused == FALSE);
+        return TRUE;
+    }
+
+    if (g_pChitin->cNetwork.GetSessionOpen() == TRUE
+        && g_pChitin->cNetwork.GetSessionHosting() == TRUE) {
+        BOOLEAN bPermitted = TRUE;
+        if (pGame->GetGameSave()->m_mode == 386 || pGame->GetGameSave()->m_mode == 1282) {
+            bPermitted = FALSE;
+        }
+        if (pGame->GetMultiplayerSettings()->m_bHostPermittedDialog == TRUE) {
+            bPermitted = FALSE;
+        }
+        if (m_bPaused == TRUE && m_bHardPaused == TRUE) {
+            bPermitted = FALSE;
+        }
+
+        if ((bVisualPause == TRUE && m_comingOutOfDialog > 0) || !bPermitted) {
+            return TRUE;
+        }
+    }
+
+    if (g_pChitin->cNetwork.GetSessionOpen() == TRUE
+        && g_pChitin->cNetwork.GetServiceProvider() != CNetwork::SERV_PROV_NULL
+        && bVisualPause == TRUE) {
+        if (m_bPaused == TRUE) {
+            if (field_EA4 != 17 && field_EA4 != GetPanel_21_7()) {
+                if (field_11B6 < GetTickCount() && GetTickCount() - field_11B6 < 1500) {
+                    return TRUE;
+                }
+            }
+        } else {
+            if (GetTickCount() > field_11BA && GetTickCount() - field_11BA < 1000) {
+                return TRUE;
+            }
+        }
+    }
+
+    if (g_pChitin->cNetwork.GetSessionOpen() == TRUE
+        && g_pChitin->cNetwork.GetSessionHosting() == TRUE
+        && bSendMessage == TRUE) {
+        if (idPlayerPausing == 0) {
+            g_pBaldurChitin->GetBaldurMessage()->PauseAnnounceStatus(static_cast<BOOLEAN>(m_bHardPaused),
+                m_bPaused == FALSE,
+                g_pChitin->cNetwork.m_idLocalPlayer);
+        } else {
+            g_pBaldurChitin->GetBaldurMessage()->PauseAnnounceStatus(static_cast<BOOLEAN>(m_bHardPaused),
+                m_bPaused == FALSE,
+                idPlayerPausing);
+        }
+    }
+
+    CString sName("");
+
+    if (!m_bPaused) {
+        pGame->GetWorldTimer()->StopTime();
+        m_bPaused = TRUE;
+        if (bVisualPause) {
+            field_14A = TRUE;
+        }
+        pGame->m_bForceDither = TRUE;
+        g_pBaldurChitin->GetTlkTable().Fetch(16321, strRes); // "Paused"
+
+        if (g_pChitin->cNetwork.GetSessionOpen() == TRUE) {
+            field_11B6 = GetTickCount();
+        }
+    } else {
+        if (field_EA4 != 17 && field_EA4 != GetPanel_21_7()) {
+            switch (field_EA4) {
+            case 0:
+            case 7:
+            case 19:
+            case 21:
+            case 22:
+            case -1:
+                break;
+            case 6:
+                StopCommand();
+                field_EA4 = -1;
+                break;
+            case 8:
+                StopContainer();
+                field_EA4 = -1;
+                break;
+            default:
+                // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenWorld.cpp
+                // __LINE__: 5469
+                UTIL_ASSERT(FALSE);
+            }
+
+            pGame->GetWorldTimer()->StartTime();
+            m_bPaused = FALSE;
+            if (!field_F44) {
+                pGame->m_bForceDither = FALSE;
+            }
+            field_14A = FALSE;
+            g_pBaldurChitin->GetTlkTable().Fetch(16322, strRes); // "Unpaused"
+        }
+    }
+
+    if (g_pChitin->cNetwork.GetSessionOpen() == TRUE
+        && g_pChitin->cNetwork.GetServiceProvider() != CNetwork::SERV_PROV_NULL) {
+        if (g_pChitin->cNetwork.GetSessionHosting() == TRUE && idPlayerPausing == 0) {
+            sName = g_pChitin->cNetwork.m_sLocalPlayerName;
+        } else {
+            INT nPlayerNumber = g_pChitin->cNetwork.FindPlayerLocationByID(idPlayerPausing, FALSE);
+            if (nPlayerNumber != -1) {
+                g_pChitin->cNetwork.GetPlayerName(nPlayerNumber, sName);
+            }
+        }
+    }
+
+    g_pBaldurChitin->m_pEngineWorld->DisplayText(sName,
+        strRes.szText,
+        RGB(255, 0, 0),
+        RGB(255, 0, 0),
+        -1,
+        FALSE);
 
     return TRUE;
 }
@@ -1558,12 +1693,220 @@ BOOLEAN CScreenWorld::ReadyEndCredits(BOOLEAN bForcedFromServer)
 // 0x68F9D0
 void CScreenWorld::EndDialog(BOOLEAN bForceExecution, BOOLEAN fullEnd)
 {
-    // TODO: Incomplete.
-    //
-    // iwd2r: when completed, the squared-distance comparison at 0x6902D4
-    // (cmp edx, ecx against a squared range) takes
-    // iwd2r::CurrentScreenLayout().dialogAutoScrollRange, as IEex patches it
-    // to scale with the resolution.
+    CString sChatText;
+    LONG nChatLines;
+    LONG nMaxChatLines;
+
+    m_nPartySizeCheckStartDelay = 6;
+
+    if (!field_1204) {
+        m_comingOutOfDialog = 30;
+    }
+
+    if (g_pChitin->cNetwork.GetSessionOpen()
+        && g_pChitin->cNetwork.GetServiceProvider() != CNetwork::SERV_PROV_NULL) {
+        nMaxChatLines = 11;
+        nChatLines = 6;
+    } else {
+        nMaxChatLines = 12;
+        nChatLines = 7;
+    }
+
+    if (!m_bInControlOfDialog && !bForceExecution) {
+        return;
+    }
+
+    if (m_bInControlOfDialog) {
+        CMessageExitDialogMode* pMessage = new CMessageExitDialogMode(field_1150,
+            CGameObjectArray::INVALID_INDEX,
+            CGameObjectArray::INVALID_INDEX);
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(pMessage, FALSE);
+    }
+
+    g_pBaldurChitin->GetObjectGame()->m_tempCursor = 4;
+    g_pBaldurChitin->GetTlkTable().field_58 = byte_8FB954;
+
+    g_pBaldurChitin->m_pEngineWorld->GetManager()->GetPanel(9)->SetActive(FALSE);
+    g_pBaldurChitin->m_pEngineWorld->GetManager()->GetPanel(9)->SetInactiveRender(FALSE);
+
+    sub_695570(TRUE, TRUE);
+
+    // The last non-empty string of the dialog display, so the world screen's
+    // display can show it at the top.
+    INT nIndex = m_pActiveDialogDisplay->m_plstStrings->GetCount();
+    BOOLEAN bFound = FALSE;
+    POSITION posTopString;
+    while (nIndex > 0) {
+        if (bFound) {
+            break;
+        }
+
+        CString sString;
+        nIndex--;
+        m_pActiveDialogDisplay->GetString(nIndex, sString);
+        if (sString.GetLength() >= 1) {
+            bFound = TRUE;
+        }
+    }
+
+    if (bFound == TRUE) {
+        posTopString = m_pActiveDialogDisplay->GetBossPosition(nIndex);
+
+        // NOTE: The result is unused.
+        m_pActiveDialogDisplay->GetNumLines(posTopString);
+    } else {
+        posTopString = NULL;
+    }
+
+    LONG nLines;
+    if (field_114C == GetPanel_21_7()) {
+        nLines = nMaxChatLines;
+    } else if (field_114C == GetPanel_22_0()) {
+        nLines = nChatLines;
+    } else {
+        nLines = 2;
+    }
+
+    BOOL bInputCapture;
+    GetChatEditBoxStatus(sChatText, bInputCapture);
+
+    // NOTE: The original compares the chat text with "" here and ignores the
+    // result.
+    if (nLines < nChatLines && !bInputCapture) {
+        sChatText.Compare("");
+    }
+
+    CUIPanel* pPanel = g_pBaldurChitin->m_pEngineWorld->GetManager()->GetPanel(GetPanel_22_0());
+
+    if (g_pChitin->cNetwork.GetSessionOpen()
+        && g_pChitin->cNetwork.GetServiceProvider() != CNetwork::SERV_PROV_NULL) {
+        g_pBaldurChitin->m_pEngineWorld->GetManager()->GetPanel(GetPanel_19_0())->SetActive(FALSE);
+        g_pBaldurChitin->m_pEngineWorld->GetManager()->GetPanel(GetPanel_21_0())->SetActive(FALSE);
+    } else {
+        g_pBaldurChitin->m_pEngineWorld->GetManager()->GetPanel(GetPanel_21_7())->SetActive(FALSE);
+    }
+
+    CUIControlTextDisplay* pOldDialogDisplay = m_pActiveDialogDisplay;
+    g_pBaldurChitin->m_pEngineWorld->m_pActiveDialogDisplay = static_cast<CUIControlTextDisplay*>(pPanel->GetControl(1));
+    static_cast<CUIControlTextDisplay*>(pPanel->GetControl(1))->CopyDisplay(pOldDialogDisplay);
+
+    // NOTE: Uninline.
+    g_pBaldurChitin->m_pEngineWorld->SetNewViewSize(CInfinity::stru_8E79B8, FALSE);
+
+    CRect rViewPort(CInfinity::stru_8E79B8);
+
+    CopyChatEditBox(pOldDialogDisplay->m_pPanel, pPanel);
+
+    g_pBaldurChitin->GetObjectGame()->GetWorldTimer()->StartTime();
+    m_bPaused = FALSE;
+
+    if (m_cUIManager.m_bHidden) {
+        rViewPort = CInfinity::stru_8E7548;
+    }
+
+    if (m_pActiveChatDisplay != NULL) {
+        CString sLabel;
+        CString sString;
+        COLORREF rgbTextColor;
+
+        for (INT nItem = 0; nItem < m_pActiveChatDisplay->field_A6C; nItem++) {
+            if (!m_pActiveChatDisplay->GetItem(nItem, sLabel, sString)) {
+                // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenWorld.cpp
+                // __LINE__: 4773
+                UTIL_ASSERT(FALSE);
+            }
+
+            if (!m_pActiveChatDisplay->GetItemTextColor(nItem, rgbTextColor)) {
+                // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenWorld.cpp
+                // __LINE__: 4775
+                UTIL_ASSERT(FALSE);
+            }
+
+            m_pActiveDialogDisplay->DisplayString(sLabel,
+                sString,
+                rgbTextColor,
+                rgbTextColor,
+                -1,
+                FALSE,
+                TRUE);
+        }
+
+        m_pActiveChatDisplay->RemoveAll();
+
+        if (m_pActiveChatDisplay->m_pPanel->m_nID != GetPanel_21_0()) {
+            static_cast<CUIControlTextDisplay*>(m_cUIManager.GetPanel(GetPanel_21_0())->GetControl(3))->CopyDisplay(m_pActiveChatDisplay);
+        }
+
+        m_pActiveChatDisplay = NULL;
+    }
+
+    if (fullEnd && posTopString != NULL) {
+        m_pActiveDialogDisplay->SetTopString(posTopString);
+    }
+
+    if (field_11F4) {
+        pPanel->SetActive(TRUE);
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    if (field_1204 == TRUE) {
+        pGame->GetGameSave()->m_mode = 0x142;
+        pGame->GetGameSave()->m_cutScene = TRUE;
+        g_pBaldurChitin->GetObjectCursor()->SetCursor(0, FALSE);
+        pGame->m_tempCursor = 4;
+        pGame->GetVisibleArea()->m_nScrollState = 0;
+        field_1204 = FALSE;
+    } else {
+        pGame->GetGameSave()->m_mode = -1;
+    }
+
+    pGame->GetVisibleArea()->OnMouseMove(g_pChitin->m_ptPointer);
+
+    if (g_pChitin->cNetwork.GetSessionOpen() == TRUE
+        && g_pChitin->cNetwork.GetSessionHosting() == TRUE) {
+        field_11BA = GetTickCount();
+        pGame->GetMultiplayerSettings()->m_nHostPermittedDialogDelay = 0;
+        pGame->GetMultiplayerSettings()->m_bHostPermittedDialog = FALSE;
+        pGame->GetMultiplayerSettings()->m_idHostPermittedDialog = 0;
+    }
+
+    CString sAreaName;
+    field_F1A.CopyToString(sAreaName);
+    if (g_pBaldurChitin->GetObjectGame()->GetArea(sAreaName) != NULL) {
+        CGameArea* pArea = g_pBaldurChitin->GetObjectGame()->GetArea(sAreaName);
+        if (pArea != pGame->GetVisibleArea()) {
+            pGame->GetVisibleArea()->m_bPicked = FALSE;
+            pGame->GetVisibleArea()->m_iPicked = CGameObjectArray::INVALID_INDEX;
+            pGame->GetVisibleArea()->m_nToolTip = 0;
+            pGame->GetVisibleArea()->OnDeactivation();
+            pGame->m_visibleArea = g_pBaldurChitin->GetObjectGame()->GetArea(sAreaName)->m_id;
+            pGame->GetVisibleArea()->OnActivation();
+        }
+
+        INT x;
+        INT y;
+        pGame->GetVisibleArea()->GetInfinity()->GetViewPosition(x, y);
+
+        field_F12.y += rViewPort.top;
+        field_F12.x += rViewPort.left;
+
+        LONG dy = y - field_F12.y;
+        LONG dx = x - field_F12.x;
+
+        // iwd2r: the squared range (700 * 700 at 0x6902D4) takes
+        // iwd2r::CurrentScreenLayout().dialogAutoScrollRange, as IEex
+        // patches it to scale with the resolution.
+        if (dx * dx + dy * dy > iwd2r::CurrentScreenLayout().dialogAutoScrollRange) {
+            // NOTE: Uninline.
+            StartScroll(field_F12, 0);
+        } else {
+            // NOTE: Uninline.
+            StartScroll(field_F12, 16);
+        }
+    }
+
+    m_internalLoadedDialog.EndDialog();
+    field_EA4 = -1;
 }
 
 // FIXME: `areaName` should be reference.

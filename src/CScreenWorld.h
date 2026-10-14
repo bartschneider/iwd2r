@@ -141,7 +141,7 @@ public:
     /* 0132 */ BOOL m_bMenuKeyDown;
     /* 0136 */ BOOL m_bCtrlKeyDown;
     /* 013A */ BOOL m_bCapsLockKeyOn;
-    /* 013E */ BOOLEAN m_bPaused;
+    /* 013E */ BOOL m_bPaused;
     /* 0142 */ BOOL field_142;
     /* 0146 */ BOOL m_bHardPaused;
     /* 014A */ int field_14A;
@@ -163,6 +163,8 @@ public:
     /* 0EA8 */ CUIControlTextDisplay* m_pActiveDialogDisplay;
     /* 0EAC */ CUIControlTextDisplay* m_pActiveChatDisplay;
     /* 0EB0 */ CGameDialogSprite m_internalLoadedDialog;
+    /* 0F12 */ CPoint field_F12;
+    /* 0F1A */ CResRef field_F1A;
     /* 0F22 */ CRect m_newViewSize;
     /* 0F32 */ BOOL m_bForceViewSize;
     /* 0F36 */ BYTE m_waitingOnResize;
