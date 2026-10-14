@@ -750,6 +750,114 @@
     "dialog_reply_shown": {
       "class": "CGameDialogReply",
       "member": "m_displayPosition"
+    },
+    "object_pos": {
+      "class": "CGameObject",
+      "member": "m_pos"
+    },
+    "object_area": {
+      "class": "CGameObject",
+      "member": "m_pArea"
+    },
+    "object_list_type": {
+      "class": "CGameObject",
+      "member": "m_listType"
+    },
+    "object_can_be_seen": {
+      "class": "CGameObject",
+      "member": "m_canBeSeen"
+    },
+    "object_ai_speed": {
+      "class": "CGameObject",
+      "member": "m_AISpeed"
+    },
+    "object_ai_inhibitor": {
+      "class": "CGameObject",
+      "member": "m_AIInhibitor"
+    },
+    "sprite_name": {
+      "class": "CGameSprite",
+      "member": "m_scriptName"
+    },
+    "sprite_last_character_count": {
+      "class": "CGameSprite",
+      "member": "m_lastCharacterCount"
+    },
+    "sprite_active": {
+      "class": "CGameSprite",
+      "member": "m_active"
+    },
+    "sprite_active_ai": {
+      "class": "CGameSprite",
+      "member": "m_activeAI"
+    },
+    "sprite_active_imprisonment": {
+      "class": "CGameSprite",
+      "member": "m_activeImprisonment"
+    },
+    "sprite_visible_monster": {
+      "class": "CGameSprite",
+      "member": "m_bVisibleMonster"
+    },
+    "area_characters": {
+      "class": "CGameArea",
+      "member": "m_nCharacters"
+    },
+    "area_view_x": {
+      "class": "CGameArea",
+      "member": "m_cInfinity.nCurrentX"
+    },
+    "area_view_y": {
+      "class": "CGameArea",
+      "member": "m_cInfinity.nCurrentY"
+    },
+    "area_visibility_width": {
+      "class": "CGameArea",
+      "member": "m_visibility.m_nWidth"
+    },
+    "area_visibility_height": {
+      "class": "CGameArea",
+      "member": "m_visibility.m_nHeight"
+    },
+    "area_visibility_range": {
+      "class": "CGameArea",
+      "member": "m_visibility.field_E"
+    },
+    "area_visibility_ids": {
+      "class": "CGameArea",
+      "member": "m_visibility.m_aCharacterIds"
+    },
+    "sprite_field_294": {
+      "class": "CGameSprite",
+      "member": "m_baseStats.field_294"
+    },
+    "sprite_general_state": {
+      "class": "CGameSprite",
+      "member": "m_derivedStats.m_generalState"
+    },
+    "sprite_sequence": {
+      "class": "CGameSprite",
+      "member": "m_nSequence"
+    },
+    "sprite_queued_count": {
+      "class": "CGameSprite",
+      "member": "m_queuedActions.m_nCount"
+    },
+    "sprite_queued_head": {
+      "class": "CGameSprite",
+      "member": "m_queuedActions.m_pNodeHead"
+    },
+    "sprite_triggers_count": {
+      "class": "CGameSprite",
+      "member": "m_pendingTriggers.m_nCount"
+    },
+    "action_id": {
+      "class": "CAIAction",
+      "member": "m_actionID"
+    },
+    "character_slots": {
+      "class": "CInfGame",
+      "member": "m_characters"
     }
   }
 }

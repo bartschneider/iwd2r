@@ -8,6 +8,8 @@
 //   IWD2R_SCRIPT       the scenario (platform/script.h's format), optional
 //   IWD2R_DUMP_EVERY   a dump every N frames (default 30; 0: none)
 //   IWD2R_SEED         the seed for the original srand (default 1)
+//   IWD2R_PROBE=FIRST-LAST  probe.txt at those frames
+//                      (platform/replay_probe.h)
 //   IWD2R_TEST_STEAL_FOCUS=N  test: a window of the recorder's takes the
 //                      foreground at frame N
 //   IWD2R_TEST_NO_FOCUS_GUARD=1  test: activation messages reach the game
@@ -71,6 +73,7 @@
 #include "oracle/replay/recorder_script.h"
 #include "platform/input_settings.h"
 #include "platform/replay_clock.h"
+#include "platform/replay_probe.h"
 #include "replay_fields.h"
 #include "vanilla_config.h"
 
@@ -138,6 +141,33 @@ static_assert(kField_dialog_entries_size.type == ReplayType::k_i32, "");
 static_assert(kField_dialog_replies.type == ReplayType::k_ptr, "");
 static_assert(kField_dialog_replies_size.type == ReplayType::k_i32, "");
 static_assert(kField_dialog_reply_shown.type == ReplayType::k_ptr, "");
+static_assert(kField_object_pos.type == ReplayType::k_i32 && kField_object_pos.count == 2, "");
+static_assert(kField_object_area.type == ReplayType::k_ptr, "");
+static_assert(kField_object_list_type.type == ReplayType::k_u8, "");
+static_assert(kField_object_can_be_seen.type == ReplayType::k_i16, "");
+static_assert(kField_object_ai_speed.type == ReplayType::k_u8, "");
+static_assert(kField_object_ai_inhibitor.type == ReplayType::k_u8, "");
+static_assert(kField_sprite_name.type == ReplayType::k_i8 && kField_sprite_name.count == 32, "");
+static_assert(kField_sprite_last_character_count.type == ReplayType::k_u8, "");
+static_assert(kField_sprite_active.type == ReplayType::k_i32, "");
+static_assert(kField_sprite_active_ai.type == ReplayType::k_i32, "");
+static_assert(kField_sprite_active_imprisonment.type == ReplayType::k_i32, "");
+static_assert(kField_sprite_visible_monster.type == ReplayType::k_i32, "");
+static_assert(kField_sprite_field_294.type == ReplayType::k_u8, "");
+static_assert(kField_sprite_general_state.type == ReplayType::k_u32, "");
+static_assert(kField_sprite_sequence.type == ReplayType::k_i16, "");
+static_assert(kField_sprite_queued_count.type == ReplayType::k_i32, "");
+static_assert(kField_sprite_queued_head.type == ReplayType::k_ptr, "");
+static_assert(kField_sprite_triggers_count.type == ReplayType::k_i32, "");
+static_assert(kField_action_id.type == ReplayType::k_i16, "");
+static_assert(kField_character_slots.type == ReplayType::k_i32 && kField_character_slots.count == 6, "");
+static_assert(kField_area_characters.type == ReplayType::k_u8, "");
+static_assert(kField_area_view_x.type == ReplayType::k_i32, "");
+static_assert(kField_area_view_y.type == ReplayType::k_i32, "");
+static_assert(kField_area_visibility_width.type == ReplayType::k_i16, "");
+static_assert(kField_area_visibility_height.type == ReplayType::k_i16, "");
+static_assert(kField_area_visibility_range.type == ReplayType::k_i16, "");
+static_assert(kField_area_visibility_ids.type == ReplayType::k_i32 && kField_area_visibility_ids.count == 6, "");
 
 // The virtual clock (platform/replay_clock.h, shared with our engine's
 // replay mode): kClockBase at the start, then 1000 / kFramesPerSecond ms per
@@ -625,18 +655,25 @@ std::string WorldJson(uint32_t chitin, uint32_t world)
         + ", \"creatures\": " + Number(values.creatures) + "}";
 }
 
+// The active engine's name (the last kReplayScreens match), none or unknown.
+const char* ScreenName(uint32_t chitin, uint32_t active, bool* ok)
+{
+    const char* screen = active ? "unknown" : "none";
+    for (const ReplayScreen& s : kReplayScreens) {
+        if (active && ReadU32(At(chitin, s.field), ok) == active) {
+            screen = s.name;
+        }
+    }
+    return screen;
+}
+
 // The dump of the current frame; checkpoint is null for a periodic dump.
 std::string DumpJson(const char* checkpoint)
 {
     bool ok = true;
     const uint32_t chitin = ReadU32(kField_baldur_chitin.address, &ok);
     const uint32_t active = chitin ? ReadU32(At(chitin, kField_active_engine), &ok) : 0;
-    const char* screen = active ? "unknown" : "none";
-    for (const ReplayScreen& s : kReplayScreens) {
-        if (active && ReadU32(At(chitin, s.field), &ok) == active) {
-            screen = s.name;
-        }
-    }
+    const char* screen = ScreenName(chitin, active, &ok);
     const uint32_t tiddata = OriginalTiddata();
     const uint32_t rng = ReadU32(tiddata + kVanillaTiddataRandStart, &ok);
     const uint32_t inputTiddata = g_inputTiddata.load();
@@ -679,6 +716,137 @@ void WriteDump(const char* checkpoint)
     } else if (checkpoint) {
         Log("wrote %s", name.c_str());
     }
+}
+
+// ---------------------------------------------------------------------------
+// IWD2R_PROBE (platform/replay_probe.h): our engine's ReadProbe
+// (src/StateDumpSources.cpp), from the original's memory. A value that
+// cannot be read stays 0.
+
+platform::replay_probe::Range g_probe;
+
+std::string ReadName(uint32_t address)
+{
+    char name[32] = {};
+    if (!SafeRead(address, name, sizeof(name))) {
+        return "";
+    }
+    return std::string(name, strnlen(name, sizeof(name)));
+}
+
+void ReadProbe(platform::replay_probe::Frame* out)
+{
+    bool ok = true;
+    const uint32_t chitin = ReadU32(kField_baldur_chitin.address, &ok);
+    if (!chitin) {
+        out->screen = "none";
+        return;
+    }
+    const uint32_t active = ReadU32(At(chitin, kField_active_engine), &ok);
+    out->screen = ScreenName(chitin, active, &ok);
+    const uint32_t game = ReadU32(At(chitin, kField_object_game), &ok);
+    if (!game) {
+        return;
+    }
+    out->characters = ReadI16(At(game, kField_characters_count), &ok);
+    out->visibleArea = ReadU8(At(game, kField_visible_area), &ok);
+    for (uint32_t i = 0; i < 6; ++i) {
+        out->slots[i] = ReadI32(At(game, kField_character_slots) + 4u * i, &ok);
+        out->portraits[i] = ReadI32(At(game, kField_character_portraits) + 4u * i, &ok);
+    }
+    uint32_t area = 0;
+    if (out->visibleArea < kField_game_areas.count) {
+        area = ReadU32(At(game, kField_game_areas) + 4u * out->visibleArea, &ok);
+    }
+    if (area) {
+        platform::replay_probe::Area& a = out->area;
+        a.present = true;
+        char resref[8] = {};
+        SafeRead(At(area, kField_area_resref), resref, sizeof(resref));
+        a.resref.assign(resref, strnlen(resref, sizeof(resref)));
+        a.characters = ReadU8(At(area, kField_area_characters), &ok);
+        a.viewX = ReadI32(At(area, kField_area_view_x), &ok);
+        a.viewY = ReadI32(At(area, kField_area_view_y), &ok);
+        a.width = ReadI16(At(area, kField_area_visibility_width), &ok);
+        a.height = ReadI16(At(area, kField_area_visibility_height), &ok);
+        a.size = ReadI32(At(area, kField_area_visibility_size), &ok);
+        a.range = ReadI16(At(area, kField_area_visibility_range), &ok);
+        for (uint32_t i = 0; i < kField_area_visibility_ids.count && i < 6; ++i) {
+            a.ids[i] = ReadI32(At(area, kField_area_visibility_ids) + 4u * i, &ok);
+        }
+        const uint32_t map = ReadU32(At(area, kField_area_visibility_map), &ok);
+        if (map && a.size > 0) {
+            a.map.resize(static_cast<size_t>(a.size));
+            if (!SafeRead(map, a.map.data(), a.map.size())) {
+                a.map.clear();
+            }
+        }
+    }
+    const uint32_t array = ReadU32(At(game, kField_objects_array), &ok);
+    const int16_t maxIndex = ReadI16(At(game, kField_objects_max_index), &ok);
+    for (int16_t index = 0; array && index <= maxIndex; ++index) {
+        bool entryOk = true;
+        const uint32_t entry = array + static_cast<uint32_t>(index) * kField_object_entry_size.offset;
+        const int16_t objectId = ReadI16(At(entry, kField_object_entry_id), &entryOk);
+        const uint32_t object = ReadU32(At(entry, kField_object_entry_ptr), &entryOk);
+        if (!entryOk || objectId == -1 || !object) {
+            continue;
+        }
+        platform::replay_probe::Object o;
+        o.index = index;
+        o.id = static_cast<int32_t>((static_cast<uint32_t>(index) << 16) | static_cast<uint16_t>(objectId));
+        o.type = ReadU8(At(object, kField_object_type), &entryOk);
+        o.x = ReadI32(At(object, kField_object_pos), &entryOk);
+        o.y = ReadI32(At(object, kField_object_pos) + 4, &entryOk);
+        o.here = area && ReadU32(At(object, kField_object_area), &entryOk) == area;
+        o.list = ReadU8(At(object, kField_object_list_type), &entryOk);
+        o.seen = ReadI16(At(object, kField_object_can_be_seen), &entryOk);
+        o.speed = ReadU8(At(object, kField_object_ai_speed), &entryOk);
+        o.inhibitor = ReadU8(At(object, kField_object_ai_inhibitor), &entryOk);
+        if (o.type == platform::replay_probe::kTypeSprite) {
+            o.hasName = true;
+            o.name = ReadName(At(object, kField_sprite_name));
+            o.sprite = true;
+            o.lastCharacters = ReadU8(At(object, kField_sprite_last_character_count), &entryOk);
+            o.active = ReadI32(At(object, kField_sprite_active), &entryOk);
+            o.activeAi = ReadI32(At(object, kField_sprite_active_ai), &entryOk);
+            o.activeImprisonment = ReadI32(At(object, kField_sprite_active_imprisonment), &entryOk);
+            o.visibleMonster = ReadI32(At(object, kField_sprite_visible_monster), &entryOk);
+            o.field294 = ReadU8(At(object, kField_sprite_field_294), &entryOk);
+            o.generalState = ReadU32(At(object, kField_sprite_general_state), &entryOk);
+            o.action = ReadI16(At(object, kField_sprite_action), &entryOk);
+            o.sequence = ReadI16(At(object, kField_sprite_sequence), &entryOk);
+            o.queued = ReadI32(At(object, kField_sprite_queued_count), &entryOk);
+            const uint32_t head = ReadU32(At(object, kField_sprite_queued_head), &entryOk);
+            if (head) {
+                const uint32_t action = ReadU32(At(head, kField_list_node_data), &entryOk);
+                o.queuedHead = action ? ReadI16(At(action, kField_action_id), &entryOk) : -1;
+            }
+            o.triggers = ReadI32(At(object, kField_sprite_triggers_count), &entryOk);
+        } else if (o.type == platform::replay_probe::kTypeDoor) {
+            o.hasName = true;
+            o.name = ReadName(At(object, kField_door_name));
+        }
+        out->objects.push_back(o);
+    }
+}
+
+void WriteProbe(uint32_t frame)
+{
+    if (!g_probe.Has(frame)) {
+        return;
+    }
+    platform::replay_probe::Frame f;
+    f.frame = frame;
+    ReadProbe(&f);
+    std::FILE* out = std::fopen(PathIn("probe.txt").c_str(), "ab");
+    if (!out) {
+        Log("cannot write probe.txt: error %lu", GetLastError());
+        return;
+    }
+    const std::string text = platform::replay_probe::Format(f);
+    std::fwrite(text.data(), 1, text.size(), out);
+    std::fclose(out);
 }
 
 void WriteStatus()
@@ -1086,6 +1254,7 @@ extern "C" void __cdecl OnFrame()
     if (g_dumpEvery && frame % g_dumpEvery == 0) {
         WriteDump(nullptr);
     }
+    WriteProbe(frame);
     WriteStatus();
     g_now = platform::replay_clock::TickAfterFrame(frame);
     g_frameCounted = true;
@@ -1674,6 +1843,14 @@ bool Start()
     if (!seed.empty() && !ParseUnsigned(seed, &g_seed)) {
         Log("FATAL: IWD2R_SEED=%s is not a number", seed.c_str());
         return false;
+    }
+    const std::string probe = Env("IWD2R_PROBE");
+    if (!platform::replay_probe::ParseRange(probe.c_str(), &g_probe)) {
+        Log("FATAL: IWD2R_PROBE=%s is not a frame or FIRST-LAST", probe.c_str());
+        return false;
+    }
+    if (g_probe.on) {
+        Log("probe: frames %u-%u in probe.txt", g_probe.first, g_probe.last);
     }
     const std::string steal = Env("IWD2R_TEST_STEAL_FOCUS");
     if (!steal.empty()) {

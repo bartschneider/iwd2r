@@ -11,6 +11,7 @@
 #include "CGameTrigger.h"
 #include "CInfGame.h"
 #include "CMessage.h"
+#include "CObjectMarker.h"
 #include "CPathSearch.h"
 #include "CResDLG.h"
 #include "CScreenCreateChar.h"
@@ -1075,4 +1076,56 @@ TEST_CASE("door: a closed door marks its closed search squares in the search map
         checked++;
     }
     CHECK(checked > 0);
+}
+
+TEST_CASE("sprite: sub_75F3D0 hides and shows a creature", "[ai][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    CGameSprite* pCharacter = NewGameInStartArea(cre);
+    CGameArea* pArea = pCharacter->GetArea();
+    REQUIRE(pArea != NULL);
+    REQUIRE(pArea->m_pObjectMarker != NULL);
+
+    // 10HINT's CRE sets byte 0x29C: AddToArea clears field_294 and hides
+    // the creature again with sub_75F3D0(1), as in the original (the
+    // replay probe reads 1 for it from the first world frame on).
+    CGameSprite* pHint = NULL;
+    for (CGameObject* pObject : ObjectsOfType(pArea, CGameObject::TYPE_SPRITE)) {
+        CGameSprite* pSprite = static_cast<CGameSprite*>(pObject);
+        if (strncmp(pSprite->m_scriptName, "Door_Hint_Text_01", SCRIPTNAME_SIZE) == 0) {
+            pHint = pSprite;
+        }
+    }
+    REQUIRE(pHint != NULL);
+    CList<LONG>& markers = pArea->m_pObjectMarker->m_lstObjectIds;
+    CHECK(pHint->m_baseStats.field_294 == 1);
+    CHECK(pHint->sub_75F3D0(1) == CGameAIBase::ACTION_DONE);
+    CHECK(pHint->m_baseStats.field_294 == 1);
+
+    // Show: back on the marker list and the search map.
+    CHECK(pHint->sub_75F3D0(0) == CGameAIBase::ACTION_DONE);
+    CHECK(pHint->m_baseStats.field_294 == 0);
+    CHECK(markers.Find(pHint->GetId()) != NULL);
+    CHECK(pHint->field_7430 == 1);
+    CHECK(pHint->sub_75F3D0(0) == CGameAIBase::ACTION_DONE);
+
+    // Hide: off both.
+    CHECK(pHint->sub_75F3D0(1) == CGameAIBase::ACTION_DONE);
+    CHECK(pHint->m_baseStats.field_294 == 1);
+    CHECK(markers.Find(pHint->GetId()) == NULL);
+    CHECK(pHint->field_7430 == 0);
+
+    // Any other argument is an error and changes nothing.
+    CHECK(pHint->sub_75F3D0(2) == CGameAIBase::ACTION_ERROR);
+    CHECK(pHint->m_baseStats.field_294 == 1);
 }

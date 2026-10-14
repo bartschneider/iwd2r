@@ -31,3 +31,41 @@ first call whose function differs is where the streams part.
 Off by default: the trace costs a file write per call.
 
 Notes: the recorder flushes its buffered calls at the start of each frame, so the calls of the last frame before the original exits are not written. On our side, with the trace on outside replay mode (no `IWD2R_STATE_DUMP`), `rand.txt` is written to the working folder, which is the game folder once the engine has changed into it.
+
+## The state probe (IWD2R_PROBE)
+
+The trace shows where the streams part; the probe shows which state made
+them part. With `IWD2R_PROBE=FIRST-LAST` (or one frame number) both engines
+append the same text block to `probe.txt` at each of those frames, at the
+frame's start (before its AI update, where the dumps are taken), so
+
+```sh
+IWD2R_PROBE=1492-1499 IWD2R_RAND_TRACE=1 python3 tools/oracle.py replay compare scenarios/pending/walk_and_talk.txt --seed 1
+diff runs/<stamp>/original/probe.txt runs/<stamp>/ours/probe.txt
+```
+
+names the first state difference. The block (format in
+`platform/replay_probe.h`, which formats both sides):
+
+- `game`: the party count, the area on view, the party slots
+  (`m_characters`, what Player1..6 resolve through) and the portraits;
+- `area`: the area on view's resref, character count, viewport and its
+  visibility map's size, range and character ids;
+- `obj`: every live object of the object array, by index: id, type,
+  position, whether it is in the area on view, list, `m_canBeSeen`, AI speed
+  and inhibitor; a door's or sprite's script name; for a sprite also
+  `m_lastCharacterCount`, the active flags, `m_bVisibleMonster`,
+  `field_294` (hidden), the general state, the current action, the sequence,
+  the action queue (length and head) and the pending triggers;
+- `vis`: the visibility map, one hex row per map row.
+
+The recorder reads these through `fields.json` (schema.json's `x-fields`,
+`tools/gen_fields.py`); `src/StateDumpSources.cpp` reads them from our
+classes. Off by default; a frame costs a few tens of KB. To add a value,
+add its x-field, a member of `replay_probe::Object` (or `Frame`), and the
+two reads.
+
+At the time of writing the positions of static objects (type 17) and of
+doors (type 33) differ between the engines (doors by one pixel, statics by
+up to about 80; not investigated yet); filter them with
+`grep -v 'type 17 \|type 33 '` when they are not the subject.
