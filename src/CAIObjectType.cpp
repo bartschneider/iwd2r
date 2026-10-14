@@ -1262,7 +1262,9 @@ CGameObject* CAIObjectType::sub_40CCA0(CGameAIBase* caller, BOOL checkBackList) 
         nId = sub_40CED0(caller, checkBackList);
     }
 
-    CGameObject* pObject;
+    // NOTE: The original starts the object at NULL (0x40D114); a failed
+    // share leaves it so.
+    CGameObject* pObject = NULL;
     BYTE rc;
     do {
         rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(nId,
@@ -1396,7 +1398,9 @@ CGameObject* CAIObjectType::sub_40D0F0(CGameAIBase* caller, BOOL checkBackList) 
         nId = sub_40CED0(caller, checkBackList);
     }
 
-    CGameObject* pObject;
+    // NOTE: The original starts the object at NULL (0x40D114); a failed
+    // share leaves it so.
+    CGameObject* pObject = NULL;
     BYTE rc;
     do {
         rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(nId,

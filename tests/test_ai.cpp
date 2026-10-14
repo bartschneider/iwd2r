@@ -223,6 +223,21 @@ TEST_CASE("ai: ExecuteAction answers NoAction, an unknown action and SetGlobal",
         pCaller->m_pArea = NULL;
     }
 
+    // Exists and Dead over an object of the array: an AI object that is not
+    // a sprite exists and counts as dead; nobody does not exist.
+    {
+        CGameAIBase* pOther = AddAIObject();
+        CAIObjectType other(0, 0, 0, 0, 0, 0, 0, 0, pOther->m_id, 0, 0);
+        CAITrigger exists(0x400D, other, 0);
+        CHECK(pCaller->EvaluateStatusTrigger(exists) == TRUE);
+        CAITrigger dead(0x4051, other, 0);
+        CHECK(pCaller->EvaluateStatusTrigger(dead) == TRUE);
+        CAITrigger existsNobody(0x400D, CAIObjectType::NOONE, 0);
+        CHECK(pCaller->EvaluateStatusTrigger(existsNobody) == FALSE);
+        CAITrigger deadNobody(0x4051, CAIObjectType::NOONE, 0);
+        CHECK(pCaller->EvaluateStatusTrigger(deadNobody) == TRUE);
+    }
+
     // RandomNum(6, n): the object's random value of this update, 1 to 6.
     pCaller->m_randValue = 15;
     CAITrigger randomNum(0x4047, 6);

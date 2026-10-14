@@ -9,6 +9,7 @@
 #include "CGameContainer.h"
 #include "CGameDoor.h"
 #include "CGameEffect.h"
+#include "CGameSound.h"
 #include "CGameSpawning.h"
 #include "CGameSprite.h"
 #include "CGameStatic.h"
@@ -4046,6 +4047,41 @@ BOOL CGameAIBase::EvaluateStatusTrigger(const CAITrigger& trigger)
             bResult = static_cast<ULONG>(pVariable->GetIntValue()) < nGameTime;
         }
         break;
+    case 0x400D:
+        // Exists
+        triggerCopy.m_triggerCause.Decode(this);
+        pObject2 = triggerCopy.m_triggerCause.sub_40D0F0(this, TRUE);
+        bResult = pObject2 != NULL;
+        break;
+    case 0x4051:
+        // Dead: no such object, not a sprite, or a sprite dead now or by
+        // its base state.
+        triggerCopy.Decode(this);
+        pObject2 = triggerCopy.GetCause().sub_40D0F0(this, TRUE);
+        if (pObject2 == NULL
+            || pObject2->GetObjectType() != CGameObject::TYPE_SPRITE
+            || (static_cast<CGameSprite*>(pObject2)->GetDerivedStats()->m_generalState & STATE_DEAD) != 0
+            || (static_cast<CGameSprite*>(pObject2)->GetBaseStats()->m_generalState & STATE_DEAD) != 0) {
+            bResult = TRUE;
+        } else {
+            bResult = FALSE;
+        }
+        break;
+    case 0x40D7:
+        // IsActive: a sound, a sprite or an info trigger that is active.
+        triggerCopy.Decode(this);
+        pObject2 = triggerCopy.GetCause().sub_40CCA0(this, FALSE);
+        if (pObject2 != NULL) {
+            BYTE objectType = pObject2->GetObjectType();
+            if (objectType == CGameObject::TYPE_SOUND) {
+                bResult = static_cast<CGameSound*>(pObject2)->IsActive();
+            } else if (objectType == CGameObject::TYPE_SPRITE) {
+                bResult = static_cast<CGameSprite*>(pObject2)->GetActive();
+            } else if (objectType == CGameObject::TYPE_TRIGGER) {
+                bResult = static_cast<WORD>(static_cast<CGameTrigger*>(pObject2)->sub_45B950());
+            }
+        }
+        break;
     case 0x4047:
         // RandomNum(range, value): the object's random value of this
         // update. NOTE: a range of 0 divides by zero, as in the original.
@@ -4109,8 +4145,9 @@ BOOL CGameAIBase::EvaluateStatusTrigger(const CAITrigger& trigger)
         bResult = g_pBaldurChitin->GetObjectGame()->GetGameSave()->m_mode == 0x142;
         break;
     default:
-        // TODO: The other triggers (0x453BDE-0x45AD4C) are not ported; they
-        // are FALSE until they are.
+        // TODO: Every trigger not listed above (the byte table 0x45B0C4 and
+        // the jump table 0x45AE40, cases 0x453BDE-0x45AD4C) is not ported;
+        // it answers FALSE until it is.
         bResult = FALSE;
         break;
     }
