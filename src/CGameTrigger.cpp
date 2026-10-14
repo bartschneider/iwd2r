@@ -6,6 +6,7 @@
 #include "CGameSprite.h"
 #include "CInfCursor.h"
 #include "CInfGame.h"
+#include "CMessage.h"
 #include "CPathSearch.h"
 #include "CScreenWorld.h"
 #include "CUtil.h"
@@ -42,6 +43,7 @@ CGameTrigger::CGameTrigger(CGameArea* pArea, CAreaFileTriggerObject* pTriggerObj
     m_dwFlags = pTriggerObject->m_dwFlags;
     m_description = pTriggerObject->m_description;
     m_nPolygon = pTriggerObject->m_pickPointCount;
+    memcpy(m_scriptRes, pTriggerObject->m_script, RESREF_SIZE);
     strncpy(m_scriptName, pTriggerObject->m_scriptName, SCRIPTNAME_SIZE);
 
     CAIScript* pScript = new CAIScript(CResRef(pTriggerObject->m_script));
@@ -162,6 +164,105 @@ CGameTrigger::~CGameTrigger()
     }
 
     field_630.SetSize(0);
+}
+
+// 0x4CD220
+BOOLEAN CGameTrigger::DoAIUpdate(BOOLEAN active, LONG counter)
+{
+    // NOTE: Unlike CGameObject::DoAIUpdate (0x44CC00) the trigger's version
+    // ignores `active` and `counter`: a trigger with a script gets an AI
+    // update every time, paused or not.
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CGameObjectArray* pObjectArray = pGame->GetObjectArray();
+
+    if ((m_dwFlags & 0x100) != 0) {
+        return FALSE;
+    }
+
+    if (m_triggerType == 0) {
+        if ((m_dwFlags & 0x20) != 0 && pGame->GetOptions()->m_nTutorialState == 0) {
+            return FALSE;
+        }
+
+        if (m_trapActivated != 0) {
+            CTypedPtrList<CPtrList, LONG*> lObjects(10);
+            m_pArea->GetAllInRange(m_posVertList,
+                m_pos,
+                CAIObjectType::ANYONE,
+                m_boundingRange,
+                m_pArea->m_visibleTerrainTable,
+                lObjects,
+                FALSE,
+                FALSE);
+
+            POSITION pos = lObjects.GetHeadPosition();
+            while (pos != NULL) {
+                LONG iObject = static_cast<LONG>(reinterpret_cast<INT_PTR>(lObjects.GetNext(pos)));
+
+                CGameSprite* pSprite;
+                BYTE rc = pObjectArray->GetShare(iObject,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    reinterpret_cast<CGameObject**>(&pSprite),
+                    INFINITE);
+                if (rc != CGameObjectArray::SUCCESS) {
+                    continue;
+                }
+
+                if (pSprite->GetObjectType() != CGameObject::TYPE_SPRITE) {
+                    pObjectArray->ReleaseShare(iObject, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+                    continue;
+                }
+
+                if ((m_dwFlags & 0x40) != 0
+                    || pGame->GetCharacterPortraitNum(pSprite->m_id) != -1
+                    || pGame->m_familiars.Find(reinterpret_cast<int*>(pSprite->m_id)) != NULL) {
+                    if (g_pChitin->cNetwork.GetSessionOpen() == TRUE
+                        && g_pChitin->cNetwork.GetSessionHosting() == TRUE
+                        && pSprite->field_580 == 1) {
+                        // NOTE: The original goes on to the next object
+                        // without releasing this one's share (a leak, kept).
+                        continue;
+                    }
+
+                    if (IsOverActivate(pSprite->GetPos())) {
+                        CPoint ptLast(pSprite->field_536A, pSprite->field_536E);
+                        if (!IsOverActivate(ptLast)) {
+                            do {
+                                rc = pObjectArray->GetDeny(iObject,
+                                    CGameObjectArray::THREAD_ASYNCH,
+                                    reinterpret_cast<CGameObject**>(&pSprite),
+                                    INFINITE);
+                            } while (rc == CGameObjectArray::DENIED || rc == CGameObjectArray::SHARED);
+
+                            if (rc == CGameObjectArray::SUCCESS) {
+                                // NOTE: CAITrigger::ENTERED (0x847E30).
+                                CAITrigger entered(CAITRIGGER_ENTERED, pSprite->GetAIType(), 0);
+                                CMessage* message = new CMessageSetTrigger(entered, m_id, m_id);
+                                g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+                                pObjectArray->ReleaseDeny(iObject, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+                            }
+
+                            if ((m_dwFlags & 0x2) == 0) {
+                                m_trapActivated = 0;
+                            }
+                        }
+                    }
+
+                    const CPoint& ptPos = pSprite->GetPos();
+                    pSprite->field_536A = ptPos.x;
+                    pSprite->field_536E = ptPos.y;
+                }
+
+                pObjectArray->ReleaseShare(iObject, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+            }
+
+            lObjects.RemoveAll();
+            return TRUE;
+        }
+    }
+
+    return CResRef(m_scriptRes) != "";
 }
 
 // 0x4CD630
