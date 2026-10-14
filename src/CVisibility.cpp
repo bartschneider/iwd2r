@@ -713,13 +713,87 @@ void CVisibilityMap::SetAreaUnexplored()
 // 0x553800
 void CVisibilityMap::sub_553800(const CPoint& ptView, const CPoint& ptOffset, const CPoint& ptSearchMapView, BYTE charId, const BYTE* pVisibleTerrainTable)
 {
-    // TODO: Incomplete.
+    const BYTE* pArc = field_12;
+    LONG y = ptView.y - field_10;
+    LONG x = ptView.x;
+    BYTE nArcLength = field_4;
+    BOOLEAN bLookingUp = TRUE;
+    SHORT nStepY = 1;
+    LONG nRight;
+    LONG nStepLeft;
+    LONG nStepRight;
+    LONG nCount;
+
+    for (INT nPass = 0; nPass < 2; nPass++) {
+        if (nArcLength != 0) {
+            nStepLeft = x + 1;
+            nCount = nArcLength;
+            nStepRight = x;
+            nRight = x;
+            do {
+                nRight++;
+                MarkTileLine(ptView, ptSearchMapView, x, y, ptOffset, charId, pVisibleTerrainTable, bLookingUp);
+                MarkTileLine(ptView, ptSearchMapView, nRight, y, ptOffset, charId, pVisibleTerrainTable, bLookingUp);
+                x--;
+                nStepLeft--;
+                nStepRight++;
+                if (*pArc++ != 0) {
+                    y += nStepY;
+                    MarkTileLine(ptView, ptSearchMapView, nStepLeft, y, ptOffset, charId, pVisibleTerrainTable, bLookingUp);
+                    MarkTileLine(ptView, ptSearchMapView, nStepRight, y, ptOffset, charId, pVisibleTerrainTable, bLookingUp);
+                }
+                nCount--;
+            } while (nCount != 0);
+        }
+
+        x = ptView.x;
+        pArc = field_12;
+        y = field_10 + ptView.y;
+        nArcLength = field_4;
+        bLookingUp = FALSE;
+        nStepY = -1;
+    }
 }
 
 // 0x553990
 void CVisibilityMap::sub_553990(const CPoint& ptView, const CPoint& ptOffset, const CPoint& ptSearchMapView, BYTE charId, const BYTE* pVisibleTerrainTable)
 {
-    // TODO: Incomplete.
+    const BYTE* pArc = field_16;
+    LONG y = ptView.y;
+    LONG nLeft = ptView.x - field_E + 1;
+    SHORT nArcLength = field_1A;
+    BOOLEAN bLookingUp = TRUE;
+    SHORT nStepY = -1;
+    LONG nRight = ptView.x + field_E;
+    SHORT nRows;
+    BYTE nFirst;
+
+    for (INT nPass = 0; nPass < 2; nPass++) {
+        if (nArcLength >= 0) {
+            nRows = nArcLength + 1;
+            do {
+                MarkTileLine(ptView, ptSearchMapView, nLeft, y, ptOffset, charId, pVisibleTerrainTable, bLookingUp);
+                MarkTileLine(ptView, ptSearchMapView, nRight, y, ptOffset, charId, pVisibleTerrainTable, bLookingUp);
+                if (pArc != NULL && *pArc++ != 0) {
+                    nLeft++;
+                    nRight--;
+                    MarkTileLine(ptView, ptSearchMapView, nLeft, y, ptOffset, charId, pVisibleTerrainTable, bLookingUp);
+                    MarkTileLine(ptView, ptSearchMapView, nRight, y, ptOffset, charId, pVisibleTerrainTable, bLookingUp);
+                }
+                y += nStepY;
+                nRows--;
+            } while (nRows != 0);
+        }
+
+        nFirst = *field_16;
+        y = ptView.y + 1;
+        bLookingUp = FALSE;
+        nLeft = (nFirst - field_E) + 1 + ptView.x;
+        nRight = (ptView.x - nFirst) + field_E;
+        pArc = field_16 + 1;
+        nStepY = 1;
+        nArcLength = field_1A - 1;
+    }
 }
 
 // 0x553B10
