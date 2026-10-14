@@ -169,7 +169,10 @@ Fixture MakeFixture(CaseContext& ctx, Picks& picks)
     std::vector<uint8_t> costs(costSize);
     for (uint8_t& cost : costs) {
         const int32_t pick = picks.Between(0, 63);
-        cost = pick == 0 ? 0x02 : pick == 1 ? 0x10 : pick == 2 ? 0x80 : pick == 3 ? 0x01 : 0;
+        cost = pick == 0 ? 0x02 : pick == 1 ? 0x10
+            : pick == 2                     ? 0x80
+            : pick == 3                     ? 0x01
+                                            : 0;
     }
 
     auto* areaStorage = static_cast<unsigned char*>(::operator new(sizeof(CGameArea)));
@@ -241,7 +244,7 @@ void CompareOne(CaseContext& ctx, Fixture& f, bool snapshot, int32_t sx, int32_t
         + ", goal " + Point(gx, gy) + (snapshot ? ", bBump " : ", personalSpace ") + std::to_string(arg)
         + ", tolerance " + std::to_string(tolerance)
         + (snapshot ? ", sourceSide " + std::to_string(sourceSide) + ", snapshot personal space "
-                     + std::to_string(personalSpace)
+                    + std::to_string(personalSpace)
                     : "")
         + ")");
 
