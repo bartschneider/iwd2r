@@ -418,6 +418,8 @@ SHORT CGameAIBase::ExecuteAction()
         returnValue = DoubleClickRButtonObject(pTarget);
         goto release;
     case 59:
+        // TODO: MoveCursorPoint reaches MoveCursor (0x45F6D0), still a stub
+        // that answers ACTION_DONE.
         returnValue = MoveCursorPoint();
         goto done;
     case 252:
