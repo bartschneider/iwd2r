@@ -4,6 +4,7 @@
 #include "CAIAction.h"
 #include "CAIScript.h"
 #include "CBaldurChitin.h"
+#include "CGameAnimationTypeCharacter.h"
 #include "CGameArea.h"
 #include "CGameDialog.h"
 #include "CGameDoor.h"
@@ -1162,4 +1163,41 @@ TEST_CASE("sprite: StartSpriteEffect allocates its arrays without asserting", "[
     pCharacter->StartSpriteEffect(2, 1, 5, FALSE);
     CHECK(pCharacter->m_pSpriteEffectArray != NULL);
     CHECK(pCharacter->m_pSpriteEffectArrayPosition != NULL);
+}
+
+TEST_CASE("animation: a two-handed weapon takes the two-handed stance and READY group", "[ai][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    CGameSprite* pCharacter = NewGameInStartArea(cre);
+    CGameArea* pArea = pCharacter->GetArea();
+    REQUIRE(pArea != NULL);
+    pArea->SortLists();
+
+    // Hedron (10HEDRON) wields a spear (00SPER01, two-handed): EquipWeapon
+    // (0x6C8390) takes the two-handed path only when the item's flag bit 1
+    // is set (0x6C90A9), so his weapon code is 5 and READY (7) uses BAM
+    // group 3 (SetSequence 0x6CDA00).
+    CGameSprite* pHedron = NULL;
+    for (CGameObject* pObject : ObjectsOfType(pArea, CGameObject::TYPE_SPRITE)) {
+        CGameSprite* pSprite = static_cast<CGameSprite*>(pObject);
+        if (strncmp(pSprite->m_scriptName, "Hedron", SCRIPTNAME_SIZE) == 0) {
+            pHedron = pSprite;
+        }
+    }
+    REQUIRE(pHedron != NULL);
+    REQUIRE(pHedron->m_animation.GetAnimationId() == 0x6100);
+    CGameAnimationTypeCharacter* pAnimation = static_cast<CGameAnimationTypeCharacter*>(pHedron->m_animation.m_animation);
+    CHECK(pAnimation->m_weaponCode == 5);
+    pHedron->m_animation.SetSequence(7);
+    CHECK(pAnimation->m_currentBamSequence == 3);
 }
