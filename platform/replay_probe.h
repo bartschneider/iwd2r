@@ -15,7 +15,8 @@
 //   game characters C visible_area V
 //   area RESREF characters C view X,Y vis WxH size S range R ids a,b,c,d,e,f
 //   obj INDEX ID type T pos X,Y here H list L seen S speed P inhibitor I
-//       [name NAME] [last C active A ai B imprisonment M visible_monster V]
+//       [name NAME] [last C active A ai B imprisonment M visible_monster V
+//       field_294 F state S]
 //   vis ROW HEX...
 //
 // - game: CInfGame::m_nCharacters and m_visibleArea.
@@ -28,8 +29,9 @@
 //   members m_objectType, m_pos, whether m_pArea is the area on view
 //   (here 1/0), m_listType, m_canBeSeen, m_AISpeed and m_AIInhibitor; a
 //   sprite (0x31) or door (0x21) adds its script name; a sprite adds
-//   m_lastCharacterCount, m_active, m_activeAI, m_activeImprisonment and
-//   m_bVisibleMonster. One line per object.
+//   m_lastCharacterCount, m_active, m_activeAI, m_activeImprisonment,
+//   m_bVisibleMonster, m_baseStats.field_294 and m_derivedStats.m_generalState
+//   (hex). One line per object.
 // - vis: the area's visibility map, one line per row of m_nWidth tiles
 //   (bytes in hex: bit 7 explored, the low bits the visibility count);
 //   the rows past m_nMapSize, if any, are left out.
@@ -99,6 +101,8 @@ struct Object {
     int32_t activeAi = 0;
     int32_t activeImprisonment = 0;
     int32_t visibleMonster = 0;
+    unsigned field294 = 0;
+    uint32_t generalState = 0;
 };
 
 struct Area {
@@ -154,9 +158,10 @@ inline std::string Format(const Frame& f)
         if (o.hasName)
             out += " name " + o.name;
         if (o.sprite) {
-            std::snprintf(line, sizeof(line), " last %u active %ld ai %ld imprisonment %ld visible_monster %ld",
+            std::snprintf(line, sizeof(line), " last %u active %ld ai %ld imprisonment %ld visible_monster %ld field_294 %u state %08lx",
                 o.lastCharacters, static_cast<long>(o.active), static_cast<long>(o.activeAi),
-                static_cast<long>(o.activeImprisonment), static_cast<long>(o.visibleMonster));
+                static_cast<long>(o.activeImprisonment), static_cast<long>(o.visibleMonster), o.field294,
+                static_cast<unsigned long>(o.generalState));
             out += line;
         }
         out += "\n";

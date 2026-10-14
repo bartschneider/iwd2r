@@ -527,5 +527,15 @@
     "offset": "0x08A0",
     "type": "i32",
     "count": 6
+  },
+  "sprite_field_294": {
+    "base": "CGameSprite",
+    "offset": "0x0838",
+    "type": "u8"
+  },
+  "sprite_general_state": {
+    "base": "CGameSprite",
+    "offset": "0x0920",
+    "type": "u32"
   }
 }

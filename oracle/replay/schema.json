@@ -820,6 +820,14 @@
     "area_visibility_ids": {
       "class": "CGameArea",
       "member": "m_visibility.m_aCharacterIds"
+    },
+    "sprite_field_294": {
+      "class": "CGameSprite",
+      "member": "m_baseStats.field_294"
+    },
+    "sprite_general_state": {
+      "class": "CGameSprite",
+      "member": "m_derivedStats.m_generalState"
     }
   }
 }

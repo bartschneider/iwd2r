@@ -284,6 +284,8 @@ void ReadProbe(platform::replay_probe::Frame* out)
             o.activeAi = sprite->m_activeAI;
             o.activeImprisonment = sprite->m_activeImprisonment;
             o.visibleMonster = sprite->m_bVisibleMonster;
+            o.field294 = sprite->m_baseStats.field_294;
+            o.generalState = sprite->m_derivedStats.m_generalState;
         } else if (o.type == CGameObject::TYPE_DOOR) {
             const CGameDoor* door = static_cast<CGameDoor*>(object);
             o.hasName = true;
