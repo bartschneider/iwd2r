@@ -524,9 +524,111 @@ int CSpawnList::ParseData(const CString& sData, CStringArray& Sections)
 // 0x768FA0
 int CSpawnList::Execute(CGameArea* pArea, BOOL bForce)
 {
-    // TODO: Incomplete.
+    if (GetCount() < 1) {
+        return 0;
+    }
 
-    return 0;
+    if (pControlVar != NULL) {
+        CVariable* pControl = CGameAIBase::GetGlobalVariable(pControlVar->mScope, pControlVar->mLabel, 0);
+        if (pControl == NULL || pControl->m_intValue == 0) {
+            return 0;
+        }
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+    if (CheckSpawnTimes) {
+        DWORD nHour = pGame->GetWorldTimer()->m_gameTime % CTimerWorld::TIMESCALE_MSEC_PER_DAY
+            / CTimerWorld::TIMESCALE_MSEC_PER_SEC
+            / CTimerWorld::TIMESCALE_SEC_PER_MIN
+            / CTimerWorld::TIMESCALE_MIN_PER_HOUR;
+        if (((SpawnTimeOfDay >> nHour) & 1) == 0) {
+            return 0;
+        }
+    }
+
+    CVariable var;
+    CString sTimerName = pArea->m_resRef.GetResRefStr() + mSectionAlias + "_TIMER";
+    CString sDayName = pArea->m_resRef.GetResRefStr() + mSectionAlias + "_DAY";
+
+    CVariable* pTimer = g_pBaldurChitin->GetObjectGame()->GetVariables()->FindKey(sTimerName);
+    CVariable* pDay = g_pBaldurChitin->GetObjectGame()->GetVariables()->FindKey(sDayName);
+
+    DWORD nGameTime = pGame->GetWorldTimer()->m_gameTime;
+    DWORD nToday = (nGameTime / CTimerWorld::TIMESCALE_MSEC_PER_DAY + 1) & 0xFFFF;
+
+    BOOL bSpawn;
+    if (!field_20) {
+        if (pTimer != NULL) {
+            if (pDay == NULL) {
+                var.SetName(sDayName);
+                var.m_intValue = nToday;
+                pGame->m_variables.AddKey(var);
+
+                pDay = g_pBaldurChitin->GetObjectGame()->GetVariables()->FindKey(sDayName);
+            }
+
+            bSpawn = TRUE;
+            if ((nToday - pDay->m_intValue) * CTimerWorld::TIMESCALE_MSEC_PER_DAY - pTimer->m_intValue + nGameTime < mInterval) {
+                bSpawn = bForce;
+            }
+
+            field_24 = nGameTime;
+            pTimer->m_intValue = nGameTime;
+            field_28 = nToday;
+            pDay->m_intValue = nToday;
+        } else {
+            bSpawn = TRUE;
+
+            field_24 = nGameTime;
+            var.SetName(sTimerName);
+            var.m_intValue = field_24;
+            pGame->m_variables.AddKey(var);
+
+            field_28 = nToday;
+            var.SetName(sDayName);
+            var.m_intValue = field_28;
+            pGame->m_variables.AddKey(var);
+        }
+
+        field_20 = TRUE;
+
+        if (!bSpawn) {
+            return 0;
+        }
+    } else {
+        bSpawn = bForce;
+    }
+
+    int nSpawned = 0;
+
+    // NOTE: The original multiplies the days here by 1296000 (twelve times
+    // TIMESCALE_MSEC_PER_DAY, a constant the compiler folded), where the
+    // first run above uses TIMESCALE_MSEC_PER_DAY. Unsigned, as there.
+    if (!bSpawn && nToday * 1296000 - static_cast<DWORD>(field_28) * 1296000 - field_24 + nGameTime < mInterval) {
+        return 0;
+    }
+
+    field_24 = nGameTime;
+    field_28 = nToday;
+
+    if (pTimer != NULL) {
+        pTimer->m_intValue = nGameTime;
+    }
+
+    if (pDay != NULL) {
+        pDay->m_intValue = field_28;
+    }
+
+    POSITION pos = GetHeadPosition();
+    while (pos != NULL) {
+        CSpawn* pSpawn = GetNext(pos);
+        if (pSpawn != NULL) {
+            nSpawned += pSpawn->ExecuteSpawn(pArea);
+        }
+    }
+
+    return nSpawned;
 }
 
 // NOTE: Inlined.
