@@ -1,17 +1,21 @@
 #include "CInfGame.h"
 
+#include "CAIGroup.h"
 #include "CAIScript.h"
 #include "CBaldurChitin.h"
 #include "CBaldurEngine.h"
 #include "CBaldurProjector.h"
+#include "CCacheStatus.h"
 #include "CCreatureFile.h"
 #include "CGameAnimationType.h"
 #include "CGameArea.h"
 #include "CGameContainer.h"
+#include "CGameEffect.h"
 #include "CGameObject.h"
 #include "CGameSprite.h"
 #include "CInfCursor.h"
 #include "CItem.h"
+#include "CMessage.h"
 #include "CPathSearch.h"
 #include "CResCHR.h"
 #include "CResCache.h"
@@ -36,6 +40,7 @@
 #include "CUIManager.h"
 #include "CUIPanel.h"
 #include "CUtil.h"
+#include "CVariableHash.h"
 #include "compat/marshal_ptr.h"
 #include "compat/path_hook.h"
 #include "Icewind586B70.h"
@@ -1395,7 +1400,202 @@ void CInfGame::CacheResFileWithResource(const CString& areaName)
 // 0x5A0F50
 LONG CInfGame::ImportCharacter(const CString& sFileName, INT nIndex)
 {
-    // TODO: Incomplete.
+    CResHelper<CResCHR, 1018> cCharacterFile;
+    BOOLEAN bTemporaryKey = FALSE;
+    // NOTE: The original allocates resources of type 1022 as a class of its
+    // own (vtable 0x8480C8, `Demand` 0x4029F0: the raw data, "parsed" when
+    // present); `CBaldurChitin::AllocResObject` does not have it yet, so the
+    // data is read through `CRes::Demand`.
+    CResHelper<CRes, 1022> cBiographyFile;
+    STR_RES strRes;
+
+    // NOTE: Uninline.
+    cCharacterFile.SetResRef(CResRef(sFileName), TRUE, TRUE);
+    if (cCharacterFile.GetResRef() == "") {
+        bTemporaryKey = TRUE;
+        g_pChitin->cDimm.AddTemporaryKey(m_sCharactersDir, CResRef(sFileName), 1018);
+
+        // NOTE: Uninline.
+        cCharacterFile.SetResRef(CResRef(sFileName), TRUE, TRUE);
+    }
+
+    BYTE* pData = cCharacterFile.GetRes() != NULL
+        ? reinterpret_cast<BYTE*>(cCharacterFile.GetRes()->Demand())
+        : NULL;
+
+    // NOTE: Inlined (0x720490): the resource's size, read between a
+    // `Demand` and a `Release`.
+    LONG nData = 0;
+    if (cCharacterFile.GetRes() != NULL) {
+        if (cCharacterFile.GetRes()->Demand() != NULL) {
+            nData = cCharacterFile.GetRes()->m_nResSizeActual;
+            cCharacterFile.GetRes()->Release();
+        }
+    }
+
+    if (pData != NULL && memcmp(pData, "CHR V2.2", 8) == 0) {
+        BYTE* pHeader = pData + 8;
+
+        LONG nCreature = nData - 0x224;
+
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\InfGame.cpp
+        // __LINE__: 4172
+        UTIL_ASSERT(nCreature > 0);
+
+        nCreature -= *reinterpret_cast<DWORD*>(pHeader + 0x24);
+
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\InfGame.cpp
+        // __LINE__: 4175
+        UTIL_ASSERT(nCreature >= 0);
+
+        CGameSprite* pSprite = new CGameSprite(pData + *reinterpret_cast<DWORD*>(pHeader + 0x20),
+            *reinterpret_cast<DWORD*>(pHeader + 0x24),
+            0,
+            0,
+            -1,
+            0,
+            0,
+            INT_MAX,
+            CPoint(-1, -1),
+            0);
+
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\InfGame.cpp
+        // __LINE__: 4180
+        UTIL_ASSERT(pSprite != NULL);
+
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\InfGame.cpp
+        // __LINE__: 4181
+        UTIL_ASSERT(nCreature == 0);
+
+        pSprite->SetResRef(CResRef(sFileName));
+
+        char szName[SCRIPTNAME_SIZE + 1];
+        memset(szName, 0, sizeof(szName));
+        strncpy(szName, reinterpret_cast<char*>(pHeader), SCRIPTNAME_SIZE);
+        pSprite->m_sName = CString(szName);
+
+        for (INT nWeapon = 0; nWeapon < 8; nWeapon++) {
+            pSprite->InitQuickItemData(*reinterpret_cast<WORD*>(pHeader + 0x28 + 2 * nWeapon),
+                *reinterpret_cast<WORD*>(pHeader + 0x38 + 2 * nWeapon),
+                pHeader[0x19C + nWeapon],
+                pSprite->m_quickWeapons[nWeapon]);
+        }
+
+        for (INT nSpell = 0; nSpell < 9; nSpell++) {
+            pSprite->InitQuickSpellData(CResRef(pHeader + 0x48 + RESREF_SIZE * nSpell),
+                1,
+                pSprite->m_quickSpells[nSpell],
+                pHeader[0x90 + nSpell],
+                pHeader[0x15C + nSpell],
+                pHeader[0x165 + nSpell]);
+        }
+
+        for (INT nItem = 0; nItem < 3; nItem++) {
+            pSprite->InitQuickItemData(*reinterpret_cast<WORD*>(pHeader + 0x9A + 2 * nItem),
+                *reinterpret_cast<WORD*>(pHeader + 0xA0 + 2 * nItem),
+                0,
+                pSprite->m_quickItems[nItem]);
+        }
+
+        for (INT nInnate = 0; nInnate < 9; nInnate++) {
+            pSprite->InitQuickSpellData(CResRef(pHeader + 0xA6 + RESREF_SIZE * nInnate),
+                2,
+                pSprite->m_quickInnates[nInnate],
+                0,
+                0,
+                0);
+        }
+
+        for (INT nSong = 0; nSong < 9; nSong++) {
+            pSprite->InitQuickSpellData(CResRef(pHeader + 0xEE + RESREF_SIZE * nSong),
+                3,
+                pSprite->m_quickSongs[nSong],
+                0,
+                0,
+                0);
+        }
+
+        for (INT nButton = 0; nButton < 9; nButton++) {
+            pSprite->field_3D14[nButton] = *reinterpret_cast<int*>(pHeader + 0x136 + 4 * nButton);
+        }
+
+        pSprite->m_nLastSpellbookClassIndex = pHeader[0x15A];
+        pSprite->m_nLastSpellbookSpellLevel = pHeader[0x15B];
+
+        if (bTemporaryKey == TRUE) {
+            g_pChitin->cDimm.RemoveTemporaryKey(m_sCharactersDir, CResRef(sFileName), 1018);
+        }
+
+        // NOTE: Uninline.
+        cBiographyFile.SetResRef(CResRef(sFileName), TRUE, TRUE);
+        if (cBiographyFile.GetResRef() != "") {
+            STRREF strId = 0xF240 + static_cast<BYTE>(nIndex);
+
+            const char* pText = cBiographyFile.GetRes() != NULL
+                ? reinterpret_cast<const char*>(cBiographyFile.GetRes()->Demand())
+                : NULL;
+            strRes.szText = CString(pText);
+            strRes.szText = strRes.szText.Left(cBiographyFile.GetRes()->nSize);
+
+            g_pBaldurChitin->GetTlkTable().m_override.AddUserEntry(strId, strRes);
+            pSprite->m_baseStats.m_biography = strId;
+
+            cBiographyFile.GetRes()->Release();
+        } else {
+            pSprite->m_baseStats.m_biography = -1;
+        }
+
+        BYTE nClass;
+
+        nClass = 3;
+        pSprite->AddKnownDivineSpells(nClass);
+
+        nClass = 4;
+        pSprite->AddKnownDivineSpells(nClass);
+
+        nClass = 7;
+        pSprite->AddKnownDivineSpells(nClass);
+
+        nClass = 8;
+        pSprite->AddKnownDivineSpells(nClass);
+
+        AddPartyGold(g_pBaldurChitin->GetObjectGame()->GetRuleTables().GetStartingGold(pSprite));
+
+        // NOTE: The sound set's folder name is read up to its terminator,
+        // which a name of 32 characters lacks (the original reads on into
+        // the header's next field).
+        CString sSounds(reinterpret_cast<char*>(pHeader + 0x17C));
+        INT nLength = sSounds.GetLength();
+        memcpy(pSprite->field_725A, sSounds.GetBuffer(nLength), min(nLength, 32));
+        if (nLength < 32) {
+            pSprite->field_725A[nLength] = '\0';
+        }
+
+        CString sSoundsDir = g_pBaldurChitin->GetObjectGame()->GetDirSounds() + sSounds + '\\';
+        g_pChitin->cDimm.AddToDirectoryList(sSoundsDir, TRUE);
+
+        pSprite->m_secondarySounds = CResRef(pHeader + 0x174);
+
+        cCharacterFile.GetRes()->dwFlags |= CRes::RES_FLAG_0x100;
+
+        // NOTE: Uninline.
+        cCharacterFile.Release();
+
+        pSprite->m_bGlobal = TRUE;
+        pSprite->sub_726810(pSprite->m_nWeaponSet);
+
+        return pSprite->m_id;
+    }
+
+    // NOTE: Uninline.
+    cCharacterFile.Release();
+
+    if (bTemporaryKey) {
+        g_pChitin->cDimm.RemoveTemporaryKey(m_sCharactersDir, CResRef(sFileName), 1018);
+
+        // NOTE: Uninline.
+        cCharacterFile.Release();
+    }
 
     return 0;
 }
@@ -1482,9 +1682,9 @@ BOOL CInfGame::SaveGame(BOOLEAN bProgressBarRequired, BOOLEAN bProgressBarInPlac
         g_pChitin->cProgressBar.m_bDisableMinibars = TRUE;
     }
 
-    // TODO: Incomplete. The original calls 0x5170F0 on `m_cMoveList` and
-    // `m_cLimboList` with the master area here (CMoveList, not in our tree
-    // yet).
+    // The moves still pending go into the save as timed effects.
+    m_cMoveList.Marshal(g_pBaldurChitin->GetObjectGame()->m_pGameAreaMaster);
+    m_cLimboList.Marshal(g_pBaldurChitin->GetObjectGame()->m_pGameAreaMaster);
 
     if (bProgressBarInPlace || bProgressBarRequired) {
         ProgressBarCallback(0, TRUE);
@@ -1517,10 +1717,12 @@ BOOL CInfGame::SaveGame(BOOLEAN bProgressBarRequired, BOOLEAN bProgressBarInPlac
         field_366E = 1;
     }
 
-    // TODO: Incomplete. The original asks Icewind586B70 for its list of ids
-    // (0x587510) and passes each to a CBaldurMessage multiplayer helper
-    // (0x43D8D0, which returns at once without a network session); neither is
-    // in our tree yet.
+    // NOTE: The original passes each of these ids to a CBaldurMessage
+    // helper (0x43D8D0) that returns at once without a network session
+    // (`test [cNetwork+0x1032]` at 0x43D8F3). Multiplayer is removed (ADR
+    // 0002), so the ids are fetched and the helper is not called.
+    std::vector<int> ids = Icewind586B70::Instance()->sub_587510();
+    (void)ids;
 
     Icewind586B70::Instance()->sub_587190();
 
@@ -1571,8 +1773,7 @@ BOOL CInfGame::SaveGame(BOOLEAN bProgressBarRequired, BOOLEAN bProgressBarInPlac
         }
     }
 
-    // TODO: Incomplete. The original writes the world map here (0x558F40 on
-    // `m_cWorldMap` with `m_sTempDir`; CWorldMap, not in our tree yet).
+    m_cWorldMap.Marshal(m_sTempDir);
 
     g_pBaldurChitin->GetTlkTable().m_override.Save();
     g_pBaldurChitin->GetTlkTable().m_override.CloseFiles();
@@ -6246,9 +6447,201 @@ SHORT CInfGame::GetNumQuickWeaponSlots(SHORT nPortrait)
 // 0x5BAD70
 BOOL CInfGame::SwapItemPersonalInventory(SHORT nPortraitNum, CItem*& pNewItem, SHORT nSlotNum, STRREF& errorCode, WORD wCount, BOOLEAN bFromServer, BOOL bAutoStacking)
 {
-    // TODO: Incomplete.
+    // NOTE: Uninline.
+    LONG nCharacterId = GetCharacterId(nPortraitNum);
 
-    return FALSE;
+    BOOL bResult = TRUE;
+    errorCode = -1;
+
+    if ((nSlotNum < 18 || nSlotNum >= 18 + CScreenInventory::PERSONAL_INVENTORY_SIZE)
+        && nSlotNum != 0x7FFF) {
+        // "Bad Slot Number"
+        errorCode = 9374;
+        return FALSE;
+    }
+
+    CGameSprite* pSprite;
+
+    BYTE rc;
+    do {
+        rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetDeny(nCharacterId,
+            CGameObjectArray::THREAD_ASYNCH,
+            reinterpret_cast<CGameObject**>(&pSprite),
+            INFINITE);
+    } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+    if (rc != CGameObjectArray::SUCCESS) {
+        // "No Sprite"
+        errorCode = 9373;
+        return FALSE;
+    }
+
+    if (g_pChitin->cNetwork.m_nServiceProvider != 0
+        && g_pChitin->cNetwork.m_idLocalPlayer != pSprite->m_remotePlayerID
+        && g_pChitin->cNetwork.m_bConnectionEstablished == TRUE
+        && !bFromServer) {
+        // NOTE: A client asks the server for the swap here (0x431560 on
+        // `m_cBaldurMessage` with the character, the slot, the item, the
+        // error and the count) and returns its answer
+        // (0x5BAE6D-0x5BAEBC). Multiplayer is removed (ADR 0002); without a
+        // session this branch is never taken.
+        g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(nCharacterId,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+        return FALSE;
+    }
+
+    CItem* pSlotItem;
+
+    if (nSlotNum != 0x7FFF
+        && pNewItem != NULL
+        && (pSlotItem = pSprite->m_equipment.m_items[nSlotNum]) != NULL
+        && pSlotItem->GetItemType() == 58) {
+        // Into a bag.
+        INT nAdded = AddItemToBag(pSlotItem->GetResRef(), pNewItem, errorCode);
+        if (nAdded != 0) {
+            if (pNewItem->GetMaxStackable() > 1 && pNewItem->GetUsageCount(0) != nAdded) {
+                pNewItem->SetUsageCount(0, pNewItem->GetUsageCount(0) - nAdded);
+            } else {
+                // NOTE: Uninline.
+                AddDisposableItem(pNewItem);
+                pNewItem = NULL;
+            }
+
+            g_pBaldurChitin->GetActiveEngine()->UpdatePersonalItemStatus(pSprite->m_id);
+
+            if ((g_pChitin->cNetwork.m_nServiceProvider == 0
+                    || g_pChitin->cNetwork.m_idLocalPlayer == pSprite->m_remotePlayerID)
+                && g_pChitin->cNetwork.m_bConnectionEstablished == TRUE) {
+                CMessageSpriteEquipment* pMessage = new CMessageSpriteEquipment(pSprite,
+                    nCharacterId,
+                    nCharacterId);
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(pMessage, FALSE);
+            }
+
+            g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(nCharacterId,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+            return TRUE;
+        }
+
+        bResult = FALSE;
+    } else if (bAutoStacking && pNewItem != NULL && pNewItem->GetMaxStackable() > 1) {
+        for (INT nSlot = 18; static_cast<SHORT>(nSlot) < 18 + CScreenInventory::PERSONAL_INVENTORY_SIZE; nSlot++) {
+            pSlotItem = pSprite->m_equipment.m_items[nSlot];
+            if (pSlotItem != NULL
+                && pSlotItem->GetResRef() == pNewItem->GetResRef()
+                && ((pSlotItem->m_flags ^ pNewItem->m_flags) & 0x1) == 0) {
+                if (pSlotItem->GetUsageCount(0) < pSlotItem->GetMaxStackable()) {
+                    if (pSlotItem->GetUsageCount(0) + pNewItem->GetUsageCount(0) <= pSlotItem->GetMaxStackable()) {
+                        nSlotNum = static_cast<SHORT>(nSlot);
+                        break;
+                    }
+
+                    pNewItem->SetUsageCount(0, pNewItem->GetUsageCount(0) - pSlotItem->GetMaxStackable() + pSlotItem->GetUsageCount(0));
+                    pSlotItem->SetUsageCount(0, pSlotItem->GetMaxStackable());
+                }
+            }
+        }
+    }
+
+    if (nSlotNum == 0x7FFF) {
+        for (INT nSlot = 18; static_cast<SHORT>(nSlot) < 18 + CScreenInventory::PERSONAL_INVENTORY_SIZE && nSlotNum == 0x7FFF; nSlot++) {
+            if (pSprite->m_equipment.m_items[static_cast<SHORT>(nSlot)] == NULL) {
+                nSlotNum = static_cast<SHORT>(nSlot);
+            }
+        }
+
+        if (nSlotNum == 0x7FFF) {
+            // "Inventory Is Full"
+            errorCode = 17999;
+            g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(nCharacterId,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+            return FALSE;
+        }
+    }
+
+    pSlotItem = pSprite->m_equipment.m_items[nSlotNum];
+
+    if (bResult) {
+        if (pSlotItem != NULL
+            && ((pSlotItem->GetFlagsFile() & 0x4) == 0 || (pSlotItem->m_flags & 0x10) != 0)) {
+            bResult = FALSE;
+            // "This item can not be removed."
+            errorCode = 25697;
+        } else {
+            if (pSlotItem != NULL
+                && pNewItem == NULL
+                && pSlotItem->GetMaxStackable() > 1
+                && wCount < pSlotItem->GetUsageCount(0)) {
+                // Take part of the stack.
+
+                // __FILE__: C:\Projects\Icewind2\src\Baldur\InfGame.cpp
+                // __LINE__: 14884
+                UTIL_ASSERT(wCount != 0);
+
+                pSlotItem->SetUsageCount(0, pSlotItem->GetUsageCount(0) - wCount);
+                pNewItem = new CItem(pSlotItem->GetResRef(), 0, 0, 0, 0, 0);
+                pNewItem->SetUsageCount(0, wCount);
+                pNewItem->m_flags = ((pSlotItem->m_flags ^ pNewItem->m_flags) & 0x1) ^ pNewItem->m_flags;
+            } else if (pSlotItem != NULL
+                && pNewItem != NULL
+                && pSlotItem->GetMaxStackable() > 1
+                && pNewItem->GetResRef() == pSlotItem->GetResRef()
+                && ((pNewItem->m_flags ^ pSlotItem->m_flags) & 0x1) == 0) {
+                // Onto a stack of the same item.
+
+                // __FILE__: C:\Projects\Icewind2\src\Baldur\InfGame.cpp
+                // __LINE__: 14894
+                UTIL_ASSERT(wCount != 0);
+
+                INT nMove = pNewItem->GetUsageCount(0) < pSlotItem->GetMaxStackable() - pSlotItem->GetUsageCount(0)
+                    ? pNewItem->GetUsageCount(0)
+                    : pSlotItem->GetMaxStackable() - pSlotItem->GetUsageCount(0);
+                if (wCount < nMove) {
+                    nMove = wCount;
+                } else {
+                    nMove = pNewItem->GetUsageCount(0) < pSlotItem->GetMaxStackable() - pSlotItem->GetUsageCount(0)
+                        ? pNewItem->GetUsageCount(0)
+                        : pSlotItem->GetMaxStackable() - pSlotItem->GetUsageCount(0);
+                }
+
+                pSlotItem->SetUsageCount(0, pSlotItem->GetUsageCount(0) + nMove);
+
+                if (pNewItem->GetUsageCount(0) == static_cast<WORD>(nMove)) {
+                    // NOTE: Uninline.
+                    AddDisposableItem(pNewItem);
+                    pNewItem = NULL;
+                } else {
+                    pNewItem->SetUsageCount(0, pNewItem->GetUsageCount(0) - nMove);
+                }
+            } else {
+                pSprite->m_equipment.m_items[nSlotNum] = pNewItem;
+                pNewItem = pSlotItem;
+            }
+
+            g_pBaldurChitin->GetActiveEngine()->UpdatePersonalItemStatus(pSprite->m_id);
+
+            if ((g_pChitin->cNetwork.m_nServiceProvider == 0
+                    || g_pChitin->cNetwork.m_idLocalPlayer == pSprite->m_remotePlayerID)
+                && g_pChitin->cNetwork.m_bConnectionEstablished == TRUE) {
+                CMessageSpriteEquipment* pMessage = new CMessageSpriteEquipment(pSprite,
+                    nCharacterId,
+                    nCharacterId);
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(pMessage, FALSE);
+            }
+        }
+    }
+
+    pSprite->field_562C = 1;
+    pSprite->ProcessEffectList();
+
+    g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(nCharacterId,
+        CGameObjectArray::THREAD_ASYNCH,
+        INFINITE);
+
+    return bResult;
 }
 
 // 0x5BB600
@@ -6925,6 +7318,13 @@ BOOL CInfGame::AddCharacterToParty(LONG id, SHORT nPortraitNumber)
     }
 
     m_characterPortraits[nPortraitNumber] = id;
+
+    for (INT nCharacterSlot = 0; nCharacterSlot < CINFGAME_MAXCHARACTERS; nCharacterSlot++) {
+        if (m_characters[nCharacterSlot] == CGameObjectArray::INVALID_INDEX) {
+            m_characters[nCharacterSlot] = id;
+            break;
+        }
+    }
 
     UpdatePortraitToolTip(nPortraitNumber, pSprite->GetNameRef());
     pSprite->SetFootstepChannel();
@@ -8372,9 +8772,29 @@ BYTE CInfGame::GetCharactersControlled()
 }
 
 // 0x5C1160
-BOOLEAN CInfGame::RestParty(int a2, unsigned char a3)
+BOOLEAN CInfGame::RestParty(INT nHP, BOOLEAN bRenting)
 {
-    // TODO: Incomplete.
+    if (bRenting) {
+        for (SHORT nIndex = 0; nIndex < m_nCharacters; nIndex++) {
+            // NOTE: Uninline.
+            LONG nCharacterId = GetCharacterId(nIndex);
+
+            CMessage101* pMessage = new CMessage101(FALSE,
+                nCharacterId,
+                nCharacterId,
+                TRUE);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(pMessage, FALSE);
+        }
+    }
+
+    // NOTE: The original hands a multiplayer game to the server
+    // (0x436290, `CScreenWorld::StartRestMultiplayerHost` 0x693520 or
+    // `CScreenWorld::SetPendingRest` 0x6934F0, 0x5C1245-0x5C1347) and returns
+    // TRUE, or FALSE when the session state is neither. Multiplayer is
+    // removed (ADR 0002): only the single-player branch is ported.
+    if (!g_pChitin->cNetwork.m_bConnectionEstablished) {
+        return RestPartyPrivate(nHP, bRenting);
+    }
 
     return FALSE;
 }
@@ -8382,17 +8802,311 @@ BOOLEAN CInfGame::RestParty(int a2, unsigned char a3)
 // 0x5C1350
 BOOLEAN CInfGame::RestPartyPrivate(INT nHP, BOOLEAN bRenting)
 {
-    // TODO: Incomplete.
+    BOOLEAN bResult;
+    BOOLEAN bNoneHurt = TRUE;
+    INT nHealed;
 
-    return FALSE;
+    CAIAction restAction;
+    // NOTE: The SHORT at 0x847834, ACTION.IDS 96 Rest().
+    restAction.m_actionID = 96;
+
+    // NOTE: Trigger 0x93 is not in TRIGGER.IDS; only the engine raises it.
+    CAITrigger restTrigger(0x93, 0);
+
+    g_pBaldurChitin->GetObjectGame()->sub_5CADF0();
+
+    if (!g_pChitin->cNetwork.m_bConnectionEstablished
+        || g_pChitin->cNetwork.m_bIsHost == TRUE) {
+        // NOTE: The original looks the chapter variable up and drops the
+        // result.
+        g_pBaldurChitin->GetObjectGame()->GetVariables()->FindKey(CHAPTER_GLOBAL);
+
+        // NOTE: The original announces the rest to the clients here
+        // (`CBaldurMessage` 0x436500 with nHP, bRenting and 0); it returns
+        // at once without a session. Multiplayer is removed (ADR 0002).
+
+        nHealed = 0;
+
+        // TODO: `CGameArea::CheckRestEncounter` 0x46FEA0 (CGameArea.cpp,
+        // not ported): the original asks the visible area for a rest
+        // encounter when the party is not renting a room, and an encounter
+        // ends the rest here (0x5C150F-0x5C1525):
+        //
+        //     if (!bRenting
+        //         && m_gameAreas[m_visibleArea]->CheckRestEncounter()) {
+        //         goto done;
+        //     }
+        //
+        // The check draws rand() (0x46FEFD onwards), so until it is ported
+        // a rest draws none of its numbers and is never interrupted.
+
+        SHORT nCharacters = m_nCharacters;
+        if (m_bHealPartyOnRest) {
+            for (SHORT nIndex = 0; nIndex < nCharacters; nIndex++) {
+                CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+                LONG nCharacterId = pGame->GetCharacterId(nIndex);
+
+                CGameSprite* pSprite;
+
+                BYTE rc;
+                do {
+                    rc = pGame->GetObjectArray()->GetShare(nCharacterId,
+                        CGameObjectArray::THREAD_ASYNCH,
+                        reinterpret_cast<CGameObject**>(&pSprite),
+                        INFINITE);
+                } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+                if (rc == CGameObjectArray::SUCCESS) {
+                    if ((pSprite->m_baseStats.m_generalState & STATE_DEAD) == 0) {
+                        INT nMissing = pSprite->m_baseStats.m_maxHitPointsBase - pSprite->m_baseStats.m_hitPoints;
+                        if (nMissing > 1) {
+                            bNoneHurt = FALSE;
+                        }
+
+                        nHealed += nMissing;
+
+                        INT nLevel = pSprite->m_derivedStats.GetClassMaskLevel(CLASSMASK_CLERIC | CLASSMASK_DRUID);
+                        if (nLevel > 0) {
+                            nHP += nLevel * 19 + 5;
+                        }
+
+                        nLevel = pSprite->m_derivedStats.GetClassMaskLevel(CLASSMASK_PALADIN | CLASSMASK_RANGER);
+                        if (nLevel > 9) {
+                            nHP += nLevel * 19 - 147;
+                        }
+                    }
+
+                    pGame->GetObjectArray()->ReleaseShare(nCharacterId,
+                        CGameObjectArray::THREAD_ASYNCH,
+                        INFINITE);
+                }
+            }
+        } else {
+            nHealed = nHP;
+        }
+
+        // Round the healing up to a whole number of hours.
+        if (nHP > 0) {
+            INT nHours = nHealed / nHP;
+            if (nHealed % nHP != 0) {
+                nHours++;
+            }
+            nHealed = nHours * nHP;
+        }
+
+        if (!m_bHealPartyOnRest) {
+            m_worldTime.AddCurrentTime(CRuleTables::TIME_RESTING);
+            FeedBack(FEEDBACK_TIMEPASSEDREST, CRuleTables::TIME_RESTING, TRUE);
+        } else if (nHealed > nHP) {
+            // NOTE: Unsigned arithmetic, as the original's `div`.
+            m_worldTime.AddCurrentTime(CRuleTables::TIME_RESTING * nHealed * 100 / (nHP * 100) + CRuleTables::TIME_RESTING);
+            FeedBack(FEEDBACK_TIMEPASSEDREST,
+                CRuleTables::TIME_RESTING * nHealed * 100 / (nHP * 100) + CRuleTables::TIME_RESTING,
+                TRUE);
+        } else if (bNoneHurt == TRUE) {
+            m_worldTime.AddCurrentTime(CRuleTables::TIME_RESTING);
+            FeedBack(FEEDBACK_TIMEPASSEDREST, CRuleTables::TIME_RESTING, TRUE);
+        } else {
+            m_worldTime.AddCurrentTime(CRuleTables::TIME_RESTING * 2);
+            FeedBack(FEEDBACK_TIMEPASSEDREST, CRuleTables::TIME_RESTING * 2, TRUE);
+        }
+
+        for (SHORT nIndex = 0; nIndex < nCharacters; nIndex++) {
+            // NOTE: Uninline.
+            LONG nCharacterId = GetCharacterId(nIndex);
+
+            CGameEffectHeal* pHeal = new CGameEffectHeal();
+            if (m_bHealPartyOnRest) {
+                pHeal->m_effectAmount = 1000;
+            } else {
+                pHeal->m_effectAmount = nHealed;
+            }
+
+            CMessageAddEffect* pAddEffect = new CMessageAddEffect(pHeal,
+                nCharacterId,
+                nCharacterId);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(pAddEffect, FALSE);
+
+            CMessageAddAction* pAddAction = new CMessageAddAction(restAction,
+                nCharacterId,
+                nCharacterId);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(pAddAction, FALSE);
+
+            CMessageSetTrigger* pSetTrigger = new CMessageSetTrigger(restTrigger,
+                nCharacterId,
+                nCharacterId);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(pSetTrigger, FALSE);
+        }
+
+        // NOTE: The DWORD at 0x847F84 (35) and the SHORT at 0x847908,
+        // ACTION.IDS 203 FadeFromColor().
+        CAIAction fadeAction;
+        fadeAction = CAIAction(203, CPoint(35, 0), 0, -1);
+
+        g_pBaldurChitin->GetObjectGame()->GetGroup()->GroupAction(CAIAction(CAIAction::NO_ACTION, CPoint(-1, -1), 0, -1),
+            TRUE,
+            &fadeAction);
+    }
+
+    // done:
+    if (!bRenting) {
+        bResult = FALSE;
+
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\InfGame.cpp
+        // __LINE__: 18368
+        UTIL_ASSERT(g_pBaldurChitin->m_pEngineWorld != NULL);
+
+        if (g_pBaldurChitin->GetActiveEngine() != g_pBaldurChitin->m_pEngineWorld) {
+            g_pBaldurChitin->GetActiveEngine()->SelectEngine(g_pBaldurChitin->m_pEngineWorld);
+        }
+    } else {
+        bResult = TRUE;
+    }
+
+    // NOTE: The original signals the clients here when a session is open
+    // and the party is not renting (`CBaldurMessage::SendSignal` 0x4333C0).
+    // Multiplayer is removed (ADR 0002).
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\InfGame.cpp
+    // __LINE__: 18481
+    UTIL_ASSERT(g_pBaldurChitin->m_pEngineWorld != NULL);
+
+    if (g_pBaldurChitin->GetActiveEngine() != g_pBaldurChitin->m_pEngineWorld) {
+        CCacheStatus::dword_8D0BA8 = TRUE;
+        g_pBaldurChitin->GetActiveEngine()->SelectEngine(g_pBaldurChitin->m_pEngineWorld);
+
+        // NOTE: A renting client of a multiplayer game tells the server here
+        // (0x436C00). Multiplayer is removed (ADR 0002).
+    }
+
+    g_pBaldurChitin->GetObjectGame()->m_cButtonArray.ResetState();
+
+    return bResult;
 }
 
 // 0x5C1E30
-BOOL CInfGame::CanRestParty(STRREF& strError, unsigned char a2, unsigned char a3, unsigned char a4)
+BOOL CInfGame::CanRestParty(STRREF& strError, unsigned char bInStore, unsigned char a3, unsigned char a4)
 {
-    // TODO: Incomplete.
+    BOOL bResult;
+    BOOL bScattered = FALSE;
+    BOOL bAllInDungeon = TRUE;
+    BOOL bNoneAlive = TRUE;
+    BOOL bRestForbidden = FALSE;
+    CResRef cResArea("");
+    CPoint ptFirst;
 
-    return FALSE;
+    // "You may not rest at this time."
+    strError = 10309;
+
+    bResult = FALSE;
+
+    if (m_nCharacters > 0) {
+        for (SHORT nIndex = 0; nIndex < m_nCharacters && !bScattered; nIndex++) {
+            // NOTE: Uninline.
+            LONG nCharacterId = GetCharacterId(nIndex);
+
+            CGameSprite* pSprite;
+
+            BYTE rc;
+            do {
+                rc = m_cObjectArray.GetDeny(nCharacterId,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    reinterpret_cast<CGameObject**>(&pSprite),
+                    INFINITE);
+            } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+            if (rc != CGameObjectArray::SUCCESS) {
+                bScattered = TRUE;
+                continue;
+            }
+
+            if (pSprite->GetArea() != NULL
+                && (pSprite->GetArea()->m_header.m_flags & 0x2) != 0
+                && !bInStore
+                && !a4) {
+                bRestForbidden = TRUE;
+            }
+
+            if (pSprite->Animate()) {
+                bNoneAlive = FALSE;
+
+                // NOTE: The original computes this and never reads it.
+                if (bAllInDungeon && (pSprite->GetArea()->m_header.m_areaType & 0x20) != 0) {
+                    bAllInDungeon = TRUE;
+                } else {
+                    bAllInDungeon = FALSE;
+                }
+
+                CPoint pt = pSprite->GetPos();
+                if (cResArea == "") {
+                    cResArea = pSprite->GetArea()->m_resRef;
+                    ptFirst = pt;
+                } else {
+                    if (((pSprite->m_baseStats.m_generalState & STATE_DEAD) == 0
+                            && cResArea != pSprite->GetArea()->m_resRef)
+                        || (ptFirst.y - pt.y) * (ptFirst.y - pt.y) * 16 / 9 + (ptFirst.x - pt.x) * (ptFirst.x - pt.x) > CScreenInventory::RANGE_SWAPITEM) {
+                        bScattered = TRUE;
+                    }
+                }
+            }
+
+            m_cObjectArray.ReleaseDeny(nCharacterId,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+        }
+
+        if (bRestForbidden == TRUE) {
+            // "You may not rest at this time."
+            strError = 10309;
+            return FALSE;
+        }
+    }
+
+    if (a3 == TRUE && !bScattered) {
+        return TRUE;
+    }
+
+    if (!bNoneAlive) {
+        if (!CanSaveGame(strError, TRUE, FALSE)) {
+            if (strError == 16501) {
+                // "You cannot rest; there are monsters nearby."
+                strError = 16500;
+                bResult = FALSE;
+            } else {
+                // "You may not rest at this time."
+                strError = 10309;
+                bResult = FALSE;
+            }
+        } else if (bScattered) {
+            // "You may not rest when your party is scattered."
+            strError = 16457;
+            bResult = FALSE;
+        } else if (!g_pBaldurChitin->GetObjectGame()->m_singlePlayerPermissions.m_bPermissions[CGamePermission::LEADER]) {
+            // "You must have the leader permission to rest the party in
+            // multiplayer mode."
+            strError = 17198;
+            bResult = FALSE;
+        } else {
+            // "Are you sure you wish to rest?"
+            strError = 15358;
+            bResult = TRUE;
+        }
+    }
+
+    // TODO: `CGameObjectArray` 0x5C9300 (CGameObjectArray.cpp, not ported):
+    // FALSE when any sprite in the array has spell state 46 or 47
+    // (SPLSTATE_MOLD_TOUCH, SPLSTATE_SHROUD_OF_FLAME), TRUE otherwise
+    // (0x5C20B0-0x5C20C9):
+    //
+    //     if (!m_cObjectArray.sub_5C9300()) {
+    //         bResult = FALSE;
+    //         strError = 10309;
+    //     }
+    //
+    // Until it is ported the check passes, as it does when no sprite has
+    // either state.
+
+    return bResult;
 }
 
 // 0x5C3010
@@ -8742,6 +9456,55 @@ BOOL CInfGame::sub_5C79C0(CString sArea)
     }
 
     return FALSE;
+}
+
+// 0x5C7B10
+INT CInfGame::AddItemToBag(const CResRef& cResBag, CItem* pItem, STRREF& strError)
+{
+    INT nCount = 0;
+
+    strError = -1;
+
+    if (g_pChitin->cNetwork.m_bConnectionEstablished) {
+        // NOTE: In a session the original fills the server's copy of the bag
+        // (`DemandServerStore` 0x5ADC90, `GetServerStore` 0x5ADF60,
+        // `ReleaseServerStore` 0x5ADE90) or asks the server for it
+        // (`CBaldurMessage::DemandResourceFromServer`) and announces the
+        // change (0x5C7B5B-0x5C8023). Multiplayer is removed (ADR 0002).
+        return nCount;
+    }
+
+    CStore cStore(cResBag);
+    if (cStore.GetType() == 4 && cStore.IsItemAcceptable(pItem)) {
+        // NOTE: The bag's capacity is the WORD at the header's +0x94; the
+        // original compares it with the number of items in the bag.
+        WORD nCapacity = static_cast<WORD>(cStore.m_header.field_94);
+        if (nCapacity != 0 && nCapacity != cStore.GetNumItems()) {
+            nCount = 1;
+            if (pItem->GetMaxStackable() > 1) {
+                nCount = pItem->GetUsageCount(0);
+            }
+
+            if (cStore.GetNumItems() + nCount > nCapacity) {
+                nCount = nCapacity - cStore.GetNumItems();
+            }
+
+            pItem->SetUsageCount(0, static_cast<WORD>(nCount));
+            cStore.AddItemExt(*pItem, 1);
+        } else {
+            // "Container Is Full"
+            strError = 24889;
+        }
+    } else {
+        // "Wrong Item Type"
+        strError = 26285;
+    }
+
+    if (strError == -1) {
+        cStore.Marshal(m_sTempDir);
+    }
+
+    return nCount;
 }
 
 // 0x5C8190
