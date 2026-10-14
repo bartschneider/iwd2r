@@ -8,10 +8,13 @@
 
 #include "CBaldurChitin.h"
 #include "CGameArea.h"
+#include "CGameDialog.h"
+#include "CGameDoor.h"
 #include "CGameObjectArray.h"
 #include "CGameSprite.h"
 #include "CInfGame.h"
 #include "CScreenCreateChar.h"
+#include "CScreenWorld.h"
 #include "platform/state_dump.h"
 
 #include <cstring>
@@ -19,6 +22,8 @@
 namespace {
 
 using platform::state_dump::Chargen;
+using platform::state_dump::Dialog;
+using platform::state_dump::Door;
 using platform::state_dump::EngineState;
 using platform::state_dump::PartyMember;
 using platform::state_dump::World;
@@ -65,11 +70,11 @@ const char* ScreenName(CBaldurChitin* chitin)
     return name;
 }
 
-// The sprite an object id names (the create_char screen's, a party
-// member's): CGameObjectArray::GetShare's THREAD_ASYNCH lookup without the
-// call (no share taken), the recorder's SpriteById. nullptr when the id does
-// not resolve.
-CGameSprite* SpriteById(CBaldurChitin* chitin, LONG id)
+// The object an id names (the create_char screen's sprite, a party member,
+// an object on an area's list): CGameObjectArray::GetShare's THREAD_ASYNCH
+// lookup without the call (no share taken), the recorder's ObjectById.
+// nullptr when the id does not resolve.
+CGameObject* ObjectById(CBaldurChitin* chitin, LONG id)
 {
     CInfGame* game = chitin->m_pObjectGame;
     if (!game)
@@ -83,7 +88,13 @@ CGameSprite* SpriteById(CBaldurChitin* chitin, LONG id)
     const CGameObjectArrayEntry& entry = objects.m_pArray[index];
     if (entry.m_objectId != static_cast<SHORT>(id))
         return nullptr;
-    return static_cast<CGameSprite*>(entry.m_objectPtr);
+    return entry.m_objectPtr;
+}
+
+// A sprite's id, the recorder's SpriteById: the object, unchecked.
+CGameSprite* SpriteById(CBaldurChitin* chitin, LONG id)
+{
+    return static_cast<CGameSprite*>(ObjectById(chitin, id));
 }
 
 void ReadChargen(CBaldurChitin* chitin, CScreenCreateChar* screen, Chargen* out)
@@ -111,6 +122,62 @@ void ReadChargen(CBaldurChitin* chitin, CScreenCreateChar* screen, Chargen* out)
     char resref[sizeof(stats.m_portraitLarge) + 1] = {};
     std::memcpy(resref, &stats.m_portraitLarge, sizeof(stats.m_portraitLarge));
     out->portrait = resref;
+}
+
+// The objects of type on an area list, head to tail (ids, as the lists
+// store them), the recorder's ObjectsOn.
+template <typename Visit>
+void ObjectsOn(CBaldurChitin* chitin, CTypedPtrList<CPtrList, int*>& list, BYTE type, Visit visit)
+{
+    POSITION pos = list.GetHeadPosition();
+    while (pos != NULL) {
+        const LONG id = static_cast<LONG>(reinterpret_cast<INT_PTR>(list.GetNext(pos)));
+        CGameObject* object = ObjectById(chitin, id);
+        if (object && object->m_objectType == type)
+            visit(object);
+    }
+}
+
+// The area's doors, explored tiles and sprites, the recorder's ReadArea.
+void ReadArea(CBaldurChitin* chitin, CGameArea* area, World* out)
+{
+    ObjectsOn(chitin, area->m_lVertSort, CGameObject::TYPE_DOOR, [&](CGameObject* object) {
+        const CGameDoor* door = static_cast<CGameDoor*>(object);
+        Door d;
+        d.name.assign(door->m_scriptName, strnlen(door->m_scriptName, SCRIPTNAME_SIZE));
+        d.open = (door->m_dwFlags & 0x1) != 0;
+        d.locked = (door->m_dwFlags & 0x2) != 0;
+        out->doors.push_back(d);
+    });
+    const CVisibilityMap& visibility = area->m_visibility;
+    if (visibility.m_pMap) {
+        for (LONG i = 0; i < visibility.m_nMapSize; ++i) {
+            if ((visibility.m_pMap[i] & CVisibilityMap::EXPLORED_FLAG) != 0)
+                ++out->exploredCount;
+        }
+    }
+    for (CTypedPtrList<CPtrList, int*>* list : { &area->m_lVertSort, &area->m_lVertSortBack, &area->m_lVertSortFlight })
+        ObjectsOn(chitin, *list, CGameObject::TYPE_SPRITE, [&](CGameObject*) { ++out->creatures; });
+}
+
+// The world screen's dialog, the recorder's DialogJson.
+void ReadDialog(CGameDialogSprite& dialog, Dialog* out)
+{
+    out->active = dialog.field_54 != 0;
+    if (!out->active)
+        return;
+    out->speaker = dialog.m_talkerIndex;
+    out->entry = dialog.m_currentEntryIndex;
+    if (!dialog.m_waitingForResponse || dialog.m_currentEntryIndex >= static_cast<DWORD>(dialog.m_dialogEntries.GetSize()))
+        return;
+    CGameDialogEntry* entry = dialog.m_dialogEntries[dialog.m_currentEntryIndex];
+    if (!entry)
+        return;
+    for (INT i = 0; i < entry->GetSize(); ++i) {
+        const CGameDialogReply* reply = entry->GetAt(i);
+        if (reply && reply->m_displayPosition != NULL)
+            ++out->responses;
+    }
 }
 
 // The area on view and the party, the recorder's WorldJson: GetVisibleArea
@@ -145,9 +212,16 @@ void ReadWorld(CBaldurChitin* chitin, World* out)
             member.maxHp = sprite->m_derivedStats.m_nMaxHitPoints;
             for (int k = 0; k < 64; ++k)
                 member.skills[k] = sprite->m_derivedStats.m_nSkills[k];
+            member.action = sprite->m_curAction.m_actionID;
+            member.modal = sprite->m_nModalState;
+            member.facing = sprite->m_nDirection;
         }
         out->party.push_back(member);
     }
+    if (game->m_visibleArea < CINFGAME_MAX_AREAS && game->m_gameAreas[game->m_visibleArea])
+        ReadArea(chitin, game->m_gameAreas[game->m_visibleArea], out);
+    if (chitin->m_pEngineWorld)
+        ReadDialog(chitin->m_pEngineWorld->m_internalLoadedDialog, &out->dialog);
 }
 
 class EngineDumpSource : public platform::state_dump::DumpSource {

@@ -72,10 +72,25 @@ namespace {
                 + ", \"x\": " + (m.sprite ? Number(m.x) : null) + ", \"y\": " + (m.sprite ? Number(m.y) : null)
                 + ", \"hp\": " + (m.sprite ? Number(m.hp) : null)
                 + ", \"max_hp\": " + (m.sprite ? Number(m.maxHp) : null)
-                + ", \"skills\": " + (m.sprite ? List(m.skills) : null) + "}";
+                + ", \"skills\": " + (m.sprite ? List(m.skills) : null)
+                + ", \"action\": " + (m.sprite ? Number(m.action) : null)
+                + ", \"modal\": " + (m.sprite ? Number(m.modal) : null)
+                + ", \"facing\": " + (m.sprite ? Number(m.facing) : null) + "}";
         }
         party += "]";
-        return "{\"area\": " + JsonString(w.area) + ", \"party\": " + party + "}";
+        std::string doors = "[";
+        for (size_t i = 0; i < w.doors.size(); ++i) {
+            const Door& d = w.doors[i];
+            doors += std::string(i ? ", " : "") + "{\"name\": " + JsonString(d.name) + ", \"open\": " + Number(d.open)
+                + ", \"locked\": " + Number(d.locked) + "}";
+        }
+        doors += "]";
+        const Dialog& g = w.dialog;
+        const std::string dialog = "{\"active\": " + Number(g.active) + ", \"speaker\": " + Number(g.speaker)
+            + ", \"entry\": " + Number(g.entry) + ", \"responses\": " + Number(g.responses) + "}";
+        return "{\"area\": " + JsonString(w.area) + ", \"party\": " + party + ", \"doors\": " + doors
+            + ", \"dialog\": " + dialog + ", \"explored_count\": " + Number(w.exploredCount)
+            + ", \"creatures\": " + Number(w.creatures) + "}";
     }
 
 }

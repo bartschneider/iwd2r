@@ -24,8 +24,16 @@ its base classes' commented members. The member's declared
 type gives the field type: u8, i8, u16, i16, u32, i32, ptr (any pointer),
 resref (RESREF, 8 bytes); an array member adds "count". Two classes the
 original lays out as plain values count as such: CResRef is a resref and
-CPoint is i32 with count 2 (x, y). Methods (anything with a parenthesis)
-are ignored.
+CPoint is i32 with count 2 (x, y); a SCRIPTNAME (char[32]) is i8 with count
+32 and a POSITION is a ptr. Methods (anything with a parenthesis) are
+ignored.
+
+MFC's containers have no comments of ours: their 32-bit layout (VC6 MFC
+4.2, afxcoll.h) is built in. CPtrList (and CObList, CTypedPtrList) has
+m_pNodeHead, m_pNodeTail and m_nCount; its node, "CPtrList::CNode", has
+pNext, pPrev and data; CPtrArray (and CObArray, CTypedPtrArray) has m_pData
+and m_nSize. A member path may go into them ("m_lVertSort.m_pNodeHead"), and
+a class deriving from one has their members.
 
 fields.json maps each field to {"base", "offset", "type"} (plus "count"):
 base is the class name, or the global's address for a global; offset is a
@@ -62,14 +70,27 @@ SCALARS = {
     'long': ('i32', 4), 'BOOL': ('i32', 4),
     'DWORD': ('u32', 4), 'UINT': ('u32', 4), 'unsigned int': ('u32', 4),
     'ULONG': ('u32', 4), 'STRREF': ('u32', 4), 'COLORREF': ('u32', 4),
-    'RESREF': ('resref', 8),
+    'RESREF': ('resref', 8), 'POSITION': ('ptr', 4),
 }
 # Classes laid out as plain values -> (field type, element size, elements).
 VALUES = {
     'CResRef': ('resref', 8, 1),
     'CPoint': ('i32', 4, 2),
+    'SCRIPTNAME': ('i8', 1, 32),
 }
 PTR_SIZE = 4  # the original is 32-bit
+
+# MFC 4.2's 32-bit layouts (afxcoll.h): {class: {member: (offset, type)}}.
+# Both containers start with CObject's vtable pointer.
+MFC = {
+    'CPtrList': {'m_pNodeHead': (0x04, 'void*'),
+                 'm_pNodeTail': (0x08, 'void*'), 'm_nCount': (0x0C, 'int')},
+    'CPtrList::CNode': {'pNext': (0x00, 'void*'), 'pPrev': (0x04, 'void*'),
+                        'data': (0x08, 'void*')},
+    'CPtrArray': {'m_pData': (0x04, 'void*'), 'm_nSize': (0x08, 'int')},
+}
+MFC_ALIASES = {'CObList': 'CPtrList', 'CTypedPtrList': 'CPtrList',
+               'CObArray': 'CPtrArray', 'CTypedPtrArray': 'CPtrArray'}
 
 MEMBER_LINE = re.compile(
     r'^\s*/\*\s*(?:0x)?([0-9A-Fa-f]+)\s*\*/\s*([^;]*);')
@@ -80,6 +101,13 @@ DEFINE = re.compile(r'^\s*#define\s+([A-Za-z_]\w*)\s+(\d+)\s*$', re.M)
 
 class FieldError(Exception):
     pass
+
+
+def bare(type_name):
+    """A type name without its template arguments:
+    CTypedPtrList<CPtrList, int*> -> CTypedPtrList (a list, not a pointer);
+    CTypedPtrList<CPtrList, int*>* stays a pointer."""
+    return re.sub(r'<.*>', '', type_name).strip()
 
 
 class Member:
@@ -93,7 +121,7 @@ class Member:
     def field_type(self):
         """(field type, size of one element) or (None, None) for a class
         or an unknown type."""
-        if '*' in self.type_name:
+        if '*' in bare(self.type_name):
             return 'ptr', PTR_SIZE
         if self.type_name in VALUES:
             return VALUES[self.type_name][:2]
@@ -103,7 +131,7 @@ class Member:
         """The number of field-type elements: the array count times the
         elements of one value (2 for a CPoint); None for a single one."""
         per_value = 1
-        if '*' not in self.type_name and self.type_name in VALUES:
+        if '*' not in bare(self.type_name) and self.type_name in VALUES:
             per_value = VALUES[self.type_name][2]
         n = (self.count or 1) * per_value
         return n if self.count or n > 1 else None
@@ -138,6 +166,13 @@ class Headers:
     def members(self, name):
         """{member name: Member} of class name."""
         if name in self.classes:
+            return self.classes[name]
+        layout = MFC.get(MFC_ALIASES.get(name, name))
+        if layout is not None:
+            self.classes[name] = {
+                member: Member(offset, type_name, member, None,
+                               'MFC %s' % name)
+                for member, (offset, type_name) in layout.items()}
             return self.classes[name]
         found = None
         pattern = re.compile(r'\b(?:class|struct)\s+%s\b[^;{()]*\{'
@@ -205,7 +240,7 @@ class Headers:
                 if member.field_type()[0] is not None or member.count:
                     raise FieldError('%s.%s is not a class member (%s)'
                                      % (current, part, member.type_name))
-                current = member.type_name
+                current = bare(member.type_name)
         return offset, member
 
     def size_of(self, class_name):
