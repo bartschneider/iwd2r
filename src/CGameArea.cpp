@@ -811,6 +811,174 @@ LONG CGameArea::GetNearest(LONG startObject, const CAIObjectType& type, SHORT ra
     }
 }
 
+// NOTE: The name is the Ghidra project's: the nearest active creature whose
+// dialog (m_dialog or field_56E4) is `dialog`, from `startObject` within
+// `range`: first the front list outward from the caller's node (or the whole
+// front list from its head when the caller is not on it), then the back
+// list from its head. CGameDialogSprite::Reload passes the larger of the
+// area's width and height as the range.
+//
+// 0x46C460
+LONG CGameArea::GetNearestDialogMatch(LONG startObject, CResRef dialog, LONG range)
+{
+    LONG nBest = range * range + 1;
+    LONG nFound = CGameObjectArray::INVALID_INDEX;
+    CAIObjectType callerType;
+
+    CGameObject* pObject;
+    BYTE rc = m_pGame->GetObjectArray()->GetShare(startObject,
+        CGameObjectArray::THREAD_ASYNCH,
+        &pObject,
+        INFINITE);
+    if (rc != CGameObjectArray::SUCCESS) {
+        return CGameObjectArray::INVALID_INDEX;
+    }
+
+    // NOTE: The caller's type is copied and never read.
+    callerType.Set(pObject->GetAIType());
+    BYTE listType = pObject->GetVertListType();
+    INT x = pObject->GetPos().x;
+    INT y = 4 * pObject->GetPos().y / 3;
+    POSITION posVertList = pObject->GetVertListPos();
+
+    m_pGame->GetObjectArray()->ReleaseShare(startObject,
+        CGameObjectArray::THREAD_ASYNCH,
+        INFINITE);
+
+    POSITION posPrev;
+    POSITION posNext;
+    if (listType == CGameObject::LIST_FRONT) {
+        // NOTE: The original reads the node's links unchecked; a caller on
+        // the front list type with no node would fault. Bounded: no
+        // neighbours.
+        posPrev = posVertList;
+        posNext = posVertList;
+        if (posVertList != NULL) {
+            m_lVertSort.GetPrev(posPrev);
+            m_lVertSort.GetNext(posNext);
+        }
+    } else {
+        posNext = m_lVertSort.GetHeadPosition();
+        posPrev = NULL;
+    }
+
+    // One creature on the front list. Returns FALSE when it is out of range
+    // vertically, which ends its side.
+    auto Check = [&](LONG nId, CGameSprite* pSprite) -> BOOL {
+        if (!pSprite->m_active
+            || !pSprite->m_activeAI
+            || !pSprite->m_activeImprisonment
+            || pSprite->GetVertListPos() == NULL) {
+            return TRUE;
+        }
+
+        const CPoint& pt = pSprite->GetPos();
+        LONG dy = (y - 4 * pt.y / 3) * (y - 4 * pt.y / 3);
+        if (dy >= nBest) {
+            return FALSE;
+        }
+
+        if (pSprite->m_dialog == dialog || pSprite->field_56E4 == dialog) {
+            LONG nDistance = (x - pt.x) * (x - pt.x) + dy;
+            if (nDistance < nBest) {
+                nBest = nDistance;
+                nFound = nId;
+            }
+        }
+
+        return TRUE;
+    };
+
+    while (posPrev != NULL || posNext != NULL) {
+        if (posPrev != NULL) {
+            LONG nId = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSort.GetPrev(posPrev)));
+            rc = m_pGame->GetObjectArray()->GetShare(nId,
+                CGameObjectArray::THREAD_ASYNCH,
+                &pObject,
+                INFINITE);
+            if (rc != CGameObjectArray::SUCCESS) {
+                continue;
+            }
+
+            if (pObject->GetObjectType() != CGameObject::TYPE_SPRITE) {
+                // NOTE: This leaves the round without the side below.
+                m_pGame->GetObjectArray()->ReleaseShare(nId,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    INFINITE);
+                continue;
+            }
+
+            if (!Check(nId, static_cast<CGameSprite*>(pObject))) {
+                posPrev = NULL;
+            }
+
+            m_pGame->GetObjectArray()->ReleaseShare(nId,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+
+            if (posNext == NULL) {
+                continue;
+            }
+        }
+
+        LONG nId = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSort.GetNext(posNext)));
+        rc = m_pGame->GetObjectArray()->GetShare(nId,
+            CGameObjectArray::THREAD_ASYNCH,
+            &pObject,
+            INFINITE);
+        if (rc != CGameObjectArray::SUCCESS) {
+            continue;
+        }
+
+        if (pObject->GetObjectType() == CGameObject::TYPE_SPRITE
+            && !Check(nId, static_cast<CGameSprite*>(pObject))) {
+            posNext = NULL;
+        }
+
+        m_pGame->GetObjectArray()->ReleaseShare(nId,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+    }
+
+    // The back list (the dead and the sleeping): no imprisonment test.
+    POSITION pos = m_lVertSortBack.GetHeadPosition();
+    while (pos != NULL) {
+        LONG nId = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSortBack.GetNext(pos)));
+        rc = m_pGame->GetObjectArray()->GetShare(nId,
+            CGameObjectArray::THREAD_ASYNCH,
+            &pObject,
+            INFINITE);
+        if (rc != CGameObjectArray::SUCCESS) {
+            continue;
+        }
+
+        if (pObject->GetObjectType() == CGameObject::TYPE_SPRITE && pObject->GetVertListPos() != NULL) {
+            CGameSprite* pSprite = static_cast<CGameSprite*>(pObject);
+            const CPoint& pt = pSprite->GetPos();
+            LONG dy = (y - 4 * pt.y / 3) * (y - 4 * pt.y / 3);
+            if (dy < nBest) {
+                if (pSprite->m_active
+                    && pSprite->m_activeAI
+                    && (pSprite->m_dialog == dialog || pSprite->field_56E4 == dialog)) {
+                    LONG nDistance = (x - pt.x) * (x - pt.x) + dy;
+                    if (nDistance < nBest) {
+                        nBest = nDistance;
+                        nFound = nId;
+                    }
+                }
+            } else {
+                pos = NULL;
+            }
+        }
+
+        m_pGame->GetObjectArray()->ReleaseShare(nId,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+    }
+
+    return nFound;
+}
+
 // NOTE: Walks the vertical list outward from `posVertList` (the caller's
 // own node, which it skips), one object above and one below per round, and
 // stops a side once an object on it is out of range vertically: the list is
