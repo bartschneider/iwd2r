@@ -11298,7 +11298,9 @@ SHORT CGameSprite::ExecuteAction()
         if (pTarget->GetObjectType() == CGameObject::TYPE_DOOR) {
             // NOTE: The original passes an uninitialized stack point
             // (esp+0x14 at 0x72B2AB) to GetCloserDestPt, so which of the
-            // door's two points it picks is undefined; ours passes (0, 0).
+            // door's two points it picks depends on the last use of that
+            // stack slot (case 8's GetShare out-pointer, among others); ours
+            // passes (0, 0).
             CPoint ptUnset(0, 0);
             CPoint ptDest = static_cast<CGameDoor*>(pTarget)->GetCloserDestPt(ptUnset);
             returnValue = MoveToPoint(ptDest, 0);
