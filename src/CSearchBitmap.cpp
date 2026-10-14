@@ -224,13 +224,91 @@ BYTE CSearchBitmap::GetMobileCost(const CPoint& point, const BYTE* terrainTable,
 // 0x5488C0
 void CSearchBitmap::SnapshotRemoveObject(CPoint point, BYTE personalSpaceRange, BOOL bBumpable)
 {
-    // TODO: Incomplete.
+    if (personalSpaceRange != 0
+        && point.x >= 0
+        && point.y >= 0
+        && point.x < CPathSearch::GRID_ACTUALX
+        && point.y < CPathSearch::GRID_ACTUALY) {
+        INT radius = (personalSpaceRange - 1) / 2;
+        INT minX = point.x - radius;
+        INT maxX = point.x + radius;
+        INT minY = point.y - radius;
+        INT maxY = point.y + radius;
+
+        // NOTE: The far edge is clamped only when the near one is not.
+        if (minX < 0) {
+            minX = 0;
+        } else if (maxX > m_GridSquareDimensions.cx - 1) {
+            maxX = m_GridSquareDimensions.cx - 1;
+        }
+
+        if (minY < 0) {
+            minY = 0;
+        } else if (maxY > m_GridSquareDimensions.cy - 1) {
+            maxY = m_GridSquareDimensions.cy - 1;
+        }
+
+        // One fewer creature in the square's count: bits 1-3 for bumpable
+        // ones, bits 4-6 for the others.
+        BYTE keep;
+        BYTE mask;
+        BYTE one;
+        if (!bBumpable) {
+            keep = 0x8F;
+            mask = 0x70;
+            one = 0x10;
+        } else {
+            keep = 0xF1;
+            mask = 0x0E;
+            one = 0x02;
+        }
+
+        for (INT y = minY; y <= maxY; y++) {
+            for (INT x = minX; x <= maxX; x++) {
+                BYTE* pCost = &(m_snapshotDynamicCost[m_GridSquareDimensions.cx * y + x]);
+                *pCost = ((*pCost - one) & mask) | (*pCost & keep);
+            }
+        }
+    }
 }
 
 // 0x5489E0
 void CSearchBitmap::SnapshotAddObjectDiagonals(CPoint point, BYTE personalSpaceRange, BOOL bBumpable)
 {
-    // TODO: Incomplete.
+    if (point.x >= 0
+        && point.y >= 0
+        && point.x < CPathSearch::GRID_ACTUALX
+        && point.y < CPathSearch::GRID_ACTUALY) {
+        // One more creature in the count of each corner of the personal
+        // space: bits 1-3 for bumpable ones, bits 4-6 for the others.
+        auto Add = [bBumpable](BYTE* pCost) {
+            if (!bBumpable) {
+                *pCost = ((((*pCost & 0xF0) + 0x10) ^ *pCost) & 0x70) ^ *pCost;
+            } else {
+                *pCost = ((((*pCost & 0xFE) + 0x2) ^ *pCost) & 0xE) ^ *pCost;
+            }
+        };
+
+        BYTE radius = static_cast<BYTE>((personalSpaceRange - 1) / 2);
+
+        if (point.x - radius >= 0) {
+            if (point.y - radius >= 0) {
+                Add(&(m_snapshotDynamicCost[m_GridSquareDimensions.cx * (point.y - radius) + point.x - radius]));
+            }
+            if (point.y + radius < m_GridSquareDimensions.cy) {
+                Add(&(m_snapshotDynamicCost[m_GridSquareDimensions.cx * (point.y + radius) + point.x - radius]));
+            }
+        }
+
+        if (point.x + radius < m_GridSquareDimensions.cx) {
+            if (point.y - radius >= 0) {
+                Add(&(m_snapshotDynamicCost[m_GridSquareDimensions.cx * (point.y - radius) + point.x + radius]));
+            }
+            if (point.y + radius < m_GridSquareDimensions.cy) {
+                Add(&(m_snapshotDynamicCost[m_GridSquareDimensions.cx * (point.y + radius) + point.x + radius]));
+            }
+        }
+    }
 }
 
 // 0x547E60
@@ -741,10 +819,14 @@ void SearchThreadMain(void* userInfo)
     SHORT cnt;
     BYTE rc;
     BYTE deadLockCnt;
+    BOOL bRetry;
     BYTE objectSpace;
     CRect rGrid;
     POINT startPt;
     CPoint tempPoint;
+
+    rGrid.left = 0;
+    rGrid.top = 0;
 
     CSingleLock searchLock(&(g_pBaldurChitin->GetObjectGame()->field_1B58), FALSE);
     g_pBaldurChitin->RegisterThread();
@@ -759,7 +841,7 @@ void SearchThreadMain(void* userInfo)
 
         searchShutdown = g_pBaldurChitin->GetObjectGame()->m_searchShutdown;
         while (!g_pBaldurChitin->GetObjectGame()->m_searchRequests.IsEmpty()
-            && !g_pBaldurChitin->GetObjectGame()->m_searchRequestsBack.IsEmpty()) {
+            || !g_pBaldurChitin->GetObjectGame()->m_searchRequestsBack.IsEmpty()) {
             if (g_pBaldurChitin->GetObjectGame()->m_searchRequests.IsEmpty()) {
                 searchRequest = g_pBaldurChitin->GetObjectGame()->m_searchRequestsBack.RemoveHead();
             } else {
@@ -835,8 +917,11 @@ void SearchThreadMain(void* userInfo)
                                     if (rc != CGameObjectArray::DENIED) {
                                         break;
                                     }
+                                    // NOTE: 256 tries: the counter is tested
+                                    // before it wraps.
+                                    bRetry = deadLockCnt != 255;
                                     deadLockCnt++;
-                                } while (deadLockCnt != 255);
+                                } while (bRetry);
 
                                 if (rc == CGameObjectArray::SUCCESS
                                     && pObject->OnSearchMap()
@@ -861,6 +946,7 @@ void SearchThreadMain(void* userInfo)
                                         goalBumpable[cnt] = FALSE;
                                         goalRemoveObject[cnt].x = -1;
                                         goalRemoveObject[cnt].y = -1;
+                                        targetIdPresent = TRUE;
                                     }
                                 } else {
                                     if (rc == CGameObjectArray::SUCCESS) {
@@ -891,8 +977,9 @@ void SearchThreadMain(void* userInfo)
                                             if (rc != CGameObjectArray::DENIED) {
                                                 break;
                                             }
+                                            bRetry = deadLockCnt != 255;
                                             deadLockCnt++;
-                                        } while (deadLockCnt != 255);
+                                        } while (bRetry);
 
                                         if (rc == CGameObjectArray::SUCCESS
                                             && pObject->OnSearchMap()
@@ -953,7 +1040,7 @@ void SearchThreadMain(void* userInfo)
                                             CGameObjectArray::THREAD_SEARCH,
                                             INFINITE);
 
-                                        searchRequest->m_searchBitmap->SnapshotRemoveObject(CPoint(goalPts[cnt]),
+                                        searchRequest->m_searchBitmap->SnapshotRemoveObject(CPoint(goalRemoveObject[cnt]),
                                             goalObjectSpaces[cnt],
                                             goalBumpable[cnt]);
                                     }
@@ -995,6 +1082,8 @@ void SearchThreadMain(void* userInfo)
                                             goalPts[cnt].x = -1;
                                             goalPts[cnt].y = -1;
                                         } else {
+                                            goalPts[cnt].x /= CPathSearch::GRID_SQUARE_SIZEX;
+                                            goalPts[cnt].y /= CPathSearch::GRID_SQUARE_SIZEY;
                                             if (pArea->SnapshotAdjustTarget(CPoint(startPt), &(goalPts[cnt]), bBump, 10) == TRUE) {
                                                 targetPointPresent = TRUE;
                                             } else {
@@ -1018,7 +1107,9 @@ void SearchThreadMain(void* userInfo)
                                                 bBump,
                                                 &rGrid);
                                         } else {
-                                            searchRequest->m_searchRc = g_pBaldurChitin->GetObjectGame()->m_pathSearch->FindPath(&startPt,
+                                            // A promoted search continues from
+                                            // the end of the path found so far.
+                                            searchRequest->m_searchRc = g_pBaldurChitin->GetObjectGame()->m_pathSearch->FindPath(&(searchRequest->m_sourcePt),
                                                 goalPts,
                                                 searchRequest->m_nTargetPoints + searchRequest->m_nTargetIds,
                                                 searchRequest->m_minNodesBack,
@@ -1089,8 +1180,9 @@ void SearchThreadMain(void* userInfo)
                             searchLock.Lock(INFINITE);
                             if (searchRequest->m_serviceState != CSearchRequest::STATE_STALE) {
                                 searchRequest->m_serviceState = CSearchRequest::STATE_ERROR;
+                            } else {
+                                delete searchRequest;
                             }
-                            delete searchRequest;
                             searchLock.Unlock();
                         }
                     } else {

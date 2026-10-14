@@ -31,6 +31,7 @@
 #include "CGameArea.h"
 #include "CGameObject.h"
 #include "CResBitmap.h"
+#include "CSearchBitmap.h"
 #ifdef _MSC_VER
 #pragma warning(pop)
 #endif
@@ -312,6 +313,116 @@ void AdjustTarget(CaseContext& ctx)
     }
 }
 
+// CSearchBitmap::SnapshotRemoveObject(point, personalSpaceRange, bBumpable)
+// (0x5488C0) and SnapshotAddObjectDiagonals (0x5489E0): `ret 0x10` at
+// 0x5489D6 and 0x548B5A/0x548B76. Both read only m_snapshotDynamicCost
+// (+0xBE) and m_GridSquareDimensions (+0xE6, +0xEA) (R10b).
+using SnapshotObjectFn = void(__fastcall*)(void* self, void* edx, int32_t x, int32_t y, uint32_t personalSpace,
+    int32_t bBumpable);
+constexpr uintptr_t kSnapshotRemoveObject = 0x5488C0;
+constexpr uintptr_t kSnapshotAddObjectDiagonals = 0x5489E0;
+constexpr size_t kSearchBitmapSize = 0xF4;
+
+// Grids of a few sizes, costs from the seed (every count value in both
+// fields), points inside, on the edges and outside (up to 320, the
+// functions' own bound), personal spaces 0 to 9, both bump kinds; each call
+// on both sides from the same bytes, then the whole snapshot compared.
+void SnapshotObjects(CaseContext& ctx)
+{
+    Picks picks(ctx.seed, 0x5A4A0B1ull);
+    const int32_t sizes[][2] = { { 8, 6 }, { 30, 20 }, { 200, 192 } };
+
+    for (const auto& size : sizes) {
+        const int32_t cx = size[0];
+        const int32_t cy = size[1];
+        // The functions write only inside the grid when the point is inside
+        // it; a point outside the grid but below 320 can reach rows and
+        // columns past it, so both buffers are 320 x 320 like the search
+        // thread's.
+        const size_t bytes = 320u * 320u;
+        uint8_t* original = nullptr;
+        uint8_t* originalCosts = nullptr;
+        ctx.SetInputs("allocating the original's search bitmap " + std::to_string(cx) + "x" + std::to_string(cy));
+        ctx.CallOriginal([&] {
+            original = OriginalBlock(kSearchBitmapSize);
+            originalCosts = OriginalBlock(bytes);
+            Put<uint32_t>(original, 0xBE, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(originalCosts)));
+            Put<int32_t>(original, 0xE6, cx);
+            Put<int32_t>(original, 0xEA, cy);
+        });
+
+        auto* storage = static_cast<unsigned char*>(::operator new(sizeof(CSearchBitmap)));
+        std::memset(storage, 0, sizeof(CSearchBitmap));
+        auto* ours = reinterpret_cast<CSearchBitmap*>(storage);
+        std::vector<uint8_t> oursCosts(bytes);
+        ours->m_snapshotDynamicCost = oursCosts.data();
+        ours->m_GridSquareDimensions.cx = cx;
+        ours->m_GridSquareDimensions.cy = cy;
+
+        for (int i = 0; i < ctx.iterations; ++i) {
+            const bool remove = picks.Between(0, 1) == 0;
+            int32_t x;
+            int32_t y;
+            switch (picks.Between(0, 4)) {
+            case 0: // an edge or a corner
+                x = picks.Between(0, 1) ? 0 : cx - 1;
+                y = picks.Between(0, 1) ? 0 : cy - 1;
+                break;
+            case 1: // outside, near
+                x = picks.Between(-3, cx + 3);
+                y = picks.Between(-3, cy + 3);
+                break;
+            case 2: // the functions' own bound
+                x = picks.Between(318, 322);
+                y = picks.Between(-1, 1);
+                break;
+            default:
+                x = picks.Between(0, cx - 1);
+                y = picks.Between(0, cy - 1);
+                break;
+            }
+            const uint32_t space = static_cast<uint32_t>(picks.Between(0, 9));
+            const int32_t bump = picks.Between(0, 2);
+
+            // Fresh bytes for the area the call can touch.
+            for (int32_t row = 0; row < cy + 10 && row < 320; ++row) {
+                for (int32_t col = 0; col < cx + 10 && col < 320; ++col) {
+                    const uint8_t value = static_cast<uint8_t>(picks.Bits());
+                    oursCosts[static_cast<size_t>(row) * static_cast<size_t>(cx) + static_cast<size_t>(col)] = value;
+                }
+            }
+
+            ctx.SetInputs(std::string(remove ? "SnapshotRemoveObject" : "SnapshotAddObjectDiagonals") + "(("
+                + std::to_string(x) + ", " + std::to_string(y) + "), " + std::to_string(space) + ", "
+                + std::to_string(bump) + ") on " + std::to_string(cx) + "x" + std::to_string(cy));
+            ctx.CallOriginal([&] {
+                std::memcpy(originalCosts, oursCosts.data(), bytes);
+                reinterpret_cast<SnapshotObjectFn>(remove ? kSnapshotRemoveObject : kSnapshotAddObjectDiagonals)(
+                    original, nullptr, x, y, space, bump);
+            });
+            if (remove) {
+                ours->SnapshotRemoveObject(CPoint(x, y), static_cast<BYTE>(space), bump);
+            } else {
+                ours->SnapshotAddObjectDiagonals(CPoint(x, y), static_cast<BYTE>(space), bump);
+            }
+
+            ctx.CountInputs(1);
+            size_t first = bytes;
+            for (size_t at = 0; at < bytes; ++at) {
+                if (originalCosts[at] != oursCosts[at]) {
+                    first = at;
+                    break;
+                }
+            }
+            if (first != bytes) {
+                ctx.Fail(ctx.Inputs(), "byte " + std::to_string(first) + " = " + std::to_string(originalCosts[first]),
+                    "byte " + std::to_string(first) + " = " + std::to_string(oursCosts[first]));
+            }
+        }
+    }
+}
+
 } // namespace
 
 ORACLE_CASE("area/adjust_target", AdjustTarget);
+ORACLE_CASE("search/snapshot_objects", SnapshotObjects);
