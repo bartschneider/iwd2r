@@ -3,6 +3,7 @@
 
 #include "CBaldurChitin.h"
 #include "CGameArea.h"
+#include "CGameObjectArray.h"
 #include "CGameSprite.h"
 #include "CInfGame.h"
 #include "CScreenCreateChar.h"
@@ -571,5 +572,50 @@ TEST_CASE("save screen: the Save As popup checks the name and saves under it tri
     CHECK(pSave->GetTopPopup() == NULL);
     CHECK(pSave->m_nNumGameSlots == 0);
     CHECK(fs::exists(Child(Child(SaveRoot(), "000000004-Zeta"), "ICEWIND2.GAM")));
+    ClearSaves();
+}
+
+// CInfGame::AddCharacterToParty (0x5BD070) puts a loaded party member into
+// m_characters as well as m_characterPortraits; CInfGame::Marshal (0x5A3230)
+// walks m_characters, so without it every save after a load asserted.
+TEST_CASE("save screen: a loaded party fills m_characters and saves from the world", "[save][gam][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    ClearSaves();
+    NewGameWithOneCharacter(cre, "Probe");
+    REQUIRE(pGame->SaveGame(FALSE, FALSE, FALSE));
+
+    pGame->DestroyGame(FALSE, FALSE);
+    for (int n = 0; n < CINFGAME_MAXCHARACTERS; n++)
+        CHECK(pGame->m_characters[n] == CGameObjectArray::INVALID_INDEX);
+    pGame->LoadGame(FALSE, FALSE);
+    REQUIRE(pGame->m_nCharacters == 1);
+    CHECK(pGame->m_characterPortraits[0] != CGameObjectArray::INVALID_INDEX);
+    CHECK(pGame->m_characters[0] == pGame->m_characterPortraits[0]);
+    for (int n = 1; n < CINFGAME_MAXCHARACTERS; n++)
+        CHECK(pGame->m_characters[n] == CGameObjectArray::INVALID_INDEX);
+
+    // The save screen's save of the loaded game marshals the party.
+    CScreenSave* pSave = g_pBaldurChitin->m_pEngineSave;
+    pSave->StartSave(2);
+    REQUIRE(pSave->m_nNumGameSlots == 1);
+    pSave->SaveGame(0, CString("Reloaded"));
+    const fs::path gam = Child(Child(SaveRoot(), "000000004-Reloaded"), "ICEWIND2.GAM");
+    REQUIRE(fs::exists(gam));
+    const std::string bytes = ReadFile(gam);
+    REQUIRE(bytes.size() >= 0xB4);
+    CHECK(Le32(bytes, 0x24) == 1);
     ClearSaves();
 }
