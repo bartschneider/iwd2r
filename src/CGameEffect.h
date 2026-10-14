@@ -1350,6 +1350,7 @@ class CGameEffectVisualSpellHit : public CGameEffect {
 public:
     CGameEffectVisualSpellHit(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;
 };
 
 class CGameEffectPortraitIcon : public CGameEffect {
@@ -1543,6 +1544,7 @@ class CGameEffectAddInnateAbility : public CGameEffect {
 public:
     CGameEffectAddInnateAbility(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;
 };
 
 class CGameEffectRemoveInnateAbility : public CGameEffect {

@@ -1,7 +1,7 @@
 ---
 address: 0x4BBCB0
 name: CGameEffect_opcode_141_2
-oracle_case:
+exemption: "visual only; needs an area and the projectile classes"
 ghidra_version: 12.1.4
 ---
 
@@ -425,3 +425,7 @@ LAB_004bc412:
 - 0x7FD114 CString_SetAt
 
 ## Notes
+
+CGameEffectVisualSpellHit::ApplyEffect, opcode 141 (vtable 0x849A64). Without an area it only ends. Modes 0x20..0x22, 0x23 (FlmStrk), 0x24 (HLYMITE) and 0x26 (DDoorH) build projectile objects that are not in src/ (0x530300, 0x5348C0, 0x535320): TODOs. Mode 0x25 fires projectile 0x93, 0x27 0xCF, modes 0..0x1E (the low two bits not 3) 0x76..0x8D, each through CMessageFireProjectile at the sprite with the height of the local 0x535F20 projectile (its m_bHasHeight is set, 0x53625C, so the sprite's cast height); that local projectile itself is a TODO.
+
+Original bug bounded (ruling P4-10): the projectile type lives in the sprite argument, so a mode without an entry (low bits 3, after the assert at line 19999, or above 0x27) fires the sprite's address as the type; ours fires nothing.

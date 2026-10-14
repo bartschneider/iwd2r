@@ -1,13 +1,13 @@
 # Subsystem map
 
-Generated from commit `92aed8a` by `tools/gen_map.py`. Do not edit; CI runs `python3 -I tools/gen_map.py --check`.
+Generated from commit `e45f8d2` by `tools/gen_map.py`. Do not edit; CI runs `python3 -I tools/gen_map.py --check`.
 
-Totals: 513 files, 304080 lines, 339 `TODO: Incomplete`, 10200 address comments.
+Totals: 513 files, 304278 lines, 344 `TODO: Incomplete`, 10202 address comments.
 
 | Family | Files | Lines | `TODO: Incomplete` | Address comments | Platform headers included |
 |---|---:|---:|---:|---:|---|
 | AI | 22 | 8576 | 2 | 410 | — |
-| Game | 103 | 100605 | 95 | 2600 | — |
+| Game | 103 | 100803 | 100 | 2602 | — |
 | Screens | 36 | 65302 | 66 | 2026 | — |
 | UI | 28 | 11683 | 12 | 514 | — |
 | Video | 34 | 23761 | 65 | 1106 | ddraw_shim.h, gl_compat.h |
@@ -18,4 +18,4 @@ Totals: 513 files, 304080 lines, 339 `TODO: Incomplete`, 10200 address comments.
 | Other | 90 | 28813 | 54 | 1360 | compose.h, state_dump.h, window.h |
 | compat | 33 | 3872 | 0 | 0 | win32_api.h |
 | platform | 64 | 12554 | 0 | 1 | affinity.h, clock.h, compose.h, crash.h, data_dir.h, ddraw_shim.h, dsound_shim.h, fs.h, gl_compat.h, gpu_probe.h, handles.h, imm_stub.h, input_settings.h, png.h, present.h, present_backend.h, replay.h, replay_clock.h, script.h, script_core.h, state_dump.h, win32_api.h, window.h |
-| **Total** | 513 | 304080 | 339 | 10200 | |
+| **Total** | 513 | 304278 | 344 | 10202 | |

@@ -9,6 +9,7 @@
 #include "CGameSprite.h"
 #include "CInfCursor.h"
 #include "CInfGame.h"
+#include "CProjectile.h"
 #include "CScreenWorld.h"
 #include "CSevenEyes.h"
 #include "CSpell.h"
@@ -11541,6 +11542,162 @@ CGameEffect* CGameEffectVisualSpellHit::Copy()
     return copy;
 }
 
+// 0x4BBCB0
+BOOL CGameEffectVisualSpellHit::ApplyEffect(CGameSprite* pSprite)
+{
+    if (pSprite->GetArea() == NULL) {
+        m_done = TRUE;
+        return TRUE;
+    }
+
+    // NOTE: The original keeps the projectile type in its sprite argument;
+    // a mode with no entry below leaves the sprite's address there and
+    // fires that as the type. Bounded here (ruling P4-10): such a mode
+    // fires nothing.
+    LONG nProjectile = -1;
+
+    switch (m_dwFlags) {
+    case 0x20:
+    case 0x21:
+    case 0x22:
+        // TODO: Incomplete. The original adds a 0x2A0-byte projectile
+        // (0x530300; 0x52B150 with 0x43, 0x41 or 0x45, then vtable +0x88 at
+        // the sprite's position, y - 2); the projectile classes are not in
+        // src/.
+        m_done = TRUE;
+        return TRUE;
+    case 0x23:
+        // TODO: Incomplete. A shaft projectile "FlmStrk" (0x5348C0) added at
+        // the sprite through vtable +0x6C; not in src/.
+        m_done = TRUE;
+        return TRUE;
+    case 0x24:
+        // TODO: Incomplete. A shaft projectile "HLYMITE" (0x5348C0); not in
+        // src/.
+        m_done = TRUE;
+        return TRUE;
+    case 0x25:
+        nProjectile = 0x93;
+        break;
+    case 0x26:
+        // TODO: Incomplete. A "DDoorH" projectile (0x535320); not in src/.
+        m_done = TRUE;
+        return TRUE;
+    case 0x27:
+        nProjectile = 0xCF;
+        break;
+    default:
+        switch (m_dwFlags) {
+        case 0x0:
+            nProjectile = 0x76;
+            break;
+        case 0x1:
+            nProjectile = 0x77;
+            break;
+        case 0x2:
+            nProjectile = 0x78;
+            break;
+        case 0x4:
+            nProjectile = 0x79;
+            break;
+        case 0x5:
+            nProjectile = 0x7A;
+            break;
+        case 0x6:
+            nProjectile = 0x7B;
+            break;
+        case 0x8:
+            nProjectile = 0x7C;
+            break;
+        case 0x9:
+            nProjectile = 0x7D;
+            break;
+        case 0xA:
+            nProjectile = 0x7E;
+            break;
+        case 0xC:
+            nProjectile = 0x7F;
+            break;
+        case 0xD:
+            nProjectile = 0x80;
+            break;
+        case 0xE:
+            nProjectile = 0x81;
+            break;
+        case 0x10:
+            nProjectile = 0x82;
+            break;
+        case 0x11:
+            nProjectile = 0x83;
+            break;
+        case 0x12:
+            nProjectile = 0x84;
+            break;
+        case 0x14:
+            nProjectile = 0x85;
+            break;
+        case 0x15:
+            nProjectile = 0x86;
+            break;
+        case 0x16:
+            nProjectile = 0x87;
+            break;
+        case 0x18:
+            nProjectile = 0x88;
+            break;
+        case 0x19:
+            nProjectile = 0x89;
+            break;
+        case 0x1A:
+            nProjectile = 0x8A;
+            break;
+        case 0x1C:
+            nProjectile = 0x8B;
+            break;
+        case 0x1D:
+            nProjectile = 0x8C;
+            break;
+        case 0x1E:
+            nProjectile = 0x8D;
+            break;
+        }
+
+        // The low two bits pick air, earth or water (the "SHAir",
+        // "SHEarth", "SHWater" animations of the local projectile below).
+        if ((m_dwFlags & 3) == 3) {
+            // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameEffect.cpp
+            // __LINE__: 19999
+            UTIL_ASSERT(FALSE);
+        }
+        break;
+    }
+
+    // TODO: Incomplete. The original also builds a local 0x32C-byte
+    // projectile (0x535F20) from the animation names and adds it at the
+    // sprite through vtable +0x6C; not in src/.
+
+    if (nProjectile != -1) {
+        // NOTE: The height is the local projectile's DetermineHeight
+        // (0x529F40) for the sprite; that projectile's constructor sets
+        // m_bHasHeight (0x53625C), so it is the sprite's cast height.
+        LONG nHeight = pSprite->GetObjectType() != CGameObject::TYPE_SPRITE
+            ? 32
+            : pSprite->GetAnimation()->GetCastHeight();
+
+        CMessage* message = new CMessageFireProjectile(static_cast<WORD>(nProjectile),
+            pSprite->GetId(),
+            pSprite->GetPos(),
+            nHeight,
+            pSprite->GetId(),
+            pSprite->GetId(),
+            0);
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+    }
+
+    m_done = TRUE;
+    return TRUE;
+}
+
 // -----------------------------------------------------------------------------
 
 // NOTE: Inlined.
@@ -12585,6 +12742,45 @@ CGameEffect* CGameEffectAddInnateAbility::Copy()
     delete effect;
     copy->CopyFromBase(this);
     return copy;
+}
+
+// 0x4BE000
+BOOL CGameEffectAddInnateAbility::ApplyEffect(CGameSprite* pSprite)
+{
+    if (!g_pBaldurChitin->cDimm.m_cKeyTable.FindKey(m_res, 1006, TRUE)) {
+        m_done = TRUE;
+        return TRUE;
+    }
+
+    pSprite->AddSpecialAbility(m_res, FALSE);
+
+    // A shapeshift: SPIN122 is added once more when its entry's field_4 is
+    // 0; any other goes through 0x725D30.
+    UINT nID = 0;
+    if (g_pBaldurChitin->GetObjectGame()->m_shapeshifts.Find(m_res, nID) == TRUE) {
+        if (m_res == CGameSprite::SPIN122) {
+            UINT nIndex = 0;
+            if (pSprite->m_shapeshifts.Find(nID, nIndex) == TRUE) {
+                // NOTE: Inlined CGameSpriteSpellList::Get.
+                if (pSprite->m_shapeshifts.Get(nIndex)->field_4 == 0) {
+                    unsigned int a2 = 1;
+                    unsigned int a3 = 0;
+                    unsigned int a4 = 0;
+                    pSprite->m_shapeshifts.Add(nID, a2, a3, a4);
+
+                    BOOLEAN a5 = FALSE;
+                    pSprite->m_shapeshifts.sub_725C50(nID, a2, a5);
+                }
+            }
+        } else {
+            unsigned int a1 = 1;
+            BOOLEAN a2 = FALSE;
+            pSprite->m_shapeshifts.sub_725D30(a1, a2);
+        }
+    }
+
+    m_done = TRUE;
+    return TRUE;
 }
 
 // -----------------------------------------------------------------------------
