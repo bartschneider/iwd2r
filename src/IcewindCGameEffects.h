@@ -141,6 +141,7 @@ class IcewindCGameEffectBeltynsBurningBlood : public CGameEffect {
 public:
     IcewindCGameEffectBeltynsBurningBlood(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;
 };
 
 class IcewindCGameEffectCastingGlow : public CGameEffect {
@@ -195,6 +196,7 @@ class IcewindCGameEffectVampiricTouch : public CGameEffect {
 public:
     IcewindCGameEffectVampiricTouch(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;
 };
 
 class IcewindCGameEffectColorGlowDissipate : public CGameEffect {
@@ -219,6 +221,7 @@ class IcewindCGameEffectVisualSpellHit : public CGameEffect {
 public:
     IcewindCGameEffectVisualSpellHit(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;
 };
 
 class IcewindCGameEffectRemoveEffectOfResource : public CGameEffect {
@@ -249,12 +252,14 @@ class IcewindCGameEffectAnimationRemove : public CGameEffect {
 public:
     IcewindCGameEffectAnimationRemove(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;
 };
 
 class IcewindCGameEffectImmunityToEffectAndResource : public CGameEffect {
 public:
     IcewindCGameEffectImmunityToEffectAndResource(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;
 };
 
 class IcewindCGameEffectDominate : public CGameEffect {
@@ -381,6 +386,7 @@ class IcewindCGameEffectVitriolicSphere : public CGameEffect {
 public:
     IcewindCGameEffectVitriolicSphere(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;
 };
 
 class IcewindCGameEffectSuppressHPDisplay : public CGameEffect {
@@ -394,6 +400,7 @@ class IcewindCGameEffectFloatText : public CGameEffect {
 public:
     IcewindCGameEffectFloatText(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;
 };
 
 class IcewindCGameEffectMaceOfDisruption : public CGameEffect {
@@ -477,6 +484,7 @@ class IcewindCGameEffectApplyEffectsList : public CGameEffect {
 public:
     IcewindCGameEffectApplyEffectsList(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;
 };
 
 class IcewindCGameEffectArmorOfFaith : public CGameEffect {
@@ -564,6 +572,7 @@ class IcewindCGameEffectBleedingWounds : public CGameEffect {
 public:
     IcewindCGameEffectBleedingWounds(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;
 };
 
 class IcewindCGameEffectUnconsciousness : public CGameEffect {
