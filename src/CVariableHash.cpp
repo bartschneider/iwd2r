@@ -1,6 +1,8 @@
 #include "CVariableHash.h"
 
 #include "CBaldurChitin.h"
+#include "CGameEffect.h"
+#include "CGameSprite.h"
 #include "CInfGame.h"
 
 // 0x84EC4C
@@ -326,7 +328,43 @@ void CVariableHash::Marshal(CVariable** pList, WORD* pCount)
 // 0x550600
 void CVariableHash::MarshalToCharacter(CGameSprite* pSprite)
 {
-    // TODO: Incomplete.
+    ITEM_EFFECT* pItemEffect = new ITEM_EFFECT;
+    CGameEffect::ClearItemEffect(pItemEffect, CGAMEEFFECT_SETLOCALVARIABLE);
+
+    CVariable empty;
+
+    for (int index = 0; index < m_nTableEntries; index++) {
+        if (strcmp(m_hashEntries[index].GetName(), "") != 0) {
+            CGameEffect* pEffect = CGameEffect::DecodeEffect(pItemEffect,
+                pSprite->GetPos(),
+                pSprite->m_id,
+                CPoint(-1, -1));
+
+            memcpy(pEffect->m_scriptName, m_hashEntries[index].m_name, sizeof(SCRIPTNAME));
+            pEffect->m_flags = m_hashEntries[index].m_type;
+            pEffect->m_effectAmount2 = m_hashEntries[index].m_resRefType;
+            pEffect->m_dwFlags = m_hashEntries[index].m_dwValue;
+            pEffect->m_effectAmount = m_hashEntries[index].m_intValue;
+            pEffect->m_effectAmount3 = static_cast<LONG>(m_hashEntries[index].m_floatValue);
+            // NOTE: The duration type is the WORD constant at 0x8491AA (1).
+            pEffect->m_durationType = 1;
+
+            CString sValue(m_hashEntries[index].m_stringValue);
+            pEffect->m_res = sValue.Left(8);
+            if (sValue.GetLength() > 8) {
+                pEffect->m_res2 = sValue.Mid(8, 8);
+                if (sValue.GetLength() > 16) {
+                    pEffect->m_res3 = sValue.Mid(16, 8);
+                }
+            }
+
+            pSprite->AddEffect(pEffect, CGameAIBase::EFFECT_LIST_TIMED, TRUE, FALSE);
+
+            m_hashEntries[index] = empty;
+        }
+    }
+
+    delete pItemEffect;
 }
 
 // 0x550920
