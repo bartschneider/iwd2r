@@ -120,10 +120,15 @@ CProjectile* CProjectile::DecodeProjectile(WORD nProjectileType, CGameAIBase* pS
 
         // TODO: Incomplete (0x51EB93-0x528DEF). The jump table at 0x528E7C
         // builds one class per type, 2 to 386; only types 1 and 79 are
-        // ported. A
-        // type without its case takes the original's fallback below, the
-        // instant projectile, which delivers the effects on Fire without an
-        // animation.
+        // ported.
+        // DEVIATION (temporary): unported type -> instant projectile. The
+        // original reaches the fallback below only for types out of range
+        // and for the table entries 106, 107, 219-226, 259 and 265. Until
+        // the other cases are ported, a replay differs in two ways: the
+        // effects land on the Fire frame instead of after the projectile's
+        // flight, and the instant projectile never calls
+        // GetObjectArray()->Add where the real classes do (some also add a
+        // VEF and sparkle objects), so every later object id shifts.
         (void)pSprite;
         (void)nUnknown;
         break;

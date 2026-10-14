@@ -416,7 +416,12 @@ TEST_CASE("projectile: the instant projectile delivers on Fire and the handler r
     ClearMessages();
 
     CProjectile* pProjectile = CProjectile::DecodeProjectile(1, NULL, 0);
-    pProjectile->AddEffect(Decode(pSprite, CGAMEEFFECT_AC, 0, 0).release());
+    CGameEffect* pEffect = Decode(pSprite, CGAMEEFFECT_AC, 0, 0).release();
+    // A timed effect that lasts, so it stays on the sprite's list.
+    pEffect->m_durationType = 0;
+    pEffect->m_duration = 100000;
+    pProjectile->AddEffect(pEffect);
+    CHECK(pSprite->m_timedEffectList.Find(pEffect) == NULL);
     // Fire delivers the effects and deletes the projectile.
     pProjectile->Fire(pSprite->GetArea(), pSprite->GetId(), pSprite->GetId(), pSprite->GetPos(), 0, 0);
 
@@ -428,6 +433,13 @@ TEST_CASE("projectile: the instant projectile delivers on Fire and the handler r
 
     handler.AsynchronousUpdate();
     CHECK(handler.m_messageList.IsEmpty());
+    // The group's CMessageAddEffect gave the effect to the sprite.
+    POSITION posEffect = pSprite->m_timedEffectList.Find(pEffect);
+    CHECK(posEffect != NULL);
+    if (posEffect != NULL) {
+        pSprite->m_timedEffectList.RemoveAt(posEffect);
+        delete pEffect;
+    }
 
     ClearMessages();
 }
@@ -448,8 +460,19 @@ TEST_CASE("projectile: CMessageFireProjectile runs without a service provider an
     handler.AddMessage(message, FALSE);
     REQUIRE(handler.m_messageList.GetCount() == 1);
 
+    CGameObjectArray* pArray = g_pBaldurChitin->GetObjectGame()->GetObjectArray();
+    SHORT nMaxArrayIndex = pArray->m_nMaxArrayIndex;
+    SHORT nNextObjectId = pArray->m_nNextObjectId;
+    SHORT nDeletedListHead = pArray->m_deletedListHead;
+    INT_PTR nAdded = pSprite->GetArea()->m_lVertSortAdd.GetCount();
+
     handler.AsynchronousUpdate();
     CHECK(handler.m_messageList.IsEmpty());
+    // Nothing was added to the object array or to the area.
+    CHECK(pArray->m_nMaxArrayIndex == nMaxArrayIndex);
+    CHECK(pArray->m_nNextObjectId == nNextObjectId);
+    CHECK(pArray->m_deletedListHead == nDeletedListHead);
+    CHECK(pSprite->GetArea()->m_lVertSortAdd.GetCount() == nAdded);
 
     ClearMessages();
 }
