@@ -683,13 +683,126 @@ void CVisibilityMap::RemoveCharacter(const CPoint& pos, LONG charId, const BYTE*
 // 0x553440
 void CVisibilityMap::sub_553440(const CPoint& pt, BYTE charId)
 {
-    // TODO: Incomplete.
+    LONG nLeft = pt.x;
+    LONG nRight;
+    const BYTE* pArc = field_12;
+    BYTE nArcLength = field_4;
+    LONG y = pt.y - field_10;
+    SHORT nStepY = 1;
+    SHORT nRemaining;
+    SHORT nNext;
+    BYTE code;
+    LONG nStart;
+    LONG nEnd;
+    LONG nCount;
+    LONG nIndex;
+
+    for (INT nPass = 0; nPass < 2; nPass++) {
+        nRemaining = nArcLength;
+        nRight = nLeft;
+        if (nRemaining != 0) {
+            do {
+                code = *pArc;
+                nNext = nRemaining - 1;
+                while (TRUE) {
+                    nRight++;
+                    pArc++;
+                    nRemaining = nNext;
+                    if (code != 0) {
+                        break;
+                    }
+
+                    nRemaining = nNext - 1;
+                    if (nNext == 0) {
+                        break;
+                    }
+
+                    code = *pArc;
+                    nLeft--;
+                    nNext = nRemaining;
+                }
+
+                if (y >= 0 && y < m_nHeight) {
+                    nStart = max(nLeft, 0);
+                    nEnd = min(nRight, m_nWidth - 1);
+                    if (nStart <= nEnd) {
+                        nCount = nEnd - nStart + 1;
+                        nIndex = m_nWidth * y + nStart;
+                        do {
+                            // NOTE: Uninline.
+                            DecrementVisibility(nIndex, charId);
+                            nCount--;
+                            nIndex++;
+                        } while (nCount != 0);
+                    }
+                }
+
+                y += nStepY;
+                nLeft--;
+            } while (nRemaining > 0);
+        }
+
+        nLeft = pt.x;
+        y = field_10 + pt.y;
+        pArc = field_12;
+        nArcLength = field_4;
+        nStepY = -1;
+    }
 }
 
 // 0x5535D0
 void CVisibilityMap::sub_5535D0(const CPoint& pt, BYTE charId)
 {
-    // TODO: Incomplete.
+    LONG y = pt.y;
+    LONG nRight = pt.x + field_E;
+    const BYTE* pArc = field_16;
+    LONG nLeft = pt.x - field_E + 1;
+    SHORT nArcLength = field_1A;
+    SHORT nStepY = -1;
+    SHORT nRows;
+    LONG nStart;
+    LONG nEnd;
+    LONG nCount;
+    LONG nIndex;
+    BYTE nFirst;
+
+    for (INT nPass = 0; nPass < 2; nPass++) {
+        if (nArcLength >= 0) {
+            nRows = nArcLength + 1;
+            do {
+                if (y >= 0 && y < m_nHeight) {
+                    nStart = max(nLeft, 0);
+                    nEnd = min(nRight, m_nWidth - 1);
+                    if (nStart <= nEnd) {
+                        nCount = nEnd - nStart + 1;
+                        nIndex = m_nWidth * y + nStart;
+                        do {
+                            // NOTE: Uninline.
+                            DecrementVisibility(nIndex, charId);
+                            nCount--;
+                            nIndex++;
+                        } while (nCount != 0);
+                    }
+                }
+
+                if (*pArc++ != 0) {
+                    nLeft++;
+                    nRight--;
+                }
+
+                y += nStepY;
+                nRows--;
+            } while (nRows != 0);
+        }
+
+        nFirst = *field_16;
+        y = pt.y + 1;
+        nStepY = 1;
+        nLeft = pt.x + 1 + (nFirst - field_E);
+        nRight = (pt.x - nFirst) + field_E;
+        pArc = field_16 + 1;
+        nArcLength = field_1A - 1;
+    }
 }
 
 // 0x553740
@@ -1088,4 +1201,14 @@ void CVisibilityMap::SetTileVisible(LONG nIndex, BYTE charId)
     UTIL_ASSERT_MSG((nIndex >= 0 && nIndex < m_nMapSize), "Index into vis map out of range in SetTileVisible");
 
     m_pMap[nIndex] |= charId | EXPLORED_FLAG;
+}
+
+// NOTE: Inlined.
+void CVisibilityMap::DecrementVisibility(LONG nIndex, BYTE charId)
+{
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\CVisibility.cpp
+    // __LINE__: 2274
+    UTIL_ASSERT_MSG((nIndex >= 0 && nIndex < m_nMapSize), "Index into vis map out of range in DecrementVisibility");
+
+    m_pMap[nIndex] &= ~charId;
 }
