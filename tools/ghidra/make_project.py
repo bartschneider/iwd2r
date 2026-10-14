@@ -38,6 +38,12 @@ PROJECT_NAME = 'iwd2'
 # One headless Ghidra at a time across every worktree (filelock.hold).
 LOCK_PATH = os.path.join(PROJECT_DIR, '..', 'iwd2.lock')
 PROGRAM = 'iwd2.exe'
+# Read-only runs (evidence drafts, queries) use a copy of the project per
+# worktree, each with its own lock, so parallel worktrees do not queue behind
+# one Ghidra. GENERATION_PATH changes whenever make_project writes the main
+# project; a copy made from an older generation is made again.
+CLONES_DIR = os.path.join(HOME, 'ghidra-projects', 'clones')
+GENERATION_PATH = os.path.join(PROJECT_DIR, 'generation')
 VANILLA = os.path.join(HOME, 'vanilla', PROGRAM)
 INSTALL_EXE = '/mnt/c/Games/Icewind Dale II/iwd2ee/backup/1000/iwd2.exe'
 EXTRA_LABELS = os.path.join(HERE, 'extra_labels.txt')
@@ -71,12 +77,71 @@ def project_exists():
     return os.path.exists(os.path.join(PROJECT_DIR, PROJECT_NAME + '.gpr'))
 
 
-def headless(args, log):
+def generation():
+    """The main project's generation stamp ('0' before the first bump)."""
+    try:
+        with open(GENERATION_PATH) as f:
+            return f.read().strip() or '0'
+    except FileNotFoundError:
+        return '0'
+
+
+def bump_generation():
+    with open(GENERATION_PATH + '.tmp', 'w') as f:
+        f.write(f'{time.time_ns()}\n')
+    os.replace(GENERATION_PATH + '.tmp', GENERATION_PATH)
+
+
+def _ignore_locks(directory, names):
+    # Ghidra's own lock files (iwd2.lock, iwd2.lock~) and our run logs stay
+    # with the main project.
+    return [n for n in names if '.lock' in n or n.startswith('headless-')]
+
+
+def worktree_clone(worktree=None):
+    """The read-only copy of the project for this worktree, made or remade
+    from the main project when missing or from an older generation.
+    Returns (project_dir, lock_path)."""
+    name = os.path.basename(os.path.normpath(worktree or ROOT))
+    base = os.path.join(CLONES_DIR, name)
+    clone = os.path.join(base, PROJECT_NAME)
+    lock = os.path.join(base, PROJECT_NAME + '.lock')
+    stamp = os.path.join(base, 'generation')
+    os.makedirs(base, exist_ok=True)
+    with filelock.hold(lock, 'ghidra clone ' + name):
+        want = generation()
+        try:
+            with open(stamp) as f:
+                have = f.read().strip()
+        except FileNotFoundError:
+            have = None
+        if have != want or not os.path.exists(
+                os.path.join(clone, PROJECT_NAME + '.gpr')):
+            fresh = clone + '.new'
+            shutil.rmtree(fresh, ignore_errors=True)
+            # Copy under the main lock so a refresh cannot change it midway.
+            with filelock.hold(LOCK_PATH, 'ghidra'):
+                want = generation()
+                shutil.copytree(PROJECT_DIR, fresh, ignore=_ignore_locks)
+            shutil.rmtree(clone, ignore_errors=True)
+            os.replace(fresh, clone)
+            with open(stamp, 'w') as f:
+                f.write(want + '\n')
+    return clone, lock
+
+
+def headless(args, log, read_only=False):
     """Run analyzeHeadless on the project; returns the CompletedProcess.
 
     Ghidra refuses project paths with an element starting with '.', such as
-    ~/.local, so the project is reached through a temporary symlink. The run
-    holds LOCK_PATH, so a second worktree's run waits for this one."""
+    ~/.local, so the project is reached through a temporary symlink. A
+    read-only run uses this worktree's copy and holds only its lock; any
+    other run uses the main project and holds LOCK_PATH, so a second
+    worktree's run waits for this one."""
+    project, lock = PROJECT_DIR, LOCK_PATH
+    if read_only:
+        project, lock = worktree_clone()
+        log = os.path.join(os.path.dirname(project), os.path.basename(log))
     env = dict(os.environ, JAVA_HOME=JDK, GHIDRA_HEADLESS_MAXMEM=MAXMEM)
     env['PATH'] = os.path.join(JDK, 'bin') + os.pathsep + env.get('PATH', '')
     with tempfile.TemporaryDirectory(prefix='iwd2r-ghidra-') as tmp:
@@ -84,10 +149,10 @@ def headless(args, log):
             sys.exit(f'make_project: temporary directory {tmp} has a '
                      "path element starting with '.'; set TMPDIR")
         link = os.path.join(tmp, 'iwd2')
-        os.symlink(PROJECT_DIR, link)
+        os.symlink(project, link)
         cmd = [HEADLESS, link, PROJECT_NAME, *args,
                '-scriptPath', HERE, '-log', log]
-        with filelock.hold(LOCK_PATH, 'ghidra'):
+        with filelock.hold(lock, 'ghidra'):
             return subprocess.run(cmd, env=env, capture_output=True,
                                   text=True)
 
@@ -150,6 +215,7 @@ def main(argv=None):
     elapsed = time.monotonic() - start
     with open(os.path.join(PROJECT_DIR, f'headless-{mode}.out'), 'w') as f:
         f.write(r.stdout + r.stderr)
+    bump_generation()  # worktree copies remake themselves from this one
     if r.returncode != 0 or 'ERROR REPORT' in r.stdout:
         sys.stderr.write(r.stdout[-4000:] + r.stderr[-4000:])
         sys.exit(f'make_project: analyzeHeadless failed ({r.returncode})')
