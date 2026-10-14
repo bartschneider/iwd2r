@@ -1424,6 +1424,14 @@ LONG CDamageReduction::Apply(LONG nDamage)
     } else {
         // NOTE: The whole pool comes off the damage here, even when it is
         // larger than the amount (see 447C20.md). Kept.
+        //
+        // NOTE: Use-after-free kept from the original (see 447C20.md): the
+        // first sub_4C0830 may delete m_sourceEffectPtr, which the second
+        // call dereferences again. m_pPool points into that effect too, and
+        // every derived stats copy (m_derivedStats, m_tempStats,
+        // m_bonusStats) keeps m_pPool and m_sourceEffectPtr dangling until
+        // the next ProcessEffectList rebuild, including GetBest and
+        // GetEffectiveAmount on m_derivedStats from the character screen.
         nDamage -= *m_pPool;
         *m_pPool = 0;
 
@@ -1478,6 +1486,19 @@ BOOLEAN CDamageReduction::IsGeneric()
     return m_damageTypes.find(0x8000000) != m_damageTypes.end();
 }
 
+// NOTE: The character screen calls it (0x5DDF68 and five more); 0x448130,
+// 0x4481A0 and 0x448250 inline it.
+//
+// 0x447E30
+LONG CDamageReduction::GetEffectiveAmount()
+{
+    if (m_pPool == NULL) {
+        return m_nAmount;
+    }
+
+    return *m_pPool < m_nAmount ? *m_pPool : m_nAmount;
+}
+
 // 0x447E50
 void CDamageReduction::AddDamageType(INT nType)
 {
@@ -1492,17 +1513,6 @@ void CDamageReduction::SetSource(LONG* pPool, CGameSprite* pSprite, CGameEffect*
     m_sourceEffectPtr = pEffect;
 }
 
-// NOTE: Inlined in 0x448130, 0x4481A0 and 0x448250: the amount, or the pool
-// when it holds less.
-static LONG GetEffectiveAmount(const CDamageReduction& reduction)
-{
-    if (reduction.m_pPool == NULL) {
-        return reduction.m_nAmount;
-    }
-
-    return *reduction.m_pPool < reduction.m_nAmount ? *reduction.m_pPool : reduction.m_nAmount;
-}
-
 // NOTE: The original reads no argument here but pops one (`ret 0x4`); its
 // caller passes 5.
 //
@@ -1514,7 +1524,7 @@ CDamageReduction* CDamageReductionList::GetBestGeneric(LONG nEnchantment)
     CDamageReduction* pBest = NULL;
     for (iterator it = begin(); it != end(); it++) {
         if (it->IsGeneric() == TRUE) {
-            if (pBest == NULL || GetEffectiveAmount(*it) > GetEffectiveAmount(*pBest)) {
+            if (pBest == NULL || it->GetEffectiveAmount() > pBest->GetEffectiveAmount()) {
                 pBest = &(*it);
             }
         }
@@ -1534,7 +1544,7 @@ CDamageReduction* CDamageReductionList::GetBest(LONG nEnchantment, DWORD nDamage
             && (it->m_damageTypes.size() == 0
                 || it->m_damageTypes.find(static_cast<INT>(nDamageType)) != it->m_damageTypes.end())
             && !it->IsGeneric()) {
-            if (pBest == NULL || GetEffectiveAmount(*it) > GetEffectiveAmount(*pBest)) {
+            if (pBest == NULL || it->GetEffectiveAmount() > pBest->GetEffectiveAmount()) {
                 pBest = &(*it);
             }
         }
@@ -1551,7 +1561,7 @@ LONG CDamageReductionList::Apply(LONG nDamage, LONG nEnchantment, DWORD nDamageT
         if (nEnchantment < it->m_nEnchantment
             && (it->m_damageTypes.size() == 0
                 || it->m_damageTypes.find(static_cast<INT>(nDamageType)) != it->m_damageTypes.end())) {
-            if (pBest == NULL || GetEffectiveAmount(*it) > GetEffectiveAmount(*pBest)) {
+            if (pBest == NULL || it->GetEffectiveAmount() > pBest->GetEffectiveAmount()) {
                 pBest = &(*it);
             }
         }

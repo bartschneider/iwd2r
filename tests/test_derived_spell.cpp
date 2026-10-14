@@ -244,6 +244,16 @@ TEST_CASE("damage reduction apply", "[derived]")
 
 TEST_CASE("damage reduction lookup", "[derived]")
 {
+    CDamageReduction plain(12, 1);
+    CHECK(plain.GetEffectiveAmount() == 12);
+    LONG pool = 7;
+    plain.SetSource(&pool, nullptr, nullptr);
+    CHECK(plain.GetEffectiveAmount() == 7);
+    pool = 12;
+    CHECK(plain.GetEffectiveAmount() == 12);
+    pool = 40;
+    CHECK(plain.GetEffectiveAmount() == 12);
+
     CHECK(CDamageReduction(5, 1).IsGeneric() == TRUE);
     CHECK(MakeGeneric(5, 1).IsGeneric() == TRUE);
     CDamageReduction partial(5, 1);

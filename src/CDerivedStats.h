@@ -539,6 +539,7 @@ public:
     CDamageReduction(LONG nAmount, LONG nEnchantment);
     LONG Apply(LONG nDamage);
     BOOLEAN IsGeneric();
+    LONG GetEffectiveAmount();
     void AddDamageType(INT nType);
     void SetSource(LONG* pPool, CGameSprite* pSprite, CGameEffect* pEffect);
 

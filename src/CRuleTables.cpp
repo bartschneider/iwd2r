@@ -3782,9 +3782,6 @@ void CRuleTables::sub_546B60(CGameSprite* pSprite, int& a2, int& a3, int& a4, BO
     }
 }
 
-// FIXME: For unknown reason `nClass` and `nLevel` params are passed as
-// pointers.
-//
 // 0x547040
 INT CRuleTables::GetSaveAdjustmentForSourceSprite(CGameSprite* pSprite, const CResRef& sourceRes, DWORD nSavingThrow, BYTE nClass, DWORD nSpecialization, BYTE nCasterLevel) const
 {
@@ -3838,6 +3835,9 @@ INT CRuleTables::GetSaveAdjustmentForSourceSprite(CGameSprite* pSprite, const CR
     return nBonus;
 }
 
+// FIXME: For unknown reason `nClass` and `nLevel` params are passed as
+// pointers.
+//
 // 0x547130
 DWORD CRuleTables::GetMaxSpellLevel(const BYTE& nClass, const UINT& nLevel) const
 {
