@@ -321,7 +321,7 @@ def decompile(queries):
         out = os.path.join(tmp, 'evidence.txt')
         r = mp.headless(['-process', mp.PROGRAM, '-noanalysis', '-readOnly',
                          '-postScript', 'DecompileToEvidence.java', out,
-                         *queries], log)
+                         *queries], log, read_only=True)
         if (r.returncode != 0 or 'ERROR REPORT' in r.stdout
                 or not os.path.exists(out)):
             sys.stderr.write(r.stdout[-4000:] + r.stderr[-4000:])
