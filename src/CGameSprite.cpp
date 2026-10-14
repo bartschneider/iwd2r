@@ -4351,7 +4351,8 @@ void CGameSprite::PlaySound(BYTE soundID, BOOL showText, BOOL showCircle, BOOL o
         UTIL_ASSERT(FALSE);
 
         // NOTE: The original goes on into the common part with no string
-        // resource (a null pointer, 0x70204F) and faults; bounded here.
+        // resource (a null pointer: ebp is still 0 at 0x702071) and faults;
+        // bounded here.
         return;
     }
 
