@@ -6422,6 +6422,58 @@ CGameEffect* CGameEffectStoneToFlesh::Copy()
     return copy;
 }
 
+// 0x4B2070
+BOOL CGameEffectStoneToFlesh::ApplyEffect(CGameSprite* pSprite)
+{
+    if ((pSprite->m_derivedStats.m_generalState & STATE_STONE_DEATH) == 0) {
+        m_done = TRUE;
+        return TRUE;
+    }
+
+    CMessage* message;
+
+    // NOTE: Inlined CGameObject::InControl.
+    if (pSprite->InControl()) {
+        // A permanent Raise Dead (effect 32, flags 0x2B).
+        ITEM_EFFECT* effect = new ITEM_EFFECT;
+        memset(effect, 0, sizeof(ITEM_EFFECT));
+        effect->effectID = CGAMEEFFECT_RESURRECT;
+        effect->probabilityUpper = 100;
+        effect->dwFlags = 0x2B;
+        effect->durationType = 1;
+        effect->duration = 0;
+
+        CGameEffect* pEffect = CGameEffect::DecodeEffect(effect, pSprite->GetPos(), pSprite->GetId(), CPoint(-1, -1));
+        message = new CMessageAddEffect(pEffect->Copy(), pSprite->GetId(), pSprite->GetId());
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        if (pEffect != NULL) {
+            delete pEffect;
+        }
+        delete effect;
+    }
+
+    pSprite->m_baseStats.m_hitPoints = 1;
+
+    pSprite->m_equipedEffectList.RemoveAllOfType(pSprite, CGAMEEFFECT_PORTRAITICON, pSprite->m_equipedEffectList.m_posCurrent, 71);
+    pSprite->m_timedEffectList.RemoveAllOfType(pSprite, CGAMEEFFECT_PORTRAITICON, pSprite->m_timedEffectList.m_posCurrent, 71);
+
+    if ((pSprite->m_baseStats.m_flags & 0x800) != 0) {
+        // NOTE: Inlined CGameObject::InControl.
+        if (pSprite->InControl()) {
+            message = new CMessageSetDialogResRef(CResRef("MULTIJ"), pSprite->GetId(), pSprite->GetId());
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        }
+
+        if (g_pBaldurChitin->GetObjectGame()->GetCharacterPortraitNum(pSprite->GetId()) != -1) {
+            message = new CMessageVisibilityMapMove(TRUE, pSprite->GetId(), pSprite->GetId());
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        }
+    }
+
+    m_done = TRUE;
+    return TRUE;
+}
+
 // -----------------------------------------------------------------------------
 
 // NOTE: Inlined.
@@ -7130,6 +7182,89 @@ CGameEffect* CGameEffectSlay::Copy()
     delete effect;
     copy->CopyFromBase(this);
     return copy;
+}
+
+// 0x4B2F10
+BOOL CGameEffectSlay::ApplyEffect(CGameSprite* pSprite)
+{
+    if (g_pBaldurChitin->GetObjectGame()->m_gameSave.m_cutScene == TRUE) {
+        m_done = TRUE;
+        return TRUE;
+    }
+
+    if ((pSprite->m_baseStats.m_flags & 0x20000) != 0) {
+        m_done = TRUE;
+        return TRUE;
+    }
+
+    CAIObjectType typeAI;
+    typeAI.Set(pSprite->GetAIType());
+
+    // NOTE: Inlined CGameEffectDeath().
+    CGameEffect* pDeath = new CGameEffectDeath();
+    pDeath->m_dwFlags = 4;
+    pDeath->m_source = m_source;
+    pDeath->m_sourceID = m_sourceID;
+    pDeath->m_casterLevel = m_casterLevel;
+
+    // Kills when the sprite's object type has the amount in the field the
+    // mode names (an amount of 0 matches any). NOTE: The original leaks the
+    // death effect when nothing matches.
+    BYTE nAlignment;
+    switch (m_dwFlags) {
+    case 2:
+        if (typeAI.m_nEnemyAlly == static_cast<DWORD>(m_effectAmount) || m_effectAmount == 0) {
+            pSprite->AddEffect(pDeath, CGameAIBase::EFFECT_LIST_TIMED, TRUE, TRUE);
+        }
+        break;
+    case 3:
+        if (typeAI.m_nGeneral == static_cast<DWORD>(m_effectAmount) || m_effectAmount == 0) {
+            pSprite->AddEffect(pDeath, CGameAIBase::EFFECT_LIST_TIMED, TRUE, TRUE);
+        }
+        break;
+    case 4:
+        if (typeAI.m_nRace == static_cast<DWORD>(m_effectAmount) || m_effectAmount == 0) {
+            pSprite->AddEffect(pDeath, CGameAIBase::EFFECT_LIST_TIMED, TRUE, TRUE);
+        }
+        break;
+    case 5:
+        if ((typeAI.m_nClassMask & m_effectAmount) != 0 || m_effectAmount == 0) {
+            pSprite->AddEffect(pDeath, CGameAIBase::EFFECT_LIST_TIMED, TRUE, TRUE);
+        }
+        break;
+    case 6:
+        if (typeAI.m_nSpecific == static_cast<DWORD>(m_effectAmount) || m_effectAmount == 0) {
+            pSprite->AddEffect(pDeath, CGameAIBase::EFFECT_LIST_TIMED, TRUE, TRUE);
+        }
+        break;
+    case 7:
+        if (typeAI.m_nGender == static_cast<DWORD>(m_effectAmount) || m_effectAmount == 0) {
+            pSprite->AddEffect(pDeath, CGameAIBase::EFFECT_LIST_TIMED, TRUE, TRUE);
+        }
+        break;
+    case 8:
+        nAlignment = typeAI.m_nAlignment;
+        if (nAlignment == static_cast<DWORD>(m_effectAmount) || m_effectAmount == 0) {
+            pSprite->AddEffect(pDeath, CGameAIBase::EFFECT_LIST_TIMED, TRUE, TRUE);
+        }
+
+        // An amount of 1, 2, 3 names the good-evil axis, 0x10, 0x20, 0x30
+        // the law-chaos axis. NOTE: The original can add the same death a
+        // second time here; for the alignments the game uses the exact match
+        // above never meets one of these amounts.
+        if ((m_effectAmount == 1 && (nAlignment & 0xF) == 1)
+            || (m_effectAmount == 2 && (nAlignment & 0xF) == 2)
+            || (m_effectAmount == 3 && (nAlignment & 0xF) == 3)
+            || (m_effectAmount == 0x10 && (nAlignment & 0xF0) == 0x10)
+            || (m_effectAmount == 0x20 && (nAlignment & 0xF0) == 0x20)
+            || (m_effectAmount == 0x30 && (nAlignment & 0xF0) == 0x30)) {
+            pSprite->AddEffect(pDeath, CGameAIBase::EFFECT_LIST_TIMED, TRUE, TRUE);
+        }
+        break;
+    }
+
+    m_done = TRUE;
+    return TRUE;
 }
 
 // -----------------------------------------------------------------------------
@@ -10900,6 +11035,97 @@ CGameEffect* CGameEffectTeleport::Copy()
     return copy;
 }
 
+// 0x4B92E0
+BOOL CGameEffectTeleport::ApplyEffect(CGameSprite* pSprite)
+{
+    CGameObject* pObject;
+    CGameSprite* pSource;
+    CMessage* message;
+
+    switch (m_dwFlags) {
+    case 0:
+        // To the effect's target point.
+        pSprite->JumpToPoint(m_target, TRUE);
+        m_done = TRUE;
+        return TRUE;
+    case 1:
+        // The source to this sprite.
+        if (g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetDeny(m_sourceID,
+                CGameObjectArray::THREAD_ASYNCH,
+                &pObject,
+                INFINITE)
+            == CGameObjectArray::SUCCESS) {
+            pSource = static_cast<CGameSprite*>(pObject);
+            pSource->JumpToPoint(pSprite->GetPos(), TRUE);
+            g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(m_sourceID,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+            m_done = TRUE;
+            return TRUE;
+        }
+        break;
+    case 2:
+        // Back to the creature file's saved point and facing.
+        pSprite->JumpToPoint(CPoint(pSprite->m_baseStats.field_2E4, pSprite->m_baseStats.field_2E6), TRUE);
+        pSprite->SetDirection(static_cast<SHORT>(static_cast<char>(pSprite->m_baseStats.field_2E8)));
+        m_done = TRUE;
+        return TRUE;
+    case 3:
+        // The source and this sprite change places.
+        if (g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetDeny(m_sourceID,
+                CGameObjectArray::THREAD_ASYNCH,
+                &pObject,
+                INFINITE)
+            == CGameObjectArray::SUCCESS) {
+            pSource = static_cast<CGameSprite*>(pObject);
+            CPoint ptSource = pSource->GetPos();
+            CPoint ptTarget = pSprite->GetPos();
+
+            pSource->sub_75F3D0(1);
+            if (g_pChitin->cNetwork.m_nServiceProvider != 0) {
+                message = new CMessage90(pSource->GetId(), pSource->GetId(), 1);
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+            }
+
+            pSprite->sub_75F3D0(1);
+            if (g_pChitin->cNetwork.m_nServiceProvider != 0) {
+                message = new CMessage90(pSprite->GetId(), pSprite->GetId(), 1);
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+            }
+
+            pSource->JumpToPoint(ptTarget, TRUE);
+            pSprite->JumpToPoint(ptSource, TRUE);
+
+            pSource->sub_75F3D0(0);
+            if (g_pChitin->cNetwork.m_nServiceProvider != 0) {
+                message = new CMessage90(pSource->GetId(), pSource->GetId(), 0);
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+            }
+
+            pSprite->sub_75F3D0(0);
+            if (g_pChitin->cNetwork.m_nServiceProvider != 0) {
+                message = new CMessage90(pSprite->GetId(), pSprite->GetId(), 0);
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+            }
+
+            g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(m_sourceID,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+            m_done = TRUE;
+            return TRUE;
+        }
+        break;
+    default:
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameEffect.cpp
+        // __LINE__: 17926
+        UTIL_ASSERT(FALSE);
+        break;
+    }
+
+    m_done = TRUE;
+    return TRUE;
+}
+
 // -----------------------------------------------------------------------------
 
 // NOTE: Inlined.
@@ -14621,6 +14847,72 @@ CGameEffect* CGameEffectStoneSkins::Copy()
     delete effect;
     copy->CopyFromBase(this);
     return copy;
+}
+
+// 0x4C0250
+BOOL CGameEffectStoneSkins::ApplyEffect(CGameSprite* pSprite)
+{
+    if (m_dwFlags == 0) {
+        // Stoneskin.
+        if (m_secondaryType) {
+            // NOTE: Uninline.
+            DisplayStringRef(pSprite, 803);
+        }
+
+        pSprite->m_derivedStats.m_spellStates.set(SPLSTATE_STONESKIN, true);
+
+        // NOTE: Uninline.
+        AddPortraitIcon(pSprite, 46);
+
+        if (m_secondaryType) {
+            DWORD nAmount = m_casterLevel * 10;
+            if (nAmount > 149) {
+                nAmount = 150;
+            }
+            m_effectAmount2 = nAmount;
+        }
+
+        // TODO: Incomplete. The original adds a damage reduction entry for
+        // the physical damage types (0, 0x100000, 0x1000000, 0x2000000,
+        // 0x4000000, 0x8000000) of 10 / 5 with m_effectAmount2 as its pool
+        // to the table at m_derivedStats + 0x49C (0x447B60, 0x447E50,
+        // 0x447F10, 0x447F30, 0x448470); CDerivedStats.h does not declare
+        // the table.
+    } else if (m_dwFlags == 1) {
+        // Iron skins.
+        if (m_secondaryType) {
+            // NOTE: Uninline.
+            DisplayStringRef(pSprite, 804);
+        }
+
+        pSprite->m_derivedStats.m_spellStates.set(SPLSTATE_IRON_SKINS, true);
+
+        // NOTE: Uninline.
+        AddPortraitIcon(pSprite, 89);
+
+        pSprite->m_derivedStats.m_nResistCrushing += 10;
+        pSprite->m_derivedStats.m_nResistPiercing += 10;
+        pSprite->m_derivedStats.m_nResistSlashing += 10;
+
+        LONG nSkins = pSprite->m_derivedStats.m_nStoneSkins;
+        if (nSkins <= m_effectAmount) {
+            nSkins = m_effectAmount;
+        }
+        pSprite->m_derivedStats.m_nStoneSkins = nSkins;
+
+        CMessage* message = new CMessageVisualEffect(23,
+            static_cast<BYTE>(pSprite->m_derivedStats.m_nStoneSkins),
+            pSprite->GetId(),
+            pSprite->GetId());
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+    }
+
+    pSprite->SetColorRange(14);
+
+    pSprite->m_derivedStats.m_naturalImmunities.insert(CGAMEEFFECT_STONESKINS);
+
+    m_done = FALSE;
+    return TRUE;
 }
 
 // -----------------------------------------------------------------------------

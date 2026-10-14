@@ -560,3 +560,39 @@ TEST_CASE("learn spell (147) finds a wizard spell and ends", "[effects][data]")
 
     delete pSprite;
 }
+
+TEST_CASE("stoneskins (218), slay (55) and stone to flesh (43)", "[effects][data]")
+{
+    REQUIRE_ENGINE();
+    CGameSprite* pSprite = MakeSprite();
+
+    SECTION("iron skins add 10 to the physical resistances and keep the larger count")
+    {
+        SHORT nSlashing = pSprite->m_derivedStats.m_nResistSlashing;
+        pSprite->m_derivedStats.m_nStoneSkins = 2;
+        CHECK(Apply(pSprite, CGAMEEFFECT_STONESKINS, 1, 5, 0) == FALSE);
+        CHECK(pSprite->m_derivedStats.m_nResistSlashing == nSlashing + 10);
+        CHECK(pSprite->m_derivedStats.m_nStoneSkins == 5);
+        CHECK(pSprite->m_derivedStats.m_spellStates.test(SPLSTATE_IRON_SKINS));
+        CHECK(pSprite->m_derivedStats.m_naturalImmunities.count(CGAMEEFFECT_STONESKINS) == 1);
+    }
+
+    SECTION("slay leaves a sprite of another race alone")
+    {
+        SHORT nHitPoints = pSprite->m_baseStats.m_hitPoints;
+        BYTE nRace = pSprite->GetAIType().m_nRace;
+        CHECK(Apply(pSprite, CGAMEEFFECT_SLAY, 4, nRace + 1, 0) == TRUE);
+        CHECK(pSprite->m_baseStats.m_hitPoints == nHitPoints);
+        CHECK(pSprite->m_timedEffectList.GetCount() == 0);
+    }
+
+    SECTION("stone to flesh does nothing to a living sprite")
+    {
+        pSprite->m_derivedStats.m_generalState &= ~STATE_STONE_DEATH;
+        SHORT nHitPoints = pSprite->m_baseStats.m_hitPoints;
+        CHECK(Apply(pSprite, CGAMEEFFECT_STONETOFLESH, 0, 0, 0) == TRUE);
+        CHECK(pSprite->m_baseStats.m_hitPoints == nHitPoints);
+    }
+
+    delete pSprite;
+}
