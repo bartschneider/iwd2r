@@ -1,6 +1,7 @@
 #define NOMINMAX
 #include "platform/present.h"
 
+#include "platform/gpu_probe.h"
 #include "platform/present_backend.h"
 
 #include <algorithm>
@@ -25,6 +26,13 @@ namespace {
         float sharpness = 0.5f;
         // A device loss was already answered with a rebuild.
         bool rebuilt = false;
+        // The child probe's verdict, kept for the session (probed: it ran).
+        bool probed = false;
+        bool probeOk = false;
+        std::string probeWhy;
+        std::string probeExe; // testing::SetProbeExe; empty: this executable
+        std::string fallback; // why the last gpu start fell back
+
         int skipped = 0;
         // testing::UseOffscreen: a backend without a window.
         int offscreenWidth = 0;
@@ -51,6 +59,8 @@ namespace {
         static State state;
         return state;
     }
+
+    const int kProbeTimeoutMs = 10000;
 
     const uint64_t kFnvOffset = 14695981039346656037ull;
     const uint64_t kFnvPrime = 1099511628211ull;
@@ -112,6 +122,38 @@ namespace {
         return true;
     }
 
+    // Whether the game's process may create a GPU device: the child probe
+    // (IWD2R_GPU_PROBE skips or fails it). False with why set.
+    bool ProbeAllows(std::string& why)
+    {
+        State& s = S();
+        const char* mode = std::getenv("IWD2R_GPU_PROBE");
+        const std::string m = Lower(mode);
+        if (m == "skip")
+            return true;
+        if (m == "fail") {
+            why = "probe: forced by IWD2R_GPU_PROBE=fail";
+            return false;
+        }
+        if (!s.probed) {
+            const std::string exe = s.probeExe.empty() ? gpu_probe::SelfExe() : s.probeExe;
+            if (exe.empty()) {
+                s.probeOk = false;
+                s.probeWhy = "this executable's path is unknown";
+            } else {
+                const gpu_probe::Result r = gpu_probe::Run(exe, kProbeTimeoutMs);
+                s.probeOk = r.outcome == gpu_probe::Outcome::Ok;
+                s.probeWhy = r.reason;
+                if (s.probeOk)
+                    std::fprintf(stderr, "presenter: gpu probe %s\n", r.reason.c_str());
+            }
+            s.probed = true;
+        }
+        if (!s.probeOk)
+            why = "probe: " + s.probeWhy;
+        return s.probeOk;
+    }
+
     // Starts the chosen backend on the current target; gpu (or auto) falls
     // back to classic, saying why.
     void StartBackend(BackendKind kind)
@@ -124,10 +166,12 @@ namespace {
             return;
         std::string why;
         if (kind != BackendKind::Classic) {
-            if (TryStart(MakeGpuBackend(), why)) {
+            if (ProbeAllows(why) && TryStart(MakeGpuBackend(), why)) {
                 s.active = BackendKind::Gpu;
+                s.fallback.clear();
                 return;
             }
+            s.fallback = why;
             std::fprintf(stderr, "presenter: gpu unavailable (%s), using classic\n", why.c_str());
         }
         if (!TryStart(MakeClassicBackend(), why))
@@ -517,6 +561,17 @@ bool PrimaryFrame(const uint32_t** pixels, int* width, int* height, int* pitchBy
 }
 
 namespace testing {
+
+    void SetProbeExe(const char* exe)
+    {
+        State& s = S();
+        s.probeExe = exe ? exe : "";
+        s.probed = false;
+        s.probeOk = false;
+        s.probeWhy.clear();
+    }
+
+    std::string LastFallbackReason() { return S().fallback; }
 
     void UseOffscreen(int w, int h)
     {

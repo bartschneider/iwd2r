@@ -17,6 +17,13 @@ public:
 };
 
 static_assert(sizeof(CVariable) == 0x54, "CVariable size");
+static_assert(offsetof(CVariable, m_name) == 0x00, "CVariable::m_name");
+static_assert(offsetof(CVariable, m_type) == 0x20, "CVariable::m_type");
+static_assert(offsetof(CVariable, m_resRefType) == 0x22, "CVariable::m_resRefType");
+static_assert(offsetof(CVariable, m_dwValue) == 0x24, "CVariable::m_dwValue");
+static_assert(offsetof(CVariable, m_intValue) == 0x28, "CVariable::m_intValue");
+static_assert(offsetof(CVariable, m_floatValue) == 0x2C, "CVariable::m_floatValue");
+static_assert(offsetof(CVariable, m_stringValue) == 0x34, "CVariable::m_stringValue");
 
 class CVariableHashBase {
 public:

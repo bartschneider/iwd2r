@@ -3592,89 +3592,6 @@ SHORT CGameAIBase::SetGlobalTimer()
 
 // -----------------------------------------------------------------------------
 
-// NOTE: The original's message that hands a cutscene response to its actor
-// (vtable 0x848BB0, 0x3C bytes). Marshal and Unmarshal (0x5017E0, 0x501FE0)
-// are the network path and are omitted (single player only,
-// docs/adr/0002-single-player-only.md). It lives here, next to the action
-// that sends it, until CMessage.cpp has an owner to take it.
-class CMessageInsertResponse : public CMessage {
-public:
-    CMessageInsertResponse(const CAIResponse& response, LONG caller, LONG target)
-        : CMessage(caller, target)
-    {
-        m_response.Set(response);
-        m_bCheckCurrentResponse = FALSE;
-        m_bClearActions = FALSE;
-        m_nMode = 0;
-    }
-
-    SHORT GetCommType() override { return SEND; }
-    BYTE GetMsgType() override { return CBaldurMessage::MSG_TYPE_CMESSAGE; }
-    // NOTE: 0x463280 returns the BYTE at 0x84CEF3 (28).
-    BYTE GetMsgSubType() override { return 28; }
-    void Run() override;
-
-    /* 000C */ CAIResponse m_response;
-    /* 0030 */ BOOL m_bCheckCurrentResponse;
-    /* 0034 */ BOOL m_bClearActions;
-    /* 0038 */ LONG m_nMode;
-};
-
-// 0x502570
-void CMessageInsertResponse::Run()
-{
-    CGameObject* pObject;
-    BYTE rc;
-
-    do {
-        rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetDeny(m_targetId,
-            CGameObjectArray::THREAD_ASYNCH,
-            &pObject,
-            INFINITE);
-    } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
-
-    if (rc != CGameObjectArray::SUCCESS) {
-        return;
-    }
-
-    if ((pObject->GetObjectType() & CGameObject::TYPE_AIBASE) != 0) {
-        CGameAIBase* pAIBase = static_cast<CGameAIBase*>(pObject);
-
-        if (m_nMode == 1) {
-            POSITION pos = m_response.m_actionList.GetHeadPosition();
-            while (pos != NULL) {
-                CAIAction oldAction;
-                oldAction = pAIBase->m_curAction;
-
-                POSITION posCurr = pos;
-                CAIAction* pAction = m_response.m_actionList.GetNext(pos);
-                pAction->m_internalFlags |= 0x2;
-
-                if (g_pBaldurChitin->GetObjectGame()->GetRuleTables().m_lDLGINST.Find(pAction->m_actionID) != NULL) {
-                    pAIBase->SetCurrAction(*pAction);
-                    pAIBase->ExecuteAction();
-                    m_response.m_actionList.RemoveAt(posCurr);
-                    if (pAction != NULL) {
-                        delete pAction;
-                    }
-                }
-
-                pAIBase->SetCurrAction(oldAction);
-            }
-        }
-
-        if (m_response.m_actionList.GetCount() > 0) {
-            pAIBase->InsertResponse(m_response, m_bCheckCurrentResponse, m_bClearActions);
-        }
-    }
-
-    g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(m_targetId,
-        CGameObjectArray::THREAD_ASYNCH,
-        INFINITE);
-}
-
-// -----------------------------------------------------------------------------
-
 // 0x462F90
 SHORT CGameAIBase::StartCutScene()
 {
@@ -3695,7 +3612,7 @@ SHORT CGameAIBase::StartCutScene()
 
                 CGameObject* pActor = pAction->m_acteeID.sub_40CB20(this, CGameObject::TYPE_AIBASE, FALSE);
                 if (pActor != NULL) {
-                    CMessage* message = new CMessageInsertResponse(*pResponse, m_id, pActor->m_id);
+                    CMessage* message = new CMessageInsertResponse(*pResponse, FALSE, FALSE, FALSE, m_id, pActor->m_id);
                     g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
 
                     if ((pActor->GetObjectType() & CGameObject::TYPE_AIBASE) != 0) {
