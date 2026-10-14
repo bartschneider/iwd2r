@@ -4,6 +4,7 @@
 #include "CResSpell.h"
 
 class CGameEffect;
+class CGameObject;
 class CGameSprite;
 
 class CSpell : public CResHelper<CResSpell, 1006> {
@@ -15,6 +16,7 @@ public:
     INT GetAbilityCount();
     BOOL GetIcon(BYTE* resRef);
     SPELL_ABILITY* GetAbility(LONG nAbilityNo) const;
+    CGameEffect* GetAbilityEffect(LONG nAbility, LONG nEffect, CGameObject* pObject, BYTE nClass, DWORD nSpecialization, BYTE nCasterLevel);
     SHORT GetLevel() const;
     DWORD GetNotUsableBy() const;
     BOOL CheckUsableBy(CGameSprite* pSprite) const;

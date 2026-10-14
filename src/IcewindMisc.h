@@ -5,6 +5,8 @@
 
 #include "BalDataTypes.h"
 
+#include <list>
+
 class CButtonData;
 class CGameEffect;
 class CGameObject;
@@ -77,6 +79,7 @@ public:
     static BOOLEAN sub_585DA0(CGameSprite* pSprite);
     static CButtonData* CreateButtonData(BYTE* resRef);
     static void sub_5860F0(CGameSprite* pSprite, CGameEffect* pEffect);
+    static std::list<CGameEffect*> GetSpellResrefEffects(CGameObject* pObject, const BYTE* resRef, INT nLevel);
 };
 
 #endif /* ICEWINDMISC_H_ */

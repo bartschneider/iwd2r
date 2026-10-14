@@ -14,11 +14,8 @@ CDerivedStats::CDerivedStats()
 
     // TODO: Incomplete. Members our header does not declare yet: the two
     // 10-entry arrays at +0x328 and +0x378 (zeroed at 0x443CA3 and
-    // 0x443CB9), the tree at +0x470 (0x443D71, 0x448C40), the list at
-    // +0x490 (0x443DA1, 0x4490E0) and the vector of 0x24-byte entries at
-    // +0x49C (0x443DC1-0x443DD3); and, after BonusInit, their emptying
-    // (0x443FD5 and 0x443FE0 with 0x4E7050, the tree at 0x444031, the list
-    // up to 0x44407B).
+    // 0x443CB9), and, after BonusInit, their emptying (0x443FD5 and
+    // 0x443FE0 with 0x4E7050).
 
     BonusInit();
 
@@ -46,7 +43,9 @@ CDerivedStats::CDerivedStats()
     field_41C.RemoveAll();
     m_cImmunitiesItemUse.ClearAll();
     m_cImmunitiesItemTypeUse.ClearAll();
+    m_resourceImmunities.clear();
     m_naturalImmunities.clear();
+    m_whenStruckList.clear();
     field_4AC.RemoveAll();
     field_4C8.RemoveAll();
     field_4E4.RemoveAll();
@@ -87,12 +86,28 @@ void CDerivedStats::Reload(CGameSprite* pSprite, CCreatureFileHeader* pCreature,
     m_nACPiercingMod = pCreature->m_armorClassPiercingAdjustment;
     m_nACSlashingMod = pCreature->m_armorClassSlashingAdjustment;
 
-    // TODO: Incomplete. The original empties the vector of 0x24-byte entries
-    // at +0x49C (FUN_00448B00, 0x444181) and, when the header's field_1B4
-    // is not 0, adds one built from it (5 * field_1B4, or 15 with 1 for 6)
-    // with six flag values 0, 0x100000, 0x1000000, 0x2000000, 0x4000000
-    // and 0x8000000 (0x444186-0x444306). Our header does not declare the
-    // vector yet.
+    // NOTE: The original erases the whole range (0x448B00 at 0x444181).
+    m_damageReductions.clear();
+
+    // NOTE: Unsigned compare (`jbe` at 0x44418E).
+    if (static_cast<DWORD>(pCreature->field_1B4) > 0) {
+        LONG nAmount = 5 * pCreature->field_1B4;
+        LONG nEnchantment = pCreature->field_1B4;
+        if (pCreature->field_1B4 == 6) {
+            nAmount = 15;
+            nEnchantment = 1;
+        }
+
+        // NOTE: The original builds the entry inline (0x4441AA-0x4442E0).
+        CDamageReduction reduction(nAmount, nEnchantment);
+        reduction.AddDamageType(0);
+        reduction.AddDamageType(0x100000);
+        reduction.AddDamageType(0x1000000);
+        reduction.AddDamageType(0x2000000);
+        reduction.AddDamageType(0x4000000);
+        reduction.AddDamageType(0x8000000);
+        m_damageReductions.insert(m_damageReductions.end(), 1, reduction);
+    }
 
     m_nCriticalHitBonus = 0;
     m_nTHAC0 = 0;
@@ -233,13 +248,9 @@ void CDerivedStats::Reload(CGameSprite* pSprite, CCreatureFileHeader* pCreature,
     m_cImmunitiesItemUse.ClearAll();
     m_cImmunitiesItemTypeUse.ClearAll();
 
-    // TODO: Incomplete. The tree at +0x470 (emptied at 0x44471B-0x444730),
-    // not declared in our header.
-
+    m_resourceImmunities.clear();
     m_naturalImmunities.clear();
-
-    // TODO: Incomplete. The list at +0x490 (emptied from 0x444751), not
-    // declared in our header.
+    m_whenStruckList.clear();
 
     // NOTE: See BonusInit.
     field_4AC.RemoveAll();
@@ -312,9 +323,15 @@ void CDerivedStats::Reload(CGameSprite* pSprite, CCreatureFileHeader* pCreature,
         }
 
         if (pSprite->m_derivedStats.m_monkLevel >= 20) {
-            // TODO: Incomplete. The original adds an entry to the vector at
-            // +0x49C (value 0x14, 1; the same six flag values as above;
-            // 0x4449D1-0x444ADF).
+            // NOTE: The original builds the entry inline (0x4449DA-0x444AB5).
+            CDamageReduction reduction(20, 1);
+            reduction.AddDamageType(0);
+            reduction.AddDamageType(0x100000);
+            reduction.AddDamageType(0x1000000);
+            reduction.AddDamageType(0x2000000);
+            reduction.AddDamageType(0x4000000);
+            reduction.AddDamageType(0x8000000);
+            m_damageReductions.insert(m_damageReductions.end(), 1, reduction);
         }
 
         // NOTE: 42 is the last misc slot (SLOT_MISC + 27), the magic weapon
@@ -404,9 +421,9 @@ CDerivedStats& CDerivedStats::operator=(const CDerivedStats& other)
     m_nACPiercingMod = other.m_nACPiercingMod;
     m_nACSlashingMod = other.m_nACSlashingMod;
 
-    // TODO: Incomplete. The original copies the vector of 0x24-byte
-    // entries at +0x49C (ending at 0x44550B), which our header does not
-    // declare yet (see Reload).
+    // NOTE: The vector's operator= inlined (0x44538B-0x44550B); the
+    // entries' pools, creatures and effects are copied as pointers.
+    m_damageReductions = other.m_damageReductions;
 
     m_nCriticalHitBonus = other.m_nCriticalHitBonus;
     m_nTHAC0 = other.m_nTHAC0;
@@ -521,13 +538,12 @@ CDerivedStats& CDerivedStats::operator=(const CDerivedStats& other)
     m_cImmunitiesItemUse = other.m_cImmunitiesItemUse;
     m_cImmunitiesItemTypeUse = other.m_cImmunitiesItemTypeUse;
 
-    // TODO: Incomplete. The tree at +0x470 (0x445A7D-0x445B00), not
-    // declared in our header.
-
+    m_resourceImmunities = other.m_resourceImmunities;
     m_naturalImmunities = other.m_naturalImmunities;
+    m_whenStruckList = other.m_whenStruckList;
 
-    // TODO: Incomplete. The list at +0x490 and the six lists at +0x4AC to
-    // +0x538 (0x4E7680, 0x4E7720; 0x445CC4-0x445D1E), whose element types are unknown.
+    // TODO: Incomplete. The six lists at +0x4AC to +0x538 (0x4E7680,
+    // 0x4E7720; 0x445CC4-0x445D1E), whose element types are unknown.
 
     field_128 = other.field_128;
     field_12C = other.field_12C;
@@ -569,9 +585,7 @@ void CDerivedStats::BonusInit()
     m_nACPiercingMod = 0;
     m_nACSlashingMod = 0;
 
-    // TODO: Incomplete. The original empties a vector of 0x24-byte entries
-    // at +0x49C (0x445EB4, FUN_00448BD0) that our header does not declare
-    // yet; Reload adds to it (see 4440F0.md).
+    m_damageReductions.clear();
 
     m_nCriticalHitBonus = 0;
     m_nTHAC0 = 0;
@@ -699,13 +713,9 @@ void CDerivedStats::BonusInit()
     m_cImmunitiesItemUse.ClearAll();
     m_cImmunitiesItemTypeUse.ClearAll();
 
-    // TODO: Incomplete. A tree container at +0x470 (emptied at 0x4461E3),
-    // not declared in our header.
-
+    m_resourceImmunities.clear();
     m_naturalImmunities.clear();
-
-    // TODO: Incomplete. A list of { CResRef, CResRef, 3 DWORDs } at +0x490
-    // (emptied at 0x4462E3), not declared in our header.
+    m_whenStruckList.clear();
 
     // NOTE: The original's ClearAll (0x4E71B0) deletes each element; the
     // element types of these lists are unknown and nothing adds to them.
@@ -1385,4 +1395,192 @@ CGameSpriteGroupedSpellList* CDerivedStats::sub_447B00(const BYTE& nClass)
     UTIL_ASSERT(nClassIndex < CSPELLLIST_NUM_CLASSES);
 
     return &(m_spells.m_spellsByClass[nClassIndex]);
+}
+
+// -----------------------------------------------------------------------------
+
+// 0x447B60
+CDamageReduction::CDamageReduction(LONG nAmount, LONG nEnchantment)
+{
+    m_nAmount = nAmount;
+    m_nEnchantment = nEnchantment;
+    m_pPool = NULL;
+    m_sourceCreaturePtr = NULL;
+    m_sourceEffectPtr = NULL;
+}
+
+// 0x447C20
+LONG CDamageReduction::Apply(LONG nDamage)
+{
+    if (m_pPool == NULL) {
+        nDamage -= m_nAmount;
+    } else if (*m_pPool >= nDamage) {
+        LONG nReduction = m_nAmount;
+        if (nDamage < nReduction) {
+            nReduction = nDamage;
+        }
+        nDamage -= nReduction;
+        *m_pPool -= nReduction;
+    } else {
+        // NOTE: The whole pool comes off the damage here, even when it is
+        // larger than the amount (see 447C20.md). Kept.
+        //
+        // NOTE: In the original the first sub_4C0830 may delete
+        // m_sourceEffectPtr, which the second call dereferences again;
+        // m_pPool points into that effect too, and every derived stats copy
+        // (m_derivedStats, m_tempStats, m_bonusStats) keeps m_pPool and
+        // m_sourceEffectPtr dangling until the next ProcessEffectList
+        // rebuild, including GetBest and GetEffectiveAmount on
+        // m_derivedStats from the character screen (see 447C20.md).
+        nDamage -= *m_pPool;
+        *m_pPool = 0;
+
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\CDerivedStats.cpp
+        // __LINE__: 2206
+        UTIL_ASSERT(m_sourceCreaturePtr != 0);
+
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\CDerivedStats.cpp
+        // __LINE__: 2207
+        UTIL_ASSERT(m_sourceEffectPtr != 0);
+
+        // DEVIATION (ruling M3-10): the original calls both lists'
+        // sub_4C0830 and keeps the entry. Its freed pool reads 0, so later
+        // hits subtract 0 and select the same way; ours skips the second
+        // call once the first has deleted the effect and neutralizes the
+        // entry, so it never reads, writes or deletes through stale
+        // pointers. Play is unchanged.
+        if (!m_sourceCreaturePtr->m_equipedEffectList.sub_4C0830(m_sourceEffectPtr)) {
+            m_sourceCreaturePtr->m_timedEffectList.sub_4C0830(m_sourceEffectPtr);
+        }
+
+        m_nAmount = 0;
+        m_pPool = NULL;
+        m_sourceEffectPtr = NULL;
+    }
+
+    if (nDamage < 0) {
+        return 0;
+    }
+
+    return nDamage;
+}
+
+// 0x447CD0
+BOOLEAN CDamageReduction::IsGeneric()
+{
+    if (m_damageTypes.size() == 0) {
+        return TRUE;
+    }
+
+    if (m_damageTypes.find(0) == m_damageTypes.end()) {
+        return FALSE;
+    }
+
+    if (m_damageTypes.find(0x100000) == m_damageTypes.end()) {
+        return FALSE;
+    }
+
+    if (m_damageTypes.find(0x1000000) == m_damageTypes.end()) {
+        return FALSE;
+    }
+
+    if (m_damageTypes.find(0x2000000) == m_damageTypes.end()) {
+        return FALSE;
+    }
+
+    // NOTE: The original looks this one up through lower_bound and a key
+    // compare (0x449800), the same test.
+    if (m_damageTypes.find(0x4000000) == m_damageTypes.end()) {
+        return FALSE;
+    }
+
+    return m_damageTypes.find(0x8000000) != m_damageTypes.end();
+}
+
+// NOTE: The character screen calls it (0x5DDF68 and five more); 0x448130,
+// 0x4481A0 and 0x448250 inline it.
+//
+// 0x447E30
+LONG CDamageReduction::GetEffectiveAmount()
+{
+    if (m_pPool == NULL) {
+        return m_nAmount;
+    }
+
+    return *m_pPool < m_nAmount ? *m_pPool : m_nAmount;
+}
+
+// 0x447E50
+void CDamageReduction::AddDamageType(INT nType)
+{
+    m_damageTypes.insert(nType);
+}
+
+// 0x447F10
+void CDamageReduction::SetSource(LONG* pPool, CGameSprite* pSprite, CGameEffect* pEffect)
+{
+    m_pPool = pPool;
+    m_sourceCreaturePtr = pSprite;
+    m_sourceEffectPtr = pEffect;
+}
+
+// NOTE: The original reads no argument here but pops one (`ret 0x4`); its
+// caller passes 5.
+//
+// 0x448130
+CDamageReduction* CDamageReductionList::GetBestGeneric(LONG nEnchantment)
+{
+    (void)nEnchantment;
+
+    CDamageReduction* pBest = NULL;
+    for (iterator it = begin(); it != end(); it++) {
+        if (it->IsGeneric() == TRUE) {
+            if (pBest == NULL || it->GetEffectiveAmount() > pBest->GetEffectiveAmount()) {
+                pBest = &(*it);
+            }
+        }
+    }
+
+    return pBest;
+}
+
+// 0x4481A0
+CDamageReduction* CDamageReductionList::GetBest(LONG nEnchantment, DWORD nDamageType)
+{
+    CDamageReduction* pBest = NULL;
+    for (iterator it = begin(); it != end(); it++) {
+        // NOTE: An empty type set makes the entry generic, so it never
+        // passes both tests. Kept.
+        if (nEnchantment < it->m_nEnchantment
+            && (it->m_damageTypes.size() == 0
+                || it->m_damageTypes.find(static_cast<INT>(nDamageType)) != it->m_damageTypes.end())
+            && !it->IsGeneric()) {
+            if (pBest == NULL || it->GetEffectiveAmount() > pBest->GetEffectiveAmount()) {
+                pBest = &(*it);
+            }
+        }
+    }
+
+    return pBest;
+}
+
+// 0x448250
+LONG CDamageReductionList::Apply(LONG nDamage, LONG nEnchantment, DWORD nDamageType)
+{
+    CDamageReduction* pBest = NULL;
+    for (iterator it = begin(); it != end(); it++) {
+        if (nEnchantment < it->m_nEnchantment
+            && (it->m_damageTypes.size() == 0
+                || it->m_damageTypes.find(static_cast<INT>(nDamageType)) != it->m_damageTypes.end())) {
+            if (pBest == NULL || it->GetEffectiveAmount() > pBest->GetEffectiveAmount()) {
+                pBest = &(*it);
+            }
+        }
+    }
+
+    if (pBest != NULL) {
+        return pBest->Apply(nDamage);
+    }
+
+    return nDamage;
 }

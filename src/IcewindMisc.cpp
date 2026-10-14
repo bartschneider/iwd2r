@@ -1017,3 +1017,58 @@ void IcewindMisc::sub_5860F0(CGameSprite* pSprite, CGameEffect* pEffect)
         }
     }
 }
+
+// 0x586220
+std::list<CGameEffect*> IcewindMisc::GetSpellResrefEffects(CGameObject* pObject, const BYTE* resRef, INT nLevel)
+{
+    // NOTE: The original builds a CString from the resref as a C string
+    // (0x7FCC88); callers pass CResRef's 8-byte buffer, which has no
+    // terminator when all 8 characters are used, so the original reads on
+    // into the next member. CResRef keeps only the first 8 characters, so
+    // ours stops there.
+    char szResRef[9];
+    strncpy(szResRef, reinterpret_cast<const char*>(resRef), 8);
+    szResRef[8] = '\0';
+
+    CString sResRef(szResRef);
+    CResRef cResRef(sResRef);
+
+    CSpell cSpell;
+    cSpell.SetResRef(cResRef, TRUE, TRUE);
+    cSpell.Demand();
+
+    // NOTE: The last ability whose minimum caster level is not above nLevel;
+    // -1 (no ability) when the first one is already above it.
+    SHORT nAbility = 0;
+    while (nAbility < cSpell.GetAbilityCount()) {
+        if (cSpell.GetAbility(nAbility)->minCasterLevel > nLevel) {
+            break;
+        }
+
+        // NOTE: The original fetches the ability a second time for nothing
+        // (0x586301).
+        cSpell.GetAbility(nAbility);
+
+        nAbility++;
+    }
+    nAbility--;
+
+    SPELL_ABILITY* pAbility = cSpell.GetAbility(nAbility);
+
+    std::list<CGameEffect*> effects;
+    if (pAbility != NULL) {
+        for (INT nEffect = 0; nEffect < pAbility->effectCount; nEffect++) {
+            CGameEffect* pEffect = cSpell.GetAbilityEffect(nAbility, nEffect, pObject, 0, 0, 0);
+
+            // NOTE: No NULL check in the original (0x58638A). Kept.
+            pEffect->m_source = pObject->GetPos();
+            pEffect->m_sourceID = pObject->m_id;
+
+            effects.push_back(pEffect);
+        }
+    }
+
+    cSpell.Release();
+
+    return effects;
+}
