@@ -170,7 +170,6 @@ public:
     /* 01B4 */ BOOL m_bCapsLockKeyOn;
     /* 01B8 */ BOOLEAN field_1B8;
     /* 01BA */ CGameSpriteGroupedSpellList m_spells;
-    /* 02B6 */ int field_2B6;
     /* 02BA */ SHORT m_nTopSkill;
     /* 02BC */ INT m_nLevelUpSkillPoints;
     /* 02C0 */ INT m_storedSkills[16];

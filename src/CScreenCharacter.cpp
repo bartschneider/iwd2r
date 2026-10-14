@@ -264,7 +264,8 @@ CScreenCharacter::CScreenCharacter()
     }
     m_spells.m_nHighestLevel = 0;
 
-    field_2B6 = 0;
+    // NOTE: The original clears 0x2B6 (m_spells.m_nHighestLevel) again.
+    m_spells.m_nHighestLevel = 0;
     field_866 = 0;
     m_nSpellLevel = 0;
     field_86A = 0;
@@ -525,6 +526,15 @@ void CScreenCharacter::EngineGameInit()
     m_pTempDerivedStats = NULL;
     m_pBeforeLevelUpDerivedStats = NULL;
 
+    for (UINT nLevel = 0; nLevel < CSPELLLIST_MAX_LEVELS; nLevel++) {
+        if (m_spells.m_lists[nLevel].m_List.size() != 0) {
+            m_spells.m_lists[nLevel].m_List.clear();
+            m_spells.m_lists[nLevel].field_14 = 0;
+            m_spells.m_lists[nLevel].field_18 = 0;
+        }
+    }
+    m_spells.m_nHighestLevel = 0;
+
     field_866 = 0;
     field_86A = 0;
 
@@ -648,9 +658,9 @@ void CScreenCharacter::OnMouseMove(CPoint pt)
     } else if (m_cUIManager.GetPanel(57)->m_bActive) {
         pPanel = m_cUIManager.GetPanel(57);
         if (pPanel->GetControl(2)->IsOver(pt - pPanel->m_ptOrigin)) {
-            m_pCurrentScrollBar = static_cast<CUIControlScrollBar*>(pPanel->GetControl(4));
-        } else {
             m_pCurrentScrollBar = static_cast<CUIControlScrollBar*>(pPanel->GetControl(3));
+        } else {
+            m_pCurrentScrollBar = static_cast<CUIControlScrollBar*>(pPanel->GetControl(4));
         }
     }
 
@@ -731,6 +741,8 @@ CString CScreenCharacter::GetCurrentPortrait(CGameSprite* pSprite)
         // __LINE__: 1767
         UTIL_ASSERT(FALSE);
     }
+
+    return CString("");
 }
 
 // NOTE: Inlined.
@@ -1873,7 +1885,7 @@ void CScreenCharacter::UpdateAbilitiesPanel(CGameSprite* pSprite)
         pButton = static_cast<CUIControlButton*>(pPanel->GetControl(17 + nIndex));
 
         // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenCharacter.cpp
-        // __LINE__: 3685
+        // __LINE__: 3692
         UTIL_ASSERT(pButton != NULL);
 
         BOOL bCanDec;
@@ -2401,6 +2413,8 @@ STRREF CScreenCharacter::GetRangerHatedRaceStrref(BYTE nRace)
         // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenCharacter.cpp
         // __LINE__: 4439
         UTIL_ASSERT(FALSE);
+
+        strRace = -1;
     }
     return strRace;
 }
@@ -2567,10 +2581,36 @@ void CScreenCharacter::UpdateMainPanel(BOOL bCharacterChanged)
 
             UpdateLabel(pPanel, 0x1000002A, "%d", DStats.m_nMaxHitPoints);
             UpdateLabel(pPanel, 0x10000028, "%d", pSprite->GetAC());
+
+            CString sRace;
+            rule.GetRaceStringMixed(typeAI.m_nRace, sRace, typeAI.m_nSubRace);
+            UpdateLabel(pPanel, 0x1000000F, "%s", (LPCSTR)sRace);
+
+            switch (typeAI.m_nAlignment) {
+            case 0x00:
+            case 0x11:
+            case 0x12:
+            case 0x13:
+            case 0x21:
+            case 0x22:
+            case 0x23:
+            case 0x31:
+            case 0x32:
+            case 0x33:
+                break;
+            default:
+                // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenCharacter.cpp
+                // __LINE__: 1546
+                UTIL_ASSERT(FALSE);
+            }
         } else {
             UpdateLabel(pPanel, 0x10000029, "");
             UpdateLabel(pPanel, 0x1000002A, "");
             UpdateLabel(pPanel, 0x10000028, "");
+
+            CString sRace;
+            rule.GetRaceStringMixed(0, sRace, 0);
+            UpdateLabel(pPanel, 0x1000000F, "%s", (LPCSTR)sRace);
         }
 
         if (BStats.m_name != -1) {
@@ -2669,8 +2709,8 @@ void CScreenCharacter::UpdateMainPanel(BOOL bCharacterChanged)
         // __LINE__: 4866
         UTIL_ASSERT(pButton != NULL);
 
-        // pButton->SetEnabled(IsLevelUpButtonClickable(pSprite)
-        //     && (DStats.m_generalState & STATE_DEAD) == 0);
+        pButton->SetEnabled(CanLevelUp(pSprite)
+            && (DStats.m_generalState & STATE_DEAD) == 0);
 
         pGame->GetObjectArray()->ReleaseShare(nCharacterId,
             CGameObjectArray::THREAD_ASYNCH,
@@ -2726,6 +2766,7 @@ void CScreenCharacter::UpdateGeneralInformation(CUIControlTextDisplay* pText, CG
 
     if ((pDStats->m_generalState & STATE_DEAD) != 0) {
         UpdateText(pText, "%s", (LPCSTR)FetchString(11829)); // "DEAD"
+        UpdateText(pText, "");
     }
 
     // FIXME: Calls `GetEffectiveCharacterLevel` twice.
@@ -3014,8 +3055,101 @@ void CScreenCharacter::UpdateGeneralInformation(CUIControlTextDisplay* pText, CG
         UpdateText(pText, "");
     }
 
+    BOOLEAN bHasBonusSpells = FALSE;
+    BOOL bBonusSpellsHeader = FALSE;
     if (pSprite->HasClassMask(CLASSMASK_WIZARD | CLASSMASK_SORCERER | CLASSMASK_RANGER | CLASSMASK_PALADIN | CLASSMASK_DRUID | CLASSMASK_CLERIC | CLASSMASK_BARD)) {
-        // TODO: Incomplete (spells).
+        CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+        for (UINT nIndex = 0; nIndex < 7; nIndex++) {
+            BYTE nClass = pGame->GetSpellcasterClass(nIndex);
+
+            DWORD dwClassMask;
+            switch (nIndex) {
+            case 0:
+                dwClassMask = CLASSMASK_BARD;
+                break;
+            case 1:
+                dwClassMask = CLASSMASK_CLERIC;
+                break;
+            case 2:
+                dwClassMask = CLASSMASK_DRUID;
+                break;
+            case 3:
+                dwClassMask = CLASSMASK_PALADIN;
+                break;
+            case 4:
+                dwClassMask = CLASSMASK_RANGER;
+                break;
+            case 5:
+                dwClassMask = CLASSMASK_SORCERER;
+                break;
+            case 6:
+                dwClassMask = CLASSMASK_WIZARD;
+                break;
+            default:
+                dwClassMask = 0;
+                break;
+            }
+
+            if (pSprite->HasClassMask(dwClassMask)) {
+                // NOTE: Only the bonus (the out parameter) is shown; the
+                // returned maximum is dropped.
+                INT nBonus;
+                rule.GetMaxKnownSpells(nClass,
+                    typeAI,
+                    *pDStats,
+                    pBStats->m_specialization,
+                    1,
+                    nBonus);
+
+                if (nBonus > 0) {
+                    bHasBonusSpells = TRUE;
+
+                    CString sClass;
+                    rule.GetClassStringMixed(nClass,
+                        pBStats->m_specialization,
+                        pBStats->m_flags,
+                        sClass,
+                        typeAI.m_nGender != 2);
+
+                    if (!bBonusSpellsHeader) {
+                        UpdateTextForceColor(pText,
+                            RGB(200, 200, 0),
+                            "%s",
+                            (LPCSTR)FetchString(10344)); // "Bonus Spells"
+                        bBonusSpellsHeader = TRUE;
+                    }
+
+                    UpdateText(pText, "%s", (LPCSTR)sClass);
+
+                    INT nSpellLevel = 1;
+                    while (nBonus > 0) {
+                        sValue.Format("%d", nSpellLevel);
+                        tlk.SetToken(TOKEN_SPELLLEVEL, sValue);
+
+                        UpdateTextNoTrim(pText,
+                            "  %s: %+d",
+                            (LPCSTR)FetchString(10345), // "Level <SPELLLEVEL>"
+                            nBonus);
+
+                        nSpellLevel++;
+                        rule.GetMaxKnownSpells(nClass,
+                            typeAI,
+                            *pDStats,
+                            pBStats->m_specialization,
+                            nSpellLevel,
+                            nBonus);
+                        if (nSpellLevel > 9) {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (bHasBonusSpells == TRUE) {
+            UpdateText(pText, "");
+        }
     }
 
     UpdateTextForceColor(pText,
@@ -3023,8 +3157,12 @@ void CScreenCharacter::UpdateGeneralInformation(CUIControlTextDisplay* pText, CG
         "%s",
         (LPCSTR)FetchString(40315)); // "Ability Statistics"
 
-    INT nTotalWeight = static_cast<INT>(static_cast<float>(rule.GetEncumbranceMod(pSprite)) / 100.0f
-        * static_cast<float>(atol(rule.m_tStrengthMod.GetAt(CPoint(3, pDStats->m_nSTR)))));
+    // NOTE: The original divides and multiplies on the x87 stack (extended
+    // precision) with float operands; double keeps the intermediate exact
+    // enough for these small values.
+    INT nStrengthWeight = iwd2r_atol(rule.m_tStrengthMod.GetAt(CPoint(3, pDStats->m_nSTR)));
+    INT nTotalWeight = static_cast<INT>(static_cast<double>(static_cast<float>(rule.GetEncumbranceMod(pSprite))) / 100.0
+        * static_cast<double>(static_cast<float>(nStrengthWeight)));
 
     UpdateText(pText,
         "%s: %d %s",
@@ -3140,7 +3278,53 @@ void CScreenCharacter::UpdateGeneralInformation(CUIControlTextDisplay* pText, CG
         (LPCSTR)FetchString(15581), // "Spell Resistance"
         pDStats->m_nResistMagic);
 
-    // TODO: Incomplete (checking unknown STL container for damage reductions).
+    if (pDStats->m_damageReductions.size() > 0) {
+        UpdateText(pText, "");
+
+        UpdateTextForceColor(pText,
+            RGB(200, 200, 0),
+            "%s",
+            (LPCSTR)FetchString(39325)); // "Damage Reduction"
+
+        // NOTE: GetBestGeneric ignores its argument, so the first try (5)
+        // decides.
+        for (INT nEnchantment = 5; nEnchantment >= 0; nEnchantment--) {
+            CDamageReduction* pReduction = pDStats->m_damageReductions.GetBestGeneric(nEnchantment);
+            if (pReduction != NULL) {
+                UpdateText(pText,
+                    "%s: %d/+%d",
+                    (LPCSTR)FetchString(41406),
+                    pReduction->GetEffectiveAmount(),
+                    pReduction->m_nEnchantment);
+                break;
+            }
+        }
+
+        static const struct {
+            DWORD dwDamageType;
+            STRREF strName;
+        } kDamageTypes[] = {
+            { 0, 11770 }, // "Bludgeoning"
+            { 0x100000, 11769 }, // "Piercing"
+            { 0x1000000, 11768 }, // "Slashing"
+            { 0x2000000, 41404 },
+            { 0x4000000, 41405 },
+        };
+
+        for (const auto& damageType : kDamageTypes) {
+            for (INT nEnchantment = 5; nEnchantment >= 0; nEnchantment--) {
+                CDamageReduction* pReduction = pDStats->m_damageReductions.GetBest(nEnchantment, damageType.dwDamageType);
+                if (pReduction != NULL) {
+                    UpdateText(pText,
+                        "%s: %d/+%d",
+                        (LPCSTR)FetchString(damageType.strName),
+                        pReduction->GetEffectiveAmount(),
+                        pReduction->m_nEnchantment);
+                    break;
+                }
+            }
+        }
+    }
 }
 
 // 0x5DE2C0
@@ -4518,7 +4702,7 @@ BOOL CScreenCharacter::OnCancelButtonClick()
                 m_spells.m_lists[nLevel].field_18 = 0;
             }
         }
-        field_2B6 = 0;
+        m_spells.m_nHighestLevel = 0;
 
         pSprite->m_spells = m_pTempDerivedStats->m_spells;
         pSprite->m_domainSpells = m_pTempDerivedStats->m_domainSpells;
@@ -6388,13 +6572,10 @@ void CScreenCharacter::UpdateClassSelectionPanel(CGameSprite* pSprite)
 
         BOOL bEnabled;
 
-        // TODO: Unclear jumps.
+        BOOL bCheckClass;
         switch (pSprite->m_startTypeAI.GetRace()) {
         case CAIOBJECTTYPE_R_HUMAN:
-            // NOTE: Uninline.
-            bEnabled = rule.IsValidAlignment(pButton->GetClass(),
-                pSprite->m_startTypeAI.GetAlignment(),
-                0);
+            bCheckClass = TRUE;
             break;
         case CAIOBJECTTYPE_R_ELF:
         case CAIOBJECTTYPE_R_HALF_ELF:
@@ -6402,32 +6583,51 @@ void CScreenCharacter::UpdateClassSelectionPanel(CGameSprite* pSprite)
         case CAIOBJECTTYPE_R_HALFLING:
         case CAIOBJECTTYPE_R_GNOME:
         case CAIOBJECTTYPE_R_HALF_ORC:
-            if (nClass > 0 || nClass <= 11) {
-                bEnabled = rule.IsValidAlignment(pButton->GetClass(),
-                    pSprite->m_startTypeAI.GetAlignment(),
-                    0);
-                break;
-            }
+            // NOTE: Every button's class is in 1..11, so this always passes.
+            bCheckClass = nClass != 0 && nClass <= 11;
             break;
         default:
-            bEnabled = FALSE;
+            bCheckClass = FALSE;
             break;
         }
 
-        if (bEnabled) {
+        if (bCheckClass) {
             // NOTE: Uninline.
-            switch (pButton->GetClass()) {
-            case CAIOBJECTTYPE_C_PALADIN:
-                if ((pSprite->GetBaseStats()->field_2FB & 0x8) != 0) {
-                    bEnabled = FALSE;
+            bEnabled = rule.IsValidAlignment(pButton->GetClass(),
+                pSprite->m_startTypeAI.GetAlignment(),
+                0);
+            if (bEnabled) {
+                switch (pButton->m_nID) {
+                case 2:
+                case 3:
+                case 4:
+                case 5:
+                case 6:
+                case 9:
+                case 10:
+                case 11:
+                case 12:
+                    break;
+                case 7:
+                    // The monk's button: a fallen monk (CRE 0x2FB bit 8).
+                    if ((pSprite->GetBaseStats()->field_2FB & 0x8) != 0) {
+                        bEnabled = FALSE;
+                    }
+                    break;
+                case 8:
+                    // The paladin's button: a fallen paladin (CRE 0x2FB bit 4).
+                    if ((pSprite->GetBaseStats()->field_2FB & 0x4) != 0) {
+                        bEnabled = FALSE;
+                    }
+                    break;
+                default:
+                    // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenCharacter.cpp
+                    // __LINE__: 12808
+                    UTIL_ASSERT(FALSE);
                 }
-                break;
-            case CAIOBJECTTYPE_C_RANGER:
-                if ((pSprite->GetBaseStats()->field_2FB & 0x4) != 0) {
-                    bEnabled = FALSE;
-                }
-                break;
             }
+        } else {
+            bEnabled = FALSE;
         }
 
         pButton->SetEnabled(bEnabled);
@@ -7371,9 +7571,9 @@ DWORD CUIControlButtonCharacterSpecializationSelection::GetSpecialization()
         case 6:
             return SPECMASK_WIZARD_ENCHANTER;
         case 7:
-            return SPECMASK_WIZARD_ILLUSIONIST;
-        case 8:
             return SPECMASK_WIZARD_EVOKER;
+        case 8:
+            return SPECMASK_WIZARD_ILLUSIONIST;
         case 9:
             return SPECMASK_WIZARD_NECROMANCER;
         case 10:
@@ -7447,7 +7647,8 @@ void CUIControlButtonCharacterSpecializationSelection::OnLButtonClick(CPoint pt)
     if (rc == CGameObjectArray::SUCCESS) {
         DWORD nSpecialization = GetSpecialization();
 
-        // TODO: Looks odd.
+        // NOTE: The original keeps only the low 16 bits of the old
+        // specialization here (movzx), so a cleric's deity bits are dropped.
         pCharacter->m_nSpecialization = nSpecialization | static_cast<WORD>(pCharacter->field_77C);
 
         STRREF strDescription;
@@ -7523,6 +7724,13 @@ void CUIControlButtonCharacterSpecializationSelection::OnLButtonClick(CPoint pt)
             break;
         case SPECMASK_WIZARD_UNIVERSAL:
             strDescription = 9563;
+            break;
+        default:
+            // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenCharacter.cpp
+            // __LINE__: 14181
+            UTIL_ASSERT(FALSE);
+
+            strDescription = -1;
         }
 
         pCharacter->UpdateHelp(m_pPanel->m_nID, 13, strDescription);

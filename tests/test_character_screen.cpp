@@ -8,6 +8,7 @@
 #include "CInfGame.h"
 #include "CScreenCharacter.h"
 #include "CScreenCreateChar.h"
+#include "CUIControlButton.h"
 #include "CUIPanel.h"
 #include "ScreenLayout.h"
 #include "data_view.h"
@@ -390,4 +391,37 @@ TEST_CASE("character screen: cancelling a level-up restores the creature", "[cha
     CHECK(pCharacter->m_pBeforeLevelUpDerivedStats == NULL);
     CHECK(pSprite->m_baseStats.m_fighterLevel == 1);
     CHECK(pCharacter->CanLevelUp(pSprite));
+}
+
+// UpdateMainPanel (0x5DBDE0) enables the Level Up button (37) when
+// CanLevelUp (0x5E4E80) allows it and the creature is not dead.
+TEST_CASE("character screen: the main panel enables Level Up with the experience for it", "[character][levelup][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+
+    CScreenCharacter* pCharacter = FighterReadyToLevel(cre);
+    REQUIRE(pCharacter != NULL);
+    CGameSprite* pSprite = PartySprite();
+    REQUIRE(pSprite != NULL);
+
+    CUIControlButton* pLevelUp = static_cast<CUIControlButton*>(pCharacter->GetManager()->GetPanel(2)->GetControl(37));
+    REQUIRE(pLevelUp != NULL);
+
+    pCharacter->UpdateMainPanel(TRUE);
+    CHECK(pLevelUp->m_bEnabled);
+
+    pSprite->m_baseStats.m_xp = 0;
+    pSprite->m_derivedStats.m_nXP = 0;
+    pCharacter->UpdateMainPanel(TRUE);
+    CHECK_FALSE(pLevelUp->m_bEnabled);
 }
