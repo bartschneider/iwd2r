@@ -36,6 +36,12 @@ const BYTE CVisibilityMap::SQUARE_SIZEX = 32;
 // 0x84EDD7
 const BYTE CVisibilityMap::SQUARE_SIZEY = 32;
 
+// 0x84EDC4
+const BYTE CVisibilityMap::SEARCH_TO_VIS_Y[8] = { 0, 0, 1, 1, 1, 2, 2, 2 };
+
+// 0x84EDCC
+const BYTE CVisibilityMap::VIS_TO_SEARCH_Y[3] = { 0, 2, 5 };
+
 // 0x84EDDB
 const BYTE CVisibilityMap::EXPLORED = 0;
 
@@ -391,7 +397,236 @@ void CVisibilityMap::Unmarshal(BYTE* pData, DWORD nData)
 // 0x552A50
 void CVisibilityMap::MarkTileLine(const CPoint& ptView, const CPoint& ptSearchMapView, LONG nDestX, LONG nDestY, const CPoint& ptOffset, BYTE charId, const BYTE* pVisibleTerrainTable, BOOLEAN bLookingUp)
 {
-    // TODO: Incomplete.
+    SHORT nStepX = 1;
+    SHORT nStepY = 1;
+    INT nXFrom = ptView.x;
+    INT nYFrom = ptView.y;
+    INT nXTo = nDestX;
+    INT nYTo = nDestY;
+    CPoint ptSearch = ptSearchMapView;
+    CPoint ptTile;
+    LONG nLastTileX = -1;
+    LONG nLastTileY = -1;
+    SHORT nHighest = 0;
+    BOOLEAN bHitWall = FALSE;
+    SHORT nTableIndex;
+    BYTE cost;
+    SHORT nHeight;
+
+    // NOTE: ptOffset is not read; the original's fifth argument is unused.
+
+    // NOTE: The clipped start is not used afterwards, and the result is
+    // ignored: a destination the clip leaves outside the map trips
+    // SetTileVisible's assert, as in the original.
+    CRect rClip(0, 0, m_nWidth - 1, m_nHeight - 1);
+    CVidMode::ClipLine(nXFrom, nYFrom, nXTo, nYTo, rClip);
+
+    CPoint ptDest(nXTo, nYTo);
+
+    CPoint ptSearchDest;
+    ptSearchDest.x = ptDest.x * 2;
+    ptSearchDest.y = VIS_TO_SEARCH_Y[ptDest.y % 3] + (ptDest.y / 3) * 8;
+
+    LONG nDeltaX = ptSearchDest.x - ptSearch.x;
+    LONG nDeltaY = ptSearchDest.y - ptSearch.y;
+
+    if (nDeltaX < 0) {
+        nStepX = -1;
+        nDeltaX = -nDeltaX;
+    }
+
+    if (nDeltaY < 0) {
+        nStepY = -1;
+        nDeltaY = -nDeltaY;
+    }
+
+    LONG nIncrementE;
+    LONG nIncrementNE;
+    LONG nDecision;
+
+    if (nDeltaY < nDeltaX) {
+        nIncrementE = nDeltaY * 2;
+        nDecision = nIncrementE - nDeltaX;
+        nIncrementNE = (nDeltaY - nDeltaX) * 2;
+
+        while (ptSearch.x != ptSearchDest.x || ptSearch.y != ptSearchDest.y) {
+            if (ptDest.x != m_nWidth - 1 || bHitWall) {
+                if (ptDest.y != m_nHeight - 1 || bHitWall) {
+                    cost = m_pSearchMap->GetLOSCost(ptSearch, pVisibleTerrainTable, nTableIndex, m_bOutDoor);
+                    if (cost == CPathSearch::COST_IMPASSABLE) {
+                        bHitWall = TRUE;
+                        nHeight = m_pSearchMap->GetStructureHeight(nTableIndex);
+                        if (nHeight < nHighest) {
+                            return;
+                        }
+
+                        nHighest = nHeight;
+
+                        if (bLookingUp) {
+                            ptTile.x = ptSearch.x >> 1;
+                            ptTile.y = SEARCH_TO_VIS_Y[ptSearch.y & 7] + (ptSearch.y >> 3) * 3;
+                            if (nLastTileX != ptTile.x || nLastTileY != ptTile.y) {
+                                ClimbWall(ptTile, ptDest, charId, pVisibleTerrainTable, nHeight);
+                                nLastTileY = ptTile.y;
+                                nLastTileX = ptTile.x;
+                            }
+                        }
+                    } else {
+                        if (bHitWall) {
+                            return;
+                        }
+                    }
+                } else {
+                    ptTile.x = ptSearch.x >> 1;
+                    ptTile.y = ptDest.y;
+                    if (nLastTileX != ptTile.x || nLastTileY != ptTile.y) {
+                        // NOTE: Uninline.
+                        SetTileVisible(m_nWidth * ptDest.y + ptTile.x, charId);
+                    }
+                }
+            } else {
+                ptTile.x = ptDest.x;
+                ptTile.y = SEARCH_TO_VIS_Y[ptSearch.y & 7] + (ptSearch.y >> 3) * 3;
+                if (nLastTileX != ptTile.x || nLastTileY != ptTile.y) {
+                    // NOTE: Uninline.
+                    SetTileVisible(m_nWidth * ptTile.y + ptDest.x, charId);
+                }
+            }
+
+            ptTile.x = ptSearch.x >> 1;
+            ptTile.y = SEARCH_TO_VIS_Y[ptSearch.y & 7] + (ptSearch.y >> 3) * 3;
+            if (nLastTileX != ptTile.x || nLastTileY != ptTile.y) {
+                // NOTE: Uninline.
+                SetTileVisible(m_nWidth * ptTile.y + ptTile.x, charId);
+                nLastTileY = ptTile.y;
+                nLastTileX = ptTile.x;
+            }
+
+            if (nDecision < 1) {
+                nDecision += nIncrementE;
+                ptSearch.x += nStepX;
+            } else {
+                nDecision += nIncrementNE;
+                ptSearch.y += nStepY;
+                ptSearch.x += nStepX;
+            }
+        }
+    } else {
+        nIncrementE = nDeltaX * 2;
+        nDecision = nIncrementE - nDeltaY;
+        nIncrementNE = (nDeltaX - nDeltaY) * 2;
+
+        while (ptSearch.x != ptSearchDest.x || ptSearch.y != ptSearchDest.y) {
+            if (ptDest.x != m_nWidth - 1 || bHitWall) {
+                if (ptDest.y != m_nHeight - 1 || bHitWall) {
+                    cost = m_pSearchMap->GetLOSCost(ptSearch, pVisibleTerrainTable, nTableIndex, m_bOutDoor);
+                    if (cost == CPathSearch::COST_IMPASSABLE) {
+                        bHitWall = TRUE;
+                        nHeight = m_pSearchMap->GetStructureHeight(nTableIndex);
+                        if (nHeight < nHighest) {
+                            return;
+                        }
+
+                        nHighest = nHeight;
+
+                        if (bLookingUp) {
+                            ptTile.x = ptSearch.x >> 1;
+                            ptTile.y = SEARCH_TO_VIS_Y[ptSearch.y & 7] + (ptSearch.y >> 3) * 3;
+                            if (nLastTileX != ptTile.x || nLastTileY != ptTile.y) {
+                                ClimbWall(ptTile, ptDest, charId, pVisibleTerrainTable, nHeight);
+                                nLastTileY = ptTile.y;
+                                nLastTileX = ptTile.x;
+                            }
+                        }
+                    } else {
+                        if (bHitWall) {
+                            return;
+                        }
+                    }
+                } else {
+                    ptTile.x = ptSearch.x >> 1;
+                    ptTile.y = ptDest.y;
+                    if (nLastTileX != ptTile.x || nLastTileY != ptTile.y) {
+                        // NOTE: Uninline.
+                        SetTileVisible(m_nWidth * ptDest.y + ptTile.x, charId);
+                    }
+                }
+            } else {
+                ptTile.x = ptDest.x;
+                ptTile.y = SEARCH_TO_VIS_Y[ptSearch.y & 7] + (ptSearch.y >> 3) * 3;
+                if (nLastTileX != ptTile.x || nLastTileY != ptTile.y) {
+                    // NOTE: Uninline.
+                    SetTileVisible(m_nWidth * ptTile.y + ptDest.x, charId);
+                }
+            }
+
+            ptTile.x = ptSearch.x >> 1;
+            ptTile.y = SEARCH_TO_VIS_Y[ptSearch.y & 7] + (ptSearch.y >> 3) * 3;
+            if (nLastTileX != ptTile.x || nLastTileY != ptTile.y) {
+                // NOTE: Uninline.
+                SetTileVisible(m_nWidth * ptTile.y + ptTile.x, charId);
+                nLastTileY = ptTile.y;
+                nLastTileX = ptTile.x;
+            }
+
+            if (nDecision < 1) {
+                nDecision += nIncrementE;
+                ptSearch.y += nStepY;
+            } else {
+                nDecision += nIncrementNE;
+                ptSearch.y += nStepY;
+                ptSearch.x += nStepX;
+            }
+        }
+    }
+
+    if (ptDest.x == m_nWidth - 1) {
+        ptTile.x = ptDest.x;
+        ptTile.y = SEARCH_TO_VIS_Y[ptSearch.y & 7] + (ptSearch.y >> 3) * 3;
+        if (nLastTileX != ptTile.x || nLastTileY != ptTile.y) {
+            // NOTE: Uninline.
+            SetTileVisible(m_nWidth * ptTile.y + ptDest.x, charId);
+        }
+    } else if (ptDest.y == m_nHeight - 1) {
+        ptTile.x = ptSearch.x >> 1;
+        ptTile.y = ptDest.y;
+        if (nLastTileX != ptTile.x || nLastTileY != ptTile.y) {
+            // NOTE: Uninline.
+            SetTileVisible(m_nWidth * ptDest.y + ptTile.x, charId);
+        }
+    } else {
+        cost = m_pSearchMap->GetLOSCost(ptSearch, pVisibleTerrainTable, nTableIndex, m_bOutDoor);
+        if (cost == CPathSearch::COST_IMPASSABLE) {
+            nHeight = m_pSearchMap->GetStructureHeight(nTableIndex);
+            if (nHeight < nHighest) {
+                return;
+            }
+
+            ptTile.x = ptSearch.x >> 1;
+            ptTile.y = SEARCH_TO_VIS_Y[ptSearch.y & 7] + (ptSearch.y >> 3) * 3;
+            if (nLastTileX == ptTile.x && nLastTileY == ptTile.y) {
+                return;
+            }
+
+            if (bLookingUp) {
+                ClimbWall(ptTile, ptDest, charId, pVisibleTerrainTable, nHeight);
+                return;
+            }
+        } else {
+            if (bHitWall) {
+                return;
+            }
+
+            ptTile.x = ptSearch.x >> 1;
+            ptTile.y = SEARCH_TO_VIS_Y[ptSearch.y & 7] + (ptSearch.y >> 3) * 3;
+            if (nLastTileX == ptTile.x && nLastTileY == ptTile.y) {
+                return;
+            }
+        }
+
+        // NOTE: Uninline.
+        SetTileVisible(m_nWidth * ptTile.y + ptTile.x, charId);
+    }
 }
 
 // 0x553290
