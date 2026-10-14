@@ -8,6 +8,7 @@
 #include "CInfGame.h"
 #include "CMessage.h"
 #include "CProjectile.h"
+#include "CProjectile850F9C.h"
 #include "CProjectileArea.h"
 #include "CProjectileBAM.h"
 #include "CProjectileSpellHit.h"
@@ -630,5 +631,46 @@ TEST_CASE("projectile: the cloak of fear area leaves its source out", "[projecti
     CHECK(LastGroup() == nullptr);
 
     delete pArea;
+    ClearMessages();
+}
+
+TEST_CASE("projectile: the casting glow waits, loops and arrives at the caster", "[projectile][data]")
+{
+    PROBE_OR_SKIP(pSprite);
+    ClearMessages();
+
+    IcewindCVisualEffect visualEffect;
+    CProjectile850F9C* pGlow = new CProjectile850F9C(CString("AbjurCG"), CString(""), 0, 2, visualEffect);
+    CHECK(pGlow->m_nDelay == 2);
+    CHECK(pGlow->m_nLoops == 0);
+    CHECK(pGlow->m_glow.m_nCurrentSequence == 2);
+    CHECK(pGlow->m_bHasHeight == TRUE);
+
+    pGlow->Fire(pSprite->GetArea(), pSprite->GetId(), pSprite->GetId(), pSprite->GetPos(), 0, 0);
+    LONG id = pGlow->GetId();
+    REQUIRE(id != CGameObjectArray::INVALID_INDEX);
+    // It has no effects, so it delivers an empty group at once.
+    CMessageGroup* pGroup = LastGroup();
+    REQUIRE(pGroup != nullptr);
+    CHECK(pGroup->m_messages.empty());
+    ClearMessages();
+
+    pGlow->AIUpdate();
+    pGlow->AIUpdate();
+    CHECK(pGlow->m_nDelay == 0);
+
+    CGameObjectArray* pArray = g_pBaldurChitin->GetObjectGame()->GetObjectArray();
+    bool removed = false;
+    for (int frame = 0; frame < 2000 && !removed; frame++) {
+        CGameObject* pObject;
+        if (pArray->GetShare(id, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) != CGameObjectArray::SUCCESS) {
+            removed = true;
+            break;
+        }
+        pArray->ReleaseShare(id, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+        pObject->AIUpdate();
+    }
+    CHECK(removed);
+
     ClearMessages();
 }
