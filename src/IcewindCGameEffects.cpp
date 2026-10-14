@@ -6,6 +6,7 @@
 #include "CInfGame.h"
 #include "CMessage.h"
 #include "CProjectile.h"
+#include "CScreenWorld.h"
 #include "CUtil.h"
 #include "IcewindMisc.h"
 
@@ -46,6 +47,19 @@ static std::list<CGameEffect*> GetSpellResrefEffects(CGameObject* pObject, const
     (void)resRef;
     (void)nLevel;
     return std::list<CGameEffect*>();
+}
+
+// TODO: Stub. CInfGame's tracking lookup (CInfGame_B3AUTO_005466F0,
+// 0x5466F0, a CInfGame member not declared yet) finds the area in the
+// tracking table and, when the sprite's wilderness lore roll (d20 + the
+// skill against the entry / 5 + 10) succeeds, returns the area's tracking
+// string. Until then it returns the original's fallback, 19534, the string
+// for an area missing from the table.
+static STRREF GetTrackingString(CGameSprite* pSprite, CString& sAreaName)
+{
+    (void)pSprite;
+    (void)sAreaName;
+    return 19534;
 }
 
 // TODO: Stub. CProjectile_DecodeSpellHitProjectile (0x560310) builds the
@@ -1796,6 +1810,111 @@ CGameEffect* IcewindCGameEffectTurnUndead::Copy()
     return copy;
 }
 
+// 0x576D40
+static INT CalculateTurnUndeadFinalSourceRoll(CGameSprite* pSprite)
+{
+    INT nModifier = g_pBaldurChitin->GetObjectGame()->GetRuleTables().GetAbilityScoreModifier(pSprite->GetDerivedStats()->m_nCHR);
+    INT nRoll = nModifier + 1 + CUtil::UtilRandInt(20, pSprite->GetDerivedStats()->m_nLuck);
+    SHORT nTurnUndeadLevel = pSprite->GetTurnUndeadLevel();
+    if (nRoll - 10 >= 0) {
+        return (nRoll - 10) / 3 + nTurnUndeadLevel;
+    }
+    return (nRoll - 9) / 3 - 1 + nTurnUndeadLevel;
+}
+
+// 0x566080
+BOOL IcewindCGameEffectTurnUndead::ApplyEffect(CGameSprite* pSprite)
+{
+    // NOTE: The turner's id travels in m_numDice.
+    LONG nTurnerId = m_numDice;
+
+    CGameSprite* pTurner;
+    BYTE rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(nTurnerId,
+        CGameObjectArray::THREAD_ASYNCH,
+        reinterpret_cast<CGameObject**>(&pTurner),
+        INFINITE);
+    if (rc != CGameObjectArray::SUCCESS) {
+        return FALSE;
+    }
+
+    if (m_dwFlags == 4) {
+        LONG nLevel = pSprite->GetLevel();
+        if (nLevel > CalculateTurnUndeadFinalSourceRoll(pTurner)) {
+            FeedBackImmuneToResource(pSprite, m_sourceRes);
+            m_done = TRUE;
+            // NOTE: The original returns without releasing the turner.
+            return TRUE;
+        }
+
+        if (IcewindMisc::IsEvil(pTurner) == TRUE) {
+            m_dwFlags = static_cast<BYTE>(m_casterLevel) <= nLevel * 2 ? 1 : 0;
+        } else {
+            m_dwFlags = (static_cast<BYTE>(m_casterLevel) <= nLevel * 2 ? 1 : 0) + 2;
+        }
+    }
+
+    if (m_secondaryType != 0) {
+        PlaySound(CResRef("ACT_06"), pSprite);
+    }
+
+    pSprite->GetDerivedStats()->m_spellStates.set(SPLSTATE_TURNED, true);
+
+    CGameEffect* pEffect;
+    CMessage* message;
+    switch (m_dwFlags) {
+    case 0:
+        if (m_secondaryType != 0) {
+            DisplayStringRef(pSprite, 41023);
+
+            ITEM_EFFECT effect;
+            CGameEffect::ClearItemEffect(&effect, ICEWIND_CGAMEEFFECT_DOMINATE);
+            effect.dwFlags = 4;
+            effect.durationType = 0x1000;
+            effect.duration = m_duration;
+            pEffect = CGameEffect::DecodeEffect(&effect,
+                pTurner->GetPos(),
+                pTurner->GetId(),
+                CPoint(-1, -1));
+            message = new CMessageAddEffect(pEffect, pSprite->GetId(), pSprite->GetId());
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        }
+        break;
+    case 1:
+        if (m_secondaryType != 0) {
+            DisplayStringRef(pSprite, 20827);
+        }
+        SetSpellState(pSprite, SPLSTATE_179);
+        pSprite->GetDerivedStats()->field_C -= 2;
+        break;
+    case 2:
+        // NOTE: A bare CGameEffect (the inlined default constructor, vtable
+        // 0x8487E8) of opcode 13 (death), flags 8, from the turner. Its
+        // probability range is 0-0, so CGameSprite::AddEffect's checks
+        // likely drop it before the base ApplyEffect would assert.
+        pEffect = new CGameEffect();
+        pEffect->m_effectID = CGAMEEFFECT_DEATH;
+        pEffect->m_effectAmount = 0;
+        pEffect->m_dwFlags = 8;
+        pEffect->m_sourceID = pTurner->GetId();
+        message = new CMessageAddEffect(pEffect, pSprite->GetId(), pSprite->GetId());
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        m_done = TRUE;
+        break;
+    case 3:
+        if (m_secondaryType != 0) {
+            DisplayStringRef(pSprite, 20828);
+        }
+        AddPanicEffect(pSprite);
+        break;
+    }
+
+    g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(nTurnerId,
+        CGameObjectArray::THREAD_ASYNCH,
+        INFINITE);
+
+    return TRUE;
+}
+
 // 0x566070
 void IcewindCGameEffectTurnUndead::OnRemove(CGameSprite* pSprite)
 {
@@ -2031,6 +2150,27 @@ CGameEffect* IcewindCGameEffectRangerTracking::Copy()
     delete effect;
     copy->CopyFromBase(this);
     return copy;
+}
+
+// 0x5667C0
+BOOL IcewindCGameEffectRangerTracking::ApplyEffect(CGameSprite* pSprite)
+{
+    CString sAreaName;
+    STR_RES strRes;
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    pGame->m_gameAreas[pGame->m_visibleArea]->m_resRef.CopyToString(sAreaName);
+
+    STRREF strTracks = GetTrackingString(pSprite, sAreaName);
+    g_pBaldurChitin->m_cTlkTable.Fetch(strTracks, strRes);
+    g_pBaldurChitin->m_pEngineWorld->DisplayText(pSprite->GetName(),
+        strRes.szText,
+        -1,
+        FALSE);
+
+    m_done = TRUE;
+
+    return TRUE;
 }
 
 // -----------------------------------------------------------------------------

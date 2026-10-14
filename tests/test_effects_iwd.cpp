@@ -737,3 +737,35 @@ TEST_CASE("effects-iwd: gaze, wail and projectile effects finish; area of effect
     CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
     CHECK(pEffect->m_done == TRUE);
 }
+
+TEST_CASE("effects-iwd: turn undead (280) and ranger tracking (286)", "[effects][data]")
+{
+    PROBE_OR_SKIP(pSprite);
+    // The turner's id travels in the dice count; an unknown one returns
+    // FALSE at once.
+    std::unique_ptr<CGameEffect> pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_TURNUNDEAD, 3, 0);
+    pEffect->m_numDice = static_cast<DWORD>(-1);
+    CHECK(pEffect->ApplyEffect(pSprite) == FALSE);
+    CHECK(pEffect->m_done == FALSE);
+
+    // Type 1 (rebuked) from the sprite itself: turned, state 179 and two
+    // points off derived field_C.
+    CDerivedStats* pStats = pSprite->GetDerivedStats();
+    pStats->m_spellStates.reset(SPLSTATE_TURNED);
+    pStats->m_spellStates.reset(SPLSTATE_179);
+    const short before = pStats->field_C;
+    pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_TURNUNDEAD, 1, 0);
+    pEffect->m_numDice = static_cast<DWORD>(pSprite->GetId());
+    pEffect->m_secondaryType = 0;
+    CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+    CHECK(pStats->m_spellStates.test(SPLSTATE_TURNED));
+    CHECK(pStats->m_spellStates.test(SPLSTATE_179));
+    CHECK(pStats->field_C == before - 2);
+    pStats->field_C = before;
+    pStats->m_spellStates.reset(SPLSTATE_TURNED);
+    pStats->m_spellStates.reset(SPLSTATE_179);
+
+    pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_RANGERTRACKING, 0, 0);
+    CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+    CHECK(pEffect->m_done == TRUE);
+}
