@@ -704,9 +704,10 @@ TEST_CASE("vis: the party member in AR1000 explores its vision ellipse and moves
 // INI spawns (CSpawn.cpp): CSpawn::ExecuteSpawn on AR1000 with a section
 // built in memory. The area's difficulty band comes from the party level
 // (header byte 0x4E) against the two bounds (0x4C, 0x4D); a spawn whose
-// area_diff_N key turns its band off spawns nothing and asserts nothing
-// (Review Focus 5); with the band on it creates create_qty creatures at the
-// spawn point.
+// area_diff_N key turns its band off spawns nothing and asserts nothing;
+// with the band on it creates create_qty creatures at the spawn point.
+// (Review Focus 5, CGameSpawning::Spawn's per-total-level table, is a
+// separate function, not ported yet: it needs CAIGroup 0x405370.)
 namespace {
 
 int ObjectsInArea(CGameArea* pArea)
