@@ -2541,6 +2541,25 @@ public:
     /* 0000 */ int m_unused;
 };
 """,
+    'CHolder.h': """class CReply {
+public:
+    /* 0000 */ DWORD m_flags;
+    /* 0004 */ POSITION m_displayPosition;
+};
+
+class CReplies : public CTypedPtrArray<CPtrArray, CReply*> {
+public:
+    /* 0014 */ STRREF m_text;
+};
+
+class CHolder {
+public:
+    /* 0000 */ SCRIPTNAME m_name;
+    /* 0020 */ CTypedPtrList<CPtrList, int*> m_list;
+    /* 003C */ CTypedPtrArray<CPtrArray, CReplies*> m_entries;
+    /* 0050 */ CTypedPtrList<CPtrList, int*>* m_pList;
+};
+""",
 }
 
 
@@ -2606,6 +2625,49 @@ class GenFieldsTest(unittest.TestCase):
             'through': {'base': 'CBigThing', 'offset': '0x0016',
                         'type': 'i16'},
         })
+
+    def test_mfc_containers_and_names(self):
+        out = self.generate({
+            'name': {'class': 'CHolder', 'member': 'm_name'},
+            'head': {'class': 'CHolder', 'member': 'm_list.m_pNodeHead'},
+            'count': {'class': 'CHolder', 'member': 'm_list.m_nCount'},
+            'list_ptr': {'class': 'CHolder', 'member': 'm_pList'},
+            'next': {'class': 'CPtrList::CNode', 'member': 'pNext'},
+            'data': {'class': 'CPtrList::CNode', 'member': 'data'},
+            'entries': {'class': 'CHolder', 'member': 'm_entries.m_pData'},
+            'entries_size': {'class': 'CHolder',
+                             'member': 'm_entries.m_nSize'},
+            'replies': {'class': 'CReplies', 'member': 'm_pData'},
+            'replies_size': {'class': 'CReplies', 'member': 'm_nSize'},
+            'text': {'class': 'CReplies', 'member': 'm_text'},
+            'shown': {'class': 'CReply', 'member': 'm_displayPosition'},
+        })
+        self.assertEqual(out, {
+            'name': {'base': 'CHolder', 'offset': '0x0000', 'type': 'i8',
+                     'count': 32},
+            'head': {'base': 'CHolder', 'offset': '0x0024', 'type': 'ptr'},
+            'count': {'base': 'CHolder', 'offset': '0x002C', 'type': 'i32'},
+            'list_ptr': {'base': 'CHolder', 'offset': '0x0050',
+                         'type': 'ptr'},
+            'next': {'base': 'CPtrList::CNode', 'offset': '0x0000',
+                     'type': 'ptr'},
+            'data': {'base': 'CPtrList::CNode', 'offset': '0x0008',
+                     'type': 'ptr'},
+            'entries': {'base': 'CHolder', 'offset': '0x0040',
+                        'type': 'ptr'},
+            'entries_size': {'base': 'CHolder', 'offset': '0x0044',
+                             'type': 'i32'},
+            'replies': {'base': 'CReplies', 'offset': '0x0004',
+                        'type': 'ptr'},
+            'replies_size': {'base': 'CReplies', 'offset': '0x0008',
+                             'type': 'i32'},
+            'text': {'base': 'CReplies', 'offset': '0x0014', 'type': 'u32'},
+            'shown': {'base': 'CReply', 'offset': '0x0004', 'type': 'ptr'},
+        })
+        with self.assertRaises(gen_fields.FieldError) as e:
+            self.generate({'x': {'class': 'CHolder',
+                                 'member': 'm_list.m_nSize'}})
+        self.assertIn('no commented member m_nSize', str(e.exception))
 
     def test_global_and_sizeof(self):
         out = self.generate({
@@ -2763,7 +2825,7 @@ class MiniSchemaTest(unittest.TestCase):
         with open(os.path.join(ROOT, 'oracle', 'replay', 'schema.json')) as f:
             schema = json.load(f)
         member = {'id': 65536, 'x': 1046, 'y': 1258, 'hp': 9, 'max_hp': 12,
-                  'skills': [0] * 64}
+                  'skills': [0] * 64, 'action': 0, 'modal': 0, 'facing': 4}
         dump = {'frame': 1500, 'checkpoint': 'world', 'screen': 'world',
                 'rng_state': 1,
                 'globals': {'au_counter': 1498, 'fullscreen': 0,
@@ -2771,18 +2833,62 @@ class MiniSchemaTest(unittest.TestCase):
                             'reinitializing': 0, 'loading': 0, 'loads': 1,
                             'held_frames': 13, 'ai_rng_state': 7},
                 'chargen': None,
-                'world': {'area': 'AR1000', 'party': [member]}}
+                'world': {'area': 'AR1000', 'party': [member],
+                          'doors': [{'name': 'DOOR01', 'open': 0,
+                                     'locked': 1}],
+                          'dialog': {'active': 1, 'speaker': 3, 'entry': 0,
+                                     'responses': 2},
+                          'explored_count': 12, 'creatures': 3}}
         self.assertEqual(minischema.validate(dump, schema), [])
         dump['world']['party'].append(
             {'id': 131073, 'x': None, 'y': None, 'hp': None, 'max_hp': None,
-             'skills': None})
+             'skills': None, 'action': None, 'modal': None, 'facing': None})
         self.assertEqual(minischema.validate(dump, schema), [])
         dump['world']['party'][0] = dict(member, hp='9')
         self.assertEqual(minischema.validate(dump, schema), [
             "$.world.party[0].hp: '9' is not of type integer or null"])
+        dump['world']['party'][0] = dict(member)
+        del dump['world']['party'][0]['action']
+        self.assertEqual(minischema.validate(dump, schema), [
+            "$.world.party[0]: missing required property 'action'"])
+        dump['world']['party'][0] = member
+        dump['world']['doors'][0]['open'] = '0'
+        self.assertEqual(minischema.validate(dump, schema), [
+            "$.world.doors[0].open: '0' is not of type integer"])
+        dump['world']['doors'][0]['open'] = 0
+        dump['world']['dialog'] = {'active': 0, 'speaker': -1, 'entry': -1,
+                                   'responses': 0}
+        self.assertEqual(minischema.validate(dump, schema), [])
+        del dump['world']['creatures']
+        self.assertEqual(minischema.validate(dump, schema), [
+            "$.world: missing required property 'creatures'"])
         del dump['world']
         self.assertEqual(minischema.validate(dump, schema),
                          ["$: missing required property 'world'"])
+
+    def test_world_fields_are_compared(self):
+        """The world block's fields are compared, none of them timing."""
+        original = {'world': {'doors': [{'name': 'DOOR01', 'open': 0,
+                                         'locked': 1}],
+                              'dialog': {'active': 0, 'speaker': -1,
+                                         'entry': -1, 'responses': 0},
+                              'party': [{'action': 0, 'modal': 0,
+                                         'facing': 4}],
+                              'explored_count': 12, 'creatures': 3}}
+        ours = {'world': {'doors': [{'name': 'DOOR01', 'open': 1,
+                                     'locked': 1}],
+                          'dialog': {'active': 1, 'speaker': 3,
+                                     'entry': 0, 'responses': 2},
+                          'party': [{'action': 23, 'modal': 1,
+                                     'facing': 12}],
+                          'explored_count': 13, 'creatures': 4}}
+        self.assertEqual([d[0] for d in oracle.field_differences(original,
+                                                                 ours)], [
+            'world.creatures', 'world.dialog.active', 'world.dialog.entry',
+            'world.dialog.responses', 'world.dialog.speaker',
+            'world.doors[0].open', 'world.explored_count',
+            'world.party[0].action', 'world.party[0].facing',
+            'world.party[0].modal'])
 
     def test_every_engine_field_is_a_screen(self):
         with open(os.path.join(ROOT, 'oracle', 'replay', 'schema.json')) as f:

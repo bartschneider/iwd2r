@@ -80,17 +80,17 @@ public:
     void SetString2(CString sText);
     void SetString1(CString sText);
 
-    SHORT m_actionID;
-    CAIObjectType m_actorID;
-    CAIObjectType m_acteeID;
-    CAIObjectType m_acteeID2;
-    LONG m_specificID;
-    LONG m_specificID2;
-    LONG m_specificID3;
-    CString m_string1;
-    CString m_string2;
-    CPoint m_dest;
-    DWORD m_internalFlags;
+    /* 0000 */ SHORT m_actionID;
+    /* 0002 */ CAIObjectType m_actorID;
+    /* 003E */ CAIObjectType m_acteeID;
+    /* 007A */ CAIObjectType m_acteeID2;
+    /* 00B6 */ LONG m_specificID;
+    /* 00BA */ LONG m_specificID2;
+    /* 00BE */ LONG m_specificID3;
+    /* 00C2 */ CString m_string1;
+    /* 00C6 */ CString m_string2;
+    /* 00CA */ CPoint m_dest;
+    /* 00D2 */ DWORD m_internalFlags;
 };
 
 #endif /* CAIACTION_H_ */

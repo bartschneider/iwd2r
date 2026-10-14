@@ -5,5 +5,5 @@
   "rng_state": 12345,
   "globals": {"au_counter": 1498, "fullscreen": 0, "in_async_update": 0, "ai_stalled_frames": 0, "reinitializing": 0, "loading": 0, "loads": 1, "held_frames": 13, "ai_rng_state": 77},
   "chargen": null,
-  "world": {"area": "AR1000", "party": [{"id": 65536, "x": 1046, "y": 1258, "hp": 9, "max_hp": 12, "skills": [0, 4, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]}, {"id": 131073, "x": null, "y": null, "hp": null, "max_hp": null, "skills": null}]}
+  "world": {"area": "AR1000", "party": [{"id": 65536, "x": 1046, "y": 1258, "hp": 9, "max_hp": 12, "skills": [0, 4, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "action": 23, "modal": 1, "facing": 12}, {"id": 131073, "x": null, "y": null, "hp": null, "max_hp": null, "skills": null, "action": null, "modal": null, "facing": null}], "doors": [{"name": "AR1000_Door1", "open": 0, "locked": 0}, {"name": "Door\"2", "open": 1, "locked": 1}], "dialog": {"active": 0, "speaker": -1, "entry": -1, "responses": 0}, "explored_count": 345, "creatures": 7}
 }

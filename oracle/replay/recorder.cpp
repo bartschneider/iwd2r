@@ -110,6 +110,28 @@ static_assert(kField_sprite_pos.type == ReplayType::k_i32 && kField_sprite_pos.c
 static_assert(kField_sprite_hp.type == ReplayType::k_i16, "");
 static_assert(kField_sprite_max_hp.type == ReplayType::k_i16, "");
 static_assert(kField_sprite_skills.type == ReplayType::k_i8 && kField_sprite_skills.count == 64, "");
+static_assert(kField_sprite_action.type == ReplayType::k_i16, "");
+static_assert(kField_sprite_modal.type == ReplayType::k_u8, "");
+static_assert(kField_sprite_facing.type == ReplayType::k_i16, "");
+static_assert(kField_object_type.type == ReplayType::k_u8, "");
+static_assert(kField_area_vert_sort.type == ReplayType::k_ptr, "");
+static_assert(kField_area_vert_sort_back.type == ReplayType::k_ptr, "");
+static_assert(kField_area_vert_sort_flight.type == ReplayType::k_ptr, "");
+static_assert(kField_list_node_next.type == ReplayType::k_ptr, "");
+static_assert(kField_list_node_data.type == ReplayType::k_ptr, "");
+static_assert(kField_area_visibility_map.type == ReplayType::k_ptr, "");
+static_assert(kField_area_visibility_size.type == ReplayType::k_i32, "");
+static_assert(kField_door_name.type == ReplayType::k_i8 && kField_door_name.count == 32, "");
+static_assert(kField_door_flags.type == ReplayType::k_u32, "");
+static_assert(kField_dialog_active.type == ReplayType::k_u8, "");
+static_assert(kField_dialog_talker.type == ReplayType::k_i32, "");
+static_assert(kField_dialog_entry.type == ReplayType::k_u32, "");
+static_assert(kField_dialog_waiting.type == ReplayType::k_i32, "");
+static_assert(kField_dialog_entries.type == ReplayType::k_ptr, "");
+static_assert(kField_dialog_entries_size.type == ReplayType::k_i32, "");
+static_assert(kField_dialog_replies.type == ReplayType::k_ptr, "");
+static_assert(kField_dialog_replies_size.type == ReplayType::k_i32, "");
+static_assert(kField_dialog_reply_shown.type == ReplayType::k_ptr, "");
 
 // The virtual clock (platform/replay_clock.h, shared with our engine's
 // replay mode): kClockBase at the start, then 1000 / kFramesPerSecond ms per
@@ -330,10 +352,10 @@ std::string Number(long long value)
     return std::to_string(value);
 }
 
-// The sprite an object id names (the create_char screen's, a party
-// member's): CGameObjectArray::GetShare's THREAD_ASYNCH lookup, without the
-// call. 0 when the id does not resolve.
-uint32_t SpriteById(uint32_t chitin, int32_t id)
+// The object an id names (the create_char screen's sprite, a party member,
+// an object on an area's list): CGameObjectArray::GetShare's THREAD_ASYNCH
+// lookup, without the call. 0 when the id does not resolve.
+uint32_t ObjectById(uint32_t chitin, int32_t id)
 {
     bool ok = true;
     const uint32_t game = ReadU32(At(chitin, kField_object_game), &ok);
@@ -348,8 +370,8 @@ uint32_t SpriteById(uint32_t chitin, int32_t id)
     if (ReadI16(At(entry, kField_object_entry_id), &ok) != static_cast<int16_t>(id)) {
         return 0;
     }
-    const uint32_t sprite = ReadU32(At(entry, kField_object_entry_ptr), &ok);
-    return ok ? sprite : 0;
+    const uint32_t object = ReadU32(At(entry, kField_object_entry_ptr), &ok);
+    return ok ? object : 0;
 }
 
 std::string ChargenJson(uint32_t chitin, uint32_t screen)
@@ -374,7 +396,7 @@ std::string ChargenJson(uint32_t chitin, uint32_t screen)
     std::string abilities = "null";
     std::string feats = "null";
     std::string portrait = "null";
-    const uint32_t sprite = SpriteById(chitin, spriteId);
+    const uint32_t sprite = ObjectById(chitin, spriteId);
     if (sprite) {
         bool spriteOk = true;
         race = Number(ReadU8(At(sprite, kField_sprite_race), &spriteOk));
@@ -408,8 +430,9 @@ std::string ChargenJson(uint32_t chitin, uint32_t screen)
 // read fails.
 std::string PartyMemberJson(uint32_t chitin, int32_t id)
 {
-    std::string values = "\"x\": null, \"y\": null, \"hp\": null, \"max_hp\": null, \"skills\": null";
-    const uint32_t sprite = SpriteById(chitin, id);
+    std::string values = "\"x\": null, \"y\": null, \"hp\": null, \"max_hp\": null, \"skills\": null, "
+                         "\"action\": null, \"modal\": null, \"facing\": null";
+    const uint32_t sprite = ObjectById(chitin, id);
     if (sprite) {
         bool ok = true;
         const int32_t x = ReadI32(At(sprite, kField_sprite_pos), &ok);
@@ -421,17 +444,133 @@ std::string PartyMemberJson(uint32_t chitin, int32_t id)
             skills += (i ? ", " : "") + Number(static_cast<int8_t>(ReadU8(At(sprite, kField_sprite_skills) + i, &ok)));
         }
         skills += "]";
+        const int16_t action = ReadI16(At(sprite, kField_sprite_action), &ok);
+        const uint8_t modal = ReadU8(At(sprite, kField_sprite_modal), &ok);
+        const int16_t facing = ReadI16(At(sprite, kField_sprite_facing), &ok);
         if (ok) {
             values = "\"x\": " + Number(x) + ", \"y\": " + Number(y) + ", \"hp\": " + Number(hp)
-                + ", \"max_hp\": " + Number(maxHp) + ", \"skills\": " + skills;
+                + ", \"max_hp\": " + Number(maxHp) + ", \"skills\": " + skills + ", \"action\": " + Number(action)
+                + ", \"modal\": " + Number(modal) + ", \"facing\": " + Number(facing);
         }
     }
     return "{\"id\": " + Number(id) + ", " + values + "}";
 }
 
-// The area on view and the party: CInfGame::GetVisibleArea and
-// GetCharacterId read without the calls. null when CInfGame cannot be read.
-std::string WorldJson(uint32_t chitin)
+// CGameObject::TYPE_DOOR and TYPE_SPRITE, the m_objectType bytes the
+// original's constructors store (docs/evidence/485AC0.md).
+constexpr uint8_t kTypeDoor = 0x21;
+constexpr uint8_t kTypeSprite = 0x31;
+// A bound on a list walk, against a list caught mid-change.
+constexpr int kMaxListNodes = 100000;
+
+// Calls visit(object) for each object of type on the CPtrList whose head
+// node pointer is at headAddress, head to tail (MFC's CNode: pNext, data =
+// the object id).
+template <typename Visit>
+void ObjectsOn(uint32_t chitin, uint32_t headAddress, uint8_t type, Visit visit)
+{
+    bool ok = true;
+    uint32_t node = ReadU32(headAddress, &ok);
+    for (int n = 0; ok && node && n < kMaxListNodes; ++n) {
+        const int32_t id = ReadI32(At(node, kField_list_node_data), &ok);
+        node = ReadU32(At(node, kField_list_node_next), &ok);
+        if (!ok) {
+            break;
+        }
+        const uint32_t object = ObjectById(chitin, id);
+        bool typeOk = true;
+        if (object && ReadU8(At(object, kField_object_type), &typeOk) == type && typeOk) {
+            visit(object);
+        }
+    }
+}
+
+// The world block's "doors" (the JSON array), "explored_count" and
+// "creatures".
+struct AreaValues {
+    std::string doors;
+    long long explored = 0;
+    long long creatures = 0;
+};
+
+// The area's doors (its front list's order), explored tiles and sprites;
+// none for no area.
+AreaValues ReadArea(uint32_t chitin, uint32_t area)
+{
+    std::string doors = "[";
+    long long explored = 0;
+    long long creatures = 0;
+    if (area) {
+        ObjectsOn(chitin, At(area, kField_area_vert_sort), kTypeDoor, [&](uint32_t door) {
+            char name[32] = {};
+            bool ok = SafeRead(At(door, kField_door_name), name, sizeof(name));
+            const uint32_t flags = ReadU32(At(door, kField_door_flags), &ok);
+            if (ok) {
+                doors += (doors.size() > 1 ? ", " : "") + std::string("{\"name\": ")
+                    + JsonString(name, strnlen(name, sizeof(name))) + ", \"open\": " + Number(flags & 1u)
+                    + ", \"locked\": " + Number((flags >> 1) & 1u) + "}";
+            }
+        });
+        bool ok = true;
+        const uint32_t map = ReadU32(At(area, kField_area_visibility_map), &ok);
+        const int32_t size = ReadI32(At(area, kField_area_visibility_size), &ok);
+        if (ok && map && size > 0) {
+            std::vector<uint8_t> tiles(static_cast<size_t>(size));
+            if (SafeRead(map, tiles.data(), tiles.size())) {
+                for (const uint8_t tile : tiles) {
+                    explored += (tile & 0x80) != 0; // CVisibilityMap::EXPLORED_FLAG
+                }
+            }
+        }
+        const ReplayField lists[] = { kField_area_vert_sort, kField_area_vert_sort_back, kField_area_vert_sort_flight };
+        for (const ReplayField& list : lists) {
+            ObjectsOn(chitin, At(area, list), kTypeSprite, [&](uint32_t) { ++creatures; });
+        }
+    }
+    doors += "]";
+    AreaValues values;
+    values.doors = doors;
+    values.explored = explored;
+    values.creatures = creatures;
+    return values;
+}
+
+// CScreenWorld::m_internalLoadedDialog: the "dialog" member.
+std::string DialogJson(uint32_t world)
+{
+    bool ok = true;
+    const uint8_t active = world ? ReadU8(At(world, kField_dialog_active), &ok) : 0;
+    if (!world || !ok || !active) {
+        return "{\"active\": 0, \"speaker\": -1, \"entry\": -1, \"responses\": 0}";
+    }
+    const int32_t talker = ReadI32(At(world, kField_dialog_talker), &ok);
+    const uint32_t entryIndex = ReadU32(At(world, kField_dialog_entry), &ok);
+    const int32_t waiting = ReadI32(At(world, kField_dialog_waiting), &ok);
+    const uint32_t entries = ReadU32(At(world, kField_dialog_entries), &ok);
+    const int32_t entriesSize = ReadI32(At(world, kField_dialog_entries_size), &ok);
+    long long responses = 0;
+    if (ok && waiting && entries && entriesSize > 0 && entryIndex < static_cast<uint32_t>(entriesSize)) {
+        bool entryOk = true;
+        const uint32_t entry = ReadU32(entries + 4u * entryIndex, &entryOk);
+        const uint32_t replies = entry ? ReadU32(At(entry, kField_dialog_replies), &entryOk) : 0;
+        const int32_t count = entry ? ReadI32(At(entry, kField_dialog_replies_size), &entryOk) : 0;
+        for (int32_t i = 0; entryOk && replies && i < count && i < kMaxListNodes; ++i) {
+            const uint32_t reply = ReadU32(replies + 4u * static_cast<uint32_t>(i), &entryOk);
+            bool replyOk = true;
+            if (reply && ReadU32(At(reply, kField_dialog_reply_shown), &replyOk) != 0 && replyOk) {
+                ++responses;
+            }
+        }
+    }
+    return "{\"active\": 1, \"speaker\": " + Number(talker) + ", \"entry\": " + Number(entryIndex)
+        + ", \"responses\": " + Number(responses) + "}";
+}
+
+// The area on view and the party (CInfGame::GetVisibleArea and
+// GetCharacterId read without the calls), the area's doors, explored tiles
+// and sprites, and the dialog of world, the CScreenWorld. null when CInfGame
+// cannot be read.
+std::string WorldJson(uint32_t chitin, uint32_t world)
 {
     bool ok = true;
     const uint32_t game = ReadU32(At(chitin, kField_object_game), &ok);
@@ -441,11 +580,14 @@ std::string WorldJson(uint32_t chitin)
         return "null";
     }
     std::string area = "\"\"";
+    uint32_t pArea = 0;
     if (visible < kField_game_areas.count) {
         bool areaOk = true;
-        const uint32_t pArea = ReadU32(At(game, kField_game_areas) + 4u * visible, &areaOk);
+        pArea = ReadU32(At(game, kField_game_areas) + 4u * visible, &areaOk);
         char resref[8] = {};
-        if (areaOk && pArea && SafeRead(At(pArea, kField_area_resref), resref, sizeof(resref))) {
+        if (!areaOk) {
+            pArea = 0;
+        } else if (pArea && SafeRead(At(pArea, kField_area_resref), resref, sizeof(resref))) {
             area = JsonString(resref, strnlen(resref, sizeof(resref)));
         }
     }
@@ -461,7 +603,13 @@ std::string WorldJson(uint32_t chitin)
         party += (i ? ", " : "") + PartyMemberJson(chitin, id);
     }
     party += "]";
-    return ok ? "{\"area\": " + area + ", \"party\": " + party + "}" : "null";
+    if (!ok) {
+        return "null";
+    }
+    const AreaValues values = ReadArea(chitin, pArea);
+    return "{\"area\": " + area + ", \"party\": " + party + ", \"doors\": " + values.doors + ", \"dialog\": "
+        + DialogJson(world) + ", \"explored_count\": " + Number(values.explored)
+        + ", \"creatures\": " + Number(values.creatures) + "}";
 }
 
 // The dump of the current frame; checkpoint is null for a periodic dump.
@@ -504,7 +652,7 @@ std::string DumpJson(const char* checkpoint)
     const bool chargen = std::strcmp(screen, "create_char") == 0;
     json += "  \"chargen\": " + (chargen ? ChargenJson(chitin, active) : std::string("null")) + ",\n";
     const bool world = std::strcmp(screen, "world") == 0;
-    json += "  \"world\": " + (world ? WorldJson(chitin) : std::string("null")) + "\n}\n";
+    json += "  \"world\": " + (world ? WorldJson(chitin, active) : std::string("null")) + "\n}\n";
     return json;
 }
 
