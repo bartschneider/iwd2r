@@ -21,8 +21,8 @@ import sys
 import zlib
 
 # Resource types by extension (IESDP); add more as cases need them.
-TYPES = {'BMP': 0x001, '2DA': 0x3F4, 'IDS': 0x3F0, 'BCS': 0x3EF, 'INI': 0x802, 'ITM': 0x3ED, 'DLG': 0x3F3,
-         'STO': 0x3F6, 'ARE': 0x3F2, 'CRE': 0x3F1}
+TYPES = {'BMP': 0x001, '2DA': 0x3F4, 'IDS': 0x3F0, 'BCS': 0x3EF, 'INI': 0x802, 'ITM': 0x3ED,
+         'DLG': 0x3F3, 'STO': 0x3F6, 'ARE': 0x3F2, 'CRE': 0x3F1}
 
 
 class BifError(Exception):

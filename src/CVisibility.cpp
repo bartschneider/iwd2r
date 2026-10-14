@@ -36,6 +36,12 @@ const BYTE CVisibilityMap::SQUARE_SIZEX = 32;
 // 0x84EDD7
 const BYTE CVisibilityMap::SQUARE_SIZEY = 32;
 
+// 0x84EDC4
+const BYTE CVisibilityMap::SEARCH_TO_VIS_Y[8] = { 0, 0, 1, 1, 1, 2, 2, 2 };
+
+// 0x84EDCC
+const BYTE CVisibilityMap::VIS_TO_SEARCH_Y[3] = { 0, 2, 5 };
+
 // 0x84EDDB
 const BYTE CVisibilityMap::EXPLORED = 0;
 
@@ -132,13 +138,23 @@ CVisibilityMap::~CVisibilityMap()
 // 0x551840
 BOOL CVisibilityMap::AddCharacter(const CPoint& pos, LONG charId, const BYTE* pVisibleTerrainTable)
 {
-    for (SHORT nIndex = 0; nIndex < 6; nIndex++) {
+    SHORT nIndex;
+    for (nIndex = 0; nIndex < 6; nIndex++) {
         if (m_aCharacterIds[nIndex] == CGameObjectArray::INVALID_INDEX) {
             m_aCharacterIds[nIndex] = charId;
-            PrivateAddCharacter(charId, 1 << nIndex, pVisibleTerrainTable);
-            return TRUE;
+            break;
+        }
+
+        if (m_aCharacterIds[nIndex] == charId) {
+            break;
         }
     }
+
+    if (nIndex != 6) {
+        PrivateAddCharacter(pos, 1 << nIndex, pVisibleTerrainTable);
+        return TRUE;
+    }
+
     return FALSE;
 }
 
@@ -391,7 +407,236 @@ void CVisibilityMap::Unmarshal(BYTE* pData, DWORD nData)
 // 0x552A50
 void CVisibilityMap::MarkTileLine(const CPoint& ptView, const CPoint& ptSearchMapView, LONG nDestX, LONG nDestY, const CPoint& ptOffset, BYTE charId, const BYTE* pVisibleTerrainTable, BOOLEAN bLookingUp)
 {
-    // TODO: Incomplete.
+    SHORT nStepX = 1;
+    SHORT nStepY = 1;
+    INT nXFrom = ptView.x;
+    INT nYFrom = ptView.y;
+    INT nXTo = nDestX;
+    INT nYTo = nDestY;
+    CPoint ptSearch = ptSearchMapView;
+    CPoint ptTile;
+    LONG nLastTileX = -1;
+    LONG nLastTileY = -1;
+    SHORT nHighest = 0;
+    BOOLEAN bHitWall = FALSE;
+    SHORT nTableIndex;
+    BYTE cost;
+    SHORT nHeight;
+
+    // NOTE: ptOffset is not read; the original's fifth argument is unused.
+
+    // NOTE: The clipped start is not used afterwards, and the result is
+    // ignored: a destination the clip leaves outside the map trips
+    // SetTileVisible's assert, as in the original.
+    CRect rClip(0, 0, m_nWidth - 1, m_nHeight - 1);
+    CVidMode::ClipLine(nXFrom, nYFrom, nXTo, nYTo, rClip);
+
+    CPoint ptDest(nXTo, nYTo);
+
+    CPoint ptSearchDest;
+    ptSearchDest.x = ptDest.x * 2;
+    ptSearchDest.y = VIS_TO_SEARCH_Y[ptDest.y % 3] + (ptDest.y / 3) * 8;
+
+    LONG nDeltaX = ptSearchDest.x - ptSearch.x;
+    LONG nDeltaY = ptSearchDest.y - ptSearch.y;
+
+    if (nDeltaX < 0) {
+        nStepX = -1;
+        nDeltaX = -nDeltaX;
+    }
+
+    if (nDeltaY < 0) {
+        nStepY = -1;
+        nDeltaY = -nDeltaY;
+    }
+
+    LONG nIncrementE;
+    LONG nIncrementNE;
+    LONG nDecision;
+
+    if (nDeltaY < nDeltaX) {
+        nIncrementE = nDeltaY * 2;
+        nDecision = nIncrementE - nDeltaX;
+        nIncrementNE = (nDeltaY - nDeltaX) * 2;
+
+        while (ptSearch.x != ptSearchDest.x || ptSearch.y != ptSearchDest.y) {
+            if (ptDest.x != m_nWidth - 1 || bHitWall) {
+                if (ptDest.y != m_nHeight - 1 || bHitWall) {
+                    cost = m_pSearchMap->GetLOSCost(ptSearch, pVisibleTerrainTable, nTableIndex, m_bOutDoor);
+                    if (cost == CPathSearch::COST_IMPASSABLE) {
+                        bHitWall = TRUE;
+                        nHeight = m_pSearchMap->GetStructureHeight(nTableIndex);
+                        if (nHeight < nHighest) {
+                            return;
+                        }
+
+                        nHighest = nHeight;
+
+                        if (bLookingUp) {
+                            ptTile.x = ptSearch.x >> 1;
+                            ptTile.y = SEARCH_TO_VIS_Y[ptSearch.y & 7] + (ptSearch.y >> 3) * 3;
+                            if (nLastTileX != ptTile.x || nLastTileY != ptTile.y) {
+                                ClimbWall(ptTile, ptDest, charId, pVisibleTerrainTable, nHeight);
+                                nLastTileY = ptTile.y;
+                                nLastTileX = ptTile.x;
+                            }
+                        }
+                    } else {
+                        if (bHitWall) {
+                            return;
+                        }
+                    }
+                } else {
+                    ptTile.x = ptSearch.x >> 1;
+                    ptTile.y = ptDest.y;
+                    if (nLastTileX != ptTile.x || nLastTileY != ptTile.y) {
+                        // NOTE: Uninline.
+                        SetTileVisible(m_nWidth * ptDest.y + ptTile.x, charId);
+                    }
+                }
+            } else {
+                ptTile.x = ptDest.x;
+                ptTile.y = SEARCH_TO_VIS_Y[ptSearch.y & 7] + (ptSearch.y >> 3) * 3;
+                if (nLastTileX != ptTile.x || nLastTileY != ptTile.y) {
+                    // NOTE: Uninline.
+                    SetTileVisible(m_nWidth * ptTile.y + ptDest.x, charId);
+                }
+            }
+
+            ptTile.x = ptSearch.x >> 1;
+            ptTile.y = SEARCH_TO_VIS_Y[ptSearch.y & 7] + (ptSearch.y >> 3) * 3;
+            if (nLastTileX != ptTile.x || nLastTileY != ptTile.y) {
+                // NOTE: Uninline.
+                SetTileVisible(m_nWidth * ptTile.y + ptTile.x, charId);
+                nLastTileY = ptTile.y;
+                nLastTileX = ptTile.x;
+            }
+
+            if (nDecision < 1) {
+                nDecision += nIncrementE;
+                ptSearch.x += nStepX;
+            } else {
+                nDecision += nIncrementNE;
+                ptSearch.y += nStepY;
+                ptSearch.x += nStepX;
+            }
+        }
+    } else {
+        nIncrementE = nDeltaX * 2;
+        nDecision = nIncrementE - nDeltaY;
+        nIncrementNE = (nDeltaX - nDeltaY) * 2;
+
+        while (ptSearch.x != ptSearchDest.x || ptSearch.y != ptSearchDest.y) {
+            if (ptDest.x != m_nWidth - 1 || bHitWall) {
+                if (ptDest.y != m_nHeight - 1 || bHitWall) {
+                    cost = m_pSearchMap->GetLOSCost(ptSearch, pVisibleTerrainTable, nTableIndex, m_bOutDoor);
+                    if (cost == CPathSearch::COST_IMPASSABLE) {
+                        bHitWall = TRUE;
+                        nHeight = m_pSearchMap->GetStructureHeight(nTableIndex);
+                        if (nHeight < nHighest) {
+                            return;
+                        }
+
+                        nHighest = nHeight;
+
+                        if (bLookingUp) {
+                            ptTile.x = ptSearch.x >> 1;
+                            ptTile.y = SEARCH_TO_VIS_Y[ptSearch.y & 7] + (ptSearch.y >> 3) * 3;
+                            if (nLastTileX != ptTile.x || nLastTileY != ptTile.y) {
+                                ClimbWall(ptTile, ptDest, charId, pVisibleTerrainTable, nHeight);
+                                nLastTileY = ptTile.y;
+                                nLastTileX = ptTile.x;
+                            }
+                        }
+                    } else {
+                        if (bHitWall) {
+                            return;
+                        }
+                    }
+                } else {
+                    ptTile.x = ptSearch.x >> 1;
+                    ptTile.y = ptDest.y;
+                    if (nLastTileX != ptTile.x || nLastTileY != ptTile.y) {
+                        // NOTE: Uninline.
+                        SetTileVisible(m_nWidth * ptDest.y + ptTile.x, charId);
+                    }
+                }
+            } else {
+                ptTile.x = ptDest.x;
+                ptTile.y = SEARCH_TO_VIS_Y[ptSearch.y & 7] + (ptSearch.y >> 3) * 3;
+                if (nLastTileX != ptTile.x || nLastTileY != ptTile.y) {
+                    // NOTE: Uninline.
+                    SetTileVisible(m_nWidth * ptTile.y + ptDest.x, charId);
+                }
+            }
+
+            ptTile.x = ptSearch.x >> 1;
+            ptTile.y = SEARCH_TO_VIS_Y[ptSearch.y & 7] + (ptSearch.y >> 3) * 3;
+            if (nLastTileX != ptTile.x || nLastTileY != ptTile.y) {
+                // NOTE: Uninline.
+                SetTileVisible(m_nWidth * ptTile.y + ptTile.x, charId);
+                nLastTileY = ptTile.y;
+                nLastTileX = ptTile.x;
+            }
+
+            if (nDecision < 1) {
+                nDecision += nIncrementE;
+                ptSearch.y += nStepY;
+            } else {
+                nDecision += nIncrementNE;
+                ptSearch.y += nStepY;
+                ptSearch.x += nStepX;
+            }
+        }
+    }
+
+    if (ptDest.x == m_nWidth - 1) {
+        ptTile.x = ptDest.x;
+        ptTile.y = SEARCH_TO_VIS_Y[ptSearch.y & 7] + (ptSearch.y >> 3) * 3;
+        if (nLastTileX != ptTile.x || nLastTileY != ptTile.y) {
+            // NOTE: Uninline.
+            SetTileVisible(m_nWidth * ptTile.y + ptDest.x, charId);
+        }
+    } else if (ptDest.y == m_nHeight - 1) {
+        ptTile.x = ptSearch.x >> 1;
+        ptTile.y = ptDest.y;
+        if (nLastTileX != ptTile.x || nLastTileY != ptTile.y) {
+            // NOTE: Uninline.
+            SetTileVisible(m_nWidth * ptDest.y + ptTile.x, charId);
+        }
+    } else {
+        cost = m_pSearchMap->GetLOSCost(ptSearch, pVisibleTerrainTable, nTableIndex, m_bOutDoor);
+        if (cost == CPathSearch::COST_IMPASSABLE) {
+            nHeight = m_pSearchMap->GetStructureHeight(nTableIndex);
+            if (nHeight < nHighest) {
+                return;
+            }
+
+            ptTile.x = ptSearch.x >> 1;
+            ptTile.y = SEARCH_TO_VIS_Y[ptSearch.y & 7] + (ptSearch.y >> 3) * 3;
+            if (nLastTileX == ptTile.x && nLastTileY == ptTile.y) {
+                return;
+            }
+
+            if (bLookingUp) {
+                ClimbWall(ptTile, ptDest, charId, pVisibleTerrainTable, nHeight);
+                return;
+            }
+        } else {
+            if (bHitWall) {
+                return;
+            }
+
+            ptTile.x = ptSearch.x >> 1;
+            ptTile.y = SEARCH_TO_VIS_Y[ptSearch.y & 7] + (ptSearch.y >> 3) * 3;
+            if (nLastTileX == ptTile.x && nLastTileY == ptTile.y) {
+                return;
+            }
+        }
+
+        // NOTE: Uninline.
+        SetTileVisible(m_nWidth * ptTile.y + ptTile.x, charId);
+    }
 }
 
 // 0x553290
@@ -448,13 +693,126 @@ void CVisibilityMap::RemoveCharacter(const CPoint& pos, LONG charId, const BYTE*
 // 0x553440
 void CVisibilityMap::sub_553440(const CPoint& pt, BYTE charId)
 {
-    // TODO: Incomplete.
+    LONG nLeft = pt.x;
+    LONG nRight;
+    const BYTE* pArc = field_12;
+    BYTE nArcLength = field_4;
+    LONG y = pt.y - field_10;
+    SHORT nStepY = 1;
+    SHORT nRemaining;
+    SHORT nNext;
+    BYTE code;
+    LONG nStart;
+    LONG nEnd;
+    LONG nCount;
+    LONG nIndex;
+
+    for (INT nPass = 0; nPass < 2; nPass++) {
+        nRemaining = nArcLength;
+        nRight = nLeft;
+        if (nRemaining != 0) {
+            do {
+                code = *pArc;
+                nNext = nRemaining - 1;
+                while (TRUE) {
+                    nRight++;
+                    pArc++;
+                    nRemaining = nNext;
+                    if (code != 0) {
+                        break;
+                    }
+
+                    nRemaining = nNext - 1;
+                    if (nNext == 0) {
+                        break;
+                    }
+
+                    code = *pArc;
+                    nLeft--;
+                    nNext = nRemaining;
+                }
+
+                if (y >= 0 && y < m_nHeight) {
+                    nStart = max(nLeft, 0);
+                    nEnd = min(nRight, m_nWidth - 1);
+                    if (nStart <= nEnd) {
+                        nCount = nEnd - nStart + 1;
+                        nIndex = m_nWidth * y + nStart;
+                        do {
+                            // NOTE: Uninline.
+                            DecrementVisibility(nIndex, charId);
+                            nCount--;
+                            nIndex++;
+                        } while (nCount != 0);
+                    }
+                }
+
+                y += nStepY;
+                nLeft--;
+            } while (nRemaining > 0);
+        }
+
+        nLeft = pt.x;
+        y = field_10 + pt.y;
+        pArc = field_12;
+        nArcLength = field_4;
+        nStepY = -1;
+    }
 }
 
 // 0x5535D0
 void CVisibilityMap::sub_5535D0(const CPoint& pt, BYTE charId)
 {
-    // TODO: Incomplete.
+    LONG y = pt.y;
+    LONG nRight = pt.x + field_E;
+    const BYTE* pArc = field_16;
+    LONG nLeft = pt.x - field_E + 1;
+    SHORT nArcLength = field_1A;
+    SHORT nStepY = -1;
+    SHORT nRows;
+    LONG nStart;
+    LONG nEnd;
+    LONG nCount;
+    LONG nIndex;
+    BYTE nFirst;
+
+    for (INT nPass = 0; nPass < 2; nPass++) {
+        if (nArcLength >= 0) {
+            nRows = nArcLength + 1;
+            do {
+                if (y >= 0 && y < m_nHeight) {
+                    nStart = max(nLeft, 0);
+                    nEnd = min(nRight, m_nWidth - 1);
+                    if (nStart <= nEnd) {
+                        nCount = nEnd - nStart + 1;
+                        nIndex = m_nWidth * y + nStart;
+                        do {
+                            // NOTE: Uninline.
+                            DecrementVisibility(nIndex, charId);
+                            nCount--;
+                            nIndex++;
+                        } while (nCount != 0);
+                    }
+                }
+
+                if (*pArc++ != 0) {
+                    nLeft++;
+                    nRight--;
+                }
+
+                y += nStepY;
+                nRows--;
+            } while (nRows != 0);
+        }
+
+        nFirst = *field_16;
+        y = pt.y + 1;
+        nStepY = 1;
+        nLeft = pt.x + 1 + (nFirst - field_E);
+        nRight = (pt.x - nFirst) + field_E;
+        pArc = field_16 + 1;
+        nArcLength = field_1A - 1;
+    }
 }
 
 // 0x553740
@@ -478,13 +836,87 @@ void CVisibilityMap::SetAreaUnexplored()
 // 0x553800
 void CVisibilityMap::sub_553800(const CPoint& ptView, const CPoint& ptOffset, const CPoint& ptSearchMapView, BYTE charId, const BYTE* pVisibleTerrainTable)
 {
-    // TODO: Incomplete.
+    const BYTE* pArc = field_12;
+    LONG y = ptView.y - field_10;
+    LONG x = ptView.x;
+    BYTE nArcLength = field_4;
+    BOOLEAN bLookingUp = TRUE;
+    SHORT nStepY = 1;
+    LONG nRight;
+    LONG nStepLeft;
+    LONG nStepRight;
+    LONG nCount;
+
+    for (INT nPass = 0; nPass < 2; nPass++) {
+        if (nArcLength != 0) {
+            nStepLeft = x + 1;
+            nCount = nArcLength;
+            nStepRight = x;
+            nRight = x;
+            do {
+                nRight++;
+                MarkTileLine(ptView, ptSearchMapView, x, y, ptOffset, charId, pVisibleTerrainTable, bLookingUp);
+                MarkTileLine(ptView, ptSearchMapView, nRight, y, ptOffset, charId, pVisibleTerrainTable, bLookingUp);
+                x--;
+                nStepLeft--;
+                nStepRight++;
+                if (*pArc++ != 0) {
+                    y += nStepY;
+                    MarkTileLine(ptView, ptSearchMapView, nStepLeft, y, ptOffset, charId, pVisibleTerrainTable, bLookingUp);
+                    MarkTileLine(ptView, ptSearchMapView, nStepRight, y, ptOffset, charId, pVisibleTerrainTable, bLookingUp);
+                }
+                nCount--;
+            } while (nCount != 0);
+        }
+
+        x = ptView.x;
+        pArc = field_12;
+        y = field_10 + ptView.y;
+        nArcLength = field_4;
+        bLookingUp = FALSE;
+        nStepY = -1;
+    }
 }
 
 // 0x553990
 void CVisibilityMap::sub_553990(const CPoint& ptView, const CPoint& ptOffset, const CPoint& ptSearchMapView, BYTE charId, const BYTE* pVisibleTerrainTable)
 {
-    // TODO: Incomplete.
+    const BYTE* pArc = field_16;
+    LONG y = ptView.y;
+    LONG nLeft = ptView.x - field_E + 1;
+    SHORT nArcLength = field_1A;
+    BOOLEAN bLookingUp = TRUE;
+    SHORT nStepY = -1;
+    LONG nRight = ptView.x + field_E;
+    SHORT nRows;
+    BYTE nFirst;
+
+    for (INT nPass = 0; nPass < 2; nPass++) {
+        if (nArcLength >= 0) {
+            nRows = nArcLength + 1;
+            do {
+                MarkTileLine(ptView, ptSearchMapView, nLeft, y, ptOffset, charId, pVisibleTerrainTable, bLookingUp);
+                MarkTileLine(ptView, ptSearchMapView, nRight, y, ptOffset, charId, pVisibleTerrainTable, bLookingUp);
+                if (pArc != NULL && *pArc++ != 0) {
+                    nLeft++;
+                    nRight--;
+                    MarkTileLine(ptView, ptSearchMapView, nLeft, y, ptOffset, charId, pVisibleTerrainTable, bLookingUp);
+                    MarkTileLine(ptView, ptSearchMapView, nRight, y, ptOffset, charId, pVisibleTerrainTable, bLookingUp);
+                }
+                y += nStepY;
+                nRows--;
+            } while (nRows != 0);
+        }
+
+        nFirst = *field_16;
+        y = ptView.y + 1;
+        bLookingUp = FALSE;
+        nLeft = (nFirst - field_E) + 1 + ptView.x;
+        nRight = (ptView.x - nFirst) + field_E;
+        pArc = field_16 + 1;
+        nStepY = 1;
+        nArcLength = field_1A - 1;
+    }
 }
 
 // 0x553B10
@@ -504,16 +936,19 @@ void CVisibilityMap::Uninit()
 void CVisibilityMap::UpDate(const CPoint& ptOldPos, const CPoint& ptNewPos, LONG charId, const BYTE* pVisibleTerrainTable)
 {
     CPoint pt;
-    pt.x = ptNewPos.x / 32;
-    pt.y = ptNewPos.y / 32;
+    pt.x = ptOldPos.x / 32;
+    pt.y = ptOldPos.y / 32;
 
-    // NOTE: Uninline.
-    BYTE visId = GetCharacterPos(charId);
-
-    if (visId != -1) {
-        sub_553440(pt, visId);
-        sub_5535D0(pt, visId);
-        PrivateAddCharacter(charId, visId, pVisibleTerrainTable);
+    for (SHORT nIndex = 0; nIndex < 6; nIndex++) {
+        if (m_aCharacterIds[nIndex] == charId) {
+            // NOTE: The original compares the signed char 1 << nIndex with
+            // -1, which never matches.
+            BYTE visId = 1 << nIndex;
+            sub_553440(pt, visId);
+            sub_5535D0(pt, visId);
+            PrivateAddCharacter(ptNewPos, visId, pVisibleTerrainTable);
+            return;
+        }
     }
 }
 
@@ -779,4 +1214,14 @@ void CVisibilityMap::SetTileVisible(LONG nIndex, BYTE charId)
     UTIL_ASSERT_MSG((nIndex >= 0 && nIndex < m_nMapSize), "Index into vis map out of range in SetTileVisible");
 
     m_pMap[nIndex] |= charId | EXPLORED_FLAG;
+}
+
+// NOTE: Inlined.
+void CVisibilityMap::DecrementVisibility(LONG nIndex, BYTE charId)
+{
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\CVisibility.cpp
+    // __LINE__: 2274
+    UTIL_ASSERT_MSG((nIndex >= 0 && nIndex < m_nMapSize), "Index into vis map out of range in DecrementVisibility");
+
+    m_pMap[nIndex] &= ~charId;
 }

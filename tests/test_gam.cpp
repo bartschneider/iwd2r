@@ -5,7 +5,10 @@
 #include "CGameArea.h"
 #include "CGameSprite.h"
 #include "CInfGame.h"
+#include "CMemINI.h"
 #include "CScreenCreateChar.h"
+#include "CSpawn.h"
+#include "CVisibility.h"
 #include "ScreenLayout.h"
 #include "data_view.h"
 #include "platform/data_dir.h"
@@ -612,6 +615,252 @@ TEST_CASE("gam: character export overwrites a junk PROBE.CHR and numbers past a 
     const std::string numbered = ReadFile(Child(characters, "PROBE00.CHR"));
     CHECK(numbered.compare(0, 8, "CHR V2.2") == 0);
     CHECK(numbered.size() == chr.size());
+}
+
+// The visibility map (CVisibility.cpp): the party member SetupCharacters
+// places in AR1000 is added to the area's map (CGameSprite::AddToArea ->
+// AddCharacter), whose sweeps run MarkTileLine to its vision ellipse; a move
+// (UpDate) clears its bit around the old tile and sweeps around the new one.
+// The tile values themselves are compared with the original by the vis/
+// oracle cases and the replay's world.explored_count.
+TEST_CASE("vis: the party member in AR1000 explores its vision ellipse and moves it", "[vis][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CGameSprite* pSprite = NewGameWithOneCharacter(cre, "Probe");
+    pGame->UpdateCharacterSlots();
+    pGame->SetupCharacters(FALSE);
+    CGameArea* pArea = pSprite->GetArea();
+    REQUIRE(pArea != NULL);
+    CVisibilityMap& vis = pArea->m_visibility;
+    REQUIRE(vis.m_pMap != NULL);
+
+    auto explored = [&vis]() {
+        LONG count = 0;
+        for (LONG n = 0; n < vis.m_nMapSize; n++) {
+            if (vis.IsTileExplored(n))
+                count++;
+        }
+        return count;
+    };
+
+    // One slot holds the member, with bit 0.
+    int slots = 0;
+    for (LONG id : vis.m_aCharacterIds) {
+        if (id == pSprite->GetId())
+            slots++;
+    }
+    REQUIRE(slots == 1);
+    CHECK(vis.m_aCharacterIds[0] == pSprite->GetId());
+
+    const CPoint start = pSprite->GetPos();
+    const LONG startTile = vis.PointToTile(start);
+    CHECK(vis.IsTileExplored(startTile));
+    CHECK((vis.m_pMap[startTile] & 0x01) != 0);
+    const LONG first = explored();
+    // Within the 29 x 21 tiles of the 14 x 10 ellipse.
+    CHECK(first > 1);
+    CHECK(first <= 29 * 21);
+
+    // Adding the member again keeps its slot and its bit (the original's
+    // AddCharacter stops at the slot holding it).
+    REQUIRE(vis.AddCharacter(start, pSprite->GetId(), pSprite->GetVisibleTerrainTable()));
+    slots = 0;
+    for (LONG id : vis.m_aCharacterIds) {
+        if (id == pSprite->GetId())
+            slots++;
+    }
+    CHECK(slots == 1);
+    CHECK(explored() == first);
+
+    // A move out of the old ellipse: the old tile loses the member's bit but
+    // stays explored; the new one is explored and visible.
+    const CPoint moved(start.x - 30 * 32, start.y);
+    const LONG movedTile = vis.PointToTile(moved);
+    vis.UpDate(start, moved, pSprite->GetId(), pSprite->GetVisibleTerrainTable());
+    CHECK(vis.IsTileExplored(startTile));
+    CHECK((vis.m_pMap[startTile] & 0x01) == 0);
+    CHECK(vis.IsTileExplored(movedTile));
+    CHECK((vis.m_pMap[movedTile] & 0x01) != 0);
+    CHECK(explored() > first);
+
+    // An id that is not on the map changes nothing.
+    std::vector<BYTE> before(vis.m_pMap, vis.m_pMap + vis.m_nMapSize);
+    vis.UpDate(moved, start, 0x7FFF, pSprite->GetVisibleTerrainTable());
+    CHECK(std::equal(before.begin(), before.end(), vis.m_pMap));
+}
+
+// INI spawns (CSpawn.cpp): CSpawn::ExecuteSpawn on AR1000 with a section
+// built in memory. The area's difficulty band comes from the party level
+// (header byte 0x4E) against the two bounds (0x4C, 0x4D); a spawn whose
+// area_diff_N key turns its band off spawns nothing and asserts nothing;
+// with the band on it creates create_qty creatures at the spawn point.
+// (Review Focus 5, CGameSpawning::Spawn's per-total-level table, is a
+// separate function, not ported yet: it needs CAIGroup 0x405370.)
+namespace {
+
+int ObjectsInArea(CGameArea* pArea)
+{
+    int count = 0;
+    CTypedPtrList<CPtrList, int*>* lists[] = { &pArea->m_lVertSort, &pArea->m_lVertSortBack, &pArea->m_lVertSortFlight,
+        &pArea->m_lVertSortAdd, &pArea->m_lVertSortBackAdd, &pArea->m_lVertSortFlightAdd };
+    for (CTypedPtrList<CPtrList, int*>* list : lists) {
+        count += static_cast<int>(list->GetCount());
+    }
+    return count;
+}
+
+}
+
+TEST_CASE("spawn: an INI spawn whose difficulty band is off spawns nothing; on, it spawns its quantity", "[spawn][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CGameSprite* pSprite = NewGameWithOneCharacter(cre, "Probe");
+    pGame->UpdateCharacterSlots();
+    pGame->SetupCharacters(FALSE);
+    CGameArea* pArea = pSprite->GetArea();
+    REQUIRE(pArea != NULL);
+
+    // Band 1: the party level below the first bound.
+    pArea->m_header.field_4C = 4;
+    pArea->m_header.field_4D = 8;
+    pArea->m_header.field_4E = 1;
+
+    // A point well away from the party (2414,897), out of its sight.
+    CMemINISection section(CString("probe"));
+    section.Set(CString("cre_file"), CString("10JON"));
+    section.Set(CString("create_qty"), CString("2"));
+    section.Set(CString("spawn_point"), CString("[1100.700:4]"));
+    section.Set(CString("area_diff_1"), CString("0"));
+
+    const int before = ObjectsInArea(pArea);
+    {
+        CSpawn spawn(&section);
+        REQUIRE(spawn.DataIsValid);
+        CHECK(spawn.ExecuteSpawn(pArea) == 0);
+        CHECK(ObjectsInArea(pArea) == before);
+
+        // Bands 2 and 3 stay on (their keys are absent).
+        pArea->m_header.field_4E = 6;
+        CHECK(spawn.ExecuteSpawn(pArea) == 2);
+        CHECK(ObjectsInArea(pArea) == before + 2);
+    }
+
+    section.Set(CString("area_diff_3"), CString("0"));
+    pArea->m_header.field_4E = 30;
+    CSpawn spawn(&section);
+    REQUIRE(spawn.DataIsValid);
+    CHECK(spawn.ExecuteSpawn(pArea) == 0);
+    CHECK(ObjectsInArea(pArea) == before + 2);
+}
+
+// CSpawn::Read's spec key and ExecuteSpawn's search count: a bracketed
+// object type or a script name both search (GetCountInPoly over the whole
+// area, which OfType matches by type and name); a count that reaches spec_qty
+// spawns nothing, one below it spawns create_qty; an unclosed bracket leaves
+// the spawn invalid.
+TEST_CASE("spawn: the spec key's object type gates an INI spawn on the area's count", "[spawn][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CGameSprite* pSprite = NewGameWithOneCharacter(cre, "Probe");
+    pGame->UpdateCharacterSlots();
+    pGame->SetupCharacters(FALSE);
+    CGameArea* pArea = pSprite->GetArea();
+    REQUIRE(pArea != NULL);
+    // The area's objects onto the list GetCountInPoly walks.
+    pArea->SortLists();
+    REQUIRE(pArea->m_lVertSort.GetCount() > 1);
+
+    auto section = [](const char* spec, const char* qty) {
+        auto* p = new CMemINISection(CString("probe"));
+        p->Set(CString("cre_file"), CString("10JON"));
+        p->Set(CString("create_qty"), CString("2"));
+        p->Set(CString("spawn_point"), CString("[1100.700:4]"));
+        p->Set(CString("spec"), CString(spec));
+        p->Set(CString("spec_qty"), CString(qty));
+        return p;
+    };
+
+    {
+        std::unique_ptr<CMemINISection> p(section("[3.4.5.6.7.8.9.10]", "1"));
+        CSpawn spawn(p.get());
+        REQUIRE(spawn.DataIsValid);
+        CHECK(spawn.field_13E == TRUE);
+        CHECK(spawn.mSearchType.m_nEnemyAlly == 3);
+        CHECK(spawn.mSearchType.m_nGeneral == 4);
+        CHECK(spawn.mSearchType.m_nRace == 5);
+        CHECK(spawn.mSearchType.m_nSubRace == 6);
+        CHECK(spawn.mSearchType.m_nClass == 7);
+        CHECK(spawn.mSearchType.m_nSpecific == 8);
+        CHECK(spawn.mSearchType.m_nGender == 9);
+        CHECK(spawn.mSearchType.m_nAlignment == 10);
+    }
+
+    const int before = ObjectsInArea(pArea);
+    {
+        std::unique_ptr<CMemINISection> p(section("[0.0.0.0.0.0.0.0]", "1"));
+        CSpawn spawn(p.get());
+        REQUIRE(spawn.DataIsValid);
+        CHECK(spawn.ExecuteSpawn(pArea) == 0);
+        CHECK(ObjectsInArea(pArea) == before);
+    }
+    {
+        // A name no object in the area carries: the count stays 0.
+        std::unique_ptr<CMemINISection> p(section("  NoSuchProbe  ", "1"));
+        CSpawn spawn(p.get());
+        REQUIRE(spawn.DataIsValid);
+        CHECK(spawn.field_13E == TRUE);
+        CHECK(spawn.mSearchType.m_sName == "NoSuchProbe");
+        CHECK(spawn.ExecuteSpawn(pArea) == 2);
+        CHECK(ObjectsInArea(pArea) == before + 2);
+    }
+    {
+        std::unique_ptr<CMemINISection> p(section("[0.0.0.0.0.0.0.0]", "1000"));
+        CSpawn spawn(p.get());
+        REQUIRE(spawn.DataIsValid);
+        CHECK(spawn.ExecuteSpawn(pArea) == 2);
+        CHECK(ObjectsInArea(pArea) == before + 4);
+    }
+    {
+        std::unique_ptr<CMemINISection> p(section("[1.2", "1"));
+        CSpawn spawn(p.get());
+        CHECK_FALSE(spawn.DataIsValid);
+    }
 }
 
 #ifndef _WIN32

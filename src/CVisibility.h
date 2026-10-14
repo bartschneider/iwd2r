@@ -19,6 +19,9 @@ public:
     static const BYTE SQUARE_SIZEX;
     static const BYTE SQUARE_SIZEY;
 
+    static const BYTE SEARCH_TO_VIS_Y[8];
+    static const BYTE VIS_TO_SEARCH_Y[3];
+
     static const BYTE EXPLORED;
     static const TILE_CODE EXPLORED_FULL;
 
@@ -65,8 +68,8 @@ public:
     void sub_5535D0(const CPoint& pt, BYTE charId);
     void SetAreaExplored();
     void SetAreaUnexplored();
-    void sub_553800(const CPoint& ptView, const CPoint& ptSearchMapView, const CPoint& ptOffset, BYTE charId, const BYTE* pVisibleTerrainTable);
-    void sub_553990(const CPoint& ptView, const CPoint& ptSearchMapView, const CPoint& ptOffset, BYTE charId, const BYTE* pVisibleTerrainTable);
+    void sub_553800(const CPoint& ptView, const CPoint& ptOffset, const CPoint& ptSearchMapView, BYTE charId, const BYTE* pVisibleTerrainTable);
+    void sub_553990(const CPoint& ptView, const CPoint& ptOffset, const CPoint& ptSearchMapView, BYTE charId, const BYTE* pVisibleTerrainTable);
     void Uninit();
     void UpDate(const CPoint& ptOldPos, const CPoint& ptNewPos, LONG charId, const BYTE* pVisibleTerrainTable);
     BOOLEAN IsTileExplored(LONG nIndex);
@@ -83,6 +86,7 @@ public:
     void SetTileExplored(LONG nIndex);
     void SetTileUnexplored(LONG nIndex);
     void SetTileVisible(LONG nIndex, BYTE charId);
+    void DecrementVisibility(LONG nIndex, BYTE charId);
 
     /* 0000 */ BYTE* m_pMap;
     /* 0004 */ BYTE field_4;
