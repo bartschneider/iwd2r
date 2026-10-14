@@ -674,3 +674,40 @@ TEST_CASE("effects-iwd: damage reduction (436) and protection from arrows (443) 
     pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_PROTECTIONFORMARROWS, 0, 0);
     CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
 }
+
+TEST_CASE("effects-iwd: the aura and storm effects re-queue themselves and finish", "[effects][data]")
+{
+    PROBE_OR_SKIP(pSprite);
+    CGameEffectList* pList = pSprite->GetTimedEffectList();
+    auto delayed = [&](WORD id) {
+        int n = 0;
+        POSITION pos = pList->GetHeadPosition();
+        while (pos != NULL) {
+            CGameEffect* pOther = pList->GetNext(pos);
+            if (pOther->m_effectID == id && pOther->m_durationType == 7) {
+                n++;
+            }
+        }
+        return n;
+    };
+    // Salamander aura and umber hulk gaze: one copy seven ticks later.
+    const WORD auras[] = { ICEWIND_CGAMEEFFECT_SALAMANDERAURA, ICEWIND_CGAMEEFFECT_UMBERHULKGAZE };
+    for (WORD id : auras) {
+        const int before = delayed(id);
+        std::unique_ptr<CGameEffect> pEffect = Decode(pSprite, id, 0, 0);
+        CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+        CHECK(pEffect->m_done == TRUE);
+        CHECK(delayed(id) == before + 1);
+    }
+    // Static charge, call lightning, cloak of fear: one copy per further
+    // round; an unknown source then only finishes.
+    const WORD storms[] = { ICEWIND_CGAMEEFFECT_STATICCHARGE, ICEWIND_CGAMEEFFECT_CALLLIGHTNING, ICEWIND_CGAMEEFFECT_CLOAKOFFEAR };
+    for (WORD id : storms) {
+        const int before = delayed(id);
+        std::unique_ptr<CGameEffect> pEffect = Decode(pSprite, id, 0, 3);
+        pEffect->m_sourceID = -1;
+        CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+        CHECK(pEffect->m_done == TRUE);
+        CHECK(delayed(id) == before + 2);
+    }
+}

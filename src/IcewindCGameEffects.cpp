@@ -913,6 +913,34 @@ CGameEffect* IcewindCGameEffectSalamanderAura::Copy()
     return copy;
 }
 
+// 0x563D30
+BOOL IcewindCGameEffectSalamanderAura::ApplyEffect(CGameSprite* pSprite)
+{
+    if (IcewindMisc::IsDead(pSprite) == TRUE) {
+        m_done = TRUE;
+        return TRUE;
+    }
+
+    CGameEffect* copy = Copy();
+    copy->m_duration = 7;
+    // NOTE: The duration type is the WORD constant at 0x8491B0 (4).
+    copy->m_durationType = 4;
+    pSprite->AddEffect(copy, CGameAIBase::EFFECT_LIST_TIMED, TRUE, TRUE);
+
+    // TODO: Incomplete (0x563DAC-0x563F48). The original builds a
+    // CProjectileArea of type 100 (0x56EDD0, not ported) and adds to it, for
+    // type 0, an immunity to the source resref (CreateEffectImmunitySpell
+    // with 3, 10, 0, 2) and a sub_5853B0 damage of the dice and amount; for
+    // type 1 an immunity with 25 and a sub_5853E0 damage, both with this
+    // caster level; another type asserts (line 3123). Each carries the
+    // source resref. Then it fires the projectile at the sprite
+    // (Fire(area, id, id, pos, 0, 0)).
+
+    m_done = TRUE;
+
+    return TRUE;
+}
+
 // -----------------------------------------------------------------------------
 
 // 0x49E6B0
@@ -929,6 +957,33 @@ CGameEffect* IcewindCGameEffectUmberHulkGaze::Copy()
     delete effect;
     copy->CopyFromBase(this);
     return copy;
+}
+
+// 0x563F70
+BOOL IcewindCGameEffectUmberHulkGaze::ApplyEffect(CGameSprite* pSprite)
+{
+    if (IcewindMisc::IsDead(pSprite) == TRUE) {
+        m_done = TRUE;
+        return TRUE;
+    }
+
+    CGameEffect* copy = Copy();
+    copy->m_duration = 7;
+    // NOTE: The duration type is the WORD constant at 0x8491B0 (4).
+    copy->m_durationType = 4;
+    pSprite->AddEffect(copy, CGameAIBase::EFFECT_LIST_TIMED, TRUE, TRUE);
+
+    // TODO: Incomplete (0x563FED-0x5641D4). The original builds a
+    // CProjectileArea of type 275 (0x56EDD0, not ported) aimed at the
+    // sprite's enemies (CProjectileArea_TargetEnemy 0x5704E0), adds
+    // immunities to SpIn994 (0x8AF154; CreateEffectImmunitySpell with 17,
+    // 27, 29 and 23, duration 10, target type 2), a confusion
+    // (CreateEffectConfusion) and a last immunity, each with the SpIn994
+    // source resref, and fires it at the sprite.
+
+    m_done = TRUE;
+
+    return TRUE;
 }
 
 // -----------------------------------------------------------------------------
@@ -1080,6 +1135,51 @@ CGameEffect* IcewindCGameEffectStaticCharge::Copy()
     return copy;
 }
 
+// 0x564D40
+BOOL IcewindCGameEffectStaticCharge::ApplyEffect(CGameSprite* pSprite)
+{
+    if (IcewindMisc::IsDead(pSprite) == TRUE) {
+        m_done = TRUE;
+    } else {
+        if (m_effectAmount > 0) {
+            LONG nDelay = 70;
+            for (LONG nRound = 1; nRound < m_effectAmount; nRound++) {
+                CGameEffect* copy = Copy();
+                copy->m_duration = nDelay;
+                copy->m_effectAmount = 0;
+                // NOTE: The duration type is the WORD constant at 0x8491B0
+                // (4).
+                copy->m_durationType = 4;
+                copy->m_casterLevel = m_casterLevel;
+                pSprite->AddEffect(copy, CGameAIBase::EFFECT_LIST_TIMED, TRUE, TRUE);
+                nDelay += 70;
+            }
+        }
+
+        CGameObject* pSource;
+        BYTE rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(m_sourceID,
+            CGameObjectArray::THREAD_ASYNCH,
+            &pSource,
+            INFINITE);
+        if (rc == CGameObjectArray::SUCCESS) {
+            // TODO: Incomplete. The original builds its projectile
+            // (FUN_00574970, not ported) aimed at the sprite's enemies
+            // (CProjectileArea_TargetEnemy 0x5704E0), adds the effects of
+            // spell m_res at this caster level (GetSpellResrefEffects
+            // 0x586220) with the source resref, and fires it at the sprite.
+
+            g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(m_sourceID,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+            m_done = TRUE;
+        } else {
+            m_done = TRUE;
+        }
+    }
+
+    return TRUE;
+}
+
 // -----------------------------------------------------------------------------
 
 // 0x49EC50
@@ -1098,6 +1198,46 @@ CGameEffect* IcewindCGameEffectCallLightning::Copy()
     return copy;
 }
 
+// 0x564F80
+BOOL IcewindCGameEffectCallLightning::ApplyEffect(CGameSprite* pSprite)
+{
+    if (m_effectAmount > 0) {
+        LONG nDelay = 70;
+        for (LONG nRound = 1; nRound < m_effectAmount; nRound++) {
+            CGameEffect* copy = Copy();
+            copy->m_duration = nDelay;
+            copy->m_effectAmount = 0;
+            // NOTE: The duration type is the WORD constant at 0x8491B0 (4).
+            copy->m_durationType = 4;
+            copy->m_casterLevel = m_casterLevel;
+            pSprite->AddEffect(copy, CGameAIBase::EFFECT_LIST_TIMED, TRUE, TRUE);
+            nDelay += 70;
+        }
+    }
+
+    CGameObject* pSource;
+    BYTE rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(m_sourceID,
+        CGameObjectArray::THREAD_ASYNCH,
+        &pSource,
+        INFINITE);
+    if (rc == CGameObjectArray::SUCCESS) {
+        // TODO: Incomplete. The original builds its projectile
+        // (FUN_00574A70, not ported) aimed at the sprite's enemies
+        // (CProjectileArea_TargetEnemy 0x5704E0), adds the effects of spell
+        // m_res at this caster level (GetSpellResrefEffects 0x586220) with
+        // the source resref, and fires it at the sprite.
+
+        g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(m_sourceID,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+        m_done = TRUE;
+    } else {
+        m_done = TRUE;
+    }
+
+    return TRUE;
+}
+
 // -----------------------------------------------------------------------------
 
 // 0x49ED40
@@ -1114,6 +1254,49 @@ CGameEffect* IcewindCGameEffectCloakOfFear::Copy()
     delete effect;
     copy->CopyFromBase(this);
     return copy;
+}
+
+// 0x5651A0
+BOOL IcewindCGameEffectCloakOfFear::ApplyEffect(CGameSprite* pSprite)
+{
+    if (IcewindMisc::IsDead(pSprite) == TRUE) {
+        m_done = TRUE;
+    } else {
+        if (m_effectAmount > 0) {
+            LONG nDelay = 3;
+            for (LONG nRound = 1; nRound < m_effectAmount; nRound++) {
+                CGameEffect* copy = Copy();
+                copy->m_duration = nDelay;
+                copy->m_effectAmount = 0;
+                // NOTE: The duration type is the WORD constant at 0x8491B0
+                // (4).
+                copy->m_durationType = 4;
+                pSprite->AddEffect(copy, CGameAIBase::EFFECT_LIST_TIMED, TRUE, TRUE);
+                nDelay += 3;
+            }
+        }
+
+        CGameObject* pSource;
+        BYTE rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(m_sourceID,
+            CGameObjectArray::THREAD_ASYNCH,
+            &pSource,
+            INFINITE);
+        if (rc == CGameObjectArray::SUCCESS) {
+            // TODO: Incomplete. The original builds its projectile
+            // (FUN_00575B00 with 0x100, not ported; +0x2AE = 75), adds the
+            // effects of spell m_res (GetSpellResrefEffects 0x586220) with
+            // the source resref, and fires it at the sprite.
+
+            g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(m_sourceID,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+            m_done = TRUE;
+        } else {
+            m_done = TRUE;
+        }
+    }
+
+    return TRUE;
 }
 
 // -----------------------------------------------------------------------------
