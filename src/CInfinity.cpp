@@ -3109,7 +3109,95 @@ void CInfinity::CallLightning(INT xWorldPos, INT yWorldPos)
 // 0x5D1380
 void CInfinity::Scroll(CPoint ptDest, SHORT speed)
 {
-    // TODO: Incomplete.
+    INT xDestExact = ptDest.x * 10000;
+    INT xDist = xDestExact - m_ptCurrentPosExact.x;
+    INT yDestExact = ptDest.y * 10000;
+    INT yDist = yDestExact - m_ptCurrentPosExact.y;
+    INT nDiagonalSpeed = speed * 30000 / 4;
+    INT nSpeed = speed * 10000;
+    INT nHalfSpeed = nSpeed / 2;
+
+    DWORD nTickCount = GetTickCount();
+    DWORD nElapsed;
+    if (nTickCount < m_nLastTickCount
+        || (nElapsed = nTickCount - m_nLastTickCount) > 500) {
+        nElapsed = 500;
+    }
+    m_nLastTickCount = nTickCount;
+
+    // NOTE: The steps are unsigned: the original multiplies the elapsed
+    // ticks (unsigned) by the speed and divides unsigned.
+    DWORD nStepX = nElapsed * static_cast<DWORD>(nSpeed) / 50;
+    DWORD nStepY = nElapsed * static_cast<DWORD>(nDiagonalSpeed) / 50;
+
+    if (speed == 0) {
+        SetViewPosition(ptDest.x, ptDest.y, TRUE);
+        m_ptScrollDest.x = -1;
+        m_ptScrollDest.y = -1;
+        return;
+    }
+
+    if (xDist <= static_cast<INT>(nStepX) && -static_cast<INT>(nStepX) <= xDist) {
+        if (yDist <= static_cast<INT>(nStepY) && -static_cast<INT>(nStepY) <= yDist) {
+            m_ptCurrentPosExact.y = yDestExact;
+            m_ptCurrentPosExact.x = xDestExact;
+            SetViewPosition(xDestExact / 10000, yDestExact / 10000, FALSE);
+            m_ptScrollDest.x = -1;
+            m_ptScrollDest.y = -1;
+            return;
+        }
+
+        if (yDist > 0) {
+            m_ptCurrentPosExact.y = static_cast<LONG>(m_ptCurrentPosExact.y + nStepY);
+            m_ptCurrentPosExact.x = xDestExact;
+            SetViewPosition(xDestExact / 10000, m_ptCurrentPosExact.y / 10000, FALSE);
+            return;
+        }
+
+        if (yDist < 0) {
+            m_ptCurrentPosExact.y = static_cast<LONG>(m_ptCurrentPosExact.y - nStepY);
+            m_ptCurrentPosExact.x = xDestExact;
+            SetViewPosition(xDestExact / 10000, m_ptCurrentPosExact.y / 10000, FALSE);
+            return;
+        }
+    }
+
+    // NOTE: The original compares the vertical distance with 6 here (`cmp
+    // edi, 6` at 0x5D158B and 0x5D15D4), not with the vertical step.
+    if (xDist > 0 && yDist <= 6 && -static_cast<INT>(nStepY) <= yDist) {
+        m_ptCurrentPosExact.x = static_cast<LONG>(m_ptCurrentPosExact.x + nStepX);
+        m_ptCurrentPosExact.y = yDestExact;
+        SetViewPosition(m_ptCurrentPosExact.x / 10000, yDestExact / 10000, FALSE);
+        return;
+    }
+
+    if (xDist < 0 && yDist <= 6 && -static_cast<INT>(nStepY) <= yDist) {
+        m_ptCurrentPosExact.x = static_cast<LONG>(m_ptCurrentPosExact.x - nStepX);
+        m_ptCurrentPosExact.y = yDestExact;
+        SetViewPosition(m_ptCurrentPosExact.x / 10000, yDestExact / 10000, FALSE);
+        return;
+    }
+
+    // The diagonals: three quarters of the speed across, half of it down.
+    DWORD nDiagonalX = nElapsed * static_cast<DWORD>(nDiagonalSpeed) / 50;
+    DWORD nDiagonalY = nElapsed * static_cast<DWORD>(nHalfSpeed) / 50;
+    if (xDist > 0 && yDist > 0) {
+        m_ptCurrentPosExact.x = static_cast<LONG>(m_ptCurrentPosExact.x + nDiagonalX);
+        m_ptCurrentPosExact.y = static_cast<LONG>(m_ptCurrentPosExact.y + nDiagonalY);
+    } else if (xDist < 0 && yDist > 0) {
+        m_ptCurrentPosExact.x = static_cast<LONG>(m_ptCurrentPosExact.x - nDiagonalX);
+        m_ptCurrentPosExact.y = static_cast<LONG>(m_ptCurrentPosExact.y + nDiagonalY);
+    } else if (xDist > 0 && yDist < 0) {
+        m_ptCurrentPosExact.x = static_cast<LONG>(m_ptCurrentPosExact.x + nDiagonalX);
+        m_ptCurrentPosExact.y = static_cast<LONG>(m_ptCurrentPosExact.y - nDiagonalY);
+    } else if (xDist < 0 && yDist < 0) {
+        m_ptCurrentPosExact.x = static_cast<LONG>(m_ptCurrentPosExact.x - nDiagonalX);
+        m_ptCurrentPosExact.y = static_cast<LONG>(m_ptCurrentPosExact.y - nDiagonalY);
+    } else {
+        return;
+    }
+
+    SetViewPosition(m_ptCurrentPosExact.x / 10000, m_ptCurrentPosExact.y / 10000, FALSE);
 }
 
 // 0x5D1750
