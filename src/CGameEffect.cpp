@@ -22,6 +22,8 @@
 #include "Icewind586B70.h"
 #include "IcewindMisc.h"
 
+#include <cstdio>
+
 // NOTE: Not used. It does not include many effects. Formatting is odd.
 //
 // 0x8D45F0
@@ -5980,7 +5982,7 @@ CGameEffect* CGameEffectResistFire::Copy()
     return copy;
 }
 
-// 0x4B0050
+// 0x4B0200
 BOOL CGameEffectResistFire::ApplyEffect(CGameSprite* pSprite)
 {
     switch (m_dwFlags) {
@@ -5996,7 +5998,7 @@ BOOL CGameEffectResistFire::ApplyEffect(CGameSprite* pSprite)
             m_forceRepass = TRUE;
             m_done = TRUE;
         } else {
-            pSprite->m_bonusStats.m_nResistFire += static_cast<BYTE>(m_effectAmount);
+            pSprite->m_bonusStats.m_nResistFire += static_cast<SHORT>(m_effectAmount);
             m_done = FALSE;
         }
         break;
@@ -6020,7 +6022,7 @@ BOOL CGameEffectResistFire::ApplyEffect(CGameSprite* pSprite)
         break;
     case 2:
         if (m_durationType == 1) {
-            pSprite->GetBaseStats()->m_resistFireBase = static_cast<BYTE>(m_effectAmount) * pSprite->GetBaseStats()->m_resistFireBase / 100;
+            pSprite->GetBaseStats()->m_resistFireBase = static_cast<SHORT>(m_effectAmount) * pSprite->GetBaseStats()->m_resistFireBase / 100;
             if (pSprite->GetBaseStats()->m_resistFireBase > 100) {
                 pSprite->GetBaseStats()->m_resistFireBase = 100;
             }
@@ -12403,6 +12405,15 @@ CGameEffect* CGameEffectPolymorph::Copy()
 // 0x4BB110
 BOOL CGameEffectPolymorph::ApplyEffect(CGameSprite* pSprite)
 {
+    // iwd2r: said once on stderr (ruling M3-7), so a missing port cannot
+    // pass unnoticed; the game goes on.
+    static bool bWarned = false;
+    if (!bWarned) {
+        bWarned = true;
+        fprintf(stderr, "iwd2r: effect %d (CGameEffectPolymorph::ApplyEffect, 0x4BB110) is not ported; it does nothing\n",
+            135);
+    }
+
     // TODO: Incomplete. Not ported yet (a creature file swap through a new
     // CGameSprite, CGameObjectArray::Delete and the search map); until then
     // the override only keeps the effect from reaching the asserting base
@@ -13177,6 +13188,15 @@ CGameEffect* CGameEffectReplaceSelf::Copy()
 // 0x4BD050
 BOOL CGameEffectReplaceSelf::ApplyEffect(CGameSprite* pSprite)
 {
+    // iwd2r: said once on stderr (ruling M3-7), so a missing port cannot
+    // pass unnoticed; the game goes on.
+    static bool bWarned = false;
+    if (!bWarned) {
+        bWarned = true;
+        fprintf(stderr, "iwd2r: effect %d (CGameEffectReplaceSelf::ApplyEffect, 0x4BD050) is not ported; it does nothing\n",
+            151);
+    }
+
     // TODO: Incomplete. Not ported yet; until then the override only keeps the
     // effect from reaching the asserting base ApplyEffect.
     return TRUE;
@@ -14701,6 +14721,15 @@ BOOL CGameEffectFeatCleave::ApplyEffect(CGameSprite* pSprite)
 {
     if (!m_secondaryType) {
         return TRUE;
+    }
+
+    // iwd2r: said once on stderr (ruling M3-7), so a missing port cannot
+    // pass unnoticed; the game goes on.
+    static bool bWarned = false;
+    if (!bWarned) {
+        bWarned = true;
+        fprintf(stderr, "iwd2r: effect %d (CGameEffectFeatCleave::ApplyEffect, 0x4B9AA0) is not ported; it does nothing\n",
+            442);
     }
 
     // TODO: Incomplete. Not ported: it needs the area's nearest-enemy search

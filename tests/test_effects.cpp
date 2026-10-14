@@ -362,10 +362,12 @@ TEST_CASE("spell immunity (206, 290) stays on while it has a resource", "[effect
     pEffect->m_res = CResRef("SPWI112");
     REQUIRE(pEffect->ApplyEffect(pSprite) == TRUE);
     CHECK(pEffect->m_done == FALSE);
+    delete pEffect;
 
     CGameEffect* pEmpty = Make(CGAMEEFFECT_IMMUNITYSPELL, 0, 0, 0);
     REQUIRE(pEmpty->ApplyEffect(pSprite) == TRUE);
     CHECK(pEmpty->m_done == TRUE);
+    delete pEmpty;
 
     // Mode 1 ends the effect on a sprite that is not undead (Evaluate
     // 0x4BF140 holds).
@@ -373,6 +375,7 @@ TEST_CASE("spell immunity (206, 290) stays on while it has a resource", "[effect
     pLiving->m_res = CResRef("SPWI112");
     REQUIRE(pLiving->ApplyEffect(pSprite) == TRUE);
     CHECK(pLiving->m_done == TRUE);
+    delete pLiving;
 
     delete pSprite;
 }
@@ -474,7 +477,8 @@ TEST_CASE("RemoveAllOfType removes the matching effects but the one to leave", "
         CHECK(list.GetHead() == pOther);
     }
 
-    list.RemoveAll();
+    // The list's destructor deletes the surviving effects.
+
     delete pSprite;
 }
 
@@ -650,6 +654,22 @@ TEST_CASE("apply effect (177) and the equip triggers (182, 183)", "[effects][dat
         CHECK(pEntry->m_error == 1234);
         delete pEffect;
     }
+
+    delete pSprite;
+}
+
+TEST_CASE("fire resistance (30) adds a negative temporary bonus as a signed amount", "[effects][data]")
+{
+    REQUIRE_ENGINE();
+    CGameSprite* pSprite = MakeSprite();
+
+    SHORT nBonus = pSprite->m_bonusStats.m_nResistFire;
+    Apply(pSprite, CGAMEEFFECT_RESISTFIRE, 0, -10, 0);
+    CHECK(pSprite->m_bonusStats.m_nResistFire == nBonus - 10);
+
+    pSprite->m_baseStats.m_resistFireBase = 40;
+    Apply(pSprite, CGAMEEFFECT_RESISTFIRE, 2, 50, 1);
+    CHECK(pSprite->m_baseStats.m_resistFireBase == 20);
 
     delete pSprite;
 }
