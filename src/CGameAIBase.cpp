@@ -941,10 +941,8 @@ SHORT CGameAIBase::ExecuteAction()
             field_595 = g_pBaldurChitin->GetObjectGame()->GetMultiplayerSettings()->GetListenToJoinOption();
             g_pBaldurChitin->GetObjectGame()->GetMultiplayerSettings()->SetListenToJoinOption(FALSE, TRUE);
             field_596++;
-            returnValue = ACTION_DONE;
-        } else {
-            // TODO: 0x45127A (field_596 set) not ported.
         }
+        returnValue = ACTION_DONE;
         goto done;
     case 272:
         // ResetJoinRequests
@@ -2824,11 +2822,15 @@ SHORT CGameAIBase::StaticStart(CGameStatic* target, BOOL bStart)
         return ACTION_ERROR;
     }
 
-    // TODO: Check, not sure if that's right.
+    // NOTE: The original compares bStart with the flag bit itself
+    // (`and ecx,8; cmp ebx,ecx` at 0x467BEE), so StaticStart (TRUE, 1)
+    // never matches the bit (8) and never sends; StaticStop (FALSE) sends
+    // only to a static whose bit is clear. Kept as the original does.
     if (bStart == (target->m_header.m_dwFlags & 0x8)) {
         CMessageStaticStart* pMessage = new CMessageStaticStart(bStart,
             m_id,
             target->GetId());
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(pMessage, FALSE);
     }
 
     return ACTION_DONE;
