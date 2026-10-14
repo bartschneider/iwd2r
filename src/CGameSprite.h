@@ -422,7 +422,9 @@ public:
     /* 004C */ void Render(CGameArea* pArea, CVidMode* pVidMode, INT nSurface) override;
     /* 0058 */ void SetCursor(LONG nToolTip) override;
     /* 0078 */ void AddEffect(CGameEffect* pEffect, BYTE list, BOOL noSave, BOOL immediateApply) override;
+    /* 0070 */ void SetTargetObject(CGameObject* pTarget) override;
     /* 007C */ void ClearAI(BOOLEAN bSetSequence) override;
+    /* 0084 */ SHORT ExecuteAction() override;
     /* 008C */ void ProcessAI() override;
     /* 0094 */ void SetScript(SHORT level, CAIScript* script) override;
     /* 009C */ const BYTE* GetVisibleTerrainTable() override;
@@ -580,7 +582,15 @@ public:
     SHORT sub_73CC40(CItem* curWeapon, const ITEM_ABILITY* curAttack);
     SHORT sub_73D420();
     SHORT sub_73D440(CItem* curWeapon);
+    void CheckModal();
+    CGameObject* GetTargetShare();
+    SHORT MoveToObject(CGameObject* pTarget);
     SHORT MoveToPoint();
+    SHORT MoveToPoint(const CPoint& dest, LONG range);
+    SHORT Dialog(CGameSprite* pTarget);
+    SHORT PlayerDialog(CGameSprite* pTarget);
+    SHORT UseDoor();
+    SHORT ReturnToStartLoc();
     SHORT OneSwing();
     SHORT Recoil();
     SHORT PlayDead();

@@ -1055,6 +1055,36 @@ public:
     /* 000C */ BYTE m_sequence;
 };
 
+// NOTE: The original's message that sets (or increments) a script variable
+// on every machine (vtable 0x84882C, 0x1E bytes). Its comm type is
+// BROADCAST_FORCED, so the local player runs it too. Marshal and Unmarshal
+// (0x50A4D0, 0x50A6C0) are the network path and are omitted (single player
+// only, docs/adr/0002-single-player-only.md).
+class CMessageSetVariable : public CMessage {
+public:
+    CMessageSetVariable(const CString& sScope, const CString& sName, LONG nValue, LONG caller, LONG target)
+        : CMessage(caller, target)
+    {
+        m_sScope = sScope;
+        m_sName = sName;
+        m_nValue = nValue;
+        m_bIncrement = FALSE;
+        m_dwFlags = 0;
+    }
+
+    SHORT GetCommType() override { return BROADCAST_FORCED; }
+    BYTE GetMsgType() override { return CBaldurMessage::MSG_TYPE_CMESSAGE; }
+    // NOTE: The BYTE at 0x84CF0C (53).
+    BYTE GetMsgSubType() override { return 53; }
+    void Run() override;
+
+    /* 000C */ CString m_sScope;
+    /* 0010 */ CString m_sName;
+    /* 0014 */ LONG m_nValue;
+    /* 0018 */ BOOLEAN m_bIncrement;
+    /* 001A */ DWORD m_dwFlags;
+};
+
 class CMessageSetTrigger : public CMessage {
 public:
     CMessageSetTrigger(const CAITrigger& trigger, LONG caller, LONG target);

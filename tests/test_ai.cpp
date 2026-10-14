@@ -1,0 +1,591 @@
+#define NOMINMAX
+#include <catch2/catch_test_macros.hpp>
+
+#include "CAIAction.h"
+#include "CAIConditionResponse.h"
+#include "CAIResponse.h"
+#include "CAIScript.h"
+#include "CAITrigger.h"
+#include "CBaldurChitin.h"
+#include "CCreatureFile.h"
+#include "CDerivedStats.h"
+#include "CGameAIBase.h"
+#include "CGameArea.h"
+#include "CGameDoor.h"
+#include "CGameObjectArray.h"
+#include "CGameSprite.h"
+#include "CInfGame.h"
+#include "CMessage.h"
+#include "CPathSearch.h"
+#include "CScreenCreateChar.h"
+#include "CVariableHash.h"
+#include "ScreenLayout.h"
+#include "data_view.h"
+#include "platform/data_dir.h"
+#include "platform/window.h"
+
+#include <climits>
+#include <cstdlib>
+#include <cstring>
+#include <memory>
+#include <new>
+#include <string>
+#include <vector>
+
+namespace {
+
+// The engine in this process, as iwd2r_main builds it, without a game
+// loaded: the game object, its variables, object array and message handler
+// exist. Built once and leaked: the engine's globals live until the process
+// ends. The engine writes into its data folder: it starts on a private view.
+bool StartEngine(std::string& error)
+{
+    static bool started = false;
+    static std::string startError;
+    static bool tried = false;
+    if (tried) {
+        error = startError;
+        return started;
+    }
+    tried = true;
+
+#ifdef _WIN32
+    _putenv_s("SDL_VIDEO_DRIVER", "dummy");
+    _putenv_s("SDL_AUDIO_DRIVER", "dummy");
+#else
+    setenv("SDL_VIDEO_DRIVER", "dummy", 1);
+    setenv("SDL_AUDIO_DRIVER", "dummy", 1);
+#endif
+    static std::unique_ptr<DataView> view;
+    const char* install = std::getenv("IWD2_DATA");
+    if (install != nullptr && *install != '\0') {
+        const std::string original = install;
+        view = std::make_unique<DataView>(original);
+#ifdef _WIN32
+        _putenv_s("IWD2_DATA", view->Path().c_str());
+#else
+        setenv("IWD2_DATA", view->Path().c_str(), 1);
+#endif
+        const bool found = platform::ResolveDataDir();
+#ifdef _WIN32
+        _putenv_s("IWD2_DATA", original.c_str());
+#else
+        setenv("IWD2_DATA", original.c_str(), 1);
+#endif
+        if (!found) {
+            startError = "data folder not found";
+            return false;
+        }
+    } else if (!platform::ResolveDataDir()) {
+        startError = "data folder not found";
+        return false;
+    }
+    const iwd2r::ScreenSize screen = iwd2r::ReadScreenSize(".\\Icewind2.ini");
+    if (!screen.ok) {
+        startError = screen.error;
+        return false;
+    }
+    if (!platform::window::InitScreen(screen.width, screen.height, screen.scale)) {
+        startError = "SDL video could not start";
+        return false;
+    }
+    CBaldurChitin* chitin = new CBaldurChitin();
+    if (chitin->field_1932 != 0) {
+        startError = "CBaldurChitin refused to start";
+        return false;
+    }
+    chitin->Init(NULL);
+    // The sprites' palettes read the video mode (CVidPalette::SetType), as
+    // tests/test_cre.cpp gives it.
+    chitin->m_pEngineCreateChar->SetVideoMode(0);
+    chitin->pActiveEngine = chitin->m_pEngineCreateChar;
+    started = true;
+    return true;
+}
+
+#define REQUIRE_ENGINE()                            \
+    do {                                            \
+        const char* env = std::getenv("IWD2_DATA"); \
+        if (env == nullptr || *env == '\0') {       \
+            SKIP("[iwd2r-skip] IWD2_DATA unset");   \
+        }                                           \
+        std::string error;                          \
+        INFO(error);                                \
+        REQUIRE(StartEngine(error));                \
+    } while (0)
+
+// An AI object in the game's object array, as an area's objects are.
+CGameAIBase* AddAIObject()
+{
+    CGameAIBase* pObject = new CGameAIBase();
+    LONG id = CGameObjectArray::INVALID_INDEX;
+    REQUIRE(g_pBaldurChitin->GetObjectGame()->GetObjectArray()->Add(&id, pObject, INFINITE)
+        == CGameObjectArray::SUCCESS);
+    pObject->m_id = id;
+    return pObject;
+}
+
+// A live sprite from CHARBASE.CRE, made the way StartCreateChar makes it
+// (0x610540); its constructor adds it to the object array.
+CGameSprite* MakeSprite()
+{
+    CCreatureFile file;
+    file.SetResRef(CResRef("CHARBASE"), TRUE, TRUE);
+    BYTE* data = file.GetData();
+    REQUIRE(data != NULL);
+    std::vector<BYTE> bytes(data, data + file.GetDataSize());
+    file.Release();
+    return new CGameSprite(bytes.data(),
+        static_cast<LONG>(bytes.size()),
+        0,
+        0,
+        -1,
+        0,
+        0,
+        INT_MAX,
+        CPoint(-1, -1),
+        0);
+}
+
+// A door: zeroed storage with its members that own memory constructed and
+// its flags set. ToggleDoor reads only these when the door has no search
+// polygons.
+CGameDoor* MakeDoor(DWORD dwFlags)
+{
+    auto* storage = static_cast<unsigned char*>(::operator new(sizeof(CGameDoor)));
+    std::memset(storage, 0, sizeof(CGameDoor));
+    CGameDoor* pDoor = reinterpret_cast<CGameDoor*>(storage);
+    new (&pDoor->m_sound) CSound();
+    new (&pDoor->m_pendingTriggers) CTypedPtrList<CPtrList, CAITrigger*>();
+    new (&pDoor->m_curAction) CAIAction();
+    // The area: zeroed storage named AR1000, its search map empty (the door
+    // has no search polygons).
+    auto* area = static_cast<unsigned char*>(::operator new(sizeof(CGameArea)));
+    std::memset(area, 0, sizeof(CGameArea));
+    pDoor->m_pArea = reinterpret_cast<CGameArea*>(area);
+    std::memcpy(pDoor->m_pArea->m_header.m_areaName, "AR1000", 6);
+    pDoor->m_dwFlags = dwFlags;
+    pDoor->m_strNotPickable = static_cast<STRREF>(-1);
+    pDoor->m_ptOpenDest = CPoint(10, 20);
+    pDoor->m_ptClosedDest = CPoint(30, 40);
+    // Not in the object array (that would need the door's constructor and an
+    // area file): its status messages have no target and are dropped.
+    pDoor->m_id = CGameObjectArray::INVALID_INDEX;
+    return pDoor;
+}
+
+void ClearMessages()
+{
+    CMessageHandler& handler = g_pBaldurChitin->m_cMessageHandler;
+    while (!handler.m_messageList.IsEmpty()) {
+        delete handler.m_messageList.RemoveHead();
+    }
+}
+
+}
+
+TEST_CASE("ai: ExecuteAction answers NoAction, an unknown action and SetGlobal", "[ai][data]")
+{
+    REQUIRE_ENGINE();
+    CGameAIBase* pCaller = AddAIObject();
+
+    pCaller->SetCurrAction(CAIAction::NULL_ACTION);
+    CHECK(pCaller->ExecuteAction() == CGameAIBase::ACTION_NO_ACTION);
+    CHECK(pCaller->m_nLastActionReturn == CGameAIBase::ACTION_NO_ACTION);
+
+    // Attack (3) is a sprite's action: the base dispatcher reports it.
+    CAIAction attack;
+    attack.m_actionID = CAIAction::ATTACK;
+    pCaller->SetCurrAction(attack);
+    CHECK(pCaller->ExecuteAction() == CGameAIBase::ACTION_ERROR);
+
+    // SetGlobal("ai_test_var","GLOBAL",5): the script compiler's string1 is
+    // the scope followed by the name.
+    CAIAction setGlobal;
+    setGlobal.m_actionID = 30;
+    setGlobal.m_string1 = "GLOBALai_test_var";
+    setGlobal.m_specificID = 5;
+    pCaller->SetCurrAction(setGlobal);
+    CHECK(pCaller->ExecuteAction() == CGameAIBase::ACTION_DONE);
+    CVariable* pVariable = g_pBaldurChitin->GetObjectGame()->GetVariables()->FindKey(CString("AI_TEST_VAR"));
+    REQUIRE(pVariable != NULL);
+    CHECK(pVariable->m_intValue == 5);
+
+    // IncrementGlobal by 3.
+    CAIAction increment;
+    increment.m_actionID = 109;
+    increment.m_string1 = "GLOBALAI_TEST_VAR";
+    increment.m_specificID = 3;
+    pCaller->SetCurrAction(increment);
+    CHECK(pCaller->ExecuteAction() == CGameAIBase::ACTION_DONE);
+    CHECK(pVariable->m_intValue == 8);
+
+    // The status triggers read it back: Global, GlobalGT, GlobalLT.
+    CAITrigger global(0x400F, 8);
+    global.m_string1 = "GLOBALAI_TEST_VAR";
+    CHECK(pCaller->EvaluateStatusTrigger(global) == TRUE);
+    CAITrigger globalGT(0x4034, 8);
+    globalGT.m_string1 = "GLOBALAI_TEST_VAR";
+    CHECK(pCaller->EvaluateStatusTrigger(globalGT) == FALSE);
+    CAITrigger globalLT(0x4035, 9);
+    globalLT.m_string1 = "GLOBALAI_TEST_VAR";
+    CHECK(pCaller->EvaluateStatusTrigger(globalLT) == TRUE);
+    // A variable nobody set reads as 0.
+    CAITrigger missing(0x400F, 0);
+    missing.m_string1 = "GLOBALAI_NEVER_SET";
+    CHECK(pCaller->EvaluateStatusTrigger(missing) == TRUE);
+
+    // AllowAreaResting(0) sets the area's no-rest flag (m_header.m_flags 2),
+    // which AreaRestDisabled reads; AllowAreaResting(1) clears it.
+    {
+        auto* area = static_cast<unsigned char*>(::operator new(sizeof(CGameArea)));
+        std::memset(area, 0, sizeof(CGameArea));
+        pCaller->m_pArea = reinterpret_cast<CGameArea*>(area);
+        CAIAction allowResting;
+        allowResting.m_actionID = 286;
+        allowResting.m_specificID = 0;
+        pCaller->SetCurrAction(allowResting);
+        CHECK(pCaller->ExecuteAction() == CGameAIBase::ACTION_DONE);
+        CAITrigger restDisabled(0x40D2, 0);
+        CHECK(pCaller->EvaluateStatusTrigger(restDisabled) == TRUE);
+        CHECK(pCaller->m_pArea->m_header.m_areaType == 0);
+        allowResting.m_specificID = 1;
+        pCaller->SetCurrAction(allowResting);
+        CHECK(pCaller->ExecuteAction() == CGameAIBase::ACTION_DONE);
+        CHECK(pCaller->EvaluateStatusTrigger(restDisabled) == FALSE);
+        pCaller->m_pArea = NULL;
+    }
+
+    // Exists and Dead over an object of the array: an AI object that is not
+    // a sprite exists and counts as dead; nobody does not exist.
+    {
+        CGameAIBase* pOther = AddAIObject();
+        CAIObjectType other(0, 0, 0, 0, 0, 0, 0, 0, pOther->m_id, 0, 0);
+        CAITrigger exists(0x400D, other, 0);
+        CHECK(pCaller->EvaluateStatusTrigger(exists) == TRUE);
+        CAITrigger dead(0x4051, other, 0);
+        CHECK(pCaller->EvaluateStatusTrigger(dead) == TRUE);
+        CAITrigger existsNobody(0x400D, CAIObjectType::NOONE, 0);
+        CHECK(pCaller->EvaluateStatusTrigger(existsNobody) == FALSE);
+        CAITrigger deadNobody(0x4051, CAIObjectType::NOONE, 0);
+        CHECK(pCaller->EvaluateStatusTrigger(deadNobody) == TRUE);
+    }
+
+    // RandomNum(6, n): the object's random value of this update, 1 to 6.
+    pCaller->m_randValue = 15;
+    CAITrigger randomNum(0x4047, 6);
+    randomNum.m_specific2 = 15 % 6 + 1;
+    CHECK(pCaller->EvaluateStatusTrigger(randomNum) == TRUE);
+    CAITrigger randomNumLT(0x4049, 6);
+    randomNumLT.m_specific2 = 15 % 6 + 1;
+    CHECK(pCaller->EvaluateStatusTrigger(randomNumLT) == FALSE);
+
+    ClearMessages();
+}
+
+TEST_CASE("ai: Dead and IsActive answer for a live sprite", "[ai][data]")
+{
+    REQUIRE_ENGINE();
+    CGameAIBase* pCaller = AddAIObject();
+    CGameSprite* pSprite = MakeSprite();
+    REQUIRE(pSprite->m_id != CGameObjectArray::INVALID_INDEX);
+    REQUIRE((pSprite->m_derivedStats.m_generalState & STATE_DEAD) == 0);
+    REQUIRE((pSprite->m_baseStats.m_generalState & STATE_DEAD) == 0);
+    CAIObjectType sprite(0, 0, 0, 0, 0, 0, 0, 0, pSprite->m_id, 0, 0);
+
+    // Alive in both states: not dead. Dead by its base state: dead.
+    CAITrigger dead(0x4051, sprite, 0);
+    CHECK(pCaller->EvaluateStatusTrigger(dead) == FALSE);
+    pSprite->m_baseStats.m_generalState |= STATE_DEAD;
+    CHECK(pCaller->EvaluateStatusTrigger(dead) == TRUE);
+    pSprite->m_baseStats.m_generalState &= ~STATE_DEAD;
+    pSprite->m_derivedStats.m_generalState |= STATE_DEAD;
+    CHECK(pCaller->EvaluateStatusTrigger(dead) == TRUE);
+    pSprite->m_derivedStats.m_generalState &= ~STATE_DEAD;
+
+    // IsActive reads the sprite's active flag.
+    CAITrigger isActive(0x40D7, sprite, 0);
+    pSprite->m_active = TRUE;
+    CHECK(pCaller->EvaluateStatusTrigger(isActive) == TRUE);
+    pSprite->m_active = FALSE;
+    CHECK(pCaller->EvaluateStatusTrigger(isActive) == FALSE);
+    // An AI object that is neither a sound, a sprite nor a trigger: FALSE.
+    CAIObjectType other(0, 0, 0, 0, 0, 0, 0, 0, pCaller->m_id, 0, 0);
+    CAITrigger isActiveOther(0x40D7, other, 0);
+    CHECK(pCaller->EvaluateStatusTrigger(isActiveOther) == FALSE);
+}
+
+TEST_CASE("ai: a compiled script reads its triggers and weighted responses", "[ai][data]")
+{
+    REQUIRE_ENGINE();
+    // AR1000.BCS's first block: OnCreation() and Global("HEALED_REIG",
+    // "MYAREA",0), one response of weight 100: SetHP and Continue.
+    CAIScript script(CResRef("AR1000"));
+    REQUIRE(script.m_caList.GetCount() > 0);
+    CAIConditionResponse* pFirst = script.m_caList.GetHead();
+    REQUIRE(pFirst->m_condition.m_triggerList.GetCount() == 2);
+    CHECK(pFirst->m_condition.m_triggerList.GetHead()->m_triggerID == CAITrigger::ONCREATION);
+    CAITrigger* pGlobal = pFirst->m_condition.m_triggerList.GetTail();
+    CHECK(pGlobal->m_triggerID == 0x400F);
+    CHECK(pGlobal->m_string1 == "MYAREAHEALED_REIG");
+    REQUIRE(pFirst->m_responseSet.m_responseList.GetCount() == 1);
+    CHECK(pFirst->m_responseSet.m_weightTotal == 100);
+    CAIResponse* pResponse = pFirst->m_responseSet.m_responseList.GetHead();
+    CHECK(pResponse->m_weight == 100);
+    REQUIRE(pResponse->m_actionList.GetCount() == 2);
+    CHECK(pResponse->m_actionList.GetHead()->m_actionID == 254);
+    CHECK(pResponse->m_actionList.GetTail()->m_actionID == CAIAction::CONTINUE);
+}
+
+TEST_CASE("ai: a locked door stays closed and says it is locked", "[ai][data]")
+{
+    REQUIRE_ENGINE();
+    ClearMessages();
+    CGameAIBase* pClicker = AddAIObject();
+    CGameDoor* pDoor = MakeDoor(0x2);
+
+    CAIObjectType cause(0, 0, 0, 0, 0, 0, 0, 0, pClicker->m_id, 0, 0);
+    pDoor->ToggleDoor(cause, FALSE);
+
+    CHECK((pDoor->m_dwFlags & 0x1) == 0);
+    CHECK((pDoor->m_dwFlags & 0x2) != 0);
+    CHECK(pDoor->m_pos == CPoint(0, 0));
+
+    // The feedback: "Locked" (15874) to the one who tried it, in the
+    // original's colors.
+    CMessageHandler& handler = g_pBaldurChitin->m_cMessageHandler;
+    REQUIRE(handler.m_messageList.GetCount() == 1);
+    auto* message = dynamic_cast<CMessageDisplayTextRefSend*>(handler.m_messageList.GetHead());
+    REQUIRE(message != nullptr);
+    CHECK(message->m_text == 15874);
+    CHECK(message->m_name == static_cast<STRREF>(-1));
+    CHECK(message->m_textColor == RGB(215, 215, 190));
+    CHECK(message->m_targetId == pClicker->m_id);
+    CHECK(message->m_sourceId == pDoor->m_id);
+
+    // A door with its own "locked" text says that instead.
+    ClearMessages();
+    pDoor->m_dwFlags |= 0x200;
+    pDoor->m_strNotPickable = 1234;
+    pDoor->ToggleDoor(cause, FALSE);
+    REQUIRE(handler.m_messageList.GetCount() == 1);
+    message = dynamic_cast<CMessageDisplayTextRefSend*>(handler.m_messageList.GetHead());
+    REQUIRE(message != nullptr);
+    CHECK(message->m_text == 1234);
+    CHECK((pDoor->m_dwFlags & 0x1) == 0);
+
+    ClearMessages();
+}
+
+TEST_CASE("ai: a forced toggle opens a locked door, unlocks it, and closes it again", "[ai][data]")
+{
+    REQUIRE_ENGINE();
+    ClearMessages();
+    CGameDoor* pDoor = MakeDoor(0x2);
+    CAIObjectType cause(0, 0, 0, 0, 0, 0, 0, 0, CGameObjectArray::INVALID_INDEX, 0, 0);
+
+    // A script's OpenDoor (143) toggles with bForce: the lock is ignored and
+    // the door ends unlocked.
+    pDoor->ToggleDoor(cause, TRUE);
+    CHECK((pDoor->m_dwFlags & 0x1) != 0);
+    CHECK((pDoor->m_dwFlags & 0x2) == 0);
+    CHECK(pDoor->m_pos == CPoint(30, 40));
+    CHECK(pDoor->m_tiledObject.m_wAIState == CTiledObject::STATE_PRIMARY_TILE);
+
+    pDoor->ToggleDoor(cause, FALSE);
+    CHECK((pDoor->m_dwFlags & 0x1) == 0);
+    CHECK(pDoor->m_pos == CPoint(10, 20));
+    CHECK(pDoor->m_tiledObject.m_wAIState == CTiledObject::STATE_SECONDARY_TILE);
+
+    ClearMessages();
+}
+
+TEST_CASE("ai: Allegiance, Range, See and the HP triggers answer both ways", "[ai][data]")
+{
+    REQUIRE_ENGINE();
+    auto* areaStorage = static_cast<unsigned char*>(::operator new(sizeof(CGameArea)));
+    std::memset(areaStorage, 0, sizeof(CGameArea));
+    CGameArea* pArea = reinterpret_cast<CGameArea*>(areaStorage);
+
+    CGameAIBase* pCaller = AddAIObject();
+    pCaller->m_pArea = pArea;
+    pCaller->m_pos = CPoint(400, 300);
+    pCaller->m_typeAI.m_nEnemyAlly = 255;
+
+    // Allegiance(Myself, n): the caller's own enemy-ally byte.
+    CAIObjectType myself(0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0);
+    myself.m_SpecialCase[0] = 1;
+    CAITrigger enemy(0x400B, myself, 255);
+    CHECK(pCaller->EvaluateStatusTrigger(enemy) == TRUE);
+    CAITrigger neutral(0x400B, myself, 128);
+    CHECK(pCaller->EvaluateStatusTrigger(neutral) == FALSE);
+
+    // Range(object, 2, less than): within (2 + 1)^2 squared grid squares.
+    CGameAIBase* pTarget = AddAIObject();
+    pTarget->m_pArea = pArea;
+    pTarget->m_pos = CPoint(400 + 2 * CPathSearch::GRID_SQUARE_SIZEX, 300);
+    CAIObjectType target(0, 0, 0, 0, 0, 0, 0, 0, pTarget->m_id, 0, 0);
+    CAITrigger rangeNear(0x4018, target, 2);
+    rangeNear.m_specific2 = 2;
+    CHECK(pCaller->EvaluateStatusTrigger(rangeNear) == TRUE);
+    pTarget->m_pos = CPoint(400 + 5 * CPathSearch::GRID_SQUARE_SIZEX, 300);
+    CHECK(pCaller->EvaluateStatusTrigger(rangeNear) == FALSE);
+    CAITrigger rangeFar(0x4018, target, 2);
+    rangeFar.m_specific2 = 3;
+    CHECK(pCaller->EvaluateStatusTrigger(rangeFar) == TRUE);
+    // An unknown mode answers FALSE.
+    rangeFar.m_specific2 = 0;
+    CHECK(pCaller->EvaluateStatusTrigger(rangeFar) == FALSE);
+
+    // See: in the same area and on the caller's own point the line of
+    // sight holds at once (CGameArea::CheckLOS's start == goal); another
+    // area or beyond the visual range is not seen.
+    CAITrigger see(0x401C, target, 0);
+    pTarget->m_pos = pCaller->m_pos;
+    CHECK(pCaller->EvaluateStatusTrigger(see) == TRUE);
+    CHECK(pCaller->m_lSeen.GetInstance() == pTarget->m_id);
+    pTarget->m_pos = CPoint(400 + 1000 * CPathSearch::GRID_SQUARE_SIZEX, 300);
+    CHECK(pCaller->EvaluateStatusTrigger(see) == FALSE);
+    pTarget->m_pos = pCaller->m_pos;
+    pTarget->m_pArea = NULL;
+    CHECK(pCaller->EvaluateStatusTrigger(see) == FALSE);
+
+    // HP, HPGT, HPLT read a sprite's base hit points; not a sprite: FALSE.
+    CGameSprite* pSprite = MakeSprite();
+    pSprite->m_baseStats.m_hitPoints = 10;
+    CAIObjectType sprite(0, 0, 0, 0, 0, 0, 0, 0, pSprite->m_id, 0, 0);
+    CAITrigger hpgt(0x4011, sprite, 5);
+    CHECK(pCaller->EvaluateStatusTrigger(hpgt) == TRUE);
+    CAITrigger hpgtHigh(0x4011, sprite, 10);
+    CHECK(pCaller->EvaluateStatusTrigger(hpgtHigh) == FALSE);
+    CAITrigger hp(0x4010, sprite, 10);
+    CHECK(pCaller->EvaluateStatusTrigger(hp) == TRUE);
+    CAITrigger hplt(0x4012, sprite, 10);
+    CHECK(pCaller->EvaluateStatusTrigger(hplt) == FALSE);
+    CAITrigger hpOther(0x4011, target, 0);
+    CHECK(pCaller->EvaluateStatusTrigger(hpOther) == FALSE);
+
+    pCaller->m_pArea = NULL;
+}
+
+TEST_CASE("ai: the sprite's dispatcher runs its own actions and leaves the rest to the base", "[ai][data]")
+{
+    REQUIRE_ENGINE();
+    ClearMessages();
+    CGameSprite* pSprite = MakeSprite();
+
+    // NoAction (0): done, and counted (m_noActionCount, 0x72901E).
+    LONG nNoAction = pSprite->m_noActionCount;
+    pSprite->SetCurrAction(CAIAction::NULL_ACTION);
+    CHECK(pSprite->ExecuteAction() == CGameAIBase::ACTION_DONE);
+    CHECK(pSprite->m_noActionCount == nNoAction + 1);
+    CHECK(pSprite->m_nLastActionReturn == CGameAIBase::ACTION_DONE);
+
+    // Continue (36) and CutSceneId (127): done.
+    CAIAction action;
+    action.m_actionID = 36;
+    pSprite->SetCurrAction(action);
+    CHECK(pSprite->ExecuteAction() == CGameAIBase::ACTION_DONE);
+    action.m_actionID = 127;
+    pSprite->SetCurrAction(action);
+    CHECK(pSprite->ExecuteAction() == CGameAIBase::ACTION_DONE);
+
+    // SetDialogueRange(300) (256): the range Dialogue reads (+0x7106).
+    action.m_actionID = 256;
+    action.m_specificID = 300;
+    pSprite->SetCurrAction(action);
+    CHECK(pSprite->ExecuteAction() == CGameAIBase::ACTION_DONE);
+    CHECK(pSprite->field_7106 == 300);
+
+    // SetSavedLocationPoint (249) and MakeUnselectable (182).
+    action.m_actionID = 249;
+    action.m_specificID = 120;
+    action.m_specificID2 = 240;
+    action.m_specificID3 = 6;
+    pSprite->SetCurrAction(action);
+    CHECK(pSprite->ExecuteAction() == CGameAIBase::ACTION_DONE);
+    CHECK(pSprite->GetBaseStats()->field_2E4 == 120);
+    CHECK(pSprite->GetBaseStats()->field_2E6 == 240);
+    CHECK(pSprite->GetBaseStats()->field_2E8 == 6);
+    action.m_actionID = 182;
+    action.m_specificID = 2;
+    pSprite->SetCurrAction(action);
+    CHECK(pSprite->ExecuteAction() == CGameAIBase::ACTION_DONE);
+    CHECK(pSprite->m_nUnselectableCounter == 30);
+    pSprite->m_nUnselectableCounter = 0;
+
+    // Attack (3) is the sprite's but not ported yet: the case answers
+    // ACTION_ERROR (its TODO), it does not reach the base's error case.
+    action.m_actionID = CAIAction::ATTACK;
+    pSprite->SetCurrAction(action);
+    CHECK(pSprite->ExecuteAction() == CGameAIBase::ACTION_ERROR);
+
+    // SetGlobal (30) is the base's: the byte table sends it on.
+    CAIAction setGlobal;
+    setGlobal.m_actionID = 30;
+    setGlobal.m_string1 = "GLOBALai_sprite_var";
+    setGlobal.m_specificID = 7;
+    pSprite->SetCurrAction(setGlobal);
+    CHECK(pSprite->ExecuteAction() == CGameAIBase::ACTION_DONE);
+    CVariable* pVariable = g_pBaldurChitin->GetObjectGame()->GetVariables()->FindKey(CString("AI_SPRITE_VAR"));
+    REQUIRE(pVariable != NULL);
+    CHECK(pVariable->m_intValue == 7);
+
+    // An id above the table's 0x142 goes to the base as well (its own
+    // error case for an unknown id).
+    action.m_actionID = 400;
+    pSprite->SetCurrAction(action);
+    CHECK(pSprite->ExecuteAction() == CGameAIBase::ACTION_ERROR);
+
+    ClearMessages();
+}
+
+TEST_CASE("ai: a named creature is found by its name in any case", "[ai]")
+{
+    // AddKey (0x550D10) stores the name upper case without spaces and hashes
+    // that, as FindKey looks it up (Decode's "Hedron" in a cut scene).
+    CNamedCreatureVariableHash hash(64);
+    CVariable hedron;
+    hedron.SetName(CString("Hedron"));
+    hedron.m_intValue = 42;
+    CHECK(hash.AddKey(hedron) == FALSE);
+    CVariable* pFound = hash.FindKey(CString("HEDRON"));
+    REQUIRE(pFound != NULL);
+    CHECK(pFound->m_intValue == 42);
+    CHECK(pFound->GetName() == "HEDRON");
+    REQUIRE(hash.FindKey(CString("hedron")) != NULL);
+
+    // The same name again updates the entry and answers TRUE.
+    CVariable again;
+    again.SetName(CString("He dron"));
+    again.m_intValue = 43;
+    CHECK(hash.AddKey(again) == TRUE);
+    CHECK(hash.FindKey(CString("HEDRON"))->m_intValue == 43);
+}
+
+TEST_CASE("ai: CheckLimits keeps the morale recovery time and caps the morale break at 20", "[ai]")
+{
+    // 0x446C39-0x446C9E: XP, gold and the recovery time are clamped to
+    // 0xFFFFFFFF unsigned (no change), the morale break to 20 at most.
+    CDerivedStats stats;
+    stats.m_nXP = 1250;
+    stats.m_nGold = 87;
+    stats.m_nXPValue = 15;
+    stats.m_nMoraleRecoveryTime = 60;
+    stats.m_nMoraleBreak = 5;
+    stats.m_nReputation = 5;
+    stats.CheckLimits();
+    CHECK(stats.m_nXP == 1250);
+    CHECK(stats.m_nGold == 87);
+    CHECK(stats.m_nXPValue == 15);
+    CHECK(stats.m_nMoraleRecoveryTime == 60);
+    CHECK(stats.m_nMoraleBreak == 5);
+    CHECK(stats.m_nReputation == 10);
+    stats.m_nMoraleBreak = 25;
+    stats.CheckLimits();
+    CHECK(stats.m_nMoraleBreak == 20);
+    // The reputation compares unsigned: a negative one becomes 200.
+    stats.m_nReputation = -5;
+    stats.CheckLimits();
+    CHECK(stats.m_nReputation == 200);
+}

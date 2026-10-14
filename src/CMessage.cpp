@@ -17287,3 +17287,109 @@ void CMessagePickedDialogResponse::Run()
         m_targetId);
     g_pBaldurChitin->GetMessageHandler()->AddMessage(pMessage, FALSE, pMessage->GetCommType());
 }
+
+// -----------------------------------------------------------------------------
+
+// 0x50A820
+void CMessageSetVariable::Run()
+{
+    CGameObject* pObject;
+    BYTE rc;
+
+    do {
+        rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetDeny(m_targetId,
+            CGameObjectArray::THREAD_ASYNCH,
+            &pObject,
+            INFINITE);
+    } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+    if (pObject != NULL && (m_dwFlags & 0x6) != 0) {
+        if ((m_dwFlags & 0x2) != 0) {
+            CGameArea* pArea = g_pBaldurChitin->GetObjectGame()->GetArea(m_sScope);
+            if (pArea != NULL) {
+                pArea->GetNamedCreatures()->RemoveKey(m_sName, TRUE, pObject->m_id);
+            }
+        }
+
+        if ((m_dwFlags & 0x4) != 0) {
+            g_pBaldurChitin->GetObjectGame()->GetNamedCreatures()->RemoveKey(m_sName, TRUE, pObject->m_id);
+        }
+
+        g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(m_targetId,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+        return;
+    }
+
+    if (strcmp(m_sScope, "GLOBAL") == 0) {
+        CVariable* pVariable = g_pBaldurChitin->GetObjectGame()->GetVariables()->FindKey(m_sName);
+        if (pVariable != NULL) {
+            if (m_bIncrement == TRUE) {
+                pVariable->m_intValue += m_nValue;
+            } else {
+                pVariable->m_intValue = m_nValue;
+            }
+        } else {
+            CVariable* pNew = new CVariable();
+            pNew->SetName(m_sName);
+            pNew->m_intValue = m_nValue;
+            g_pBaldurChitin->GetObjectGame()->m_variables.AddKey(*pNew);
+            delete pNew;
+        }
+    }
+
+    // NOTE: The original goes on to the LOCALS and area checks after a GLOBAL
+    // variable, as it does here.
+    if (rc != CGameObjectArray::SUCCESS) {
+        return;
+    }
+
+    if (strcmp(m_sScope, "LOCALS") == 0) {
+        if (pObject != NULL && pObject->GetObjectType() == CGameObject::TYPE_SPRITE) {
+            CGameSprite* pSprite = static_cast<CGameSprite*>(pObject);
+            CString sName(m_sName);
+            CVariable* pVariable = pSprite->GetLocalVariables()->FindKey(sName);
+            if (pVariable != NULL) {
+                if (m_bIncrement == TRUE) {
+                    pVariable->m_intValue += m_nValue;
+                } else {
+                    pVariable->m_intValue = m_nValue;
+                }
+            } else {
+                CVariable* pNew = new CVariable();
+                pNew->SetName(sName);
+                pNew->m_intValue = m_nValue;
+                pSprite->GetLocalVariables()->AddKey(*pNew);
+                delete pNew;
+            }
+        }
+    } else {
+        if (strcmp(m_sScope, "MYAREA") == 0) {
+            // NOTE: The area's name is read as a C string from the start of
+            // the area (its header's RESREF), as the original does.
+            m_sScope = reinterpret_cast<const char*>(pObject->m_pArea->m_header.m_areaName);
+        }
+
+        CGameArea* pArea = g_pBaldurChitin->GetObjectGame()->GetArea(m_sScope);
+        if (pArea != NULL) {
+            CVariable* pVariable = pArea->GetVariables()->FindKey(m_sName);
+            if (pVariable != NULL) {
+                if (m_bIncrement == TRUE) {
+                    pVariable->m_intValue += m_nValue;
+                } else {
+                    pVariable->m_intValue = m_nValue;
+                }
+            } else {
+                CVariable* pNew = new CVariable();
+                pNew->SetName(m_sName);
+                pNew->m_intValue = m_nValue;
+                pArea->m_variables.AddKey(*pNew);
+                delete pNew;
+            }
+        }
+    }
+
+    g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(m_targetId,
+        CGameObjectArray::THREAD_ASYNCH,
+        INFINITE);
+}

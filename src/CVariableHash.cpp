@@ -1,6 +1,8 @@
 #include "CVariableHash.h"
 
 #include "CBaldurChitin.h"
+#include "CGameEffect.h"
+#include "CGameSprite.h"
 #include "CInfGame.h"
 
 // 0x84EC4C
@@ -104,11 +106,11 @@ int CVariableHashBase::Hash(CString sName)
 {
     int length = sName.GetLength();
     int v1 = 0;
-    int v2 = 0;
     int v3 = 1;
 
+    // Each character's low bits (& 0x2F) times its prime (0x54FB07).
     for (int index = 0; index < length && index < 32; index++) {
-        int v4 = PRIME[index] * ((v2 + length) & 0x2F);
+        int v4 = PRIME[index] * (static_cast<BYTE>(sName[index]) & 0x2F);
         v1 += v4;
         v3 *= v4 & (m_nTableEntries - 1);
     }
@@ -326,7 +328,43 @@ void CVariableHash::Marshal(CVariable** pList, WORD* pCount)
 // 0x550600
 void CVariableHash::MarshalToCharacter(CGameSprite* pSprite)
 {
-    // TODO: Incomplete.
+    ITEM_EFFECT* pItemEffect = new ITEM_EFFECT;
+    CGameEffect::ClearItemEffect(pItemEffect, CGAMEEFFECT_SETLOCALVARIABLE);
+
+    CVariable empty;
+
+    for (int index = 0; index < m_nTableEntries; index++) {
+        if (strcmp(m_hashEntries[index].GetName(), "") != 0) {
+            CGameEffect* pEffect = CGameEffect::DecodeEffect(pItemEffect,
+                pSprite->GetPos(),
+                pSprite->m_id,
+                CPoint(-1, -1));
+
+            memcpy(pEffect->m_scriptName, m_hashEntries[index].m_name, sizeof(SCRIPTNAME));
+            pEffect->m_flags = m_hashEntries[index].m_type;
+            pEffect->m_effectAmount2 = m_hashEntries[index].m_resRefType;
+            pEffect->m_dwFlags = m_hashEntries[index].m_dwValue;
+            pEffect->m_effectAmount = m_hashEntries[index].m_intValue;
+            pEffect->m_effectAmount3 = static_cast<LONG>(m_hashEntries[index].m_floatValue);
+            // NOTE: The duration type is the WORD constant at 0x8491AA (1).
+            pEffect->m_durationType = 1;
+
+            CString sValue(m_hashEntries[index].m_stringValue);
+            pEffect->m_res = sValue.Left(8);
+            if (sValue.GetLength() > 8) {
+                pEffect->m_res2 = sValue.Mid(8, 8);
+                if (sValue.GetLength() > 16) {
+                    pEffect->m_res3 = sValue.Mid(16, 8);
+                }
+            }
+
+            pSprite->AddEffect(pEffect, CGameAIBase::EFFECT_LIST_TIMED, TRUE, FALSE);
+
+            m_hashEntries[index] = empty;
+        }
+    }
+
+    delete pItemEffect;
 }
 
 // 0x550920
@@ -484,9 +522,17 @@ BOOL CNamedCreatureVariableHash::AddKey(CVariable& var)
     CString sName = var.GetName();
     CString sTemp;
 
-    for (int index = 0; index < sName.GetLength() && index < 32; index++) {
+    // The name is stored upper case without its spaces, at most 32
+    // characters of it (0x550D49-0x550DA2).
+    int nCount = 0;
+    for (int index = 0; index < sName.GetLength(); index++) {
+        if (nCount > 31) {
+            break;
+        }
+
         if (sName[index] != ' ') {
             sTemp += static_cast<char>(toupper(sName[index]));
+            nCount++;
         }
     }
 
@@ -494,18 +540,19 @@ BOOL CNamedCreatureVariableHash::AddKey(CVariable& var)
         return FALSE;
     }
 
-    int hash = Hash(sName);
+    var.SetName(sTemp);
 
-    if (m_hashEntries[hash] != NULL) {
-        CNamedCreatureVariableHashEntry* pCurr = m_hashEntries[hash];
-        while (pCurr != NULL) {
-            // FIXME: Unnecessary copying.
-            if (pCurr->m_variable.GetName() == sTemp) {
+    int hash = Hash(sTemp);
+
+    CNamedCreatureVariableHashEntry* pCurr = m_hashEntries[hash];
+    while (pCurr != NULL) {
+        if (pCurr->m_variable.GetName() == sTemp) {
+            if (&(pCurr->m_variable) != &var) {
                 pCurr->m_variable = var;
-                return TRUE;
             }
-            pCurr = pCurr->m_pNext;
+            return TRUE;
         }
+        pCurr = pCurr->m_pNext;
     }
 
     CNamedCreatureVariableHashEntry* pVar = new CNamedCreatureVariableHashEntry(var);
@@ -515,7 +562,6 @@ BOOL CNamedCreatureVariableHash::AddKey(CVariable& var)
         m_hashEntries[hash] = pVar;
     }
 
-    // FIXME: Probably wrong.
     return FALSE;
 }
 

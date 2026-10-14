@@ -1,21 +1,21 @@
 # Subsystem map
 
-Generated from commit `4d7d285` by `tools/gen_map.py`. Do not edit; CI runs `python3 -I tools/gen_map.py --check`.
+Generated from commit `1fd7583` by `tools/gen_map.py`. Do not edit; CI runs `python3 -I tools/gen_map.py --check`.
 
-Totals: 513 files, 294804 lines, 341 `TODO: Incomplete`, 10098 address comments.
+Totals: 513 files, 300125 lines, 333 `TODO: Incomplete`, 10145 address comments.
 
 | Family | Files | Lines | `TODO: Incomplete` | Address comments | Platform headers included |
 |---|---:|---:|---:|---:|---|
-| AI | 22 | 8145 | 4 | 409 | — |
-| Game | 103 | 92127 | 95 | 2502 | — |
+| AI | 22 | 8531 | 2 | 409 | — |
+| Game | 103 | 96794 | 90 | 2546 | — |
 | Screens | 36 | 65271 | 65 | 2026 | — |
-| UI | 28 | 11681 | 12 | 514 | — |
+| UI | 28 | 11683 | 12 | 514 | — |
 | Video | 34 | 23761 | 65 | 1106 | ddraw_shim.h, gl_compat.h |
-| Resources | 63 | 10773 | 1 | 332 | dsound_shim.h |
-| Sound | 20 | 7822 | 0 | 266 | dsound_shim.h, win32_api.h |
-| Messaging | 10 | 23083 | 33 | 1171 | — |
+| Resources | 63 | 10778 | 1 | 332 | dsound_shim.h |
+| Sound | 20 | 7829 | 0 | 266 | dsound_shim.h, win32_api.h |
+| Messaging | 10 | 23219 | 33 | 1172 | — |
 | Engine core | 10 | 7082 | 11 | 413 | data_dir.h, fs.h, present.h, replay.h, window.h |
-| Other | 90 | 28710 | 55 | 1358 | compose.h, state_dump.h, window.h |
-| compat | 33 | 3796 | 0 | 0 | win32_api.h |
+| Other | 90 | 28813 | 54 | 1360 | compose.h, state_dump.h, window.h |
+| compat | 33 | 3811 | 0 | 0 | win32_api.h |
 | platform | 64 | 12553 | 0 | 1 | affinity.h, clock.h, compose.h, crash.h, data_dir.h, ddraw_shim.h, dsound_shim.h, fs.h, gl_compat.h, gpu_probe.h, handles.h, imm_stub.h, input_settings.h, png.h, present.h, present_backend.h, replay.h, replay_clock.h, script.h, script_core.h, state_dump.h, win32_api.h, window.h |
-| **Total** | 513 | 294804 | 341 | 10098 | |
+| **Total** | 513 | 300125 | 333 | 10145 | |

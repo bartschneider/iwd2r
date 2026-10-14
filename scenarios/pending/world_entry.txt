@@ -4,16 +4,18 @@
 # the chapter screen and the start area. It stays in scenarios/pending/ (not
 # in play.py --suite or the replay compare gate) until our engine reaches the
 # world screen; then it moves to scenarios/. Coordinates for Resolution=800.
-wait 60
+wait 150
 checkpoint menu
 # New Game (645,262), then Done (537,562) with New Party selected, then the
-# first slot's Create Character (530,100).
+# first slot's Create Character (530,100). The waits are long enough for
+# Windows Sandbox, where these screens come up more slowly: a click before
+# Party Formation is up leaves the party empty and Done disabled.
 click 645 262
-wait 90
+wait 180
 click 537 562
-wait 60
+wait 150
 click 530 100
-wait 90
+wait 150
 checkpoint chargen
 # Gender (400,128): Male (400,286), Next (536,562) to Appearance.
 click 400 128

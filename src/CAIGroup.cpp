@@ -958,7 +958,71 @@ void CAIGroup::Sort()
 // 0x4063E0
 void CAIGroup::GroupSetTarget(CPoint target, BOOL additive, SHORT formationType, CPoint cursor)
 {
-    // TODO: Incomplete.
+    if (formationType == 0) {
+        FollowLeader(target, additive);
+        return;
+    }
+
+    if (abs(target.x - cursor.x) < 12 && abs(target.y - cursor.y) < 9) {
+        cursor.x = -1;
+        cursor.y = -1;
+    }
+
+    if (m_memberList.GetCount() == 0) {
+        return;
+    }
+
+    if (m_memberList.GetCount() == 1) {
+        // One member walks to the point itself (0x4064BA-0x406774).
+        LONG nMemberId = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_memberList.GetHead()));
+
+        CGameSprite* pSprite;
+        BYTE rc;
+        do {
+            rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetDeny(nMemberId,
+                CGameObjectArray::THREAD_ASYNCH,
+                reinterpret_cast<CGameObject**>(&pSprite),
+                INFINITE);
+        } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+        if (rc != CGameObjectArray::SUCCESS) {
+            return;
+        }
+
+        if (pSprite->GetDerivedStats()->m_nEncumberance == 2) {
+            pSprite->FeedBack(CGameSprite::FEEDBACK_TOOHEAVY_STOPPED, 1, 0, 0, -1, 0, 0);
+        } else {
+            CAIAction action(CAIAction::MOVETOPOINT, target, 0, -1);
+            action.m_specificID3 = 0;
+            action.m_internalFlags = 0;
+
+            if (additive) {
+                pSprite->m_userCommandPause = CGameSprite::USER_OVERRIDE_COUNT;
+                pSprite->m_triggerId = CGameObjectArray::INVALID_INDEX;
+                pSprite->InsertAction(action);
+                if (pSprite->m_curAction.m_actionID != CAIAction::MOVETOPOINT) {
+                    pSprite->m_interrupt = TRUE;
+                }
+            } else {
+                pSprite->m_userCommandPause = CGameSprite::USER_OVERRIDE_COUNT;
+                pSprite->m_triggerId = CGameObjectArray::INVALID_INDEX;
+                pSprite->AddAction(action);
+                pSprite->m_interrupt = TRUE;
+            }
+
+            pSprite->PlaySound(CGameSprite::SOUND_SELECT_ACTION, TRUE, FALSE, FALSE);
+        }
+
+        g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(nMemberId,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+        return;
+    }
+
+    // TODO: 0x406774-0x4071CD not ported: a group of two or more takes its
+    // formation's offsets (0x405370, 0x405A10) around the point, each
+    // member's square adjusted (CGameArea::AdjustTarget), with a Face and,
+    // when the game's walk-sound option is on, a SmallWait of rand() % 7.
 }
 
 // 0x407280

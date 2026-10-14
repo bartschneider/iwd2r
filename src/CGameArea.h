@@ -164,6 +164,7 @@ public:
     BOOL AdjustTarget(CPoint start, POINT* goal, BYTE personalSpace, SHORT tolerance);
     BOOL SnapshotAdjustTarget(CPoint start, POINT* goal, BOOL bBump, SHORT tolerance);
     void ApplyWindToAmbients(BYTE nPercentVolume);
+    CGameSprite* sub_47A1C0(LONG nObjectId, const CPoint* pPoints, USHORT nPoints);
     BOOL CheckLOS(const CPoint& start, const CPoint& goal, const BYTE* terrainTable, BOOLEAN bCheckIfExplored);
     BOOL CheckWalkable(const CPoint& start, const CPoint& goal, const BYTE* terrainTable, BYTE personalSpace, BOOLEAN bCheckIfExplored);
     LONG GetGroundPile(const CPoint& ptPos);
