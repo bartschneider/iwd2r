@@ -7341,6 +7341,131 @@ void CInfGame::ChangeReputation(SHORT eventCode)
     ReputationAdjustment(static_cast<SHORT>(repMod), FALSE);
 }
 
+// The party member a Decode object picks (Decode 0x40C445): 1 the lowest
+// level, 2 the highest, 3 the most damaged, 4 the least damaged, 5 the
+// highest-level male, 6 the worst AC, 7 the best AC. Dead members are
+// skipped; a level tie goes to the class mask level (0xD1). INVALID_INDEX
+// when nobody qualifies.
+//
+// 0x5BDFE0
+LONG CInfGame::sub_5BDFE0(SHORT nType)
+{
+    LONG nBest = CGameObjectArray::INVALID_INDEX;
+    INT nBestClassLevel = 0;
+    // NOTE: Case 5 compares a level tie with a stack slot it never sets
+    // (local_4, 0x5BE35E); ours starts it at 0.
+    INT nUnsetClassLevel = 0;
+    SHORT nIndex;
+    SHORT nValue;
+    CGameSprite* pSprite;
+    BYTE rc;
+
+    switch (nType) {
+    case 1:
+        nValue = 0x7FFF;
+        for (nIndex = 0; nIndex < m_nCharacters; nIndex++) {
+            do {
+                rc = m_cObjectArray.GetShare(GetCharacterId(nIndex), CGameObjectArray::THREAD_ASYNCH, reinterpret_cast<CGameObject**>(&pSprite), INFINITE);
+            } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+            if (rc != CGameObjectArray::SUCCESS) {
+                continue;
+            }
+            if ((pSprite->GetDerivedStats()->m_generalState & STATE_DEAD) == 0) {
+                BYTE nLevel = pSprite->GetDerivedStats()->m_nLevel;
+                if (nLevel < nValue) {
+                    nBest = GetCharacterId(nIndex);
+                    nBestClassLevel = pSprite->GetDerivedStats()->GetClassMaskLevel(0xD1);
+                    nValue = nLevel;
+                } else if (nLevel == nValue) {
+                    INT nClassLevel = pSprite->GetDerivedStats()->GetClassMaskLevel(0xD1);
+                    if (nBestClassLevel > nClassLevel) {
+                        nBest = GetCharacterId(nIndex);
+                        nValue = pSprite->GetDerivedStats()->m_nLevel;
+                        nBestClassLevel = nClassLevel;
+                    }
+                }
+            }
+            m_cObjectArray.ReleaseShare(GetCharacterId(nIndex), CGameObjectArray::THREAD_ASYNCH, INFINITE);
+        }
+        return nBest;
+    case 2:
+    case 5:
+        nValue = 0;
+        for (nIndex = 0; nIndex < m_nCharacters; nIndex++) {
+            do {
+                rc = m_cObjectArray.GetShare(GetCharacterId(nIndex), CGameObjectArray::THREAD_ASYNCH, reinterpret_cast<CGameObject**>(&pSprite), INFINITE);
+            } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+            if (rc != CGameObjectArray::SUCCESS) {
+                continue;
+            }
+            if ((pSprite->GetDerivedStats()->m_generalState & STATE_DEAD) == 0
+                && (nType == 2 || pSprite->GetAIType().m_nGender == 1)) {
+                BYTE nLevel = pSprite->GetDerivedStats()->m_nLevel;
+                if (nLevel > nValue) {
+                    nBest = GetCharacterId(nIndex);
+                    if (nType == 2) {
+                        nBestClassLevel = pSprite->GetDerivedStats()->GetClassMaskLevel(0xD1);
+                    }
+                    nValue = nLevel;
+                } else if (nLevel == nValue) {
+                    INT nClassLevel = pSprite->GetDerivedStats()->GetClassMaskLevel(0xD1);
+                    if ((nType == 2 ? nBestClassLevel : nUnsetClassLevel) < nClassLevel) {
+                        nBest = GetCharacterId(nIndex);
+                        nValue = pSprite->GetDerivedStats()->m_nLevel;
+                        if (nType == 2) {
+                            nBestClassLevel = nClassLevel;
+                        }
+                    }
+                }
+            }
+            m_cObjectArray.ReleaseShare(GetCharacterId(nIndex), CGameObjectArray::THREAD_ASYNCH, INFINITE);
+        }
+        return nBest;
+    case 3:
+    case 4:
+        nValue = nType == 3 ? 0 : 0x7FFF;
+        for (nIndex = 0; nIndex < m_nCharacters; nIndex++) {
+            do {
+                rc = m_cObjectArray.GetShare(GetCharacterId(nIndex), CGameObjectArray::THREAD_ASYNCH, reinterpret_cast<CGameObject**>(&pSprite), INFINITE);
+            } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+            if (rc != CGameObjectArray::SUCCESS) {
+                continue;
+            }
+            if ((pSprite->GetDerivedStats()->m_generalState & STATE_DEAD) == 0) {
+                SHORT nDamage = pSprite->GetDerivedStats()->m_nMaxHitPoints - pSprite->GetBaseStats()->m_hitPoints;
+                if (nType == 3 ? nValue < nDamage : nDamage < nValue) {
+                    nBest = GetCharacterId(nIndex);
+                    nValue = nDamage;
+                }
+            }
+            m_cObjectArray.ReleaseShare(GetCharacterId(nIndex), CGameObjectArray::THREAD_ASYNCH, INFINITE);
+        }
+        return nBest;
+    case 6:
+    case 7:
+        nValue = nType == 6 ? -20 : 20;
+        for (nIndex = 0; nIndex < m_nCharacters; nIndex++) {
+            do {
+                rc = m_cObjectArray.GetShare(GetCharacterId(nIndex), CGameObjectArray::THREAD_ASYNCH, reinterpret_cast<CGameObject**>(&pSprite), INFINITE);
+            } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+            if (rc != CGameObjectArray::SUCCESS) {
+                continue;
+            }
+            if ((pSprite->GetDerivedStats()->m_generalState & STATE_DEAD) == 0) {
+                INT nAC = pSprite->GetAC();
+                if (nType == 6 ? nValue < nAC : nAC < nValue) {
+                    nBest = GetCharacterId(nIndex);
+                    nValue = static_cast<SHORT>(pSprite->GetAC());
+                }
+            }
+            m_cObjectArray.ReleaseShare(GetCharacterId(nIndex), CGameObjectArray::THREAD_ASYNCH, INFINITE);
+        }
+        return nBest;
+    }
+
+    return CGameObjectArray::INVALID_INDEX;
+}
+
 // 0x5BF4B0
 void CInfGame::AddDisposableItem(CItem* pItem)
 {

@@ -5233,6 +5233,97 @@ void CGameArea::RemoveFromMarkers(LONG id)
 
 // -----------------------------------------------------------------------------
 
+// The first live creature next to an object (in the front vertical-sort
+// list, looking back from the object first) whose personal space covers one
+// of the points: the creature standing in a closing door's way (ToggleDoor
+// 0x489AB0). The creature is returned shared; NULL when there is none.
+//
+// 0x47A1C0
+CGameSprite* CGameArea::sub_47A1C0(LONG nObjectId, const CPoint* pPoints, USHORT nPoints)
+{
+    CAIObjectType typeAI(0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0);
+    CGameObject* pObject;
+    CGameObjectArray* pObjectArray = m_pGame->GetObjectArray();
+
+    if (pObjectArray->GetShare(nObjectId, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) != CGameObjectArray::SUCCESS) {
+        return NULL;
+    }
+
+    typeAI.Set(pObject->GetAIType());
+
+    if (pObject->GetVertListType() != CGameObject::LIST_FRONT) {
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameArea.cpp
+        // __LINE__: 9002
+        UTIL_ASSERT(FALSE);
+    }
+
+    pObject->GetPos();
+    POSITION posStart = pObject->GetVertListPos();
+    pObjectArray->ReleaseShare(nObjectId, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+
+    // NOTE: The original walks the list's nodes directly: back from the
+    // object through pPrev, and forward through pNext.
+    POSITION posNext = posStart;
+    POSITION posPrev = posStart;
+    m_lVertSort.GetNext(posNext);
+    m_lVertSort.GetPrev(posPrev);
+
+    while (posPrev != NULL || posNext != NULL) {
+        BOOL bNext = posPrev == NULL;
+        if (!bNext) {
+            LONG nId = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSort.GetPrev(posPrev)));
+            if (pObjectArray->GetShare(nId, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) != CGameObjectArray::SUCCESS) {
+                continue;
+            }
+
+            if (pObject->GetObjectType() != CGameObject::TYPE_SPRITE) {
+                pObjectArray->ReleaseShare(nId, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+                continue;
+            }
+
+            CGameSprite* pSprite = static_cast<CGameSprite*>(pObject);
+            if (pSprite->m_active
+                && pSprite->m_activeAI
+                && pSprite->m_activeImprisonment
+                && pSprite->GetVertListPos() != NULL) {
+                const CPoint& pos = pSprite->GetPos();
+                CPoint ptGrid(pos.x / CPathSearch::GRID_SQUARE_SIZEX, pos.y / CPathSearch::GRID_SQUARE_SIZEY);
+                if (m_search.sub_54A210(ptGrid, pSprite->GetAnimation()->GetPersonalSpace(), pPoints, nPoints) == TRUE) {
+                    return pSprite;
+                }
+            }
+
+            pObjectArray->ReleaseShare(nId, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+            if (posNext == NULL) {
+                continue;
+            }
+        }
+
+        LONG nId = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSort.GetNext(posNext)));
+        if (pObjectArray->GetShare(nId, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) != CGameObjectArray::SUCCESS) {
+            continue;
+        }
+
+        if (pObject->GetObjectType() == CGameObject::TYPE_SPRITE) {
+            CGameSprite* pSprite = static_cast<CGameSprite*>(pObject);
+            if (pSprite->m_active
+                && pSprite->m_activeAI
+                && pSprite->m_activeImprisonment
+                && pSprite->GetVertListPos() != NULL) {
+                const CPoint& pos = pSprite->GetPos();
+                CPoint ptGrid(pos.x / CPathSearch::GRID_SQUARE_SIZEX, pos.y / CPathSearch::GRID_SQUARE_SIZEY);
+                if (m_search.sub_54A210(ptGrid, pSprite->GetAnimation()->GetPersonalSpace(), pPoints, nPoints) == TRUE) {
+                    return pSprite;
+                }
+            }
+        }
+
+        pObjectArray->ReleaseShare(nId, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+    }
+
+    return NULL;
+}
+
 // 0x47A020
 BYTE* CAreaFile::GetData()
 {
