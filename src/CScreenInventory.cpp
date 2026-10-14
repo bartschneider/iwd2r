@@ -6169,8 +6169,8 @@ BOOL CUIControlButtonInventoryAppearance::Render(BOOL bForce)
         return FALSE;
     }
 
-    if (pInventory->m_bMultiPlayerViewable == TRUE && pSprite->m_animation.m_animation != NULL) {
-        CSingleLock renderLock(&(m_pPanel->m_pManager->field_56), FALSE);
+    if (pInventory->m_bMultiPlayerViewable == TRUE && pInventory->m_animation.m_animation != NULL) {
+        CSingleLock renderLock(&(pInventory->GetManager()->field_36), FALSE);
         renderLock.Lock(INFINITE);
 
         CPoint ptPos(m_pPanel->m_ptOrigin.x + m_ptOrigin.x + m_size.cx / 2,
@@ -6222,11 +6222,11 @@ BOOL CUIControlButtonInventoryAppearance::Render(BOOL bForce)
         delete pArea;
 
         renderLock.Unlock();
-
-        pGame->GetObjectArray()->ReleaseShare(nCharacterId,
-            CGameObjectArray::THREAD_1,
-            INFINITE);
     }
+
+    pGame->GetObjectArray()->ReleaseShare(nCharacterId,
+        CGameObjectArray::THREAD_1,
+        INFINITE);
 
     // NOTE: Always returns `FALSE` which is a bit odd.
     return FALSE;
@@ -6265,7 +6265,7 @@ void CUIControlButtonInventoryWeaponSet::OnLButtonClick(CPoint pt)
 
 // 0x631E10
 CUIControlButtonInventoryColor::CUIControlButtonInventoryColor(CUIPanel* panel, UI_CONTROL_BUTTON* controlInfo)
-    : CUIControlButton(panel, controlInfo, LBUTTON, 0)
+    : CUIControlButton(panel, controlInfo, LBUTTON, 1)
 {
     m_pDecal = new CVidCell(CResRef("COLGRAD"), m_pPanel->m_pManager->m_bDoubleSize);
 
@@ -6438,7 +6438,7 @@ BOOL CUIControlButtonInventoryColor::Render(BOOL bForce)
 
 // 0x0632530
 CUIControlButtonInventoryColorChoice::CUIControlButtonInventoryColorChoice(CUIPanel* panel, UI_CONTROL_BUTTON* controlInfo)
-    : CUIControlButton(panel, controlInfo, LBUTTON, 0)
+    : CUIControlButton(panel, controlInfo, LBUTTON, 1)
 {
     if (m_nID == 35) {
         STR_RES strRes;
@@ -6577,15 +6577,28 @@ BOOL CUIControlButtonInventoryColorChoice::GetColorRange(BYTE& colorRange)
         }
         return FALSE;
     case 3:
-        colorRange = static_cast<BYTE>(atol(pInventory->m_tSkinColor.GetAt(CPoint(0, m_nID))));
-        return TRUE;
+        // NOTE: Unsigned compare.
+        if (m_nID < static_cast<DWORD>(pInventory->m_tSkinColor.GetHeight())) {
+            colorRange = static_cast<BYTE>(atol(pInventory->m_tSkinColor.GetAt(CPoint(0, m_nID))));
+            return TRUE;
+        }
+        return FALSE;
     case 6:
-        colorRange = static_cast<BYTE>(atol(pInventory->m_tHairColor.GetAt(CPoint(0, m_nID))));
-        return TRUE;
+        // NOTE: Unsigned compare.
+        if (m_nID < static_cast<DWORD>(pInventory->m_tHairColor.GetHeight())) {
+            colorRange = static_cast<BYTE>(atol(pInventory->m_tHairColor.GetAt(CPoint(0, m_nID))));
+            return TRUE;
+        }
+        return FALSE;
     default:
         // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenInventory.cpp
         // __LINE__: 10006
         UTIL_ASSERT(FALSE);
+
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenInventory.cpp
+        // __LINE__: 10009
+        UTIL_ASSERT(FALSE);
+        return FALSE;
     }
 }
 
@@ -6624,6 +6637,8 @@ void CUIControlScrollBarInventoryGround::OnPageDown(DWORD nLines)
         INT nStep = min(nLines, GROUND_SLOTS - 1);
         INT nNewTopGroundItem = max(pInventory->m_nTopGroundItem - nStep, 0);
         if (pInventory->m_nTopGroundItem != nNewTopGroundItem) {
+            pInventory->m_nTopGroundItem = nNewTopGroundItem;
+
             for (INT nButtonId = 68; nButtonId <= 81; nButtonId++) {
                 m_pPanel->GetControl(nButtonId)->InvalidateRect();
             }
@@ -6655,6 +6670,8 @@ void CUIControlScrollBarInventoryGround::OnPageUp(DWORD nLines)
         INT nStep = min(nLines, GROUND_SLOTS - 1);
         INT nNewTopGroundItem = min(pInventory->m_nTopGroundItem + nStep, nNumGroundSlots);
         if (pInventory->m_nTopGroundItem != nNewTopGroundItem) {
+            pInventory->m_nTopGroundItem = nNewTopGroundItem;
+
             for (INT nButtonId = 68; nButtonId <= 81; nButtonId++) {
                 m_pPanel->GetControl(nButtonId)->InvalidateRect();
             }
@@ -6957,11 +6974,11 @@ void CUIControlButtonInventoryRequesterPlusMinus::AdjustValue()
         switch (m_nID) {
         case 3:
             // NOTE: Uninline.
-            pInventory->OnRequesterMinusButtonClick();
+            pInventory->OnRequesterPlusButtonClick();
             break;
         case 4:
             // NOTE: Uninline.
-            pInventory->OnRequesterPlusButtonClick();
+            pInventory->OnRequesterMinusButtonClick();
             break;
         default:
             // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenInventory.cpp
@@ -7018,7 +7035,7 @@ void CUIControlEditInventoryRequesterAmount::KillFocus()
     if (pItem != NULL) {
         INT nAmount = atol(m_sText);
         // NOTE: Signed compare.
-        if (nAmount > 0 && nAmount <= static_cast<SHORT>(wCount)) {
+        if (nAmount > 0 && nAmount <= static_cast<INT>(wCount)) {
             pInventory->m_nRequesterAmount = nAmount;
         }
         pInventory->UpdateRequesterPanel();
@@ -7031,7 +7048,7 @@ void CUIControlEditInventoryRequesterAmount::KillFocus()
 
 // 0x633D50
 CUIControlButtonInventoryHistoryIcon::CUIControlButtonInventoryHistoryIcon(CUIPanel* panel, UI_CONTROL_BUTTON* controlInfo)
-    : CUIControlButton(panel, controlInfo, LBUTTON, 0)
+    : CUIControlButton(panel, controlInfo, LBUTTON, 1)
 {
     field_662 = 0;
     m_pItem = NULL;
@@ -7059,7 +7076,7 @@ void CUIControlButtonInventoryHistoryIcon::SetItem(CItem* pItem)
     }
 }
 
-// 0x634950
+// 0x633F10
 BOOL CUIControlButtonInventoryHistoryIcon::Render(BOOL bForce)
 {
     CVidCell vcIcon;
@@ -7150,7 +7167,7 @@ CUIControlButtonInventoryAbilitiesAbility::CUIControlButtonInventoryAbilitiesAbi
     m_nSelectedFrame = 0;
 }
 
-// 0x634280
+// 0x634390
 CUIControlButtonInventoryAbilitiesAbility::~CUIControlButtonInventoryAbilitiesAbility()
 {
 }
@@ -7191,7 +7208,7 @@ BOOL CUIControlButtonInventoryAbilitiesAbility::Render(BOOL bForce)
             rClip,
             iconResRef,
             m_pPanel->m_pManager->m_bDoubleSize,
-            m_bEnabled ? 0x1 : 0,
+            m_bEnabled ? 0 : 0x1,
             0,
             FALSE,
             0,
@@ -7233,6 +7250,7 @@ void CUIControlButtonInventoryAbilitiesAbility::OnLButtonClick(CPoint pt)
         // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenInventory.cpp
         // __LINE__: 11021
         UTIL_ASSERT(FALSE);
+        v1 = -1;
     }
 
     pInventory->m_nCurrentAbility = v1;
@@ -7312,7 +7330,7 @@ void CUIControlButtonInventoryHistoryCancel::OnLButtonClick(CPoint pt)
 
 // 0x634B60
 CUIControlButtonInventoryHistoryImage::CUIControlButtonInventoryHistoryImage(CUIPanel* panel, UI_CONTROL_BUTTON* controlInfo)
-    : CUIControlButton(panel, controlInfo, LBUTTON, 0)
+    : CUIControlButton(panel, controlInfo, 0, 1)
 {
     m_imageResRef = "";
 }
