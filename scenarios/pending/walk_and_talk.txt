@@ -215,7 +215,7 @@ wait 10
 origin screen
 click 56 312
 wait 150
-# Leg 2: centre, walk to 1784,960 along the dock.
+# Leg 2: centre, walk to 1784,960 (the click target; the party stops at 1784,966) along the dock.
 origin ui
 click 528 460
 click 528 460
@@ -223,7 +223,7 @@ wait 10
 origin screen
 click 80 174
 wait 150
-# Leg 3: centre, walk towards 1528,924; Reig stops the party with his dialog.
+# Leg 3: centre, walk towards 1528,924 (the click target; Reig stops the party at about 1667,949); Reig stops the party with his dialog.
 origin ui
 click 528 460
 click 528 460
@@ -261,7 +261,7 @@ wait 10
 origin screen
 click 85 113
 wait 150
-# Leg 5: centre, walk to 1032,972 in front of the houses.
+# Leg 5: centre, walk to 1032,972 (the click target; the party stops at 1032,977) in front of the houses.
 origin ui
 click 528 460
 click 528 460
