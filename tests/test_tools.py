@@ -504,6 +504,20 @@ class ScenarioParseTest(unittest.TestCase):
             'chapter', 'world', 'world_settled'])
         self.assertEqual(actions[-1]['op'], 'quit')
 
+    def test_walk_and_talk_checkpoints(self):
+        def load(name):
+            return realinput.load_scenario(os.path.join(
+                ROOT, 'scenarios', 'pending', name))
+        actions = load('walk_and_talk.txt')
+        names = [a['name'] for a in actions if a['op'] == 'checkpoint']
+        world = [a['name'] for a in load('world_entry.txt')
+                 if a['op'] == 'checkpoint']
+        self.assertEqual(names, world + [
+            'opening_dialog', 'opening_done', 'moved', 'dialog',
+            'dialog_end', 'reig_dialog', 'reig_done', 'door_open'])
+        self.assertEqual(len(names), len(set(names)))
+        self.assertEqual(actions[-1]['op'], 'quit')
+
     def test_keysym_table_covers_every_key_name(self):
         self.assertEqual(set(realinput.X_KEYSYM), set(realinput.KEY_VK))
         used = set()
