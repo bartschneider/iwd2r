@@ -1034,3 +1034,41 @@ TEST_CASE("sprite: SetCurrAction draws the path counter and decodes a spell acti
     pCharacter->SetCurrAction(CAIAction::NULL_ACTION);
     ClearMessages();
 }
+
+TEST_CASE("door: a closed door marks its closed search squares in the search map", "[ai][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    CGameSprite* pCharacter = NewGameInStartArea(cre);
+    CGameArea* pArea = pCharacter->GetArea();
+    REQUIRE(pArea != NULL);
+
+    // AR1000's doors have no open search squares and 4-64 closed ones; the
+    // constructor (0x485AC0) takes the closed count from the record's
+    // +0x4E and marks them in the dynamic cost (0x80) while closed.
+    int checked = 0;
+    for (CGameObject* pObject : ObjectsOfType(pArea, CGameObject::TYPE_DOOR)) {
+        CGameDoor* pDoor = static_cast<CGameDoor*>(pObject);
+        if ((pDoor->m_dwFlags & 0x1) != 0) {
+            continue;
+        }
+        INFO("door " << (const char*)pDoor->m_scriptName);
+        CHECK(pDoor->m_nClosedSearch > 0);
+        CSearchBitmap& search = pArea->m_search;
+        for (WORD n = 0; n < pDoor->m_nClosedSearch; n++) {
+            const CPoint& pt = pDoor->m_pClosedSearch[n];
+            CHECK((search.m_pDynamicCost[pt.y * search.m_GridSquareDimensions.cx + pt.x] & 0x80) != 0);
+        }
+        checked++;
+    }
+    CHECK(checked > 0);
+}
