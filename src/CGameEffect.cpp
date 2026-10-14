@@ -11927,6 +11927,142 @@ CGameEffect* CGameEffectLearnSpell::Copy()
     return copy;
 }
 
+// 0x4BC8C0
+BOOL CGameEffectLearnSpell::ApplyEffect(CGameSprite* pSprite)
+{
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+    // The chance from INTMOD.2DA: column 0 (the SHORT at 0x84EA6A), the row
+    // of the sprite's intelligence.
+    // NOTE: Inlined C2DArray::GetAt.
+    CString sChance(pGame->GetRuleTables().m_tIntelligenceMod.GetAt(CPoint(0, pSprite->m_tempStats.m_nINT)));
+    BYTE nChance = static_cast<BYTE>(atol(sChance));
+
+    INT nRoll = CUtil::UtilRandInt(100, -pSprite->m_tempStats.m_nLuck);
+
+    CSpell* pSpell = new CSpell(m_res);
+    if (pSpell == NULL) {
+        m_done = TRUE;
+        return TRUE;
+    }
+
+    UINT nIndex = 0;
+    UINT nID = 0;
+    if (!pGame->m_spells.Find(m_res, nID)) {
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameEffect.cpp
+        // __LINE__: 20230
+        UTIL_ASSERT_MSG(FALSE, "Invalid spell");
+
+        delete pSpell;
+        m_done = TRUE;
+        return FALSE;
+    }
+
+    // The spell's level in the wizard list (class 11).
+    BYTE nClass = 11;
+    CGroupedSpellList* pSpells = &(pGame->m_spellsByClass[pGame->GetSpellcasterIndex(nClass)]);
+
+    UINT nSpellLevel = 0;
+    UINT nLevel;
+    for (nLevel = 0; nLevel < 9; nLevel++) {
+        // __FILE__: .\Include\InfGame.h
+        // __LINE__: 772
+        UTIL_ASSERT(nLevel < CSPELLLIST_MAX_LEVELS);
+
+        if (pSpells->m_lists[nLevel].GetSpellLevel(nID, nIndex) == TRUE) {
+            break;
+        }
+    }
+
+    if (nLevel < 9) {
+        // __FILE__: .\Include\InfGame.h
+        // __LINE__: 772
+        UTIL_ASSERT(nLevel < CSPELLLIST_MAX_LEVELS);
+
+        // NOTE: An inlined accessor of the entry's level (its asserts are
+        // CSpellList::Get's, lines 724 and 725).
+        // __FILE__: .\Include\InfGame.h
+        // __LINE__: 724
+        UTIL_ASSERT(nIndex < pSpells->m_lists[nLevel].m_nCount);
+
+        // __FILE__: .\Include\InfGame.h
+        // __LINE__: 725
+        UTIL_ASSERT(pSpells->m_lists[nLevel].m_pList != NULL);
+
+        nSpellLevel = pSpells->m_lists[nLevel].m_pList[nIndex].m_nLevel;
+    }
+
+    if (nSpellLevel == 0) {
+        delete pSpell;
+        m_done = TRUE;
+        return FALSE;
+    }
+
+    unsigned int nCasterType = pSpell->GetCasterType();
+
+    // A specialist learns his school more easily and other schools less.
+    if ((pSprite->m_baseStats.m_specialization & 0x4000) == 0) {
+        if (pGame->GetRuleTables().MapCharacterSpecializationToSchool(static_cast<WORD>(pSprite->m_baseStats.m_specialization)) == pSpell->GetSchool()) {
+            nChance += 15;
+        } else {
+            nChance -= 15;
+        }
+    }
+
+    LONG nDifficulty;
+    if (g_pChitin->cNetwork.m_bConnectionEstablished == TRUE) {
+        nDifficulty = pGame->GetOptions()->m_nMPDifficultyMultiplier;
+    } else {
+        nDifficulty = pGame->GetOptions()->m_nDifficultyMultiplier;
+    }
+
+    if (nDifficulty < 0 || nRoll < nChance) {
+        switch (pGame->GetSpellType(m_res)) {
+        case 1:
+            if (nCasterType > 0 && nCasterType <= 2) {
+                BYTE nKnownClass = 11;
+                UINT nKnownLevel = nSpellLevel - 1;
+                unsigned int a4 = 0;
+                unsigned int a5 = 0;
+                unsigned int a6 = 0;
+                pSprite->AddKnownSpell(nKnownClass, nKnownLevel, m_res, a4, a5, a6);
+            }
+            break;
+        case 2:
+            if (1) {
+                unsigned int a2 = 0;
+                unsigned int a3 = 0;
+                unsigned int a4 = 0;
+                pSprite->AddInnateSpell(m_res, a2, a3, a4);
+            }
+            break;
+        case 3:
+            if (1) {
+                unsigned int a2 = 1;
+                unsigned int a3 = 1;
+                unsigned int a4 = 0;
+                pSprite->AddSong(m_res, a2, a3, a4);
+            }
+            break;
+        case 4:
+            if (1) {
+                unsigned int a2 = 0;
+                pSprite->AddShapeshift(m_res, a2);
+            }
+            break;
+        default:
+            // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameEffect.cpp
+            // __LINE__: 20320
+            UTIL_ASSERT(FALSE);
+            break;
+        }
+    }
+
+    delete pSpell;
+    m_done = TRUE;
+    return TRUE;
+}
+
 // -----------------------------------------------------------------------------
 
 // NOTE: Inlined.

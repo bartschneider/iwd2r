@@ -544,3 +544,19 @@ TEST_CASE("item effects create and destroy items", "[effects][data]")
 
     delete pSprite;
 }
+
+TEST_CASE("learn spell (147) finds a wizard spell and ends", "[effects][data]")
+{
+    REQUIRE_ENGINE();
+    CGameSprite* pSprite = MakeSprite();
+    pSprite->m_tempStats.m_nINT = 40;
+    pSprite->m_tempStats.m_nLuck = 0;
+    pSprite->m_baseStats.m_specialization = 0x4000;
+
+    CGameEffect* pEffect = Make(CGAMEEFFECT_LEARNSPELL, 0, 0, 1);
+    pEffect->m_res = CResRef("SPWI112");
+    REQUIRE(pEffect->ApplyEffect(pSprite) == TRUE);
+    CHECK(pEffect->m_done == TRUE);
+
+    delete pSprite;
+}
