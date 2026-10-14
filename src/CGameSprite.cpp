@@ -10098,7 +10098,128 @@ void CGameSprite::GetNumInventoryPersonalSlots(INT& nUsedSlots, INT& nTotalSlots
 // 0x71FC00
 void CGameSprite::SetModalState(BYTE modalState, BOOL bUpdateToolbar)
 {
-    // TODO: Incomplete.
+    if (modalState == m_nModalState) {
+        return;
+    }
+
+    switch (m_nModalState) {
+    case 1:
+        // The battle song ends. With the Lingering Song feat (0x24) the song
+        // lingers on everyone in range instead of the "battle song ends"
+        // feedback.
+        if (sub_763150(CGAMESPRITE_FEAT_LINGERING_SONG) != 1) {
+            FeedBack(FEEDBACK_BATTLESONGEND, 0, 0, 0, -1, 0, 0);
+            break;
+        }
+
+        if ((m_derivedStats.m_generalState & STATE_SILENCED) == 0
+            && (m_baseStats.m_generalState & STATE_SILENCED) == 0
+            && g_pBaldurChitin->GetObjectGame()->GetGameSave()->m_cutScene != TRUE) {
+            UINT nSongIndex = m_nLastSong;
+
+            // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjCreature.cpp
+            // __LINE__: 22207
+            UTIL_ASSERT_MSG(nSongIndex < g_pBaldurChitin->GetObjectGame()->m_songs.m_nCount,
+                "Invalid Song Index");
+
+            CResRef songResRef = g_pBaldurChitin->GetObjectGame()->m_songs.Get(nSongIndex);
+
+            // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjCreature.cpp
+            // __LINE__: 22209
+            UTIL_ASSERT(songResRef != "");
+
+            CSpell cSpell(songResRef);
+            cSpell.Demand();
+
+            if (cSpell.GetCasterType() != 5) {
+                cSpell.Release();
+                break;
+            }
+
+            FeedBack(FEEDBACK_LINGERINGSONG, 0, 0, 0, cSpell.GetGenericName(), 0, 0);
+
+            SPELL_ABILITY* pAbility = cSpell.GetAbility(0);
+
+            CTypedPtrList<CPtrList, LONG*> targets(10);
+            m_pArea->GetAllInRange(GetVertListPos(),
+                GetPos(),
+                CAIObjectType::ANYONE,
+                400,
+                GetTerrainTable(),
+                targets,
+                TRUE,
+                FALSE);
+            m_pArea->GetAllInRangeBack(GetPos(),
+                CAIObjectType::ANYONE,
+                400,
+                GetTerrainTable(),
+                targets,
+                TRUE,
+                FALSE,
+                FALSE);
+            targets.AddTail(reinterpret_cast<LONG*>(static_cast<INT_PTR>(m_id)));
+
+            POSITION pos = targets.GetHeadPosition();
+            while (pos != NULL) {
+                LONG nTargetId = static_cast<LONG>(reinterpret_cast<INT_PTR>(targets.GetNext(pos)));
+
+                CGameObject* pObject;
+                BYTE rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(nTargetId,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    &pObject,
+                    INFINITE);
+                if (rc != CGameObjectArray::SUCCESS) {
+                    continue;
+                }
+
+                if (pObject->GetObjectType() == CGameObject::TYPE_SPRITE) {
+                    CGameSprite* pTarget = static_cast<CGameSprite*>(pObject);
+                    if ((songResRef != "SPIN147"
+                            || (IcewindMisc::sub_585230(this, pTarget) != TRUE
+                                && IcewindMisc::sud_585070(pTarget) != TRUE
+                                && !pTarget->m_derivedStats.m_spellStates.test(SPLSTATE_DEAFENED)))
+                        && IcewindMisc::sub_585230(this, pTarget)) {
+                        // TODO: Incomplete (0x720004-0x7201A0): one effect
+                        // per effect of the song's first ability
+                        // (CSpell_DecodeEffect, 0x54A510, with the caster's
+                        // position and id, IcewindMisc::sub_5860F0, a
+                        // permanent effect of duration type 7 made timed for
+                        // 200 ticks), each wrapped in a CMessageAddEffect
+                        // (vtable 0x8487CC) and all sent as one CMessageGroup
+                        // (0x5152C0). Neither CSpell_DecodeEffect nor
+                        // CMessageGroup is in src/ yet.
+                        (void)pAbility;
+                    }
+                }
+
+                g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(nTargetId,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    INFINITE);
+            }
+
+            cSpell.Release();
+        }
+        break;
+    case 2:
+        FeedBack(FEEDBACK_SEARCHEND, 0, 0, 0, -1, 0, 0);
+        break;
+    case 3:
+        if (m_bHiding) {
+            FeedBack(FEEDBACK_LEAVING_SHADOWS, 0, 0, 0, -1, 0, 0);
+            m_bHiding = FALSE;
+        }
+        break;
+    case 4:
+        FeedBack(FEEDBACK_TURNUNDEADEND, 0, 0, 0, -1, 0, 0);
+        break;
+    }
+
+    m_nModalState = modalState;
+
+    if (bUpdateToolbar
+        && g_pBaldurChitin->GetObjectGame()->GetGroup()->GetGroupLeader() == m_id) {
+        g_pBaldurChitin->GetObjectGame()->GetButtonArray()->UpdateButtons();
+    }
 }
 
 // 0x7202E0
