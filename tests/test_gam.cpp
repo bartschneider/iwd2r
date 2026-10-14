@@ -777,6 +777,92 @@ TEST_CASE("spawn: an INI spawn whose difficulty band is off spawns nothing; on, 
     CHECK(ObjectsInArea(pArea) == before + 2);
 }
 
+// CSpawn::Read's spec key and ExecuteSpawn's search count: a bracketed
+// object type or a script name both search (GetCountInPoly over the whole
+// area, which OfType matches by type and name); a count that reaches spec_qty
+// spawns nothing, one below it spawns create_qty; an unclosed bracket leaves
+// the spawn invalid.
+TEST_CASE("spawn: the spec key's object type gates an INI spawn on the area's count", "[spawn][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CGameSprite* pSprite = NewGameWithOneCharacter(cre, "Probe");
+    pGame->UpdateCharacterSlots();
+    pGame->SetupCharacters(FALSE);
+    CGameArea* pArea = pSprite->GetArea();
+    REQUIRE(pArea != NULL);
+    // The area's objects onto the list GetCountInPoly walks.
+    pArea->SortLists();
+    REQUIRE(pArea->m_lVertSort.GetCount() > 1);
+
+    auto section = [](const char* spec, const char* qty) {
+        auto* p = new CMemINISection(CString("probe"));
+        p->Set(CString("cre_file"), CString("10JON"));
+        p->Set(CString("create_qty"), CString("2"));
+        p->Set(CString("spawn_point"), CString("[1100.700:4]"));
+        p->Set(CString("spec"), CString(spec));
+        p->Set(CString("spec_qty"), CString(qty));
+        return p;
+    };
+
+    {
+        std::unique_ptr<CMemINISection> p(section("[3.4.5.6.7.8.9.10]", "1"));
+        CSpawn spawn(p.get());
+        REQUIRE(spawn.DataIsValid);
+        CHECK(spawn.field_13E == TRUE);
+        CHECK(spawn.mSearchType.m_nEnemyAlly == 3);
+        CHECK(spawn.mSearchType.m_nGeneral == 4);
+        CHECK(spawn.mSearchType.m_nRace == 5);
+        CHECK(spawn.mSearchType.m_nSubRace == 6);
+        CHECK(spawn.mSearchType.m_nClass == 7);
+        CHECK(spawn.mSearchType.m_nSpecific == 8);
+        CHECK(spawn.mSearchType.m_nGender == 9);
+        CHECK(spawn.mSearchType.m_nAlignment == 10);
+    }
+
+    const int before = ObjectsInArea(pArea);
+    {
+        std::unique_ptr<CMemINISection> p(section("[0.0.0.0.0.0.0.0]", "1"));
+        CSpawn spawn(p.get());
+        REQUIRE(spawn.DataIsValid);
+        CHECK(spawn.ExecuteSpawn(pArea) == 0);
+        CHECK(ObjectsInArea(pArea) == before);
+    }
+    {
+        // A name no object in the area carries: the count stays 0.
+        std::unique_ptr<CMemINISection> p(section("  NoSuchProbe  ", "1"));
+        CSpawn spawn(p.get());
+        REQUIRE(spawn.DataIsValid);
+        CHECK(spawn.field_13E == TRUE);
+        CHECK(spawn.mSearchType.m_sName == "NoSuchProbe");
+        CHECK(spawn.ExecuteSpawn(pArea) == 2);
+        CHECK(ObjectsInArea(pArea) == before + 2);
+    }
+    {
+        std::unique_ptr<CMemINISection> p(section("[0.0.0.0.0.0.0.0]", "1000"));
+        CSpawn spawn(p.get());
+        REQUIRE(spawn.DataIsValid);
+        CHECK(spawn.ExecuteSpawn(pArea) == 2);
+        CHECK(ObjectsInArea(pArea) == before + 4);
+    }
+    {
+        std::unique_ptr<CMemINISection> p(section("[1.2", "1"));
+        CSpawn spawn(p.get());
+        CHECK_FALSE(spawn.DataIsValid);
+    }
+}
+
 #ifndef _WIN32
 TEST_CASE("gam: Party Formation's Done saves a game file the engine loads back", "[gam][data]")
 {
