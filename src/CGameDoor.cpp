@@ -331,6 +331,13 @@ CGameDoor::~CGameDoor()
     field_6F2.SetSize(0);
 }
 
+// 0x47C830
+BOOLEAN CGameDoor::CanSaveGame(STRREF& strError)
+{
+    strError = -1;
+    return TRUE;
+}
+
 // 0x487460
 void CGameDoor::AIUpdate()
 {

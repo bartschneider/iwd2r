@@ -768,6 +768,69 @@ void DoorBlockerPoints(CaseContext& ctx)
     }
 }
 
+// ---------------------------------------------------------------------------
+// ai/decode_spell
+
+// CGameAIBase::DecodeSpell(LONG nSpellId, CString& sResRef) (0x45D3E0),
+// `ret 8` at 0x45D552; it reads the base's marked spell (field_588, 0x588).
+using DecodeSpellFn = void(__fastcall*)(void* self, void* edx, int32_t id, void* out);
+constexpr uintptr_t kDecodeSpell = 0x45D3E0;
+constexpr size_t kMarkedSpellOffset = 0x588;
+
+int32_t SpellId(std::mt19937& rng)
+{
+    switch (rng() % 6) {
+    case 0:
+        return 0;
+    case 1:
+        return static_cast<int32_t>(rng() % 5000);
+    case 2:
+        return static_cast<int32_t>(1000 * (1 + rng() % 3) + rng() % 1000);
+    case 3:
+        return -static_cast<int32_t>(rng() % 5000);
+    case 4:
+        return static_cast<int32_t>(rng());
+    default:
+        return static_cast<int32_t>(999 + rng() % 3003);
+    }
+}
+
+void DecodeSpellCase(CaseContext& ctx)
+{
+    OurChitinReset reset;
+    std::mt19937 rng(static_cast<uint32_t>(ctx.seed));
+
+    std::vector<std::pair<int32_t, int32_t>> inputs;
+    for (int i = 0; i < 2000; ++i) {
+        inputs.push_back({ SpellId(rng), rng() % 2 == 0 ? 0 : SpellId(rng) });
+    }
+
+    std::vector<std::string> original;
+    ctx.SetInputs("building the original's base");
+    ctx.CallOriginal([&] {
+        OriginalGame();
+        uint8_t* base = OriginalBlock(kAIBaseSize);
+        reinterpret_cast<AIBaseCtorFn>(kAIBaseCtor)(base, nullptr);
+        for (const auto& in : inputs) {
+            Put<int32_t>(base + kMarkedSpellOffset, in.second);
+            void* out = const_cast<void*>(OriginalString("unchanged"));
+            reinterpret_cast<DecodeSpellFn>(kDecodeSpell)(base, nullptr, in.first, out);
+            original.push_back(*reinterpret_cast<const char* const*>(out));
+        }
+    });
+
+    OursGame();
+    CGameAIBase* base = new CGameAIBase();
+    for (size_t i = 0; i < inputs.size(); ++i) {
+        ctx.SetInputs("id " + std::to_string(inputs[i].first) + ", marked spell " + std::to_string(inputs[i].second));
+        base->field_588 = inputs[i].second;
+        CString out("unchanged");
+        base->DecodeSpell(inputs[i].first, out);
+        ctx.CountInputs(1);
+        oracle::Compare(ctx, original[i], std::string((LPCSTR)out));
+    }
+}
+
 }
 
 ORACLE_CASE("ai/global_variable", GlobalVariable);
@@ -775,3 +838,4 @@ ORACLE_CASE("ai/closer_dest_pt", CloserDestPt);
 ORACLE_CASE("ai/decode", Decode);
 ORACLE_CASE("ai/named_add_key", NamedAddKey);
 ORACLE_CASE("ai/door_blocker_points", DoorBlockerPoints);
+ORACLE_CASE("ai/decode_spell", DecodeSpellCase);
