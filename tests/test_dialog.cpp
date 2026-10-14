@@ -260,6 +260,36 @@ int ShownReplies(CGameDialogSprite& dialog)
     return count;
 }
 
+// Keeps a demanded resource and puts back one byte patched in its data
+// when the test case leaves, by a failed REQUIRE too.
+class DemandedResource {
+public:
+    explicit DemandedResource(CRes* pRes)
+        : m_pRes(pRes)
+    {
+    }
+    ~DemandedResource()
+    {
+        if (m_pByte != NULL) {
+            *m_pByte = m_original;
+        }
+        m_pRes->Release();
+    }
+    void Patch(BYTE* pByte, BYTE value)
+    {
+        m_pByte = pByte;
+        m_original = *pByte;
+        *pByte = value;
+    }
+    DemandedResource(const DemandedResource&) = delete;
+    DemandedResource& operator=(const DemandedResource&) = delete;
+
+private:
+    CRes* m_pRes;
+    BYTE* m_pByte = NULL;
+    BYTE m_original = 0;
+};
+
 void RunMessages()
 {
     g_pBaldurChitin->GetMessageHandler()->AsynchronousUpdate();
@@ -342,6 +372,7 @@ TEST_CASE("dialog: Hedron's opening conversation shows three responses and ends 
     REQUIRE(file.GetRes() != NULL);
     BYTE* pData = static_cast<BYTE*>(file.GetRes()->Demand());
     REQUIRE(pData != NULL);
+    DemandedResource demanded(file.GetRes());
     const DWORD nSize = file.GetRes()->m_nResSizeActual;
     const std::string sTrigger = "NumTimesTalkedTo(0)";
     BYTE* pTrigger = std::search(pData, pData + nSize, sTrigger.begin(), sTrigger.end());
@@ -358,7 +389,12 @@ TEST_CASE("dialog: Hedron's opening conversation shows three responses and ends 
 
         // An unknown trigger name is a parse error that adds no trigger, so
         // state 0's condition holds (CAICondition::Hold of an empty list).
-        pTrigger[15] = 'X';
+        //
+        // TODO(remove): this patch of the cached DLG exists only until
+        // CGameSprite::EvaluateStatusTrigger is ported (the movement
+        // stream) and runs only when !bStarted; `demanded` puts the byte
+        // back (docs/followups.md).
+        demanded.Patch(&pTrigger[15], 'X');
         REQUIRE(pWorld->StartDialog(pCharacter, pHedron, FALSE, FALSE));
     }
 
@@ -436,11 +472,6 @@ TEST_CASE("dialog: Hedron's opening conversation shows three responses and ends 
     CHECK(pWorld->field_EA4 == -1);
     CHECK_FALSE(pWorld->m_bPaused);
     CHECK(ShownReplies(dialog) == 0);
-
-    if (!bStarted) {
-        pTrigger[15] = 'o';
-    }
-    file.GetRes()->Release();
 }
 
 TEST_CASE("dialog: TogglePauseGame pauses and unpauses the world and returns TRUE", "[dialog][data]")
