@@ -50,7 +50,47 @@ BOOL CGameEffectList::sub_4C0830(CGameEffect* pEffect)
 // 0x4C08E0
 void CGameEffectList::RemoveAllOfType(CGameSprite* pSprite, WORD effectID, POSITION posLeave, LONG effectAmount)
 {
-    // TODO: Incomplete.
+    BOOL bLeaveNext = FALSE;
+
+    POSITION pos = GetHeadPosition();
+    if (pos != NULL) {
+        do {
+            if (GetCount() == 0) {
+                break;
+            }
+
+            if (pos == posLeave) {
+                GetNext(pos);
+                if (pos == NULL && posLeave != NULL) {
+                    break;
+                }
+            }
+
+            POSITION posOld = pos;
+            CGameEffect* pEffect = GetNext(pos);
+            if (pos == posLeave) {
+                bLeaveNext = TRUE;
+            }
+
+            if (effectID == pEffect->m_effectID
+                && (effectAmount == -1 || effectAmount == pEffect->m_effectAmount)) {
+                // NOTE: When the node to leave was skipped just above, the
+                // original removes that node instead of this one (ECX still
+                // holds it, 0x4C0946) and deletes this effect while its node
+                // stays in the list: memory corruption, bounded here (ruling
+                // P4-10) by removing this node.
+                RemoveAt(posOld);
+                pEffect->OnRemove(pSprite);
+                delete pEffect;
+            }
+        } while (pos != NULL);
+
+        if (bLeaveNext && posLeave != NULL) {
+            POSITION posNext = posLeave;
+            GetNext(posNext);
+            m_posNext = posNext;
+        }
+    }
 }
 
 // 0x4C0990

@@ -119,3 +119,11 @@ The guards in `src/render/api.h` leave these for the renderer that first draws t
 - 15 sampled creatures assert in the base `CGameEffect::ApplyEffect` until effect opcodes 261, 98, 206 and 429 are ported (effects streams).
 - `CGameAnimationTypeMonsterIcewindNew` was compared with the original only where its constructor reaches (`Render`, `SetSequence` and the rest of `ClearColorEffects` were not); other animation files pass `bWarningIfMissing` TRUE everywhere, where the original passes 0 for some cells.
 - `CItem`: `m_nAbilities` is zeroed in the copy and CRE-record constructors (the original leaves it unset on a missing item) but not in the resref constructor 0x4E7E90; make it consistent. The destructor test reads fields after `~CItem`, which is undefined behaviour and would break under LTO. The 10GUTHE/12OGR test only checks that construction succeeds, not the palette type, weapon cell or mirror test.
+
+## Effects (from project 3, milestone 3, effects-core and effects-iwd)
+
+- Polymorph (135, druid wild shapes), ReplaceSelf (151) and FeatCleave (442) are not ported; each prints a one-shot `iwd2r: effect N (...) is not ported` warning. No test covers the warnings.
+- `CGameEffectApplyEffect` (177) and the two equip-item effects (182, 183) are ported, but the vanilla data has no EFF files, so their decode path and most of 177's mode matching are verified only against the disassembly.
+- Spell immunity (206/290) waits for the shared `CDerivedStats` immunity set from the stats-spell stream; opcodes 3, 12 and 440 wait for its shared `GetSpellResrefEffects`.
+- Dominate (263) and Summon (411) are not ported; their blockers are in docs/evidence/5645A0.md and 55F710.md.
+- Effect 233 (visual spell hit, the most common opcode) queues `CMessageFireProjectile`, whose `Run` (0x5007F0) is being ported by the projectiles stream; until then the queued message asserts.
