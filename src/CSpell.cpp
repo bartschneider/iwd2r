@@ -1,7 +1,10 @@
 #include "CSpell.h"
 
+#include "CBaldurChitin.h"
 #include "CGameEffect.h"
 #include "CGameSprite.h"
+#include "CInfGame.h"
+#include "CRuleTables.h"
 #include "CUtil.h"
 
 // NOTE: Inlined.
@@ -104,6 +107,171 @@ SPELL_ABILITY* CSpell::GetAbility(LONG abilityNum) const
     }
 
     return pAbility;
+}
+
+// 0x54A510
+CGameEffect* CSpell::GetAbilityEffect(LONG nAbility, LONG nEffect, CGameObject* pObject, BYTE nClass, DWORD nSpecialization, BYTE nCasterLevel)
+{
+    if (GetResRef() == "") {
+        return NULL;
+    }
+
+    if (pRes == NULL) {
+        return NULL;
+    }
+
+    pRes->Demand();
+
+    if (pRes == NULL) {
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\CSpell.cpp
+        // __LINE__: 310
+        UTIL_ASSERT(FALSE);
+        return NULL;
+    }
+
+    if (nEffect >= pRes->GetAbilityEffectNo(nAbility)) {
+        pRes->Release();
+        return NULL;
+    }
+
+    if (nCasterLevel == 0) {
+        if (pObject != NULL && pObject->GetObjectType() == CGameObject::TYPE_SPRITE) {
+            // NOTE: The SHORT is kept as a byte (0x54A5C4).
+            nCasterLevel = static_cast<BYTE>(static_cast<CGameSprite*>(pObject)->GetCasterLevel(this, nClass, nSpecialization));
+        } else {
+            nCasterLevel = 10;
+        }
+    }
+
+    CGameEffect* pEffect = CGameEffect::DecodeEffect(pRes->GetAbilityEffect(nAbility, nEffect, nCasterLevel),
+        CPoint(-1, -1),
+        -1,
+        CPoint(-1, -1));
+    if (pEffect != NULL) {
+        pEffect->m_school = pRes->m_pHeader->school;
+        pEffect->m_sourceType = 1;
+        pEffect->field_48 = pRes->m_pHeader->secondaryType;
+        pEffect->m_sourceRes = GetResRef();
+        pEffect->m_sourceFlags = pRes->m_pHeader->itemFlags;
+
+        if (pObject != NULL) {
+            if (pObject->GetObjectType() == CGameObject::TYPE_SPRITE) {
+                CGameSprite* pSprite = static_cast<CGameSprite*>(pObject);
+                const CRuleTables& ruleTables = g_pBaldurChitin->GetObjectGame()->GetRuleTables();
+
+                if (pEffect->m_school != 0) {
+                    BYTE nSchool = ruleTables.MapCharacterSpecializationToSchool(static_cast<WORD>(pSprite->m_baseStats.m_specialization));
+
+                    UINT nFeat;
+                    BOOL bFocus = TRUE;
+                    switch (pEffect->m_school) {
+                    case 4:
+                        nFeat = CGAMESPRITE_FEAT_SPELL_FOCUS_ENCHANTMENT;
+                        break;
+                    case 6:
+                        nFeat = CGAMESPRITE_FEAT_SPELL_FOCUS_EVOCATION;
+                        break;
+                    case 7:
+                        nFeat = CGAMESPRITE_FEAT_SPELL_FOCUS_NECROMANCY;
+                        break;
+                    case 8:
+                        nFeat = CGAMESPRITE_FEAT_SPELL_FOCUS_TRANSMUTE;
+                        break;
+                    default:
+                        nFeat = 0;
+                        bFocus = FALSE;
+                        break;
+                    }
+
+                    if (bFocus) {
+                        if (pSprite->sub_763150(nFeat)) {
+                            pEffect->m_saveMod += 2 * pSprite->GetFeatValue(nFeat);
+                        }
+                    }
+
+                    if (nSchool == pEffect->m_school) {
+                        pEffect->m_saveMod += 2;
+                    }
+                }
+
+                if (GetResRef() == "SPIN126"
+                    || GetResRef() == "SPIN127"
+                    || GetResRef() == "SPIN128"
+                    || GetResRef() == "SPIN129"
+                    || GetResRef() == "SPIN130"
+                    || GetResRef() == "SPIN131"
+                    || GetResRef() == "SPIN132") {
+                    // NOTE: Unsigned: the average below is an unsigned
+                    // divide (0x54A8BF), see 54A510.md. Kept.
+                    UINT nTotal = 0;
+                    UINT nCount = 0;
+
+                    if (pSprite->HasClassLevel(CAIOBJECTTYPE_C_WIZARD)) {
+                        DWORD dwClassMask = CLASSMASK_WIZARD;
+                        if (pSprite->sub_725330(CResRef("SPWI710"), dwClassMask, 9, FALSE) == TRUE) {
+                            nTotal = ruleTables.GetSaveAdjustmentForSourceSprite(pSprite,
+                                GetResRef(),
+                                0,
+                                CAIOBJECTTYPE_C_WIZARD,
+                                0,
+                                nCasterLevel);
+                            nCount = 1;
+                        }
+                    }
+
+                    if (pSprite->HasClassLevel(CAIOBJECTTYPE_C_SORCERER)) {
+                        DWORD dwClassMask = CLASSMASK_SORCERER;
+                        if (pSprite->sub_725330(CResRef("SPWI710"), dwClassMask, 9, FALSE) == TRUE) {
+                            nTotal += ruleTables.GetSaveAdjustmentForSourceSprite(pSprite,
+                                GetResRef(),
+                                0,
+                                CAIOBJECTTYPE_C_SORCERER,
+                                0,
+                                nCasterLevel);
+                            nCount++;
+                        }
+                    }
+
+                    if (pSprite->HasClassLevel(CAIOBJECTTYPE_C_CLERIC)
+                        && (pSprite->m_baseStats.m_specialization & 0xFF8000) == SPECMASK_CLERIC_HELM) {
+                        UINT nLevel = 9;
+                        if (pSprite->sub_7256B0(CResRef("SPWI710"), nLevel, FALSE) == TRUE) {
+                            nTotal += ruleTables.GetSaveAdjustmentForSourceSprite(pSprite,
+                                GetResRef(),
+                                0,
+                                CAIOBJECTTYPE_C_CLERIC,
+                                SPECMASK_CLERIC_HELM,
+                                nCasterLevel);
+                            nCount++;
+                        }
+                    }
+
+                    if (nCount != 0) {
+                        pEffect->m_saveMod += nTotal / nCount;
+                    }
+                }
+
+                pEffect->m_casterLevel = nCasterLevel;
+
+                // NOTE: Effect +0xC8, named m_firstCall in CGameEffect.h: twice
+                // the Spell Penetration feat (0x54A8D2).
+                pEffect->m_firstCall = pSprite->GetFeatValue(CGAMESPRITE_FEAT_SPELL_PENETRATION) << 1;
+            } else {
+                pEffect->m_casterLevel = 1;
+            }
+
+            pEffect->m_casterLevel |= nClass << 8;
+
+            if (nClass == CAIOBJECTTYPE_C_CLERIC) {
+                BYTE nIndex = g_pBaldurChitin->GetObjectGame()->GetRuleTables().GetSpecializationIndex(CAIOBJECTTYPE_C_CLERIC, nSpecialization);
+                pEffect->m_casterLevel |= nIndex << 16;
+            }
+        }
+    }
+
+    pRes->Release();
+
+    return pEffect;
 }
 
 // 0x54A970

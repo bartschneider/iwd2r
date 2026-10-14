@@ -3785,6 +3785,59 @@ void CRuleTables::sub_546B60(CGameSprite* pSprite, int& a2, int& a3, int& a4, BO
 // FIXME: For unknown reason `nClass` and `nLevel` params are passed as
 // pointers.
 //
+// 0x547040
+INT CRuleTables::GetSaveAdjustmentForSourceSprite(CGameSprite* pSprite, const CResRef& sourceRes, DWORD nSavingThrow, BYTE nClass, DWORD nSpecialization, BYTE nCasterLevel) const
+{
+    // NOTE: Not read by the original.
+    (void)sourceRes;
+    (void)nCasterLevel;
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\CRuleTables.cpp
+    // __LINE__: 6961
+    UTIL_ASSERT(pSprite != NULL);
+
+    // NOTE: The original calls it and drops the result (0x54706E).
+    pSprite->GetAIType();
+
+    // NOTE: A class without a casting ability keeps 0, which gives -5 below
+    // (see 547040.md). Kept.
+    INT nAbility = 0;
+    switch (nClass) {
+    case CAIOBJECTTYPE_C_BARD:
+    case CAIOBJECTTYPE_C_SORCERER:
+        nAbility = pSprite->m_derivedStats.m_nCHR;
+        break;
+    case CAIOBJECTTYPE_C_CLERIC:
+    case CAIOBJECTTYPE_C_DRUID:
+    case CAIOBJECTTYPE_C_PALADIN:
+    case CAIOBJECTTYPE_C_RANGER:
+        nAbility = pSprite->m_derivedStats.m_nWIS;
+        break;
+    case CAIOBJECTTYPE_C_WIZARD:
+        nAbility = pSprite->m_derivedStats.m_nINT;
+        break;
+    }
+
+    // NOTE: The original computes in floats (0x5470AE-0x5470E2) and
+    // truncates.
+    float fBonus;
+    if (nAbility >= 10) {
+        fBonus = (static_cast<float>(nAbility) - 10.0f) / 2.0f;
+    } else {
+        fBonus = (static_cast<float>(nAbility) - 1.0f - 10.0f) / 2.0f;
+    }
+
+    INT nBonus = static_cast<INT>(fBonus);
+
+    if (nClass == CAIOBJECTTYPE_C_CLERIC
+        && nSpecialization == SPECMASK_CLERIC_BANE
+        && nSavingThrow == 0x10) {
+        nBonus++;
+    }
+
+    return nBonus;
+}
+
 // 0x547130
 DWORD CRuleTables::GetMaxSpellLevel(const BYTE& nClass, const UINT& nLevel) const
 {

@@ -8,7 +8,10 @@
 #include "FileFormat.h"
 
 #include <bitset>
+#include <list>
 #include <set>
+#include <string>
+#include <vector>
 
 // STATE.IDS
 
@@ -383,6 +386,7 @@
 #define IWD_VFX_DEATH_ARMOR 31
 
 class CCreatureFileHeader;
+class CGameEffect;
 class CGameSprite;
 class CGameSpriteGroupedSpellList;
 class CGameSpriteSpells;
@@ -518,6 +522,44 @@ public:
 
 #pragma pack(pop)
 
+// An entry of the when-struck list (CDerivedStats +0x490): a VC6 std::list
+// node of 0x24 bytes (next, prev, then these 0x1C bytes; 0x4490E0), as
+// WhenStruck (0x56A5A0) appends it.
+struct CWhenStruckEntry {
+    /* 0000 */ CResRef m_sourceRes;
+    /* 0008 */ CResRef m_res;
+    /* 0010 */ DWORD m_casterLevel;
+    /* 0014 */ CPoint m_target;
+};
+
+// A damage reduction ("amount/+enchantment"), the 0x24-byte element of the
+// vector at CDerivedStats +0x49C (CDerivedStats.cpp in the original).
+class CDamageReduction {
+public:
+    CDamageReduction(LONG nAmount, LONG nEnchantment);
+    LONG Apply(LONG nDamage);
+    BOOLEAN IsGeneric();
+    void AddDamageType(INT nType);
+    void SetSource(LONG* pPool, CGameSprite* pSprite, CGameEffect* pEffect);
+
+    /* 0000 */ LONG m_nAmount;
+    /* 0004 */ LONG m_nEnchantment;
+    /* 0008 */ std::set<INT> m_damageTypes;
+    // The absorb pool (opcode 218 points it at its m_effectAmount2), or NULL.
+    /* 0018 */ LONG* m_pPool;
+    /* 001C */ CGameSprite* m_sourceCreaturePtr;
+    /* 0020 */ CGameEffect* m_sourceEffectPtr;
+};
+
+// The vector at CDerivedStats +0x49C (VC6: allocator byte, _First, _Last,
+// _End).
+class CDamageReductionList : public std::vector<CDamageReduction> {
+public:
+    CDamageReduction* GetBestGeneric(LONG nEnchantment);
+    CDamageReduction* GetBest(LONG nEnchantment, DWORD nDamageType);
+    LONG Apply(LONG nDamage, LONG nEnchantment, DWORD nDamageType);
+};
+
 class CDerivedStats : public CDerivedStatsTemplate {
 public:
     CDerivedStats();
@@ -566,8 +608,14 @@ public:
     /* 041C */ CImmunitiesProjectile field_41C;
     /* 0438 */ CImmunitiesItemEquipList m_cImmunitiesItemUse;
     /* 0454 */ CImmunitiesItemTypeEquipList m_cImmunitiesItemTypeUse;
-    /* 04AC */ CPtrList field_4AC;
+    // The resources the sprite is immune to (ImmunityToResource, 0x564200).
+    /* 0470 */ std::set<std::string> m_resourceImmunities;
     /* 0480 */ std::set<int> m_naturalImmunities;
+    // VC6 std::list: allocator byte at +0x490, _Head at +0x494, _Size at
+    // +0x498.
+    /* 0490 */ std::list<CWhenStruckEntry> m_whenStruckList;
+    /* 049C */ CDamageReductionList m_damageReductions;
+    /* 04AC */ CPtrList field_4AC;
     /* 04C8 */ CPtrList field_4C8;
     /* 04E4 */ CPtrList field_4E4;
     /* 0500 */ CPtrList field_500;
