@@ -11,6 +11,7 @@
 #include "CInfGame.h"
 #include "CPathSearch.h"
 #include "CProjectile.h"
+#include "CProjectileArea.h"
 #include "CResEffect.h"
 #include "CScreenWorld.h"
 #include "CSevenEyes.h"
@@ -1425,6 +1426,27 @@ void CGameEffect::AddColorEffect(CGameSprite* pSprite, BYTE r, BYTE g, BYTE b)
     AddColorEffect(pSprite, r, g, b, 1);
 }
 
+// 0x547620
+// NOTE: A CRuleTables member (its assert names CRuleTables.cpp); kept here,
+// file-static, until CRuleTables.cpp's owner takes it. Only CheckAdd calls
+// it: for type 1 the sprite's animal empathy skill less the save modifier,
+// the spell level and 5.
+static INT RuleTables_GetSaveAdjustment547620(const CRuleTables& ruleTables, INT nType, CGameSprite* pSprite, LONG nSaveMod, DWORD nSpellLevel)
+{
+    (void)ruleTables;
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\CRuleTables.cpp
+    // __LINE__: 7295
+    UTIL_ASSERT_MSG(pSprite != NULL, "Invalid Sprite.");
+
+    INT nAdjustment = 0;
+    if (nType == 1) {
+        nAdjustment = pSprite->GetDerivedStats()->m_nSkills[CGAMESPRITE_SKILL_ANIMAL_EMPATHY] - nSaveMod - static_cast<INT>(nSpellLevel) - 5;
+    }
+
+    return nAdjustment;
+}
+
 // 0x4A3310
 BOOL CGameEffect::sub_4A3310(CGameSprite* pSprite, BYTE* pRoll1, BYTE* pRoll2, BYTE* pRoll3, BYTE* pRoll4, BYTE* pProbabilityRoll)
 {
@@ -1619,8 +1641,15 @@ BOOL CGameEffect::sub_4A3310(CGameSprite* pSprite, BYTE* pRoll1, BYTE* pRoll2, B
                 static_cast<BYTE>(m_casterLevel));
         }
 
-        // TODO: Incomplete. For SPWI420's source the original adds 0x547620
-        // to m_saveMod (0x4A3DF7-0x4A3E29); not in src/.
+        // NOTE: The CResRef at 0x8F8E60 is CGameSprite::SPIN108. The source's
+        // type is not checked here.
+        if (m_sourceRes == CGameSprite::SPIN108) {
+            m_saveMod += RuleTables_GetSaveAdjustment547620(pGame->GetRuleTables(),
+                1,
+                static_cast<CGameSprite*>(pSource),
+                m_saveMod,
+                m_spellLevel);
+        }
 
         pGame->GetObjectArray()->ReleaseShare(m_sourceID,
             CGameObjectArray::THREAD_ASYNCH,
@@ -16864,30 +16893,44 @@ void CPersistantEffect84C4B4::ApplyEffect(CGameSprite* pSprite, int index)
         return;
     }
 
-    // TODO: Incomplete. The original builds an area projectile (0x65E bytes,
-    // 0x56EDD0, with field_54) and copies the ids of field_58 into its set
-    // (+0x64E); the projectile classes are not in src/.
+    CProjectileArea* pProjectile = new CProjectileArea(static_cast<WORD>(field_54));
+
+    // NOTE: Inlined `std::set::insert` (0x4C45A0) for each id.
+    for (std::set<void*>::iterator it = field_58.begin(); it != field_58.end(); ++it) {
+        pProjectile->m_excludedTargets.insert(static_cast<LONG>(reinterpret_cast<INT_PTR>(*it)));
+    }
 
     if (index < 100) {
         for (int n = index; n > 0; n--) {
             const char* szRes = field_34.c_str() != NULL ? field_34.c_str() : "";
-            (void)szRes;
-
-            // TODO: Incomplete. GetSpellResrefEffects (0x586220, not in
-            // src/) gives the effects of szRes at level 1 for the source;
-            // each gets field_29 as its source resref and this sprite's
-            // position as its target and goes to the projectile
-            // (CProjectile::AddEffect).
+            std::list<CGameEffect*> effects = IcewindMisc::GetSpellResrefEffects(pSource,
+                reinterpret_cast<const BYTE*>(szRes),
+                1);
+            for (std::list<CGameEffect*>::iterator it = effects.begin(); it != effects.end(); it++) {
+                (*it)->m_sourceRes = CResRef(reinterpret_cast<const char*>(field_29));
+                (*it)->m_target = pSprite->GetPos();
+                pProjectile->AddEffect(*it);
+            }
         }
     } else if (field_44.length() != 0) {
         const char* szRes = field_44.c_str() != NULL ? field_44.c_str() : "";
-        (void)szRes;
-
-        // TODO: Incomplete. As above, once, with field_44's spell.
+        std::list<CGameEffect*> effects = IcewindMisc::GetSpellResrefEffects(pSource,
+            reinterpret_cast<const BYTE*>(szRes),
+            1);
+        for (std::list<CGameEffect*>::iterator it = effects.begin(); it != effects.end(); it++) {
+            (*it)->m_sourceRes = CResRef(reinterpret_cast<const char*>(field_29));
+            (*it)->m_target = pSprite->GetPos();
+            pProjectile->AddEffect(*it);
+        }
     }
 
-    // TODO: Incomplete. The projectile is fired from the source at this
-    // sprite (vtable +0x6C: area, source id, sprite id, position).
+    // NOTE: Fired even when it carries nothing.
+    pProjectile->Fire(pSprite->GetArea(),
+        pSource->GetId(),
+        pSprite->GetId(),
+        pSprite->GetPos(),
+        0,
+        0);
 
     pGame->GetObjectArray()->ReleaseShare(m_sourceID,
         CGameObjectArray::THREAD_ASYNCH,
@@ -16939,19 +16982,25 @@ void CPersistantEffect84C4C4::ApplyEffect(CGameSprite* pSprite, int index)
     if (index < 100) {
         for (int n = index; n > 0; n--) {
             const char* szRes = field_34.c_str() != NULL ? field_34.c_str() : "";
-            (void)szRes;
-
-            // TODO: Incomplete. GetSpellResrefEffects (0x586220, not in
-            // src/) gives the effects of szRes at level 1 for the source;
-            // each gets field_29 as its source resref and this sprite's
-            // position as its target and is added to this sprite
-            // (AddEffect(pEffect, EFFECT_LIST_TIMED, FALSE, TRUE)).
+            std::list<CGameEffect*> effects = IcewindMisc::GetSpellResrefEffects(pSource,
+                reinterpret_cast<const BYTE*>(szRes),
+                1);
+            for (std::list<CGameEffect*>::iterator it = effects.begin(); it != effects.end(); it++) {
+                (*it)->m_sourceRes = CResRef(reinterpret_cast<const char*>(field_29));
+                (*it)->m_target = pSprite->GetPos();
+                pSprite->AddEffect(*it, CGameAIBase::EFFECT_LIST_TIMED, FALSE, TRUE);
+            }
         }
     } else if (field_44.length() != 0) {
         const char* szRes = field_44.c_str() != NULL ? field_44.c_str() : "";
-        (void)szRes;
-
-        // TODO: Incomplete. As above, once, with field_44's spell.
+        std::list<CGameEffect*> effects = IcewindMisc::GetSpellResrefEffects(pSource,
+            reinterpret_cast<const BYTE*>(szRes),
+            1);
+        for (std::list<CGameEffect*>::iterator it = effects.begin(); it != effects.end(); it++) {
+            (*it)->m_sourceRes = CResRef(reinterpret_cast<const char*>(field_29));
+            (*it)->m_target = pSprite->GetPos();
+            pSprite->AddEffect(*it, CGameAIBase::EFFECT_LIST_TIMED, FALSE, TRUE);
+        }
     }
 
     pGame->GetObjectArray()->ReleaseShare(m_sourceID,
@@ -17090,18 +17139,44 @@ void CPersistantEffect84C4D4::ApplyEffect(CGameSprite* pSprite, int index)
     }
 
     for (int n = index; n > 0; n--) {
-        // TODO: Incomplete. GetSpellResrefEffects (0x586220, not in src/)
-        // gives the effects of "EffSoF1" at level 1 for the source; each
-        // gets field_29 as its source resref and is added to this sprite
-        // (AddEffect(pEffect, EFFECT_LIST_TIMED, FALSE, TRUE)).
+        // NOTE: The string at 0x8AB108.
+        std::list<CGameEffect*> effects = IcewindMisc::GetSpellResrefEffects(pSource,
+            reinterpret_cast<const BYTE*>("EffSoF1"),
+            1);
+        for (std::list<CGameEffect*>::iterator it = effects.begin(); it != effects.end(); it++) {
+            (*it)->m_sourceRes = CResRef(reinterpret_cast<const char*>(field_29));
+            pSprite->AddEffect(*it, CGameAIBase::EFFECT_LIST_TIMED, FALSE, TRUE);
+        }
     }
 
-    // TODO: Incomplete. The original builds a projectile (0x65E bytes,
-    // 0x575DD0, with field_54) whose set holds this sprite's id and the ids
-    // of field_58; index times it gets the "EffSoF2" effects with the
-    // duration (field_1C - game time) / 15; then it is fired from the
-    // source at this sprite (vtable +0x6C). The projectile classes and
-    // GetSpellResrefEffects are not in src/.
+    CProjectileArea850690* pProjectile = new CProjectileArea850690(static_cast<WORD>(field_54));
+
+    // NOTE: Inlined `std::set::insert` (0x4C45A0, then 0x4C4690 for each id
+    // of field_58).
+    pProjectile->m_excludedTargets.insert(pSprite->GetId());
+    for (std::set<void*>::iterator it = field_58.begin(); it != field_58.end(); ++it) {
+        pProjectile->m_excludedTargets.insert(static_cast<LONG>(reinterpret_cast<INT_PTR>(*it)));
+    }
+
+    for (int n = index; n > 0; n--) {
+        // NOTE: The string at 0x8AB100.
+        std::list<CGameEffect*> effects = IcewindMisc::GetSpellResrefEffects(pSource,
+            reinterpret_cast<const BYTE*>("EffSoF2"),
+            1);
+        for (std::list<CGameEffect*>::iterator it = effects.begin(); it != effects.end(); it++) {
+            (*it)->m_sourceRes = CResRef(reinterpret_cast<const char*>(field_29));
+            // NOTE: An unsigned division (0x4C2EED).
+            (*it)->m_duration = static_cast<DWORD>(field_1C - pGame->GetWorldTimer()->m_gameTime) / 15;
+            pProjectile->AddEffect(*it);
+        }
+    }
+
+    pProjectile->Fire(pSprite->GetArea(),
+        pSource->GetId(),
+        pSprite->GetId(),
+        pSprite->GetPos(),
+        0,
+        0);
 
     pGame->GetObjectArray()->ReleaseShare(m_sourceID,
         CGameObjectArray::THREAD_ASYNCH,
@@ -17160,12 +17235,31 @@ void CPersistantEffect84C484::ApplyEffect(CGameSprite* pSprite, int index)
     }
 
     if (nElapsed != 0 && nElapsed != 1) {
-        // TODO: Incomplete. The original builds a projectile (0x65E bytes,
-        // 0x575CD0, with field_54) whose set holds this sprite's id and the
-        // ids of field_58, gives it index times the "EffMT1" effects
-        // (GetSpellResrefEffects 0x586220) with field_29 as source resref,
-        // and fires it from the source at this sprite (vtable +0x6C). The
-        // projectile classes and GetSpellResrefEffects are not in src/.
+        CProjectileArea8505F4* pProjectile = new CProjectileArea8505F4(static_cast<WORD>(field_54));
+
+        // NOTE: Inlined `std::set::insert` (0x4C4690).
+        pProjectile->m_excludedTargets.insert(pSprite->GetId());
+        for (std::set<void*>::iterator it = field_58.begin(); it != field_58.end(); ++it) {
+            pProjectile->m_excludedTargets.insert(static_cast<LONG>(reinterpret_cast<INT_PTR>(*it)));
+        }
+
+        for (int n = index; n > 0; n--) {
+            // NOTE: The string at 0x8AB110.
+            std::list<CGameEffect*> effects = IcewindMisc::GetSpellResrefEffects(pSource,
+                reinterpret_cast<const BYTE*>("EffMT1"),
+                1);
+            for (std::list<CGameEffect*>::iterator it = effects.begin(); it != effects.end(); it++) {
+                (*it)->m_sourceRes = CResRef(reinterpret_cast<const char*>(field_29));
+                pProjectile->AddEffect(*it);
+            }
+        }
+
+        pProjectile->Fire(pSprite->GetArea(),
+            pSource->GetId(),
+            pSprite->GetId(),
+            pSprite->GetPos(),
+            0,
+            0);
     }
 
     pGame->GetObjectArray()->ReleaseShare(m_sourceID,

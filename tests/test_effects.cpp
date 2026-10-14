@@ -836,6 +836,52 @@ TEST_CASE("check add rejects a resource immunity and adds the source's save adju
     delete pSprite;
 }
 
+TEST_CASE("check add gives SPIN108 the source's animal empathy save modifier", "[effects][data]")
+{
+    REQUIRE_ENGINE();
+    CGameSprite* pSprite = MakeSprite();
+    BYTE roll1 = 10;
+    BYTE roll2 = 10;
+    BYTE roll3 = 10;
+    BYTE roll4 = 10;
+    BYTE probability = 50;
+
+    // 0x547620: animal empathy (skill 1) less the spell level less 5, in
+    // place of the modifier the effect had.
+    pSprite->m_derivedStats.m_nSkills[CGAMESPRITE_SKILL_ANIMAL_EMPATHY] = 12;
+    CGameEffect* pEffect = Make(CGAMEEFFECT_STR, 0, 1, 0);
+    pEffect->m_sourceID = pSprite->GetId();
+    pEffect->m_sourceRes = CResRef("SPIN108");
+    pEffect->m_savingThrow = 0x4;
+    pEffect->m_saveMod = 3;
+    pEffect->m_spellLevel = 2;
+    pEffect->sub_4A3310(pSprite, &roll1, &roll2, &roll3, &roll4, &probability);
+    CHECK(pEffect->m_saveMod == 5);
+    delete pEffect;
+
+    // Another source resref keeps its modifier.
+    pEffect = Make(CGAMEEFFECT_STR, 0, 1, 0);
+    pEffect->m_sourceID = pSprite->GetId();
+    pEffect->m_sourceRes = CResRef("SPIN109");
+    pEffect->m_savingThrow = 0x4;
+    pEffect->m_saveMod = 3;
+    pEffect->m_spellLevel = 2;
+    pEffect->sub_4A3310(pSprite, &roll1, &roll2, &roll3, &roll4, &probability);
+    CHECK(pEffect->m_saveMod == 3);
+    delete pEffect;
+
+    // Without a saving throw nothing is adjusted.
+    pEffect = Make(CGAMEEFFECT_STR, 0, 1, 0);
+    pEffect->m_sourceID = pSprite->GetId();
+    pEffect->m_sourceRes = CResRef("SPIN108");
+    pEffect->m_saveMod = 3;
+    pEffect->sub_4A3310(pSprite, &roll1, &roll2, &roll3, &roll4, &probability);
+    CHECK(pEffect->m_saveMod == 3);
+    delete pEffect;
+
+    delete pSprite;
+}
+
 TEST_CASE("stoneskin's exhausted pool removes only its effect and later hits take full damage", "[effects][data]")
 {
     REQUIRE_ENGINE();

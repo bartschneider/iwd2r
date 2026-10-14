@@ -6,6 +6,9 @@
 #include "CInfGame.h"
 #include "CMessage.h"
 #include "CProjectile.h"
+#include "CProjectile850F9C.h"
+#include "CProjectileArea.h"
+#include "CProjectileSingleTarget.h"
 #include "CScreenWorld.h"
 #include "CUtil.h"
 #include "IcewindCVisualEffect.h"
@@ -39,6 +42,18 @@ const char RESREF_EYE_OF_FORTITUDE[] = "SpIn131";
 // 0x8AEBE4
 const char RESREF_EYE_OF_STONE[] = "SpIn132";
 
+// 0x8AEBE8
+const char RESREF_BEHOLDER_DISPEL_MAGIC[] = "SpIn164";
+
+// 0x8AEBEC
+const char RESREF_HARPY_WAIL[] = "SpIn166";
+
+// 0x8AEBF0
+const char RESREF_JACKALWERE_GAZE[] = "SpIn179";
+
+// 0x8AF154
+const char RESREF_UMBER_HULK_GAZE[] = "SpIn994";
+
 // TODO: Stub. CInfGame's tracking lookup (CInfGame_B3AUTO_005466F0,
 // 0x5466F0, a CInfGame member not declared yet) finds the area in the
 // tracking table and, when the sprite's wilderness lore roll (d20 + the
@@ -52,18 +67,6 @@ static STRREF GetTrackingString(CGameSprite* pSprite, CString& sAreaName)
     (void)pSprite;
     (void)sAreaName;
     return 19534;
-}
-
-// TODO: Stub. CProjectile_DecodeSpellHitProjectile (0x560310) builds the
-// school's spell hit projectile (CProjectileSpellHit 0x57E490 and its
-// siblings, none ported yet) and adds its glow to the sprite. Until then no
-// projectile comes back.
-static CProjectile* DecodeSpellHitProjectile(DWORD nType, CGameSprite* pSprite, BOOLEAN bPriest)
-{
-    (void)nType;
-    (void)pSprite;
-    (void)bPriest;
-    return NULL;
 }
 
 // 0x49DB70
@@ -178,45 +181,68 @@ BOOL IcewindCGameEffectCastingGlow::ApplyEffect(CGameSprite* pSprite)
     IcewindCVisualEffect visualEffect;
     visualEffect.sub_586A90(TRUE);
 
-    WORD nProjectileType = 0;
+    WORD nProjectileType;
+    CProjectile850F9C* pProjectile;
     switch (m_dwFlags) {
     case 1:
-        nProjectileType = 113; // AbjurCG
+        nProjectileType = 113;
+        pProjectile = new CProjectile850F9C(CString("AbjurCG"), CString(""), nDuration, 0, visualEffect);
         break;
     case 2:
-        nProjectileType = 115; // ConjuCG
+        nProjectileType = 115;
+        pProjectile = new CProjectile850F9C(CString("ConjuCG"), CString(""), nDuration, 0, visualEffect);
         break;
     case 3:
-        nProjectileType = 117; // DivinCG
+        nProjectileType = 117;
+        pProjectile = new CProjectile850F9C(CString("DivinCG"), CString(""), nDuration, 0, visualEffect);
         break;
     case 4:
-        nProjectileType = 112; // EnchaCG
+        nProjectileType = 112;
+        pProjectile = new CProjectile850F9C(CString("EnchaCG"), CString(""), nDuration, 0, visualEffect);
         break;
     case 5:
-        nProjectileType = 114; // IllusCG
+        nProjectileType = 114;
+        pProjectile = new CProjectile850F9C(CString("IllusCG"), CString(""), nDuration, 0, visualEffect);
         break;
     case 6:
-        nProjectileType = 116; // InvocCG
+        nProjectileType = 116;
+        pProjectile = new CProjectile850F9C(CString("InvocCG"), CString(""), nDuration, 0, visualEffect);
         break;
     case 7:
-        nProjectileType = 110; // NecroCG
+        nProjectileType = 110;
+        pProjectile = new CProjectile850F9C(CString("NecroCG"), CString(""), nDuration, 0, visualEffect);
         break;
     case 8:
-        nProjectileType = 111; // AlterCG
+        nProjectileType = 111;
+        pProjectile = new CProjectile850F9C(CString("AlterCG"), CString(""), nDuration, 0, visualEffect);
         break;
+    default:
+        // DEVIATION: for another type the original keeps the sprite in its
+        // projectile register (0x55E76A). It calls DetermineHeight with the
+        // sprite as the projectile, queues a message whose type is the
+        // uninitialised stack slot holding the duration byte, and calls the
+        // sprite's own vtable slot 0x6C with Fire's seven arguments, which
+        // unbalances the stack. Bounded (ruling P4-10): ours queues and fires
+        // nothing.
+        m_done = TRUE;
+        return TRUE;
     }
 
-    // TODO: Incomplete (0x55E199-0x55E806). For each school the original
-    // builds its casting glow projectile (FUN_0057CAC0 with the school's
-    // animation, AbjurCG and so on, the duration and the visual effect; not
-    // ported), queues CMessageFireProjectile (nProjectileType, at the sprite,
-    // the projectile's DetermineHeight, nDuration) and fires the projectile
-    // at the sprite at that height. NOTE: for a type outside 1-8 the original
-    // calls the sprite's own vtable slot 0x6C (ClearActions) in place of
-    // Fire, its projectile pointer still holding the sprite.
-    (void)pSprite;
-    (void)nDuration;
-    (void)nProjectileType;
+    CMessage* message = new CMessageFireProjectile(nProjectileType,
+        pSprite->GetId(),
+        pSprite->GetPos(),
+        pProjectile->DetermineHeight(pSprite),
+        pSprite->GetId(),
+        pSprite->GetId(),
+        nDuration);
+    g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+    pProjectile->Fire(pSprite->GetArea(),
+        pSprite->GetId(),
+        pSprite->GetId(),
+        pSprite->GetPos(),
+        pProjectile->DetermineHeight(pSprite),
+        0);
 
     m_done = TRUE;
 
@@ -859,7 +885,7 @@ BOOL IcewindCGameEffectVisualSpellHit::ApplyEffect(CGameSprite* pSprite)
         bPriest = TRUE;
     }
 
-    CProjectile* pProjectile = DecodeSpellHitProjectile(m_dwFlags, pSprite, bPriest);
+    CProjectile* pProjectile = CProjectile::DecodeSpellHitProjectile(m_dwFlags, pSprite, bPriest);
 
     CMessage* message = new CMessageFireProjectile(static_cast<WORD>(m_dwFlags + 0x1000),
         pSprite->GetId(),
@@ -868,18 +894,13 @@ BOOL IcewindCGameEffectVisualSpellHit::ApplyEffect(CGameSprite* pSprite)
         pSprite->GetId(),
         pSprite->GetId(),
         0);
-    // TODO: CMessageFireProjectile has no Run yet. The original's,
-    // CMessageFireProjectile::Run (0x5007F0, vtable 0x84D4D8 +0x18), decodes
-    // the projectile (0x51EAF0) and fires it. In single player the message
-    // is queued locally and CMessageHandler::AsynchronousUpdate runs the base
-    // CMessage::Run, which asserts, until that Run is ported (the
-    // projectiles stream).
     g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
 
     // DEVIATION: the original calls Fire on the decoded projectile
-    // unconditionally. The NULL check is only there because
-    // DecodeSpellHitProjectile (0x560310) is still a stub that returns NULL;
-    // remove it when 0x560310 is ported.
+    // unconditionally. The NULL check is there because our
+    // DecodeSpellHitProjectile (0x560310) still returns NULL for the shaft
+    // and sunray types 45, 52, 57 and 72 (see CProjectile.h); remove it when
+    // those classes are ported.
     if (pProjectile != NULL) {
         pProjectile->Fire(pSprite->GetArea(),
             pSprite->GetId(),
@@ -995,14 +1016,43 @@ BOOL IcewindCGameEffectSalamanderAura::ApplyEffect(CGameSprite* pSprite)
     copy->m_durationType = 4;
     pSprite->AddEffect(copy, CGameAIBase::EFFECT_LIST_TIMED, TRUE, TRUE);
 
-    // TODO: Incomplete (0x563DAC-0x563F48). The original builds a
-    // CProjectileArea of type 100 (0x56EDD0, not ported) and adds to it, for
-    // type 0, an immunity to the source resref (CreateEffectImmunitySpell
-    // with 3, 10, 0, 2) and a sub_5853B0 damage of the dice and amount; for
-    // type 1 an immunity with 25 and a sub_5853E0 damage, both with this
-    // caster level; another type asserts (line 3123). Each carries the
-    // source resref. Then it fires the projectile at the sprite
-    // (Fire(area, id, id, pos, 0, 0)).
+    CProjectileArea* pProjectile = new CProjectileArea(100);
+
+    CGameEffect* pEffect;
+    switch (m_dwFlags) {
+    case 0:
+        pEffect = IcewindMisc::CreateEffectImmunitySpell(pSprite, m_sourceRes.GetResRef(), 3, 10, 0, 2);
+        pEffect->m_sourceRes = m_sourceRes;
+        pProjectile->AddEffect(pEffect);
+
+        pEffect = IcewindMisc::sub_5853B0(pSprite, m_numDice, m_diceSize, m_effectAmount, static_cast<BYTE>(m_spellLevel), 0);
+        pEffect->m_sourceRes = m_sourceRes;
+        pProjectile->AddEffect(pEffect);
+        break;
+    case 1:
+        pEffect = IcewindMisc::CreateEffectImmunitySpell(pSprite, m_sourceRes.GetResRef(), 25, 10, 0, 2);
+        pEffect->m_sourceRes = m_sourceRes;
+        pEffect->m_casterLevel = m_casterLevel;
+        pProjectile->AddEffect(pEffect);
+
+        pEffect = IcewindMisc::sub_5853E0(pSprite, m_numDice, m_diceSize, m_effectAmount, static_cast<BYTE>(m_spellLevel), 0);
+        pEffect->m_sourceRes = m_sourceRes;
+        pEffect->m_casterLevel = m_casterLevel;
+        pProjectile->AddEffect(pEffect);
+        break;
+    default:
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\IcewindCGameEffects.cpp
+        // __LINE__: 3123
+        UTIL_ASSERT(FALSE);
+        break;
+    }
+
+    pProjectile->Fire(pSprite->GetArea(),
+        pSprite->GetId(),
+        pSprite->GetId(),
+        pSprite->GetPos(),
+        0,
+        0);
 
     m_done = TRUE;
 
@@ -1041,13 +1091,41 @@ BOOL IcewindCGameEffectUmberHulkGaze::ApplyEffect(CGameSprite* pSprite)
     copy->m_durationType = 4;
     pSprite->AddEffect(copy, CGameAIBase::EFFECT_LIST_TIMED, TRUE, TRUE);
 
-    // TODO: Incomplete (0x563FED-0x5641D4). The original builds a
-    // CProjectileArea of type 275 (0x56EDD0, not ported) aimed at the
-    // sprite's enemies (CProjectileArea_TargetEnemy 0x5704E0), adds
-    // immunities to SpIn994 (0x8AF154; CreateEffectImmunitySpell with 17,
-    // 27, 29 and 23, duration 10, target type 2), a confusion
-    // (CreateEffectConfusion) and a last immunity, each with the SpIn994
-    // source resref, and fires it at the sprite.
+    CProjectileArea* pProjectile = new CProjectileArea(275);
+    pProjectile->TargetEnemy(pSprite);
+
+    CGameEffect* pEffect;
+
+    pEffect = IcewindMisc::CreateEffectImmunitySpell(pSprite, reinterpret_cast<const BYTE*>(RESREF_UMBER_HULK_GAZE), 17, 10, 0, 2);
+    pEffect->m_sourceRes = CResRef(RESREF_UMBER_HULK_GAZE);
+    pProjectile->AddEffect(pEffect);
+
+    pEffect = IcewindMisc::CreateEffectImmunitySpell(pSprite, reinterpret_cast<const BYTE*>(RESREF_UMBER_HULK_GAZE), 27, 10, 0, 2);
+    pEffect->m_sourceRes = CResRef(RESREF_UMBER_HULK_GAZE);
+    pProjectile->AddEffect(pEffect);
+
+    pEffect = IcewindMisc::CreateEffectImmunitySpell(pSprite, reinterpret_cast<const BYTE*>(RESREF_UMBER_HULK_GAZE), 29, 10, 0, 2);
+    pEffect->m_sourceRes = CResRef(RESREF_UMBER_HULK_GAZE);
+    pProjectile->AddEffect(pEffect);
+
+    pEffect = IcewindMisc::CreateEffectImmunitySpell(pSprite, reinterpret_cast<const BYTE*>(RESREF_UMBER_HULK_GAZE), 23, 10, 0, 2);
+    pEffect->m_sourceRes = CResRef(RESREF_UMBER_HULK_GAZE);
+    pProjectile->AddEffect(pEffect);
+
+    pEffect = IcewindMisc::CreateEffectConfusion(pSprite, m_effectAmount, static_cast<BYTE>(m_spellLevel), 16);
+    pEffect->m_sourceRes = CResRef(RESREF_UMBER_HULK_GAZE);
+    pProjectile->AddEffect(pEffect);
+
+    pEffect = IcewindMisc::CreateEffectImmunitySpell(pSprite, reinterpret_cast<const BYTE*>(RESREF_UMBER_HULK_GAZE), 0, m_effectAmount, 0, 2);
+    pEffect->m_sourceRes = CResRef(RESREF_UMBER_HULK_GAZE);
+    pProjectile->AddEffect(pEffect);
+
+    pProjectile->Fire(pSprite->GetArea(),
+        pSprite->GetId(),
+        pSprite->GetId(),
+        pSprite->GetPos(),
+        0,
+        0);
 
     m_done = TRUE;
 
@@ -1226,11 +1304,23 @@ BOOL IcewindCGameEffectStaticCharge::ApplyEffect(CGameSprite* pSprite)
             &pSource,
             INFINITE);
         if (rc == CGameObjectArray::SUCCESS) {
-            // TODO: Incomplete. The original builds its projectile
-            // (FUN_00574970, not ported) aimed at the sprite's enemies
-            // (CProjectileArea_TargetEnemy 0x5704E0), adds the effects of
-            // spell m_res at this caster level (GetSpellResrefEffects
-            // 0x586220) with the source resref, and fires it at the sprite.
+            CProjectileArea850078* pProjectile = new CProjectileArea850078();
+            pProjectile->TargetEnemy(pSprite);
+
+            std::list<CGameEffect*> effects = IcewindMisc::GetSpellResrefEffects(pSprite,
+                m_res.GetResRef(),
+                static_cast<BYTE>(m_casterLevel));
+            for (std::list<CGameEffect*>::iterator it = effects.begin(); it != effects.end(); it++) {
+                (*it)->m_sourceRes = m_sourceRes;
+                pProjectile->AddEffect(*it);
+            }
+
+            pProjectile->Fire(pSprite->GetArea(),
+                pSprite->GetId(),
+                pSprite->GetId(),
+                pSprite->GetPos(),
+                0,
+                0);
 
             g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(m_sourceID,
                 CGameObjectArray::THREAD_ASYNCH,
@@ -1285,11 +1375,23 @@ BOOL IcewindCGameEffectCallLightning::ApplyEffect(CGameSprite* pSprite)
         &pSource,
         INFINITE);
     if (rc == CGameObjectArray::SUCCESS) {
-        // TODO: Incomplete. The original builds its projectile
-        // (FUN_00574A70, not ported) aimed at the sprite's enemies
-        // (CProjectileArea_TargetEnemy 0x5704E0), adds the effects of spell
-        // m_res at this caster level (GetSpellResrefEffects 0x586220) with
-        // the source resref, and fires it at the sprite.
+        CProjectileArea850114* pProjectile = new CProjectileArea850114();
+        pProjectile->TargetEnemy(pSprite);
+
+        std::list<CGameEffect*> effects = IcewindMisc::GetSpellResrefEffects(pSprite,
+            m_res.GetResRef(),
+            static_cast<BYTE>(m_casterLevel));
+        for (std::list<CGameEffect*>::iterator it = effects.begin(); it != effects.end(); it++) {
+            (*it)->m_sourceRes = m_sourceRes;
+            pProjectile->AddEffect(*it);
+        }
+
+        pProjectile->Fire(pSprite->GetArea(),
+            pSprite->GetId(),
+            pSprite->GetId(),
+            pSprite->GetPos(),
+            0,
+            0);
 
         g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(m_sourceID,
             CGameObjectArray::THREAD_ASYNCH,
@@ -1346,10 +1448,25 @@ BOOL IcewindCGameEffectCloakOfFear::ApplyEffect(CGameSprite* pSprite)
             &pSource,
             INFINITE);
         if (rc == CGameObjectArray::SUCCESS) {
-            // TODO: Incomplete. The original builds its projectile
-            // (FUN_00575B00 with 0x100, not ported; +0x2AE = 75), adds the
-            // effects of spell m_res (GetSpellResrefEffects 0x586220) with
-            // the source resref, and fires it at the sprite.
+            // NOTE: The radius argument is the DWORD at 0x84F1BC (0x100).
+            CProjectileArea8504BC* pProjectile = new CProjectileArea8504BC(0x100);
+            pProjectile->m_nRadius = 75;
+
+            // NOTE: Level 1, not the caster level.
+            std::list<CGameEffect*> effects = IcewindMisc::GetSpellResrefEffects(pSprite,
+                m_res.GetResRef(),
+                1);
+            for (std::list<CGameEffect*>::iterator it = effects.begin(); it != effects.end(); it++) {
+                (*it)->m_sourceRes = m_sourceRes;
+                pProjectile->AddEffect(*it);
+            }
+
+            pProjectile->Fire(pSprite->GetArea(),
+                pSprite->GetId(),
+                pSprite->GetId(),
+                pSprite->GetPos(),
+                0,
+                0);
 
             g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(m_sourceID,
                 CGameObjectArray::THREAD_ASYNCH,
@@ -2415,12 +2532,30 @@ BOOL IcewindCGameEffectBeholderDispelMagic::ApplyEffect(CGameSprite* pSprite)
         return TRUE;
     }
 
-    // TODO: Incomplete (0x566C6B-0x566DF0). The original builds its cone
-    // projectile (FUN_00579B40, not ported; +0x2CE = 600, +0x2D2 = 300, its
-    // speed times 5), aims it 300 ahead of the sprite in its facing
-    // (IcewindMisc::sub_584610 and sub_5847B0), adds the effects of SpIn164
-    // at level 1 (GetSpellResrefEffects 0x586220) with SpIn164 as their
-    // source resref and this caster level, and fires it.
+    // NOTE: The two strings are the empty string at 0x8C5CF8.
+    CProjectile850DDC* pProjectile = new CProjectile850DDC("", "");
+    pProjectile->m_speed *= 5;
+    pProjectile->m_nWidth = 600;
+    pProjectile->m_nLength = 300;
+
+    CPoint ptDirection = IcewindMisc::sub_584610(pSprite->m_nDirection);
+    CPoint ptTarget = IcewindMisc::sub_5847B0(pSprite->GetPos(), ptDirection.x, ptDirection.y, 300);
+
+    std::list<CGameEffect*> effects = IcewindMisc::GetSpellResrefEffects(pSprite,
+        reinterpret_cast<const BYTE*>(RESREF_BEHOLDER_DISPEL_MAGIC),
+        1);
+    for (std::list<CGameEffect*>::iterator it = effects.begin(); it != effects.end(); it++) {
+        (*it)->m_sourceRes = CResRef(CString(RESREF_BEHOLDER_DISPEL_MAGIC));
+        (*it)->m_casterLevel = m_casterLevel;
+        pProjectile->AddEffect(*it);
+    }
+
+    pProjectile->Fire(pSprite->GetArea(),
+        pSprite->GetId(),
+        pSprite->GetId(),
+        ptTarget,
+        0,
+        0);
 
     m_done = TRUE;
 
@@ -2459,11 +2594,25 @@ BOOL IcewindCGameEffectHarpyWail::ApplyEffect(CGameSprite* pSprite)
     copy->m_durationType = 4;
     pSprite->AddEffect(copy, CGameAIBase::EFFECT_LIST_TIMED, TRUE, TRUE);
 
-    // TODO: Incomplete. The original builds a CProjectileArea of type 300
-    // (0x56EDD0, not ported), names its sound (the string at 0x8ACB70 into
-    // its +0x4F6 string), adds the effects of SpIn166 at level 1
-    // (GetSpellResrefEffects 0x586220) with SpIn166 as their source resref
-    // and this caster level, and fires it at the sprite.
+    CProjectileArea* pProjectile = new CProjectileArea(300);
+    // NOTE: The string at 0x8ACB70.
+    pProjectile->m_explosion1.m_sound = "EFF_P111";
+
+    std::list<CGameEffect*> effects = IcewindMisc::GetSpellResrefEffects(pSprite,
+        reinterpret_cast<const BYTE*>(RESREF_HARPY_WAIL),
+        1);
+    for (std::list<CGameEffect*>::iterator it = effects.begin(); it != effects.end(); it++) {
+        (*it)->m_sourceRes = CResRef(CString(RESREF_HARPY_WAIL));
+        (*it)->m_casterLevel = m_casterLevel;
+        pProjectile->AddEffect(*it);
+    }
+
+    pProjectile->Fire(pSprite->GetArea(),
+        pSprite->GetId(),
+        pSprite->GetId(),
+        pSprite->GetPos(),
+        0,
+        0);
 
     m_done = TRUE;
 
@@ -2505,10 +2654,22 @@ BOOL IcewindCGameEffectJackalwereGaze::ApplyEffect(CGameSprite* pSprite)
     CGameEffect* pString = IcewindMisc::CreateEffectDisplayString(pSprite, 26939, 0, 0);
     pSprite->AddEffect(pString, CGameAIBase::EFFECT_LIST_TIMED, TRUE, TRUE);
 
-    // TODO: Incomplete. The original builds a CProjectileArea of type 300
-    // (0x56EDD0, not ported), adds the effects of SpIn179 at level 1
-    // (GetSpellResrefEffects 0x586220) with SpIn179 as their source resref,
-    // and fires it at the sprite.
+    CProjectileArea* pProjectile = new CProjectileArea(300);
+
+    std::list<CGameEffect*> effects = IcewindMisc::GetSpellResrefEffects(pSprite,
+        reinterpret_cast<const BYTE*>(RESREF_JACKALWERE_GAZE),
+        1);
+    for (std::list<CGameEffect*>::iterator it = effects.begin(); it != effects.end(); it++) {
+        (*it)->m_sourceRes = CResRef(CString(RESREF_JACKALWERE_GAZE));
+        pProjectile->AddEffect(*it);
+    }
+
+    pProjectile->Fire(pSprite->GetArea(),
+        pSprite->GetId(),
+        pSprite->GetId(),
+        pSprite->GetPos(),
+        0,
+        0);
 
     m_done = TRUE;
 
@@ -3833,13 +3994,26 @@ BOOL IcewindCGameEffectAreaOfEffect::ApplyEffect(CGameSprite* pSprite)
                 &pSource,
                 INFINITE);
             if (rc == CGameObjectArray::SUCCESS) {
-                // TODO: Incomplete. The original builds a CProjectileArea of
-                // type m_effectAmount (0x56EDD0, not ported); for type 2 it
-                // keeps the sprite out of its targets (FUN_004C45A0 inserts
-                // the sprite id into the projectile's set); it adds the
-                // effects of spell m_res at level 1 from the source
-                // (GetSpellResrefEffects 0x586220) with m_res as their source
-                // resref, and fires it from the source at the sprite.
+                CProjectileArea* pProjectile = new CProjectileArea(static_cast<WORD>(m_effectAmount));
+                if (m_dwFlags == 2) {
+                    // NOTE: Inlined `std::set::insert` (FUN_004C45A0).
+                    pProjectile->m_excludedTargets.insert(pSprite->GetId());
+                }
+
+                std::list<CGameEffect*> effects = IcewindMisc::GetSpellResrefEffects(pSource,
+                    m_res.GetResRef(),
+                    1);
+                for (std::list<CGameEffect*>::iterator it = effects.begin(); it != effects.end(); it++) {
+                    (*it)->m_sourceRes = m_res;
+                    pProjectile->AddEffect(*it);
+                }
+
+                pProjectile->Fire(pSprite->GetArea(),
+                    pSource->GetId(),
+                    pSprite->GetId(),
+                    pSprite->GetPos(),
+                    0,
+                    0);
 
                 g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(m_sourceID,
                     CGameObjectArray::THREAD_ASYNCH,
@@ -4380,13 +4554,26 @@ BOOL IcewindCGameEffectProjectile::ApplyEffect(CGameSprite* pSprite)
         return TRUE;
     }
 
-    // TODO: Incomplete (0x56A79D-0x56A88A). The original decodes projectile
-    // m_dwFlags + 1 for the sprite (CProjectile_DecodeProjectile 0x51EAF0,
-    // not ported), adds the effects of spell m_res at level 1 from the
-    // source (GetSpellResrefEffects 0x586220) with m_res as their source
-    // resref, this target point and caster level, and fires it from the
-    // source at the sprite.
-    (void)pSprite;
+    // NOTE: Most types still decode to the instant fallback (see
+    // DecodeProjectile 0x51EAF0).
+    CProjectile* pProjectile = CProjectile::DecodeProjectile(static_cast<WORD>(m_dwFlags + 1), pSprite, 0);
+
+    std::list<CGameEffect*> effects = IcewindMisc::GetSpellResrefEffects(pSource,
+        m_res.GetResRef(),
+        1);
+    for (std::list<CGameEffect*>::iterator it = effects.begin(); it != effects.end(); it++) {
+        (*it)->m_sourceRes = m_res;
+        (*it)->m_target = m_target;
+        (*it)->m_casterLevel = m_casterLevel;
+        pProjectile->AddEffect(*it);
+    }
+
+    pProjectile->Fire(pSprite->GetArea(),
+        pSource->GetId(),
+        pSprite->GetId(),
+        pSprite->GetPos(),
+        0,
+        0);
 
     g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(m_sourceID,
         CGameObjectArray::THREAD_ASYNCH,
