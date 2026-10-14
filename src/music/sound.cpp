@@ -528,21 +528,28 @@ int preloadBuffers(Sound* sound)
     unsigned char* data = (unsigned char*)mallocPtr(size);
     int bytesRead = sound->io.read(sound->io.fd, data, size);
     if (bytesRead != size) {
-        if ((sound->soundFlags & SOUND_LOOPING) != 0
-            && (sound->soundFlags & SOUND_FLAG_0x100) == 0) {
-            unsigned char* chunk = data + bytesRead;
-            int remaining = bytesRead;
-            while (size - remaining > bytesRead) {
-                memcpy(chunk, data, bytesRead);
-                remaining += bytesRead;
-                chunk += bytesRead;
-            }
+        // The original compares unsigned: a read that reports more than
+        // `size` (musicSoundRead past a song's end answers size + 1) or an
+        // error (-1) clears the whole buffer instead of filling past it.
+        if (static_cast<unsigned int>(bytesRead) < static_cast<unsigned int>(size)) {
+            if ((sound->soundFlags & SOUND_LOOPING) != 0
+                && (sound->soundFlags & SOUND_FLAG_0x100) == 0) {
+                unsigned char* chunk = data + bytesRead;
+                int remaining = bytesRead;
+                while (size - remaining > bytesRead) {
+                    memcpy(chunk, data, bytesRead);
+                    remaining += bytesRead;
+                    chunk += bytesRead;
+                }
 
-            if (remaining < size) {
-                memcpy(chunk, data, size - remaining);
+                if (remaining < size) {
+                    memcpy(chunk, data, size - remaining);
+                }
+            } else {
+                memset(data + bytesRead, 0, size - bytesRead);
             }
         } else {
-            memset(data + bytesRead, 0, size - bytesRead);
+            memset(data, 0, size);
         }
     }
 
