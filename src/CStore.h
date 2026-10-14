@@ -23,7 +23,9 @@ public:
     BOOL GetItem(INT nIndex, CItem& cItem);
     CResRef GetItemId(INT nIndex);
     INT GetItemIndex(const CResRef& itemId);
-    INT RemoveItemExt(CResRef resRef, int a2, int a3, int a4, BOOLEAN* a5);
+    INT RemoveItemExt(CResRef resRef, int dwFlags, int nIndex, int wCount, BOOLEAN* pbRemoved);
+    INT RemoveItemFromStore(CResRef resRef, DWORD dwFlags, INT nIndex, INT wCount, BOOLEAN* pbRemoved);
+    INT RemoveItemFromBag(CResRef resRef, DWORD dwFlags, INT nIndex, INT wCount, BOOLEAN* pbRemoved);
     INT AddItemExt(CItem& cItem, DWORD storeFlags);
     INT AddItemToBag(CItem& cItem);
     INT AddItemToStore(CItem& cItem);

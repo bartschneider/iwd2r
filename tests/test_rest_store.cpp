@@ -14,6 +14,7 @@
 #include "CRuleTables.h"
 #include "CScreenCreateChar.h"
 #include "CScreenInventory.h"
+#include "CScreenStore.h"
 #include "CScreenWorld.h"
 #include "CStore.h"
 #include "ScreenLayout.h"
@@ -228,6 +229,26 @@ std::vector<CGameSprite*> NewGameWithParty(int count)
     return party;
 }
 
+// Sets CInfGame::m_bHealPartyOnRest for a test and puts it back however the
+// test ends.
+class HealOnRestGuard {
+public:
+    explicit HealOnRestGuard(BOOL value)
+        : m_saved(CInfGame::m_bHealPartyOnRest)
+    {
+        CInfGame::m_bHealPartyOnRest = value;
+    }
+    ~HealOnRestGuard()
+    {
+        CInfGame::m_bHealPartyOnRest = m_saved;
+    }
+    HealOnRestGuard(const HealOnRestGuard&) = delete;
+    HealOnRestGuard& operator=(const HealOnRestGuard&) = delete;
+
+private:
+    BOOL m_saved;
+};
+
 BOOL HasQueuedAction(CGameSprite* pSprite, SHORT actionID)
 {
     if (pSprite->m_curAction.m_actionID == actionID) {
@@ -352,8 +373,7 @@ TEST_CASE("rest: RestParty passes the rest time and queues the heal, the Rest ac
     CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
     g_pBaldurChitin->pActiveEngine = g_pBaldurChitin->m_pEngineWorld;
 
-    const BOOL heal = CInfGame::m_bHealPartyOnRest;
-    CInfGame::m_bHealPartyOnRest = FALSE;
+    HealOnRestGuard guard(FALSE);
 
     for (CGameSprite* pSprite : party) {
         pSprite->m_queuedActions.RemoveAll();
@@ -387,8 +407,6 @@ TEST_CASE("rest: RestParty passes the rest time and queues the heal, the Rest ac
     // Renting a room returns TRUE.
     CHECK(pGame->RestParty(7, TRUE) == TRUE);
     g_pBaldurChitin->GetMessageHandler()->AsynchronousUpdate();
-
-    CInfGame::m_bHealPartyOnRest = heal;
 }
 
 TEST_CASE("rest: with healing on rest the clock runs by the party's wounds and the heal is full", "[rest][data]")
@@ -407,8 +425,7 @@ TEST_CASE("rest: with healing on rest the clock runs by the party's wounds and t
     CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
     g_pBaldurChitin->pActiveEngine = g_pBaldurChitin->m_pEngineWorld;
 
-    const BOOL heal = CInfGame::m_bHealPartyOnRest;
-    CInfGame::m_bHealPartyOnRest = TRUE;
+    HealOnRestGuard guard(TRUE);
 
     // The hourly rate: the given points plus, per member, 19 per cleric or
     // druid level plus 5 and, from level 10, 19 per paladin or ranger level
@@ -459,8 +476,6 @@ TEST_CASE("rest: with healing on rest the clock runs by the party's wounds and t
     for (CGameSprite* pSprite : party) {
         CHECK(pSprite->m_baseStats.m_hitPoints == pSprite->m_baseStats.m_maxHitPointsBase);
     }
-
-    CInfGame::m_bHealPartyOnRest = heal;
 }
 
 namespace {
@@ -863,4 +878,182 @@ TEST_CASE("import: ImportCharacter builds the sprite of a CHR with its name, bio
 
     // A file that is not there: 0.
     CHECK(pGame->ImportCharacter(CString("NOSUCHCH"), 0) == 0);
+}
+
+namespace {
+
+// The stock of an item's first line in a store, 0 when it has none.
+DWORD StockOf(CStore& store, const CResRef& item)
+{
+    POSITION pos = store.m_lInventory.GetHeadPosition();
+    while (pos != NULL) {
+        CStoreFileItem* pLine = store.m_lInventory.GetNext(pos);
+        if (CResRef(pLine->m_itemId) == item) {
+            return pLine->m_nInStock;
+        }
+    }
+    return 0;
+}
+
+}
+
+TEST_CASE("store: TakeItemFromStore takes the item out of the store for good", "[store][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+    // An identified line with stock and no infinite supply.
+    CResRef item;
+    DWORD stock = 0;
+    {
+        CStore store(CResRef("11OSWALD"));
+        POSITION pos = store.m_lInventory.GetHeadPosition();
+        while (pos != NULL) {
+            CStoreFileItem* pLine = store.m_lInventory.GetNext(pos);
+            if ((pLine->m_nStoreFlags & 0x1) == 0 && (pLine->m_dynamicFlags & 0x1) != 0 && pLine->m_nInStock > 0
+                && StockOf(store, CResRef(pLine->m_itemId)) == pLine->m_nInStock) {
+                item = CResRef(pLine->m_itemId);
+                stock = pLine->m_nInStock;
+                break;
+            }
+        }
+    }
+    REQUIRE(stock > 0);
+
+    CHECK(pGame->TakeItemFromStore(CResRef("11OSWALD"), item, 1) == 1);
+
+    CStore after(CResRef("11OSWALD"));
+    CHECK(StockOf(after, item) == stock - 1);
+
+    // RemoveItemExt on a line it cannot find answers 0.
+    CHECK(after.RemoveItemExt(CResRef("NOSUCHIT"), 0, -1, 1, NULL) == 0);
+    CHECK(after.RemoveItemExt(CResRef(""), 0, -1, 1, NULL) == 0);
+}
+
+TEST_CASE("store: TakeItemBags takes a gem back out of a bag", "[store][inventory][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<CGameSprite*> party = NewGameWithParty(1);
+    if (party.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CGameSprite* pSprite = party[0];
+    ClearPersonalSlots(pSprite);
+
+    pSprite->m_equipment.m_items[20] = new CItem(CResRef("00GBGA01"), 0, 0, 0, 0, 0);
+    CItem* pGem = new CItem(CResRef("00GEM01"), 1, 0, 0, 0, 0);
+    STRREF strError = 0;
+    REQUIRE(pGame->SwapItemPersonalInventory(0, pGem, 20, strError, 1, FALSE, FALSE) == TRUE);
+    {
+        CStore bag(CResRef("00GBGA01"));
+        REQUIRE(bag.GetItemIndex(CResRef("00GEM01")) != INT_MAX);
+    }
+
+    CHECK(pSprite->TakeItemBags(CString("00GEM01"), 1, 20) == 1);
+
+    CStore bag(CResRef("00GBGA01"));
+    CHECK(bag.GetItemIndex(CResRef("00GEM01")) == INT_MAX);
+    ClearPersonalSlots(pSprite);
+}
+
+TEST_CASE("store: the store screen's moves from a bag to the store remove the item from the bag without asserting", "[store][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    CScreenStore* pScreen = g_pBaldurChitin->m_pEngineStore;
+    REQUIRE(pScreen != NULL);
+    // The buy and sell panel and the single-player button bar, as the
+    // screen's activation picks them.
+    if (pScreen->m_cUIManager.GetPanel(2) == NULL) {
+        pScreen->EngineGameInit();
+    }
+    CUIPanel* pOldMain = pScreen->m_pMainPanel;
+    CUIPanel* pOldBar = pScreen->m_pButtonBar;
+    pScreen->m_pMainPanel = pScreen->m_cUIManager.GetPanel(2);
+    pScreen->m_pButtonBar = pScreen->m_cUIManager.GetPanel(3);
+    REQUIRE(pScreen->m_pMainPanel != NULL);
+    REQUIRE(pScreen->m_pButtonBar != NULL);
+
+    for (int path = 0; path < 2; path++) {
+        INFO("path " << path);
+        CStore* pStore = new CStore(CResRef("11OSWALD"));
+        CStore* pBag = new CStore(CResRef("00GBGA01"));
+        while (pBag->m_lInventory.GetCount() > 0) {
+            delete pBag->m_lInventory.RemoveHead();
+        }
+        CItem gem(CResRef("00GEM02"), 1, 0, 0, 0, 0);
+        REQUIRE(pBag->AddItemExt(gem, 1) == 0);
+        const DWORD stock = StockOf(*pStore, CResRef("00GEM02"));
+
+        CStore* pOldStore = pScreen->m_pStore;
+        CStore* pOldBag = pScreen->m_pBag;
+        pScreen->m_pStore = pStore;
+        pScreen->m_pBag = pBag;
+        CScreenStoreItem* pEntry = new CScreenStoreItem();
+        pEntry->m_bSelected = TRUE;
+        pScreen->m_lGroupItems.AddTail(pEntry);
+
+        if (path == 0) {
+            pScreen->sub_67A5B0();
+        } else {
+            pScreen->sub_67B030();
+        }
+
+        CHECK(pBag->m_lInventory.GetCount() == 0);
+        CHECK(StockOf(*pStore, CResRef("00GEM02")) == stock + 1);
+
+        pScreen->m_lGroupItems.RemoveAll();
+        delete pEntry;
+        pScreen->m_pStore = pOldStore;
+        pScreen->m_pBag = pOldBag;
+        delete pStore;
+        delete pBag;
+    }
+    pScreen->m_pMainPanel = pOldMain;
+    pScreen->m_pButtonBar = pOldBar;
+}
+
+TEST_CASE("store: InvalidateStore cuts the temp copy of a store to an empty STOO header", "[store][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+    // A store that is not in the temp folder is left alone.
+    CStore::InvalidateStore(CResRef("11DEIRD"));
+    {
+        CStore store(CResRef("11DEIRD"));
+        CHECK(std::memcmp(store.m_pVersion, "STORV9.0", 8) == 0);
+        CHECK(store.m_lInventory.GetCount() > 0);
+        store.Marshal(pGame->m_sTempDir);
+    }
+
+    // Its temp copy becomes "STOOV9.0" alone, which no longer loads as a
+    // store.
+    CStore::InvalidateStore(CResRef("11DEIRD"));
+    CHECK(TempFile("11DEIRD.STO") == std::vector<char>({ 'S', 'T', 'O', 'O', 'V', '9', '.', '0' }));
+    CStore after(CResRef("11DEIRD"));
+    CHECK(std::memcmp(after.m_pVersion, "STOOV9.0", 8) == 0);
+    CHECK(after.m_lInventory.GetCount() == 0);
 }
