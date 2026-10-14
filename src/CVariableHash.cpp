@@ -522,9 +522,17 @@ BOOL CNamedCreatureVariableHash::AddKey(CVariable& var)
     CString sName = var.GetName();
     CString sTemp;
 
-    for (int index = 0; index < sName.GetLength() && index < 32; index++) {
+    // The name is stored upper case without its spaces, at most 32
+    // characters of it (0x550D49-0x550DA2).
+    int nCount = 0;
+    for (int index = 0; index < sName.GetLength(); index++) {
+        if (nCount > 31) {
+            break;
+        }
+
         if (sName[index] != ' ') {
             sTemp += static_cast<char>(toupper(sName[index]));
+            nCount++;
         }
     }
 
@@ -532,18 +540,19 @@ BOOL CNamedCreatureVariableHash::AddKey(CVariable& var)
         return FALSE;
     }
 
-    int hash = Hash(sName);
+    var.SetName(sTemp);
 
-    if (m_hashEntries[hash] != NULL) {
-        CNamedCreatureVariableHashEntry* pCurr = m_hashEntries[hash];
-        while (pCurr != NULL) {
-            // FIXME: Unnecessary copying.
-            if (pCurr->m_variable.GetName() == sTemp) {
+    int hash = Hash(sTemp);
+
+    CNamedCreatureVariableHashEntry* pCurr = m_hashEntries[hash];
+    while (pCurr != NULL) {
+        if (pCurr->m_variable.GetName() == sTemp) {
+            if (&(pCurr->m_variable) != &var) {
                 pCurr->m_variable = var;
-                return TRUE;
             }
-            pCurr = pCurr->m_pNext;
+            return TRUE;
         }
+        pCurr = pCurr->m_pNext;
     }
 
     CNamedCreatureVariableHashEntry* pVar = new CNamedCreatureVariableHashEntry(var);
@@ -553,7 +562,6 @@ BOOL CNamedCreatureVariableHash::AddKey(CVariable& var)
         m_hashEntries[hash] = pVar;
     }
 
-    // FIXME: Probably wrong.
     return FALSE;
 }
 
