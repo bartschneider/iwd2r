@@ -1,19 +1,21 @@
 #include "CGameDialog.h"
 
+#include "CAIScriptFile.h"
 #include "CBaldurChitin.h"
 #include "CGameArea.h"
 #include "CGameSprite.h"
-#include "CAIScriptFile.h"
+#include "CInfGame.h"
 #include "CMessage.h"
 #include "CResDLG.h"
-#include "CVidPalette.h"
-#include "CUIControlButton.h"
-#include "CUIPanel.h"
-#include "ScreenLayout.h"
-#include "CInfGame.h"
 #include "CScreenWorld.h"
+#include "CUIControlButton.h"
 #include "CUIControlTextDisplay.h"
+#include "CUIPanel.h"
 #include "CUtil.h"
+#include "CVidPalette.h"
+#include "ScreenLayout.h"
+
+#include <cstdio>
 
 // NOTE: Inlined.
 CGameDialogSprite::CGameDialogSprite()
@@ -391,6 +393,13 @@ void CGameDialogSprite::Reload(CResRef file, CGameSprite* pTalker)
             // the talker's area whose dialog is `file`
             // (CGameArea::GetNearestDialogMatch, 0x46C460, not ported; the
             // movement stream's file). The talker is kept.
+            //
+            // iwd2r: said on stderr, so a link to another creature's dialog
+            // cannot diverge from the original unnoticed.
+            fprintf(stderr,
+                "iwd2r: CGameDialogSprite::Reload: dialog %s is not the talker's; keeping talker %d (GetNearestDialogMatch not ported)\n",
+                static_cast<const char*>(file.GetResRefStr()),
+                static_cast<int>(m_talkerIndex));
             nTalkerId = m_talkerIndex;
         }
 
