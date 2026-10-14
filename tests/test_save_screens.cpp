@@ -1,11 +1,14 @@
 #define NOMINMAX
 #include <catch2/catch_test_macros.hpp>
 
+#include "CAIAction.h"
 #include "CBaldurChitin.h"
 #include "CGameArea.h"
 #include "CGameObjectArray.h"
 #include "CGameSprite.h"
 #include "CInfGame.h"
+#include "CMessage.h"
+#include "CScreenCharacter.h"
 #include "CScreenCreateChar.h"
 #include "CScreenLoad.h"
 #include "CScreenSave.h"
@@ -732,4 +735,56 @@ TEST_CASE("save screen: PrintSurfaceToBmp averages surface blocks into a bottom-
         }
     }
     delete[] data;
+}
+
+TEST_CASE("save: the SaveGame action saves through its message under the strref's name (case 275)", "[save][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    ClearSaves();
+    NewGameWithOneCharacter(cre, "Probe");
+    CGameObject* pObject = NULL;
+    REQUIRE(pGame->GetObjectArray()->GetShare(pGame->GetCharacterId(0), CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE)
+        == CGameObjectArray::SUCCESS);
+    CGameSprite* pSprite = static_cast<CGameSprite*>(pObject);
+    CGameArea* pArea = pSprite->GetArea();
+    REQUIRE(pArea != NULL);
+    pArea->m_header.m_flags |= 0x1;
+    const DWORD flags = pArea->m_header.m_flags;
+
+    // AR1000.BCS's SaveGame(16202): the action sends the message and is done.
+    pSprite->m_curAction = CAIAction(275, CPoint(-1, -1), 16202, 0);
+    CHECK(pSprite->CGameAIBase::ExecuteAction() == CGameAIBase::ACTION_DONE);
+    pSprite->m_curAction = CAIAction();
+    CHECK(SaveFolders().empty());
+
+    // Without 3D acceleration (the original's setting) the Run first draws
+    // the save screenshot through CInfGame::SynchronousUpdate unless
+    // field_50D8 is set; there is no world screen to draw in this test.
+    pGame->field_50D8 = TRUE;
+
+    // Its Run (0x504CA0) saves under "000000000-<39935> - <16202>" and puts
+    // each area's flags back as they were (bit 0 is cleared while saving).
+    g_pBaldurChitin->GetMessageHandler()->AsynchronousUpdate();
+    const std::string name = (LPCSTR)pGame->m_sSaveGame;
+    INFO(name);
+    CHECK(name.rfind("000000000-", 0) == 0);
+    CHECK(name.find(" - ") != std::string::npos);
+    CHECK(std::string((LPCSTR)CScreenCharacter::SAVE_NAME) == name);
+    CHECK(pArea->m_header.m_flags == flags);
+    const std::vector<std::string> folders = SaveFolders();
+    CHECK(std::count(folders.begin(), folders.end(), name) == 1);
+    CHECK(fs::exists(Child(Child(SaveRoot(), name), "ICEWIND2.GAM")));
+    pArea->m_header.m_flags &= ~0x1;
 }

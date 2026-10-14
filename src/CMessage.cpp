@@ -17,6 +17,7 @@
 #include "CPathSearch.h"
 #include "CProjectile.h"
 #include "CScreenChapter.h"
+#include "CScreenCharacter.h"
 #include "CScreenConnection.h"
 #include "CScreenCreateChar.h"
 #include "CScreenLoad.h"
@@ -359,6 +360,9 @@ const BYTE CBaldurMessage::MSG_SUBTYPE_CMESSAGE_SET_AREA_TYPE = 109;
 
 // 0x84CF45
 const BYTE CBaldurMessage::MSG_SUBTYPE_CMESSAGE_SET_AREA_REST_ENCOUNTER = 110;
+
+// 0x84CF46
+const BYTE CBaldurMessage::MSG_SUBTYPE_CMESSAGE_SAVE_GAME = 111;
 
 // 0x84CF48
 const BYTE CBaldurMessage::MSG_SUBTYPE_CMESSAGE_PICKED_DIALOG_RESPONSE = 113;
@@ -13461,6 +13465,125 @@ CMessage90::CMessage90(LONG caller, LONG target, int a3)
     : CMessage(caller, target)
 {
     field_C = a3;
+}
+
+// 0x453490
+CMessageSaveGame::CMessageSaveGame(STRREF strRef, LONG caller, LONG target)
+    : CMessage(caller, target)
+{
+    m_strRef = strRef;
+}
+
+// 0x43E170
+SHORT CMessageSaveGame::GetCommType()
+{
+    return BROADCAST_FORCED;
+}
+
+// 0x40A0E0
+BYTE CMessageSaveGame::GetMsgType()
+{
+    return CBaldurMessage::MSG_TYPE_CMESSAGE;
+}
+
+// 0x4534B0
+BYTE CMessageSaveGame::GetMsgSubType()
+{
+    return CBaldurMessage::MSG_SUBTYPE_CMESSAGE_SAVE_GAME;
+}
+
+// 0x504C40
+void CMessageSaveGame::MarshalMessage(BYTE** pData, DWORD* dwSize)
+{
+    *dwSize = sizeof(STRREF);
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\CMessage.cpp
+    // __LINE__: 15869
+    UTIL_ASSERT(STATICBUFFERSIZE >= sizeof(STRREF));
+
+    // NOTE: The original writes one byte of the four it declares;
+    // UnmarshalMessage reads a DWORD back.
+    **pData = static_cast<BYTE>(m_strRef);
+}
+
+// 0x504C80
+BOOL CMessageSaveGame::UnmarshalMessage(BYTE* pData, DWORD dwSize)
+{
+    m_strRef = *reinterpret_cast<STRREF*>(pData + CNetwork::SPEC_MSG_HEADER_LENGTH);
+    return TRUE;
+}
+
+// 0x504CA0
+void CMessageSaveGame::Run()
+{
+    if (g_pChitin->cNetwork.GetSessionOpen() && g_pChitin->cNetwork.GetSessionHosting() != TRUE) {
+        return;
+    }
+
+    STR_RES strRes;
+    CString sName;
+
+    // The save name is built with the tokens' text, not their strrefs.
+    BOOLEAN bStrrefOn = CTlkTable::STRREF_ON;
+    if (bStrrefOn == TRUE) {
+        CTlkTable::STRREF_ON = FALSE;
+    }
+
+    g_pBaldurChitin->GetTlkTable().Fetch(m_strRef, strRes);
+    sName.Format("000000000-%s - %s", (LPCSTR)CBaldurEngine::FetchString(39935), (LPCSTR)strRes.szText);
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    if (pGame->m_cOptions.m_nNightmareMode == TRUE) {
+        STR_RES strNightmare;
+        if (g_pBaldurChitin->GetTlkTable().Fetch(41363, strNightmare) == TRUE) {
+            CString sSuffix;
+            sSuffix.Format(" (%s)", (LPCSTR)strNightmare.szText);
+            sName += sSuffix;
+        }
+    }
+
+    if (bStrrefOn == TRUE) {
+        CTlkTable::STRREF_ON = TRUE;
+    }
+
+    // Bit 0 of each area's flags is cleared while saving and put back after.
+    DWORD areaFlags[CINFGAME_MAX_AREAS];
+    for (INT nArea = 0; nArea < CINFGAME_MAX_AREAS; nArea++) {
+        CGameArea* pArea = g_pBaldurChitin->GetObjectGame()->GetArea(static_cast<SHORT>(nArea));
+        if (pArea != NULL) {
+            areaFlags[nArea] = pArea->m_header.m_flags;
+            pArea->m_header.m_flags &= ~0x1;
+        }
+    }
+
+    g_pBaldurChitin->GetObjectGame()->m_sSaveGame = sName;
+    CScreenCharacter::SAVE_NAME = sName;
+
+    pGame = g_pBaldurChitin->GetObjectGame();
+    pGame->field_366E = TRUE;
+    pGame->field_50DC = 0;
+
+    if (!g_pChitin->cVideo.m_bIs3dAccelerated) {
+        if (!pGame->field_50D8) {
+            pGame->SynchronousUpdate();
+        }
+        pGame->field_50D8 = TRUE;
+    }
+
+    if (g_pChitin->cNetwork.m_nServiceProvider == CNetwork::SERV_PROV_NULL) {
+        g_pBaldurChitin->GetObjectGame()->field_50D8 = TRUE;
+    } else {
+        g_pBaldurChitin->GetObjectGame()->field_50D8 = FALSE;
+    }
+
+    g_pBaldurChitin->GetObjectGame()->SaveGame(FALSE, FALSE, TRUE);
+
+    for (INT nArea = 0; nArea < CINFGAME_MAX_AREAS; nArea++) {
+        CGameArea* pArea = g_pBaldurChitin->GetObjectGame()->GetArea(static_cast<SHORT>(nArea));
+        if (pArea != NULL) {
+            pArea->m_header.m_flags = areaFlags[nArea];
+        }
+    }
 }
 
 // 0x66F250

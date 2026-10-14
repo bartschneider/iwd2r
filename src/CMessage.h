@@ -128,6 +128,7 @@ public:
     static const BYTE MSG_SUBTYPE_CMESSAGE_PICKED_DIALOG_RESPONSE;
     static const BYTE MSG_SUBTYPE_CMESSAGE_SET_AREA_TYPE;
     static const BYTE MSG_SUBTYPE_CMESSAGE_SET_AREA_REST_ENCOUNTER;
+    static const BYTE MSG_SUBTYPE_CMESSAGE_SAVE_GAME;
     static const BYTE MSG_SUBTYPE_CMESSAGE_SET_AREA_EXPLORED;
     static const BYTE MSG_SUBTYPE_CMESSAGE_CHANGE_STAT;
     static const BYTE MSG_SUBTYPE_CMESSAGE_120;
@@ -1413,6 +1414,21 @@ public:
     void Run() override;
 
     /* 000C */ CResRef m_screen;
+};
+
+// The SaveGame action's message (vtable 0x84888C): saves the game under a
+// name made of the strref's text.
+class CMessageSaveGame : public CMessage {
+public:
+    CMessageSaveGame(STRREF strRef, LONG caller, LONG target);
+    SHORT GetCommType() override;
+    BYTE GetMsgType() override;
+    BYTE GetMsgSubType() override;
+    void MarshalMessage(BYTE** pData, DWORD* dwSize) override;
+    BOOL UnmarshalMessage(BYTE* pData, DWORD dwSize) override;
+    void Run() override;
+
+    /* 000C */ STRREF m_strRef;
 };
 
 class CMessage90 : public CMessage {

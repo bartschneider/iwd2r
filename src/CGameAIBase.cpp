@@ -992,8 +992,12 @@ SHORT CGameAIBase::ExecuteAction()
         // TODO: 0x4511D5-0x451282 not ported.
         goto done;
     case 275:
-        // SaveGame
-        // TODO: 0x451282-0x4512E9 not ported.
+        // SaveGame (0x451282-0x4512E9)
+        if (!g_pChitin->cNetwork.GetSessionOpen() || g_pChitin->cNetwork.GetSessionHosting() == TRUE) {
+            message = new CMessageSaveGame(m_curAction.GetSpecifics(), m_id, m_id);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        }
+        returnValue = ACTION_DONE;
         goto done;
     case 278:
         // DropInventoryEXExclude
