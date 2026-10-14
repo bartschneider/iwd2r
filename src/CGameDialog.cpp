@@ -112,6 +112,11 @@ static CString ReadDialogScript(BYTE* pDialog, const CGameDialogFileScript* pScr
                 "C:\\Projects\\Icewind2\\src\\Baldur\\CGameDialog.cpp",
                 "index >= 0",
                 sError);
+
+            // NOTE: UtilAssert does not return (the original's shuts the
+            // engine down and exits, ours aborts), so a script without ')'
+            // never reaches the Left/Right below with index -1, which would
+            // loop forever on the same text.
         }
 
         sScript += sData.Left(index + 1);
