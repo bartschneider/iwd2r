@@ -106,11 +106,11 @@ int CVariableHashBase::Hash(CString sName)
 {
     int length = sName.GetLength();
     int v1 = 0;
-    int v2 = 0;
     int v3 = 1;
 
+    // Each character's low bits (& 0x2F) times its prime (0x54FB07).
     for (int index = 0; index < length && index < 32; index++) {
-        int v4 = PRIME[index] * ((v2 + length) & 0x2F);
+        int v4 = PRIME[index] * (static_cast<BYTE>(sName[index]) & 0x2F);
         v1 += v4;
         v3 *= v4 & (m_nTableEntries - 1);
     }
