@@ -887,9 +887,35 @@ void CGameDoor::ToggleDoor(const CAIObjectType& cause, BOOL bForce)
         // Open: close it.
         if (_strnicmp(reinterpret_cast<const char*>(m_pArea->m_header.m_areaName), "ar5004", 7) == 0) {
             if (!m_pArea->m_search.CanToggleDoor(m_pClosedSearch, m_nClosedSearch)) {
-                // TODO: 0x4899A0-0x489DE1, the creature in the door's way
-                // in AR5004 is told to move (calls CGameArea 0x47A1C0, not
-                // ported).
+                // The creature in the door's way: the door gets the action
+                // 292 (the SHORT at 0x8479A4) on it, and the one closing the
+                // door gets CloseDoor (144, 0x847894) on this door again
+                // (0x4899A0-0x489DE1).
+                CAIAction action;
+                action.m_actionID = CAIAction::NO_ACTION;
+                action.m_specificID = 0;
+                action.m_specificID2 = 0;
+                action.m_specificID3 = 0;
+                action.m_string1 = "";
+                action.m_string2 = "";
+                action.m_internalFlags = 0;
+
+                CGameSprite* pBlocker = m_pArea->sub_47A1C0(m_id, m_pClosedSearch, m_nClosedSearch);
+                if (pBlocker != NULL) {
+                    action.m_actionID = 292;
+                    action.m_acteeID.Set(pBlocker->GetAIType());
+                    CMessage* message = new CMessageAddAction(action, m_id, m_id);
+                    g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+                    g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(pBlocker->m_id,
+                        CGameObjectArray::THREAD_ASYNCH,
+                        INFINITE);
+
+                    action.m_actionID = 144;
+                    action.m_acteeID.Set(m_typeAI);
+                    message = new CMessageAddAction(action, m_id, cause.m_nInstance);
+                    g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+                }
                 return;
             }
         } else {

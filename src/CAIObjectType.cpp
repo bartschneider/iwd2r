@@ -1122,9 +1122,59 @@ void CAIObjectType::Decode(CGameAIBase* caller)
         case 5:
         case 6:
         case 7:
+        case 28:
+        case 47:
+        case 48:
+            // WeakestOf, StrongestOf, MostDamagedOf, LeastDamagedOf,
+            // StrongestOfMale, WorstAC, BestAC: the party member
+            // CInfGame::sub_5BDFE0 picks (the SHORTs at 0x851898 to
+            // 0x8518A4: 1 to 7; 0x40BE85, 0x40BED3, 0x40C3FD, 0x40C444).
+            {
+                SHORT nType;
+                switch (nSpecial) {
+                case 4:
+                    nType = 1;
+                    break;
+                case 5:
+                    nType = 2;
+                    break;
+                case 6:
+                    nType = 3;
+                    break;
+                case 7:
+                    nType = 4;
+                    break;
+                case 28:
+                    nType = 5;
+                    break;
+                case 47:
+                    nType = 6;
+                    break;
+                default:
+                    nType = 7;
+                    break;
+                }
+
+                typeAI.Set(ANYONE);
+                typeAI.m_nInstance = g_pBaldurChitin->GetObjectGame()->sub_5BDFE0(nType);
+                if (typeAI.m_nInstance == CGameObjectArray::INVALID_INDEX) {
+                    Set(NOONE);
+                    return;
+                }
+            }
+            g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(pObject->m_id,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+            pObject = typeAI.sub_40CB20(caller, CGameObject::TYPE_AIBASE, FALSE);
+            if (pObject == NULL) {
+                Set(NOONE);
+                return;
+            }
+            typeAI.Set(pObject->GetAIType());
+            typeAI.m_nInstance = pObject->m_id;
+            continue;
         case 12:
         case 14:
-        case 28:
         case 29:
         case 30:
         case 31:
@@ -1143,20 +1193,15 @@ void CAIObjectType::Decode(CGameAIBase* caller)
         case 44:
         case 45:
         case 46:
-        case 47:
-        case 48:
         case 49:
         case 50:
         case 52:
         case 53:
-            // WeakestOf, StrongestOf, MostDamagedOf, LeastDamagedOf,
-            // NearestEnemyOf, Nearest (and its second to tenth),
-            // StrongestOfMale, the second to tenth NearestEnemyOf, WorstAC,
-            // BestAC, Farthest, FarthestEnemyOf, NearestPC,
+            // NearestEnemyOf, Nearest (and its second to tenth), the second
+            // to tenth NearestEnemyOf, Farthest, FarthestEnemyOf, NearestPC,
             // NearestEnemySummoned.
-            // TODO: 0x40BE85-0x40BF48, 0x40BF48-0x40C35A, 0x40C3FD-0x40C46C
-            // and 0x40C46C-0x40C84E not ported (they need CInfGame 0x5BDFE0
-            // and the CGameArea nearest searches); the object is not found.
+            // TODO: 0x40BF48-0x40C35A and 0x40C46C-0x40C84E not ported (they
+            // need the CGameArea nearest searches); the object is not found.
             Set(NOONE);
             return;
         default:
