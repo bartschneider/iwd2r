@@ -208,8 +208,10 @@ void CGameSpawning::Spawn(const CPoint& ptFacingTowards, BYTE nTotalCharacterLev
 
                 if (bPlace) {
                     if (nCount == 0) {
+                        // NOTE: The original calls rand before GetDirection.
+                        INT nFormation = rand() % 9 + 1;
                         SHORT nDirection = pSprite->GetDirection(ptFacingTowards);
-                        pOffsets = pGame->m_group.GetOffsets(static_cast<SHORT>(rand() % 9 + 1),
+                        pOffsets = pGame->m_group.GetOffsets(static_cast<SHORT>(nFormation),
                             static_cast<SHORT>(nDirection * 360 / 16 % 360),
                             TRUE);
                     }
