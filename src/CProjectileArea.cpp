@@ -151,7 +151,7 @@ void CProjectileArea::Fire(CGameArea* pArea, LONG source, LONG target, CPoint ta
     if (!m_effectList.IsEmpty()) {
         CGameEffect* pEffect = m_effectList.GetTail();
         if (pEffect != NULL) {
-            m_nDuration = GetDuration(static_cast<BYTE>(pEffect->m_firstCall));
+            m_nDuration = GetDuration(static_cast<BYTE>(pEffect->m_casterLevel));
         }
     }
 
