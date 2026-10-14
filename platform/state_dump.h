@@ -35,13 +35,32 @@ struct Chargen {
 struct PartyMember {
     int32_t id = 0;
     // False while the id does not resolve in the object array: x, y, hp,
-    // max_hp and skills are then null.
+    // max_hp, skills, action, modal and facing are then null.
     bool sprite = false;
     int32_t x = 0;
     int32_t y = 0;
     int hp = 0;
     int maxHp = 0;
     int skills[64] = {};
+    int action = 0;
+    int modal = 0;
+    int facing = 0;
+};
+
+// One schema.json "world.doors" entry.
+struct Door {
+    std::string name;
+    int open = 0;
+    int locked = 0;
+};
+
+// schema.json "world.dialog".
+struct Dialog {
+    int active = 0;
+    // -1 while not active.
+    int64_t speaker = -1;
+    int64_t entry = -1;
+    int responses = 0;
 };
 
 // schema.json "world".
@@ -50,6 +69,11 @@ struct World {
     std::string area;
     // At most 6, in portrait order.
     std::vector<PartyMember> party;
+    // The area's doors in its front list's order.
+    std::vector<Door> doors;
+    Dialog dialog;
+    int64_t exploredCount = 0;
+    int64_t creatures = 0;
 };
 
 // What the engine's DumpSource reads.

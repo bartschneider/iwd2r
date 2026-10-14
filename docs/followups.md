@@ -44,6 +44,8 @@ These are in `build_vanilla` and `verify_vanilla` in `tools/oracle.py`.
 
 These are in `oracle/replay/` and `tools/`.
 
+- `play.py --vm linux` cannot produce replay dumps: it drives the game through xdotool and drops `IWD2R_SCRIPT`, so replay mode never leaves the menu, and `play.py --linux --headless` without the vanilla copy fails at the save step (CInfGame.cpp:4206). Our half of a comparison is only reachable through `oracle.py replay compare` (or its `run_ours`). Add a `play.py --replay <scenario>` path (or an `oracle.py replay ours`) that runs our replay half against a recorded scenario on Linux.
+- The recorder drops a door whose name or flags fail to read, while our dump always includes it; emit the door with null values or log the drop so the two sides cannot disagree silently (M2 Task 1 review).
 - The dump invariant (`recorder.cpp`) is enforced on checkpoint dumps only, not on periodic ones.
 - `oracle.py` reads the injector's pid with a blocking `readline` that has no timeout, so a stuck injector hangs the run.
 - A swallowed `WM_KILLFOCUS` skips the `SetCursor` call the original would have made.

@@ -162,12 +162,45 @@ TEST_CASE("state dump JSON matches the golden dumps", "[dump]")
     member.skills[1] = 4;
     member.skills[5] = 2;
     member.skills[13] = -1;
+    member.action = 23;
+    member.modal = 1;
+    member.facing = 12;
     world.engine.world.party.push_back(member);
     platform::state_dump::PartyMember missing;
     missing.id = 0x20001;
     missing.hp = 5; // ignored without a sprite
+    missing.action = 3; // ignored without a sprite
     world.engine.world.party.push_back(missing);
+    world.engine.world.doors.push_back({ "AR1000_Door1", 0, 0 });
+    world.engine.world.doors.push_back({ "Door\"2", 1, 1 });
+    world.engine.world.exploredCount = 345;
+    world.engine.world.creatures = 7;
     REQUIRE(platform::state_dump::ToJson(world) == Fixture("state_dump_world.json"));
+}
+
+TEST_CASE("state dump writes the doors, the dialog, the explored tiles and the creatures", "[dump]")
+{
+    Snapshot s = MenuSnapshot();
+    s.engine.screen = "world";
+    s.engine.hasWorld = true;
+    s.engine.world.area = "AR1000";
+    s.engine.world.doors.push_back({ "DOOR01", 0, 1 });
+    s.engine.world.dialog.active = 1;
+    s.engine.world.dialog.speaker = 3;
+    s.engine.world.dialog.entry = 0;
+    s.engine.world.dialog.responses = 2;
+    s.engine.world.exploredCount = 12;
+    s.engine.world.creatures = 3;
+    const fs::path dir = TempDir("iwd2r-dump-");
+    const fs::path path = dir / "checkpoint-world.json";
+    REQUIRE(platform::state_dump::Write(path.string().c_str(), s));
+    REQUIRE(ReadFile(path).find("\"world\": {\"area\": \"AR1000\", \"party\": [], "
+                                "\"doors\": [{\"name\": \"DOOR01\", \"open\": 0, \"locked\": 1}], "
+                                "\"dialog\": {\"active\": 1, \"speaker\": 3, \"entry\": 0, \"responses\": 2}, "
+                                "\"explored_count\": 12, \"creatures\": 3}\n}\n")
+        != std::string::npos);
+    std::error_code ec;
+    fs::remove_all(dir, ec);
 }
 
 TEST_CASE("state dump world block with no area and no party", "[dump]")
@@ -175,7 +208,10 @@ TEST_CASE("state dump world block with no area and no party", "[dump]")
     Snapshot s = MenuSnapshot();
     s.engine.screen = "world";
     s.engine.hasWorld = true;
-    REQUIRE(platform::state_dump::ToJson(s).find("\"world\": {\"area\": \"\", \"party\": []}\n}\n")
+    REQUIRE(platform::state_dump::ToJson(s).find(
+                "\"world\": {\"area\": \"\", \"party\": [], \"doors\": [], "
+                "\"dialog\": {\"active\": 0, \"speaker\": -1, \"entry\": -1, \"responses\": 0}, "
+                "\"explored_count\": 0, \"creatures\": 0}\n}\n")
         != std::string::npos);
 }
 

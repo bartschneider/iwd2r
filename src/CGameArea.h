@@ -294,7 +294,7 @@ public:
     /* 098E */ DWORD m_startedMusicCounter;
     /* 0992 */ CTypedPtrList<CPtrList, int*> m_lVertSort; // NOTE: Stores actual ints disguised as pointers.
     /* 09AE */ CTypedPtrList<CPtrList, int*> m_lVertSortBack; // NOTE: Stores actual ints disguised as pointers.
-    /* 099A */ CTypedPtrList<CPtrList, int*> m_lVertSortFlight; // NOTE: Stores actual ints disguised as pointers.
+    /* 09CA */ CTypedPtrList<CPtrList, int*> m_lVertSortFlight; // NOTE: Stores actual ints disguised as pointers.
     /* 09E6 */ CTypedPtrList<CPtrList, int*> m_lVertSortAdd; // NOTE: Stores actual ints disguised as pointers.
     /* 0A02 */ CTypedPtrList<CPtrList, int*> m_lVertSortBackAdd; // NOTE: Stores actual ints disguised as pointers.
     /* 0A1E */ CTypedPtrList<CPtrList, int*> m_lVertSortFlightAdd; // NOTE: Stores actual ints disguised as pointers.

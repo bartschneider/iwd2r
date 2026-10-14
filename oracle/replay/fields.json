@@ -318,5 +318,116 @@
     "offset": "0x0A64",
     "type": "i8",
     "count": 64
+  },
+  "sprite_action": {
+    "base": "CGameSprite",
+    "offset": "0x0476",
+    "type": "i16"
+  },
+  "sprite_modal": {
+    "base": "CGameSprite",
+    "offset": "0x4C53",
+    "type": "u8"
+  },
+  "sprite_facing": {
+    "base": "CGameSprite",
+    "offset": "0x5380",
+    "type": "i16"
+  },
+  "object_type": {
+    "base": "CGameObject",
+    "offset": "0x0004",
+    "type": "u8"
+  },
+  "area_vert_sort": {
+    "base": "CGameArea",
+    "offset": "0x0996",
+    "type": "ptr"
+  },
+  "area_vert_sort_back": {
+    "base": "CGameArea",
+    "offset": "0x09B2",
+    "type": "ptr"
+  },
+  "area_vert_sort_flight": {
+    "base": "CGameArea",
+    "offset": "0x09CE",
+    "type": "ptr"
+  },
+  "list_node_next": {
+    "base": "CPtrList::CNode",
+    "offset": "0x0000",
+    "type": "ptr"
+  },
+  "list_node_data": {
+    "base": "CPtrList::CNode",
+    "offset": "0x0008",
+    "type": "ptr"
+  },
+  "area_visibility_map": {
+    "base": "CGameArea",
+    "offset": "0x0860",
+    "type": "ptr"
+  },
+  "area_visibility_size": {
+    "base": "CGameArea",
+    "offset": "0x086A",
+    "type": "i32"
+  },
+  "door_name": {
+    "base": "CGameDoor",
+    "offset": "0x0610",
+    "type": "i8",
+    "count": 32
+  },
+  "door_flags": {
+    "base": "CGameDoor",
+    "offset": "0x05C4",
+    "type": "u32"
+  },
+  "dialog_active": {
+    "base": "CScreenWorld",
+    "offset": "0x0F04",
+    "type": "u8"
+  },
+  "dialog_talker": {
+    "base": "CScreenWorld",
+    "offset": "0x0EE4",
+    "type": "i32"
+  },
+  "dialog_entry": {
+    "base": "CScreenWorld",
+    "offset": "0x0EE8",
+    "type": "u32"
+  },
+  "dialog_waiting": {
+    "base": "CScreenWorld",
+    "offset": "0x0EEC",
+    "type": "i32"
+  },
+  "dialog_entries": {
+    "base": "CScreenWorld",
+    "offset": "0x0EBC",
+    "type": "ptr"
+  },
+  "dialog_entries_size": {
+    "base": "CScreenWorld",
+    "offset": "0x0EC0",
+    "type": "i32"
+  },
+  "dialog_replies": {
+    "base": "CGameDialogEntry",
+    "offset": "0x0004",
+    "type": "ptr"
+  },
+  "dialog_replies_size": {
+    "base": "CGameDialogEntry",
+    "offset": "0x0008",
+    "type": "i32"
+  },
+  "dialog_reply_shown": {
+    "base": "CGameDialogReply",
+    "offset": "0x0058",
+    "type": "ptr"
   }
 }
