@@ -6,6 +6,7 @@
 #include "CGameSprite.h"
 #include "CInfGame.h"
 #include "CScreenCreateChar.h"
+#include "CVisibility.h"
 #include "ScreenLayout.h"
 #include "data_view.h"
 #include "platform/data_dir.h"
@@ -612,6 +613,90 @@ TEST_CASE("gam: character export overwrites a junk PROBE.CHR and numbers past a 
     const std::string numbered = ReadFile(Child(characters, "PROBE00.CHR"));
     CHECK(numbered.compare(0, 8, "CHR V2.2") == 0);
     CHECK(numbered.size() == chr.size());
+}
+
+// The visibility map (CVisibility.cpp): the party member SetupCharacters
+// places in AR1000 is added to the area's map (CGameSprite::AddToArea ->
+// AddCharacter), whose sweeps run MarkTileLine to its vision ellipse; a move
+// (UpDate) clears its bit around the old tile and sweeps around the new one.
+// The tile values themselves are compared with the original by the vis/
+// oracle cases and the replay's world.explored_count.
+TEST_CASE("vis: the party member in AR1000 explores its vision ellipse and moves it", "[vis][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CGameSprite* pSprite = NewGameWithOneCharacter(cre, "Probe");
+    pGame->UpdateCharacterSlots();
+    pGame->SetupCharacters(FALSE);
+    CGameArea* pArea = pSprite->GetArea();
+    REQUIRE(pArea != NULL);
+    CVisibilityMap& vis = pArea->m_visibility;
+    REQUIRE(vis.m_pMap != NULL);
+
+    auto explored = [&vis]() {
+        LONG count = 0;
+        for (LONG n = 0; n < vis.m_nMapSize; n++) {
+            if (vis.IsTileExplored(n))
+                count++;
+        }
+        return count;
+    };
+
+    // One slot holds the member, with bit 0.
+    int slots = 0;
+    for (LONG id : vis.m_aCharacterIds) {
+        if (id == pSprite->GetId())
+            slots++;
+    }
+    REQUIRE(slots == 1);
+    CHECK(vis.m_aCharacterIds[0] == pSprite->GetId());
+
+    const CPoint start = pSprite->GetPos();
+    const LONG startTile = vis.PointToTile(start);
+    CHECK(vis.IsTileExplored(startTile));
+    CHECK((vis.m_pMap[startTile] & 0x01) != 0);
+    const LONG first = explored();
+    // Within the 29 x 21 tiles of the 14 x 10 ellipse.
+    CHECK(first > 1);
+    CHECK(first <= 29 * 21);
+
+    // Adding the member again keeps its slot and its bit (the original's
+    // AddCharacter stops at the slot holding it).
+    REQUIRE(vis.AddCharacter(start, pSprite->GetId(), pSprite->GetVisibleTerrainTable()));
+    slots = 0;
+    for (LONG id : vis.m_aCharacterIds) {
+        if (id == pSprite->GetId())
+            slots++;
+    }
+    CHECK(slots == 1);
+    CHECK(explored() == first);
+
+    // A move out of the old ellipse: the old tile loses the member's bit but
+    // stays explored; the new one is explored and visible.
+    const CPoint moved(start.x - 30 * 32, start.y);
+    const LONG movedTile = vis.PointToTile(moved);
+    vis.UpDate(start, moved, pSprite->GetId(), pSprite->GetVisibleTerrainTable());
+    CHECK(vis.IsTileExplored(startTile));
+    CHECK((vis.m_pMap[startTile] & 0x01) == 0);
+    CHECK(vis.IsTileExplored(movedTile));
+    CHECK((vis.m_pMap[movedTile] & 0x01) != 0);
+    CHECK(explored() > first);
+
+    // An id that is not on the map changes nothing.
+    std::vector<BYTE> before(vis.m_pMap, vis.m_pMap + vis.m_nMapSize);
+    vis.UpDate(moved, start, 0x7FFF, pSprite->GetVisibleTerrainTable());
+    CHECK(std::equal(before.begin(), before.end(), vis.m_pMap));
 }
 
 #ifndef _WIN32
