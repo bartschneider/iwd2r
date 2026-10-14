@@ -12128,9 +12128,15 @@ BOOL CGameSprite::EvaluateStatusTrigger(const CAITrigger& trigger)
         bResult = FALSE;
         break;
     case 0x40E2: // SetMarkedSpell
-        // TODO: Incomplete (0x731CA6-0x731D35): CGameAIBase_DecodeSpell
-        // and sub_725330 before field_588 is set.
-        bResult = FALSE;
+        if (trigger.m_specificID == 0) {
+            field_588 = 0;
+        } else if (field_588 == 0) {
+            // TODO: Incomplete (0x731CC5-0x731D26): the spell's resref
+            // through CGameAIBase_DecodeSpell (0x45D3E0) and, when not
+            // empty and sub_725330 (0x725330) finds it among the sprite's
+            // spells, field_588 = the trigger's specific.
+        }
+        bResult = TRUE;
         break;
     case 0x4039: // NumTimesTalkedTo
         bResult = m_nNumberOfTimesTalkedTo == triggerCopy.m_specificID;
@@ -12288,6 +12294,10 @@ BOOL CGameSprite::EvaluateStatusTrigger(const CAITrigger& trigger)
         bResult = TRUE;
         break;
     default:
+        // NOTE: Until the ai-dispatch stream declares
+        // CGameAIBase::EvaluateStatusTrigger (0x453840), this call resolves
+        // to CGameObject's, which returns FALSE: Global, GlobalGT, GlobalLT,
+        // RandomNum and every other base trigger are FALSE until then.
         bResult = CGameAIBase::EvaluateStatusTrigger(trigger);
         break;
     }
