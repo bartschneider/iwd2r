@@ -14,6 +14,7 @@ Project 3 finishes the roughly 20% of the decompiled engine that is missing and 
 - **Reserve `0x400000` from a suspended child.** The runner starts a copy of itself suspended inside a kill-on-close job object, reserves `0x400000`-`0xA21000` in it, then resumes it.
 - **DEP off in the runner.** The runner is linked with `/NXCOMPAT:NO` and calls `SetProcessDEPPolicy(0)` in the child. It exits with an error if DEP stays on.
 - **One virtual clock.** The recorder (in the original) and the replay mode (in our engine) share one clock: `platform/replay_clock.h`. Frame N is the same moment in every run.
+- **One order inside a frame.** Both sides fire a frame's timers when the frame's SynchronousUpdate returns, so the AI update the timer wakes runs after the main thread's render, never beside it (`platform/replay_clock.h`, "The order inside a frame"). With the timers fired at the start of the frame, which of the two first took the visible area's list lock depended on thread scheduling, and the two engines parted at walk_and_talk's frame 1498.
 
 ## Alternatives considered
 

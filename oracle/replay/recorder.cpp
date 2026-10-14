@@ -23,10 +23,13 @@
 // frame: a call drawn while the AI thread is inside an update (a load
 // redrawing its progress) is held, and OnFrame returns at once. For a frame
 // it counts the frame, runs the scenario step, writes the due dumps and
-// status.txt, then advances the virtual clock and fires the due
-// timeSetEvent callbacks, which wake the AI thread for the next
-// AsynchronousUpdate. Dumps are written only there, on the main thread,
-// while the AI thread waits for that wake-up.
+// status.txt, and advances the virtual clock. The trampoline then calls
+// CChitin::SynchronousUpdate itself and, when it returns, OnFrameEnd fires
+// the due timeSetEvent callbacks, which wake the AI thread for the next
+// AsynchronousUpdate: the AI update of a frame runs after the main thread's
+// frame (its render included), never beside it (platform/replay_clock.h,
+// "The order inside a frame"). Dumps are written only in OnFrame, on the
+// main thread, while the AI thread waits for that wake-up.
 //
 // Hooked imports (the exe's IAT): input GetAsyncKeyState, GetCursorPos,
 // SetCursorPos, PeekMessageA, GetMessageA; time timeGetTime, GetTickCount,
@@ -179,6 +182,9 @@ std::atomic<uint32_t> g_inputTiddata { 0 }; // _tiddata of the thread that polls
 std::atomic<int> g_lastX { 400 }; // the cursor in client pixels when the scenario does not say
 std::atomic<int> g_lastY { 300 };
 uint32_t g_frameTarget = 0; // where the patched jmp went: CChitin::SynchronousUpdate
+// Main thread: the current call of the frame hook counted as a frame, so
+// OnFrameEnd fires the timers when CChitin::SynchronousUpdate returns.
+bool g_frameCounted = false;
 
 std::mutex g_timerMutex;
 std::vector<Timer> g_timers;
@@ -1069,12 +1075,28 @@ extern "C" void __cdecl OnFrame()
     }
     WriteStatus();
     g_now = platform::replay_clock::TickAfterFrame(frame);
+    g_frameCounted = true;
+}
+
+// After CChitin::SynchronousUpdate returns: a call that counted as a frame
+// fires the due timers now, so the AI update they wake runs after the
+// frame's render (platform/replay_clock.h, "The order inside a frame"). A
+// held call fires nothing, as before.
+extern "C" void __cdecl OnFrameEnd()
+{
+    if (!g_frameCounted) {
+        return;
+    }
+    g_frameCounted = false;
     FireTimers();
 }
 
 // Replaces the first instruction of CBaldurChitin::SynchronousUpdate. It runs
-// OnFrame with every register and flag kept, then takes the original jmp, so
-// SynchronousUpdate sees its `this` (ecx) and return address untouched.
+// OnFrame with every register and flag kept, then calls the original jmp's
+// target, CChitin::SynchronousUpdate (thiscall, no arguments, a plain ret
+// at 0x790CC3, 0x790D87 and 0x790DDE), with `this` (ecx) untouched, then
+// OnFrameEnd, and returns to WinMain's call at 0x79284B. The extra return
+// address on the stack is the only difference SynchronousUpdate sees.
 extern "C" __declspec(naked) void FrameTrampoline()
 {
     __asm {
@@ -1083,7 +1105,13 @@ extern "C" __declspec(naked) void FrameTrampoline()
         call OnFrame
         popfd
         popad
-        jmp dword ptr [g_frameTarget]
+        call dword ptr [g_frameTarget]
+        pushad
+        pushfd
+        call OnFrameEnd
+        popfd
+        popad
+        ret
     }
 }
 

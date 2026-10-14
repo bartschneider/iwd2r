@@ -42,6 +42,27 @@ constexpr int64_t WallClockSeconds(uint32_t tick)
     return kWallClockEpoch + static_cast<int64_t>((tick - kClockBase) / 1000);
 }
 
+// The order inside a frame. Both sides fire a frame's due timers when
+// CChitin::SynchronousUpdate returns (the recorder's OnFrameEnd, ours
+// platform::replay::OnFrameEnd), not when the frame starts. The timer wakes
+// the AI thread, so the AI update of frame N runs after the main thread has
+// drawn frame N and before frame N+1 starts (the main thread waits for the
+// update's m_bDisplayStale). The clock still advances at the start of the
+// frame, so the frame's render and the AI update read the same time.
+//
+// Why: with the timers fired at the start of the frame, the AI update ran
+// beside the main thread's render, and the order of the two came from the
+// machine's thread scheduling, which no virtual clock pins. It shows where
+// both take the visible area's list lock (field_214): CGameArea::Render
+// (0x477740) holds it from its start until after it clears m_firstRender
+// and starts the world timer, while CGameArea::AIUpdate (0x46E3D0) takes it
+// in SortLists and returns early if m_firstRender is still 1 after it. The
+// original's main thread got there first in walk_and_talk's frame 1498 (its
+// AI thread drew 185 rand() calls, a full update); ours spent 2.4 ms in the
+// UI render before it, and its AI thread, woken 16 us after the timer, got
+// there first (2 calls). Serializing the two removes the race on both sides
+// and keeps the order the original showed.
+//
 // The frame gate: which calls of CBaldurChitin::SynchronousUpdate count as
 // frames. Both sides ask it at the start of each call after the first, and
 // a call it holds does nothing more: no frame is counted, the clock does

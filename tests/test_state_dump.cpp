@@ -330,6 +330,7 @@ TEST_CASE("replay mode is off without IWD2R_STATE_DUMP", "[dump]")
 
     const unsigned int rngBefore = iwd2r_rand_state();
     platform::replay::OnFrame();
+    platform::replay::OnFrameEnd();
     platform::replay::Checkpoint("nothing", 1);
     REQUIRE(platform::replay::Frame() == 0);
     REQUIRE(iwd2r_rand_state() == rngBefore); // no srand(seed)

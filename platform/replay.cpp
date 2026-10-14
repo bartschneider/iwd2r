@@ -94,6 +94,9 @@ namespace {
     uint32_t g_stalledFrames = 0;
     int32_t g_lastAu = 0;
     clock::FrameGate g_gate;
+    // The current call of CBaldurChitin::SynchronousUpdate counted as a
+    // frame: OnFrameEnd fires its timers.
+    bool g_frameCounted = false;
     bool g_haveScript = false;
     bool g_scriptFinished = false;
     // The rand state of the first thread other than the main one to poll
@@ -312,6 +315,16 @@ void OnFrame()
         WriteDump(nullptr);
     WriteStatus();
     g_now = clock::TickAfterFrame(frame);
+    g_frameCounted = true;
+}
+
+// The recorder's OnFrameEnd: the timers of a frame that counted fire once
+// the frame is drawn.
+void OnFrameEnd()
+{
+    if (!Active() || !g_frameCounted)
+        return;
+    g_frameCounted = false;
     FireTimers();
 }
 

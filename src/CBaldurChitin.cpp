@@ -2185,6 +2185,10 @@ void CBaldurChitin::SynchronousUpdate()
     platform::replay::OnFrame();
 
     CChitin::SynchronousUpdate();
+
+    // iwd2r: the frame's timers fire after its render, as the recorder's
+    // FrameTrampoline fires them; a no-op unless IWD2R_STATE_DUMP is set.
+    platform::replay::OnFrameEnd();
 }
 
 // 0x425FC0
