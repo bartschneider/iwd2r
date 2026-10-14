@@ -7090,7 +7090,8 @@ BOOL CInfGame::ClearCharacterSlot(INT nCharacterSlot)
             pSprite->GetId(),
             pSprite->GetTerrainTable());
 
-        if (pSprite->GetArea()->m_nCharacters != -1) {
+        // The BYTE is compared with 0xFF (`cmp al, 0xff` at 0x5BD61E).
+        if (pSprite->GetArea()->m_nCharacters != 0xFF) {
             pSprite->GetArea()->m_nCharacters--;
         }
 
