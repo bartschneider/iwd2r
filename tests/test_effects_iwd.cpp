@@ -7,8 +7,12 @@
 #include "CGameSprite.h"
 #include "CInfGame.h"
 #include "CMessage.h"
+#include "CProjectile850F9C.h"
+#include "CProjectileArea.h"
+#include "CProjectileSpellHit.h"
 #include "CScreenCreateChar.h"
 #include "CScreenWorld.h"
+#include "CSpell.h"
 #include "CUIControlTextDisplay.h"
 #include "CVariableHash.h"
 #include "IcewindCGameEffects.h"
@@ -265,6 +269,62 @@ bool HasPortraitIcon(CGameSprite* pSprite, int icon)
     return pSprite->m_portraitIcons.Find(reinterpret_cast<int*>(static_cast<INT_PTR>(icon)), NULL) != NULL;
 }
 
+// The objects the area holds in its add lists (what Fire added since the last
+// SortLists), in the order they were added.
+std::vector<CGameObject*> Added(CGameArea* pArea)
+{
+    std::vector<CGameObject*> objects;
+    CTypedPtrList<CPtrList, int*>* lists[] = { &pArea->m_lVertSortAdd, &pArea->m_lVertSortBackAdd, &pArea->m_lVertSortFlightAdd };
+    CGameObjectArray* pArray = g_pBaldurChitin->GetObjectGame()->GetObjectArray();
+    for (CTypedPtrList<CPtrList, int*>* pList : lists) {
+        POSITION pos = pList->GetHeadPosition();
+        while (pos != NULL) {
+            LONG id = static_cast<LONG>(reinterpret_cast<INT_PTR>(pList->GetNext(pos)));
+            CGameObject* pObject;
+            if (pArray->GetShare(id, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) == CGameObjectArray::SUCCESS) {
+                pArray->ReleaseShare(id, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+                objects.push_back(pObject);
+            }
+        }
+    }
+    return objects;
+}
+
+// Removes the projectiles the area holds in its add lists and empties them.
+void RemoveAdded(CGameArea* pArea)
+{
+    std::vector<CGameObject*> objects = Added(pArea);
+    pArea->SortLists();
+    for (CGameObject* pObject : objects) {
+        CProjectile* pProjectile = dynamic_cast<CProjectile*>(pObject);
+        if (pProjectile != nullptr) {
+            pProjectile->RemoveSelf();
+        }
+    }
+}
+
+// The one projectile of this class ApplyEffect added to the area.
+template <class T>
+T* AddedOne(CGameArea* pArea)
+{
+    std::vector<CGameObject*> objects = Added(pArea);
+    if (objects.size() != 1) {
+        return nullptr;
+    }
+    return dynamic_cast<T*>(objects.front());
+}
+
+// The effects a projectile carries.
+std::vector<CGameEffect*> Carried(CProjectile* pProjectile)
+{
+    std::vector<CGameEffect*> effects;
+    POSITION pos = pProjectile->m_effectList.GetHeadPosition();
+    while (pos != NULL) {
+        effects.push_back(pProjectile->m_effectList.GetNext(pos));
+    }
+    return effects;
+}
+
 #define PROBE_OR_SKIP(pSprite)                                          \
     if (DataDir() == nullptr) {                                         \
         SKIP("[iwd2r-skip] IWD2_DATA unset");                           \
@@ -348,15 +408,17 @@ TEST_CASE("effects-iwd: float text (283) queues the string's message only for ty
 // ported, so the base CMessage::Run would assert when the handler's
 // AsynchronousUpdate reached it. The case therefore checks the queue and
 // removes the message itself; it says nothing about the projectile firing.
-TEST_CASE("effects-iwd: visual spell hit (233) queues a CMessageFireProjectile and is done", "[effects][data]")
+TEST_CASE("effects-iwd: visual spell hit (233) queues a CMessageFireProjectile and fires the spell hit", "[effects][data]")
 {
     PROBE_OR_SKIP(pSprite);
     ClearMessages();
+    CGameArea* pArea = pSprite->GetArea();
+    pArea->SortLists();
     CMessageHandler& handler = g_pBaldurChitin->m_cMessageHandler;
     std::unique_ptr<CGameEffect> pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_VISUALSPELLHIT, 4, 0);
     CHECK(pEffect->ApplyEffect(pSprite) == FALSE);
     CHECK(pEffect->m_done == TRUE);
-    REQUIRE(handler.m_messageList.GetCount() == 1);
+    REQUIRE(!handler.m_messageList.IsEmpty());
     CMessageFireProjectile* message = dynamic_cast<CMessageFireProjectile*>(handler.m_messageList.GetHead());
     REQUIRE(message != nullptr);
     CHECK(message->m_projectileType == 0x1004);
@@ -365,7 +427,20 @@ TEST_CASE("effects-iwd: visual spell hit (233) queues a CMessageFireProjectile a
     CHECK(message->m_height == 0);
     CHECK(message->GetSource() == pSprite->GetId());
     CHECK(message->GetTarget() == pSprite->GetId());
-    // Removed here: running it needs CMessageFireProjectile::Run (0x5007F0).
+    // The spell hit is fired at the sprite and plays in the area.
+    CProjectileSpellHit* pHit = AddedOne<CProjectileSpellHit>(pArea);
+    REQUIRE(pHit != nullptr);
+    CHECK(pHit->GetArea() == pArea);
+    RemoveAdded(pArea);
+    ClearMessages();
+
+    // A shaft type (45) still decodes to NULL: the message is queued and
+    // nothing is fired (the DEVIATION's NULL check).
+    pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_VISUALSPELLHIT, 45, 0);
+    CHECK(pEffect->ApplyEffect(pSprite) == FALSE);
+    CHECK(pEffect->m_done == TRUE);
+    REQUIRE(handler.m_messageList.GetCount() == 1);
+    CHECK(Added(pArea).empty());
     ClearMessages();
 }
 
@@ -770,9 +845,12 @@ TEST_CASE("effects-iwd: damage reduction (436) and protection from arrows (443) 
     list.clear();
 }
 
-TEST_CASE("effects-iwd: the aura and storm effects re-queue themselves and finish", "[effects][data]")
+TEST_CASE("effects-iwd: the aura and storm effects re-queue themselves and fire their area", "[effects][data]")
 {
     PROBE_OR_SKIP(pSprite);
+    ClearMessages();
+    CGameArea* pArea = pSprite->GetArea();
+    pArea->SortLists();
     CGameEffectList* pList = pSprite->GetTimedEffectList();
     auto delayed = [&](WORD id) {
         int n = 0;
@@ -785,15 +863,61 @@ TEST_CASE("effects-iwd: the aura and storm effects re-queue themselves and finis
         }
         return n;
     };
-    // Salamander aura and umber hulk gaze: one copy seven ticks later.
-    const WORD auras[] = { ICEWIND_CGAMEEFFECT_SALAMANDERAURA, ICEWIND_CGAMEEFFECT_UMBERHULKGAZE };
-    for (WORD id : auras) {
-        const int before = delayed(id);
-        std::unique_ptr<CGameEffect> pEffect = Decode(pSprite, id, 0, 0);
+
+    // Salamander aura: one copy seven ticks later, and a type 100 area with
+    // an immunity and a damage carrying the source resref; type 1 also
+    // gives them the caster level.
+    for (DWORD type = 0; type <= 1; type++) {
+        const int before = delayed(ICEWIND_CGAMEEFFECT_SALAMANDERAURA);
+        std::unique_ptr<CGameEffect> pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_SALAMANDERAURA, type, 0);
+        pEffect->m_sourceRes = CResRef("SPIN150");
+        pEffect->m_casterLevel = 7;
         CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
         CHECK(pEffect->m_done == TRUE);
-        CHECK(delayed(id) == before + 1);
+        CHECK(delayed(ICEWIND_CGAMEEFFECT_SALAMANDERAURA) == before + 1);
+        CProjectileArea* pAura = AddedOne<CProjectileArea>(pArea);
+        REQUIRE(pAura != nullptr);
+        CHECK(pAura->m_nRadius == 100);
+        CHECK(pAura->m_sourceId == pSprite->GetId());
+        CHECK(pAura->m_targetId == pSprite->GetId());
+        std::vector<CGameEffect*> carried = Carried(pAura);
+        REQUIRE(carried.size() == 2);
+        for (CGameEffect* pCarried : carried) {
+            CHECK(pCarried->m_sourceRes == CResRef("SPIN150"));
+            CHECK(pCarried->m_casterLevel == (type == 1 ? 7u : 0u));
+        }
+        CHECK(carried[0]->m_dwFlags == (type == 1 ? 25u : 3u));
+        RemoveAdded(pArea);
     }
+
+    // Umber hulk gaze: a type 275 area aimed at enemies with four
+    // immunities, a confusion and a last immunity, all from SpIn994.
+    {
+        const int before = delayed(ICEWIND_CGAMEEFFECT_UMBERHULKGAZE);
+        std::unique_ptr<CGameEffect> pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_UMBERHULKGAZE, 0, 5);
+        CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+        CHECK(pEffect->m_done == TRUE);
+        CHECK(delayed(ICEWIND_CGAMEEFFECT_UMBERHULKGAZE) == before + 1);
+        CProjectileArea* pGaze = AddedOne<CProjectileArea>(pArea);
+        REQUIRE(pGaze != nullptr);
+        CHECK(pGaze->m_nRadius == 275);
+        CHECK(pGaze->m_targetType.m_nEnemyAlly == CAIObjectType::EA_ENEMY);
+        std::vector<CGameEffect*> carried = Carried(pGaze);
+        REQUIRE(carried.size() == 6);
+        const DWORD flags[] = { 17, 27, 29, 23 };
+        for (int n = 0; n < 4; n++) {
+            CHECK(carried[n]->m_dwFlags == flags[n]);
+            CHECK(carried[n]->m_duration == 10);
+        }
+        CHECK(carried[4]->m_duration == 5);
+        CHECK(carried[5]->m_dwFlags == 0);
+        CHECK(carried[5]->m_duration == 5);
+        for (CGameEffect* pCarried : carried) {
+            CHECK(pCarried->m_sourceRes == CResRef("SpIn994"));
+        }
+        RemoveAdded(pArea);
+    }
+
     // Static charge, call lightning, cloak of fear: one copy per further
     // round; an unknown source then only finishes.
     const WORD storms[] = { ICEWIND_CGAMEEFFECT_STATICCHARGE, ICEWIND_CGAMEEFFECT_CALLLIGHTNING, ICEWIND_CGAMEEFFECT_CLOAKOFFEAR };
@@ -804,17 +928,132 @@ TEST_CASE("effects-iwd: the aura and storm effects re-queue themselves and finis
         CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
         CHECK(pEffect->m_done == TRUE);
         CHECK(delayed(id) == before + 2);
+        CHECK(Added(pArea).empty());
     }
-}
 
-TEST_CASE("effects-iwd: gaze, wail and projectile effects finish; area of effect 1 adds its persistant effect", "[effects][data]")
-{
-    PROBE_OR_SKIP(pSprite);
-    const WORD ids[] = { ICEWIND_CGAMEEFFECT_BEHOLDERDISPELMAGIC, ICEWIND_CGAMEEFFECT_HARPYWAIL, ICEWIND_CGAMEEFFECT_JACKALWEREGAZE, ICEWIND_CGAMEEFFECT_PROJECTILE };
-    for (WORD id : ids) {
+    // With the source: the storm's area carries the spell's effects with the
+    // source resref. Static charge and call lightning aim at enemies and
+    // take the caster level; cloak of fear has radius 75 and takes level 1.
+    CSpell spell(CResRef("SPWI112"));
+    spell.Demand();
+    REQUIRE(spell.GetAbilityCount() > 0);
+    for (WORD id : storms) {
         std::unique_ptr<CGameEffect> pEffect = Decode(pSprite, id, 0, 0);
+        pEffect->m_res = CResRef("SPWI112");
+        pEffect->m_sourceRes = CResRef("SPIN200");
+        pEffect->m_casterLevel = 20;
         CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
         CHECK(pEffect->m_done == TRUE);
+        std::vector<CGameObject*> added = Added(pArea);
+        REQUIRE(added.size() == 1);
+        CProjectileArea* pStorm = dynamic_cast<CProjectileArea*>(added.front());
+        REQUIRE(pStorm != nullptr);
+        if (id == ICEWIND_CGAMEEFFECT_STATICCHARGE) {
+            CHECK(dynamic_cast<CProjectileArea850078*>(pStorm) != nullptr);
+            CHECK(pStorm->m_targetType.m_nEnemyAlly == CAIObjectType::EA_ENEMY);
+        } else if (id == ICEWIND_CGAMEEFFECT_CALLLIGHTNING) {
+            CHECK(dynamic_cast<CProjectileArea850114*>(pStorm) != nullptr);
+            CHECK(pStorm->m_targetType.m_nEnemyAlly == CAIObjectType::EA_ENEMY);
+        } else {
+            CHECK(dynamic_cast<CProjectileArea8504BC*>(pStorm) != nullptr);
+            CHECK(pStorm->m_nRadius == 75);
+        }
+        std::vector<CGameEffect*> carried = Carried(pStorm);
+        // The last ability at the level (20 or 1).
+        SHORT nLevel = id == ICEWIND_CGAMEEFFECT_CLOAKOFFEAR ? 1 : 20;
+        SHORT nAbility = 0;
+        while (nAbility < spell.GetAbilityCount() && spell.GetAbility(nAbility)->minCasterLevel <= nLevel) {
+            nAbility++;
+        }
+        nAbility--;
+        const size_t expected = nAbility >= 0 ? static_cast<size_t>(spell.GetAbility(nAbility)->effectCount) : 0;
+        CHECK(carried.size() == expected);
+        for (CGameEffect* pCarried : carried) {
+            CHECK(pCarried->m_sourceRes == CResRef("SPIN200"));
+        }
+        RemoveAdded(pArea);
+    }
+    spell.Release();
+    ClearMessages();
+}
+
+TEST_CASE("effects-iwd: gaze, wail and projectile effects fire their projectiles; area of effect 1 adds its persistant effect", "[effects][data]")
+{
+    PROBE_OR_SKIP(pSprite);
+    ClearMessages();
+    CGameArea* pArea = pSprite->GetArea();
+    pArea->SortLists();
+    CMessageHandler& handler = g_pBaldurChitin->m_cMessageHandler;
+
+    {
+        std::unique_ptr<CGameEffect> pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_BEHOLDERDISPELMAGIC, 0, 0);
+        CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+        CHECK(pEffect->m_done == TRUE);
+        RemoveAdded(pArea);
+        ClearMessages();
+    }
+
+    // Harpy wail: a type 300 area with its sound, SpIn166's effects with
+    // that source resref and the caster level.
+    {
+        std::unique_ptr<CGameEffect> pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_HARPYWAIL, 0, 0);
+        pEffect->m_casterLevel = 9;
+        CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+        CHECK(pEffect->m_done == TRUE);
+        CProjectileArea* pWail = AddedOne<CProjectileArea>(pArea);
+        REQUIRE(pWail != nullptr);
+        CHECK(pWail->m_nRadius == 300);
+        CHECK(pWail->m_explosion1.m_sound == "EFF_P111");
+        std::vector<CGameEffect*> carried = Carried(pWail);
+        CHECK(!carried.empty());
+        for (CGameEffect* pCarried : carried) {
+            CHECK(pCarried->m_sourceRes == CResRef("SpIn166"));
+            CHECK(pCarried->m_casterLevel == 9);
+        }
+        RemoveAdded(pArea);
+    }
+
+    // Jackalwere gaze: the same with SpIn179, without the caster level.
+    {
+        std::unique_ptr<CGameEffect> pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_JACKALWEREGAZE, 0, 0);
+        pEffect->m_casterLevel = 9;
+        CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+        CHECK(pEffect->m_done == TRUE);
+        CProjectileArea* pGaze = AddedOne<CProjectileArea>(pArea);
+        REQUIRE(pGaze != nullptr);
+        CHECK(pGaze->m_nRadius == 300);
+        std::vector<CGameEffect*> carried = Carried(pGaze);
+        CHECK(!carried.empty());
+        for (CGameEffect* pCarried : carried) {
+            CHECK(pCarried->m_sourceRes == CResRef("SpIn179"));
+            CHECK(pCarried->m_casterLevel != 9);
+        }
+        RemoveAdded(pArea);
+    }
+
+    // Projectile 430, type 0: projectile 1, the instant projectile, which
+    // delivers SPWI112's level 1 effects to the sprite as one group at once.
+    {
+        ClearMessages();
+        std::unique_ptr<CGameEffect> pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_PROJECTILE, 0, 0);
+        pEffect->m_res = CResRef("SPWI112");
+        pEffect->m_casterLevel = 4;
+        CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+        CHECK(pEffect->m_done == TRUE);
+        CHECK(Added(pArea).empty());
+        REQUIRE(!handler.m_messageList.IsEmpty());
+        CMessageGroup* pGroup = dynamic_cast<CMessageGroup*>(handler.m_messageList.GetTail());
+        REQUIRE(pGroup != nullptr);
+        CHECK(pGroup->GetTarget() == pSprite->GetId());
+        REQUIRE(!pGroup->m_messages.empty());
+        for (CMessage* pMessage : pGroup->m_messages) {
+            CMessageAddEffect* pAdd = dynamic_cast<CMessageAddEffect*>(pMessage);
+            REQUIRE(pAdd != nullptr);
+            CHECK(pAdd->m_effect->m_sourceRes == CResRef("SPWI112"));
+            CHECK(pAdd->m_effect->m_casterLevel == 4);
+            CHECK(pAdd->m_effect->m_projectileType == 0);
+        }
+        ClearMessages();
     }
 
     CDerivedStats* pStats = pSprite->GetDerivedStats();
@@ -831,6 +1070,27 @@ TEST_CASE("effects-iwd: gaze, wail and projectile effects finish; area of effect
     pEffect->m_sourceID = -1;
     CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
     CHECK(pEffect->m_done == TRUE);
+    CHECK(Added(pArea).empty());
+
+    // Types 0 and 2 with the source: an area of radius m_effectAmount from
+    // the source, carrying the spell's effects with m_res as source resref;
+    // type 2 leaves the sprite out.
+    for (DWORD type = 0; type <= 2; type += 2) {
+        pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_AREAOFEFFECT, type, 120);
+        pEffect->m_res = CResRef("SPWI112");
+        CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+        CHECK(pEffect->m_done == TRUE);
+        CProjectileArea* pAoE = AddedOne<CProjectileArea>(pArea);
+        REQUIRE(pAoE != nullptr);
+        CHECK(pAoE->m_nRadius == 120);
+        CHECK(pAoE->m_sourceId == pSprite->GetId());
+        CHECK(pAoE->m_excludedTargets.count(pSprite->GetId()) == (type == 2 ? 1u : 0u));
+        for (CGameEffect* pCarried : Carried(pAoE)) {
+            CHECK(pCarried->m_sourceRes == CResRef("SPWI112"));
+        }
+        RemoveAdded(pArea);
+    }
+    ClearMessages();
 }
 
 TEST_CASE("effects-iwd: turn undead (280) without a turner and type 1", "[effects][data]")
@@ -947,17 +1207,37 @@ TEST_CASE("effects-iwd: ranger tracking (286) shows the tracking string under th
     CHECK(found);
 }
 
-TEST_CASE("effects-iwd: casting glow (235) finishes", "[effects][data]")
+TEST_CASE("effects-iwd: casting glow (235) queues its message and fires the school's glow", "[effects][data]")
 {
     PROBE_OR_SKIP(pSprite);
+    CGameArea* pArea = pSprite->GetArea();
+    const WORD types[] = { 0, 113, 115, 117, 112, 114, 116, 110, 111 };
     for (DWORD school = 0; school <= 9; school++) {
         ClearMessages();
+        pArea->SortLists();
         std::unique_ptr<CGameEffect> pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_CASTINGGLOW, school, 0);
         CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
         CHECK(pEffect->m_done == TRUE);
         CHECK(pEffect->m_dwFlags == school);
-        // The projectile and its CMessageFireProjectile are the TODO range
-        // (0x55E199-0x55E806): nothing is queued yet.
-        CHECK(g_pBaldurChitin->m_cMessageHandler.m_messageList.IsEmpty());
+        CTypedPtrList<CPtrList, CMessage*>& messages = g_pBaldurChitin->m_cMessageHandler.m_messageList;
+        if (school < 1 || school > 8) {
+            // Another type is bounded: nothing queued, nothing fired.
+            CHECK(messages.IsEmpty());
+            CHECK(Added(pArea).empty());
+            continue;
+        }
+        REQUIRE(!messages.IsEmpty());
+        CMessageFireProjectile* message = dynamic_cast<CMessageFireProjectile*>(messages.GetHead());
+        REQUIRE(message != nullptr);
+        CHECK(message->m_projectileType == types[school]);
+        CHECK(message->m_projectileTargetId == pSprite->GetId());
+        CHECK(message->GetSource() == pSprite->GetId());
+        CHECK(message->GetTarget() == pSprite->GetId());
+        CProjectile850F9C* pGlow = AddedOne<CProjectile850F9C>(pArea);
+        REQUIRE(pGlow != nullptr);
+        CHECK(pGlow->m_targetId == pSprite->GetId());
+        CHECK(pGlow->m_bHasHeight == TRUE);
+        RemoveAdded(pArea);
     }
+    ClearMessages();
 }
