@@ -204,17 +204,117 @@ void CGameArea::AddObject(LONG id, BYTE listType)
 // 0x46A3D0
 BOOL CGameArea::AdjustTarget(CPoint start, POINT* goal, BYTE personalSpace, SHORT tolerance)
 {
-    // TODO: Incomplete.
+    if (start.x == goal->x && start.y == goal->y) {
+        return FALSE;
+    }
 
-    return FALSE;
+    // Walks from the goal toward the start, one search square along the
+    // longer axis per step, to the first square that is explored and
+    // passable.
+    CPoint pt(goal->x, goal->y);
+    LONG dy = start.y - pt.y;
+    LONG dx = start.x - pt.x;
+    LONG stepX;
+    LONG stepY;
+
+    if (abs(dy) < abs(dx)) {
+        stepX = (pt.x < start.x ? 1 : -1) * (1 << CGameSprite::EXACT_SCALE);
+        stepY = dy * (1 << CGameSprite::EXACT_SCALE) / abs(dx);
+    } else {
+        stepX = dx * (1 << CGameSprite::EXACT_SCALE) / abs(dy);
+        stepY = (pt.y < start.y ? 1 : -1) * (1 << CGameSprite::EXACT_SCALE);
+    }
+
+    LONG exactX = pt.x * (1 << CGameSprite::EXACT_SCALE) + (1 << (CGameSprite::EXACT_SCALE - 1));
+    LONG exactY = pt.y * (1 << CGameSprite::EXACT_SCALE) + (1 << (CGameSprite::EXACT_SCALE - 1));
+
+    while (1) {
+        if (pt.x == start.x && pt.y == start.y) {
+            return FALSE;
+        }
+
+        if (tolerance-- <= 0) {
+            return FALSE;
+        }
+
+        SHORT nTile = static_cast<SHORT>(static_cast<SHORT>((pt.y * CPathSearch::GRID_SQUARE_SIZEY + CPathSearch::GRID_SQUARE_SIZEY / 2) / CVisibilityMap::SQUARE_SIZEY) * m_visibility.m_nWidth
+            + (pt.x * CPathSearch::GRID_SQUARE_SIZEX + CPathSearch::GRID_SQUARE_SIZEX / 2) / CVisibilityMap::SQUARE_SIZEX);
+        if (m_visibility.IsTileExplored(nTile)) {
+            SHORT nTableIndex;
+            if (m_search.GetCost(pt, CGameObject::DEFAULT_TERRAIN_TABLE, personalSpace, nTableIndex, TRUE) != CPathSearch::COST_IMPASSABLE) {
+                break;
+            }
+        }
+
+        exactX += stepX;
+        pt.x = exactX >> CGameSprite::EXACT_SCALE;
+        exactY += stepY;
+        pt.y = exactY >> CGameSprite::EXACT_SCALE;
+    }
+
+    if (pt.x == start.x && pt.y == start.y) {
+        return FALSE;
+    }
+
+    goal->x = pt.x;
+    goal->y = pt.y;
+
+    return TRUE;
 }
 
 // 0x46A630
 BOOL CGameArea::SnapshotAdjustTarget(CPoint start, POINT* goal, BOOL bBump, SHORT tolerance)
 {
-    // TODO: Incomplete.
+    if (start.x == goal->x && start.y == goal->y) {
+        return FALSE;
+    }
 
-    return FALSE;
+    // AdjustTarget on the search thread's snapshot: no explored test, and
+    // the cost from the snapshot of the dynamic costs.
+    CPoint pt(goal->x, goal->y);
+    LONG dy = start.y - pt.y;
+    LONG dx = start.x - pt.x;
+    LONG stepX;
+    LONG stepY;
+
+    if (abs(dy) < abs(dx)) {
+        stepX = (pt.x < start.x ? 1 : -1) * (1 << CGameSprite::EXACT_SCALE);
+        stepY = dy * (1 << CGameSprite::EXACT_SCALE) / abs(dx);
+    } else {
+        stepX = dx * (1 << CGameSprite::EXACT_SCALE) / abs(dy);
+        stepY = (pt.y < start.y ? 1 : -1) * (1 << CGameSprite::EXACT_SCALE);
+    }
+
+    LONG exactX = pt.x * (1 << CGameSprite::EXACT_SCALE) + (1 << (CGameSprite::EXACT_SCALE - 1));
+    LONG exactY = pt.y * (1 << CGameSprite::EXACT_SCALE) + (1 << (CGameSprite::EXACT_SCALE - 1));
+
+    while (1) {
+        if (pt.x == start.x && pt.y == start.y) {
+            return FALSE;
+        }
+
+        if (tolerance-- <= 0) {
+            return FALSE;
+        }
+
+        if (m_search.SnapshotGetCost(pt, bBump) != CPathSearch::COST_IMPASSABLE) {
+            break;
+        }
+
+        exactY += stepY;
+        exactX += stepX;
+        pt.x = exactX >> CGameSprite::EXACT_SCALE;
+        pt.y = exactY >> CGameSprite::EXACT_SCALE;
+    }
+
+    if (pt.x == start.x && pt.y == start.y) {
+        return FALSE;
+    }
+
+    goal->x = pt.x;
+    goal->y = pt.y;
+
+    return TRUE;
 }
 
 // 0x46A7B0
