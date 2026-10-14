@@ -318,6 +318,11 @@ WORD CDimm::CDSwitch(WORD drive, CString& sDrive, BOOLEAN a3)
 {
     // TODO: Incomplete.
 
+    // NOTE: Not in the original: it asks for the CD here; 0 is the player's
+    // cancel, on which the caller quits with exit code 0. Say why.
+    fprintf(stderr, "iwd2r: no drive holds %s (drives 0x%x); the CD request is not ported, quitting\n", static_cast<const char*>(sDrive), drive);
+    fflush(stderr);
+
     return 0;
 }
 

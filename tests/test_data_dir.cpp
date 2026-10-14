@@ -2,6 +2,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "compat/path_hook.h"
+#include "compat/win_types.h"
 #include "platform/data_dir.h"
 #include "platform/fs.h"
 
@@ -207,4 +208,28 @@ TEST_CASE("data_dir ReportFatal goes through the installed handler", "[data_dir]
     CHECK(g_fatalCalls == 1);
     CHECK(g_fatalText == "text");
     CHECK(g_fatalCaption == "caption");
+}
+
+// CDimm::CDScan (_chdir) and CDimm::WriteSetUp (_chdir, _mkdir) take the
+// INI's [Alias] paths, which name the folder the game was installed to: on
+// every platform they reach the data directory through the resolver, not
+// the CRT as they are (on Windows a copy elsewhere quit at the world).
+TEST_CASE("data_dir: _chdir, _mkdir and _access re-root alias paths", "[data_dir]")
+{
+    EnvCwdGuard guard;
+    TempDir tmp;
+    auto data = tmp.Make("data", "chitin.key");
+    stdfs::create_directories(data / "CD2");
+    platform::fs::SetDataRoot(data.string());
+    platform::fs::SetInstallPrefix("C:\\Nowhere\\Icewind Dale II\\");
+    platform::fs::InstallResolver();
+
+    CHECK(_chdir("C:\\Nowhere\\Icewind Dale II\\CD2\\") == 0);
+    CHECK(stdfs::equivalent(stdfs::current_path(), data / "CD2"));
+    CHECK(_mkdir("C:\\Nowhere\\Icewind Dale II\\temp") == 0);
+    CHECK(stdfs::is_directory(data / "temp"));
+    CHECK(_access("C:\\Nowhere\\Icewind Dale II\\temp", 0) == 0);
+    CHECK(_access("C:\\Nowhere\\Icewind Dale II\\missing", 0) != 0);
+
+    platform::fs::SetInstallPrefix("");
 }

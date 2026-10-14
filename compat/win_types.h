@@ -44,6 +44,21 @@
 // _beginthread as iwd2r_beginthread there.
 #include <direct.h>
 #include <io.h>
+
+#include "compat/path_hook.h"
+
+// Through the path resolver, as on the other platforms (below): the INI's
+// [Alias] paths name the folder the game was installed to, which the
+// resolver re-roots onto the data directory. The CRT's own take them as they
+// are: on a copy of the install elsewhere (Windows Sandbox maps it to
+// C:\iwd2r\game) CDimm::CDScan's _chdir then finds no CD folder, and the
+// first resource from one (the world's areas) quits the game.
+inline int iwd2r_chdir(const char* path) { return ::_chdir(compat::ResolvePath(path).c_str()); }
+inline int iwd2r_access(const char* path, int mode) { return ::_access(compat::ResolvePath(path).c_str(), mode); }
+inline int iwd2r_mkdir(const char* path) { return ::_mkdir(compat::ResolvePath(path).c_str()); }
+#define _chdir iwd2r_chdir
+#define _access iwd2r_access
+#define _mkdir iwd2r_mkdir
 #else
 #include "compat/path_hook.h"
 
