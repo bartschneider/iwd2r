@@ -1682,9 +1682,9 @@ BOOL CInfGame::SaveGame(BOOLEAN bProgressBarRequired, BOOLEAN bProgressBarInPlac
         g_pChitin->cProgressBar.m_bDisableMinibars = TRUE;
     }
 
-    // TODO: Incomplete. The original calls 0x5170F0 on `m_cMoveList` and
-    // `m_cLimboList` with the master area here (CMoveList, not in our tree
-    // yet).
+    // The moves still pending go into the save as timed effects.
+    m_cMoveList.Marshal(g_pBaldurChitin->GetObjectGame()->m_pGameAreaMaster);
+    m_cLimboList.Marshal(g_pBaldurChitin->GetObjectGame()->m_pGameAreaMaster);
 
     if (bProgressBarInPlace || bProgressBarRequired) {
         ProgressBarCallback(0, TRUE);
@@ -1717,10 +1717,12 @@ BOOL CInfGame::SaveGame(BOOLEAN bProgressBarRequired, BOOLEAN bProgressBarInPlac
         field_366E = 1;
     }
 
-    // TODO: Incomplete. The original asks Icewind586B70 for its list of ids
-    // (0x587510) and passes each to a CBaldurMessage multiplayer helper
-    // (0x43D8D0, which returns at once without a network session); neither is
-    // in our tree yet.
+    // NOTE: The original passes each of these ids to a CBaldurMessage
+    // helper (0x43D8D0) that returns at once without a network session
+    // (`test [cNetwork+0x1032]` at 0x43D8F3). Multiplayer is removed (ADR
+    // 0002), so the ids are fetched and the helper is not called.
+    std::vector<int> ids = Icewind586B70::Instance()->sub_587510();
+    (void)ids;
 
     Icewind586B70::Instance()->sub_587190();
 
@@ -1771,8 +1773,7 @@ BOOL CInfGame::SaveGame(BOOLEAN bProgressBarRequired, BOOLEAN bProgressBarInPlac
         }
     }
 
-    // TODO: Incomplete. The original writes the world map here (0x558F40 on
-    // `m_cWorldMap` with `m_sTempDir`; CWorldMap, not in our tree yet).
+    m_cWorldMap.Marshal(m_sTempDir);
 
     g_pBaldurChitin->GetTlkTable().m_override.Save();
     g_pBaldurChitin->GetTlkTable().m_override.CloseFiles();
@@ -7317,6 +7318,13 @@ BOOL CInfGame::AddCharacterToParty(LONG id, SHORT nPortraitNumber)
     }
 
     m_characterPortraits[nPortraitNumber] = id;
+
+    for (INT nCharacterSlot = 0; nCharacterSlot < CINFGAME_MAXCHARACTERS; nCharacterSlot++) {
+        if (m_characters[nCharacterSlot] == CGameObjectArray::INVALID_INDEX) {
+            m_characters[nCharacterSlot] = id;
+            break;
+        }
+    }
 
     UpdatePortraitToolTip(nPortraitNumber, pSprite->GetNameRef());
     pSprite->SetFootstepChannel();

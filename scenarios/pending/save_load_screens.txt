@@ -1,0 +1,142 @@
+# Milestone 4: the save and load screens on the player's path. A new party
+# enters the world and ends the opening dialog (walk_and_talk.txt's steps up
+# to opening_done, without its checkpoints), saves into the empty slot
+# through Options, then loads that save through Options. Coordinates for
+# Resolution=800. Pending: our engine asserts in CInfGame::Marshal (0x5A3230,
+# "cnt3 == m_nCharacters") on the save, because CInfGame::AddCharacterToParty
+# (0x5BD070) does not put the member into m_characters (0x5BD1A9..0x5BD1C1)
+# and nothing else refills it after the Party Formation reload. With that
+# fixed the whole script runs (checked 2026-10-14 by patching it locally).
+# walk_and_talk.txt to the end of the opening dialog (its comments say
+# what each step does).
+wait 60
+click 645 262
+wait 90
+click 537 562
+wait 60
+click 530 100
+wait 90
+click 400 128
+wait 30
+click 400 286
+wait 20
+click 536 562
+wait 30
+click 536 562
+wait 30
+click 400 163
+wait 30
+click 400 198
+wait 20
+click 536 562
+wait 30
+click 400 198
+wait 30
+click 400 268
+wait 20
+click 536 562
+wait 30
+click 400 233
+wait 30
+click 400 198
+wait 20
+click 536 562
+wait 30
+click 400 268
+wait 30
+click 499 170
+wait 20
+click 499 170
+wait 20
+click 499 170
+wait 20
+click 499 242
+wait 20
+click 517 278
+wait 20
+click 517 350
+wait 20
+click 536 562
+wait 30
+click 338 331
+wait 30
+click 400 303
+wait 30
+click 499 420
+wait 15
+click 499 420
+wait 15
+click 499 420
+wait 15
+click 499 420
+wait 15
+click 536 562
+wait 30
+click 499 168
+wait 15
+click 499 384
+wait 15
+click 536 562
+wait 30
+click 400 338
+wait 30
+click 536 562
+wait 30
+click 536 562
+wait 30
+click 400 373
+wait 30
+type Probe
+wait 15
+click 458 268
+wait 30
+click 536 562
+wait 60
+click 634 507
+wait 150
+click 514 549
+wait 150
+wait 300
+click 300 399
+wait 60
+click 340 437
+wait 60
+click 250 386
+wait 60
+click 280 437
+wait 60
+click 398 583
+wait 60
+click 250 399
+wait 120
+# Options (690,568) on the wheel, then Save Game (612,111).
+click 690 568
+wait 60
+click 612 111
+wait 60
+# The save screen: one slot, "Empty", its Delete disabled.
+shot 01_save
+# The slot's Save (685,101): the Save As popup, "Prologue, 7 hours".
+click 685 101
+wait 60
+type Probe One
+wait 15
+shot 02_save_as
+# The popup's Save (464,320): back in the world, "Save successful".
+click 464 320
+wait 300
+shot 03_saved
+# Options, Load Game (612,81), the popup's Load (458,240).
+click 690 568
+wait 60
+click 612 81
+wait 60
+click 458 240
+wait 90
+# The load screen: "Probe One", "Prologue, 7 hours" and the file time.
+shot 04_load
+# The slot's Load (685,101): the world again.
+click 685 101
+wait 400
+shot 05_loaded
+quit
