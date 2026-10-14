@@ -65,7 +65,7 @@ classes. Off by default; a frame costs a few tens of KB. To add a value,
 add its x-field, a member of `replay_probe::Object` (or `Frame`), and the
 two reads.
 
-Static objects (type 17) and doors differ in position by a pixel or more
-between the engines (a known difference of their bounding-box centres);
-filter them with `grep -v 'type 17 \|type 33 '` when they are not the
-subject.
+At the time of writing the positions of static objects (type 17) and of
+doors (type 33) differ between the engines (doors by one pixel, statics by
+up to about 80; not investigated yet); filter them with
+`grep -v 'type 17 \|type 33 '` when they are not the subject.
