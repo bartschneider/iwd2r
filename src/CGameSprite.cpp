@@ -8,6 +8,7 @@
 #include "CGameArea.h"
 #include "CGameButtonList.h"
 #include "CGameContainer.h"
+#include "CGameTimer.h"
 #include "CInfCursor.h"
 #include "CInfGame.h"
 #include "CItem.h"
@@ -2657,7 +2658,7 @@ void CGameSprite::AIUpdateWalk()
 
         if (m_currentSearchRequest->m_serviceState == CSearchRequest::STATE_WAITING) {
             if (m_currentSearchRequest->m_collisionDelay > 1) {
-                m_currentSearchRequest--;
+                m_currentSearchRequest->m_collisionDelay--;
                 pathLock.Unlock();
                 return;
             }
@@ -2796,39 +2797,47 @@ void CGameSprite::AIUpdateWalk()
             }
             return;
         }
-    }
 
-    CPoint goal;
-    CPathSearch::PositionToPoint(m_pPath[m_currPath++], &goal);
-    m_posDest.x = goal.x * CPathSearch::GRID_SQUARE_SIZEX + CPathSearch::GRID_SQUARE_SIZEX / 2;
-    m_posDest.y = goal.y * CPathSearch::GRID_SQUARE_SIZEY + CPathSearch::GRID_SQUARE_SIZEY / 2;
+        // The next node: the sprite heads for its centre. The distance and
+        // the step are taken in the 4/3-scaled space (a search square is
+        // 16 by 16 there), as m_posExact is.
+        CPoint goal;
+        CPathSearch::PositionToPoint(m_pPath[m_currPath], &goal);
+        m_currPath++;
+        m_posDest.x = goal.x * CPathSearch::GRID_SQUARE_SIZEX + CPathSearch::GRID_SQUARE_SIZEX / 2;
+        m_posDest.y = goal.y * CPathSearch::GRID_SQUARE_SIZEY + CPathSearch::GRID_SQUARE_SIZEY / 2;
 
-    int scale = static_cast<int>(sqrt((m_posDest.x - m_pos.x) * (m_posDest.x - m_pos.x) + (m_posDest.y - 4 * m_pos.y / 3) * (m_posDest.y - 4 * m_pos.y / 3)) + 0.5);
-    if (scale == 0) {
-        // NOTE: Uninline.
-        DropPath();
+        LONG dx = m_posDest.x - m_pos.x;
+        LONG dy = goal.y * CPathSearch::GRID_SQUARE_SIZEX + CPathSearch::GRID_SQUARE_SIZEX / 2 - 4 * m_pos.y / 3;
 
-        // NOTE: Uninline.
-        SetIdleSequence();
+        // NOTE: __ftol truncates the square root.
+        int scale = static_cast<int>(sqrt(static_cast<double>(dx * dx + dy * dy)));
+        if (scale == 0) {
+            // NOTE: Uninline.
+            DropPath();
 
-        return;
-    }
+            // NOTE: Uninline.
+            SetIdleSequence();
 
-    if (m_animation.GetMoveScale() > 8) {
-        if (scale >= m_animation.GetMoveScale()) {
-            scale = (scale + m_animation.GetMoveScale() / 2) / m_animation.GetMoveScale();
-        } else {
-            scale = 1;
+            return;
         }
 
-        m_posDelta.x = ((m_animation.GetMoveScale() * (m_posDest.x - m_pos.x)) << EXACT_SCALE) / scale;
-        m_posDelta.y = ((m_animation.GetMoveScale() * (m_posDest.y - m_pos.y)) << EXACT_SCALE) / scale;
-    } else {
-        m_posDelta.x = ((m_animation.GetMoveScale() * (m_posDest.x - m_pos.x)) << EXACT_SCALE) / scale;
-        m_posDelta.y = ((m_animation.GetMoveScale() * (m_posDest.y - m_pos.y)) << EXACT_SCALE) / scale;
-    }
+        if (m_animation.GetMoveScale() < 9) {
+            m_posDelta.x = dx * m_animation.GetMoveScale() * (1 << EXACT_SCALE) / scale;
+            m_posDelta.y = dy * m_animation.GetMoveScale() * (1 << EXACT_SCALE) / scale;
+        } else {
+            if (scale < m_animation.GetMoveScale()) {
+                scale = 1;
+            } else {
+                scale = (m_animation.GetMoveScale() / 2 + scale) / m_animation.GetMoveScale();
+            }
 
-    SetDirection(m_posDest);
+            m_posDelta.x = dx * (1 << EXACT_SCALE) / scale;
+            m_posDelta.y = dy * (1 << EXACT_SCALE) / scale;
+        }
+
+        SetDirection(m_posDest);
+    }
 
     m_turningAbout = !m_walkBackwards
         && abs(m_nNewDirection - m_nDirection) >= 5
@@ -3016,6 +3025,7 @@ void CGameSprite::SetPath(LONG* pPath, SHORT nPath)
     m_pPath = pPath;
     m_currPath = 1;
     m_posDest.x = m_pos.x + 4;
+    m_walkBackwards = FALSE;
     m_posDest.y = m_pos.y + 3;
 
     // NOTE: Uninline.
@@ -3024,7 +3034,9 @@ void CGameSprite::SetPath(LONG* pPath, SHORT nPath)
     // NOTE: Uninline.
     CPathSearch::PositionToPoint(m_pPath[nPath - 1], &goal);
 
-    if (abs(goal.x - start.x) <= 4 && abs(goal.y - start.y <= 4) && nPath <= 4) {
+    // A short path (within 4 squares each way, at most 4 nodes) is walked
+    // backwards.
+    if (abs(goal.y - start.y) <= 4 && abs(goal.x - start.x) <= 4 && nPath <= 4) {
         m_walkBackwards = TRUE;
     }
 
@@ -12054,6 +12066,213 @@ BOOL CGameSprite::ProcessEffectList()
 
         field_72A2--;
     }
+}
+
+// NOTE: The sprite's override of the status triggers (the vtable at
+// 0x85BDD4, slot 0x64). Any trigger it does not know goes to
+// CGameAIBase::EvaluateStatusTrigger (0x453840).
+//
+// 0x731B30
+BOOL CGameSprite::EvaluateStatusTrigger(const CAITrigger& trigger)
+{
+    CAITrigger triggerCopy(trigger);
+    BOOL bResult = FALSE;
+
+    switch (triggerCopy.m_triggerID) {
+    case 0x400A: // Alignment
+        triggerCopy.m_triggerCause.Decode(this);
+        switch (triggerCopy.m_specificID) {
+        case 1:
+        case 2:
+        case 3:
+            bResult = (triggerCopy.m_triggerCause.m_nAlignment & 0xF) == triggerCopy.m_specificID;
+            break;
+        case 0x10:
+        case 0x20:
+        case 0x30:
+            bResult = (triggerCopy.m_triggerCause.m_nAlignment & 0xF0) == triggerCopy.m_specificID;
+            break;
+        default:
+            bResult = triggerCopy.m_triggerCause.m_nAlignment == triggerCopy.m_specificID;
+            break;
+        }
+        break;
+    case 0x4031: // HaveSpell
+        // TODO: Incomplete (0x731C09-0x731C8E): CGameAIBase_DecodeSpell
+        // and sub_725330 over the sprite's spells.
+        bResult = FALSE;
+        break;
+    case 0x4032: // HaveAnySpells
+        // TODO: Incomplete (0x731D53-0x731FCF): GetSpells,
+        // GetSpellsAtLevel and the grouped spell lists.
+        bResult = FALSE;
+        break;
+    case 0x40E2: // SetMarkedSpell
+        // TODO: Incomplete (0x731CA6-0x731D35): CGameAIBase_DecodeSpell
+        // and sub_725330 before field_588 is set.
+        bResult = FALSE;
+        break;
+    case 0x4039: // NumTimesTalkedTo
+        bResult = m_nNumberOfTimesTalkedTo == triggerCopy.m_specificID;
+        break;
+    case 0x403A: // NumTimesTalkedToGT
+        bResult = triggerCopy.m_specificID < m_nNumberOfTimesTalkedTo;
+        break;
+    case 0x403B: // NumTimesTalkedToLT
+        bResult = m_nNumberOfTimesTalkedTo < triggerCopy.m_specificID;
+        break;
+    case 0x4058: // HaveUsableWeaponEquipped
+        // TODO: Incomplete (0x732016-0x732193): the selected weapon's
+        // ability (CItem::Demand, GetAbility, GetUsageCount).
+        bResult = FALSE;
+        break;
+    case 0x4063: // InWeaponRange
+        // TODO: Incomplete (0x732237-0x732661): the weapon's range against
+        // the target from CGameAIBase_GetTargetShareAIType.
+        bResult = FALSE;
+        break;
+    case 0x40F3: // IsFacingObject
+        // TODO: Incomplete (0x732662-0x7326B1): the target from
+        // CGameAIBase_GetTargetShareAIType.
+        bResult = FALSE;
+        break;
+    case 0x40A0: // Internal
+    case 0x40A1: // InternalGT
+    case 0x40A2: // InternalLT
+    case 0x40A3: // School
+    case 0x40A4: // IsWeaponRanged
+    case 0x40B1: // ModalState
+        // TODO: Incomplete (0x7329D8-0x732C3F): the target from
+        // CGameAIBase_GetTargetShareAIType and its members.
+        bResult = FALSE;
+        break;
+    case 0x40F2: // IsSpellTargetValid
+        // TODO: Incomplete (0x732C40-0x732CA1): CGameSprite_CanTarget and
+        // CGameSprite_IsSpellTargetValid on the target.
+        bResult = FALSE;
+        break;
+    case 0x40F8: // OutOfAmmo
+        // TODO: Incomplete (0x732CA2-0x732E62): the selected weapon's
+        // ability and usage count.
+        bResult = FALSE;
+        break;
+    case 0x4059: // NumTimesInteracted
+        if (triggerCopy.m_specificID < 24) {
+            bResult = m_nNumberOfTimesInteractedWith[triggerCopy.m_specificID] == triggerCopy.m_specific2;
+        } else {
+            bResult = FALSE;
+        }
+        break;
+    case 0x405A: // NumTimesInteractedGT
+        if (triggerCopy.m_specificID < 24) {
+            bResult = triggerCopy.m_specific2 < m_nNumberOfTimesInteractedWith[triggerCopy.m_specificID];
+        } else {
+            bResult = FALSE;
+        }
+        break;
+    case 0x405B: // NumTimesInteractedLT
+        if (triggerCopy.m_specificID < 24) {
+            bResult = m_nNumberOfTimesInteractedWith[triggerCopy.m_specificID] < triggerCopy.m_specific2;
+        } else {
+            bResult = FALSE;
+        }
+        break;
+    case 0x4062: // InteractingWith
+        // NOTE: The original decodes the sprite's own m_interactingWith
+        // (0x73220F), not the trigger's object.
+        m_interactingWith.Decode(this);
+        bResult = m_interactingWith.OfType(triggerCopy.m_triggerCause, FALSE, FALSE);
+        break;
+    case 0x406D: // UnselectableVariable
+        bResult = static_cast<DWORD>(m_nUnselectableCounter) == static_cast<DWORD>(triggerCopy.m_specificID);
+        break;
+    case 0x406E: // UnselectableVariableGT
+        bResult = triggerCopy.m_specificID < m_nUnselectableCounter;
+        break;
+    case 0x406F: // UnselectableVariableLT
+        bResult = m_nUnselectableCounter < triggerCopy.m_specificID;
+        break;
+    case 0x4097: { // TimerActive
+        POSITION pos = m_timers.GetHeadPosition();
+        while (pos != NULL) {
+            CGameTimer* pTimer = m_timers.GetNext(pos);
+            if (pTimer != NULL && static_cast<LONG>(pTimer->m_id) == triggerCopy.m_specificID) {
+                bResult = TRUE;
+            }
+        }
+        break;
+    }
+    case 0x4098: { // ClassEx
+        triggerCopy.m_triggerCause.Decode(this);
+        DWORD mask = triggerCopy.m_triggerCause.m_nClassMask;
+        LONG nClass = triggerCopy.m_specificID;
+        if (((mask & 0x1) != 0 && (nClass == 1 || nClass == 0xCD))
+            || ((mask & 0x2) != 0 && (nClass == 2 || nClass == 0xCA))
+            || ((mask & 0x4) != 0 && (nClass == 3 || nClass == 0xCB))
+            || ((mask & 0x8) != 0 && (nClass == 4 || nClass == 0xCB || nClass == 0xCC))
+            || ((mask & 0x10) != 0 && (nClass == 5 || nClass == 0xCD))) {
+            bResult = TRUE;
+            break;
+        }
+
+        bResult = FALSE;
+        if ((mask & 0x20) != 0 && nClass == 6) {
+            bResult = TRUE;
+            break;
+        }
+        if ((mask & 0x40) != 0) {
+            if (nClass == 7 || nClass == 0xCD || nClass == 0xCE) {
+                bResult = TRUE;
+                break;
+            }
+        }
+        if ((mask & 0x80) != 0) {
+            if (nClass == 8 || nClass == 0xCD || nClass == 0xCF) {
+                bResult = TRUE;
+                break;
+            }
+        }
+        if ((mask & 0x100) != 0) {
+            if (nClass == 9 || nClass == 0xD0) {
+                bResult = TRUE;
+                break;
+            }
+        }
+        if ((mask & 0x200) != 0) {
+            if (nClass == 10 || nClass == 0xD1) {
+                bResult = TRUE;
+                break;
+            }
+        }
+        if ((mask & 0x400) != 0 && (nClass == 11 || nClass == 0xD1)) {
+            bResult = TRUE;
+        }
+        break;
+    }
+    case 0x4099: // NearSavedLocation
+        if (m_baseStats.field_2E4 != 0 && m_baseStats.field_2E6 != 0) {
+            INT dx = static_cast<INT>(GetPos().x - static_cast<USHORT>(m_baseStats.field_2E4)) / CPathSearch::GRID_SQUARE_SIZEX;
+            INT dy = static_cast<INT>(GetPos().y - static_cast<USHORT>(m_baseStats.field_2E6)) / CPathSearch::GRID_SQUARE_SIZEY;
+            if (dy * dy + dx * dx <= triggerCopy.m_specificID * triggerCopy.m_specificID) {
+                bResult = TRUE;
+            }
+        }
+        break;
+    case 0x40E0: // IsMarkedSpell
+        bResult = trigger.m_specificID == field_588;
+        break;
+    case 0x40F1: // ForceMarkedSpell
+        if (field_588 != trigger.m_specificID) {
+            field_588 = trigger.m_specificID;
+        }
+        bResult = TRUE;
+        break;
+    default:
+        bResult = CGameAIBase::EvaluateStatusTrigger(trigger);
+        break;
+    }
+
+    return bResult;
 }
 
 // 0x733050
