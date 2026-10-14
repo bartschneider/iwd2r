@@ -6249,6 +6249,8 @@ BOOL CGameEffectColorTintSolid::ApplyEffect(CGameSprite* pSprite)
             pColorEffect->m_tintColor = tintColor;
             pColorEffect->m_periodLength = 1;
             pSprite->GetDerivedStats()->m_appliedColorEffects.AddTail(pColorEffect);
+
+            range++;
         }
     } else {
         // NOTE: Uninline.
@@ -6332,6 +6334,8 @@ BOOL CGameEffectColorLightSolid::ApplyEffect(CGameSprite* pSprite)
             pColorEffect->m_tintColor = tintColor;
             pColorEffect->m_periodLength = 1;
             pSprite->GetDerivedStats()->m_appliedColorEffects.AddTail(pColorEffect);
+
+            range++;
         }
     } else {
         // NOTE: Uninline.

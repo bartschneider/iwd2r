@@ -331,3 +331,23 @@ TEST_CASE("regeneration (98) queues a persistent heal", "[effects][data]")
 
     delete pSprite;
 }
+
+TEST_CASE("solid colour effects (51, 52) add one colour effect per range", "[effects][data]")
+{
+    REQUIRE_ENGINE();
+    CGameSprite* pSprite = MakeSprite();
+
+    // Range 255 walks the original's 17-entry table (0x8A8EE0, 0x8A8F28)
+    // up to its -1 terminator: 17 entries, then stop.
+    for (WORD effectID : { static_cast<WORD>(CGAMEEFFECT_COLORTINTSOLID), static_cast<WORD>(CGAMEEFFECT_COLORLIGHTSOLID) }) {
+        INT before = pSprite->m_derivedStats.m_appliedColorEffects.GetCount();
+        Apply(pSprite, effectID, 255, 0x00FF0000, 0);
+        CHECK(pSprite->m_derivedStats.m_appliedColorEffects.GetCount() == before + 17);
+
+        before = pSprite->m_derivedStats.m_appliedColorEffects.GetCount();
+        Apply(pSprite, effectID, 2, 0x00FF0000, 0);
+        CHECK(pSprite->m_derivedStats.m_appliedColorEffects.GetCount() == before + 1);
+    }
+
+    delete pSprite;
+}
