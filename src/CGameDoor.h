@@ -14,6 +14,7 @@ public:
     CGameDoor(CGameArea* pArea, CAreaFileDoorObject* pDoorObject, CAreaPoint* pPoints, WORD maxPts);
     /* 0000 */ ~CGameDoor() override;
     /* 000C */ void AIUpdate() override;
+    /* 0028 */ BOOLEAN CanSaveGame(STRREF& strError) override;
     /* 0030 */ void DebugDump(const CString& message, BOOLEAN bEchoToScreen) override;
     /* 0034 */ BOOL IsOver(const CPoint& pt) override;
     /* 0040 */ void OnActionButton(const CPoint& pt) override;

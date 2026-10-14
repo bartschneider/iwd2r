@@ -2101,14 +2101,16 @@ void CGameSprite::AIUpdate()
         if (m_active
             && m_activeAI
             && m_activeImprisonment
-            && ((pGame->GetWorldTimer()->m_gameTime / 2) & VISIBLE_DELAY) == ((m_id / 2) & VISIBLE_DELAY)) {
+            && (((pGame->GetWorldTimer()->m_gameTime / 2) & VISIBLE_DELAY) == ((m_id / 2) & VISIBLE_DELAY)
+                || m_lastCharacterCount != m_pArea->m_nCharacters)) {
             CheckIfVisible();
         }
     } else {
         if (m_active
             && m_activeAI
             && m_activeImprisonment
-            && (pGame->GetWorldTimer()->m_gameTime & VISIBLE_DELAY) == (m_id & VISIBLE_DELAY)) {
+            && ((pGame->GetWorldTimer()->m_gameTime & VISIBLE_DELAY) == (m_id & VISIBLE_DELAY)
+                || m_lastCharacterCount != m_pArea->m_nCharacters)) {
             CheckIfVisible();
         }
     }
@@ -11825,6 +11827,80 @@ STRREF CGameSprite::GetNameRef()
     return strName;
 }
 
+// 0x727720
+BOOL CGameSprite::sub_727720(const CResRef& resRef, BYTE& nClass, DWORD& nSpecialization, BYTE& nLevel)
+{
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    BOOL bFound = FALSE;
+    UINT nID;
+
+    if (!pGame->m_spells.Find(resRef, nID)) {
+        return FALSE;
+    }
+
+    UINT nMinLevel = 0;
+    UINT nMaxLevel = CSPELLLIST_MAX_LEVELS;
+    if (nLevel > 0 && nLevel <= CSPELLLIST_MAX_LEVELS) {
+        nMinLevel = nLevel - 1;
+        nMaxLevel = nLevel;
+    }
+
+    if (nSpecialization == 0) {
+        UINT nClassIndex = 0;
+        if (nClass > 0 && nClass <= CAIOBJECTTYPE_C_WIZARD) {
+            nClassIndex = pGame->GetSpellcasterIndex(nClass);
+        }
+
+        for (; nClassIndex < CSPELLLIST_NUM_CLASSES && !bFound; nClassIndex++) {
+            UINT nLevels = nMaxLevel < m_spells.Get(nClassIndex)->m_nHighestLevel
+                ? nMaxLevel
+                : m_spells.Get(nClassIndex)->m_nHighestLevel;
+
+            for (UINT nCurLevel = nMinLevel; nCurLevel < nLevels && !bFound; nCurLevel++) {
+                CGameSpriteSpellList* pSpells = m_spells.GetSpellsAtLevel(nClassIndex, nCurLevel);
+
+                UINT nIndex = 0;
+                for (auto it = pSpells->m_List.begin(); it != pSpells->m_List.end(); it++) {
+                    if (it->m_nID == nID) {
+                        if (m_spells.GetSpellsAtLevel(nClassIndex, nCurLevel)->Get(nIndex)->field_8 > 0) {
+                            nClass = pGame->GetSpellcasterClass(nClassIndex);
+                            nLevel = static_cast<BYTE>(nCurLevel + 1);
+                            nSpecialization = 0;
+                            bFound = TRUE;
+                        }
+                        break;
+                    }
+                    nIndex++;
+                }
+            }
+        }
+    }
+
+    UINT nLevels = nMaxLevel < m_domainSpells.m_nHighestLevel
+        ? nMaxLevel
+        : m_domainSpells.m_nHighestLevel;
+
+    for (UINT nCurLevel = nMinLevel; nCurLevel < nLevels && !bFound; nCurLevel++) {
+        CGameSpriteSpellList* pSpells = m_domainSpells.GetSpellsAtLevel(nCurLevel);
+
+        UINT nIndex = 0;
+        for (auto it = pSpells->m_List.begin(); it != pSpells->m_List.end(); it++) {
+            if (it->m_nID == nID) {
+                if (m_domainSpells.GetSpellsAtLevel(nCurLevel)->Get(nIndex)->field_8 > 0) {
+                    nClass = CAIOBJECTTYPE_C_CLERIC;
+                    nLevel = static_cast<BYTE>(nCurLevel + 1);
+                    nSpecialization = m_baseStats.m_specialization;
+                    bFound = TRUE;
+                }
+                break;
+            }
+            nIndex++;
+        }
+    }
+
+    return bFound;
+}
+
 // 0x727B40
 BOOL CGameSprite::sub_727B40()
 {
@@ -14505,6 +14581,301 @@ void CGameSprite::ClearAI(BOOLEAN bSetSequence)
                     m_id,
                     m_id);
                 g_pBaldurChitin->GetMessageHandler()->AddMessage(pMessage, FALSE);
+            }
+        }
+    }
+}
+
+// 0x7338E0
+void CGameSprite::SetCurrAction(const CAIAction& action)
+{
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+    // NOTE: The original reads the world screen's panel through its getter
+    // at 0x691130 (`return field_EA4`).
+    if (action.m_actionID != CAIAction::NO_ACTION
+        && g_pBaldurChitin->m_pEngineWorld->field_EA4 == 8
+        && m_id == pGame->m_iContainerSprite) {
+        g_pBaldurChitin->m_pEngineWorld->StopContainer();
+    }
+
+    m_curDest.x = -1;
+    m_curDest.y = -1;
+    field_7118 = 0;
+    field_5616 = 0;
+    field_711C = 0;
+    m_actionCount = 0;
+    m_bStartedCasting = FALSE;
+    m_interrupt = FALSE;
+    field_5630 = 0;
+    field_5632 = 0;
+    field_5636 = 0;
+    m_moveCount = 0;
+    m_bInCasting = FALSE;
+
+    if (m_nModalState != 0
+        && action.m_actionID != CAIAction::NO_ACTION
+        && action.m_actionID != CAIAction::MOVETOPOINT
+        && action.m_actionID != 22 // MoveToObject
+        && action.m_actionID != CAIAction::NO_ACTION
+        && action.m_actionID != CAIAction::FACE
+        && action.m_actionID != 18 // Hide
+        && action.m_actionID != CAIAction::SMALLWAIT
+        && action.m_actionID != 99
+        && action.m_actionID != 89 // Follow
+        && action.m_actionID != CAIAction::MOVETOPOINTNORECTICLE
+        && action.m_actionID != 215
+        && action.m_actionID != 13 // FindTraps
+        && action.m_actionID != 33 // Turn
+        && action.m_actionID != 234 // Debug
+        && action.m_actionID != 273 // HideGUI
+        && action.m_actionID != 274 // UnhideGUI
+        && action.m_actionID != 293 // UnHide
+        && action.m_actionID != 183 // MultiPlayerSync
+        && action.m_actionID != 233 // HideCreature
+        && action.m_actionID != 30 // SetGlobal
+        && action.m_actionID != CAIAction::WAIT
+        && action.m_actionID != 10 // Enemy
+        && action.m_actionID != 257 // ForceHide
+        && action.m_actionID != 236 // SetSavedLocation
+        && action.m_actionID != 249 // SetSavedLocationPoint
+        && action.m_actionID != 252 // ChangeCurrentScript
+        && action.m_actionID != CAIAction::CONTINUE
+        && action.m_actionID != CAIAction::RANDOMWALK) {
+        if (m_nModalState == 2 || m_nModalState == 4) {
+            SetModalState(0, TRUE);
+
+            pGame->GetButtonArray()->m_nSelectedButton = 100;
+
+            if (g_pBaldurChitin->GetActiveEngine()->GetSelectedCharacter() == pGame->GetCharacterPortraitNum(m_id)) {
+                INT nState = pGame->GetButtonArray()->m_nState;
+                if (nState != 102
+                    && nState != 101
+                    && nState != 104
+                    && nState != 103
+                    && nState != 105
+                    && nState != 112
+                    && nState != 115
+                    && nState != 116
+                    && nState != 117
+                    && nState != 118
+                    && nState != 119
+                    && nState != 120
+                    && nState != 121
+                    && nState != 122
+                    && nState != 123
+                    && nState != 106) {
+                    pGame->GetButtonArray()->ResetState();
+                }
+            }
+        } else {
+            SetModalState(0, TRUE);
+        }
+    }
+
+    if (m_curAction.m_actionID != CAIAction::NO_ACTION || action.m_actionID != CAIAction::NO_ACTION) {
+        ResolveTargetPoint(&action, m_queuedActions.GetHeadPosition());
+    }
+
+    if (action.m_actionID != 92) { // SelectWeaponAbility
+        m_nTempSelectedWeapon = m_equipment.m_selectedWeapon;
+        m_nTempSelectedWeaponAbility = static_cast<BYTE>(m_equipment.m_selectedWeaponAbility);
+    }
+
+    if (action.m_actionID == 28) { // RemoveTraps
+        CMessage* pMessage = new CMessage107(TRUE, m_id, m_id);
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(pMessage, FALSE);
+    }
+
+    if (m_curAction.m_actionID == 28 && action.m_actionID != 28) { // RemoveTraps
+        CMessage* pMessage = new CMessage107(FALSE, m_id, m_id);
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(pMessage, FALSE);
+    }
+
+    m_curAction.m_actionID = action.m_actionID;
+    m_curAction.m_specificID = action.m_specificID;
+    m_curAction.m_actorID.Set(action.m_actorID);
+    m_curAction.m_acteeID.Set(action.m_acteeID);
+    m_curAction.m_acteeID2.Set(action.m_acteeID2);
+    m_curAction.m_dest = action.m_dest;
+    m_curAction.m_specificID2 = action.m_specificID2;
+    m_curAction.m_specificID3 = action.m_specificID3;
+    m_curAction.m_string1 = action.m_string1;
+    m_curAction.m_string2 = action.m_string2;
+    m_curAction.m_internalFlags = action.m_internalFlags;
+
+    m_bPlayedEncumberedStopped = FALSE;
+    m_bPlayedEncumberedSlowed = FALSE;
+
+    if (m_currentActionId != action.m_actionID) {
+        if (action.m_actionID == 108 // EscapeArea
+            || action.m_actionID == 176 // EscapeAreaDestroy
+            || action.m_actionID == CAIAction::DIALOGUE
+            || action.m_actionID == CAIAction::STARTDIALOG
+            || action.m_actionID == CAIAction::STARTDIALOGUENOSET) {
+            CMessage* pMessage = new CMessageSetCurrentActionId(action.m_actionID, m_id, m_id);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(pMessage, FALSE);
+        } else if (m_currentActionId != 0) {
+            CMessage* pMessage = new CMessageSetCurrentActionId(0, m_id, m_id);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(pMessage, FALSE);
+        }
+    }
+
+    if (m_targetId != CGameObjectArray::INVALID_INDEX) {
+        if (m_bSelected && Orderable(FALSE)) {
+            CGameObject* pObject;
+
+            BYTE rc;
+            do {
+                rc = pGame->GetObjectArray()->GetDeny(m_targetId,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    &pObject,
+                    INFINITE);
+            } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+            if (rc == CGameObjectArray::SUCCESS) {
+                if (pObject->GetObjectType() == CGameObject::TYPE_SPRITE) {
+                    static_cast<CGameSprite*>(pObject)->m_marker.SetType(CMarker::ELLIPSE);
+                }
+
+                pGame->GetObjectArray()->ReleaseDeny(m_targetId,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    INFINITE);
+            }
+        }
+        m_targetId = CGameObjectArray::INVALID_INDEX;
+    }
+
+    if (m_curSpell != NULL) {
+        delete m_curSpell;
+        m_curSpell = NULL;
+    }
+
+    if (m_curItem != NULL) {
+        m_curItem = NULL;
+    }
+
+    if (action.m_actionID == CAIAction::NO_ACTION) {
+        return;
+    }
+
+    field_710C = 0;
+
+    if (m_curProjectile != NULL) {
+        delete m_curProjectile;
+        m_curProjectile = NULL;
+    }
+
+    field_5618 = 0;
+
+    if (pGame->GetRuleTables().m_lNoDecodeList.Find(action.m_actionID) == NULL) {
+        m_curAction.Decode(this);
+    }
+
+    // The path search counter (the WORD at 0x85BBA4 is 8).
+    field_5616 = static_cast<SHORT>(CUtil::UtilRandInt(8, -m_derivedStats.m_nLuck));
+    m_noActionCount = 0;
+
+    if (m_nSequence != SEQ_TWITCH
+        && m_nSequence != SEQ_DIE
+        && m_nSequence != SEQ_SLEEP
+        && m_nSequence != SEQ_WALK) {
+        SetIdleSequence();
+    }
+
+    if (m_userCommandPause > CTimerWorld::TIMESCALE_MSEC_PER_SEC * 5 - 2) {
+        m_marker.m_nRecticleForceRender = CTimerWorld::TIMESCALE_MSEC_PER_SEC;
+    }
+
+    if (action.m_actionID == CAIAction::MOVETOPOINT
+        || action.m_actionID == 22 // MoveToObject
+        || action.m_actionID == 89 // Follow
+        || action.m_actionID == CAIAction::MOVETOPOINTNORECTICLE
+        || action.m_actionID == 27 // ProtectPoint
+        || action.m_actionID == 215) {
+        if (m_derivedStats.m_nEncumberance == 2) {
+            FeedBack(15, 0, 0, 0, -1, 0, 0);
+        } else if (m_derivedStats.m_nEncumberance == 1) {
+            FeedBack(14, 0, 0, 0, -1, 0, 0);
+        }
+    }
+
+    if (m_curAction.m_actionID == CAIAction::SPELL
+        || m_curAction.m_actionID == CAIAction::SPELLPOINT
+        || m_curAction.m_actionID == CAIAction::FORCESPELL
+        || m_curAction.m_actionID == CAIAction::FORCESPELLPOINT
+        || m_curAction.m_actionID == CAIAction::REALLYFORCESPELL
+        || m_curAction.m_actionID == CAIAction::SPELLNODEC
+        || m_curAction.m_actionID == CAIAction::SPELLPOINTNODEC) {
+        CString sSpell;
+
+        if (strcmp(m_curAction.GetString1(), "") == 0) {
+            DecodeSpell(m_curAction.m_specificID, sSpell);
+        } else {
+            sSpell = m_curAction.GetString1();
+        }
+
+        CResRef cResSpell(sSpell);
+        if (pGame->GetSpellType(cResSpell) == 1) {
+            BYTE nClass = static_cast<BYTE>(m_curAction.m_specificID2);
+            DWORD nSpecialization = pGame->GetRuleTables().GetSpecializationMask(nClass,
+                static_cast<BYTE>(m_curAction.m_specificID2 >> 8));
+            BYTE nLevel = static_cast<BYTE>(m_curAction.m_specificID3);
+
+            if (nClass == 0 || nLevel == 0) {
+                m_curSpell = new CSpell(cResSpell);
+                if (m_curSpell != NULL) {
+                    if (!sub_727720(cResSpell, nClass, nSpecialization, nLevel)) {
+                        if (m_curSpell->Demand() == TRUE) {
+                            switch (m_curSpell->GetCasterType()) {
+                            case 1:
+                                nClass = CAIOBJECTTYPE_C_WIZARD;
+                                break;
+                            case 2:
+                                nClass = CAIOBJECTTYPE_C_CLERIC;
+                                break;
+                            default:
+                                // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjCreatureAI.cpp
+                                // __LINE__: 6082
+                                UTIL_ASSERT_MSG(FALSE, "Invalid spell type.");
+                            }
+
+                            nSpecialization = 0;
+                            nLevel = static_cast<BYTE>(m_curSpell->GetLevel());
+                            m_curSpell->Release();
+                        }
+
+                        CString sError(" ");
+                        sError.Format("Error setting action for %s (%s): could not find spell (%s) in any spell casting class.",
+                            (LPCSTR)m_sName,
+                            (LPCSTR)m_resRef.GetResRefStr(),
+                            (LPCSTR)cResSpell.GetResRefStr());
+
+                        // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjCreatureAI.cpp
+                        // __LINE__: 6102
+                        UTIL_ASSERT_MSG((nClass == CAIOBJECTTYPE_C_BARD)
+                                || (nClass == CAIOBJECTTYPE_C_CLERIC)
+                                || (nClass == CAIOBJECTTYPE_C_DRUID)
+                                || (nClass == CAIOBJECTTYPE_C_PALADIN)
+                                || (nClass == CAIOBJECTTYPE_C_RANGER)
+                                || (nClass == CAIOBJECTTYPE_C_SORCERER)
+                                || (nClass == CAIOBJECTTYPE_C_WIZARD),
+                            sError);
+
+                        // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjCreatureAI.cpp
+                        // __LINE__: 6105
+                        UTIL_ASSERT_MSG(nLevel <= CSPELLLIST_MAX_LEVELS, "Error setting action: Invalid spell level.");
+                    }
+
+                    m_curAction.m_specificID2 = MAKEWORD(nClass,
+                        pGame->GetRuleTables().GetSpecializationIndex(nClass, nSpecialization));
+                    m_curAction.m_specificID3 = nLevel;
+                }
+
+                if (m_curSpell != NULL) {
+                    delete m_curSpell;
+                    m_curSpell = NULL;
+                }
             }
         }
     }
@@ -17535,6 +17906,32 @@ SHORT CGameSprite::sub_75E330(CItem* pLauncher, BOOL bEquipMelee)
 const CAIObjectType& CGameSprite::GetLiveAIType()
 {
     return m_liveTypeAI;
+}
+
+// 0x75E890
+BOOLEAN CGameSprite::CanSaveGame(STRREF& strError)
+{
+    if (!m_baseStats.field_294
+        && m_typeAI.GetEnemyAlly() >= CAIObjectType::EA_EVILCUTOFF
+        && m_canBeSeen > 0
+        && (m_derivedStats.m_generalState & STATE_DEAD) == 0
+        && (m_baseStats.m_flags & 0x8000) == 0) {
+        strError = 16501;
+        return FALSE;
+    }
+
+    if (sub_7202E0()) {
+        if (m_curAction.m_actionID != CAIAction::DIALOGUE
+            && m_curAction.m_actionID != CAIAction::STARTDIALOG
+            && m_currentActionId != CAIAction::DIALOGUE
+            && m_currentActionId != CAIAction::STARTDIALOG) {
+            strError = -1;
+            return TRUE;
+        }
+    }
+
+    strError = 16502; // "You cannot save at this time."
+    return FALSE;
 }
 
 // 0x75E940

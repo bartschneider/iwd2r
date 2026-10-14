@@ -280,6 +280,13 @@ CGameContainer::~CGameContainer()
     field_8D6.SetSize(0);
 }
 
+// 0x47C830
+BOOLEAN CGameContainer::CanSaveGame(STRREF& strError)
+{
+    strError = -1;
+    return TRUE;
+}
+
 // 0x47D7F0
 BOOLEAN CGameContainer::DoAIUpdate(BOOLEAN active, LONG counter)
 {
