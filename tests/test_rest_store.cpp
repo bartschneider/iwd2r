@@ -6,6 +6,7 @@
 #include "CBaldurChitin.h"
 #include "CGameArea.h"
 #include "CGameEffect.h"
+#include "CGameJournal.h"
 #include "CGameSprite.h"
 #include "CInfGame.h"
 #include "CMessage.h"
@@ -555,4 +556,49 @@ TEST_CASE("store: Marshal writes the store SetResRef read, without its sold-out 
     reread.Marshal(pGame->m_sTempDir);
     CHECK(TempFile("11OSWALD.STO") == bytes);
     (void)stock;
+}
+
+TEST_CASE("journal: Unmarshal keeps each record's character and Marshal writes the records back", "[journal]")
+{
+    CSavedGameJournalEntry saved[3];
+    saved[0].m_strEntry = 1000;
+    saved[0].m_time = 50;
+    saved[0].m_chapter = 2;
+    saved[0].m_type = 4;
+    saved[0].m_character = 3;
+    saved[1].m_strEntry = 1001;
+    saved[1].m_time = 60;
+    saved[1].m_chapter = 0;
+    saved[1].m_type = 1;
+    saved[1].m_character = 0;
+    saved[2].m_strEntry = 1002;
+    saved[2].m_time = 70;
+    saved[2].m_chapter = 2;
+    saved[2].m_type = 2;
+    saved[2].m_character = 0xFF;
+
+    CGameJournal journal;
+    journal.Unmarshal(saved, 3);
+    REQUIRE(journal.CountEntries() == 3);
+
+    CSavedGameJournalEntry out[3];
+    for (CSavedGameJournalEntry& entry : out) {
+        entry.m_read = 0xCD;
+    }
+    journal.Marshal(out);
+
+    // Chapter order: chapter 0's record first, then chapter 2's in order.
+    CHECK(out[0].m_strEntry == 1001);
+    CHECK(out[0].m_chapter == 0);
+    CHECK(out[0].m_read == 0);
+    CHECK(out[0].m_type == 1);
+    // A character of 0 loads as 1.
+    CHECK(out[0].m_character == 1);
+    CHECK(out[1].m_strEntry == 1000);
+    CHECK(out[1].m_time == 50);
+    CHECK(out[1].m_chapter == 2);
+    CHECK(out[1].m_type == 4);
+    CHECK(out[1].m_character == 3);
+    CHECK(out[2].m_strEntry == 1002);
+    CHECK(out[2].m_character == 0xFF);
 }

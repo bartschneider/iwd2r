@@ -15,6 +15,7 @@
 #pragma warning(push)
 #pragma warning(disable : 4121 4201)
 #endif
+#include "CGameJournal.h"
 #include "CInfButtonArray.h"
 #include "CVariableHash.h"
 #include "Icewind586B70.h"
@@ -70,6 +71,21 @@ using LimitIdsFn = void*(__fastcall*)(void* self, void* edx, void* result);
 constexpr uintptr_t kLimitIds = 0x587510;
 constexpr size_t kLimitEntrySize = 10;
 constexpr int kLimitEntries = 6;
+
+// CGameJournal (0x14 bytes: a CPtrArray of seven CPtrLists). The
+// constructor (0x4C6200, plain `ret`) builds the lists through MFC's
+// originals; Unmarshal(CSavedGameJournalEntry*, DWORD) (0x4C6CD0, `ret 8` at
+// 0x4C6D86) adds an entry per 12-byte record to the list of its chapter;
+// Marshal(CSavedGameJournalEntry*) (0x4C6BF0, `ret 4` at 0x4C6CC6) writes the
+// entries back, chapter by chapter. None reads a global.
+using JournalConstructFn = void*(__fastcall*)(void* self, void* edx);
+constexpr uintptr_t kJournalConstruct = 0x4C6200;
+using JournalUnmarshalFn = void(__fastcall*)(void* self, void* edx, const uint8_t* pSaved, uint32_t nSaved);
+constexpr uintptr_t kJournalUnmarshal = 0x4C6CD0;
+using JournalMarshalFn = void(__fastcall*)(void* self, void* edx, uint8_t* pSaved);
+constexpr uintptr_t kJournalMarshal = 0x4C6BF0;
+constexpr size_t kJournalSize = 0x14;
+constexpr size_t kJournalEntrySize = 12;
 
 void* OriginalNew(size_t size)
 {
@@ -288,8 +304,62 @@ void LimitIds(CaseContext& ctx)
     }
 }
 
+// Saved journal records: a strref, a time, a chapter from 0 to 6 (the byte
+// after it 0: a non-zero one indexes past the chapters in the original), a
+// type and a character, 0 one time in three (Unmarshal reads it as 1).
+void JournalRoundTrip(CaseContext& ctx)
+{
+    std::mt19937 rng(static_cast<uint32_t>(ctx.seed));
+    for (int iteration = 0; iteration < 40; ++iteration) {
+        const uint32_t count = rng() % 30;
+        std::vector<uint8_t> saved(count * kJournalEntrySize);
+        for (uint32_t i = 0; i < count; ++i) {
+            uint8_t* at = saved.data() + i * kJournalEntrySize;
+            const uint32_t strref = rng();
+            const uint32_t time = rng();
+            std::memcpy(at, &strref, 4);
+            std::memcpy(at + 4, &time, 4);
+            at[8] = static_cast<uint8_t>(rng() % 7);
+            at[9] = 0;
+            at[10] = static_cast<uint8_t>(rng());
+            at[11] = rng() % 3 == 0 ? 0 : static_cast<uint8_t>(rng());
+        }
+        ctx.SetInputs(std::to_string(count) + " journal records from rand #" + std::to_string(iteration));
+
+        std::vector<uint8_t> original(count * kJournalEntrySize, 0xCD);
+        ctx.CallOriginal([&] {
+            uint8_t* self = OriginalBlock(kJournalSize);
+            reinterpret_cast<JournalConstructFn>(kJournalConstruct)(self, nullptr);
+            uint8_t* input = OriginalBlock(saved.size() + 1);
+            std::memcpy(input, saved.data(), saved.size());
+            reinterpret_cast<JournalUnmarshalFn>(kJournalUnmarshal)(self, nullptr, input, count);
+            uint8_t* output = OriginalBlock(original.size() + 1);
+            std::memset(output, 0xCD, original.size());
+            reinterpret_cast<JournalMarshalFn>(kJournalMarshal)(self, nullptr, output);
+            std::memcpy(original.data(), output, original.size());
+        });
+
+        std::vector<uint8_t> ours(count * kJournalEntrySize + 1, 0xCD);
+        {
+            CGameJournal journal;
+            journal.Unmarshal(reinterpret_cast<CSavedGameJournalEntry*>(saved.data()), count);
+            journal.Marshal(reinterpret_cast<CSavedGameJournalEntry*>(ours.data()));
+        }
+
+        ctx.CountInputs(1);
+        const std::string inputs = ctx.Inputs();
+        for (uint32_t i = 0; i < count; ++i) {
+            ctx.SetInputs(inputs + ", record " + std::to_string(i));
+            for (size_t b = 0; b < kJournalEntrySize; ++b) {
+                oracle::Compare(ctx, original[i * kJournalEntrySize + b], ours[i * kJournalEntrySize + b]);
+            }
+        }
+    }
+}
+
 }
 
 ORACLE_CASE("save/variable_hash_marshal", VariableHashMarshal);
+ORACLE_CASE("save/journal_round_trip", JournalRoundTrip);
 ORACLE_CASE("save/button_array_updates", ButtonArrayUpdates);
 ORACLE_CASE("save/limit_ids", LimitIds);
