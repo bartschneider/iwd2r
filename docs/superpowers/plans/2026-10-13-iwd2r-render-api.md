@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** An SDL3 GPU presenter with scaling filters and fallback, true UI scaling through region composition, and the render API with its dispatch points proven, with the classic renderer's pixels unchanged.
+**Goal:** An SDL3 GPU presenter with scaling filters and fallback, true UI scaling through region composition, and the render API with its dispatch points proven, with the classic renderer's pixels unchanged at default settings, except the fixes toward the original listed in the README (`CVidPoly::FillConvexPoly`, `CVidPalette::GetTint`, `CVidMode::ApplyBrightnessContrast` and `CVidPalette::RealizeResource`).
 
 **Architecture:** Task 1 adds the pure composition module and the region hook in `present`, sequentially, because everything else builds on it. Then three streams run in parallel in their own worktrees: presenter (the GPU backend, shaders, settings, hotkey), layout (the second scale, regions, mouse mapping) and render API (the interface, the guards, the recording backend). Task 5 ports the 32-bpp stubs after the guards land, Task 6 integrates.
 
@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- The classic path's pixels do not change: the smoke test's frame hash, the `--vm linux` and sandbox suites and `replay compare chargen_replay` pass unchanged with default settings at every integration.
+- The classic path's pixels do not change at default settings, except the fixes toward the original listed in the README (`CVidPoly::FillConvexPoly`, `CVidPalette::GetTint`, `CVidMode::ApplyBrightnessContrast` and `CVidPalette::RealizeResource`): the smoke test's frame hash, the `--vm linux` and sandbox suites and `replay compare chargen_replay` pass unchanged with default settings at every integration.
 - Decompiled code changes are limited to one guard line at the top of each drawing entry point (section 3 of the spec) and the stub ports; each touched function gets `docs/evidence/<ADDR>.md` (`check_evidence.py` enforces it), the guards with an `exemption` naming the render API.
 - Never commit game files, dumps, `runs/` or `build/`. Never modify `/mnt/c/Games/Icewind Dale II`. On Windows write only under `C:\Users\thier\iwd2r-build*`, `iwd2r-oracle` and `iwd2r-vm`.
 - No per-file header lines. Commit messages end with `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`.

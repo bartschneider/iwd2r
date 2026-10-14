@@ -423,6 +423,7 @@ public:
     /* 0058 */ void SetCursor(LONG nToolTip) override;
     /* 0078 */ void AddEffect(CGameEffect* pEffect, BYTE list, BOOL noSave, BOOL immediateApply) override;
     /* 007C */ void ClearAI(BOOLEAN bSetSequence) override;
+    /* 008C */ void ProcessAI() override;
     /* 0094 */ void SetScript(SHORT level, CAIScript* script) override;
     /* 009C */ const BYTE* GetVisibleTerrainTable() override;
     /* 00A0 */ const BYTE* GetTerrainTable() override;
@@ -433,6 +434,7 @@ public:
     /* 00BC */ virtual void SetAIType(const CAIObjectType& typeAI, BOOL updateLive, BOOL updateStart);
     /* 00C0 */ virtual void ResetAITypeLive();
     /* 00C4 */ virtual void ResetAIType();
+    /* 00C8 */ virtual void ProcessPendingTriggers();
 
     void AddBlood(SHORT nHeight, SHORT nDirection, SHORT nType);
     void RemoveReplacementFromArea();
@@ -533,6 +535,9 @@ public:
     void GetNumInventoryPersonalSlots(INT& nUsedSlots, INT& nTotalSlots);
     void SetModalState(BYTE modalState, BOOL bUpdateToolbar);
     BOOL sub_7202E0();
+    BOOL sub_71CFF0();
+    void sub_71D0B0();
+    void sub_72FBF0();
     void CheckSequence(BYTE& sequence);
     void sub_7204C0();
     void sub_720B50(CMemINIValue* a1, CMemINIValue* a2);
@@ -726,6 +731,7 @@ public:
     /* 0920 */ CDerivedStats m_derivedStats;
     /* 1778 */ CDerivedStats m_tempStats;
     /* 25D0 */ CDerivedStats m_bonusStats;
+    /* 3428 */ DWORD field_3428;
     /* 342C */ CButtonData m_quickWeapons[8];
     /* 360C */ CButtonData m_quickSpells[9];
     /* 3828 */ CButtonData m_quickItems[3];
