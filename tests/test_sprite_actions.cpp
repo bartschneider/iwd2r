@@ -2,11 +2,13 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "CAIAction.h"
+#include "CAIScript.h"
 #include "CBaldurChitin.h"
 #include "CGameArea.h"
 #include "CGameDialog.h"
 #include "CGameDoor.h"
 #include "CGameSprite.h"
+#include "CGameTrigger.h"
 #include "CInfGame.h"
 #include "CMessage.h"
 #include "CPathSearch.h"
@@ -640,5 +642,174 @@ TEST_CASE("sprite: UseDoor on a locked door leaves it closed and says it is lock
         }
     }
     CHECK(found);
+    ClearMessages();
+}
+
+namespace {
+
+// Every object of a type on the area's three lists.
+std::vector<CGameObject*> ObjectsOfType(CGameArea* pArea, BYTE type)
+{
+    std::vector<CGameObject*> objects;
+    CTypedPtrList<CPtrList, int*>* lists[] = { &pArea->m_lVertSort, &pArea->m_lVertSortBack, &pArea->m_lVertSortFlight };
+    for (CTypedPtrList<CPtrList, int*>* list : lists) {
+        POSITION pos = list->GetHeadPosition();
+        while (pos != NULL) {
+            LONG id = static_cast<LONG>(reinterpret_cast<INT_PTR>(list->GetNext(pos)));
+            CGameObject* pObject;
+            if (g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(id, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) == CGameObjectArray::SUCCESS) {
+                g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(id, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+                if (pObject->GetObjectType() == type) {
+                    objects.push_back(pObject);
+                }
+            }
+        }
+    }
+    return objects;
+}
+
+}
+
+TEST_CASE("sprite: DoAIUpdate runs while the world is paused and cycles the AI inhibitor", "[ai][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    CGameSprite* pCharacter = NewGameInStartArea(cre);
+    CGameArea* pArea = pCharacter->GetArea();
+    REQUIRE(pArea != NULL);
+    pArea->SortLists();
+    CGameSprite* pHedron = FindSpeaker(pArea, "10HEDRON");
+    REQUIRE(pHedron != NULL);
+
+    // CGameSprite::DoAIUpdate (0x7238C0) ignores `active`; the counter test
+    // is CGameObject's.
+    const LONG counter = pHedron->m_id & pHedron->m_AISpeed;
+    pHedron->m_canBeSeen = 0;
+    pHedron->m_AIInhibitor = 0;
+    CHECK(pHedron->DoAIUpdate(FALSE, counter) == TRUE);
+    if (pHedron->m_AISpeed != 0) {
+        const BYTE inhibitor = pHedron->m_AIInhibitor;
+        CHECK(pHedron->DoAIUpdate(FALSE, counter ^ pHedron->m_AISpeed) == FALSE);
+        CHECK(pHedron->m_AIInhibitor == inhibitor);
+    }
+
+    // An unseen non-party creature (EA between CONTROLCUTOFF and EVILCUTOFF)
+    // keeps its inhibitor: 1, 2, then 0 lets an update through.
+    const BYTE ea = pHedron->GetAIType().m_nEnemyAlly;
+    if ((pHedron->m_baseStats.m_flags & 0x200000) == 0
+        && ea > CAIObjectType::EA_CONTROLCUTOFF
+        && ea < CAIObjectType::EA_EVILCUTOFF) {
+        pHedron->m_AIInhibitor = 0;
+        pHedron->m_canBeSeen = 0;
+        pHedron->DoAIUpdate(FALSE, counter);
+        CHECK(pHedron->m_AIInhibitor == 1);
+        pHedron->DoAIUpdate(FALSE, counter);
+        CHECK(pHedron->m_AIInhibitor == 2);
+        pHedron->DoAIUpdate(FALSE, counter);
+        CHECK(pHedron->m_AIInhibitor == 0);
+    }
+
+    // A party member is never held back.
+    pCharacter->m_AIInhibitor = 0;
+    const LONG partyCounter = pCharacter->m_id & pCharacter->m_AISpeed;
+    for (int n = 0; n < 3; n++) {
+        CHECK(pCharacter->DoAIUpdate(FALSE, partyCounter) == TRUE);
+        CHECK(pCharacter->m_AIInhibitor == 0);
+    }
+
+    // The constructor: active by the creature's time-of-day mask
+    // (0x6EF990), and the party member counted in the area (the BYTE count
+    // starts at 0xFF, 0x6F40F0).
+    const LONG hour = g_pBaldurChitin->GetObjectGame()->GetWorldTimer()->GetCurrentHour();
+    INFO("hour " << hour << " mask " << pHedron->m_timeOfDayVisible);
+    CHECK((pHedron->m_active != FALSE) == (((pHedron->m_timeOfDayVisible >> hour) & 1) != 0));
+    CHECK(pArea->m_nCharacters == 1);
+}
+
+TEST_CASE("trigger: DoAIUpdate answers whether the trigger has a script while paused too", "[ai][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    CGameSprite* pCharacter = NewGameInStartArea(cre);
+    CGameArea* pArea = pCharacter->GetArea();
+    REQUIRE(pArea != NULL);
+    pArea->SortLists();
+
+    std::vector<CGameObject*> triggers = ObjectsOfType(pArea, CGameObject::TYPE_TRIGGER);
+    REQUIRE(!triggers.empty());
+    int checked = 0;
+    for (CGameObject* pObject : triggers) {
+        CGameTrigger* pTrigger = static_cast<CGameTrigger*>(pObject);
+        // The constructor (0x4CCAB0) keeps the ARE's script name, which
+        // the override script was loaded from.
+        REQUIRE(pTrigger->m_overrideScript != NULL);
+        CHECK(CResRef(pTrigger->m_scriptRes) == pTrigger->m_overrideScript->m_cResRef);
+        if (pTrigger->m_triggerType == 0 || (pTrigger->m_dwFlags & 0x100) != 0) {
+            continue;
+        }
+        const BOOLEAN bScript = CResRef(pTrigger->m_scriptRes) != "";
+        CHECK(pTrigger->DoAIUpdate(FALSE, 12345) == bScript);
+        CHECK(pTrigger->DoAIUpdate(TRUE, 0) == bScript);
+        pTrigger->m_dwFlags |= 0x100;
+        CHECK(pTrigger->DoAIUpdate(TRUE, 0) == FALSE);
+        pTrigger->m_dwFlags &= ~0x100;
+        checked++;
+    }
+    CHECK(checked > 0);
+}
+
+TEST_CASE("sprite: a weapon set change takes off the old set and selects the new one", "[ai][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    CGameSprite* pCharacter = NewGameInStartArea(cre);
+    REQUIRE(pCharacter->GetArea() != NULL);
+    REQUIRE(pCharacter->m_equipment.m_items[42] == NULL);
+
+    // Set 1 holds nothing: the fist (slot 10) is selected (0x726810).
+    if (pCharacter->m_equipment.m_items[45] == NULL && pCharacter->m_equipment.m_items[46] == NULL) {
+        ClearMessages();
+        pCharacter->sub_726810(1);
+        CHECK(pCharacter->m_nWeaponSet == 1);
+        CHECK(pCharacter->m_equipment.m_selectedWeapon == 10);
+        CHECK(pCharacter->field_3D3A[2] == 0);
+        ClearMessages();
+    }
+
+    // Back to set 0: its weapon is selected again.
+    pCharacter->sub_726810(0);
+    CHECK(pCharacter->m_nWeaponSet == 0);
+    if (pCharacter->m_equipment.m_items[43] != NULL) {
+        CHECK(pCharacter->m_equipment.m_selectedWeapon == 43);
+    } else {
+        CHECK(pCharacter->m_equipment.m_selectedWeapon == 10);
+    }
     ClearMessages();
 }
