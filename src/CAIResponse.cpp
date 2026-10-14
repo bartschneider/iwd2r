@@ -2,6 +2,8 @@
 
 #include "CAIUtil.h"
 
+#include <cstdlib>
+
 // 0x40DAB0
 CAIResponse::CAIResponse()
 {
@@ -96,9 +98,11 @@ BOOL CAIResponse::InList(SHORT actionID)
 // 0x40E0C0
 BOOL CAIResponse::InListEnd(SHORT actionID)
 {
+    // NOTE: The original walks forward from the tail, so only the last
+    // action is tested.
     POSITION pos = m_actionList.GetTailPosition();
     while (pos != NULL) {
-        CAIAction* action = m_actionList.GetPrev(pos);
+        CAIAction* action = m_actionList.GetNext(pos);
         if (action->OfType(actionID)) {
             return TRUE;
         }

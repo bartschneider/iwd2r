@@ -838,6 +838,10 @@ CGameSprite::CGameSprite(BYTE* pCreature, LONG creatureSize, int a3, WORD type, 
     m_bDeleteOnRemove = TRUE;
     m_lastRegenerationTime = g_pBaldurChitin->GetObjectGame()->GetWorldTimer()->m_gameTime;
 
+    // NOTE: The original zeroes 0x3428-0x3DFA here (rep stos at 0x6EFAAB);
+    // nothing writes field_3428 afterwards.
+    field_3428 = 0;
+
     CButtonData buttonData;
 
     for (index = 0; index < 8; index++) {
@@ -9133,6 +9137,92 @@ INT CGameSprite::GetNumQuickWeaponSlots()
     return g_pBaldurChitin->GetObjectGame()->GetRuleTables().GetNumQuickWeaponSlots(m_typeAI.m_nClass);
 }
 
+// 0x71CFF0
+BOOL CGameSprite::sub_71CFF0()
+{
+    if ((m_baseStats.field_2FB & 0x1) != 0) {
+        return TRUE;
+    }
+
+    BYTE nMorale = m_baseStats.m_morale;
+    if (nMorale > 19) {
+        nMorale = 20;
+    }
+    m_baseStats.m_morale = nMorale;
+
+    // NOTE: The original clamps the unsigned byte at 0 too, which changes
+    // nothing.
+    if (nMorale == 0) {
+        nMorale = 0;
+    }
+    m_baseStats.m_morale = nMorale;
+
+    if (m_derivedStats.m_nMoraleRecoveryTime == 0) {
+        m_baseStats.m_morale = 10;
+    } else if (static_cast<DWORD>(field_44A) % (m_derivedStats.m_nMoraleRecoveryTime * 15) == 0) {
+        if (nMorale > 10) {
+            m_baseStats.m_morale = nMorale - 1;
+        } else if (nMorale < 10) {
+            m_baseStats.m_morale = nMorale + 1;
+        }
+    }
+
+    if (!g_pBaldurChitin->GetObjectGame()->GetGameSave()->m_cutScene
+        && (m_curAction.m_internalFlags & 0x1) == 0) {
+        return m_derivedStats.m_nMoraleBreak < m_baseStats.m_morale;
+    }
+
+    return TRUE;
+}
+
+// 0x71D0B0
+void CGameSprite::sub_71D0B0()
+{
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    ULONG nGameTime = pGame->GetWorldTimer()->m_gameTime;
+    DWORD nHours = (nGameTime - field_722A) / 18000;
+    DWORD nFatigue = m_baseStats.m_fatigue;
+
+    if (nFatigue < nHours) {
+        ITEM_EFFECT effect;
+        CGameEffect::ClearItemEffect(&effect, CGAMEEFFECT_FATIGUE);
+        effect.effectAmount = nHours;
+        effect.dwFlags = 1;
+        effect.durationType = 1;
+
+        CGameEffect* pEffect = CGameEffect::DecodeEffect(&effect, m_pos, m_id, CPoint(-1, -1));
+
+        // NOTE: The original leaks the effect when the sprite is immune to
+        // it.
+        if (!m_derivedStats.m_cImmunitiesEffect.OnList(pEffect)
+            && m_derivedStats.m_naturalImmunities.find(pEffect->m_effectID) == m_derivedStats.m_naturalImmunities.end()) {
+            CMessage* message = new CMessageAddEffect(pEffect, m_id, m_id);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+            // NOTE: The original's atol (0x7E7B03) is VC6's, which wraps on overflow.
+            char nLuck = static_cast<char>(iwd2r_atol(pGame->GetRuleTables().m_tFatigueMod.GetAt(CPoint(0, nHours))));
+            m_derivedStats.m_nLuck += nLuck;
+
+            if (nLuck != 0) {
+                // NOTE: Uninline.
+                AddPortraitIcon(39);
+            }
+
+            if (nHours > 6) {
+                message = new CMessagePlaySound(3, TRUE, TRUE, m_id, m_id);
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+            }
+        }
+    } else if (nHours < nFatigue) {
+        field_722A = nGameTime - nFatigue * 18000;
+
+        if (m_baseStats.m_fatigue > 6) {
+            CMessage* message = new CMessagePlaySound(3, TRUE, TRUE, m_id, m_id);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        }
+    }
+}
+
 // 0x71D310
 SHORT CGameSprite::FindItemPersonal(const CString& sName, int number, BOOL restrictToEquiped)
 {
@@ -10888,6 +10978,18 @@ DWORD CGameSprite::GetSpecialization()
     return m_baseStats.m_specialization;
 }
 
+// 0x728B70
+void CGameSprite::ProcessPendingTriggers()
+{
+    if ((m_derivedStats.m_generalState & STATE_PANIC) == 0
+        && !m_inCutScene
+        && !g_pBaldurChitin->GetObjectGame()->GetGameSave()->m_cutScene) {
+        if (sub_7202E0() && (m_baseStats.m_flags & 0x80000000) == 0) {
+            CGameAIBase::ProcessPendingTriggers();
+        }
+    }
+}
+
 // 0x728BC0
 void CGameSprite::ResolveInstants(BOOL dropNonInstants)
 {
@@ -11087,6 +11189,856 @@ void CGameSprite::ResolveTargetPoint(const CAIAction* curAction, POSITION pos)
         m_targetPoint.x = -1;
         m_targetPoint.y = -1;
         break;
+    }
+}
+
+// 0x72B9A0
+void CGameSprite::ProcessAI()
+{
+    // NOTE: A function-local static in the original (0x8F9928, built on the
+    // first call).
+    static CAIAction action;
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    BOOL bInstant;
+
+    if (g_pBaldurChitin->m_pEngineWorld->m_bPaused == TRUE
+        && g_pChitin->cNetwork.m_bIsHost == TRUE
+        && pGame->GetGameSave()->m_cutScene == TRUE) {
+        g_pBaldurChitin->m_pEngineWorld->TogglePauseGame(0, 1, 0);
+    }
+
+    if (pGame->GetGameSave()->field_1AC
+        && m_pArea != NULL
+        && g_pChitin->cNetwork.GetServiceProvider() != CNetwork::SERV_PROV_NULL
+        && g_pChitin->cNetwork.m_idLocalPlayer != m_remotePlayerID
+        && m_pArea->m_visibility.IsCharacterIdOnMap(m_id)) {
+        m_pArea->m_visibility.RemoveCharacter(m_pos, m_id, m_visibleTerrainTable);
+    }
+
+    if (pGame->GetGameSave()->field_1AC
+        && g_pChitin->cNetwork.GetServiceProvider() != CNetwork::SERV_PROV_NULL
+        && g_pChitin->cNetwork.m_idLocalPlayer != m_remotePlayerID
+        && m_typeAI.m_nEnemyAlly <= CAIOBJECTTYPE_EA_GOODCUTOFF) {
+        m_typeAI.m_nEnemyAlly = CAIOBJECTTYPE_EA_ARENAPC;
+        m_liveTypeAI.m_nEnemyAlly = CAIOBJECTTYPE_EA_ARENAPC;
+        m_startTypeAI.m_nEnemyAlly = CAIOBJECTTYPE_EA_ARENAPC;
+    }
+
+    if (m_userCommandPause > 0) {
+        m_baseStats.m_flags &= ~0x80000000;
+    }
+
+    if (field_72A0 > 0) {
+        field_72A0--;
+    }
+
+    // The move scale of game mode 0x142 (0x72BB64-0x72C0CD): the animation
+    // walks at 6 while the mode is on, and gets its old scale back after.
+    // The step towards the destination is computed again each time (the
+    // same code three times in the original).
+    LONG nDistance;
+    if (pGame->GetGameSave()->m_mode == 0x142) {
+        if (field_72AA) {
+            if (pGame->GetGameSave()->m_mode == 0x142 && m_animation.GetMoveScale() != 6) {
+                field_72AA = TRUE;
+                m_animation.SetMoveScale(6);
+
+                nDistance = static_cast<LONG>(sqrt(static_cast<double>((m_posDest.y - m_pos.y) * (m_posDest.y - m_pos.y) * 16 / 9
+                    + (m_posDest.x - m_pos.x) * (m_posDest.x - m_pos.x))));
+                if (nDistance != 0) {
+                    m_posDelta.x = static_cast<LONG>((m_posDest.x - m_pos.x) * 1024 * static_cast<UINT>(m_animation.GetMoveScale())) / nDistance;
+                    m_posDelta.y = static_cast<LONG>((m_posDest.y - m_pos.y) * 4 / 3 * 1024 * static_cast<UINT>(m_animation.GetMoveScale())) / nDistance;
+                } else {
+                    m_posDelta.x = 0;
+                    m_posDelta.y = 0;
+                }
+            }
+        } else {
+            field_72A8 = m_animation.GetMoveScale();
+            field_72AA = TRUE;
+            m_animation.SetMoveScale(6);
+
+            if (field_72A8 != 6) {
+                nDistance = static_cast<LONG>(sqrt(static_cast<double>((m_posDest.y - m_pos.y) * (m_posDest.y - m_pos.y) * 16 / 9
+                    + (m_posDest.x - m_pos.x) * (m_posDest.x - m_pos.x))));
+                if (nDistance != 0) {
+                    m_posDelta.x = static_cast<LONG>((m_posDest.x - m_pos.x) * 1024 * static_cast<UINT>(m_animation.GetMoveScale())) / nDistance;
+                    m_posDelta.y = static_cast<LONG>((m_posDest.y - m_pos.y) * 4 / 3 * 1024 * static_cast<UINT>(m_animation.GetMoveScale())) / nDistance;
+                } else {
+                    m_posDelta.x = 0;
+                    m_posDelta.y = 0;
+                }
+            }
+        }
+    } else if (field_72AA) {
+        field_72AA = FALSE;
+        m_animation.SetMoveScale(field_72A8);
+        field_562C = TRUE;
+
+        if (field_72A8 != 6) {
+            nDistance = static_cast<LONG>(sqrt(static_cast<double>((m_posDest.y - m_pos.y) * (m_posDest.y - m_pos.y) * 16 / 9
+                + (m_posDest.x - m_pos.x) * (m_posDest.x - m_pos.x))));
+            if (nDistance != 0) {
+                m_posDelta.x = static_cast<LONG>((m_posDest.x - m_pos.x) * 1024 * static_cast<UINT>(m_animation.GetMoveScale())) / nDistance;
+                m_posDelta.y = static_cast<LONG>((m_posDest.y - m_pos.y) * 4 / 3 * 1024 * static_cast<UINT>(m_animation.GetMoveScale())) / nDistance;
+            } else {
+                m_posDelta.x = 0;
+                m_posDelta.y = 0;
+            }
+        }
+    }
+
+    m_randValue = rand() % 0x7FFF;
+
+    SHORT nSequence = m_nSequence;
+    if ((m_derivedStats.m_generalState & STATE_DEAD) != 0
+        && nSequence != SEQ_DIE
+        && nSequence != SEQ_TWITCH
+        && nSequence != SEQ_SLEEP) {
+        SetSequence(SEQ_TWITCH);
+    }
+
+    if (m_pArea == NULL && (m_derivedStats.m_generalState & STATE_DEAD) != 0) {
+        if (!ProcessEffectList()) {
+            return;
+        }
+
+        bInstant = pGame->GetRuleTables().m_lInstantActions.Find(m_curAction.m_actionID) != NULL;
+        if ((g_pChitin->cNetwork.m_bConnectionEstablished != TRUE || m_curAction.m_actionID != 110)
+            && bInstant) {
+            while (1) {
+                ResolveInstants(FALSE);
+                bInstant = pGame->GetRuleTables().m_lInstantActions.Find(m_curAction.m_actionID) != NULL;
+                if (g_pChitin->cNetwork.m_bConnectionEstablished == TRUE
+                    && m_curAction.m_actionID == 110) {
+                    break;
+                }
+                if (!bInstant) {
+                    return;
+                }
+            }
+            return;
+        }
+
+        SetCurrAction(GetNextAction(action));
+        m_interrupt = FALSE;
+        return;
+    }
+
+    if (m_pPath == NULL && nSequence == SEQ_WALK) {
+        if (GetVertListType() != CGAMEOBJECT_LIST_FLIGHT) {
+            SetIdleSequence();
+        }
+    }
+
+    if (m_bSelected) {
+        if (!Orderable(FALSE)) {
+            Unselect();
+            pGame->SelectToolbar();
+        }
+    }
+
+    if (g_pChitin->cNetwork.GetServiceProvider() != CNetwork::SERV_PROV_NULL
+        && g_pChitin->cNetwork.m_idLocalPlayer != m_remotePlayerID) {
+        return;
+    }
+
+    if (m_bEscapingArea == TRUE
+        || m_curAction.m_actionID == 108
+        || m_curAction.m_actionID == 176
+        || m_currentActionId == 108
+        || m_currentActionId == 176) {
+        m_dialogWait = 0;
+    }
+
+    SHORT nActionID = m_curAction.m_actionID;
+    if (nActionID == 137
+        || nActionID == 8
+        || nActionID == 198
+        || m_currentActionId == 137
+        || m_currentActionId == 8
+        || m_currentActionId == 198) {
+        m_dialogWait = 0;
+    }
+
+    if (nActionID == 207
+        || nActionID == 208
+        || m_currentActionId == 207
+        || m_currentActionId == 208) {
+        m_dialogWait = 0;
+    }
+
+    if (!sub_7202E0()) {
+        m_dialogWait = 0;
+    }
+
+    if (m_dialogWait > 0 && m_pendingTriggers.GetHeadPosition() != NULL) {
+        SHORT nTriggerID = m_pendingTriggers.GetHead()->m_triggerID;
+        if (nTriggerID == CAITRIGGER_ATTACKEDBY || nTriggerID == CAITRIGGER_HITBY) {
+            m_dialogWait = 0;
+        }
+    }
+
+    if (m_curAction.m_actionID == 27) {
+        if (GetAIType().m_nEnemyAlly >= CAIOBJECTTYPE_EA_EVILCUTOFF) {
+            ClearActions(FALSE);
+
+            CMessage* message = new CMessageDropPath(m_id, m_id);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+            message = new CMessageAddAction(CAIAction(CAIAction::NO_ACTION, CPoint(-1, -1), 0, -1),
+                m_id,
+                m_id);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        }
+    }
+
+    if (m_curAction.m_actionID == CAIAction::NO_ACTION) {
+        if (m_queuedActions.GetCount() != 0) {
+            SetCurrAction(GetNextAction(action));
+            m_interrupt = FALSE;
+        }
+
+        if (m_curAction.m_actionID == CAIAction::NO_ACTION) {
+            m_inCutScene = FALSE;
+            m_nCommandPause = 0;
+        }
+    }
+
+    if (((pGame->GetCharacterPortraitNum(m_id) != -1 && static_cast<DWORD>(field_44A) % 16 == static_cast<DWORD>(m_id) % 16)
+            || static_cast<DWORD>(field_44A) % 0x800 == static_cast<DWORD>(m_id) % 0x800)
+        && (g_pChitin->cNetwork.GetServiceProvider() == CNetwork::SERV_PROV_NULL
+            || g_pChitin->cNetwork.m_idLocalPlayer == m_remotePlayerID)) {
+        if (pGame->GetCharacterPortraitNum(m_id) != -1 && m_nSequence != SEQ_WALK) {
+            JumpToPoint(m_pos, FALSE);
+        }
+
+        CMessage* message = new CMessageSpriteUpdate(this, m_id, m_id);
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+    }
+
+    if (pGame->GetCharacterPortraitNum(m_id) != -1
+        && static_cast<DWORD>(field_44A) % 0x803 == static_cast<DWORD>(m_id) % 0x803) {
+        sub_71D0B0();
+    }
+
+    if (pGame->GetWorldTimer()->m_active && m_nUnselectableCounter > 0) {
+        m_nUnselectableCounter--;
+    }
+
+    if (!pGame->GetWorldTimer()->m_active) {
+        // The world is paused: only the paused action's target and the
+        // instant actions (0x72DD1B).
+        if (!m_interrupt
+            || (m_baseStats.m_flags & 0x80000000) != 0
+            || (m_userCommandPause < 1 && m_nCommandPause < 1)) {
+            ResolvePausedAction(&m_curAction, m_queuedActions.GetHeadPosition());
+        } else {
+            POSITION pos = m_queuedActions.GetHeadPosition();
+            if (pos != NULL) {
+                CAIAction* pAction = m_queuedActions.GetNext(pos);
+                ResolvePausedAction(pAction, pos);
+            }
+        }
+
+        if (m_curAction.m_actionID == CAIAction::NO_ACTION && m_queuedActions.GetCount() != 0) {
+            SetCurrAction(GetNextAction(action));
+            m_interrupt = FALSE;
+        }
+
+        if (m_interrupt && (m_baseStats.m_flags & 0x80000000) == 0) {
+            SetCurrAction(GetNextAction(action));
+            m_interrupt = FALSE;
+        }
+
+        bInstant = pGame->GetRuleTables().m_lInstantActions.Find(m_curAction.m_actionID) != NULL;
+        if (g_pChitin->cNetwork.m_bConnectionEstablished == TRUE
+            && m_curAction.m_actionID == 110) {
+            return;
+        }
+
+        if (bInstant) {
+            ResolveInstants(FALSE);
+        }
+        return;
+    }
+
+    if (!m_active || !m_activeAI || !m_activeImprisonment) {
+        if (static_cast<DWORD>(field_44A) % 16 == static_cast<DWORD>(m_id) % 16
+            && m_userCommandPause < 1
+            && m_nCommandPause < 1
+            && (field_3428 & 0x7) == 0
+            && ((m_derivedStats.m_generalState & STATE_DEAD) == 0 || field_558E)) {
+            field_54C++;
+            field_558E = TRUE;
+
+            BOOL bProcess = TRUE;
+            if (m_curAction.m_actionID != CAIAction::NO_ACTION
+                && m_pendingTriggers.GetCount() == 0
+                && field_550 < 120
+                && field_552 <= 0) {
+                CRect rView(m_pArea->GetInfinity()->rViewPort);
+                INT x;
+                INT y;
+                m_pArea->GetInfinity()->GetViewPosition(x, y);
+                rView.OffsetRect(x, y);
+                if (!rView.PtInRect(m_pos)) {
+                    field_550++;
+                    bProcess = FALSE;
+                }
+            }
+
+            if (bProcess) {
+                if ((m_derivedStats.m_generalState & STATE_DEAD) != 0) {
+                    field_558E = FALSE;
+                }
+
+                if (m_pendingTriggers.GetCount() != 0) {
+                    field_552 = 5;
+                }
+
+                ProcessPendingTriggers();
+
+                if (field_552 > 0) {
+                    field_552--;
+                }
+
+                field_550 = 0;
+            }
+
+            m_userCommandPause = 0;
+            m_nCommandPause = 0;
+        }
+
+        if (m_curAction.m_actionID == CAIAction::NO_ACTION && m_queuedActions.GetCount() != 0) {
+            SetCurrAction(GetNextAction(action));
+            m_interrupt = FALSE;
+        }
+
+        bInstant = pGame->GetRuleTables().m_lInstantActions.Find(m_curAction.m_actionID) != NULL;
+        if ((g_pChitin->cNetwork.m_bConnectionEstablished != TRUE || m_curAction.m_actionID != 110)
+            && bInstant) {
+            while (1) {
+                ResolveInstants(FALSE);
+                bInstant = pGame->GetRuleTables().m_lInstantActions.Find(m_curAction.m_actionID) != NULL;
+                if (g_pChitin->cNetwork.m_bConnectionEstablished == TRUE
+                    && m_curAction.m_actionID == 110) {
+                    break;
+                }
+                if (!bInstant) {
+                    return;
+                }
+            }
+            return;
+        }
+
+        SetCurrAction(GetNextAction(action));
+        m_interrupt = FALSE;
+        return;
+    }
+
+    m_userCommandPause--;
+    m_nCommandPause--;
+    field_44A++;
+
+    if ((m_derivedStats.m_generalState & STATE_DEAD) == 0 && !sub_71CFF0()) {
+        // The morale broke (0x72CA52-0x72CC41).
+        if (!m_moraleFailure) {
+            m_moraleFailure = TRUE;
+
+            if (g_pChitin->cNetwork.GetServiceProvider() == CNetwork::SERV_PROV_NULL
+                || g_pChitin->cNetwork.m_idLocalPlayer == m_remotePlayerID) {
+                CMessage* message = new CMessageSpriteUpdate(this, m_id, m_id);
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+            }
+
+            PlaySound(1, TRUE, FALSE, FALSE);
+
+            BYTE nRoll = static_cast<BYTE>(rand() % 100);
+            if (nRoll < 10) {
+                FeedBack(18, 0, 0, 0, -1, 0, 0);
+
+                // Panic()
+                action.m_actionID = 24;
+                action.m_specificID = 0;
+                action.m_specificID2 = -1;
+                action.m_dest.x = -1;
+                action.m_dest.y = -1;
+                action.m_specificID3 = 0;
+                action.m_string1 = "";
+                action.m_string2 = "";
+                action.m_internalFlags = 0;
+
+                m_baseStats.m_generalState |= STATE_PANIC;
+            } else if (nRoll < 90) {
+                FeedBack(19, 0, 0, 0, -1, 0, 0);
+
+                // RunAwayFromNoInterrupt()
+                action.m_actionID = 184;
+                action.m_specificID = 0x7FFFFFFF;
+                action.m_specificID2 = 0;
+                action.m_dest.x = -1;
+                action.m_dest.y = -1;
+                action.m_specificID3 = 0;
+                action.m_string1 = "";
+                action.m_string2 = "";
+                action.m_internalFlags = 0;
+
+                m_baseStats.m_generalState |= STATE_PANIC;
+            } else {
+                FeedBack(20, 0, 0, 0, -1, 0, 0);
+
+                m_berserkActive = TRUE;
+
+                // Berserk()
+                action.m_actionID = 124;
+                action.m_specificID = 0x7FFFFFFF;
+                action.m_dest.x = -1;
+                action.m_dest.y = -1;
+                action.m_specificID2 = 0;
+                action.m_specificID3 = 0;
+                action.m_string1 = "";
+                action.m_string2 = "";
+                action.m_internalFlags = 0;
+            }
+
+            ClearActions(FALSE);
+            m_interrupt = TRUE;
+            AddAction(action);
+        }
+    } else if (m_dialogWait > 0
+        && m_typeAI.m_nEnemyAlly < CAIOBJECTTYPE_EA_EVILCUTOFF
+        && (m_derivedStats.m_generalState & STATE_SLEEPING) == 0
+        && m_bAllowDialogInterrupt
+        && !m_derivedStats.m_bIgnoreDialogPause) {
+        // Waiting for a dialog (0x72CC46-0x72CE7C).
+        if (m_moraleFailure) {
+            m_moraleFailure = FALSE;
+
+            if (g_pChitin->cNetwork.GetServiceProvider() == CNetwork::SERV_PROV_NULL
+                || g_pChitin->cNetwork.m_idLocalPlayer == m_remotePlayerID) {
+                CMessage* message = new CMessageSpriteUpdate(this, m_id, m_id);
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+            }
+
+            ClearActions(FALSE);
+
+            CMessage* message = new CMessageDropPath(m_id, m_id);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+            SetCurrAction(GetNextAction(action));
+
+            m_baseStats.m_generalState &= ~STATE_PANIC;
+            m_derivedStats.m_generalState &= ~STATE_PANIC;
+        }
+
+        nSequence = m_nSequence;
+        m_dialogWait--;
+
+        if (nSequence != GetIdleSequence()
+            && m_nSequence != SEQ_DIE
+            && m_nSequence != SEQ_SLEEP
+            && m_nSequence != SEQ_TWITCH) {
+            CMessage* message = new CMessageSetSequence(static_cast<BYTE>(GetIdleSequence()), m_id, m_id);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        }
+
+        CGameObject* pObject;
+        if (pGame->GetObjectArray()->GetShare(m_dialogWaitTarget,
+                CGameObjectArray::THREAD_ASYNCH,
+                &pObject,
+                INFINITE)
+            == CGameObjectArray::SUCCESS) {
+            if (m_nDirection != GetDirection(pObject->GetPos())
+                && m_nSequence != SEQ_SLEEP) {
+                CMessage* message = new CMessageSetDirection(pObject->GetPos(), m_id, m_id);
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+            }
+
+            pGame->GetObjectArray()->ReleaseShare(m_dialogWaitTarget,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+        }
+
+        if (m_pPath != NULL) {
+            CMessage* message = new CMessageDropPath(m_id, m_id);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        }
+    } else {
+        // 0x72CE81: the morale holds (or the sprite is dead) and no dialog
+        // holds it.
+        if (m_moraleFailure) {
+            m_moraleFailure = FALSE;
+
+            if (g_pChitin->cNetwork.GetServiceProvider() == CNetwork::SERV_PROV_NULL
+                || g_pChitin->cNetwork.m_idLocalPlayer == m_remotePlayerID) {
+                CMessage* message = new CMessageSpriteUpdate(this, m_id, m_id);
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+            }
+
+            ClearActions(FALSE);
+
+            CMessage* message = new CMessageDropPath(m_id, m_id);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+            SetCurrAction(GetNextAction(action));
+
+            m_baseStats.m_generalState &= ~STATE_PANIC;
+            m_derivedStats.m_generalState &= ~STATE_PANIC;
+        }
+
+        if (((m_id ^ field_44A) & 0xF) == 0) {
+            CheckTimers(1);
+        }
+
+        if ((m_derivedStats.m_generalState & STATE_SLEEPING) != 0
+            && m_nSequence != SEQ_TWITCH
+            && m_nSequence != SEQ_DIE
+            && m_nSequence != SEQ_SLEEP) {
+            CMessage* message = new CMessageSetSequence(SEQ_SLEEP, m_id, m_id);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        }
+
+        // 0: the scripts run (0x72D816); 1: the state's action replaces the
+        // current one, then field_727E and ApplyTriggers (0x72D1B4); 2: only
+        // field_727E and ApplyTriggers (0x72D1D5).
+        INT nState = 0;
+
+        if (sub_7202E0()) {
+            DWORD dwState = m_derivedStats.m_generalState;
+            if ((dwState & STATE_HELPLESS) != 0) {
+                if (m_curAction.m_actionID != CAIAction::NO_ACTION) {
+                    action = CAIAction::NULL_ACTION;
+                    nState = 1;
+                } else {
+                    nState = 2;
+                }
+            } else if ((dwState & STATE_BERSERK) != 0 && m_berserkActive) {
+                sub_72FBF0();
+
+                if (m_curAction.m_actionID != 3 && m_curAction.m_actionID != 124) {
+                    // Berserk()
+                    action.m_actionID = 124;
+                    action.m_specificID = 0x7FFFFFFF;
+                    action.m_dest.x = -1;
+                    action.m_dest.y = -1;
+                    action.m_specificID2 = 0;
+                    action.m_specificID3 = 0;
+                    action.m_string1 = "";
+                    action.m_string2 = "";
+                    action.m_internalFlags = 0;
+                    nState = 1;
+                } else {
+                    nState = 2;
+                }
+            } else if ((dwState & STATE_FEEBLEMINDED) != 0) {
+                if (m_curAction.m_actionID != CAIAction::NO_ACTION) {
+                    action = CAIAction::NULL_ACTION;
+                    nState = 1;
+                } else {
+                    nState = 2;
+                }
+            } else if ((dwState & STATE_CONFUSED) != 0) {
+                if (static_cast<DWORD>(field_44A) % 100 == static_cast<DWORD>(m_id) % 100) {
+                    switch (rand() % 10) {
+                    case 0:
+                    case 1:
+                    case 2:
+                        // RunAwayFromNoInterrupt()
+                        action.m_actionID = 184;
+                        action.m_specificID = 0x7FFFFFFF;
+                        action.m_dest.x = -1;
+                        action.m_dest.y = -1;
+                        action.m_specificID2 = 0;
+                        action.m_specificID3 = 0;
+                        action.m_string1 = "";
+                        action.m_string2 = "";
+                        action.m_internalFlags = 0;
+                        break;
+                    case 3:
+                    case 4:
+                    case 5:
+                        action = CAIAction::NULL_ACTION;
+                        break;
+                    case 6:
+                    case 7:
+                    case 8:
+                    case 9:
+                        // GroupAttack([ANYONE])
+                        action.m_actionID = CAIAction::GROUPATTACK;
+                        action.m_acteeID.Set(CAIObjectType::ANYONE);
+                        action.m_specificID = 0;
+                        action.m_specificID2 = 0;
+                        action.m_specificID3 = 0;
+                        action.m_string1 = "";
+                        action.m_string2 = "";
+                        action.m_internalFlags = 0;
+                        break;
+                    }
+                    nState = 1;
+                } else {
+                    nState = 2;
+                }
+            } else if (m_derivedStats.m_spellStates.test(SPLSTATE_ANIMAL_RAGE)) {
+                nState = 2;
+
+                if (m_curAction.m_actionID != 149) {
+                    if (m_typeAI.m_nEnemyAlly < CAIOBJECTTYPE_EA_EVILCUTOFF) {
+                        if (m_typeAI.m_nEnemyAlly <= CAIOBJECTTYPE_EA_GOODCUTOFF
+                            && (m_curAction.m_actionID != 134 || m_curAction.m_acteeID.m_nEnemyAlly < CAIOBJECTTYPE_EA_EVILCUTOFF)) {
+                            // AttackReevaluate([EVILCUTOFF], 45)
+                            action.m_actionID = 134;
+                            action.m_specificID = 0;
+                            action.m_dest.x = -1;
+                            action.m_dest.y = -1;
+                            action.m_specificID2 = -1;
+                            action.m_specificID3 = 0;
+                            action.m_string1 = "";
+                            action.m_string2 = "";
+                            action.m_internalFlags = 0;
+
+                            CAIObjectType type;
+                            type.m_nEnemyAlly = CAIOBJECTTYPE_EA_EVILCUTOFF;
+                            action.m_acteeID.Set(type);
+                            action.m_specificID = 45;
+
+                            ClearActions(FALSE);
+                            DropPath();
+                            m_interrupt = TRUE;
+                            AddAction(action);
+                        }
+                    } else if (m_curAction.m_actionID != 134 || m_curAction.m_acteeID.m_nEnemyAlly > CAIOBJECTTYPE_EA_GOODCUTOFF) {
+                        // AttackReevaluate([GOODCUTOFF], 45)
+                        action.m_actionID = 134;
+                        action.m_specificID = 0;
+                        action.m_dest.x = -1;
+                        action.m_dest.y = -1;
+                        action.m_specificID2 = -1;
+                        action.m_specificID3 = 0;
+                        action.m_string1 = "";
+                        action.m_string2 = "";
+                        action.m_internalFlags = 0;
+
+                        CAIObjectType type;
+                        type.m_nEnemyAlly = CAIOBJECTTYPE_EA_GOODCUTOFF;
+                        action.m_acteeID.Set(type);
+                        action.m_specificID = 45;
+
+                        ClearActions(FALSE);
+                        DropPath();
+                        m_interrupt = TRUE;
+                        AddAction(action);
+                    }
+                }
+            } else if (m_derivedStats.m_spellStates.test(SPLSTATE_179)) {
+                if (m_curAction.m_actionID != CAIAction::NO_ACTION) {
+                    action = CAIAction::NULL_ACTION;
+                    nState = 1;
+                } else {
+                    nState = 2;
+                }
+            } else if ((dwState & STATE_CHARMED) != 0
+                && m_startTypeAI.m_nEnemyAlly <= CAIOBJECTTYPE_EA_GOODCUTOFF
+                && m_typeAI.m_nEnemyAlly == 254) {
+                if (m_curAction.m_actionID != CAIAction::NO_ACTION) {
+                    action = CAIAction::NULL_ACTION;
+                    nState = 1;
+                } else {
+                    nState = 2;
+                }
+            }
+        }
+
+        if (nState == 0) {
+            // 0x72D816
+            if (field_727E) {
+                field_727E = FALSE;
+
+                if (m_curAction.m_actionID != CAIAction::NO_ACTION) {
+                    action = CAIAction::NULL_ACTION;
+
+                    ClearActions(FALSE);
+                    DropPath();
+                    m_interrupt = TRUE;
+                    AddAction(action);
+                }
+
+                ApplyTriggers();
+            } else {
+                sub_72FBF0();
+
+                // TODO: Incomplete: CheckModal (0x72FD20, the modal
+                // actions every 100 cycles: detect traps, stealth, turn
+                // undead and the battle songs) is not ported.
+
+                if (m_userCommandPause > 0 || m_nCommandPause > 0) {
+                    ClearTriggers();
+                }
+
+                if (static_cast<DWORD>(field_44A) % 16 == static_cast<DWORD>(m_id) % 16
+                    && m_userCommandPause < 1
+                    && m_nCommandPause < 1
+                    && (field_3428 & 0x7) == 0
+                    && ((m_derivedStats.m_generalState & STATE_DEAD) == 0 || field_558E)) {
+                    field_54C++;
+                    field_558E = TRUE;
+
+                    BOOL bProcess = TRUE;
+                    if (m_curAction.m_actionID != CAIAction::NO_ACTION
+                        && m_pendingTriggers.GetCount() == 0
+                        && field_550 < 120
+                        && field_552 <= 0) {
+                        CRect rView(m_pArea->GetInfinity()->rViewPort);
+                        INT x;
+                        INT y;
+                        m_pArea->GetInfinity()->GetViewPosition(x, y);
+                        rView.OffsetRect(x, y);
+                        if (!rView.PtInRect(m_pos)) {
+                            field_550++;
+                            bProcess = FALSE;
+                        }
+                    }
+
+                    if (bProcess) {
+                        if ((m_derivedStats.m_generalState & STATE_DEAD) != 0) {
+                            field_558E = FALSE;
+                        }
+
+                        if (m_pendingTriggers.GetCount() != 0) {
+                            field_552 = 5;
+                        }
+
+                        ProcessPendingTriggers();
+
+                        if (field_552 > 0) {
+                            field_552--;
+                        }
+
+                        field_550 = 0;
+                    }
+
+                    m_userCommandPause = 0;
+                    m_nCommandPause = 0;
+                }
+
+                if (m_curAction.m_actionID == CAIAction::NO_ACTION && m_queuedActions.GetCount() != 0) {
+                    SetCurrAction(GetNextAction(action));
+                    m_interrupt = FALSE;
+                }
+            }
+        } else {
+            if (nState == 1) {
+                ClearActions(FALSE);
+                DropPath();
+                m_interrupt = TRUE;
+                AddAction(action);
+            }
+
+            field_727E = TRUE;
+            ApplyTriggers();
+        }
+    }
+
+    // 0x72DAC5
+    if (!ProcessEffectList()) {
+        return;
+    }
+
+    if (m_posVertList == NULL) {
+        return;
+    }
+
+    if (m_dialogWait > 0
+        && m_typeAI.m_nEnemyAlly < CAIOBJECTTYPE_EA_EVILCUTOFF
+        && m_bAllowDialogInterrupt
+        && !m_derivedStats.m_bIgnoreDialogPause) {
+        return;
+    }
+
+    if ((m_derivedStats.m_generalState & STATE_DEAD) == 0) {
+        if (!sub_7245D0()
+            && !m_derivedStats.m_bCasterHold
+            && (m_derivedStats.m_generalState & (STATE_STONE_DEATH | STATE_FROZEN_DEATH)) == 0
+            && (pGame->m_nTimeStop == 0 || pGame->m_nTimeStopCaster == m_id)) {
+            do {
+                ResolveInstants(TRUE);
+                bInstant = pGame->GetRuleTables().m_lInstantActions.Find(m_curAction.m_actionID) != NULL;
+                if (g_pChitin->cNetwork.m_bConnectionEstablished == TRUE
+                    && m_curAction.m_actionID == 110) {
+                    return;
+                }
+            } while (bInstant);
+        } else {
+            bInstant = pGame->GetRuleTables().m_lInstantActions.Find(m_curAction.m_actionID) != NULL;
+            if (g_pChitin->cNetwork.m_bConnectionEstablished == TRUE
+                && m_curAction.m_actionID == 110
+                && !sub_7245D0()) {
+                return;
+            }
+
+            do {
+                if (!bInstant) {
+                    return;
+                }
+                ResolveInstants(FALSE);
+                bInstant = pGame->GetRuleTables().m_lInstantActions.Find(m_curAction.m_actionID) != NULL;
+            } while (g_pChitin->cNetwork.m_bConnectionEstablished != TRUE
+                || m_curAction.m_actionID != 110);
+        }
+    } else {
+        bInstant = pGame->GetRuleTables().m_lInstantActions.Find(m_curAction.m_actionID) != NULL;
+        if ((g_pChitin->cNetwork.m_bConnectionEstablished == TRUE && m_curAction.m_actionID == 110)
+            || !bInstant) {
+            SetCurrAction(GetNextAction(action));
+            m_interrupt = FALSE;
+        } else {
+            do {
+                ResolveInstants(FALSE);
+                bInstant = pGame->GetRuleTables().m_lInstantActions.Find(m_curAction.m_actionID) != NULL;
+                if (g_pChitin->cNetwork.m_bConnectionEstablished == TRUE
+                    && m_curAction.m_actionID == 110) {
+                    return;
+                }
+            } while (bInstant);
+        }
+    }
+}
+
+// NOTE: placed before 0x72DE60, out of address order, to keep clear of the
+// movement stream's insertion after ProcessEffectList; move after the wave.
+// 0x72FBF0
+void CGameSprite::sub_72FBF0()
+{
+    if (!sub_7202E0()) {
+        m_berserkActive = FALSE;
+    }
+
+    if (m_derivedStats.m_spellStates.test(SPLSTATE_BERSERK_ALWAYS_ACTIVE)) {
+        m_berserkActive = TRUE;
+        return;
+    }
+
+    if (static_cast<DWORD>(field_44A) % 100 == static_cast<DWORD>(m_id) % 100) {
+        if (GetVertListType() == CGAMEOBJECT_LIST_FRONT) {
+            CAIObjectType enemy = m_typeAI.GetEnemyOf();
+            if (m_pArea->GetNearest(m_id,
+                    enemy,
+                    GetVisualRange(),
+                    m_terrainTable,
+                    TRUE,
+                    GetCanSeeInvisible(),
+                    FALSE,
+                    0,
+                    FALSE)
+                == CGameObjectArray::INVALID_INDEX) {
+                m_berserkActive = FALSE;
+            } else {
+                m_berserkActive = TRUE;
+            }
+        } else {
+            m_berserkActive = FALSE;
+        }
     }
 }
 
