@@ -205,7 +205,7 @@ CGameDoor::CGameDoor(CGameArea* pArea, CAreaFileDoorObject* pDoorObject, CAreaPo
     m_ptOpenDest.x = (pDoorObject->m_openBoundingRectLeft + pDoorObject->m_openBoundingRectRight) / 2;
     m_ptOpenDest.y = pDoorObject->m_openBoundingRectBottom;
 
-    m_nClosedSearch = pDoorObject->m_openSearchSquaresCount;
+    m_nClosedSearch = pDoorObject->m_closedSearchSquaresCount;
     if (m_nClosedSearch != 0) {
         m_pClosedSearch = new CPoint[m_nClosedSearch];
 
