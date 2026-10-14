@@ -18,9 +18,9 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <new>
 #include <string>
 #include <vector>
-#include <new>
 
 namespace {
 
