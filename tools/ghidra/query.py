@@ -21,7 +21,8 @@ def main(argv=None):
         sys.exit('query: no project; run tools/ghidra/make_project.py')
     log = os.path.join(mp.PROJECT_DIR, 'headless-query.log')
     r = mp.headless(['-process', mp.PROGRAM, '-noanalysis', '-readOnly',
-                     '-postScript', 'QuerySymbol.java', *queries], log)
+                     '-postScript', 'QuerySymbol.java', *queries], log,
+                    read_only=True)
     found = [l.split('QUERY ', 1)[1].rstrip().removesuffix('(GhidraScript)')
              .rstrip() for l in r.stdout.splitlines() if 'QUERY ' in l]
     if r.returncode != 0 or not found:

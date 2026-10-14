@@ -4220,5 +4220,60 @@ class DataViewTest(unittest.TestCase):
             key, os.path.join(self.data, 'CHITIN.KEY')))
 
 
+class GhidraCloneTest(unittest.TestCase):
+    """make_project.worktree_clone: one read-only project copy per worktree."""
+
+    def setUp(self):
+        self.mp = load_ghidra_tool('make_project')
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        root = self._tmp.name
+        self.main = os.path.join(root, 'ghidra-projects', 'iwd2')
+        os.makedirs(os.path.join(self.main, 'iwd2.rep'))
+        for name, text in (('iwd2.gpr', 'gpr'), ('iwd2.lock', ''),
+                           ('iwd2.lock~', ''), ('headless-query.log', 'x'),
+                           ('iwd2.rep/data', 'v1')):
+            with open(os.path.join(self.main, name), 'w') as f:
+                f.write(text)
+        self.mp.PROJECT_DIR = self.main
+        self.mp.LOCK_PATH = os.path.join(root, 'ghidra-projects', 'iwd2.lock')
+        self.mp.CLONES_DIR = os.path.join(root, 'ghidra-projects', 'clones')
+        self.mp.GENERATION_PATH = os.path.join(self.main, 'generation')
+
+    def read(self, clone, name):
+        with open(os.path.join(clone, name)) as f:
+            return f.read()
+
+    def test_copies_the_project_without_its_locks_and_logs(self):
+        clone, lock = self.mp.worktree_clone('/w/p3-effects-core')
+        self.assertTrue(clone.endswith(os.path.join('clones', 'p3-effects-core', 'iwd2')))
+        self.assertTrue(lock.endswith(os.path.join('p3-effects-core', 'iwd2.lock')))
+        self.assertEqual(self.read(clone, 'iwd2.rep/data'), 'v1')
+        for name in ('iwd2.lock', 'iwd2.lock~', 'headless-query.log'):
+            self.assertFalse(os.path.exists(os.path.join(clone, name)))
+
+    def test_each_worktree_gets_its_own_copy(self):
+        a, lock_a = self.mp.worktree_clone('/w/p3-a')
+        b, lock_b = self.mp.worktree_clone('/w/p3-b')
+        self.assertNotEqual(a, b)
+        self.assertNotEqual(lock_a, lock_b)
+
+    def test_a_copy_is_reused_until_the_main_project_changes(self):
+        clone, _ = self.mp.worktree_clone('/w/p3-a')
+        with open(os.path.join(self.main, 'iwd2.rep/data'), 'w') as f:
+            f.write('v2')
+        self.mp.worktree_clone('/w/p3-a')
+        self.assertEqual(self.read(clone, 'iwd2.rep/data'), 'v1')
+        self.mp.bump_generation()
+        self.mp.worktree_clone('/w/p3-a')
+        self.assertEqual(self.read(clone, 'iwd2.rep/data'), 'v2')
+
+    def test_a_copy_missing_its_project_file_is_made_again(self):
+        clone, _ = self.mp.worktree_clone('/w/p3-a')
+        os.remove(os.path.join(clone, 'iwd2.gpr'))
+        self.mp.worktree_clone('/w/p3-a')
+        self.assertEqual(self.read(clone, 'iwd2.gpr'), 'gpr')
+
+
 if __name__ == '__main__':
     unittest.main()
