@@ -32,6 +32,7 @@
 #endif
 #include "CResBitmap.h"
 #include "CSearchBitmap.h"
+#include "CVidInf.h"
 #include "CVisibility.h"
 #ifdef _MSC_VER
 #pragma warning(pop)
@@ -106,13 +107,31 @@ constexpr size_t kSearchDynamicCost = 0xBA;
 constexpr size_t kSearchDimensions = 0xE6;
 
 // CVisibilityMap's constructor: the ellipse radii 14 x 10 and the arcs
-// CVidMode::GetEllipseArcPixelList(14, 10) and (10, 14) give.
+// CVidMode::GetEllipseArcPixelList(14, 10) and (10, 14) give (sub_5518A0),
+// computed by ours on a CVidInf from our constructor, leaked.
 constexpr int16_t kRadiusX = 14;
 constexpr int16_t kRadiusY = 10;
-const uint8_t kArc[kRadiusX] = { 0, 0, 0, 0, 1, 0, 0, 1, 0, 1, 1, 1 };
-constexpr uint8_t kArcLength = 12;
-const uint8_t kArcSide[kRadiusY] = { 0, 0, 1, 0, 1, 1 };
-constexpr uint8_t kArcSideLength = 6;
+
+struct Arcs {
+    uint8_t arc[kRadiusX] = {};
+    uint8_t arcLength = 0;
+    uint8_t arcSide[kRadiusY] = {};
+    uint8_t arcSideLength = 0;
+};
+
+const Arcs& VisionArcs()
+{
+    static Arcs arcs;
+    static bool made = false;
+    if (!made) {
+        CVidInf* mode = new CVidInf();
+        arcs.arcLength = static_cast<uint8_t>(mode->CVidMode::GetEllipseArcPixelList(kRadiusX, kRadiusY, arcs.arc));
+        arcs.arcSideLength
+            = static_cast<uint8_t>(mode->CVidMode::GetEllipseArcPixelList(kRadiusY, kRadiusX, arcs.arcSide));
+        made = true;
+    }
+    return arcs;
+}
 
 // CGameObject::DEFAULT_VISIBLE_TERRAIN_TABLE (0x84C514), which sprites and
 // areas copy as their visible terrain table.
@@ -186,6 +205,8 @@ VisPair MakeVisPair(CaseContext& ctx)
     std::memcpy(&cx, bmp.data() + 18, 4);
     std::memcpy(&cy, bmp.data() + 22, 4);
 
+    const Arcs& arcs = VisionArcs();
+
     VisPair pair;
     // CVisibilityMap::Init: nAreaX / 32 + 1 by nAreaY / 32 + 1.
     pair.width = cx * 16 / 32 + 1;
@@ -213,14 +234,14 @@ VisPair MakeVisPair(CaseContext& ctx)
         Put<int32_t>(search, kSearchDimensions + 4, cy);
 
         uint8_t* arc = OriginalBlock(kRadiusX);
-        std::memcpy(arc, kArc, kRadiusX);
+        std::memcpy(arc, arcs.arc, kRadiusX);
         uint8_t* arcSide = OriginalBlock(kRadiusY);
-        std::memcpy(arcSide, kArcSide, kRadiusY);
+        std::memcpy(arcSide, arcs.arcSide, kRadiusY);
 
         pair.original = OriginalBlock(kVisSize);
         pair.originalTiles = OriginalBlock(static_cast<size_t>(pair.size));
         Put<uint32_t>(pair.original, kVisMap, Address(pair.originalTiles));
-        Put<uint8_t>(pair.original, kVisArcLength, kArcLength);
+        Put<uint8_t>(pair.original, kVisArcLength, arcs.arcLength);
         Put<int16_t>(pair.original, kVisWidth, static_cast<int16_t>(pair.width));
         Put<int16_t>(pair.original, kVisHeight, static_cast<int16_t>(pair.height));
         Put<int32_t>(pair.original, kVisMapSize, pair.size);
@@ -228,7 +249,7 @@ VisPair MakeVisPair(CaseContext& ctx)
         Put<int16_t>(pair.original, kVisRadiusY, kRadiusY);
         Put<uint32_t>(pair.original, kVisArc, Address(arc));
         Put<uint32_t>(pair.original, kVisArcSide, Address(arcSide));
-        Put<uint8_t>(pair.original, kVisArcSideLength, kArcSideLength);
+        Put<uint8_t>(pair.original, kVisArcSideLength, arcs.arcSideLength);
         Put<uint32_t>(pair.original, kVisSearchMap, Address(search));
     });
 
@@ -252,15 +273,15 @@ VisPair MakeVisPair(CaseContext& ctx)
     search->m_GridSquareDimensions.cy = cy;
 
     auto* arc = new uint8_t[kRadiusX];
-    std::memcpy(arc, kArc, kRadiusX);
+    std::memcpy(arc, arcs.arc, kRadiusX);
     auto* arcSide = new uint8_t[kRadiusY];
-    std::memcpy(arcSide, kArcSide, kRadiusY);
+    std::memcpy(arcSide, arcs.arcSide, kRadiusY);
 
     auto* visStorage = static_cast<uint8_t*>(::operator new(sizeof(CVisibilityMap)));
     std::memset(visStorage, 0, sizeof(CVisibilityMap));
     pair.ours = reinterpret_cast<CVisibilityMap*>(visStorage);
     pair.ours->m_pMap = new uint8_t[static_cast<size_t>(pair.size)]();
-    pair.ours->field_4 = kArcLength;
+    pair.ours->field_4 = arcs.arcLength;
     pair.ours->m_nWidth = static_cast<SHORT>(pair.width);
     pair.ours->m_nHeight = static_cast<SHORT>(pair.height);
     pair.ours->m_nMapSize = pair.size;
@@ -268,7 +289,7 @@ VisPair MakeVisPair(CaseContext& ctx)
     pair.ours->field_10 = kRadiusY;
     pair.ours->field_12 = arc;
     pair.ours->field_16 = arcSide;
-    pair.ours->field_1A = kArcSideLength;
+    pair.ours->field_1A = arcs.arcSideLength;
     pair.ours->m_pSearchMap = search;
     return pair;
 }
