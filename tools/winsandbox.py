@@ -152,6 +152,8 @@ def refresh_cache(source, cache, log, lock=None):
         if state == 'foreign' and os.path.isdir(cache):
             log('game cache %s was not copied from %s: deleting it'
                 % (cache, source))
+            # Never remove the root or a folder that holds the source itself.
+            assert cache and os.path.realpath(cache) != os.sep and not (os.path.realpath(source) + os.sep).startswith(os.path.realpath(cache) + os.sep), cache
             shutil.rmtree(cache)
         os.makedirs(cache, exist_ok=True)
         log('rebuilding the game cache %s from %s (about 1.9 GB)'
