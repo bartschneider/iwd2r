@@ -2535,13 +2535,12 @@ void CGameArea::Unmarshal(BYTE* pArea, LONG areaSize, const CString& sName, BOOL
         deltaTime = 0;
     }
 
-    // NOTE: The original copies the eight bytes of its third argument, a
-    // resref field (two dwords, 0x472DE0). Ours gets the name as a CString,
-    // whose buffer may be shorter ("AR1000" is seven bytes with its NUL), so
-    // the name is copied up to eight characters and the rest zeroed, as a
-    // resref field pads it.
-    memset(m_header.m_areaName, 0, RESREF_SIZE);
-    memcpy(m_header.m_areaName, (LPCSTR)sName, min(sName.GetLength(), RESREF_SIZE));
+    // NOTE: The original copies eight bytes (two dwords, 0x472DE0) from its
+    // third argument, which LoadArea (0x5A24D0) builds from the area's resref
+    // (CResRef::GetResRefStr). Ours goes through a CResRef, so the name is
+    // upper-cased and zero-padded to eight bytes and nothing past the
+    // CString's buffer is read ("AR1000" is seven bytes with its NUL).
+    CResRef(sName).GetResRef(m_header.m_areaName);
 
     CString cStr(CString((char*)m_header.m_areaName, RESREF_SIZE).GetBuffer(RESREF_SIZE + 1));
 
