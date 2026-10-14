@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 
 namespace platform::present {
@@ -728,5 +729,82 @@ namespace {
 }
 
 std::unique_ptr<Backend> MakeGpuBackend() { return std::make_unique<GpuBackend>(); }
+
+namespace {
+
+    SDL_GPUShader* ProbeShader(SDL_GPUDevice* device, const char* name, SDL_GPUShaderStage stage, Uint32 samplers, Uint32 uniforms)
+    {
+        const unsigned char* code = nullptr;
+        size_t size = 0;
+        if (!ShaderCode(name, &code, &size))
+            return nullptr;
+        SDL_GPUShaderCreateInfo info = {};
+        info.code_size = size;
+        info.code = code;
+        info.entrypoint = "main";
+        info.format = SDL_GPU_SHADERFORMAT_SPIRV;
+        info.stage = stage;
+        info.num_samplers = samplers;
+        info.num_uniform_buffers = uniforms;
+        return SDL_CreateGPUShader(device, &info);
+    }
+
+    // The probe's work: a device and the nearest pipeline, as GpuBackend
+    // makes them. said is the line after "probe-gpu: "; false when the
+    // probe failed.
+    bool Probe(std::string& said)
+    {
+        if (!SDL_Init(SDL_INIT_VIDEO)) {
+            said = std::string("unavailable no SDL video: ") + SDL_GetError();
+            return false;
+        }
+        SDL_GPUDevice* device = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV, false, nullptr);
+        if (!device) {
+            said = std::string("unavailable no Vulkan device: ") + SDL_GetError();
+            return false;
+        }
+        SDL_GPUShader* vert = ProbeShader(device, "quad.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
+        SDL_GPUShader* frag = ProbeShader(device, kPipelines[kNearest].fragment, SDL_GPU_SHADERSTAGE_FRAGMENT, 1, kPipelines[kNearest].uniformBuffers);
+        SDL_GPUGraphicsPipeline* pipeline = nullptr;
+        if (vert && frag) {
+            SDL_GPUColorTargetDescription color = {};
+            color.format = kFormat;
+            SDL_GPUGraphicsPipelineCreateInfo info = {};
+            info.vertex_shader = vert;
+            info.fragment_shader = frag;
+            info.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+            info.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+            info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+            info.target_info.color_target_descriptions = &color;
+            info.target_info.num_color_targets = 1;
+            pipeline = SDL_CreateGPUGraphicsPipeline(device, &info);
+        }
+        if (!pipeline)
+            said = std::string("unavailable the nearest pipeline cannot be created: ") + SDL_GetError();
+        if (pipeline)
+            SDL_ReleaseGPUGraphicsPipeline(device, pipeline);
+        if (frag)
+            SDL_ReleaseGPUShader(device, frag);
+        if (vert)
+            SDL_ReleaseGPUShader(device, vert);
+        if (pipeline) {
+            const char* driver = SDL_GetGPUDeviceDriver(device);
+            const char* name = SDL_GetStringProperty(SDL_GetGPUDeviceProperties(device), SDL_PROP_GPU_DEVICE_NAME_STRING, "");
+            said = std::string("ok ") + (driver ? driver : "?") + (name && *name ? std::string(" ") + name : std::string());
+        }
+        SDL_DestroyGPUDevice(device);
+        return pipeline != nullptr;
+    }
+
+}
+
+int RunGpuProbe()
+{
+    std::string said;
+    const bool ok = Probe(said);
+    std::printf("probe-gpu: %s\n", said.c_str());
+    std::fflush(stdout);
+    return ok ? 0 : 1;
+}
 
 }

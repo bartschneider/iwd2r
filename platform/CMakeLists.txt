@@ -28,7 +28,7 @@ file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/present_shaders.cpp.in"
     "            *code = e.code;\n            *size = e.size;\n            return true;\n        }\n    }\n"
     "    return false;\n}\n\n}\n")
 configure_file("${CMAKE_CURRENT_BINARY_DIR}/present_shaders.cpp.in" "${CMAKE_CURRENT_BINARY_DIR}/present_shaders.cpp" COPYONLY)
-add_library(iwd2r_platform STATIC platform_version.cpp threads.cpp clock.cpp fs.cpp data_dir.cpp ddraw_shim.cpp dsound_shim.cpp compose.cpp present.cpp present_classic.cpp present_gpu.cpp present_nis.cpp "${CMAKE_CURRENT_BINARY_DIR}/present_shaders.cpp" window.cpp window_keys.cpp win32_stubs.cpp gl_compat.cpp affinity.cpp png.cpp script_core.cpp script.cpp state_dump.cpp replay.cpp crash.cpp)
+add_library(iwd2r_platform STATIC platform_version.cpp threads.cpp clock.cpp fs.cpp data_dir.cpp ddraw_shim.cpp dsound_shim.cpp compose.cpp gpu_probe.cpp present.cpp present_classic.cpp present_gpu.cpp present_nis.cpp "${CMAKE_CURRENT_BINARY_DIR}/present_shaders.cpp" window.cpp window_keys.cpp win32_stubs.cpp gl_compat.cpp affinity.cpp png.cpp script_core.cpp script.cpp state_dump.cpp replay.cpp crash.cpp)
 target_include_directories(iwd2r_platform PUBLIC "${PROJECT_SOURCE_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(iwd2r_platform PUBLIC Threads::Threads iwd2r_compat SDL3::SDL3-static miniaudio iwd2r_miniaudio ${ZLIB_LIBRARIES})
 # The screenshot writer (png.cpp) uses the vendored zlib.

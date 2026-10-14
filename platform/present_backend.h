@@ -93,6 +93,13 @@ namespace testing {
     // The gpu backend's FSR filter shows EASU's output without RCAS.
     void SetSkipRcas(bool skip);
 
+    // The executable the gpu probe runs as `<exe> --probe-gpu` (nullptr:
+    // this one, the default), and forgets the session's probe result.
+    void SetProbeExe(const char* exe);
+    // Why the last gpu (or auto) start fell back to classic, as the stderr
+    // line gives it ("probe: ..." for the probe); empty after a gpu start.
+    std::string LastFallbackReason();
+
     // Runs the front's backend without a window, presenting into an
     // offscreen target of w x h (0 x 0 stops it). The backend is chosen as
     // SetBackend would choose it with a window.

@@ -14,8 +14,9 @@
 namespace platform::present {
 
 // Which backend draws the frames: classic (SDL_Renderer, the original
-// path), gpu (SDL3 GPU, Vulkan through SPIR-V shaders), or auto (gpu when a
-// device can be made for the window, else classic). Program Options/Presenter.
+// path), gpu (SDL3 GPU, Vulkan through SPIR-V shaders), or auto (the same
+// as gpu: gpu when the probe passes and a device can be made for the window,
+// else classic). Program Options/Presenter.
 enum class BackendKind {
     Auto,
     Gpu,
@@ -46,12 +47,27 @@ const char* BackendKindName(BackendKind kind);
 // Chooses the backend. With a target window it switches now: a gpu (or
 // auto) choice that cannot start falls back to classic with one stderr line
 // saying why. Without a window the choice waits for SetPresentTarget.
+//
+// Before the game's process creates a GPU device, the probe runs the same
+// executable as `--probe-gpu` in a child process (10 s at most): only a
+// clean exit with "probe-gpu: ok" lets the device be created here; a
+// failure, crash or timeout falls back to classic with
+// "presenter: gpu unavailable (probe: ...), using classic". The child's
+// result is kept for the session, so the hotkey reuses it. IWD2R_GPU_PROBE
+// =skip creates the device without the probe; =fail fails the probe.
 void SetBackend(BackendKind kind);
 // The backend drawing now: Gpu or Classic (Classic before a window).
 BackendKind ActiveBackend();
 // Switches between gpu and classic (the Ctrl+Shift+R hotkey) and returns
-// the backend now active (classic again when gpu cannot start).
+// the backend now active (classic again when gpu cannot start, the probe
+// included).
 BackendKind ToggleBackend();
+// The child side of the probe (`iwd2r --probe-gpu`, before anything else
+// starts SDL): starts SDL video, creates a GPU device for SPIR-V, builds the
+// nearest filter's pipeline, releases everything and prints one stdout
+// line, "probe-gpu: ok <driver> <device>" or "probe-gpu: unavailable
+// <reason>". Returns the exit code: 0 or 1.
+int RunGpuProbe();
 void SetFilter(Filter filter);
 Filter CurrentFilter();
 // How much the fsr and nis filters sharpen (Program Options/Sharpness),
