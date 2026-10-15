@@ -4050,3 +4050,22 @@ DWORD CRuleTables::GetSpecializationMask(BYTE nClass, BYTE nIndex) const
 
     return 0;
 }
+
+// 0x547620
+//
+// NOTE: The save adjustment CGameEffect::CheckAdd (0x4A3310) adds for
+// SPIN108: with `nType` 1 the source's animal empathy less `nSaveMod`, the
+// spell level and 5; 0 for any other type.
+INT CRuleTables::sub_547620(INT nType, CGameSprite* pSprite, LONG nSaveMod, DWORD nSpellLevel) const
+{
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\CRuleTables.cpp
+    // __LINE__: 7295
+    UTIL_ASSERT_MSG(pSprite != NULL, "Invalid Sprite.");
+
+    INT nAdjustment = 0;
+    if (nType == 1) {
+        nAdjustment = pSprite->GetDerivedStats()->m_nSkills[CGAMESPRITE_SKILL_ANIMAL_EMPATHY] - nSaveMod - static_cast<INT>(nSpellLevel) - 5;
+    }
+
+    return nAdjustment;
+}
