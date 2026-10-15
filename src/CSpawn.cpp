@@ -375,6 +375,7 @@ int CSpawnFile::ParseData(const CString& sData, CStringArray& Sections)
                 Sections.Add(sSection);
             }
         } else {
+            count++;
             Sections.Add(sMutableData);
             sMutableData.Empty();
         }
@@ -513,6 +514,7 @@ int CSpawnList::ParseData(const CString& sData, CStringArray& Sections)
                 Sections.Add(sSection);
             }
         } else {
+            count++;
             Sections.Add(sMutableData);
             sMutableData.Empty();
         }
