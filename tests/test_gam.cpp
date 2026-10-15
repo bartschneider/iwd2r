@@ -4,6 +4,7 @@
 #include "CBaldurChitin.h"
 #include "CGameArea.h"
 #include "CGameObjectArray.h"
+#include "CGameSound.h"
 #include "CGameSpawning.h"
 #include "CGameSprite.h"
 #include "CInfGame.h"
@@ -1570,4 +1571,73 @@ TEST_CASE("party: AddXPVar gives the exptable row's experience (case 238)", "[sp
     pSprite->ProcessEffectList();
     CHECK(pSprite->m_baseStats.m_xp == nBefore + nExpected);
     pSprite->m_curAction = CAIAction();
+}
+
+TEST_CASE("sound: DoAIUpdate plays a periodic sound and draws its next period", "[spawn][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CGameSprite* pSprite = NewGameWithOneCharacter(cre, "Probe");
+    pGame->UpdateCharacterSlots();
+    pGame->SetupCharacters(FALSE);
+    CGameArea* pArea = pSprite->GetArea();
+    REQUIRE(pArea != NULL);
+
+    // An ambient sound in turn (flag bits 0 and 2, not 3), every hour, a
+    // period of 2 seconds without variance, two sounds.
+    CAreaFileSoundObject object;
+    // The class constructor clears it.
+    strncpy(reinterpret_cast<char*>(object.m_scriptName), "ProbeSound", SCRIPTNAME_SIZE);
+    object.m_posX = 1100;
+    object.m_posY = 700;
+    memcpy(object.m_soundObject[0], CResRef("AM1000A").GetResRef(), RESREF_SIZE);
+    memcpy(object.m_soundObject[1], CResRef("AM1000B").GetResRef(), RESREF_SIZE);
+    object.m_soundObjectNum = 2;
+    object.m_period = 2;
+    object.m_periodVariance = 0;
+    object.m_timeOfDayActive = 0xFFFFFF;
+    object.m_dwFlags = 0x1 | 0x4;
+    CGameSound* pSound = new CGameSound(pArea, &object);
+    const LONG counter = pSound->m_id;
+
+    // The constructor (0x4C8B10) starts the count at 0, the period at
+    // (2 - 0 + 0) * 15 and the turn at the number of sounds.
+    REQUIRE(pSound->m_period == 30);
+    REQUIRE(pSound->m_currentSound == 2);
+
+    // Not active: nothing.
+    CHECK(pSound->DoAIUpdate(FALSE, counter) == FALSE);
+    CHECK(pSound->m_periodCount == 0);
+
+    // 30 updates count up to the period ...
+    for (int n = 0; n < 30; n++) {
+        CHECK(pSound->DoAIUpdate(TRUE, counter) == FALSE);
+    }
+    CHECK(pSound->m_periodCount == 30);
+    CHECK(pSound->m_currentSound == 2);
+
+    // ... and the next plays the next sound in turn, (2 + 1) % 2, and draws
+    // the next period.
+    pSound->DoAIUpdate(TRUE, counter);
+    CHECK(pSound->m_currentSound == 1);
+    CHECK(pSound->m_periodCount == 0);
+    CHECK(pSound->m_period == 30);
+    pSound->DoAIUpdate(TRUE, counter);
+    CHECK(pSound->m_periodCount == 1);
+
+    // A disabled sound (bit 0 clear) does nothing.
+    pSound->m_soundObject.m_dwFlags = 0x4;
+    pSound->DoAIUpdate(TRUE, counter);
+    CHECK(pSound->m_periodCount == 1);
 }
