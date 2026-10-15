@@ -5,7 +5,10 @@
 #include "CGameSprite.h"
 #include "CInfCursor.h"
 #include "CInfGame.h"
+#include "CMessage.h"
+#include "CPathSearch.h"
 #include "CRuleTables.h"
+#include "CSearchBitmap.h"
 #include "CWorldMap.h"
 #include "CScreenCharacter.h"
 #include "CScreenMap.h"
@@ -19,7 +22,7 @@
 #include "CVidInf.h"
 
 // 0x8F89DC
-const LONG FATIGUE_TIME_CAP = 24 * CTimerWorld::TIMESCALE_MSEC_PER_HOUR;
+const LONG CScreenWorldMap::FATIGUE_TIME_CAP = 24 * CTimerWorld::TIMESCALE_MSEC_PER_HOUR;
 
 // 0x698860
 CScreenWorldMap::CScreenWorldMap()
@@ -1127,10 +1130,446 @@ DWORD CScreenWorldMap::GetTravelTime(DWORD nArea)
     return nTime;
 }
 
+// NOTE: Inlined twice in 0x69D0F0, for the party and for the familiars.
+//
+// Moves one party member (already denied) into `pArea` next to `ptEntry`,
+// keeping the formation and line of sight to the previous one.
+static void MoveSpriteToArea(CGameArea* pArea,
+    CGameSprite* pSprite,
+    LONG nSpriteId,
+    const CPoint& ptEntry,
+    const CPoint* pOffsets,
+    SHORT& nOffsetIndex,
+    CPoint& ptPrev,
+    BOOLEAN& bMarshalled,
+    SHORT nFacing)
+{
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+    pSprite->ClearActions(FALSE);
+
+    CGameArea* pOldArea = pSprite->m_pArea;
+
+    // The area left behind is saved to the temp folder once.
+    CAreaFile cAreaFile;
+    if (pOldArea != NULL
+        && (!g_pChitin->cNetwork.GetSessionOpen()
+            || g_pChitin->cNetwork.GetSessionHosting() == TRUE)
+        && !bMarshalled
+        && (pOldArea->m_header.m_flags & 0x1) == 0
+        && !pOldArea->field_436) {
+        BYTE* pData;
+        DWORD nSize;
+        pOldArea->Marshal(&pData, &nSize, TRUE);
+        if (pData != NULL) {
+            cAreaFile.SetResRef(pOldArea->m_resRef, TRUE, TRUE);
+
+            // NOTE: The original writes through a NULL resource when the
+            // area file is missing; bounded here (P4-10).
+            if (cAreaFile.pRes != NULL) {
+                static_cast<CRes*>(cAreaFile.pRes)->Write(pGame->m_sTempDir, pData, nSize);
+            }
+
+            pOldArea->field_436 = 1;
+            pOldArea->field_438 = pGame->m_worldTime.m_gameTime;
+
+            delete pData;
+
+            bMarshalled = TRUE;
+        }
+    }
+
+    pGame->m_bInAreaTransition = TRUE;
+
+    if (pSprite->m_pArea != NULL) {
+        pSprite->RemoveFromArea();
+
+        CPoint ptOffset(pOffsets[nOffsetIndex].x / CAIGroup::OFFSET_MULTIPLIER,
+            pOffsets[nOffsetIndex].y / CAIGroup::OFFSET_MULTIPLIER);
+        nOffsetIndex++;
+
+        BYTE nPersonalSpace = pSprite->m_animation.GetPersonalSpace();
+
+        CPoint ptOpen = pArea->m_search.GetNearestOpenSquare(CPoint(ptOffset.x + ptEntry.x, ptOffset.y + ptEntry.y),
+            pSprite->GetTerrainTable(),
+            nPersonalSpace,
+            -1);
+
+        if (ptPrev.x != -1) {
+            // Within sight of the one placed before, else next to them, else
+            // at the entry point.
+            CPoint ptPrevCenter(ptPrev.x * CPathSearch::GRID_SQUARE_SIZEX + CPathSearch::GRID_SQUARE_SIZEX / 2,
+                ptPrev.y * CPathSearch::GRID_SQUARE_SIZEY + CPathSearch::GRID_SQUARE_SIZEY / 2);
+            CPoint ptOpenCenter(ptOpen.x * CPathSearch::GRID_SQUARE_SIZEX + CPathSearch::GRID_SQUARE_SIZEX / 2,
+                ptOpen.y * CPathSearch::GRID_SQUARE_SIZEY + CPathSearch::GRID_SQUARE_SIZEY / 2);
+
+            if (!pArea->CheckLOS(ptPrevCenter, ptOpenCenter, pSprite->GetVisibleTerrainTable(), TRUE)) {
+                ptOpen = pArea->m_search.GetNearestOpenSquare(ptPrev,
+                    pSprite->GetTerrainTable(),
+                    pSprite->m_animation.GetPersonalSpace(),
+                    -1);
+
+                CPoint ptNextCenter(ptOpen.x * CPathSearch::GRID_SQUARE_SIZEX + CPathSearch::GRID_SQUARE_SIZEX / 2,
+                    ptOpen.y * CPathSearch::GRID_SQUARE_SIZEY + CPathSearch::GRID_SQUARE_SIZEY / 2);
+
+                if (!pArea->CheckLOS(ptPrevCenter, ptNextCenter, pSprite->GetVisibleTerrainTable(), TRUE)) {
+                    ptOpen = pArea->m_search.GetNearestOpenSquare(ptEntry,
+                        pSprite->GetTerrainTable(),
+                        pSprite->m_animation.GetPersonalSpace(),
+                        -1);
+                }
+            }
+        }
+
+        ptPrev = ptOpen;
+
+        CPoint pos(ptOpen.x * CPathSearch::GRID_SQUARE_SIZEX + CPathSearch::GRID_SQUARE_SIZEX / 2,
+            ptOpen.y * CPathSearch::GRID_SQUARE_SIZEY + CPathSearch::GRID_SQUARE_SIZEY / 2);
+
+        if (!pSprite->Animate() && pSprite->m_animation.CanLieDown()) {
+            // The dead lie in the back.
+            pSprite->AddToArea(pArea, pos, 0, CGameObject::LIST_BACK);
+        } else {
+            pSprite->AddToArea(pArea, pos, 0, CGameObject::LIST_FRONT);
+            pSprite->SetFacing(nFacing);
+
+            if (pGame->GetVisibleArea() != pArea) {
+                CScreenWorld* pWorld = g_pBaldurChitin->m_pEngineWorld;
+
+                // NOTE: The original compares the address of this copy with
+                // the old area's view port, so it always resizes.
+                CRect rView = pWorld->GetNewViewSize();
+                pWorld->SetNewViewSize(rView, FALSE);
+
+                pArea->m_cInfinity.SetViewPosition(pos.x - rView.Width() / 2,
+                    pos.y - rView.Height() / 2,
+                    TRUE);
+
+                pGame->UnselectAll();
+            } else if (pOldArea == pArea) {
+                CRect rView = pArea->m_cInfinity.rViewPort;
+                pArea->m_cInfinity.SetViewPosition(pos.x - rView.Width() / 2,
+                    pos.y - rView.Height() / 2,
+                    TRUE);
+            }
+
+            pGame->SelectCharacter(pSprite->m_id, FALSE);
+        }
+    }
+
+    pGame->m_bInAreaTransition = FALSE;
+
+    CPoint& ptPos = pSprite->GetPos();
+    if (ptPos.x != -1 || ptPos.y != -1 || pSprite->m_pArea != NULL) {
+        CMessage* message = new CMessageSpriteUpdate(pSprite, nSpriteId, nSpriteId);
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+    }
+}
+
 // 0x69D0F0
 void CScreenWorldMap::MoveToArea(const CResRef& cResArea, CString sEntryPoint, DWORD nEdge, BOOL bRandomEncounter, DWORD nTravelTime)
 {
-    // TODO: Incomplete.
+    // NOTE: The multiplayer parts (telling the clients 0x69D18A-0x69D1F2,
+    // waiting for them 0x69D2CB-0x69D416 and 0x69EADF-0x69F4F6, the
+    // client's side 0x69F509-0x69F834, the host's control and action hand
+    // out 0x69F9FC-0x69FF38) are not ported: iwd2r has no multiplayer.
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CBaldurMessage* pMessage = g_pBaldurChitin->GetBaldurMessage();
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenWorldMap.cpp
+    // __LINE__: 2933
+    UTIL_ASSERT(pGame != NULL && pMessage != NULL);
+
+    CString sArea;
+    cResArea.CopyToString(sArea);
+
+    DWORD nProgressTarget = CInfGame::PROGRESSBAR_AREA_ADDITIONAL + CInfGame::PROGRESSBAR_CACHING_ADDITIONAL;
+    BOOLEAN bMarshalled = FALSE;
+
+    pGame->sub_59FA00(TRUE);
+
+    g_pBaldurChitin->GetObjectGame()->m_nTravelScreenImageToUse = static_cast<BYTE>(rand() % 5);
+
+    g_pChitin->SetProgressBar(TRUE, 9891, 0, 0, TRUE, 9885, FALSE, 0, FALSE, FALSE, 255);
+    g_pChitin->cProgressBar.m_nActionProgress = 0;
+    g_pChitin->cProgressBar.m_nActionTarget = nProgressTarget;
+    g_pChitin->cProgressBar.m_bDisableMinibars = FALSE;
+
+    CGameArea* pArea = pGame->LoadArea(sArea, 255, FALSE, TRUE);
+
+    // The first character this machine controls.
+    BOOLEAN bFound = FALSE;
+    BYTE rc = CGameObjectArray::SUCCESS;
+    CGameSprite* pFoundSprite = NULL;
+    for (INT nTries = 10; nTries > 0 && !bFound; nTries--) {
+        for (SHORT nCharacter = 0; nCharacter < 6 && !bFound; nCharacter++) {
+            field_FF6 = nCharacter < 6
+                ? pGame->m_characters[nCharacter]
+                : CGameObjectArray::INVALID_INDEX;
+            if (field_FF6 != CGameObjectArray::INVALID_INDEX) {
+                do {
+                    rc = pGame->GetObjectArray()->GetDeny(field_FF6,
+                        CGameObjectArray::THREAD_ASYNCH,
+                        reinterpret_cast<CGameObject**>(&pFoundSprite),
+                        INFINITE);
+                } while (rc == CGameObjectArray::SHARED);
+
+                // NOTE: The sprite is read even when the deny failed (as the
+                // original).
+                if (g_pChitin->cNetwork.GetServiceProvider() == CNetwork::SERV_PROV_NULL
+                    || (pFoundSprite != NULL
+                        && g_pChitin->cNetwork.m_idLocalPlayer == pFoundSprite->m_remotePlayerID)) {
+                    bFound = TRUE;
+                } else {
+                    rc = pGame->GetObjectArray()->ReleaseDeny(field_FF6,
+                        CGameObjectArray::THREAD_ASYNCH,
+                        INFINITE);
+                }
+            }
+        }
+    }
+
+    if (bFound == TRUE && rc != CGameObjectArray::SUCCESS) {
+        if (g_pChitin->cNetwork.GetSessionOpen()) {
+            g_pChitin->cNetwork.CloseSession(TRUE);
+        }
+        g_pChitin->SetProgressBar(FALSE, 0, 0, 0, FALSE, 0, FALSE, 0, FALSE, FALSE, 255);
+        return;
+    }
+
+    if (pArea == NULL) {
+        if (g_pChitin->cNetwork.GetSessionOpen()) {
+            g_pChitin->cNetwork.CloseSession(TRUE);
+        }
+        g_pChitin->SetProgressBar(FALSE, 0, 0, 0, FALSE, 0, FALSE, 0, FALSE, FALSE, 255);
+
+        if (bFound == TRUE) {
+            pGame->GetObjectArray()->ReleaseDeny(field_FF6,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+        }
+        return;
+    }
+
+    // Where the party comes in.
+    SHORT nFacing = static_cast<SHORT>(nEdge);
+
+    // NOTE: The original leaves the point uninitialized on a bad edge;
+    // bounded here (P4-10).
+    CPoint ptEntry(0, 0);
+    if (bRandomEncounter) {
+        ptEntry.x = pArea->m_cInfinity.nAreaX >> 1;
+        ptEntry.y = pArea->m_cInfinity.nAreaY >> 1;
+    } else if (strcmp(sEntryPoint, "") != 0) {
+        pArea->GetEntryPoint(sEntryPoint, ptEntry, nFacing);
+    } else {
+        switch (nFacing) {
+        case 0:
+            ptEntry.x = pArea->m_cInfinity.nAreaX >> 1;
+            ptEntry.y = CPathSearch::GRID_SQUARE_SIZEY * CSearchBitmap::TRAVEL_WIDTH * 5;
+            break;
+        case 4:
+            ptEntry.x = pArea->m_cInfinity.nAreaX - CPathSearch::GRID_SQUARE_SIZEX * CSearchBitmap::TRAVEL_WIDTH * 5 - 1;
+            ptEntry.y = pArea->m_cInfinity.nAreaY >> 1;
+            break;
+        case 8:
+            ptEntry.x = pArea->m_cInfinity.nAreaX >> 1;
+            ptEntry.y = pArea->m_cInfinity.nAreaY - CPathSearch::GRID_SQUARE_SIZEY * CSearchBitmap::TRAVEL_WIDTH * 5 - 1;
+            break;
+        case 12:
+            ptEntry.x = CPathSearch::GRID_SQUARE_SIZEX * CSearchBitmap::TRAVEL_WIDTH * 5;
+            ptEntry.y = pArea->m_cInfinity.nAreaY >> 1;
+            break;
+        default:
+            // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenWorldMap.cpp
+            // __LINE__: 3186
+            UTIL_ASSERT(FALSE);
+            break;
+        }
+    }
+
+    ptEntry.x /= CPathSearch::GRID_SQUARE_SIZEX;
+    ptEntry.y /= CPathSearch::GRID_SQUARE_SIZEY;
+
+    if (bFound == TRUE) {
+        CPoint ptPrev(-1, -1);
+
+        SHORT nFormation = g_pChitin->cNetwork.GetSessionOpen()
+            ? CAIGroup::FORMATION_2BY3
+            : pGame->GetGameSave()->m_curFormation;
+
+        SHORT nDirection = static_cast<SHORT>((nFacing + 8) * 360 / 16 % 360);
+
+        CPoint* pOffsets = pGame->m_group.GetOffsets(nFormation, nDirection, TRUE);
+
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenWorldMap.cpp
+        // __LINE__: 3206
+        UTIL_ASSERT(pOffsets != NULL);
+
+        SHORT nOffsetIndex = 0;
+
+        for (SHORT nCharacter = 0; nCharacter < pGame->m_nCharacters; nCharacter++) {
+            // NOTE: Uninline.
+            LONG nCharacterId = pGame->GetCharacterId(nCharacter);
+
+            CGameSprite* pSprite;
+            do {
+                rc = pGame->GetObjectArray()->GetDeny(nCharacterId,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    reinterpret_cast<CGameObject**>(&pSprite),
+                    INFINITE);
+            } while (rc == CGameObjectArray::SHARED);
+
+            if (rc != CGameObjectArray::SUCCESS) {
+                // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenWorldMap.cpp
+                // __LINE__: 3236
+                UTIL_ASSERT(FALSE);
+
+                pGame->SelectToolbar();
+                g_pChitin->SetProgressBar(FALSE, 0, 0, 0, FALSE, 0, FALSE, 0, FALSE, FALSE, 255);
+                delete pOffsets;
+                pGame->GetObjectArray()->ReleaseDeny(field_FF6,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    INFINITE);
+                return;
+            }
+
+            if (g_pChitin->cNetwork.GetServiceProvider() == CNetwork::SERV_PROV_NULL
+                || g_pChitin->cNetwork.m_idLocalPlayer == pSprite->m_remotePlayerID) {
+                MoveSpriteToArea(pArea,
+                    pSprite,
+                    nCharacterId,
+                    ptEntry,
+                    pOffsets,
+                    nOffsetIndex,
+                    ptPrev,
+                    bMarshalled,
+                    nFacing);
+            }
+
+            pGame->GetObjectArray()->ReleaseDeny(nCharacterId,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+        }
+
+        POSITION pos = pGame->m_familiars.GetHeadPosition();
+        while (pos != NULL) {
+            LONG nFamiliarId = static_cast<LONG>(reinterpret_cast<INT_PTR>(pGame->m_familiars.GetNext(pos)));
+
+            CGameSprite* pSprite;
+            do {
+                rc = pGame->GetObjectArray()->GetDeny(nFamiliarId,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    reinterpret_cast<CGameObject**>(&pSprite),
+                    INFINITE);
+            } while (rc == CGameObjectArray::SHARED);
+
+            if (rc != CGameObjectArray::SUCCESS) {
+                // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenWorldMap.cpp
+                // __LINE__: 3372
+                UTIL_ASSERT(FALSE);
+
+                pGame->SelectToolbar();
+                g_pChitin->SetProgressBar(FALSE, 0, 0, 0, FALSE, 0, FALSE, 0, FALSE, FALSE, 255);
+                delete pOffsets;
+                pGame->GetObjectArray()->ReleaseDeny(field_FF6,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    INFINITE);
+                return;
+            }
+
+            if (g_pChitin->cNetwork.GetServiceProvider() == CNetwork::SERV_PROV_NULL
+                || g_pChitin->cNetwork.m_idLocalPlayer == pSprite->m_remotePlayerID) {
+                MoveSpriteToArea(pArea,
+                    pSprite,
+                    nFamiliarId,
+                    ptEntry,
+                    pOffsets,
+                    nOffsetIndex,
+                    ptPrev,
+                    bMarshalled,
+                    nFacing);
+            }
+
+            pGame->GetObjectArray()->ReleaseDeny(nFamiliarId,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+        }
+
+        delete pOffsets;
+
+        pGame->SelectToolbar();
+
+        if (g_pChitin->cNetwork.GetServiceProvider() == CNetwork::SERV_PROV_NULL
+            || g_pChitin->cNetwork.m_idLocalPlayer == pFoundSprite->m_remotePlayerID) {
+            CPoint& ptPos = pFoundSprite->GetPos();
+            if (ptPos.x != -1 || ptPos.y != -1 || pFoundSprite->m_pArea != NULL) {
+                CMessage* message = new CMessageSpriteUpdate(pFoundSprite, field_FF6, field_FF6);
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+            }
+        }
+
+        pGame->GetObjectArray()->ReleaseDeny(field_FF6,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+    }
+
+    g_pChitin->cProgressBar.m_nActionProgress = g_pChitin->cProgressBar.m_nActionTarget - 1;
+    g_pChitin->m_bDisplayStale = TRUE;
+
+    pGame->sub_59FA00(TRUE);
+
+    g_pChitin->cProgressBar.m_nActionProgress = g_pChitin->cProgressBar.m_nActionTarget;
+
+    g_pChitin->cProgressBar.m_bTimeoutVisible = FALSE;
+    g_pChitin->cProgressBar.m_nActionProgress = g_pChitin->cProgressBar.m_nActionTarget;
+    g_pChitin->m_bDisplayStale = TRUE;
+
+    pGame->sub_59FA00(TRUE);
+
+    g_pChitin->SetProgressBar(FALSE, 0, 0, 0, FALSE, 0, FALSE, 0, FALSE, FALSE, 255);
+
+    if (nTravelTime > 0) {
+        // Travel tires the party, up to a day's worth.
+        for (SHORT nCharacter = 0; nCharacter < pGame->m_nCharacters; nCharacter++) {
+            // NOTE: Uninline.
+            LONG nCharacterId = pGame->GetCharacterId(nCharacter);
+
+            CGameSprite* pSprite;
+            do {
+                rc = pGame->GetObjectArray()->GetDeny(nCharacterId,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    reinterpret_cast<CGameObject**>(&pSprite),
+                    INFINITE);
+            } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+            if (rc != CGameObjectArray::SUCCESS) {
+                return;
+            }
+
+            if (g_pChitin->cNetwork.GetServiceProvider() == CNetwork::SERV_PROV_NULL
+                || g_pChitin->cNetwork.m_idLocalPlayer == pSprite->m_remotePlayerID) {
+                LONG nFatigue = pGame->m_worldTime.m_gameTime - pSprite->field_722A - FATIGUE_TIME_CAP + nTravelTime;
+                if (nFatigue < 0) {
+                    nFatigue = 0;
+                } else if (nFatigue >= static_cast<LONG>(nTravelTime)) {
+                    nFatigue = nTravelTime;
+                }
+                pSprite->field_722A += nFatigue;
+            }
+
+            pGame->GetObjectArray()->ReleaseDeny(nCharacterId,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+        }
+
+        if (!g_pChitin->cNetwork.GetSessionOpen()
+            || g_pChitin->cNetwork.GetSessionHosting() == TRUE) {
+            pGame->m_worldTime.AddCurrentTime(nTravelTime);
+            pGame->FeedBack(CInfGame::FEEDBACK_TIMEPASSEDJOURNEY, nTravelTime, TRUE);
+        }
+    }
 }
 
 // 0x69BA70
