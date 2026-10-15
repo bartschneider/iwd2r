@@ -2411,6 +2411,8 @@ void CScreenStore::UpdateGroupItems()
     while (pos != NULL) {
         CScreenStoreItem* pOldItem = m_lGroupItems.GetNext(pos);
         if (!pOldItem->m_bSelected) {
+            // NOTE: In bag mode the line's heap CItem is not freed, a leak
+            // the original has too (plain operator delete of the line).
             delete pOldItem;
         } else {
             lOldItems.AddTail(pOldItem);
@@ -2475,6 +2477,8 @@ void CScreenStore::UpdateGroupItems()
             INFINITE);
     } else {
         // An open bag.
+        // NOTE: Each line owns a heap CItem that nothing frees when the list
+        // is rebuilt (see above); the original leaks it the same way.
         for (INT nIndex = 0; nIndex < m_pBag->m_lInventory.GetCount(); nIndex++) {
             CItem* pItem = new CItem();
             if (!m_pBag->GetItem(nIndex, *pItem)) {

@@ -9,8 +9,9 @@ class CGameSprite;
 class CInfGame;
 class CItem;
 
-// NOTE: These are `CInfGame` members in the original (thiscall, `pGame` is
-// `this`). They live here until `CInfGame.cpp`'s owner folds them in.
+// TODO: These eight functions are `CInfGame` members in the original
+// (thiscall, `pGame` is `this`). This file is a temporary seam (ruling M5-1):
+// they become `CInfGame` members once the CInfGame owner's stream merges.
 
 BOOLEAN CInfGame_SwapItemGround(CInfGame* pGame, LONG nContainerId, SHORT nSlotNum, CItem*& pItem, STRREF& errorCode, WORD wCount, BOOLEAN bFromServer);
 BOOL CInfGame_SwapItemPersonal(CInfGame* pGame, SHORT nPortrait, SHORT nSlotNum, CItem*& pItem, STRREF& errorCode, WORD wCount, BOOLEAN bFromServer);

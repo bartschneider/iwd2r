@@ -927,6 +927,7 @@ BOOLEAN CStore::sub_54CFE0(INT nIndex, CItem& cItem)
     cItem.SetResRef(CResRef(sResRef), TRUE);
 
     if (cItem.cResRef == "") {
+        // NOTE: The original formats the message and never shows it.
         CString sError;
         sError.Format("Random Treasure Item not found: %s", (LPCSTR)sResRef);
         return FALSE;
