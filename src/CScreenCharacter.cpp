@@ -3442,8 +3442,8 @@ void CScreenCharacter::UpdateGeneralInformation(CUIControlTextDisplay* pText, CG
 void CScreenCharacter::UpdateEquipmentInformation(CUIControlTextDisplay* pText, CGameSprite* pSprite)
 {
     // TODO: Incomplete. Blocked on CGameSprite 0x723EA0, 0x73CF10 and
-    // 0x73D080 and on CItem 0x4E9840, none ported (other streams' files);
-    // CRuleTables::GetIterativeAttackBonus 0x547020 is ported.
+    // 0x73D080, on CItem 0x4E9840 and on CRuleTables::GetIterativeAttackBonus
+    // 0x547020, none on first (all but 0x723EA0 are ported on p3/combat).
 }
 
 // 0x5E0200

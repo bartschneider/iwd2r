@@ -1,0 +1,640 @@
+#define NOMINMAX
+#include <catch2/catch_test_macros.hpp>
+
+#include "CBaldurChitin.h"
+#include "CBlood.h"
+#include "CButtonData.h"
+#include "CGameArea.h"
+#include "CGameButtonList.h"
+#include "CGameObjectArray.h"
+#include "CGameSprite.h"
+#include "CInfButtonArray.h"
+#include "CInfGame.h"
+#include "CParticle.h"
+#include "CScreenCreateChar.h"
+#include "CScreenWorld.h"
+#include "CUIControlBase.h"
+#include "CUIPanel.h"
+#include "CWeather.h"
+#include "ScreenLayout.h"
+#include "data_view.h"
+#include "platform/data_dir.h"
+#include "platform/window.h"
+
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <climits>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <memory>
+#include <string>
+#include <thread>
+#include <vector>
+
+// The action bar (CInfButtonArray), CBlood's particles and CWeather's wind,
+// on the engine in this process and a private view of the install without
+// saves (tests/data_view.h).
+
+
+namespace {
+
+namespace fs = std::filesystem;
+
+std::string ReadFile(const fs::path& path)
+{
+    std::ifstream in(path, std::ios::binary);
+    return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+}
+
+uint32_t Le32(const std::string& d, size_t at)
+{
+    return uint32_t(static_cast<unsigned char>(d[at])) | (uint32_t(static_cast<unsigned char>(d[at + 1])) << 8)
+        | (uint32_t(static_cast<unsigned char>(d[at + 2])) << 16) | (uint32_t(static_cast<unsigned char>(d[at + 3])) << 24);
+}
+
+std::string Lower(std::string s)
+{
+    for (char& c : s)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return s;
+}
+
+const char* DataDir()
+{
+    const char* env = std::getenv("IWD2_DATA");
+    return env != nullptr && *env != '\0' ? env : nullptr;
+}
+
+// The entry of `dir` whose name matches `name` without regard to case.
+fs::path Child(const fs::path& dir, const std::string& name)
+{
+    std::error_code ec;
+    for (const auto& entry : fs::directory_iterator(dir, ec)) {
+        if (Lower(entry.path().filename().string()) == Lower(name))
+            return entry.path();
+    }
+    return dir / name;
+}
+
+// The engine as iwd2r_main builds it, on a private view of the install (as
+// tests/test_gam.cpp does), every engine's panels loaded. Built once and
+// leaked: the engine's globals live until the process ends.
+fs::path g_view;
+
+bool StartEngine(std::string& error)
+{
+    static bool started = false;
+    static std::string startError;
+    static bool tried = false;
+    if (tried) {
+        error = startError;
+        return started;
+    }
+    tried = true;
+
+#ifdef _WIN32
+    _putenv_s("SDL_VIDEO_DRIVER", "dummy");
+    _putenv_s("SDL_AUDIO_DRIVER", "dummy");
+#else
+    setenv("SDL_VIDEO_DRIVER", "dummy", 1);
+    setenv("SDL_AUDIO_DRIVER", "dummy", 1);
+#endif
+    static std::unique_ptr<DataView> view;
+    const std::string original = DataDir();
+    view = std::make_unique<DataView>(original, DataView::Saves::None);
+    g_view = view->Path();
+#ifdef _WIN32
+    _putenv_s("IWD2_DATA", view->Path().c_str());
+#else
+    setenv("IWD2_DATA", view->Path().c_str(), 1);
+#endif
+    const bool found = platform::ResolveDataDir();
+#ifdef _WIN32
+    _putenv_s("IWD2_DATA", original.c_str());
+#else
+    setenv("IWD2_DATA", original.c_str(), 1);
+#endif
+    if (!found) {
+        startError = "data folder not found";
+        return false;
+    }
+    std::error_code ec;
+    if (!fs::exists(Child(g_view, "mpsave"), ec)) {
+        fs::create_directories(g_view / "mpsave", ec);
+    }
+    const iwd2r::ScreenSize screen = iwd2r::ReadScreenSize(".\\Icewind2.ini");
+    if (!screen.ok) {
+        startError = screen.error;
+        return false;
+    }
+    if (!platform::window::InitScreen(screen.width, screen.height, screen.scale)) {
+        startError = "SDL video could not start";
+        return false;
+    }
+    CBaldurChitin* chitin = new CBaldurChitin();
+    if (chitin->field_1932 != 0) {
+        startError = "CBaldurChitin refused to start";
+        return false;
+    }
+    chitin->Init(NULL);
+    POSITION pos = chitin->lEngines.GetHeadPosition();
+    while (pos != NULL) {
+        CWarp* pEngine = static_cast<CWarp*>(chitin->lEngines.GetNext(pos));
+        if (pEngine != NULL) {
+            pEngine->EngineInitialized();
+        }
+    }
+    chitin->m_pEngineCreateChar->SetVideoMode(0);
+    chitin->pActiveEngine = chitin->m_pEngineCreateChar;
+    started = true;
+    return true;
+}
+
+// Stands in for the main loop: the engine's waits for a drawn frame return
+// as soon as they begin.
+class FramePump {
+public:
+    FramePump()
+        : m_running(true)
+        , m_thread([this] {
+            while (m_running) {
+                g_pChitin->m_bDisplayStale = FALSE;
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+        })
+    {
+    }
+    ~FramePump()
+    {
+        m_running = false;
+        m_thread.join();
+    }
+    FramePump(const FramePump&) = delete;
+    FramePump& operator=(const FramePump&) = delete;
+
+private:
+    std::atomic<bool> m_running;
+    std::thread m_thread;
+};
+
+// The CRE of the first finished character in the view's Characters folder.
+std::vector<BYTE> FinishedCharacter()
+{
+    std::vector<fs::path> files;
+    std::error_code ec;
+    for (const auto& entry : fs::directory_iterator(Child(g_view, "Characters"), ec)) {
+        if (Lower(entry.path().extension().string()) == ".chr")
+            files.push_back(entry.path());
+    }
+    std::sort(files.begin(), files.end());
+    for (const fs::path& file : files) {
+        const std::string chr = ReadFile(file);
+        if (chr.size() > 0x224 && chr.compare(0, 8, "CHR V2.2") == 0) {
+            const uint32_t offset = Le32(chr, 0x28);
+            const uint32_t size = Le32(chr, 0x2C);
+            if (offset + size <= chr.size() && chr.compare(offset, 8, "CRE V2.2") == 0)
+                return std::vector<BYTE>(chr.begin() + offset, chr.begin() + offset + size);
+        }
+    }
+    return std::vector<BYTE>();
+}
+
+// A new game in AR1000 with one party member, as Party Formation's Done
+// leaves it before it saves.
+void NewGameWithOneCharacter(std::vector<BYTE>& bytes, const char* name)
+{
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    pGame->NewGame(FALSE, FALSE);
+
+    CGameSprite* pSprite = new CGameSprite(bytes.data(),
+        static_cast<LONG>(bytes.size()),
+        0,
+        0,
+        -1,
+        0,
+        0,
+        INT_MAX,
+        CPoint(-1, -1),
+        0);
+    pSprite->m_sName = name;
+    pSprite->m_bGlobal = TRUE;
+    pGame->SetCharacterSlot(0, pSprite->GetId());
+    pGame->UpdateCharacterSlots();
+    pGame->SetupCharacters(FALSE);
+    for (int n = 0; n < CINFGAME_MAX_AREAS; n++) {
+        if (pGame->m_gameAreas[n] != NULL)
+            pGame->m_gameAreas[n]->SortLists();
+    }
+}
+
+// The party member in slot 0, denied to this thread while the test reads it.
+CGameSprite* PartySprite()
+{
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CGameSprite* pSprite = NULL;
+    LONG nId = pGame->GetCharacterId(0);
+    if (pGame->GetObjectArray()->GetShare(nId, CGameObjectArray::THREAD_ASYNCH, reinterpret_cast<CGameObject**>(&pSprite), INFINITE) != CGameObjectArray::SUCCESS)
+        return NULL;
+    pGame->GetObjectArray()->ReleaseShare(nId, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+    return pSprite;
+}
+
+
+// The party member of a new one-character game, selected, or NULL. The game
+// is made once per process (CInfGame::NewGame wants no characters).
+CGameSprite* SelectedPartyMember()
+{
+    static bool made = false;
+    if (!made) {
+        std::vector<BYTE> cre = FinishedCharacter();
+        if (cre.empty())
+            return NULL;
+        NewGameWithOneCharacter(cre, "Probe");
+        made = true;
+    }
+    CGameSprite* pSprite = PartySprite();
+    if (pSprite == NULL)
+        return NULL;
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    if (pGame->GetGroup()->GetCount() == 0)
+        pGame->SelectCharacter(pSprite->GetId(), FALSE);
+    return pSprite;
+}
+
+CButtonData* LevelEntry(BYTE nLevel)
+{
+    CButtonData* pButtonData = new CButtonData();
+    pButtonData->m_abilityId.field_1D = nLevel;
+    return pButtonData;
+}
+
+size_t Particles(USHORT nType, SHORT nDirection)
+{
+    CBlood blood(NULL, 400, 300, 20, nDirection, nType, 50);
+    return static_cast<size_t>(blood.m_particleList.GetCount());
+}
+
+}
+
+// CParticle's copy constructor (0x7C35B0) copies everything but the tag,
+// the tail length included (CBlood copies a template particle for each one
+// it makes); an infinite life span is 0x7FFFFFFF (0x85EB74).
+TEST_CASE("particle: the copy keeps the tail length", "[blood]")
+{
+    CHECK(CParticle::LIFESPAN_INFINITE == 0x7FFFFFFF);
+
+    CParticle particle(1, 2, 3, 4, 5, 6, RGB(7, 8, 9), 4, 512, CParticle::DOTS);
+    particle.m_nTimeStamp = 11;
+    particle.m_nRenderTime = 40;
+    particle.m_nLifeSpan = 15;
+    particle.m_bTag = TRUE;
+
+    CParticle copy(particle);
+    CHECK(copy.m_pos.x == 1);
+    CHECK(copy.m_pos.y == 2);
+    CHECK(copy.m_pos.z == 3);
+    CHECK(copy.m_vel.x == 4);
+    CHECK(copy.m_vel.y == 5);
+    CHECK(copy.m_vel.z == 6);
+    CHECK(copy.m_rgbColor == RGB(7, 8, 9));
+    CHECK(copy.m_nTailLength == 4);
+    CHECK(copy.m_nGravity == 512);
+    CHECK(copy.m_wType == CParticle::DOTS);
+    CHECK(copy.m_nTimeStamp == 11);
+    CHECK(copy.m_nRenderTime == 40);
+    CHECK(copy.m_nLifeSpan == 15);
+    CHECK_FALSE(copy.m_bTag);
+
+    CParticle blank;
+    CHECK(blank.m_nLifeSpan == CParticle::LIFESPAN_INFINITE);
+}
+
+// GenerateParticles (0x51A500): a stream type's particle count is fixed (the
+// streams shrink by streams / length each step; the high squirt adds a left
+// and a right particle per step).
+TEST_CASE("blood: each stream type makes its fixed number of particles", "[blood]")
+{
+    CHECK(Particles(0, 0) == 70); // SQUIRT_HIGH: 20+16+12+8+4 and 2 per step
+    CHECK(Particles(1, 4) == 30); // SQUIRT_MEDIUM: 10+8+6+4+2
+    CHECK(Particles(2, 8) == 15); // SQUIRT_LOW
+    CHECK(Particles(3, 12) == 60); // GUSH_HIGH
+    CHECK(Particles(4, 2) == 30); // GUSH_MEDIUM
+    CHECK(Particles(5, 6) == 15); // GUSH_LOW
+    CHECK(Particles(6, 0) == 21); // PULSATING_ARTERY: 6+5+4+3+2+1
+}
+
+// GenerateExplodingBlood (0x51A2A0): bursts until a running count of
+// rand() % 5 reaches 30; each burst is one particle and rand() % 20 more.
+// CalcBoundingRect (0x519C40) centres its rectangle on the point with the
+// video mode's FX size, so this one needs the engine. The test engine never
+// activates its video mode, so it has no surfaces for CVidInf::GetFXSize to
+// check; the 3D flag makes it answer with the FX size instead.
+TEST_CASE("blood: exploding blood makes blobs", "[blood][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+
+    const BOOL bIs3dAccelerated = g_pChitin->cVideo.m_bIs3dAccelerated;
+    g_pChitin->cVideo.m_bIs3dAccelerated = TRUE;
+    CBlood blood(NULL, 400, 300, 0, 0, 7, 50);
+    CSize size;
+    const BOOL bHaveSize = g_pChitin->pActiveEngine->pVidMode->GetFXSize(size);
+    g_pChitin->cVideo.m_bIs3dAccelerated = bIs3dAccelerated;
+
+    CHECK(blood.m_particleType == CParticle::BLOB);
+    CHECK(blood.m_particleList.GetCount() > 0);
+    CHECK(blood.BloodLeft());
+
+    REQUIRE(bHaveSize);
+    size.cx--;
+    size.cy--;
+    CHECK(blood.m_refPoint == CPoint(400 - (size.cx >> 1), 300 - (size.cy >> 1)));
+    CHECK(blood.m_rBounding.right == 400 + (size.cx >> 1));
+    CHECK(blood.m_rBounding.bottom == 300 + (size.cy >> 1));
+    CHECK(blood.m_rBounding.left == 400 - (size.cx >> 1));
+    CHECK(blood.m_rBounding.top == 300 - (size.cy >> 1));
+}
+
+// AsynchronousUpdate (0x519740): one time stamp per call; a particle whose
+// render time is still ahead stops the walk; the blood is done (FALSE) once
+// its particles and their splashes have died.
+TEST_CASE("blood: the update runs the particles out", "[blood]")
+{
+    for (USHORT nType = 0; nType <= 6; nType++) {
+        INFO(nType);
+        CBlood blood(NULL, 400, 300, 20, 0, nType, 50);
+        REQUIRE(blood.BloodLeft());
+        int nCalls = 0;
+        BOOLEAN bLeft = TRUE;
+        while (bLeft && nCalls < 1000) {
+            bLeft = blood.AsynchronousUpdate();
+            nCalls++;
+            CHECK(blood.m_nTimeStamp == nCalls);
+            CHECK(static_cast<bool>(bLeft) == static_cast<bool>(blood.BloodLeft()));
+        }
+        CHECK_FALSE(bLeft);
+        CHECK(nCalls < 1000);
+        CHECK(blood.m_particleList.IsEmpty());
+        CHECK(blood.m_lstSplashParticles.IsEmpty());
+    }
+}
+
+// CalcBoundingRect (0x519C40): the artery's rectangle by direction.
+TEST_CASE("blood: the pulsating artery's bounding rectangle by direction", "[blood]")
+{
+    CBlood south(NULL, 400, 300, 20, 0, 6, 50);
+    CHECK(south.m_rBounding == CRect(380, 240, 420, 320));
+    CHECK(south.m_refPoint == CPoint(380, 240));
+
+    CBlood north(NULL, 400, 300, 20, 8, 6, 50);
+    CHECK(north.m_rBounding == CRect(380, 230, 420, 300));
+    CHECK(north.m_refPoint == CPoint(380, 230));
+
+    CBlood west(NULL, 400, 300, 20, 4, 6, 50);
+    CHECK(west.m_rBounding == CRect(335, 240, 415, 320));
+    CHECK(west.m_refPoint == CPoint(335, 240));
+
+    // The left and top edges stop at 0; the reference point does not.
+    CBlood corner(NULL, 5, 10, 20, 0, 6, 50);
+    CHECK(corner.m_rBounding == CRect(0, 0, 25, 30));
+    CHECK(corner.m_refPoint == CPoint(-15, -50));
+}
+
+// CalcBoundingRect (0x519C40): a squirt's or gush's rectangle by direction.
+TEST_CASE("blood: a stream's bounding rectangle by direction", "[blood]")
+{
+    CBlood south(NULL, 400, 300, 20, 0, 0, 50);
+    CHECK(south.m_rBounding == CRect(355, 270, 445, 360));
+    CHECK(south.m_refPoint == CPoint(355, 270));
+
+    CBlood north(NULL, 400, 300, 20, 8, 3, 50);
+    CHECK(north.m_rBounding == CRect(355, 250, 445, 330));
+    CHECK(north.m_refPoint == CPoint(355, 250));
+}
+
+// GetWind (0x5564F0): 100 with the wind off; in a light wind the share left
+// of the first fifth of the transition, compared signed.
+TEST_CASE("weather: the wind's ambient share", "[weather][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    CWeather& weather = g_pBaldurChitin->m_pEngineWorld->m_weather;
+    const BOOLEAN bWindOn = weather.m_bWindOn;
+    const USHORT nWindLevel = weather.m_nWindLevel;
+    const ULONG nDurationCounter = weather.m_nDurationCounter;
+
+    weather.m_bWindOn = FALSE;
+    CHECK(weather.GetWind() == 100);
+
+    weather.m_bWindOn = TRUE;
+    weather.m_nWindLevel = 32;
+    weather.m_nDurationCounter = 0;
+    CHECK(weather.GetWind() == 0);
+
+    weather.m_nWindLevel = 16;
+    const ULONG nFifth = CWeather::WEATHER_TRANSITION_TIME / 5;
+    weather.m_nDurationCounter = 0;
+    CHECK(weather.GetWind() == 100);
+    weather.m_nDurationCounter = nFifth / 2;
+    CHECK(weather.GetWind() == 100 - 500 * (nFifth / 2) / CWeather::WEATHER_TRANSITION_TIME);
+    weather.m_nDurationCounter = nFifth;
+    CHECK(weather.GetWind() == 0);
+    weather.m_nDurationCounter = nFifth + 1;
+    CHECK(weather.GetWind() == 0);
+    // The compare is signed: a counter past 0x7FFFFFFF passes it, and the
+    // share wraps as the original's 32-bit unsigned product and byte do:
+    // 500 * 0xFFFFFFFF is 0xFFFFFE0C, / 150 is 28633111, low byte 23.
+    REQUIRE(CWeather::WEATHER_TRANSITION_TIME == 150);
+    weather.m_nDurationCounter = 0xFFFFFFFF;
+    CHECK(weather.GetWind() == 100 - 23);
+
+    weather.m_bWindOn = bWindOn;
+    weather.m_nWindLevel = nWindLevel;
+    weather.m_nDurationCounter = nDurationCounter;
+}
+
+// SetState (0x589110) pushes the state it leaves, ResetState (0x588FF0) and
+// sub_589FF0 pop it; field_19B2 is the stack's size.
+TEST_CASE("action bar: the state stack", "[actionbar][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    if (SelectedPartyMember() == NULL) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+
+    CInfButtonArray& bar = g_pBaldurChitin->GetObjectGame()->m_cButtonArray;
+    bar.m_stateStack.RemoveAll();
+    bar.field_19B2 = 0;
+    bar.m_nState = 0;
+
+    // Nothing is pushed while the state is 0.
+    bar.SetState(110, TRUE);
+    CHECK(bar.m_nState == 110);
+    CHECK(bar.field_19B2 == 0);
+    const INT state110[12] = { 7, 8, 15, 16, 17, 18, 19, 20, 100, 100, 100, 100 };
+    for (int n = 0; n < 12; n++) {
+        INFO(n);
+        CHECK(bar.m_buttonTypes[n] == state110[n]);
+    }
+
+    bar.SetState(108, TRUE);
+    CHECK(bar.m_nState == 108);
+    CHECK(bar.field_19B2 == 1);
+    CHECK(bar.m_buttonTypes[0] == 21);
+    CHECK(bar.m_buttonTypes[11] == 32);
+
+    // The same state again pushes nothing.
+    bar.SetState(108, TRUE);
+    CHECK(bar.field_19B2 == 1);
+
+    bar.SetState(109, TRUE);
+    CHECK(bar.field_19B2 == 2);
+    CHECK(static_cast<int>(bar.m_stateStack.GetCount()) == bar.field_19B2);
+
+    // One pop goes back to the last state.
+    CHECK(bar.ResetState());
+    CHECK(bar.m_nState == 108);
+    CHECK(bar.field_19B2 == 1);
+
+    bar.SetState(109, TRUE);
+    CHECK(bar.field_19B2 == 2);
+    // Popping everything goes back to the first state pushed.
+    bar.sub_589FF0(FALSE, TRUE);
+    CHECK(bar.m_nState == 110);
+    CHECK(bar.field_19B2 == 0);
+    CHECK(bar.m_buttonTypes[0] == 7);
+
+    // An empty stack keeps the state.
+    CHECK(bar.ResetState());
+    CHECK(bar.m_nState == 110);
+}
+
+// UpdateButtons (0x58A340), through SetState (0x589110): state 110 is guard,
+// attack, stop, the five quick formations and four empty buttons. Each sets the frames of GUIBTACT it shows, its
+// tooltip and, for a formation, its FORMn icon.
+TEST_CASE("action bar: the buttons of state 110", "[actionbar][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    if (SelectedPartyMember() == NULL) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    CUIPanel* pPanel = g_pBaldurChitin->m_pEngineWorld->GetManager()->GetPanel(1);
+    REQUIRE(pPanel != NULL);
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CInfButtonArray& bar = pGame->m_cButtonArray;
+    bar.m_stateStack.RemoveAll();
+    bar.field_19B2 = 0;
+    bar.m_nState = 0;
+    bar.m_nSelectedButton = -1;
+    REQUIRE(bar.SetState(110, FALSE));
+
+    // Guard: frames 0 and 2, tooltip 15925.
+    CHECK(bar.m_buttonArray[0].field_0 == 1);
+    CHECK(bar.m_buttonArray[0].field_8 == 1);
+    CHECK(bar.m_buttonArray[0].field_C == 0);
+    CHECK(bar.m_buttonArray[0].field_10 == 2);
+    CHECK(pPanel->GetControl(6)->m_nToolTipStrRef == 15925);
+    // Attack: frames 12 and 14, tooltip 4666.
+    CHECK(bar.m_buttonArray[1].field_C == 12);
+    CHECK(bar.m_buttonArray[1].field_10 == 14);
+    CHECK(pPanel->GetControl(7)->m_nToolTipStrRef == 4666);
+    // Stop: frame 44, tooltip 15924.
+    CHECK(bar.m_buttonArray[2].field_C == 44);
+    CHECK(bar.m_buttonArray[2].field_10 == 44);
+    CHECK(pPanel->GetControl(8)->m_nToolTipStrRef == 15924);
+
+    // The quick formations show their icons, the current one selected.
+    for (int n = 0; n < 5; n++) {
+        INFO(n);
+        const CInfButtonSettings& settings = bar.m_buttonArray[3 + n];
+        CHECK(settings.field_0 == 1);
+        CHECK(settings.field_4 == 1);
+        CHECK(settings.field_8 == 0);
+        const SHORT nFormation = pGame->m_gameSave.m_quickFormations[n];
+        CString sIcon;
+        if (nFormation == -1) {
+            sIcon = "STONFORM";
+        } else if (nFormation < 10) {
+            sIcon.Format("FORM%d", nFormation);
+        } else {
+            sIcon.Format("FORM%c", static_cast<char>(nFormation) + '7');
+        }
+        const CResRef& icon = static_cast<const CResHelper<CResCell, 1000>&>(settings.field_14).cResRef;
+        CHECK(icon == CResRef(sIcon));
+        CHECK(settings.field_1CC == (nFormation == pGame->m_gameSave.m_curFormation ? 1 : 0));
+        CHECK(pPanel->GetControl(9 + n)->m_nToolTipStrRef == 4935);
+    }
+
+    // The last four are empty and greyed out.
+    for (int n = 8; n < 12; n++) {
+        INFO(n);
+        CHECK(bar.m_buttonArray[n].field_0 == 0);
+        CHECK(bar.m_buttonArray[n].m_bGreyOut);
+        CHECK(pPanel->GetControl(6 + n)->m_nToolTipStrRef == static_cast<STRREF>(-1));
+    }
+}
+
+// sub_595FB0 (0x595FB0) and sub_596040 (0x596040) page a spell list by
+// level: forward to the first entry of the next level (0 at the last
+// level), back to the first entry of the previous level (0 past the top).
+TEST_CASE("action bar: paging a spell list by level", "[actionbar][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+
+    CInfButtonArray& bar = g_pBaldurChitin->GetObjectGame()->m_cButtonArray;
+    CInfButtonArray::sub_587BD0();
+    CGameButtonList* pList = new CGameButtonList();
+    pList->AddTail(LevelEntry(1));
+    pList->AddTail(LevelEntry(1));
+    pList->AddTail(LevelEntry(2));
+    pList->AddTail(LevelEntry(2));
+    pList->AddTail(LevelEntry(3));
+    CInfButtonArray::dword_8E6820 = pList;
+
+    bar.field_197A = 0;
+    CHECK(bar.sub_595FB0(pList) == 2);
+    bar.field_197A = 2;
+    CHECK(bar.sub_595FB0(pList) == 4);
+    bar.field_197A = 4;
+    CHECK(bar.sub_595FB0(pList) == 0);
+
+    bar.field_197A = 4;
+    CHECK(bar.sub_596040(pList) == 2);
+    bar.field_197A = 2;
+    CHECK(bar.sub_596040(pList) == 0);
+
+    bar.field_197A = 0;
+    CInfButtonArray::sub_587BD0();
+    CHECK(CInfButtonArray::dword_8E6820 == NULL);
+}
