@@ -1235,7 +1235,7 @@ TEST_CASE("trigger: IsTeamBitOn tests the bits SetTeamBit sets (0x40E4)", "[ai][
     pCharacter->m_curAction = CAIAction();
 }
 
-TEST_CASE("trigger: ActionListEmpty and NearLocation (0x402B, 0x40A9)", "[ai][data]")
+TEST_CASE("trigger: ActionListEmpty and NearLocation and CreatureHidden (0x402B 0x40A9 0x40A7)", "[ai][data]")
 {
     if (DataDir() == nullptr) {
         SKIP("[iwd2r-skip] IWD2_DATA unset");
@@ -1289,6 +1289,14 @@ TEST_CASE("trigger: ActionListEmpty and NearLocation (0x402B, 0x40A9)", "[ai][da
     pCharacter->m_baseStats.field_2E6 = static_cast<SHORT>(pos.y);
     CHECK(nearLocation(-2, -2, 2));
     CHECK_FALSE(nearLocation(-2, -2, 1));
+
+    // CreatureHidden(Myself) (0x4582E0): the base stats' field_294.
+    const CAITrigger creatureHidden(0x40A7, CAIObjectType::OBJECT_MYSELF, 0);
+    pCharacter->m_baseStats.field_294 = 0;
+    CHECK_FALSE(pCharacter->EvaluateStatusTrigger(creatureHidden));
+    pCharacter->m_baseStats.field_294 = 1;
+    CHECK(pCharacter->EvaluateStatusTrigger(creatureHidden));
+    pCharacter->m_baseStats.field_294 = 0;
 }
 
 TEST_CASE("action: FloatMessage floats the text over its target and is done (case 241)", "[ai][data]")

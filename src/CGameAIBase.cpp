@@ -4211,6 +4211,21 @@ BOOL CGameAIBase::EvaluateStatusTrigger(const CAITrigger& trigger)
             bResult = FALSE;
         }
         break;
+    case 0x40A7:
+        // CreatureHidden: the object's hidden flag (base stats field_294).
+        {
+            CGameSprite* pSprite = NULL;
+            bNoRelease = GetTriggerSprite(triggerCopy, &pSprite);
+            pObject = pSprite;
+            if (pSprite == NULL) {
+                // NOTE: The original leaves through its early epilogue
+                // (0x45AB7A) without releasing anything; nothing is shared.
+                return FALSE;
+            }
+
+            bResult = pSprite->m_baseStats.field_294;
+        }
+        break;
     case 0x40A9:
         // NearLocation(object, x, y, range): the object within `range`
         // search squares of (x, y).
