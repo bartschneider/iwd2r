@@ -150,6 +150,108 @@ TEST_CASE("fill_convex_poly_rectangle_clipped", "[vid]")
     CHECK(pixels == Expected({ { 4, { 4, 6 } }, { 5, { 4, 6 } } }));
 }
 
+namespace {
+
+// Fills the polygon with CVidPoly::FillPoly (0x7C13A0) into a cleared 24x16
+// buffer clipped to rClip. FillPoly caches edge tables by the vertex
+// list's address and count, so each test passes its own static array.
+std::vector<DWORD> FillNonConvex(CVIDPOLY_VERTEX* vertices, WORD count, const CRect& rClip, DWORD dwFlags, const CPoint& ptRef = CPoint(0, 0))
+{
+    std::vector<DWORD> pixels(kWidth * kHeight, 0);
+    CVidPoly poly;
+    poly.SetPoly(vertices, count);
+    DWORD* surface = pixels.data() + rClip.top * kWidth + rClip.left;
+    REQUIRE(poly.FillPoly(reinterpret_cast<WORD*>(surface), kWidth * 4, rClip, kColor, dwFlags, ptRef));
+    return pixels;
+}
+
+// The notched square (2,2) (6,6) (10,2) (10,10) (2,10), by hand from the
+// original's edge walk: the edge table holds four edges sorted by top y
+// then x (the bottom edge is horizontal and skipped); once the table is
+// empty an edge ends when its count reaches -1 (0x7C1911), so the bottom
+// row 10 is drawn; spans run between pairs of active edges, inclusive.
+std::vector<std::pair<int, std::pair<int, int>>> NotchRows()
+{
+    return {
+        { 3, { 2, 3 } }, { 3, { 9, 10 } },
+        { 4, { 2, 4 } }, { 4, { 8, 10 } },
+        { 5, { 2, 5 } }, { 5, { 7, 10 } },
+        { 6, { 2, 10 } }, { 7, { 2, 10 } }, { 8, { 2, 10 } }, { 9, { 2, 10 } }, { 10, { 2, 10 } },
+        { 2, { 2, 2 } }, { 2, { 10, 10 } },
+    };
+}
+
+}
+
+TEST_CASE("fill_poly_notched_square", "[vid]")
+{
+    ChitinScope scope;
+    static CVIDPOLY_VERTEX notch[] = { { 2, 2 }, { 6, 6 }, { 10, 2 }, { 10, 10 }, { 2, 10 } };
+    CHECK(FillNonConvex(notch, 5, kWhole, 0x1) == Expected(NotchRows()));
+    // The second fill takes the edge table from the cache (0x7C1DE0) and
+    // draws the same pixels.
+    CHECK(FillNonConvex(notch, 5, kWhole, 0x1) == Expected(NotchRows()));
+}
+
+// The notch clipped to (4,3)-(9,8): rows 3..7, columns 4..8 (the clip's last
+// row and column are drawn, as in FillConvexPoly).
+TEST_CASE("fill_poly_notched_square_clipped", "[vid]")
+{
+    ChitinScope scope;
+    static CVIDPOLY_VERTEX notch[] = { { 2, 2 }, { 6, 6 }, { 10, 2 }, { 10, 10 }, { 2, 10 } };
+    std::vector<std::pair<int, std::pair<int, int>>> rows;
+    for (const auto& [y, span] : NotchRows()) {
+        if (y < 3 || y > 7) {
+            continue;
+        }
+        const int first = std::max(span.first, 4);
+        const int last = std::min(span.second, 8);
+        if (first <= last) {
+            rows.push_back({ y, { first, last } });
+        }
+    }
+    CHECK(FillNonConvex(notch, 5, CRect(4, 3, 9, 8), 0x1) == Expected(rows));
+}
+
+// Flag 0x8 flips the rows inside the clip: row y lands on clip.bottom - 1 -
+// (y - clip.top).
+TEST_CASE("fill_poly_flipped", "[vid]")
+{
+    ChitinScope scope;
+    static CVIDPOLY_VERTEX notch[] = { { 2, 2 }, { 6, 6 }, { 10, 2 }, { 10, 10 }, { 2, 10 } };
+    std::vector<std::pair<int, std::pair<int, int>>> rows;
+    for (const auto& [y, span] : NotchRows()) {
+        rows.push_back({ kHeight - 1 - y, span });
+    }
+    CHECK(FillNonConvex(notch, 5, kWhole, 0x1 | 0x8) == Expected(rows));
+}
+
+// Dithered (flag 0x2, which also skips the cache): DrawHLineDithered32
+// fills every other pixel, starting where (x + ref.x + y + ref.y) is odd.
+TEST_CASE("fill_poly_dithered", "[vid]")
+{
+    ChitinScope scope;
+    static CVIDPOLY_VERTEX notch[] = { { 2, 2 }, { 6, 6 }, { 10, 2 }, { 10, 10 }, { 2, 10 } };
+    std::vector<DWORD> expected(kWidth * kHeight, 0);
+    for (const auto& [y, span] : NotchRows()) {
+        for (int x = span.first; x <= span.second; ++x) {
+            if (((x + y) & 1) != 0) {
+                expected[y * kWidth + x] = kColor;
+            }
+        }
+    }
+    CHECK(FillNonConvex(notch, 5, kWhole, 0x2) == expected);
+}
+
+// A polygon whose edges are all horizontal has an empty edge table; the
+// original reads through NULL there (bounded: nothing is drawn).
+TEST_CASE("fill_poly_flat", "[vid]")
+{
+    ChitinScope scope;
+    static CVIDPOLY_VERTEX flat[] = { { 2, 4 }, { 8, 4 }, { 12, 4 } };
+    CHECK(FillNonConvex(flat, 3, kWhole, 0x1) == std::vector<DWORD>(kWidth * kHeight, 0));
+}
+
 // DrawHLineShaded32 blends a pixel toward the colour by the colour's
 // intensity when the pixel is not dark (sum > 31) and its sum / 8 is at most
 // that intensity; the top byte ends up clear.

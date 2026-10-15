@@ -10,6 +10,19 @@ typedef struct {
     WORD y;
 } CVIDPOLY_VERTEX;
 
+// An edge of FillPoly's edge tables (0x24 bytes in the original).
+typedef struct CVidPolyEdge {
+    /* 0000 */ struct CVidPolyEdge* pNext;
+    /* 0004 */ INT nX;
+    /* 0008 */ INT nY;
+    /* 000C */ INT nXDir;
+    /* 0010 */ INT nXStep;
+    /* 0014 */ INT nErrTerm;
+    /* 0018 */ INT nAdjUp;
+    /* 001C */ INT nAdjDown;
+    /* 0020 */ INT nCount;
+} CVIDPOLY_EDGE;
+
 class CVidPoly {
 public:
     typedef void (CVidPoly::*DrawHLineFunc)(void* pSurface, int xMin, int xMax, DWORD dwColor, const CRect& rSurface, const CPoint& ptRef);
@@ -30,6 +43,8 @@ public:
     void DrawHLineDithered16(void* pSurface, int xMin, int xMax, DWORD dwColor, const CRect& rSurface, const CPoint& ptRef);
     void DrawHLineDitheredMirrored16(void* pSurface, int xMin, int xMax, DWORD dwColor, const CRect& rSurface, const CPoint& ptRef);
     void SetHLineFunction(DWORD dwFlags);
+    void AdvanceActiveEdges();
+    void BuildEdgeTable(CVIDPOLY_EDGE* pEdges);
 
     void DrawHLineShaded16(void* pSurface, int xMin, int xMax, DWORD dwColor, const CRect& rSurface, const CPoint& ptRef);
     void DrawHLineShadedMirrored16(void* pSurface, int xMin, int xMax, DWORD dwColor, const CRect& rSurface, const CPoint& ptRef);
@@ -50,8 +65,8 @@ public:
     int field_0;
     CVIDPOLY_VERTEX* m_pVertices;
     INT m_nVertices;
-    int field_C;
-    int field_10;
+    CVIDPOLY_EDGE* m_pEdgeTable;
+    CVIDPOLY_EDGE* m_pActiveEdges;
     DrawHLineFunc m_pDrawHLineFunction;
 };
 

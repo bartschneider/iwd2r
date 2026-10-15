@@ -956,6 +956,145 @@ void FillConvexPoly(CaseContext& ctx)
     }
 }
 
+// CVidPoly::FillPoly(pSurface, lPitch, rClip, dwColor, dwFlags, ptRef)
+// (0x7C13A0), `ret 0x18`, with the same arguments as FillConvexPoly. It
+// builds its edge table into a global (0xA07B20) and caches up to 16 tables
+// keyed by the vertex list's address and count (0xA09F20; not for 0x2), so
+// every input gets vertex lists at fresh addresses on both sides: a
+// reused address with the same count would take a stale table, in the
+// original as in ours.
+using FillPolyFn = int32_t(__fastcall*)(void* self, void* edx, uint32_t* pSurface, int32_t lPitch,
+    const void* rClip, uint32_t dwColor, uint32_t dwFlags, const void* ptRef);
+constexpr uintptr_t kFillPoly = 0x7C13A0;
+
+// FillPoly on the 64x48 canvas of random pixels: non-convex shapes (a
+// notched square, an L, a U, a comb, a bow tie that crosses itself, a
+// spiral-like zigzag), the convex triangle and rectangle, and random
+// star-shaped polygons of 3 to 12 vertices, each solid, dithered, shaded,
+// mirrored and flipped, three clip rectangles, each filled twice with the
+// same vertex list so the second fill takes the cached table. The result
+// and the whole canvas are compared.
+void FillPoly(CaseContext& ctx)
+{
+    VideoFixture video(ctx);
+    uint8_t* poly = nullptr;
+    uint32_t* canvas = nullptr;
+    uint8_t* clip = nullptr;
+    uint8_t* ref = nullptr;
+    ctx.SetInputs("building the original's polygon and canvas");
+    ctx.CallOriginal([&] {
+        poly = OriginalBlock(kVidPolySize);
+        reinterpret_cast<VidPolyCtorFn>(kVidPolyCtor)(poly, nullptr);
+        canvas = reinterpret_cast<uint32_t*>(OriginalBlock(kPolyCanvasW * kPolyCanvasH * 4));
+        clip = OriginalBlock(16);
+        ref = OriginalBlock(8);
+    });
+    CVidPoly ours;
+    // Our vertex lists stay alive, so no address repeats.
+    std::vector<std::vector<CVIDPOLY_VERTEX>> keep;
+    std::vector<DWORD> mine(kPolyCanvasW * kPolyCanvasH);
+    Picks picks(ctx.seed, 0x46696C6C506F6C79ull); // "FillPoly"
+    const uint32_t kFlags[] = { 0x1, 0x2, 0x10, 0x1 | 0x4, 0x2 | 0x4, 0x1 | 0x8, 0x2 | 0x8, 0x10 | 0x8 };
+    int n = 0;
+
+    auto check = [&](const std::vector<CVIDPOLY_VERTEX>& points, const CRect& rClip, uint32_t dwFlags) {
+        uint8_t* vertices = nullptr;
+        ctx.CallOriginal([&] { vertices = OriginalBlock(points.size() * 4); });
+        keep.push_back(points);
+        std::vector<CVIDPOLY_VERTEX>& copy = keep.back();
+        for (int pass = 0; pass < 2; ++pass) {
+            const uint32_t color = picks.Bits() & 0xFFFFFF;
+            for (DWORD& pixel : mine) {
+                pixel = picks.Bits();
+            }
+            std::string text = "input " + std::to_string(n++) + ": pass " + std::to_string(pass) + ", flags "
+                + Hex(dwFlags) + ", clip (" + std::to_string(rClip.left) + "," + std::to_string(rClip.top) + ")-("
+                + std::to_string(rClip.right) + "," + std::to_string(rClip.bottom) + "), vertices";
+            for (const CVIDPOLY_VERTEX& v : points) {
+                text += " (" + std::to_string(v.x) + "," + std::to_string(v.y) + ")";
+            }
+            ctx.SetInputs(text);
+            const int32_t r[4] = { rClip.left, rClip.top, rClip.right, rClip.bottom };
+            const int32_t pt[2] = { picks.Between(0, 7), picks.Between(0, 7) };
+            const int32_t offset = rClip.top * kPolyCanvasW + rClip.left;
+            int32_t originalResult = 0;
+            ctx.CallOriginal([&] {
+                std::memcpy(canvas, mine.data(), mine.size() * 4);
+                std::memcpy(vertices, points.data(), points.size() * 4);
+                std::memcpy(clip, r, sizeof(r));
+                std::memcpy(ref, pt, sizeof(pt));
+                Put<uint32_t>(poly, 4, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(vertices)));
+                Put<int32_t>(poly, 8, static_cast<int32_t>(points.size()));
+                originalResult = reinterpret_cast<FillPolyFn>(kFillPoly)(poly, nullptr, canvas + offset,
+                    kPolyCanvasW * 4, clip, color, dwFlags, ref);
+            });
+            ours.SetPoly(copy.data(), static_cast<WORD>(copy.size()));
+            const BOOL oursResult = ours.FillPoly(reinterpret_cast<WORD*>(mine.data() + offset), kPolyCanvasW * 4,
+                rClip, color, dwFlags, CPoint(pt[0], pt[1]));
+            ctx.CountInputs(1);
+            if (oracle::Compare(ctx, originalResult, static_cast<int32_t>(oursResult))) {
+                CompareArrays(ctx, canvas, mine.data(), kPolyCanvasW * kPolyCanvasH);
+            }
+        }
+    };
+
+    auto vertex = [](int x, int y) { return CVIDPOLY_VERTEX { static_cast<WORD>(x), static_cast<WORD>(y) }; };
+    const CRect kClips[] = { CRect(0, 0, kPolyCanvasW, kPolyCanvasH), CRect(4, 6, 60, 44), CRect(10, 12, 30, 20) };
+
+    for (const uint32_t dwFlags : kFlags) {
+        for (const CRect& rClip : kClips) {
+            check({ vertex(2, 2), vertex(6, 6), vertex(10, 2), vertex(10, 10), vertex(2, 10) }, rClip, dwFlags);
+            check({ vertex(5, 3), vertex(15, 3), vertex(15, 30), vertex(45, 30), vertex(45, 40), vertex(5, 40) },
+                rClip, dwFlags);
+            check({ vertex(4, 4), vertex(14, 4), vertex(17, 33), vertex(40, 35), vertex(43, 2), vertex(58, 6),
+                      vertex(50, 45), vertex(9, 44) },
+                rClip, dwFlags);
+            check({ vertex(1, 1), vertex(9, 25), vertex(17, 3), vertex(25, 27), vertex(33, 5), vertex(41, 29),
+                      vertex(49, 7), vertex(57, 31), vertex(60, 46), vertex(3, 46) },
+                rClip, dwFlags);
+            check({ vertex(3, 5), vertex(50, 40), vertex(50, 5), vertex(3, 40) }, rClip, dwFlags);
+            check({ vertex(30, 0), vertex(63, 20), vertex(40, 24), vertex(55, 47), vertex(20, 30), vertex(2, 47),
+                      vertex(10, 20), vertex(0, 8) },
+                rClip, dwFlags);
+            check({ vertex(10, 0), vertex(13, 4), vertex(6, 4) }, rClip, dwFlags);
+            check({ vertex(0, 0), vertex(63, 0), vertex(63, 47), vertex(0, 47) }, rClip, dwFlags);
+        }
+    }
+    for (int i = 0; i < 200 + ctx.iterations / 10; ++i) {
+        const uint32_t dwFlags = kFlags[picks.Between(0, 7)];
+        const CRect rClip = kClips[picks.Between(0, 2)];
+        // A star-shaped polygon: points at increasing angles around a
+        // centre with random radii, not all on one row.
+        static const int kCos[12] = { 100, 87, 50, 0, -50, -87, -100, -87, -50, 0, 50, 87 };
+        static const int kSin[12] = { 0, 50, 87, 100, 87, 50, 0, -50, -87, -100, -87, -50 };
+        const int cx = picks.Between(20, 43);
+        const int cy = picks.Between(16, 31);
+        std::vector<CVIDPOLY_VERTEX> points;
+        for (int k = 0; k < 12; ++k) {
+            if (picks.Between(0, 2) == 0 && 12 - k > 3 - static_cast<int>(points.size())) {
+                continue;
+            }
+            const int radius = picks.Between(2, 19);
+            const int x = std::clamp(cx + radius * kCos[k] / 100, 0, kPolyCanvasW - 1);
+            const int y = std::clamp(cy + radius * kSin[k] / 100, 0, kPolyCanvasH - 1);
+            points.push_back(vertex(x, y));
+        }
+        bool flat = true;
+        for (const CVIDPOLY_VERTEX& v : points) {
+            flat = flat && v.y == points[0].y;
+        }
+        if (flat) {
+            // The original reads through NULL when every edge is
+            // horizontal (an empty edge table); not an input.
+            continue;
+        }
+        if (picks.Between(0, 1)) {
+            std::reverse(points.begin(), points.end());
+        }
+        check(points, rClip, dwFlags);
+    }
+}
+
 // CVidCell::sub_7D0950(pSurface, lPitch, dwFlags, nTransVal) (0x7D0950),
 // `ret 0x10`, and sub_7D1190(pSurface, lPitch, dwFlags) (0x7D1190), `ret 0xc`.
 using CellTransFn = int32_t(__fastcall*)(void* self, void* edx, uint32_t* pSurface, int32_t lPitch, uint32_t dwFlags,
@@ -1158,5 +1297,6 @@ ORACLE_CASE("vid/thick_line32", ThickLine32);
 ORACLE_CASE("vid/brightness_contrast", BrightnessContrast);
 ORACLE_CASE("vid/lighting_effect32", LightingEffect32);
 ORACLE_CASE("vid/fill_convex_poly", FillConvexPoly);
+ORACLE_CASE("vid/fill_poly", FillPoly);
 ORACLE_CASE("vid/cell_translucent32", CellTranslucent);
 ORACLE_CASE("vid/cell_brightness32", CellBrightness);
