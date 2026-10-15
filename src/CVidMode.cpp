@@ -1279,10 +1279,68 @@ BOOL CVidMode::PolyLine(INT nSurface, CRect& rSurface, LPPOINT lpPoints, int nCo
 
     switch (g_pChitin->cVideo.GetBitsPerPixels()) {
     case 16:
-        // TODO: Incomplete.
+        if (nThickness == 1) {
+            while (nCount - 1 > 0) {
+                bResult = DrawLine16(lpPoints[0].x,
+                    lpPoints[0].y,
+                    lpPoints[1].x,
+                    lpPoints[1].y,
+                    reinterpret_cast<WORD*>(ddsd.lpSurface),
+                    ddsd.lPitch >> 1,
+                    rSurface,
+                    static_cast<WORD>(((GetBValue(rgbColor) >> field_CA) << m_dwBBitShift) | ((GetGValue(rgbColor) >> field_C6) << m_dwGBitShift) | ((GetRValue(rgbColor) >> field_C2) << m_dwRBitShift)),
+                    FALSE);
+                lpPoints++;
+                nCount--;
+            }
+        } else {
+            while (nCount - 1 > 0) {
+                bResult = DrawThickLine16(lpPoints[0].x,
+                    lpPoints[0].y,
+                    lpPoints[1].x,
+                    lpPoints[1].y,
+                    reinterpret_cast<WORD*>(ddsd.lpSurface),
+                    ddsd.lPitch >> 1,
+                    rSurface,
+                    nThickness,
+                    static_cast<WORD>(((GetBValue(rgbColor) >> field_CA) << m_dwBBitShift) | ((GetGValue(rgbColor) >> field_C6) << m_dwGBitShift) | ((GetRValue(rgbColor) >> field_C2) << m_dwRBitShift)),
+                    FALSE);
+                lpPoints++;
+                nCount--;
+            }
+        }
         break;
     case 24:
-        // TODO: Incomplete.
+        if (nThickness == 1) {
+            while (nCount - 1 > 0) {
+                bResult = DrawLine24(lpPoints[0].x,
+                    lpPoints[0].y,
+                    lpPoints[1].x,
+                    lpPoints[1].y,
+                    reinterpret_cast<BYTE*>(ddsd.lpSurface),
+                    ddsd.lPitch,
+                    rSurface,
+                    (GetBValue(rgbColor) << m_dwBBitShift) | (GetGValue(rgbColor) << m_dwGBitShift) | (GetRValue(rgbColor) << m_dwRBitShift),
+                    FALSE);
+                lpPoints++;
+                nCount--;
+            }
+        } else {
+            while (nCount - 1 > 0) {
+                bResult = DrawThickLine24(lpPoints[0].x,
+                    lpPoints[0].y,
+                    lpPoints[1].x,
+                    lpPoints[1].y,
+                    reinterpret_cast<BYTE*>(ddsd.lpSurface),
+                    ddsd.lPitch,
+                    rSurface,
+                    nThickness,
+                    (GetBValue(rgbColor) << m_dwBBitShift) | (GetGValue(rgbColor) << m_dwGBitShift) | (GetRValue(rgbColor) << m_dwRBitShift),
+                    FALSE);
+                lpPoints++;
+                nCount--;
+            }
+        }
         break;
     case 32:
         if (nThickness == 1) {
