@@ -1061,3 +1061,31 @@ TEST_CASE("cell_negative_sequence_is_past_the_end", "[vid]")
     ::operator delete(cellStorage);
     ::operator delete(resStorage);
 }
+
+// DrawHLine16 (0x7C1AA0) writes an odd first pixel of dwColor's low word,
+// then pixel pairs as the DWORD dwColor | dwColor << 16; the mirrored one
+// (0x7C1AF0) walks left from width - xMin, the pair's high word landing on
+// its higher-addressed pixel. A colour with bits above 15 shows the pairs.
+TEST_CASE("draw_hline16_pairs", "[vid]")
+{
+    CVidPoly poly;
+    const DWORD color = 0xABCD1234; // pair 0xBBFD1234
+    std::vector<WORD> row(8, 0x1111);
+    poly.DrawHLine16(row.data(), 1, 3, color, CRect(0, 0, 8, 1), CPoint(0, 0));
+    CHECK(row == std::vector<WORD> { 0x1111, 0x1234, 0x1234, 0xBBFD, 0x1111, 0x1111, 0x1111, 0x1111 });
+
+    std::fill(row.begin(), row.end(), static_cast<WORD>(0x1111));
+    poly.DrawHLine16(row.data(), 2, 5, color, CRect(0, 0, 8, 1), CPoint(0, 0));
+    CHECK(row == std::vector<WORD> { 0x1111, 0x1111, 0x1234, 0xBBFD, 0x1234, 0xBBFD, 0x1111, 0x1111 });
+
+    // Mirrored, width 7: xMin 1 to 3 are pixels 6 (odd), 4 and 5 (a pair).
+    std::fill(row.begin(), row.end(), static_cast<WORD>(0x1111));
+    poly.DrawHLineMirrored16(row.data(), 1, 3, color, CRect(0, 0, 7, 1), CPoint(0, 0));
+    CHECK(row == std::vector<WORD> { 0x1111, 0x1111, 0x1111, 0x1111, 0x1234, 0xBBFD, 0x1234, 0x1111 });
+
+    // An empty span draws nothing.
+    std::fill(row.begin(), row.end(), static_cast<WORD>(0x1111));
+    poly.DrawHLine16(row.data(), 4, 3, color, CRect(0, 0, 8, 1), CPoint(0, 0));
+    poly.DrawHLineMirrored16(row.data(), 4, 3, color, CRect(0, 0, 7, 1), CPoint(0, 0));
+    CHECK(row == std::vector<WORD>(8, 0x1111));
+}

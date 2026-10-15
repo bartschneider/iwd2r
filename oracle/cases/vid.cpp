@@ -262,6 +262,13 @@ constexpr uintptr_t kDrawHLineShaded16 = 0x7C1FD0;
 constexpr uintptr_t kDrawHLineShadedMirrored16 = 0x7C2040;
 constexpr uintptr_t kDrawHLineShaded24 = 0x7D6CA0;
 constexpr uintptr_t kDrawHLineShadedMirrored24 = 0x7D6DA0;
+// CVidPoly::DrawHLine16 (0x7C1AA0), DrawHLineMirrored16 (0x7C1AF0),
+// DrawHLine24 (0x7D6970) and DrawHLineMirrored24 (0x7D69B0), all `ret 0x18`
+// and reading only their arguments.
+constexpr uintptr_t kDrawHLine16 = 0x7C1AA0;
+constexpr uintptr_t kDrawHLineMirrored16 = 0x7C1AF0;
+constexpr uintptr_t kDrawHLine24 = 0x7D6970;
+constexpr uintptr_t kDrawHLineMirrored24 = 0x7D69B0;
 constexpr size_t kRMaskOffset = 0x18;
 constexpr size_t kGMaskOffset = 0x1C;
 constexpr size_t kBMaskOffset = 0x20;
@@ -564,11 +571,14 @@ void SetMode16(VideoFixture& video, CaseContext& ctx, bool green6)
     video.oursChitin->cVideo.m_nBpp = 16;
 }
 
-// One DrawHLineShaded16/24 (or the mirrored one) on a 64x1 row of random
-// pixels, as HLineShaded does for 32 bits: every span once with the widest
-// surface rectangle, then random spans and rectangles. The 16-bit forms run
-// on a 5-6-5 and a 5-5-5 video mode in turn.
-void HLineShadedDepth(CaseContext& ctx, uintptr_t address, int nBpp, bool mirrored, uint64_t salt)
+// One 16- or 24-bit span function (solid, shaded, mirrored or not) on a
+// 64x1 row of random pixels, as HLineShaded does for 32 bits: every span
+// once with the widest surface rectangle, then random spans and rectangles.
+// The 16-bit forms run on a 5-6-5 and a 5-5-5 video mode in turn; the
+// colours are random 32-bit values (the 16-bit solid spans write pixel pairs
+// from dwColor | dwColor << 16).
+void HLineDepth(CaseContext& ctx, uintptr_t address, CVidPoly::DrawHLineFunc oursFn, const char* fnName, int nBpp,
+    uint64_t salt)
 {
     VideoFixture video(ctx);
     const int bytes = nBpp / 8;
@@ -585,8 +595,7 @@ void HLineShadedDepth(CaseContext& ctx, uintptr_t address, int nBpp, bool mirror
     });
     CVidPoly ours;
     Picks picks(ctx.seed, salt);
-    const std::string name = std::string(mirrored ? "DrawHLineShadedMirrored" : "DrawHLineShaded")
-        + std::to_string(nBpp);
+    const std::string name = fnName;
 
     auto check = [&](int32_t xMin, int32_t xMax, uint32_t color, int32_t left, int32_t right) {
         std::vector<uint8_t> pixels(static_cast<size_t>(kLineWidth * bytes));
@@ -606,19 +615,7 @@ void HLineShadedDepth(CaseContext& ctx, uintptr_t address, int nBpp, bool mirror
         });
         const CRect rSurface(left, 0, right, 1);
         const CPoint ptRef(pt[0], pt[1]);
-        if (nBpp == 16) {
-            if (mirrored) {
-                ours.DrawHLineShadedMirrored16(pixels.data(), xMin, xMax, color, rSurface, ptRef);
-            } else {
-                ours.DrawHLineShaded16(pixels.data(), xMin, xMax, color, rSurface, ptRef);
-            }
-        } else {
-            if (mirrored) {
-                ours.DrawHLineShadedMirrored24(pixels.data(), xMin, xMax, color, rSurface, ptRef);
-            } else {
-                ours.DrawHLineShaded24(pixels.data(), xMin, xMax, color, rSurface, ptRef);
-            }
-        }
+        (ours.*oursFn)(pixels.data(), xMin, xMax, color, rSurface, ptRef);
         ctx.CountInputs(1);
         for (size_t i = 0; i < pixels.size(); ++i) {
             if (row[i] != pixels[i]) {
@@ -649,22 +646,48 @@ void HLineShadedDepth(CaseContext& ctx, uintptr_t address, int nBpp, bool mirror
 
 void HLineShaded16(CaseContext& ctx)
 {
-    HLineShadedDepth(ctx, kDrawHLineShaded16, 16, false, 0x484C533136000000ull); // "HLS16"
+    HLineDepth(ctx, kDrawHLineShaded16, &CVidPoly::DrawHLineShaded16, "DrawHLineShaded16", 16,
+        0x484C533136000000ull); // "HLS16"
 }
 
 void HLineShadedMirrored16(CaseContext& ctx)
 {
-    HLineShadedDepth(ctx, kDrawHLineShadedMirrored16, 16, true, 0x484C4D3136000000ull); // "HLM16"
+    HLineDepth(ctx, kDrawHLineShadedMirrored16, &CVidPoly::DrawHLineShadedMirrored16, "DrawHLineShadedMirrored16", 16,
+        0x484C4D3136000000ull); // "HLM16"
 }
 
 void HLineShaded24(CaseContext& ctx)
 {
-    HLineShadedDepth(ctx, kDrawHLineShaded24, 24, false, 0x484C533234000000ull); // "HLS24"
+    HLineDepth(ctx, kDrawHLineShaded24, &CVidPoly::DrawHLineShaded24, "DrawHLineShaded24", 24,
+        0x484C533234000000ull); // "HLS24"
 }
 
 void HLineShadedMirrored24(CaseContext& ctx)
 {
-    HLineShadedDepth(ctx, kDrawHLineShadedMirrored24, 24, true, 0x484C4D3234000000ull); // "HLM24"
+    HLineDepth(ctx, kDrawHLineShadedMirrored24, &CVidPoly::DrawHLineShadedMirrored24, "DrawHLineShadedMirrored24", 24,
+        0x484C4D3234000000ull); // "HLM24"
+}
+
+void HLine16(CaseContext& ctx)
+{
+    HLineDepth(ctx, kDrawHLine16, &CVidPoly::DrawHLine16, "DrawHLine16", 16, 0x484C303136000000ull); // "HL016"
+}
+
+void HLineMirrored16(CaseContext& ctx)
+{
+    HLineDepth(ctx, kDrawHLineMirrored16, &CVidPoly::DrawHLineMirrored16, "DrawHLineMirrored16", 16,
+        0x484C4D3136300000ull); // "HLM160"
+}
+
+void HLine24(CaseContext& ctx)
+{
+    HLineDepth(ctx, kDrawHLine24, &CVidPoly::DrawHLine24, "DrawHLine24", 24, 0x484C303234000000ull); // "HL024"
+}
+
+void HLineMirrored24(CaseContext& ctx)
+{
+    HLineDepth(ctx, kDrawHLineMirrored24, &CVidPoly::DrawHLineMirrored24, "DrawHLineMirrored24", 24,
+        0x484C4D3234300000ull); // "HLM240"
 }
 
 // CVidPalette::RealizeRange (0x7BF870) at 32 bpp: a range palette of 256
@@ -2168,6 +2191,10 @@ ORACLE_CASE("vid/hline_shaded16", HLineShaded16);
 ORACLE_CASE("vid/hline_shaded_mirrored16", HLineShadedMirrored16);
 ORACLE_CASE("vid/hline_shaded24", HLineShaded24);
 ORACLE_CASE("vid/hline_shaded_mirrored24", HLineShadedMirrored24);
+ORACLE_CASE("vid/hline16", HLine16);
+ORACLE_CASE("vid/hline_mirrored16", HLineMirrored16);
+ORACLE_CASE("vid/hline24", HLine24);
+ORACLE_CASE("vid/hline_mirrored24", HLineMirrored24);
 ORACLE_CASE("vid/realize_range", RealizeRange);
 ORACLE_CASE("vid/realize_resource", RealizeResource);
 ORACLE_CASE("vid/thick_line32", ThickLine32);

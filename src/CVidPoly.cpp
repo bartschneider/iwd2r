@@ -638,7 +638,9 @@ void CVidPoly::SetPoly(WORD* pVertices, WORD nVertices)
 void CVidPoly::SetPoly(CVIDPOLY_VERTEX* pVertices, WORD nVertices)
 {
     m_pVertices = pVertices;
-    m_nVertices = nVertices;
+    // The count is sign-extended (movsx at 0x7C18D0), unlike the WORD
+    // overload's.
+    m_nVertices = static_cast<SHORT>(nVertices);
 }
 
 // 0x7C18F0
@@ -737,12 +739,24 @@ void CVidPoly::DrawHLine16(void* pSurface, int xMin, int xMax, DWORD dwColor, co
 {
     unsigned short* pSurface16 = reinterpret_cast<unsigned short*>(pSurface);
 
-    int width = xMax - xMin + 1;
-    if (width > 0) {
+    // The span is written as pixel pairs of dwColor | dwColor << 16 (rep stosd
+    // at 0x7C1ADD), after one odd pixel of dwColor's low word: a colour with
+    // bits above 15 puts its high word ORed with its low word in the second
+    // pixel of each pair.
+    DWORD dwPair = dwColor | (dwColor << 16);
+
+    if (xMax - xMin >= 0) {
+        int width = xMax - xMin + 1;
         pSurface16 += xMin;
 
-        for (int x = 0; x < width; x++) {
-            *pSurface16++ = static_cast<unsigned short>(dwColor);
+        if ((width & 1) != 0) {
+            *pSurface16++ = static_cast<unsigned short>(dwPair);
+            width--;
+        }
+
+        for (int nPairs = width / 2; nPairs > 0; nPairs--) {
+            *pSurface16++ = static_cast<unsigned short>(dwPair);
+            *pSurface16++ = static_cast<unsigned short>(dwPair >> 16);
         }
     }
 }
@@ -752,12 +766,24 @@ void CVidPoly::DrawHLineMirrored16(void* pSurface, int xMin, int xMax, DWORD dwC
 {
     unsigned short* pSurface16 = reinterpret_cast<unsigned short*>(pSurface);
 
-    int width = xMax - xMin + 1;
-    if (width > 0) {
+    // As DrawHLine16, walking left from the pixel at the surface's width -
+    // xMin: one odd pixel, then pairs whose higher-addressed pixel gets the
+    // pair's high word (0x7C1B3A).
+    DWORD dwPair = dwColor | (dwColor << 16);
+
+    if (xMax - xMin >= 0) {
+        int width = xMax - xMin + 1;
         pSurface16 += rSurface.Width() - xMin;
 
-        for (int x = 0; x < width; x++) {
-            *pSurface16-- = static_cast<unsigned short>(dwColor);
+        if ((width & 1) != 0) {
+            *pSurface16-- = static_cast<unsigned short>(dwPair);
+            width--;
+        }
+
+        for (int nPairs = width >> 1; nPairs > 0; nPairs--) {
+            pSurface16[-1] = static_cast<unsigned short>(dwPair);
+            pSurface16[0] = static_cast<unsigned short>(dwPair >> 16);
+            pSurface16 -= 2;
         }
     }
 }
