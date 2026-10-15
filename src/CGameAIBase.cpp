@@ -4211,6 +4211,82 @@ BOOL CGameAIBase::EvaluateStatusTrigger(const CAITrigger& trigger)
             bResult = FALSE;
         }
         break;
+    case 0x40CD:
+        // SubRace: the cause's race and subrace against the specifics'
+        // high and low words.
+        triggerCopy.m_triggerCause.Decode(this);
+        bResult = triggerCopy.m_triggerCause.m_nRace == (triggerCopy.m_specificID >> 16)
+            && triggerCopy.m_triggerCause.m_nSubRace == (triggerCopy.m_specificID & 0xFFFF);
+        break;
+    case 0x40CE:
+        // Kit: every bit of the specifics in the sprite's specialization.
+        triggerCopy.m_triggerCause.Decode(this);
+        pObject = triggerCopy.m_triggerCause.sub_40CB20(this, CGameObject::TYPE_SPRITE, FALSE);
+        if (pObject != NULL) {
+            DWORD nKit = static_cast<DWORD>(triggerCopy.m_specificID);
+            bResult = (static_cast<CGameSprite*>(pObject)->GetSpecialization() & nKit) == nKit;
+        }
+        break;
+    case 0x40E7:
+    case 0x40E8:
+        // CheckSkillGT, CheckSkillLT: the object's skill m_specific2
+        // against the specifics.
+        {
+            CGameSprite* pSprite = NULL;
+            bNoRelease = GetTriggerSprite(triggerCopy, &pSprite);
+            pObject = pSprite;
+            if (pSprite == NULL) {
+                // NOTE: The original leaves through its early epilogue
+                // (0x45AB7A) without releasing anything; nothing is shared.
+                return FALSE;
+            }
+
+            // NOTE: The skill index is not checked, as in the original.
+            INT nSkill = pSprite->GetDerivedStats()->m_nSkills[triggerCopy.m_specific2];
+            if (triggerCopy.m_triggerID == 0x40E7) {
+                bResult = nSkill > triggerCopy.m_specificID;
+            } else {
+                bResult = nSkill < triggerCopy.m_specificID;
+            }
+        }
+        break;
+    case 0x4042:
+        // PartyHasItem: a party member carries the item (string1),
+        // personally or in a bag.
+        {
+            CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+            for (SHORT nIndex = 0; nIndex < pGame->GetNumCharacters(); nIndex++) {
+                LONG nCharacterId = pGame->GetCharacterId(nIndex);
+                CGameObject* pCharacter;
+                BYTE rc;
+                do {
+                    rc = pGame->GetObjectArray()->GetShare(nCharacterId,
+                        CGameObjectArray::THREAD_ASYNCH,
+                        &pCharacter,
+                        INFINITE);
+                } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+                if (rc != CGameObjectArray::SUCCESS) {
+                    // NOTE: The original gives up at the first character it
+                    // cannot share (the early epilogue 0x45AB7A), without
+                    // trying the rest.
+                    return FALSE;
+                }
+
+                CGameSprite* pSprite = static_cast<CGameSprite*>(pCharacter);
+                BOOL bFound = pSprite->FindItemPersonal(triggerCopy.GetString1(), 0, FALSE) != -1
+                    || pSprite->FindItemBags(triggerCopy.GetString1(), 0, FALSE) != -1;
+
+                pGame->GetObjectArray()->ReleaseShare(nCharacterId,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    INFINITE);
+
+                if (bFound) {
+                    return TRUE;
+                }
+            }
+            return FALSE;
+        }
     case 0x40A7:
         // CreatureHidden: the object's hidden flag (base stats field_294).
         {

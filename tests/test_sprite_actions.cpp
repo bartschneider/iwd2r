@@ -1299,6 +1299,76 @@ TEST_CASE("trigger: ActionListEmpty and NearLocation and CreatureHidden (0x402B 
     pCharacter->m_baseStats.field_294 = 0;
 }
 
+TEST_CASE("trigger: SubRace and Kit and CheckSkillGT/LT and PartyHasItem (0x40CD 0x40CE 0x40E7 0x40E8 0x4042)", "[ai][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    CGameSprite* pCharacter = NewGameInStartArea(cre);
+    REQUIRE(pCharacter->GetArea() != NULL);
+
+    // SubRace (0x453B54): race in the high word, subrace in the low word.
+    const CAIObjectType& type = pCharacter->GetAIType();
+    const LONG raceSubRace = (static_cast<LONG>(type.m_nRace) << 16) | type.m_nSubRace;
+    CHECK(pCharacter->EvaluateStatusTrigger(CAITrigger(0x40CD, CAIObjectType::OBJECT_MYSELF, raceSubRace)));
+    CHECK_FALSE(pCharacter->EvaluateStatusTrigger(CAITrigger(0x40CD, CAIObjectType::OBJECT_MYSELF, raceSubRace + 1)));
+    CHECK_FALSE(pCharacter->EvaluateStatusTrigger(CAITrigger(0x40CD, CAIObjectType::OBJECT_MYSELF, raceSubRace + 0x10000)));
+
+    // Kit (0x453B95): every bit of the specifics in the specialization.
+    const DWORD specialization = pCharacter->m_baseStats.m_specialization;
+    pCharacter->m_baseStats.m_specialization = 0x4040;
+    CHECK(pCharacter->EvaluateStatusTrigger(CAITrigger(0x40CE, CAIObjectType::OBJECT_MYSELF, 0x40)));
+    CHECK(pCharacter->EvaluateStatusTrigger(CAITrigger(0x40CE, CAIObjectType::OBJECT_MYSELF, 0x4040)));
+    CHECK_FALSE(pCharacter->EvaluateStatusTrigger(CAITrigger(0x40CE, CAIObjectType::OBJECT_MYSELF, 0x41)));
+    pCharacter->m_baseStats.m_specialization = specialization;
+
+    // CheckSkillGT/LT (0x455F32, 0x455F75): derived skill m_specific2
+    // against the specifics.
+    const signed char skill = pCharacter->m_derivedStats.m_nSkills[3];
+    pCharacter->m_derivedStats.m_nSkills[3] = 5;
+    auto checkSkill = [&](SHORT id, LONG value) {
+        CAITrigger trigger(id, CAIObjectType::OBJECT_MYSELF, value);
+        trigger.m_specific2 = 3;
+        return pCharacter->EvaluateStatusTrigger(trigger) != FALSE;
+    };
+    CHECK(checkSkill(0x40E7, 4));
+    CHECK_FALSE(checkSkill(0x40E7, 5));
+    CHECK(checkSkill(0x40E8, 6));
+    CHECK_FALSE(checkSkill(0x40E8, 5));
+    pCharacter->m_derivedStats.m_nSkills[3] = skill;
+
+    // PartyHasItem (0x455B3C): FindItemPersonal (0x71D310) answers -1 for
+    // an item nobody carries, and the slot, matched without case, for one
+    // the character carries.
+    CAITrigger missing(0x4042, 0);
+    missing.m_string1 = "NOSUCHIT";
+    CHECK(pCharacter->FindItemPersonal(CString("NOSUCHIT"), 0, FALSE) == -1);
+    CHECK_FALSE(pCharacter->EvaluateStatusTrigger(missing));
+    SHORT slot = -1;
+    for (SHORT n = 0; n < 51 && slot == -1; n++) {
+        if (pCharacter->GetEquipment()->m_items[n] != NULL) {
+            slot = n;
+        }
+    }
+    if (slot != -1) {
+        CString sName = pCharacter->GetEquipment()->m_items[slot]->cResRef.GetResRefStr();
+        CString sLower(sName);
+        sLower.MakeLower();
+        CHECK(pCharacter->FindItemPersonal(sLower, 0, FALSE) == slot);
+        CAITrigger carried(0x4042, 0);
+        carried.m_string1 = sLower;
+        CHECK(pCharacter->EvaluateStatusTrigger(carried));
+    }
+}
+
 TEST_CASE("action: FloatMessage floats the text over its target and is done (case 241)", "[ai][data]")
 {
     if (DataDir() == nullptr) {
