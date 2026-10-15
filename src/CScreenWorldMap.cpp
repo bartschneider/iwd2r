@@ -1034,8 +1034,8 @@ void CScreenWorldMap::OnAreaMouseClick(DWORD nArea, const CPoint& ptMousePos)
 
         if (g_pChitin->cNetwork.GetSessionOpen() == TRUE
             && !g_pChitin->cNetwork.GetSessionHosting()) {
-            // TODO: A client asks the host to travel (0x69B545-0x69B5C4),
-            // through CBaldurMessage 0x4356E0, not ported.
+            // NOTE: A client asks the host to travel (0x69B545-0x69B5C4,
+            // CBaldurMessage 0x4356E0); not ported, iwd2r has no multiplayer.
             m_bClickedArea = TRUE;
             return;
         }
