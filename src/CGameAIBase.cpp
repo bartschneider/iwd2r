@@ -893,9 +893,29 @@ SHORT CGameAIBase::ExecuteAction()
         }
         goto done;
     case 241:
-        // FloatMessage
-        // TODO: 0x4507E1-0x4508CE not ported.
-        goto done;
+        // FloatMessage (0x4507E1-0x4508CE)
+        pTarget = GetTargetShareType(CGameObject::TYPE_SPRITE);
+        if (pTarget == NULL) {
+            pTarget = GetTargetShareType(CGameObject::TYPE_DOOR);
+            if (pTarget == NULL) {
+                returnValue = ACTION_DONE;
+                goto done;
+            }
+        }
+        bShare = TRUE;
+        if (g_pChitin->cNetwork.m_nServiceProvider == CNetwork::SERV_PROV_NULL) {
+            pTarget->FloatText(m_curAction.m_specificID, 10, 5);
+        } else {
+            message = new CMessageFloatText(m_id, pTarget->GetId(), m_curAction.m_specificID, FALSE);
+            if (g_pChitin->cNetwork.m_nServiceProvider == 0
+                || g_pChitin->cNetwork.m_idLocalPlayer == pTarget->m_remotePlayerID) {
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+            } else {
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE, CMessage::BROADCAST_FORCED);
+            }
+        }
+        returnValue = ACTION_DONE;
+        goto release;
     case 242:
         // ChangeStat
         // TODO: 0x4523BA-0x45248C not ported.

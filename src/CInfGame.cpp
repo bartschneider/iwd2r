@@ -9,7 +9,6 @@
 #include "CCreatureFile.h"
 #include "CGameAnimationType.h"
 #include "CGameArea.h"
-#include "CGameEffect.h"
 #include "CGameContainer.h"
 #include "CGameEffect.h"
 #include "CGameObject.h"
@@ -42,10 +41,10 @@
 #include "CUIPanel.h"
 #include "CUtil.h"
 #include "CVariableHash.h"
-#include "compat/marshal_ptr.h"
-#include "compat/path_hook.h"
 #include "Icewind586B70.h"
 #include "IcewindMisc.h"
+#include "compat/marshal_ptr.h"
+#include "compat/path_hook.h"
 
 #define FIFTY_THREE 53
 
@@ -3127,9 +3126,7 @@ void CInfGame::CharacterExport(LONG nCharacterId, CString sFileName)
     }
 
     INT nLength = strRes.szText.GetLength();
-    static_cast<CRes*>(cBiographyFile.GetRes())->Write(m_sCharactersDir,
-        strRes.szText.GetBuffer(0),
-        nLength + (nLength > 0));
+    static_cast<CRes*>(cBiographyFile.GetRes())->Write(m_sCharactersDir, strRes.szText.GetBuffer(0), nLength + (nLength > 0));
 
     if (bTemporaryKey == TRUE) {
         g_pChitin->cDimm.RemoveTemporaryKey(m_sCharactersDir, CResRef(sFileName), 1022);
@@ -6333,7 +6330,7 @@ void CInfGame::CompressContainer(LONG nContainerId)
 INT CInfGame::CheckItemUsable(CGameSprite* pSprite, CItem* pItem)
 {
     INT nType = pItem->GetItemType();
-    if (nType != 35 || nType != 11) {
+    if (nType != 35 && nType != 11) {
         return 1;
     }
 
