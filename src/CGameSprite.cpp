@@ -12846,9 +12846,8 @@ SHORT CGameSprite::ExecuteAction()
         returnValue = ACTION_ERROR;
         goto done;
     case 134:
-        // AttackReevaluate
-        // TODO: 0x72A33E-0x72A34E not ported (0x738E70).
-        returnValue = ACTION_ERROR;
+        // AttackReevaluate (0x72A33E-0x72A34E)
+        returnValue = AttackReevaluate();
         goto done;
     case 135:
         // LockScroll (0x72A34E-0x72A374)
@@ -16600,6 +16599,245 @@ SHORT CGameSprite::Attack(CGameSprite* target)
     g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
 
     return ACTION_ERROR;
+}
+
+// 0x738E70
+SHORT CGameSprite::AttackReevaluate()
+{
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CMessage* message;
+    SHORT returnValue;
+
+    // The target is decoded once, when the action starts.
+    CAIObjectType decoded(0, 0, 0, 0, 0, 0, 0, 0, -1);
+    if (m_actionCount == 0) {
+        decoded.Set(m_curAction.m_acteeID);
+        decoded.Decode(this);
+        m_curAction.m_acteeID2.Set(decoded);
+    }
+
+    CGameSprite* target = static_cast<CGameSprite*>(GetTargetShareAIType(m_curAction.m_acteeID2, CGameObject::TYPE_SPRITE));
+    if (target != NULL
+        && (m_baseStats.m_flags & 0x100000) == 0
+        && target->GetAIType().m_nEnemyAlly <= CAIObjectType::EA_GOODCUTOFF) {
+        m_baseStats.m_flags |= 0x100000;
+    }
+
+    BOOL bInvalid = FALSE;
+    if (target == NULL) {
+        goto reevaluate;
+    }
+
+    if (target->m_animation.GetListType() == CGAMEOBJECT_LIST_FLIGHT) {
+        goto release;
+    }
+
+    if (!target->IsVisibleToCaller(GetCanSeeInvisible())
+        || target->m_derivedStats.m_spellStates[SPLSTATE_SANCTUARY]) {
+        bInvalid = TRUE;
+    }
+
+    if (target->m_id == m_id) {
+        bInvalid = TRUE;
+    }
+
+    if ((target->m_derivedStats.m_generalState & STATE_DEAD) != 0) {
+        bInvalid = TRUE;
+    }
+
+    if ((target->m_derivedStats.m_generalState & STATE_SLEEPING) != 0
+        && m_equipment.m_selectedWeapon == 10
+        && !GetAIType().IsClassValid(CAIOBJECTTYPE_C_MONK)) {
+        goto release;
+    }
+
+    if (bInvalid) {
+        goto release;
+    }
+
+    {
+        // The battle cry (the BYTE at 0x85BB68 is 5).
+        if (m_actionCount == 0
+            && (pGame->GetCharacterPortraitNum(m_id) == -1 || rand() % 6 == 0)) {
+            message = new CMessagePlaySound(5, TRUE, FALSE, m_id, m_id);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        }
+
+        if (field_70EE != target->m_id) {
+            FeedBack(FEEDBACK_ATTACKS, 0, 0, 0, target->GetNameRef(), 0, 0);
+            field_70EE = target->m_id;
+        }
+
+        CItem* pLauncher = NULL;
+        const ITEM_ABILITY* launcherAttack = NULL;
+        CItem* curWeapon = m_equipment.m_items[m_equipment.m_selectedWeapon];
+        if (curWeapon == NULL) {
+            EquipMostDamagingMelee();
+            pGame->GetObjectArray()->ReleaseShare(target->m_id, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+            return ACTION_ERROR;
+        }
+
+        curWeapon->Demand();
+        const ITEM_ABILITY* curAttack = curWeapon->GetAbility(m_equipment.m_selectedWeaponAbility);
+        if (curAttack == NULL
+            || (curAttack->type & 0xFF) == 4
+            || (curAttack->usageFlags == 3
+                && curWeapon->GetUsageCount(m_equipment.m_selectedWeaponAbility) == 0
+                && curAttack->maxUsageCount != 0)) {
+            // The weapon cannot be used.
+            CString sResRef;
+            curWeapon->cResRef.CopyToString(sResRef);
+
+            CAITrigger trigger(CAITRIGGER_UNUSABLE, 0);
+            trigger.m_string1 = sResRef;
+
+            message = new CMessageSetTrigger(trigger, m_id, m_id);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+            pGame->GetObjectArray()->ReleaseShare(target->m_id, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+            curWeapon->Release();
+            return ACTION_ERROR;
+        }
+
+        INT nDistance;
+        if (curAttack->type == 2) {
+            const CPoint& ptTarget = target->GetPos();
+            INT nTargetY = ptTarget.y / CPathSearch::GRID_SQUARE_SIZEY;
+            INT nTargetX = ptTarget.x / CPathSearch::GRID_SQUARE_SIZEX;
+            const CPoint& ptSelf = GetPos();
+            INT nSelfY = ptSelf.y / CPathSearch::GRID_SQUARE_SIZEY;
+            INT dx = ptSelf.x / CPathSearch::GRID_SQUARE_SIZEX - nTargetX;
+            nDistance = dx * dx + (nSelfY - nTargetY) * (nSelfY - nTargetY);
+
+            SHORT launcherSlot;
+            pLauncher = GetLauncher(curAttack, launcherSlot);
+            if (pLauncher != NULL) {
+                pLauncher->Demand();
+                launcherAttack = pLauncher->GetAbility(0);
+            } else {
+                launcherAttack = NULL;
+            }
+        } else {
+            const CPoint& ptTarget = target->GetPos();
+            CPoint ptTargetGrid(ptTarget.x / CPathSearch::GRID_SQUARE_SIZEX,
+                ptTarget.y / CPathSearch::GRID_SQUARE_SIZEY);
+            const CPoint& ptSelf = GetPos();
+            CPoint ptSelfGrid(ptSelf.x / CPathSearch::GRID_SQUARE_SIZEX,
+                ptSelf.y / CPathSearch::GRID_SQUARE_SIZEY);
+            nDistance = CAIUtil::CountSquares(ptSelfGrid, ptTargetGrid);
+            nDistance *= nDistance;
+        }
+
+        SHORT nRange = curAttack->range + 1;
+        if (launcherAttack != NULL) {
+            nRange = max(static_cast<WORD>(launcherAttack->range + 1), static_cast<WORD>(curAttack->range + 1));
+        }
+
+        if (pLauncher != NULL) {
+            pLauncher->Release();
+        }
+
+        curWeapon->Release();
+
+        // The battle music, except against the area's critters.
+        CString sAnimation;
+        BOOLEAN bMusic = TRUE;
+        target->m_animation.GetAnimationResRef(sAnimation, 0);
+        if (strcmp(sAnimation, "MGEN") == 0
+            || strcmp(sAnimation, "MKG1") == 0
+            || strcmp(sAnimation, "MKG2") == 0
+            || strcmp(sAnimation, "MKG3") == 0) {
+            bMusic = FALSE;
+        }
+
+        if (m_pArea != NULL && bMusic == TRUE) {
+            m_pArea->PlaySong(3, 0x101F4);
+        }
+
+        BYTE nSelfSpace = m_animation.GetPersonalSpace();
+        BYTE nTargetSpace = target->m_animation.GetPersonalSpace();
+        BYTE nSpace = static_cast<BYTE>(((nTargetSpace - 1) >> 1) + ((nSelfSpace - 1) >> 1) - 1);
+        INT nReach = nSpace + nRange;
+
+        if ((nDistance <= nReach * nReach || (field_7118 != 0 && nDistance <= (nReach + 1) * (nReach + 1)))
+            && m_pArea->CheckLOS(target->GetPos(),
+                GetPos(),
+                m_visibleTerrainTable,
+                static_cast<BOOLEAN>(target->Orderable(FALSE)))) {
+            if (m_pPath != NULL) {
+                message = new CMessageDropPath(m_id, m_id);
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+            }
+
+            if (m_attackFrame == -2) {
+                m_attackFrame = -1;
+            }
+
+            returnValue = Swing(target);
+            m_lastActionID = CAIAction::ATTACK;
+
+            if (m_attackFrame == 0 && m_actionCount != 0) {
+                AutoPause(0x40);
+                if (m_curAction.m_actionID == 105) {
+                    // NOTE: The original returns here without releasing the
+                    // target's share (0x739A80); unreachable while the
+                    // action is AttackReevaluate (134).
+                    return ACTION_DONE;
+                }
+            }
+        } else {
+            // Out of reach: walk to the target.
+            returnValue = MoveToObject(target);
+            if (returnValue == ACTION_DONE) {
+                returnValue = ACTION_INTERRUPTABLE;
+            }
+            m_lastActionID = 22;
+        }
+
+        // The target is chosen again after the given number of rounds.
+        if (m_curAction.m_specificID < m_actionCount) {
+            returnValue = ACTION_DONE;
+        }
+
+        pGame->GetObjectArray()->ReleaseShare(target->m_id, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+        return returnValue;
+    }
+
+release:
+    // 0x738FF4
+    pGame->GetObjectArray()->ReleaseShare(target->m_id, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+
+reevaluate:
+    // 0x73901A: the nearest creature of the actee's type.
+    {
+        CAIObjectType type(0, 0, 0, 0, 0, 0, 0, 0, -1);
+        type.Set(m_curAction.m_acteeID);
+        type.Decode(this);
+
+        LONG nNearest = m_pArea->GetNearest(m_id,
+            type,
+            GetVisualRange(),
+            m_visibleTerrainTable,
+            TRUE,
+            GetCanSeeInvisible(),
+            TRUE,
+            0,
+            FALSE);
+        if (nNearest == CGameObjectArray::INVALID_INDEX) {
+            return ACTION_DONE;
+        }
+
+        type.m_nInstance = nNearest;
+        m_curAction.m_acteeID2.Set(type);
+
+        CGameObject* pTarget = GetTargetShareAIType(m_curAction.m_acteeID2, CGameObject::TYPE_SPRITE);
+        if (pTarget == NULL) {
+            return ACTION_ERROR;
+        }
+
+        pGame->GetObjectArray()->ReleaseShare(pTarget->GetId(), CGameObjectArray::THREAD_ASYNCH, INFINITE);
+        return ACTION_INTERRUPTABLE;
+    }
 }
 
 // 0x739B60

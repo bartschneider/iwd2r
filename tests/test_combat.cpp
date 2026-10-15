@@ -747,3 +747,59 @@ TEST_CASE("combat: OneSwing and Swing draw the attack speed at the start of a ro
     CHECK(pCharacter->m_speedFactor <= 10);
     ClearMessages();
 }
+
+TEST_CASE("combat: a goblin given AttackReevaluate swings at the party member", "[combat][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    Fight fight;
+    std::string why;
+    if (!SetUpFight(fight, why)) {
+        if (why.find("CHR") != std::string::npos) {
+            SKIP("[iwd2r-skip] " + why);
+        }
+        FAIL(why);
+    }
+    CGameSprite* pCharacter = fight.pCharacter;
+    CGameSprite* pGoblin = fight.pGoblin;
+    const SHORT characterStart = pCharacter->GetBaseStats()->m_hitPoints;
+
+    // AttackReevaluate (134) on the party member, the target chosen again
+    // after 2000 AI updates (the action's count).
+    CAIAction attack(134, CAIObjectType(0, 0, 0, 0, 0, 0, 0, 0, pCharacter->GetId()), 2000, 0, 0);
+    pGoblin->ClearActions(FALSE);
+    pGoblin->AddAction(attack);
+    pCharacter->ClearActions(FALSE);
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    if (!pGame->GetWorldTimer()->m_active) {
+        pGame->GetWorldTimer()->StartTime();
+    }
+    int frames = 0;
+    int blows = 0;
+    SHORT previous = characterStart;
+    bool hpRose = false;
+    while (frames < 1500 && pCharacter->GetBaseStats()->m_hitPoints > 0) {
+        Tick(fight.pArea, { pCharacter, pGoblin });
+        if (pGoblin->m_attackFrame == 0) {
+            blows++;
+        }
+        SHORT hp = pCharacter->GetBaseStats()->m_hitPoints;
+        if (hp > previous) {
+            hpRose = true;
+        }
+        previous = hp;
+        frames++;
+    }
+    INFO("frames " << frames << ", rounds " << blows << ", character hit points " << characterStart << " -> "
+                   << pCharacter->GetBaseStats()->m_hitPoints);
+    CHECK(blows > 2);
+    CHECK(pGoblin->m_curAction.m_actionID == 134);
+    CHECK_FALSE(hpRose);
+    CHECK(pCharacter->GetBaseStats()->m_hitPoints <= characterStart);
+}
