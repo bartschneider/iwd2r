@@ -69,6 +69,9 @@ public:
     void OnErrorButtonClick(INT nButton);
     void CheckMultiPlayerViewable();
     void UnmemorizeSpell(CGameSprite* pSprite, int a2);
+    INT GetMaxMemorizableSpells(CGameSprite* pSprite);
+    INT GetRemainingSpellSlots();
+    BOOLEAN MemorizeSpell(CGameSprite* pSprite, INT nKnownIndex);
 
     // NOTE: Seen in `OnErrorButtonClick` assertion.
     INT GetNumErrorButtons() { return m_nNumErrorButtons; }
@@ -78,7 +81,7 @@ public:
     /* 0442 */ CUIControlButtonSpellbookSpell* m_pFlashCurrentSpell;
     /* 0446 */ CUIControlButtonSpellbookSpell* m_pFlashMemorizeSourceSpell;
     /* 044A */ CUIControlButtonSpellbookSpell* m_pFlashMemorizeDestSpell;
-    /* 044E */ unsigned char m_nSpellLevel;
+    /* 044E */ UINT m_nSpellLevel;
     /* 0452 */ BYTE m_nClassIndex;
     /* 0454 */ INT m_nNumKnownSpells;
     /* 0458 */ INT m_nTopKnownSpell;
@@ -100,7 +103,7 @@ public:
     /* 0F88 */ CVidFont m_preLoadFontTool;
     /* 1488 */ int field_1488;
     /* 148C */ CResRef field_148C[24];
-    /* 15C4 */ int field_154C[24];
+    /* 154C */ int field_154C[24];
     /* 15AC */ int field_15AC[24];
     /* 160C */ CResRef field_160C[8];
     /* 1650 */ DWORD m_nNumberOfSpellClasses;
