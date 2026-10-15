@@ -466,6 +466,35 @@ TEST_CASE("weather: the wind's ambient share", "[weather][data]")
     weather.m_nDurationCounter = nDurationCounter;
 }
 
+// The constructor (0x5879E0): state 0, button 100 selected, the default
+// customizable buttons.
+TEST_CASE("action bar: the constructor's defaults", "[actionbar][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+
+    std::unique_ptr<CInfButtonArray> pBar = std::make_unique<CInfButtonArray>();
+    CHECK(pBar->m_nState == 0);
+    CHECK(pBar->m_nSelectedButton == 100);
+    CHECK(pBar->field_16E0 == -1);
+    CHECK(pBar->field_19B2 == 0);
+    CHECK(pBar->m_stateStack.IsEmpty());
+    CHECK(pBar->m_nSelectedWeaponSet == 0);
+    const INT customizable[9] = { 5, 3, 70, 71, 80, 81, 90, 91, 10 };
+    for (int n = 0; n < 9; n++) {
+        INFO(n);
+        CHECK(pBar->m_customizableButtonTypes[n] == customizable[n]);
+    }
+    for (int n = 0; n < 12; n++) {
+        INFO(n);
+        CHECK(pBar->m_buttonArray[n].field_1D4 == 0);
+    }
+}
+
 // SetState (0x589110) pushes the state it leaves, ResetState (0x588FF0) and
 // sub_589FF0 pop it; field_19B2 is the stack's size.
 TEST_CASE("action bar: the state stack", "[actionbar][data]")
