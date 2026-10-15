@@ -11,6 +11,7 @@
 #include "platform/present.h"
 #include "platform/replay.h"
 #include "platform/script.h"
+#include "platform/text_layer.h"
 #include "platform/win32_api.h"
 
 #include <SDL3/SDL.h>
@@ -359,6 +360,13 @@ void Translate(const SDL_Event& e, bool& displayChanged)
         if (e.key.scancode == SDL_SCANCODE_R && (e.key.mod & SDL_KMOD_CTRL) != 0 && (e.key.mod & SDL_KMOD_SHIFT) != 0) {
             if (!e.key.repeat)
                 std::fprintf(stderr, "presenter: %s\n", platform::present::BackendKindName(platform::present::ToggleBackend()));
+            return;
+        }
+        // Ctrl+Shift+T switches the text between the bitmap fonts and the
+        // scalable faces (platform/text_layer.h); not a key press either.
+        if (e.key.scancode == SDL_SCANCODE_T && (e.key.mod & SDL_KMOD_CTRL) != 0 && (e.key.mod & SDL_KMOD_SHIFT) != 0) {
+            if (!e.key.repeat)
+                std::fprintf(stderr, "text: %s\n", platform::text::Toggle() ? "scalable" : "classic");
             return;
         }
         // Auto-repeat is not a new press: the engine times its own repeat.
