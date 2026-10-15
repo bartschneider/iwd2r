@@ -283,9 +283,13 @@ BOOL CVidBitmap::RenderDirect(INT nSurface, INT x, INT y, const CRect& rClip, DW
             }
             break;
         case 24:
+            // The tinting copy whenever a flag in the high word (tint, add,
+            // light, ...) is set or the brightness and contrast move mid
+            // grey (test of dwFlags & 0xFFFF0000 before each
+            // ApplyBrightnessContrast).
             switch (g_pChitin->cVideo.m_nBpp) {
             case 16:
-                if (g_pChitin->GetCurrentVideoMode()->ApplyBrightnessContrast(RGB(128, 128, 128)) != RGB(128, 128, 128)) {
+                if ((dwFlags & 0xFFFF0000) != 0 || g_pChitin->GetCurrentVideoMode()->ApplyBrightnessContrast(RGB(128, 128, 128)) != RGB(128, 128, 128)) {
                     bResult = BltBmp24To16Tint(reinterpret_cast<WORD*>(pSurface),
                         ddsd.lPitch,
                         pData,
@@ -302,7 +306,7 @@ BOOL CVidBitmap::RenderDirect(INT nSurface, INT x, INT y, const CRect& rClip, DW
                 }
                 break;
             case 24:
-                if (g_pChitin->GetCurrentVideoMode()->ApplyBrightnessContrast(RGB(128, 128, 128)) != RGB(128, 128, 128)) {
+                if ((dwFlags & 0xFFFF0000) != 0 || g_pChitin->GetCurrentVideoMode()->ApplyBrightnessContrast(RGB(128, 128, 128)) != RGB(128, 128, 128)) {
                     bResult = BltBmp24To24Tint(reinterpret_cast<BYTE*>(pSurface),
                         ddsd.lPitch,
                         pData,
@@ -319,7 +323,7 @@ BOOL CVidBitmap::RenderDirect(INT nSurface, INT x, INT y, const CRect& rClip, DW
                 }
                 break;
             case 32:
-                if (g_pChitin->GetCurrentVideoMode()->ApplyBrightnessContrast(RGB(128, 128, 128)) != RGB(128, 128, 128)) {
+                if ((dwFlags & 0xFFFF0000) != 0 || g_pChitin->GetCurrentVideoMode()->ApplyBrightnessContrast(RGB(128, 128, 128)) != RGB(128, 128, 128)) {
                     bResult = BltBmp24To32Tint(reinterpret_cast<DWORD*>(pSurface),
                         ddsd.lPitch,
                         pData,

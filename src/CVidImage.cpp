@@ -346,6 +346,9 @@ BOOL CVidTile::Render(LPDIRECTDRAWSURFACE pSurface, INT x, INT y, const CRect& r
         // __FILE__: C:\Projects\Icewind2\src\chitin\ChVidImage.cpp
         // __LINE__: 6159
         UTIL_ASSERT_MSG(FALSE, "Tile data accessed when not loaded");
+
+        // FALSE without releasing the demand (xor eax,eax at 0x7B182C).
+        return FALSE;
     }
 
     INT nTileSize = pRes->GetTileSize();
@@ -447,12 +450,17 @@ BOOL CVidTile::Render(LPDIRECTDRAWSURFACE pSurface, INT x, INT y, const CRect& r
             nDataJump,
             dwFlags);
         break;
+    default:
+        bSuccess = FALSE;
+        break;
     }
 
     pSurface->Unlock(ddsd.lpSurface);
 
     pRes->Release();
-    return TRUE;
+
+    // The blit's result (mov eax,esi at 0x7B1B1C).
+    return bSuccess;
 }
 
 // 0x7B1B30
@@ -473,13 +481,19 @@ BOOL CVidTile::Render(LPDIRECTDRAWSURFACE pSurface, INT x, INT y, CResTile* pRes
         return FALSE;
     }
 
+    // Both tiles are demanded (0x7B1BA8 and 0x7B1BB6); each is released
+    // on the way out.
     pRes->Demand();
+    pResStencil->Demand();
 
     BYTE* pData = pRes->GetTileData();
     if (pData == NULL) {
         // __FILE__: C:\Projects\Icewind2\src\chitin\ChVidImage.cpp
         // __LINE__: 6344
         UTIL_ASSERT_MSG(FALSE, "Tile data accessed when not loaded");
+
+        // FALSE without releasing either demand, as the original.
+        return FALSE;
     }
 
     BYTE* pStencilData = pResStencil->GetTileData();
@@ -487,6 +501,10 @@ BOOL CVidTile::Render(LPDIRECTDRAWSURFACE pSurface, INT x, INT y, CResTile* pRes
         // __FILE__: C:\Projects\Icewind2\src\chitin\ChVidImage.cpp
         // __LINE__: 6351
         UTIL_ASSERT_MSG(FALSE, "Tile stencil data accessed when not loaded");
+
+        pRes->Release();
+        pResStencil->Release();
+        return FALSE;
     }
 
     INT nTileSize = pRes->GetTileSize();
@@ -593,13 +611,20 @@ BOOL CVidTile::Render(LPDIRECTDRAWSURFACE pSurface, INT x, INT y, CResTile* pRes
             nDataJump,
             dwFlags);
         break;
+    default:
+        // NOTE: The original releases only one tile here (unreachable: the
+        // depth is 16, 24 or 32).
+        bSuccess = FALSE;
+        break;
     }
 
     pSurface->Unlock(ddsd.lpSurface);
 
     pRes->Release();
     pResStencil->Release();
-    return TRUE;
+
+    // The blit's result, as in the plain tile's Render.
+    return bSuccess;
 }
 
 // 0x7B22E0
