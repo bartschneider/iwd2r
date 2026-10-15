@@ -223,7 +223,8 @@ void CScreenStart::UpdateMainPanel()
         pButton->SetEnabled(TRUE);
 
         if (1) {
-            // TODO: Figure out which.
+            // NOTE: Control 3 is hidden in this state (verified at
+            // 0x66F710: SetActive and SetInactiveRender through the vtable).
             CUIControlBase* pControl = pPanel->GetControl(3);
             pControl->SetActive(FALSE);
             pControl->SetInactiveRender(FALSE);

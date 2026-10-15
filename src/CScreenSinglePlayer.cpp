@@ -559,7 +559,8 @@ void CScreenSinglePlayer::TimerAsynchronousUpdate()
         }
     }
 
-    // TODO: Check, lots of jumps and repeating conditions.
+    // NOTE: Checked against 0x661160-0x661270: the original's shared tails
+    // (the session checks after either branch) are written out per branch.
     if (pPanel != NULL) {
         switch (pPanel->m_nID) {
         case 3:
