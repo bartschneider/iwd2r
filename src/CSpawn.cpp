@@ -376,6 +376,7 @@ int CSpawnFile::ParseData(const CString& sData, CStringArray& Sections)
             }
         } else {
             Sections.Add(sMutableData);
+            count++; // The last item counts too (inc ebp at 0x768926).
             sMutableData.Empty();
         }
     }
@@ -514,6 +515,7 @@ int CSpawnList::ParseData(const CString& sData, CStringArray& Sections)
             }
         } else {
             Sections.Add(sMutableData);
+            count++; // The last item counts too (inc ebp at 0x768E48).
             sMutableData.Empty();
         }
     }

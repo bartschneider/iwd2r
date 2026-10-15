@@ -9,7 +9,9 @@
 #include "CGameSprite.h"
 #include "CImmunities.h"
 #include "CInfGame.h"
+#include "CMemINI.h"
 #include "CScreenCreateChar.h"
+#include "CSpawn.h"
 #include "IcewindCGameEffects.h"
 #include "ScreenLayout.h"
 #include "data_view.h"
@@ -1035,14 +1037,7 @@ TEST_CASE("AR3000's troll applies 00TROLL1's regeneration", "[effects][data]")
 // (CInfGame::LoadArea 0x5A24D0). Its ice trolls (30ICETRL) come in wearing
 // 00CIWWLF and 00CWABI2, both with a regeneration (98) equip effect and an
 // eight-character resref.
-//
-// Hidden ([.]): AR3000.INI's "critters=DRUM_SUMMON_A,...,DRUM_SUMMON_D" then
-// fails CSpawnList's "error parsing section list" assertion (CSpawn.cpp 430),
-// because the port's CSpawnList::ParseData (0x768D50) and
-// CSpawnFile::ParseData (0x768840) do not count the last section, which the
-// originals do (inc ebp at 0x768E48 and 0x768926). With that counted it
-// passes; unhide it then.
-TEST_CASE("AR3000 loads with its ice trolls regenerating", "[.][effects][data][ar3000]")
+TEST_CASE("AR3000 loads with its ice trolls regenerating", "[effects][data][ar3000]")
 {
     REQUIRE_ENGINE();
     // The main loop's drawn frames: the loads wait for m_bDisplayStale to
@@ -1107,4 +1102,35 @@ TEST_CASE("AR3000 loads with its ice trolls regenerating", "[.][effects][data][a
     }
     CHECK(iceTrolls > 0);
     CHECK(regenerating == iceTrolls);
+}
+
+// The spawn lists' ParseData (CSpawnFile 0x768840, CSpawnList 0x768D50)
+// count the last item, which has no separator after it, as the originals do
+// (inc ebp at 0x768926 and 0x768E48): CSpawnList's constructor asserts the
+// count equals the array's size (AR3000.INI's critters= list).
+TEST_CASE("spawn lists count the last item of a comma list", "[spawn]")
+{
+    CMemINI ini;
+    CSpawnFile file(&ini);
+    CSpawnList list(&ini, CString("none"));
+
+    CStringArray fileSections;
+    CHECK(file.ParseData(CString("DRUM_SUMMON_A,DRUM_SUMMON_B,DRUM_SUMMON_C,DRUM_SUMMON_D"), fileSections) == 4);
+    REQUIRE(fileSections.GetSize() == 4);
+    CHECK(fileSections[3] == "DRUM_SUMMON_D");
+
+    CStringArray listSections;
+    CHECK(list.ParseData(CString(" A, B.C "), listSections) == 3);
+    REQUIRE(listSections.GetSize() == 3);
+    CHECK(listSections[0] == "A");
+    CHECK(listSections[1] == "B");
+    CHECK(listSections[2] == "C");
+
+    // A single item, and a trailing separator (nothing after it to add).
+    CStringArray single;
+    CHECK(list.ParseData(CString("1_SECOND"), single) == 1);
+    CHECK(single.GetSize() == 1);
+    CStringArray trailing;
+    CHECK(list.ParseData(CString("A,B,"), trailing) == 2);
+    CHECK(trailing.GetSize() == 2);
 }
