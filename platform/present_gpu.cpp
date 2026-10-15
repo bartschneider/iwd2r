@@ -70,6 +70,7 @@ namespace {
         kEasu,
         kRcas,
         kNis,
+        kOverlay, // the scalable text overlay, blended (text_overlay.h)
         kPipelineCount,
     };
     // Each pipeline's fragment shader and its uniform buffer count.
@@ -84,6 +85,7 @@ namespace {
         { "fsr_easu.frag", 1 },
         { "fsr_rcas.frag", 1 },
         { "nis.frag", 2 }, // Region, Coefficients
+        { "overlay.frag", 0 },
     };
 
     // How a filter draws into the target.
@@ -186,6 +188,16 @@ namespace {
                 SDL_ReleaseGPUTexture(device_, target_);
             if (easu_)
                 SDL_ReleaseGPUTexture(device_, easu_);
+            if (overlay_)
+                SDL_ReleaseGPUTexture(device_, overlay_);
+            if (overlayUpload_)
+                SDL_ReleaseGPUTransferBuffer(device_, overlayUpload_);
+            overlay_ = nullptr;
+            overlayUpload_ = nullptr;
+            overlayUploadSize_ = 0;
+            overlayW_ = overlayH_ = 0;
+            overlayVersion_ = 0;
+            overlayPending_ = false;
             if (upload_)
                 SDL_ReleaseGPUTransferBuffer(device_, upload_);
             frame_ = nullptr;
@@ -209,6 +221,7 @@ namespace {
             pass_ = nullptr;
             swapchain_ = nullptr;
             uploaded_ = false;
+            overlayPending_ = false;
             draws_.clear();
             const testing::GpuFault fault = testing::TakeAcquireFault();
             if (fault == testing::GpuFault::Acquire || fault == testing::GpuFault::AcquireOnce)
@@ -356,6 +369,50 @@ namespace {
                 { sharpness, 0.0f, 0.0f, 0.0f },
             };
             draws_.push_back(d);
+            text::Placement p;
+            p.frame = f;
+            p.x = dest.x;
+            p.y = dest.y;
+            p.sx = dest.w / fw;
+            p.sy = dest.h / fh;
+            p.clip = { x0, y0, x1, y1 };
+            p.ui = region.ui;
+            placed.push_back(p);
+        }
+
+        bool OutputSize(int* w, int* h) override
+        {
+            if (!cmd_ || outW_ <= 0 || outH_ <= 0)
+                return false;
+            *w = outW_;
+            *h = outH_;
+            return true;
+        }
+
+        // The overlay: an output-sized texture, updated where it changed,
+        // drawn by EndFrame after the regions with the blending pipeline.
+        void DrawText(const text::Overlay& overlay) override
+        {
+            if (!cmd_ || overlay.width != outW_ || overlay.height != outH_ || overlay.width <= 0)
+                return;
+            if (!overlay_ || overlayW_ != overlay.width || overlayH_ != overlay.height) {
+                if (!EnsureTexture(overlay_, overlayW_, overlayH_, overlay.width, overlay.height, SDL_GPU_TEXTUREUSAGE_SAMPLER)) {
+                    Lose("no text overlay texture");
+                    return;
+                }
+                overlayVersion_ = 0;
+            }
+            if (overlayVersion_ != overlay.version) {
+                RECT r = { 0, 0, overlay.width, overlay.height };
+                if (overlayVersion_ + 1 == overlay.version)
+                    r = overlay.dirty;
+                const int w = static_cast<int>(r.right - r.left);
+                const int h = static_cast<int>(r.bottom - r.top);
+                if (w > 0 && h > 0 && !UploadOverlay(overlay, r))
+                    return;
+                overlayVersion_ = overlay.version;
+            }
+            overlayPending_ = !overlay.empty;
         }
 
         void EndFrame() override
@@ -369,6 +426,9 @@ namespace {
             for (const Draw& d : draws_)
                 Issue(d);
             draws_.clear();
+            if (overlayPending_)
+                IssueOverlay();
+            overlayPending_ = false;
             SDL_EndGPURenderPass(pass_);
             pass_ = nullptr;
             if (swapchain_) {
@@ -597,6 +657,65 @@ namespace {
             SDL_DrawGPUPrimitives(pass_, 3, 1, 0, 0);
         }
 
+        bool UploadOverlay(const text::Overlay& overlay, const RECT& r)
+        {
+            const Uint32 w = static_cast<Uint32>(r.right - r.left);
+            const Uint32 h = static_cast<Uint32>(r.bottom - r.top);
+            const Uint32 bytes = w * h * 4u;
+            if (!overlayUpload_ || overlayUploadSize_ < bytes) {
+                if (overlayUpload_)
+                    SDL_ReleaseGPUTransferBuffer(device_, overlayUpload_);
+                SDL_GPUTransferBufferCreateInfo info = {};
+                info.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+                info.size = bytes;
+                overlayUpload_ = SDL_CreateGPUTransferBuffer(device_, &info);
+                overlayUploadSize_ = overlayUpload_ ? bytes : 0;
+                if (!overlayUpload_) {
+                    Lose("no text overlay transfer buffer");
+                    return false;
+                }
+            }
+            uint8_t* dst = static_cast<uint8_t*>(SDL_MapGPUTransferBuffer(device_, overlayUpload_, true));
+            if (!dst) {
+                Lose("cannot map the text overlay transfer buffer");
+                return false;
+            }
+            for (Uint32 y = 0; y < h; y++) {
+                const uint32_t* src = overlay.pixels.data() + static_cast<size_t>(r.top + static_cast<LONG>(y)) * static_cast<size_t>(overlay.width) + static_cast<size_t>(r.left);
+                std::memcpy(dst + static_cast<size_t>(y) * w * 4u, src, static_cast<size_t>(w) * 4u);
+            }
+            SDL_UnmapGPUTransferBuffer(device_, overlayUpload_);
+            SDL_GPUCopyPass* copy = SDL_BeginGPUCopyPass(cmd_);
+            SDL_GPUTextureTransferInfo from = {};
+            from.transfer_buffer = overlayUpload_;
+            from.pixels_per_row = w;
+            from.rows_per_layer = h;
+            SDL_GPUTextureRegion to = {};
+            to.texture = overlay_;
+            to.x = static_cast<Uint32>(r.left);
+            to.y = static_cast<Uint32>(r.top);
+            to.w = w;
+            to.h = h;
+            to.d = 1;
+            SDL_UploadToGPUTexture(copy, &from, &to, true);
+            SDL_EndGPUCopyPass(copy);
+            return true;
+        }
+
+        void IssueOverlay()
+        {
+            const SDL_GPUViewport viewport = { 0.0f, 0.0f, static_cast<float>(outW_), static_cast<float>(outH_), 0.0f, 1.0f };
+            const SDL_Rect scissor = { 0, 0, outW_, outH_ };
+            SDL_BindGPUGraphicsPipeline(pass_, pipelines_[kOverlay]);
+            SDL_SetGPUViewport(pass_, &viewport);
+            SDL_SetGPUScissor(pass_, &scissor);
+            SDL_GPUTextureSamplerBinding binding = {};
+            binding.texture = overlay_;
+            binding.sampler = samplers_[0];
+            SDL_BindGPUFragmentSamplers(pass_, 0, &binding, 1);
+            SDL_DrawGPUPrimitives(pass_, 3, 1, 0, 0);
+        }
+
         bool BeginPass(SDL_GPUTexture* texture)
         {
             SDL_GPUColorTargetInfo target = {};
@@ -674,6 +793,17 @@ namespace {
                 }
                 SDL_GPUColorTargetDescription color = {};
                 color.format = kFormat;
+                if (i == kOverlay) {
+                    // Premultiplied: source plus destination times one
+                    // minus source alpha.
+                    color.blend_state.enable_blend = true;
+                    color.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+                    color.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+                    color.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
+                    color.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+                    color.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+                    color.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
+                }
                 SDL_GPUGraphicsPipelineCreateInfo info = {};
                 info.vertex_shader = vert;
                 info.fragment_shader = frag;
@@ -729,6 +859,14 @@ namespace {
         int easuW_ = 0;
         int easuH_ = 0;
         std::vector<Draw> draws_;
+        // The scalable text overlay (DrawText).
+        SDL_GPUTexture* overlay_ = nullptr;
+        int overlayW_ = 0;
+        int overlayH_ = 0;
+        SDL_GPUTransferBuffer* overlayUpload_ = nullptr;
+        Uint32 overlayUploadSize_ = 0;
+        uint64_t overlayVersion_ = 0;
+        bool overlayPending_ = false;
         // The frame being recorded.
         SDL_GPUCommandBuffer* cmd_ = nullptr;
         SDL_GPUTexture* swapchain_ = nullptr;

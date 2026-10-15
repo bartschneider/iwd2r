@@ -461,3 +461,19 @@ TEST_CASE("text_renderer_scalable_captures", "[text][data]")
     REQUIRE(render::Active() == nullptr);
     text::SetFontScale(1.0f);
 }
+
+TEST_CASE("text_toggle_swaps_the_capture", "[text]")
+{
+    // Without an engine (nothing to redraw): Ctrl+Shift+T's handler puts
+    // the capture in and takes it out again, the layer with it.
+    REQUIRE_FALSE(render::text_capture::Installed());
+    render::Backend* before = render::Active();
+    REQUIRE(render::text_capture::Toggle());
+    REQUIRE(render::text_capture::Installed());
+    REQUIRE(text::Enabled());
+    REQUIRE(render::Active() != before);
+    REQUIRE_FALSE(render::text_capture::Toggle());
+    REQUIRE_FALSE(render::text_capture::Installed());
+    REQUIRE_FALSE(text::Enabled());
+    REQUIRE(render::Active() == before);
+}

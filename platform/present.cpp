@@ -3,6 +3,8 @@
 
 #include "platform/gpu_probe.h"
 #include "platform/present_backend.h"
+#include "platform/text_layer.h"
+#include "platform/text_overlay.h"
 
 #include <algorithm>
 #include <cctype>
@@ -217,6 +219,21 @@ namespace {
         FallBackToClassic("could not be rebuilt (" + failed + ")");
     }
 
+    // The scalable text (platform/text_overlay.h): the glyphs the frame
+    // still shows, at output resolution, over the regions just drawn.
+    void DrawTextOverlay(Backend& b, const uint32_t* xrgb, int width, int height, int pitchBytes)
+    {
+        if (!text::Enabled())
+            return;
+        int ow = 0;
+        int oh = 0;
+        if (!b.OutputSize(&ow, &oh))
+            return;
+        text::Composer& composer = text::PresentComposer();
+        composer.Compose(text::BackLayer(), xrgb, width, height, pitchBytes / 4, b.placed, ow, oh, text::FontScale());
+        b.DrawText(composer.Result());
+    }
+
     // One frame through the backend; false when it was skipped.
     bool DrawFrame(const uint32_t* xrgb, int width, int height, int pitchBytes, bool offscreen)
     {
@@ -228,6 +245,7 @@ namespace {
         b.offscreen = offscreen;
         b.lost = false;
         bool drawn = false;
+        b.placed.clear();
         if (b.BeginFrame()) {
             b.Upload(xrgb, width, height, pitchBytes);
             const auto regions = RegionsSnapshot();
@@ -237,6 +255,7 @@ namespace {
                 for (const compose::Region& r : *regions)
                     b.DrawRegion(r, s.filter);
             }
+            DrawTextOverlay(b, xrgb, width, height, pitchBytes);
             b.EndFrame();
             drawn = !b.lost;
         }
