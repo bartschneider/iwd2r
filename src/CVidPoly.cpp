@@ -995,7 +995,8 @@ void CVidPoly::DrawHLineDithered24(void* pSurface, int xMin, int xMax, DWORD dwC
 
     int width = xMax - xMin + 1;
     if (width > 0) {
-        pSurface8 += xMin;
+        // Three bytes a pixel (add at 0x7D6A26, lea at 0x7D6A2E).
+        pSurface8 += xMin * 3;
 
         if ((ptRef.y & 1) != 0) {
             if (((xMin + ptRef.x) & 1) != 0) {

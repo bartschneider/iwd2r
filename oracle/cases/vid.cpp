@@ -269,6 +269,17 @@ constexpr uintptr_t kDrawHLine16 = 0x7C1AA0;
 constexpr uintptr_t kDrawHLineMirrored16 = 0x7C1AF0;
 constexpr uintptr_t kDrawHLine24 = 0x7D6970;
 constexpr uintptr_t kDrawHLineMirrored24 = 0x7D69B0;
+// The dithered spans: DrawHLineDithered16 (0x7C1B50), its mirror
+// (0x7C1BB0), DrawHLineDithered24 (0x7D6A00), its mirror (0x7D6A70),
+// DrawHLineDithered32 (0x7D6B60) and its mirror (0x7D6BF0), all `ret 0x18`;
+// they read ptRef for the dither parity and the 32-bit ones the 3d flag
+// (0x91C, 0 in the fixture).
+constexpr uintptr_t kDrawHLineDithered16 = 0x7C1B50;
+constexpr uintptr_t kDrawHLineDitheredMirrored16 = 0x7C1BB0;
+constexpr uintptr_t kDrawHLineDithered24 = 0x7D6A00;
+constexpr uintptr_t kDrawHLineDitheredMirrored24 = 0x7D6A70;
+constexpr uintptr_t kDrawHLineDithered32 = 0x7D6B60;
+constexpr uintptr_t kDrawHLineDitheredMirrored32 = 0x7D6BF0;
 constexpr size_t kRMaskOffset = 0x18;
 constexpr size_t kGMaskOffset = 0x1C;
 constexpr size_t kBMaskOffset = 0x20;
@@ -571,12 +582,12 @@ void SetMode16(VideoFixture& video, CaseContext& ctx, bool green6)
     video.oursChitin->cVideo.m_nBpp = 16;
 }
 
-// One 16- or 24-bit span function (solid, shaded, mirrored or not) on a
-// 64x1 row of random pixels, as HLineShaded does for 32 bits: every span
-// once with the widest surface rectangle, then random spans and rectangles.
-// The 16-bit forms run on a 5-6-5 and a 5-5-5 video mode in turn; the
-// colours are random 32-bit values (the 16-bit solid spans write pixel pairs
-// from dwColor | dwColor << 16).
+// One 16-, 24- or 32-bit span function (solid, dithered, shaded, mirrored
+// or not) on a 64x1 row of random pixels, as HLineShaded does for 32 bits:
+// every span once with the widest surface rectangle, then random spans and
+// rectangles, ptRef random for the dither parity. The 16-bit forms run on a
+// 5-6-5 and a 5-5-5 video mode in turn; the colours are random 32-bit values
+// (the 16-bit solid spans write pixel pairs from dwColor | dwColor << 16).
 void HLineDepth(CaseContext& ctx, uintptr_t address, CVidPoly::DrawHLineFunc oursFn, const char* fnName, int nBpp,
     uint64_t salt)
 {
@@ -688,6 +699,42 @@ void HLineMirrored24(CaseContext& ctx)
 {
     HLineDepth(ctx, kDrawHLineMirrored24, &CVidPoly::DrawHLineMirrored24, "DrawHLineMirrored24", 24,
         0x484C4D3234300000ull); // "HLM240"
+}
+
+void HLineDithered16(CaseContext& ctx)
+{
+    HLineDepth(ctx, kDrawHLineDithered16, &CVidPoly::DrawHLineDithered16, "DrawHLineDithered16", 16,
+        0x484C443136000000ull); // "HLD16"
+}
+
+void HLineDitheredMirrored16(CaseContext& ctx)
+{
+    HLineDepth(ctx, kDrawHLineDitheredMirrored16, &CVidPoly::DrawHLineDitheredMirrored16,
+        "DrawHLineDitheredMirrored16", 16, 0x484C444D31360000ull); // "HLDM16"
+}
+
+void HLineDithered24(CaseContext& ctx)
+{
+    HLineDepth(ctx, kDrawHLineDithered24, &CVidPoly::DrawHLineDithered24, "DrawHLineDithered24", 24,
+        0x484C443234000000ull); // "HLD24"
+}
+
+void HLineDitheredMirrored24(CaseContext& ctx)
+{
+    HLineDepth(ctx, kDrawHLineDitheredMirrored24, &CVidPoly::DrawHLineDitheredMirrored24,
+        "DrawHLineDitheredMirrored24", 24, 0x484C444D32340000ull); // "HLDM24"
+}
+
+void HLineDithered32(CaseContext& ctx)
+{
+    HLineDepth(ctx, kDrawHLineDithered32, &CVidPoly::DrawHLineDithered32, "DrawHLineDithered32", 32,
+        0x484C443332000000ull); // "HLD32"
+}
+
+void HLineDitheredMirrored32(CaseContext& ctx)
+{
+    HLineDepth(ctx, kDrawHLineDitheredMirrored32, &CVidPoly::DrawHLineDitheredMirrored32,
+        "DrawHLineDitheredMirrored32", 32, 0x484C444D33320000ull); // "HLDM32"
 }
 
 // CVidPalette::RealizeRange (0x7BF870) at 32 bpp: a range palette of 256
@@ -2195,6 +2242,12 @@ ORACLE_CASE("vid/hline16", HLine16);
 ORACLE_CASE("vid/hline_mirrored16", HLineMirrored16);
 ORACLE_CASE("vid/hline24", HLine24);
 ORACLE_CASE("vid/hline_mirrored24", HLineMirrored24);
+ORACLE_CASE("vid/hline_dithered16", HLineDithered16);
+ORACLE_CASE("vid/hline_dithered_mirrored16", HLineDitheredMirrored16);
+ORACLE_CASE("vid/hline_dithered24", HLineDithered24);
+ORACLE_CASE("vid/hline_dithered_mirrored24", HLineDitheredMirrored24);
+ORACLE_CASE("vid/hline_dithered32", HLineDithered32);
+ORACLE_CASE("vid/hline_dithered_mirrored32", HLineDitheredMirrored32);
 ORACLE_CASE("vid/realize_range", RealizeRange);
 ORACLE_CASE("vid/realize_resource", RealizeResource);
 ORACLE_CASE("vid/thick_line32", ThickLine32);
