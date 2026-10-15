@@ -594,6 +594,51 @@
     "offset": "0x1B7C",
     "type": "u8"
   },
+  "sprite_script_override": {
+    "base": "CGameSprite",
+    "offset": "0x03F6",
+    "type": "ptr"
+  },
+  "sprite_script_special1": {
+    "base": "CGameSprite",
+    "offset": "0x03FA",
+    "type": "ptr"
+  },
+  "sprite_script_team": {
+    "base": "CGameSprite",
+    "offset": "0x03FE",
+    "type": "ptr"
+  },
+  "sprite_script_special2": {
+    "base": "CGameSprite",
+    "offset": "0x0402",
+    "type": "ptr"
+  },
+  "sprite_script_combat": {
+    "base": "CGameSprite",
+    "offset": "0x0406",
+    "type": "ptr"
+  },
+  "sprite_script_special3": {
+    "base": "CGameSprite",
+    "offset": "0x040A",
+    "type": "ptr"
+  },
+  "sprite_script_movement": {
+    "base": "CGameSprite",
+    "offset": "0x040E",
+    "type": "ptr"
+  },
+  "script_resref": {
+    "base": "CAIScript",
+    "offset": "0x0000",
+    "type": "resref"
+  },
+  "script_blocks": {
+    "base": "CAIScript",
+    "offset": "0x0018",
+    "type": "i32"
+  },
   "sprite_timers_head": {
     "base": "CGameSprite",
     "offset": "0x0452",

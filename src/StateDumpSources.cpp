@@ -6,6 +6,7 @@
 
 #include "mfc.h"
 
+#include "CAIScript.h"
 #include "CBaldurChitin.h"
 #include "CGameArea.h"
 #include "CGameDialog.h"
@@ -318,6 +319,20 @@ void ReadProbe(platform::replay_probe::Frame* out)
             while (pos != NULL) {
                 const CGameTimer* timer = sprite->m_timers.GetNext(pos);
                 o.timers.emplace_back(timer->m_id, timer->m_time);
+            }
+            CAIScript* const scripts[] = {
+                sprite->m_overrideScript, sprite->m_special1Script, sprite->m_teamScript,
+                sprite->m_special2Script, sprite->m_combatScript, sprite->m_special3Script,
+                sprite->m_movementScript,
+            };
+            for (CAIScript* script : scripts) {
+                if (script == NULL) {
+                    o.scripts.emplace_back("-", 0);
+                    continue;
+                }
+                char resref[RESREF_SIZE + 1] = {};
+                std::memcpy(resref, script->m_cResRef.GetResRef(), RESREF_SIZE);
+                o.scripts.emplace_back(resref, static_cast<int>(script->m_caList.GetCount()));
             }
         } else if (o.type == CGameObject::TYPE_DOOR) {
             const CGameDoor* door = static_cast<CGameDoor*>(object);

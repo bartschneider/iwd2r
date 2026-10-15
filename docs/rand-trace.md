@@ -35,7 +35,8 @@ calls made through a helper (most go through `CUtil::UtilRandInt` 0x780C80,
 which is useless as a caller): the stack dword just above the return address
 (for a caller that calls `rand` first, its own return address), then the
 first eight dwords further up the stack (scanning up to 512) that lie in the
-exe's code range 0x401000-0x7FFFFF, or 0 when fewer are found. Those eight
+exe's code range 0x401000-0x7FFFFF, each as `address@slot` (the slot in
+dwords up from the return address; `00000000@0` when fewer are found). Those eight
 are a heuristic: a stack slot can hold a stale return address from an
 earlier call, so check that the instruction before a candidate is a call to
 the function below it before trusting it. Our side's lines are unchanged.
@@ -66,7 +67,8 @@ names the first state difference. The block (format in
   and inhibitor; a door's or sprite's script name; for a sprite also
   `m_lastCharacterCount`, the active flags, `m_bVisibleMonster`,
   `field_294` (hidden), the general state, the current action, the sequence,
-  the action queue (length and head) and the pending triggers;
+  the action queue (length and head), the pending triggers, the script
+  timers and the seven script levels (resref and block count);
 - `vis`: the visibility map, one hex row per map row.
 
 The recorder reads these through `fields.json` (schema.json's `x-fields`,

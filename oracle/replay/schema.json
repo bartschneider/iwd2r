@@ -879,6 +879,42 @@
       "class": "CInfGame",
       "member": "m_worldTime.m_active"
     },
+    "sprite_script_override": {
+      "class": "CGameSprite",
+      "member": "m_overrideScript"
+    },
+    "sprite_script_special1": {
+      "class": "CGameSprite",
+      "member": "m_special1Script"
+    },
+    "sprite_script_team": {
+      "class": "CGameSprite",
+      "member": "m_teamScript"
+    },
+    "sprite_script_special2": {
+      "class": "CGameSprite",
+      "member": "m_special2Script"
+    },
+    "sprite_script_combat": {
+      "class": "CGameSprite",
+      "member": "m_combatScript"
+    },
+    "sprite_script_special3": {
+      "class": "CGameSprite",
+      "member": "m_special3Script"
+    },
+    "sprite_script_movement": {
+      "class": "CGameSprite",
+      "member": "m_movementScript"
+    },
+    "script_resref": {
+      "class": "CAIScript",
+      "member": "m_cResRef"
+    },
+    "script_blocks": {
+      "class": "CAIScript",
+      "member": "m_caList.m_nCount"
+    },
     "sprite_timers_head": {
       "class": "CGameSprite",
       "member": "m_timers.m_pNodeHead"

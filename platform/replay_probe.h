@@ -19,7 +19,7 @@
 //       [name NAME] [last C active A ai B imprisonment M visible_monster V
 //       field_294 F state S action A sequence Q queued N next A triggers T
 //       effects TIMED,EQUIPED xp X hp H dest X,Y path [NODE ...]
-//       timers [ID:TIME ...]]
+//       timers [ID:TIME ...] scripts R:N R:N R:N R:N R:N R:N R:N]
 //   vis ROW HEX...
 //
 // - game: CInfGame::m_nCharacters, m_visibleArea, m_characters (the
@@ -41,7 +41,11 @@
 //   triggers' count, the timed and equipped effect lists' lengths, the
 //   experience (m_baseStats.m_xp), the hit points and the script timers
 //   (m_timers: each CGameTimer's id and expiry time), m_posDest and the
-//   path's nodes (m_pPath[0 .. m_nPath - 1], at most 64). One line per object.
+//   path's nodes (m_pPath[0 .. m_nPath - 1], at most 64), and its seven
+//   script levels (m_overrideScript, m_special1Script, m_teamScript,
+//   m_special2Script, m_combatScript, m_special3Script, m_movementScript):
+//   each its m_cResRef and block count (m_caList), `-` for none. One line
+//   per object.
 // - vis: the area's visibility map, one line per row of m_nWidth tiles
 //   (bytes in hex: bit 7 explored, the low bits the visibility count);
 //   the rows past m_nMapSize, if any, are left out.
@@ -129,6 +133,9 @@ struct Object {
     std::vector<int32_t> path;
     // The m_timers list, head to tail: (id, time).
     std::vector<std::pair<unsigned, int32_t>> timers;
+    // The seven script levels, override to movement: (resref, blocks);
+    // resref "-" for none.
+    std::vector<std::pair<std::string, int>> scripts;
 };
 
 struct Area {
@@ -211,6 +218,10 @@ inline std::string Format(const Frame& f)
             for (const auto& timer : o.timers) {
                 std::snprintf(line, sizeof(line), " %u:%ld", timer.first, static_cast<long>(timer.second));
                 out += line;
+            }
+            out += " scripts";
+            for (const auto& script : o.scripts) {
+                out += " " + script.first + ":" + std::to_string(script.second);
             }
         }
         out += "\n";

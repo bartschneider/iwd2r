@@ -169,6 +169,10 @@ static_assert(kField_game_time_active.type == ReplayType::k_u8, "");
 static_assert(kField_sprite_timers_head.type == ReplayType::k_ptr, "");
 static_assert(kField_timer_time.type == ReplayType::k_i32, "");
 static_assert(kField_timer_id.type == ReplayType::k_u8, "");
+static_assert(kField_sprite_script_override.type == ReplayType::k_ptr, "");
+static_assert(kField_sprite_script_movement.type == ReplayType::k_ptr, "");
+static_assert(kField_script_resref.type == ReplayType::k_resref, "");
+static_assert(kField_script_blocks.type == ReplayType::k_i32, "");
 static_assert(kField_sprite_pos_dest.type == ReplayType::k_i32 && kField_sprite_pos_dest.count == 2, "");
 static_assert(kField_sprite_path.type == ReplayType::k_ptr, "");
 static_assert(kField_sprite_path_count.type == ReplayType::k_i16, "");
@@ -859,6 +863,23 @@ void ReadProbe(platform::replay_probe::Frame* out)
                     o.timers.emplace_back(id, time);
                 }
             }
+            const ReplayField* const kScriptLevels[] = {
+                &kField_sprite_script_override, &kField_sprite_script_special1, &kField_sprite_script_team,
+                &kField_sprite_script_special2, &kField_sprite_script_combat, &kField_sprite_script_special3,
+                &kField_sprite_script_movement,
+            };
+            for (const ReplayField* level : kScriptLevels) {
+                bool scriptOk = true;
+                const uint32_t script = ReadU32(At(object, *level), &scriptOk);
+                if (!script) {
+                    o.scripts.emplace_back("-", 0);
+                    continue;
+                }
+                char resref[8] = {};
+                SafeRead(At(script, kField_script_resref), resref, sizeof(resref));
+                o.scripts.emplace_back(std::string(resref, strnlen(resref, sizeof(resref))),
+                    ReadI32(At(script, kField_script_blocks), &scriptOk));
+            }
         } else if (o.type == platform::replay_probe::kTypeDoor) {
             o.hasName = true;
             o.name = ReadName(At(object, kField_door_name));
@@ -1168,7 +1189,11 @@ uint32_t g_randContinue = kVanillaRand + 5;
 // 0x780C80 does, that is its own return address) and the first eight dwords
 // further up (up to 512) that lie in the exe's code (0x401000-0x7FFFFF):
 // heuristic outer callers, any of which may be a stale value (0 when fewer
-// are found).
+// are found). Each is written with its stack slot, `address@slot`, the
+// slot counted in dwords from the return address, so the same frame layout
+// can be compared between two calls. The slot rides in the top nine bits
+// (code addresses need only 23).
+constexpr uint32_t kSlotShift = 23;
 bool g_randTraceStack = false;
 constexpr size_t kRandRecord = 12;
 
@@ -1178,13 +1203,13 @@ extern "C" void __cdecl LogRand(const uint32_t* stack)
     if (g_randTraceStack) {
         record[3] = stack[1];
         size_t found = 4;
-        for (int i = 2; i < 514 && found < kRandRecord; ++i) {
+        for (uint32_t i = 2; i < 512 && found < kRandRecord; ++i) {
             uint32_t value = 0;
             if (!SafeRead(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(stack + i)), &value, sizeof(value))) {
                 break;
             }
             if (value >= 0x401000 && value < 0x800000) {
-                record[found++] = value;
+                record[found++] = value | (i << kSlotShift);
             }
         }
     }
@@ -1228,8 +1253,10 @@ void FlushRandTrace()
     for (size_t i = 0; i + kRandRecord <= calls.size(); i += kRandRecord) {
         if (g_randTraceStack) {
             std::fprintf(out, "%u %u", calls[i], calls[i + 1]);
-            for (size_t j = 2; j < kRandRecord; ++j) {
-                std::fprintf(out, " %08x", calls[i + j]);
+            std::fprintf(out, " %08x %08x", calls[i + 2], calls[i + 3]);
+            for (size_t j = 4; j < kRandRecord; ++j) {
+                const uint32_t value = calls[i + j];
+                std::fprintf(out, " %08x@%u", value & ((1u << kSlotShift) - 1), value >> kSlotShift);
             }
             std::fprintf(out, "\n");
         } else {
