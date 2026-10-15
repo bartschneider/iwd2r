@@ -6961,6 +6961,7 @@ void CGameSprite::UpdateSpriteEffect()
                     } else {
                         field_7548[nIndex].SequenceSet(0);
                     }
+                    field_7548[nIndex].FrameSet(0);
                 } else {
                     field_7548[nIndex].FrameAdvance();
                 }
@@ -6969,6 +6970,7 @@ void CGameSprite::UpdateSpriteEffect()
             case IWD_VFX_FIRE_SHIELD_BLUE:
                 if (field_7548[nIndex].IsEndOfSequence(FALSE)) {
                     field_7548[nIndex].SequenceSet(2);
+                    field_7548[nIndex].FrameSet(0);
                 } else {
                     field_7548[nIndex].FrameAdvance();
                 }
@@ -6977,6 +6979,7 @@ void CGameSprite::UpdateSpriteEffect()
             case IWD_VFX_29:
                 if (field_7548[nIndex].IsEndOfSequence(FALSE)) {
                     field_7548[nIndex].SequenceSet(3);
+                    field_7548[nIndex].FrameSet(0);
                 } else {
                     field_7548[nIndex].FrameAdvance();
                 }
@@ -6991,6 +6994,7 @@ void CGameSprite::UpdateSpriteEffect()
                         nSequence--;
                     }
                     field_7548[nIndex].SequenceSet(nSequence);
+                    field_7548[nIndex].FrameSet(0);
                 } else {
                     field_7548[nIndex].FrameAdvance();
                 }
@@ -7057,6 +7061,7 @@ void CGameSprite::UpdateSpriteEffect()
                     } else {
                         field_7548[nIndex].SequenceSet(0);
                     }
+                    field_7548[nIndex].FrameSet(0);
                 } else {
                     field_7548[nIndex].FrameAdvance();
                 }
@@ -7069,19 +7074,83 @@ void CGameSprite::UpdateSpriteEffect()
             if (m_pSpriteEffectArray != NULL) {
                 CRect rFx;
                 CPoint ptReference;
+                BOOL bSaved = FALSE;
                 m_animation.CalculateFxRect(rFx, ptReference, m_posZ);
 
+                // The particles of the effect (0x70A3D1-0x70A7FD): one of the
+                // sequence's rows starts again each other tick, the others
+                // move on.
                 for (BYTE nIndex = 0; nIndex < m_spriteEffectSequenceLength; nIndex++) {
-                    if ((g_pBaldurChitin->GetObjectGame()->GetWorldTimer()->m_gameTime / 2) % m_spriteEffectSequenceLength == nIndex) {
-                        BYTE intensity = m_spriteEffectBaseIntensity + m_spriteEffectRandomIntensity - 1;
-                        memset(&(m_pSpriteEffectArray[intensity]),
-                            -1,
-                            sizeof(USHORT) * (intensity));
-                        // TODO: Incomplete.
-                    } else {
-                        BYTE intensity = m_spriteEffectBaseIntensity + m_spriteEffectRandomIntensity - 1;
+                    if ((g_pBaldurChitin->GetObjectGame()->GetWorldTimer()->m_gameTime >> 1) % m_spriteEffectSequenceLength == nIndex) {
+                        INT nIntensity = static_cast<CHAR>(m_spriteEffectBaseIntensity) + m_spriteEffectRandomIntensity;
+                        memset(&(m_pSpriteEffectArray[(nIntensity - 1) * nIndex]),
+                            0xFF,
+                            nIntensity * 2 - 2);
 
-                        // TODO: Incomplete.
+                        if (m_spriteEffectDuration >= m_spriteEffectSequenceLength) {
+                            INT nRandom = m_spriteEffectRandomIntensity != 0
+                                ? rand() % m_spriteEffectRandomIntensity
+                                : 0;
+                            nRandom &= 0xFF;
+
+                            for (BYTE nParticle = 0;
+                                 nParticle < static_cast<CHAR>(m_spriteEffectBaseIntensity) + nRandom;
+                                 nParticle++) {
+                                BYTE nSequence = m_spriteEffectSequenceNumber != 0
+                                    ? static_cast<BYTE>(rand() % m_spriteEffectSequenceNumber)
+                                    : 0;
+                                INT nParticleIndex = static_cast<SHORT>((static_cast<CHAR>(m_spriteEffectBaseIntensity) - 1 + m_spriteEffectRandomIntensity) * nIndex + nParticle);
+                                m_pSpriteEffectArray[nParticleIndex] = static_cast<USHORT>(nSequence << 8);
+
+                                INT nWidth = rFx.right / 3 + 1;
+                                INT nX = nWidth != 0 ? rand() % nWidth : 0;
+                                m_pSpriteEffectArrayPosition[nParticleIndex].x = rFx.right / 3 - ptReference.x + nX;
+
+                                INT nHeight = rFx.bottom * 4 / 5 + 1;
+                                INT nY = nHeight != 0 ? rand() % nHeight : 0;
+                                m_pSpriteEffectArrayPosition[nParticleIndex].y = rFx.bottom - nY - ptReference.y;
+                            }
+                        }
+                    } else {
+                        for (BYTE nParticle = 0;
+                             nParticle < (m_spriteEffectRandomIntensity - 1) + static_cast<CHAR>(m_spriteEffectBaseIntensity);
+                             nParticle++) {
+                            INT nParticleIndex = static_cast<SHORT>(((m_spriteEffectRandomIntensity - 1) + static_cast<CHAR>(m_spriteEffectBaseIntensity)) * nIndex + nParticle);
+                            if (static_cast<SHORT>(m_pSpriteEffectArray[nParticleIndex]) == -1) {
+                                break;
+                            }
+
+                            // A particle that left the middle third goes
+                            // back into it; the first such move keeps the
+                            // rectangle it was measured in.
+                            LONG nX = m_pSpriteEffectArrayPosition[nParticleIndex].x;
+                            if (nX < rFx.right / 3 - ptReference.x
+                                || rFx.right * 2 / 3 - ptReference.x < nX) {
+                                INT nWidth = rFx.right / 3 + 1;
+                                INT nRandom = nWidth != 0 ? rand() % nWidth : 0;
+                                m_pSpriteEffectArrayPosition[nParticleIndex].x = rFx.right / 3 - ptReference.x + nRandom;
+                                if (!bSaved) {
+                                    m_rSpriteEffectFX = rFx;
+                                    m_ptSpriteEffectReference = ptReference;
+                                    bSaved = TRUE;
+                                }
+                            }
+
+                            LONG nY = m_pSpriteEffectArrayPosition[nParticleIndex].y;
+                            if (rFx.bottom - ptReference.y < nY
+                                || nY < rFx.bottom - rFx.bottom * 4 / 5 - ptReference.y - 1) {
+                                INT nHeight = rFx.bottom * 4 / 5 + 1;
+                                INT nRandom = nHeight != 0 ? rand() % nHeight : 0;
+                                m_pSpriteEffectArrayPosition[nParticleIndex].y = rFx.bottom - nRandom - ptReference.y;
+                                if (!bSaved) {
+                                    m_rSpriteEffectFX = rFx;
+                                    m_ptSpriteEffectReference = ptReference;
+                                    bSaved = TRUE;
+                                }
+                            }
+
+                            m_pSpriteEffectArray[nParticleIndex]++;
+                        }
                     }
                 }
             }
