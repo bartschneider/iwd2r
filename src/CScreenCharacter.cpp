@@ -6813,7 +6813,7 @@ void CScreenCharacter::CheckMultiPlayerViewableModifyable()
         m_bMultiPlayerModifyable = m_bMultiPlayerViewable;
 
         if (!pSprite->Orderable(TRUE)) {
-            m_bMultiPlayerViewable = FALSE;
+            m_bMultiPlayerModifyable = FALSE;
         }
 
         if (!m_bMultiPlayerViewable) {
@@ -8206,8 +8206,11 @@ void CUIControlScrollBarCharacterHatedRace::OnPageUp(DWORD nLines)
     // __LINE__: 14706
     UTIL_ASSERT(pCharacter != NULL);
 
-    INT nStep = min(nLines, 11);
-    INT nTopHatedRace = max(pCharacter->m_nTopHatedRace - nStep, 0);
+    // NOTE: The original pages by the absolute line count, 11 for zero.
+    INT nStep = abs(static_cast<INT>(nLines));
+    INT nTopHatedRace = pCharacter->m_nTopHatedRace - (nStep != 0 ? nStep : 11) >= 0
+        ? pCharacter->m_nTopHatedRace - (nStep != 0 ? nStep : 11)
+        : 0;
 
     if (nTopHatedRace != pCharacter->m_nTopHatedRace) {
         // NOTE: Uninline.
@@ -8229,8 +8232,11 @@ void CUIControlScrollBarCharacterHatedRace::OnPageDown(DWORD nLines)
     // __LINE__: 14744
     UTIL_ASSERT(pCharacter != NULL);
 
-    INT nStep = min(nLines, 11);
-    INT nTopHatedRace = min(pCharacter->m_nTopHatedRace + nStep, 5);
+    // NOTE: The original pages by the absolute line count, 11 for zero.
+    INT nStep = abs(static_cast<INT>(nLines));
+    INT nTopHatedRace = (nStep != 0 ? nStep : 11) + pCharacter->m_nTopHatedRace < 6
+        ? (nStep != 0 ? nStep : 11) + pCharacter->m_nTopHatedRace
+        : 5;
 
     if (nTopHatedRace != pCharacter->m_nTopHatedRace) {
         // NOTE: Uninline.
@@ -8390,6 +8396,8 @@ void CUIControlButtonCharacterHatedRaceSelection::OnLButtonClick(CPoint pt)
             // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenCharacter.cpp
             // __LINE__: 15003
             UTIL_ASSERT(FALSE);
+            strHelp = -1;
+            break;
         }
 
         pCharacter->UpdateHelp(m_pPanel->m_nID, 8, strHelp);
@@ -9791,7 +9799,7 @@ void CUIControlScrollBarCharacterFeats::OnScroll()
     UTIL_ASSERT(pCharacter != NULL);
 
     INT nTopFeat = max(FEAT_COUNT * field_144, 0) / field_142;
-    pCharacter->m_nTopFeat = max(min(nTopFeat - FEAT_SLOTS, FEAT_COUNT - FEAT_SLOTS), 0);
+    pCharacter->m_nTopFeat = max(min(nTopFeat, FEAT_COUNT - FEAT_SLOTS), 0);
 
     InvalidateItems();
 
@@ -10140,9 +10148,8 @@ BOOL CUIControlButtonCharacterFeatsCircle::Render(BOOL bForce)
         UTIL_ASSERT(FALSE);
     }
 
-    CScreenCreateChar* pCreateChar = g_pBaldurChitin->m_pEngineCreateChar;
-
-    INT nGameSprite = pCreateChar->GetSpriteId();
+    CScreenCharacter* pCharacter = g_pBaldurChitin->m_pEngineCharacter;
+    INT nGameSprite = pCharacter->field_1840;
 
     CGameSprite* pSprite;
     BYTE rc;
@@ -10158,7 +10165,7 @@ BOOL CUIControlButtonCharacterFeatsCircle::Render(BOOL bForce)
     }
 
     const CRuleTables& ruleTables = g_pBaldurChitin->GetObjectGame()->GetRuleTables();
-    DWORD v1 = ruleTables.GetFeatId(nIndex + pCreateChar->m_nTopFeat);
+    DWORD v1 = ruleTables.GetFeatId(nIndex + pCharacter->m_nTopFeat);
     INT nFeatNumber = ruleTables.GetFeatId(v1);
     INT nValue = pSprite->GetFeatValue(nFeatNumber);
     INT nMaxValue = pSprite->GetMaxFeatValue(nFeatNumber);
@@ -10193,15 +10200,19 @@ BOOL CUIControlButtonCharacterFeatsCircle::Render(BOOL bForce)
         // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenCharacter.cpp
         // __LINE__: 17756
         UTIL_ASSERT(bResult);
-    }
 
-    pCreateChar->UpdatePopupPanel(pCreateChar->GetTopPopup()->m_nID, pSprite);
+        g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(nGameSprite,
+            CGameObjectArray::THREAD_1,
+            INFINITE);
+
+        return TRUE;
+    }
 
     g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(nGameSprite,
         CGameObjectArray::THREAD_1,
         INFINITE);
 
-    return TRUE;
+    return FALSE;
 }
 
 // -----------------------------------------------------------------------------
