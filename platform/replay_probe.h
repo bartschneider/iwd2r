@@ -15,11 +15,12 @@
 //   game characters C visible_area V slots a,b,c,d,e,f portraits a,b,c,d,e,f
 //       time T active A
 //   area RESREF characters C view X,Y vis WxH size S range R ids a,b,c,d,e,f
+//   messages N [setseq TARGET:SEQUENCE:SOURCE ...]
 //   obj INDEX ID type T pos X,Y here H list L seen S speed P inhibitor I
 //       [name NAME] [last C active A ai B imprisonment M visible_monster V
 //       field_294 F state S action A sequence Q queued N next A triggers T
 //       effects TIMED,EQUIPED xp X hp H dest X,Y path [NODE ...]
-//       timers [ID:TIME ...]]
+//       timers [ID:TIME ...] scripts R:N R:N R:N R:N R:N R:N R:N dir D:N noaction C]
 //   vis ROW HEX...
 //
 // - game: CInfGame::m_nCharacters, m_visibleArea, m_characters (the
@@ -29,6 +30,10 @@
 //   m_nCharacters, the viewport's m_cInfinity.nCurrentX/Y, and its
 //   CVisibilityMap's m_nWidth, m_nHeight, m_nMapSize, field_E (the
 //   visibility range in squares) and m_aCharacterIds. Absent with no area.
+// - messages: the message handler's queue (CBaldurChitin::m_cMessageHandler
+//   .m_messageList), the messages the frame's AsynchronousUpdate runs: its
+//   length and, in queue order, each CMessageSetSequence's target,
+//   m_sequence and source (the original's by its vtable, 0x8488C4).
 // - obj: every live entry of the object array (CInfGame::m_cObjectArray,
 //   index 0 .. m_nMaxArrayIndex), in index order: its id, the CGameObject
 //   members m_objectType, m_pos, whether m_pArea is the area on view
@@ -41,7 +46,12 @@
 //   triggers' count, the timed and equipped effect lists' lengths, the
 //   experience (m_baseStats.m_xp), the hit points and the script timers
 //   (m_timers: each CGameTimer's id and expiry time), m_posDest and the
-//   path's nodes (m_pPath[0 .. m_nPath - 1], at most 64). One line per object.
+//   path's nodes (m_pPath[0 .. m_nPath - 1], at most 64), and its seven
+//   script levels (m_overrideScript, m_special1Script, m_teamScript,
+//   m_special2Script, m_combatScript, m_special3Script, m_movementScript):
+//   each its m_cResRef and block count (m_caList), `-` for none, and its
+//   m_nDirection and m_nNewDirection, and m_noActionCount. One line per
+//   object.
 // - vis: the area's visibility map, one line per row of m_nWidth tiles
 //   (bytes in hex: bit 7 explored, the low bits the visibility count);
 //   the rows past m_nMapSize, if any, are left out.
@@ -129,6 +139,12 @@ struct Object {
     std::vector<int32_t> path;
     // The m_timers list, head to tail: (id, time).
     std::vector<std::pair<unsigned, int32_t>> timers;
+    // The seven script levels, override to movement: (resref, blocks);
+    // resref "-" for none.
+    std::vector<std::pair<std::string, int>> scripts;
+    int direction = 0;
+    int newDirection = 0;
+    int32_t noActionCount = 0;
 };
 
 struct Area {
@@ -155,6 +171,14 @@ struct Frame {
     uint32_t gameTime = 0;
     unsigned timeActive = 0;
     Area area;
+    int messages = 0;
+    // The queued CMessageSetSequence messages: target, sequence, source.
+    struct SetSequence {
+        int32_t target = 0;
+        unsigned sequence = 0;
+        int32_t source = 0;
+    };
+    std::vector<SetSequence> setSequences;
     std::vector<Object> objects;
 };
 
@@ -186,6 +210,13 @@ inline std::string Format(const Frame& f)
             static_cast<long>(a.ids[5]));
         out += line;
     }
+    out += "messages " + std::to_string(f.messages);
+    for (const Frame::SetSequence& m : f.setSequences) {
+        std::snprintf(line, sizeof(line), " setseq %ld:%u:%ld", static_cast<long>(m.target), m.sequence,
+            static_cast<long>(m.source));
+        out += line;
+    }
+    out += "\n";
     for (const Object& o : f.objects) {
         std::snprintf(line, sizeof(line), "obj %d %ld type %u pos %ld,%ld here %d list %u seen %d speed %u inhibitor %u",
             o.index, static_cast<long>(o.id), o.type, static_cast<long>(o.x), static_cast<long>(o.y), o.here, o.list,
@@ -212,6 +243,12 @@ inline std::string Format(const Frame& f)
                 std::snprintf(line, sizeof(line), " %u:%ld", timer.first, static_cast<long>(timer.second));
                 out += line;
             }
+            out += " scripts";
+            for (const auto& script : o.scripts) {
+                out += " " + script.first + ":" + std::to_string(script.second);
+            }
+            out += " dir " + std::to_string(o.direction) + ":" + std::to_string(o.newDirection);
+            out += " noaction " + std::to_string(o.noActionCount);
         }
         out += "\n";
     }

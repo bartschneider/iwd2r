@@ -19,6 +19,7 @@
 #include "CScreenCreateChar.h"
 #include "CScreenWorld.h"
 #include "CSearchBitmap.h"
+#include "CStore.h"
 #include "CUtil.h"
 #include "ScreenLayout.h"
 #include "data_view.h"
@@ -1235,6 +1236,329 @@ TEST_CASE("trigger: IsTeamBitOn tests the bits SetTeamBit sets (0x40E4)", "[ai][
     pCharacter->m_curAction = CAIAction();
 }
 
+TEST_CASE("trigger: ActionListEmpty and NearLocation and CreatureHidden (0x402B 0x40A9 0x40A7)", "[ai][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    CGameSprite* pCharacter = NewGameInStartArea(cre);
+    REQUIRE(pCharacter->GetArea() != NULL);
+
+    // ActionListEmpty (0x45534B): nothing queued and no current action.
+    const CAITrigger actionListEmpty(0x402B, 0);
+    pCharacter->ClearActions(FALSE);
+    pCharacter->m_curAction = CAIAction();
+    CHECK(pCharacter->EvaluateStatusTrigger(actionListEmpty));
+    pCharacter->m_curAction = CAIAction(310, CPoint(-1, -1), 64, 1);
+    CHECK_FALSE(pCharacter->EvaluateStatusTrigger(actionListEmpty));
+    pCharacter->m_curAction = CAIAction();
+    pCharacter->AddAction(CAIAction(310, CPoint(-1, -1), 64, 1));
+    CHECK_FALSE(pCharacter->EvaluateStatusTrigger(actionListEmpty));
+    pCharacter->ClearActions(FALSE);
+
+    // NearLocation(Myself, x, y, range) (0x4584ED): search squares of 16 by
+    // 12, squared distance at most range squared.
+    const CPoint pos = pCharacter->GetPos();
+    REQUIRE(pos.x > 100);
+    REQUIRE(pos.y > 100);
+    auto nearLocation = [&](LONG x, LONG y, LONG range) {
+        CAITrigger trigger(0x40A9, CAIObjectType::OBJECT_MYSELF, x);
+        trigger.m_specific2 = y;
+        trigger.m_specific3 = range;
+        return pCharacter->EvaluateStatusTrigger(trigger) != FALSE;
+    };
+    // Four squares to the left: (4 * 16 / 16)^2 = 16 <= 16.
+    CHECK(nearLocation(pos.x - 4 * 16, pos.y, 4));
+    CHECK_FALSE(nearLocation(pos.x - 5 * 16, pos.y, 4));
+    // 3 and 4 squares: 9 + 16 = 25.
+    CHECK(nearLocation(pos.x - 3 * 16, pos.y - 4 * 12, 5));
+    CHECK_FALSE(nearLocation(pos.x - 3 * 16, pos.y - 4 * 12, 4));
+    // -1 is the caller's own position; x or y at most 0 is FALSE.
+    CHECK(nearLocation(-1, -1, 0));
+    CHECK_FALSE(nearLocation(0, pos.y, 1000));
+    CHECK_FALSE(nearLocation(pos.x, -3, 1000));
+    // -2 is the saved location (base stats field_2E4, field_2E6).
+    pCharacter->m_baseStats.field_2E4 = static_cast<SHORT>(pos.x + 2 * 16);
+    pCharacter->m_baseStats.field_2E6 = static_cast<SHORT>(pos.y);
+    CHECK(nearLocation(-2, -2, 2));
+    CHECK_FALSE(nearLocation(-2, -2, 1));
+
+    // CreatureHidden(Myself) (0x4582E0): the base stats' field_294.
+    const CAITrigger creatureHidden(0x40A7, CAIObjectType::OBJECT_MYSELF, 0);
+    pCharacter->m_baseStats.field_294 = 0;
+    CHECK_FALSE(pCharacter->EvaluateStatusTrigger(creatureHidden));
+    pCharacter->m_baseStats.field_294 = 1;
+    CHECK(pCharacter->EvaluateStatusTrigger(creatureHidden));
+    pCharacter->m_baseStats.field_294 = 0;
+}
+
+TEST_CASE("sprite: ChangeDirection turns a slow walker only on its world ticks (0x6FBAD0)", "[ai][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    CGameSprite* pCharacter = NewGameInStartArea(cre);
+    REQUIRE(pCharacter->GetArea() != NULL);
+
+    CTimerWorld* pTimer = g_pBaldurChitin->GetObjectGame()->GetWorldTimer();
+    const ULONG gameTime = pTimer->m_gameTime;
+    const BYTE moveScale = pCharacter->GetAnimation()->GetMoveScale();
+    const ULONG idParity = static_cast<ULONG>(pCharacter->m_id) % 2;
+
+    auto turnsAt = [&](ULONG time) {
+        pTimer->m_gameTime = time;
+        pCharacter->m_nDirection = 0;
+        pCharacter->m_nNewDirection = 4;
+        pCharacter->m_deltaDirection = 1;
+        pCharacter->m_skipDeltaDirection = 0;
+        pCharacter->ChangeDirection();
+        return pCharacter->m_nDirection != 0;
+    };
+
+    // Move scale 5: 2 - 5 / 6 = 2, every other tick, on the id's parity.
+    pCharacter->GetAnimation()->SetMoveScale(5);
+    CHECK(turnsAt(100 + idParity));
+    CHECK_FALSE(turnsAt(101 - idParity));
+    // 6 to 11: 2 - 1 = 1, every tick.
+    pCharacter->GetAnimation()->SetMoveScale(9);
+    CHECK(turnsAt(101 - idParity));
+    // 12 and up: no gate.
+    pCharacter->GetAnimation()->SetMoveScale(12);
+    CHECK(turnsAt(101 - idParity));
+
+    pCharacter->GetAnimation()->SetMoveScale(moveScale);
+    pTimer->m_gameTime = gameTime;
+    pCharacter->m_nNewDirection = pCharacter->m_nDirection;
+}
+
+TEST_CASE("action: FaceSavedLocation turns to the saved orientation (case 298)", "[ai][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    CGameSprite* pCharacter = NewGameInStartArea(cre);
+    REQUIRE(pCharacter->GetArea() != NULL);
+    pCharacter->m_walkBackwards = FALSE;
+
+    // 0x451FA3: SetDirection to the base stats' field_2E8; done.
+    pCharacter->m_nDirection = 2;
+    pCharacter->m_nNewDirection = 2;
+    pCharacter->m_baseStats.field_2E8 = 6;
+    CAIObjectType actee(pCharacter->GetAIType());
+    actee.m_nInstance = pCharacter->GetId();
+    pCharacter->m_curAction = CAIAction(298, actee, 0, 0, 0);
+    CHECK(pCharacter->CGameAIBase::ExecuteAction() == CGameAIBase::ACTION_DONE);
+    CHECK(pCharacter->m_nNewDirection == 6);
+    CHECK(pCharacter->m_deltaDirection == 1);
+    pCharacter->m_curAction = CAIAction();
+    g_pBaldurChitin->GetMessageHandler()->AsynchronousUpdate();
+    pCharacter->m_nNewDirection = pCharacter->m_nDirection;
+}
+
+TEST_CASE("sprite: SetDirection turns the short way round (0x706C80)", "[ai][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    CGameSprite* pCharacter = NewGameInStartArea(cre);
+    REQUIRE(pCharacter->GetArea() != NULL);
+    pCharacter->m_walkBackwards = FALSE;
+
+    auto senseFrom = [&](SHORT from, SHORT to) {
+        pCharacter->m_nDirection = from;
+        pCharacter->SetDirection(to);
+        CHECK(pCharacter->m_nNewDirection == to);
+        return pCharacter->m_deltaDirection;
+    };
+    CHECK(senseFrom(2, 6) == 1);
+    CHECK(senseFrom(6, 2) == -1);
+    // More than half a turn up: down instead (2 -> 0 -> 14).
+    CHECK(senseFrom(2, 14) == -1);
+    CHECK(senseFrom(14, 2) == 1);
+    // Exactly half a turn: up from below (+8 is not above 8), down from
+    // above negated to up (-8 is at most -8), with the skip.
+    CHECK(senseFrom(2, 10) == 1);
+    CHECK(pCharacter->m_skipDeltaDirection == 4);
+    CHECK(senseFrom(10, 2) == 1);
+    CHECK(senseFrom(3, 4) == 1);
+    CHECK(pCharacter->m_skipDeltaDirection == 0);
+
+    pCharacter->m_nNewDirection = pCharacter->m_nDirection;
+}
+
+TEST_CASE("trigger: SubRace and Kit and CheckSkillGT/LT and PartyHasItem (0x40CD 0x40CE 0x40E7 0x40E8 0x4042)", "[ai][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    CGameSprite* pCharacter = NewGameInStartArea(cre);
+    REQUIRE(pCharacter->GetArea() != NULL);
+
+    // SubRace (0x453B54): race in the high word, subrace in the low word.
+    const CAIObjectType& type = pCharacter->GetAIType();
+    const LONG raceSubRace = (static_cast<LONG>(type.m_nRace) << 16) | type.m_nSubRace;
+    CHECK(pCharacter->EvaluateStatusTrigger(CAITrigger(0x40CD, CAIObjectType::OBJECT_MYSELF, raceSubRace)));
+    CHECK_FALSE(pCharacter->EvaluateStatusTrigger(CAITrigger(0x40CD, CAIObjectType::OBJECT_MYSELF, raceSubRace + 1)));
+    CHECK_FALSE(pCharacter->EvaluateStatusTrigger(CAITrigger(0x40CD, CAIObjectType::OBJECT_MYSELF, raceSubRace + 0x10000)));
+
+    // Kit (0x453B95): every bit of the specifics in the specialization.
+    const DWORD specialization = pCharacter->m_baseStats.m_specialization;
+    pCharacter->m_baseStats.m_specialization = 0x4040;
+    CHECK(pCharacter->EvaluateStatusTrigger(CAITrigger(0x40CE, CAIObjectType::OBJECT_MYSELF, 0x40)));
+    CHECK(pCharacter->EvaluateStatusTrigger(CAITrigger(0x40CE, CAIObjectType::OBJECT_MYSELF, 0x4040)));
+    CHECK_FALSE(pCharacter->EvaluateStatusTrigger(CAITrigger(0x40CE, CAIObjectType::OBJECT_MYSELF, 0x41)));
+    pCharacter->m_baseStats.m_specialization = specialization;
+
+    // CheckSkillGT/LT (0x455F32, 0x455F75): derived skill m_specific2
+    // against the specifics.
+    const signed char skill = pCharacter->m_derivedStats.m_nSkills[3];
+    pCharacter->m_derivedStats.m_nSkills[3] = 5;
+    auto checkSkill = [&](SHORT id, LONG value) {
+        CAITrigger trigger(id, CAIObjectType::OBJECT_MYSELF, value);
+        trigger.m_specific2 = 3;
+        return pCharacter->EvaluateStatusTrigger(trigger) != FALSE;
+    };
+    CHECK(checkSkill(0x40E7, 4));
+    CHECK_FALSE(checkSkill(0x40E7, 5));
+    CHECK(checkSkill(0x40E8, 6));
+    CHECK_FALSE(checkSkill(0x40E8, 5));
+    pCharacter->m_derivedStats.m_nSkills[3] = skill;
+
+    // PartyHasItem (0x455B3C): FindItemPersonal (0x71D310) answers -1 for
+    // an item nobody carries, and the slot, matched without case, for one
+    // the character carries.
+    CAITrigger missing(0x4042, 0);
+    missing.m_string1 = "NOSUCHIT";
+    CHECK(pCharacter->FindItemPersonal(CString("NOSUCHIT"), 0, FALSE) == -1);
+    CHECK_FALSE(pCharacter->EvaluateStatusTrigger(missing));
+    // A known item in a free inventory slot: found by name in any case.
+    CGameSpriteEquipment* pEquipment = pCharacter->GetEquipment();
+    SHORT gemSlot = -1;
+    SHORT bagSlot = -1;
+    for (SHORT n = 18; n < 51 && bagSlot == -1; n++) {
+        if (pEquipment->m_items[n] == NULL) {
+            if (gemSlot == -1) {
+                gemSlot = n;
+            } else {
+                bagSlot = n;
+            }
+        }
+    }
+    REQUIRE(bagSlot != -1);
+    pEquipment->m_items[gemSlot] = new CItem(CResRef("00GEM02"), 1, 0, 0, 0, 0);
+    CHECK(pCharacter->FindItemPersonal(CString("00gem02"), 0, FALSE) == gemSlot);
+    CAITrigger carried(0x4042, 0);
+    carried.m_string1 = "00gem02";
+    CHECK(pCharacter->EvaluateStatusTrigger(carried));
+
+    // A gem in a bag (an item of type 58 whose store, named as the bag,
+    // holds it): FindItemBags (0x722530) answers the bag's slot, through
+    // FindItemInStore (0x5C8190) loading the bag's store, and PartyHasItem
+    // finds it there.
+    pEquipment->m_items[bagSlot] = new CItem(CResRef("00GBGA01"), 0, 0, 0, 0, 0);
+    REQUIRE(pEquipment->m_items[bagSlot]->GetItemType() == 58);
+    {
+        CStore bag(CResRef("00GBGA01"));
+        while (bag.m_lInventory.GetCount() > 0) {
+            delete bag.m_lInventory.RemoveHead();
+        }
+        CItem gem(CResRef("00GEM03"), 1, 0, 0, 0, 0);
+        REQUIRE(bag.AddItemExt(gem, 1) == 0);
+        bag.Marshal(g_pBaldurChitin->GetObjectGame()->m_sTempDir);
+    }
+    CHECK(pCharacter->FindItemPersonal(CString("00GEM03"), 0, FALSE) == -1);
+    CHECK(pCharacter->FindItemBags(CString("00gem03"), 0, FALSE) == bagSlot);
+    CHECK(pCharacter->FindItemBags(CString("00GEM04"), 0, FALSE) == -1);
+    CAITrigger inBag(0x4042, 0);
+    inBag.m_string1 = "00GEM03";
+    CHECK(pCharacter->EvaluateStatusTrigger(inBag));
+
+    CStore::InvalidateStore(CResRef("00GBGA01"));
+    delete pEquipment->m_items[gemSlot];
+    pEquipment->m_items[gemSlot] = NULL;
+    delete pEquipment->m_items[bagSlot];
+    pEquipment->m_items[bagSlot] = NULL;
+}
+
+TEST_CASE("sprite: ResolveInstants sends the idle sequence after 60 no-action ticks (0x728BC0)", "[ai][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    CGameSprite* pCharacter = NewGameInStartArea(cre);
+    REQUIRE(pCharacter->GetArea() != NULL);
+    REQUIRE(pCharacter->m_pPath == NULL);
+
+    CMessageHandler* pHandler = g_pBaldurChitin->GetMessageHandler();
+    pHandler->AsynchronousUpdate();
+    const SHORT idle = pCharacter->GetIdleSequence();
+    const SHORT other = idle == 6 ? 7 : 6;
+    auto sendsAfter = [&](LONG count) {
+        pCharacter->ClearActions(FALSE);
+        pCharacter->m_curAction = CAIAction();
+        pCharacter->m_sequenceTest = FALSE;
+        pCharacter->m_nSequence = other;
+        pCharacter->m_noActionCount = count;
+        const INT before = pHandler->m_messageList.GetCount();
+        pCharacter->ResolveInstants(TRUE);
+        const INT after = pHandler->m_messageList.GetCount();
+        pHandler->AsynchronousUpdate();
+        return after > before;
+    };
+    // NoAction counts one more (case 0), then the count must be above
+    // READY_COUNT, the WORD at 0x85BB9A: 60.
+    CHECK_FALSE(sendsAfter(59));
+    CHECK(sendsAfter(60));
+}
+
 TEST_CASE("action: FloatMessage floats the text over its target and is done (case 241)", "[ai][data]")
 {
     if (DataDir() == nullptr) {
@@ -1317,4 +1641,48 @@ TEST_CASE("walk: the distance to the next node is rounded before it is cut into 
     CHECK(pCharacter->m_posDelta.x == -16 * (1 << CGameSprite::EXACT_SCALE) / 3);
     CHECK(pCharacter->m_posDelta.y == -16 * (1 << CGameSprite::EXACT_SCALE) / 3);
     pCharacter->DropPath();
+}
+
+TEST_CASE("object: FloatText floats only in the area on view and clears its text link", "[ai][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    CGameSprite* pCharacter = NewGameInStartArea(cre);
+    CGameArea* pArea = pCharacter->GetArea();
+    REQUIRE(pArea != NULL);
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+    // 0x4C80E0. The text object itself needs the world screen's video mode
+    // (CGameText::SetText's FX size), which these tests do not set up; the
+    // walk_and_talk replay covers it (the goblins' float texts take the
+    // original's object ids). Here: an object at (-1, -1) floats nothing,
+    // and an object outside the area on view does not either.
+    const LONG nObjectsBefore = pGame->GetObjectArray()->m_nNextObjectId;
+    const CPoint pos = pCharacter->m_pos;
+    pCharacter->field_1C = 0;
+    pCharacter->m_pos = CPoint(-1, -1);
+    pCharacter->FloatText(2806, 10, 5);
+    CHECK(pCharacter->field_1C == 0);
+    pCharacter->m_pos = pos;
+
+    const BYTE nVisible = pGame->m_visibleArea;
+    pGame->m_visibleArea = static_cast<BYTE>((nVisible + 1) % CINFGAME_MAX_AREAS);
+    pCharacter->FloatText(2806, 10, 5);
+    CHECK(pCharacter->field_1C == 0);
+    CHECK(pGame->GetObjectArray()->m_nNextObjectId == nObjectsBefore);
+    pGame->m_visibleArea = nVisible;
+
+    // Strref 0 clears the link to the previous text.
+    pCharacter->field_1C = 0;
+    pCharacter->FloatText(0, 10, 5);
+    CHECK(pCharacter->field_1C == 0);
 }

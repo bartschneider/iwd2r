@@ -1104,9 +1104,20 @@ SHORT CGameAIBase::ExecuteAction()
         // TODO: 0x451E5F-0x451EAA not ported.
         goto done;
     case 298:
-        // FaceSavedLocation
-        // TODO: 0x451FA3-0x452035 not ported.
-        goto done;
+        // FaceSavedLocation: the sprite turns to its saved orientation
+        // (0x451FA3).
+        pTarget = GetTargetShareType(CGameObject::TYPE_SPRITE);
+        bShare = TRUE;
+        if (pTarget != NULL) {
+            CGameSprite* pSprite = static_cast<CGameSprite*>(pTarget);
+            pSprite->SetDirection(static_cast<SHORT>(pSprite->m_baseStats.field_2E8));
+            if (pSprite->GetPos() != CPoint(-1, -1) || pSprite->GetArea() != NULL) {
+                message = new CMessageSpriteUpdate(pSprite, pSprite->GetId(), pSprite->GetId());
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+            }
+        }
+        returnValue = ACTION_DONE;
+        goto release;
     case 301:
         // SetExtendedNight
         // TODO: 0x4520ED-0x45216A not ported.
@@ -4463,6 +4474,143 @@ BOOL CGameAIBase::EvaluateStatusTrigger(const CAITrigger& trigger)
         // AreaRestDisabled
         if (m_pArea != NULL && (m_pArea->m_header.m_flags & 0x2) != 0) {
             bResult = TRUE;
+        }
+        break;
+    case 0x402B:
+        // ActionListEmpty: nothing queued and no current action.
+        if (m_queuedActions.GetCount() != 0) {
+            bResult = FALSE;
+        } else if (m_curAction.m_actionID == CAIAction::NO_ACTION) {
+            bResult = TRUE;
+        } else {
+            bResult = FALSE;
+        }
+        break;
+    case 0x40CD:
+        // SubRace: the cause's race and subrace against the specifics'
+        // high and low words.
+        triggerCopy.m_triggerCause.Decode(this);
+        bResult = triggerCopy.m_triggerCause.m_nRace == (triggerCopy.m_specificID >> 16)
+            && triggerCopy.m_triggerCause.m_nSubRace == (triggerCopy.m_specificID & 0xFFFF);
+        break;
+    case 0x40CE:
+        // Kit: every bit of the specifics in the sprite's specialization.
+        triggerCopy.m_triggerCause.Decode(this);
+        pObject = triggerCopy.m_triggerCause.sub_40CB20(this, CGameObject::TYPE_SPRITE, FALSE);
+        if (pObject != NULL) {
+            DWORD nKit = static_cast<DWORD>(triggerCopy.m_specificID);
+            bResult = (static_cast<CGameSprite*>(pObject)->GetSpecialization() & nKit) == nKit;
+        }
+        break;
+    case 0x40E7:
+    case 0x40E8:
+        // CheckSkillGT, CheckSkillLT: the object's skill m_specific2
+        // against the specifics.
+        {
+            CGameSprite* pSprite = NULL;
+            bNoRelease = GetTriggerSprite(triggerCopy, &pSprite);
+            pObject = pSprite;
+            if (pSprite == NULL) {
+                // NOTE: The original leaves through its early epilogue
+                // (0x45AB7A) without releasing anything; nothing is shared.
+                return FALSE;
+            }
+
+            // NOTE: The skill index is not checked, as in the original.
+            INT nSkill = pSprite->GetDerivedStats()->m_nSkills[triggerCopy.m_specific2];
+            if (triggerCopy.m_triggerID == 0x40E7) {
+                bResult = nSkill > triggerCopy.m_specificID;
+            } else {
+                bResult = nSkill < triggerCopy.m_specificID;
+            }
+        }
+        break;
+    case 0x4042:
+        // PartyHasItem: a party member carries the item (string1),
+        // personally or in a bag.
+        {
+            CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+            for (SHORT nIndex = 0; nIndex < pGame->GetNumCharacters(); nIndex++) {
+                LONG nCharacterId = pGame->GetCharacterId(nIndex);
+                CGameObject* pCharacter;
+                BYTE rc;
+                do {
+                    rc = pGame->GetObjectArray()->GetShare(nCharacterId,
+                        CGameObjectArray::THREAD_ASYNCH,
+                        &pCharacter,
+                        INFINITE);
+                } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+                if (rc != CGameObjectArray::SUCCESS) {
+                    // NOTE: The original gives up at the first character it
+                    // cannot share (the early epilogue 0x45AB7A), without
+                    // trying the rest.
+                    return FALSE;
+                }
+
+                CGameSprite* pSprite = static_cast<CGameSprite*>(pCharacter);
+                BOOL bFound = pSprite->FindItemPersonal(triggerCopy.GetString1(), 0, FALSE) != -1
+                    || pSprite->FindItemBags(triggerCopy.GetString1(), 0, FALSE) != -1;
+
+                pGame->GetObjectArray()->ReleaseShare(nCharacterId,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    INFINITE);
+
+                if (bFound) {
+                    return TRUE;
+                }
+            }
+            return FALSE;
+        }
+    case 0x40A7:
+        // CreatureHidden: the object's hidden flag (base stats field_294).
+        {
+            CGameSprite* pSprite = NULL;
+            bNoRelease = GetTriggerSprite(triggerCopy, &pSprite);
+            pObject = pSprite;
+            if (pSprite == NULL) {
+                // NOTE: The original leaves through its early epilogue
+                // (0x45AB7A) without releasing anything; nothing is shared.
+                return FALSE;
+            }
+
+            bResult = pSprite->m_baseStats.field_294;
+        }
+        break;
+    case 0x40A9:
+        // NearLocation(object, x, y, range): the object within `range`
+        // search squares of (x, y).
+        {
+            CGameSprite* pSprite = NULL;
+            bNoRelease = GetTriggerSprite(triggerCopy, &pSprite);
+            pObject = pSprite;
+            if (pSprite == NULL) {
+                // NOTE: The original leaves through its early epilogue
+                // (0x45AB7A) without releasing anything; nothing is shared.
+                return FALSE;
+            }
+
+            // NOTE: The saved location (-2) is read through the sprite's
+            // base stats (0x453190) whatever the caller is, as the original
+            // does.
+            if (triggerCopy.m_specificID == -2) {
+                triggerCopy.m_specificID = static_cast<USHORT>(static_cast<CGameSprite*>(this)->m_baseStats.field_2E4);
+            } else if (triggerCopy.m_specificID == -1) {
+                triggerCopy.m_specificID = GetPos().x;
+            }
+
+            if (triggerCopy.m_specific2 == -2) {
+                triggerCopy.m_specific2 = static_cast<USHORT>(static_cast<CGameSprite*>(this)->m_baseStats.field_2E6);
+            } else if (triggerCopy.m_specific2 == -1) {
+                triggerCopy.m_specific2 = GetPos().y;
+            }
+
+            if (triggerCopy.m_specificID > 0 && triggerCopy.m_specific2 > 0) {
+                LONG nRange = triggerCopy.m_specific3;
+                LONG dx = (pSprite->GetPos().x - triggerCopy.m_specificID) / CPathSearch::GRID_SQUARE_SIZEX;
+                LONG dy = (pSprite->GetPos().y - triggerCopy.m_specific2) / CPathSearch::GRID_SQUARE_SIZEY;
+                bResult = dy * dy + dx * dx <= nRange * nRange;
+            }
         }
         break;
     case 0x40EF:

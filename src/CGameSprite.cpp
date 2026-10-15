@@ -110,7 +110,7 @@ const BYTE CGameSprite::SOUND_REACT_TO_DEATH = 13;
 const SHORT CGameSprite::EXACT_SCALE = 10;
 
 // 0x85BB9A
-const SHORT CGameSprite::READY_COUNT = 75;
+const SHORT CGameSprite::READY_COUNT = 60;
 
 // 0x85BB9C
 const SHORT CGameSprite::USER_OVERRIDE_COUNT = 75;
@@ -3514,6 +3514,17 @@ void CGameSprite::ChangeDirection()
         return;
     }
 
+    // A slow walker (move scale below 12) turns only on the world ticks
+    // where the world time and its id agree modulo (2 - scale / 6), every
+    // other tick for a scale below 6 (0x6FBAEC). The byte at 0x85AB4C is 6.
+    if (m_animation.GetMoveScale() < 2 * 6) {
+        ULONG nGameTime = g_pBaldurChitin->GetObjectGame()->GetWorldTimer()->m_gameTime;
+        if (nGameTime % static_cast<ULONG>(2 - m_animation.GetMoveScale() / 6)
+            != static_cast<ULONG>(m_id) % static_cast<ULONG>(2 - m_animation.GetMoveScale() / 6)) {
+            return;
+        }
+    }
+
     if (m_skipDeltaDirection > 0) {
         m_skipDeltaDirection -= 2;
         if (m_skipDeltaDirection <= 1) {
@@ -6268,8 +6279,8 @@ void CGameSprite::SetDirection(SHORT direction)
     m_deltaDirection = direction > m_nDirection ? 1 : -1;
 
     if (direction - m_nDirection > 8 || direction - m_nDirection <= -8) {
-        // FIXME: Same value?
-        m_deltaDirection = direction > m_nDirection ? 1 : -1;
+        // The short way round (`neg`, 0x706CB9).
+        m_deltaDirection = -m_deltaDirection;
     }
 
     if (abs(direction - m_nDirection) == 8) {
@@ -10112,7 +10123,7 @@ SHORT CGameSprite::FindItemPersonal(const CString& sName, int number, BOOL restr
 
     for (SHORT slot = 0; slot < end; slot++) {
         if (m_equipment.m_items[slot] != NULL
-            && m_equipment.m_items[slot]->cResRef == sName) {
+            && m_equipment.m_items[slot]->cResRef == sMutableName) {
             if (number > 0) {
                 number--;
             } else {
@@ -10121,7 +10132,7 @@ SHORT CGameSprite::FindItemPersonal(const CString& sName, int number, BOOL restr
         }
     }
 
-    return 0;
+    return -1;
 }
 
 // 0x71D3D0
