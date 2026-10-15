@@ -1346,6 +1346,44 @@ TEST_CASE("sprite: ChangeDirection turns a slow walker only on its world ticks (
     pCharacter->m_nNewDirection = pCharacter->m_nDirection;
 }
 
+TEST_CASE("sprite: SetDirection turns the short way round (0x706C80)", "[ai][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    CGameSprite* pCharacter = NewGameInStartArea(cre);
+    REQUIRE(pCharacter->GetArea() != NULL);
+    pCharacter->m_walkBackwards = FALSE;
+
+    auto senseFrom = [&](SHORT from, SHORT to) {
+        pCharacter->m_nDirection = from;
+        pCharacter->SetDirection(to);
+        CHECK(pCharacter->m_nNewDirection == to);
+        return pCharacter->m_deltaDirection;
+    };
+    CHECK(senseFrom(2, 6) == 1);
+    CHECK(senseFrom(6, 2) == -1);
+    // More than half a turn up: down instead (2 -> 0 -> 14).
+    CHECK(senseFrom(2, 14) == -1);
+    CHECK(senseFrom(14, 2) == 1);
+    // Exactly half a turn: from below goes down, with the skip.
+    CHECK(senseFrom(2, 10) == 1);
+    CHECK(pCharacter->m_skipDeltaDirection == 4);
+    CHECK(senseFrom(10, 2) == 1);
+    CHECK(senseFrom(3, 4) == 1);
+    CHECK(pCharacter->m_skipDeltaDirection == 0);
+
+    pCharacter->m_nNewDirection = pCharacter->m_nDirection;
+}
+
 TEST_CASE("trigger: SubRace and Kit and CheckSkillGT/LT and PartyHasItem (0x40CD 0x40CE 0x40E7 0x40E8 0x4042)", "[ai][data]")
 {
     if (DataDir() == nullptr) {

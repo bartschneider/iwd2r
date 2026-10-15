@@ -6233,8 +6233,8 @@ void CGameSprite::SetDirection(SHORT direction)
     m_deltaDirection = direction > m_nDirection ? 1 : -1;
 
     if (direction - m_nDirection > 8 || direction - m_nDirection <= -8) {
-        // FIXME: Same value?
-        m_deltaDirection = direction > m_nDirection ? 1 : -1;
+        // The short way round (`neg`, 0x706CB9).
+        m_deltaDirection = -m_deltaDirection;
     }
 
     if (abs(direction - m_nDirection) == 8) {
