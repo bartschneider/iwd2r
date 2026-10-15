@@ -168,3 +168,11 @@ The guards in `src/render/api.h` leave these for the renderer that first draws t
 - `CGameSprite::GetAC` is a stub returning 0, so the character screen shows AC 0 (milestone 3 combat).
 - `CGameSprite.h` lacks `BYTE field_7282[11]`, so level-up always rolls hit points; the original skips that roll (and its `rand()`) in one rare drained-level case. No test pins level-up's rand count.
 - `CScreenCharacter::OnKeyDown` calls its own `OnLeftPanelButtonClick` where the original calls the active engine's.
+
+## Inventory, containers and stores (from project 3, milestone 5, screens-items)
+
+- `src/CInfGameItemUse.*` holds eight CInfGame functions as free functions, a temporary seam while another stream owned `CInfGame.*`. Fold them into CInfGame members once that stream merges.
+- TODOs left in the item-use paths: `CGameSprite::CheckQuickLists`, `CheckIfUsedUp` and 0x723830 are not called yet.
+- The container slot handler 0x6957E0 needs `SwapItemGround` before dropping onto the ground works as in the original.
+- Container, bag and temple buy paths have no tests yet.
+- The area-move test uses AR1001 because loading AR3000 aborted (see the persistent-effect resref fix).
