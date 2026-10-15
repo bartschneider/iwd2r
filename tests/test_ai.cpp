@@ -787,3 +787,21 @@ TEST_CASE("ai: closing AR5004's door on a creature tells the creature to move an
     pArea->m_search.m_pDynamicCost = NULL;
     ClearMessages();
 }
+
+TEST_CASE("action: the copy constructor copies all three specific ids", "[ai]")
+{
+    // StartRandomTimer(18, 20, 30) as a script's response carries it:
+    // CAIAction's copy constructor (0x409090) copies +0xBE from +0xBE.
+    CAIAction action(232, CAIObjectType::NOONE, 18, 20, 30);
+    action.m_string1 = "one";
+    action.m_string2 = "two";
+    action.m_dest = CPoint(7, 9);
+    const CAIAction copy(action);
+    CHECK(copy.m_actionID == 232);
+    CHECK(copy.m_specificID == 18);
+    CHECK(copy.m_specificID2 == 20);
+    CHECK(copy.m_specificID3 == 30);
+    CHECK(copy.m_string1 == "one");
+    CHECK(copy.m_string2 == "two");
+    CHECK(copy.m_dest == CPoint(7, 9));
+}
