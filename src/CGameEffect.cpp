@@ -19,8 +19,8 @@
 #include "CUIPanel.h"
 #include "CUtil.h"
 #include "CVidPalette.h"
-#include "IcewindCGameEffects.h"
 #include "Icewind586B70.h"
+#include "IcewindCGameEffects.h"
 #include "IcewindMisc.h"
 
 #include <cstdio>
@@ -16832,9 +16832,6 @@ CPersistantEffect84C4A4::CPersistantEffect84C4A4(const CPersistantEffect84C4A4& 
     field_24 = other.field_24;
     field_28 = other.field_28;
     memcpy(field_29, other.field_29, sizeof(field_29));
-    field_31 = other.field_31;
-    field_32 = other.field_32;
-    field_33 = other.field_33;
 }
 
 // 0x4C1920

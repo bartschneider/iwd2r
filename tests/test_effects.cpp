@@ -3,6 +3,7 @@
 
 #include "CBaldurChitin.h"
 #include "CCreatureFile.h"
+#include "CGameArea.h"
 #include "CGameEffect.h"
 #include "CGameEffectList.h"
 #include "CGameSprite.h"
@@ -15,11 +16,15 @@
 #include "platform/data_dir.h"
 #include "platform/window.h"
 
+#include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <climits>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 // The effects' ApplyEffect on a sprite made from CHARBASE.CRE, the way
@@ -917,4 +922,189 @@ TEST_CASE("stoneskin's exhausted pool removes only its effect and later hits tak
     CHECK(pOther->m_effectID == CGAMEEFFECT_STR);
 
     delete pSprite;
+}
+
+namespace {
+
+// The bytes of a creature file, as LoadCharBase reads CHARBASE.
+std::vector<BYTE> LoadCreature(const char* resRef)
+{
+    CCreatureFile file;
+    file.SetResRef(CResRef(resRef), TRUE, TRUE);
+    BYTE* data = file.GetData();
+    std::vector<BYTE> bytes;
+    if (data != NULL) {
+        bytes.assign(data, data + file.GetDataSize());
+    }
+    file.Release();
+    return bytes;
+}
+
+// The persistent effect's source resref: the original's strcpy target at
+// +0x29, ten bytes there (the copy at 0x4C29EE moves 0x29..0x32 as one
+// member).
+std::string SourceOf(CPersistantEffect84C4A4* pEffect)
+{
+    const char* source = reinterpret_cast<const char*>(pEffect->field_29);
+    return std::string(source, strnlen(source, sizeof(pEffect->field_29)));
+}
+
+}
+
+// AR3000's trolls (30TROLL) wear 00TROLL1, whose equip effect is a
+// regeneration (98, mode 3, amount 2): its source resref has eight
+// characters, so the strcpy into the persistent effect writes nine bytes.
+// Loading AR3000 aborted on it (_FORTIFY_SOURCE) while field_29 was
+// declared as eight bytes. The poison (25) and disease (78) sites copy the
+// same way.
+TEST_CASE("persistent effects keep an eight-character source resref", "[effects][data]")
+{
+    REQUIRE_ENGINE();
+    CGameSprite* pSprite = MakeSprite();
+    CTypedPtrList<CPtrList, CPersistantEffect*>& list = pSprite->m_derivedStats.m_cRegeneratedPersistantEffectList;
+
+    struct Site {
+        WORD effectID;
+        DWORD dwFlags;
+        LONG amount;
+    };
+    const Site sites[] = {
+        { CGAMEEFFECT_REGENERATION, 3, 2 }, // 0x4B6620, as 00TROLL1
+        { CGAMEEFFECT_POISON, 2, 1 }, // 0x4AF610
+        { CGAMEEFFECT_DISEASE, 2, 1 }, // 0x4B5790
+        { CGAMEEFFECT_DISEASE, 11, 1 }, // 0x4B5E50 (mold touch)
+    };
+    for (const Site& site : sites) {
+        INFO("effect " << site.effectID << " mode " << site.dwFlags);
+        INT count = list.GetCount();
+        CGameEffect* pEffect = Make(site.effectID, site.dwFlags, site.amount, 0, 60);
+        pEffect->m_sourceRes = CResRef("00TROLL1");
+        REQUIRE(pEffect->ApplyEffect(pSprite) == TRUE);
+        delete pEffect;
+
+        REQUIRE(list.GetCount() == count + 1);
+        CPersistantEffect84C4A4* pPersistant = static_cast<CPersistantEffect84C4A4*>(list.GetTail());
+        CHECK(SourceOf(pPersistant) == "00TROLL1");
+        CHECK(pPersistant->field_29[8] == '\0');
+
+        // The copy keeps the ten bytes.
+        CPersistantEffect84C4A4* pCopy = static_cast<CPersistantEffect84C4A4*>(pPersistant->Copy());
+        CHECK(SourceOf(pCopy) == "00TROLL1");
+        delete pCopy;
+    }
+
+    delete pSprite;
+}
+
+// The same through the creature: 30TROLL equips 00TROLL1 and its effect list
+// applies the regeneration.
+TEST_CASE("AR3000's troll applies 00TROLL1's regeneration", "[effects][data]")
+{
+    REQUIRE_ENGINE();
+    std::vector<BYTE> bytes = LoadCreature("30TROLL");
+    REQUIRE(!bytes.empty());
+    CGameSprite* pSprite = new CGameSprite(bytes.data(),
+        static_cast<LONG>(bytes.size()),
+        0,
+        0,
+        -1,
+        0,
+        0,
+        INT_MAX,
+        CPoint(-1, -1),
+        0);
+    pSprite->ProcessEffectList();
+
+    bool found = false;
+    CTypedPtrList<CPtrList, CPersistantEffect*>& list = pSprite->m_derivedStats.m_cRegeneratedPersistantEffectList;
+    POSITION pos = list.GetHeadPosition();
+    while (pos != NULL) {
+        CPersistantEffect84C4A4* pEffect = static_cast<CPersistantEffect84C4A4*>(list.GetNext(pos));
+        if (SourceOf(pEffect) == "00TROLL1") {
+            found = true;
+            CHECK(static_cast<CPersistantEffect84C494*>(pEffect)->field_34 == 1);
+            CHECK(pEffect->field_24 == 2 * 15);
+        }
+    }
+    CHECK(found);
+
+    delete pSprite;
+}
+
+// AR3000 itself: a new game, then the area loaded the way a travel loads it
+// (CInfGame::LoadArea 0x5A24D0). Its ice trolls (30ICETRL) come in wearing
+// 00CIWWLF and 00CWABI2, both with a regeneration (98) equip effect and an
+// eight-character resref.
+//
+// Hidden ([.]): AR3000.INI's "critters=DRUM_SUMMON_A,...,DRUM_SUMMON_D" then
+// fails CSpawnList's "error parsing section list" assertion (CSpawn.cpp 430),
+// because the port's CSpawnList::ParseData (0x768D50) and
+// CSpawnFile::ParseData (0x768840) do not count the last section, which the
+// originals do (inc ebp at 0x768E48 and 0x768926). With that counted it
+// passes; unhide it then.
+TEST_CASE("AR3000 loads with its ice trolls regenerating", "[.][effects][data][ar3000]")
+{
+    REQUIRE_ENGINE();
+    // The main loop's drawn frames: the loads wait for m_bDisplayStale to
+    // clear (tests/test_gam.cpp's FramePump).
+    std::atomic<bool> running(true);
+    std::thread pump([&running] {
+        while (running) {
+            g_pChitin->m_bDisplayStale = FALSE;
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    });
+    struct Join {
+        std::atomic<bool>& running;
+        std::thread& pump;
+        ~Join()
+        {
+            running = false;
+            pump.join();
+        }
+    } join { running, pump };
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    pGame->NewGame(FALSE, FALSE);
+
+    CGameArea* pArea = pGame->LoadArea(CString("AR3000"), 0, FALSE, FALSE);
+    REQUIRE(pArea != NULL);
+    // The added objects onto the sorted lists (as a frame's AIUpdate does).
+    pArea->SortLists();
+
+    int iceTrolls = 0;
+    int regenerating = 0;
+    CTypedPtrList<CPtrList, int*>* lists[] = { &pArea->m_lVertSort, &pArea->m_lVertSortBack, &pArea->m_lVertSortFlight };
+    for (CTypedPtrList<CPtrList, int*>* objects : lists) {
+        POSITION pos = objects->GetHeadPosition();
+        while (pos != NULL) {
+            LONG id = static_cast<LONG>(reinterpret_cast<INT_PTR>(objects->GetNext(pos)));
+            CGameObject* pObject;
+            if (pGame->GetObjectArray()->GetShare(id, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) != CGameObjectArray::SUCCESS) {
+                continue;
+            }
+            pGame->GetObjectArray()->ReleaseShare(id, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+            if (pObject->GetObjectType() != CGameObject::TYPE_SPRITE) {
+                continue;
+            }
+            CGameSprite* pSprite = static_cast<CGameSprite*>(pObject);
+            if (pSprite->m_resRef != CResRef("30ICETRL")) {
+                continue;
+            }
+            iceTrolls++;
+            pSprite->ProcessEffectList();
+            std::vector<std::string> sources;
+            CTypedPtrList<CPtrList, CPersistantEffect*>& list = pSprite->m_derivedStats.m_cRegeneratedPersistantEffectList;
+            POSITION effectPos = list.GetHeadPosition();
+            while (effectPos != NULL) {
+                sources.push_back(SourceOf(static_cast<CPersistantEffect84C4A4*>(list.GetNext(effectPos))));
+            }
+            if (std::find(sources.begin(), sources.end(), "00CIWWLF") != sources.end()
+                && std::find(sources.begin(), sources.end(), "00CWABI2") != sources.end()) {
+                regenerating++;
+            }
+        }
+    }
+    CHECK(iceTrolls > 0);
+    CHECK(regenerating == iceTrolls);
 }
