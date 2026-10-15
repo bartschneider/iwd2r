@@ -1299,6 +1299,53 @@ TEST_CASE("trigger: ActionListEmpty and NearLocation and CreatureHidden (0x402B 
     pCharacter->m_baseStats.field_294 = 0;
 }
 
+TEST_CASE("sprite: ChangeDirection turns a slow walker only on its world ticks (0x6FBAD0)", "[ai][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    CGameSprite* pCharacter = NewGameInStartArea(cre);
+    REQUIRE(pCharacter->GetArea() != NULL);
+
+    CTimerWorld* pTimer = g_pBaldurChitin->GetObjectGame()->GetWorldTimer();
+    const ULONG gameTime = pTimer->m_gameTime;
+    const BYTE moveScale = pCharacter->GetAnimation()->GetMoveScale();
+    const ULONG idParity = static_cast<ULONG>(pCharacter->m_id) % 2;
+
+    auto turnsAt = [&](ULONG time) {
+        pTimer->m_gameTime = time;
+        pCharacter->m_nDirection = 0;
+        pCharacter->m_nNewDirection = 4;
+        pCharacter->m_deltaDirection = 1;
+        pCharacter->m_skipDeltaDirection = 0;
+        pCharacter->ChangeDirection();
+        return pCharacter->m_nDirection != 0;
+    };
+
+    // Move scale 5: 2 - 5 / 6 = 2, every other tick, on the id's parity.
+    pCharacter->GetAnimation()->SetMoveScale(5);
+    CHECK(turnsAt(100 + idParity));
+    CHECK_FALSE(turnsAt(101 - idParity));
+    // 6 to 11: 2 - 1 = 1, every tick.
+    pCharacter->GetAnimation()->SetMoveScale(9);
+    CHECK(turnsAt(101 - idParity));
+    // 12 and up: no gate.
+    pCharacter->GetAnimation()->SetMoveScale(12);
+    CHECK(turnsAt(101 - idParity));
+
+    pCharacter->GetAnimation()->SetMoveScale(moveScale);
+    pTimer->m_gameTime = gameTime;
+    pCharacter->m_nNewDirection = pCharacter->m_nDirection;
+}
+
 TEST_CASE("trigger: SubRace and Kit and CheckSkillGT/LT and PartyHasItem (0x40CD 0x40CE 0x40E7 0x40E8 0x4042)", "[ai][data]")
 {
     if (DataDir() == nullptr) {

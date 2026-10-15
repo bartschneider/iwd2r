@@ -3468,6 +3468,17 @@ void CGameSprite::ChangeDirection()
         return;
     }
 
+    // A slow walker (move scale below 12) turns only on the world ticks
+    // where the world time and its id agree modulo (2 - scale / 6), every
+    // other tick for a scale below 6 (0x6FBAEC). The byte at 0x85AB4C is 6.
+    if (m_animation.GetMoveScale() < 2 * 6) {
+        ULONG nGameTime = g_pBaldurChitin->GetObjectGame()->GetWorldTimer()->m_gameTime;
+        if (nGameTime % static_cast<ULONG>(2 - m_animation.GetMoveScale() / 6)
+            != static_cast<ULONG>(m_id) % static_cast<ULONG>(2 - m_animation.GetMoveScale() / 6)) {
+            return;
+        }
+    }
+
     if (m_skipDeltaDirection > 0) {
         m_skipDeltaDirection -= 2;
         if (m_skipDeltaDirection <= 1) {
