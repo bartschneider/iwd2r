@@ -425,6 +425,7 @@ public:
     BOOL GetCustomSound(CString& sName, BYTE nSoundId) const;
     void GetAlignmentStringMixed(BYTE nAlignment, CString& sAlignment) const;
     void GetGenderStringMixed(BYTE nGender, CString& sGender) const;
+    INT GetIntModMaxAllowedSpellLevel(const CDerivedStats& stats) const;
     INT GetNumQuickWeaponSlots(BYTE nClass) const;
     BOOL IsItemExclusive(CItem* pItem) const;
     BOOL Is3DSound(int nSoundChannel) const;

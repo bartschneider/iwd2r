@@ -155,7 +155,12 @@ public:
     void UpdateIdentifyCost();
     void UpdateStoreCost();
     void UpdateSpellCost();
+    BOOL IsBuyItemButtonClickable();
     void OnBuyItemButtonClick();
+    void BuyStoreItems();
+    void BuyBagItems();
+    void BuyContainerItems();
+    void BuyContainerBagItems();
     BOOL IsSellItemButtonClickable();
     void OnSellItemButtonClick();
     void sub_67A130();
@@ -164,6 +169,7 @@ public:
     void sub_67B030();
     void OnIdentifyItemButtonClick();
     void OnBuySpellButtonClick();
+    BOOL CheckSpellUsable(SHORT nPortrait, const CResRef& cResSpell);
     void OnRentRoomButtonClick();
     void OnBuyDrinkButtonClick(INT nButton);
     void OnDoneButtonClick();

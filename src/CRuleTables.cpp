@@ -3238,6 +3238,12 @@ void CRuleTables::GetGenderStringMixed(BYTE nGender, CString& sGender) const
     sGender = strRes.szText;
 }
 
+// 0x5456C0
+INT CRuleTables::GetIntModMaxAllowedSpellLevel(const CDerivedStats& stats) const
+{
+    return atol(m_tIntelligenceMod.GetAt(CPoint(1, stats.m_nINT)));
+}
+
 // 0x545720
 INT CRuleTables::GetNumQuickWeaponSlots(BYTE nClass) const
 {
