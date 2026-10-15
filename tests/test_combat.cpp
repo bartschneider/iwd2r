@@ -1253,3 +1253,82 @@ TEST_CASE("combat: a party member's ForceSpell action hurts the goblin", "[comba
     CHECK(pGoblin->GetBaseStats()->m_hitPoints < goblinStart);
     CHECK(pGoblin->GetBaseStats()->m_hitPoints >= goblinStart - 5);
 }
+
+// Swing's missile branch (0x73A679-0x73AC06): a goblin archer (10GOBAR,
+// a bow and arrows) given Attack at the party member six squares away shoots
+// from where it stands: its rounds go by, it never closes to melee, and the
+// arrows that hit carry Damage's effect to the party member (the arrow's
+// projectile, CProjectile84D8B8, arrives at once).
+TEST_CASE("combat: a goblin archer shoots arrows at the party member", "[combat][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    Fight fight;
+    std::string why;
+    if (!SetUpFight(fight, why)) {
+        if (why.find("CHR") != std::string::npos) {
+            SKIP("[iwd2r-skip] " + why);
+        }
+        FAIL(why);
+    }
+    CGameSprite* pCharacter = fight.pCharacter;
+    const CPoint pos = pCharacter->GetPos();
+    const CPoint archerPos(pos.x - 6 * CPathSearch::GRID_SQUARE_SIZEX, pos.y);
+    CGameSprite* pArcher = AddCreature(fight.pArea, "10GOBAR", archerPos);
+    if (pArcher == NULL) {
+        FAIL("10GOBAR.CRE not found");
+    }
+    fight.pArea->SortLists();
+    ClearMessages();
+    fight.pGoblin->ClearActions(FALSE);
+    pCharacter->ClearActions(FALSE);
+    const SHORT characterStart = pCharacter->GetBaseStats()->m_hitPoints;
+
+    CItem* pWeapon = pArcher->GetEquipment()->m_items[pArcher->GetEquipment()->m_selectedWeapon];
+    REQUIRE(pWeapon != NULL);
+    pWeapon->Demand();
+    const ITEM_ABILITY* pAbility = pWeapon->GetAbility(pArcher->GetEquipment()->m_selectedWeaponAbility);
+    const int type = pAbility != NULL ? (pAbility->type & 0xFF) : -1;
+    pWeapon->Release();
+    INFO("archer's weapon " << pWeapon->GetResRef().GetResRefStr() << ", ability type " << type);
+    REQUIRE(type == 2);
+
+    // A fixed rand() stream: the hits are the same on every run.
+    srand(21);
+    pArcher->ClearActions(FALSE);
+    pArcher->AddAction(CAIAction(CAIAction::ATTACK, CAIObjectType(0, 0, 0, 0, 0, 0, 0, 0, pCharacter->GetId()), 0, 0, 0));
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    if (!pGame->GetWorldTimer()->m_active) {
+        pGame->GetWorldTimer()->StartTime();
+    }
+    int frames = 0;
+    int rounds = 0;
+    int nearest = INT_MAX;
+    SHORT hp = characterStart;
+    bool hpRose = false;
+    while (frames < 1500 && pCharacter->GetBaseStats()->m_hitPoints > 0) {
+        Tick(fight.pArea, { pCharacter, pArcher });
+        if (pArcher->m_attackFrame == 0) {
+            rounds++;
+        }
+        const CPoint& at = pArcher->GetPos();
+        nearest = std::min(nearest, std::abs(at.x - pos.x) / CPathSearch::GRID_SQUARE_SIZEX);
+        if (pCharacter->GetBaseStats()->m_hitPoints > hp) {
+            hpRose = true;
+        }
+        hp = pCharacter->GetBaseStats()->m_hitPoints;
+        frames++;
+    }
+    INFO("frames " << frames << ", rounds " << rounds << ", nearest " << nearest << " squares, character hit points "
+                   << characterStart << " -> " << pCharacter->GetBaseStats()->m_hitPoints);
+    CHECK(rounds > 2);
+    CHECK(nearest >= 5);
+    CHECK_FALSE(hpRose);
+    CHECK(pCharacter->GetBaseStats()->m_hitPoints < characterStart);
+}

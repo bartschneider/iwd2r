@@ -17493,9 +17493,107 @@ SHORT CGameSprite::Swing(CGameSprite* target)
         }
 
         if (curAttack->type == 2) {
-            // TODO: 0x73A679-0x73AC06 not ported (the missile: the projectile,
-            // Hit and Damage on it, CMessageFireProjectile and the launcher's
-            // effects). A missile attack does nothing here yet.
+            // 0x73A679: the missile.
+            // NOTE: The original copies m_startTypeAI into a local it never
+            // reads.
+            CAIObjectType startType;
+            startType.Set(m_startTypeAI);
+
+            if (nSequence != SEQ_SHOOT && field_5630 != 0) {
+                message = new CMessageSetSequence(SEQ_SHOOT, m_id, m_id);
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+            }
+
+            BOOL bShoot;
+            if (m_curProjectile == NULL) {
+                CProjectile* pProjectile = CProjectile::DecodeProjectile(curAttack->missileType, this, 0);
+                CWeaponIdentification weaponId;
+                curWeapon->LoadWeaponIdentification(weaponId);
+                m_curProjectile = pProjectile;
+                bShoot = pProjectile != NULL && field_5630 != 0;
+            } else {
+                bShoot = field_5630 != 0;
+            }
+
+            if (bShoot) {
+                BOOL bCritical = FALSE;
+                if (!Hit(target, curWeapon, nAbility, &bCritical, field_5632, field_5636)) {
+                    m_curProjectile->ClearEffects();
+                } else {
+                    bHit = TRUE;
+
+                    // A monk of level 20 or more is hurt only by a weapon with
+                    // flag 0x40; the target's weapon immunities.
+                    CWeaponIdentification weaponId;
+                    curWeapon->LoadWeaponIdentification(weaponId);
+                    if ((target->GetAIType().IsClassValid(CAIObjectType::C_MONK)
+                            && target->m_derivedStats.GetClassLevel(CAIObjectType::C_MONK) >= 20
+                            && (weaponId.m_itemFlags & 0x40) == 0)
+                        || target->m_derivedStats.m_cImmunitiesWeapon.OnList(weaponId)) {
+                        FeedBack(FEEDBACK_IMMUNE_TO_WEAPON, 0, 0, 0, -1, 0, 0);
+                        m_curProjectile->ClearEffects();
+                    } else {
+                        CGameEffect* pDamage = Damage(curWeapon,
+                            pLauncher,
+                            nAbility,
+                            bCritical,
+                            target->m_typeAI,
+                            target->m_nDirection,
+                            GetDirection(target->GetPos()),
+                            target,
+                            field_5632);
+                        m_curProjectile->AddEffect(pDamage);
+
+                        // TODO: 0x73A85B calls CGameSprite 0x71F860 (not
+                        // ported; outside this stream's grant) with the
+                        // projectile, the weapon, the ability and the
+                        // target's position: the ammunition's and the
+                        // launcher's effects on the projectile.
+                    }
+                }
+
+                // The shot, hit or miss.
+                LONG nHeight = m_curProjectile->DetermineHeight(this);
+                CMessageFireProjectile* pFire = new CMessageFireProjectile(m_curProjectile->m_projectileType,
+                    target->m_id,
+                    target->m_pos,
+                    nHeight,
+                    m_id,
+                    m_id,
+                    0);
+
+                if (m_curProjectile->m_projectileType == 304) {
+                    INT nRandom = rand() % 1000000;
+                    // TODO: The original also stores it in the projectile's
+                    // +0x356 (the class DecodeProjectile builds for this
+                    // type; not ported).
+                    pFire->field_20 = nRandom;
+                }
+
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(pFire, FALSE);
+
+                // NOTE: The WORD at 0x84D5E8 is 6.
+                m_curProjectile->Fire(m_pArea,
+                    m_id,
+                    target->m_id,
+                    target->m_pos,
+                    m_curProjectile->DetermineHeight(this),
+                    6);
+
+                // NOTE: The original clears the member when its address is
+                // not valid (AfxIsValidAddress, 0x7FB089), which never
+                // happens.
+                if (!AfxIsValidAddress(&m_curProjectile, sizeof(m_curProjectile), TRUE)) {
+                    m_curProjectile = NULL;
+                }
+
+                // The fired projectile belongs to the area now; the next
+                // shot gets a new one.
+                CProjectile* pNext = CProjectile::DecodeProjectile(curAttack->missileType, this, 0);
+                CWeaponIdentification nextWeaponId;
+                curWeapon->LoadWeaponIdentification(nextWeaponId);
+                m_curProjectile = pNext;
+            }
         } else {
             if (nSequence != SEQ_ATTACK) {
                 message = new CMessageSetSequence(SEQ_ATTACK, m_id, m_id);
