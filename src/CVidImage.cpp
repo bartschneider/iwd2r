@@ -18,6 +18,15 @@ BYTE CVidTile::m_pPixels[16384];
 // 0x9064F8
 DWORD CVidImage::rgbTempPal[256];
 
+// The 64x64x32 blend table: entry (k, m, i) is m and k mixed at weight
+// i / 32, (m * (64 - 2i) + k * 2i) >> 6.
+//
+// 0x9060F0
+BYTE* CVidImage::m_pBlendTable;
+
+// 0x9068F8
+INT CVidImage::m_nBlendTableRefs;
+
 // 0x7ACA60
 CVidImage::CVidImage()
 {
@@ -33,13 +42,39 @@ CVidImage::CVidImage()
     memset(m_paletteAffects.aRangeLightPeriods, 0, sizeof(m_paletteAffects.aRangeLightPeriods[0]) * CVidPalette::NUM_RANGES);
     m_paletteAffects.suppressTints = 0;
 
-    // TODO: Incomplete.
+    // The first image builds the blend table.
+    if (m_nBlendTableRefs++ == 0) {
+        m_pBlendTable = new BYTE[0x20000];
+        if (m_pBlendTable != NULL) {
+            INT nWeight = 0;
+            INT nStep = 64;
+            do {
+                INT nRowStart = 0;
+                for (INT nColumn = 0; nColumn < 0x800; nColumn += 0x20) {
+                    INT nValue = nRowStart;
+                    INT nOffset = nColumn;
+                    for (INT nRow = 64; nRow != 0; nRow--) {
+                        m_pBlendTable[nOffset + nWeight] = static_cast<BYTE>(nValue >> 6);
+                        nOffset += 0x800;
+                        nValue += nWeight * 2;
+                    }
+                    nRowStart += nStep;
+                }
+                nStep -= 2;
+                nWeight++;
+            } while (nStep > 0);
+        }
+    }
 }
 
 // 0x7ACC40
 CVidImage::~CVidImage()
 {
-    // TODO: Incomplete.
+    // The last image frees the blend table.
+    if (--m_nBlendTableRefs == 0 && m_pBlendTable != NULL) {
+        delete[] m_pBlendTable;
+        m_pBlendTable = NULL;
+    }
 }
 
 // #binary-identical

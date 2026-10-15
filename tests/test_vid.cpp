@@ -766,3 +766,29 @@ TEST_CASE("outline_poly32", "[vid]")
     pSurface->Release();
     pDirectDraw->Release();
 }
+
+// CVidImage's constructor (0x7ACA60) builds the shared blend table on the
+// first image: entry (k, m, i) at k * 0x800 + m * 0x20 + i is
+// (m * (64 - 2i) + k * 2i) >> 6. The destructor (0x7ACC40) frees it with
+// the last image.
+TEST_CASE("vid_image_blend_table", "[vid]")
+{
+    const INT refsBefore = CVidImage::m_nBlendTableRefs;
+    {
+        CVidImage image;
+        CHECK(CVidImage::m_nBlendTableRefs == refsBefore + 1);
+        REQUIRE(CVidImage::m_pBlendTable != nullptr);
+        for (int k : { 0, 1, 17, 63 }) {
+            for (int m : { 0, 5, 40, 63 }) {
+                for (int i : { 0, 1, 16, 31 }) {
+                    INFO("k " << k << " m " << m << " i " << i);
+                    CHECK(CVidImage::m_pBlendTable[k * 0x800 + m * 0x20 + i] == ((m * (64 - 2 * i) + k * 2 * i) >> 6));
+                }
+            }
+        }
+    }
+    CHECK(CVidImage::m_nBlendTableRefs == refsBefore);
+    if (refsBefore == 0) {
+        CHECK(CVidImage::m_pBlendTable == nullptr);
+    }
+}
