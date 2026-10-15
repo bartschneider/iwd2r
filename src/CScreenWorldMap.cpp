@@ -7,6 +7,7 @@
 #include "CInfGame.h"
 #include "CRuleTables.h"
 #include "CWorldMap.h"
+#include "CScreenCharacter.h"
 #include "CScreenMap.h"
 #include "CScreenWorld.h"
 #include "CTimerWorld.h"
@@ -836,7 +837,231 @@ void CScreenWorldMap::OnMapAsyncUpdate()
 // 0x69ACF0
 void CScreenWorldMap::OnAreaMouseClick(DWORD nArea, const CPoint& ptMousePos)
 {
-    // TODO: Incomplete.
+    CResRef aRandomAreas[5];
+    CString sEntryPoint;
+    CResRef cResArea;
+    BOOL bRandomEncounter = FALSE;
+    DWORD nSkipLink = -1;
+    DWORD nTravelTime = 0;
+    DWORD nEncounterLink;
+    DWORD nEdge;
+    DWORD nSrcArea;
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenWorldMap.cpp
+    // __LINE__: 1787
+    UTIL_ASSERT(pGame != NULL);
+
+    CString sArea;
+    pGame->GetVisibleArea()->m_resRef.CopyToString(sArea);
+
+    CWorldMap* pWorldMap = pGame->GetWorldMap(sArea);
+
+    // The protagonist must be reachable.
+    LONG nProtagonistId = pGame->GetProtagonist();
+
+    CGameObject* pProtagonist;
+
+    BYTE rc;
+    do {
+        rc = pGame->GetObjectArray()->GetDeny(nProtagonistId,
+            CGameObjectArray::THREAD_ASYNCH,
+            &pProtagonist,
+            INFINITE);
+    } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+    if (rc != CGameObjectArray::SUCCESS) {
+        return;
+    }
+
+    pGame->GetObjectArray()->ReleaseDeny(nProtagonistId,
+        CGameObjectArray::THREAD_ASYNCH,
+        INFINITE);
+
+    if (m_nEngineState != 1 || !m_bInControl || m_bClickedArea) {
+        return;
+    }
+
+    CWorldMapArea* pArea = pWorldMap->GetArea(pWorldMap->sub_55A3A0(), nArea);
+    pGame->field_1B86 = reinterpret_cast<char*>(pArea->m_strName);
+
+    // NOTE: When the party is not on a link this stays the clicked area,
+    // whose bytes are read as link flags below if the path is empty (as the
+    // original).
+    CWorldMapLinks* pLink = reinterpret_cast<CWorldMapLinks*>(pArea);
+
+    if (m_nCurrentLink != -1) {
+        // On the way: travel on from the link's far end, or turn back.
+        nSrcArea = pWorldMap->FindSourceAreaIndex(pWorldMap->sub_55A3A0(), m_nCurrentLink);
+
+        pLink = pWorldMap->GetLink(pWorldMap->sub_55A3A0(), m_nCurrentLink);
+        if (nSrcArea == nArea) {
+            nSrcArea = pLink->m_nArea;
+            nSkipLink = pWorldMap->GetLinkIndex(pWorldMap->sub_55A3A0(), pLink->m_nArea, nArea);
+        }
+
+        nTravelTime = (pLink->m_nDistanceScale * CRuleTables::TIME_TRAVELLING) >> 1;
+    } else {
+        BOOL bResult = pWorldMap->GetAreaIndex(pWorldMap->sub_55A3A0(), m_cResCurrentArea, nSrcArea);
+
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenWorldMap.cpp
+        // __LINE__: 1842
+        UTIL_ASSERT(bResult);
+    }
+
+    pWorldMap->GetArea(pWorldMap->sub_55A3A0(), nSrcArea);
+
+    if ((pArea->m_dwFlags & 0x1) == 0 || (pArea->m_dwFlags & 0x4) == 0) {
+        return;
+    }
+
+    if (nSrcArea != nArea) {
+        m_pPath = pWorldMap->FindPath(pWorldMap->sub_55A3A0(), nSrcArea, nArea);
+        if (m_pPath == NULL) {
+            return;
+        }
+
+        while (m_pPath->GetCount() > 0 && !bRandomEncounter) {
+            nEncounterLink = m_pPath->GetHead();
+            pLink = pWorldMap->GetLink(pWorldMap->sub_55A3A0(), nEncounterLink);
+
+            if (m_nCurrentLink != nEncounterLink && nSkipLink != nEncounterLink) {
+                // The encounter areas not loaded yet.
+                DWORD nRandomAreas = 0;
+                const RESREF* pRandomAreas[5] = {
+                    &(pLink->m_resRandomEncounterArea0),
+                    &(pLink->m_resRandomEncounterArea1),
+                    &(pLink->m_resRandomEncounterArea2),
+                    &(pLink->m_resRandomEncounterArea3),
+                    &(pLink->m_resRandomEncounterArea4),
+                };
+
+                for (INT nIndex = 0; nIndex < 5; nIndex++) {
+                    CString sRandomArea;
+                    cResArea = *pRandomAreas[nIndex];
+                    cResArea.CopyToString(sRandomArea);
+                    if (cResArea != "") {
+                        if (pGame->GetArea(sRandomArea) == NULL) {
+                            aRandomAreas[nRandomAreas] = cResArea;
+                            nRandomAreas++;
+                        }
+                    }
+                }
+
+                if (nRandomAreas != 0
+                    && pLink->m_nEncounterProbability > static_cast<DWORD>(rand() % 101)) {
+                    cResArea = aRandomAreas[static_cast<DWORD>(rand()) % nRandomAreas];
+                    nTravelTime += (pLink->m_nDistanceScale * CRuleTables::TIME_TRAVELLING) >> 1;
+                    nEdge = 10;
+                    sEntryPoint = "";
+                    bRandomEncounter = TRUE;
+                } else {
+                    nTravelTime += pLink->m_nDistanceScale * CRuleTables::TIME_TRAVELLING;
+                }
+            }
+
+            m_pPath->RemoveHead();
+        }
+
+        if (!bRandomEncounter) {
+            // The edge of the destination the party comes in from.
+            if ((pLink->m_dwLinkFlags & 0x1) != 0) {
+                nEdge = 0;
+            } else if ((pLink->m_dwLinkFlags & 0x4) != 0) {
+                nEdge = 8;
+            } else if ((pLink->m_dwLinkFlags & 0x8) != 0) {
+                nEdge = 12;
+            } else if ((pLink->m_dwLinkFlags & 0x2) != 0) {
+                nEdge = 4;
+            } else {
+                // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenWorldMap.cpp
+                // __LINE__: 1963
+                UTIL_ASSERT(FALSE);
+                nEdge = 10;
+            }
+
+            sEntryPoint = reinterpret_cast<char*>(pLink->m_entryPoint);
+            cResArea = pArea->m_resCurrentArea;
+            nEncounterLink = -1;
+        }
+
+        if (m_pPath != NULL) {
+            delete m_pPath;
+        }
+        m_pPath = NULL;
+
+        g_pBaldurChitin->m_pEngineWorld->m_weather.OnAreaChange(TRUE);
+
+        g_pBaldurChitin->cSoundMixer.m_nActiveArea = -1;
+        g_pBaldurChitin->cSoundMixer.UpdateSoundList();
+
+        // Auto-save before leaving (not from an area flagged so).
+        if ((pGame->GetVisibleArea()->m_header.m_flags & 0x1) == 0
+            && (!g_pChitin->cNetwork.GetSessionOpen()
+                || g_pChitin->cNetwork.GetSessionHosting() == TRUE)) {
+            pGame->m_sSaveGame = CInfGame::AUTO_SAVE_NAME;
+            CScreenCharacter::SAVE_NAME = CInfGame::AUTO_SAVE_NAME;
+
+            if (g_pChitin->cNetwork.GetServiceProvider() == CNetwork::SERV_PROV_NULL) {
+                pGame->field_366E = 1;
+                pGame->field_50DC = 0;
+
+                if (!g_pChitin->cVideo.Is3dAccelerated()) {
+                    if (!pGame->field_50D8) {
+                        pGame->SynchronousUpdate();
+                    }
+                    pGame->field_50D8 = TRUE;
+                }
+            }
+
+            pGame->SaveGame(1, 0, 1);
+
+            // NOTE: Never true together with the first block's check; the
+            // inner branch cannot run (as the original).
+            if (g_pChitin->cNetwork.GetServiceProvider() == CNetwork::SERV_PROV_NULL
+                && g_pChitin->cVideo.Is3dAccelerated()) {
+                pGame->field_366E = 1;
+                pGame->field_50DC = 1;
+            }
+        }
+
+        pGame->GetGameSave()->m_cResCurrentWorldArea = cResArea;
+        pGame->GetGameSave()->m_nCurrentWorldLink = nEncounterLink;
+
+        if (g_pChitin->cNetwork.GetSessionOpen() == TRUE
+            && !g_pChitin->cNetwork.GetSessionHosting()) {
+            // TODO: A client asks the host to travel (0x69B545-0x69B5C4),
+            // through CBaldurMessage 0x4356E0, not ported.
+            m_bClickedArea = TRUE;
+            return;
+        }
+
+        MoveToArea(cResArea, sEntryPoint, nEdge, bRandomEncounter, nTravelTime);
+
+        StopWorldMap(nSrcArea != nArea);
+    } else {
+        StopWorldMap(FALSE);
+    }
+
+    CScreenWorld* pWorld = g_pBaldurChitin->m_pEngineWorld;
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenWorldMap.cpp
+    // __LINE__: 2085
+    UTIL_ASSERT(pWorld != NULL);
+
+    SelectEngine(pWorld);
+
+    if (bRandomEncounter) {
+        STR_RES strRes;
+        g_pBaldurChitin->GetTlkTable().Fetch(16493, strRes);
+
+        pWorld->DisplayText(CString(""), strRes.szText, -1, FALSE);
+
+        strRes.cSound.SetFireForget(TRUE);
+        strRes.cSound.SetChannel(5, 0);
+        strRes.cSound.Play(FALSE);
+    }
 }
 
 // 0x69B7F0
@@ -900,6 +1125,12 @@ DWORD CScreenWorldMap::GetTravelTime(DWORD nArea)
     }
 
     return nTime;
+}
+
+// 0x69D0F0
+void CScreenWorldMap::MoveToArea(const CResRef& cResArea, CString sEntryPoint, DWORD nEdge, BOOL bRandomEncounter, DWORD nTravelTime)
+{
+    // TODO: Incomplete.
 }
 
 // 0x69BA70
