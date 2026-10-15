@@ -38,8 +38,8 @@ public:
     BOOLEAN AsynchronousUpdate();
     void Render(CVidMode* pVidMode, INT nSurface);
     void CalcBoundingRect();
-    void GenerateExplodingBlood(LONG nX, LONG nY, LONG nZ);
-    void GenerateParticles();
+    SHORT GenerateExplodingBlood(LONG nX, LONG nY, LONG nZ);
+    SHORT GenerateParticles();
 
     BOOL BloodLeft() { return !m_particleList.IsEmpty() || !m_lstSplashParticles.IsEmpty(); }
     SHORT GetDirection() { return m_nDirection; }
