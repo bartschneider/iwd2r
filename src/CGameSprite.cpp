@@ -2831,8 +2831,9 @@ void CGameSprite::AIUpdateWalk()
         LONG dx = m_posDest.x - m_pos.x;
         LONG dy = goal.y * CPathSearch::GRID_SQUARE_SIZEX + CPathSearch::GRID_SQUARE_SIZEX / 2 - 4 * m_pos.y / 3;
 
-        // NOTE: __ftol truncates the square root.
-        int scale = static_cast<int>(sqrt(static_cast<double>(dx * dx + dy * dy)));
+        // The distance, rounded: sqrt + 0.5 (the double at 0x848DD0), then
+        // __ftol (0x6F97FA-0x6F981A).
+        int scale = static_cast<int>(sqrt(static_cast<double>(dx * dx + dy * dy)) + 0.5);
         if (scale == 0) {
             // NOTE: Uninline.
             DropPath();
