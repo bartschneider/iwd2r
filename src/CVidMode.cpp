@@ -938,9 +938,115 @@ BOOL CVidMode::DrawThickLine16(INT nXFrom, INT nYFrom, INT nXTo, INT nYTo, WORD*
 BOOL CVidMode::OutlinePoly(const CPoint* pPoly, SHORT nVertices, const CRect& rSurface, COLORREF rgbColor, const CPoint& ptOffset)
 {
     if (auto* b = render::Active(); b && b->Clipped(rSurface).DrawPoly(render::Minus(pPoly, nVertices, ptOffset).data(), nVertices, rgbColor, false, 0)) return TRUE;
-    // TODO: Incomplete.
+    CRect rLock(0, 0, rSurface.right - rSurface.left, rSurface.bottom - rSurface.top);
+    INT nOffsetX = rSurface.left + ptOffset.x;
+    INT nOffsetY = ptOffset.y + rSurface.top;
+    SHORT nIndex;
 
-    return FALSE;
+    if (nVertices < 1) {
+        return FALSE;
+    }
+
+    if (g_pChitin->cVideo.Is3dAccelerated()) {
+        return OutlinePoly3d(pPoly, nVertices, rSurface, rgbColor, ptOffset);
+    }
+
+    if (rSurface.IsRectEmpty()) {
+        return FALSE;
+    }
+
+    DDSURFACEDESC ddsd = {};
+    ddsd.dwSize = sizeof(ddsd);
+
+    BOOL bLocked = LockSurface(0, &ddsd, rSurface);
+
+    // __FILE__: C:\Projects\Icewind2\src\chitin\ChVideo.cpp
+    // __LINE__: 3466
+    UTIL_ASSERT(ddsd.lpSurface != NULL);
+
+    if (!bLocked) {
+        return FALSE;
+    }
+
+    WORD color16;
+    DWORD color;
+
+    switch (g_pChitin->cVideo.m_nBpp) {
+    case 16:
+        color16 = static_cast<WORD>(((GetRValue(rgbColor) >> field_C2) << m_dwRBitShift) | ((GetGValue(rgbColor) >> field_C6) << m_dwGBitShift) | ((GetBValue(rgbColor) >> field_CA) << m_dwBBitShift));
+        for (nIndex = 0; nIndex < nVertices - 1; nIndex++) {
+            DrawLine16(pPoly[nIndex].x - nOffsetX,
+                pPoly[nIndex].y - nOffsetY,
+                pPoly[nIndex + 1].x - nOffsetX,
+                pPoly[nIndex + 1].y - nOffsetY,
+                reinterpret_cast<WORD*>(ddsd.lpSurface),
+                ddsd.lPitch >> 1,
+                rLock,
+                color16,
+                FALSE);
+        }
+        DrawLine16(pPoly[nVertices - 1].x - nOffsetX,
+            pPoly[nVertices - 1].y - nOffsetY,
+            pPoly[0].x - nOffsetX,
+            pPoly[0].y - nOffsetY,
+            reinterpret_cast<WORD*>(ddsd.lpSurface),
+            ddsd.lPitch >> 1,
+            rLock,
+            color16,
+            FALSE);
+        break;
+    case 24:
+        color = (GetGValue(rgbColor) << m_dwGBitShift) | (GetBValue(rgbColor) << m_dwBBitShift) | (GetRValue(rgbColor) << m_dwRBitShift);
+        for (nIndex = 0; nIndex < nVertices - 1; nIndex++) {
+            DrawLine24(pPoly[nIndex].x - nOffsetX,
+                pPoly[nIndex].y - nOffsetY,
+                pPoly[nIndex + 1].x - nOffsetX,
+                pPoly[nIndex + 1].y - nOffsetY,
+                reinterpret_cast<BYTE*>(ddsd.lpSurface),
+                ddsd.lPitch,
+                rLock,
+                color,
+                FALSE);
+        }
+        DrawLine24(pPoly[nVertices - 1].x - nOffsetX,
+            pPoly[nVertices - 1].y - nOffsetY,
+            pPoly[0].x - nOffsetX,
+            pPoly[0].y - nOffsetY,
+            reinterpret_cast<BYTE*>(ddsd.lpSurface),
+            ddsd.lPitch,
+            rLock,
+            color,
+            FALSE);
+        break;
+    case 32:
+        color = (GetGValue(rgbColor) << m_dwGBitShift) | (GetBValue(rgbColor) << m_dwBBitShift) | (GetRValue(rgbColor) << m_dwRBitShift);
+        for (nIndex = 0; nIndex < nVertices - 1; nIndex++) {
+            DrawLine32(pPoly[nIndex].x - nOffsetX,
+                pPoly[nIndex].y - nOffsetY,
+                pPoly[nIndex + 1].x - nOffsetX,
+                pPoly[nIndex + 1].y - nOffsetY,
+                reinterpret_cast<DWORD*>(ddsd.lpSurface),
+                ddsd.lPitch >> 2,
+                rLock,
+                color,
+                FALSE);
+        }
+        DrawLine32(pPoly[nVertices - 1].x - nOffsetX,
+            pPoly[nVertices - 1].y - nOffsetY,
+            pPoly[0].x - nOffsetX,
+            pPoly[0].y - nOffsetY,
+            reinterpret_cast<DWORD*>(ddsd.lpSurface),
+            ddsd.lPitch >> 2,
+            rLock,
+            color,
+            FALSE);
+        break;
+    }
+
+    // NOTE: Uninline.
+    UnLockSurface(0, ddsd.lpSurface);
+
+    return TRUE;
 }
 
 // #binary-identical
@@ -1273,7 +1379,6 @@ BOOL CVidMode::UnLockSurface(UINT nIndex, LPVOID lpSurfaceData)
     return pSurface->Unlock(lpSurfaceData) == DD_OK;
 }
 
-// #binary-identical
 // 0x79A860
 void CVidMode::ScanLine16(WORD* pSurface, UINT nMajorAxis, UINT nMinorAxis, INT nMajorAxisAdjust, INT nMinorAxisAdjust, WORD color)
 {
@@ -1326,6 +1431,7 @@ void CVidMode::ScanLine16(WORD* pSurface, UINT nMajorAxis, UINT nMinorAxis, INT 
     }
 }
 
+// #binary-identical
 // 0x79AB50
 DWORD CVidMode::ReduceColor(COLORREF rgbColor)
 {

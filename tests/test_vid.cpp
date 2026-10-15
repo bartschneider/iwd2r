@@ -676,3 +676,93 @@ TEST_CASE("draw_ellipse24", "[vid]")
         }
     }
 }
+
+// CVidMode::OutlinePoly (0x799540) locks the rectangle of surface 0 and
+// draws each edge and the closing one with DrawLine32, the points moved by
+// -(ptOffset) relative to the surface (the lock's origin is rSurface's top
+// left). Compared with DrawLine32 drawing the same edges into a plain
+// buffer; the triangle's top edge and left edge are checked by hand.
+TEST_CASE("outline_poly32", "[vid]")
+{
+    ChitinScope scope;
+    IDirectDraw* pDirectDraw = NULL;
+    REQUIRE(DirectDrawCreate(NULL, &pDirectDraw, NULL) == DD_OK);
+    DDSURFACEDESC desc;
+    std::memset(&desc, 0, sizeof(desc));
+    desc.dwSize = sizeof(desc);
+    desc.dwFlags = DDSD_CAPS | DDSD_HEIGHT | DDSD_WIDTH;
+    desc.ddsCaps.dwCaps = DDSCAPS_SYSTEMMEMORY | DDSCAPS_OFFSCREENPLAIN;
+    desc.dwWidth = 16;
+    desc.dwHeight = 12;
+    IDirectDrawSurface* pSurface = NULL;
+    REQUIRE(pDirectDraw->CreateSurface(&desc, &pSurface, NULL) == DD_OK);
+
+    CVidInf mode;
+    IDirectDrawSurface* surfaces[1] = { pSurface };
+    mode.m_nSurfaces = 1;
+    mode.pSurfaces = surfaces;
+    mode.m_dwRBitShift = 16;
+    mode.m_dwGBitShift = 8;
+    mode.m_dwBBitShift = 0;
+
+    auto read = [&]() {
+        std::vector<DWORD> pixels(16 * 12);
+        DDSURFACEDESC ddsd;
+        ddsd.dwSize = sizeof(ddsd);
+        REQUIRE(mode.LockSurface(0, &ddsd, CRect(0, 0, 16, 12)));
+        for (int y = 0; y < 12; ++y) {
+            std::memcpy(pixels.data() + y * 16, reinterpret_cast<BYTE*>(ddsd.lpSurface) + y * ddsd.lPitch, 16 * 4);
+        }
+        mode.UnLockSurface(0, ddsd.lpSurface);
+        return pixels;
+    };
+    auto clear = [&]() {
+        DDSURFACEDESC ddsd;
+        ddsd.dwSize = sizeof(ddsd);
+        REQUIRE(mode.LockSurface(0, &ddsd, CRect(0, 0, 16, 12)));
+        for (int y = 0; y < 12; ++y) {
+            std::memset(reinterpret_cast<BYTE*>(ddsd.lpSurface) + y * ddsd.lPitch, 0, 16 * 4);
+        }
+        mode.UnLockSurface(0, ddsd.lpSurface);
+    };
+
+    const CPoint triangle[3] = { CPoint(3, 3), CPoint(11, 3), CPoint(3, 9) };
+    const DWORD color = 0x00302010; // RGB(0x30, 0x20, 0x10) with red at bit 16
+    for (int shifted = 0; shifted < 2; ++shifted) {
+        INFO("shifted " << shifted);
+        clear();
+        // Shifted: the rectangle (2,1)-(16,12), whose top left the lock
+        // returns, and offset (1,1) put the triangle 1 left and 1 up.
+        const CRect rSurface = shifted != 0 ? CRect(2, 1, 16, 12) : CRect(0, 0, 16, 12);
+        const CPoint ptOffset = shifted != 0 ? CPoint(1, 1) : CPoint(0, 0);
+        REQUIRE(mode.OutlinePoly(triangle, 3, rSurface, RGB(0x30, 0x20, 0x10), ptOffset));
+        const std::vector<DWORD> pixels = read();
+
+        const int dx = shifted != 0 ? 1 : 0;
+        const int dy = shifted != 0 ? 1 : 0;
+        std::vector<DWORD> expected(16 * 12, 0);
+        const CRect rWhole(0, 0, 16, 12);
+        for (int i = 0; i < 3; ++i) {
+            const CPoint& a = triangle[i];
+            const CPoint& b = triangle[(i + 1) % 3];
+            mode.DrawLine32(a.x - dx, a.y - dy, b.x - dx, b.y - dy, expected.data(), 16, rWhole, color, FALSE);
+        }
+        CHECK(pixels == expected);
+        for (int x = 3; x <= 11; ++x) {
+            CHECK(pixels[(3 - dy) * 16 + x - dx] == color);
+        }
+        for (int y = 3; y <= 9; ++y) {
+            CHECK(pixels[(y - dy) * 16 + 3 - dx] == color);
+        }
+    }
+
+    // No vertices: nothing is drawn.
+    clear();
+    CHECK_FALSE(mode.OutlinePoly(triangle, 0, CRect(0, 0, 16, 12), RGB(1, 2, 3), CPoint(0, 0)));
+    CHECK(read() == std::vector<DWORD>(16 * 12, 0));
+
+    mode.m_nSurfaces = 0;
+    mode.pSurfaces = NULL;
+    pSurface->Release();
+    pDirectDraw->Release();
+}
