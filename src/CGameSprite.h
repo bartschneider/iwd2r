@@ -576,6 +576,8 @@ public:
     BOOL HandleEffects();
     void FeedBack(WORD nFeedBackId, LONG a2, LONG a3, LONG a4, LONG a5, LONG a6, LONG a7);
     BOOLEAN sub_737910(BOOL a1);
+    SHORT Attack(CGameSprite* target);
+    SHORT Swing(CGameSprite* target);
     SHORT GetCriticalHitBonus();
     BOOL Hit(CGameSprite* target, CItem* curWeapon, SHORT nAbility, BOOL* pCritical, BOOL bOffHand, BYTE nAttackCount);
     BOOL sub_73C490(CGameSprite* target);
@@ -604,6 +606,9 @@ public:
     SHORT UseDoor();
     SHORT ReturnToStartLoc();
     SHORT OneSwing();
+    void sub_6F50A0();
+    BOOL CheckIfUsedUp(SHORT nSlot, SHORT nAbility);
+    void sub_761AB0(CGameSprite* target);
     SHORT Recoil();
     SHORT PlayDead();
     SHORT JumpToPoint(CPoint dest, BOOL spriteUpdate);

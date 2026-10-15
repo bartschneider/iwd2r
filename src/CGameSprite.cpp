@@ -6,6 +6,8 @@
 #include "CBaldurEngine.h"
 #include "CBlood.h"
 #include "CGameAnimationType.h"
+#include "CGameAnimationTypeMonsterIcewind.h"
+#include "CGameAnimationTypeMonsterIcewindNew.h"
 #include "CGameArea.h"
 #include "CGameButtonList.h"
 #include "CGameContainer.h"
@@ -1615,6 +1617,46 @@ void CGameSprite::RemoveFromArea()
                 }
 
                 delete this;
+            }
+        }
+    }
+}
+
+// 0x6F50A0
+void CGameSprite::sub_6F50A0()
+{
+    // Each of the creature's teams becomes the party's enemy: the global
+    // TEAM_<n>_ENEMY is set to 1.
+    if ((field_58C & 0x200000) != 0 && field_58C != 0x200000) {
+        DWORD dwTeams = field_58C;
+        for (INT nTeam = 0; nTeam < 21; nTeam++) {
+            if ((dwTeams & (1 << nTeam)) != 0) {
+                CString sName;
+                CString sNumber;
+                sNumber.Format("%d", nTeam);
+                sName = "TEAM_";
+                sName += sNumber;
+                sName += "_ENEMY";
+
+                CVariable* pVariable = g_pBaldurChitin->GetObjectGame()->GetVariables()->FindKey(sName);
+                if (pVariable != NULL) {
+                    pVariable->m_intValue = 1;
+                } else {
+                    pVariable = new CVariable();
+                    pVariable->SetName(sName);
+                    pVariable->m_intValue = 1;
+                    g_pBaldurChitin->GetObjectGame()->m_variables.AddKey(*pVariable);
+                    delete pVariable;
+                }
+
+                // NOTE: The scope is the area object read as a string (its
+                // header's signature onwards), as in the original.
+                CMessage* message = new CMessageSetVariable(CString(reinterpret_cast<const char*>(m_pArea)),
+                    sName,
+                    1,
+                    m_id,
+                    m_id);
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
             }
         }
     }
@@ -12284,10 +12326,38 @@ SHORT CGameSprite::ExecuteAction()
         goto done;
     case 3:
     case 98:
-        // Attack, AttackNoSound
-        // TODO: 0x7290DB-0x72920D not ported (CGameSprite_Attack 0x737EF0).
-        returnValue = ACTION_ERROR;
-        goto done;
+        // Attack, AttackNoSound (0x7290DB-0x72920D)
+        {
+            DWORD nTickCount = GetTickCount();
+            g_pBaldurChitin->field_1AB2[1] += nTickCount - g_pBaldurChitin->field_1AF2[1];
+            g_pBaldurChitin->field_1AF2[1] = nTickCount;
+        }
+
+        pTarget = GetTargetShareType(CGameObject::TYPE_SPRITE);
+        bShare = TRUE;
+        if (pTarget == NULL) {
+            // A party member's lost target: any enemy.
+            if (pGame->GetCharacterPortraitNum(m_id) != -1) {
+                CAIObjectType type(CAIObjectType::ANYONE);
+                type.m_nEnemyAlly = m_typeAI.GetEnemyOf().m_nEnemyAlly;
+                pTarget = GetTargetShareAIType(type, CGameObject::TYPE_SPRITE);
+            }
+        }
+
+        if (pTarget != NULL
+            && (m_baseStats.m_flags & 0x100000) == 0
+            && pTarget->GetAIType().m_nEnemyAlly <= CAIObjectType::EA_GOODCUTOFF) {
+            m_baseStats.m_flags |= 0x100000;
+        }
+
+        returnValue = Attack(static_cast<CGameSprite*>(pTarget));
+
+        {
+            DWORD nTickCount = GetTickCount();
+            g_pBaldurChitin->field_1A72[1] += nTickCount - g_pBaldurChitin->field_1AF2[1];
+            g_pBaldurChitin->field_1AF2[1] = nTickCount;
+        }
+        goto release;
     case 5:
         // BackStab (0x72920D-0x729234): the target is shared and released,
         // the action fails.
@@ -16207,6 +16277,751 @@ BOOLEAN CGameSprite::sub_737910(BOOL a1)
     return TRUE;
 }
 
+// 0x737EF0
+SHORT CGameSprite::Attack(CGameSprite* target)
+{
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CMessage* message;
+
+    if (target != NULL) {
+        if (target->m_baseStats.field_294 == 1) {
+            return ACTION_ERROR;
+        }
+
+        if (target->m_animation.GetListType() != CGAMEOBJECT_LIST_FLIGHT) {
+            if (!target->IsVisibleToCaller(GetCanSeeInvisible())
+                || target->m_derivedStats.m_spellStates[SPLSTATE_SANCTUARY]) {
+                // 0x738C2D: the target cannot be seen.
+                if (pGame->m_lastTarget == target->m_id) {
+                    pGame->m_lastClick.x = -1;
+                    pGame->m_lastClick.y = -1;
+                    pGame->m_lastTarget = CGameObjectArray::INVALID_INDEX;
+                }
+
+                AutoPause(0x20);
+
+                CAITrigger trigger(CAITRIGGER_TARGETUNREACHABLE, m_curAction.m_acteeID, 0);
+                message = new CMessageSetTrigger(trigger, m_id, m_id);
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+                return ACTION_ERROR;
+            }
+
+            if (target->m_id == m_id) {
+                return ACTION_ERROR;
+            }
+
+            if ((target->m_derivedStats.m_generalState & STATE_DEAD) != 0) {
+                // The target is dead: attack the nearest enemy instead.
+                if (pGame->m_lastTarget == target->m_id) {
+                    pGame->m_lastClick.x = -1;
+                    pGame->m_lastClick.y = -1;
+                    pGame->m_lastTarget = CGameObjectArray::INVALID_INDEX;
+                }
+
+                AutoPause(0x20);
+
+                CAIObjectType enemy = m_typeAI.GetEnemyOf();
+                LONG nNearest = m_pArea->GetNearest(m_id,
+                    enemy,
+                    GetVisualRange(),
+                    m_terrainTable,
+                    TRUE,
+                    GetCanSeeInvisible(),
+                    FALSE,
+                    0,
+                    FALSE);
+                if (nNearest != CGameObjectArray::INVALID_INDEX) {
+                    CAIAction action(CAIAction::ATTACK, CAIObjectType(0, 0, 0, 0, 0, 0, 0, 0, nNearest), 0, 0, 0);
+                    AddAction(action);
+                }
+
+                return ACTION_DONE;
+            }
+
+            // A sleeping target is not attacked with the fist, except by a
+            // monk.
+            if ((target->m_derivedStats.m_generalState & STATE_SLEEPING) != 0
+                && m_equipment.m_selectedWeapon == 10
+                && !GetAIType().IsClassValid(CAIOBJECTTYPE_C_MONK)) {
+                if (pGame->m_lastTarget == target->m_id) {
+                    pGame->m_lastClick.x = -1;
+                    pGame->m_lastClick.y = -1;
+                    pGame->m_lastTarget = CGameObjectArray::INVALID_INDEX;
+                }
+
+                AutoPause(0x20);
+                return ACTION_DONE;
+            }
+
+            CItem* pLauncher = NULL;
+            const ITEM_ABILITY* launcherAttack = NULL;
+            CItem* curWeapon = m_equipment.m_items[m_equipment.m_selectedWeapon];
+            if (curWeapon == NULL) {
+                EquipMostDamagingMelee();
+                AutoPause(1);
+                return ACTION_ERROR;
+            }
+
+            curWeapon->Demand();
+            const ITEM_ABILITY* curAttack = curWeapon->GetAbility(m_equipment.m_selectedWeaponAbility);
+            if (curAttack == NULL) {
+                AutoPause(1);
+                curWeapon->Release();
+                return ACTION_ERROR;
+            }
+
+            if ((curAttack->type & 0xFF) == 4
+                || (curAttack->usageFlags == 3
+                    && curWeapon->GetUsageCount(m_equipment.m_selectedWeaponAbility) == 0
+                    && curAttack->maxUsageCount != 0)) {
+                // The weapon cannot be used.
+                CString sResRef;
+                curWeapon->cResRef.CopyToString(sResRef);
+
+                CAITrigger trigger(CAITRIGGER_UNUSABLE, 0);
+                trigger.m_string1 = sResRef;
+
+                message = new CMessageSetTrigger(trigger, m_id, m_id);
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+                curWeapon->Release();
+                return ACTION_ERROR;
+            }
+
+            if (field_70EE != target->m_id) {
+                FeedBack(FEEDBACK_ATTACKS, 0, 0, 0, target->GetNameRef(), 0, 0);
+                field_70EE = target->m_id;
+            }
+
+            // The battle music, except against the area's critters.
+            CString sAnimation;
+            BOOLEAN bMusic = TRUE;
+            target->m_animation.GetAnimationResRef(sAnimation, 0);
+            if (strcmp(sAnimation, "MGEN") == 0
+                || strcmp(sAnimation, "MKG1") == 0
+                || strcmp(sAnimation, "MKG2") == 0
+                || strcmp(sAnimation, "MKG3") == 0) {
+                bMusic = FALSE;
+            }
+
+            if (m_pArea != NULL && bMusic == TRUE) {
+                m_pArea->PlaySong(3, 0x101F4);
+            }
+
+            // The battle cry (the BYTE at 0x85BB68 is 5).
+            if (m_actionCount == 0
+                && m_curAction.m_actionID == CAIAction::ATTACK
+                && (pGame->GetCharacterPortraitNum(m_id) == -1 || rand() % 6 == 0)) {
+                message = new CMessagePlaySound(5, TRUE, FALSE, m_id, m_id);
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+            }
+
+            INT nDistance;
+            if (curAttack->type == 2) {
+                const CPoint& ptTarget = target->GetPos();
+                INT nTargetY = ptTarget.y / CPathSearch::GRID_SQUARE_SIZEY;
+                INT nTargetX = ptTarget.x / CPathSearch::GRID_SQUARE_SIZEX;
+                const CPoint& ptSelf = GetPos();
+                INT nSelfY = ptSelf.y / CPathSearch::GRID_SQUARE_SIZEY;
+                INT nSelfX = ptSelf.x / CPathSearch::GRID_SQUARE_SIZEX;
+                INT dy = nSelfY - nTargetY;
+                INT dx = nSelfX - nTargetX;
+                nDistance = dx * dx + dy * dy;
+
+                SHORT launcherSlot;
+                pLauncher = GetLauncher(curAttack, launcherSlot);
+                if (pLauncher != NULL) {
+                    pLauncher->Demand();
+                    launcherAttack = pLauncher->GetAbility(0);
+                } else {
+                    launcherAttack = NULL;
+                }
+            } else {
+                const CPoint& ptTarget = target->GetPos();
+                CPoint ptTargetGrid(ptTarget.x / CPathSearch::GRID_SQUARE_SIZEX,
+                    ptTarget.y / CPathSearch::GRID_SQUARE_SIZEY);
+                const CPoint& ptSelf = GetPos();
+                CPoint ptSelfGrid(ptSelf.x / CPathSearch::GRID_SQUARE_SIZEX,
+                    ptSelf.y / CPathSearch::GRID_SQUARE_SIZEY);
+                nDistance = CAIUtil::CountSquares(ptSelfGrid, ptTargetGrid);
+                nDistance *= nDistance;
+            }
+
+            SHORT nRange = curAttack->range + 1;
+            if (launcherAttack != NULL) {
+                nRange = max(static_cast<WORD>(launcherAttack->range + 1), static_cast<WORD>(curAttack->range + 1));
+            }
+
+            if (pLauncher != NULL) {
+                pLauncher->Release();
+            }
+
+            curWeapon->Release();
+
+            BYTE nSelfSpace = m_animation.GetPersonalSpace();
+            BYTE nTargetSpace = target->m_animation.GetPersonalSpace();
+            BYTE nSpace = static_cast<BYTE>(((nTargetSpace - 1) >> 1) + ((nSelfSpace - 1) >> 1) - 1);
+
+            INT nReach = nSpace + nRange;
+            BOOL bInRange;
+            if (nDistance <= nReach * nReach) {
+                bInRange = TRUE;
+            } else if (field_7118 == 0) {
+                bInRange = FALSE;
+            } else {
+                // Mid-swing, a step further still reaches.
+                nReach += 1;
+                bInRange = nDistance <= nReach * nReach;
+            }
+
+            if (bInRange
+                && m_pArea->CheckLOS(target->GetPos(),
+                    GetPos(),
+                    m_visibleTerrainTable,
+                    static_cast<BOOLEAN>(target->Orderable(FALSE)))) {
+                if (m_pPath != NULL) {
+                    message = new CMessageDropPath(m_id, m_id);
+                    g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+                }
+
+                if (m_attackFrame == -2) {
+                    m_attackFrame = -1;
+                }
+
+                SHORT returnValue = Swing(target);
+
+                if (m_attackFrame > 0 || m_actionCount == 0) {
+                    m_lastActionID = CAIAction::ATTACK;
+                    return returnValue;
+                }
+
+                AutoPause(0x40);
+                if (m_curAction.m_actionID != 105) {
+                    m_lastActionID = CAIAction::ATTACK;
+                    return returnValue;
+                }
+
+                return ACTION_DONE;
+            }
+
+            // 0x738BC7: out of reach, walk to the target.
+            SHORT returnValue = MoveToObject(target);
+            if (returnValue == ACTION_DONE) {
+                returnValue = ACTION_INTERRUPTABLE;
+            } else if (returnValue == ACTION_ERROR) {
+                return ACTION_DONE;
+            }
+
+            m_lastActionID = 22;
+            return returnValue;
+        }
+    }
+
+    // 0x738D57: no target, or one in flight.
+    AutoPause(0x20);
+
+    CAITrigger trigger(CAITRIGGER_TARGETUNREACHABLE, m_curAction.m_acteeID, 0);
+    message = new CMessageSetTrigger(trigger, m_id, m_id);
+    g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+    return ACTION_ERROR;
+}
+
+// 0x739B60
+SHORT CGameSprite::Swing(CGameSprite* target)
+{
+    CAITrigger attackedBy(CAITRIGGER_ATTACKEDBY, m_typeAI, 0);
+    CAITrigger hitBy(CAITRIGGER_HITBY, m_typeAI, 0);
+    CAbilityId abilityId;
+
+    BOOLEAN bHit = FALSE;
+    WORD nAbility = m_equipment.m_selectedWeaponAbility;
+    WORD nSlot = m_equipment.m_selectedWeapon;
+    CItem* pLauncher = NULL;
+    const ITEM_ABILITY* launcherAttack = NULL;
+    SHORT returnValue;
+
+    // The off-hand attack of the round, with a weapon (not a shield) there.
+    if (field_5632 != 0 && m_equipment.m_selectedWeapon != 42) {
+        CItem* pLeftItem = m_equipment.m_items[sub_726800()];
+        if (pLeftItem != NULL
+            && pLeftItem->GetItemType() != 53
+            && pLeftItem->GetItemType() != 47
+            && pLeftItem->GetItemType() != 49
+            && pLeftItem->GetItemType() != 41) {
+            nSlot = static_cast<BYTE>(sub_726800());
+            nAbility = 0;
+        }
+    }
+
+    CItem* curWeapon = m_equipment.m_items[nSlot];
+    BOOL bReleaseWeapon = TRUE;
+    const ITEM_ABILITY* curAttack;
+    if (curWeapon == NULL) {
+        EquipMostDamagingMelee();
+        curWeapon = m_equipment.m_items[10];
+
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjCreatureAI.cpp
+        // __LINE__: 8550
+        UTIL_ASSERT(curWeapon != NULL);
+
+        curWeapon->Demand();
+        curAttack = curWeapon->GetAbility(0);
+        nAbility = 0;
+    } else {
+        curWeapon->Demand();
+        curAttack = curWeapon->GetAbility(nAbility);
+    }
+
+    m_cGameStats.RecordWeaponUse(curWeapon->cResRef);
+
+    if (curAttack == NULL) {
+        curAttack = &DEFAULT_ATTACK;
+    }
+
+    if ((curAttack->type & 0xFF) == 4) {
+        curWeapon->Release();
+        return ACTION_ERROR;
+    }
+
+    if ((curAttack->type & 0xFF) == 2) {
+        SHORT launcherSlot;
+        pLauncher = GetLauncher(curAttack, launcherSlot);
+        if (pLauncher != NULL) {
+            pLauncher->Demand();
+            launcherAttack = pLauncher->GetAbility(0);
+        } else {
+            launcherAttack = NULL;
+        }
+    }
+
+    if (target != NULL) {
+        if (m_nDirection != GetDirection(target->GetPos())) {
+            CMessage* message = new CMessageSetDirection(target->GetPos(), m_id, m_id);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        }
+    }
+
+    // The start of a round: the speed of this attack.
+    if (m_attackFrame == -1) {
+        m_attackFrame = 0;
+
+        m_speedFactor = curAttack->speedFactor;
+        if (m_speedFactor - GetActiveStats()->m_nPhysicalSpeed < 0) {
+            m_speedFactor = 0;
+        } else {
+            m_speedFactor = m_speedFactor - GetActiveStats()->m_nPhysicalSpeed;
+        }
+
+        // NOTE: The BYTE at 0x85BBA3 is 6.
+        m_speedFactor += static_cast<SHORT>(CUtil::UtilRandInt(6, -GetActiveStats()->m_nLuck));
+        m_speedFactor -= 6 >> 1;
+
+        if ((m_typeAI.m_nClassMask & 0x20) != 0) {
+            INT nMonkLevel = m_derivedStats.GetClassLevel(CAIOBJECTTYPE_C_MONK);
+            if (nMonkLevel >= 8) {
+                m_speedFactor--;
+            }
+            if (nMonkLevel >= 12) {
+                m_speedFactor--;
+            }
+        }
+
+        if (sub_763150(CGAMESPRITE_FEAT_IMPROVED_INITIATIVE) == TRUE) {
+            m_speedFactor--;
+        }
+
+        if (m_speedFactor < 0) {
+            m_speedFactor = 0;
+        } else if (m_speedFactor > 10) {
+            m_speedFactor = 10;
+        }
+
+        field_5630 = 0;
+        field_5632 = 0;
+
+        if (curAttack->type == 2) {
+            if (m_curProjectile != NULL) {
+                delete m_curProjectile;
+                m_curProjectile = NULL;
+            }
+
+            CProjectile* pProjectile = CProjectile::DecodeProjectile(curAttack->missileType, this, 0);
+
+            CWeaponIdentification weaponId;
+            curWeapon->LoadWeaponIdentification(weaponId);
+
+            m_curProjectile = pProjectile;
+        }
+    }
+
+    BYTE frameType;
+    if (m_derivedStats.m_nNumberOfAttacks < 1) {
+        frameType = 0;
+    } else {
+        frameType = m_animation.GetAttackFrameType(static_cast<BYTE>(m_derivedStats.m_nNumberOfAttacks),
+            static_cast<BYTE>(m_speedFactor),
+            static_cast<BYTE>(m_attackFrame));
+    }
+
+    if (m_derivedStats.m_nNumberOfAttacks < field_5636) {
+        frameType = 15;
+    }
+
+    // The missile animations of the Icewind monsters time their own release.
+    if (curAttack->type == 2) {
+        if ((m_animation.GetAnimationId() & 0xF000) == 0xE000) {
+            CGameAnimationTypeMonsterIcewind* pAnimation = static_cast<CGameAnimationTypeMonsterIcewind*>(m_animation.m_animation);
+            if (frameType == 9) {
+                frameType = 7;
+            }
+
+            if (pAnimation->field_1CDE != -1
+                && m_attackFrame == pAnimation->field_1CDA + pAnimation->field_1CDE) {
+                frameType = 9;
+            }
+        } else if ((m_animation.GetAnimationId() & 0xFF00) == 0xF100) {
+            CGameAnimationTypeMonsterIcewindNew* pAnimation = static_cast<CGameAnimationTypeMonsterIcewindNew*>(m_animation.m_animation);
+            if (frameType == 9) {
+                frameType = 0;
+            }
+
+            if (pAnimation->field_34F8 != -1) {
+                INT nReleaseFrame = pAnimation->field_34F8 + pAnimation->field_34F4;
+                if (m_attackFrame == nReleaseFrame) {
+                    frameType = 9;
+                } else if (m_attackFrame > nReleaseFrame && m_attackFrame < nReleaseFrame + 6) {
+                    frameType = 8;
+                } else if (m_attackFrame == nReleaseFrame + 6) {
+                    frameType = 8;
+                    pAnimation->field_34F8 = -1;
+                }
+            }
+        }
+    }
+
+    SHORT nSequence = m_nSequence;
+    CMessage* message;
+
+    switch (frameType) {
+    case 0:
+        // 0x73A274
+        field_7118 = 0;
+        if (nSequence != GetIdleSequence() && nSequence != SEQ_SHOOT && nSequence != SEQ_ATTACK) {
+            message = new CMessageSetSequence(static_cast<BYTE>(GetIdleSequence()), m_id, m_id);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        }
+        returnValue = ACTION_INTERRUPTABLE;
+        break;
+    case 6:
+        // 0x73A2F2
+        if (curAttack->type != 2) {
+            if (nSequence != SEQ_ATTACK) {
+                message = new CMessageSetSequence(SEQ_ATTACK, m_id, m_id);
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+            }
+
+            message = new CMessageSetLastAttacker(m_typeAI, m_id, target->m_id);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        }
+        returnValue = ACTION_INTERRUPTABLE;
+        break;
+    case 7:
+        // 0x73A3DE
+        field_7118 = 1;
+        if (curAttack->type == 2) {
+            if (nSequence != SEQ_SHOOT && field_5630 != 0) {
+                message = new CMessageSetSequence(SEQ_SHOOT, m_id, m_id);
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+            }
+        } else {
+            if (nSequence != SEQ_ATTACK) {
+                message = new CMessageSetSequence(SEQ_ATTACK, m_id, m_id);
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+            }
+        }
+        returnValue = ACTION_NORMAL;
+        break;
+    case 8:
+        // 0x73B3E8
+        field_7118 = 0;
+        returnValue = ACTION_NORMAL;
+        break;
+    case 9:
+        // 0x73A463: the blow.
+        field_7118 = 1;
+
+        if ((m_animation.GetAnimationId() & 0xF000) == 0xE000) {
+            static_cast<CGameAnimationTypeMonsterIcewind*>(m_animation.m_animation)->field_1CDE = -1;
+        }
+
+        message = new CMessageSetLastAttacker(m_typeAI, m_id, target->m_id);
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+        // An invisible attacker becomes visible, and a sanctuary ends.
+        if (!IsVisibleToCaller(FALSE)) {
+            ITEM_EFFECT effect;
+            CGameEffect::ClearItemEffect(&effect, CGAMEEFFECT_FORCEVISIBLE);
+            effect.durationType = 1;
+
+            CGameEffect* pEffect = CGameEffect::DecodeEffect(&effect, m_pos, m_id, CPoint(-1, -1));
+            message = new CMessageAddEffect(pEffect, m_id, m_id);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        }
+
+        if (m_derivedStats.m_spellStates[SPLSTATE_SANCTUARY]) {
+            ITEM_EFFECT effect;
+            CGameEffect::ClearItemEffect(&effect, CGAMEEFFECT_DISPELSANCTUARY);
+            effect.durationType = 1;
+
+            CGameEffect* pEffect = CGameEffect::DecodeEffect(&effect, m_pos, m_id, CPoint(-1, -1));
+            message = new CMessageAddEffect(pEffect, m_id, m_id);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        }
+
+        if (curAttack->type == 2) {
+            // TODO: 0x73A679-0x73AC06 not ported (the missile: the projectile,
+            // Hit and Damage on it, CMessageFireProjectile and the launcher's
+            // effects). A missile attack does nothing here yet.
+        } else {
+            if (nSequence != SEQ_ATTACK) {
+                message = new CMessageSetSequence(SEQ_ATTACK, m_id, m_id);
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+            }
+
+            if (field_5630 != 0) {
+                BOOL bCritical = FALSE;
+                if (Hit(target, curWeapon, nAbility, &bCritical, field_5632, field_5636)) {
+                    bHit = TRUE;
+
+                    // A party member's first blow marks the target hostile.
+                    if ((target->field_58C & 0x200000) == 0
+                        && GetAIType().m_nEnemyAlly <= CAIObjectType::EA_GOODCUTOFF) {
+                        target->field_58C |= 0x200000;
+                        target->sub_6F50A0();
+                    }
+
+                    message = new CMessageSetTrigger(hitBy, m_id, target->m_id);
+                    g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+                    CWeaponIdentification weaponId;
+                    curWeapon->LoadWeaponIdentification(weaponId);
+
+                    CGameEffect* pDamage = Damage(curWeapon,
+                        pLauncher,
+                        nAbility,
+                        bCritical,
+                        target->m_typeAI,
+                        target->m_nDirection,
+                        GetDirection(target->GetPos()),
+                        target,
+                        field_5632);
+
+                    message = new CMessageAddEffect(pDamage, m_id, target->m_id);
+                    g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+                    for (INT nEffect = 0; nEffect < curAttack->effectCount; nEffect++) {
+                        CGameEffect* pEffect = curWeapon->GetAbilityEffect(nAbility, nEffect, this);
+                        pEffect->m_source = m_pos;
+                        pEffect->m_sourceID = m_id;
+                        pEffect->m_target = target->m_pos;
+                        IcewindMisc::sub_5860F0(this, pEffect);
+
+                        switch (pEffect->m_targetType) {
+                        case 1:
+                            message = new CMessageAddEffect(pEffect, m_id, m_id);
+                            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+                            break;
+                        case 2:
+                            message = new CMessageAddEffect(pEffect, m_id, target->m_id);
+                            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+                            break;
+                        case 3:
+                            ApplyEffectToParty(pEffect);
+                            delete pEffect;
+                            break;
+                        case 4:
+                        case 5:
+                        case 6:
+                        case 7:
+                        case 8:
+                            // TODO: The original gives the effect to the area's
+                            // creatures through CGameArea 0x46E130 (not ported):
+                            // 4 all, 5 the party, 6 those of the caster's
+                            // specific, 7 those of the target's specific, 8 all
+                            // but the caster.
+                            delete pEffect;
+                            break;
+                        default:
+                            delete pEffect;
+                            break;
+                        }
+                    }
+
+                    if (launcherAttack != NULL) {
+                        for (INT nEffect = 0; nEffect < launcherAttack->effectCount; nEffect++) {
+                            CGameEffect* pEffect = pLauncher->GetAbilityEffect(0, nEffect, this);
+                            pEffect->m_source = m_pos;
+                            pEffect->m_sourceID = m_id;
+                            pEffect->m_target = target->m_pos;
+                            IcewindMisc::sub_5860F0(this, pEffect);
+
+                            switch (pEffect->m_targetType) {
+                            case 1:
+                                message = new CMessageAddEffect(pEffect, m_id, m_id);
+                                g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+                                break;
+                            case 2:
+                                m_curProjectile->AddEffect(pEffect);
+                                break;
+                            case 3:
+                                ApplyEffectToParty(pEffect);
+                                delete pEffect;
+                                break;
+                            case 4:
+                            case 5:
+                            case 6:
+                            case 7:
+                            case 8:
+                                // TODO: The original gives the effect to the area's
+                                // creatures through CGameArea 0x46E130 (not ported):
+                                // 4 all, 5 the party, 6 those of the caster's
+                                // specific, 7 those of the target's specific, 8 all
+                                // but the caster.
+                                delete pEffect;
+                                break;
+                            default:
+                                delete pEffect;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (curAttack->type == 1) {
+                        sub_761AB0(target);
+                    }
+                }
+            } else {
+                goto after_blow;
+            }
+        }
+
+        // 0x73B12F: the blow spends a charge.
+        if (field_5630 != 0
+            && curAttack->maxUsageCount != 0
+            && (curAttack->type != 1 || bHit)) {
+            curWeapon->SetUsageCount(nAbility, curWeapon->GetUsageCount(nAbility) - 1);
+        }
+
+    after_blow:
+        if (field_5630 != 0 && curAttack->maxUsageCount != 0) {
+            abilityId.m_itemType = 2;
+            abilityId.m_itemNum = nSlot;
+            abilityId.m_abilityNum = nAbility;
+            // TODO: 0x73B19A-0x73B1BD calls CheckQuickLists 0x71ABA0 (not
+            // ported) with the ability, -1, 0, 0.
+        }
+
+        if (m_derivedStats.m_spellStates[SPLSTATE_SMITE_EVIL]) {
+            CGameEffect* pEffect = IcewindMisc::CreateEffectRemoveAllOfType(this, ICEWIND_CGAMEEFFECT_SMITEEVIL, 0);
+            message = new CMessageAddEffect(pEffect, m_id, m_id);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        }
+
+        bReleaseWeapon = FALSE;
+        curWeapon->Release();
+
+        if (CheckIfUsedUp(nSlot, nAbility)) {
+            AutoPause(1);
+            returnValue = ACTION_ERROR;
+        } else {
+            returnValue = ACTION_NORMAL;
+        }
+
+        message = new CMessageSetTrigger(attackedBy, m_id, target->m_id);
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        break;
+    case 15:
+        // 0x73B32F: the round is over.
+        field_7118 = 0;
+        if (nSequence != GetIdleSequence() && nSequence != SEQ_SHOOT && nSequence != SEQ_ATTACK) {
+            message = new CMessageSetSequence(static_cast<BYTE>(GetIdleSequence()), m_id, m_id);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        }
+
+        if (curAttack->type == 2 && m_curProjectile != NULL) {
+            delete m_curProjectile;
+            m_curProjectile = NULL;
+        }
+
+        returnValue = ACTION_INTERRUPTABLE;
+        m_attackFrame = -2;
+        break;
+    default:
+        // 0x73B3F7: the frames that choose the attack of the round.
+        field_5636 = frameType - 9;
+
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjCreatureAI.cpp
+        // __LINE__: 9154
+        UTIL_ASSERT_MSG(field_5636 <= m_derivedStats.m_nNumberOfAttacks,
+            "Current attack # is greater than total number of attacks.");
+
+        if (frameType - 9 > 0) {
+            INT nAttack = frameType - 9;
+            INT nAttacks = m_derivedStats.m_nNumberOfAttacks;
+            BOOL bAttack;
+            if (nAttacks < 6) {
+                bAttack = nAttack <= nAttacks;
+            } else {
+                bAttack = nAttack < nAttacks - 5;
+            }
+
+            if (bAttack) {
+                field_7118 = 1;
+                field_5630 = 1;
+                if (nAttacks < 6 ? nAttack == nAttacks : nAttack == nAttacks - 6) {
+                    field_5632 = 1;
+                }
+            } else {
+                field_7118 = 0;
+                field_5630 = 0;
+                field_5632 = 0;
+            }
+
+            if (curAttack->type == 2) {
+                if (nSequence != SEQ_SHOOT && field_5630 != 0) {
+                    message = new CMessageSetSequence(SEQ_SHOOT, m_id, m_id);
+                    g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+                    if ((m_animation.GetAnimationId() & 0xF000) == 0xE000) {
+                        static_cast<CGameAnimationTypeMonsterIcewind*>(m_animation.m_animation)->field_1CDE = m_attackFrame;
+                    } else if ((m_animation.GetAnimationId() & 0xFF00) == 0xF100) {
+                        static_cast<CGameAnimationTypeMonsterIcewindNew*>(m_animation.m_animation)->field_34F8 = m_attackFrame;
+                    }
+                }
+            } else {
+                if (nSequence != SEQ_ATTACK) {
+                    message = new CMessageSetSequence(SEQ_ATTACK, m_id, m_id);
+                    g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+                }
+            }
+        }
+        returnValue = ACTION_NORMAL;
+        break;
+    }
+
+    if (pLauncher != NULL) {
+        pLauncher->Release();
+    }
+
+    if (bReleaseWeapon) {
+        curWeapon->Release();
+    }
+
+    return returnValue;
+}
+
 // 0x73B740
 SHORT CGameSprite::GetCriticalHitBonus()
 {
@@ -19259,6 +20074,68 @@ SHORT CGameSprite::UseDoor()
     return ACTION_DONE;
 }
 
+// 0x75D450
+BOOL CGameSprite::CheckIfUsedUp(SHORT nSlot, SHORT nAbility)
+{
+    CResRef cResItem;
+    CAITrigger trigger(CAITrigger::NO_TRIGGER, 0);
+    SHORT nSelectedWeapon = m_equipment.m_selectedWeapon;
+    SHORT nLauncherSlot = GetLauncherSlot(nSelectedWeapon, m_equipment.m_selectedWeaponAbility);
+    g_pBaldurChitin->GetActiveEngine()->UpdatePersonalItemStatus(m_id);
+
+    CMessage* message;
+
+    // NOTE: The BYTE at 0x85BD87 is 51.
+    if (nSlot > 51 || nSlot < 0) {
+        CAITrigger unusable(CAITRIGGER_UNUSABLE, 0);
+        message = new CMessageSetTrigger(unusable, m_id, m_id);
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        return TRUE;
+    }
+
+    CItem* pItem = m_equipment.m_items[nSlot];
+    if (pItem == NULL) {
+        CString sItem;
+        CAITrigger unusable(CAITRIGGER_UNUSABLE, 0);
+        unusable.m_string1 = sItem;
+        message = new CMessageSetTrigger(unusable, m_id, m_id);
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        return TRUE;
+    }
+
+    cResItem = pItem->cResRef;
+    pItem->Demand();
+
+    const ITEM_ABILITY* ability = pItem->GetAbility(nAbility);
+    if (ability == NULL) {
+        // TODO: 0x75D683-0x75D901 not ported (an item without the ability:
+        // with ability 0 it is dropped from the slot and the weapon or
+        // launcher chosen again, otherwise UNUSABLE is triggered). Ours
+        // keeps the item.
+        pItem->Release();
+        return FALSE;
+    }
+
+    if (pItem->GetUsageCount(nAbility) == 0xFFFF
+        && ability->maxUsageCount != 0
+        && ability->usageFlags == 1) {
+        pItem->SetUsageCount(nAbility, 0);
+    }
+
+    if (pItem->GetUsageCount(nAbility) != 0 || ability->maxUsageCount == 0) {
+        pItem->Release();
+        return FALSE;
+    }
+
+    // TODO: 0x75D942-0x75DE3D not ported (the charges are spent: by the
+    // usage flags the item is removed, replaced by its used-up item or kept,
+    // the weapon chosen again, and UNUSABLE triggered with its name). Ours
+    // keeps the item.
+    (void)nLauncherSlot;
+    pItem->Release();
+    return FALSE;
+}
+
 // 0x75DFD0
 SHORT CGameSprite::EquipMostDamagingMelee()
 {
@@ -20378,6 +21255,32 @@ SHORT CGameSprite::sub_7615F0(int a1)
 void CGameSprite::sub_761650()
 {
     // TODO: Incomplete.
+}
+
+// 0x761AB0
+void CGameSprite::sub_761AB0(CGameSprite* target)
+{
+    // The effects of the creature's melee hits (its when-struck list's
+    // spells), given to it or to the target.
+    for (std::list<CWhenStruckEntry>::iterator it = m_derivedStats.m_whenStruckList.begin();
+         it != m_derivedStats.m_whenStruckList.end();
+         it++) {
+        std::list<CGameEffect*> effects = IcewindMisc::GetSpellResrefEffects(this,
+            it->m_res.GetResRef(),
+            it->m_casterLevel);
+        for (std::list<CGameEffect*>::iterator itEffect = effects.begin(); itEffect != effects.end(); itEffect++) {
+            (*itEffect)->m_sourceRes = it->m_sourceRes;
+            (*itEffect)->m_target = it->m_target;
+
+            CMessage* message;
+            if ((*itEffect)->m_targetType == 1) {
+                message = new CMessageAddEffect(*itEffect, m_id, m_id);
+            } else {
+                message = new CMessageAddEffect(*itEffect, m_id, target->m_id);
+            }
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        }
+    }
 }
 
 // 0x7618E0
