@@ -1620,7 +1620,11 @@ using CellShadowFn = int32_t(__fastcall*)(void* self, void* edx, uint32_t* pSurf
 constexpr uintptr_t kCellBlt8To32 = 0x7CFBC0;
 constexpr uintptr_t kCellClearShadow = 0x7D0470;
 constexpr uintptr_t kCellBrightest = 0x7D0730;
-enum class CellMode { Translucent, Brightness, Blt, ClearShadow, Brightest };
+enum class CellMode { Translucent,
+    Brightness,
+    Blt,
+    ClearShadow,
+    Brightest };
 
 void CellBlend(CaseContext& ctx, CellMode mode, uint64_t salt)
 {
@@ -2376,7 +2380,8 @@ void BltTile(CaseContext& ctx, int bpp, bool stencil, uint64_t salt)
                 originalResult = reinterpret_cast<BltStencilTile32Fn>(address)(tile, nullptr, canvas + offset * bytes,
                     kTileCanvas * bytes, data, stencilData, size, jump, dwFlags);
             } else {
-                const uintptr_t address = bpp == 16 ? kBltTile8To16 : bpp == 24 ? kBltTile8To24 : kBltTile8To32;
+                const uintptr_t address = bpp == 16 ? kBltTile8To16 : bpp == 24 ? kBltTile8To24
+                                                                                : kBltTile8To32;
                 originalResult = reinterpret_cast<BltTile16Fn>(address)(tile, nullptr,
                     reinterpret_cast<uint16_t*>(canvas + offset * bytes), kTileCanvas * bytes, data, size, jump,
                     dwFlags);

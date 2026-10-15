@@ -175,11 +175,19 @@ std::vector<DWORD> FillNonConvex(CVIDPOLY_VERTEX* vertices, WORD count, const CR
 std::vector<std::pair<int, std::pair<int, int>>> NotchRows()
 {
     return {
-        { 3, { 2, 3 } }, { 3, { 9, 10 } },
-        { 4, { 2, 4 } }, { 4, { 8, 10 } },
-        { 5, { 2, 5 } }, { 5, { 7, 10 } },
-        { 6, { 2, 10 } }, { 7, { 2, 10 } }, { 8, { 2, 10 } }, { 9, { 2, 10 } }, { 10, { 2, 10 } },
-        { 2, { 2, 2 } }, { 2, { 10, 10 } },
+        { 3, { 2, 3 } },
+        { 3, { 9, 10 } },
+        { 4, { 2, 4 } },
+        { 4, { 8, 10 } },
+        { 5, { 2, 5 } },
+        { 5, { 7, 10 } },
+        { 6, { 2, 10 } },
+        { 7, { 2, 10 } },
+        { 8, { 2, 10 } },
+        { 9, { 2, 10 } },
+        { 10, { 2, 10 } },
+        { 2, { 2, 2 } },
+        { 2, { 10, 10 } },
     };
 }
 
@@ -595,13 +603,11 @@ TEST_CASE("blt_tile8to16", "[vid]")
     BYTE data[12] = { 1, 2, 3, 4, 99, 99, 5, 6, 7, 8, 99, 99 };
     std::vector<WORD> pixels(8 * 2, 0xAAAA);
     REQUIRE(tile->BltTile8To16(pixels.data(), 8 * 2, data, CSize(4, 2), 2, 0));
-    CHECK(pixels == std::vector<WORD> { 0x0100, 0x0200, 0x0300, 0x0400, 0xAAAA, 0xAAAA, 0xAAAA, 0xAAAA,
-                        0x0500, 0x0600, 0x0700, 0x0800, 0xAAAA, 0xAAAA, 0xAAAA, 0xAAAA });
+    CHECK(pixels == std::vector<WORD> { 0x0100, 0x0200, 0x0300, 0x0400, 0xAAAA, 0xAAAA, 0xAAAA, 0xAAAA, 0x0500, 0x0600, 0x0700, 0x0800, 0xAAAA, 0xAAAA, 0xAAAA, 0xAAAA });
 
     std::fill(pixels.begin(), pixels.end(), static_cast<WORD>(0xAAAA));
     REQUIRE(tile->BltTile8To16(pixels.data(), 8 * 2, data, CSize(4, 2), 2, 0x8));
-    CHECK(pixels == std::vector<WORD> { 0x0100, 0x5678, 0x0300, 0x5678, 0xAAAA, 0xAAAA, 0xAAAA, 0xAAAA,
-                        0x5678, 0x0600 | 0x1234, 0x5678, 0x0800 | 0x1234, 0xAAAA, 0xAAAA, 0xAAAA, 0xAAAA });
+    CHECK(pixels == std::vector<WORD> { 0x0100, 0x5678, 0x0300, 0x5678, 0xAAAA, 0xAAAA, 0xAAAA, 0xAAAA, 0x5678, 0x0600 | 0x1234, 0x5678, 0x0800 | 0x1234, 0xAAAA, 0xAAAA, 0xAAAA, 0xAAAA });
 
     g_pChitin->pActiveEngine = nullptr;
     ::operator delete(tileStorage);
@@ -988,11 +994,21 @@ TEST_CASE("draw_hline_shaded24", "[vid]")
     };
     poly.DrawHLineShaded24(row, 0, 3, color, CRect(0, 0, 5, 1), CPoint(0, 0));
     const BYTE expected[5 * 3] = {
-        blend(0x5A, 16), blend(0x3C, 17), blend(0x1E, 18),
-        0x05, 0x01, 0x02,
-        0xF0, 0x01, 0x02,
-        blend(0x5A, 128), blend(0x3C, 129), blend(0x1E, 130),
-        0x10, 0x10, 0x10,
+        blend(0x5A, 16),
+        blend(0x3C, 17),
+        blend(0x1E, 18),
+        0x05,
+        0x01,
+        0x02,
+        0xF0,
+        0x01,
+        0x02,
+        blend(0x5A, 128),
+        blend(0x3C, 129),
+        blend(0x1E, 130),
+        0x10,
+        0x10,
+        0x10,
     };
     CHECK(std::vector<BYTE>(row, row + 15) == std::vector<BYTE>(expected, expected + 15));
 
@@ -1390,8 +1406,7 @@ TEST_CASE("blt_tile8to24_and_stencil16", "[vid]")
     // its stencil is clear (index 1). Row 1 (odd): the first is the whole
     // field_24 ORed in where its stencil is clear (index 6), its high word
     // reaching the second pixel.
-    CHECK(words == std::vector<WORD> { 0x0101, 0xCDEF, 0x0303, 0x0404, 0x5555, 0x5555, 0x5555, 0x5555,
-                       0xCDEF, 0x0606 | 0x00AB, 0x0707, 0x0808, 0x5555, 0x5555, 0x5555, 0x5555 });
+    CHECK(words == std::vector<WORD> { 0x0101, 0xCDEF, 0x0303, 0x0404, 0x5555, 0x5555, 0x5555, 0x5555, 0xCDEF, 0x0606 | 0x00AB, 0x0707, 0x0808, 0x5555, 0x5555, 0x5555, 0x5555 });
     CHECK_FALSE(tile->BltStencilTile8To16(words.data(), 8 * 2, data, stencil, CSize(3, 2), 2, 0));
 
     g_pChitin->pActiveEngine = nullptr;
