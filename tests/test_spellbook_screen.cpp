@@ -216,7 +216,6 @@ void NewGameWithOneCharacter(std::vector<BYTE>& bytes, const char* name)
     }
 }
 
-
 // The party member in slot 0, denied to this thread while the test reads it.
 CGameSprite* PartySprite()
 {
