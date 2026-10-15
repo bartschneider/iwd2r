@@ -352,6 +352,7 @@ void ReadProbe(platform::replay_probe::Frame* out)
             }
             o.direction = sprite->m_nDirection;
             o.newDirection = sprite->m_nNewDirection;
+            o.noActionCount = sprite->m_noActionCount;
         } else if (o.type == CGameObject::TYPE_DOOR) {
             const CGameDoor* door = static_cast<CGameDoor*>(object);
             o.hasName = true;

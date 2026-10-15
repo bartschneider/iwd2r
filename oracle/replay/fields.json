@@ -619,6 +619,11 @@
     "offset": "0x000C",
     "type": "u8"
   },
+  "sprite_no_action_count": {
+    "base": "CGameSprite",
+    "offset": "0x5624",
+    "type": "i32"
+  },
   "sprite_direction": {
     "base": "CGameSprite",
     "offset": "0x5380",

@@ -899,6 +899,10 @@
       "class": "CMessageSetSequence",
       "member": "m_sequence"
     },
+    "sprite_no_action_count": {
+      "class": "CGameSprite",
+      "member": "m_noActionCount"
+    },
     "sprite_direction": {
       "class": "CGameSprite",
       "member": "m_nDirection"

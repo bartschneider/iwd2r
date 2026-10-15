@@ -20,7 +20,7 @@
 //       [name NAME] [last C active A ai B imprisonment M visible_monster V
 //       field_294 F state S action A sequence Q queued N next A triggers T
 //       effects TIMED,EQUIPED xp X hp H dest X,Y path [NODE ...]
-//       timers [ID:TIME ...] scripts R:N R:N R:N R:N R:N R:N R:N dir D:N]
+//       timers [ID:TIME ...] scripts R:N R:N R:N R:N R:N R:N R:N dir D:N noaction C]
 //   vis ROW HEX...
 //
 // - game: CInfGame::m_nCharacters, m_visibleArea, m_characters (the
@@ -50,7 +50,8 @@
 //   script levels (m_overrideScript, m_special1Script, m_teamScript,
 //   m_special2Script, m_combatScript, m_special3Script, m_movementScript):
 //   each its m_cResRef and block count (m_caList), `-` for none, and its
-//   m_nDirection and m_nNewDirection. One line per object.
+//   m_nDirection and m_nNewDirection, and m_noActionCount. One line per
+//   object.
 // - vis: the area's visibility map, one line per row of m_nWidth tiles
 //   (bytes in hex: bit 7 explored, the low bits the visibility count);
 //   the rows past m_nMapSize, if any, are left out.
@@ -143,6 +144,7 @@ struct Object {
     std::vector<std::pair<std::string, int>> scripts;
     int direction = 0;
     int newDirection = 0;
+    int32_t noActionCount = 0;
 };
 
 struct Area {
@@ -246,6 +248,7 @@ inline std::string Format(const Frame& f)
                 out += " " + script.first + ":" + std::to_string(script.second);
             }
             out += " dir " + std::to_string(o.direction) + ":" + std::to_string(o.newDirection);
+            out += " noaction " + std::to_string(o.noActionCount);
         }
         out += "\n";
     }
