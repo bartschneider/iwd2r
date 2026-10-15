@@ -1433,3 +1433,81 @@ TEST_CASE("combat: CItem's information text lists who can use the item", "[comba
     CHECK(all.find(Tlk(31530)) == std::string::npos);
     CHECK(all.find(Tlk(31531)) == std::string::npos);
 }
+
+// CGameSprite::CheckIfUsedUp 0x75D450 after a goblin archer's shot. With
+// arrows left it changes nothing and answers FALSE. With none left
+// (00AROW01: one charge per arrow, usage flag 1) the arrows vanish: the fist
+// is selected and the weapon set chosen again (sub_726810), UNUSABLE is
+// triggered with the arrows' name, and it answers TRUE (Swing then ends the
+// attack). An ability the item lacks triggers UNUSABLE too and keeps the
+// item.
+TEST_CASE("combat: CheckIfUsedUp keeps arrows that are left and drops spent ones", "[combat][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    Fight fight;
+    std::string why;
+    if (!SetUpFight(fight, why)) {
+        if (why.find("CHR") != std::string::npos) {
+            SKIP("[iwd2r-skip] " + why);
+        }
+        FAIL(why);
+    }
+    const CPoint pos = fight.pCharacter->GetPos();
+    CGameSprite* pArcher = AddCreature(fight.pArea, "10GOBAR", CPoint(pos.x - 6 * CPathSearch::GRID_SQUARE_SIZEX, pos.y));
+    if (pArcher == NULL) {
+        FAIL("10GOBAR.CRE not found");
+    }
+    CGameSpriteEquipment* pEquipment = pArcher->GetEquipment();
+    const SHORT nSlot = pEquipment->m_selectedWeapon;
+    const SHORT nAbility = static_cast<SHORT>(pEquipment->m_selectedWeaponAbility);
+    CItem* pArrows = pEquipment->m_items[nSlot];
+    REQUIRE(pArrows != NULL);
+    REQUIRE(pArrows->GetResRef() == CResRef("00AROW01"));
+
+    auto unusableTriggers = [](const char* name) {
+        int count = 0;
+        for (CMessageSetTrigger* message : Queued<CMessageSetTrigger>()) {
+            if (message->m_trigger.m_triggerID == CAITRIGGER_UNUSABLE
+                && strcmp(message->m_trigger.m_string1, name) == 0) {
+                count++;
+            }
+        }
+        return count;
+    };
+
+    srand(5);
+    const unsigned int state = iwd2r_rand_state();
+
+    // Arrows left.
+    ClearMessages();
+    pArrows->SetUsageCount(0, 5);
+    CHECK_FALSE(pArcher->CheckIfUsedUp(nSlot, nAbility));
+    CHECK(pEquipment->m_items[nSlot] == pArrows);
+    CHECK(unusableTriggers("00AROW01") == 0);
+
+    // An ability the arrows lack.
+    ClearMessages();
+    CHECK(pArcher->CheckIfUsedUp(nSlot, 5));
+    CHECK(pEquipment->m_items[nSlot] == pArrows);
+    CHECK(unusableTriggers("00AROW01") == 1);
+
+    // None left.
+    ClearMessages();
+    pArrows->SetUsageCount(0, 0);
+    CHECK(pArcher->CheckIfUsedUp(nSlot, nAbility));
+    CHECK(pEquipment->m_items[nSlot] == NULL);
+    CHECK(pEquipment->m_selectedWeapon != nSlot);
+    CHECK(unusableTriggers("00AROW01") == 1);
+    // CheckIfUsedUp draws nothing itself; the unequips it causes recalculate
+    // the effect lists while the world timer is stopped (CItem::Unequip):
+    // two ProcessEffectList runs of five draws (four save d20s and a
+    // rand() % 100).
+    CHECK(Draws(state, iwd2r_rand_state()) == 10);
+    ClearMessages();
+}

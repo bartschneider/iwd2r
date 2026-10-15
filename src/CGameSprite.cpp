@@ -21993,12 +21993,47 @@ BOOL CGameSprite::CheckIfUsedUp(SHORT nSlot, SHORT nAbility)
 
     const ITEM_ABILITY* ability = pItem->GetAbility(nAbility);
     if (ability == NULL) {
-        // TODO: 0x75D683-0x75D901 not ported (an item without the ability:
-        // with ability 0 it is dropped from the slot and the weapon or
-        // launcher chosen again, otherwise UNUSABLE is triggered). Ours
-        // keeps the item.
-        pItem->Release();
-        return FALSE;
+        // 0x75D683: the item has no such ability.
+        if (nAbility == 0) {
+            // An item without abilities is gone: it leaves the slot, the
+            // fist (or what the launcher can use) takes over.
+            if (pItem->GetMaxStackable() <= 1) {
+                PlaySound(CResRef("EFF_M02"));
+            }
+
+            if (nSlot != m_equipment.m_selectedWeapon) {
+                Unequip(nSlot);
+            } else {
+                SelectWeaponAbility(CGameSpriteEquipment::SLOT_FIST, 0, FALSE, TRUE);
+            }
+
+            m_equipment.m_items[nSlot]->ReleaseAll();
+            delete m_equipment.m_items[nSlot];
+            m_equipment.m_items[nSlot] = NULL;
+
+            if (nSlot == nSelectedWeapon) {
+                if (nLauncherSlot == -1) {
+                    EquipMostDamagingMelee();
+                } else if (sub_75E330(m_equipment.m_items[nLauncherSlot], !IcewindMisc::IsPC(this)) == CGameAIBase::ACTION_DONE
+                    && m_equipment.m_items[m_equipment.m_selectedWeapon] != NULL
+                    && m_equipment.m_items[m_equipment.m_selectedWeapon]->cResRef == cResItem) {
+                    return FALSE;
+                }
+            }
+
+            return TRUE;
+        }
+
+        CString sItem;
+        pItem->cResRef.CopyToString(sItem);
+
+        CAITrigger unusable(CAITRIGGER_UNUSABLE, 0);
+        unusable.m_string1 = sItem;
+        message = new CMessageSetTrigger(unusable, m_id, m_id);
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+        m_equipment.m_items[nSlot]->ReleaseAll();
+        return TRUE;
     }
 
     if (pItem->GetUsageCount(nAbility) == 0xFFFF
@@ -22012,13 +22047,96 @@ BOOL CGameSprite::CheckIfUsedUp(SHORT nSlot, SHORT nAbility)
         return FALSE;
     }
 
-    // TODO: 0x75D942-0x75DE3D not ported (the charges are spent: by the
-    // usage flags the item is removed, replaced by its used-up item or kept,
-    // the weapon chosen again, and UNUSABLE triggered with its name). Ours
-    // keeps the item.
-    (void)nLauncherSlot;
-    pItem->Release();
-    return FALSE;
+    // 0x75D942: the charges are spent.
+    BOOL bRelease = TRUE;
+    CString sItem;
+    pItem->cResRef.CopyToString(sItem);
+
+    switch (ability->usageFlags) {
+    case 1:
+        // The item vanishes.
+        if (m_equipment.m_items[nSlot] != NULL) {
+            if (pItem->GetMaxStackable() <= 1) {
+                PlaySound(CResRef("EFF_M02"));
+            }
+
+            if (nSlot != m_equipment.m_selectedWeapon) {
+                Unequip(nSlot);
+            } else {
+                SelectWeaponAbility(CGameSpriteEquipment::SLOT_FIST, 0, FALSE, TRUE);
+            }
+
+            m_equipment.m_items[nSlot]->ReleaseAll();
+            bRelease = FALSE;
+            delete m_equipment.m_items[nSlot];
+            m_equipment.m_items[nSlot] = NULL;
+
+            if (nSlot == nSelectedWeapon) {
+                if (nLauncherSlot == -1) {
+                    if (!IcewindMisc::IsPC(this)) {
+                        EquipMostDamagingMelee();
+                    }
+                } else if (sub_75E330(m_equipment.m_items[nLauncherSlot], !IcewindMisc::IsPC(this)) == CGameAIBase::ACTION_DONE
+                    && m_equipment.m_items[m_equipment.m_selectedWeapon] != NULL
+                    && m_equipment.m_items[m_equipment.m_selectedWeapon]->cResRef == cResItem) {
+                    return FALSE;
+                }
+            }
+
+            sub_726810(m_nWeaponSet);
+        }
+        break;
+    case 2:
+        // The item turns into its used-up item, or vanishes without one.
+        if (nSlot != m_equipment.m_selectedWeapon) {
+            Unequip(nSlot);
+        }
+
+        pItem->Release();
+        bRelease = FALSE;
+
+        if (pItem->GetUsedUpItemId() != "") {
+            pItem->SetResRef(pItem->GetUsedUpItemId(), TRUE);
+            pItem->cResRef.CopyToString(sItem);
+        } else {
+            m_equipment.m_items[nSlot]->ReleaseAll();
+            delete m_equipment.m_items[nSlot];
+            m_equipment.m_items[nSlot] = NULL;
+        }
+
+        if (nSlot == nSelectedWeapon) {
+            if (nLauncherSlot == -1) {
+                if (!IcewindMisc::IsPC(this)) {
+                    EquipMostDamagingMelee();
+                }
+            } else if (sub_75E330(m_equipment.m_items[nLauncherSlot], !IcewindMisc::IsPC(this)) == CGameAIBase::ACTION_DONE
+                && m_equipment.m_items[m_equipment.m_selectedWeapon] != NULL
+                && m_equipment.m_items[m_equipment.m_selectedWeapon]->cResRef == cResItem) {
+                return FALSE;
+            }
+        }
+
+        if (g_pBaldurChitin->GetObjectGame()->GetCharacterPortraitNum(m_id) != -1
+            && (m_derivedStats.m_generalState & STATE_CHARMED) == 0) {
+            sub_726810(m_nWeaponSet);
+        } else {
+            // TODO: 0x75DAFC calls CGameSprite 0x75E150 (not ported; outside
+            // this stream's grant) for a creature outside the party or
+            // charmed.
+        }
+        break;
+    }
+
+    trigger = CAITrigger(CAITRIGGER_UNUSABLE, 0);
+    trigger.m_string1 = sItem;
+    message = new CMessageSetTrigger(trigger, m_id, m_id);
+    g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+    if (bRelease) {
+        m_equipment.m_items[nSlot]->Release();
+    }
+
+    return TRUE;
 }
 
 // 0x75DFD0
