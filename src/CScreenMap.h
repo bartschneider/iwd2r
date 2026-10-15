@@ -123,7 +123,7 @@ public:
     void SetRenderCharacter(SHORT nPortrait, WORD nVisualRange);
     BOOL RenderCharactersOnly(const CPoint& pt);
     void RenderCharacters(const CRect& rClip);
-    void RenderFogOfWar(CVidInf* pVidInf, const CPoint& pt, const CRect& rClip);
+    BOOL RenderFogOfWar(CVidInf* pVidInf, const CPoint& pt, const CRect& rClip);
     void InvalidateNotes();
     void RenderViewRect(CVidInf* pVidInf, const CRect& r1, const CRect& r2);
     void SetMap(CGameArea* pArea);

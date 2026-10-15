@@ -1733,10 +1733,164 @@ void CUIControlButtonMapAreaMap::RenderCharacters(const CRect& rClip)
     }
 }
 
-// 0x643CC0
-void CUIControlButtonMapAreaMap::RenderFogOfWar(CVidInf* pVidInf, const CPoint& pt, const CRect& rClip)
+// 0x644390
+BOOL CUIControlButtonMapAreaMap::RenderFogOfWar(CVidInf* pVidInf, const CPoint& pt, const CRect& rClip)
 {
-    // TODO: Incomplete.
+    // Darkens the unexplored parts of the map, sub-tile by sub-tile, with
+    // the diagonal edges drawn as triangles.
+    CPoint aPoints[64];
+    CSize fxSize;
+    DWORD dwFlags = 0;
+
+    COLORREF rgbFog = pVidInf->ApplyBrightnessContrast(RGB(3, 1, 3)) | 0xFF000000;
+
+    if (m_pArea == NULL) {
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenMap.cpp
+        // __LINE__: 3207
+        UTIL_ASSERT(FALSE);
+        return FALSE;
+    }
+
+    CVisibilityMap* pVisibility = &(m_pArea->m_visibility);
+
+    pVidInf->GetFXSize(fxSize);
+
+    BYTE nScale = 4;
+    if (m_pPanel->m_pManager->m_bDoubleSize) {
+        nScale = 8;
+    }
+
+    INT nYOffset = 0;
+    while (rClip.top + nYOffset < rClip.bottom) {
+        INT nTop = rClip.top + nYOffset;
+        INT nBottom = min(rClip.bottom, rClip.top + fxSize.cy + nYOffset);
+        nYOffset += fxSize.cy;
+
+        INT nXOffset = 0;
+        while (rClip.left + nXOffset < rClip.right) {
+            INT nLeft = rClip.left + nXOffset;
+            INT nRight = min(rClip.right, nLeft + fxSize.cx);
+            nXOffset += fxSize.cx;
+
+            CRect rFx(0, 0, nRight - nLeft, nBottom - nTop);
+            dwFlags |= 0x101;
+
+            pVidInf->FXPrep(rFx, dwFlags, CPoint(0, 0), CPoint(0, 0), CRect(0, 0, 0, 0));
+
+            if (pVidInf->FXLock(rFx, dwFlags)) {
+                INT nStep = nScale;
+                INT nTileX = nLeft / nStep;
+                INT nTileY = nTop / nStep;
+                INT nFirstX = nTileX * nStep;
+                INT nFirstY = nTileY * nStep;
+                INT nWidth = (nStep + nRight - 1) / nStep * nStep - nFirstX;
+                INT nHeight = (nStep + nBottom - 1) / nStep * nStep - nFirstY;
+                INT nRowSkip = pVisibility->m_nWidth - nWidth / nStep;
+                if (nRowSkip < 0) {
+                    nRowSkip = 0;
+                }
+
+                if (pVisibility->m_nWidth * nStep - nFirstX < nWidth) {
+                    nWidth = static_cast<WORD>(nScale) * static_cast<WORD>(pVisibility->m_nWidth) - nFirstX;
+                }
+
+                if (pVisibility->m_nHeight * nStep - nFirstY < nHeight) {
+                    nHeight = static_cast<WORD>(nScale) * static_cast<WORD>(pVisibility->m_nHeight) - nFirstY;
+                }
+
+                LONG nTile = pVisibility->m_nWidth * nTileY + nTileX;
+
+                INT nEndY = (nHeight & 0xFFFF) - nTop + nFirstY;
+                for (INT y = nFirstY - nTop; y < nEndY; y += nStep) {
+                    INT nEndX = (nWidth & 0xFFFF) - nLeft + nFirstX;
+                    for (INT x = nFirstX - nLeft; x < nEndX; x += nStep) {
+                        BYTE nPoints = 0;
+                        BOOL bRender = TRUE;
+
+                        switch (pVisibility->GetSubTileCode(nTile) & 0xF) {
+                        case 7:
+                            for (BYTE row = 0; row < nScale; row++) {
+                                for (BYTE col = 0; col < nScale; col++) {
+                                    if (col <= row) {
+                                        aPoints[nPoints].x = x + col;
+                                        aPoints[nPoints].y = y + row;
+                                        nPoints++;
+                                    }
+                                }
+                            }
+                            break;
+                        case 11:
+                            for (INT row = 0; row < nStep; row++) {
+                                for (INT col = 0; col < nStep; col++) {
+                                    if (row + col < nStep) {
+                                        aPoints[nPoints].x = x + col;
+                                        aPoints[nPoints].y = y + row;
+                                        nPoints++;
+                                    }
+                                }
+                            }
+                            break;
+                        case 13:
+                            for (BYTE row = 0; row < nScale; row++) {
+                                for (BYTE col = 0; col < nScale; col++) {
+                                    if (col >= row) {
+                                        aPoints[nPoints].x = x + col;
+                                        aPoints[nPoints].y = y + row;
+                                        nPoints++;
+                                    }
+                                }
+                            }
+                            break;
+                        case 14:
+                            for (INT row = 0; row < nStep; row++) {
+                                for (INT col = 0; col < nStep; col++) {
+                                    if (row + col > nStep - 1) {
+                                        aPoints[nPoints].x = x + col;
+                                        aPoints[nPoints].y = y + row;
+                                        nPoints++;
+                                    }
+                                }
+                            }
+                            break;
+                        case 15:
+                            if (!pVisibility->IsTileExplored(nTile)) {
+                                for (INT row = 0; row < nStep; row++) {
+                                    for (INT col = 0; col < nStep; col++) {
+                                        aPoints[nPoints].x = x + col;
+                                        aPoints[nPoints].y = y + row;
+                                        nPoints++;
+                                    }
+                                }
+                            } else {
+                                bRender = FALSE;
+                            }
+                            break;
+                        default:
+                            bRender = FALSE;
+                            break;
+                        }
+
+                        if (bRender) {
+                            pVidInf->FXRender(aPoints, nPoints, rFx, rgbFog, FALSE);
+                        }
+
+                        nTile++;
+                    }
+
+                    nTile += nRowSkip;
+                }
+
+                pVidInf->FXUnlock(dwFlags, NULL, CPoint(0, 0));
+
+                CRect rBlt(nLeft, nTop, nRight, nBottom);
+                rBlt.OffsetRect(pt.x, pt.y);
+
+                pVidInf->FXBltToBack(rFx, pt.x + nLeft, pt.y + nTop, 0, 0, rBlt, dwFlags);
+            }
+        }
+    }
+
+    return TRUE;
 }
 
 // 0x644A50
