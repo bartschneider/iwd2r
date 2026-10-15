@@ -499,9 +499,11 @@ BOOL CVidFont::TextOutEx(INT nSurface, const CString& sString, int x, int y, con
 
     SetTextColor(hDC, rgbColor);
 
+    // NOTE: Uninline. The baseline is measured with the caller's bDemanded
+    // (0x793CF5).
     ExtTextOutA(hDC,
         x,
-        y - GetBaseLineHeight(TRUE), // NOTE: Uninline.
+        y - GetBaseLineHeight(static_cast<BOOLEAN>(bDemanded)),
         ETO_CLIPPED,
         rClip,
         sString,
@@ -515,7 +517,7 @@ BOOL CVidFont::TextOutEx(INT nSurface, const CString& sString, int x, int y, con
         pVidMode->CheckResults(hr);
     } while (hr == DDERR_SURFACELOST || hr == DDERR_WASSTILLDRAWING);
 
-    return FALSE;
+    return TRUE;
 }
 
 // 0x7A0490
