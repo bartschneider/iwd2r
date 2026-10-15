@@ -506,6 +506,8 @@ TEST_CASE("replay probe: the block both engines write", "[dump]")
     hint.field294 = 1;
     hint.sequence = 6;
     hint.timers = { { 18, 1234 } };
+    hint.direction = 6;
+    hint.newDirection = 10;
     hint.scripts = { { "-", 0 }, { "10FIRTHV", 2 }, { "-", 0 }, { "-", 0 }, { "-", 0 }, { "-", 0 }, { "00AMVR", 2 } };
     f.objects = { hint, door };
     CHECK(platform::replay_probe::Format(f)
@@ -515,7 +517,7 @@ TEST_CASE("replay probe: the block both engines write", "[dump]")
            "obj 19 1245203 type 49 pos 2354,608 here 1 list 0 seen 32 speed 1 inhibitor 0 name Door_Hint_Text_01"
            " last 1 active 1 ai 1 imprisonment 1 visible_monster 0 field_294 1 state 00000000 action 0 sequence 6"
            " queued 0 next -1 triggers 0 effects 0,0 xp 0 hp 0 dest 0,0 path timers 18:1234"
-           " scripts -:0 10FIRTHV:2 -:0 -:0 -:0 -:0 00AMVR:2\n"
+           " scripts -:0 10FIRTHV:2 -:0 -:0 -:0 -:0 00AMVR:2 dir 6:10\n"
            "obj 41 2687017 type 33 pos 2377,601 here 1 list 0 seen 0 speed 1 inhibitor 0 name AR1000_Door2\n"
            "vis 0 808100\n"
            "vis 1 ff0f10\n");

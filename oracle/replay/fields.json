@@ -594,6 +594,16 @@
     "offset": "0x1B7C",
     "type": "u8"
   },
+  "sprite_direction": {
+    "base": "CGameSprite",
+    "offset": "0x5380",
+    "type": "i16"
+  },
+  "sprite_new_direction": {
+    "base": "CGameSprite",
+    "offset": "0x537E",
+    "type": "i16"
+  },
   "sprite_script_override": {
     "base": "CGameSprite",
     "offset": "0x03F6",

@@ -334,6 +334,8 @@ void ReadProbe(platform::replay_probe::Frame* out)
                 std::memcpy(resref, script->m_cResRef.GetResRef(), RESREF_SIZE);
                 o.scripts.emplace_back(resref, static_cast<int>(script->m_caList.GetCount()));
             }
+            o.direction = sprite->m_nDirection;
+            o.newDirection = sprite->m_nNewDirection;
         } else if (o.type == CGameObject::TYPE_DOOR) {
             const CGameDoor* door = static_cast<CGameDoor*>(object);
             o.hasName = true;

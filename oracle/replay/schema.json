@@ -879,6 +879,14 @@
       "class": "CInfGame",
       "member": "m_worldTime.m_active"
     },
+    "sprite_direction": {
+      "class": "CGameSprite",
+      "member": "m_nDirection"
+    },
+    "sprite_new_direction": {
+      "class": "CGameSprite",
+      "member": "m_nNewDirection"
+    },
     "sprite_script_override": {
       "class": "CGameSprite",
       "member": "m_overrideScript"

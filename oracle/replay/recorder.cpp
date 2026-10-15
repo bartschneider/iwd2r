@@ -173,6 +173,8 @@ static_assert(kField_sprite_script_override.type == ReplayType::k_ptr, "");
 static_assert(kField_sprite_script_movement.type == ReplayType::k_ptr, "");
 static_assert(kField_script_resref.type == ReplayType::k_resref, "");
 static_assert(kField_script_blocks.type == ReplayType::k_i32, "");
+static_assert(kField_sprite_direction.type == ReplayType::k_i16, "");
+static_assert(kField_sprite_new_direction.type == ReplayType::k_i16, "");
 static_assert(kField_sprite_pos_dest.type == ReplayType::k_i32 && kField_sprite_pos_dest.count == 2, "");
 static_assert(kField_sprite_path.type == ReplayType::k_ptr, "");
 static_assert(kField_sprite_path_count.type == ReplayType::k_i16, "");
@@ -880,6 +882,9 @@ void ReadProbe(platform::replay_probe::Frame* out)
                 o.scripts.emplace_back(std::string(resref, strnlen(resref, sizeof(resref))),
                     ReadI32(At(script, kField_script_blocks), &scriptOk));
             }
+            bool directionOk = true;
+            o.direction = ReadI16(At(object, kField_sprite_direction), &directionOk);
+            o.newDirection = ReadI16(At(object, kField_sprite_new_direction), &directionOk);
         } else if (o.type == platform::replay_probe::kTypeDoor) {
             o.hasName = true;
             o.name = ReadName(At(object, kField_door_name));
