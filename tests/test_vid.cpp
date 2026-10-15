@@ -7,7 +7,9 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "CChitin.h"
+#include "CResBitmap.h"
 #include "CResCell.h"
+#include "CVidBitmap.h"
 #include "CVidCell.h"
 #include "CVidInf.h"
 #include "CVidPoly.h"
@@ -1395,4 +1397,64 @@ TEST_CASE("blt_tile8to24_and_stencil16", "[vid]")
     g_pChitin->pActiveEngine = nullptr;
     ::operator delete(tileStorage);
     ::operator delete(static_cast<void*>(engine));
+}
+
+// BltBmp8To24 (0x7CCB20) realizes the bitmap's colour table and writes each
+// pixel's three low bytes, the rows going up from the destination (the
+// bitmap's last row); BltBmp24To24 (0x7CCBF0) skips pure green and halves
+// what is under black with 0x5, a drawn pixel's fourth byte landing on the
+// next pixel's first (zero with shifts 16/8/0).
+TEST_CASE("blt_bmp8to24_and_24to24", "[vid]")
+{
+    ChitinScope scope;
+    CVidInf mode;
+    mode.m_dwRBitShift = 16;
+    mode.m_dwGBitShift = 8;
+    mode.m_dwBBitShift = 0;
+    ActiveModeScope active(&mode);
+
+    RGBQUAD colors[256];
+    for (int i = 0; i < 256; ++i) {
+        colors[i] = { static_cast<BYTE>(i), static_cast<BYTE>(255 - i), static_cast<BYTE>(i ^ 0x5A), 0 };
+    }
+    auto* resStorage = static_cast<unsigned char*>(::operator new(sizeof(CResBitmap)));
+    std::memset(resStorage, 0, sizeof(CResBitmap));
+    auto* res = reinterpret_cast<CResBitmap*>(resStorage);
+    res->bParsed = TRUE;
+    res->nColors = 256;
+    res->pColorTable = colors;
+    auto* bitmapStorage = static_cast<unsigned char*>(::operator new(sizeof(CVidBitmap)));
+    std::memset(bitmapStorage, 0, sizeof(CVidBitmap));
+    auto* bitmap = reinterpret_cast<CVidBitmap*>(bitmapStorage);
+    static_cast<CResHelper<CResBitmap, 1>*>(bitmap)->pRes = res;
+
+    // A 3x2 bitmap with a data jump of 1, into a 4-pixel-wide surface (12
+    // bytes a row), drawn up from row 1.
+    BYTE data[8] = { 10, 20, 30, 99, 40, 50, 60, 99 };
+    std::vector<BYTE> surface(12 * 2, 0x77);
+    REQUIRE(bitmap->BltBmp8To24(surface.data() + 12, 12, data, CSize(3, 2), 1, 0));
+    std::vector<BYTE> expected(12 * 2, 0x77);
+    auto put = [&](int row, int x, DWORD rgb) {
+        BYTE* p = expected.data() + row * 12 + x * 3;
+        p[0] = static_cast<BYTE>(rgb);
+        p[1] = static_cast<BYTE>(rgb >> 8);
+        p[2] = static_cast<BYTE>(rgb >> 16);
+    };
+    for (int x = 0; x < 3; ++x) {
+        put(1, x, CVidImage::rgbTempPal[data[x]]);
+        put(0, x, CVidImage::rgbTempPal[data[4 + x]]);
+    }
+    CHECK(surface == expected);
+
+    // 24 to 24, keyed with shadows: pure green, black, a colour; one row.
+    BYTE rgb[9] = { 0x00, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x11, 0x22, 0x33 };
+    std::vector<BYTE> row = { 0x40, 0x41, 0x42, 0x80, 0x82, 0x84, 0x90, 0x91, 0x92, 0x55, 0x55, 0x55 };
+    REQUIRE(bitmap->BltBmp24To24(row.data(), 12, rgb, CSize(3, 1), 0, 0x5));
+    // Pixel 0 skipped; pixel 1 halved (0x80 0x82 0x84 -> 0x40 0x41 0x42), its
+    // fourth byte (0) on pixel 2's first; pixel 2 the colour (B 0x11, G
+    // 0x22, R 0x33 as bytes 0, 1, 2), last of the row so three bytes.
+    CHECK(row == std::vector<BYTE> { 0x40, 0x41, 0x42, 0x40, 0x41, 0x42, 0x11, 0x22, 0x33, 0x55, 0x55, 0x55 });
+
+    ::operator delete(bitmapStorage);
+    ::operator delete(resStorage);
 }
