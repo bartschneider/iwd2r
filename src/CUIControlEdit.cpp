@@ -583,13 +583,6 @@ void CUIControlEdit::OnKeyDown(SHORT nKey)
     }
 }
 
-// 0x4D89E0
-void sub_4D89E0()
-{
-    // TODO: Incomplete. CImm::sub_4D89E0 in the original (the IME's composed
-    // string, Double Byte Character Support only); not ported.
-}
-
 // 0x4D8A60
 BOOL CUIControlEdit::NeedRender()
 {

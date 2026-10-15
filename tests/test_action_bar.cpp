@@ -13,14 +13,19 @@
 #include "CInfGame.h"
 #include "CParticle.h"
 #include "CRuleTables.h"
-#include "CSoundProperties.h"
 #include "CScreenCreateChar.h"
+#include "CScreenJournal.h"
 #include "CScreenWorld.h"
+#include "CSoundProperties.h"
 #include "CUIControlBase.h"
 #include "CUIControlEdit.h"
+#include "CUIControlEditMultiLine.h"
 #include "CUIControlFactory.h"
 #include "CUIControlTextDisplay.h"
+#include "CUIManager.h"
 #include "CUIPanel.h"
+#include "CUtil.h"
+#include "CWarp.h"
 #include "CWeather.h"
 #include "ScreenLayout.h"
 #include "data_view.h"
@@ -46,7 +51,6 @@
 // (CInfButtonArray), CBlood's particles, CWeather's wind and the text
 // display's items, on the engine in this process and a private view of the
 // install without saves (tests/data_view.h).
-
 
 namespace {
 
@@ -250,7 +254,6 @@ CGameSprite* PartySprite()
     pGame->GetObjectArray()->ReleaseShare(nId, CGameObjectArray::THREAD_ASYNCH, INFINITE);
     return pSprite;
 }
-
 
 // The party member of a new one-character game, selected, or NULL. The game
 // is made once per process (CInfGame::NewGame wants no characters).
@@ -953,4 +956,325 @@ TEST_CASE("edit: the input history", "[edit][data]")
         pEdit->field_874[n] = "";
     }
     pEdit->m_sText = "";
+}
+
+namespace {
+
+// Character generation's biography edit (panel 51, control 4), empty and
+// focused, with its scroll bar (control 3).
+CUIControlEditMultiLine* BiographyEdit()
+{
+    CUIPanel* pPanel = g_pBaldurChitin->m_pEngineCreateChar->GetManager()->GetPanel(51);
+    if (pPanel == NULL) {
+        return NULL;
+    }
+    CUIControlEditMultiLine* pEdit = static_cast<CUIControlEditMultiLine*>(pPanel->GetControl(4));
+    if (pEdit == NULL) {
+        return NULL;
+    }
+    pEdit->m_bActive = TRUE;
+    pEdit->SetText(CString(""));
+    pEdit->m_sText = "";
+    pEdit->field_86A = 0;
+    pEdit->field_86E = 0;
+    pEdit->field_87A = 0;
+    pEdit->field_88A = -1;
+    pEdit->field_88E = -1;
+    pEdit->m_bFocused = TRUE;
+    return pEdit;
+}
+
+// Types TEXT (letters, digits and spaces) through OnKeyDown, with no Shift.
+void TypeText(CUIControlEditMultiLine* pEdit, const char* text)
+{
+    for (const char* p = text; *p != '\0'; p++) {
+        char ch = *p;
+        if (ch >= 'a' && ch <= 'z') {
+            ch = static_cast<char>(ch - 'a' + 'A');
+        }
+        pEdit->OnKeyDown(static_cast<SHORT>(ch == ' ' ? VK_SPACE : ch));
+    }
+}
+
+// The pixel widths of the edit's lines, split at its line breaks, without
+// the space a soft break keeps at the line's end.
+std::vector<LONG> LineWidths(CUIControlEditMultiLine* pEdit)
+{
+    std::vector<LONG> widths;
+    CString sText = pEdit->m_sText;
+    INT nStart = 0;
+    while (nStart <= sText.GetLength()) {
+        INT nEnd = CUtil::FindOneOf(sText.Mid(nStart), CString("\n\r"), 0);
+        if (nEnd == -1) {
+            nEnd = sText.GetLength() - nStart;
+        }
+        CString sLine = sText.Mid(nStart, nEnd);
+        if (sLine.Right(1) == " ") {
+            sLine = sLine.Left(sLine.GetLength() - 1);
+        }
+        widths.push_back(pEdit->m_cVidFont.GetStringLength(sLine, FALSE));
+        nStart += nEnd + 1;
+    }
+    return widths;
+}
+
+}
+
+// ReConstitute (0x4D9830), through SetText (0x4E17B0) and CalculateNewLines
+// (0x4D9D00) mode 3: the text wraps at spaces into lines narrower than the
+// control less 10 pixels, with soft breaks (\r) GetText takes out again; the
+// hard breaks stay.
+TEST_CASE("multi-line edit: the text wraps into the control", "[editml][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    CUIControlEditMultiLine* pEdit = BiographyEdit();
+    REQUIRE(pEdit != NULL);
+
+    CString sText;
+    for (int n = 0; n < 60; n++) {
+        CString sWord;
+        sWord.Format("word%d ", n);
+        sText += sWord;
+    }
+    sText += "\nlast line";
+    pEdit->SetText(sText);
+
+    CHECK(pEdit->GetText() == sText);
+    CHECK(pEdit->m_sText.Find('\r') != -1);
+    CHECK(pEdit->field_87A > 2);
+
+    // Every line fits; the line count is the breaks plus one.
+    std::vector<LONG> widths = LineWidths(pEdit);
+    CHECK(static_cast<INT>(widths.size()) == pEdit->field_87A);
+    for (size_t n = 0; n < widths.size(); n++) {
+        INFO(n);
+        CHECK(widths[n] < pEdit->m_size.cx - 10);
+    }
+
+    // A soft break follows a space; the hard break stays where it was.
+    INT nBreak = pEdit->m_sText.Find('\r');
+    CHECK(pEdit->m_sText[nBreak - 1] == ' ');
+    CHECK(pEdit->m_sText.Right(10) == "\nlast line");
+
+    // Reflowing again changes nothing.
+    CString sWrapped = pEdit->m_sText;
+    pEdit->ReConstitute();
+    CHECK(pEdit->m_sText == sWrapped);
+}
+
+// OnKeyDown (0x4DB160) and CalculateNewLines (0x4D9D00) modes 1 and 2:
+// typing at the end, Backspace, the arrows, Home, End, Enter and Ctrl+Left.
+TEST_CASE("multi-line edit: typing and moving the cursor", "[editml][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    CUIControlEditMultiLine* pEdit = BiographyEdit();
+    REQUIRE(pEdit != NULL);
+    // No Shift, Ctrl or Caps Lock is down in the test engine.
+    REQUIRE_FALSE(pEdit->m_pPanel->m_pManager->m_pWarp->GetShiftKey());
+    REQUIRE_FALSE(pEdit->m_pPanel->m_pManager->m_pWarp->GetCtrlKey());
+
+    TypeText(pEdit, "hello world");
+    CHECK(pEdit->GetText() == "hello world");
+    CHECK(pEdit->field_86A == 11);
+
+    pEdit->OnKeyDown(VK_BACK);
+    CHECK(pEdit->GetText() == "hello worl");
+    CHECK(pEdit->field_86A == 10);
+
+    pEdit->OnKeyDown(VK_HOME);
+    CHECK(pEdit->field_86A == 0);
+    pEdit->OnKeyDown(VK_RIGHT);
+    pEdit->OnKeyDown(VK_RIGHT);
+    CHECK(pEdit->field_86A == 2);
+    TypeText(pEdit, "x");
+    CHECK(pEdit->GetText() == "hexllo worl");
+    CHECK(pEdit->field_86A == 3);
+    pEdit->OnKeyDown(VK_LEFT);
+    CHECK(pEdit->field_86A == 2);
+    pEdit->OnKeyDown(VK_DELETE);
+    CHECK(pEdit->GetText() == "hello worl");
+    CHECK(pEdit->field_86A == 2);
+
+    pEdit->OnKeyDown(VK_END);
+    CHECK(pEdit->field_86A == 10);
+    pEdit->OnKeyDown(VK_RETURN);
+    CHECK(pEdit->GetText() == "hello worl\n");
+    CHECK(pEdit->field_86A == 11);
+    CHECK(pEdit->field_87A == 2);
+    TypeText(pEdit, "2nd");
+    CHECK(pEdit->GetText() == "hello worl\n2nd");
+
+    // Up goes to the same column of the line above, as near as it can.
+    pEdit->OnKeyDown(VK_UP);
+    CHECK(pEdit->field_86A <= 3);
+    pEdit->OnKeyDown(VK_DOWN);
+    CHECK(pEdit->field_86A >= 11);
+
+    // Escape puts back the text the edit had when it took the focus.
+    pEdit->field_866 = "kept";
+    pEdit->OnKeyDown(VK_ESCAPE);
+    CHECK(pEdit->GetText() == "kept");
+}
+
+// Typing past the line's end breaks it (CalculateNewLines mode 1), and
+// deleting pulls the next line's words back up (mode 2).
+TEST_CASE("multi-line edit: typing and deleting reflow the lines", "[editml][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    CUIControlEditMultiLine* pEdit = BiographyEdit();
+    REQUIRE(pEdit != NULL);
+
+    std::string typed;
+    for (int n = 0; n < 40; n++) {
+        typed += "abc ";
+    }
+    TypeText(pEdit, typed.c_str());
+    CHECK(pEdit->GetText() == CString(typed.c_str()));
+    CHECK(pEdit->field_87A > 1);
+    for (LONG width : LineWidths(pEdit)) {
+        CHECK(width < pEdit->m_size.cx - 10);
+    }
+
+    INT nLines = pEdit->field_87A;
+    for (int n = 0; n < 20; n++) {
+        pEdit->OnKeyDown(VK_BACK);
+    }
+    CHECK(pEdit->GetText() == CString(typed.substr(0, typed.size() - 20).c_str()));
+    pEdit->ReConstitute();
+    CHECK(pEdit->field_87A <= nLines);
+}
+
+// OnKeyDown (0x4DB160) with Shift and Ctrl: Shift+End selects to the line's
+// end and a letter replaces the selection; Ctrl+Left and Ctrl+Right jump by
+// words; Ctrl+Home and Ctrl+End to the text's ends. Character generation
+// never reports Ctrl (its vtable's GetCtrlKey is CWarp's, 0x78E6E0, in the
+// original too), so the biography edit's manager answers to the journal
+// screen, which does, while the test runs.
+TEST_CASE("multi-line edit: selecting and word jumps", "[editml][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    CUIControlEditMultiLine* pEdit = BiographyEdit();
+    REQUIRE(pEdit != NULL);
+    CUIManager* pManager = pEdit->m_pPanel->m_pManager;
+    CWarp* pCreateChar = pManager->m_pWarp;
+    CWarp* pWarp = g_pBaldurChitin->m_pEngineJournal;
+    pManager->m_pWarp = pWarp;
+    pWarp->SetSystemKeyCtrl(FALSE);
+    pWarp->SetSystemKeyShift(FALSE);
+    pWarp->SetSystemKeyCapsLock(FALSE);
+
+    TypeText(pEdit, "one two three");
+    pEdit->OnKeyDown(VK_HOME);
+    CHECK(pEdit->field_86A == 0);
+
+    pWarp->SetSystemKeyCtrl(TRUE);
+    pEdit->OnKeyDown(VK_RIGHT);
+    CHECK(pEdit->field_86A == 4);
+    pEdit->OnKeyDown(VK_RIGHT);
+    CHECK(pEdit->field_86A == 8);
+    pEdit->OnKeyDown(VK_LEFT);
+    CHECK(pEdit->field_86A == 4);
+    pEdit->OnKeyDown(VK_END);
+    CHECK(pEdit->field_86A == 13);
+    pEdit->OnKeyDown(VK_HOME);
+    CHECK(pEdit->field_86A == 0);
+    CHECK(pEdit->field_86E == 0);
+    pWarp->SetSystemKeyCtrl(FALSE);
+
+    // Shift+Right twice, then Shift+End: the selection runs from 0 to 13.
+    pWarp->SetSystemKeyShift(TRUE);
+    pEdit->OnKeyDown(VK_RIGHT);
+    pEdit->OnKeyDown(VK_RIGHT);
+    CHECK(pEdit->field_88A == 0);
+    CHECK(pEdit->field_88E == 2);
+    pEdit->OnKeyDown(VK_END);
+    CHECK(pEdit->field_88A == 0);
+    CHECK(pEdit->field_88E == 13);
+    pWarp->SetSystemKeyShift(FALSE);
+
+    // A letter replaces the selection made forwards; the cursor stays.
+    pEdit->OnKeyDown('Z');
+    CHECK(pEdit->GetText() == "z");
+    CHECK(pEdit->field_88A == -1);
+    CHECK(pEdit->field_88E == -1);
+
+    // Without Shift an arrow drops the selection.
+    pEdit->SetText(CString("abcdef"));
+    pEdit->field_86A = 3;
+    pWarp->SetSystemKeyShift(TRUE);
+    pEdit->OnKeyDown(VK_LEFT);
+    pWarp->SetSystemKeyShift(FALSE);
+    CHECK(pEdit->field_88A == 3);
+    CHECK(pEdit->field_88E == 2);
+    pEdit->OnKeyDown(VK_LEFT);
+    CHECK(pEdit->field_88A == -1);
+    CHECK(pEdit->field_88E == -1);
+    CHECK(pEdit->field_86A == 1);
+
+    // Delete takes a selection out and the cursor goes to its start.
+    pEdit->field_88A = 1;
+    pEdit->field_88E = 4;
+    pEdit->OnKeyDown(VK_DELETE);
+    CHECK(pEdit->GetText() == "aef");
+    CHECK(pEdit->field_86A == 1);
+
+    pManager->m_pWarp = pCreateChar;
+}
+
+// OnLButtonDown (0x4DABD0) puts the cursor at the character clicked (the end
+// of the line right of its text) and starts a drag; OnMouseMove (0x4E05B0)
+// moves the selection's end with it.
+TEST_CASE("multi-line edit: clicking and dragging", "[editml][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    CUIControlEditMultiLine* pEdit = BiographyEdit();
+    REQUIRE(pEdit != NULL);
+    pEdit->SetText(CString("first line\nsecond"));
+
+    const CPoint ptText = pEdit->m_ptOrigin + pEdit->m_ptText;
+    const SHORT nFontHeight = pEdit->m_cVidFont.GetFontHeight(FALSE);
+
+    CHECK(pEdit->OnLButtonDown(ptText + CPoint(1, 1)));
+    CHECK(pEdit->field_86A == 0);
+    CHECK(pEdit->field_888 == 1);
+    CHECK(pEdit->field_88A == 0);
+    CHECK(pEdit->field_88E == 0);
+
+    // Right of the first line's text: its end, before the break.
+    CHECK(pEdit->OnLButtonDown(ptText + CPoint(pEdit->m_size.cx - 2, 1)));
+    CHECK(pEdit->field_86A == 10);
+
+    // The second line, dragged to from the first line's start.
+    CHECK(pEdit->OnLButtonDown(ptText + CPoint(1, 1)));
+    pEdit->OnMouseMove(ptText + CPoint(pEdit->m_size.cx - 2, nFontHeight + 1));
+    CHECK(pEdit->field_86A == 17);
+    CHECK(pEdit->field_88A == 0);
+    CHECK(pEdit->field_88E == 17);
+    pEdit->OnLButtonUp(ptText + CPoint(pEdit->m_size.cx - 2, nFontHeight + 1));
+    CHECK(pEdit->field_888 == 0);
 }
