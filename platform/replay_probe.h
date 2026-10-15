@@ -15,6 +15,7 @@
 //   game characters C visible_area V slots a,b,c,d,e,f portraits a,b,c,d,e,f
 //       time T active A
 //   area RESREF characters C view X,Y vis WxH size S range R ids a,b,c,d,e,f
+//   messages N [setseq TARGET:SEQUENCE:SOURCE ...]
 //   obj INDEX ID type T pos X,Y here H list L seen S speed P inhibitor I
 //       [name NAME] [last C active A ai B imprisonment M visible_monster V
 //       field_294 F state S action A sequence Q queued N next A triggers T
@@ -29,6 +30,10 @@
 //   m_nCharacters, the viewport's m_cInfinity.nCurrentX/Y, and its
 //   CVisibilityMap's m_nWidth, m_nHeight, m_nMapSize, field_E (the
 //   visibility range in squares) and m_aCharacterIds. Absent with no area.
+// - messages: the message handler's queue (CBaldurChitin::m_cMessageHandler
+//   .m_messageList), the messages the frame's AsynchronousUpdate runs: its
+//   length and, in queue order, each CMessageSetSequence's target,
+//   m_sequence and source (the original's by its vtable, 0x8488C4).
 // - obj: every live entry of the object array (CInfGame::m_cObjectArray,
 //   index 0 .. m_nMaxArrayIndex), in index order: its id, the CGameObject
 //   members m_objectType, m_pos, whether m_pArea is the area on view
@@ -164,6 +169,14 @@ struct Frame {
     uint32_t gameTime = 0;
     unsigned timeActive = 0;
     Area area;
+    int messages = 0;
+    // The queued CMessageSetSequence messages: target, sequence, source.
+    struct SetSequence {
+        int32_t target = 0;
+        unsigned sequence = 0;
+        int32_t source = 0;
+    };
+    std::vector<SetSequence> setSequences;
     std::vector<Object> objects;
 };
 
@@ -195,6 +208,13 @@ inline std::string Format(const Frame& f)
             static_cast<long>(a.ids[5]));
         out += line;
     }
+    out += "messages " + std::to_string(f.messages);
+    for (const Frame::SetSequence& m : f.setSequences) {
+        std::snprintf(line, sizeof(line), " setseq %ld:%u:%ld", static_cast<long>(m.target), m.sequence,
+            static_cast<long>(m.source));
+        out += line;
+    }
+    out += "\n";
     for (const Object& o : f.objects) {
         std::snprintf(line, sizeof(line), "obj %d %ld type %u pos %ld,%ld here %d list %u seen %d speed %u inhibitor %u",
             o.index, static_cast<long>(o.id), o.type, static_cast<long>(o.x), static_cast<long>(o.y), o.here, o.list,

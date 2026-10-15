@@ -15,6 +15,7 @@
 #include "CGameSprite.h"
 #include "CGameTimer.h"
 #include "CInfGame.h"
+#include "CMessage.h"
 #include "CScreenCreateChar.h"
 #include "CScreenWorld.h"
 #include "CTimerWorld.h"
@@ -237,6 +238,21 @@ void ReadProbe(platform::replay_probe::Frame* out)
         return;
     }
     out->screen = ScreenName(chitin);
+    // NOTE: The AI thread runs and fills the queue; the frame gate holds it
+    // at the frame's start. Diagnostic runs only.
+    const CTypedPtrList<CPtrList, CMessage*>& messages = chitin->m_cMessageHandler.m_messageList;
+    out->messages = static_cast<int>(messages.GetCount());
+    POSITION messagePos = messages.GetHeadPosition();
+    while (messagePos != NULL) {
+        CMessage* message = messages.GetNext(messagePos);
+        if (CMessageSetSequence* setSequence = dynamic_cast<CMessageSetSequence*>(message)) {
+            platform::replay_probe::Frame::SetSequence m;
+            m.target = setSequence->m_targetId;
+            m.sequence = setSequence->m_sequence;
+            m.source = setSequence->m_sourceId;
+            out->setSequences.push_back(m);
+        }
+    }
     CInfGame* game = chitin->m_pObjectGame;
     if (!game)
         return;

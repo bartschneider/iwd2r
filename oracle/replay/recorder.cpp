@@ -174,6 +174,14 @@ static_assert(kField_sprite_script_movement.type == ReplayType::k_ptr, "");
 static_assert(kField_script_resref.type == ReplayType::k_resref, "");
 static_assert(kField_script_blocks.type == ReplayType::k_i32, "");
 static_assert(kField_sprite_direction.type == ReplayType::k_i16, "");
+static_assert(kField_message_list_head.type == ReplayType::k_ptr, "");
+static_assert(kField_message_list_count.type == ReplayType::k_i32, "");
+static_assert(kField_message_target.type == ReplayType::k_i32, "");
+static_assert(kField_message_source.type == ReplayType::k_i32, "");
+static_assert(kField_message_set_sequence.type == ReplayType::k_u8, "");
+
+// CMessageSetSequence's vtable (its constructor 0x453530 stores it).
+constexpr uint32_t kVanillaSetSequenceVtable = 0x8488C4;
 static_assert(kField_sprite_new_direction.type == ReplayType::k_i16, "");
 static_assert(kField_sprite_pos_dest.type == ReplayType::k_i32 && kField_sprite_pos_dest.count == 2, "");
 static_assert(kField_sprite_path.type == ReplayType::k_ptr, "");
@@ -761,6 +769,20 @@ void ReadProbe(platform::replay_probe::Frame* out)
     }
     const uint32_t active = ReadU32(At(chitin, kField_active_engine), &ok);
     out->screen = ScreenName(chitin, active, &ok);
+    bool messagesOk = true;
+    out->messages = ReadI32(At(chitin, kField_message_list_count), &messagesOk);
+    uint32_t messageNode = ReadU32(At(chitin, kField_message_list_head), &messagesOk);
+    for (int n = 0; messagesOk && messageNode && n < kMaxListNodes; ++n) {
+        const uint32_t message = ReadU32(At(messageNode, kField_list_node_data), &messagesOk);
+        messageNode = ReadU32(At(messageNode, kField_list_node_next), &messagesOk);
+        if (message && ReadU32(message, &messagesOk) == kVanillaSetSequenceVtable) {
+            platform::replay_probe::Frame::SetSequence m;
+            m.target = ReadI32(At(message, kField_message_target), &messagesOk);
+            m.sequence = ReadU8(At(message, kField_message_set_sequence), &messagesOk);
+            m.source = ReadI32(At(message, kField_message_source), &messagesOk);
+            out->setSequences.push_back(m);
+        }
+    }
     const uint32_t game = ReadU32(At(chitin, kField_object_game), &ok);
     if (!game) {
         return;

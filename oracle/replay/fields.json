@@ -594,6 +594,31 @@
     "offset": "0x1B7C",
     "type": "u8"
   },
+  "message_list_head": {
+    "base": "CBaldurChitin",
+    "offset": "0x4984",
+    "type": "ptr"
+  },
+  "message_list_count": {
+    "base": "CBaldurChitin",
+    "offset": "0x498C",
+    "type": "i32"
+  },
+  "message_target": {
+    "base": "CMessage",
+    "offset": "0x0004",
+    "type": "i32"
+  },
+  "message_source": {
+    "base": "CMessage",
+    "offset": "0x0008",
+    "type": "i32"
+  },
+  "message_set_sequence": {
+    "base": "CMessageSetSequence",
+    "offset": "0x000C",
+    "type": "u8"
+  },
   "sprite_direction": {
     "base": "CGameSprite",
     "offset": "0x5380",

@@ -509,11 +509,14 @@ TEST_CASE("replay probe: the block both engines write", "[dump]")
     hint.direction = 6;
     hint.newDirection = 10;
     hint.scripts = { { "-", 0 }, { "10FIRTHV", 2 }, { "-", 0 }, { "-", 0 }, { "-", 0 }, { "-", 0 }, { "00AMVR", 2 } };
+    f.messages = 3;
+    f.setSequences = { { 1245203, 6, 1245203 } };
     f.objects = { hint, door };
     CHECK(platform::replay_probe::Format(f)
         == "frame 1496 screen chapter\n"
            "game characters 1 visible_area 0 slots 7143533,-1,-1,-1,-1,-1 portraits 7143533,-1,-1,-1,-1,-1 time 0 active 0\n"
            "area AR1000 characters 1 view 0,0 vis 3x2 size 6 range 14 ids 7143533,-1,-1,-1,-1,-1\n"
+           "messages 3 setseq 1245203:6:1245203\n"
            "obj 19 1245203 type 49 pos 2354,608 here 1 list 0 seen 32 speed 1 inhibitor 0 name Door_Hint_Text_01"
            " last 1 active 1 ai 1 imprisonment 1 visible_monster 0 field_294 1 state 00000000 action 0 sequence 6"
            " queued 0 next -1 triggers 0 effects 0,0 xp 0 hp 0 dest 0,0 path timers 18:1234"

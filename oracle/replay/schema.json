@@ -879,6 +879,26 @@
       "class": "CInfGame",
       "member": "m_worldTime.m_active"
     },
+    "message_list_head": {
+      "class": "CBaldurChitin",
+      "member": "m_cMessageHandler.m_messageList.m_pNodeHead"
+    },
+    "message_list_count": {
+      "class": "CBaldurChitin",
+      "member": "m_cMessageHandler.m_messageList.m_nCount"
+    },
+    "message_target": {
+      "class": "CMessage",
+      "member": "m_targetId"
+    },
+    "message_source": {
+      "class": "CMessage",
+      "member": "m_sourceId"
+    },
+    "message_set_sequence": {
+      "class": "CMessageSetSequence",
+      "member": "m_sequence"
+    },
     "sprite_direction": {
       "class": "CGameSprite",
       "member": "m_nDirection"

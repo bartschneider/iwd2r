@@ -69,6 +69,8 @@ names the first state difference. The block (format in
   `field_294` (hidden), the general state, the current action, the sequence,
   the action queue (length and head), the pending triggers, the script
   timers and the seven script levels (resref and block count);
+- `messages`: the message queue's length and its CMessageSetSequence
+  messages (target:sequence:source), the messages the frame runs;
 - `vis`: the visibility map, one hex row per map row.
 
 The recorder reads these through `fields.json` (schema.json's `x-fields`,
