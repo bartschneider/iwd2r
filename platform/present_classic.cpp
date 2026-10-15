@@ -22,6 +22,13 @@ namespace {
 
         void Shutdown() override
         {
+            if (overlayTexture_) {
+                SDL_DestroyTexture(overlayTexture_);
+                overlayTexture_ = nullptr;
+            }
+            overlayWidth_ = 0;
+            overlayHeight_ = 0;
+            overlayVersion_ = 0;
             if (texture_) {
                 SDL_DestroyTexture(texture_);
                 texture_ = nullptr;
@@ -64,6 +71,12 @@ namespace {
                     letterbox ? SDL_LOGICAL_PRESENTATION_LETTERBOX : SDL_LOGICAL_PRESENTATION_STRETCH);
                 Clear();
                 SDL_RenderTexture(renderer_, texture_, nullptr, nullptr);
+                int ow = 0;
+                int oh = 0;
+                if (SDL_GetCurrentRenderOutputSize(renderer_, &ow, &oh)) {
+                    const SDL_FRect d = WholeFrameRect(textureWidth_, textureHeight_, ow, oh, letterbox);
+                    Place(region.frame, d, region.ui);
+                }
                 return;
             }
             // A composition region: its frame rect at its scale from its
@@ -89,6 +102,54 @@ namespace {
             const SDL_FRect dst = { static_cast<float>(region.window.left) * px, static_cast<float>(region.window.top) * py,
                 src.w * s * px, src.h * s * py };
             SDL_RenderTexture(renderer_, texture_, &src, &dst);
+            Place(region.frame, dst, region.ui);
+        }
+
+        bool OutputSize(int* w, int* h) override
+        {
+            return frameReady_ && renderer_ && SDL_GetCurrentRenderOutputSize(renderer_, w, h) && *w > 0 && *h > 0;
+        }
+
+        // The overlay as one texture the output's size, premultiplied,
+        // drawn 1:1 over the whole output with the logical presentation
+        // off (and put back after: the mouse maps through it).
+        void DrawText(const text::Overlay& overlay) override
+        {
+            if (!frameReady_ || overlay.width <= 0 || overlay.height <= 0)
+                return;
+            if (!overlayTexture_ || overlayWidth_ != overlay.width || overlayHeight_ != overlay.height) {
+                if (overlayTexture_)
+                    SDL_DestroyTexture(overlayTexture_);
+                overlayTexture_ = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, overlay.width, overlay.height);
+                if (!overlayTexture_)
+                    return;
+                SDL_SetTextureBlendMode(overlayTexture_, SDL_BLENDMODE_BLEND_PREMULTIPLIED);
+                SDL_SetTextureScaleMode(overlayTexture_, SDL_SCALEMODE_NEAREST);
+                overlayWidth_ = overlay.width;
+                overlayHeight_ = overlay.height;
+                overlayVersion_ = 0;
+            }
+            if (overlayVersion_ != overlay.version) {
+                SDL_Rect r = { 0, 0, overlay.width, overlay.height };
+                if (overlayVersion_ + 1 == overlay.version) {
+                    r = { static_cast<int>(overlay.dirty.left), static_cast<int>(overlay.dirty.top),
+                        static_cast<int>(overlay.dirty.right - overlay.dirty.left), static_cast<int>(overlay.dirty.bottom - overlay.dirty.top) };
+                }
+                if (r.w > 0 && r.h > 0) {
+                    const uint32_t* first = overlay.pixels.data() + static_cast<size_t>(r.y) * static_cast<size_t>(overlay.width) + static_cast<size_t>(r.x);
+                    SDL_UpdateTexture(overlayTexture_, &r, first, overlay.width * 4);
+                }
+                overlayVersion_ = overlay.version;
+            }
+            if (overlay.empty)
+                return;
+            int lw = 0;
+            int lh = 0;
+            SDL_RendererLogicalPresentation mode = SDL_LOGICAL_PRESENTATION_DISABLED;
+            SDL_GetRenderLogicalPresentation(renderer_, &lw, &lh, &mode);
+            SDL_SetRenderLogicalPresentation(renderer_, 0, 0, SDL_LOGICAL_PRESENTATION_DISABLED);
+            SDL_RenderTexture(renderer_, overlayTexture_, nullptr, nullptr);
+            SDL_SetRenderLogicalPresentation(renderer_, lw, lh, mode);
         }
 
         void EndFrame() override
@@ -171,6 +232,25 @@ namespace {
             return true;
         }
 
+        // A region's placement in output pixels, for the text overlay.
+        void Place(const RECT& frame, const SDL_FRect& d, bool ui)
+        {
+            const float fw = static_cast<float>(frame.right - frame.left);
+            const float fh = static_cast<float>(frame.bottom - frame.top);
+            if (fw <= 0.0f || fh <= 0.0f)
+                return;
+            text::Placement p;
+            p.frame = frame;
+            p.x = d.x;
+            p.y = d.y;
+            p.sx = d.w / fw;
+            p.sy = d.h / fh;
+            p.clip = { static_cast<LONG>(SDL_floorf(d.x)), static_cast<LONG>(SDL_floorf(d.y)),
+                static_cast<LONG>(SDL_ceilf(d.x + d.w)), static_cast<LONG>(SDL_ceilf(d.y + d.h)) };
+            p.ui = ui;
+            placed.push_back(p);
+        }
+
         // Black under the first region of a frame; later regions add to it.
         void Clear()
         {
@@ -188,6 +268,10 @@ namespace {
         int textureHeight_ = 0;
         bool frameReady_ = false;
         bool cleared_ = false;
+        SDL_Texture* overlayTexture_ = nullptr;
+        int overlayWidth_ = 0;
+        int overlayHeight_ = 0;
+        uint64_t overlayVersion_ = 0;
     };
 
 }

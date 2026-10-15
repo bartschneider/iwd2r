@@ -35,3 +35,18 @@ Changes from the originals:
 
 - FSR: EASU's four `textureGather` reads are twelve `texelFetch` reads clamped to the presenter region's frame rectangle. RCAS reads EASU's output clamped to the region's pixels. Its two limiter divisions are kept off zero and a select stands in for the hardware `max` that the original relies on to drop the NaN they make where a ring channel is all 0 or all 1, so the lobe is the original's. The one arithmetic difference: the resolve uses an exact reciprocal instead of `APrxMedRcpF1` (which is 0.3% low at lobe 0), so that sharpness 0 leaves EASU's pixels unchanged. The optional denoise and alpha paths are left out.
 - NIS: the compute shader's groupshared luma tile and edge map are computed per output pixel in a fragment shader, with the same arithmetic. Only the SDR, 32-bit, non-viewport, non-NV12 path is ported. The coefficient tables are pushed as a uniform block instead of read from textures.
+
+## Scalable text
+
+`Program Options/Text Renderer=scalable` (platform/text_*.cpp) rasterizes TrueType faces with stb_truetype and embeds four SIL Open Font License faces in the executable.
+
+| Our files | From | Licence |
+|---|---|---|
+| `third_party/stb/stb_truetype.h` | stb_truetype v1.26, [nothings/stb](https://github.com/nothings/stb) at commit 6e9f34d5429cf16790ec43c9bac3f1ee4ad1f760 (SHA-256 ecd30b05e0dd4fea3a13c26810dd9e1992dc379049482c393d5a19e6b5090aab), unmodified | Public domain (Unlicense), or MIT, at the user's choice; the text is at the end of the file |
+| `third_party/fonts/CrimsonPro-Bold.ttf` | Crimson Pro Bold, [Fonthausen/CrimsonPro](https://github.com/Fonthausen/CrimsonPro) `fonts/ttf/` at commit 475ca6a0469ba2bd9c2a3bbf038957099392c04d, unmodified | SIL OFL 1.1, `third_party/fonts/OFL-CrimsonPro.txt`; Copyright 2018 The Crimson Pro Project Authors |
+| `third_party/fonts/Marcellus-Regular.ttf` | Marcellus, [google/fonts](https://github.com/google/fonts) `ofl/marcellus/`, unmodified | SIL OFL 1.1, `third_party/fonts/OFL-Marcellus.txt`; Copyright (c) 2012, Brian J. Bonislawsky DBA Astigmatic (AOETI), Reserved Font Name "Marcellus" |
+| `third_party/fonts/MarcellusSC-Regular.ttf` | Marcellus SC, [google/fonts](https://github.com/google/fonts) `ofl/marcellussc/`, unmodified | SIL OFL 1.1, `third_party/fonts/OFL-MarcellusSC.txt`; Copyright (c) 2012, Brian J. Bonislawsky DBA Astigmatic (AOETI), Reserved Font Name "Marcellus" |
+| `third_party/fonts/UncialAntiqua-Regular.ttf` | Uncial Antiqua, [google/fonts](https://github.com/google/fonts) `ofl/uncialantiqua/`, unmodified | SIL OFL 1.1, `third_party/fonts/OFL-UncialAntiqua.txt`; Copyright (c) 2011 by Brian J. Bonislawsky DBA Astigmatic (AOETI), Reserved Font Name "Uncial Antiqua" |
+
+The fonts are embedded unmodified under their original names (the OFL allows bundling them with software; the licence files travel with them in the source tree). SHA-256: CrimsonPro-Bold.ttf d8fc7d47b2b8681e7513e365764808b986999e1a78928cc58d04f237d8b8f798, Marcellus-Regular.ttf 1cf0cd10b17d35e852729962cc1ffaffed94514895972458345e2df34abb2f81, MarcellusSC-Regular.ttf 03044ab65228b0554c9a5c1e63df29d4e58a71857e212801aaf768dfd106bdf0, UncialAntiqua-Regular.ttf 33a5128b59d1c95d4f3788164f4ab3a1196f0a982263cb2cd278c47418366766.
+

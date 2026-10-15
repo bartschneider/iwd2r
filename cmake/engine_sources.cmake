@@ -14,6 +14,8 @@ set(IWD2R_ENGINE_SOURCES
     "src/render/recording.cpp"
     "src/render/recording.h"
     "src/render/render.cpp"
+    "src/render/text_capture.cpp"
+    "src/render/text_capture.h"
     "src/BalDataTypes.h"
     "src/C2DArray.cpp"
     "src/C2DArray.h"
