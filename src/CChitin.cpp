@@ -2209,6 +2209,11 @@ static void WaitForMainAIThread(CChitin* pChitin)
     }
 
     pChitin->m_bExitMainAIThread = TRUE;
+    // NOTE: Under MSVC the handle comes from _beginthread, whose CRT closes
+    // it when the thread exits: once the thread is gone the wait sees
+    // WAIT_FAILED rather than WAIT_OBJECT_0, and the loop runs out its tries
+    // at once without waiting (harmless: the thread has left). The handle
+    // value could in principle be reused by then.
     for (int nTry = 0; nTry < 200; nTry++) {
         ResumeThread(pChitin->m_hMainAIThread);
         if (WaitForSingleObject(pChitin->m_hMainAIThread, 50) == WAIT_OBJECT_0) {

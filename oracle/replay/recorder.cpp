@@ -1247,7 +1247,8 @@ extern "C" void __cdecl LogRand(const uint32_t* stack)
         }
     }
     EnterCriticalSection(&g_randLock);
-    g_randLog.insert(g_randLog.end(), record, record + kRandRecord);
+    // Mode 1 keeps its three dwords a call; mode 2 all twelve.
+    g_randLog.insert(g_randLog.end(), record, record + (g_randTraceStack ? kRandRecord : 3));
     LeaveCriticalSection(&g_randLock);
 }
 
@@ -1283,7 +1284,8 @@ void FlushRandTrace()
     if (!out) {
         return;
     }
-    for (size_t i = 0; i + kRandRecord <= calls.size(); i += kRandRecord) {
+    const size_t stride = g_randTraceStack ? kRandRecord : 3;
+    for (size_t i = 0; i + stride <= calls.size(); i += stride) {
         if (g_randTraceStack) {
             std::fprintf(out, "%u %u", calls[i], calls[i + 1]);
             std::fprintf(out, " %08x %08x", calls[i + 2], calls[i + 3]);
