@@ -5,6 +5,7 @@
 
 #include "platform/compose.h"
 #include "platform/present.h"
+#include "platform/text_overlay.h"
 
 #include <SDL3/SDL.h>
 
@@ -34,6 +35,13 @@ struct Backend {
     virtual bool BeginFrame() = 0;
     virtual void Upload(const uint32_t* xrgb, int w, int h, int pitch) = 0;
     virtual void DrawRegion(const compose::Region& region, Filter filter) = 0;
+    // The scalable text (platform/text_overlay.h): the output's size in
+    // pixels for this frame (false before BeginFrame succeeded), and the
+    // overlay blended over everything the regions drew, after the regions
+    // and before EndFrame. The overlay is output-sized; a backend uploads
+    // only overlay.dirty when it saw the previous version.
+    virtual bool OutputSize(int* w, int* h) = 0;
+    virtual void DrawText(const text::Overlay& overlay) = 0;
     // Shows the frame, unless offscreen is set. lost is set when it failed.
     virtual void EndFrame() = 0;
     // The last frame's pixels as drawn (window size), XRGB8888.
@@ -56,6 +64,10 @@ struct Backend {
     int offscreenHeight = 0;
 
     // Set by the backend.
+    // Where each region drawn this frame landed, in output pixels (DrawRegion
+    // appends; the front clears it before BeginFrame): the text overlay maps
+    // glyphs through it.
+    std::vector<text::Placement> placed;
     bool lost = false; // the last frame failed in an API call
     std::string error; // why Init failed or the frame was lost
 };

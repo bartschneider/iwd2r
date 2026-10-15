@@ -1019,8 +1019,9 @@ TEST_CASE("store: the store screen's moves from a bag to the store remove the it
         CHECK(pBag->m_lInventory.GetCount() == 0);
         CHECK(StockOf(*pStore, CResRef("00GEM02")) == stock + 1);
 
-        pScreen->m_lGroupItems.RemoveAll();
-        delete pEntry;
+        // The moves rebuild the group list (UpdateGroupItems 0x676780 frees
+        // the unselected lines, the test's among them); free what is left.
+        pScreen->DestroyGroupItems(FALSE);
         pScreen->m_pStore = pOldStore;
         pScreen->m_pBag = pOldBag;
         delete pStore;

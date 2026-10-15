@@ -1,0 +1,40 @@
+# Text-heavy screens for comparing the bitmap fonts with the scalable text
+# (Program Options/Text Renderer): run it twice, with and without
+#   --set "Program Options/Text Renderer=scalable" --shot-presented
+# and compare the *-presented.png screenshots. Coordinates for
+# Resolution=800 (the play.py default; at 1600 with Scale 2 the engine's
+# screen is 800x600 too).
+wait 60
+# The main menu's captions (NORMAL).
+shot 01_start
+# Options (645,410), then Graphics (612,81): labels and help text.
+click 645 410
+wait 30
+click 612 81
+wait 30
+shot 02_graphics
+# Cancel (548,350), Return (612,350).
+click 548 350
+wait 30
+click 612 350
+wait 30
+# New Game (645,262), Done (537,562) with New Party selected, then the first
+# slot's Create Character (530,100).
+click 645 262
+wait 90
+click 537 562
+wait 60
+shot 03_party_formation
+click 530 100
+wait 90
+# Character generation's main menu and its description panel.
+shot 04_chargen
+# Gender (400,128), then Female (400,321): the gender page and its
+# description text.
+click 400 128
+wait 30
+click 400 321
+wait 20
+shot 05_gender
+# WM_CLOSE: the quit confirmation takes its default.
+quit

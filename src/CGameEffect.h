@@ -1598,7 +1598,8 @@ public:
 class CGameEffectApplyEffect : public CGameEffect {
 public:
     CGameEffectApplyEffect(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
-    CGameEffect* Copy() override;    BOOL ApplyEffect(CGameSprite* pSprite) override;
+    CGameEffect* Copy() override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;
 };
 
 class CGameEffectSelectiveToHitBonus : public CGameEffect {
@@ -1632,13 +1633,15 @@ public:
 class CGameEffectApplyEffectEquipItem : public CGameEffect {
 public:
     CGameEffectApplyEffectEquipItem(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
-    CGameEffect* Copy() override;    BOOL ApplyEffect(CGameSprite* pSprite) override;
+    CGameEffect* Copy() override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;
 };
 
 class CGameEffectApplyEffectEquipItemType : public CGameEffect {
 public:
     CGameEffectApplyEffectEquipItemType(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
-    CGameEffect* Copy() override;    BOOL ApplyEffect(CGameSprite* pSprite) override;
+    CGameEffect* Copy() override;
+    BOOL ApplyEffect(CGameSprite* pSprite) override;
 };
 
 class CGameEffectSetDoNoJump : public CGameEffect {
@@ -2071,10 +2074,12 @@ public:
     /* 0020 */ int field_20;
     /* 0024 */ int field_24;
     /* 0028 */ unsigned char field_28;
-    /* 0029 */ RESREF field_29;
-    /* 0031 */ unsigned char field_31;
-    /* 0032 */ unsigned char field_32;
-    /* 0033 */ unsigned char field_33;
+    // The source resref, strcpy'd from CResRef::GetResRefStr (up to eight
+    // characters and the NUL) at 0x4AF610, 0x4B5790, 0x4B5E50 and 0x4B6620.
+    // Ten bytes: the copies (0x4C1F95, 0x4C24C5, 0x4C2852, 0x4C29EE) move
+    // 0x29..0x32 as one member (two dwords and a word) and never 0x33, the
+    // padding before 0x34.
+    /* 0029 */ unsigned char field_29[10];
 };
 
 class CPersistantEffect84C4B4 : public CPersistantEffect84C4A4 {

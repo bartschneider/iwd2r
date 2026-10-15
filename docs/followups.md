@@ -157,9 +157,20 @@ The guards in `src/render/api.h` leave these for the renderer that first draws t
 - Shroud of Flame's EffSoF1/EffSoF2 path (index >= 1) has no test yet; it is reachable now that `StartSpriteEffect` asserts only on a failed allocation.
 - `Ftol` is duplicated in src/CProjectileSingleTarget.cpp and src/CAIGroup.cpp.
 
-## Crisp text at high resolutions (required)
+## Scalable text (after `Text Renderer=scalable`)
 
-- The user requires readable, crisp text at desktop resolutions; upscaling the original's bitmap fonts (`Scale` 2 or 3, even with the `sharp` filter) is not good enough. Plan: draw text with a scalable font behind an option (the original's bitmap fonts stay the default look), sized from the UI scale. To design before building: which font (a licence-clean face close to the original's), where text is drawn (the CVidFont/BAM font paths the screens call), how line breaks and widths stay identical so layouts and replays do not change, and how it composes with the presenter's UI regions. Full AI-upscaled HD art (the HD classic project) stays a later, separate project.
+The crisp-text requirement is met by `Program Options/Text Renderer=scalable` (spec docs/superpowers/specs/2026-10-14-iwd2r-scalable-text-design.md, README's display section). What it leaves:
+
+- **Tooltips keep the bitmap font.** `CInfToolTip::RenderText` draws through `CVidInf::FXTextOut` into the FX surface, which `FXBltToBack` composites onto the back buffer at a place the call does not carry. The capture declines it (stderr says so once). Capturing it needs the FX begin-group and end-group calls (the FX groups item under the render API) or a notification at `FXBltToBack` with the FX rectangle and its destination, with evidence; the tags would then be written into the FX surface (only where the pixel is not the colour key) and the glyphs moved by the blit's offset.
+- **Proportional fit.** Each TrueType glyph is centred in its bitmap cell (narrowed when wider), so spacing follows the bitmap font's advances: words look more widely spaced than the face's own metrics. A later option could fit each run's glyphs proportionally inside the same total width.
+- **The pointer and the glyph's reach.** Inside its cell a glyph shows only where its tag survives, so the pointer and anything drawn over it hide it exactly; the part of a TrueType glyph above or below its bitmap cell (an i's dot, a descender) is drawn wherever the draw's clip allows and can cover the pointer there.
+- **Golden frames at Scale 3.** `text_golden_presented_frames` and `text_golden_presented_frames_gpu` pin the presented main menu, character generation and gender page at Scale 2 per machine in `<IWD2R_HOME>/text-golden` (`name hash` lines; with the file present a missing or different hash fails). Headless runs present at most the dummy and offscreen displays' 1024x768 (the engine fits its window to the desktop), so Scale 2 is shown as a 1.28x stretch and Scale 3 is out of reach; it needs a larger virtual display. The overlay's own scale handling is covered at 1-4 by `tests/test_text_overlay.cpp`. A dialog golden needs `scenarios/pending/world_entry.txt` to move out of pending.
+- **The overlay is recomposed whole when any glyph changes.** Static screens cost nothing (the composed image is reused), but a screen with a lot of text and something changing every frame (hit points over moving creatures) recomposes every visible glyph each frame on the CPU. Tile the overlay and recompose only the tiles whose glyphs changed if a profile shows it.
+- **Translucent and brightest blends keep the tag.** `CVidCell::sub_7D0950` (0x7D0950, translucent) and `sub_7D1190` (0x7D1190, brightest) write RGB and keep the destination's X byte, so a translucent sprite or effect drawn over text leaves the tag and the scalable text shows crisp on top of it, where the bitmap text would show through dimmed.
+- **The layer's bookkeeping.** A glyph completely hidden under the pointer for longer than the forget delay (1800 presents, only while the layer holds more than 4096 glyphs) is dropped; its tags come back with the pointer's save-under but nothing draws them until the control redraws. Keeping glyphs whose tag is still in the back buffer does not help (the tags are in the save-under surface then). `Layer::Add` scans every live glyph for overlaps (O(n) per character) and every present scans every glyph's box; a grid of glyphs by cell would make both local.
+- **Out-of-cell parts ignore tags.** The part of a TrueType glyph outside its bitmap cell (an i's dot, a descender) is drawn wherever the draw's clip allows, without a tag test, so it can paint over whatever covers that spot (the pointer, a panel drawn later).
+- **TOOLFONT draws with Crimson Pro**, the body face, not the sans the spec suggested for small labels: a sans looked out of place next to the bitmap serif in the side-by-side screenshots.
+- **Glyphs are centred in their cell** (the advance's slack split on both sides), not left-aligned as the spec says: the same spacing between neighbours, half the slack less at a run's start.
 
 ## Character, spellbook and options screens (from project 3, milestone 5, screens-char)
 
@@ -168,3 +179,17 @@ The guards in `src/render/api.h` leave these for the renderer that first draws t
 - `CGameSprite::GetAC` is a stub returning 0, so the character screen shows AC 0 (milestone 3 combat).
 - `CGameSprite.h` lacks `BYTE field_7282[11]`, so level-up always rolls hit points; the original skips that roll (and its `rand()`) in one rare drained-level case. No test pins level-up's rand count.
 - `CScreenCharacter::OnKeyDown` calls its own `OnLeftPanelButtonClick` where the original calls the active engine's.
+
+## Inventory, containers and stores (from project 3, milestone 5, screens-items)
+
+- `src/CInfGameItemUse.*` holds eight CInfGame functions as free functions, a temporary seam while another stream owned `CInfGame.*`. Fold them into CInfGame members once that stream merges.
+- TODOs left in the item-use paths: `CGameSprite::CheckQuickLists`, `CheckIfUsedUp` and 0x723830 are not called yet.
+- The container slot handler 0x6957E0 needs `SwapItemGround` before dropping onto the ground works as in the original.
+- Container, bag and temple buy paths have no tests yet.
+- The area-move test uses AR1001 because loading AR3000 aborted (see the persistent-effect resref fix).
+
+## Persistent effects and spawn lists (from project 3, milestone 3, crashfix-regen)
+
+- `CGameEffectDisease::ApplyEffect` uses an uninitialised `pEffect` after `UTIL_ASSERT(FALSE)` for an unknown mode. This is the original's bug, kept as is.
+- Running several engine test cases in one `iwd2r_tests` process can crash at random, because each test file starts its own engine (seen with `[effects]` across test_effects and test_effects_iwd, and with the movement rounding test). ctest and the gate run one process per case, so they are unaffected.
+- The AR1001 stand-in in the area-move test (screens-items) can go back to AR3000 now that AR3000 loads.

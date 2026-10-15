@@ -12,7 +12,9 @@
 #include "ScreenLayout.h"
 #include "platform/data_dir.h"
 #include "platform/present.h"
+#include "platform/text_layer.h"
 #include "platform/window.h"
+#include "render/text_capture.h"
 
 // 0x421820 was IsSupportedOS, removed with the OS version check.
 
@@ -93,6 +95,38 @@ int iwd2r_main(int argc, char** argv)
     platform::present::SetBackend(backend);
     platform::present::SetFilter(scaleFilter);
     platform::present::SetSharpness(sharpen);
+
+    // Program Options/Text Renderer (classic, the default, or scalable) and
+    // Text Font Scale (0.5 to 2, default 1): scalable draws the text with
+    // TrueType faces at window resolution over the presented frame
+    // (render/text_capture.h); classic installs nothing and every byte drawn
+    // is the original's. Ctrl+Shift+T switches between them while playing.
+    char textRenderer[32];
+    char textFontScale[32];
+    GetPrivateProfileStringA("Program Options", "Text Renderer", "classic", textRenderer, sizeof(textRenderer), ".\\Icewind2.ini");
+    GetPrivateProfileStringA("Program Options", "Text Font Scale", "", textFontScale, sizeof(textFontScale), ".\\Icewind2.ini");
+    bool scalableText = false;
+    if (!platform::text::ParseRenderer(textRenderer, &scalableText)) {
+        std::cerr << "iwd2r: Text Renderer=" << textRenderer << " is not classic or scalable; using classic" << std::endl;
+    }
+    float fontScale = 1.0f;
+    if (textFontScale[0] != '\0' && !platform::text::ParseFontScale(textFontScale, &fontScale)) {
+        std::cerr << "iwd2r: Text Font Scale=" << textFontScale << " is not a number from 0.5 to 2; using 1" << std::endl;
+        fontScale = 1.0f;
+    }
+    platform::text::SetFontScale(fontScale);
+    if (scalableText) {
+        render::text_capture::Install();
+    }
+    platform::text::SetToggleHandler(render::text_capture::Toggle);
+    // The capture belongs to this run (tests run the engine in-process).
+    struct TextCaptureGuard {
+        ~TextCaptureGuard()
+        {
+            platform::text::SetToggleHandler(nullptr);
+            render::text_capture::Uninstall();
+        }
+    } textCaptureGuard;
 
     // Ruling R27: the window's client area is the engine's screen, so
     // GetSystemMetrics(SM_CXSCREEN) must report the game resolution before
