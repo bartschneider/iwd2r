@@ -1,8 +1,11 @@
 #include "CGameAIBase.h"
 
+#include "C2DArray.h"
+#include "CAIConditionResponse.h"
 #include "CAIResponse.h"
 #include "CAIScript.h"
 #include "CAITrigger.h"
+#include "CAIUtil.h"
 #include "CBaldurChitin.h"
 #include "CBaldurProjector.h"
 #include "CGameArea.h"
@@ -17,20 +20,17 @@
 #include "CGameTimer.h"
 #include "CGameTrigger.h"
 #include "CInfGame.h"
-#include "CScreenCharacter.h"
-#include "CScreenWorld.h"
-#include "CSpell.h"
-#include "CTimerWorld.h"
-#include "CAIConditionResponse.h"
-#include "CAIUtil.h"
 #include "CMessage.h"
 #include "CPathSearch.h"
 #include "CScreenChapter.h"
+#include "CScreenCharacter.h"
+#include "CScreenWorld.h"
 #include "CSound.h"
-#include "C2DArray.h"
-#include "CWeather.h"
+#include "CSpell.h"
+#include "CTimerWorld.h"
 #include "CUtil.h"
 #include "CVariableHash.h"
+#include "CWeather.h"
 
 // 0x8485C4
 const SHORT CGameAIBase::ACTION_DONE = -1;
@@ -859,8 +859,38 @@ SHORT CGameAIBase::ExecuteAction()
         // TODO: 0x450B52-0x450BD9 not ported.
         goto done;
     case 238:
-        // AddXPVar
-        // TODO: 0x4508CE-0x450B52 not ported.
+        // AddXPVar (0x4508CE-0x450B52)
+        {
+            C2DArray tExperience;
+            tExperience.Load(CResRef("exptable"));
+
+            CString sLabel = m_curAction.GetString1();
+            CPoint ptLocation;
+            if (!tExperience.Find(sLabel, ptLocation, TRUE)) {
+                returnValue = ACTION_ERROR;
+                goto done;
+            }
+
+            // The row label is found with x = -1; the value is in column 0
+            // (`mov [esp+0x70], ebp` at 0x4509FE).
+            ptLocation.x = 0;
+
+            if (m_curAction.m_specificID != 0) {
+                STR_RES strRes;
+                if (g_pBaldurChitin->GetTlkTable().Fetch(m_curAction.m_specificID, strRes)) {
+                    g_pBaldurChitin->GetBaldurMessage()->DisplayText(CString(""),
+                        strRes.szText,
+                        RGB(200, 255, 200),
+                        RGB(200, 255, 200),
+                        -1,
+                        m_id,
+                        m_id);
+                }
+            }
+
+            g_pBaldurChitin->GetObjectGame()->AddExperienceParty(tExperience.GetAtLong(ptLocation), FALSE, FALSE);
+            returnValue = ACTION_DONE;
+        }
         goto done;
     case 241:
         // FloatMessage
@@ -962,8 +992,12 @@ SHORT CGameAIBase::ExecuteAction()
         // TODO: 0x4511D5-0x451282 not ported.
         goto done;
     case 275:
-        // SaveGame
-        // TODO: 0x451282-0x4512E9 not ported.
+        // SaveGame (0x451282-0x4512E9)
+        if (!g_pChitin->cNetwork.GetSessionOpen() || g_pChitin->cNetwork.GetSessionHosting() == TRUE) {
+            message = new CMessageSaveGame(m_curAction.GetSpecifics(), m_id, m_id);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        }
+        returnValue = ACTION_DONE;
         goto done;
     case 278:
         // DropInventoryEXExclude
@@ -3763,6 +3797,10 @@ BOOL CGameAIBase::EvaluateStatusTrigger(const CAITrigger& trigger)
     case 0x4023:
         // True
         return TRUE;
+    case 0x40E4:
+        // IsTeamBitOn (0x455E44-0x455E58)
+        bResult = triggerCopy.m_specificID & sub_45B6D0();
+        break;
     case 0x4030:
     case 0x40C8:
         // False, HasInnateAbility
@@ -4232,4 +4270,3 @@ BOOL CGameAIBase::SeeTarget(CGameObject* pTarget, BOOL bSeeDead)
 
     return TRUE;
 }
-

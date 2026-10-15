@@ -12,9 +12,11 @@
 #include "CGameDoor.h"
 #include "CGameObjectArray.h"
 #include "CGameSprite.h"
+#include "CGameTimer.h"
 #include "CInfGame.h"
 #include "CScreenCreateChar.h"
 #include "CScreenWorld.h"
+#include "CTimerWorld.h"
 #include "platform/replay.h"
 #include "platform/state_dump.h"
 
@@ -229,14 +231,18 @@ void ReadWorld(CBaldurChitin* chitin, World* out)
 void ReadProbe(platform::replay_probe::Frame* out)
 {
     CBaldurChitin* chitin = g_pBaldurChitin;
-    if (!chitin)
+    if (!chitin) {
+        out->screen = "none";
         return;
+    }
     out->screen = ScreenName(chitin);
     CInfGame* game = chitin->m_pObjectGame;
     if (!game)
         return;
     out->characters = game->m_nCharacters;
     out->visibleArea = game->m_visibleArea;
+    out->gameTime = game->m_worldTime.m_gameTime;
+    out->timeActive = game->m_worldTime.m_active;
     for (int i = 0; i < 6; ++i) {
         out->slots[i] = game->m_characters[i];
         out->portraits[i] = game->m_characterPortraits[i];
@@ -296,6 +302,19 @@ void ReadProbe(platform::replay_probe::Frame* out)
             if (!sprite->m_queuedActions.IsEmpty())
                 o.queuedHead = sprite->m_queuedActions.GetHead()->m_actionID;
             o.triggers = sprite->m_pendingTriggers.GetCount();
+            o.timedEffects = sprite->m_timedEffectList.GetCount();
+            o.equipedEffects = sprite->m_equipedEffectList.GetCount();
+            o.xp = sprite->m_baseStats.m_xp;
+            o.hp = sprite->m_baseStats.m_hitPoints;
+            o.destX = sprite->m_posDest.x;
+            o.destY = sprite->m_posDest.y;
+            for (SHORT n = 0; sprite->m_pPath != NULL && n < sprite->m_nPath && n < 64; n++)
+                o.path.push_back(sprite->m_pPath[n]);
+            POSITION pos = sprite->m_timers.GetHeadPosition();
+            while (pos != NULL) {
+                const CGameTimer* timer = sprite->m_timers.GetNext(pos);
+                o.timers.emplace_back(timer->m_id, timer->m_time);
+            }
         } else if (o.type == CGameObject::TYPE_DOOR) {
             const CGameDoor* door = static_cast<CGameDoor*>(object);
             o.hasName = true;
