@@ -160,3 +160,11 @@ The guards in `src/render/api.h` leave these for the renderer that first draws t
 ## Crisp text at high resolutions (required)
 
 - The user requires readable, crisp text at desktop resolutions; upscaling the original's bitmap fonts (`Scale` 2 or 3, even with the `sharp` filter) is not good enough. Plan: draw text with a scalable font behind an option (the original's bitmap fonts stay the default look), sized from the UI scale. To design before building: which font (a licence-clean face close to the original's), where text is drawn (the CVidFont/BAM font paths the screens call), how line breaks and widths stay identical so layouts and replays do not change, and how it composes with the presenter's UI regions. Full AI-upscaled HD art (the HD classic project) stays a later, separate project.
+
+## Character, spellbook and options screens (from project 3, milestone 5, screens-char)
+
+- Blocked stubs in src/CScreenCharacter.cpp: `UpdateEquipmentInformation` 0x5DE2C0 and the character text export `sub_5E4560` need CGameSprite 0x723EA0, 0x73CF10 and 0x73D080, CRuleTables 0x547020 and CItem 0x4E9840; `CheckDropSlot` 0x5E6A30 needs CInfGame 0x5B7850, 0x5B81C0 and 0x5B9C60 (until then a level-up never drops items a character can no longer use). Their comments should name those blockers.
+- `CGameSprite::CheckQuickLists` 0x71ABA0 is not ported: forgetting a spell and level-up skip it, so quick slots keep a forgotten spell until rebuilt.
+- `CGameSprite::GetAC` is a stub returning 0, so the character screen shows AC 0 (milestone 3 combat).
+- `CGameSprite.h` lacks `BYTE field_7282[11]`, so level-up always rolls hit points; the original skips that roll (and its `rand()`) in one rare drained-level case. No test pins level-up's rand count.
+- `CScreenCharacter::OnKeyDown` calls its own `OnLeftPanelButtonClick` where the original calls the active engine's.
