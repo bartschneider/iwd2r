@@ -150,6 +150,8 @@ BOOL CVidMode::ClipLine(INT& nXFrom, INT& nYFrom, INT& nXTo, INT& nYTo, const CR
     INT x;
     INT y;
 
+    // The right edge is tested before the left one (0x7959E4), which only
+    // matters for a rectangle whose left is past its right.
     while (1) {
         memset(&fromCode, 0, sizeof(fromCode));
         memset(&toCode, 0, sizeof(toCode));
@@ -162,12 +164,12 @@ BOOL CVidMode::ClipLine(INT& nXFrom, INT& nYFrom, INT& nXTo, INT& nYTo, const CR
             fromCode.all += 4;
         }
 
-        if (nXFrom < rClip.left) {
-            fromCode.left |= 1;
-            fromCode.all += 1;
-        } else if (nXFrom > rClip.right) {
+        if (nXFrom > rClip.right) {
             fromCode.right |= 1;
             fromCode.all += 2;
+        } else if (nXFrom < rClip.left) {
+            fromCode.left |= 1;
+            fromCode.all += 1;
         }
 
         if (nYTo < rClip.top) {
@@ -178,12 +180,12 @@ BOOL CVidMode::ClipLine(INT& nXFrom, INT& nYFrom, INT& nXTo, INT& nYTo, const CR
             toCode.all += 4;
         }
 
-        if (nXTo < rClip.left) {
-            toCode.left |= 1;
-            toCode.all += 1;
-        } else if (nXTo > rClip.right) {
+        if (nXTo > rClip.right) {
             toCode.right |= 1;
             toCode.all += 2;
+        } else if (nXTo < rClip.left) {
+            toCode.left |= 1;
+            toCode.all += 1;
         }
 
         if (fromCode.all == 0 && toCode.all == 0) {
