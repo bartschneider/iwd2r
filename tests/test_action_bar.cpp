@@ -1278,3 +1278,63 @@ TEST_CASE("multi-line edit: clicking and dragging", "[editml][data]")
     pEdit->OnLButtonUp(ptText + CPoint(pEdit->m_size.cx - 2, nFontHeight + 1));
     CHECK(pEdit->field_888 == 0);
 }
+
+// The IME's composition (Double Byte Character Support): with the IME on
+// (CImm::field_128), a key puts the composed string (CImm::sub_4D89E0, which
+// hands it over and clears it) in at the cursor instead of the key's
+// character. CUIControlEdit::OnKeyDown (0x4D7130) needs the option on too;
+// CUIControlEditMultiLine::OnKeyDown (0x4DB160) only the IME. Off in a normal
+// run; Linux has no IME, so the composition is set by hand.
+TEST_CASE("edit: the IME's composition goes in at the cursor", "[edit][editml][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    if (SelectedPartyMember() == NULL) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+
+    const int nDoubleByte = g_pBaldurChitin->field_1A0;
+    g_pBaldurChitin->field_1A0 = 1;
+    g_pBaldurChitin->cImm.field_128 = 1;
+
+    CUIPanel* pPanel = g_pBaldurChitin->m_pEngineWorld->GetManager()->GetPanel(6);
+    REQUIRE(pPanel != NULL);
+    CUIControlEdit* pEdit = static_cast<CUIControlEdit*>(pPanel->GetControl(0));
+    REQUIRE(pEdit != NULL);
+    pEdit->m_sText = "abcd";
+    pEdit->m_nCursorIndex = 2;
+    g_pBaldurChitin->cImm.field_130 = "XY";
+    pEdit->OnKeyDown('Q');
+    CHECK(pEdit->m_sText == "abXYcd");
+    CHECK(pEdit->m_nCursorIndex == 4);
+    CHECK(g_pBaldurChitin->cImm.field_130 == "");
+
+    // With no double-byte characters Backspace and Left still go one
+    // character.
+    g_pBaldurChitin->cImm.field_128 = 0;
+    pEdit->OnKeyDown(VK_BACK);
+    CHECK(pEdit->m_sText == "abXcd");
+    CHECK(pEdit->m_nCursorIndex == 3);
+    pEdit->OnKeyDown(VK_LEFT);
+    CHECK(pEdit->m_nCursorIndex == 2);
+    pEdit->m_sText = "";
+
+    CUIControlEditMultiLine* pMulti = BiographyEdit();
+    REQUIRE(pMulti != NULL);
+    pMulti->SetText(CString("hello"));
+    pMulti->field_86A = 5;
+    g_pBaldurChitin->cImm.field_128 = 1;
+    g_pBaldurChitin->cImm.field_130 = " there";
+    pMulti->OnKeyDown('Q');
+    CHECK(pMulti->GetText() == "hello there");
+    CHECK(pMulti->field_86A == 11);
+
+    g_pBaldurChitin->cImm.field_128 = 0;
+    g_pBaldurChitin->cImm.field_130 = "";
+    g_pBaldurChitin->field_1A0 = nDoubleByte;
+}
