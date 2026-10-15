@@ -692,7 +692,10 @@ CAIAction CGameSprite::m_aiDoAction;
 
 // 0x6EF990
 CGameSprite::CGameSprite(BYTE* pCreature, LONG creatureSize, int a3, WORD type, DWORD expirationTime, WORD huntingRange, WORD followRange, DWORD timeOfDayVisible, CPoint startPos, WORD facing)
-    : m_portraitIconVidCell(CResRef("STATES"), g_pBaldurChitin->field_4A28)
+    // The sprite effects' palettes are range palettes (0x6EFDD5, 0x6EFDFC).
+    : m_spriteEffectPalette(CVidPalette::TYPE_RANGE)
+    , m_spriteSplashPalette(CVidPalette::TYPE_RANGE)
+    , m_portraitIconVidCell(CResRef("STATES"), g_pBaldurChitin->field_4A28)
 {
     int index;
 
@@ -15335,7 +15338,9 @@ void CGameSprite::FeedBack(WORD nFeedBackId, LONG a3, LONG a4, LONG a5, LONG a6,
 
             CString sName;
             STR_RES strRes2;
-            if (a6 >= -7 && a6 != -1) {
+            // NOTE: The original compares the name as unsigned (0x735E9F):
+            // only -7 to -2, a party slot, is a character.
+            if (static_cast<DWORD>(a6) >= static_cast<DWORD>(-7) && a6 != -1) {
                 LONG nCharacterId = g_pBaldurChitin->GetObjectGame()->GetCharacterSlot(-2 - a6);
 
                 CGameSprite* pSprite;
