@@ -15,7 +15,9 @@ CVidMosaic::CVidMosaic()
 // 0x7B0B20
 CVidMosaic::~CVidMosaic()
 {
-    // TODO: Incomplete.
+    // NOTE: The original's body is the two base destructors inlined:
+    // CResHelper's (cancel a pending request, release the resource) and
+    // CVidImage's (the blend table count); ours runs them after this body.
 }
 
 // 0x7B0BF0
