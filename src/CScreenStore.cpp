@@ -7297,9 +7297,121 @@ void CUIControlButtonStoreStoreItem::OnRButtonClick(CPoint pt)
 // 0x6817A0
 BOOL CUIControlButtonStoreStoreItem::Render(BOOL bForce)
 {
-    // TODO: Incomplete.
+    CResRef cResIcon;
 
-    return FALSE;
+    if (!m_bActive && !m_bInactiveRender) {
+        return FALSE;
+    }
+
+    if (m_nRenderCount == 0 && !bForce) {
+        return FALSE;
+    }
+
+    if (!CUIControlButton3State::Render(bForce)) {
+        return FALSE;
+    }
+
+    if (m_item.cResRef == "") {
+        return TRUE;
+    }
+
+    cResIcon = m_item.GetItemIcon();
+
+    WORD wCount = m_item.GetUsageCount(0);
+    if (m_item.GetMaxStackable() <= 1) {
+        wCount = 0;
+    }
+
+    CScreenStore* pStore = g_pBaldurChitin->m_pEngineStore;
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenStore.cpp
+    // __LINE__: 11666
+    UTIL_ASSERT(pStore != NULL);
+
+    CScreenStoreItem cItem;
+    pStore->GetStoreItem(pStore->m_nTopStoreItem + m_nID - 5, cItem);
+
+    WORD wSecondCount = static_cast<WORD>(cItem.m_nCount);
+    if (wSecondCount < 2) {
+        wSecondCount = 0;
+    }
+
+    CRect rControlFrame(m_pPanel->m_ptOrigin + m_ptOrigin, m_size);
+    if (m_bPressed) {
+        rControlFrame.OffsetRect(field_63E, field_642);
+    }
+
+    CPoint pos = rControlFrame.TopLeft();
+
+    CRect rClip;
+    rClip.IntersectRect(rControlFrame, m_rDirty);
+
+    CIcon::RenderIcon(0,
+        pos,
+        m_size,
+        rClip,
+        cResIcon,
+        m_pPanel->m_pManager->m_bDoubleSize,
+        m_bEnabled ? 0 : 0x1,
+        wCount,
+        FALSE,
+        wSecondCount,
+        FALSE,
+        0);
+
+    INT x = m_pPanel->m_ptOrigin.x + m_ptOrigin.x;
+    INT y = m_pPanel->m_ptOrigin.y + m_ptOrigin.y;
+
+    if ((m_item.m_flags & 0x1) == 0) {
+        // Not identified.
+        CVidCell vcTint(CResRef("STORTIN2"), m_pPanel->m_pManager->m_bDoubleSize);
+        vcTint.Render(0, x, y, rClip, NULL, 0, 2, 0xC0);
+    } else if (!m_bValid) {
+        CVidCell vcTint(CResRef("STORTINT"), m_pPanel->m_pManager->m_bDoubleSize);
+        vcTint.Render(0, x, y, rClip, NULL, 0, 2, 0xC0);
+    } else {
+        CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenStore.cpp
+        // __LINE__: 11719
+        UTIL_ASSERT(pGame != NULL);
+
+        // NOTE: Uninline.
+        LONG nCharacterId = pGame->GetCharacterId(static_cast<SHORT>(pStore->GetSelectedCharacter()));
+        if (nCharacterId != CGameObjectArray::INVALID_INDEX) {
+            CGameSprite* pSprite;
+
+            BYTE rc;
+            do {
+                rc = pGame->GetObjectArray()->GetShare(nCharacterId,
+                    CGameObjectArray::THREAD_1,
+                    reinterpret_cast<CGameObject**>(&pSprite),
+                    INFINITE);
+            } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+            if (rc == CGameObjectArray::SUCCESS) {
+                INT nUsable = pGame->CheckItemUsable(pSprite, &m_item);
+                if (nUsable == 2) {
+                    CVidCell vcTint(CResRef("STORTIN4"), m_pPanel->m_pManager->m_bDoubleSize);
+                    vcTint.Render(0, x, y, rClip, NULL, 0, 2, 0xC0);
+                } else if (nUsable == 0) {
+                    CVidCell vcTint(CResRef("STORTINT"), m_pPanel->m_pManager->m_bDoubleSize);
+                    vcTint.Render(0, x, y, rClip, NULL, 0, 2, 0xC0);
+                }
+
+                pGame->GetObjectArray()->ReleaseShare(nCharacterId,
+                    CGameObjectArray::THREAD_1,
+                    INFINITE);
+            }
+        }
+    }
+
+    if ((m_item.m_flags & 0x8) != 0 && (m_item.m_flags & 0x1) != 0) {
+        CVidCell vcTint(CResRef("STORTIN3"), m_pPanel->m_pManager->m_bDoubleSize);
+        vcTint.Render(0, x, y, rClip, NULL, 0, 2, 0xC0);
+    }
+
+    return TRUE;
 }
 
 // -----------------------------------------------------------------------------
@@ -7480,9 +7592,123 @@ void CUIControlButtonStoreGroupItem::OnRButtonClick(CPoint pt)
 // 0x6822F0
 BOOL CUIControlButtonStoreGroupItem::Render(BOOL bForce)
 {
-    // TODO: Incomplete.
+    CResRef cResIcon;
 
-    return FALSE;
+    if (!m_bActive && !m_bInactiveRender) {
+        return FALSE;
+    }
+
+    if (m_nRenderCount == 0 && !bForce) {
+        return FALSE;
+    }
+
+    if (!CUIControlButton3State::Render(bForce)) {
+        return FALSE;
+    }
+
+    if (m_item.cResRef == "") {
+        return TRUE;
+    }
+
+    cResIcon = m_item.GetItemIcon();
+
+    WORD wCount = m_item.GetUsageCount(0);
+    if (m_item.GetMaxStackable() <= 1) {
+        wCount = 0;
+    }
+
+    CScreenStore* pStore = g_pBaldurChitin->m_pEngineStore;
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenStore.cpp
+    // __LINE__: 12019
+    UTIL_ASSERT(pStore != NULL);
+
+    // NOTE: The identify panel uses this control too (ids 8 to 13), which
+    // gives a negative index here and so an empty item (as the original).
+    CScreenStoreItem cItem;
+    pStore->GetGroupItem(pStore->m_nTopGroupItem + m_nID - 13, cItem);
+
+    WORD wSecondCount = static_cast<WORD>(cItem.m_nCount);
+    if (wSecondCount < 2) {
+        wSecondCount = 0;
+    }
+
+    CRect rControlFrame(m_pPanel->m_ptOrigin + m_ptOrigin, m_size);
+    if (m_bPressed) {
+        rControlFrame.OffsetRect(field_63E, field_642);
+    }
+
+    CPoint pos = rControlFrame.TopLeft();
+
+    CRect rClip;
+    rClip.IntersectRect(rControlFrame, m_rDirty);
+
+    CIcon::RenderIcon(0,
+        pos,
+        m_size,
+        rClip,
+        cResIcon,
+        m_pPanel->m_pManager->m_bDoubleSize,
+        m_bEnabled ? 0 : 0x1,
+        wCount,
+        FALSE,
+        wSecondCount,
+        FALSE,
+        0);
+
+    INT x = m_pPanel->m_ptOrigin.x + m_ptOrigin.x;
+    INT y = m_pPanel->m_ptOrigin.y + m_ptOrigin.y;
+
+    if ((m_item.m_flags & 0x1) == 0) {
+        // Not identified.
+        CVidCell vcTint(CResRef("STORTIN2"), m_pPanel->m_pManager->m_bDoubleSize);
+        vcTint.Render(0, x, y, rClip, NULL, 0, 2, 0xC0);
+    } else if (!m_bValid) {
+        CVidCell vcTint(CResRef("STORTINT"), m_pPanel->m_pManager->m_bDoubleSize);
+        vcTint.Render(0, x, y, rClip, NULL, 0, 2, 0xC0);
+    } else {
+        CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenStore.cpp
+        // __LINE__: 12071
+        UTIL_ASSERT(pGame != NULL);
+
+        // NOTE: Uninline.
+        LONG nCharacterId = pGame->GetCharacterId(static_cast<SHORT>(pStore->GetSelectedCharacter()));
+        if (nCharacterId != CGameObjectArray::INVALID_INDEX) {
+            CGameSprite* pSprite;
+
+            BYTE rc;
+            do {
+                rc = pGame->GetObjectArray()->GetShare(nCharacterId,
+                    CGameObjectArray::THREAD_1,
+                    reinterpret_cast<CGameObject**>(&pSprite),
+                    INFINITE);
+            } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+            if (rc == CGameObjectArray::SUCCESS) {
+                INT nUsable = pGame->CheckItemUsable(pSprite, &m_item);
+                if (nUsable == 2) {
+                    CVidCell vcTint(CResRef("STORTIN4"), m_pPanel->m_pManager->m_bDoubleSize);
+                    vcTint.Render(0, x, y, rClip, NULL, 0, 2, 0xC0);
+                } else if (nUsable == 0) {
+                    CVidCell vcTint(CResRef("STORTINT"), m_pPanel->m_pManager->m_bDoubleSize);
+                    vcTint.Render(0, x, y, rClip, NULL, 0, 2, 0xC0);
+                }
+
+                pGame->GetObjectArray()->ReleaseShare(nCharacterId,
+                    CGameObjectArray::THREAD_1,
+                    INFINITE);
+            }
+        }
+    }
+
+    if ((m_item.m_flags & 0x8) != 0 && (m_item.m_flags & 0x1) != 0) {
+        CVidCell vcTint(CResRef("STORTIN3"), m_pPanel->m_pManager->m_bDoubleSize);
+        vcTint.Render(0, x, y, rClip, NULL, 0, 2, 0xC0);
+    }
+
+    return TRUE;
 }
 
 // -----------------------------------------------------------------------------
@@ -7591,9 +7817,81 @@ void CUIControlButtonStoreStoreSpell::OnRButtonClick(CPoint pt)
 // 0x682D10
 BOOL CUIControlButtonStoreStoreSpell::Render(BOOL bForce)
 {
-    // TODO: Incomplete.
+    CResRef cResIcon;
+    CString sIcon;
 
-    return FALSE;
+    if (!m_bActive && !m_bInactiveRender) {
+        return FALSE;
+    }
+
+    if (m_nRenderCount == 0 && !bForce) {
+        return FALSE;
+    }
+
+    if (!CUIControlButton3State::Render(bForce)) {
+        return FALSE;
+    }
+
+    if (m_resRef != "") {
+        CSpell cSpell;
+        cSpell.SetResRef(m_resRef, TRUE, TRUE);
+        cSpell.Demand();
+
+        // NOTE: The original leaves the buffer uninitialized when the spell
+        // does not load; bounded here (P4-10).
+        RESREF iconResRef = { 0 };
+        cSpell.GetIcon(iconResRef);
+        cResIcon = iconResRef;
+
+        cSpell.Release();
+
+        // The store shows the icon's "B" variant.
+        cResIcon.CopyToString(sIcon);
+
+        // NOTE: The original writes before the string when it is empty;
+        // bounded here (P4-10).
+        if (sIcon.GetLength() > 0) {
+            sIcon.SetAt(sIcon.GetLength() - 1, 'B');
+        }
+        cResIcon = sIcon;
+
+        CRect rControlFrame(m_pPanel->m_ptOrigin + m_ptOrigin, m_size);
+        if (m_bPressed) {
+            rControlFrame.OffsetRect(field_63E, field_642);
+        }
+
+        CPoint pos = rControlFrame.TopLeft();
+
+        CRect rClip;
+        rClip.IntersectRect(rControlFrame, m_rDirty);
+
+        CIcon::RenderIcon(0,
+            pos,
+            m_size,
+            rClip,
+            cResIcon,
+            m_pPanel->m_pManager->m_bDoubleSize,
+            m_bEnabled ? 0 : 0x1,
+            0,
+            FALSE,
+            0,
+            FALSE,
+            0);
+
+        if (!m_bValid) {
+            CVidCell vcTint(CResRef("STORTINT"), m_pPanel->m_pManager->m_bDoubleSize);
+            vcTint.Render(0,
+                m_pPanel->m_ptOrigin.x + m_ptOrigin.x,
+                m_pPanel->m_ptOrigin.y + m_ptOrigin.y,
+                rClip,
+                NULL,
+                0,
+                2,
+                0xC0);
+        }
+    }
+
+    return TRUE;
 }
 
 // -----------------------------------------------------------------------------
