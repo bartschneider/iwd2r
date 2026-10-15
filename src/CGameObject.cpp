@@ -3,6 +3,9 @@
 #include "CBaldurChitin.h"
 #include "CGameArea.h"
 #include "CGameObjectArray.h"
+#include "CGameSprite.h"
+#include "CGameText.h"
+#include "CGameTrigger.h"
 #include "CInfCursor.h"
 #include "CInfGame.h"
 #include "CScreenWorld.h"
@@ -408,10 +411,81 @@ void CGameObject::SetCursor(LONG nToolTip)
     }
 }
 
-// 0x4C83F0
+// 0x4C80E0
 void CGameObject::FloatText(STRREF strRef, int a2, int a3)
 {
-    // TODO: Incomplete.
+    if (m_pos.x == -1 && m_pos.y == -1) {
+        return;
+    }
+
+    STR_RES strRes;
+
+    if (g_pChitin->cNetwork.m_nServiceProvider != 0 && !g_pChitin->cNetwork.GetSessionHosting()) {
+        Sleep(25);
+    }
+
+    // The previous text of this object goes.
+    if (field_1C != 0) {
+        CGameObject* pOldText;
+        BYTE rc;
+        do {
+            rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(field_1C,
+                CGameObjectArray::THREAD_ASYNCH,
+                &pOldText,
+                INFINITE);
+        } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+        if (rc == CGameObjectArray::SUCCESS) {
+            pOldText->RemoveFromArea();
+        }
+    }
+
+    if (strRef == 0) {
+        field_1C = 0;
+        return;
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    if (pGame->m_gameAreas[pGame->m_visibleArea] != m_pArea) {
+        return;
+    }
+
+    g_pBaldurChitin->GetTlkTable().Fetch(strRef, strRes);
+    if (strRes.szText.GetLength() == 0) {
+        return;
+    }
+
+    strRes.szText.TrimLeft();
+
+    CPoint pt;
+    if (GetObjectType() == TYPE_TRIGGER) {
+        pt = static_cast<CGameTrigger*>(this)->m_posTrapOrigin;
+    } else {
+        pt = m_pos;
+    }
+
+    CGameText* pText = new CGameText(m_pArea, pt, static_cast<BYTE>(a2), static_cast<BYTE>(a3), strRes.szText);
+
+    // With Duplicate Floating Text, a text on screen also goes to the
+    // world screen's log.
+    if (pGame->m_cOptions.m_bDuplicateFloatingText && pText->IsOnScreen()) {
+        CString sName;
+        if (GetObjectType() == TYPE_SPRITE) {
+            sName = static_cast<CGameSprite*>(this)->GetName();
+        } else {
+            sName = "";
+        }
+        g_pBaldurChitin->m_pEngineWorld->DisplayText(sName, strRes.szText, RGB(215, 215, 190), RGB(215, 215, 190), -1, FALSE);
+    }
+
+    pText->field_1C = m_id;
+    field_1C = pText->m_id;
+
+    // An info trigger's text stands above its point, inside the view.
+    if (GetObjectType() == TYPE_TRIGGER) {
+        const CPoint& ptTrap = static_cast<CGameTrigger*>(this)->m_posTrapOrigin;
+        pText->SetPositionInView(CPoint(ptTrap.x, (-3 - static_cast<BYTE>(pText->m_nLines)) * 5 + ptTrap.y));
+    }
 }
 
 // 0x78E750

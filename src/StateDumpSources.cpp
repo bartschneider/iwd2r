@@ -6,6 +6,7 @@
 
 #include "mfc.h"
 
+#include "CAIScript.h"
 #include "CBaldurChitin.h"
 #include "CGameArea.h"
 #include "CGameDialog.h"
@@ -14,6 +15,7 @@
 #include "CGameSprite.h"
 #include "CGameTimer.h"
 #include "CInfGame.h"
+#include "CMessage.h"
 #include "CScreenCreateChar.h"
 #include "CScreenWorld.h"
 #include "CTimerWorld.h"
@@ -236,6 +238,21 @@ void ReadProbe(platform::replay_probe::Frame* out)
         return;
     }
     out->screen = ScreenName(chitin);
+    // NOTE: The AI thread runs and fills the queue; the frame gate holds it
+    // at the frame's start. Diagnostic runs only.
+    const CTypedPtrList<CPtrList, CMessage*>& messages = chitin->m_cMessageHandler.m_messageList;
+    out->messages = static_cast<int>(messages.GetCount());
+    POSITION messagePos = messages.GetHeadPosition();
+    while (messagePos != NULL) {
+        CMessage* message = messages.GetNext(messagePos);
+        if (CMessageSetSequence* setSequence = dynamic_cast<CMessageSetSequence*>(message)) {
+            platform::replay_probe::Frame::SetSequence m;
+            m.target = setSequence->m_targetId;
+            m.sequence = setSequence->m_sequence;
+            m.source = setSequence->m_sourceId;
+            out->setSequences.push_back(m);
+        }
+    }
     CInfGame* game = chitin->m_pObjectGame;
     if (!game)
         return;
@@ -319,6 +336,23 @@ void ReadProbe(platform::replay_probe::Frame* out)
                 const CGameTimer* timer = sprite->m_timers.GetNext(pos);
                 o.timers.emplace_back(timer->m_id, timer->m_time);
             }
+            CAIScript* const scripts[] = {
+                sprite->m_overrideScript, sprite->m_special1Script, sprite->m_teamScript,
+                sprite->m_special2Script, sprite->m_combatScript, sprite->m_special3Script,
+                sprite->m_movementScript,
+            };
+            for (CAIScript* script : scripts) {
+                if (script == NULL) {
+                    o.scripts.emplace_back("-", 0);
+                    continue;
+                }
+                char resref[RESREF_SIZE + 1] = {};
+                std::memcpy(resref, script->m_cResRef.GetResRef(), RESREF_SIZE);
+                o.scripts.emplace_back(resref, static_cast<int>(script->m_caList.GetCount()));
+            }
+            o.direction = sprite->m_nDirection;
+            o.newDirection = sprite->m_nNewDirection;
+            o.noActionCount = sprite->m_noActionCount;
         } else if (o.type == CGameObject::TYPE_DOOR) {
             const CGameDoor* door = static_cast<CGameDoor*>(object);
             o.hasName = true;

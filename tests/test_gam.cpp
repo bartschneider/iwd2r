@@ -1642,6 +1642,131 @@ TEST_CASE("sound: DoAIUpdate plays a periodic sound and draws its next period", 
     pSound->m_soundObject.m_dwFlags = 0x4;
     pSound->DoAIUpdate(TRUE, counter);
     CHECK(pSound->m_periodCount == 1);
+
+    // RemoveFromArea (0x4C95B0) takes it out of the object array and deletes it.
+    pSound->RemoveFromArea();
+}
+
+TEST_CASE("sound: DoAIUpdate picks a random sound before it draws the period variance", "[spawn][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CGameSprite* pSprite = NewGameWithOneCharacter(cre, "Probe");
+    pGame->UpdateCharacterSlots();
+    pGame->SetupCharacters(FALSE);
+    CGameArea* pArea = pSprite->GetArea();
+    REQUIRE(pArea != NULL);
+
+    // A random ambient sound (bits 0, 2 and 3), a period of 4 seconds with a
+    // variance of 2, two sounds.
+    CAreaFileSoundObject object;
+    strncpy(reinterpret_cast<char*>(object.m_scriptName), "ProbeRandom", SCRIPTNAME_SIZE);
+    object.m_posX = 1100;
+    object.m_posY = 700;
+    memcpy(object.m_soundObject[0], CResRef("AM1000A").GetResRef(), RESREF_SIZE);
+    memcpy(object.m_soundObject[1], CResRef("AM1000B").GetResRef(), RESREF_SIZE);
+    object.m_soundObjectNum = 2;
+    object.m_period = 4;
+    object.m_periodVariance = 2;
+    object.m_timeOfDayActive = 0xFFFFFF;
+    object.m_dwFlags = 0x1 | 0x4 | 0x8;
+
+    // The draws the constructor and the play make, in order: a seed whose
+    // second and third draws give different periods, so the order shows.
+    unsigned int seed = 1;
+    int draws[3] = {};
+    for (;; seed++) {
+        srand(seed);
+        for (int& draw : draws) {
+            draw = rand();
+        }
+        if (draws[1] % 5 != draws[2] % 5) {
+            break;
+        }
+    }
+
+    srand(seed);
+    CGameSound* pSound = new CGameSound(pArea, &object);
+    const LONG counter = pSound->m_id;
+    // The constructor (0x4C8B10): (4 - 2 + rand() % 5) * 15.
+    REQUIRE(pSound->m_period == (4 - 2 + draws[0] % 5) * 15);
+    const LONG period = pSound->m_period;
+    for (LONG n = 0; n < period; n++) {
+        REQUIRE(pSound->DoAIUpdate(TRUE, counter) == FALSE);
+    }
+
+    // The play: the sound first (rand() % 2), then the next period
+    // (rand() % 5); the turn is left alone.
+    pSound->DoAIUpdate(TRUE, counter);
+    CHECK(pSound->m_currentSound == 2);
+    CHECK(pSound->m_periodCount == 0);
+    CHECK(pSound->m_period == (4 - 2 + draws[2] % 5) * 15);
+
+    pSound->RemoveFromArea();
+}
+
+TEST_CASE("sound: DoAIUpdate starts a looping sound in its hours and stops it outside", "[spawn][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CGameSprite* pSprite = NewGameWithOneCharacter(cre, "Probe");
+    pGame->UpdateCharacterSlots();
+    pGame->SetupCharacters(FALSE);
+    CGameArea* pArea = pSprite->GetArea();
+    REQUIRE(pArea != NULL);
+
+    // One looping ambient sound (bits 0, 1 and 2), every hour.
+    CAreaFileSoundObject object;
+    strncpy(reinterpret_cast<char*>(object.m_scriptName), "ProbeLoop", SCRIPTNAME_SIZE);
+    object.m_posX = 1100;
+    object.m_posY = 700;
+    memcpy(object.m_soundObject[0], CResRef("AM1000A").GetResRef(), RESREF_SIZE);
+    object.m_soundObjectNum = 1;
+    object.m_period = 2;
+    object.m_timeOfDayActive = 0xFFFFFF;
+    object.m_dwFlags = 0x1 | 0x2 | 0x4;
+    CGameSound* pSound = new CGameSound(pArea, &object);
+    const LONG counter = pSound->m_id;
+    REQUIRE((pSound->m_soundObject.m_dwFlags & 0x2) != 0);
+
+    // In its hours it starts once and then leaves the loop playing; no
+    // period is counted.
+    CHECK(pSound->m_bLoopPlaying == FALSE);
+    CHECK(pSound->DoAIUpdate(TRUE, counter) == FALSE);
+    CHECK(pSound->m_bLoopPlaying == TRUE);
+    CHECK(pSound->DoAIUpdate(TRUE, counter) == FALSE);
+    CHECK(pSound->m_bLoopPlaying == TRUE);
+
+    // Outside them (the constructor's adjusted copy of the hours) it stops.
+    pSound->m_timeOfDayActive = 0;
+    CHECK(pSound->DoAIUpdate(TRUE, counter) == FALSE);
+    CHECK(pSound->m_bLoopPlaying == FALSE);
+    CHECK(pSound->DoAIUpdate(TRUE, counter) == FALSE);
+    CHECK(pSound->m_bLoopPlaying == FALSE);
+
+    pSound->RemoveFromArea();
 }
 
 TEST_CASE("items: CheckItemUsable answers 1 for every item type but 35 and 11", "[spawn][data]")
