@@ -881,3 +881,15 @@ TEST_CASE("draw_points32", "[vid]")
     expected[0] = 0x00010203;
     CHECK(pixels == expected);
 }
+
+// CVidPoly::IsPtInPoly (0x7C0E40) on a two-point polygon tests the point
+// against its one segment (the end standing in for the previous point).
+TEST_CASE("is_pt_in_poly_two_points", "[vid]")
+{
+    const CPoint segment[2] = { CPoint(0, 0), CPoint(10, 10) };
+    CHECK(CVidPoly::IsPtInPoly(segment, 2, CPoint(4, 4)));
+    CHECK_FALSE(CVidPoly::IsPtInPoly(segment, 2, CPoint(4, 5)));
+    const CPoint square[4] = { CPoint(0, 0), CPoint(10, 0), CPoint(10, 10), CPoint(0, 10) };
+    CHECK(CVidPoly::IsPtInPoly(square, 4, CPoint(5, 5)));
+    CHECK_FALSE(CVidPoly::IsPtInPoly(square, 4, CPoint(15, 5)));
+}

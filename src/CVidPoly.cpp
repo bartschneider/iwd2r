@@ -73,7 +73,9 @@ BOOLEAN CVidPoly::IsPtInPoly(const CPoint* pPoly, SHORT nPoly, const CPoint& pt)
     if (nPoly == 1) {
         return pPoly[0] == pt;
     } else if (nPoly == 2) {
-        interSectionY = CalculateLineVIntersection(pPoly[0], pPoly[2], pt.x, pPoly[1]);
+        // A two-point polygon is its one segment, its end standing in for
+        // the previous point (0x7C0EA6).
+        interSectionY = CalculateLineVIntersection(pPoly[0], pPoly[1], pt.x, pPoly[1]);
         return interSectionY == pt.y;
     }
 

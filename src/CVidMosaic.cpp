@@ -128,25 +128,40 @@ BOOL CVidMosaic::Render(INT nSurface, int x, int y, const CRect& rMosaic, const 
 
             rTile.right = min(nMosaicWidth - nTileX * nTileSize, nTileSize);
 
-            // TODO: Figure out why pointer needs to be rendered for every tile
-            // in mosaic.
+            // NOTE: The original renders the pointer (vtable 0xFC) once for
+            // every tile of the range, before its clip test; ours for the
+            // tiles that pass it. The pointer is drawn to the front
+            // surface, so the screen's pixels are the same.
             g_pChitin->GetCurrentVideoMode()->RenderPointer();
 
-            if (pVidMode->LockSurface(m_nFxSurface, &surfaceDesc, rTile)) {
-                (this->*Blt)(reinterpret_cast<DWORD*>(surfaceDesc.lpSurface),
-                    surfaceDesc.lPitch,
-                    nTileY * pRes->m_pHeader->nXTiles + nTileX,
-                    rTile,
-                    dwFlags);
-                pVidMode->UnLockSurface(m_nFxSurface, surfaceDesc.lpSurface);
-
-                BltFromFX(pVidMode->pSurfaces[nSurface],
-                    destX,
-                    destY,
-                    rTile.Size(),
-                    rClip,
-                    dwFlags);
+            // A failed lock or blit ends the render with FALSE (0x7B1303).
+            if (!pVidMode->LockSurface(m_nFxSurface, &surfaceDesc, rTile)) {
+                if (!bDemanded) {
+                    pRes->Release();
+                }
+                return FALSE;
             }
+
+            BOOL bResult = (this->*Blt)(reinterpret_cast<DWORD*>(surfaceDesc.lpSurface),
+                surfaceDesc.lPitch,
+                nTileY * pRes->m_pHeader->nXTiles + nTileX,
+                rTile,
+                dwFlags);
+            pVidMode->UnLockSurface(m_nFxSurface, surfaceDesc.lpSurface);
+
+            if (!bResult) {
+                if (!bDemanded) {
+                    pRes->Release();
+                }
+                return FALSE;
+            }
+
+            BltFromFX(pVidMode->pSurfaces[nSurface],
+                destX,
+                destY,
+                rTile.Size(),
+                rClip,
+                dwFlags);
         }
     }
 
@@ -239,7 +254,8 @@ BOOL CVidMosaic::BltMos8To16(DWORD* pSurface, LONG lPitch, UINT nTile, const CRe
         BYTE* pTileData = pRes->GetTileData(nTile, m_bDoubleSize);
         LONG nSkip = lPitch - width * 2;
 
-        // TODO: Original code is different (more optimized).
+        // NOTE: The original copies a pixel, two or four at a time by the
+        // width's low bits; the pixels are the same.
         BYTE* pSurfaceBytes = reinterpret_cast<BYTE*>(pSurface);
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
@@ -267,10 +283,9 @@ BOOL CVidMosaic::BltMos8To24(DWORD* pSurface, LONG lPitch, UINT nTile, const CRe
     int width = rRect.Width();
 
     if (width != 0) {
+        // The 24-bit form does not test the palette (after the call at
+        // 0x7CC8AE).
         RGBQUAD* pPalette = pRes->GetTilePalette(nTile);
-        if (pPalette == NULL) {
-            return FALSE;
-        }
 
         m_cPalette.SetPalette(pPalette, 256, CVidPalette::TYPE_RESOURCE);
         m_cPalette.Realize(CVidImage::rgbTempPal, 24, dwFlags | 0x400000, &m_paletteAffects, 255);
@@ -278,7 +293,8 @@ BOOL CVidMosaic::BltMos8To24(DWORD* pSurface, LONG lPitch, UINT nTile, const CRe
         BYTE* pTileData = pRes->GetTileData(nTile, m_bDoubleSize);
         LONG nSkip = lPitch - width * 3;
 
-        // TODO: Original code is different (more optimized).
+        // NOTE: The original copies the bytes a word and a byte at a time;
+        // the pixels are the same.
         BYTE* pSurfaceBytes = reinterpret_cast<BYTE*>(pSurface);
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
@@ -312,7 +328,8 @@ BOOL CVidMosaic::BltMos8To32(DWORD* pSurface, LONG lPitch, UINT nTile, const CRe
         BYTE* pTileData = pRes->GetTileData(nTile, m_bDoubleSize);
         LONG nSkip = lPitch - width * 4;
 
-        // TODO: Original code is different (more optimized).
+        // NOTE: The original copies four pixels from one DWORD of tile data
+        // at a time (0x7CCA8E); the pixels are the same.
         BYTE* pSurfaceBytes = reinterpret_cast<BYTE*>(pSurface);
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
