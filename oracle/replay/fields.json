@@ -613,5 +613,21 @@
     "base": "CGameTimer",
     "offset": "0x0004",
     "type": "u8"
+  },
+  "sprite_pos_dest": {
+    "base": "CGameSprite",
+    "offset": "0x535A",
+    "type": "i32",
+    "count": 2
+  },
+  "sprite_path": {
+    "base": "CGameSprite",
+    "offset": "0x5382",
+    "type": "ptr"
+  },
+  "sprite_path_count": {
+    "base": "CGameSprite",
+    "offset": "0x5386",
+    "type": "i16"
   }
 }

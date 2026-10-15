@@ -306,6 +306,10 @@ void ReadProbe(platform::replay_probe::Frame* out)
             o.equipedEffects = sprite->m_equipedEffectList.GetCount();
             o.xp = sprite->m_baseStats.m_xp;
             o.hp = sprite->m_baseStats.m_hitPoints;
+            o.destX = sprite->m_posDest.x;
+            o.destY = sprite->m_posDest.y;
+            for (SHORT n = 0; sprite->m_pPath != NULL && n < sprite->m_nPath && n < 64; n++)
+                o.path.push_back(sprite->m_pPath[n]);
             POSITION pos = sprite->m_timers.GetHeadPosition();
             while (pos != NULL) {
                 const CGameTimer* timer = sprite->m_timers.GetNext(pos);

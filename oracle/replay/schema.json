@@ -894,6 +894,18 @@
     "timer_id": {
       "class": "CGameTimer",
       "member": "m_id"
+    },
+    "sprite_pos_dest": {
+      "class": "CGameSprite",
+      "member": "m_posDest"
+    },
+    "sprite_path": {
+      "class": "CGameSprite",
+      "member": "m_pPath"
+    },
+    "sprite_path_count": {
+      "class": "CGameSprite",
+      "member": "m_nPath"
     }
   }
 }

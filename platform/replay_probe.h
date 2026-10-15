@@ -18,7 +18,8 @@
 //   obj INDEX ID type T pos X,Y here H list L seen S speed P inhibitor I
 //       [name NAME] [last C active A ai B imprisonment M visible_monster V
 //       field_294 F state S action A sequence Q queued N next A triggers T
-//       effects TIMED,EQUIPED xp X hp H timers [ID:TIME ...]]
+//       effects TIMED,EQUIPED xp X hp H dest X,Y path [NODE ...]
+//       timers [ID:TIME ...]]
 //   vis ROW HEX...
 //
 // - game: CInfGame::m_nCharacters, m_visibleArea, m_characters (the
@@ -39,7 +40,8 @@
 //   length and its head's m_actionID (-1 when empty), and the pending
 //   triggers' count, the timed and equipped effect lists' lengths, the
 //   experience (m_baseStats.m_xp), the hit points and the script timers
-//   (m_timers: each CGameTimer's id and expiry time). One line per object.
+//   (m_timers: each CGameTimer's id and expiry time), m_posDest and the
+//   path's nodes (m_pPath[0 .. m_nPath - 1], at most 64). One line per object.
 // - vis: the area's visibility map, one line per row of m_nWidth tiles
 //   (bytes in hex: bit 7 explored, the low bits the visibility count);
 //   the rows past m_nMapSize, if any, are left out.
@@ -121,6 +123,10 @@ struct Object {
     int equipedEffects = 0;
     uint32_t xp = 0;
     int hp = 0;
+    int32_t destX = 0;
+    int32_t destY = 0;
+    // m_pPath[0 .. m_nPath - 1] (search positions), at most 64.
+    std::vector<int32_t> path;
     // The m_timers list, head to tail: (id, time).
     std::vector<std::pair<unsigned, int32_t>> timers;
 };
@@ -195,6 +201,12 @@ inline std::string Format(const Frame& f)
                 static_cast<unsigned long>(o.generalState), o.action, o.sequence, o.queued,
                 o.queuedHead, o.triggers, o.timedEffects, o.equipedEffects, static_cast<unsigned long>(o.xp), o.hp);
             out += line;
+            std::snprintf(line, sizeof(line), " dest %ld,%ld path", static_cast<long>(o.destX), static_cast<long>(o.destY));
+            out += line;
+            for (int32_t node : o.path) {
+                std::snprintf(line, sizeof(line), " %ld", static_cast<long>(node));
+                out += line;
+            }
             out += " timers";
             for (const auto& timer : o.timers) {
                 std::snprintf(line, sizeof(line), " %u:%ld", timer.first, static_cast<long>(timer.second));

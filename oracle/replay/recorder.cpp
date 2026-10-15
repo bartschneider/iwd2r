@@ -169,6 +169,9 @@ static_assert(kField_game_time_active.type == ReplayType::k_u8, "");
 static_assert(kField_sprite_timers_head.type == ReplayType::k_ptr, "");
 static_assert(kField_timer_time.type == ReplayType::k_i32, "");
 static_assert(kField_timer_id.type == ReplayType::k_u8, "");
+static_assert(kField_sprite_pos_dest.type == ReplayType::k_i32 && kField_sprite_pos_dest.count == 2, "");
+static_assert(kField_sprite_path.type == ReplayType::k_ptr, "");
+static_assert(kField_sprite_path_count.type == ReplayType::k_i16, "");
 static_assert(kField_area_characters.type == ReplayType::k_u8, "");
 static_assert(kField_area_view_x.type == ReplayType::k_i32, "");
 static_assert(kField_area_view_y.type == ReplayType::k_i32, "");
@@ -837,6 +840,14 @@ void ReadProbe(platform::replay_probe::Frame* out)
             o.equipedEffects = ReadI32(At(object, kField_sprite_equiped_effects), &entryOk);
             o.xp = ReadU32(At(object, kField_sprite_xp), &entryOk);
             o.hp = ReadI16(At(object, kField_sprite_hp), &entryOk);
+            o.destX = ReadI32(At(object, kField_sprite_pos_dest), &entryOk);
+            o.destY = ReadI32(At(object, kField_sprite_pos_dest) + 4, &entryOk);
+            bool pathOk = true;
+            const uint32_t path = ReadU32(At(object, kField_sprite_path), &pathOk);
+            const int16_t pathCount = ReadI16(At(object, kField_sprite_path_count), &pathOk);
+            for (int16_t n = 0; pathOk && path && n < pathCount && n < 64; n++) {
+                o.path.push_back(ReadI32(path + 4u * static_cast<uint32_t>(n), &pathOk));
+            }
             bool timersOk = true;
             uint32_t node = ReadU32(At(object, kField_sprite_timers_head), &timersOk);
             for (int n = 0; timersOk && node && n < kMaxListNodes; ++n) {
