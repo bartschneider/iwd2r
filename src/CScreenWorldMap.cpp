@@ -5,6 +5,8 @@
 #include "CGameSprite.h"
 #include "CInfCursor.h"
 #include "CInfGame.h"
+#include "CRuleTables.h"
+#include "CWorldMap.h"
 #include "CScreenMap.h"
 #include "CScreenWorld.h"
 #include "CTimerWorld.h"
@@ -221,7 +223,8 @@ BYTE* CScreenWorldMap::GetVirtualKeysFlags()
 // 0x699650
 CScreenWorldMap::~CScreenWorldMap()
 {
-    // TODO: Incomplete.
+    // NOTE: The original only runs the members' destructors; `m_pPath` is
+    // not freed here.
 }
 
 // 0x699760
@@ -740,13 +743,163 @@ void CScreenWorldMap::OnMapMouseMove(const CPoint& ptMousePos)
 // 0x69A9D0
 void CScreenWorldMap::OnMapAsyncUpdate()
 {
-    // TODO: Incomplete.
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenWorldMap.cpp
+    // __LINE__: 1644
+    UTIL_ASSERT(pGame != NULL);
+
+    CString sArea;
+    pGame->GetVisibleArea()->m_resRef.CopyToString(sArea);
+
+    CWorldMap* pWorldMap = pGame->GetWorldMap(sArea);
+
+    CPoint pt(g_pChitin->m_ptPointer.x - m_pMapControl->m_pPanel->m_ptOrigin.x,
+        g_pChitin->m_ptPointer.y - m_pMapControl->m_pPanel->m_ptOrigin.y);
+
+    BOOL bInside = !(pt.x < m_pMapControl->m_ptOrigin.x
+        || pt.y < m_pMapControl->m_ptOrigin.y
+        || m_pMapControl->m_ptOrigin.x + m_pMapControl->m_size.cx < pt.x
+        || m_pMapControl->m_ptOrigin.y + m_pMapControl->m_size.cy < pt.y);
+
+    BOOL bHighlight = FALSE;
+
+    if (bInside) {
+        if (m_nEngineState == 1 && m_bInControl && !m_bClickedArea) {
+            CPoint ptMap(pt.x - m_pMapControl->m_ptOrigin.x,
+                pt.y - m_pMapControl->m_ptOrigin.y);
+
+            DWORD nArea = FindAreaHit(ptMap);
+
+            if (m_nSelectedArea != -1 && m_bOverSelectedArea != (m_nSelectedArea == nArea)) {
+                m_bOverSelectedArea = m_nSelectedArea == nArea;
+                InvalidateArea(m_nSelectedArea);
+            }
+
+            if (m_nHighlightArea != -1) {
+                InvalidateArea(m_nHighlightArea);
+            }
+
+            BOOL bHighlighted = FALSE;
+            if (nArea != -1) {
+                CWorldMapArea* pArea = pWorldMap->GetArea(pWorldMap->sub_55A3A0(), nArea);
+
+                // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenWorldMap.cpp
+                // __LINE__: 1682
+                UTIL_ASSERT(pArea != NULL);
+
+                if ((pArea->m_dwFlags & 0x1) != 0 && (pArea->m_dwFlags & 0x4) != 0) {
+                    bHighlight = TRUE;
+
+                    if (nArea != m_nHighlightArea) {
+                        InvalidateArea(nArea);
+                    }
+
+                    m_nHighlightArea = nArea;
+                    bHighlighted = TRUE;
+                }
+            }
+
+            if (!bHighlighted) {
+                m_nHighlightArea = -1;
+            }
+        }
+
+        if (m_nEngineState == 0
+            || !m_bInControl
+            || m_bClickedArea
+            || m_nEngineState != 1
+            || m_bMapDragging
+            || (m_nSelectedArea == -1 && !bHighlight)) {
+            pGame->m_tempCursor = 44;
+            return;
+        }
+
+        // The travel time tool tip, in hours.
+        m_nToolTip++;
+        if (m_nToolTip >= static_cast<DWORD>(pGame->m_cOptions.m_nTooltips)) {
+            CString sTime;
+            sTime.Format("%d", GetTravelTime(m_nHighlightArea) / CTimerWorld::TIMESCALE_MSEC_PER_HOUR);
+
+            STRREF strToolTip = 23084;
+            g_pBaldurChitin->m_pObjectCursor->SetToolTip(strToolTip, NULL, sTime);
+            return;
+        }
+    } else if (m_bMapDragging) {
+        pGame->m_tempCursor = 44;
+        return;
+    }
+
+    pGame->m_tempCursor = 0;
 }
 
 // 0x69ACF0
 void CScreenWorldMap::OnAreaMouseClick(DWORD nArea, const CPoint& ptMousePos)
 {
     // TODO: Incomplete.
+}
+
+// 0x69B7F0
+DWORD CScreenWorldMap::GetTravelTime(DWORD nArea)
+{
+    DWORD nTime = 0;
+    DWORD nSkipLink = -1;
+    DWORD nSrcArea;
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenWorldMap.cpp
+    // __LINE__: 2133
+    UTIL_ASSERT(pGame != NULL);
+
+    CString sArea;
+    pGame->GetVisibleArea()->m_resRef.CopyToString(sArea);
+
+    CWorldMap* pWorldMap = pGame->GetWorldMap(sArea);
+
+    pWorldMap->GetArea(pWorldMap->sub_55A3A0(), nArea);
+
+    if (m_nCurrentLink != -1) {
+        // On the way: count from the link's far end, or turn back.
+        nSrcArea = pWorldMap->FindSourceAreaIndex(pWorldMap->sub_55A3A0(), m_nCurrentLink);
+
+        CWorldMapLinks* pLink = pWorldMap->GetLink(pWorldMap->sub_55A3A0(), m_nCurrentLink);
+        if (nSrcArea == nArea) {
+            nSrcArea = pLink->m_nArea;
+            nSkipLink = pWorldMap->GetLinkIndex(pWorldMap->sub_55A3A0(), pLink->m_nArea, nArea);
+        }
+
+        nTime = (pLink->m_nDistanceScale * CRuleTables::TIME_TRAVELLING) >> 1;
+    } else {
+        BOOL bResult = pWorldMap->GetAreaIndex(pWorldMap->sub_55A3A0(), m_cResCurrentArea, nSrcArea);
+
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenWorldMap.cpp
+        // __LINE__: 2164
+        UTIL_ASSERT(bResult);
+    }
+
+    pWorldMap->GetArea(pWorldMap->sub_55A3A0(), nSrcArea);
+
+    if (nSrcArea != nArea) {
+        m_pPath = pWorldMap->FindPath(pWorldMap->sub_55A3A0(), nSrcArea, nArea);
+        if (m_pPath != NULL) {
+            while (m_pPath->GetCount() > 0) {
+                DWORD nLink = m_pPath->GetHead();
+
+                CWorldMapLinks* pLink = pWorldMap->GetLink(pWorldMap->sub_55A3A0(), nLink);
+                if (m_nCurrentLink != nLink && nSkipLink != nLink) {
+                    nTime += pLink->m_nDistanceScale * CRuleTables::TIME_TRAVELLING;
+                }
+
+                m_pPath->RemoveHead();
+            }
+
+            delete m_pPath;
+            m_pPath = NULL;
+        }
+    }
+
+    return nTime;
 }
 
 // 0x69BA70
@@ -1115,10 +1268,10 @@ void CScreenWorldMap::StopWorldMap(BOOLEAN bAreaClicked)
 // 0x69CB40
 COLORREF CScreenWorldMap::sub_69CB40(COLORREF rgb)
 {
-    int v1 = (g_pBaldurChitin->nAUCounter / 2) & 7;
-    short v2 = v1 < 4 ? 3 - v1 : v1 - 4;
+    // NOTE: An arithmetic shift, as the original.
+    WORD v1 = static_cast<WORD>((g_pBaldurChitin->nAUCounter >> 1) & 7);
+    INT v2 = v1 < 4 ? 3 - v1 : v1 - 4;
 
-    // TODO: Check, probably wrong.
     return RGB(GetRValue(rgb) + v2 * (191 - GetRValue(rgb)) / 3,
         GetGValue(rgb) - v2 * GetGValue(rgb) / 3,
         GetBValue(rgb) - v2 * GetBValue(rgb) / 3);

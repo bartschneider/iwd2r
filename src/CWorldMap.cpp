@@ -436,6 +436,163 @@ DWORD CWorldMap::GetLinkIndex(DWORD nMap, DWORD nSrcArea, DWORD nDstArea)
     return nFoundLink;
 }
 
+// 0x559B40
+CWorldMapList* CWorldMap::FindPath(DWORD nMap, DWORD nSrcArea, DWORD nDstArea)
+{
+    // The cheapest chain of links from `nSrcArea` to `nDstArea` over the
+    // explorable areas (Dijkstra), as link indexes in travel order; NULL when
+    // there is none.
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\CWorldMap.cpp
+    // __LINE__: 1256
+    UTIL_ASSERT(nSrcArea < m_pData[nMap].m_nAreas);
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\CWorldMap.cpp
+    // __LINE__: 1257
+    UTIL_ASSERT(nDstArea < m_pData[nMap].m_nAreas);
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\CWorldMap.cpp
+    // __LINE__: 1258
+    UTIL_ASSERT((m_ppAreas[nMap][nSrcArea].m_dwFlags & 0x1) != 0);
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\CWorldMap.cpp
+    // __LINE__: 1259
+    UTIL_ASSERT((m_ppAreas[nMap][nDstArea].m_dwFlags & 0x1) != 0);
+
+    // 0 - done, 1 - open, 2 - not reached.
+    CDWordArray aState;
+    CDWordArray aPrevious;
+    CDWordArray aDistance;
+    CWorldMapList lOpen;
+
+    aState.SetSize(m_pData[nMap].m_nAreas, -1);
+    aPrevious.SetSize(m_pData[nMap].m_nAreas, -1);
+    aDistance.SetSize(m_pData[nMap].m_nAreas, -1);
+
+    for (DWORD nArea = 0; nArea < m_pData[nMap].m_nAreas; nArea++) {
+        aState[nArea] = 2;
+    }
+
+    aState[nSrcArea] = 0;
+    aPrevious[nSrcArea] = -1;
+    aDistance[nSrcArea] = 0;
+
+    DWORD nCurArea = nSrcArea;
+    BOOL bFailed = FALSE;
+
+    while (nCurArea != nDstArea) {
+        if (bFailed) {
+            return NULL;
+        }
+
+        CWorldMapList* pLinks = GetAllLinks(nMap, nCurArea);
+
+        POSITION pos = pLinks->GetHeadPosition();
+        while (pos != NULL) {
+            DWORD nLink = pLinks->GetNext(pos);
+
+            // NOTE: Uninline. The links are looked up on the map of the
+            // visible area, the areas on `nMap` (as the original).
+            DWORD nLinkMap = sub_55A3A0();
+
+            // __FILE__: C:\Projects\Icewind2\src\Baldur\CWorldMap.cpp
+            // __LINE__: 586
+            UTIL_ASSERT(nLinkMap < m_cHeader.m_nMapCount);
+
+            // __FILE__: C:\Projects\Icewind2\src\Baldur\CWorldMap.cpp
+            // __LINE__: 587
+            UTIL_ASSERT(nLink < m_pData[nLinkMap].m_nLinks);
+
+            DWORD nArea = m_ppLinks[nLinkMap][nLink].m_nArea;
+            DWORD nDistance = m_ppLinks[nLinkMap][nLink].m_nDistanceScale;
+
+            if ((m_ppAreas[nMap][nArea].m_dwFlags & 0x4) != 0) {
+                if (aState[nArea] == 1 && aDistance[nCurArea] + nDistance < aDistance[nArea]) {
+                    aPrevious[nArea] = nCurArea;
+                    aDistance[nArea] = aDistance[nCurArea] + nDistance;
+                }
+
+                if (aState[nArea] == 2) {
+                    aState[nArea] = 1;
+                    lOpen.AddHead(nArea);
+                    aPrevious[nArea] = nCurArea;
+                    aDistance[nArea] = aDistance[nCurArea] + nDistance;
+                }
+            }
+        }
+
+        delete pLinks;
+
+        if (lOpen.GetCount() < 1) {
+            bFailed = TRUE;
+        } else {
+            // The open area nearest to the source; the first one on a tie.
+            POSITION posBest = lOpen.GetHeadPosition();
+            nCurArea = lOpen.GetAt(posBest);
+            DWORD nBestDistance = aDistance[nCurArea];
+
+            POSITION posNode = posBest;
+            lOpen.GetNext(posNode);
+            while (posNode != NULL) {
+                POSITION posCurrent = posNode;
+                DWORD nArea = lOpen.GetNext(posNode);
+                if (aDistance[nArea] < nBestDistance) {
+                    nBestDistance = aDistance[nArea];
+                    posBest = posCurrent;
+                    nCurArea = nArea;
+                }
+            }
+
+            lOpen.RemoveAt(posBest);
+            aState[nCurArea] = 0;
+        }
+    }
+
+    if (bFailed) {
+        return NULL;
+    }
+
+    CWorldMapList* pPath = new CWorldMapList();
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\CWorldMap.cpp
+    // __LINE__: 1361
+    UTIL_ASSERT(nCurArea != -1);
+
+    DWORD nChildArea = nCurArea;
+    DWORD nArea = aPrevious[nCurArea];
+    while (nArea != -1) {
+        CWorldMapList* pLinks = GetAllLinks(nMap, nArea);
+
+        DWORD nFoundLink = -1;
+        POSITION pos = pLinks->GetHeadPosition();
+        while (pos != NULL) {
+            DWORD nLink = pLinks->GetNext(pos);
+
+            // __FILE__: C:\Projects\Icewind2\src\Baldur\CWorldMap.cpp
+            // __LINE__: 586
+            UTIL_ASSERT(nMap < m_cHeader.m_nMapCount);
+
+            // __FILE__: C:\Projects\Icewind2\src\Baldur\CWorldMap.cpp
+            // __LINE__: 587
+            UTIL_ASSERT(nLink < m_pData[nMap].m_nLinks);
+
+            if (m_ppLinks[nMap][nLink].m_nArea == nChildArea) {
+                nFoundLink = nLink;
+                break;
+            }
+        }
+
+        delete pLinks;
+
+        pPath->AddHead(nFoundLink);
+
+        nChildArea = nArea;
+        nArea = aPrevious[nArea];
+    }
+
+    return pPath;
+}
+
 // 0x55A230
 DWORD CWorldMap::FindSourceAreaIndex(DWORD nMap, DWORD nLink)
 {
