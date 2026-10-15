@@ -555,6 +555,7 @@ public:
     LONG GetLevel();
     void sub_723BF0(BOOLEAN a1, BOOLEAN a2);
     INT GetAC();
+    INT sub_723DB0();
     INT sub_723F60();
     void sub_71E240(CCreatureFileHeader& oldBaseStats, CDerivedStats& oldDStats);
     void sub_71E750(CCreatureFileHeader& oldBaseStats, CDerivedStats& oldDStats);
@@ -576,6 +577,8 @@ public:
     void FeedBack(WORD nFeedBackId, LONG a2, LONG a3, LONG a4, LONG a5, LONG a6, LONG a7);
     BOOLEAN sub_737910(BOOL a1);
     SHORT GetCriticalHitBonus();
+    BOOL Hit(CGameSprite* target, CItem* curWeapon, SHORT nAbility, BOOL* pCritical, BOOL bOffHand, BYTE nAttackCount);
+    BOOL sub_73C490(CGameSprite* target);
     SHORT sub_73C6A0(CGameSprite* target, CItem* curWeapon, const ITEM_ABILITY* curAttack);
     SHORT sub_73C7E0();
     SHORT sub_73C8C0(CGameSprite* target);
@@ -584,8 +587,13 @@ public:
     SHORT sub_73CAE0(CItem* curWeapon, const ITEM_ABILITY* curAttack);
     SHORT sub_73CB10(CItem* curWeapon, const ITEM_ABILITY* curAttack);
     SHORT sub_73CC40(CItem* curWeapon, const ITEM_ABILITY* curAttack);
+    INT sub_73CD00(CGameSprite* target, CItem* curWeapon, const ITEM_ABILITY* curAttack);
+    SHORT sub_73CF10(CItem* curWeapon, const ITEM_ABILITY* curAttack);
+    SHORT sub_73D080(BOOL bLeftHand);
+    INT sub_73D1B0(CGameSprite* target, const ITEM_ABILITY* curAttack);
     SHORT sub_73D420();
     SHORT sub_73D440(CItem* curWeapon);
+    CGameEffect* Damage(CItem* curWeapon, CItem* pLauncher, SHORT nAbility, BOOL bCritical, const CAIObjectType& targetType, SHORT nTargetDirection, SHORT nAttackDirection, CGameSprite* target, BOOL bOffHand);
     void CheckModal();
     CGameObject* GetTargetShare();
     SHORT MoveToObject(CGameObject* pTarget);

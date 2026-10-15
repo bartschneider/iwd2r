@@ -839,6 +839,32 @@ WORD CItem::GetItemType()
     return nType;
 }
 
+// 0x4E9840
+SHORT CItem::sub_4E9840(const ITEM_ABILITY* ability)
+{
+    // The weapon's critical threat range beyond 20.
+    SHORT nRange = 0;
+
+    switch (GetItemType()) {
+    case 16:
+    case 19:
+    case 20:
+    case 23:
+    case 27:
+    case 31:
+    case 57:
+    case 69:
+        nRange = 1;
+        break;
+    }
+
+    if (ability != NULL && (ability->abilityFlags & 0x20000) != 0) {
+        nRange++;
+    }
+
+    return nRange;
+}
+
 // 0x4E9910
 DWORD CItem::GetCriticalHitMultiplier()
 {

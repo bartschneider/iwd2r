@@ -37,6 +37,7 @@ public:
     ITEM_ABILITY* GetAbility(INT nAbility);
     CGameEffect* GetAbilityEffect(LONG abilityNum, LONG effectNum, CGameObject* pObject);
     WORD GetItemType();
+    SHORT sub_4E9840(const ITEM_ABILITY* ability);
     DWORD GetCriticalHitMultiplier();
     DWORD GetWeight();
     CResRef GetUsedUpItemId();

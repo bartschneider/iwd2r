@@ -3788,6 +3788,16 @@ void CRuleTables::sub_546B60(CGameSprite* pSprite, int& a2, int& a3, int& a4, BO
     }
 }
 
+// 0x547020
+INT CRuleTables::GetIterativeAttackBonus(INT nBonus, INT nStep, INT nAttack) const
+{
+    nBonus -= nStep * nAttack;
+    if (nBonus < 0) {
+        nBonus = 0;
+    }
+    return nBonus;
+}
+
 // 0x547040
 INT CRuleTables::GetSaveAdjustmentForSourceSprite(CGameSprite* pSprite, const CResRef& sourceRes, DWORD nSavingThrow, BYTE nClass, DWORD nSpecialization, BYTE nCasterLevel) const
 {
