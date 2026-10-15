@@ -109,6 +109,67 @@ void ThickLineSlices(T* pSurface, UINT nMajorAxis, UINT nMinorAxis, INT nMajorAx
     }
 }
 
+// DrawRecticle16/24 (0x7989B0, 0x7C9B10): DrawRecticle32's body (0x7CB670)
+// with the depth's octants and line, lPitch in the units they take.
+template <class T, class HOctant, class VOctant, class Line>
+void Recticle(CVidMode* pMode, const CVIDMODE_RECTICLE_DESCRIPTION& rd, T* pSurface, LONG lPitch, const CRect* rClip, HOctant hOctant, VOctant vOctant, Line line)
+{
+    BYTE* pPixelList = new BYTE[max(rd.xAxis, rd.yAxis)];
+
+    INT v1 = rd.xAxis + rd.piePieceXOffset;
+    INT v2 = rd.yAxis + rd.piePieceYOffset;
+    INT v3;
+
+    CRect rLineClip;
+    BOOLEAN bLineClipped;
+
+    // The lines are clipped to the clip less its last row and column when
+    // there is one, and drawn unclipped when there is none.
+    if (rClip != NULL) {
+        rLineClip.SetRect(rClip->left, rClip->top, rClip->right - 1, rClip->bottom - 1);
+        bLineClipped = FALSE;
+    } else {
+        rLineClip.SetRect(0, 0, 0, 0);
+        bLineClipped = TRUE;
+    }
+
+    LONG nArcLength = pMode->GetEllipseArcPixelList(rd.xAxis, rd.yAxis, pPixelList);
+
+    nArcLength -= 1;
+
+    UTIL_ASSERT(nArcLength < max(rd.xAxis, rd.yAxis));
+
+    v3 = hOctant(rd.ptCenter.x, rd.ptCenter.y - v2, nArcLength - rd.xGap, pSurface, lPitch, FALSE, pPixelList, rClip);
+    line(rd.ptCenter.x + rd.xGap - nArcLength, v3, rd.ptCenter.x, rd.ptCenter.y + rd.piePiecePtYOffset - v2, pSurface, lPitch, rLineClip, bLineClipped);
+
+    v3 = hOctant(rd.ptCenter.x + 1, rd.ptCenter.y + pPixelList[0] - v2, nArcLength - rd.xGap - 1, pSurface, lPitch, TRUE, pPixelList + 1, rClip);
+    line(rd.ptCenter.x - rd.xGap + nArcLength, v3, rd.ptCenter.x, rd.ptCenter.y + rd.piePiecePtYOffset - v2, pSurface, lPitch, rLineClip, bLineClipped);
+
+    v3 = hOctant(rd.ptCenter.x, rd.ptCenter.y + v2, nArcLength - rd.xGap, pSurface, -lPitch, FALSE, pPixelList, rClip);
+    line(rd.ptCenter.x + rd.xGap - nArcLength, v3, rd.ptCenter.x, rd.ptCenter.y - rd.piePiecePtYOffset + v2, pSurface, lPitch, rLineClip, bLineClipped);
+
+    v3 = hOctant(rd.ptCenter.x + 1, rd.ptCenter.y - pPixelList[0] + v2, nArcLength - rd.xGap - 1, pSurface, -lPitch, TRUE, pPixelList + 1, rClip);
+    line(rd.ptCenter.x - rd.xGap + nArcLength, v3, rd.ptCenter.x, rd.ptCenter.y - rd.piePiecePtYOffset + v2, pSurface, lPitch, rLineClip, bLineClipped);
+
+    nArcLength = pMode->GetEllipseArcPixelList(rd.yAxis, rd.xAxis, pPixelList);
+
+    UTIL_ASSERT(nArcLength < max(rd.xAxis, rd.yAxis));
+
+    v3 = vOctant(rd.ptCenter.x - v1, rd.ptCenter.y, nArcLength - rd.yGap, pSurface, -lPitch, TRUE, pPixelList, rClip);
+    line(v3, rd.ptCenter.y + rd.yGap - nArcLength, rd.ptCenter.x + rd.piePiecePtXOffset - v1, rd.ptCenter.y, pSurface, lPitch, rLineClip, bLineClipped);
+
+    v3 = vOctant(rd.ptCenter.x + pPixelList[0] - v1, rd.ptCenter.y + 1, nArcLength - rd.yGap - 1, pSurface, lPitch, TRUE, pPixelList + 1, rClip);
+    line(v3, rd.ptCenter.y - rd.yGap + nArcLength, rd.ptCenter.x + rd.piePiecePtXOffset - v1, rd.ptCenter.y, pSurface, lPitch, rLineClip, bLineClipped);
+
+    v3 = vOctant(rd.ptCenter.x + v1, rd.ptCenter.y, nArcLength - rd.yGap, pSurface, -lPitch, FALSE, pPixelList, rClip);
+    line(v3, rd.ptCenter.y + rd.yGap - nArcLength, rd.ptCenter.x - rd.piePiecePtXOffset + v1, rd.ptCenter.y, pSurface, lPitch, rLineClip, bLineClipped);
+
+    v3 = vOctant(rd.ptCenter.x - pPixelList[0] + v1, rd.ptCenter.y + 1, nArcLength - rd.yGap - 1, pSurface, lPitch, FALSE, pPixelList + 1, rClip);
+    line(v3, rd.ptCenter.y - rd.yGap + nArcLength, rd.ptCenter.x - rd.piePiecePtXOffset + v1, rd.ptCenter.y, pSurface, lPitch, rLineClip, bLineClipped);
+
+    delete[] pPixelList;
+}
+
 // DrawThickLine16/24 (0x799280, 0x7CA330): DrawThickLine32's body on pixels
 // of type T, nUnit Ts to a pixel (3 bytes for 24 bits, else 1), lPitch in
 // Ts, nHalf half the thickness rounded up. slices draws the general case.
@@ -651,23 +712,234 @@ void CVidMode::DrawEllipse(const CPoint& ptCenter, const CSize& axis, const DDSU
 // 0x796260
 void CVidMode::DrawEllipse16(const CPoint& ptCenter, const CSize& axis, const DDSURFACEDESC& ddsd, const CRect* rClip, COLORREF rgbColor)
 {
-    // TODO: Incomplete.
+    // As DrawEllipse24 (0x7C8B40) with 16-bit pixels: the pitch in pixels
+    // (sar at 0x796292) and the colour with the dropped bits.
+    BYTE* pPixelList = new BYTE[max(axis.cx, axis.cy)];
+    LONG lPitch = ddsd.lPitch >> 1;
+    WORD color = static_cast<WORD>(((GetGValue(rgbColor) >> field_C6) << m_dwGBitShift)
+        | ((GetBValue(rgbColor) >> field_CA) << m_dwBBitShift)
+        | ((GetRValue(rgbColor) >> field_C2) << m_dwRBitShift));
+    LONG nArcLength = GetEllipseArcPixelList(axis.cx, axis.cy, pPixelList);
+
+    // __FILE__: C:\Projects\Icewind2\src\chitin\ChVideo.cpp
+    // __LINE__: 1506
+    UTIL_ASSERT(nArcLength <= max(axis.cx, axis.cy));
+
+    DrawEllipseHOctant16(ptCenter.x,
+        ptCenter.y - axis.cy,
+        nArcLength,
+        reinterpret_cast<WORD*>(ddsd.lpSurface),
+        lPitch,
+        FALSE,
+        pPixelList,
+        rClip,
+        color);
+
+    DrawEllipseHOctant16(ptCenter.x + 1,
+        ptCenter.y + pPixelList[0] - axis.cy,
+        nArcLength - 1,
+        reinterpret_cast<WORD*>(ddsd.lpSurface),
+        lPitch,
+        TRUE,
+        pPixelList + 1,
+        rClip,
+        color);
+
+    DrawEllipseHOctant16(ptCenter.x,
+        ptCenter.y + axis.cy,
+        nArcLength,
+        reinterpret_cast<WORD*>(ddsd.lpSurface),
+        -lPitch,
+        FALSE,
+        pPixelList,
+        rClip,
+        color);
+
+    DrawEllipseHOctant16(ptCenter.x + 1,
+        ptCenter.y - pPixelList[0] + axis.cy,
+        nArcLength - 1,
+        reinterpret_cast<WORD*>(ddsd.lpSurface),
+        -lPitch,
+        TRUE,
+        pPixelList + 1,
+        rClip,
+        color);
+
+    nArcLength = GetEllipseArcPixelList(axis.cy, axis.cx, pPixelList);
+
+    // __FILE__: C:\Projects\Icewind2\src\chitin\ChVideo.cpp
+    // __LINE__: 1529
+    UTIL_ASSERT(nArcLength < max(axis.cx, axis.cy));
+
+    DrawEllipseVOctant16(ptCenter.x - axis.cx,
+        ptCenter.y,
+        nArcLength,
+        reinterpret_cast<WORD*>(ddsd.lpSurface),
+        -lPitch,
+        TRUE,
+        pPixelList,
+        rClip,
+        color);
+
+    DrawEllipseVOctant16(ptCenter.x + pPixelList[0] - axis.cx,
+        ptCenter.y + 1,
+        nArcLength - 1,
+        reinterpret_cast<WORD*>(ddsd.lpSurface),
+        lPitch,
+        TRUE,
+        pPixelList + 1,
+        rClip,
+        color);
+
+    DrawEllipseVOctant16(ptCenter.x + axis.cx,
+        ptCenter.y,
+        nArcLength,
+        reinterpret_cast<WORD*>(ddsd.lpSurface),
+        -lPitch,
+        FALSE,
+        pPixelList,
+        rClip,
+        color);
+
+    DrawEllipseVOctant16(ptCenter.x - pPixelList[0] + axis.cx,
+        ptCenter.y + 1,
+        nArcLength - 1,
+        reinterpret_cast<WORD*>(ddsd.lpSurface),
+        lPitch,
+        FALSE,
+        pPixelList + 1,
+        rClip,
+        color);
+
+    delete[] pPixelList;
 }
 
 // 0x796550
 LONG CVidMode::DrawEllipseHOctant16(LONG x, LONG y, INT nArcLength, WORD* pSurface, LONG lPitch, BOOLEAN clockwise, unsigned char* pArcData, const CRect* rClip, WORD color)
 {
-    // TODO: Incomplete.
+    INT nStep;
 
-    return 0;
+    if (rClip == NULL) {
+        if (lPitch < 0) {
+            pSurface += x - y * lPitch;
+            nStep = -1;
+        } else {
+            pSurface += x + y * lPitch;
+            nStep = 1;
+        }
+
+        while (nArcLength != 0) {
+            *pSurface = color;
+
+            if (*pArcData++ != 0) {
+                pSurface += lPitch;
+                y += nStep;
+            }
+
+            if (clockwise) {
+                pSurface++;
+            } else {
+                pSurface--;
+            }
+
+            nArcLength--;
+        }
+
+        return y;
+    }
+
+    if (lPitch < 0) {
+        pSurface += (x - (y - rClip->top) * lPitch) - rClip->left;
+        nStep = -1;
+    } else {
+        pSurface += ((y - rClip->top) * lPitch - rClip->left) + x;
+        nStep = 1;
+    }
+
+    while (nArcLength != 0) {
+        if (rClip->PtInRect(CPoint(x, y))) {
+            *pSurface = color;
+        }
+
+        if (*pArcData++ != 0) {
+            pSurface += lPitch;
+            y += nStep;
+        }
+
+        if (clockwise) {
+            pSurface++;
+            x++;
+        } else {
+            pSurface--;
+            x--;
+        }
+
+        nArcLength--;
+    }
+
+    return y;
 }
 
 // 0x7966B0
 LONG CVidMode::DrawEllipseVOctant16(LONG x, LONG y, INT nArcLength, WORD* pSurface, LONG lPitch, BOOLEAN clockwise, unsigned char* pArcData, const CRect* rClip, WORD color)
 {
-    // TODO: Incomplete.
+    if (rClip == NULL) {
+        if (lPitch < 0) {
+            pSurface += x - y * lPitch;
+        } else {
+            pSurface += x + y * lPitch;
+        }
 
-    return 0;
+        while (nArcLength != 0) {
+            *pSurface = color;
+
+            if (*pArcData++ != 0) {
+                if (clockwise) {
+                    pSurface++;
+                    x++;
+                } else {
+                    pSurface--;
+                    x--;
+                }
+            }
+
+            pSurface += lPitch;
+            nArcLength--;
+        }
+
+        return x;
+    }
+
+    INT nStep;
+    if (lPitch < 0) {
+        pSurface += (x - (y - rClip->top) * lPitch) - rClip->left;
+        nStep = -1;
+    } else {
+        pSurface += ((y - rClip->top) * lPitch - rClip->left) + x;
+        nStep = 1;
+    }
+
+    while (nArcLength != 0) {
+        if (rClip->PtInRect(CPoint(x, y))) {
+            *pSurface = color;
+        }
+
+        if (*pArcData++ != 0) {
+            if (clockwise) {
+                pSurface++;
+                x++;
+            } else {
+                pSurface--;
+                x--;
+            }
+        }
+
+        pSurface += lPitch;
+        y += nStep;
+        nArcLength--;
+    }
+
+    return x;
 }
 
 // #binary-identical
@@ -1143,7 +1415,22 @@ void CVidMode::DrawRecticle(const CVIDMODE_RECTICLE_DESCRIPTION& rd, const DDSUR
 // 0x7989B0
 void CVidMode::DrawRecticle16(const CVIDMODE_RECTICLE_DESCRIPTION& rd, const DDSURFACEDESC& ddsd, const CRect* rClip, COLORREF rgbColor)
 {
-    // TODO: Incomplete.
+    // As DrawRecticle32 (0x7CB670) with the 16-bit octants and line, the
+    // pitch in pixels and the colour with the dropped bits.
+    WORD color = static_cast<WORD>(((GetRValue(rgbColor) >> field_C2) << m_dwRBitShift)
+        | ((GetGValue(rgbColor) >> field_C6) << m_dwGBitShift)
+        | ((GetBValue(rgbColor) >> field_CA) << m_dwBBitShift));
+
+    Recticle(this, rd, reinterpret_cast<WORD*>(ddsd.lpSurface), ddsd.lPitch >> 1, rClip,
+        [this, color](LONG x, LONG y, INT n, WORD* p, LONG lPitch, BOOLEAN clockwise, BYTE* pArc, const CRect* pClip) {
+            return DrawEllipseHOctant16(x, y, n, p, lPitch, clockwise, pArc, pClip, color);
+        },
+        [this, color](LONG x, LONG y, INT n, WORD* p, LONG lPitch, BOOLEAN clockwise, BYTE* pArc, const CRect* pClip) {
+            return DrawEllipseVOctant16(x, y, n, p, lPitch, clockwise, pArc, pClip, color);
+        },
+        [this, color](INT x1, INT y1, INT x2, INT y2, WORD* p, LONG lPitch, const CRect& r, BOOLEAN bClipped) {
+            DrawLine16(x1, y1, x2, y2, p, lPitch, r, color, bClipped);
+        });
 }
 
 // #binary-identical
@@ -2144,7 +2431,20 @@ LONG CVidMode::DrawEllipseHOctant24(LONG x, LONG y, INT nArcLength, BYTE* pSurfa
 // 0x7C9B10
 void CVidMode::DrawRecticle24(const CVIDMODE_RECTICLE_DESCRIPTION& rd, const DDSURFACEDESC& ddsd, const CRect* rClip, COLORREF rgbColor)
 {
-    // TODO: Incomplete.
+    // As DrawRecticle32 (0x7CB670) with the 24-bit octants and line, the
+    // pitch in bytes.
+    DWORD color = (GetGValue(rgbColor) << m_dwGBitShift) | (GetBValue(rgbColor) << m_dwBBitShift) | (GetRValue(rgbColor) << m_dwRBitShift);
+
+    Recticle(this, rd, reinterpret_cast<BYTE*>(ddsd.lpSurface), ddsd.lPitch, rClip,
+        [this, color](LONG x, LONG y, INT n, BYTE* p, LONG lPitch, BOOLEAN clockwise, BYTE* pArc, const CRect* pClip) {
+            return DrawEllipseHOctant24(x, y, n, p, lPitch, clockwise, pArc, pClip, color);
+        },
+        [this, color](LONG x, LONG y, INT n, BYTE* p, LONG lPitch, BOOLEAN clockwise, BYTE* pArc, const CRect* pClip) {
+            return DrawEllipseVOctant24(x, y, n, p, lPitch, clockwise, pArc, pClip, color);
+        },
+        [this, color](INT x1, INT y1, INT x2, INT y2, BYTE* p, LONG lPitch, const CRect& r, BOOLEAN bClipped) {
+            DrawLine24(x1, y1, x2, y2, p, lPitch, r, color, bClipped);
+        });
 }
 
 // 0x7CA0D0

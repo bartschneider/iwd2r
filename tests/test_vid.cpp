@@ -1220,3 +1220,109 @@ TEST_CASE("draw_thick_line16_24", "[vid]")
     }
     CHECK(pixels24 == expected24);
 }
+
+// DrawEllipse16 (0x796260) draws the outline through the four ends of its
+// axes with the 16-bit colour (5-6-5 here), the same with the whole surface
+// as the clip as without one, symmetric about the centre.
+TEST_CASE("draw_ellipse16", "[vid]")
+{
+    CVidInf mode;
+    mode.m_dwRBitShift = 11;
+    mode.m_dwGBitShift = 5;
+    mode.m_dwBBitShift = 0;
+    mode.field_C2 = 3;
+    mode.field_C6 = 2;
+    mode.field_CA = 3;
+    constexpr int kW = 24;
+    constexpr int kH = 16;
+    std::vector<WORD> plain(kW * kH, 0);
+    std::vector<WORD> clipped(kW * kH, 0);
+    DDSURFACEDESC ddsd = {};
+    ddsd.lPitch = kW * 2;
+    ddsd.lpSurface = plain.data();
+    mode.DrawEllipse16(CPoint(11, 7), CSize(7, 4), ddsd, nullptr, RGB(0xF8, 0xFC, 0xF8));
+    ddsd.lpSurface = clipped.data();
+    const CRect rWhole(0, 0, kW, kH);
+    mode.DrawEllipse16(CPoint(11, 7), CSize(7, 4), ddsd, &rWhole, RGB(0xF8, 0xFC, 0xF8));
+    CHECK(plain == clipped);
+
+    auto lit = [&](int x, int y) { return plain[y * kW + x] == 0xFFFF; };
+    CHECK(lit(4, 7));
+    CHECK(lit(18, 7));
+    CHECK(lit(11, 3));
+    CHECK(lit(11, 11));
+    CHECK_FALSE(lit(11, 7));
+    for (int y = 0; y < kH; ++y) {
+        for (int x = 0; x < kW; ++x) {
+            const int mx = 22 - x;
+            const int my = 14 - y;
+            if (mx >= 0 && mx < kW && my >= 0 && my < kH) {
+                INFO("pixel " << x << "," << y);
+                CHECK(lit(x, y) == lit(mx, my));
+            }
+        }
+    }
+}
+
+// DrawRecticle16 (0x7989B0) and DrawRecticle24 (0x7C9B10) draw the same
+// pixels as DrawRecticle32 (0x7CB670) in their own formats.
+TEST_CASE("draw_recticle16_24", "[vid]")
+{
+    CVidInf mode;
+    mode.m_dwRBitShift = 16;
+    mode.m_dwGBitShift = 8;
+    mode.m_dwBBitShift = 0;
+    constexpr int kW = 64;
+    constexpr int kH = 48;
+    CVIDMODE_RECTICLE_DESCRIPTION desc = {};
+    desc.ptCenter = CPoint(30, 22);
+    desc.xAxis = 14;
+    desc.yAxis = 9;
+    desc.xGap = 3;
+    desc.yGap = 2;
+    desc.piePieceXOffset = 2;
+    desc.piePieceYOffset = 1;
+    desc.piePiecePtXOffset = 3;
+    desc.piePiecePtYOffset = 2;
+    const CRect rClip(5, 4, 50, 40);
+
+    for (int withClip = 0; withClip < 2; ++withClip) {
+        INFO("clip " << withClip);
+        const CRect* pClip = withClip != 0 ? &rClip : nullptr;
+        std::vector<DWORD> p32(kW * kH, 0);
+        DDSURFACEDESC ddsd = {};
+        ddsd.lPitch = kW * 4;
+        ddsd.lpSurface = p32.data();
+        mode.DrawRecticle32(desc, ddsd, pClip, RGB(0xF8, 0xFC, 0xF8));
+
+        std::vector<BYTE> p24(kW * kH * 3, 0);
+        ddsd.lPitch = kW * 3;
+        ddsd.lpSurface = p24.data();
+        mode.DrawRecticle24(desc, ddsd, pClip, RGB(0xF8, 0xFC, 0xF8));
+
+        std::vector<WORD> p16(kW * kH, 0);
+        ddsd.lPitch = kW * 2;
+        ddsd.lpSurface = p16.data();
+        mode.m_dwRBitShift = 11;
+        mode.m_dwGBitShift = 5;
+        mode.field_C2 = 3;
+        mode.field_C6 = 2;
+        mode.field_CA = 3;
+        mode.DrawRecticle16(desc, ddsd, pClip, RGB(0xF8, 0xFC, 0xF8));
+        mode.m_dwRBitShift = 16;
+        mode.m_dwGBitShift = 8;
+        mode.field_C2 = 0;
+        mode.field_C6 = 0;
+        mode.field_CA = 0;
+
+        int drawn = 0;
+        for (int i = 0; i < kW * kH; ++i) {
+            const bool lit32 = p32[i] == 0x00F8FCF8;
+            drawn += lit32 ? 1 : 0;
+            INFO("pixel " << i);
+            CHECK(lit32 == (p16[i] == 0xFFFF));
+            CHECK(lit32 == (p24[i * 3] == 0xF8 && p24[i * 3 + 1] == 0xFC && p24[i * 3 + 2] == 0xF8));
+        }
+        CHECK(drawn > 40);
+    }
+}

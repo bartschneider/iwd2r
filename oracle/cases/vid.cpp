@@ -2083,6 +2083,91 @@ void DrawEllipse24(CaseContext& ctx)
     }
 }
 
+// CVidMode::DrawEllipse16(ptCenter, axis, ddsd, rClip, rgbColor)
+// (0x796260), with its octants through the vtable (0x796550, 0x7966B0) and
+// GetEllipseArcPixelList. Unreachable in iwd2r (32 bpp only).
+constexpr uintptr_t kDrawEllipse16 = 0x796260;
+
+// DrawEllipse24's inputs on a 96x96 16-bit canvas of random words, on a
+// 5-6-5 and a 5-5-5 video mode in turn. The whole canvas is compared.
+void DrawEllipse16(CaseContext& ctx)
+{
+    VideoFixture video(ctx);
+    uint8_t* canvas = nullptr;
+    uint8_t* args = nullptr;
+    uint8_t* ddsd = nullptr;
+    const int pitch = kEllipseCanvas * 2;
+    ctx.SetInputs("building the original's canvas");
+    ctx.CallOriginal([&] {
+        canvas = OriginalBlock(static_cast<size_t>(pitch * kEllipseCanvas));
+        args = OriginalBlock(32);
+        ddsd = OriginalBlock(0x6C);
+    });
+    std::vector<uint8_t> mine(static_cast<size_t>(pitch * kEllipseCanvas));
+    Picks picks(ctx.seed, 0x456C6C3136000000ull); // "Ell16"
+    const int count = 400 + ctx.iterations / 20;
+    for (int n = 0; n < count; ++n) {
+        if (n == 0 || n == count / 2) {
+            SetMode16(video, ctx, n == 0);
+        }
+        const int32_t ax = picks.Between(1, 30);
+        const int32_t ay = picks.Between(1, 30);
+        const bool clipped = picks.Between(0, 1) != 0;
+        int32_t cx;
+        int32_t cy;
+        int32_t r[4] = { 0, 0, 0, 0 };
+        if (clipped) {
+            r[0] = picks.Between(0, 60);
+            r[1] = picks.Between(0, 60);
+            r[2] = picks.Between(r[0], 95);
+            r[3] = picks.Between(r[1], 95);
+            const int32_t x0 = (std::max)(ax + 1, r[0] - ax);
+            const int32_t y0 = (std::max)(ay + 1, r[1] - ay);
+            cx = picks.Between(x0, (std::max)(x0, (std::min)(94 - ax, r[2] + ax)));
+            cy = picks.Between(y0, (std::max)(y0, (std::min)(94 - ay, r[3] + ay)));
+        } else {
+            cx = picks.Between(ax + 1, 94 - ax);
+            cy = picks.Between(ay + 1, 94 - ay);
+        }
+        const uint32_t rgb = picks.Bits() & 0xFFFFFF;
+        for (uint8_t& b : mine) {
+            b = static_cast<uint8_t>(picks.Bits());
+        }
+        std::vector<BYTE> arc(256);
+        const LONG nArcH = video.oursMode->GetEllipseArcPixelList(ax, ay, arc.data());
+        const LONG nArcV = video.oursMode->GetEllipseArcPixelList(ay, ax, arc.data());
+        if (nArcH > (std::max)(ax, ay) || nArcV >= (std::max)(ax, ay)) {
+            continue;
+        }
+        char inputs[200];
+        std::snprintf(inputs, sizeof(inputs), "input %d: centre (%d,%d), axis (%d,%d), clip %s (%d,%d)-(%d,%d), rgb 0x%06X",
+            n, cx, cy, ax, ay, clipped ? "on" : "off", r[0], r[1], r[2], r[3], rgb);
+        ctx.SetInputs(inputs);
+        const int32_t offset = clipped ? r[1] * pitch + r[0] * 2 : 0;
+        ctx.CallOriginal([&] {
+            std::memcpy(canvas, mine.data(), mine.size());
+            const int32_t pt[2] = { cx, cy };
+            const int32_t size[2] = { ax, ay };
+            std::memcpy(args, pt, 8);
+            std::memcpy(args + 8, size, 8);
+            std::memcpy(args + 16, r, 16);
+            Put<int32_t>(ddsd, 0x10, pitch);
+            Put<uint32_t>(ddsd, 0x24, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(canvas + offset)));
+            reinterpret_cast<DrawEllipse24Fn>(kDrawEllipse16)(video.mode, nullptr, args, args + 8, ddsd,
+                clipped ? args + 16 : nullptr, rgb);
+        });
+        DDSURFACEDESC desc = {};
+        desc.lPitch = pitch;
+        desc.lpSurface = mine.data() + offset;
+        const CRect rClip(r[0], r[1], r[2], r[3]);
+        video.oursMode->DrawEllipse16(CPoint(cx, cy), CSize(ax, ay), desc, clipped ? &rClip : nullptr, rgb);
+        ctx.CountInputs(1);
+        std::vector<uint32_t> a(canvas, canvas + mine.size());
+        std::vector<uint32_t> b(mine.begin(), mine.end());
+        CompareArrays(ctx, a.data(), b.data(), static_cast<int>(mine.size()));
+    }
+}
+
 // CVidTile::BltTile8To16(pSurface, lPitch, pData, blitSize, nDataJump,
 // dwFlags) (0x7B22E0), `ret 0x18`. Unreachable in iwd2r (32 bpp only). It
 // reads the realized palette (0x9064F8) and, for 0x8, the video mode's
@@ -2327,6 +2412,121 @@ void Shapes32(CaseContext& ctx, bool recticle, uint64_t salt)
     }
 }
 
+// CVidMode::DrawRecticle16 (0x7989B0) and DrawRecticle24 (0x7C9B10), as
+// DrawRecticle32 with the depth's octants and line. Unreachable in iwd2r.
+constexpr uintptr_t kDrawRecticle16 = 0x7989B0;
+constexpr uintptr_t kDrawRecticle24 = 0x7C9B10;
+
+// Shapes32's reticles on a 128x128 16- or 24-bit canvas of random bytes
+// (the 16-bit ones on a 5-6-5 and a 5-5-5 mode in turn). The whole canvas
+// is compared byte by byte.
+void RecticleDepth(CaseContext& ctx, int nBpp, uint64_t salt)
+{
+    VideoFixture video(ctx);
+    const int bytes = nBpp / 8;
+    uint8_t* canvas = nullptr;
+    uint8_t* args = nullptr;
+    uint8_t* ddsd = nullptr;
+    const int pitch = kShapeCanvas * bytes;
+    ctx.SetInputs("building the original's canvas");
+    ctx.CallOriginal([&] {
+        canvas = OriginalBlock(static_cast<size_t>(pitch * kShapeCanvas));
+        args = OriginalBlock(64);
+        ddsd = OriginalBlock(0x6C);
+    });
+    std::vector<uint8_t> mine(static_cast<size_t>(pitch * kShapeCanvas));
+    Picks picks(ctx.seed, salt);
+    const int count = 500 + ctx.iterations / 20;
+    for (int n = 0; n < count; ++n) {
+        if (nBpp == 16 && (n == 0 || n == count / 2)) {
+            SetMode16(video, ctx, n == 0);
+        }
+        const int32_t ax = picks.Between(2, 30);
+        const int32_t ay = picks.Between(2, 30);
+        std::vector<BYTE> arc(256);
+        const LONG nArcH = video.oursMode->GetEllipseArcPixelList(ax, ay, arc.data());
+        const LONG nArcV = video.oursMode->GetEllipseArcPixelList(ay, ax, arc.data());
+        if (nArcH > (std::max)(ax, ay) || nArcV >= (std::max)(ax, ay) || nArcH < 3 || nArcV < 3) {
+            continue;
+        }
+        CVIDMODE_RECTICLE_DESCRIPTION desc = {};
+        desc.xAxis = static_cast<SHORT>(ax);
+        desc.yAxis = static_cast<SHORT>(ay);
+        desc.xGap = static_cast<SHORT>(picks.Between(0, nArcH - 3));
+        desc.yGap = static_cast<SHORT>(picks.Between(0, nArcV - 2));
+        desc.piePieceXOffset = static_cast<SHORT>(picks.Between(0, 6));
+        desc.piePieceYOffset = static_cast<SHORT>(picks.Between(0, 6));
+        desc.piePiecePtXOffset = static_cast<SHORT>(picks.Between(0, 6));
+        desc.piePiecePtYOffset = static_cast<SHORT>(picks.Between(0, 6));
+        const bool clipped = picks.Between(0, 1) != 0;
+        int32_t r[4] = { 0, 0, 0, 0 };
+        if (clipped) {
+            r[0] = picks.Between(0, 90);
+            r[1] = picks.Between(0, 90);
+            r[2] = picks.Between(r[0] + 1, 127);
+            r[3] = picks.Between(r[1] + 1, 127);
+        }
+        const int32_t cx = picks.Between(44, 83);
+        const int32_t cy = picks.Between(44, 83);
+        desc.ptCenter = CPoint(cx, cy);
+        const uint32_t rgb = picks.Bits() & 0xFFFFFF;
+        for (uint8_t& b : mine) {
+            b = static_cast<uint8_t>(picks.Bits());
+        }
+        char inputs[240];
+        std::snprintf(inputs, sizeof(inputs),
+            "input %d: centre (%d,%d), axis (%d,%d), gap (%d,%d), pie (%d,%d) pt (%d,%d), clip %s (%d,%d)-(%d,%d)", n,
+            cx, cy, ax, ay, desc.xGap, desc.yGap, desc.piePieceXOffset, desc.piePieceYOffset, desc.piePiecePtXOffset,
+            desc.piePiecePtYOffset, clipped ? "on" : "off", r[0], r[1], r[2], r[3]);
+        ctx.SetInputs(inputs);
+        const int32_t offset = clipped ? r[1] * pitch + r[0] * bytes : 0;
+        ctx.CallOriginal([&] {
+            std::memcpy(canvas, mine.data(), mine.size());
+            std::memcpy(args + 16, r, 16);
+            Put<int32_t>(args + 32, 0, cx);
+            Put<int32_t>(args + 32, 4, cy);
+            Put<int16_t>(args + 32, 8, desc.xAxis);
+            Put<int16_t>(args + 32, 10, desc.yAxis);
+            Put<int16_t>(args + 32, 12, desc.piePiecePtXOffset);
+            Put<int16_t>(args + 32, 14, desc.piePiecePtYOffset);
+            Put<int16_t>(args + 32, 16, desc.piePieceXOffset);
+            Put<int16_t>(args + 32, 18, desc.piePieceYOffset);
+            Put<int16_t>(args + 32, 20, desc.xGap);
+            Put<int16_t>(args + 32, 22, desc.yGap);
+            Put<int32_t>(ddsd, 0x10, pitch);
+            Put<uint32_t>(ddsd, 0x24, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(canvas + offset)));
+            reinterpret_cast<DrawRecticle32Fn>(nBpp == 16 ? kDrawRecticle16 : kDrawRecticle24)(video.mode, nullptr,
+                args + 32, ddsd, clipped ? args + 16 : nullptr, rgb);
+        });
+        DDSURFACEDESC surface = {};
+        surface.lPitch = pitch;
+        surface.lpSurface = mine.data() + offset;
+        const CRect rClip(r[0], r[1], r[2], r[3]);
+        if (nBpp == 16) {
+            video.oursMode->DrawRecticle16(desc, surface, clipped ? &rClip : nullptr, rgb);
+        } else {
+            video.oursMode->DrawRecticle24(desc, surface, clipped ? &rClip : nullptr, rgb);
+        }
+        ctx.CountInputs(1);
+        for (size_t i = 0; i < mine.size(); ++i) {
+            if (canvas[i] != mine[i]) {
+                ctx.Fail(ctx.Inputs() + ", byte " + std::to_string(i), Hex(canvas[i]), Hex(mine[i]));
+                break;
+            }
+        }
+    }
+}
+
+void Recticle16(CaseContext& ctx)
+{
+    RecticleDepth(ctx, 16, 0x5265637431360000ull); // "Rect16"
+}
+
+void Recticle24(CaseContext& ctx)
+{
+    RecticleDepth(ctx, 24, 0x5265637432340000ull); // "Rect24"
+}
+
 void Ellipse32(CaseContext& ctx)
 {
     Shapes32(ctx, false, 0x456C6C3332000000ull); // "Ell32"
@@ -2401,8 +2601,11 @@ ORACLE_CASE("vid/cell_blt8to32_point", CellBlt8To32Point);
 ORACLE_CASE("vid/draw_line16", DrawLine16);
 ORACLE_CASE("vid/draw_line32", DrawLine32);
 ORACLE_CASE("vid/draw_ellipse24", DrawEllipse24);
+ORACLE_CASE("vid/draw_ellipse16", DrawEllipse16);
 ORACLE_CASE("vid/blt_tile8to16", BltTile8To16);
 ORACLE_CASE("vid/blt_tile8to32", BltTile8To32);
 ORACLE_CASE("vid/blt_stencil_tile8to32", BltStencilTile8To32);
 ORACLE_CASE("vid/draw_ellipse32", Ellipse32);
 ORACLE_CASE("vid/draw_recticle32", Recticle32);
+ORACLE_CASE("vid/draw_recticle16", Recticle16);
+ORACLE_CASE("vid/draw_recticle24", Recticle24);
