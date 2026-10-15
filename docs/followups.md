@@ -176,3 +176,9 @@ The guards in `src/render/api.h` leave these for the renderer that first draws t
 - The container slot handler 0x6957E0 needs `SwapItemGround` before dropping onto the ground works as in the original.
 - Container, bag and temple buy paths have no tests yet.
 - The area-move test uses AR1001 because loading AR3000 aborted (see the persistent-effect resref fix).
+
+## Persistent effects and spawn lists (from project 3, milestone 3, crashfix-regen)
+
+- `CGameEffectDisease::ApplyEffect` uses an uninitialised `pEffect` after `UTIL_ASSERT(FALSE)` for an unknown mode. This is the original's bug, kept as is.
+- Running several engine test cases in one `iwd2r_tests` process can crash at random, because each test file starts its own engine (seen with `[effects]` across test_effects and test_effects_iwd, and with the movement rounding test). ctest and the gate run one process per case, so they are unaffected.
+- The AR1001 stand-in in the area-move test (screens-items) can go back to AR3000 now that AR3000 loads.
