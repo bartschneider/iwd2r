@@ -1039,6 +1039,7 @@ BOOL CVidCell::Render(WORD* pSurface, LONG lPitch, INT nRefPtX, INT nRefPtY, con
         // __FILE__: C:\Projects\Icewind2\src\chitin\ChVidImage.cpp
         // __LINE__: 2289
         UTIL_ASSERT_MSG(FALSE, "CVidCell::Render m_pFrame = GARBAGE");
+        return FALSE;
     }
 
     CPoint pt(nRefPtX - m_pFrame->nCenterX, nRefPtY - m_pFrame->nCenterY);
@@ -1410,8 +1411,9 @@ void CVidCell::BltBackGroundToFx(LPDIRECTDRAWSURFACE pSurface, CRect& rSrc, cons
                 &rSrc,
                 DDBLT_WAIT | DDBLT_DDFX,
                 &fx);
+            g_pChitin->GetCurrentVideoMode()->CheckResults(hr);
         } while (hr == DDERR_SURFACELOST || hr == DDERR_WASSTILLDRAWING);
-    } else {
+    } else if (rSrcSurface.top < rSrcSurface.bottom && rSrcSurface.left < rSrcSurface.right) {
         do {
             hr = g_pChitin->cVideo.cVidBlitter.BltFast(g_pChitin->GetCurrentVideoMode()->pSurfaces[m_nFxSurface],
                 destX,
@@ -1419,6 +1421,7 @@ void CVidCell::BltBackGroundToFx(LPDIRECTDRAWSURFACE pSurface, CRect& rSrc, cons
                 pSurface,
                 rSrcSurface,
                 DDBLTFAST_WAIT);
+            g_pChitin->GetCurrentVideoMode()->CheckResults(hr);
             if (hr != DDERR_SURFACELOST && hr != DDERR_WASSTILLDRAWING) {
                 break;
             }
@@ -1511,6 +1514,10 @@ BOOL CVidCell::BltFromFX(LPDIRECTDRAWSURFACE pSurface, int x, int y, const CRect
 // 0x7B0980
 BOOL CVidCell::GetFrame(BOOLEAN bDemanded)
 {
+    if (pRes == NULL) {
+        return FALSE;
+    }
+
     if (!bDemanded) {
         if (pRes->Demand() == NULL) {
             return FALSE;
