@@ -5543,6 +5543,297 @@ CUIControlButtonInventorySlot::~CUIControlButtonInventorySlot()
 {
 }
 
+// 0x62D0B0
+void CUIControlButtonInventorySlot::UpdateHighlight(INT x, INT y)
+{
+    // Frame 2 where the item on the cursor can go and the mouse is, 1 where
+    // it can go, 0 elsewhere.
+    CScreenInventory* pInventory = g_pBaldurChitin->m_pEngineInventory;
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenInventory.cpp
+    // __LINE__: 6051
+    UTIL_ASSERT(pInventory != NULL);
+
+    CItem* pItem = pInventory->m_pTempItem;
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenInventory.cpp
+    // __LINE__: 6056
+    UTIL_ASSERT(g_pBaldurChitin->GetObjectGame() != NULL);
+
+    if (pItem != NULL) {
+        STRREF strError;
+        SHORT nSlot = static_cast<SHORT>(pInventory->MapButtonIdToInventoryId(m_nID));
+        if (!CInfGame_CanPortraitEquipInSlot(g_pBaldurChitin->GetObjectGame(),
+                static_cast<SHORT>(pInventory->GetSelectedCharacter()),
+                nSlot,
+                &pItem,
+                &strError)) {
+            if (m_cVidCell.m_nCurrentFrame != 0) {
+                m_cVidCell.FrameSet(0);
+                InvalidateRect();
+            }
+        } else if (x < m_ptOrigin.x
+            || y < m_ptOrigin.y
+            || m_ptOrigin.x + m_size.cx < x
+            || m_ptOrigin.y + m_size.cy < y) {
+            if (m_cVidCell.m_nCurrentFrame != 1) {
+                m_cVidCell.FrameSet(1);
+                InvalidateRect();
+            }
+        } else if (m_cVidCell.m_nCurrentFrame != 2) {
+            m_cVidCell.FrameSet(2);
+            InvalidateRect();
+        }
+    } else if (m_cVidCell.m_nCurrentFrame != 0) {
+        m_cVidCell.FrameSet(0);
+        InvalidateRect();
+    }
+}
+
+// 0x62D1F0
+void CUIControlButtonInventorySlot::UpdateWeaponHighlight(INT x, INT y)
+{
+    // The weapon and quiver slots: frame 3 marks the weapon in use (and its
+    // set), unless the item on the cursor can go there.
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenInventory.cpp
+    // __LINE__: 6204
+    UTIL_ASSERT(pGame != NULL);
+
+    CScreenInventory* pInventory = g_pBaldurChitin->m_pEngineInventory;
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenInventory.cpp
+    // __LINE__: 6208
+    UTIL_ASSERT(pInventory != NULL);
+
+    CItem* pItem = pInventory->m_pTempItem;
+
+    // NOTE: Uninline.
+    LONG nCharacterId = pGame->GetCharacterId(static_cast<SHORT>(pInventory->GetSelectedCharacter()));
+
+    CGameSprite* pSprite;
+
+    BYTE rc;
+    do {
+        rc = pGame->GetObjectArray()->GetShare(nCharacterId,
+            CGameObjectArray::THREAD_ASYNCH,
+            reinterpret_cast<CGameObject**>(&pSprite),
+            INFINITE);
+    } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+    if (rc != CGameObjectArray::SUCCESS) {
+        UpdateHighlight(x, y);
+        return;
+    }
+
+    INT nSlot = pInventory->MapButtonIdToInventoryId(m_nID);
+    DWORD nSelectedWeapon = pSprite->m_equipment.m_selectedWeapon;
+    DWORD nLauncherSlot = -1;
+
+    if (pSprite->m_equipment.m_items[nSelectedWeapon] != NULL) {
+        CItem* pWeapon = pSprite->m_equipment.m_items[nSelectedWeapon];
+        SHORT nLauncher;
+        pWeapon->Demand();
+        CItem* pLauncher = pSprite->GetLauncher(pWeapon->GetAbility(pSprite->m_equipment.m_selectedWeaponAbility), nLauncher);
+        pWeapon->Release();
+        if (pLauncher != NULL) {
+            nLauncherSlot = pSprite->m_nWeaponSet * 2 + 43;
+        }
+    }
+
+    if ((pSprite->m_derivedStats.m_generalState & STATE_DEAD) == 0) {
+        // The magic weapon (slot 10) stands for the whole set.
+        BOOL bMagicWeapon = (nSlot == 43 || nSlot == 45 || nSlot == 47 || nSlot == 49)
+            && nSelectedWeapon == 10;
+
+        if (static_cast<DWORD>(nSlot) != nSelectedWeapon
+            && static_cast<DWORD>(nSlot) != nLauncherSlot
+            && ((nSlot - 43) / 2 != pSprite->m_nWeaponSet
+                || (pSprite->m_equipment.m_items[nSlot] == NULL && !bMagicWeapon))) {
+            UpdateHighlight(x, y);
+        } else if (pItem == NULL) {
+            if (m_cVidCell.m_nCurrentFrame != 3) {
+                m_cVidCell.FrameSet(3);
+                InvalidateRect();
+            }
+        } else {
+            STRREF strError;
+            if (!CInfGame_CanPortraitEquipInSlot(pGame,
+                    static_cast<SHORT>(pInventory->GetSelectedCharacter()),
+                    static_cast<SHORT>(nSlot),
+                    &pItem,
+                    &strError)) {
+                if (m_cVidCell.m_nCurrentFrame != 3) {
+                    m_cVidCell.FrameSet(3);
+                    InvalidateRect();
+                }
+            } else if (x < m_ptOrigin.x
+                || y < m_ptOrigin.y
+                || m_ptOrigin.x + m_size.cx < x
+                || m_ptOrigin.y + m_size.cy < y) {
+                if (m_cVidCell.m_nCurrentFrame != 1) {
+                    m_cVidCell.FrameSet(1);
+                    InvalidateRect();
+                }
+            } else if (m_cVidCell.m_nCurrentFrame != 2) {
+                m_cVidCell.FrameSet(2);
+                InvalidateRect();
+            }
+        }
+    }
+
+    pGame->GetObjectArray()->ReleaseShare(nCharacterId,
+        CGameObjectArray::THREAD_ASYNCH,
+        INFINITE);
+}
+
+// 0x62D4B0
+void CUIControlButtonInventorySlot::TimerAsynchronousUpdate(BOOLEAN bInside)
+{
+    CUIControlBase::TimerAsynchronousUpdate(bInside);
+
+    if (!m_bActive && !m_bInactiveRender) {
+        return;
+    }
+
+    if (!m_pPanel->m_bActive && m_cVidCell.m_nCurrentFrame != 3) {
+        if (m_cVidCell.m_nCurrentFrame != 0) {
+            m_cVidCell.FrameSet(0);
+            InvalidateRect();
+        }
+        return;
+    }
+
+    CScreenInventory* pInventory = g_pBaldurChitin->m_pEngineInventory;
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenInventory.cpp
+    // __LINE__: 6364
+    UTIL_ASSERT(pInventory != NULL);
+
+    INT x = pInventory->m_cLastMousePosition.x - m_pPanel->m_ptOrigin.x;
+    INT y = pInventory->m_cLastMousePosition.y - m_pPanel->m_ptOrigin.y;
+
+    switch (m_nID) {
+    case 5:
+    case 6:
+    case 7:
+    case 11:
+    case 12:
+    case 13:
+    case 14:
+    case 21:
+    case 22:
+    case 23:
+    case 24:
+    case 25:
+        UpdateHighlight(x, y);
+        return;
+    case 15:
+    case 16:
+    case 17:
+    case 101:
+    case 102:
+    case 103:
+    case 104:
+    case 105:
+    case 106:
+    case 107:
+    case 108:
+        UpdateWeaponHighlight(x, y);
+        return;
+    case 30:
+    case 31:
+    case 32:
+    case 33:
+    case 34:
+    case 35:
+    case 36:
+    case 37:
+    case 38:
+    case 39:
+    case 40:
+    case 41:
+    case 42:
+    case 43:
+    case 44:
+    case 45:
+    case 73:
+    case 74:
+    case 75:
+    case 76:
+    case 77:
+    case 78:
+    case 79:
+    case 80:
+        // The pack: any item fits.
+        if (1) {
+            CScreenInventory* pPackInventory = g_pBaldurChitin->m_pEngineInventory;
+
+            // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenInventory.cpp
+            // __LINE__: 6110
+            UTIL_ASSERT(pPackInventory != NULL);
+
+            if (pPackInventory->m_pTempItem == NULL
+                || x < m_ptOrigin.x
+                || y < m_ptOrigin.y
+                || m_ptOrigin.x + m_size.cx < x
+                || m_ptOrigin.y + m_size.cy < y) {
+                if (m_cVidCell.m_nCurrentFrame != 0) {
+                    m_cVidCell.FrameSet(0);
+                    InvalidateRect();
+                }
+                return;
+            }
+        }
+        break;
+    case 68:
+    case 69:
+    case 70:
+    case 71:
+    case 72:
+    case 81:
+        // The ground: lit while an item is held.
+        if (1) {
+            CScreenInventory* pGroundInventory = g_pBaldurChitin->m_pEngineInventory;
+
+            // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenInventory.cpp
+            // __LINE__: 6150
+            UTIL_ASSERT(pGroundInventory != NULL);
+
+            if (pGroundInventory->m_pTempItem == NULL) {
+                if (m_cVidCell.m_nCurrentFrame != 0) {
+                    m_cVidCell.FrameSet(0);
+                    InvalidateRect();
+                }
+                return;
+            }
+
+            if (x < m_ptOrigin.x
+                || y < m_ptOrigin.y
+                || m_ptOrigin.x + m_size.cx < x
+                || m_ptOrigin.y + m_size.cy < y) {
+                if (m_cVidCell.m_nCurrentFrame != 1) {
+                    m_cVidCell.FrameSet(1);
+                    InvalidateRect();
+                }
+                return;
+            }
+        }
+        break;
+    default:
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenInventory.cpp
+        // __LINE__: 6440
+        UTIL_ASSERT(FALSE);
+        return;
+    }
+
+    if (m_cVidCell.m_nCurrentFrame != 2) {
+        m_cVidCell.FrameSet(2);
+        InvalidateRect();
+    }
+}
+
 // 0x62D760
 void CUIControlButtonInventorySlot::OnMouseMove(CPoint pt)
 {

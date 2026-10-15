@@ -18,5 +18,7 @@ SHORT CInfGame_FindEmptyItemPersonalInventory(CInfGame* pGame, SHORT nPortrait);
 BOOL CInfGame_CheckItemForClassAndKitUsability(CInfGame* pGame, DWORD nClassMask, DWORD nSpecialization, CItem* pItem);
 BOOL CInfGame_CheckIfPlayerInPortraitSlotCanUseItem(CInfGame* pGame, SHORT nPortrait, CItem* pItem, STRREF* pError, BOOL bAsynch);
 BOOL CInfGame_CheckIfSpriteCanUseItem(CInfGame* pGame, CGameSprite* pSprite, CItem* pItem, STRREF* pError, BOOL bAsynch);
+BOOL CInfGame_CanEquipInSlot(CInfGame* pGame, CGameSprite* pSprite, SHORT nSlot, CItem** ppItem, STRREF* pError);
+BOOL CInfGame_CanPortraitEquipInSlot(CInfGame* pGame, SHORT nPortrait, SHORT nSlot, CItem** ppItem, STRREF* pError);
 
 #endif /* CINFGAMEITEMUSE_H_ */

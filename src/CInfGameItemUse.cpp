@@ -1132,3 +1132,356 @@ BOOL CInfGame_CheckIfSpriteCanUseItem(CInfGame* pGame, CGameSprite* pSprite, CIt
 
     return bResult;
 }
+
+// The item types that go in a weapon hand.
+static BOOL IsHandWeaponType(WORD nType)
+{
+    return nType == 0x10
+        || nType == 0x11
+        || nType == 0x2C
+        || nType == 0x12
+        || nType == 0x13
+        || nType == 0x14
+        || nType == 0x45
+        || nType == 0x15
+        || nType == 0x16
+        || nType == 0x17
+        || nType == 0x18
+        || nType == 0x19
+        || nType == 0x1A
+        || nType == 0x1B
+        || nType == 0x1D
+        || nType == 0x1E
+        || nType == 0x39;
+}
+
+// The shield item types.
+static BOOL IsShieldType(WORD nType)
+{
+    return nType == 0x2F
+        || nType == 0x35
+        || nType == 0x31
+        || nType == 0x29;
+}
+
+// TRUE when an ability of the item is ranged (2) or a launcher (4); sets
+// the error to `strRanged` or `strLauncher` for the first one.
+static BOOL HasRangedAbility(CItem* pItem, STRREF* pError, STRREF strRanged, STRREF strLauncher)
+{
+    BOOL bResult = FALSE;
+
+    pItem->Demand();
+    for (INT nAbility = 0; nAbility < pItem->GetAbilityCount() && !bResult; nAbility++) {
+        const ITEM_ABILITY* pAbility = pItem->GetAbility(nAbility);
+        if (pAbility != NULL) {
+            if ((pAbility->type & 0xFF) == 2) {
+                *pError = strRanged;
+                bResult = TRUE;
+            } else if ((pAbility->type & 0xFF) == 4) {
+                *pError = strLauncher;
+                bResult = TRUE;
+            }
+        }
+    }
+    pItem->Release();
+
+    return bResult;
+}
+
+// 0x5BA2E0
+BOOL CInfGame_CanEquipInSlot(CInfGame* pGame, CGameSprite* pSprite, SHORT nSlot, CItem** ppItem, STRREF* pError)
+{
+    // Whether the item (or no item) may go in the slot: the slot's item
+    // types, the hands and the quick slots' rules, the usability checks and
+    // the equip immunities.
+    BOOL bQuickSlot = FALSE;
+    CItem* pItem = *ppItem;
+    CItem** pSlots = pSprite->m_equipment.m_items;
+
+    // NOTE: Without an item the slot number stands in for the type (as the
+    // original).
+    WORD nType = pItem != NULL ? pItem->GetItemType() : static_cast<WORD>(nSlot);
+
+    *pError = -1;
+
+    if (nSlot >= CGameSpriteEquipment::NUM_SLOT) {
+        *pError = 9374;
+        return FALSE;
+    }
+
+    BOOL bResult = CInfGame_CheckIfSpriteCanUseItem(pGame, pSprite, pItem, pError, TRUE);
+    if (!bResult) {
+        return FALSE;
+    }
+
+    switch (nSlot) {
+    case 0:
+        if (pItem != NULL && nType != 1 && nType != 0x46) {
+            *pError = 9375;
+            return FALSE;
+        }
+        break;
+    case 1:
+        if (pItem != NULL
+            && nType != 0x3C
+            && nType != 0x3D
+            && nType != 0x42
+            && nType != 0x3E
+            && nType != 0x3F
+            && nType != 0x40
+            && nType != 0x41
+            && nType != 0x43
+            && nType != 0x44) {
+            *pError = 9375;
+            return FALSE;
+        }
+        break;
+    case 2:
+        if (pItem != NULL && nType != 3) {
+            *pError = 9375;
+            return FALSE;
+        }
+        break;
+    case 3:
+        if (pItem != NULL && nType != 4) {
+            *pError = 9375;
+            return FALSE;
+        }
+        break;
+    case 4:
+        if (pItem != NULL && nType != 0x20) {
+            *pError = 9375;
+            return FALSE;
+        }
+        break;
+    case 5:
+        if (pItem != NULL && nType != 6 && nType != 0x49) {
+            *pError = 9375;
+            return FALSE;
+        }
+        break;
+    case 6:
+        if (pItem != NULL && nType != 7 && nType != 0x48) {
+            *pError = 9375;
+            return FALSE;
+        }
+        break;
+    case 7:
+    case 8:
+        if (pItem != NULL && nType != 10) {
+            *pError = 9375;
+            return FALSE;
+        }
+        break;
+    case 10:
+        *pError = 9375;
+        return FALSE;
+    case 11:
+    case 12:
+    case 13:
+    case 14:
+        if (pItem != NULL && nType != 5 && nType != 0x1F && nType != 0xE) {
+            *pError = 9375;
+            return FALSE;
+        }
+        break;
+    case 15:
+    case 16:
+    case 17:
+        // The quick item slots.
+        bQuickSlot = TRUE;
+        if (pItem != NULL) {
+            if (nType != 0
+                && nType != 8
+                && nType != 0x23
+                && nType != 9
+                && nType != 0xB
+                && nType != 0xD
+                && nType != 0x47) {
+                *pError = 9375;
+                return FALSE;
+            }
+
+            if (pItem->cResRef == "SCRL75"
+                || pItem->cResRef == "MISC3P"
+                || pItem->cResRef == "MISC86") {
+                *pError = 9375;
+                return FALSE;
+            }
+
+            if (pItem->GetAbilityCount() == 0) {
+                *pError = 9375;
+                return FALSE;
+            }
+
+            if (!g_pBaldurChitin->GetObjectGame()->CheckItemUsable(pSprite, pItem)) {
+                *pError = 9382;
+                return FALSE;
+            }
+        }
+        break;
+    case 43:
+    case 45:
+    case 47:
+    case 49: {
+        // The weapon hands; the shield hand is the next slot.
+        BOOL bLauncher = FALSE;
+        if (pItem != NULL) {
+            if (nType == 0xF) {
+                bLauncher = TRUE;
+            } else if (!IsHandWeaponType(nType)) {
+                *pError = 9375;
+                bResult = FALSE;
+            }
+        }
+
+        if (!bLauncher && (nType == 0xF || nType == 0x1B || nType == 0x12)) {
+            bLauncher = TRUE;
+        }
+
+        if (pItem != NULL) {
+            CItem* pOffHand = pSlots[nSlot + 1];
+            if (bLauncher) {
+                if (pOffHand != NULL && !IsShieldType(pOffHand->GetItemType())) {
+                    *pError = 1313;
+                    bResult = FALSE;
+                }
+            } else if (pOffHand != NULL && !IsShieldType(pOffHand->GetItemType())) {
+                // A weapon in the other hand: no ranged weapon here.
+                if (!bResult || HasRangedAbility(pItem, pError, 1312, 1313)) {
+                    return FALSE;
+                }
+            }
+
+            if ((pItem->GetFlagsFile() & 0x2) != 0 && pSlots[nSlot + 1] != NULL) {
+                // Two-handed with something in the other hand.
+                if (!IsShieldType(pSlots[nSlot + 1]->GetItemType())) {
+                    *pError = 28758;
+                } else {
+                    *pError = 9380;
+                }
+                return FALSE;
+            }
+        }
+        break;
+    }
+    case 44:
+    case 46:
+    case 48:
+    case 50: {
+        // The shield hands; the weapon hand is the slot before.
+        if (pItem != NULL) {
+            if (IsHandWeaponType(nType)) {
+                if ((pItem->GetFlagsFile() & 0x2) != 0) {
+                    *pError = 26342;
+                    return FALSE;
+                }
+
+                if (HasRangedAbility(pItem, pError, 1314, 1314)) {
+                    bResult = FALSE;
+                }
+            } else if (!IsShieldType(nType)) {
+                *pError = 9375;
+                return FALSE;
+            }
+        }
+
+        CItem* pMainHand = pSlots[nSlot - 1];
+        if (pMainHand != NULL && pItem != NULL) {
+            if ((pMainHand->GetFlagsFile() & 0x2) != 0 && pMainHand != pSlots[10]) {
+                *pError = 9381;
+                return FALSE;
+            }
+
+            if (!IsShieldType(nType) && bResult) {
+                if (HasRangedAbility(pMainHand, pError, 1310, 1311)) {
+                    bResult = FALSE;
+                }
+            }
+        }
+        break;
+    }
+    default:
+        break;
+    }
+
+    if (!bResult) {
+        return FALSE;
+    }
+
+    if (pItem != NULL) {
+        // NOTE: The original picks the stats in use (`m_bAllowEffectListCall`)
+        // where `GetDerivedStats` is simplified to the current ones.
+        CDerivedStats* pStats = pSprite->m_bAllowEffectListCall
+            ? &(pSprite->m_derivedStats)
+            : &(pSprite->m_tempStats);
+
+        STRREF strError;
+        CGameEffect* pEffect;
+        if (pStats->m_cImmunitiesItemEquip.OnList(pItem->cResRef, strError, pEffect)
+            || pStats->m_cImmunitiesItemTypeEquip.OnList(pItem->GetItemType(), strError, pEffect)) {
+            *pError = strError;
+            if (pEffect != NULL) {
+                delete pEffect;
+            }
+            return FALSE;
+        }
+    }
+
+    // NOTE: The original demands a NULL item here when a quick slot is asked
+    // with no item; bounded here (P4-10).
+    if (bQuickSlot && pItem != NULL) {
+        pItem->Demand();
+
+        if (pItem->GetAbility(0) == NULL) {
+            *pError = 17317;
+            pItem->Release();
+            return FALSE;
+        }
+
+        if ((pItem->m_flags & 0x1) == 0 && (pItem->GetFlagsFile() & 0x100) != 0) {
+            *pError = 17316;
+            pItem->Release();
+            return FALSE;
+        }
+
+        if ((pItem->m_flags & 0x1) != 0 && (pItem->GetFlagsFile() & 0x200) != 0) {
+            *pError = 17316;
+            bResult = FALSE;
+        }
+
+        pItem->Release();
+    }
+
+    return bResult;
+}
+
+// 0x5BA230
+BOOL CInfGame_CanPortraitEquipInSlot(CInfGame* pGame, SHORT nPortrait, SHORT nSlot, CItem** ppItem, STRREF* pError)
+{
+    // NOTE: Uninline.
+    LONG nCharacterId = pGame->GetCharacterId(nPortrait);
+
+    CGameSprite* pSprite;
+
+    BYTE rc;
+    do {
+        rc = pGame->GetObjectArray()->GetShare(nCharacterId,
+            CGameObjectArray::THREAD_ASYNCH,
+            reinterpret_cast<CGameObject**>(&pSprite),
+            INFINITE);
+    } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+    if (rc != CGameObjectArray::SUCCESS) {
+        *pError = 9373;
+        return FALSE;
+    }
+
+    BOOL bResult = CInfGame_CanEquipInSlot(pGame, pSprite, nSlot, ppItem, pError);
+
+    pGame->GetObjectArray()->ReleaseShare(nCharacterId,
+        CGameObjectArray::THREAD_ASYNCH,
+        INFINITE);
+
+    return bResult;
+}
