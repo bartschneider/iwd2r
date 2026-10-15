@@ -1095,3 +1095,161 @@ TEST_CASE("combat: RenderDamageArrow points at an off-screen party member; Rende
     pInfinity->pVidMode = savedMode;
     pVidMode->m_nFade = savedFade;
 }
+
+namespace {
+
+// The queued messages of one kind, oldest first.
+template <class T>
+std::vector<T*> Queued()
+{
+    std::vector<T*> found;
+    CMessageHandler& handler = g_pBaldurChitin->m_cMessageHandler;
+    POSITION pos = handler.m_messageList.GetHeadPosition();
+    while (pos != NULL) {
+        CMessage* message = handler.m_messageList.GetNext(pos);
+        if (T* typed = dynamic_cast<T*>(message)) {
+            found.push_back(typed);
+        }
+    }
+    return found;
+}
+
+}
+
+// CGameAIBase::ForceSpell 0x461190 (ForceSpell 113, ReallyForceSpell 181)
+// and ForceSpellPoint 0x461B80 (114), called with the action counter at
+// the points the casting time divides: Magic Missile (SPWI112) has speed 1,
+// so 10 ticks, the conjuring sequence before tick 6 and the casting one
+// from there. A creature's first tick starts the casting (sub_755A70); its
+// voice and its rand() need a cast time of 3, so no tick draws until the
+// missile flies (Magic Missile's projectile is not type 304). ReallyForceSpell
+// fires at once.
+TEST_CASE("combat: ForceSpell and ForceSpellPoint wait for the casting time and then fire", "[combat][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    Fight fight;
+    std::string why;
+    if (!SetUpFight(fight, why)) {
+        if (why.find("CHR") != std::string::npos) {
+            SKIP("[iwd2r-skip] " + why);
+        }
+        FAIL(why);
+    }
+    CGameSprite* pCharacter = fight.pCharacter;
+    CGameSprite* pGoblin = fight.pGoblin;
+    const CAIObjectType goblin(0, 0, 0, 0, 0, 0, 0, 0, pGoblin->GetId());
+
+    struct Tick {
+        SHORT count;
+        SHORT result;
+        int conjure;
+        int cast;
+        int fire;
+    };
+    // The action counter, the result and the messages the call queues.
+    const Tick ticks[] = {
+        { 0, CGameAIBase::ACTION_NORMAL, 1, 0, 0 },
+        { 5, CGameAIBase::ACTION_NORMAL, 1, 0, 0 },
+        { 6, CGameAIBase::ACTION_NORMAL, 0, 1, 0 },
+        { 9, CGameAIBase::ACTION_NORMAL, 0, 1, 0 },
+        { 10, CGameAIBase::ACTION_DONE, 0, 1, 1 },
+    };
+
+    for (int point = 0; point < 2; point++) {
+        INFO((point ? "ForceSpellPoint" : "ForceSpell"));
+        if (point) {
+            CAIAction action(CAIAction::FORCESPELLPOINT, pGoblin->GetPos(), 1, 0);
+            action.m_string1 = "SPWI112";
+            pCharacter->m_curAction = action;
+        } else {
+            pCharacter->m_curAction = CAIAction(CAIAction::FORCESPELL, goblin, CString("SPWI112"), 1, 0);
+        }
+        for (const Tick& tick : ticks) {
+            INFO("action count " << tick.count);
+            ClearMessages();
+            pCharacter->m_nSequence = 0;
+            pCharacter->m_actionCount = tick.count;
+            srand(Seed(static_cast<unsigned int>(tick.count + 100 * point)));
+            const unsigned int before = iwd2r_rand_state();
+            const SHORT result = point ? pCharacter->ForceSpellPoint() : pCharacter->ForceSpell(pGoblin);
+            CHECK(result == tick.result);
+            CHECK(Draws(before, iwd2r_rand_state()) == 0);
+            int conjure = 0;
+            int cast = 0;
+            for (CMessageSetSequence* message : Queued<CMessageSetSequence>()) {
+                conjure += message->m_sequence == CGameSprite::SEQ_CONJURE ? 1 : 0;
+                cast += message->m_sequence == CGameSprite::SEQ_CAST ? 1 : 0;
+            }
+            CHECK(conjure == tick.conjure);
+            CHECK(cast == tick.cast);
+            const std::vector<CMessageFireProjectile*> fire = Queued<CMessageFireProjectile>();
+            CHECK(static_cast<int>(fire.size()) == tick.fire);
+            if (!fire.empty()) {
+                CHECK(fire[0]->m_projectileTargetId == (point ? -1 : pGoblin->GetId()));
+                CHECK(fire[0]->m_projectileTarget == pGoblin->GetPos());
+            }
+        }
+    }
+
+    // ReallyForceSpell: no casting time.
+    ClearMessages();
+    pCharacter->m_curAction = CAIAction(CAIAction::REALLYFORCESPELL, goblin, CString("SPWI112"), 1, 0);
+    pCharacter->m_actionCount = 0;
+    CHECK(pCharacter->ForceSpell(pGoblin) == CGameAIBase::ACTION_DONE);
+    CHECK(Queued<CMessageSetSequence>().empty());
+    CHECK(Queued<CMessageFireProjectile>().size() == 1);
+
+    // No spell: an error.
+    pCharacter->m_curAction = CAIAction(CAIAction::FORCESPELL, goblin, CString("SPWI112"), 1, 0);
+    CHECK(pCharacter->ForceSpell(NULL) == CGameAIBase::ACTION_ERROR);
+    ClearMessages();
+}
+
+// The ForceSpell action through ExecuteAction: the party member's Magic
+// Missile hurts the goblin.
+TEST_CASE("combat: a party member's ForceSpell action hurts the goblin", "[combat][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    Fight fight;
+    std::string why;
+    if (!SetUpFight(fight, why)) {
+        if (why.find("CHR") != std::string::npos) {
+            SKIP("[iwd2r-skip] " + why);
+        }
+        FAIL(why);
+    }
+    CGameSprite* pCharacter = fight.pCharacter;
+    CGameSprite* pGoblin = fight.pGoblin;
+    const SHORT goblinStart = pGoblin->GetBaseStats()->m_hitPoints;
+
+    pCharacter->ClearActions(FALSE);
+    pCharacter->AddAction(CAIAction(CAIAction::FORCESPELL, CAIObjectType(0, 0, 0, 0, 0, 0, 0, 0, pGoblin->GetId()),
+        CString("SPWI112"), 1, 0));
+    pGoblin->ClearActions(FALSE);
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    if (!pGame->GetWorldTimer()->m_active) {
+        pGame->GetWorldTimer()->StartTime();
+    }
+    int frames = 0;
+    while (frames < 600 && pGoblin->GetBaseStats()->m_hitPoints == goblinStart) {
+        Tick(fight.pArea, { pCharacter, pGoblin });
+        frames++;
+    }
+    INFO("frames " << frames << ", goblin hit points " << goblinStart << " -> " << pGoblin->GetBaseStats()->m_hitPoints);
+    CHECK(frames > 10);
+    CHECK(pGoblin->GetBaseStats()->m_hitPoints < goblinStart);
+    CHECK(pGoblin->GetBaseStats()->m_hitPoints >= goblinStart - 5);
+}
