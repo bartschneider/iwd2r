@@ -893,3 +893,120 @@ TEST_CASE("is_pt_in_poly_two_points", "[vid]")
     CHECK(CVidPoly::IsPtInPoly(square, 4, CPoint(5, 5)));
     CHECK_FALSE(CVidPoly::IsPtInPoly(square, 4, CPoint(15, 5)));
 }
+
+namespace {
+
+// Installs a zeroed CWarp holding mode as the active engine, so
+// g_pChitin->GetCurrentVideoMode() returns mode (inside a ChitinScope).
+class ActiveModeScope {
+public:
+    explicit ActiveModeScope(CVidMode* mode)
+        : m_engine(reinterpret_cast<CWarp*>(::operator new(sizeof(CWarp))))
+    {
+        std::memset(static_cast<void*>(m_engine), 0, sizeof(CWarp));
+        m_engine->pVidMode = mode;
+        g_pChitin->pActiveEngine = m_engine;
+    }
+    ~ActiveModeScope()
+    {
+        g_pChitin->pActiveEngine = nullptr;
+        ::operator delete(static_cast<void*>(m_engine));
+    }
+
+    ActiveModeScope(const ActiveModeScope&) = delete;
+    ActiveModeScope& operator=(const ActiveModeScope&) = delete;
+
+private:
+    CWarp* m_engine;
+};
+
+}
+
+// DrawHLineShaded16 (0x7C1FD0) puts in each pixel the colour's low word
+// scaled by the pixel's intensity / 4 (ScaleColor16 0x79AD20 of
+// GetIntensity16 0x79AD90: the channels brought to 8 bits, green counted
+// twice). 5-6-5 masks; dwColor's high word is ignored.
+TEST_CASE("draw_hline_shaded16", "[vid]")
+{
+    ChitinScope scope;
+    CVidInf mode;
+    mode.m_dwRBitMask = 0xF800;
+    mode.m_dwGBitMask = 0x07E0;
+    mode.m_dwBBitMask = 0x001F;
+    mode.m_dwRBitShift = 11;
+    mode.m_dwGBitShift = 5;
+    mode.m_dwBBitShift = 0;
+    mode.field_C2 = 3;
+    mode.field_C6 = 2;
+    mode.field_CA = 3;
+    ActiveModeScope active(&mode);
+
+    // 0x8410 is (16, 32, 16): intensity 128 + 2 * 128 + 128 = 512, scale 128.
+    // 0xFFFF is (31, 63, 31): intensity 248 + 2 * 252 + 248 = 1000, scale 250.
+    CHECK(mode.GetIntensity16(0x8410) == 512);
+    CHECK(mode.GetIntensity16(0xABCDFFFF) == 1000);
+    CHECK(mode.ScaleColor16(0xF81F, 128) == ((15u << 11) | 15u));
+
+    CVidPoly poly;
+    const DWORD color = 0xABCDF81F; // magenta (31, 0, 31)
+    WORD row[4] = { 0x8410, 0xFFFF, 0x0000, 0x1234 };
+    poly.DrawHLineShaded16(row, 0, 2, color, CRect(0, 0, 4, 1), CPoint(0, 0));
+    CHECK(row[0] == ((15 << 11) | 15)); // 31 * 128 >> 8
+    CHECK(row[1] == ((30 << 11) | 30)); // 31 * 250 >> 8
+    CHECK(row[2] == 0x0000);
+    CHECK(row[3] == 0x1234);
+
+    // Mirrored: xMin 1 to xMax 2 are the pixels at width - 1 and width - 2.
+    WORD mirrored[6] = { 0x1111, 0x1111, 0x8410, 0xFFFF, 0x1111, 0x1111 };
+    poly.DrawHLineShadedMirrored16(mirrored, 1, 2, color, CRect(0, 0, 4, 1), CPoint(0, 0));
+    CHECK(mirrored[0] == 0x1111);
+    CHECK(mirrored[1] == 0x1111);
+    CHECK(mirrored[2] == ((15 << 11) | 15));
+    CHECK(mirrored[3] == ((30 << 11) | 30));
+    CHECK(mirrored[4] == 0x1111);
+    CHECK(mirrored[5] == 0x1111);
+}
+
+// DrawHLineShaded24 (0x7D6CA0) blends toward the colour as the 32-bit one
+// does, but reads only each pixel's first byte v and takes v, v + 1 and
+// v + 2 for its three channels (0x7D6D1F); the blend goes to the bytes in
+// the order colour bits 16-23, 8-15, 0-7.
+TEST_CASE("draw_hline_shaded24", "[vid]")
+{
+    CVidPoly poly;
+    // dwColor bytes 0x1E, 0x3C, 0x5A: intensity 60, inverse 195.
+    const DWORD color = 0x005A3C1E;
+    auto blend = [](int c, int p) { return static_cast<BYTE>((c * 60 + 195 * p) >> 8); };
+    BYTE row[5 * 3] = {
+        0x10, 0x99, 0x77, // v 16: sum 51, 51 / 8 = 6 <= 60: blended
+        0x05, 0x01, 0x02, // v 5: sum 18, too dark: kept
+        0xF0, 0x01, 0x02, // v 240: sum 723, 90 > 60: kept
+        0x80, 0x00, 0x00, // v 128: sum 387, 48 <= 60: blended
+        0x10, 0x10, 0x10, // outside the span
+    };
+    poly.DrawHLineShaded24(row, 0, 3, color, CRect(0, 0, 5, 1), CPoint(0, 0));
+    const BYTE expected[5 * 3] = {
+        blend(0x5A, 16), blend(0x3C, 17), blend(0x1E, 18),
+        0x05, 0x01, 0x02,
+        0xF0, 0x01, 0x02,
+        blend(0x5A, 128), blend(0x3C, 129), blend(0x1E, 130),
+        0x10, 0x10, 0x10,
+    };
+    CHECK(std::vector<BYTE>(row, row + 15) == std::vector<BYTE>(expected, expected + 15));
+
+    // Mirrored: xMin 1 to xMax 2 are the pixels at width - 1 and width - 2.
+    BYTE mirrored[6 * 3];
+    std::memset(mirrored, 0x80, sizeof(mirrored));
+    poly.DrawHLineShadedMirrored24(mirrored, 1, 2, color, CRect(0, 0, 4, 1), CPoint(0, 0));
+    for (int pixel = 0; pixel < 6; ++pixel) {
+        INFO("pixel " << pixel);
+        const BYTE* p = mirrored + pixel * 3;
+        if (pixel == 2 || pixel == 3) {
+            CHECK(p[0] == blend(0x5A, 128));
+            CHECK(p[1] == blend(0x3C, 129));
+            CHECK(p[2] == blend(0x1E, 130));
+        } else {
+            CHECK((p[0] == 0x80 && p[1] == 0x80 && p[2] == 0x80));
+        }
+    }
+}

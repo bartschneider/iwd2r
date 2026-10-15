@@ -251,6 +251,24 @@ void HLineShadedMirrored32(CaseContext& ctx)
     HLineShaded(ctx, kDrawHLineShadedMirrored32, true, 0x484C696E654D0000ull); // "HLineM"
 }
 
+// CVidPoly::DrawHLineShaded16 (0x7C1FD0) and DrawHLineShadedMirrored16
+// (0x7C2040), `ret 0x18` at 0x7C2037 and 0x7C20B6: they read the current
+// video mode through g_pChitin (masks 0x18-0x20, shifts 0xAA-0xB2, the
+// bits dropped at 0xC2-0xCA) for ScaleColor16 (0x79AD20) and
+// GetIntensity16 (0x79AD90). DrawHLineShaded24 (0x7D6CA0) and
+// DrawHLineShadedMirrored24 (0x7D6DA0), `ret 0x18` at 0x7D6D94 and
+// 0x7D6EA2, read nothing but their arguments.
+constexpr uintptr_t kDrawHLineShaded16 = 0x7C1FD0;
+constexpr uintptr_t kDrawHLineShadedMirrored16 = 0x7C2040;
+constexpr uintptr_t kDrawHLineShaded24 = 0x7D6CA0;
+constexpr uintptr_t kDrawHLineShadedMirrored24 = 0x7D6DA0;
+constexpr size_t kRMaskOffset = 0x18;
+constexpr size_t kGMaskOffset = 0x1C;
+constexpr size_t kBMaskOffset = 0x20;
+constexpr size_t kRDropOffset = 0xC2;
+constexpr size_t kGDropOffset = 0xC6;
+constexpr size_t kBDropOffset = 0xCA;
+
 // CVidMode::DrawThickLine32(nXFrom, nYFrom, nXTo, nYTo, pSurface, lPitch,
 // rSurface, a8, color, bClipped) (0x7CBE70), `ret 0x28`. It reads no member;
 // ecx goes on to the slice helper 0x7CC130, which ignores it.
@@ -512,6 +530,142 @@ struct VideoFixture {
     CChitin* oursChitin = nullptr;
     CVidInf* oursMode = nullptr;
 };
+
+// The current video mode on both sides as a 16-bit one: 5-6-5 (green6) or
+// 5-5-5 masks, shifts and dropped bits as CVidInf::CreateSurfaces sets them.
+void SetMode16(VideoFixture& video, CaseContext& ctx, bool green6)
+{
+    const uint32_t gBits = green6 ? 6 : 5;
+    const uint32_t rShift = 5 + gBits;
+    const uint32_t rMask = 0x1Fu << rShift;
+    const uint32_t gMask = ((1u << gBits) - 1) << 5;
+    const uint32_t bMask = 0x1F;
+    ctx.CallOriginal([&] {
+        Put<uint32_t>(video.mode, kRMaskOffset, rMask);
+        Put<uint32_t>(video.mode, kGMaskOffset, gMask);
+        Put<uint32_t>(video.mode, kBMaskOffset, bMask);
+        Put<uint32_t>(video.mode, kRShiftOffset, rShift);
+        Put<uint32_t>(video.mode, kGShiftOffset, 5);
+        Put<uint32_t>(video.mode, kBShiftOffset, 0);
+        Put<uint32_t>(video.mode, kRDropOffset, 3);
+        Put<uint32_t>(video.mode, kGDropOffset, 8 - gBits);
+        Put<uint32_t>(video.mode, kBDropOffset, 3);
+        Put<uint16_t>(video.chitin, kBppOffset, 16);
+    });
+    video.oursMode->m_dwRBitMask = rMask;
+    video.oursMode->m_dwGBitMask = gMask;
+    video.oursMode->m_dwBBitMask = bMask;
+    video.oursMode->m_dwRBitShift = rShift;
+    video.oursMode->m_dwGBitShift = 5;
+    video.oursMode->m_dwBBitShift = 0;
+    video.oursMode->field_C2 = 3;
+    video.oursMode->field_C6 = 8 - gBits;
+    video.oursMode->field_CA = 3;
+    video.oursChitin->cVideo.m_nBpp = 16;
+}
+
+// One DrawHLineShaded16/24 (or the mirrored one) on a 64x1 row of random
+// pixels, as HLineShaded does for 32 bits: every span once with the widest
+// surface rectangle, then random spans and rectangles. The 16-bit forms run
+// on a 5-6-5 and a 5-5-5 video mode in turn.
+void HLineShadedDepth(CaseContext& ctx, uintptr_t address, int nBpp, bool mirrored, uint64_t salt)
+{
+    VideoFixture video(ctx);
+    const int bytes = nBpp / 8;
+    uint8_t* poly = nullptr;
+    uint8_t* row = nullptr;
+    uint8_t* rect = nullptr;
+    uint8_t* ref = nullptr;
+    ctx.SetInputs("building the original's buffers");
+    ctx.CallOriginal([&] {
+        poly = OriginalBlock(kVidPolySize);
+        row = OriginalBlock(static_cast<size_t>(kLineWidth * bytes));
+        rect = OriginalBlock(16);
+        ref = OriginalBlock(8);
+    });
+    CVidPoly ours;
+    Picks picks(ctx.seed, salt);
+    const std::string name = std::string(mirrored ? "DrawHLineShadedMirrored" : "DrawHLineShaded")
+        + std::to_string(nBpp);
+
+    auto check = [&](int32_t xMin, int32_t xMax, uint32_t color, int32_t left, int32_t right) {
+        std::vector<uint8_t> pixels(static_cast<size_t>(kLineWidth * bytes));
+        for (size_t i = 0; i < pixels.size(); ++i) {
+            // Dark bytes (sum below 32 in the 24-bit form) and bright ones.
+            pixels[i] = static_cast<uint8_t>(picks.Bits() >> picks.Between(0, 31));
+        }
+        std::memcpy(row, pixels.data(), pixels.size());
+        const int32_t r[4] = { left, 0, right, 1 };
+        std::memcpy(rect, r, sizeof(r));
+        const int32_t pt[2] = { picks.Between(0, 7), picks.Between(0, 7) };
+        std::memcpy(ref, pt, sizeof(pt));
+        ctx.SetInputs(name + "(" + std::to_string(xMin) + ", " + std::to_string(xMax) + ", " + Hex(color)
+            + ", rSurface " + std::to_string(left) + ".." + std::to_string(right) + ")");
+        ctx.CallOriginal([&] {
+            reinterpret_cast<HLineFn>(address)(poly, nullptr, row, xMin, xMax, color, rect, ref);
+        });
+        const CRect rSurface(left, 0, right, 1);
+        const CPoint ptRef(pt[0], pt[1]);
+        if (nBpp == 16) {
+            if (mirrored) {
+                ours.DrawHLineShadedMirrored16(pixels.data(), xMin, xMax, color, rSurface, ptRef);
+            } else {
+                ours.DrawHLineShaded16(pixels.data(), xMin, xMax, color, rSurface, ptRef);
+            }
+        } else {
+            if (mirrored) {
+                ours.DrawHLineShadedMirrored24(pixels.data(), xMin, xMax, color, rSurface, ptRef);
+            } else {
+                ours.DrawHLineShaded24(pixels.data(), xMin, xMax, color, rSurface, ptRef);
+            }
+        }
+        ctx.CountInputs(1);
+        for (size_t i = 0; i < pixels.size(); ++i) {
+            if (row[i] != pixels[i]) {
+                ctx.Fail(ctx.Inputs() + ", byte " + std::to_string(i), Hex(row[i]), Hex(pixels[i]));
+                break;
+            }
+        }
+    };
+
+    for (int format = 0; format < (nBpp == 16 ? 2 : 1); ++format) {
+        if (nBpp == 16) {
+            SetMode16(video, ctx, format == 0);
+        }
+        for (int32_t xMin = 0; xMin < kLineWidth; ++xMin) {
+            for (int32_t xMax = xMin - 1; xMax < kLineWidth; ++xMax) {
+                check(xMin, xMax, picks.Bits(), 0, kLineWidth - 1);
+            }
+        }
+        for (int i = 0; i < ctx.iterations; ++i) {
+            const int32_t xMin = picks.Between(0, kLineWidth - 1);
+            const int32_t xMax = picks.Between(xMin - 2, kLineWidth - 1);
+            const int32_t width = picks.Between(xMax < xMin ? xMin : xMax, kLineWidth - 1);
+            const int32_t left = picks.Between(-100, 100);
+            check(xMin, xMax, picks.Bits(), left, left + width);
+        }
+    }
+}
+
+void HLineShaded16(CaseContext& ctx)
+{
+    HLineShadedDepth(ctx, kDrawHLineShaded16, 16, false, 0x484C533136000000ull); // "HLS16"
+}
+
+void HLineShadedMirrored16(CaseContext& ctx)
+{
+    HLineShadedDepth(ctx, kDrawHLineShadedMirrored16, 16, true, 0x484C4D3136000000ull); // "HLM16"
+}
+
+void HLineShaded24(CaseContext& ctx)
+{
+    HLineShadedDepth(ctx, kDrawHLineShaded24, 24, false, 0x484C533234000000ull); // "HLS24"
+}
+
+void HLineShadedMirrored24(CaseContext& ctx)
+{
+    HLineShadedDepth(ctx, kDrawHLineShadedMirrored24, 24, true, 0x484C4D3234000000ull); // "HLM24"
+}
 
 // CVidPalette::RealizeRange (0x7BF870) at 32 bpp: a range palette of 256
 // random entries, the seven ranges each with or without a tint, an add and a
@@ -2010,6 +2164,10 @@ void CellBrightest32(CaseContext& ctx)
 
 ORACLE_CASE("vid/hline_shaded32", HLineShaded32);
 ORACLE_CASE("vid/hline_shaded_mirrored32", HLineShadedMirrored32);
+ORACLE_CASE("vid/hline_shaded16", HLineShaded16);
+ORACLE_CASE("vid/hline_shaded_mirrored16", HLineShadedMirrored16);
+ORACLE_CASE("vid/hline_shaded24", HLineShaded24);
+ORACLE_CASE("vid/hline_shaded_mirrored24", HLineShadedMirrored24);
 ORACLE_CASE("vid/realize_range", RealizeRange);
 ORACLE_CASE("vid/realize_resource", RealizeResource);
 ORACLE_CASE("vid/thick_line32", ThickLine32);

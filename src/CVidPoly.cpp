@@ -893,13 +893,38 @@ void CVidPoly::SetHLineFunction(DWORD dwFlags)
 // 0x7C1FD0
 void CVidPoly::DrawHLineShaded16(void* pSurface, int xMin, int xMax, DWORD dwColor, const CRect& rSurface, const CPoint& ptRef)
 {
-    // TODO: Incomplete.
+    // Each pixel becomes the colour scaled by the pixel's intensity / 4.
+    CVidMode* pVidMode = g_pChitin->GetCurrentVideoMode();
+
+    int width = xMax - xMin + 1;
+    if (xMax - xMin >= 0 && width > 0) {
+        WORD* pSurface16 = reinterpret_cast<WORD*>(pSurface) + xMin;
+
+        do {
+            DWORD nIntensity = pVidMode->GetIntensity16(*pSurface16);
+            *pSurface16 = static_cast<WORD>(pVidMode->ScaleColor16(dwColor & 0xFFFF, nIntensity >> 2));
+            pSurface16++;
+            width--;
+        } while (width != 0);
+    }
 }
 
 // 0x7C2040
 void CVidPoly::DrawHLineShadedMirrored16(void* pSurface, int xMin, int xMax, DWORD dwColor, const CRect& rSurface, const CPoint& ptRef)
 {
-    // TODO: Incomplete.
+    CVidMode* pVidMode = g_pChitin->GetCurrentVideoMode();
+
+    int width = xMax - xMin + 1;
+    if (xMax - xMin >= 0 && width > 0) {
+        WORD* pSurface16 = reinterpret_cast<WORD*>(pSurface) + 1 + (rSurface.right - rSurface.left - xMin);
+
+        do {
+            pSurface16--;
+            DWORD nIntensity = pVidMode->GetIntensity16(*pSurface16);
+            width--;
+            *pSurface16 = static_cast<WORD>(pVidMode->ScaleColor16(dwColor & 0xFFFF, nIntensity >> 2));
+        } while (width != 0);
+    }
 }
 
 // 0x7D6970
@@ -1104,13 +1129,59 @@ void CVidPoly::DrawHLineDitheredMirrored32(void* pSurface, int xMin, int xMax, D
 // 0x7D6CA0
 void CVidPoly::DrawHLineShaded24(void* pSurface, int xMin, int xMax, DWORD dwColor, const CRect& rSurface, const CPoint& ptRef)
 {
-    // TODO: Incomplete.
+    DWORD nColor0 = dwColor & 0xFF;
+    DWORD nColor1 = (dwColor >> 8) & 0xFF;
+    DWORD nColor2 = (dwColor >> 16) & 0xFF;
+    INT nIntensity = static_cast<INT>(nColor0 + nColor2 + nColor1) / 3;
+
+    int width = xMax - xMin + 1;
+    if (xMax - xMin >= 0 && width > 0) {
+        BYTE* pSurface8 = reinterpret_cast<BYTE*>(pSurface) + xMin * 3;
+
+        do {
+            // NOTE: The original reads only the pixel's first byte and takes
+            // it, it plus one and it plus two for the three channels
+            // (0x7D6D1F to 0x7D6D2F).
+            INT nValue = pSurface8[0];
+            INT nSum = (nValue + 2) + (nValue + 1) + nValue;
+            if (nSum >= 0x20 && (nSum >> 3) <= nIntensity) {
+                INT nInverse = 255 - nIntensity;
+                pSurface8[1] = static_cast<BYTE>((nColor1 * nIntensity + nInverse * (nValue + 1)) >> 8);
+                pSurface8[0] = static_cast<BYTE>((nColor2 * nIntensity + nInverse * nValue) >> 8);
+                pSurface8[2] = static_cast<BYTE>((nColor0 * nIntensity + nInverse * (nValue + 2)) >> 8);
+            }
+            pSurface8 += 3;
+            width--;
+        } while (width != 0);
+    }
 }
 
 // 0x7D6DA0
 void CVidPoly::DrawHLineShadedMirrored24(void* pSurface, int xMin, int xMax, DWORD dwColor, const CRect& rSurface, const CPoint& ptRef)
 {
-    // TODO: Incomplete.
+    DWORD nColor0 = dwColor & 0xFF;
+    DWORD nColor1 = (dwColor >> 8) & 0xFF;
+    DWORD nColor2 = (dwColor >> 16) & 0xFF;
+    INT nIntensity = static_cast<INT>(nColor0 + nColor2 + nColor1) / 3;
+
+    int width = xMax - xMin + 1;
+    if (xMax - xMin >= 0 && width > 0) {
+        BYTE* pSurface8 = reinterpret_cast<BYTE*>(pSurface) + (rSurface.right - rSurface.left - xMin + 1) * 3;
+
+        do {
+            pSurface8 -= 3;
+            // NOTE: As DrawHLineShaded24, the first byte stands for all three.
+            INT nValue = pSurface8[0];
+            INT nSum = (nValue + 2) + (nValue + 1) + nValue;
+            if (nSum >= 0x20 && (nSum >> 3) <= nIntensity) {
+                INT nInverse = 255 - nIntensity;
+                pSurface8[1] = static_cast<BYTE>((nColor1 * nIntensity + nInverse * (nValue + 1)) >> 8);
+                pSurface8[0] = static_cast<BYTE>((nColor2 * nIntensity + nInverse * nValue) >> 8);
+                pSurface8[2] = static_cast<BYTE>((nColor0 * nIntensity + nInverse * (nValue + 2)) >> 8);
+            }
+            width--;
+        } while (width != 0);
+    }
 }
 
 // 0x7D6EB0

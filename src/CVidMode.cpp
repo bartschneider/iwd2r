@@ -1546,6 +1546,30 @@ void CVidMode::ScanLine16(WORD* pSurface, UINT nMajorAxis, UINT nMinorAxis, INT 
     }
 }
 
+// The 16-bit pixel color with each channel scaled by nScale / 256.
+//
+// 0x79AD20
+DWORD CVidMode::ScaleColor16(DWORD color, INT nScale)
+{
+    color &= 0xFFFF;
+
+    return ((((m_dwRBitMask & color) >> (m_dwRBitShift & 0x1F)) * nScale >> 8) << (m_dwRBitShift & 0x1F))
+        | ((((m_dwGBitMask & color) >> (m_dwGBitShift & 0x1F)) * nScale >> 8) << (m_dwGBitShift & 0x1F))
+        | ((((m_dwBBitMask & color) >> (m_dwBBitShift & 0x1F)) * nScale >> 8) << (m_dwBBitShift & 0x1F));
+}
+
+// The 16-bit pixel's channels brought to 8 bits and summed, green twice.
+//
+// 0x79AD90
+DWORD CVidMode::GetIntensity16(DWORD color)
+{
+    color &= 0xFFFF;
+
+    return (((m_dwBBitMask & color) >> (m_dwBBitShift & 0x1F)) << (field_CA & 0x1F))
+        + (((m_dwGBitMask & color) >> (m_dwGBitShift & 0x1F)) << (field_C6 & 0x1F)) * 2
+        + (((m_dwRBitMask & color) >> (m_dwRBitShift & 0x1F)) << (field_C2 & 0x1F));
+}
+
 // #binary-identical
 // 0x79AB50
 DWORD CVidMode::ReduceColor(COLORREF rgbColor)
