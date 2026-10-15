@@ -841,7 +841,6 @@ void CVidPalette::SetRange(USHORT nRange, USHORT nValue, CVidBitmap& bmpMasterPa
     // __LINE__: 934
     UTIL_ASSERT(m_nType == TYPE_RANGE);
 
-    // TODO: Check.
     m_rangeColors[nRange] = static_cast<BYTE>(nValue);
 
     RGBQUAD* pTmpPalette = m_pPalette + 12 * nRange + 4;

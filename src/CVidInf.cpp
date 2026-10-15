@@ -274,7 +274,7 @@ BOOL CVidInf::CreateSurfaces(BOOLEAN bFullscreen)
         }
     }
 
-    surfaceDesc.ddpfPixelFormat.dwFlags = sizeof(surfaceDesc.ddpfPixelFormat);
+    surfaceDesc.ddpfPixelFormat.dwSize = sizeof(surfaceDesc.ddpfPixelFormat);
 
     hr = pSurfaces[CVIDINF_SURFACE_BACK]->GetPixelFormat(&(surfaceDesc.ddpfPixelFormat));
     if (hr != DD_OK) {
@@ -283,9 +283,15 @@ BOOL CVidInf::CreateSurfaces(BOOLEAN bFullscreen)
 
     ParsePixelFormat(surfaceDesc.ddpfPixelFormat);
 
+    // The pure green of the surface's format is the colour key of the
+    // keyed surfaces and the transparent colour the engine fills with
+    // (field_24: the FX fill, wall polygons, dithered tiles, a cell's
+    // shadow entry with the shadow off) (0x79B75B).
+    field_24 = m_dwGBitMask;
+
     DDCOLORKEY colorKey;
     colorKey.dwColorSpaceLowValue = m_dwGBitMask;
-    colorKey.dwColorSpaceLowValue = m_dwGBitMask;
+    colorKey.dwColorSpaceHighValue = m_dwGBitMask;
 
     surfaceDesc.dwFlags = DDSD_CAPS | DDSD_HEIGHT | DDSD_WIDTH;
 
