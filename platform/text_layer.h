@@ -46,6 +46,7 @@ enum GlyphFlags : uint8_t {
 struct Glyph {
     RECT cell = {}; // the bitmap font's frame for the character, frame pixels
     RECT box = {}; // the tagged pixels: the cell inside the clip and the locked rectangle
+    RECT clip = {}; // the draw's clip inside the surface: the TrueType glyph may reach past its box up to it
     int baseline = 0; // frame y of the baseline
     float capHeight = 0.0f; // the bitmap font's cap height, frame pixels
     uint32_t colour = 0; // 0xRRGGBB

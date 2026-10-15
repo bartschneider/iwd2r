@@ -330,7 +330,8 @@ bool Backend::DrawText(const CVidFont& constFont, const char* text, POINT pos, D
             continue;
         platform::text::Glyph g;
         g.cell = cell.rect;
-        g.box = Intersect(Intersect(cell.rect, m_clip), surface);
+        g.clip = Intersect(m_clip, surface);
+        g.box = Intersect(cell.rect, g.clip);
         if (g.box.right <= g.box.left || g.box.bottom <= g.box.top)
             continue;
         g.baseline = pos.y + info.baselineOffset * scale;

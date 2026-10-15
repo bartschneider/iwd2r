@@ -1,7 +1,13 @@
 #include "platform/text_fonts.h"
 
 #include <cctype>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <deque>
+#include <mutex>
+#include <string>
+#include <vector>
 
 namespace platform::text {
 
@@ -9,14 +15,22 @@ namespace platform::text {
 // third_party/fonts/*.ttf, in the order of IWD2R_TEXT_FACES).
 const Face* EmbeddedFaces(int* count);
 
+int FallbackFace()
+{
+    return 0;
+}
+
 namespace {
 
-    // The faces, by number: the order of IWD2R_TEXT_FACES.
+    // The faces, by number: the order of IWD2R_TEXT_FACES. Picked from
+    // side-by-side screenshots against the bitmap fonts (the scalable text
+    // report): a bold book serif for the running text, and Marcellus (flared,
+    // carved capitals) for the headings.
     enum FaceId {
-        kBody = 0, // running text: dialog, descriptions, journal (NORMAL)
-        kDisplay = 1, // headings and buttons, carved capitals (STONESML, STONESM2, STONEBIG)
-        kLabel = 2, // small labels (TOOLFONT)
-        kUncial = 3, // the uncial titles (REALMS)
+        kBody = 0, // Crimson Pro Bold: dialog, descriptions, captions (NORMAL, TOOLFONT)
+        kDisplay = 1, // Marcellus: titles (STONEBIG)
+        kSmallCaps = 2, // Marcellus SC: small-capital headings (STONESML, STONESM2)
+        kUncial = 3, // Uncial Antiqua: the uncial lettering (REALMS)
     };
 
     struct Mapping {
@@ -29,10 +43,10 @@ namespace {
     // symbol fonts (STATES2, WMDAG) and digit strips (NUMBER, NUMFONT).
     const Mapping kMappings[] = {
         { "NORMAL", kBody, 1.0f },
-        { "STONESML", kDisplay, 1.0f },
-        { "STONESM2", kDisplay, 1.0f },
-        { "STONEBIG", kBody, 1.0f },
-        { "TOOLFONT", kLabel, 1.0f },
+        { "TOOLFONT", kBody, 1.0f },
+        { "STONEBIG", kDisplay, 1.0f },
+        { "STONESML", kSmallCaps, 1.0f },
+        { "STONESM2", kSmallCaps, 1.0f },
         { "REALMS", kUncial, 1.0f },
     };
 
@@ -55,10 +69,90 @@ namespace {
 
 }
 
+namespace {
+
+    // IWD2R_TEXT_FONT_<RESREF>=<file.ttf>[@<size factor>]: a face from a
+    // file for one bitmap font, for comparing candidate faces without a
+    // rebuild. Faces read this way are numbered from kFileFaces up.
+    const int kFileFaces = 100;
+
+    struct FileFace {
+        std::string resref;
+        std::vector<unsigned char> bytes;
+        Face face = {};
+        float sizeFactor = 1.0f;
+    };
+
+    std::mutex& FileMutex()
+    {
+        static std::mutex mutex;
+        return mutex;
+    }
+
+    std::deque<FileFace>& FileFaces()
+    {
+        static std::deque<FileFace> faces;
+        return faces;
+    }
+
+    // The file face for resref (loaded on first use), or -1.
+    int FileFaceFor(const char* resref, float* sizeFactor)
+    {
+        std::string name = "IWD2R_TEXT_FONT_";
+        for (const char* p = resref; *p != '\0'; p++)
+            name.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(*p))));
+        const char* value = std::getenv(name.c_str());
+        if (value == nullptr || *value == '\0')
+            return -1;
+        std::lock_guard<std::mutex> lock(FileMutex());
+        std::deque<FileFace>& faces = FileFaces();
+        for (size_t i = 0; i < faces.size(); i++) {
+            if (SameResRef(faces[i].resref.c_str(), resref)) {
+                *sizeFactor = faces[i].sizeFactor;
+                return faces[i].bytes.empty() ? -1 : kFileFaces + static_cast<int>(i);
+            }
+        }
+        FileFace f;
+        f.resref = resref;
+        std::string path = value;
+        const size_t at = path.rfind('@');
+        if (at != std::string::npos) {
+            f.sizeFactor = std::strtof(path.c_str() + at + 1, nullptr);
+            if (!(f.sizeFactor > 0.0f))
+                f.sizeFactor = 1.0f;
+            path.resize(at);
+        }
+        if (std::FILE* file = std::fopen(path.c_str(), "rb")) {
+            unsigned char buffer[65536];
+            size_t n = 0;
+            while ((n = std::fread(buffer, 1, sizeof(buffer), file)) > 0)
+                f.bytes.insert(f.bytes.end(), buffer, buffer + n);
+            std::fclose(file);
+        }
+        if (f.bytes.empty())
+            std::fprintf(stderr, "text: %s=%s cannot be read\n", name.c_str(), path.c_str());
+        else
+            std::fprintf(stderr, "text: %s from %s (size factor %.2f)\n", resref, path.c_str(), static_cast<double>(f.sizeFactor));
+        faces.push_back(std::move(f));
+        FileFace& kept = faces.back();
+        kept.face.name = kept.resref.c_str();
+        kept.face.data = kept.bytes.data();
+        kept.face.size = kept.bytes.size();
+        *sizeFactor = kept.sizeFactor;
+        return kept.bytes.empty() ? -1 : kFileFaces + static_cast<int>(faces.size() - 1);
+    }
+
+}
+
 bool FaceFor(const char* resref, int* face, float* sizeFactor)
 {
     if (resref == nullptr)
         return false;
+    const int file = FileFaceFor(resref, sizeFactor);
+    if (file >= 0) {
+        *face = file;
+        return true;
+    }
     for (const Mapping& m : kMappings) {
         if (SameResRef(m.resref, resref)) {
             *face = m.face;
@@ -71,6 +165,11 @@ bool FaceFor(const char* resref, int* face, float* sizeFactor)
 
 const Face* FaceAt(int face)
 {
+    if (face >= kFileFaces) {
+        std::lock_guard<std::mutex> lock(FileMutex());
+        const size_t index = static_cast<size_t>(face - kFileFaces);
+        return index < FileFaces().size() && !FileFaces()[index].bytes.empty() ? &FileFaces()[index].face : nullptr;
+    }
     int count = 0;
     const Face* faces = EmbeddedFaces(&count);
     if (face < 0 || face >= count || faces[face].data == nullptr || faces[face].size == 0)
@@ -92,6 +191,18 @@ uint16_t DecodeCp1252(uint8_t byte)
         return cp != 0 ? cp : byte;
     }
     return byte;
+}
+
+uint16_t Substitute(uint16_t codepoint)
+{
+    switch (codepoint) {
+    case 0x00AD:
+        return '-';
+    case 0x00A0:
+        return ' ';
+    default:
+        return codepoint;
+    }
 }
 
 }

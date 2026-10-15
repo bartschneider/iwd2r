@@ -25,8 +25,16 @@ bool FaceFor(const char* resref, int* face, float* sizeFactor);
 const Face* FaceAt(int face);
 int FaceCount();
 
+// The face that draws a character a mapped face lacks (the body face, which
+// has all of Windows-1252).
+int FallbackFace();
+
 // A Windows-1252 byte (dialog.tlk's encoding) as a Unicode code point. The
 // five unassigned bytes (0x81, 0x8D, 0x8F, 0x90, 0x9D) map to themselves.
 uint16_t DecodeCp1252(uint8_t byte);
+
+// The character drawn for a code point no face has: the soft hyphen as a
+// hyphen, the no-break space as a space; any other code point is itself.
+uint16_t Substitute(uint16_t codepoint);
 
 }
