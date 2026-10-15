@@ -827,7 +827,9 @@ BOOL CVidMode::DrawRect(const CRect& r, UINT nSurface, const CRect& rClip, COLOR
         break;
     }
 
-    // NOTE: Uninline.
+    // NOTE: Uninline. The original unlocks surface 0 whatever nSurface is
+    // (mov eax,[ecx] at 0x79874C); its one caller, CInfinity::DrawHighlightRect,
+    // passes 0. Ours unlocks the surface it locked.
     UnLockSurface(nSurface, ddsd.lpSurface);
 
     return TRUE;

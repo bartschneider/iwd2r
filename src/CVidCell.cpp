@@ -693,12 +693,15 @@ BOOL CVidCell::Render(WORD* pSurface, LONG lPitch, INT nRefPointX, INT nRefPoint
             // __FILE__: C:\Projects\Icewind2\src\chitin\ChVidImage.cpp
             // __LINE__: 1913
             UTIL_ASSERT_MSG(FALSE, GetResRef().GetResRefStr() + ".BAM is corrupted (GetFrame() failed)");
+
+            // Nothing is drawn or released (xor eax,eax at 0x7AE691).
+            return FALSE;
         }
     }
 
     if ((dwFlags & 0x200) != 0 && TRANSLUCENT_BLTS_ON) {
         // __FILE__: C:\Projects\Icewind2\src\chitin\ChVidImage.cpp
-        // __LINE__: 1902
+        // __LINE__: 1932
         UTIL_ASSERT(nTransVal >= 0);
 
         switch (g_pChitin->cVideo.m_nBpp) {
