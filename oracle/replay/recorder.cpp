@@ -1163,12 +1163,33 @@ bool g_randTrace = false;
 uint32_t g_randGetptd = kVanillaGetptd;
 uint32_t g_randContinue = kVanillaRand + 5;
 
-extern "C" void __cdecl LogRand(uint32_t caller)
+// IWD2R_RAND_TRACE=2 adds nine columns: the stack dword above the return
+// address (for a caller that calls rand first, as CUtil::UtilRandInt
+// 0x780C80 does, that is its own return address) and the first eight dwords
+// further up (up to 512) that lie in the exe's code (0x401000-0x7FFFFF):
+// heuristic outer callers, any of which may be a stale value (0 when fewer
+// are found).
+bool g_randTraceStack = false;
+constexpr size_t kRandRecord = 12;
+
+extern "C" void __cdecl LogRand(const uint32_t* stack)
 {
+    uint32_t record[kRandRecord] = { g_frame.load(), GetCurrentThreadId(), stack[0] };
+    if (g_randTraceStack) {
+        record[3] = stack[1];
+        size_t found = 4;
+        for (int i = 2; i < 514 && found < kRandRecord; ++i) {
+            uint32_t value = 0;
+            if (!SafeRead(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(stack + i)), &value, sizeof(value))) {
+                break;
+            }
+            if (value >= 0x401000 && value < 0x800000) {
+                record[found++] = value;
+            }
+        }
+    }
     EnterCriticalSection(&g_randLock);
-    g_randLog.push_back(g_frame.load());
-    g_randLog.push_back(GetCurrentThreadId());
-    g_randLog.push_back(caller);
+    g_randLog.insert(g_randLog.end(), record, record + kRandRecord);
     LeaveCriticalSection(&g_randLock);
 }
 
@@ -1177,7 +1198,8 @@ extern "C" __declspec(naked) void RandTrampoline()
     __asm {
         pushad
         pushfd
-        push dword ptr [esp + 36]
+        lea eax, [esp + 36]
+        push eax
         call LogRand
         add esp, 4
         popfd
@@ -1203,8 +1225,16 @@ void FlushRandTrace()
     if (!out) {
         return;
     }
-    for (size_t i = 0; i + 2 < calls.size(); i += 3) {
-        std::fprintf(out, "%u %u %08x\n", calls[i], calls[i + 1], calls[i + 2]);
+    for (size_t i = 0; i + kRandRecord <= calls.size(); i += kRandRecord) {
+        if (g_randTraceStack) {
+            std::fprintf(out, "%u %u", calls[i], calls[i + 1]);
+            for (size_t j = 2; j < kRandRecord; ++j) {
+                std::fprintf(out, " %08x", calls[i + j]);
+            }
+            std::fprintf(out, "\n");
+        } else {
+            std::fprintf(out, "%u %u %08x\n", calls[i], calls[i + 1], calls[i + 2]);
+        }
     }
     std::fclose(out);
 }
@@ -1936,6 +1966,7 @@ bool Start()
         kClockBase, kFramesPerSecond);
     std::string error;
     const std::string randTrace = Env("IWD2R_RAND_TRACE");
+    g_randTraceStack = randTrace == "2";
     if (!randTrace.empty() && randTrace != "0" && !HookRand(&error)) {
         Log("FATAL: %s", error.c_str());
         return false;

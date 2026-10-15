@@ -30,6 +30,16 @@ first call whose function differs is where the streams part.
 
 Off by default: the trace costs a file write per call.
 
+With `IWD2R_RAND_TRACE=2` the original's lines get nine more columns, for
+calls made through a helper (most go through `CUtil::UtilRandInt` 0x780C80,
+which is useless as a caller): the stack dword just above the return address
+(for a caller that calls `rand` first, its own return address), then the
+first eight dwords further up the stack (scanning up to 512) that lie in the
+exe's code range 0x401000-0x7FFFFF, or 0 when fewer are found. Those eight
+are a heuristic: a stack slot can hold a stale return address from an
+earlier call, so check that the instruction before a candidate is a call to
+the function below it before trusting it. Our side's lines are unchanged.
+
 Notes: the recorder flushes its buffered calls at the start of each frame, so the calls of the last frame before the original exits are not written. On our side, with the trace on outside replay mode (no `IWD2R_STATE_DUMP`), `rand.txt` is written to the working folder, which is the game folder once the engine has changed into it.
 
 ## The state probe (IWD2R_PROBE)
