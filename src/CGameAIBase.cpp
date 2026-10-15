@@ -1103,9 +1103,20 @@ SHORT CGameAIBase::ExecuteAction()
         // TODO: 0x451E5F-0x451EAA not ported.
         goto done;
     case 298:
-        // FaceSavedLocation
-        // TODO: 0x451FA3-0x452035 not ported.
-        goto done;
+        // FaceSavedLocation: the sprite turns to its saved orientation
+        // (0x451FA3).
+        pTarget = GetTargetShareType(CGameObject::TYPE_SPRITE);
+        bShare = TRUE;
+        if (pTarget != NULL) {
+            CGameSprite* pSprite = static_cast<CGameSprite*>(pTarget);
+            pSprite->SetDirection(static_cast<SHORT>(pSprite->m_baseStats.field_2E8));
+            if (pSprite->GetPos() != CPoint(-1, -1) || pSprite->GetArea() != NULL) {
+                message = new CMessageSpriteUpdate(pSprite, pSprite->GetId(), pSprite->GetId());
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+            }
+        }
+        returnValue = ACTION_DONE;
+        goto release;
     case 301:
         // SetExtendedNight
         // TODO: 0x4520ED-0x45216A not ported.

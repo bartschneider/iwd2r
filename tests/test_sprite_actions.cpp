@@ -1346,6 +1346,38 @@ TEST_CASE("sprite: ChangeDirection turns a slow walker only on its world ticks (
     pCharacter->m_nNewDirection = pCharacter->m_nDirection;
 }
 
+TEST_CASE("action: FaceSavedLocation turns to the saved orientation (case 298)", "[ai][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    CGameSprite* pCharacter = NewGameInStartArea(cre);
+    REQUIRE(pCharacter->GetArea() != NULL);
+    pCharacter->m_walkBackwards = FALSE;
+
+    // 0x451FA3: SetDirection to the base stats' field_2E8; done.
+    pCharacter->m_nDirection = 2;
+    pCharacter->m_nNewDirection = 2;
+    pCharacter->m_baseStats.field_2E8 = 6;
+    CAIObjectType actee(pCharacter->GetAIType());
+    actee.m_nInstance = pCharacter->GetId();
+    pCharacter->m_curAction = CAIAction(298, actee, 0, 0, 0);
+    CHECK(pCharacter->CGameAIBase::ExecuteAction() == CGameAIBase::ACTION_DONE);
+    CHECK(pCharacter->m_nNewDirection == 6);
+    CHECK(pCharacter->m_deltaDirection == 1);
+    pCharacter->m_curAction = CAIAction();
+    g_pBaldurChitin->GetMessageHandler()->AsynchronousUpdate();
+    pCharacter->m_nNewDirection = pCharacter->m_nDirection;
+}
+
 TEST_CASE("sprite: SetDirection turns the short way round (0x706C80)", "[ai][data]")
 {
     if (DataDir() == nullptr) {
