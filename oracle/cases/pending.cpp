@@ -178,15 +178,19 @@ ORACLE_CASE_PENDING("pending/save_rolls", nullptr,
     "ours not implemented (CGameSprite::ProcessEffectList 0x72DE60 rolls the save dice); needs engine state "
     "(the sprite's effect lists, derived stats and g_pBaldurChitin's game)");
 // CGameSprite::Hit (0x73B760) rolls the attack d20 (CUtil::UtilRandInt(20,
-// luck) + 1) and compares it with the target's AC.
+// luck) + 1) and compares it with the target's AC. Ours is ported; the
+// original needs sprites from its constructor (their vtables: GetAIType,
+// GetPos), equipped CItems with loaded abilities and the game's options, so
+// no fixture is honest (R10a). tests/test_combat.cpp pins ours' draws.
 ORACLE_CASE_PENDING("pending/hit", nullptr,
-    "ours not implemented (CGameSprite::Hit 0x73B760); needs engine state (equipped CItems with loaded "
-    "abilities, an attacker and a target sprite, g_pBaldurChitin's game and options)");
+    "needs engine state (equipped CItems with loaded abilities, an attacker and a target sprite from the "
+    "original's constructor, g_pBaldurChitin's game and options); ours covered by tests/test_combat.cpp");
 // CGameSprite::Damage (0x73D560) rolls the weapon's damage dice
 // (CUtil::UtilRandInt(size, luck) + 1 per die) and builds the damage effect.
+// Ours is ported; pending for the same reasons as Hit.
 ORACLE_CASE_PENDING("pending/damage", nullptr,
-    "ours not implemented (CGameSprite::Damage 0x73D560); needs engine state (equipped CItems with loaded "
-    "abilities, the target's animation, g_pBaldurChitin's game, the message handler)");
+    "needs engine state (equipped CItems with loaded abilities, the target's animation and vtable, "
+    "g_pBaldurChitin's game, the message handler); ours covered by tests/test_combat.cpp");
 // CGameDialogSprite::FetchRumor (0x483B70) loads the rumor DLG through
 // CGameDialogSprite::Load (0x482210: g_pChitin's resource manager, the
 // object array for the speaker's colour and name), parses its scripts with
