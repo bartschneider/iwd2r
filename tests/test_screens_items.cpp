@@ -568,7 +568,6 @@ TEST_CASE("store: buying takes the gold and puts the item in a free slot", "[sto
 
     // The first item that is not a random one, bought once.
     CScreenStoreItem* pStoreItem = NULL;
-    INT nIndex = 0;
     POSITION pos = pStore->m_lStoreItems.GetHeadPosition();
     while (pos != NULL) {
         CScreenStoreItem* pItem = pStore->m_lStoreItems.GetNext(pos);
@@ -576,7 +575,6 @@ TEST_CASE("store: buying takes the gold and puts the item in a free slot", "[sto
             pStoreItem = pItem;
             break;
         }
-        nIndex++;
     }
     REQUIRE(pStoreItem != NULL);
     const CResRef cResBought = pStoreItem->m_pItem->cResRef;
