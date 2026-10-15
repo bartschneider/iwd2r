@@ -13,6 +13,7 @@
 #include "CPathSearch.h"
 #include "CScreenCreateChar.h"
 #include "CScreenWorld.h"
+#include "CUIControlTextDisplay.h"
 #include "CUtil.h"
 #include "CVidInf.h"
 #include "CVidMode.h"
@@ -1331,4 +1332,104 @@ TEST_CASE("combat: a goblin archer shoots arrows at the party member", "[combat]
     CHECK(nearest >= 5);
     CHECK_FALSE(hpRose);
     CHECK(pCharacter->GetBaseStats()->m_hitPoints < characterStart);
+}
+
+namespace {
+
+// The text of a string reference, as the TLK has it.
+std::string Tlk(STRREF strRef)
+{
+    STR_RES strRes;
+    g_pBaldurChitin->m_cTlkTable.Fetch(strRef, strRes);
+    return std::string(static_cast<LPCSTR>(strRes.szText));
+}
+
+}
+
+// CItem::sub_4EA580 0x4EA580 and its usability list 0x4EA750: the item's
+// description, an empty line, the heading ("usable by" 31531 when anything
+// makes the item usable, else "not usable by" 31530) in RGB(200, 200, 0), and
+// the list. 00AX1H83 has only bit 0x4000 (strref 31532) set: it is usable by
+// everyone else. 00BARD01 (0x7FD and every kit bit) is usable by the class
+// of bit 0x2 (1083) only, so the "not usable by" list shows. An item without
+// restrictions (00SWDL01) gets the description only.
+TEST_CASE("combat: CItem's information text lists who can use the item", "[combat][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    Fight fight;
+    std::string why;
+    if (!SetUpFight(fight, why)) {
+        if (why.find("CHR") != std::string::npos) {
+            SKIP("[iwd2r-skip] " + why);
+        }
+        FAIL(why);
+    }
+    CUIControlTextDisplay* pDisplay = g_pBaldurChitin->m_pEngineWorld->m_pActiveDialogDisplay;
+    REQUIRE(pDisplay != NULL);
+    REQUIRE(pDisplay->m_plstStrings != NULL);
+    REQUIRE(g_pBaldurChitin->pActiveEngine == g_pBaldurChitin->m_pEngineWorld);
+
+    // The strings the call adds: (text, colour).
+    auto added = [&](const char* resRef, std::vector<std::pair<std::string, COLORREF>>& lines) {
+        CItem item(CResRef(resRef), 0, 0, 0, 0, 1);
+        const INT_PTR before = pDisplay->m_plstStrings->GetCount();
+        const unsigned int state = iwd2r_rand_state();
+        item.sub_4EA580(pDisplay, RGB(200, 200, 0));
+        CHECK(iwd2r_rand_state() == state);
+        INT_PTR n = 0;
+        POSITION pos = pDisplay->m_plstStrings->GetHeadPosition();
+        while (pos != NULL) {
+            CDisplayString* pString = pDisplay->m_plstStrings->GetNext(pos);
+            if (n++ >= before) {
+                lines.emplace_back(std::string(static_cast<LPCSTR>(pString->GetString())), pString->GetTextColor());
+            }
+        }
+        std::string all;
+        for (const auto& line : lines) {
+            all += line.first + "\n";
+        }
+        return all;
+    };
+    auto headingColour = [&](const std::vector<std::pair<std::string, COLORREF>>& lines, const std::string& heading) {
+        for (const auto& line : lines) {
+            if (line.first.find(heading) != std::string::npos) {
+                return line.second;
+            }
+        }
+        return static_cast<COLORREF>(0xFFFFFFFF);
+    };
+
+    std::vector<std::pair<std::string, COLORREF>> lines;
+    std::string all = added("00AX1H83", lines);
+    INFO(all);
+    // The description wraps over several lines: its first words.
+    CHECK(all.find(Tlk(11108).substr(0, 24)) != std::string::npos);
+    CHECK(headingColour(lines, Tlk(31531)) == RGB(200, 200, 0));
+    CHECK(all.find(Tlk(31530)) == std::string::npos);
+    for (STRREF strRef : { 31534, 31536, 34, 1083, 1079, 1080, 16799, 33, 1078, 1077, 1082, 32, 9987 }) {
+        CHECK(all.find("  " + Tlk(strRef)) != std::string::npos);
+    }
+    CHECK(all.find("  " + Tlk(31532)) == std::string::npos);
+
+    lines.clear();
+    all = added("00BARD01", lines);
+    INFO(all);
+    CHECK(headingColour(lines, Tlk(31530)) == RGB(200, 200, 0));
+    for (STRREF strRef : { 34, 1079, 1080, 16799, 33, 1078, 1077, 1082, 32, 9987 }) {
+        CHECK(all.find("  " + Tlk(strRef)) != std::string::npos);
+    }
+    CHECK(all.find("  " + Tlk(1083)) == std::string::npos);
+
+    lines.clear();
+    all = added("00SWDL01", lines);
+    INFO(all);
+    CHECK(all.find(Tlk(32681).substr(0, 24)) != std::string::npos);
+    CHECK(all.find(Tlk(31530)) == std::string::npos);
+    CHECK(all.find(Tlk(31531)) == std::string::npos);
 }

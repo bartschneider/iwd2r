@@ -63,6 +63,7 @@ public:
     BYTE GetMinCHRRequired();
     void sub_4EA4A0(CString& sResRef);
     void sub_4EA580(CUIControlTextDisplay* pText, COLORREF rgbColor);
+    void sub_4EA750(CUIControlTextDisplay* pText, COLORREF rgbColor);
 
     CItem& operator=(const CItem& other);
     bool operator==(const CItem& other);

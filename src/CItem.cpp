@@ -1,6 +1,7 @@
 #include "CItem.h"
 
 #include "CBaldurChitin.h"
+#include "CBaldurEngine.h"
 #include "CGameEffect.h"
 #include "CGameSprite.h"
 #include "CImmunities.h"
@@ -1387,7 +1388,239 @@ void CItem::sub_4EA4A0(CString& sResRef)
 // 0x4EA580
 void CItem::sub_4EA580(CUIControlTextDisplay* pText, COLORREF rgbColor)
 {
-    // TODO: Incomplete.
+    // The item's description and who can use it, for the inventory's and
+    // the store's information panels.
+    //
+    // NOTE: `rgbColor` is not read: the usability heading is always
+    // RGB(200, 200, 0) (0xC8C8), which is what both callers pass.
+    CString sUnused1;
+    CString sUnused2;
+
+    // NOTE: Inlined GetItemType; the type is not used.
+    GetItemType();
+
+    // NOTE: Uninline.
+    GetAbilityCount();
+
+    CBaldurEngine* pEngine = static_cast<CBaldurEngine*>(g_pBaldurChitin->pActiveEngine);
+    if (pEngine != NULL) {
+        // NOTE: Inlined GetDescription.
+        STRREF strDescription = GetDescription();
+
+        pEngine->UpdateText(pText, "%s", (LPCSTR)CBaldurEngine::FetchString(strDescription));
+        pEngine->UpdateText(pText, "");
+        sub_4EA750(pText, RGB(200, 200, 0));
+    }
+}
+
+// 0x4EA750
+void CItem::sub_4EA750(CUIControlTextDisplay* pText, COLORREF rgbColor)
+{
+    // Who can use the item: each class, race, alignment and kit is listed
+    // under "usable by" when its bit of the unusable flags is clear and
+    // under "not usable by" when it is set, and one of the two lists is
+    // shown with its heading.
+    BOOL bUsable = FALSE;
+
+    // NOTE: Inlined GetNotUsableBy.
+    DWORD dwNotUsableBy = GetNotUsableBy();
+    DWORD dwNotUsableBy2 = GetNotUsableBy2();
+
+    CString sNotUsable;
+    CString sUsable;
+    CString sEntry;
+    CString sUnused;
+    CString sKit1;
+    CString sKit2;
+    CString sKit3;
+    CString sKit4;
+    CString sKit5;
+    CString sKit6;
+    CString sKit7;
+    CString sKit8;
+
+    if (dwNotUsableBy == 0 && dwNotUsableBy2 == 0) {
+        return;
+    }
+
+    CBaldurEngine* pEngine = static_cast<CBaldurEngine*>(g_pBaldurChitin->pActiveEngine);
+    if (pEngine == NULL) {
+        return;
+    }
+
+    // NOTE: The original clears the flags' bits one by one and keeps no
+    // count (0x4EA841-0x4EA84E).
+    for (DWORD dwBits = dwNotUsableBy; dwBits != 0; dwBits &= dwBits - 1) {
+    }
+
+    // NOTE: Inlined GetNotUsableBy again.
+    DWORD dwFlags = GetNotUsableBy();
+
+    if ((dwFlags & 0xE000) != 0) {
+        CString sA = "  " + CBaldurEngine::FetchString(31532) + "\n";
+        CString sB = "  " + CBaldurEngine::FetchString(31534) + "\n";
+        CString sC = "  " + CBaldurEngine::FetchString(31536) + "\n";
+
+        if ((dwFlags & 0x4000) != 0) {
+            sNotUsable += sA;
+        } else {
+            sUsable += sA;
+        }
+
+        if ((dwFlags & 0x8000) != 0) {
+            sNotUsable += sB;
+        } else {
+            sUsable += sB;
+        }
+
+        if ((dwFlags & 0x2000) != 0) {
+            sNotUsable += sC;
+        } else {
+            sUsable += sC;
+        }
+    }
+
+    if ((dwFlags & 0x31000) != 0) {
+        CString sA = "  " + CBaldurEngine::FetchString(31533) + "\n";
+        CString sB = "  " + CBaldurEngine::FetchString(31534) + "\n";
+        CString sC = "  " + CBaldurEngine::FetchString(31535) + "\n";
+
+        if ((dwFlags & 0x10000) != 0) {
+            sNotUsable += sA;
+        } else {
+            sUsable += sA;
+        }
+
+        if ((dwFlags & 0x20000) != 0) {
+            sNotUsable += sB;
+        } else {
+            sUsable += sB;
+        }
+
+        if ((dwFlags & 0x1000) != 0) {
+            sNotUsable += sC;
+        } else {
+            sUsable += sC;
+        }
+    }
+
+    if ((dwFlags & 0x3F800000) != 0) {
+        CString sA = "  " + CBaldurEngine::FetchString(31570) + "\n";
+        CString sB = "  " + CBaldurEngine::FetchString(31574) + "\n";
+        CString sC = "  " + CBaldurEngine::FetchString(31573) + "\n";
+        CString sD = "  " + CBaldurEngine::FetchString(31571) + "\n";
+        CString sE = "  " + CBaldurEngine::FetchString(31576) + "\n";
+        CString sF = "  " + CBaldurEngine::FetchString(31569) + "\n";
+        CString sG = "  " + CBaldurEngine::FetchString(31572) + "\n";
+
+        if ((dwFlags & 0x800000) != 0) {
+            sNotUsable += sA;
+        } else {
+            sUsable += sA;
+        }
+
+        // NOTE: Of these, only this entry marks the item usable.
+        if ((dwFlags & 0x1000000) != 0) {
+            sNotUsable += sB;
+        } else {
+            sUsable += sB;
+            bUsable = TRUE;
+        }
+
+        if ((dwFlags & 0x2000000) != 0) {
+            sNotUsable += sC;
+        } else {
+            sUsable += sC;
+        }
+
+        if ((dwFlags & 0x4000000) != 0) {
+            sNotUsable += sD;
+        } else {
+            sUsable += sD;
+        }
+
+        if ((dwFlags & 0x8000000) != 0) {
+            sNotUsable += sF;
+        } else {
+            sUsable += sF;
+        }
+
+        if ((dwFlags & 0x10000000) != 0) {
+            sNotUsable += sG;
+        } else {
+            sUsable += sG;
+        }
+
+        if ((dwFlags & 0x20000000) != 0) {
+            sNotUsable += sE;
+        } else {
+            sUsable += sE;
+        }
+    }
+
+    // The classes (0x4EB092-0x4EB72D): a set bit lists the class as not
+    // usable only while nothing has made the item usable.
+    static const STRREF CLASSES[] = { 34, 1083, 1079, 1080, 16799, 33, 1078, 1077, 1082 };
+    for (INT nIndex = 0; nIndex < 9; nIndex++) {
+        sEntry = "  " + CBaldurEngine::FetchString(CLASSES[nIndex]) + "\n";
+        if ((dwFlags & (1 << nIndex)) != 0) {
+            if (!bUsable) {
+                sNotUsable += sEntry;
+            }
+        } else {
+            sUsable += sEntry;
+        }
+    }
+
+    // NOTE: Unlike the others, a clear 0x200 bit marks the item usable.
+    sEntry = "  " + CBaldurEngine::FetchString(32) + "\n";
+    if ((dwFlags & 0x200) != 0) {
+        if (!bUsable) {
+            sNotUsable += sEntry;
+        }
+    } else {
+        sUsable += sEntry;
+        bUsable = TRUE;
+    }
+
+    // The kits (the second flags, 0x4EB72D-0x4EBF0F).
+    sEntry = "  " + CBaldurEngine::FetchString(9987) + "\n";
+    sKit1 = "  " + CBaldurEngine::FetchString(502) + "\n";
+    sKit2 = "  " + CBaldurEngine::FetchString(504) + "\n";
+    sKit3 = "  " + CBaldurEngine::FetchString(2012) + "\n";
+    sKit4 = "  " + CBaldurEngine::FetchString(2022) + "\n";
+    sKit5 = "  " + CBaldurEngine::FetchString(12786) + "\n";
+    sKit6 = "  " + CBaldurEngine::FetchString(12785) + "\n";
+    sKit7 = "  " + CBaldurEngine::FetchString(12787) + "\n";
+    sKit8 = "  " + CBaldurEngine::FetchString(12788) + "\n";
+
+    CString* kits[] = { &sKit1, &sKit2, &sKit3, &sKit4, &sKit5, &sKit6, &sKit7, &sKit8 };
+    if ((dwFlags & 0x400) != 0) {
+        // A clear kit bit lists the kit as usable.
+        for (INT nIndex = 0; nIndex < 8; nIndex++) {
+            if ((dwNotUsableBy2 & (0x40 << nIndex)) == 0) {
+                sUsable += *kits[nIndex];
+                bUsable = TRUE;
+            }
+        }
+
+        if ((dwNotUsableBy2 & 0x2000) != 0 && !bUsable) {
+            sNotUsable += sEntry;
+        }
+    } else {
+        // A set kit bit lists the kit as not usable.
+        for (INT nIndex = 0; nIndex < 8; nIndex++) {
+            if ((dwNotUsableBy2 & (0x40 << nIndex)) != 0) {
+                sNotUsable += *kits[nIndex];
+            }
+        }
+
+        sUsable += sEntry;
+    }
+
+    STRREF strHeading = bUsable ? 31531 : 31530;
+    pEngine->UpdateTextForceColor(pText, rgbColor, "%s", (LPCSTR)CBaldurEngine::FetchString(strHeading));
+    pEngine->UpdateTextNoTrim(pText, "%s", bUsable ? (LPCSTR)sUsable : (LPCSTR)sNotUsable);
 }
 
 // 0x464130
