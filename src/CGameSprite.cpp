@@ -2970,7 +2970,14 @@ void CGameSprite::AIUpdateWalk()
                     field_7430);
             }
 
-            char* pSndWalk = m_animation.GetSndWalk(m_pArea->m_search.GetTableIndex(ptOldSearch));
+            // The table index of the old square, which is already in search
+            // squares (0x6F9F8A-0x6F9FCB): CSearchBitmap::GetTableIndex
+            // divides a pixel position first.
+            CVidBitmap& resSearch = m_pArea->m_search.m_resSearch;
+            SHORT nTableIndex = resSearch.GetBitCount(TRUE) == 8
+                ? resSearch.GetPixelValue(ptOldSearch.x, ptOldSearch.y, TRUE) >> 4
+                : resSearch.GetPixelValue(ptOldSearch.x, ptOldSearch.y, TRUE);
+            char* pSndWalk = m_animation.GetSndWalk(nTableIndex);
             if (pSndWalk != NULL) {
                 m_sndWalk[m_currSndWalk].SetResRef(CResRef(pSndWalk), TRUE, TRUE);
 
@@ -11246,9 +11253,9 @@ void CGameSprite::sub_722820()
         case 2:
             break;
         default:
-        // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjCreature.cpp
-        // __LINE__: 23869
-        UTIL_ASSERT(FALSE);
+            // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjCreature.cpp
+            // __LINE__: 23869
+            UTIL_ASSERT(FALSE);
             break;
         }
         break;
@@ -11283,9 +11290,9 @@ void CGameSprite::sub_722820()
             m_baseStats.field_3E = 14;
             break;
         default:
-        // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjCreature.cpp
-        // __LINE__: 23977
-        UTIL_ASSERT(FALSE);
+            // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjCreature.cpp
+            // __LINE__: 23977
+            UTIL_ASSERT(FALSE);
             break;
         }
         break;
