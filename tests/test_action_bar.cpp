@@ -17,6 +17,8 @@
 #include "CScreenCreateChar.h"
 #include "CScreenWorld.h"
 #include "CUIControlBase.h"
+#include "CUIControlEdit.h"
+#include "CUIControlFactory.h"
 #include "CUIControlTextDisplay.h"
 #include "CUIPanel.h"
 #include "CWeather.h"
@@ -872,4 +874,83 @@ TEST_CASE("rules: lay on hands follows the object type's class", "[rules][data]"
     pStats->m_classMask = CLASSMASK_PALADIN;
     pStats->m_nCHR = 16;
     CHECK(rules.GetLayOnHandsAmount(typeAI, *pStats) == 0);
+}
+
+// CUIControlEdit::OnKeyDown (0x4D7130): Enter puts a changed text at the head
+// of the history and moves the rest down, the oldest dropped; up shows the
+// entry at the history index and moves it on, down the one two back. The
+// world screen's console edit (CUIControlEditLua, 0x77BD00) keeps ten.
+TEST_CASE("edit: the input history", "[edit][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    if (SelectedPartyMember() == NULL) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    CUIPanel* pPanel = g_pBaldurChitin->m_pEngineWorld->GetManager()->GetPanel(6);
+    REQUIRE(pPanel != NULL);
+    CUIControlEditLua* pEdit = static_cast<CUIControlEditLua*>(pPanel->GetControl(0));
+    REQUIRE(pEdit != NULL);
+    REQUIRE(pEdit->field_873 == 10);
+    for (int n = 0; n < 10; n++) {
+        pEdit->field_874[n] = "";
+    }
+    pEdit->field_872 = 1;
+
+    auto enter = [&](const char* text) {
+        pEdit->m_sText = text;
+        pEdit->m_nCursorIndex = static_cast<SHORT>(pEdit->m_sText.GetLength());
+        pEdit->OnKeyDown(VK_RETURN);
+    };
+    enter("first");
+    enter("second");
+    enter("third");
+    CHECK(pEdit->field_874[0] == "third");
+    CHECK(pEdit->field_874[1] == "second");
+    CHECK(pEdit->field_874[2] == "first");
+    CHECK(pEdit->field_874[3] == "");
+    CHECK(pEdit->field_872 == 1);
+
+    // The same text again changes nothing.
+    enter("third");
+    CHECK(pEdit->field_874[1] == "second");
+
+    pEdit->OnKeyDown(VK_UP);
+    CHECK(pEdit->m_sText == "second");
+    CHECK(pEdit->field_872 == 2);
+    pEdit->OnKeyDown(VK_UP);
+    CHECK(pEdit->m_sText == "first");
+    CHECK(pEdit->field_872 == 3);
+    pEdit->OnKeyDown(VK_UP);
+    CHECK(pEdit->m_sText == "first");
+    CHECK(pEdit->field_872 == 3);
+
+    pEdit->OnKeyDown(VK_DOWN);
+    CHECK(pEdit->m_sText == "second");
+    CHECK(pEdit->field_872 == 2);
+    pEdit->OnKeyDown(VK_DOWN);
+    CHECK(pEdit->m_sText == "third");
+    CHECK(pEdit->field_872 == 1);
+    pEdit->OnKeyDown(VK_DOWN);
+    CHECK(pEdit->m_sText == "third");
+    CHECK(pEdit->field_872 == 1);
+
+    // Ten entries at most: the oldest goes.
+    for (int n = 0; n < 10; n++) {
+        CString sText;
+        sText.Format("entry %d", n);
+        enter(sText);
+    }
+    CHECK(pEdit->field_874[0] == "entry 9");
+    CHECK(pEdit->field_874[9] == "entry 0");
+
+    for (int n = 0; n < 10; n++) {
+        pEdit->field_874[n] = "";
+    }
+    pEdit->m_sText = "";
 }

@@ -216,7 +216,9 @@ BOOL CUIControlEdit::OnRButtonDown(CPoint pt)
 void CUIControlEdit::OnKeyDown(SHORT nKey)
 {
     if (g_pBaldurChitin->field_1A0) {
-        // TODO: Incomplete.
+        // TODO: Incomplete. The IME input of Double Byte Character Support
+        // (Program Options, off by default; CImm 0x7C2CC0, 0x7C2E10,
+        // 0x4D89E0), not ported.
     }
 
     if (m_pPanel->m_pManager->m_pWarp->GetMenuKey()) {
@@ -287,7 +289,9 @@ void CUIControlEdit::OnKeyDown(SHORT nKey)
             }
 
             if (g_pChitin->field_1A0) {
-                // TODO: Incomplete.
+                // TODO: Incomplete. Double Byte Character Support only (off
+                // by default): the original deletes a double-byte character
+                // whole (CUtil::IsDBCSTrailByte, IsDBCSLeadByte).
             } else {
                 m_sText = m_sText.Left(m_nCursorIndex) + m_sText.Right(m_sText.GetLength() - m_nCursorIndex - 1);
             }
@@ -298,7 +302,11 @@ void CUIControlEdit::OnKeyDown(SHORT nKey)
     case VK_RETURN:
         field_872 = 1;
         if (m_sText != field_874[0]) {
-            // TODO: Incomplete.
+            // NOTE: The history moves down one, the oldest entry dropped
+            // (0x4D79EF-0x4D7A24).
+            for (BYTE nIndex = field_873 - 1; nIndex != 0; nIndex--) {
+                field_874[nIndex] = field_874[nIndex - 1];
+            }
             field_874[0] = m_sText;
         }
 
@@ -345,7 +353,9 @@ void CUIControlEdit::OnKeyDown(SHORT nKey)
             }
 
             if (g_pChitin->field_1A0) {
-                // TODO: Incomplete.
+                // TODO: Incomplete. Double Byte Character Support only (off
+                // by default): the original steps over a double-byte
+                // character's lead byte too (CUtil::IsDBCSTrailByte).
             }
 
             InvalidateRect();
@@ -375,8 +385,12 @@ void CUIControlEdit::OnKeyDown(SHORT nKey)
         }
         break;
     case VK_DOWN:
-        if (field_872 > 1 && field_874[field_872].GetLength() != 0) {
-            m_sText = field_874[field_872--];
+        // NOTE: Two entries back from the history index, as the original
+        // (0x4D7AE0: `field_874` + (index - 2) * 4); ours read the entry at
+        // the index.
+        if (field_872 > 1 && field_874[field_872 - 2].GetLength() != 0) {
+            m_sText = field_874[field_872 - 2];
+            field_872--;
             m_nCursorIndex = m_sText.GetLength();
 
             AdjustVisibleIndex();
@@ -572,7 +586,8 @@ void CUIControlEdit::OnKeyDown(SHORT nKey)
 // 0x4D89E0
 void sub_4D89E0()
 {
-    // TODO: Incomplete.
+    // TODO: Incomplete. CImm::sub_4D89E0 in the original (the IME's composed
+    // string, Double Byte Character Support only); not ported.
 }
 
 // 0x4D8A60

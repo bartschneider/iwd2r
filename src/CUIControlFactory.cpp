@@ -4563,9 +4563,11 @@ CUIControlEditLua::CUIControlEditLua(CUIPanel* panel, UI_CONTROL_EDIT* controlIn
 {
     CString sKey("String0");
 
-    m_nHistorySize = 10;
+    // NOTE: The base class's history size (+0x873, 0x77BD56); ours set a
+    // member of its own that hid it, so the history kept one entry.
+    field_873 = 10;
 
-    for (BYTE nIndex = 0; nIndex < m_nHistorySize; nIndex++) {
+    for (BYTE nIndex = 0; nIndex < field_873; nIndex++) {
         sKey.SetAt(sKey.GetLength() - 1, nIndex + '0');
         GetPrivateProfileStringA("Lua Edit",
             sKey,

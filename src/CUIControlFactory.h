@@ -340,8 +340,8 @@ public:
     CUIControlEditLua(CUIPanel* panel, UI_CONTROL_EDIT* controlInfo);
     ~CUIControlEditLua() override;
 
-    /* 0873 */ BYTE m_nHistorySize;
-    /* 0874 */ CString m_sHistory[10];
+    // NOTE: The history size (+0x873) and the history (+0x874) are
+    // CUIControlEdit's `field_873` and `field_874`.
     /* 08A2 */ LONG field_8A2;
     /* 08A6 */ unsigned char field_8A6;
 };
