@@ -6,6 +6,7 @@
 #include "compat/ini.h"
 #include "data_view.h"
 #include "main.h"
+#include "noon_time_zone.h"
 #include "platform/compose.h"
 #include "platform/present.h"
 #include "platform/present_backend.h"
@@ -19,6 +20,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -41,6 +43,16 @@ void SetEnv(const char* name, const char* value)
         setenv(name, value, 1);
     else
         unsetenv(name);
+#endif
+}
+
+// Rereads TZ, which localtime_r and localtime_s otherwise read only once.
+void ResetTimeZone()
+{
+#ifdef _WIN32
+    _tzset();
+#else
+    tzset();
 #endif
 }
 
@@ -462,7 +474,8 @@ std::map<std::string, std::string> Pinned(bool* present)
 bool RunGolden(const char* prefix, const char* videoDriver, const char* presenter)
 {
     const char* env = std::getenv("IWD2_DATA");
-    DataView view(env);
+    // No saves, so Quick Load is disabled whatever saves earlier runs left in the install.
+    DataView view(env, DataView::Saves::None);
     const std::filesystem::path shots = std::filesystem::path(view.Path()).parent_path() / "text-golden-shots";
     std::filesystem::create_directories(shots);
     const std::string script = std::string(IWD2R_SOURCE_DIR) + "/scenarios/text_screens.txt";
@@ -478,6 +491,12 @@ bool RunGolden(const char* prefix, const char* videoDriver, const char* presente
     SetEnv("IWD2R_SCRIPT", script.c_str());
     SetEnv("IWD2R_SHOT_DIR", shots.string().c_str());
     SetEnv("IWD2R_SHOT_PRESENTED", "1");
+    // The local time is noon (the main menu's day background), as in the smoke test.
+    const char* oldTz = std::getenv("TZ");
+    const bool hadTz = oldTz != nullptr;
+    const std::string savedTz = hadTz ? oldTz : "";
+    SetEnv("TZ", NoonTimeZone().c_str());
+    ResetTimeZone();
     const char* old = std::getenv("IWD2_DATA");
     const std::string saved = old ? old : "";
     SetEnv("IWD2_DATA", view.Path().c_str());
@@ -487,6 +506,8 @@ bool RunGolden(const char* prefix, const char* videoDriver, const char* presente
     const int rc = iwd2r_main(1, argv);
     std::filesystem::current_path(cwd);
     SetEnv("IWD2_DATA", saved.c_str());
+    SetEnv("TZ", hadTz ? savedTz.c_str() : nullptr);
+    ResetTimeZone();
     for (const char* name : { "IWD2R_SCRIPT", "IWD2R_SHOT_DIR", "IWD2R_SHOT_PRESENTED", "IWD2R_INI_OVERRIDE", "IWD2R_GPU_PROBE" })
         SetEnv(name, nullptr);
     compat::ini::ResetOverridesForTesting();
