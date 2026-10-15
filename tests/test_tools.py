@@ -3421,6 +3421,12 @@ class SandboxReplayTest(unittest.TestCase):
         with mock.patch.dict(os.environ, {'IWD2R_RAND_TRACE': '1'}):
             self.assertEqual(oracle.recorder_env('s', 'd', 7, 0)
                              ['IWD2R_RAND_TRACE'], '1')
+        with mock.patch.dict(os.environ, {'IWD2R_RAND_TRACE': '2'}):
+            self.assertEqual(oracle.recorder_env('s', 'd', 7, 0)
+                             ['IWD2R_RAND_TRACE'], '2')
+        with mock.patch.dict(os.environ, {'IWD2R_RAND_TRACE': 'yes'}):
+            self.assertEqual(oracle.recorder_env('s', 'd', 7, 0)
+                             ['IWD2R_RAND_TRACE'], '1')
         with mock.patch.dict(os.environ, {'IWD2R_RAND_TRACE': '0'}):
             self.assertNotIn('IWD2R_RAND_TRACE',
                              oracle.recorder_env('s', 'd', 7, 0))

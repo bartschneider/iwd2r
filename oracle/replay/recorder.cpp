@@ -169,6 +169,21 @@ static_assert(kField_game_time_active.type == ReplayType::k_u8, "");
 static_assert(kField_sprite_timers_head.type == ReplayType::k_ptr, "");
 static_assert(kField_timer_time.type == ReplayType::k_i32, "");
 static_assert(kField_timer_id.type == ReplayType::k_u8, "");
+static_assert(kField_sprite_script_override.type == ReplayType::k_ptr, "");
+static_assert(kField_sprite_script_movement.type == ReplayType::k_ptr, "");
+static_assert(kField_script_resref.type == ReplayType::k_resref, "");
+static_assert(kField_script_blocks.type == ReplayType::k_i32, "");
+static_assert(kField_sprite_direction.type == ReplayType::k_i16, "");
+static_assert(kField_sprite_no_action_count.type == ReplayType::k_i32, "");
+static_assert(kField_message_list_head.type == ReplayType::k_ptr, "");
+static_assert(kField_message_list_count.type == ReplayType::k_i32, "");
+static_assert(kField_message_target.type == ReplayType::k_i32, "");
+static_assert(kField_message_source.type == ReplayType::k_i32, "");
+static_assert(kField_message_set_sequence.type == ReplayType::k_u8, "");
+
+// CMessageSetSequence's vtable (its constructor 0x453530 stores it).
+constexpr uint32_t kVanillaSetSequenceVtable = 0x8488C4;
+static_assert(kField_sprite_new_direction.type == ReplayType::k_i16, "");
 static_assert(kField_sprite_pos_dest.type == ReplayType::k_i32 && kField_sprite_pos_dest.count == 2, "");
 static_assert(kField_sprite_path.type == ReplayType::k_ptr, "");
 static_assert(kField_sprite_path_count.type == ReplayType::k_i16, "");
@@ -755,6 +770,20 @@ void ReadProbe(platform::replay_probe::Frame* out)
     }
     const uint32_t active = ReadU32(At(chitin, kField_active_engine), &ok);
     out->screen = ScreenName(chitin, active, &ok);
+    bool messagesOk = true;
+    out->messages = ReadI32(At(chitin, kField_message_list_count), &messagesOk);
+    uint32_t messageNode = ReadU32(At(chitin, kField_message_list_head), &messagesOk);
+    for (int n = 0; messagesOk && messageNode && n < kMaxListNodes; ++n) {
+        const uint32_t message = ReadU32(At(messageNode, kField_list_node_data), &messagesOk);
+        messageNode = ReadU32(At(messageNode, kField_list_node_next), &messagesOk);
+        if (message && ReadU32(message, &messagesOk) == kVanillaSetSequenceVtable) {
+            platform::replay_probe::Frame::SetSequence m;
+            m.target = ReadI32(At(message, kField_message_target), &messagesOk);
+            m.sequence = ReadU8(At(message, kField_message_set_sequence), &messagesOk);
+            m.source = ReadI32(At(message, kField_message_source), &messagesOk);
+            out->setSequences.push_back(m);
+        }
+    }
     const uint32_t game = ReadU32(At(chitin, kField_object_game), &ok);
     if (!game) {
         return;
@@ -859,6 +888,31 @@ void ReadProbe(platform::replay_probe::Frame* out)
                     o.timers.emplace_back(id, time);
                 }
             }
+            const ReplayField* const kScriptLevels[] = {
+                &kField_sprite_script_override,
+                &kField_sprite_script_special1,
+                &kField_sprite_script_team,
+                &kField_sprite_script_special2,
+                &kField_sprite_script_combat,
+                &kField_sprite_script_special3,
+                &kField_sprite_script_movement,
+            };
+            for (const ReplayField* level : kScriptLevels) {
+                bool scriptOk = true;
+                const uint32_t script = ReadU32(At(object, *level), &scriptOk);
+                if (!script) {
+                    o.scripts.emplace_back("-", 0);
+                    continue;
+                }
+                char resref[8] = {};
+                SafeRead(At(script, kField_script_resref), resref, sizeof(resref));
+                o.scripts.emplace_back(std::string(resref, strnlen(resref, sizeof(resref))),
+                    ReadI32(At(script, kField_script_blocks), &scriptOk));
+            }
+            bool directionOk = true;
+            o.direction = ReadI16(At(object, kField_sprite_direction), &directionOk);
+            o.newDirection = ReadI16(At(object, kField_sprite_new_direction), &directionOk);
+            o.noActionCount = ReadI32(At(object, kField_sprite_no_action_count), &directionOk);
         } else if (o.type == platform::replay_probe::kTypeDoor) {
             o.hasName = true;
             o.name = ReadName(At(object, kField_door_name));
@@ -1163,12 +1217,38 @@ bool g_randTrace = false;
 uint32_t g_randGetptd = kVanillaGetptd;
 uint32_t g_randContinue = kVanillaRand + 5;
 
-extern "C" void __cdecl LogRand(uint32_t caller)
+// IWD2R_RAND_TRACE=2 adds nine columns: the stack dword above the return
+// address (for a caller that calls rand first, as CUtil::UtilRandInt
+// 0x780C80 does, that is its own return address) and the first eight dwords
+// further up (up to 512) that lie in the exe's code (0x401000-0x7FFFFF):
+// heuristic outer callers, any of which may be a stale value (0 when fewer
+// are found). Each is written with its stack slot, `address@slot`, the
+// slot counted in dwords from the return address, so the same frame layout
+// can be compared between two calls. The slot rides in the top nine bits
+// (code addresses need only 23).
+constexpr uint32_t kSlotShift = 23;
+bool g_randTraceStack = false;
+constexpr size_t kRandRecord = 12;
+
+extern "C" void __cdecl LogRand(const uint32_t* stack)
 {
+    uint32_t record[kRandRecord] = { g_frame.load(), GetCurrentThreadId(), stack[0] };
+    if (g_randTraceStack) {
+        record[3] = stack[1];
+        size_t found = 4;
+        for (uint32_t i = 2; i < 512 && found < kRandRecord; ++i) {
+            uint32_t value = 0;
+            if (!SafeRead(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(stack + i)), &value, sizeof(value))) {
+                break;
+            }
+            if (value >= 0x401000 && value < 0x800000) {
+                record[found++] = value | (i << kSlotShift);
+            }
+        }
+    }
     EnterCriticalSection(&g_randLock);
-    g_randLog.push_back(g_frame.load());
-    g_randLog.push_back(GetCurrentThreadId());
-    g_randLog.push_back(caller);
+    // Mode 1 keeps its three dwords a call; mode 2 all twelve.
+    g_randLog.insert(g_randLog.end(), record, record + (g_randTraceStack ? kRandRecord : 3));
     LeaveCriticalSection(&g_randLock);
 }
 
@@ -1177,7 +1257,8 @@ extern "C" __declspec(naked) void RandTrampoline()
     __asm {
         pushad
         pushfd
-        push dword ptr [esp + 36]
+        lea eax, [esp + 36]
+        push eax
         call LogRand
         add esp, 4
         popfd
@@ -1203,8 +1284,19 @@ void FlushRandTrace()
     if (!out) {
         return;
     }
-    for (size_t i = 0; i + 2 < calls.size(); i += 3) {
-        std::fprintf(out, "%u %u %08x\n", calls[i], calls[i + 1], calls[i + 2]);
+    const size_t stride = g_randTraceStack ? kRandRecord : 3;
+    for (size_t i = 0; i + stride <= calls.size(); i += stride) {
+        if (g_randTraceStack) {
+            std::fprintf(out, "%u %u", calls[i], calls[i + 1]);
+            std::fprintf(out, " %08x %08x", calls[i + 2], calls[i + 3]);
+            for (size_t j = 4; j < kRandRecord; ++j) {
+                const uint32_t value = calls[i + j];
+                std::fprintf(out, " %08x@%u", value & ((1u << kSlotShift) - 1), value >> kSlotShift);
+            }
+            std::fprintf(out, "\n");
+        } else {
+            std::fprintf(out, "%u %u %08x\n", calls[i], calls[i + 1], calls[i + 2]);
+        }
     }
     std::fclose(out);
 }
@@ -1936,6 +2028,7 @@ bool Start()
         kClockBase, kFramesPerSecond);
     std::string error;
     const std::string randTrace = Env("IWD2R_RAND_TRACE");
+    g_randTraceStack = randTrace == "2";
     if (!randTrace.empty() && randTrace != "0" && !HookRand(&error)) {
         Log("FATAL: %s", error.c_str());
         return false;

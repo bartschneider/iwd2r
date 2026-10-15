@@ -9656,7 +9656,7 @@ DWORD CInfGame::FindItemInStore(const CResRef& cResStore, const CResRef& cResIte
 
         return inStock;
     } else {
-        CStore cStore;
+        CStore cStore(cResStore);
         CResRef curItemRef;
         DWORD inStock = 0;
 

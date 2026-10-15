@@ -14,10 +14,13 @@
 #include "CVidFont.h"
 #include "CWarp.h"
 
+#include <atomic>
+
 static LRESULT CALLBACK WndProc(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam);
 static void MessageThreadMain(void* userInfo);
 static void RSThreadMain(void* userInfo);
 static void MainAIThread(void* userInfo);
+static void WaitForMainAIThread(CChitin* pChitin);
 static void MusicThreadMain(void* userInfo);
 static void CALLBACK TimerFunction(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser, DWORD_PTR dw1, DWORD_PTR dw2);
 
@@ -2001,6 +2004,10 @@ void CChitin::ShutDown(int nLineNumber, const char* szFileName, const char* text
         }
         timeEndPeriod(field_C0);
 
+        // DEVIATION: wait for the AI thread before the engines go (see
+        // WaitForMainAIThread).
+        WaitForMainAIThread(this);
+
         POSITION pos = lEngines.GetHeadPosition();
         while (pos != NULL) {
             CWarp* pEngine = static_cast<CWarp*>(lEngines.GetAt(pos));
@@ -2176,10 +2183,43 @@ static void RSThreadMain(void* userInfo)
     g_pChitin->RSThreadMain(userInfo);
 }
 
+// iwd2r: the AI thread's id (0 before it starts), for ShutDown's wait.
+static std::atomic<DWORD> g_mainAIThreadId { 0 };
+
 // 0x7928E0
 static void MainAIThread(void* userInfo)
 {
+    // iwd2r: noted for CChitin::ShutDown's wait (see WaitForMainAIThread).
+    g_mainAIThreadId = GetCurrentThreadId();
     g_pChitin->MainAIThread(userInfo);
+}
+
+// iwd2r: DEVIATION. ShutDown waits for the AI thread to leave its loop
+// before anything it uses is destroyed. The original does not: its process
+// ends with ExitProcess, which kills the thread before destructors matter;
+// ours returns from WinMain into C++ destructors (main.cpp's CBaldurChitin,
+// its game and areas) while an AI update could still run. The thread parks
+// itself with SuspendThread when it sees the exit flag at the end of an
+// update, so it is resumed while it is waited for. Bounded (10 s), and not
+// from the AI thread itself (an assertion's ShutDown there).
+static void WaitForMainAIThread(CChitin* pChitin)
+{
+    if (pChitin->m_hMainAIThread == NULL || GetCurrentThreadId() == g_mainAIThreadId.load()) {
+        return;
+    }
+
+    pChitin->m_bExitMainAIThread = TRUE;
+    // NOTE: Under MSVC the handle comes from _beginthread, whose CRT closes
+    // it when the thread exits: once the thread is gone the wait sees
+    // WAIT_FAILED rather than WAIT_OBJECT_0, and the loop runs out its tries
+    // at once without waiting (harmless: the thread has left). The handle
+    // value could in principle be reused by then.
+    for (int nTry = 0; nTry < 200; nTry++) {
+        ResumeThread(pChitin->m_hMainAIThread);
+        if (WaitForSingleObject(pChitin->m_hMainAIThread, 50) == WAIT_OBJECT_0) {
+            return;
+        }
+    }
 }
 
 // 0x792900

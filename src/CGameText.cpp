@@ -5,6 +5,7 @@
 #include "CInfGame.h"
 #include "CUtil.h"
 #include "CVidMode.h"
+#include "CWarp.h"
 
 // 0x8D6570
 const CSize CGameText::PADDING(0, 0);
@@ -58,7 +59,7 @@ void CGameText::SetText(const CPoint& pt, BYTE nDuration, BYTE nBeginFade, const
         m_nMaxLines = static_cast<BYTE>((size.cy - 2 * PADDING.cy) / m_textFont.GetFontHeight(TRUE));
 
         if (m_szLine != NULL) {
-            delete m_szLine;
+            delete[] m_szLine;
         }
 
         m_szLine = new CString[m_nMaxLines];
@@ -92,6 +93,104 @@ void CGameText::SetText(const CPoint& pt, BYTE nDuration, BYTE nBeginFade, const
 
     m_nBeginFade = nBeginFade;
     m_pos = pt;
+}
+
+// 0x4CB820
+//
+// Moves the text to pt, then by the amount it sticks out of the viewport.
+void CGameText::SetPositionInView(const CPoint& pt)
+{
+    CVidMode* pVidMode = g_pBaldurChitin->pActiveEngine != NULL ? g_pBaldurChitin->pActiveEngine->pVidMode : NULL;
+    const CInfinity& cInfinity = m_pArea->m_cInfinity;
+
+    m_pos = pt;
+
+    // The half extents: the frame's centre with a picture, else from the FX
+    // size and the lines.
+    CPoint ptHalf;
+    if (m_vidCell.GetRes() != NULL) {
+        CSize frameSize;
+        m_vidCell.GetCurrentCenterPoint(ptHalf, FALSE);
+        m_vidCell.GetCurrentFrameSize(frameSize, FALSE);
+    } else {
+        CSize size;
+        pVidMode->GetFXSize(size);
+        size.cx /= 2;
+        size.cy /= 2;
+        if (static_cast<BYTE>(m_nLines) == 1) {
+            size.cx = m_textFont.GetStringLength(m_szLine[0], FALSE);
+        }
+        ptHalf.x = size.cx / 2;
+        ptHalf.y = static_cast<BYTE>(m_nLines) * size.cy / m_nMaxLines / 2;
+    }
+
+    LONG nY = m_pos.y - m_posZ;
+    LONG nLeft = m_pos.x - ptHalf.x;
+    LONG nRight = m_pos.x + ptHalf.x;
+    LONG nTop = nY - ptHalf.y;
+    LONG nBottom = nY + ptHalf.y;
+
+    LONG nViewLeft = cInfinity.nCurrentX;
+    LONG nViewTop = cInfinity.nCurrentY;
+    LONG nViewRight = cInfinity.rViewPort.right - cInfinity.rViewPort.left + nViewLeft;
+    LONG nViewBottom = cInfinity.rViewPort.bottom - cInfinity.rViewPort.top + nViewTop;
+
+    LONG dx = nLeft < nViewLeft ? nViewLeft - nLeft : 0;
+    if (nRight > nViewRight) {
+        dx = nViewRight - nRight;
+    }
+
+    // NOTE: A text below the viewport is moved further down (the original
+    // adds the overhang, 0x4CB97C-0x4CB982); kept.
+    LONG dy = 0;
+    if (nBottom > nViewBottom) {
+        dy = nBottom - nViewBottom;
+    }
+    if (nTop < nViewTop) {
+        dy = nViewTop - nTop;
+    }
+
+    m_pos.x += dx;
+    m_pos.y += dy;
+}
+
+// 0x4CB9B0
+//
+// Whether the text's box meets the viewport.
+BOOL CGameText::IsOnScreen()
+{
+    if (static_cast<BYTE>(m_nLines) == 0) {
+        return FALSE;
+    }
+
+    CVidMode* pVidMode = g_pBaldurChitin->pActiveEngine->pVidMode;
+    const CInfinity& cInfinity = m_pArea->m_cInfinity;
+
+    CPoint ptHalf;
+    if (m_vidCell.GetRes() != NULL) {
+        CSize frameSize;
+        m_vidCell.GetCurrentCenterPoint(ptHalf, FALSE);
+        m_vidCell.GetCurrentFrameSize(frameSize, FALSE);
+    } else {
+        CSize size;
+        pVidMode->GetFXSize(size);
+        size.cx /= 2;
+        size.cy /= 2;
+        LONG nWidth = size.cx;
+        if (static_cast<BYTE>(m_nLines) == 1) {
+            nWidth = m_textFont.GetStringLength(m_szLine[0], FALSE);
+        }
+        ptHalf.x = nWidth / 2;
+        ptHalf.y = static_cast<BYTE>(m_nLines) * size.cy / m_nMaxLines / 2;
+    }
+
+    LONG nY = m_pos.y - m_posZ;
+    CRect rText(m_pos.x - ptHalf.x, nY - ptHalf.y, m_pos.x + ptHalf.x, nY + ptHalf.y);
+    CRect rView(cInfinity.nCurrentX,
+        cInfinity.nCurrentY,
+        cInfinity.rViewPort.right - cInfinity.rViewPort.left + cInfinity.nCurrentX,
+        cInfinity.rViewPort.bottom - cInfinity.rViewPort.top + cInfinity.nCurrentY);
+    return IntersectRect(&rView, &rText, &rView) != FALSE;
 }
 
 // 0x4CB700
@@ -144,7 +243,7 @@ void CGameText::RemoveFromArea()
 CGameText::~CGameText()
 {
     if (m_szLine != NULL) {
-        delete m_szLine;
+        delete[] m_szLine;
     }
 
     if (field_1C != 0) {
