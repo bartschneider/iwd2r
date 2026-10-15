@@ -9,6 +9,7 @@
 #include "CCreatureFile.h"
 #include "CGameAnimationType.h"
 #include "CGameArea.h"
+#include "CGameEffect.h"
 #include "CGameContainer.h"
 #include "CGameEffect.h"
 #include "CGameObject.h"
@@ -8493,6 +8494,107 @@ void CInfGame::ReadyCharacterTerminationSequence(int a1, int a2)
         g_pBaldurChitin->m_pEngineWorld->field_10F0 = a1;
         g_pBaldurChitin->m_pEngineWorld->field_10F4 = a2;
     }
+}
+
+// 0x5C0BB0
+//
+// Shares nExperience among the living party members (STATE_DEAD clear), as
+// an XP effect (104) each: the remainder of the division goes one point at
+// a time to the first ones, then the multiclass penalty applies. With
+// bChallengeRating the amount is first looked up against the members'
+// average level (CRuleTables::sub_542560) and halved. Returns the total.
+LONG CInfGame::AddExperienceParty(DWORD nExperience, BOOLEAN a2, BOOLEAN bChallengeRating)
+{
+    const CRuleTables& ruleTables = g_pBaldurChitin->GetObjectGame()->GetRuleTables();
+    CGameSprite* pSprite;
+    BYTE rc;
+    SHORT nAlive = 0;
+    SHORT nLevels = 0;
+
+    for (SHORT nIndex = 0; nIndex < m_nCharacters; nIndex++) {
+        LONG nId = nIndex < m_nCharacters ? m_characterPortraits[nIndex] : CGameObjectArray::INVALID_INDEX;
+        do {
+            rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(nId,
+                CGameObjectArray::THREAD_ASYNCH,
+                reinterpret_cast<CGameObject**>(&pSprite),
+                INFINITE);
+        } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+        if (rc == CGameObjectArray::SUCCESS) {
+            if ((pSprite->m_derivedStats.m_generalState & STATE_DEAD) == 0) {
+                nAlive++;
+                nLevels += pSprite->m_derivedStats.m_nLevel;
+            }
+
+            g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(nId,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+        }
+    }
+
+    if (nAlive == 0) {
+        nAlive = 1;
+    }
+
+    DWORD nTotal = nExperience;
+    if (bChallengeRating) {
+        nTotal = static_cast<DWORD>(ruleTables.sub_542560(static_cast<unsigned short>(nExperience),
+                     static_cast<unsigned short>(nLevels / nAlive)))
+            >> 1;
+    }
+
+    const DWORD nShare = nTotal / static_cast<DWORD>(nAlive);
+    SHORT nRemainder = static_cast<SHORT>(nTotal % static_cast<DWORD>(nAlive));
+
+    ITEM_EFFECT effect;
+    CGameEffect::ClearItemEffect(&effect, 104);
+    // NOTE: The duration type is the WORD constant at 0x8491AA (1).
+    effect.durationType = 1;
+    effect.effectAmount = nShare;
+
+    LONG nGiven = 0;
+    for (SHORT nIndex = 0; nIndex < m_nCharacters; nIndex++) {
+        LONG nId = nIndex < m_nCharacters ? m_characterPortraits[nIndex] : CGameObjectArray::INVALID_INDEX;
+        do {
+            rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(nId,
+                CGameObjectArray::THREAD_ASYNCH,
+                reinterpret_cast<CGameObject**>(&pSprite),
+                INFINITE);
+        } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+        if (rc != CGameObjectArray::SUCCESS) {
+            continue;
+        }
+
+        if ((pSprite->m_derivedStats.m_generalState & STATE_DEAD) == 0) {
+            DWORD nAmount = nShare;
+            if (nRemainder > 0) {
+                nAmount = nShare + 1;
+                nRemainder--;
+            }
+            effect.effectAmount = nAmount;
+
+            INT nPenalty = pSprite->GetMulticlassingPenalty();
+            if (nPenalty > 0) {
+                effect.effectAmount = (100 - nPenalty) * effect.effectAmount / 100;
+            }
+
+            nGiven += effect.effectAmount;
+
+            CGameEffect* pEffect = CGameEffect::DecodeEffect(&effect, CPoint(-1, -1), -1, CPoint(-1, -1));
+            LONG nTarget = nIndex < m_nCharacters ? m_characterPortraits[nIndex] : CGameObjectArray::INVALID_INDEX;
+            CMessage* message = new CMessageAddEffect(pEffect, nTarget, nTarget);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        }
+
+        g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(nId,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+    }
+
+    FeedBack(2, nGiven, a2);
+
+    return nGiven;
 }
 
 // 0x5C2630

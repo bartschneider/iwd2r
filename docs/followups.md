@@ -166,3 +166,19 @@ The crisp-text requirement is met by `Program Options/Text Renderer=scalable` (s
 - **The pointer and the glyph's reach.** Inside its cell a glyph shows only where its tag survives, so the pointer and anything drawn over it hide it exactly; the part of a TrueType glyph above or below its bitmap cell (an i's dot, a descender) is drawn wherever the draw's clip allows and can cover the pointer there.
 - **Golden frames are pinned per machine by hand.** `text_golden_presented_frames` prints the presented main menu, character generation and gender page hashes until they are listed in `<IWD2R_HOME>/text-golden` (`name hash` lines); `tools/gates.sh` does not set it up the way it reads `smoke-hash`. Headless runs present at most the dummy display's 1024x768 (the engine fits its window to the desktop), so true Scale 2 and 3 goldens need a larger virtual display; the overlay's own scale handling is covered at 1-4 by `tests/test_text_overlay.cpp`. A dialog golden needs `scenarios/pending/world_entry.txt` to move out of pending.
 - **The overlay is recomposed whole when any glyph changes.** Static screens cost nothing (the composed image is reused), but a screen with a lot of text and something changing every frame (hit points over moving creatures) recomposes every visible glyph each frame on the CPU. Tile the overlay and recompose only the tiles whose glyphs changed if a profile shows it.
+
+## Character, spellbook and options screens (from project 3, milestone 5, screens-char)
+
+- Blocked stubs in src/CScreenCharacter.cpp: `UpdateEquipmentInformation` 0x5DE2C0 and the character text export `sub_5E4560` need CGameSprite 0x723EA0, 0x73CF10 and 0x73D080, CRuleTables 0x547020 and CItem 0x4E9840; `CheckDropSlot` 0x5E6A30 needs CInfGame 0x5B7850, 0x5B81C0 and 0x5B9C60 (until then a level-up never drops items a character can no longer use). Their comments should name those blockers.
+- `CGameSprite::CheckQuickLists` 0x71ABA0 is not ported: forgetting a spell and level-up skip it, so quick slots keep a forgotten spell until rebuilt.
+- `CGameSprite::GetAC` is a stub returning 0, so the character screen shows AC 0 (milestone 3 combat).
+- `CGameSprite.h` lacks `BYTE field_7282[11]`, so level-up always rolls hit points; the original skips that roll (and its `rand()`) in one rare drained-level case. No test pins level-up's rand count.
+- `CScreenCharacter::OnKeyDown` calls its own `OnLeftPanelButtonClick` where the original calls the active engine's.
+
+## Inventory, containers and stores (from project 3, milestone 5, screens-items)
+
+- `src/CInfGameItemUse.*` holds eight CInfGame functions as free functions, a temporary seam while another stream owned `CInfGame.*`. Fold them into CInfGame members once that stream merges.
+- TODOs left in the item-use paths: `CGameSprite::CheckQuickLists`, `CheckIfUsedUp` and 0x723830 are not called yet.
+- The container slot handler 0x6957E0 needs `SwapItemGround` before dropping onto the ground works as in the original.
+- Container, bag and temple buy paths have no tests yet.
+- The area-move test uses AR1001 because loading AR3000 aborted (see the persistent-effect resref fix).

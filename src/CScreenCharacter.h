@@ -61,6 +61,7 @@ public:
     /* 00A8 */ BYTE* GetVirtualKeysFlags() override;
     /* 00C0 */ void TimerAsynchronousUpdate() override;
     /* 00C4 */ void TimerSynchronousUpdate() override;
+    /* 00AC */ void OnKeyDown(SHORT nKeysFlags) override;
     /* 00E0 */ void OnPortraitLClick(DWORD nPortrait) override;
     /* 00F0 */ void OnRestButtonClick() override;
     /* 0104 */ void CancelEngine() override;
@@ -84,6 +85,7 @@ public:
     void ResetBiographyPanel(CGameSprite* pSprite);
     void ResetClassDescriptionPanel(CGameSprite* pSprite);
     void sub_5D8B50(CGameSprite* pSprite);
+    void LevelUpStartAbilities(CGameSprite* pSprite);
     BOOL ResetAbility(CGameSprite* pSprite, const CString& sMin, const CString& sMax, const CString& sMod, BYTE& nAbility, BYTE& nMin, BYTE& nMax, INT& nMod);
     void ResetAbilitiesPanel(CGameSprite* pSprite, int a2);
     void ResetSpellsPanel(CGameSprite* pSprite, int a2);
@@ -93,6 +95,8 @@ public:
     void UpdateSpecializationPanel(CGameSprite* pSprite);
     void UpdateAbilitiesPanel(CGameSprite* pSprite);
     void UpdateSpellsPanel(CGameSprite* pSprite);
+    void UpdateInformationPanel();
+    void sub_5DB200(CGameSprite* pSprite);
     void GetPartyInformation(DWORD& nPartyChapterKillsXPValue, DWORD& nPartyChapterKillsNumber, DWORD& nPartyGameKillsXPValue, DWORD& nPartyGameKillsNumber);
     void EnableMainPanel(BOOL bEnable);
     STRREF GetRangerHatedRaceStrref(BYTE nRace);
@@ -102,6 +106,9 @@ public:
     void UpdateMiscInformation(CUIControlTextDisplay* pText, CGameSprite* pSprite);
     void ResetPopupPanel(DWORD dwPanelId, CGameSprite* pSprite, int a3);
     void UpdatePopupPanel(DWORD dwPanelId, CGameSprite* pSprite);
+    BOOL CheckSummonPopup(DWORD dwPopupId, CGameSprite* pSprite);
+    BOOL SummonNextPopup(DWORD dwPopupId, CGameSprite* pSprite);
+    BOOL SummonPreviousPopup(DWORD dwPopupId, CGameSprite* pSprite);
     CUIPanel* GetTopPopup();
     void ShowPopupPanel(DWORD dwPanelId, BOOL bShow);
     void EnablePopupPanel(DWORD dwPanelId, BOOL bEnable);
@@ -118,6 +125,7 @@ public:
     void sub_5E4B30();
     void OnScriptButtonClick();
     void OnExportButtonClick();
+    BOOL CanLevelUp(CGameSprite* pSprite);
     void OnLevelUpButtonClick();
     void LevelUp(CGameSprite* pSprite);
     void UpdateHelp(DWORD dwPanelId, DWORD dwTextId, DWORD dwStrId);
@@ -132,6 +140,7 @@ public:
     void OnErrorButtonClick(INT nButton);
     void OnCharacterItemSelect(INT nItem);
     void UpdateClassSelectionPanel(CGameSprite* pSprite);
+    void UpdateFeatsPanel(CGameSprite* pSprite);
     INT GetNumHatedRaces();
     void SetTopHatedRace(INT nTopHatedRace);
     BYTE GetHatedRace(INT nIndex);
@@ -146,6 +155,7 @@ public:
     void OnSoundItemSelect(INT nItem);
     void ResetCustomizeBiographyPanel(CUIPanel* pPanel, CGameSprite* pSprite);
     void ResetSkillsPanel(CUIPanel* pPanel, CGameSprite* pSprite, int a3);
+    void UpdateSkillsPanel(CGameSprite* pSprite);
     void sub_5F89B0(CGameSprite* pSprite);
     void sub_5F8C90(int a1);
     void sub_5F91F0(int a1);
@@ -161,16 +171,17 @@ public:
     /* 01B4 */ BOOL m_bCapsLockKeyOn;
     /* 01B8 */ BOOLEAN field_1B8;
     /* 01BA */ CGameSpriteGroupedSpellList m_spells;
-    /* 02B6 */ int field_2B6;
     /* 02BA */ SHORT m_nTopSkill;
+    /* 02BC */ INT m_nLevelUpSkillPoints;
     /* 02C0 */ INT m_storedSkills[16];
     /* 0300 */ CKeyInfo m_pVirtualKeys[CSCREENCHARACTER_VIRTUAL_KEYS];
     /* 05D0 */ BYTE m_pVirtualKeysFlags[CSCREENCHARACTER_VIRTUAL_KEYS];
     /* 062A */ CTypedPtrList<CPtrList, CUIPanel*> m_lPopupStack;
     /* 0646 */ INT m_nExtraFeats;
     /* 064A */ SHORT m_nTopFeat;
+    /* 064C */ INT m_nLevelUpFeats;
     /* 0650 */ INT m_storedFeats[75];
-    /* 077C */ WORD field_77C;
+    /* 077C */ DWORD field_77C;
     /* 0780 */ int field_780;
     /* 0798 */ INT m_nExtraSkillPoints;
     /* 079C */ int field_79C;
@@ -220,7 +231,7 @@ public:
     /* 126E */ CVidFont m_preLoadFontTool;
     /* 176E */ CString field_176E;
     /* 1772 */ int field_1772;
-    /* 1776 */ int field_1776;
+    /* 1776 */ BYTE m_nSpellLevel;
     /* 1778 */ INT m_nExtraAbilityPoints;
     /* 177C */ BYTE m_nMinSTR;
     /* 177D */ BYTE m_nMinDEX;
@@ -242,9 +253,12 @@ public:
     /* 179C */ INT m_nModCHR;
     /* 17A0 */ INT m_nHatedRaceIndex;
     /* 17A4 */ int field_17A4;
-    /* 17A8 */ int field_17A8;
-    /* 17C0 */ int field_17C0;
-    /* 1800 */ int field_1800;
+    // Copies of the creature's feat flags (CRE 0x1B8, 24 bytes), feat values
+    // (0x1D0, 64 bytes) and skills (0x210, 64 bytes) taken when a level-up
+    // starts (LevelUpStartAbilities).
+    /* 17A8 */ BYTE m_levelUpFeatFlags[24];
+    /* 17C0 */ BYTE m_levelUpFeatValues[64];
+    /* 1800 */ BYTE m_levelUpSkills[64];
     /* 1840 */ int field_1840;
     /* 1844 */ unsigned char field_1844;
     /* 1846 */ int field_1846;
@@ -368,9 +382,10 @@ public:
     ~CUIControlButtonCharacter5EBC60() override;
     BOOL Render(BOOL bForce) override;
     void OnLButtonClick(CPoint pt) override;
+    void SetSpell(CResRef cResRef);
 
-    /* 066E */ CResRef field_66E;
-    /* 0676 */ CResRef field_676;
+    /* 066E */ CResRef m_iconResRef;
+    /* 0676 */ CResRef m_spellResRef;
 };
 
 class CUIControlButtonCharacterPopupDone : public CUIControlButton {

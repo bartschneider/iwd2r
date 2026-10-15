@@ -568,5 +568,66 @@
     "offset": "0x3816",
     "type": "i32",
     "count": 6
+  },
+  "sprite_timed_effects": {
+    "base": "CGameSprite",
+    "offset": "0x5532",
+    "type": "i32"
+  },
+  "sprite_equiped_effects": {
+    "base": "CGameSprite",
+    "offset": "0x5506",
+    "type": "i32"
+  },
+  "sprite_xp": {
+    "base": "CGameSprite",
+    "offset": "0x05B4",
+    "type": "u32"
+  },
+  "game_time": {
+    "base": "CInfGame",
+    "offset": "0x1B78",
+    "type": "u32"
+  },
+  "game_time_active": {
+    "base": "CInfGame",
+    "offset": "0x1B7C",
+    "type": "u8"
+  },
+  "sprite_timers_head": {
+    "base": "CGameSprite",
+    "offset": "0x0452",
+    "type": "ptr"
+  },
+  "sprite_timers_count": {
+    "base": "CGameSprite",
+    "offset": "0x045A",
+    "type": "i32"
+  },
+  "timer_time": {
+    "base": "CGameTimer",
+    "offset": "0x0000",
+    "type": "i32"
+  },
+  "timer_id": {
+    "base": "CGameTimer",
+    "offset": "0x0004",
+    "type": "u8"
+  },
+  "sprite_pos_dest": {
+    "base": "CGameSprite",
+    "offset": "0x535A",
+    "type": "i32",
+    "count": 2
+  },
+  "sprite_path": {
+    "base": "CGameSprite",
+    "offset": "0x5382",
+    "type": "ptr"
+  },
+  "sprite_path_count": {
+    "base": "CGameSprite",
+    "offset": "0x5386",
+    "type": "i16"
   }
 }

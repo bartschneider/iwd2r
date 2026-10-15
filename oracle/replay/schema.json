@@ -858,6 +858,54 @@
     "character_slots": {
       "class": "CInfGame",
       "member": "m_characters"
+    },
+    "sprite_timed_effects": {
+      "class": "CGameSprite",
+      "member": "m_timedEffectList.m_nCount"
+    },
+    "sprite_equiped_effects": {
+      "class": "CGameSprite",
+      "member": "m_equipedEffectList.m_nCount"
+    },
+    "sprite_xp": {
+      "class": "CGameSprite",
+      "member": "m_baseStats.m_xp"
+    },
+    "game_time": {
+      "class": "CInfGame",
+      "member": "m_worldTime.m_gameTime"
+    },
+    "game_time_active": {
+      "class": "CInfGame",
+      "member": "m_worldTime.m_active"
+    },
+    "sprite_timers_head": {
+      "class": "CGameSprite",
+      "member": "m_timers.m_pNodeHead"
+    },
+    "sprite_timers_count": {
+      "class": "CGameSprite",
+      "member": "m_timers.m_nCount"
+    },
+    "timer_time": {
+      "class": "CGameTimer",
+      "member": "m_time"
+    },
+    "timer_id": {
+      "class": "CGameTimer",
+      "member": "m_id"
+    },
+    "sprite_pos_dest": {
+      "class": "CGameSprite",
+      "member": "m_posDest"
+    },
+    "sprite_path": {
+      "class": "CGameSprite",
+      "member": "m_pPath"
+    },
+    "sprite_path_count": {
+      "class": "CGameSprite",
+      "member": "m_nPath"
     }
   }
 }

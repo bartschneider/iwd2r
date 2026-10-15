@@ -21,6 +21,7 @@
 #define CRESUI_CONTROLBUTTONID_INVENTORYCOLOR_LASTCOLOR 33
 
 class CGameButtonList;
+class CGameSprite;
 
 class CScreenInventory : public CBaldurEngine {
 public:
@@ -79,7 +80,7 @@ public:
     void DismissPopup();
     void ResetHistoryPanel(CUIPanel* pPanel);
     void ResetAbilitiesPanel(CUIPanel* pPanel);
-    void SelectItemAbility();
+    void SelectItemAbility(CGameSprite* pSprite);
     void OnDoneButtonClick();
     void OnCancelButtonClick();
     void ResetErrorPanel(CUIPanel* pPanel);
@@ -170,8 +171,11 @@ public:
     BOOL OnLButtonDown(CPoint pt) override;
     void OnLButtonUp(CPoint pt) override;
     BOOL OnLButtonDblClk(CPoint pt) override;
+    void TimerAsynchronousUpdate(BOOLEAN bInside) override;
     BOOL Render(BOOL bForce) override;
     void OnRButtonClick(CPoint pt) override;
+    void UpdateHighlight(INT x, INT y);
+    void UpdateWeaponHighlight(INT x, INT y);
 
     /* 0666 */ BOOL field_666;
     /* 066A */ BOOL field_66A;

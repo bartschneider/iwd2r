@@ -61,6 +61,8 @@ public:
     void OnMapMouseMove(const CPoint& ptMousePos);
     void OnMapAsyncUpdate();
     void OnAreaMouseClick(DWORD nArea, const CPoint& ptMousePos);
+    DWORD GetTravelTime(DWORD nArea);
+    void MoveToArea(const CResRef& cResArea, CString sEntryPoint, DWORD nEdge, BOOL bRandomEncounter, DWORD nTravelTime);
     BOOL DrawMap(const CRect& r);
     void StartWorldMap(INT nEngineState, LONG nLeavingEdge, BOOLEAN bInControl);
     void StopWorldMap(BOOLEAN bAreaClicked);

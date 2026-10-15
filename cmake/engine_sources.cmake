@@ -188,6 +188,8 @@ set(IWD2R_ENGINE_SOURCES
     "src/CInfCursor.h"
     "src/CInfGame.cpp"
     "src/CInfGame.h"
+    "src/CInfGameItemUse.cpp"
+    "src/CInfGameItemUse.h"
     "src/CInfinity.cpp"
     "src/CInfinity.h"
     "src/CItem.cpp"

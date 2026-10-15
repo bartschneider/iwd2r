@@ -715,10 +715,6 @@ void CGameAnimationTypeCharacter::CalculateFxRect(CRect& rFx, CPoint& ptReferenc
             CPoint weaponCenter;
             m_currentVidCellWeapon->GetCurrentCenterPoint(weaponCenter, FALSE);
 
-            if (weaponCenter.x > ptReference.x) {
-                ptReference.x = weaponCenter.x;
-            }
-
             rFx.right = max(rFx.right, ptReference.x - weaponCenter.x + weaponSize.cx);
             rFx.bottom = max(rFx.bottom, ptReference.y - weaponCenter.y + weaponSize.cy);
         }
@@ -732,10 +728,6 @@ void CGameAnimationTypeCharacter::CalculateFxRect(CRect& rFx, CPoint& ptReferenc
 
                 CPoint shieldCenter;
                 m_currentVidCellShield->GetCurrentCenterPoint(shieldCenter, FALSE);
-
-                if (shieldCenter.x > ptReference.x) {
-                    ptReference.x = shieldCenter.x;
-                }
 
                 rFx.right = max(rFx.right, ptReference.x - shieldCenter.x + shieldSize.cx);
                 rFx.bottom = max(rFx.bottom, ptReference.y - shieldCenter.y + shieldSize.cy);
@@ -751,10 +743,6 @@ void CGameAnimationTypeCharacter::CalculateFxRect(CRect& rFx, CPoint& ptReferenc
 
             CPoint helmetCenter;
             m_currentVidCellHelmet->GetCurrentCenterPoint(helmetCenter, FALSE);
-
-            if (helmetCenter.x > ptReference.x) {
-                ptReference.x = helmetCenter.x;
-            }
 
             rFx.right = max(rFx.right, ptReference.x - helmetCenter.x + helmetSize.cx);
             rFx.bottom = max(rFx.bottom, ptReference.y - helmetCenter.y + helmetSize.cy);
@@ -1051,7 +1039,7 @@ void CGameAnimationTypeCharacter::EquipWeapon(const CString& resRef, BYTE* color
             return;
         }
 
-        if ((itemFlags & 0x2) != 0) {
+        if ((itemFlags & 0x2) == 0) {
             Equip1HWeapon(resRef, colorRangeValues);
             return;
         }

@@ -35,6 +35,8 @@ public:
     BOOL GetSpell(INT nIndex, CResRef& spellResRef, DWORD& dwCost);
     BOOL GetDrink(INT nIndex, STRREF& strName, DWORD& dwCost, DWORD& dwRumorChance);
     void sub_54CF80();
+    BOOLEAN sub_54CFE0(INT nIndex, CItem& cItem);
+    BOOLEAN sub_54D130(INT nIndex, CItem& cItem);
 
     static void InvalidateStore(const CResRef& resRef);
 

@@ -2831,8 +2831,9 @@ void CGameSprite::AIUpdateWalk()
         LONG dx = m_posDest.x - m_pos.x;
         LONG dy = goal.y * CPathSearch::GRID_SQUARE_SIZEX + CPathSearch::GRID_SQUARE_SIZEX / 2 - 4 * m_pos.y / 3;
 
-        // NOTE: __ftol truncates the square root.
-        int scale = static_cast<int>(sqrt(static_cast<double>(dx * dx + dy * dy)));
+        // The distance, rounded: sqrt + 0.5 (the double at 0x848DD0), then
+        // __ftol (0x6F97FA-0x6F981A).
+        int scale = static_cast<int>(sqrt(static_cast<double>(dx * dx + dy * dy)) + 0.5);
         if (scale == 0) {
             // NOTE: Uninline.
             DropPath();
@@ -2970,7 +2971,14 @@ void CGameSprite::AIUpdateWalk()
                     field_7430);
             }
 
-            char* pSndWalk = m_animation.GetSndWalk(m_pArea->m_search.GetTableIndex(ptOldSearch));
+            // The table index of the old square, which is already in search
+            // squares (0x6F9F8A-0x6F9FCB): CSearchBitmap::GetTableIndex
+            // divides a pixel position first.
+            CVidBitmap& resSearch = m_pArea->m_search.m_resSearch;
+            SHORT nTableIndex = resSearch.GetBitCount(TRUE) == 8
+                ? resSearch.GetPixelValue(ptOldSearch.x, ptOldSearch.y, TRUE) >> 4
+                : resSearch.GetPixelValue(ptOldSearch.x, ptOldSearch.y, TRUE);
+            char* pSndWalk = m_animation.GetSndWalk(nTableIndex);
             if (pSndWalk != NULL) {
                 m_sndWalk[m_currSndWalk].SetResRef(CResRef(pSndWalk), TRUE, TRUE);
 
@@ -6758,17 +6766,21 @@ void CGameSprite::StartSpriteEffect(BYTE spriteEffect, BYTE intensityLevel, BYTE
     int cnt = m_spriteEffectSequenceLength * (m_spriteEffectBaseIntensity + m_spriteEffectRandomIntensity - 1);
     if (m_spriteEffectSequenceLength * (m_spriteEffectBaseIntensity + m_spriteEffectRandomIntensity - 1) > 0) {
         m_pSpriteEffectArray = new USHORT[cnt];
-        if (m_pSpriteEffectArray != NULL) {
+        if (m_pSpriteEffectArray == NULL) {
             // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjCreature.cpp
             // __LINE__: 10332
             UTIL_ASSERT(FALSE);
+            return;
         }
 
         m_pSpriteEffectArrayPosition = new POINT[cnt];
-        if (m_pSpriteEffectArrayPosition != NULL) {
+        if (m_pSpriteEffectArrayPosition == NULL) {
             // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjCreature.cpp
             // __LINE__: 10338
             UTIL_ASSERT(FALSE);
+            delete m_pSpriteEffectArray;
+            m_pSpriteEffectArray = NULL;
+            return;
         }
 
         memset(m_pSpriteEffectArray, 0xFF, sizeof(USHORT) * cnt);
@@ -11242,9 +11254,9 @@ void CGameSprite::sub_722820()
         case 2:
             break;
         default:
-        // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjCreature.cpp
-        // __LINE__: 23869
-        UTIL_ASSERT(FALSE);
+            // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjCreature.cpp
+            // __LINE__: 23869
+            UTIL_ASSERT(FALSE);
             break;
         }
         break;
@@ -11279,9 +11291,9 @@ void CGameSprite::sub_722820()
             m_baseStats.field_3E = 14;
             break;
         default:
-        // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjCreature.cpp
-        // __LINE__: 23977
-        UTIL_ASSERT(FALSE);
+            // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjCreature.cpp
+            // __LINE__: 23977
+            UTIL_ASSERT(FALSE);
             break;
         }
         break;
@@ -18100,8 +18112,9 @@ SHORT CGameSprite::sub_75F3D0(int a1)
             return ACTION_DONE;
         }
 
-        // NOTE: sub_40CCA0 takes a share of the object that is never
-        // released, as in the original.
+        // NOTE: sub_40CCA0 shares the object and nothing releases it, as in
+        // the original. For THREAD_ASYNCH no share count is taken, so the
+        // missing release is harmless.
         if (m_typeAI.sub_40CCA0(this, TRUE) != NULL) {
             // NOTE: Uninline (no NULL check of the marker in the original).
             m_pArea->m_pObjectMarker->RemoveObject(m_id);
@@ -18144,7 +18157,7 @@ SHORT CGameSprite::sub_75F3D0(int a1)
             -1);
     }
 
-    // NOTE: As above, the share is not released.
+    // NOTE: As above, the share is not released (THREAD_ASYNCH: no count).
     if (m_typeAI.sub_40CCA0(this, TRUE) != NULL) {
         // NOTE: Uninline.
         m_pArea->m_pObjectMarker->RemoveObject(m_id);

@@ -3,7 +3,9 @@
 
 #include "CAIAction.h"
 #include "CAIScript.h"
+#include "CAITrigger.h"
 #include "CBaldurChitin.h"
+#include "CGameAnimationTypeCharacter.h"
 #include "CGameArea.h"
 #include "CGameDialog.h"
 #include "CGameDoor.h"
@@ -1128,4 +1130,107 @@ TEST_CASE("sprite: sub_75F3D0 hides and shows a creature", "[ai][data]")
     // Any other argument is an error and changes nothing.
     CHECK(pHint->sub_75F3D0(2) == CGameAIBase::ACTION_ERROR);
     CHECK(pHint->m_baseStats.field_294 == 1);
+}
+
+TEST_CASE("sprite: StartSpriteEffect allocates its arrays without asserting", "[ai][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    CGameSprite* pCharacter = NewGameInStartArea(cre);
+    REQUIRE(pCharacter->GetArea() != NULL);
+
+    // Fire (1) at intensity 2: base 0, random 2, so length * 1 entries.
+    // 0x708C0F and 0x708C65 assert only when an allocation fails.
+    pCharacter->StartSpriteEffect(1, 2, 10, FALSE);
+    const int length = pCharacter->m_spriteEffectSequenceLength;
+    REQUIRE(length > 0);
+    REQUIRE(pCharacter->m_pSpriteEffectArray != NULL);
+    REQUIRE(pCharacter->m_pSpriteEffectArrayPosition != NULL);
+    for (int i = 0; i < length; i++) {
+        CHECK(pCharacter->m_pSpriteEffectArray[i] == 0xFFFF);
+    }
+    CHECK(pCharacter->m_spriteEffectDuration == static_cast<BYTE>(length + 10 + 9));
+
+    // A second effect frees the first arrays and allocates new ones.
+    pCharacter->StartSpriteEffect(2, 1, 5, FALSE);
+    CHECK(pCharacter->m_pSpriteEffectArray != NULL);
+    CHECK(pCharacter->m_pSpriteEffectArrayPosition != NULL);
+}
+
+TEST_CASE("animation: a two-handed weapon takes the two-handed stance and READY group", "[ai][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    CGameSprite* pCharacter = NewGameInStartArea(cre);
+    CGameArea* pArea = pCharacter->GetArea();
+    REQUIRE(pArea != NULL);
+    pArea->SortLists();
+
+    // Hedron (10HEDRON) wields a spear (00SPER01, two-handed): EquipWeapon
+    // (0x6C8390) takes the two-handed path only when the item's flag bit 1
+    // is set (0x6C90A9), so his weapon code is 5 and READY (7) uses BAM
+    // group 3 (SetSequence 0x6CDA00).
+    CGameSprite* pHedron = NULL;
+    for (CGameObject* pObject : ObjectsOfType(pArea, CGameObject::TYPE_SPRITE)) {
+        CGameSprite* pSprite = static_cast<CGameSprite*>(pObject);
+        if (strncmp(pSprite->m_scriptName, "Hedron", SCRIPTNAME_SIZE) == 0) {
+            pHedron = pSprite;
+        }
+    }
+    REQUIRE(pHedron != NULL);
+    REQUIRE(pHedron->m_animation.GetAnimationId() == 0x6100);
+    CGameAnimationTypeCharacter* pAnimation = static_cast<CGameAnimationTypeCharacter*>(pHedron->m_animation.m_animation);
+    CHECK(pAnimation->m_weaponCode == 5);
+    pHedron->m_animation.SetSequence(7);
+    CHECK(pAnimation->m_currentBamSequence == 3);
+}
+
+TEST_CASE("trigger: IsTeamBitOn tests the bits SetTeamBit sets (0x40E4)", "[ai][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    CGameSprite* pCharacter = NewGameInStartArea(cre);
+    REQUIRE(pCharacter->GetArea() != NULL);
+
+    // 0x455E44: the trigger's number ANDed with field_58C.
+    const CAITrigger teamBit64(0x40E4, 64);
+    pCharacter->field_58C = 0;
+    CHECK_FALSE(pCharacter->EvaluateStatusTrigger(teamBit64));
+
+    // SetTeamBit(64, TRUE) (case 310) turns it on; SetTeamBit(64, FALSE) off.
+    pCharacter->m_curAction = CAIAction(310, CPoint(-1, -1), 64, 1);
+    CHECK(pCharacter->ExecuteAction() == CGameAIBase::ACTION_DONE);
+    CHECK(pCharacter->EvaluateStatusTrigger(teamBit64));
+    CHECK_FALSE(pCharacter->EvaluateStatusTrigger(CAITrigger(0x40E4, 32)));
+    pCharacter->m_curAction = CAIAction(310, CPoint(-1, -1), 64, 0);
+    CHECK(pCharacter->ExecuteAction() == CGameAIBase::ACTION_DONE);
+    CHECK_FALSE(pCharacter->EvaluateStatusTrigger(teamBit64));
+    pCharacter->m_curAction = CAIAction();
 }
