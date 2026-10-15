@@ -1235,6 +1235,62 @@ TEST_CASE("trigger: IsTeamBitOn tests the bits SetTeamBit sets (0x40E4)", "[ai][
     pCharacter->m_curAction = CAIAction();
 }
 
+TEST_CASE("trigger: ActionListEmpty and NearLocation (0x402B, 0x40A9)", "[ai][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    CGameSprite* pCharacter = NewGameInStartArea(cre);
+    REQUIRE(pCharacter->GetArea() != NULL);
+
+    // ActionListEmpty (0x45534B): nothing queued and no current action.
+    const CAITrigger actionListEmpty(0x402B, 0);
+    pCharacter->ClearActions(FALSE);
+    pCharacter->m_curAction = CAIAction();
+    CHECK(pCharacter->EvaluateStatusTrigger(actionListEmpty));
+    pCharacter->m_curAction = CAIAction(310, CPoint(-1, -1), 64, 1);
+    CHECK_FALSE(pCharacter->EvaluateStatusTrigger(actionListEmpty));
+    pCharacter->m_curAction = CAIAction();
+    pCharacter->AddAction(CAIAction(310, CPoint(-1, -1), 64, 1));
+    CHECK_FALSE(pCharacter->EvaluateStatusTrigger(actionListEmpty));
+    pCharacter->ClearActions(FALSE);
+
+    // NearLocation(Myself, x, y, range) (0x4584ED): search squares of 16 by
+    // 12, squared distance at most range squared.
+    const CPoint pos = pCharacter->GetPos();
+    REQUIRE(pos.x > 100);
+    REQUIRE(pos.y > 100);
+    auto nearLocation = [&](LONG x, LONG y, LONG range) {
+        CAITrigger trigger(0x40A9, CAIObjectType::OBJECT_MYSELF, x);
+        trigger.m_specific2 = y;
+        trigger.m_specific3 = range;
+        return pCharacter->EvaluateStatusTrigger(trigger) != FALSE;
+    };
+    // Four squares to the left: (4 * 16 / 16)^2 = 16 <= 16.
+    CHECK(nearLocation(pos.x - 4 * 16, pos.y, 4));
+    CHECK_FALSE(nearLocation(pos.x - 5 * 16, pos.y, 4));
+    // 3 and 4 squares: 9 + 16 = 25.
+    CHECK(nearLocation(pos.x - 3 * 16, pos.y - 4 * 12, 5));
+    CHECK_FALSE(nearLocation(pos.x - 3 * 16, pos.y - 4 * 12, 4));
+    // -1 is the caller's own position; x or y at most 0 is FALSE.
+    CHECK(nearLocation(-1, -1, 0));
+    CHECK_FALSE(nearLocation(0, pos.y, 1000));
+    CHECK_FALSE(nearLocation(pos.x, -3, 1000));
+    // -2 is the saved location (base stats field_2E4, field_2E6).
+    pCharacter->m_baseStats.field_2E4 = static_cast<SHORT>(pos.x + 2 * 16);
+    pCharacter->m_baseStats.field_2E6 = static_cast<SHORT>(pos.y);
+    CHECK(nearLocation(-2, -2, 2));
+    CHECK_FALSE(nearLocation(-2, -2, 1));
+}
+
 TEST_CASE("action: FloatMessage floats the text over its target and is done (case 241)", "[ai][data]")
 {
     if (DataDir() == nullptr) {

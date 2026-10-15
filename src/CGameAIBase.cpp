@@ -4201,6 +4201,52 @@ BOOL CGameAIBase::EvaluateStatusTrigger(const CAITrigger& trigger)
             bResult = TRUE;
         }
         break;
+    case 0x402B:
+        // ActionListEmpty: nothing queued and no current action.
+        if (m_queuedActions.GetCount() != 0) {
+            bResult = FALSE;
+        } else if (m_curAction.m_actionID == CAIAction::NO_ACTION) {
+            bResult = TRUE;
+        } else {
+            bResult = FALSE;
+        }
+        break;
+    case 0x40A9:
+        // NearLocation(object, x, y, range): the object within `range`
+        // search squares of (x, y).
+        {
+            CGameSprite* pSprite = NULL;
+            bNoRelease = GetTriggerSprite(triggerCopy, &pSprite);
+            pObject = pSprite;
+            if (pSprite == NULL) {
+                // NOTE: The original leaves through its early epilogue
+                // (0x45AB7A) without releasing anything; nothing is shared.
+                return FALSE;
+            }
+
+            // NOTE: The saved location (-2) is read through the sprite's
+            // base stats (0x453190) whatever the caller is, as the original
+            // does.
+            if (triggerCopy.m_specificID == -2) {
+                triggerCopy.m_specificID = static_cast<USHORT>(static_cast<CGameSprite*>(this)->m_baseStats.field_2E4);
+            } else if (triggerCopy.m_specificID == -1) {
+                triggerCopy.m_specificID = GetPos().x;
+            }
+
+            if (triggerCopy.m_specific2 == -2) {
+                triggerCopy.m_specific2 = static_cast<USHORT>(static_cast<CGameSprite*>(this)->m_baseStats.field_2E6);
+            } else if (triggerCopy.m_specific2 == -1) {
+                triggerCopy.m_specific2 = GetPos().y;
+            }
+
+            if (triggerCopy.m_specificID > 0 && triggerCopy.m_specific2 > 0) {
+                LONG nRange = triggerCopy.m_specific3;
+                LONG dx = (pSprite->GetPos().x - triggerCopy.m_specificID) / CPathSearch::GRID_SQUARE_SIZEX;
+                LONG dy = (pSprite->GetPos().y - triggerCopy.m_specific2) / CPathSearch::GRID_SQUARE_SIZEY;
+                bResult = dy * dy + dx * dx <= nRange * nRange;
+            }
+        }
+        break;
     case 0x40EF:
         // InCutsceneMode
         bResult = g_pBaldurChitin->GetObjectGame()->GetGameSave()->m_mode == 0x142;
