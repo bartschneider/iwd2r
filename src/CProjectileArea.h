@@ -110,4 +110,20 @@ public:
     /* 0094 */ void ApplyToTargets(std::list<LONG>& targets) override;
 };
 
+// The area projectile of Mold Touch's tick (CPersistantEffect84C484, vtable
+// 0x8505F4): it strikes the first sprite not already in the Mold Touch state.
+class CProjectileArea8505F4 : public CProjectileArea {
+public:
+    CProjectileArea8505F4(WORD nRadius);
+    /* 0094 */ void ApplyToTargets(std::list<LONG>& targets) override;
+};
+
+// The area projectile of Shroud of Flame's tick (CPersistantEffect84C4D4,
+// vtable 0x850690): it strikes every sprite not in the Shroud of Flame state.
+class CProjectileArea850690 : public CProjectileArea {
+public:
+    CProjectileArea850690(WORD nRadius);
+    /* 0094 */ void ApplyToTargets(std::list<LONG>& targets) override;
+};
+
 #endif /* CPROJECTILEAREA_H_ */

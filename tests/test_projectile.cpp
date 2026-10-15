@@ -11,6 +11,7 @@
 #include "CProjectile850F9C.h"
 #include "CProjectileArea.h"
 #include "CProjectileBAM.h"
+#include "CProjectileSingleTarget.h"
 #include "CProjectileSpellHit.h"
 #include "CScreenCreateChar.h"
 #include "CScreenWorld.h"
@@ -695,5 +696,231 @@ TEST_CASE("projectile: the casting glow waits, loops and arrives at the caster",
     }
     CHECK(removed);
 
+    ClearMessages();
+}
+
+namespace {
+
+// The objects the area holds in its add lists (what Fire added since the last
+// SortLists).
+std::vector<CGameObject*> AddedObjects(CGameArea* pArea)
+{
+    std::vector<CGameObject*> objects;
+    CTypedPtrList<CPtrList, int*>* lists[] = { &pArea->m_lVertSortAdd, &pArea->m_lVertSortBackAdd, &pArea->m_lVertSortFlightAdd };
+    CGameObjectArray* pArray = g_pBaldurChitin->GetObjectGame()->GetObjectArray();
+    for (CTypedPtrList<CPtrList, int*>* pList : lists) {
+        POSITION pos = pList->GetHeadPosition();
+        while (pos != NULL) {
+            LONG id = static_cast<LONG>(reinterpret_cast<INT_PTR>(pList->GetNext(pos)));
+            CGameObject* pObject;
+            if (pArray->GetShare(id, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) == CGameObjectArray::SUCCESS) {
+                pArray->ReleaseShare(id, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+                objects.push_back(pObject);
+            }
+        }
+    }
+    return objects;
+}
+
+bool Near(LONG a, LONG b)
+{
+    return a - b <= 1 && b - a <= 1;
+}
+
+}
+
+TEST_CASE("projectile: the cone builds its animation and its defaults", "[projectile][data]")
+{
+    PROBE_OR_SKIP(pSprite);
+
+    CProjectile850DDC* pCone = new CProjectile850DDC("", "");
+    CHECK(pCone->m_nWidth == 200);
+    CHECK(pCone->m_nLength == 350);
+    CHECK(pCone->m_nHalfWidth == 25);
+    CHECK(pCone->m_nPuffSpacing == 20);
+    CHECK(pCone->m_nFrames == 15);
+    CHECK(pCone->m_nWaveInterval == 5);
+    CHECK(pCone->m_speed == 20);
+    CHECK(pCone->m_sPuff.empty());
+    // An empty animation falls back to MMissiT, with +0x1DE cleared.
+    REQUIRE(pCone->m_animation != nullptr);
+    CHECK(pCone->field_1DE == FALSE);
+    CHECK(pCone->m_bHasHeight == TRUE);
+    CHECK(pCone->field_2A0 == 0);
+    delete pCone;
+
+    pCone = new CProjectile850DDC("SPMAGMIS", "SPMAGMIS");
+    CHECK(pCone->field_1DE == TRUE);
+    CHECK(pCone->m_sPuff == "SPMAGMIS");
+    delete pCone;
+}
+
+TEST_CASE("projectile: the cone's Fire lays out its corners and puff points", "[projectile][data]")
+{
+    PROBE_OR_SKIP(pSprite);
+    ClearMessages();
+    CGameArea* pArea = pSprite->GetArea();
+    pArea->SortLists();
+
+    CPoint ptSource;
+    CProjectile::GetSourcePosition(pSprite->GetId(), ptSource, TRUE);
+
+    // Straight east, as far as the cone is long.
+    CProjectile850DDC* pCone = new CProjectile850DDC("", "SPMAGMIS");
+    CPoint ptTarget(ptSource.x + 350, ptSource.y);
+    pCone->Fire(pArea, pSprite->GetId(), CGameObjectArray::INVALID_INDEX, ptTarget, 7, 3);
+    CHECK(pCone->m_ptSource == ptSource);
+    CHECK(pCone->m_nHeight == 7);
+    CHECK(pCone->m_nType == 3);
+    CHECK(pCone->m_nPuffs == 5);
+    CHECK(pCone->m_ptEnd == ptTarget);
+    // At the source: 25 either side; at the far end (375 out): 125 either
+    // side.
+    CHECK(pCone->m_corners[0].x == ptSource.x);
+    CHECK(Near(pCone->m_corners[0].y, ptSource.y + 25));
+    CHECK(pCone->m_corners[1].x == ptSource.x);
+    CHECK(Near(pCone->m_corners[1].y, ptSource.y - 25));
+    CHECK(Near(pCone->m_corners[2].x, ptSource.x + 375));
+    CHECK(Near(pCone->m_corners[2].y, ptSource.y - 125));
+    CHECK(Near(pCone->m_corners[3].x, ptSource.x + 375));
+    CHECK(Near(pCone->m_corners[3].y, ptSource.y + 125));
+    // Ten points 20 apart across the end, then the end once more.
+    REQUIRE(pCone->m_puffPoints.size() == 11);
+    for (size_t n = 0; n < 10; n++) {
+        const LONG offset = static_cast<LONG>(n) - 5;
+        CHECK(pCone->m_puffPoints[n].x == ptTarget.x);
+        CHECK(Near(pCone->m_puffPoints[n].y, ptTarget.y - 20 * offset));
+    }
+    CHECK(pCone->m_puffPoints[5] == ptTarget);
+    CHECK(pCone->m_puffPoints[10] == ptTarget);
+
+    // The first frame sends a puff to each point, at 35-79% of the cone's
+    // speed.
+    pArea->SortLists();
+    pCone->AIUpdate();
+    CHECK(pCone->m_nFrame == 1);
+    std::vector<CGameObject*> puffs = AddedObjects(pArea);
+    REQUIRE(puffs.size() == 11);
+    for (size_t n = 0; n < puffs.size(); n++) {
+        CProjectile850D54* pPuff = dynamic_cast<CProjectile850D54*>(puffs[n]);
+        REQUIRE(pPuff != nullptr);
+        CHECK(pPuff->m_sourceId == pSprite->GetId());
+        CHECK(pPuff->m_targetId == CGameObjectArray::INVALID_INDEX);
+        CHECK(pPuff->m_speed >= 7);
+        CHECK(pPuff->m_speed <= 15);
+        CHECK(pPuff->field_1D8 == 1);
+    }
+    pArea->SortLists();
+    for (CGameObject* pObject : puffs) {
+        static_cast<CProjectile*>(pObject)->RemoveSelf();
+    }
+
+    // Frames 2-5: no wave; frame 6: the next one.
+    for (int frame = 2; frame <= 5; frame++) {
+        pCone->AIUpdate();
+    }
+    CHECK(AddedObjects(pArea).empty());
+    pCone->AIUpdate();
+    CHECK(AddedObjects(pArea).size() == 11);
+    pArea->SortLists();
+    for (CGameObject* pObject : AddedObjects(pArea)) {
+        static_cast<CProjectile*>(pObject)->RemoveSelf();
+    }
+
+    pCone->RemoveSelf();
+    ClearMessages();
+}
+
+TEST_CASE("projectile: the cone gives copies of its effects to what is inside it", "[projectile][data]")
+{
+    PROBE_OR_SKIP(pSprite);
+    ClearMessages();
+    CGameArea* pArea = pSprite->GetArea();
+    pArea->SortLists();
+
+    CProjectile850DDC* pCone = new CProjectile850DDC("", "");
+    pCone->m_pArea = pArea;
+    pCone->m_sourceId = CGameObjectArray::INVALID_INDEX;
+    CGameEffect* pEffect = Decode(pSprite, CGAMEEFFECT_AC, 0, 0).release();
+    pCone->AddEffect(pEffect);
+
+    // A square around the sprite, seen from just west of it.
+    const CPoint pos = pSprite->GetPos();
+    pCone->m_corners[0] = CPoint(pos.x - 40, pos.y - 40);
+    pCone->m_corners[1] = CPoint(pos.x - 40, pos.y + 40);
+    pCone->m_corners[2] = CPoint(pos.x + 40, pos.y + 40);
+    pCone->m_corners[3] = CPoint(pos.x + 40, pos.y - 40);
+    pCone->m_ptSource = CPoint(pos.x - 20, pos.y);
+    pCone->DeliverEffects();
+    CHECK(pCone->m_bDelivered == TRUE);
+    CMessageHandler& handler = g_pBaldurChitin->m_cMessageHandler;
+    bool found = false;
+    POSITION pos2 = handler.m_messageList.GetHeadPosition();
+    while (pos2 != NULL) {
+        CMessageAddEffect* pAdd = dynamic_cast<CMessageAddEffect*>(handler.m_messageList.GetNext(pos2));
+        REQUIRE(pAdd != nullptr);
+        if (pAdd->GetTarget() == pSprite->GetId()) {
+            found = true;
+            CHECK(pAdd->GetSource() == CGameObjectArray::INVALID_INDEX);
+            CHECK(pAdd->m_effect != pEffect);
+            CHECK(pAdd->m_effect->m_effectID == CGAMEEFFECT_AC);
+        }
+    }
+    CHECK(found);
+    // The cone keeps its own effects.
+    CHECK(pCone->m_effectList.GetCount() == 1);
+    ClearMessages();
+
+    // The source itself is left out.
+    pCone->m_sourceId = pSprite->GetId();
+    pCone->DeliverEffects();
+    pos2 = handler.m_messageList.GetHeadPosition();
+    while (pos2 != NULL) {
+        CHECK(handler.m_messageList.GetNext(pos2)->GetTarget() != pSprite->GetId());
+    }
+    ClearMessages();
+
+    delete pCone;
+}
+
+TEST_CASE("projectile: a fired cone arrives, delivers and removes itself after its frames", "[projectile][data]")
+{
+    PROBE_OR_SKIP(pSprite);
+    ClearMessages();
+    CGameArea* pArea = pSprite->GetArea();
+    pArea->SortLists();
+
+    // Aimed at the sprite itself (the target id wins over the point), it
+    // flies the short way to it.
+    CProjectile850DDC* pCone = new CProjectile850DDC("", "");
+    CPoint ptTarget(pSprite->GetPos().x + 100, pSprite->GetPos().y);
+    pCone->Fire(pArea, pSprite->GetId(), pSprite->GetId(), ptTarget, 0, 0);
+    LONG id = pCone->GetId();
+    REQUIRE(id != CGameObjectArray::INVALID_INDEX);
+    pArea->SortLists();
+
+    CGameObjectArray* pArray = g_pBaldurChitin->GetObjectGame()->GetObjectArray();
+    bool removed = false;
+    int frames = 0;
+    int delivered = -1;
+    for (; frames < 400; frames++) {
+        CGameObject* pObject;
+        if (pArray->GetShare(id, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) != CGameObjectArray::SUCCESS) {
+            removed = true;
+            break;
+        }
+        pArray->ReleaseShare(id, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+        CProjectile850DDC* pLive = dynamic_cast<CProjectile850DDC*>(pObject);
+        REQUIRE(pLive != nullptr);
+        if (delivered < 0 && pLive->m_bDelivered) {
+            delivered = frames;
+        }
+        pObject->AIUpdate();
+    }
+    // It delivers on arrival, stays, and goes on the first frame after both
+    // its arrival and its 15 frames.
+    CHECK(removed);
+    REQUIRE(delivered >= 0);
+    CHECK(frames == std::max(delivered, 15) + 1);
     ClearMessages();
 }
