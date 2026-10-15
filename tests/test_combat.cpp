@@ -803,3 +803,55 @@ TEST_CASE("combat: a goblin given AttackReevaluate swings at the party member", 
     CHECK_FALSE(hpRose);
     CHECK(pCharacter->GetBaseStats()->m_hitPoints <= characterStart);
 }
+
+TEST_CASE("combat: a party member casts Magic Missile through the Spell action", "[combat][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    Fight fight;
+    std::string why;
+    if (!SetUpFight(fight, why)) {
+        if (why.find("CHR") != std::string::npos) {
+            SKIP("[iwd2r-skip] " + why);
+        }
+        FAIL(why);
+    }
+    CGameSprite* pCharacter = fight.pCharacter;
+    CGameSprite* pGoblin = fight.pGoblin;
+    // A first-level wizard, whatever the probe's class (GetCasterLevel reads
+    // the derived class levels).
+    pCharacter->GetDerivedStats()->m_wizardLevel = 1;
+    const SHORT goblinStart = pGoblin->GetBaseStats()->m_hitPoints;
+
+    // Spell (31) with the resref, the class (wizard, 11) and the level.
+    CAIAction spell(CAIAction::SPELL, CAIObjectType(0, 0, 0, 0, 0, 0, 0, 0, pGoblin->GetId()), CString("SPWI112"), 0,
+        CAIOBJECTTYPE_C_WIZARD);
+    spell.m_specificID3 = 1;
+    pCharacter->ClearActions(FALSE);
+    pCharacter->AddAction(spell);
+    pGoblin->ClearActions(FALSE);
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    if (!pGame->GetWorldTimer()->m_active) {
+        pGame->GetWorldTimer()->StartTime();
+    }
+    int frames = 0;
+    bool cast = false;
+    while (frames < 600 && pGoblin->GetBaseStats()->m_hitPoints == goblinStart) {
+        Tick(fight.pArea, { pCharacter, pGoblin });
+        if (pCharacter->m_bStartedCasting) {
+            cast = true;
+        }
+        frames++;
+    }
+    INFO("frames " << frames << ", goblin hit points " << goblinStart << " -> " << pGoblin->GetBaseStats()->m_hitPoints
+                   << ", cast counter " << pCharacter->m_castCounter);
+    CHECK(cast);
+    CHECK(pGoblin->GetBaseStats()->m_hitPoints < goblinStart);
+    CHECK(pGoblin->GetBaseStats()->m_hitPoints >= goblinStart - 5);
+}

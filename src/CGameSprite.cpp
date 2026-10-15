@@ -1652,8 +1652,9 @@ void CGameSprite::sub_6F50A0()
                     delete pVariable;
                 }
 
-                // NOTE: The scope is the area object read as a string (its
-                // header's signature onwards), as in the original.
+                // NOTE: The scope is the area object read as a string: its
+                // first member, the area's name (m_header.m_areaName), as
+                // in the original.
                 CMessage* message = new CMessageSetVariable(CString(reinterpret_cast<const char*>(m_pArea)),
                     sName,
                     1,
@@ -12636,10 +12637,11 @@ SHORT CGameSprite::ExecuteAction()
         goto done;
     case 31:
     case 191:
-        // Spell, SpellNoDec
-        // TODO: 0x729A84-0x729AAC not ported (CGameSprite_Spell 0x740270).
-        returnValue = ACTION_ERROR;
-        goto done;
+        // Spell, SpellNoDec (0x729A84-0x729AAC)
+        pTarget = GetTargetShareType(CGameObject::TYPE_AIBASE);
+        bShare = TRUE;
+        returnValue = Spell(static_cast<CGameAIBase*>(pTarget));
+        goto release;
     case 33:
         // Turn (0x729AAC-0x729ABC)
         returnValue = Turn();
@@ -19367,6 +19369,692 @@ SHORT CGameSprite::MoveToPoint(const CPoint& dest, LONG range)
     return ACTION_INTERRUPTABLE;
 }
 
+// 0x740270
+SHORT CGameSprite::Spell(CGameAIBase* target)
+{
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    SHORT nSequence = m_nSequence;
+    CString sResRef("");
+    CMessage* message;
+
+    if (m_typeAI.m_nGeneral == 3) {
+        return ACTION_DONE;
+    }
+
+    if (m_actionCount == 0) {
+        if (m_curProjectile != NULL) {
+            delete m_curProjectile;
+            m_curProjectile = NULL;
+        }
+
+        if (m_derivedStats.m_bAuraCleansing && m_castCounter != -1) {
+            FeedBack(41, 0, 0, 0, -1, 0, 0);
+            m_castCounter = -1;
+        }
+    }
+
+    if (target == NULL) {
+        return ACTION_ERROR;
+    }
+
+    if (target->GetObjectType() == CGameObject::TYPE_SPRITE && target != this) {
+        if (!static_cast<CGameSprite*>(target)->IsVisibleToCaller(GetCanSeeInvisible())
+            || static_cast<CGameSprite*>(target)->m_derivedStats.m_spellStates[SPLSTATE_SANCTUARY]) {
+            AutoPause(0x20);
+
+            CAITrigger trigger(CAITRIGGER_TARGETUNREACHABLE, m_curAction.m_acteeID, 0);
+            message = new CMessageSetTrigger(trigger, m_id, m_id);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+            // NOTE: The original releases the target's share here as well as
+            // in ExecuteAction (a no-op for the asynchronous thread).
+            pGame->GetObjectArray()->ReleaseShare(target->GetId(), CGameObjectArray::THREAD_ASYNCH, INFINITE);
+            return ACTION_ERROR;
+        }
+    }
+
+    if (m_nDirection != GetDirection(target->GetPos()) && target != this) {
+        // 0x7427A0: face the target first.
+        message = new CMessageSetDirection(target->GetPos(), m_id, m_id);
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        return ACTION_NORMAL;
+    }
+
+    // Silenced, without subvocal casting, only Silence (SPWI219) of the
+    // wizard and priest spells can be cast.
+    if (!m_derivedStats.m_spellStates[SPLSTATE_VOCALIZE]
+        && (m_derivedStats.m_generalState & STATE_SILENCED) != 0
+        && !sub_763150(CGAMESPRITE_FEAT_SUBVOCAL_CASTING)) {
+        if (strcmp(m_curAction.GetString1(), "") == 0) {
+            DecodeSpell(m_curAction.m_specificID, sResRef);
+            if (strcmp(sResRef, "") == 0) {
+                return ACTION_ERROR;
+            }
+        } else {
+            sResRef = m_curAction.GetString1();
+        }
+
+        BYTE nSpellType = pGame->GetSpellType(CResRef(sResRef));
+        if ((nSpellType == 1 || nSpellType == 3) && strcmp(sResRef, "SPWI219") != 0) {
+            return ACTION_ERROR;
+        }
+    }
+
+    BYTE nClass = static_cast<BYTE>(m_curAction.m_specificID2);
+    BYTE nDomain = static_cast<BYTE>(m_curAction.m_specificID2 >> 8);
+    DWORD nSpecialization = pGame->GetRuleTables().GetSpecializationMask(nClass, nDomain);
+    LONG nSpellLevel = m_curAction.m_specificID3;
+    SHORT nCasterType = 0;
+
+    if (!m_bStartedCasting) {
+        // In range and sight, or walk to the target.
+        CSpell* pSpell = m_curSpell;
+        BOOL bTemporary;
+        if (pSpell == NULL) {
+            if (strcmp(m_curAction.GetString1(), "") == 0) {
+                DecodeSpell(m_curAction.m_specificID, sResRef);
+                if (strcmp(sResRef, "") == 0) {
+                    return ACTION_ERROR;
+                }
+            } else {
+                sResRef = m_curAction.GetString1();
+            }
+
+            pSpell = new CSpell(CResRef(sResRef));
+            if (pSpell == NULL) {
+                return ACTION_ERROR;
+            }
+            bTemporary = TRUE;
+        } else {
+            bTemporary = FALSE;
+        }
+
+        if (!CheckAppropriateTarget(pSpell, target)) {
+            if (bTemporary && pSpell != NULL) {
+                delete pSpell;
+            }
+            return ACTION_ERROR;
+        }
+
+        if (pSpell->GetGenericName() != 25765
+            && pSpell->GetGenericName() != 32393
+            && pSpell->GetGenericName() != 12117) {
+            DWORD dwItemFlags = pSpell->GetItemFlags();
+            BOOL bReady = FALSE;
+            if (sub_7567F0(pSpell, target->GetPos(), nClass, nSpecialization)) {
+                if (m_pArea->CheckLOS(m_pos, target->GetPos(), m_visibleTerrainTable, FALSE)
+                    || (dwItemFlags & 0x800) != 0) {
+                    message = new CMessageDropPath(m_id, m_id);
+                    g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+                    bReady = TRUE;
+                }
+            }
+
+            if (!bReady) {
+                SHORT returnValue = MoveToObject(target);
+                if (returnValue != ACTION_DONE) {
+                    if (bTemporary && pSpell != NULL) {
+                        delete pSpell;
+                    }
+                    return returnValue;
+                }
+            }
+        }
+
+        if (bTemporary && pSpell != NULL) {
+            delete pSpell;
+        }
+
+        if (m_castCounter == -1) {
+            m_castCounter = 0;
+            m_bInCasting = TRUE;
+        }
+    }
+
+    if (m_castCounter == 0) {
+        // The cast starts: the spell is taken from the memorized ones.
+        if (!IsVisibleToCaller(FALSE)) {
+            ITEM_EFFECT effect;
+            CGameEffect::ClearItemEffect(&effect, CGAMEEFFECT_FORCEVISIBLE);
+            effect.durationType = 1;
+
+            CGameEffect* pEffect = CGameEffect::DecodeEffect(&effect, m_pos, m_id, CPoint(-1, -1));
+            message = new CMessageAddEffect(pEffect, m_id, m_id);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        }
+
+        if (strcmp(m_curAction.GetString1(), "") == 0) {
+            DecodeSpell(m_curAction.m_specificID, sResRef);
+            if (strcmp(sResRef, "") == 0) {
+                return ACTION_ERROR;
+            }
+        } else {
+            sResRef = m_curAction.GetString1();
+        }
+
+        if (m_derivedStats.m_spellStates[SPLSTATE_SANCTUARY]) {
+            ITEM_EFFECT effect;
+            CGameEffect::ClearItemEffect(&effect, CGAMEEFFECT_DISPELSANCTUARY);
+            effect.durationType = 1;
+
+            CGameEffect* pEffect = CGameEffect::DecodeEffect(&effect, m_pos, m_id, CPoint(-1, -1));
+            message = new CMessageAddEffect(pEffect, m_id, m_id);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        }
+
+        if (m_curSpell != NULL) {
+            delete m_curSpell;
+            m_curSpell = NULL;
+        }
+
+        if (m_curAction.m_actionID == 191) {
+            // SpellNoDec: nothing is taken.
+            m_curSpell = new CSpell(CResRef(sResRef));
+            m_cGameStats.RecordSpellUse(CResRef(sResRef));
+            if (m_curSpell == NULL) {
+                return ACTION_ERROR;
+            }
+            nCasterType = m_curSpell->GetCasterType();
+        } else {
+            if (strcmp(sResRef.Left(strlen("**")), "**") == 0) {
+                // NOTE: The original formats "*** %s is trying to cast an
+                // OBSOLETE SPELL: %s." with the name and the resref and
+                // shows it nowhere.
+                return ACTION_ERROR;
+            }
+
+            m_curSpell = new CSpell(CResRef(sResRef));
+            m_cGameStats.RecordSpellUse(CResRef(sResRef));
+            if (m_curSpell == NULL) {
+                return ACTION_ERROR;
+            }
+
+            nCasterType = m_curSpell->GetCasterType();
+
+            INT nType;
+            if (nCasterType == 1) {
+                nType = 0;
+            } else if (nCasterType == 2) {
+                nType = 1;
+            } else if (nCasterType == 4) {
+                nType = 2;
+            } else {
+                nType = 0;
+                // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjCreatureAI.cpp
+                // __LINE__: 12582
+                UTIL_ASSERT_MSG(FALSE, "Invalid spell type");
+            }
+
+            BOOLEAN bDisabled = FALSE;
+            if (m_derivedStats.m_disabledSpellTypes[nType]) {
+                bDisabled = TRUE;
+            }
+
+            BYTE nSpellType = pGame->GetSpellType(CResRef(sResRef));
+            UINT nIndex = 0;
+            UINT nID = 0;
+            BOOLEAN bRefresh = TRUE;
+
+            if (nSpellType == 1) {
+                if (!pGame->m_spells.Find(CResRef(sResRef), nID)) {
+                    // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjCreatureAI.cpp
+                    // __LINE__: 12599
+                    UTIL_ASSERT_MSG(FALSE, "Unknown spell");
+                    return ACTION_ERROR;
+                }
+
+                UINT nClassIndex = pGame->GetSpellcasterIndex(nClass);
+                if (nDomain == 0) {
+                    if (nClass == CAIOBJECTTYPE_C_SORCERER || nClass == CAIOBJECTTYPE_C_BARD) {
+                        // A sorcerer or a bard spends a slot of the level.
+                        UINT nLevel = static_cast<BYTE>(nSpellLevel) - 1;
+                        unsigned int a2 = 1;
+                        BOOLEAN a3 = FALSE;
+                        m_spells.Get(nClassIndex)->sub_7261A0(nLevel, a2, a3);
+                        bRefresh = FALSE;
+                        // TODO: The original then refreshes the quick
+                        // spells of each spell of the level through
+                        // CheckQuickLists 0x71ABA0 (not ported),
+                        // 0x7412F5-0x741465.
+                    } else {
+                        UINT nLevel = static_cast<BYTE>(nSpellLevel) - 1;
+                        unsigned int a4 = 1;
+                        unsigned int a5 = 0;
+                        sub_724FD0(nClass, nLevel, CResRef(sResRef), a4, a5);
+                    }
+                } else {
+                    UINT nLevel = static_cast<BYTE>(nSpellLevel) - 1;
+                    unsigned int a4 = 1;
+                    unsigned int a5 = 0;
+                    sub_725110(nLevel, CResRef(sResRef), a4, a5);
+                }
+            } else if (nSpellType == 2) {
+                if (!pGame->m_innateSpells.Find(CResRef(sResRef), nID)) {
+                    // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjCreatureAI.cpp
+                    // __LINE__: 12667
+                    UTIL_ASSERT_MSG(FALSE, "Unknown spell");
+                    return ACTION_ERROR;
+                }
+
+                if (m_innateSpells.Find(nID, nIndex) == TRUE) {
+                    CResRef cResSpell(sResRef);
+                    if (cResSpell == SPIN275
+                        || cResSpell == SPIN276
+                        || cResSpell == SPIN277
+                        || cResSpell == SPIN278
+                        || cResSpell == SPIN279) {
+                        bRefresh = FALSE;
+                    } else {
+                        unsigned int a2 = 1;
+                        unsigned int a3 = 0;
+                        sub_725270(cResSpell, a2, a3);
+                    }
+                }
+            } else if (nSpellType == 3) {
+                if (!pGame->m_songs.Find(CResRef(sResRef), nID)) {
+                    // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjCreatureAI.cpp
+                    // __LINE__: 12695
+                    UTIL_ASSERT_MSG(FALSE, "Unknown spell");
+                    return ACTION_ERROR;
+                }
+
+                m_songs.Find(nID, nIndex);
+            } else if (nSpellType == 4) {
+                if (!pGame->m_shapeshifts.Find(CResRef(sResRef), nID)) {
+                    // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjCreatureAI.cpp
+                    // __LINE__: 12710
+                    UTIL_ASSERT_MSG(FALSE, "Unknown spell");
+                    return ACTION_ERROR;
+                }
+
+                if (m_shapeshifts.Find(nID, nIndex) == TRUE) {
+                    if (CResRef(sResRef) == SPIN122) {
+                        UINT nShapeIndex = 0;
+                        if (m_shapeshifts.Find(nID, nShapeIndex) == TRUE) {
+                            unsigned int a2 = 1;
+                            BOOLEAN a3 = FALSE;
+                            m_shapeshifts.sub_725CC0(nID, a2, a3);
+                            unsigned int a4 = 0;
+                            unsigned int a5 = 0;
+                            m_shapeshifts.Remove(nID, TRUE, a4, a5);
+                        }
+                    } else {
+                        unsigned int a1 = 1;
+                        BOOLEAN a2 = FALSE;
+                        m_shapeshifts.sub_725DB0(a1, a2);
+                    }
+
+                    bRefresh = FALSE;
+                    // TODO: The original then refreshes the quick spells of
+                    // each shapeshift through CheckQuickLists 0x71ABA0 (not
+                    // ported), 0x7417D5-0x7418A3.
+                }
+            }
+
+            if (bDisabled) {
+                if (m_curSpell != NULL) {
+                    delete m_curSpell;
+                }
+                m_curSpell = NULL;
+                return ACTION_ERROR;
+            }
+
+            if (bRefresh) {
+                // TODO: The original refreshes the spell's quick buttons
+                // through CheckQuickLists 0x71ABA0 (not ported),
+                // 0x7418A3-0x741971.
+            }
+        }
+    }
+
+    // 0x740D20: the cast goes on.
+    if (m_curSpell == NULL) {
+        return m_typeAI.m_nEnemyAlly <= CAIObjectType::EA_GOODCUTOFF ? ACTION_INTERRUPTABLE : ACTION_NORMAL;
+    }
+
+    m_curSpell->Demand();
+
+    // The last ability the caster's level reaches.
+    const SPELL_ABILITY* pAbility = NULL;
+    SHORT nCasterLevel = GetCasterLevel(m_curSpell, nClass, nSpecialization);
+    INT nAbilityIndex = 0;
+    if (m_curSpell->GetAbilityCount() > 0) {
+        do {
+            if (nCasterLevel < m_curSpell->GetAbility(nAbilityIndex)->minCasterLevel) {
+                break;
+            }
+            pAbility = m_curSpell->GetAbility(nAbilityIndex);
+            nAbilityIndex++;
+        } while (nAbilityIndex < m_curSpell->GetAbilityCount());
+    }
+    nAbilityIndex--;
+
+    if (pAbility == NULL) {
+        m_curSpell->Release();
+        return ACTION_ERROR;
+    }
+
+    if (!m_bStartedCasting) {
+        sub_755A70(m_curSpell, pAbility, target->GetPos());
+        m_bStartedCasting = TRUE;
+
+        // An enemy within 24 squares calls for concentration.
+        CAIObjectType enemy = GetAIType().GetEnemyOf();
+        LONG nEnemy = m_pArea->GetNearest(m_id,
+            enemy,
+            24,
+            GetTerrainTable(),
+            FALSE,
+            GetCanSeeInvisible(),
+            FALSE,
+            0,
+            FALSE);
+        if (nEnemy != CGameObjectArray::INVALID_INDEX) {
+            INT nLevel = m_curSpell->GetLevel();
+            if (field_9D15 != TRUE) {
+                if (field_9D14 == 0) {
+                    field_9D14 = 1;
+                    INT nBonus = GetFeatValue(CGAMESPRITE_FEAT_COMBAT_CASTING) != 0 ? 4 : 0;
+                    INT nDC = nLevel + 10;
+                    INT nRoll = CUtil::UtilRandInt(20, m_derivedStats.m_nLuck) + 1;
+                    INT nConcentration = m_derivedStats.m_nSkills[3];
+                    if ((m_baseStats.field_2FB & 0x1) != 0) {
+                        nConcentration += 10;
+                    }
+                    FeedBack(83, nRoll, nConcentration - nBonus, nBonus, 39842, 0, nLevel);
+                    field_9D15 = nConcentration + nRoll < nDC;
+                }
+            }
+
+            if (field_9D15 == TRUE) {
+                FeedBack(84, 0, 0, 0, -1, 0, 0);
+                m_curSpell->Release();
+                return ACTION_DONE;
+            }
+        }
+
+        if (pGame->GetCharacterPortraitNum(m_id) == -1) {
+            // A party member who sees a creature cast may know the spell
+            // (spellcraft).
+            INT nCharacters = pGame->m_nCharacters;
+            for (INT nCharacter = 0; nCharacter < nCharacters; nCharacter++) {
+                LONG nCharacterId = static_cast<SHORT>(nCharacter) < pGame->m_nCharacters
+                    ? pGame->m_characterPortraits[static_cast<SHORT>(nCharacter)]
+                    : CGameObjectArray::INVALID_INDEX;
+
+                CGameSprite* pCharacter;
+                BYTE rc;
+                do {
+                    rc = pGame->GetObjectArray()->GetShare(nCharacterId,
+                        CGameObjectArray::THREAD_ASYNCH,
+                        reinterpret_cast<CGameObject**>(&pCharacter),
+                        INFINITE);
+                } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+                if (rc == CGameObjectArray::SUCCESS) {
+                    INT nSpellcraft = pCharacter->m_derivedStats.m_nSkills[13];
+                    INT nSkillBase = pCharacter->sub_763E40(13);
+                    DWORD dwState = pCharacter->m_derivedStats.m_generalState & (STATE_DEAD | STATE_HELPLESS | STATE_SLEEPING);
+                    CPoint ptCharacter = pCharacter->GetPos();
+
+                    // NOTE: The original releases the nearest enemy's share
+                    // here, not the character's (a no-op for the
+                    // asynchronous thread).
+                    pGame->GetObjectArray()->ReleaseShare(nEnemy, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+
+                    INT nRange = GetVisualRange() * GetVisualRange();
+                    INT dx = ptCharacter.x - m_pos.x;
+                    INT dy = ptCharacter.y - m_pos.y;
+                    if (dwState == 0 && nSpellcraft > 0 && dx * dx + dy * dy <= nRange) {
+                        INT nRoll = rand() % 20;
+                        FeedBack(83, nSpellcraft + nRoll + 1, m_curSpell->GetLevel() + 15, nSkillBase, 39306, 0, 0);
+                        if (nRoll + nSpellcraft + 1 >= m_curSpell->GetLevel() + 15) {
+                            FeedBack(FEEDBACK_SPELL, nCasterType != 4 ? 1 : 0, 0, 0, m_curSpell->GetGenericName(), 0, 0);
+                            message = new CMessageFloatText(m_id, m_id, m_curSpell->GetGenericName(), TRUE);
+                            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 0x741EF1: the casting time.
+    INT nCastTime = max(pAbility->speedFactor - m_derivedStats.m_nMentalSpeed, 0);
+    m_speedFactor = static_cast<SHORT>(max(m_speedFactor - m_derivedStats.m_nMentalSpeed, 0));
+    INT nTicks = static_cast<SHORT>(nCastTime) * 100 / 10;
+
+    if (m_castCounter < nTicks) {
+        if (field_9D15 != TRUE
+            && (field_5582 == 0 || m_curSpell->GetCasterType() == 4)) {
+            if (nSequence != SEQ_CONJURE && m_castCounter < nTicks - 4) {
+                message = new CMessageSetSequence(SEQ_CONJURE, m_id, m_id);
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+            } else if (nSequence != SEQ_CAST && m_castCounter >= nTicks - 4) {
+                message = new CMessageSetSequence(SEQ_CAST, m_id, m_id);
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+                ApplyCastingEffectPost(m_curSpell, pAbility);
+            }
+
+            m_curSpell->Release();
+            return ACTION_NORMAL;
+        }
+
+        // Hit while casting: concentration (once).
+        INT nDamage = field_5582;
+        INT nLevel = m_curSpell->GetLevel();
+        if (field_9D15 != TRUE) {
+            if (field_9D14 == 0) {
+                field_9D14 = 1;
+                INT nBonus = GetFeatValue(CGAMESPRITE_FEAT_COMBAT_CASTING) != 0 ? 4 : 0;
+                INT nDC = nLevel + nDamage + 10;
+                INT nRoll = CUtil::UtilRandInt(20, m_derivedStats.m_nLuck) + 1;
+                INT nConcentration = m_derivedStats.m_nSkills[3];
+                if ((m_baseStats.field_2FB & 0x1) != 0) {
+                    nConcentration += 10;
+                }
+                FeedBack(83, nRoll, nConcentration - nBonus, nBonus, 39842, nDamage, nLevel);
+                field_9D15 = nConcentration + nRoll < nDC;
+            }
+
+            if (field_9D15 != TRUE) {
+                m_curSpell->Release();
+                return ACTION_NORMAL;
+            }
+        }
+
+        // 0x7423CB: the spell is lost.
+        FeedBack(55, 0, 0, 0, -1, 0, 0);
+        m_curSpell->Release();
+        return ACTION_DONE;
+    }
+
+    // 0x742134: the cast completes. The spell failure roll first.
+    INT nFailureRoll = rand() % 100;
+    BOOL bFailed = FALSE;
+    nCasterType = m_curSpell->GetCasterType();
+    if (nCasterType != 4) {
+        switch (nClass) {
+        case CAIOBJECTTYPE_C_CLERIC:
+        case CAIOBJECTTYPE_C_DRUID:
+        case CAIOBJECTTYPE_C_PALADIN:
+        case CAIOBJECTTYPE_C_RANGER:
+            nCasterType = 2;
+            if (CheckDivineFailure(nFailureRoll)) {
+                FeedBack(61, 0, 0, 0, -1, 0, 0);
+                bFailed = TRUE;
+            }
+            break;
+        default:
+            nCasterType = 1;
+            if (CheckAranceFailure(nFailureRoll)) {
+                FeedBack(61, 0, 0, 0, -1, 0, 0);
+                bFailed = TRUE;
+            }
+            break;
+        }
+    }
+
+    if ((m_curSpell->GetItemFlags() & 0x2000) != 0
+        && (m_pArea->m_header.m_areaType & 0x1) == 0) {
+        FeedBack(22, 0, 0, 0, -1, 0, 0);
+        bFailed = TRUE;
+    }
+
+    if (field_9D15 == TRUE
+        || (field_5582 != 0 && m_curSpell->GetCasterType() != 4)) {
+        INT nDamage = field_5582;
+        INT nLevel = m_curSpell->GetLevel();
+        if (field_9D15 == TRUE) {
+            goto lost;
+        }
+
+        if (field_9D14 == 0) {
+            field_9D14 = 1;
+            INT nBonus = GetFeatValue(CGAMESPRITE_FEAT_COMBAT_CASTING) != 0 ? 4 : 0;
+            INT nDC = nDamage + nLevel + 10;
+            INT nRoll = CUtil::UtilRandInt(20, m_derivedStats.m_nLuck) + 1;
+            INT nConcentration = m_derivedStats.m_nSkills[3];
+            if ((m_baseStats.field_2FB & 0x1) != 0) {
+                nConcentration += 10;
+            }
+            FeedBack(83, nRoll, nConcentration - nBonus, nBonus, 39842, nDamage, nLevel);
+            field_9D15 = nConcentration + nRoll < nDC;
+        }
+
+        if (field_9D15 == TRUE) {
+            goto lost;
+        }
+    }
+
+    if (bFailed) {
+        m_curSpell->Release();
+        return ACTION_DONE;
+    }
+
+    if (m_derivedStats.m_spellStates[SPLSTATE_WEB] && m_curSpell->GetCasterType() != 4) {
+        // NOTE: In a web a concentration check that succeeds
+        // loses the spell (0x7423C9 jumps to the loss on `>=`).
+        INT nDamage = field_5582;
+        INT nLevel = m_curSpell->GetLevel();
+        INT nBonus = GetFeatValue(CGAMESPRITE_FEAT_COMBAT_CASTING) != 0 ? 4 : 0;
+        INT nDC = nLevel + 10 + nDamage;
+        INT nRoll = CUtil::UtilRandInt(20, m_derivedStats.m_nLuck) + 1;
+        INT nConcentration = m_derivedStats.m_nSkills[3];
+        if ((m_baseStats.field_2FB & 0x1) != 0) {
+            nConcentration += 10;
+        }
+        FeedBack(83, nRoll, nConcentration - nBonus, nBonus, 39842, nDamage, nLevel);
+        if (nConcentration + nRoll >= nDC) {
+            goto lost;
+        }
+    }
+
+    if ((m_curSpell->GetItemFlags() & 0x2000) != 0
+        && (m_pArea->m_header.m_areaType & 0x1) == 0) {
+        FeedBack(22, 0, 0, 0, -1, 0, 0);
+    } else {
+        FeedBack(FEEDBACK_SPELL, nCasterType != 4 ? 1 : 0, 0, 0, m_curSpell->GetGenericName(), 0, 0);
+
+        if (nSequence != SEQ_CAST) {
+            message = new CMessageSetSequence(SEQ_CAST, m_id, m_id);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        }
+
+        m_curProjectile = CProjectile::DecodeProjectile(pAbility->missileType, this, 0);
+        m_curProjectile->m_sourceRes = m_curSpell->GetResRef();
+        DWORD nLevel = static_cast<BYTE>(nSpellLevel);
+        m_curProjectile->m_nSpellLevel = nLevel;
+
+        for (INT nEffect = 0; nEffect < pAbility->effectCount; nEffect++) {
+            CGameEffect* pEffect = m_curSpell->GetAbilityEffect(nAbilityIndex,
+                nEffect,
+                this,
+                nClass,
+                nSpecialization,
+                0);
+            pEffect->m_source = m_pos;
+            pEffect->m_sourceID = m_id;
+            pEffect->m_target = target->GetPos();
+
+            if (pEffect->m_spellLevel != 0) {
+                pEffect->m_spellLevel = nLevel;
+            }
+
+            IcewindMisc::sub_5860F0(this, pEffect);
+
+            // The duration modifiers of the arcane and the divine casters.
+            if (pEffect->m_durationType == 0) {
+                if (nCasterType == 1) {
+                    pEffect->m_duration = static_cast<DWORD>(m_derivedStats.m_nSpellDurationModMage * static_cast<INT>(pEffect->m_duration)) / 100;
+                } else if (nCasterType == 2) {
+                    pEffect->m_duration = static_cast<DWORD>(m_derivedStats.m_nSpellDurationModPriest * static_cast<INT>(pEffect->m_duration)) / 100;
+                }
+            }
+
+            switch (pEffect->m_targetType) {
+            case 1:
+                pEffect->m_flags |= 0x2;
+                message = new CMessageAddEffect(pEffect, m_id, m_id);
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+                break;
+            case 2:
+                m_curProjectile->AddEffect(pEffect);
+                break;
+            case 3:
+                ApplyEffectToParty(pEffect);
+                delete pEffect;
+                break;
+            case 4:
+            case 5:
+            case 6:
+            case 7:
+            case 8:
+                // TODO: The original gives the effect to the area's
+                // creatures through CGameArea 0x46E130 (not ported).
+                delete pEffect;
+                break;
+            default:
+                delete pEffect;
+                break;
+            }
+        }
+
+        LONG nHeight = m_curProjectile->DetermineHeight(this);
+        CMessageFireProjectile* pFire = new CMessageFireProjectile(m_curProjectile->m_projectileType,
+            target->GetId(),
+            target->GetPos(),
+            nHeight,
+            m_id,
+            m_id,
+            0);
+
+        if (m_curProjectile->m_projectileType == 304) {
+            INT nRandom = rand() % 1000000;
+            // TODO: The original also stores it in the projectile's +0x356
+            // (not ported yet).
+            pFire->field_20 = nRandom;
+        }
+
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(pFire, FALSE);
+
+        m_curProjectile->Fire(m_pArea, m_id, target->GetId(), target->GetPos(), m_curProjectile->DetermineHeight(this), 0);
+        m_curProjectile = NULL;
+    }
+
+    m_curSpell->Release();
+    AutoPause(0x40);
+    AutoPause(0x400);
+    return ACTION_DONE;
+
+lost:
+    // 0x7423CB
+    FeedBack(55, 0, 0, 0, -1, 0, 0);
+    m_curSpell->Release();
+    return ACTION_DONE;
+}
+
 // 0x7446F0
 SHORT CGameSprite::OneSwing()
 {
@@ -20169,6 +20857,395 @@ void CGameSprite::SelectWeaponAbility(unsigned char buttonNum, unsigned char abi
         CMessage* message = new CMessageSetSequence(static_cast<BYTE>(GetIdleSequence()), m_id, m_id);
         g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
     }
+}
+
+// 0x755A70
+void CGameSprite::sub_755A70(CSpell* pSpell, const SPELL_ABILITY* pAbility, const CPoint& ptTarget)
+{
+    // The casting: the caster's voice, the casting sound, the casting glow
+    // and the spell's casting effects.
+    pSpell->GetCasterType();
+
+    if (pSpell == NULL) {
+        return;
+    }
+
+    if (pAbility == NULL) {
+        return;
+    }
+
+    CString sVoice;
+    CMessage* message;
+
+    // The voice: none for a short cast, else by gender (CHA_<M|F><M|P>..).
+    INT nCastTime = pAbility->speedFactor - m_derivedStats.m_nMentalSpeed;
+    CHAR nGender;
+    if (nCastTime < 0 || nCastTime < 3) {
+        nGender = 'N';
+    } else {
+        nGender = m_typeAI.m_nGender != 2 ? 'M' : 'F';
+    }
+
+    CHAR nType;
+    if (pSpell->GetCasterType() == 2) {
+        nType = 'P';
+    } else {
+        pSpell->GetCasterType();
+        nType = 'M';
+    }
+
+    if (nGender != 'N') {
+        CString sBase;
+        sBase = "CHA_";
+        sBase += nGender;
+        sBase += nType;
+
+        // NOTE: Each kind draws a rand() whose value is not used.
+        switch (pSpell->GetAnimationType()) {
+        case 9:
+            rand();
+            sVoice.Format("%s1%c", (LPCSTR)sBase, '3');
+            break;
+        case 10:
+            rand();
+            sVoice.Format("%s1%c", (LPCSTR)sBase, '5');
+            break;
+        case 11:
+            rand();
+            sBase += "09";
+            break;
+        case 12:
+            rand();
+            sVoice.Format("%s0%c", (LPCSTR)sBase, '3');
+            break;
+        case 13:
+            rand();
+            sVoice.Format("%s0%c", (LPCSTR)sBase, '1');
+            break;
+        case 14:
+            rand();
+            sVoice.Format("%s0%c", (LPCSTR)sBase, '5');
+            break;
+        case 15:
+            rand();
+            sVoice.Format("%s1%c", (LPCSTR)sBase, '1');
+            break;
+        case 16:
+            rand();
+            sVoice.Format("%s0%c", (LPCSTR)sBase, '7');
+            break;
+        }
+    }
+
+    BOOLEAN bHarpy = FALSE;
+    if (GetObjectType() == 0xAE) {
+        sVoice = "HARPY06";
+        bHarpy = TRUE;
+    }
+
+    if ((nGender != 'N' && IcewindMisc::sub_585210(this) == TRUE) || bHarpy == TRUE) {
+        m_sndVoice.SetChannel(2, reinterpret_cast<DWORD_PTR>(m_pArea));
+        m_sndVoice.SetResRef(CResRef(sVoice), TRUE, TRUE);
+        m_sndVoice.Play(m_pos.x, m_pos.y, m_posZ, FALSE);
+
+        CMessagePlaySoundRef* pSound = new CMessagePlaySoundRef(CResRef(sVoice), m_id, m_id);
+        pSound->m_nChannel = 2;
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(pSound, FALSE);
+    }
+
+    // The casting sound: PRE_<M|P>0<n>.
+    CString sCasting;
+    sCasting = "PRE_";
+    sCasting += nType;
+    switch (pSpell->GetAnimationType()) {
+    case 9:
+        sCasting += "07";
+        break;
+    case 10:
+        sCasting += "08";
+        break;
+    case 11:
+        sCasting += "05";
+        break;
+    case 12:
+        sCasting += "02";
+        break;
+    default:
+        sCasting += "01";
+        break;
+    case 14:
+        sCasting += "03";
+        break;
+    case 15:
+        sCasting += "06";
+        break;
+    case 16:
+        sCasting += "04";
+        break;
+    }
+
+    field_4EC8.SetChannel(4, reinterpret_cast<DWORD_PTR>(m_pArea));
+    field_4EC8.SetResRef(CResRef(sCasting), TRUE, TRUE);
+    field_4EC8.Play(m_pos.x, m_pos.y, m_posZ, FALSE);
+
+    CMessagePlaySoundRef* pSound = new CMessagePlaySoundRef(CResRef(sCasting), m_id, m_id);
+    pSound->m_nChannel = 4;
+    g_pBaldurChitin->GetMessageHandler()->AddMessage(pSound, FALSE);
+
+    // The casting glow for the casting time.
+    INT nTime = pAbility->speedFactor;
+    if (sub_763150(CGAMESPRITE_FEAT_IMPROVED_INITIATIVE) == TRUE) {
+        nTime = max(nTime - 1, 0);
+    }
+    nTime -= m_derivedStats.m_nMentalSpeed;
+    SHORT nDuration = static_cast<SHORT>(max(nTime, 0) * 100 / 10);
+
+    ITEM_EFFECT effect;
+    CGameEffect::ClearItemEffect(&effect, 0);
+
+    DWORD nGameTime = g_pBaldurChitin->GetObjectGame()->GetWorldTimer()->m_gameTime;
+    BOOL bGlow = TRUE;
+    switch (pSpell->GetAnimationType()) {
+    case 9:
+        effect.effectID = 235;
+        effect.dwFlags = 7;
+        break;
+    case 10:
+        effect.effectID = 235;
+        effect.dwFlags = 8;
+        break;
+    case 11:
+        effect.effectID = 235;
+        effect.dwFlags = 4;
+        break;
+    case 12:
+        effect.effectID = 235;
+        effect.dwFlags = 1;
+        break;
+    case 13:
+        effect.effectID = 235;
+        effect.dwFlags = 5;
+        break;
+    case 14:
+        effect.effectID = 235;
+        effect.dwFlags = 2;
+        break;
+    case 15:
+        effect.effectID = 235;
+        effect.dwFlags = 6;
+        break;
+    case 16:
+        effect.effectID = 235;
+        effect.dwFlags = 3;
+        break;
+    case 17:
+    case 26:
+        effect.effectID = 41;
+        effect.dwFlags = 3;
+        effect.effectAmount = 2;
+        break;
+    case 18:
+    case 27:
+        effect.effectID = 41;
+        effect.dwFlags = 3;
+        effect.effectAmount = 1;
+        break;
+    case 19:
+    case 28:
+        effect.effectID = 41;
+        effect.dwFlags = 3;
+        effect.effectAmount = 2;
+        break;
+    case 20:
+    case 29:
+        effect.effectID = 41;
+        effect.dwFlags = 3;
+        effect.effectAmount = 4;
+        break;
+    case 21:
+    case 30:
+        effect.effectID = 41;
+        effect.dwFlags = 3;
+        effect.effectAmount = 5;
+        break;
+    case 22:
+    case 31:
+        effect.effectID = 41;
+        effect.dwFlags = 3;
+        effect.effectAmount = 11;
+        break;
+    case 23:
+    case 32:
+        effect.effectID = 41;
+        effect.dwFlags = 3;
+        effect.effectAmount = 6;
+        break;
+    case 24:
+    case 33:
+        effect.effectID = 41;
+        effect.dwFlags = 3;
+        effect.effectAmount = 7;
+        break;
+    case 25:
+    case 34:
+        effect.effectID = 41;
+        effect.dwFlags = 3;
+        effect.effectAmount = 8;
+        break;
+    default:
+        bGlow = FALSE;
+        break;
+    }
+
+    if (bGlow) {
+        // NOTE: The WORD at 0x8491BC is 0x1000: the duration is absolute.
+        effect.durationType = 0x1000;
+        effect.duration = nDuration + nGameTime;
+    }
+
+    // NOTE: Every kind, and an unknown one with the cleared effect, ends 4
+    // ticks later.
+    effect.duration += 4;
+
+    CGameEffect* pEffect = CGameEffect::DecodeEffect(&effect, ptTarget, m_id, CPoint(-1, -1));
+    message = new CMessageAddEffect(pEffect, m_id, m_id);
+    g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+    for (INT nEffect = 0; nEffect < pSpell->GetCastingEffectNo(); nEffect++) {
+        CGameEffect* pCastingEffect = pSpell->GetCastingEffect(nEffect);
+        pCastingEffect->m_source = m_pos;
+        pCastingEffect->m_sourceID = m_id;
+        pCastingEffect->m_target = m_pos;
+
+        switch (pCastingEffect->m_targetType) {
+        case 1:
+            message = new CMessageAddEffect(pCastingEffect, m_id, m_id);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+            break;
+        case 2:
+            // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjCreatureAI.cpp
+            // __LINE__: 21479
+            UTIL_ASSERT(FALSE);
+            break;
+        case 3:
+            ApplyEffectToParty(pCastingEffect);
+            delete pCastingEffect;
+            break;
+        case 4:
+        case 5:
+        case 6:
+        case 7:
+        case 8:
+            // TODO: The original gives the effect to the area's creatures
+            // through CGameArea 0x46E130 (not ported).
+            delete pCastingEffect;
+            break;
+        default:
+            delete pCastingEffect;
+            break;
+        }
+    }
+}
+
+// 0x7564E0
+void CGameSprite::ApplyCastingEffectPost(CSpell* pSpell, const SPELL_ABILITY* pAbility)
+{
+    // The sound of the spell's release: CAS_<M|P>0<n>.
+    pSpell->GetCasterType();
+
+    if (pSpell == NULL) {
+        return;
+    }
+
+    if (pAbility == NULL) {
+        return;
+    }
+
+    CString sSound("CAS_");
+    if (pSpell->GetCasterType() == 2) {
+        sSound += 'P';
+    } else {
+        pSpell->GetCasterType();
+        sSound += 'M';
+    }
+
+    switch (pSpell->GetAnimationType()) {
+    case 9:
+        sSound += "07";
+        break;
+    case 10:
+        sSound += "08";
+        break;
+    case 11:
+        sSound += "05";
+        break;
+    case 12:
+        sSound += "02";
+        break;
+    case 13:
+        sSound += "01";
+        break;
+    case 14:
+        sSound += "03";
+        break;
+    case 15:
+        sSound += "06";
+        break;
+    case 16:
+        sSound += "04";
+        break;
+    default:
+        return;
+    }
+
+    field_4EC8.Stop();
+    field_4EC8.SetChannel(4, reinterpret_cast<DWORD_PTR>(m_pArea));
+    field_4EC8.SetResRef(CResRef(sSound), TRUE, TRUE);
+    field_4EC8.Play(m_pos.x, m_pos.y, m_posZ, FALSE);
+
+    CMessagePlaySoundRef* pSoundMessage = new CMessagePlaySoundRef(CResRef(sSound), m_id, m_id);
+    pSoundMessage->m_nChannel = 4;
+    g_pBaldurChitin->GetMessageHandler()->AddMessage(pSoundMessage, FALSE);
+}
+
+// 0x7567F0
+BOOL CGameSprite::sub_7567F0(CSpell* pSpell, const CPoint& ptTarget, BYTE nClass, DWORD nSpecialization)
+{
+    // Whether the target is within the range of the ability the caster's
+    // level reaches (range -1: anywhere).
+    pSpell->Demand();
+
+    const SPELL_ABILITY* pAbility = NULL;
+    SHORT nCasterLevel = GetCasterLevel(pSpell, nClass, nSpecialization);
+    if (pSpell->GetAbilityCount() > 0) {
+        INT nIndex = 0;
+        do {
+            if (nCasterLevel < pSpell->GetAbility(nIndex)->minCasterLevel) {
+                break;
+            }
+            pAbility = pSpell->GetAbility(nIndex);
+            nIndex++;
+        } while (nIndex < pSpell->GetAbilityCount());
+
+        if (pAbility != NULL) {
+            if (static_cast<SHORT>(pAbility->range) == -1) {
+                pSpell->Release();
+                return TRUE;
+            }
+
+            const CPoint& ptSelf = GetPos();
+            INT dx = ptSelf.x / 16 - ptTarget.x / 16;
+            INT nReach = pAbility->range + 2;
+            INT dy = ptSelf.y / 12 - ptTarget.y / 12;
+            if (dx * dx + dy * dy <= nReach * nReach) {
+                pSpell->Release();
+                return TRUE;
+            }
+        }
+    }
+
+    pSpell->Release();
+    return FALSE;
 }
 
 // 0x756930

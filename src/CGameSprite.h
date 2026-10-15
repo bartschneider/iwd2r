@@ -606,10 +606,14 @@ public:
     SHORT PlayerDialog(CGameSprite* pTarget);
     SHORT UseDoor();
     SHORT ReturnToStartLoc();
+    SHORT Spell(CGameAIBase* target);
     SHORT OneSwing();
     void sub_6F50A0();
     BOOL CheckIfUsedUp(SHORT nSlot, SHORT nAbility);
     void sub_761AB0(CGameSprite* target);
+    void sub_755A70(CSpell* pSpell, const SPELL_ABILITY* pAbility, const CPoint& ptTarget);
+    void ApplyCastingEffectPost(CSpell* pSpell, const SPELL_ABILITY* pAbility);
+    BOOL sub_7567F0(CSpell* pSpell, const CPoint& ptTarget, BYTE nClass, DWORD nSpecialization);
     SHORT Recoil();
     SHORT PlayDead();
     SHORT JumpToPoint(CPoint dest, BOOL spriteUpdate);
