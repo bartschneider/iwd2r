@@ -1468,7 +1468,7 @@ BOOL CVidMode::SetPointer(CVidCell* pVidCell, CResRef cResRef, BOOLEAN bAnimatin
 
     if (pVidCell->pRes == NULL) {
         lock.Unlock();
-        return NULL;
+        return FALSE;
     }
 
     m_bPointerAnimating = bAnimating;

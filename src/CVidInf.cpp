@@ -1419,8 +1419,11 @@ BOOL CVidInf::FXTextOut(CVidFont* pFont, const CString& sString, INT x, INT y, c
             bDemanded);
     }
 
+    // FALSE when there is no FX surface (GetFXSurface at 0x79DA7B).
     INT nSurface;
-    g_pChitin->GetCurrentVideoMode()->GetFXSurface(nSurface, dwFlags);
+    if (!g_pChitin->GetCurrentVideoMode()->GetFXSurface(nSurface, dwFlags)) {
+        return FALSE;
+    }
 
     return pFont->TextOutEx(nSurface,
         sString,
@@ -1626,6 +1629,7 @@ BOOL CVidInf::BKRender(CParticle* pParticle, const CRect& rClip, USHORT nFlag, U
 
     if (m_SurfaceDesc.lpSurface != NULL) {
         pParticle->Render(m_SurfaceDesc.lpSurface, m_SurfaceDesc.lPitch, rClip, nFlag, nBlobSize);
+        return TRUE;
     }
 
     return FALSE;
@@ -1732,7 +1736,7 @@ BOOL CVidInf::BKTextOut(CVidFont* pFont, const CString& sString, int x, int y, c
     CRect rNewClip;
     rNewClip.left = m_rLockedRect.left + rClip.left;
     rNewClip.top = m_rLockedRect.top + rClip.top;
-    rNewClip.top = m_rLockedRect.left + rClip.right;
+    rNewClip.right = m_rLockedRect.left + rClip.right;
     rNewClip.bottom = m_rLockedRect.top + rClip.bottom;
 
     return pFont->TextOutEx(CVIDINF_SURFACE_BACK,
@@ -2167,12 +2171,14 @@ void CVidInf::RenderFlash(UINT nSurface, COLORREF rgbColor, unsigned char a4, co
         fx.dwFillColor = ConvertToSurfaceRGB(rgbColor);
 
         do {
-            HRESULT hr = g_pChitin->cVideo.cVidBlitter.Blt(pSurfaces[CVIDINF_SURFACE_FRONT],
+            // The fill goes to nSurface with the colour in fx (push eax, the
+            // DDBLTFX, at 0x79F64A; the surface from [edx+ebp*4] at 0x79F650).
+            HRESULT hr = g_pChitin->cVideo.cVidBlitter.Blt(pSurfaces[nSurface],
                 &destRect,
                 NULL,
                 NULL,
                 DDBLT_WAIT | DDBLT_COLORFILL,
-                NULL);
+                &fx);
             CheckResults(hr);
             if (hr != DDERR_SURFACELOST && hr != DDERR_WASSTILLDRAWING) {
                 break;

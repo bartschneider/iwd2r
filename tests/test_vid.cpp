@@ -1089,3 +1089,67 @@ TEST_CASE("draw_hline16_pairs", "[vid]")
     poly.DrawHLineMirrored16(row.data(), 4, 3, color, CRect(0, 0, 7, 1), CPoint(0, 0));
     CHECK(row == std::vector<WORD>(8, 0x1111));
 }
+
+// CVidInf::RenderFlash (0x79F520) fills rClip of surface nSurface with the
+// colour in the surface's format (DDBLT_COLORFILL with the DDBLTFX); the
+// other surfaces are left alone.
+TEST_CASE("render_flash_fills_its_surface", "[vid]")
+{
+    ChitinScope scope;
+    IDirectDraw* pDirectDraw = NULL;
+    REQUIRE(DirectDrawCreate(NULL, &pDirectDraw, NULL) == DD_OK);
+    DDSURFACEDESC desc;
+    std::memset(&desc, 0, sizeof(desc));
+    desc.dwSize = sizeof(desc);
+    desc.dwFlags = DDSD_CAPS | DDSD_HEIGHT | DDSD_WIDTH;
+    desc.ddsCaps.dwCaps = DDSCAPS_SYSTEMMEMORY | DDSCAPS_OFFSCREENPLAIN;
+    desc.dwWidth = 8;
+    desc.dwHeight = 6;
+    IDirectDrawSurface* surfaces[2] = { NULL, NULL };
+    REQUIRE(pDirectDraw->CreateSurface(&desc, &surfaces[0], NULL) == DD_OK);
+    REQUIRE(pDirectDraw->CreateSurface(&desc, &surfaces[1], NULL) == DD_OK);
+
+    CVidInf mode;
+    mode.m_nSurfaces = 2;
+    mode.pSurfaces = surfaces;
+    mode.m_dwRBitShift = 16;
+    mode.m_dwGBitShift = 8;
+    mode.m_dwBBitShift = 0;
+
+    auto read = [&](UINT nSurface) {
+        std::vector<DWORD> pixels(8 * 6);
+        DDSURFACEDESC ddsd;
+        ddsd.dwSize = sizeof(ddsd);
+        REQUIRE(mode.LockSurface(nSurface, &ddsd, CRect(0, 0, 8, 6)));
+        for (int y = 0; y < 6; ++y) {
+            std::memcpy(pixels.data() + y * 8, reinterpret_cast<BYTE*>(ddsd.lpSurface) + y * ddsd.lPitch, 8 * 4);
+        }
+        mode.UnLockSurface(nSurface, ddsd.lpSurface);
+        return pixels;
+    };
+    for (UINT nSurface = 0; nSurface < 2; ++nSurface) {
+        DDSURFACEDESC ddsd;
+        ddsd.dwSize = sizeof(ddsd);
+        REQUIRE(mode.LockSurface(nSurface, &ddsd, CRect(0, 0, 8, 6)));
+        for (int y = 0; y < 6; ++y) {
+            std::memset(reinterpret_cast<BYTE*>(ddsd.lpSurface) + y * ddsd.lPitch, 0, 8 * 4);
+        }
+        mode.UnLockSurface(nSurface, ddsd.lpSurface);
+    }
+
+    mode.RenderFlash(1, RGB(0x10, 0x20, 0x30), 0, CRect(1, 1, 5, 4));
+    std::vector<DWORD> expected(8 * 6, 0);
+    for (int y = 1; y < 4; ++y) {
+        for (int x = 1; x < 5; ++x) {
+            expected[y * 8 + x] = 0x00102030;
+        }
+    }
+    CHECK(read(1) == expected);
+    CHECK(read(0) == std::vector<DWORD>(8 * 6, 0));
+
+    mode.m_nSurfaces = 0;
+    mode.pSurfaces = NULL;
+    surfaces[1]->Release();
+    surfaces[0]->Release();
+    pDirectDraw->Release();
+}
