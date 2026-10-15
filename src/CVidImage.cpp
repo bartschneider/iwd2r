@@ -570,9 +570,46 @@ BOOL CVidTile::Render(LPDIRECTDRAWSURFACE pSurface, INT x, INT y, CResTile* pRes
 // 0x7B22E0
 BOOL CVidTile::BltTile8To16(WORD* pSurface, LONG lPitch, BYTE* pData, const CSize& blitSize, LONG nDataJump, DWORD dwFlags)
 {
-    // TODO: Incomplete.
+    INT nDataIndex = 0;
+    DWORD color = g_pChitin->GetCurrentVideoMode()->field_24;
+    INT nSurfaceJump = (lPitch >> 1) - blitSize.cx;
+    INT nPairs = blitSize.cx >> 1;
 
-    return FALSE;
+    // Two pixels are written at a time as one DWORD.
+    DWORD* pDest = reinterpret_cast<DWORD*>(pSurface);
+
+    if ((dwFlags & 0x8) == 0) {
+        for (INT y = blitSize.cy; y > 0; y--) {
+            for (INT x = nPairs; x > 0; x--) {
+                *pDest++ = (rgbTempPal[pData[nDataIndex + 1]] << 16) | (rgbTempPal[pData[nDataIndex]] & 0xFFFF);
+                nDataIndex += 2;
+            }
+            nDataIndex += nDataJump;
+            pDest = reinterpret_cast<DWORD*>(reinterpret_cast<WORD*>(pDest) + nSurfaceJump);
+        }
+    } else {
+        // Dithered with the video mode's colour: even rows keep the first
+        // pixel of each pair, odd rows the second.
+        // NOTE: The odd rows OR in the whole colour, so its high word
+        // reaches the kept pixel, as in the original (0x7B23A1).
+        for (INT y = 0; y < blitSize.cy; y++) {
+            if ((y & 1) == 0) {
+                for (INT x = nPairs; x > 0; x--) {
+                    *pDest++ = (rgbTempPal[pData[nDataIndex]] & 0xFFFF) | (color << 16);
+                    nDataIndex += 2;
+                }
+            } else {
+                for (INT x = nPairs; x > 0; x--) {
+                    *pDest++ = (rgbTempPal[pData[nDataIndex + 1]] << 16) | color;
+                    nDataIndex += 2;
+                }
+            }
+            pDest = reinterpret_cast<DWORD*>(reinterpret_cast<WORD*>(pDest) + nSurfaceJump);
+            nDataIndex += nDataJump;
+        }
+    }
+
+    return TRUE;
 }
 
 // 0x7B2440

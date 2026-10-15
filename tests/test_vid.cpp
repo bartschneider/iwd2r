@@ -451,3 +451,228 @@ TEST_CASE("cell_blend_raw_frames_through_the_locked_surface", "[vid]")
     g_pChitin->pActiveEngine = nullptr;
     ::operator delete(static_cast<void*>(engine));
 }
+
+// The 16- and 24-bit paths. iwd2r runs at 32 bpp only (the DirectDraw shim
+// lists no other mode), so the game never reaches these; they are ported
+// for the record and checked here by hand and by oracle cases against the
+// original (vid/cell_blt8to16, vid/cell_blt8to24, vid/blt_tile8to16,
+// vid/draw_line16, vid/draw_ellipse24).
+namespace {
+
+// A 4x3 frame, transparent index 0:
+//   5 0 6 7
+//   0 0 8 0
+//   9 9 0 1
+const BYTE kFrame[12] = { 5, 0, 6, 7, 0, 0, 8, 0, 9, 9, 0, 1 };
+// The same run-length encoded: a transparent pixel and its run - 1.
+const BYTE kFrameRle[] = { 5, 0, 0, 6, 7, 0, 1, 8, 0, 0, 9, 9, 0, 0, 1 };
+
+struct CellFixture {
+    explicit CellFixture(bool compressed)
+    {
+        bam.assign(0x40, 0);
+        bam[0xB] = 0;
+        if (compressed) {
+            std::memcpy(bam.data() + 0x20, kFrameRle, sizeof(kFrameRle));
+        } else {
+            std::memcpy(bam.data() + 0x20, kFrame, sizeof(kFrame));
+        }
+        frame.nWidth = 4;
+        frame.nHeight = 3;
+        frame.nOffset = 0x20 | (compressed ? 0u : 0x80000000u);
+        resStorage = static_cast<unsigned char*>(::operator new(sizeof(CResCell)));
+        std::memset(resStorage, 0, sizeof(CResCell));
+        auto* res = reinterpret_cast<CResCell*>(resStorage);
+        res->m_bParsed = TRUE;
+        res->m_pBamHeader = reinterpret_cast<BAMHEADER*>(bam.data());
+        cellStorage = static_cast<unsigned char*>(::operator new(sizeof(CVidCell)));
+        std::memset(cellStorage, 0, sizeof(CVidCell));
+        cell = reinterpret_cast<CVidCell*>(cellStorage);
+        static_cast<CResHelper<CResCell, 1000>*>(cell)->pRes = res;
+        cell->m_pFrame = &frame;
+        for (int i = 0; i < 256; ++i) {
+            CVidImage::rgbTempPal[i] = 0xEE000000u | static_cast<DWORD>(i) * 0x010203u;
+        }
+    }
+    ~CellFixture()
+    {
+        ::operator delete(cellStorage);
+        ::operator delete(resStorage);
+    }
+    CellFixture(const CellFixture&) = delete;
+    CellFixture& operator=(const CellFixture&) = delete;
+
+    std::vector<BYTE> bam;
+    FRAMEENTRY frame = {};
+    unsigned char* resStorage;
+    unsigned char* cellStorage;
+    CVidCell* cell;
+};
+
+constexpr int kDepthW = 8;
+constexpr int kDepthH = 5;
+
+// The pixels { x, y, palette index } a blit of kFrame from source (1, 0) to
+// (2, 1) draws: source columns 1..3 land on x 2..4.
+std::vector<std::pair<std::pair<int, int>, int>> FrameAt21()
+{
+    return { { { 3, 1 }, 6 }, { { 4, 1 }, 7 }, { { 3, 2 }, 8 }, { { 2, 3 }, 9 }, { { 4, 3 }, 1 } };
+}
+
+}
+
+TEST_CASE("blt8to16_point_and_clip", "[vid]")
+{
+    for (int compressed = 0; compressed < 2; ++compressed) {
+        CellFixture fixture(compressed != 0);
+        INFO("compressed " << compressed);
+
+        std::vector<WORD> pixels(kDepthW * kDepthH, 0xAAAA);
+        REQUIRE(fixture.cell->Blt8To16(pixels.data(), kDepthW * 2, CPoint(2, 1), CRect(0, 0, kDepthW, kDepthH), 0,
+            CPoint(1, 0)));
+        std::vector<WORD> expected(kDepthW * kDepthH, 0xAAAA);
+        for (const auto& [at, index] : FrameAt21()) {
+            expected[at.second * kDepthW + at.first] = static_cast<WORD>(CVidImage::rgbTempPal[index]);
+        }
+        CHECK(pixels == expected);
+
+        // Clipped to (3,0)-(8,3): rows 1 and 2, columns 3 and 4.
+        std::fill(pixels.begin(), pixels.end(), static_cast<WORD>(0xAAAA));
+        REQUIRE(fixture.cell->Blt8To16(pixels.data(), kDepthW * 2, CPoint(2, 1), CRect(3, 0, kDepthW, 3), 0,
+            CPoint(1, 0)));
+        std::fill(expected.begin(), expected.end(), static_cast<WORD>(0xAAAA));
+        expected[1 * kDepthW + 3] = static_cast<WORD>(CVidImage::rgbTempPal[6]);
+        expected[1 * kDepthW + 4] = static_cast<WORD>(CVidImage::rgbTempPal[7]);
+        expected[2 * kDepthW + 3] = static_cast<WORD>(CVidImage::rgbTempPal[8]);
+        CHECK(pixels == expected);
+    }
+}
+
+TEST_CASE("blt8to24_point", "[vid]")
+{
+    for (int compressed = 0; compressed < 2; ++compressed) {
+        CellFixture fixture(compressed != 0);
+        INFO("compressed " << compressed);
+
+        std::vector<BYTE> pixels(kDepthW * kDepthH * 3, 0xAA);
+        REQUIRE(fixture.cell->Blt8To24(pixels.data(), kDepthW * 3, CPoint(2, 1), CRect(0, 0, kDepthW, kDepthH), 0,
+            CPoint(1, 0)));
+        std::vector<BYTE> expected(kDepthW * kDepthH * 3, 0xAA);
+        for (const auto& [at, index] : FrameAt21()) {
+            const DWORD rgb = CVidImage::rgbTempPal[index];
+            BYTE* p = expected.data() + (at.second * kDepthW + at.first) * 3;
+            p[0] = static_cast<BYTE>(rgb);
+            p[1] = static_cast<BYTE>(rgb >> 8);
+            p[2] = static_cast<BYTE>(rgb >> 16);
+        }
+        CHECK(pixels == expected);
+    }
+}
+
+// BltTile8To16 writes pixel pairs as one DWORD. Dithered (0x8), even rows
+// keep the first pixel of each pair and put field_24's low word in the
+// second; odd rows put field_24 in the first and OR its high word into the
+// second (0x7B23A1).
+TEST_CASE("blt_tile8to16", "[vid]")
+{
+    ChitinScope scope;
+    CWarp* engine = reinterpret_cast<CWarp*>(::operator new(sizeof(CWarp)));
+    std::memset(static_cast<void*>(engine), 0, sizeof(CWarp));
+    auto mode = std::make_unique<CVidInf>();
+    mode->field_24 = 0x12345678;
+    engine->pVidMode = mode.get();
+    g_pChitin->pActiveEngine = engine;
+    for (int i = 0; i < 256; ++i) {
+        CVidImage::rgbTempPal[i] = 0x00010000u * static_cast<DWORD>(i) + 0x0100u * static_cast<DWORD>(i);
+    }
+    auto* tileStorage = static_cast<unsigned char*>(::operator new(sizeof(CVidTile)));
+    std::memset(tileStorage, 0, sizeof(CVidTile));
+    auto* tile = reinterpret_cast<CVidTile*>(tileStorage);
+
+    // A 4x2 tile from a 6-wide data block (data jump 2) into an 8x2 surface.
+    BYTE data[12] = { 1, 2, 3, 4, 99, 99, 5, 6, 7, 8, 99, 99 };
+    std::vector<WORD> pixels(8 * 2, 0xAAAA);
+    REQUIRE(tile->BltTile8To16(pixels.data(), 8 * 2, data, CSize(4, 2), 2, 0));
+    CHECK(pixels == std::vector<WORD> { 0x0100, 0x0200, 0x0300, 0x0400, 0xAAAA, 0xAAAA, 0xAAAA, 0xAAAA,
+                        0x0500, 0x0600, 0x0700, 0x0800, 0xAAAA, 0xAAAA, 0xAAAA, 0xAAAA });
+
+    std::fill(pixels.begin(), pixels.end(), static_cast<WORD>(0xAAAA));
+    REQUIRE(tile->BltTile8To16(pixels.data(), 8 * 2, data, CSize(4, 2), 2, 0x8));
+    CHECK(pixels == std::vector<WORD> { 0x0100, 0x5678, 0x0300, 0x5678, 0xAAAA, 0xAAAA, 0xAAAA, 0xAAAA,
+                        0x5678, 0x0600 | 0x1234, 0x5678, 0x0800 | 0x1234, 0xAAAA, 0xAAAA, 0xAAAA, 0xAAAA });
+
+    g_pChitin->pActiveEngine = nullptr;
+    ::operator delete(tileStorage);
+    ::operator delete(static_cast<void*>(engine));
+}
+
+// DrawLine16 from (0,0) to (5,2): a run-sliced line (ScanLine16, 0x79A860)
+// with whole step 2: runs of two pixels on each row. Vertical and
+// horizontal lines are drawn inclusive of both ends.
+TEST_CASE("draw_line16", "[vid]")
+{
+    CVidInf mode;
+    const CRect rSurface(0, 0, kDepthW, kDepthH);
+    std::vector<WORD> pixels(kDepthW * kDepthH, 0);
+    REQUIRE(mode.DrawLine16(5, 2, 0, 0, pixels.data(), kDepthW, rSurface, 0x7777, TRUE));
+    std::vector<WORD> expected(kDepthW * kDepthH, 0);
+    for (const auto& [x, y] : std::vector<std::pair<int, int>> { { 0, 0 }, { 1, 0 }, { 2, 1 }, { 3, 1 }, { 4, 2 }, { 5, 2 } }) {
+        expected[y * kDepthW + x] = 0x7777;
+    }
+    CHECK(pixels == expected);
+
+    std::fill(pixels.begin(), pixels.end(), static_cast<WORD>(0));
+    REQUIRE(mode.DrawLine16(6, 0, 6, 4, pixels.data(), kDepthW, rSurface, 0x1111, TRUE));
+    REQUIRE(mode.DrawLine16(1, 4, 3, 4, pixels.data(), kDepthW, rSurface, 0x2222, TRUE));
+    std::fill(expected.begin(), expected.end(), static_cast<WORD>(0));
+    for (int y = 0; y <= 4; ++y) {
+        expected[y * kDepthW + 6] = 0x1111;
+    }
+    for (int x = 1; x <= 3; ++x) {
+        expected[4 * kDepthW + x] = 0x2222;
+    }
+    CHECK(pixels == expected);
+}
+
+// DrawEllipse24 draws the outline through the four ends of its axes, the
+// same with the whole surface as the clip as without one, symmetric about
+// the centre.
+TEST_CASE("draw_ellipse24", "[vid]")
+{
+    CVidInf mode;
+    mode.m_dwRBitShift = 16;
+    mode.m_dwGBitShift = 8;
+    mode.m_dwBBitShift = 0;
+    constexpr int kW = 24;
+    constexpr int kH = 16;
+    std::vector<BYTE> plain(kW * kH * 3, 0);
+    std::vector<BYTE> clipped(kW * kH * 3, 0);
+    DDSURFACEDESC ddsd = {};
+    ddsd.lPitch = kW * 3;
+    ddsd.lpSurface = plain.data();
+    mode.DrawEllipse24(CPoint(11, 7), CSize(7, 4), ddsd, nullptr, RGB(0x10, 0x20, 0x30));
+    ddsd.lpSurface = clipped.data();
+    const CRect rWhole(0, 0, kW, kH);
+    mode.DrawEllipse24(CPoint(11, 7), CSize(7, 4), ddsd, &rWhole, RGB(0x10, 0x20, 0x30));
+    CHECK(plain == clipped);
+
+    auto lit = [&](int x, int y) {
+        const BYTE* p = plain.data() + (y * kW + x) * 3;
+        return p[0] == 0x30 && p[1] == 0x20 && p[2] == 0x10;
+    };
+    CHECK(lit(4, 7));
+    CHECK(lit(18, 7));
+    CHECK(lit(11, 3));
+    CHECK(lit(11, 11));
+    CHECK_FALSE(lit(11, 7));
+    for (int y = 0; y < kH; ++y) {
+        for (int x = 0; x < kW; ++x) {
+            const int mx = 22 - x;
+            const int my = 14 - y;
+            if (mx >= 0 && mx < kW && my >= 0 && my < kH) {
+                INFO("pixel " << x << "," << y);
+                CHECK(lit(x, y) == lit(mx, my));
+            }
+        }
+    }
+}

@@ -1277,6 +1277,406 @@ void CellBlend(CaseContext& ctx, bool translucent, uint64_t salt)
     ::operator delete(oursCellStorage);
 }
 
+// CVidCell::Blt8To16(pSurface, lPitch, pt, rClip, dwFlags, ptSource)
+// (0x7AF3C0) and Blt8To24 (0x7CEEB0), both `ret 0x18`. Unreachable in
+// iwd2r, which runs at 32 bpp only (the DirectDraw shim lists no 16- or
+// 24-bit mode), and ported for the record. They read the cell's frame and
+// resource like the blends above and the global realized palette
+// CVidImage::rgbTempPal (0x9064F8): 16 bpp takes each entry's low word, 24
+// bpp its three low bytes.
+using CellPointBltFn = int32_t(__fastcall*)(void* self, void* edx, void* pSurface, int32_t lPitch, const void* pt,
+    const void* rClip, uint32_t dwFlags, const void* ptSource);
+constexpr uintptr_t kBlt8To16 = 0x7AF3C0;
+constexpr uintptr_t kBlt8To24 = 0x7CEEB0;
+constexpr uintptr_t kTempPal = 0x9064F8;
+constexpr int kPointCanvas = 64;
+
+// A random frame (up to 12x8, RLE or raw, transparent pixels mixed in) drawn
+// at a random point (-6..40) from a random source point inside it, clipped
+// to a random rectangle inside the 64x64 canvas of random bytes. The
+// original's compressed walk draws rows down to rClip.bottom - pt.y counted
+// from pt.y, so a frame starting above the clip may draw below it; the
+// canvas holds that. The result and the whole canvas are compared.
+void CellPointBlt(CaseContext& ctx, int bpp, uint64_t salt)
+{
+    VideoFixture video(ctx);
+    uint8_t* cell = nullptr;
+    uint8_t* res = nullptr;
+    uint8_t* bam = nullptr;
+    uint8_t* frame = nullptr;
+    uint8_t* canvas = nullptr;
+    uint8_t* args = nullptr;
+    constexpr size_t kBamSize = 0x1000;
+    const int bytes = bpp / 8;
+    const int pitch = kPointCanvas * bytes;
+    ctx.SetInputs("building the original's cell");
+    ctx.CallOriginal([&] {
+        cell = OriginalBlock(kCellSize);
+        res = OriginalBlock(kResCellSize);
+        bam = OriginalBlock(kBamSize);
+        frame = OriginalBlock(12);
+        canvas = OriginalBlock(static_cast<size_t>(pitch * kPointCanvas));
+        args = OriginalBlock(32);
+        Put<uint32_t>(res, 0x50, 1);
+        Put<uint32_t>(res, 0x54, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(bam)));
+        Put<uint32_t>(cell, 0xA8, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(res)));
+        Put<uint32_t>(cell, 0xD0, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(frame)));
+    });
+
+    auto* oursCellStorage = static_cast<unsigned char*>(::operator new(sizeof(CVidCell)));
+    std::memset(oursCellStorage, 0, sizeof(CVidCell));
+    auto* oursResStorage = static_cast<unsigned char*>(::operator new(sizeof(CResCell)));
+    std::memset(oursResStorage, 0, sizeof(CResCell));
+    auto* oursCell = reinterpret_cast<CVidCell*>(oursCellStorage);
+    auto* oursRes = reinterpret_cast<CResCell*>(oursResStorage);
+    std::vector<uint8_t> oursBam(kBamSize);
+    FRAMEENTRY oursFrame = {};
+    oursRes->m_bParsed = TRUE;
+    oursRes->m_pBamHeader = reinterpret_cast<BAMHEADER*>(oursBam.data());
+    static_cast<CResHelper<CResCell, 1000>*>(oursCell)->pRes = oursRes;
+    oursCell->m_pFrame = &oursFrame;
+
+    std::vector<uint8_t> mine(static_cast<size_t>(pitch * kPointCanvas));
+    Picks picks(ctx.seed, salt);
+    const int count = 600 + ctx.iterations / 10;
+    for (int n = 0; n < count; ++n) {
+        const int width = picks.Between(1, 12);
+        const int height = picks.Between(1, 8);
+        const bool compressed = picks.Between(0, 1) != 0;
+        const uint8_t transparent = static_cast<uint8_t>(picks.Between(0, 255));
+        std::vector<uint8_t> pixels(static_cast<size_t>(width * height));
+        for (uint8_t& p : pixels) {
+            p = picks.Between(0, 2) == 0 ? transparent : static_cast<uint8_t>(picks.Between(0, 255));
+        }
+        const std::vector<uint8_t> data = compressed ? RunLengthEncode(pixels, transparent) : pixels;
+        std::vector<uint8_t> image(kBamSize, 0);
+        image[0xB] = transparent;
+        std::memcpy(image.data() + kFrameDataOffset, data.data(), data.size());
+        FRAMEENTRY entry = {};
+        entry.nWidth = static_cast<WORD>(width);
+        entry.nHeight = static_cast<WORD>(height);
+        entry.nOffset = static_cast<DWORD>(kFrameDataOffset) | (compressed ? 0u : 0x80000000u);
+        uint32_t palette[256];
+        for (uint32_t& c : palette) {
+            c = picks.Bits();
+        }
+        for (uint8_t& b : mine) {
+            b = static_cast<uint8_t>(picks.Bits());
+        }
+        const int32_t left = picks.Between(0, 40);
+        const int32_t top = picks.Between(0, 40);
+        const int32_t r[4] = { left, top, picks.Between(left, 48), picks.Between(top, 48) };
+        const int32_t pt[2] = { picks.Between(-6, 40), picks.Between(-6, 40) };
+        const int32_t src[2] = { picks.Between(0, width - 1), picks.Between(0, height - 1) };
+
+        char inputs[240];
+        std::snprintf(inputs, sizeof(inputs),
+            "input %d: %dx%d %s, transparent %u, pt (%d,%d), clip (%d,%d)-(%d,%d), source (%d,%d)", n, width,
+            height, compressed ? "RLE" : "raw", transparent, pt[0], pt[1], r[0], r[1], r[2], r[3], src[0], src[1]);
+        ctx.SetInputs(inputs);
+        int32_t originalResult = 0;
+        ctx.CallOriginal([&] {
+            std::memcpy(bam, image.data(), kBamSize);
+            std::memcpy(frame, &entry, sizeof(entry));
+            std::memcpy(canvas, mine.data(), mine.size());
+            std::memcpy(reinterpret_cast<void*>(kTempPal), palette, sizeof(palette));
+            std::memcpy(args, pt, 8);
+            std::memcpy(args + 8, r, 16);
+            std::memcpy(args + 24, src, 8);
+            originalResult = reinterpret_cast<CellPointBltFn>(bpp == 16 ? kBlt8To16 : kBlt8To24)(cell, nullptr,
+                canvas, pitch, args, args + 8, 0, args + 24);
+        });
+        std::memcpy(oursBam.data(), image.data(), kBamSize);
+        oursFrame = entry;
+        std::memcpy(CVidImage::rgbTempPal, palette, sizeof(palette));
+        BOOL oursResult;
+        if (bpp == 16) {
+            oursResult = oursCell->Blt8To16(reinterpret_cast<WORD*>(mine.data()), pitch, CPoint(pt[0], pt[1]),
+                CRect(r[0], r[1], r[2], r[3]), 0, CPoint(src[0], src[1]));
+        } else {
+            oursResult = oursCell->Blt8To24(mine.data(), pitch, CPoint(pt[0], pt[1]), CRect(r[0], r[1], r[2], r[3]),
+                0, CPoint(src[0], src[1]));
+        }
+        ctx.CountInputs(1);
+        if (oracle::Compare(ctx, originalResult, static_cast<int32_t>(oursResult))) {
+            std::vector<uint32_t> a(mine.size());
+            std::vector<uint32_t> b(mine.size());
+            for (size_t i = 0; i < mine.size(); ++i) {
+                a[i] = canvas[i];
+                b[i] = mine[i];
+            }
+            CompareArrays(ctx, a.data(), b.data(), static_cast<int>(mine.size()));
+        }
+    }
+    ::operator delete(oursResStorage);
+    ::operator delete(oursCellStorage);
+}
+
+void CellBlt8To16(CaseContext& ctx)
+{
+    CellPointBlt(ctx, 16, 0x426C743136000000ull); // "Blt16"
+}
+
+void CellBlt8To24(CaseContext& ctx)
+{
+    CellPointBlt(ctx, 24, 0x426C743234000000ull); // "Blt24"
+}
+
+// CVidMode::DrawLine16(nXFrom, nYFrom, nXTo, nYTo, pSurface, lPitch,
+// rSurface, color, bClipped) (0x797D30), `ret 0x24`, with its run-slice
+// helper ScanLine16 (0x79A860). Unreachable in iwd2r (32 bpp only). lPitch
+// is in pixels and pSurface the surface rectangle's top left, as DrawLine
+// passes them.
+using DrawLine16Fn = int32_t(__fastcall*)(void* self, void* edx, int32_t nXFrom, int32_t nYFrom, int32_t nXTo,
+    int32_t nYTo, uint16_t* pSurface, int32_t lPitch, const void* rSurface, uint32_t color, uint32_t bClipped);
+constexpr uintptr_t kDrawLine16 = 0x797D30;
+
+// DrawLine16 on the 96x96 canvas with a 16-pixel margin, as ThickLine32:
+// vertical, horizontal, diagonal and general lines in every direction,
+// clipped by the function or already inside. The whole canvas and the
+// result are compared.
+void DrawLine16(CaseContext& ctx)
+{
+    uint8_t* self = nullptr;
+    uint16_t* canvas = nullptr;
+    uint8_t* rect = nullptr;
+    ctx.SetInputs("building the original's canvas");
+    ctx.CallOriginal([&] {
+        self = OriginalBlock(kVidInfSize);
+        canvas = reinterpret_cast<uint16_t*>(OriginalBlock(kCanvas * kCanvas * 2));
+        rect = OriginalBlock(16);
+    });
+    const int32_t r[4] = { kMargin, kMargin, kCanvas - kMargin, kCanvas - kMargin };
+    std::memcpy(rect, r, sizeof(r));
+    CVidInf ours;
+    CRect rSurface(r[0], r[1], r[2], r[3]);
+    std::vector<WORD> mine(kCanvas * kCanvas);
+    Picks picks(ctx.seed, 0x4C696E6531360000ull); // "Line16"
+    int n = 0;
+
+    auto check = [&](int32_t x1, int32_t y1, int32_t x2, int32_t y2, bool bClipped) {
+        const uint16_t color = static_cast<uint16_t>(picks.Bits() | 1);
+        std::memset(canvas, 0, kCanvas * kCanvas * 2);
+        std::fill(mine.begin(), mine.end(), static_cast<WORD>(0));
+        ctx.SetInputs("input " + std::to_string(n++) + ": DrawLine16(" + std::to_string(x1) + ", "
+            + std::to_string(y1) + ", " + std::to_string(x2) + ", " + std::to_string(y2) + ", bClipped "
+            + std::to_string(bClipped) + ")");
+        int32_t originalResult = 0;
+        ctx.CallOriginal([&] {
+            originalResult = reinterpret_cast<DrawLine16Fn>(kDrawLine16)(self, nullptr, x1, y1, x2, y2,
+                canvas + kMargin * kCanvas + kMargin, kCanvas, rect, color, bClipped ? 1u : 0u);
+        });
+        const BOOL oursResult = ours.DrawLine16(x1, y1, x2, y2, mine.data() + kMargin * kCanvas + kMargin, kCanvas,
+            rSurface, color, bClipped ? TRUE : FALSE);
+        ctx.CountInputs(1);
+        if (oracle::Compare(ctx, originalResult, static_cast<int32_t>(oursResult))) {
+            std::vector<uint32_t> a(canvas, canvas + kCanvas * kCanvas);
+            std::vector<uint32_t> b(mine.begin(), mine.end());
+            CompareArrays(ctx, a.data(), b.data(), kCanvas * kCanvas);
+        }
+    };
+
+    const int32_t lo = kMargin;
+    const int32_t hi = kCanvas - kMargin - 1;
+    for (int i = 0; i < 64; ++i) {
+        const int32_t x = picks.Between(lo, hi);
+        const int32_t y = picks.Between(lo, hi);
+        const int32_t len = picks.Between(0, 30);
+        check(x, y, x, picks.Between(lo, hi), true);
+        check(x, y, picks.Between(lo, hi), y, true);
+        const int32_t dx = picks.Between(0, 1) ? 1 : -1;
+        const int32_t dy = picks.Between(0, 1) ? 1 : -1;
+        if (x + dx * len >= lo && x + dx * len <= hi && y + dy * len >= lo && y + dy * len <= hi) {
+            check(x, y, x + dx * len, y + dy * len, true);
+        }
+        check(x, y, picks.Between(lo, hi), picks.Between(lo, hi), true);
+    }
+    for (int i = 0; i < ctx.iterations / 4; ++i) {
+        const int32_t x1 = picks.Between(0, kCanvas - 1);
+        const int32_t y1 = picks.Between(0, kCanvas - 1);
+        const int32_t x2 = picks.Between(0, 3) == 0 ? x1 : picks.Between(0, kCanvas - 1);
+        const int32_t y2 = picks.Between(0, 3) == 0 ? y1 : picks.Between(0, kCanvas - 1);
+        check(x1, y1, x2, y2, false);
+    }
+}
+
+// CVidMode::DrawEllipse24(ptCenter, axis, ddsd, rClip, rgbColor) (0x7C8B40),
+// `ret 0x14`, with DrawEllipseHOctant24 (0x7C9990) and DrawEllipseVOctant24
+// (0x7C8E10) through the vtable, and GetEllipseArcPixelList. Unreachable in
+// iwd2r (32 bpp only). It reads the colour shifts and the surface's pitch
+// (0x10) and pointer (0x24) from the DDSURFACEDESC.
+using DrawEllipse24Fn = int32_t(__fastcall*)(void* self, void* edx, const void* ptCenter, const void* axis,
+    const void* ddsd, const void* rClip, uint32_t rgbColor);
+constexpr uintptr_t kDrawEllipse24 = 0x7C8B40;
+constexpr int kEllipseCanvas = 96;
+
+// Ellipses with half-axes 1 to 30 on a 96x96 24-bit canvas of random bytes:
+// without a clip (the whole ellipse on the canvas, the surface at the
+// canvas's origin), and with a random clip rectangle (the surface at the
+// clip's top left, as DrawEllipse locks it; centres anywhere so that the
+// clip cuts the ellipse). The whole canvas is compared.
+void DrawEllipse24(CaseContext& ctx)
+{
+    VideoFixture video(ctx);
+    uint8_t* canvas = nullptr;
+    uint8_t* args = nullptr;
+    uint8_t* ddsd = nullptr;
+    const int pitch = kEllipseCanvas * 3;
+    ctx.SetInputs("building the original's canvas");
+    ctx.CallOriginal([&] {
+        canvas = OriginalBlock(static_cast<size_t>(pitch * kEllipseCanvas));
+        args = OriginalBlock(32);
+        ddsd = OriginalBlock(0x6C);
+    });
+    std::vector<uint8_t> mine(static_cast<size_t>(pitch * kEllipseCanvas));
+    Picks picks(ctx.seed, 0x456C6C3234000000ull); // "Ell24"
+    const int count = 400 + ctx.iterations / 20;
+    for (int n = 0; n < count; ++n) {
+        const int32_t ax = picks.Between(1, 30);
+        const int32_t ay = picks.Between(1, 30);
+        const bool clipped = picks.Between(0, 1) != 0;
+        int32_t cx;
+        int32_t cy;
+        int32_t r[4] = { 0, 0, 0, 0 };
+        if (clipped) {
+            r[0] = picks.Between(0, 60);
+            r[1] = picks.Between(0, 60);
+            r[2] = picks.Between(r[0], 95);
+            r[3] = picks.Between(r[1], 95);
+            // Every point the octants walk stays on the canvas.
+            const int32_t x0 = (std::max)(ax + 1, r[0] - ax);
+            const int32_t y0 = (std::max)(ay + 1, r[1] - ay);
+            cx = picks.Between(x0, (std::max)(x0, (std::min)(94 - ax, r[2] + ax)));
+            cy = picks.Between(y0, (std::max)(y0, (std::min)(94 - ay, r[3] + ay)));
+        } else {
+            cx = picks.Between(ax + 1, 94 - ax);
+            cy = picks.Between(ay + 1, 94 - ay);
+        }
+        const uint32_t rgb = picks.Bits() & 0xFFFFFF;
+        for (uint8_t& b : mine) {
+            b = static_cast<uint8_t>(picks.Bits());
+        }
+        // The original asserts (UtilAssert faults in the runner) when an
+        // arc is longer than the larger half-axis allows, as for long thin
+        // ellipses; those are not inputs. The arc lengths come from ours,
+        // whose GetEllipseArcPixelList the 32-bit case already exercises.
+        std::vector<BYTE> arc(256);
+        const LONG nArcH = video.oursMode->GetEllipseArcPixelList(ax, ay, arc.data());
+        const LONG nArcV = video.oursMode->GetEllipseArcPixelList(ay, ax, arc.data());
+        if (nArcH > (std::max)(ax, ay) || nArcV >= (std::max)(ax, ay)) {
+            continue;
+        }
+        char inputs[200];
+        std::snprintf(inputs, sizeof(inputs), "input %d: centre (%d,%d), axis (%d,%d), clip %s (%d,%d)-(%d,%d), rgb 0x%06X",
+            n, cx, cy, ax, ay, clipped ? "on" : "off", r[0], r[1], r[2], r[3], rgb);
+        ctx.SetInputs(inputs);
+        const int32_t offset = clipped ? r[1] * pitch + r[0] * 3 : 0;
+        ctx.CallOriginal([&] {
+            std::memcpy(canvas, mine.data(), mine.size());
+            const int32_t pt[2] = { cx, cy };
+            const int32_t size[2] = { ax, ay };
+            std::memcpy(args, pt, 8);
+            std::memcpy(args + 8, size, 8);
+            std::memcpy(args + 16, r, 16);
+            Put<int32_t>(ddsd, 0x10, pitch);
+            Put<uint32_t>(ddsd, 0x24, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(canvas + offset)));
+            reinterpret_cast<DrawEllipse24Fn>(kDrawEllipse24)(video.mode, nullptr, args, args + 8, ddsd,
+                clipped ? args + 16 : nullptr, rgb);
+        });
+        DDSURFACEDESC desc = {};
+        desc.lPitch = pitch;
+        desc.lpSurface = mine.data() + offset;
+        const CRect rClip(r[0], r[1], r[2], r[3]);
+        video.oursMode->DrawEllipse24(CPoint(cx, cy), CSize(ax, ay), desc, clipped ? &rClip : nullptr, rgb);
+        ctx.CountInputs(1);
+        std::vector<uint32_t> a(canvas, canvas + mine.size());
+        std::vector<uint32_t> b(mine.begin(), mine.end());
+        CompareArrays(ctx, a.data(), b.data(), static_cast<int>(mine.size()));
+    }
+}
+
+// CVidTile::BltTile8To16(pSurface, lPitch, pData, blitSize, nDataJump,
+// dwFlags) (0x7B22E0), `ret 0x18`. Unreachable in iwd2r (32 bpp only). It
+// reads the realized palette (0x9064F8) and, for 0x8, the video mode's
+// field_24, not the tile.
+using BltTile16Fn = int32_t(__fastcall*)(void* self, void* edx, uint16_t* pSurface, int32_t lPitch,
+    const uint8_t* pData, const void* blitSize, int32_t nDataJump, uint32_t dwFlags);
+constexpr uintptr_t kBltTile8To16 = 0x7B22E0;
+
+// Tiles of 1 to 32 by 1 to 32 pixels (odd widths too) with a random data
+// jump, plain and dithered (0x8) with a random 32-bit field_24, into a
+// 64x64 16-bit canvas of random words. The whole canvas is compared.
+void BltTile8To16(CaseContext& ctx)
+{
+    VideoFixture video(ctx);
+    uint16_t* canvas = nullptr;
+    uint8_t* data = nullptr;
+    uint8_t* size = nullptr;
+    uint8_t* tile = nullptr;
+    constexpr int kTileCanvas = 64;
+    constexpr size_t kDataSize = 64 * 96;
+    ctx.SetInputs("building the original's canvas");
+    ctx.CallOriginal([&] {
+        canvas = reinterpret_cast<uint16_t*>(OriginalBlock(kTileCanvas * kTileCanvas * 2));
+        data = OriginalBlock(kDataSize);
+        size = OriginalBlock(8);
+        tile = OriginalBlock(0x100);
+    });
+    auto* oursTileStorage = static_cast<unsigned char*>(::operator new(sizeof(CVidTile)));
+    std::memset(oursTileStorage, 0, sizeof(CVidTile));
+    auto* oursTile = reinterpret_cast<CVidTile*>(oursTileStorage);
+    std::vector<WORD> mine(kTileCanvas * kTileCanvas);
+    std::vector<uint8_t> pixels(kDataSize);
+    Picks picks(ctx.seed, 0x54696C6531360000ull); // "Tile16"
+    const int count = 600 + ctx.iterations / 10;
+    for (int n = 0; n < count; ++n) {
+        const int32_t cx = picks.Between(1, 32);
+        const int32_t cy = picks.Between(1, 32);
+        const int32_t jump = picks.Between(0, 32);
+        const uint32_t dwFlags = picks.Between(0, 1) ? 0x8u : 0u;
+        const uint32_t color = picks.Bits();
+        const int32_t x = picks.Between(0, kTileCanvas - cx);
+        const int32_t y = picks.Between(0, kTileCanvas - cy);
+        uint32_t palette[256];
+        for (uint32_t& c : palette) {
+            c = picks.Bits();
+        }
+        for (uint8_t& b : pixels) {
+            b = static_cast<uint8_t>(picks.Bits());
+        }
+        for (WORD& w : mine) {
+            w = static_cast<WORD>(picks.Bits());
+        }
+        char inputs[200];
+        std::snprintf(inputs, sizeof(inputs), "input %d: %dx%d at (%d,%d), jump %d, flags 0x%X, field_24 0x%08X", n,
+            cx, cy, x, y, jump, dwFlags, color);
+        ctx.SetInputs(inputs);
+        const int32_t offset = y * kTileCanvas + x;
+        int32_t originalResult = 0;
+        ctx.CallOriginal([&] {
+            std::memcpy(canvas, mine.data(), mine.size() * 2);
+            std::memcpy(data, pixels.data(), kDataSize);
+            const int32_t s[2] = { cx, cy };
+            std::memcpy(size, s, 8);
+            std::memcpy(reinterpret_cast<void*>(kTempPal), palette, sizeof(palette));
+            Put<uint32_t>(video.mode, kShadowColorOffset, color);
+            originalResult = reinterpret_cast<BltTile16Fn>(kBltTile8To16)(tile, nullptr, canvas + offset,
+                kTileCanvas * 2, data, size, jump, dwFlags);
+        });
+        std::memcpy(CVidImage::rgbTempPal, palette, sizeof(palette));
+        video.oursMode->field_24 = color;
+        const BOOL oursResult = oursTile->BltTile8To16(mine.data() + offset, kTileCanvas * 2, pixels.data(),
+            CSize(cx, cy), jump, dwFlags);
+        ctx.CountInputs(1);
+        if (oracle::Compare(ctx, originalResult, static_cast<int32_t>(oursResult))) {
+            std::vector<uint32_t> a(canvas, canvas + kTileCanvas * kTileCanvas);
+            std::vector<uint32_t> b(mine.begin(), mine.end());
+            CompareArrays(ctx, a.data(), b.data(), kTileCanvas * kTileCanvas);
+        }
+    }
+    ::operator delete(oursTileStorage);
+}
+
 void CellTranslucent(CaseContext& ctx)
 {
     CellBlend(ctx, true, 0x43656C6C54000000ull); // "CellT"
@@ -1300,3 +1700,8 @@ ORACLE_CASE("vid/fill_convex_poly", FillConvexPoly);
 ORACLE_CASE("vid/fill_poly", FillPoly);
 ORACLE_CASE("vid/cell_translucent32", CellTranslucent);
 ORACLE_CASE("vid/cell_brightness32", CellBrightness);
+ORACLE_CASE("vid/cell_blt8to16", CellBlt8To16);
+ORACLE_CASE("vid/cell_blt8to24", CellBlt8To24);
+ORACLE_CASE("vid/draw_line16", DrawLine16);
+ORACLE_CASE("vid/draw_ellipse24", DrawEllipse24);
+ORACLE_CASE("vid/blt_tile8to16", BltTile8To16);

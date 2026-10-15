@@ -76,6 +76,7 @@ public:
     static void RenderFan(const VERTEX_DESC* pVertices, INT nVertices);
     static void RenderQuad(const VERTEX_DESC* pVertices, INT nVertices);
     static void RenderBlackFade3d();
+    void ScanLine16(WORD* pSurface, UINT nMajorAxis, UINT nMinorAxis, INT nMajorAxisAdjust, INT nMinorAxisAdjust, WORD color);
     void ScanLine32(DWORD* pSurface, UINT nMajorAxis, UINT nMinorAxis, INT nMajorAxisAdjust, INT nMinorAxisAdjust, DWORD color);
     void sub_7CC130(DWORD* pSurface, UINT nMajorAxis, UINT nMinorAxis, INT nMajorAxisAdjust, INT nMinorAxisAdjust, UINT nThickness, DWORD color);
 
