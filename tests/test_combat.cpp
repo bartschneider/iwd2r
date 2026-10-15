@@ -14,6 +14,8 @@
 #include "CScreenCreateChar.h"
 #include "CScreenWorld.h"
 #include "CUtil.h"
+#include "CVidInf.h"
+#include "CVidMode.h"
 #include "ScreenLayout.h"
 #include "compat/msvc_rand.h"
 #include "data_view.h"
@@ -854,4 +856,242 @@ TEST_CASE("combat: a party member casts Magic Missile through the Spell action",
     CHECK(cast);
     CHECK(pGoblin->GetBaseStats()->m_hitPoints < goblinStart);
     CHECK(pGoblin->GetBaseStats()->m_hitPoints >= goblinStart - 5);
+}
+
+namespace {
+
+// DirectDraw shim surfaces for the current video mode (XRGB8888, as the
+// running engine's): the back buffer at the screen's size and the FX
+// surfaces 2 and 3 at 512 by 512. The engine in these tests never activates
+// its video mode, so it has none. The destructor restores the mode.
+class Surfaces {
+public:
+    explicit Surfaces(CVidMode* pVidMode, int width, int height)
+        : m_pVidMode(pVidMode)
+        , m_nSurfacesBefore(pVidMode->m_nSurfaces)
+        , m_pSurfacesBefore(pVidMode->pSurfaces)
+        , m_nBppBefore(g_pChitin->cVideo.m_nBpp)
+        , m_shifts { pVidMode->m_dwRBitShift, pVidMode->m_dwGBitShift, pVidMode->m_dwBBitShift }
+    {
+        for (IDirectDrawSurface*& pSurface : m_surfaces) {
+            pSurface = NULL;
+        }
+        if (DirectDrawCreate(NULL, &m_pDirectDraw, NULL) != DD_OK) {
+            m_pDirectDraw = NULL;
+            return;
+        }
+        m_surfaces[CVIDINF_SURFACE_BACK] = Create(width, height);
+        m_surfaces[CVIDINF_SURFACE_2] = Create(CVIDINF_FX_WIDTH, CVIDINF_FX_HEIGHT);
+        m_surfaces[CVIDINF_SURFACE_3] = Create(CVIDINF_FX_WIDTH, CVIDINF_FX_HEIGHT);
+        pVidMode->m_nSurfaces = 9;
+        pVidMode->pSurfaces = m_surfaces;
+        g_pChitin->cVideo.m_nBpp = 32;
+        pVidMode->m_dwRBitShift = 16;
+        pVidMode->m_dwGBitShift = 8;
+        pVidMode->m_dwBBitShift = 0;
+    }
+    ~Surfaces()
+    {
+        m_pVidMode->m_nSurfaces = m_nSurfacesBefore;
+        m_pVidMode->pSurfaces = m_pSurfacesBefore;
+        g_pChitin->cVideo.m_nBpp = m_nBppBefore;
+        m_pVidMode->m_dwRBitShift = m_shifts[0];
+        m_pVidMode->m_dwGBitShift = m_shifts[1];
+        m_pVidMode->m_dwBBitShift = m_shifts[2];
+        for (IDirectDrawSurface* pSurface : m_surfaces) {
+            if (pSurface != NULL) {
+                pSurface->Release();
+            }
+        }
+        if (m_pDirectDraw != NULL) {
+            m_pDirectDraw->Release();
+        }
+    }
+    Surfaces(const Surfaces&) = delete;
+    Surfaces& operator=(const Surfaces&) = delete;
+
+    bool Ok() const
+    {
+        return m_surfaces[CVIDINF_SURFACE_BACK] != NULL && m_surfaces[CVIDINF_SURFACE_2] != NULL
+            && m_surfaces[CVIDINF_SURFACE_3] != NULL;
+    }
+
+    // The back buffer's pixels in `rect`, after filling it with `fill` when
+    // `clear` is set.
+    std::vector<DWORD> Back(const CRect& rect, bool clear = false, DWORD fill = 0)
+    {
+        std::vector<DWORD> pixels;
+        DDSURFACEDESC ddsd;
+        memset(&ddsd, 0, sizeof(ddsd));
+        ddsd.dwSize = sizeof(ddsd);
+        if (!m_pVidMode->LockSurface(CVIDINF_SURFACE_BACK, &ddsd, rect)) {
+            return pixels;
+        }
+        for (int y = 0; y < rect.Height(); y++) {
+            DWORD* row = reinterpret_cast<DWORD*>(reinterpret_cast<BYTE*>(ddsd.lpSurface) + y * ddsd.lPitch);
+            if (clear) {
+                std::fill(row, row + rect.Width(), fill);
+            }
+            pixels.insert(pixels.end(), row, row + rect.Width());
+        }
+        m_pVidMode->UnLockSurface(CVIDINF_SURFACE_BACK, ddsd.lpSurface);
+        return pixels;
+    }
+
+private:
+    IDirectDrawSurface* Create(int width, int height)
+    {
+        DDSURFACEDESC desc;
+        memset(&desc, 0, sizeof(desc));
+        desc.dwSize = sizeof(desc);
+        desc.dwFlags = DDSD_CAPS | DDSD_HEIGHT | DDSD_WIDTH;
+        desc.ddsCaps.dwCaps = DDSCAPS_SYSTEMMEMORY | DDSCAPS_OFFSCREENPLAIN;
+        desc.dwWidth = width;
+        desc.dwHeight = height;
+        IDirectDrawSurface* pSurface = NULL;
+        if (m_pDirectDraw->CreateSurface(&desc, &pSurface, NULL) != DD_OK) {
+            return NULL;
+        }
+        return pSurface;
+    }
+
+    CVidMode* m_pVidMode;
+    IDirectDraw* m_pDirectDraw = NULL;
+    IDirectDrawSurface* m_surfaces[9];
+    UINT m_nSurfacesBefore;
+    IDirectDrawSurface** m_pSurfacesBefore;
+    USHORT m_nBppBefore;
+    DWORD m_shifts[3];
+};
+
+// The number of pixels whose colour differs between two captures of one
+// rectangle (the glyph tag byte aside).
+int Changed(const std::vector<DWORD>& before, const std::vector<DWORD>& after)
+{
+    int changed = 0;
+    for (size_t n = 0; n < before.size() && n < after.size(); n++) {
+        if ((before[n] & 0xFFFFFF) != (after[n] & 0xFFFFFF)) {
+            changed++;
+        }
+    }
+    return changed;
+}
+
+}
+
+// CGameSprite::RenderDamageArrow 0x708FC0: with the locator feedback at 4 a
+// party member wholly outside the viewport gets the LOCATER.BAM arrow whose
+// sequence points at it (0 east, 2 north, 3 north-west, 4 west) drawn at the
+// screen's edge; on screen it gets none, nor at level 2 without a damage
+// flash. RenderSpriteEffect 0x7093E0 draws the fire particles
+// UpdateSpriteEffect placed. Neither draws rand().
+TEST_CASE("combat: RenderDamageArrow points at an off-screen party member; RenderSpriteEffect draws the particles", "[combat][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    Fight fight;
+    std::string why;
+    if (!SetUpFight(fight, why)) {
+        if (why.find("CHR") != std::string::npos) {
+            SKIP("[iwd2r-skip] " + why);
+        }
+        FAIL(why);
+    }
+    CGameSprite* pCharacter = fight.pCharacter;
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CInfinity* pInfinity = fight.pArea->GetInfinity();
+    CVidMode* pVidMode = g_pChitin->GetCurrentVideoMode();
+    REQUIRE(pVidMode != NULL);
+    const CRect rScreen = pInfinity->rViewPort;
+    REQUIRE(rScreen.Width() > 0);
+    REQUIRE(rScreen.Height() > 0);
+    Surfaces surfaces(pVidMode, rScreen.right, rScreen.bottom);
+    REQUIRE(surfaces.Ok());
+    const CPoint pos = pCharacter->GetPos();
+    const int savedX = pInfinity->nCurrentX;
+    const int savedY = pInfinity->nCurrentY;
+    // CInfinity::Render sets the infinity's video mode each frame.
+    CVidMode* const savedMode = pInfinity->pVidMode;
+    pInfinity->pVidMode = pVidMode;
+    // Faded in, as after the game loads (a faded-out screen draws nothing).
+    const BYTE savedFade = pVidMode->m_nFade;
+    pVidMode->m_nFade = CVidMode::NUM_FADE_FRAMES;
+    const DWORD savedLevel = pGame->GetOptions()->m_nLocatorFeedbackLevel;
+    srand(13);
+    const unsigned int seed = iwd2r_rand_state();
+
+    struct Case {
+        int x;
+        int y;
+        SHORT sequence;
+    };
+    // The viewport's top left corner and the arrow the party member gets.
+    const Case cases[] = {
+        { pos.x - rScreen.Width() - 400, pos.y - rScreen.Height() / 2, 0 },
+        { pos.x - rScreen.Width() / 2, pos.y + 400, 2 },
+        { pos.x + 400, pos.y + 400, 3 },
+        { pos.x + 400, pos.y - rScreen.Height() / 2, 4 },
+    };
+    pGame->GetOptions()->m_nLocatorFeedbackLevel = 4;
+    for (const Case& c : cases) {
+        pInfinity->nCurrentX = c.x;
+        pInfinity->nCurrentY = c.y;
+        pGame->m_vcLocator.SequenceSet(7);
+        const std::vector<DWORD> before = surfaces.Back(rScreen, true, 0x123456);
+        pCharacter->RenderDamageArrow(fight.pArea, pVidMode, CVIDINF_SURFACE_BACK);
+        INFO("viewport at " << c.x << "," << c.y << ", party member at " << pos.x << "," << pos.y);
+        CHECK(pGame->m_vcLocator.m_nCurrentSequence == c.sequence);
+        CHECK(Changed(before, surfaces.Back(rScreen)) > 0);
+    }
+
+    // On screen: no arrow.
+    pInfinity->nCurrentX = pos.x - rScreen.Width() / 2;
+    pInfinity->nCurrentY = pos.y - rScreen.Height() / 2;
+    pGame->m_vcLocator.SequenceSet(7);
+    std::vector<DWORD> before = surfaces.Back(rScreen, true, 0x123456);
+    pCharacter->RenderDamageArrow(fight.pArea, pVidMode, CVIDINF_SURFACE_BACK);
+    CHECK(pGame->m_vcLocator.m_nCurrentSequence == 7);
+    CHECK(Changed(before, surfaces.Back(rScreen)) == 0);
+
+    // Level 2 shows the arrow only while the damage flashes.
+    pGame->GetOptions()->m_nLocatorFeedbackLevel = 2;
+    pInfinity->nCurrentX = cases[0].x;
+    pInfinity->nCurrentY = cases[0].y;
+    pCharacter->m_bBloodFlashOn = FALSE;
+    pCharacter->RenderDamageArrow(fight.pArea, pVidMode, CVIDINF_SURFACE_BACK);
+    CHECK(pGame->m_vcLocator.m_nCurrentSequence == 7);
+    pGame->GetOptions()->m_nLocatorFeedbackLevel = savedLevel;
+
+    // The fire particles. The splash cell has nothing to play, so the
+    // particles show at once. The effect's rectangle comes from the
+    // animation's current frame, which a sprite that was never drawn has not
+    // loaded (12 pixels wide here): give it a drawn creature's size and put
+    // one particle (sequence 0, frame 0) in its middle, where it lies inside
+    // whether the animation mirrors or not.
+    pInfinity->nCurrentX = pos.x - rScreen.Width() / 2;
+    pInfinity->nCurrentY = pos.y - rScreen.Height() / 2;
+    pCharacter->StartSpriteEffect(1, 2, 30, FALSE);
+    REQUIRE(pCharacter->m_spriteEffectDuration > 0);
+    REQUIRE(pCharacter->m_pSpriteEffectArray != NULL);
+    pCharacter->m_rSpriteEffectFX = CRect(0, 0, 96, 96);
+    pCharacter->m_ptSpriteEffectReference = CPoint(48, 80);
+    pCharacter->m_pSpriteEffectArray[0] = 0;
+    pCharacter->m_pSpriteEffectArrayPosition[0].x = 0;
+    pCharacter->m_pSpriteEffectArrayPosition[0].y = -40;
+    const unsigned int beforeRender = iwd2r_rand_state();
+    before = surfaces.Back(rScreen, true, 0x123456);
+    pCharacter->RenderSpriteEffect(pVidMode, CVIDINF_SURFACE_BACK);
+    CHECK(iwd2r_rand_state() == beforeRender);
+    CHECK(Changed(before, surfaces.Back(rScreen)) > 0);
+    (void)seed;
+
+    pInfinity->nCurrentX = savedX;
+    pInfinity->nCurrentY = savedY;
+    pInfinity->pVidMode = savedMode;
+    pVidMode->m_nFade = savedFade;
 }

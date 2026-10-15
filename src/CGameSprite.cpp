@@ -6919,13 +6919,400 @@ void CGameSprite::RenderSpriteCover(CVidMode* pVidMode, INT nSurface, CVidCell* 
 // 0x708FC0
 void CGameSprite::RenderDamageArrow(CGameArea* pArea, CVidMode* pVidMode, INT nSurface)
 {
-    // TODO: Incomplete.
+    CRect rViewPort;
+    CPoint ptPos;
+    CPoint ptReference;
+    CRect rFx;
+    CRect rGCBounds;
+    CRect rIntersect;
+    INT x;
+    INT y;
+    SHORT nSequence;
+    COLORREF rgbColor;
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    DWORD nLevel = pGame->GetOptions()->m_nLocatorFeedbackLevel;
+
+    if (pGame->GetCharacterPortraitNum(m_id) == -1) {
+        return;
+    }
+
+    // The locator feedback level: 2 shows the arrow while the damage
+    // flashes, 3 also for the picked character, 4 and 5 always.
+    switch (nLevel) {
+    case 2:
+        if (!m_bBloodFlashOn) {
+            return;
+        }
+
+        if (m_nDamageLocatorTime == 0) {
+            return;
+        }
+
+        if (g_pBaldurChitin->nAUCounter % CMarker::PICKED_FLASH_PERIOD < CMarker::PICKED_FLASH_PERIOD >> 1) {
+            return;
+        }
+        // FALLTHROUGH
+    case 3:
+        if (!m_bBloodFlashOn
+            || m_nDamageLocatorTime == 0
+            || g_pBaldurChitin->nAUCounter % CMarker::PICKED_FLASH_PERIOD < CMarker::PICKED_FLASH_PERIOD >> 1) {
+            if (m_id != pArea->m_iPicked) {
+                return;
+            }
+        }
+        break;
+    case 4:
+    case 5:
+        break;
+    default:
+        return;
+    }
+
+    if (!m_active || !m_activeAI || !m_activeImprisonment) {
+        return;
+    }
+
+    if (m_baseStats.field_294 == TRUE) {
+        return;
+    }
+
+    if ((m_derivedStats.m_generalState & STATE_DEAD) != 0) {
+        return;
+    }
+
+    if (m_pArea != pArea) {
+        return;
+    }
+
+    CInfinity* pInfinity = m_pArea->GetInfinity();
+    rViewPort.left = pInfinity->nCurrentX;
+    rViewPort.top = pInfinity->nCurrentY;
+    rViewPort.right = pInfinity->rViewPort.right - pInfinity->rViewPort.left + pInfinity->nCurrentX;
+    rViewPort.bottom = pInfinity->rViewPort.bottom - pInfinity->rViewPort.top + pInfinity->nCurrentY;
+
+    ptPos = m_pos;
+    ptPos.y += m_pArea->GetHeightOffset(m_pos, m_listType);
+
+    m_animation.CalculateFxRect(rFx, ptReference, m_posZ);
+    m_animation.CalculateGCBoundsRect(rGCBounds,
+        ptPos,
+        ptReference,
+        m_posZ,
+        rFx.right - rFx.left,
+        rFx.bottom - rFx.top);
+
+    rIntersect.IntersectRect(&rViewPort, &rGCBounds);
+    if (!rIntersect.IsRectEmpty()) {
+        // On screen: no arrow.
+        return;
+    }
+
+    // The arrow points from the viewport's edge or corner nearest the
+    // sprite: sequences 0-7 run east, north-east, north, north-west, west,
+    // south-west, south and south-east.
+    const CRect& rScreen = pInfinity->rViewPort;
+    if (ptPos.x < rViewPort.left) {
+        if (m_posZ + ptPos.y < rViewPort.top) {
+            x = rScreen.left;
+            y = rScreen.top;
+            nSequence = 3;
+        } else if (m_posZ + ptPos.y > rViewPort.bottom) {
+            x = rScreen.left;
+            y = rScreen.bottom;
+            nSequence = 5;
+        } else {
+            x = rScreen.left;
+            y = rScreen.top - rViewPort.top + ptPos.y;
+            nSequence = 4;
+        }
+    } else if (ptPos.x > rViewPort.right) {
+        if (m_posZ + ptPos.y < rViewPort.top) {
+            x = rScreen.right;
+            y = rScreen.top;
+            nSequence = 1;
+        } else if (m_posZ + ptPos.y > rViewPort.bottom) {
+            x = rScreen.right;
+            y = rScreen.bottom;
+            nSequence = 7;
+        } else {
+            x = rScreen.right;
+            y = rScreen.top - rViewPort.top + ptPos.y;
+            nSequence = 0;
+        }
+    } else {
+        if (m_posZ + ptPos.y < rViewPort.top) {
+            x = rScreen.left - rViewPort.left + ptPos.x;
+            y = rScreen.top;
+            nSequence = 2;
+        } else if (m_posZ + ptPos.y > rViewPort.bottom) {
+            x = rScreen.left - rViewPort.left + ptPos.x;
+            y = rScreen.bottom;
+            nSequence = 6;
+        } else {
+            return;
+        }
+    }
+
+    pGame->m_vcLocator.SequenceSet(nSequence);
+    pGame->m_vcLocator.FrameSet(0);
+
+    if (m_bBloodFlashOn && m_nDamageLocatorTime > 0) {
+        rgbColor = m_nDamageLocatorColor;
+    } else {
+        rgbColor = m_marker.m_rgbColor;
+    }
+
+    pGame->m_vcLocator.SetTintColor(g_pBaldurChitin->GetCurrentVideoMode()->ApplyFadeAmount(rgbColor));
+    pGame->m_vcLocator.Render(nSurface,
+        x,
+        y,
+        m_pArea->GetInfinity()->rViewPort,
+        NULL,
+        0,
+        0x20000,
+        -1);
 }
 
 // 0x7093E0
 void CGameSprite::RenderSpriteEffect(CVidMode* pVidMode, INT nSurface)
 {
-    // TODO: Incomplete.
+    CRect rFX;
+    CRect rGCBounds;
+    CRect rClip;
+    CSize frameSize;
+    CPoint ptCenter;
+    CPoint ptPos;
+    CPoint ptOffset;
+    CPoint ptRef;
+    INT nHeightOffset;
+    INT x;
+    INT y;
+    BOOL bRendered;
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjCreature.cpp
+    // __LINE__: 10675
+    UTIL_ASSERT(pVidMode != NULL);
+
+    // NOTE: Inlined CGameAnimation::IsMirroring.
+    // __FILE__: .\Include\ObjAnimation.h
+    // __LINE__: 2101
+    UTIL_ASSERT(m_animation.m_animation != NULL);
+
+    DWORD dwRenderFlags = (m_animation.m_animation->IsMirroring() ? CInfinity::MIRROR_FX : 0)
+        | m_spriteEffectFlags;
+
+    if (m_spriteEffectDuration == 0) {
+        return;
+    }
+
+    BOOLEAN bDithered = m_id == m_pArea->m_iPicked
+        || g_pBaldurChitin->GetObjectGame()->GetOptions()->m_bAlwaysDither
+        || g_pBaldurChitin->GetObjectGame()->m_bForceDither;
+
+    if (!m_spriteSplashVidCell.IsEndOfSequence(FALSE)) {
+        // The splash plays first; the particles wait for its end.
+        m_spriteSplashVidCell.GetCurrentCenterPoint(ptCenter, FALSE);
+        m_spriteSplashVidCell.GetCurrentFrameSize(frameSize, FALSE);
+        SetRect(&rFX, 0, 0, frameSize.cx, frameSize.cy);
+
+        INT y0 = m_pArea->GetHeightOffset(m_pos, m_listType) + m_pos.y;
+
+        rGCBounds.left = m_pos.x - ptCenter.x;
+        rGCBounds.right = rFX.right - rFX.left + rGCBounds.left;
+
+        dwRenderFlags |= CInfinity::FXPREP_COPYFROMBACK;
+
+        ptPos.x = m_pos.x;
+        ptPos.y = m_posZ - m_ptSpriteEffectReference.y / 2 + y0;
+
+        m_pArea->GetInfinity()->FXPrep(rFX,
+            dwRenderFlags | CInfinity::FXPREP_COPYFROMBACK,
+            nSurface,
+            ptPos,
+            ptCenter);
+
+        if (!m_pArea->GetInfinity()->FXLock(rFX, dwRenderFlags)) {
+            return;
+        }
+
+        m_pArea->GetInfinity()->FXRender(&m_spriteSplashVidCell,
+            ptCenter.x,
+            ptCenter.y,
+            dwRenderFlags,
+            0);
+
+        rClip.left = rGCBounds.left;
+        rClip.right = rGCBounds.right;
+        rClip.top = m_posZ - ptCenter.y + y0 - m_ptSpriteEffectReference.y / 2 - m_posZ;
+        rClip.bottom = rFX.bottom - rFX.top + m_posZ - ptCenter.y + y0 - m_ptSpriteEffectReference.y / 2 - m_posZ;
+
+        ptRef.x = ptCenter.x;
+        ptRef.y = m_posZ - m_ptSpriteEffectReference.y / 2 + ptCenter.y;
+
+        m_pArea->GetInfinity()->FXRenderClippingPolys(m_pos.x,
+            y0 - m_ptSpriteEffectReference.y / 2 - m_posZ,
+            m_posZ,
+            ptRef,
+            rClip,
+            bDithered,
+            dwRenderFlags);
+
+        m_pArea->GetInfinity()->FXUnlock(dwRenderFlags, NULL, CPoint(0, 0));
+        m_pArea->GetInfinity()->FXBltFrom(nSurface,
+            rFX,
+            m_pos.x,
+            m_posZ - m_ptSpriteEffectReference.y / 2 + y0,
+            ptCenter.x,
+            ptCenter.y,
+            dwRenderFlags);
+        return;
+    }
+
+    if (m_pSpriteEffectArray == NULL) {
+        return;
+    }
+
+    bRendered = FALSE;
+
+    // NOTE: The original keeps the FX surface's size and each particle's
+    // frame size in one variable.
+    pVidMode->GetFXSize(frameSize);
+
+    switch (m_effectExtendDirection) {
+    case 0:
+        ptOffset.x = 0;
+        ptOffset.y = 0;
+        SetRect(&rFX, 0, 0, m_rSpriteEffectFX.right, m_rSpriteEffectFX.bottom);
+        if (rFX.right > frameSize.cx) {
+            rFX.right = frameSize.cx;
+        }
+        if (rFX.bottom > frameSize.cy) {
+            rFX.bottom = frameSize.cy;
+        }
+        break;
+    case 1:
+        ptOffset.x = 0;
+        ptOffset.y = m_rSpriteEffectFX.bottom - frameSize.cy + 1;
+        SetRect(&rFX, 0, 0, m_rSpriteEffectFX.right, frameSize.cy - 1);
+        if (rFX.right > frameSize.cx) {
+            rFX.right = frameSize.cx;
+        }
+        if (rFX.bottom > frameSize.cy) {
+            rFX.bottom = frameSize.cy;
+        }
+        break;
+    case 2:
+        ptOffset.x = 0;
+        ptOffset.y = 0;
+        SetRect(&rFX, 0, 0, m_rSpriteEffectFX.right, frameSize.cy - 1);
+        if (rFX.right > frameSize.cx) {
+            rFX.right = frameSize.cx;
+        }
+        if (rFX.bottom > frameSize.cy) {
+            rFX.bottom = frameSize.cy;
+        }
+        break;
+    default:
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjCreature.cpp
+        // __LINE__: 10799
+        UTIL_ASSERT(FALSE);
+    }
+
+    nHeightOffset = m_pArea->GetHeightOffset(m_pos, m_listType);
+
+    rGCBounds.left = m_pos.x - m_ptSpriteEffectReference.x + ptOffset.x;
+    rGCBounds.top = m_posZ - m_ptSpriteEffectReference.y + m_pos.y + nHeightOffset + ptOffset.y;
+    rGCBounds.right = rFX.right - rFX.left + rGCBounds.left;
+    rGCBounds.bottom = rFX.bottom - rFX.top + rGCBounds.top;
+
+    if ((m_spriteEffectFlags & 0x208) != 0) {
+        dwRenderFlags |= CInfinity::FXPREP_COPYFROMBACK;
+    } else {
+        dwRenderFlags |= CInfinity::FXPREP_CLEARFILL | 0x1;
+    }
+
+    ptPos.x = m_pos.x + ptOffset.x;
+    ptPos.y = m_posZ + m_pos.y + nHeightOffset + ptOffset.y;
+
+    m_pArea->GetInfinity()->FXPrep(rFX,
+        dwRenderFlags,
+        nSurface,
+        ptPos,
+        m_ptSpriteEffectReference);
+
+    if (!m_pArea->GetInfinity()->FXLock(rFX, dwRenderFlags)) {
+        return;
+    }
+
+    for (BYTE nIndex = 0; nIndex < m_spriteEffectSequenceLength; nIndex++) {
+        for (BYTE nParticle = 0;
+             nParticle < static_cast<CHAR>(m_spriteEffectBaseIntensity) + m_spriteEffectRandomIntensity - 1;
+             nParticle++) {
+            SHORT nParticleIndex = static_cast<SHORT>((static_cast<CHAR>(m_spriteEffectBaseIntensity) + m_spriteEffectRandomIntensity - 1) * nIndex + nParticle);
+            USHORT nEntry = m_pSpriteEffectArray[nParticleIndex];
+            if (nEntry == 0xFFFF) {
+                break;
+            }
+
+            m_spriteEffectVidCell.SequenceSet(nEntry >> 8);
+            m_spriteEffectVidCell.FrameSet(nEntry & 0xFF);
+            m_spriteEffectVidCell.GetCurrentCenterPoint(ptCenter, FALSE);
+            m_spriteEffectVidCell.GetCurrentFrameSize(frameSize, FALSE);
+
+            const POINT& pos = m_pSpriteEffectArrayPosition[nParticleIndex];
+            if ((CInfinity::MIRROR_FX & dwRenderFlags) != 0) {
+                x = rFX.right - pos.x - m_ptSpriteEffectReference.x + ptOffset.x + ptCenter.x;
+            } else {
+                x = pos.x - ptOffset.x - ptCenter.x + m_ptSpriteEffectReference.x;
+            }
+            y = pos.y - ptOffset.y - ptCenter.y + m_ptSpriteEffectReference.y;
+
+            if (x >= frameSize.cx >> 2
+                && x <= rFX.right - (frameSize.cx >> 2)
+                && y >= frameSize.cy >> 2
+                && y <= rFX.bottom - (frameSize.cy >> 2)
+                && x - ptCenter.x >= 0
+                && x - ptCenter.x + frameSize.cx < rFX.right - rFX.left
+                && y - ptCenter.y >= 0
+                && y - ptCenter.y + frameSize.cy < rFX.bottom - rFX.top) {
+                m_pArea->GetInfinity()->FXRender(&m_spriteEffectVidCell,
+                    x,
+                    y,
+                    dwRenderFlags,
+                    0);
+                bRendered = TRUE;
+            }
+        }
+    }
+
+    if (bRendered) {
+        rClip.left = rGCBounds.left;
+        rClip.top = rGCBounds.top;
+        rClip.right = rGCBounds.right;
+        rClip.bottom = rGCBounds.bottom - m_posZ;
+        m_pArea->GetInfinity()->FXRenderClippingPolys(m_pos.x,
+            m_pos.y,
+            0,
+            m_ptSpriteEffectReference,
+            rClip,
+            bDithered,
+            dwRenderFlags);
+    }
+
+    m_pArea->GetInfinity()->FXUnlock(dwRenderFlags, NULL, CPoint(0, 0));
+
+    if (!bRendered) {
+        return;
+    }
+
+    m_pArea->GetInfinity()->FXBltFrom(nSurface,
+        rFX,
+        m_pos.x + ptOffset.x,
+        m_posZ + m_pos.y + nHeightOffset + ptOffset.y,
+        m_ptSpriteEffectReference.x,
+        m_ptSpriteEffectReference.y,
+        dwRenderFlags);
 }
 
 // 0x709B60
