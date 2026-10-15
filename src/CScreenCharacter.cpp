@@ -629,6 +629,116 @@ void CScreenCharacter::EngineGameUninit()
     m_cUIManager.fUninit();
 }
 
+// 0x5D72D0
+void CScreenCharacter::OnKeyDown(SHORT nKeysFlags)
+{
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+    for (SHORT nKeyFlag = 0; nKeyFlag < nKeysFlags; nKeyFlag++) {
+        BYTE nKey = m_pVirtualKeysFlags[nKeyFlag];
+
+        if (nKey == VK_ESCAPE) {
+            if (GetTopPopup() != NULL) {
+                OnCancelButtonClick();
+            } else {
+                SelectEngine(g_pBaldurChitin->m_pEngineWorld);
+            }
+            continue;
+        }
+
+        if (nKey == VK_RETURN) {
+            CUIPanel* pPanel = GetTopPopup();
+            if (pPanel != NULL && pPanel->m_nID != 51) {
+                OnDoneButtonClick();
+                continue;
+            }
+        } else {
+            if (m_cUIManager.OnKeyDown(nKey)) {
+                continue;
+            }
+        }
+
+        switch (nKey) {
+        case VK_TAB:
+            m_cUIManager.ForceToolTip();
+            break;
+        case VK_LEFT:
+        case VK_NUMPAD4:
+            // Appearance popup: previous portrait.
+            if (GetTopPopup() != NULL && GetTopPopup()->m_nID == 18) {
+                CUIControlButton* pButton = static_cast<CUIControlButton*>(GetManager()->GetPanel(18)->GetControl(1));
+                if (pButton != NULL) {
+                    pButton->OnLButtonClick(CPoint(0, 0));
+                }
+            }
+            break;
+        case VK_RIGHT:
+        case VK_NUMPAD6:
+            // Appearance popup: next portrait.
+            if (GetTopPopup() != NULL && GetTopPopup()->m_nID == 18) {
+                CUIControlButton* pButton = static_cast<CUIControlButton*>(GetManager()->GetPanel(18)->GetControl(2));
+                if (pButton != NULL) {
+                    pButton->OnLButtonClick(CPoint(0, 0));
+                }
+            }
+            break;
+        case VK_SNAPSHOT:
+            g_pBaldurChitin->GetCurrentVideoMode()->PrintScreen();
+            break;
+        case '1':
+        case '2':
+        case '3':
+        case '4':
+        case '5':
+        case '6':
+            if (GetTopPopup() == NULL) {
+                OnPortraitLClick(nKey - '1');
+            }
+            break;
+        default:
+            if (GetTopPopup() == NULL) {
+                for (SHORT index = 0; index < CINFGAME_KEYMAP_SIZE; index++) {
+                    // NOTE: Uninline.
+                    if (pGame->GetKeymap(index) == nKey
+                        && pGame->GetKeymapFlag(index) == m_bCtrlKeyDown) {
+                        switch (index) {
+                        case 0:
+                            OnLeftPanelButtonClick(5);
+                            break;
+                        case 1:
+                            OnLeftPanelButtonClick(8);
+                            break;
+                        case 2:
+                            OnLeftPanelButtonClick(0);
+                            break;
+                        case 3:
+                            OnLeftPanelButtonClick(6);
+                            break;
+                        case 4:
+                            OnLeftPanelButtonClick(7);
+                            break;
+                        case 5:
+                            OnLeftPanelButtonClick(4);
+                            break;
+                        case 6:
+                            OnLeftPanelButtonClick(9);
+                            break;
+                        case 7:
+                            OnLeftPanelButtonClick(13);
+                            break;
+                        case 29:
+                            OnRestButtonClick();
+                            break;
+                        }
+                        break;
+                    }
+                }
+            }
+            break;
+        }
+    }
+}
+
 // 0x5D76E0
 void CScreenCharacter::OnMouseMove(CPoint pt)
 {
