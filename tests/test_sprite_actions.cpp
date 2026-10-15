@@ -22,6 +22,7 @@
 #include "CStore.h"
 #include "CUtil.h"
 #include "ScreenLayout.h"
+#include "compat/msvc_rand.h"
 #include "data_view.h"
 #include "platform/data_dir.h"
 #include "platform/window.h"
@@ -1202,6 +1203,54 @@ TEST_CASE("animation: a two-handed weapon takes the two-handed stance and READY 
     CHECK(pAnimation->m_weaponCode == 5);
     pHedron->m_animation.SetSequence(7);
     CHECK(pAnimation->m_currentBamSequence == 3);
+}
+
+TEST_CASE("animation: HEAD_TURN picks BAM group 2 or 7 or 8 with one draw (0x6CDA00)", "[ai][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    CGameSprite* pCharacter = NewGameInStartArea(cre);
+    REQUIRE(pCharacter->GetArea() != NULL);
+    CGameAnimationTypeCharacter* pAnimation = static_cast<CGameAnimationTypeCharacter*>(pCharacter->m_animation.m_animation);
+    REQUIRE(pAnimation != NULL);
+
+    // The VC6 generator: one draw from a seed.
+    auto oneDraw = [](unsigned int seed) {
+        return seed * 214013u + 2531011u;
+    };
+
+    // HEAD_TURN (6) draws rand() % 100 (0x6CF3FA): below 60 group 2
+    // (0x6CF443), below 97 group 7 (0x6CF62E), else group 8 (0x6CF81E).
+    // Group 2 draws a random first frame only when the group was not
+    // already 2, 7 or 8 on the G1 cell; groups 7 and 8 never do.
+    // Seed 7 draws 61: group 7.
+    srand(7);
+    pCharacter->m_animation.SetSequence(6);
+    CHECK(pAnimation->m_currentBamSequence == 7);
+    CHECK(iwd2r_rand_state() == oneDraw(7));
+
+    // Seed 1 draws 41: group 2, coming from 7 on the G1 cell, so no frame draw.
+    srand(1);
+    pCharacter->m_animation.SetSequence(6);
+    CHECK(pAnimation->m_currentBamSequence == 2);
+    CHECK(iwd2r_rand_state() == oneDraw(1));
+
+    // Seed 18 draws 97: group 8 (vis-probe round 7: ours set 0, so the
+    // player's head turn at walk_and_talk frame 4048 ended at 4066 and drew
+    // again).
+    srand(18);
+    pCharacter->m_animation.SetSequence(6);
+    CHECK(pAnimation->m_currentBamSequence == 8);
+    CHECK(iwd2r_rand_state() == oneDraw(18));
 }
 
 TEST_CASE("trigger: IsTeamBitOn tests the bits SetTeamBit sets (0x40E4)", "[ai][data]")
