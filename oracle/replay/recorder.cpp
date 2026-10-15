@@ -866,8 +866,12 @@ void ReadProbe(platform::replay_probe::Frame* out)
                 }
             }
             const ReplayField* const kScriptLevels[] = {
-                &kField_sprite_script_override, &kField_sprite_script_special1, &kField_sprite_script_team,
-                &kField_sprite_script_special2, &kField_sprite_script_combat, &kField_sprite_script_special3,
+                &kField_sprite_script_override,
+                &kField_sprite_script_special1,
+                &kField_sprite_script_team,
+                &kField_sprite_script_special2,
+                &kField_sprite_script_combat,
+                &kField_sprite_script_special3,
                 &kField_sprite_script_movement,
             };
             for (const ReplayField* level : kScriptLevels) {
