@@ -189,19 +189,28 @@ wait 60
 click 250 399
 wait 120
 checkpoint opening_done
+# Centre the view on Probe (2414,897): the view the opening cut-scene leaves
+# depends on real time (with real input, play.py --vm, it ends about 12
+# pixels east of a replay's), and the next two clicks need it exact.
+# Centred, Probe is at screen 400,216 (view 2014,681).
+origin ui
+click 528 460
+click 528 460
+wait 10
 # Click-to-move on the deck: Probe walks to 2328,905 and stops.
 origin screen
-click 330 262
+click 314 224
 wait 90
 checkpoint moved
 # Hedron's circle (he stands at 2503,900): the party walks up and his dialog
 # opens at entry 34 with 5 responses; "Nothing today, thanks. Farewell." (5)
 # goes to entry 37, whose "Very well. Farewell." (1) ends it.
-move 511 254
+move 497 217
 wait 5
-click 511 254
+click 497 217
 wait 90
 checkpoint dialog
+shot dialog
 origin ui
 click 260 424
 wait 60
