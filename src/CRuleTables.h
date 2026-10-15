@@ -450,6 +450,7 @@ public:
     INT GetEncumbranceMod(CGameSprite* pSprite) const;
     void sub_546B60(CGameSprite* pSprite, int& a2, int& a3, int& a4, BOOL a5) const;
     INT GetSaveAdjustmentForSourceSprite(CGameSprite* pSprite, const CResRef& sourceRes, DWORD nSavingThrow, BYTE nClass, DWORD nSpecialization, BYTE nCasterLevel) const;
+    INT GetIterativeAttackBonus(INT nBaseAttackBonus, INT nAttack, INT nPenalty) const;
     DWORD GetMaxSpellLevel(const BYTE& nClass, const UINT& nLevel) const;
     BYTE GetSpecializationIndex(BYTE nClass, DWORD nSpecialization) const;
     DWORD GetSpecializationMask(BYTE nClass, BYTE nIndex) const;

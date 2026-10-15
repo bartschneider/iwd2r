@@ -3841,6 +3841,16 @@ INT CRuleTables::GetSaveAdjustmentForSourceSprite(CGameSprite* pSprite, const CR
     return nBonus;
 }
 
+// 0x547020
+INT CRuleTables::GetIterativeAttackBonus(INT nBaseAttackBonus, INT nAttack, INT nPenalty) const
+{
+    INT nBonus = nBaseAttackBonus - nAttack * nPenalty;
+    if (nBonus < 0) {
+        nBonus = 0;
+    }
+    return nBonus;
+}
+
 // FIXME: For unknown reason `nClass` and `nLevel` params are passed as
 // pointers.
 //
