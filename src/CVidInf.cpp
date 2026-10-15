@@ -107,6 +107,10 @@ BOOL CVidInf::ActivateVideoMode(CVidMode* pPrevVidMode, HWND hWnd, BOOLEAN bFull
 
         SetWindowedMode(hWnd);
     } else {
+        // NOTE: The original takes the saved depth here (CChitin vtable
+        // 0xB4, GetSavedBitsPerPixel; 0x79B1C8). iwd2r's presenter offers
+        // 32 bpp only, so ours takes the desktop's, which is 32: a saved 16
+        // or 24 would fail the support test below and quit.
         int nBpp = CUtil::GetCurrentBitsPerPixels();
         switch (nBpp) {
         case 16:
@@ -506,7 +510,11 @@ void CVidInf::DestroySurfaces()
             pSurfaces[CVIDINF_SURFACE_FRONT] = NULL;
         }
 
-        if (pSurfaces[CVIDINF_SURFACE_BACK] != NULL) {
+        // In full screen the back buffer is the primary's attached surface
+        // and is not released here (0x79BEC0).
+        // NOTE: GetAttachedSurface took a reference to it in CreateSurfaces,
+        // so in full screen that reference leaks, in the original as in ours.
+        if (!g_pChitin->m_bFullscreen && pSurfaces[CVIDINF_SURFACE_BACK] != NULL) {
             pSurfaces[CVIDINF_SURFACE_BACK]->Release();
             pSurfaces[CVIDINF_SURFACE_BACK] = NULL;
         }
@@ -711,10 +719,12 @@ BOOL CVidInf::FullScreenFlip(BOOL bRenderCursor)
 
     if (bRenderCursor) {
         if (field_14) {
+            // Without the second cursor surface the pointer just drawn is
+            // restored from surface 4 (0x79C3B1).
             if (bPointerRendered
-                && rOldPointerStorage.Width() > 0
-                && rOldPointerStorage.Height() > 0) {
-                m_pPointerVidCell->RestoreBackground(CVIDINF_SURFACE_4, CVIDINF_SURFACE_BACK, rOldPointerStorage);
+                && m_rPointerStorage.Width() > 0
+                && m_rPointerStorage.Height() > 0) {
+                m_pPointerVidCell->RestoreBackground(CVIDINF_SURFACE_4, CVIDINF_SURFACE_BACK, m_rPointerStorage);
             }
         } else {
             if (bPointerRendered
@@ -1149,6 +1159,7 @@ BOOL CVidInf::FXBltToBack(CRect& rFXRect, INT x, INT y, INT nRefPointX, INT nRef
     } else {
         if (pt.x < rClip.left) {
             rSrc.left += rClip.left - pt.x;
+            pt.x = rClip.left;
         }
 
         if (rSrc.Width() + pt.x - 1 >= rClip.right) {
@@ -1158,6 +1169,7 @@ BOOL CVidInf::FXBltToBack(CRect& rFXRect, INT x, INT y, INT nRefPointX, INT nRef
 
     if (rSrc.bottom > rSrc.top && rSrc.right > rSrc.left) {
         if (bUseFX) {
+            fx.dwSize = sizeof(fx);
             while (1) {
                 HRESULT hr = g_pChitin->cVideo.cVidBlitter.Blt(pSurfaces[CVIDINF_SURFACE_BACK],
                     CRect(pt, rSrc.Size()),
@@ -1811,7 +1823,7 @@ void CVidInf::LoadFogOWarSurfaces(const CString& a2)
                     tileVidCell.FrameSet(2);
                     tileVidCell.Render(reinterpret_cast<WORD*>(surfaceDesc.lpSurface), surfaceDesc.lPitch, 0, 32, rTileRect, TRUE, 0, CPoint(0, 0));
 
-                    tileVidCell.FrameSet(2);
+                    tileVidCell.FrameSet(3);
                     tileVidCell.Render(reinterpret_cast<WORD*>(surfaceDesc.lpSurface), surfaceDesc.lPitch, 32, 32, rTileRect, TRUE, 0, CPoint(0, 0));
 
                     // NOTE: Uninline.

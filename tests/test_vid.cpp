@@ -792,3 +792,67 @@ TEST_CASE("vid_image_blend_table", "[vid]")
         CHECK(CVidImage::m_pBlendTable == nullptr);
     }
 }
+
+// CVidInf::FXBltToBack (0x79CC90) copies the FX rectangle to the back
+// buffer at (x, y) less the reference point, clipped, skipping the colour
+// key. Clipped on the left, the source starts that many pixels in and the
+// destination at the clip's left (0x79CDD0): FX columns 2..7 land on x
+// 4..9, not shifted left.
+TEST_CASE("fx_blt_to_back_clips_left", "[vid]")
+{
+    ChitinScope scope;
+    IDirectDraw* pDirectDraw = NULL;
+    REQUIRE(DirectDrawCreate(NULL, &pDirectDraw, NULL) == DD_OK);
+    auto make = [&](DWORD w, DWORD h) {
+        DDSURFACEDESC desc;
+        std::memset(&desc, 0, sizeof(desc));
+        desc.dwSize = sizeof(desc);
+        desc.dwFlags = DDSD_CAPS | DDSD_HEIGHT | DDSD_WIDTH;
+        desc.ddsCaps.dwCaps = DDSCAPS_SYSTEMMEMORY | DDSCAPS_OFFSCREENPLAIN;
+        desc.dwWidth = w;
+        desc.dwHeight = h;
+        IDirectDrawSurface* p = NULL;
+        REQUIRE(pDirectDraw->CreateSurface(&desc, &p, NULL) == DD_OK);
+        return p;
+    };
+    IDirectDrawSurface* pBack = make(16, 12);
+    IDirectDrawSurface* pFx = make(16, 16);
+    DDCOLORKEY key = { 0x0000FF00, 0x0000FF00 };
+    pFx->SetColorKey(DDCKEY_SRCBLT, &key);
+
+    CVidInf mode;
+    IDirectDrawSurface* surfaces[9] = { pBack, NULL, pFx, NULL, NULL, NULL, NULL, NULL, NULL };
+    mode.m_nSurfaces = 9;
+    mode.pSurfaces = surfaces;
+
+    // FX row y, column x holds 0x100 * y + x + 1; the back buffer is clear.
+    DDSURFACEDESC ddsd;
+    ddsd.dwSize = sizeof(ddsd);
+    REQUIRE(mode.LockSurface(2, &ddsd, CRect(0, 0, 16, 16)));
+    for (int y = 0; y < 16; ++y) {
+        for (int x = 0; x < 16; ++x) {
+            reinterpret_cast<DWORD*>(reinterpret_cast<BYTE*>(ddsd.lpSurface) + y * ddsd.lPitch)[x] = 0x100 * y + x + 1;
+        }
+    }
+    mode.UnLockSurface(2, ddsd.lpSurface);
+
+    CRect rFX(0, 0, 8, 4);
+    REQUIRE(mode.FXBltToBack(rFX, 6, 5, 4, 0, CRect(4, 0, 16, 12), 0));
+
+    REQUIRE(mode.LockSurface(0, &ddsd, CRect(0, 0, 16, 12)));
+    for (int y = 0; y < 12; ++y) {
+        for (int x = 0; x < 16; ++x) {
+            const DWORD pixel = reinterpret_cast<DWORD*>(reinterpret_cast<BYTE*>(ddsd.lpSurface) + y * ddsd.lPitch)[x];
+            const bool inside = y >= 5 && y < 9 && x >= 4 && x < 10;
+            INFO("x " << x << " y " << y);
+            CHECK(pixel == (inside ? static_cast<DWORD>(0x100 * (y - 5) + (x - 2) + 1) : 0u));
+        }
+    }
+    mode.UnLockSurface(0, ddsd.lpSurface);
+
+    mode.m_nSurfaces = 0;
+    mode.pSurfaces = NULL;
+    pFx->Release();
+    pBack->Release();
+    pDirectDraw->Release();
+}
