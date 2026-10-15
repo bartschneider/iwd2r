@@ -22,6 +22,7 @@
 #include "CInfGame.h"
 #include "CMessage.h"
 #include "CPathSearch.h"
+#include "CProjectile.h"
 #include "CScreenChapter.h"
 #include "CScreenCharacter.h"
 #include "CScreenWorld.h"
@@ -3010,15 +3011,278 @@ void CGameAIBase::sub_481890(CRect* r, CArray<CRect*>& ary)
 }
 
 // 0x467C50
-void CGameAIBase::FireSpell(const CResRef& resRef, CGameObject* target)
+SHORT CGameAIBase::FireSpell(const CResRef& resRef, CGameObject* target)
 {
-    // TODO: Incomplete.
+    CString sResRef;
+
+    if (target == NULL) {
+        return ACTION_ERROR;
+    }
+
+    resRef.CopyToString(sResRef);
+
+    CSpell* pSpell = new CSpell(CResRef(sResRef));
+    if (pSpell == NULL) {
+        return ACTION_ERROR;
+    }
+
+    pSpell->Demand();
+
+    SHORT nCasterLevel;
+    if (GetObjectType() == CGameObject::TYPE_SPRITE) {
+        SHORT nLevel = static_cast<CGameSprite*>(this)->GetCasterLevel(pSpell, 0, 0);
+        nCasterLevel = 1;
+        if (nLevel > 0) {
+            nCasterLevel = nLevel;
+        }
+    } else {
+        nCasterLevel = 1;
+    }
+
+    // The last ability the caster's level reaches.
+    SHORT nAbilities = 0;
+    LONG nIndex = 0;
+    if (pSpell->GetAbilityCount() > 0) {
+        do {
+            if (nCasterLevel < pSpell->GetAbility(nIndex)->minCasterLevel) {
+                break;
+            }
+            pSpell->GetAbility(nIndex);
+            nAbilities++;
+            nIndex = nAbilities;
+        } while (nIndex < pSpell->GetAbilityCount());
+    }
+
+    LONG nAbility = static_cast<SHORT>(nAbilities - 1);
+    SPELL_ABILITY* pAbility = pSpell->GetAbility(nAbility);
+    if (pAbility == NULL) {
+        pSpell->Release();
+        delete pSpell;
+        return ACTION_ERROR;
+    }
+
+    CProjectile* pProjectile = CProjectile::DecodeProjectile(pAbility->missileType, this, 0);
+
+    if (GetObjectType() == CGameObject::TYPE_SPRITE) {
+        BYTE nClass = 0;
+        DWORD nSpecialization = 0;
+        BYTE nLevel = 0;
+        if (static_cast<CGameSprite*>(this)->sub_727720(pSpell->GetResRef(), nClass, nSpecialization, nLevel) == TRUE) {
+            pProjectile->m_nSpellLevel = nLevel;
+        }
+        pProjectile->m_sourceRes = pSpell->GetResRef();
+    }
+
+    CMessage* message;
+    for (LONG nEffect = 0; nEffect < pAbility->effectCount; nEffect++) {
+        CGameEffect* pEffect = pSpell->GetAbilityEffect(nAbility, nEffect, this, 0, 0, 0);
+        pEffect->m_source = m_pos;
+        pEffect->m_sourceID = m_id;
+        pEffect->m_target = target->GetPos();
+
+        switch (pEffect->m_targetType) {
+        case 1:
+            pEffect->m_flags |= 0x2;
+            message = new CMessageAddEffect(pEffect, m_id, m_id);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+            break;
+        case 2:
+            pProjectile->AddEffect(pEffect);
+            break;
+        case 3:
+            ApplyEffectToParty(pEffect);
+            delete pEffect;
+            break;
+        case 4:
+        case 5:
+        case 6:
+        case 7:
+        case 8:
+            // TODO: The original gives the effect to the area's creatures
+            // through CGameArea 0x46E130 (not ported): 4 all, 5 the party, 6
+            // those of the caster's specific, 7 those of the target's
+            // specific, 8 all but the caster.
+            delete pEffect;
+            break;
+        default:
+            // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameAIBaseActions.cpp
+            // __LINE__: 4780
+            UTIL_ASSERT(FALSE);
+        }
+    }
+
+    if (GetObjectType() == CGameObject::TYPE_SPRITE) {
+        static_cast<CGameSprite*>(this)->FeedBack(CGameSprite::FEEDBACK_SPELL,
+            0,
+            0,
+            0,
+            pSpell->GetGenericName(),
+            0,
+            0);
+    }
+
+    LONG nHeight = pProjectile->DetermineHeight(static_cast<CGameSprite*>(this));
+    CMessageFireProjectile* pFire = new CMessageFireProjectile(pProjectile->m_projectileType,
+        target->GetId(),
+        target->GetPos(),
+        nHeight,
+        m_id,
+        m_id,
+        0);
+
+    if (pProjectile->m_projectileType == 304) {
+        INT nRandom = rand() % 1000000;
+        // TODO: The original also stores it in the projectile's +0x356, a
+        // member of the class DecodeProjectile builds for this type (not
+        // ported yet).
+        pFire->field_20 = nRandom;
+    }
+
+    g_pBaldurChitin->GetMessageHandler()->AddMessage(pFire, FALSE);
+
+    pProjectile->Fire(m_pArea, m_id, target->GetId(), target->GetPos(), 30, 0);
+
+    pSpell->Release();
+    delete pSpell;
+
+    return ACTION_DONE;
 }
 
 // 0x4681E0
-void CGameAIBase::FireSpellPoint(const CResRef& resRef, const CPoint& ptTarget)
+SHORT CGameAIBase::FireSpellPoint(const CResRef& resRef, const CPoint& ptTarget)
 {
-    // TODO: Incomplete.
+    // NOTE: The original builds the spell from an empty string: `resRef` is
+    // never read (0x468211-0x46827A), so the spell has no ability and the
+    // action fails.
+    CString sResRef;
+
+    CSpell* pSpell = new CSpell(CResRef(sResRef));
+    if (pSpell == NULL) {
+        return ACTION_ERROR;
+    }
+
+    pSpell->Demand();
+
+    SHORT nCasterLevel;
+    if (GetObjectType() == CGameObject::TYPE_SPRITE) {
+        SHORT nLevel = static_cast<CGameSprite*>(this)->GetCasterLevel(pSpell, 0, 0);
+        nCasterLevel = 1;
+        if (nLevel > 0) {
+            nCasterLevel = nLevel;
+        }
+    } else {
+        nCasterLevel = 1;
+    }
+
+    SHORT nAbilities = 0;
+    if (pSpell->GetAbilityCount() > 0) {
+        LONG nIndex = 0;
+        do {
+            if (nCasterLevel < pSpell->GetAbility(nIndex)->minCasterLevel) {
+                break;
+            }
+            nAbilities++;
+            nIndex = nAbilities;
+        } while (nIndex < pSpell->GetAbilityCount());
+    }
+
+    LONG nAbility = static_cast<SHORT>(nAbilities - 1);
+    SPELL_ABILITY* pAbility = pSpell->GetAbility(nAbility);
+    if (pAbility == NULL) {
+        pSpell->Release();
+        delete pSpell;
+        return ACTION_ERROR;
+    }
+
+    CProjectile* pProjectile = CProjectile::DecodeProjectile(pAbility->missileType, this, 0);
+
+    if (GetObjectType() == CGameObject::TYPE_SPRITE) {
+        DWORD nSpecialization = 0;
+        BYTE nClass = 0;
+        BYTE nLevel = 0;
+        if (static_cast<CGameSprite*>(this)->sub_727720(pSpell->GetResRef(), nClass, nSpecialization, nLevel) == TRUE) {
+            pProjectile->m_nSpellLevel = nLevel;
+        }
+        pProjectile->m_sourceRes = pSpell->GetResRef();
+    }
+
+    CMessage* message;
+    for (LONG nEffect = 0; nEffect < pAbility->effectCount; nEffect++) {
+        CGameEffect* pEffect = pSpell->GetAbilityEffect(nAbility, nEffect, this, 0, 0, 0);
+        pEffect->m_source = m_pos;
+        pEffect->m_sourceID = m_id;
+        pEffect->m_target = ptTarget;
+
+        switch (pEffect->m_targetType) {
+        case 1:
+            pEffect->m_flags |= 0x2;
+            message = new CMessageAddEffect(pEffect, m_id, m_id);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+            break;
+        case 2:
+            pProjectile->AddEffect(pEffect);
+            break;
+        case 3:
+            ApplyEffectToParty(pEffect);
+            delete pEffect;
+            break;
+        case 4:
+            // TODO: The original gives the effect to all the area's creatures
+            // through CGameArea 0x46E130 (not ported), then deletes it.
+            delete pEffect;
+            break;
+        case 7:
+            delete pEffect;
+            break;
+        case 5:
+        case 6:
+        case 8:
+            // TODO: The original gives the effect to the area's creatures
+            // through CGameArea 0x46E130 (not ported): 5 the party, 6 those
+            // of the caster's specific, 8 all but the caster.
+            delete pEffect;
+            break;
+        default:
+            // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameAIBaseActions.cpp
+            // __LINE__: 4942
+            UTIL_ASSERT(FALSE);
+        }
+    }
+
+    if (GetObjectType() == CGameObject::TYPE_SPRITE) {
+        static_cast<CGameSprite*>(this)->FeedBack(CGameSprite::FEEDBACK_SPELL,
+            0,
+            0,
+            0,
+            pSpell->GetGenericName(),
+            0,
+            0);
+    }
+
+    LONG nHeight = pProjectile->DetermineHeight(static_cast<CGameSprite*>(this));
+    CMessageFireProjectile* pFire = new CMessageFireProjectile(pProjectile->m_projectileType,
+        -1,
+        ptTarget,
+        nHeight,
+        m_id,
+        m_id,
+        0);
+
+    if (pProjectile->m_projectileType == 304) {
+        INT nRandom = rand() % 1000000;
+        // TODO: The original also stores it in the projectile's +0x356 (not
+        // ported yet).
+        pFire->field_20 = nRandom;
+    }
+
+    g_pBaldurChitin->GetMessageHandler()->AddMessage(pFire, FALSE);
+
+    pProjectile->Fire(m_pArea, m_id, -1, ptTarget, 30, 0);
+
+    pSpell->Release();
+    delete pSpell;
+
+    return ACTION_DONE;
 }
 
 // 0x4686C0

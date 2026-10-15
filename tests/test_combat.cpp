@@ -29,6 +29,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <iterator>
 #include <memory>
 #include <string>
@@ -342,9 +343,52 @@ bool SetUpFight(Fight& fight, std::string& why)
     return true;
 }
 
+// One tick as the area runs it, for the fighters and the projectiles in
+// flight only: the game time, each object's AIUpdate when DoAIUpdate lets
+// it, then the messages. (Not the whole world screen: the area's scripts
+// start AR1000's cut-scene, which switches engines and starts the sound.)
+void Tick(CGameArea* pArea, std::initializer_list<CGameSprite*> fighters)
+{
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    pGame->GetWorldTimer()->UpdateTime(FALSE);
+    g_pChitin->nAUCounter++;
+    for (CGameSprite* pFighter : fighters) {
+        if (pFighter->DoAIUpdate(pGame->GetWorldTimer()->m_active, g_pChitin->nAUCounter)) {
+            pFighter->AIUpdate();
+        }
+    }
+
+    std::vector<LONG> projectiles;
+    CTypedPtrList<CPtrList, int*>* lists[] = { &pArea->m_lVertSort, &pArea->m_lVertSortBack, &pArea->m_lVertSortFlight };
+    for (CTypedPtrList<CPtrList, int*>* list : lists) {
+        POSITION pos = list->GetHeadPosition();
+        while (pos != NULL) {
+            LONG id = static_cast<LONG>(reinterpret_cast<INT_PTR>(list->GetNext(pos)));
+            CGameObject* pObject;
+            if (pGame->GetObjectArray()->GetShare(id, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) == CGameObjectArray::SUCCESS) {
+                if (pObject->IsProjectile()) {
+                    projectiles.push_back(id);
+                }
+                pGame->GetObjectArray()->ReleaseShare(id, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+            }
+        }
+    }
+    for (LONG id : projectiles) {
+        CGameObject* pObject;
+        if (pGame->GetObjectArray()->GetDeny(id, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) == CGameObjectArray::SUCCESS) {
+            if (pObject->DoAIUpdate(pGame->GetWorldTimer()->m_active, g_pChitin->nAUCounter)) {
+                pObject->AIUpdate();
+            }
+            pGame->GetObjectArray()->ReleaseDeny(id, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+        }
+    }
+
+    g_pBaldurChitin->GetMessageHandler()->AsynchronousUpdate();
 }
 
-TEST_CASE("combat: a party member melees a goblin in AR1000 until it dies", "[combat][data]")
+}
+
+TEST_CASE("combat: a party member melees a goblin in AR1000 until it dies and casts a spell", "[combat][data]")
 {
     if (DataDir() == nullptr) {
         SKIP("[iwd2r-skip] IWD2_DATA unset");
@@ -375,30 +419,17 @@ TEST_CASE("combat: a party member melees a goblin in AR1000 until it dies", "[co
     pCharacter->ClearActions(FALSE);
     pCharacter->AddAction(attack);
 
-    CMessageHandler* pHandler = g_pBaldurChitin->GetMessageHandler();
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    if (!pGame->GetWorldTimer()->m_active) {
+        pGame->GetWorldTimer()->StartTime();
+    }
     int frames = 0;
     int swings = 0;
     SHORT lowest = goblinStart;
     SHORT previous = goblinStart;
     bool hpRose = false;
-    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
-    if (!pGame->GetWorldTimer()->m_active) {
-        pGame->GetWorldTimer()->StartTime();
-    }
     while (frames < 6000) {
-        // A tick of the two fighters as the area runs them: the game time,
-        // each object's AIUpdate when DoAIUpdate lets it, then the messages.
-        // (Not the whole world screen: the area's scripts start AR1000's
-        // cut-scene, which switches engines and starts the sound.)
-        pGame->GetWorldTimer()->UpdateTime(FALSE);
-        g_pChitin->nAUCounter++;
-        CGameSprite* fighters[] = { pCharacter, pGoblin };
-        for (CGameSprite* pFighter : fighters) {
-            if (pFighter->DoAIUpdate(pGame->GetWorldTimer()->m_active, g_pChitin->nAUCounter)) {
-                pFighter->AIUpdate();
-            }
-        }
-        pHandler->AsynchronousUpdate();
+        Tick(fight.pArea, { pCharacter, pGoblin });
         if (pCharacter->m_attackFrame == 0) {
             swings++;
         }
@@ -420,6 +451,27 @@ TEST_CASE("combat: a party member melees a goblin in AR1000 until it dies", "[co
     // The character keeps hit points between none and its start (the goblin
     // may hit back).
     CHECK(pCharacter->GetBaseStats()->m_hitPoints <= characterStart);
+    CHECK(pCharacter->GetBaseStats()->m_hitPoints >= 0);
+
+    // One spell: Magic Missile (SPWI112) on a second goblin a few squares
+    // off, through CGameAIBase::FireSpell (0x467C50), its projectile flying
+    // until it delivers the damage.
+    const CPoint& pos = pCharacter->GetPos();
+    CGameSprite* pTarget = AddCreature(fight.pArea, "10GOB", CPoint(pos.x - 6 * CPathSearch::GRID_SQUARE_SIZEX, pos.y));
+    REQUIRE(pTarget != NULL);
+    fight.pArea->SortLists();
+    const SHORT targetStart = pTarget->GetBaseStats()->m_hitPoints;
+    REQUIRE(targetStart > 0);
+    CHECK(pCharacter->FireSpell(CResRef("SPWI112"), pTarget) == CGameAIBase::ACTION_DONE);
+    int spellFrames = 0;
+    while (spellFrames < 600 && pTarget->GetBaseStats()->m_hitPoints == targetStart) {
+        Tick(fight.pArea, { pCharacter, pTarget });
+        spellFrames++;
+    }
+    INFO("spell frames " << spellFrames << ", target hit points " << targetStart << " -> " << pTarget->GetBaseStats()->m_hitPoints);
+    // Magic Missile does 1d4+1 at the first caster levels.
+    CHECK(pTarget->GetBaseStats()->m_hitPoints < targetStart);
+    CHECK(pTarget->GetBaseStats()->m_hitPoints >= targetStart - 5);
 }
 
 TEST_CASE("combat: GetAC sums the armour class modifiers and the capped dexterity bonus", "[combat][data]")
