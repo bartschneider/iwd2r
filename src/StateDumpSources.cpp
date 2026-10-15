@@ -306,6 +306,10 @@ void ReadProbe(platform::replay_probe::Frame* out)
             o.equipedEffects = sprite->m_equipedEffectList.GetCount();
             o.xp = sprite->m_baseStats.m_xp;
             o.hp = sprite->m_baseStats.m_hitPoints;
+            // NOTE: The AI thread owns m_pPath and m_timers; with IWD2R_PROBE
+            // set these reads race it (the frame gate keeps it waiting at a
+            // frame's start, but a path the search thread hands over is not
+            // locked here). Diagnostic runs only.
             o.destX = sprite->m_posDest.x;
             o.destY = sprite->m_posDest.y;
             for (SHORT n = 0; sprite->m_pPath != NULL && n < sprite->m_nPath && n < 64; n++)

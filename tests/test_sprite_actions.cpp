@@ -1234,3 +1234,87 @@ TEST_CASE("trigger: IsTeamBitOn tests the bits SetTeamBit sets (0x40E4)", "[ai][
     CHECK_FALSE(pCharacter->EvaluateStatusTrigger(teamBit64));
     pCharacter->m_curAction = CAIAction();
 }
+
+TEST_CASE("action: FloatMessage floats the text over its target and is done (case 241)", "[ai][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    CGameSprite* pCharacter = NewGameInStartArea(cre);
+    REQUIRE(pCharacter->GetArea() != NULL);
+
+    // A sprite target: done (0x4508C4 floats the strref over it).
+    CAIObjectType actee(pCharacter->GetAIType());
+    actee.m_nInstance = pCharacter->GetId();
+    pCharacter->m_curAction = CAIAction(241, actee, 1677, 0, 0);
+    CHECK(pCharacter->CGameAIBase::ExecuteAction() == CGameAIBase::ACTION_DONE);
+
+    // No sprite or door to float over: done as well (0x44E1DB).
+    pCharacter->m_curAction = CAIAction(241, CAIObjectType::NOONE, 1677, 0, 0);
+    CHECK(pCharacter->CGameAIBase::ExecuteAction() == CGameAIBase::ACTION_DONE);
+    pCharacter->m_curAction = CAIAction();
+}
+
+TEST_CASE("walk: the distance to the next node is rounded before it is cut into steps", "[ai][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    CGameSprite* pCharacter = NewGameInStartArea(cre);
+    CGameArea* pArea = pCharacter->GetArea();
+    REQUIRE(pArea != NULL);
+    pArea->SortLists();
+
+    // At the centre of its square, with one node: the square up and left,
+    // 16 by 16 away in the 4/3-scaled space. sqrt(512) is 22.6: the
+    // original rounds it to 23 (fadd 0.5 at 0x6F9811), so a move scale of 9
+    // cuts it into (4 + 23) / 9 = 3 steps; truncated it would be 2.
+    const CPoint start = Square(pCharacter->GetPos());
+    CPoint square(-1, -1);
+    for (int dy = -6; dy <= 6 && square.x == -1; dy++) {
+        for (int dx = -6; dx <= 6 && square.x == -1; dx++) {
+            const CPoint candidate(start.x + dx, start.y + dy);
+            if (OpenSquare(pCharacter, candidate) && OpenSquare(pCharacter, CPoint(candidate.x - 1, candidate.y - 1))) {
+                square = candidate;
+            }
+        }
+    }
+    REQUIRE(square.x != -1);
+    const CPoint centre(square.x * CPathSearch::GRID_SQUARE_SIZEX + CPathSearch::GRID_SQUARE_SIZEX / 2,
+        square.y * CPathSearch::GRID_SQUARE_SIZEY + CPathSearch::GRID_SQUARE_SIZEY / 2);
+    pCharacter->m_pos = centre;
+    pCharacter->m_posOld = centre;
+    pCharacter->m_posDest = centre;
+    pCharacter->m_posExact.x = centre.x << CGameSprite::EXACT_SCALE;
+    pCharacter->m_posExact.y = (4 * centre.y / 3) << CGameSprite::EXACT_SCALE;
+    pCharacter->m_animation.SetMoveScale(9);
+    REQUIRE(pCharacter->m_animation.GetMoveScale() == 9);
+
+    POINT node = { square.x - 1, square.y - 1 };
+    pCharacter->DropPath();
+    pCharacter->m_pPath = new LONG[1];
+    pCharacter->m_pPath[0] = CPathSearch::PointToPosition(&node);
+    pCharacter->m_nPath = 1;
+    pCharacter->m_currPath = 0;
+
+    pCharacter->AIUpdateWalk();
+    CHECK(pCharacter->m_posDelta.x == -16 * (1 << CGameSprite::EXACT_SCALE) / 3);
+    CHECK(pCharacter->m_posDelta.y == -16 * (1 << CGameSprite::EXACT_SCALE) / 3);
+    pCharacter->DropPath();
+}

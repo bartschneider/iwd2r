@@ -9,7 +9,6 @@
 #include "CCreatureFile.h"
 #include "CGameAnimationType.h"
 #include "CGameArea.h"
-#include "CGameEffect.h"
 #include "CGameContainer.h"
 #include "CGameEffect.h"
 #include "CGameObject.h"
