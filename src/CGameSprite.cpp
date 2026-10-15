@@ -108,7 +108,7 @@ const BYTE CGameSprite::SOUND_REACT_TO_DEATH = 13;
 const SHORT CGameSprite::EXACT_SCALE = 10;
 
 // 0x85BB9A
-const SHORT CGameSprite::READY_COUNT = 75;
+const SHORT CGameSprite::READY_COUNT = 60;
 
 // 0x85BB9C
 const SHORT CGameSprite::USER_OVERRIDE_COUNT = 75;

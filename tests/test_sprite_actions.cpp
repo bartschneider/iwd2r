@@ -19,6 +19,7 @@
 #include "CScreenCreateChar.h"
 #include "CScreenWorld.h"
 #include "CSearchBitmap.h"
+#include "CStore.h"
 #include "CUtil.h"
 #include "ScreenLayout.h"
 #include "data_view.h"
@@ -1406,7 +1407,8 @@ TEST_CASE("sprite: SetDirection turns the short way round (0x706C80)", "[ai][dat
     // More than half a turn up: down instead (2 -> 0 -> 14).
     CHECK(senseFrom(2, 14) == -1);
     CHECK(senseFrom(14, 2) == 1);
-    // Exactly half a turn: from below goes down, with the skip.
+    // Exactly half a turn: up from below (+8 is not above 8), down from
+    // above negated to up (-8 is at most -8), with the skip.
     CHECK(senseFrom(2, 10) == 1);
     CHECK(pCharacter->m_skipDeltaDirection == 4);
     CHECK(senseFrom(10, 2) == 1);
@@ -1469,21 +1471,92 @@ TEST_CASE("trigger: SubRace and Kit and CheckSkillGT/LT and PartyHasItem (0x40CD
     missing.m_string1 = "NOSUCHIT";
     CHECK(pCharacter->FindItemPersonal(CString("NOSUCHIT"), 0, FALSE) == -1);
     CHECK_FALSE(pCharacter->EvaluateStatusTrigger(missing));
-    SHORT slot = -1;
-    for (SHORT n = 0; n < 51 && slot == -1; n++) {
-        if (pCharacter->GetEquipment()->m_items[n] != NULL) {
-            slot = n;
+    // A known item in a free inventory slot: found by name in any case.
+    CGameSpriteEquipment* pEquipment = pCharacter->GetEquipment();
+    SHORT gemSlot = -1;
+    SHORT bagSlot = -1;
+    for (SHORT n = 18; n < 51 && bagSlot == -1; n++) {
+        if (pEquipment->m_items[n] == NULL) {
+            if (gemSlot == -1) {
+                gemSlot = n;
+            } else {
+                bagSlot = n;
+            }
         }
     }
-    if (slot != -1) {
-        CString sName = pCharacter->GetEquipment()->m_items[slot]->cResRef.GetResRefStr();
-        CString sLower(sName);
-        sLower.MakeLower();
-        CHECK(pCharacter->FindItemPersonal(sLower, 0, FALSE) == slot);
-        CAITrigger carried(0x4042, 0);
-        carried.m_string1 = sLower;
-        CHECK(pCharacter->EvaluateStatusTrigger(carried));
+    REQUIRE(bagSlot != -1);
+    pEquipment->m_items[gemSlot] = new CItem(CResRef("00GEM02"), 1, 0, 0, 0, 0);
+    CHECK(pCharacter->FindItemPersonal(CString("00gem02"), 0, FALSE) == gemSlot);
+    CAITrigger carried(0x4042, 0);
+    carried.m_string1 = "00gem02";
+    CHECK(pCharacter->EvaluateStatusTrigger(carried));
+
+    // A gem in a bag (an item of type 58 whose store, named as the bag,
+    // holds it): FindItemBags (0x722530) answers the bag's slot, through
+    // FindItemInStore (0x5C8190) loading the bag's store, and PartyHasItem
+    // finds it there.
+    pEquipment->m_items[bagSlot] = new CItem(CResRef("00GBGA01"), 0, 0, 0, 0, 0);
+    REQUIRE(pEquipment->m_items[bagSlot]->GetItemType() == 58);
+    {
+        CStore bag(CResRef("00GBGA01"));
+        while (bag.m_lInventory.GetCount() > 0) {
+            delete bag.m_lInventory.RemoveHead();
+        }
+        CItem gem(CResRef("00GEM03"), 1, 0, 0, 0, 0);
+        REQUIRE(bag.AddItemExt(gem, 1) == 0);
+        bag.Marshal(g_pBaldurChitin->GetObjectGame()->m_sTempDir);
     }
+    CHECK(pCharacter->FindItemPersonal(CString("00GEM03"), 0, FALSE) == -1);
+    CHECK(pCharacter->FindItemBags(CString("00gem03"), 0, FALSE) == bagSlot);
+    CHECK(pCharacter->FindItemBags(CString("00GEM04"), 0, FALSE) == -1);
+    CAITrigger inBag(0x4042, 0);
+    inBag.m_string1 = "00GEM03";
+    CHECK(pCharacter->EvaluateStatusTrigger(inBag));
+
+    CStore::InvalidateStore(CResRef("00GBGA01"));
+    delete pEquipment->m_items[gemSlot];
+    pEquipment->m_items[gemSlot] = NULL;
+    delete pEquipment->m_items[bagSlot];
+    pEquipment->m_items[bagSlot] = NULL;
+}
+
+TEST_CASE("sprite: ResolveInstants sends the idle sequence after 60 no-action ticks (0x728BC0)", "[ai][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    CGameSprite* pCharacter = NewGameInStartArea(cre);
+    REQUIRE(pCharacter->GetArea() != NULL);
+    REQUIRE(pCharacter->m_pPath == NULL);
+
+    CMessageHandler* pHandler = g_pBaldurChitin->GetMessageHandler();
+    pHandler->AsynchronousUpdate();
+    const SHORT idle = pCharacter->GetIdleSequence();
+    const SHORT other = idle == 6 ? 7 : 6;
+    auto sendsAfter = [&](LONG count) {
+        pCharacter->ClearActions(FALSE);
+        pCharacter->m_curAction = CAIAction();
+        pCharacter->m_sequenceTest = FALSE;
+        pCharacter->m_nSequence = other;
+        pCharacter->m_noActionCount = count;
+        const INT before = pHandler->m_messageList.GetCount();
+        pCharacter->ResolveInstants(TRUE);
+        const INT after = pHandler->m_messageList.GetCount();
+        pHandler->AsynchronousUpdate();
+        return after > before;
+    };
+    // NoAction counts one more (case 0), then the count must be above
+    // READY_COUNT, the WORD at 0x85BB9A: 60.
+    CHECK_FALSE(sendsAfter(59));
+    CHECK(sendsAfter(60));
 }
 
 TEST_CASE("action: FloatMessage floats the text over its target and is done (case 241)", "[ai][data]")
