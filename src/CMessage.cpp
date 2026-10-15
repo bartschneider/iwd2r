@@ -6455,7 +6455,9 @@ CMessageContainerAddItem::CMessageContainerAddItem(const CItem& item, SHORT slot
     //
     m_item = item;
     m_slotNum = slotNum;
-    m_bCompressContainer = m_bCompressContainer;
+    // The parameter, as the inlined copy at 0x48082F-0x480844 stores it
+    // (CGameContainer::PlaceItemInBlankSlot).
+    m_bCompressContainer = bCompressContainer;
 }
 
 // 0x47DFC0

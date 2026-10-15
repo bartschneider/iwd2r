@@ -8,7 +8,9 @@
 #include "CGameSpawning.h"
 #include "CGameSprite.h"
 #include "CInfGame.h"
+#include "CItem.h"
 #include "CMemINI.h"
+#include "CMessage.h"
 #include "CScreenCreateChar.h"
 #include "CSpawn.h"
 #include "CUtil.h"
@@ -1640,4 +1642,60 @@ TEST_CASE("sound: DoAIUpdate plays a periodic sound and draws its next period", 
     pSound->m_soundObject.m_dwFlags = 0x4;
     pSound->DoAIUpdate(TRUE, counter);
     CHECK(pSound->m_periodCount == 1);
+}
+
+TEST_CASE("items: CheckItemUsable answers 1 for every item type but 35 and 11", "[spawn][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CGameSprite* pSprite = NewGameWithOneCharacter(cre, "Probe");
+    pSprite->m_derivedStats.m_classMask = CLASSMASK_FIGHTER;
+    pSprite->m_derivedStats.m_nSkills[CGAMESPRITE_SKILL_USE_MAGIC_DEVICE] = 0;
+
+    // 0x5BA094: a wand (35) goes on to the class tests. 00WAND02 is not
+    // usable by a fighter (bit 0x10 of its flags), and without Use Magic
+    // Device there is no second chance: 0.
+    CItem wand(CResRef("00WAND02"), 0, 0, 0, 0, 0);
+    REQUIRE(wand.GetItemType() == 35);
+    CHECK(pGame->CheckItemUsable(pSprite, &wand) == 0);
+
+    // A scroll (11) usable by every class: 1.
+    CItem scroll(CResRef("00SCRL01"), 0, 0, 0, 0, 0);
+    REQUIRE(scroll.GetItemType() == 11);
+    CHECK(pGame->CheckItemUsable(pSprite, &scroll) == 1);
+
+    // Any other type answers 1 at once.
+    CItem dagger(CResRef("00DAGG01"), 0, 0, 0, 0, 0);
+    REQUIRE(dagger.GetItemType() != 35);
+    REQUIRE(dagger.GetItemType() != 11);
+    CHECK(pGame->CheckItemUsable(pSprite, &dagger) == 1);
+}
+
+TEST_CASE("items: CMessageContainerAddItem keeps its compress flag", "[spawn][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+
+    // The constructor inlined at 0x480844 stores the parameter.
+    const CMessageContainerAddItem keep(CItem(), 3, TRUE, 1, 2);
+    CHECK(keep.m_bCompressContainer == TRUE);
+    CHECK(keep.m_slotNum == 3);
+    const CMessageContainerAddItem drop(CItem(), 4, FALSE, 1, 2);
+    CHECK(drop.m_bCompressContainer == FALSE);
 }
