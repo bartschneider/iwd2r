@@ -1010,3 +1010,54 @@ TEST_CASE("draw_hline_shaded24", "[vid]")
         }
     }
 }
+
+// The cell's sequence checks compare unsigned (GetCurrentCenterPoint
+// 0x7AD5AC, GetCurrentFrameSize 0x7AD88C, IsEndOfSequence 0x7AE084,
+// GetFrame 0x7B09CA): a negative current sequence counts as past the end,
+// so the frame comes from sequence 0 (GetFrame resets it to 0) and
+// IsEndOfSequence answers FALSE. Two sequences of one frame each, 4x3
+// centred (1, 2) and 7x5 centred (3, 4).
+TEST_CASE("cell_negative_sequence_is_past_the_end", "[vid]")
+{
+    BAMHEADER header = {};
+    header.nSequences = 2;
+    SEQUENCEENTRY sequences[2] = { { 1, 0 }, { 1, 1 } };
+    WORD frameList[2] = { 0, 1 };
+    FRAMEENTRY frames[2] = { { 4, 3, 1, 2, 0 }, { 7, 5, 3, 4, 0 } };
+
+    auto* resStorage = static_cast<unsigned char*>(::operator new(sizeof(CResCell)));
+    std::memset(resStorage, 0, sizeof(CResCell));
+    auto* res = reinterpret_cast<CResCell*>(resStorage);
+    res->m_bParsed = TRUE;
+    res->m_pBamHeader = &header;
+    res->m_pSequences = sequences;
+    res->m_pFrameList = frameList;
+    res->m_pFrames = frames;
+    auto* cellStorage = static_cast<unsigned char*>(::operator new(sizeof(CVidCell)));
+    std::memset(cellStorage, 0, sizeof(CVidCell));
+    auto* cell = reinterpret_cast<CVidCell*>(cellStorage);
+    static_cast<CResHelper<CResCell, 1000>*>(cell)->pRes = res;
+    cell->field_C8 = 1;
+
+    for (const SHORT sequence : { SHORT(-1), SHORT(-2), SHORT(2), SHORT(1) }) {
+        INFO("sequence " << sequence);
+        const bool inRange = sequence == 1;
+        cell->m_nCurrentSequence = sequence;
+        cell->m_nCurrentFrame = 0;
+        CSize size;
+        REQUIRE(cell->GetCurrentFrameSize(size, TRUE));
+        CHECK(size.cx == (inRange ? 7 : 4));
+        CHECK(size.cy == (inRange ? 5 : 3));
+        CPoint center;
+        REQUIRE(cell->GetCurrentCenterPoint(center, TRUE));
+        CHECK(center.x == (inRange ? 3 : 1));
+        CHECK(center.y == (inRange ? 4 : 2));
+        CHECK(cell->IsEndOfSequence(TRUE) == (inRange ? TRUE : FALSE));
+        REQUIRE(cell->CVidCell::GetFrame(TRUE));
+        CHECK(cell->m_nCurrentSequence == (inRange ? 1 : 0));
+        CHECK(cell->m_pFrame == &frames[inRange ? 1 : 0]);
+    }
+
+    ::operator delete(cellStorage);
+    ::operator delete(resStorage);
+}

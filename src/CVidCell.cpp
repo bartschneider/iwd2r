@@ -94,7 +94,7 @@ void CVidCell::AddRangeAffect(USHORT nAffectType, USHORT nRangeId, COLORREF rgbA
         break;
     default:
         // __FILE__: C:\Projects\Icewind2\src\chitin\ChVidImage.cpp
-        // __LINE__: 523
+        // __LINE__: 565
         UTIL_ASSERT(FALSE);
     }
 }
@@ -195,8 +195,9 @@ BOOL CVidCell::GetCurrentCenterPoint(CPoint& ptReference, BOOLEAN bDemanded)
     }
 
     SHORT nSequence;
-    // NOTE: Uninline.
-    if (m_nCurrentSequence < GetResBamHeader()->nSequences) {
+    // NOTE: Uninline. The sequence compares unsigned (jb at 0x7AD5AC), so
+    // a negative one counts as past the end.
+    if (static_cast<WORD>(m_nCurrentSequence) < GetResBamHeader()->nSequences) {
         nSequence = m_nCurrentSequence;
     } else {
         nSequence = 0;
@@ -272,8 +273,9 @@ BOOL CVidCell::GetCurrentFrameSize(CSize& frameSize, BOOLEAN bDemanded)
     }
 
     SHORT nSequence;
-    // NOTE: Uninline.
-    if (m_nCurrentSequence < GetResBamHeader()->nSequences) {
+    // NOTE: Uninline. The sequence compares unsigned (jb at 0x7AD88C), so
+    // a negative one counts as past the end.
+    if (static_cast<WORD>(m_nCurrentSequence) < GetResBamHeader()->nSequences) {
         nSequence = m_nCurrentSequence;
     } else {
         nSequence = 0;
@@ -380,7 +382,7 @@ BOOL CVidCell::GetFrameCenterPoint(SHORT nSequence, SHORT nFrame, CSize& ptCtr, 
     UTIL_ASSERT(nSequence < GetResBamHeader()->nSequences);
 
     // __FILE__: C:\Projects\Icewind2\src\chitin\ChVidImage.cpp
-    // __LINE__: 1189
+    // __LINE__: 1190
     UTIL_ASSERT(nFrame < GetResSequences()[nSequence].nFrames);
 
     BOOL bSuccess;
@@ -494,14 +496,16 @@ BOOL CVidCell::IsEndOfSequence(BOOLEAN bDemanded)
         return FALSE;
     }
 
-    // NOTE: Uninline.
-    if (m_nCurrentSequence < GetResBamHeader()->nSequences) {
+    // NOTE: Uninline. The sequence compares and indexes unsigned (jae at
+    // 0x7AE084), so a negative one counts as past the end.
+    WORD nSequence = static_cast<WORD>(m_nCurrentSequence);
+    if (nSequence < GetResBamHeader()->nSequences) {
         bResult = TRUE;
         // FIXME: Repeating calls.
         // NOTE: Uninline.
-        if (m_nCurrentFrame < GetResSequences()[m_nCurrentSequence].nFrames - 1) {
+        if (m_nCurrentFrame < GetResSequences()[nSequence].nFrames - 1) {
             // NOTE: Uninline.
-            if (GetResSequences()[m_nCurrentSequence].nFrames != 0) {
+            if (GetResSequences()[nSequence].nFrames != 0) {
                 bResult = FALSE;
             }
         }
@@ -1484,11 +1488,13 @@ BOOL CVidCell::BltFromFX(LPDIRECTDRAWSURFACE pSurface, int x, int y, const CRect
                 rDest.right = rSrcSurface.right - rSrcSurface.left;
                 rDest.bottom = rSrcSurface.bottom - rSrcSurface.top;
 
+                // The colour key goes with the mirror (0x1008800 at
+                // 0x7B090F).
                 hr = g_pChitin->cVideo.cVidBlitter.Blt(pSurface,
                     &rDest,
                     g_pChitin->GetCurrentVideoMode()->pSurfaces[m_nFxSurface],
                     &rSrcSurface,
-                    DDBLT_WAIT | DDBLT_DDFX,
+                    DDBLT_WAIT | DDBLT_KEYSRC | DDBLT_DDFX,
                     &fx);
                 g_pChitin->GetCurrentVideoMode()->CheckResults(hr);
             } while (hr == DDERR_SURFACELOST || hr == DDERR_WASSTILLDRAWING);
@@ -1531,7 +1537,9 @@ BOOL CVidCell::GetFrame(BOOLEAN bDemanded)
         pHeader = pRes->m_pBamHeader;
     }
 
-    if (!(m_nCurrentSequence < pHeader->nSequences)) {
+    // The sequence compares unsigned (jb at 0x7B09CA): a negative one is
+    // reset too.
+    if (!(static_cast<WORD>(m_nCurrentSequence) < pHeader->nSequences)) {
         m_nCurrentSequence = 0;
     }
 
