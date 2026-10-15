@@ -697,7 +697,15 @@ namespace {
             to.w = w;
             to.h = h;
             to.d = 1;
-            SDL_UploadToGPUTexture(copy, &from, &to, true);
+            // Cycle only when the whole texture is rewritten. SDL's rule
+            // (SDL_gpu.h, "cycling"): a cycled texture is a fresh resource
+            // whose previous contents are undefined while an earlier command
+            // buffer may still use the old one, so a cycled partial upload
+            // would leave every texel outside the dirty rectangle undefined
+            // (text vanishing or stale). Without cycling the upload is
+            // ordered before this command buffer's pass that samples it.
+            const bool whole = r.left == 0 && r.top == 0 && static_cast<int>(w) == overlay.width && static_cast<int>(h) == overlay.height;
+            SDL_UploadToGPUTexture(copy, &from, &to, whole);
             SDL_EndGPUCopyPass(copy);
             return true;
         }

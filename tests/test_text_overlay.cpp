@@ -433,8 +433,10 @@ std::string FileHash(const std::filesystem::path& path)
 }
 
 // The pinned golden hashes of this machine: <IWD2R_HOME or
-// ~/.local/share/iwd2r>/text-golden, lines "<name> <hash>".
-std::map<std::string, std::string> Pinned()
+// ~/.local/share/iwd2r>/text-golden, lines "<name> <hash>". present is
+// false when the file does not exist (the hashes are then only reported, as
+// the smoke test does without IWD2R_SMOKE_HASH).
+std::map<std::string, std::string> Pinned(bool* present)
 {
     std::map<std::string, std::string> pinned;
     std::string home;
@@ -443,6 +445,7 @@ std::map<std::string, std::string> Pinned()
     else if (const char* user = std::getenv("HOME"))
         home = std::string(user) + "/.local/share/iwd2r";
     std::ifstream in(std::filesystem::path(home) / "text-golden");
+    *present = in.good();
     std::string name;
     std::string hash;
     while (in >> name >> hash)
@@ -450,29 +453,28 @@ std::map<std::string, std::string> Pinned()
     return pinned;
 }
 
-}
-
-// Golden presented frames with scalable text: the main menu, the character
-// generation screen and its description panel (scenarios/text_screens.txt)
-// at Scale 2 under the classic presenter. Each machine pins its own hashes
-// (the game data and the renderer differ), as for the smoke test: a hash not
-// pinned yet is printed for <IWD2R_HOME>/text-golden. Inspect the shots once
-// by eye before pinning them.
-TEST_CASE("text_golden_presented_frames", "[text][data]")
+// Runs scenarios/text_screens.txt in this process with scalable text at
+// Scale 2 (presented at most at the headless display's 1024x768) and checks
+// the presented shots against the pinned hashes, named <prefix>_<shot>.
+// videoDriver: SDL's dummy for classic, offscreen (Vulkan through
+// VK_EXT_headless_surface) for gpu. Returns false when the gpu presenter did
+// not start (the caller skips).
+bool RunGolden(const char* prefix, const char* videoDriver, const char* presenter)
 {
     const char* env = std::getenv("IWD2_DATA");
-    if (env == nullptr || *env == '\0') {
-        SKIP("[iwd2r-skip] IWD2_DATA unset");
-    }
     DataView view(env);
     const std::filesystem::path shots = std::filesystem::path(view.Path()).parent_path() / "text-golden-shots";
     std::filesystem::create_directories(shots);
     const std::string script = std::string(IWD2R_SOURCE_DIR) + "/scenarios/text_screens.txt";
-    SetEnv("IWD2R_INI_OVERRIDE", "Program Options/Text Renderer=scalable;Program Options/Resolution=1600;Program Options/Height=1200;Program Options/Scale=2;Program Options/Full Screen=0");
+    const std::string overrides = std::string("Program Options/Text Renderer=scalable;Program Options/Resolution=1600;Program Options/Height=1200;"
+                                              "Program Options/Scale=2;Program Options/Full Screen=0;Program Options/Presenter=")
+        + presenter;
+    SetEnv("IWD2R_INI_OVERRIDE", overrides.c_str());
     compat::ini::ResetOverridesForTesting();
-    SetEnv("SDL_VIDEO_DRIVER", "dummy");
+    SetEnv("SDL_VIDEO_DRIVER", videoDriver);
     SetEnv("SDL_AUDIO_DRIVER", "dummy");
     SetEnv("IWD2R_AUDIO", "null");
+    SetEnv("IWD2R_GPU_PROBE", "skip");
     SetEnv("IWD2R_SCRIPT", script.c_str());
     SetEnv("IWD2R_SHOT_DIR", shots.string().c_str());
     SetEnv("IWD2R_SHOT_PRESENTED", "1");
@@ -485,24 +487,58 @@ TEST_CASE("text_golden_presented_frames", "[text][data]")
     const int rc = iwd2r_main(1, argv);
     std::filesystem::current_path(cwd);
     SetEnv("IWD2_DATA", saved.c_str());
-    for (const char* name : { "IWD2R_SCRIPT", "IWD2R_SHOT_DIR", "IWD2R_SHOT_PRESENTED", "IWD2R_INI_OVERRIDE" })
+    for (const char* name : { "IWD2R_SCRIPT", "IWD2R_SHOT_DIR", "IWD2R_SHOT_PRESENTED", "IWD2R_INI_OVERRIDE", "IWD2R_GPU_PROBE" })
         SetEnv(name, nullptr);
     compat::ini::ResetOverridesForTesting();
     REQUIRE(rc == 0);
+    if (std::string(presenter) == "gpu" && !present::testing::LastFallbackReason().empty())
+        return false;
 
-    const std::map<std::string, std::string> pinned = Pinned();
+    bool present = false;
+    const std::map<std::string, std::string> pinned = Pinned(&present);
     for (const char* shot : { "01_start", "04_chargen", "05_gender" }) {
-        const std::string name = std::string("text_") + shot + "-presented";
-        const std::string hash = FileHash(shots / (std::string(shot) + "-presented.png"));
-        INFO(name);
+        const std::string name = std::string(prefix) + "_" + shot + "-presented";
+        const std::filesystem::path png = shots / (std::string(shot) + "-presented.png");
+        const std::string hash = FileHash(png);
+        INFO(name << " " << hash << " (" << png.string() << ")");
         REQUIRE_FALSE(hash.empty());
-        auto it = pinned.find(name);
-        if (it == pinned.end()) {
-            WARN("not pinned: " << name << " " << hash << " (add the line to <IWD2R_HOME>/text-golden after looking at " << (shots / (std::string(shot) + "-presented.png")).string() << ")");
+        if (!present) {
+            WARN("not pinned (no <IWD2R_HOME>/text-golden): " << name << " " << hash);
             continue;
         }
+        auto it = pinned.find(name);
+        REQUIRE(it != pinned.end());
         CHECK(it->second == hash);
     }
+    return true;
+}
+
+}
+
+// Golden presented frames with scalable text: the main menu, the character
+// generation screen and its description panel (scenarios/text_screens.txt)
+// at Scale 2. Each machine pins its own hashes in <IWD2R_HOME>/text-golden
+// (the game data and the renderer differ), as the smoke test pins its frame:
+// with the file present every shot must be listed and match. Inspect the
+// shots once by eye before pinning them. Scale 3 is out of reach headless
+// (the display is 1024x768; docs/followups.md).
+TEST_CASE("text_golden_presented_frames", "[text][data]")
+{
+    const char* env = std::getenv("IWD2_DATA");
+    if (env == nullptr || *env == '\0') {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    REQUIRE(RunGolden("text", "dummy", "classic"));
+}
+
+TEST_CASE("text_golden_presented_frames_gpu", "[text][data]")
+{
+    const char* env = std::getenv("IWD2_DATA");
+    if (env == nullptr || *env == '\0') {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    if (!RunGolden("text_gpu", "offscreen", "gpu"))
+        SKIP("the gpu presenter did not start: " << present::testing::LastFallbackReason());
 }
 
 TEST_CASE("text_toggle_hotkey", "[text]")
