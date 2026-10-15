@@ -1318,3 +1318,47 @@ TEST_CASE("walk: the distance to the next node is rounded before it is cut into 
     CHECK(pCharacter->m_posDelta.y == -16 * (1 << CGameSprite::EXACT_SCALE) / 3);
     pCharacter->DropPath();
 }
+
+TEST_CASE("object: FloatText floats only in the area on view and clears its text link", "[ai][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    CGameSprite* pCharacter = NewGameInStartArea(cre);
+    CGameArea* pArea = pCharacter->GetArea();
+    REQUIRE(pArea != NULL);
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+    // 0x4C80E0. The text object itself needs the world screen's video mode
+    // (CGameText::SetText's FX size), which these tests do not set up; the
+    // walk_and_talk replay covers it (the goblins' float texts take the
+    // original's object ids). Here: an object at (-1, -1) floats nothing,
+    // and an object outside the area on view does not either.
+    const LONG nObjectsBefore = pGame->GetObjectArray()->m_nNextObjectId;
+    const CPoint pos = pCharacter->m_pos;
+    pCharacter->field_1C = 0;
+    pCharacter->m_pos = CPoint(-1, -1);
+    pCharacter->FloatText(2806, 10, 5);
+    CHECK(pCharacter->field_1C == 0);
+    pCharacter->m_pos = pos;
+
+    const BYTE nVisible = pGame->m_visibleArea;
+    pGame->m_visibleArea = static_cast<BYTE>((nVisible + 1) % CINFGAME_MAX_AREAS);
+    pCharacter->FloatText(2806, 10, 5);
+    CHECK(pCharacter->field_1C == 0);
+    CHECK(pGame->GetObjectArray()->m_nNextObjectId == nObjectsBefore);
+    pGame->m_visibleArea = nVisible;
+
+    // Strref 0 clears the link to the previous text.
+    pCharacter->field_1C = 0;
+    pCharacter->FloatText(0, 10, 5);
+    CHECK(pCharacter->field_1C == 0);
+}
