@@ -280,8 +280,18 @@ TEST_CASE("Icewind586B70::sub_587510 lists the ids of the filled entries", "[ice
     CHECK(ids[1] == 14);
 }
 
-TEST_CASE("CInfButtonArray keeps the customizable buttons and the weapon set", "[buttons]")
+// The constructor (0x5879E0) sets state 0 through SetState and UpdateButtons,
+// which read the engine (the UI's double size and the world screen's
+// panels), as the original's does inside CInfGame's constructor.
+TEST_CASE("CInfButtonArray keeps the customizable buttons and the weapon set", "[buttons][data]")
 {
+    const char* env = std::getenv("IWD2_DATA");
+    if (env == nullptr || *env == '\0') {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+
     CInfButtonArray* pButtons = new CInfButtonArray();
     INT types[9] = { 1, 2, 3, 4, 5, 6, 7, 8, 9 };
     pButtons->UpdateCustomizableButtonTypes(types);
