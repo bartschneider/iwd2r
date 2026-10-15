@@ -4659,7 +4659,186 @@ void CScreenStore::OnIdentifyItemButtonClick()
 // 0x67B8A0
 void CScreenStore::OnBuySpellButtonClick()
 {
-    // TODO: Incomplete.
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenStore.cpp
+    // __LINE__: 6999
+    UTIL_ASSERT(pGame != NULL);
+
+    LONG nGold = static_cast<LONG>(pGame->GetGameSave()->m_nPartyGold);
+    CTypedPtrList<CPtrList, CAIAction*> actions(10);
+    CString sSpell;
+
+    CSingleLock renderLock(&(GetManager()->field_36), FALSE);
+    renderLock.Lock(INFINITE);
+
+    BOOL bSelected = FALSE;
+    POSITION pos = m_lSpellItems.GetHeadPosition();
+    while (pos != NULL) {
+        if (m_lSpellItems.GetNext(pos)->m_bSelected) {
+            bSelected = TRUE;
+            break;
+        }
+    }
+
+    if (!bSelected) {
+        renderLock.Unlock();
+        return;
+    }
+
+    if (!IsCharacterInRange(static_cast<SHORT>(m_nSelectedCharacter))
+        && (m_pMainPanel->m_nID != 5
+            || IsCharacterAlive(static_cast<SHORT>(m_nSelectedCharacter)))) {
+        renderLock.Unlock();
+        return;
+    }
+
+    if (m_dwSpellCost > static_cast<DWORD>(nGold)) {
+        m_nErrorState = 2;
+        m_strErrorText = 11048;
+        m_strErrorButtonText[0] = 11973;
+        SummonPopup(10);
+        renderLock.Unlock();
+        return;
+    }
+
+    LONG nProprietorId = m_cAIProprietor.m_nInstance;
+
+    CGameSprite* pProprietor;
+
+    BYTE rc;
+    do {
+        rc = pGame->GetObjectArray()->GetDeny(nProprietorId,
+            CGameObjectArray::THREAD_ASYNCH,
+            reinterpret_cast<CGameObject**>(&pProprietor),
+            INFINITE);
+    } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+    if (rc != CGameObjectArray::SUCCESS) {
+        renderLock.Unlock();
+        return;
+    }
+
+    // NOTE: Uninline.
+    LONG nCustomerId = pGame->GetCharacterId(m_nSelectedCharacter);
+
+    CGameSprite* pCustomer;
+
+    do {
+        rc = pGame->GetObjectArray()->GetDeny(nCustomerId,
+            CGameObjectArray::THREAD_ASYNCH,
+            reinterpret_cast<CGameObject**>(&pCustomer),
+            INFINITE);
+    } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+    if (rc != CGameObjectArray::SUCCESS) {
+        renderLock.Unlock();
+
+        pGame->GetObjectArray()->ReleaseDeny(nProprietorId,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+        return;
+    }
+
+    pos = m_lSpellItems.GetHeadPosition();
+    while (pos != NULL) {
+        CScreenStoreItem* pSpellItem = m_lSpellItems.GetNext(pos);
+        if (pSpellItem->m_bSelected && pSpellItem->m_nValue <= nGold) {
+            nGold -= pSpellItem->m_nValue;
+            pSpellItem->m_bSelected = FALSE;
+
+            pSpellItem->m_cResSpell.CopyToString(sSpell);
+
+            // The proprietor casts the spell on the customer.
+            CAIAction* pAction = new CAIAction();
+            pAction->m_actionID = CAIAction::APPLYSPELL;
+            pAction->m_acteeID.Set(pCustomer->GetAIType());
+            pAction->SetString1(sSpell);
+            pAction->m_specificID3 = pCustomer->m_derivedStats.GetClassMaskLevel(0xFFF);
+            pAction->m_internalFlags |= 0x20000000;
+            actions.AddTail(pAction);
+
+            CResRef cResSound;
+            if (strcmp(sSpell, "SPPR103") == 0) {
+                cResSound = "EFF_P26";
+            } else if (strcmp(sSpell, "SPPR303") == 0) {
+                cResSound = "EFF_M10";
+            } else if (strcmp(sSpell, "SPPR307") == 0) {
+                cResSound = "EFF_M10";
+            } else if (strcmp(sSpell, "SPPR401") == 0) {
+                cResSound = "EFF_P26";
+            } else if (strcmp(sSpell, "SPPR212") == 0) {
+                cResSound = "EFF_P17";
+            } else if (strcmp(sSpell, "SPPR504") == 0) {
+                cResSound = "EFF_P18";
+            }
+
+            PlayGUISound(cResSound);
+        }
+    }
+
+    pos = actions.GetHeadPosition();
+    while (pos != NULL) {
+        CAIAction* pAction = actions.GetNext(pos);
+
+        CMessage* message = new CMessageAddAction(*pAction, nCustomerId, nProprietorId);
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+        delete pAction;
+    }
+    actions.RemoveAll();
+
+    pCustomer->field_562C = 1;
+    pCustomer->ProcessEffectList();
+
+    BOOLEAN bLocal;
+    if (g_pChitin->cNetwork.GetServiceProvider() != CNetwork::SERV_PROV_NULL) {
+        bLocal = g_pChitin->cNetwork.m_idLocalPlayer == pCustomer->m_remotePlayerID;
+    } else {
+        bLocal = TRUE;
+    }
+
+    pGame->GetObjectArray()->ReleaseDeny(nCustomerId,
+        CGameObjectArray::THREAD_ASYNCH,
+        INFINITE);
+
+    pGame->GetObjectArray()->ReleaseDeny(nProprietorId,
+        CGameObjectArray::THREAD_ASYNCH,
+        INFINITE);
+
+    pGame->AddPartyGold(nGold - static_cast<LONG>(pGame->GetGameSave()->m_nPartyGold));
+
+    // A raised character belonging to another player: select the first
+    // living member in range instead. `sSpell` is the last spell bought.
+    if (!bLocal
+        && (strcmp(sSpell, "SPPR504") == 0 || strcmp(sSpell, "SPPR712") == 0)) {
+        for (SHORT nPortrait = 0; nPortrait < 6; nPortrait++) {
+            if (IsCharacterInRange(nPortrait) && IsCharacterAlive(nPortrait) == TRUE) {
+                DWORD nOldSelectedCharacter = m_nSelectedCharacter;
+                OnPortraitLClick(nPortrait);
+                CheckEnablePortaits(1);
+
+                CUIPanel* pPanel = m_cUIManager.GetPanel(1);
+                CUIControlBase* pControl = pPanel->GetControl(nOldSelectedCharacter);
+                pControl->SetActive(FALSE);
+                pControl->SetInactiveRender(FALSE);
+                pPanel->InvalidateRect(NULL);
+                break;
+            }
+        }
+    }
+
+    UpdateSpellItems();
+
+    // NOTE: Uninline.
+    SetTopSpellItem(0);
+
+    // NOTE: Uninline.
+    UpdateSpellCost();
+
+    UpdateMainPanel();
+
+    renderLock.Unlock();
 }
 
 // 0x67C570
