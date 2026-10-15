@@ -1151,7 +1151,19 @@ std::vector<uint8_t> RunLengthEncode(const std::vector<uint8_t>& pixels, uint8_t
 // and Realize reads back. Ruling P4-11: under R10b that is acceptable, since
 // the written members are plain data and the case's comparison of the
 // whole canvas covers what Realize makes of them.
-void CellBlend(CaseContext& ctx, bool translucent, uint64_t salt)
+// The cells' other 32-bit blits on the same fixture: Blt8To32 (0x7CFBC0,
+// the FX form: the whole frame at the surface pointer, `ret 0x10`),
+// Blt8To32ClearShadow (0x7D0470) and Blt8To32Brightest (0x7D0730), both
+// (pSurface, lPitch, dwFlags), `ret 0xc`.
+using CellBlt32Fn = int32_t(__fastcall*)(void* self, void* edx, uint32_t* pSurface, int32_t lPitch, uint32_t dwFlags,
+    int32_t nTransVal);
+using CellShadowFn = int32_t(__fastcall*)(void* self, void* edx, uint32_t* pSurface, int32_t lPitch, uint32_t dwFlags);
+constexpr uintptr_t kCellBlt8To32 = 0x7CFBC0;
+constexpr uintptr_t kCellClearShadow = 0x7D0470;
+constexpr uintptr_t kCellBrightest = 0x7D0730;
+enum class CellMode { Translucent, Brightness, Blt, ClearShadow, Brightest };
+
+void CellBlend(CaseContext& ctx, CellMode mode, uint64_t salt)
 {
     VideoFixture video(ctx);
     uint8_t* cell = nullptr;
@@ -1247,12 +1259,27 @@ void CellBlend(CaseContext& ctx, bool translucent, uint64_t salt)
             std::memcpy(canvas, mine.data(), mine.size() * 4);
             Put<uint8_t>(cell, 0xD4, shadowOn);
             Put<uint32_t>(video.mode, kShadowColorOffset, shadow);
-            if (translucent) {
+            switch (mode) {
+            case CellMode::Translucent:
                 originalResult = reinterpret_cast<CellTransFn>(kCellTrans)(cell, nullptr, canvas + start,
                     kCellCanvas * 4, dwFlags, nTransVal);
-            } else {
+                break;
+            case CellMode::Brightness:
                 originalResult = reinterpret_cast<CellBrightFn>(kCellBright)(cell, nullptr, canvas + start,
                     kCellCanvas * 4, dwFlags);
+                break;
+            case CellMode::Blt:
+                originalResult = reinterpret_cast<CellBlt32Fn>(kCellBlt8To32)(cell, nullptr, canvas + start,
+                    kCellCanvas * 4, dwFlags, nTransVal);
+                break;
+            case CellMode::ClearShadow:
+                originalResult = reinterpret_cast<CellShadowFn>(kCellClearShadow)(cell, nullptr, canvas + start,
+                    kCellCanvas * 4, dwFlags);
+                break;
+            case CellMode::Brightest:
+                originalResult = reinterpret_cast<CellShadowFn>(kCellBrightest)(cell, nullptr, canvas + start,
+                    kCellCanvas * 4, dwFlags);
+                break;
             }
         });
         std::memcpy(oursBam.data(), image.data(), kBamSize);
@@ -1263,10 +1290,23 @@ void CellBlend(CaseContext& ctx, bool translucent, uint64_t salt)
         const auto* begin = reinterpret_cast<const BYTE*>(mine.data());
         const CVidCell::SurfaceRange range = { begin, begin + mine.size() * 4 };
         BOOL oursResult;
-        if (translucent) {
+        switch (mode) {
+        case CellMode::Translucent:
             oursResult = oursCell->sub_7D0950(mine.data() + start, kCellCanvas * 4, dwFlags, nTransVal, range);
-        } else {
+            break;
+        case CellMode::Brightness:
             oursResult = oursCell->sub_7D1190(mine.data() + start, kCellCanvas * 4, dwFlags, range);
+            break;
+        case CellMode::Blt:
+            oursResult = oursCell->Blt8To32(mine.data() + start, kCellCanvas * 4, dwFlags, nTransVal);
+            break;
+        case CellMode::ClearShadow:
+            oursResult = oursCell->Blt8To32ClearShadow(mine.data() + start, kCellCanvas * 4, dwFlags);
+            break;
+        case CellMode::Brightest:
+        default:
+            oursResult = oursCell->Blt8To32Brightest(mine.data() + start, kCellCanvas * 4, dwFlags);
+            break;
         }
         ctx.CountInputs(1);
         if (oracle::Compare(ctx, originalResult, static_cast<int32_t>(oursResult))) {
@@ -1287,6 +1327,12 @@ void CellBlend(CaseContext& ctx, bool translucent, uint64_t salt)
 using CellPointBltFn = int32_t(__fastcall*)(void* self, void* edx, void* pSurface, int32_t lPitch, const void* pt,
     const void* rClip, uint32_t dwFlags, const void* ptSource);
 constexpr uintptr_t kBlt8To16 = 0x7AF3C0;
+// CVidCell::Blt8To32(pSurface, lPitch, pt, rClip, dwFlags, ptSource,
+// nTransVal) (0x7CFDF0), `ret 0x1c`, the 32-bit form the cells' Render
+// uses: rgbTempPal as is, and with nTransVal the alpha byte blended.
+using CellPointBlt32Fn = int32_t(__fastcall*)(void* self, void* edx, void* pSurface, int32_t lPitch, const void* pt,
+    const void* rClip, uint32_t dwFlags, const void* ptSource, int32_t nTransVal);
+constexpr uintptr_t kBlt8To32Point = 0x7CFDF0;
 constexpr uintptr_t kBlt8To24 = 0x7CEEB0;
 constexpr uintptr_t kTempPal = 0x9064F8;
 constexpr int kPointCanvas = 64;
@@ -1374,6 +1420,7 @@ void CellPointBlt(CaseContext& ctx, int bpp, uint64_t salt)
             "input %d: %dx%d %s, transparent %u, pt (%d,%d), clip (%d,%d)-(%d,%d), source (%d,%d)", n, width,
             height, compressed ? "RLE" : "raw", transparent, pt[0], pt[1], r[0], r[1], r[2], r[3], src[0], src[1]);
         ctx.SetInputs(inputs);
+        const int32_t nTransVal = bpp == 32 && picks.Between(0, 1) != 0 ? picks.Between(1, 255) : 0;
         int32_t originalResult = 0;
         ctx.CallOriginal([&] {
             std::memcpy(bam, image.data(), kBamSize);
@@ -1383,14 +1430,22 @@ void CellPointBlt(CaseContext& ctx, int bpp, uint64_t salt)
             std::memcpy(args, pt, 8);
             std::memcpy(args + 8, r, 16);
             std::memcpy(args + 24, src, 8);
-            originalResult = reinterpret_cast<CellPointBltFn>(bpp == 16 ? kBlt8To16 : kBlt8To24)(cell, nullptr,
-                canvas, pitch, args, args + 8, 0, args + 24);
+            if (bpp == 32) {
+                originalResult = reinterpret_cast<CellPointBlt32Fn>(kBlt8To32Point)(cell, nullptr, canvas, pitch,
+                    args, args + 8, 0, args + 24, nTransVal);
+            } else {
+                originalResult = reinterpret_cast<CellPointBltFn>(bpp == 16 ? kBlt8To16 : kBlt8To24)(cell, nullptr,
+                    canvas, pitch, args, args + 8, 0, args + 24);
+            }
         });
         std::memcpy(oursBam.data(), image.data(), kBamSize);
         oursFrame = entry;
         std::memcpy(CVidImage::rgbTempPal, palette, sizeof(palette));
         BOOL oursResult;
-        if (bpp == 16) {
+        if (bpp == 32) {
+            oursResult = oursCell->Blt8To32(reinterpret_cast<DWORD*>(mine.data()), pitch, CPoint(pt[0], pt[1]),
+                CRect(r[0], r[1], r[2], r[3]), 0, CPoint(src[0], src[1]), nTransVal);
+        } else if (bpp == 16) {
             oursResult = oursCell->Blt8To16(reinterpret_cast<WORD*>(mine.data()), pitch, CPoint(pt[0], pt[1]),
                 CRect(r[0], r[1], r[2], r[3]), 0, CPoint(src[0], src[1]));
         } else {
@@ -1420,6 +1475,11 @@ void CellBlt8To16(CaseContext& ctx)
 void CellBlt8To24(CaseContext& ctx)
 {
     CellPointBlt(ctx, 24, 0x426C743234000000ull); // "Blt24"
+}
+
+void CellBlt8To32Point(CaseContext& ctx)
+{
+    CellPointBlt(ctx, 32, 0x426C743332000000ull); // "Blt32"
 }
 
 // CVidMode::DrawLine16(nXFrom, nYFrom, nXTo, nYTo, pSurface, lPitch,
@@ -1876,12 +1936,27 @@ void Recticle32(CaseContext& ctx)
 
 void CellTranslucent(CaseContext& ctx)
 {
-    CellBlend(ctx, true, 0x43656C6C54000000ull); // "CellT"
+    CellBlend(ctx, CellMode::Translucent, 0x43656C6C54000000ull); // "CellT"
 }
 
 void CellBrightness(CaseContext& ctx)
 {
-    CellBlend(ctx, false, 0x43656C6C42000000ull); // "CellB"
+    CellBlend(ctx, CellMode::Brightness, 0x43656C6C42000000ull); // "CellB"
+}
+
+void CellBlt32(CaseContext& ctx)
+{
+    CellBlend(ctx, CellMode::Blt, 0x43656C6C30000000ull); // "Cell0"
+}
+
+void CellClearShadow32(CaseContext& ctx)
+{
+    CellBlend(ctx, CellMode::ClearShadow, 0x43656C6C53000000ull); // "CellS"
+}
+
+void CellBrightest32(CaseContext& ctx)
+{
+    CellBlend(ctx, CellMode::Brightest, 0x43656C6C48000000ull); // "CellH"
 }
 
 } // namespace
@@ -1897,8 +1972,12 @@ ORACLE_CASE("vid/fill_convex_poly", FillConvexPoly);
 ORACLE_CASE("vid/fill_poly", FillPoly);
 ORACLE_CASE("vid/cell_translucent32", CellTranslucent);
 ORACLE_CASE("vid/cell_brightness32", CellBrightness);
+ORACLE_CASE("vid/cell_blt8to32", CellBlt32);
+ORACLE_CASE("vid/cell_clear_shadow32", CellClearShadow32);
+ORACLE_CASE("vid/cell_brightest32", CellBrightest32);
 ORACLE_CASE("vid/cell_blt8to16", CellBlt8To16);
 ORACLE_CASE("vid/cell_blt8to24", CellBlt8To24);
+ORACLE_CASE("vid/cell_blt8to32_point", CellBlt8To32Point);
 ORACLE_CASE("vid/draw_line16", DrawLine16);
 ORACLE_CASE("vid/draw_line32", DrawLine32);
 ORACLE_CASE("vid/draw_ellipse24", DrawEllipse24);
