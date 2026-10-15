@@ -52,6 +52,7 @@ LONG CVidFont::GetStringLength(const CString& sString, BOOLEAN bDemanded)
         // __FILE__: C:\Projects\Icewind2\src\chitin\ChVidFont.cpp
         // __LINE__: 168
         UTIL_ASSERT(FALSE);
+        return -1;
     }
 
     int length = sString.GetLength();
@@ -60,9 +61,11 @@ LONG CVidFont::GetStringLength(const CString& sString, BOOLEAN bDemanded)
         SHORT nSequence = ch < 0 ? ch + 256 : ch;
         SequenceSet(nSequence - 1);
 
-        if (g_pChitin->field_1A0 & IsDBCSLeadByte(sString.GetAt(index))) {
+        // A double-byte character's trail byte, unsigned, picks the frame
+        // (movzx at 0x792E12).
+        if (g_pChitin->field_1A0 != 0 && IsDBCSLeadByte(sString.GetAt(index))) {
             index++;
-            FrameSet(sString.GetAt(index) - 1);
+            FrameSet(static_cast<BYTE>(sString.GetAt(index)) - 1);
         } else {
             FrameSet(0);
         }
@@ -87,6 +90,7 @@ LONG CVidFont::GetStringLengthEx(INT nSurface, const CString& sString, BOOLEAN b
         // __FILE__: C:\Projects\Icewind2\src\chitin\ChVidFont.cpp
         // __LINE__: 242
         UTIL_ASSERT(FALSE);
+        return -1;
     }
 
     CVidMode* pVidMode = g_pChitin->GetCurrentVideoMode();
@@ -140,12 +144,12 @@ SHORT CVidFont::GetBaseLineHeight(BOOLEAN bDemanded)
         // __FILE__: C:\Projects\Icewind2\src\chitin\ChVidFont.cpp
         // __LINE__: 333
         UTIL_ASSERT(FALSE);
+        return -1;
     }
 
     CSize size;
     GetFrameSize(0, 0, size, bDemanded);
 
-    // TODO: Check.
     return static_cast<SHORT>(size.cy);
 }
 
@@ -166,12 +170,12 @@ SHORT CVidFont::GetFontHeight(BOOLEAN bDemanded)
         // __FILE__: C:\Projects\Icewind2\src\chitin\ChVidFont.cpp
         // __LINE__: 379
         UTIL_ASSERT(FALSE);
+        return -1;
     }
 
     CSize size;
     GetFrameSize(1, 0, size, bDemanded);
 
-    // TODO: Check.
     return static_cast<SHORT>(size.cy);
 }
 
@@ -285,7 +289,6 @@ BOOL CVidFont::SetTextFontEx(INT nSurface, HDC hDC)
         } while (hr == DDERR_SURFACELOST || hr == DDERR_WASSTILLDRAWING);
     }
 
-    // TODO: Check cast.
     m_nFontHeight = static_cast<SHORT>(tm.tmHeight);
     m_nBaseLineHeight = static_cast<SHORT>(tm.tmHeight - tm.tmDescent);
 
@@ -336,7 +339,8 @@ BOOL CVidFont::TextOut(const CString& sString, int x, int y, const CRect& rClip,
         SequenceSet(nSequence - 1);
 
         if (g_pChitin->field_1A0 && IsDBCSLeadByte(sString.GetAt(index))) {
-            FrameSet(sString.GetAt(index) - 1);
+            index++;
+            FrameSet(static_cast<BYTE>(sString.GetAt(index)) - 1);
         } else {
             FrameSet(0);
         }
@@ -405,7 +409,7 @@ BOOL CVidFont::TextOut(const CString& sString, WORD* pSurface, LONG lPitch, int 
 
         if (g_pChitin->field_1A0 && IsDBCSLeadByte(sString.GetAt(index))) {
             index++;
-            FrameSet(sString.GetAt(index) - 1);
+            FrameSet(static_cast<BYTE>(sString.GetAt(index)) - 1);
         } else {
             FrameSet(0);
         }
@@ -1175,7 +1179,8 @@ BOOL CVidFont::TextOutEx3d(const CString& sString, int x, int y, const CRect& rC
         SequenceSet(nSequence - 1);
 
         if (g_pChitin->field_1A0 && IsDBCSLeadByte(sString[index])) {
-            FrameSet(sString[index] - 1);
+            index++;
+            FrameSet(static_cast<BYTE>(sString[index]) - 1);
         } else {
             FrameSet(0);
         }
