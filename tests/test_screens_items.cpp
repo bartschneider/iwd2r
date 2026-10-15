@@ -13,12 +13,13 @@
 #include "CMessage.h"
 #include "CRuleTables.h"
 #include "CScreenCreateChar.h"
-#include "CScreenWorldMap.h"
-#include "CWorldMap.h"
 #include "CScreenInventory.h"
 #include "CScreenStore.h"
 #include "CScreenWorld.h"
+#include "CScreenWorldMap.h"
 #include "CStore.h"
+#include "CUIPanel.h"
+#include "CWorldMap.h"
 #include "ScreenLayout.h"
 #include "data_view.h"
 #include "platform/data_dir.h"
@@ -232,7 +233,6 @@ std::vector<CGameSprite*> NewGameWithParty(int count)
     pGame->SetupCharacters(FALSE);
     return party;
 }
-
 
 // The world map of the visible area and its map index, with every area
 // made known and explorable for the test (the flags are put back by the
@@ -553,6 +553,18 @@ TEST_CASE("store: buying takes the gold and puts the item in a free slot", "[sto
 
     // Nothing selected: the button stays off.
     CHECK(pStore->IsBuyItemButtonClickable() == FALSE);
+
+    // A click on the first line's button (control 5 of the buy and sell
+    // panel) selects it and adds its price; a second click drops it.
+    CUIControlButtonStoreStoreItem* pFirst = static_cast<CUIControlButtonStoreStoreItem*>(pStore->m_pMainPanel->GetControl(5));
+    REQUIRE(pFirst != NULL);
+    pStore->SetTopStoreItem(0);
+    pFirst->OnLButtonClick(CPoint(0, 0));
+    CHECK(pStore->m_lStoreItems.GetHead()->m_bSelected == TRUE);
+    CHECK(pStore->m_nStoreCost == pStore->m_lStoreItems.GetHead()->m_nValue);
+    pFirst->OnLButtonClick(CPoint(0, 0));
+    CHECK(pStore->m_lStoreItems.GetHead()->m_bSelected == FALSE);
+    CHECK(pStore->m_nStoreCost == 0);
 
     // The first item that is not a random one, bought once.
     CScreenStoreItem* pStoreItem = NULL;

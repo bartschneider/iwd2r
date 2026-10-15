@@ -4599,15 +4599,17 @@ void CScreenStore::OnIdentifyItemButtonClick()
     renderLock.Lock(INFINITE);
 
     DWORD nPartyGold = pGame->GetGameSave()->m_nPartyGold;
+    BOOL bSelected = FALSE;
     POSITION pos = m_lIdentifyItems.GetHeadPosition();
     while (pos != NULL) {
         CScreenStoreItem* pStoreItem = m_lIdentifyItems.GetNext(pos);
         if (pStoreItem->m_bSelected) {
+            bSelected = TRUE;
             break;
         }
     }
 
-    if (pos != NULL) {
+    if (bSelected) {
         if (m_dwIdentifyCost <= nPartyGold) {
             CUIPanel* pPanel = m_cUIManager.GetPanel(4);
 
@@ -4628,6 +4630,7 @@ void CScreenStore::OnIdentifyItemButtonClick()
                     && static_cast<LONG>(nPartyGold) >= pStoreItem->m_nValue) {
                     pStoreItem->m_pItem->m_flags |= 0x1;
                     nPartyGold -= pStoreItem->m_nValue;
+                    pStoreItem->m_bSelected = FALSE;
                     UpdateText(pText, "%s", (LPCSTR)FetchString(pStoreItem->m_pItem->GetDescription()));
                     UpdateText(pText, "");
                     UpdateText(pText, "-----------------------------");
@@ -5790,6 +5793,7 @@ void CScreenStore::RestParty()
         // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenStore.cpp
         // __LINE__: 8824
         UTIL_ASSERT(FALSE);
+        nHP = 0;
     }
 
     sToken.Format("%d", CRuleTables::TIME_RESTING / CTimerWorld::TIMESCALE_MIN_PER_HOUR / CTimerWorld::TIMESCALE_SEC_PER_MIN / CTimerWorld::TIMESCALE_MSEC_PER_SEC);
@@ -7191,7 +7195,7 @@ void CUIControlButtonStoreStoreItem::OnLButtonClick(CPoint pt)
     CScreenStoreItem cItem;
     INT nIndex;
 
-    switch (m_nID) {
+    switch (m_pPanel->m_nID) {
     case 2:
         nIndex = pStore->m_nTopStoreItem + m_nID - 5;
         pStore->GetStoreItem(nIndex, cItem);
@@ -7221,7 +7225,7 @@ void CUIControlButtonStoreStoreItem::OnLButtonDoubleClick(CPoint pt)
     CScreenStoreItem cItem;
     INT nIndex;
 
-    switch (m_nID) {
+    switch (m_pPanel->m_nID) {
     case 2:
         nIndex = pStore->m_nTopStoreItem + m_nID - 5;
         pStore->GetStoreItem(nIndex, cItem);
@@ -7243,7 +7247,11 @@ void CUIControlButtonStoreStoreItem::OnLButtonDoubleClick(CPoint pt)
                 renderLock.Unlock();
             }
         } else {
-            if (cItem.m_nStoreCount != -1) {
+            if (cItem.m_nStoreCount != 1) {
+                pStore->field_14DE = 1;
+                pStore->field_14E2 = nIndex;
+                pStore->field_14E6 = 1;
+
                 CSingleLock renderLock(&(pStore->GetManager()->field_36), FALSE);
                 renderLock.Lock(INFINITE);
 
@@ -7275,7 +7283,7 @@ void CUIControlButtonStoreStoreItem::OnRButtonClick(CPoint pt)
     INT nIndex;
     POSITION pos;
 
-    switch (m_nID) {
+    switch (m_pPanel->m_nID) {
     case 2:
         nIndex = pStore->m_nTopStoreItem + m_nID - 5;
         pos = pStore->m_lStoreItems.FindIndex(nIndex);
@@ -7440,7 +7448,7 @@ void CUIControlButtonStoreGroupItem::OnLButtonClick(CPoint pt)
     CScreenStoreItem cItem;
     INT nIndex;
 
-    switch (m_nID) {
+    switch (m_pPanel->m_nID) {
     case 2:
         nIndex = pStore->m_nTopGroupItem + m_nID - 13;
         pStore->GetGroupItem(nIndex, cItem);
@@ -7477,8 +7485,11 @@ void CUIControlButtonStoreGroupItem::OnLButtonClick(CPoint pt)
         nIndex = pStore->m_nTopIdentifyItem + m_nID - 8;
         pStore->GetIdentifyItem(nIndex, cItem);
 
-        // NOTE: Uninline.
-        pStore->SelectIdentifyItem(nIndex, !cItem.m_bSelected);
+        // NOTE: Inlined twice in the original, with the same result; an
+        // identify line is only toggled.
+        if (nIndex >= 0 && nIndex < pStore->m_lIdentifyItems.GetCount()) {
+            pStore->m_lIdentifyItems.GetAt(pStore->m_lIdentifyItems.FindIndex(nIndex))->m_bSelected = !cItem.m_bSelected;
+        }
 
         // NOTE: Uninline.
         pStore->UpdateIdentifyCost();
@@ -7506,7 +7517,7 @@ void CUIControlButtonStoreGroupItem::OnLButtonDoubleClick(CPoint pt)
     CScreenStoreItem cItem;
     INT nIndex;
 
-    switch (m_nID) {
+    switch (m_pPanel->m_nID) {
     case 2:
         nIndex = pStore->m_nTopGroupItem + m_nID - 13;
         pStore->GetGroupItem(nIndex, cItem);
@@ -7518,6 +7529,12 @@ void CUIControlButtonStoreGroupItem::OnLButtonDoubleClick(CPoint pt)
 
             pStore->UpdateStoreItems();
 
+            // NOTE: Inlined in the original: only the selection is cleared.
+            POSITION pos = pStore->m_lStoreItems.GetHeadPosition();
+            while (pos != NULL) {
+                pStore->m_lStoreItems.GetNext(pos)->m_bSelected = FALSE;
+            }
+
             // NOTE: Uninline.
             pStore->SetTopStoreItem(0);
 
@@ -7525,6 +7542,12 @@ void CUIControlButtonStoreGroupItem::OnLButtonDoubleClick(CPoint pt)
             pStore->UpdateStoreCost();
 
             pStore->UpdateGroupItems();
+
+            // NOTE: Inlined in the original: only the selection is cleared.
+            pos = pStore->m_lGroupItems.GetHeadPosition();
+            while (pos != NULL) {
+                pStore->m_lGroupItems.GetNext(pos)->m_bSelected = FALSE;
+            }
 
             // NOTE: Uninline.
             pStore->SetTopGroupItem(0);
@@ -7560,7 +7583,7 @@ void CUIControlButtonStoreGroupItem::OnRButtonClick(CPoint pt)
     POSITION pos;
     CScreenStoreItem* pItem;
 
-    switch (m_nID) {
+    switch (m_pPanel->m_nID) {
     case 2:
         nIndex = pStore->m_nTopGroupItem + m_nID - 13;
         pos = pStore->m_lGroupItems.FindIndex(nIndex);
