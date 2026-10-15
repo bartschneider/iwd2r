@@ -4,6 +4,7 @@
 #include "CBaldurChitin.h"
 #include "CBlood.h"
 #include "CButtonData.h"
+#include "CDerivedStats.h"
 #include "CGameArea.h"
 #include "CGameButtonList.h"
 #include "CGameObjectArray.h"
@@ -11,9 +12,12 @@
 #include "CInfButtonArray.h"
 #include "CInfGame.h"
 #include "CParticle.h"
+#include "CRuleTables.h"
+#include "CSoundProperties.h"
 #include "CScreenCreateChar.h"
 #include "CScreenWorld.h"
 #include "CUIControlBase.h"
+#include "CUIControlTextDisplay.h"
 #include "CUIPanel.h"
 #include "CWeather.h"
 #include "ScreenLayout.h"
@@ -36,9 +40,10 @@
 #include <thread>
 #include <vector>
 
-// The action bar (CInfButtonArray), CBlood's particles and CWeather's wind,
-// on the engine in this process and a private view of the install without
-// saves (tests/data_view.h).
+// The ui-misc stream's controls and visual systems: the action bar
+// (CInfButtonArray), CBlood's particles, CWeather's wind and the text
+// display's items, on the engine in this process and a private view of the
+// install without saves (tests/data_view.h).
 
 
 namespace {
@@ -666,4 +671,205 @@ TEST_CASE("action bar: paging a spell list by level", "[actionbar][data]")
     bar.field_197A = 0;
     CInfButtonArray::sub_587BD0();
     CHECK(CInfButtonArray::dword_8E6820 == NULL);
+}
+
+// CUIControlTextDisplay::GetItem (0x4E3E70): an item that wraps comes back
+// as its first line and the next one joined by a space, the last item
+// included (CScreenWorld copies every item of the dialog display into the
+// new one when the dialog panel changes). Only an item's first line has a
+// line count, and the loop reads the count of the line it appended, so the
+// original stops after the second line.
+TEST_CASE("text display: an item's first two lines come back joined", "[textdisplay][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    // The world screen's panels load with a game.
+    FramePump pump;
+    if (SelectedPartyMember() == NULL) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    // The world screen's message panel's text display, as its activation
+    // takes it (CScreenWorld 0x686DE0).
+    CScreenWorld* pWorld = g_pBaldurChitin->m_pEngineWorld;
+    CUIPanel* pPanel = pWorld->GetManager()->GetPanel(pWorld->GetPanel_22_0());
+    REQUIRE(pPanel != NULL);
+    CUIControlTextDisplay* pDisplay = static_cast<CUIControlTextDisplay*>(pPanel->GetControl(1));
+    REQUIRE(pDisplay != NULL);
+    REQUIRE(pDisplay->m_plstStrings != NULL);
+    pDisplay->RemoveAll();
+
+    const CString sShort("A short line.");
+    CString sLong;
+    for (int n = 0; n < 40; n++) {
+        CString sWord;
+        sWord.Format("word%d ", n);
+        sLong += sWord;
+    }
+    sLong.TrimRight();
+    pDisplay->DisplayString(CString("Probe: "), sShort, RGB(255, 255, 0), RGB(255, 255, 255), -1, FALSE, TRUE);
+    POSITION posLong = pDisplay->DisplayString(CString("Probe: "), sLong, RGB(255, 255, 0), RGB(255, 255, 255), -1, FALSE, TRUE);
+    REQUIRE(posLong != NULL);
+    REQUIRE(pDisplay->field_A6C == 2);
+
+    // The long item wraps over three lines or more; only its first line has
+    // the count.
+    const INT nLines = pDisplay->m_plstStrings->GetAt(posLong)->GetNumLines();
+    REQUIRE(nLines > 2);
+    CString sJoined;
+    POSITION pos = posLong;
+    for (INT n = 0; n < nLines; n++) {
+        REQUIRE(pos != NULL);
+        CDisplayString* pLine = pDisplay->m_plstStrings->GetNext(pos);
+        if (n > 0) {
+            CHECK(pLine->GetNumLines() == 0);
+        }
+        if (n == 1) {
+            sJoined += " ";
+        }
+        if (n < 2) {
+            sJoined += pLine->GetString();
+        }
+    }
+    CHECK(pos == NULL);
+
+    CString sLabel;
+    CString sString;
+    REQUIRE(pDisplay->GetItem(0, sLabel, sString));
+    CHECK(sString == sShort);
+    CHECK(sLabel.Find("Probe") == 0);
+    REQUIRE(pDisplay->GetItem(1, sLabel, sString));
+    CHECK(sString == sJoined);
+    CHECK(sString.Find("word0 ") == 0);
+    CHECK(sString.Find("word39") == -1);
+    CHECK_FALSE(pDisplay->GetItem(2, sLabel, sString));
+    CHECK(sString == "");
+
+    pDisplay->RemoveAll();
+}
+
+// OnPageDown (0x4E28B0), OnPageUp (0x4E2A00) and OnScroll (0x4E2790): the top
+// line moves by the page less one line, within the strings past the visible
+// lines; the step's compare with the visible lines is unsigned, so with no
+// visible lines a page down moves up one line.
+TEST_CASE("text display: paging and scrolling", "[textdisplay][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    if (SelectedPartyMember() == NULL) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    CScreenWorld* pWorld = g_pBaldurChitin->m_pEngineWorld;
+    CUIPanel* pPanel = pWorld->GetManager()->GetPanel(pWorld->GetPanel_22_0());
+    REQUIRE(pPanel != NULL);
+    CUIControlTextDisplay* pDisplay = static_cast<CUIControlTextDisplay*>(pPanel->GetControl(1));
+    REQUIRE(pDisplay != NULL);
+    pDisplay->RemoveAll();
+    for (int n = 0; n < 10; n++) {
+        CString sLine;
+        sLine.Format("line %d", n);
+        pDisplay->DisplayString(CString(""), sLine, RGB(255, 255, 0), RGB(255, 255, 255), -1, FALSE, TRUE);
+    }
+    REQUIRE(pDisplay->m_plstStrings->GetCount() == 10);
+    const short nVisible = pDisplay->field_A6A;
+    pDisplay->field_A6A = 4;
+    pDisplay->field_5A = 0;
+
+    pDisplay->OnPageDown(10);
+    CHECK(pDisplay->field_5A == 3);
+    pDisplay->OnPageDown(10);
+    CHECK(pDisplay->field_5A == 6);
+    pDisplay->OnPageDown(1);
+    CHECK(pDisplay->field_5A == 6);
+    pDisplay->OnPageUp(2);
+    CHECK(pDisplay->field_5A == 4);
+    pDisplay->OnPageUp(100);
+    CHECK(pDisplay->field_5A == 1);
+    pDisplay->OnPageUp(100);
+    CHECK(pDisplay->field_5A == 0);
+
+    pDisplay->OnScroll(1, 2);
+    CHECK(pDisplay->field_5A == 3);
+    pDisplay->OnScroll(2, 2);
+    CHECK(pDisplay->field_5A == 6);
+
+    pDisplay->field_A6A = 0;
+    pDisplay->OnPageDown(5);
+    CHECK(pDisplay->field_5A == 5);
+    pDisplay->OnPageUp(5);
+    CHECK(pDisplay->field_5A == 6);
+
+    pDisplay->field_A6A = nVisible;
+    pDisplay->RemoveAll();
+}
+
+// CRuleTables::GetSoundEnvironment (0x545890) wraps the reverb index by the
+// REVERB table's rows (m_nSizeY), not its columns.
+TEST_CASE("rules: the sound environment wraps by the reverb table's rows", "[rules][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    const CRuleTables& rules = g_pBaldurChitin->GetObjectGame()->GetRuleTables();
+    const INT nRows = rules.m_tReverb.GetHeight();
+    const INT nColumns = rules.m_tReverb.GetWidth();
+    INFO(nRows << " rows, " << nColumns << " columns");
+    REQUIRE(nRows > 2);
+    REQUIRE(nRows != nColumns);
+
+    for (INT nReverb : { 0, 1, nRows - 1, nRows, nRows + 2 }) {
+        INFO(nReverb);
+        EAXPRESET preset;
+        memset(&preset, 0, sizeof(preset));
+        const INT nPreset = rules.GetSoundEnvironment(preset, nReverb);
+        CHECK(nPreset == nReverb % nRows);
+        CHECK(preset.fVolume == static_cast<float>(atof(rules.m_tReverb.GetAt(CPoint(1, nPreset)))));
+        CHECK(preset.fDecayTime == static_cast<float>(atof(rules.m_tReverb.GetAt(CPoint(2, nPreset)))));
+    }
+}
+
+// CRuleTables::GetLayOnHandsAmount (0x544930): the object type's class mask
+// decides, the paladin level times (charisma - 10) / 2 (charisma less 1
+// below 10), the level alone below 1.
+TEST_CASE("rules: lay on hands follows the object type's class", "[rules][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    const CRuleTables& rules = g_pBaldurChitin->GetObjectGame()->GetRuleTables();
+
+    std::unique_ptr<CDerivedStats> pStats = std::make_unique<CDerivedStats>();
+    pStats->m_nClassLevels[CAIOBJECTTYPE_C_PALADIN - 1] = 6;
+    pStats->m_classMask = 0;
+    CAIObjectType typeAI;
+    typeAI.m_nClassMask = CLASSMASK_PALADIN;
+
+    pStats->m_nCHR = 16;
+    CHECK(rules.GetLayOnHandsAmount(typeAI, *pStats) == 18);
+    pStats->m_nCHR = 17;
+    CHECK(rules.GetLayOnHandsAmount(typeAI, *pStats) == 18);
+    pStats->m_nCHR = 11;
+    CHECK(rules.GetLayOnHandsAmount(typeAI, *pStats) == 6);
+    pStats->m_nCHR = 8;
+    CHECK(rules.GetLayOnHandsAmount(typeAI, *pStats) == 6);
+
+    // The derived stats' mask does not count.
+    typeAI.m_nClassMask = 0;
+    pStats->m_classMask = CLASSMASK_PALADIN;
+    pStats->m_nCHR = 16;
+    CHECK(rules.GetLayOnHandsAmount(typeAI, *pStats) == 0);
 }

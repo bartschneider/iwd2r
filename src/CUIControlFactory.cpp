@@ -4979,7 +4979,8 @@ CUIControlButton77DCC0::CUIControlButton77DCC0(CUIPanel* panel, UI_CONTROL_BUTTO
     CSize frameSize;
     m_cVidCell.GetCurrentFrameSize(frameSize, FALSE);
 
-    // TODO: Check.
+    // NOTE: Only the frame width's low byte, as the original (`movzx` at
+    // 0x77DD1F).
     field_668 = frameSize.cx & 0xFF;
     field_666 = 0;
 
