@@ -21,6 +21,11 @@
 // Calling conventions (objdump of the vanilla exe): __thiscall without
 // arguments, plain ret, INT in eax; called here through __fastcall pointers
 // whose edx argument is unused.
+//
+// CRuleTables::GetIterativeAttackBonus (0x547020), max(0, nBonus - nStep *
+// nAttack): __thiscall with three stack arguments, `ret 0xc` at 0x547033;
+// its first instruction overwrites ecx, so `this` is never read (a zeroed
+// block of CRuleTables' size on both sides).
 #ifdef _MSC_VER
 #pragma warning(push)
 #pragma warning(disable : 4121 4201)
@@ -28,6 +33,7 @@
 #include "CBaldurChitin.h"
 #include "CGameSprite.h"
 #include "CInfGame.h"
+#include "CRuleTables.h"
 #ifdef _MSC_VER
 #pragma warning(pop)
 #endif
@@ -36,6 +42,7 @@
 #include "oracle/runner/generators.h"
 #include "oracle/runner/registry.h"
 
+#include <climits>
 #include <cstdint>
 #include <cstring>
 #include <new>
@@ -170,6 +177,55 @@ void ArmorClass(CaseContext& ctx)
     }
 }
 
+using IterativeAttackBonusFn = int32_t(__fastcall*)(const void* self, void* edx, int32_t nBonus, int32_t nStep,
+    int32_t nAttack);
+constexpr uintptr_t kGetIterativeAttackBonus = 0x547020;
+constexpr size_t kRuleTablesSize = 0x1B58;
+
+// Every nBonus in [-5, 40] with steps 0, 1, 3, 5 and -5 and nAttack in
+// [0, 5]; the 32-bit extremes; then --iterations random triples.
+void IterativeAttackBonus(CaseContext& ctx)
+{
+    void* original = nullptr;
+    ctx.SetInputs("building the original's CRuleTables block");
+    ctx.CallOriginal([&] { original = OriginalBlock(kRuleTablesSize); });
+    auto* storage = static_cast<unsigned char*>(::operator new(sizeof(CRuleTables)));
+    std::memset(storage, 0, sizeof(CRuleTables));
+    const CRuleTables* ours = reinterpret_cast<const CRuleTables*>(storage);
+
+    auto check = [&](int32_t bonus, int32_t step, int32_t attack) {
+        ctx.SetInputs("GetIterativeAttackBonus(" + std::to_string(bonus) + ", " + std::to_string(step) + ", "
+            + std::to_string(attack) + ")");
+        int32_t originalResult = 0;
+        ctx.CallOriginal([&] {
+            originalResult = reinterpret_cast<IterativeAttackBonusFn>(kGetIterativeAttackBonus)(original, nullptr,
+                bonus, step, attack);
+        });
+        ctx.CountInputs(1);
+        oracle::Compare(ctx, originalResult, static_cast<int32_t>(ours->GetIterativeAttackBonus(bonus, step, attack)));
+    };
+    for (int32_t bonus = -5; bonus <= 40; ++bonus) {
+        for (const int32_t step : { 0, 1, 3, 5, -5 }) {
+            for (int32_t attack = 0; attack <= 5; ++attack) {
+                check(bonus, step, attack);
+            }
+        }
+    }
+    for (const int32_t e : { INT32_MIN, -1, 0, 1, INT32_MAX }) {
+        check(e, 5, 1);
+        check(10, e, 1);
+        check(10, 5, e);
+    }
+    uint64_t state = ctx.seed ^ 0x547020ull;
+    for (int i = 0; i < ctx.iterations; ++i) {
+        const int32_t bonus = static_cast<int32_t>(oracle::SplitMix64(&state) % 151) - 50;
+        const int32_t step = static_cast<int32_t>(oracle::SplitMix64(&state) % 21) - 10;
+        const int32_t attack = static_cast<int32_t>(oracle::SplitMix64(&state) % 13) - 2;
+        check(bonus, step, attack);
+    }
+}
+
 } // namespace
 
 ORACLE_CASE("combat/armor_class", ArmorClass);
+ORACLE_CASE("rules/iterative_attack_bonus", IterativeAttackBonus);
