@@ -24,6 +24,9 @@
 #pragma GCC diagnostic ignored "-Wcomma"
 #endif
 #elif defined(_MSC_VER)
+// C4505 (an unreferenced static function removed) is reported at the end of
+// the file, after the pop: off for the whole file.
+#pragma warning(disable : 4505)
 #pragma warning(push, 0)
 #endif
 #define STB_TRUETYPE_IMPLEMENTATION
