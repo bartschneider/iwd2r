@@ -23,6 +23,6 @@ CGameButtonList* CGameSprite_sub_716E80(CGameSprite* pSprite, BOOL bFlag);
 CGameButtonList* CGameSprite_sub_717250(CGameSprite* pSprite, BOOL bFlag);
 CGameButtonList* CGameSprite_sub_717FC0(CGameSprite* pSprite, const CResRef& cResRef, UINT nCount);
 void CGameSprite_sub_716770(CGameSprite* pSprite, CButtonData* pButtonData);
-void CGameSprite_sub_718390(CGameSprite* pSprite, const CResRef& cResRef, BYTE nClass, BYTE nLevel, CButtonData& buttonData);
+BOOL CGameSprite_sub_718390(CGameSprite* pSprite, const CResRef& cResRef, BYTE nClass, DWORD nSpecialization, CButtonData& buttonData);
 
 #endif /* CGAMESPRITEBUTTONLISTS_H_ */

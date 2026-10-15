@@ -1,8 +1,6 @@
 #ifndef CINFBUTTONARRAY_H_
 #define CINFBUTTONARRAY_H_
 
-#include <deque>
-
 #include "CVidCell.h"
 
 class CButtonData;
@@ -88,9 +86,10 @@ public:
     /* 197A */ int field_197A; // first list entry shown
     /* 197E */ INT m_nSelectedButton;
     /* 1982 */ INT m_nState;
-    // The original's std::deque<INT> (0x1986); CGameArea reads its size at
-    // 0x19B2 as `field_19B2`, kept equal to `m_stateStack.size()`.
-    /* 1986 */ std::deque<INT> m_stateStack;
+    // The original's std::deque<INT> (0x1986), used as a stack at its front;
+    // CGameArea reads its size at 0x19B2 as `field_19B2`, kept equal to
+    // `m_stateStack.GetCount()`.
+    /* 1986 */ CList<INT, INT> m_stateStack;
     /* 19B2 */ int field_19B2;
     /* 19B6 */ INT m_customizableButtonTypes[9];
     /* 19DA */ BYTE m_nCurrentSelectedSpellClass;

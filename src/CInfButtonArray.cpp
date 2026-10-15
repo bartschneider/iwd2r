@@ -35,6 +35,16 @@ static const UINT dword_85BCB4 = 5;
 // the original, not in our CGameSprite.h).
 static const LONG dword_85BD1C = 90;
 
+// 0x84CEB8
+//
+// NOTE: The icon flags of a greyed out action button.
+static const DWORD dword_84CEB8 = 2;
+
+// 0x84EBB0
+//
+// NOTE: The tint of a quick item the character cannot use now.
+static const COLORREF dword_84EBB0 = RGB(255, 255, 0);
+
 // 0x8477A6
 //
 // NOTE: `CAIAction::HIDE`, not in our CAIAction.h.
@@ -981,9 +991,8 @@ void CInfButtonArray::sub_588CB0(CButtonData* pButtonData, BYTE buttonNum, INT n
 BOOL CInfButtonArray::ResetState()
 {
     if (field_19B2 != 0) {
-        INT nState = m_stateStack.front();
-        m_stateStack.pop_front();
-        field_19B2 = static_cast<int>(m_stateStack.size());
+        INT nState = m_stateStack.RemoveHead();
+        field_19B2 = static_cast<int>(m_stateStack.GetCount());
         SetState(nState, 0);
         return TRUE;
     }
@@ -1011,8 +1020,8 @@ BOOL CInfButtonArray::SetState(INT nState, BYTE bPush)
     sub_587BD0();
 
     if (bPush == TRUE && nState != m_nState && m_nState != 0) {
-        m_stateStack.push_front(m_nState);
-        field_19B2 = static_cast<int>(m_stateStack.size());
+        m_stateStack.AddHead(m_nState);
+        field_19B2 = static_cast<int>(m_stateStack.GetCount());
     }
 
     INT nType;
@@ -1390,16 +1399,15 @@ void CInfButtonArray::sub_589FF0(BYTE bPush, BYTE bAll)
 {
     if (field_19B2 != 0) {
         if (bAll == TRUE) {
-            INT nState = m_stateStack.back();
-            m_stateStack.clear();
+            INT nState = m_stateStack.GetTail();
+            m_stateStack.RemoveAll();
             field_19B2 = 0;
             SetState(nState, 0);
             return;
         }
 
-        INT nState = m_stateStack.front();
-        m_stateStack.pop_front();
-        field_19B2 = static_cast<int>(m_stateStack.size());
+        INT nState = m_stateStack.RemoveHead();
+        field_19B2 = static_cast<int>(m_stateStack.GetCount());
         SetState(nState, bPush);
     }
 }
@@ -4997,6 +5005,259 @@ BOOL CInfButtonArray::OnRButtonPressed(int buttonID)
     pGame->GetObjectArray()->ReleaseShare(nCharacterId,
         CGameObjectArray::THREAD_ASYNCH,
         INFINITE);
+
+    return TRUE;
+}
+
+// 0x5950F0
+BOOL CInfButtonArray::sub_5950F0(const CPoint& pt, const CRect& rClip, BOOL bPressed, INT nButton)
+{
+    CVidCell vcHighlight;
+    CResRef cResRef;
+    DWORD dwFlags = 0;
+
+    CSize size;
+    size.cx = (g_pBaldurChitin->field_4A2C != FALSE ? 2 : 1) * CIcon::ICON_SIZE_SM.cx;
+    size.cy = (g_pBaldurChitin->field_4A2C != FALSE ? 2 : 1) * CIcon::ICON_SIZE_SM.cy;
+
+    if (nButton < 0 || nButton >= 12) {
+        return TRUE;
+    }
+
+    CInfButtonSettings* pSettings = &(m_buttonArray[nButton]);
+    DWORD dwHighlightFlags = pSettings->m_bGreyOut ? 0x80000 : 0;
+
+    if (g_pBaldurChitin->pActiveEngine == NULL
+        || g_pBaldurChitin->pActiveEngine->pVidMode == NULL) {
+        return FALSE;
+    }
+
+    CPoint ptIcon;
+    ptIcon.x = (g_pBaldurChitin->field_4A2C != FALSE ? 2 : 1) * 3 + pt.x;
+    ptIcon.y = (g_pBaldurChitin->field_4A2C != FALSE ? 2 : 1) * 3 + pt.y;
+    if (bPressed) {
+        ptIcon.x += (g_pBaldurChitin->field_4A2C != FALSE ? 2 : 1) * 2;
+        ptIcon.y += (g_pBaldurChitin->field_4A2C != FALSE ? 2 : 1) * 2;
+    }
+
+    CRect rIcon(ptIcon, size);
+    CRect rIconClip;
+    rIconClip.IntersectRect(rIcon, rClip);
+
+    if (pSettings->field_0 == 0) {
+        return TRUE;
+    }
+
+    if (pSettings->field_4 == 0) {
+        return FALSE;
+    }
+
+    if (pSettings->field_1D0 != 0 && pSettings->field_1CC == 0) {
+        vcHighlight.SetResRef(CResRef("HIGHLGHT"), g_pBaldurChitin->field_4A2C, TRUE, TRUE);
+        vcHighlight.Render(0, ptIcon.x, ptIcon.y, rIconClip, NULL, 0, dwHighlightFlags, -1);
+    }
+
+    if (pSettings->m_bGreyOut) {
+        dwFlags = dword_84CEB8;
+    }
+
+    CIcon::RenderIcon(0,
+        ptIcon,
+        size,
+        rIconClip,
+        pSettings->field_EE.GetResRef(),
+        g_pBaldurChitin->field_4A2C,
+        dwFlags,
+        0,
+        FALSE,
+        0,
+        FALSE,
+        0);
+
+    switch (m_buttonTypes[nButton]) {
+    case 70:
+    case 71:
+    case 72:
+    case 73:
+    case 74:
+    case 75:
+    case 76:
+    case 77:
+    case 78:
+    case 90:
+    case 91:
+    case 92:
+    case 93:
+    case 94:
+    case 95:
+    case 96:
+    case 97:
+    case 98: {
+        BOOL bForceCount;
+        if (pSettings->field_14.GetResRef() == "STONSPEL"
+            || pSettings->field_14.GetResRef() == "STONSPEC") {
+            bForceCount = TRUE;
+        } else {
+            bForceCount = FALSE;
+        }
+
+        CIcon::RenderIcon(0,
+            ptIcon,
+            size,
+            rIconClip,
+            pSettings->field_14.GetResRef(),
+            g_pBaldurChitin->field_4A2C,
+            dwFlags,
+            static_cast<WORD>(pSettings->field_1D8),
+            bForceCount,
+            0,
+            FALSE,
+            0);
+        break;
+    }
+    case 80:
+    case 81:
+    case 82: {
+        CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+        SHORT nPortrait = static_cast<SHORT>(g_pBaldurChitin->m_pEngineWorld->GetSelectedCharacter());
+
+        LONG nCharacterId;
+        if (nPortrait < pGame->m_nCharacters) {
+            nCharacterId = pGame->m_characterPortraits[nPortrait];
+        } else {
+            nCharacterId = CGameObjectArray::INVALID_INDEX;
+        }
+
+        BOOL bTint = FALSE;
+        CGameSprite* pSprite = NULL;
+
+        BYTE rc;
+        do {
+            rc = pGame->GetObjectArray()->GetShare(nCharacterId,
+                CGameObjectArray::THREAD_ASYNCH,
+                reinterpret_cast<CGameObject**>(&pSprite),
+                INFINITE);
+        } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+        INT nUsable = 1;
+        if (rc == CGameObjectArray::SUCCESS) {
+            if (pSprite != NULL) {
+                CItem* pItem = pSprite->GetQuickItem(static_cast<BYTE>(m_buttonTypes[nButton] - 80));
+                if (pItem != NULL) {
+                    nUsable = pGame->CheckItemUsable(pSprite, pItem);
+                    bTint = nUsable == 2;
+                }
+            }
+
+            pGame->GetObjectArray()->ReleaseShare(nCharacterId,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+        }
+
+        CIcon::RenderIcon(0,
+            ptIcon,
+            size,
+            rIconClip,
+            pSettings->field_14.GetResRef(),
+            g_pBaldurChitin->field_4A2C,
+            dwFlags,
+            static_cast<WORD>(pSettings->field_1D8),
+            FALSE,
+            0,
+            FALSE,
+            bTint == TRUE ? dword_84EBB0 : 0);
+
+        if (nUsable == 2) {
+            CVidCell vcTint(CResRef("STORTIN4"),
+                g_pBaldurChitin->m_pEngineWorld->GetManager()->m_bDoubleSize);
+            vcTint.Render(0, ptIcon.x, ptIcon.y, rIconClip, NULL, 0, 2, 192);
+        } else if (nUsable == 0) {
+            CVidCell vcTint(CResRef("STORTINT"),
+                g_pBaldurChitin->m_pEngineWorld->GetManager()->m_bDoubleSize);
+            vcTint.Render(0, ptIcon.x, ptIcon.y, rIconClip, NULL, 0, 2, 192);
+        }
+        break;
+    }
+    default:
+        CIcon::RenderIcon(0,
+            ptIcon,
+            size,
+            rIconClip,
+            pSettings->field_14.GetResRef(),
+            g_pBaldurChitin->field_4A2C,
+            dwFlags,
+            static_cast<WORD>(pSettings->field_1D8),
+            FALSE,
+            0,
+            FALSE,
+            0);
+        break;
+    }
+
+    return TRUE;
+}
+
+// 0x5957C0
+BOOL CInfButtonArray::sub_5957C0(const CPoint& pt, const CRect& rClip, BOOL bPressed, INT nButton)
+{
+    if (nButton < 0 || nButton >= 12) {
+        return TRUE;
+    }
+
+    CInfButtonSettings* pSettings = &(m_buttonArray[nButton]);
+
+    DWORD dwFlags;
+    if (pSettings->m_bGreyOut) {
+        field_17C2.SetTintColor(CUIControlButton::TINT_DISABLED);
+        field_16E8.SetTintColor(CUIControlButton::TINT_DISABLED);
+        dwFlags = 0xA0000;
+    } else {
+        dwFlags = 0;
+    }
+
+    if (g_pBaldurChitin->pActiveEngine == NULL
+        || g_pBaldurChitin->pActiveEngine->pVidMode == NULL) {
+        return FALSE;
+    }
+
+    INT nSize = (g_pBaldurChitin->field_4A2C != FALSE ? 2 : 1) * 38;
+    CRect rButton(pt.x, pt.y, pt.x + nSize, pt.y + nSize);
+    CRect rButtonClip;
+    rButtonClip.IntersectRect(rButton, rClip);
+
+    if (pSettings->field_0 == 0) {
+        return TRUE;
+    }
+
+    if (pSettings->field_8 == 0 || pSettings->field_C < 0) {
+        if (pSettings->field_1CC == 0) {
+            return FALSE;
+        }
+
+        field_16E8.SequenceSet(0);
+
+        SHORT nFrame = static_cast<SHORT>(nButton * 2 + 24);
+        if (bPressed) {
+            nFrame++;
+        }
+        field_16E8.FrameSet(nFrame);
+        field_16E8.Render(0, pt.x, pt.y, rButtonClip, NULL, 0, dwFlags, -1);
+        return TRUE;
+    }
+
+    field_17C2.SequenceSet(0);
+
+    INT nFrame;
+    if (pSettings->field_1CC != 0) {
+        nFrame = pSettings->field_10;
+    } else {
+        nFrame = pSettings->field_C;
+    }
+    if (bPressed) {
+        nFrame++;
+    }
+    field_17C2.FrameSet(static_cast<SHORT>(nFrame));
+    field_17C2.Render(0, pt.x, pt.y, rButtonClip, NULL, 0, dwFlags, -1);
 
     return TRUE;
 }

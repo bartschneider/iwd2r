@@ -4083,6 +4083,54 @@ void CUIControlButtonAction::OnRButtonClick(CPoint pt)
     g_pBaldurChitin->GetObjectGame()->GetButtonArray()->OnRButtonPressed(m_nID - 6);
 }
 
+// 0x77B530
+BOOL CUIControlButtonAction::Render(BOOL bForce)
+{
+    if (!m_bActive && !m_bInactiveRender) {
+        return FALSE;
+    }
+
+    SHORT nRenderCount = m_nRenderCount;
+    if (nRenderCount == 0 && !bForce) {
+        return FALSE;
+    }
+
+    CInfButtonArray* pButtonArray = &(g_pBaldurChitin->GetObjectGame()->m_cButtonArray);
+    field_64C = pButtonArray->m_buttonArray[m_nID - 6].m_bGreyOut;
+
+    if (pButtonArray == NULL) {
+        return CUIControlButton::Render(bForce);
+    }
+
+    CPoint pt = m_pPanel->m_ptOrigin + m_ptOrigin;
+
+    BOOL bDecremented = FALSE;
+    if (nRenderCount != 0) {
+        CSingleLock renderLock(&(m_pPanel->m_pManager->field_56), FALSE);
+        renderLock.Lock(INFINITE);
+        m_nRenderCount--;
+        renderLock.Unlock();
+        bDecremented = TRUE;
+    }
+
+    if (!pButtonArray->sub_5957C0(pt, m_rDirty, m_bPressed, m_nID - 6)) {
+        if (bDecremented) {
+            CSingleLock renderLock(&(m_pPanel->m_pManager->field_56), FALSE);
+            renderLock.Lock(INFINITE);
+            m_nRenderCount++;
+            renderLock.Unlock();
+        }
+
+        if (!CUIControlButton::Render(bForce)) {
+            return FALSE;
+        }
+    }
+
+    pButtonArray->sub_5950F0(pt, m_rDirty, m_bPressed, m_nID - 6);
+
+    return TRUE;
+}
+
 // -----------------------------------------------------------------------------
 
 // NOTE: Inlined.
