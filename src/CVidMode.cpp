@@ -251,6 +251,7 @@ void CVidMode::DestroySurface(IDirectDrawSurface** lplpDirectDrawSurface)
     if (lplpDirectDrawSurface != NULL) {
         if (*lplpDirectDrawSurface != NULL) {
             (*lplpDirectDrawSurface)->Release();
+            *lplpDirectDrawSurface = NULL;
         }
     }
 }
@@ -480,9 +481,65 @@ void CVidMode::DrawLightingEffect16(WORD* pSurface, LONG lPitch, const CPoint& a
 // 0x7977D0
 BOOL CVidMode::DrawPoints(CPoint* pPoints, INT nPoints, WORD* pSurface, LONG lPitch, const CRect& rSurface, COLORREF rgbColor, BOOL bClipped)
 {
-    // TODO: Incomplete.
+    // The points are surface coordinates; unless bClipped, a point outside
+    // rSurface is skipped. lPitch is in bytes.
+    DWORD color = ReduceColor(rgbColor);
 
-    return FALSE;
+    switch (g_pChitin->cVideo.m_nBpp) {
+    case 16:
+        if (!bClipped) {
+            for (; nPoints > 0; nPoints--) {
+                if (rSurface.PtInRect(*pPoints)) {
+                    pSurface[pPoints->y * (lPitch >> 1) + pPoints->x] = static_cast<WORD>(color);
+                }
+                pPoints++;
+            }
+        } else {
+            for (; nPoints > 0; nPoints--) {
+                pSurface[pPoints->y * (lPitch >> 1) + pPoints->x] = static_cast<WORD>(color);
+                pPoints++;
+            }
+        }
+        break;
+    case 24:
+        if (!bClipped) {
+            for (; nPoints > 0; nPoints--) {
+                if (rSurface.PtInRect(*pPoints)) {
+                    BYTE* pPixel = reinterpret_cast<BYTE*>(pSurface) + pPoints->x * 3 + pPoints->y * lPitch;
+                    *reinterpret_cast<WORD*>(pPixel) = static_cast<WORD>(color);
+                    pPixel[2] = static_cast<BYTE>(color >> 16);
+                }
+                pPoints++;
+            }
+        } else {
+            for (; nPoints > 0; nPoints--) {
+                BYTE* pPixel = reinterpret_cast<BYTE*>(pSurface) + pPoints->x * 3 + pPoints->y * lPitch;
+                *reinterpret_cast<WORD*>(pPixel) = static_cast<WORD>(color);
+                pPixel[2] = static_cast<BYTE>(color >> 16);
+                pPoints++;
+            }
+        }
+        break;
+    case 32:
+        if (!bClipped) {
+            for (; nPoints > 0; nPoints--) {
+                if (rSurface.PtInRect(*pPoints)) {
+                    reinterpret_cast<DWORD*>(pSurface)[pPoints->y * (lPitch >> 2) + pPoints->x] = color;
+                }
+                pPoints++;
+            }
+        } else {
+            for (; nPoints > 0; nPoints--) {
+                reinterpret_cast<DWORD*>(pSurface)[pPoints->y * (lPitch >> 2) + pPoints->x] = color;
+                pPoints++;
+            }
+        }
+        break;
+    default:
+        return FALSE;
+    }
+
+    return TRUE;
 }
 
 // #binary-identical
@@ -1413,7 +1470,7 @@ BOOL CVidMode::SetPointer(CVidCell* pVidCell, CResRef cResRef, BOOLEAN bAnimatin
     }
 
     m_bPointerAnimating = bAnimating;
-    m_nPointerNumber = m_nPointerNumber;
+    m_nPointerNumber = nPointerNumber;
     m_pPointerVidCell = pVidCell;
 
     lock.Unlock();
@@ -1924,7 +1981,7 @@ LONG CVidMode::DrawEllipse32(const CPoint& ptCenter, const CSize& axis, const DD
         rClip,
         color);
 
-    delete pPixelList;
+    delete[] pPixelList;
 
     return 0;
 }
@@ -2271,12 +2328,15 @@ void CVidMode::DrawRecticle32(const CVIDMODE_RECTICLE_DESCRIPTION& recticleDesc,
     CRect rLineClip;
     BOOLEAN bLineClipped;
 
+    // The lines are clipped to the clip less its last row and column when
+    // there is one, and drawn unclipped when there is none (sete at
+    // 0x7CB7D3: bClipped is TRUE when there is no clip).
     if (rClip != NULL) {
         rLineClip.SetRect(rClip->left, rClip->top, rClip->right - 1, rClip->bottom - 1);
-        bLineClipped = TRUE;
+        bLineClipped = FALSE;
     } else {
         rLineClip.SetRect(0, 0, 0, 0);
-        bLineClipped = FALSE;
+        bLineClipped = TRUE;
     }
 
     LONG nArcLength = GetEllipseArcPixelList(recticleDesc.xAxis,
@@ -2374,7 +2434,7 @@ void CVidMode::DrawRecticle32(const CVIDMODE_RECTICLE_DESCRIPTION& recticleDesc,
         pPixelList);
 
     // __FILE__: C:\Projects\Icewind2\src\chitin\ChVideo24.cpp
-    // __LINE__: 2097
+    // __LINE__: 2129
     UTIL_ASSERT(nArcLength < max(recticleDesc.xAxis, recticleDesc.yAxis));
 
     v3 = DrawEllipseVOctant32(recticleDesc.ptCenter.x - v1,
@@ -2457,7 +2517,7 @@ void CVidMode::DrawRecticle32(const CVIDMODE_RECTICLE_DESCRIPTION& recticleDesc,
         color,
         bLineClipped);
 
-    delete pPixelList;
+    delete[] pPixelList;
 }
 
 // 0x7CBC40

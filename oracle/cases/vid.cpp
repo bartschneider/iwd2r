@@ -1500,6 +1500,78 @@ void DrawLine16(CaseContext& ctx)
     }
 }
 
+using DrawLine32Fn = int32_t(__fastcall*)(void* self, void* edx, int32_t nXFrom, int32_t nYFrom, int32_t nXTo,
+    int32_t nYTo, uint32_t* pSurface, int32_t lPitch, const void* rSurface, uint32_t color, uint32_t bClipped);
+constexpr uintptr_t kDrawLine32 = 0x7CBC40;
+
+// DrawLine32 (0x7CBC40) with ScanLine32 (0x7CBD80), as DrawLine16 on 32-bit
+// pixels. DrawLine16 on the 96x96 canvas with a 16-pixel margin, as ThickLine32:
+// vertical, horizontal, diagonal and general lines in every direction,
+// clipped by the function or already inside. The whole canvas and the
+// result are compared.
+void DrawLine32(CaseContext& ctx)
+{
+    uint8_t* self = nullptr;
+    uint32_t* canvas = nullptr;
+    uint8_t* rect = nullptr;
+    ctx.SetInputs("building the original's canvas");
+    ctx.CallOriginal([&] {
+        self = OriginalBlock(kVidInfSize);
+        canvas = reinterpret_cast<uint32_t*>(OriginalBlock(kCanvas * kCanvas * 4));
+        rect = OriginalBlock(16);
+    });
+    const int32_t r[4] = { kMargin, kMargin, kCanvas - kMargin, kCanvas - kMargin };
+    std::memcpy(rect, r, sizeof(r));
+    CVidInf ours;
+    CRect rSurface(r[0], r[1], r[2], r[3]);
+    std::vector<DWORD> mine(kCanvas * kCanvas);
+    Picks picks(ctx.seed, 0x4C696E6533320000ull); // "Line32"
+    int n = 0;
+
+    auto check = [&](int32_t x1, int32_t y1, int32_t x2, int32_t y2, bool bClipped) {
+        const uint32_t color = picks.Bits() | 1;
+        std::memset(canvas, 0, kCanvas * kCanvas * 4);
+        std::fill(mine.begin(), mine.end(), 0u);
+        ctx.SetInputs("input " + std::to_string(n++) + ": DrawLine32(" + std::to_string(x1) + ", "
+            + std::to_string(y1) + ", " + std::to_string(x2) + ", " + std::to_string(y2) + ", bClipped "
+            + std::to_string(bClipped) + ")");
+        int32_t originalResult = 0;
+        ctx.CallOriginal([&] {
+            originalResult = reinterpret_cast<DrawLine32Fn>(kDrawLine32)(self, nullptr, x1, y1, x2, y2,
+                canvas + kMargin * kCanvas + kMargin, kCanvas, rect, color, bClipped ? 1u : 0u);
+        });
+        const BOOL oursResult = ours.DrawLine32(x1, y1, x2, y2, mine.data() + kMargin * kCanvas + kMargin, kCanvas,
+            rSurface, color, bClipped ? TRUE : FALSE);
+        ctx.CountInputs(1);
+        if (oracle::Compare(ctx, originalResult, static_cast<int32_t>(oursResult))) {
+            CompareArrays(ctx, canvas, mine.data(), kCanvas * kCanvas);
+        }
+    };
+
+    const int32_t lo = kMargin;
+    const int32_t hi = kCanvas - kMargin - 1;
+    for (int i = 0; i < 64; ++i) {
+        const int32_t x = picks.Between(lo, hi);
+        const int32_t y = picks.Between(lo, hi);
+        const int32_t len = picks.Between(0, 30);
+        check(x, y, x, picks.Between(lo, hi), true);
+        check(x, y, picks.Between(lo, hi), y, true);
+        const int32_t dx = picks.Between(0, 1) ? 1 : -1;
+        const int32_t dy = picks.Between(0, 1) ? 1 : -1;
+        if (x + dx * len >= lo && x + dx * len <= hi && y + dy * len >= lo && y + dy * len <= hi) {
+            check(x, y, x + dx * len, y + dy * len, true);
+        }
+        check(x, y, picks.Between(lo, hi), picks.Between(lo, hi), true);
+    }
+    for (int i = 0; i < ctx.iterations / 4; ++i) {
+        const int32_t x1 = picks.Between(0, kCanvas - 1);
+        const int32_t y1 = picks.Between(0, kCanvas - 1);
+        const int32_t x2 = picks.Between(0, 3) == 0 ? x1 : picks.Between(0, kCanvas - 1);
+        const int32_t y2 = picks.Between(0, 3) == 0 ? y1 : picks.Between(0, kCanvas - 1);
+        check(x1, y1, x2, y2, false);
+    }
+}
+
 // CVidMode::DrawEllipse24(ptCenter, axis, ddsd, rClip, rgbColor) (0x7C8B40),
 // `ret 0x14`, with DrawEllipseHOctant24 (0x7C9990) and DrawEllipseVOctant24
 // (0x7C8E10) through the vtable, and GetEllipseArcPixelList. Unreachable in
@@ -1677,6 +1749,131 @@ void BltTile8To16(CaseContext& ctx)
     ::operator delete(oursTileStorage);
 }
 
+// CVidMode::DrawEllipse32 (0x7CA840) and DrawRecticle32 (0x7CB670), both
+// `ret 0x10`/`ret 0x14` with the same DDSURFACEDESC reads as
+// DrawEllipse24, through the vtable to the 32-bit octants and
+// GetEllipseArcPixelList, and (the reticle) DrawLine32.
+using DrawEllipse32Fn = int32_t(__fastcall*)(void* self, void* edx, const void* ptCenter, const void* axis,
+    const void* ddsd, const void* rClip, uint32_t rgbColor);
+using DrawRecticle32Fn = void(__fastcall*)(void* self, void* edx, const void* desc, const void* ddsd,
+    const void* rClip, uint32_t rgbColor);
+constexpr uintptr_t kDrawEllipse32 = 0x7CA840;
+constexpr uintptr_t kDrawRecticle32 = 0x7CB670;
+constexpr int kShapeCanvas = 128;
+
+// Ellipses and reticles on a 128x128 32-bit canvas of random pixels, with
+// and without a random clip (the surface at the clip's top left when there
+// is one, as the callers lock it). Half-axes 2 to 30; a reticle's gaps stay
+// below its arcs and its pie offsets small, so every point and line stays
+// on the canvas. Inputs on which the original asserts are skipped, as in
+// DrawEllipse24. The whole canvas is compared.
+void Shapes32(CaseContext& ctx, bool recticle, uint64_t salt)
+{
+    VideoFixture video(ctx);
+    uint32_t* canvas = nullptr;
+    uint8_t* args = nullptr;
+    uint8_t* ddsd = nullptr;
+    const int pitch = kShapeCanvas * 4;
+    ctx.SetInputs("building the original's canvas");
+    ctx.CallOriginal([&] {
+        canvas = reinterpret_cast<uint32_t*>(OriginalBlock(static_cast<size_t>(pitch * kShapeCanvas)));
+        args = OriginalBlock(64);
+        ddsd = OriginalBlock(0x6C);
+    });
+    std::vector<DWORD> mine(static_cast<size_t>(kShapeCanvas * kShapeCanvas));
+    Picks picks(ctx.seed, salt);
+    const int count = 500 + ctx.iterations / 20;
+    for (int n = 0; n < count; ++n) {
+        const int32_t ax = picks.Between(2, 30);
+        const int32_t ay = picks.Between(2, 30);
+        std::vector<BYTE> arc(256);
+        const LONG nArcH = video.oursMode->GetEllipseArcPixelList(ax, ay, arc.data());
+        const LONG nArcV = video.oursMode->GetEllipseArcPixelList(ay, ax, arc.data());
+        if (nArcH > (std::max)(ax, ay) || nArcV >= (std::max)(ax, ay) || nArcH < 3 || nArcV < 3) {
+            continue;
+        }
+        CVIDMODE_RECTICLE_DESCRIPTION desc = {};
+        desc.xAxis = static_cast<SHORT>(ax);
+        desc.yAxis = static_cast<SHORT>(ay);
+        desc.xGap = static_cast<SHORT>(picks.Between(0, nArcH - 3));
+        desc.yGap = static_cast<SHORT>(picks.Between(0, nArcV - 2));
+        desc.piePieceXOffset = static_cast<SHORT>(picks.Between(0, 6));
+        desc.piePieceYOffset = static_cast<SHORT>(picks.Between(0, 6));
+        desc.piePiecePtXOffset = static_cast<SHORT>(picks.Between(0, 6));
+        desc.piePiecePtYOffset = static_cast<SHORT>(picks.Between(0, 6));
+        const bool clipped = picks.Between(0, 1) != 0;
+        int32_t r[4] = { 0, 0, 0, 0 };
+        if (clipped) {
+            r[0] = picks.Between(0, 90);
+            r[1] = picks.Between(0, 90);
+            r[2] = picks.Between(r[0] + 1, 127);
+            r[3] = picks.Between(r[1] + 1, 127);
+        }
+        const int32_t cx = picks.Between(44, 83);
+        const int32_t cy = picks.Between(44, 83);
+        desc.ptCenter = CPoint(cx, cy);
+        const uint32_t rgb = picks.Bits() & 0xFFFFFF;
+        for (DWORD& pixel : mine) {
+            pixel = picks.Bits();
+        }
+        char inputs[240];
+        std::snprintf(inputs, sizeof(inputs),
+            "input %d: centre (%d,%d), axis (%d,%d), gap (%d,%d), pie (%d,%d) pt (%d,%d), clip %s (%d,%d)-(%d,%d)", n,
+            cx, cy, ax, ay, desc.xGap, desc.yGap, desc.piePieceXOffset, desc.piePieceYOffset, desc.piePiecePtXOffset,
+            desc.piePiecePtYOffset, clipped ? "on" : "off", r[0], r[1], r[2], r[3]);
+        ctx.SetInputs(inputs);
+        const int32_t offset = clipped ? r[1] * kShapeCanvas + r[0] : 0;
+        ctx.CallOriginal([&] {
+            std::memcpy(canvas, mine.data(), mine.size() * 4);
+            const int32_t pt[2] = { cx, cy };
+            const int32_t size[2] = { ax, ay };
+            std::memcpy(args, pt, 8);
+            std::memcpy(args + 8, size, 8);
+            std::memcpy(args + 16, r, 16);
+            Put<int32_t>(args + 32, 0, cx);
+            Put<int32_t>(args + 32, 4, cy);
+            Put<int16_t>(args + 32, 8, desc.xAxis);
+            Put<int16_t>(args + 32, 10, desc.yAxis);
+            Put<int16_t>(args + 32, 12, desc.piePiecePtXOffset);
+            Put<int16_t>(args + 32, 14, desc.piePiecePtYOffset);
+            Put<int16_t>(args + 32, 16, desc.piePieceXOffset);
+            Put<int16_t>(args + 32, 18, desc.piePieceYOffset);
+            Put<int16_t>(args + 32, 20, desc.xGap);
+            Put<int16_t>(args + 32, 22, desc.yGap);
+            Put<int32_t>(ddsd, 0x10, pitch);
+            Put<uint32_t>(ddsd, 0x24, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(canvas + offset)));
+            if (recticle) {
+                reinterpret_cast<DrawRecticle32Fn>(kDrawRecticle32)(video.mode, nullptr, args + 32, ddsd,
+                    clipped ? args + 16 : nullptr, rgb);
+            } else {
+                reinterpret_cast<DrawEllipse32Fn>(kDrawEllipse32)(video.mode, nullptr, args, args + 8, ddsd,
+                    clipped ? args + 16 : nullptr, rgb);
+            }
+        });
+        DDSURFACEDESC surface = {};
+        surface.lPitch = pitch;
+        surface.lpSurface = mine.data() + offset;
+        const CRect rClip(r[0], r[1], r[2], r[3]);
+        if (recticle) {
+            video.oursMode->DrawRecticle32(desc, surface, clipped ? &rClip : nullptr, rgb);
+        } else {
+            video.oursMode->DrawEllipse32(CPoint(cx, cy), CSize(ax, ay), surface, clipped ? &rClip : nullptr, rgb);
+        }
+        ctx.CountInputs(1);
+        CompareArrays(ctx, canvas, mine.data(), kShapeCanvas * kShapeCanvas);
+    }
+}
+
+void Ellipse32(CaseContext& ctx)
+{
+    Shapes32(ctx, false, 0x456C6C3332000000ull); // "Ell32"
+}
+
+void Recticle32(CaseContext& ctx)
+{
+    Shapes32(ctx, true, 0x5265637433320000ull); // "Rect32"
+}
+
 void CellTranslucent(CaseContext& ctx)
 {
     CellBlend(ctx, true, 0x43656C6C54000000ull); // "CellT"
@@ -1703,5 +1900,8 @@ ORACLE_CASE("vid/cell_brightness32", CellBrightness);
 ORACLE_CASE("vid/cell_blt8to16", CellBlt8To16);
 ORACLE_CASE("vid/cell_blt8to24", CellBlt8To24);
 ORACLE_CASE("vid/draw_line16", DrawLine16);
+ORACLE_CASE("vid/draw_line32", DrawLine32);
 ORACLE_CASE("vid/draw_ellipse24", DrawEllipse24);
 ORACLE_CASE("vid/blt_tile8to16", BltTile8To16);
+ORACLE_CASE("vid/draw_ellipse32", Ellipse32);
+ORACLE_CASE("vid/draw_recticle32", Recticle32);

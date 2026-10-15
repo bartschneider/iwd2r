@@ -856,3 +856,28 @@ TEST_CASE("fx_blt_to_back_clips_left", "[vid]")
     pBack->Release();
     pDirectDraw->Release();
 }
+
+// CVidMode::DrawPoints (0x7977D0), which CVidInf::FXRender (0x79D450) uses
+// for particles: each point is a surface coordinate (lPitch in bytes);
+// unless bClipped, a point outside rSurface is skipped.
+TEST_CASE("draw_points32", "[vid]")
+{
+    ChitinScope scope;
+    CVidInf mode;
+    mode.m_dwRBitShift = 16;
+    mode.m_dwGBitShift = 8;
+    mode.m_dwBBitShift = 0;
+    CPoint points[4] = { CPoint(1, 1), CPoint(6, 2), CPoint(7, 3), CPoint(0, 0) };
+    std::vector<DWORD> pixels(8 * 4, 0);
+    REQUIRE(mode.DrawPoints(points, 4, reinterpret_cast<WORD*>(pixels.data()), 8 * 4, CRect(1, 1, 7, 4), RGB(1, 2, 3), FALSE));
+    std::vector<DWORD> expected(8 * 4, 0);
+    expected[1 * 8 + 1] = 0x00010203;
+    expected[2 * 8 + 6] = 0x00010203;
+    CHECK(pixels == expected);
+
+    std::fill(pixels.begin(), pixels.end(), 0u);
+    REQUIRE(mode.DrawPoints(points, 4, reinterpret_cast<WORD*>(pixels.data()), 8 * 4, CRect(1, 1, 7, 4), RGB(1, 2, 3), TRUE));
+    expected[3 * 8 + 7] = 0x00010203;
+    expected[0] = 0x00010203;
+    CHECK(pixels == expected);
+}
