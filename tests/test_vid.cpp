@@ -1153,3 +1153,70 @@ TEST_CASE("render_flash_fills_its_surface", "[vid]")
     surfaces[0]->Release();
     pDirectDraw->Release();
 }
+
+// DrawLine24 (0x7CA0D0) draws 3-byte pixels (the colour's low word, then
+// its third byte), lPitch in bytes; a run-sliced line goes through
+// ScanLine24 (0x7CA240) as DrawLine16 through ScanLine16.
+TEST_CASE("draw_line24", "[vid]")
+{
+    CVidInf mode;
+    const CRect rSurface(0, 0, kDepthW, kDepthH);
+    std::vector<BYTE> pixels(kDepthW * kDepthH * 3, 0);
+    const DWORD color = 0x00ABCDEF;
+    REQUIRE(mode.DrawLine24(5, 2, 0, 0, pixels.data(), kDepthW * 3, rSurface, color, TRUE));
+    std::vector<BYTE> expected(kDepthW * kDepthH * 3, 0);
+    auto put = [&](int x, int y) {
+        BYTE* p = expected.data() + (y * kDepthW + x) * 3;
+        p[0] = 0xEF;
+        p[1] = 0xCD;
+        p[2] = 0xAB;
+    };
+    for (const auto& [x, y] : std::vector<std::pair<int, int>> { { 0, 0 }, { 1, 0 }, { 2, 1 }, { 3, 1 }, { 4, 2 }, { 5, 2 } }) {
+        put(x, y);
+    }
+    CHECK(pixels == expected);
+
+    // Clipped by the function: a vertical line from above the surface.
+    std::fill(pixels.begin(), pixels.end(), static_cast<BYTE>(0));
+    std::fill(expected.begin(), expected.end(), static_cast<BYTE>(0));
+    REQUIRE(mode.DrawLine24(6, -3, 6, 2, pixels.data(), kDepthW * 3, rSurface, color, FALSE));
+    for (int y = 0; y <= 2; ++y) {
+        put(6, y);
+    }
+    CHECK(pixels == expected);
+}
+
+// DrawThickLine16 (0x799280) and DrawThickLine24 (0x7CA330) draw a
+// horizontal line a8 + 1 rows thick, starting half the thickness above and
+// to the left of the first point.
+TEST_CASE("draw_thick_line16_24", "[vid]")
+{
+    CVidInf mode;
+    constexpr int kW = 12;
+    constexpr int kH = 10;
+    CRect rSurface(0, 0, kW, kH);
+
+    std::vector<WORD> pixels16(kW * kH, 0);
+    REQUIRE(mode.DrawThickLine16(3, 5, 7, 5, pixels16.data(), kW, rSurface, 2, 0x1234, TRUE));
+    std::vector<WORD> expected16(kW * kH, 0);
+    // a8 2: three rows from y 4, each starting at x 2 and one pixel later
+    // per row (the original's row step), five pixels long.
+    for (int row = 0; row < 3; ++row) {
+        for (int x = 2 + row; x <= 6 + row; ++x) {
+            expected16[(4 + row) * kW + x] = 0x1234;
+        }
+    }
+    CHECK(pixels16 == expected16);
+
+    std::vector<BYTE> pixels24(kW * kH * 3, 0);
+    REQUIRE(mode.DrawThickLine24(3, 5, 7, 5, pixels24.data(), kW * 3, rSurface, 2, 0x00ABCDEF, TRUE));
+    std::vector<BYTE> expected24(kW * kH * 3, 0);
+    for (int i = 0; i < kW * kH; ++i) {
+        if (expected16[i] != 0) {
+            expected24[i * 3 + 0] = 0xEF;
+            expected24[i * 3 + 1] = 0xCD;
+            expected24[i * 3 + 2] = 0xAB;
+        }
+    }
+    CHECK(pixels24 == expected24);
+}

@@ -14,6 +14,243 @@ typedef struct CVIDMODE_CLIP_OUTCODE {
     unsigned int top : 4;
 } CVIDMODE_CLIP_OUTCODE;
 
+namespace {
+
+// The thick-line slices of DrawThickLine16/24 (0x79A950, 0x7CA630): the
+// algorithm of DrawThickLine32's sub_7CC130 on pixels of type T, written by
+// put. The adjustments are in units of T (bytes for 24 bits).
+template <class T, class Put>
+void ThickLineSlices(T* pSurface, UINT nMajorAxis, UINT nMinorAxis, INT nMajorAxisAdjust, INT nMinorAxisAdjust, UINT nThickness, Put put)
+{
+    UINT nWholeStep = nMajorAxis / nMinorAxis;
+    INT nAdjUp = (nMajorAxis % nMinorAxis) * 2;
+    INT nAdjDown = nMinorAxis * 2;
+    INT nErrorTerm = (nAdjUp >> 1) - nAdjDown;
+    UINT nFinalPixelCount = (nWholeStep >> 1) + 1;
+    UINT nInitialPixelCount = nFinalPixelCount;
+
+    if (nAdjUp == 0 && (nWholeStep & 1) == 0) {
+        nInitialPixelCount--;
+    }
+
+    if ((nWholeStep & 1) != 0) {
+        nErrorTerm += nMinorAxis;
+    }
+
+    INT nTrailErrorTerm = nErrorTerm;
+    UINT nTrail = 0;
+    UINT nTrailRun = nInitialPixelCount;
+    UINT nLead = (nThickness & ~1) + nInitialPixelCount;
+
+    for (UINT n = nLead; n != 0; n--) {
+        put(pSurface);
+        pSurface += nMajorAxisAdjust;
+    }
+    pSurface += nMinorAxisAdjust - static_cast<INT>(nLead) * nMajorAxisAdjust;
+
+    UINT nWait = nThickness - 2;
+    for (UINT nSlice = nMinorAxis - 1; nSlice != 0; nSlice--) {
+        UINT nRunLength = nWholeStep;
+        nErrorTerm += nAdjUp;
+        if (nErrorTerm > 0) {
+            nRunLength = nWholeStep + 1;
+            nErrorTerm -= nAdjDown;
+        }
+
+        nLead += nRunLength;
+        if (nTrail < nLead) {
+            for (UINT n = nLead - nTrail; n != 0; n--) {
+                put(pSurface);
+                pSurface += nMajorAxisAdjust;
+            }
+        }
+        pSurface -= static_cast<INT>(nLead - nTrail) * nMajorAxisAdjust;
+
+        if (nWait == 0) {
+            pSurface += static_cast<INT>(nTrailRun) * nMajorAxisAdjust;
+            nTrail += nTrailRun;
+            nTrailRun = nWholeStep;
+            nTrailErrorTerm += nAdjUp;
+            if (nTrailErrorTerm > 0) {
+                nTrailRun = nWholeStep + 1;
+                nTrailErrorTerm -= nAdjDown;
+            }
+        } else {
+            nWait--;
+        }
+
+        pSurface += nMinorAxisAdjust;
+    }
+
+    nLead += nFinalPixelCount;
+    for (UINT nSlice = 0; nSlice < nThickness; nSlice++) {
+        if (nTrail < nLead) {
+            for (UINT n = nLead - nTrail; n != 0; n--) {
+                put(pSurface);
+                pSurface += nMajorAxisAdjust;
+            }
+        }
+        pSurface -= static_cast<INT>(nLead - nTrail) * nMajorAxisAdjust;
+
+        if (nSlice == nThickness - 1) {
+            nTrailRun = nFinalPixelCount;
+        }
+
+        pSurface += static_cast<INT>(nTrailRun) * nMajorAxisAdjust;
+        nTrail += nTrailRun;
+        nTrailRun = nWholeStep;
+        nTrailErrorTerm += nAdjUp;
+        if (nTrailErrorTerm > 0) {
+            nTrailRun = nWholeStep + 1;
+            nTrailErrorTerm -= nAdjDown;
+        }
+
+        pSurface += nMinorAxisAdjust;
+    }
+}
+
+// DrawThickLine16/24 (0x799280, 0x7CA330): DrawThickLine32's body on pixels
+// of type T, nUnit Ts to a pixel (3 bytes for 24 bits, else 1), lPitch in
+// Ts, nHalf half the thickness rounded up. slices draws the general case.
+template <class T, class Put, class Slices>
+BOOL ThickLine(INT nXFrom, INT nYFrom, INT nXTo, INT nYTo, T* pSurface, LONG lPitch, const CRect& rSurface, int a8, INT nHalf, INT nUnit, BOOLEAN bClipped, Put put, Slices slices)
+{
+    INT nCount = a8 + 1;
+    INT nStep = nUnit;
+    INT nDeltaX;
+    INT nDeltaY;
+
+    if (!bClipped) {
+        CRect rClip;
+        rClip.left = rSurface.left + nHalf;
+        rClip.top = rSurface.top + nHalf;
+        rClip.right = rSurface.right - nHalf;
+        rClip.bottom = rSurface.bottom - nHalf;
+        if (!CVidMode::ClipLine(nXFrom, nYFrom, nXTo, nYTo, rClip)) {
+            return FALSE;
+        }
+    }
+
+    if (nYTo < nYFrom) {
+        INT t;
+
+        t = nXTo;
+        nXTo = nXFrom;
+        nXFrom = t;
+
+        t = nYTo;
+        nYTo = nYFrom;
+        nYFrom = t;
+    }
+
+    nDeltaX = nXTo - nXFrom;
+    if (nDeltaX < 0) {
+        nDeltaX = nXFrom - nXTo;
+        nStep = -nUnit;
+    }
+
+    nDeltaY = nYTo - nYFrom;
+
+    // The line's first pixel moved back half the thickness across and up.
+    pSurface += lPitch * (nYFrom - rSurface.top) + (nXFrom - rSurface.left) * nUnit;
+    if (nStep > 0) {
+        pSurface -= nHalf * nUnit;
+    } else {
+        pSurface += nHalf * nUnit;
+    }
+    pSurface -= nHalf * lPitch;
+
+    if (nDeltaX == 0) {
+        // Each column starts a row below the previous one.
+        if (a8 >= 0) {
+            do {
+                if (nDeltaY >= 0) {
+                    INT n = nDeltaY + 1;
+                    do {
+                        put(pSurface);
+                        pSurface += lPitch;
+                        n--;
+                    } while (n != 0);
+                }
+                pSurface += nUnit - nDeltaY * lPitch;
+                nCount--;
+            } while (nCount != 0);
+            return TRUE;
+        }
+    } else if (nDeltaY == 0) {
+        // Each row starts a column after the previous one.
+        if (a8 >= 0) {
+            do {
+                if (nDeltaX >= 0) {
+                    INT n = nDeltaX + 1;
+                    do {
+                        put(pSurface);
+                        pSurface += nStep;
+                        n--;
+                    } while (n != 0);
+                }
+                nCount--;
+                pSurface += lPitch - nDeltaX * nStep;
+            } while (nCount != 0);
+            return TRUE;
+        }
+    } else if (nDeltaX == nDeltaY) {
+        INT nRow = 0;
+        INT nRun = a8 - 1;
+        if (a8 > 0) {
+            do {
+                nRun += nRow < nDeltaX ? 1 : 0;
+                for (INT n = nRun; n > 0; n--) {
+                    put(pSurface);
+                    pSurface += nStep;
+                }
+                nRow++;
+                pSurface += lPitch - nRun * nStep;
+            } while (nRow < a8);
+        }
+
+        pSurface += nStep;
+
+        INT nRows = nDeltaY - ((a8 & 1) != 0 ? a8 : a8 - 1);
+        if (nRows > 0) {
+            do {
+                for (INT n = nRun; n > 0; n--) {
+                    put(pSurface);
+                    pSurface += nStep;
+                }
+                nRows--;
+                pSurface += lPitch - (nRun - 1) * nStep;
+            } while (nRows != 0);
+        }
+
+        if (a8 > 0) {
+            INT nAdvance = (1 - nRun) * nStep + lPitch;
+            INT nLeft = a8;
+            do {
+                for (INT n = nRun; n > 0; n--) {
+                    put(pSurface);
+                    pSurface += nStep;
+                }
+                pSurface += nAdvance;
+                nRun--;
+                nAdvance += nStep;
+                nLeft--;
+            } while (nLeft != 0);
+            return TRUE;
+        }
+    } else {
+        if (nDeltaY > nDeltaX) {
+            slices(pSurface, nDeltaY, nDeltaX, lPitch, nStep, a8);
+        } else {
+            slices(pSurface, nDeltaX, nDeltaY, nStep, lPitch, a8);
+        }
+    }
+
+    return TRUE;
+}
+
+}
+
 // 0x8FB964
 const CString CVidMode::SCREEN_SHOT_EXTENSION("bmp");
 
@@ -990,9 +1227,24 @@ BOOL CVidMode::DrawThickLine(INT nXFrom, INT nYFrom, INT nXTo, INT nYTo, const D
 // 0x799280
 BOOL CVidMode::DrawThickLine16(INT nXFrom, INT nYFrom, INT nXTo, INT nYTo, WORD* pSurface, LONG lPitch, CRect& rSurface, int a8, WORD color, BOOLEAN bClipped)
 {
-    // TODO: Incomplete.
+    // As DrawThickLine32 (0x7CBE70) on 16-bit pixels; half the thickness
+    // is taken as a short (movsx at the start).
+    return ThickLine(nXFrom, nYFrom, nXTo, nYTo, pSurface, lPitch, rSurface, a8,
+        static_cast<SHORT>((a8 + 1) >> 1), 1, bClipped,
+        [color](WORD* p) { *p = color; },
+        [this, color](WORD* p, UINT nMajor, UINT nMinor, INT nMajorAdjust, INT nMinorAdjust, int nThickness) {
+            sub_79A950(p, nMajor, nMinor, nMajorAdjust, nMinorAdjust, nThickness, color);
+        });
+}
 
-    return FALSE;
+// The 16-bit thick-line slices of DrawThickLine16: sub_7CC130 on 16-bit
+// pixels.
+//
+// 0x79A950
+void CVidMode::sub_79A950(WORD* pSurface, UINT nMajorAxis, UINT nMinorAxis, INT nMajorAxisAdjust, INT nMinorAxisAdjust, UINT nThickness, WORD color)
+{
+    ThickLineSlices(pSurface, nMajorAxis, nMinorAxis, nMajorAxisAdjust, nMinorAxisAdjust, nThickness,
+        [color](WORD* p) { *p = color; });
 }
 
 // 0x799540
@@ -1898,17 +2150,139 @@ void CVidMode::DrawRecticle24(const CVIDMODE_RECTICLE_DESCRIPTION& rd, const DDS
 // 0x7CA0D0
 BOOL CVidMode::DrawLine24(INT nXFrom, INT nYFrom, INT nXTo, INT nYTo, BYTE* pSurface, LONG lPitch, const CRect& rSurface, DWORD color, BOOLEAN bClipped)
 {
-    // TODO: Incomplete.
+    INT nDeltaX;
+    INT nDeltaY;
+    INT nStep = 3;
 
-    return FALSE;
+    if (!bClipped) {
+        if (!ClipLine(nXFrom, nYFrom, nXTo, nYTo, rSurface)) {
+            return FALSE;
+        }
+    }
+
+    if (nYTo < nYFrom) {
+        INT t;
+
+        t = nXTo;
+        nXTo = nXFrom;
+        nXFrom = t;
+
+        t = nYTo;
+        nYTo = nYFrom;
+        nYFrom = t;
+    }
+
+    nDeltaX = nXTo - nXFrom;
+    if (nDeltaX < 0) {
+        nStep = -3;
+        nDeltaX = nXFrom - nXTo;
+    }
+
+    nDeltaY = nYTo - nYFrom;
+
+    // lPitch is in bytes; each pixel is the colour's low word and its third
+    // byte.
+    pSurface += (nYFrom - rSurface.top) * lPitch + (nXFrom - rSurface.left) * 3;
+
+    if (nDeltaX == 0) {
+        while (nDeltaY >= 0) {
+            PutPixel24(pSurface, color);
+            pSurface += lPitch;
+            nDeltaY--;
+        }
+    } else if (nDeltaY == 0) {
+        while (nDeltaX >= 0) {
+            PutPixel24(pSurface, color);
+            pSurface += nStep;
+            nDeltaX--;
+        }
+    } else if (nDeltaX == nDeltaY) {
+        while (nDeltaX >= 0) {
+            PutPixel24(pSurface, color);
+            pSurface += nStep + lPitch;
+            nDeltaX--;
+        }
+    } else if (nDeltaX < nDeltaY) {
+        ScanLine24(pSurface, nDeltaY, nDeltaX, lPitch, nStep, color);
+    } else {
+        ScanLine24(pSurface, nDeltaX, nDeltaY, nStep, lPitch, color);
+    }
+
+    return TRUE;
+}
+
+// The 24-bit run-sliced line: ScanLine16 (0x79A860) on 3-byte pixels, the
+// adjustments in bytes.
+//
+// 0x7CA240
+void CVidMode::ScanLine24(BYTE* pSurface, UINT nMajorAxis, UINT nMinorAxis, INT nMajorAxisAdjust, INT nMinorAxisAdjust, DWORD color)
+{
+    UINT nWholeStep = nMajorAxis / nMinorAxis;
+    INT nAdjUp = (nMajorAxis % nMinorAxis) * 2;
+    INT nErrorTerm = (nAdjUp >> 1) - nMinorAxis * 2;
+    UINT nFinalRun = (nWholeStep >> 1) + 1;
+    UINT nInitialRun = nFinalRun;
+    UINT nRun;
+
+    if (nAdjUp == 0 && (nWholeStep & 1) == 0) {
+        nInitialRun = nWholeStep >> 1;
+    }
+
+    if ((nWholeStep & 1) != 0) {
+        nErrorTerm += nMinorAxis;
+    }
+
+    for (nRun = nInitialRun; nRun != 0; nRun--) {
+        PutPixel24(pSurface, color);
+        pSurface += nMajorAxisAdjust;
+    }
+
+    UINT nRows = nMinorAxis;
+    while (true) {
+        nRows--;
+        pSurface += nMinorAxisAdjust;
+        if (nRows == 0) {
+            break;
+        }
+
+        nErrorTerm += nAdjUp;
+        nRun = nWholeStep;
+        if (nErrorTerm > 0) {
+            nRun = nWholeStep + 1;
+            nErrorTerm -= nMinorAxis * 2;
+        }
+
+        for (; nRun != 0; nRun--) {
+            PutPixel24(pSurface, color);
+            pSurface += nMajorAxisAdjust;
+        }
+    }
+
+    for (nRun = nFinalRun; nRun != 0; nRun--) {
+        PutPixel24(pSurface, color);
+        pSurface += nMajorAxisAdjust;
+    }
 }
 
 // 0x7CA330
 BOOL CVidMode::DrawThickLine24(INT nXFrom, INT nYFrom, INT nXTo, INT nYTo, BYTE* pSurface, LONG lPitch, CRect& rSurface, int a8, DWORD color, BOOLEAN bClipped)
 {
-    // TODO: Incomplete.
+    // As DrawThickLine32 (0x7CBE70) on 3-byte pixels, lPitch in bytes.
+    return ThickLine(nXFrom, nYFrom, nXTo, nYTo, pSurface, lPitch, rSurface, a8, (a8 + 1) >> 1, 3, bClipped,
+        [color](BYTE* p) { PutPixel24(p, color); },
+        [this, color](BYTE* p, UINT nMajor, UINT nMinor, INT nMajorAdjust, INT nMinorAdjust, int nThickness) {
+            sub_7CA630(p, nMajor, nMinor, nMajorAdjust, nMinorAdjust, nThickness, color);
+        });
+}
 
-    return FALSE;
+// The 24-bit thick-line slices of DrawThickLine24: sub_7CC130 on 3-byte
+// pixels, the adjustments in bytes.
+//
+// 0x7CA630
+void CVidMode::sub_7CA630(BYTE* pSurface, UINT nMajorAxis, UINT nMinorAxis, INT nMajorAxisAdjust, INT nMinorAxisAdjust, UINT nThickness, DWORD color)
+{
+    ThickLineSlices(pSurface, nMajorAxis, nMinorAxis, nMajorAxisAdjust, nMinorAxisAdjust, nThickness,
+        [color](BYTE* p) { PutPixel24(p, color); });
 }
 
 // 0x7CA840
