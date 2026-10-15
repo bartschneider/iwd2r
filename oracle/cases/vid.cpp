@@ -1738,10 +1738,20 @@ constexpr uintptr_t kBltTile8To16 = 0x7B22E0;
 // Tiles of 1 to 32 by 1 to 32 pixels (odd widths too) with a random data
 // jump, plain and dithered (0x8) with a random 32-bit field_24, into a
 // 64x64 16-bit canvas of random words. The whole canvas is compared.
-void BltTile8To16(CaseContext& ctx)
+// CVidTile::BltTile8To32 (0x7CE830, `ret 0x18`, even widths only) and
+// BltStencilTile8To32(pSurface, lPitch, pData, pStencilData, blitSize,
+// nDataJump, dwFlags) (0x7CE290, `ret 0x1c`): the same fixture on a 32-bit
+// canvas, the stencil random with a quarter of its bytes 0 (clear).
+using BltStencilTile32Fn = int32_t(__fastcall*)(void* self, void* edx, uint8_t* pSurface, int32_t lPitch,
+    const uint8_t* pData, const uint8_t* pStencilData, const void* blitSize, int32_t nDataJump, uint32_t dwFlags);
+constexpr uintptr_t kBltTile8To32 = 0x7CE830;
+constexpr uintptr_t kBltStencilTile8To32 = 0x7CE290;
+
+void BltTile(CaseContext& ctx, int bpp, bool stencil, uint64_t salt)
 {
     VideoFixture video(ctx);
-    uint16_t* canvas = nullptr;
+    uint8_t* canvas = nullptr;
+    uint8_t* stencilData = nullptr;
     uint8_t* data = nullptr;
     uint8_t* size = nullptr;
     uint8_t* tile = nullptr;
@@ -1749,7 +1759,8 @@ void BltTile8To16(CaseContext& ctx)
     constexpr size_t kDataSize = 64 * 96;
     ctx.SetInputs("building the original's canvas");
     ctx.CallOriginal([&] {
-        canvas = reinterpret_cast<uint16_t*>(OriginalBlock(kTileCanvas * kTileCanvas * 2));
+        canvas = OriginalBlock(kTileCanvas * kTileCanvas * 4);
+        stencilData = OriginalBlock(kDataSize);
         data = OriginalBlock(kDataSize);
         size = OriginalBlock(8);
         tile = OriginalBlock(0x100);
@@ -1757,12 +1768,14 @@ void BltTile8To16(CaseContext& ctx)
     auto* oursTileStorage = static_cast<unsigned char*>(::operator new(sizeof(CVidTile)));
     std::memset(oursTileStorage, 0, sizeof(CVidTile));
     auto* oursTile = reinterpret_cast<CVidTile*>(oursTileStorage);
-    std::vector<WORD> mine(kTileCanvas * kTileCanvas);
+    const int bytes = bpp / 8;
+    std::vector<uint8_t> mine(static_cast<size_t>(kTileCanvas * kTileCanvas * bytes));
     std::vector<uint8_t> pixels(kDataSize);
-    Picks picks(ctx.seed, 0x54696C6531360000ull); // "Tile16"
+    std::vector<uint8_t> stencils(kDataSize);
+    Picks picks(ctx.seed, salt);
     const int count = 600 + ctx.iterations / 10;
     for (int n = 0; n < count; ++n) {
-        const int32_t cx = picks.Between(1, 32);
+        const int32_t cx = bpp == 32 ? 2 * picks.Between(1, 16) : picks.Between(1, 32);
         const int32_t cy = picks.Between(1, 32);
         const int32_t jump = picks.Between(0, 32);
         const uint32_t dwFlags = picks.Between(0, 1) ? 0x8u : 0u;
@@ -1776,8 +1789,11 @@ void BltTile8To16(CaseContext& ctx)
         for (uint8_t& b : pixels) {
             b = static_cast<uint8_t>(picks.Bits());
         }
-        for (WORD& w : mine) {
-            w = static_cast<WORD>(picks.Bits());
+        for (uint8_t& b : stencils) {
+            b = picks.Between(0, 3) == 0 ? 0 : static_cast<uint8_t>(picks.Bits());
+        }
+        for (uint8_t& b : mine) {
+            b = static_cast<uint8_t>(picks.Bits());
         }
         char inputs[200];
         std::snprintf(inputs, sizeof(inputs), "input %d: %dx%d at (%d,%d), jump %d, flags 0x%X, field_24 0x%08X", n,
@@ -1786,27 +1802,58 @@ void BltTile8To16(CaseContext& ctx)
         const int32_t offset = y * kTileCanvas + x;
         int32_t originalResult = 0;
         ctx.CallOriginal([&] {
-            std::memcpy(canvas, mine.data(), mine.size() * 2);
+            std::memcpy(canvas, mine.data(), mine.size());
             std::memcpy(data, pixels.data(), kDataSize);
+            std::memcpy(stencilData, stencils.data(), kDataSize);
             const int32_t s[2] = { cx, cy };
             std::memcpy(size, s, 8);
             std::memcpy(reinterpret_cast<void*>(kTempPal), palette, sizeof(palette));
             Put<uint32_t>(video.mode, kShadowColorOffset, color);
-            originalResult = reinterpret_cast<BltTile16Fn>(kBltTile8To16)(tile, nullptr, canvas + offset,
-                kTileCanvas * 2, data, size, jump, dwFlags);
+            if (stencil) {
+                originalResult = reinterpret_cast<BltStencilTile32Fn>(kBltStencilTile8To32)(tile, nullptr,
+                    canvas + offset * bytes, kTileCanvas * bytes, data, stencilData, size, jump, dwFlags);
+            } else {
+                originalResult = reinterpret_cast<BltTile16Fn>(bpp == 16 ? kBltTile8To16 : kBltTile8To32)(tile,
+                    nullptr, reinterpret_cast<uint16_t*>(canvas + offset * bytes), kTileCanvas * bytes, data, size,
+                    jump, dwFlags);
+            }
         });
         std::memcpy(CVidImage::rgbTempPal, palette, sizeof(palette));
         video.oursMode->field_24 = color;
-        const BOOL oursResult = oursTile->BltTile8To16(mine.data() + offset, kTileCanvas * 2, pixels.data(),
-            CSize(cx, cy), jump, dwFlags);
+        BOOL oursResult;
+        if (stencil) {
+            oursResult = oursTile->BltStencilTile8To32(reinterpret_cast<DWORD*>(mine.data() + offset * bytes),
+                kTileCanvas * bytes, pixels.data(), stencils.data(), CSize(cx, cy), jump, dwFlags);
+        } else if (bpp == 16) {
+            oursResult = oursTile->BltTile8To16(reinterpret_cast<WORD*>(mine.data() + offset * bytes),
+                kTileCanvas * bytes, pixels.data(), CSize(cx, cy), jump, dwFlags);
+        } else {
+            oursResult = oursTile->BltTile8To32(reinterpret_cast<DWORD*>(mine.data() + offset * bytes),
+                kTileCanvas * bytes, pixels.data(), CSize(cx, cy), jump, dwFlags);
+        }
         ctx.CountInputs(1);
         if (oracle::Compare(ctx, originalResult, static_cast<int32_t>(oursResult))) {
-            std::vector<uint32_t> a(canvas, canvas + kTileCanvas * kTileCanvas);
+            std::vector<uint32_t> a(canvas, canvas + mine.size());
             std::vector<uint32_t> b(mine.begin(), mine.end());
-            CompareArrays(ctx, a.data(), b.data(), kTileCanvas * kTileCanvas);
+            CompareArrays(ctx, a.data(), b.data(), static_cast<int>(mine.size()));
         }
     }
     ::operator delete(oursTileStorage);
+}
+
+void BltTile8To16(CaseContext& ctx)
+{
+    BltTile(ctx, 16, false, 0x54696C6531360000ull); // "Tile16"
+}
+
+void BltTile8To32(CaseContext& ctx)
+{
+    BltTile(ctx, 32, false, 0x54696C6533320000ull); // "Tile32"
+}
+
+void BltStencilTile8To32(CaseContext& ctx)
+{
+    BltTile(ctx, 32, true, 0x5374656E33320000ull); // "Sten32"
 }
 
 // CVidMode::DrawEllipse32 (0x7CA840) and DrawRecticle32 (0x7CB670), both
@@ -1982,5 +2029,7 @@ ORACLE_CASE("vid/draw_line16", DrawLine16);
 ORACLE_CASE("vid/draw_line32", DrawLine32);
 ORACLE_CASE("vid/draw_ellipse24", DrawEllipse24);
 ORACLE_CASE("vid/blt_tile8to16", BltTile8To16);
+ORACLE_CASE("vid/blt_tile8to32", BltTile8To32);
+ORACLE_CASE("vid/blt_stencil_tile8to32", BltStencilTile8To32);
 ORACLE_CASE("vid/draw_ellipse32", Ellipse32);
 ORACLE_CASE("vid/draw_recticle32", Recticle32);

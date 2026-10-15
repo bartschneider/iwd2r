@@ -676,59 +676,59 @@ BOOL CVidTile::BltTile8To32(DWORD* pSurface, LONG lPitch, BYTE* pData, const CSi
 {
     INT nSurfaceJump = lPitch - 4 * blitSize.cx;
     DWORD color = g_pChitin->GetCurrentVideoMode()->field_24;
+    INT nRows = blitSize.cy;
+    INT nColumns;
 
     if ((blitSize.cx & 1) != 0) {
         return FALSE;
     }
 
-    if ((dwFlags & 0x8) != 0) {
-        for (int y = 0; y < blitSize.cy; y++) {
-            for (int x = 0; x < blitSize.cx; x++) {
-                pSurface[0] = rgbTempPal[*pData];
-
-                x++;
-                if (x == blitSize.cx) {
-                    break;
-                }
-
-                pSurface[1] = color;
-
-                pData += 2;
-                pSurface += 2;
-            }
-
-            pSurface = reinterpret_cast<DWORD*>(reinterpret_cast<BYTE*>(pSurface) + nSurfaceJump);
-            pData += nDataJump;
-
-            y++;
-            if (y == blitSize.cy) {
-                break;
-            }
-
-            for (int x = 0; x < blitSize.cx; x++) {
-                pSurface[0] = color;
-
-                x++;
-                if (x == blitSize.cx) {
-                    pSurface[1] = rgbTempPal[*pData];
-                }
-
-                pData += 2;
-                pSurface += 2;
-            }
-
-            pSurface = reinterpret_cast<DWORD*>(reinterpret_cast<BYTE*>(pSurface) + nSurfaceJump);
-            pData += nDataJump;
-        }
-    } else {
-        for (int y = 0; y < blitSize.cy; y++) {
-            for (int x = 0; x < blitSize.cx; x++) {
+    if ((dwFlags & 0x8) == 0) {
+        do {
+            for (nColumns = blitSize.cx; nColumns != 0; nColumns--) {
                 *pSurface++ = rgbTempPal[*pData++];
             }
-
             pSurface = reinterpret_cast<DWORD*>(reinterpret_cast<BYTE*>(pSurface) + nSurfaceJump);
             pData += nDataJump;
-        }
+            nRows--;
+        } while (nRows != 0);
+    } else {
+        // Dithered with the video mode's colour, two rows at a time: the
+        // first keeps the even pixels, the second the odd ones.
+        do {
+            nColumns = blitSize.cx;
+            do {
+                pSurface[0] = rgbTempPal[pData[0]];
+                if (nColumns == 1) {
+                    break;
+                }
+                pSurface[1] = color;
+                pData += 2;
+                pSurface += 2;
+                nColumns -= 2;
+            } while (nColumns != 0);
+            pSurface = reinterpret_cast<DWORD*>(reinterpret_cast<BYTE*>(pSurface) + nSurfaceJump);
+            pData += nDataJump;
+
+            if (nRows == 1) {
+                return TRUE;
+            }
+
+            nColumns = blitSize.cx;
+            do {
+                pSurface[0] = color;
+                if (nColumns == 1) {
+                    break;
+                }
+                pSurface[1] = rgbTempPal[pData[1]];
+                pData += 2;
+                pSurface += 2;
+                nColumns -= 2;
+            } while (nColumns != 0);
+            pSurface = reinterpret_cast<DWORD*>(reinterpret_cast<BYTE*>(pSurface) + nSurfaceJump);
+            pData += nDataJump;
+            nRows -= 2;
+        } while (nRows != 0);
     }
 
     return TRUE;
@@ -775,7 +775,9 @@ BOOL CVidTile::BltStencilTile8To32(DWORD* pSurface, LONG lPitch, BYTE* pData, BY
         }
 
         pSurface = reinterpret_cast<DWORD*>(reinterpret_cast<BYTE*>(pSurface) + nSurfaceJump);
-        pData += nDataJump;
+        // The jump moves the index into both the tile and the stencil
+        // (add ecx,edx at 0x7CE3A0).
+        nDataIndex += nDataJump;
     }
 
     return TRUE;
