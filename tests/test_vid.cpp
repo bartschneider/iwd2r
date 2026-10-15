@@ -1326,3 +1326,73 @@ TEST_CASE("draw_recticle16_24", "[vid]")
         CHECK(drawn > 40);
     }
 }
+
+// BltTile8To24 (0x7CDD00) writes each pixel as its palette entry's three low
+// bytes, four at a time (a width not a multiple of four draws nothing).
+// Dithered (0x8), even rows keep pixels 0 and 2 and odd rows 1 and 3, the
+// others field_24, and the rows follow on from each other (no row jump, as
+// the original). BltStencilTile8To16 (0x7B2440) puts field_24 where the
+// stencil is clear in the pixel the row's parity drops.
+TEST_CASE("blt_tile8to24_and_stencil16", "[vid]")
+{
+    ChitinScope scope;
+    CWarp* engine = reinterpret_cast<CWarp*>(::operator new(sizeof(CWarp)));
+    std::memset(static_cast<void*>(engine), 0, sizeof(CWarp));
+    auto mode = std::make_unique<CVidInf>();
+    mode->field_24 = 0x00ABCDEF;
+    engine->pVidMode = mode.get();
+    g_pChitin->pActiveEngine = engine;
+    for (int i = 0; i < 256; ++i) {
+        CVidImage::rgbTempPal[i] = 0xEE000000u | static_cast<DWORD>(i) * 0x010101u;
+    }
+    auto* tileStorage = static_cast<unsigned char*>(::operator new(sizeof(CVidTile)));
+    std::memset(tileStorage, 0, sizeof(CVidTile));
+    auto* tile = reinterpret_cast<CVidTile*>(tileStorage);
+
+    BYTE data[12] = { 1, 2, 3, 4, 99, 99, 5, 6, 7, 8, 99, 99 };
+    // An 8-pixel-wide 24-bit surface: 24 bytes a row.
+    std::vector<BYTE> pixels(24 * 2, 0x55);
+    REQUIRE(tile->BltTile8To24(reinterpret_cast<DWORD*>(pixels.data()), 24, data, CSize(4, 2), 2, 0));
+    std::vector<BYTE> expected(24 * 2, 0x55);
+    const BYTE rows[2][4] = { { 1, 2, 3, 4 }, { 5, 6, 7, 8 } };
+    for (int y = 0; y < 2; ++y) {
+        for (int x = 0; x < 4; ++x) {
+            std::memset(expected.data() + y * 24 + x * 3, rows[y][x], 3);
+        }
+    }
+    CHECK(pixels == expected);
+    CHECK_FALSE(tile->BltTile8To24(reinterpret_cast<DWORD*>(pixels.data()), 24, data, CSize(3, 2), 2, 0));
+
+    std::fill(pixels.begin(), pixels.end(), static_cast<BYTE>(0x55));
+    REQUIRE(tile->BltTile8To24(reinterpret_cast<DWORD*>(pixels.data()), 24, data, CSize(4, 2), 2, 0x8));
+    std::fill(expected.begin(), expected.end(), static_cast<BYTE>(0x55));
+    // Row 0: data 1, key, data 3, key; row 1 straight after it, from data
+    // index 4: key, data[5] (99), key, data[7] (6).
+    const BYTE key[3] = { 0xEF, 0xCD, 0xAB };
+    auto put = [&](int pixel, int index) { std::memset(expected.data() + pixel * 3, index, 3); };
+    auto putKey = [&](int pixel) { std::memcpy(expected.data() + pixel * 3, key, 3); };
+    put(0, 1);
+    putKey(1);
+    put(2, 3);
+    putKey(3);
+    putKey(4);
+    put(5, 99);
+    putKey(6);
+    put(7, 6);
+    CHECK(pixels == expected);
+
+    BYTE stencil[12] = { 1, 0, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0 };
+    std::vector<WORD> words(8 * 2, 0x5555);
+    REQUIRE(tile->BltStencilTile8To16(words.data(), 8 * 2, data, stencil, CSize(4, 2), 2, 0));
+    // Row 0 (even): the second of each pair is field_24's low word where
+    // its stencil is clear (index 1). Row 1 (odd): the first is the whole
+    // field_24 ORed in where its stencil is clear (index 6), its high word
+    // reaching the second pixel.
+    CHECK(words == std::vector<WORD> { 0x0101, 0xCDEF, 0x0303, 0x0404, 0x5555, 0x5555, 0x5555, 0x5555,
+                       0xCDEF, 0x0606 | 0x00AB, 0x0707, 0x0808, 0x5555, 0x5555, 0x5555, 0x5555 });
+    CHECK_FALSE(tile->BltStencilTile8To16(words.data(), 8 * 2, data, stencil, CSize(3, 2), 2, 0));
+
+    g_pChitin->pActiveEngine = nullptr;
+    ::operator delete(tileStorage);
+    ::operator delete(static_cast<void*>(engine));
+}
