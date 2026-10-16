@@ -59,6 +59,7 @@ struct State {
     bool smokeDone = false;
     bool smokeEnvRead = false;
     int scriptFrame = 0; // PresentedFrames() at the script's last step
+    unsigned controlPolls = 0; // ButtonPolls() at the control channel's last look
 };
 
 State& S()
@@ -74,6 +75,9 @@ char g_arrowCursor;
 // cleared by GetAsyncKeyState when it reports it (the engine's input
 // thread). A tap released before the next poll is still seen once.
 std::array<std::atomic<bool>, 256> g_pressedSincePoll;
+
+// platform::window::ButtonPolls: the engine's reads of the mouse buttons.
+std::atomic<unsigned> g_buttonPolls { 0 };
 
 void MarkPressed(int vk)
 {
@@ -419,10 +423,15 @@ void PumpEvents()
     platform::present::PresentIfDirty();
     CheckSmoke();
     // The control channel and the script run once per presented frame (the
-    // replay mode advances the script from its own frame instead).
+    // replay mode advances the script from its own frame instead); the
+    // channel also after the engine has read the mouse buttons, so a driver
+    // waiting for that read hears of it within the AI update.
     const int frames = platform::present::PresentedFrames();
-    if (S().scriptFrame < frames)
+    const unsigned polls = g_buttonPolls.load();
+    if (S().scriptFrame < frames || S().controlPolls != polls) {
+        S().controlPolls = polls;
         platform::script::PollControl();
+    }
     if (platform::replay::Active())
         S().scriptFrame = frames;
     while (S().scriptFrame < frames) {
@@ -510,6 +519,8 @@ void RefreshRegions()
     if (!SameRegions(regions, *platform::present::Regions()))
         platform::present::SetRegions(std::move(regions));
 }
+
+unsigned ButtonPolls() { return g_buttonPolls.load(); }
 
 HWND MainWindow()
 {
@@ -982,6 +993,8 @@ SHORT GetAsyncKeyState(int vk)
 {
     if (platform::replay::Active())
         return platform::replay::Key(vk);
+    if (vk == VK_LBUTTON || vk == VK_RBUTTON)
+        g_buttonPolls.fetch_add(1);
     SHORT injected = 0;
     if (platform::script::InjectedKey(vk, &injected))
         return injected;

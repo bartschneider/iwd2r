@@ -135,7 +135,7 @@ BOOL CGameJournal::AddEntry(STRREF strText, INT nChapter, LONG nTime, WORD nType
         }
     }
 
-    CGameJournalEntry* pEntry = new CGameJournalEntry();
+    CGameJournalEntry* pEntry = new CGameJournalEntry(strText, nTime, nType);
 
     BOOL bFound = FALSE;
     for (INT i = 0; i < NUM_CHAPTERS && !bFound; i++) {

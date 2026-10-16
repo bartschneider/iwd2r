@@ -12,32 +12,50 @@ an action list. Two executors consume that list:
   which reads windows_actions() as JSON and uses SendInput.
 
 The in-engine script (IWD2R_SCRIPT) stays off in these runs. Engine
-framebuffer screenshots are requested through the IWD2R_CONTROL_DIR channel
-(platform::script::PollControl), which injects no input.
+framebuffer screenshots, and at each checkpoint a state dump, are requested
+through the IWD2R_CONTROL_DIR channel (platform::script::PollControl), which
+injects no input; check_checkpoints compares the dumps with the scenario's
+expectations (what the original reached there).
 
 Standard library only.
 """
 
 import ctypes
 import ctypes.util
+import json
 import os
 import re
 import shutil
 import signal
 import subprocess
+import sys
 import threading
 import time
 
-import dataview
+# The sibling modules (python3 -I does not put the script's folder on the
+# path).
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import dataview  # noqa: E402
 
 # The engine updates (and the in-engine script advances) 30 times a second;
 # `wait N` is N of those frames.
 FRAME_RATE = 30
 
 # Frames a click or key is held and settled, as platform/script_core.cpp does.
+# Each phase also lasts until the engine has read the mouse buttons again
+# (XDriver.hold, platform::window::ButtonPolls): the engine polls input once
+# per AI update and reads only "down" and "pressed since the last poll"
+# (GetAsyncKeyState), so when its updates stall (Windows Sandbox: gaps of
+# 165 ms) a release and the next press with no poll between them read as
+# one press, and a double click as one click. Waiting for presented frames
+# instead made a double click's two presses too far apart for the engine's
+# double-click time on that slow engine.
 MOVE_SETTLE_FRAMES = 1
 HOLD_FRAMES = 2
 SETTLE_FRAMES = 2
+# Seconds a phase waits at most for that read before it goes on: a screen
+# that does not read the mouse buttons, or a load.
+POLL_TIMEOUT = 1.0
 
 # Seconds to wait for the engine to answer a framebuffer shot request.
 SHOT_TIMEOUT = 60.0
@@ -48,8 +66,11 @@ WINDOW_TIMEOUT = 120.0
 WINDOW_STABLE_POLLS = 5
 # Seconds quit waits for the close confirmation before asking again.
 QUIT_RETRY = 10.0
-# Default per-scenario timeout in seconds.
+# Default per-scenario timeout in seconds; a scenario that needs longer says
+# so in its header (header_timeout).
 DEFAULT_TIMEOUT = 180
+# The header line that sets a scenario's timeout: "# timeout: SECONDS".
+TIMEOUT_LINE = re.compile(r'#\s*timeout\s*:(.*)$', re.IGNORECASE)
 
 # The virtual-key names platform/script_core.cpp accepts (kNamedKeys), with
 # their Win32 VK codes. Letters and digits are handled in vk_for_name.
@@ -150,7 +171,8 @@ def parse_scenario(text):
     Actions: wait {frames}, move/click/rclick {x, y, ui}, key {key}, type
     {text}, shot {name}, checkpoint {name}, quit, origin {ui}. A checkpoint
     is where the replay recorder (oracle/replay) dumps state; the drivers
-    here pass over it. ui is True when X Y are in the
+    here ask the engine for a state dump there. ui is True when X Y are in
+    the
     original's 800x600 UI coordinates (the default, or after `origin ui`),
     False for screen pixels (after `origin screen`). Raises ScenarioError on
     the first bad line.
@@ -241,6 +263,154 @@ def load_scenario(path):
         raise ScenarioError('%s: %s' % (path, e)) from None
 
 
+def header_timeout(text):
+    """The timeout in seconds a scenario's header sets with a line
+    "# timeout: SECONDS", or None. The header is the comment and blank
+    lines before the first command; every scenario parser (this one,
+    platform/script_core.cpp, the replay recorder) reads the line as a
+    comment. Raises ScenarioError for a value that is not a positive whole
+    number or a second such line."""
+    found = None
+    for number, raw in enumerate(text.split('\n'), 1):
+        line = raw.rstrip('\r').strip()
+        if not line:
+            continue
+        if not line.startswith('#'):
+            break
+        m = TIMEOUT_LINE.match(line)
+        if not m:
+            continue
+        if found is not None:
+            raise ScenarioError('line %d: duplicate timeout (first on line '
+                                '%d)' % (number, found[1]))
+        value = _int(m.group(1).strip())
+        if not value:
+            raise ScenarioError('line %d: timeout needs a positive number '
+                                'of seconds' % number)
+        found = (value, number)
+    return found[0] if found else None
+
+
+def load_header_timeout(path):
+    """header_timeout of the scenario file at path."""
+    with open(path, encoding='utf-8') as f:
+        text = f.read()
+    try:
+        return header_timeout(text)
+    except ScenarioError as e:
+        raise ScenarioError('%s: %s' % (path, e)) from None
+
+
+# ---------------------------------------------------------------------------
+# Checkpoints
+#
+# At a `checkpoint NAME` line the drivers ask the engine for a state dump
+# through the control channel (state-NAME.req; platform::script::PollControl
+# writes checkpoint-NAME.json, the replay dump's layout). A scenario's
+# <name>.expect.json, made from the original's replay dumps (`python3
+# tools/realinput.py expect SCENARIO DUMPS`), names what the run must have
+# reached at each checkpoint: the fields input decides (the screen, the
+# character generation choices, the area and the dialog), not those that
+# depend on real time (frames, positions, the rand states).
+
+EXPECT_FIELDS = ('screen', 'chargen.race', 'chargen.subrace',
+                 'chargen.class', 'chargen.abilities', 'chargen.portrait',
+                 'world.area', 'world.dialog.active', 'world.dialog.speaker',
+                 'world.dialog.entry', 'world.dialog.responses')
+
+
+def flatten(value, prefix=''):
+    """A dump as {field path: value}, as tools/oracle.py flatten:
+    chargen.abilities[2], world.dialog.entry."""
+    out = {}
+    if isinstance(value, dict):
+        for key, item in value.items():
+            out.update(flatten(item, '%s.%s' % (prefix, key) if prefix
+                               else key))
+    elif isinstance(value, list):
+        for i, item in enumerate(value):
+            out.update(flatten(item, '%s[%d]' % (prefix, i)))
+    else:
+        out[prefix] = value
+    return out
+
+
+def expected_fields(dump):
+    """The EXPECT_FIELDS of a dump (a list field by its items) that it
+    has."""
+    out = {}
+    for path, value in flatten(dump).items():
+        if path.split('[')[0] in EXPECT_FIELDS:
+            out[path] = value
+    return out
+
+
+def checkpoint_names(actions):
+    return [a['name'] for a in actions if a['op'] == 'checkpoint']
+
+
+def read_dump(folder, name):
+    """checkpoint-NAME.json in folder, or None when it is missing or
+    unreadable."""
+    try:
+        with open(os.path.join(folder, 'checkpoint-%s.json' % name)) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def make_expectations(actions, dump_dir, source):
+    """The expectations for a scenario from a folder of its checkpoint
+    dumps (the original's, from `oracle.py replay compare`): {'source':
+    source, 'checkpoints': {name: expected_fields}}. ValueError names a
+    checkpoint whose dump is missing."""
+    checkpoints = {}
+    for name in checkpoint_names(actions):
+        dump = read_dump(dump_dir, name)
+        if dump is None:
+            raise ValueError('no checkpoint-%s.json in %s' % (name, dump_dir))
+        checkpoints[name] = expected_fields(dump)
+    return {'source': source, 'checkpoints': checkpoints}
+
+
+def expectation_path(scenario):
+    """scenarios/x.txt -> scenarios/x.expect.json."""
+    return os.path.splitext(scenario)[0] + '.expect.json'
+
+
+def load_expectations(scenario):
+    """The scenario's expectations, or None when it has none."""
+    try:
+        with open(expectation_path(scenario)) as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return None
+
+
+def check_checkpoints(actions, run_dir, expectations):
+    """What is wrong with a run's checkpoint dumps: a checkpoint without a
+    dump, and every expected field (expectations, may be None) the dump
+    disagrees with. [] when all is well."""
+    want = (expectations or {}).get('checkpoints', {})
+    problems = []
+    for name in checkpoint_names(actions):
+        dump = read_dump(run_dir, name)
+        if dump is None:
+            problems.append('no state dump at checkpoint %s' % name)
+            continue
+        have = flatten(dump)
+        fields = want.get(name, {})
+        # On another screen the other fields say nothing more.
+        if 'screen' in fields and have.get('screen') != fields['screen']:
+            fields = {'screen': fields['screen']}
+        for field, value in sorted(fields.items()):
+            got = have.get(field, '<missing>')
+            if got != value:
+                problems.append('checkpoint %s: %s is %s, expected %s' % (
+                    name, field, json.dumps(got), json.dumps(value)))
+    return problems
+
+
 def windows_actions(actions, geometry=None):
     """The action list for tools/sandbox/driver.ps1: keys carry their VK code
     and extended flag, `type` is expanded into single key presses (with
@@ -248,7 +418,7 @@ def windows_actions(actions, geometry=None):
     pointer coordinates are window pixels (window_point)."""
     out = []
     for a in actions:
-        if a['op'] in ('origin', 'checkpoint'):
+        if a['op'] == 'origin':
             continue
         if a['op'] in ('move', 'click', 'rclick'):
             x, y = window_point(a, geometry)
@@ -645,6 +815,7 @@ class XDriver:
         self.geometry = geometry
         self.screen_shots = 0
         self.engine_shots = 0
+        self.state_dumps = 0
 
     def _subprocess_run(self, cmd, timeout=30):
         env = dict(os.environ, DISPLAY=self.display)
@@ -680,9 +851,10 @@ class XDriver:
                 return
             self._sleep(min(left, 0.1))
 
-    def request(self, name, timeout):
+    def request(self, name, timeout, quiet=False):
         """Creates control/<name> and waits for the engine to delete it,
-        which it does on its next presented frame."""
+        which it does on its next presented frame. After timeout seconds
+        raises DriverError, or with quiet returns False."""
         path = os.path.join(self.control_dir, name)
         with open(path, 'w') as f:
             f.write('\n')
@@ -690,9 +862,20 @@ class XDriver:
         while os.path.exists(path):
             self.check()
             if time.time() > end:
+                if quiet:
+                    return False
                 raise DriverError('engine did not answer %s in %.0f s'
                                   % (name, timeout))
             self._sleep(0.01)
+        return True
+
+    def button_polls(self, timeout):
+        """platform::window::ButtonPolls (input.req), or None when the
+        engine did not answer in timeout seconds."""
+        if not self.request('input.req', max(timeout, 0.01), quiet=True):
+            return None
+        with open(os.path.join(self.control_dir, 'input.txt')) as f:
+            return int(f.read().strip())
 
     def engine_frames(self):
         """The engine's presented frame count."""
@@ -773,17 +956,44 @@ class XDriver:
         self.refresh_window()
         self.xdo('mousemove', '--window', self.window, x, y)
 
+    def hold(self, frames):
+        """A phase of a click or key: frames of wall-clock time, and until
+        the engine has read the mouse buttons after the phase began (at
+        most POLL_TIMEOUT)."""
+        started = time.time()
+        end = started + POLL_TIMEOUT
+        first = self.button_polls(POLL_TIMEOUT)
+        left = started + frames / FRAME_RATE - time.time()
+        if left > 0:
+            self.sleep_frames(left * FRAME_RATE)
+        while first is not None:
+            now = self.button_polls(end - time.time())
+            if now is not None and now > first:
+                return
+            if time.time() >= end:
+                break
+        self.log('  the engine did not read the mouse buttons in %.0f s'
+                 % POLL_TIMEOUT)
+
     def button(self, button):
         self.xdo('mousedown', button)
-        self.sleep_frames(HOLD_FRAMES)
+        self.hold(HOLD_FRAMES)
         self.xdo('mouseup', button)
-        self.sleep_frames(SETTLE_FRAMES)
+        self.hold(SETTLE_FRAMES)
 
-    def key(self, keysym):
+    def key(self, keysym, shift=False):
+        """A key press; with shift, Shift_L is held around it, as
+        driver.ps1's Press-Key does for a capital."""
+        if shift:
+            self.xdo('keydown', 'Shift_L')
+            self.hold(1)
         self.xdo('keydown', keysym)
-        self.sleep_frames(HOLD_FRAMES)
+        self.hold(HOLD_FRAMES)
         self.xdo('keyup', keysym)
-        self.sleep_frames(SETTLE_FRAMES)
+        if shift:
+            self.hold(1)
+            self.xdo('keyup', 'Shift_L')
+        self.hold(SETTLE_FRAMES)
 
     def screen_shot(self, name):
         path = os.path.join(self.run_dir, name + '-screen.png')
@@ -800,6 +1010,16 @@ class XDriver:
             raise DriverError('engine wrote no %s.png' % name)
         self.engine_shots += 1
         self.log('  wrote %s.png' % name)
+
+    def state_dump(self, name):
+        """`checkpoint NAME`: the engine writes checkpoint-NAME.json, its
+        state now (platform::script::PollControl); no input."""
+        self.request('state-%s.req' % name, SHOT_TIMEOUT)
+        if not os.path.exists(os.path.join(self.run_dir,
+                                           'checkpoint-%s.json' % name)):
+            raise DriverError('engine wrote no checkpoint-%s.json' % name)
+        self.state_dumps += 1
+        self.log('  wrote checkpoint-%s.json' % name)
 
     def quit(self):
         """Asks the window to close as a window manager would; the engine
@@ -832,18 +1052,22 @@ class XDriver:
             self.wait(action['frames'])
         elif op in ('move', 'click', 'rclick'):
             self.pointer(*window_point(action, self.geometry))
-            self.sleep_frames(MOVE_SETTLE_FRAMES)
+            self.hold(MOVE_SETTLE_FRAMES)
             if op != 'move':
                 self.button(1 if op == 'click' else 3)
         elif op == 'key':
             self.key(keysym_for_name(action['key']))
         elif op == 'type':
-            self.xdo('type', '--delay', int(1000 * (HOLD_FRAMES + SETTLE_FRAMES)
-                                            / FRAME_RATE), action['text'])
-            self.sleep_frames(SETTLE_FRAMES)
+            # One key press per character (windows_actions' expansion), so
+            # each waits for the engine's input reads like any key.
+            for ch in action['text']:
+                name = 'SPACE' if ch == ' ' else ch.upper()
+                self.key(keysym_for_name(name), shift=ch.isupper())
         elif op == 'shot':
             self.screen_shot(action['name'])
             self.engine_shot(action['name'])
+        elif op == 'checkpoint':
+            self.state_dump(action['name'])
         elif op == 'quit':
             self.quit()
 
@@ -956,7 +1180,7 @@ def run_scenario(exe, base_env, actions, run_dir, geometry, timeout,
                     result['code'] = 1
             result['seconds'] = time.time() - started
             log('exit code %s' % result['code'])
-            for name in ('frames.txt', 'frames.tmp'):
+            for name in ('frames.txt', 'frames.tmp', 'input.txt', 'input.tmp'):
                 try:
                     os.unlink(os.path.join(control, name))
                 except OSError:
@@ -966,3 +1190,29 @@ def run_scenario(exe, base_env, actions, run_dir, geometry, timeout,
             except OSError:
                 pass
     return result
+
+
+def main(argv):
+    """python3 tools/realinput.py expect SCENARIO DUMPS: writes the
+    scenario's expectations (expectation_path) from a folder of its
+    checkpoint dumps, the original's from `oracle.py replay compare`
+    (runs/<stamp>/original)."""
+    if len(argv) != 3 or argv[0] != 'expect':
+        print('usage: realinput.py expect SCENARIO DUMPS', file=sys.stderr)
+        return 2
+    scenario, dumps = argv[1], os.path.abspath(argv[2])
+    actions = load_scenario(scenario)
+    # A run folder is named from runs/ on, whichever worktree holds it.
+    at = dumps.find('/runs/')
+    expect = make_expectations(actions, dumps, 'checkpoint dumps in %s' % (
+        dumps[at + 1:] if at >= 0 else dumps))
+    path = expectation_path(scenario)
+    with open(path, 'w') as f:
+        json.dump(expect, f, indent=1, sort_keys=True)
+        f.write('\n')
+    print('wrote %s (%d checkpoints)' % (path, len(expect['checkpoints'])))
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv[1:]))

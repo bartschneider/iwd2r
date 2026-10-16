@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -396,6 +397,84 @@ TEST_CASE("control directory answers shot and frame-count requests", "[script][c
     CHECK(std::filesystem::exists(control / "shot-later.req"));
     CHECK_FALSE(std::filesystem::exists(dir / "later.png"));
 
+    platform::present::SetPrimary(nullptr, 0, 0);
+    SetShotDir("");
+    std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("control directory answers state requests with a checkpoint dump", "[script][control]")
+{
+    const std::filesystem::path dir = std::filesystem::temp_directory_path() / ("iwd2r_state_test_" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    const std::filesystem::path control = dir / "control";
+    std::filesystem::create_directories(control);
+    SetShotDir(dir.string());
+    SetEnv("IWD2R_CONTROL_DIR", control.string());
+    std::ofstream(control / "state-gender_done.req").put('\n');
+    // Not a checkpoint name: refused, and the request is removed.
+    std::ofstream(control / "state-a.b.req").put('\n');
+
+    std::vector<uint32_t> pixels(4 * 2, 0x00336699u);
+    platform::present::SetPrimary(&pixels, 4, 2);
+    platform::present::MarkPrimaryDirty();
+    platform::window::PumpEvents(); // presents one frame
+    CHECK_FALSE(std::filesystem::exists(control / "state-gender_done.req"));
+    CHECK_FALSE(std::filesystem::exists(control / "state-a.b.req"));
+    CHECK_FALSE(std::filesystem::exists(dir / "checkpoint-a.b.json"));
+
+    // The replay dump's layout: the presented frame, the name, the screen
+    // (none: no engine in this test).
+    std::string text;
+    {
+        std::ifstream in(dir / "checkpoint-gender_done.json");
+        text.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    }
+    const std::string frame = "\"frame\": " + std::to_string(platform::present::PresentedFrames()) + ",";
+    CHECK(text.find(frame) != std::string::npos);
+    CHECK(text.find("\"checkpoint\": \"gender_done\",") != std::string::npos);
+    CHECK(text.find("\"screen\": \"none\",") != std::string::npos);
+
+    SetEnv("IWD2R_CONTROL_DIR", "");
+    platform::present::SetPrimary(nullptr, 0, 0);
+    SetShotDir("");
+    std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("control directory reports the engine's mouse-button polls", "[script][control]")
+{
+    // A real-input driver waits for these between a press and its release
+    // and before the next press: the engine reads only "down" and "pressed
+    // since the last poll", so a release and a press with no poll between
+    // them read as one press.
+    const std::filesystem::path dir = std::filesystem::temp_directory_path() / ("iwd2r_polls_test_" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    const std::filesystem::path control = dir / "control";
+    std::filesystem::create_directories(control);
+    SetShotDir(dir.string());
+    SetEnv("IWD2R_CONTROL_DIR", control.string());
+    std::vector<uint32_t> pixels(4 * 2, 0x00336699u);
+    platform::present::SetPrimary(&pixels, 4, 2);
+
+    const unsigned before = platform::window::ButtonPolls();
+    GetAsyncKeyState(VK_LBUTTON);
+    GetAsyncKeyState(VK_RBUTTON);
+    GetAsyncKeyState('A'); // not a mouse button
+    CHECK(platform::window::ButtonPolls() == before + 2);
+
+    // Answered on the next pump after a poll, without a new frame.
+    platform::window::PumpEvents();
+    std::ofstream(control / "input.req").put('\n');
+    platform::window::PumpEvents(); // no frame, no poll: not answered yet
+    CHECK(std::filesystem::exists(control / "input.req"));
+    GetAsyncKeyState(VK_LBUTTON);
+    platform::window::PumpEvents();
+    CHECK_FALSE(std::filesystem::exists(control / "input.req"));
+    unsigned polls = 0;
+    {
+        std::ifstream in(control / "input.txt");
+        in >> polls;
+    }
+    CHECK(polls == before + 3);
+
+    SetEnv("IWD2R_CONTROL_DIR", "");
     platform::present::SetPrimary(nullptr, 0, 0);
     SetShotDir("");
     std::filesystem::remove_all(dir);
