@@ -2990,9 +2990,10 @@ shield penalty, no magic-slot test for the attack count; asserts lines
 16140, 16160, 16187); the armour class parts ("%d"); the skills (rogue,
 bard, ranger, paladin, cleric) and the AI script; a ranger's favoured
 enemies (plural strings); the saving throws and trap sense; the weapon
-proficiencies (NOTE: CGameSprite 0x75E930, the rank, is an empty function
-returning 0 in the original, so no line is written; ours keeps the loop
-with 0); the armour class modifiers; the ability bonuses (STRMOD columns 0,
+proficiencies (NOTE: CGameSprite 0x75E930, the rank, is `xor eax, eax;
+ret 4` in the original, so no line is written; ours writes the header and
+leaves the 17 calls out, the proficiencies' strings listed in a NOTE); the
+armour class modifiers; the ability bonuses (STRMOD columns 0,
 1 and 3; the weight allowance as the x87 computes it, in double; the hit
 points per level through CRuleTables 0x542EC0; the chance to learn a spell
 from INTMOD); the bonus spells per casting class (NOTE: the levels after the

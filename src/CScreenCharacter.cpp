@@ -11427,39 +11427,18 @@ CString CScreenCharacter::sub_5EFFD0(BYTE& bSuccess)
     }
     fputs("\n", file);
 
-    // Weapon proficiencies: "+" per rank.
+    // Weapon proficiencies.
     //
-    // NOTE: CGameSprite 0x75E930, the rank, returns 0 for every weapon in
-    // the original (an empty function), so no line is written.
+    // NOTE: For each of 17 proficiencies (index 0-16 from the BYTE table at
+    // 0x85BC08: Bows 8733, Crossbows 16033, Missile Weapons 9403, Axes 9402,
+    // Maces 16017, Daggers 16013, Flails 16020, Polearms 16015, Hammers
+    // 16022, Quarterstaves 16031, Great Swords 16011, Large Swords 8668,
+    // Small Swords 8732, the styles 31138, 31135, 31136, 31137) the original
+    // asks the sprite for the rank (CGameSprite 0x75E930, __thiscall) and
+    // writes a line of '+' for a rank of 1 to 19 (0x5F3A6D on). 0x75E930 is
+    // `xor eax, eax; ret 4`: the rank is always 0 and no line is written,
+    // so the loop is left out.
     fprintf(file, "%s:\n", (LPCSTR)FetchString(9466)); // "Weapon Proficiencies"
-    static const STRREF proficiencies[] = {
-        8733, // "Bows"
-        16033, // "Crossbows"
-        9403, // "Missile Weapons"
-        9402, // "Axes"
-        16017, // "Maces"
-        16013, // "Daggers"
-        16020, // "Flails"
-        16015, // "Polearms"
-        16022, // "Hammers"
-        16031, // "Quarterstaves"
-        16011, // "Great Swords"
-        8668, // "Large Swords"
-        8732, // "Small Swords"
-        31138, // "Two Weapon Style"
-        31135, // "Two Handed Weapon Style"
-        31136, // "Weapon and Shield Style"
-        31137, // "Single Weapon Style"
-    };
-    for (INT nProficiency = 0; nProficiency < static_cast<INT>(sizeof(proficiencies) / sizeof(proficiencies[0])); nProficiency++) {
-        INT nRank = 0;
-        if (nRank > 0 && nRank < 20) {
-            char szRank[20];
-            memset(szRank, '+', nRank);
-            szRank[nRank] = '\0';
-            sub_5EF920(file, FetchString(proficiencies[nProficiency]), CString(szRank), TRUE);
-        }
-    }
     fputs("\n", file);
 
     // The armour class modifiers by damage type.
