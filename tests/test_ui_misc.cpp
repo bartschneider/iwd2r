@@ -9,6 +9,7 @@
 #include "CChitin.h"
 #include "CDerivedStats.h"
 #include "CGameArea.h"
+#include "CGameContainer.h"
 #include "CGameObjectArray.h"
 #include "CGameSprite.h"
 #include "CInfButtonArray.h"
@@ -1180,6 +1181,39 @@ TEST_CASE("dialog script: a trigger's last number is found by its IDS name", "[u
     CHECK(pTrigger->m_triggerID == 0x40E8);
     CHECK(pTrigger->m_specificID == 1);
     CHECK(pTrigger->m_specific2 == 4);
+}
+
+// CGameContainer::MarshalMessage (0x480C00) for a new ground pile, as
+// CInfGame::GetGroundPile (0x5B75C0) makes one at the inventory's opening:
+// no polygon, no items. The item count starts at 0 (0x480D09); it used to
+// be read uninitialised and fail the size assert inside the constructor's
+// CGameObjectArray::Add.
+TEST_CASE("container: a new ground pile marshals no items", "[uimisc][container][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    CGameSprite* pSprite = PartyMember();
+    if (pSprite == NULL) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+
+    const CPoint& pt = pSprite->GetPos();
+    CGameContainer* pPile = new CGameContainer(pSprite->GetArea(), CRect(pt.x - 8, pt.y - 6, pt.x + 9, pt.y + 7));
+    REQUIRE(pPile->m_lstItems.GetCount() == 0);
+
+    BYTE* pData = NULL;
+    DWORD dwSize = 0;
+    pPile->MarshalMessage(&pData, &dwSize);
+    CString sArea;
+    pSprite->GetArea()->m_resRef.CopyToString(sArea);
+    // The record, the area name's length and name, the polygon's count and
+    // the item count; no points and no items.
+    CHECK(dwSize == sizeof(CAreaFileContainer) + sizeof(BYTE) + 2 * sizeof(WORD) + static_cast<DWORD>(sArea.GetLength()));
 }
 
 // The text character sheet's lines (0x5EF760): the label over a row of
