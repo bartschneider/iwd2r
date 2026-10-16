@@ -94,13 +94,14 @@ CGameAnimationTypeAmbientStatic::CGameAnimationTypeAmbientStatic(USHORT animatio
 
     // NOTE: Uninline.
     m_g1VidCellBase.SetResRef(CResRef(sName + "G1"), FALSE, TRUE, TRUE);
+    m_currentVidCellBase = &m_g1VidCellBase;
 
     if (!MIRROR_BAM) {
         m_g1VidCellExtend.SetResRef(CResRef(sName + "G1E"), FALSE, TRUE, TRUE);
     }
 
     m_currentVidCellExtend = &m_g1VidCellExtend;
-    m_currentVidCell = &m_g1VidCellBase;
+    m_currentVidCell = m_currentVidCellBase;
 
     if (m_falseColor) {
         for (BYTE colorRange = 0; colorRange < CVidPalette::NUM_RANGES; colorRange++) {

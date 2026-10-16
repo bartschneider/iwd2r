@@ -39,7 +39,6 @@ CGameAnimationTypeMonsterLarge16::CGameAnimationTypeMonsterLarge16(USHORT animat
         m_nSndFreq = 16;
         m_personalSpace = 5;
         m_colorBlood = 56;
-        m_resRef = "MWYV";
         m_colorChunks = -1;
         m_resRef = "MCAR";
         break;
@@ -55,6 +54,7 @@ CGameAnimationTypeMonsterLarge16::CGameAnimationTypeMonsterLarge16(USHORT animat
     m_g1VidCellBase.SetResRef(CResRef(m_resRef + "G1"), FALSE, TRUE, TRUE);
     m_g2VidCellBase.SetResRef(CResRef(m_resRef + "G2"), FALSE, TRUE, TRUE);
     m_g3VidCellBase.SetResRef(CResRef(m_resRef + "G3"), FALSE, TRUE, TRUE);
+    m_currentVidCellBase = &m_g1VidCellBase;
 
     if (!MIRROR_BAM) {
         // NOTE: Uninline.
@@ -64,7 +64,7 @@ CGameAnimationTypeMonsterLarge16::CGameAnimationTypeMonsterLarge16(USHORT animat
     }
 
     m_currentVidCellExtend = &m_g1VidCellExtend;
-    m_currentVidCell = &m_g1VidCellBase;
+    m_currentVidCell = m_currentVidCellBase;
 
     if (m_falseColor) {
         for (BYTE colorRange = 0; colorRange < CVidPalette::NUM_RANGES; colorRange++) {

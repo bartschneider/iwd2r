@@ -3,6 +3,7 @@
 
 #include "CGameAnimationType.h"
 #include "CGameAnimationTypeAmbient.h"
+#include "CGameAnimationTypeAmbientStatic.h"
 #include "CGameAnimationTypeFlying.h"
 #include "CGameAnimationTypeMonster.h"
 #include "CGameAnimationTypeMonsterAnkheg.h"
@@ -16,6 +17,7 @@
 #include "CGameContainer.h"
 #include "CGameDoor.h"
 #include "CGameObjectArray.h"
+#include "CGameTrigger.h"
 #include "engine_world.h"
 #include "render_surfaces.h"
 
@@ -371,10 +373,7 @@ TEST_CASE("creature render: CGameAnimationTypeMonsterQuadrant draws each quadran
 // MonsterLarge 0x6B1E70, MonsterLarge16 0x6B3C60, MonsterQuadrant 0x6BC5F0,
 // TownStatic 0x6A55C0): each channel is the cell's and the tint's added less
 // 255, red from the low bytes (for instance 0x6A85BC). Ours took red from the
-// blue bytes, so a yellow tint (blue 0) left no red at all. AmbientStatic
-// is not drawn here: its constructor (0x6A5A10) leaves m_currentVidCellBase
-// unset in ours (the original sets it at 0x6A5D73), so a cow cannot be built
-// (vis-probe's file; reported).
+// blue bytes, so a yellow tint (blue 0) left no red at all.
 TEST_CASE("creature render: the earlier Renders keep red in a yellow tint", "[render][data]")
 {
     std::string why;
@@ -391,6 +390,7 @@ TEST_CASE("creature render: the earlier Renders keep red in a yellow tint", "[re
     };
     const Case cases[] = {
         { 0xC100, "Ambient (cat)", [](CGameAnimationType* p) { return dynamic_cast<CGameAnimationTypeAmbient*>(p) != nullptr; } },
+        { 0xB000, "AmbientStatic (cow)", [](CGameAnimationType* p) { return dynamic_cast<CGameAnimationTypeAmbientStatic*>(p) != nullptr; } },
         { 0xD400, "Flying (bird, the one Flying animation that is tinted)", [](CGameAnimationType* p) { return dynamic_cast<CGameAnimationTypeFlying*>(p) != nullptr; } },
         { 0xE408, "MonsterIcewind (goblin)", [](CGameAnimationType* p) { return dynamic_cast<CGameAnimationTypeMonsterIcewind*>(p) != nullptr; } },
         { 0x9000, "MonsterLarge (ogre)", [](CGameAnimationType* p) { return dynamic_cast<CGameAnimationTypeMonsterLarge*>(p) != nullptr; } },
@@ -674,4 +674,213 @@ TEST_CASE("creature render: AR1000's doors and containers draw their highlight",
         CHECK(Compare(outlined, filled, scope.Screen(), whole).changed == fill.changed);
     }
     CInfinity::TRANSLUCENT_BLTS_ON = translucentBefore;
+}
+
+namespace {
+
+// The pixel DrawHLineShaded32 (flag 0x10) makes of a grey pixel `grey` and
+// the colour 0x00RRGGBB: each channel blended towards the colour by the
+// colour's intensity.
+DWORD Shaded(DWORD colour, DWORD grey)
+{
+    const DWORD r = (colour >> 16) & 0xFF;
+    const DWORD g = (colour >> 8) & 0xFF;
+    const DWORD b = colour & 0xFF;
+    const DWORD intensity = (r + g + b) / 3;
+    const DWORD inverse = 255 - intensity;
+    return (((r * intensity + inverse * grey) >> 8) << 16) | (((g * intensity + inverse * grey) >> 8) << 8)
+        | ((b * intensity + inverse * grey) >> 8);
+}
+
+}
+
+// The trap and region highlights of CGameTrigger::Render (0x4CFA60, vtable
+// slot 0x4C of 0x84C7BC) and its fill FillPoly (0x4D02C0, slot 0xBC),
+// which ours did not have, on AR1000's regions:
+// - a trap (type 0) whose outline is drawn for a while (m_drawPoly): red;
+// - a found trap picked under the thieving cursor (state 2, icon 36): green;
+// - any region while the trigger polygons are shown (CInfGame::field_4AB2,
+//   the cheat key Ctrl+4): blue.
+// Each is outlined in its COLORREF and, with translucent blits on, filled
+// through the FX surface with flag 0x10 in its PackColor. AR1000's traps
+// are two-point lines (nothing inside to fill); the travel region is a
+// quadrilateral.
+TEST_CASE("creature render: AR1000's traps and regions draw their highlight", "[render][data]")
+{
+    std::string why;
+    if (!Begin(why)) {
+        SKIP("[iwd2r-skip] " + why);
+    }
+    FramePump pump;
+    World world;
+    if (!NewWorld(world, why)) {
+        SKIP("[iwd2r-skip] " + why);
+    }
+    CGameArea* pArea = world.pArea;
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    auto find = [&](bool trap) {
+        auto accept = [trap](CGameTrigger* p) {
+            return (p->m_triggerType == 0) == trap && p->m_nPolygon >= (trap ? 2 : 3) && p->m_rBounding.Width() <= 512
+                && p->m_rBounding.Height() <= 512;
+        };
+        CGameTrigger* p = FindObject<CGameTrigger>(pArea->m_lVertSort, CGameObject::TYPE_TRIGGER, accept);
+        return p != NULL ? p : FindObject<CGameTrigger>(pArea->m_lVertSortBack, CGameObject::TYPE_TRIGGER, accept);
+    };
+    CGameTrigger* pTrap = find(true);
+    REQUIRE(pTrap != NULL);
+    CGameTrigger* pRegion = find(false);
+    REQUIRE(pRegion != NULL);
+    // sub_481890 gave each its own bounding rectangle to fill.
+    REQUIRE(pTrap->field_630.GetSize() == 1);
+    CHECK(pTrap->field_630[0] == &pTrap->m_rBounding);
+
+    AreaScope scope(pArea);
+    REQUIRE(scope.Ok());
+    const BOOLEAN translucentBefore = CInfinity::TRANSLUCENT_BLTS_ON;
+    const CRect whole(0, 0, scope.Screen().Width(), scope.Screen().Height());
+    const WORD trapActivated = pTrap->m_trapActivated;
+    const WORD trapDetected = pTrap->m_trapDetected;
+    const LONG picked = pArea->m_iPicked;
+    const SHORT state = pGame->m_nState;
+    const BYTE icon = pGame->m_iconIndex;
+
+    struct Case {
+        const char* name;
+        CGameTrigger* pTrigger;
+        DWORD colour; // 0x00RRGGBB, as the outline is drawn
+        bool area; // a polygon with an inside to fill
+        bool alone; // no other object changes with it
+        std::function<void(bool)> show;
+    };
+    const Case cases[] = {
+        { "trap_drawpoly", pTrap, 0xFF0000, pTrap->m_nPolygon > 2, true, [&](bool on) { pTrap->m_drawPoly = on ? 100 : 0; } },
+        { "trap_found", pTrap, 0x00FA00, pTrap->m_nPolygon > 2, true,
+            [&](bool on) {
+                pTrap->m_trapActivated = on ? 1 : trapActivated;
+                pTrap->m_trapDetected = on ? 1 : trapDetected;
+                pArea->m_iPicked = on ? pTrap->GetId() : picked;
+                pGame->m_nState = on ? 2 : state;
+                pGame->m_iconIndex = on ? 36 : icon;
+            } },
+        { "region_shown", pRegion, 0x0000FF, true, false, [&](bool on) { pGame->field_4AB2 = on ? 1 : 0; } },
+    };
+    for (const Case& c : cases) {
+        INFO(c.name);
+        scope.CentreOn(c.pTrigger->m_rBounding.CenterPoint());
+        const CRect rScreen = scope.ToScreen(c.pTrigger->m_rBounding);
+        CRect rAround(rScreen);
+        rAround.InflateRect(1, 1);
+        INFO("bounds on screen " << rScreen.left << "," << rScreen.top << " - " << rScreen.right << "," << rScreen.bottom);
+
+        // The fill alone on grey.
+        const std::vector<DWORD> grey = scope.Back(true, 0x808080);
+        c.pTrigger->FillPoly(pArea, scope.VidMode(), CVIDINF_SURFACE_BACK, scope.VidMode()->PackColor(RGB(c.colour >> 16, (c.colour >> 8) & 0xFF, c.colour & 0xFF)));
+        const std::vector<DWORD> greyFilled = scope.Back();
+        const Difference shaded = Compare(grey, greyFilled, scope.Screen(), rScreen, Shaded(c.colour, 0x80));
+        INFO("fill on grey: changed " << shaded.changed << ", shaded " << shaded.exact);
+        if (c.area) {
+            CHECK(shaded.changed > 20);
+        }
+        CHECK(shaded.exact == shaded.changed);
+        CHECK(Compare(grey, greyFilled, scope.Screen(), whole).changed == shaded.changed);
+
+        c.show(false);
+        CInfinity::TRANSLUCENT_BLTS_ON = TRUE;
+        const std::vector<DWORD> plain = scope.RenderArea(pArea);
+        c.show(true);
+        CInfinity::TRANSLUCENT_BLTS_ON = FALSE;
+        const std::vector<DWORD> outlined = scope.RenderArea(pArea);
+        CInfinity::TRANSLUCENT_BLTS_ON = TRUE;
+        const std::vector<DWORD> filled = scope.RenderArea(pArea);
+        scope.Shot(filled, std::string("ar1000_") + c.name);
+        c.show(false);
+
+        const Difference outline = Compare(plain, outlined, scope.Screen(), rAround, c.colour);
+        INFO("outline: changed " << outline.changed << ", in its colour " << outline.exact);
+        CHECK(outline.exact > 20);
+        CHECK(outline.changed <= outline.exact);
+        // Shown, every region is outlined: elsewhere only in that colour.
+        const Difference everywhere = Compare(plain, outlined, scope.Screen(), whole, c.colour);
+        if (c.alone) {
+            CHECK(everywhere.changed == outline.changed);
+        } else {
+            CHECK(everywhere.changed <= everywhere.exact);
+        }
+        const Difference fill = Compare(outlined, filled, scope.Screen(), rAround);
+        INFO("fill in the area: changed " << fill.changed);
+        if (c.area) {
+            CHECK(fill.changed > 0);
+        }
+        if (c.alone) {
+            CHECK(Compare(outlined, filled, scope.Screen(), whole).changed == fill.changed);
+        }
+    }
+    CInfinity::TRANSLUCENT_BLTS_ON = translucentBefore;
+}
+
+// A cow (0xB000, ACOW: 00COW and two other CRE files) of
+// CGameAnimationTypeAmbientStatic, whose constructor (0x6A5A10) sets
+// m_currentVidCellBase to its base cell (0x6A5D73). Ours left it unset, so
+// ChangeDirection at the constructor's end made a garbage pointer the
+// current cell and set its sequence: building a cow wrote into memory it
+// did not own, and drawing one crashed. Every facing now picks the base
+// cell, or the extended one past m_extendDirectionTest without mirrored
+// BAMs, with a frame to draw; and the cow draws like the others.
+TEST_CASE("creature render: CGameAnimationTypeAmbientStatic builds and draws a cow", "[render][data]")
+{
+    std::string why;
+    if (!Begin(why)) {
+        SKIP("[iwd2r-skip] " + why);
+    }
+    RenderScope scope;
+    REQUIRE(scope.Ok());
+    BYTE colors[16] = {};
+    for (WORD facing = 0; facing < 16; facing++) {
+        INFO("facing " << facing);
+        std::unique_ptr<CGameAnimationType> pAnimation(CGameAnimationType::SetAnimationType(0xB000, colors, facing));
+        auto* pCow = dynamic_cast<CGameAnimationTypeAmbientStatic*>(pAnimation.get());
+        REQUIRE(pCow != nullptr);
+        CHECK(pCow->m_currentVidCellBase == &pCow->m_g1VidCellBase);
+        CHECK(pCow->m_currentVidCellExtend == &pCow->m_g1VidCellExtend);
+        const bool extended = !CGameAnimationType::MIRROR_BAM && pCow->m_currentBamDirection > pCow->m_extendDirectionTest;
+        CHECK(pCow->m_currentVidCell == (extended ? pCow->m_currentVidCellExtend : pCow->m_currentVidCellBase));
+        CSize frameSize;
+        CHECK(pCow->m_currentVidCell->GetCurrentFrameSize(frameSize, FALSE));
+        if (facing == 0 || facing == 12) {
+            CheckRender(scope, pCow, CPoint(320, 300), "cow_" + std::to_string(facing));
+        }
+    }
+}
+
+// A wyvern (0xA000, MWYV in three groups of BAMs: 00SWYV, 50WYV, 61WYVERN
+// and eight other CRE files) of CGameAnimationTypeMonsterLarge16, whose
+// constructor (0x6B23B0) sets m_currentVidCellBase to its first base cell
+// (0x6B26F8). Ours left it unset, as AmbientStatic's, so the constructor's
+// ChangeDirection made whatever the heap held the current cell. Every
+// facing now picks the base cell, or the extended one past
+// m_extendDirectionTest without mirrored BAMs, with a frame to draw.
+TEST_CASE("creature render: CGameAnimationTypeMonsterLarge16 builds and draws a wyvern", "[render][data]")
+{
+    std::string why;
+    if (!Begin(why)) {
+        SKIP("[iwd2r-skip] " + why);
+    }
+    RenderScope scope;
+    REQUIRE(scope.Ok());
+    BYTE colors[16] = {};
+    for (WORD facing = 0; facing < 16; facing++) {
+        INFO("facing " << facing);
+        std::unique_ptr<CGameAnimationType> pAnimation(CGameAnimationType::SetAnimationType(0xA000, colors, facing));
+        auto* pWyvern = dynamic_cast<CGameAnimationTypeMonsterLarge16*>(pAnimation.get());
+        REQUIRE(pWyvern != nullptr);
+        CHECK(pWyvern->m_currentVidCellBase == &pWyvern->m_g1VidCellBase);
+        CHECK(pWyvern->m_currentVidCellExtend == &pWyvern->m_g1VidCellExtend);
+        const bool extended = !CGameAnimationType::MIRROR_BAM && pWyvern->m_currentBamDirection > pWyvern->m_extendDirectionTest;
+        CHECK(pWyvern->m_currentVidCell == (extended ? pWyvern->m_currentVidCellExtend : pWyvern->m_currentVidCellBase));
+        CSize frameSize;
+        CHECK(pWyvern->m_currentVidCell->GetCurrentFrameSize(frameSize, FALSE));
+        if (facing == 0 || facing == 12) {
+            CheckRender(scope, pWyvern, CPoint(320, 330), "wyvern16_" + std::to_string(facing));
+        }
+    }
 }
