@@ -8241,6 +8241,10 @@ void CGameSprite::Unmarshal(CSavedGamePartyCreature* pCreature, BOOLEAN bPartyMe
     m_nLastSpellbookSpellLevel = pCreature->m_nLastSpellbookSpellLevel;
     m_nLastSong = pCreature->m_nLastSong;
 
+    // NOTE: Inlined ResetQuickSlots (0x70C8E6-0x70C96E): the empty action
+    // bar buttons get the class's defaults (QSLOTS.2DA).
+    ResetQuickSlots();
+
     m_nNumberOfTimesTalkedTo = pCreature->m_nNumberOfTimesTalkedTo;
     m_nHappiness = pCreature->m_nHappiness;
 
