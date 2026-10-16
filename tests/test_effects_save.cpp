@@ -1212,15 +1212,30 @@ TEST_CASE("Hold Person (SPPR208) on a goblin: a made will save refuses the hold,
         CHECK(pGoblin->m_derivedStats.m_spellStates.test(SPLSTATE_HELD));
         CHECK(pGoblin->field_70F8 == (1 | 0x80));
 
-        // SPPR208's flags (0x4000) lack the hostile bit 0x400, so OnAdd sends
-        // no AttackedBy.
-        bool attacked = false;
+        // SPPR208's flags (0x4000) lack the hostile bit 0x400: OnAdd sends
+        // no AttackedBy and leaves the hostility bit alone.
+        CHECK(pHold->m_sourceFlags == 0x4000);
         for (const TriggerSent& one : Triggers()) {
-            if (one.id == CAITRIGGER_ATTACKEDBY && one.caller == pProbe->GetId() && one.target == pGoblin->GetId()) {
-                attacked = true;
-            }
+            CHECK(one.id != CAITRIGGER_ATTACKEDBY);
         }
-        CHECK(attacked == ((pHold->m_sourceFlags & 0x400) != 0));
+    }
+
+    SECTION("a natural 1 with the hostile flag: held, and OnAdd tells the goblin who attacked it")
+    {
+        pHold->m_sourceFlags |= 0x400;
+        pGoblin->field_58C = 0;
+        pGoblin->field_70F8 = 1;
+        iwd2r_srand(31);
+        pGoblin->AddEffect(pHold, CGameAIBase::EFFECT_LIST_TIMED, FALSE, TRUE);
+        CHECK(Draws(31, iwd2r_rand_state()) == 1);
+
+        CHECK(HasEffect(pGoblin->m_timedEffectList, CGAMEEFFECT_HOLDCREATURE, source));
+        CHECK(pGoblin->field_58C == 0x200000);
+        std::vector<TriggerSent> sent = Triggers();
+        REQUIRE(sent.size() == 1);
+        CHECK(sent[0].id == CAITRIGGER_ATTACKEDBY);
+        CHECK(sent[0].caller == pProbe->GetId());
+        CHECK(sent[0].target == pGoblin->GetId());
     }
 
     pTimer->m_active = active;
