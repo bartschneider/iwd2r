@@ -19,6 +19,7 @@
 #include "CGameObjectArray.h"
 #include "CGameTrigger.h"
 #include "CVidInf.h"
+#include "CVidPoly.h"
 #include "CWeather.h"
 #include "engine_world.h"
 #include "render_surfaces.h"
@@ -987,4 +988,107 @@ TEST_CASE("weather: snow flakes are drawn in the scaled snow colour", "[render][
         CHECK(drawn == 1);
         CHECK((pixels[60 * width + 90] & 0xFFFFFF) == c.expected);
     }
+}
+
+// CGameArea::SetDawn (0x478490) ends by passing the dawn on to its
+// infinity's SetDawn (the call at 0x478AAB), in an outdoor area. Ours
+// called SetDusk, which lights the world for dusk: at intensity 200 a light
+// of (255, 230, 230) where dawn gives (222, 230, 255).
+TEST_CASE("area: SetDawn lights an outdoor area for dawn", "[render][data]")
+{
+    std::string why;
+    if (!Begin(why)) {
+        SKIP("[iwd2r-skip] " + why);
+    }
+    FramePump pump;
+    World world;
+    if (!NewWorld(world, why)) {
+        SKIP("[iwd2r-skip] " + why);
+    }
+    CGameArea* pArea = world.pArea;
+    CInfinity* pInfinity = pArea->GetInfinity();
+    REQUIRE((pInfinity->m_areaType & 0x2) != 0);
+    REQUIRE((pInfinity->m_areaType & 0x40) == 0);
+
+    pArea->SetDawn(200, FALSE);
+    // n = 400 & 0xFF = 144: CInfinity::SetDawn's constants (0x5D19AB-0x5D1A26).
+    CHECK(pInfinity->m_dayLightIntensity == 200);
+    CHECK(pInfinity->m_rgbTimeOfDayGlobalLighting == RGB(0xB4 + (144 * 0x4B >> 8), 0xC8 + (144 * 0x37 >> 8), 0xFF));
+    CHECK(pInfinity->m_rgbTimeOfDayRainColor == RGB(0x5A + (144 * 0x14 >> 8), 0x5A + (144 * 0x14 >> 8), 0x64 + (144 * 10 >> 8)));
+}
+
+// CGameTrigger::IsOverActivate (0x4CECB0) is FALSE outside the region's
+// bounding rectangle (`jne` past the return at 0x4CECCE), then tests the
+// polygon. Ours had the rectangle test the wrong way round, as IsOver had,
+// so a creature walking into a trap or a travel region never set it off
+// (CGameTrigger::DoAIUpdate 0x4CD220 asks this of each sprite's position).
+TEST_CASE("trigger: a creature inside a travel region sets it off", "[render][data]")
+{
+    std::string why;
+    if (!Begin(why)) {
+        SKIP("[iwd2r-skip] " + why);
+    }
+    FramePump pump;
+    World world;
+    if (!NewWorld(world, why)) {
+        SKIP("[iwd2r-skip] " + why);
+    }
+    CGameArea* pArea = world.pArea;
+    // AR1000's To1005, inside the house door (its bounds 825,875-866,928).
+    const CPoint ptInside(845, 900);
+    auto accept = [&](CGameTrigger* p) { return p->m_triggerType == 2 && p->m_rBounding.PtInRect(ptInside); };
+    CGameTrigger* pRegion = FindObject<CGameTrigger>(pArea->m_lVertSort, CGameObject::TYPE_TRIGGER, accept);
+    if (pRegion == NULL) {
+        pRegion = FindObject<CGameTrigger>(pArea->m_lVertSortBack, CGameObject::TYPE_TRIGGER, accept);
+    }
+    REQUIRE(pRegion != NULL);
+    REQUIRE(pRegion->m_pPolygon != NULL);
+
+    CHECK(pRegion->IsOverActivate(ptInside));
+    CHECK(pRegion->IsOverActivate(pRegion->m_rBounding.CenterPoint()));
+    CHECK_FALSE(pRegion->IsOverActivate(CPoint(pRegion->m_rBounding.right + 4, pRegion->m_rBounding.CenterPoint().y)));
+    CHECK_FALSE(pRegion->IsOverActivate(CPoint(pRegion->m_rBounding.left - 4, pRegion->m_rBounding.top - 4)));
+    // Inside the rectangle the polygon decides.
+    int inside = 0;
+    int outside = 0;
+    for (int y = pRegion->m_rBounding.top; y < pRegion->m_rBounding.bottom; y += 3) {
+        for (int x = pRegion->m_rBounding.left; x < pRegion->m_rBounding.right; x += 3) {
+            const CPoint pt(x, y);
+            const bool expected = CVidPoly::IsPtInPoly(pRegion->m_pPolygon, pRegion->m_nPolygon, pt) != FALSE;
+            CHECK((pRegion->IsOverActivate(pt) != FALSE) == expected);
+            (expected ? inside : outside)++;
+        }
+    }
+    CHECK(inside > 0);
+}
+
+// A pile (container type 4) with no bounding rectangle in the area file gets
+// its search square: left and top rounded down to the 16x12 grid, right and
+// bottom the square's last pixel, (pos / 16 + 1) * 16 - 1 and
+// (pos / 12 + 1) * 12 - 1 (0x47C17A-0x47C1C2 of the constructor 0x47BFA0).
+// Its walk-to point, which is also its position, is the rectangle's middle.
+// Ours computed 16 * (pos / 17) - 1 and 12 * (pos / 13) - 1, so AR1000's
+// goblin axe (file position 490,956) stood at 463,911 and was drawn 27 and
+// 45 pixels off; it is at 487,953 as in the original's shots.
+TEST_CASE("container: a pile without bounds gets its search square", "[render][data]")
+{
+    std::string why;
+    if (!Begin(why)) {
+        SKIP("[iwd2r-skip] " + why);
+    }
+    FramePump pump;
+    World world;
+    if (!NewWorld(world, why)) {
+        SKIP("[iwd2r-skip] " + why);
+    }
+    CGameArea* pArea = world.pArea;
+    auto accept = [](CGameContainer* p) { return p->m_containerType == 4 && p->m_rBounding.left == 480 && p->m_rBounding.top == 948; };
+    CGameContainer* pPile = FindObject<CGameContainer>(pArea->m_lVertSortBack, CGameObject::TYPE_CONTAINER, accept);
+    if (pPile == NULL) {
+        pPile = FindObject<CGameContainer>(pArea->m_lVertSort, CGameObject::TYPE_CONTAINER, accept);
+    }
+    REQUIRE(pPile != NULL);
+    CHECK(pPile->m_rBounding == CRect(480, 948, 496, 960));
+    CHECK(pPile->m_ptWalkToUse == CPoint(487, 953));
+    CHECK(pPile->GetPos() == CPoint(487, 953));
 }

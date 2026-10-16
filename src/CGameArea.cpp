@@ -5644,7 +5644,7 @@ void CGameArea::SetDawn(BYTE nIntensity, BOOLEAN bPlayDayNightMovie)
     }
 
     if ((m_cInfinity.m_areaType & 0x2) != 0) {
-        m_cInfinity.SetDusk(nIntensity, bPlayDayNightMovie);
+        m_cInfinity.SetDawn(nIntensity, bPlayDayNightMovie);
     }
 }
 
