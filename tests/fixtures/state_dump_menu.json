@@ -5,5 +5,6 @@
   "rng_state": 1,
   "globals": {"au_counter": 61, "fullscreen": 0, "in_async_update": 0, "ai_stalled_frames": 0, "ai_overlap_frames": 0, "search_wait_timeouts": 0, "reinitializing": 0, "loading": 0, "loads": 0, "held_frames": 0, "ai_rng_state": 3861535683},
   "chargen": null,
-  "world": null
+  "world": null,
+  "game": null
 }

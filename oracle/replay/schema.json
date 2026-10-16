@@ -9,7 +9,8 @@
     "rng_state",
     "globals",
     "chargen",
-    "world"
+    "world",
+    "game"
   ],
   "additionalProperties": false,
   "properties": {
@@ -411,6 +412,135 @@
           "description": "The sprites in the area: the objects on its front, back and flight vertical lists (CGameArea::m_lVertSort, m_lVertSortBack, m_lVertSortFlight) whose CGameObject::m_objectType is TYPE_SPRITE (0x31), the party included.",
           "type": "integer",
           "minimum": 0
+        }
+      }
+    },
+    "game": {
+      "description": "The game in progress, on every screen (CBaldurChitin::m_pObjectGame, a CInfGame): the party's purse and, for each party member, what a save carries: gold, experience, levels and the inventory. null when there is no CInfGame (or the recorder cannot read it). A member's values are null while its id does not resolve in the object array.",
+      "type": [
+        "object",
+        "null"
+      ],
+      "required": [
+        "party_gold",
+        "members"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "party_gold": {
+          "description": "The party's gold, CInfGame::m_gameSave.m_nPartyGold (CInfGame::AddPartyGold 0x5BF610 adds to it at 0x5BF68B).",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "members": {
+          "description": "The party in portrait order: CInfGame::m_characterPortraits[0 .. m_nCharacters - 1], as world.party.",
+          "type": "array",
+          "maxItems": 6,
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "gold",
+              "xp",
+              "level",
+              "class_levels",
+              "inventory"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "description": "The object id (m_characterPortraits[i]).",
+                "type": "integer"
+              },
+              "gold": {
+                "description": "The character's own gold, m_baseStats.m_gold (the CRE's; the party's purse is party_gold).",
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "maximum": 4294967295
+              },
+              "xp": {
+                "description": "The experience points, m_baseStats.m_xp.",
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "maximum": 4294967295
+              },
+              "level": {
+                "description": "The character level, m_baseStats.m_characterLevel (CRE V2.2's total level, which CDerivedStats::Reload 0x4440F0 reads at 0x4443D9).",
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "maximum": 255
+              },
+              "class_levels": {
+                "description": "m_baseStats.m_classLevels: the levels in barbarian, bard, cleric, druid, fighter, monk, paladin, ranger, rogue, sorcerer and wizard (CDerivedStats::Reload copies the 11 bytes, 0x4443D0).",
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 255
+                },
+                "minItems": 11,
+                "maxItems": 11
+              },
+              "inventory": {
+                "description": "The 51 equipment and inventory slots, CGameSprite::m_equipment.m_items[0 .. 50] in slot order (CGameSpriteEquipment, the CRE's equipment table).",
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "description": "The item in the slot, CGameSpriteEquipment::m_items[slot] (a CItem); null for an empty slot.",
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "required": [
+                    "resref",
+                    "uses",
+                    "flags"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "resref": {
+                      "description": "The item's resref, CItem::cResRef (its CResHelper base's, at 0x0C in the original: docs/evidence/4E7840.md).",
+                      "type": "string"
+                    },
+                    "uses": {
+                      "description": "CItem::m_useCount1, m_useCount2, m_useCount3: the charges of the item's first three abilities, and for a stackable item (ammunition, potions) the stack's size in m_useCount1, as the CRE item's usage fields.",
+                      "type": "array",
+                      "items": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 65535
+                      },
+                      "minItems": 3,
+                      "maxItems": 3
+                    },
+                    "flags": {
+                      "description": "CItem::m_flags, the CRE item's flags (bit 0 identified, 1 unstealable, 2 stolen, 3 undroppable).",
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 4294967295
+                    }
+                  }
+                },
+                "minItems": 51,
+                "maxItems": 51
+              }
+            }
+          }
         }
       }
     }
@@ -979,6 +1109,46 @@
     "sprite_path_count": {
       "class": "CGameSprite",
       "member": "m_nPath"
+    },
+    "party_gold": {
+      "class": "CInfGame",
+      "member": "m_gameSave.m_nPartyGold"
+    },
+    "sprite_gold": {
+      "class": "CGameSprite",
+      "member": "m_baseStats.m_gold"
+    },
+    "sprite_level": {
+      "class": "CGameSprite",
+      "member": "m_baseStats.m_characterLevel"
+    },
+    "sprite_class_levels": {
+      "class": "CGameSprite",
+      "member": "m_baseStats.m_classLevels"
+    },
+    "sprite_items": {
+      "class": "CGameSprite",
+      "member": "m_equipment.m_items"
+    },
+    "item_resref": {
+      "class": "CItem",
+      "member": "cResRef"
+    },
+    "item_use_count1": {
+      "class": "CItem",
+      "member": "m_useCount1"
+    },
+    "item_use_count2": {
+      "class": "CItem",
+      "member": "m_useCount2"
+    },
+    "item_use_count3": {
+      "class": "CItem",
+      "member": "m_useCount3"
+    },
+    "item_flags": {
+      "class": "CItem",
+      "member": "m_flags"
     }
   }
 }

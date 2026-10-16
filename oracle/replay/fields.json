@@ -714,5 +714,57 @@
     "base": "CGameSprite",
     "offset": "0x5386",
     "type": "i16"
+  },
+  "party_gold": {
+    "base": "CInfGame",
+    "offset": "0x4238",
+    "type": "u32"
+  },
+  "sprite_gold": {
+    "base": "CGameSprite",
+    "offset": "0x05B8",
+    "type": "u32"
+  },
+  "sprite_level": {
+    "base": "CGameSprite",
+    "offset": "0x0626",
+    "type": "u8"
+  },
+  "sprite_class_levels": {
+    "base": "CGameSprite",
+    "offset": "0x0627",
+    "type": "u8",
+    "count": 11
+  },
+  "sprite_items": {
+    "base": "CGameSprite",
+    "offset": "0x4AD8",
+    "type": "ptr",
+    "count": 51
+  },
+  "item_resref": {
+    "base": "CItem",
+    "offset": "0x000C",
+    "type": "resref"
+  },
+  "item_use_count1": {
+    "base": "CItem",
+    "offset": "0x0018",
+    "type": "u16"
+  },
+  "item_use_count2": {
+    "base": "CItem",
+    "offset": "0x001A",
+    "type": "u16"
+  },
+  "item_use_count3": {
+    "base": "CItem",
+    "offset": "0x001C",
+    "type": "u16"
+  },
+  "item_flags": {
+    "base": "CItem",
+    "offset": "0x0020",
+    "type": "u32"
   }
 }

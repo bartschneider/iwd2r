@@ -3104,6 +3104,25 @@ public:
     /* 0014 */ STRREF m_text;
 };
 
+template <class T, int nType>
+class CResHolder {
+public:
+    /* 0000 */ BOOL bLoading;
+    /* 0004 */ T* pRes;
+    /* 0008 */ CResRef cResRef;
+};
+
+// The original has a vtable at 0: the base starts at 4.
+class CHeld : public CResHolder<CResX, 5> /* base 0x0004 */ {
+public:
+    /* 0014 */ INT m_nAbilities;
+};
+
+class CHeldToo : public CObject, public CResHolder<CResX, 6> /* base 0x10 */ {
+public:
+    /* 0020 */ WORD m_count;
+};
+
 class CHolder {
 public:
     /* 0000 */ SCRIPTNAME m_name;
@@ -3221,6 +3240,34 @@ class GenFieldsTest(unittest.TestCase):
                                  'member': 'm_list.m_nSize'}})
         self.assertIn('no commented member m_nSize', str(e.exception))
 
+    def test_base_offset_comment(self):
+        # `/* base 0xNNNN */` after a base class moves its members.
+        out = self.generate({
+            'ref': {'class': 'CHeld', 'member': 'cResRef'},
+            'loading': {'class': 'CHeld', 'member': 'bLoading'},
+            'own': {'class': 'CHeld', 'member': 'm_nAbilities'},
+            'plain': {'class': 'CResHolder', 'member': 'cResRef'},
+            'second': {'class': 'CHeldToo', 'member': 'pRes'},
+            'count': {'class': 'CHeldToo', 'member': 'm_count'},
+        })
+        self.assertEqual(out, {
+            'ref': {'base': 'CHeld', 'offset': '0x000C', 'type': 'resref'},
+            'loading': {'base': 'CHeld', 'offset': '0x0004', 'type': 'i32'},
+            'own': {'base': 'CHeld', 'offset': '0x0014', 'type': 'i32'},
+            'plain': {'base': 'CResHolder', 'offset': '0x0008',
+                      'type': 'resref'},
+            'second': {'base': 'CHeldToo', 'offset': '0x0014',
+                       'type': 'ptr'},
+            'count': {'base': 'CHeldToo', 'offset': '0x0020',
+                      'type': 'u16'},
+        })
+        # The repository's CItem (src/CItem.h): its resref is at 0x0C in the
+        # original (0x4E785C lea ebx, [esi+0xC]).
+        with open(os.path.join(ROOT, 'oracle', 'replay', 'fields.json')) as f:
+            fields = json.load(f)
+        self.assertEqual(fields['item_resref'], {
+            'base': 'CItem', 'offset': '0x000C', 'type': 'resref'})
+
     def test_global_and_sizeof(self):
         out = self.generate({
             'thing': {'global': 'g_pThing', 'type': 'ptr'},
@@ -3296,6 +3343,18 @@ class GenFieldsTest(unittest.TestCase):
         self.assertEqual(fields['object_entry_size']['offset'], '0x000C')
         self.assertEqual(fields['object_entry_id']['offset'], '0x0006')
         self.assertEqual(fields['object_entry_ptr']['offset'], '0x0008')
+        # The game block: CInfGame::AddPartyGold 0x5BF68B (add [ecx+0x4238]),
+        # CGameSprite::Marshal 0x70B4E0 (lea ecx, [ebp+0x4AD8], the
+        # equipment), CDerivedStats::Reload 0x4443D0/0x4443D9 (the base
+        # stats' levels at 0x83 and 0x82), CItem::CItem 0x4E7840 (resref
+        # 0x0C, use counts 0x18-0x1C, flags 0x20).
+        self.assertEqual(fields['party_gold']['offset'], '0x4238')
+        self.assertEqual(fields['sprite_items']['offset'], '0x4AD8')
+        self.assertEqual(fields['sprite_level']['offset'], '0x0626')
+        self.assertEqual(fields['sprite_class_levels']['offset'], '0x0627')
+        self.assertEqual(fields['item_resref']['offset'], '0x000C')
+        self.assertEqual(fields['item_use_count1']['offset'], '0x0018')
+        self.assertEqual(fields['item_flags']['offset'], '0x0020')
 
 
 class MiniSchemaTest(unittest.TestCase):
@@ -3360,7 +3419,8 @@ class MiniSchemaTest(unittest.TestCase):
                             'ai_overlap_frames': 0,
                             'reinitializing': 0, 'loading': 0, 'loads': 0,
                             'held_frames': 0, 'ai_rng_state': None},
-                'chargen': None, 'world': None}
+                'chargen': None, 'world': None,
+                'game': {'party_gold': 0, 'members': []}}
         self.assertEqual(minischema.validate(dump, schema), [])
         dump['chargen'] = {'race': 1, 'subrace': 0, 'class': 5,
                            'abilities': [10, 11, 12, 13, 14, 15],
@@ -3392,7 +3452,8 @@ class MiniSchemaTest(unittest.TestCase):
                                      'locked': 1}],
                           'dialog': {'active': 1, 'speaker': 3, 'entry': 0,
                                      'responses': 2},
-                          'explored_count': 12, 'creatures': 3}}
+                          'explored_count': 12, 'creatures': 3},
+                'game': None}
         self.assertEqual(minischema.validate(dump, schema), [])
         dump['world']['party'].append(
             {'id': 131073, 'x': None, 'y': None, 'hp': None, 'max_hp': None,
@@ -3419,6 +3480,68 @@ class MiniSchemaTest(unittest.TestCase):
         del dump['world']
         self.assertEqual(minischema.validate(dump, schema),
                          ["$: missing required property 'world'"])
+
+    def test_replay_schema_game(self):
+        with open(os.path.join(ROOT, 'oracle', 'replay', 'schema.json')) as f:
+            schema = json.load(f)
+        inventory = [None] * 51
+        inventory[0] = {'resref': '00HELM01', 'uses': [0, 0, 0], 'flags': 1}
+        inventory[16] = {'resref': '00ARRO01', 'uses': [40, 0, 0],
+                         'flags': 0}
+        member = {'id': 65536, 'gold': 0, 'xp': 300, 'level': 1,
+                  'class_levels': [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0],
+                  'inventory': inventory}
+        gone = {'id': 131073, 'gold': None, 'xp': None, 'level': None,
+                'class_levels': None, 'inventory': None}
+        dump = {'frame': 1500, 'checkpoint': 'loaded', 'screen': 'inventory',
+                'rng_state': 1,
+                'globals': {'au_counter': 1498, 'fullscreen': 0,
+                            'in_async_update': 0, 'ai_stalled_frames': 0,
+                            'ai_overlap_frames': 0,
+                            'reinitializing': 0, 'loading': 0, 'loads': 1,
+                            'held_frames': 13, 'ai_rng_state': 7},
+                'chargen': None, 'world': None,
+                'game': {'party_gold': 75, 'members': [member, gone]}}
+        self.assertEqual(minischema.validate(dump, schema), [])
+        member['inventory'] = inventory[:50]
+        member['class_levels'] = [0] * 12
+        inventory[16] = dict(inventory[16], uses=[70000, 0, 0])
+        member['inventory'] = inventory
+        self.assertEqual(minischema.validate(dump, schema), [
+            '$.game.members[0].class_levels: 12 items, more than 11',
+            '$.game.members[0].inventory[16].uses[0]: 70000 is above the '
+            'maximum 65535'])
+        del dump['game']['party_gold']
+        member['class_levels'] = [0] * 11
+        inventory[16]['uses'] = [40, 0, 0]
+        self.assertEqual(minischema.validate(dump, schema), [
+            "$.game: missing required property 'party_gold'"])
+
+    def test_game_fields_are_compared(self):
+        """The game block's fields are compared, an item's by slot."""
+        slots = [None] * 51
+        original = {'game': {'party_gold': 75, 'members': [
+            {'id': 1, 'gold': 0, 'xp': 300, 'level': 1,
+             'class_levels': [0] * 11,
+             'inventory': slots[:16] + [{'resref': 'A', 'uses': [40, 0, 0],
+                                         'flags': 0}] + slots[17:]}]}}
+        ours = json.loads(json.dumps(original))
+        ours['game']['party_gold'] = 80
+        ours['game']['members'][0]['xp'] = 0
+        ours['game']['members'][0]['inventory'][16]['uses'][0] = 39
+        ours['game']['members'][0]['inventory'][17] = {'resref': 'B',
+                                                       'uses': [1, 0, 0],
+                                                       'flags': 1}
+        self.assertEqual(oracle.field_differences(original, ours), [
+            ('game.members[0].inventory[16].uses[0]', 40, 39),
+            ('game.members[0].inventory[17]', None, '<missing>'),
+            ('game.members[0].inventory[17].flags', '<missing>', 1),
+            ('game.members[0].inventory[17].resref', '<missing>', 'B'),
+            ('game.members[0].inventory[17].uses[0]', '<missing>', 1),
+            ('game.members[0].inventory[17].uses[1]', '<missing>', 0),
+            ('game.members[0].inventory[17].uses[2]', '<missing>', 0),
+            ('game.members[0].xp', 300, 0),
+            ('game.party_gold', 75, 80)])
 
     def test_world_fields_are_compared(self):
         """The world block's fields are compared, none of them timing."""

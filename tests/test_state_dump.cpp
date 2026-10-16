@@ -179,6 +179,30 @@ TEST_CASE("state dump JSON matches the golden dumps", "[dump]")
     world.engine.world.doors.push_back({ "Door\"2", 1, 1 });
     world.engine.world.exploredCount = 345;
     world.engine.world.creatures = 7;
+    // The game block: one member with three items, one whose id does not
+    // resolve.
+    world.engine.hasGame = true;
+    world.engine.game.partyGold = 1234;
+    platform::state_dump::GameMember carried;
+    carried.id = 0x10000;
+    carried.sprite = true;
+    carried.gold = 12;
+    carried.xp = 300;
+    carried.level = 1;
+    carried.classLevels[4] = 1;
+    carried.hasItem[0] = true;
+    carried.items[0] = { "00HELM01", { 0, 0, 0 }, 1 };
+    carried.hasItem[16] = true;
+    carried.items[16] = { "00ARRO01", { 40, 0, 0 }, 0 };
+    carried.hasItem[20] = true;
+    carried.items[20] = { "Q\"2", { 1, 2, 65535 }, 0xFFFFFFFFu };
+    carried.items[30] = { "IGNORED", { 1, 1, 1 }, 1 }; // no item in the slot
+    world.engine.game.members.push_back(carried);
+    platform::state_dump::GameMember gone;
+    gone.id = 0x20001;
+    gone.gold = 5; // ignored without a sprite
+    gone.hasItem[0] = true; // ignored without a sprite
+    world.engine.game.members.push_back(gone);
     REQUIRE(platform::state_dump::ToJson(world) == Fixture("state_dump_world.json"));
 }
 
@@ -201,7 +225,7 @@ TEST_CASE("state dump writes the doors, the dialog, the explored tiles and the c
     REQUIRE(ReadFile(path).find("\"world\": {\"area\": \"AR1000\", \"party\": [], "
                                 "\"doors\": [{\"name\": \"DOOR01\", \"open\": 0, \"locked\": 1}], "
                                 "\"dialog\": {\"active\": 1, \"speaker\": 3, \"entry\": 0, \"responses\": 2}, "
-                                "\"explored_count\": 12, \"creatures\": 3}\n}\n")
+                                "\"explored_count\": 12, \"creatures\": 3},\n  \"game\": null\n}\n")
         != std::string::npos);
     std::error_code ec;
     fs::remove_all(dir, ec);
@@ -215,7 +239,7 @@ TEST_CASE("state dump world block with no area and no party", "[dump]")
     REQUIRE(platform::state_dump::ToJson(s).find(
                 "\"world\": {\"area\": \"\", \"party\": [], \"doors\": [], "
                 "\"dialog\": {\"active\": 0, \"speaker\": -1, \"entry\": -1, \"responses\": 0}, "
-                "\"explored_count\": 0, \"creatures\": 0}\n}\n")
+                "\"explored_count\": 0, \"creatures\": 0},\n  \"game\": null\n}\n")
         != std::string::npos);
 }
 
@@ -486,7 +510,8 @@ TEST_CASE("replay mode dumps the start screen checkpoint", "[dump][data]")
     REQUIRE(checkpoint
         == "{\n  \"frame\": 61,\n  \"checkpoint\": \"start\",\n  \"screen\": \"connection\",\n  \"rng_state\": 1,\n"
            "  \"globals\": {\"au_counter\": 61, \"fullscreen\": 0, \"in_async_update\": 0, \"ai_stalled_frames\": 0, \"ai_overlap_frames\": 0, "
-           "\"search_wait_timeouts\": 0, \"reinitializing\": 0, \"loading\": 0, \"loads\": 0, \"held_frames\": 0, \"ai_rng_state\": 3861535683},\n  \"chargen\": null,\n  \"world\": null\n}\n");
+           "\"search_wait_timeouts\": 0, \"reinitializing\": 0, \"loading\": 0, \"loads\": 0, \"held_frames\": 0, \"ai_rng_state\": 3861535683},\n  \"chargen\": null,\n  \"world\": null,\n"
+           "  \"game\": {\"party_gold\": 0, \"members\": []}\n}\n");
     REQUIRE(periodic.find("\"frame\": 30,") != std::string::npos);
     REQUIRE(statusText == "frame=61\nscript_line=0\nstate=finished\n");
 }

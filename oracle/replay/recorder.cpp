@@ -681,6 +681,109 @@ std::string WorldJson(uint32_t chitin, uint32_t world)
         + ", \"creatures\": " + Number(values.creatures) + "}";
 }
 
+// ---------------------------------------------------------------------------
+// The "game" block (schema.json): the party's purse and what a save carries
+// of each member, on every screen.
+
+static_assert(kField_party_gold.type == ReplayType::k_u32, "");
+static_assert(kField_sprite_gold.type == ReplayType::k_u32, "");
+static_assert(kField_sprite_level.type == ReplayType::k_u8, "");
+static_assert(kField_sprite_class_levels.type == ReplayType::k_u8 && kField_sprite_class_levels.count == 11, "");
+static_assert(kField_sprite_items.type == ReplayType::k_ptr && kField_sprite_items.count == 51, "");
+static_assert(kField_item_resref.type == ReplayType::k_resref, "");
+static_assert(kField_item_use_count1.type == ReplayType::k_u16, "");
+static_assert(kField_item_use_count2.type == ReplayType::k_u16, "");
+static_assert(kField_item_use_count3.type == ReplayType::k_u16, "");
+static_assert(kField_item_flags.type == ReplayType::k_u32, "");
+
+uint16_t ReadU16(uint32_t address, bool* ok)
+{
+    uint16_t value = 0;
+    *ok = SafeRead(address, &value, sizeof(value)) && *ok;
+    return value;
+}
+
+// One slot of m_equipment.m_items: null when empty, or when the item cannot
+// be read.
+std::string ItemJson(uint32_t item)
+{
+    if (!item) {
+        return "null";
+    }
+    char resref[8] = {};
+    bool ok = SafeRead(At(item, kField_item_resref), resref, sizeof(resref));
+    const uint16_t use1 = ReadU16(At(item, kField_item_use_count1), &ok);
+    const uint16_t use2 = ReadU16(At(item, kField_item_use_count2), &ok);
+    const uint16_t use3 = ReadU16(At(item, kField_item_use_count3), &ok);
+    const uint32_t flags = ReadU32(At(item, kField_item_flags), &ok);
+    if (!ok) {
+        return "null";
+    }
+    return "{\"resref\": " + JsonString(resref, strnlen(resref, sizeof(resref))) + ", \"uses\": [" + Number(use1)
+        + ", " + Number(use2) + ", " + Number(use3) + "], \"flags\": " + Number(flags) + "}";
+}
+
+// One party member: its values are null when the id does not resolve or a
+// read fails.
+std::string GameMemberJson(uint32_t chitin, int32_t id)
+{
+    std::string values = "\"gold\": null, \"xp\": null, \"level\": null, \"class_levels\": null, \"inventory\": null";
+    const uint32_t sprite = ObjectById(chitin, id);
+    if (sprite) {
+        bool ok = true;
+        const uint32_t gold = ReadU32(At(sprite, kField_sprite_gold), &ok);
+        const uint32_t xp = ReadU32(At(sprite, kField_sprite_xp), &ok);
+        const uint8_t level = ReadU8(At(sprite, kField_sprite_level), &ok);
+        std::string levels = "[";
+        for (uint32_t i = 0; i < kField_sprite_class_levels.count; ++i) {
+            levels += (i ? ", " : "") + Number(ReadU8(At(sprite, kField_sprite_class_levels) + i, &ok));
+        }
+        levels += "]";
+        std::string inventory = "[";
+        for (uint32_t slot = 0; slot < kField_sprite_items.count; ++slot) {
+            const uint32_t item = ReadU32(At(sprite, kField_sprite_items) + 4u * slot, &ok);
+            inventory += (slot ? ", " : "") + ItemJson(ok ? item : 0);
+        }
+        inventory += "]";
+        if (ok) {
+            values = "\"gold\": " + Number(gold) + ", \"xp\": " + Number(xp) + ", \"level\": " + Number(level)
+                + ", \"class_levels\": " + levels + ", \"inventory\": " + inventory;
+        }
+    }
+    return "{\"id\": " + Number(id) + ", " + values + "}";
+}
+
+// The game block: null when CInfGame cannot be read.
+std::string GameJson(uint32_t chitin)
+{
+    bool ok = true;
+    const uint32_t game = chitin ? ReadU32(At(chitin, kField_object_game), &ok) : 0;
+    if (!ok || !game) {
+        return "null";
+    }
+    const uint32_t gold = ReadU32(At(game, kField_party_gold), &ok);
+    int16_t count = ReadI16(At(game, kField_characters_count), &ok);
+    if (!ok) {
+        return "null";
+    }
+    if (count < 0) {
+        count = 0;
+    }
+    if (count > static_cast<int16_t>(kField_character_portraits.count)) {
+        count = static_cast<int16_t>(kField_character_portraits.count);
+    }
+    std::string members = "[";
+    for (int16_t i = 0; i < count; ++i) {
+        const int32_t id = ReadI32(At(game, kField_character_portraits) + 4u * i, &ok);
+        members += (i ? ", " : "") + GameMemberJson(chitin, id);
+    }
+    members += "]";
+    if (!ok) {
+        return "null";
+    }
+    return "{\"party_gold\": " + Number(gold) + ", \"members\": " + members + "}";
+}
+
 // The active engine's name (the last kReplayScreens match), none or unknown.
 const char* ScreenName(uint32_t chitin, uint32_t active, bool* ok)
 {
@@ -729,7 +832,8 @@ std::string DumpJson(const char* checkpoint)
     const bool chargen = std::strcmp(screen, "create_char") == 0;
     json += "  \"chargen\": " + (chargen ? ChargenJson(chitin, active) : std::string("null")) + ",\n";
     const bool world = std::strcmp(screen, "world") == 0;
-    json += "  \"world\": " + (world ? WorldJson(chitin, active) : std::string("null")) + "\n}\n";
+    json += "  \"world\": " + (world ? WorldJson(chitin, active) : std::string("null")) + ",\n";
+    json += "  \"game\": " + GameJson(chitin) + "\n}\n";
     return json;
 }
 

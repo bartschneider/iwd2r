@@ -20,7 +20,11 @@ under "x-fields", one entry per field:
 Offsets come from the layout comments in our headers under --src (default
 src/): a member line starts with `/* NNNN */` or `/* 0xNNNN */`, the offset
 from the start of the object, base classes included, so a class also has
-its base classes' commented members. The member's declared
+its base classes' commented members. A base class named in the class head
+with a `/* base 0xNNNN */` comment after it starts at that offset in the
+original instead of at 0 (a vtable our port does not declare comes first:
+`class CItem : public CResHelper<CResItem, 1005> /* base 0x0004 */ {`), and
+its members move by as much. The member's declared
 type gives the field type: u8, i8, u16, i16, u32, i32, ptr (any pointer),
 resref (RESREF, 8 bytes); an array member adds "count". Two classes the
 original lays out as plain values count as such: CResRef is a resref and
@@ -95,7 +99,9 @@ MFC_ALIASES = {'CObList': 'CPtrList', 'CTypedPtrList': 'CPtrList',
 MEMBER_LINE = re.compile(
     r'^\s*/\*\s*(?:0x)?([0-9A-Fa-f]+)\s*\*/\s*([^;]*);')
 DECL = re.compile(r'^(.*?)\b([A-Za-z_]\w*)\s*((?:\[[^\]]*\]\s*)*)$')
-BASE = re.compile(r'\b(?:public|protected|private)\s+([A-Za-z_]\w*)')
+BASE = re.compile(r'\b(?:public|protected|private)\s+([A-Za-z_]\w*)'
+                  r'(?:\s*<[^<>]*>)?'
+                  r'(?:\s*/\*\s*base\s+(?:0x)?([0-9A-Fa-f]+)\s*\*/)?')
 DEFINE = re.compile(r'^\s*#define\s+([A-Za-z_]\w*)\s+(\d+)\s*$', re.M)
 
 
@@ -209,15 +215,23 @@ class Headers:
             members[decl.group(2)] = Member(int(m.group(1), 16), type_name,
                                             decl.group(2), count, where)
         # A base class's members are at the offsets their comments give
-        # (offsets count from the start of the object, bases included);
-        # the class's own members win. A base without comments adds none.
-        for base in BASE.findall(head.split(':', 1)[1] if ':' in head
-                                 else ''):
+        # (offsets count from the start of the object, bases included),
+        # moved by the base's `/* base 0xNNNN */` offset when the head
+        # gives one; the class's own members win. A base without comments
+        # adds none.
+        for base, shift in BASE.findall(head.split(':', 1)[1] if ':' in head
+                                        else ''):
             try:
                 inherited = self.members(base)
             except FieldError:
                 continue
+            shift = int(shift, 16) if shift else 0
             for member_name, member in inherited.items():
+                if shift:
+                    member = Member(member.offset + shift, member.type_name,
+                                    member.name, member.count,
+                                    '%s (base %s at 0x%04X)'
+                                    % (member.line, base, shift))
                 members.setdefault(member_name, member)
         if not members:
             raise FieldError('class %s (%s) has no /* NNNN */ member '
