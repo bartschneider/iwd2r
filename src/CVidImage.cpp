@@ -18,6 +18,15 @@ BYTE CVidTile::m_pPixels[16384];
 // 0x9064F8
 DWORD CVidImage::rgbTempPal[256];
 
+// The 64x64x32 blend table: entry (k, m, i) is m and k mixed at weight
+// i / 32, (m * (64 - 2i) + k * 2i) >> 6.
+//
+// 0x9060F0
+BYTE* CVidImage::m_pBlendTable;
+
+// 0x9068F8
+INT CVidImage::m_nBlendTableRefs;
+
 // 0x7ACA60
 CVidImage::CVidImage()
 {
@@ -33,13 +42,39 @@ CVidImage::CVidImage()
     memset(m_paletteAffects.aRangeLightPeriods, 0, sizeof(m_paletteAffects.aRangeLightPeriods[0]) * CVidPalette::NUM_RANGES);
     m_paletteAffects.suppressTints = 0;
 
-    // TODO: Incomplete.
+    // The first image builds the blend table.
+    if (m_nBlendTableRefs++ == 0) {
+        m_pBlendTable = new BYTE[0x20000];
+        if (m_pBlendTable != NULL) {
+            INT nWeight = 0;
+            INT nStep = 64;
+            do {
+                INT nRowStart = 0;
+                for (INT nColumn = 0; nColumn < 0x800; nColumn += 0x20) {
+                    INT nValue = nRowStart;
+                    INT nOffset = nColumn;
+                    for (INT nRow = 64; nRow != 0; nRow--) {
+                        m_pBlendTable[nOffset + nWeight] = static_cast<BYTE>(nValue >> 6);
+                        nOffset += 0x800;
+                        nValue += nWeight * 2;
+                    }
+                    nRowStart += nStep;
+                }
+                nStep -= 2;
+                nWeight++;
+            } while (nStep > 0);
+        }
+    }
 }
 
 // 0x7ACC40
 CVidImage::~CVidImage()
 {
-    // TODO: Incomplete.
+    // The last image frees the blend table.
+    if (--m_nBlendTableRefs == 0 && m_pBlendTable != NULL) {
+        delete[] m_pBlendTable;
+        m_pBlendTable = NULL;
+    }
 }
 
 // #binary-identical
@@ -311,6 +346,9 @@ BOOL CVidTile::Render(LPDIRECTDRAWSURFACE pSurface, INT x, INT y, const CRect& r
         // __FILE__: C:\Projects\Icewind2\src\chitin\ChVidImage.cpp
         // __LINE__: 6159
         UTIL_ASSERT_MSG(FALSE, "Tile data accessed when not loaded");
+
+        // FALSE without releasing the demand (xor eax,eax at 0x7B182C).
+        return FALSE;
     }
 
     INT nTileSize = pRes->GetTileSize();
@@ -412,12 +450,17 @@ BOOL CVidTile::Render(LPDIRECTDRAWSURFACE pSurface, INT x, INT y, const CRect& r
             nDataJump,
             dwFlags);
         break;
+    default:
+        bSuccess = FALSE;
+        break;
     }
 
     pSurface->Unlock(ddsd.lpSurface);
 
     pRes->Release();
-    return TRUE;
+
+    // The blit's result (mov eax,esi at 0x7B1B1C).
+    return bSuccess;
 }
 
 // 0x7B1B30
@@ -438,13 +481,19 @@ BOOL CVidTile::Render(LPDIRECTDRAWSURFACE pSurface, INT x, INT y, CResTile* pRes
         return FALSE;
     }
 
+    // Both tiles are demanded (0x7B1BA8 and 0x7B1BB6); each is released
+    // on the way out.
     pRes->Demand();
+    pResStencil->Demand();
 
     BYTE* pData = pRes->GetTileData();
     if (pData == NULL) {
         // __FILE__: C:\Projects\Icewind2\src\chitin\ChVidImage.cpp
         // __LINE__: 6344
         UTIL_ASSERT_MSG(FALSE, "Tile data accessed when not loaded");
+
+        // FALSE without releasing either demand, as the original.
+        return FALSE;
     }
 
     BYTE* pStencilData = pResStencil->GetTileData();
@@ -452,6 +501,10 @@ BOOL CVidTile::Render(LPDIRECTDRAWSURFACE pSurface, INT x, INT y, CResTile* pRes
         // __FILE__: C:\Projects\Icewind2\src\chitin\ChVidImage.cpp
         // __LINE__: 6351
         UTIL_ASSERT_MSG(FALSE, "Tile stencil data accessed when not loaded");
+
+        pRes->Release();
+        pResStencil->Release();
+        return FALSE;
     }
 
     INT nTileSize = pRes->GetTileSize();
@@ -558,45 +611,225 @@ BOOL CVidTile::Render(LPDIRECTDRAWSURFACE pSurface, INT x, INT y, CResTile* pRes
             nDataJump,
             dwFlags);
         break;
+    default:
+        // NOTE: The original releases only one tile here (unreachable: the
+        // depth is 16, 24 or 32).
+        bSuccess = FALSE;
+        break;
     }
 
     pSurface->Unlock(ddsd.lpSurface);
 
     pRes->Release();
     pResStencil->Release();
-    return TRUE;
+
+    // The blit's result, as in the plain tile's Render.
+    return bSuccess;
 }
 
 // 0x7B22E0
 BOOL CVidTile::BltTile8To16(WORD* pSurface, LONG lPitch, BYTE* pData, const CSize& blitSize, LONG nDataJump, DWORD dwFlags)
 {
-    // TODO: Incomplete.
+    INT nDataIndex = 0;
+    DWORD color = g_pChitin->GetCurrentVideoMode()->field_24;
+    INT nSurfaceJump = (lPitch >> 1) - blitSize.cx;
+    INT nPairs = blitSize.cx >> 1;
 
-    return FALSE;
+    // Two pixels are written at a time as one DWORD.
+    DWORD* pDest = reinterpret_cast<DWORD*>(pSurface);
+
+    if ((dwFlags & 0x8) == 0) {
+        for (INT y = blitSize.cy; y > 0; y--) {
+            for (INT x = nPairs; x > 0; x--) {
+                *pDest++ = (rgbTempPal[pData[nDataIndex + 1]] << 16) | (rgbTempPal[pData[nDataIndex]] & 0xFFFF);
+                nDataIndex += 2;
+            }
+            nDataIndex += nDataJump;
+            pDest = reinterpret_cast<DWORD*>(reinterpret_cast<WORD*>(pDest) + nSurfaceJump);
+        }
+    } else {
+        // Dithered with the video mode's colour: even rows keep the first
+        // pixel of each pair, odd rows the second.
+        // NOTE: The odd rows OR in the whole colour, so its high word
+        // reaches the kept pixel, as in the original (0x7B23A1).
+        for (INT y = 0; y < blitSize.cy; y++) {
+            if ((y & 1) == 0) {
+                for (INT x = nPairs; x > 0; x--) {
+                    *pDest++ = (rgbTempPal[pData[nDataIndex]] & 0xFFFF) | (color << 16);
+                    nDataIndex += 2;
+                }
+            } else {
+                for (INT x = nPairs; x > 0; x--) {
+                    *pDest++ = (rgbTempPal[pData[nDataIndex + 1]] << 16) | color;
+                    nDataIndex += 2;
+                }
+            }
+            pDest = reinterpret_cast<DWORD*>(reinterpret_cast<WORD*>(pDest) + nSurfaceJump);
+            nDataIndex += nDataJump;
+        }
+    }
+
+    return TRUE;
 }
 
 // 0x7B2440
 BOOL CVidTile::BltStencilTile8To16(WORD* pSurface, LONG lPitch, BYTE* pData, BYTE* pStencilData, const CSize& blitSize, LONG nDataJump, DWORD dwFlags)
 {
-    // TODO: Incomplete.
+    INT nDataIndex = 0;
+    DWORD color = g_pChitin->GetCurrentVideoMode()->field_24;
 
-    return FALSE;
+    // Pixel pairs written as one DWORD; an odd width draws nothing.
+    if ((blitSize.cx & 1) != 0) {
+        return FALSE;
+    }
+
+    INT nPairs = blitSize.cx >> 1;
+    DWORD* pDest = reinterpret_cast<DWORD*>(pSurface);
+
+    for (INT y = 0; y < blitSize.cy; y++) {
+        if ((y & 1) == 0) {
+            // Even rows keep the first pixel of each pair; the second is
+            // the colour's low word where the stencil is clear.
+            for (INT x = nPairs; x > 0; x--) {
+                if (pStencilData[nDataIndex + 1] == CVidPalette::CLEAR_ENTRY) {
+                    *pDest = (rgbTempPal[pData[nDataIndex]] & 0xFFFF) | (color << 16);
+                } else {
+                    *pDest = (rgbTempPal[pData[nDataIndex + 1]] << 16) | (rgbTempPal[pData[nDataIndex]] & 0xFFFF);
+                }
+                pDest++;
+                nDataIndex += 2;
+            }
+        } else {
+            // Odd rows keep the second pixel; the first is the colour where
+            // the stencil is clear, ORed in whole as in BltTile8To16.
+            for (INT x = nPairs; x > 0; x--) {
+                if (pStencilData[nDataIndex] == CVidPalette::CLEAR_ENTRY) {
+                    *pDest = (rgbTempPal[pData[nDataIndex + 1]] << 16) | color;
+                } else {
+                    *pDest = (rgbTempPal[pData[nDataIndex + 1]] << 16) | (rgbTempPal[pData[nDataIndex]] & 0xFFFF);
+                }
+                pDest++;
+                nDataIndex += 2;
+            }
+        }
+
+        nDataIndex += nDataJump;
+        pDest = reinterpret_cast<DWORD*>(reinterpret_cast<WORD*>(pDest) + ((lPitch >> 1) - blitSize.cx));
+    }
+
+    return TRUE;
+}
+
+namespace {
+
+// A 24-bit pixel: the three low bytes of a realized palette entry.
+inline void PutTilePixel24(BYTE*& pDest, DWORD rgb)
+{
+    pDest[0] = static_cast<BYTE>(rgb);
+    pDest[1] = static_cast<BYTE>(rgb >> 8);
+    pDest[2] = static_cast<BYTE>(rgb >> 16);
+    pDest += 3;
+}
+
 }
 
 // 0x7CDD00
 BOOL CVidTile::BltTile8To24(DWORD* pSurface, LONG lPitch, BYTE* pData, const CSize& blitSize, LONG nDataJump, DWORD dwFlags)
 {
-    // TODO: Incomplete.
+    INT nDataIndex = 0;
+    DWORD color = g_pChitin->GetCurrentVideoMode()->field_24;
 
-    return FALSE;
+    // Four pixels are packed into three DWORDs at a time; a width that is
+    // not a multiple of four draws nothing.
+    if ((blitSize.cx & 3) != 0) {
+        return FALSE;
+    }
+
+    INT nGroups = blitSize.cx >> 2;
+    // The row jump rounds toward zero to whole DWORDs (cdq/sar at
+    // 0x7CDD4E).
+    INT nSurfaceJump = lPitch - blitSize.cx * 3;
+    nSurfaceJump = nSurfaceJump / 4 * 4;
+    BYTE* pDest = reinterpret_cast<BYTE*>(pSurface);
+
+    if ((dwFlags & 0x8) == 0) {
+        for (INT y = blitSize.cy; y > 0; y--) {
+            for (INT x = nGroups; x > 0; x--) {
+                PutTilePixel24(pDest, rgbTempPal[pData[nDataIndex]]);
+                PutTilePixel24(pDest, rgbTempPal[pData[nDataIndex + 1]]);
+                PutTilePixel24(pDest, rgbTempPal[pData[nDataIndex + 2]]);
+                PutTilePixel24(pDest, rgbTempPal[pData[nDataIndex + 3]]);
+                nDataIndex += 4;
+            }
+            nDataIndex += nDataJump;
+            pDest += nSurfaceJump;
+        }
+    } else {
+        // Dithered with the video mode's colour: even rows keep pixels 0
+        // and 2 of each four, odd rows 1 and 3.
+        // NOTE: The original moves neither to the next row nor past the
+        // data jump here: the rows follow on from each other in the surface
+        // and the data (the loop at 0x7CDD83 to 0x7CDEA7).
+        for (INT y = 0; y < blitSize.cy; y++) {
+            for (INT x = nGroups; x > 0; x--) {
+                if ((y & 1) == 0) {
+                    PutTilePixel24(pDest, rgbTempPal[pData[nDataIndex]]);
+                    PutTilePixel24(pDest, color);
+                    PutTilePixel24(pDest, rgbTempPal[pData[nDataIndex + 2]]);
+                    PutTilePixel24(pDest, color);
+                } else {
+                    PutTilePixel24(pDest, color);
+                    PutTilePixel24(pDest, rgbTempPal[pData[nDataIndex + 1]]);
+                    PutTilePixel24(pDest, color);
+                    PutTilePixel24(pDest, rgbTempPal[pData[nDataIndex + 3]]);
+                }
+                nDataIndex += 4;
+            }
+        }
+    }
+
+    return TRUE;
 }
 
 // 0x7CDF90
 BOOL CVidTile::BltStencilTile8To24(DWORD* pSurface, LONG lPitch, BYTE* pData, BYTE* pStencilData, const CSize& blitSize, LONG nDataJump, DWORD dwFlags)
 {
-    // TODO: Incomplete.
+    INT nDataIndex = 0;
+    DWORD color = g_pChitin->GetCurrentVideoMode()->field_24;
 
-    return FALSE;
+    if ((blitSize.cx & 3) != 0) {
+        return FALSE;
+    }
+
+    INT nGroups = blitSize.cx >> 2;
+    INT nSurfaceJump = lPitch - blitSize.cx * 3;
+    nSurfaceJump = nSurfaceJump / 4 * 4;
+    BYTE* pDest = reinterpret_cast<BYTE*>(pSurface);
+
+    for (INT y = 0; y < blitSize.cy; y++) {
+        for (INT x = nGroups; x > 0; x--) {
+            if ((y & 1) == 0) {
+                // Even rows: pixels 1 and 3 are the colour where the
+                // stencil is clear.
+                PutTilePixel24(pDest, rgbTempPal[pData[nDataIndex]]);
+                PutTilePixel24(pDest, pStencilData[nDataIndex + 1] == CVidPalette::CLEAR_ENTRY ? color : rgbTempPal[pData[nDataIndex + 1]]);
+                PutTilePixel24(pDest, rgbTempPal[pData[nDataIndex + 2]]);
+                PutTilePixel24(pDest, pStencilData[nDataIndex + 3] == CVidPalette::CLEAR_ENTRY ? color : rgbTempPal[pData[nDataIndex + 3]]);
+            } else {
+                // Odd rows: pixels 0 and 2.
+                PutTilePixel24(pDest, pStencilData[nDataIndex] == CVidPalette::CLEAR_ENTRY ? color : rgbTempPal[pData[nDataIndex]]);
+                PutTilePixel24(pDest, rgbTempPal[pData[nDataIndex + 1]]);
+                PutTilePixel24(pDest, pStencilData[nDataIndex + 2] == CVidPalette::CLEAR_ENTRY ? color : rgbTempPal[pData[nDataIndex + 2]]);
+                PutTilePixel24(pDest, rgbTempPal[pData[nDataIndex + 3]]);
+            }
+            nDataIndex += 4;
+        }
+
+        nDataIndex += nDataJump;
+        pDest += nSurfaceJump;
+    }
+
+    return TRUE;
 }
 
 // 0x7CE830
@@ -604,59 +837,59 @@ BOOL CVidTile::BltTile8To32(DWORD* pSurface, LONG lPitch, BYTE* pData, const CSi
 {
     INT nSurfaceJump = lPitch - 4 * blitSize.cx;
     DWORD color = g_pChitin->GetCurrentVideoMode()->field_24;
+    INT nRows = blitSize.cy;
+    INT nColumns;
 
     if ((blitSize.cx & 1) != 0) {
         return FALSE;
     }
 
-    if ((dwFlags & 0x8) != 0) {
-        for (int y = 0; y < blitSize.cy; y++) {
-            for (int x = 0; x < blitSize.cx; x++) {
-                pSurface[0] = rgbTempPal[*pData];
-
-                x++;
-                if (x == blitSize.cx) {
-                    break;
-                }
-
-                pSurface[1] = color;
-
-                pData += 2;
-                pSurface += 2;
-            }
-
-            pSurface = reinterpret_cast<DWORD*>(reinterpret_cast<BYTE*>(pSurface) + nSurfaceJump);
-            pData += nDataJump;
-
-            y++;
-            if (y == blitSize.cy) {
-                break;
-            }
-
-            for (int x = 0; x < blitSize.cx; x++) {
-                pSurface[0] = color;
-
-                x++;
-                if (x == blitSize.cx) {
-                    pSurface[1] = rgbTempPal[*pData];
-                }
-
-                pData += 2;
-                pSurface += 2;
-            }
-
-            pSurface = reinterpret_cast<DWORD*>(reinterpret_cast<BYTE*>(pSurface) + nSurfaceJump);
-            pData += nDataJump;
-        }
-    } else {
-        for (int y = 0; y < blitSize.cy; y++) {
-            for (int x = 0; x < blitSize.cx; x++) {
+    if ((dwFlags & 0x8) == 0) {
+        do {
+            for (nColumns = blitSize.cx; nColumns != 0; nColumns--) {
                 *pSurface++ = rgbTempPal[*pData++];
             }
-
             pSurface = reinterpret_cast<DWORD*>(reinterpret_cast<BYTE*>(pSurface) + nSurfaceJump);
             pData += nDataJump;
-        }
+            nRows--;
+        } while (nRows != 0);
+    } else {
+        // Dithered with the video mode's colour, two rows at a time: the
+        // first keeps the even pixels, the second the odd ones.
+        do {
+            nColumns = blitSize.cx;
+            do {
+                pSurface[0] = rgbTempPal[pData[0]];
+                if (nColumns == 1) {
+                    break;
+                }
+                pSurface[1] = color;
+                pData += 2;
+                pSurface += 2;
+                nColumns -= 2;
+            } while (nColumns != 0);
+            pSurface = reinterpret_cast<DWORD*>(reinterpret_cast<BYTE*>(pSurface) + nSurfaceJump);
+            pData += nDataJump;
+
+            if (nRows == 1) {
+                return TRUE;
+            }
+
+            nColumns = blitSize.cx;
+            do {
+                pSurface[0] = color;
+                if (nColumns == 1) {
+                    break;
+                }
+                pSurface[1] = rgbTempPal[pData[1]];
+                pData += 2;
+                pSurface += 2;
+                nColumns -= 2;
+            } while (nColumns != 0);
+            pSurface = reinterpret_cast<DWORD*>(reinterpret_cast<BYTE*>(pSurface) + nSurfaceJump);
+            pData += nDataJump;
+            nRows -= 2;
+        } while (nRows != 0);
     }
 
     return TRUE;
@@ -703,7 +936,9 @@ BOOL CVidTile::BltStencilTile8To32(DWORD* pSurface, LONG lPitch, BYTE* pData, BY
         }
 
         pSurface = reinterpret_cast<DWORD*>(reinterpret_cast<BYTE*>(pSurface) + nSurfaceJump);
-        pData += nDataJump;
+        // The jump moves the index into both the tile and the stencil
+        // (add ecx,edx at 0x7CE3A0).
+        nDataIndex += nDataJump;
     }
 
     return TRUE;

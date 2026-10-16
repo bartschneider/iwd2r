@@ -283,9 +283,13 @@ BOOL CVidBitmap::RenderDirect(INT nSurface, INT x, INT y, const CRect& rClip, DW
             }
             break;
         case 24:
+            // The tinting copy whenever a flag in the high word (tint, add,
+            // light, ...) is set or the brightness and contrast move mid
+            // grey (test of dwFlags & 0xFFFF0000 before each
+            // ApplyBrightnessContrast).
             switch (g_pChitin->cVideo.m_nBpp) {
             case 16:
-                if (g_pChitin->GetCurrentVideoMode()->ApplyBrightnessContrast(RGB(128, 128, 128)) != RGB(128, 128, 128)) {
+                if ((dwFlags & 0xFFFF0000) != 0 || g_pChitin->GetCurrentVideoMode()->ApplyBrightnessContrast(RGB(128, 128, 128)) != RGB(128, 128, 128)) {
                     bResult = BltBmp24To16Tint(reinterpret_cast<WORD*>(pSurface),
                         ddsd.lPitch,
                         pData,
@@ -302,7 +306,7 @@ BOOL CVidBitmap::RenderDirect(INT nSurface, INT x, INT y, const CRect& rClip, DW
                 }
                 break;
             case 24:
-                if (g_pChitin->GetCurrentVideoMode()->ApplyBrightnessContrast(RGB(128, 128, 128)) != RGB(128, 128, 128)) {
+                if ((dwFlags & 0xFFFF0000) != 0 || g_pChitin->GetCurrentVideoMode()->ApplyBrightnessContrast(RGB(128, 128, 128)) != RGB(128, 128, 128)) {
                     bResult = BltBmp24To24Tint(reinterpret_cast<BYTE*>(pSurface),
                         ddsd.lPitch,
                         pData,
@@ -319,7 +323,7 @@ BOOL CVidBitmap::RenderDirect(INT nSurface, INT x, INT y, const CRect& rClip, DW
                 }
                 break;
             case 32:
-                if (g_pChitin->GetCurrentVideoMode()->ApplyBrightnessContrast(RGB(128, 128, 128)) != RGB(128, 128, 128)) {
+                if ((dwFlags & 0xFFFF0000) != 0 || g_pChitin->GetCurrentVideoMode()->ApplyBrightnessContrast(RGB(128, 128, 128)) != RGB(128, 128, 128)) {
                     bResult = BltBmp24To32Tint(reinterpret_cast<DWORD*>(pSurface),
                         ddsd.lPitch,
                         pData,
@@ -373,20 +377,116 @@ BOOL CVidBitmap::BltBmp24To16Tint(WORD* pSurface, LONG lPitch, BYTE* pData, cons
     return FALSE;
 }
 
+namespace {
+
+// A 24-bit pixel written as the original does: all four bytes of value,
+// the fourth landing on the next pixel's first byte, except for a row's last
+// pixel, which gets three (a WORD and a BYTE).
+inline void PutBmpPixel24(BYTE* pPixel, DWORD value, bool bLast)
+{
+    pPixel[0] = static_cast<BYTE>(value);
+    pPixel[1] = static_cast<BYTE>(value >> 8);
+    pPixel[2] = static_cast<BYTE>(value >> 16);
+    if (!bLast) {
+        pPixel[3] = static_cast<BYTE>(value >> 24);
+    }
+}
+
+}
+
 // 0x7CCB20
 BOOL CVidBitmap::BltBmp8To24(BYTE* pSurface, LONG lPitch, BYTE* pData, const CSize& bmpSize, LONG nDataJump, DWORD dwFlags)
 {
-    // TODO: Incomplete.
+    m_cPalette.SetPalette(pRes->GetColorTable(), pRes->GetColorCount(), CVidPalette::TYPE_RESOURCE);
+    m_cPalette.Realize(rgbTempPal, 24, dwFlags | 0x800000, &m_paletteAffects, 255);
 
-    return FALSE;
+    // NOTE: The original runs width - 1 pixels with a do-while, so a width
+    // of 1 never ends there; RenderDirect passes wider bitmaps. The rows go
+    // up the surface (the destination is the bitmap's last row).
+    for (LONG y = bmpSize.cy; y > 0; y--) {
+        BYTE* pPixel = pSurface;
+        for (LONG x = 0; x < bmpSize.cx; x++) {
+            PutBmpPixel24(pPixel, rgbTempPal[pData[x]], x == bmpSize.cx - 1);
+            pPixel += 3;
+        }
+
+        pData += bmpSize.cx + nDataJump;
+        pSurface -= lPitch;
+    }
+
+    return TRUE;
 }
 
 // 0x7CCBF0
 BOOL CVidBitmap::BltBmp24To24(BYTE* pSurface, LONG lPitch, BYTE* pData, const CSize& bmpSize, LONG nDataJump, DWORD dwFlags)
 {
-    // TODO: Incomplete.
+    CVidMode* pVidMode = g_pChitin->GetCurrentVideoMode();
 
-    return FALSE;
+    BYTE nRShift = static_cast<BYTE>(pVidMode->m_dwRBitShift) & 0x1F;
+    BYTE nGShift = static_cast<BYTE>(pVidMode->m_dwGBitShift) & 0x1F;
+    BYTE nBShift = static_cast<BYTE>(pVidMode->m_dwBBitShift) & 0x1F;
+
+    if ((dwFlags & 0x1) == 0) {
+        // As BltBmp8To24: every pixel but a row's last written whole.
+        for (LONG y = bmpSize.cy; y > 0; y--) {
+            BYTE* pPixel = pSurface;
+            for (LONG x = 0; x < bmpSize.cx; x++) {
+                DWORD value = (static_cast<DWORD>(pData[2]) << nRShift)
+                    | (static_cast<DWORD>(pData[1]) << nGShift)
+                    | (static_cast<DWORD>(pData[0]) << nBShift);
+                PutBmpPixel24(pPixel, value, x == bmpSize.cx - 1);
+                pPixel += 3;
+                pData += 3;
+            }
+
+            pData += nDataJump;
+            pSurface -= lPitch;
+        }
+    } else {
+        // Keyed: pure green is skipped, black with 0x4 halves what is there.
+        // NOTE: A drawn pixel other than a row's last writes a fourth byte
+        // over the next pixel's first, which a skipped pixel keeps; the
+        // last pixel's shadow reads red and green from its first WORD and
+        // blue from its third byte (shr al,1 on [edi+0x2] at 0x7CCD6E).
+        for (LONG y = 0; y < bmpSize.cy; y++) {
+            BYTE* pPixel = pSurface;
+            for (LONG x = 0; x < bmpSize.cx; x++) {
+                const bool bLast = x == bmpSize.cx - 1;
+                DWORD r = pData[2];
+                DWORD g = pData[1];
+                DWORD b = pData[0];
+
+                if (r != 0 || g != 0xFF || b != 0) {
+                    if ((dwFlags & 0x4) != 0 && r == 0 && g == 0 && b == 0) {
+                        if (bLast) {
+                            DWORD nWord = pPixel[0] | (static_cast<DWORD>(pPixel[1]) << 8);
+                            r = ((nWord >> nRShift) >> 1) & 0x7F;
+                            g = ((nWord >> nGShift) >> 1) & 0x7F;
+                            b = pPixel[2] >> 1;
+                        } else {
+                            DWORD nPixel = pPixel[0]
+                                | (static_cast<DWORD>(pPixel[1]) << 8)
+                                | (static_cast<DWORD>(pPixel[2]) << 16)
+                                | (static_cast<DWORD>(pPixel[3]) << 24);
+                            r = ((nPixel >> nRShift) >> 1) & 0x7F;
+                            g = ((nPixel >> nGShift) >> 1) & 0x7F;
+                            b = ((nPixel >> nBShift) >> 1) & 0x7F;
+                        }
+                    }
+
+                    PutBmpPixel24(pPixel, (b << nBShift) | (g << nGShift) | (r << nRShift), bLast);
+                }
+
+                pPixel += 3;
+                pData += 3;
+            }
+
+            pData += nDataJump;
+            pSurface -= lPitch;
+        }
+    }
+
+    return TRUE;
 }
 
 // 0x7CCE80

@@ -665,7 +665,10 @@ void CVidPalette::Realize(DWORD* pDestPalette, INT nBpp, DWORD dwFlags, CVIDIMG_
         if (g_pChitin->cVideo.m_bIs3dAccelerated) {
             RealizeResource3d(pDestPalette, dwFlags, pAffectArgs, nTransVal);
         } else {
-            if (pAffectArgs != NULL
+            // Without flags, brightness or gamma the colours are copied as
+            // they are, whatever the affects (test edx,edx on dwFlags at
+            // 0x7BF211).
+            if (dwFlags != 0
                 || g_pChitin->GetCurrentVideoMode()->m_nBrightnessCorrection != 0
                 || g_pChitin->GetCurrentVideoMode()->m_nGammaCorrection != 0) {
                 RealizeResource(pDestPalette, nBpp, dwFlags, pAffectArgs);
@@ -841,7 +844,6 @@ void CVidPalette::SetRange(USHORT nRange, USHORT nValue, CVidBitmap& bmpMasterPa
     // __LINE__: 934
     UTIL_ASSERT(m_nType == TYPE_RANGE);
 
-    // TODO: Check.
     m_rangeColors[nRange] = static_cast<BYTE>(nValue);
 
     RGBQUAD* pTmpPalette = m_pPalette + 12 * nRange + 4;

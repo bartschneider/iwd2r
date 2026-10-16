@@ -14,6 +14,304 @@ typedef struct CVIDMODE_CLIP_OUTCODE {
     unsigned int top : 4;
 } CVIDMODE_CLIP_OUTCODE;
 
+namespace {
+
+// The thick-line slices of DrawThickLine16/24 (0x79A950, 0x7CA630): the
+// algorithm of DrawThickLine32's sub_7CC130 on pixels of type T, written by
+// put. The adjustments are in units of T (bytes for 24 bits).
+template <class T, class Put>
+void ThickLineSlices(T* pSurface, UINT nMajorAxis, UINT nMinorAxis, INT nMajorAxisAdjust, INT nMinorAxisAdjust, UINT nThickness, Put put)
+{
+    UINT nWholeStep = nMajorAxis / nMinorAxis;
+    INT nAdjUp = (nMajorAxis % nMinorAxis) * 2;
+    INT nAdjDown = nMinorAxis * 2;
+    INT nErrorTerm = (nAdjUp >> 1) - nAdjDown;
+    UINT nFinalPixelCount = (nWholeStep >> 1) + 1;
+    UINT nInitialPixelCount = nFinalPixelCount;
+
+    if (nAdjUp == 0 && (nWholeStep & 1) == 0) {
+        nInitialPixelCount--;
+    }
+
+    if ((nWholeStep & 1) != 0) {
+        nErrorTerm += nMinorAxis;
+    }
+
+    INT nTrailErrorTerm = nErrorTerm;
+    UINT nTrail = 0;
+    UINT nTrailRun = nInitialPixelCount;
+    UINT nLead = (nThickness & ~1) + nInitialPixelCount;
+
+    for (UINT n = nLead; n != 0; n--) {
+        put(pSurface);
+        pSurface += nMajorAxisAdjust;
+    }
+    pSurface += nMinorAxisAdjust - static_cast<INT>(nLead) * nMajorAxisAdjust;
+
+    UINT nWait = nThickness - 2;
+    for (UINT nSlice = nMinorAxis - 1; nSlice != 0; nSlice--) {
+        UINT nRunLength = nWholeStep;
+        nErrorTerm += nAdjUp;
+        if (nErrorTerm > 0) {
+            nRunLength = nWholeStep + 1;
+            nErrorTerm -= nAdjDown;
+        }
+
+        nLead += nRunLength;
+        if (nTrail < nLead) {
+            for (UINT n = nLead - nTrail; n != 0; n--) {
+                put(pSurface);
+                pSurface += nMajorAxisAdjust;
+            }
+        }
+        pSurface -= static_cast<INT>(nLead - nTrail) * nMajorAxisAdjust;
+
+        if (nWait == 0) {
+            pSurface += static_cast<INT>(nTrailRun) * nMajorAxisAdjust;
+            nTrail += nTrailRun;
+            nTrailRun = nWholeStep;
+            nTrailErrorTerm += nAdjUp;
+            if (nTrailErrorTerm > 0) {
+                nTrailRun = nWholeStep + 1;
+                nTrailErrorTerm -= nAdjDown;
+            }
+        } else {
+            nWait--;
+        }
+
+        pSurface += nMinorAxisAdjust;
+    }
+
+    nLead += nFinalPixelCount;
+    for (UINT nSlice = 0; nSlice < nThickness; nSlice++) {
+        if (nTrail < nLead) {
+            for (UINT n = nLead - nTrail; n != 0; n--) {
+                put(pSurface);
+                pSurface += nMajorAxisAdjust;
+            }
+        }
+        pSurface -= static_cast<INT>(nLead - nTrail) * nMajorAxisAdjust;
+
+        if (nSlice == nThickness - 1) {
+            nTrailRun = nFinalPixelCount;
+        }
+
+        pSurface += static_cast<INT>(nTrailRun) * nMajorAxisAdjust;
+        nTrail += nTrailRun;
+        nTrailRun = nWholeStep;
+        nTrailErrorTerm += nAdjUp;
+        if (nTrailErrorTerm > 0) {
+            nTrailRun = nWholeStep + 1;
+            nTrailErrorTerm -= nAdjDown;
+        }
+
+        pSurface += nMinorAxisAdjust;
+    }
+}
+
+// DrawRecticle16/24 (0x7989B0, 0x7C9B10): DrawRecticle32's body (0x7CB670)
+// with the depth's octants and line, lPitch in the units they take.
+template <class T, class HOctant, class VOctant, class Line>
+void Recticle(CVidMode* pMode, const CVIDMODE_RECTICLE_DESCRIPTION& rd, T* pSurface, LONG lPitch, const CRect* rClip, HOctant hOctant, VOctant vOctant, Line line)
+{
+    BYTE* pPixelList = new BYTE[max(rd.xAxis, rd.yAxis)];
+
+    INT v1 = rd.xAxis + rd.piePieceXOffset;
+    INT v2 = rd.yAxis + rd.piePieceYOffset;
+    INT v3;
+
+    CRect rLineClip;
+    BOOLEAN bLineClipped;
+
+    // The lines are clipped to the clip less its last row and column when
+    // there is one, and drawn unclipped when there is none.
+    if (rClip != NULL) {
+        rLineClip.SetRect(rClip->left, rClip->top, rClip->right - 1, rClip->bottom - 1);
+        bLineClipped = FALSE;
+    } else {
+        rLineClip.SetRect(0, 0, 0, 0);
+        bLineClipped = TRUE;
+    }
+
+    LONG nArcLength = pMode->GetEllipseArcPixelList(rd.xAxis, rd.yAxis, pPixelList);
+
+    nArcLength -= 1;
+
+    UTIL_ASSERT(nArcLength < max(rd.xAxis, rd.yAxis));
+
+    v3 = hOctant(rd.ptCenter.x, rd.ptCenter.y - v2, nArcLength - rd.xGap, pSurface, lPitch, FALSE, pPixelList, rClip);
+    line(rd.ptCenter.x + rd.xGap - nArcLength, v3, rd.ptCenter.x, rd.ptCenter.y + rd.piePiecePtYOffset - v2, pSurface, lPitch, rLineClip, bLineClipped);
+
+    v3 = hOctant(rd.ptCenter.x + 1, rd.ptCenter.y + pPixelList[0] - v2, nArcLength - rd.xGap - 1, pSurface, lPitch, TRUE, pPixelList + 1, rClip);
+    line(rd.ptCenter.x - rd.xGap + nArcLength, v3, rd.ptCenter.x, rd.ptCenter.y + rd.piePiecePtYOffset - v2, pSurface, lPitch, rLineClip, bLineClipped);
+
+    v3 = hOctant(rd.ptCenter.x, rd.ptCenter.y + v2, nArcLength - rd.xGap, pSurface, -lPitch, FALSE, pPixelList, rClip);
+    line(rd.ptCenter.x + rd.xGap - nArcLength, v3, rd.ptCenter.x, rd.ptCenter.y - rd.piePiecePtYOffset + v2, pSurface, lPitch, rLineClip, bLineClipped);
+
+    v3 = hOctant(rd.ptCenter.x + 1, rd.ptCenter.y - pPixelList[0] + v2, nArcLength - rd.xGap - 1, pSurface, -lPitch, TRUE, pPixelList + 1, rClip);
+    line(rd.ptCenter.x - rd.xGap + nArcLength, v3, rd.ptCenter.x, rd.ptCenter.y - rd.piePiecePtYOffset + v2, pSurface, lPitch, rLineClip, bLineClipped);
+
+    nArcLength = pMode->GetEllipseArcPixelList(rd.yAxis, rd.xAxis, pPixelList);
+
+    UTIL_ASSERT(nArcLength < max(rd.xAxis, rd.yAxis));
+
+    v3 = vOctant(rd.ptCenter.x - v1, rd.ptCenter.y, nArcLength - rd.yGap, pSurface, -lPitch, TRUE, pPixelList, rClip);
+    line(v3, rd.ptCenter.y + rd.yGap - nArcLength, rd.ptCenter.x + rd.piePiecePtXOffset - v1, rd.ptCenter.y, pSurface, lPitch, rLineClip, bLineClipped);
+
+    v3 = vOctant(rd.ptCenter.x + pPixelList[0] - v1, rd.ptCenter.y + 1, nArcLength - rd.yGap - 1, pSurface, lPitch, TRUE, pPixelList + 1, rClip);
+    line(v3, rd.ptCenter.y - rd.yGap + nArcLength, rd.ptCenter.x + rd.piePiecePtXOffset - v1, rd.ptCenter.y, pSurface, lPitch, rLineClip, bLineClipped);
+
+    v3 = vOctant(rd.ptCenter.x + v1, rd.ptCenter.y, nArcLength - rd.yGap, pSurface, -lPitch, FALSE, pPixelList, rClip);
+    line(v3, rd.ptCenter.y + rd.yGap - nArcLength, rd.ptCenter.x - rd.piePiecePtXOffset + v1, rd.ptCenter.y, pSurface, lPitch, rLineClip, bLineClipped);
+
+    v3 = vOctant(rd.ptCenter.x - pPixelList[0] + v1, rd.ptCenter.y + 1, nArcLength - rd.yGap - 1, pSurface, lPitch, FALSE, pPixelList + 1, rClip);
+    line(v3, rd.ptCenter.y - rd.yGap + nArcLength, rd.ptCenter.x - rd.piePiecePtXOffset + v1, rd.ptCenter.y, pSurface, lPitch, rLineClip, bLineClipped);
+
+    delete[] pPixelList;
+}
+
+// DrawThickLine16/24 (0x799280, 0x7CA330): DrawThickLine32's body on pixels
+// of type T, nUnit Ts to a pixel (3 bytes for 24 bits, else 1), lPitch in
+// Ts, nHalf half the thickness rounded up. slices draws the general case.
+template <class T, class Put, class Slices>
+BOOL ThickLine(INT nXFrom, INT nYFrom, INT nXTo, INT nYTo, T* pSurface, LONG lPitch, const CRect& rSurface, int a8, INT nHalf, INT nUnit, BOOLEAN bClipped, Put put, Slices slices)
+{
+    INT nCount = a8 + 1;
+    INT nStep = nUnit;
+    INT nDeltaX;
+    INT nDeltaY;
+
+    if (!bClipped) {
+        CRect rClip;
+        rClip.left = rSurface.left + nHalf;
+        rClip.top = rSurface.top + nHalf;
+        rClip.right = rSurface.right - nHalf;
+        rClip.bottom = rSurface.bottom - nHalf;
+        if (!CVidMode::ClipLine(nXFrom, nYFrom, nXTo, nYTo, rClip)) {
+            return FALSE;
+        }
+    }
+
+    if (nYTo < nYFrom) {
+        INT t;
+
+        t = nXTo;
+        nXTo = nXFrom;
+        nXFrom = t;
+
+        t = nYTo;
+        nYTo = nYFrom;
+        nYFrom = t;
+    }
+
+    nDeltaX = nXTo - nXFrom;
+    if (nDeltaX < 0) {
+        nDeltaX = nXFrom - nXTo;
+        nStep = -nUnit;
+    }
+
+    nDeltaY = nYTo - nYFrom;
+
+    // The line's first pixel moved back half the thickness across and up.
+    pSurface += lPitch * (nYFrom - rSurface.top) + (nXFrom - rSurface.left) * nUnit;
+    if (nStep > 0) {
+        pSurface -= nHalf * nUnit;
+    } else {
+        pSurface += nHalf * nUnit;
+    }
+    pSurface -= nHalf * lPitch;
+
+    if (nDeltaX == 0) {
+        // Each column starts a row below the previous one.
+        if (a8 >= 0) {
+            do {
+                if (nDeltaY >= 0) {
+                    INT n = nDeltaY + 1;
+                    do {
+                        put(pSurface);
+                        pSurface += lPitch;
+                        n--;
+                    } while (n != 0);
+                }
+                pSurface += nUnit - nDeltaY * lPitch;
+                nCount--;
+            } while (nCount != 0);
+            return TRUE;
+        }
+    } else if (nDeltaY == 0) {
+        // Each row starts a column after the previous one.
+        if (a8 >= 0) {
+            do {
+                if (nDeltaX >= 0) {
+                    INT n = nDeltaX + 1;
+                    do {
+                        put(pSurface);
+                        pSurface += nStep;
+                        n--;
+                    } while (n != 0);
+                }
+                nCount--;
+                pSurface += lPitch - nDeltaX * nStep;
+            } while (nCount != 0);
+            return TRUE;
+        }
+    } else if (nDeltaX == nDeltaY) {
+        INT nRow = 0;
+        INT nRun = a8 - 1;
+        if (a8 > 0) {
+            do {
+                nRun += nRow < nDeltaX ? 1 : 0;
+                for (INT n = nRun; n > 0; n--) {
+                    put(pSurface);
+                    pSurface += nStep;
+                }
+                nRow++;
+                pSurface += lPitch - nRun * nStep;
+            } while (nRow < a8);
+        }
+
+        pSurface += nStep;
+
+        INT nRows = nDeltaY - ((a8 & 1) != 0 ? a8 : a8 - 1);
+        if (nRows > 0) {
+            do {
+                for (INT n = nRun; n > 0; n--) {
+                    put(pSurface);
+                    pSurface += nStep;
+                }
+                nRows--;
+                pSurface += lPitch - (nRun - 1) * nStep;
+            } while (nRows != 0);
+        }
+
+        if (a8 > 0) {
+            INT nAdvance = (1 - nRun) * nStep + lPitch;
+            INT nLeft = a8;
+            do {
+                for (INT n = nRun; n > 0; n--) {
+                    put(pSurface);
+                    pSurface += nStep;
+                }
+                pSurface += nAdvance;
+                nRun--;
+                nAdvance += nStep;
+                nLeft--;
+            } while (nLeft != 0);
+            return TRUE;
+        }
+    } else {
+        if (nDeltaY > nDeltaX) {
+            slices(pSurface, nDeltaY, nDeltaX, lPitch, nStep, a8);
+        } else {
+            slices(pSurface, nDeltaX, nDeltaY, nStep, lPitch, a8);
+        }
+    }
+
+    return TRUE;
+}
+
+}
+
 // 0x8FB964
 const CString CVidMode::SCREEN_SHOT_EXTENSION("bmp");
 
@@ -150,6 +448,8 @@ BOOL CVidMode::ClipLine(INT& nXFrom, INT& nYFrom, INT& nXTo, INT& nYTo, const CR
     INT x;
     INT y;
 
+    // The right edge is tested before the left one (0x7959E4), which only
+    // matters for a rectangle whose left is past its right.
     while (1) {
         memset(&fromCode, 0, sizeof(fromCode));
         memset(&toCode, 0, sizeof(toCode));
@@ -162,12 +462,12 @@ BOOL CVidMode::ClipLine(INT& nXFrom, INT& nYFrom, INT& nXTo, INT& nYTo, const CR
             fromCode.all += 4;
         }
 
-        if (nXFrom < rClip.left) {
-            fromCode.left |= 1;
-            fromCode.all += 1;
-        } else if (nXFrom > rClip.right) {
+        if (nXFrom > rClip.right) {
             fromCode.right |= 1;
             fromCode.all += 2;
+        } else if (nXFrom < rClip.left) {
+            fromCode.left |= 1;
+            fromCode.all += 1;
         }
 
         if (nYTo < rClip.top) {
@@ -178,12 +478,12 @@ BOOL CVidMode::ClipLine(INT& nXFrom, INT& nYFrom, INT& nXTo, INT& nYTo, const CR
             toCode.all += 4;
         }
 
-        if (nXTo < rClip.left) {
-            toCode.left |= 1;
-            toCode.all += 1;
-        } else if (nXTo > rClip.right) {
+        if (nXTo > rClip.right) {
             toCode.right |= 1;
             toCode.all += 2;
+        } else if (nXTo < rClip.left) {
+            toCode.left |= 1;
+            toCode.all += 1;
         }
 
         if (fromCode.all == 0 && toCode.all == 0) {
@@ -251,6 +551,7 @@ void CVidMode::DestroySurface(IDirectDrawSurface** lplpDirectDrawSurface)
     if (lplpDirectDrawSurface != NULL) {
         if (*lplpDirectDrawSurface != NULL) {
             (*lplpDirectDrawSurface)->Release();
+            *lplpDirectDrawSurface = NULL;
         }
     }
 }
@@ -411,23 +712,234 @@ void CVidMode::DrawEllipse(const CPoint& ptCenter, const CSize& axis, const DDSU
 // 0x796260
 void CVidMode::DrawEllipse16(const CPoint& ptCenter, const CSize& axis, const DDSURFACEDESC& ddsd, const CRect* rClip, COLORREF rgbColor)
 {
-    // TODO: Incomplete.
+    // As DrawEllipse24 (0x7C8B40) with 16-bit pixels: the pitch in pixels
+    // (sar at 0x796292) and the colour with the dropped bits.
+    BYTE* pPixelList = new BYTE[max(axis.cx, axis.cy)];
+    LONG lPitch = ddsd.lPitch >> 1;
+    WORD color = static_cast<WORD>(((GetGValue(rgbColor) >> field_C6) << m_dwGBitShift)
+        | ((GetBValue(rgbColor) >> field_CA) << m_dwBBitShift)
+        | ((GetRValue(rgbColor) >> field_C2) << m_dwRBitShift));
+    LONG nArcLength = GetEllipseArcPixelList(axis.cx, axis.cy, pPixelList);
+
+    // __FILE__: C:\Projects\Icewind2\src\chitin\ChVideo.cpp
+    // __LINE__: 1506
+    UTIL_ASSERT(nArcLength <= max(axis.cx, axis.cy));
+
+    DrawEllipseHOctant16(ptCenter.x,
+        ptCenter.y - axis.cy,
+        nArcLength,
+        reinterpret_cast<WORD*>(ddsd.lpSurface),
+        lPitch,
+        FALSE,
+        pPixelList,
+        rClip,
+        color);
+
+    DrawEllipseHOctant16(ptCenter.x + 1,
+        ptCenter.y + pPixelList[0] - axis.cy,
+        nArcLength - 1,
+        reinterpret_cast<WORD*>(ddsd.lpSurface),
+        lPitch,
+        TRUE,
+        pPixelList + 1,
+        rClip,
+        color);
+
+    DrawEllipseHOctant16(ptCenter.x,
+        ptCenter.y + axis.cy,
+        nArcLength,
+        reinterpret_cast<WORD*>(ddsd.lpSurface),
+        -lPitch,
+        FALSE,
+        pPixelList,
+        rClip,
+        color);
+
+    DrawEllipseHOctant16(ptCenter.x + 1,
+        ptCenter.y - pPixelList[0] + axis.cy,
+        nArcLength - 1,
+        reinterpret_cast<WORD*>(ddsd.lpSurface),
+        -lPitch,
+        TRUE,
+        pPixelList + 1,
+        rClip,
+        color);
+
+    nArcLength = GetEllipseArcPixelList(axis.cy, axis.cx, pPixelList);
+
+    // __FILE__: C:\Projects\Icewind2\src\chitin\ChVideo.cpp
+    // __LINE__: 1529
+    UTIL_ASSERT(nArcLength < max(axis.cx, axis.cy));
+
+    DrawEllipseVOctant16(ptCenter.x - axis.cx,
+        ptCenter.y,
+        nArcLength,
+        reinterpret_cast<WORD*>(ddsd.lpSurface),
+        -lPitch,
+        TRUE,
+        pPixelList,
+        rClip,
+        color);
+
+    DrawEllipseVOctant16(ptCenter.x + pPixelList[0] - axis.cx,
+        ptCenter.y + 1,
+        nArcLength - 1,
+        reinterpret_cast<WORD*>(ddsd.lpSurface),
+        lPitch,
+        TRUE,
+        pPixelList + 1,
+        rClip,
+        color);
+
+    DrawEllipseVOctant16(ptCenter.x + axis.cx,
+        ptCenter.y,
+        nArcLength,
+        reinterpret_cast<WORD*>(ddsd.lpSurface),
+        -lPitch,
+        FALSE,
+        pPixelList,
+        rClip,
+        color);
+
+    DrawEllipseVOctant16(ptCenter.x - pPixelList[0] + axis.cx,
+        ptCenter.y + 1,
+        nArcLength - 1,
+        reinterpret_cast<WORD*>(ddsd.lpSurface),
+        lPitch,
+        FALSE,
+        pPixelList + 1,
+        rClip,
+        color);
+
+    delete[] pPixelList;
 }
 
 // 0x796550
 LONG CVidMode::DrawEllipseHOctant16(LONG x, LONG y, INT nArcLength, WORD* pSurface, LONG lPitch, BOOLEAN clockwise, unsigned char* pArcData, const CRect* rClip, WORD color)
 {
-    // TODO: Incomplete.
+    INT nStep;
 
-    return 0;
+    if (rClip == NULL) {
+        if (lPitch < 0) {
+            pSurface += x - y * lPitch;
+            nStep = -1;
+        } else {
+            pSurface += x + y * lPitch;
+            nStep = 1;
+        }
+
+        while (nArcLength != 0) {
+            *pSurface = color;
+
+            if (*pArcData++ != 0) {
+                pSurface += lPitch;
+                y += nStep;
+            }
+
+            if (clockwise) {
+                pSurface++;
+            } else {
+                pSurface--;
+            }
+
+            nArcLength--;
+        }
+
+        return y;
+    }
+
+    if (lPitch < 0) {
+        pSurface += (x - (y - rClip->top) * lPitch) - rClip->left;
+        nStep = -1;
+    } else {
+        pSurface += ((y - rClip->top) * lPitch - rClip->left) + x;
+        nStep = 1;
+    }
+
+    while (nArcLength != 0) {
+        if (rClip->PtInRect(CPoint(x, y))) {
+            *pSurface = color;
+        }
+
+        if (*pArcData++ != 0) {
+            pSurface += lPitch;
+            y += nStep;
+        }
+
+        if (clockwise) {
+            pSurface++;
+            x++;
+        } else {
+            pSurface--;
+            x--;
+        }
+
+        nArcLength--;
+    }
+
+    return y;
 }
 
 // 0x7966B0
 LONG CVidMode::DrawEllipseVOctant16(LONG x, LONG y, INT nArcLength, WORD* pSurface, LONG lPitch, BOOLEAN clockwise, unsigned char* pArcData, const CRect* rClip, WORD color)
 {
-    // TODO: Incomplete.
+    if (rClip == NULL) {
+        if (lPitch < 0) {
+            pSurface += x - y * lPitch;
+        } else {
+            pSurface += x + y * lPitch;
+        }
 
-    return 0;
+        while (nArcLength != 0) {
+            *pSurface = color;
+
+            if (*pArcData++ != 0) {
+                if (clockwise) {
+                    pSurface++;
+                    x++;
+                } else {
+                    pSurface--;
+                    x--;
+                }
+            }
+
+            pSurface += lPitch;
+            nArcLength--;
+        }
+
+        return x;
+    }
+
+    INT nStep;
+    if (lPitch < 0) {
+        pSurface += (x - (y - rClip->top) * lPitch) - rClip->left;
+        nStep = -1;
+    } else {
+        pSurface += ((y - rClip->top) * lPitch - rClip->left) + x;
+        nStep = 1;
+    }
+
+    while (nArcLength != 0) {
+        if (rClip->PtInRect(CPoint(x, y))) {
+            *pSurface = color;
+        }
+
+        if (*pArcData++ != 0) {
+            if (clockwise) {
+                pSurface++;
+                x++;
+            } else {
+                pSurface--;
+                x--;
+            }
+        }
+
+        pSurface += lPitch;
+        y += nStep;
+        nArcLength--;
+    }
+
+    return x;
 }
 
 // #binary-identical
@@ -480,9 +992,65 @@ void CVidMode::DrawLightingEffect16(WORD* pSurface, LONG lPitch, const CPoint& a
 // 0x7977D0
 BOOL CVidMode::DrawPoints(CPoint* pPoints, INT nPoints, WORD* pSurface, LONG lPitch, const CRect& rSurface, COLORREF rgbColor, BOOL bClipped)
 {
-    // TODO: Incomplete.
+    // The points are surface coordinates; unless bClipped, a point outside
+    // rSurface is skipped. lPitch is in bytes.
+    DWORD color = ReduceColor(rgbColor);
 
-    return FALSE;
+    switch (g_pChitin->cVideo.m_nBpp) {
+    case 16:
+        if (!bClipped) {
+            for (; nPoints > 0; nPoints--) {
+                if (rSurface.PtInRect(*pPoints)) {
+                    pSurface[pPoints->y * (lPitch >> 1) + pPoints->x] = static_cast<WORD>(color);
+                }
+                pPoints++;
+            }
+        } else {
+            for (; nPoints > 0; nPoints--) {
+                pSurface[pPoints->y * (lPitch >> 1) + pPoints->x] = static_cast<WORD>(color);
+                pPoints++;
+            }
+        }
+        break;
+    case 24:
+        if (!bClipped) {
+            for (; nPoints > 0; nPoints--) {
+                if (rSurface.PtInRect(*pPoints)) {
+                    BYTE* pPixel = reinterpret_cast<BYTE*>(pSurface) + pPoints->x * 3 + pPoints->y * lPitch;
+                    *reinterpret_cast<WORD*>(pPixel) = static_cast<WORD>(color);
+                    pPixel[2] = static_cast<BYTE>(color >> 16);
+                }
+                pPoints++;
+            }
+        } else {
+            for (; nPoints > 0; nPoints--) {
+                BYTE* pPixel = reinterpret_cast<BYTE*>(pSurface) + pPoints->x * 3 + pPoints->y * lPitch;
+                *reinterpret_cast<WORD*>(pPixel) = static_cast<WORD>(color);
+                pPixel[2] = static_cast<BYTE>(color >> 16);
+                pPoints++;
+            }
+        }
+        break;
+    case 32:
+        if (!bClipped) {
+            for (; nPoints > 0; nPoints--) {
+                if (rSurface.PtInRect(*pPoints)) {
+                    reinterpret_cast<DWORD*>(pSurface)[pPoints->y * (lPitch >> 2) + pPoints->x] = color;
+                }
+                pPoints++;
+            }
+        } else {
+            for (; nPoints > 0; nPoints--) {
+                reinterpret_cast<DWORD*>(pSurface)[pPoints->y * (lPitch >> 2) + pPoints->x] = color;
+                pPoints++;
+            }
+        }
+        break;
+    default:
+        return FALSE;
+    }
+
+    return TRUE;
 }
 
 // #binary-identical
@@ -560,9 +1128,63 @@ BOOL CVidMode::DrawLine(INT nXFrom, INT nYFrom, INT nXTo, INT nYTo, const DDSURF
 // 0x797D30
 BOOL CVidMode::DrawLine16(INT nXFrom, INT nYFrom, INT nXTo, INT nYTo, WORD* pSurface, LONG lPitch, const CRect& rSurface, WORD color, BOOLEAN bClipped)
 {
-    // TODO: Incomplete.
+    INT nDeltaX;
+    INT nDeltaY;
+    INT nStep = 1;
 
-    return FALSE;
+    if (!bClipped) {
+        if (!ClipLine(nXFrom, nYFrom, nXTo, nYTo, rSurface)) {
+            return FALSE;
+        }
+    }
+
+    if (nYTo < nYFrom) {
+        INT t;
+
+        t = nXTo;
+        nXTo = nXFrom;
+        nXFrom = t;
+
+        t = nYTo;
+        nYTo = nYFrom;
+        nYFrom = t;
+    }
+
+    nDeltaX = nXTo - nXFrom;
+    if (nDeltaX < 0) {
+        nDeltaX = nXFrom - nXTo;
+        nStep = -1;
+    }
+
+    nDeltaY = nYTo - nYFrom;
+
+    pSurface += (nYFrom - rSurface.top) * lPitch - rSurface.left + nXFrom;
+
+    if (nDeltaX == 0) {
+        while (nDeltaY >= 0) {
+            *pSurface = color;
+            pSurface += lPitch;
+            nDeltaY--;
+        }
+    } else if (nDeltaY == 0) {
+        while (nDeltaX >= 0) {
+            *pSurface = color;
+            pSurface += nStep;
+            nDeltaX--;
+        }
+    } else if (nDeltaX == nDeltaY) {
+        while (nDeltaX >= 0) {
+            *pSurface = color;
+            pSurface += nStep + lPitch;
+            nDeltaX--;
+        }
+    } else if (nDeltaX < nDeltaY) {
+        ScanLine16(pSurface, nDeltaY, nDeltaX, lPitch, nStep, color);
+    } else {
+        ScanLine16(pSurface, nDeltaX, nDeltaY, nStep, lPitch, color);
+    }
+
+    return TRUE;
 }
 
 // 0x7980E0
@@ -714,7 +1336,9 @@ BOOL CVidMode::DrawRect(const CRect& r, UINT nSurface, const CRect& rClip, COLOR
         break;
     }
 
-    // NOTE: Uninline.
+    // NOTE: Uninline. The original unlocks surface 0 whatever nSurface is
+    // (mov eax,[ecx] at 0x79874C); its one caller, CInfinity::DrawHighlightRect,
+    // passes 0. Ours unlocks the surface it locked.
     UnLockSurface(nSurface, ddsd.lpSurface);
 
     return TRUE;
@@ -791,7 +1415,22 @@ void CVidMode::DrawRecticle(const CVIDMODE_RECTICLE_DESCRIPTION& rd, const DDSUR
 // 0x7989B0
 void CVidMode::DrawRecticle16(const CVIDMODE_RECTICLE_DESCRIPTION& rd, const DDSURFACEDESC& ddsd, const CRect* rClip, COLORREF rgbColor)
 {
-    // TODO: Incomplete.
+    // As DrawRecticle32 (0x7CB670) with the 16-bit octants and line, the
+    // pitch in pixels and the colour with the dropped bits.
+    WORD color = static_cast<WORD>(((GetRValue(rgbColor) >> field_C2) << m_dwRBitShift)
+        | ((GetGValue(rgbColor) >> field_C6) << m_dwGBitShift)
+        | ((GetBValue(rgbColor) >> field_CA) << m_dwBBitShift));
+
+    Recticle(this, rd, reinterpret_cast<WORD*>(ddsd.lpSurface), ddsd.lPitch >> 1, rClip,
+        [this, color](LONG x, LONG y, INT n, WORD* p, LONG lPitch, BOOLEAN clockwise, BYTE* pArc, const CRect* pClip) {
+            return DrawEllipseHOctant16(x, y, n, p, lPitch, clockwise, pArc, pClip, color);
+        },
+        [this, color](LONG x, LONG y, INT n, WORD* p, LONG lPitch, BOOLEAN clockwise, BYTE* pArc, const CRect* pClip) {
+            return DrawEllipseVOctant16(x, y, n, p, lPitch, clockwise, pArc, pClip, color);
+        },
+        [this, color](INT x1, INT y1, INT x2, INT y2, WORD* p, LONG lPitch, const CRect& r, BOOLEAN bClipped) {
+            DrawLine16(x1, y1, x2, y2, p, lPitch, r, color, bClipped);
+        });
 }
 
 // #binary-identical
@@ -875,18 +1514,139 @@ BOOL CVidMode::DrawThickLine(INT nXFrom, INT nYFrom, INT nXTo, INT nYTo, const D
 // 0x799280
 BOOL CVidMode::DrawThickLine16(INT nXFrom, INT nYFrom, INT nXTo, INT nYTo, WORD* pSurface, LONG lPitch, CRect& rSurface, int a8, WORD color, BOOLEAN bClipped)
 {
-    // TODO: Incomplete.
+    // As DrawThickLine32 (0x7CBE70) on 16-bit pixels; half the thickness
+    // is taken as a short (movsx at the start).
+    return ThickLine(nXFrom, nYFrom, nXTo, nYTo, pSurface, lPitch, rSurface, a8,
+        static_cast<SHORT>((a8 + 1) >> 1), 1, bClipped,
+        [color](WORD* p) { *p = color; },
+        [this, color](WORD* p, UINT nMajor, UINT nMinor, INT nMajorAdjust, INT nMinorAdjust, int nThickness) {
+            sub_79A950(p, nMajor, nMinor, nMajorAdjust, nMinorAdjust, nThickness, color);
+        });
+}
 
-    return FALSE;
+// The 16-bit thick-line slices of DrawThickLine16: sub_7CC130 on 16-bit
+// pixels.
+//
+// 0x79A950
+void CVidMode::sub_79A950(WORD* pSurface, UINT nMajorAxis, UINT nMinorAxis, INT nMajorAxisAdjust, INT nMinorAxisAdjust, UINT nThickness, WORD color)
+{
+    ThickLineSlices(pSurface, nMajorAxis, nMinorAxis, nMajorAxisAdjust, nMinorAxisAdjust, nThickness,
+        [color](WORD* p) { *p = color; });
 }
 
 // 0x799540
 BOOL CVidMode::OutlinePoly(const CPoint* pPoly, SHORT nVertices, const CRect& rSurface, COLORREF rgbColor, const CPoint& ptOffset)
 {
     if (auto* b = render::Active(); b && b->Clipped(rSurface).DrawPoly(render::Minus(pPoly, nVertices, ptOffset).data(), nVertices, rgbColor, false, 0)) return TRUE;
-    // TODO: Incomplete.
+    CRect rLock(0, 0, rSurface.right - rSurface.left, rSurface.bottom - rSurface.top);
+    INT nOffsetX = rSurface.left + ptOffset.x;
+    INT nOffsetY = ptOffset.y + rSurface.top;
+    SHORT nIndex;
 
-    return FALSE;
+    if (nVertices < 1) {
+        return FALSE;
+    }
+
+    if (g_pChitin->cVideo.Is3dAccelerated()) {
+        return OutlinePoly3d(pPoly, nVertices, rSurface, rgbColor, ptOffset);
+    }
+
+    if (rSurface.IsRectEmpty()) {
+        return FALSE;
+    }
+
+    DDSURFACEDESC ddsd = {};
+    ddsd.dwSize = sizeof(ddsd);
+
+    BOOL bLocked = LockSurface(0, &ddsd, rSurface);
+
+    // __FILE__: C:\Projects\Icewind2\src\chitin\ChVideo.cpp
+    // __LINE__: 3466
+    UTIL_ASSERT(ddsd.lpSurface != NULL);
+
+    if (!bLocked) {
+        return FALSE;
+    }
+
+    WORD color16;
+    DWORD color;
+
+    switch (g_pChitin->cVideo.m_nBpp) {
+    case 16:
+        color16 = static_cast<WORD>(((GetRValue(rgbColor) >> field_C2) << m_dwRBitShift) | ((GetGValue(rgbColor) >> field_C6) << m_dwGBitShift) | ((GetBValue(rgbColor) >> field_CA) << m_dwBBitShift));
+        for (nIndex = 0; nIndex < nVertices - 1; nIndex++) {
+            DrawLine16(pPoly[nIndex].x - nOffsetX,
+                pPoly[nIndex].y - nOffsetY,
+                pPoly[nIndex + 1].x - nOffsetX,
+                pPoly[nIndex + 1].y - nOffsetY,
+                reinterpret_cast<WORD*>(ddsd.lpSurface),
+                ddsd.lPitch >> 1,
+                rLock,
+                color16,
+                FALSE);
+        }
+        DrawLine16(pPoly[nVertices - 1].x - nOffsetX,
+            pPoly[nVertices - 1].y - nOffsetY,
+            pPoly[0].x - nOffsetX,
+            pPoly[0].y - nOffsetY,
+            reinterpret_cast<WORD*>(ddsd.lpSurface),
+            ddsd.lPitch >> 1,
+            rLock,
+            color16,
+            FALSE);
+        break;
+    case 24:
+        color = (GetGValue(rgbColor) << m_dwGBitShift) | (GetBValue(rgbColor) << m_dwBBitShift) | (GetRValue(rgbColor) << m_dwRBitShift);
+        for (nIndex = 0; nIndex < nVertices - 1; nIndex++) {
+            DrawLine24(pPoly[nIndex].x - nOffsetX,
+                pPoly[nIndex].y - nOffsetY,
+                pPoly[nIndex + 1].x - nOffsetX,
+                pPoly[nIndex + 1].y - nOffsetY,
+                reinterpret_cast<BYTE*>(ddsd.lpSurface),
+                ddsd.lPitch,
+                rLock,
+                color,
+                FALSE);
+        }
+        DrawLine24(pPoly[nVertices - 1].x - nOffsetX,
+            pPoly[nVertices - 1].y - nOffsetY,
+            pPoly[0].x - nOffsetX,
+            pPoly[0].y - nOffsetY,
+            reinterpret_cast<BYTE*>(ddsd.lpSurface),
+            ddsd.lPitch,
+            rLock,
+            color,
+            FALSE);
+        break;
+    case 32:
+        color = (GetGValue(rgbColor) << m_dwGBitShift) | (GetBValue(rgbColor) << m_dwBBitShift) | (GetRValue(rgbColor) << m_dwRBitShift);
+        for (nIndex = 0; nIndex < nVertices - 1; nIndex++) {
+            DrawLine32(pPoly[nIndex].x - nOffsetX,
+                pPoly[nIndex].y - nOffsetY,
+                pPoly[nIndex + 1].x - nOffsetX,
+                pPoly[nIndex + 1].y - nOffsetY,
+                reinterpret_cast<DWORD*>(ddsd.lpSurface),
+                ddsd.lPitch >> 2,
+                rLock,
+                color,
+                FALSE);
+        }
+        DrawLine32(pPoly[nVertices - 1].x - nOffsetX,
+            pPoly[nVertices - 1].y - nOffsetY,
+            pPoly[0].x - nOffsetX,
+            pPoly[0].y - nOffsetY,
+            reinterpret_cast<DWORD*>(ddsd.lpSurface),
+            ddsd.lPitch >> 2,
+            rLock,
+            color,
+            FALSE);
+        break;
+    }
+
+    // NOTE: Uninline.
+    UnLockSurface(0, ddsd.lpSurface);
+
+    return TRUE;
 }
 
 // #binary-identical
@@ -1119,10 +1879,68 @@ BOOL CVidMode::PolyLine(INT nSurface, CRect& rSurface, LPPOINT lpPoints, int nCo
 
     switch (g_pChitin->cVideo.GetBitsPerPixels()) {
     case 16:
-        // TODO: Incomplete.
+        if (nThickness == 1) {
+            while (nCount - 1 > 0) {
+                bResult = DrawLine16(lpPoints[0].x,
+                    lpPoints[0].y,
+                    lpPoints[1].x,
+                    lpPoints[1].y,
+                    reinterpret_cast<WORD*>(ddsd.lpSurface),
+                    ddsd.lPitch >> 1,
+                    rSurface,
+                    static_cast<WORD>(((GetBValue(rgbColor) >> field_CA) << m_dwBBitShift) | ((GetGValue(rgbColor) >> field_C6) << m_dwGBitShift) | ((GetRValue(rgbColor) >> field_C2) << m_dwRBitShift)),
+                    FALSE);
+                lpPoints++;
+                nCount--;
+            }
+        } else {
+            while (nCount - 1 > 0) {
+                bResult = DrawThickLine16(lpPoints[0].x,
+                    lpPoints[0].y,
+                    lpPoints[1].x,
+                    lpPoints[1].y,
+                    reinterpret_cast<WORD*>(ddsd.lpSurface),
+                    ddsd.lPitch >> 1,
+                    rSurface,
+                    nThickness,
+                    static_cast<WORD>(((GetBValue(rgbColor) >> field_CA) << m_dwBBitShift) | ((GetGValue(rgbColor) >> field_C6) << m_dwGBitShift) | ((GetRValue(rgbColor) >> field_C2) << m_dwRBitShift)),
+                    FALSE);
+                lpPoints++;
+                nCount--;
+            }
+        }
         break;
     case 24:
-        // TODO: Incomplete.
+        if (nThickness == 1) {
+            while (nCount - 1 > 0) {
+                bResult = DrawLine24(lpPoints[0].x,
+                    lpPoints[0].y,
+                    lpPoints[1].x,
+                    lpPoints[1].y,
+                    reinterpret_cast<BYTE*>(ddsd.lpSurface),
+                    ddsd.lPitch,
+                    rSurface,
+                    (GetBValue(rgbColor) << m_dwBBitShift) | (GetGValue(rgbColor) << m_dwGBitShift) | (GetRValue(rgbColor) << m_dwRBitShift),
+                    FALSE);
+                lpPoints++;
+                nCount--;
+            }
+        } else {
+            while (nCount - 1 > 0) {
+                bResult = DrawThickLine24(lpPoints[0].x,
+                    lpPoints[0].y,
+                    lpPoints[1].x,
+                    lpPoints[1].y,
+                    reinterpret_cast<BYTE*>(ddsd.lpSurface),
+                    ddsd.lPitch,
+                    rSurface,
+                    nThickness,
+                    (GetBValue(rgbColor) << m_dwBBitShift) | (GetGValue(rgbColor) << m_dwGBitShift) | (GetRValue(rgbColor) << m_dwRBitShift),
+                    FALSE);
+                lpPoints++;
+                nCount--;
+            }
+        }
         break;
     case 32:
         if (nThickness == 1) {
@@ -1191,11 +2009,11 @@ BOOL CVidMode::SetPointer(CVidCell* pVidCell, CResRef cResRef, BOOLEAN bAnimatin
 
     if (pVidCell->pRes == NULL) {
         lock.Unlock();
-        return NULL;
+        return FALSE;
     }
 
     m_bPointerAnimating = bAnimating;
-    m_nPointerNumber = m_nPointerNumber;
+    m_nPointerNumber = nPointerNumber;
     m_pPointerVidCell = pVidCell;
 
     lock.Unlock();
@@ -1217,6 +2035,82 @@ BOOL CVidMode::UnLockSurface(UINT nIndex, LPVOID lpSurfaceData)
     }
 
     return pSurface->Unlock(lpSurfaceData) == DD_OK;
+}
+
+// 0x79A860
+void CVidMode::ScanLine16(WORD* pSurface, UINT nMajorAxis, UINT nMinorAxis, INT nMajorAxisAdjust, INT nMinorAxisAdjust, WORD color)
+{
+    // A run-sliced line: runs of whole steps along the major axis, the
+    // first and last half runs, one minor step between runs.
+    UINT nWholeStep = nMajorAxis / nMinorAxis;
+    INT nAdjUp = (nMajorAxis % nMinorAxis) * 2;
+    INT nErrorTerm = (nAdjUp >> 1) - nMinorAxis * 2;
+    UINT nFinalRun = (nWholeStep >> 1) + 1;
+    UINT nInitialRun = nFinalRun;
+    UINT nRun;
+
+    if (nAdjUp == 0 && (nWholeStep & 1) == 0) {
+        nInitialRun = nWholeStep >> 1;
+    }
+
+    if ((nWholeStep & 1) != 0) {
+        nErrorTerm += nMinorAxis;
+    }
+
+    for (nRun = nInitialRun; nRun != 0; nRun--) {
+        *pSurface = color;
+        pSurface += nMajorAxisAdjust;
+    }
+
+    UINT nRows = nMinorAxis;
+    while (true) {
+        nRows--;
+        pSurface += nMinorAxisAdjust;
+        if (nRows == 0) {
+            break;
+        }
+
+        nErrorTerm += nAdjUp;
+        nRun = nWholeStep;
+        if (nErrorTerm > 0) {
+            nRun = nWholeStep + 1;
+            nErrorTerm -= nMinorAxis * 2;
+        }
+
+        for (; nRun != 0; nRun--) {
+            *pSurface = color;
+            pSurface += nMajorAxisAdjust;
+        }
+    }
+
+    for (nRun = nFinalRun; nRun != 0; nRun--) {
+        *pSurface = color;
+        pSurface += nMajorAxisAdjust;
+    }
+}
+
+// The 16-bit pixel color with each channel scaled by nScale / 256.
+//
+// 0x79AD20
+DWORD CVidMode::ScaleColor16(DWORD color, INT nScale)
+{
+    color &= 0xFFFF;
+
+    return ((((m_dwRBitMask & color) >> (m_dwRBitShift & 0x1F)) * nScale >> 8) << (m_dwRBitShift & 0x1F))
+        | ((((m_dwGBitMask & color) >> (m_dwGBitShift & 0x1F)) * nScale >> 8) << (m_dwGBitShift & 0x1F))
+        | ((((m_dwBBitMask & color) >> (m_dwBBitShift & 0x1F)) * nScale >> 8) << (m_dwBBitShift & 0x1F));
+}
+
+// The 16-bit pixel's channels brought to 8 bits and summed, green twice.
+//
+// 0x79AD90
+DWORD CVidMode::GetIntensity16(DWORD color)
+{
+    color &= 0xFFFF;
+
+    return (((m_dwBBitMask & color) >> (m_dwBBitShift & 0x1F)) << (field_CA & 0x1F))
+        + (((m_dwGBitMask & color) >> (m_dwGBitShift & 0x1F)) << (field_C6 & 0x1F)) * 2
+        + (((m_dwRBitMask & color) >> (m_dwRBitShift & 0x1F)) << (field_C2 & 0x1F));
 }
 
 // #binary-identical
@@ -1297,7 +2191,102 @@ BOOL CVidMode::ActivateVideoMode(CVidMode* pPrevVidMode, HWND hWnd, BOOLEAN bFul
 // 0x7C8B40
 LONG CVidMode::DrawEllipse24(const CPoint& ptCenter, const CSize& axis, const DDSURFACEDESC& ddsd, const CRect* rClip, COLORREF rgbColor)
 {
-    // TODO: Incomplete.
+    BYTE* pPixelList = new BYTE[max(axis.cx, axis.cy)];
+    DWORD color = (GetGValue(rgbColor) << m_dwGBitShift) | (GetBValue(rgbColor) << m_dwBBitShift) | (GetRValue(rgbColor) << m_dwRBitShift);
+    LONG nArcLength = GetEllipseArcPixelList(axis.cx, axis.cy, pPixelList);
+
+    // __FILE__: C:\Projects\Icewind2\src\chitin\ChVideo24.cpp
+    // __LINE__: 68
+    UTIL_ASSERT(nArcLength <= max(axis.cx, axis.cy));
+
+    // The pitch stays in bytes: the octants step three bytes a pixel.
+    DrawEllipseHOctant24(ptCenter.x,
+        ptCenter.y - axis.cy,
+        nArcLength,
+        reinterpret_cast<BYTE*>(ddsd.lpSurface),
+        ddsd.lPitch,
+        FALSE,
+        pPixelList,
+        rClip,
+        color);
+
+    DrawEllipseHOctant24(ptCenter.x + 1,
+        ptCenter.y + pPixelList[0] - axis.cy,
+        nArcLength - 1,
+        reinterpret_cast<BYTE*>(ddsd.lpSurface),
+        ddsd.lPitch,
+        TRUE,
+        pPixelList + 1,
+        rClip,
+        color);
+
+    DrawEllipseHOctant24(ptCenter.x,
+        ptCenter.y + axis.cy,
+        nArcLength,
+        reinterpret_cast<BYTE*>(ddsd.lpSurface),
+        -ddsd.lPitch,
+        FALSE,
+        pPixelList,
+        rClip,
+        color);
+
+    DrawEllipseHOctant24(ptCenter.x + 1,
+        ptCenter.y - pPixelList[0] + axis.cy,
+        nArcLength - 1,
+        reinterpret_cast<BYTE*>(ddsd.lpSurface),
+        -ddsd.lPitch,
+        TRUE,
+        pPixelList + 1,
+        rClip,
+        color);
+
+    nArcLength = GetEllipseArcPixelList(axis.cy, axis.cx, pPixelList);
+
+    // __FILE__: C:\Projects\Icewind2\src\chitin\ChVideo24.cpp
+    // __LINE__: 91
+    UTIL_ASSERT(nArcLength < max(axis.cx, axis.cy));
+
+    DrawEllipseVOctant24(ptCenter.x - axis.cx,
+        ptCenter.y,
+        nArcLength,
+        reinterpret_cast<BYTE*>(ddsd.lpSurface),
+        -ddsd.lPitch,
+        TRUE,
+        pPixelList,
+        rClip,
+        color);
+
+    DrawEllipseVOctant24(ptCenter.x + pPixelList[0] - axis.cx,
+        ptCenter.y + 1,
+        nArcLength - 1,
+        reinterpret_cast<BYTE*>(ddsd.lpSurface),
+        ddsd.lPitch,
+        TRUE,
+        pPixelList + 1,
+        rClip,
+        color);
+
+    DrawEllipseVOctant24(ptCenter.x + axis.cx,
+        ptCenter.y,
+        nArcLength,
+        reinterpret_cast<BYTE*>(ddsd.lpSurface),
+        -ddsd.lPitch,
+        FALSE,
+        pPixelList,
+        rClip,
+        color);
+
+    DrawEllipseVOctant24(ptCenter.x - pPixelList[0] + axis.cx,
+        ptCenter.y + 1,
+        nArcLength - 1,
+        reinterpret_cast<BYTE*>(ddsd.lpSurface),
+        ddsd.lPitch,
+        FALSE,
+        pPixelList + 1,
+        rClip,
+        color);
+
+    delete[] pPixelList;
 
     return 0;
 }
@@ -1305,9 +2294,63 @@ LONG CVidMode::DrawEllipse24(const CPoint& ptCenter, const CSize& axis, const DD
 // 0x7C8E10
 LONG CVidMode::DrawEllipseVOctant24(LONG x, LONG y, INT nArcLength, BYTE* pSurface, LONG lPitch, BOOLEAN clockwise, unsigned char* pArcData, const CRect* rClip, DWORD color)
 {
-    // TODO: Incomplete.
+    if (rClip == NULL) {
+        if (lPitch < 0) {
+            pSurface += x * 3 - y * lPitch;
+        } else {
+            pSurface += y * lPitch + x * 3;
+        }
 
-    return 0;
+        while (nArcLength != 0) {
+            pSurface[2] = static_cast<BYTE>(color >> 16);
+            *reinterpret_cast<WORD*>(pSurface) = static_cast<WORD>(color);
+
+            if (*pArcData++ != 0) {
+                if (clockwise) {
+                    pSurface += 3;
+                    x++;
+                } else {
+                    pSurface -= 3;
+                    x--;
+                }
+            }
+
+            pSurface += lPitch;
+            nArcLength--;
+        }
+    } else {
+        INT nStep;
+        if (lPitch < 0) {
+            pSurface += (x - rClip->left) * 3 - (y - rClip->top) * lPitch;
+            nStep = -1;
+        } else {
+            pSurface += (x - rClip->left) * 3 + (y - rClip->top) * lPitch;
+            nStep = 1;
+        }
+
+        while (nArcLength != 0) {
+            if (rClip->PtInRect(CPoint(x, y))) {
+                *reinterpret_cast<WORD*>(pSurface) = static_cast<WORD>(color);
+                pSurface[2] = static_cast<BYTE>(color >> 16);
+            }
+
+            if (*pArcData++ != 0) {
+                if (clockwise) {
+                    pSurface += 3;
+                    x++;
+                } else {
+                    pSurface -= 3;
+                    x--;
+                }
+            }
+
+            pSurface += lPitch;
+            y += nStep;
+            nArcLength--;
+        }
+    }
+
+    return x;
 }
 
 // 0x7C8F70
@@ -1319,31 +2362,227 @@ void CVidMode::DrawLightingEffect24(BYTE* pSurface, LONG lPitch, const CPoint& a
 // 0x7C9990
 LONG CVidMode::DrawEllipseHOctant24(LONG x, LONG y, INT nArcLength, BYTE* pSurface, LONG lPitch, BOOLEAN clockwise, unsigned char* pArcData, const CRect* rClip, DWORD color)
 {
-    // TODO: Incomplete.
+    INT nStep;
 
-    return 0;
+    if (rClip != NULL) {
+        if (lPitch < 0) {
+            nStep = -1;
+            pSurface += (x - rClip->left) * 3 - (y - rClip->top) * lPitch;
+        } else {
+            nStep = 1;
+            pSurface += (x - rClip->left) * 3 + (y - rClip->top) * lPitch;
+        }
+
+        while (nArcLength != 0) {
+            if (rClip->PtInRect(CPoint(x, y))) {
+                *reinterpret_cast<WORD*>(pSurface) = static_cast<WORD>(color);
+                pSurface[2] = static_cast<BYTE>(color >> 16);
+            }
+
+            if (*pArcData++ != 0) {
+                pSurface += lPitch;
+                y += nStep;
+            }
+
+            if (clockwise) {
+                pSurface += 3;
+                x++;
+            } else {
+                pSurface -= 3;
+                x--;
+            }
+
+            nArcLength--;
+        }
+
+        return y;
+    }
+
+    if (lPitch < 0) {
+        pSurface += x * 3 - y * lPitch;
+        nStep = -1;
+    } else {
+        pSurface += y * lPitch + x * 3;
+        nStep = 1;
+    }
+
+    while (nArcLength != 0) {
+        *reinterpret_cast<WORD*>(pSurface) = static_cast<WORD>(color);
+        pSurface[2] = static_cast<BYTE>(color >> 16);
+
+        if (*pArcData != 0) {
+            pSurface += lPitch;
+            y += nStep;
+        }
+
+        if (clockwise) {
+            pSurface += 3;
+        } else {
+            pSurface -= 3;
+        }
+
+        nArcLength--;
+        pArcData++;
+    }
+
+    return y;
 }
 
 // 0x7C9B10
 void CVidMode::DrawRecticle24(const CVIDMODE_RECTICLE_DESCRIPTION& rd, const DDSURFACEDESC& ddsd, const CRect* rClip, COLORREF rgbColor)
 {
-    // TODO: Incomplete.
+    // As DrawRecticle32 (0x7CB670) with the 24-bit octants and line, the
+    // pitch in bytes.
+    DWORD color = (GetGValue(rgbColor) << m_dwGBitShift) | (GetBValue(rgbColor) << m_dwBBitShift) | (GetRValue(rgbColor) << m_dwRBitShift);
+
+    Recticle(this, rd, reinterpret_cast<BYTE*>(ddsd.lpSurface), ddsd.lPitch, rClip,
+        [this, color](LONG x, LONG y, INT n, BYTE* p, LONG lPitch, BOOLEAN clockwise, BYTE* pArc, const CRect* pClip) {
+            return DrawEllipseHOctant24(x, y, n, p, lPitch, clockwise, pArc, pClip, color);
+        },
+        [this, color](LONG x, LONG y, INT n, BYTE* p, LONG lPitch, BOOLEAN clockwise, BYTE* pArc, const CRect* pClip) {
+            return DrawEllipseVOctant24(x, y, n, p, lPitch, clockwise, pArc, pClip, color);
+        },
+        [this, color](INT x1, INT y1, INT x2, INT y2, BYTE* p, LONG lPitch, const CRect& r, BOOLEAN bClipped) {
+            DrawLine24(x1, y1, x2, y2, p, lPitch, r, color, bClipped);
+        });
 }
 
 // 0x7CA0D0
 BOOL CVidMode::DrawLine24(INT nXFrom, INT nYFrom, INT nXTo, INT nYTo, BYTE* pSurface, LONG lPitch, const CRect& rSurface, DWORD color, BOOLEAN bClipped)
 {
-    // TODO: Incomplete.
+    INT nDeltaX;
+    INT nDeltaY;
+    INT nStep = 3;
 
-    return FALSE;
+    if (!bClipped) {
+        if (!ClipLine(nXFrom, nYFrom, nXTo, nYTo, rSurface)) {
+            return FALSE;
+        }
+    }
+
+    if (nYTo < nYFrom) {
+        INT t;
+
+        t = nXTo;
+        nXTo = nXFrom;
+        nXFrom = t;
+
+        t = nYTo;
+        nYTo = nYFrom;
+        nYFrom = t;
+    }
+
+    nDeltaX = nXTo - nXFrom;
+    if (nDeltaX < 0) {
+        nStep = -3;
+        nDeltaX = nXFrom - nXTo;
+    }
+
+    nDeltaY = nYTo - nYFrom;
+
+    // lPitch is in bytes; each pixel is the colour's low word and its third
+    // byte.
+    pSurface += (nYFrom - rSurface.top) * lPitch + (nXFrom - rSurface.left) * 3;
+
+    if (nDeltaX == 0) {
+        while (nDeltaY >= 0) {
+            PutPixel24(pSurface, color);
+            pSurface += lPitch;
+            nDeltaY--;
+        }
+    } else if (nDeltaY == 0) {
+        while (nDeltaX >= 0) {
+            PutPixel24(pSurface, color);
+            pSurface += nStep;
+            nDeltaX--;
+        }
+    } else if (nDeltaX == nDeltaY) {
+        while (nDeltaX >= 0) {
+            PutPixel24(pSurface, color);
+            pSurface += nStep + lPitch;
+            nDeltaX--;
+        }
+    } else if (nDeltaX < nDeltaY) {
+        ScanLine24(pSurface, nDeltaY, nDeltaX, lPitch, nStep, color);
+    } else {
+        ScanLine24(pSurface, nDeltaX, nDeltaY, nStep, lPitch, color);
+    }
+
+    return TRUE;
+}
+
+// The 24-bit run-sliced line: ScanLine16 (0x79A860) on 3-byte pixels, the
+// adjustments in bytes.
+//
+// 0x7CA240
+void CVidMode::ScanLine24(BYTE* pSurface, UINT nMajorAxis, UINT nMinorAxis, INT nMajorAxisAdjust, INT nMinorAxisAdjust, DWORD color)
+{
+    UINT nWholeStep = nMajorAxis / nMinorAxis;
+    INT nAdjUp = (nMajorAxis % nMinorAxis) * 2;
+    INT nErrorTerm = (nAdjUp >> 1) - nMinorAxis * 2;
+    UINT nFinalRun = (nWholeStep >> 1) + 1;
+    UINT nInitialRun = nFinalRun;
+    UINT nRun;
+
+    if (nAdjUp == 0 && (nWholeStep & 1) == 0) {
+        nInitialRun = nWholeStep >> 1;
+    }
+
+    if ((nWholeStep & 1) != 0) {
+        nErrorTerm += nMinorAxis;
+    }
+
+    for (nRun = nInitialRun; nRun != 0; nRun--) {
+        PutPixel24(pSurface, color);
+        pSurface += nMajorAxisAdjust;
+    }
+
+    UINT nRows = nMinorAxis;
+    while (true) {
+        nRows--;
+        pSurface += nMinorAxisAdjust;
+        if (nRows == 0) {
+            break;
+        }
+
+        nErrorTerm += nAdjUp;
+        nRun = nWholeStep;
+        if (nErrorTerm > 0) {
+            nRun = nWholeStep + 1;
+            nErrorTerm -= nMinorAxis * 2;
+        }
+
+        for (; nRun != 0; nRun--) {
+            PutPixel24(pSurface, color);
+            pSurface += nMajorAxisAdjust;
+        }
+    }
+
+    for (nRun = nFinalRun; nRun != 0; nRun--) {
+        PutPixel24(pSurface, color);
+        pSurface += nMajorAxisAdjust;
+    }
 }
 
 // 0x7CA330
 BOOL CVidMode::DrawThickLine24(INT nXFrom, INT nYFrom, INT nXTo, INT nYTo, BYTE* pSurface, LONG lPitch, CRect& rSurface, int a8, DWORD color, BOOLEAN bClipped)
 {
-    // TODO: Incomplete.
+    // As DrawThickLine32 (0x7CBE70) on 3-byte pixels, lPitch in bytes.
+    return ThickLine(nXFrom, nYFrom, nXTo, nYTo, pSurface, lPitch, rSurface, a8, (a8 + 1) >> 1, 3, bClipped,
+        [color](BYTE* p) { PutPixel24(p, color); },
+        [this, color](BYTE* p, UINT nMajor, UINT nMinor, INT nMajorAdjust, INT nMinorAdjust, int nThickness) {
+            sub_7CA630(p, nMajor, nMinor, nMajorAdjust, nMinorAdjust, nThickness, color);
+        });
+}
 
-    return FALSE;
+// The 24-bit thick-line slices of DrawThickLine24: sub_7CC130 on 3-byte
+// pixels, the adjustments in bytes.
+//
+// 0x7CA630
+void CVidMode::sub_7CA630(BYTE* pSurface, UINT nMajorAxis, UINT nMinorAxis, INT nMajorAxisAdjust, INT nMinorAxisAdjust, UINT nThickness, DWORD color)
+{
+    ThickLineSlices(pSurface, nMajorAxis, nMinorAxis, nMajorAxisAdjust, nMinorAxisAdjust, nThickness,
+        [color](BYTE* p) { PutPixel24(p, color); });
 }
 
 // 0x7CA840
@@ -1444,7 +2683,7 @@ LONG CVidMode::DrawEllipse32(const CPoint& ptCenter, const CSize& axis, const DD
         rClip,
         color);
 
-    delete pPixelList;
+    delete[] pPixelList;
 
     return 0;
 }
@@ -1791,12 +3030,15 @@ void CVidMode::DrawRecticle32(const CVIDMODE_RECTICLE_DESCRIPTION& recticleDesc,
     CRect rLineClip;
     BOOLEAN bLineClipped;
 
+    // The lines are clipped to the clip less its last row and column when
+    // there is one, and drawn unclipped when there is none (sete at
+    // 0x7CB7D3: bClipped is TRUE when there is no clip).
     if (rClip != NULL) {
         rLineClip.SetRect(rClip->left, rClip->top, rClip->right - 1, rClip->bottom - 1);
-        bLineClipped = TRUE;
+        bLineClipped = FALSE;
     } else {
         rLineClip.SetRect(0, 0, 0, 0);
-        bLineClipped = FALSE;
+        bLineClipped = TRUE;
     }
 
     LONG nArcLength = GetEllipseArcPixelList(recticleDesc.xAxis,
@@ -1894,7 +3136,7 @@ void CVidMode::DrawRecticle32(const CVIDMODE_RECTICLE_DESCRIPTION& recticleDesc,
         pPixelList);
 
     // __FILE__: C:\Projects\Icewind2\src\chitin\ChVideo24.cpp
-    // __LINE__: 2097
+    // __LINE__: 2129
     UTIL_ASSERT(nArcLength < max(recticleDesc.xAxis, recticleDesc.yAxis));
 
     v3 = DrawEllipseVOctant32(recticleDesc.ptCenter.x - v1,
@@ -1977,7 +3219,7 @@ void CVidMode::DrawRecticle32(const CVIDMODE_RECTICLE_DESCRIPTION& recticleDesc,
         color,
         bLineClipped);
 
-    delete pPixelList;
+    delete[] pPixelList;
 }
 
 // 0x7CBC40

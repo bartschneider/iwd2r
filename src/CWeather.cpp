@@ -149,7 +149,8 @@ WORD CWeather::Marshal()
 // 0x5558B0
 void CWeather::AdvanceWeatherLevel(ULONG nCurrentTime)
 {
-    // TODO: Check casts.
+    // NOTE: The thresholds 2 and 3 times WEATHER_TRANSITION_TIME are 16-bit
+    // products in the original; they fit (300 and 450).
     ULONG nTime = nCurrentTime + 6 * WEATHER_TRANSITION_TIME + m_nWeatherDuration - m_nWeatherEndTime;
     if (nTime < static_cast<ULONG>(WEATHER_TRANSITION_TIME)) {
         m_nWeatherLevel = 0;
@@ -523,8 +524,8 @@ BYTE CWeather::GetWind()
     }
 
     if (m_nWindLevel == 16) {
-        // TODO: Check casts.
-        if (m_nDurationCounter <= static_cast<ULONG>(WEATHER_TRANSITION_TIME / 5)) {
+        // NOTE: Signed compare.
+        if (static_cast<LONG>(m_nDurationCounter) <= WEATHER_TRANSITION_TIME / 5) {
             return static_cast<BYTE>(100 - 500 * m_nDurationCounter / WEATHER_TRANSITION_TIME);
         }
     }
@@ -586,8 +587,8 @@ void CWeather::SetWind(SHORT nWindLevel, ULONG nLevelPercentage, BOOLEAN bResetA
                     m_bWindOn = TRUE;
                 }
 
-                // TODO: Check casts.
-                if (m_nWindVolumeLevel > static_cast<ULONG>(WEATHER_TRANSITION_TIME / 5)) {
+                // NOTE: Signed compare.
+                if (static_cast<LONG>(m_nWindVolumeLevel) > WEATHER_TRANSITION_TIME / 5) {
                     m_sndWind.SetVolume((VOLUME_LIGHT * m_nWindVolumeLevel - VOLUME_LIGHT * (WEATHER_TRANSITION_TIME / 5)) / (WEATHER_TRANSITION_TIME - WEATHER_TRANSITION_TIME / 5));
                 } else {
                     m_sndWind.SetVolume(0);

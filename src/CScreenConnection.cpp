@@ -603,7 +603,10 @@ void CScreenConnection::TimerAsynchronousUpdate()
     }
 
     if (field_FA8) {
-        // TODO: Incomplete (detecting/switching CD).
+        // NOTE: The original first looks for the play CD
+        // (CBaldurChitin::DetectBaldurCD 0x426B20) and, without it, asks for
+        // it until it is inserted or Escape quits; iwd2r runs from an
+        // installed copy and has no CD to ask for.
 
         srand(static_cast<unsigned int>(time(NULL)));
         rand();
@@ -787,7 +790,8 @@ void CScreenConnection::TimerAsynchronousUpdate()
         g_pBaldurChitin->GetObjectCursor()->CursorUpdate(pVidMode);
 
         if (m_bExitProgram) {
-            // TODO: Incomplete.
+            // NOTE: The original calls CVidInf::GetType (0x7ABB90) here and
+            // discards the result.
         }
     }
 }
@@ -3443,7 +3447,7 @@ void CScreenConnection::HandleEMEvent(BYTE nEvent, BYTE nEventStage)
                 }
 
                 if (g_pChitin->cGameSpy.field_0 == 1) {
-                    // TODO: Incomplete.
+                    // NOTE: GameSpy is not ported (multiplayer, ADR 0002).
                 }
 
                 CString sIPAddress = g_pChitin->cNetwork.m_sIPAddress;

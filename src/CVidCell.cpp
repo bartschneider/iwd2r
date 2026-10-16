@@ -94,7 +94,7 @@ void CVidCell::AddRangeAffect(USHORT nAffectType, USHORT nRangeId, COLORREF rgbA
         break;
     default:
         // __FILE__: C:\Projects\Icewind2\src\chitin\ChVidImage.cpp
-        // __LINE__: 523
+        // __LINE__: 565
         UTIL_ASSERT(FALSE);
     }
 }
@@ -195,8 +195,9 @@ BOOL CVidCell::GetCurrentCenterPoint(CPoint& ptReference, BOOLEAN bDemanded)
     }
 
     SHORT nSequence;
-    // NOTE: Uninline.
-    if (m_nCurrentSequence < GetResBamHeader()->nSequences) {
+    // NOTE: Uninline. The sequence compares unsigned (jb at 0x7AD5AC), so
+    // a negative one counts as past the end.
+    if (static_cast<WORD>(m_nCurrentSequence) < GetResBamHeader()->nSequences) {
         nSequence = m_nCurrentSequence;
     } else {
         nSequence = 0;
@@ -272,8 +273,9 @@ BOOL CVidCell::GetCurrentFrameSize(CSize& frameSize, BOOLEAN bDemanded)
     }
 
     SHORT nSequence;
-    // NOTE: Uninline.
-    if (m_nCurrentSequence < GetResBamHeader()->nSequences) {
+    // NOTE: Uninline. The sequence compares unsigned (jb at 0x7AD88C), so
+    // a negative one counts as past the end.
+    if (static_cast<WORD>(m_nCurrentSequence) < GetResBamHeader()->nSequences) {
         nSequence = m_nCurrentSequence;
     } else {
         nSequence = 0;
@@ -380,7 +382,7 @@ BOOL CVidCell::GetFrameCenterPoint(SHORT nSequence, SHORT nFrame, CSize& ptCtr, 
     UTIL_ASSERT(nSequence < GetResBamHeader()->nSequences);
 
     // __FILE__: C:\Projects\Icewind2\src\chitin\ChVidImage.cpp
-    // __LINE__: 1189
+    // __LINE__: 1190
     UTIL_ASSERT(nFrame < GetResSequences()[nSequence].nFrames);
 
     BOOL bSuccess;
@@ -494,14 +496,16 @@ BOOL CVidCell::IsEndOfSequence(BOOLEAN bDemanded)
         return FALSE;
     }
 
-    // NOTE: Uninline.
-    if (m_nCurrentSequence < GetResBamHeader()->nSequences) {
+    // NOTE: Uninline. The sequence compares and indexes unsigned (jae at
+    // 0x7AE084), so a negative one counts as past the end.
+    WORD nSequence = static_cast<WORD>(m_nCurrentSequence);
+    if (nSequence < GetResBamHeader()->nSequences) {
         bResult = TRUE;
         // FIXME: Repeating calls.
         // NOTE: Uninline.
-        if (m_nCurrentFrame < GetResSequences()[m_nCurrentSequence].nFrames - 1) {
+        if (m_nCurrentFrame < GetResSequences()[nSequence].nFrames - 1) {
             // NOTE: Uninline.
-            if (GetResSequences()[m_nCurrentSequence].nFrames != 0) {
+            if (GetResSequences()[nSequence].nFrames != 0) {
                 bResult = FALSE;
             }
         }
@@ -689,12 +693,15 @@ BOOL CVidCell::Render(WORD* pSurface, LONG lPitch, INT nRefPointX, INT nRefPoint
             // __FILE__: C:\Projects\Icewind2\src\chitin\ChVidImage.cpp
             // __LINE__: 1913
             UTIL_ASSERT_MSG(FALSE, GetResRef().GetResRefStr() + ".BAM is corrupted (GetFrame() failed)");
+
+            // Nothing is drawn or released (xor eax,eax at 0x7AE691).
+            return FALSE;
         }
     }
 
     if ((dwFlags & 0x200) != 0 && TRANSLUCENT_BLTS_ON) {
         // __FILE__: C:\Projects\Icewind2\src\chitin\ChVidImage.cpp
-        // __LINE__: 1902
+        // __LINE__: 1932
         UTIL_ASSERT(nTransVal >= 0);
 
         switch (g_pChitin->cVideo.m_nBpp) {
@@ -1039,6 +1046,7 @@ BOOL CVidCell::Render(WORD* pSurface, LONG lPitch, INT nRefPtX, INT nRefPtY, con
         // __FILE__: C:\Projects\Icewind2\src\chitin\ChVidImage.cpp
         // __LINE__: 2289
         UTIL_ASSERT_MSG(FALSE, "CVidCell::Render m_pFrame = GARBAGE");
+        return FALSE;
     }
 
     CPoint pt(nRefPtX - m_pFrame->nCenterX, nRefPtY - m_pFrame->nCenterY);
@@ -1099,7 +1107,233 @@ BOOL CVidCell::sub_7AF1C0(WORD* pSurface, LONG lPitch, DWORD dwFlags)
 // 0x7AF3C0
 BOOL CVidCell::Blt8To16(WORD* pSurface, LONG lPitch, const CPoint& pt, const CRect& rClip, DWORD dwFlags, const CPoint& ptSource)
 {
-    // TODO: Incomplete.
+    INT nFrameWidth = m_pFrame->nWidth;
+    INT pos = 0;
+    INT nBltHeight = m_pFrame->nHeight - ptSource.y;
+    INT nBltWidth = nFrameWidth - ptSource.x;
+
+    // __FILE__: C:\Projects\Icewind2\src\chitin\ChVidImage.cpp
+    // __LINE__: 2624
+    UTIL_ASSERT(ptSource.x >= 0 && ptSource.y >= 0);
+
+    // __FILE__: C:\Projects\Icewind2\src\chitin\ChVidImage.cpp
+    // __LINE__: 2625
+    UTIL_ASSERT(rClip.top >= 0 && rClip.top <= rClip.bottom && rClip.left >= 0 && rClip.left <= rClip.right);
+
+    if (pt.y > rClip.bottom
+        || pt.x > rClip.right
+        || pt.y + nBltHeight < rClip.top
+        || pt.x + nBltWidth < rClip.left) {
+        return TRUE;
+    }
+
+    BYTE* pFrameData = pRes->GetFrameData(m_pFrame, m_bDoubleSize);
+    BAMHEADER* pBamHeader = pRes->m_bCacheHeader
+        ? pRes->m_pBamHeaderCopy
+        : pRes->m_pBamHeader;
+    BYTE nTransparentColor = pBamHeader->nTransparentColor;
+
+    lPitch >>= 1;
+    WORD* pDest = pSurface + lPitch * pt.y + pt.x;
+
+    if (!pRes->GetCompressed(m_pFrame, m_bDoubleSize)) {
+        INT nSrcJump = ptSource.x;
+        INT nSrc = m_pFrame->nWidth * ptSource.y + ptSource.x;
+        INT nBltH = nBltHeight;
+
+        if (pt.y < rClip.top) {
+            pDest += (rClip.top - pt.y) * lPitch;
+            nSrc += (rClip.top - pt.y) * m_pFrame->nWidth;
+            nBltH = pt.y - rClip.top + nBltHeight;
+        }
+
+        if (nBltHeight + pt.y > rClip.bottom) {
+            nBltH += rClip.bottom - pt.y - nBltHeight;
+        }
+
+        INT nBltW = nBltWidth;
+        if (pt.x < rClip.left) {
+            nSrcJump = ptSource.x + rClip.left - pt.x;
+            nBltW = pt.x - rClip.left + nBltWidth;
+            nSrc += rClip.left - pt.x;
+            pDest += rClip.left - pt.x;
+        }
+
+        if (nBltWidth + pt.x > rClip.right) {
+            nSrcJump += pt.x - rClip.right + nBltWidth;
+            nBltW += rClip.right - pt.x - nBltWidth;
+        }
+
+        for (INT y = nBltH; y > 0; y--) {
+            for (INT x = nBltW; x > 0; x--) {
+                if (pFrameData[nSrc] != nTransparentColor) {
+                    *pDest = static_cast<WORD>(CVidImage::rgbTempPal[pFrameData[nSrc]]);
+                }
+                pDest++;
+                nSrc++;
+            }
+            pDest += lPitch - nBltW;
+            nSrc += nSrcJump;
+        }
+    } else {
+        INT nRunLength = 0;
+        INT nRemaining;
+        INT nStep;
+
+        // Skip the source rows above ptSource.
+        for (INT y = ptSource.y; y > 0; y--) {
+            nRemaining = nFrameWidth;
+            while (nRemaining > 0) {
+                if (pFrameData[pos] == nTransparentColor) {
+                    if (nRunLength == 0) {
+                        nRunLength = pFrameData[pos + 1] + 1;
+                    }
+
+                    if (nRemaining == nRunLength) {
+                        nRunLength = 0;
+                        pos += 2;
+                        break;
+                    }
+
+                    if (nRemaining <= nRunLength) {
+                        nRunLength -= nRemaining;
+                        break;
+                    }
+
+                    pos += 2;
+                    nStep = -nRunLength;
+                    nRunLength = 0;
+                } else {
+                    pos++;
+                    nStep = -1;
+                }
+                nRemaining += nStep;
+            }
+        }
+
+        // Skip the rows above the clip.
+        INT nSkipRows = pt.y < rClip.top ? rClip.top - pt.y : 0;
+        for (INT y = nSkipRows; y > 0; y--) {
+            nRemaining = nFrameWidth;
+            while (nRemaining > 0) {
+                if (pFrameData[pos] == nTransparentColor) {
+                    if (nRunLength == 0) {
+                        nRunLength = pFrameData[pos + 1] + 1;
+                    }
+
+                    if (nRemaining == nRunLength) {
+                        nRunLength = 0;
+                        pDest += nRemaining;
+                        pos += 2;
+                        break;
+                    }
+
+                    if (nRemaining <= nRunLength) {
+                        pDest += nRemaining;
+                        nRunLength -= nRemaining;
+                        break;
+                    }
+
+                    pos += 2;
+                    nStep = -nRunLength;
+                    pDest += nRunLength;
+                    nRunLength = 0;
+                } else {
+                    pDest++;
+                    pos++;
+                    nStep = -1;
+                }
+                nRemaining += nStep;
+            }
+            pDest += lPitch - nFrameWidth;
+        }
+
+        SHORT nLeft = static_cast<SHORT>(rClip.left) - static_cast<SHORT>(pt.x);
+        INT nSkipLeft = nLeft < 0 ? 0 : nLeft;
+        if (nBltWidth != nSkipLeft) {
+            INT nRight = nBltWidth;
+            if (rClip.right - pt.x <= nBltWidth) {
+                nRight = rClip.right - pt.x;
+            }
+
+            INT nRows = nBltHeight - nSkipRows;
+            if (nRows < 0) {
+                nRows = 0;
+            }
+            if (nRows > rClip.bottom - pt.y) {
+                nRows = rClip.bottom - pt.y;
+            }
+
+            for (; nRows > 0; nRows--) {
+                // Skip the source columns left of ptSource.
+                nRemaining = ptSource.x;
+                while (nRemaining > 0) {
+                    if (pFrameData[pos] == nTransparentColor) {
+                        if (nRunLength == 0) {
+                            nRunLength = pFrameData[pos + 1] + 1;
+                        }
+
+                        if (nRemaining == nRunLength) {
+                            nRunLength = 0;
+                            pos += 2;
+                            break;
+                        }
+
+                        if (nRemaining <= nRunLength) {
+                            nRunLength -= nRemaining;
+                            break;
+                        }
+
+                        pos += 2;
+                        nStep = -nRunLength;
+                        nRunLength = 0;
+                    } else {
+                        pos++;
+                        nStep = -1;
+                    }
+                    nRemaining += nStep;
+                }
+
+                // The row: pixels from nSkipLeft to nRight are drawn.
+                nRemaining = nBltWidth;
+                while (nRemaining > 0) {
+                    if (pFrameData[pos] == nTransparentColor) {
+                        if (nRunLength == 0) {
+                            nRunLength = pFrameData[pos + 1] + 1;
+                        }
+
+                        if (nRemaining == nRunLength) {
+                            nRunLength = 0;
+                            pDest += nRemaining;
+                            pos += 2;
+                            break;
+                        }
+
+                        if (nRemaining <= nRunLength) {
+                            pDest += nRemaining;
+                            nRunLength -= nRemaining;
+                            break;
+                        }
+
+                        pos += 2;
+                        nStep = -nRunLength;
+                        pDest += nRunLength;
+                        nRunLength = 0;
+                    } else {
+                        if (nRemaining <= nBltWidth - nSkipLeft && nBltWidth - nRight < nRemaining) {
+                            *pDest = static_cast<WORD>(CVidImage::rgbTempPal[pFrameData[pos]]);
+                        }
+                        pDest++;
+                        pos++;
+                        nStep = -1;
+                    }
+                    nRemaining += nStep;
+                }
+
+                pDest += lPitch - nBltWidth;
+            }
+        }
+    }
 
     return TRUE;
 }
@@ -1184,8 +1418,9 @@ void CVidCell::BltBackGroundToFx(LPDIRECTDRAWSURFACE pSurface, CRect& rSrc, cons
                 &rSrc,
                 DDBLT_WAIT | DDBLT_DDFX,
                 &fx);
+            g_pChitin->GetCurrentVideoMode()->CheckResults(hr);
         } while (hr == DDERR_SURFACELOST || hr == DDERR_WASSTILLDRAWING);
-    } else {
+    } else if (rSrcSurface.top < rSrcSurface.bottom && rSrcSurface.left < rSrcSurface.right) {
         do {
             hr = g_pChitin->cVideo.cVidBlitter.BltFast(g_pChitin->GetCurrentVideoMode()->pSurfaces[m_nFxSurface],
                 destX,
@@ -1193,6 +1428,7 @@ void CVidCell::BltBackGroundToFx(LPDIRECTDRAWSURFACE pSurface, CRect& rSrc, cons
                 pSurface,
                 rSrcSurface,
                 DDBLTFAST_WAIT);
+            g_pChitin->GetCurrentVideoMode()->CheckResults(hr);
             if (hr != DDERR_SURFACELOST && hr != DDERR_WASSTILLDRAWING) {
                 break;
             }
@@ -1255,11 +1491,13 @@ BOOL CVidCell::BltFromFX(LPDIRECTDRAWSURFACE pSurface, int x, int y, const CRect
                 rDest.right = rSrcSurface.right - rSrcSurface.left;
                 rDest.bottom = rSrcSurface.bottom - rSrcSurface.top;
 
+                // The colour key goes with the mirror (0x1008800 at
+                // 0x7B090F).
                 hr = g_pChitin->cVideo.cVidBlitter.Blt(pSurface,
                     &rDest,
                     g_pChitin->GetCurrentVideoMode()->pSurfaces[m_nFxSurface],
                     &rSrcSurface,
-                    DDBLT_WAIT | DDBLT_DDFX,
+                    DDBLT_WAIT | DDBLT_KEYSRC | DDBLT_DDFX,
                     &fx);
                 g_pChitin->GetCurrentVideoMode()->CheckResults(hr);
             } while (hr == DDERR_SURFACELOST || hr == DDERR_WASSTILLDRAWING);
@@ -1285,6 +1523,10 @@ BOOL CVidCell::BltFromFX(LPDIRECTDRAWSURFACE pSurface, int x, int y, const CRect
 // 0x7B0980
 BOOL CVidCell::GetFrame(BOOLEAN bDemanded)
 {
+    if (pRes == NULL) {
+        return FALSE;
+    }
+
     if (!bDemanded) {
         if (pRes->Demand() == NULL) {
             return FALSE;
@@ -1298,7 +1540,9 @@ BOOL CVidCell::GetFrame(BOOLEAN bDemanded)
         pHeader = pRes->m_pBamHeader;
     }
 
-    if (!(m_nCurrentSequence < pHeader->nSequences)) {
+    // The sequence compares unsigned (jb at 0x7B09CA): a negative one is
+    // reset too.
+    if (!(static_cast<WORD>(m_nCurrentSequence) < pHeader->nSequences)) {
         m_nCurrentSequence = 0;
     }
 
@@ -1381,7 +1625,237 @@ BOOL CVidCell::sub_7CECD0(BYTE* pSurface, LONG lPitch, DWORD dwFlags)
 // 0x7CEEB0
 BOOL CVidCell::Blt8To24(BYTE* pSurface, LONG lPitch, const CPoint& pt, const CRect& rClip, DWORD dwFlags, const CPoint& ptSource)
 {
-    // TODO: Incomplete.
+    INT pos = 0;
+    INT nFrameWidth = m_pFrame->nWidth;
+    INT nBltHeight = m_pFrame->nHeight - ptSource.y;
+    INT nBltWidth = nFrameWidth - ptSource.x;
+
+    // __FILE__: C:\Projects\Icewind2\src\chitin\ChVidImage24.cpp
+    // __LINE__: 3073
+    UTIL_ASSERT(ptSource.x >= 0 && ptSource.y >= 0);
+
+    // __FILE__: C:\Projects\Icewind2\src\chitin\ChVidImage24.cpp
+    // __LINE__: 3074
+    UTIL_ASSERT(rClip.top >= 0 && rClip.top <= rClip.bottom && rClip.left >= 0 && rClip.left <= rClip.right);
+
+    if (pt.y > rClip.bottom
+        || pt.x > rClip.right
+        || pt.y + nBltHeight < rClip.top
+        || pt.x + nBltWidth < rClip.left) {
+        return TRUE;
+    }
+
+    BYTE* pFrameData = pRes->GetFrameData(m_pFrame, m_bDoubleSize);
+    BAMHEADER* pBamHeader = pRes->m_bCacheHeader
+        ? pRes->m_pBamHeaderCopy
+        : pRes->m_pBamHeader;
+    BYTE nTransparentColor = pBamHeader->nTransparentColor;
+
+    BYTE* pDest = pSurface + pt.x * 3 + pt.y * lPitch;
+
+    if (!pRes->GetCompressed(m_pFrame, m_bDoubleSize)) {
+        INT nSrcJump = ptSource.x;
+        INT nSrc = m_pFrame->nWidth * ptSource.y + ptSource.x;
+        INT nBltH = nBltHeight;
+
+        if (pt.y < rClip.top) {
+            nSrc += (rClip.top - pt.y) * m_pFrame->nWidth;
+            pDest += (rClip.top - pt.y) * lPitch;
+            nBltH = pt.y - rClip.top + nBltHeight;
+        }
+
+        if (nBltHeight + pt.y > rClip.bottom) {
+            nBltH += rClip.bottom - pt.y - nBltHeight;
+        }
+
+        INT nBltW = nBltWidth;
+        if (pt.x < rClip.left) {
+            nSrcJump = ptSource.x + rClip.left - pt.x;
+            nBltW = pt.x - rClip.left + nBltWidth;
+            pDest += (rClip.left - pt.x) * 3;
+            nSrc += rClip.left - pt.x;
+        }
+
+        if (nBltWidth + pt.x > rClip.right) {
+            nSrcJump += pt.x - rClip.right + nBltWidth;
+            nBltW += rClip.right - pt.x - nBltWidth;
+        }
+
+        for (INT y = nBltH; y > 0; y--) {
+            for (INT x = nBltW; x > 0; x--) {
+                if (pFrameData[nSrc] != nTransparentColor) {
+                    *reinterpret_cast<WORD*>(pDest) = static_cast<WORD>(CVidImage::rgbTempPal[pFrameData[nSrc]]);
+                    pDest[2] = static_cast<BYTE>(CVidImage::rgbTempPal[pFrameData[nSrc]] >> 16);
+                }
+                pDest += 3;
+                nSrc++;
+            }
+            pDest += lPitch - nBltW * 3;
+            nSrc += nSrcJump;
+        }
+    } else {
+        // The compressed walk counts in bytes of the destination, three per
+        // pixel.
+        INT nRunLength = 0;
+        INT nRemaining;
+        INT nStep;
+
+        // Skip the source rows above ptSource.
+        for (INT y = ptSource.y; y > 0; y--) {
+            nRemaining = nFrameWidth * 3;
+            while (nRemaining > 0) {
+                if (pFrameData[pos] == nTransparentColor) {
+                    if (nRunLength == 0) {
+                        nRunLength = (pFrameData[pos + 1] + 1) * 3;
+                    }
+
+                    if (nRemaining == nRunLength) {
+                        nRunLength = 0;
+                        pos += 2;
+                        break;
+                    }
+
+                    if (nRemaining <= nRunLength) {
+                        nRunLength -= nRemaining;
+                        break;
+                    }
+
+                    pos += 2;
+                    nStep = -nRunLength;
+                    nRunLength = 0;
+                } else {
+                    pos++;
+                    nStep = -3;
+                }
+                nRemaining += nStep;
+            }
+        }
+
+        // Skip the rows above the clip.
+        INT nSkipRows = pt.y < rClip.top ? rClip.top - pt.y : 0;
+        for (INT y = nSkipRows; y > 0; y--) {
+            nRemaining = nFrameWidth * 3;
+            while (nRemaining > 0) {
+                if (pFrameData[pos] == nTransparentColor) {
+                    if (nRunLength == 0) {
+                        nRunLength = (pFrameData[pos + 1] + 1) * 3;
+                    }
+
+                    if (nRemaining == nRunLength) {
+                        pDest += nRemaining;
+                        nRunLength = 0;
+                        pos += 2;
+                        break;
+                    }
+
+                    if (nRemaining <= nRunLength) {
+                        pDest += nRemaining;
+                        nRunLength -= nRemaining;
+                        break;
+                    }
+
+                    pos += 2;
+                    nStep = -nRunLength;
+                    pDest += nRunLength;
+                    nRunLength = 0;
+                } else {
+                    pDest += 3;
+                    pos++;
+                    nStep = -3;
+                }
+                nRemaining += nStep;
+            }
+            pDest += lPitch - nFrameWidth * 3;
+        }
+
+        SHORT nLeft = static_cast<SHORT>(rClip.left) - static_cast<SHORT>(pt.x);
+        INT nSkipLeft = nLeft < 0 ? 0 : nLeft;
+        INT nDrawEnd = (nBltWidth - nSkipLeft) * 3;
+        if (nDrawEnd != 0) {
+            INT nRight = nBltWidth;
+            if (rClip.right - pt.x <= nBltWidth) {
+                nRight = rClip.right - pt.x;
+            }
+
+            INT nRows = nBltHeight - nSkipRows;
+            if (nRows < 0) {
+                nRows = 0;
+            }
+            if (nRows > rClip.bottom - pt.y) {
+                nRows = rClip.bottom - pt.y;
+            }
+
+            for (; nRows > 0; nRows--) {
+                // Skip the source columns left of ptSource.
+                nRemaining = ptSource.x * 3;
+                while (nRemaining > 0) {
+                    if (pFrameData[pos] == nTransparentColor) {
+                        if (nRunLength == 0) {
+                            nRunLength = (pFrameData[pos + 1] + 1) * 3;
+                        }
+
+                        if (nRemaining == nRunLength) {
+                            nRunLength = 0;
+                            pos += 2;
+                            break;
+                        }
+
+                        if (nRemaining <= nRunLength) {
+                            nRunLength -= nRemaining;
+                            break;
+                        }
+
+                        pos += 2;
+                        nStep = -nRunLength;
+                        nRunLength = 0;
+                    } else {
+                        pos++;
+                        nStep = -3;
+                    }
+                    nRemaining += nStep;
+                }
+
+                // The row: pixels from nSkipLeft to nRight are drawn.
+                nRemaining = nBltWidth * 3;
+                while (nRemaining > 0) {
+                    if (pFrameData[pos] == nTransparentColor) {
+                        if (nRunLength == 0) {
+                            nRunLength = (pFrameData[pos + 1] + 1) * 3;
+                        }
+
+                        if (nRemaining == nRunLength) {
+                            pDest += nRemaining;
+                            nRunLength = 0;
+                            pos += 2;
+                            break;
+                        }
+
+                        if (nRemaining <= nRunLength) {
+                            pDest += nRemaining;
+                            nRunLength -= nRemaining;
+                            break;
+                        }
+
+                        pos += 2;
+                        nStep = -nRunLength;
+                        pDest += nRunLength;
+                        nRunLength = 0;
+                    } else {
+                        if (nRemaining <= nDrawEnd && (nBltWidth - nRight) * 3 < nRemaining) {
+                            *reinterpret_cast<WORD*>(pDest) = static_cast<WORD>(CVidImage::rgbTempPal[pFrameData[pos]]);
+                            pDest[2] = static_cast<BYTE>(CVidImage::rgbTempPal[pFrameData[pos]] >> 16);
+                        }
+                        pDest += 3;
+                        pos++;
+                        nStep = -3;
+                    }
+                    nRemaining += nStep;
+                }
+
+                pDest += lPitch - nBltWidth * 3;
+            }
+        }
+    }
 
     return TRUE;
 }
@@ -1503,21 +1977,23 @@ BOOL CVidCell::Blt8To32(DWORD* pSurface, LONG lPitch, DWORD dwFlags, INT nTransV
 // 0x7CFDF0
 BOOL CVidCell::Blt8To32(DWORD* pSurface, LONG lPitch, const CPoint& pt, const CRect& rClip, DWORD dwFlags, const CPoint& ptSource, INT nTransVal)
 {
-    int nBltWidth = m_pFrame->nWidth - ptSource.x;
-    int nBltHeight = m_pFrame->nHeight - ptSource.y;
+    INT nFrameWidth = m_pFrame->nWidth;
+    INT pos = 0;
+    INT nBltHeight = m_pFrame->nHeight - ptSource.y;
+    INT nBltWidth = nFrameWidth - ptSource.x;
 
-    // __FILE__: C:\Projects\Icewind2\src\chitin\ChVidImage.cpp
+    // __FILE__: C:\Projects\Icewind2\src\chitin\ChVidImage24.cpp
     // __LINE__: 5029
     UTIL_ASSERT(ptSource.x >= 0 && ptSource.y >= 0);
 
-    // __FILE__: C:\Projects\Icewind2\src\chitin\ChVidImage.cpp
+    // __FILE__: C:\Projects\Icewind2\src\chitin\ChVidImage24.cpp
     // __LINE__: 5030
     UTIL_ASSERT(rClip.top >= 0 && rClip.top <= rClip.bottom && rClip.left >= 0 && rClip.left <= rClip.right);
 
     if (pt.y > rClip.bottom
         || pt.x > rClip.right
-        || pt.x + nBltWidth < rClip.left
-        || pt.y + nBltHeight < rClip.top) {
+        || pt.y + nBltHeight < rClip.top
+        || pt.x + nBltWidth < rClip.left) {
         return TRUE;
     }
 
@@ -1527,281 +2003,277 @@ BOOL CVidCell::Blt8To32(DWORD* pSurface, LONG lPitch, const CPoint& pt, const CR
         : pRes->m_pBamHeader;
     BYTE nTransparentColor = pBamHeader->nTransparentColor;
 
-    DWORD* pDest = pSurface + lPitch / 4 * pt.y + pt.x;
+    lPitch >>= 2;
+    DWORD* pDest = pSurface + lPitch * pt.y + pt.x;
 
-    // NOTE: Original code is different, but does the same thing.
-    if (pRes->GetCompressed(m_pFrame, m_bDoubleSize)) {
-        int nWidth = m_pFrame->nWidth;
-        int nHeight = m_pFrame->nHeight;
-        int nRunLength = 0;
-        int pos = 0;
-
-        // Skip src top.
-        int nSkipSrcH = ptSource.y;
-        while (nSkipSrcH > 0) {
-            int nRemainingWidth = nWidth;
-            while (nRemainingWidth != 0) {
-                BYTE nColor = pFrameData[pos];
-                if (nColor == nTransparentColor) {
-                    if (nRunLength == 0) {
-                        nRunLength = pFrameData[pos + 1] + 1;
-                    }
-
-                    if (nRemainingWidth == nRunLength) {
-                        pos += 2;
-
-                        nRunLength = 0;
-                        nRemainingWidth = 0;
-                    } else if (nRemainingWidth > nRunLength) {
-                        pos += 2;
-
-                        nRemainingWidth -= nRunLength;
-                        nRunLength = 0;
-                    } else {
-                        nRunLength -= nRemainingWidth;
-                        nRemainingWidth = 0;
-                    }
-                } else {
-                    pos++;
-                    nRemainingWidth--;
-                }
-            }
-            nSkipSrcH--;
-        }
-
-        // Skip dest top.
-        int nSkipDestH = max(rClip.top - pt.y, 0);
-        while (nSkipDestH > 0) {
-            int nRemainingWidth = nWidth;
-            while (nRemainingWidth != 0) {
-                BYTE nColor = pFrameData[pos];
-                if (nColor == nTransparentColor) {
-                    if (nRunLength == 0) {
-                        nRunLength = pFrameData[pos + 1] + 1;
-                    }
-
-                    if (nRemainingWidth == nRunLength) {
-                        pos += 2;
-
-                        pDest += nRemainingWidth;
-                        nRunLength = 0;
-                        nRemainingWidth = 0;
-                    } else if (nRemainingWidth > nRunLength) {
-                        pos += 2;
-
-                        pDest += nRunLength;
-                        nRemainingWidth -= nRunLength;
-                        nRunLength = 0;
-                    } else {
-                        pDest += nRemainingWidth;
-                        nRunLength -= nRemainingWidth;
-                        nRemainingWidth = 0;
-                    }
-                } else {
-                    pos++;
-
-                    pDest++;
-                    nRemainingWidth--;
-                }
-            }
-            pDest += lPitch / 4 - nWidth;
-            nSkipDestH--;
-        }
-
-        int nBltH = min(nBltHeight - max(rClip.top - pt.y, 0), rClip.bottom - pt.y);
-        while (nBltH > 0) {
-            int nRemainingWidth = nWidth;
-
-            // Skip src left.
-            int nSkipSrcW = min(ptSource.x, nRemainingWidth);
-            nRemainingWidth -= nSkipSrcW;
-            while (nSkipSrcW > 0) {
-                BYTE nColor = pFrameData[pos];
-                if (nColor == nTransparentColor) {
-                    if (nRunLength == 0) {
-                        nRunLength = pFrameData[pos + 1] + 1;
-                    }
-
-                    if (nSkipSrcW == nRunLength) {
-                        pos += 2;
-
-                        nRunLength = 0;
-                        nSkipSrcW = 0;
-                    } else if (nSkipSrcW > nRunLength) {
-                        pos += 2;
-
-                        nSkipSrcW -= nRunLength;
-                        nRunLength = 0;
-                    } else {
-                        nRunLength -= nSkipSrcW;
-                        nSkipSrcW = 0;
-                    }
-                } else {
-                    pos++;
-                    nSkipSrcW--;
-                }
-            }
-
-            // Skip dest left.
-            int nSkipDestW = min(max(rClip.left - pt.x, 0), nRemainingWidth);
-            nRemainingWidth -= nSkipDestW;
-            while (nSkipDestW > 0) {
-                BYTE nColor = pFrameData[pos];
-                if (nColor == nTransparentColor) {
-                    if (nRunLength == 0) {
-                        nRunLength = pFrameData[pos + 1] + 1;
-                    }
-
-                    if (nSkipDestW == nRunLength) {
-                        pos += 2;
-
-                        pDest += nSkipDestW;
-                        nRunLength = 0;
-                        nSkipDestW = 0;
-                    } else if (nSkipDestW > nRunLength) {
-                        pos += 2;
-
-                        pDest += nRunLength;
-                        nSkipDestW -= nRunLength;
-                        nRunLength = 0;
-                    } else {
-                        pDest += nSkipDestW;
-                        nRunLength -= nSkipDestW;
-                        nSkipDestW = 0;
-                    }
-                } else {
-                    pos++;
-                    pDest++;
-                    nSkipDestW--;
-                }
-            }
-
-            // Blt.
-            int nBltW = min(max(rClip.right - rClip.left, 0), nRemainingWidth);
-            nRemainingWidth -= nBltW;
-            while (nBltW > 0) {
-                BYTE nColor = pFrameData[pos];
-                if (nColor == nTransparentColor) {
-                    if (nRunLength == 0) {
-                        nRunLength = pFrameData[pos + 1] + 1;
-                    }
-
-                    if (nBltW == nRunLength) {
-                        pos += 2;
-
-                        pDest += nBltW;
-                        nRunLength = 0;
-                        nBltW = 0;
-                    } else if (nBltW > nRunLength) {
-                        pos += 2;
-
-                        pDest += nRunLength;
-                        nBltW -= nRunLength;
-                        nRunLength = 0;
-                    } else {
-                        pDest += nBltW;
-                        nRunLength -= nBltW;
-                        nBltW = 0;
-                    }
-                } else {
-                    pos++;
-
-                    *pDest++ = CVidImage::rgbTempPal[nColor];
-                    nBltW--;
-                }
-            }
-
-            // Skip remainder.
-            while (nRemainingWidth > 0) {
-                BYTE nColor = pFrameData[pos];
-                if (nColor == nTransparentColor) {
-                    if (nRunLength == 0) {
-                        nRunLength = pFrameData[pos + 1] + 1;
-                    }
-
-                    if (nRemainingWidth == nRunLength) {
-                        pos += 2;
-
-                        pDest += nRemainingWidth;
-                        nRunLength = 0;
-                        nRemainingWidth = 0;
-                    } else if (nRemainingWidth > nRunLength) {
-                        pos += 2;
-
-                        pDest += nRunLength;
-                        nRemainingWidth -= nRunLength;
-                        nRunLength = 0;
-                    } else {
-                        pDest += nRemainingWidth;
-                        nRunLength -= nRemainingWidth;
-                        nRemainingWidth = 0;
-                    }
-                } else {
-                    pos++;
-
-                    pDest++;
-                    nRemainingWidth--;
-                }
-            }
-            pDest += lPitch / 4 - nBltWidth;
-            nBltH--;
-        }
-    } else {
+    if (!pRes->GetCompressed(m_pFrame, m_bDoubleSize)) {
         INT nSrcJump = ptSource.x;
+        INT nSrc = m_pFrame->nWidth * ptSource.y + ptSource.x;
         INT nBltH = nBltHeight;
-        INT nBltW = nBltWidth;
-
-        pFrameData += m_pFrame->nWidth * ptSource.y + ptSource.x;
 
         if (pt.y < rClip.top) {
-            nBltH -= rClip.top - pt.y;
-            pDest += lPitch / 4 * (rClip.top - pt.y);
-            pFrameData += m_pFrame->nWidth * (rClip.top - pt.y);
+            pDest += (rClip.top - pt.y) * lPitch;
+            nSrc += (rClip.top - pt.y) * m_pFrame->nWidth;
+            nBltH = pt.y - rClip.top + nBltHeight;
         }
 
-        if (pt.y + nBltHeight > rClip.bottom) {
-            nBltH -= pt.y + nBltHeight - rClip.bottom;
+        if (nBltHeight + pt.y > rClip.bottom) {
+            nBltH += rClip.bottom - pt.y - nBltHeight;
         }
 
+        INT nBltW = nBltWidth;
         if (pt.x < rClip.left) {
-            nBltW -= rClip.left - pt.x;
-            nSrcJump += rClip.left - pt.x;
-            pFrameData += rClip.left - pt.x;
-            pDest += rClip.left - pt.x; // iwd2r: was pSurface, which is not read again
+            nSrcJump = ptSource.x + rClip.left - pt.x;
+            nBltW = pt.x - rClip.left + nBltWidth;
+            nSrc += rClip.left - pt.x;
+            pDest += rClip.left - pt.x;
         }
 
-        if (pt.x + nBltWidth > rClip.right) {
-            nBltW -= pt.x + nBltWidth - rClip.right;
-            nSrcJump += pt.x + nBltWidth - rClip.right;
+        if (nBltWidth + pt.x > rClip.right) {
+            nSrcJump += pt.x - rClip.right + nBltWidth;
+            nBltW += rClip.right - pt.x - nBltWidth;
         }
 
         if (nTransVal == 0) {
-            for (int y = 0; y < nBltH; y++) {
-                for (int x = 0; x < nBltW; x++) {
-                    BYTE nColor = *pFrameData;
-                    if (nColor != nTransparentColor) {
-                        *pDest = CVidImage::rgbTempPal[nColor];
+            for (INT y = nBltH; y > 0; y--) {
+                for (INT x = nBltW; x > 0; x--) {
+                    if (pFrameData[nSrc] != nTransparentColor) {
+                        *pDest = CVidImage::rgbTempPal[pFrameData[nSrc]];
                     }
-                    pFrameData++;
                     pDest++;
+                    nSrc++;
                 }
-                pDest += lPitch / 4 - nBltW; // iwd2r: was nBltWidth, which sheared right-clipped rows
-                pFrameData += nSrcJump;
+                nSrc += nSrcJump;
+                pDest += lPitch - nBltW;
             }
         } else {
-            for (int y = 0; y < nBltH; y++) {
-                for (int x = 0; x < nBltW; x++) {
-                    BYTE nColor = *pFrameData;
+            // The frame's indices scale the surface's alpha byte; a
+            // transparent pixel clears it.
+            for (INT y = nBltH; y > 0; y--) {
+                for (INT x = nBltW; x > 0; x--) {
+                    BYTE nColor = pFrameData[nSrc];
                     if (nColor == nTransparentColor) {
                         *pDest &= 0xFFFFFF;
                     } else {
-                        *pDest = (*pDest & 0xFFFFFF) | ((nColor * (*pDest >> 24)) << 16) & 0xFF000000;
+                        *pDest = (*pDest & 0xFFFFFF) | (((*pDest >> 24) * nColor) << 16) & 0xFF000000;
                     }
-                    pFrameData++;
                     pDest++;
+                    nSrc++;
                 }
-                pDest += lPitch / 4 - nBltW; // iwd2r: was nBltWidth, which sheared right-clipped rows
-                pFrameData += nSrcJump;
+                pDest += lPitch - nBltW;
+                nSrc += nSrcJump;
+            }
+        }
+    } else {
+        INT nRunLength = 0;
+        INT nRemaining;
+        INT nStep;
+
+        // Skip the source rows above ptSource.
+        for (INT y = ptSource.y; y > 0; y--) {
+            nRemaining = nFrameWidth;
+            while (nRemaining > 0) {
+                if (pFrameData[pos] == nTransparentColor) {
+                    if (nRunLength == 0) {
+                        nRunLength = pFrameData[pos + 1] + 1;
+                    }
+
+                    if (nRemaining == nRunLength) {
+                        nRunLength = 0;
+                        pos += 2;
+                        break;
+                    }
+
+                    if (nRemaining <= nRunLength) {
+                        nRunLength -= nRemaining;
+                        break;
+                    }
+
+                    pos += 2;
+                    nStep = -nRunLength;
+                    nRunLength = 0;
+                } else {
+                    pos++;
+                    nStep = -1;
+                }
+                nRemaining += nStep;
+            }
+        }
+
+        // Skip the rows above the clip.
+        INT nSkipRows = pt.y < rClip.top ? rClip.top - pt.y : 0;
+        for (INT y = nSkipRows; y > 0; y--) {
+            nRemaining = nFrameWidth;
+            while (nRemaining > 0) {
+                if (pFrameData[pos] == nTransparentColor) {
+                    if (nRunLength == 0) {
+                        nRunLength = pFrameData[pos + 1] + 1;
+                    }
+
+                    if (nRemaining == nRunLength) {
+                        nRunLength = 0;
+                        pDest += nRemaining;
+                        pos += 2;
+                        break;
+                    }
+
+                    if (nRemaining <= nRunLength) {
+                        pDest += nRemaining;
+                        nRunLength -= nRemaining;
+                        break;
+                    }
+
+                    pos += 2;
+                    nStep = -nRunLength;
+                    pDest += nRunLength;
+                    nRunLength = 0;
+                } else {
+                    pDest++;
+                    pos++;
+                    nStep = -1;
+                }
+                nRemaining += nStep;
+            }
+            pDest += lPitch - nFrameWidth;
+        }
+
+        SHORT nLeft = static_cast<SHORT>(rClip.left) - static_cast<SHORT>(pt.x);
+        INT nSkipLeft = nLeft < 0 ? 0 : nLeft;
+        INT nDrawEnd = nBltWidth - nSkipLeft;
+        if (nDrawEnd != 0) {
+            INT nRight = nBltWidth;
+            if (rClip.right - pt.x <= nBltWidth) {
+                nRight = rClip.right - pt.x;
+            }
+            INT nDrawStart = nBltWidth - nRight;
+
+            INT nRows = nBltHeight - nSkipRows;
+            if (nRows < 0) {
+                nRows = 0;
+            }
+            if (nRows > rClip.bottom - pt.y) {
+                nRows = rClip.bottom - pt.y;
+            }
+
+            for (; nRows > 0; nRows--) {
+                // Skip the source columns left of ptSource.
+                nRemaining = ptSource.x;
+                while (nRemaining > 0) {
+                    if (pFrameData[pos] == nTransparentColor) {
+                        if (nRunLength == 0) {
+                            nRunLength = pFrameData[pos + 1] + 1;
+                        }
+
+                        if (nRemaining == nRunLength) {
+                            nRunLength = 0;
+                            pos += 2;
+                            break;
+                        }
+
+                        if (nRemaining <= nRunLength) {
+                            nRunLength -= nRemaining;
+                            break;
+                        }
+
+                        pos += 2;
+                        nStep = -nRunLength;
+                        nRunLength = 0;
+                    } else {
+                        pos++;
+                        nStep = -1;
+                    }
+                    nRemaining += nStep;
+                }
+
+                // The row: pixels whose remaining count lies in
+                // (nDrawStart, nDrawEnd] are drawn, the clip's columns.
+                nRemaining = nBltWidth;
+                if (nTransVal != 0) {
+                    while (nRemaining > 0) {
+                        BYTE nColor = pFrameData[pos];
+                        if (nColor == nTransparentColor) {
+                            if (nRunLength == 0) {
+                                nRunLength = pFrameData[pos + 1] + 1;
+                            }
+
+                            if (nRemaining == nRunLength) {
+                                do {
+                                    if (nRemaining <= nDrawEnd && nDrawStart < nRemaining) {
+                                        *pDest &= 0xFFFFFF;
+                                    }
+                                    pDest++;
+                                    nRemaining--;
+                                } while (nRemaining > 0);
+                                pos += 2;
+                                nRunLength = 0;
+                                continue;
+                            }
+
+                            if (nRemaining <= nRunLength) {
+                                nRunLength -= nRemaining;
+                                for (; nRemaining > 0; nRemaining--) {
+                                    if (nRemaining <= nDrawEnd && nDrawStart < nRemaining) {
+                                        reinterpret_cast<BYTE*>(pDest)[3] = 0;
+                                    }
+                                    pDest++;
+                                }
+                                break;
+                            }
+
+                            pos += 2;
+                            for (; nRunLength > 0; nRunLength--) {
+                                if (nRemaining <= nDrawEnd && nDrawStart < nRemaining) {
+                                    *pDest &= 0xFFFFFF;
+                                }
+                                pDest++;
+                                nRemaining--;
+                            }
+                        } else {
+                            if (nRemaining <= nDrawEnd && nDrawStart < nRemaining) {
+                                *pDest = (*pDest & 0xFFFFFF) | (((*pDest >> 24) * nColor) << 16) & 0xFF000000;
+                            }
+                            pDest++;
+                            pos++;
+                            nRemaining--;
+                        }
+                    }
+                } else {
+                    while (nRemaining > 0) {
+                        if (pFrameData[pos] == nTransparentColor) {
+                            if (nRunLength == 0) {
+                                nRunLength = pFrameData[pos + 1] + 1;
+                            }
+
+                            if (nRemaining == nRunLength) {
+                                nRunLength = 0;
+                                pDest += nRemaining;
+                                pos += 2;
+                                break;
+                            }
+
+                            if (nRemaining <= nRunLength) {
+                                pDest += nRemaining;
+                                nRunLength -= nRemaining;
+                                break;
+                            }
+
+                            pos += 2;
+                            nStep = -nRunLength;
+                            pDest += nRunLength;
+                            nRunLength = 0;
+                        } else {
+                            if (nRemaining <= nDrawEnd && nDrawStart < nRemaining) {
+                                *pDest = CVidImage::rgbTempPal[pFrameData[pos]];
+                            }
+                            pDest++;
+                            pos++;
+                            nStep = -1;
+                        }
+                        nRemaining += nStep;
+                    }
+                }
+
+                pDest += lPitch - nBltWidth;
             }
         }
     }
@@ -1967,8 +2439,9 @@ BOOL CVidCell::Blt8To32Brightest(DWORD* pSurface, LONG lPitch, DWORD dwFlags)
         : pRes->m_pBamHeader;
     BYTE nTransparentColor = pBamHeader->nTransparentColor;
 
-    // NOTE: Original code is different, not sure if the implementation is
-    // right.
+    // The original is hand-written assembly (0x7D0837 to 0x7D093A): each
+    // channel byte takes the larger of the surface's and the palette's, and
+    // the surface's top byte is kept.
     if (pRes->GetCompressed(m_pFrame, m_bDoubleSize)) {
         int nRunLength = 0;
         int pos = 0;
@@ -2003,9 +2476,10 @@ BOOL CVidCell::Blt8To32Brightest(DWORD* pSurface, LONG lPitch, DWORD dwFlags)
 
                     // NOTE: Not present in uncompressed data branch.
                     if ((CVidImage::rgbTempPal[nColor] & 0xF0F0F0) != 0) {
-                        *pSurface = RGB(max(GetRValue(*pSurface), GetRValue(CVidImage::rgbTempPal[nColor])),
-                            max(GetGValue(*pSurface), GetGValue(CVidImage::rgbTempPal[nColor])),
-                            max(GetBValue(*pSurface), GetBValue(CVidImage::rgbTempPal[nColor])));
+                        *pSurface = (*pSurface & 0xFF000000)
+                            | RGB(max(GetRValue(*pSurface), GetRValue(CVidImage::rgbTempPal[nColor])),
+                                max(GetGValue(*pSurface), GetGValue(CVidImage::rgbTempPal[nColor])),
+                                max(GetBValue(*pSurface), GetBValue(CVidImage::rgbTempPal[nColor])));
                     }
 
                     pSurface++;
@@ -2019,9 +2493,10 @@ BOOL CVidCell::Blt8To32Brightest(DWORD* pSurface, LONG lPitch, DWORD dwFlags)
             for (int x = 0; x < nWidth; x++) {
                 BYTE nColor = *pFrameData;
                 if (nColor != nTransparentColor) {
-                    *pSurface = RGB(max(GetRValue(*pSurface), GetRValue(CVidImage::rgbTempPal[nColor])),
-                        max(GetGValue(*pSurface), GetGValue(CVidImage::rgbTempPal[nColor])),
-                        max(GetBValue(*pSurface), GetBValue(CVidImage::rgbTempPal[nColor])));
+                    *pSurface = (*pSurface & 0xFF000000)
+                        | RGB(max(GetRValue(*pSurface), GetRValue(CVidImage::rgbTempPal[nColor])),
+                            max(GetGValue(*pSurface), GetGValue(CVidImage::rgbTempPal[nColor])),
+                            max(GetBValue(*pSurface), GetBValue(CVidImage::rgbTempPal[nColor])));
                 }
                 pFrameData++;
                 pSurface++;

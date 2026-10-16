@@ -76,7 +76,20 @@ public:
     static void RenderFan(const VERTEX_DESC* pVertices, INT nVertices);
     static void RenderQuad(const VERTEX_DESC* pVertices, INT nVertices);
     static void RenderBlackFade3d();
+    DWORD ScaleColor16(DWORD color, INT nScale);
+    DWORD GetIntensity16(DWORD color);
+    // A 24-bit pixel: the colour's low word, then its third byte.
+    static void PutPixel24(BYTE* pPixel, DWORD color)
+    {
+        pPixel[0] = static_cast<BYTE>(color);
+        pPixel[1] = static_cast<BYTE>(color >> 8);
+        pPixel[2] = static_cast<BYTE>(color >> 16);
+    }
+    void ScanLine24(BYTE* pSurface, UINT nMajorAxis, UINT nMinorAxis, INT nMajorAxisAdjust, INT nMinorAxisAdjust, DWORD color);
+    void ScanLine16(WORD* pSurface, UINT nMajorAxis, UINT nMinorAxis, INT nMajorAxisAdjust, INT nMinorAxisAdjust, WORD color);
     void ScanLine32(DWORD* pSurface, UINT nMajorAxis, UINT nMinorAxis, INT nMajorAxisAdjust, INT nMinorAxisAdjust, DWORD color);
+    void sub_79A950(WORD* pSurface, UINT nMajorAxis, UINT nMinorAxis, INT nMajorAxisAdjust, INT nMinorAxisAdjust, UINT nThickness, WORD color);
+    void sub_7CA630(BYTE* pSurface, UINT nMajorAxis, UINT nMinorAxis, INT nMajorAxisAdjust, INT nMinorAxisAdjust, UINT nThickness, DWORD color);
     void sub_7CC130(DWORD* pSurface, UINT nMajorAxis, UINT nMinorAxis, INT nMajorAxisAdjust, INT nMinorAxisAdjust, UINT nThickness, DWORD color);
 
     CVidMode();
