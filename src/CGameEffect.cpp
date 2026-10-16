@@ -1532,9 +1532,7 @@ BOOL CGameEffect::sub_4A3310(CGameSprite* pSprite, BYTE* pRoll1, BYTE* pRoll2, B
             && pSource->GetAIType().m_nEnemyAlly <= CAIObjectType::EA_GOODCUTOFF) {
             pSprite->field_58C |= 0x200000;
 
-            // TODO: Incomplete. The original calls CGameSprite::sub_6F50A0
-            // (0x6F50A0) on the target here; it is ported on p3/combat and not
-            // yet on first. Wire it once that branch is merged.
+            pSprite->sub_6F50A0();
         }
 
         CAITrigger hitBy(CAITRIGGER_HITBY, pSource->GetAIType(), 0);
@@ -1746,9 +1744,7 @@ void CGameEffect::sub_4A3FF0(CGameSprite* pSprite)
             && pSource->GetAIType().m_nEnemyAlly <= CAIObjectType::EA_GOODCUTOFF) {
             pSprite->field_58C |= 0x200000;
 
-            // TODO: Incomplete. The original calls CGameSprite::sub_6F50A0
-            // (0x6F50A0) on the target here; it is ported on p3/combat and not
-            // yet on first. Wire it once that branch is merged.
+            pSprite->sub_6F50A0();
         }
 
         CMessage* message;
@@ -4605,9 +4601,7 @@ void CGameEffectDamage::OnAddSpecific(CGameSprite* pSprite)
         && pSource->GetAIType().m_nEnemyAlly <= CAIObjectType::EA_GOODCUTOFF) {
         pSprite->field_58C |= 0x200000;
 
-        // TODO: Incomplete. The original calls CGameSprite::sub_6F50A0
-        // (0x6F50A0) on the target here; it is ported on p3/combat and not
-        // yet on first. Wire it once that branch is merged.
+        pSprite->sub_6F50A0();
     }
 
     // HitBy carries the damage type (the flags' upper word).

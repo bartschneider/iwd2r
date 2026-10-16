@@ -860,6 +860,29 @@ TEST_CASE("OnAdd (0x4A3FF0) and Damage's OnAddSpecific (0x4A9B50) tell the targe
         }
     }
 
+    SECTION("the target's teams become the party's enemies (CGameSprite::sub_6F50A0)")
+    {
+        // Teams 0 and 2.
+        pGoblin->field_58C = 0x5;
+        CVariableHash* pVariables = g_pBaldurChitin->GetObjectGame()->GetVariables();
+        CVariable* pTeam0 = pVariables->FindKey(CString("TEAM_0_ENEMY"));
+        if (pTeam0 != NULL) {
+            pTeam0->m_intValue = 0;
+        }
+
+        std::unique_ptr<CGameEffect> pEffect = Decode(CGAMEEFFECT_HOLDCREATURE, 0, 0, pProbe->GetId());
+        pEffect->m_sourceFlags = 0x400;
+        pEffect->sub_4A3FF0(pGoblin);
+
+        CHECK(pGoblin->field_58C == (0x5 | 0x200000));
+        pTeam0 = pVariables->FindKey(CString("TEAM_0_ENEMY"));
+        REQUIRE(pTeam0 != NULL);
+        CHECK(pTeam0->m_intValue == 1);
+        CVariable* pTeam2 = pVariables->FindKey(CString("TEAM_2_ENEMY"));
+        REQUIRE(pTeam2 != NULL);
+        CHECK(pTeam2->m_intValue == 1);
+    }
+
     SECTION("an enemy source leaves the party member's hostility bit alone")
     {
         pProbe->field_58C &= ~0x200000;
