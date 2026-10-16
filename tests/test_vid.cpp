@@ -1731,3 +1731,89 @@ TEST_CASE("cell_blt_from_fx_keeps_the_key_mirrored", "[vid]")
     pBack->Release();
     pDirectDraw->Release();
 }
+
+// CVidBitmap::RenderDirect (0x7B3190) draws a 24-bit bitmap on a 32-bit
+// surface with BltBmp24To32Tint when any flag of the high word is set
+// (dwFlags & 0xFFFF0000, tested before each ApplyBrightnessContrast), or
+// when the brightness and contrast move mid grey. With them neutral, ours
+// tinted only for the latter, so the greyscale (0x80000) and tint (0x20000)
+// flags were dropped and the pixels copied as they are (fails here, checked
+// by removing the flag test). Keyed (0x1): each pixel is written with alpha
+// 0xFF. A 2 x 1 bitmap (row padded to 8 bytes) drawn at (1, 0).
+TEST_CASE("render_direct_tints_24bit_on_high_word_flags", "[vid]")
+{
+    ChitinScope scope;
+    CVidInf mode;
+    mode.m_dwRBitShift = 16;
+    mode.m_dwGBitShift = 8;
+    mode.m_dwBBitShift = 0;
+    IDirectDraw* pDirectDraw = NULL;
+    REQUIRE(DirectDrawCreate(NULL, &pDirectDraw, NULL) == DD_OK);
+    IDirectDrawSurface* pSurface = MakeSurface(pDirectDraw, 4, 2);
+    IDirectDrawSurface* surfaces[1] = { pSurface };
+    mode.m_nSurfaces = 1;
+    mode.pSurfaces = surfaces;
+    ActiveModeScope active(&mode);
+
+    BITMAPINFOHEADER info;
+    std::memset(&info, 0, sizeof(info));
+    info.biWidth = 2;
+    info.biHeight = 1;
+    info.biBitCount = 24;
+    // B, G, R per pixel: (R 0x60, G 0x30, B 0x90) and (R 0x10, G 0x20, B 0x30).
+    BYTE data[8] = { 0x90, 0x30, 0x60, 0x30, 0x20, 0x10, 0, 0 };
+    auto* resStorage = static_cast<unsigned char*>(::operator new(sizeof(CResBitmap)));
+    std::memset(resStorage, 0, sizeof(CResBitmap));
+    auto* res = reinterpret_cast<CResBitmap*>(resStorage);
+    res->bParsed = TRUE;
+    res->pBitmapInfoHeader = &info;
+    res->pBitmapData = data;
+    auto* bitmapStorage = static_cast<unsigned char*>(::operator new(sizeof(CVidBitmap)));
+    std::memset(bitmapStorage, 0, sizeof(CVidBitmap));
+    auto* bitmap = reinterpret_cast<CVidBitmap*>(bitmapStorage);
+    static_cast<CResHelper<CResBitmap, 1>*>(bitmap)->pRes = res;
+    bitmap->m_paletteAffects.rgbTintColor = RGB(0x80, 0x40, 0xFF);
+
+    auto pixel = [](DWORD r, DWORD g, DWORD b) { return 0xFF000000u | (r << 16) | (g << 8) | b; };
+    struct Case {
+        DWORD dwFlags;
+        DWORD first;
+        DWORD second;
+    };
+    const Case cases[] = {
+        // No high-word flag: copied.
+        { 0x1, pixel(0x60, 0x30, 0x90), pixel(0x10, 0x20, 0x30) },
+        // Greyscale: (r + g + b) >> 2 in each channel.
+        { 0x80001, pixel(0x48, 0x48, 0x48), pixel(0x18, 0x18, 0x18) },
+        // Tint by rgbTintColor: c * t >> 8.
+        { 0x20001, pixel(0x30, 0x0C, 0x8F), pixel(0x08, 0x08, 0x2F) },
+    };
+    for (const Case& c : cases) {
+        INFO("dwFlags 0x" << std::hex << c.dwFlags);
+        DDSURFACEDESC ddsd;
+        ddsd.dwSize = sizeof(ddsd);
+        REQUIRE(mode.LockSurface(0, &ddsd, CRect(0, 0, 4, 2)));
+        for (int y = 0; y < 2; ++y) {
+            std::memset(reinterpret_cast<BYTE*>(ddsd.lpSurface) + y * ddsd.lPitch, 0, 4 * 4);
+        }
+        mode.UnLockSurface(0, ddsd.lpSurface);
+
+        CHECK(bitmap->RenderDirect(0, 1, 0, CRect(0, 0, 4, 2), c.dwFlags, TRUE));
+
+        REQUIRE(mode.LockSurface(0, &ddsd, CRect(0, 0, 4, 2)));
+        const DWORD* row = reinterpret_cast<const DWORD*>(ddsd.lpSurface);
+        const std::vector<DWORD> drawn(row, row + 4);
+        const DWORD* below = reinterpret_cast<const DWORD*>(reinterpret_cast<const BYTE*>(ddsd.lpSurface) + ddsd.lPitch);
+        const std::vector<DWORD> under(below, below + 4);
+        mode.UnLockSurface(0, ddsd.lpSurface);
+        CHECK(drawn == std::vector<DWORD> { 0, c.first, c.second, 0 });
+        CHECK(under == std::vector<DWORD>(4, 0u));
+    }
+
+    mode.m_nSurfaces = 0;
+    mode.pSurfaces = NULL;
+    ::operator delete(bitmapStorage);
+    ::operator delete(resStorage);
+    pSurface->Release();
+    pDirectDraw->Release();
+}
