@@ -744,21 +744,29 @@ TEST_CASE("inventory: identifying with the last scroll uses it up", "[uimisc][in
 // past their end), so a trail byte that equals a separator matched.
 TEST_CASE("util: FindOneOf skips a double-byte character of the searched string", "[uimisc][util]")
 {
-#ifdef _WIN32
-    SKIP("[iwd2r-skip] IsDBCSLeadByte is the system's code page on Windows");
-#else
-    // FindOneOf reads only field_1A0 of the chitin.
+    // FindOneOf reads only field_1A0 of the chitin. When another case has
+    // started the engine, its threads read g_pChitin: the case changes only
+    // that flag on the engine's chitin and puts it back (no main loop runs
+    // in the tests, so nothing lays out text meanwhile). Without an engine
+    // no thread reads g_pChitin, and a zeroed chitin stands in.
+    // IsDBCSLeadByte is the shim's on every platform
+    // (platform/win32_stubs.cpp).
     CChitin* pSaved = g_pChitin;
-    std::unique_ptr<unsigned char[]> storage(new unsigned char[sizeof(CChitin)]());
-    g_pChitin = reinterpret_cast<CChitin*>(storage.get());
+    std::unique_ptr<unsigned char[]> storage;
+    if (g_pChitin == NULL) {
+        storage.reset(new unsigned char[sizeof(CChitin)]());
+        g_pChitin = reinterpret_cast<CChitin*>(storage.get());
+    }
     struct Restore {
         CChitin* pChitin;
+        int nFlag;
         ~Restore()
         {
-            g_pChitin = pChitin;
             iwd2r_SetTestLeadBytes(nullptr);
+            g_pChitin->field_1A0 = nFlag;
+            g_pChitin = pChitin;
         }
-    } restore { pSaved };
+    } restore { pSaved, g_pChitin->field_1A0 };
 
     // A single-byte code page.
     g_pChitin->field_1A0 = 0;
@@ -789,7 +797,6 @@ TEST_CASE("util: FindOneOf skips a double-byte character of the searched string"
     CHECK(CUtil::FindOneOf(CString("x\x81y,"), CString("\x81,"), 0) == 3);
     CHECK(CUtil::FindOneOf(CString("x,"), CString("\x81"), 0) == -1);
     CHECK(CUtil::FindOneOf(CString("abcdefghijklmnopqrstuvwxyz;"), CString(";"), 0) == 26);
-#endif
 }
 
 // SelectToolbar (0x5ADAE0): one selected party member gives the action bar
