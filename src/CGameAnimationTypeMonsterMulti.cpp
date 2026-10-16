@@ -829,6 +829,116 @@ void CGameAnimationTypeMonsterMulti::SetColorRangeAll(BYTE rangeValue)
     }
 }
 
+// 0x6B71F0
+void CGameAnimationTypeMonsterMulti::Render(CInfinity* pInfinity, CVidMode* pVidMode, INT nSurface, const CRect& rectFX, const CPoint& ptNewPos, const CPoint& ptReference, DWORD dwRenderFlags, COLORREF rgbTintColor, const CRect& rGCBounds, BOOL bDithered, BOOL bFadeOut, LONG posZ, BYTE transparency)
+{
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjAnimation.cpp
+    // __LINE__: 11138
+    UTIL_ASSERT(pInfinity != NULL && pVidMode != NULL);
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjAnimation.cpp
+    // __LINE__: 11139
+    UTIL_ASSERT(m_currentVidCell != NULL);
+
+    // The part of the area on screen: each quadrant is drawn only when its
+    // bounds reach into it. rectFX, ptReference and rGCBounds are not used.
+    CRect rWorldViewPort(pInfinity->nCurrentX,
+        pInfinity->nCurrentY,
+        pInfinity->nCurrentX + pInfinity->rViewPort.Width(),
+        pInfinity->nCurrentY + pInfinity->rViewPort.Height());
+    CPoint ptPos(ptNewPos.x, ptNewPos.y + posZ);
+
+    if (m_currentBamDirection > m_extendDirectionTest) {
+        dwRenderFlags |= CInfinity::MIRROR_FX;
+    }
+
+    dwRenderFlags |= CInfinity::FXPREP_COPYFROMBACK | 0x4;
+
+    if (transparency != 0) {
+        dwRenderFlags |= 0x2;
+    }
+
+    if (field_446) {
+        field_44A->GetRes()->Demand();
+    }
+
+    CPoint ptQuadCenter;
+    CSize frameSize;
+    CRect rFXRect;
+    CRect rQuadGCBounds;
+    for (BYTE quad = 0; quad < m_nQuadrants; quad++) {
+        m_currentVidCell[quad].GetCurrentCenterPoint(ptQuadCenter, FALSE);
+        m_currentVidCell[quad].GetCurrentFrameSize(frameSize, FALSE);
+        rFXRect.SetRect(0, 0, frameSize.cx, frameSize.cy);
+
+        // NOTE: The FX surface's size overwrites frameSize and is not used.
+        pVidMode->GetFXSize(frameSize);
+
+        CalculateGCBoundsRect(rQuadGCBounds,
+            ptNewPos,
+            ptQuadCenter,
+            posZ,
+            rFXRect.Width(),
+            rFXRect.Height());
+
+        if (!(rWorldViewPort & rQuadGCBounds).IsRectEmpty()) {
+            pInfinity->FXPrep(rFXRect, dwRenderFlags, nSurface, ptPos, ptQuadCenter);
+
+            if (pInfinity->FXLock(rFXRect, dwRenderFlags)) {
+                if (field_446) {
+                    m_currentVidCell[quad].SetPalette(field_44A->GetRes()->GetColorTable(),
+                        field_44A->GetRes()->GetColorCount(),
+                        CVidPalette::TYPE_RESOURCE);
+                }
+
+                // Each channel is the cell's and the tint's added less 255,
+                // at least 0 (red from the low bytes).
+                COLORREF oldTintColor = m_currentVidCell[quad].GetTintColor();
+                INT r = GetRValue(oldTintColor) + GetRValue(rgbTintColor) - 255;
+                INT g = GetGValue(oldTintColor) + GetGValue(rgbTintColor) - 255;
+                INT b = GetBValue(oldTintColor) + GetBValue(rgbTintColor) - 255;
+                m_currentVidCell[quad].SetTintColor(RGB(r >= 0 ? r : 0, g >= 0 ? g : 0, b >= 0 ? b : 0));
+
+                pInfinity->FXRender(&(m_currentVidCell[quad]),
+                    ptQuadCenter.x,
+                    ptQuadCenter.y,
+                    dwRenderFlags,
+                    transparency);
+
+                m_currentVidCell[quad].SetTintColor(oldTintColor);
+
+                // NOTE: The quadrant's bounds go to the clipping polygons as
+                // they are, not raised by posZ.
+                pInfinity->FXRenderClippingPolys(ptPos.x,
+                    ptPos.y - posZ,
+                    posZ,
+                    ptQuadCenter,
+                    rQuadGCBounds,
+                    bDithered,
+                    dwRenderFlags);
+
+                if (bFadeOut) {
+                    pInfinity->FXUnlock(dwRenderFlags, &rFXRect, ptPos + ptQuadCenter);
+                } else {
+                    pInfinity->FXUnlock(dwRenderFlags, NULL, CPoint(0, 0));
+                }
+
+                pInfinity->FXBltFrom(nSurface,
+                    rFXRect,
+                    ptPos.x,
+                    ptPos.y,
+                    ptQuadCenter.x,
+                    ptQuadCenter.y,
+                    dwRenderFlags);
+            }
+        }
+    }
+
+    if (field_446) {
+        field_44A->GetRes()->Release();
+    }
+}
+
 // 0x6B9CA0
 void CGameAnimationTypeMonsterMulti::GetAnimationResRef(CString& resRef, BYTE range)
 {
