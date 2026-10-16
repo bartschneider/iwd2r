@@ -556,6 +556,7 @@ public:
     void sub_723BF0(BOOLEAN a1, BOOLEAN a2);
     INT GetAC();
     INT sub_723DB0();
+    INT sub_723EA0();
     INT sub_723F60();
     void sub_71E240(CCreatureFileHeader& oldBaseStats, CDerivedStats& oldDStats);
     void sub_71E750(CCreatureFileHeader& oldBaseStats, CDerivedStats& oldDStats);

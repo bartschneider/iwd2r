@@ -12165,6 +12165,57 @@ skip:
         + 10;
 }
 
+// 0x723EA0
+INT CGameSprite::sub_723EA0()
+{
+    // The dexterity bonus to the armor class, as GetAC counts it: capped by
+    // the armor, and none while blind without Blind Fight.
+    INT nDexMod = g_pBaldurChitin->GetObjectGame()->GetRuleTables().GetAbilityScoreModifier(m_derivedStats.m_nDEX);
+
+    if (m_equipment.m_items[1] != NULL) {
+        INT nMaxDexMod;
+        switch (m_equipment.m_items[1]->GetItemType()) {
+        case 60:
+            nMaxDexMod = 6;
+            break;
+        case 61:
+            nMaxDexMod = 5;
+            break;
+        case 62:
+            nMaxDexMod = 2;
+            break;
+        case 63:
+        case 64:
+            nMaxDexMod = 0;
+            break;
+        case 65:
+            nMaxDexMod = 1;
+            break;
+        case 66:
+            nMaxDexMod = 4;
+            break;
+        case 68:
+            nMaxDexMod = 3;
+            break;
+        default:
+            goto skip;
+        }
+
+        if (nMaxDexMod < nDexMod) {
+            nDexMod = nMaxDexMod;
+        }
+    }
+skip:
+
+    if ((m_derivedStats.m_generalState & STATE_BLIND) != 0
+        && nDexMod > 0
+        && !sub_763150(CGAMESPRITE_FEAT_BLIND_FIGHT)) {
+        return 0;
+    }
+
+    return nDexMod;
+}
+
 // 0x723F60
 INT CGameSprite::sub_723F60()
 {
