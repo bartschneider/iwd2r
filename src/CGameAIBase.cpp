@@ -3017,10 +3017,64 @@ CAIAction& CGameAIBase::GetNextAction(CAIAction& action)
     return action;
 }
 
+// The rectangles that cover r for the polygon fills (CGameContainer::FillPoly,
+// CGameDoor::FillClosedPoly and FillOpenPoly, the trigger's): r itself when
+// it is at most 512 x 512, else new 512 x 512 pieces of it, row by row (the
+// owners delete them when there are more than one).
+//
 // 0x481890
 void CGameAIBase::sub_481890(CRect* r, CArray<CRect*>& ary)
 {
-    // TODO: Incomplete.
+    INT nWidth = r->right - r->left;
+    INT nRows = 1;
+    INT nColumns = 1;
+    BOOL bWide = FALSE;
+
+    if (nWidth > 512) {
+        nColumns = nWidth / 512 + 1;
+        bWide = TRUE;
+    }
+
+    INT nHeight = r->bottom - r->top;
+    if (nHeight > 512) {
+        nRows = nHeight / 512 + 1;
+    } else if (!bWide) {
+        ary.SetSize(0, -1);
+        ary.SetAtGrow(ary.GetSize(), r);
+        return;
+    }
+
+    ary.SetSize(0, 4);
+
+    // NOTE: The original compares the offsets, which start at 0, with r's
+    // right and bottom edges, not with its size (0x481913, 0x48192C); kept.
+    for (INT nRow = 0, y = 0; nRow < nRows; nRow++, y += 512) {
+        if (y > r->bottom) {
+            return;
+        }
+
+        for (INT nColumn = 0, x = 0; nColumn < nColumns; nColumn++, x += 512) {
+            if (x > r->right) {
+                break;
+            }
+
+            CRect* pRect = new CRect(r->left + x, r->top + y, INT_MAX, INT_MAX);
+
+            INT nPieceWidth = r->right - pRect->left;
+            if (nPieceWidth >= 512) {
+                nPieceWidth = 512;
+            }
+            pRect->right = pRect->left + nPieceWidth;
+
+            INT nPieceHeight = r->bottom - pRect->top;
+            if (nPieceHeight >= 512) {
+                nPieceHeight = 512;
+            }
+            pRect->bottom = pRect->top + nPieceHeight;
+
+            ary.SetAtGrow(ary.GetSize(), pRect);
+        }
+    }
 }
 
 // 0x467C50

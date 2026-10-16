@@ -102,7 +102,7 @@ function, its `extra_labels.txt` line can go.
 
 | Function | Case | Body |
 |---|---|---|
-| 0x4A42F0 CGameEffect::CheckSave | pending/check_save | none: g_pBaldurChitin's game, sprite vtables, feats, the object array |
+| 0x4A42F0 CGameEffect::CheckSave (ours ported, tests/test_effects_save.cpp) | pending/check_save | none: g_pBaldurChitin's game, sprite vtables, feats, the object array |
 | 0x72DE60 CGameSprite::ProcessEffectList (rolls the save d20s) | pending/save_rolls | none: the whole effect list |
 | 0x73B760 CGameSprite::Hit (attack d20 against AC) | pending/hit | none: equipped CItems, sprites from the constructor, the game's options (ours ported, tests/test_combat.cpp) |
 | 0x547020 CRuleTables::GetIterativeAttackBonus | rules/iterative_attack_bonus | compared with ours |

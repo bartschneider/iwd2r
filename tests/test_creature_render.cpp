@@ -1,45 +1,28 @@
 #define NOMINMAX
 #include <catch2/catch_test_macros.hpp>
 
-#include "CBaldurChitin.h"
-#include "CCacheStatus.h"
-#include "CCreatureFile.h"
 #include "CGameAnimationType.h"
+#include "CGameAnimationTypeAmbient.h"
+#include "CGameAnimationTypeFlying.h"
 #include "CGameAnimationTypeMonster.h"
 #include "CGameAnimationTypeMonsterAnkheg.h"
+#include "CGameAnimationTypeMonsterIcewind.h"
+#include "CGameAnimationTypeMonsterLarge.h"
+#include "CGameAnimationTypeMonsterLarge16.h"
 #include "CGameAnimationTypeMonsterMulti.h"
 #include "CGameAnimationTypeMonsterOld.h"
-#include "CGameArea.h"
+#include "CGameAnimationTypeMonsterQuadrant.h"
+#include "CGameAnimationTypeTownStatic.h"
 #include "CGameContainer.h"
 #include "CGameDoor.h"
 #include "CGameObjectArray.h"
-#include "CGameSprite.h"
-#include "CInfGame.h"
-#include "CInfinity.h"
-#include "CScreenCreateChar.h"
-#include "CScreenWorld.h"
-#include "CVidInf.h"
-#include "CVidMode.h"
-#include "ScreenLayout.h"
-#include "data_view.h"
-#include "platform/data_dir.h"
-#include "platform/png.h"
-#include "platform/window.h"
+#include "engine_world.h"
+#include "render_surfaces.h"
 
-#include <algorithm>
-#include <atomic>
-#include <chrono>
-#include <climits>
-#include <cstdint>
-#include <cstdlib>
-#include <cstring>
-#include <filesystem>
-#include <fstream>
 #include <functional>
-#include <iterator>
 #include <memory>
 #include <string>
-#include <thread>
+#include <typeinfo>
 #include <vector>
 
 // The Render functions of the creature animations that had none
@@ -58,260 +41,10 @@
 // IWD2R_SHOT_DIR set, each render is also written there as a PNG. Every
 // engine works on a private view of the install (tests/data_view.h).
 
+using namespace engine_world;
+using namespace render_surfaces;
+
 namespace {
-
-namespace fs = std::filesystem;
-
-fs::path g_view;
-
-const char* DataDir()
-{
-    const char* env = std::getenv("IWD2_DATA");
-    return env != nullptr && *env != '\0' ? env : nullptr;
-}
-
-// The engine as iwd2r_main builds it (tests/test_gam.cpp's StartEngine).
-bool StartEngine(std::string& error)
-{
-    static bool started = false;
-    static std::string startError;
-    static bool tried = false;
-    if (tried) {
-        error = startError;
-        return started;
-    }
-    tried = true;
-
-#ifdef _WIN32
-    _putenv_s("SDL_VIDEO_DRIVER", "dummy");
-    _putenv_s("SDL_AUDIO_DRIVER", "dummy");
-#else
-    setenv("SDL_VIDEO_DRIVER", "dummy", 1);
-    setenv("SDL_AUDIO_DRIVER", "dummy", 1);
-#endif
-    static std::unique_ptr<DataView> view;
-    const std::string original = DataDir();
-    view = std::make_unique<DataView>(original);
-    g_view = view->Path();
-#ifdef _WIN32
-    _putenv_s("IWD2_DATA", view->Path().c_str());
-#else
-    setenv("IWD2_DATA", view->Path().c_str(), 1);
-#endif
-    const bool found = platform::ResolveDataDir();
-#ifdef _WIN32
-    _putenv_s("IWD2_DATA", original.c_str());
-#else
-    setenv("IWD2_DATA", original.c_str(), 1);
-#endif
-    if (!found) {
-        startError = "data folder not found";
-        return false;
-    }
-    const iwd2r::ScreenSize screen = iwd2r::ReadScreenSize(".\\Icewind2.ini");
-    if (!screen.ok) {
-        startError = screen.error;
-        return false;
-    }
-    if (!platform::window::InitScreen(screen.width, screen.height, screen.scale)) {
-        startError = "SDL video could not start";
-        return false;
-    }
-    CBaldurChitin* chitin = new CBaldurChitin();
-    if (chitin->field_1932 != 0) {
-        startError = "CBaldurChitin refused to start";
-        return false;
-    }
-    chitin->Init(NULL);
-    POSITION pos = chitin->lEngines.GetHeadPosition();
-    while (pos != NULL) {
-        CWarp* pEngine = static_cast<CWarp*>(chitin->lEngines.GetNext(pos));
-        if (pEngine != NULL) {
-            pEngine->EngineInitialized();
-        }
-    }
-    chitin->m_pEngineCreateChar->SetVideoMode(0);
-    chitin->pActiveEngine = chitin->m_pEngineCreateChar;
-    started = true;
-    return true;
-}
-
-constexpr int kWidth = 640;
-constexpr int kHeight = 480;
-// The FX surfaces' colour key and the transparent fill (field_24): pure
-// green of the 32-bit format.
-constexpr DWORD kKey = 0x0000FF00;
-
-// The current video mode with shim surfaces: the back buffer, and the FX
-// surfaces 2 and 3 keyed as CVidInf::CreateSurfaces keys them, at 32 bpp,
-// faded in. A standalone CInfinity shows the area's top left corner over
-// the whole back buffer, so a world point is a screen point; it has no WED,
-// so FXRenderClippingPolys draws nothing.
-class RenderScope {
-public:
-    RenderScope()
-        : m_pVidMode(g_pChitin->GetCurrentVideoMode())
-        , m_nSurfacesBefore(m_pVidMode->m_nSurfaces)
-        , m_pSurfacesBefore(m_pVidMode->pSurfaces)
-        , m_nBppBefore(g_pChitin->cVideo.m_nBpp)
-        , m_shifts { m_pVidMode->m_dwRBitShift, m_pVidMode->m_dwGBitShift, m_pVidMode->m_dwBBitShift }
-        , m_field24Before(m_pVidMode->field_24)
-        , m_nFadeBefore(m_pVidMode->m_nFade)
-    {
-        for (IDirectDrawSurface*& pSurface : m_surfaces) {
-            pSurface = NULL;
-        }
-        if (DirectDrawCreate(NULL, &m_pDirectDraw, NULL) != DD_OK) {
-            m_pDirectDraw = NULL;
-            return;
-        }
-        DDCOLORKEY key = { kKey, kKey };
-        m_surfaces[CVIDINF_SURFACE_BACK] = Create(kWidth, kHeight);
-        m_surfaces[CVIDINF_SURFACE_2] = Create(CVIDINF_FX_WIDTH, CVIDINF_FX_HEIGHT);
-        m_surfaces[CVIDINF_SURFACE_3] = Create(CVIDINF_FX_WIDTH, CVIDINF_FX_HEIGHT);
-        if (m_surfaces[CVIDINF_SURFACE_2] != NULL) {
-            m_surfaces[CVIDINF_SURFACE_2]->SetColorKey(DDCKEY_SRCBLT, &key);
-        }
-        if (m_surfaces[CVIDINF_SURFACE_3] != NULL) {
-            m_surfaces[CVIDINF_SURFACE_3]->SetColorKey(DDCKEY_SRCBLT, &key);
-        }
-        m_pVidMode->m_nSurfaces = 9;
-        m_pVidMode->pSurfaces = m_surfaces;
-        g_pChitin->cVideo.m_nBpp = 32;
-        m_pVidMode->m_dwRBitShift = 16;
-        m_pVidMode->m_dwGBitShift = 8;
-        m_pVidMode->m_dwBBitShift = 0;
-        m_pVidMode->field_24 = kKey;
-        m_pVidMode->m_nFade = CVidMode::NUM_FADE_FRAMES;
-
-        m_infinity.pVidMode = m_pVidMode;
-        m_infinity.rViewPort = CRect(0, 0, kWidth, kHeight);
-        m_infinity.nCurrentX = 0;
-        m_infinity.nCurrentY = 0;
-    }
-    ~RenderScope()
-    {
-        m_pVidMode->m_nSurfaces = m_nSurfacesBefore;
-        m_pVidMode->pSurfaces = m_pSurfacesBefore;
-        g_pChitin->cVideo.m_nBpp = m_nBppBefore;
-        m_pVidMode->m_dwRBitShift = m_shifts[0];
-        m_pVidMode->m_dwGBitShift = m_shifts[1];
-        m_pVidMode->m_dwBBitShift = m_shifts[2];
-        m_pVidMode->field_24 = m_field24Before;
-        m_pVidMode->m_nFade = m_nFadeBefore;
-        for (IDirectDrawSurface* pSurface : m_surfaces) {
-            if (pSurface != NULL) {
-                pSurface->Release();
-            }
-        }
-        if (m_pDirectDraw != NULL) {
-            m_pDirectDraw->Release();
-        }
-    }
-    RenderScope(const RenderScope&) = delete;
-    RenderScope& operator=(const RenderScope&) = delete;
-
-    bool Ok() const
-    {
-        return m_surfaces[CVIDINF_SURFACE_BACK] != NULL && m_surfaces[CVIDINF_SURFACE_2] != NULL
-            && m_surfaces[CVIDINF_SURFACE_3] != NULL;
-    }
-
-    CInfinity* Infinity() { return &m_infinity; }
-    CVidMode* VidMode() { return m_pVidMode; }
-
-    // The back buffer, after filling it with `fill` when `clear` is set.
-    std::vector<DWORD> Back(bool clear = false, DWORD fill = 0)
-    {
-        std::vector<DWORD> pixels;
-        DDSURFACEDESC ddsd;
-        memset(&ddsd, 0, sizeof(ddsd));
-        ddsd.dwSize = sizeof(ddsd);
-        if (!m_pVidMode->LockSurface(CVIDINF_SURFACE_BACK, &ddsd, CRect(0, 0, kWidth, kHeight))) {
-            return pixels;
-        }
-        for (int y = 0; y < kHeight; y++) {
-            DWORD* row = reinterpret_cast<DWORD*>(reinterpret_cast<BYTE*>(ddsd.lpSurface) + y * ddsd.lPitch);
-            if (clear) {
-                std::fill(row, row + kWidth, fill);
-            }
-            pixels.insert(pixels.end(), row, row + kWidth);
-        }
-        m_pVidMode->UnLockSurface(CVIDINF_SURFACE_BACK, ddsd.lpSurface);
-        return pixels;
-    }
-
-private:
-    IDirectDrawSurface* Create(int width, int height)
-    {
-        DDSURFACEDESC desc;
-        memset(&desc, 0, sizeof(desc));
-        desc.dwSize = sizeof(desc);
-        desc.dwFlags = DDSD_CAPS | DDSD_HEIGHT | DDSD_WIDTH;
-        desc.ddsCaps.dwCaps = DDSCAPS_SYSTEMMEMORY | DDSCAPS_OFFSCREENPLAIN;
-        desc.dwWidth = width;
-        desc.dwHeight = height;
-        IDirectDrawSurface* pSurface = NULL;
-        if (m_pDirectDraw->CreateSurface(&desc, &pSurface, NULL) != DD_OK) {
-            return NULL;
-        }
-        return pSurface;
-    }
-
-    CVidMode* m_pVidMode;
-    IDirectDraw* m_pDirectDraw = NULL;
-    IDirectDrawSurface* m_surfaces[9];
-    UINT m_nSurfacesBefore;
-    IDirectDrawSurface** m_pSurfacesBefore;
-    USHORT m_nBppBefore;
-    DWORD m_shifts[3];
-    COLORREF m_field24Before;
-    BYTE m_nFadeBefore;
-    CInfinity m_infinity;
-};
-
-// With IWD2R_SHOT_DIR set, the back buffer as <dir>/<name>.png, to look at.
-void Shot(const std::vector<DWORD>& pixels, const std::string& name)
-{
-    const char* dir = std::getenv("IWD2R_SHOT_DIR");
-    if (dir == nullptr || *dir == '\0' || pixels.size() != static_cast<size_t>(kWidth * kHeight)) {
-        return;
-    }
-    const std::string path = std::string(dir) + "/" + name + ".png";
-    platform::WritePng(path.c_str(), reinterpret_cast<const uint32_t*>(pixels.data()), kWidth, kHeight, kWidth * 4);
-}
-
-// What one Render left in the back buffer, cleared to black first.
-struct Drawn {
-    int changed = 0; // pixels that are no longer black
-    int outside = 0; // of those, outside the expected bounds
-    int red = 0; // of those, with some red
-    int blue = 0; // of those, with some blue
-};
-
-Drawn Count(const std::vector<DWORD>& pixels, const CRect& rBounds)
-{
-    Drawn drawn;
-    for (int y = 0; y < kHeight; y++) {
-        for (int x = 0; x < kWidth; x++) {
-            const DWORD pixel = pixels[y * kWidth + x] & 0xFFFFFF;
-            if (pixel == 0) {
-                continue;
-            }
-            drawn.changed++;
-            if (!rBounds.PtInRect(CPoint(x, y))) {
-                drawn.outside++;
-            }
-            if ((pixel & 0xFF0000) != 0) {
-                drawn.red++;
-            }
-            if ((pixel & 0xFF) != 0) {
-                drawn.blue++;
-            }
-        }
-    }
-    return drawn;
-}
 
 // Renders the animation's current frame at `pos` as CGameSprite::Render
 // does (its FX rectangle and reference point, then its bounds) and returns
@@ -371,6 +104,72 @@ void CheckRender(RenderScope& scope, CGameAnimationType* pAnimation, const CPoin
     CHECK(yellow.outside == 0);
     CHECK(yellow.blue == 0);
     CHECK(yellow.red > yellow.changed / 2);
+}
+
+// The quadrants of a multi-cell animation each drawn from their own cell:
+// each cell is tinted its own primary (red, green, blue in turn), so every
+// pixel that lies in one quadrant's bounds only carries that quadrant's
+// channel alone. The cells' tints are put back afterwards.
+void CheckQuadrants(RenderScope& scope, CGameAnimationType* pAnimation, CVidCell* pCells, int nQuadrants, const CPoint& pos, const std::string& name)
+{
+    static const COLORREF tints[3] = { RGB(255, 0, 0), RGB(0, 255, 0), RGB(0, 0, 255) };
+    static const DWORD channels[3] = { 0xFF0000, 0x00FF00, 0x0000FF };
+    std::vector<COLORREF> saved;
+    std::vector<CRect> bounds;
+    for (int quad = 0; quad < nQuadrants; quad++) {
+        saved.push_back(pCells[quad].GetTintColor());
+        pCells[quad].SetTintColor(tints[quad % 3]);
+        CPoint ptCenter;
+        CSize frameSize;
+        REQUIRE(pCells[quad].GetCurrentCenterPoint(ptCenter, FALSE));
+        REQUIRE(pCells[quad].GetCurrentFrameSize(frameSize, FALSE));
+        CRect rQuad;
+        pAnimation->CalculateGCBoundsRect(rQuad, pos, ptCenter, 0, frameSize.cx, frameSize.cy);
+        bounds.push_back(rQuad);
+    }
+
+    CRect rBounds;
+    Render(scope, pAnimation, pos, FALSE, RGB(255, 255, 255), rBounds, name);
+    const std::vector<DWORD> pixels = scope.Back();
+    std::vector<int> own(nQuadrants, 0);
+    std::vector<int> wrong(nQuadrants, 0);
+    for (int y = 0; y < kHeight; y++) {
+        for (int x = 0; x < kWidth; x++) {
+            const DWORD pixel = pixels[y * kWidth + x] & 0xFFFFFF;
+            if (pixel == 0) {
+                continue;
+            }
+            int found = -1;
+            int count = 0;
+            for (int quad = 0; quad < nQuadrants; quad++) {
+                if (bounds[quad].PtInRect(CPoint(x, y))) {
+                    found = quad;
+                    count++;
+                }
+            }
+            if (count == 1) {
+                if ((pixel & ~channels[found % 3]) != 0) {
+                    wrong[found]++;
+                } else {
+                    own[found]++;
+                }
+            }
+        }
+    }
+    // A quadrant can lie under the others' bounds or be empty in a frame
+    // (the dragon's sixth facing south): most must show their own colour.
+    int shown = 0;
+    for (int quad = 0; quad < nQuadrants; quad++) {
+        INFO(name << ", quadrant " << quad << ": bounds " << bounds[quad].left << "," << bounds[quad].top << " - " << bounds[quad].right << ","
+                  << bounds[quad].bottom << ", its own colour " << own[quad] << ", another " << wrong[quad]);
+        CHECK(wrong[quad] == 0);
+        if (own[quad] > 0) {
+            shown++;
+        }
+        pCells[quad].SetTintColor(saved[quad]);
+    }
+    INFO(name << ": " << shown << " of " << nQuadrants << " quadrants show their own colour");
+    CHECK(shown * 2 >= nQuadrants);
 }
 
 bool Begin(std::string& why)
@@ -534,369 +333,89 @@ TEST_CASE("creature render: CGameAnimationTypeMonsterMulti draws the black drago
     CHECK(pDragon->m_currentVidCell[0].m_nCurrentSequence == 4);
     CHECK(pDragon->IsMirroring());
     CheckRender(scope, pDragon, CPoint(320, 330), "dragon_12");
+
+    // Each of the nine quadrants is its own cell, at its own place.
+    CheckQuadrants(scope, pDragon, pDragon->m_currentVidCell, pDragon->m_nQuadrants, CPoint(320, 330), "dragon_12_quadrants");
+    pDragon->ChangeDirection(0);
+    CheckQuadrants(scope, pDragon, pDragon->m_currentVidCell, pDragon->m_nQuadrants, CPoint(320, 330), "dragon_0_quadrants");
+}
+
+// The white wyvern (0x1001, MWYV in four quadrant BAMs, 50WYRWH and six
+// other CRE files): CGameAnimationTypeMonsterQuadrant::Render (0x6BC5F0)
+// draws each quadrant from its own cell, m_currentVidCell + quad * 0xDA
+// (0x6BC84E, 0x6BC856), with that cell's tint read and restored (0x6BC799,
+// 0x6BC86A). Ours drew cell 0 in every quadrant with cell 0's tint, so the
+// per-quadrant colours of CheckQuadrants came out all red.
+TEST_CASE("creature render: CGameAnimationTypeMonsterQuadrant draws each quadrant from its own cell", "[render][data]")
+{
+    std::string why;
+    if (!Begin(why)) {
+        SKIP("[iwd2r-skip] " + why);
+    }
+    RenderScope scope;
+    REQUIRE(scope.Ok());
+    BYTE colors[16] = {};
+    for (WORD facing : { 0, 12 }) {
+        INFO("facing " << facing);
+        std::unique_ptr<CGameAnimationType> pAnimation(CGameAnimationType::SetAnimationType(0x1001, colors, facing));
+        auto* pWyvern = dynamic_cast<CGameAnimationTypeMonsterQuadrant*>(pAnimation.get());
+        REQUIRE(pWyvern != nullptr);
+        REQUIRE(pWyvern->m_nQuadrants == 4);
+        CheckQuadrants(scope, pWyvern, pWyvern->m_currentVidCell, pWyvern->m_nQuadrants, CPoint(320, 300),
+            "wyvern_" + std::to_string(facing) + "_quadrants");
+    }
+}
+
+// The tint of the eight Renders ported before this stream's (Ambient
+// 0x6A8470, AmbientStatic 0x6A6A30, Flying 0x6A44F0, MonsterIcewind 0x6E7A40,
+// MonsterLarge 0x6B1E70, MonsterLarge16 0x6B3C60, MonsterQuadrant 0x6BC5F0,
+// TownStatic 0x6A55C0): each channel is the cell's and the tint's added less
+// 255, red from the low bytes (for instance 0x6A85BC). Ours took red from the
+// blue bytes, so a yellow tint (blue 0) left no red at all. AmbientStatic
+// is not drawn here: its constructor (0x6A5A10) leaves m_currentVidCellBase
+// unset in ours (the original sets it at 0x6A5D73), so a cow cannot be built
+// (vis-probe's file; reported).
+TEST_CASE("creature render: the earlier Renders keep red in a yellow tint", "[render][data]")
+{
+    std::string why;
+    if (!Begin(why)) {
+        SKIP("[iwd2r-skip] " + why);
+    }
+    RenderScope scope;
+    REQUIRE(scope.Ok());
+    BYTE colors[16] = {};
+    struct Case {
+        USHORT animationID;
+        const char* name;
+        bool (*isClass)(CGameAnimationType*);
+    };
+    const Case cases[] = {
+        { 0xC100, "Ambient (cat)", [](CGameAnimationType* p) { return dynamic_cast<CGameAnimationTypeAmbient*>(p) != nullptr; } },
+        { 0xD400, "Flying (bird, the one Flying animation that is tinted)", [](CGameAnimationType* p) { return dynamic_cast<CGameAnimationTypeFlying*>(p) != nullptr; } },
+        { 0xE408, "MonsterIcewind (goblin)", [](CGameAnimationType* p) { return dynamic_cast<CGameAnimationTypeMonsterIcewind*>(p) != nullptr; } },
+        { 0x9000, "MonsterLarge (ogre)", [](CGameAnimationType* p) { return dynamic_cast<CGameAnimationTypeMonsterLarge*>(p) != nullptr; } },
+        { 0xA000, "MonsterLarge16 (wyvern)", [](CGameAnimationType* p) { return dynamic_cast<CGameAnimationTypeMonsterLarge16*>(p) != nullptr; } },
+        { 0x1001, "MonsterQuadrant (white wyvern)", [](CGameAnimationType* p) { return dynamic_cast<CGameAnimationTypeMonsterQuadrant*>(p) != nullptr; } },
+        { 0x4400, "TownStatic (townsman)", [](CGameAnimationType* p) { return dynamic_cast<CGameAnimationTypeTownStatic*>(p) != nullptr; } },
+    };
+    for (const Case& c : cases) {
+        INFO(c.name);
+        std::unique_ptr<CGameAnimationType> pAnimation(CGameAnimationType::SetAnimationType(c.animationID, colors, 0));
+        REQUIRE(c.isClass(pAnimation.get()));
+        CRect rBounds;
+        const Drawn white = Render(scope, pAnimation.get(), CPoint(320, 300), FALSE, RGB(255, 255, 255), rBounds, "");
+        INFO("white: drawn " << white.changed << ", with red " << white.red);
+        REQUIRE(white.changed > 50);
+        CHECK(white.red > white.changed / 2);
+        const Drawn yellow = Render(scope, pAnimation.get(), CPoint(320, 300), FALSE, RGB(255, 255, 0), rBounds, "");
+        INFO("yellow: drawn " << yellow.changed << ", with red " << yellow.red << ", with blue " << yellow.blue);
+        CHECK(yellow.changed > 50);
+        CHECK(yellow.blue == 0);
+        CHECK(yellow.red > yellow.changed / 2);
+    }
 }
 
 namespace {
-
-std::string Lower(std::string s)
-{
-    for (char& c : s)
-        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    return s;
-}
-
-fs::path Child(const fs::path& dir, const std::string& name)
-{
-    std::error_code ec;
-    for (const auto& entry : fs::directory_iterator(dir, ec)) {
-        if (Lower(entry.path().filename().string()) == Lower(name))
-            return entry.path();
-    }
-    return dir / name;
-}
-
-uint32_t Le32(const std::string& d, size_t at)
-{
-    return uint32_t(static_cast<unsigned char>(d[at])) | (uint32_t(static_cast<unsigned char>(d[at + 1])) << 8)
-        | (uint32_t(static_cast<unsigned char>(d[at + 2])) << 16) | (uint32_t(static_cast<unsigned char>(d[at + 3])) << 24);
-}
-
-// The main loop's drawn frames (tests/test_gam.cpp's FramePump).
-class FramePump {
-public:
-    FramePump()
-        : m_running(true)
-        , m_thread([this] {
-            while (m_running) {
-                g_pChitin->m_bDisplayStale = FALSE;
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            }
-        })
-    {
-    }
-    ~FramePump()
-    {
-        m_running = false;
-        m_thread.join();
-    }
-    FramePump(const FramePump&) = delete;
-    FramePump& operator=(const FramePump&) = delete;
-
-private:
-    std::atomic<bool> m_running;
-    std::thread m_thread;
-};
-
-// The first finished character in the view's Characters folder
-// (tests/test_combat.cpp's FinishedCharacter).
-std::vector<BYTE> FinishedCharacter()
-{
-    std::vector<fs::path> files;
-    std::error_code ec;
-    for (const auto& entry : fs::directory_iterator(Child(g_view, "Characters"), ec)) {
-        if (Lower(entry.path().extension().string()) == ".chr")
-            files.push_back(entry.path());
-    }
-    std::sort(files.begin(), files.end());
-    for (const fs::path& file : files) {
-        std::ifstream in(file, std::ios::binary);
-        const std::string chr((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-        if (chr.size() > 0x224 && chr.compare(0, 8, "CHR V2.2") == 0) {
-            const uint32_t offset = Le32(chr, 0x28);
-            const uint32_t size = Le32(chr, 0x2C);
-            if (offset + size <= chr.size() && chr.compare(offset, 8, "CRE V2.2") == 0)
-                return std::vector<BYTE>(chr.begin() + offset, chr.begin() + offset + size);
-        }
-    }
-    return std::vector<BYTE>();
-}
-
-// A new game with one party member standing in AR1000 (tests/test_combat.cpp's
-// NewGameInStartArea).
-CGameSprite* NewGameInStartArea(std::vector<BYTE>& bytes)
-{
-    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
-    pGame->NewGame(FALSE, FALSE);
-
-    CGameSprite* pSprite = new CGameSprite(bytes.data(),
-        static_cast<LONG>(bytes.size()),
-        0,
-        0,
-        -1,
-        0,
-        0,
-        INT_MAX,
-        CPoint(-1, -1),
-        0);
-    pSprite->m_sName = "Probe";
-    pSprite->m_bGlobal = TRUE;
-    pGame->SetCharacterSlot(0, pSprite->GetId());
-    pGame->UpdateCharacterSlots();
-    pGame->SetupCharacters(FALSE);
-    for (int n = 0; n < CINFGAME_MAX_AREAS; n++) {
-        if (pGame->m_gameAreas[n] != NULL)
-            pGame->m_gameAreas[n]->SortLists();
-    }
-
-    CScreenWorld* pWorld = g_pBaldurChitin->m_pEngineWorld;
-    pWorld->EngineGameInit();
-    g_pBaldurChitin->pActiveEngine = pWorld;
-    pGame->m_bGameLoaded = TRUE;
-    return pSprite;
-}
-
-// A creature of the game's files put on the area's front list at `pos`
-// (tests/test_combat.cpp's AddCreature).
-CGameSprite* AddCreature(CGameArea* pArea, const char* resRef, const CPoint& pos)
-{
-    CCreatureFile creatureData;
-    creatureData.SetResRef(CResRef(resRef), TRUE, TRUE);
-    if (creatureData.GetDataSize() == 0) {
-        return NULL;
-    }
-    CGameSprite* pSprite = new CGameSprite(creatureData.GetData(),
-        creatureData.GetDataSize(),
-        0,
-        0,
-        -1,
-        0,
-        0,
-        INT_MAX,
-        pos,
-        0);
-    pSprite->SetResRef(CResRef(resRef));
-    creatureData.ReleaseData();
-    pSprite->AddToArea(pArea, pos, 0, CGameObject::LIST_FRONT);
-    return pSprite;
-}
-
-// The area's video mode with shim surfaces as large as the area's viewport
-// reaches (the back buffer) and the two keyed FX surfaces, at 32 bpp, faded
-// in; the area's infinity draws with it.
-class AreaScope {
-public:
-    explicit AreaScope(CGameArea* pArea)
-        : m_pInfinity(pArea->GetInfinity())
-        , m_pVidMode(g_pChitin->GetCurrentVideoMode())
-        , m_nSurfacesBefore(m_pVidMode->m_nSurfaces)
-        , m_pSurfacesBefore(m_pVidMode->pSurfaces)
-        , m_nBppBefore(g_pChitin->cVideo.m_nBpp)
-        , m_shifts { m_pVidMode->m_dwRBitShift, m_pVidMode->m_dwGBitShift, m_pVidMode->m_dwBBitShift }
-        , m_field24Before(m_pVidMode->field_24)
-        , m_nFadeBefore(m_pVidMode->m_nFade)
-        , m_pInfinityModeBefore(m_pInfinity->pVidMode)
-        , m_rScreen(m_pInfinity->rViewPort)
-    {
-        for (IDirectDrawSurface*& pSurface : m_surfaces) {
-            pSurface = NULL;
-        }
-        if (m_rScreen.Width() <= 0 || m_rScreen.Height() <= 0 || DirectDrawCreate(NULL, &m_pDirectDraw, NULL) != DD_OK) {
-            m_pDirectDraw = NULL;
-            return;
-        }
-        DDCOLORKEY key = { kKey, kKey };
-        m_surfaces[CVIDINF_SURFACE_BACK] = Create(m_rScreen.right, m_rScreen.bottom);
-        // The tile renderer draws the pointer on the front surface, saving
-        // what it covers in surface 4.
-        m_surfaces[CVIDINF_SURFACE_FRONT] = Create(m_rScreen.right, m_rScreen.bottom);
-        m_surfaces[CVIDINF_SURFACE_2] = Create(CVIDINF_FX_WIDTH, CVIDINF_FX_HEIGHT);
-        m_surfaces[CVIDINF_SURFACE_3] = Create(CVIDINF_FX_WIDTH, CVIDINF_FX_HEIGHT);
-        m_surfaces[CVIDINF_SURFACE_4] = Create(128, 128);
-        for (int n : { CVIDINF_SURFACE_2, CVIDINF_SURFACE_3, CVIDINF_SURFACE_4 }) {
-            if (m_surfaces[n] != NULL) {
-                m_surfaces[n]->SetColorKey(DDCKEY_SRCBLT, &key);
-            }
-        }
-        m_pVidMode->m_nSurfaces = 9;
-        m_pVidMode->pSurfaces = m_surfaces;
-        g_pChitin->cVideo.m_nBpp = 32;
-        m_pVidMode->m_dwRBitShift = 16;
-        m_pVidMode->m_dwGBitShift = 8;
-        m_pVidMode->m_dwBBitShift = 0;
-        m_pVidMode->field_24 = kKey;
-        m_pVidMode->m_nFade = CVidMode::NUM_FADE_FRAMES;
-        m_pInfinity->pVidMode = m_pVidMode;
-    }
-    ~AreaScope()
-    {
-        if (!m_vram.empty()) {
-            g_pBaldurChitin->GetObjectGame()->m_cVRamPool.DetachSurfaces();
-            CVidInf* pVidInf = static_cast<CVidInf*>(m_pVidMode);
-            pVidInf->m_pVRamSurfaces = NULL;
-            pVidInf->m_nVRamSurfaces = 0;
-            for (IDirectDrawSurface* pSurface : m_vram) {
-                if (pSurface != NULL) {
-                    pSurface->Release();
-                }
-            }
-        }
-        m_pVidMode->m_nSurfaces = m_nSurfacesBefore;
-        m_pVidMode->pSurfaces = m_pSurfacesBefore;
-        g_pChitin->cVideo.m_nBpp = m_nBppBefore;
-        m_pVidMode->m_dwRBitShift = m_shifts[0];
-        m_pVidMode->m_dwGBitShift = m_shifts[1];
-        m_pVidMode->m_dwBBitShift = m_shifts[2];
-        m_pVidMode->field_24 = m_field24Before;
-        m_pVidMode->m_nFade = m_nFadeBefore;
-        m_pInfinity->pVidMode = m_pInfinityModeBefore;
-        for (IDirectDrawSurface* pSurface : m_surfaces) {
-            if (pSurface != NULL) {
-                pSurface->Release();
-            }
-        }
-        if (m_pDirectDraw != NULL) {
-            m_pDirectDraw->Release();
-        }
-    }
-    AreaScope(const AreaScope&) = delete;
-    AreaScope& operator=(const AreaScope&) = delete;
-
-    bool Ok() const
-    {
-        return m_surfaces[CVIDINF_SURFACE_BACK] != NULL && m_surfaces[CVIDINF_SURFACE_2] != NULL
-            && m_surfaces[CVIDINF_SURFACE_3] != NULL;
-    }
-
-    CVidMode* VidMode() { return m_pVidMode; }
-    const CRect& Screen() const { return m_rScreen; }
-
-    // The area's whole render (tiles, then its objects) on a black back
-    // buffer. The tiles go through 64x64 VRAM surfaces (CVRamPool), which
-    // the test's video mode does not have: they are made on the first call.
-    std::vector<DWORD> RenderArea(CGameArea* pArea)
-    {
-        CVidInf* pVidInf = static_cast<CVidInf*>(m_pVidMode);
-        CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
-        if (m_vram.empty()) {
-            m_vram.assign(512, nullptr);
-            for (IDirectDrawSurface*& pSurface : m_vram) {
-                pSurface = Create(64, 64);
-            }
-            pVidInf->m_pVRamSurfaces = m_vram.data();
-            pVidInf->m_nVRamSurfaces = static_cast<int>(m_vram.size());
-            pGame->m_cVRamPool.DetachSurfaces();
-            pGame->m_cVRamPool.AttachSurfaces(pVidInf);
-            m_pInfinity->AttachVRamPool(&(pGame->m_cVRamPool));
-        }
-        // The cache screen's flag fades the screen out on the area's first
-        // render after a load; the game is past that here.
-        CCacheStatus::dword_8D0BA8 = FALSE;
-        Back(true, 0);
-        pArea->Render(m_pVidMode, CVIDINF_SURFACE_BACK);
-        return Back();
-    }
-
-    // A world rectangle in the back buffer's coordinates.
-    CRect ToScreen(const CRect& rWorld) const
-    {
-        CRect r(rWorld);
-        r.OffsetRect(m_pInfinity->rViewPort.left - m_pInfinity->nCurrentX, m_pInfinity->rViewPort.top - m_pInfinity->nCurrentY);
-        return r;
-    }
-
-    // Puts the viewport's centre on a world point (within the area), with
-    // no scroll under way: the infinity's render moves the view towards
-    // m_ptScrollDest otherwise.
-    void CentreOn(const CPoint& pt)
-    {
-        m_pInfinity->m_ptScrollDest = CPoint(-1, -1);
-        m_pInfinity->SetViewPosition(pt.x - m_rScreen.Width() / 2, pt.y - m_rScreen.Height() / 2, TRUE);
-        m_pInfinity->nCurrentX = m_pInfinity->nNewX;
-        m_pInfinity->nCurrentY = m_pInfinity->nNewY;
-    }
-
-    // The viewport's pixels, after filling them with `fill` when `clear` is
-    // set.
-    std::vector<DWORD> Back(bool clear = false, DWORD fill = 0)
-    {
-        std::vector<DWORD> pixels;
-        DDSURFACEDESC ddsd;
-        memset(&ddsd, 0, sizeof(ddsd));
-        ddsd.dwSize = sizeof(ddsd);
-        if (!m_pVidMode->LockSurface(CVIDINF_SURFACE_BACK, &ddsd, m_rScreen)) {
-            return pixels;
-        }
-        for (int y = 0; y < m_rScreen.Height(); y++) {
-            DWORD* row = reinterpret_cast<DWORD*>(reinterpret_cast<BYTE*>(ddsd.lpSurface) + y * ddsd.lPitch);
-            if (clear) {
-                std::fill(row, row + m_rScreen.Width(), fill);
-            }
-            pixels.insert(pixels.end(), row, row + m_rScreen.Width());
-        }
-        m_pVidMode->UnLockSurface(CVIDINF_SURFACE_BACK, ddsd.lpSurface);
-        return pixels;
-    }
-
-    // The viewport as <IWD2R_SHOT_DIR>/<name>.png when that is set.
-    void Shot(const std::vector<DWORD>& pixels, const std::string& name) const
-    {
-        const char* dir = std::getenv("IWD2R_SHOT_DIR");
-        if (dir == nullptr || *dir == '\0' || pixels.size() != static_cast<size_t>(m_rScreen.Width() * m_rScreen.Height())) {
-            return;
-        }
-        const std::string path = std::string(dir) + "/" + name + ".png";
-        platform::WritePng(path.c_str(), reinterpret_cast<const uint32_t*>(pixels.data()), m_rScreen.Width(), m_rScreen.Height(),
-            m_rScreen.Width() * 4);
-    }
-
-private:
-    IDirectDrawSurface* Create(int width, int height)
-    {
-        DDSURFACEDESC desc;
-        memset(&desc, 0, sizeof(desc));
-        desc.dwSize = sizeof(desc);
-        desc.dwFlags = DDSD_CAPS | DDSD_HEIGHT | DDSD_WIDTH;
-        desc.ddsCaps.dwCaps = DDSCAPS_SYSTEMMEMORY | DDSCAPS_OFFSCREENPLAIN;
-        desc.dwWidth = width;
-        desc.dwHeight = height;
-        IDirectDrawSurface* pSurface = NULL;
-        if (m_pDirectDraw->CreateSurface(&desc, &pSurface, NULL) != DD_OK) {
-            return NULL;
-        }
-        return pSurface;
-    }
-
-    CInfinity* m_pInfinity;
-    CVidMode* m_pVidMode;
-    IDirectDraw* m_pDirectDraw = NULL;
-    IDirectDrawSurface* m_surfaces[9];
-    UINT m_nSurfacesBefore;
-    IDirectDrawSurface** m_pSurfacesBefore;
-    USHORT m_nBppBefore;
-    DWORD m_shifts[3];
-    COLORREF m_field24Before;
-    BYTE m_nFadeBefore;
-    CVidMode* m_pInfinityModeBefore;
-    CRect m_rScreen;
-    std::vector<IDirectDrawSurface*> m_vram;
-};
-
-// The pixels that differ between two renders inside a screen rectangle, and
-// how many of the second render's there are exactly `colour` (0x00RRGGBB).
-struct Difference {
-    int changed = 0;
-    int exact = 0;
-};
-
-Difference Compare(const std::vector<DWORD>& before, const std::vector<DWORD>& after, const CRect& rScreen, const CRect& rIn, DWORD colour = 0xFFFFFFFF)
-{
-    Difference d;
-    CRect r;
-    r.IntersectRect(rIn, CRect(0, 0, rScreen.Width(), rScreen.Height()));
-    for (int y = r.top; y < r.bottom; y++) {
-        for (int x = r.left; x < r.right; x++) {
-            const DWORD a = before[y * rScreen.Width() + x] & 0xFFFFFF;
-            const DWORD b = after[y * rScreen.Width() + x] & 0xFFFFFF;
-            if (a != b) {
-                d.changed++;
-            }
-            if (b == colour) {
-                d.exact++;
-            }
-        }
-    }
-    return d;
-}
 
 // A new game in AR1000 with its party member, the area explored and
 // visible, drawn into AreaScope's surfaces.
@@ -1061,19 +580,33 @@ TEST_CASE("creature render: AR1000's doors and containers draw their highlight",
         return p->m_containerType != 4 && p->m_nPolygon > 2;
     });
     REQUIRE(pContainer != NULL);
-    // The rectangles the fills walk: the original's CGameAIBase::sub_481890
-    // (0x481890) puts the bounding rectangle itself in the array when it is
-    // at most 512 x 512, as these are, else 512 x 512 pieces of it. Ours is
-    // still a stub (vis-probe's file) and leaves the arrays empty, so the
-    // test fills them as the original would.
-    REQUIRE(pDoor->m_rClosedBounding.Width() <= 512);
-    REQUIRE(pDoor->m_rClosedBounding.Height() <= 512);
-    REQUIRE(pContainer->m_rBounding.Width() <= 512);
-    REQUIRE(pContainer->m_rBounding.Height() <= 512);
-    pDoor->field_6DA.SetSize(0);
-    pDoor->field_6DA.Add(&pDoor->m_rClosedBounding);
-    pContainer->field_8D6.SetSize(0);
-    pContainer->field_8D6.Add(&pContainer->m_rBounding);
+    // The rectangles the fills walk come from the constructors through
+    // CGameAIBase::sub_481890 (0x481890): an object at most 512 x 512 gets
+    // its own bounding rectangle, a larger one new 512 x 512 pieces of it.
+    REQUIRE(pDoor->field_6DA.GetSize() == 1);
+    CHECK(pDoor->field_6DA[0] == &pDoor->m_rClosedBounding);
+    REQUIRE(pContainer->field_8D6.GetSize() == 1);
+    CHECK(pContainer->field_8D6[0] == &pContainer->m_rBounding);
+    // A larger rectangle (no door or container of AR1000 has one): 3 x 2
+    // pieces, row by row, the last column and row cut at the edges.
+    {
+        CRect r(100, 50, 1300, 700);
+        CArray<CRect*> pieces;
+        pDoor->sub_481890(&r, pieces);
+        REQUIRE(pieces.GetSize() == 6);
+        long long area = 0;
+        for (int n = 0; n < pieces.GetSize(); n++) {
+            const CRect* pPiece = pieces[n];
+            INFO("piece " << n << ": " << pPiece->left << "," << pPiece->top << " - " << pPiece->right << "," << pPiece->bottom);
+            CHECK(pPiece->left == r.left + 512 * (n % 3));
+            CHECK(pPiece->top == r.top + 512 * (n / 3));
+            CHECK(pPiece->right == std::min(pPiece->left + 512, r.right));
+            CHECK(pPiece->bottom == std::min(pPiece->top + 512, r.bottom));
+            area += static_cast<long long>(pPiece->Width()) * pPiece->Height();
+            delete pPiece;
+        }
+        CHECK(area == static_cast<long long>(r.Width()) * r.Height());
+    }
 
     AreaScope scope(pArea);
     REQUIRE(scope.Ok());
@@ -1136,6 +669,8 @@ TEST_CASE("creature render: AR1000's doors and containers draw their highlight",
         CHECK(Compare(plain, outlined, scope.Screen(), whole).changed == outline.changed);
         // The fill changes nothing outside the polygon's rectangle.
         const Difference fill = Compare(outlined, filled, scope.Screen(), rAround);
+        INFO("fill in the area: changed " << fill.changed);
+        CHECK(fill.changed > 0);
         CHECK(Compare(outlined, filled, scope.Screen(), whole).changed == fill.changed);
     }
     CInfinity::TRANSLUCENT_BLTS_ON = translucentBefore;
