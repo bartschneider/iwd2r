@@ -425,7 +425,7 @@ class PlayVmArgsTest(unittest.TestCase):
             self.assertEqual(play.suite_files(tmp),
                              [os.path.join(tmp, 'a.txt'),
                               os.path.join(tmp, 'b.txt')])
-        self.assertNotIn('world_entry',
+        self.assertNotIn('first_fight',
                          [play.scenario_name(p) for p in play.suite_files()])
 
     def test_table(self):
@@ -534,10 +534,12 @@ class ScenarioParseTest(unittest.TestCase):
                                          '*.txt'))
         for path in scenario_files() + pending:
             self.assertTrue(realinput.load_scenario(path), path)
+            # A header line that reads like "# timeout: S" must be one.
+            realinput.load_header_timeout(path)
 
     def test_world_entry_checkpoints(self):
         actions = realinput.load_scenario(os.path.join(
-            ROOT, 'scenarios', 'pending', 'world_entry.txt'))
+            ROOT, 'scenarios', 'world_entry.txt'))
         names = [a['name'] for a in actions if a['op'] == 'checkpoint']
         chargen = [a['name'] for a in realinput.load_scenario(os.path.join(
             ROOT, 'scenarios', 'chargen_replay.txt')) if a['op'] == 'checkpoint']
@@ -551,7 +553,7 @@ class ScenarioParseTest(unittest.TestCase):
             ROOT, 'scenarios', 'walk_and_talk.txt'))
         names = [a['name'] for a in actions if a['op'] == 'checkpoint']
         world = [a['name'] for a in realinput.load_scenario(os.path.join(
-            ROOT, 'scenarios', 'pending', 'world_entry.txt'))
+            ROOT, 'scenarios', 'world_entry.txt'))
                  if a['op'] == 'checkpoint']
         self.assertEqual(names, world + [
             'opening_dialog', 'opening_done', 'moved', 'dialog',
@@ -1107,8 +1109,9 @@ class CheckpointExpectationTest(unittest.TestCase):
             for fields in expect['checkpoints'].values():
                 self.assertIn('screen', fields)
         # The scenario whose lost Gender click the old pass test missed,
-        # and M2's exit scenario.
+        # and M1's and M2's exit scenarios.
         self.assertIn('chargen_replay', found)
+        self.assertIn('world_entry', found)
         self.assertIn('walk_and_talk', found)
 
 
@@ -3552,7 +3555,7 @@ class ShotCheckTest(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
         self.run_dir = self._tmp.name
         self.actions = realinput.load_scenario(os.path.join(
-            ROOT, 'scenarios', 'pending', 'world_entry.txt'))
+            ROOT, 'scenarios', 'world_entry.txt'))
         self.assertIn('world', [a['name'] for a in self.actions
                                 if a['op'] == 'shot'])
 
