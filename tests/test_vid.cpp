@@ -1817,3 +1817,183 @@ TEST_CASE("render_direct_tints_24bit_on_high_word_flags", "[vid]")
     pSurface->Release();
     pDirectDraw->Release();
 }
+
+namespace {
+
+// A surface that only hands out device contexts, counting them. The shim's
+// surfaces have none, so CVidFont::TextOutEx stops at GetDC on them.
+class DcSurface final : public IDirectDrawSurface {
+public:
+    int getDCs = 0;
+    int releaseDCs = 0;
+
+    ULONG AddRef() override { return 1; }
+    ULONG Release() override { return 1; }
+    HRESULT Lock(LPRECT, LPDDSURFACEDESC, DWORD, HANDLE) override { return DDERR_UNSUPPORTED; }
+    HRESULT Unlock(LPVOID) override { return DDERR_UNSUPPORTED; }
+    HRESULT Blt(LPRECT, IDirectDrawSurface*, LPRECT, DWORD, LPDDBLTFX) override { return DDERR_UNSUPPORTED; }
+    HRESULT BltFast(DWORD, DWORD, IDirectDrawSurface*, LPRECT, DWORD) override { return DDERR_UNSUPPORTED; }
+    HRESULT Flip(IDirectDrawSurface*, DWORD) override { return DDERR_UNSUPPORTED; }
+    HRESULT GetAttachedSurface(LPDDSCAPS, IDirectDrawSurface**) override { return DDERR_UNSUPPORTED; }
+    HRESULT SetColorKey(DWORD, LPDDCOLORKEY) override { return DDERR_UNSUPPORTED; }
+    HRESULT GetColorKey(DWORD, LPDDCOLORKEY) override { return DDERR_UNSUPPORTED; }
+    HRESULT GetPixelFormat(LPDDPIXELFORMAT) override { return DDERR_UNSUPPORTED; }
+    HRESULT SetClipper(IDirectDrawClipper*) override { return DDERR_UNSUPPORTED; }
+    HRESULT SetPalette(IDirectDrawPalette*) override { return DDERR_UNSUPPORTED; }
+    HRESULT GetPalette(IDirectDrawPalette**) override { return DDERR_UNSUPPORTED; }
+    HRESULT GetDC(HDC* lphDC) override
+    {
+        ++getDCs;
+        *lphDC = reinterpret_cast<HDC>(this);
+        return DD_OK;
+    }
+    HRESULT ReleaseDC(HDC) override
+    {
+        ++releaseDCs;
+        return DD_OK;
+    }
+    HRESULT Restore() override { return DD_OK; }
+    HRESULT IsLost() override { return DD_OK; }
+};
+
+// A BAM of one sequence of one 5 x 7 frame: the header, the frame entry, the
+// sequence entry, the frame list and a palette.
+std::vector<BYTE> OneFrameBam()
+{
+    std::vector<BYTE> bytes(0x2C + 1024, 0);
+    BAMHEADER header = {};
+    std::memcpy(&header.nFileType, "BAM ", 4);
+    std::memcpy(&header.nFileVersion, "V1  ", 4);
+    header.nFrames = 1;
+    header.nSequences = 1;
+    header.nTableOffset = 0x18;
+    header.nFrameListOffset = 0x28;
+    header.nPaletteOffset = 0x2C;
+    std::memcpy(bytes.data(), &header, sizeof(header));
+    FRAMEENTRY frame = { 5, 7, 0, 0, 0x80000000 };
+    std::memcpy(bytes.data() + 0x18, &frame, sizeof(frame));
+    SEQUENCEENTRY sequence = { 1, 0 };
+    std::memcpy(bytes.data() + 0x24, &sequence, sizeof(sequence));
+    return bytes;
+}
+
+// A font that draws white on black, so TextOutEx reads no resource name for
+// its colour, and whose TrueType font counts as set.
+void PrepareFont(CVidFont& font)
+{
+    font.m_bFontSet = TRUE;
+    font.m_rgbForegroundColor = RGB(255, 255, 255);
+    font.m_rgbBackgroundColor = RGB(0, 0, 0);
+}
+
+}
+
+// CVidFont::TextOutEx (0x793A70), the TrueType text path, returns TRUE once
+// the text is out; ours returned FALSE, which BKTextOut and FXTextOut pass
+// on. It measures the baseline with the caller's bDemanded (0x793CF5); ours
+// passed TRUE. With no TrueType font named, the baseline is the font BAM's
+// first frame height. That BAM starts parsed with no demand, a state only a
+// demand and its release change (CResCell::Release clears the parse at 0):
+// with bDemanded FALSE the text demands the BAM and gives it back, with TRUE
+// it leaves it alone. Both fail on the old code (checked by restoring it).
+TEST_CASE("font_text_out_ex_returns_true_and_passes_bdemanded", "[vid]")
+{
+    ChitinScope scope;
+    g_pChitin->m_sFontName = "";
+    CVidInf mode;
+    DcSurface dc;
+    IDirectDrawSurface* surfaces[1] = { &dc };
+    mode.m_nSurfaces = 1;
+    mode.pSurfaces = surfaces;
+    ActiveModeScope active(&mode);
+
+    {
+        MemoryRes<CResCell> bam(OneFrameBam());
+        bam.res.m_bCacheHeader = FALSE;
+        CVidFont font;
+        PrepareFont(font);
+        static_cast<CResHelper<CResCell, 1000>&>(font).pRes = &bam.res;
+
+        for (const BOOL bDemanded : { TRUE, FALSE }) {
+            INFO("bDemanded " << bDemanded);
+            REQUIRE(bam.res.Parse(bam.data.data()));
+            dc.getDCs = 0;
+            dc.releaseDCs = 0;
+            CHECK(font.TextOutEx(0, CString("text"), 2, 20, CRect(0, 0, 64, 32), 0, bDemanded) == TRUE);
+            CHECK(dc.getDCs == 1);
+            CHECK(dc.releaseDCs == 1);
+            CHECK(bam.res.GetDemands() == 0);
+            CHECK(bam.res.m_bParsed == bDemanded);
+        }
+        static_cast<CResHelper<CResCell, 1000>&>(font).pRes = NULL;
+    }
+
+    mode.m_nSurfaces = 0;
+    mode.pSurfaces = NULL;
+}
+
+// CVidInf::FXTextOut (0x79D970) returns FALSE when the mode has no FX
+// surface (GetFXSurface at 0x79DA7B) and draws nothing. Ours passed
+// GetFXSurface's -1 on to TextOutEx, which took the surface pointer before
+// the array; a guard sits in that slot here, so the old code draws on it and
+// returns TRUE (checked by restoring it). With an FX surface the text goes
+// there and TextOutEx's TRUE comes back.
+TEST_CASE("fx_text_out_without_fx_surface_returns_false", "[vid]")
+{
+    ChitinScope scope;
+    g_pChitin->m_sFontName = "Arial";
+    g_pChitin->m_bUseMirrorFX = FALSE;
+    CVidInf mode;
+    DcSurface guard;
+    DcSurface fx;
+    IDirectDrawSurface* slots[1 + 9] = { &guard };
+    mode.m_nSurfaces = 9;
+    mode.pSurfaces = slots + 1;
+    std::vector<DWORD> locked(4 * 4, 0);
+    mode.m_SurfaceDesc.lpSurface = locked.data();
+    mode.m_SurfaceDesc.lPitch = 4 * 4;
+    ActiveModeScope active(&mode);
+
+    CVidFont font;
+    PrepareFont(font);
+    font.m_nBaseLineHeight = 10;
+
+    CHECK(mode.FXTextOut(&font, CString("fx"), 1, 12, CRect(0, 0, 32, 16), 0, TRUE) == FALSE);
+    CHECK(guard.getDCs == 0);
+
+    slots[1 + CVIDINF_SURFACE_2] = &fx;
+    CHECK(mode.FXTextOut(&font, CString("fx"), 1, 12, CRect(0, 0, 32, 16), 0, TRUE) == TRUE);
+    CHECK(fx.getDCs == 1);
+    CHECK(fx.releaseDCs == 1);
+    CHECK(guard.getDCs == 0);
+
+    mode.m_SurfaceDesc.lpSurface = NULL;
+    mode.m_nSurfaces = 0;
+    mode.pSurfaces = NULL;
+}
+
+// CVidInf::BKRender(CParticle*) (0x79E060) returns TRUE after drawing the
+// particle into the locked back buffer (ours fell through to FALSE, checked
+// by restoring it), and FALSE when nothing is locked. A dot at (3, 3):
+// x = posX >> 10, y = (3 * posY / 4 - posZ) >> 10.
+TEST_CASE("bk_render_particle_returns_true", "[vid]")
+{
+    ChitinScope scope;
+    CVidInf mode;
+    mode.m_dwRBitShift = 16;
+    mode.m_dwGBitShift = 8;
+    mode.m_dwBBitShift = 0;
+    ActiveModeScope active(&mode);
+    std::vector<DWORD> pixels(8 * 8, 0);
+    mode.m_SurfaceDesc.lpSurface = pixels.data();
+    mode.m_SurfaceDesc.lPitch = 8 * 4;
+
+    CParticle particle(3 << 10, 4 << 10, 0, 0, 0, 0, RGB(1, 2, 3), 0, 0, CParticle::BLOB);
+    CHECK(mode.BKRender(&particle, CRect(0, 0, 8, 8), CParticle::DOTS, 1) == TRUE);
+    std::vector<DWORD> expected(8 * 8, 0);
+    expected[3 * 8 + 3] = 0x00010203;
+    CHECK(pixels == expected);
+
+    mode.m_SurfaceDesc.lpSurface = NULL;
+    CHECK(mode.BKRender(&particle, CRect(0, 0, 8, 8), CParticle::DOTS, 1) == FALSE);
+}
