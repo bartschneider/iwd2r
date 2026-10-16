@@ -7,42 +7,30 @@
 # it moves to scenarios/. Coordinates for Resolution=800 as in
 # walk_and_talk.txt.
 #
-# Status (2026-10-15, combat stream): written and played on our side only
-# (play.py --linux --headless, also with IWD2R_STATE_DUMP): it plays to the
-# end without an assertion. In the replay mode our side matches
-# walk_and_talk's positions (reig_done 1669,949, leg 5 1032,977), walks to
-# the goblin, and the attack orders give attack rolls ("Attack Roll 4 + 1 =
-# 5 : Miss"; a run without the spell step killed it with "13 + 1 = 14 :
-# Hit"). On our side the spell clicks do nothing (below), so the first
-# click on the goblin is an attack order; each attack order then ends after
-# one round (the action is 0 at the next checkpoint) and the goblin does not
-# strike back: to be compared with the recording. Not recorded with the
-# original yet, so the coordinates after leg 5 come from our engine and the
-# area's search map and must be confirmed in the first sandbox recording:
-# - The nearest hostile is 1000_Goblin_01 (10GOB, 4 hit points) at 511,763,
-#   on the dirt path north-west of the houses where walk_and_talk's leg 5
-#   ends (1032,977 in the original); the goblins south of the dock
-#   (2172,1457, 2186,1509) are twice as far by the search map
-#   (AR1000SR.BMP). The legs follow its dirt paths (search value 1). The
-#   goblin stays where it is until it sees the party.
-# - icewind2.ini's Auto Pause State 547 includes "enemy sighted" (0x20) and
-#   Auto Pause Center is 1: the game pauses when the goblin comes into view.
-#   The orders are given while paused and Space unpauses. After the kill
-#   the game auto-pauses again ("Target Gone").
-# - If Magic Missile kills the goblin in the original's run (seed 1), the
-#   melee has no target: then melee first and give the spell to the next
-#   goblins, 713,1812 and 611,1896, down the same path.
-# - The spell: our action bar (CInfButtonArray SetState, UpdateButtons and
-#   OnLButtonPressed) is still a stub, so our side cannot cast through it
-#   yet. In the original's PC state (0x589110, state 114) the twelve
-#   buttons are type 7, the weapon set's two slots, then the sprite's nine
-#   customizable types; the saves in mpsave/ have type 3 second among
-#   those, which is taken here as Cast Spell: the action bar's fifth button
-#   (193,463 in origin ui, buttons 41 apart from 29). The spell buttons
-#   that replace them (types 0x15-0x20) show the known spells; Magic Missile
-#   is assumed to be the fourth (152,463) in spell order (Burning Hands,
-#   Chromatic Orb, Mage Armor, Magic Missile). Both are guesses to check
-#   against the recording.
+# Status (2026-10-16, vis-probe round 8): played on our side only, in the
+# replay mode (IWD2R_STATE_DUMP, seed 1); not recorded with the original
+# yet (the Windows Sandbox was taken), so every frame and position after
+# leg 5 comes from our engine and must be confirmed in the first sandbox
+# recording. Our side, seed 1:
+# - Leg 7: the goblin (1000_Goblin_01, 10GOB, 4 hit points, at 511,763)
+#   comes into view at frame 4681 and the game auto-pauses (Enemy Sighted)
+#   with Probe at 749,1006.
+# - Space: Probe ends leg 7 at 568,906 and the goblin, its combat script
+#   asking See(NearestEnemyOf(Myself)) then AttackOneRound(LastMarkedObject),
+#   walks to 568,872 and attacks.
+# - The attack order: Probe swings at the goblin; the goblin's attack (a
+#   critical miss) auto-pauses the game (Attacked) at frame 5012.
+# - The spell while paused, then Space: Probe casts Magic Missile (SPWI112)
+#   at frame 5100; the missile (projectile type 218) is fired at 5122 and
+#   kills the goblin at 5125. Two runs give the same 219 dumps but for the
+#   timing field held_frames.
+# Needs on our side what first does not have yet: the world screen's keys
+# (CScreenWorld::OnKeyDown, ui-misc round 2) for Space; without them the
+# game stays paused after Enemy Sighted.
+# About 5400 frames, with character generation: at walk_and_talk's pace in
+# Windows Sandbox (4100 frames in 300 s) about 400 s, past the default
+# 180 s of replay record and compare:
+# timeout: 720
 wait 60
 checkpoint menu
 # New Game (645,262), then Done (537,562) with New Party selected, then the
@@ -217,17 +205,26 @@ wait 60
 click 250 399
 wait 120
 checkpoint opening_done
+# Centre the view on Probe (2414,897), as walk_and_talk.txt does: the view
+# the opening cut-scene leaves depends on real time (with real input,
+# play.py --vm, it ends about 12 pixels east of a replay's), and the next
+# two clicks need it exact. Centred, Probe is at screen 400,216 (view
+# 2014,681).
+origin ui
+click 528 460
+click 528 460
+wait 10
 # Click-to-move on the deck: Probe walks to 2328,905 and stops.
 origin screen
-click 330 262
+click 314 224
 wait 90
 checkpoint moved
 # Hedron's circle (he stands at 2503,900): the party walks up and his dialog
 # opens at entry 34 with 5 responses; "Nothing today, thanks. Farewell." (5)
 # goes to entry 37, whose "Very well. Farewell." (1) ends it.
-move 511 254
+move 497 217
 wait 5
-click 511 254
+click 497 217
 wait 90
 checkpoint dialog
 origin ui
@@ -308,7 +305,10 @@ click 128 269
 wait 150
 checkpoint leg6
 # Leg 7: centre and walk to 520,900 on the north-south path the goblin
-# stands on (160,82 from the centred view). The goblin comes into view.
+# stands on (160,82 from the centred view). When the goblin comes into view
+# the game auto-pauses (Enemy Sighted: Auto Pause State 547 has 0x200, and
+# Auto Pause Center 1 centres the view on Probe): on our side at frame
+# 4681, Probe at 749,1006.
 origin ui
 click 528 460
 click 528 460
@@ -318,45 +318,47 @@ click 160 82
 wait 150
 checkpoint goblin_sighted
 shot goblin_sighted
-# The spell first, from range, while the game is paused: centre on Probe
-# (the goblin, 511,763, is then at about 391,77 with Probe at 520,894),
-# Cast Spell (the action bar's fifth button), Magic Missile, the goblin;
-# Space ends the auto pause. Magic Missile does 1d4+1 and the goblin has 4
-# hit points: when it survives, it comes at the party.
-origin ui
-click 528 460
-click 528 460
-wait 10
-click 193 463
-wait 20
-click 152 463
-wait 20
-origin screen
-move 391 77
-wait 5
-click 391 77
-wait 10
+# Space ends the pause. Probe walks on to 568,906; the goblin's combat
+# script (10GOBM0: See(NearestEnemyOf(Myself)), AttackOneRound) brings it
+# to 568,872 to fight him.
 key SPACE
-wait 90
-checkpoint spell
-shot spell
-# The melee: an attack order on the goblin where it stood (Probe walks to
-# it, or meets it on the way); the game runs on. Space is not pressed
-# again: it would pause. Auto pauses that the fight itself may cause
-# (Auto Pause State 547: a party member hit, 0x1, or injured, 0x2; the
-# target gone after the kill) are to be checked in the recording.
+wait 80
+checkpoint engaged
+shot engaged
+# The melee: centre on Probe (the view at 168,690 puts the goblin at
+# 400,182) and click the goblin, an attack order. The goblin's first
+# attack, hit or miss, auto-pauses the game (Attacked, 0x2).
 origin ui
 click 528 460
 click 528 460
 wait 10
 origin screen
-move 391 77
+move 400 182
 wait 5
-click 391 77
-wait 240
+click 400 182
+wait 100
 checkpoint melee
 shot melee
-wait 300
+# The spell, while paused: Cast Spell (the action bar's fifth button,
+# 179,463; the bar's buttons are at x 27 + 38 * n), Magic Missile (the
+# first of the four known spells, 27,463: the spells keep the order they
+# were chosen in), the goblin; Space ends the pause and Probe casts. With
+# seed 1 the missile kills the goblin (4 hit points; 1d4+1).
+origin ui
+click 179 463
+wait 20
+click 27 463
+wait 20
+origin screen
+move 400 182
+wait 5
+click 400 182
+wait 10
+key SPACE
+wait 150
+checkpoint spell
+shot spell
+wait 150
 checkpoint fight_done
 shot fight_done
 quit

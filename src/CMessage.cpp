@@ -27,6 +27,7 @@
 #include "CStore.h"
 #include "CUIPanel.h"
 #include "CUtil.h"
+#include "Icewind586B70.h"
 #include "compat/marshal_ptr.h"
 
 // NOTE: Might be static in `CMessage`.
@@ -316,6 +317,9 @@ const BYTE CBaldurMessage::MSG_SUBTYPE_CMESSAGE_SET_TIME_STOP = 85;
 // 0x84CF2E
 const BYTE CBaldurMessage::MSG_SUBTYPE_CMESSAGE_STORE_RELEASE = 87;
 
+// 0x84CF30
+const BYTE CBaldurMessage::MSG_SUBTYPE_CMESSAGE_89 = 89;
+
 // 0x84CF31
 const BYTE CBaldurMessage::MSG_SUBTYPE_CMESSAGE_90 = 90;
 
@@ -330,6 +334,9 @@ const BYTE CBaldurMessage::MSG_SUBTYPE_CMESSAGE_SET_PROTAGONIST = 93;
 
 // 0x84CF35
 const BYTE CBaldurMessage::MSG_SUBTYPE_CMESSAGE_START_COMBAT_MUSIC = 94;
+
+// 0x84CF37
+const BYTE CBaldurMessage::MSG_SUBTYPE_CMESSAGE_96 = 96;
 
 // 0x84CF3A
 const BYTE CBaldurMessage::MSG_SUBTYPE_CMESSAGE_SCREENSHAKE = 99;
@@ -12631,7 +12638,7 @@ CMessageVisualEffect::CMessageVisualEffect(BYTE nEffectType, BYTE nEffectPropert
     : CMessage(caller, target)
 {
     m_nEffectType = nEffectType;
-    nEffectProperty = nEffectProperty;
+    m_nEffectProperty = nEffectProperty;
 }
 
 // 0x453510
@@ -17631,4 +17638,130 @@ void CMessageGroup::Run()
     for (std::list<CMessage*>::iterator it = m_messages.begin(); it != m_messages.end(); ++it) {
         (*it)->Run();
     }
+}
+
+// NOTE: Inlined in CGameEffectDeath::ApplyEffect (0x4AB510) and the skill
+// unsummon (0x4B4BD0): the vtable 0x84C3A8 and the three ids.
+CMessage89::CMessage89(LONG spriteId, LONG caller, LONG target)
+    : CMessage(caller, target)
+{
+    m_spriteId = spriteId;
+}
+
+// 0x453510
+SHORT CMessage89::GetCommType()
+{
+    return BROADCAST;
+}
+
+// 0x40A0E0
+BYTE CMessage89::GetMsgType()
+{
+    return CBaldurMessage::MSG_TYPE_CMESSAGE;
+}
+
+// 0x4AD380
+BYTE CMessage89::GetMsgSubType()
+{
+    return CBaldurMessage::MSG_SUBTYPE_CMESSAGE_89;
+}
+
+// 0x5129D0
+void CMessage89::Run()
+{
+    CGameObject* pObject;
+
+    BYTE rc;
+    do {
+        rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetDeny(m_spriteId,
+            CGameObjectArray::THREAD_ASYNCH,
+            &pObject,
+            INFINITE);
+    } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+    if (rc != CGameObjectArray::SUCCESS) {
+        return;
+    }
+
+    // NOTE: Only in a multiplayer game, for a sprite another player owns
+    // (docs/adr/0002-single-player-only.md): never here.
+    if (g_pChitin->cNetwork.GetServiceProvider() != CNetwork::SERV_PROV_NULL
+        && g_pChitin->cNetwork.m_idLocalPlayer != pObject->m_remotePlayerID) {
+        if (pObject->GetObjectType() != CGameObject::TYPE_SPRITE) {
+            g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(m_spriteId,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+            return;
+        }
+
+        // TODO: Incomplete. The original calls the summon limit table's
+        // CSummonLimitStruct_Unsummon (Icewind586B70 0x586DC0, not ported)
+        // with the sprite.
+    }
+
+    g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(m_spriteId,
+        CGameObjectArray::THREAD_ASYNCH,
+        INFINITE);
+}
+
+// NOTE: Inlined in CGameEffectDeath::ApplyEffect (0x4AB510): the vtable
+// 0x84C38C and the three ids.
+CMessage96::CMessage96(LONG spriteId, LONG caller, LONG target)
+    : CMessage(caller, target)
+{
+    m_spriteId = spriteId;
+}
+
+// 0x453510
+SHORT CMessage96::GetCommType()
+{
+    return BROADCAST;
+}
+
+// 0x40A0E0
+BYTE CMessage96::GetMsgType()
+{
+    return CBaldurMessage::MSG_TYPE_CMESSAGE;
+}
+
+// 0x4AD390
+BYTE CMessage96::GetMsgSubType()
+{
+    return CBaldurMessage::MSG_SUBTYPE_CMESSAGE_96;
+}
+
+// 0x513180
+void CMessage96::Run()
+{
+    CGameObject* pObject;
+
+    BYTE rc;
+    do {
+        rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetDeny(m_spriteId,
+            CGameObjectArray::THREAD_ASYNCH,
+            &pObject,
+            INFINITE);
+    } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+    if (rc != CGameObjectArray::SUCCESS) {
+        return;
+    }
+
+    // NOTE: Only in a multiplayer game, for a sprite another player owns
+    // (docs/adr/0002-single-player-only.md): never here.
+    if (g_pChitin->cNetwork.GetServiceProvider() != CNetwork::SERV_PROV_NULL
+        && g_pChitin->cNetwork.m_idLocalPlayer != pObject->m_remotePlayerID) {
+        if (pObject->GetObjectType() != CGameObject::TYPE_SPRITE) {
+            g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(m_spriteId,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+            return;
+        }
+
+        Icewind586B70::Instance()->Remove(static_cast<CGameSprite*>(pObject));
+    }
+
+    g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(m_spriteId,
+        CGameObjectArray::THREAD_ASYNCH,
+        INFINITE);
 }

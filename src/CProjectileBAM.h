@@ -22,10 +22,14 @@ public:
     /* 0192 */ CVidCell* m_animation;
     /* 0196 */ CVidCell* m_shadow;
     /* 019A */ CVidPalette m_palette;
+    // NOTE: The constructor (0x52AD60) leaves 0x1BE and 0x1D2 as they are;
+    // ours starts them at 0. Only the magic missile classes set them.
+    /* 01BE */ DWORD field_1BE = 0;
     /* 01C2 */ BOOL field_1C2;
     /* 01C6 */ DWORD field_1C6;
     /* 01CA */ DWORD field_1CA;
     /* 01CE */ DWORD field_1CE;
+    /* 01D2 */ WORD field_1D2 = 0;
     /* 01D4 */ DWORD field_1D4;
     /* 01D8 */ WORD field_1D8;
     /* 01DA */ WORD field_1DA;
@@ -44,6 +48,35 @@ public:
 class CProjectile84DF1C : public CProjectileBAM {
 public:
     CProjectile84DF1C();
+};
+
+// Several projectiles of one type fired together (vtable 0x84E030): the
+// constructor makes nCount of type nType + 1 (DecodeProjectile); Fire fires
+// them all at the target, each with copies of this projectile's effects and
+// its speed changed by up to 10 either way, spreads them in pairs to either
+// side of the line of flight, and deletes this one.
+class CProjectile84E030 : public CProjectileBAM {
+public:
+    CProjectile84E030(WORD nType, CResRef resRef, WORD nCount, WORD nPaletteType);
+    /* 0000 */ ~CProjectile84E030() override;
+    /* 006C */ void Fire(CGameArea* pArea, LONG source, LONG target, CPoint targetPos, LONG nHeight, SHORT nType) override;
+
+    /* 02A0 */ WORD m_nCount;
+    /* 02A2 */ CTypedPtrList<CPtrList, CProjectile*> m_projectiles;
+    /* 02BE */ WORD m_nType;
+};
+
+// Magic Missile, types 68 to 72 (vtable 0x84E0C4): 1 to 5 missiles of type
+// 218.
+class CProjectile84E0C4 : public CProjectile84E030 {
+public:
+    CProjectile84E0C4(WORD nCount, WORD nPaletteType);
+};
+
+// One magic missile, type 218 (vtable 0x8510A4).
+class CProjectile8510A4 : public CProjectileBAM {
+public:
+    CProjectile8510A4(WORD nPaletteType);
 };
 
 #endif /* CPROJECTILEBAM_H_ */

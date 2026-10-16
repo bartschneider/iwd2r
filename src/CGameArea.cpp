@@ -812,6 +812,216 @@ LONG CGameArea::GetNearest(LONG startObject, const CAIObjectType& type, SHORT ra
     }
 }
 
+// 0x46BAD0
+LONG CGameArea::sub_46BAD0(LONG startObject, const CAIObjectType& type, SHORT range, const BYTE* terrainTable, BOOL checkLOS, BOOL seeInvisible, BOOL ignoreSleeping, BYTE nNearest, BOOL summonedOnly)
+{
+    // GetNearest's search for the (nNearest + 1)-th nearest creature of the
+    // type to startObject, or the farthest one found when there are fewer.
+    // Unlike GetNearest it has no location type and no race 0xBE test, and
+    // a caller off the front list searches from its point (sub_46DDC0).
+    CAIObjectType callerType;
+    DWORD dwSkipStates = STATE_DEAD;
+    if (ignoreSleeping) {
+        dwSkipStates = STATE_DEAD | STATE_SLEEPING;
+    }
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameArea.cpp
+    // __LINE__: 1188
+    UTIL_ASSERT(terrainTable != NULL);
+
+    CGameObject* pObject;
+    BYTE rc = m_pGame->GetObjectArray()->GetShare(startObject,
+        CGameObjectArray::THREAD_ASYNCH,
+        &pObject,
+        INFINITE);
+    if (rc != CGameObjectArray::SUCCESS) {
+        return CGameObjectArray::INVALID_INDEX;
+    }
+
+    callerType.Set(pObject->GetAIType());
+
+    if (pObject->GetPos().x < 0 || pObject->GetPos().y < 0) {
+        m_pGame->GetObjectArray()->ReleaseShare(startObject,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+        return CGameObjectArray::INVALID_INDEX;
+    }
+
+    if (pObject->GetVertListType() != CGameObject::LIST_FRONT) {
+        CPoint pt = pObject->GetPos();
+        m_pGame->GetObjectArray()->ReleaseShare(startObject,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+        return sub_46DDC0(pt.x, pt.y, type, range, terrainTable, checkLOS, seeInvisible, nNearest, summonedOnly);
+    }
+
+    CPoint ptStart = pObject->GetPos();
+    INT xStart = pObject->GetPos().x;
+    INT yStart = 4 * pObject->GetPos().y / 3;
+
+    SHORT nTile = static_cast<SHORT>(ptStart.y / CVisibilityMap::SQUARE_SIZEY * m_visibility.m_nWidth
+        + ptStart.x / CVisibilityMap::SQUARE_SIZEX);
+    if (nTile >= m_visibility.m_nWidth * m_visibility.m_nHeight) {
+        // NOTE: The original formats "Illegal position (%d,%d)" into a new
+        // buffer and frees it unused.
+        m_pGame->GetObjectArray()->ReleaseShare(startObject,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+        return CGameObjectArray::INVALID_INDEX;
+    }
+
+    POSITION posVertList = pObject->GetVertListPos();
+
+    m_pGame->GetObjectArray()->ReleaseShare(startObject,
+        CGameObjectArray::THREAD_ASYNCH,
+        INFINITE);
+
+    if (posVertList == NULL) {
+        return CGameObjectArray::INVALID_INDEX;
+    }
+
+    if (checkLOS) {
+        if (m_pGame->GetCharacterPortraitNum(startObject) == -1) {
+            if (!m_visibility.IsTileExplored(nTile)) {
+                return CGameObjectArray::INVALID_INDEX;
+            }
+        } else {
+            if (!m_visibility.IsTileVisible(nTile)) {
+                return CGameObjectArray::INVALID_INDEX;
+            }
+        }
+    }
+
+    // NOTE: The original keeps the two tables on its stack, 12 entries each;
+    // its callers ask for at most the tenth nearest.
+    LONG nDistances[256];
+    LONG nIds[256];
+    INT nCount = nNearest + 1;
+    for (SHORT nIndex = 0; nIndex < nCount; nIndex++) {
+        nDistances[nIndex] = range * range + 1;
+        nIds[nIndex] = CGameObjectArray::INVALID_INDEX;
+    }
+
+    // NOTE: The original reads the node's links directly; any vertical list
+    // walks a node the same way.
+    POSITION posPrev = posVertList;
+    m_lVertSort.GetPrev(posPrev);
+    POSITION posNext = posVertList;
+    m_lVertSort.GetNext(posNext);
+
+    // One object (the original has the same code for each side): a sprite
+    // in range, not skipped for its state, visible to the caller, above
+    // ground, not ignoring the caller's type, not hidden, summoned when
+    // asked, active, of the type and in sight when asked goes into the
+    // first place of the table it is nearer than. Returns FALSE when it is
+    // as far vertically as the table's last place, which ends its side.
+    auto Check = [&](LONG nId, CGameObject* pTarget) -> BOOL {
+        if (pTarget->GetVertListPos() == NULL) {
+            return TRUE;
+        }
+
+        INT xTarget = pTarget->GetPos().x;
+        LONG dy = (yStart - 4 * pTarget->GetPos().y / 3) * (yStart - 4 * pTarget->GetPos().y / 3);
+        if (dy >= nDistances[nNearest]) {
+            return FALSE;
+        }
+
+        if (pTarget->GetObjectType() != CGameObject::TYPE_SPRITE) {
+            return TRUE;
+        }
+
+        CGameSprite* pSprite = static_cast<CGameSprite*>(pTarget);
+        if ((pSprite->m_derivedStats.m_generalState & dwSkipStates) != 0
+            || !pSprite->IsVisibleToCaller(seeInvisible)
+            || !pSprite->GetAnimation()->GetAboveGround()
+            || pSprite->m_derivedStats.m_cImmunitiesAIType.OnList(callerType)
+            || pSprite->GetBaseStats()->field_294 == 1
+            || (summonedOnly == 1 && (pSprite->m_derivedStats.m_generalState & STATE_SUMMONED_CREATURE) == 0)
+            || !pSprite->m_active
+            || !pSprite->m_activeAI
+            || !pSprite->m_activeImprisonment) {
+            return TRUE;
+        }
+
+        if (!pSprite->GetAIType().OfType(type, FALSE, FALSE)) {
+            return TRUE;
+        }
+
+        if (checkLOS && !CheckLOS(ptStart, pSprite->GetPos(), terrainTable, TRUE)) {
+            return TRUE;
+        }
+
+        LONG nDistance = (xStart - xTarget) * (xStart - xTarget) + dy;
+        for (SHORT nIndex = 0; nIndex < nCount; nIndex++) {
+            if (nDistance < nDistances[nIndex]) {
+                memmove(&nDistances[nIndex + 1], &nDistances[nIndex], (nNearest - nIndex) * sizeof(LONG));
+                memmove(&nIds[nIndex + 1], &nIds[nIndex], (nNearest - nIndex) * sizeof(LONG));
+                nDistances[nIndex] = nDistance;
+                nIds[nIndex] = nId;
+                break;
+            }
+        }
+
+        return TRUE;
+    };
+
+    while (1) {
+        if (posPrev == NULL && posNext == NULL) {
+            break;
+        }
+
+        if (posPrev != NULL) {
+            LONG nId = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSort.GetPrev(posPrev)));
+
+            CGameObject* pTarget;
+            rc = m_pGame->GetObjectArray()->GetShare(nId,
+                CGameObjectArray::THREAD_ASYNCH,
+                &pTarget,
+                INFINITE);
+            if (rc != CGameObjectArray::SUCCESS) {
+                continue;
+            }
+
+            if (!Check(nId, pTarget)) {
+                posPrev = NULL;
+            }
+
+            m_pGame->GetObjectArray()->ReleaseShare(nId,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+
+            if (posNext == NULL) {
+                continue;
+            }
+        }
+
+        LONG nId = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSort.GetNext(posNext)));
+
+        CGameObject* pTarget;
+        rc = m_pGame->GetObjectArray()->GetShare(nId,
+            CGameObjectArray::THREAD_ASYNCH,
+            &pTarget,
+            INFINITE);
+        if (rc != CGameObjectArray::SUCCESS) {
+            continue;
+        }
+
+        if (!Check(nId, pTarget)) {
+            posNext = NULL;
+        }
+
+        m_pGame->GetObjectArray()->ReleaseShare(nId,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+    }
+
+    while (nNearest > 0 && nIds[nNearest] == CGameObjectArray::INVALID_INDEX) {
+        nNearest--;
+    }
+
+    return nIds[nNearest];
+}
+
 // NOTE: The name is the Ghidra project's: the nearest active creature whose
 // dialog (m_dialog or field_56E4) is `dialog`, from `startObject` within
 // `range`: first the front list outward from the caller's node (or the whole
@@ -1425,6 +1635,106 @@ LONG CGameArea::sub_46DAE0(INT x, INT y, const CAIObjectType& type, int a4, cons
     } while (pos != NULL);
 
     return nFound;
+}
+
+
+// 0x46DDC0
+LONG CGameArea::sub_46DDC0(INT x, INT y, const CAIObjectType& type, SHORT range, const BYTE* terrainTable, BOOL checkLOS, BOOL seeInvisible, BYTE nNearest, BOOL summonedOnly)
+{
+    // The (nNearest + 1)-th nearest object of the type to the point within
+    // range, or the farthest one found when there are fewer.
+    if (x < 0 || y < 0) {
+        return CGameObjectArray::INVALID_INDEX;
+    }
+
+    // NOTE: The original keeps the two tables on its stack, 12 entries each;
+    // its callers ask for at most the tenth nearest.
+    LONG nDistances[256];
+    LONG nIds[256];
+    INT nCount = nNearest + 1;
+    for (SHORT nIndex = 0; nIndex < nCount; nIndex++) {
+        nDistances[nIndex] = range * range + 1;
+        nIds[nIndex] = CGameObjectArray::INVALID_INDEX;
+    }
+
+    INT yScaled = 4 * y / 3;
+
+    POSITION pos = m_lVertSort.GetHeadPosition();
+    while (pos != NULL) {
+        LONG nId = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSort.GetNext(pos)));
+
+        CGameObject* pObject;
+        BYTE rc = m_pGame->GetObjectArray()->GetShare(nId,
+            CGameObjectArray::THREAD_ASYNCH,
+            &pObject,
+            INFINITE);
+        if (rc != CGameObjectArray::SUCCESS) {
+            continue;
+        }
+
+        LONG xObject = pObject->GetPos().x;
+        LONG yObject = 4 * pObject->GetPos().y / 3;
+
+        if (yScaled - yObject <= range) {
+            if (yObject - yScaled > range) {
+                // The list is sorted by y: the rest are farther.
+                m_pGame->GetObjectArray()->ReleaseShare(nId,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    INFINITE);
+                break;
+            }
+
+            BOOL bCandidate = TRUE;
+            if (pObject->GetObjectType() == CGameObject::TYPE_SPRITE) {
+                CGameSprite* pSprite = static_cast<CGameSprite*>(pObject);
+                bCandidate = pSprite->m_active
+                    && pSprite->m_activeAI
+                    && pSprite->m_activeImprisonment
+                    && pSprite->GetAnimation()->GetAboveGround()
+                    && pSprite->IsVisibleToCaller(seeInvisible);
+            }
+
+            // NOTE: With summonedOnly the original reads the general state
+            // at 0x920 of any object, a sprite's derived state; ours reads it
+            // for sprites and takes 0 for the others (as sub_46DAE0).
+            DWORD dwState = pObject->GetObjectType() == CGameObject::TYPE_SPRITE
+                ? static_cast<CGameSprite*>(pObject)->m_derivedStats.m_generalState
+                : 0;
+
+            if (bCandidate
+                && pObject->GetAIType().OfType(type, FALSE, FALSE)
+                && (!summonedOnly || (dwState & STATE_SUMMONED_CREATURE) != 0)) {
+                LONG nDistance = (xObject - x) * (xObject - x) + (yObject - yScaled) * (yObject - yScaled);
+                for (SHORT nIndex = 0; nIndex < nCount; nIndex++) {
+                    if (nDistance > nDistances[nIndex]) {
+                        continue;
+                    }
+
+                    // NOTE: A failed line of sight moves on to the next
+                    // place in the table and checks again.
+                    if (checkLOS && !CheckLOS(CPoint(x, y), pObject->GetPos(), terrainTable, FALSE)) {
+                        continue;
+                    }
+
+                    memmove(&nDistances[nIndex + 1], &nDistances[nIndex], (nNearest - nIndex) * sizeof(LONG));
+                    memmove(&nIds[nIndex + 1], &nIds[nIndex], (nNearest - nIndex) * sizeof(LONG));
+                    nDistances[nIndex] = nDistance;
+                    nIds[nIndex] = nId;
+                    break;
+                }
+            }
+        }
+
+        m_pGame->GetObjectArray()->ReleaseShare(nId,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+    }
+
+    while (nNearest > 0 && nIds[nNearest] == CGameObjectArray::INVALID_INDEX) {
+        nNearest--;
+    }
+
+    return nIds[nNearest];
 }
 
 // 0x46F5A0

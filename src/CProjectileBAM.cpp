@@ -2,6 +2,7 @@
 
 #include "CBaldurChitin.h"
 #include "CGameArea.h"
+#include "CGameEffect.h"
 #include "CGameSprite.h"
 #include "CInfGame.h"
 #include "CParticle.h"
@@ -442,4 +443,225 @@ CProjectile84DF1C::CProjectile84DF1C()
     m_sVisualEffect = "";
     field_182 = CGameObjectArray::INVALID_INDEX;
     m_bLimitedLifetime = TRUE;
+}
+
+// -----------------------------------------------------------------------------
+
+// 0x5309C0
+CProjectile84E030::CProjectile84E030(WORD nType, CResRef resRef, WORD nCount, WORD nPaletteType)
+    : CProjectileBAM(resRef)
+{
+    m_animation->SequenceSet(0);
+    m_nCount = nCount;
+    m_nType = nType;
+    field_E6 |= 0x8;
+
+    switch (nPaletteType) {
+    case 0:
+        break;
+    case 1:
+        m_palette.SetRange(0, 33, *g_pBaldurChitin->GetObjectGame()->GetMasterBitmap());
+        m_animation->SetPalette(m_palette);
+        break;
+    default:
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\CProjectile.cpp
+        // __LINE__: 7083
+        UTIL_ASSERT(FALSE);
+    }
+
+    for (SHORT nIndex = 0; nIndex < static_cast<SHORT>(nCount); nIndex++) {
+        CProjectile* pProjectile = DecodeProjectile(m_nType + 1, NULL, 0);
+        if (nIndex != 0) {
+            // Only the first one plays its fire sound.
+            pProjectile->m_fireSoundRef = "";
+        }
+        m_projectiles.AddTail(pProjectile);
+    }
+
+    m_callBackProjectile = CGameObjectArray::INVALID_INDEX;
+    m_sVisualEffect = "";
+    field_182 = CGameObjectArray::INVALID_INDEX;
+}
+
+// 0x530B60
+CProjectile84E030::~CProjectile84E030()
+{
+    // NOTE: The projectiles in the list are not deleted: Fire empties it, and
+    // a projectile that is never fired keeps them.
+}
+
+// 0x530C90
+void CProjectile84E030::Fire(CGameArea* pArea, LONG source, LONG target, CPoint targetPos, LONG nHeight, SHORT nType)
+{
+    CGameObject* pObject;
+    BYTE rc;
+
+    (void)nHeight;
+
+    do {
+        rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(target,
+            CGameObjectArray::THREAD_ASYNCH,
+            &pObject,
+            INFINITE);
+    } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+    // NOTE: On failure the original returns without deleting this projectile
+    // or the ones in its list.
+    if (rc != CGameObjectArray::SUCCESS) {
+        return;
+    }
+
+    CPoint ptTarget = pObject->GetPos();
+
+    g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(target,
+        CGameObjectArray::THREAD_ASYNCH,
+        INFINITE);
+
+    do {
+        rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(source,
+            CGameObjectArray::THREAD_ASYNCH,
+            &pObject,
+            INFINITE);
+    } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+    if (rc != CGameObjectArray::SUCCESS) {
+        return;
+    }
+
+    m_pos = pObject->GetPos();
+
+    g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(source,
+        CGameObjectArray::THREAD_ASYNCH,
+        INFINITE);
+
+    // The velocity along the line of flight in the projectiles' units.
+    LONG dx = ptTarget.x - m_pos.x;
+    LONG dy = ptTarget.y * 4 / 3 - m_pos.y * 4 / 3;
+    LONG nDistance = static_cast<LONG>(sqrt(static_cast<double>(dy * dy + dx * dx)) + 0.5);
+
+    LONG vx;
+    LONG vy;
+    if (nDistance == 0) {
+        vx = 1;
+        vy = 1;
+    } else {
+        vx = (dx << CParticle::RESOLUTION_INC) * m_speed / nDistance;
+        vy = (dy << CParticle::RESOLUTION_INC) * m_speed / nDistance;
+    }
+
+    LONG nVelocity = static_cast<LONG>(sqrt(static_cast<double>(vy * vy + vx * vx)));
+
+    // NOTE: The original copies the effects and fires each projectile with
+    // the same code twice, once for each of a pair.
+    auto fireOne = [&](CProjectile* pProjectile) {
+        POSITION pos = m_effectList.GetHeadPosition();
+        while (pos != NULL) {
+            CGameEffect* pEffect = m_effectList.GetNext(pos)->Copy();
+            pEffect->m_projectileType = pProjectile->m_projectileType;
+            pProjectile->m_effectList.AddTail(pEffect);
+        }
+
+        pProjectile->m_speed = static_cast<SHORT>(rand() % 20 + pProjectile->m_speed - 10);
+        pProjectile->m_nSpellLevel = m_nSpellLevel;
+        pProjectile->m_sourceRes = m_sourceRes;
+        pProjectile->Fire(pArea, source, target, targetPos, 0, nType);
+    };
+
+    BYTE nPair = 1;
+    POSITION pos = m_projectiles.GetHeadPosition();
+    while (pos != NULL) {
+        CProjectile* pFirst = m_projectiles.GetNext(pos);
+        fireOne(pFirst);
+
+        CProjectile* pSecond = NULL;
+        if (pos != NULL) {
+            pSecond = m_projectiles.GetNext(pos);
+            fireOne(pSecond);
+        }
+
+        if (pSecond != NULL) {
+            // A pair drifts out to either side of the line of flight, each
+            // pair further than the one before.
+            LONG nDriftX = nPair * vy;
+            LONG nDriftY = -(nPair * vx);
+            WORD nDecay = static_cast<WORD>(nPair * nVelocity / 40);
+
+            pFirst->m_driftX = nDriftX;
+            pFirst->m_driftY = nDriftY;
+            pFirst->m_driftDecay = nDecay;
+            pFirst->m_bTrackTargetHeight = nDriftX != 0 || nDriftY != 0;
+
+            pSecond->m_driftX = -nDriftX;
+            pSecond->m_driftY = -nDriftY;
+            pSecond->m_driftDecay = nDecay;
+            pSecond->m_bTrackTargetHeight = nDriftX != 0 || nDriftY != 0;
+
+            nPair++;
+        } else {
+            pFirst->m_driftX = 0;
+            pFirst->m_driftY = 0;
+            pFirst->m_driftDecay = m_speed;
+            pFirst->m_bTrackTargetHeight = FALSE;
+        }
+    }
+
+    m_projectiles.RemoveAll();
+
+    delete this;
+}
+
+// -----------------------------------------------------------------------------
+
+// 0x531120
+CProjectile84E0C4::CProjectile84E0C4(WORD nCount, WORD nPaletteType)
+    : CProjectile84E030(217, CResRef("SPMAGMIS"), nCount, nPaletteType)
+{
+    field_1BE = 0;
+    field_1C2 = FALSE;
+    field_1D4 = 0;
+    field_1CA = 10;
+    field_1CE = 7;
+    field_1C6 = 1;
+    field_1D2 = 0x80;
+    field_1D8 = 1;
+    m_fireSoundRef = "";
+    m_callBackProjectile = CGameObjectArray::INVALID_INDEX;
+    m_sVisualEffect = "";
+    field_182 = CGameObjectArray::INVALID_INDEX;
+}
+
+// -----------------------------------------------------------------------------
+
+// 0x57E030
+CProjectile8510A4::CProjectile8510A4(WORD nPaletteType)
+    : CProjectileBAM(CResRef("MMissiT"))
+{
+    m_animation->SequenceSet(0);
+    m_speed *= 2;
+    field_1CA = 15;
+    field_1CE = 11;
+    field_1BE = 0;
+    field_1C2 = FALSE;
+    field_1C6 = 1;
+    field_1D2 = 0x80;
+    field_1D4 = 0;
+    m_fireSoundRef = "";
+    field_E6 |= 0x8;
+
+    switch (nPaletteType) {
+    case 0:
+        break;
+    case 1:
+        m_palette.SetRange(0, 33, *g_pBaldurChitin->GetObjectGame()->GetMasterBitmap());
+        m_animation->SetPalette(m_palette);
+        break;
+    default:
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\IcewindCProjectiles.cpp
+        // __LINE__: 1481
+        UTIL_ASSERT(FALSE);
+    }
+
+    m_callBackProjectile = CGameObjectArray::INVALID_INDEX;
+    m_sVisualEffect = "";
+    field_182 = CGameObjectArray::INVALID_INDEX;
 }
