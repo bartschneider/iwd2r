@@ -4885,15 +4885,28 @@ class KnownDifferencesTest(unittest.TestCase):
         self.assertEqual(oracle.stale_known(known, hits), [known[1]])
 
 
-def make_save(folder, name, payload='x'):
+def sav_bytes(entries):
+    """A SAV V1.0 file holding entries ({name: data}), as the game packs
+    ICEWIND2.SAV."""
+    out = b'SAV V1.0'
+    for name, data in entries.items():
+        packed = zlib.compress(data)
+        raw = name.encode('latin-1') + b'\0'
+        out += struct.pack('<I', len(raw)) + raw
+        out += struct.pack('<II', len(data), len(packed)) + packed
+    return out
+
+
+def make_save(folder, name, payload='x', sav=None):
     """A save folder as the game writes it: ICEWIND2.GAM with the
-    GAMEV2.2 signature (CInfGame::SaveGameExists)."""
+    GAMEV2.2 signature (CInfGame::SaveGameExists) and ICEWIND2.SAV, the
+    payload itself or, with sav ({name: data}), a SAV V1.0 file of it."""
     path = os.path.join(folder, name)
     os.makedirs(path)
     with open(os.path.join(path, 'ICEWIND2.GAM'), 'wb') as f:
         f.write(b'GAMEV2.2' + payload.encode())
-    with open(os.path.join(path, 'ICEWIND2.SAV'), 'w') as f:
-        f.write(payload)
+    with open(os.path.join(path, 'ICEWIND2.SAV'), 'wb') as f:
+        f.write(sav_bytes(sav) if sav is not None else payload.encode())
     return path
 
 
@@ -5183,6 +5196,110 @@ class OracleSavesTest(unittest.TestCase):
             ROOT, 'scenarios', 'pending', 'save_load.txt')), 420)
 
 
+savediff = load_tool('savediff')
+
+
+def area_bytes(entrances=7, vertices=386, region_vertices=4,
+               door_vertices=3):
+    """An ARE V9.1 area file with one region and one door at the offsets
+    tools/savediff.py reads."""
+    data = bytearray(0x400)
+    struct.pack_into('<H', data, 0x6A, 1)
+    struct.pack_into('<I', data, 0x6C, 0x100)
+    struct.pack_into('<II', data, 0x78, 0x300, entrances)
+    struct.pack_into('<H', data, 0x84, 25)
+    struct.pack_into('<H', data, 0x90, vertices)
+    struct.pack_into('<II', data, 0xB4, 1, 0x200)
+    data[0x100:0x100 + 9] = b'Life Raft'
+    struct.pack_into('<H', data, 0x100 + 0x2A, region_vertices)
+    data[0x200:0x200 + 12] = b'AR1000_Door1'
+    struct.pack_into('<HH', data, 0x200 + 0x30, door_vertices, 4)
+    struct.pack_into('<8H', data, 0x200 + 0x38, 3174, 3, 3183, 13, 958, 486,
+                     1005, 540)
+    return bytes(data)
+
+
+class SaveDiffTest(unittest.TestCase):
+    """tools/savediff.py on two save folders."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp = self._tmp.name
+
+    def save(self, side, gam=b'', area=None, extra=None, wmp=b'map',
+             bmp=b'shot'):
+        path = os.path.join(self.tmp, side)
+        os.makedirs(path)
+        files = {'ICEWIND2.GAM': b'GAMEV2.2' + bytes(0x340) + gam,
+                 'ICEWIND2.SAV': sav_bytes(dict(
+                     {'AR1000.ARE': area or area_bytes()}, **(extra or {}))),
+                 'WORLDMAP.WMP': wmp, 'ICEWIND2.BMP': bmp,
+                 'PORTRT0.BMP': bmp}
+        for name, data in files.items():
+            with open(os.path.join(path, name), 'wb') as f:
+                f.write(data)
+        return path
+
+    def test_the_same_data(self):
+        a = self.save('a')
+        b = self.save('b', bmp=b'another shot')
+        lines, different = savediff.compare_saves(a, b)
+        self.assertEqual(different, 0)
+        self.assertEqual(lines, [
+            '  ICEWIND2.GAM: same (0x325-0x331 masked)',
+            '  ICEWIND2.SAV:AR1000.ARE: same', '  WORLDMAP.WMP: same'])
+
+    def test_the_original_s_uninitialised_bytes_are_masked(self):
+        a = self.save('a')
+        b = self.save('b')
+        with open(os.path.join(b, 'ICEWIND2.GAM'), 'r+b') as f:
+            f.seek(0x325)
+            f.write(b'\xfe' * (0x331 - 0x325 + 1))
+        self.assertEqual(savediff.compare_saves(a, b)[1], 0)
+        with open(os.path.join(b, 'ICEWIND2.GAM'), 'r+b') as f:
+            f.seek(0x332)
+            f.write(b'\x01')
+        lines, different = savediff.compare_saves(a, b)
+        self.assertEqual(different, 1)
+        self.assertEqual(lines[:2], [
+            '  ICEWIND2.GAM: DIFFERENT (840 and 840 bytes, 1 run of '
+            'differing bytes)', '    0x0332-0x0332: 00 / 01'])
+
+    def test_an_area_differs_by_its_parts(self):
+        a = self.save('a', extra={'default.toh': b'toh'})
+        b = self.save('b', area=area_bytes(entrances=0, vertices=225,
+                                           region_vertices=2,
+                                           door_vertices=2))
+        lines, different = savediff.compare_saves(a, b)
+        self.assertEqual(different, 2)
+        self.assertIn('    entrances: 7, 0', lines)
+        self.assertIn('    vertices: 386, 225', lines)
+        self.assertIn('    region Life Raft: 4 vertices; 2', lines)
+        self.assertIn('    door AR1000_Door1: vertices 3 open, 4 closed, '
+                      'boxes (3174, 3, 3183, 13) (958, 486, 1005, 540); 2, '
+                      '4, (3174, 3, 3183, 13) (958, 486, 1005, 540)', lines)
+        self.assertIn('  ICEWIND2.SAV:default.toh: MISSING in %s' % b, lines)
+
+    def test_unreadable_and_missing_files(self):
+        a = self.save('a')
+        b = self.save('b')
+        with open(os.path.join(b, 'ICEWIND2.SAV'), 'wb') as f:
+            f.write(b'SAV V1.0' + b'\x05')
+        os.remove(os.path.join(b, 'WORLDMAP.WMP'))
+        lines, different = savediff.compare_saves(a, b)
+        self.assertEqual(different, 2)
+        self.assertTrue(lines[1].startswith('  ICEWIND2.SAV: unreadable'))
+        self.assertEqual(lines[2], '  WORLDMAP.WMP: MISSING in %s' % b)
+        with contextlib.redirect_stdout(io.StringIO()) as text:
+            self.assertEqual(savediff.main([a, b]), 1)
+            self.assertEqual(savediff.main([a, a]), 0)
+            self.assertEqual(savediff.main([a]), 2)
+        self.assertIn('savediff: 2 files differ', text.getvalue())
+        self.assertIn('savediff: the saves hold the same data',
+                      text.getvalue())
+
+
 class CrossloadTest(unittest.TestCase):
     """tools/oracle.py replay crossload, with both engines stubbed: each
     run writes its checkpoint dumps and, in the save scenario, a save."""
@@ -5206,13 +5323,16 @@ class CrossloadTest(unittest.TestCase):
                 'chargen': None, 'world': None,
                 'game': {'party_gold': gold, 'members': []}}
 
-    def crossload(self, argv, gold=None, saves=None):
+    def crossload(self, argv, gold=None, saves=None, payload=None):
         """oracle.main(['replay', 'crossload'] + argv) with the runs
         stubbed. gold: {run folder: party gold in its dumps} (36 for any
         other); saves: {'original': [...], 'ours': [...]}, the saves each
-        engine's save run makes. Returns (exit code, runs, output)."""
+        engine's save run makes; payload: {engine: its saves' game file
+        bytes} (the same for both by default). Returns (exit code, runs,
+        output)."""
         from unittest import mock
         gold = gold or {}
+        payload = payload or {}
         saves = saves or {'original': ['000000000-Autosave - Prologue',
                                        '000000004-Probe Save'],
                           'ours': ['000000000-Autosave - Prologue',
@@ -5234,7 +5354,9 @@ class CrossloadTest(unittest.TestCase):
                     json.dump(self.dump(name, gold.get(subdir, 36)), f)
             if subdir.startswith('save-'):
                 for name in saves[engine]:
-                    make_save(os.path.join(out, 'saves'), name, subdir)
+                    make_save(os.path.join(out, 'saves'), name,
+                              payload.get(engine, 'game'),
+                              {'AR1000.ARE': b'area'})
             return 0
 
         def record(script, actions, seed, timeout, dump_every, run_dir,
@@ -5272,19 +5394,30 @@ class CrossloadTest(unittest.TestCase):
             ('ours-loads-original', 'ours', 'load_game.txt', 'load',
              'save-original/saves/' + save),
             ('ours-loads-ours', 'ours', 'load_game.txt', 'load',
-             'save-ours/saves/' + save)])
+             'save-ours/saves/' + save),
+            # By default the original loads its own save too.
+            ('original-loads-original', 'original', 'load_game.txt',
+             'load', 'save-original/saves/' + save)])
+        self.assertIn('== the saves, the original\'s and ours: the same '
+                      'data', text)
         self.assertIn('== compare original-loads-ours with '
                       'ours-loads-original: match at 4 of 4 checkpoints',
                       text)
-        self.assertIn('result: MATCH: each engine loads the other\'s save '
-                      '(000000004-Probe Save)', text)
+        self.assertIn('== compare original-loads-original with '
+                      'original-loads-ours: match', text)
+        self.assertIn('result: MATCH: the saves (000000004-Probe Save) hold '
+                      'the same data and each engine loads the other\'s to '
+                      'the same state', text)
         report = glob.glob(os.path.join(self.tmp, 'runs', '*',
                                         'crossload.json'))
         with open(report[0]) as f:
             report = json.load(f)
         self.assertEqual(report['save'], save)
+        self.assertEqual(report['save_files_differ'], 0)
         self.assertEqual([(p['first'], p['second']) for p in
-                          report['pairs']], list(oracle.CROSSLOAD_PAIRS))
+                          report['pairs']],
+                         list(oracle.CROSSLOAD_PAIRS
+                              + oracle.CROSSLOAD_OWN_PAIRS))
 
     def test_a_difference_names_the_runs(self):
         code, _, text = self.crossload([], gold={'original-loads-ours': 40})
@@ -5293,17 +5426,29 @@ class CrossloadTest(unittest.TestCase):
                       'ours-loads-original 36', text)
         self.assertIn('== compare ours-loads-original with ours-loads-ours: '
                       'match', text)
-        # Two pairs have the original's run, 4 checkpoints each.
-        self.assertIn('result: DIFFERENT: 8 differences', text)
+        # Three pairs have that run, 4 checkpoints each.
+        self.assertIn('result: DIFFERENT: 12 differences in the loaded '
+                      'states, 0 files of the saves', text)
 
-    def test_full_adds_the_originals_own_save(self):
-        code, runs, text = self.crossload(['--full', '--seed', '7'])
+    def test_the_saves_are_compared_as_data(self):
+        # A field both our saver and our loader get wrong: the loaded
+        # states match, the saves do not.
+        code, runs, text = self.crossload([], payload={'ours': 'other'})
+        self.assertEqual(code, 1)
+        self.assertEqual(len(runs), 6)
+        self.assertIn('== the saves, the original\'s and ours: 1 file '
+                      'DIFFERENT', text)
+        self.assertIn('  ICEWIND2.GAM: DIFFERENT', text)
+        self.assertIn('  ICEWIND2.SAV:AR1000.ARE: same', text)
+        self.assertIn('result: DIFFERENT: 0 differences in the loaded '
+                      'states, 1 file of the saves', text)
+
+    def test_quick_leaves_out_the_originals_own_save(self):
+        code, runs, text = self.crossload(['--quick', '--seed', '7'])
         self.assertEqual(code, 0, text)
-        self.assertEqual(runs[-1], (
-            'original-loads-original', 'original', 'load_game.txt', 'load',
-            'save-original/saves/000000004-Probe Save'))
-        self.assertIn('== compare original-loads-original with '
-                      'original-loads-ours: match', text)
+        self.assertEqual([r[0] for r in runs][2:], [
+            'original-loads-ours', 'ours-loads-original', 'ours-loads-ours'])
+        self.assertNotIn('original-loads-original', text)
 
     def test_the_sides_must_make_the_same_saves(self):
         code, runs, text = self.crossload([], saves={
@@ -5322,13 +5467,21 @@ class CrossloadTest(unittest.TestCase):
 
     def test_saves_from_an_earlier_run(self):
         earlier = os.path.join(self.tmp, 'earlier')
-        make_save(os.path.join(earlier, 'original', 'saves'), '000000004-A')
-        make_save(os.path.join(earlier, 'ours', 'saves'), '000000004-A')
-        code, runs, text = self.crossload(['--saves-from', earlier])
+        for side in ('original', 'ours'):
+            make_save(os.path.join(earlier, side, 'saves'), '000000004-A',
+                      'game', {})
+        # A relative path is taken as it reads from here.
+        code, runs, text = self.crossload(['--saves-from',
+                                           os.path.relpath(earlier)])
         self.assertEqual(code, 0, text)
         self.assertEqual([r[0] for r in runs], [
-            'original-loads-ours', 'ours-loads-original', 'ours-loads-ours'])
+            'original-loads-ours', 'ours-loads-original', 'ours-loads-ours',
+            'original-loads-original'])
         self.assertTrue(runs[0][4].endswith('earlier/ours/saves/000000004-A'))
+        report = glob.glob(os.path.join(self.tmp, 'runs', '*',
+                                        'crossload.json'))
+        with open(report[0]) as f:
+            self.assertEqual(json.load(f)['saves_from'], earlier)
         with self.assertRaises(SystemExit), \
                 contextlib.redirect_stdout(io.StringIO()):
             self.crossload(['--saves-from', self.tmp])

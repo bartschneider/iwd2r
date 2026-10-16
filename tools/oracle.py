@@ -20,7 +20,7 @@ Usage (from WSL, in the repository):
   python3 tools/oracle.py replay crossload [<save scenario>]
                                            [--load-scenario S]
                                            [--saves-from RUN] [--slot NAME]
-                                           [--full] [--seed N] [--timeout S]
+                                           [--quick] [--seed N] [--timeout S]
                                            [--dump-every N] [--no-build]
                                            [--host]
 
@@ -153,43 +153,49 @@ on either side; runs/<stamp>/compare.json keeps the result.
 
 Saves. The load and save screens list the saves of mpsave in folder name
 order, so a replay that loads or saves gets a mpsave of its own on both
-sides (prepared_saves): with --load SAVE (a save folder, NNNNNNNNN-Name
-with its ICEWIND2.GAM) mpsave holds only that save (and the game's own
-default folder), so the scenario loads it from the load screen's first
-slot (scenarios/pending/load_game.txt does, from the main menu); a
-scenario whose header says "# saves: empty" starts with no saves, and one
-that says "# saves: load" refuses to run without --load. The saves such a
-run makes are moved into its folder's saves/ (runs/<stamp>/original/saves,
-ours/saves). The vanilla copy's own saves wait in
-C:/Users/thier/iwd2r-oracle/mpsave-aside meanwhile and are put back after
-the run, or by the next recording when a run died; our engine's data view
-has a private copy of mpsave, emptied in place. Both sides keep the same
-seed and frame alignment as a new-game replay.
+sides (prepared_saves): every replay starts with no saves but the game's
+own default folder, and the saves it makes are moved into its folder's
+saves/ (runs/<stamp>/original/saves, ours/saves), so the vanilla copy's
+own saves never change. With --load SAVE (a save folder, NNNNNNNNN-Name
+with its ICEWIND2.GAM) mpsave holds only that save, so the scenario loads
+it from the load screen's first slot (scenarios/pending/load_game.txt
+does, from the main menu); a run that saves over it keeps that save too.
+A scenario whose header says "# saves: load" refuses to run without
+--load ("# saves: empty" is the default, said where it matters). The
+vanilla copy's own saves wait in C:/Users/thier/iwd2r-oracle/mpsave-aside
+meanwhile and are put back after the run, or by the next recording when a
+run died; our engine's data view has a private copy of mpsave, emptied in
+place. Both sides keep the same seed and frame alignment as a new-game
+replay.
 
 replay crossload is M4's exit check: a game saved in each engine loads in
 the other to the same state. It runs the save scenario (default
 scenarios/pending/save_load.txt) in both engines with no saves at the start
-(save-original, save-ours; its checkpoints are compared and shown), picks
-the save both made with the highest slot number (or --slot NAME), and runs
-the load scenario (default scenarios/pending/load_game.txt) three times:
-the original on our save (original-loads-ours), ours on the original's
-(ours-loads-original) and ours on our own (ours-loads-ours); --full adds
-the original on its own (original-loads-original), one more sandbox run.
+(save-original, save-ours; its checkpoints are compared and shown) and
+picks the save both made with the highest slot number (or --slot NAME).
+It compares the two saves as data (tools/savediff.py: the game file but
+the original's uninitialised bytes, each area of ICEWIND2.SAV byte by byte
+and by its parts, the world map), then runs the load scenario (default
+scenarios/pending/load_game.txt) four times: the original on our save
+(original-loads-ours), ours on the original's (ours-loads-original), ours
+on our own (ours-loads-ours) and the original on its own
+(original-loads-original; --quick leaves it out, one sandbox run fewer).
 --saves-from RUN takes the saves of an earlier crossload or replay compare
 run instead of running the save scenario. The loaded states are compared
 pairwise as replay compare compares (screens, known differences): the
 cross-load, then the pairs that tell which side a difference comes from.
-It exits 0 when every pair matches and every run succeeded; the result is
-in runs/<stamp>/crossload.json.
+It exits 0 when the saves hold the same data, every pair matches and
+every run succeeded; the result is in runs/<stamp>/crossload.json.
 
 The vanilla copy is shared by every worktree: replay record, replay
 compare and replay crossload each hold
 C:/Users/thier/iwd2r-oracle/replay.lock for the whole run, and building
-the copy holds vanilla.lock beside it (tools/filelock.py). In
-the sandbox, a recording also holds C:/Users/thier/iwd2r-vm/sandbox.lock
-(one sandbox at a time, shared with play.py --vm windows), always taken
-inside replay.lock. A run that has to wait says so on stderr after 5
-seconds.
+the copy holds vanilla.lock beside it (tools/filelock.py). A recording
+also holds C:/Users/thier/iwd2r-vm/sandbox.lock (one sandbox at a time,
+shared with play.py --vm windows), always taken inside replay.lock, from
+before the copy's saves go aside to after they are back, in --host mode
+too: play.py --vm windows copies the copy into its game cache under it. A
+run that has to wait says so on stderr after 5 seconds.
 
 Standard library only.
 """
@@ -2373,20 +2379,23 @@ CROSSLOAD_SAVE_SCENARIO = os.path.join(ROOT, 'scenarios', 'pending',
 CROSSLOAD_LOAD_SCENARIO = os.path.join(ROOT, 'scenarios', 'pending',
                                        'load_game.txt')
 # The load runs: (run folder, engine, whose save it loads). The first two
-# are the exit criterion: each engine loads the other's save.
+# are the exit criterion: each engine loads the other's save. Each engine
+# also loads its own, the last one (one more sandbox run) left out with
+# --quick: a field both our saver and our loader get wrong only shows
+# against the original loading its own save (or in the save diff).
 CROSSLOAD_RUNS = (('original-loads-ours', 'original', 'ours'),
                   ('ours-loads-original', 'ours', 'original'),
                   ('ours-loads-ours', 'ours', 'ours'))
-CROSSLOAD_FULL_RUN = ('original-loads-original', 'original', 'original')
+CROSSLOAD_OWN_RUN = ('original-loads-original', 'original', 'original')
 # The comparisons: the cross-load itself, then each pair that tells which
 # side a difference comes from (our save in both engines; both saves in
-# ours; with --full, the original's save in both engines and both saves in
-# the original).
+# ours; the original's save in both engines and both saves in the
+# original).
 CROSSLOAD_PAIRS = (('original-loads-ours', 'ours-loads-original'),
                    ('original-loads-ours', 'ours-loads-ours'),
                    ('ours-loads-original', 'ours-loads-ours'))
-CROSSLOAD_FULL_PAIRS = (('original-loads-original', 'ours-loads-original'),
-                        ('original-loads-original', 'original-loads-ours'))
+CROSSLOAD_OWN_PAIRS = (('original-loads-original', 'ours-loads-original'),
+                       ('original-loads-original', 'original-loads-ours'))
 
 
 def saves_in(folder):
@@ -2444,6 +2453,9 @@ def cmd_replay_crossload(args):
 
 def replay_crossload(args):
     import play
+    import savediff
+    saves_from = os.path.abspath(args.saves_from) if args.saves_from \
+        else None
     load_script = scenario_path(args.load_scenario)
     load_steps = load_actions(load_script)
     names = [a['name'] for a in load_steps if a['op'] == 'checkpoint']
@@ -2451,7 +2463,7 @@ def replay_crossload(args):
         sys.exit('oracle: the load scenario %s needs a "# saves: load" '
                  'header and checkpoints' % load_script)
     save_script = None
-    if not args.saves_from:
+    if not saves_from:
         save_script = scenario_path(args.save_scenario)
         save_steps = load_actions(save_script)
     screens = load_screens()
@@ -2465,6 +2477,8 @@ def replay_crossload(args):
     ini_names = play.backup_inis(game, backup)
     results = {}
     save_lines = []
+    diff_lines = []
+    files_differ = 0
 
     def run(subdir, engine, script, steps, saves):
         print('== %s' % subdir)
@@ -2481,10 +2495,9 @@ def replay_crossload(args):
 
     try:
         if save_script:
-            # The save scenario runs with no saves (its header may say so
-            # too), so the saves each side made are the run's own.
-            plan = save_plan(save_script, None) or {'mode': 'empty',
-                                                    'load': None}
+            # The save scenario runs with no saves, so the saves each side
+            # made are the run's own.
+            plan = save_plan(save_script, None)
             run('save-original', 'original', save_script, save_steps, plan)
             run('save-ours', 'ours', save_script, save_steps, plan)
             folders = (os.path.join(run_dir, 'save-original', 'saves'),
@@ -2502,7 +2515,7 @@ def replay_crossload(args):
             for line in save_lines:
                 print(line)
         else:
-            folders = crossload_saves_folders(args.saves_from)
+            folders = crossload_saves_folders(saves_from)
         slot, why = pick_save(saves_in(folders[0]), saves_in(folders[1]),
                               args.slot)
         if why:
@@ -2513,16 +2526,27 @@ def replay_crossload(args):
                 'ours': os.path.join(folders[1], slot)}
         print('crossload: %s, the original\'s from %s, ours from %s'
               % (slot, folders[0], folders[1]))
+        # The saves as data first (tools/savediff.py): what both our saver
+        # and our loader get wrong cannot show in a loaded state.
+        diff_lines, files_differ = savediff.compare_saves(made['original'],
+                                                          made['ours'])
+        print('== the saves, the original\'s and ours: %s' % (
+            'the same data' if not files_differ else '%d file%s DIFFERENT'
+            % (files_differ, '' if files_differ == 1 else 's')))
+        for line in diff_lines:
+            print(line)
         for subdir, engine, whose in CROSSLOAD_RUNS + (
-                (CROSSLOAD_FULL_RUN,) if args.full else ()):
+                () if args.quick else (CROSSLOAD_OWN_RUN,)):
             run(subdir, engine, load_script, load_steps,
                 {'mode': 'load', 'load': made[whose]})
     finally:
         play.restore_inis(backup, game, ini_names)
     failures = 0
     report_pairs = []
-    for first, second in CROSSLOAD_PAIRS + (CROSSLOAD_FULL_PAIRS
-                                            if args.full else ()):
+    # TODO: also compare each pair's periodic dumps (frame-<N>.json) with
+    # compare_frames once m12-fix's change lands in first.
+    for first, second in CROSSLOAD_PAIRS + (() if args.quick
+                                            else CROSSLOAD_OWN_PAIRS):
         counts = {}
         lines, pair_failures, known_hits = compare_checkpoints(
             os.path.join(run_dir, first), os.path.join(run_dir, second),
@@ -2540,7 +2564,8 @@ def replay_crossload(args):
     failed_runs = sorted(k for k, v in results.items() if v != 0)
     report = {'save_scenario': save_script and os.path.relpath(save_script,
                                                                ROOT),
-              'saves_from': args.saves_from, 'save': slot,
+              'saves_from': saves_from, 'save': slot,
+              'save_diff': diff_lines, 'save_files_differ': files_differ,
               'load_scenario': os.path.relpath(load_script, ROOT),
               'seed': args.seed, 'results': results,
               'save_lines': save_lines, 'pairs': report_pairs,
@@ -2548,16 +2573,19 @@ def replay_crossload(args):
     with open(os.path.join(run_dir, 'crossload.json'), 'w') as f:
         json.dump(report, f, indent=2)
         f.write('\n')
-    if failures == 0 and not failed_runs:
-        print('result: MATCH: each engine loads the other\'s save (%s) to '
-              'the same state' % slot)
+    ok = failures == 0 and files_differ == 0 and not failed_runs
+    if ok:
+        print('result: MATCH: the saves (%s) hold the same data and each '
+              'engine loads the other\'s to the same state' % slot)
     else:
-        print('result: DIFFERENT: %d difference%s%s' % (
-            failures, '' if failures == 1 else 's',
-            '; runs failed: %s' % ', '.join(failed_runs) if failed_runs
-            else ''))
+        print('result: DIFFERENT: %d difference%s in the loaded states, '
+              '%d file%s of the saves%s' % (
+                  failures, '' if failures == 1 else 's', files_differ,
+                  '' if files_differ == 1 else 's',
+                  '; runs failed: %s' % ', '.join(failed_runs)
+                  if failed_runs else ''))
     print('compare: %s' % os.path.relpath(run_dir, ROOT))
-    return 0 if failures == 0 and not failed_runs else 1
+    return 0 if ok else 1
 
 
 def positive_int(text):
@@ -2696,9 +2724,10 @@ def main(argv=None):
     cross.add_argument('--slot', metavar='NAME',
                        help='the save folder to cross-load (default: the '
                        'one with the highest slot number both sides made)')
-    cross.add_argument('--full', action='store_true',
-                       help='also load the original\'s save in the original '
-                       '(one more sandbox run)')
+    cross.add_argument('--quick', action='store_true',
+                       help='leave out the original loading its own save '
+                       '(one sandbox run fewer; a bug our saver and loader '
+                       'share then shows only in the save diff)')
     cross.add_argument('--seed', type=seed_arg, default=1,
                        help='seed for every run (default %(default)s)')
     cross.add_argument('--timeout', type=positive_int,
