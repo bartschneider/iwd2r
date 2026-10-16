@@ -26,6 +26,7 @@ public:
     bool sub_586CF0(CGameSprite* sprite1, CGameSprite* sprite2);
     void sub_586D60(CGameSprite* sprite1, CGameSprite* sprite2);
     void sub_586F20(CGameSprite* sprite1, CGameSprite* sprite2);
+    void Unsummon(CGameSprite* sprite);
     void Remove(CGameSprite* sprite);
     void sub_586FC0(CGameSprite* sprite);
     void sub_587190();
