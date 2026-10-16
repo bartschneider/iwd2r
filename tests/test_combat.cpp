@@ -2087,3 +2087,67 @@ TEST_CASE("combat: a save marks the party members for an effect list update", "[
 
     g_pChitin->cNetwork.m_bConnectionEstablished = bConnection;
 }
+
+// GiveItem (action 15, CGameSprite 0x757540) and CMessageAddItem's Run
+// (0x4F9150): the goblin's weapon leaves it and a copy lands in the party
+// member's first empty inventory slot.
+TEST_CASE("combat: GiveItem moves a goblin's weapon into the party member's inventory", "[combat][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    Fight fight;
+    std::string why;
+    if (!SetUpFight(fight, why)) {
+        if (why.find("CHR") != std::string::npos) {
+            SKIP("[iwd2r-skip] " + why);
+        }
+        FAIL(why);
+    }
+    CGameSprite* pCharacter = fight.pCharacter;
+    CGameSprite* pGoblin = fight.pGoblin;
+
+    // The goblin's selected weapon.
+    CGameSpriteEquipment* pEquipment = pGoblin->GetEquipment();
+    SHORT nSlot = pEquipment->m_selectedWeapon;
+    CItem* pWeapon = pEquipment->m_items[nSlot];
+    REQUIRE(pWeapon != NULL);
+    const CString sWeapon = pWeapon->GetResRef().GetResRefStr();
+    INFO("weapon " << static_cast<const char*>(sWeapon) << " in slot " << nSlot);
+
+    // No target: an error.
+    CAIAction give(15, CAIObjectType(0, 0, 0, 0, 0, 0, 0, 0, pCharacter->GetId()), 0, 0, 0);
+    give.m_string1 = sWeapon;
+    pGoblin->m_curAction = give;
+    CHECK(pGoblin->GiveItem(NULL) == CGameAIBase::ACTION_ERROR);
+
+    // An item the goblin does not carry (nor in a bag): an error.
+    CAIAction missing = give;
+    missing.m_string1 = "NOSUCH";
+    pGoblin->m_curAction = missing;
+    CHECK(pGoblin->GiveItem(pCharacter) == CGameAIBase::ACTION_ERROR);
+
+    // The weapon: done, the goblin's slot is empty, and the message gives
+    // the party member a copy in its first empty inventory slot.
+    INT nFirstEmpty = -1;
+    for (INT n = 18; n < 42; n++) {
+        if (pCharacter->GetEquipment()->m_items[n] == NULL) {
+            nFirstEmpty = n;
+            break;
+        }
+    }
+    REQUIRE(nFirstEmpty != -1);
+    ClearMessages();
+    pGoblin->m_curAction = give;
+    CHECK(pGoblin->GiveItem(pCharacter) == CGameAIBase::ACTION_DONE);
+    CHECK(pEquipment->m_items[nSlot] == NULL);
+    g_pBaldurChitin->GetMessageHandler()->AsynchronousUpdate();
+    CItem* pGiven = pCharacter->GetEquipment()->m_items[nFirstEmpty];
+    REQUIRE(pGiven != NULL);
+    CHECK(pGiven->GetResRef() == CResRef(sWeapon));
+    ClearMessages();
+}

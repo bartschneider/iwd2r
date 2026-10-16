@@ -13138,10 +13138,11 @@ SHORT CGameSprite::ExecuteAction()
         returnValue = ACTION_DONE;
         goto release;
     case 15:
-        // GiveItem
-        // TODO: 0x729538-0x72955F not ported (0x757540).
-        returnValue = ACTION_ERROR;
-        goto done;
+        // GiveItem (0x729538-0x72955F)
+        pTarget = GetTargetShareType(CGameObject::TYPE_SPRITE);
+        bShare = TRUE;
+        returnValue = GiveItem(static_cast<CGameAIBase*>(pTarget));
+        goto release;
     case 17:
         // Help
         // TODO: 0x72955F-0x72956F not ported (0x74FF10).
@@ -28130,6 +28131,49 @@ SHORT CGameSprite::DropInventory(BOOLEAN bCriticalOnly, CString sException)
     pGame->GetObjectArray()->ReleaseDeny(nGroundPile,
         CGameObjectArray::THREAD_ASYNCH,
         INFINITE);
+
+    return ACTION_DONE;
+}
+
+// GiveItem: the item named by the action's string1 (carried, else in a bag)
+// leaves this creature; a creature target gets a copy through
+// CMessageAddItem and the item itself is disposed of.
+//
+// 0x757540
+SHORT CGameSprite::GiveItem(CGameAIBase* pTarget)
+{
+    if (pTarget == NULL) {
+        return ACTION_ERROR;
+    }
+
+    SHORT nSlot = FindItemPersonal(m_curAction.GetString1(), 0, FALSE);
+
+    CItem* pItem;
+    if (nSlot == -1) {
+        // TODO: Incomplete. The original takes the item out of a bag
+        // (DropItemFromBag 0x722740 through CInfGame 0x5C8C30, not ported),
+        // then unequips slot -1 and clears the DWORD before m_items (the
+        // field at +0x4AD4). Without it an item in a bag is not given.
+        return ACTION_ERROR;
+    } else {
+        pItem = m_equipment.m_items[nSlot];
+    }
+
+    Unequip(nSlot);
+    m_equipment.m_items[nSlot] = NULL;
+
+    if (pTarget->GetObjectType() == CGameObject::TYPE_SPRITE) {
+        CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+        if (pGame->GetCharacterPortraitNum(pTarget->GetId()) != -1) {
+            // NOTE: The WORD at 0x8518C2 (3).
+            pGame->FeedBack(3, 0, TRUE);
+        }
+
+        pGame->AddDisposableItem(pItem);
+
+        CMessageAddItem* pMessage = new CMessageAddItem(*pItem, m_id, pTarget->GetId());
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(pMessage, FALSE);
+    }
 
     return ACTION_DONE;
 }

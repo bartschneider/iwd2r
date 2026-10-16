@@ -83,6 +83,9 @@ const BYTE CBaldurMessage::MSG_SUBTYPE_CMESSAGE_ADD_ACTION = 0;
 // 0x84CED8
 const BYTE CBaldurMessage::MSG_SUBTYPE_CMESSAGE_ADD_EFFECT = 1;
 
+// 0x84CED9
+const BYTE CBaldurMessage::MSG_SUBTYPE_CMESSAGE_ADD_ITEM = 2;
+
 // 0x84CEDA
 const BYTE CBaldurMessage::MSG_SUBTYPE_CMESSAGE_ANIMATION_CHANGE = 3;
 
@@ -6525,6 +6528,103 @@ void CMessageColorReset::Run()
             CGameObjectArray::THREAD_ASYNCH,
             INFINITE);
     }
+}
+
+// -----------------------------------------------------------------------------
+
+// NOTE: Inlined in CGameSprite::GiveItem (0x757680-0x7576DF): the item's
+// resource, its three use counts, its wear and its flags.
+CMessageAddItem::CMessageAddItem(const CItem& item, LONG caller, LONG target)
+    : CMessage(caller, target)
+{
+    m_item.SetResRef(item.cResRef, TRUE);
+    m_item.m_useCount1 = item.m_useCount1;
+    m_item.m_useCount2 = item.m_useCount2;
+    m_item.m_useCount3 = item.m_useCount3;
+    m_item.m_wear = item.m_wear;
+    m_item.m_flags = item.m_flags;
+}
+
+// 0x464180
+CMessageAddItem::~CMessageAddItem()
+{
+}
+
+// 0x40A0D0
+SHORT CMessageAddItem::GetCommType()
+{
+    return SEND;
+}
+
+// 0x40A0E0
+BYTE CMessageAddItem::GetMsgType()
+{
+    return CBaldurMessage::MSG_TYPE_CMESSAGE;
+}
+
+// 0x464170
+BYTE CMessageAddItem::GetMsgSubType()
+{
+    return CBaldurMessage::MSG_SUBTYPE_CMESSAGE_ADD_ITEM;
+}
+
+// 0x4F9150
+void CMessageAddItem::Run()
+{
+    CGameSprite* pSprite;
+
+    BYTE rc;
+    do {
+        rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetDeny(m_targetId,
+            CGameObjectArray::THREAD_ASYNCH,
+            reinterpret_cast<CGameObject**>(&pSprite),
+            INFINITE);
+    } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+    if (rc != CGameObjectArray::SUCCESS) {
+        return;
+    }
+
+    if (pSprite->GetObjectType() == CGameObject::TYPE_SPRITE) {
+        // The first empty one of the 24 inventory slots (the WORD at
+        // 0x855128), from slot 18.
+        BOOL bPlaced = FALSE;
+        for (SHORT nSlot = 0; nSlot < 24; nSlot++) {
+            if (bPlaced) {
+                break;
+            }
+
+            if (pSprite->m_equipment.m_items[18 + nSlot] == NULL) {
+                pSprite->m_equipment.m_items[18 + nSlot] = new CItem(m_item);
+                pSprite->Equip(18 + nSlot);
+                bPlaced = TRUE;
+            }
+        }
+
+        if (bPlaced) {
+            CMessageSpriteEquipment* pMessage = new CMessageSpriteEquipment(pSprite,
+                pSprite->GetId(),
+                pSprite->GetId());
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(pMessage, FALSE, pMessage->GetCommType());
+        } else {
+            CItem* pItem = new CItem(m_item);
+
+            // NOTE: The WORD at 0x85C106 (48).
+            pSprite->FeedBack(48, 0, 0, 0, -1, 0, 0);
+            pSprite->PutItemGround(pItem);
+
+            if (g_pBaldurChitin->GetObjectGame()->GetCharacterPortraitNum(pSprite->GetId()) != -1) {
+                // NOTE: The WORD at 0x8518CC (8).
+                g_pBaldurChitin->GetObjectGame()->FeedBack(8, 0, TRUE);
+            }
+        }
+
+        g_pBaldurChitin->GetActiveEngine()->UpdatePersonalItemStatus(m_targetId);
+    }
+
+    g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(m_targetId,
+        CGameObjectArray::THREAD_ASYNCH,
+        INFINITE);
 }
 
 // -----------------------------------------------------------------------------
