@@ -49,13 +49,13 @@ CGameDoor::CGameDoor(CGameArea* pArea, CAreaFileDoorObject* pDoorObject, CAreaPo
 
     m_rOpenBounding.left = pDoorObject->m_openBoundingRectLeft;
     m_rOpenBounding.top = pDoorObject->m_openBoundingRectTop;
-    m_rOpenBounding.right = pDoorObject->m_openBoundingRectRight;
-    m_rOpenBounding.bottom = pDoorObject->m_openBoundingRectBottom;
+    m_rOpenBounding.right = pDoorObject->m_openBoundingRectRight + 1;
+    m_rOpenBounding.bottom = pDoorObject->m_openBoundingRectBottom + 1;
 
     m_rClosedBounding.left = pDoorObject->m_closedBoundingRectLeft;
     m_rClosedBounding.top = pDoorObject->m_closedBoundingRectTop;
-    m_rClosedBounding.right = pDoorObject->m_closedBoundingRectRight;
-    m_rClosedBounding.bottom = pDoorObject->m_closedBoundingRectBottom;
+    m_rClosedBounding.right = pDoorObject->m_closedBoundingRectRight + 1;
+    m_rClosedBounding.bottom = pDoorObject->m_closedBoundingRectBottom + 1;
 
     m_cursorType = pDoorObject->m_cursorType;
     m_dwFlags = pDoorObject->m_dwFlags;

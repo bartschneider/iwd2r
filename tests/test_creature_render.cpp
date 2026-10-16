@@ -1236,3 +1236,49 @@ TEST_CASE("area objects: AR1000's polygons keep the original's points", "[render
     }
     CHECK(foundTotal == total);
 }
+
+// CGameDoor's constructor (0x485AC0) takes the open and closed bounding
+// rectangles from the area file with right and bottom one past the file's
+// last pixel (`inc` at 0x485CA6, 0x485CB3, 0x485CD6 and 0x485CE1), and
+// Marshal writes them back less one, so a save keeps the file's rectangles.
+// Ours took them as they are, so a door was picked one pixel short on the
+// right and the bottom and each save shrank them by a pixel. The rectangles
+// expected here are those the original saved for AR1000 (the save of the
+// test above), plus one on the right and the bottom.
+TEST_CASE("door: its bounding rectangles end one past the file's", "[render][data]")
+{
+    std::string why;
+    if (!Begin(why)) {
+        SKIP("[iwd2r-skip] " + why);
+    }
+    FramePump pump;
+    World world;
+    if (!NewWorld(world, why)) {
+        SKIP("[iwd2r-skip] " + why);
+    }
+    CGameArea* pArea = world.pArea;
+    struct Expected {
+        const char* name;
+        CRect open; // left, top, right, bottom as saved (inclusive)
+        CRect closed;
+    };
+    const Expected expected[] = {
+        { "AR1000_Door4", CRect(3175, 4, 3182, 12), CRect(766, 2192, 815, 2253) },
+        { "AR1000_Door3", CRect(3170, 6, 3177, 12), CRect(892, 1764, 938, 1822) },
+        { "AR1000_Door6", CRect(3180, 4, 3188, 12), CRect(259, 1649, 306, 1713) },
+        { "AR1000_Door5", CRect(3180, 3, 3188, 8), CRect(823, 870, 868, 930) },
+        { "AR1000_Door2", CRect(3179, 2, 3187, 10), CRect(2252, 455, 2503, 601) },
+        { "AR1000_Door1", CRect(3174, 3, 3183, 13), CRect(958, 486, 1005, 540) },
+    };
+    for (const Expected& e : expected) {
+        INFO(e.name);
+        auto accept = [&](CGameDoor* p) { return strncmp(p->m_scriptName, e.name, SCRIPTNAME_SIZE) == 0; };
+        CGameDoor* pDoor = FindObject<CGameDoor>(pArea->m_lVertSort, CGameObject::TYPE_DOOR, accept);
+        if (pDoor == NULL) {
+            pDoor = FindObject<CGameDoor>(pArea->m_lVertSortBack, CGameObject::TYPE_DOOR, accept);
+        }
+        REQUIRE(pDoor != NULL);
+        CHECK(pDoor->m_rOpenBounding == CRect(e.open.left, e.open.top, e.open.right + 1, e.open.bottom + 1));
+        CHECK(pDoor->m_rClosedBounding == CRect(e.closed.left, e.closed.top, e.closed.right + 1, e.closed.bottom + 1));
+    }
+}
