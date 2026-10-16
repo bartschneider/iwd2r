@@ -2,6 +2,7 @@
 
 #include "CBaldurChitin.h"
 #include "CGameArea.h"
+#include "CGameObject84D624.h"
 #include "CGameSprite.h"
 #include "CInfGame.h"
 #include "CInfinity.h"
@@ -178,10 +179,11 @@ void CProjectileBAM::AIUpdate()
     }
 
     if (m_bSparkle) {
-        // TODO: Incomplete (0x578E38-0x578EA2). The original adds a sparkle
-        // object (operator new(0xCA), 0x51AE40 with m_nSparkleColour and the
-        // WORDs at 0x84D600 and 0x84D5F0) to the area at the projectile's
-        // position; its class is not ported.
+        // A puff of sparkles at the projectile.
+        CGameObject84D624* pSparkle = new CGameObject84D624(m_nSparkleColour,
+            CGameObject84D624::TYPE_SPARKLE,
+            CGameObject84D624::EXPLOSION_PUFFS);
+        pSparkle->AddToArea(m_pArea, m_pos, m_posZ, CGameObject::LIST_FRONT);
     }
 
     m_sound.SetCoordinates(m_pos.x, m_pos.y, m_posZ);

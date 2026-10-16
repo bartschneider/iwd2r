@@ -8,7 +8,9 @@
 #include "CProjectile84DFA4.h"
 #include "CProjectile84E940.h"
 #include "CProjectile84E9C0.h"
+#include "CProjectileBAM.h"
 #include "CProjectileShaft.h"
+#include "CProjectileSingleTarget.h"
 #include "CSpell.h"
 #include "engine_world.h"
 #include "msvc_rand.h"
@@ -855,6 +857,53 @@ TEST_CASE("visual projectiles: a spell's Visual Spell Hit plays on a goblin and 
         const LONG id = pDoor->GetId();
         pArea->SortLists();
         CHECK(UpdateUntilGone(id, 2000) > 0);
+        pArea->SortLists();
+        ClearMessages();
+    }
+}
+
+// A sparkling projectile in flight (CProjectileBAM::AIUpdate 0x52B900 at
+// 0x52BC88, CProjectileSingleTarget::AIUpdate 0x578AB0 at 0x578E38) leaves
+// a puff of its sparkle colour (TYPE_SPARKLE, 14 particles, 28 draws) at
+// its position and height each update.
+TEST_CASE("visual projectiles: a sparkling projectile leaves a puff each update", "[visualprojectile][data]")
+{
+    WORLD_OR_SKIP(world);
+    CGameArea* pArea = world.pArea;
+    CGameSprite* pSprite = world.pCharacter;
+    const CPoint pos(pSprite->GetPos().x + 200, pSprite->GetPos().y + 60);
+    CGameSprite* pGoblin = AddCreature(pArea, "00GOB", pos);
+    REQUIRE(pGoblin != NULL);
+    pArea->SortLists();
+    ClearMessages();
+
+    CProjectile* projectiles[] = {
+        new CProjectile84DF1C(),
+        new CProjectileSingleTarget(CResRef("SPMAGMIS")),
+    };
+    for (CProjectile* pProjectile : projectiles) {
+        pProjectile->m_bSparkle = TRUE;
+        pProjectile->m_nSparkleColour = 8;
+        pProjectile->Fire(pArea, pSprite->GetId(), pGoblin->GetId(), pos, 0, 0);
+        const LONG id = pProjectile->GetId();
+        REQUIRE(id != CGameObjectArray::INVALID_INDEX);
+        pArea->SortLists();
+
+        iwd2r_srand(71);
+        pProjectile->AIUpdate();
+        CHECK(Draws(71, iwd2r_rand_state()) == 28);
+        std::vector<CGameObject84D624*> added = AddedParticles(pArea);
+        REQUIRE(added.size() == 1);
+        CHECK(added[0]->m_wType == CGameObject84D624::TYPE_SPARKLE);
+        // CSPARKLE_COLORTYPE_WHITE.
+        CHECK(added[0]->m_rgbColors[0] == RGB(245, 245, 245));
+        CHECK(added[0]->GetPos() == pProjectile->GetPos());
+        CHECK(added[0]->m_posZ == pProjectile->m_posZ);
+        CHECK(added[0]->GetVertListType() == CGameObject::LIST_FRONT);
+        CHECK(added[0]->m_particleList.GetCount() == 14);
+
+        pProjectile->RemoveSelf();
+        CHECK(UpdateUntilGone(added[0]->GetId(), 400) > 0);
         pArea->SortLists();
         ClearMessages();
     }
