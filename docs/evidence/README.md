@@ -104,9 +104,9 @@ function, its `extra_labels.txt` line can go.
 |---|---|---|
 | 0x4A42F0 CGameEffect::CheckSave (ours ported, tests/test_effects_save.cpp) | pending/check_save | none: g_pBaldurChitin's game, sprite vtables, feats, the object array |
 | 0x72DE60 CGameSprite::ProcessEffectList (rolls the save d20s) | pending/save_rolls | none: the whole effect list |
-| 0x73B760 CGameSprite::Hit (attack d20 against AC) | pending/hit | none: equipped CItems, sprites, the game's options |
-| 0x547020 CRuleTables::GetIterativeAttackBonus | pending/iterative_attack_bonus | determinism check |
-| 0x73D560 CGameSprite::Damage (weapon damage dice) | pending/damage | none: equipped CItems, the target's animation, the message handler |
+| 0x73B760 CGameSprite::Hit (attack d20 against AC) | pending/hit | none: equipped CItems, sprites from the constructor, the game's options (ours ported, tests/test_combat.cpp) |
+| 0x547020 CRuleTables::GetIterativeAttackBonus | rules/iterative_attack_bonus | compared with ours |
+| 0x73D560 CGameSprite::Damage (weapon damage dice) | pending/damage | none: equipped CItems, the target's animation, the message handler (ours ported, tests/test_combat.cpp) |
 | 0x483B70 CGameDialogSprite::FetchRumor | dialog/fetch_rumor | none: the resource manager (the DLG and the IDS lists), the object array, a sprite answering status triggers |
 
 ## Replays and known differences

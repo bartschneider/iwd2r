@@ -1,0 +1,362 @@
+# Milestone 3's exit scenario: a melee fight and one spell at the start
+# area (AR1000). It is walk_and_talk.txt's steps with a sorcerer instead of
+# the fighter (character generation, Party Formation, the chapter screen,
+# the opening dialog, Hedron's second dialog, the walk west along the dock
+# with Reig's dialog), then the fight. It stays in scenarios/pending/ until
+# it is recorded with the original and our engine plays it through; then
+# it moves to scenarios/. Coordinates for Resolution=800 as in
+# walk_and_talk.txt.
+#
+# Status (2026-10-15, combat stream): written and played on our side only
+# (play.py --linux --headless, also with IWD2R_STATE_DUMP): it plays to the
+# end without an assertion. In the replay mode our side matches
+# walk_and_talk's positions (reig_done 1669,949, leg 5 1032,977), walks to
+# the goblin, and the attack orders give attack rolls ("Attack Roll 4 + 1 =
+# 5 : Miss"; a run without the spell step killed it with "13 + 1 = 14 :
+# Hit"). On our side the spell clicks do nothing (below), so the first
+# click on the goblin is an attack order; each attack order then ends after
+# one round (the action is 0 at the next checkpoint) and the goblin does not
+# strike back: to be compared with the recording. Not recorded with the
+# original yet, so the coordinates after leg 5 come from our engine and the
+# area's search map and must be confirmed in the first sandbox recording:
+# - The nearest hostile is 1000_Goblin_01 (10GOB, 4 hit points) at 511,763,
+#   on the dirt path north-west of the houses where walk_and_talk's leg 5
+#   ends (1032,977 in the original); the goblins south of the dock
+#   (2172,1457, 2186,1509) are twice as far by the search map
+#   (AR1000SR.BMP). The legs follow its dirt paths (search value 1). The
+#   goblin stays where it is until it sees the party.
+# - icewind2.ini's Auto Pause State 547 includes "enemy sighted" (0x20) and
+#   Auto Pause Center is 1: the game pauses when the goblin comes into view.
+#   The orders are given while paused and Space unpauses. After the kill
+#   the game auto-pauses again ("Target Gone").
+# - If Magic Missile kills the goblin in the original's run (seed 1), the
+#   melee has no target: then melee first and give the spell to the next
+#   goblins, 713,1812 and 611,1896, down the same path.
+# - The spell: our action bar (CInfButtonArray SetState, UpdateButtons and
+#   OnLButtonPressed) is still a stub, so our side cannot cast through it
+#   yet. In the original's PC state (0x589110, state 114) the twelve
+#   buttons are type 7, the weapon set's two slots, then the sprite's nine
+#   customizable types; the saves in mpsave/ have type 3 second among
+#   those, which is taken here as Cast Spell: the action bar's fifth button
+#   (193,463 in origin ui, buttons 41 apart from 29). The spell buttons
+#   that replace them (types 0x15-0x20) show the known spells; Magic Missile
+#   is assumed to be the fourth (152,463) in spell order (Burning Hands,
+#   Chromatic Orb, Mage Armor, Magic Missile). Both are guesses to check
+#   against the recording.
+wait 60
+checkpoint menu
+# New Game (645,262), then Done (537,562) with New Party selected, then the
+# first slot's Create Character (530,100).
+click 645 262
+wait 90
+click 537 562
+wait 60
+click 530 100
+wait 90
+checkpoint chargen
+# Gender (400,128): Male (400,286), Next (536,562) to Appearance.
+click 400 128
+wait 30
+click 400 286
+wait 20
+checkpoint male
+click 536 562
+wait 30
+checkpoint appearance
+# Next keeps the first portrait and returns to the main menu.
+click 536 562
+wait 30
+checkpoint gender_done
+# Race (400,163): Elf (400,198), which is a Moon Elf, then Next.
+click 400 163
+wait 30
+click 400 198
+wait 20
+checkpoint elf
+click 536 562
+wait 30
+checkpoint race_done
+# Class (400,198): Sorcerer (400,443), then Next.
+click 400 198
+wait 30
+click 400 443
+wait 20
+checkpoint sorcerer
+click 536 562
+wait 30
+checkpoint class_done
+# Alignment (400,233): Chaotic Good (400,198), then Next.
+click 400 233
+wait 30
+click 400 198
+wait 20
+checkpoint chaotic_good
+click 536 562
+wait 30
+checkpoint alignment_done
+# Abilities (400,268): + at x 499 and - at x 517, rows at y 170 (STR),
+# 206 (DEX), 242 (CON), 278 (INT), 314 (WIS), 350 (CHA). CHA 10 to 16 (a
+# sorcerer casts a level 1 spell with 11 or more), STR 10 to 12, CON 8 to
+# 10; 6 points stay unspent.
+click 400 268
+wait 30
+checkpoint abilities
+click 499 350
+wait 15
+click 499 350
+wait 15
+click 499 350
+wait 15
+click 499 350
+wait 15
+click 499 350
+wait 15
+click 499 350
+wait 15
+checkpoint cha_up
+click 499 170
+wait 15
+click 499 170
+wait 15
+click 499 242
+wait 15
+click 499 242
+wait 15
+checkpoint str_con_up
+# Next (536,562) with points left asks "You have some unallocated points
+# left. Are you sure you want to continue?"; Yes (338,331) keeps them.
+click 536 562
+wait 30
+checkpoint points_prompt
+click 338 331
+wait 30
+checkpoint abilities_done
+# Skills (400,303): Concentration's + (499,276) four times (Next stays
+# disabled while points are left), then Next to Feats.
+click 400 303
+wait 30
+click 499 276
+wait 15
+click 499 276
+wait 15
+click 499 276
+wait 15
+click 499 276
+wait 15
+click 536 562
+wait 30
+checkpoint skills_done
+# Feats: Combat Casting's + (499,384), then Next goes on to the Arcane
+# Spell Selection (level 1, 4 spells, a 6 by 4 grid from 293,179 by 43 by
+# 43-44): Magic Missile (465,222), Burning Hands (293,179), Chromatic Orb
+# (422,179) and Mage Armor (422,222); then Next back to the main menu.
+# (Auto Pick, 400,356, hangs our engine as of 2026-10-15.)
+click 499 384
+wait 15
+click 536 562
+wait 30
+checkpoint feats_done
+click 465 222
+wait 15
+click 293 179
+wait 15
+click 422 179
+wait 15
+click 422 222
+wait 15
+checkpoint spells_chosen
+click 536 562
+wait 30
+checkpoint spells_done
+# Appearance (400,338): Next keeps the colours and goes on to Sound; Next
+# keeps the voice and returns to the main menu.
+click 400 338
+wait 30
+click 536 562
+wait 30
+click 536 562
+wait 30
+# Name (400,373): type Probe, Done (458,268).
+click 400 373
+wait 30
+type Probe
+wait 15
+click 458 268
+wait 30
+checkpoint named
+# Next (536,562) finishes the character and shows Party Formation.
+click 536 562
+wait 60
+checkpoint party_formation
+# Done (634,507) starts the game on the chapter screen (the Prologue text,
+# which would move on to the world by itself after about 3,400 frames); its
+# Done (514,549) loads the start area into the world screen.
+click 634 507
+wait 150
+checkpoint chapter
+click 514 549
+wait 150
+checkpoint world
+wait 300
+checkpoint world_settled
+# M2. The opening dialog (Hedron, entry 0): "No, we're here to stay" (1),
+# "Do you know where I can go to sign on with the Targos guard?" (4), "Where
+# can I find Lord Ulbrec?" (1), "All right. Thanks for your help" (1),
+# Continue, "We'll be careful. Farewell, Hedron." (1) ends it.
+checkpoint opening_dialog
+click 300 399
+wait 60
+click 340 437
+wait 60
+click 250 386
+wait 60
+click 280 437
+wait 60
+click 398 583
+wait 60
+click 250 399
+wait 120
+checkpoint opening_done
+# Click-to-move on the deck: Probe walks to 2328,905 and stops.
+origin screen
+click 330 262
+wait 90
+checkpoint moved
+# Hedron's circle (he stands at 2503,900): the party walks up and his dialog
+# opens at entry 34 with 5 responses; "Nothing today, thanks. Farewell." (5)
+# goes to entry 37, whose "Very well. Farewell." (1) ends it.
+move 511 254
+wait 5
+click 511 254
+wait 90
+checkpoint dialog
+origin ui
+click 260 424
+wait 60
+click 220 399
+wait 60
+checkpoint dialog_end
+# Leg 1: centre on Probe (2448,906), walk to 2104,1002 below the gangplank.
+click 528 460
+click 528 460
+wait 10
+origin screen
+click 56 312
+wait 150
+# Leg 2: centre, walk to 1784,960 (the click target; the party stops at 1784,966) along the dock.
+origin ui
+click 528 460
+click 528 460
+wait 10
+origin screen
+click 80 174
+wait 150
+# Leg 3: centre, walk towards 1528,924 (the click target; Reig stops the party at about 1667,949); Reig stops the party with his dialog.
+origin ui
+click 528 460
+click 528 460
+wait 10
+origin screen
+click 144 180
+wait 150
+checkpoint reig_dialog
+# Reig: "Calm down - what's wrong with your arm?" (2), "We've come from
+# Luskan to aid Targos" (1), Continue three times (Reig, Jon, Reig), "Your
+# arm looks in pretty bad shape" (2), "I'll go see if I can find Magdar,
+# then. Farewell." (1), "I'll be careful. Farewell." (1) ends it.
+origin ui
+click 290 386
+wait 60
+click 340 399
+wait 60
+click 398 583
+wait 60
+click 398 583
+wait 60
+click 398 583
+wait 60
+click 340 424
+wait 60
+click 300 399
+wait 60
+click 230 386
+wait 90
+checkpoint reig_done
+# Leg 4: centre on Probe (1667,949), walk to 1352,846 past Reig and Jon.
+click 528 460
+click 528 460
+wait 10
+origin screen
+click 85 113
+wait 150
+# Leg 5: centre, walk to 1032,972 (the click target; the party stops at 1032,977) in front of the houses.
+origin ui
+click 528 460
+click 528 460
+wait 10
+origin screen
+click 80 342
+wait 150
+# Leg 6: centre on Probe (1032,977) and walk west to 760,1032 on the path
+# south of the houses (128,269 from the centred view).
+origin ui
+click 528 460
+click 528 460
+wait 10
+origin screen
+click 128 269
+wait 150
+checkpoint leg6
+# Leg 7: centre and walk to 520,900 on the north-south path the goblin
+# stands on (160,82 from the centred view). The goblin comes into view.
+origin ui
+click 528 460
+click 528 460
+wait 10
+origin screen
+click 160 82
+wait 150
+checkpoint goblin_sighted
+shot goblin_sighted
+# The spell first, from range, while the game is paused: centre on Probe
+# (the goblin, 511,763, is then at about 391,77 with Probe at 520,894),
+# Cast Spell (the action bar's fifth button), Magic Missile, the goblin;
+# Space ends the auto pause. Magic Missile does 1d4+1 and the goblin has 4
+# hit points: when it survives, it comes at the party.
+origin ui
+click 528 460
+click 528 460
+wait 10
+click 193 463
+wait 20
+click 152 463
+wait 20
+origin screen
+move 391 77
+wait 5
+click 391 77
+wait 10
+key SPACE
+wait 90
+checkpoint spell
+shot spell
+# The melee: an attack order on the goblin where it stood (Probe walks to
+# it, or meets it on the way); the game runs on. Space is not pressed
+# again: it would pause. Auto pauses that the fight itself may cause
+# (Auto Pause State 547: a party member hit, 0x1, or injured, 0x2; the
+# target gone after the kill) are to be checked in the recording.
+origin ui
+click 528 460
+click 528 460
+wait 10
+origin screen
+move 391 77
+wait 5
+click 391 77
+wait 240
+checkpoint melee
+shot melee
+wait 300
+checkpoint fight_done
+shot fight_done
+quit
