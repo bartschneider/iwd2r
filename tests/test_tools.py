@@ -1092,6 +1092,37 @@ class SandboxWsbTest(unittest.TestCase):
         self.assertEqual(waited, [420 + winsandbox.SANDBOX_ALLOWANCE])
         self.assertGreaterEqual(winsandbox.SANDBOX_ALLOWANCE, 60)
 
+    def test_driver_dry_run(self):
+        # driver.ps1 -DryRun on the host compiles its C# and walks the
+        # actions without starting anything; it catches a script that would
+        # only fail inside the sandbox.
+        powershell = ('/mnt/c/Windows/System32/WindowsPowerShell/v1.0/'
+                      'powershell.exe')
+        if not os.path.isfile(powershell) or \
+                not os.path.isdir(winsandbox.VM_ROOT):
+            self.skipTest('no Windows PowerShell or %s' % winsandbox.VM_ROOT)
+        os.makedirs(os.path.join(winsandbox.VM_ROOT, 'dryrun'), exist_ok=True)
+        with tempfile.TemporaryDirectory(
+                dir=os.path.join(winsandbox.VM_ROOT, 'dryrun')) as tmp:
+            actions = realinput.windows_actions(realinput.parse_scenario(
+                'checkpoint menu\nclick 10 20\nkey ESCAPE\nwait 3\n'
+                'shot s\nquit\n'))
+            winsandbox.write_inputs(tmp, winsandbox.driver_config(
+                ['A/B=1'], 60, 30, 'dry'), actions)
+            win = subprocess.run(['wslpath', '-w', tmp], capture_output=True,
+                                 text=True, check=True).stdout.strip()
+            r = subprocess.run(
+                [powershell, '-NoProfile', '-ExecutionPolicy', 'Bypass',
+                 '-File', win + '\\driver.ps1', '-Config',
+                 win + '\\config.json', '-DryRun'],
+                capture_output=True, text=True, timeout=120, cwd=tmp)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        for line in ('line 1: checkpoint menu',
+                     'would request checkpoint-menu.json',
+                     'line 2: click 10 20', 'line 3: key ESCAPE',
+                     'line 6: quit', 'scenario finished'):
+            self.assertIn(line, r.stdout)
+
     def test_start_batch(self):
         self.assertEqual(winsandbox.start_batch(r'C:\r\run.wsb'),
                          '@echo off\nstart "" '

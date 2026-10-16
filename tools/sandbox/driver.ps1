@@ -346,8 +346,8 @@ function Quiet-Logon {
 
 function Check {
     if ($DryRun) { return }
-    Watch-Foreground
     if ($script:game.HasExited) { throw [System.OperationCanceledException]::new('game exited') }
+    Watch-Foreground
     if ((Get-Date) -gt $deadline) { throw "scenario timeout ($($cfg.timeout) s)" }
 }
 
@@ -622,6 +622,8 @@ try {
         }
         Log 'scenario finished'
     } catch [System.OperationCanceledException] {
+        # Its window went with it: what takes the foreground now is no loss.
+        $script:watching = $false
         Log 'game exited'
     } finally {
         if (-not $DryRun) { Watch-Foreground }
