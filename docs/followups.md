@@ -188,7 +188,7 @@ The crisp-text requirement is met by `Program Options/Text Renderer=scalable` (s
 
 ## UI controls and visual systems (from project 3, milestone 5, ui-misc)
 
-- `CGameSprite::CheckQuickLists` (0x71ABA0) is ported and called by spontaneous casting (0x716770), the inventory, spellbook and level-up screens, Swing (0x739B60), the three refreshes of the Spell action (0x740270) and `sub_75E330` (M1/M2 review fix round). One caller keeps its TODO: `CGameEffect.cpp` near line 6823 (0x71ABA0 with the ability, 0, 1, 0).
+- `CGameSprite::CheckQuickLists` (0x71ABA0) is ported and called by spontaneous casting (0x716770), the inventory, spellbook and level-up screens, Swing (0x739B60), the three refreshes of the Spell action (0x740270) and `sub_75E330` (M1/M2 review fix round).
 - `CScreenWorld::OnKeyDown` (0x6872D0) is ported (ui-misc round 2) but for three TODOs: the cheat keys (0x68956A-0x68BC5D, Ctrl with `field_156`, which nothing sets), the keymap's spell keys 53-371 (0x6893FD-0x689502: CGameSprite 0x719180 and the shared table at 0x8B4EB0) and keymap 21's CGameSprite 0x75E150.
 - The text character sheet export (`CScreenCharacter::sub_5E4560`, 0x5EFFD0) ends in the original's assert at the spell lists (it passes a list index where `CGameSprite::GetSpells` wants a class); ours keeps it (ruling P4-10). No vanilla button starts it (GUIREC panel 2 has no control 51).
 - Movie subtitles (`CBaldurProjector` 0x43E300, 0x43EA70, 0x43EC20, 0x43EED0) are not ported: Bink playback needs binkw32 (absent on Linux) and the subtitles blit DirectDraw surfaces.
