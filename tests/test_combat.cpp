@@ -1961,3 +1961,55 @@ TEST_CASE("combat: a swing picks its weapon's sound and the next one when it wou
     pGoblin->field_70FB = FALSE;
     pGoblin->m_animation.m_nSequence = savedSequence;
 }
+
+// CGameArea 0x46DDC0, the area's n-th nearest search from a point (Feat
+// Cleave's next target, CAIObjectType's n-th nearest objects).
+TEST_CASE("combat: the area finds the n-th nearest enemy of a point", "[combat][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    Fight fight;
+    std::string why;
+    if (!SetUpFight(fight, why)) {
+        if (why.find("CHR") != std::string::npos) {
+            SKIP("[iwd2r-skip] " + why);
+        }
+        FAIL(why);
+    }
+    CGameSprite* pCharacter = fight.pCharacter;
+    CGameSprite* pGoblin = fight.pGoblin;
+    const CPoint pos = pCharacter->GetPos();
+    CGameSprite* pFarGoblin = AddCreature(fight.pArea, "10GOB", CPoint(pos.x - 5 * CPathSearch::GRID_SQUARE_SIZEX, pos.y));
+    REQUIRE(pFarGoblin != NULL);
+    fight.pArea->SortLists();
+    pCharacter->GetDerivedStats()->m_generalState &= ~STATE_SUMMONED_CREATURE;
+    pGoblin->GetDerivedStats()->m_generalState &= ~STATE_SUMMONED_CREATURE;
+    pFarGoblin->GetDerivedStats()->m_generalState &= ~STATE_SUMMONED_CREATURE;
+
+    const CAIObjectType enemy(CAIOBJECTTYPE_EA_ENEMY);
+    const BYTE* terrain = pCharacter->GetTerrainTable();
+    CGameArea* pArea = fight.pArea;
+
+    // The nearest, the second nearest; the third does not exist and the
+    // farthest one found stands in for it.
+    CHECK(pArea->sub_46DDC0(pos.x, pos.y, enemy, 400, terrain, FALSE, FALSE, 0, FALSE) == pGoblin->GetId());
+    CHECK(pArea->sub_46DDC0(pos.x, pos.y, enemy, 400, terrain, FALSE, FALSE, 1, FALSE) == pFarGoblin->GetId());
+    CHECK(pArea->sub_46DDC0(pos.x, pos.y, enemy, 400, terrain, FALSE, FALSE, 2, FALSE) == pFarGoblin->GetId());
+
+    // Out of range: only the near goblin is within 3 squares.
+    CHECK(pArea->sub_46DDC0(pos.x, pos.y, enemy, 3 * CPathSearch::GRID_SQUARE_SIZEX, terrain, FALSE, FALSE, 1, FALSE) == pGoblin->GetId());
+
+    // Summoned creatures only: none.
+    CHECK(pArea->sub_46DDC0(pos.x, pos.y, enemy, 400, terrain, FALSE, FALSE, 0, TRUE) == CGameObjectArray::INVALID_INDEX);
+    pFarGoblin->GetDerivedStats()->m_generalState |= STATE_SUMMONED_CREATURE;
+    CHECK(pArea->sub_46DDC0(pos.x, pos.y, enemy, 400, terrain, FALSE, FALSE, 0, TRUE) == pFarGoblin->GetId());
+    pFarGoblin->GetDerivedStats()->m_generalState &= ~STATE_SUMMONED_CREATURE;
+
+    // A point off the area: none.
+    CHECK(pArea->sub_46DDC0(-1, pos.y, enemy, 400, terrain, FALSE, FALSE, 0, FALSE) == CGameObjectArray::INVALID_INDEX);
+}

@@ -1427,6 +1427,106 @@ LONG CGameArea::sub_46DAE0(INT x, INT y, const CAIObjectType& type, int a4, cons
     return nFound;
 }
 
+
+// 0x46DDC0
+LONG CGameArea::sub_46DDC0(INT x, INT y, const CAIObjectType& type, SHORT range, const BYTE* terrainTable, BOOL checkLOS, BOOL seeInvisible, BYTE nNearest, BOOL summonedOnly)
+{
+    // The (nNearest + 1)-th nearest object of the type to the point within
+    // range, or the farthest one found when there are fewer.
+    if (x < 0 || y < 0) {
+        return CGameObjectArray::INVALID_INDEX;
+    }
+
+    // NOTE: The original keeps the two tables on its stack, 12 entries each;
+    // its callers ask for at most the tenth nearest.
+    LONG nDistances[256];
+    LONG nIds[256];
+    INT nCount = nNearest + 1;
+    for (SHORT nIndex = 0; nIndex < nCount; nIndex++) {
+        nDistances[nIndex] = range * range + 1;
+        nIds[nIndex] = CGameObjectArray::INVALID_INDEX;
+    }
+
+    INT yScaled = 4 * y / 3;
+
+    POSITION pos = m_lVertSort.GetHeadPosition();
+    while (pos != NULL) {
+        LONG nId = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSort.GetNext(pos)));
+
+        CGameObject* pObject;
+        BYTE rc = m_pGame->GetObjectArray()->GetShare(nId,
+            CGameObjectArray::THREAD_ASYNCH,
+            &pObject,
+            INFINITE);
+        if (rc != CGameObjectArray::SUCCESS) {
+            continue;
+        }
+
+        LONG xObject = pObject->GetPos().x;
+        LONG yObject = 4 * pObject->GetPos().y / 3;
+
+        if (yScaled - yObject <= range) {
+            if (yObject - yScaled > range) {
+                // The list is sorted by y: the rest are farther.
+                m_pGame->GetObjectArray()->ReleaseShare(nId,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    INFINITE);
+                break;
+            }
+
+            BOOL bCandidate = TRUE;
+            if (pObject->GetObjectType() == CGameObject::TYPE_SPRITE) {
+                CGameSprite* pSprite = static_cast<CGameSprite*>(pObject);
+                bCandidate = pSprite->m_active
+                    && pSprite->m_activeAI
+                    && pSprite->m_activeImprisonment
+                    && pSprite->GetAnimation()->GetAboveGround()
+                    && pSprite->IsVisibleToCaller(seeInvisible);
+            }
+
+            // NOTE: With summonedOnly the original reads the general state
+            // at 0x920 of any object, a sprite's derived state; ours reads it
+            // for sprites and takes 0 for the others (as sub_46DAE0).
+            DWORD dwState = pObject->GetObjectType() == CGameObject::TYPE_SPRITE
+                ? static_cast<CGameSprite*>(pObject)->m_derivedStats.m_generalState
+                : 0;
+
+            if (bCandidate
+                && pObject->GetAIType().OfType(type, FALSE, FALSE)
+                && (!summonedOnly || (dwState & STATE_SUMMONED_CREATURE) != 0)) {
+                LONG nDistance = (xObject - x) * (xObject - x) + (yObject - yScaled) * (yObject - yScaled);
+                for (SHORT nIndex = 0; nIndex < nCount; nIndex++) {
+                    if (nDistance > nDistances[nIndex]) {
+                        continue;
+                    }
+
+                    // NOTE: A failed line of sight moves on to the next
+                    // place in the table and checks again.
+                    if (checkLOS && !CheckLOS(CPoint(x, y), pObject->GetPos(), terrainTable, FALSE)) {
+                        continue;
+                    }
+
+                    memmove(&nDistances[nIndex + 1], &nDistances[nIndex], (nNearest - nIndex) * sizeof(LONG));
+                    memmove(&nIds[nIndex + 1], &nIds[nIndex], (nNearest - nIndex) * sizeof(LONG));
+                    nDistances[nIndex] = nDistance;
+                    nIds[nIndex] = nId;
+                    break;
+                }
+            }
+        }
+
+        m_pGame->GetObjectArray()->ReleaseShare(nId,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+    }
+
+    while (nNearest > 0 && nIds[nNearest] == CGameObjectArray::INVALID_INDEX) {
+        nNearest--;
+    }
+
+    return nIds[nNearest];
+}
+
 // 0x46F5A0
 BOOLEAN CGameArea::CanSaveGame(STRREF& strError)
 {
