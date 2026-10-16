@@ -45,7 +45,11 @@ CProjectileBAM::CProjectileBAM(CResRef resRef)
     field_E6 = 0x20000;
     field_1DA = 0;
     field_29C = 0;
-    memcpy(m_terrainTable, CGameObject::DEFAULT_TERRAIN_TABLE, sizeof(m_terrainTable));
+    // NOTE: The original copies the 16 bytes at 0x8A8154, a copy of the
+    // visible terrain table's defaults (CGameObject 0x84C514), not
+    // DEFAULT_TERRAIN_TABLE: a square with a creature on it (entry 8) is
+    // passable to projectiles.
+    memcpy(m_terrainTable, CGameObject::DEFAULT_VISIBLE_TERRAIN_TABLE, sizeof(m_terrainTable));
     m_callBackProjectile = CGameObjectArray::INVALID_INDEX;
     m_sVisualEffect = "";
     field_182 = CGameObjectArray::INVALID_INDEX;

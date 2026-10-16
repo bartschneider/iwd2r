@@ -830,12 +830,11 @@ TEST_CASE("visual projectiles: a spell's Visual Spell Hit plays on a goblin and 
         CProjectile84DFA4* pBurst = AddedOne<CProjectile84DFA4>(pArea);
         REQUIRE(pBurst != nullptr);
         CHECK(pBurst->GetPos() == CPoint(pos.x, pos.y - 2));
-        // Not drawn: CProjectileBAM::Render skips a square its terrain table
-        // makes impassable with the creatures on it counted (GetMobileCost
-        // with bumps, the table's entry 8), and the burst stands on the
-        // goblin's.
+        // Drawn on the goblin's square: projectiles take the visible
+        // terrain table (0x8A8154), whose entry for a square with a creature
+        // on it (8) is passable.
         const Lit lit = RenderLit(scope, pBurst, CRect(), "spwi980");
-        CHECK(lit.outside == 0);
+        CHECK(lit.outside > 0);
         const LONG id = pBurst->GetId();
         pArea->SortLists();
         CHECK(UpdateUntilGone(id, 400) > 0);
