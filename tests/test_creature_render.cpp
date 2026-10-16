@@ -988,3 +988,30 @@ TEST_CASE("weather: snow flakes are drawn in the scaled snow colour", "[render][
         CHECK((pixels[60 * width + 90] & 0xFFFFFF) == c.expected);
     }
 }
+
+// CGameArea::SetDawn (0x478490) ends by passing the dawn on to its
+// infinity's SetDawn (the call at 0x478AAB), in an outdoor area. Ours
+// called SetDusk, which lights the world for dusk: at intensity 200 a light
+// of (255, 230, 230) where dawn gives (222, 230, 255).
+TEST_CASE("area: SetDawn lights an outdoor area for dawn", "[render][data]")
+{
+    std::string why;
+    if (!Begin(why)) {
+        SKIP("[iwd2r-skip] " + why);
+    }
+    FramePump pump;
+    World world;
+    if (!NewWorld(world, why)) {
+        SKIP("[iwd2r-skip] " + why);
+    }
+    CGameArea* pArea = world.pArea;
+    CInfinity* pInfinity = pArea->GetInfinity();
+    REQUIRE((pInfinity->m_areaType & 0x2) != 0);
+    REQUIRE((pInfinity->m_areaType & 0x40) == 0);
+
+    pArea->SetDawn(200, FALSE);
+    // n = 400 & 0xFF = 144: CInfinity::SetDawn's constants (0x5D19AB-0x5D1A26).
+    CHECK(pInfinity->m_dayLightIntensity == 200);
+    CHECK(pInfinity->m_rgbTimeOfDayGlobalLighting == RGB(0xB4 + (144 * 0x4B >> 8), 0xC8 + (144 * 0x37 >> 8), 0xFF));
+    CHECK(pInfinity->m_rgbTimeOfDayRainColor == RGB(0x5A + (144 * 0x14 >> 8), 0x5A + (144 * 0x14 >> 8), 0x64 + (144 * 10 >> 8)));
+}
