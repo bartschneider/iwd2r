@@ -128,7 +128,7 @@ CGameDoor::CGameDoor(CGameArea* pArea, CAreaFileDoorObject* pDoorObject, CAreaPo
                     || (y2 == y1 && y1 == y0)
                     || (x2 != x1
                         && x1 != x0
-                        && 1000 * (y2 - y1) / (x2 - x1) != 1000 * (y1 - y0) / (x1 - x0))) {
+                        && 1000 * (y2 - y1) / (x2 - x1) == 1000 * (y1 - y0) / (x1 - x0))) {
                     m_pOpenPolygon[cnt - adjust - 1] = m_pOpenPolygon[cnt - adjust];
                     adjust++;
                 }
@@ -167,7 +167,7 @@ CGameDoor::CGameDoor(CGameArea* pArea, CAreaFileDoorObject* pDoorObject, CAreaPo
                     || (y2 == y1 && y1 == y0)
                     || (x2 != x1
                         && x1 != x0
-                        && 1000 * (y2 - y1) / (x2 - x1) != 1000 * (y1 - y0) / (x1 - x0))) {
+                        && 1000 * (y2 - y1) / (x2 - x1) == 1000 * (y1 - y0) / (x1 - x0))) {
                     m_pClosedPolygon[cnt - adjust - 1] = m_pClosedPolygon[cnt - adjust];
                     adjust++;
                 }
