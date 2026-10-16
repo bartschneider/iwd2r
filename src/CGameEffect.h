@@ -465,6 +465,7 @@ public:
     void sub_4A7750(CGameSprite* pSprite);
     void sub_4A8DF0(DWORD dwDamageType, CGameSprite* pSprite);
     void sub_4AA6D0(CGameSprite* pSprite, INT nResisted);
+    CString sub_4AB370();
     void sub_4AB0A0(CGameSprite* pSprite, INT nAmount);
 };
 

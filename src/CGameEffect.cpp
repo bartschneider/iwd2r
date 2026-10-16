@@ -4786,9 +4786,235 @@ BOOL CGameEffectDamage::CheckSave(CGameSprite* pSprite, BYTE* pFortitudeRoll, BY
 // 0x4AA6D0
 void CGameEffectDamage::sub_4AA6D0(CGameSprite* pSprite, INT nResisted)
 {
-    // TODO: Incomplete. The damage feedback line ("<name> takes <amount>
-    // damage", the DAMAGER, DAMAGEE, AMOUNT, RESISTED and TYPE tokens, the
-    // feedback sound of the string) is not ported.
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CGameObject* pSource;
+    CString sValue;
+
+    // The plain line: the string as fetched, or the name and the amount.
+    BOOL bTokens = FALSE;
+    BOOL bNoDamage = FALSE;
+    STRREF strText;
+
+    CString sName(pSprite->GetName());
+
+    if ((pGame->GetOptions()->m_nEffectTextLevel & 0x2) == 0) {
+        if (m_effectAmount > 0) {
+            return;
+        }
+    }
+
+    if (m_effectAmount <= 0) {
+        // No damage: "<DAMAGER> fails to damage <DAMAGEE>" under the
+        // source's name.
+        bTokens = FALSE;
+        bNoDamage = TRUE;
+        strText = 25038;
+
+        if (m_sourceID == CGameObjectArray::INVALID_INDEX || m_sourceID == pSprite->GetId()) {
+            return;
+        }
+
+        g_pBaldurChitin->GetTlkTable().SetToken(CString("DAMAGEE"), pSprite->GetName());
+        g_pBaldurChitin->GetTlkTable().SetToken(CString("TYPE"), sub_4AB370());
+
+        // NOTE: One try, no retry loop (0x4AA86E).
+        if (pGame->GetObjectArray()->GetShare(m_sourceID,
+                CGameObjectArray::THREAD_ASYNCH,
+                &pSource,
+                INFINITE)
+            != CGameObjectArray::SUCCESS) {
+            return;
+        }
+
+        if (pSource->GetObjectType() != CGameObject::TYPE_SPRITE) {
+            pGame->GetObjectArray()->ReleaseShare(m_sourceID,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+            return;
+        }
+
+        if (strcmp(static_cast<CGameSprite*>(pSource)->GetName(), "") == 0) {
+            pGame->GetObjectArray()->ReleaseShare(m_sourceID,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+            return;
+        }
+
+        sName = static_cast<CGameSprite*>(pSource)->GetName();
+        pGame->GetObjectArray()->ReleaseShare(m_sourceID,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+    } else {
+        // The effect's own line from EFFTEXT.2DA.
+        CString sEffectID;
+        sEffectID.Format("%d", m_effectID);
+        CString sStrRef(pGame->GetRuleTables().m_tEffectText.GetAt(CRuleTables::STRREF_STR, sEffectID));
+        STRREF strEffect = atol(sStrRef);
+        strText = strEffect;
+        if (strEffect == -1) {
+            return;
+        }
+
+        if (m_sourceID == pSprite->GetId()) {
+            // Self-inflicted.
+            bTokens = TRUE;
+            if (nResisted < 0) {
+                strText = 26222;
+            } else {
+                strText = nResisted != 0 ? 25040 : 25039;
+            }
+
+            sName = pSprite->GetName();
+
+            sValue.Format("%d", m_effectAmount);
+            g_pBaldurChitin->GetTlkTable().SetToken(CString("AMOUNT"), sValue);
+
+            sValue.Format("%d", nResisted);
+            g_pBaldurChitin->GetTlkTable().SetToken(CString("RESISTED"), sValue);
+
+            g_pBaldurChitin->GetTlkTable().SetToken(CString("TYPE"), sub_4AB370());
+        }
+
+        if (m_sourceID != CGameObjectArray::INVALID_INDEX && m_sourceID != pSprite->GetId()) {
+            bTokens = TRUE;
+            if (nResisted < 0) {
+                strText = 26223;
+            } else {
+                strText = nResisted != 0 ? 25017 : 25028;
+            }
+
+            sName = pSprite->GetName();
+
+            sValue.Format("%d", m_effectAmount);
+            g_pBaldurChitin->GetTlkTable().SetToken(CString("AMOUNT"), sValue);
+
+            sValue.Format("%d", nResisted < 0 ? -nResisted : nResisted);
+            g_pBaldurChitin->GetTlkTable().SetToken(CString("RESISTED"), sValue);
+
+            g_pBaldurChitin->GetTlkTable().SetToken(CString("TYPE"), sub_4AB370());
+
+            // NOTE: One try, no retry loop (0x4AAD3C).
+            if (pGame->GetObjectArray()->GetShare(m_sourceID,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    &pSource,
+                    INFINITE)
+                == CGameObjectArray::SUCCESS) {
+                if (pSource->GetObjectType() == CGameObject::TYPE_SPRITE) {
+                    // An unnamed damager falls back to the effect's line.
+                    if (strcmp(static_cast<CGameSprite*>(pSource)->GetName(), "") == 0) {
+                        bTokens = FALSE;
+                        strText = strEffect;
+                    }
+
+                    g_pBaldurChitin->GetTlkTable().SetToken(CString("DAMAGER"), static_cast<CGameSprite*>(pSource)->GetName());
+                } else {
+                    bTokens = FALSE;
+                    strText = strEffect;
+                }
+
+                pGame->GetObjectArray()->ReleaseShare(m_sourceID,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    INFINITE);
+            } else {
+                bTokens = FALSE;
+                strText = strEffect;
+            }
+        }
+    }
+
+    STR_RES strRes;
+    g_pBaldurChitin->GetTlkTable().Fetch(strText, strRes);
+
+    COLORREF rgbNameColor = CVidPalette::RANGE_COLORS[pSprite->GetBaseStats()->m_colors[2]];
+
+    // The string's sound, at the sprite.
+    if (strRes.cSound.pRes != NULL) {
+        CMessage* message = new CMessagePlaySoundRef(strRes.cSound.cResRef, pSprite->GetId(), pSprite->GetId());
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+        if (strRes.cSound.m_nLooping == 0) {
+            strRes.cSound.SetFireForget(TRUE);
+        }
+
+        strRes.cSound.SetChannel(14, reinterpret_cast<DWORD_PTR>(pSprite->GetArea()));
+        strRes.cSound.Play(pSprite->GetPos().x, pSprite->GetPos().y, 0, FALSE);
+    }
+
+    if (strcmp(strRes.szText, "") != 0) {
+        CString sText;
+        if (bNoDamage) {
+            sText = strRes.szText;
+        } else if (!bTokens) {
+            sName = pSprite->GetName();
+            sText.Format("%s (%d)", static_cast<const char*>(strRes.szText), m_effectAmount);
+        } else {
+            sText = strRes.szText;
+        }
+
+        g_pBaldurChitin->GetBaldurMessage()->DisplayText(sName,
+            sText,
+            rgbNameColor,
+            RGB(0xD7, 0xD7, 0xBE),
+            -1,
+            pSprite->GetId(),
+            pSprite->GetId());
+    }
+}
+
+// 0x4AB370
+CString CGameEffectDamage::sub_4AB370()
+{
+    // The damage type's name.
+    STRREF strType;
+    switch (m_dwFlags & 0xFFFF0000) {
+    case 0x0:
+    case 0x4000000:
+    case 0x8000000:
+        strType = 25023;
+        break;
+    case 0x10000:
+        strType = 25027;
+        break;
+    case 0x20000:
+        strType = 25026;
+        break;
+    case 0x40000:
+        strType = 25025;
+        break;
+    case 0x80000:
+        strType = 25024;
+        break;
+    case 0x100000:
+    case 0x2000000:
+        strType = 25022;
+        break;
+    case 0x200000:
+        strType = 25018;
+        break;
+    case 0x400000:
+    case 0x10000000:
+        strType = 25019;
+        break;
+    case 0x1000000:
+        strType = 25021;
+        break;
+    case 0x20000000:
+        strType = 10912;
+        break;
+    case 0x40000000:
+        strType = 10911;
+        break;
+    default:
+        // NOTE: For any other type the original fetches the address of the
+        // string it returns as the strref (0x4AB44F); ours fetches -1, which
+        // gives an empty name as that huge strref does.
+        strType = -1;
+        break;
+    }
+
+    STR_RES strRes;
+    g_pBaldurChitin->GetTlkTable().Fetch(strType, strRes);
+    return strRes.szText;
 }
 
 // 0x4AB0A0

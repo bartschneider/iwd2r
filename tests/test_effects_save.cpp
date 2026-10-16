@@ -1204,3 +1204,96 @@ TEST_CASE("Hold Person (SPPR208) on a goblin: a made will save refuses the hold,
     ClearMessages();
     delete pGoblin;
 }
+
+namespace {
+
+CString Token(const char* key)
+{
+    CString value;
+    if (!g_pBaldurChitin->GetTlkTable().m_mapTokens.Lookup(CString(key), value)) {
+        return CString("<unset>");
+    }
+    return value;
+}
+
+CString Text(STRREF strRef)
+{
+    STR_RES strRes;
+    g_pBaldurChitin->GetTlkTable().Fetch(strRef, strRes);
+    return strRes.szText;
+}
+
+}
+
+TEST_CASE("Damage's feedback line (0x4AA6D0) and its type name (0x4AB370)", "[effects][checksave][data]")
+{
+    PROBE_OR_SKIP(pProbe);
+    CGameSprite* pGoblin = MakeGoblin();
+    ClearMessages();
+    CGameOptions* pOptions = g_pBaldurChitin->GetObjectGame()->GetOptions();
+    const DWORD level = pOptions->m_nEffectTextLevel;
+    iwd2r_srand(41);
+
+    SECTION("the damage type names")
+    {
+        const struct {
+            DWORD type;
+            STRREF name;
+        } types[] = {
+            { 0x0, 25023 },
+            { 0x10000, 25027 },
+            { 0x20000, 25026 },
+            { 0x40000, 25025 },
+            { 0x80000, 25024 },
+            { 0x100000, 25022 },
+            { 0x200000, 25018 },
+            { 0x400000, 25019 },
+            { 0x1000000, 25021 },
+            { 0x2000000, 25022 },
+            { 0x4000000, 25023 },
+            { 0x8000000, 25023 },
+            { 0x10000000, 25019 },
+            { 0x20000000, 10912 },
+            { 0x40000000, 10911 },
+        };
+        for (const auto& one : types) {
+            INFO("type " << one.type);
+            std::unique_ptr<CGameEffect> pDamage = Decode(CGAMEEFFECT_DAMAGE, one.type, 5, CGameObjectArray::INVALID_INDEX);
+            CHECK(static_cast<CGameEffectDamage*>(pDamage.get())->sub_4AB370() == Text(one.name));
+        }
+    }
+
+    SECTION("damage from the party member: AMOUNT, RESISTED, TYPE and DAMAGER")
+    {
+        pOptions->m_nEffectTextLevel |= 0x2;
+        std::unique_ptr<CGameEffect> pDamage = Decode(CGAMEEFFECT_DAMAGE, 0x10000, 7, pProbe->GetId());
+        static_cast<CGameEffectDamage*>(pDamage.get())->sub_4AA6D0(pGoblin, -3);
+        CHECK(Token("AMOUNT") == "7");
+        CHECK(Token("RESISTED") == "3");
+        CHECK(Token("TYPE") == Text(25027));
+        CHECK(Token("DAMAGER") == pProbe->GetName());
+    }
+
+    SECTION("without the option's bit 2 a hit says nothing")
+    {
+        pOptions->m_nEffectTextLevel &= ~0x2;
+        g_pBaldurChitin->GetTlkTable().SetToken(CString("AMOUNT"), CString("none"));
+        std::unique_ptr<CGameEffect> pDamage = Decode(CGAMEEFFECT_DAMAGE, 0, 7, pProbe->GetId());
+        static_cast<CGameEffectDamage*>(pDamage.get())->sub_4AA6D0(pGoblin, 0);
+        CHECK(Token("AMOUNT") == "none");
+    }
+
+    SECTION("no damage from a named source: DAMAGEE and TYPE")
+    {
+        pOptions->m_nEffectTextLevel &= ~0x2;
+        std::unique_ptr<CGameEffect> pDamage = Decode(CGAMEEFFECT_DAMAGE, 0x20000, 0, pProbe->GetId());
+        static_cast<CGameEffectDamage*>(pDamage.get())->sub_4AA6D0(pGoblin, 0);
+        CHECK(Token("DAMAGEE") == pGoblin->GetName());
+        CHECK(Token("TYPE") == Text(25026));
+    }
+
+    pOptions->m_nEffectTextLevel = level;
+    CHECK(iwd2r_rand_state() == 41);
+    ClearMessages();
+    delete pGoblin;
+}
