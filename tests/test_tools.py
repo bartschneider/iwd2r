@@ -3742,6 +3742,17 @@ class OracleReplayTest(unittest.TestCase):
                          'not hold')
         overlap['globals'].update(ai_overlap_frames=0)
         self.assertIsNone(oracle.invariant_problem('c', overlap))
+        # Our engine's replay-mode wait for the search thread gave up (a
+        # lost semaphore post, no search thread); the original's dumps have
+        # no such field.
+        search = dump(61, 61)
+        search['globals'].update(search_wait_timeouts=3)
+        self.assertEqual(oracle.invariant_problem('c', search),
+                         'c: 3 waits for the search thread by frame 61 gave '
+                         'up at their deadline: a path search was never '
+                         'taken up')
+        search['globals'].update(search_wait_timeouts=0)
+        self.assertIsNone(oracle.invariant_problem('c', search))
         self.assertEqual(oracle.invariant_problem('c', dump(61, 61, 0, 1)),
                          'c: reinitializing is 1 at frame 61: the game '
                          'stopped updating (a focus loss?)')
@@ -3891,6 +3902,9 @@ class OracleReplayCompareTest(unittest.TestCase):
         other['globals'].update(au_counter=1, ai_stalled_frames=3,
                                 ai_overlap_frames=2, in_async_update=1,
                                 held_frames=4)
+        self.assertEqual(oracle.field_differences(dump, other), [])
+        # Only our engine writes search_wait_timeouts: never compared.
+        other['globals'].update(search_wait_timeouts=0)
         self.assertEqual(oracle.field_differences(dump, other), [])
         other['globals']['ai_rng_state'] = 8
         other['chargen']['abilities'] = [1, 3, 4]

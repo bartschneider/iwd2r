@@ -58,7 +58,8 @@ fs::path TempDir(const char* tag)
 }
 
 // A checkpoint dump on the main menu, as both sides wrote it for
-// scenarios/replay_click.txt.
+// scenarios/replay_click.txt (the original writes no search_wait_timeouts:
+// only our engine has the search wait).
 Snapshot MenuSnapshot()
 {
     Snapshot s;
@@ -126,6 +127,7 @@ TEST_CASE("state dump JSON matches the golden dumps", "[dump]")
     periodic.rngState = 0xFFFFFFFFu;
     periodic.aiStalledFrames = 2;
     periodic.aiOverlapFrames = 3;
+    periodic.searchWaitTimeouts = 4;
     periodic.engine.screen = "create_char";
     periodic.engine.auCounter = 28;
     periodic.engine.fullscreen = 1;
@@ -355,6 +357,59 @@ TEST_CASE("replay mode is off without IWD2R_STATE_DUMP", "[dump]")
     REQUIRE(timeKillEvent(id) == MMSYSERR_INVALPARAM); // a fired one-shot is gone
 }
 
+// The replay mode's wait for the search thread (CGameArea::AIUpdate's
+// ReplayWaitForSearch) ends at its deadline of real time when the search
+// never does (a lost semaphore post; no search thread, where the deadline is
+// 0) and counts the expiry in the dump's search_wait_timeouts.
+TEST_CASE("replay search wait gives up at its deadline and counts it", "[dump]")
+{
+    using platform::replay::SearchWaitTimeouts;
+    using platform::replay::WaitForSearch;
+    const uint32_t before = SearchWaitTimeouts();
+
+    // Done at the first poll: nothing counted.
+    int polls = 0;
+    CHECK(WaitForSearch(5000, [&](std::string*) {
+        ++polls;
+        return false;
+    }));
+    CHECK(polls == 1);
+    CHECK(SearchWaitTimeouts() == before);
+
+    // Done at the third poll.
+    polls = 0;
+    CHECK(WaitForSearch(5000, [&](std::string* what) {
+        *what = "object 7";
+        return ++polls < 3;
+    }));
+    CHECK(polls == 3);
+    CHECK(SearchWaitTimeouts() == before);
+
+    // Never done: it polls until the deadline has passed, then gives up.
+    polls = 0;
+    const auto start = std::chrono::steady_clock::now();
+    CHECK_FALSE(WaitForSearch(50, [&](std::string* what) {
+        *what = "object 7, its request in state 0 (collision delay 0), 1 requests queued in front and 0 in back";
+        ++polls;
+        return true;
+    }));
+    const auto waited = std::chrono::steady_clock::now() - start;
+    CHECK(waited >= std::chrono::milliseconds(50));
+    CHECK(waited < std::chrono::seconds(5));
+    CHECK(polls > 1);
+    CHECK(SearchWaitTimeouts() == before + 1);
+
+    // No search thread (a deadline of 0): one poll decides.
+    polls = 0;
+    CHECK_FALSE(WaitForSearch(0, [&](std::string* what) {
+        *what = "object 7, no search thread";
+        ++polls;
+        return true;
+    }));
+    CHECK(polls == 1);
+    CHECK(SearchWaitTimeouts() == before + 2);
+}
+
 namespace {
 
 std::vector<std::string> CheckpointNames(const char* scenario)
@@ -431,7 +486,7 @@ TEST_CASE("replay mode dumps the start screen checkpoint", "[dump][data]")
     REQUIRE(checkpoint
         == "{\n  \"frame\": 61,\n  \"checkpoint\": \"start\",\n  \"screen\": \"connection\",\n  \"rng_state\": 1,\n"
            "  \"globals\": {\"au_counter\": 61, \"fullscreen\": 0, \"in_async_update\": 0, \"ai_stalled_frames\": 0, \"ai_overlap_frames\": 0, "
-           "\"reinitializing\": 0, \"loading\": 0, \"loads\": 0, \"held_frames\": 0, \"ai_rng_state\": 3861535683},\n  \"chargen\": null,\n  \"world\": null\n}\n");
+           "\"search_wait_timeouts\": 0, \"reinitializing\": 0, \"loading\": 0, \"loads\": 0, \"held_frames\": 0, \"ai_rng_state\": 3861535683},\n  \"chargen\": null,\n  \"world\": null\n}\n");
     REQUIRE(periodic.find("\"frame\": 30,") != std::string::npos);
     REQUIRE(statusText == "frame=61\nscript_line=0\nstate=finished\n");
 }
