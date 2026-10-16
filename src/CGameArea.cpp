@@ -2832,14 +2832,101 @@ void CGameArea::DecrHeightDynamic(const CPoint& point)
     }
 }
 
+// The light of a point: the area's light map (and its night one) sampled at
+// the four corners of the 16 by 12 cell the point is in and interpolated.
+//
 // 0x470F10
 COLORREF CGameArea::GetTintColor(const CPoint& cPoint, BYTE listType)
 {
-    COLORREF rgbColor = RGB(255, 255, 255);
+    // NOTE: The day bits of the BYTEs at 0x851930 (1) and 0x851931 (2).
+    const BYTE DAY = 1;
+    const BYTE NIGHT = 2;
 
-    // TODO: Incomplete.
+    INT nFracX = cPoint.x % 16;
+    INT nFracY = cPoint.y % 12;
+    BYTE nCode = DAY;
 
-    return rgbColor;
+    if (listType == CGameObject::LIST_FLIGHT) {
+        return RGB(255, 255, 255);
+    }
+
+    if (m_bmLum.pRes == NULL) {
+        return RGB(255, 255, 255);
+    }
+
+    if ((m_cInfinity.m_areaType & 0x40) != 0) {
+        nCode = m_cInfinity.m_renderDayNightCode;
+    }
+
+    INT nX = cPoint.x / 16;
+    INT nY = cPoint.y / 12;
+
+    // NOTE: The original leaves the corners on its stack as they are when it
+    // samples neither map (a code with neither bit); ours starts them at 0.
+    // GetPixelColor answers TRUE for a loaded map, so the falls back to the
+    // first corner below do not happen.
+    RGBQUAD corners[4] = {};
+    if ((nCode & DAY) != 0) {
+        m_bmLum.GetPixelColor(corners[0], nX, nY, TRUE);
+        if (!m_bmLum.GetPixelColor(corners[1], nX + 1, nY, TRUE)) {
+            corners[1] = corners[0];
+        }
+        if (!m_bmLum.GetPixelColor(corners[2], nX, nY + 1, TRUE)) {
+            corners[2] = corners[0];
+        }
+        if (!m_bmLum.GetPixelColor(corners[3], nX + 1, nY + 1, TRUE)) {
+            corners[3] = corners[0];
+        }
+    }
+
+    if ((nCode & NIGHT) != 0) {
+        if (m_pbmLumNight == NULL) {
+            // NOTE: The original calls through a NULL video mode when no
+            // engine is active.
+            return g_pBaldurChitin->GetActiveEngine()->pVidMode->GetGlobalTintColor();
+        }
+
+        RGBQUAD night[4] = {};
+        m_pbmLumNight->GetPixelColor(night[0], nX, nY, TRUE);
+        if (!m_pbmLumNight->GetPixelColor(night[1], nX + 1, nY, TRUE)) {
+            night[1] = night[0];
+        }
+        if (!m_pbmLumNight->GetPixelColor(night[2], nX, nY + 1, TRUE)) {
+            night[2] = night[0];
+        }
+        if (!m_pbmLumNight->GetPixelColor(night[3], nX + 1, nY + 1, TRUE)) {
+            night[3] = night[0];
+        }
+
+        if ((nCode & DAY) != 0) {
+            // Both: each corner's day and night light mixed by the daylight
+            // intensity.
+            INT nDay = m_cInfinity.m_dayLightIntensity;
+            INT nNight = static_cast<BYTE>(0xFF - m_cInfinity.m_dayLightIntensity);
+            for (INT n = 0; n < 4; n++) {
+                corners[n].rgbRed = static_cast<BYTE>((corners[n].rgbRed * nDay + night[n].rgbRed * nNight) >> 8);
+                corners[n].rgbGreen = static_cast<BYTE>((corners[n].rgbGreen * nDay + night[n].rgbGreen * nNight) >> 8);
+                corners[n].rgbBlue = static_cast<BYTE>((corners[n].rgbBlue * nDay + night[n].rgbBlue * nNight) >> 8);
+            }
+        } else {
+            for (INT n = 0; n < 4; n++) {
+                corners[n] = night[n];
+            }
+        }
+    }
+
+    // Across the cell: the top and bottom edges in sixteenths, then down in
+    // twelfths (each division truncated).
+    auto lerp = [&](BYTE c0, BYTE c1, BYTE c2, BYTE c3) -> BYTE {
+        INT nTop = (c0 * (16 - nFracX) + c1 * nFracX) / 16;
+        INT nBottom = (c2 * (16 - nFracX) + c3 * nFracX) / 16;
+        return static_cast<BYTE>((nTop * (12 - nFracY) + nBottom * nFracY) / 12);
+    };
+
+    BYTE nRed = lerp(corners[0].rgbRed, corners[1].rgbRed, corners[2].rgbRed, corners[3].rgbRed);
+    BYTE nGreen = lerp(corners[0].rgbGreen, corners[1].rgbGreen, corners[2].rgbGreen, corners[3].rgbGreen);
+    BYTE nBlue = lerp(corners[0].rgbBlue, corners[1].rgbBlue, corners[2].rgbBlue, corners[3].rgbBlue);
+    return RGB(nRed, nGreen, nBlue);
 }
 
 // 0x471630
@@ -5642,7 +5729,7 @@ void CGameArea::SetDawn(BYTE nIntensity, BOOLEAN bPlayDayNightMovie)
     }
 
     if ((m_cInfinity.m_areaType & 0x2) != 0) {
-        m_cInfinity.SetDusk(nIntensity, bPlayDayNightMovie);
+        m_cInfinity.SetDawn(nIntensity, bPlayDayNightMovie);
     }
 }
 
