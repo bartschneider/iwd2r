@@ -478,8 +478,7 @@ TEST_CASE("character screen: the combat page of a character with a long sword", 
     // The saving throws close the page.
     CHECK_FALSE(items.empty());
 
-    // Back to the character's own weapon: the later cases count the rands
-    // its effect list draws.
+    // Back to the character's own weapon for the later cases.
     pSprite->SelectWeaponAbility(CGameSpriteEquipment::SLOT_FIST, 0, FALSE, TRUE);
     pSprite->m_equipment.m_items[43] = pOld;
     delete pSword;
@@ -663,19 +662,31 @@ TEST_CASE("inventory: copying a scroll's last charge removes it and its quick it
     REQUIRE(pInventory->MapButtonIdToInventoryId(5) == nSlot);
 
     // CheckIfUsedUp on its own: a spent scroll that stacks (5) vanishes
-    // without a sound. With the world's time stopped (as here) it draws 22
-    // rands, none of its own: unequipping the quick slot and reselecting the
-    // weapon set run the effect list four times (ProcessEffectList's five
-    // saving throw rolls each; AddEffect runs it at once only while the time
-    // is stopped) and CheckAdd (0x4A3310) twice.
+    // without a sound (0x75D942: Unequip, the item deleted, the weapon set
+    // reselected through 0x726810). It draws no rand of its own: as many as
+    // that sequence run without it. (Those come from the effect list and
+    // CheckAdd, other streams' code, and from the character.)
     {
+        const SHORT nSpentSlot = static_cast<SHORT>(nSlot + 1);
+        CItem* pReference = new CItem(CResRef("SPWI110Z"), 1, 1, 0, 0, 0x1);
+        pReference->SetUsageCount(0, 0);
+        pSprite->m_equipment.m_items[nSpentSlot] = pReference;
+        unsigned int before = iwd2r_rand_state();
+        pSprite->Unequip(nSpentSlot);
+        pReference->ReleaseAll();
+        delete pReference;
+        pSprite->m_equipment.m_items[nSpentSlot] = NULL;
+        pSprite->sub_726810(pSprite->m_nWeaponSet);
+        const int nSequence = Draws(before, iwd2r_rand_state());
+        REQUIRE(nSequence >= 0);
+
         CItem* pSpent = new CItem(CResRef("SPWI110Z"), 1, 1, 0, 0, 0x1);
         pSpent->SetUsageCount(0, 0);
-        pSprite->m_equipment.m_items[nSlot + 1] = pSpent;
-        const unsigned int before = iwd2r_rand_state();
-        CHECK(pSprite->CheckIfUsedUp(static_cast<SHORT>(nSlot + 1), 0));
-        CHECK(Draws(before, iwd2r_rand_state()) == 22);
-        CHECK(pSprite->m_equipment.m_items[nSlot + 1] == NULL);
+        pSprite->m_equipment.m_items[nSpentSlot] = pSpent;
+        before = iwd2r_rand_state();
+        CHECK(pSprite->CheckIfUsedUp(nSpentSlot, 0));
+        CHECK(Draws(before, iwd2r_rand_state()) == nSequence);
+        CHECK(pSprite->m_equipment.m_items[nSpentSlot] == NULL);
     }
 
     pInventory->CopySpell();
@@ -1009,8 +1020,8 @@ TEST_CASE("world keys: the inventory key opens the inventory", "[uimisc][worldke
     PressKey(pWorld, 'I');
     CHECK(g_pBaldurChitin->pActiveEngine == g_pBaldurChitin->m_pEngineInventory);
 
-    // The inventory started the world's time; the effect lists the later
-    // cases count rands over run on it.
+    // The inventory started the world's time; the later cases want it as it
+    // was (AddEffect runs the effect list at once only while it is stopped).
     g_pBaldurChitin->pActiveEngine = pPrevious;
     pGame->GetWorldTimer()->m_active = bTimeActive;
     pGame->GetGameSave()->m_mode = nMode;
