@@ -193,7 +193,6 @@ The crisp-text requirement is met by `Program Options/Text Renderer=scalable` (s
 
 ## UI controls and visual systems (from project 3, milestone 5, ui-misc)
 
-- `src/CGameSpriteButtonLists.*` holds the action bar's eight sprite button lists (0x714F70, 0x7155C0, 0x715BD0, 0x716E80, 0x717250, 0x717FC0, 0x716770, 0x718390) as free functions taking the sprite, a temporary seam like `CInfGameItemUse` while vis-probe owns `CGameSprite.*`. Fold them into CGameSprite members.
 - Spontaneous casting (the seam's 0x716770) skips `CGameSprite::CheckQuickLists` (0x71ABA0), so the quick spell slots keep a converted spell's old count until they are rebuilt.
 - `CScreenWorld::OnKeyDown` should call `CInfButtonArray::sub_594170` (at 0x688D2A, 0x688E17, 0x6890E2, 0x689146 and 0x6891B9): the customize state's keys. The 'I' key does not open the inventory. `CInfGame::SelectToolbar`'s TODOs can call 0x595E70 and 0x595F70 now.
 - `CScreenCharacter::UpdateEquipmentInformation` (0x5DE2C0) and `sub_5E4560` wait for CGameSprite 0x723EA0 (not ported anywhere) and the p3/combat ports of 0x73CF10, 0x73D080, CItem 0x4E9840 and `CRuleTables::GetIterativeAttackBonus`.

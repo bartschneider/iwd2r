@@ -507,6 +507,14 @@ public:
     BOOLEAN CanCast(BYTE nClass, DWORD nSpecialization, CSpell* pSpell);
     CGameButtonList* GetInternalButtonList();
     CGameButtonList* GetItemUsages(SHORT slotNum, WORD buttonType, SHORT abilityNum);
+    CGameButtonList* GetSpellQuickButtons(const BYTE& nClass);
+    CGameButtonList* GetDomainQuickButtons(const BYTE& nClass, DWORD nDomain);
+    CGameButtonList* GetInnateQuickButtons();
+    CGameButtonList* sub_716E80(BOOL bFirstOnly);
+    CGameButtonList* sub_717250(BOOL bFirstOnly);
+    CGameButtonList* sub_717FC0(const CResRef& cResRef, UINT nCount);
+    void sub_716770(CButtonData* pData);
+    BOOL sub_718390(const CResRef& cResRef, BYTE nClass, DWORD nSpecialization, CButtonData& buttonData);
     CItem* GetLauncher(const ITEM_ABILITY* ability, SHORT& launcherSlot);
     SHORT GetLauncherSlot(SHORT slotNum, SHORT abilityNum);
     BOOL CheckLauncherType(const ITEM_ABILITY* ability, CItem* pLauncher);

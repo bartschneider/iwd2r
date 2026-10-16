@@ -7,7 +7,6 @@
 #include "CGameButtonList.h"
 #include "CGameEffect.h"
 #include "CGameSprite.h"
-#include "CGameSpriteButtonLists.h"
 #include "CIcon.h"
 #include "CInfGame.h"
 #include "CItem.h"
@@ -488,25 +487,25 @@ CGameButtonList* CInfButtonArray::sub_587C20(INT nIndex, INT nType, BYTE& nClass
         if (bItemUsages) {
             pList = pSprite->GetItemUsages(static_cast<SHORT>(nIndex), 1, -1);
         } else {
-            pList = CGameSprite_sub_717250(pSprite, FALSE);
+            pList = pSprite->sub_717250(FALSE);
         }
         break;
     case 2:
         if (nClass == CAIOBJECTTYPE_C_CLERIC && nDomain != 0) {
-            pList = CGameSprite_GetDomainQuickButtons(pSprite, nClass, nDomain);
+            pList = pSprite->GetDomainQuickButtons(nClass, nDomain);
         } else {
-            pList = CGameSprite_GetSpellQuickButtons(pSprite, nClass);
+            pList = pSprite->GetSpellQuickButtons(nClass);
         }
         break;
     case 3:
         if (!pGame->m_cOptions.m_bQuickItemMapping || bItemUsages) {
-            pList = CGameSprite_sub_716E80(pSprite, FALSE);
+            pList = pSprite->sub_716E80(FALSE);
         } else {
             pList = pSprite->GetItemUsages(static_cast<SHORT>(nIndex + 15), 3, -1);
         }
         break;
     case 4:
-        pList = CGameSprite_GetInnateQuickButtons(pSprite);
+        pList = pSprite->GetInnateQuickButtons();
         break;
     case 5:
         pList = pSprite->GetInternalButtonList();
@@ -558,14 +557,14 @@ CGameButtonList* CInfButtonArray::sub_587DF0(const CResRef& cResRef)
             pGame->GetRuleTables().sub_546B60(pSprite, nLevel, nUnused1, nUnused2, FALSE);
             // NOTE: Unsigned compare.
             UINT nCount = static_cast<UINT>(nLevel) > dword_85BCB4 ? dword_85BCB4 : static_cast<UINT>(nLevel);
-            pList = CGameSprite_sub_717FC0(pSprite, cResRef, nCount + 1);
+            pList = pSprite->sub_717FC0(cResRef, nCount + 1);
         }
     } else if (cResRef == CGameSprite::SPIN276) {
         if (pSprite->sub_763150(CGAMESPRITE_FEAT_EXPERTISE)) {
             pGame->GetRuleTables().sub_546B60(pSprite, nLevel, nUnused2, nUnused1, FALSE);
             // NOTE: Unsigned compare.
             UINT nCount = static_cast<UINT>(nLevel) > dword_85BCB4 ? dword_85BCB4 : static_cast<UINT>(nLevel);
-            pList = CGameSprite_sub_717FC0(pSprite, cResRef, nCount + 1);
+            pList = pSprite->sub_717FC0(cResRef, nCount + 1);
         }
     }
 
@@ -2234,7 +2233,7 @@ BOOL CInfButtonArray::UpdateButtons()
             pSettings->field_1D8 = 0;
             pSettings->field_1D0 = 0;
 
-            CGameButtonList* pItems = CGameSprite_sub_716E80(pSprite, TRUE);
+            CGameButtonList* pItems = pSprite->sub_716E80(TRUE);
             if (pItems == NULL
                 || pItems->GetCount() == 0
                 || pSprite->m_derivedStats.m_bPolymorphed == TRUE) {
@@ -3448,7 +3447,7 @@ BOOL CInfButtonArray::OnLButtonPressed(int buttonID)
                             && pButtonData->m_abilityId.m_nClass == CAIOBJECTTYPE_C_CLERIC
                             && pButtonData->m_abilityId.field_1E == 0
                             && !pButtonData->m_bDisabled) {
-                            CGameSprite_sub_716770(pSprite, pButtonData);
+                            pSprite->sub_716770(pButtonData);
                             bReady = FALSE;
                         }
                     }
@@ -3844,7 +3843,7 @@ BOOL CInfButtonArray::OnLButtonPressed(int buttonID)
         case 13:
             if (pSprite->m_derivedStats.m_nSkills[1] > 0) {
                 CButtonData buttonData;
-                CGameSprite_sub_718390(pSprite, CGameSprite::SPIN108, 0, 0, buttonData);
+                pSprite->sub_718390(CGameSprite::SPIN108, 0, 0, buttonData);
                 sub_5886A0(&buttonData, TRUE);
             }
 
@@ -4236,7 +4235,7 @@ BOOL CInfButtonArray::OnLButtonPressed(int buttonID)
         case 13:
             if (pSprite->GetDerivedStats()->m_nSkills[1] > 0) {
                 CButtonData buttonData;
-                CGameSprite_sub_718390(pSprite, CGameSprite::SPIN108, 0, 0, buttonData);
+                pSprite->sub_718390(CGameSprite::SPIN108, 0, 0, buttonData);
                 sub_5886A0(&buttonData, TRUE);
             }
             UpdateButtons();
@@ -4384,7 +4383,7 @@ BOOL CInfButtonArray::OnLButtonPressed(int buttonID)
                 && pButtonData->m_abilityId.field_1E == 0
                 && g_pBaldurChitin->GetActiveEngine()->GetShiftKey() == TRUE
                 && !pButtonData->m_bDisabled) {
-                CGameSprite_sub_716770(pSprite, pButtonData);
+                pSprite->sub_716770(pButtonData);
             } else {
                 pGame->SetState(0);
                 SetSelectedButton(*pButtonType);
