@@ -1,21 +1,21 @@
 # Subsystem map
 
-Generated from commit `bf91195f` by `tools/gen_map.py`. Do not edit; CI runs `python3 -I tools/gen_map.py --check`.
+Generated from commit `b1aa6aa0` by `tools/gen_map.py`. Do not edit; CI runs `python3 -I tools/gen_map.py --check`.
 
-Totals: 536 files, 346719 lines, 199 `TODO: Incomplete`, 10548 address comments.
+Totals: 536 files, 347705 lines, 199 `TODO: Incomplete`, 10566 address comments.
 
 | Family | Files | Lines | `TODO: Incomplete` | Address comments | Platform headers included |
 |---|---:|---:|---:|---:|---|
-| AI | 22 | 8577 | 2 | 410 | — |
-| Game | 103 | 112172 | 82 | 2713 | replay.h |
+| AI | 22 | 8772 | 2 | 410 | — |
+| Game | 103 | 112799 | 81 | 2718 | replay.h |
 | Screens | 36 | 75501 | 11 | 2054 | — |
 | UI | 28 | 13785 | 0 | 517 | — |
 | Video | 34 | 27185 | 28 | 1131 | ddraw_shim.h, gl_compat.h |
 | Resources | 63 | 10789 | 1 | 332 | dsound_shim.h |
 | Sound | 20 | 7829 | 0 | 266 | dsound_shim.h, win32_api.h |
-| Messaging | 10 | 23491 | 33 | 1189 | — |
+| Messaging | 10 | 23655 | 34 | 1202 | — |
 | Engine core | 10 | 7164 | 9 | 413 | data_dir.h, fs.h, present.h, replay.h, text_layer.h, window.h |
 | Other | 102 | 41768 | 33 | 1521 | compose.h, replay.h, state_dump.h, text_fonts.h, text_layer.h, window.h |
 | compat | 33 | 3872 | 0 | 0 | win32_api.h |
 | platform | 75 | 14586 | 0 | 2 | affinity.h, clock.h, compose.h, crash.h, data_dir.h, ddraw_shim.h, dsound_shim.h, fs.h, gl_compat.h, gpu_probe.h, handles.h, imm_stub.h, input_settings.h, png.h, present.h, present_backend.h, replay.h, replay_clock.h, replay_probe.h, script.h, script_core.h, state_dump.h, text_atlas.h, text_fonts.h, text_layer.h, text_overlay.h, win32_api.h, window.h |
-| **Total** | 536 | 346719 | 199 | 10548 | |
+| **Total** | 536 | 347705 | 199 | 10566 | |
