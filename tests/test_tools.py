@@ -22,6 +22,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import time
 import types
 import unittest
 import xml.etree.ElementTree as ET
@@ -824,10 +825,22 @@ class XDriverTest(unittest.TestCase):
         self.calls = []
         self.lines = []
         self.game = FakeGame()
+        self.frames = 0
         self.driver = realinput.XDriver(
             7, self.game, self._tmp.name, self._tmp.name, self.lines.append,
-            deadline=1e12, run=self.fake_run, sleep=lambda s: None)
+            deadline=time.time() + 60, run=self.fake_run,
+            sleep=self.fast_engine)
         self.driver.window = 0x50
+
+    def fast_engine(self, seconds):
+        """The engine's control channel: a frame per call, and frames.req
+        answered with the count."""
+        self.frames += 1
+        req = os.path.join(self._tmp.name, 'frames.req')
+        if os.path.exists(req):
+            with open(os.path.join(self._tmp.name, 'frames.txt'), 'w') as f:
+                f.write('%d\n' % self.frames)
+            os.remove(req)
 
     def fake_run(self, cmd, timeout=30):
         self.calls.append(cmd)
@@ -864,6 +877,51 @@ class XDriverTest(unittest.TestCase):
         self.game.code = 0
         self.assertEqual(self.driver.run([{'op': 'wait', 'frames': 1,
                                            'line': 1}]), 'game exited')
+
+    def test_press_and_release_last_engine_frames_on_a_slow_engine(self):
+        # The engine polls input once per AI update and reports only "down"
+        # and "pressed since the last poll" (GetAsyncKeyState), so a release
+        # and the next press with no poll between them read as one long
+        # press: a double click becomes one click. In Windows Sandbox the
+        # world ran at about 18 frames a second with gaps of 165 ms between
+        # polls, and the portrait double click that centres the view was
+        # sometimes lost. Each phase of a click now lasts engine frames.
+        control = os.path.join(self._tmp.name, 'control')
+        os.makedirs(control)
+        engine = {'frames': 0, 'slept': 0.0}
+
+        def slow_engine(seconds):
+            # 10 frames a second: one per 0.1 s of sleeping.
+            time.sleep(seconds)
+            engine['slept'] += seconds
+            engine['frames'] = int(engine['slept'] * 10)
+            req = os.path.join(control, 'frames.req')
+            if os.path.exists(req):
+                with open(os.path.join(control, 'frames.txt'), 'w') as f:
+                    f.write('%d\n' % engine['frames'])
+                os.remove(req)
+
+        events = []
+
+        def run(cmd, timeout=30):
+            if cmd[:2] == ['xdotool', 'search']:
+                return 0, '80\n'
+            events.append((cmd[1], engine['frames']))
+            return 0, ''
+
+        self.driver = realinput.XDriver(
+            7, self.game, self._tmp.name, control, self.lines.append,
+            deadline=time.time() + 60, run=run, sleep=slow_engine)
+        self.driver.window = 80
+        self.driver.do({'op': 'click', 'x': 1, 'y': 2, 'line': 1})
+        self.driver.do({'op': 'click', 'x': 1, 'y': 2, 'line': 2})
+        self.driver.do({'op': 'key', 'key': 'ESCAPE', 'line': 3})
+        presses = [e for e in events if e[0] in ('mousedown', 'mouseup',
+                                                 'keydown', 'keyup')]
+        self.assertEqual([e[0] for e in presses],
+                         ['mousedown', 'mouseup'] * 2 + ['keydown', 'keyup'])
+        for (_, before), (_, after) in zip(presses, presses[1:]):
+            self.assertGreaterEqual(after - before, realinput.HOLD_FRAMES)
 
     def test_checkpoint_asks_the_engine_for_a_state_dump(self):
         control = os.path.join(self._tmp.name, 'control')

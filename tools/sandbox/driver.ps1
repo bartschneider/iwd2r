@@ -472,15 +472,28 @@ function Refresh-Window {
     }
 }
 
-function Press-Key($action) {
+# A phase of a click or key press: N frames of wall-clock time and until the
+# engine has presented N frames. The engine polls input once per AI update
+# and reports only "down" and "pressed since the last poll"
+# (GetAsyncKeyState), so in the sandbox, where the world runs at about 18
+# frames a second with gaps of 165 ms between polls, a release and the next
+# press could fall between two polls and read as one press: the portrait
+# double click that centres the view became one click.
+function Hold-Frames([int]$frames) {
+    Wait-Frames $frames
+}
+
+# -Modal: the engine is inside a message box and presents no frames.
+function Press-Key($action, [switch]$Modal) {
     $vk = [uint16]$action.vk
     $extended = [bool]$action.extended
-    if ($action.shift) { [IwdInput]::Key(0x10, $true, $false); Sleep-Frames 1 }
+    $phase = if ($Modal) { { param($n) Sleep-Frames $n } } else { { param($n) Hold-Frames $n } }
+    if ($action.shift) { [IwdInput]::Key(0x10, $true, $false); & $phase 1 }
     [IwdInput]::Key($vk, $true, $extended)
-    Sleep-Frames 2
+    & $phase 2
     [IwdInput]::Key($vk, $false, $extended)
-    if ($action.shift) { Sleep-Frames 1; [IwdInput]::Key(0x10, $false, $false) }
-    Sleep-Frames 2
+    if ($action.shift) { & $phase 1; [IwdInput]::Key(0x10, $false, $false) }
+    & $phase 2
 }
 
 function Screen-Shot([string]$name) {
@@ -527,7 +540,7 @@ function Quit-Game {
                 Log ('  confirmation window 0x{0:x}: Return' -f $dialogs[0].ToInt64())
                 [void][IwdInput]::SetForegroundWindow($dialogs[0])
                 Sleep-Frames 2
-                Press-Key ([pscustomobject]@{ vk = 0x0D; extended = $false; shift = $false })
+                Press-Key ([pscustomobject]@{ vk = 0x0D; extended = $false; shift = $false }) -Modal
                 return
             }
             Start-Sleep -Milliseconds 100
@@ -569,13 +582,13 @@ function Do-Action($a) {
             Refresh-Window
             $p = [IwdInput]::ToScreen($script:window, [int]$a.x, [int]$a.y)
             [void][IwdInput]::SetCursorPos($p.X, $p.Y)
-            Sleep-Frames 1
+            Hold-Frames 1
             if ($a.op -ne 'move') {
                 $right = $a.op -eq 'rclick'
                 [IwdInput]::Button($right, $true)
-                Sleep-Frames 2
+                Hold-Frames 2
                 [IwdInput]::Button($right, $false)
-                Sleep-Frames 2
+                Hold-Frames 2
             }
         }
         'key' { Refresh-Window; Press-Key $a }

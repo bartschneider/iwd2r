@@ -42,6 +42,11 @@ import dataview  # noqa: E402
 FRAME_RATE = 30
 
 # Frames a click or key is held and settled, as platform/script_core.cpp does.
+# They are engine frames as well as wall-clock time (XDriver.hold): the
+# engine polls input once per AI update and reports only "down" and "pressed
+# since the last poll" (GetAsyncKeyState), so on an engine slower than 30
+# frames a second a release and the next press with no poll between them
+# would read as one press, and a double click as one click.
 MOVE_SETTLE_FRAMES = 1
 HOLD_FRAMES = 2
 SETTLE_FRAMES = 2
@@ -933,17 +938,22 @@ class XDriver:
         self.refresh_window()
         self.xdo('mousemove', '--window', self.window, x, y)
 
+    def hold(self, frames):
+        """A phase of a click or key: frames of wall-clock time and until
+        the engine has presented that many frames (wait)."""
+        self.wait(frames)
+
     def button(self, button):
         self.xdo('mousedown', button)
-        self.sleep_frames(HOLD_FRAMES)
+        self.hold(HOLD_FRAMES)
         self.xdo('mouseup', button)
-        self.sleep_frames(SETTLE_FRAMES)
+        self.hold(SETTLE_FRAMES)
 
     def key(self, keysym):
         self.xdo('keydown', keysym)
-        self.sleep_frames(HOLD_FRAMES)
+        self.hold(HOLD_FRAMES)
         self.xdo('keyup', keysym)
-        self.sleep_frames(SETTLE_FRAMES)
+        self.hold(SETTLE_FRAMES)
 
     def screen_shot(self, name):
         path = os.path.join(self.run_dir, name + '-screen.png')
@@ -1002,7 +1012,7 @@ class XDriver:
             self.wait(action['frames'])
         elif op in ('move', 'click', 'rclick'):
             self.pointer(*window_point(action, self.geometry))
-            self.sleep_frames(MOVE_SETTLE_FRAMES)
+            self.hold(MOVE_SETTLE_FRAMES)
             if op != 'move':
                 self.button(1 if op == 'click' else 3)
         elif op == 'key':
