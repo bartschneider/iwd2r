@@ -1022,7 +1022,9 @@ class CheckpointExpectationTest(unittest.TestCase):
         self.assertEqual(expect['checkpoints']['w'], {
             'screen': 'world', 'world.area': 'AR1000',
             'world.dialog.active': 1, 'world.dialog.speaker': 1048592,
-            'world.dialog.entry': 34, 'world.dialog.responses': 5})
+            'world.dialog.entry': 34, 'world.dialog.responses': 5,
+            'world.doors[0].name': 'AR1000_Door5',
+            'world.doors[0].open': 0, 'world.doors[0].locked': 0})
         os.remove(os.path.join(original, 'checkpoint-w.json'))
         with self.assertRaisesRegex(ValueError, 'checkpoint-w.json'):
             realinput.make_expectations(self.actions, original, 'test')

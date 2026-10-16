@@ -310,13 +310,14 @@ def load_header_timeout(path):
 # <name>.expect.json, made from the original's replay dumps (`python3
 # tools/realinput.py expect SCENARIO DUMPS`), names what the run must have
 # reached at each checkpoint: the fields input decides (the screen, the
-# character generation choices, the area and the dialog), not those that
-# depend on real time (frames, positions, the rand states).
+# character generation choices, the area, the dialog and the doors), not
+# those that depend on real time (frames, positions, the rand states).
 
 EXPECT_FIELDS = ('screen', 'chargen.race', 'chargen.subrace',
                  'chargen.class', 'chargen.abilities', 'chargen.portrait',
                  'world.area', 'world.dialog.active', 'world.dialog.speaker',
-                 'world.dialog.entry', 'world.dialog.responses')
+                 'world.dialog.entry', 'world.dialog.responses',
+                 'world.doors')
 
 
 def flatten(value, prefix=''):

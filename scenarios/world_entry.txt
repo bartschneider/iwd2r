@@ -6,7 +6,8 @@
 # (oracle.py replay compare, seed 1, twice) and both real-input runs
 # (play.py --vm linux and --vm windows) reached the original's states at its
 # checkpoints (world_entry.expect.json: the screen, the character generation
-# choices, the area and the dialog). Coordinates for Resolution=800.
+# choices, the area, the dialog and the doors). Coordinates for
+# Resolution=800.
 #
 # A real-input run in Windows Sandbox can outlast play.py's default:
 # timeout: 300

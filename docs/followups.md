@@ -68,7 +68,6 @@ These are in `oracle/replay/` and `tools/`.
 ## Tooling
 
 - `ORACLE_DIR` in `tools/oracle.py` and `WIN_CHECKOUT` in `tools/play.py` are hardcoded to `/mnt/c/Users/thier/...`, so the Windows side works only for this user. Derive them from `%USERPROFILE%` (through `cmd.exe /c echo` or `wslvar`) or an environment variable.
-- **walk_and_talk's door step in real input.** In replay the last leg reaches AR1000_Door5 (party 840,978, the door open), but in every real-input run so far, on Xvfb and in Windows Sandbox, Probe stops at about 904..968,942..966 with the door closed: after the portrait double click the view sits about 80 px further right than the original's, so the `origin screen` click at 213,144 (scenarios/walk_and_talk.txt) lands left of the door. `walk_and_talk.expect.json` leaves the doors out (`realinput.EXPECT_FIELDS`); add `world.doors` once the door step reaches the door in real input.
 - `replay compare` reports a `known_differences.json` entry that matched nothing, but does not fail on it. An entry carries no scenario, so one valid for another scenario would look stale. It stays a warning until entries carry a `scenario` field.
 - Consider a data-gated test through `CRuleTables::GetClassStringMixed` (the fighter-type string choice: Barbarian 34, otherwise 16799). The id choice is confirmed by the disassembly noted in `docs/evidence/544120.md` and exercised by the chargen replay.
 
