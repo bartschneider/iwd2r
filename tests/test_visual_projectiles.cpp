@@ -5,6 +5,11 @@
 #include "CGameObject84D624.h"
 #include "CGameObjectArray.h"
 #include "CMessage.h"
+#include "CProjectile84DFA4.h"
+#include "CProjectile84E940.h"
+#include "CProjectile84E9C0.h"
+#include "CProjectileShaft.h"
+#include "CSpell.h"
 #include "engine_world.h"
 #include "msvc_rand.h"
 #include "render_surfaces.h"
@@ -515,4 +520,342 @@ TEST_CASE("visual projectiles: the Sparkle effect adds an explosion or a shower"
     CHECK(Draws(31, iwd2r_rand_state()) == 0);
     CHECK(AddedParticles(pArea).empty());
     CHECK(pSparkle->m_done == TRUE);
+}
+
+namespace {
+
+void ClearMessages()
+{
+    CMessageHandler& handler = g_pBaldurChitin->m_cMessageHandler;
+    while (!handler.m_messageList.IsEmpty()) {
+        delete handler.m_messageList.RemoveHead();
+    }
+}
+
+// The one object of this class the area holds in its add lists, or NULL.
+template <class T>
+T* AddedOne(CGameArea* pArea)
+{
+    std::vector<CGameObject*> objects = AddedObjects(pArea);
+    if (objects.size() != 1) {
+        return NULL;
+    }
+    return dynamic_cast<T*>(objects.front());
+}
+
+// The pixels the render lit, all of them, and those outside `rIn` (a world
+// rectangle).
+Lit RenderLit(AreaScope& scope, CGameObject* pObject, const CRect& rIn, const std::string& shot)
+{
+    const std::vector<DWORD> pixels = RenderObject(scope, pObject);
+    scope.Shot(pixels, shot);
+    return CountLit(pixels, scope.Screen(), scope.ToScreen(rIn));
+}
+
+}
+
+// The burst (CProjectile84DFA4, SPBOOM, 0x530300): its colour range set
+// (0x52B150), PlayAt (vtable 0x88, 0x530510) puts it at a point without
+// firing it; CProjectileBAM::Render (0x52B190) draws its frame around the
+// point; its updates (0x5306F0) play the sequence once, then it removes
+// itself. No rand draws.
+TEST_CASE("visual projectiles: the burst plays once at a point and removes itself", "[visualprojectile][data]")
+{
+    WORLD_OR_SKIP(world);
+    CGameArea* pArea = world.pArea;
+    pArea->SortLists();
+    const CPoint pos(world.pCharacter->GetPos().x + 50, world.pCharacter->GetPos().y + 40);
+
+    CProjectile84DFA4* pBurst = new CProjectile84DFA4();
+    CHECK(pBurst->m_animation->m_nCurrentSequence == 0);
+    CHECK(pBurst->field_1D8 == 1);
+    CHECK(pBurst->field_1DE == TRUE);
+    CHECK(pBurst->field_1BE == FALSE);
+    CHECK(pBurst->field_1D4 == 0);
+    CHECK(pBurst->m_fireSoundRef == "");
+    pBurst->SetColorRange(0, 0x41);
+
+    iwd2r_srand(41);
+    pBurst->PlayAt(pArea, pos);
+    CHECK(Draws(41, iwd2r_rand_state()) == 0);
+    const LONG id = pBurst->GetId();
+    REQUIRE(id != CGameObjectArray::INVALID_INDEX);
+    CHECK(pBurst->GetPos() == pos);
+    CHECK(pBurst->GetArea() == pArea);
+    CHECK(AddedOne<CProjectile84DFA4>(pArea) == pBurst);
+
+    {
+        AreaScope scope(pArea);
+        REQUIRE(scope.Ok());
+        scope.CentreOn(pos);
+        CRect rFx;
+        CPoint ptReference;
+        pBurst->CalculateFxRect(rFx, ptReference, NULL);
+        const CRect rBounds(pos.x - ptReference.x, pos.y - ptReference.y, pos.x - ptReference.x + rFx.Width(), pos.y - ptReference.y + rFx.Height());
+        const Lit lit = RenderLit(scope, pBurst, rBounds, "burst");
+        CHECK(lit.inside > 0);
+        CHECK(lit.outside == 0);
+    }
+
+    const int nLength = pBurst->m_animation->GetSequenceLength(0, FALSE);
+    REQUIRE(nLength > 1);
+    iwd2r_srand(42);
+    CHECK(UpdateUntilGone(id, 400) == nLength - 1);
+    CHECK(Draws(42, iwd2r_rand_state()) == 0);
+    pArea->SortLists();
+    ClearMessages();
+}
+
+// The shaft (CProjectileShaft, 0x5348C0): fired at a sprite (0x535100) it
+// delivers its effects at once (an empty group here), stands 13 below the
+// sprite, draws its sequences stacked upwards (0x534DD0) and goes when its
+// duration runs out (0x534C10). It draws a number each update only with a
+// random frame.
+TEST_CASE("visual projectiles: the shaft stands on its target for its duration", "[visualprojectile][data]")
+{
+    WORLD_OR_SKIP(world);
+    CGameArea* pArea = world.pArea;
+    CGameSprite* pSprite = world.pCharacter;
+    pArea->SortLists();
+    ClearMessages();
+    const CPoint pos = pSprite->GetPos();
+
+    CProjectileShaft* pShaft = new CProjectileShaft(CString("FlmStrk"), CString(""), 0xFF, FALSE, FALSE, 30);
+    CHECK(pShaft->m_nDuration == 30);
+    CHECK(pShaft->m_bTransparent == FALSE);
+    CHECK(pShaft->m_bRandomFrame == FALSE);
+    CHECK(pShaft->m_bHasHeight == FALSE);
+    CHECK(pShaft->DetermineHeight(pSprite) == 0);
+    REQUIRE(pShaft->m_animation.GetNumberSequences(FALSE) > 1);
+
+    iwd2r_srand(43);
+    pShaft->Fire(pArea, pSprite->GetId(), pSprite->GetId(), pos, 0, 0);
+    CHECK(Draws(43, iwd2r_rand_state()) == 0);
+    const LONG id = pShaft->GetId();
+    REQUIRE(id != CGameObjectArray::INVALID_INDEX);
+    CHECK(pShaft->GetPos() == CPoint(pos.x, pos.y + 13));
+    CHECK(AddedOne<CProjectileShaft>(pArea) == pShaft);
+    CMessageHandler& handler = g_pBaldurChitin->m_cMessageHandler;
+    REQUIRE(handler.m_messageList.GetCount() == 1);
+    CMessageGroup* pGroup = dynamic_cast<CMessageGroup*>(handler.m_messageList.GetHead());
+    REQUIRE(pGroup != nullptr);
+    CHECK(pGroup->m_messages.empty());
+    ClearMessages();
+
+    {
+        AreaScope scope(pArea);
+        REQUIRE(scope.Ok());
+        scope.CentreOn(CPoint(pos.x, pos.y - 100));
+        // A column over the shaft's foot.
+        const CRect rColumn(pos.x - 150, pos.y - 600, pos.x + 150, pos.y + 13 + 60);
+        const Lit lit = RenderLit(scope, pShaft, rColumn, "shaft");
+        CHECK(lit.inside > 0);
+        CHECK(lit.outside == 0);
+    }
+
+    iwd2r_srand(44);
+    CHECK(UpdateUntilGone(id, 100) == 30);
+    CHECK(Draws(44, iwd2r_rand_state()) == 0);
+    pArea->SortLists();
+
+    // A random frame each update: one draw per update but the last.
+    pShaft = new CProjectileShaft(CString("HLYMITE"), CString(""), 0xFF, TRUE, TRUE, 5);
+    pShaft->Fire(pArea, pSprite->GetId(), pSprite->GetId(), pos, 0, 0);
+    REQUIRE(pShaft->m_animation.GetSequenceLength(0, FALSE) > 0);
+    iwd2r_srand(45);
+    CHECK(UpdateUntilGone(pShaft->GetId(), 100) == 5);
+    CHECK(Draws(45, iwd2r_rand_state()) == 4);
+    pArea->SortLists();
+    ClearMessages();
+}
+
+// The door (CProjectile84E940, DDoorH, 0x535320): fired at a sprite
+// (0x535D20) it stands one above it and delivers its effects; it plays
+// "DDoorH2", "DDoorH1" four times and "DDoorH2" backwards (0x5357B0), then
+// arrives. No rand draws.
+TEST_CASE("visual projectiles: the door opens, loops, closes and arrives", "[visualprojectile][data]")
+{
+    WORLD_OR_SKIP(world);
+    CGameArea* pArea = world.pArea;
+    CGameSprite* pSprite = world.pCharacter;
+    pArea->SortLists();
+    ClearMessages();
+    const CPoint pos = pSprite->GetPos();
+
+    CProjectile84E940* pDoor = new CProjectile84E940(CString("DDoorH"), CString(""), CString(""), 0, 0);
+    CHECK(pDoor->m_sAnimation == "DDoorH");
+    CHECK(pDoor->m_nState == 0);
+    CHECK(pDoor->m_bPalette == FALSE);
+    CHECK(pDoor->m_animation.GetResRef() == CResRef("DDoorH2"));
+
+    iwd2r_srand(51);
+    pDoor->Fire(pArea, pSprite->GetId(), pSprite->GetId(), pos, 0, 0);
+    const LONG id = pDoor->GetId();
+    REQUIRE(id != CGameObjectArray::INVALID_INDEX);
+    CHECK(pDoor->GetPos() == CPoint(pos.x, pos.y - 1));
+    CHECK(AddedOne<CProjectile84E940>(pArea) == pDoor);
+    ClearMessages();
+
+    {
+        AreaScope scope(pArea);
+        REQUIRE(scope.Ok());
+        scope.CentreOn(pos);
+        CPoint ptReference;
+        CSize frameSize;
+        pDoor->m_animation.GetCurrentCenterPoint(ptReference, FALSE);
+        pDoor->m_animation.GetCurrentFrameSize(frameSize, FALSE);
+        const CPoint ptPos(pos.x, pos.y - 1 + pArea->GetHeightOffset(pDoor->GetPos(), pDoor->m_listType));
+        const CRect rBounds(ptPos.x - ptReference.x, ptPos.y - ptReference.y, ptPos.x - ptReference.x + frameSize.cx, ptPos.y - ptReference.y + frameSize.cy);
+        const Lit lit = RenderLit(scope, pDoor, rBounds, "door");
+        CHECK(lit.inside > 0);
+        CHECK(lit.outside == 0);
+    }
+
+    std::vector<int> states;
+    for (int frame = 0; frame < 2000 && Alive(id); frame++) {
+        if (states.empty() || states.back() != pDoor->m_nState) {
+            states.push_back(pDoor->m_nState);
+        }
+        if (pDoor->m_nState == 1 && states.size() == 2) {
+            CHECK(pDoor->m_animation.GetResRef() == CResRef("DDoorH1"));
+        }
+        pDoor->AIUpdate();
+    }
+    CHECK(!Alive(id));
+    CHECK(states == std::vector<int> { 0, 1, 2, 3, 4, 5 });
+    CHECK(Draws(51, iwd2r_rand_state()) == 0);
+    pArea->SortLists();
+    ClearMessages();
+}
+
+// The Visual Spell Hit effect (opcode 141, CGameEffectVisualSpellHit::
+// ApplyEffect 0x4BBCB0) as spells carry it, applied to a goblin in AR1000:
+// SPWI984's three hits (modes 24, 25, 26: air, earth and water in palette
+// 6) queue the projectile of their type (0x88..0x8A) and play their local
+// hit (CProjectile84E9C0, 0x535F20) at the goblin until it arrives;
+// SPWI980's burst (mode 32) and SPWI995's door (mode 38) play their
+// objects. The hits are drawn into the shim surfaces on the way.
+TEST_CASE("visual projectiles: a spell's Visual Spell Hit plays on a goblin and finishes", "[visualprojectile][data]")
+{
+    WORLD_OR_SKIP(world);
+    CGameArea* pArea = world.pArea;
+    const CPoint pos(world.pCharacter->GetPos().x + 70, world.pCharacter->GetPos().y + 20);
+    CGameSprite* pGoblin = AddCreature(pArea, "00GOB", pos);
+    REQUIRE(pGoblin != NULL);
+    pArea->SortLists();
+    ClearMessages();
+
+    // The opcode 141 effects of the spell's first ability.
+    auto hits = [&](const char* resRef) {
+        std::vector<std::unique_ptr<CGameEffect>> effects;
+        CSpell spell { CResRef(resRef) };
+        for (LONG n = 0; n < 32; n++) {
+            std::unique_ptr<CGameEffect> pEffect(spell.GetAbilityEffect(0, n, pGoblin, 0, 0, 0));
+            if (pEffect == nullptr) {
+                break;
+            }
+            if (pEffect->m_effectID == CGAMEEFFECT_VISUALSPELLHIT) {
+                effects.push_back(std::move(pEffect));
+            }
+        }
+        return effects;
+    };
+
+    AreaScope scope(pArea);
+    REQUIRE(scope.Ok());
+    scope.CentreOn(pos);
+
+    {
+        INFO("SPWI984");
+        std::vector<std::unique_ptr<CGameEffect>> effects = hits("SPWI984");
+        REQUIRE(effects.size() == 3);
+        const DWORD modes[] = { 24, 25, 26 };
+        const WORD types[] = { 0x88, 0x89, 0x8A };
+        const char* animations[] = { "SHAir", "SHEarth", "SHWater" };
+        const char* palettes[] = { "SHAir6", "SHEarth6", "SHWater6" };
+        for (size_t n = 0; n < effects.size(); n++) {
+            INFO("mode " << modes[n]);
+            CGameEffect* pEffect = effects[n].get();
+            CHECK(pEffect->m_dwFlags == modes[n]);
+            CHECK(pEffect->ApplyEffect(pGoblin) == TRUE);
+            CHECK(pEffect->m_done == TRUE);
+
+            CMessageHandler& handler = g_pBaldurChitin->m_cMessageHandler;
+            REQUIRE(handler.m_messageList.GetCount() == 2);
+            CMessageFireProjectile* message = dynamic_cast<CMessageFireProjectile*>(handler.m_messageList.GetHead());
+            REQUIRE(message != nullptr);
+            CHECK(message->m_projectileType == types[n]);
+            CHECK(message->m_projectileTargetId == pGoblin->GetId());
+            CHECK(message->GetSource() == pGoblin->GetId());
+            CHECK(dynamic_cast<CMessageGroup*>(handler.m_messageList.GetTail()) != nullptr);
+            ClearMessages();
+
+            CProjectile84E9C0* pHit = AddedOne<CProjectile84E9C0>(pArea);
+            REQUIRE(pHit != nullptr);
+            CHECK(pHit->m_animation.GetResRef() == CResRef(animations[n]));
+            CHECK(pHit->m_bPalette == TRUE);
+            CHECK(pHit->m_palette.GetResRef() == CResRef(palettes[n]));
+            CHECK(pHit->m_dwFlags == 8);
+            CHECK(pHit->m_bHasHeight == TRUE);
+            CHECK(pHit->GetPos() == CPoint(pos.x, pos.y + 1));
+            CHECK(pHit->m_posZ == pHit->DetermineHeight(pGoblin));
+            CHECK(pHit->m_posZ == pGoblin->GetAnimation()->GetCastHeight());
+
+            const std::vector<DWORD> pixels = RenderObject(scope, pHit);
+            scope.Shot(pixels, std::string("hit_") + animations[n]);
+            const Lit lit = CountLit(pixels, scope.Screen(), CRect());
+            CHECK(lit.outside > 0);
+            CHECK(pHit->m_dwFlags == (8 | CInfinity::FXPREP_COPYFROMBACK));
+
+            const LONG id = pHit->GetId();
+            pArea->SortLists();
+            iwd2r_srand(61);
+            CHECK(UpdateUntilGone(id, 400) > 0);
+            CHECK(Draws(61, iwd2r_rand_state()) == 0);
+            pArea->SortLists();
+            ClearMessages();
+        }
+    }
+
+    {
+        INFO("SPWI980");
+        std::vector<std::unique_ptr<CGameEffect>> effects = hits("SPWI980");
+        REQUIRE(effects.size() == 1);
+        CHECK(effects[0]->m_dwFlags == 32);
+        effects[0]->ApplyEffect(pGoblin);
+        CHECK(effects[0]->m_done == TRUE);
+        CHECK(g_pBaldurChitin->m_cMessageHandler.m_messageList.IsEmpty());
+        CProjectile84DFA4* pBurst = AddedOne<CProjectile84DFA4>(pArea);
+        REQUIRE(pBurst != nullptr);
+        CHECK(pBurst->GetPos() == CPoint(pos.x, pos.y - 2));
+        // Not drawn: CProjectileBAM::Render skips a square its terrain table
+        // makes impassable with the creatures on it counted (GetMobileCost
+        // with bumps, the table's entry 8), and the burst stands on the
+        // goblin's.
+        const Lit lit = RenderLit(scope, pBurst, CRect(), "spwi980");
+        CHECK(lit.outside == 0);
+        const LONG id = pBurst->GetId();
+        pArea->SortLists();
+        CHECK(UpdateUntilGone(id, 400) > 0);
+        pArea->SortLists();
+    }
+
+    {
+        INFO("SPWI995");
+        std::vector<std::unique_ptr<CGameEffect>> effects = hits("SPWI995");
+        REQUIRE(effects.size() == 1);
+        CHECK(effects[0]->m_dwFlags == 38);
+        effects[0]->ApplyEffect(pGoblin);
+        CHECK(effects[0]->m_done == TRUE);
+        CProjectile84E940* pDoor = AddedOne<CProjectile84E940>(pArea);
+        REQUIRE(pDoor != nullptr);
+        CHECK(pDoor->m_sAnimation == "DDoorH");
+        CHECK(pDoor->GetPos() == CPoint(pos.x, pos.y - 1));
+        ClearMessages();
+        const LONG id = pDoor->GetId();
+        pArea->SortLists();
+        CHECK(UpdateUntilGone(id, 2000) > 0);
+        pArea->SortLists();
+        ClearMessages();
+    }
 }
