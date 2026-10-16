@@ -15,8 +15,10 @@
 #include "CGameTrigger.h"
 #include "CInfButtonArray.h"
 #include "CInfGame.h"
+#include "CInfinity.h"
 #include "CItem.h"
 #include "CMessage.h"
+#include "CParticle.h"
 #include "CPathSearch.h"
 #include "CRuleTables.h"
 #include "CScreenCharacter.h"
@@ -30,6 +32,7 @@
 #include "CUIPanel.h"
 #include "CUtil.h"
 #include "CWarp.h"
+#include "CWeather.h"
 #include "Icewind586B70.h"
 #include "ScreenLayout.h"
 #include "compat/msvc_rand.h"
@@ -1894,4 +1897,136 @@ TEST_CASE("travel: a member leaving unsummons its summons", "[uimisc][travel][da
     CHECK(pTable->mEntries[1].field_4 == 67890);
 
     pTable->Clear();
+}
+
+// Weather particles (ui-misc round 4): the original builds a new particle's
+// position with the height rolled before the width (its arguments are
+// evaluated right to left), in the generation (z, y, x) and in the respawn
+// of a melted flake or a fallen drop (y, x).
+namespace {
+
+// The VC6 generator, as compat/msvc_rand rolls it for one thread.
+class Vc6Rand {
+public:
+    explicit Vc6Rand(unsigned int seed)
+        : m_state(seed)
+    {
+    }
+    int operator()()
+    {
+        m_state = m_state * 214013u + 2531011u;
+        return static_cast<int>((m_state >> 16) & 0x7FFF);
+    }
+
+private:
+    unsigned int m_state;
+};
+
+} // namespace
+
+// CSnowStorm::GenerateFlakes (0x5581B0): the 250 flakes' constructors roll
+// their drift (two each), then each flake rolls z, y (0x5582A3) and x
+// (0x5582BD).
+TEST_CASE("weather: a new snow flake rolls its height before its width", "[uimisc][weather]")
+{
+    iwd2r_srand(7);
+    const CPoint pt(320, 240);
+    const CRect bounds(0, 0, 800, 433);
+    CSnowStorm storm;
+    storm.GenerateFlakes(pt, bounds);
+    REQUIRE(storm.m_pSnowFlakes != NULL);
+
+    Vc6Rand roll(7);
+    for (int n = 0; n < 250; n++) {
+        const bool bRight = (roll() & 1) != 0;
+        INFO("flake " << n);
+        CHECK(storm.m_pSnowFlakes[n].m_vel.x == (bRight ? 1 : -1) * CSnowFlake::DRIFT_VELOCITY);
+        CHECK(storm.m_pSnowFlakes[n].m_nDriftWidth == 5 + roll() % 5);
+    }
+    for (int n = 0; n < 250; n++) {
+        INFO("flake " << n);
+        const int z = roll() % 100;
+        const int y = 4 * pt.y / 3 + z + roll() % (4 * bounds.Height() / 3);
+        const int x = pt.x + roll() % bounds.Width();
+        CHECK(storm.m_pSnowFlakes[n].m_pos.z == z << CParticle::RESOLUTION_INC);
+        CHECK(storm.m_pSnowFlakes[n].m_pos.y == y << CParticle::RESOLUTION_INC);
+        CHECK(storm.m_pSnowFlakes[n].m_pos.x == x << CParticle::RESOLUTION_INC);
+    }
+}
+
+// CRainStorm::GenerateDrops (0x557C30): the drops' constructors roll
+// nothing; each drop rolls z, y (0x557D23) and x (0x557D3D).
+TEST_CASE("weather: a new rain drop rolls its height before its width", "[uimisc][weather]")
+{
+    iwd2r_srand(11);
+    const CPoint pt(64, 96);
+    const CRect bounds(0, 0, 640, 400);
+    CRainStorm storm;
+    storm.GenerateDrops(pt, bounds);
+    REQUIRE(storm.m_pRainDrops != NULL);
+
+    Vc6Rand roll(11);
+    for (int n = 0; n < 250; n++) {
+        INFO("drop " << n);
+        const int z = roll() % 100;
+        const int y = 4 * pt.y / 3 + z + roll() % (4 * bounds.Height() / 3);
+        const int x = pt.x + roll() % bounds.Width();
+        CHECK(storm.m_pRainDrops[n].m_pos.z == z << CParticle::RESOLUTION_INC);
+        CHECK(storm.m_pRainDrops[n].m_pos.y == y << CParticle::RESOLUTION_INC);
+        CHECK(storm.m_pRainDrops[n].m_pos.x == x << CParticle::RESOLUTION_INC);
+    }
+}
+
+// CSnowStorm::AsynchronousUpdate (0x557FC0): a melted flake comes back at
+// the top of the view, rolling y (0x558120) before x (0x55813A).
+TEST_CASE("weather: a melted snow flake comes back rolling its height first", "[uimisc][weather][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    CGameSprite* pSprite = PartyMember();
+    if (pSprite == NULL) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CGameArea* pArea = pGame->GetVisibleArea();
+    REQUIRE(pArea != NULL);
+    // AR1000 is outdoors (area type 0x4), where the weather runs.
+    REQUIRE((pArea->m_header.m_areaType & 0x4) != 0);
+    CInfinity* pInfinity = pArea->GetInfinity();
+    const CRect rView(pInfinity->nNewX,
+        pInfinity->nNewY,
+        pInfinity->nNewX + pInfinity->rViewPort.Width(),
+        pInfinity->nNewY + pInfinity->rViewPort.Height());
+
+    CSnowStorm storm;
+    storm.GenerateFlakes(rView.TopLeft(), CRect(0, 0, rView.Width(), rView.Height()));
+    REQUIRE(storm.m_pSnowFlakes != NULL);
+    // Every flake on the ground with one update of melting left.
+    for (int n = 0; n < 250; n++) {
+        storm.m_pSnowFlakes[n].m_pos.z = 0;
+        storm.m_pSnowFlakes[n].m_nMeltTime = 1;
+    }
+
+    const BOOLEAN bActive = pGame->GetWorldTimer()->m_active;
+    pGame->GetWorldTimer()->m_active = TRUE;
+    iwd2r_srand(5);
+    storm.AsynchronousUpdate();
+    pGame->GetWorldTimer()->m_active = bActive;
+
+    Vc6Rand roll(5);
+    for (int n = 0; n < 250; n++) {
+        INFO("flake " << n);
+        const int y = roll() % (4 * rView.bottom / 3 - 4 * rView.top / 3) + 4 * rView.top / 3 + 100;
+        const int x = rView.left + roll() % rView.Width();
+        CHECK(storm.m_pSnowFlakes[n].m_pos.y == y << CParticle::RESOLUTION_INC);
+        CHECK(storm.m_pSnowFlakes[n].m_pos.x == x << CParticle::RESOLUTION_INC);
+        CHECK(storm.m_pSnowFlakes[n].m_pos.z == 100 << CParticle::RESOLUTION_INC);
+        CHECK(storm.m_pSnowFlakes[n].m_nMeltTime == 30);
+    }
 }
