@@ -1263,14 +1263,17 @@ TEST_CASE("effects-iwd: ranger tracking (286) shows the tracking string under th
     const STRREF strArea = pGame->GetRuleTables().m_tTracking.GetAtLong(CPoint(0, row.y));
     REQUIRE(strArea != 19534);
 
+    // The display wraps a long string over several lines: look for its
+    // first twenty characters.
     auto shows = [&](STRREF strRef) {
         STR_RES strRes;
         g_pBaldurChitin->m_cTlkTable.Fetch(strRef, strRes);
+        const CString sStart = strRes.szText.Left(20);
         bool found = false;
         POSITION pos = pDisplay->m_plstStrings->GetHeadPosition();
         while (pos != NULL) {
             CDisplayString* pString = pDisplay->m_plstStrings->GetNext(pos);
-            if (!strRes.szText.IsEmpty() && pString->GetString().Find(strRes.szText) != -1) {
+            if (!sStart.IsEmpty() && pString->GetString().Find(sStart) != -1) {
                 found = true;
             }
         }
