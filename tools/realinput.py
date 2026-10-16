@@ -42,14 +42,20 @@ import dataview  # noqa: E402
 FRAME_RATE = 30
 
 # Frames a click or key is held and settled, as platform/script_core.cpp does.
-# They are engine frames as well as wall-clock time (XDriver.hold): the
-# engine polls input once per AI update and reports only "down" and "pressed
-# since the last poll" (GetAsyncKeyState), so on an engine slower than 30
-# frames a second a release and the next press with no poll between them
-# would read as one press, and a double click as one click.
+# Each phase also lasts until the engine has read the mouse buttons again
+# (XDriver.hold, platform::window::ButtonPolls): the engine polls input once
+# per AI update and reads only "down" and "pressed since the last poll"
+# (GetAsyncKeyState), so when its updates stall (Windows Sandbox: gaps of
+# 165 ms) a release and the next press with no poll between them read as
+# one press, and a double click as one click. Waiting for presented frames
+# instead made a double click's two presses too far apart for the engine's
+# double-click time on that slow engine.
 MOVE_SETTLE_FRAMES = 1
 HOLD_FRAMES = 2
 SETTLE_FRAMES = 2
+# Seconds a phase waits at most for that read before it goes on: a screen
+# that does not read the mouse buttons, or a load.
+POLL_TIMEOUT = 1.0
 
 # Seconds to wait for the engine to answer a framebuffer shot request.
 SHOT_TIMEOUT = 60.0
@@ -845,9 +851,10 @@ class XDriver:
                 return
             self._sleep(min(left, 0.1))
 
-    def request(self, name, timeout):
+    def request(self, name, timeout, quiet=False):
         """Creates control/<name> and waits for the engine to delete it,
-        which it does on its next presented frame."""
+        which it does on its next presented frame. After timeout seconds
+        raises DriverError, or with quiet returns False."""
         path = os.path.join(self.control_dir, name)
         with open(path, 'w') as f:
             f.write('\n')
@@ -855,9 +862,20 @@ class XDriver:
         while os.path.exists(path):
             self.check()
             if time.time() > end:
+                if quiet:
+                    return False
                 raise DriverError('engine did not answer %s in %.0f s'
                                   % (name, timeout))
             self._sleep(0.01)
+        return True
+
+    def button_polls(self, timeout):
+        """platform::window::ButtonPolls (input.req), or None when the
+        engine did not answer in timeout seconds."""
+        if not self.request('input.req', max(timeout, 0.01), quiet=True):
+            return None
+        with open(os.path.join(self.control_dir, 'input.txt')) as f:
+            return int(f.read().strip())
 
     def engine_frames(self):
         """The engine's presented frame count."""
@@ -939,9 +957,23 @@ class XDriver:
         self.xdo('mousemove', '--window', self.window, x, y)
 
     def hold(self, frames):
-        """A phase of a click or key: frames of wall-clock time and until
-        the engine has presented that many frames (wait)."""
-        self.wait(frames)
+        """A phase of a click or key: frames of wall-clock time, and until
+        the engine has read the mouse buttons after the phase began (at
+        most POLL_TIMEOUT)."""
+        started = time.time()
+        end = started + POLL_TIMEOUT
+        first = self.button_polls(POLL_TIMEOUT)
+        left = started + frames / FRAME_RATE - time.time()
+        if left > 0:
+            self.sleep_frames(left * FRAME_RATE)
+        while first is not None:
+            now = self.button_polls(end - time.time())
+            if now is not None and now > first:
+                return
+            if time.time() >= end:
+                break
+        self.log('  the engine did not read the mouse buttons in %.0f s'
+                 % POLL_TIMEOUT)
 
     def button(self, button):
         self.xdo('mousedown', button)

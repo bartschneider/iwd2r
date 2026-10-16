@@ -472,15 +472,47 @@ function Refresh-Window {
     }
 }
 
-# A phase of a click or key press: N frames of wall-clock time and until the
-# engine has presented N frames. The engine polls input once per AI update
-# and reports only "down" and "pressed since the last poll"
-# (GetAsyncKeyState), so in the sandbox, where the world runs at about 18
-# frames a second with gaps of 165 ms between polls, a release and the next
+# Seconds a phase of a click or key waits at most for the engine to read the
+# mouse buttons: a screen that does not read them, or a load.
+$pollTimeout = 1.0
+
+# platform::window::ButtonPolls through the control channel (input.req), or
+# $null when the engine did not answer in $seconds.
+function Button-Polls([double]$seconds) {
+    $path = Join-Path $cfg.control 'input.req'
+    Retry-Io { Set-Content -LiteralPath $path -Value '' -Encoding ASCII -ErrorAction Stop }
+    $end = (Get-Date).AddSeconds([Math]::Max($seconds, 0.01))
+    while ([System.IO.File]::Exists($path)) {
+        Check
+        if ((Get-Date) -gt $end) { return $null }
+        Start-Sleep -Milliseconds 5
+    }
+    $answer = Join-Path $cfg.control 'input.txt'
+    return [long](Retry-Io { Get-Content -Raw -LiteralPath $answer -ErrorAction Stop }).Trim()
+}
+
+# A phase of a click or key press: N frames of wall-clock time, and until the
+# engine has read the mouse buttons after the phase began (at most
+# $pollTimeout). The engine polls input once per AI update and reads only
+# "down" and "pressed since the last poll" (GetAsyncKeyState); in the
+# sandbox its updates stalled for up to 165 ms, so a release and the next
 # press could fall between two polls and read as one press: the portrait
-# double click that centres the view became one click.
+# double click that centres the view became one click. Waiting for presented
+# frames instead put a double click's presses too far apart for the
+# engine's double-click time.
 function Hold-Frames([int]$frames) {
-    Wait-Frames $frames
+    if ($DryRun) { return }
+    $start = Get-Date
+    $end = $start.AddSeconds($pollTimeout)
+    $first = Button-Polls $pollTimeout
+    $left = ($start.AddSeconds($frames / $frameRate) - (Get-Date)).TotalSeconds
+    if ($left -gt 0) { Sleep-Frames ($left * $frameRate) }
+    while ($first -ne $null) {
+        $now = Button-Polls ($end - (Get-Date)).TotalSeconds
+        if ($now -ne $null -and $now -gt $first) { return }
+        if ((Get-Date) -ge $end) { break }
+    }
+    Log "  the engine did not read the mouse buttons in $pollTimeout s"
 }
 
 # -Modal: the engine is inside a message box and presents no frames.

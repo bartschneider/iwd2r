@@ -260,11 +260,14 @@ void PollControl()
     std::vector<fs::path> requests;
     std::vector<fs::path> states;
     bool framesRequested = false;
+    bool inputRequested = false;
     for (fs::directory_iterator it(fs::path(dir), ec), end; !ec && it != end; it.increment(ec)) {
         const std::string file = it->path().filename().string();
         const bool req = file.size() > 4 && file.compare(file.size() - 4, 4, ".req") == 0;
         if (file == "frames.req")
             framesRequested = true;
+        else if (file == "input.req")
+            inputRequested = true;
         else if (req && file.size() > 8 && file.compare(0, 5, "shot-") == 0)
             requests.push_back(it->path());
         else if (req && file.size() >= 10 && file.compare(0, 6, "state-") == 0)
@@ -283,6 +286,17 @@ void PollControl()
         }
         fs::rename(temp, answer, ec);
         fs::remove(fs::path(dir) / "frames.req", ec);
+    }
+    if (inputRequested) {
+        // The same way: input.txt holds platform::window::ButtonPolls().
+        const fs::path answer = fs::path(dir) / "input.txt";
+        const fs::path temp = fs::path(dir) / "input.tmp";
+        {
+            std::ofstream out(temp, std::ios::binary | std::ios::trunc);
+            out << platform::window::ButtonPolls() << "\n";
+        }
+        fs::rename(temp, answer, ec);
+        fs::remove(fs::path(dir) / "input.req", ec);
     }
     for (const fs::path& request : requests) {
         const std::string file = request.filename().string();

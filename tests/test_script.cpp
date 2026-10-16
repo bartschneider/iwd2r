@@ -438,3 +438,44 @@ TEST_CASE("control directory answers state requests with a checkpoint dump", "[s
     SetShotDir("");
     std::filesystem::remove_all(dir);
 }
+
+TEST_CASE("control directory reports the engine's mouse-button polls", "[script][control]")
+{
+    // A real-input driver waits for these between a press and its release
+    // and before the next press: the engine reads only "down" and "pressed
+    // since the last poll", so a release and a press with no poll between
+    // them read as one press.
+    const std::filesystem::path dir = std::filesystem::temp_directory_path() / ("iwd2r_polls_test_" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    const std::filesystem::path control = dir / "control";
+    std::filesystem::create_directories(control);
+    SetShotDir(dir.string());
+    SetEnv("IWD2R_CONTROL_DIR", control.string());
+    std::vector<uint32_t> pixels(4 * 2, 0x00336699u);
+    platform::present::SetPrimary(&pixels, 4, 2);
+
+    const unsigned before = platform::window::ButtonPolls();
+    GetAsyncKeyState(VK_LBUTTON);
+    GetAsyncKeyState(VK_RBUTTON);
+    GetAsyncKeyState('A'); // not a mouse button
+    CHECK(platform::window::ButtonPolls() == before + 2);
+
+    // Answered on the next pump after a poll, without a new frame.
+    platform::window::PumpEvents();
+    std::ofstream(control / "input.req").put('\n');
+    platform::window::PumpEvents(); // no frame, no poll: not answered yet
+    CHECK(std::filesystem::exists(control / "input.req"));
+    GetAsyncKeyState(VK_LBUTTON);
+    platform::window::PumpEvents();
+    CHECK_FALSE(std::filesystem::exists(control / "input.req"));
+    unsigned polls = 0;
+    {
+        std::ifstream in(control / "input.txt");
+        in >> polls;
+    }
+    CHECK(polls == before + 3);
+
+    SetEnv("IWD2R_CONTROL_DIR", "");
+    platform::present::SetPrimary(nullptr, 0, 0);
+    SetShotDir("");
+    std::filesystem::remove_all(dir);
+}

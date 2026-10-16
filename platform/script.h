@@ -77,7 +77,10 @@ int Line();
 // state-<NAME>.req (NAME a checkpoint name), writes the engine's state now
 // as checkpoint-<NAME>.json into IWD2R_SHOT_DIR, in the replay dump's
 // layout (platform/state_dump.h: frame is the presented frame count, the
-// replay mode's own counts are 0), and deletes the request. A shot request
+// replay mode's own counts are 0), and deletes the request; for input.req,
+// writes platform::window::ButtonPolls() into input.txt and deletes the
+// request (the pump also looks after each such poll, not only once per
+// frame). A shot request
 // made before the first frame waits for it. Called by the window pump once
 // per presented frame; it injects no input, so an outside driver can use
 // it alongside real input (the real-input drivers ask for a state dump at

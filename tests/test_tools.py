@@ -833,14 +833,15 @@ class XDriverTest(unittest.TestCase):
         self.driver.window = 0x50
 
     def fast_engine(self, seconds):
-        """The engine's control channel: a frame per call, and frames.req
-        answered with the count."""
+        """The engine's control channel: a frame and a mouse-button read
+        per call; frames.req and input.req answered with the counts."""
         self.frames += 1
-        req = os.path.join(self._tmp.name, 'frames.req')
-        if os.path.exists(req):
-            with open(os.path.join(self._tmp.name, 'frames.txt'), 'w') as f:
-                f.write('%d\n' % self.frames)
-            os.remove(req)
+        for name, answer in (('frames', 'frames.txt'), ('input', 'input.txt')):
+            req = os.path.join(self._tmp.name, name + '.req')
+            if os.path.exists(req):
+                with open(os.path.join(self._tmp.name, answer), 'w') as f:
+                    f.write('%d\n' % self.frames)
+                os.remove(req)
 
     def fake_run(self, cmd, timeout=30):
         self.calls.append(cmd)
@@ -878,27 +879,28 @@ class XDriverTest(unittest.TestCase):
         self.assertEqual(self.driver.run([{'op': 'wait', 'frames': 1,
                                            'line': 1}]), 'game exited')
 
-    def test_press_and_release_last_engine_frames_on_a_slow_engine(self):
+    def test_press_and_release_each_reach_a_slow_engine(self):
         # The engine polls input once per AI update and reports only "down"
         # and "pressed since the last poll" (GetAsyncKeyState), so a release
         # and the next press with no poll between them read as one long
         # press: a double click becomes one click. In Windows Sandbox the
-        # world ran at about 18 frames a second with gaps of 165 ms between
-        # polls, and the portrait double click that centres the view was
-        # sometimes lost. Each phase of a click now lasts engine frames.
+        # gaps between polls reached 165 ms, and the portrait double click
+        # that centres the view was sometimes lost. Each phase of a click
+        # now lasts until the engine has read the mouse buttons again.
         control = os.path.join(self._tmp.name, 'control')
         os.makedirs(control)
-        engine = {'frames': 0, 'slept': 0.0}
+        engine = {'polls': 0, 'slept': 0.0}
 
         def slow_engine(seconds):
-            # 10 frames a second: one per 0.1 s of sleeping.
+            # 10 reads a second: one per 0.1 s of sleeping.
             time.sleep(seconds)
             engine['slept'] += seconds
-            engine['frames'] = int(engine['slept'] * 10)
-            req = os.path.join(control, 'frames.req')
+            if not engine.get('frozen'):
+                engine['polls'] = int(engine['slept'] * 10)
+            req = os.path.join(control, 'input.req')
             if os.path.exists(req):
-                with open(os.path.join(control, 'frames.txt'), 'w') as f:
-                    f.write('%d\n' % engine['frames'])
+                with open(os.path.join(control, 'input.txt'), 'w') as f:
+                    f.write('%d\n' % engine['polls'])
                 os.remove(req)
 
         events = []
@@ -906,7 +908,7 @@ class XDriverTest(unittest.TestCase):
         def run(cmd, timeout=30):
             if cmd[:2] == ['xdotool', 'search']:
                 return 0, '80\n'
-            events.append((cmd[1], engine['frames']))
+            events.append((cmd[1], engine['polls']))
             return 0, ''
 
         self.driver = realinput.XDriver(
@@ -920,8 +922,18 @@ class XDriverTest(unittest.TestCase):
                                                  'keydown', 'keyup')]
         self.assertEqual([e[0] for e in presses],
                          ['mousedown', 'mouseup'] * 2 + ['keydown', 'keyup'])
+        # A read between every two transitions.
         for (_, before), (_, after) in zip(presses, presses[1:]):
-            self.assertGreaterEqual(after - before, realinput.HOLD_FRAMES)
+            self.assertGreaterEqual(after - before, 1)
+        # An engine that never reads the buttons delays a phase by at most
+        # POLL_TIMEOUT.
+        engine['frozen'] = True
+        started = time.time()
+        self.driver.do({'op': 'click', 'x': 1, 'y': 2, 'line': 4})
+        self.assertLess(time.time() - started,
+                        3 * realinput.POLL_TIMEOUT + 1)
+        self.assertIn('  the engine did not read the mouse buttons in 1 s',
+                      self.lines)
 
     def test_checkpoint_asks_the_engine_for_a_state_dump(self):
         control = os.path.join(self._tmp.name, 'control')
