@@ -1240,8 +1240,7 @@ void CGameDoor::ToggleDoor(const CAIObjectType& cause, BOOL bForce)
             STRREF strNotPickable = m_strNotPickable;
             if (static_cast<LONG>(strNotPickable) > -1) {
                 if (g_pChitin->cNetwork.GetServiceProvider() == CNetwork::SERV_PROV_NULL) {
-                    // TODO: 0x48A54A-0x48A556, the door's floating text
-                    // (CGameObject 0x4C80E0 with 10 and 5, not ported).
+                    FloatText(strNotPickable, 10, 5);
                 } else {
                     // NOTE: A connected game sends the floating text
                     // (CMessageFloatText). Omitted: single player only
