@@ -1259,6 +1259,15 @@ CGameEffect* IcewindCGameEffectDominate::Copy()
     return copy;
 }
 
+// 0x4A6220
+void IcewindCGameEffectDominate::OnAddSpecific(CGameSprite* pSprite)
+{
+    // NOTE: Identical code folding shares CGameEffectCharm's (vtable
+    // 0x84B7F0 +0x10).
+    m_numDice = -1;
+    m_diceSize = -1;
+}
+
 // -----------------------------------------------------------------------------
 
 // 0x49EB60

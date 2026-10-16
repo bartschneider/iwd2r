@@ -271,6 +271,7 @@ class IcewindCGameEffectDominate : public CGameEffect {
 public:
     IcewindCGameEffectDominate(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
+    void OnAddSpecific(CGameSprite* pSprite) override;
 };
 
 class IcewindCGameEffectStaticCharge : public CGameEffect {
