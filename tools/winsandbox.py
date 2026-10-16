@@ -22,6 +22,7 @@ import hashlib
 import json
 import os
 import shutil
+import stat
 import struct
 import subprocess
 import time
@@ -247,10 +248,40 @@ def runtime_dlls(imports, redist_dir):
     return sorted(n for n in os.listdir(redist_dir) if n.lower() in wanted)
 
 
+# Seconds two mtimes may differ by and still name the same file: on the
+# Windows drive (/mnt/c) a copied file's mtime reads back in whole seconds,
+# the redist's own with a fraction.
+MTIME_TOLERANCE = 2.0
+
+
+def runtime_current(src, dst):
+    """True when dst is a copy of src as deploy_runtime makes it: the same
+    size and the same mtime, within MTIME_TOLERANCE."""
+    try:
+        have = os.stat(dst)
+    except FileNotFoundError:
+        return False
+    want = os.stat(src)
+    return have.st_size == want.st_size and \
+        abs(have.st_mtime - want.st_mtime) <= MTIME_TOLERANCE
+
+
+def copy_runtime(src, dst):
+    """Copies src's bytes and mtime to dst, not its mode: the redist under
+    Program Files is read-only, and a read-only copy could not be replaced
+    by the next deployment (PermissionError). A read-only copy an older
+    deployment left is made writable first."""
+    if os.path.exists(dst) and not os.access(dst, os.W_OK):
+        os.chmod(dst, os.stat(dst).st_mode | stat.S_IWUSR)
+    shutil.copyfile(src, dst)
+    st = os.stat(src)
+    os.utime(dst, ns=(st.st_atime_ns, st.st_mtime_ns))
+
+
 def deploy_runtime(exe, log, redist_root=REDIST_ROOT, arch='x64'):
     """Copies the MSVC runtime DLLs (of arch) exe imports next to it, so the
-    sandbox needs no installer. Returns the names copied or already
-    current."""
+    sandbox needs no installer; a copy already current (runtime_current) is
+    kept. Returns the names copied or already current."""
     imports = pe_imports(exe)
     if not any(n.lower().startswith(('vcruntime', 'msvcp', 'concrt'))
                for n in imports):
@@ -264,10 +295,8 @@ def deploy_runtime(exe, log, redist_root=REDIST_ROOT, arch='x64'):
     for name in names:
         src = os.path.join(redist, name)
         dst = os.path.join(target, name)
-        if not os.path.exists(dst) or os.path.getsize(dst) != \
-                os.path.getsize(src) or os.path.getmtime(dst) < \
-                os.path.getmtime(src):
-            shutil.copy2(src, dst)
+        if not runtime_current(src, dst):
+            copy_runtime(src, dst)
     log('app-local MSVC runtime: %s' % ', '.join(names))
     return names
 

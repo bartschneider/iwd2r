@@ -1041,6 +1041,67 @@ class SandboxRuntimeTest(unittest.TestCase):
         self.assertEqual(winsandbox.deploy_runtime(exe, lambda m: None,
                                                    self.dir), [])
 
+    def runtime_fixture(self):
+        """A redist folder with a read-only msvcp140.dll (as under Program
+        Files) and an exe importing it; returns (redist root, exe, the
+        redist DLL)."""
+        crt = os.path.join(self.dir, 'Redist', '14.44.2', 'x64',
+                           'Microsoft.VC143.CRT')
+        os.makedirs(crt)
+        src = os.path.join(crt, 'msvcp140.dll')
+        self.rewrite(src, 'runtime v1')
+        out = os.path.join(self.dir, 'bin')
+        os.makedirs(out)
+        exe = os.path.join(out, 'iwd2r.exe')
+        with open(exe, 'wb') as f:
+            f.write(tiny_pe(['KERNEL32.dll', 'MSVCP140.dll']))
+        return os.path.join(self.dir, 'Redist'), exe, src
+
+    def rewrite(self, path, text, mtime=None):
+        """Writes text into path and leaves it read-only (mtime: seconds,
+        else now)."""
+        if os.path.exists(path):
+            os.chmod(path, 0o644)
+        with open(path, 'w') as f:
+            f.write(text)
+        if mtime is not None:
+            os.utime(path, (mtime, mtime))
+        os.chmod(path, 0o444)
+
+    def test_deploy_ignores_sub_second_mtimes(self):
+        # On /mnt/c a copied file's mtime reads back in whole seconds: a
+        # copy whose mtime is the source's, truncated, is current.
+        redist, exe, src = self.runtime_fixture()
+        os.utime(src, (1000.75, 1000.75))
+        dst = os.path.join(os.path.dirname(exe), 'msvcp140.dll')
+        with open(dst, 'w') as f:
+            f.write('runtime vX')  # same size, other content
+        os.utime(dst, (1000.0, 1000.0))
+        winsandbox.deploy_runtime(exe, lambda m: None, redist)
+        with open(dst) as f:
+            self.assertEqual(f.read(), 'runtime vX')
+
+    def test_deploy_twice_over_a_read_only_source(self):
+        # copy2 carried the source's read-only bit over, so the next copy
+        # could not open the file: PermissionError on msvcp140.dll.
+        redist, exe, src = self.runtime_fixture()
+        dst = os.path.join(os.path.dirname(exe), 'msvcp140.dll')
+        winsandbox.deploy_runtime(exe, lambda m: None, redist)
+        self.assertTrue(os.stat(dst).st_mode & 0o200, 'the copy is writable')
+        self.assertEqual(int(os.path.getmtime(dst)),
+                         int(os.path.getmtime(src)))
+        # A newer runtime (an update) replaces the first copy.
+        self.rewrite(src, 'runtime v2 (longer)', os.path.getmtime(src) + 10)
+        winsandbox.deploy_runtime(exe, lambda m: None, redist)
+        with open(dst) as f:
+            self.assertEqual(f.read(), 'runtime v2 (longer)')
+        # An older deployment left a read-only copy (copy2): replaced too.
+        os.chmod(dst, 0o444)
+        self.rewrite(src, 'runtime v3, longer still')
+        winsandbox.deploy_runtime(exe, lambda m: None, redist)
+        with open(dst) as f:
+            self.assertEqual(f.read(), 'runtime v3, longer still')
+
 
 class LabelsTest(unittest.TestCase):
     def setUp(self):
