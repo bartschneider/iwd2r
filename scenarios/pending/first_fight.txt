@@ -18,10 +18,12 @@
 # - Space: Probe ends leg 7 at 568,906 and the goblin, its combat script
 #   asking See(NearestEnemyOf(Myself)) then AttackOneRound(LastMarkedObject),
 #   walks to 568,872 and attacks.
-# - The attack order: Probe swings at the goblin; the goblin's hit (1 point)
-#   auto-pauses the game (Attacked) at frame 5012.
-# - The spell while paused, then Space: Magic Missile (SPWI112) kills the
-#   goblin at frame 5121.
+# - The attack order: Probe swings at the goblin; the goblin's attack (a
+#   critical miss) auto-pauses the game (Attacked) at frame 5012.
+# - The spell while paused, then Space: Probe casts Magic Missile (SPWI112)
+#   at frame 5100; the missile (projectile type 218) is fired at 5122 and
+#   kills the goblin at 5125. Two runs give the same 219 dumps but for the
+#   timing field held_frames.
 # Needs on our side what first does not have yet: the world screen's keys
 # (CScreenWorld::OnKeyDown, ui-misc round 2) for Space; without them the
 # game stays paused after Enemy Sighted.
@@ -320,8 +322,8 @@ wait 80
 checkpoint engaged
 shot engaged
 # The melee: centre on Probe (the view at 168,690 puts the goblin at
-# 400,182) and click the goblin, an attack order. The goblin's first hit
-# auto-pauses the game (Attacked, 0x2).
+# 400,182) and click the goblin, an attack order. The goblin's first
+# attack, hit or miss, auto-pauses the game (Attacked, 0x2).
 origin ui
 click 528 460
 click 528 460
