@@ -18,6 +18,10 @@
 // CGameSprite storage of ours with the same members set. __thiscall with one
 // argument, `ret 4` at 0x727BA0, called through a __fastcall pointer whose
 // edx argument is unused.
+//
+// CGameSprite::GetDirection(ptStart, ptTarget) (0x706DD0) is a pure function
+// of the two points' coordinates; both points sit in a block of the
+// original's (R10b).
 #ifdef _MSC_VER
 #pragma warning(push)
 #pragma warning(disable : 4121 4201)
@@ -178,9 +182,62 @@ void RotateOffsets(CaseContext& ctx)
     }
 }
 
+// CGameSprite::GetDirection(const CPoint& ptStart, const CPoint& ptTarget)
+// (0x706DD0): static __cdecl, the two pointers at [esp+4] and [esp+8], plain
+// ret at 0x706DEF (its caller 0x706D50 pops 8 at 0x706DC1); the direction
+// in ax.
+using GetDirectionFn = int16_t(__cdecl*)(const int32_t* pStart, const int32_t* pTarget);
+constexpr uintptr_t kGetDirection = 0x706DD0;
+
+// Every step of up to 40 either way from three starts (the same point, the
+// axes, all four quadrants and both sides of every threshold), one of them
+// walk_and_talk's up-left step, then random pairs over the area range and
+// beyond it on both sides.
+void GetDirection(CaseContext& ctx)
+{
+    int32_t* original = nullptr;
+    ctx.SetInputs("allocating the original's points");
+    ctx.CallOriginal([&] { original = reinterpret_cast<int32_t*>(OriginalBlock(4 * 4)); });
+
+    auto check = [&](int32_t sx, int32_t sy, int32_t tx, int32_t ty) {
+        ctx.SetInputs("GetDirection((" + std::to_string(sx) + "," + std::to_string(sy) + "), ("
+            + std::to_string(tx) + "," + std::to_string(ty) + "))");
+        int16_t originalResult = 0;
+        ctx.CallOriginal([&] {
+            original[0] = sx;
+            original[1] = sy;
+            original[2] = tx;
+            original[3] = ty;
+            originalResult = reinterpret_cast<GetDirectionFn>(kGetDirection)(original, original + 2);
+        });
+        const SHORT oursResult = CGameSprite::GetDirection(CPoint(sx, sy), CPoint(tx, ty));
+        ctx.CountInputs(1);
+        oracle::Compare(ctx, static_cast<int32_t>(originalResult), static_cast<int32_t>(oursResult));
+    };
+
+    const int32_t starts[][2] = { { 1000, 1000 }, { 0, 0 }, { 2232, 1208 } };
+    for (const auto& start : starts) {
+        for (int32_t dx = -40; dx <= 40; ++dx) {
+            for (int32_t dy = -40; dy <= 40; ++dy) {
+                check(start[0], start[1], start[0] + dx, start[1] + dy);
+            }
+        }
+    }
+
+    uint64_t state = ctx.seed ^ 0x706DD0ull;
+    oracle::RandomGen<uint32_t> bits(oracle::SplitMix64(&state));
+    auto between = [&](int32_t lo, int32_t hi) {
+        return static_cast<int32_t>(lo + static_cast<int32_t>(*bits.Next() % static_cast<uint32_t>(hi - lo + 1)));
+    };
+    for (int i = 0; i < ctx.iterations; ++i) {
+        check(between(-2000, 20000), between(-2000, 20000), between(-2000, 20000), between(-2000, 20000));
+    }
+}
+
 } // namespace
 
 ORACLE_CASE("move/visible_to_caller", IsVisibleToCaller);
+ORACLE_CASE("move/get_direction", GetDirection);
 ORACLE_CASE("group/rotate_offsets", RotateOffsets);
 ORACLE_CASE_PENDING("move/follow_path", nullptr,
     "needs engine state (sprites from the original's CGameSprite constructor in its object array, the "

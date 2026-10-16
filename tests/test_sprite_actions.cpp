@@ -1246,7 +1246,7 @@ TEST_CASE("animation: HEAD_TURN picks BAM group 2 or 7 or 8 with one draw (0x6CD
 
     // Seed 18 draws 97: group 8 (vis-probe round 7: ours set 0, so the
     // player's head turn at walk_and_talk frame 4048 ended at 4066 and drew
-    // again).
+    // again; frames before 1aef7608).
     srand(18);
     pCharacter->m_animation.SetSequence(6);
     CHECK(pAnimation->m_currentBamSequence == 8);
@@ -1467,7 +1467,7 @@ TEST_CASE("sprite: GetDirection picks the 16-way direction by quadrant (0x706DD0
         }
     }
     // Up-left, a step of (-16, -12) on the 4/3-scaled y (walk_and_talk's
-    // player at frame 2957): 6; slightly up of west: 5.
+    // player at frame 2957, before 1aef7608): 6; slightly up of west: 5.
     CHECK(CGameSprite::GetDirection(CPoint(2232, 1208), CPoint(2216, 1192)) == 6);
     CHECK(CGameSprite::GetDirection(CPoint(100, 100), CPoint(60, 90)) == 5);
 }

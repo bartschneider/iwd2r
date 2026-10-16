@@ -1522,39 +1522,57 @@ namespace {
 // next object moves, and the search is done at the object's next update in
 // every recording. Here the AI thread waits after the update until the
 // search is done, so neither the snapshot nor the result depend on how the
-// threads are scheduled.
+// threads are scheduled. What the wait rules out, and what it does not
+// cover, is in platform/replay.h.
+//
+// The wait has a deadline of real time (platform::replay::WaitForSearch):
+// a search the search thread never takes up (its lost semaphore post, no
+// search thread) would otherwise stop the AI thread for good. With no
+// search thread, or once a wait has given up (the run already fails on
+// search_wait_timeouts), one poll decides, so later objects do not wait
+// for it again.
 void ReplayWaitForSearch(CInfGame* pGame, LONG iObject)
 {
     if (!platform::replay::Active()) {
         return;
     }
 
-    for (;;) {
+    const uint32_t nDeadlineMs = pGame->m_hSearchThread != NULL && platform::replay::SearchWaitTimeouts() == 0
+        ? platform::replay::kSearchWaitMs
+        : 0;
+    platform::replay::WaitForSearch(nDeadlineMs, [pGame, iObject](std::string* what) -> bool {
         BOOL bPending = FALSE;
+        const CSearchRequest* pRequest = NULL;
         CGameObject* pObject;
         CSingleLock searchLock(&(pGame->field_1B58), TRUE);
-        if (!pGame->m_searchRequests.IsEmpty() || !pGame->m_searchRequestsBack.IsEmpty()) {
-            bPending = TRUE;
-        } else if (pGame->GetObjectArray()->GetShare(iObject, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) == CGameObjectArray::SUCCESS
+        const INT nFront = pGame->m_searchRequests.GetCount();
+        const INT nBack = pGame->m_searchRequestsBack.GetCount();
+        if (pGame->GetObjectArray()->GetShare(iObject, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) == CGameObjectArray::SUCCESS
             && pObject->GetObjectType() == CGameObject::TYPE_SPRITE) {
+            pRequest = static_cast<CGameSprite*>(pObject)->m_currentSearchRequest;
+        }
+        if (nFront != 0 || nBack != 0) {
+            bPending = TRUE;
+        } else if (pRequest != NULL
+            && (pRequest->m_serviceState == CSearchRequest::STATE_PROCESSING
+                || (pRequest->m_serviceState == CSearchRequest::STATE_WAITING
+                    && pRequest->m_collisionDelay == 0))) {
             // A request is off the lists while the search thread runs it; one
             // still waiting with a collision delay is not queued yet.
-            const CSearchRequest* pRequest = static_cast<CGameSprite*>(pObject)->m_currentSearchRequest;
-            if (pRequest != NULL
-                && (pRequest->m_serviceState == CSearchRequest::STATE_PROCESSING
-                    || (pRequest->m_serviceState == CSearchRequest::STATE_WAITING
-                        && pRequest->m_collisionDelay == 0))) {
-                bPending = TRUE;
-            }
+            bPending = TRUE;
+        }
+        if (bPending) {
+            *what = "object " + std::to_string(iObject) + ", "
+                + (pRequest != NULL
+                        ? "its request in state " + std::to_string(pRequest->m_serviceState) + " (collision delay "
+                            + std::to_string(pRequest->m_collisionDelay) + ")"
+                        : std::string("no request of its own"))
+                + ", " + std::to_string(nFront) + " requests queued in front and " + std::to_string(nBack) + " in back, "
+                + (pGame->m_hSearchThread != NULL ? "search thread running" : "no search thread");
         }
         searchLock.Unlock();
-
-        if (!bPending) {
-            return;
-        }
-
-        SleepEx(1, FALSE);
-    }
+        return bPending != FALSE;
+    });
 }
 
 }

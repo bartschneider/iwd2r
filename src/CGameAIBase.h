@@ -150,8 +150,10 @@ public:
 
     void sub_481890(CRect* r, CArray<CRect*>& ary);
     void DecodeSpell(LONG nSpellId, CString& sResRef);
-    void FireSpell(const CResRef& resRef, CGameObject* target);
-    void FireSpellPoint(const CResRef& resRef, const CPoint& ptTarget);
+    SHORT FireSpell(const CResRef& resRef, CGameObject* target);
+    SHORT FireSpellPoint(const CResRef& resRef, const CPoint& ptTarget);
+    SHORT ForceSpell(CGameAIBase* target);
+    SHORT ForceSpellPoint();
     static CVariable* GetGlobalVariable(const CString& sScope, const CString& sName, int a3);
     void sub_4530F0(const CAIObjectType& type);
     void sub_453110(const CAIObjectType& type);

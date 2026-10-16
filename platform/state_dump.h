@@ -104,6 +104,9 @@ struct Snapshot {
     // Frames whose AI update began before the frame's render ended
     // (platform/replay.cpp OnFrameEnd).
     uint32_t aiOverlapFrames = 0;
+    // Our engine only: the replay mode's waits for the search thread that
+    // gave up at their deadline (platform/replay.h WaitForSearch).
+    uint32_t searchWaitTimeouts = 0;
     // platform/replay_clock.h FrameGate: Loads() and HeldFrames().
     uint32_t loads = 0;
     uint32_t heldFrames = 0;

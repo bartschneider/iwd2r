@@ -33,7 +33,22 @@
 //     so the search thread's snapshot of the search map and the frame its
 //     result is first seen do not depend on thread scheduling: the original
 //     shows that timing in every recording, and without the wait about one
-//     run of ours in five walked a different path in walk_and_talk.
+//     run of ours in five walked a different path in walk_and_talk. The
+//     wait is a deviation from the original, where the next object's update
+//     can run while the search does. In replay it rules out:
+//       - FindPath cut short at minNodes because another request was queued
+//         meanwhile (CPathSearch::FindPath's two node-limit tests go past
+//         minNodes only while m_searchRequestListEmpty is set, and queueing
+//         a request clears it): the next object queues nothing until the
+//         search is done;
+//       - a share the search thread asks for coming back DENIED because the
+//         next object's update holds its deny; in the original 256 DENIED
+//         tries drop that party member (or target) from the search's goals
+//         and snapshot;
+//     and it covers only the requests queued in the three per-object loops
+//     of CGameArea::AIUpdate. A request queued anywhere else (the message
+//     handler, the main thread) is not waited for. A wait that passes its
+//     deadline gives up and is counted (WaitForSearch below);
 //
 // OnFrame writes frame-<N>.json every IWD2R_DUMP_EVERY frames (default 30,
 // 0 for none), checkpoint-<NAME>.json at the scenario's checkpoint lines,
@@ -44,6 +59,7 @@
 #include "platform/win32_api.h"
 
 #include <cstdint>
+#include <functional>
 #include <string>
 
 namespace platform::replay {
@@ -81,6 +97,27 @@ POINT Cursor();
 SHORT Key(int vk);
 // SetCursorPos: the last cursor.
 void SetCursor(int x, int y);
+
+// The wait for the search thread (CGameArea::AIUpdate's ReplayWaitForSearch)
+// must end even when the search never does: the search thread can lose a
+// request's semaphore post (SearchThreadMain 0x5492E0 tests its lists and
+// posts to itself without field_1B58 after some results, and the
+// semaphore's maximum is 1), or there may be no search thread. WaitForSearch
+// calls pending, which answers whether the wait goes on and says what it
+// waits for in *what, every millisecond until it answers false (then it
+// returns true) or deadlineMs of real time have passed since the call
+// (std::chrono::steady_clock, never the virtual clock); it always polls at
+// least once. On expiry it counts the wait in the dump's
+// search_wait_timeouts, which tools/oracle.py fails a checkpoint on, writes
+// one line to stderr with the frame and *what (for the first
+// kSearchWaitLines expiries; later ones are only counted) and returns false.
+// It does not test Active(): the caller does.
+constexpr uint32_t kSearchWaitMs = 5000;
+constexpr uint32_t kSearchWaitLines = 10;
+bool WaitForSearch(uint32_t deadlineMs, const std::function<bool(std::string* what)>& pending);
+
+// The waits WaitForSearch gave up so far (search_wait_timeouts).
+uint32_t SearchWaitTimeouts();
 
 // The probe (platform/replay_probe.h): with IWD2R_PROBE naming frame N,
 // OnFrame calls the source after the frame's dump and appends the block to
