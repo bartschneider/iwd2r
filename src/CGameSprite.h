@@ -175,6 +175,10 @@ typedef struct {
 class CGameSpriteLastUpdate {
 public:
     void Initialize(BOOL bFullUpdateRequired);
+
+    // NOTE: Only the last member of the original's 0xFC bytes is declared;
+    // Initialize (0x723B20) stores its argument there (0x723BDB).
+    /* 00F8 */ BOOL m_bFullUpdateRequired = FALSE;
 };
 
 class CGameSprite : public CGameAIBase {
@@ -983,6 +987,9 @@ public:
     /* 70FF */ BOOLEAN field_70FF;
     /* 7100 */ BOOLEAN field_7100;
     /* 7101 */ BOOLEAN field_7101;
+    // The last hit sound's resref prefix (CGameEffectDamage 0x4A8DF0 moves
+    // the digit on when the new one is the same).
+    /* 7102 */ CString m_sLastHitSound;
     /* 7106 */ int field_7106;
     /* 710A */ SHORT field_710A;
     /* 710C */ SHORT field_710C;

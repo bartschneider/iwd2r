@@ -12049,7 +12049,9 @@ BOOLEAN CGameSprite::DoAIUpdate(BOOLEAN active, LONG counter)
 // 0x723B20
 void CGameSpriteLastUpdate::Initialize(BOOL bFullUpdateRequired)
 {
-    // TODO: Incomplete.
+    // TODO: Incomplete. The original also clears the update's other members
+    // (0x723B20-0x723BD8), which CGameSpriteLastUpdate does not declare.
+    m_bFullUpdateRequired = bFullUpdateRequired;
 }
 
 // 0x723BF0
