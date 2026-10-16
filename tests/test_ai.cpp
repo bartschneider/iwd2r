@@ -770,6 +770,59 @@ TEST_CASE("ai: NearestPC decodes to the nearest live good party member", "[ai][d
     pGame->m_characterPortraits[1] = portrait1;
 }
 
+// A creature's death on the host (0x6F5330): its <script name>_DEAD, its
+// KILL_<race>_CNT and the creature file's death and kill variables. Only
+// the host counts.
+TEST_CASE("ai: a death sets the creature's death variables on the host", "[ai][data]")
+{
+    REQUIRE_ENGINE();
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CGameSprite* pSprite = MakeSprite();
+    pSprite->m_bBumped = FALSE;
+    pSprite->m_bVisibleMonster = FALSE;
+    pSprite->m_bInfravisionOn = FALSE;
+    std::memset(pSprite->m_scriptName, 0, sizeof(pSprite->m_scriptName));
+    std::memcpy(pSprite->m_scriptName, "AITESTGOB", 9);
+    pSprite->m_typeAI.m_nRace = 155; // goblin
+    pSprite->m_baseStats.field_295[0] = 1;
+    pSprite->m_baseStats.field_295[1] = 1;
+    std::memset(&pSprite->m_baseStats.field_295[0xD], 0, 64);
+    std::memcpy(&pSprite->m_baseStats.field_295[0xD], "  AITEST_DEATHVAR ", 18);
+    std::memcpy(&pSprite->m_baseStats.field_295[0x2D], "aitest_a:aitest_b", 17);
+
+    auto value = [&](const char* name) -> LONG {
+        CVariable* pVariable = pGame->GetVariables()->FindKey(CString(name));
+        return pVariable != NULL ? pVariable->m_intValue : -1;
+    };
+
+    CHECK(CGameSprite::GetRaceString(155) == CString("GOBLIN"));
+    CHECK(CGameSprite::GetRaceString(114) == CString(""));
+
+    const BOOLEAN bHost = g_pChitin->cNetwork.m_bIsHost;
+    g_pChitin->cNetwork.m_bIsHost = FALSE;
+    pSprite->sub_6F5330();
+    CHECK(value("AITESTGOB_DEAD") == -1);
+
+    g_pChitin->cNetwork.m_bIsHost = TRUE;
+    const LONG kills = value("KILL_GOBLIN_CNT");
+    pSprite->sub_6F5330();
+    CHECK(value("AITESTGOB_DEAD") == 1);
+    CHECK(value("KILL_GOBLIN_CNT") == (kills == -1 ? 1 : kills + 1));
+    CHECK(value("AITEST_DEATHVAR") == 1);
+    CHECK(value("AITEST_A") == 1);
+    CHECK(value("AITEST_B") == 1);
+
+    // A second death counts the kills again; the death variables stay 1.
+    pSprite->sub_6F5330();
+    CHECK(value("AITESTGOB_DEAD") == 1);
+    CHECK(value("AITEST_DEATHVAR") == 1);
+    CHECK(value("AITEST_A") == 2);
+    CHECK(value("AITEST_B") == 2);
+
+    g_pChitin->cNetwork.m_bIsHost = bHost;
+    ClearMessages();
+}
+
 TEST_CASE("ai: closing AR5004's door on a creature tells the creature to move and closes again", "[ai][data]")
 {
     REQUIRE_ENGINE();

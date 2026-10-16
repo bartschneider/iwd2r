@@ -27187,3 +27187,326 @@ BOOL CGameSprite::sub_718390(const CResRef& cResRef, BYTE nClass, DWORD nSpecial
 
     return bResult;
 }
+
+// The death of a creature, before CGameEffectDeath (0x4AB510) lays it down:
+// it stops being bumped, a visible monster and an infravision source, and
+// on the host its death is counted in global variables, each set on every
+// machine through a CMessageSetVariable (vtable 0x84882C) with the scope
+// GLOBAL:
+// - <script name>_DEAD = 1 when the creature's file asks for it (base stats
+//   +0x295);
+// - TEAM_<n>_ENEMY = 1 for its teams (sub_6F50A0);
+// - KILL_<race>_CNT + 1 when the file asks for it (base stats +0x296), the
+//   race named by GetRaceString;
+// - the file's death variable (base stats +0x2A2, 32 characters) = 1;
+// - the file's kill variables (base stats +0x2C2, 32 characters, "A:B",
+//   upper case) + 1 each.
+// A variable not yet in the game's table is added with the value.
+//
+// 0x6F5330
+void CGameSprite::sub_6F5330()
+{
+    if (m_bBumped) {
+        m_ptBumpedFrom.x = -1;
+        m_bBumped = FALSE;
+        m_ptBumpedFrom.y = -1;
+    }
+
+    if (m_bVisibleMonster) {
+        m_bVisibleMonster = FALSE;
+        m_pArea->m_nVisibleMonster--;
+    }
+
+    if (m_bInfravisionOn) {
+        m_bInfravisionOn = FALSE;
+        m_pArea->m_nInfravision--;
+    }
+
+    // NOTE: Compared with 1 (`cmp al,0x1` at 0x6F53B7).
+    if (g_pChitin->cNetwork.m_bIsHost != TRUE) {
+        return;
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+    char szName[SCRIPTNAME_SIZE + 1];
+    memcpy(szName, &(m_baseStats.field_295[0xD]), SCRIPTNAME_SIZE);
+    szName[SCRIPTNAME_SIZE] = '\0';
+    CString sDeathVariable(szName);
+    sDeathVariable.TrimLeft();
+    sDeathVariable.TrimRight();
+
+    memcpy(szName, &(m_baseStats.field_295[0x2D]), SCRIPTNAME_SIZE);
+    szName[SCRIPTNAME_SIZE] = '\0';
+    CString sKillVariables(szName);
+    sKillVariables.TrimLeft();
+    sKillVariables.TrimRight();
+
+    CString sName;
+    CString sScope("GLOBAL");
+
+    // The variable named sName set to 1, or incremented, then the message.
+    auto SetVariable = [&](BOOL bIncrement) {
+        LONG nValue;
+        CVariable* pVariable = pGame->GetVariables()->FindKey(sName);
+        if (pVariable != NULL) {
+            if (bIncrement) {
+                pVariable->m_intValue++;
+            } else {
+                pVariable->m_intValue = 1;
+            }
+            nValue = pVariable->m_intValue;
+        } else {
+            CVariable var;
+            var.SetName(sName);
+            var.m_intValue = 1;
+            pGame->m_variables.AddKey(var);
+            nValue = var.m_intValue;
+        }
+
+        CMessage* message = new CMessageSetVariable(sScope, sName, nValue, m_id, m_id);
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+    };
+
+    if (m_baseStats.field_295[0] != 0) {
+        sName = m_scriptName;
+        sName += "_DEAD";
+        SetVariable(FALSE);
+    }
+
+    sub_6F50A0();
+
+    if (m_baseStats.field_295[1] != 0) {
+        sName = "KILL_";
+        sName += GetRaceString(GetAIType().m_nRace);
+        sName += "_CNT";
+        SetVariable(TRUE);
+    }
+
+    if (strcmp(sDeathVariable, "") != 0) {
+        sName = sDeathVariable;
+        SetVariable(FALSE);
+    }
+
+    if (strcmp(sKillVariables, "") != 0) {
+        CString sFirst;
+        CString sSecond;
+        CString sUpper(sKillVariables);
+        sUpper.MakeUpper();
+
+        INT nColon = sUpper.Find(":");
+        if (nColon >= 0) {
+            sFirst = sUpper.Left(nColon);
+            sSecond = sUpper.Right(sUpper.GetLength() - nColon - 1);
+        } else {
+            sFirst = sUpper;
+        }
+
+        if (strcmp(sFirst, "") != 0) {
+            sName = sFirst;
+            SetVariable(TRUE);
+        }
+
+        if (strcmp(sSecond, "") != 0) {
+            sName = sSecond;
+            SetVariable(TRUE);
+        }
+    }
+
+    // NOTE: Only a multiplayer guest gets here past the host test above, so
+    // this never runs (0x6F5F3B).
+    if (g_pChitin->cNetwork.GetServiceProvider() != CNetwork::SERV_PROV_NULL
+        && pGame->GetCharacterPortraitNum(m_id) != -1
+        && g_pChitin->cNetwork.m_bIsHost == FALSE
+        && g_pBaldurChitin->m_pEngineWorld != g_pBaldurChitin->pActiveEngine) {
+        g_pBaldurChitin->pActiveEngine->SelectEngine(g_pBaldurChitin->m_pEngineWorld);
+    }
+}
+
+// The race's name in the KILL_<race>_CNT variables: one string per race
+// value (the jump table 0x72232C by the byte table 0x722414), none for the
+// others.
+//
+// 0x722090
+CString CGameSprite::GetRaceString(BYTE nRace)
+{
+    CString sRace;
+
+    switch (nRace) {
+    case 1:
+        sRace = "HUMAN";
+        break;
+    case 2:
+        sRace = "ELF";
+        break;
+    case 3:
+        sRace = "HALF_ELF";
+        break;
+    case 4:
+        sRace = "DWARF";
+        break;
+    case 5:
+        sRace = "HALFLING";
+        break;
+    case 6:
+        sRace = "GNOME";
+        break;
+    case 7:
+        sRace = "HALF_ORC";
+        break;
+    case 101:
+        sRace = "ANKHEG";
+        break;
+    case 102:
+        sRace = "BASILISK";
+        break;
+    case 103:
+        sRace = "BEAR";
+        break;
+    case 104:
+        sRace = "CARRIONCRAWLER";
+        break;
+    case 105:
+        sRace = "DOG";
+        break;
+    case 106:
+        sRace = "DOPPLEGANGER";
+        break;
+    case 107:
+        sRace = "ETTERCAP";
+        break;
+    case 108:
+        sRace = "GHOUL";
+        break;
+    case 109:
+        sRace = "GIBBERLING";
+        break;
+    case 110:
+        sRace = "GNOLL";
+        break;
+    case 111:
+        sRace = "HOBGOBLIN";
+        break;
+    case 112:
+        sRace = "KOBOLD";
+        break;
+    case 113:
+        sRace = "OGRE";
+        break;
+    case 115:
+        sRace = "SKELETON";
+        break;
+    case 116:
+        sRace = "SPIDER";
+        break;
+    case 117:
+        sRace = "WOLF";
+        break;
+    case 118:
+        sRace = "WYVERN";
+        break;
+    case 119:
+        sRace = "SLIME";
+        break;
+    case 120:
+        sRace = "FAIRY";
+        break;
+    case 150:
+        sRace = "BEETLE";
+        break;
+    case 151:
+        sRace = "CARRION_CRAWLER";
+        break;
+    case 152:
+        sRace = "ELEMENTAL";
+        break;
+    case 153:
+        sRace = "GIANT";
+        break;
+    case 154:
+        sRace = "DRAKE";
+        break;
+    case 155:
+        sRace = "GOBLIN";
+        break;
+    case 156:
+        sRace = "GOLEM";
+        break;
+    case 157:
+        sRace = "LIZARDMAN";
+        break;
+    case 158:
+        sRace = "MANTICORE";
+        break;
+    case 159:
+        sRace = "MYCONID";
+        break;
+    case 160:
+        sRace = "ORC";
+        break;
+    case 161:
+        sRace = "SALAMANDER";
+        break;
+    case 162:
+        sRace = "SHRIEKER";
+        break;
+    case 163:
+        sRace = "SVIRFNEBLIN";
+        break;
+    case 164:
+        sRace = "TANARI";
+        break;
+    case 165:
+        sRace = "TROLL";
+        break;
+    case 166:
+        sRace = "UMBERHULK";
+        break;
+    case 167:
+        sRace = "UNDEAD";
+        break;
+    case 168:
+        sRace = "YUANTI";
+        break;
+    case 174:
+        sRace = "HARPY";
+        break;
+    case 177:
+        sRace = "BEHOLDER";
+        break;
+    case 179:
+        sRace = "MINOTAUR";
+        break;
+    case 180:
+        sRace = "BUGBEAR";
+        break;
+    case 181:
+        sRace = "HOOKHORROR";
+        break;
+    case 182:
+        sRace = "DRIDER";
+        break;
+    case 183:
+        sRace = "DROW";
+        break;
+    case 184:
+        sRace = "MIND_FLAYER";
+        break;
+    case 191:
+        sRace = "SHAPESHIFTER";
+        break;
+    case 192:
+        sRace = "WILLOWISP";
+        break;
+    case 193:
+        sRace = "OTYUGH";
+        break;
+    case 255:
+        sRace = "NO_RACE";
+        break;
+    default:
+        break;
+    }
+
+    return sRace;
+}
