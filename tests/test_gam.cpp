@@ -767,6 +767,47 @@ TEST_CASE("gam: loading a game file that names an unsaved second area does not a
     CHECK(pGame->GetArea(CString("AR1001")) == NULL);
 }
 
+// CGameJournal::AddEntry (0x4C63B0) builds the entry from its text, time
+// and type (the inlined constructor) before it looks for the text in the
+// journal. Ours built it with the default constructor, so the text it
+// compared and stored was whatever the heap held: an entry was refused at
+// random, and with it walk_and_talk's "Your journal has been updated." line
+// that CGameDialogReply::Pick pins to the top of the dialog panel, so the
+// next reply sat three lines higher in some Windows Sandbox runs.
+TEST_CASE("journal: AddEntry stores its text and refuses the same text again", "[gam][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    // Without the feedback line: the entry is what is under test.
+    CGameOptions* pOptions = g_pBaldurChitin->GetObjectGame()->GetOptions();
+    const DWORD textLevel = pOptions->m_nEffectTextLevel;
+    pOptions->m_nEffectTextLevel = textLevel & ~0x10u;
+
+    CGameJournal journal;
+    CHECK(journal.AddEntry(1000, 2, 50, 4) == TRUE);
+    CHECK(journal.AddEntry(1001, 2, 60, 1) == TRUE);
+    // The same text again, in any chapter: refused.
+    CHECK(journal.AddEntry(1000, 3, 70, 4) == FALSE);
+    REQUIRE(journal.CountEntries() == 2);
+
+    CSavedGameJournalEntry out[2];
+    journal.Marshal(out);
+    CHECK(out[0].m_strEntry == 1000);
+    CHECK(out[0].m_time == 50);
+    CHECK(out[0].m_chapter == 2);
+    CHECK(out[0].m_type == 4);
+    CHECK(out[0].m_character == 0xFF);
+    CHECK(out[1].m_strEntry == 1001);
+    CHECK(out[1].m_time == 60);
+    CHECK(out[1].m_type == 1);
+
+    pOptions->m_nEffectTextLevel = textLevel;
+}
+
 TEST_CASE("gam: SetupCharacters twice adds the party once", "[gam][data]")
 {
     if (DataDir() == nullptr) {
