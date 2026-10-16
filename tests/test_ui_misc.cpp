@@ -1197,8 +1197,21 @@ TEST_CASE("character screen: the text character sheet up to the original's asser
         g_pBaldurChitin->m_pEngineCharacter->sub_5EFFD0(bSuccess);
         _exit(0);
     }
+    // The child of a process with threads has only this one: should it
+    // block on a lock another thread held at the fork, it is killed after a
+    // minute (the whole case takes under two seconds).
     int status = 0;
-    REQUIRE(waitpid(pid, &status, 0) == pid);
+    pid_t waited = 0;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
+    while ((waited = waitpid(pid, &status, WNOHANG)) == 0 && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    if (waited == 0) {
+        kill(pid, SIGKILL);
+        waitpid(pid, &status, 0);
+        FAIL("the export's child process did not end within a minute");
+    }
+    REQUIRE(waited == pid);
     REQUIRE(WIFEXITED(status));
     CHECK(WEXITSTATUS(status) == 42);
 
