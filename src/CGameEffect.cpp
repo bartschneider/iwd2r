@@ -13,7 +13,11 @@
 #include "CInfGame.h"
 #include "CPathSearch.h"
 #include "CProjectile.h"
+#include "CProjectile84DFA4.h"
+#include "CProjectile84E940.h"
+#include "CProjectile84E9C0.h"
 #include "CProjectileArea.h"
+#include "CProjectileShaft.h"
 #include "CResEffect.h"
 #include "CScreenWorld.h"
 #include "CSevenEyes.h"
@@ -13801,6 +13805,10 @@ CGameEffect* CGameEffectVisualSpellHit::Copy()
 // 0x4BBCB0
 BOOL CGameEffectVisualSpellHit::ApplyEffect(CGameSprite* pSprite)
 {
+    CString sPalette;
+    CString sSound;
+    CString sAnimation;
+
     if (pSprite->GetArea() == NULL) {
         m_done = TRUE;
         return TRUE;
@@ -13809,38 +13817,83 @@ BOOL CGameEffectVisualSpellHit::ApplyEffect(CGameSprite* pSprite)
     // NOTE: The original keeps the projectile type in its sprite argument;
     // a mode with no entry below leaves the sprite's address there and
     // fires that as the type. Bounded here (ruling P4-10): such a mode
-    // fires nothing.
+    // fires no message (its local projectile still plays).
     LONG nProjectile = -1;
+
+    CProjectile84DFA4* pBurst = NULL;
+    USHORT nColor = 0;
 
     switch (m_dwFlags) {
     case 0x20:
+        pBurst = new CProjectile84DFA4();
+        nColor = 0x43;
+        break;
     case 0x21:
+        pBurst = new CProjectile84DFA4();
+        nColor = 0x41;
+        break;
     case 0x22:
-        // TODO: Incomplete. The original adds a 0x2A0-byte projectile
-        // (0x530300; 0x52B150 with 0x43, 0x41 or 0x45, then vtable +0x88 at
-        // the sprite's position, y - 2); the projectile classes are not in
-        // src/.
+        pBurst = new CProjectile84DFA4();
+        nColor = 0x45;
+        break;
+    case 0x23: {
+        CProjectileShaft* pShaft = new CProjectileShaft(CString("FlmStrk"),
+            CString(""),
+            0xFF,
+            FALSE,
+            FALSE,
+            CTimerWorld::TIMESCALE_MSEC_PER_SEC * 2);
+        pShaft->Fire(pSprite->GetArea(),
+            pSprite->GetId(),
+            pSprite->GetId(),
+            pSprite->GetPos(),
+            pShaft->DetermineHeight(pSprite),
+            0);
         m_done = TRUE;
         return TRUE;
-    case 0x23:
-        // TODO: Incomplete. A shaft projectile "FlmStrk" (0x5348C0) added at
-        // the sprite through vtable +0x6C; not in src/.
+    }
+    case 0x24: {
+        CProjectileShaft* pShaft = new CProjectileShaft(CString("HLYMITE"),
+            CString(""),
+            0xFF,
+            TRUE,
+            FALSE,
+            CTimerWorld::TIMESCALE_MSEC_PER_SEC * 2);
+        pShaft->Fire(pSprite->GetArea(),
+            pSprite->GetId(),
+            pSprite->GetId(),
+            pSprite->GetPos(),
+            pShaft->DetermineHeight(pSprite),
+            0);
         m_done = TRUE;
         return TRUE;
-    case 0x24:
-        // TODO: Incomplete. A shaft projectile "HLYMITE" (0x5348C0); not in
-        // src/.
-        m_done = TRUE;
-        return TRUE;
+    }
     case 0x25:
         nProjectile = 0x93;
+        sAnimation = "SHAir";
+        sPalette = "SHAir7";
+        sSound = "";
         break;
-    case 0x26:
-        // TODO: Incomplete. A "DDoorH" projectile (0x535320); not in src/.
+    case 0x26: {
+        CProjectile84E940* pDoor = new CProjectile84E940(CString("DDoorH"),
+            CString(""),
+            CString(""),
+            0,
+            0);
+        pDoor->Fire(pSprite->GetArea(),
+            pSprite->GetId(),
+            pSprite->GetId(),
+            pSprite->GetPos(),
+            0,
+            0);
         m_done = TRUE;
         return TRUE;
+    }
     case 0x27:
+        sAnimation = "SPFDEATH";
         nProjectile = 0xCF;
+        sPalette = "";
+        sSound = "";
         break;
     default:
         switch (m_dwFlags) {
@@ -13918,37 +13971,78 @@ BOOL CGameEffectVisualSpellHit::ApplyEffect(CGameSprite* pSprite)
             break;
         }
 
-        // The low two bits pick air, earth or water (the "SHAir",
-        // "SHEarth", "SHWater" animations of the local projectile below).
-        if ((m_dwFlags & 3) == 3) {
+        // The low two bits pick air, earth or water, the rest the palette
+        // (none for 0, else "SHAir1".."SHAir7" and so on).
+        switch (m_dwFlags & 3) {
+        case 0:
+            sAnimation = "SHAir";
+            if ((m_dwFlags & ~3) != 0) {
+                sPalette = "SHAir0";
+                sPalette.SetAt(sPalette.GetLength() - 1, static_cast<char>((m_dwFlags >> 2) + '0'));
+            } else {
+                sPalette = "";
+            }
+            sSound = "";
+            break;
+        case 1:
+            sAnimation = "SHEarth";
+            if ((m_dwFlags & ~3) != 0) {
+                sPalette = "SHEarth0";
+                sPalette.SetAt(sPalette.GetLength() - 1, static_cast<char>((m_dwFlags >> 2) + '0'));
+            } else {
+                sPalette = "";
+            }
+            sSound = "";
+            break;
+        case 2:
+            sAnimation = "SHWater";
+            if ((m_dwFlags & ~3) != 0) {
+                sPalette = "SHWater0";
+                sPalette.SetAt(sPalette.GetLength() - 1, static_cast<char>((m_dwFlags >> 2) + '0'));
+            } else {
+                sPalette = "";
+            }
+            sSound = "";
+            break;
+        default:
             // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameEffect.cpp
             // __LINE__: 19999
             UTIL_ASSERT(FALSE);
+            break;
         }
         break;
     }
 
-    // TODO: Incomplete. The original also builds a local 0x32C-byte
-    // projectile (0x535F20) from the animation names and adds it at the
-    // sprite through vtable +0x6C; not in src/.
+    if (pBurst != NULL) {
+        // A burst of the colour at the sprite, two pixels up.
+        pBurst->SetColorRange(0, nColor);
+        CPoint pos = pSprite->GetPos();
+        pBurst->PlayAt(pSprite->GetArea(), CPoint(pos.x, pos.y - 2));
+        m_done = TRUE;
+        return TRUE;
+    }
+
+    // The hit plays here (a local projectile) and, through the message, the
+    // projectile of the type on the other machines.
+    CProjectile84E9C0* pHit = new CProjectile84E9C0(sAnimation, sSound, sPalette, 8, 0);
 
     if (nProjectile != -1) {
-        // NOTE: The height is the local projectile's DetermineHeight
-        // (0x529F40) for the sprite; that projectile's constructor sets
-        // m_bHasHeight (0x53625C), so it is the sprite's cast height.
-        LONG nHeight = pSprite->GetObjectType() != CGameObject::TYPE_SPRITE
-            ? 32
-            : pSprite->GetAnimation()->GetCastHeight();
-
         CMessage* message = new CMessageFireProjectile(static_cast<WORD>(nProjectile),
             pSprite->GetId(),
             pSprite->GetPos(),
-            nHeight,
+            pHit->DetermineHeight(pSprite),
             pSprite->GetId(),
             pSprite->GetId(),
             0);
         g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
     }
+
+    pHit->Fire(pSprite->GetArea(),
+        pSprite->GetId(),
+        pSprite->GetId(),
+        pSprite->GetPos(),
+        pHit->DetermineHeight(pSprite),
+        0);
 
     m_done = TRUE;
     return TRUE;
