@@ -2,6 +2,7 @@
 
 #include "CBaldurChitin.h"
 #include "CGameSprite.h"
+#include "CInfinity.h"
 #include "CUtil.h"
 
 // 0x8F8E00
@@ -456,7 +457,135 @@ void CGameAnimationTypeMonsterAnkheg::SetColorEffectAll(BYTE effectType, COLORRE
 // 0x6C3910
 void CGameAnimationTypeMonsterAnkheg::Render(CInfinity* pInfinity, CVidMode* pVidMode, INT nSurface, const CRect& rectFX, const CPoint& ptNewPos, const CPoint& ptReference, DWORD dwRenderFlags, COLORREF rgbTintColor, const CRect& rGCBounds, BOOL bDithered, BOOL bFadeOut, LONG posZ, BYTE transparency)
 {
-    // TODO: Incomplete.
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjAnimation.cpp
+    // __LINE__: 15919
+    UTIL_ASSERT(pInfinity != NULL && pVidMode != NULL);
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjAnimation.cpp
+    // __LINE__: 15920
+    UTIL_ASSERT(m_currentVidCell != NULL && m_currentVidCellHole != NULL);
+
+    CPoint ptPos(ptNewPos.x, ptNewPos.y + posZ);
+
+    if (MIRROR_BAM) {
+        if (m_currentBamDirection > m_extendDirectionTest) {
+            dwRenderFlags |= CInfinity::MIRROR_FX;
+        }
+
+        if (transparency != 0) {
+            dwRenderFlags |= CInfinity::FXPREP_COPYFROMBACK;
+            dwRenderFlags |= 0x2;
+        } else {
+            dwRenderFlags |= CInfinity::FXPREP_CLEARFILL;
+            dwRenderFlags |= 0x1;
+        }
+    } else {
+        dwRenderFlags |= 0x4;
+
+        dwRenderFlags |= CInfinity::FXPREP_COPYFROMBACK;
+
+        if (transparency != 0) {
+            dwRenderFlags |= 0x2;
+        }
+    }
+
+    // NOTE: The hole and the body are each drawn around their own frame's
+    // centre; rectFX and ptReference are not used, and each cell keeps the
+    // tint it is given.
+    CPoint ptCenter;
+    CSize frameSize;
+    CRect rFXRect;
+    CRect rCellGCBounds;
+
+    m_currentVidCellHole->GetCurrentCenterPoint(ptCenter, FALSE);
+    m_currentVidCellHole->GetCurrentFrameSize(frameSize, FALSE);
+    rFXRect.SetRect(0, 0, frameSize.cx, frameSize.cy);
+
+    pInfinity->FXPrep(rFXRect, dwRenderFlags, nSurface, ptPos, ptCenter);
+
+    if (pInfinity->FXLock(rFXRect, dwRenderFlags)) {
+        m_currentVidCellHole->SetTintColor(rgbTintColor);
+
+        pInfinity->FXRender(m_currentVidCellHole,
+            ptCenter.x,
+            ptCenter.y,
+            dwRenderFlags,
+            transparency);
+
+        CalculateGCBoundsRect(rCellGCBounds,
+            ptNewPos,
+            ptCenter,
+            posZ,
+            rFXRect.Width(),
+            rFXRect.Height());
+
+        pInfinity->FXRenderClippingPolys(ptPos.x,
+            ptPos.y - posZ,
+            posZ,
+            ptCenter,
+            CRect(rCellGCBounds.left, rCellGCBounds.top - posZ, rCellGCBounds.right, rCellGCBounds.bottom - posZ),
+            bDithered,
+            dwRenderFlags);
+
+        if (bFadeOut) {
+            pInfinity->FXUnlock(dwRenderFlags, &rFXRect, ptPos + ptCenter);
+        } else {
+            pInfinity->FXUnlock(dwRenderFlags, NULL, CPoint(0, 0));
+        }
+
+        pInfinity->FXBltFrom(nSurface,
+            rFXRect,
+            ptPos.x,
+            ptPos.y,
+            ptCenter.x,
+            ptCenter.y,
+            dwRenderFlags);
+    }
+
+    m_currentVidCell->GetCurrentCenterPoint(ptCenter, FALSE);
+    m_currentVidCell->GetCurrentFrameSize(frameSize, FALSE);
+    rFXRect.SetRect(0, 0, frameSize.cx, frameSize.cy);
+
+    pInfinity->FXPrep(rFXRect, dwRenderFlags, nSurface, ptPos, ptCenter);
+
+    if (pInfinity->FXLock(rFXRect, dwRenderFlags)) {
+        m_currentVidCell->SetTintColor(rgbTintColor);
+
+        pInfinity->FXRender(m_currentVidCell,
+            ptCenter.x,
+            ptCenter.y,
+            dwRenderFlags,
+            transparency);
+
+        CalculateGCBoundsRect(rCellGCBounds,
+            ptNewPos,
+            ptCenter,
+            posZ,
+            rFXRect.Width(),
+            rFXRect.Height());
+
+        pInfinity->FXRenderClippingPolys(ptPos.x,
+            ptPos.y - posZ,
+            posZ,
+            ptCenter,
+            CRect(rCellGCBounds.left, rCellGCBounds.top - posZ, rCellGCBounds.right, rCellGCBounds.bottom - posZ),
+            bDithered,
+            dwRenderFlags);
+
+        if (bFadeOut) {
+            pInfinity->FXUnlock(dwRenderFlags, &rFXRect, ptPos + ptCenter);
+        } else {
+            pInfinity->FXUnlock(dwRenderFlags, NULL, CPoint(0, 0));
+        }
+
+        pInfinity->FXBltFrom(nSurface,
+            rFXRect,
+            ptPos.x,
+            ptPos.y,
+            ptCenter.x,
+            ptCenter.y,
+            dwRenderFlags);
+    }
 }
 
 // 0x6C3D10
@@ -619,4 +748,10 @@ SHORT CGameAnimationTypeMonsterAnkheg::SetSequence(SHORT nSequence)
     }
 
     return nSequence;
+}
+
+// 0x78E6E0
+BOOL CGameAnimationTypeMonsterAnkheg::IsFalseColor()
+{
+    return FALSE;
 }

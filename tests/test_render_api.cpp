@@ -246,6 +246,18 @@ TEST_CASE("every_entry_point_dispatches", "[render]")
         const rec::Text t = DispatchOnce<rec::Text>([&] { REQUIRE(inf.FXTextOut(&font, CString("fx"), 3, 4, clip, 0x1, TRUE)); });
         REQUIRE(t.text == "fx");
         REQUIRE(SamePoint(t.pos, 3, 4));
+
+        // The polygon fill (0x79D680) of the container and door
+        // highlights: FX-surface coordinates, filled, with its flags.
+        CVIDPOLY_VERTEX verts[3] = { { 10, 10 }, { 40, 10 }, { 25, 30 } };
+        CVidPoly poly;
+        poly.SetPoly(verts, 3);
+        const rec::Poly f = DispatchOnce<rec::Poly>([&] { REQUIRE(inf.FXRender(&poly, clip, RGB(0, 250, 0), 0x10, CPoint(0, 0), FALSE)); });
+        REQUIRE(f.points.size() == 3);
+        REQUIRE(SamePoint(f.points[2], 25, 30));
+        REQUIRE(f.fill);
+        REQUIRE(f.flags == 0x10);
+        REQUIRE(SameRect(f.clip, clip));
     }
 
     SECTION("CVidInf BK, in back-buffer coordinates")

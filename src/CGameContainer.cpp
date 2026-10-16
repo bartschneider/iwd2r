@@ -11,6 +11,7 @@
 #include "CResRef.h"
 #include "CScreenWorld.h"
 #include "CUtil.h"
+#include "CVidInf.h"
 #include "CVidPoly.h"
 #include "marshal_ptr.h"
 
@@ -520,6 +521,202 @@ BOOL CGameContainer::IsOver(const CPoint& pt)
     }
 
     return TRUE;
+}
+
+// 0x47F580
+void CGameContainer::Render(CGameArea* pArea, CVidMode* pVidMode, INT nSurface)
+{
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    SHORT nState = pGame->m_nState;
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameContainer.cpp
+    // __LINE__: 1267
+    UTIL_ASSERT(pVidMode != NULL);
+
+    // The highlight colours (COLORREFs at 0x8A85F8, 0x8A85FC and 0x8A8608,
+    // only read): the picked container, a trapped or locked one under the
+    // thieving cursors and every one while the menu key is held, and one
+    // whose outline is drawn for a while (m_drawPoly).
+    const COLORREF rgbPicked = RGB(32, 64, 160);
+    const COLORREF rgbAction = RGB(0, 250, 0);
+    const COLORREF rgbDrawPoly = RGB(255, 0, 0);
+
+    BOOL bFilled = FALSE;
+    BOOLEAN bHighlightAll = FALSE;
+
+    if (m_containerType == 4) {
+        // A pile of items: its cells drawn through the FX surface, at the
+        // container's position.
+        if (m_nPileVidCell > 0
+            && m_pArea->m_visibility.IsTileExplored(m_pArea->m_visibility.PointToTile(m_pos))) {
+            CInfinity* pInfinity = m_pArea->GetInfinity();
+            DWORD dwFlags = CInfinity::FXPREP_CLEARFILL | 0x30001;
+            CRect rFx(0, 0, 0, 0);
+            CPoint ptReference(0, 0);
+            BOOLEAN bFadeOut = FALSE;
+
+            for (BYTE nCell = m_nPileVidCell; nCell > 0; nCell--) {
+                CPoint ptCenter;
+                m_pileVidCell[nCell - 1].GetCurrentCenterPoint(ptCenter, FALSE);
+
+                CSize frameSize;
+                m_pileVidCell[nCell - 1].GetCurrentFrameSize(frameSize, FALSE);
+
+                CRect rFrame;
+                SetRect(&rFrame, 0, 0, frameSize.cx, frameSize.cy);
+
+                if (ptCenter.x > ptReference.x) {
+                    rFx.right += ptCenter.x - ptReference.x;
+                    ptReference.x = ptCenter.x;
+                }
+
+                if (rFrame.right > rFx.right) {
+                    rFx.right = rFrame.right;
+                }
+
+                if (ptCenter.y > ptReference.y) {
+                    rFx.bottom += ptCenter.y - ptReference.y;
+                    ptReference.y = ptCenter.y;
+                }
+
+                if (rFrame.bottom > rFx.bottom) {
+                    rFx.bottom = rFrame.bottom;
+                }
+            }
+
+            CPoint ptPos(m_pos.x, m_pArea->GetHeightOffset(m_pos, m_listType) + m_pos.y);
+
+            CRect rBounds;
+            rBounds.left = ptPos.x - ptReference.x;
+            rBounds.top = m_posZ - ptReference.y + ptPos.y;
+            rBounds.right = rFx.right - rFx.left + rBounds.left;
+            rBounds.bottom = rBounds.top - rFx.top + rFx.bottom;
+
+            CRect rViewPort;
+            rViewPort.left = pInfinity->nCurrentX;
+            rViewPort.top = pInfinity->nCurrentY;
+            rViewPort.right = pInfinity->rViewPort.Width() + rViewPort.left;
+            rViewPort.bottom = pInfinity->rViewPort.Height() + rViewPort.top;
+
+            if (IntersectRect(&rViewPort, &rBounds, &rViewPort)) {
+                COLORREF rgbTint = m_pArea->GetTintColor(CPoint(ptPos.x, m_posZ + ptPos.y), m_listType);
+                BOOLEAN bDithered = m_id == m_pArea->m_iPicked;
+
+                if (!m_pArea->m_visibility.IsTileVisible(m_pArea->m_visibility.PointToTile(m_pos))) {
+                    if (g_pChitin->cVideo.m_bIs3dAccelerated) {
+                        rgbTint = RGB(GetRValue(rgbTint) >> 1, GetGValue(rgbTint) >> 1, GetBValue(rgbTint) >> 1);
+                    } else {
+                        bFadeOut = TRUE;
+                    }
+                }
+
+                pInfinity->FXPrep(rFx, dwFlags, nSurface, ptPos, ptReference);
+
+                if (pInfinity->FXLock(rFx, dwFlags)) {
+                    for (BYTE nCell = m_nPileVidCell; nCell > 0; nCell--) {
+                        CVidCell* pCell = &(m_pileVidCell[nCell - 1]);
+
+                        if (m_id == m_pArea->m_iPicked
+                            && pGame->GetGroup()->GetCount() > 0
+                            && nState == 0) {
+                            pCell->m_bShadowOn = TRUE;
+                        } else {
+                            pCell->m_bShadowOn = FALSE;
+                        }
+
+                        if (g_pBaldurChitin->pActiveEngine == g_pBaldurChitin->m_pEngineWorld
+                            && g_pBaldurChitin->m_pEngineWorld->GetMenuKey() == TRUE) {
+                            pCell->m_bShadowOn = TRUE;
+                            bHighlightAll = TRUE;
+                        }
+
+                        pCell->SetTintColor(rgbTint);
+
+                        pInfinity->FXRender(pCell,
+                            ptReference.x,
+                            ptReference.y,
+                            dwFlags,
+                            0);
+                    }
+
+                    CRect rGCBounds(rBounds.left, rBounds.top - m_posZ, rBounds.right, rBounds.bottom - m_posZ);
+
+                    if (!bHighlightAll) {
+                        pInfinity->FXRenderClippingPolys(ptPos.x,
+                            ptPos.y - m_posZ,
+                            m_posZ,
+                            ptReference,
+                            rGCBounds,
+                            bDithered,
+                            dwFlags);
+                    }
+
+                    if (bFadeOut) {
+                        pInfinity->FXUnlock(dwFlags, &rFx, ptPos + ptReference);
+                    } else {
+                        pInfinity->FXUnlock(dwFlags, NULL, CPoint(0, 0));
+                    }
+
+                    pInfinity->FXBltFrom(nSurface,
+                        rFx,
+                        ptPos.x,
+                        ptPos.y,
+                        ptReference.x,
+                        ptReference.y,
+                        dwFlags);
+                }
+            }
+        }
+    } else if (m_id == m_pArea->m_iPicked
+        && m_pArea->m_visibility.IsTileExplored(m_pArea->m_visibility.PointToTile(m_pos))) {
+        if (pGame->GetGroup()->GetCount() > 0 && nState == 0) {
+            if (CInfinity::TRANSLUCENT_BLTS_ON && !g_pChitin->cVideo.m_bIs3dAccelerated) {
+                FillPoly(pArea, pVidMode, nSurface, g_pChitin->GetCurrentVideoMode()->PackColor(rgbPicked));
+                bFilled = TRUE;
+            }
+
+            m_pArea->GetInfinity()->OutlinePoly(m_pPolygon, m_nPolygon, m_rBounding, rgbPicked);
+        }
+
+        if (pGame->m_nState == 2) {
+            if (pGame->m_iconIndex == 36) {
+                if ((m_trapActivated != 0 && m_trapDetected != 0) || (m_dwFlags & 0x1) != 0) {
+                    if (CInfinity::TRANSLUCENT_BLTS_ON && !g_pChitin->cVideo.m_bIs3dAccelerated) {
+                        FillPoly(pArea, pVidMode, nSurface, g_pChitin->GetCurrentVideoMode()->PackColor(rgbAction));
+                        bFilled = TRUE;
+                    }
+
+                    m_pArea->GetInfinity()->OutlinePoly(m_pPolygon, m_nPolygon, m_rBounding, rgbAction);
+                }
+            } else if (pGame->m_iconIndex == 12) {
+                if ((m_dwFlags & 0x1) != 0) {
+                    if (CInfinity::TRANSLUCENT_BLTS_ON && !g_pChitin->cVideo.m_bIs3dAccelerated) {
+                        FillPoly(pArea, pVidMode, nSurface, g_pChitin->GetCurrentVideoMode()->PackColor(rgbAction));
+                        bFilled = TRUE;
+                    }
+
+                    m_pArea->GetInfinity()->OutlinePoly(m_pPolygon, m_nPolygon, m_rBounding, rgbAction);
+                }
+            }
+        }
+    } else if (m_pArea->m_visibility.IsTileExplored(m_pArea->m_visibility.PointToTile(m_pos))
+        && g_pBaldurChitin->pActiveEngine == g_pBaldurChitin->m_pEngineWorld
+        && g_pBaldurChitin->m_pEngineWorld->GetMenuKey() == TRUE) {
+        if (CInfinity::TRANSLUCENT_BLTS_ON && !g_pChitin->cVideo.m_bIs3dAccelerated) {
+            FillPoly(pArea, pVidMode, nSurface, g_pChitin->GetCurrentVideoMode()->PackColor(rgbAction));
+            bFilled = TRUE;
+        }
+
+        m_pArea->GetInfinity()->OutlinePoly(m_pPolygon, m_nPolygon, m_rBounding, rgbAction);
+    }
+
+    if (m_drawPoly > 0) {
+        if (CInfinity::TRANSLUCENT_BLTS_ON && !g_pChitin->cVideo.m_bIs3dAccelerated && !bFilled) {
+            FillPoly(pArea, pVidMode, nSurface, g_pChitin->GetCurrentVideoMode()->PackColor(rgbDrawPoly));
+        }
+
+        m_pArea->GetInfinity()->OutlinePoly(m_pPolygon, m_nPolygon, m_rBounding, rgbDrawPoly);
+    }
 }
 
 // 0x47FE10
@@ -1134,6 +1331,64 @@ SHORT CGameContainer::CountItem(const CResRef& res)
     }
 
     return nCount;
+}
+
+// The container's polygon filled with dwColor (in the surface's format)
+// through the FX surface, piece by piece: each of the rectangles that cover
+// it (field_8D6) that is on screen.
+//
+// 0x481A10
+void CGameContainer::FillPoly(CGameArea* pArea, CVidMode* pVidMode, INT nSurface, DWORD dwColor)
+{
+    CInfinity* pInfinity = pArea->GetInfinity();
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameContainer.cpp
+    // __LINE__: 2691
+    UTIL_ASSERT(pInfinity != NULL && pVidMode != NULL);
+
+    CRect rViewPort;
+    rViewPort.left = m_pArea->GetInfinity()->nCurrentX;
+    rViewPort.top = m_pArea->GetInfinity()->nCurrentY;
+    rViewPort.right = m_pArea->GetInfinity()->rViewPort.Width() + rViewPort.left;
+    rViewPort.bottom = m_pArea->GetInfinity()->rViewPort.Height() + rViewPort.top;
+
+    INT nRects = field_8D6.GetSize();
+    CPoint ptReference(0, 0);
+
+    CVidPoly cPoly;
+    cPoly.SetPoly(reinterpret_cast<WORD*>(field_8EA), m_nPolygon);
+
+    for (INT nRect = 0; nRect < nRects; nRect++) {
+        CRect* pRect = field_8D6[nRect];
+        if (pRect != NULL) {
+            CRect rIntersect;
+            IntersectRect(&rIntersect, &rViewPort, pRect);
+
+            CRect rClip(rIntersect);
+            if (rIntersect.left != 0 || rIntersect.right != 0 || rIntersect.top != 0 || rIntersect.bottom != 0) {
+                CPoint ptPos(rIntersect.left, rIntersect.top);
+
+                CRect rFx(rIntersect);
+                OffsetRect(&rFx, -rIntersect.left, -rIntersect.top);
+
+                if (pInfinity->FXPrep(rFx, CInfinity::FXPREP_COPYFROMBACK, nSurface, ptPos, ptReference)) {
+                    if (pInfinity->FXLock(rFx, 0)) {
+                        static_cast<CVidInf*>(pVidMode)->FXRender(&cPoly, rClip, dwColor, 0x10, ptPos, FALSE);
+
+                        if (pInfinity->FXUnlock(0, NULL, CPoint(0, 0))) {
+                            pInfinity->FXBltFrom(nSurface,
+                                rFx,
+                                ptPos.x,
+                                ptPos.y,
+                                ptReference.x,
+                                ptReference.y,
+                                0);
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 // FIXME: `scriptRes` should be reference.
