@@ -17,6 +17,7 @@
 #include "CVidImage.h"
 #include "CVidInf.h"
 #include "CVidPoly.h"
+#include "CVisibility.h"
 #include "CWarp.h"
 
 #include <algorithm>
@@ -2024,4 +2025,242 @@ TEST_CASE("bk_render_particle_returns_true", "[vid]")
 
     mode.m_SurfaceDesc.lpSurface = NULL;
     CHECK(mode.BKRender(&particle, CRect(0, 0, 8, 8), CParticle::DOTS, 1) == FALSE);
+}
+
+// CVisibilityMap::GetSubTileCode (0x5525C0) puts the corners that are not
+// visible in the high nibble (`shl bl, 4` at 0x552668) and the unexplored
+// ones in the low nibble: bit 0x1 the tile, 0x2 the one below, 0x4 below
+// right, 0x8 right; a tile off the map counts as neither. Ours shifted by 8,
+// which dropped the visibility bits from the BYTE, so the fog never showed
+// what the party does not see.
+TEST_CASE("visibility_sub_tile_code_keeps_the_unseen_corners", "[vid]")
+{
+    // GetSubTileCode reads only the map and its size; the constructor would
+    // need the current video mode (sub_5518A0).
+    alignas(CVisibilityMap) unsigned char storage[sizeof(CVisibilityMap)];
+    std::memset(storage, 0, sizeof(storage));
+    auto* map = reinterpret_cast<CVisibilityMap*>(storage);
+    // 4x2 tiles: 0x80 explored, 0x3F the characters that see the tile.
+    BYTE tiles[8] = {
+        0x81,
+        0x80,
+        0x80,
+        0x82,
+        0x00,
+        0x82,
+        0x81,
+        0x00,
+    };
+    map->m_pMap = tiles;
+    map->m_nWidth = 4;
+    map->m_nHeight = 2;
+    map->m_nMapSize = 8;
+
+    // Tile 0: seen; below (4) unseen and unexplored; below right (5) seen;
+    // right (1) explored but unseen.
+    CHECK(map->GetSubTileCode(0) == 0xA2);
+    // Tile 2: itself explored but unseen; below right (7) neither seen nor
+    // explored; below (6) and right (3) both.
+    CHECK(map->GetSubTileCode(2) == 0x54);
+    // Tile 3: below right (8) is off the map, and its right is tile 4, the
+    // next row's first (nothing stops at the row's end).
+    CHECK(map->GetSubTileCode(3) == 0xEE);
+    // Every corner seen and explored.
+    tiles[0] = tiles[1] = tiles[4] = tiles[5] = 0x81;
+    CHECK(map->GetSubTileCode(0) == 0x00);
+}
+
+namespace {
+
+// One of BltFogOWar's (0x551FF0) or BltDitherPattern's (0x551A90) blits:
+// FOGOWAR's tile nTileRect (GetFogOWarTileRect: 0/4 top left, 1/5 top
+// right, 2/6 bottom left, 3/7 bottom right of its 64x64 surface) from
+// surface nSurface, mirrored as dwDDFX says, keyed on the surface's colour
+// key.
+struct FogBlit {
+    BYTE nTileRect;
+    int nSurface;
+    DWORD dwDDFX;
+};
+
+}
+
+// CVisibilityMap::BltFogOWar (0x551FF0) draws the fog of war into a 64x64
+// tile surface, per 32x32 quadrant of the tile code: first BltDitherPattern
+// (0x551A90) dithers the corners that are not visible (high nibble) unless
+// the same corners are unexplored, then the unexplored corners (low nibble)
+// get FOGOWAR's black edges, or a black fill when the whole quadrant is
+// unexplored. The shapes, rectangles, surfaces and mirrors are the
+// disassembly's (jump tables 0x551FB0 and 0x552558, rectangle ids at
+// 0x85DE43-0x85DE4A). Ours did nothing, so no fog was ever drawn.
+//
+// The blits move whole 32-bit pixels: a keyed source pixel leaves the
+// destination's X byte (a scalable-text tag) alone and a drawn one replaces
+// it, and the black fill writes X 0, as any engine write does.
+TEST_CASE("fog_of_war_blits_the_dither_and_the_edges", "[vid]")
+{
+    ChitinScope scope;
+    IDirectDraw* pDirectDraw = NULL;
+    REQUIRE(DirectDrawCreate(NULL, &pDirectDraw, NULL) == DD_OK);
+    DDSURFACEDESC desc;
+    std::memset(&desc, 0, sizeof(desc));
+    desc.dwSize = sizeof(desc);
+    desc.dwFlags = DDSD_CAPS | DDSD_HEIGHT | DDSD_WIDTH;
+    desc.ddsCaps.dwCaps = DDSCAPS_SYSTEMMEMORY | DDSCAPS_OFFSCREENPLAIN;
+    desc.dwWidth = 64;
+    desc.dwHeight = 64;
+    IDirectDrawSurface* surfaces[9] = {};
+    for (IDirectDrawSurface*& surface : surfaces) {
+        REQUIRE(pDirectDraw->CreateSurface(&desc, &surface, NULL) == DD_OK);
+    }
+    IDirectDrawSurface* target = surfaces[8];
+
+    CVidInf mode;
+    mode.m_nSurfaces = 8;
+    mode.pSurfaces = surfaces;
+    mode.m_dwRBitShift = 16;
+    mode.m_dwGBitShift = 8;
+    mode.m_dwBBitShift = 0;
+    ActiveModeScope active(&mode);
+
+    constexpr DWORD kKey = 0x0000FF00;
+    constexpr DWORD kBackground = 0x55A0B0C0; // X 0x55, a text tag
+    auto write = [](IDirectDrawSurface* surface, const std::vector<DWORD>& pixels) {
+        DDSURFACEDESC ddsd;
+        REQUIRE(surface->Lock(NULL, &ddsd, DDLOCK_WAIT, NULL) == DD_OK);
+        for (int y = 0; y < 64; ++y) {
+            std::memcpy(reinterpret_cast<BYTE*>(ddsd.lpSurface) + y * ddsd.lPitch, pixels.data() + y * 64, 64 * 4);
+        }
+        surface->Unlock(ddsd.lpSurface);
+    };
+    auto read = [](IDirectDrawSurface* surface) {
+        std::vector<DWORD> pixels(64 * 64);
+        DDSURFACEDESC ddsd;
+        REQUIRE(surface->Lock(NULL, &ddsd, DDLOCK_WAIT, NULL) == DD_OK);
+        for (int y = 0; y < 64; ++y) {
+            std::memcpy(pixels.data() + y * 64, reinterpret_cast<BYTE*>(ddsd.lpSurface) + y * ddsd.lPitch, 64 * 4);
+        }
+        surface->Unlock(ddsd.lpSurface);
+        return pixels;
+    };
+
+    // Surfaces 6 and 7 hold FOGOWAR's frames as LoadFogOWarSurfaces
+    // (0x79E550) lays them out; here each pixel names its surface and
+    // position, and a third of them are the colour key.
+    std::vector<DWORD> fog[2];
+    for (int nSurface = 6; nSurface <= 7; ++nSurface) {
+        std::vector<DWORD>& pixels = fog[nSurface - 6];
+        pixels.resize(64 * 64);
+        for (int y = 0; y < 64; ++y) {
+            for (int x = 0; x < 64; ++x) {
+                pixels[y * 64 + x] = (x + 2 * y) % 3 == 0
+                    ? kKey
+                    : 0xFF000000 | (static_cast<DWORD>(nSurface) << 16) | (static_cast<DWORD>(y) << 8) | static_cast<DWORD>(x);
+            }
+        }
+        write(surfaces[nSurface], pixels);
+        DDCOLORKEY colorKey = { kKey, kKey };
+        REQUIRE(surfaces[nSurface]->SetColorKey(DDCKEY_SRCBLT, &colorKey) == DD_OK);
+    }
+
+    constexpr DWORD kBoth = DDBLTFX_MIRRORLEFTRIGHT | DDBLTFX_MIRRORUPDOWN;
+    // By the high nibble (BltDitherPattern), then the low (BltFogOWar).
+    const std::pair<BYTE, FogBlit> dither[] = {
+        { 0x3, { 5, 7, 0 } },
+        { 0x6, { 4, 7, kBoth } },
+        { 0x7, { 7, 7, kBoth } },
+        { 0x9, { 4, 7, 0 } },
+        { 0xB, { 6, 7, 0 } },
+        { 0xC, { 5, 7, kBoth } },
+        { 0xD, { 7, 7, 0 } },
+        { 0xE, { 6, 7, kBoth } },
+        { 0xF, { 3, 6, 0 } },
+    };
+    const std::pair<BYTE, FogBlit> edges[] = {
+        { 0x3, { 1, 6, 0 } },
+        { 0x6, { 0, 6, kBoth } },
+        { 0x7, { 2, 6, DDBLTFX_MIRRORUPDOWN } },
+        { 0x9, { 0, 6, 0 } },
+        { 0xB, { 2, 6, 0 } },
+        { 0xC, { 1, 6, kBoth } },
+        { 0xD, { 2, 6, DDBLTFX_MIRRORLEFTRIGHT } },
+        { 0xE, { 2, 6, kBoth } },
+    };
+    auto find = [](const auto& table, BYTE code) -> const FogBlit* {
+        for (const auto& [nCode, blit] : table) {
+            if (nCode == code) {
+                return &blit;
+            }
+        }
+        return nullptr;
+    };
+    auto apply = [&](std::vector<DWORD>& pixels, int ox, int oy, const FogBlit& blit) {
+        const std::vector<DWORD>& src = fog[blit.nSurface - 6];
+        int sx = (blit.nTileRect & 1) != 0 ? 32 : 0;
+        int sy = (blit.nTileRect & 2) != 0 ? 32 : 0;
+        for (int v = 0; v < 32; ++v) {
+            for (int u = 0; u < 32; ++u) {
+                int x = (blit.dwDDFX & DDBLTFX_MIRRORLEFTRIGHT) != 0 ? 31 - u : u;
+                int y = (blit.dwDDFX & DDBLTFX_MIRRORUPDOWN) != 0 ? 31 - v : v;
+                DWORD pixel = src[(sy + y) * 64 + sx + x];
+                if (pixel != kKey) {
+                    pixels[(oy + v) * 64 + ox + u] = pixel;
+                }
+            }
+        }
+    };
+
+    const int offsets[4][2] = { { 0, 0 }, { 32, 0 }, { 0, 32 }, { 32, 32 } };
+    for (int code = 0; code < 256; ++code) {
+        BYTE codes[4] = {
+            static_cast<BYTE>(code),
+            static_cast<BYTE>(code + 37),
+            static_cast<BYTE>(code + 101),
+            static_cast<BYTE>(code + 211),
+        };
+        TILE_CODE tileCode = { codes[0], codes[1], codes[2], codes[3] };
+
+        std::vector<DWORD> expected(64 * 64, kBackground);
+        for (int q = 0; q < 4; ++q) {
+            BYTE nUnseen = codes[q] >> 4;
+            BYTE nUnexplored = codes[q] & 0xF;
+            if (const FogBlit* blit = find(dither, nUnseen); blit != nullptr && nUnseen != nUnexplored) {
+                apply(expected, offsets[q][0], offsets[q][1], *blit);
+            }
+        }
+        for (int q = 0; q < 4; ++q) {
+            BYTE nUnexplored = codes[q] & 0xF;
+            if (const FogBlit* blit = find(edges, nUnexplored); blit != nullptr) {
+                apply(expected, offsets[q][0], offsets[q][1], *blit);
+            } else if (nUnexplored == 0xF) {
+                for (int v = 0; v < 32; ++v) {
+                    for (int u = 0; u < 32; ++u) {
+                        expected[(offsets[q][1] + v) * 64 + offsets[q][0] + u] = 0;
+                    }
+                }
+            }
+        }
+
+        write(target, std::vector<DWORD>(64 * 64, kBackground));
+        CVisibilityMap::BltFogOWar(target, tileCode);
+        INFO("tile code " << code);
+        CHECK(read(target) == expected);
+    }
+
+    // The tags: a quadrant explored and seen keeps them, an unexplored one
+    // loses them to the black, and keyed pixels of an edge keep them.
+    write(target, std::vector<DWORD>(64 * 64, kBackground));
+    CVisibilityMap::BltFogOWar(target, TILE_CODE { 0x00, 0xFF, 0x09, 0x00 });
+    std::vector<DWORD> pixels = read(target);
+    CHECK(pixels[0] == kBackground);
+    CHECK(pixels[5 * 64 + 40] == 0);
+    CHECK(pixels[32 * 64 + 0] == kBackground); // (0, 0) of FOGOWAR's frame 0 is the key
+    CHECK(pixels[32 * 64 + 1] == 0xFF060001);
+
+    mode.m_nSurfaces = 0;
+    mode.pSurfaces = NULL;
+    for (IDirectDrawSurface* surface : surfaces) {
+        surface->Release();
+    }
+    pDirectDraw->Release();
 }
