@@ -202,6 +202,14 @@ public:
     INT CheckItemUsable(CGameSprite* pSprite, CItem* pItem);
     SHORT GetNumQuickWeaponSlots(SHORT nPortrait);
     BOOL SwapItemPersonalInventory(SHORT nPortraitNum, CItem*& pNewItem, SHORT nSlotNum, STRREF& errorCode, WORD wCount, BOOLEAN bFromServer, BOOL bAutoStacking);
+    BOOLEAN SwapItemGround(LONG nContainerId, SHORT nSlotNum, CItem*& pItem, STRREF& errorCode, WORD wCount, BOOLEAN bFromServer);
+    BOOL SwapItemPersonal(SHORT nPortrait, SHORT nSlotNum, CItem*& pItem, STRREF& errorCode, WORD wCount, BOOLEAN bFromServer);
+    SHORT FindEmptyItemPersonalInventory(SHORT nPortrait);
+    BOOL CheckItemForClassAndKitUsability(DWORD nClassMask, DWORD nSpecialization, CItem* pItem);
+    BOOL CheckIfPlayerInPortraitSlotCanUseItem(SHORT nPortrait, CItem* pItem, STRREF* pError, BOOL bAsynch);
+    BOOL CheckIfSpriteCanUseItem(CGameSprite* pSprite, CItem* pItem, STRREF* pError, BOOL bAsynch);
+    BOOL CanEquipInSlot(CGameSprite* pSprite, SHORT nSlot, CItem** ppItem, STRREF* pError);
+    BOOL CanPortraitEquipInSlot(SHORT nPortrait, SHORT nSlot, CItem** ppItem, STRREF* pError);
     void InventoryInfoPersonal(SHORT nPortraitNum, SHORT nSlotNum, CItem*& pItem, STRREF& description, CResRef& cResIcon, CResRef& cResItem, WORD& wCount, BOOL a8);
     BOOL Is3DSound(int nSoundChannel);
     float GetSoundReverbMix(int nSoundChannel, int nReverb);
@@ -506,5 +514,11 @@ public:
     BYTE* GetData();
     DWORD GetDataSize();
 };
+
+// 0x8B4F84: the keymap's spell resrefs, entries 53 to 371 of the original's
+// table at 0x8B4EB0 (Keymap.ini's Priest Spells, then Wizard Spells); the
+// last two are NULL. CInfGame::LoadKeymap reads it, and
+// CInfButtonArray::UpdateButtons finds a spell's hot key in it.
+extern const char* off_8B4F84[CINFGAME_KEYMAP_SIZE - 53];
 
 #endif /* CINFGAME_H_ */
