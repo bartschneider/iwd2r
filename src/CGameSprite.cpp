@@ -22148,10 +22148,12 @@ BOOL CGameSprite::CheckIfUsedUp(SHORT nSlot, SHORT nAbility)
 // 0x75DFD0
 SHORT CGameSprite::EquipMostDamagingMelee()
 {
-    // TODO: EquipMostDamagingMelee 0x75DFD0 is not ported. The original
-    // picks the melee weapon with the most damage and selects it
-    // (SelectWeaponAbility at 0x75E09F, sub_726810 at 0x75E0B4); ours
-    // selects nothing. Listed in docs/followups.md.
+    // TODO: EquipMostDamagingMelee 0x75DFD0 is not ported. Unless the magic
+    // weapon slot (42) holds an item (then ACTION_ERROR), the original
+    // selects the weapon set (slots 43-50) whose melee ability does the most
+    // damage (dice count times size plus bonus) through sub_726810
+    // (0x75E0B4), or the fist (SelectWeaponAbility, 0x75E09F), and returns
+    // ACTION_DONE. Ours selects nothing. Listed in docs/followups.md.
     return ACTION_ERROR;
 }
 

@@ -208,7 +208,7 @@ The crisp-text requirement is met by `Program Options/Text Renderer=scalable` (s
 
 These block TODOs in the combat stream's ports; each is in a file or function the stream was not granted.
 
-- `CGameSprite::EquipMostDamagingMelee` 0x75DFD0 is a stub that returns `ACTION_ERROR` (TODO in its body). Its callers (the EquipMostDamagingMelee action 149, Attack, Swing, AttackReevaluate, CheckIfUsedUp and `sub_75E330`) get no weapon change: the creature keeps its empty or launcher slot instead of its best melee weapon.
+- `CGameSprite::EquipMostDamagingMelee` 0x75DFD0 is a stub that returns `ACTION_ERROR` (TODO in its body). Its callers (the action 149, Attack, Swing, AttackReevaluate, CheckIfUsedUp, `sub_75E330`, several effect opcodes and others; docs/evidence/75DFD0.md lists them) get no weapon change: the creature keeps its empty or launcher slot instead of its best melee weapon or the fist.
 - `CGameSprite` 0x75E150, CheckIfUsedUp for a creature outside the party or charmed, is not ported.
 - `CGameSprite` 0x71F860, the ammunition's and launcher's effects on a missile's projectile, is not ported: Swing's missile branch fires without them.
 - `CGameSprite::CheckQuickLists` 0x71ABA0 is not ported: Swing's and Spell's quick-button refreshes are TODOs.
