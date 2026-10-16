@@ -19,9 +19,14 @@ public:
     /* 0080 */ virtual DWORD GetField_E6();
     /* 0084 */ virtual void UpdateBasedOnTargetPoint(LONG x, LONG y);
 
+    void CalculateFxRect(CRect& rFx, CPoint& ptReference, CVidCell* pVidCell);
+    void SetColorRange(USHORT nRange, USHORT nColor);
+    void SetSequenceDirection(CVidCell* pVidCell);
+
     /* 0192 */ CVidCell* m_animation;
     /* 0196 */ CVidCell* m_shadow;
     /* 019A */ CVidPalette m_palette;
+    /* 01BE */ BOOL field_1BE;
     /* 01C2 */ BOOL field_1C2;
     /* 01C6 */ DWORD field_1C6;
     /* 01CA */ DWORD field_1CA;
