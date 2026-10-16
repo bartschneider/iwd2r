@@ -884,3 +884,46 @@ TEST_CASE("creature render: CGameAnimationTypeMonsterLarge16 builds and draws a 
         }
     }
 }
+
+// CGameTrigger::IsOver (0x4CEBE0) is FALSE outside the region's bounding
+// rectangle (`PtInRect`, then `jne` past the early return at 0x4CEC53) and
+// tests the polygon inside it. Ours had the test the wrong way round, so no
+// region could ever be picked: in walk_and_talk the mouse rests on the
+// opened AR1000_Door5, where the original picks the travel region To1005
+// (to AR1005) and shows its cursor, 42 (CGameTrigger's constructor turns
+// the file's door cursor 30 into 42), and ours showed the walk cursor, 4.
+TEST_CASE("trigger: a travel region is picked inside its bounds", "[render][data]")
+{
+    std::string why;
+    if (!Begin(why)) {
+        SKIP("[iwd2r-skip] " + why);
+    }
+    FramePump pump;
+    World world;
+    if (!NewWorld(world, why)) {
+        SKIP("[iwd2r-skip] " + why);
+    }
+    CGameArea* pArea = world.pArea;
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    pGame->SelectCharacter(world.pCharacter->GetId(), FALSE);
+    REQUIRE(pGame->GetGroup()->IsPartyLeader());
+
+    // The mouse's world point at walk_and_talk's door_open checkpoint.
+    const CPoint ptMouse(845, 900);
+    auto accept = [&](CGameTrigger* p) { return p->m_triggerType == 2 && p->m_rBounding.PtInRect(ptMouse); };
+    CGameTrigger* pRegion = FindObject<CGameTrigger>(pArea->m_lVertSort, CGameObject::TYPE_TRIGGER, accept);
+    if (pRegion == NULL) {
+        pRegion = FindObject<CGameTrigger>(pArea->m_lVertSortBack, CGameObject::TYPE_TRIGGER, accept);
+    }
+    REQUIRE(pRegion != NULL);
+    CHECK(pRegion->m_cursorType == 42);
+
+    CHECK(pRegion->IsOver(ptMouse));
+    CHECK(pRegion->IsOver(pRegion->m_rBounding.CenterPoint()));
+    CHECK_FALSE(pRegion->IsOver(CPoint(pRegion->m_rBounding.right + 4, pRegion->m_rBounding.CenterPoint().y)));
+    CHECK_FALSE(pRegion->IsOver(CPoint(pRegion->m_rBounding.left - 4, pRegion->m_rBounding.top - 4)));
+
+    // Only the party leader picks it.
+    pGame->UnselectAll();
+    CHECK_FALSE(pRegion->IsOver(ptMouse));
+}
