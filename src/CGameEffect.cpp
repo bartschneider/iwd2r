@@ -16147,19 +16147,61 @@ BOOL CGameEffectFeatCleave::ApplyEffect(CGameSprite* pSprite)
         return TRUE;
     }
 
-    // iwd2r: said once on stderr (ruling M3-7), so a missing port cannot
-    // pass unnoticed; the game goes on.
-    static bool bWarned = false;
-    if (!bWarned) {
-        bWarned = true;
-        fprintf(stderr, "iwd2r: effect %d (CGameEffectFeatCleave::ApplyEffect, 0x4B9AA0) is not ported; it does nothing\n",
-            442);
+    CAIObjectType typeEnemy = pSprite->GetAIType().GetEnemyOf();
+
+    // NOTE: Inlined CGameAnimation::GetPersonalSpace (ObjAnimation.h line
+    // 2093). The product is a BYTE.
+    SHORT nRange = static_cast<BYTE>(pSprite->GetAnimation()->GetPersonalSpace() * 5) + 50;
+
+    // The nearest enemy in reach (the BYTEs 0x847D1D and 0x847D25, 29 and
+    // 37: the n-th nearest from 0 to 8); the one in m_special is passed
+    // over once.
+    LONG nTarget = CGameObjectArray::INVALID_INDEX;
+    LONG nLast = CGameObjectArray::INVALID_INDEX;
+    for (BYTE nObject = 29; nObject <= 37; nObject++) {
+        nTarget = pSprite->GetArea()->sub_46DDC0(pSprite->GetPos().x,
+            pSprite->GetPos().y,
+            typeEnemy,
+            nRange,
+            pSprite->GetVisibleTerrainTable(),
+            FALSE,
+            FALSE,
+            nObject - 29,
+            FALSE);
+        if (nTarget == CGameObjectArray::INVALID_INDEX) {
+            break;
+        }
+
+        if (nTarget != static_cast<LONG>(m_special)) {
+            break;
+        }
+
+        nTarget = CGameObjectArray::INVALID_INDEX;
+        if (nLast == static_cast<LONG>(m_special)) {
+            break;
+        }
+        nLast = m_special;
     }
 
-    // TODO: Incomplete. Not ported: it needs the area's nearest-enemy search
-    // (CGameArea 0x46DDC0, not in src/) to pick the next target; without one
-    // the original ends the effect (m_done).
-    m_done = TRUE;
+    if (nTarget == CGameObjectArray::INVALID_INDEX) {
+        m_done = TRUE;
+        return TRUE;
+    }
+
+    // Another swing at it.
+    pSprite->FeedBack(CGameSprite::FEEDBACK_CLEAVE, pSprite->field_5636, 0, 0, -1, 0, 0);
+    pSprite->m_attackFrame = -2;
+    pSprite->field_5636 = static_cast<BYTE>(m_effectAmount);
+
+    CMessage* message = new CMessageSetSequence(CGameSprite::SEQ_ATTACK, pSprite->GetId(), pSprite->GetId());
+    g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+    CAIAction action(CAIAction::ATTACK, typeEnemy, nTarget, 0, 0);
+    pSprite->ClearActions(FALSE);
+    pSprite->DropPath();
+    pSprite->m_interrupt = TRUE;
+    pSprite->AddAction(action);
+
     return TRUE;
 }
 
