@@ -722,6 +722,54 @@ TEST_CASE("ai: the party specifiers decode to the party member the game picks", 
     pGame->m_characterPortraits[0] = portrait;
 }
 
+// NearestPC (special 52, 0x40C46C): the nearest live good party member by
+// the squared distance to the caller, y not scaled; dead and evil members
+// do not count, and none is NOONE.
+TEST_CASE("ai: NearestPC decodes to the nearest live good party member", "[ai][data]")
+{
+    REQUIRE_ENGINE();
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CGameAIBase* pCaller = AddAIObject();
+    pCaller->m_pos = CPoint(1000, 1000);
+    CGameSprite* pNear = MakeSprite();
+    CGameSprite* pFar = MakeSprite();
+    for (CGameSprite* pSprite : { pNear, pFar }) {
+        pSprite->m_derivedStats.m_generalState &= ~(STATE_DEAD | STATE_INVISIBLE);
+        pSprite->m_typeAI.m_nEnemyAlly = 2; // PC
+    }
+    pNear->m_pos = CPoint(1000, 1100);
+    pFar->m_pos = CPoint(1150, 1000);
+
+    const SHORT nCharacters = pGame->m_nCharacters;
+    const LONG portrait0 = pGame->m_characterPortraits[0];
+    const LONG portrait1 = pGame->m_characterPortraits[1];
+    pGame->m_nCharacters = 2;
+    pGame->m_characterPortraits[0] = pFar->m_id;
+    pGame->m_characterPortraits[1] = pNear->m_id;
+
+    auto decode = [&]() {
+        CAIObjectType type(0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0);
+        type.m_SpecialCase[0] = 52;
+        type.Decode(pCaller);
+        return type;
+    };
+
+    CHECK(decode().m_nInstance == pNear->m_id);
+
+    // A dead one, or one of the other side, is not a PC to find.
+    pNear->m_derivedStats.m_generalState |= STATE_DEAD;
+    CHECK(decode().m_nInstance == pFar->m_id);
+    pNear->m_derivedStats.m_generalState &= ~STATE_DEAD;
+    pNear->m_typeAI.m_nEnemyAlly = 255;
+    CHECK(decode().m_nInstance == pFar->m_id);
+    pFar->m_typeAI.m_nEnemyAlly = 255;
+    CHECK(decode().Equal(CAIObjectType::NOONE));
+
+    pGame->m_nCharacters = nCharacters;
+    pGame->m_characterPortraits[0] = portrait0;
+    pGame->m_characterPortraits[1] = portrait1;
+}
+
 TEST_CASE("ai: closing AR5004's door on a creature tells the creature to move and closes again", "[ai][data]")
 {
     REQUIRE_ENGINE();
