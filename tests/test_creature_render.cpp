@@ -18,6 +18,8 @@
 #include "CGameDoor.h"
 #include "CGameObjectArray.h"
 #include "CGameTrigger.h"
+#include "CVidInf.h"
+#include "CWeather.h"
 #include "engine_world.h"
 #include "render_surfaces.h"
 
@@ -926,4 +928,63 @@ TEST_CASE("trigger: a travel region is picked inside its bounds", "[render][data
     // Only the party leader picks it.
     pGame->UnselectAll();
     CHECK_FALSE(pRegion->IsOver(ptMouse));
+}
+
+// CSnowStorm::Render (0x558310) colours each flake with the snow colour it
+// is given scaled by CSnowFlake::SNOWFLAKE_BASE_COLOR (230, 230, 230) / 256,
+// channel by channel (0x55837D-0x5583C4). Ours multiplied without the
+// shift and kept the low byte, so white light drew the flakes nearly black
+// (26, 26, 26) where the original draws them (229, 229, 229); under
+// AR1000's light both draw (202, 202, 202) now.
+TEST_CASE("weather: snow flakes are drawn in the scaled snow colour", "[render][data]")
+{
+    std::string why;
+    if (!Begin(why)) {
+        SKIP("[iwd2r-skip] " + why);
+    }
+    FramePump pump;
+    World world;
+    if (!NewWorld(world, why)) {
+        SKIP("[iwd2r-skip] " + why);
+    }
+    CGameArea* pArea = world.pArea;
+    AreaScope scope(pArea);
+    REQUIRE(scope.Ok());
+    scope.CentreOn(world.pCharacter->GetPos());
+    CInfinity* pInfinity = pArea->GetInfinity();
+    const CRect rClip(pInfinity->nCurrentX,
+        pInfinity->nCurrentY,
+        pInfinity->nCurrentX + pInfinity->rViewPort.Width(),
+        pInfinity->nCurrentY + pInfinity->rViewPort.Height());
+
+    CSnowStorm storm;
+    storm.GenerateFlakes(CPoint(pInfinity->nCurrentX, pInfinity->nCurrentY), pInfinity->rViewPort);
+    REQUIRE(storm.IsInitialized());
+    storm.m_nCurrentDensity = 1;
+    // One dot, no tail, at (90, 60) in the viewport: the render puts a flake
+    // at x >> 10, (3 * y / 4 - z) >> 10.
+    CSnowFlake& flake = storm.m_pSnowFlakes[0];
+    flake.m_pos.x = (rClip.left + 90) << CParticle::RESOLUTION_INC;
+    flake.m_pos.y = (4 * (rClip.top + 60) / 3) << CParticle::RESOLUTION_INC;
+    flake.m_pos.z = (3 * flake.m_pos.y / 4 - ((rClip.top + 60) << CParticle::RESOLUTION_INC));
+    flake.m_nTailLength = 0;
+    flake.m_nTimeStamp = 0;
+
+    struct Case {
+        COLORREF rgbColor;
+        DWORD expected; // 0x00RRGGBB
+    };
+    for (const Case& c : { Case { RGB(255, 255, 255), 0xE5E5E5 }, Case { RGB(225, 225, 225), 0xCACACA }, Case { RGB(100, 150, 200), 0x5986B3 } }) {
+        INFO("colour " << std::hex << c.rgbColor);
+        scope.Back(true, 0);
+        storm.Render(scope.VidMode(), 0, rClip, c.rgbColor);
+        const std::vector<DWORD> pixels = scope.Back();
+        const int width = scope.Screen().Width();
+        int drawn = 0;
+        for (DWORD pixel : pixels) {
+            drawn += (pixel & 0xFFFFFF) != 0;
+        }
+        CHECK(drawn == 1);
+        CHECK((pixels[60 * width + 90] & 0xFFFFFF) == c.expected);
+    }
 }
