@@ -116,6 +116,7 @@ std::string ToJson(const Snapshot& s)
     json += "  \"globals\": {\"au_counter\": " + Number(e.auCounter) + ", \"fullscreen\": " + Number(e.fullscreen)
         + ", \"in_async_update\": " + Number(e.inAsyncUpdate) + ", \"ai_stalled_frames\": " + Number(s.aiStalledFrames)
         + ", \"ai_overlap_frames\": " + Number(s.aiOverlapFrames)
+        + ", \"search_wait_timeouts\": " + Number(s.searchWaitTimeouts)
         + ", \"reinitializing\": " + Number(e.reinitializing) + ", \"loading\": " + Number(e.loading)
         + ", \"loads\": " + Number(s.loads) + ", \"held_frames\": " + Number(s.heldFrames)
         + ", \"ai_rng_state\": " + (s.hasAiRngState ? Number(s.aiRngState) : std::string("null")) + "},\n";

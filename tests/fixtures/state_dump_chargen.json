@@ -3,7 +3,7 @@
   "checkpoint": "str_up_1",
   "screen": "create_char",
   "rng_state": 1,
-  "globals": {"au_counter": 789, "fullscreen": 0, "in_async_update": 0, "ai_stalled_frames": 0, "ai_overlap_frames": 0, "reinitializing": 0, "loading": 0, "loads": 0, "held_frames": 0, "ai_rng_state": 149961326},
+  "globals": {"au_counter": 789, "fullscreen": 0, "in_async_update": 0, "ai_stalled_frames": 0, "ai_overlap_frames": 0, "search_wait_timeouts": 0, "reinitializing": 0, "loading": 0, "loads": 0, "held_frames": 0, "ai_rng_state": 149961326},
   "chargen": {"race": 2, "subrace": 0, "class": 5, "abilities": [11, 12, 8, 10, 10, 10], "rolls": [0, 0, 0, 0, 0, 0, 0], "skill_points": 0, "feats": [8, 66068416, 0], "portrait": "2MELF1_L"},
   "world": null
 }

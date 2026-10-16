@@ -96,6 +96,11 @@
           "type": "integer",
           "minimum": 0
         },
+        "search_wait_timeouts": {
+          "description": "Our engine only; the recorder never writes it. Waits of the replay mode for the search thread that gave up at their deadline of real time (CGameArea::AIUpdate's ReplayWaitForSearch, platform/replay.h WaitForSearch): a path search the search thread never took up (a lost semaphore post, no search thread). The original has no such wait. tools/oracle.py fails a checkpoint dump where it is not 0 and never compares it.",
+          "type": "integer",
+          "minimum": 0
+        },
         "reinitializing": {
           "description": "CChitin::m_bReInitializing: nonzero while the game is not updating (OnAltTab(FALSE) on focus loss sets it, and AsynchronousUpdate then neither counts nor polls input).",
           "type": "integer",
@@ -128,7 +133,7 @@
           "maximum": 4294967295
         }
       },
-      "description": "The recorder's invariant (tools/oracle.py checks it on every checkpoint dump): reinitializing, ai_stalled_frames, ai_overlap_frames, in_async_update and loading are 0. au_counter follows frame one for one, never behind by a stall; held_frames is timing, loads is compared."
+      "description": "The recorder's invariant (tools/oracle.py checks it on every checkpoint dump): reinitializing, ai_stalled_frames, ai_overlap_frames, in_async_update and loading are 0, and so is search_wait_timeouts where our engine writes it. au_counter follows frame one for one, never behind by a stall; held_frames is timing, loads is compared."
     },
     "chargen": {
       "description": "Character generation, null unless the screen is create_char. The sprite values are null while the screen has no sprite (m_nGameSprite does not resolve in the object array).",
