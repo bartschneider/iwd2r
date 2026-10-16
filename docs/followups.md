@@ -193,3 +193,14 @@ The crisp-text requirement is met by `Program Options/Text Renderer=scalable` (s
 - `CGameEffectDisease::ApplyEffect` uses an uninitialised `pEffect` after `UTIL_ASSERT(FALSE)` for an unknown mode. This is the original's bug, kept as is.
 - Running several engine test cases in one `iwd2r_tests` process can crash at random, because each test file starts its own engine (seen with `[effects]` across test_effects and test_effects_iwd, and with the movement rounding test). ctest and the gate run one process per case, so they are unaffected.
 - The AR1001 stand-in in the area-move test (screens-items) can go back to AR3000 now that AR3000 loads.
+
+## Combat and spell casting (from project 3, milestone 3, combat)
+
+These block TODOs in the combat stream's ports; each is in a file or function the stream was not granted.
+
+- `CGameSprite::EquipMostDamagingMelee` 0x75DFD0 is a stub that returns `ACTION_ERROR` (TODO in its body). Its callers (the EquipMostDamagingMelee action 149, Attack, Swing, AttackReevaluate, CheckIfUsedUp and `sub_75E330`) get no weapon change: the creature keeps its empty or launcher slot instead of its best melee weapon.
+- `CGameSprite` 0x75E150, CheckIfUsedUp for a creature outside the party or charmed, is not ported.
+- `CGameSprite` 0x71F860, the ammunition's and launcher's effects on a missile's projectile, is not ported: Swing's missile branch fires without them.
+- `CGameSprite::CheckQuickLists` 0x71ABA0 is not ported: Swing's and Spell's quick-button refreshes are TODOs.
+- `CGameArea` 0x46E130, which gives an effect to the area's creatures (target types 4-8), is not ported: FireSpell, FireSpellPoint, ForceSpell, ForceSpellPoint, Spell, Swing's melee effects and 0x755A70 drop those effects (TODOs).
+- The projectile class DecodeProjectile builds for type 304 is not ported, so it has no member at +0x356: the five spell and missile paths draw the type-304 `rand() % 1000000` for the fire message but do not store it in the projectile (TODOs).

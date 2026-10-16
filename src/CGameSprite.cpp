@@ -20235,7 +20235,8 @@ SHORT CGameSprite::Spell(CGameAIBase* target)
         sub_755A70(m_curSpell, pAbility, target->GetPos());
         m_bStartedCasting = TRUE;
 
-        // An enemy within 24 squares calls for concentration.
+        // An enemy within GetNearest's range 24 (in pixels, 0x741B6B) calls
+        // for concentration.
         CAIObjectType enemy = GetAIType().GetEnemyOf();
         LONG nEnemy = m_pArea->GetNearest(m_id,
             enemy,
@@ -20459,6 +20460,10 @@ SHORT CGameSprite::Spell(CGameAIBase* target)
             g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
         }
 
+        // NOTE: The original overwrites m_curProjectile without deleting it
+        // (0x7424D0). A leftover projectile (Swing keeps the next shot's
+        // there, 0x73ABEB; Spell deletes it only while m_actionCount is 0)
+        // leaks, as in the original.
         m_curProjectile = CProjectile::DecodeProjectile(pAbility->missileType, this, 0);
         m_curProjectile->m_sourceRes = m_curSpell->GetResRef();
         DWORD nLevel = static_cast<BYTE>(nSpellLevel);
@@ -22143,6 +22148,10 @@ BOOL CGameSprite::CheckIfUsedUp(SHORT nSlot, SHORT nAbility)
 // 0x75DFD0
 SHORT CGameSprite::EquipMostDamagingMelee()
 {
+    // TODO: EquipMostDamagingMelee 0x75DFD0 is not ported. The original
+    // picks the melee weapon with the most damage and selects it
+    // (SelectWeaponAbility at 0x75E09F, sub_726810 at 0x75E0B4); ours
+    // selects nothing. Listed in docs/followups.md.
     return ACTION_ERROR;
 }
 
