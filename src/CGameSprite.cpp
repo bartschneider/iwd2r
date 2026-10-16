@@ -13184,10 +13184,19 @@ SHORT CGameSprite::ExecuteAction()
         returnValue = ACTION_ERROR;
         goto done;
     case 105:
-        // AttackOneRound
-        // TODO: 0x72A094-0x72A0E7 not ported (CGameSprite_Attack).
-        returnValue = ACTION_ERROR;
-        goto done;
+        // AttackOneRound (0x72A094-0x72A0E7): Attack's case without its
+        // timing counters and without a party member's fallback target;
+        // Attack ends the action after one round (0x737EF0).
+        pTarget = GetTargetShareType(CGameObject::TYPE_SPRITE);
+        bShare = TRUE;
+        if (pTarget != NULL
+            && (m_baseStats.m_flags & 0x100000) == 0
+            && pTarget->GetAIType().m_nEnemyAlly <= CAIObjectType::EA_GOODCUTOFF) {
+            m_baseStats.m_flags |= 0x100000;
+        }
+
+        returnValue = Attack(static_cast<CGameSprite*>(pTarget));
+        goto release;
     case 107:
         // MoveToOffset (0x72A0E7-0x72A197)
         if (m_interrupt) {
