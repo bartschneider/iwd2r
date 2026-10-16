@@ -2,10 +2,17 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "CGameAnimationType.h"
+#include "CGameAnimationTypeAmbient.h"
+#include "CGameAnimationTypeFlying.h"
 #include "CGameAnimationTypeMonster.h"
 #include "CGameAnimationTypeMonsterAnkheg.h"
+#include "CGameAnimationTypeMonsterIcewind.h"
+#include "CGameAnimationTypeMonsterLarge.h"
+#include "CGameAnimationTypeMonsterLarge16.h"
 #include "CGameAnimationTypeMonsterMulti.h"
 #include "CGameAnimationTypeMonsterOld.h"
+#include "CGameAnimationTypeMonsterQuadrant.h"
+#include "CGameAnimationTypeTownStatic.h"
 #include "CGameContainer.h"
 #include "CGameDoor.h"
 #include "CGameObjectArray.h"
@@ -15,6 +22,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <typeinfo>
 #include <vector>
 
 // The Render functions of the creature animations that had none
@@ -96,6 +104,72 @@ void CheckRender(RenderScope& scope, CGameAnimationType* pAnimation, const CPoin
     CHECK(yellow.outside == 0);
     CHECK(yellow.blue == 0);
     CHECK(yellow.red > yellow.changed / 2);
+}
+
+// The quadrants of a multi-cell animation each drawn from their own cell:
+// each cell is tinted its own primary (red, green, blue in turn), so every
+// pixel that lies in one quadrant's bounds only carries that quadrant's
+// channel alone. The cells' tints are put back afterwards.
+void CheckQuadrants(RenderScope& scope, CGameAnimationType* pAnimation, CVidCell* pCells, int nQuadrants, const CPoint& pos, const std::string& name)
+{
+    static const COLORREF tints[3] = { RGB(255, 0, 0), RGB(0, 255, 0), RGB(0, 0, 255) };
+    static const DWORD channels[3] = { 0xFF0000, 0x00FF00, 0x0000FF };
+    std::vector<COLORREF> saved;
+    std::vector<CRect> bounds;
+    for (int quad = 0; quad < nQuadrants; quad++) {
+        saved.push_back(pCells[quad].GetTintColor());
+        pCells[quad].SetTintColor(tints[quad % 3]);
+        CPoint ptCenter;
+        CSize frameSize;
+        REQUIRE(pCells[quad].GetCurrentCenterPoint(ptCenter, FALSE));
+        REQUIRE(pCells[quad].GetCurrentFrameSize(frameSize, FALSE));
+        CRect rQuad;
+        pAnimation->CalculateGCBoundsRect(rQuad, pos, ptCenter, 0, frameSize.cx, frameSize.cy);
+        bounds.push_back(rQuad);
+    }
+
+    CRect rBounds;
+    Render(scope, pAnimation, pos, FALSE, RGB(255, 255, 255), rBounds, name);
+    const std::vector<DWORD> pixels = scope.Back();
+    std::vector<int> own(nQuadrants, 0);
+    std::vector<int> wrong(nQuadrants, 0);
+    for (int y = 0; y < kHeight; y++) {
+        for (int x = 0; x < kWidth; x++) {
+            const DWORD pixel = pixels[y * kWidth + x] & 0xFFFFFF;
+            if (pixel == 0) {
+                continue;
+            }
+            int found = -1;
+            int count = 0;
+            for (int quad = 0; quad < nQuadrants; quad++) {
+                if (bounds[quad].PtInRect(CPoint(x, y))) {
+                    found = quad;
+                    count++;
+                }
+            }
+            if (count == 1) {
+                if ((pixel & ~channels[found % 3]) != 0) {
+                    wrong[found]++;
+                } else {
+                    own[found]++;
+                }
+            }
+        }
+    }
+    // A quadrant can lie under the others' bounds or be empty in a frame
+    // (the dragon's sixth facing south): most must show their own colour.
+    int shown = 0;
+    for (int quad = 0; quad < nQuadrants; quad++) {
+        INFO(name << ", quadrant " << quad << ": bounds " << bounds[quad].left << "," << bounds[quad].top << " - " << bounds[quad].right << ","
+                  << bounds[quad].bottom << ", its own colour " << own[quad] << ", another " << wrong[quad]);
+        CHECK(wrong[quad] == 0);
+        if (own[quad] > 0) {
+            shown++;
+        }
+        pCells[quad].SetTintColor(saved[quad]);
+    }
+    INFO(name << ": " << shown << " of " << nQuadrants << " quadrants show their own colour");
+    CHECK(shown * 2 >= nQuadrants);
 }
 
 bool Begin(std::string& why)
@@ -259,6 +333,86 @@ TEST_CASE("creature render: CGameAnimationTypeMonsterMulti draws the black drago
     CHECK(pDragon->m_currentVidCell[0].m_nCurrentSequence == 4);
     CHECK(pDragon->IsMirroring());
     CheckRender(scope, pDragon, CPoint(320, 330), "dragon_12");
+
+    // Each of the nine quadrants is its own cell, at its own place.
+    CheckQuadrants(scope, pDragon, pDragon->m_currentVidCell, pDragon->m_nQuadrants, CPoint(320, 330), "dragon_12_quadrants");
+    pDragon->ChangeDirection(0);
+    CheckQuadrants(scope, pDragon, pDragon->m_currentVidCell, pDragon->m_nQuadrants, CPoint(320, 330), "dragon_0_quadrants");
+}
+
+// The white wyvern (0x1001, MWYV in four quadrant BAMs, 50WYRWH and six
+// other CRE files): CGameAnimationTypeMonsterQuadrant::Render (0x6BC5F0)
+// draws each quadrant from its own cell, m_currentVidCell + quad * 0xDA
+// (0x6BC84E, 0x6BC856), with that cell's tint read and restored (0x6BC799,
+// 0x6BC86A). Ours drew cell 0 in every quadrant with cell 0's tint, so the
+// per-quadrant colours of CheckQuadrants came out all red.
+TEST_CASE("creature render: CGameAnimationTypeMonsterQuadrant draws each quadrant from its own cell", "[render][data]")
+{
+    std::string why;
+    if (!Begin(why)) {
+        SKIP("[iwd2r-skip] " + why);
+    }
+    RenderScope scope;
+    REQUIRE(scope.Ok());
+    BYTE colors[16] = {};
+    for (WORD facing : { 0, 12 }) {
+        INFO("facing " << facing);
+        std::unique_ptr<CGameAnimationType> pAnimation(CGameAnimationType::SetAnimationType(0x1001, colors, facing));
+        auto* pWyvern = dynamic_cast<CGameAnimationTypeMonsterQuadrant*>(pAnimation.get());
+        REQUIRE(pWyvern != nullptr);
+        REQUIRE(pWyvern->m_nQuadrants == 4);
+        CheckQuadrants(scope, pWyvern, pWyvern->m_currentVidCell, pWyvern->m_nQuadrants, CPoint(320, 300),
+            "wyvern_" + std::to_string(facing) + "_quadrants");
+    }
+}
+
+// The tint of the eight Renders ported before this stream's (Ambient
+// 0x6A8470, AmbientStatic 0x6A6A30, Flying 0x6A44F0, MonsterIcewind 0x6E7A40,
+// MonsterLarge 0x6B1E70, MonsterLarge16 0x6B3C60, MonsterQuadrant 0x6BC5F0,
+// TownStatic 0x6A55C0): each channel is the cell's and the tint's added less
+// 255, red from the low bytes (for instance 0x6A85BC). Ours took red from the
+// blue bytes, so a yellow tint (blue 0) left no red at all. AmbientStatic
+// is not drawn here: its constructor (0x6A5A10) leaves m_currentVidCellBase
+// unset in ours (the original sets it at 0x6A5D73), so a cow cannot be built
+// (vis-probe's file; reported).
+TEST_CASE("creature render: the earlier Renders keep red in a yellow tint", "[render][data]")
+{
+    std::string why;
+    if (!Begin(why)) {
+        SKIP("[iwd2r-skip] " + why);
+    }
+    RenderScope scope;
+    REQUIRE(scope.Ok());
+    BYTE colors[16] = {};
+    struct Case {
+        USHORT animationID;
+        const char* name;
+        bool (*isClass)(CGameAnimationType*);
+    };
+    const Case cases[] = {
+        { 0xC100, "Ambient (cat)", [](CGameAnimationType* p) { return dynamic_cast<CGameAnimationTypeAmbient*>(p) != nullptr; } },
+        { 0xD400, "Flying (bird, the one Flying animation that is tinted)", [](CGameAnimationType* p) { return dynamic_cast<CGameAnimationTypeFlying*>(p) != nullptr; } },
+        { 0xE408, "MonsterIcewind (goblin)", [](CGameAnimationType* p) { return dynamic_cast<CGameAnimationTypeMonsterIcewind*>(p) != nullptr; } },
+        { 0x9000, "MonsterLarge (ogre)", [](CGameAnimationType* p) { return dynamic_cast<CGameAnimationTypeMonsterLarge*>(p) != nullptr; } },
+        { 0xA000, "MonsterLarge16 (wyvern)", [](CGameAnimationType* p) { return dynamic_cast<CGameAnimationTypeMonsterLarge16*>(p) != nullptr; } },
+        { 0x1001, "MonsterQuadrant (white wyvern)", [](CGameAnimationType* p) { return dynamic_cast<CGameAnimationTypeMonsterQuadrant*>(p) != nullptr; } },
+        { 0x4400, "TownStatic (townsman)", [](CGameAnimationType* p) { return dynamic_cast<CGameAnimationTypeTownStatic*>(p) != nullptr; } },
+    };
+    for (const Case& c : cases) {
+        INFO(c.name);
+        std::unique_ptr<CGameAnimationType> pAnimation(CGameAnimationType::SetAnimationType(c.animationID, colors, 0));
+        REQUIRE(c.isClass(pAnimation.get()));
+        CRect rBounds;
+        const Drawn white = Render(scope, pAnimation.get(), CPoint(320, 300), FALSE, RGB(255, 255, 255), rBounds, "");
+        INFO("white: drawn " << white.changed << ", with red " << white.red);
+        REQUIRE(white.changed > 50);
+        CHECK(white.red > white.changed / 2);
+        const Drawn yellow = Render(scope, pAnimation.get(), CPoint(320, 300), FALSE, RGB(255, 255, 0), rBounds, "");
+        INFO("yellow: drawn " << yellow.changed << ", with red " << yellow.red << ", with blue " << yellow.blue);
+        CHECK(yellow.changed > 50);
+        CHECK(yellow.blue == 0);
+        CHECK(yellow.red > yellow.changed / 2);
+    }
 }
 
 namespace {
@@ -426,19 +580,33 @@ TEST_CASE("creature render: AR1000's doors and containers draw their highlight",
         return p->m_containerType != 4 && p->m_nPolygon > 2;
     });
     REQUIRE(pContainer != NULL);
-    // The rectangles the fills walk: the original's CGameAIBase::sub_481890
-    // (0x481890) puts the bounding rectangle itself in the array when it is
-    // at most 512 x 512, as these are, else 512 x 512 pieces of it. Ours is
-    // still a stub (vis-probe's file) and leaves the arrays empty, so the
-    // test fills them as the original would.
-    REQUIRE(pDoor->m_rClosedBounding.Width() <= 512);
-    REQUIRE(pDoor->m_rClosedBounding.Height() <= 512);
-    REQUIRE(pContainer->m_rBounding.Width() <= 512);
-    REQUIRE(pContainer->m_rBounding.Height() <= 512);
-    pDoor->field_6DA.SetSize(0);
-    pDoor->field_6DA.Add(&pDoor->m_rClosedBounding);
-    pContainer->field_8D6.SetSize(0);
-    pContainer->field_8D6.Add(&pContainer->m_rBounding);
+    // The rectangles the fills walk come from the constructors through
+    // CGameAIBase::sub_481890 (0x481890): an object at most 512 x 512 gets
+    // its own bounding rectangle, a larger one new 512 x 512 pieces of it.
+    REQUIRE(pDoor->field_6DA.GetSize() == 1);
+    CHECK(pDoor->field_6DA[0] == &pDoor->m_rClosedBounding);
+    REQUIRE(pContainer->field_8D6.GetSize() == 1);
+    CHECK(pContainer->field_8D6[0] == &pContainer->m_rBounding);
+    // A larger rectangle (no door or container of AR1000 has one): 3 x 2
+    // pieces, row by row, the last column and row cut at the edges.
+    {
+        CRect r(100, 50, 1300, 700);
+        CArray<CRect*> pieces;
+        pDoor->sub_481890(&r, pieces);
+        REQUIRE(pieces.GetSize() == 6);
+        long long area = 0;
+        for (int n = 0; n < pieces.GetSize(); n++) {
+            const CRect* pPiece = pieces[n];
+            INFO("piece " << n << ": " << pPiece->left << "," << pPiece->top << " - " << pPiece->right << "," << pPiece->bottom);
+            CHECK(pPiece->left == r.left + 512 * (n % 3));
+            CHECK(pPiece->top == r.top + 512 * (n / 3));
+            CHECK(pPiece->right == std::min(pPiece->left + 512, r.right));
+            CHECK(pPiece->bottom == std::min(pPiece->top + 512, r.bottom));
+            area += static_cast<long long>(pPiece->Width()) * pPiece->Height();
+            delete pPiece;
+        }
+        CHECK(area == static_cast<long long>(r.Width()) * r.Height());
+    }
 
     AreaScope scope(pArea);
     REQUIRE(scope.Ok());
@@ -501,6 +669,8 @@ TEST_CASE("creature render: AR1000's doors and containers draw their highlight",
         CHECK(Compare(plain, outlined, scope.Screen(), whole).changed == outline.changed);
         // The fill changes nothing outside the polygon's rectangle.
         const Difference fill = Compare(outlined, filled, scope.Screen(), rAround);
+        INFO("fill in the area: changed " << fill.changed);
+        CHECK(fill.changed > 0);
         CHECK(Compare(outlined, filled, scope.Screen(), whole).changed == fill.changed);
     }
     CInfinity::TRANSLUCENT_BLTS_ON = translucentBefore;
