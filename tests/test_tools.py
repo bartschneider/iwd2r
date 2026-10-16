@@ -3895,11 +3895,11 @@ class SandboxReplayTest(unittest.TestCase):
         events = []
         build = os.path.join(self.tmp, 'win')
         out = os.path.join(build, oracle.REPLAY_DIR_REL)
-        os.makedirs(out)
+        os.makedirs(out, exist_ok=True)
         for name in (oracle.INJECTOR, oracle.RECORDER):
             open(os.path.join(out, name), 'w').close()
         game = os.path.join(self.tmp, 'game')
-        os.makedirs(game)
+        os.makedirs(game, exist_ok=True)
         dump = {'frame': 10, 'globals': {'reinitializing': 0,
                                          'ai_stalled_frames': 0}}
 
@@ -3981,6 +3981,27 @@ class SandboxReplayTest(unittest.TestCase):
         self.record(['replay', 'record', 'start_screen',
                      '--test-slow-reads', '15'], run)
         self.assertEqual(seen, ['15'])
+
+    def test_record_takes_the_scenario_timeout(self):
+        # --timeout wins; else the scenario header's "# timeout: S"
+        # (realinput.header_timeout); else REPLAY_TIMEOUT.
+        seen = []
+
+        def run(build_dir, game_dir, script, env, timeout, host_run,
+                out_dir, log):
+            seen.append(timeout)
+            os.makedirs(out_dir)
+            return {'code': None, 'stdout': '', 'stderr': '',
+                    'error': 'stop', 'seconds': 1.0}
+        own = os.path.join(self.tmp, 'long.txt')
+        with open(own, 'w') as f:
+            f.write('# timeout: 420\nwait 1\ncheckpoint start\n')
+        self.record(['replay', 'record', own], run)
+        self.record(['replay', 'record', own, '--timeout', '60'], run)
+        self.record(['replay', 'record', 'start_screen'], run)
+        self.assertEqual(seen, [420, 60, oracle.REPLAY_TIMEOUT])
+        self.assertEqual(oracle.replay_timeout(None, os.path.join(
+            ROOT, 'scenarios', 'walk_and_talk.txt')), 420)
 
     def test_host_switch(self):
         code, events, locks, _ = self.record(
