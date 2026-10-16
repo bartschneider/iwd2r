@@ -5,6 +5,7 @@
 #include "platform/png.h"
 #include "platform/present.h"
 #include "platform/replay.h"
+#include "platform/state_dump.h"
 #include "platform/window.h"
 
 #include <cstdio>
@@ -28,18 +29,23 @@ using platform::script::Command;
     std::_Exit(5);
 }
 
+// IWD2R_SHOT_DIR (or the working directory) joined with name.
+std::string ShotDirPath(const std::string& name)
+{
+    std::string path;
+    if (const char* env = std::getenv("IWD2R_SHOT_DIR"))
+        path = env;
+    if (!path.empty() && path.back() != '/' && path.back() != '\\')
+        path += path.find('\\') != std::string::npos ? '\\' : '/';
+    return path + name;
+}
+
 // Writes the primary surface as <IWD2R_SHOT_DIR>/<name>.png, and with
 // IWD2R_SHOT_PRESENTED=1 the presented frame beside it. On failure returns
 // false with why set.
 bool WriteShot(const std::string& name, std::string& path, std::string& why)
 {
-    std::string dir;
-    if (const char* env = std::getenv("IWD2R_SHOT_DIR"))
-        dir = env;
-    path = dir;
-    if (!path.empty() && path.back() != '/' && path.back() != '\\')
-        path += path.find('\\') != std::string::npos ? '\\' : '/';
-    path += name + ".png";
+    path = ShotDirPath(name + ".png");
 
     const uint32_t* pixels = nullptr;
     int w = 0;
@@ -71,6 +77,41 @@ bool WriteShot(const std::string& name, std::string& path, std::string& why)
         else
             why += ", presented " + std::to_string(pw) + "x" + std::to_string(ph) + " by " + backend;
     }
+    return true;
+}
+
+// A checkpoint name as the scenario parsers accept it: letters, digits, _
+// and -.
+bool CheckpointName(const std::string& name)
+{
+    if (name.empty())
+        return false;
+    for (const char c : name) {
+        const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-';
+        if (!ok)
+            return false;
+    }
+    return true;
+}
+
+// Writes the replay dump's checkpoint-<name>.json into IWD2R_SHOT_DIR from
+// the engine's state now: the presented frame and what the engine's
+// DumpSource reads. The replay mode's own fields (rand states, stall and
+// gate counts) stay 0. On failure returns false with why set.
+bool WriteStateDump(const std::string& name, std::string& path, std::string& why)
+{
+    path = ShotDirPath("checkpoint-" + name + ".json");
+    platform::state_dump::Snapshot s;
+    s.frame = static_cast<uint32_t>(platform::present::PresentedFrames());
+    s.hasCheckpoint = true;
+    s.checkpoint = name;
+    if (const platform::state_dump::DumpSource* source = platform::state_dump::Source())
+        source->Read(&s.engine);
+    if (!platform::state_dump::Write(path.c_str(), s)) {
+        why = "cannot write " + path;
+        return false;
+    }
+    why = "screen " + s.engine.screen;
     return true;
 }
 
@@ -217,13 +258,17 @@ void PollControl()
     namespace fs = std::filesystem;
     std::error_code ec;
     std::vector<fs::path> requests;
+    std::vector<fs::path> states;
     bool framesRequested = false;
     for (fs::directory_iterator it(fs::path(dir), ec), end; !ec && it != end; it.increment(ec)) {
         const std::string file = it->path().filename().string();
+        const bool req = file.size() > 4 && file.compare(file.size() - 4, 4, ".req") == 0;
         if (file == "frames.req")
             framesRequested = true;
-        else if (file.size() > 8 && file.compare(0, 5, "shot-") == 0 && file.compare(file.size() - 4, 4, ".req") == 0)
+        else if (req && file.size() > 8 && file.compare(0, 5, "shot-") == 0)
             requests.push_back(it->path());
+        else if (req && file.size() >= 10 && file.compare(0, 6, "state-") == 0)
+            states.push_back(it->path());
     }
     if (framesRequested) {
         // Written aside and renamed, so a reader never sees a partial file.
@@ -251,6 +296,20 @@ void PollControl()
         } else {
             std::printf("control: shot %s failed: %s\n", name.c_str(), why.c_str());
         }
+        std::fflush(stdout);
+        fs::remove(request, ec);
+    }
+    for (const fs::path& request : states) {
+        const std::string file = request.filename().string();
+        const std::string name = file.substr(6, file.size() - 10);
+        std::string path;
+        std::string why;
+        if (!CheckpointName(name))
+            std::printf("control: state %s refused: not a checkpoint name\n", name.c_str());
+        else if (WriteStateDump(name, path, why))
+            std::printf("control: state %s (%s)\n", path.c_str(), why.c_str());
+        else
+            std::printf("control: state %s failed: %s\n", name.c_str(), why.c_str());
         std::fflush(stdout);
         fs::remove(request, ec);
     }
