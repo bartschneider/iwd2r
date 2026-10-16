@@ -48,7 +48,7 @@
 
 // The game file (GAM) and the character export (CHR), on the engine in this
 // process (NewGame, a sprite from CHARBASE.CRE, the game's own save and load
-// functions) and end to end (scenarios/pending/world_entry.txt through
+// functions) and end to end (scenarios/world_entry.txt through
 // Party Formation's Done). Every engine works on a private view of the
 // install (tests/data_view.h).
 
@@ -1458,7 +1458,7 @@ TEST_CASE("gam: Party Formation's Done saves a game file the engine loads back",
     if (!fs::exists(Child(view.Path(), "mpsave"), ec)) {
         fs::create_directories(fs::path(view.Path()) / "mpsave", ec);
     }
-    const Run run = RunScenario(view.Path(), fs::path(IWD2R_SOURCE_DIR) / "scenarios" / "pending" / "world_entry.txt");
+    const Run run = RunScenario(view.Path(), fs::path(IWD2R_SOURCE_DIR) / "scenarios" / "world_entry.txt");
     const std::string gam = ReadFile(Child(Child(view.Path(), "mpsave"), "default") / "ICEWIND2.GAM");
 
     INFO("output:\n"

@@ -636,7 +636,7 @@ $exitCode = $null
 # The real run changes the machine it runs on (audio, services, scheduled
 # tasks, a shutdown at the end): only inside Windows Sandbox, whose user is
 # WDAGUtilityAccount. Elsewhere only -DryRun runs.
-$inSandbox = $env:USERNAME -eq 'WDAGUtilityAccount'
+$inSandbox = [Environment]::UserName -eq 'WDAGUtilityAccount'
 try {
     Log "scenario $($cfg.scenario): $($actions.Count) actions"
     $gpu = (Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue | Select-Object -First 1).Name
@@ -645,9 +645,9 @@ try {
         Log "would run $($cfg.exe) with IWD2_DATA=$($cfg.data) IWD2R_INI_OVERRIDE=$($cfg.ini_override)"
     } else {
         if (-not $inSandbox) {
-            throw "driver.ps1 runs only inside Windows Sandbox (user WDAGUtilityAccount, not '$env:USERNAME'); use -DryRun elsewhere"
+            throw "driver.ps1 runs only inside Windows Sandbox (user WDAGUtilityAccount, not '$([Environment]::UserName)'); use -DryRun elsewhere"
         }
-        Log "sandbox user $env:USERNAME"
+        Log "sandbox user $([Environment]::UserName)"
         # The sandbox's sound reaches the host's speakers. Mute its whole
         # output before anything else runs.
         $muteState = 'failed'
@@ -713,13 +713,13 @@ try {
         Stop-Process -Id $script:game.Id -Force -ErrorAction SilentlyContinue
     }
     Log "exit code $exitCode"
-    if (-not $DryRun) {
+    if (-not $DryRun -and $inSandbox) {
         Set-Content -LiteralPath (Join-Path $cfg.results 'exitcode.txt') -Value "$exitCode" -Encoding ASCII
         if ($errorText) {
             Set-Content -LiteralPath (Join-Path $cfg.results 'error.txt') -Value $errorText -Encoding UTF8
         }
         Set-Content -LiteralPath (Join-Path $cfg.results 'done.txt') -Value 'done' -Encoding ASCII
-        if ($cfg.shutdown -and $inSandbox) { shutdown.exe /s /t 0 }
+        if ($cfg.shutdown) { shutdown.exe /s /t 0 }
     }
 }
 if ($errorText) { exit 1 }
