@@ -16,6 +16,7 @@
 #include "CScreenCreateChar.h"
 #include "CScreenInventory.h"
 #include "CScreenWorld.h"
+#include "CTimerWorld.h"
 #include "CUIControlTextDisplay.h"
 #include "CUIManager.h"
 #include "CUIPanel.h"
@@ -996,6 +997,62 @@ TEST_CASE("world keys: Escape and the arrows act with game input only", "[uimisc
 
     pGame->m_nState = 0;
     pArea->m_nKeyScrollState = nScroll;
+    pGame->GetGameSave()->m_mode = nMode;
+}
+
+// Space (0x6872D0, VK_SPACE) toggles the pause through TogglePauseGame
+// (0x68DFD0) as a visual pause: paused, the world's time stops and the
+// screen dithers; again, the time runs. Without game input it does nothing.
+TEST_CASE("world keys: Space pauses and unpauses the game", "[uimisc][worldkeys][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    CGameSprite* pSprite = PartyMember();
+    if (pSprite == NULL) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    const DWORD nMode = pGame->GetGameSave()->m_mode;
+    CScreenWorld* pWorld = WorldWithInput(pSprite);
+    CTimerWorld* pTimer = pGame->GetWorldTimer();
+    const BOOLEAN bTimeActive = pTimer->m_active;
+    const ULONG nGameTime = pTimer->m_gameTime;
+    const BYTE nLastPercentage = pTimer->m_nLastPercentage;
+    const BOOLEAN bForceDither = pGame->m_bForceDither;
+    const unsigned char nF44 = pWorld->field_F44;
+    REQUIRE_FALSE(pWorld->m_bPaused);
+    pTimer->m_active = TRUE;
+    pWorld->field_F44 = 0;
+
+    PressKey(pWorld, VK_SPACE);
+    CHECK(pWorld->m_bPaused == TRUE);
+    CHECK(pWorld->field_14A == TRUE);
+    CHECK_FALSE(pTimer->m_active);
+    CHECK(pGame->m_bForceDither == TRUE);
+
+    PressKey(pWorld, VK_SPACE);
+    CHECK(pWorld->m_bPaused == FALSE);
+    CHECK(pWorld->field_14A == FALSE);
+    CHECK(pTimer->m_active);
+    CHECK(pGame->m_bForceDither == FALSE);
+
+    // Without game input (a dialog, a cut scene) Space does not pause.
+    pGame->GetGameSave()->m_mode = 0;
+    PressKey(pWorld, VK_SPACE);
+    CHECK(pWorld->m_bPaused == FALSE);
+    CHECK(pTimer->m_active);
+
+    pTimer->m_active = bTimeActive;
+    pTimer->m_gameTime = nGameTime;
+    pTimer->m_nLastPercentage = nLastPercentage;
+    pGame->m_bForceDither = bForceDither;
+    pWorld->field_F44 = nF44;
     pGame->GetGameSave()->m_mode = nMode;
 }
 
