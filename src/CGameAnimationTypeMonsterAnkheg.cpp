@@ -749,3 +749,9 @@ SHORT CGameAnimationTypeMonsterAnkheg::SetSequence(SHORT nSequence)
 
     return nSequence;
 }
+
+// 0x78E6E0
+BOOL CGameAnimationTypeMonsterAnkheg::IsFalseColor()
+{
+    return FALSE;
+}

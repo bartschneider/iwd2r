@@ -948,3 +948,11 @@ void CGameAnimationTypeMonsterMulti::GetAnimationResRef(CString& resRef, BYTE ra
         resRef = "";
     }
 }
+
+// 0x6C2D70
+BOOLEAN CGameAnimationTypeMonsterMulti::GetCurrentSequenceAndFrame(SHORT nSequence, SHORT nFrame)
+{
+    nSequence = m_currentVidCell->m_nCurrentSequence;
+    nFrame = m_currentVidCell->m_nCurrentFrame;
+    return TRUE;
+}

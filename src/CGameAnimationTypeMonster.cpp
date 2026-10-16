@@ -1505,3 +1505,23 @@ SHORT CGameAnimationTypeMonster::SetSequence(SHORT nSequence)
 
     return nSequence;
 }
+
+// 0x6BB190
+void CGameAnimationTypeMonster::CalculateFxRectMax(CRect& rFx, CPoint& ptReference, LONG posZ)
+{
+    ptReference.x = 512;
+    ptReference.y = 512;
+
+    rFx.left = 0;
+    rFx.top = 0;
+    rFx.right = 1024;
+    rFx.bottom = 1024;
+}
+
+// 0x6C2D70
+BOOLEAN CGameAnimationTypeMonster::GetCurrentSequenceAndFrame(SHORT nSequence, SHORT nFrame)
+{
+    nSequence = m_currentVidCell->m_nCurrentSequence;
+    nFrame = m_currentVidCell->m_nCurrentFrame;
+    return TRUE;
+}

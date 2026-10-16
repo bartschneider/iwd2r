@@ -30,7 +30,9 @@ public:
     /* 00A4 */ void SetColorRange(BYTE colorRange, BYTE rangeValue) override;
     /* 00A8 */ void SetColorRangeAll(BYTE rangeValue) override;
     /* 00AC */ SHORT SetSequence(SHORT nSequence) override;
+    /* 00B0 */ void CalculateFxRectMax(CRect& rFx, CPoint& ptReference, LONG posZ) override;
     /* 00C8 */ SHORT GetCurrentFrame() override;
+    /* 00CC */ BOOLEAN GetCurrentSequenceAndFrame(SHORT nSequence, SHORT nFrame) override;
 
     /* 03FE */ CString m_resRef;
     /* 0402 */ CVidCell* m_currentVidCell;
