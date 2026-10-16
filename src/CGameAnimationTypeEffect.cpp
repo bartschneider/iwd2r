@@ -466,14 +466,6 @@ void CGameAnimationTypeEffect::Render(CInfinity* pInfinity, CVidMode* pVidMode, 
         dwRenderFlags |= 0x1;
     }
 
-    if (transparency) {
-        dwRenderFlags |= CInfinity::FXPREP_COPYFROMBACK;
-        dwRenderFlags |= 0x2;
-    } else {
-        dwRenderFlags |= CInfinity::FXPREP_CLEARFILL;
-        dwRenderFlags |= 0x1;
-    }
-
     if (m_currentVidCellShadow != NULL) {
         dwRenderFlags |= 0x4;
     }
@@ -490,9 +482,10 @@ void CGameAnimationTypeEffect::Render(CInfinity* pInfinity, CVidMode* pVidMode, 
         }
 
         if (m_currentVidCellShadow != NULL) {
+            // The shadow stays on the ground, posZ below the cell.
             pInfinity->FXRender(m_currentVidCellShadow,
                 ptReference.x,
-                ptReference.y,
+                ptReference.y - posZ,
                 dwRenderFlags,
                 0);
         }
@@ -528,10 +521,10 @@ void CGameAnimationTypeEffect::Render(CInfinity* pInfinity, CVidMode* pVidMode, 
         }
 
         pInfinity->FXRenderClippingPolys(ptPos.x,
-            ptPos.y - posZ,
-            posZ,
+            ptPos.y,
+            0,
             ptReference,
-            CRect(rGCBounds.left, rGCBounds.top - posZ, rGCBounds.right, rGCBounds.bottom - posZ),
+            rGCBounds,
             bDithered,
             dwRenderFlags);
 
