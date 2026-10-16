@@ -4963,15 +4963,11 @@ void CInfGame::SelectToolbar()
         }
 
         if (IcewindMisc::IsPC(pSprite) == TRUE) {
-            // TODO: Incomplete. The original copies the sprite's nine
-            // customizable button types (`field_3D14`) into the button array
-            // (0x595E70) and then its weapon set (`m_nWeaponSet`, 0x595F70);
-            // CInfButtonArray has neither yet.
+            m_cButtonArray.UpdateCustomizableButtonTypes(pSprite->field_3D14);
+            m_cButtonArray.UpdateSelectedWeaponSet(pSprite->m_nWeaponSet);
             m_cButtonArray.SetState(114, 0);
         } else {
-            // TODO: Incomplete. The original sets the button array's weapon
-            // set from `m_nWeaponSet` here (0x595F70, not in CInfButtonArray
-            // yet).
+            m_cButtonArray.UpdateSelectedWeaponSet(pSprite->m_nWeaponSet);
             m_cButtonArray.SetState(110, 0);
         }
 
