@@ -319,7 +319,10 @@
    "world.doors[4].open": 0,
    "world.doors[5].locked": 0,
    "world.doors[5].name": "AR1000_Door4",
-   "world.doors[5].open": 0
+   "world.doors[5].open": 0,
+   "world.party[0].hp": 9,
+   "world.party[0].max_hp": 9,
+   "world.party_count": 1
   },
   "world_settled": {
    "screen": "world",
@@ -345,8 +348,11 @@
    "world.doors[4].open": 0,
    "world.doors[5].locked": 0,
    "world.doors[5].name": "AR1000_Door4",
-   "world.doors[5].open": 0
+   "world.doors[5].open": 0,
+   "world.party[0].hp": 9,
+   "world.party[0].max_hp": 9,
+   "world.party_count": 1
   }
  },
- "source": "checkpoint dumps in runs/20261016-145206/original"
+ "source": "checkpoint dumps in /home/thier/iwd2r-runs/20261016-175040/20261016-181029/original"
 }

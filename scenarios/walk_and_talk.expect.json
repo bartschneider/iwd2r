@@ -144,7 +144,10 @@
    "world.doors[4].open": 0,
    "world.doors[5].locked": 0,
    "world.doors[5].name": "AR1000_Door4",
-   "world.doors[5].open": 0
+   "world.doors[5].open": 0,
+   "world.party[0].hp": 9,
+   "world.party[0].max_hp": 9,
+   "world.party_count": 1
   },
   "dialog_end": {
    "screen": "world",
@@ -170,7 +173,10 @@
    "world.doors[4].open": 0,
    "world.doors[5].locked": 0,
    "world.doors[5].name": "AR1000_Door4",
-   "world.doors[5].open": 0
+   "world.doors[5].open": 0,
+   "world.party[0].hp": 9,
+   "world.party[0].max_hp": 9,
+   "world.party_count": 1
   },
   "door_open": {
    "screen": "world",
@@ -196,7 +202,10 @@
    "world.doors[4].open": 0,
    "world.doors[5].locked": 0,
    "world.doors[5].name": "AR1000_Door4",
-   "world.doors[5].open": 0
+   "world.doors[5].open": 0,
+   "world.party[0].hp": 9,
+   "world.party[0].max_hp": 9,
+   "world.party_count": 1
   },
   "elf": {
    "chargen.abilities[0]": 9,
@@ -263,6 +272,35 @@
    "chargen.subrace": 0,
    "screen": "create_char"
   },
+  "jon_dialog": {
+   "screen": "world",
+   "world.area": "AR1000",
+   "world.dialog.active": 1,
+   "world.dialog.entry": 2,
+   "world.dialog.responses": 1,
+   "world.dialog.speaker": 786444,
+   "world.doors[0].locked": 1,
+   "world.doors[0].name": "AR1000_Door1",
+   "world.doors[0].open": 0,
+   "world.doors[1].locked": 1,
+   "world.doors[1].name": "AR1000_Door2",
+   "world.doors[1].open": 0,
+   "world.doors[2].locked": 0,
+   "world.doors[2].name": "AR1000_Door5",
+   "world.doors[2].open": 0,
+   "world.doors[3].locked": 0,
+   "world.doors[3].name": "AR1000_Door6",
+   "world.doors[3].open": 0,
+   "world.doors[4].locked": 0,
+   "world.doors[4].name": "AR1000_Door3",
+   "world.doors[4].open": 0,
+   "world.doors[5].locked": 0,
+   "world.doors[5].name": "AR1000_Door4",
+   "world.doors[5].open": 0,
+   "world.party[0].hp": 9,
+   "world.party[0].max_hp": 9,
+   "world.party_count": 1
+  },
   "male": {
    "chargen.abilities[0]": 9,
    "chargen.abilities[1]": 9,
@@ -303,7 +341,10 @@
    "world.doors[4].open": 0,
    "world.doors[5].locked": 0,
    "world.doors[5].name": "AR1000_Door4",
-   "world.doors[5].open": 0
+   "world.doors[5].open": 0,
+   "world.party[0].hp": 9,
+   "world.party[0].max_hp": 9,
+   "world.party_count": 1
   },
   "named": {
    "chargen.abilities[0]": 13,
@@ -342,7 +383,10 @@
    "world.doors[4].open": 0,
    "world.doors[5].locked": 0,
    "world.doors[5].name": "AR1000_Door4",
-   "world.doors[5].open": 0
+   "world.doors[5].open": 0,
+   "world.party[0].hp": 9,
+   "world.party[0].max_hp": 9,
+   "world.party_count": 1
   },
   "opening_done": {
    "screen": "world",
@@ -368,7 +412,10 @@
    "world.doors[4].open": 0,
    "world.doors[5].locked": 0,
    "world.doors[5].name": "AR1000_Door4",
-   "world.doors[5].open": 0
+   "world.doors[5].open": 0,
+   "world.party[0].hp": 9,
+   "world.party[0].max_hp": 9,
+   "world.party_count": 1
   },
   "party_formation": {
    "screen": "single_player"
@@ -423,7 +470,10 @@
    "world.doors[4].open": 0,
    "world.doors[5].locked": 0,
    "world.doors[5].name": "AR1000_Door4",
-   "world.doors[5].open": 0
+   "world.doors[5].open": 0,
+   "world.party[0].hp": 9,
+   "world.party[0].max_hp": 9,
+   "world.party_count": 1
   },
   "reig_done": {
    "screen": "world",
@@ -449,7 +499,10 @@
    "world.doors[4].open": 0,
    "world.doors[5].locked": 0,
    "world.doors[5].name": "AR1000_Door4",
-   "world.doors[5].open": 0
+   "world.doors[5].open": 0,
+   "world.party[0].hp": 9,
+   "world.party[0].max_hp": 9,
+   "world.party_count": 1
   },
   "skills_done": {
    "chargen.abilities[0]": 13,
@@ -527,7 +580,10 @@
    "world.doors[4].open": 0,
    "world.doors[5].locked": 0,
    "world.doors[5].name": "AR1000_Door4",
-   "world.doors[5].open": 0
+   "world.doors[5].open": 0,
+   "world.party[0].hp": 9,
+   "world.party[0].max_hp": 9,
+   "world.party_count": 1
   },
   "world_settled": {
    "screen": "world",
@@ -553,8 +609,11 @@
    "world.doors[4].open": 0,
    "world.doors[5].locked": 0,
    "world.doors[5].name": "AR1000_Door4",
-   "world.doors[5].open": 0
+   "world.doors[5].open": 0,
+   "world.party[0].hp": 9,
+   "world.party[0].max_hp": 9,
+   "world.party_count": 1
   }
  },
- "source": "checkpoint dumps in runs/20261016-152159/original"
+ "source": "checkpoint dumps in /home/thier/iwd2r-runs/20261016-175040/20261016-180732/original"
 }

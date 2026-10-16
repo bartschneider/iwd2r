@@ -557,7 +557,8 @@ class ScenarioParseTest(unittest.TestCase):
                  if a['op'] == 'checkpoint']
         self.assertEqual(names, world + [
             'opening_dialog', 'opening_done', 'moved', 'dialog',
-            'dialog_end', 'reig_dialog', 'reig_done', 'door_open'])
+            'dialog_end', 'reig_dialog', 'jon_dialog', 'reig_done',
+            'door_open'])
         self.assertEqual(len(names), len(set(names)))
         # M2 Task 7: a shot of Hedron's dialog panel and of the door.
         self.assertEqual([a['name'] for a in actions if a['op'] == 'shot'],
