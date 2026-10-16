@@ -141,6 +141,8 @@ set(IWD2R_ENGINE_SOURCES
     "src/CGameJournal.h"
     "src/CGameObject.cpp"
     "src/CGameObject.h"
+    "src/CGameObject84D624.cpp"
+    "src/CGameObject84D624.h"
     "src/CGameObjectArray.cpp"
     "src/CGameObjectArray.h"
     "src/CGameOptions.cpp"
