@@ -34,6 +34,7 @@ public:
     static const BYTE MSG_TYPE_CMESSAGE;
     static const BYTE MSG_SUBTYPE_CMESSAGE_ADD_ACTION;
     static const BYTE MSG_SUBTYPE_CMESSAGE_ADD_EFFECT;
+    static const BYTE MSG_SUBTYPE_CMESSAGE_ADD_ITEM;
     static const BYTE MSG_SUBTYPE_CMESSAGE_ANIMATION_CHANGE;
     static const BYTE MSG_SUBTYPE_CMESSAGE_CHANGE_DIRECTION;
     static const BYTE MSG_SUBTYPE_CMESSAGE_CLEAR_ACTIONS;
@@ -591,6 +592,20 @@ public:
 
     /* 000C */ CColorRanges m_appliedColorRanges;
     /* 0028 */ CColorEffects m_appliedColorEffects;
+};
+
+// GiveItem's item for its target (vtable 0x848BE8): the target puts a copy
+// in its first empty inventory slot, else on the ground.
+class CMessageAddItem : public CMessage {
+public:
+    CMessageAddItem(const CItem& item, LONG caller, LONG target);
+    ~CMessageAddItem() override;
+    SHORT GetCommType() override;
+    BYTE GetMsgType() override;
+    BYTE GetMsgSubType() override;
+    void Run() override;
+
+    /* 000C */ CItem m_item;
 };
 
 class CMessageContainerAddItem : public CMessage {

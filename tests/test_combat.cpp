@@ -2032,3 +2032,315 @@ TEST_CASE("combat: the area finds the n-th nearest enemy of a point", "[combat][
     INFO("decoded instance " << second.m_nInstance);
     CHECK(second.m_nInstance == pFarGoblin->GetId());
 }
+
+// CBaldurMessage::BroadcastUpdateCharacterSlot (0x42DCF0), which SaveGame
+// calls: each party member's effect list and visual effects are redone at
+// its next AI update.
+TEST_CASE("combat: a save marks the party members for an effect list update", "[combat][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    Fight fight;
+    std::string why;
+    if (!SetUpFight(fight, why)) {
+        if (why.find("CHR") != std::string::npos) {
+            SKIP("[iwd2r-skip] " + why);
+        }
+        FAIL(why);
+    }
+    CGameSprite* pCharacter = fight.pCharacter;
+    CGameSprite* pGoblin = fight.pGoblin;
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    REQUIRE(pGame->m_characters[0] == pCharacter->GetId());
+
+    const BOOLEAN bConnection = g_pChitin->cNetwork.m_bConnectionEstablished;
+
+    // No open session: nothing.
+    g_pChitin->cNetwork.m_bConnectionEstablished = FALSE;
+    pCharacter->field_562C = FALSE;
+    pCharacter->m_bForceVisualEffects = FALSE;
+    g_pBaldurChitin->GetBaldurMessage()->BroadcastUpdateCharacterSlot(TRUE, 0, FALSE);
+    CHECK_FALSE(pCharacter->field_562C);
+    CHECK_FALSE(pCharacter->m_bForceVisualEffects);
+
+    // The single player game's open session: every slot's character, and
+    // only the party's.
+    g_pChitin->cNetwork.m_bConnectionEstablished = TRUE;
+    pGoblin->field_562C = FALSE;
+    const LONG progress = g_pChitin->cProgressBar.m_nActionProgress;
+    g_pBaldurChitin->GetBaldurMessage()->BroadcastUpdateCharacterSlot(TRUE, 0, FALSE);
+    CHECK(pCharacter->field_562C);
+    CHECK(pCharacter->m_bForceVisualEffects);
+    CHECK_FALSE(pGoblin->field_562C);
+    CHECK(g_pChitin->cProgressBar.m_nActionProgress == progress);
+
+    // With the progress bar: 500000 units a slot, six slots.
+    g_pBaldurChitin->GetBaldurMessage()->BroadcastUpdateCharacterSlot(TRUE, 0, TRUE);
+    CHECK(g_pChitin->cProgressBar.m_nActionProgress == progress + 6 * 500000);
+    CHECK_FALSE(g_pChitin->cProgressBar.m_bWaiting);
+    g_pChitin->cProgressBar.m_nActionProgress = progress;
+
+    g_pChitin->cNetwork.m_bConnectionEstablished = bConnection;
+}
+
+// GiveItem (action 15, CGameSprite 0x757540) and CMessageAddItem's Run
+// (0x4F9150): the goblin's weapon leaves it and a copy lands in the party
+// member's first empty inventory slot.
+TEST_CASE("combat: GiveItem moves a goblin's weapon into the party member's inventory", "[combat][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    Fight fight;
+    std::string why;
+    if (!SetUpFight(fight, why)) {
+        if (why.find("CHR") != std::string::npos) {
+            SKIP("[iwd2r-skip] " + why);
+        }
+        FAIL(why);
+    }
+    CGameSprite* pCharacter = fight.pCharacter;
+    CGameSprite* pGoblin = fight.pGoblin;
+
+    // The goblin's selected weapon.
+    CGameSpriteEquipment* pEquipment = pGoblin->GetEquipment();
+    SHORT nSlot = pEquipment->m_selectedWeapon;
+    CItem* pWeapon = pEquipment->m_items[nSlot];
+    REQUIRE(pWeapon != NULL);
+    const CString sWeapon = pWeapon->GetResRef().GetResRefStr();
+    INFO("weapon " << static_cast<const char*>(sWeapon) << " in slot " << nSlot);
+
+    // No target: an error.
+    CAIAction give(15, CAIObjectType(0, 0, 0, 0, 0, 0, 0, 0, pCharacter->GetId()), 0, 0, 0);
+    give.m_string1 = sWeapon;
+    pGoblin->m_curAction = give;
+    CHECK(pGoblin->GiveItem(NULL) == CGameAIBase::ACTION_ERROR);
+
+    // An item the goblin does not carry (nor in a bag): an error.
+    CAIAction missing = give;
+    missing.m_string1 = "NOSUCH";
+    pGoblin->m_curAction = missing;
+    CHECK(pGoblin->GiveItem(pCharacter) == CGameAIBase::ACTION_ERROR);
+
+    // The weapon: done, the goblin's slot is empty, and the message gives
+    // the party member a copy in its first empty inventory slot.
+    INT nFirstEmpty = -1;
+    for (INT n = 18; n < 42; n++) {
+        if (pCharacter->GetEquipment()->m_items[n] == NULL) {
+            nFirstEmpty = n;
+            break;
+        }
+    }
+    REQUIRE(nFirstEmpty != -1);
+    ClearMessages();
+    pGoblin->m_curAction = give;
+    CHECK(pGoblin->GiveItem(pCharacter) == CGameAIBase::ACTION_DONE);
+    CHECK(pEquipment->m_items[nSlot] == NULL);
+    g_pBaldurChitin->GetMessageHandler()->AsynchronousUpdate();
+    CItem* pGiven = pCharacter->GetEquipment()->m_items[nFirstEmpty];
+    REQUIRE(pGiven != NULL);
+    CHECK(pGiven->GetResRef() == CResRef(sWeapon));
+    ClearMessages();
+}
+
+// SetBestWeapon (action 255, 0x72AB84-0x72ACB5): the target within the
+// action's range in search squares asks for a melee weapon, beyond it for a
+// ranged one.
+TEST_CASE("combat: SetBestWeapon picks the goblin's melee weapon within its range", "[combat][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    Fight fight;
+    std::string why;
+    if (!SetUpFight(fight, why)) {
+        if (why.find("CHR") != std::string::npos) {
+            SKIP("[iwd2r-skip] " + why);
+        }
+        FAIL(why);
+    }
+    CGameSprite* pCharacter = fight.pCharacter;
+    CGameSprite* pGoblin = fight.pGoblin;
+    CGameSpriteEquipment* pEquipment = pGoblin->GetEquipment();
+    const BYTE nWeapon = pEquipment->m_selectedWeapon;
+    REQUIRE(nWeapon >= CGameSpriteEquipment::SLOT_WEAPON);
+    const CAIObjectType character(0, 0, 0, 0, 0, 0, 0, 0, pCharacter->GetId());
+
+    // The party member is two search squares away: a range of 5 holds it.
+    pGoblin->ClearActions(FALSE);
+    pGoblin->SelectWeaponAbility(CGameSpriteEquipment::SLOT_FIST, 0, 0, 1);
+    REQUIRE(pEquipment->m_selectedWeapon == CGameSpriteEquipment::SLOT_FIST);
+    pGoblin->m_curAction = CAIAction(255, character, 5, 0, 0);
+    CHECK(pGoblin->ExecuteAction() == CGameAIBase::ACTION_DONE);
+    // The fists are a melee ability: they stay.
+    CHECK(pEquipment->m_selectedWeapon == CGameSpriteEquipment::SLOT_FIST);
+
+    // Beyond a range of 0 the goblin wants a ranged weapon; it has none, so
+    // EquipRanged falls back to its most damaging melee weapon.
+    pGoblin->m_curAction = CAIAction(255, character, 0, 0, 0);
+    CHECK(pGoblin->ExecuteAction() == CGameAIBase::ACTION_DONE);
+    CHECK(pEquipment->m_selectedWeapon == nWeapon);
+
+    // No target: an error.
+    pGoblin->m_curAction = CAIAction(255, CAIObjectType(0, 0, 0, 0, 0, 0, 0, 0, 0x7FFF0000), 5, 0, 0);
+    CHECK(pGoblin->ExecuteAction() == CGameAIBase::ACTION_ERROR);
+    ClearMessages();
+}
+
+// CAIObjectType::Decode's NearestEnemyOf (12, 0x40BF48) and Nearest (14,
+// 0x40C208): Nearest asks the area for the second nearest of the current
+// object's type, as SecondNearest does.
+TEST_CASE("combat: NearestEnemyOf decodes to the nearest goblin and Nearest to the second nearest", "[combat][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    Fight fight;
+    std::string why;
+    if (!SetUpFight(fight, why)) {
+        if (why.find("CHR") != std::string::npos) {
+            SKIP("[iwd2r-skip] " + why);
+        }
+        FAIL(why);
+    }
+    CGameSprite* pCharacter = fight.pCharacter;
+    CGameSprite* pGoblin = fight.pGoblin;
+    const CPoint pos = pCharacter->GetPos();
+    CGameSprite* pMiddle = AddCreature(fight.pArea, "10GOB", CPoint(pos.x + 4 * CPathSearch::GRID_SQUARE_SIZEX, pos.y));
+    CGameSprite* pFar = AddCreature(fight.pArea, "10GOB", CPoint(pos.x + 7 * CPathSearch::GRID_SQUARE_SIZEX, pos.y));
+    REQUIRE(pMiddle != NULL);
+    REQUIRE(pFar != NULL);
+    fight.pArea->SortLists();
+
+    // NearestEnemyOf(Myself) of the party member: the nearest goblin.
+    CAIObjectType enemy(0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0);
+    enemy.m_SpecialCase[0] = 12;
+    enemy.Decode(pCharacter);
+    CHECK(enemy.m_nInstance == pGoblin->GetId());
+
+    // Nearest with the goblins' type, from the nearest goblin: of the two
+    // other goblins, the second nearest (the far one), not the nearest (the
+    // middle one).
+    CAIObjectType nearest;
+    nearest.Set(pGoblin->GetAIType());
+    nearest.m_sName = "";
+    nearest.m_nInstance = -1;
+    nearest.m_SpecialCase[0] = 14;
+    nearest.Decode(pGoblin);
+    INFO("middle " << pMiddle->GetId() << ", far " << pFar->GetId() << ", decoded " << nearest.m_nInstance);
+    CHECK(nearest.m_nInstance == pFar->GetId());
+}
+
+// Unmarshal (0x70C600) resets a loaded character's empty action bar buttons
+// from QSLOTS.2DA (the inlined ResetQuickSlots, 0x70C8E6-0x70C96E).
+TEST_CASE("combat: a loaded party member's empty action bar buttons get its class's defaults", "[combat][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    Fight fight;
+    std::string why;
+    if (!SetUpFight(fight, why)) {
+        if (why.find("CHR") != std::string::npos) {
+            SKIP("[iwd2r-skip] " + why);
+        }
+        FAIL(why);
+    }
+    CGameSprite* pCharacter = fight.pCharacter;
+    CSavedGamePartyCreature partyCreature;
+    pCharacter->Marshal(partyCreature, FALSE);
+
+    // Slot 0 keeps a button of its own; the others are empty.
+    for (INT nSlot = 0; nSlot < CGAMESAVECHARACTER_NUM_CUSTOM_BUTTONS22; nSlot++) {
+        partyCreature.field_19A[nSlot] = nSlot == 0 ? 2 : 0;
+    }
+    pCharacter->Unmarshal(&partyCreature, TRUE, FALSE);
+
+    const CRuleTables& ruleTables = g_pBaldurChitin->GetObjectGame()->GetRuleTables();
+    INT nClass = pCharacter->GetDerivedStats()->GetBestClass() - 1;
+    INFO("class row " << nClass);
+    CHECK(pCharacter->field_3D14[0] == 2);
+    for (INT nSlot = 1; nSlot < CGAMESAVECHARACTER_NUM_CUSTOM_BUTTONS22; nSlot++) {
+        INFO("slot " << nSlot);
+        CHECK(pCharacter->field_3D14[nSlot] == atol(ruleTables.m_tQuickSlots.GetAt(CPoint(nSlot, nClass))));
+    }
+    ClearMessages();
+}
+
+// CGameArea::GetTintColor (0x470F10): the light map's colour at the corners
+// of the point's 16 by 12 cell, interpolated.
+TEST_CASE("combat: the area tints a point with its light map", "[combat][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    Fight fight;
+    std::string why;
+    if (!SetUpFight(fight, why)) {
+        if (why.find("CHR") != std::string::npos) {
+            SKIP("[iwd2r-skip] " + why);
+        }
+        FAIL(why);
+    }
+    CGameArea* pArea = fight.pArea;
+    REQUIRE(pArea->m_bmLum.pRes != NULL);
+
+    // A flying object is never tinted.
+    CHECK(pArea->GetTintColor(CPoint(400, 300), CGameObject::LIST_FLIGHT) == RGB(255, 255, 255));
+
+    // The day map alone (no day and night code in the area type).
+    const WORD areaType = pArea->m_cInfinity.m_areaType;
+    pArea->m_cInfinity.m_areaType = areaType & ~0x40;
+
+    RGBQUAD c00;
+    RGBQUAD c10;
+    RGBQUAD c01;
+    RGBQUAD c11;
+    REQUIRE(pArea->m_bmLum.GetPixelColor(c00, 25, 25, FALSE));
+    REQUIRE(pArea->m_bmLum.GetPixelColor(c10, 26, 25, FALSE));
+    REQUIRE(pArea->m_bmLum.GetPixelColor(c01, 25, 26, FALSE));
+    REQUIRE(pArea->m_bmLum.GetPixelColor(c11, 26, 26, FALSE));
+
+    // On a cell's corner: that pixel's colour.
+    CHECK(pArea->GetTintColor(CPoint(25 * 16, 25 * 12), CGameObject::LIST_FRONT)
+        == RGB(c00.rgbRed, c00.rgbGreen, c00.rgbBlue));
+
+    // In the middle: the four corners weighed by 8/16 and 6/12, each step
+    // truncated.
+    auto mid = [](BYTE a, BYTE b, BYTE c, BYTE d) {
+        INT nTop = (a * 8 + b * 8) / 16;
+        INT nBottom = (c * 8 + d * 8) / 16;
+        return static_cast<BYTE>((nTop * 6 + nBottom * 6) / 12);
+    };
+    CHECK(pArea->GetTintColor(CPoint(25 * 16 + 8, 25 * 12 + 6), CGameObject::LIST_FRONT)
+        == RGB(mid(c00.rgbRed, c10.rgbRed, c01.rgbRed, c11.rgbRed),
+            mid(c00.rgbGreen, c10.rgbGreen, c01.rgbGreen, c11.rgbGreen),
+            mid(c00.rgbBlue, c10.rgbBlue, c01.rgbBlue, c11.rgbBlue)));
+
+    pArea->m_cInfinity.m_areaType = areaType;
+}

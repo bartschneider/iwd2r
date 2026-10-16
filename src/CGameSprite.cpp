@@ -13138,10 +13138,11 @@ SHORT CGameSprite::ExecuteAction()
         returnValue = ACTION_DONE;
         goto release;
     case 15:
-        // GiveItem
-        // TODO: 0x729538-0x72955F not ported (0x757540).
-        returnValue = ACTION_ERROR;
-        goto done;
+        // GiveItem (0x729538-0x72955F)
+        pTarget = GetTargetShareType(CGameObject::TYPE_SPRITE);
+        bShare = TRUE;
+        returnValue = GiveItem(static_cast<CGameAIBase*>(pTarget));
+        goto release;
     case 17:
         // Help
         // TODO: 0x72955F-0x72956F not ported (0x74FF10).
@@ -13666,9 +13667,52 @@ SHORT CGameSprite::ExecuteAction()
         returnValue = ACTION_ERROR;
         goto done;
     case 255:
-        // SetBestWeapon
-        // TODO: 0x72AB84-0x72ACB5 not ported.
-        returnValue = ACTION_ERROR;
+        // SetBestWeapon (0x72AB84-0x72ACB5): within the action's range (in
+        // search squares) of the target, the best melee weapon unless the
+        // selected ability is a melee one; beyond it, the best ranged one
+        // unless the selected ability is a ranged or launcher one.
+        // NOTE: The original never releases the target's share (a no-op for
+        // the AI thread).
+        pTarget = GetTargetShareType(CGameObject::TYPE_SPRITE);
+        if (pTarget == NULL) {
+            returnValue = ACTION_ERROR;
+            goto done;
+        }
+
+        {
+            CItem* pItem = m_equipment.m_items[m_equipment.m_selectedWeapon];
+            const ITEM_ABILITY* pAbility = NULL;
+            if (pItem != NULL) {
+                pItem->Demand();
+                pAbility = pItem->GetAbility(m_equipment.m_selectedWeaponAbility);
+            }
+
+            const CPoint& ptTarget = pTarget->GetPos();
+            LONG nTargetX = ptTarget.x / CPathSearch::GRID_SQUARE_SIZEX;
+            LONG nTargetY = ptTarget.y / CPathSearch::GRID_SQUARE_SIZEY;
+            LONG dy = GetPos().y / CPathSearch::GRID_SQUARE_SIZEY - nTargetY;
+            LONG dx = GetPos().x / CPathSearch::GRID_SQUARE_SIZEX - nTargetX;
+            LONG nRange = m_curAction.m_specificID + 1;
+
+            if (dx * dx + dy * dy <= nRange * nRange) {
+                // NOTE: The type's low byte (`cmp byte ptr [eax], 1`).
+                if (pAbility != NULL && (pAbility->type & 0xFF) == 1) {
+                    returnValue = ACTION_DONE;
+                } else {
+                    returnValue = EquipMostDamagingMelee();
+                }
+            } else {
+                if (pAbility != NULL && ((pAbility->type & 0xFF) == 4 || (pAbility->type & 0xFF) == 2)) {
+                    returnValue = ACTION_DONE;
+                } else {
+                    returnValue = EquipRanged();
+                }
+            }
+
+            if (pItem != NULL) {
+                pItem->Release();
+            }
+        }
         goto done;
     case 256:
         // SetDialogueRange (0x72ACB5-0x72ACD1)
@@ -22601,6 +22645,9 @@ SHORT CGameSprite::EquipMostDamagingMelee()
     CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
     if (IcewindMisc::IsPC(this) == TRUE
         && pGame->m_group.m_memberList.GetCount() != 0) {
+        // NOTE: The original calls GetGroupList twice (0x75E0EC, 0x75E106),
+        // reads the leader from the second array and frees only that one:
+        // the first array leaks. Ours calls it once.
         LONG* pList = pGame->m_group.GetGroupList();
         LONG nLeader = pList[0];
         delete[] pList;
@@ -28130,6 +28177,49 @@ SHORT CGameSprite::DropInventory(BOOLEAN bCriticalOnly, CString sException)
     pGame->GetObjectArray()->ReleaseDeny(nGroundPile,
         CGameObjectArray::THREAD_ASYNCH,
         INFINITE);
+
+    return ACTION_DONE;
+}
+
+// GiveItem: the item named by the action's string1 (carried, else in a bag)
+// leaves this creature; a creature target gets a copy through
+// CMessageAddItem and the item itself is disposed of.
+//
+// 0x757540
+SHORT CGameSprite::GiveItem(CGameAIBase* pTarget)
+{
+    if (pTarget == NULL) {
+        return ACTION_ERROR;
+    }
+
+    SHORT nSlot = FindItemPersonal(m_curAction.GetString1(), 0, FALSE);
+
+    CItem* pItem;
+    if (nSlot == -1) {
+        // TODO: Incomplete. The original takes the item out of a bag
+        // (DropItemFromBag 0x722740 through CInfGame 0x5C8C30, not ported),
+        // then unequips slot -1 and clears the DWORD before m_items (the
+        // field at +0x4AD4). Without it an item in a bag is not given.
+        return ACTION_ERROR;
+    } else {
+        pItem = m_equipment.m_items[nSlot];
+    }
+
+    Unequip(nSlot);
+    m_equipment.m_items[nSlot] = NULL;
+
+    if (pTarget->GetObjectType() == CGameObject::TYPE_SPRITE) {
+        CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+        if (pGame->GetCharacterPortraitNum(pTarget->GetId()) != -1) {
+            // NOTE: The WORD at 0x8518C2 (3).
+            pGame->FeedBack(3, 0, TRUE);
+        }
+
+        pGame->AddDisposableItem(pItem);
+
+        CMessageAddItem* pMessage = new CMessageAddItem(*pItem, m_id, pTarget->GetId());
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(pMessage, FALSE);
+    }
 
     return ACTION_DONE;
 }
