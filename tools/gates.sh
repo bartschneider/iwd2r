@@ -97,7 +97,10 @@ linux_preset() {
     [ -f "build/$preset/CMakeCache.txt" ] || cmake --preset "$preset" || return 1
     cmake --build --preset "$preset" || return 1
     log=$(mktemp)
-    capped ctest --preset "$preset" --output-on-failure | tee "$log"
+    # The cases are independent processes (data views, no shared state), so
+    # they run in parallel under the one memory cap; IWD2R_CTEST_JOBS=1 runs
+    # them one at a time.
+    capped ctest --preset "$preset" --output-on-failure -j "${IWD2R_CTEST_JOBS:-8}" | tee "$log"
     rc=${PIPESTATUS[0]}
     if [ "$LAVAPIPE" = 1 ]; then
         # The [present] cases ctest reports as skipped (each test is its own
