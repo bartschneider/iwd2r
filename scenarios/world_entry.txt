@@ -1,9 +1,16 @@
 # Milestone 1's exit scenario: a new party enters the world. It is
 # chargen_replay.txt's steps and checkpoints, then the rest of character
 # generation (skills, feats, appearance, sound, name), Party Formation's Done,
-# the chapter screen and the start area. It stays in scenarios/pending/ (not
-# in play.py --suite or the replay compare gate) until our engine reaches the
-# world screen; then it moves to scenarios/. Coordinates for Resolution=800.
+# the chapter screen and the start area. It moved up from scenarios/pending/
+# when our engine matched the original at every checkpoint in replay
+# (oracle.py replay compare, seed 1, twice) and both real-input runs
+# (play.py --vm linux and --vm windows) reached the original's states at its
+# checkpoints (world_entry.expect.json: the screen, the character generation
+# choices, the area, the dialog and the doors). Coordinates for
+# Resolution=800.
+#
+# A real-input run in Windows Sandbox can outlast play.py's default:
+# timeout: 300
 wait 150
 checkpoint menu
 # New Game (645,262), then Done (537,562) with New Party selected, then the

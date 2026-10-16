@@ -425,7 +425,7 @@ class PlayVmArgsTest(unittest.TestCase):
             self.assertEqual(play.suite_files(tmp),
                              [os.path.join(tmp, 'a.txt'),
                               os.path.join(tmp, 'b.txt')])
-        self.assertNotIn('world_entry',
+        self.assertNotIn('first_fight',
                          [play.scenario_name(p) for p in play.suite_files()])
 
     def test_table(self):
@@ -534,10 +534,12 @@ class ScenarioParseTest(unittest.TestCase):
                                          '*.txt'))
         for path in scenario_files() + pending:
             self.assertTrue(realinput.load_scenario(path), path)
+            # A header line that reads like "# timeout: S" must be one.
+            realinput.load_header_timeout(path)
 
     def test_world_entry_checkpoints(self):
         actions = realinput.load_scenario(os.path.join(
-            ROOT, 'scenarios', 'pending', 'world_entry.txt'))
+            ROOT, 'scenarios', 'world_entry.txt'))
         names = [a['name'] for a in actions if a['op'] == 'checkpoint']
         chargen = [a['name'] for a in realinput.load_scenario(os.path.join(
             ROOT, 'scenarios', 'chargen_replay.txt')) if a['op'] == 'checkpoint']
@@ -551,7 +553,7 @@ class ScenarioParseTest(unittest.TestCase):
             ROOT, 'scenarios', 'walk_and_talk.txt'))
         names = [a['name'] for a in actions if a['op'] == 'checkpoint']
         world = [a['name'] for a in realinput.load_scenario(os.path.join(
-            ROOT, 'scenarios', 'pending', 'world_entry.txt'))
+            ROOT, 'scenarios', 'world_entry.txt'))
                  if a['op'] == 'checkpoint']
         self.assertEqual(names, world + [
             'opening_dialog', 'opening_done', 'moved', 'dialog',
@@ -1020,7 +1022,9 @@ class CheckpointExpectationTest(unittest.TestCase):
         self.assertEqual(expect['checkpoints']['w'], {
             'screen': 'world', 'world.area': 'AR1000',
             'world.dialog.active': 1, 'world.dialog.speaker': 1048592,
-            'world.dialog.entry': 34, 'world.dialog.responses': 5})
+            'world.dialog.entry': 34, 'world.dialog.responses': 5,
+            'world.doors[0].name': 'AR1000_Door5',
+            'world.doors[0].open': 0, 'world.doors[0].locked': 0})
         os.remove(os.path.join(original, 'checkpoint-w.json'))
         with self.assertRaisesRegex(ValueError, 'checkpoint-w.json'):
             realinput.make_expectations(self.actions, original, 'test')
@@ -1107,8 +1111,9 @@ class CheckpointExpectationTest(unittest.TestCase):
             for fields in expect['checkpoints'].values():
                 self.assertIn('screen', fields)
         # The scenario whose lost Gender click the old pass test missed,
-        # and M2's exit scenario.
+        # and M1's and M2's exit scenarios.
         self.assertIn('chargen_replay', found)
+        self.assertIn('world_entry', found)
         self.assertIn('walk_and_talk', found)
 
 
@@ -3608,7 +3613,7 @@ class ShotCheckTest(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
         self.run_dir = self._tmp.name
         self.actions = realinput.load_scenario(os.path.join(
-            ROOT, 'scenarios', 'pending', 'world_entry.txt'))
+            ROOT, 'scenarios', 'world_entry.txt'))
         self.assertIn('world', [a['name'] for a in self.actions
                                 if a['op'] == 'shot'])
 
@@ -3951,11 +3956,11 @@ class SandboxReplayTest(unittest.TestCase):
         events = []
         build = os.path.join(self.tmp, 'win')
         out = os.path.join(build, oracle.REPLAY_DIR_REL)
-        os.makedirs(out)
+        os.makedirs(out, exist_ok=True)
         for name in (oracle.INJECTOR, oracle.RECORDER):
             open(os.path.join(out, name), 'w').close()
         game = os.path.join(self.tmp, 'game')
-        os.makedirs(game)
+        os.makedirs(game, exist_ok=True)
         dump = {'frame': 10, 'globals': {'reinitializing': 0,
                                          'ai_stalled_frames': 0}}
 
@@ -4037,6 +4042,27 @@ class SandboxReplayTest(unittest.TestCase):
         self.record(['replay', 'record', 'start_screen',
                      '--test-slow-reads', '15'], run)
         self.assertEqual(seen, ['15'])
+
+    def test_record_takes_the_scenario_timeout(self):
+        # --timeout wins; else the scenario header's "# timeout: S"
+        # (realinput.header_timeout); else REPLAY_TIMEOUT.
+        seen = []
+
+        def run(build_dir, game_dir, script, env, timeout, host_run,
+                out_dir, log):
+            seen.append(timeout)
+            os.makedirs(out_dir)
+            return {'code': None, 'stdout': '', 'stderr': '',
+                    'error': 'stop', 'seconds': 1.0}
+        own = os.path.join(self.tmp, 'long.txt')
+        with open(own, 'w') as f:
+            f.write('# timeout: 420\nwait 1\ncheckpoint start\n')
+        self.record(['replay', 'record', own], run)
+        self.record(['replay', 'record', own, '--timeout', '60'], run)
+        self.record(['replay', 'record', 'start_screen'], run)
+        self.assertEqual(seen, [420, 60, oracle.REPLAY_TIMEOUT])
+        self.assertEqual(oracle.replay_timeout(None, os.path.join(
+            ROOT, 'scenarios', 'walk_and_talk.txt')), 420)
 
     def test_host_switch(self):
         code, events, locks, _ = self.record(
