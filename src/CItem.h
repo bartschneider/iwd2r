@@ -37,6 +37,7 @@ public:
     ITEM_ABILITY* GetAbility(INT nAbility);
     CGameEffect* GetAbilityEffect(LONG abilityNum, LONG effectNum, CGameObject* pObject);
     WORD GetItemType();
+    SHORT sub_4E9840(const ITEM_ABILITY* ability);
     DWORD GetCriticalHitMultiplier();
     DWORD GetWeight();
     CResRef GetUsedUpItemId();
@@ -62,6 +63,7 @@ public:
     BYTE GetMinCHRRequired();
     void sub_4EA4A0(CString& sResRef);
     void sub_4EA580(CUIControlTextDisplay* pText, COLORREF rgbColor);
+    void sub_4EA750(CUIControlTextDisplay* pText, COLORREF rgbColor);
 
     CItem& operator=(const CItem& other);
     bool operator==(const CItem& other);
