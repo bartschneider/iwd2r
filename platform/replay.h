@@ -33,7 +33,22 @@
 //     so the search thread's snapshot of the search map and the frame its
 //     result is first seen do not depend on thread scheduling: the original
 //     shows that timing in every recording, and without the wait about one
-//     run of ours in five walked a different path in walk_and_talk.
+//     run of ours in five walked a different path in walk_and_talk. The
+//     wait is a deviation from the original, where the next object's update
+//     can run while the search does. In replay it rules out:
+//       - FindPath cut short at minNodes because another request was queued
+//         meanwhile (CPathSearch::FindPath's two node-limit tests go past
+//         minNodes only while m_searchRequestListEmpty is set, and queueing
+//         a request clears it): the next object queues nothing until the
+//         search is done;
+//       - a share the search thread asks for coming back DENIED because the
+//         next object's update holds its deny; in the original 256 DENIED
+//         tries drop that party member (or target) from the search's goals
+//         and snapshot;
+//     and it covers only the requests queued in the three per-object loops
+//     of CGameArea::AIUpdate. A request queued anywhere else (the message
+//     handler, the main thread) is not waited for. A wait that passes its
+//     deadline gives up and is counted (WaitForSearch below);
 //
 // OnFrame writes frame-<N>.json every IWD2R_DUMP_EVERY frames (default 30,
 // 0 for none), checkpoint-<NAME>.json at the scenario's checkpoint lines,
