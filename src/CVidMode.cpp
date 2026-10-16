@@ -2113,6 +2113,25 @@ DWORD CVidMode::GetIntensity16(DWORD color)
         + (((m_dwRBitMask & color) >> (m_dwRBitShift & 0x1F)) << (field_C2 & 0x1F));
 }
 
+// The colour as a pixel of the current depth: each channel at its shift,
+// above 16 bpp whole, else less the bits the 16-bit format drops and cut to
+// the low word.
+//
+// 0x79ADF0
+DWORD CVidMode::PackColor(COLORREF rgbColor)
+{
+    if (g_pChitin->cVideo.m_nBpp > 16) {
+        return (GetRValue(rgbColor) << (m_dwRBitShift & 0x1F))
+            | (GetGValue(rgbColor) << (m_dwGBitShift & 0x1F))
+            | (GetBValue(rgbColor) << (m_dwBBitShift & 0x1F));
+    }
+
+    return ((GetGValue(rgbColor) >> (field_C6 & 0x1F)) << (m_dwGBitShift & 0x1F)
+               | (GetBValue(rgbColor) >> (field_CA & 0x1F)) << (m_dwBBitShift & 0x1F)
+               | (GetRValue(rgbColor) >> (field_C2 & 0x1F)) << (m_dwRBitShift & 0x1F))
+        & 0xFFFF;
+}
+
 // #binary-identical
 // 0x79AB50
 DWORD CVidMode::ReduceColor(COLORREF rgbColor)
