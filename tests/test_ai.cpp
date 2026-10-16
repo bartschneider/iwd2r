@@ -714,6 +714,47 @@ TEST_CASE("ai: CheckStat, CheckStatGT and CheckStatLT compare the cause's derive
     ClearMessages();
 }
 
+// sub_763200's Resist Poison (feat 50, 0x7636E9) and Snake Blood (feat 59,
+// 0x7637AE): the race, at character level 1.
+TEST_CASE("ai: Resist Poison and Snake Blood need their race at character level 1", "[ai][data]")
+{
+    REQUIRE_ENGINE();
+    CGameSprite* pSprite = MakeSprite();
+    pSprite->m_typeAI.m_nClassMask = 1;
+    memset(pSprite->m_baseStats.m_classLevels, 0, sizeof(pSprite->m_baseStats.m_classLevels));
+    pSprite->m_baseStats.m_classLevels[0] = 1;
+
+    // Resist Poison: a half-orc, or a dwarf of subrace 2.
+    pSprite->m_typeAI.m_nRace = CAIOBJECTTYPE_R_HALF_ORC;
+    pSprite->m_typeAI.m_nSubRace = 0;
+    CHECK(pSprite->sub_763200(CGAMESPRITE_FEAT_RESIST_POISON, 0));
+    pSprite->m_typeAI.m_nRace = CAIOBJECTTYPE_R_DWARF;
+    CHECK_FALSE(pSprite->sub_763200(CGAMESPRITE_FEAT_RESIST_POISON, 0));
+    pSprite->m_typeAI.m_nSubRace = 2;
+    CHECK(pSprite->sub_763200(CGAMESPRITE_FEAT_RESIST_POISON, 0));
+    pSprite->m_typeAI.m_nRace = CAIOBJECTTYPE_R_HUMAN;
+    CHECK_FALSE(pSprite->sub_763200(CGAMESPRITE_FEAT_RESIST_POISON, 0));
+
+    // Snake Blood: a human.
+    CHECK(pSprite->sub_763200(CGAMESPRITE_FEAT_SNAKE_BLOOD, 0));
+    pSprite->m_typeAI.m_nRace = CAIOBJECTTYPE_R_HALF_ORC;
+    CHECK_FALSE(pSprite->sub_763200(CGAMESPRITE_FEAT_SNAKE_BLOOD, 0));
+
+    // Character level 2 (the classes of the class mask): neither.
+    pSprite->m_typeAI.m_nRace = CAIOBJECTTYPE_R_HUMAN;
+    pSprite->m_baseStats.m_classLevels[0] = 2;
+    CHECK_FALSE(pSprite->sub_763200(CGAMESPRITE_FEAT_SNAKE_BLOOD, 0));
+    pSprite->m_typeAI.m_nRace = CAIOBJECTTYPE_R_HALF_ORC;
+    CHECK_FALSE(pSprite->sub_763200(CGAMESPRITE_FEAT_RESIST_POISON, 0));
+    // A level in a class outside the mask does not count.
+    pSprite->m_baseStats.m_classLevels[0] = 1;
+    pSprite->m_baseStats.m_classLevels[3] = 4;
+    CHECK(pSprite->sub_763200(CGAMESPRITE_FEAT_RESIST_POISON, 0));
+    // No class: neither.
+    pSprite->m_typeAI.m_nClassMask = 0;
+    CHECK_FALSE(pSprite->sub_763200(CGAMESPRITE_FEAT_RESIST_POISON, 0));
+}
+
 TEST_CASE("ai: the party specifiers decode to the party member the game picks", "[ai][data]")
 {
     REQUIRE_ENGINE();
