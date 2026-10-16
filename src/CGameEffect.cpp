@@ -4556,14 +4556,18 @@ void CGameEffectDamage::sub_4A8DF0(DWORD dwDamageType, CGameSprite* pSprite)
         sSound = sPrefix;
         sSound += nDigit;
 
-        // TODO: Incomplete. The original compares sSound with the sprite's
-        // last hit sound (a CString at CGameSprite + 0x7102, not in
-        // CGameSprite.h): when they are equal the digit moves on by one,
-        // wrapping to '1'. Without the field the comparison never holds.
+        // The same sound twice in a row moves on to the next, wrapping to
+        // the first.
+        if (strcmp(sSound, pSprite->m_sLastHitSound) == 0) {
+            if (nDigit - '1' == nDigits - 1) {
+                nDigit = '1';
+            } else {
+                nDigit++;
+            }
+        }
         sPrefix += nDigit;
 
-        // TODO: Incomplete. The original stores sPrefix as the sprite's last
-        // hit sound (CGameSprite + 0x7102).
+        pSprite->m_sLastHitSound = sPrefix;
     }
 
     CResRef res(sPrefix);
