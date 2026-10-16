@@ -88,7 +88,8 @@ C:/Users/thier/iwd2r-oracle/replays/<stamp>, then moves them with
 recorder.log, status.txt and replay.json (the summary) to
 runs/<stamp>/replay/. Every dump is validated against
 oracle/replay/schema.json (tools/minischema.py). The injector kills the game
-after --timeout seconds (default 180) and exits 10; the run then reports the
+after --timeout seconds (default: the scenario header's "# timeout: S",
+else 180) and exits 10; the run then reports the
 last frame the recorder reached (its status.txt) and exits 10. Any other
 failure exits 1: a dump that does not validate, a game exit code other than
 0, a scenario that did not finish, a scenario checkpoint with no dump, or a
@@ -1599,6 +1600,19 @@ def finish_replay(out_dir, schema, actions, result, summary, report):
     return result
 
 
+def replay_timeout(arg, script):
+    """A replay's timeout in seconds: --timeout (arg) when given, else the
+    scenario header's "# timeout: S" (realinput.header_timeout), else
+    REPLAY_TIMEOUT."""
+    import realinput
+    if arg is not None:
+        return arg
+    try:
+        return realinput.load_header_timeout(script) or REPLAY_TIMEOUT
+    except realinput.ScenarioError as e:
+        sys.exit('oracle: %s' % e)
+
+
 def load_actions(script):
     import realinput
     try:
@@ -1617,7 +1631,8 @@ def replay_record(args):
     script = scenario_path(args.scenario)
     actions = load_actions(script)
     run_dir = play.make_run_folder(RUNS_DIR, datetime.datetime.now())
-    return record_original(script, actions, args.seed, args.timeout,
+    return record_original(script, actions, args.seed,
+                           replay_timeout(args.timeout, script),
                            args.dump_every, run_dir, 'replay',
                            args.test_steal_focus, args.test_no_focus_guard,
                            sandbox=not args.host,
@@ -1911,12 +1926,13 @@ def replay_compare(args):
     ini_names = play.backup_inis(game, backup)
     try:
         print('== the original')
-        original = record_original(script, actions, args.seed, args.timeout,
+        timeout = replay_timeout(args.timeout, script)
+        original = record_original(script, actions, args.seed, timeout,
                                    args.dump_every, run_dir, 'original',
                                    sandbox=not args.host)
         play.restore_inis(backup, game, ini_names)
         print('== ours')
-        ours = run_ours(exe, game, script, actions, args.seed, args.timeout,
+        ours = run_ours(exe, game, script, actions, args.seed, timeout,
                         args.dump_every, run_dir, 'ours')
     finally:
         play.restore_inis(backup, game, ini_names)
@@ -2048,9 +2064,9 @@ def main(argv=None):
                         help='seed for the original srand (default '
                         '%(default)s)')
     record.add_argument('--timeout', type=positive_int,
-                        default=REPLAY_TIMEOUT,
-                        help='seconds before the game is killed (default '
-                        '%(default)s)')
+                        help='seconds before the game is killed (default: '
+                        'the scenario header\'s "# timeout: S", else %d)'
+                        % REPLAY_TIMEOUT)
     record.add_argument('--dump-every', type=non_negative_int,
                         default=REPLAY_DUMP_EVERY,
                         help='a dump every N frames, 0 for none (default '
@@ -2075,9 +2091,9 @@ def main(argv=None):
                          help='seed for both sides\' main-thread srand '
                          '(default %(default)s)')
     compare.add_argument('--timeout', type=positive_int,
-                         default=REPLAY_TIMEOUT,
                          help='seconds before either side is killed '
-                         '(default %(default)s)')
+                         '(default: the scenario header\'s "# timeout: S", '
+                         'else %d)' % REPLAY_TIMEOUT)
     compare.add_argument('--dump-every', type=non_negative_int,
                          default=REPLAY_DUMP_EVERY,
                          help='a dump every N frames on both sides, 0 for '
