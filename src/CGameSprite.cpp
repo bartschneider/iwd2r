@@ -853,9 +853,20 @@ CGameSprite::CGameSprite(BYTE* pCreature, LONG creatureSize, int a3, WORD type, 
     m_bDeleteOnRemove = TRUE;
     m_lastRegenerationTime = g_pBaldurChitin->GetObjectGame()->GetWorldTimer()->m_gameTime;
 
-    // NOTE: The original zeroes 0x3428-0x3DFA here (rep stos at 0x6EFAAB);
-    // nothing writes field_3428 afterwards.
+    // NOTE: The original zeroes 0x3428-0x3DFA here (rep stos of 0x274
+    // DWORDs and a WORD at 0x6EFAAB-0x6EFAC0), before the quick-slot buttons
+    // are built: field_3428 (nothing writes it afterwards), field_3D14, the
+    // last spellbook class and level, field_3D3A and m_nLastSong. A creature
+    // that is not a party member gets no other value for field_3D3A, the
+    // quick weapons' ammunition slots, before Unmarshal re-equips its weapon
+    // set (sub_726810 reads it): left as the heap had it, an archer's bow
+    // was equipped once or twice depending on the memory layout.
     field_3428 = 0;
+    memset(field_3D14, 0, sizeof(field_3D14));
+    m_nLastSpellbookClassIndex = 0;
+    m_nLastSpellbookSpellLevel = 0;
+    memset(field_3D3A, 0, sizeof(field_3D3A));
+    m_nLastSong = 0;
 
     CButtonData buttonData;
 

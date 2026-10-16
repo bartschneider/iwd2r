@@ -491,6 +491,56 @@ TEST_CASE("creatures 10GUTHE and 12OGR construct from their CRE", "[cre][data]")
     }
 }
 
+// The constructor (0x6EF990) zeroes 0x3428-0x3DFA before Unmarshal re-equips
+// a creature's weapon set (sub_726810), which reads the quick weapons'
+// ammunition slots (field_3D3A). 10GOBAR, AR1000's goblin archer, has a
+// shortbow and arrows: built over memory of zeroes or of 0xFF bytes, it
+// selects the arrows (the first quiver slot, 11) for its first weapon
+// button either way.
+TEST_CASE("a goblin archer equips its bow the same over any heap contents", "[cre][data]")
+{
+    const char* env = std::getenv("IWD2_DATA");
+    if (env == nullptr || *env == '\0') {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+
+    std::vector<BYTE> bytes = LoadCre("10GOBAR");
+    REQUIRE(bytes.size() > 900);
+
+    // Never freed: the sprites stay in the game's object array, as
+    // MakeSprite's do.
+    CGameSprite* sprites[2];
+    const int fills[2] = { 0x00, 0xFF };
+    for (int n = 0; n < 2; n++) {
+        void* memory = ::operator new(sizeof(CGameSprite));
+        std::memset(memory, fills[n], sizeof(CGameSprite));
+        sprites[n] = new (memory) CGameSprite(bytes.data(),
+            static_cast<LONG>(bytes.size()),
+            0,
+            0,
+            -1,
+            0,
+            0,
+            INT_MAX,
+            CPoint(-1, -1),
+            0);
+    }
+
+    for (int n = 0; n < 2; n++) {
+        INFO("fill " << fills[n]);
+        CHECK(sprites[n]->field_3D3A[0] == 11);
+        for (int button = 1; button < 8; button++) {
+            CHECK(sprites[n]->field_3D3A[button] == 0);
+        }
+        CHECK(sprites[n]->m_nLastSong == 0);
+        CHECK(sprites[n]->m_equipment.m_selectedWeapon == 11);
+    }
+    CHECK(sprites[0]->m_equipment.m_selectedWeaponAbility == sprites[1]->m_equipment.m_selectedWeaponAbility);
+}
+
 // A manual sweep, hidden from the default run: constructs every creature
 // named in IWD2R_CRE_LIST (separated by spaces, commas or newlines),
 // printing each name before it is built, so a crash names its creature.
