@@ -516,6 +516,7 @@ public:
     void ReadyOffInternalList(CButtonData buttonData, BOOLEAN firstCall);
     void sub_71A0E0(CButtonData buttonData, BOOLEAN firstCall);
     void sub_71A550(CButtonData buttonData, BOOLEAN firstCall);
+    void CheckQuickLists(CAbilityId* ability, SHORT changeAmount, BOOL remove, BOOL removeSpellIfZero);
     void CheckToolTipItem(BYTE buttonNum);
     CItem* GetQuickItem(BYTE buttonNum);
     void UnequipAll(BOOL a1);
