@@ -13239,9 +13239,9 @@ SHORT CGameSprite::ExecuteAction()
         returnValue = ACTION_ERROR;
         goto done;
     case 119:
-        // DropInventory
-        // TODO: 0x72A764-0x72A787 not ported (0x754EE0).
-        returnValue = ACTION_ERROR;
+        // DropInventory (0x72A764-0x72A787): everything droppable, no
+        // exception.
+        returnValue = DropInventory(FALSE, CString(""));
         goto done;
     case 124:
         // Berserk
