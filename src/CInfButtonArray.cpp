@@ -1774,7 +1774,6 @@ BOOL CInfButtonArray::sub_5959A0(INT nButtonType)
     return TRUE;
 }
 
-
 // 0x58A340
 BOOL CInfButtonArray::UpdateButtons()
 {
