@@ -2199,3 +2199,91 @@ TEST_CASE("combat: SetBestWeapon picks the goblin's melee weapon within its rang
     CHECK(pGoblin->ExecuteAction() == CGameAIBase::ACTION_ERROR);
     ClearMessages();
 }
+
+// CAIObjectType::Decode's NearestEnemyOf (12, 0x40BF48) and Nearest (14,
+// 0x40C208): Nearest asks the area for the second nearest of the current
+// object's type, as SecondNearest does.
+TEST_CASE("combat: NearestEnemyOf decodes to the nearest goblin and Nearest to the second nearest", "[combat][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    Fight fight;
+    std::string why;
+    if (!SetUpFight(fight, why)) {
+        if (why.find("CHR") != std::string::npos) {
+            SKIP("[iwd2r-skip] " + why);
+        }
+        FAIL(why);
+    }
+    CGameSprite* pCharacter = fight.pCharacter;
+    CGameSprite* pGoblin = fight.pGoblin;
+    const CPoint pos = pCharacter->GetPos();
+    CGameSprite* pMiddle = AddCreature(fight.pArea, "10GOB", CPoint(pos.x + 4 * CPathSearch::GRID_SQUARE_SIZEX, pos.y));
+    CGameSprite* pFar = AddCreature(fight.pArea, "10GOB", CPoint(pos.x + 7 * CPathSearch::GRID_SQUARE_SIZEX, pos.y));
+    REQUIRE(pMiddle != NULL);
+    REQUIRE(pFar != NULL);
+    fight.pArea->SortLists();
+
+    // NearestEnemyOf(Myself) of the party member: the nearest goblin.
+    CAIObjectType enemy(0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0);
+    enemy.m_SpecialCase[0] = 12;
+    enemy.Decode(pCharacter);
+    CHECK(enemy.m_nInstance == pGoblin->GetId());
+
+    // Nearest with the goblins' type, from the nearest goblin: of the two
+    // other goblins, the second nearest (the far one), not the nearest (the
+    // middle one).
+    CAIObjectType nearest;
+    nearest.Set(pGoblin->GetAIType());
+    nearest.m_sName = "";
+    nearest.m_nInstance = -1;
+    nearest.m_SpecialCase[0] = 14;
+    nearest.Decode(pGoblin);
+    INFO("middle " << pMiddle->GetId() << ", far " << pFar->GetId() << ", decoded " << nearest.m_nInstance);
+    CHECK(nearest.m_nInstance == pFar->GetId());
+}
+
+// Unmarshal (0x70C600) resets a loaded character's empty action bar buttons
+// from QSLOTS.2DA (the inlined ResetQuickSlots, 0x70C8E6-0x70C96E).
+TEST_CASE("combat: a loaded party member's empty action bar buttons get its class's defaults", "[combat][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    Fight fight;
+    std::string why;
+    if (!SetUpFight(fight, why)) {
+        if (why.find("CHR") != std::string::npos) {
+            SKIP("[iwd2r-skip] " + why);
+        }
+        FAIL(why);
+    }
+    CGameSprite* pCharacter = fight.pCharacter;
+    CSavedGamePartyCreature partyCreature;
+    pCharacter->Marshal(partyCreature, FALSE);
+
+    // Slot 0 keeps a button of its own; the others are empty.
+    for (INT nSlot = 0; nSlot < CGAMESAVECHARACTER_NUM_CUSTOM_BUTTONS22; nSlot++) {
+        partyCreature.field_19A[nSlot] = nSlot == 0 ? 2 : 0;
+    }
+    pCharacter->Unmarshal(&partyCreature, TRUE, FALSE);
+
+    const CRuleTables& ruleTables = g_pBaldurChitin->GetObjectGame()->GetRuleTables();
+    INT nClass = pCharacter->GetDerivedStats()->GetBestClass() - 1;
+    INFO("class row " << nClass);
+    CHECK(pCharacter->field_3D14[0] == 2);
+    for (INT nSlot = 1; nSlot < CGAMESAVECHARACTER_NUM_CUSTOM_BUTTONS22; nSlot++) {
+        INFO("slot " << nSlot);
+        CHECK(pCharacter->field_3D14[nSlot] == atol(ruleTables.m_tQuickSlots.GetAt(CPoint(nSlot, nClass))));
+    }
+    ClearMessages();
+}
