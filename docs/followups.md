@@ -108,7 +108,6 @@ The guards in `src/render/api.h` leave these for the renderer that first draws t
 ## Load-time equipment and AI rand parity (from project 3, milestone 2, rng round 2)
 
 - Faithful ports that change default gameplay widely, so new crashes or gameplay differences may trace back to them: the weapon-set switch `CGameSprite::sub_726810` (0x726810) now runs at every party load, on every weapon-set click in the inventory, and for every non-PC creature loaded from a CRE; the area now counts the party (`m_nCharacters` compared with 0xFF), so the visibility branches run; `CGameArea::OnActivation` stops the world timer when the world is not paused; creatures' `m_active` follows the time-of-day mask, so they appear and vanish by hour.
-- `CGameSprite::EquipMostDamagingMelee` (0x75DFD0) is a stub, reached from `sub_75E330` when a non-PC has a launcher but no fitting ammunition: the original equips its best melee weapon, ours keeps the launcher (TODO at the call site in src/CGameSprite.cpp).
 - `sub_75E330` does not call `CheckQuickLists` (0x71ABA0); it only refreshes quick-list counts and the action bar.
 - `byte_8D86B0` is a file-static in both src/CGameSprite.cpp and src/CItem.cpp; the original has one never-written global. Both copies stay zero, so they cannot disagree, but one shared extern would be cleaner.
 - Weaker tests: the `m_active` test restates the formula; the trigger test skips the proximity-trap path (type 0, ENTERED/GetDeny); the weapon-set test never covers the launcher path; `CGameArea::OnActivation`'s fix has no unit test (the headless sound start segfaults) and is covered only by the replay's rand trace.
@@ -206,7 +205,6 @@ The crisp-text requirement is met by `Program Options/Text Renderer=scalable` (s
 
 These block TODOs in the combat stream's ports; each is in a file or function the stream was not granted.
 
-- `CGameSprite::EquipMostDamagingMelee` 0x75DFD0 is a stub that returns `ACTION_ERROR` (TODO in its body). Its callers (the action 149, Attack, Swing, AttackReevaluate, CheckIfUsedUp, `sub_75E330`, several effect opcodes and others; docs/evidence/75DFD0.md lists them) get no weapon change: the creature keeps its empty or launcher slot instead of its best melee weapon or the fist.
 - `CGameSprite` 0x75E150, CheckIfUsedUp for a creature outside the party or charmed, is not ported.
 - `CGameSprite` 0x71F860, the ammunition's and launcher's effects on a missile's projectile, is not ported: Swing's missile branch fires without them.
 - `CGameSprite::CheckQuickLists` 0x71ABA0 is not ported: Swing's and Spell's quick-button refreshes are TODOs.

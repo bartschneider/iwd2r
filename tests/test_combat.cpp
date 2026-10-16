@@ -568,6 +568,45 @@ TEST_CASE("combat: DropInventory puts a goblin's droppable items and gold on its
     ClearMessages();
 }
 
+// EquipMostDamagingMelee (0x75DFD0): the goblin's melee weapon set, not the
+// fist; with the magic weapon slot in use nothing changes (ACTION_ERROR).
+TEST_CASE("combat: EquipMostDamagingMelee takes the goblin's melee weapon back from its fists", "[combat][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    Fight fight;
+    std::string why;
+    if (!SetUpFight(fight, why)) {
+        if (why.find("CHR") != std::string::npos) {
+            SKIP("[iwd2r-skip] " + why);
+        }
+        FAIL(why);
+    }
+    CGameSprite* pGoblin = fight.pGoblin;
+    CGameSpriteEquipment* pEquipment = pGoblin->GetEquipment();
+    const BYTE nWeapon = pEquipment->m_selectedWeapon;
+    INFO("selected weapon slot " << static_cast<int>(nWeapon));
+    REQUIRE(nWeapon >= CGameSpriteEquipment::SLOT_WEAPON);
+    REQUIRE(pEquipment->m_items[nWeapon] != NULL);
+
+    pGoblin->SelectWeaponAbility(CGameSpriteEquipment::SLOT_FIST, 0, 0, 1);
+    REQUIRE(pEquipment->m_selectedWeapon == CGameSpriteEquipment::SLOT_FIST);
+    CHECK(pGoblin->EquipMostDamagingMelee() == CGameAIBase::ACTION_DONE);
+    CHECK(pEquipment->m_selectedWeapon == nWeapon);
+
+    // EquipWeapon (299) is done at once for a sprite holding a weapon.
+    pGoblin->ClearActions(FALSE);
+    pGoblin->m_curAction = CAIAction(299, CPoint(-1, -1), 0, -1);
+    CHECK(pGoblin->ExecuteAction() == CGameAIBase::ACTION_DONE);
+    CHECK(pEquipment->m_selectedWeapon == nWeapon);
+    ClearMessages();
+}
+
 TEST_CASE("combat: GetAC sums the armour class modifiers and the capped dexterity bonus", "[combat][data]")
 {
     if (DataDir() == nullptr) {

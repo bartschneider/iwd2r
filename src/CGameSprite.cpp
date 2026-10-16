@@ -13335,9 +13335,8 @@ SHORT CGameSprite::ExecuteAction()
         returnValue = ACTION_ERROR;
         goto done;
     case 174:
-        // EquipRanged
-        // TODO: 0x72AE54-0x72AE64 not ported (0x75E150).
-        returnValue = ACTION_ERROR;
+        // EquipRanged (0x72AE54-0x72AE64)
+        returnValue = EquipRanged();
         goto done;
     case 175:
         // SetLeavePartyDialogFile
@@ -13513,9 +13512,15 @@ SHORT CGameSprite::ExecuteAction()
         returnValue = ACTION_ERROR;
         goto done;
     case 299:
-        // EquipWeapon
-        // TODO: 0x72AE1F-0x72AE43 not ported (0x75E150).
-        returnValue = ACTION_ERROR;
+        // EquipWeapon (0x72AE1F-0x72AE43): a sprite holding nothing or its
+        // fists (00FIST) takes its best ranged weapon; one with a weapon is
+        // done.
+        if (m_equipment.m_items[m_equipment.m_selectedWeapon] != NULL
+            && !(m_equipment.m_items[m_equipment.m_selectedWeapon]->cResRef == "00FIST")) {
+            returnValue = ACTION_DONE;
+            goto done;
+        }
+        returnValue = EquipRanged();
         goto done;
     case 300:
         // JumpToSavedLocation (0x729BA8-0x729BDE)
@@ -22161,13 +22166,126 @@ BOOL CGameSprite::CheckIfUsedUp(SHORT nSlot, SHORT nAbility)
 // 0x75DFD0
 SHORT CGameSprite::EquipMostDamagingMelee()
 {
-    // TODO: EquipMostDamagingMelee 0x75DFD0 is not ported. Unless the magic
-    // weapon slot (42) holds an item (then ACTION_ERROR), the original
-    // selects the weapon set (slots 43-50) whose melee ability does the most
-    // damage (dice count times size plus bonus) through sub_726810
-    // (0x75E0B4), or the fist (SelectWeaponAbility, 0x75E09F), and returns
-    // ACTION_DONE. Ours selects nothing. Listed in docs/followups.md.
-    return ACTION_ERROR;
+    if (m_equipment.m_items[42] != NULL) {
+        return ACTION_ERROR;
+    }
+
+    // The weapon set (slots 43-50) whose melee ability (type byte 1) does the most
+    // damage, dice count times dice size plus the bonus, a SHORT; a later
+    // one wins a tie, and nothing better than 0 counts.
+    SHORT nBestSlot = -1;
+    SHORT nBestAbility = -1;
+    SHORT nBestDamage = 0;
+    for (INT nSet = 0; nSet < 8; nSet++) {
+        CItem* pItem = m_equipment.m_items[CGameSpriteEquipment::SLOT_WEAPON + nSet];
+        if (pItem == NULL) {
+            continue;
+        }
+
+        pItem->Demand();
+        for (INT nAbility = 0; nAbility < pItem->GetAbilityCount(); nAbility++) {
+            const ITEM_ABILITY* pAbility = pItem->GetAbility(nAbility);
+            if (pAbility != NULL && (pAbility->type & 0xFF) == 1) {
+                SHORT nDamage = static_cast<SHORT>(pAbility->damageDiceCount * pAbility->damageDice + pAbility->damageDiceBonus);
+                if (nDamage >= nBestDamage) {
+                    nBestDamage = nDamage;
+                    nBestAbility = static_cast<SHORT>(nAbility);
+                    nBestSlot = static_cast<SHORT>(CGameSpriteEquipment::SLOT_WEAPON + nSet);
+                }
+            }
+        }
+        pItem->Release();
+    }
+
+    if (nBestSlot == -1 && nBestAbility == -1) {
+        SelectWeaponAbility(CGameSpriteEquipment::SLOT_FIST, 0, 1, 1);
+    } else {
+        sub_726810(static_cast<BYTE>((nBestSlot - CGameSpriteEquipment::SLOT_WEAPON) / 2));
+    }
+
+    // A PC that leads the party gets its action bar redrawn.
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    if (IcewindMisc::IsPC(this) == TRUE
+        && pGame->m_group.m_memberList.GetCount() != 0) {
+        LONG* pList = pGame->m_group.GetGroupList();
+        LONG nLeader = pList[0];
+        delete[] pList;
+        if (nLeader == m_id) {
+            pGame->GetButtonArray()->UpdateState();
+        }
+    }
+
+    return ACTION_DONE;
+}
+
+// The best ranged weapon (EquipRanged and, for a sprite holding its fists,
+// EquipWeapon): unless the magic weapon slot holds an item (ACTION_ERROR).
+// A party member that already holds a ranged ability keeps it; otherwise
+// the first quiver item (slots 11-14) whose ranged ability fits a launcher
+// selects that launcher's weapon set, else the first weapon set (slots
+// 43-50) with a ranged ability that needs no launcher, else the most
+// damaging melee weapon. ACTION_DONE.
+//
+// 0x75E150
+SHORT CGameSprite::EquipRanged()
+{
+    if (m_equipment.m_items[42] != NULL) {
+        return ACTION_ERROR;
+    }
+
+    if (g_pBaldurChitin->GetObjectGame()->GetCharacterPortraitNum(m_id) != -1) {
+        // NOTE: The original demands and releases the selected weapon
+        // without testing it for NULL; the selected slot always holds one
+        // (the fist at least).
+        CItem* pSelected = m_equipment.m_items[m_equipment.m_selectedWeapon];
+        if (pSelected != NULL) {
+            pSelected->Demand();
+            const ITEM_ABILITY* pAbility = pSelected->GetAbility(m_equipment.m_selectedWeaponAbility);
+            if (pAbility != NULL && (pAbility->type & 0xFF) == 2) {
+                pSelected->Release();
+                return ACTION_DONE;
+            }
+            pSelected->Release();
+        }
+    }
+
+    for (INT nQuiver = 0; nQuiver < 4; nQuiver++) {
+        CItem* pAmmo = m_equipment.m_items[CGameSpriteEquipment::SLOT_AMMO + nQuiver];
+        if (pAmmo == NULL) {
+            continue;
+        }
+
+        pAmmo->Demand();
+        const ITEM_ABILITY* pAbility = pAmmo->GetAbility(0);
+        if (pAbility != NULL && (pAbility->type & 0xFF) == 2 && CheckLauncherType(pAbility, NULL)) {
+            SHORT nLauncherSlot;
+            if (GetLauncher(pAbility, nLauncherSlot) != NULL) {
+                sub_726810(static_cast<BYTE>((nLauncherSlot - CGameSpriteEquipment::SLOT_WEAPON) / 2));
+            }
+            pAmmo->Release();
+            return ACTION_DONE;
+        }
+        pAmmo->Release();
+    }
+
+    for (INT nSet = 0; nSet < 8; nSet++) {
+        CItem* pWeapon = m_equipment.m_items[CGameSpriteEquipment::SLOT_WEAPON + nSet];
+        if (pWeapon == NULL) {
+            continue;
+        }
+
+        pWeapon->Demand();
+        const ITEM_ABILITY* pAbility = pWeapon->GetAbility(0);
+        if (pAbility != NULL && (pAbility->type & 0xFF) == 2 && CheckLauncherType(pAbility, NULL)) {
+            sub_726810(static_cast<BYTE>(nSet / 2));
+            pWeapon->Release();
+            return ACTION_DONE;
+        }
+        pWeapon->Release();
+    }
+
+    EquipMostDamagingMelee();
+    return ACTION_DONE;
 }
 
 // 0x75E330
@@ -22196,11 +22314,6 @@ SHORT CGameSprite::sub_75E330(CItem* pLauncher, BOOL bEquipMelee)
 
     if (static_cast<SHORT>(nBest) == -1) {
         if (bEquipMelee == TRUE) {
-            // TODO: EquipMostDamagingMelee (0x75DFD0) is still a stub that
-            // returns ACTION_ERROR. The original picks the best melee weapon
-            // here (and re-enters sub_726810 at 0x75E0B4); ours equips
-            // nothing, so a non-PC with a launcher and no fitting ammunition
-            // keeps the launcher. Listed in docs/followups.md.
             EquipMostDamagingMelee();
             return CGameAIBase::ACTION_DONE;
         }
