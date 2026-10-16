@@ -2287,3 +2287,60 @@ TEST_CASE("combat: a loaded party member's empty action bar buttons get its clas
     }
     ClearMessages();
 }
+
+// CGameArea::GetTintColor (0x470F10): the light map's colour at the corners
+// of the point's 16 by 12 cell, interpolated.
+TEST_CASE("combat: the area tints a point with its light map", "[combat][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    Fight fight;
+    std::string why;
+    if (!SetUpFight(fight, why)) {
+        if (why.find("CHR") != std::string::npos) {
+            SKIP("[iwd2r-skip] " + why);
+        }
+        FAIL(why);
+    }
+    CGameArea* pArea = fight.pArea;
+    REQUIRE(pArea->m_bmLum.pRes != NULL);
+
+    // A flying object is never tinted.
+    CHECK(pArea->GetTintColor(CPoint(400, 300), CGameObject::LIST_FLIGHT) == RGB(255, 255, 255));
+
+    // The day map alone (no day and night code in the area type).
+    const WORD areaType = pArea->m_cInfinity.m_areaType;
+    pArea->m_cInfinity.m_areaType = areaType & ~0x40;
+
+    RGBQUAD c00;
+    RGBQUAD c10;
+    RGBQUAD c01;
+    RGBQUAD c11;
+    REQUIRE(pArea->m_bmLum.GetPixelColor(c00, 25, 25, FALSE));
+    REQUIRE(pArea->m_bmLum.GetPixelColor(c10, 26, 25, FALSE));
+    REQUIRE(pArea->m_bmLum.GetPixelColor(c01, 25, 26, FALSE));
+    REQUIRE(pArea->m_bmLum.GetPixelColor(c11, 26, 26, FALSE));
+
+    // On a cell's corner: that pixel's colour.
+    CHECK(pArea->GetTintColor(CPoint(25 * 16, 25 * 12), CGameObject::LIST_FRONT)
+        == RGB(c00.rgbRed, c00.rgbGreen, c00.rgbBlue));
+
+    // In the middle: the four corners weighed by 8/16 and 6/12, each step
+    // truncated.
+    auto mid = [](BYTE a, BYTE b, BYTE c, BYTE d) {
+        INT nTop = (a * 8 + b * 8) / 16;
+        INT nBottom = (c * 8 + d * 8) / 16;
+        return static_cast<BYTE>((nTop * 6 + nBottom * 6) / 12);
+    };
+    CHECK(pArea->GetTintColor(CPoint(25 * 16 + 8, 25 * 12 + 6), CGameObject::LIST_FRONT)
+        == RGB(mid(c00.rgbRed, c10.rgbRed, c01.rgbRed, c11.rgbRed),
+            mid(c00.rgbGreen, c10.rgbGreen, c01.rgbGreen, c11.rgbGreen),
+            mid(c00.rgbBlue, c10.rgbBlue, c01.rgbBlue, c11.rgbBlue)));
+
+    pArea->m_cInfinity.m_areaType = areaType;
+}
