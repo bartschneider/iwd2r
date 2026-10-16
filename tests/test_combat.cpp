@@ -329,6 +329,13 @@ bool SetUpFight(Fight& fight, std::string& why)
         why = "no CHR V2.2 file in the Characters folder";
         return false;
     }
+    // The engine seeds rand() from the clock (`srand(time)` in
+    // CChitin::InitializeVariables 0x7902C0) and the new game draws from it
+    // (the creatures' first animation frames, so the frame an idle sequence
+    // ends on): seeded here, the fighters start the same in every run, and
+    // a fight after the test's own srand() draws its rolls in the same
+    // order.
+    srand(1);
     fight.pCharacter = NewGameInStartArea(cre);
     fight.pArea = fight.pCharacter->GetArea();
     if (fight.pArea == NULL) {
@@ -825,11 +832,13 @@ TEST_CASE("combat: a goblin given AttackReevaluate swings at the party member", 
     }
     INFO("frames " << frames << ", rounds " << blows << ", character hit points " << characterStart << " -> "
                    << pCharacter->GetBaseStats()->m_hitPoints);
-    CHECK(blows > 2);
+    CHECK(blows == 16);
     CHECK(pGoblin->m_curAction.m_actionID == 134);
-    // Hit points only drop. (Whether a blow lands in 16 rounds varies from
-    // run to run, so no hit is required.)
+    // Hit points only drop; with the new game seeded (SetUpFight) every run
+    // lands the same blows.
     CHECK_FALSE(hpRose);
+    CHECK(characterStart == 9);
+    CHECK(pCharacter->GetBaseStats()->m_hitPoints == 6);
 }
 
 TEST_CASE("combat: a party member casts Magic Missile through the Spell action", "[combat][data]")
@@ -1336,8 +1345,8 @@ TEST_CASE("combat: a goblin archer shoots arrows at the party member", "[combat]
     INFO("archer's weapon " << pWeapon->GetResRef().GetResRefStr() << ", ability type " << type);
     REQUIRE(type == 2);
 
-    // A fixed rand() stream to start from. The runs still differ (the hit
-    // points end at 6 or 7): something else draws rand() during the fight.
+    // A fixed rand() stream to start from; with the new game seeded too
+    // (SetUpFight) every run draws the same rolls.
     srand(21);
     pArcher->ClearActions(FALSE);
     pArcher->AddAction(CAIAction(CAIAction::ATTACK, CAIObjectType(0, 0, 0, 0, 0, 0, 0, 0, pCharacter->GetId()), 0, 0, 0));
@@ -1366,10 +1375,11 @@ TEST_CASE("combat: a goblin archer shoots arrows at the party member", "[combat]
     }
     INFO("frames " << frames << ", rounds " << rounds << ", nearest " << nearest << " squares, character hit points "
                    << characterStart << " -> " << pCharacter->GetBaseStats()->m_hitPoints);
-    CHECK(rounds > 2);
+    CHECK(rounds == 16);
     CHECK(nearest >= 5);
     CHECK_FALSE(hpRose);
-    CHECK(pCharacter->GetBaseStats()->m_hitPoints < characterStart);
+    CHECK(characterStart == 9);
+    CHECK(pCharacter->GetBaseStats()->m_hitPoints == 6);
 }
 
 namespace {
