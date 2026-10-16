@@ -11,6 +11,7 @@
 #include "CProjectileBAM.h"
 #include "CProjectileShaft.h"
 #include "CProjectileSingleTarget.h"
+#include "CProjectileSpellHit.h"
 #include "CSpell.h"
 #include "engine_world.h"
 #include "msvc_rand.h"
@@ -906,4 +907,74 @@ TEST_CASE("visual projectiles: a sparkling projectile leaves a puff each update"
         pArea->SortLists();
         ClearMessages();
     }
+}
+
+// The explosion's streams for other directions (0x51CE50): a source due
+// north fans them north-west, north and north-east; a source south-west of
+// the position (as far south as west) south, south-west and west.
+TEST_CASE("visual projectiles: an explosion fans its streams away from its source", "[visualprojectile][data]")
+{
+    WORLD_OR_SKIP(world);
+    CGameArea* pArea = world.pArea;
+    const CPoint pos(world.pCharacter->GetPos().x - 70, world.pCharacter->GetPos().y - 30);
+
+    struct Fan {
+        CPoint source;
+        CPoint vel[3];
+    };
+    const Fan fans[] = {
+        { CPoint(pos.x, pos.y - 100), { CPoint(-700, -700), CPoint(0, -1000), CPoint(700, -700) } },
+        { CPoint(pos.x - 100, pos.y + 100), { CPoint(0, 1000), CPoint(-700, 700), CPoint(-1000, 0) } },
+    };
+    for (const Fan& fan : fans) {
+        INFO("source " << fan.source.x - pos.x << "," << fan.source.y - pos.y);
+        CGameObject84D624* pExplosion = new CGameObject84D624(CGameObject84D624::COLORTYPE_STONE,
+            CGameObject84D624::TYPE_EXPLOSION,
+            CGameObject84D624::EXPLOSION_PUFFS);
+        pExplosion->SetSource(fan.source);
+        pExplosion->AddToArea(pArea, pos, 30, CGameObject::LIST_FRONT);
+        REQUIRE(pExplosion->m_particleList.GetCount() == 42);
+        for (int stream = 0; stream < 3; stream++) {
+            CParticle* pFirst = pExplosion->m_particleList.GetAt(pExplosion->m_particleList.FindIndex(14 * stream));
+            CHECK(pFirst->m_vel.x == fan.vel[stream].x);
+            CHECK(pFirst->m_vel.y == fan.vel[stream].y);
+        }
+        CHECK(UpdateUntilGone(pExplosion->GetId(), 400) > 0);
+        pArea->SortLists();
+    }
+}
+
+// CProjectileSingleTarget::Render (0x578480) draws a spell hit
+// (CProjectileSpellHit, DecodeSpellHitProjectile type 9) on the creature it
+// was fired at: on its square, which the projectiles' visible terrain
+// table passes.
+TEST_CASE("visual projectiles: a spell hit draws on its target", "[visualprojectile][data]")
+{
+    WORLD_OR_SKIP(world);
+    CGameArea* pArea = world.pArea;
+    CGameSprite* pSprite = world.pCharacter;
+    pArea->SortLists();
+    ClearMessages();
+
+    CProjectile* pProjectile = CProjectile::DecodeSpellHitProjectile(9, NULL, FALSE);
+    REQUIRE(pProjectile != nullptr);
+    pProjectile->Fire(pArea, pSprite->GetId(), pSprite->GetId(), pSprite->GetPos(), 0, 0);
+    const LONG id = pProjectile->GetId();
+    REQUIRE(id != CGameObjectArray::INVALID_INDEX);
+    ClearMessages();
+
+    AreaScope scope(pArea);
+    REQUIRE(scope.Ok());
+    scope.CentreOn(pSprite->GetPos());
+    // A few frames in, its animation is under way.
+    pProjectile->AIUpdate();
+    pProjectile->AIUpdate();
+    const CPoint pos = pSprite->GetPos();
+    const Lit lit = RenderLit(scope, pProjectile, CRect(pos.x - 200, pos.y - 250, pos.x + 200, pos.y + 100), "spellhit");
+    CHECK(lit.inside > 0);
+    CHECK(lit.outside == 0);
+
+    CHECK(UpdateUntilGone(id, 2000) > 0);
+    pArea->SortLists();
+    ClearMessages();
 }

@@ -7,6 +7,7 @@
 #include "CGameObject84D624.h"
 #include "CGameSprite.h"
 #include "CInfGame.h"
+#include "CInfinity.h"
 #include "CMessage.h"
 #include "CParticle.h"
 #include "CPathSearch.h"
@@ -239,12 +240,301 @@ void CProjectileSingleTarget::AIUpdate()
 // 0x578480
 void CProjectileSingleTarget::Render(CGameArea* pArea, CVidMode* pVidMode, int a3)
 {
-    // TODO: Incomplete. The original draws m_animation (and m_shadow when
-    // field_1D4 is set) through CInfinity's FX functions when the tile under
-    // the projectile is visible and passable.
     (void)pArea;
-    (void)pVidMode;
-    (void)a3;
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\IcewindCProjectileBAM.cpp
+    // __LINE__: 140
+    UTIL_ASSERT(pVidMode != NULL);
+
+    CRect rBounds(0, 0, 0, 0);
+    COLORREF rgbTint = RGB(CVidPalette::NO_TINT, CVidPalette::NO_TINT, CVidPalette::NO_TINT);
+    DWORD dwFlags = m_visualEffect.m_dwFlags;
+
+    if (!m_pArea->m_visibility.IsTileVisible(m_pArea->m_visibility.PointToTile(m_pos))) {
+        return;
+    }
+
+    CPoint ptGrid(m_pos.x / CPathSearch::GRID_SQUARE_SIZEX, m_pos.y / CPathSearch::GRID_SQUARE_SIZEY);
+    if (m_pArea->m_search.GetMobileCost(ptGrid, m_terrainTable, 3, TRUE) == CPathSearch::COST_IMPASSABLE) {
+        return;
+    }
+
+    if (!field_1DE) {
+        return;
+    }
+
+    if (field_1D4) {
+        dwFlags |= 0x4;
+    }
+
+    if (field_1D8 > 1) {
+        SetSequenceDirection(NULL);
+    }
+
+    CInfinity* pInfinity = &(m_pArea->m_cInfinity);
+
+    CRect rView;
+    rView.left = pInfinity->nCurrentX;
+    rView.top = pInfinity->nCurrentY;
+    rView.right = pInfinity->rViewPort.right - pInfinity->rViewPort.left + rView.left;
+    rView.bottom = pInfinity->rViewPort.bottom - pInfinity->rViewPort.top + rView.top;
+
+    CRect rFx;
+    CPoint ptReference;
+    CalculateFxRect(rFx, ptReference, NULL);
+
+    CPoint ptPos;
+    LONG nHeight;
+    ptPos.x = m_pos.x;
+    if (field_1D4) {
+        ptPos.y = m_pos.y;
+        nHeight = m_posZ;
+    } else {
+        ptPos.y = m_pos.y - m_posZ;
+        nHeight = 0;
+    }
+
+    if (field_1C2 || m_bHasHeight) {
+        ptPos.y += m_pArea->GetHeightOffset(m_pos, m_listType);
+    }
+
+    if (field_1DA > CGameSprite::DIR_N) {
+        rBounds.left = ptReference.x - rFx.right + ptPos.x + rFx.left;
+    } else {
+        rBounds.left = ptPos.x - ptReference.x;
+    }
+
+    if (field_1DA > CGameSprite::DIR_W && field_1DA < CGameSprite::DIR_E) {
+        if (field_1D4) {
+            ptReference.y = rFx.bottom - rFx.top - ptReference.y;
+            rBounds.top = ptPos.y - m_posZ - ptReference.y;
+        } else {
+            rBounds.top = ptPos.y - ptReference.y;
+        }
+        nHeight = -nHeight;
+    } else {
+        rBounds.top = ptPos.y - ptReference.y;
+    }
+
+    rBounds.right = rFx.right - rFx.left + rBounds.left;
+    rBounds.bottom = rFx.bottom - rFx.top + rBounds.top;
+
+    if (!rView.IntersectRect(rBounds, rView)) {
+        return;
+    }
+
+    if (m_visualEffect.field_0 == TRUE || m_visualEffect.field_1 == TRUE) {
+        rgbTint = m_pArea->GetTintColor(ptPos, m_listType);
+    }
+
+    // Mirrored past north, and between west and east, when the projectile
+    // allows it (+0x2A1, +0x2A0).
+    if (field_1DA > CGameSprite::DIR_N && field_2A1 == 1) {
+        dwFlags |= CInfinity::MIRROR_FX;
+    }
+
+    if (field_1DA > CGameSprite::DIR_W && field_1DA < CGameSprite::DIR_E && field_2A0 == 1) {
+        // NOTE: The original toggles MIRROR_FX here, not MIRROR_FX_UPDOWN
+        // (0x57879B: the register still holds 0x85193C).
+        dwFlags ^= CInfinity::MIRROR_FX;
+    }
+
+    // NOTE: Only FXPrep gets FXPREP_COPYFROMBACK; the rest of the render
+    // goes without it.
+    pInfinity->FXPrep(rFx, CInfinity::FXPREP_COPYFROMBACK | dwFlags, a3, ptPos, ptReference);
+    if (!pInfinity->FXLock(rFx, dwFlags)) {
+        return;
+    }
+
+    if (m_visualEffect.field_0 == TRUE) {
+        m_animation->SetTintColor(rgbTint);
+    }
+
+    if (field_1D4) {
+        pInfinity->FXRender(m_shadow, ptReference.x, ptReference.y, dwFlags, 0);
+    }
+
+    if (field_29C) {
+        field_1E2.GetRes()->Demand();
+        m_animation->SetPalette(field_1E2.GetRes()->GetColorTable(),
+            field_1E2.GetRes()->GetColorCount(),
+            CVidPalette::TYPE_RESOURCE);
+        pInfinity->FXRender(m_animation, ptReference.x, ptReference.y - nHeight, dwFlags, m_visualEffect.m_nTransValue);
+        field_1E2.GetRes()->Release();
+    } else {
+        pInfinity->FXRender(m_animation, ptReference.x, ptReference.y - nHeight, dwFlags, m_visualEffect.m_nTransValue);
+    }
+
+    pInfinity->FXRenderClippingPolys(ptPos.x, ptPos.y, 0, ptReference, rBounds, FALSE, dwFlags);
+    pInfinity->FXUnlock(dwFlags, NULL, CPoint(0, 0));
+    pInfinity->FXBltFrom(a3, rFx, ptPos.x, ptPos.y, ptReference.x, ptReference.y, dwFlags);
+}
+
+// 0x578970
+void CProjectileSingleTarget::CalculateFxRect(CRect& rFx, CPoint& ptReference, CVidCell* pVidCell)
+{
+    CPoint ptCenter;
+    CPoint ptShadowCenter;
+    CSize frameSize;
+
+    if (pVidCell == NULL) {
+        pVidCell = m_animation;
+    }
+
+    if (!field_1D4) {
+        pVidCell->GetCurrentCenterPoint(ptReference, FALSE);
+        pVidCell->GetCurrentFrameSize(frameSize, FALSE);
+        rFx.SetRect(0, 0, frameSize.cx, frameSize.cy);
+    }
+
+    // With a shadow: the frame and the shadow's frame on one reference
+    // point, the frame raised by the height (as CProjectileBAM's 0x52B6B0).
+    if (field_1D4) {
+        pVidCell->GetCurrentCenterPoint(ptCenter, FALSE);
+        ptCenter.y += m_posZ;
+        m_shadow->GetCurrentCenterPoint(ptShadowCenter, FALSE);
+
+        ptReference = ptCenter;
+        if (ptReference.x < ptShadowCenter.x) {
+            ptReference.x = ptShadowCenter.x;
+        }
+        if (ptReference.y < ptShadowCenter.y) {
+            ptReference.y = ptShadowCenter.y;
+        }
+
+        pVidCell->GetCurrentFrameSize(frameSize, FALSE);
+        frameSize.cx += ptReference.x - ptCenter.x;
+        frameSize.cy += ptReference.y - ptCenter.y;
+        rFx.SetRect(0, 0, frameSize.cx, frameSize.cy);
+
+        m_shadow->GetCurrentFrameSize(frameSize, FALSE);
+        frameSize.cx += ptReference.x - ptShadowCenter.x;
+        frameSize.cy += ptReference.y - ptShadowCenter.y;
+        if (frameSize.cx > rFx.right) {
+            rFx.right = frameSize.cx;
+        }
+        if (frameSize.cy > rFx.bottom) {
+            rFx.bottom = frameSize.cy;
+        }
+    }
+}
+
+// 0x579860
+void CProjectileSingleTarget::SetSequenceDirection(CVidCell* pVidCell)
+{
+    if (pVidCell == NULL) {
+        pVidCell = m_animation;
+    }
+
+    if (field_1D8 == 1) {
+        return;
+    }
+
+    if (field_1DA == m_nDirection) {
+        return;
+    }
+
+    if (field_1D8 == 16) {
+        // Sixteen directions: 0 to 4 face south to west; the others mirror
+        // them unless the animation has its own (+0x2A0 clear).
+        switch (m_nDirection) {
+        case 0:
+            pVidCell->SequenceSet(0);
+            break;
+        case 1:
+        case 15:
+            pVidCell->SequenceSet(1);
+            break;
+        case 2:
+        case 14:
+            pVidCell->SequenceSet(2);
+            break;
+        case 3:
+        case 13:
+            pVidCell->SequenceSet(3);
+            break;
+        case 4:
+        case 12:
+            pVidCell->SequenceSet(4);
+            break;
+        case 5:
+        case 11:
+            pVidCell->SequenceSet(field_2A0 ? 3 : 5);
+            break;
+        case 6:
+        case 10:
+            pVidCell->SequenceSet(field_2A0 ? 2 : 6);
+            break;
+        case 7:
+        case 9:
+            pVidCell->SequenceSet(field_2A0 ? 1 : 7);
+            break;
+        case 8:
+            pVidCell->SequenceSet(field_2A0 ? 0 : 8);
+            break;
+        default:
+            // __FILE__: C:\Projects\Icewind2\src\Baldur\IcewindCProjectileBAM.cpp
+            // __LINE__: 907
+            UTIL_ASSERT(FALSE);
+            break;
+        }
+    } else if (field_1D8 == 8) {
+        switch ((m_nDirection / 2) * 2) {
+        case 0:
+        case 8:
+            pVidCell->SequenceSet(0);
+            break;
+        case 2:
+        case 6:
+        case 10:
+        case 14:
+            pVidCell->SequenceSet(2);
+            break;
+        case 4:
+        case 12:
+            pVidCell->SequenceSet(4);
+            break;
+        default:
+            // __FILE__: C:\Projects\Icewind2\src\Baldur\IcewindCProjectileBAM.cpp
+            // __LINE__: 942
+            UTIL_ASSERT(FALSE);
+            break;
+        }
+    } else if (field_1D8 == 2) {
+        // Two: one sequence for the four straight directions, the other for
+        // the rest.
+        switch (m_nDirection) {
+        case 0:
+        case 4:
+        case 8:
+        case 12:
+            pVidCell->SequenceSet(0);
+            break;
+        case 1:
+        case 2:
+        case 3:
+        case 5:
+        case 6:
+        case 7:
+        case 9:
+        case 10:
+        case 11:
+        case 13:
+        case 14:
+        case 15:
+            pVidCell->SequenceSet(1);
+            break;
+        default:
+            // __FILE__: C:\Projects\Icewind2\src\Baldur\IcewindCProjectileBAM.cpp
+            // __LINE__: 974
+            UTIL_ASSERT(FALSE);
+            break;
+        }
+    }
+
+    if (pVidCell == m_animation) {
+        field_1DA = m_nDirection;
+    }
 }
 
 // 0x5791D0
