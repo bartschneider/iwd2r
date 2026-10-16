@@ -23953,6 +23953,32 @@ BOOL CGameSprite::sub_763200(UINT nFeatNumber, INT a2)
     case CGAMESPRITE_FEAT_MERCANTILE_BACKGROUND:
         // TODO: Incomplete.
         return FALSE;
+    case CGAMESPRITE_FEAT_RESIST_POISON:
+        // A half-orc, or a dwarf of subrace 2 (0x7636E9), of character level
+        // 1.
+        if (!(m_typeAI.m_nRace == CAIOBJECTTYPE_R_DWARF && m_typeAI.m_nSubRace == 2)
+            && m_typeAI.m_nRace != CAIOBJECTTYPE_R_HALF_ORC) {
+            return FALSE;
+        }
+        if (1) {
+            // Character level 1: the levels of the classes in the type's
+            // class mask add up to 1.
+            DWORD dwMask = GetAIType().m_nClassMask & 0xFFF;
+            if (dwMask == 0) {
+                return FALSE;
+            }
+
+            INT nLevels = 0;
+            DWORD dwBit = 1;
+            for (INT nClass = 0; nClass < 11 && dwBit <= 0xFFF; nClass++) {
+                if ((dwBit & dwMask) != 0) {
+                    nLevels += m_baseStats.m_classLevels[nClass];
+                }
+                dwBit <<= 1;
+            }
+
+            return nLevels == 1;
+        }
     case CGAMESPRITE_FEAT_SIMPLE_CROSSBOW:
     case CGAMESPRITE_FEAT_SIMPLE_MACE:
     case CGAMESPRITE_FEAT_SIMPLE_MISSILE:
@@ -23960,8 +23986,29 @@ BOOL CGameSprite::sub_763200(UINT nFeatNumber, INT a2)
     case CGAMESPRITE_FEAT_SIMPLE_SMALLBLADE:
         return GetFeatValue(nFeatNumber) != 3 || m_baseStats.m_fighterLevel >= 4;
     case CGAMESPRITE_FEAT_SNAKE_BLOOD:
-        // TODO: Incomplete.
-        return FALSE;
+        // A human (0x7637AE) of character level 1.
+        if (m_typeAI.m_nRace != CAIOBJECTTYPE_R_HUMAN) {
+            return FALSE;
+        }
+        if (1) {
+            // Character level 1: the levels of the classes in the type's
+            // class mask add up to 1.
+            DWORD dwMask = GetAIType().m_nClassMask & 0xFFF;
+            if (dwMask == 0) {
+                return FALSE;
+            }
+
+            INT nLevels = 0;
+            DWORD dwBit = 1;
+            for (INT nClass = 0; nClass < 11 && dwBit <= 0xFFF; nClass++) {
+                if ((dwBit & dwMask) != 0) {
+                    nLevels += m_baseStats.m_classLevels[nClass];
+                }
+                dwBit <<= 1;
+            }
+
+            return nLevels == 1;
+        }
     case CGAMESPRITE_FEAT_STUNNING_FIST:
         return (nDEX >= 13 && nWIS >= 13 && m_baseStats.m_attackBase >= 8)
             || m_baseStats.m_monkLevel > 0;
