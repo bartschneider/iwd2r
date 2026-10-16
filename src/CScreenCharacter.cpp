@@ -6242,7 +6242,15 @@ void CScreenCharacter::LevelUp(CGameSprite* pSprite)
     pSprite->AddKnownDivineSpells(nClass);
 
     if (m_nClass == CAIOBJECTTYPE_C_SORCERER || m_nClass == CAIOBJECTTYPE_C_BARD) {
+        // The quick spell buttons of each known spell, by level.
+        CAbilityId abilityId;
+        abilityId.m_nClass = m_nClass;
+        abilityId.field_1E = 0;
+        abilityId.m_itemType = 1;
+
         for (UINT nLevel = 0; nLevel < CSPELLLIST_MAX_LEVELS; nLevel++) {
+            abilityId.field_1D = static_cast<BYTE>(nLevel + 1);
+
             const CRuleTables& ruleTables = g_pBaldurChitin->GetObjectGame()->GetRuleTables();
 
             INT nNewBonus = 0;
@@ -6284,10 +6292,9 @@ void CScreenCharacter::LevelUp(CGameSprite* pSprite)
                     UINT nZero2 = 0;
                     pSprite->GetSpells(m_nClass)->Add(nID, nLevel, nDelta, nZero1, nZero2);
 
-                    // NOTE: The original then refreshes the quick spell
-                    // buttons of this spell with CGameSprite::CheckQuickLists
-                    // (0x71ABA0), which is not ported (CGameSprite.cpp, another
-                    // stream's file).
+                    // The spell's quick buttons gain the level's new uses.
+                    abilityId.m_res = g_pBaldurChitin->GetObjectGame()->m_spells.Get(nID);
+                    pSprite->CheckQuickLists(&abilityId, static_cast<SHORT>(nNewMax - nOldMax), FALSE, FALSE);
                 }
 
                 UINT nDelta = nNewMax - nOldMax;

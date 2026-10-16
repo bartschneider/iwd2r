@@ -21,6 +21,7 @@
 #include "CUtil.h"
 #include "CWarp.h"
 #include "ScreenLayout.h"
+#include "compat/msvc_rand.h"
 #include "data_view.h"
 #include "platform/data_dir.h"
 #include "platform/window.h"
@@ -470,5 +471,243 @@ TEST_CASE("character screen: the combat page of a character with a long sword", 
 
     pSprite->SelectWeaponAbility(CGameSpriteEquipment::SLOT_FIST, 0, FALSE, TRUE);
     pSprite->m_equipment.m_items[43] = pOld;
+    delete pSword;
+}
+
+namespace {
+
+// The rand() draws from the state `before` to `after`, or -1.
+int Draws(unsigned int before, unsigned int after, int limit = 1000)
+{
+    unsigned int state = before;
+    for (int n = 0; n <= limit; n++) {
+        if (state == after) {
+            return n;
+        }
+        state = state * 214013u + 2531011u;
+    }
+    return -1;
+}
+
+CAbilityId QuickItemAbility(SHORT nSlot)
+{
+    // As the inventory screen builds it for a scroll (0x62B0B0).
+    CAbilityId abilityId;
+    abilityId.m_res = "";
+    abilityId.m_itemType = 2;
+    abilityId.m_itemNum = nSlot;
+    abilityId.m_abilityNum = 0;
+    return abilityId;
+}
+
+CButtonData Button(const CAbilityId& abilityId, SHORT nCount)
+{
+    CButtonData buttonData;
+    buttonData.m_icon = "PROBE";
+    buttonData.m_name = 1;
+    buttonData.m_abilityId = abilityId;
+    buttonData.m_count = nCount;
+    return buttonData;
+}
+
+bool Cleared(const CButtonData& buttonData)
+{
+    return buttonData.m_count == 0
+        && buttonData.m_abilityId.m_itemType == -1
+        && buttonData.m_icon == ""
+        && buttonData.m_name == static_cast<STRREF>(-1)
+        && buttonData.m_bDisplayCount == TRUE;
+}
+
+}
+
+// CheckQuickLists (0x71ABA0): the matching buttons of every quick list take
+// the change; an emptied weapon, item or song is cleared, an emptied spell
+// or innate greys out unless removeSpellIfZero; `remove` clears every match;
+// only the first quick item and the first six songs count. It draws no rand.
+TEST_CASE("sprite: the quick lists follow a spent ability", "[uimisc][quicklists][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    CGameSprite* pSprite = PartyMember();
+    if (pSprite == NULL) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    REQUIRE(pSprite->m_bGlobal);
+
+    CAbilityId spell;
+    spell.m_res = "SPWI112";
+    spell.m_itemType = 1;
+    spell.m_nClass = 11;
+    spell.field_1D = 1;
+    CAbilityId other = spell;
+    other.m_res = "SPWI104";
+
+    pSprite->m_quickSpells[0] = Button(spell, 2);
+    pSprite->m_quickSpells[1] = Button(other, 2);
+    pSprite->m_quickSpells[2] = Button(spell, 2);
+    pSprite->m_quickInnates[0] = Button(spell, 1);
+    pSprite->m_quickWeapons[3] = Button(spell, 1);
+    pSprite->field_3D3A[3] = 7;
+    pSprite->m_quickItems[0] = Button(spell, 3);
+    pSprite->m_quickItems[1] = Button(spell, 3);
+    pSprite->m_quickSongs[5] = Button(spell, 1);
+    pSprite->m_quickSongs[6] = Button(spell, 1);
+
+    unsigned int before = iwd2r_rand_state();
+    pSprite->CheckQuickLists(&spell, -1, FALSE, FALSE);
+    CHECK(Draws(before, iwd2r_rand_state()) == 0);
+
+    CHECK(pSprite->m_quickSpells[0].m_count == 1);
+    CHECK_FALSE(pSprite->m_quickSpells[0].m_bDisabled);
+    CHECK(pSprite->m_quickSpells[1].m_count == 2);
+    CHECK(pSprite->m_quickSpells[2].m_count == 1);
+    // The innate is spent: greyed out, still there.
+    CHECK(pSprite->m_quickInnates[0].m_count == 0);
+    CHECK(pSprite->m_quickInnates[0].m_bDisabled);
+    CHECK(pSprite->m_quickInnates[0].m_abilityId.m_res == spell.m_res);
+    // The weapon button is cleared with its flag.
+    CHECK(Cleared(pSprite->m_quickWeapons[3]));
+    CHECK(pSprite->field_3D3A[3] == 0);
+    // Only the first quick item.
+    CHECK(pSprite->m_quickItems[0].m_count == 2);
+    CHECK(pSprite->m_quickItems[1].m_count == 3);
+    // Songs: the sixth is spent (and kept: songs go only with
+    // removeSpellIfZero), the seventh is not checked.
+    CHECK(pSprite->m_quickSongs[5].m_count == 0);
+    CHECK(pSprite->m_quickSongs[5].m_abilityId.m_res == spell.m_res);
+    CHECK(pSprite->m_quickSongs[6].m_count == 1);
+
+    // Spent to zero with removeSpellIfZero: the spells go.
+    pSprite->CheckQuickLists(&spell, -5, FALSE, TRUE);
+    CHECK(Cleared(pSprite->m_quickSpells[0]));
+    CHECK(Cleared(pSprite->m_quickSpells[2]));
+    CHECK(pSprite->m_quickSpells[1].m_count == 2);
+    CHECK(Cleared(pSprite->m_quickItems[0]));
+
+    // A gain re-enables a greyed spell; `remove` clears it whatever its
+    // count.
+    pSprite->m_quickSpells[0] = Button(spell, 0);
+    pSprite->m_quickSpells[0].m_bDisabled = TRUE;
+    pSprite->CheckQuickLists(&spell, 1, FALSE, FALSE);
+    CHECK(pSprite->m_quickSpells[0].m_count == 1);
+    CHECK_FALSE(pSprite->m_quickSpells[0].m_bDisabled);
+    pSprite->CheckQuickLists(&spell, 1, TRUE, FALSE);
+    CHECK(Cleared(pSprite->m_quickSpells[0]));
+    CHECK(Cleared(pSprite->m_quickItems[1]));
+
+    // A creature outside the party and its allies is left alone.
+    pSprite->m_bGlobal = FALSE;
+    pSprite->m_quickSpells[0] = Button(spell, 2);
+    pSprite->CheckQuickLists(&spell, -1, FALSE, FALSE);
+    CHECK(pSprite->m_quickSpells[0].m_count == 2);
+    pSprite->m_bGlobal = TRUE;
+
+    for (int n = 0; n < 9; n++) {
+        pSprite->m_quickSpells[n] = CButtonData();
+        pSprite->m_quickInnates[n] = CButtonData();
+        pSprite->m_quickSongs[n] = CButtonData();
+    }
+    pSprite->m_quickItems[0] = CButtonData();
+    pSprite->m_quickItems[1] = CButtonData();
+}
+
+// CopySpell (0x62B0B0): writing the last charge of a scroll into the
+// spellbook uses it up (CheckIfUsedUp 0x75D450: the scroll vanishes) and
+// clears its quick item (CheckQuickLists, removeSpellIfZero).
+TEST_CASE("inventory: copying a scroll's last charge removes it and its quick item", "[uimisc][inventory][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    CGameSprite* pSprite = PartyMember();
+    if (pSprite == NULL) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+
+    const SHORT nSlot = CGameSpriteEquipment::SLOT_MISC;
+    CItem* pOld = pSprite->m_equipment.m_items[nSlot];
+    CItem* pScroll = new CItem(CResRef("SPWI110Z"), 1, 1, 0, 0, 0x1);
+    pScroll->Demand();
+    const ITEM_ABILITY* pLearn = pScroll->GetAbility(1);
+    REQUIRE(pLearn != NULL);
+    pScroll->Release();
+    pSprite->m_equipment.m_items[nSlot] = pScroll;
+    const CAbilityId item = QuickItemAbility(nSlot);
+    pSprite->m_quickItems[0] = Button(item, 1);
+
+    CScreenInventory* pInventory = g_pBaldurChitin->m_pEngineInventory;
+    pInventory->m_nSelectedCharacter = 0;
+    pInventory->m_nRequesterButtonId = 5; // slot 15
+    REQUIRE(pInventory->MapButtonIdToInventoryId(5) == nSlot);
+
+    // CheckIfUsedUp on its own: a spent scroll that stacks (5) vanishes
+    // without a sound. It draws 22 rands, none of its own: unequipping the
+    // quick slot and reselecting the weapon set run the effect list four
+    // times (ProcessEffectList's five saving throw rolls each) and CheckAdd
+    // (0x4A3310) twice.
+    {
+        CItem* pSpent = new CItem(CResRef("SPWI110Z"), 1, 1, 0, 0, 0x1);
+        pSpent->SetUsageCount(0, 0);
+        pSprite->m_equipment.m_items[nSlot + 1] = pSpent;
+        const unsigned int before = iwd2r_rand_state();
+        CHECK(pSprite->CheckIfUsedUp(static_cast<SHORT>(nSlot + 1), 0));
+        CHECK(Draws(before, iwd2r_rand_state()) == 22);
+        CHECK(pSprite->m_equipment.m_items[nSlot + 1] == NULL);
+    }
+
+    pInventory->CopySpell();
+
+    CHECK(pSprite->m_equipment.m_items[nSlot] == NULL);
+    CHECK(Cleared(pSprite->m_quickItems[0]));
+
+    pSprite->m_equipment.m_items[nSlot] = pOld;
+}
+
+// IdentifyWithScroll (0x62AE70): the identify scroll's last charge goes
+// (CheckIfUsedUp 0x75D450) and the requested item is identified.
+TEST_CASE("inventory: identifying with the last scroll uses it up", "[uimisc][inventory][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    CGameSprite* pSprite = PartyMember();
+    if (pSprite == NULL) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+
+    const SHORT nItemSlot = 16; // button 6
+    const SHORT nScrollSlot = 20;
+    CItem* pOldItem = pSprite->m_equipment.m_items[nItemSlot];
+    CItem* pOldScroll = pSprite->m_equipment.m_items[nScrollSlot];
+    CItem* pSword = new CItem(CResRef("00SWDL01"), 0, 0, 0, 0, 0);
+    pSprite->m_equipment.m_items[nItemSlot] = pSword;
+    pSprite->m_equipment.m_items[nScrollSlot] = new CItem(CResRef("SPWI110Z"), 1, 1, 0, 0, 0x1);
+    REQUIRE(pSprite->FindItemPersonal(CString("SPWI110Z"), 0, FALSE) == nScrollSlot);
+
+    CScreenInventory* pInventory = g_pBaldurChitin->m_pEngineInventory;
+    pInventory->m_nSelectedCharacter = 0;
+    pInventory->m_nRequesterButtonId = 6;
+    REQUIRE(pInventory->MapButtonIdToInventoryId(6) == nItemSlot);
+
+    pInventory->IdentifyWithScroll();
+    CHECK(pSprite->m_equipment.m_items[nScrollSlot] == NULL);
+    CHECK((pSword->m_flags & 0x1) != 0);
+
+    pSprite->m_equipment.m_items[nItemSlot] = pOldItem;
+    pSprite->m_equipment.m_items[nScrollSlot] = pOldScroll;
     delete pSword;
 }

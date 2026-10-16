@@ -2003,11 +2003,29 @@ void CScreenSpellbook::UnmemorizeSpell(CGameSprite* pSprite, int a2)
                 unsigned int nMemorized = pEntry->field_4;
                 unsigned int nAvailable = pEntry->field_8;
 
-                // NOTE: The original builds the quick-slot ability of this
-                // spell and calls CGameSprite::CheckQuickLists (0x71ABA0) with
-                // it to clear the spell from the quick slots. That function is
-                // not ported (CGameSprite.cpp, outside this file); the quick
-                // slots keep the spell until they are next rebuilt.
+                // The quick spell buttons of this spell lose the memorized
+                // copy (an emptied one is cleared).
+                CAbilityId abilityId;
+                abilityId.m_itemType = 1;
+                abilityId.m_res = resRef;
+                if (nDomainIndex == nClassIndex) {
+                    abilityId.m_nClass = pGame->GetSpellcasterClass(nClassIndex);
+                } else {
+                    // __FILE__: .\Include\InfScreenSpellbook.h
+                    // __LINE__: 76
+                    UTIL_ASSERT(nClassIndex < CSPELLLIST_NUM_CLASSES);
+
+                    abilityId.m_nClass = static_cast<BYTE>(field_1654[nClassIndex]);
+                }
+                abilityId.field_1D = static_cast<BYTE>(nSpellLevel + 1);
+                if (abilityId.m_nClass == CAIOBJECTTYPE_C_CLERIC && nDomainIndex == nClassIndex) {
+                    abilityId.field_1E = pGame->GetRuleTables().GetSpecializationIndex(CAIOBJECTTYPE_C_CLERIC,
+                        pSprite->m_baseStats.m_specialization);
+                } else {
+                    abilityId.field_1E = 0;
+                }
+                pSprite->CheckQuickLists(&abilityId, -1, FALSE, TRUE);
+
                 pGame->m_cButtonArray.UpdateButtons();
 
                 if (nAvailable != 0 || nMemorized != 0) {
