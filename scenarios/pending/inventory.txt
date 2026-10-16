@@ -18,16 +18,15 @@
 # dump to write the party's item slots (CGameSpriteEquipment::m_items
 # resrefs and the selected weapon) and the party gold.
 #
-# Status (2026-10-16, ui-misc round 3): played on our side only (replay
-# mode, headless, seed 1); two runs give identical dumps at all 37
-# checkpoints. The shots show the staff unequipped, in the second set with
-# that set selected, and back. The drop fails on our side:
-# CInfGame::GetGroundPile (0x5B75C0) makes a new pile only when the area
-# already has one at the party member's feet (`!=` where the original
-# jumps on -1 at 0x5B763B), so CScreenInventory finds no pile, the ground
-# slot is refused (red frames) and the staff stays in hand; Escape's
-# CancelEngine puts it in the first backpack slot, and picked_up shows it
-# there with the fist selected. CInfGame is the vis-probe stream's file.
+# Status (2026-10-16, ui-misc round 3, on first f428a221): played on our
+# side only (replay mode, headless, seed 1); two runs give identical dumps
+# at all 37 checkpoints. The shots show the staff unequipped, in the
+# second set with that set selected, back, on the ground (the weight 0 of
+# 90 lb.), and picked up into the first weapon slot again. Two fixes on
+# the way: CInfGame::GetGroundPile made no pile (fixed on first by the
+# vis-probe stream, 8fed5378), and then the new pile's marshalling failed
+# an assert when the inventory opened (CGameContainer::MarshalMessage's
+# item count, fixed here).
 #
 # What the original recording needs: a sandbox run of oracle.py replay
 # record (the vanilla copy, Resolution=800, seed 1), then a look at its

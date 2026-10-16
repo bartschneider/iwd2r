@@ -18,8 +18,9 @@
 # scripted first).
 #
 # On the way the goblins by the tavern (1000_Goblin_02/03/09, archers 03
-# and 04, around 611..846,1812..1951) are in sight of the steps;
-# icewind2.ini's Auto Pause State includes "enemy sighted".
+# and 04, around 611..846,1812..1951) come into sight and the game pauses
+# twice ("Enemy Sighted", icewind2.ini's Auto Pause State 547); Space goes
+# on each time. At the steps they attack ("Auto-Paused: Attacked").
 #
 # State in the checkpoint dumps: the party's position and hit points on
 # the way, the area at the end (AR1003 in the original, at its entrance
@@ -27,19 +28,20 @@
 # sell comparison needs the recorder and our state dump to write the party
 # gold and item slots.
 #
-# Status (2026-10-16, ui-misc round 3): played on our side only (replay
-# mode, headless, seed 1); two runs give identical dumps. Our side ends the
-# legs at 808,1146, 760,1314, 536,1482, 551,1649, 792,1818 and 903,1889,
-# hit points 9 of 9: the goblins stay put (their red circles in the shot)
-# and the game does not pause. Our side does not travel: the door click
-# (travel cursor) leaves Probe where he stands in AR1000
+# Status (2026-10-16, ui-misc round 3, on first f428a221):
+# played on our side only (replay mode, headless, seed 1); two runs give
+# identical dumps. Our side ends the legs at 808,1146, 760,1314,
+# 536,1482, then pauses at 542,1547 (Enemy Sighted, the move under way),
+# 551,1649 after Space, 792,1818, pauses there again, 903,1889 after
+# Space. Two goblins attack at the steps (hit points 8, then 7 of 9). The
+# door click shows the travel cursor but our side does not travel
 # (CGameSprite::LeaveArea 0x74C0D0 is not ported, the vis-probe stream's
 # file).
 #
 # What the original recording needs: a sandbox run of oracle.py replay
-# record (the vanilla copy, Resolution=800, seed 1); whether the goblins
-# attack on the way (then the legs need the fight), and the arrival in
-# AR1003.
+# record (the vanilla copy, Resolution=800, seed 1); where its pauses
+# fall (a Space when the game is not paused pauses it), the fight at the
+# steps, and the arrival in AR1003.
 #
 # A real-input run takes longer than play.py's default timeout:
 # timeout: 480
@@ -324,6 +326,13 @@ origin screen
 click 416 384
 wait 150
 checkpoint leg_s4
+# On the way the goblins by the tavern come into sight: the game pauses
+# ("Enemy Sighted", icewind2.ini's Auto Pause State) with the move still
+# under way; Space goes on.
+shot enemy_sighted
+key SPACE
+wait 150
+checkpoint leg_s4_resumed
 # Leg S5: centre on Probe (552,1650), walk to 792,1818.
 origin ui
 click 528 460
@@ -342,6 +351,11 @@ origin screen
 click 512 288
 wait 150
 checkpoint leg_s6
+# Another goblin in sight: paused again; Space goes on.
+shot enemy_sighted_2
+key SPACE
+wait 150
+checkpoint leg_s6_resumed
 shot tavern_steps
 # Centre on Probe (904,1890) and click the tavern's open door
 # (AR1000_Door3) at 919,1815, near its walk-to point 919,1819, inside the
@@ -356,7 +370,13 @@ origin screen
 move 415 141
 wait 5
 click 415 141
-wait 300
+wait 30
+checkpoint attacked
+shot attacked
+# The goblins by the steps attack and the game pauses again ("Auto-Paused:
+# Attacked") with the travel order given; Space goes on.
+key SPACE
+wait 90
 checkpoint tavern
 shot tavern
 quit
