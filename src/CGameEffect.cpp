@@ -2981,7 +2981,7 @@ BOOL CGameEffectCalm::ApplyEffect(CGameSprite* pSprite)
         CGAMEEFFECT_BERSERK,
         pSprite->GetEquipedEffectList()->GetPosCurrent(),
         -1);
-    pSprite->GetEquipedEffectList()->RemoveAllOfType(pSprite,
+    pSprite->GetTimedEffectList()->RemoveAllOfType(pSprite,
         CGAMEEFFECT_BERSERK,
         pSprite->GetTimedEffectList()->GetPosCurrent(),
         -1);
@@ -2990,7 +2990,7 @@ BOOL CGameEffectCalm::ApplyEffect(CGameSprite* pSprite)
         CGAMEEFFECT_PORTRAITICON,
         pSprite->GetEquipedEffectList()->GetPosCurrent(),
         4);
-    pSprite->GetEquipedEffectList()->RemoveAllOfType(pSprite,
+    pSprite->GetTimedEffectList()->RemoveAllOfType(pSprite,
         CGAMEEFFECT_PORTRAITICON,
         pSprite->GetTimedEffectList()->GetPosCurrent(),
         4);

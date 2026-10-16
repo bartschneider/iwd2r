@@ -1297,3 +1297,31 @@ TEST_CASE("Damage's feedback line (0x4AA6D0) and its type name (0x4AB370)", "[ef
     ClearMessages();
     delete pGoblin;
 }
+
+TEST_CASE("Calm (0x4A5E50) removes berserk from both effect lists", "[effects][checksave][data]")
+{
+    PROBE_OR_SKIP(pProbe);
+    CGameSprite* pGoblin = MakeGoblin();
+    ClearMessages();
+
+    CGameEffect* pTimed = Decode(CGAMEEFFECT_BERSERK, 0, 0, CGameObjectArray::INVALID_INDEX).release();
+    CGameEffect* pEquiped = Decode(CGAMEEFFECT_BERSERK, 0, 0, CGameObjectArray::INVALID_INDEX).release();
+    CGameEffect* pIcon = Decode(CGAMEEFFECT_PORTRAITICON, 4, 4, CGameObjectArray::INVALID_INDEX).release();
+    pGoblin->m_timedEffectList.AddTail(pTimed);
+    pGoblin->m_equipedEffectList.AddTail(pEquiped);
+    pGoblin->m_timedEffectList.AddTail(pIcon);
+    pGoblin->m_baseStats.m_generalState |= STATE_BERSERK;
+    pGoblin->m_derivedStats.m_generalState |= STATE_BERSERK;
+
+    std::unique_ptr<CGameEffect> pCalm = Decode(CGAMEEFFECT_CALM, 0, 0, CGameObjectArray::INVALID_INDEX);
+    CHECK(pCalm->ApplyEffect(pGoblin) == TRUE);
+    CHECK(pCalm->m_done == TRUE);
+    CHECK((pGoblin->m_baseStats.m_generalState & STATE_BERSERK) == 0);
+    CHECK((pGoblin->m_derivedStats.m_generalState & STATE_BERSERK) == 0);
+    CHECK(!HasEffect(pGoblin->m_timedEffectList, CGAMEEFFECT_BERSERK, CResRef("")));
+    CHECK(!HasEffect(pGoblin->m_equipedEffectList, CGAMEEFFECT_BERSERK, CResRef("")));
+    CHECK(!HasEffect(pGoblin->m_timedEffectList, CGAMEEFFECT_PORTRAITICON, CResRef("")));
+
+    ClearMessages();
+    delete pGoblin;
+}
