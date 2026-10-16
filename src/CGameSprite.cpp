@@ -27251,10 +27251,8 @@ void CGameSprite::sub_716770(CButtonData* pData)
         }
     }
 
-    // TODO: Incomplete. The original calls CGameSprite::CheckQuickLists
-    // (0x71ABA0) with `&pData->m_abilityId`, -1, 0, 0 here; it is not ported
-    // (CGameSprite.cpp, another stream's file). Until then the quick spell
-    // slots keep the converted spell's old count until they are rebuilt.
+    // The converted spell's quick buttons lose the use.
+    CheckQuickLists(&pData->m_abilityId, -1, FALSE, FALSE);
 
     FeedBack(CGameSprite::FEEDBACK_SPONTANEOUSCASTING,
         0,
