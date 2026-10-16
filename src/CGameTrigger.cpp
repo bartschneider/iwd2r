@@ -10,6 +10,7 @@
 #include "CPathSearch.h"
 #include "CScreenWorld.h"
 #include "CUtil.h"
+#include "CVidInf.h"
 #include "CVidPoly.h"
 #include "marshal_ptr.h"
 
@@ -517,6 +518,48 @@ BOOL CGameTrigger::IsOverActivate(const CPoint& pt)
     return TRUE;
 }
 
+// 0x4CFA60
+void CGameTrigger::Render(CGameArea* pArea, CVidMode* pVidMode, INT nSurface)
+{
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameTrigger.cpp
+    // __LINE__: 1020
+    UTIL_ASSERT(pVidMode != NULL);
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+    // The highlight colours (COLORREFs at 0x8A85FC, 0x8A8608 and 0x8A8600,
+    // only read): a found trap under the thieving cursor, a trap whose
+    // outline is drawn for a while (m_drawPoly), and every region while the
+    // trigger polygons are shown (CInfGame::field_4AB2, the cheat key).
+    const COLORREF rgbAction = RGB(0, 250, 0);
+    const COLORREF rgbDrawPoly = RGB(255, 0, 0);
+    const COLORREF rgbShowAll = RGB(0, 0, 255);
+
+    COLORREF rgbColor;
+    if (m_triggerType == 0
+        && m_trapActivated != 0
+        && m_trapDetected != 0
+        && m_id == m_pArea->m_iPicked
+        && pGame->m_nState == 2
+        && pGame->m_iconIndex == 36) {
+        rgbColor = rgbAction;
+    } else if (m_triggerType == 0 && m_drawPoly > 0) {
+        rgbColor = rgbDrawPoly;
+    } else {
+        if (!pGame->field_4AB2) {
+            return;
+        }
+
+        rgbColor = rgbShowAll;
+    }
+
+    if (CInfinity::TRANSLUCENT_BLTS_ON && !g_pChitin->cVideo.m_bIs3dAccelerated) {
+        FillPoly(pArea, pVidMode, nSurface, g_pChitin->GetCurrentVideoMode()->PackColor(rgbColor));
+    }
+
+    m_pArea->GetInfinity()->OutlinePoly(m_pPolygon, m_nPolygon, m_rBounding, rgbColor);
+}
+
 // 0x4CFC20
 void CGameTrigger::RemoveFromArea()
 {
@@ -705,6 +748,64 @@ void CGameTrigger::SetDrawPoly(SHORT time)
 CPoint& CGameTrigger::GetPos()
 {
     return (m_dwFlags & 0x200) != 0 ? field_628 : m_pos;
+}
+
+// The trigger's polygon filled with dwColor (in the surface's format)
+// through the FX surface, piece by piece: each of the rectangles that cover
+// it (field_630) that is on screen.
+//
+// 0x4D02C0
+void CGameTrigger::FillPoly(CGameArea* pArea, CVidMode* pVidMode, INT nSurface, DWORD dwColor)
+{
+    CInfinity* pInfinity = pArea->GetInfinity();
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameTrigger.cpp
+    // __LINE__: 1432
+    UTIL_ASSERT(pInfinity != NULL && pVidMode != NULL);
+
+    CRect rViewPort;
+    rViewPort.left = m_pArea->GetInfinity()->nCurrentX;
+    rViewPort.top = m_pArea->GetInfinity()->nCurrentY;
+    rViewPort.right = m_pArea->GetInfinity()->rViewPort.Width() + rViewPort.left;
+    rViewPort.bottom = m_pArea->GetInfinity()->rViewPort.Height() + rViewPort.top;
+
+    INT nRects = field_630.GetSize();
+    CPoint ptReference(0, 0);
+
+    CVidPoly cPoly;
+    cPoly.SetPoly(reinterpret_cast<WORD*>(field_644), m_nPolygon);
+
+    for (INT nRect = 0; nRect < nRects; nRect++) {
+        CRect* pRect = field_630[nRect];
+        if (pRect != NULL) {
+            CRect rIntersect;
+            IntersectRect(&rIntersect, &rViewPort, pRect);
+
+            CRect rClip(rIntersect);
+            if (rIntersect.left != 0 || rIntersect.right != 0 || rIntersect.top != 0 || rIntersect.bottom != 0) {
+                CPoint ptPos(rIntersect.left, rIntersect.top);
+
+                CRect rFx(rIntersect);
+                OffsetRect(&rFx, -rIntersect.left, -rIntersect.top);
+
+                if (pInfinity->FXPrep(rFx, CInfinity::FXPREP_COPYFROMBACK, nSurface, ptPos, ptReference)) {
+                    if (pInfinity->FXLock(rFx, 0)) {
+                        static_cast<CVidInf*>(pVidMode)->FXRender(&cPoly, rClip, dwColor, 0x10, ptPos, FALSE);
+
+                        if (pInfinity->FXUnlock(0, NULL, CPoint(0, 0))) {
+                            pInfinity->FXBltFrom(nSurface,
+                                rFx,
+                                ptPos.x,
+                                ptPos.y,
+                                ptReference.x,
+                                ptReference.y,
+                                0);
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 // 0x45B950
