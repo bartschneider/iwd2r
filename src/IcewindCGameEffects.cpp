@@ -61,6 +61,7 @@ const char RESREF_UMBER_HULK_GAZE[] = "SpIn994";
 // 286) calls it. The area's row in TRACKING.2DA: when the sprite has
 // wilderness lore, a d20 plus the skill against the row's difficulty / 5 +
 // 10 gives the row's string; otherwise 19534.
+// NOTE: Ruling M3-12: on the fold list; it moves into CRuleTables.
 // 0x5466F0
 static STRREF RuleTables_GetTrackingString5466F0(const CRuleTables& ruleTables, CGameSprite* pSprite, CString& sAreaName)
 {

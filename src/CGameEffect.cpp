@@ -1771,6 +1771,7 @@ void CGameEffect::sub_4A3FF0(CGameSprite* pSprite)
 // kept here, file-static, until IcewindMisc.cpp's owner takes it. Only
 // CheckSave calls it: the name of the item (identified) or spell (generic) a
 // resref names, empty when the resref is empty or names neither.
+// NOTE: Ruling M3-12: on the fold list; it moves into IcewindMisc.
 // 0x5864F0
 static CString IcewindMisc_GetResRefName5864F0(const CResRef& res)
 {
@@ -1799,6 +1800,7 @@ static CString IcewindMisc_GetResRefName5864F0(const CResRef& res)
 // Only CheckSave calls it: with the effect text option's bit 1 it shows the
 // save's name, the source's name, with bit 8 the roll, the bonus and the
 // total, and whether the save was made.
+// NOTE: Ruling M3-12: on the fold list; it moves into CGameSprite.
 // 0x765830
 static void CGameSprite_DisplaySaveString765830(CGameSprite* pSprite, DWORD nSaveType, BYTE bSaved, INT nRoll, INT nBonus, const CString& sSourceName)
 {
