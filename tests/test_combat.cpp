@@ -13,6 +13,7 @@
 #include "CPathSearch.h"
 #include "CScreenCreateChar.h"
 #include "CScreenWorld.h"
+#include "CSpell.h"
 #include "CUIControlTextDisplay.h"
 #include "CUtil.h"
 #include "CVidInf.h"
@@ -1546,5 +1547,179 @@ TEST_CASE("combat: CheckIfUsedUp keeps arrows that are left and drops spent ones
     // two ProcessEffectList runs of five draws (four save d20s and a
     // rand() % 100).
     CHECK(Draws(state, iwd2r_rand_state()) == 10);
+    ClearMessages();
+}
+
+// The battle cry of the Attack action 0x737EF0. On the action's first tick
+// a party member draws rand() % 6 and shouts (CMessagePlaySound 5) on a 0;
+// any other creature shouts without a draw. Swing then draws the round's
+// speed (one UtilRandInt).
+TEST_CASE("combat: Attack draws the battle cry of a party member only", "[combat][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    Fight fight;
+    std::string why;
+    if (!SetUpFight(fight, why)) {
+        if (why.find("CHR") != std::string::npos) {
+            SKIP("[iwd2r-skip] " + why);
+        }
+        FAIL(why);
+    }
+    CGameSprite* pCharacter = fight.pCharacter;
+    CGameSprite* pGoblin = fight.pGoblin;
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    REQUIRE(pGame->GetCharacterPortraitNum(pCharacter->GetId()) != -1);
+    REQUIRE(pGame->GetCharacterPortraitNum(pGoblin->GetId()) == -1);
+
+    const auto shouts = [] {
+        int count = 0;
+        for (CMessagePlaySound* message : Queued<CMessagePlaySound>()) {
+            count += message->m_soundId == 5 ? 1 : 0;
+        }
+        return count;
+    };
+
+    int shouted = 0;
+    int silent = 0;
+    for (unsigned int seed = 1; seed <= 30; seed++) {
+        INFO("seed " << seed);
+        ClearMessages();
+        pCharacter->m_curAction = CAIAction(CAIAction::ATTACK, CAIObjectType(0, 0, 0, 0, 0, 0, 0, 0, pGoblin->GetId()), 0, 0, 0);
+        pCharacter->m_actionCount = 0;
+        pCharacter->m_attackFrame = -1;
+        pCharacter->m_equipment.m_selectedWeapon = 10;
+        pCharacter->m_equipment.m_selectedWeaponAbility = 0;
+        srand(Seed(seed));
+        const unsigned int before = iwd2r_rand_state();
+        const bool bShout = NextRands(before, 1)[0] % 6 == 0;
+        pCharacter->Attack(pGoblin);
+        // Swing started the round.
+        CHECK(pCharacter->m_attackFrame == 0);
+        CHECK(Draws(before, iwd2r_rand_state()) == 2);
+        CHECK(shouts() == (bShout ? 1 : 0));
+        shouted += bShout ? 1 : 0;
+        silent += bShout ? 0 : 1;
+    }
+    CHECK(shouted > 0);
+    CHECK(silent > 0);
+
+    // The goblin shouts without a draw.
+    ClearMessages();
+    pGoblin->m_curAction = CAIAction(CAIAction::ATTACK, CAIObjectType(0, 0, 0, 0, 0, 0, 0, 0, pCharacter->GetId()), 0, 0, 0);
+    pGoblin->m_actionCount = 0;
+    pGoblin->m_attackFrame = -1;
+    srand(Seed(31));
+    const unsigned int before = iwd2r_rand_state();
+    pGoblin->Attack(pCharacter);
+    CHECK(pGoblin->m_attackFrame == 0);
+    CHECK(Draws(before, iwd2r_rand_state()) == 1);
+    CHECK(shouts() == 1);
+    ClearMessages();
+}
+
+// The rand() draws of the Spell action 0x740270. A goblin casts Magic
+// Missile (SPWI112, SpellNoDec) at the party member. On the first tick: the
+// concentration check an enemy within GetNearest's range 24 (0x741B6B; in
+// pixels, so the caster stands one square away) calls for (UtilRandInt(20,
+// luck)), then the spellcraft roll (rand() % 20) of a party member who sees
+// a creature cast. When the casting time is over: the spell failure roll
+// (rand() % 100), then, after a hit while casting (+0x5582), a concentration
+// check. A projectile of type 304 (SPPR613's missile 305) adds rand() %
+// 1000000 for the fire message's +0x20 (0x74271F).
+TEST_CASE("combat: Spell draws the concentration and spellcraft rolls and then the failure and type-304 rolls", "[combat][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    Fight fight;
+    std::string why;
+    if (!SetUpFight(fight, why)) {
+        if (why.find("CHR") != std::string::npos) {
+            SKIP("[iwd2r-skip] " + why);
+        }
+        FAIL(why);
+    }
+    CGameSprite* pCharacter = fight.pCharacter;
+    const CPoint pos = pCharacter->GetPos();
+    CGameSprite* pGoblin = AddCreature(fight.pArea, "10GOB", CPoint(pos.x + CPathSearch::GRID_SQUARE_SIZEX, pos.y));
+    REQUIRE(pGoblin != NULL);
+    fight.pArea->SortLists();
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    REQUIRE(pGame->GetCharacterPortraitNum(pGoblin->GetId()) == -1);
+    const CAIObjectType character(0, 0, 0, 0, 0, 0, 0, 0, pCharacter->GetId());
+    const CAIObjectType goblin(0, 0, 0, 0, 0, 0, 0, 0, pGoblin->GetId());
+
+    // A first-level wizard sure to keep its concentration; the party member
+    // knows spellcraft.
+    pGoblin->GetDerivedStats()->m_wizardLevel = 1;
+    pGoblin->GetDerivedStats()->m_nSkills[3] = 60;
+    pCharacter->GetDerivedStats()->m_nSkills[13] = 10;
+    CAIAction missile(CAIAction::SPELLNODEC, character, CString("SPWI112"), 0, CAIOBJECTTYPE_C_WIZARD);
+    missile.m_specificID3 = 1;
+    pGoblin->m_curAction = missile;
+    pGoblin->m_actionCount = 0;
+    pGoblin->m_nDirection = pGoblin->GetDirection(pCharacter->GetPos());
+    pGoblin->m_bStartedCasting = FALSE;
+    pGoblin->m_castCounter = -1;
+    pGoblin->field_5582 = 0;
+    pGoblin->field_9D14 = 0;
+    pGoblin->field_9D15 = 0;
+
+    ClearMessages();
+    srand(31);
+    unsigned int before = iwd2r_rand_state();
+    CHECK(pGoblin->Spell(pCharacter) == CGameAIBase::ACTION_NORMAL);
+    CHECK(pGoblin->m_bStartedCasting);
+    CHECK(pGoblin->field_9D14 == 1);
+    CHECK(pGoblin->field_9D15 == 0);
+    CHECK(Draws(before, iwd2r_rand_state()) == 2);
+
+    // The casting time is over after a hit for 3.
+    ClearMessages();
+    pGoblin->m_actionCount = 10;
+    pGoblin->m_castCounter = 100;
+    pGoblin->field_5582 = 3;
+    pGoblin->field_9D14 = 0;
+    srand(32);
+    before = iwd2r_rand_state();
+    CHECK(pGoblin->Spell(pCharacter) == CGameAIBase::ACTION_DONE);
+    CHECK(pGoblin->field_9D14 == 1);
+    CHECK(Draws(before, iwd2r_rand_state()) == 2);
+
+    // The party member, a cleric, finishes SPPR613 at the goblin: the
+    // failure roll, then the type-304 draw.
+    ClearMessages();
+    pCharacter->GetDerivedStats()->m_clericLevel = 20;
+    CAIAction blades(CAIAction::SPELLNODEC, goblin, CString("SPPR613"), 0, CAIOBJECTTYPE_C_CLERIC);
+    blades.m_specificID3 = 6;
+    pCharacter->m_curAction = blades;
+    pCharacter->m_actionCount = 10;
+    pCharacter->m_nDirection = pCharacter->GetDirection(pGoblin->GetPos());
+    pCharacter->m_bStartedCasting = TRUE;
+    pCharacter->m_castCounter = 1000;
+    pCharacter->field_5582 = 0;
+    pCharacter->field_9D14 = 1;
+    pCharacter->field_9D15 = 0;
+    delete pCharacter->m_curSpell;
+    pCharacter->m_curSpell = new CSpell(CResRef("SPPR613"));
+    srand(33);
+    before = iwd2r_rand_state();
+    const std::vector<int> values = NextRands(before, 2);
+    CHECK(pCharacter->Spell(pGoblin) == CGameAIBase::ACTION_DONE);
+    CHECK(Draws(before, iwd2r_rand_state()) == 2);
+    const std::vector<CMessageFireProjectile*> fire = Queued<CMessageFireProjectile>();
+    REQUIRE(fire.size() == 1);
+    CHECK(fire[0]->m_projectileType == 304);
+    CHECK(fire[0]->field_20 == values[1] % 1000000);
     ClearMessages();
 }
