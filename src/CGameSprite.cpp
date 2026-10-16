@@ -22349,9 +22349,8 @@ BOOL CGameSprite::CheckIfUsedUp(SHORT nSlot, SHORT nAbility)
             && (m_derivedStats.m_generalState & STATE_CHARMED) == 0) {
             sub_726810(m_nWeaponSet);
         } else {
-            // TODO: 0x75DAFC calls CGameSprite 0x75E150 (not ported; outside
-            // this stream's grant) for a creature outside the party or
-            // charmed.
+            // A creature outside the party or charmed (0x75DAFA-0x75DB01).
+            EquipRanged();
         }
         break;
     }

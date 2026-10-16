@@ -205,7 +205,6 @@ The crisp-text requirement is met by `Program Options/Text Renderer=scalable` (s
 
 These block TODOs in the combat stream's ports; each is in a file or function the stream was not granted.
 
-- `CGameSprite` 0x75E150, CheckIfUsedUp for a creature outside the party or charmed, is not ported.
 - `CGameSprite` 0x71F860, the ammunition's and launcher's effects on a missile's projectile, is not ported: Swing's missile branch fires without them.
 - `CGameSprite::CheckQuickLists` 0x71ABA0 is not ported: Swing's and Spell's quick-button refreshes are TODOs.
 - `CGameArea` 0x46E130, which gives an effect to the area's creatures (target types 4-8), is not ported: FireSpell, FireSpellPoint, ForceSpell, ForceSpellPoint, Spell, Swing's melee effects and 0x755A70 drop those effects (TODOs).
