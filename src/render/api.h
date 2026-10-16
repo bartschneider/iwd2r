@@ -81,6 +81,7 @@
 //   CVidInf::FXRender (cell, clip)                0x79D180  DrawCell
 //   CVidInf::FXRender (particle)                  0x79D220  DrawParticle
 //   CVidInf::FXRender (points)                    0x79D450  DrawPoints
+//   CVidInf::FXRender (polygon)                   0x79D680  DrawPoly (filled)
 //   CVidInf::FXTextOut                            0x79D970  DrawText
 //   CVidInf::BKRender (cell, clip)                0x79DE50  DrawCell
 //   CVidInf::BKRender (cell)                      0x79DF60  DrawCell

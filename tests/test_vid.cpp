@@ -244,6 +244,34 @@ TEST_CASE("fill_poly_notched_square_clipped", "[vid]")
     CHECK(FillNonConvex(notch, 5, CRect(4, 3, 9, 8), 0x1) == Expected(rows));
 }
 
+// CVidInf::FXRender with a polygon (0x79D680), the fill of the container
+// and door highlights: FillPoly, or FillConvexPoly when bConvex is set, on
+// the FX surface FXLock locked (m_SurfaceDesc), with the clip, colour,
+// flags and reference point passed through; FALSE with nothing locked.
+TEST_CASE("fx_render_poly_fills_the_locked_fx_surface", "[vid]")
+{
+    ChitinScope scope;
+    CVidInf mode;
+    static CVIDPOLY_VERTEX notch[] = { { 2, 2 }, { 6, 6 }, { 10, 2 }, { 10, 10 }, { 2, 10 } };
+    CVidPoly poly;
+    poly.SetPoly(notch, 5);
+    CHECK_FALSE(mode.FXRender(&poly, kWhole, kColor, 0x1, CPoint(0, 0), FALSE));
+
+    std::vector<DWORD> pixels(kWidth * kHeight, 0);
+    mode.m_SurfaceDesc.lpSurface = pixels.data();
+    mode.m_SurfaceDesc.lPitch = kWidth * 4;
+    CHECK(mode.FXRender(&poly, kWhole, kColor, 0x1, CPoint(0, 0), FALSE));
+    CHECK(pixels == Expected(NotchRows()));
+
+    static CVIDPOLY_VERTEX triangle[] = { { 1, 1 }, { 12, 3 }, { 4, 9 } };
+    CVidPoly convex;
+    convex.SetPoly(triangle, 3);
+    std::fill(pixels.begin(), pixels.end(), 0);
+    CHECK(mode.FXRender(&convex, kWhole, kColor, 0x1, CPoint(0, 0), TRUE));
+    CHECK(pixels == Fill({ { 1, 1 }, { 12, 3 }, { 4, 9 } }, kWhole));
+    mode.m_SurfaceDesc.lpSurface = NULL;
+}
+
 // Flag 0x8 flips the rows inside the clip: row y lands on clip.bottom - 1 -
 // (y - clip.top).
 TEST_CASE("fill_poly_flipped", "[vid]")
