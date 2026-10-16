@@ -50,9 +50,9 @@ CGameContainer::CGameContainer(CGameArea* pArea, CAreaFileContainer* pContainerO
         && pContainerObject->m_boundingRectRight == 0
         && pContainerObject->m_boundingRectBottom == 0) {
         pContainerObject->m_boundingRectLeft = CPathSearch::GRID_SQUARE_SIZEX * (pContainerObject->m_posX / CPathSearch::GRID_SQUARE_SIZEX);
-        pContainerObject->m_boundingRectRight = CPathSearch::GRID_SQUARE_SIZEX * (pContainerObject->m_posX / (CPathSearch::GRID_SQUARE_SIZEX + 1)) - 1;
+        pContainerObject->m_boundingRectRight = CPathSearch::GRID_SQUARE_SIZEX * (pContainerObject->m_posX / CPathSearch::GRID_SQUARE_SIZEX + 1) - 1;
         pContainerObject->m_boundingRectTop = CPathSearch::GRID_SQUARE_SIZEY * (pContainerObject->m_posY / CPathSearch::GRID_SQUARE_SIZEY);
-        pContainerObject->m_boundingRectBottom = CPathSearch::GRID_SQUARE_SIZEY * (pContainerObject->m_posY / (CPathSearch::GRID_SQUARE_SIZEY + 1)) - 1;
+        pContainerObject->m_boundingRectBottom = CPathSearch::GRID_SQUARE_SIZEY * (pContainerObject->m_posY / CPathSearch::GRID_SQUARE_SIZEY + 1) - 1;
     }
 
     m_rBounding.left = pContainerObject->m_boundingRectLeft;
