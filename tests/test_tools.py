@@ -4224,11 +4224,15 @@ class SandboxReplayTest(unittest.TestCase):
             ROOT, 'scenarios', 'walk_and_talk.txt')), 420)
 
     def test_host_switch(self):
-        code, events, locks, _ = self.record(
+        code, events, locks, sandbox = self.record(
             ['replay', 'record', 'start_screen', '--host'])
         self.assertEqual(code, 0)
-        self.assertEqual(events, [('host', [oracle.REPLAY_LOCK])])
-        self.assertEqual(locks.paths, [(oracle.REPLAY_LOCK, 'replay')])
+        # The sandbox lock too, while the copy's saves are aside: play.py
+        # --vm windows copies the copy into its cache under it.
+        self.assertEqual(events, [('host', [oracle.REPLAY_LOCK,
+                                            sandbox.SANDBOX_LOCK])])
+        self.assertEqual(locks.paths, [(oracle.REPLAY_LOCK, 'replay'),
+                                       (sandbox.SANDBOX_LOCK, 'sandbox')])
         run = glob.glob(os.path.join(self.tmp, 'runs', '*', 'replay'))[0]
         with open(os.path.join(run, 'replay.json')) as f:
             self.assertEqual(json.load(f)['mode'], 'host')
@@ -4931,9 +4935,9 @@ class OracleSavesTest(unittest.TestCase):
         empty = self.scenario('# saves: empty\n', 'e.txt')
         load = self.scenario('# saves: load\n', 'l.txt')
         save = make_save(self.tmp, '000000004-Probe Save')
-        self.assertIsNone(oracle.save_plan(plain, None))
-        self.assertEqual(oracle.save_plan(empty, None),
-                         {'mode': 'empty', 'load': None})
+        for script in (plain, empty):
+            self.assertEqual(oracle.save_plan(script, None),
+                             {'mode': 'empty', 'load': None})
         for script in (plain, empty, load):
             self.assertEqual(oracle.save_plan(script, save),
                              {'mode': 'load', 'load': save})
@@ -5160,7 +5164,7 @@ class OracleSavesTest(unittest.TestCase):
             ('ours', 'start_screen.txt', plan),
             ('original', 'save_load.txt', empty),
             ('ours', 'save_load.txt', empty),
-            ('original', 'start_screen.txt', None)])
+            ('original', 'start_screen.txt', empty)])
 
     def test_load_scenario(self):
         actions = realinput.load_scenario(os.path.join(

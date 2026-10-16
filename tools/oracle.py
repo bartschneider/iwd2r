@@ -1517,8 +1517,13 @@ def record_original(script, actions, seed, timeout, dump_every, run_dir,
                           timeout, dump_every,
                           'in Windows Sandbox' if sandbox else 'on the host'))
     extra = {}
-    with prepared_saves(mpsave_dir(game), saves, out_dir,
-                        save_aside(game)) as save_report:
+    import winsandbox
+    # The sandbox lock, inside REPLAY_LOCK, for as long as the copy's saves
+    # are aside (in host mode too): play.py --vm windows copies the copy
+    # into its game cache under it (see the saves section).
+    with filelock.hold(winsandbox.SANDBOX_LOCK, 'sandbox'), \
+            prepared_saves(mpsave_dir(game), saves, out_dir,
+                           save_aside(game)) as save_report:
         if sandbox:
             code, stdout, stderr, extra = record_in_sandbox(
                 build, game, script, seed, timeout, dump_every, stamp,
@@ -1529,8 +1534,7 @@ def record_original(script, actions, seed, timeout, dump_every, run_dir,
                 injector, recorder, game, script, seed, timeout, dump_every,
                 stamp, out_dir, steal_focus, no_focus_guard,
                 slow_reads=slow_reads)
-    if saves:
-        extra = dict(extra, saves=save_report)
+    extra = dict(extra, saves=save_report)
     for line in stdout.splitlines():
         print('  %s' % line)
     for line in stderr.splitlines():
@@ -1583,9 +1587,9 @@ def record_in_sandbox(build, game, script, seed, timeout, dump_every, stamp,
                       subdir, out_dir, steal_focus, no_focus_guard,
                       slow_reads=None):
     """The default mode: one fresh Windows Sandbox per recording
-    (winsandbox.run_replay, tools/sandbox/replay-driver.ps1), holding
-    winsandbox.SANDBOX_LOCK inside the caller's REPLAY_LOCK. Returns (exit
-    code or None, stdout, stderr, extra report fields)."""
+    (winsandbox.run_replay, tools/sandbox/replay-driver.ps1); the caller
+    holds winsandbox.SANDBOX_LOCK inside REPLAY_LOCK. Returns (exit code or
+    None, stdout, stderr, extra report fields)."""
     import winsandbox
     if not winsandbox.available():
         sys.exit('oracle: %s; or record on the host with --host'
@@ -1597,13 +1601,11 @@ def record_in_sandbox(build, game, script, seed, timeout, dump_every, stamp,
                        steal_focus, no_focus_guard, slow_reads)
     host_run = os.path.join(winsandbox.VM_ROOT, 'replays',
                             '%s-%s' % (stamp, subdir))
-    with filelock.hold(winsandbox.SANDBOX_LOCK, 'sandbox'):
-        try:
-            result = winsandbox.run_replay(build, game, script, env,
-                                           timeout, host_run, out_dir,
-                                           sandbox_log)
-        except RuntimeError as e:  # setting the run up failed
-            sys.exit('oracle: %s' % e)
+    try:
+        result = winsandbox.run_replay(build, game, script, env, timeout,
+                                       host_run, out_dir, sandbox_log)
+    except RuntimeError as e:  # setting the run up failed
+        sys.exit('oracle: %s' % e)
     shutil.rmtree(host_run, ignore_errors=True)
     print('sandbox: %.1f s from start to results (logs in %s)'
           % (result['seconds'], os.path.relpath(
@@ -1673,15 +1675,20 @@ def load_actions(script):
 #
 # The game lists the saves of mpsave (CInfGame::GetDirSaveRoot) in folder
 # name order (CInfGame::GetSaveGames 0x5C0520) on the load and save
-# screens, so a replay that saves or loads needs to know what is there. A
-# run with a save plan gets a mpsave of its own: everything but the game's
-# own folder (default) is taken out first, the --load save (if any) is
-# copied in under its own name, so it is the load screen's first slot, and
+# screens, so a replay that saves or loads needs to know what is there,
+# and a replay that autosaves (a new game writes 000000000-Autosave -
+# Prologue) would change the vanilla copy's saves. So every run gets a
+# mpsave of its own (save_plan): everything but the game's own folder
+# (default) is taken out first, the --load save (if any) is copied in
+# under its own name, so it is the load screen's first slot, and
 # afterwards every save the run made is moved into <out>/saves/ and what
 # was there is put back. On the vanilla copy, which every worktree shares,
 # what was there waits in save_aside (beside the copy, on its volume) and
-# every recording first puts back what a run that died left there; our
-# engine's data view has a private mpsave, emptied in place.
+# every recording first puts back what a run that died left there; a
+# recording holds winsandbox.SANDBOX_LOCK while the saves are aside, so
+# play.py --vm windows, which copies the vanilla copy into its game cache
+# under that lock, never copies it then. Our engine's data view has a
+# private mpsave, emptied in place.
 
 MPSAVE = 'mpsave'
 # The game's own folder in mpsave (the game in progress): kept in place and
@@ -1760,17 +1767,18 @@ def is_save(folder):
 
 
 def save_plan(script, load):
-    """A run's save plan, or None for a run that keeps mpsave as it is:
-    {'mode': 'load', 'load': the save folder} with --load (load), else
-    {'mode': 'empty', 'load': None} for a scenario whose header says
-    "# saves: empty". A "# saves: load" scenario needs --load; --load
-    needs a save folder."""
+    """A run's save plan: {'mode': 'load', 'load': the save folder} with
+    --load (load), else {'mode': 'empty', 'load': None}: every replay
+    starts with no saves of the copy's, and the saves it makes are kept in
+    its run folder, so the copy's own saves never change ("# saves: empty"
+    says so in a scenario that saves or loads). A "# saves: load" scenario
+    needs --load; --load needs a save folder."""
     mode = header_saves(script)
     if load is None:
         if mode == 'load':
             sys.exit('oracle: %s starts from a save ("# saves: load"); '
                      'give one with --load' % script)
-        return {'mode': 'empty', 'load': None} if mode == 'empty' else None
+        return {'mode': 'empty', 'load': None}
     load = os.path.abspath(load)
     if not is_save(load):
         sys.exit('oracle: --load %s is not a save folder (no ICEWIND2.GAM '
@@ -2066,8 +2074,7 @@ def run_ours(exe, game, script, actions, seed, timeout, dump_every, run_dir,
               'timeout': timeout, 'dump_every': dump_every,
               'exit_code': code, 'status': status, 'outcome': summary,
               'overrides': our_overrides()}
-    if saves:
-        report['saves'] = save_report
+    report['saves'] = save_report
     return finish_replay(out_dir, schema, actions, result, summary, report)
 
 
