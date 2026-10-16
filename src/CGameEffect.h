@@ -296,7 +296,9 @@ public:
     /* 0004 */ virtual CGameEffect* Copy();
     /* 0008 */ virtual BOOL ApplyEffect(CGameSprite* pSprite);
     /* 000C */ virtual BOOL ResolveEffect(CGameSprite* pSprite);
+    /* 0010 */ virtual void OnAddSpecific(CGameSprite* pSprite);
     /* 0014 */ virtual void OnLoad(CGameSprite* pSprite);
+    /* 0018 */ virtual BOOL CheckSave(CGameSprite* pSprite, BYTE* pFortitudeRoll, BYTE* pReflexRoll, BYTE* pWillRoll, BYTE* pResistMagicRoll);
     /* 001C */ virtual BOOL UsesDice();
     /* 0020 */ virtual void DisplayString(CGameSprite* pSprite);
     /* 0024 */ virtual void OnRemove(CGameSprite* pSprite);
@@ -397,6 +399,7 @@ public:
     CGameEffectCharm(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
     BOOL ApplyEffect(CGameSprite* pSprite) override;
+    void OnAddSpecific(CGameSprite* pSprite) override;
     void OnRemove(CGameSprite* pSprite) override;
 };
 
@@ -405,6 +408,7 @@ public:
     CGameEffectSlipperyMind(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
     BOOL ApplyEffect(CGameSprite* pSprite) override;
+    void OnRemove(CGameSprite* pSprite) override;
 };
 
 class CGameEffectCHR : public CGameEffect {
@@ -455,10 +459,14 @@ public:
     CGameEffectDamage(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
     BOOL ApplyEffect(CGameSprite* pSprite) override;
+    void OnAddSpecific(CGameSprite* pSprite) override;
+    BOOL CheckSave(CGameSprite* pSprite, BYTE* pFortitudeRoll, BYTE* pReflexRoll, BYTE* pWillRoll, BYTE* pResistMagicRoll) override;
+    void DisplayString(CGameSprite* pSprite) override;
 
     void sub_4A7750(CGameSprite* pSprite);
     void sub_4A8DF0(DWORD dwDamageType, CGameSprite* pSprite);
     void sub_4AA6D0(CGameSprite* pSprite, INT nResisted);
+    CString sub_4AB370();
     void sub_4AB0A0(CGameSprite* pSprite, INT nAmount);
 };
 
@@ -469,6 +477,7 @@ public:
     CGameEffectDeath(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target, int a5);
     CGameEffect* Copy() override;
     BOOL ApplyEffect(CGameSprite* pSprite) override;
+    void OnAddSpecific(CGameSprite* pSprite) override;
     void DisplayString(CGameSprite* pSprite) override;
 
     /* 018C */ int field_18C;
@@ -1082,6 +1091,7 @@ public:
     CGameEffectRegeneration(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
     CGameEffect* Copy() override;
     BOOL ApplyEffect(CGameSprite* pSprite) override;
+    void OnAddSpecific(CGameSprite* pSprite) override;
 };
 
 class CGameEffectDurationCasting : public CGameEffect {

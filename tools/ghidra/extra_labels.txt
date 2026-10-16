@@ -4,11 +4,29 @@
 # was identified (objdump of the vanilla exe, the Ghidra decompilation, and
 # docs/evidence/<ADDR>.md).
 
-# IEex calls it CGameEffect_CheckSave. Its third to sixth arguments point to
-# the four save roll bytes CGameSprite::ProcessEffectList (0x72DE60) rolls
-# into the sprite at 0x70F6-0x70F9 (rand() % 20 + 1). It adds the save
-# bonus the effect's flags (+0x3C bits 4, 8, 0x10) select to the roll and
-# compares the sum with 10 + the effect's fields +0x14 and +0x40 (a natural
-# 20 always saves, a 1 never), then calls CGameSprite_DisplaySaveString
-# (0x765830). Evidence: 4A42F0.md.
-0x4A42F0 CGameEffect::CheckSave
+
+# IEex calls it CGameSprite_sub_6F5330. Its only caller is the death effect
+# (CGameEffectDeath::ApplyEffect 0x4AB510, call at 0x4AB5B5). It clears the
+# sprite's bumped state (+0x54AC), its visible-monster (+0x54A4, the area's
+# +0x434 count) and infravision (+0x50BA, the area's +0x1EE count) marks;
+# then, only when the network's m_bIsHost (g_pBaldurChitin +0x1033) is 1, it
+# sets the death variables ("<script name>_DEAD", "KILL_<race>_CNT" with
+# 0x8B7700 and 0x8B76F8, and the creature's two 32-character death
+# variables at +0x846 and +0x866) through CMessageSetVariable. Evidence:
+# 4AB510.md.
+0x6F5330 CGameSprite::sub_6F5330
+
+# IEex calls it CGameSprite_Shatter. Only the death effect calls it (0x4AC157,
+# 0x4ACD31) for a chunk or shattered-statue death at -10 hit points or below.
+# By the argument (0 ice, 1 stone, 2 chunks) it tints the animation's colour
+# ranges and creates CGameChunk objects (0x70F4F0), drawing rand() for the
+# bounce, for the chunk count (rand() % 16 + 10, types 0 and 1) and three or
+# four times per chunk. Evidence: 4AB510.md.
+0x70A810 CGameSprite::Shatter
+
+# A constructor (CGameObject::CGameObject first, vtable 0x84D624, a list at
+# +0x72 with vtable 0x84D618) of the object the death effect (0x4AC720..
+# 0x4ACA8B) and Sparkle (0x4B185E, 0x4B18CB) add for their explosions; its
+# first argument picks colours from the rule tables ("RGB %u %u %u"). Named
+# by its vtable as src/ names such classes. Evidence: 4AB510.md.
+0x51AE40 CGameObject84D624::CGameObject84D624
