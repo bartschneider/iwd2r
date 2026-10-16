@@ -5,6 +5,9 @@
 #include "CVidMode.h"
 #include "CVideo3d.h"
 
+#include <cstdlib>
+#include <cstring>
+
 // 0x85EAA4
 const BYTE CVidPoly::m_aDitherMask[] = {
     // clang-format off
@@ -32,8 +35,8 @@ CVidPoly::CVidPoly()
 {
     field_0 = 0;
     m_pVertices = NULL;
-    field_10 = 0;
-    field_C = 0;
+    m_pActiveEdges = NULL;
+    m_pEdgeTable = NULL;
     m_nVertices = -1;
     m_pDrawHLineFunction = &CVidPoly::DrawHLine16;
 }
@@ -70,7 +73,9 @@ BOOLEAN CVidPoly::IsPtInPoly(const CPoint* pPoly, SHORT nPoly, const CPoint& pt)
     if (nPoly == 1) {
         return pPoly[0] == pt;
     } else if (nPoly == 2) {
-        interSectionY = CalculateLineVIntersection(pPoly[0], pPoly[2], pt.x, pPoly[1]);
+        // A two-point polygon is its one segment, its end standing in for
+        // the previous point (0x7C0EA6).
+        interSectionY = CalculateLineVIntersection(pPoly[0], pPoly[1], pt.x, pPoly[1]);
         return interSectionY == pt.y;
     }
 
@@ -284,12 +289,288 @@ BOOL CVidPoly::FillConvexPoly(WORD* pSurface, LONG lPitch, const CRect& rClipRec
     return TRUE;
 }
 
-// 0x7C13A0
-BOOL CVidPoly::FillPoly(WORD* pSurface, LONG lPitch, const CRect& rClip, DWORD dwColor, DWORD dwFlags, const CPoint& ptRef)
-{
-    // TODO: Incomplete.
+namespace {
 
+// The edges FillPoly builds and the cache copies in and out.
+// 0xA07B20
+CVIDPOLY_EDGE g_aPolyEdges[CVPOLY_MAX_VERTICIES];
+
+// A cached edge table: the edges of one vertex list, keyed by the list's
+// address and vertex count.
+class CVidPolyEdgeCacheEntry {
+public:
+    CVidPolyEdgeCacheEntry()
+    {
+        m_nVertices = 0;
+        m_pEdgeTable = NULL;
+        m_pEdges = NULL;
+        m_pVertices = NULL;
+    }
+
+    // 0x7C1D40
+    virtual ~CVidPolyEdgeCacheEntry()
+    {
+        if (m_pEdges != NULL) {
+            delete[] m_pEdges;
+        }
+    }
+
+    /* 0004 */ INT m_nVertices;
+    /* 0008 */ CVIDPOLY_EDGE* m_pEdges;
+    /* 000C */ CVIDPOLY_EDGE* m_pEdgeTable;
+    /* 0010 */ CVIDPOLY_VERTEX* m_pVertices;
+};
+
+// FillPoly's cache of the last 16 edge tables it built.
+class CVidPolyEdgeCache : public CPtrList {
+public:
+    // 0x7C1D70
+    CVidPolyEdgeCache()
+        : CPtrList(10)
+    {
+    }
+
+    // 0x7C0CF0
+    ~CVidPolyEdgeCache()
+    {
+        m_critSect.Lock();
+
+        POSITION pos = GetHeadPosition();
+        while (pos != NULL) {
+            CVidPolyEdgeCacheEntry* pEntry = static_cast<CVidPolyEdgeCacheEntry*>(GetNext(pos));
+            if (pEntry != NULL) {
+                delete pEntry;
+            }
+        }
+
+        RemoveAll();
+        m_critSect.Unlock();
+    }
+
+    BOOL Find(CVidPoly* pPoly);
+    void Add(CVidPoly* pPoly);
+
+    /* 001C */ CCriticalSection m_critSect;
+};
+
+// 0x7C1DE0
+BOOL CVidPolyEdgeCache::Find(CVidPoly* pPoly)
+{
+    m_critSect.Lock();
+
+    POSITION pos = GetHeadPosition();
+    while (pos != NULL) {
+        POSITION posEntry = pos;
+        CVidPolyEdgeCacheEntry* pEntry = static_cast<CVidPolyEdgeCacheEntry*>(GetNext(pos));
+        if (pEntry != NULL
+            && pPoly->m_pVertices == pEntry->m_pVertices
+            && pPoly->m_nVertices == pEntry->m_nVertices) {
+            INT nVertices = pEntry->m_nVertices;
+            CVIDPOLY_VERTEX* pVertices = pEntry->m_pVertices;
+            if (pEntry->m_pEdges != NULL && pEntry->m_pEdgeTable != NULL && pVertices != NULL) {
+                pPoly->m_pEdgeTable = pEntry->m_pEdgeTable;
+                memcpy(g_aPolyEdges, pEntry->m_pEdges, sizeof(CVIDPOLY_EDGE) * nVertices);
+                pPoly->m_nVertices = nVertices;
+                pPoly->m_pVertices = pVertices;
+            }
+
+            RemoveAt(posEntry);
+            AddHead(pEntry);
+
+            m_critSect.Unlock();
+            return TRUE;
+        }
+    }
+
+    m_critSect.Unlock();
     return FALSE;
+}
+
+// 0x7C1EC0
+void CVidPolyEdgeCache::Add(CVidPoly* pPoly)
+{
+    m_critSect.Lock();
+
+    // NOTE: The original evicts from the tail, where it also adds, so the
+    // newest entry is the first to go once 16 are held.
+    while (GetCount() > 15) {
+        CVidPolyEdgeCacheEntry* pEntry = static_cast<CVidPolyEdgeCacheEntry*>(RemoveTail());
+        if (pEntry != NULL) {
+            delete pEntry;
+        }
+    }
+
+    if (pPoly != NULL) {
+        CVidPolyEdgeCacheEntry* pEntry = new CVidPolyEdgeCacheEntry();
+        if (pPoly->m_nVertices != 0) {
+            pEntry->m_pEdges = new CVIDPOLY_EDGE[pPoly->m_nVertices];
+            if (pEntry->m_pEdges != NULL) {
+                memcpy(pEntry->m_pEdges, g_aPolyEdges, sizeof(CVIDPOLY_EDGE) * pPoly->m_nVertices);
+                pEntry->m_pEdgeTable = pPoly->m_pEdgeTable;
+                pEntry->m_nVertices = pPoly->m_nVertices;
+                pEntry->m_pVertices = pPoly->m_pVertices;
+            }
+        }
+        AddTail(pEntry);
+    }
+
+    m_critSect.Unlock();
+}
+
+// 0xA09F20
+CVidPolyEdgeCache g_cPolyEdgeCache;
+
+} // namespace
+
+// 0x7C13A0
+BOOL CVidPoly::FillPoly(WORD* pSurface, LONG lPitch, const CRect& rClipRect, DWORD dwColor, DWORD dwFlags, const CPoint& ptRef)
+{
+    CPoint ptRefAdjusted;
+    CRect rClip;
+    LONG lStep;
+    SHORT nY;
+    INT nRows;
+
+    ptRefAdjusted.x = ptRef.x;
+    ptRefAdjusted.y = ptRef.y;
+
+    rClip.left = rClipRect.left;
+    rClip.top = rClipRect.top;
+    rClip.right = rClipRect.right - 1;
+    rClip.bottom = rClipRect.bottom - 1;
+
+    lStep = lPitch;
+
+    if (m_nVertices < 3) {
+        return FALSE;
+    }
+
+    // __FILE__: C:\Projects\Icewind2\src\chitin\ChVidPoly.cpp
+    // __LINE__: 546
+    UTIL_ASSERT_MSG(m_nVertices < CVPOLY_MAX_VERTICIES, "Excessive poly vertex count");
+
+    if (m_nVertices >= CVPOLY_MAX_VERTICIES) {
+        return FALSE;
+    }
+
+    SetHLineFunction(dwFlags);
+
+    if ((dwFlags & 0x2) == 0) {
+        if (!g_cPolyEdgeCache.Find(this)) {
+            BuildEdgeTable(g_aPolyEdges);
+            g_cPolyEdgeCache.Add(this);
+        }
+    } else {
+        BuildEdgeTable(g_aPolyEdges);
+    }
+
+    m_pActiveEdges = NULL;
+
+    // NOTE: With every edge horizontal the edge table is empty and the
+    // original reads the first edge through a NULL pointer (0x7C147E);
+    // bounded here by drawing nothing, which is what its loop would do.
+    if (m_pEdgeTable == NULL) {
+        return TRUE;
+    }
+
+    nY = static_cast<SHORT>(m_pEdgeTable->nY);
+
+    if ((dwFlags & 0x8) != 0) {
+        nRows = rClip.bottom - nY;
+        lStep = -lPitch;
+    } else {
+        nRows = nY - rClip.top;
+    }
+
+    // NOTE: The row offset is signed (32-bit int in the original): a
+    // polygon starting above the clip moves the pointer back.
+    pSurface = reinterpret_cast<WORD*>(reinterpret_cast<BYTE*>(pSurface) + nRows * lPitch);
+    ptRefAdjusted.y += nY - rClip.top;
+
+    while (m_pEdgeTable != NULL || m_pActiveEdges != NULL) {
+        // Move the edges that start on this row to the active list, which
+        // stays sorted by x.
+        CVIDPOLY_EDGE* pNext = m_pActiveEdges;
+        CVIDPOLY_EDGE** ppPrev = &m_pActiveEdges;
+        while (m_pEdgeTable != NULL) {
+            if (m_pEdgeTable->nY != nY) {
+                break;
+            }
+
+            while (pNext != NULL && pNext->nX < static_cast<SHORT>(m_pEdgeTable->nX)) {
+                ppPrev = &(pNext->pNext);
+                pNext = pNext->pNext;
+            }
+
+            CVIDPOLY_EDGE* pEdge = m_pEdgeTable;
+            *ppPrev = pEdge;
+            m_pEdgeTable = m_pEdgeTable->pNext;
+            pEdge->pNext = pNext;
+            ppPrev = &(pEdge->pNext);
+        }
+
+        if (nY >= rClip.top && nY <= rClip.bottom) {
+            CVIDPOLY_EDGE* pEdge = m_pActiveEdges;
+            while (pEdge != NULL) {
+                INT xMin;
+                if (pEdge->nX > rClip.left) {
+                    xMin = pEdge->nX - rClip.left;
+                } else {
+                    xMin = 0;
+                }
+
+                CVIDPOLY_EDGE* pPair = pEdge->pNext;
+                INT xMax;
+                if (pPair->nX < rClip.right) {
+                    xMax = pPair->nX - rClip.left;
+                } else {
+                    xMax = rClip.right - rClip.left;
+                }
+
+                (this->*m_pDrawHLineFunction)(pSurface,
+                    xMin,
+                    xMax,
+                    dwColor,
+                    rClip,
+                    ptRefAdjusted);
+
+                pEdge = pPair->pNext;
+            }
+        }
+
+        AdvanceActiveEdges();
+
+        // Bubble sort the active list by x.
+        if (m_pActiveEdges != NULL) {
+            BOOL bSwapped;
+            do {
+                CVIDPOLY_EDGE** ppLink = &m_pActiveEdges;
+                CVIDPOLY_EDGE* pEdge = m_pActiveEdges;
+                bSwapped = FALSE;
+                if (pEdge->pNext == NULL) {
+                    break;
+                }
+
+                do {
+                    CVIDPOLY_EDGE* pFollow = pEdge->pNext;
+                    if (pFollow->nX < pEdge->nX) {
+                        *ppLink = pFollow;
+                        bSwapped = TRUE;
+                        pEdge->pNext = pFollow->pNext;
+                        pFollow->pNext = pEdge;
+                    }
+                    ppLink = &((*ppLink)->pNext);
+                    pEdge = *ppLink;
+                } while (pEdge->pNext != NULL);
+            } while (bSwapped);
+        }
+
+        nY++;
+        ptRefAdjusted.y++;
+        pSurface = reinterpret_cast<WORD*>(reinterpret_cast<BYTE*>(pSurface) + lStep);
+    }
+
+    return TRUE;
 }
 
 // 0x7C15F0
@@ -357,7 +638,100 @@ void CVidPoly::SetPoly(WORD* pVertices, WORD nVertices)
 void CVidPoly::SetPoly(CVIDPOLY_VERTEX* pVertices, WORD nVertices)
 {
     m_pVertices = pVertices;
-    m_nVertices = nVertices;
+    // The count is sign-extended (movsx at 0x7C18D0), unlike the WORD
+    // overload's.
+    m_nVertices = static_cast<SHORT>(nVertices);
+}
+
+// 0x7C18F0
+void CVidPoly::AdvanceActiveEdges()
+{
+    CVIDPOLY_EDGE* pEdge = m_pActiveEdges;
+    CVIDPOLY_EDGE* pPrev = NULL;
+
+    while (pEdge != NULL) {
+        // NOTE: While edges are still waiting in the edge table an edge
+        // ends when its count reaches 0; after that it is drawn one row
+        // more, to -1 (0x7C1903).
+        BOOL bDone;
+        if (m_pEdgeTable == NULL) {
+            bDone = --pEdge->nCount == -1;
+        } else {
+            bDone = --pEdge->nCount == 0;
+        }
+
+        if (bDone) {
+            if (pPrev == NULL) {
+                m_pActiveEdges = pEdge->pNext;
+            } else {
+                pPrev->pNext = pEdge->pNext;
+            }
+        } else {
+            pEdge->nX += pEdge->nXStep;
+            pEdge->nErrTerm += pEdge->nAdjUp;
+            pPrev = pEdge;
+            if (pEdge->nErrTerm >= 0) {
+                pEdge->nX += pEdge->nXDir;
+                pEdge->nErrTerm -= pEdge->nAdjDown;
+            }
+        }
+
+        pEdge = pEdge->pNext;
+    }
+}
+
+// 0x7C1970
+void CVidPoly::BuildEdgeTable(CVIDPOLY_EDGE* pEdges)
+{
+    m_pEdgeTable = NULL;
+
+    for (INT nIndex = 0; nIndex < m_nVertices; nIndex++) {
+        SHORT nNext = static_cast<SHORT>((nIndex + 1) % m_nVertices);
+        UINT nTopX;
+        UINT nTopY;
+        UINT nBottomX;
+        UINT nBottomY;
+
+        if (m_pVertices[nIndex].y < m_pVertices[nNext].y) {
+            nTopX = m_pVertices[nIndex].x;
+            nTopY = m_pVertices[nIndex].y;
+            nBottomX = m_pVertices[nNext].x;
+            nBottomY = m_pVertices[nNext].y;
+        } else {
+            nTopX = m_pVertices[nNext].x;
+            nTopY = m_pVertices[nNext].y;
+            nBottomX = m_pVertices[nIndex].x;
+            nBottomY = m_pVertices[nIndex].y;
+        }
+
+        INT nDy = nBottomY - nTopY;
+        if (nDy != 0) {
+            INT nDx = nBottomX - nTopX;
+            pEdges->nErrTerm = 1 - nDy;
+            pEdges->nXDir = nDx >= 0 ? 1 : -1;
+            pEdges->pNext = NULL;
+            pEdges->nX = nTopX;
+            pEdges->nY = nTopY;
+            pEdges->nCount = nDy;
+            pEdges->nAdjDown = nDy;
+            pEdges->nXStep = (abs(nDx) / nDy) * pEdges->nXDir;
+            pEdges->nAdjUp = abs(nDx) % nDy;
+
+            // The edge table is sorted by the top y, then x.
+            CVIDPOLY_EDGE* pNext = m_pEdgeTable;
+            CVIDPOLY_EDGE** ppPrev = &m_pEdgeTable;
+            while (pNext != NULL
+                && pNext->nY <= static_cast<INT>(nTopY)
+                && (pNext->nY != static_cast<INT>(nTopY) || pNext->nX <= static_cast<INT>(nTopX))) {
+                ppPrev = &(pNext->pNext);
+                pNext = pNext->pNext;
+            }
+
+            *ppPrev = pEdges;
+            pEdges->pNext = pNext;
+            pEdges++;
+        }
+    }
 }
 
 // 0x7C1AA0
@@ -365,12 +739,24 @@ void CVidPoly::DrawHLine16(void* pSurface, int xMin, int xMax, DWORD dwColor, co
 {
     unsigned short* pSurface16 = reinterpret_cast<unsigned short*>(pSurface);
 
-    int width = xMax - xMin + 1;
-    if (width > 0) {
+    // The span is written as pixel pairs of dwColor | dwColor << 16 (rep stosd
+    // at 0x7C1ADD), after one odd pixel of dwColor's low word: a colour with
+    // bits above 15 puts its high word ORed with its low word in the second
+    // pixel of each pair.
+    DWORD dwPair = dwColor | (dwColor << 16);
+
+    if (xMax - xMin >= 0) {
+        int width = xMax - xMin + 1;
         pSurface16 += xMin;
 
-        for (int x = 0; x < width; x++) {
-            *pSurface16++ = static_cast<unsigned short>(dwColor);
+        if ((width & 1) != 0) {
+            *pSurface16++ = static_cast<unsigned short>(dwPair);
+            width--;
+        }
+
+        for (int nPairs = width / 2; nPairs > 0; nPairs--) {
+            *pSurface16++ = static_cast<unsigned short>(dwPair);
+            *pSurface16++ = static_cast<unsigned short>(dwPair >> 16);
         }
     }
 }
@@ -380,12 +766,24 @@ void CVidPoly::DrawHLineMirrored16(void* pSurface, int xMin, int xMax, DWORD dwC
 {
     unsigned short* pSurface16 = reinterpret_cast<unsigned short*>(pSurface);
 
-    int width = xMax - xMin + 1;
-    if (width > 0) {
+    // As DrawHLine16, walking left from the pixel at the surface's width -
+    // xMin: one odd pixel, then pairs whose higher-addressed pixel gets the
+    // pair's high word (0x7C1B3A).
+    DWORD dwPair = dwColor | (dwColor << 16);
+
+    if (xMax - xMin >= 0) {
+        int width = xMax - xMin + 1;
         pSurface16 += rSurface.Width() - xMin;
 
-        for (int x = 0; x < width; x++) {
-            *pSurface16-- = static_cast<unsigned short>(dwColor);
+        if ((width & 1) != 0) {
+            *pSurface16-- = static_cast<unsigned short>(dwPair);
+            width--;
+        }
+
+        for (int nPairs = width >> 1; nPairs > 0; nPairs--) {
+            pSurface16[-1] = static_cast<unsigned short>(dwPair);
+            pSurface16[0] = static_cast<unsigned short>(dwPair >> 16);
+            pSurface16 -= 2;
         }
     }
 }
@@ -521,13 +919,38 @@ void CVidPoly::SetHLineFunction(DWORD dwFlags)
 // 0x7C1FD0
 void CVidPoly::DrawHLineShaded16(void* pSurface, int xMin, int xMax, DWORD dwColor, const CRect& rSurface, const CPoint& ptRef)
 {
-    // TODO: Incomplete.
+    // Each pixel becomes the colour scaled by the pixel's intensity / 4.
+    CVidMode* pVidMode = g_pChitin->GetCurrentVideoMode();
+
+    int width = xMax - xMin + 1;
+    if (xMax - xMin >= 0 && width > 0) {
+        WORD* pSurface16 = reinterpret_cast<WORD*>(pSurface) + xMin;
+
+        do {
+            DWORD nIntensity = pVidMode->GetIntensity16(*pSurface16);
+            *pSurface16 = static_cast<WORD>(pVidMode->ScaleColor16(dwColor & 0xFFFF, nIntensity >> 2));
+            pSurface16++;
+            width--;
+        } while (width != 0);
+    }
 }
 
 // 0x7C2040
 void CVidPoly::DrawHLineShadedMirrored16(void* pSurface, int xMin, int xMax, DWORD dwColor, const CRect& rSurface, const CPoint& ptRef)
 {
-    // TODO: Incomplete.
+    CVidMode* pVidMode = g_pChitin->GetCurrentVideoMode();
+
+    int width = xMax - xMin + 1;
+    if (xMax - xMin >= 0 && width > 0) {
+        WORD* pSurface16 = reinterpret_cast<WORD*>(pSurface) + 1 + (rSurface.right - rSurface.left - xMin);
+
+        do {
+            pSurface16--;
+            DWORD nIntensity = pVidMode->GetIntensity16(*pSurface16);
+            width--;
+            *pSurface16 = static_cast<WORD>(pVidMode->ScaleColor16(dwColor & 0xFFFF, nIntensity >> 2));
+        } while (width != 0);
+    }
 }
 
 // 0x7D6970
@@ -572,7 +995,8 @@ void CVidPoly::DrawHLineDithered24(void* pSurface, int xMin, int xMax, DWORD dwC
 
     int width = xMax - xMin + 1;
     if (width > 0) {
-        pSurface8 += xMin;
+        // Three bytes a pixel (add at 0x7D6A26, lea at 0x7D6A2E).
+        pSurface8 += xMin * 3;
 
         if ((ptRef.y & 1) != 0) {
             if (((xMin + ptRef.x) & 1) != 0) {
@@ -732,13 +1156,59 @@ void CVidPoly::DrawHLineDitheredMirrored32(void* pSurface, int xMin, int xMax, D
 // 0x7D6CA0
 void CVidPoly::DrawHLineShaded24(void* pSurface, int xMin, int xMax, DWORD dwColor, const CRect& rSurface, const CPoint& ptRef)
 {
-    // TODO: Incomplete.
+    DWORD nColor0 = dwColor & 0xFF;
+    DWORD nColor1 = (dwColor >> 8) & 0xFF;
+    DWORD nColor2 = (dwColor >> 16) & 0xFF;
+    INT nIntensity = static_cast<INT>(nColor0 + nColor2 + nColor1) / 3;
+
+    int width = xMax - xMin + 1;
+    if (xMax - xMin >= 0 && width > 0) {
+        BYTE* pSurface8 = reinterpret_cast<BYTE*>(pSurface) + xMin * 3;
+
+        do {
+            // NOTE: The original reads only the pixel's first byte and takes
+            // it, it plus one and it plus two for the three channels
+            // (0x7D6D1F to 0x7D6D2F).
+            INT nValue = pSurface8[0];
+            INT nSum = (nValue + 2) + (nValue + 1) + nValue;
+            if (nSum >= 0x20 && (nSum >> 3) <= nIntensity) {
+                INT nInverse = 255 - nIntensity;
+                pSurface8[1] = static_cast<BYTE>((nColor1 * nIntensity + nInverse * (nValue + 1)) >> 8);
+                pSurface8[0] = static_cast<BYTE>((nColor2 * nIntensity + nInverse * nValue) >> 8);
+                pSurface8[2] = static_cast<BYTE>((nColor0 * nIntensity + nInverse * (nValue + 2)) >> 8);
+            }
+            pSurface8 += 3;
+            width--;
+        } while (width != 0);
+    }
 }
 
 // 0x7D6DA0
 void CVidPoly::DrawHLineShadedMirrored24(void* pSurface, int xMin, int xMax, DWORD dwColor, const CRect& rSurface, const CPoint& ptRef)
 {
-    // TODO: Incomplete.
+    DWORD nColor0 = dwColor & 0xFF;
+    DWORD nColor1 = (dwColor >> 8) & 0xFF;
+    DWORD nColor2 = (dwColor >> 16) & 0xFF;
+    INT nIntensity = static_cast<INT>(nColor0 + nColor2 + nColor1) / 3;
+
+    int width = xMax - xMin + 1;
+    if (xMax - xMin >= 0 && width > 0) {
+        BYTE* pSurface8 = reinterpret_cast<BYTE*>(pSurface) + (rSurface.right - rSurface.left - xMin + 1) * 3;
+
+        do {
+            pSurface8 -= 3;
+            // NOTE: As DrawHLineShaded24, the first byte stands for all three.
+            INT nValue = pSurface8[0];
+            INT nSum = (nValue + 2) + (nValue + 1) + nValue;
+            if (nSum >= 0x20 && (nSum >> 3) <= nIntensity) {
+                INT nInverse = 255 - nIntensity;
+                pSurface8[1] = static_cast<BYTE>((nColor1 * nIntensity + nInverse * (nValue + 1)) >> 8);
+                pSurface8[0] = static_cast<BYTE>((nColor2 * nIntensity + nInverse * nValue) >> 8);
+                pSurface8[2] = static_cast<BYTE>((nColor0 * nIntensity + nInverse * (nValue + 2)) >> 8);
+            }
+            width--;
+        } while (width != 0);
+    }
 }
 
 // 0x7D6EB0

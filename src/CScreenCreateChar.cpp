@@ -3352,7 +3352,10 @@ void CScreenCreateChar::UpdateMemorizeArcaneSpellsPanel(CUIPanel* pPanel, CGameS
         // NOTE: Implementation is different. Original code has many inlined
         // stuff which is likely impossible to replicate one to one.
         while (nIndex < nSpells) {
-            // TODO: Unclear.
+            // NOTE: The original's inlined accessor here only asserts (the
+            // list is not empty and the index is in it, FileFormat.h lines
+            // 2428 and 2429, 0x60F520 and 0x60F54F) before the id is read;
+            // CheckF8 carries those asserts and its result is unused.
             pSpells->CheckF8(nIndex);
 
             UINT nID = pSpells->m_List[nIndex].m_nID;
@@ -5726,7 +5729,11 @@ void CScreenCreateChar::OnDoneButtonClick()
                         CGameObjectArray::THREAD_ASYNCH,
                         INFINITE);
 
-                    // TODO: Unclear.
+                    // NOTE: A custom biography is the TLK override's entry
+                    // 62016 (0xF240) plus the character's slot: a creature
+                    // already pointing there has the old entry removed
+                    // before the new one is added; any other is pointed
+                    // there (as the original, 0x616EB8).
                     if (pSprite->GetBaseStats()->m_biography == m_nCharacterSlot + 62016) {
                         if (g_pBaldurChitin->GetTlkTable().m_override.Fetch(pSprite->GetBaseStats()->m_biography, strRes)) {
                             g_pBaldurChitin->GetTlkTable().m_override.Remove(pSprite->GetBaseStats()->m_biography);
@@ -10149,8 +10156,12 @@ void CUIControlButtonCharGenMemorizedArcaneSpellSelection::OnLButtonClick(CPoint
             // NOTE: Original code is an unreadable mess consisting mostly of
             // inlined functions.
             //
-            // TODO: The code looks unsafe as checking for resref is the only
-            // way to stop this loop.
+            // NOTE: The search stops only on the button's spell, as in the
+            // original: UpdateMemorizeArcaneSpellsPanel (0x60F430) gave the
+            // button a spell of this list at or after this index (it skips
+            // only unusable ones), so it is found; past the list's end the
+            // inlined accessor's asserts (FileFormat.h lines 2437 and 2438)
+            // fire, as in the original.
             while (m_spellResRef != g_pBaldurChitin->GetObjectGame()->m_spells.Get(nID)) {
                 nButtonIndex++;
                 nID = pList->Get(nButtonIndex)->m_nID;

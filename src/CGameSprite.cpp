@@ -24876,13 +24876,13 @@ SHORT CGameSprite::GetDirection(const CPoint& ptStart, const CPoint& ptTarget)
 
     if (ptTarget.y < ptStart.y) {
         if (ptTarget.x < ptStart.x) {
-            dx = ptStart.x - ptTarget.y;
+            dx = ptStart.x - ptTarget.x;
             dy = ptStart.y - ptTarget.y;
 
             if (27 * dy <= 6 * dx) {
                 return 4;
             } else if (27 * dy <= 16 * dx) {
-                return 6;
+                return 5;
             } else if (24 * dy <= 38 * dx) {
                 return 6;
             } else if (7 * dy <= 38 * dx) {

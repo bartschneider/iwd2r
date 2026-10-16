@@ -1619,7 +1619,9 @@ const CString CRuleTables::GetClassString(BYTE nClass, DWORD nSpecialist) const
     return CString("");
 }
 
-// TODO: Figure out when it is actually used, maybe needs a better name.
+// NOTE: The class suffix of a spell button's tooltip: the action bar's spell
+// lists (CGameSprite 0x714F70, 0x7155C0, 0x716770) store it in the button's
+// CAbilityId (field_18).
 //
 // 0x5421F0
 STRREF CRuleTables::GetClassSuffixStringRef(BYTE nClass) const
@@ -1651,7 +1653,8 @@ STRREF CRuleTables::GetClassSuffixStringRef(BYTE nClass) const
     return -1;
 }
 
-// TODO: Definitely needs a better name.
+// NOTE: The tooltip suffix of a spell button the caster cannot cast
+// (CGameSprite::CanCast fails in 0x714F70); it replaces the class suffix.
 //
 // 0x542270
 STRREF CRuleTables::GetClassBeyondCastingAbilityStringRef(BYTE nClass) const
@@ -2715,8 +2718,9 @@ void CRuleTables::GetScriptDescription(const CString& sScript, CString& sTitle, 
 
     strTitle = atol(m_tScriptDescription.GetAt(TITLE, sName));
 
-    // TODO: Might be an error - obtains TITLE once again instead of DESCRIPTION
-    // as seen below.
+    // NOTE: TITLE again, not DESCRIPTION, as the original (both lookups at
+    // 0x54455E and 0x544585 pass the TITLE column, 0x8DE9A4): a script with a
+    // title but no description keeps its own row.
     strDescription = atol(m_tScriptDescription.GetAt(TITLE, sName));
 
     if (strTitle == -1 || strDescription == -1) {
@@ -2772,13 +2776,18 @@ void CRuleTables::GetSpellDescription(const CString& sSpell, CString& sDescripti
 // 0x544930
 SHORT CRuleTables::GetLayOnHandsAmount(const CAIObjectType& typeAI, CDerivedStats& DStats) const
 {
-    if ((DStats.m_classMask & CLASSMASK_PALADIN) == 0) {
+    // NOTE: The original tests the object type's class mask (`typeAI` +0x18,
+    // 0x544934), not the derived stats' one.
+    if ((typeAI.m_nClassMask & CLASSMASK_PALADIN) == 0) {
         return 0;
     }
 
     DWORD nPaladinLevel = DStats.GetClassLevel(CAIOBJECTTYPE_C_PALADIN);
 
-    // TODO: Check casts.
+    // NOTE: Checked against 0x544951-0x5449E7: the charisma (less 1 below 10)
+    // as a float, less 10, halved, stored as a float and truncated (`_ftol`);
+    // below 1 the level alone. The original returns the product in 32 bits;
+    // ours keeps it as SHORT, which holds every reachable product.
     float v1 = DStats.m_nCHR < 10
         ? static_cast<float>(DStats.m_nCHR) - 1.0f
         : static_cast<float>(DStats.m_nCHR);
@@ -2890,7 +2899,7 @@ BOOL CRuleTables::IsUsableByAlignment(DWORD dwNotUsableBy, BYTE nAlignment) cons
 BYTE CRuleTables::GetStartingReputation(BYTE nAlignment) const
 {
     CString sAlignment = GetAlignmentString(nAlignment);
-    // TODO: Check cast.
+    // NOTE: The low byte of the number, as the original (0x544C46).
     return static_cast<BYTE>(atol(m_tReputationStart.GetAt(VALUE, sAlignment)));
 }
 
@@ -3274,7 +3283,9 @@ BOOL CRuleTables::Is3DSound(int nSoundChannel) const
 // 0x5457F0
 float CRuleTables::GetSoundReverbMix(int nSoundChannel, int nReverb) const
 {
-    // TODO: Check casts.
+    // NOTE: Both rounded to float before the product, as the original
+    // (0x5457F0); the x87 product of two floats is exact, so ours rounds the
+    // same once.
     float v1 = static_cast<float>(atof(m_tSoundChannel.GetAt(CPoint(2, nSoundChannel))));
     float v2 = static_cast<float>(atof(m_tReverb.GetAt(CPoint(4, nReverb))));
     return v1 * v2;
@@ -3283,11 +3294,13 @@ float CRuleTables::GetSoundReverbMix(int nSoundChannel, int nReverb) const
 // 0x545890
 int CRuleTables::GetSoundEnvironment(EAXPRESET& preset, int nReverb) const
 {
-    int nPreset = nReverb % m_tReverb.GetWidth();
+    // NOTE: The original wraps by the table's rows (`m_nSizeY`, +0x22 of the
+    // table, 0x5458AD); ours wrapped by its columns.
+    int nPreset = nReverb % m_tReverb.GetHeight();
 
     CString sEnvironment = m_tReverb.GetAt(CPoint(0, nPreset));
 
-    // TODO: Check casts.
+    // NOTE: Each `atof` rounded to float, as the original stores them.
     preset.fVolume = static_cast<float>(atof(m_tReverb.GetAt(CPoint(1, nPreset))));
     preset.fDecayTime = static_cast<float>(atof(m_tReverb.GetAt(CPoint(2, nPreset))));
     preset.fDaming = static_cast<float>(atof(m_tReverb.GetAt(CPoint(3, nPreset))));
@@ -4059,4 +4072,23 @@ DWORD CRuleTables::GetSpecializationMask(BYTE nClass, BYTE nIndex) const
     }
 
     return 0;
+}
+
+// 0x547620
+//
+// NOTE: The save adjustment CGameEffect::CheckAdd (0x4A3310) adds for
+// SPIN108: with `nType` 1 the source's animal empathy less `nSaveMod`, the
+// spell level and 5; 0 for any other type.
+INT CRuleTables::sub_547620(INT nType, CGameSprite* pSprite, LONG nSaveMod, DWORD nSpellLevel) const
+{
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\CRuleTables.cpp
+    // __LINE__: 7295
+    UTIL_ASSERT_MSG(pSprite != NULL, "Invalid Sprite.");
+
+    INT nAdjustment = 0;
+    if (nType == 1) {
+        nAdjustment = pSprite->GetDerivedStats()->m_nSkills[CGAMESPRITE_SKILL_ANIMAL_EMPATHY] - nSaveMod - static_cast<INT>(nSpellLevel) - 5;
+    }
+
+    return nAdjustment;
 }
