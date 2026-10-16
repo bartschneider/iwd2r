@@ -2217,16 +2217,19 @@ BOOL CInfButtonArray::UpdateButtons()
                 pSettings->field_1D0 = 0;
             }
 
+            // The selected weapon's button shows the selected frame only
+            // while a weapon button is the selected button (0x58D2C0 tests
+            // m_nSelectedButton, not the button's type).
             if (buttonData.m_abilityId.m_abilityNum == selectedWeaponData.m_abilityId.m_abilityNum
                 && buttonData.m_abilityId.m_itemNum == selectedWeaponData.m_abilityId.m_itemNum) {
-                if (*pButtonType == 60
-                    || *pButtonType == 61
-                    || *pButtonType == 62
-                    || *pButtonType == 63
-                    || *pButtonType == 64
-                    || *pButtonType == 65
-                    || *pButtonType == 66
-                    || *pButtonType == 67) {
+                if (m_nSelectedButton == 60
+                    || m_nSelectedButton == 61
+                    || m_nSelectedButton == 62
+                    || m_nSelectedButton == 63
+                    || m_nSelectedButton == 64
+                    || m_nSelectedButton == 65
+                    || m_nSelectedButton == 66
+                    || m_nSelectedButton == 67) {
                     pSettings->field_1CC = 1;
                 }
             } else {

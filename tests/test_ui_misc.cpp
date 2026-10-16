@@ -849,6 +849,62 @@ TEST_CASE("toolbar: a selected character's buttons and weapon set reach the acti
     pGame->SelectToolbar();
 }
 
+// UpdateButtons (0x58A340), the quick weapons (types 60-67): the button of
+// the selected weapon gets the selected frame (field_1CC) only while a
+// weapon button is the selected button (0x58D2C0 tests m_nSelectedButton).
+// With none selected it keeps an unselected button's look (render round 5
+// found ours testing the button's own type: the red frame where the
+// original draws the green highlight).
+TEST_CASE("toolbar: the selected weapon's button is framed only while a weapon button is selected", "[uimisc][toolbar][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    CGameSprite* pSprite = PartyMember();
+    if (pSprite == NULL) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    if (pGame->GetGroup()->GetCount() == 0) {
+        pGame->SelectCharacter(pSprite->GetId(), FALSE);
+    }
+    pGame->SelectToolbar();
+    CInfButtonArray* pButtonArray = pGame->GetButtonArray();
+    INT savedTypes[12];
+    memcpy(savedTypes, pButtonArray->m_buttonTypes, sizeof(savedTypes));
+    const INT nSavedSelected = pButtonArray->m_nSelectedButton;
+
+    // Button 0: the current weapon set's weapon, the selected weapon.
+    const INT nType = 60 + 2 * pSprite->m_nWeaponSet;
+    pButtonArray->m_buttonTypes[0] = nType;
+
+    pButtonArray->m_nSelectedButton = nType;
+    pButtonArray->UpdateButtons();
+    REQUIRE(pButtonArray->m_buttonArray[0].field_1CC == 1);
+
+    // Another weapon button selected: still framed.
+    pButtonArray->m_nSelectedButton = nType == 67 ? 60 : 67;
+    pButtonArray->UpdateButtons();
+    CHECK(pButtonArray->m_buttonArray[0].field_1CC == 1);
+
+    // No button selected (100, as Escape leaves it) or another action's.
+    pButtonArray->m_nSelectedButton = 100;
+    pButtonArray->UpdateButtons();
+    CHECK(pButtonArray->m_buttonArray[0].field_1CC == 0);
+    pButtonArray->m_nSelectedButton = 2;
+    pButtonArray->UpdateButtons();
+    CHECK(pButtonArray->m_buttonArray[0].field_1CC == 0);
+
+    memcpy(pButtonArray->m_buttonTypes, savedTypes, sizeof(savedTypes));
+    pButtonArray->m_nSelectedButton = nSavedSelected;
+    pGame->SelectToolbar();
+}
+
 namespace {
 
 // The world screen with game input on (CGameSave::m_mode bit 0), the
