@@ -515,4 +515,10 @@ public:
     DWORD GetDataSize();
 };
 
+// 0x8B4F84: the keymap's spell resrefs, entries 53 to 371 of the original's
+// table at 0x8B4EB0 (Keymap.ini's Priest Spells, then Wizard Spells); the
+// last two are NULL. CInfGame::LoadKeymap reads it, and
+// CInfButtonArray::UpdateButtons finds a spell's hot key in it.
+extern const char* off_8B4F84[CINFGAME_KEYMAP_SIZE - 53];
+
 #endif /* CINFGAME_H_ */

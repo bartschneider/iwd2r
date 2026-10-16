@@ -238,7 +238,7 @@ static const char* off_8AFD24[FIFTY_THREE] = {
 };
 
 // 0x8B4F84
-static const char* off_8B4F84[] = {
+const char* off_8B4F84[CINFGAME_KEYMAP_SIZE - FIFTY_THREE] = {
     "SPPR101",
     "SPPR102",
     "SPPR103",
