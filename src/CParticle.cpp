@@ -35,7 +35,10 @@ const BYTE CParticle::GROUNDED = 1;
 const BYTE CParticle::DEAD = 2;
 
 // 0x85EB74
-const LONG CParticle::LIFESPAN_INFINITE = LONG_MAX;
+//
+// NOTE: 0x7FFFFFFF in the original. Not `LONG_MAX`, which is 64-bit on
+// LP64 targets and became -1 in a 32-bit `LONG`.
+const LONG CParticle::LIFESPAN_INFINITE = 0x7FFFFFFF;
 
 // 0x7C3500
 CParticle::CParticle()
@@ -82,6 +85,7 @@ CParticle::CParticle(const CParticle& particle)
     m_vel = particle.m_vel;
     m_rgbColor = particle.m_rgbColor;
     m_nTimeStamp = particle.m_nTimeStamp;
+    m_nTailLength = particle.m_nTailLength;
     m_nRenderTime = particle.m_nRenderTime;
     m_bTag = FALSE;
     m_nGravity = particle.m_nGravity;

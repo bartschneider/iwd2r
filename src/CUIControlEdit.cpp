@@ -2,6 +2,7 @@
 
 #include "CBaldurChitin.h"
 #include "CBaldurEngine.h"
+#include "CScreenWorld.h"
 #include "CUIManager.h"
 #include "CUIPanel.h"
 #include "CUtil.h"
@@ -215,8 +216,77 @@ BOOL CUIControlEdit::OnRButtonDown(CPoint pt)
 // 0x4D7130
 void CUIControlEdit::OnKeyDown(SHORT nKey)
 {
+    // The IME's composition with Double Byte Character Support (Program
+    // Options, off by default).
     if (g_pBaldurChitin->field_1A0) {
-        // TODO: Incomplete.
+        g_pChitin->GetWnd();
+        if (g_pBaldurChitin->cImm.field_128) {
+            if (nKey == VK_F3 && PRIMARYLANGID(GetSystemDefaultLangID()) == LANG_JAPANESE) {
+                CWnd* pWnd = g_pChitin->GetWnd();
+                g_pChitin->cImm.sub_7C2CC0(pWnd != NULL ? pWnd->GetSafeHwnd() : NULL);
+            }
+
+            if (m_sText.GetLength() >= m_nMaxLength) {
+                if (nKey == VK_F4
+                    || (nKey == VK_RETURN && PRIMARYLANGID(GetSystemDefaultLangID()) == LANG_KOREAN)) {
+                    CWnd* pWnd = g_pChitin->GetWnd();
+                    g_pBaldurChitin->cImm.sub_7C2E10(pWnd != NULL ? pWnd->GetSafeHwnd() : NULL);
+                    m_pPanel->InvalidateRect(&(m_pPanel->m_rImeSuggestionsFrame));
+                    m_pPanel->m_rImeSuggestionsFrame.SetRectEmpty();
+                    m_pPanel->m_pImeSuggestionsFont = NULL;
+                }
+                m_pPanel->InvalidateRect(NULL);
+                return;
+            }
+
+            CString sComposition = g_pBaldurChitin->cImm.sub_4D89E0();
+            if (sComposition != "") {
+                m_sText = m_sText.Left(m_nCursorIndex)
+                    + sComposition
+                    + m_sText.Right(m_sText.GetLength() - m_nCursorIndex);
+            }
+
+            if (m_sText.GetLength() >= m_nMaxLength) {
+                m_sText = m_sText.Left(m_nMaxLength);
+            }
+
+            m_nCursorIndex += static_cast<SHORT>(sComposition.GetLength());
+            AdjustVisibleIndex();
+
+            if (nKey == VK_F4
+                || (nKey == VK_RETURN && PRIMARYLANGID(GetSystemDefaultLangID()) == LANG_KOREAN)) {
+                CWnd* pWnd = g_pChitin->GetWnd();
+                g_pBaldurChitin->cImm.sub_7C2E10(pWnd != NULL ? pWnd->GetSafeHwnd() : NULL);
+                m_pPanel->InvalidateRect(&(m_pPanel->m_rImeSuggestionsFrame));
+                m_pPanel->m_rImeSuggestionsFrame.SetRectEmpty();
+                m_pPanel->m_pImeSuggestionsFont = NULL;
+                m_pPanel->InvalidateRect(NULL);
+                g_pBaldurChitin->GetActiveEngine()->GetManager()->InvalidateRect(NULL);
+                return;
+            }
+
+            // Enter in the world screen (its chat and console edits) ends the
+            // input there.
+            if (nKey == VK_RETURN && g_pBaldurChitin->GetActiveEngine() == g_pBaldurChitin->m_pEngineWorld) {
+                field_872 = 1;
+                if (m_sText != field_874[0]) {
+                    for (BYTE nIndex = field_873 - 1; nIndex != 0; nIndex--) {
+                        field_874[nIndex] = field_874[nIndex - 1];
+                    }
+                    field_874[0] = m_sText;
+                }
+
+                OnEditReturn(m_sText);
+
+                if (field_8A0) {
+                    // NOTE: Uninline.
+                    m_pPanel->m_pManager->KillCapture();
+                }
+            }
+
+            InvalidateRect();
+            return;
+        }
     }
 
     if (m_pPanel->m_pManager->m_pWarp->GetMenuKey()) {
@@ -287,7 +357,21 @@ void CUIControlEdit::OnKeyDown(SHORT nKey)
             }
 
             if (g_pChitin->field_1A0) {
-                // TODO: Incomplete.
+                // A double-byte character goes whole (0x4D7C5A-0x4D7E04).
+                if (CUtil::IsDBCSTrailByte(m_sText, m_nCursorIndex)) {
+                    m_nCursorIndex--;
+                    if (m_nCursorIndex < m_nVisibleIndex) {
+                        m_nVisibleIndex = m_nCursorIndex;
+                    }
+
+                    if (g_pChitin->field_1A0 && IsDBCSLeadByte(m_sText[static_cast<int>(m_nCursorIndex)])) {
+                        m_sText = m_sText.Left(m_nCursorIndex) + m_sText.Right(m_sText.GetLength() - m_nCursorIndex - 2);
+                    } else {
+                        m_sText = m_sText.Left(m_nCursorIndex) + m_sText.Right(m_sText.GetLength() - m_nCursorIndex - 1);
+                    }
+                } else {
+                    m_sText = m_sText.Left(m_nCursorIndex) + m_sText.Right(m_sText.GetLength() - m_nCursorIndex - 1);
+                }
             } else {
                 m_sText = m_sText.Left(m_nCursorIndex) + m_sText.Right(m_sText.GetLength() - m_nCursorIndex - 1);
             }
@@ -298,7 +382,11 @@ void CUIControlEdit::OnKeyDown(SHORT nKey)
     case VK_RETURN:
         field_872 = 1;
         if (m_sText != field_874[0]) {
-            // TODO: Incomplete.
+            // NOTE: The history moves down one, the oldest entry dropped
+            // (0x4D79EF-0x4D7A24).
+            for (BYTE nIndex = field_873 - 1; nIndex != 0; nIndex--) {
+                field_874[nIndex] = field_874[nIndex - 1];
+            }
             field_874[0] = m_sText;
         }
 
@@ -344,8 +432,13 @@ void CUIControlEdit::OnKeyDown(SHORT nKey)
                 m_nVisibleIndex = m_nCursorIndex;
             }
 
-            if (g_pChitin->field_1A0) {
-                // TODO: Incomplete.
+            // A double-byte character's lead byte is stepped over too
+            // (0x4D7B74-0x4D7BBA).
+            if (g_pChitin->field_1A0 && CUtil::IsDBCSTrailByte(m_sText, m_nCursorIndex)) {
+                m_nCursorIndex--;
+                if (m_nCursorIndex < m_nVisibleIndex) {
+                    m_nVisibleIndex = m_nCursorIndex;
+                }
             }
 
             InvalidateRect();
@@ -375,8 +468,12 @@ void CUIControlEdit::OnKeyDown(SHORT nKey)
         }
         break;
     case VK_DOWN:
-        if (field_872 > 1 && field_874[field_872].GetLength() != 0) {
-            m_sText = field_874[field_872--];
+        // NOTE: Two entries back from the history index, as the original
+        // (0x4D7AE0: `field_874` + (index - 2) * 4); ours read the entry at
+        // the index.
+        if (field_872 > 1 && field_874[field_872 - 2].GetLength() != 0) {
+            m_sText = field_874[field_872 - 2];
+            field_872--;
             m_nCursorIndex = m_sText.GetLength();
 
             AdjustVisibleIndex();
@@ -567,12 +664,6 @@ void CUIControlEdit::OnKeyDown(SHORT nKey)
         }
         break;
     }
-}
-
-// 0x4D89E0
-void sub_4D89E0()
-{
-    // TODO: Incomplete.
 }
 
 // 0x4D8A60

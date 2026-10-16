@@ -27,8 +27,18 @@ public:
     /* 0078 */ virtual void AdjustVisibleIndex();
 
     void Remove();
-    void ReConstitute();
-    void CalculateNewLines(BYTE a1);
+    INT ReConstitute();
+    INT CalculateNewLines(BYTE nMode);
+
+    // NOTE: Not functions of the original: parts of OnKeyDown, which repeats
+    // the clipboard and insertion code in several cases.
+    void CopyToClipboard(BOOL bCut);
+    void PasteFromClipboard();
+    BOOL InsertCharacter(char ch);
+    void OnPageUpKey();
+    void OnPageDownKey();
+    void OnUpKey();
+    void OnDownKey();
 
     /* 0052 */ CVidMosaic m_mosBackground;
     /* 0106 */ CVidMosaic m_mosTextFocusedBackground;

@@ -1433,27 +1433,6 @@ void CGameEffect::AddColorEffect(CGameSprite* pSprite, BYTE r, BYTE g, BYTE b)
     AddColorEffect(pSprite, r, g, b, 1);
 }
 
-// 0x547620
-// NOTE: A CRuleTables member (its assert names CRuleTables.cpp); kept here,
-// file-static, until CRuleTables.cpp's owner takes it. Only CheckAdd calls
-// it: for type 1 the sprite's animal empathy skill less the save modifier,
-// the spell level and 5.
-static INT RuleTables_GetSaveAdjustment547620(const CRuleTables& ruleTables, INT nType, CGameSprite* pSprite, LONG nSaveMod, DWORD nSpellLevel)
-{
-    (void)ruleTables;
-
-    // __FILE__: C:\Projects\Icewind2\src\Baldur\CRuleTables.cpp
-    // __LINE__: 7295
-    UTIL_ASSERT_MSG(pSprite != NULL, "Invalid Sprite.");
-
-    INT nAdjustment = 0;
-    if (nType == 1) {
-        nAdjustment = pSprite->GetDerivedStats()->m_nSkills[CGAMESPRITE_SKILL_ANIMAL_EMPATHY] - nSaveMod - static_cast<INT>(nSpellLevel) - 5;
-    }
-
-    return nAdjustment;
-}
-
 // 0x4A3310
 BOOL CGameEffect::sub_4A3310(CGameSprite* pSprite, BYTE* pRoll1, BYTE* pRoll2, BYTE* pRoll3, BYTE* pRoll4, BYTE* pProbabilityRoll)
 {
@@ -1682,8 +1661,7 @@ BOOL CGameEffect::sub_4A3310(CGameSprite* pSprite, BYTE* pRoll1, BYTE* pRoll2, B
         // NOTE: The CResRef at 0x8F8E60 is CGameSprite::SPIN108. The source's
         // type is not checked here.
         if (m_sourceRes == CGameSprite::SPIN108) {
-            m_saveMod += RuleTables_GetSaveAdjustment547620(pGame->GetRuleTables(),
-                1,
+            m_saveMod += pGame->GetRuleTables().sub_547620(1,
                 static_cast<CGameSprite*>(pSource),
                 m_saveMod,
                 m_spellLevel);

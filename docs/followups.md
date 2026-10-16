@@ -78,7 +78,7 @@ These are in `oracle/replay/` and `tools/`.
 - **Real-GPU runs in a Hyper-V VM (GPU-P).** Windows Sandbox shares the host GPU through GPU partitioning but picks the adapter itself (the AMD iGPU on a hybrid machine, no Vulkan), so `Presenter=gpu` never runs on the RTX there. A Generation 2 Hyper-V VM under `C:\Users\thier\iwd2r-vm` with `Add-VMGpuPartitionAdapter -InstancePath <RTX>` and the host's NVIDIA driver store copied into the guest runs our engine on the real GPU with real Vulkan, driven headlessly over PowerShell Direct (`Invoke-Command -VMName`) like the sandbox driver. Needs one admin setup by the user (Hyper-V is present on this host: Windows 11 Pro, vmms running). Planned as `play.py --vm hyperv` after project 4 Task 6.
 - **A free Xvfb display across `play.py` processes.** `tools/realinput.py`'s `start_xvfb` picks the first free display number under a lock that only covers the threads of one process. Two `--vm linux` runs started at the same moment from different worktrees can choose the same number; the second Xvfb exits, but `x_display_ready` may already see the first one's server, and both games would run on one display. Pick and start under a `tools/filelock.py` lock (or check that our Xvfb is still alive when the display answers) so parallel streams can run `--vm linux` at once.
 - **D3D12 and Metal shader blobs.** The GPU presenter asks SDL for `SDL_GPU_SHADERFORMAT_SPIRV` only, so it runs on Vulkan alone: a Windows machine without a Vulkan driver, and macOS, get `classic`. Compiling the shaders to DXIL and MSL as well (`tools/shaders.py`, with SDL_shadercross or the vendor compilers) and passing every format SDL accepts would bring the presenter to D3D12 and Metal.
-- **`FillPoly` (0x7C13A0).** Still a stub that returns FALSE. `CInfinity::FXRenderClippingPolys`, now ported, calls it for non-convex wall polygons, so sprites behind those walls are not occluded yet; `FillConvexPoly` (fixed, docs/evidence/7C0F40.md) covers the convex ones.
+- **`FillPoly`'s edge-table cache (0x7C1DE0) is keyed by the vertex list's address and count.** A WED freed and another loaded whose polygon list lands at the same address with the same vertex count takes the old polygon's edges, in the original as in ours (kept; docs/evidence/7C13A0.md). Sixteen entries are held. If wall occlusion ever shows a stale shape after an area change, flushing the cache when an area's WED is released would bound it.
 - **The world screen at Scale 2, World Scale 1 has not been seen running.** Before UI scaling counts as done, `scenarios/pending/world_entry.txt` must run at 1920x1200 (or 2560x1440) with `Scale=2` and `World Scale=1`, with shots showing the world at 1x and the UI at 2x. The panels themselves are checked: every GUIW08/GUIW10 panel lies inside `WorldPanelRects`' band for the viewport it is shown over (`world_panels_lie_in_the_band` in `tests/test_layout.cpp`, the CHU rectangles read with `tools/bif.py`); the world screen's UI manager holds only GUIW's ten panels and no control lies outside its panel, so the quick weapon, item and spell choices are drawn by the action bar's (panel 1's) own controls, not by a popup above it.
 - **The default stays `Presenter=classic`** until the gpu presenter has run on a real GPU under Windows (ruling P4-13; the Hyper-V GPU-P run above is that run). `auto` behaves as `gpu` once the probe passes.
 - **User check of the gpu presenter on real Windows Vulkan (P4-5).** Not yet done: the probe's `presenter: gpu probe ok` line, the swapchain claim on the game's window, Ctrl+Shift+R back to classic on the same HWND, alt-tab, minimise and a high-DPI display.
@@ -152,7 +152,6 @@ The guards in `src/render/api.h` leave these for the renderer that first draws t
 ## Effect wiring (from project 3, milestone 3, effect-wiring)
 
 - The cone projectile's Fire (0x579EF0) reproduces the original's x87 arithmetic in doubles in the same order. Nothing sets `-ffp-contract=off`, so on platforms whose compilers fuse multiply-add (aarch64 with GCC or Clang) a corner or puff point can move by one unit. Set it project-wide before any non-x86 build is compared with the original.
-- `CRuleTables` 0x547620 (the SPIN108 animal-empathy save adjustment) lives as a file-static in src/CGameEffect.cpp; it belongs in CRuleTables.
 - `DecodeProjectile`'s 14 cone cases can now call the cone projectile (0x579B40) instead of the instant fallback; 430 still takes the fallback for most types.
 - Shroud of Flame's EffSoF1/EffSoF2 path (index >= 1) has no test yet; it is reachable now that `StartSpriteEffect` asserts only on a failed allocation.
 - `Ftol` is duplicated in src/CProjectileSingleTarget.cpp and src/CAIGroup.cpp.
@@ -174,11 +173,10 @@ The crisp-text requirement is met by `Program Options/Text Renderer=scalable` (s
 
 ## Character, spellbook and options screens (from project 3, milestone 5, screens-char)
 
-- Blocked stubs in src/CScreenCharacter.cpp: `UpdateEquipmentInformation` 0x5DE2C0 and the character text export `sub_5E4560` need CGameSprite 0x723EA0, 0x73CF10 and 0x73D080, CRuleTables 0x547020 and CItem 0x4E9840; `CheckDropSlot` 0x5E6A30 needs CInfGame 0x5B7850, 0x5B81C0 and 0x5B9C60 (until then a level-up never drops items a character can no longer use). Their comments should name those blockers.
+- Blocked stubs in src/CScreenCharacter.cpp: `UpdateEquipmentInformation` 0x5DE2C0 and the character text export `sub_5E4560` need CGameSprite 0x723EA0, 0x73CF10 and 0x73D080, CRuleTables 0x547020 and CItem 0x4E9840 (all but 0x723EA0 are ported on p3/combat, none on first); their comments name them. (`CheckDropSlot` 0x5E6A30 is ported, through the CInfGameItemUse seam.)
 - `CGameSprite::CheckQuickLists` 0x71ABA0 is not ported: forgetting a spell and level-up skip it, so quick slots keep a forgotten spell until rebuilt.
 - `CGameSprite::GetAC` is a stub returning 0, so the character screen shows AC 0 (milestone 3 combat).
 - `CGameSprite.h` lacks `BYTE field_7282[11]`, so level-up always rolls hit points; the original skips that roll (and its `rand()`) in one rare drained-level case. No test pins level-up's rand count.
-- `CScreenCharacter::OnKeyDown` calls its own `OnLeftPanelButtonClick` where the original calls the active engine's.
 
 ## Inventory, containers and stores (from project 3, milestone 5, screens-items)
 
@@ -193,3 +191,15 @@ The crisp-text requirement is met by `Program Options/Text Renderer=scalable` (s
 - `CGameEffectDisease::ApplyEffect` uses an uninitialised `pEffect` after `UTIL_ASSERT(FALSE)` for an unknown mode. This is the original's bug, kept as is.
 - Running several engine test cases in one `iwd2r_tests` process can crash at random, because each test file starts its own engine (seen with `[effects]` across test_effects and test_effects_iwd, and with the movement rounding test). ctest and the gate run one process per case, so they are unaffected.
 - The AR1001 stand-in in the area-move test (screens-items) can go back to AR3000 now that AR3000 loads.
+
+## UI controls and visual systems (from project 3, milestone 5, ui-misc)
+
+- `src/CGameSpriteButtonLists.*` holds the action bar's eight sprite button lists (0x714F70, 0x7155C0, 0x715BD0, 0x716E80, 0x717250, 0x717FC0, 0x716770, 0x718390) as free functions taking the sprite, a temporary seam like `CInfGameItemUse` while vis-probe owns `CGameSprite.*`. Fold them into CGameSprite members.
+- Spontaneous casting (the seam's 0x716770) skips `CGameSprite::CheckQuickLists` (0x71ABA0), so the quick spell slots keep a converted spell's old count until they are rebuilt.
+- `CScreenWorld::OnKeyDown` should call `CInfButtonArray::sub_594170` (at 0x688D2A, 0x688E17, 0x6890E2, 0x689146 and 0x6891B9): the customize state's keys. The 'I' key does not open the inventory. `CInfGame::SelectToolbar`'s TODOs can call 0x595E70 and 0x595F70 now.
+- `CScreenCharacter::UpdateEquipmentInformation` (0x5DE2C0) and `sub_5E4560` wait for CGameSprite 0x723EA0 (not ported anywhere) and the p3/combat ports of 0x73CF10, 0x73D080, CItem 0x4E9840 and `CRuleTables::GetIterativeAttackBonus`.
+- `CUtil::FindOneOf` (0x781180) tests `IsDBCSLeadByte(sMutableSeparators[nIndex])` for every index of the searched string, reading the separators past their end; the original tests the searched string's byte, and only with Double Byte Character Support. Harmless on Linux (IsDBCSLeadByte is always FALSE) but an out-of-bounds read.
+- Movie subtitles (`CBaldurProjector` 0x43E300, 0x43EA70, 0x43EC20, 0x43EED0) are not ported: Bink playback needs binkw32 (absent on Linux) and the subtitles blit DirectDraw surfaces.
+- The Lua console's Enter (0x77BF30, `CLUAConsole` 0x5838A0) is not ported; iwd2r has no Lua runtime.
+- Character generation reports no Ctrl (its vtable's GetCtrlKey is CWarp's) and ignores Enter in the biography popup, in the original too: the biography edit has no Ctrl shortcuts or line breaks there. The character screen's and the journal's edits have them.
+- `CDerivedStats`' arrays at +0x328 and +0x378 and its six lists at +0x4AC to +0x538 are still undeclared; only the constructor, ClearAll and the copy touch them.
