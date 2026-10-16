@@ -3,6 +3,7 @@
 
 #include "CBaldurChitin.h"
 #include "CButtonData.h"
+#include "CChitin.h"
 #include "CDerivedStats.h"
 #include "CGameArea.h"
 #include "CGameObjectArray.h"
@@ -710,4 +711,109 @@ TEST_CASE("inventory: identifying with the last scroll uses it up", "[uimisc][in
     pSprite->m_equipment.m_items[nItemSlot] = pOldItem;
     pSprite->m_equipment.m_items[nScrollSlot] = pOldScroll;
     delete pSword;
+}
+
+// CUtil::FindOneOf (0x781180): the first character of the searched string,
+// from `start`, that is one of the separators. With Double Byte Character
+// Support on (g_pChitin->field_1A0), a lead byte of the searched string
+// skips its trail byte, and the separators lose their lead bytes. It used
+// to test the separators' byte at the searched string's index (reading
+// past their end), so a trail byte that equals a separator matched.
+TEST_CASE("util: FindOneOf skips a double-byte character of the searched string", "[uimisc][util]")
+{
+#ifdef _WIN32
+    SKIP("[iwd2r-skip] IsDBCSLeadByte is the system's code page on Windows");
+#else
+    // FindOneOf reads only field_1A0 of the chitin.
+    CChitin* pSaved = g_pChitin;
+    std::unique_ptr<unsigned char[]> storage(new unsigned char[sizeof(CChitin)]());
+    g_pChitin = reinterpret_cast<CChitin*>(storage.get());
+    struct Restore {
+        CChitin* pChitin;
+        ~Restore()
+        {
+            g_pChitin = pChitin;
+            iwd2r_SetTestLeadBytes(nullptr);
+        }
+    } restore { pSaved };
+
+    // A single-byte code page.
+    g_pChitin->field_1A0 = 0;
+    CHECK(CUtil::FindOneOf(CString("a,b.c"), CString(",."), 0) == 1);
+    CHECK(CUtil::FindOneOf(CString("a,b.c"), CString(",."), 2) == 3);
+    CHECK(CUtil::FindOneOf(CString("abc"), CString(",."), 0) == -1);
+    CHECK(CUtil::FindOneOf(CString("a,b"), CString(""), 0) == -1);
+    CHECK(CUtil::FindOneOf(CString("a,b"), CString(","), 5) == -1);
+    // A long string and one separator: the separator's string is never
+    // indexed by the searched string's position.
+    CHECK(CUtil::FindOneOf(CString("abcdefghijklmnopqrstuvwxyz;"), CString(";"), 0) == 26);
+
+    // Shift-JIS's lead bytes (0x81-0x9F, 0xE0-0xFC), Double Byte Character
+    // Support on.
+    static bool leadBytes[256] = {};
+    for (int c = 0x81; c <= 0x9F; c++)
+        leadBytes[c] = true;
+    for (int c = 0xE0; c <= 0xFC; c++)
+        leadBytes[c] = true;
+    iwd2r_SetTestLeadBytes(leadBytes);
+    g_pChitin->field_1A0 = 1;
+
+    // The ',' after the lead byte is its trail byte: the next ',' matches.
+    CHECK(CUtil::FindOneOf(CString("\x81,a,b"), CString(","), 0) == 3);
+    // Starting on the trail byte, it is a plain character.
+    CHECK(CUtil::FindOneOf(CString("\x81,a,b"), CString(","), 1) == 1);
+    // The separators lose their lead bytes.
+    CHECK(CUtil::FindOneOf(CString("x\x81y,"), CString("\x81,"), 0) == 3);
+    CHECK(CUtil::FindOneOf(CString("x,"), CString("\x81"), 0) == -1);
+    CHECK(CUtil::FindOneOf(CString("abcdefghijklmnopqrstuvwxyz;"), CString(";"), 0) == 26);
+#endif
+}
+
+// SelectToolbar (0x5ADAE0): one selected party member gives the action bar
+// its customizable button types (0x595E70) and its weapon set (0x595F70)
+// before state 114.
+TEST_CASE("toolbar: a selected character's buttons and weapon set reach the action bar", "[uimisc][toolbar][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    CGameSprite* pSprite = PartyMember();
+    if (pSprite == NULL) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    if (pGame->GetGroup()->GetCount() == 0) {
+        pGame->SelectCharacter(pSprite->GetId(), FALSE);
+    }
+    REQUIRE(pGame->GetGroup()->GetCount() == 1);
+
+    const int saved[9] = { pSprite->field_3D14[0], pSprite->field_3D14[1], pSprite->field_3D14[2],
+        pSprite->field_3D14[3], pSprite->field_3D14[4], pSprite->field_3D14[5], pSprite->field_3D14[6],
+        pSprite->field_3D14[7], pSprite->field_3D14[8] };
+    const BYTE nSavedSet = pSprite->m_nWeaponSet;
+    for (int n = 0; n < 9; n++) {
+        pSprite->field_3D14[n] = 30 + n;
+    }
+    pSprite->m_nWeaponSet = 2;
+
+    CInfButtonArray* pButtonArray = pGame->GetButtonArray();
+    pButtonArray->m_nSelectedWeaponSet = 0;
+    pGame->SelectToolbar();
+
+    for (int n = 0; n < 9; n++) {
+        CHECK(pButtonArray->m_customizableButtonTypes[n] == 30 + n);
+    }
+    CHECK(pButtonArray->m_nSelectedWeaponSet == 2);
+    CHECK(pButtonArray->m_nState == 114);
+
+    for (int n = 0; n < 9; n++) {
+        pSprite->field_3D14[n] = saved[n];
+    }
+    pSprite->m_nWeaponSet = nSavedSet;
+    pGame->SelectToolbar();
 }

@@ -193,6 +193,9 @@ int CUtil::FindOneOf(const CString& sString, const CString& sSeparators, int sta
     CString sMutableSeparators(sSeparators);
 
     if (g_pChitin->field_1A0) {
+        // NOTE: The original bounds this loop by the separators' length
+        // before any removal (0x7811CD, reloaded at 0x781261), so after a
+        // removal it reads past their end; ours stops at their end.
         int nIndex = 0;
         while (nIndex < sMutableSeparators.GetLength()) {
             if (IsDBCSLeadByte(sMutableSeparators[nIndex])) {
@@ -207,9 +210,11 @@ int CUtil::FindOneOf(const CString& sString, const CString& sSeparators, int sta
         }
     }
 
+    // A double-byte character of the searched string is skipped whole
+    // (0x78128D-0x7812B9).
     int nIndex = start;
     while (nIndex < sString.GetLength()) {
-        if (IsDBCSLeadByte(sMutableSeparators[nIndex])) {
+        if (g_pChitin->field_1A0 && IsDBCSLeadByte(sString[nIndex])) {
             nIndex++;
         } else {
             for (int pos = 0; pos < sMutableSeparators.GetLength(); pos++) {
