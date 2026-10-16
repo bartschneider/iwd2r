@@ -6865,9 +6865,7 @@ BOOL CGameEffectRemoveCurse::ApplyEffect(CGameSprite* pSprite)
             abilityId.m_itemNum = nSelectedWeapon;
             abilityId.m_abilityNum = pSprite->m_equipment.m_selectedWeaponAbility;
 
-            // TODO: Incomplete. The original calls CGameSprite 0x71ABA0
-            // (CheckQuickLists, abilityId, 0, 1, 0), which is not in src/.
-            (void)abilityId;
+            pSprite->CheckQuickLists(&abilityId, 0, TRUE, FALSE);
         } else if (nSlot == nLauncher) {
             pSprite->Unequip(static_cast<SHORT>(nSlot));
             bReequip = TRUE;
@@ -7559,8 +7557,7 @@ BOOL CGameEffectResurrect::ApplyEffect(CGameSprite* pSprite)
 
     // NOTE: Inlined CGameObject::InControl.
     if (pSprite->InControl()) {
-        // TODO: Incomplete. The original also sets CGameSprite + 0x752A to 1,
-        // a field CGameSprite.h does not declare.
+        pSprite->m_cLastSpriteUpdate.m_bFullUpdateRequired = TRUE;
         pSprite->m_bSendSpriteUpdate = TRUE;
     }
 
@@ -9715,10 +9712,11 @@ BOOL CGameEffectSkillUnsummon::ApplyEffect(CGameSprite* pSprite)
     if (pGame->GetCharacterPortraitNum(pSprite->GetId()) == -1) {
         // TODO: Incomplete. The original calls
         // Icewind586B70::Instance()->CSummonLimitStruct_Unsummon(pSprite)
-        // (0x586DC0, not in src/) and queues a message of subtype 89
-        // (vtable 0x84C3A8, not in src/) with the sprite's id as caller,
-        // target and payload.
+        // (0x586DC0, not in src/) here.
         Icewind586B70::Instance();
+
+        CMessage* message = new CMessage89(pSprite->GetId(), pSprite->GetId(), pSprite->GetId());
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
 
         pSprite->m_removeFromArea = TRUE;
     }
