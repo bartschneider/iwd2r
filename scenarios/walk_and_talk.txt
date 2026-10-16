@@ -4,12 +4,16 @@
 # It moved up from scenarios/pending/ when our engine matched the original
 # at every checkpoint in replay (oracle.py replay compare, seed 1) and both
 # real-input runs (play.py --vm linux and --vm windows) reached the
-# original's states at its checkpoints (walk_and_talk.expect.json).
+# original's states at its checkpoints (walk_and_talk.expect.json: screen,
+# area and dialog). The door step matches in replay only: in real input,
+# on both platforms, Probe currently stops short of AR1000_Door5 (about
+# 904..968,942..966, the door closed; the original 840,978 and open), so
+# the expectations leave the doors out (docs/followups.md).
 # Coordinates for Resolution=800: dialog responses, Continue and the
 # portrait in origin ui, map positions in origin screen (the same pixels at
 # 800x600).
 #
-# A real-input run takes about 170 s on Xvfb and 230 s in Windows Sandbox,
+# A real-input run takes about 175 s on Xvfb and 300 s in Windows Sandbox,
 # past play.py's default timeout:
 # timeout: 420
 #

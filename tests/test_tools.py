@@ -874,6 +874,17 @@ class XDriverTest(unittest.TestCase):
             ['mousedown', '3'], ['mouseup', '3'],
             ['keydown', 'Escape'], ['keyup', 'Escape']])
 
+    def test_type_presses_each_key_with_shift_for_capitals(self):
+        # As driver.ps1 does: one key press per character, shift around a
+        # capital, each phase waiting for the engine's input reads.
+        self.driver.do({'op': 'type', 'text': 'Pr 1', 'line': 1})
+        self.assertEqual(self.xdo(), [
+            ['keydown', 'Shift_L'], ['keydown', 'p'], ['keyup', 'p'],
+            ['keyup', 'Shift_L'],
+            ['keydown', 'r'], ['keyup', 'r'],
+            ['keydown', 'space'], ['keyup', 'space'],
+            ['keydown', '1'], ['keyup', '1']])
+
     def test_game_exit_ends_the_run(self):
         self.game.code = 0
         self.assertEqual(self.driver.run([{'op': 'wait', 'frames': 1,

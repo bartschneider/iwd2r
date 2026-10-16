@@ -981,10 +981,18 @@ class XDriver:
         self.xdo('mouseup', button)
         self.hold(SETTLE_FRAMES)
 
-    def key(self, keysym):
+    def key(self, keysym, shift=False):
+        """A key press; with shift, Shift_L is held around it, as
+        driver.ps1's Press-Key does for a capital."""
+        if shift:
+            self.xdo('keydown', 'Shift_L')
+            self.hold(1)
         self.xdo('keydown', keysym)
         self.hold(HOLD_FRAMES)
         self.xdo('keyup', keysym)
+        if shift:
+            self.hold(1)
+            self.xdo('keyup', 'Shift_L')
         self.hold(SETTLE_FRAMES)
 
     def screen_shot(self, name):
@@ -1050,9 +1058,11 @@ class XDriver:
         elif op == 'key':
             self.key(keysym_for_name(action['key']))
         elif op == 'type':
-            self.xdo('type', '--delay', int(1000 * (HOLD_FRAMES + SETTLE_FRAMES)
-                                            / FRAME_RATE), action['text'])
-            self.sleep_frames(SETTLE_FRAMES)
+            # One key press per character (windows_actions' expansion), so
+            # each waits for the engine's input reads like any key.
+            for ch in action['text']:
+                name = 'SPACE' if ch == ' ' else ch.upper()
+                self.key(keysym_for_name(name), shift=ch.isupper())
         elif op == 'shot':
             self.screen_shot(action['name'])
             self.engine_shot(action['name'])
@@ -1170,7 +1180,7 @@ def run_scenario(exe, base_env, actions, run_dir, geometry, timeout,
                     result['code'] = 1
             result['seconds'] = time.time() - started
             log('exit code %s' % result['code'])
-            for name in ('frames.txt', 'frames.tmp'):
+            for name in ('frames.txt', 'frames.tmp', 'input.txt', 'input.tmp'):
                 try:
                     os.unlink(os.path.join(control, name))
                 except OSError:
