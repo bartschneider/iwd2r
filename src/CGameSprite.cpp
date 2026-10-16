@@ -3595,7 +3595,9 @@ void CGameSprite::CheckIfVisible()
                     && !m_baseStats.field_294
                     && (m_baseStats.m_flags & 0x8000) == 0) {
                     if (m_pArea->m_nVisibleMonster == 0) {
-                        AutoPause(0x200);
+                        // The party member that sees it pauses the game
+                        // (`mov ecx,[esp+0x8]` at 0x6FC0D9).
+                        pSprite->AutoPause(0x200);
                     }
 
                     m_bVisibleMonster = TRUE;
