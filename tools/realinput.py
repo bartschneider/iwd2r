@@ -310,14 +310,22 @@ def load_header_timeout(path):
 # <name>.expect.json, made from the original's replay dumps (`python3
 # tools/realinput.py expect SCENARIO DUMPS`), names what the run must have
 # reached at each checkpoint: the fields input decides (the screen, the
-# character generation choices, the area, the dialog and the doors), not
-# those that depend on real time (frames, positions, the rand states).
+# character generation choices, the area, the dialog, the doors and the
+# party: how many members it has and each one's hp and max_hp), not those
+# that depend on real time (frames, positions, the rand states).
+#
+# A name matches a field path up to its first '[' (world.doors covers
+# world.doors[2].open), or the path with each list index written '[]'
+# (world.party[].hp covers world.party[0].hp and not world.party[0].x).
+# world.party_count is not in the dump: expect_view counts world.party.
 
 EXPECT_FIELDS = ('screen', 'chargen.race', 'chargen.subrace',
                  'chargen.class', 'chargen.abilities', 'chargen.portrait',
                  'world.area', 'world.dialog.active', 'world.dialog.speaker',
                  'world.dialog.entry', 'world.dialog.responses',
-                 'world.doors')
+                 'world.doors', 'world.party_count', 'world.party[].hp',
+                 'world.party[].max_hp')
+LIST_INDEX = re.compile(r'\[\d+\]')
 
 
 def flatten(value, prefix=''):
@@ -336,12 +344,23 @@ def flatten(value, prefix=''):
     return out
 
 
+def expect_view(dump):
+    """flatten(dump) with world.party_count, the number of party members,
+    when the dump has a world with a party list."""
+    out = flatten(dump)
+    world = dump.get('world') if isinstance(dump, dict) else None
+    if isinstance(world, dict) and isinstance(world.get('party'), list):
+        out['world.party_count'] = len(world['party'])
+    return out
+
+
 def expected_fields(dump):
     """The EXPECT_FIELDS of a dump (a list field by its items) that it
     has."""
     out = {}
-    for path, value in flatten(dump).items():
-        if path.split('[')[0] in EXPECT_FIELDS:
+    for path, value in expect_view(dump).items():
+        if path.split('[')[0] in EXPECT_FIELDS \
+                or LIST_INDEX.sub('[]', path) in EXPECT_FIELDS:
             out[path] = value
     return out
 
@@ -399,7 +418,7 @@ def check_checkpoints(actions, run_dir, expectations):
         if dump is None:
             problems.append('no state dump at checkpoint %s' % name)
             continue
-        have = flatten(dump)
+        have = expect_view(dump)
         fields = want.get(name, {})
         # On another screen the other fields say nothing more.
         if 'screen' in fields and have.get('screen') != fields['screen']:
@@ -1096,6 +1115,23 @@ class XDriver:
             raise
 
 
+# The engine runs under the memory cap tools/gates.sh puts on engine tests
+# (IWD2R_TEST_MEMORY_MAX, default 8G): an engine that allocates without
+# bound otherwise brings the kernel's OOM kill on the whole WSL VM.
+# systemd-run --scope execs the command, so the pid stays the engine's.
+def memory_capped(argv, env=None):
+    """argv run under systemd-run's memory cap. RuntimeError when
+    systemd-run is missing: the engine never runs without the cap."""
+    if shutil.which('systemd-run') is None:
+        raise RuntimeError('systemd-run is missing; refusing to run the '
+                           'engine without a memory cap')
+    limit = (env if env is not None else os.environ).get(
+        'IWD2R_TEST_MEMORY_MAX') or '8G'
+    return ['systemd-run', '--user', '--scope', '-q', '-p',
+            'MemoryMax=%s' % limit, '-p', 'MemorySwapMax=0', '--'] + \
+        list(argv)
+
+
 def run_scenario(exe, base_env, actions, run_dir, geometry, timeout,
                  taken, cwd=None, abort=None, cpu=None):
     """Runs the game on its own Xvfb display and drives it with actions.
@@ -1138,7 +1174,8 @@ def run_scenario(exe, base_env, actions, run_dir, geometry, timeout,
             # Windows the bare server already shows (Xvfb maps one).
             probe = XDriver(n, None, run_dir, control, log, 0)
             baseline = probe.visible_windows()
-            game = subprocess.Popen([exe], env=env, cwd=cwd, stdout=glog,
+            game = subprocess.Popen(memory_capped([exe], env), env=env,
+                                    cwd=cwd, stdout=glog,
                                     stderr=subprocess.STDOUT,
                                     start_new_session=True)
             log('game pid %d' % game.pid)
