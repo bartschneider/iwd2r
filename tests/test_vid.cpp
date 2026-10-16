@@ -2264,3 +2264,44 @@ TEST_CASE("fog_of_war_blits_the_dither_and_the_edges", "[vid]")
     }
     pDirectDraw->Release();
 }
+
+// CInfinity::SetDawn (0x5D1890) and SetDusk (0x5D1A40), in an outdoor
+// area (type 0x2), set the time-of-day light (+0x1B6) and the time-of-day
+// rain colour (+0x1BA) from the doubled intensity n (a byte). Each value
+// is read here from the disassembly's constants (0x5D193D-0x5D1A26 and
+// 0x5D1B10-0x5D1BE4). From intensity 128 on, ours stored the rain colour
+// into the light, so a dawn or dusk past its midpoint (the game starts in
+// one) lit the world at about 110 grey: the walk_and_talk world shot was at
+// 0.42 of the original's brightness.
+TEST_CASE("infinity_dawn_and_dusk_keep_the_light_and_the_rain_apart", "[vid]")
+{
+    ChitinScope scope;
+    auto pInfinity = std::make_unique<CInfinity>();
+    pInfinity->m_areaType = 0x2;
+
+    for (int intensity : { 0, 60, 127, 128, 150, 200, 255 }) {
+        INFO("intensity " << intensity);
+        const int n = (intensity * 2) & 0xFF;
+        const auto rain = [&](int base, int baseBlue) { return RGB(base + (n * 0x14 >> 8), base + (n * 0x14 >> 8), baseBlue + (n * 10 >> 8)); };
+
+        pInfinity->SetDawn(static_cast<BYTE>(intensity), FALSE);
+        CHECK(pInfinity->m_dayLightIntensity == intensity);
+        if (intensity < 128) {
+            CHECK(pInfinity->m_rgbTimeOfDayGlobalLighting == RGB(0x64 + (n * 0x50 >> 8), 0x64 + (n * 100 >> 8), 0xC8 + (n * 0x37 >> 8)));
+            CHECK(pInfinity->m_rgbTimeOfDayRainColor == rain(0x46, 0x5A));
+        } else {
+            CHECK(pInfinity->m_rgbTimeOfDayGlobalLighting == RGB(0xB4 + (n * 0x4B >> 8), 0xC8 + (n * 0x37 >> 8), 0xFF));
+            CHECK(pInfinity->m_rgbTimeOfDayRainColor == rain(0x5A, 0x64));
+        }
+
+        pInfinity->SetDusk(static_cast<BYTE>(intensity), FALSE);
+        CHECK(pInfinity->m_dayLightIntensity == intensity);
+        if (intensity < 128) {
+            CHECK(pInfinity->m_rgbTimeOfDayGlobalLighting == RGB(0x64 + (n * 0x9B >> 8), 0x64 + (n * 100 >> 8), 0xC8));
+            CHECK(pInfinity->m_rgbTimeOfDayRainColor == rain(0x46, 0x5A));
+        } else {
+            CHECK(pInfinity->m_rgbTimeOfDayGlobalLighting == RGB(0xFF, 0xC8 + (n * 0x37 >> 8), 0xC8 + (n * 0x37 >> 8)));
+            CHECK(pInfinity->m_rgbTimeOfDayRainColor == rain(0x5A, 0x64));
+        }
+    }
+}
