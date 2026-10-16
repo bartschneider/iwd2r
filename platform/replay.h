@@ -27,7 +27,13 @@
 //     frame from OnFrame: keys up and the last cursor outside it;
 //   - focus and activation never reach the engine (the recorder's focus
 //     guard), and message boxes take their first button unseen;
-//   - the stall count (ai_stalled_frames) is kept the same way.
+//   - the stall count (ai_stalled_frames) is kept the same way;
+//   - a path search an object's update queues is done before the AI thread
+//     updates the next object (CGameArea::AIUpdate, ReplayWaitForSearch),
+//     so the search thread's snapshot of the search map and the frame its
+//     result is first seen do not depend on thread scheduling: the original
+//     shows that timing in every recording, and without the wait about one
+//     run of ours in five walked a different path in walk_and_talk.
 //
 // OnFrame writes frame-<N>.json every IWD2R_DUMP_EVERY frames (default 30,
 // 0 for none), checkpoint-<NAME>.json at the scenario's checkpoint lines,

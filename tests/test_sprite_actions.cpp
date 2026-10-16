@@ -22,6 +22,7 @@
 #include "CStore.h"
 #include "CUtil.h"
 #include "ScreenLayout.h"
+#include "compat/msvc_rand.h"
 #include "data_view.h"
 #include "platform/data_dir.h"
 #include "platform/window.h"
@@ -1204,6 +1205,54 @@ TEST_CASE("animation: a two-handed weapon takes the two-handed stance and READY 
     CHECK(pAnimation->m_currentBamSequence == 3);
 }
 
+TEST_CASE("animation: HEAD_TURN picks BAM group 2 or 7 or 8 with one draw (0x6CDA00)", "[ai][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    CGameSprite* pCharacter = NewGameInStartArea(cre);
+    REQUIRE(pCharacter->GetArea() != NULL);
+    CGameAnimationTypeCharacter* pAnimation = static_cast<CGameAnimationTypeCharacter*>(pCharacter->m_animation.m_animation);
+    REQUIRE(pAnimation != NULL);
+
+    // The VC6 generator: one draw from a seed.
+    auto oneDraw = [](unsigned int seed) {
+        return seed * 214013u + 2531011u;
+    };
+
+    // HEAD_TURN (6) draws rand() % 100 (0x6CF3FA): below 60 group 2
+    // (0x6CF443), below 97 group 7 (0x6CF62E), else group 8 (0x6CF81E).
+    // Group 2 draws a random first frame only when the group was not
+    // already 2, 7 or 8 on the G1 cell; groups 7 and 8 never do.
+    // Seed 7 draws 61: group 7.
+    srand(7);
+    pCharacter->m_animation.SetSequence(6);
+    CHECK(pAnimation->m_currentBamSequence == 7);
+    CHECK(iwd2r_rand_state() == oneDraw(7));
+
+    // Seed 1 draws 41: group 2, coming from 7 on the G1 cell, so no frame draw.
+    srand(1);
+    pCharacter->m_animation.SetSequence(6);
+    CHECK(pAnimation->m_currentBamSequence == 2);
+    CHECK(iwd2r_rand_state() == oneDraw(1));
+
+    // Seed 18 draws 97: group 8 (vis-probe round 7: ours set 0, so the
+    // player's head turn at walk_and_talk frame 4048 ended at 4066 and drew
+    // again).
+    srand(18);
+    pCharacter->m_animation.SetSequence(6);
+    CHECK(pAnimation->m_currentBamSequence == 8);
+    CHECK(iwd2r_rand_state() == oneDraw(18));
+}
+
 TEST_CASE("trigger: IsTeamBitOn tests the bits SetTeamBit sets (0x40E4)", "[ai][data]")
 {
     if (DataDir() == nullptr) {
@@ -1377,6 +1426,50 @@ TEST_CASE("action: FaceSavedLocation turns to the saved orientation (case 298)",
     pCharacter->m_curAction = CAIAction();
     g_pBaldurChitin->GetMessageHandler()->AsynchronousUpdate();
     pCharacter->m_nNewDirection = pCharacter->m_nDirection;
+}
+
+TEST_CASE("sprite: GetDirection picks the 16-way direction by quadrant (0x706DD0)", "[ai]")
+{
+    // The original's thresholds per quadrant (dx, dy absolute).
+    auto expected = [](LONG sx, LONG sy, LONG tx, LONG ty) -> SHORT {
+        if (sx == tx && sy == ty) {
+            return 0;
+        }
+        static const SHORT kDownLeft[] = { 4, 3, 2, 1, 0 };
+        static const SHORT kDownRight[] = { 12, 13, 14, 15, 0 };
+        static const SHORT kUpRight[] = { 12, 11, 10, 9, 8 };
+        static const SHORT kUpLeft[] = { 4, 5, 6, 7, 8 };
+        const SHORT* table;
+        if (ty < sy) {
+            table = tx < sx ? kUpLeft : kUpRight;
+        } else {
+            table = tx < sx ? kDownLeft : kDownRight;
+        }
+        const LONG dx = tx < sx ? sx - tx : tx - sx;
+        const LONG dy = ty < sy ? sy - ty : ty - sy;
+        if (27 * dy <= 6 * dx) {
+            return table[0];
+        } else if (27 * dy <= 16 * dx) {
+            return table[1];
+        } else if (24 * dy <= 38 * dx) {
+            return table[2];
+        } else if (7 * dy <= 38 * dx) {
+            return table[3];
+        }
+        return table[4];
+    };
+    const CPoint start(1000, 1000);
+    for (LONG dx = -40; dx <= 40; dx++) {
+        for (LONG dy = -40; dy <= 40; dy++) {
+            const CPoint target(1000 + dx, 1000 + dy);
+            INFO("dx " << dx << " dy " << dy);
+            CHECK(CGameSprite::GetDirection(start, target) == expected(1000, 1000, 1000 + dx, 1000 + dy));
+        }
+    }
+    // Up-left, a step of (-16, -12) on the 4/3-scaled y (walk_and_talk's
+    // player at frame 2957): 6; slightly up of west: 5.
+    CHECK(CGameSprite::GetDirection(CPoint(2232, 1208), CPoint(2216, 1192)) == 6);
+    CHECK(CGameSprite::GetDirection(CPoint(100, 100), CPoint(60, 90)) == 5);
 }
 
 TEST_CASE("sprite: SetDirection turns the short way round (0x706C80)", "[ai][data]")
