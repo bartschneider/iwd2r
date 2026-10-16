@@ -29,12 +29,12 @@
 
 #include <algorithm>
 #include <atomic>
-#include <csignal>
 #include <chrono>
 #include <climits>
+#include <csignal>
 #include <cstdarg>
-#include <cstdio>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -411,6 +411,8 @@ TEST_CASE("character screen: the combat page of a character with a long sword", 
     }
 
     CItem* pOld = pSprite->m_equipment.m_items[43];
+    const BYTE nOldWeapon = pSprite->m_equipment.m_selectedWeapon;
+    const BYTE nOldAbility = static_cast<BYTE>(pSprite->m_equipment.m_selectedWeaponAbility);
     CItem* pSword = new CItem(CResRef("00SWDL01"), 0, 0, 0, 0, 0x1);
     pSprite->m_equipment.m_items[43] = pSword;
     pSprite->SelectWeaponAbility(43, 0, FALSE, TRUE);
@@ -476,9 +478,12 @@ TEST_CASE("character screen: the combat page of a character with a long sword", 
     // The saving throws close the page.
     CHECK_FALSE(items.empty());
 
+    // Back to the character's own weapon: the later cases count the rands
+    // its effect list draws.
     pSprite->SelectWeaponAbility(CGameSpriteEquipment::SLOT_FIST, 0, FALSE, TRUE);
     pSprite->m_equipment.m_items[43] = pOld;
     delete pSword;
+    pSprite->SelectWeaponAbility(nOldWeapon, nOldAbility, FALSE, TRUE);
 }
 
 namespace {
@@ -658,10 +663,11 @@ TEST_CASE("inventory: copying a scroll's last charge removes it and its quick it
     REQUIRE(pInventory->MapButtonIdToInventoryId(5) == nSlot);
 
     // CheckIfUsedUp on its own: a spent scroll that stacks (5) vanishes
-    // without a sound. It draws 22 rands, none of its own: unequipping the
-    // quick slot and reselecting the weapon set run the effect list four
-    // times (ProcessEffectList's five saving throw rolls each) and CheckAdd
-    // (0x4A3310) twice.
+    // without a sound. With the world's time stopped (as here) it draws 22
+    // rands, none of its own: unequipping the quick slot and reselecting the
+    // weapon set run the effect list four times (ProcessEffectList's five
+    // saving throw rolls each; AddEffect runs it at once only while the time
+    // is stopped) and CheckAdd (0x4A3310) twice.
     {
         CItem* pSpent = new CItem(CResRef("SPWI110Z"), 1, 1, 0, 0, 0x1);
         pSpent->SetUsageCount(0, 0);
@@ -998,11 +1004,15 @@ TEST_CASE("world keys: the inventory key opens the inventory", "[uimisc][worldke
     REQUIRE(pGame->GetKeymap(0) == 'I');
     REQUIRE(pGame->GetKeymapFlag(0) == 0);
     CWarp* pPrevious = g_pBaldurChitin->pActiveEngine;
+    const BOOLEAN bTimeActive = pGame->GetWorldTimer()->m_active;
     g_pBaldurChitin->pActiveEngine = pWorld;
     PressKey(pWorld, 'I');
     CHECK(g_pBaldurChitin->pActiveEngine == g_pBaldurChitin->m_pEngineInventory);
 
+    // The inventory started the world's time; the effect lists the later
+    // cases count rands over run on it.
     g_pBaldurChitin->pActiveEngine = pPrevious;
+    pGame->GetWorldTimer()->m_active = bTimeActive;
     pGame->GetGameSave()->m_mode = nMode;
 }
 
@@ -1043,9 +1053,10 @@ TEST_CASE("character screen: the text character sheet's lines", "[uimisc][charac
     std::string sSword = Str(sword.GetGenericName());
     std::string sUnknown = Str(unknown.GetGenericName());
     std::string sBolts = Str(bolts.GetGenericName());
-    CHECK(text == Format("-- %s *\n", sSword.c_str())
-            + Format("-- %s - %s\n", sUnknown.c_str(), Str(17108).c_str())
-            + Format("-- %s (%d)\n", sBolts.c_str(), static_cast<int>(bolts.GetUsageCount(0))));
+    std::string expected = Format("-- %s *\n", sSword.c_str());
+    expected += Format("-- %s - %s\n", sUnknown.c_str(), Str(17108).c_str());
+    expected += Format("-- %s (%d)\n", sBolts.c_str(), static_cast<int>(bolts.GetUsageCount(0)));
+    CHECK(text == expected);
 
     // A description (0x5EFB60) in lines of at most 70 characters, cut at a
     // new line or the last space; nothing else is lost.
