@@ -5,8 +5,10 @@
 #include "CBaldurChitin.h"
 #include "CCreatureFile.h"
 #include "CGameArea.h"
+#include "CGameContainer.h"
 #include "CGameEffect.h"
 #include "CGameSprite.h"
+#include "CGameSpriteEquipment.h"
 #include "CInfGame.h"
 #include "CItem.h"
 #include "CMessage.h"
@@ -329,6 +331,13 @@ bool SetUpFight(Fight& fight, std::string& why)
         why = "no CHR V2.2 file in the Characters folder";
         return false;
     }
+    // The engine seeds rand() from the clock (`srand(time)` in
+    // CChitin::InitializeVariables 0x7902C0) and the new game draws from it
+    // (the creatures' first animation frames, so the frame an idle sequence
+    // ends on): seeded here, the fighters start the same in every run, and
+    // a fight after the test's own srand() draws its rolls in the same
+    // order.
+    srand(1);
     fight.pCharacter = NewGameInStartArea(cre);
     fight.pArea = fight.pCharacter->GetArea();
     if (fight.pArea == NULL) {
@@ -349,7 +358,7 @@ bool SetUpFight(Fight& fight, std::string& why)
 
 // One tick as the area runs it, for the fighters and the projectiles in
 // flight only: the game time, each object's AIUpdate when DoAIUpdate lets
-// it, then the messages. (Not the whole world screen: the area's scripts
+// it, the messages, then the area's lists sorted. (Not the whole world screen: the area's scripts
 // start AR1000's cut-scene, which switches engines and starts the sound.)
 void Tick(CGameArea* pArea, std::initializer_list<CGameSprite*> fighters)
 {
@@ -388,6 +397,11 @@ void Tick(CGameArea* pArea, std::initializer_list<CGameSprite*> fighters)
     }
 
     g_pBaldurChitin->GetMessageHandler()->AsynchronousUpdate();
+
+    // The objects added during the tick (a projectile that flies, as Magic
+    // Missile's) join the lists the next tick walks, and the removed ones
+    // leave them.
+    pArea->SortLists();
 }
 
 }
@@ -476,6 +490,126 @@ TEST_CASE("combat: a party member melees a goblin in AR1000 until it dies and ca
     // Magic Missile does 1d4+1 at the first caster levels.
     CHECK(pTarget->GetBaseStats()->m_hitPoints < targetStart);
     CHECK(pTarget->GetBaseStats()->m_hitPoints >= targetStart - 5);
+}
+
+// DropInventory (0x754EE0), as a dying goblin drops its loot: every
+// droppable item but the excepted one and the gold (as MISC07) go onto its
+// ground pile; the fist stays.
+TEST_CASE("combat: DropInventory puts a goblin's droppable items and gold on its ground pile", "[combat][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    Fight fight;
+    std::string why;
+    if (!SetUpFight(fight, why)) {
+        if (why.find("CHR") != std::string::npos) {
+            SKIP("[iwd2r-skip] " + why);
+        }
+        FAIL(why);
+    }
+    CGameSprite* pGoblin = fight.pGoblin;
+    CGameSpriteEquipment* pEquipment = pGoblin->GetEquipment();
+
+    std::vector<CString> droppable;
+    CString sKept;
+    for (SHORT nSlot = 0; nSlot < CGameSpriteEquipment::NUM_SLOT; nSlot++) {
+        CItem* pItem = pEquipment->m_items[nSlot];
+        if (nSlot == CGameSpriteEquipment::SLOT_FIST || pItem == NULL || (pItem->GetFlagsFile() & 0x4) == 0) {
+            continue;
+        }
+        if (sKept.IsEmpty()) {
+            // The first droppable item is the exception: it stays.
+            sKept = pItem->GetResRef().GetResRefStr();
+        } else {
+            droppable.push_back(pItem->GetResRef().GetResRefStr());
+        }
+    }
+    INFO("droppable " << droppable.size() << ", kept " << static_cast<const char*>(sKept));
+    pGoblin->GetBaseStats()->m_gold = 7;
+
+    CHECK(pGoblin->DropInventory(FALSE, sKept) == CGameAIBase::ACTION_DONE);
+    // The pile takes the items through CMessageContainerAddItem.
+    g_pBaldurChitin->GetMessageHandler()->AsynchronousUpdate();
+
+    LONG nPile = g_pBaldurChitin->GetObjectGame()->GetGroundPile(pGoblin->GetId());
+    REQUIRE(nPile != CGameObjectArray::INVALID_INDEX);
+    CGameContainer* pPile;
+    REQUIRE(g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(nPile, CGameObjectArray::THREAD_ASYNCH,
+                reinterpret_cast<CGameObject**>(&pPile), INFINITE)
+        == CGameObjectArray::SUCCESS);
+    std::vector<CString> onPile;
+    WORD nGold = 0;
+    for (SHORT nSlot = 0; nSlot < pPile->GetNumItems(); nSlot++) {
+        CItem* pItem = pPile->GetItem(nSlot);
+        if (pItem == NULL) {
+            continue;
+        }
+        if (pItem->GetResRef() == "MISC07") {
+            nGold = pItem->GetUsageCount(0);
+        } else {
+            onPile.push_back(pItem->GetResRef().GetResRefStr());
+        }
+    }
+    g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(nPile, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+
+    CHECK(onPile.size() == droppable.size());
+    CHECK(nGold == 7);
+    CHECK(pGoblin->GetBaseStats()->m_gold == 0);
+    bool kept = false;
+    for (SHORT nSlot = 0; nSlot < CGameSpriteEquipment::NUM_SLOT; nSlot++) {
+        CItem* pItem = pEquipment->m_items[nSlot];
+        if (pItem != NULL && nSlot != CGameSpriteEquipment::SLOT_FIST && (pItem->GetFlagsFile() & 0x4) != 0) {
+            CHECK(pItem->GetResRef() == static_cast<const char*>(sKept));
+            kept = true;
+        }
+    }
+    CHECK(kept == !sKept.IsEmpty());
+    CHECK(pEquipment->m_items[CGameSpriteEquipment::SLOT_FIST] != NULL);
+    ClearMessages();
+}
+
+// EquipMostDamagingMelee (0x75DFD0): the goblin's melee weapon set, not the
+// fist; with the magic weapon slot in use nothing changes (ACTION_ERROR).
+TEST_CASE("combat: EquipMostDamagingMelee takes the goblin's melee weapon back from its fists", "[combat][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    Fight fight;
+    std::string why;
+    if (!SetUpFight(fight, why)) {
+        if (why.find("CHR") != std::string::npos) {
+            SKIP("[iwd2r-skip] " + why);
+        }
+        FAIL(why);
+    }
+    CGameSprite* pGoblin = fight.pGoblin;
+    CGameSpriteEquipment* pEquipment = pGoblin->GetEquipment();
+    const BYTE nWeapon = pEquipment->m_selectedWeapon;
+    INFO("selected weapon slot " << static_cast<int>(nWeapon));
+    REQUIRE(nWeapon >= CGameSpriteEquipment::SLOT_WEAPON);
+    REQUIRE(pEquipment->m_items[nWeapon] != NULL);
+
+    pGoblin->SelectWeaponAbility(CGameSpriteEquipment::SLOT_FIST, 0, 0, 1);
+    REQUIRE(pEquipment->m_selectedWeapon == CGameSpriteEquipment::SLOT_FIST);
+    CHECK(pGoblin->EquipMostDamagingMelee() == CGameAIBase::ACTION_DONE);
+    CHECK(pEquipment->m_selectedWeapon == nWeapon);
+
+    // EquipWeapon (299) is done at once for a sprite holding a weapon.
+    pGoblin->ClearActions(FALSE);
+    pGoblin->m_curAction = CAIAction(299, CPoint(-1, -1), 0, -1);
+    CHECK(pGoblin->ExecuteAction() == CGameAIBase::ACTION_DONE);
+    CHECK(pEquipment->m_selectedWeapon == nWeapon);
+    ClearMessages();
 }
 
 TEST_CASE("combat: GetAC sums the armour class modifiers and the capped dexterity bonus", "[combat][data]")
@@ -825,11 +959,13 @@ TEST_CASE("combat: a goblin given AttackReevaluate swings at the party member", 
     }
     INFO("frames " << frames << ", rounds " << blows << ", character hit points " << characterStart << " -> "
                    << pCharacter->GetBaseStats()->m_hitPoints);
-    CHECK(blows > 2);
+    CHECK(blows == 16);
     CHECK(pGoblin->m_curAction.m_actionID == 134);
-    // Hit points only drop. (Whether a blow lands in 16 rounds varies from
-    // run to run, so no hit is required.)
+    // Hit points only drop; with the new game seeded (SetUpFight) every run
+    // lands the same blows.
     CHECK_FALSE(hpRose);
+    CHECK(characterStart == 9);
+    CHECK(pCharacter->GetBaseStats()->m_hitPoints == 6);
 }
 
 TEST_CASE("combat: a party member casts Magic Missile through the Spell action", "[combat][data]")
@@ -1206,7 +1342,10 @@ TEST_CASE("combat: ForceSpell and ForceSpellPoint wait for the casting time and 
             const unsigned int before = iwd2r_rand_state();
             const SHORT result = point ? pCharacter->ForceSpellPoint() : pCharacter->ForceSpell(pGoblin);
             CHECK(result == tick.result);
-            CHECK(Draws(before, iwd2r_rand_state()) == 0);
+            // Magic Missile's missile changes its speed by rand() % 20 - 10
+            // when it is fired at the goblin (CProjectile84E030::Fire); at a
+            // point it has no target to fire at and fires nothing.
+            CHECK(Draws(before, iwd2r_rand_state()) == (tick.fire != 0 && point == 0 ? 1 : 0));
             int conjure = 0;
             int cast = 0;
             for (CMessageSetSequence* message : Queued<CMessageSetSequence>()) {
@@ -1336,8 +1475,8 @@ TEST_CASE("combat: a goblin archer shoots arrows at the party member", "[combat]
     INFO("archer's weapon " << pWeapon->GetResRef().GetResRefStr() << ", ability type " << type);
     REQUIRE(type == 2);
 
-    // A fixed rand() stream to start from. The runs still differ (the hit
-    // points end at 6 or 7): something else draws rand() during the fight.
+    // A fixed rand() stream to start from; with the new game seeded too
+    // (SetUpFight) every run draws the same rolls.
     srand(21);
     pArcher->ClearActions(FALSE);
     pArcher->AddAction(CAIAction(CAIAction::ATTACK, CAIObjectType(0, 0, 0, 0, 0, 0, 0, 0, pCharacter->GetId()), 0, 0, 0));
@@ -1366,10 +1505,12 @@ TEST_CASE("combat: a goblin archer shoots arrows at the party member", "[combat]
     }
     INFO("frames " << frames << ", rounds " << rounds << ", nearest " << nearest << " squares, character hit points "
                    << characterStart << " -> " << pCharacter->GetBaseStats()->m_hitPoints);
-    CHECK(rounds > 2);
+    CHECK(rounds == 16);
     CHECK(nearest >= 5);
     CHECK_FALSE(hpRose);
-    CHECK(pCharacter->GetBaseStats()->m_hitPoints < characterStart);
+    CHECK(characterStart == 9);
+    // Each shot also draws its swing sound (sub_756930: the bow's "Sw_Ms").
+    CHECK(pCharacter->GetBaseStats()->m_hitPoints == 7);
 }
 
 namespace {
@@ -1694,7 +1835,8 @@ TEST_CASE("combat: Spell draws the concentration and spellcraft rolls and then t
     before = iwd2r_rand_state();
     CHECK(pGoblin->Spell(pCharacter) == CGameAIBase::ACTION_DONE);
     CHECK(pGoblin->field_9D14 == 1);
-    CHECK(Draws(before, iwd2r_rand_state()) == 2);
+    // The two rolls, then the missile's speed (CProjectile84E030::Fire).
+    CHECK(Draws(before, iwd2r_rand_state()) == 3);
 
     // The party member, a cleric, finishes SPPR613 at the goblin: the
     // failure roll, then the type-304 draw.
@@ -1722,4 +1864,171 @@ TEST_CASE("combat: Spell draws the concentration and spellcraft rolls and then t
     CHECK(fire[0]->m_projectileType == 304);
     CHECK(fire[0]->field_20 == values[1] % 1000000);
     ClearMessages();
+}
+
+// sub_756930 (0x756930), at the first frame of an attack sequence: the
+// sound the swing plays (+0x7408) and its frame (+0x740C).
+TEST_CASE("combat: a swing picks its weapon's sound and the next one when it would repeat", "[combat][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    Fight fight;
+    std::string why;
+    if (!SetUpFight(fight, why)) {
+        if (why.find("CHR") != std::string::npos) {
+            SKIP("[iwd2r-skip] " + why);
+        }
+        FAIL(why);
+    }
+    CGameSprite* pGoblin = fight.pGoblin;
+    pGoblin->field_70FB = FALSE;
+    pGoblin->GetDerivedStats()->m_generalState &= ~STATE_SILENCED;
+    const SHORT savedSequence = pGoblin->m_animation.m_nSequence;
+    pGoblin->m_animation.m_nSequence = CGAMESPRITE_SEQ_ATTACK_SLASH;
+
+    // A long sword (type 20): "Sw_Swd" and 01 to 05, rand() % 5.
+    CItem sword(CResRef("00CWSWDB"), 0, 0, 0, 0, 0);
+    REQUIRE(sword.GetItemType() == 20);
+    srand(5);
+    const int n = NextRands(iwd2r_rand_state(), 1)[0] % 5;
+    pGoblin->field_7408 = "";
+    pGoblin->field_740C = 7;
+    unsigned int before = iwd2r_rand_state();
+    pGoblin->sub_756930(&sword, NULL);
+    CHECK(Draws(before, iwd2r_rand_state()) == 1);
+    CString expected;
+    expected.Format("Sw_Swd0%d", n + 1);
+    CHECK(pGoblin->field_7408 == expected);
+    CHECK(pGoblin->field_740C == 0);
+
+    // The same draw again: the next sound, after the fifth the first.
+    srand(5);
+    pGoblin->sub_756930(&sword, NULL);
+    expected.Format("Sw_Swd0%d", n == 4 ? 1 : n + 2);
+    CHECK(pGoblin->field_7408 == expected);
+
+    // Silenced: no sound and no draw.
+    pGoblin->GetDerivedStats()->m_generalState |= STATE_SILENCED;
+    before = iwd2r_rand_state();
+    pGoblin->sub_756930(&sword, NULL);
+    CHECK(Draws(before, iwd2r_rand_state()) == 0);
+    CHECK(pGoblin->field_7408 == expected);
+    pGoblin->GetDerivedStats()->m_generalState &= ~STATE_SILENCED;
+
+    // An amulet has no swing sound: outside the three attack sequences the
+    // creature's sound set has none either and "Sw_" is kept as it is.
+    CItem amulet(CResRef("00AMUL01"), 0, 0, 0, 0, 0);
+    const WORD amuletType = amulet.GetItemType();
+    INFO("amulet type " << amuletType);
+    REQUIRE((amuletType < 15 || (amuletType > 30 && amuletType != 44 && amuletType != 57 && amuletType != 69)));
+    REQUIRE(amuletType != 0);
+    pGoblin->m_animation.m_nSequence = CGAMESPRITE_SEQ_ATTACK;
+    before = iwd2r_rand_state();
+    pGoblin->sub_756930(&amulet, NULL);
+    CHECK(Draws(before, iwd2r_rand_state()) == 0);
+    CHECK(pGoblin->field_7408 == CString("Sw_"));
+
+    // The creature's own sounds for the sequence (its INI's att4 for a
+    // sequence other than the three): one at random with its frame, the
+    // next one when it is the one played last.
+    pGoblin->field_70FB = TRUE;
+    CGameSpriteSoundEntry first;
+    first.field_0 = "GOBSW1";
+    first.field_4 = 3;
+    CGameSpriteSoundEntry second;
+    second.field_0 = "GOBSW2";
+    second.field_4 = 5;
+    pGoblin->field_7344.AddTail(first);
+    pGoblin->field_7344.AddTail(second);
+    srand(9);
+    const int m = NextRands(iwd2r_rand_state(), 1)[0] % 2;
+    before = iwd2r_rand_state();
+    pGoblin->sub_756930(&sword, NULL);
+    CHECK(Draws(before, iwd2r_rand_state()) == 1);
+    CHECK(pGoblin->field_7408 == CString(m == 0 ? "GOBSW1" : "GOBSW2"));
+    CHECK(pGoblin->field_740C == (m == 0 ? 3 : 5));
+    srand(9);
+    pGoblin->sub_756930(&sword, NULL);
+    CHECK(pGoblin->field_7408 == CString(m == 0 ? "GOBSW2" : "GOBSW1"));
+    CHECK(pGoblin->field_740C == (m == 0 ? 5 : 3));
+
+    pGoblin->field_7344.RemoveAll();
+    pGoblin->field_70FB = FALSE;
+    pGoblin->m_animation.m_nSequence = savedSequence;
+}
+
+// CGameArea 0x46DDC0, the area's n-th nearest search from a point (Feat
+// Cleave's next target, CAIObjectType's n-th nearest objects).
+TEST_CASE("combat: the area finds the n-th nearest enemy of a point", "[combat][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    Fight fight;
+    std::string why;
+    if (!SetUpFight(fight, why)) {
+        if (why.find("CHR") != std::string::npos) {
+            SKIP("[iwd2r-skip] " + why);
+        }
+        FAIL(why);
+    }
+    CGameSprite* pCharacter = fight.pCharacter;
+    CGameSprite* pGoblin = fight.pGoblin;
+    const CPoint pos = pCharacter->GetPos();
+    CGameSprite* pFarGoblin = AddCreature(fight.pArea, "10GOB", CPoint(pos.x - 5 * CPathSearch::GRID_SQUARE_SIZEX, pos.y));
+    REQUIRE(pFarGoblin != NULL);
+    fight.pArea->SortLists();
+    pCharacter->GetDerivedStats()->m_generalState &= ~STATE_SUMMONED_CREATURE;
+    pGoblin->GetDerivedStats()->m_generalState &= ~STATE_SUMMONED_CREATURE;
+    pFarGoblin->GetDerivedStats()->m_generalState &= ~STATE_SUMMONED_CREATURE;
+
+    const CAIObjectType enemy(CAIOBJECTTYPE_EA_ENEMY);
+    const BYTE* terrain = pCharacter->GetTerrainTable();
+    CGameArea* pArea = fight.pArea;
+
+    // The nearest, the second nearest; the third does not exist and the
+    // farthest one found stands in for it.
+    CHECK(pArea->sub_46DDC0(pos.x, pos.y, enemy, 400, terrain, FALSE, FALSE, 0, FALSE) == pGoblin->GetId());
+    CHECK(pArea->sub_46DDC0(pos.x, pos.y, enemy, 400, terrain, FALSE, FALSE, 1, FALSE) == pFarGoblin->GetId());
+    CHECK(pArea->sub_46DDC0(pos.x, pos.y, enemy, 400, terrain, FALSE, FALSE, 2, FALSE) == pFarGoblin->GetId());
+
+    // Out of range: only the near goblin is within 3 squares.
+    CHECK(pArea->sub_46DDC0(pos.x, pos.y, enemy, 3 * CPathSearch::GRID_SQUARE_SIZEX, terrain, FALSE, FALSE, 1, FALSE) == pGoblin->GetId());
+
+    // Summoned creatures only: none.
+    CHECK(pArea->sub_46DDC0(pos.x, pos.y, enemy, 400, terrain, FALSE, FALSE, 0, TRUE) == CGameObjectArray::INVALID_INDEX);
+    pFarGoblin->GetDerivedStats()->m_generalState |= STATE_SUMMONED_CREATURE;
+    CHECK(pArea->sub_46DDC0(pos.x, pos.y, enemy, 400, terrain, FALSE, FALSE, 0, TRUE) == pFarGoblin->GetId());
+    pFarGoblin->GetDerivedStats()->m_generalState &= ~STATE_SUMMONED_CREATURE;
+
+    // A point off the area: none.
+    CHECK(pArea->sub_46DDC0(-1, pos.y, enemy, 400, terrain, FALSE, FALSE, 0, FALSE) == CGameObjectArray::INVALID_INDEX);
+
+    // 0x46BAD0, the same from the party member on the front list, outward
+    // from its place in the list.
+    CHECK(pArea->sub_46BAD0(pCharacter->GetId(), enemy, 400, terrain, FALSE, FALSE, FALSE, 0, FALSE) == pGoblin->GetId());
+    CHECK(pArea->sub_46BAD0(pCharacter->GetId(), enemy, 400, terrain, FALSE, FALSE, FALSE, 1, FALSE) == pFarGoblin->GetId());
+    CHECK(pArea->sub_46BAD0(pCharacter->GetId(), enemy, 400, terrain, FALSE, FALSE, FALSE, 2, FALSE) == pFarGoblin->GetId());
+    // A dead goblin is left out.
+    const DWORD state = pGoblin->GetDerivedStats()->m_generalState;
+    pGoblin->GetDerivedStats()->m_generalState = state | STATE_DEAD;
+    CHECK(pArea->sub_46BAD0(pCharacter->GetId(), enemy, 400, terrain, FALSE, FALSE, FALSE, 0, FALSE) == pFarGoblin->GetId());
+    pGoblin->GetDerivedStats()->m_generalState = state;
+
+    // CAIObjectType::Decode: SecondNearestEnemyOf (29) of the party member
+    // is the far goblin.
+    CAIObjectType second(0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0);
+    second.m_SpecialCase[0] = 29;
+    second.Decode(pCharacter);
+    INFO("decoded instance " << second.m_nInstance);
+    CHECK(second.m_nInstance == pFarGoblin->GetId());
 }

@@ -924,3 +924,110 @@ TEST_CASE("projectile: a fired cone arrives, delivers and removes itself after i
     CHECK(frames == std::max(delivered, 15) + 1);
     ClearMessages();
 }
+
+TEST_CASE("projectile: Magic Missile fires its missiles at the target with copies of its effects", "[projectile][data]")
+{
+    PROBE_OR_SKIP(pSprite);
+    ClearMessages();
+
+    // Type 70 is three missiles (types 68 to 72 are one to five), each of
+    // type 218.
+    CProjectile* pProjectile = CProjectile::DecodeProjectile(70, NULL, 0);
+    CProjectile84E0C4* pMissiles = dynamic_cast<CProjectile84E0C4*>(pProjectile);
+    REQUIRE(pMissiles != nullptr);
+    CHECK(pMissiles->m_projectileType == 69);
+    CHECK(pMissiles->m_fireSoundRef == CResRef("TRA_22"));
+    CHECK(pMissiles->m_bHasHeight == TRUE);
+    CHECK(pMissiles->m_nCount == 3);
+    CHECK(pMissiles->m_nType == 217);
+    CHECK(pMissiles->m_speed == 20);
+    CHECK(pMissiles->field_1D2 == 0x80);
+    CHECK(pMissiles->field_1D8 == 1);
+
+    std::vector<CProjectile*> missiles;
+    POSITION pos = pMissiles->m_projectiles.GetHeadPosition();
+    while (pos != NULL) {
+        missiles.push_back(pMissiles->m_projectiles.GetNext(pos));
+    }
+    REQUIRE(missiles.size() == 3);
+    for (size_t n = 0; n < missiles.size(); n++) {
+        CProjectile8510A4* pMissile = dynamic_cast<CProjectile8510A4*>(missiles[n]);
+        REQUIRE(pMissile != nullptr);
+        CHECK(pMissile->m_projectileType == 217);
+        CHECK(pMissile->m_speed == 40);
+        CHECK(pMissile->m_bHasHeight == TRUE);
+        CHECK(pMissile->field_1CA == 15);
+        CHECK(pMissile->field_1CE == 11);
+        // Only the first one plays its fire sound.
+        CHECK(pMissile->m_fireSoundRef == CResRef(n == 0 ? "TRA_02" : ""));
+    }
+
+    pMissiles->m_nSpellLevel = 1;
+    pMissiles->m_sourceRes = "SPWI112";
+    pMissiles->AddEffect(Decode(pSprite, CGAMEEFFECT_AC, 0, 0).release());
+
+    // Fired at the caster itself: the line of flight has no length, so its
+    // velocity is (1, 1) and the first pair drifts by (1, -1) and (-1, 1).
+    pMissiles->Fire(pSprite->GetArea(), pSprite->GetId(), pSprite->GetId(), pSprite->GetPos(), 0, 0);
+
+    CGameObjectArray* pArray = g_pBaldurChitin->GetObjectGame()->GetObjectArray();
+    for (size_t n = 0; n < missiles.size(); n++) {
+        CProjectile* pMissile = missiles[n];
+        INFO("missile " << n);
+        CGameObject* pObject;
+        REQUIRE(pArray->GetShare(pMissile->GetId(), CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) == CGameObjectArray::SUCCESS);
+        pArray->ReleaseShare(pMissile->GetId(), CGameObjectArray::THREAD_ASYNCH, INFINITE);
+        CHECK(pObject == pMissile);
+        CHECK(pMissile->m_sourceId == pSprite->GetId());
+        CHECK(pMissile->m_targetId == pSprite->GetId());
+        CHECK(pMissile->m_nSpellLevel == 1);
+        CHECK(pMissile->m_sourceRes == CResRef("SPWI112"));
+        CHECK(pMissile->m_speed >= 30);
+        CHECK(pMissile->m_speed < 50);
+        REQUIRE(pMissile->m_effectList.GetCount() == 1);
+        CHECK(pMissile->m_effectList.GetHead()->m_effectID == CGAMEEFFECT_AC);
+        CHECK(pMissile->m_effectList.GetHead()->m_projectileType == 217);
+    }
+    CHECK(missiles[0]->m_driftX == 1);
+    CHECK(missiles[0]->m_driftY == -1);
+    CHECK(missiles[1]->m_driftX == -1);
+    CHECK(missiles[1]->m_driftY == 1);
+    CHECK(missiles[0]->m_driftDecay == 0);
+    CHECK(missiles[1]->m_driftDecay == 0);
+    CHECK(missiles[0]->m_bTrackTargetHeight == TRUE);
+    CHECK(missiles[1]->m_bTrackTargetHeight == TRUE);
+    // The odd one out flies straight.
+    CHECK(missiles[2]->m_driftX == 0);
+    CHECK(missiles[2]->m_driftY == 0);
+    CHECK(missiles[2]->m_driftDecay == 20);
+    CHECK(missiles[2]->m_bTrackTargetHeight == FALSE);
+
+    // Each one flies to its target (from the caster's launch point, which
+    // depends on its facing: a few updates at most), delivers its copy of
+    // the effect and removes itself.
+    for (size_t n = 0; n < missiles.size(); n++) {
+        INFO("missile " << n);
+        LONG id = missiles[n]->GetId();
+        const INT nBefore = g_pBaldurChitin->m_cMessageHandler.m_messageList.GetCount();
+        bool removed = false;
+        for (int update = 0; update < 100 && !removed; update++) {
+            CGameObject* pObject;
+            if (pArray->GetShare(id, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) != CGameObjectArray::SUCCESS) {
+                removed = true;
+                break;
+            }
+            pArray->ReleaseShare(id, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+            pObject->AIUpdate();
+        }
+        CHECK(removed);
+        CHECK(g_pBaldurChitin->m_cMessageHandler.m_messageList.GetCount() == nBefore + 1);
+        CMessageGroup* pGroup = LastGroup();
+        REQUIRE(pGroup != nullptr);
+        CHECK(pGroup->GetTarget() == pSprite->GetId());
+        CHECK(pGroup->GetSource() == pSprite->GetId());
+    }
+    CHECK(g_pBaldurChitin->m_cMessageHandler.m_messageList.GetCount() == 3);
+
+    ClearMessages();
+    pSprite->GetArea()->SortLists();
+}

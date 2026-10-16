@@ -112,11 +112,13 @@ public:
     static const BYTE MSG_SUBTYPE_CMESSAGE_STOP_ESCAPE_AREA;
     static const BYTE MSG_SUBTYPE_CMESSAGE_SET_TIME_STOP;
     static const BYTE MSG_SUBTYPE_CMESSAGE_STORE_RELEASE;
+    static const BYTE MSG_SUBTYPE_CMESSAGE_89;
     static const BYTE MSG_SUBTYPE_CMESSAGE_90;
     static const BYTE MSG_SUBTYPE_CMESSAGE_FLOAT_TEXT;
     static const BYTE MSG_SUBTYPE_CMESSAGE_92;
     static const BYTE MSG_SUBTYPE_CMESSAGE_SET_PROTAGONIST;
     static const BYTE MSG_SUBTYPE_CMESSAGE_START_COMBAT_MUSIC;
+    static const BYTE MSG_SUBTYPE_CMESSAGE_96;
     static const BYTE MSG_SUBTYPE_CMESSAGE_SCREENSHAKE;
     static const BYTE MSG_SUBTYPE_CMESSAGE_STORE_DEMAND;
     static const BYTE MSG_SUBTYPE_CMESSAGE_WEAPON_IMMUNITIES_UPDATE;
@@ -1429,6 +1431,35 @@ public:
     void Run() override;
 
     /* 000C */ STRREF m_strRef;
+};
+
+// A summoned creature's death on a machine that does not own it (vtables
+// 0x84C3A8 and 0x84C38C, 0x10 bytes; CGameEffectDeath sends both with the
+// sprite as caller, target and m_spriteId): 89 asks the summon limit table to
+// unsummon it, 96 to forget it. In a single player game nothing but the
+// sprite's deny is taken. Marshal and Unmarshal (0x512830/0x512950,
+// 0x512FE0/0x513100) are the network path and are omitted (single player
+// only, docs/adr/0002-single-player-only.md).
+class CMessage89 : public CMessage {
+public:
+    CMessage89(LONG spriteId, LONG caller, LONG target);
+    SHORT GetCommType() override;
+    BYTE GetMsgType() override;
+    BYTE GetMsgSubType() override;
+    void Run() override;
+
+    /* 000C */ LONG m_spriteId;
+};
+
+class CMessage96 : public CMessage {
+public:
+    CMessage96(LONG spriteId, LONG caller, LONG target);
+    SHORT GetCommType() override;
+    BYTE GetMsgType() override;
+    BYTE GetMsgSubType() override;
+    void Run() override;
+
+    /* 000C */ LONG m_spriteId;
 };
 
 class CMessage90 : public CMessage {
