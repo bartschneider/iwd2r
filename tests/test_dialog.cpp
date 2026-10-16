@@ -474,6 +474,51 @@ TEST_CASE("dialog: Hedron's opening conversation shows three responses and ends 
     CHECK(ShownReplies(dialog) == 0);
 }
 
+TEST_CASE("dialog: Reload gives a state in another creature's dialog to that creature: Reig's 10JON is Jon", "[dialog][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CGameSprite* pCharacter = NewGameInStartArea(cre);
+    REQUIRE(pGame->m_pGameAreaMaster != NULL);
+    CGameSprite* pReig = FindSpeaker(pGame->m_pGameAreaMaster, "10REIG");
+    CGameSprite* pJon = FindSpeaker(pGame->m_pGameAreaMaster, "10JON");
+    REQUIRE(pReig != NULL);
+    REQUIRE(pJon != NULL);
+
+    CGameDialogSprite dialog;
+    dialog.Load(CResRef("10REIG"), pCharacter->GetId(), pReig->GetId());
+    REQUIRE(dialog.m_talkerIndex == pReig->GetId());
+
+    // No file, or the talker's own: the talker is kept (0x4829BD, 0x48258F).
+    dialog.Reload(CResRef(""), pReig);
+    CHECK(dialog.m_talkerIndex == pReig->GetId());
+    dialog.Reload(CResRef("10REIG"), pReig);
+    CHECK(dialog.m_talkerIndex == pReig->GetId());
+
+    // Reig's state 4 goes on to Jon's state 2 in 10JON: the nearest creature
+    // of Reig's area with that dialog (GetNearestDialogMatch 0x46C460, from
+    // 0x482570/0x482586) speaks it, as in the original's walk_and_talk
+    // (speaker 786444 at frames 3570 and 3600).
+    dialog.Reload(CResRef("10JON"), pReig);
+    CHECK(dialog.m_talkerIndex == pJon->GetId());
+    CHECK(dialog.m_characterIndex == pCharacter->GetId());
+
+    // And Jon's state 2 back to Reig's 5.
+    dialog.Reload(CResRef("10REIG"), pJon);
+    CHECK(dialog.m_talkerIndex == pReig->GetId());
+}
+
 TEST_CASE("dialog: TogglePauseGame pauses and unpauses the world and returns TRUE", "[dialog][data]")
 {
     if (DataDir() == nullptr) {
