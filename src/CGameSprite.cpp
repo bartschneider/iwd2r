@@ -22602,6 +22602,9 @@ SHORT CGameSprite::EquipMostDamagingMelee()
     CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
     if (IcewindMisc::IsPC(this) == TRUE
         && pGame->m_group.m_memberList.GetCount() != 0) {
+        // NOTE: The original calls GetGroupList twice (0x75E0EC, 0x75E106),
+        // reads the leader from the second array and frees only that one:
+        // the first array leaks. Ours calls it once.
         LONG* pList = pGame->m_group.GetGroupList();
         LONG nLeader = pList[0];
         delete[] pList;
