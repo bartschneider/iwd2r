@@ -675,6 +675,45 @@ TEST_CASE("ai: See at a distance, a dead sprite, Range's equal mode, HP's edges 
     ClearMessages();
 }
 
+TEST_CASE("ai: CheckStat, CheckStatGT and CheckStatLT compare the cause's derived stat", "[ai][data]")
+{
+    REQUIRE_ENGINE();
+    ClearMessages();
+    CGameAIBase* pCaller = AddAIObject();
+    CGameSprite* pSprite = MakeSprite();
+    CAIObjectType sprite(0, 0, 0, 0, 0, 0, 0, 0, pSprite->m_id, 0, 0);
+
+    // Int1 is the stat (STAT_STR, 36), the value its specific.
+    const SHORT saved = pSprite->m_derivedStats.m_nSTR;
+    pSprite->m_derivedStats.m_nSTR = 12;
+    CAITrigger check(0x4044, sprite, 12);
+    check.m_specific2 = STAT_STR;
+    CHECK(pCaller->EvaluateStatusTrigger(check) == TRUE);
+    check.m_specificID = 11;
+    CHECK(pCaller->EvaluateStatusTrigger(check) == FALSE);
+
+    CAITrigger greater(0x4045, sprite, 11);
+    greater.m_specific2 = STAT_STR;
+    CHECK(pCaller->EvaluateStatusTrigger(greater) == TRUE);
+    greater.m_specificID = 12;
+    CHECK(pCaller->EvaluateStatusTrigger(greater) == FALSE);
+
+    CAITrigger less(0x4046, sprite, 13);
+    less.m_specific2 = STAT_STR;
+    CHECK(pCaller->EvaluateStatusTrigger(less) == TRUE);
+    less.m_specificID = 12;
+    CHECK(pCaller->EvaluateStatusTrigger(less) == FALSE);
+
+    // No sprite (the caller is a plain AI object): FALSE.
+    CAIObjectType object(0, 0, 0, 0, 0, 0, 0, 0, pCaller->m_id, 0, 0);
+    CAITrigger other(0x4045, object, -100);
+    other.m_specific2 = STAT_STR;
+    CHECK(pCaller->EvaluateStatusTrigger(other) == FALSE);
+
+    pSprite->m_derivedStats.m_nSTR = saved;
+    ClearMessages();
+}
+
 TEST_CASE("ai: the party specifiers decode to the party member the game picks", "[ai][data]")
 {
     REQUIRE_ENGINE();

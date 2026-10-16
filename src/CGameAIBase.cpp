@@ -4760,6 +4760,31 @@ BOOL CGameAIBase::EvaluateStatusTrigger(const CAITrigger& trigger)
             }
         }
         break;
+    case 0x4044:
+    case 0x4045:
+    case 0x4046:
+        // CheckStat, CheckStatGT, CheckStatLT: the cause's derived stat
+        // (int1) against the value.
+        {
+            CGameSprite* pSprite = NULL;
+            bNoRelease = GetTriggerSprite(triggerCopy, &pSprite);
+            pObject = pSprite;
+            if (pSprite == NULL) {
+                // NOTE: The original leaves through its early epilogue
+                // (0x45AB7A) without releasing anything; nothing is shared.
+                return FALSE;
+            }
+
+            LONG nStat = pSprite->GetDerivedStats()->GetAtOffset(static_cast<SHORT>(triggerCopy.GetInt1()));
+            if (triggerCopy.m_triggerID == 0x4044) {
+                bResult = nStat == triggerCopy.GetSpecifics();
+            } else if (triggerCopy.m_triggerID == 0x4045) {
+                bResult = nStat > triggerCopy.GetSpecifics();
+            } else {
+                bResult = nStat < triggerCopy.GetSpecifics();
+            }
+        }
+        break;
     case 0x4018:
         // Range(object, range, mode): the squared search-grid distance to
         // the object (a door's nearer walk-to point) against (range + 1)
