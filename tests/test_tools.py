@@ -22,6 +22,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import time
 import types
 import unittest
 import xml.etree.ElementTree as ET
@@ -384,12 +385,30 @@ class PlayVmArgsTest(unittest.TestCase):
                     play.parse_args(argv)
 
     def test_vm_defaults(self):
+        # No --timeout: each scenario's own (scenario_timeout).
         a = play.parse_args(['--vm', 'all', '--suite'])
         self.assertEqual((a.vm, a.suite, a.jobs, a.timeout),
-                         ('all', True, 1, 180))
+                         ('all', True, 1, None))
         a = play.parse_args(['--vm', 'windows', '--script', 's.txt',
                              '--timeout', '60'])
         self.assertEqual((a.vm, a.script, a.timeout), ('windows', 's.txt', 60))
+
+    def test_scenario_timeout(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            own = os.path.join(tmp, 'own.txt')
+            with open(own, 'w') as f:
+                f.write('# A long one.\n# timeout: 420\nwait 1\n')
+            plain = os.path.join(tmp, 'plain.txt')
+            with open(plain, 'w') as f:
+                f.write('# timeout comes later\nwait 1\n# timeout: 9\n')
+            # --timeout wins; else the header's; else the default.
+            self.assertEqual(play.scenario_timeout(None, own), 420)
+            self.assertEqual(play.scenario_timeout(60, own), 60)
+            self.assertEqual(play.scenario_timeout(None, plain),
+                             realinput.DEFAULT_TIMEOUT)
+        # The scenarios that run longer than the default say so.
+        self.assertGreaterEqual(play.scenario_timeout(None, os.path.join(
+            ROOT, 'scenarios', 'walk_and_talk.txt')), 400)
 
     def test_suite_files_are_the_scenarios(self):
         self.assertEqual(play.suite_files(), scenario_files())
@@ -487,6 +506,29 @@ class ScenarioParseTest(unittest.TestCase):
                 realinput.parse_scenario(text)
             self.assertEqual(str(cm.exception), message)
 
+    def test_header_timeout(self):
+        t = realinput.header_timeout
+        self.assertEqual(t('# timeout: 420\nwait 1\n'), 420)
+        self.assertEqual(t('# About it.\n\n#  Timeout:  300 \r\nwait 1\n'),
+                         300)
+        self.assertIsNone(t('# About it.\nwait 1\n'))
+        # Only the header (the comment lines before the first command).
+        self.assertIsNone(t('wait 1\n# timeout: 420\n'))
+        self.assertIsNone(t('# the timeout is long\nwait 1\n'))
+        for text, message in (
+                ('# x\n# timeout: 0\n',
+                 'line 2: timeout needs a positive number of seconds'),
+                ('# timeout: soon\n',
+                 'line 1: timeout needs a positive number of seconds'),
+                ('# timeout: 1\n# timeout: 2\n',
+                 'line 2: duplicate timeout (first on line 1)')):
+            with self.assertRaises(realinput.ScenarioError, msg=text) as cm:
+                t(text)
+            self.assertEqual(str(cm.exception), message)
+        # The scenario parsers take the header for a comment.
+        self.assertEqual(realinput.parse_scenario('# timeout: 420\nquit\n'),
+                         [{'op': 'quit', 'line': 2}])
+
     def test_shipped_scenarios_parse(self):
         pending = glob.glob(os.path.join(ROOT, 'scenarios', 'pending',
                                          '*.txt'))
@@ -505,17 +547,19 @@ class ScenarioParseTest(unittest.TestCase):
         self.assertEqual(actions[-1]['op'], 'quit')
 
     def test_walk_and_talk_checkpoints(self):
-        def load(name):
-            return realinput.load_scenario(os.path.join(
-                ROOT, 'scenarios', 'pending', name))
-        actions = load('walk_and_talk.txt')
+        actions = realinput.load_scenario(os.path.join(
+            ROOT, 'scenarios', 'walk_and_talk.txt'))
         names = [a['name'] for a in actions if a['op'] == 'checkpoint']
-        world = [a['name'] for a in load('world_entry.txt')
+        world = [a['name'] for a in realinput.load_scenario(os.path.join(
+            ROOT, 'scenarios', 'pending', 'world_entry.txt'))
                  if a['op'] == 'checkpoint']
         self.assertEqual(names, world + [
             'opening_dialog', 'opening_done', 'moved', 'dialog',
             'dialog_end', 'reig_dialog', 'reig_done', 'door_open'])
         self.assertEqual(len(names), len(set(names)))
+        # M2 Task 7: a shot of Hedron's dialog panel and of the door.
+        self.assertEqual([a['name'] for a in actions if a['op'] == 'shot'],
+                         ['dialog', 'door_open'])
         self.assertEqual(actions[-1]['op'], 'quit')
 
     def test_keysym_table_covers_every_key_name(self):
@@ -564,10 +608,12 @@ class ScenarioParseTest(unittest.TestCase):
         self.assertEqual(out, [
             {'op': 'click', 'x': (240 + 5) * 2, 'y': (60 + 6) * 2, 'line': 1},
             {'op': 'click', 'x': 10, 'y': 12, 'line': 3}])
-        # driver.ps1 knows no checkpoint; it is dropped like origin.
+        # driver.ps1 asks for a state dump at a checkpoint; origin is
+        # dropped.
         out = realinput.windows_actions(realinput.parse_scenario(
-            'checkpoint a\nwait 2\n'))
-        self.assertEqual(out, [{'op': 'wait', 'frames': 2, 'line': 2}])
+            'checkpoint a\norigin screen\nwait 2\n'))
+        self.assertEqual(out, [{'op': 'checkpoint', 'name': 'a', 'line': 1},
+                               {'op': 'wait', 'frames': 2, 'line': 3}])
         self.assertEqual(realinput.describe(
             {'op': 'checkpoint', 'name': 'a'}), 'checkpoint a')
 
@@ -779,10 +825,23 @@ class XDriverTest(unittest.TestCase):
         self.calls = []
         self.lines = []
         self.game = FakeGame()
+        self.frames = 0
         self.driver = realinput.XDriver(
             7, self.game, self._tmp.name, self._tmp.name, self.lines.append,
-            deadline=1e12, run=self.fake_run, sleep=lambda s: None)
+            deadline=time.time() + 60, run=self.fake_run,
+            sleep=self.fast_engine)
         self.driver.window = 0x50
+
+    def fast_engine(self, seconds):
+        """The engine's control channel: a frame and a mouse-button read
+        per call; frames.req and input.req answered with the counts."""
+        self.frames += 1
+        for name, answer in (('frames', 'frames.txt'), ('input', 'input.txt')):
+            req = os.path.join(self._tmp.name, name + '.req')
+            if os.path.exists(req):
+                with open(os.path.join(self._tmp.name, answer), 'w') as f:
+                    f.write('%d\n' % self.frames)
+                os.remove(req)
 
     def fake_run(self, cmd, timeout=30):
         self.calls.append(cmd)
@@ -815,10 +874,242 @@ class XDriverTest(unittest.TestCase):
             ['mousedown', '3'], ['mouseup', '3'],
             ['keydown', 'Escape'], ['keyup', 'Escape']])
 
+    def test_type_presses_each_key_with_shift_for_capitals(self):
+        # As driver.ps1 does: one key press per character, shift around a
+        # capital, each phase waiting for the engine's input reads.
+        self.driver.do({'op': 'type', 'text': 'Pr 1', 'line': 1})
+        self.assertEqual(self.xdo(), [
+            ['keydown', 'Shift_L'], ['keydown', 'p'], ['keyup', 'p'],
+            ['keyup', 'Shift_L'],
+            ['keydown', 'r'], ['keyup', 'r'],
+            ['keydown', 'space'], ['keyup', 'space'],
+            ['keydown', '1'], ['keyup', '1']])
+
     def test_game_exit_ends_the_run(self):
         self.game.code = 0
         self.assertEqual(self.driver.run([{'op': 'wait', 'frames': 1,
                                            'line': 1}]), 'game exited')
+
+    def test_press_and_release_each_reach_a_slow_engine(self):
+        # The engine polls input once per AI update and reports only "down"
+        # and "pressed since the last poll" (GetAsyncKeyState), so a release
+        # and the next press with no poll between them read as one long
+        # press: a double click becomes one click. In Windows Sandbox the
+        # gaps between polls reached 165 ms, and the portrait double click
+        # that centres the view was sometimes lost. Each phase of a click
+        # now lasts until the engine has read the mouse buttons again.
+        control = os.path.join(self._tmp.name, 'control')
+        os.makedirs(control)
+        engine = {'polls': 0, 'slept': 0.0}
+
+        def slow_engine(seconds):
+            # 10 reads a second: one per 0.1 s of sleeping.
+            time.sleep(seconds)
+            engine['slept'] += seconds
+            if not engine.get('frozen'):
+                engine['polls'] = int(engine['slept'] * 10)
+            req = os.path.join(control, 'input.req')
+            if os.path.exists(req):
+                with open(os.path.join(control, 'input.txt'), 'w') as f:
+                    f.write('%d\n' % engine['polls'])
+                os.remove(req)
+
+        events = []
+
+        def run(cmd, timeout=30):
+            if cmd[:2] == ['xdotool', 'search']:
+                return 0, '80\n'
+            events.append((cmd[1], engine['polls']))
+            return 0, ''
+
+        self.driver = realinput.XDriver(
+            7, self.game, self._tmp.name, control, self.lines.append,
+            deadline=time.time() + 60, run=run, sleep=slow_engine)
+        self.driver.window = 80
+        self.driver.do({'op': 'click', 'x': 1, 'y': 2, 'line': 1})
+        self.driver.do({'op': 'click', 'x': 1, 'y': 2, 'line': 2})
+        self.driver.do({'op': 'key', 'key': 'ESCAPE', 'line': 3})
+        presses = [e for e in events if e[0] in ('mousedown', 'mouseup',
+                                                 'keydown', 'keyup')]
+        self.assertEqual([e[0] for e in presses],
+                         ['mousedown', 'mouseup'] * 2 + ['keydown', 'keyup'])
+        # A read between every two transitions.
+        for (_, before), (_, after) in zip(presses, presses[1:]):
+            self.assertGreaterEqual(after - before, 1)
+        # An engine that never reads the buttons delays a phase by at most
+        # POLL_TIMEOUT.
+        engine['frozen'] = True
+        started = time.time()
+        self.driver.do({'op': 'click', 'x': 1, 'y': 2, 'line': 4})
+        self.assertLess(time.time() - started,
+                        3 * realinput.POLL_TIMEOUT + 1)
+        self.assertIn('  the engine did not read the mouse buttons in 1 s',
+                      self.lines)
+
+    def test_checkpoint_asks_the_engine_for_a_state_dump(self):
+        control = os.path.join(self._tmp.name, 'control')
+        os.makedirs(control)
+        answered = []
+
+        def engine(seconds):
+            # The engine's PollControl: answers state-NAME.req with
+            # checkpoint-NAME.json and removes the request.
+            for name in os.listdir(control):
+                if name.startswith('state-') and name.endswith('.req'):
+                    point = name[len('state-'):-len('.req')]
+                    with open(os.path.join(self._tmp.name, 'checkpoint-%s.json'
+                                           % point), 'w') as f:
+                        f.write('{"checkpoint": "%s"}\n' % point)
+                    os.remove(os.path.join(control, name))
+                    answered.append(point)
+
+        self.driver = realinput.XDriver(
+            7, self.game, self._tmp.name, control, self.lines.append,
+            deadline=1e12, run=self.fake_run, sleep=engine)
+        self.driver.do({'op': 'checkpoint', 'name': 'elf', 'line': 3})
+        self.assertEqual(answered, ['elf'])
+        self.assertEqual(self.driver.state_dumps, 1)
+        self.assertEqual(self.xdo(), [])  # no input
+        self.assertIn('  wrote checkpoint-elf.json', self.lines)
+
+
+class CheckpointExpectationTest(unittest.TestCase):
+    """A real-input run's checkpoint dumps against what the original
+    reached there (scenarios/<name>.expect.json)."""
+
+    SCENARIO = 'click 1 2\nwait 5\ncheckpoint gender\nwait 5\ncheckpoint w\n'
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp = self._tmp.name
+        self.actions = realinput.parse_scenario(self.SCENARIO)
+
+    def dump(self, folder, name, screen='create_char', race=2, world=None):
+        os.makedirs(folder, exist_ok=True)
+        chargen = None if world else {
+            'race': race, 'subrace': 0, 'class': 5,
+            'abilities': [13, 12, 9, 9, 10, 9], 'rolls': [0] * 7,
+            'skill_points': 0, 'feats': [8, 66068416, 0],
+            'portrait': '2MELF1_L'}
+        with open(os.path.join(folder, 'checkpoint-%s.json' % name),
+                  'w') as f:
+            json.dump({'frame': 986, 'checkpoint': name, 'screen': screen,
+                       'rng_state': 1, 'globals': {'au_counter': 986},
+                       'chargen': chargen, 'world': world}, f)
+
+    WORLD = {'area': 'AR1000', 'party': [{'id': 1, 'x': 2414, 'y': 897}],
+             'doors': [{'name': 'AR1000_Door5', 'open': 0, 'locked': 0}],
+             'dialog': {'active': 1, 'speaker': 1048592, 'entry': 34,
+                        'responses': 5},
+             'explored_count': 560, 'creatures': 36}
+
+    def test_expected_fields_leave_out_timing_and_position(self):
+        original = os.path.join(self.tmp, 'original')
+        self.dump(original, 'gender')
+        self.dump(original, 'w', screen='world', world=self.WORLD)
+        expect = realinput.make_expectations(self.actions, original, 'test')
+        self.assertEqual(expect['source'], 'test')
+        self.assertEqual(expect['checkpoints']['gender'], {
+            'screen': 'create_char', 'chargen.race': 2,
+            'chargen.subrace': 0, 'chargen.class': 5,
+            'chargen.abilities[0]': 13, 'chargen.abilities[1]': 12,
+            'chargen.abilities[2]': 9, 'chargen.abilities[3]': 9,
+            'chargen.abilities[4]': 10, 'chargen.abilities[5]': 9,
+            'chargen.portrait': '2MELF1_L'})
+        self.assertEqual(expect['checkpoints']['w'], {
+            'screen': 'world', 'world.area': 'AR1000',
+            'world.dialog.active': 1, 'world.dialog.speaker': 1048592,
+            'world.dialog.entry': 34, 'world.dialog.responses': 5})
+        os.remove(os.path.join(original, 'checkpoint-w.json'))
+        with self.assertRaisesRegex(ValueError, 'checkpoint-w.json'):
+            realinput.make_expectations(self.actions, original, 'test')
+
+    def test_check_finds_a_lost_click(self):
+        original = os.path.join(self.tmp, 'original')
+        self.dump(original, 'gender')
+        self.dump(original, 'w', screen='world', world=self.WORLD)
+        expect = realinput.make_expectations(self.actions, original, 'test')
+        run = os.path.join(self.tmp, 'run')
+        self.dump(run, 'gender')
+        moved = dict(self.WORLD, party=[{'id': 1, 'x': 2000, 'y': 900}])
+        self.dump(run, 'w', screen='world', world=moved)
+        self.assertEqual(realinput.check_checkpoints(self.actions, run,
+                                                     expect), [])
+        # The Gender click was lost: no race, and the run is elsewhere.
+        self.dump(run, 'gender', race=0)
+        self.dump(run, 'w', screen='connection')
+        self.assertEqual(
+            realinput.check_checkpoints(self.actions, run, expect),
+            ['checkpoint gender: chargen.race is 0, expected 2',
+             'checkpoint w: screen is "connection", expected "world"'])
+        os.remove(os.path.join(run, 'checkpoint-w.json'))
+        self.assertEqual(
+            realinput.check_checkpoints(self.actions, run, None),
+            ['no state dump at checkpoint w'])
+
+    def test_expect_command_writes_the_file_beside_the_scenario(self):
+        scenario = os.path.join(self.tmp, 'x.txt')
+        with open(scenario, 'w') as f:
+            f.write(self.SCENARIO)
+        original = os.path.join(self.tmp, 'original')
+        self.dump(original, 'gender')
+        self.dump(original, 'w', screen='world', world=self.WORLD)
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(realinput.main(['expect', scenario, original]),
+                             0)
+        path = os.path.join(self.tmp, 'x.expect.json')
+        self.assertEqual(realinput.expectation_path(scenario), path)
+        loaded = realinput.load_expectations(scenario)
+        self.assertEqual(sorted(loaded['checkpoints']), ['gender', 'w'])
+        self.assertIn(original, loaded['source'])
+        self.assertIsNone(realinput.load_expectations(
+            os.path.join(self.tmp, 'none.txt')))
+
+    def test_play_fails_a_run_that_missed_a_checkpoint(self):
+        scenario = os.path.join(self.tmp, 'x.txt')
+        with open(scenario, 'w') as f:
+            f.write(self.SCENARIO)
+        original = os.path.join(self.tmp, 'original')
+        self.dump(original, 'gender')
+        self.dump(original, 'w', screen='world', world=self.WORLD)
+        with open(realinput.expectation_path(scenario), 'w') as f:
+            json.dump(realinput.make_expectations(self.actions, original,
+                                                  't'), f)
+        run = os.path.join(self.tmp, 'run')
+        self.dump(run, 'gender', race=0)
+        self.dump(run, 'w', screen='world', world=self.WORLD)
+        result = play.check_checkpoints(
+            {'code': 0, 'error': None}, run, self.actions, scenario)
+        self.assertEqual(result['code'], 1)
+        self.assertEqual(result['error'],
+                         'checkpoint gender: chargen.race is 0, expected 2')
+        # A failed run keeps its own code and error.
+        result = play.check_checkpoints(
+            {'code': 124, 'error': 'scenario timeout'}, run, self.actions,
+            scenario)
+        self.assertEqual((result['code'], result['error']),
+                         (124, 'scenario timeout'))
+
+    def test_shipped_expectations_name_the_scenario_checkpoints(self):
+        pending = glob.glob(os.path.join(ROOT, 'scenarios', 'pending',
+                                         '*.txt'))
+        found = []
+        for path in scenario_files() + pending:
+            expect = realinput.load_expectations(path)
+            if expect is None:
+                continue
+            found.append(play.scenario_name(path))
+            names = [a['name'] for a in realinput.load_scenario(path)
+                     if a['op'] == 'checkpoint']
+            self.assertEqual(sorted(expect['checkpoints']), sorted(names),
+                             path)
+            for fields in expect['checkpoints'].values():
+                self.assertIn('screen', fields)
+        # The scenario whose lost Gender click the old pass test missed,
+        # and M2's exit scenario.
+        self.assertIn('chargen_replay', found)
+        self.assertIn('walk_and_talk', found)
 
 
 class SandboxWsbTest(unittest.TestCase):
@@ -858,6 +1149,67 @@ class SandboxWsbTest(unittest.TestCase):
             with open(os.path.join(tmp, 'driver.ps1')) as f, \
                     open(winsandbox.DRIVER) as src:
                 self.assertEqual(f.read(), src.read())
+
+    def test_run_waits_for_the_scenario_timeout_and_the_sandbox(self):
+        # The host waits for done.txt as long as the driver's own timeout
+        # plus the sandbox's boot, not a fixed 300 s that a 420 s
+        # scenario would outlast.
+        from unittest import mock
+        waited = []
+        with tempfile.TemporaryDirectory() as tmp:
+            host_run = os.path.join(tmp, 'host')
+            run_dir = os.path.join(tmp, 'run')
+            os.makedirs(run_dir)
+
+            def done(results, timeout):
+                waited.append(timeout)
+                for name, text in (('exitcode.txt', '0'), ('done.txt', 'done')):
+                    with open(os.path.join(results, name), 'w') as f:
+                        f.write(text)
+
+            with mock.patch.object(winsandbox, 'wslpath_w', lambda p: p), \
+                    mock.patch.object(winsandbox, 'start_sandbox',
+                                      lambda h, w, log: None), \
+                    mock.patch.object(winsandbox, 'wait_done', done), \
+                    mock.patch.object(winsandbox, 'close_sandbox',
+                                      lambda log: None):
+                result = winsandbox.run_scenario(
+                    os.path.join(tmp, 'bin', 'iwd2r.exe'), '/game', [], [],
+                    'x', run_dir, host_run, 420, 30, lambda m: None)
+        self.assertEqual(result['code'], 0)
+        self.assertEqual(waited, [420 + winsandbox.SANDBOX_ALLOWANCE])
+        self.assertGreaterEqual(winsandbox.SANDBOX_ALLOWANCE, 60)
+
+    def test_driver_dry_run(self):
+        # driver.ps1 -DryRun on the host compiles its C# and walks the
+        # actions without starting anything; it catches a script that would
+        # only fail inside the sandbox.
+        powershell = ('/mnt/c/Windows/System32/WindowsPowerShell/v1.0/'
+                      'powershell.exe')
+        if not os.path.isfile(powershell) or \
+                not os.path.isdir(winsandbox.VM_ROOT):
+            self.skipTest('no Windows PowerShell or %s' % winsandbox.VM_ROOT)
+        os.makedirs(os.path.join(winsandbox.VM_ROOT, 'dryrun'), exist_ok=True)
+        with tempfile.TemporaryDirectory(
+                dir=os.path.join(winsandbox.VM_ROOT, 'dryrun')) as tmp:
+            actions = realinput.windows_actions(realinput.parse_scenario(
+                'checkpoint menu\nclick 10 20\nkey ESCAPE\nwait 3\n'
+                'shot s\nquit\n'))
+            winsandbox.write_inputs(tmp, winsandbox.driver_config(
+                ['A/B=1'], 60, 30, 'dry'), actions)
+            win = subprocess.run(['wslpath', '-w', tmp], capture_output=True,
+                                 text=True, check=True).stdout.strip()
+            r = subprocess.run(
+                [powershell, '-NoProfile', '-ExecutionPolicy', 'Bypass',
+                 '-File', win + '\\driver.ps1', '-Config',
+                 win + '\\config.json', '-DryRun'],
+                capture_output=True, text=True, timeout=120, cwd=tmp)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        for line in ('line 1: checkpoint menu',
+                     'would request checkpoint-menu.json',
+                     'line 2: click 10 20', 'line 3: key ESCAPE',
+                     'line 6: quit', 'scenario finished'):
+            self.assertIn(line, r.stdout)
 
     def test_start_batch(self):
         self.assertEqual(winsandbox.start_batch(r'C:\r\run.wsb'),
@@ -1040,6 +1392,67 @@ class SandboxRuntimeTest(unittest.TestCase):
             f.write(tiny_pe(['KERNEL32.dll']))
         self.assertEqual(winsandbox.deploy_runtime(exe, lambda m: None,
                                                    self.dir), [])
+
+    def runtime_fixture(self):
+        """A redist folder with a read-only msvcp140.dll (as under Program
+        Files) and an exe importing it; returns (redist root, exe, the
+        redist DLL)."""
+        crt = os.path.join(self.dir, 'Redist', '14.44.2', 'x64',
+                           'Microsoft.VC143.CRT')
+        os.makedirs(crt)
+        src = os.path.join(crt, 'msvcp140.dll')
+        self.rewrite(src, 'runtime v1')
+        out = os.path.join(self.dir, 'bin')
+        os.makedirs(out)
+        exe = os.path.join(out, 'iwd2r.exe')
+        with open(exe, 'wb') as f:
+            f.write(tiny_pe(['KERNEL32.dll', 'MSVCP140.dll']))
+        return os.path.join(self.dir, 'Redist'), exe, src
+
+    def rewrite(self, path, text, mtime=None):
+        """Writes text into path and leaves it read-only (mtime: seconds,
+        else now)."""
+        if os.path.exists(path):
+            os.chmod(path, 0o644)
+        with open(path, 'w') as f:
+            f.write(text)
+        if mtime is not None:
+            os.utime(path, (mtime, mtime))
+        os.chmod(path, 0o444)
+
+    def test_deploy_ignores_sub_second_mtimes(self):
+        # On /mnt/c a copied file's mtime reads back in whole seconds: a
+        # copy whose mtime is the source's, truncated, is current.
+        redist, exe, src = self.runtime_fixture()
+        os.utime(src, (1000.75, 1000.75))
+        dst = os.path.join(os.path.dirname(exe), 'msvcp140.dll')
+        with open(dst, 'w') as f:
+            f.write('runtime vX')  # same size, other content
+        os.utime(dst, (1000.0, 1000.0))
+        winsandbox.deploy_runtime(exe, lambda m: None, redist)
+        with open(dst) as f:
+            self.assertEqual(f.read(), 'runtime vX')
+
+    def test_deploy_twice_over_a_read_only_source(self):
+        # copy2 carried the source's read-only bit over, so the next copy
+        # could not open the file: PermissionError on msvcp140.dll.
+        redist, exe, src = self.runtime_fixture()
+        dst = os.path.join(os.path.dirname(exe), 'msvcp140.dll')
+        winsandbox.deploy_runtime(exe, lambda m: None, redist)
+        self.assertTrue(os.stat(dst).st_mode & 0o200, 'the copy is writable')
+        self.assertEqual(int(os.path.getmtime(dst)),
+                         int(os.path.getmtime(src)))
+        # A newer runtime (an update) replaces the first copy.
+        self.rewrite(src, 'runtime v2 (longer)', os.path.getmtime(src) + 10)
+        winsandbox.deploy_runtime(exe, lambda m: None, redist)
+        with open(dst) as f:
+            self.assertEqual(f.read(), 'runtime v2 (longer)')
+        # An older deployment left a read-only copy (copy2): replaced too.
+        os.chmod(dst, 0o444)
+        self.rewrite(src, 'runtime v3, longer still')
+        winsandbox.deploy_runtime(exe, lambda m: None, redist)
+        with open(dst) as f:
+            self.assertEqual(f.read(), 'runtime v3, longer still')
 
 
 class LabelsTest(unittest.TestCase):

@@ -1,0 +1,27 @@
+{
+ "checkpoints": {
+  "chargen": {
+   "chargen.abilities[0]": 9,
+   "chargen.abilities[1]": 9,
+   "chargen.abilities[2]": 9,
+   "chargen.abilities[3]": 9,
+   "chargen.abilities[4]": 9,
+   "chargen.abilities[5]": 9,
+   "chargen.class": 5,
+   "chargen.portrait": "None",
+   "chargen.race": 1,
+   "chargen.subrace": 0,
+   "screen": "create_char"
+  },
+  "menu": {
+   "screen": "connection"
+  },
+  "party_formation": {
+   "screen": "single_player"
+  },
+  "select_party": {
+   "screen": "single_player"
+  }
+ },
+ "source": "checkpoint dumps in runs/20261013-005909/original"
+}

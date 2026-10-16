@@ -223,8 +223,17 @@ void ReadWorld(CBaldurChitin* chitin, World* out)
         }
         out->party.push_back(member);
     }
-    if (game->m_visibleArea < CINFGAME_MAX_AREAS && game->m_gameAreas[game->m_visibleArea])
-        ReadArea(chitin, game->m_gameAreas[game->m_visibleArea], out);
+    if (game->m_visibleArea < CINFGAME_MAX_AREAS && game->m_gameAreas[game->m_visibleArea]) {
+        // The AI thread re-sorts the area's lists (CGameArea::SortLists);
+        // they are walked under the list lock, as CGameArea::Render walks
+        // them. The replay mode reads while the AI thread waits, so the
+        // lock is free there; a real-input run's state request
+        // (platform::script::PollControl) reads while it runs.
+        CGameArea* area = game->m_gameAreas[game->m_visibleArea];
+        game->BeginListManipulation(area);
+        ReadArea(chitin, area, out);
+        game->EndListManipulation(area);
+    }
     if (chitin->m_pEngineWorld)
         ReadDialog(chitin->m_pEngineWorld->m_internalLoadedDialog, &out->dialog);
 }
