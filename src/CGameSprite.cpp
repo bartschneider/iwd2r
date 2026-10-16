@@ -27510,3 +27510,121 @@ CString CGameSprite::GetRaceString(BYTE nRace)
 
     return sRace;
 }
+
+// The creature's droppable items (file flag 0x4) and its gold (as MISC07)
+// go onto its ground pile, except an item whose resref is sException; with
+// bCriticalOnly only the droppable items with file flag 0x1 drop, and every
+// other item is unequipped. The fist slot stays. When something dropped, the
+// equipment is sent on (a single player game or the owner, with the
+// connection up) and the quick weapons and quick items are emptied.
+// ACTION_ERROR when the ground pile cannot be had; ACTION_DONE otherwise.
+//
+// 0x754EE0
+SHORT CGameSprite::DropInventory(BOOLEAN bCriticalOnly, CString sException)
+{
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    BOOLEAN bGroundPile = FALSE;
+    LONG nGroundPile = CGameObjectArray::INVALID_INDEX;
+    CGameContainer* pGroundPile = NULL;
+    BYTE rc;
+
+    if (m_pArea == NULL) {
+        return ACTION_DONE;
+    }
+
+    for (SHORT nSlot = 0; nSlot < CGameSpriteEquipment::NUM_SLOT; nSlot++) {
+        if (nSlot == CGameSpriteEquipment::SLOT_FIST) {
+            continue;
+        }
+
+        CItem** ppItem = &(m_equipment.m_items[nSlot]);
+        if (*ppItem == NULL) {
+            continue;
+        }
+
+        if ((*ppItem)->GetFlagsFile() & 0x4) {
+            if (!bCriticalOnly || ((*ppItem)->GetFlagsFile() & 0x1) != 0) {
+                if (!bGroundPile) {
+                    nGroundPile = pGame->GetGroundPile(m_id);
+                    if (nGroundPile == CGameObjectArray::INVALID_INDEX) {
+                        return ACTION_ERROR;
+                    }
+
+                    rc = pGame->GetObjectArray()->GetDeny(nGroundPile,
+                        CGameObjectArray::THREAD_ASYNCH,
+                        reinterpret_cast<CGameObject**>(&pGroundPile),
+                        INFINITE);
+                    if (rc != CGameObjectArray::SUCCESS) {
+                        return ACTION_ERROR;
+                    }
+
+                    bGroundPile = TRUE;
+                }
+
+                if ((*ppItem)->cResRef != sException) {
+                    Unequip(nSlot);
+                    pGroundPile->PlaceItemInBlankSlot(*ppItem, TRUE, 0x7FFF);
+                    *ppItem = NULL;
+                }
+                continue;
+            }
+        }
+
+        if (bCriticalOnly) {
+            Unequip(nSlot);
+        }
+    }
+
+    SelectWeaponAbility(CGameSpriteEquipment::SLOT_FIST, 0, 0, 1);
+
+    if (m_baseStats.m_gold > 0) {
+        CItem* pGold = new CItem(CResRef("MISC07"), static_cast<WORD>(m_baseStats.m_gold), 0, 0, 0, 0);
+        if (pGold != NULL) {
+            if (!bGroundPile) {
+                nGroundPile = pGame->GetGroundPile(m_id);
+                if (nGroundPile == CGameObjectArray::INVALID_INDEX) {
+                    return ACTION_ERROR;
+                }
+
+                rc = pGame->GetObjectArray()->GetDeny(nGroundPile,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    reinterpret_cast<CGameObject**>(&pGroundPile),
+                    INFINITE);
+                if (rc != CGameObjectArray::SUCCESS) {
+                    return ACTION_ERROR;
+                }
+
+                bGroundPile = TRUE;
+            }
+
+            pGroundPile->PlaceItemInBlankSlot(pGold, TRUE, 0x7FFF);
+            m_baseStats.m_gold = 0;
+        }
+    }
+
+    if (!bGroundPile) {
+        return ACTION_DONE;
+    }
+
+    if ((g_pChitin->cNetwork.GetServiceProvider() == CNetwork::SERV_PROV_NULL
+            || g_pChitin->cNetwork.m_idLocalPlayer == m_remotePlayerID)
+        && g_pChitin->cNetwork.m_bConnectionEstablished == TRUE) {
+        CMessage* message = new CMessageSpriteEquipment(this, m_id, m_id);
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+    }
+
+    for (BYTE nButton = 0; nButton < 8; nButton++) {
+        SetQuickWeapon(nButton, CButtonData());
+        SetQuickWeapon(nButton, static_cast<BYTE>(0));
+    }
+
+    for (BYTE nButton = 0; nButton < 3; nButton++) {
+        SetQuickItem(nButton, CButtonData());
+    }
+
+    pGame->GetObjectArray()->ReleaseDeny(nGroundPile,
+        CGameObjectArray::THREAD_ASYNCH,
+        INFINITE);
+
+    return ACTION_DONE;
+}

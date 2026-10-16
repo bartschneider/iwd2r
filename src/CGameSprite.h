@@ -619,6 +619,7 @@ public:
     void sub_6F50A0();
     void sub_6F5330();
     static CString GetRaceString(BYTE nRace);
+    SHORT DropInventory(BOOLEAN bCriticalOnly, CString sException);
     BOOL CheckIfUsedUp(SHORT nSlot, SHORT nAbility);
     void sub_761AB0(CGameSprite* target);
     void sub_755A70(CSpell* pSpell, const SPELL_ABILITY* pAbility, const CPoint& ptTarget);

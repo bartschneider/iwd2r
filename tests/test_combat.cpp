@@ -5,8 +5,10 @@
 #include "CBaldurChitin.h"
 #include "CCreatureFile.h"
 #include "CGameArea.h"
+#include "CGameContainer.h"
 #include "CGameEffect.h"
 #include "CGameSprite.h"
+#include "CGameSpriteEquipment.h"
 #include "CInfGame.h"
 #include "CItem.h"
 #include "CMessage.h"
@@ -483,6 +485,87 @@ TEST_CASE("combat: a party member melees a goblin in AR1000 until it dies and ca
     // Magic Missile does 1d4+1 at the first caster levels.
     CHECK(pTarget->GetBaseStats()->m_hitPoints < targetStart);
     CHECK(pTarget->GetBaseStats()->m_hitPoints >= targetStart - 5);
+}
+
+// DropInventory (0x754EE0), as a dying goblin drops its loot: every
+// droppable item but the excepted one and the gold (as MISC07) go onto its
+// ground pile; the fist stays.
+TEST_CASE("combat: DropInventory puts a goblin's droppable items and gold on its ground pile", "[combat][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    Fight fight;
+    std::string why;
+    if (!SetUpFight(fight, why)) {
+        if (why.find("CHR") != std::string::npos) {
+            SKIP("[iwd2r-skip] " + why);
+        }
+        FAIL(why);
+    }
+    CGameSprite* pGoblin = fight.pGoblin;
+    CGameSpriteEquipment* pEquipment = pGoblin->GetEquipment();
+
+    std::vector<CString> droppable;
+    CString sKept;
+    for (SHORT nSlot = 0; nSlot < CGameSpriteEquipment::NUM_SLOT; nSlot++) {
+        CItem* pItem = pEquipment->m_items[nSlot];
+        if (nSlot == CGameSpriteEquipment::SLOT_FIST || pItem == NULL || (pItem->GetFlagsFile() & 0x4) == 0) {
+            continue;
+        }
+        if (sKept.IsEmpty()) {
+            // The first droppable item is the exception: it stays.
+            sKept = pItem->GetResRef().GetResRefStr();
+        } else {
+            droppable.push_back(pItem->GetResRef().GetResRefStr());
+        }
+    }
+    INFO("droppable " << droppable.size() << ", kept " << static_cast<const char*>(sKept));
+    pGoblin->GetBaseStats()->m_gold = 7;
+
+    CHECK(pGoblin->DropInventory(FALSE, sKept) == CGameAIBase::ACTION_DONE);
+    // The pile takes the items through CMessageContainerAddItem.
+    g_pBaldurChitin->GetMessageHandler()->AsynchronousUpdate();
+
+    LONG nPile = g_pBaldurChitin->GetObjectGame()->GetGroundPile(pGoblin->GetId());
+    REQUIRE(nPile != CGameObjectArray::INVALID_INDEX);
+    CGameContainer* pPile;
+    REQUIRE(g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(nPile, CGameObjectArray::THREAD_ASYNCH,
+                reinterpret_cast<CGameObject**>(&pPile), INFINITE)
+        == CGameObjectArray::SUCCESS);
+    std::vector<CString> onPile;
+    WORD nGold = 0;
+    for (SHORT nSlot = 0; nSlot < pPile->GetNumItems(); nSlot++) {
+        CItem* pItem = pPile->GetItem(nSlot);
+        if (pItem == NULL) {
+            continue;
+        }
+        if (pItem->GetResRef() == "MISC07") {
+            nGold = pItem->GetUsageCount(0);
+        } else {
+            onPile.push_back(pItem->GetResRef().GetResRefStr());
+        }
+    }
+    g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(nPile, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+
+    CHECK(onPile.size() == droppable.size());
+    CHECK(nGold == 7);
+    CHECK(pGoblin->GetBaseStats()->m_gold == 0);
+    bool kept = false;
+    for (SHORT nSlot = 0; nSlot < CGameSpriteEquipment::NUM_SLOT; nSlot++) {
+        CItem* pItem = pEquipment->m_items[nSlot];
+        if (pItem != NULL && nSlot != CGameSpriteEquipment::SLOT_FIST && (pItem->GetFlagsFile() & 0x4) != 0) {
+            CHECK(pItem->GetResRef() == static_cast<const char*>(sKept));
+            kept = true;
+        }
+    }
+    CHECK(kept == !sKept.IsEmpty());
+    CHECK(pEquipment->m_items[CGameSpriteEquipment::SLOT_FIST] != NULL);
+    ClearMessages();
 }
 
 TEST_CASE("combat: GetAC sums the armour class modifiers and the capped dexterity bonus", "[combat][data]")
