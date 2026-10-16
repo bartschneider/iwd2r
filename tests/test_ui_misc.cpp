@@ -817,3 +817,185 @@ TEST_CASE("toolbar: a selected character's buttons and weapon set reach the acti
     pSprite->m_nWeaponSet = nSavedSet;
     pGame->SelectToolbar();
 }
+
+namespace {
+
+// The world screen with game input on (CGameSave::m_mode bit 0), the
+// party member selected and its toolbar (state 114) shown.
+CScreenWorld* WorldWithInput(CGameSprite* pSprite)
+{
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    if (pGame->GetGroup()->GetCount() == 0) {
+        pGame->SelectCharacter(pSprite->GetId(), FALSE);
+    }
+    pGame->SelectToolbar();
+    pGame->GetGameSave()->m_mode = 0x1;
+    CScreenWorld* pWorld = g_pBaldurChitin->m_pEngineWorld;
+    pWorld->m_bCtrlKeyDown = FALSE;
+    pWorld->m_bShiftKeyDown = FALSE;
+    pWorld->field_EA4 = -1;
+    return pWorld;
+}
+
+void PressKey(CScreenWorld* pWorld, BYTE nKey)
+{
+    pWorld->m_pVirtualKeysFlags[0] = nKey;
+    pWorld->OnKeyDown(1);
+}
+
+}
+
+// OnKeyDown (0x6872D0), the keymap's customize keys (0x688D2A, 0x688E17,
+// 0x6890E2, 0x689146, 0x6891B9): when the toolbar has no button of the
+// key's type, the key opens that type's list through
+// CInfButtonArray::sub_594170 (keymap 19: type 10, state 106; keymap 13:
+// type 5, state 115). With the button there, the key presses it.
+TEST_CASE("world keys: a customize key opens its list when the bar lacks the button", "[uimisc][worldkeys][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    CGameSprite* pSprite = PartyMember();
+    if (pSprite == NULL) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    const DWORD nMode = pGame->GetGameSave()->m_mode;
+    CScreenWorld* pWorld = WorldWithInput(pSprite);
+    CInfButtonArray* pButtonArray = pGame->GetButtonArray();
+    REQUIRE(pButtonArray->m_nState == 114);
+
+    // VK_F13 is in no raw key case: the keymap decides. Keymap 19 (type
+    // 10) and 13 (type 5) get it in turn; no lower entry has it.
+    const BYTE nKey = 0x7C;
+    BYTE savedKeys[CINFGAME_KEYMAP_SIZE];
+    BOOLEAN savedFlags[CINFGAME_KEYMAP_SIZE];
+    memcpy(savedKeys, pGame->m_pKeymap, sizeof(savedKeys));
+    memcpy(savedFlags, pGame->m_pKeymapFlags, sizeof(savedFlags));
+    for (int n = 0; n < CINFGAME_KEYMAP_SIZE; n++) {
+        if (pGame->m_pKeymap[n] == nKey)
+            pGame->m_pKeymap[n] = 0;
+    }
+
+    INT savedTypes[12];
+    memcpy(savedTypes, pButtonArray->m_buttonTypes, sizeof(savedTypes));
+    for (int n = 0; n < 12; n++) {
+        pButtonArray->m_buttonTypes[n] = 1;
+    }
+    REQUIRE(pButtonArray->GetButtonId(10) == 0xFF);
+
+    pGame->m_pKeymap[19] = nKey;
+    pGame->m_pKeymapFlags[19] = FALSE;
+    PressKey(pWorld, nKey);
+    CHECK(pButtonArray->m_nState == 106);
+
+    // Holding Ctrl, the entry does not match.
+    pGame->SelectToolbar();
+    for (int n = 0; n < 12; n++) {
+        pButtonArray->m_buttonTypes[n] = 1;
+    }
+    pWorld->m_bCtrlKeyDown = TRUE;
+    PressKey(pWorld, nKey);
+    CHECK(pButtonArray->m_nState == 114);
+    pWorld->m_bCtrlKeyDown = FALSE;
+
+    pGame->m_pKeymap[19] = 0;
+    pGame->m_pKeymap[13] = nKey;
+    pGame->m_pKeymapFlags[13] = FALSE;
+    PressKey(pWorld, nKey);
+    CHECK(pButtonArray->m_nState == 115);
+
+    memcpy(pGame->m_pKeymap, savedKeys, sizeof(savedKeys));
+    memcpy(pGame->m_pKeymapFlags, savedFlags, sizeof(savedFlags));
+    memcpy(pButtonArray->m_buttonTypes, savedTypes, sizeof(savedTypes));
+    pGame->GetGameSave()->m_mode = nMode;
+    pGame->SelectToolbar();
+}
+
+// Escape ends a targeting state (the action bar's reset, the cursor back),
+// the arrows set the visible area's key scroll, and without game input the
+// keys reach none of these.
+TEST_CASE("world keys: Escape and the arrows act with game input only", "[uimisc][worldkeys][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    CGameSprite* pSprite = PartyMember();
+    if (pSprite == NULL) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    const DWORD nMode = pGame->GetGameSave()->m_mode;
+    CScreenWorld* pWorld = WorldWithInput(pSprite);
+    CGameArea* pArea = pGame->GetVisibleArea();
+    REQUIRE(pArea != NULL);
+
+    pGame->m_nState = 2;
+    pGame->m_cButtonArray.m_nSelectedButton = 5;
+    pGame->m_tempCursor = 0;
+    PressKey(pWorld, VK_ESCAPE);
+    CHECK(pGame->m_nState == 0);
+    CHECK(pGame->m_cButtonArray.m_nSelectedButton == 100);
+    CHECK(pGame->m_tempCursor == 4);
+
+    const LONG nScroll = pArea->m_nKeyScrollState;
+    PressKey(pWorld, VK_LEFT);
+    CHECK(pArea->m_nKeyScrollState == 7);
+    PressKey(pWorld, VK_NUMPAD9);
+    CHECK(pArea->m_nKeyScrollState == 2);
+    PressKey(pWorld, VK_DOWN);
+    CHECK(pArea->m_nKeyScrollState == 5);
+
+    // Without game input (a dialog, a cut scene) the arrows do nothing.
+    pGame->GetGameSave()->m_mode = 0;
+    PressKey(pWorld, VK_UP);
+    CHECK(pArea->m_nKeyScrollState == 5);
+    pGame->m_nState = 2;
+    PressKey(pWorld, VK_ESCAPE);
+    CHECK(pGame->m_nState == 2);
+
+    pGame->m_nState = 0;
+    pArea->m_nKeyScrollState = nScroll;
+    pGame->GetGameSave()->m_mode = nMode;
+}
+
+// The keymap's first entry (I by default) opens the inventory
+// (OnLeftPanelButtonClick 5 on the active engine).
+TEST_CASE("world keys: the inventory key opens the inventory", "[uimisc][worldkeys][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    CGameSprite* pSprite = PartyMember();
+    if (pSprite == NULL) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    const DWORD nMode = pGame->GetGameSave()->m_mode;
+    CScreenWorld* pWorld = WorldWithInput(pSprite);
+
+    REQUIRE(pGame->GetKeymap(0) == 'I');
+    REQUIRE(pGame->GetKeymapFlag(0) == 0);
+    CWarp* pPrevious = g_pBaldurChitin->pActiveEngine;
+    g_pBaldurChitin->pActiveEngine = pWorld;
+    PressKey(pWorld, 'I');
+    CHECK(g_pBaldurChitin->pActiveEngine == g_pBaldurChitin->m_pEngineInventory);
+
+    g_pBaldurChitin->pActiveEngine = pPrevious;
+    pGame->GetGameSave()->m_mode = nMode;
+}

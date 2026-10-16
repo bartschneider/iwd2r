@@ -8,12 +8,14 @@
 #include "CInfCursor.h"
 #include "CInfGame.h"
 #include "CScreenChapter.h"
+#include "CScreenCharacter.h"
 #include "CScreenConnection.h"
 #include "CScreenInventory.h"
 #include "CScreenLoad.h"
 #include "CScreenMap.h"
 #include "CScreenSinglePlayer.h"
 #include "CScreenWorldMap.h"
+#include "CUIControlFactory.h"
 #include "CUIControlTextDisplay.h"
 #include "CUIPanel.h"
 #include "CUtil.h"
@@ -585,6 +587,927 @@ void CScreenWorld::EngineGameInit()
         }
     }
     m_deathSoundList.RemoveAll();
+}
+
+// 0x6872D0
+void CScreenWorld::OnKeyDown(SHORT nKeysFlags)
+{
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+    // NOTE: Unused.
+    CAITrigger trigger(CAITrigger::NO_TRIGGER, 0);
+
+    if ((pGame->GetGameSave()->m_mode & 0x1) == 0) {
+        // Without game input (a dialog, a cut scene): the tool tips, the
+        // screenshot, the dialog's buttons and the reply numbers.
+        for (SHORT nKeyFlag = 0; nKeyFlag < nKeysFlags; nKeyFlag++) {
+            BYTE nKey = m_pVirtualKeysFlags[nKeyFlag];
+
+            if ((pGame->GetGameSave()->m_mode & 0x2) != 0
+                && m_cUIManager.OnKeyDown(nKey)) {
+                continue;
+            }
+
+            if (nKey == VK_TAB) {
+                CGameArea* pArea = pGame->GetVisibleArea();
+                const CPoint& ptPointer = g_pChitin->m_ptPointer;
+                if (pArea->m_iPicked != CGameObjectArray::INVALID_INDEX
+                    || ptPointer.x < pArea->GetInfinity()->rViewPort.left
+                    || ptPointer.x >= pArea->GetInfinity()->rViewPort.right
+                    || ptPointer.y < pArea->GetInfinity()->rViewPort.top
+                    || ptPointer.y >= pArea->GetInfinity()->rViewPort.bottom) {
+                    m_cUIManager.ForceToolTip();
+                }
+                continue;
+            }
+
+            if (nKey == VK_SNAPSHOT) {
+                g_pBaldurChitin->GetCurrentVideoMode()->PrintScreen();
+                continue;
+            }
+
+            if (nKey == VK_RETURN) {
+                CUIControlButton* pButton = static_cast<CUIControlButton*>(m_cUIManager.GetPanel(9)->GetControl(0));
+                if (pButton->m_bActive) {
+                    if (GetTickCount() > field_11BA + 600) {
+                        pButton->OnLButtonClick(CPoint(0, 0));
+                        field_11BA = GetTickCount();
+                    }
+                    continue;
+                }
+            }
+
+            if (nKey == pGame->m_pKeymap[24]
+                && pGame->m_pKeymapFlags[24] == m_bCtrlKeyDown) {
+                // NOTE: 0x694510 (the multiplayer chat's panel) returns at
+                // once without a network session (ADR 0002); not called.
+                sub_693710();
+                continue;
+            }
+
+            // A number picks the dialog's reply of that number.
+            LONG nDialogPanel = -1;
+            if (m_pActiveDialogDisplay != NULL && m_pActiveDialogDisplay->m_pPanel != NULL) {
+                nDialogPanel = m_pActiveDialogDisplay->m_pPanel->m_nID;
+            }
+
+            if (((nKey >= '1' && nKey <= '9') || (nKey >= VK_NUMPAD1 && nKey <= VK_NUMPAD9))
+                && g_pBaldurChitin->m_pEngineWorld->m_bInControlOfDialog
+                && (nDialogPanel == static_cast<LONG>(GetPanel_21_7())
+                    || nDialogPanel == static_cast<LONG>(GetPanel_21_0())
+                    || nDialogPanel == static_cast<LONG>(GetPanel_19_0()))) {
+                CScreenWorld* pWorld = g_pBaldurChitin->m_pEngineWorld;
+                CGameDialogEntry* pEntry = pWorld->m_internalLoadedDialog.m_dialogEntries[pWorld->m_internalLoadedDialog.m_currentEntryIndex];
+
+                SHORT nNumber;
+                if (nKey >= '1' && nKey <= '9') {
+                    nNumber = nKey - '0';
+                } else {
+                    nNumber = nKey - '`';
+                }
+
+                for (SHORT nReply = 0; nReply < pEntry->GetSize(); nReply++) {
+                    if (pEntry->GetAt(nReply)->m_displayListId == nNumber) {
+                        if (GetTickCount() > field_11BA + 600) {
+                            g_pBaldurChitin->m_pEngineWorld->m_internalLoadedDialog.m_responseMarker = nReply;
+                            field_11BA = GetTickCount();
+                        }
+                        break;
+                    }
+                }
+            }
+
+            if (m_cUIManager.m_bHidden) {
+                continue;
+            }
+
+            // NOTE: The original walks one-entry tables of panels and
+            // controls.
+            if (nKey == VK_NEXT) {
+                CUIPanel* pPanel = m_cUIManager.GetPanel(19);
+                if (pPanel->m_bActive) {
+                    CUIControlBase* pControl = pPanel->GetControl(0);
+                    if (pControl->m_bActive) {
+                        pControl->OnLButtonUp(pControl->m_ptOrigin);
+                    }
+                }
+            }
+
+            if (nKey == VK_PRIOR) {
+                CUIPanel* pPanel = m_cUIManager.GetPanel(21);
+                if (pPanel->m_bActive) {
+                    CUIControlBase* pControl = pPanel->GetControl(0);
+                    if (pControl->m_bActive) {
+                        pControl->OnLButtonUp(pControl->m_ptOrigin);
+                    }
+                }
+            }
+        }
+
+        return;
+    }
+
+    for (SHORT nKeyFlag = 0; nKeyFlag < nKeysFlags; nKeyFlag++) {
+        if ((pGame->GetGameSave()->m_mode & 0x2) != 0
+            && m_cUIManager.OnKeyDown(m_pVirtualKeysFlags[nKeyFlag])) {
+            continue;
+        }
+
+        BYTE nKey = m_pVirtualKeysFlags[nKeyFlag];
+
+        // Scripts see the key (the HotKey trigger).
+        CAITrigger hotKey(CAITRIGGER_HOTKEY, nKey);
+        pGame->m_group.AddTrigger(hotKey);
+
+        if (field_156 && m_bCtrlKeyDown && nKey != pGame->m_pKeymap[22]) {
+            // TODO: Incomplete. 0x68956A-0x68BC5D: the cheat keys (Ctrl
+            // with `field_156`, which ours never sets) for the party leader
+            // and the area; the original returns after one.
+            return;
+        }
+
+        CGameSprite* pSprite;
+        BYTE nButtonId;
+
+        switch (nKey) {
+        case VK_SNAPSHOT:
+            g_pBaldurChitin->GetCurrentVideoMode()->PrintScreen();
+            break;
+        case VK_ESCAPE:
+            if (field_EA4 == -1) {
+                if (pGame->m_nState != 0) {
+                    pGame->m_nState = 0;
+                    pGame->m_cButtonArray.m_nSelectedButton = 100;
+                    pGame->m_cButtonArray.UpdateState();
+                    pGame->m_tempCursor = 4;
+                } else if (pGame->m_cButtonArray.field_19B2 != 0) {
+                    pGame->m_cButtonArray.m_nSelectedButton = 100;
+                    pGame->m_cButtonArray.ResetState();
+                } else {
+                    g_pBaldurChitin->GetActiveEngine()->OnLeftPanelButtonClick(9);
+                }
+                break;
+            }
+            // FALLTHROUGH
+        case VK_RETURN:
+            if (field_EA4 == -1) {
+                break;
+            }
+
+            if (field_EA4 == static_cast<int>(GetPanel_21_7())) {
+                // The dialog's continue or end.
+                field_1150 = 1;
+                if (!field_10B4) {
+                    m_internalLoadedDialog.m_responseMarker = field_10B2;
+                }
+                break;
+            }
+
+            switch (field_EA4) {
+            case 0:
+            case 7:
+            case 17:
+            case 19:
+            case 21:
+            case 22:
+                break;
+            case 6:
+                StopCommand();
+                field_EA4 = -1;
+                break;
+            case 8:
+                StopContainer();
+                field_EA4 = -1;
+                break;
+            default:
+                // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenWorld.cpp
+                // __LINE__: 5469
+                UTIL_ASSERT(FALSE);
+            }
+            break;
+        case VK_TAB:
+            if (pGame->m_cOptions.m_bCheatsEnabled && m_bCtrlKeyDown) {
+                // The command line.
+                if (!m_cUIManager.m_bHidden) {
+                    field_F37 = ~field_F37;
+                    if (field_F37 != 0) {
+                        StartCommand();
+                        CUIControlEditLua* pEdit = static_cast<CUIControlEditLua*>(m_cUIManager.GetPanel(6)->GetControl(0));
+                        pEdit->field_8A6 = 0;
+                        pEdit->field_8A2 = CGameObjectArray::INVALID_INDEX;
+                    } else if (field_EA4 == 6) {
+                        StopCommand();
+                    }
+                }
+            } else {
+                CGameArea* pArea = pGame->GetVisibleArea();
+                const CPoint& ptPointer = g_pChitin->m_ptPointer;
+                if (pArea->m_iPicked != CGameObjectArray::INVALID_INDEX
+                    || ptPointer.x < pArea->GetInfinity()->rViewPort.left
+                    || ptPointer.x >= pArea->GetInfinity()->rViewPort.right
+                    || ptPointer.y < pArea->GetInfinity()->rViewPort.top
+                    || ptPointer.y >= pArea->GetInfinity()->rViewPort.bottom) {
+                    m_cUIManager.ForceToolTip();
+                    pArea->m_nToolTip = pArea->m_pGame->m_cOptions.m_nTooltips;
+                }
+            }
+            break;
+        case VK_SPACE:
+            TogglePauseGame(1, 1, 0);
+            break;
+        case VK_NEXT:
+            if (!m_cUIManager.m_bHidden) {
+                CUIPanel* pPanel = m_cUIManager.GetPanel(19);
+                if (pPanel->m_bActive) {
+                    CUIControlBase* pControl = pPanel->GetControl(0);
+                    if (pControl->m_bActive) {
+                        pControl->OnLButtonUp(pControl->m_ptOrigin);
+                    }
+                }
+            }
+            break;
+        case VK_PRIOR:
+            if (!m_cUIManager.m_bHidden) {
+                CUIPanel* pPanel = m_cUIManager.GetPanel(21);
+                if (pPanel->m_bActive) {
+                    CUIControlBase* pControl = pPanel->GetControl(0);
+                    if (pControl->m_bActive) {
+                        pControl->OnLButtonUp(pControl->m_ptOrigin);
+                    }
+                }
+            }
+            break;
+        case VK_F1:
+        case VK_F2:
+        case VK_F3:
+        case VK_F4:
+        case VK_F5:
+        case VK_F6:
+        case VK_F7:
+        case VK_F8:
+        case VK_F9:
+        case VK_F10:
+        case VK_F11:
+        case VK_F12:
+            // The action bar's buttons.
+            if (m_cUIManager.GetPanel(1)->m_bActive) {
+                if (m_bShiftKeyDown) {
+                    pGame->m_cButtonArray.OnRButtonPressed(nKey - VK_F1);
+                } else {
+                    pGame->m_cButtonArray.OnLButtonPressed(nKey - VK_F1);
+                }
+            }
+            break;
+        case '1':
+        case '2':
+        case '3':
+        case '4':
+        case '5':
+        case '6':
+            if (pGame->m_nState == 0) {
+                // NOTE: Uninline (GetCharacterId).
+                if (pGame->m_group.GetCount() == 1
+                    && pGame->GetCharacterId(nKey - '1') == pGame->m_group.GetGroupLeader()) {
+                    pGame->OnPortraitLDblClick(nKey - '1');
+                } else {
+                    if (!m_bCtrlKeyDown && !m_bShiftKeyDown) {
+                        pGame->UnselectAll();
+                    }
+                    pGame->SelectCharacter(pGame->GetCharacterId(nKey - '1'), TRUE);
+                    pGame->SelectToolbar();
+                }
+            } else {
+                // The character is the target of the action under way.
+                if (pGame->GetObjectArray()->GetShare(pGame->GetCharacterId(nKey - '1'),
+                        CGameObjectArray::THREAD_ASYNCH,
+                        reinterpret_cast<CGameObject**>(&pSprite),
+                        INFINITE)
+                    == CGameObjectArray::SUCCESS) {
+                    CGameArea* pArea = pGame->GetVisibleArea();
+                    if (pArea == pSprite->GetArea()) {
+                        if (pGame->m_nState == 1) {
+                            pArea->OnActionButtonClickGround(pSprite->GetPos());
+                        } else {
+                            pSprite->OnActionButton(pSprite->GetPos());
+                        }
+                    }
+
+                    pGame->GetObjectArray()->ReleaseShare(pGame->GetCharacterId(nKey - '1'),
+                        CGameObjectArray::THREAD_ASYNCH,
+                        INFINITE);
+                }
+            }
+            break;
+        case VK_NUMPAD1:
+            pGame->GetVisibleArea()->m_nKeyScrollState = 6;
+            break;
+        case VK_DOWN:
+        case VK_NUMPAD2:
+            pGame->GetVisibleArea()->m_nKeyScrollState = 5;
+            break;
+        case VK_NUMPAD3:
+            pGame->GetVisibleArea()->m_nKeyScrollState = 4;
+            break;
+        case VK_LEFT:
+        case VK_NUMPAD4:
+            pGame->GetVisibleArea()->m_nKeyScrollState = 7;
+            break;
+        case VK_RIGHT:
+        case VK_NUMPAD6:
+            pGame->GetVisibleArea()->m_nKeyScrollState = 3;
+            break;
+        case VK_NUMPAD7:
+            pGame->GetVisibleArea()->m_nKeyScrollState = 8;
+            break;
+        case VK_UP:
+        case VK_NUMPAD8:
+            pGame->GetVisibleArea()->m_nKeyScrollState = 1;
+            break;
+        case VK_NUMPAD9:
+            pGame->GetVisibleArea()->m_nKeyScrollState = 2;
+            break;
+        default: {
+            // The keymap (Keymap.ini): the first entry with this key and
+            // the Ctrl state.
+            SHORT index;
+            for (index = 0; index < CINFGAME_KEYMAP_SIZE; index++) {
+                // NOTE: Uninline.
+                if (pGame->GetKeymap(index) == nKey
+                    && pGame->GetKeymapFlag(index) == static_cast<BYTE>(m_bCtrlKeyDown)) {
+                    break;
+                }
+            }
+
+            if (index >= CINFGAME_KEYMAP_SIZE) {
+                break;
+            }
+
+            switch (index) {
+            case 0:
+                g_pBaldurChitin->GetActiveEngine()->OnLeftPanelButtonClick(5);
+                break;
+            case 1:
+                g_pBaldurChitin->GetActiveEngine()->OnLeftPanelButtonClick(8);
+                break;
+            case 2:
+                g_pBaldurChitin->GetActiveEngine()->OnLeftPanelButtonClick(0);
+                break;
+            case 3:
+                g_pBaldurChitin->GetActiveEngine()->OnLeftPanelButtonClick(6);
+                break;
+            case 4:
+                g_pBaldurChitin->GetActiveEngine()->OnLeftPanelButtonClick(7);
+                break;
+            case 5:
+                g_pBaldurChitin->GetActiveEngine()->OnLeftPanelButtonClick(4);
+                break;
+            case 6:
+                g_pBaldurChitin->GetActiveEngine()->OnLeftPanelButtonClick(9);
+                break;
+            case 7:
+                g_pBaldurChitin->GetActiveEngine()->OnLeftPanelButtonClick(13);
+                break;
+            case 8:
+                if (m_cUIManager.GetPanel(1)->m_bActive) {
+                    nButtonId = pGame->GetButtonArray()->GetButtonId(7);
+                    if (nButtonId != 0xFF) {
+                        pGame->GetButtonArray()->OnLButtonPressed(nButtonId);
+                    }
+                }
+                break;
+            case 9:
+                if (m_cUIManager.GetPanel(1)->m_bActive) {
+                    nButtonId = pGame->GetButtonArray()->GetButtonId(13);
+                    if (nButtonId == 0xFF) {
+                        // Open the list first (button type 5), then press.
+                        nButtonId = pGame->GetButtonArray()->GetButtonId(5);
+                        if (nButtonId == 0xFF) {
+                            break;
+                        }
+                        pGame->GetButtonArray()->OnLButtonPressed(nButtonId);
+                        nButtonId = pGame->GetButtonArray()->GetButtonId(13);
+                        if (nButtonId == 0xFF) {
+                            break;
+                        }
+                    }
+                    pGame->GetButtonArray()->OnLButtonPressed(nButtonId);
+                }
+                break;
+            case 10:
+                if (m_cUIManager.GetPanel(1)->m_bActive) {
+                    nButtonId = pGame->GetButtonArray()->GetButtonId(2);
+                    if (nButtonId != 0xFF) {
+                        if (m_bShiftKeyDown) {
+                            pGame->GetButtonArray()->OnRButtonPressed(nButtonId);
+                        } else {
+                            pGame->GetButtonArray()->OnLButtonPressed(nButtonId);
+                        }
+                    }
+                }
+                break;
+            case 11:
+                if (m_cUIManager.GetPanel(1)->m_bActive) {
+                    nButtonId = pGame->GetButtonArray()->GetButtonId(3);
+                    if (nButtonId != 0xFF) {
+                        pGame->GetButtonArray()->OnLButtonPressed(nButtonId);
+                    } else {
+                        // The customize state's key.
+                        pGame->GetButtonArray()->sub_594170(3);
+                    }
+                }
+                break;
+            case 12:
+                if (m_cUIManager.GetPanel(1)->m_bActive) {
+                    nButtonId = pGame->GetButtonArray()->GetButtonId(14);
+                    if (nButtonId != 0xFF) {
+                        pGame->GetButtonArray()->OnLButtonPressed(nButtonId);
+                    } else {
+                        pGame->GetButtonArray()->sub_594170(14);
+                    }
+                }
+                break;
+            case 13:
+                if (m_cUIManager.GetPanel(1)->m_bActive) {
+                    nButtonId = pGame->GetButtonArray()->GetButtonId(5);
+                    if (nButtonId != 0xFF) {
+                        pGame->GetButtonArray()->OnLButtonPressed(nButtonId);
+                    } else {
+                        pGame->GetButtonArray()->sub_594170(5);
+                    }
+                }
+                break;
+            case 14:
+            case 15:
+            case 16: {
+                if (m_cUIManager.GetPanel(1)->m_bActive) {
+                    INT nButtonType;
+                    switch (index) {
+                    case 14:
+                        nButtonType = 12;
+                        break;
+                    case 15:
+                        nButtonType = 11;
+                        break;
+                    default:
+                        nButtonType = 4;
+                        break;
+                    }
+
+                    nButtonId = pGame->GetButtonArray()->GetButtonId(nButtonType);
+                    if (nButtonId == 0xFF) {
+                        // Open the list first (button type 5), then press.
+                        nButtonId = pGame->GetButtonArray()->GetButtonId(5);
+                        if (nButtonId == 0xFF) {
+                            break;
+                        }
+                        pGame->GetButtonArray()->OnLButtonPressed(nButtonId);
+                        nButtonId = pGame->GetButtonArray()->GetButtonId(nButtonType);
+                        if (nButtonId == 0xFF) {
+                            break;
+                        }
+                    }
+                    pGame->GetButtonArray()->OnLButtonPressed(nButtonId);
+                }
+                break;
+            }
+            case 17:
+                if (m_cUIManager.GetPanel(1)->m_bActive) {
+                    nButtonId = pGame->GetButtonArray()->GetButtonId(15);
+                    if (nButtonId != 0xFF) {
+                        pGame->GetButtonArray()->OnLButtonPressed(nButtonId);
+                    }
+                }
+                break;
+            case 18:
+                if (m_cUIManager.GetPanel(1)->m_bActive) {
+                    nButtonId = pGame->GetButtonArray()->GetButtonId(8);
+                    if (nButtonId != 0xFF) {
+                        pGame->GetButtonArray()->OnLButtonPressed(nButtonId);
+                    } else {
+                        pGame->GetButtonArray()->OnLButtonPressed(1);
+                    }
+                }
+                break;
+            case 19:
+                if (m_cUIManager.GetPanel(1)->m_bActive) {
+                    nButtonId = pGame->GetButtonArray()->GetButtonId(10);
+                    if (nButtonId != 0xFF) {
+                        pGame->GetButtonArray()->OnLButtonPressed(nButtonId);
+                    } else {
+                        pGame->GetButtonArray()->sub_594170(10);
+                    }
+                }
+                break;
+            case 20:
+                if (m_cUIManager.GetPanel(1)->m_bActive) {
+                    if (pGame->GetObjectArray()->GetDeny(pGame->GetGroup()->GetGroupLeader(),
+                            CGameObjectArray::THREAD_ASYNCH,
+                            reinterpret_cast<CGameObject**>(&pSprite),
+                            INFINITE)
+                        == CGameObjectArray::SUCCESS) {
+                        pSprite->EquipMostDamagingMelee();
+
+                        pGame->GetObjectArray()->ReleaseDeny(pGame->GetGroup()->GetGroupLeader(),
+                            CGameObjectArray::THREAD_ASYNCH,
+                            INFINITE);
+                    }
+                }
+                break;
+            case 21:
+                if (m_cUIManager.GetPanel(1)->m_bActive) {
+                    if (pGame->GetObjectArray()->GetDeny(pGame->GetGroup()->GetGroupLeader(),
+                            CGameObjectArray::THREAD_ASYNCH,
+                            reinterpret_cast<CGameObject**>(&pSprite),
+                            INFINITE)
+                        == CGameObjectArray::SUCCESS) {
+                        // TODO: Incomplete. 0x6893E8 calls CGameSprite
+                        // 0x75E150 (the ranged weapon's selection), not
+                        // ported.
+
+                        pGame->GetObjectArray()->ReleaseDeny(pGame->GetGroup()->GetGroupLeader(),
+                            CGameObjectArray::THREAD_ASYNCH,
+                            INFINITE);
+                    }
+                }
+                break;
+            case 22:
+                // Quick load.
+                if (g_pChitin->cNetwork.GetServiceProvider() == CNetwork::SERV_PROV_NULL
+                    && pGame->SaveGameExists(CInfGame::QUICK_SAVE_NAME)) {
+                    pGame->DestroyGame(TRUE, FALSE);
+                    pGame->m_sSaveGame = CInfGame::QUICK_SAVE_NAME;
+                    CScreenCharacter::SAVE_NAME = CInfGame::QUICK_SAVE_NAME;
+                    pGame->LoadGame(TRUE, FALSE);
+                    g_pBaldurChitin->GetObjectGame()->MultiplayerSetCharacterCreationLocation();
+                    pGame->SetupCharacters(FALSE);
+
+                    for (INT nSlot = 0; nSlot < 6; nSlot++) {
+                        if (pGame->GetCharacterSlot(nSlot) != CGameObjectArray::INVALID_INDEX) {
+                            pGame->GetMultiplayerSettings()->SignalCharacterStatus(nSlot,
+                                CMultiplayerSettings::CHARSTATUS_SIGNAL_IMPORTED,
+                                TRUE,
+                                TRUE);
+                        } else {
+                            pGame->GetMultiplayerSettings()->SignalCharacterStatus(nSlot,
+                                CMultiplayerSettings::CHARSTATUS_SIGNAL_DELETED,
+                                TRUE,
+                                TRUE);
+                        }
+                    }
+
+                    if (pGame->m_bGameLoaded == TRUE) {
+                        EngineActivated();
+                    }
+                }
+                break;
+            case 23:
+                // Hide or show the interface.
+                m_nAutoHideInterface = 0;
+                m_nAutoUnhideInterface = 0;
+                if (m_cUIManager.m_bHidden) {
+                    UnhideInterface();
+                } else {
+                    HideInterface();
+                    m_cUIManager.ClearTooltip();
+                }
+                break;
+            case 24:
+                // NOTE: 0x694510 (the multiplayer chat's panel) returns at
+                // once without a network session (ADR 0002); not called.
+                sub_693710();
+                break;
+            case 25: {
+                // The pointer's area position.
+                CString sText;
+                CString sArea;
+                CPoint ptWorld = pGame->GetVisibleArea()->GetInfinity()->GetWorldCoordinates(g_pChitin->m_ptPointer);
+                sText.Format("Mouse Position: x=%ld, y=%ld  ", ptWorld.x, ptWorld.y);
+                pGame->GetVisibleArea()->m_resRef.CopyToString(sArea);
+                sText += " Area: " + sArea;
+                DisplayText(CString(""), sText, -1, FALSE);
+                break;
+            }
+            case 26: {
+                // Quick save.
+                STR_RES strRes;
+                STRREF strError;
+                if (pGame->CanSaveGame(strError, FALSE, FALSE)) {
+                    pGame->BackupQuickSave();
+                    pGame->m_sSaveGame = CInfGame::QUICK_SAVE_NAME;
+                    CScreenCharacter::SAVE_NAME = CInfGame::QUICK_SAVE_NAME;
+
+                    if (g_pChitin->cNetwork.GetServiceProvider() == CNetwork::SERV_PROV_NULL) {
+                        pGame->field_366E = 1;
+                        pGame->field_50DC = 0;
+
+                        if (!g_pChitin->cVideo.Is3dAccelerated()) {
+                            if (!pGame->field_50D8) {
+                                pGame->SynchronousUpdate();
+                            }
+                            pGame->field_50D8 = TRUE;
+                        }
+                    }
+
+                    if (pGame->SaveGame(TRUE, FALSE, TRUE)) {
+                        strError = 10237;
+                        g_pBaldurChitin->GetTlkTable().Fetch(strError, strRes);
+                        DisplayText(CString(""),
+                            strRes.szText,
+                            0,
+                            RGB(63, 255, 12),
+                            -1,
+                            FALSE);
+                    }
+
+                    // NOTE: The inner block cannot run: it needs the flag
+                    // the outer test found set.
+                    if (g_pChitin->cNetwork.GetServiceProvider() == CNetwork::SERV_PROV_NULL
+                        && g_pChitin->cVideo.Is3dAccelerated()) {
+                        pGame->field_366E = 1;
+                        pGame->field_50DC = 1;
+
+                        if (!g_pChitin->cVideo.Is3dAccelerated()) {
+                            if (!pGame->field_50D8) {
+                                pGame->SynchronousUpdate();
+                            }
+                            pGame->field_50D8 = TRUE;
+                        }
+                    }
+                } else {
+                    g_pBaldurChitin->GetTlkTable().Fetch(strError, strRes);
+                    DisplayText(CString(""),
+                        strRes.szText,
+                        0,
+                        RGB(63, 255, 12),
+                        -1,
+                        FALSE);
+                }
+                break;
+            }
+            case 27: {
+                CUIControlButton* pButton = static_cast<CUIControlButton*>(m_cUIManager.GetPanel(GetPanel_22_0())->GetControl(14));
+                pButton->OnLButtonClick(CPoint(0, 0));
+                break;
+            }
+            case 28: {
+                // Cycle the action bar and the portraits: both shown, the
+                // portraits hidden, the action bar hidden.
+                CUIPanel* pLeftPanel = m_cUIManager.GetPanel(1);
+                CUIPanel* pBottomPanel = m_cUIManager.GetPanel(GetPanel_22_0());
+                if (pLeftPanel == NULL || pBottomPanel == NULL) {
+                    // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenWorld.cpp
+                    // __LINE__: 2094
+                    UTIL_ASSERT(FALSE);
+                }
+
+                if (g_pBaldurChitin->field_4A24
+                    && !m_cUIManager.m_bHidden
+                    && !m_cUIManager.GetPanel(8)->m_bActive) {
+                    CRect rViewSize;
+                    if (m_waitingOnResize) {
+                        rViewSize = m_newViewSize;
+                    } else if (pGame->GetVisibleArea() != NULL) {
+                        CopyRect(&rViewSize, &(pGame->GetVisibleArea()->GetInfinity()->rViewPort));
+                    } else {
+                        rViewSize = CInfinity::stru_8E79B8;
+                    }
+
+                    LONG nBottom;
+                    if (field_11F0 && field_11F4) {
+                        field_11F0 = 0;
+                        pLeftPanel->m_bActive = FALSE;
+                        field_11F8 = rViewSize.bottom;
+                        nBottom = CInfinity::stru_8E79E0.bottom;
+                    } else if (!field_11F0 && field_11F4) {
+                        field_11F4 = 0;
+                        field_11F0 = 1;
+                        pLeftPanel->m_bActive = TRUE;
+                        pBottomPanel->m_bActive = FALSE;
+                        // NOTE: Uninline (0x68BFA0, 0x68BFD0).
+                        pLeftPanel->m_ptOrigin = pLeftPanel->m_ptBaseOrigin + CPoint(0, pBottomPanel->m_size.cy);
+                        field_11FC = rViewSize.bottom;
+                        nBottom = CInfinity::stru_8E79C8.bottom;
+                    } else {
+                        field_11F4 = 1;
+                        field_11F0 = 1;
+                        // NOTE: Uninline (0x68BFC0).
+                        pBottomPanel->m_bActive = TRUE;
+                        pBottomPanel->SetActive(TRUE);
+                        pLeftPanel->m_ptOrigin = pLeftPanel->m_ptBaseOrigin + CPoint(0, 0);
+                        nBottom = field_11F8;
+                    }
+
+                    m_cUIManager.InvalidateRect(NULL);
+                    CInfinity::stru_8E79B8.bottom = nBottom;
+                    SetNewViewSize(CRect(rViewSize.left, rViewSize.top, rViewSize.right, nBottom), FALSE);
+                }
+                break;
+            }
+            case 29:
+                OnRestButtonClick();
+                break;
+            case 30: {
+                CGameSprite::SHOW_CHARACTER_HP = !CGameSprite::SHOW_CHARACTER_HP;
+                for (SHORT nPortrait = 0; nPortrait < pGame->GetNumCharacters(); nPortrait++) {
+                    pGame->UpdatePortrait(nPortrait, 1);
+                }
+
+                // NOTE: The original formats the value with _itoa(value,
+                // buf, 10).
+                CString sValue;
+                sValue.Format("%d", CGameSprite::SHOW_CHARACTER_HP);
+                WritePrivateProfileStringA("Game Options",
+                    "Show Character HP",
+                    sValue,
+                    g_pBaldurChitin->GetIniFileName());
+                break;
+            }
+            case 31:
+                // The formation buttons: right click the selected one.
+                if (m_cUIManager.GetPanel(1)->m_bActive && pGame->GetGroup()->GetCount() > 1) {
+                    CInfButtonArray* pButtonArray = pGame->GetButtonArray();
+                    for (INT nButtonType = 16; nButtonType <= 20; nButtonType++) {
+                        nButtonId = pGame->GetButtonArray()->GetButtonId(nButtonType);
+                        if (nButtonId != 0xFF && pButtonArray->m_buttonArray[nButtonId].field_1CC == 1) {
+                            pGame->GetButtonArray()->OnRButtonPressed(nButtonId);
+                            break;
+                        }
+                    }
+                }
+                break;
+            case 32:
+            case 33:
+            case 34: {
+                // Select a pair of characters (1-2, 3-4, 5-6), or open the
+                // first's sheet when the pair alone is selected already.
+                SHORT nFirst = static_cast<SHORT>(2 * (index - 32));
+                if (pGame->m_nCharacters > nFirst) {
+                    INT nCount = min(pGame->m_nCharacters - nFirst, 2);
+                    if (pGame->m_group.GetCount() == nCount) {
+                        LONG* pGroupList = pGame->m_group.GetGroupList();
+                        BYTE nMember = 0;
+                        while (nMember < pGame->m_group.GetCount()
+                            && pGroupList[nMember] == pGame->GetCharacterId(nFirst + nMember)) {
+                            nMember++;
+                        }
+
+                        // NOTE: The original leaks the group list.
+                        if (nMember == pGame->m_group.GetCount()) {
+                            delete[] pGroupList;
+                            pGame->OnPortraitLDblClick(nFirst);
+                            break;
+                        }
+                        delete[] pGroupList;
+                    }
+
+                    if (!m_bCtrlKeyDown && !m_bShiftKeyDown) {
+                        pGame->UnselectAll();
+                    }
+                    pGame->SelectCharacter(pGame->GetCharacterId(nFirst), TRUE);
+                    if (pGame->m_nCharacters > nFirst + 1) {
+                        pGame->SelectCharacter(pGame->GetCharacterId(nFirst + 1), FALSE);
+                    }
+                    pGame->SelectToolbar();
+                }
+                break;
+            }
+            case 35:
+            case 36: {
+                // Select a triple (1-3, 4-6), as the pairs.
+                SHORT nFirst = static_cast<SHORT>(3 * (index - 35));
+                if (pGame->m_nCharacters > nFirst) {
+                    INT nCount = min(pGame->m_nCharacters - nFirst, 3);
+                    if (pGame->m_group.GetCount() == nCount) {
+                        LONG* pGroupList = pGame->m_group.GetGroupList();
+                        BYTE nMember = 0;
+                        while (nMember < pGame->m_group.GetCount()
+                            && pGroupList[nMember] == pGame->GetCharacterId(nFirst + nMember)) {
+                            nMember++;
+                        }
+
+                        // NOTE: The original leaks the group list.
+                        if (nMember == pGame->m_group.GetCount()) {
+                            delete[] pGroupList;
+                            pGame->OnPortraitLDblClick(nFirst);
+                            break;
+                        }
+                        delete[] pGroupList;
+                    }
+
+                    if (!m_bCtrlKeyDown && !m_bShiftKeyDown) {
+                        pGame->UnselectAll();
+                    }
+                    pGame->SelectCharacter(pGame->GetCharacterId(nFirst), TRUE);
+                    if (pGame->m_nCharacters > nFirst + 1) {
+                        pGame->SelectCharacter(pGame->GetCharacterId(nFirst + 1), FALSE);
+                    }
+                    if (pGame->m_nCharacters > nFirst + 2) {
+                        pGame->SelectCharacter(pGame->GetCharacterId(nFirst + 2), FALSE);
+                    }
+                    pGame->SelectToolbar();
+                }
+                break;
+            }
+            case 37:
+                // Select everyone, or open the first's sheet when everyone
+                // is selected already.
+                if (pGame->m_group.GetCount() == pGame->m_nCharacters) {
+                    LONG* pGroupList = pGame->m_group.GetGroupList();
+                    BYTE nMember = 0;
+                    while (nMember < pGame->m_group.GetCount()
+                        && pGroupList[nMember] == pGame->GetCharacterId(nMember)) {
+                        nMember++;
+                    }
+
+                    // NOTE: The original leaks the group list.
+                    delete[] pGroupList;
+
+                    if (nMember == pGame->m_group.GetCount()) {
+                        pGame->OnPortraitLDblClick(0);
+                        break;
+                    }
+                }
+                pGame->SelectAll(TRUE);
+                break;
+            case 38:
+            case 39:
+            case 40:
+                // The first, second or third shown button of types 70-78.
+                if (m_cUIManager.GetPanel(1)->m_bActive) {
+                    INT nSkip = index - 38;
+                    for (INT nButtonType = 70; nButtonType <= 78; nButtonType++) {
+                        nButtonId = pGame->GetButtonArray()->GetButtonId(nButtonType);
+                        if (nButtonId != 0xFF) {
+                            if (nSkip-- == 0) {
+                                if (m_bShiftKeyDown) {
+                                    pGame->GetButtonArray()->OnRButtonPressed(nButtonId);
+                                } else {
+                                    pGame->GetButtonArray()->OnLButtonPressed(nButtonId);
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+                break;
+            case 41:
+            case 42:
+            case 43:
+            case 44:
+                // The quick spells: open the list of button 1, then press.
+                if (m_cUIManager.GetPanel(1)->m_bActive) {
+                    pGame->GetButtonArray()->OnRButtonPressed(1);
+                    if (!m_bShiftKeyDown) {
+                        pGame->GetButtonArray()->OnLButtonPressed(3 * index - 123);
+                    }
+                }
+                break;
+            case 45:
+            case 46:
+            case 47: {
+                if (m_cUIManager.GetPanel(1)->m_bActive) {
+                    INT nButtonType = index + 35;
+                    nButtonId = pGame->GetButtonArray()->GetButtonId(nButtonType);
+                    if (nButtonId == 0xFF) {
+                        // The customize state's key.
+                        pGame->GetButtonArray()->sub_594170(nButtonType);
+                    } else if (m_bShiftKeyDown) {
+                        pGame->GetButtonArray()->OnRButtonPressed(nButtonId);
+                    } else {
+                        pGame->GetButtonArray()->OnLButtonPressed(nButtonId);
+                    }
+                }
+                break;
+            }
+            case 48:
+            case 49:
+            case 50:
+            case 51:
+            case 52:
+                // The formations.
+                if (m_cUIManager.GetPanel(1)->m_bActive) {
+                    nButtonId = pGame->GetButtonArray()->GetButtonId(index - 32);
+                    if (nButtonId != 0xFF) {
+                        if (m_bShiftKeyDown) {
+                            pGame->GetButtonArray()->OnRButtonPressed(nButtonId);
+                        } else {
+                            pGame->GetButtonArray()->OnLButtonPressed(nButtonId);
+                        }
+                    }
+                }
+                break;
+            default:
+                // TODO: Incomplete. 0x6893FD-0x689502: the keymap's spell
+                // keys (53 to 371) cast the entry's spell (0x8B4EB0) through
+                // the leader's CGameSprite 0x719180, not ported; the
+                // original first checks the action bar's button type 3 and
+                // ends the modal state.
+                break;
+            }
+            break;
+        }
+        }
+    }
 }
 
 // 0x5D72C0
