@@ -11,10 +11,18 @@ of the install, waits for its window and executes the actions with genuine
 Windows input: SetCursorPos and SendInput for the mouse, SendInput with
 virtual-key and scan codes for keys. `shot NAME` captures the screen with
 System.Drawing (NAME-screen.png) and asks the engine for its framebuffer
-(NAME.png) through the IWD2R_CONTROL_DIR channel. `wait N` lasts N/30 s and
-until the engine has presented N frames (the same channel). `quit` posts
-WM_CLOSE to the game window, what its title bar's close button does, and
-confirms the engine's message box with Return.
+(NAME.png) through the IWD2R_CONTROL_DIR channel; `checkpoint NAME` asks it
+for a state dump (checkpoint-NAME.json). `wait N` lasts N/30 s and until the
+engine has presented N frames (the same channel). `quit` posts WM_CLOSE to
+the game window, what its title bar's close button does, and confirms the
+engine's message box with Return.
+
+Input reaches the game only while its window is the foreground window: SDL
+drops the click that activates a window, and the engine stops polling input
+while it is inactive (CChitin::OnAltTab). Before the game starts the driver
+disables the sandbox's logon task that took the foreground about 30 s after
+logon (Quiet-Logon); while the scenario runs it watches the foreground and
+fails the run when another process took it.
 
 The results folder receives driver.log, log.txt (the game's output),
 exitcode.txt (the game's exit code), error.txt (only when the driver
@@ -86,11 +94,20 @@ public static class IwdInput {
 
     delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
+    public class ForegroundChange {
+        public string Time;
+        public uint Pid;
+        public string Window;
+    }
+
     [DllImport("user32.dll", SetLastError = true)]
     static extern uint SendInput(uint count, INPUT[] inputs, int size);
     [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr hWnd, ref POINT point);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+    [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int size);
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hWnd, uint msg, IntPtr w, IntPtr l);
     [DllImport("user32.dll")] static extern uint MapVirtualKey(uint code, uint mapType);
@@ -135,6 +152,59 @@ public static class IwdInput {
         if (!ClientToScreen(hWnd, ref p))
             throw new InvalidOperationException("ClientToScreen failed");
         return p;
+    }
+
+    // "0xHWND CLASS 'TITLE' pid N", or "none".
+    public static string Describe(IntPtr hWnd) {
+        if (hWnd == IntPtr.Zero)
+            return "none";
+        uint pid;
+        GetWindowThreadProcessId(hWnd, out pid);
+        StringBuilder name = new StringBuilder(256);
+        GetClassName(hWnd, name, name.Capacity);
+        StringBuilder title = new StringBuilder(256);
+        GetWindowText(hWnd, title, title.Capacity);
+        return string.Format("0x{0:x} {1} '{2}' pid {3}", hWnd.ToInt64(), name, title, pid);
+    }
+
+    // Every change of the foreground window, polled every 2 ms on a thread
+    // of its own, so a window that holds the foreground for a few
+    // milliseconds is seen too.
+    static System.Collections.Concurrent.ConcurrentQueue<ForegroundChange> changes =
+        new System.Collections.Concurrent.ConcurrentQueue<ForegroundChange>();
+    static System.Threading.Thread watcher;
+
+    public static void WatchForeground() {
+        if (watcher != null)
+            return;
+        watcher = new System.Threading.Thread(delegate() {
+            IntPtr last = IntPtr.Zero;
+            while (true) {
+                IntPtr now = GetForegroundWindow();
+                if (now != last) {
+                    last = now;
+                    ForegroundChange change = new ForegroundChange();
+                    change.Time = DateTime.Now.ToString("HH:mm:ss.fff");
+                    uint pid = 0;
+                    if (now != IntPtr.Zero)
+                        GetWindowThreadProcessId(now, out pid);
+                    change.Pid = pid;
+                    change.Window = Describe(now);
+                    changes.Enqueue(change);
+                }
+                System.Threading.Thread.Sleep(2);
+            }
+        });
+        watcher.IsBackground = true;
+        watcher.Start();
+    }
+
+    public static ForegroundChange[] ForegroundChanges() {
+        List<ForegroundChange> list = new List<ForegroundChange>();
+        ForegroundChange change;
+        while (changes.TryDequeue(out change))
+            list.Add(change);
+        return list.ToArray();
     }
 
     // The visible top-level windows of a process, optionally of one class.
@@ -227,9 +297,56 @@ public static class IwdAudio {
 $script:game = $null
 $script:window = [IntPtr]::Zero
 $script:baseline = @()
+# The scenario line being executed, and whether foreground changes count:
+# from the first action until quit.
+$script:line = 0
+$script:watching = $false
+$script:focusLosses = New-Object System.Collections.Generic.List[string]
+
+# Logs the foreground changes the watcher saw since the last call. While the
+# scenario runs, a window of another process taking the foreground counts as
+# a focus loss: input sent meanwhile may not have reached the game.
+function Watch-Foreground {
+    foreach ($c in [IwdInput]::ForegroundChanges()) {
+        Log "  foreground at $($c.Time): $($c.Window)"
+        if ($script:watching -and $c.Pid -ne 0 -and $c.Pid -ne [uint32]$script:game.Id) {
+            $script:focusLosses.Add("line $($script:line): $($c.Window) at $($c.Time)")
+        }
+    }
+}
+
+# Windows Sandbox's scheduled task \Microsoft\Windows\Registry\rgnupdt-run
+# has a logon trigger and runs rgnupdt.exe about 30 s after logon. Its
+# console window takes the foreground for some 30 ms; a click then is lost,
+# and it was the Gender click in character generation. The task and its
+# rgnupdt-cleanup twin are disabled before the game starts, and an instance
+# already running is waited for.
+function Quiet-Logon {
+    $tasks = @()
+    try {
+        $tasks = @(Get-ScheduledTask -TaskPath '\Microsoft\Windows\Registry\' -ErrorAction Stop |
+            Where-Object { $_.TaskName -like 'rgnupdt*' })
+    } catch {
+        Log "no logon tasks to disable: $_"
+    }
+    foreach ($t in $tasks) {
+        try {
+            $null = Disable-ScheduledTask -InputObject $t -ErrorAction Stop
+            Log "disabled scheduled task $($t.TaskPath)$($t.TaskName)"
+        } catch {
+            Log "could not disable $($t.TaskPath)$($t.TaskName): $_"
+        }
+    }
+    $running = @(Get-Process -Name 'rgnupdt' -ErrorAction SilentlyContinue)
+    if ($running.Count -gt 0) {
+        Log 'waiting for rgnupdt.exe to finish'
+        $running | Wait-Process -Timeout 30 -ErrorAction SilentlyContinue
+    }
+}
 
 function Check {
     if ($DryRun) { return }
+    Watch-Foreground
     if ($script:game.HasExited) { throw [System.OperationCanceledException]::new('game exited') }
     if ((Get-Date) -gt $deadline) { throw "scenario timeout ($($cfg.timeout) s)" }
 }
@@ -337,7 +454,9 @@ function Refresh-Window {
         $script:window = $ids[0]
         Log ('  game window is now 0x{0:x}' -f $script:window.ToInt64())
     }
-    [void][IwdInput]::SetForegroundWindow($script:window)
+    if (-not [IwdInput]::SetForegroundWindow($script:window)) {
+        Log ('  SetForegroundWindow refused; the foreground is ' + [IwdInput]::Describe([IwdInput]::GetForegroundWindow()))
+    }
 }
 
 function Press-Key($action) {
@@ -374,6 +493,14 @@ function Engine-Shot([string]$name) {
     Log "  wrote $name.png"
 }
 
+function State-Dump([string]$name) {
+    Request "state-$name.req" 60
+    if (-not [System.IO.File]::Exists((Join-Path $cfg.results "checkpoint-$name.json"))) {
+        throw "engine wrote no checkpoint-$name.json"
+    }
+    Log "  wrote checkpoint-$name.json"
+}
+
 function Quit-Game {
     while ($true) {
         Refresh-Window
@@ -401,6 +528,7 @@ function Describe($a) {
         'wait' { "wait $($a.frames)" }
         'key' { if ($a.shift) { "key SHIFT+$($a.key)" } else { "key $($a.key)" } }
         'shot' { "shot $($a.name)" }
+        'checkpoint' { "checkpoint $($a.name)" }
         'quit' { 'quit' }
         default { "$($a.op) $($a.x) $($a.y)" }
     }
@@ -416,6 +544,7 @@ function Do-Action($a) {
             }
             'key' { Log ('  would SendInput VK 0x{0:X2} (extended {1}, shift {2})' -f [int]$a.vk, $a.extended, $a.shift) }
             'shot' { Log "  would capture the screen to $($a.name)-screen.png and request $($a.name).png" }
+            'checkpoint' { Log "  would request checkpoint-$($a.name).json" }
             'quit' { Log '  would post WM_CLOSE and confirm the dialog with Return' }
             default { throw "unknown action $($a.op)" }
         }
@@ -438,7 +567,8 @@ function Do-Action($a) {
         }
         'key' { Refresh-Window; Press-Key $a }
         'shot' { Screen-Shot $a.name; Engine-Shot $a.name }
-        'quit' { Quit-Game }
+        'checkpoint' { State-Dump $a.name }
+        'quit' { Watch-Foreground; $script:watching = $false; Quit-Game }
         default { throw "unknown action $($a.op)" }
     }
 }
@@ -474,6 +604,8 @@ try {
         $env:IWD2R_SHOT_DIR = $cfg.results
         $env:IWD2R_CONTROL_DIR = $cfg.control
         Remove-Item Env:IWD2R_SCRIPT -ErrorAction SilentlyContinue
+        Quiet-Logon
+        [IwdInput]::WatchForeground()
         $script:game = Start-Process -FilePath $cfg.exe -WorkingDirectory $cfg.data -PassThru -NoNewWindow `
             -RedirectStandardOutput (Join-Path $cfg.results 'log.txt') `
             -RedirectStandardError (Join-Path $cfg.results 'stderr.txt')
@@ -482,18 +614,26 @@ try {
         Find-Window
     }
     try {
+        $script:watching = -not $DryRun
         foreach ($a in $actions) {
+            $script:line = $a.line
             Log "line $($a.line): $(Describe $a)"
             Do-Action $a
         }
         Log 'scenario finished'
     } catch [System.OperationCanceledException] {
         Log 'game exited'
+    } finally {
+        if (-not $DryRun) { Watch-Foreground }
+        $script:watching = $false
     }
     if (-not $DryRun) {
         $left = [Math]::Max(1, ($deadline - (Get-Date)).TotalMilliseconds)
         if (-not $script:game.WaitForExit([int]$left)) { throw "scenario timeout ($($cfg.timeout) s)" }
         $exitCode = $script:game.ExitCode
+        if ($script:focusLosses.Count -gt 0) {
+            throw ("the game lost the foreground {0} time(s) while the scenario ran, so input may have missed it; first {1}" -f $script:focusLosses.Count, $script:focusLosses[0])
+        }
     }
 } catch {
     $errorText = "$_"

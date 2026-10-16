@@ -53,7 +53,10 @@ BOX_RESULTS = r'C:\iwd2r\results'
 BOX_TOOLS = r'C:\iwd2r\tools'
 
 MEMORY_MB = 4096
-DONE_TIMEOUT = 300
+# Seconds the host allows on top of a scenario's timeout (which the driver
+# enforces inside) for the sandbox to boot and start the driver, before it
+# gives up on done.txt.
+SANDBOX_ALLOWANCE = 120
 CLOSE_TIMEOUT = 30
 
 
@@ -454,7 +457,7 @@ def run_scenario(exe, game_cache, actions, overrides, scenario, run_dir,
     shutil.copy2(wsb, os.path.join(run_dir, 'run.wsb'))
     try:
         start_sandbox(host_run, wsb, log)
-        wait_done(results, DONE_TIMEOUT)
+        wait_done(results, timeout + SANDBOX_ALLOWANCE)
         code_text = read_text(os.path.join(results, 'exitcode.txt'))
         if code_text.lstrip('-').isdigit():
             result['code'] = int(code_text)
