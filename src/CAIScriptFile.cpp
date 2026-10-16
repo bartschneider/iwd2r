@@ -450,8 +450,10 @@ SHORT CAIScriptFile::ParseTrigger(CString sData)
         constFile = GetConstFile(GetParameter(2, triggerIdLine));
         specifics = ParseInt(element, constFile);
 
+        // The last parameter without the closing bracket (0x41212A-0x412151):
+        // an IDS name ("Intimidate)") would not be found with it.
         restOfLine = ReadAfterChar(restOfLine, ',');
-        element = ReadToChar(restOfLine, ',');
+        element = restOfLine.Left(restOfLine.GetLength() - 1);
 
         if (element.IsEmpty()) {
             // FIXME: Typo - should be "Third".

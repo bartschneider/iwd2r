@@ -1,6 +1,9 @@
 #define NOMINMAX
 #include <catch2/catch_test_macros.hpp>
 
+#include "CAICondition.h"
+#include "CAIScriptFile.h"
+#include "CAITrigger.h"
 #include "CBaldurChitin.h"
 #include "CButtonData.h"
 #include "CChitin.h"
@@ -1145,6 +1148,38 @@ TEST_CASE("world keys: the inventory key opens the inventory", "[uimisc][worldke
     g_pBaldurChitin->pActiveEngine = pPrevious;
     pGame->GetWorldTimer()->m_active = bTimeActive;
     pGame->GetGameSave()->m_mode = nMode;
+}
+
+// CAIScriptFile::ParseTrigger (0x410B40), an object and two numbers
+// (TRIGGER.IDS 0x40E7 CheckSkillGT(O:Object*,I:Value*,I:SkillNum*Skills)):
+// the last one is read without the closing bracket (0x41212A-0x412151), so
+// an IDS name resolves. Brogan's Intimidate reply (10BROGAN state 7) asks
+// for it; it used to keep the bracket and read 0.
+TEST_CASE("dialog script: a trigger's last number is found by its IDS name", "[uimisc][script][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+
+    CAIScriptFile scriptFile;
+    scriptFile.ParseConditionalString(CString("CheckSkillGT(Protagonist, 0, Intimidate)\n"));
+    INFO(static_cast<const char*>(scriptFile.m_errors));
+    REQUIRE(scriptFile.m_curCondition->m_triggerList.GetCount() == 1);
+    CAITrigger* pTrigger = scriptFile.m_curCondition->m_triggerList.GetHead();
+    CHECK(pTrigger->m_triggerID == 0x40E7);
+    CHECK(pTrigger->m_specificID == 0);
+    CHECK(pTrigger->m_specific2 == 7); // SKILLS.IDS: 7 Intimidate
+
+    // A number as before.
+    scriptFile.ParseConditionalString(CString("CheckSkillLT(Protagonist, 1, 4)\n"));
+    REQUIRE(scriptFile.m_curCondition->m_triggerList.GetCount() == 1);
+    pTrigger = scriptFile.m_curCondition->m_triggerList.GetHead();
+    CHECK(pTrigger->m_triggerID == 0x40E8);
+    CHECK(pTrigger->m_specificID == 1);
+    CHECK(pTrigger->m_specific2 == 4);
 }
 
 // The text character sheet's lines (0x5EF760): the label over a row of
