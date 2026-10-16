@@ -120,6 +120,13 @@ public:
     void OnDoneButtonClick();
     BOOL OnCancelButtonClick();
     void sub_5E4560();
+    CString sub_5EFFD0(BYTE& bSuccess);
+    static char* sub_5EF760(const CString& sLabel, const CString& sValue, BYTE bIndent);
+    static void sub_5EF920(FILE* file, const CString& sLabel, const CString& sValue, BYTE bIndent);
+    static void sub_5EF9E0(FILE* file, const CString& sLabel, INT nValue, BYTE bIndent);
+    static void sub_5EFAA0(FILE* file, const CString& sLabel, const char* format, INT nValue, BYTE bIndent);
+    static void sub_5EFB60(FILE* file, STRREF strDescription);
+    static void sub_5EFCC0(FILE* file, CItem* pItem, BYTE bEquipped, BYTE bDescription);
     void OnInformationButtonClick();
     void OnBiographyButtonClick();
     void OnCustomizeBiographyButtonClick();

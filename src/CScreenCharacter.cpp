@@ -24,6 +24,10 @@
 #include "CUtil.h"
 #include "IcewindMisc.h"
 #include "msvc_atol.h"
+#include "path_hook.h"
+
+#include <cstdio>
+#include <cstring>
 
 #define FEAT_COUNT CGAMESPRITE_FEAT_NUMFEATS
 #define FEAT_SLOTS 9
@@ -5843,9 +5847,30 @@ BOOL CScreenCharacter::OnCancelButtonClick()
 // 0x5E4560
 void CScreenCharacter::sub_5E4560()
 {
-    // TODO: Incomplete. The character record export (with 0x5EFFD0) is
-    // blocked on the same CGameSprite helpers as UpdateEquipmentInformation
-    // (0x723EA0, 0x73CF10, 0x73D080) and CItem 0x4E9840.
+    // Writes the text character sheet and says so in the world screen's
+    // messages, the file's short name first.
+    BYTE bSuccess;
+    CString sFileName = sub_5EFFD0(bSuccess);
+
+    if (bSuccess) {
+        STR_RES strRes;
+        g_pBaldurChitin->GetTlkTable().Fetch(16801, strRes); // "Text character sheet saved."
+        g_pBaldurChitin->m_pEngineWorld->DisplayText(sFileName,
+            strRes.szText,
+            RGB(200, 255, 200),
+            RGB(200, 255, 200),
+            -1,
+            FALSE);
+    } else {
+        STR_RES strRes;
+        g_pBaldurChitin->GetTlkTable().Fetch(16802, strRes); // "Error writing text character sheet."
+        g_pBaldurChitin->m_pEngineWorld->DisplayText(sFileName,
+            strRes.szText,
+            RGB(255, 0, 0),
+            RGB(255, 0, 0),
+            -1,
+            FALSE);
+    }
 }
 
 // 0x5E46C0
@@ -10591,6 +10616,1234 @@ void CUIControlTextDisplayCharacterSoundSounds::OnItemSelected(LONG lMarker)
     UTIL_ASSERT(pCharacter != NULL);
 
     pCharacter->OnSoundItemSelect(lMarker);
+}
+
+// -----------------------------------------------------------------------------
+
+// The character sheet export's line buffer.
+//
+// 0x8F2B28
+static char byte_8F2B28[1000];
+
+// 0x5EF760
+char* CScreenCharacter::sub_5EF760(const CString& sLabel, const CString& sValue, BYTE bIndent)
+{
+    // A line of the text character sheet: the label over a row of dots, the
+    // value, a new line; indented lines have a shorter row behind three
+    // spaces. Returns a static buffer.
+    //
+    // NOTE: The original copies the label over the dots without a length
+    // check (_mbsnbcpy); a label longer than the row would run past it.
+    if (!bIndent) {
+        strcpy(byte_8F2B28, "L............................ ");
+        strncpy(byte_8F2B28, sLabel, sLabel.GetLength());
+        strcat(byte_8F2B28, sValue);
+        strcat(byte_8F2B28, "\n");
+        return byte_8F2B28;
+    }
+
+    char szLine[1000];
+    strcpy(szLine, "L......................... ");
+    strncpy(szLine, sLabel, sLabel.GetLength());
+    strcat(szLine, sValue);
+    strcat(szLine, "\n");
+    strcpy(byte_8F2B28, "   ");
+    strcat(byte_8F2B28, szLine);
+    return byte_8F2B28;
+}
+
+// 0x5EF920
+void CScreenCharacter::sub_5EF920(FILE* file, const CString& sLabel, const CString& sValue, BYTE bIndent)
+{
+    CString sFormattedLabel;
+    CString sFormattedValue;
+    sFormattedLabel.Format("%s", (LPCSTR)sLabel);
+    sFormattedValue.Format("%s", (LPCSTR)sValue);
+    fputs(sub_5EF760(sFormattedLabel, sFormattedValue, bIndent), file);
+}
+
+// 0x5EF9E0
+void CScreenCharacter::sub_5EF9E0(FILE* file, const CString& sLabel, INT nValue, BYTE bIndent)
+{
+    CString sFormattedLabel;
+    CString sFormattedValue;
+    sFormattedLabel.Format("%s", (LPCSTR)sLabel);
+    sFormattedValue.Format("%d", nValue);
+    fputs(sub_5EF760(sFormattedLabel, sFormattedValue, bIndent), file);
+}
+
+// 0x5EFAA0
+void CScreenCharacter::sub_5EFAA0(FILE* file, const CString& sLabel, const char* format, INT nValue, BYTE bIndent)
+{
+    CString sFormattedLabel;
+    CString sFormattedValue;
+    sFormattedLabel.Format("%s", (LPCSTR)sLabel);
+    sFormattedValue.Format(format, nValue);
+    fputs(sub_5EF760(sFormattedLabel, sFormattedValue, bIndent), file);
+}
+
+// 0x5EFB60
+void CScreenCharacter::sub_5EFB60(FILE* file, STRREF strDescription)
+{
+    // An item's description in lines of at most 70 characters, broken at
+    // its new lines or its last space.
+    CString sText = CString("     ") + FetchString(strDescription);
+
+    INT nLength = sText.GetLength();
+    INT nStart = 0;
+    while (nStart < nLength) {
+        CString sLine = sText.Mid(nStart, 70);
+
+        INT nEnd = sLine.Find('\n');
+        if (nEnd == -1) {
+            if (sLine.GetLength() < 70) {
+                fputs(sLine, file);
+                break;
+            }
+
+            nEnd = sLine.ReverseFind(' ');
+            if (nEnd == -1) {
+                // NOTE: Without a space in the 70 characters the original
+                // writes '\0' before the string's data (SetAt(-1)) and then
+                // writes the same piece forever (the start does not move).
+                // Ours writes the piece whole and goes on after it (ruling
+                // P4-10).
+                fprintf(file, "%s\n", (LPCSTR)sLine);
+                nStart += sLine.GetLength();
+                continue;
+            }
+        }
+
+        sLine.SetAt(nEnd, '\0');
+        fprintf(file, "%s\n", (LPCSTR)sLine);
+        nStart += nEnd + 1;
+    }
+}
+
+// 0x5EFCC0
+void CScreenCharacter::sub_5EFCC0(FILE* file, CItem* pItem, BYTE bEquipped, BYTE bDescription)
+{
+    // An item's line: its name, the uses when more than one, "NOT
+    // IDENTIFIED" (17108) unidentified, a star equipped; then its
+    // description when asked.
+    WORD nUses = pItem->GetUsageCount(0);
+    if (nUses < 2) {
+        if ((pItem->m_flags & 0x1) == 0) {
+            if (!bEquipped) {
+                fprintf(file,
+                    "-- %s - %s\n",
+                    (LPCSTR)FetchString(pItem->GetGenericName()),
+                    (LPCSTR)FetchString(17108));
+            } else {
+                fprintf(file,
+                    "-- %s - %s *\n",
+                    (LPCSTR)FetchString(pItem->GetGenericName()),
+                    (LPCSTR)FetchString(17108));
+            }
+        } else if (!bEquipped) {
+            fprintf(file, "-- %s\n", (LPCSTR)FetchString(pItem->GetGenericName()));
+        } else {
+            fprintf(file, "-- %s *\n", (LPCSTR)FetchString(pItem->GetGenericName()));
+        }
+    } else if ((pItem->m_flags & 0x1) == 0) {
+        if (!bEquipped) {
+            fprintf(file,
+                "-- %s (%d) - %s\n",
+                (LPCSTR)FetchString(pItem->GetGenericName()),
+                nUses,
+                (LPCSTR)FetchString(17108));
+        } else {
+            fprintf(file,
+                "-- %s (%d) - %s *\n",
+                (LPCSTR)FetchString(pItem->GetGenericName()),
+                nUses,
+                (LPCSTR)FetchString(17108));
+        }
+    } else if (!bEquipped) {
+        fprintf(file, "-- %s (%d)\n", (LPCSTR)FetchString(pItem->GetGenericName()), nUses);
+    } else {
+        fprintf(file, "-- %s (%d) *\n", (LPCSTR)FetchString(pItem->GetGenericName()), nUses);
+    }
+
+    if (bDescription) {
+        sub_5EFB60(file, pItem->GetDescription());
+        fputs("\n\n\n", file);
+    }
+}
+
+// 0x5EFFD0
+CString CScreenCharacter::sub_5EFFD0(BYTE& bSuccess)
+{
+    // The text character sheet: <save root>\<SAVE_NAME>\<name>.txt with the
+    // selected character's identity, abilities, attacks, armour class,
+    // skills, saving throws, bonuses, resistances, spells and items. Returns
+    // the file's short name for the message.
+    //
+    // NOTE: The original writes most lines with the bodies of 0x5EF920 and
+    // 0x5EF9E0 inlined (two CString formats and 0x5EF760); ours calls them.
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    const CRuleTables& rule = pGame->GetRuleTables();
+
+    // NOTE: Uninline.
+    LONG nCharacterId = pGame->GetCharacterId(static_cast<SHORT>(m_nSelectedCharacter));
+
+    CGameSprite* pSprite;
+    BYTE rc;
+    do {
+        rc = pGame->GetObjectArray()->GetShare(nCharacterId,
+            CGameObjectArray::THREAD_ASYNCH,
+            reinterpret_cast<CGameObject**>(&pSprite),
+            INFINITE);
+    } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+    if (rc != CGameObjectArray::SUCCESS) {
+        bSuccess = FALSE;
+        return CString();
+    }
+
+    CCreatureFileHeader* pBStats = pSprite->GetBaseStats();
+    CAIObjectType* pType = &(pSprite->m_startTypeAI);
+    CDerivedStats* pDStats = pSprite->GetDerivedStats();
+
+    CString sName(pSprite->GetName());
+    if (pBStats->m_name != -1) {
+        sName = FetchString(pBStats->m_name);
+    }
+
+    // A file name cannot hold these.
+    for (INT nIndex = 0; nIndex < sName.GetLength(); nIndex++) {
+        char ch = sName[nIndex];
+        if (ch == '\\' || ch == '/' || ch == ':' || ch == '*' || ch == '?' || ch == '<' || ch == '>' || ch == '|') {
+            sName.SetAt(nIndex, '_');
+        }
+    }
+
+    // NOTE: The path is resolved for the platform's file system.
+    FILE* file = fopen(compat::ResolvePath(pGame->GetDirSaveRoot() + SAVE_NAME + "\\" + sName + ".txt").c_str(), "wt");
+    CString sResult = CString("...\\") + SAVE_NAME + "\\" + sName + ".txt ";
+
+    if (file == NULL) {
+        bSuccess = FALSE;
+        pGame->GetObjectArray()->ReleaseShare(nCharacterId,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+        return sResult;
+    }
+
+    CString sValue;
+    CString sValue2;
+
+    // Identity.
+    sub_5EF920(file, FetchString(1047), sName, FALSE); // "Name"
+    fputs("\n", file);
+
+    STRREF strGender;
+    switch (pType->m_nGender) {
+    case 1:
+        strGender = 1050; // "Male"
+        break;
+    case 2:
+        strGender = 1051; // "Female"
+        break;
+    case 3:
+        strGender = 8260; // "other"
+        break;
+    case 4:
+        strGender = 8261; // "neither"
+        break;
+    case 5:
+        strGender = 8262; // "both"
+        break;
+    default:
+        strGender = -1;
+        break;
+    }
+    sub_5EF920(file, FetchString(12135), FetchString(strGender), FALSE); // "Gender"
+
+    rule.GetRaceStringMixed(pType->m_nRace, sValue, pType->m_nSubRace);
+    sub_5EF920(file, FetchString(1048), sValue, FALSE); // "Race"
+
+    STRREF strAlignment;
+    switch (pType->m_nAlignment) {
+    case 0:
+        strAlignment = -1;
+        break;
+    case 0x11:
+        strAlignment = 1102; // "Lawful Good"
+        break;
+    case 0x12:
+        strAlignment = 1104; // "Lawful Neutral"
+        break;
+    case 0x13:
+        strAlignment = 1103; // "Lawful Evil"
+        break;
+    case 0x21:
+        strAlignment = 1105; // "Neutral Good"
+        break;
+    case 0x22:
+        strAlignment = 1106; // "True Neutral"
+        break;
+    case 0x23:
+        strAlignment = 1107; // "Neutral Evil"
+        break;
+    case 0x31:
+        strAlignment = 1108; // "Chaotic Good"
+        break;
+    case 0x32:
+        strAlignment = 1109; // "Chaotic Neutral"
+        break;
+    case 0x33:
+        strAlignment = 1110; // "Chaotic Evil"
+        break;
+    default:
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenCharacter.cpp
+        // __LINE__: 15582
+        UTIL_ASSERT(FALSE);
+
+        // NOTE: The original fetches an uninitialized number here (an
+        // empty CString's data pointer).
+        strAlignment = -1;
+        break;
+    }
+    sub_5EF920(file, FetchString(1049), FetchString(strAlignment), FALSE); // "Alignment"
+    fputs("\n", file);
+
+    // Abilities.
+    fprintf(file, "%s:\n", (LPCSTR)FetchString(17088)); // "Abilities"
+    sub_5EF9E0(file, FetchString(1145), pDStats->m_nSTR, TRUE); // "Strength"
+    sub_5EF9E0(file, FetchString(1151), pDStats->m_nDEX, TRUE); // "Dexterity"
+    sub_5EF9E0(file, FetchString(1178), pDStats->m_nCON, TRUE); // "Constitution"
+    sub_5EF9E0(file, FetchString(1179), pDStats->m_nINT, TRUE); // "Intelligence"
+    sub_5EF9E0(file, FetchString(1180), pDStats->m_nWIS, TRUE); // "Wisdom"
+    sub_5EF9E0(file, FetchString(1181), pDStats->m_nCHR, TRUE); // "Charisma"
+    fputs("\n", file);
+
+    sub_5EF9E0(file, FetchString(10339), pSprite->GetAC(), FALSE); // "Armor Class"
+
+    sValue.Format("%d/%d", pBStats->m_hitPoints, pDStats->m_nMaxHitPoints);
+    sub_5EF920(file, FetchString(30977), sValue, FALSE); // "Hit points"
+
+    // The portrait's state icons, and death.
+    if (pSprite->m_portraitIcons.GetCount() > 0) {
+        CString sState;
+        POSITION pos = pSprite->m_portraitIcons.GetHeadPosition();
+        while (pos != NULL) {
+            INT nIcon = static_cast<INT>(reinterpret_cast<INT_PTR>(pSprite->m_portraitIcons.GetNext(pos)));
+            rule.GetCharacterStateDescription(nIcon, sState);
+            fprintf(file, "%s- %s\n", "   ", (LPCSTR)sState);
+        }
+    }
+
+    if ((pDStats->m_generalState & STATE_DEAD) != 0) {
+        fprintf(file, "%s- %s\n", "   ", (LPCSTR)FetchString(11829)); // "DEAD"
+    }
+    fputs("\n", file);
+
+    // The combat feats in use.
+    //
+    // NOTE: The original writes these without a new line ("%s: %s" and
+    // "%s: %s %d"), so they run together on one line.
+    BOOL bFeats = FALSE;
+    if (pSprite->sub_763150(CGAMESPRITE_FEAT_ARTERIAL_STRIKE)
+        && pDStats->m_spellStates.test(SPLSTATE_FEAT_ARTERIAL_STRIKE)) {
+        bFeats = TRUE;
+        fprintf(file,
+            "%s: %s",
+            (LPCSTR)FetchString(39823), // "Using Feat"
+            (LPCSTR)FetchString(35774)); // "Arterial Strike"
+    }
+
+    if (pSprite->sub_763150(CGAMESPRITE_FEAT_EXPERTISE)
+        && pSprite->sub_726270(CGAMESPRITE_FEAT_EXPERTISE) > 0) {
+        bFeats = TRUE;
+        fprintf(file,
+            "%s: %s %d",
+            (LPCSTR)FetchString(39823), // "Using Feat"
+            (LPCSTR)FetchString(35785), // "Expertise"
+            pSprite->sub_726270(CGAMESPRITE_FEAT_EXPERTISE));
+    }
+
+    if (pSprite->sub_763150(CGAMESPRITE_FEAT_HAMSTRING)
+        && pDStats->m_spellStates.test(SPLSTATE_FEAT_HAMSTRING)) {
+        bFeats = TRUE;
+        fprintf(file,
+            "%s: %s",
+            (LPCSTR)FetchString(39823), // "Using Feat"
+            (LPCSTR)FetchString(35787)); // "Hamstring"
+    }
+
+    if (pSprite->sub_763150(CGAMESPRITE_FEAT_POWER_ATTACK)
+        && pSprite->sub_726270(CGAMESPRITE_FEAT_POWER_ATTACK) > 0) {
+        bFeats = TRUE;
+        fprintf(file,
+            "%s: %s %d",
+            (LPCSTR)FetchString(39823), // "Using Feat"
+            (LPCSTR)FetchString(35794), // "Power Attack"
+            pSprite->sub_726270(CGAMESPRITE_FEAT_POWER_ATTACK));
+    }
+
+    if (pSprite->sub_763150(CGAMESPRITE_FEAT_RAPID_SHOT)
+        && pDStats->m_spellStates.test(SPLSTATE_FEAT_RAPID_SHOT)) {
+        fprintf(file,
+            "%s: %s",
+            (LPCSTR)FetchString(39823), // "Using Feat"
+            (LPCSTR)FetchString(35796)); // "Rapid Shot"
+        fputs("\n", file);
+    } else if (bFeats) {
+        fputs("\n", file);
+    }
+
+    // The classes and their levels.
+    INT nClasses = 0;
+    INT classes[CAIOBJECT_CLASS_MAX];
+    for (INT iClassType = 1; iClassType <= CAIOBJECT_CLASS_MAX; iClassType++) {
+        if (pDStats->GetClassLevel(iClassType) != 0) {
+            classes[nClasses++] = iClassType;
+        }
+    }
+
+    if (nClasses < 2) {
+        fprintf(file, "%s:\n", (LPCSTR)FetchString(12136)); // "Class"
+    } else {
+        fprintf(file, "%s:\n", (LPCSTR)FetchString(19721)); // "Multi-Class"
+    }
+
+    for (INT nClass = 0; nClass < nClasses; nClass++) {
+        INT iClassType = classes[nClass];
+        INT nLevel = pDStats->GetClassLevel(iClassType);
+        rule.GetClassStringMixed(static_cast<BYTE>(iClassType),
+            pBStats->m_specialization,
+            pBStats->m_flags,
+            sValue,
+            pType->m_nGender != 2);
+        sub_5EF920(file, FetchString(12136), sValue, TRUE); // "Class"
+        sub_5EF9E0(file, FetchString(17090), nLevel, TRUE); // "Level"
+    }
+
+    sub_5EF9E0(file, FetchString(17089), pDStats->GetXP(), TRUE); // "Experience"
+    fputs("\n", file);
+
+    // The attack rolls, as the combat page (0x5DE2C0) builds them, but for
+    // the parts the export adds up differently (see the evidence).
+    INT nBaseAttackBonus;
+    INT nBaseAttacks;
+    INT nAttackStep;
+    rule.sub_546B60(pSprite, nBaseAttackBonus, nBaseAttacks, nAttackStep, TRUE);
+
+    CGameSpriteEquipment* pEquipment = pSprite->GetEquipment();
+    CItem* curWeapon = NULL;
+    CItem* pLeftWeapon = NULL;
+
+    // NOTE: The original tests the equipment's address.
+    if (pEquipment != NULL) {
+        curWeapon = pEquipment->m_items[pEquipment->m_selectedWeapon];
+        pLeftWeapon = pEquipment->m_items[pSprite->sub_726800() & 0xFF];
+
+        if (pEquipment->m_selectedWeapon == 42
+            || (pLeftWeapon != NULL
+                && (pLeftWeapon->GetItemType() == 47
+                    || pLeftWeapon->GetItemType() == 53
+                    || pLeftWeapon->GetItemType() == 49
+                    || pLeftWeapon->GetItemType() == 41))) {
+            pLeftWeapon = NULL;
+        }
+
+        if (curWeapon == NULL) {
+            pSprite->SelectWeaponAbility(CGameSpriteEquipment::SLOT_FIST, 0, 0, 1);
+            curWeapon = pEquipment->m_items[pEquipment->m_selectedWeapon];
+        }
+    }
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenCharacter.cpp
+    // __LINE__: 16140
+    UTIL_ASSERT(curWeapon != NULL);
+
+    INT nLeftWeaponMod = 0;
+    INT nLeftProficiencyMod = 0;
+    INT nLeftAbilityMod = 0;
+
+    INT nArmorPenalty = pSprite->sub_7240A0();
+    INT nShieldPenalty = pSprite->sub_724170();
+
+    if (curWeapon != NULL) {
+        curWeapon->Demand();
+    }
+
+    const ITEM_ABILITY* curAttack = curWeapon->GetAbility(pEquipment->m_selectedWeaponAbility);
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenCharacter.cpp
+    // __LINE__: 16160
+    UTIL_ASSERT(curAttack != NULL);
+
+    INT nWeaponMod = pSprite->sub_73CA20(curWeapon, curAttack);
+    nWeaponMod += pSprite->sub_73CAE0(curWeapon, curAttack);
+    nWeaponMod += pSprite->sub_73CC40(curWeapon, curAttack);
+
+    INT nProficiencyMod = pSprite->sub_73CF10(curWeapon, curAttack);
+    nProficiencyMod += pSprite->sub_73D080(FALSE);
+
+    INT nAbilityMod = pSprite->sub_73CB10(curWeapon, curAttack);
+
+    if (pLeftWeapon != NULL) {
+        pLeftWeapon->Demand();
+
+        CButtonData buttonData;
+        pSprite->GetQuickWeapon(static_cast<BYTE>(pSprite->sub_726800() - 43), buttonData);
+
+        const ITEM_ABILITY* curAttackSecond = pLeftWeapon->GetAbility(buttonData.m_abilityId.m_abilityNum);
+
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenCharacter.cpp
+        // __LINE__: 16187
+        UTIL_ASSERT(curAttackSecond != NULL);
+
+        nLeftWeaponMod = pSprite->sub_73CA20(pLeftWeapon, curAttackSecond);
+        nLeftWeaponMod += pSprite->sub_73CAE0(pLeftWeapon, curAttackSecond);
+        nLeftWeaponMod += pSprite->sub_73CC40(pLeftWeapon, curAttackSecond);
+
+        nLeftProficiencyMod = pSprite->sub_73CF10(pLeftWeapon, curAttackSecond);
+        nLeftProficiencyMod += pSprite->sub_73D080(TRUE);
+
+        nLeftAbilityMod = pSprite->sub_73CB10(pLeftWeapon, curAttackSecond);
+    }
+
+    if (curWeapon != NULL) {
+        curWeapon->Release();
+    }
+
+    // NOTE: Without 0x73D420, which the combat page counts.
+    INT nOtherMod = pSprite->sub_73C7E0() + pSprite->sub_73CAD0();
+
+    CString sLine;
+    CString sPart;
+
+    fprintf(file, "%s:\n", (LPCSTR)FetchString(9457)); // "Attack Roll Modifiers"
+
+    BOOLEAN bRanged = FALSE;
+    SHORT nLauncherSlot;
+    CItem* pLauncher = pSprite->GetLauncher(curAttack, nLauncherSlot);
+    if (pLauncher != NULL) {
+        pLauncher->Demand();
+        if (pLauncher->GetAbility(0) != NULL) {
+            bRanged = TRUE;
+        } else if ((curAttack->type & 0xFF) == 2) {
+            bRanged = TRUE;
+        }
+    } else if ((curAttack->type & 0xFF) == 2) {
+        bRanged = TRUE;
+    }
+
+    if (pLauncher != NULL) {
+        pLauncher->Release();
+    }
+
+    INT nBaseAttacksShown = nBaseAttacks;
+
+    INT nAttacks;
+    if (curWeapon != NULL
+        && pLeftWeapon != NULL
+        && curWeapon != pLeftWeapon
+        && pLeftWeapon->GetItemType() != 47
+        && pLeftWeapon->GetItemType() != 53
+        && pLeftWeapon->GetItemType() != 49
+        && pLeftWeapon->GetItemType() != 41) {
+        nAttacks = pDStats->m_nNumberOfAttacks - 1;
+    } else {
+        nAttacks = pDStats->m_nNumberOfAttacks;
+    }
+
+    BOOL bRapidShot = pDStats->m_spellStates.test(SPLSTATE_FEAT_RAPID_SHOT);
+
+    sLine = "";
+    for (INT nAttack = 0; nAttack < nAttacks; nAttack++) {
+        INT nBonus = nBaseAttackBonus;
+        if (bRapidShot && bRanged == TRUE && nAttack == 0) {
+            nBonus -= 5;
+        }
+
+        INT nTotal = rule.GetIterativeAttackBonus(nBonus, nAttackStep, nAttack)
+            + nShieldPenalty
+            + nArmorPenalty
+            + nOtherMod
+            + nAbilityMod
+            + nProficiencyMod
+            + nWeaponMod;
+        if (bRapidShot && bRanged == TRUE) {
+            nTotal -= 2;
+        }
+
+        sPart.Format("%+d", static_cast<SHORT>(nTotal));
+        sLine += sPart;
+
+        if (nAttack + 1 < nAttacks) {
+            sLine += "/";
+        }
+    }
+    sub_5EF920(file, FetchString(734), sLine, TRUE); // "Main Hand"
+
+    // NOTE: Unlike the combat page, every attack shows a base bonus here.
+    sLine = "";
+    for (INT nAttack = 0; nAttack < nAttacks; nAttack++) {
+        sPart.Format("%+d", rule.GetIterativeAttackBonus(nBaseAttackBonus, nAttackStep, nAttack));
+        sLine += sPart;
+
+        if (static_cast<UINT>(nAttack + 1) < static_cast<UINT>(nBaseAttacksShown)) {
+            sLine += "/";
+        }
+    }
+    sub_5EF920(file, FetchString(31353), sLine, TRUE); // "Base"
+
+    if (curWeapon != pLeftWeapon) {
+        if (static_cast<SHORT>(nWeaponMod) != 0) {
+            sLine.Format("%+d", static_cast<SHORT>(nWeaponMod));
+            sub_5EF920(file, FetchString(32560), sLine, TRUE); // "Weapon"
+        }
+
+        if (static_cast<SHORT>(nProficiencyMod) != 0) {
+            sLine.Format("%+d", static_cast<SHORT>(nProficiencyMod));
+            sub_5EF920(file, FetchString(32561), sLine, TRUE); // "Proficiency"
+        }
+
+        if (static_cast<SHORT>(nAbilityMod) != 0) {
+            sLine.Format("%+d", static_cast<SHORT>(nAbilityMod));
+            sub_5EF920(file, FetchString(33547), sLine, TRUE); // "Abilities"
+        }
+
+        if (nArmorPenalty != 0) {
+            sLine.Format("%+d", nArmorPenalty);
+            sub_5EF920(file, FetchString(39816), sLine, TRUE); // "Armor Penalty"
+        }
+
+        if (nShieldPenalty != 0) {
+            sLine.Format("%+d", nShieldPenalty);
+            sub_5EF920(file, FetchString(39822), sLine, TRUE); // "Shield Penalty"
+        }
+    }
+
+    if (pLeftWeapon != NULL) {
+        if (curWeapon != pLeftWeapon) {
+            fputs("\n", file);
+        }
+
+        // NOTE: The off hand's total counts the shield penalty here.
+        sLine.Format("%+d",
+            static_cast<SHORT>(nBaseAttackBonus
+                + nShieldPenalty
+                + nArmorPenalty
+                + nOtherMod
+                + nLeftAbilityMod
+                + nLeftProficiencyMod
+                + nLeftWeaponMod));
+        sub_5EF920(file, FetchString(733), sLine, TRUE); // "Off Hand"
+
+        sLine = "";
+        sPart.Format("%+d", nBaseAttackBonus);
+        sLine += sPart;
+        sub_5EF920(file, FetchString(31353), sLine, TRUE); // "Base"
+
+        if (static_cast<SHORT>(nLeftWeaponMod) != 0) {
+            sLine.Format("%+d", static_cast<SHORT>(nLeftWeaponMod));
+            sub_5EF920(file, FetchString(32560), sLine, TRUE); // "Weapon"
+        }
+
+        if (static_cast<SHORT>(nLeftProficiencyMod) != 0) {
+            sLine.Format("%+d", static_cast<SHORT>(nLeftProficiencyMod));
+            sub_5EF920(file, FetchString(32561), sLine, TRUE); // "Proficiency"
+        }
+
+        if (static_cast<SHORT>(nLeftAbilityMod) != 0) {
+            sLine.Format("%+d", static_cast<SHORT>(nLeftAbilityMod));
+            sub_5EF920(file, FetchString(33547), sLine, TRUE); // "Abilities"
+        }
+
+        if (nArmorPenalty != 0) {
+            sLine.Format("%+d", nArmorPenalty);
+            sub_5EF920(file, FetchString(39816), sLine, TRUE); // "Armor Penalty"
+        }
+
+        if (nShieldPenalty != 0) {
+            sLine.Format("%+d", nShieldPenalty);
+            sub_5EF920(file, FetchString(39822), sLine, TRUE); // "Shield Penalty"
+        }
+
+        pLeftWeapon->Release();
+    }
+    fputs("\n", file);
+
+    if (static_cast<SHORT>(nOtherMod) != 0) {
+        sLine.Format("%+d", static_cast<SHORT>(nOtherMod));
+        sub_5EF920(file, FetchString(33548), sLine, TRUE); // "Others"
+    }
+    fputs("\n", file);
+
+    // NOTE: Unlike the combat page, the magic weapon slot is not tested.
+    CItem* pLeftItem = pEquipment->m_items[pSprite->sub_726800() & 0xFF];
+    if (curWeapon == pLeftWeapon) {
+        sValue.Format("%d", 1);
+    } else if (pLeftItem != NULL
+        && pLeftItem->GetItemType() != 47
+        && pLeftItem->GetItemType() != 53
+        && pLeftItem->GetItemType() != 49
+        && pLeftItem->GetItemType() != 41) {
+        sValue.Format("%d+%d", pDStats->m_nNumberOfAttacks - 1, 1);
+    } else {
+        sValue.Format("%d", pDStats->m_nNumberOfAttacks);
+    }
+    sub_5EF920(file, FetchString(9458), sValue, TRUE); // "Number of Attacks"
+    fputs("\n", file);
+
+    // The armour class and its parts.
+    sub_5EF9E0(file, FetchString(33553), pSprite->GetAC(), FALSE); // "Armor Class"
+    sub_5EF9E0(file, FetchString(11997), pDStats->field_6, TRUE); // "Armor"
+    sub_5EF9E0(file, FetchString(33551), pDStats->field_8, TRUE); // "Deflection"
+    sub_5EF9E0(file, FetchString(12006), pDStats->field_A, TRUE); // "Shield"
+    sub_5EF9E0(file, FetchString(33552), pDStats->field_C, TRUE); // "Generic"
+    sub_5EF9E0(file, FetchString(1151), pSprite->sub_723EA0(), TRUE); // "Dexterity"
+    fputs("\n", file);
+
+    // Skills.
+    sub_5EF9E0(file, FetchString(37275), pDStats->m_nSkills[0], TRUE); // "Alchemy"
+    sub_5EF9E0(file, FetchString(37590), pDStats->m_nSkills[8], TRUE); // "Knowledge (Arcana)"
+
+    if (pType->IsClassValid(CAIOBJECTTYPE_C_ROGUE)) {
+        sub_5EFAA0(file, FetchString(9460), "%d%%", pDStats->m_nSkills[10], TRUE); // "Open Lock"
+        sub_5EFAA0(file, FetchString(9461), "%d%%", pDStats->m_nSkills[9], TRUE); // "Move Silently"
+        sub_5EFAA0(file, FetchString(34120), "%d%%", pDStats->m_nSkills[6], TRUE); // "Hide"
+        sub_5EFAA0(file, FetchString(9462), "%d%%", pDStats->m_nSkills[12], TRUE); // "Find Traps"
+        sub_5EFAA0(file, FetchString(9463), "%d%%", pDStats->m_nSkills[11], TRUE); // "Pick Pocket"
+        sub_5EFAA0(file, FetchString(24113), "%d%%", pDStats->m_nSkills[14], TRUE); // "Use Magic Device"
+
+        INT nDice = IcewindMisc::GetSneakAttackDice();
+        sValue2.Format("%dd%d", IcewindMisc::GetSneakAttackRolls(pSprite), nDice);
+        sub_5EF920(file, FetchString(24898), sValue2, TRUE); // "Sneak Attack Damage"
+
+        // NOTE: The original calls 0x7ABB90, a shared empty function that
+        // returns 0, for the value.
+        sub_5EF9E0(file, FetchString(24897), 0, TRUE); // "Crippling Strike"
+    }
+
+    if (pType->IsClassValid(CAIOBJECTTYPE_C_BARD)) {
+        sub_5EFAA0(file, FetchString(9463), "%d%%", pDStats->m_nSkills[11], TRUE); // "Pick Pocket"
+        sub_5EFAA0(file, FetchString(24113), "%d%%", pDStats->m_nSkills[14], TRUE); // "Use Magic Device"
+    }
+
+    if (pType->IsClassValid(CAIOBJECTTYPE_C_RANGER)) {
+        // NOTE: Uninline (Average, 0x5467E0).
+        sub_5EFAA0(file,
+            FetchString(34137), // "Stealth"
+            "%d%%",
+            (pDStats->m_nSkills[9] + pDStats->m_nSkills[6]) / 2,
+            TRUE);
+    }
+
+    if (pType->IsClassValid(CAIOBJECTTYPE_C_PALADIN)) {
+        sub_5EF9E0(file, FetchString(12126), pDStats->m_nTurnUndeadLevel, TRUE); // "Turn Undead Level"
+        sub_5EF9E0(file, FetchString(12127), pDStats->m_nLayOnHandsAmount, TRUE); // "Lay on Hands Amount"
+    }
+
+    if (pType->IsClassValid(CAIOBJECTTYPE_C_CLERIC)) {
+        sub_5EF9E0(file, FetchString(12126), pDStats->m_nTurnUndeadLevel, TRUE); // "Turn Undead Level"
+    }
+
+    if (pSprite->m_special2Script == NULL) {
+        sub_5EF920(file, FetchString(2078), FetchString(17093), TRUE); // "AI Script", "None"
+    } else {
+        pSprite->m_special2Script->m_cResRef.CopyToString(sValue);
+        sub_5EF920(file, FetchString(2078), sValue, TRUE); // "AI Script"
+    }
+    fputs("\n", file);
+
+    // A ranger's favored enemies.
+    if (pType->IsClassValid(CAIOBJECTTYPE_C_RANGER)) {
+        fprintf(file, "%s:\n", (LPCSTR)FetchString(15982)); // "Favored Enemies"
+        for (INT nEnemy = 0; nEnemy < MAX_HATED_RACES; nEnemy++) {
+            BYTE nRace = pBStats->m_favoredEnemies[nEnemy];
+            if (nRace != 0xFF) {
+                STRREF strRace;
+                switch (nRace) {
+                case CAIOBJECTTYPE_R_OGRE:
+                    strRace = 15975; // "Ogres"
+                    break;
+                case CAIOBJECTTYPE_R_WYVERN:
+                    strRace = 37617; // "Wyverns"
+                    break;
+                case CAIOBJECTTYPE_R_GIANT:
+                    strRace = 61; // "Giants"
+                    break;
+                case CAIOBJECTTYPE_R_GOBLIN:
+                    strRace = 29518; // "Goblins"
+                    break;
+                case CAIOBJECTTYPE_R_LIZARDMAN:
+                    strRace = 3275; // "Lizard Men"
+                    break;
+                case CAIOBJECTTYPE_R_ORC:
+                    strRace = 3271; // "Orcs"
+                    break;
+                case CAIOBJECTTYPE_R_SALAMANDER:
+                    strRace = 3272; // "Salamanders"
+                    break;
+                case CAIOBJECTTYPE_R_TROLL:
+                    strRace = 3276; // "Trolls"
+                    break;
+                case CAIOBJECTTYPE_R_UMBERHULK:
+                    strRace = 3277; // "Umber Hulks"
+                    break;
+                case CAIOBJECTTYPE_R_UNDEAD:
+                    strRace = 3278; // "Undead"
+                    break;
+                case CAIOBJECTTYPE_R_YUANTI:
+                    strRace = 30849; // "Yuan-ti"
+                    break;
+                case CAIOBJECTTYPE_R_HARPY:
+                    strRace = 37616; // "Harpies"
+                    break;
+                case CAIOBJECTTYPE_R_BUGBEAR:
+                    strRace = 28366; // "Bugbear"
+                    break;
+                case CAIOBJECTTYPE_R_HOOK_HORROR:
+                    strRace = 37606; // "Hook Horrors"
+                    break;
+                case CAIOBJECTTYPE_R_DRIDER:
+                    strRace = 37607; // "Driders"
+                    break;
+                case CAIOBJECTTYPE_R_SHAPESHIFTER:
+                    strRace = 37605; // "Shapeshifters"
+                    break;
+                default:
+                    strRace = -1;
+                    break;
+                }
+                fprintf(file, "   %s\n", (LPCSTR)FetchString(strRace));
+            }
+        }
+        fputs("\n", file);
+    }
+
+    // Saving throws.
+    fprintf(file, "%s:\n", (LPCSTR)FetchString(17379)); // "Saving Throws"
+    sub_5EF9E0(file, FetchString(17380), pDStats->m_nSaveVSFortitude, TRUE); // "Fortitude"
+    sub_5EF9E0(file, FetchString(17381), pDStats->m_nSaveVSReflex, TRUE); // "Reflex"
+    sub_5EF9E0(file, FetchString(17382), pDStats->m_nSaveVSWill, TRUE); // "Will"
+
+    INT nTrapSense = rule.GetTrapSenseBonus(*pDStats);
+    if (nTrapSense != 0) {
+        sub_5EF9E0(file, FetchString(39802), pDStats->m_nSaveVSReflex + nTrapSense, TRUE); // "Traps"
+    }
+    fputs("\n", file);
+
+    // Weapon proficiencies: "+" per rank.
+    //
+    // NOTE: CGameSprite 0x75E930, the rank, returns 0 for every weapon in
+    // the original (an empty function), so no line is written.
+    fprintf(file, "%s:\n", (LPCSTR)FetchString(9466)); // "Weapon Proficiencies"
+    static const STRREF proficiencies[] = {
+        8733, // "Bows"
+        16033, // "Crossbows"
+        9403, // "Missile Weapons"
+        9402, // "Axes"
+        16017, // "Maces"
+        16013, // "Daggers"
+        16020, // "Flails"
+        16015, // "Polearms"
+        16022, // "Hammers"
+        16031, // "Quarterstaves"
+        16011, // "Great Swords"
+        8668, // "Large Swords"
+        8732, // "Small Swords"
+        31138, // "Two Weapon Style"
+        31135, // "Two Handed Weapon Style"
+        31136, // "Weapon and Shield Style"
+        31137, // "Single Weapon Style"
+    };
+    for (INT nProficiency = 0; nProficiency < static_cast<INT>(sizeof(proficiencies) / sizeof(proficiencies[0])); nProficiency++) {
+        INT nRank = 0;
+        if (nRank > 0 && nRank < 20) {
+            char szRank[20];
+            memset(szRank, '+', nRank);
+            szRank[nRank] = '\0';
+            sub_5EF920(file, FetchString(proficiencies[nProficiency]), CString(szRank), TRUE);
+        }
+    }
+    fputs("\n", file);
+
+    // The armour class modifiers by damage type.
+    if (pDStats->m_nACCrushingMod != 0
+        || pDStats->m_nACMissileMod != 0
+        || pDStats->m_nACPiercingMod != 0
+        || pDStats->m_nACSlashingMod != 0) {
+        fprintf(file, "%s:\n", (LPCSTR)FetchString(11766)); // "Armor Class Modifiers"
+
+        if (pDStats->m_nACCrushingMod != 0) {
+            sub_5EFAA0(file, FetchString(11770), "%+d", pDStats->m_nACCrushingMod, FALSE); // "Bludgeoning"
+        }
+
+        if (pDStats->m_nACMissileMod != 0) {
+            sub_5EFAA0(file, FetchString(11767), "%+d", pDStats->m_nACMissileMod, FALSE); // "Missile"
+        }
+
+        if (pDStats->m_nACPiercingMod != 0) {
+            sub_5EFAA0(file, FetchString(11769), "%+d", pDStats->m_nACPiercingMod, FALSE); // "Piercing"
+        }
+
+        if (pDStats->m_nACSlashingMod != 0) {
+            sub_5EFAA0(file, FetchString(11768), "%+d", pDStats->m_nACSlashingMod, FALSE); // "Slashing"
+        }
+
+        fputs("\n", file);
+    }
+
+    // The ability bonuses: STRMOD's to-hit (0), damage (1) and weight
+    // allowance (3) columns by STR.
+    fprintf(file, "%s:\n", (LPCSTR)FetchString(10315)); // "Ability Bonuses"
+
+    INT nBonus = iwd2r_atol(rule.m_tStrengthMod.GetAt(CPoint(0, pDStats->m_nSTR)));
+    if (nBonus == 0) {
+        sub_5EF9E0(file, FetchString(10332), 0, TRUE); // "To Hit"
+    } else {
+        sub_5EFAA0(file, FetchString(10332), "%+d", nBonus, TRUE); // "To Hit"
+    }
+
+    if (pSprite->GetCriticalHitBonus() != 0) {
+        SHORT nCriticalHitBonus = pSprite->GetCriticalHitBonus();
+        // NOTE: The zero branch cannot be taken; the original has it.
+        if (nCriticalHitBonus == 0) {
+            sub_5EF9E0(file, FetchString(16462), 0, TRUE); // "Critical Hit!"
+        } else {
+            sub_5EFAA0(file, FetchString(16462), "%+d", nCriticalHitBonus, TRUE); // "Critical Hit!"
+        }
+    }
+
+    if (pDStats->m_nPhysicalSpeed != 0) {
+        // NOTE: The zero branch cannot be taken; the original has it.
+        if (pDStats->m_nPhysicalSpeed == 0) {
+            sub_5EF9E0(file, FetchString(28357), 0, TRUE); // "Speed"
+        } else {
+            sub_5EFAA0(file, FetchString(28357), "%+d", pDStats->m_nPhysicalSpeed, TRUE); // "Speed"
+        }
+    }
+
+    if (pDStats->field_6 != 0) {
+        // NOTE: The zero branch cannot be taken; the original has it.
+        if (pDStats->field_6 == 0) {
+            sub_5EF9E0(file, FetchString(28373), 0, TRUE); // "Armor Bonus"
+        } else {
+            sub_5EFAA0(file, FetchString(28373), "%+d", pDStats->field_6, TRUE); // "Armor Bonus"
+        }
+    }
+
+    nBonus = iwd2r_atol(rule.m_tStrengthMod.GetAt(CPoint(1, pDStats->m_nSTR)));
+    if (nBonus == 0) {
+        sub_5EF9E0(file, FetchString(10336), 0, TRUE); // "Damage"
+    } else {
+        sub_5EFAA0(file, FetchString(10336), "%+d", nBonus, TRUE); // "Damage"
+    }
+
+    // NOTE: The original computes this on the x87 stack (the division is
+    // not rounded to a float before the product); double is closer than
+    // float.
+    nBonus = iwd2r_atol(rule.m_tStrengthMod.GetAt(CPoint(3, pDStats->m_nSTR)));
+    INT nWeight = static_cast<INT>(static_cast<double>(static_cast<float>(rule.GetEncumbranceMod(pSprite))) / 100.0
+        * static_cast<double>(static_cast<float>(nBonus)));
+    if (nWeight == 0) {
+        sub_5EF9E0(file, FetchString(10338), 0, TRUE); // "Weight Allowance"
+    } else {
+        sub_5EFAA0(file, FetchString(10338), "%+d", nWeight, TRUE); // "Weight Allowance"
+    }
+
+    INT nRolls;
+    rule.sub_542EC0(pType->m_nClass, static_cast<BYTE>(pDStats->m_nCON), nBonus, nRolls);
+    if (nBonus == 0) {
+        sub_5EF9E0(file, FetchString(10342), 0, TRUE); // "Hit Points/Level"
+    } else {
+        sub_5EFAA0(file, FetchString(10342), "%+d", nBonus, TRUE); // "Hit Points/Level"
+    }
+
+    if (pType->IsClassValid(CAIOBJECTTYPE_C_WIZARD)) {
+        nBonus = iwd2r_atol(rule.m_tIntelligenceMod.GetAt(CPoint(0, pDStats->m_nINT)));
+        sub_5EFAA0(file, FetchString(10343), "%d%%", nBonus, TRUE); // "Chance to Learn Spell"
+    }
+
+    // The bonus spells of each casting class, by level.
+    if (pType->IsClassValid(CAIOBJECTTYPE_C_BARD)
+        || pType->IsClassValid(CAIOBJECTTYPE_C_CLERIC)
+        || pType->IsClassValid(CAIOBJECTTYPE_C_DRUID)
+        || pType->IsClassValid(CAIOBJECTTYPE_C_PALADIN)
+        || pType->IsClassValid(CAIOBJECTTYPE_C_RANGER)
+        || pType->IsClassValid(CAIOBJECTTYPE_C_SORCERER)
+        || pType->IsClassValid(CAIOBJECTTYPE_C_WIZARD)) {
+        for (UINT nClassIndex = 0; nClassIndex < CSPELLLIST_NUM_CLASSES; nClassIndex++) {
+            BYTE nSpellClass = pGame->GetSpellcasterClass(nClassIndex);
+
+            DWORD dwClassMask = 0;
+            switch (nClassIndex) {
+            case 0:
+                dwClassMask = CLASSMASK_BARD;
+                break;
+            case 1:
+                dwClassMask = CLASSMASK_CLERIC;
+                break;
+            case 2:
+                dwClassMask = CLASSMASK_DRUID;
+                break;
+            case 3:
+                dwClassMask = CLASSMASK_PALADIN;
+                break;
+            case 4:
+                dwClassMask = CLASSMASK_RANGER;
+                break;
+            case 5:
+                dwClassMask = CLASSMASK_SORCERER;
+                break;
+            case 6:
+                dwClassMask = CLASSMASK_WIZARD;
+                break;
+            }
+
+            INT nBonusSpells;
+            if ((pType->m_nClassMask & dwClassMask) != 0) {
+                rule.GetMaxKnownSpells(nSpellClass, *pType, *pDStats, pBStats->m_specialization, 1, nBonusSpells);
+                if (nBonusSpells > 0) {
+                    rule.GetClassStringMixed(nSpellClass,
+                        pBStats->m_specialization,
+                        pBStats->m_flags,
+                        sValue,
+                        pType->m_nGender != 2);
+                    fprintf(file,
+                        "   %s: %s\n",
+                        (LPCSTR)FetchString(10344), // "Bonus Spells"
+                        (LPCSTR)sValue);
+
+                    INT nLevel = 1;
+                    do {
+                        if (nBonusSpells < 1) {
+                            break;
+                        }
+
+                        sValue2.Format("%d", nLevel);
+                        g_pBaldurChitin->GetTlkTable().SetToken(TOKEN_SPELLLEVEL, sValue2);
+
+                        // NOTE: The zero branch cannot be taken; the
+                        // original has it.
+                        if (nBonusSpells == 0) {
+                            sub_5EF9E0(file, FetchString(10345), 0, TRUE); // "Level <SPELLLEVEL>"
+                        } else {
+                            sub_5EFAA0(file, FetchString(10345), "%+d", nBonusSpells, TRUE); // "Level <SPELLLEVEL>"
+                        }
+
+                        // NOTE: The original asks with the AI type's class
+                        // here (0x5F51DE), not the list's.
+                        BYTE nAIClass = pType->m_nClass;
+                        nLevel++;
+                        rule.GetMaxKnownSpells(nAIClass, *pType, *pDStats, pBStats->m_specialization, nLevel, nBonusSpells);
+                    } while (nLevel < 10);
+                }
+            }
+        }
+    }
+    fputs("\n", file);
+
+    // Resistances.
+    fprintf(file, "%s:\n", (LPCSTR)FetchString(15544)); // "Resistances"
+    sub_5EF9E0(file, FetchString(15581), pDStats->m_nResistMagic, TRUE); // "Spell Resistance"
+    sub_5EF9E0(file, FetchString(11770), pDStats->m_nResistCrushing, TRUE); // "Bludgeoning"
+    sub_5EF9E0(file, FetchString(11769), pDStats->m_nResistPiercing, TRUE); // "Piercing"
+    sub_5EF9E0(file, FetchString(11768), pDStats->m_nResistSlashing, TRUE); // "Slashing"
+    sub_5EF9E0(file, FetchString(15578), pDStats->m_nResistAcid, TRUE); // "Acid"
+    sub_5EF9E0(file, FetchString(15546), pDStats->m_nResistCold, TRUE); // "Cold"
+    sub_5EF9E0(file, FetchString(15577), pDStats->m_nResistElectricity, TRUE); // "Electricity"
+    sub_5EF9E0(file, FetchString(15545), pDStats->m_nResistFire, TRUE); // "Fire"
+    sub_5EF9E0(file, FetchString(11767), pDStats->m_nResistMissile, TRUE); // "Missile"
+    sub_5EF9E0(file, FetchString(38135), pDStats->m_nResistPoison, TRUE); // "Poison"
+    fputs("\n", file);
+    fputs("\n", file);
+
+    // The known spells by class and level: "resref (available/memorized)".
+    //
+    // NOTE: The original passes the list index (0-6) to GetSpells, which
+    // wants a class: index 0 is no class, so GetSpellcasterIndex (0x5CA5D0)
+    // asserts and the game ends here, every time. The export cannot be
+    // started in the vanilla game (GUIREC's panel 2 has no control 51).
+    for (UINT nClassIndex = 0; nClassIndex < CSPELLLIST_NUM_CLASSES; nClassIndex++) {
+        BYTE nIndex = static_cast<BYTE>(nClassIndex);
+        if (pSprite->GetSpells(nIndex)->m_nHighestLevel != 0) {
+            fprintf(file,
+                "%s Spells:\n",
+                (LPCSTR)rule.GetClassString(pGame->GetSpellcasterClass(nClassIndex), 0));
+
+            for (UINT nLevel = 0; nLevel < CSPELLLIST_MAX_LEVELS; nLevel++) {
+                CGameSpriteSpellList* pSpells = pSprite->GetSpells(nIndex)->GetSpellsAtLevel(nLevel);
+                if (pSpells->m_List.size() != 0) {
+                    fprintf(file, "Level: %1d\n", nLevel);
+
+                    for (UINT nSpell = 0; nSpell < pSprite->GetSpells(nIndex)->GetSpellsAtLevel(nLevel)->m_List.size(); nSpell++) {
+                        CGameSpriteSpellListEntry* pEntry = pSprite->GetSpells(nIndex)->GetSpellsAtLevel(nLevel)->Get(nSpell);
+                        CResRef cResRef = pGame->m_spells.Get(pEntry->m_nID);
+                        fprintf(file,
+                            "    %.*s (%3d/%3d)\n",
+                            8,
+                            reinterpret_cast<const char*>(cResRef.GetResRef()),
+                            pEntry->field_8,
+                            pEntry->field_4);
+                    }
+                }
+            }
+        }
+    }
+
+    if (pSprite->m_domainSpells.m_nHighestLevel != 0) {
+        fprintf(file, "Domain Spells:\n");
+
+        for (UINT nLevel = 0; nLevel < CSPELLLIST_MAX_LEVELS; nLevel++) {
+            CGameSpriteSpellList* pSpells = pSprite->m_domainSpells.GetSpellsAtLevel(nLevel);
+            if (pSpells->m_List.size() != 0) {
+                fprintf(file, "Level: %1d\n", nLevel);
+
+                for (UINT nSpell = 0; nSpell < pSpells->m_List.size(); nSpell++) {
+                    CGameSpriteSpellListEntry* pEntry = pSpells->Get(nSpell);
+                    CResRef cResRef = pGame->m_spells.Get(pEntry->m_nID);
+                    fprintf(file,
+                        "    %.*s (%3d/%3d)\n",
+                        8,
+                        reinterpret_cast<const char*>(cResRef.GetResRef()),
+                        pEntry->field_8,
+                        pEntry->field_4);
+                }
+            }
+        }
+    }
+
+    // The innate abilities, songs and shapes, without headings.
+    if (pSprite->m_innateSpells.m_List.size() != 0) {
+        for (UINT nSpell = 0; nSpell < pSprite->GetInnateSpells()->m_List.size(); nSpell++) {
+            CGameSpriteSpellListEntry* pEntry = pSprite->GetInnateSpells()->Get(nSpell);
+            CResRef cResRef = g_pBaldurChitin->GetObjectGame()->GetInnateSpells()->Get(pEntry->m_nID);
+            fprintf(file,
+                "    %.*s (%3d/%3d)\n",
+                8,
+                reinterpret_cast<const char*>(cResRef.GetResRef()),
+                pEntry->field_8,
+                pEntry->field_4);
+        }
+    }
+
+    if (pSprite->GetSongs()->m_List.size() != 0) {
+        for (UINT nSpell = 0; nSpell < pSprite->GetSongs()->m_List.size(); nSpell++) {
+            CGameSpriteSpellListEntry* pEntry = pSprite->GetSongs()->Get(nSpell);
+            CResRef cResRef = g_pBaldurChitin->GetObjectGame()->GetMasterSongLookup().Get(pEntry->m_nID);
+            fprintf(file,
+                "    %.*s (%3d/%3d)\n",
+                8,
+                reinterpret_cast<const char*>(cResRef.GetResRef()),
+                pEntry->field_8,
+                pEntry->field_4);
+        }
+    }
+
+    if (pSprite->GetShapeshifts()->m_List.size() != 0) {
+        for (UINT nSpell = 0; nSpell < pSprite->GetShapeshifts()->m_List.size(); nSpell++) {
+            CGameSpriteSpellListEntry* pEntry = pSprite->GetShapeshifts()->Get(nSpell);
+            CResRef cResRef = g_pBaldurChitin->GetObjectGame()->GetShapeshifts()->Get(pEntry->m_nID);
+            fprintf(file,
+                "    %.*s (%3d/%3d)\n",
+                8,
+                reinterpret_cast<const char*>(cResRef.GetResRef()),
+                pEntry->field_8,
+                pEntry->field_4);
+        }
+    }
+    fputs("\n", file);
+    fputs("\n", file);
+    fputs("\n", file);
+
+    // The items: the worn ones, the weapons, the quiver and the quick items
+    // (a star marks the selected), then the rest; with Output Full Detailed
+    // Description each with its description.
+    BYTE bDetailed = GetPrivateProfileIntA("Game Options",
+                         "Output Full Detailed Description",
+                         0,
+                         g_pBaldurChitin->GetIniFileName())
+        != 0;
+
+    BOOLEAN printed[51];
+    memset(printed, 0, sizeof(printed));
+
+    fputs("--------------------------------------------------\n", file);
+    fprintf(file, "--  %s:\n", (LPCSTR)FetchString(11292)); // "Inventory"
+    fputs("--------------------------------------------------\n\n", file);
+
+    // NOTE: The worn items are written without Demand/Release, as in the
+    // original.
+    static const INT worn[] = { 6, 0, 1, 4 };
+    for (INT nSlot : worn) {
+        if (pEquipment->m_items[nSlot] != NULL) {
+            sub_5EFCC0(file, pEquipment->m_items[nSlot], TRUE, bDetailed);
+            printed[nSlot] = TRUE;
+        }
+    }
+
+    if (pEquipment->m_items[pSprite->sub_726800() & 0xFF] != NULL) {
+        sub_5EFCC0(file, pEquipment->m_items[pSprite->sub_726800() & 0xFF], TRUE, bDetailed);
+        printed[pSprite->sub_726800() & 0xFF] = TRUE;
+    }
+
+    static const INT wornAfter[] = { 5, 8, 7, 2, 3 };
+    for (INT nSlot : wornAfter) {
+        if (pEquipment->m_items[nSlot] != NULL) {
+            sub_5EFCC0(file, pEquipment->m_items[nSlot], TRUE, bDetailed);
+            printed[nSlot] = TRUE;
+        }
+    }
+    fputs("\n", file);
+
+    for (INT nWeapon = 0; nWeapon < 8; nWeapon++) {
+        CItem* pItem = pEquipment->m_items[CGameSpriteEquipment::SLOT_WEAPON + nWeapon];
+        if (pItem != NULL) {
+            pItem->Demand();
+            sub_5EFCC0(file, pItem, pEquipment->m_selectedWeapon == CGameSpriteEquipment::SLOT_WEAPON + nWeapon, bDetailed);
+            printed[CGameSpriteEquipment::SLOT_WEAPON + nWeapon] = TRUE;
+            pItem->Release();
+        }
+    }
+    fputs("\n", file);
+
+    for (INT nAmmo = 0; nAmmo < 4; nAmmo++) {
+        CItem* pItem = pEquipment->m_items[CGameSpriteEquipment::SLOT_AMMO + nAmmo];
+        if (pItem != NULL) {
+            pItem->Demand();
+            sub_5EFCC0(file, pItem, pEquipment->m_selectedWeapon == CGameSpriteEquipment::SLOT_AMMO + nAmmo, bDetailed);
+            printed[CGameSpriteEquipment::SLOT_AMMO + nAmmo] = TRUE;
+            pItem->Release();
+        }
+    }
+    fputs("\n", file);
+
+    for (INT nSlot = CGameSpriteEquipment::SLOT_MISC; nSlot < 18; nSlot++) {
+        if (pEquipment->m_items[nSlot] != NULL) {
+            pEquipment->m_items[nSlot]->Demand();
+            sub_5EFCC0(file, pEquipment->m_items[nSlot], TRUE, bDetailed);
+            pEquipment->m_items[nSlot]->Release();
+            printed[nSlot] = TRUE;
+        }
+    }
+    fputs("\n", file);
+
+    for (INT nSlot = 0; nSlot < 51; nSlot++) {
+        if (nSlot != CGameSpriteEquipment::SLOT_FIST && pEquipment->m_items[nSlot] != NULL) {
+            pEquipment->m_items[nSlot]->Demand();
+            if (!printed[nSlot]) {
+                sub_5EFCC0(file, pEquipment->m_items[nSlot], FALSE, bDetailed);
+            }
+            pEquipment->m_items[nSlot]->Release();
+        }
+    }
+
+    fclose(file);
+    bSuccess = TRUE;
+
+    g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(nCharacterId,
+        CGameObjectArray::THREAD_ASYNCH,
+        INFINITE);
+
+    return sResult;
 }
 
 // -----------------------------------------------------------------------------

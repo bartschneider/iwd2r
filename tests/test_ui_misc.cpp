@@ -29,6 +29,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <csignal>
 #include <chrono>
 #include <climits>
 #include <cstdarg>
@@ -43,6 +44,11 @@
 #include <string>
 #include <thread>
 #include <vector>
+
+#ifndef _WIN32
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
 
 // The ui-misc stream's second round: the character screen's combat page
 // (CScreenCharacter::UpdateEquipmentInformation and the sprite's dexterity
@@ -999,3 +1005,188 @@ TEST_CASE("world keys: the inventory key opens the inventory", "[uimisc][worldke
     g_pBaldurChitin->pActiveEngine = pPrevious;
     pGame->GetGameSave()->m_mode = nMode;
 }
+
+// The text character sheet's lines (0x5EF760): the label over a row of
+// dots, the value; indented lines behind three spaces with a shorter row.
+// An item's line (0x5EFCC0): the uses past one, NOT IDENTIFIED, a star when
+// equipped.
+TEST_CASE("character screen: the text character sheet's lines", "[uimisc][character][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+
+    // "L", 28 dots and a space under the label; "L", 25 dots and a space
+    // indented.
+    CHECK(std::string(CScreenCharacter::sub_5EF760(CString("Name"), CString("Probe"), FALSE))
+        == "Name" + std::string(25, '.') + " Probe\n");
+    CHECK(std::string(CScreenCharacter::sub_5EF760(CString("Strength"), CString("13"), TRUE))
+        == "   Strength" + std::string(18, '.') + " 13\n");
+
+    FILE* file = tmpfile();
+    REQUIRE(file != nullptr);
+    CItem sword(CResRef("00SWDL01"), 0, 0, 0, 0, 0x1);
+    CItem unknown(CResRef("00SWDL01"), 0, 0, 0, 0, 0);
+    unknown.m_flags &= ~0x1;
+    CItem bolts(CResRef("00BOLT01"), 10, 0, 0, 0, 0x1);
+    CScreenCharacter::sub_5EFCC0(file, &sword, TRUE, FALSE);
+    CScreenCharacter::sub_5EFCC0(file, &unknown, FALSE, FALSE);
+    CScreenCharacter::sub_5EFCC0(file, &bolts, FALSE, FALSE);
+    std::string text(4096, '\0');
+    rewind(file);
+    text.resize(fread(&text[0], 1, text.size(), file));
+    fclose(file);
+
+    std::string sSword = Str(sword.GetGenericName());
+    std::string sUnknown = Str(unknown.GetGenericName());
+    std::string sBolts = Str(bolts.GetGenericName());
+    CHECK(text == Format("-- %s *\n", sSword.c_str())
+            + Format("-- %s - %s\n", sUnknown.c_str(), Str(17108).c_str())
+            + Format("-- %s (%d)\n", sBolts.c_str(), static_cast<int>(bolts.GetUsageCount(0))));
+
+    // A description (0x5EFB60) in lines of at most 70 characters, cut at a
+    // new line or the last space; nothing else is lost.
+    file = tmpfile();
+    REQUIRE(file != nullptr);
+    sword.Demand();
+    const STRREF strDescription = sword.GetDescription();
+    sword.Release();
+    CScreenCharacter::sub_5EFB60(file, strDescription);
+    text.assign(65536, '\0');
+    rewind(file);
+    text.resize(fread(&text[0], 1, text.size(), file));
+    fclose(file);
+
+    const std::string sDescription = "     " + Str(strDescription);
+    REQUIRE(sDescription.size() > 140);
+    std::string sRejoined;
+    size_t nStart = 0;
+    while (nStart < text.size()) {
+        size_t nEnd = text.find('\n', nStart);
+        if (nEnd == std::string::npos)
+            nEnd = text.size();
+        CHECK(nEnd - nStart <= 70);
+        sRejoined += text.substr(nStart, nEnd - nStart);
+        nStart = nEnd + 1;
+    }
+    std::string sExpected;
+    for (char ch : sDescription) {
+        if (ch != '\n' && ch != ' ')
+            sExpected += ch;
+    }
+    sRejoined.erase(std::remove(sRejoined.begin(), sRejoined.end(), ' '), sRejoined.end());
+    CHECK(sRejoined == sExpected);
+}
+
+// sub_5E4560 (0x5E4560) runs the text character sheet export (0x5EFFD0) and
+// says how it went in the world screen's messages. Without the save root's
+// default folder the file cannot be opened.
+TEST_CASE("character screen: the text character sheet without its folder", "[uimisc][character][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    CGameSprite* pSprite = PartyMember();
+    if (pSprite == NULL) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+
+    std::error_code ec;
+    fs::remove_all(Child(g_view, "mpsave") / "default", ec);
+
+    CScreenCharacter* pCharacter = g_pBaldurChitin->m_pEngineCharacter;
+    pCharacter->m_nSelectedCharacter = 0;
+    BYTE bSuccess = TRUE;
+    CString sFileName = pCharacter->sub_5EFFD0(bSuccess);
+    CHECK_FALSE(bSuccess);
+    CHECK(std::string(static_cast<LPCSTR>(sFileName)) == "...\\default\\Probe.txt ");
+
+    CScreenWorld* pWorld = g_pBaldurChitin->m_pEngineWorld;
+    CUIControlTextDisplay* pDisplay = static_cast<CUIControlTextDisplay*>(pWorld->GetManager()->GetPanel(pWorld->GetPanel_22_0())->GetControl(1));
+    REQUIRE(pDisplay != NULL);
+    pDisplay->RemoveAll();
+    pCharacter->sub_5E4560();
+    std::vector<std::string> items = DisplayItems(pDisplay);
+    REQUIRE(items.size() == 1);
+    CHECK(items[0].find(Str(16802).substr(0, 20)) != std::string::npos); // "Error writing text character sheet."
+    pDisplay->RemoveAll();
+}
+
+#ifndef _WIN32
+
+namespace {
+
+void FlushAndLeave(int)
+{
+    fflush(NULL);
+    _exit(42);
+}
+
+}
+
+// The export writes the sheet up to the spell lists, where the original
+// asks GetSpells for "class" 0 (the list index) and its assert ends the game
+// (0x5CA6A4). A child process runs it; its SIGABRT handler flushes the file.
+TEST_CASE("character screen: the text character sheet up to the original's assert", "[uimisc][character][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    CGameSprite* pSprite;
+    {
+        // The new game waits for drawn frames; the child needs none.
+        FramePump pump;
+        pSprite = PartyMember();
+    }
+    if (pSprite == NULL) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+
+    std::error_code ec;
+    fs::create_directories(Child(g_view, "mpsave") / "default", ec);
+    const fs::path sheet = Child(g_view, "mpsave") / "default" / "Probe.txt";
+    fs::remove(sheet, ec);
+    const int nAC = pSprite->GetAC();
+
+    fflush(NULL);
+    pid_t pid = fork();
+    REQUIRE(pid >= 0);
+    if (pid == 0) {
+        signal(SIGABRT, FlushAndLeave);
+        g_pBaldurChitin->m_pEngineCharacter->m_nSelectedCharacter = 0;
+        BYTE bSuccess = FALSE;
+        g_pBaldurChitin->m_pEngineCharacter->sub_5EFFD0(bSuccess);
+        _exit(0);
+    }
+    int status = 0;
+    REQUIRE(waitpid(pid, &status, 0) == pid);
+    REQUIRE(WIFEXITED(status));
+    CHECK(WEXITSTATUS(status) == 42);
+
+    REQUIRE(fs::exists(sheet));
+    const std::string text = ReadFile(sheet);
+    INFO(text);
+    CHECK(text.find("Name" + std::string(25, '.') + " Probe\n") == 0);
+    CHECK(text.find(Format("%s:\n", Str(17088).c_str())) != std::string::npos); // "Abilities:"
+    CHECK(text.find(Format("%s", Str(10339).c_str())) != std::string::npos); // "Armor Class"
+    CHECK(text.find(Format(". %d\n", nAC)) != std::string::npos);
+    CHECK(text.find(Format("%s:\n", Str(9457).c_str())) != std::string::npos); // "Attack Roll Modifiers:"
+    CHECK(text.find(Format("%s:\n", Str(17379).c_str())) != std::string::npos); // "Saving Throws:"
+    CHECK(text.find(Format("%s:\n", Str(15544).c_str())) != std::string::npos); // "Resistances:"
+    // Nothing past the spell lists.
+    CHECK(text.find(Format("--  %s:\n", Str(11292).c_str())) == std::string::npos);
+
+    fs::remove(sheet, ec);
+}
+
+#endif
