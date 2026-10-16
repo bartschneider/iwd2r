@@ -54,19 +54,51 @@ const char RESREF_JACKALWERE_GAZE[] = "SpIn179";
 // 0x8AF154
 const char RESREF_UMBER_HULK_GAZE[] = "SpIn994";
 
-// TODO: Stub. CInfGame's tracking lookup (CInfGame_B3AUTO_005466F0,
-// 0x5466F0, a CInfGame member not declared yet) finds the area in the
-// tracking table and, when the sprite's wilderness lore roll (d20 + the
-// skill against the entry / 5 + 10) succeeds, returns the area's tracking
-// string. Until then it returns the original's fallback, 19534, the string
-// for an area missing from the table. For an area in the table and a sprite
-// with the skill, the original calls rand (0x546773) for that roll; the stub
-// does not, so it shifts the RNG stream until 0x5466F0 is ported.
-static STRREF GetTrackingString(CGameSprite* pSprite, CString& sAreaName)
+// NOTE: Its `this` is the game, and the table it reads, at +0x1300, is
+// CRuleTables::m_tTracking (the rule tables start the CInfGame object): a
+// CRuleTables member by what it reads. Kept here, file-static, until
+// CRuleTables.cpp's owner takes it; only the ranger tracking effect (opcode
+// 286) calls it. The area's row in TRACKING.2DA: when the sprite has
+// wilderness lore, a d20 plus the skill against the row's difficulty / 5 +
+// 10 gives the row's string; otherwise 19534.
+// NOTE: Ruling M3-12: on the fold list; it moves into CRuleTables.
+// 0x5466F0
+static STRREF RuleTables_GetTrackingString5466F0(const CRuleTables& ruleTables, CGameSprite* pSprite, CString& sAreaName)
 {
-    (void)pSprite;
-    (void)sAreaName;
-    return 19534;
+    STRREF strTracks = 19534;
+
+    // NOTE: The original leaves the point unset and reads its y when the
+    // search fails (0x546719); ours starts it at -1, the found-nothing case.
+    CPoint pt(-1, -1);
+    ruleTables.m_tTracking.Find(sAreaName, pt, TRUE);
+    if (pt.y == -1) {
+        return 19534;
+    }
+
+    INT nSkill = pSprite->m_derivedStats.m_nSkills[CGAMESPRITE_SKILL_WILDERNESS_LORE];
+    if (nSkill > 0) {
+        // NOTE: The original calls it and drops the result (0x546746).
+        pSprite->sub_763E40(CGAMESPRITE_SKILL_WILDERNESS_LORE);
+
+        pt.x = 1;
+        INT nDifficulty = ruleTables.m_tTracking.GetAtLong(pt) / 5;
+
+        INT nRoll = rand() % 20 + 1;
+        pSprite->FeedBack(CGameSprite::FEEDBACK_ROLL,
+            nRoll + nSkill,
+            nDifficulty + 10,
+            nSkill,
+            40285,
+            0,
+            0);
+
+        if (nRoll + nSkill >= nDifficulty + 10) {
+            pt.x = 0;
+            strTracks = ruleTables.m_tTracking.GetAtLong(pt);
+        }
+    }
+
+    return strTracks;
 }
 
 // 0x49DB70
@@ -1259,6 +1291,15 @@ CGameEffect* IcewindCGameEffectDominate::Copy()
     return copy;
 }
 
+// 0x4A6220
+void IcewindCGameEffectDominate::OnAddSpecific(CGameSprite* pSprite)
+{
+    // NOTE: Identical code folding shares CGameEffectCharm's (vtable
+    // 0x84B7F0 +0x10).
+    m_numDice = -1;
+    m_diceSize = -1;
+}
+
 // -----------------------------------------------------------------------------
 
 // 0x49EB60
@@ -2337,7 +2378,7 @@ BOOL IcewindCGameEffectRangerTracking::ApplyEffect(CGameSprite* pSprite)
     CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
     pGame->m_gameAreas[pGame->m_visibleArea]->m_resRef.CopyToString(sAreaName);
 
-    STRREF strTracks = GetTrackingString(pSprite, sAreaName);
+    STRREF strTracks = RuleTables_GetTrackingString5466F0(pGame->GetRuleTables(), pSprite, sAreaName);
     g_pBaldurChitin->m_cTlkTable.Fetch(strTracks, strRes);
     g_pBaldurChitin->m_pEngineWorld->DisplayText(pSprite->GetName(),
         strRes.szText,

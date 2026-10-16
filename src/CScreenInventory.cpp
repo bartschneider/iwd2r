@@ -2882,10 +2882,8 @@ void CScreenInventory::IdentifyWithSpell()
                         UINT nSpellID = pSprite->m_spells.m_spellsByClass[nClassIndex].GetSpellsAtLevel(nFoundLevel)->Get(nIndex)->m_nID;
                         abilityId.m_res = g_pBaldurChitin->GetObjectGame()->m_spells.Get(nSpellID);
 
-                        // TODO: The original calls CGameSprite::CheckQuickLists
-                        // (0x71ABA0) with `abilityId`, -1, 0, 0 here, which
-                        // is not in CGameSprite.cpp yet: the quick spell
-                        // buttons of this level keep their old counts.
+                        // The quick spell buttons of the level lose a use.
+                        pSprite->CheckQuickLists(&abilityId, -1, FALSE, FALSE);
                     }
                 } else {
                     pSprite->sub_724FD0(nClass, nFoundLevel, CResRef(CRuleTables::SPWI110), 1, 0);
@@ -2961,9 +2959,8 @@ void CScreenInventory::IdentifyWithScroll()
 
         pItem->SetUsageCount(0, pItem->GetUsageCount(0) - 1);
 
-        // TODO: The original calls CGameSprite::CheckIfUsedUp (0x75D450)
-        // with `nSlot` and 0 here, which is not in CGameSprite.cpp yet: a
-        // scroll whose last charge this was stays in the inventory.
+        // A scroll whose last charge this was leaves the inventory.
+        pSprite->CheckIfUsedUp(nSlot, 0);
 
         MapButtonIdToItemInfo(m_nRequesterButtonId,
             pItem,
@@ -3043,9 +3040,8 @@ void CScreenInventory::CopySpell()
 
             pItem->Release();
 
-            // TODO: The original calls CGameSprite::CheckIfUsedUp (0x75D450)
-            // with `nSlot` and 0 here, which is not in CGameSprite.cpp yet:
-            // a scroll whose last charge this was stays in the inventory.
+            // A scroll whose last charge this was leaves the inventory.
+            pSprite->CheckIfUsedUp(static_cast<SHORT>(nSlot), 0);
 
             CAbilityId abilityId;
             abilityId.m_res = "";
@@ -3060,10 +3056,9 @@ void CScreenInventory::CopySpell()
             abilityId.m_itemType = 2;
             abilityId.m_itemNum = static_cast<SHORT>(nSlot);
 
-            // TODO: The original calls CGameSprite::CheckQuickLists
-            // (0x71ABA0) with `abilityId`, -1, 0, 1 here, which is not in
-            // CGameSprite.cpp yet: the quick item buttons keep the scroll's
-            // old count.
+            // The quick item buttons lose the scroll's use, and an emptied
+            // one is cleared.
+            pSprite->CheckQuickLists(&abilityId, -1, FALSE, TRUE);
 
             pGame->GetObjectArray()->ReleaseDeny(nCharacterId,
                 CGameObjectArray::THREAD_ASYNCH,

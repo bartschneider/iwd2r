@@ -78,6 +78,7 @@ public:
     static void RenderBlackFade3d();
     DWORD ScaleColor16(DWORD color, INT nScale);
     DWORD GetIntensity16(DWORD color);
+    DWORD PackColor(COLORREF rgbColor);
     // A 24-bit pixel: the colour's low word, then its third byte.
     static void PutPixel24(BYTE* pPixel, DWORD color)
     {

@@ -16,6 +16,7 @@ public:
     /* 0040 */ BYTE GetMoveScale() override;
     /* 004C */ BYTE GetMoveScaleDefault() override;
     /* 0054 */ const CRect& GetEllipseRect() override;
+    /* 0074 */ BOOL IsFalseColor() override;
     /* 007C */ BOOL IsMirroring() override;
     /* 0080 */ BOOL IsBeginningOfSequence() override;
     /* 0084 */ BOOL IsEndOfSequence() override;

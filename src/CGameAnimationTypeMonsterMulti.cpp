@@ -399,6 +399,43 @@ void CGameAnimationTypeMonsterMulti::CalculateGCBoundsRect(CRect& rGCBounds, con
     rGCBounds.bottom = rGCBounds.top + nHeight;
 }
 
+// 0x6B5D80
+void CGameAnimationTypeMonsterMulti::ChangeDirection(SHORT nDirection)
+{
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjAnimation.cpp
+    // __LINE__: 10426
+    UTIL_ASSERT(m_currentVidCell != NULL);
+
+    m_currentBamDirection = nDirection;
+    m_currentVidCell = m_currentVidCellBase;
+
+    // Split BAMs keep one direction per file: the last character of each
+    // quadrant's resref is the direction, mirrored ones counted from 16.
+    if (nDirection > m_extendDirectionTest) {
+        m_splitDirectionBamChar = '0' + 16 - static_cast<CHAR>(m_currentBamDirection);
+
+        for (BYTE quad = 0; quad < m_nQuadrants; quad++) {
+            if (m_bSplitBams) {
+                m_currentVidCell[quad].SetResRef(CResRef(m_currentVidCell[quad].GetResRef().GetResRefStr().Left(7) + m_splitDirectionBamChar), m_bDoubleBlit, TRUE, TRUE);
+                m_currentVidCell[quad].m_cPalette.m_nAUCounterBase = static_cast<int>(reinterpret_cast<INT_PTR>(m_currentVidCell));
+            }
+
+            m_currentVidCell[quad].SequenceSet(9 * m_currentBamSequence - m_currentBamDirection + 16);
+        }
+    } else {
+        m_splitDirectionBamChar = '0' + static_cast<CHAR>(m_currentBamDirection);
+
+        for (BYTE quad = 0; quad < m_nQuadrants; quad++) {
+            if (m_bSplitBams) {
+                m_currentVidCell[quad].SetResRef(CResRef(m_currentVidCell[quad].GetResRef().GetResRefStr().Left(7) + m_splitDirectionBamChar), m_bDoubleBlit, TRUE, TRUE);
+                m_currentVidCell[quad].m_cPalette.m_nAUCounterBase = static_cast<int>(reinterpret_cast<INT_PTR>(m_currentVidCell));
+            }
+
+            m_currentVidCell[quad].SequenceSet(9 * m_currentBamSequence + m_currentBamDirection);
+        }
+    }
+}
+
 // 0x6B61E0
 char* CGameAnimationTypeMonsterMulti::GetSndReady()
 {
@@ -829,6 +866,274 @@ void CGameAnimationTypeMonsterMulti::SetColorRangeAll(BYTE rangeValue)
     }
 }
 
+// 0x6B71F0
+void CGameAnimationTypeMonsterMulti::Render(CInfinity* pInfinity, CVidMode* pVidMode, INT nSurface, const CRect& rectFX, const CPoint& ptNewPos, const CPoint& ptReference, DWORD dwRenderFlags, COLORREF rgbTintColor, const CRect& rGCBounds, BOOL bDithered, BOOL bFadeOut, LONG posZ, BYTE transparency)
+{
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjAnimation.cpp
+    // __LINE__: 11138
+    UTIL_ASSERT(pInfinity != NULL && pVidMode != NULL);
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjAnimation.cpp
+    // __LINE__: 11139
+    UTIL_ASSERT(m_currentVidCell != NULL);
+
+    // The part of the area on screen: each quadrant is drawn only when its
+    // bounds reach into it. rectFX, ptReference and rGCBounds are not used.
+    CRect rWorldViewPort(pInfinity->nCurrentX,
+        pInfinity->nCurrentY,
+        pInfinity->nCurrentX + pInfinity->rViewPort.Width(),
+        pInfinity->nCurrentY + pInfinity->rViewPort.Height());
+    CPoint ptPos(ptNewPos.x, ptNewPos.y + posZ);
+
+    if (m_currentBamDirection > m_extendDirectionTest) {
+        dwRenderFlags |= CInfinity::MIRROR_FX;
+    }
+
+    dwRenderFlags |= CInfinity::FXPREP_COPYFROMBACK | 0x4;
+
+    if (transparency != 0) {
+        dwRenderFlags |= 0x2;
+    }
+
+    if (field_446) {
+        field_44A->GetRes()->Demand();
+    }
+
+    CPoint ptQuadCenter;
+    CSize frameSize;
+    CRect rFXRect;
+    CRect rQuadGCBounds;
+    for (BYTE quad = 0; quad < m_nQuadrants; quad++) {
+        m_currentVidCell[quad].GetCurrentCenterPoint(ptQuadCenter, FALSE);
+        m_currentVidCell[quad].GetCurrentFrameSize(frameSize, FALSE);
+        rFXRect.SetRect(0, 0, frameSize.cx, frameSize.cy);
+
+        // NOTE: The FX surface's size overwrites frameSize and is not used.
+        pVidMode->GetFXSize(frameSize);
+
+        CalculateGCBoundsRect(rQuadGCBounds,
+            ptNewPos,
+            ptQuadCenter,
+            posZ,
+            rFXRect.Width(),
+            rFXRect.Height());
+
+        if (!(rWorldViewPort & rQuadGCBounds).IsRectEmpty()) {
+            pInfinity->FXPrep(rFXRect, dwRenderFlags, nSurface, ptPos, ptQuadCenter);
+
+            if (pInfinity->FXLock(rFXRect, dwRenderFlags)) {
+                if (field_446) {
+                    m_currentVidCell[quad].SetPalette(field_44A->GetRes()->GetColorTable(),
+                        field_44A->GetRes()->GetColorCount(),
+                        CVidPalette::TYPE_RESOURCE);
+                }
+
+                // Each channel is the cell's and the tint's added less 255,
+                // at least 0 (red from the low bytes).
+                COLORREF oldTintColor = m_currentVidCell[quad].GetTintColor();
+                INT r = GetRValue(oldTintColor) + GetRValue(rgbTintColor) - 255;
+                INT g = GetGValue(oldTintColor) + GetGValue(rgbTintColor) - 255;
+                INT b = GetBValue(oldTintColor) + GetBValue(rgbTintColor) - 255;
+                m_currentVidCell[quad].SetTintColor(RGB(r >= 0 ? r : 0, g >= 0 ? g : 0, b >= 0 ? b : 0));
+
+                pInfinity->FXRender(&(m_currentVidCell[quad]),
+                    ptQuadCenter.x,
+                    ptQuadCenter.y,
+                    dwRenderFlags,
+                    transparency);
+
+                m_currentVidCell[quad].SetTintColor(oldTintColor);
+
+                // NOTE: The quadrant's bounds go to the clipping polygons as
+                // they are, not raised by posZ.
+                pInfinity->FXRenderClippingPolys(ptPos.x,
+                    ptPos.y - posZ,
+                    posZ,
+                    ptQuadCenter,
+                    rQuadGCBounds,
+                    bDithered,
+                    dwRenderFlags);
+
+                if (bFadeOut) {
+                    pInfinity->FXUnlock(dwRenderFlags, &rFXRect, ptPos + ptQuadCenter);
+                } else {
+                    pInfinity->FXUnlock(dwRenderFlags, NULL, CPoint(0, 0));
+                }
+
+                pInfinity->FXBltFrom(nSurface,
+                    rFXRect,
+                    ptPos.x,
+                    ptPos.y,
+                    ptQuadCenter.x,
+                    ptQuadCenter.y,
+                    dwRenderFlags);
+            }
+        }
+    }
+
+    if (field_446) {
+        field_44A->GetRes()->Release();
+    }
+}
+
+// 0x6B7660
+SHORT CGameAnimationTypeMonsterMulti::SetSequence(SHORT nSequence)
+{
+    BOOL bRandomFrame = FALSE;
+
+    // NOTE: The original inlines this in every case: with split BAMs, each
+    // quadrant's cell of the group gets the file of its quadrant for the
+    // sequence's character and the current direction.
+    auto setSplitBams = [this](CVidCell* pCells, const char* szGroup) {
+        CString sSuffix;
+        for (BYTE quad = 0; quad < m_nQuadrants; quad++) {
+            sSuffix = static_cast<char>(quad + '1');
+
+            pCells[quad].SetResRef(CResRef(m_resRef + szGroup + sSuffix + m_splitBamChar + m_splitDirectionBamChar), m_bDoubleBlit, TRUE, TRUE);
+
+            pCells[quad].m_cPalette.m_nAUCounterBase = static_cast<int>(reinterpret_cast<INT_PTR>(pCells));
+        }
+    };
+
+    switch (nSequence) {
+    case 1:
+    case 5:
+    case 17:
+        m_currentVidCellBase = m_g4VidCellBase;
+        field_44A = &field_67C;
+        m_currentBamSequence = 1;
+
+        if (m_bSplitBams) {
+            m_splitBamChar = '1';
+            setSplitBams(m_g4VidCellBase, "4");
+        }
+        break;
+    case 2:
+    case 8:
+        m_currentVidCellBase = m_g5VidCellBase;
+        field_44A = &field_736;
+        m_currentBamSequence = 1;
+
+        if (m_bSplitBams) {
+            m_splitBamChar = '1';
+            setSplitBams(m_g5VidCellBase, "5");
+        }
+        break;
+    case 3:
+        field_44A = &field_508;
+        m_currentVidCellBase = m_g2VidCellBase;
+        m_currentBamSequence = 0;
+
+        if (m_bSplitBams) {
+            m_splitBamChar = '0';
+            setSplitBams(m_g2VidCellBase, "2");
+        }
+        break;
+    case 4:
+        field_44A = &field_67C;
+        m_currentVidCellBase = m_g4VidCellBase;
+        m_currentBamSequence = 0;
+
+        if (m_bSplitBams) {
+            m_splitBamChar = '0';
+            setSplitBams(m_g4VidCellBase, "4");
+        }
+        break;
+    case 6:
+        if (m_currentBamSequence != 0 || m_currentVidCellBase != m_g2VidCellBase) {
+            bRandomFrame = TRUE;
+        }
+
+        field_44A = &field_508;
+        m_currentVidCellBase = m_g2VidCellBase;
+        m_currentBamSequence = 0;
+
+        if (m_bSplitBams) {
+            m_splitBamChar = '0';
+            setSplitBams(m_g2VidCellBase, "2");
+        }
+        break;
+    case 9:
+        m_currentVidCellBase = m_g4VidCellBase;
+        field_44A = &field_67C;
+        m_currentBamSequence = 2;
+
+        if (m_bSplitBams) {
+            m_splitBamChar = '2';
+            setSplitBams(m_g4VidCellBase, "4");
+        }
+        break;
+    case 10:
+        field_44A = &field_44E;
+        m_currentVidCellBase = m_g1VidCellBase;
+        m_currentBamSequence = 0;
+
+        if (m_bSplitBams) {
+            m_splitBamChar = '0';
+            setSplitBams(m_g1VidCellBase, "1");
+        }
+        break;
+    case 11:
+    case 12:
+    case 13:
+        m_currentVidCellBase = m_g3VidCellBase;
+        field_44A = &field_5C2;
+        m_currentBamSequence = 0;
+        nSequence = 0;
+
+        if (m_bSplitBams) {
+            m_splitBamChar = '0';
+            setSplitBams(m_g3VidCellBase, "3");
+        }
+        break;
+    case 14:
+    case 15:
+        nSequence = 7;
+        // FALLTHROUGH
+    case 7:
+        if (m_currentBamSequence != 0 || m_currentVidCellBase != m_g2VidCellBase) {
+            bRandomFrame = TRUE;
+        }
+
+        field_44A = &field_508;
+        m_currentVidCellBase = m_g2VidCellBase;
+        m_currentBamSequence = 0;
+
+        if (m_bSplitBams) {
+            m_splitBamChar = '0';
+            setSplitBams(m_g2VidCellBase, "2");
+        }
+        break;
+    default:
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjAnimation.cpp
+        // __LINE__: 11505
+        UTIL_ASSERT(FALSE);
+        break;
+    }
+
+    ChangeDirection(m_currentBamDirection);
+
+    SHORT nFrame = 0;
+    if (bRandomFrame) {
+        BYTE nSequenceLength = m_currentVidCell->GetSequenceLength(m_currentVidCell->m_nCurrentSequence, FALSE);
+        if (nSequenceLength != 0) {
+            nFrame = rand() % nSequenceLength;
+        }
+    }
+
+    for (BYTE quad = 0; quad < m_nQuadrants; quad++) {
+        m_currentVidCell[quad].FrameSet(nFrame);
+    }
+
+    if (nSequence == 1) {
+        DecrementFrame();
+    }
+
+    field_800 = static_cast<unsigned char>(nSequence);
+
+    return nSequence;
+}
+
 // 0x6B9CA0
 void CGameAnimationTypeMonsterMulti::GetAnimationResRef(CString& resRef, BYTE range)
 {
@@ -837,4 +1142,12 @@ void CGameAnimationTypeMonsterMulti::GetAnimationResRef(CString& resRef, BYTE ra
     } else {
         resRef = "";
     }
+}
+
+// 0x6C2D70
+BOOLEAN CGameAnimationTypeMonsterMulti::GetCurrentSequenceAndFrame(SHORT nSequence, SHORT nFrame)
+{
+    nSequence = m_currentVidCell->m_nCurrentSequence;
+    nFrame = m_currentVidCell->m_nCurrentFrame;
+    return TRUE;
 }

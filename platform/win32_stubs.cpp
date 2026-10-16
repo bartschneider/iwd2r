@@ -291,7 +291,13 @@ int lstrcmpiA(LPCSTR a, LPCSTR b)
     }
 }
 
-BOOL IsDBCSLeadByte(BYTE) { return FALSE; }
+namespace {
+const bool* g_testLeadBytes = nullptr;
+}
+
+void iwd2r_SetTestLeadBytes(const bool* table) { g_testLeadBytes = table; }
+
+BOOL IsDBCSLeadByte(BYTE testChar) { return g_testLeadBytes != nullptr && g_testLeadBytes[testChar] ? TRUE : FALSE; }
 
 BOOL IsCharAlphaNumericA(CHAR ch) { return std::isalnum(static_cast<unsigned char>(ch)) ? TRUE : FALSE; }
 

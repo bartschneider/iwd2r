@@ -2714,6 +2714,60 @@ void CellBrightest32(CaseContext& ctx)
     CellBlend(ctx, CellMode::Brightest, 0x43656C6C48000000ull); // "CellH"
 }
 
+// CVidMode::PackColor(rgbColor) (0x79ADF0), `ret 4` at 0x79AE3F and
+// 0x79AE9E. It reads g_pChitin->cVideo.m_nBpp, the channel shifts and, at 16
+// bpp and below, the dropped bits.
+using PackColorFn = uint32_t(__fastcall*)(void* self, void* edx, uint32_t rgbColor);
+constexpr uintptr_t kPackColor = 0x79ADF0;
+
+// PackColor on random colours (and black and white) at 32 and 24 bpp with
+// the shifts 16/8/0 and the reversed 0/8/16, then at 16 bpp in 5-6-5 and
+// 5-5-5 (SetMode16), whose result keeps the low word only.
+void PackColor(CaseContext& ctx)
+{
+    VideoFixture video(ctx);
+    Picks picks(ctx.seed, 0x5061636B00000000ull); // "Pack"
+    auto run = [&](const std::string& mode) {
+        for (int i = 0; i < 2000; ++i) {
+            const uint32_t rgb = i == 0 ? 0u : i == 1 ? 0xFFFFFFu
+                                                      : picks.Bits();
+            ctx.SetInputs(mode + ", rgb " + Hex(rgb));
+            uint32_t original = 0;
+            ctx.CallOriginal([&] {
+                original = reinterpret_cast<PackColorFn>(kPackColor)(video.mode, nullptr, rgb);
+            });
+            const uint32_t mine = video.oursMode->PackColor(rgb);
+            ctx.CountInputs(1);
+            if (original != mine) {
+                ctx.Fail(ctx.Inputs(), Hex(original), Hex(mine));
+                return;
+            }
+        }
+    };
+    auto setDepth = [&](uint16_t nBpp, uint32_t rShift, uint32_t bShift) {
+        ctx.CallOriginal([&] {
+            Put<uint16_t>(video.chitin, kBppOffset, nBpp);
+            Put<uint32_t>(video.mode, kRShiftOffset, rShift);
+            Put<uint32_t>(video.mode, kGShiftOffset, 8);
+            Put<uint32_t>(video.mode, kBShiftOffset, bShift);
+        });
+        video.oursChitin->cVideo.m_nBpp = nBpp;
+        video.oursMode->m_dwRBitShift = rShift;
+        video.oursMode->m_dwGBitShift = 8;
+        video.oursMode->m_dwBBitShift = bShift;
+    };
+    setDepth(32, 16, 0);
+    run("32 bpp, shifts 16/8/0");
+    setDepth(32, 0, 16);
+    run("32 bpp, shifts 0/8/16");
+    setDepth(24, 16, 0);
+    run("24 bpp, shifts 16/8/0");
+    SetMode16(video, ctx, true);
+    run("16 bpp, 5-6-5");
+    SetMode16(video, ctx, false);
+    run("16 bpp, 5-5-5");
+}
+
 } // namespace
 
 ORACLE_CASE("vid/hline_shaded32", HLineShaded32);
@@ -2765,3 +2819,4 @@ ORACLE_CASE("vid/draw_ellipse32", Ellipse32);
 ORACLE_CASE("vid/draw_recticle32", Recticle32);
 ORACLE_CASE("vid/draw_recticle16", Recticle16);
 ORACLE_CASE("vid/draw_recticle24", Recticle24);
+ORACLE_CASE("vid/pack_color", PackColor);
