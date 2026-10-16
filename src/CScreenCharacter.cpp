@@ -10622,28 +10622,56 @@ void CUIControlTextDisplayCharacterSoundSounds::OnItemSelected(LONG lMarker)
 // 0x8F2B28
 static char byte_8F2B28[1000];
 
+// 0x5EF760's line in `line` (`size` bytes): `row`, the label copied over
+// its start, the value, a new line.
+//
+// NOTE: The original copies the label over the row with _mbsnbcpy of the
+// label's length (no terminator) and appends the value and the new line
+// with _mbscat, into 1000 bytes, with no length check. A label longer than
+// the row runs into what the buffer held before (the row's terminator is
+// overwritten), and a long label or value runs past the buffer. Ours ends
+// a long label where it ends and cuts the label, then the value, so that
+// the line and its new line fit (ruling P4-10). Shorter lines are the
+// original's.
+static void FormatSheetLine(char* line, size_t size, const char* row, const CString& sLabel, const CString& sValue)
+{
+    const size_t nLimit = size - 2;
+    strcpy(line, row);
+    const size_t nRow = strlen(row);
+
+    size_t nLabel = static_cast<size_t>(sLabel.GetLength());
+    if (nLabel > nLimit) {
+        nLabel = nLimit;
+    }
+    memcpy(line, static_cast<LPCSTR>(sLabel), nLabel);
+    size_t nUsed = nLabel > nRow ? nLabel : nRow;
+
+    size_t nValue = static_cast<size_t>(sValue.GetLength());
+    if (nValue > nLimit - nUsed) {
+        nValue = nLimit - nUsed;
+    }
+    memcpy(line + nUsed, static_cast<LPCSTR>(sValue), nValue);
+    nUsed += nValue;
+    line[nUsed++] = '\n';
+    line[nUsed] = '\0';
+}
+
 // 0x5EF760
 char* CScreenCharacter::sub_5EF760(const CString& sLabel, const CString& sValue, BYTE bIndent)
 {
     // A line of the text character sheet: the label over a row of dots, the
     // value, a new line; indented lines have a shorter row behind three
     // spaces. Returns a static buffer.
-    //
-    // NOTE: The original copies the label over the dots without a length
-    // check (_mbsnbcpy); a label longer than the row would run past it.
     if (!bIndent) {
-        strcpy(byte_8F2B28, "L............................ ");
-        strncpy(byte_8F2B28, sLabel, sLabel.GetLength());
-        strcat(byte_8F2B28, sValue);
-        strcat(byte_8F2B28, "\n");
+        FormatSheetLine(byte_8F2B28, sizeof(byte_8F2B28), "L............................ ", sLabel, sValue);
         return byte_8F2B28;
     }
 
-    char szLine[1000];
-    strcpy(szLine, "L......................... ");
-    strncpy(szLine, sLabel, sLabel.GetLength());
-    strcat(szLine, sValue);
-    strcat(szLine, "\n");
+    // NOTE: The original builds the indented line in 1000 bytes of stack and
+    // appends it to the three spaces; ours keeps it to the 996 characters
+    // the static buffer has room for behind them (ruling P4-10).
+    char szLine[sizeof(byte_8F2B28) - 3];
+    FormatSheetLine(szLine, sizeof(szLine), "L......................... ", sLabel, sValue);
     strcpy(byte_8F2B28, "   ");
     strcat(byte_8F2B28, szLine);
     return byte_8F2B28;

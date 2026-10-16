@@ -1054,6 +1054,19 @@ TEST_CASE("character screen: the text character sheet's lines", "[uimisc][charac
     CHECK(std::string(CScreenCharacter::sub_5EF760(CString("Strength"), CString("13"), TRUE))
         == "   Strength" + std::string(18, '.') + " 13\n");
 
+    // Bounded (ruling P4-10): a label longer than the row ends where it
+    // ends, the value follows; the line keeps to the 1000-byte buffer with
+    // its new line, the value cut first, then the label.
+    const std::string sLong(40, 'x');
+    CHECK(std::string(CScreenCharacter::sub_5EF760(CString(sLong.c_str()), CString("7"), FALSE)) == sLong + "7\n");
+    CHECK(std::string(CScreenCharacter::sub_5EF760(CString(sLong.c_str()), CString("7"), TRUE)) == "   " + sLong + "7\n");
+    const std::string sHuge(2000, 'v');
+    CHECK(std::string(CScreenCharacter::sub_5EF760(CString("Name"), CString(sHuge.c_str()), FALSE))
+        == "Name" + std::string(25, '.') + " " + std::string(998 - 30, 'v') + "\n");
+    CHECK(std::string(CScreenCharacter::sub_5EF760(CString(sHuge.c_str()), CString("7"), FALSE)) == std::string(998, 'v') + "\n");
+    CHECK(std::string(CScreenCharacter::sub_5EF760(CString("Name"), CString(sHuge.c_str()), TRUE))
+        == "   Name" + std::string(22, '.') + " " + std::string(995 - 27, 'v') + "\n");
+
     FILE* file = tmpfile();
     REQUIRE(file != nullptr);
     CItem sword(CResRef("00SWDL01"), 0, 0, 0, 0, 0x1);
