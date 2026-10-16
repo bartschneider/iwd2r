@@ -1,11 +1,15 @@
 #define NOMINMAX
 #include <catch2/catch_test_macros.hpp>
 
+#include "CAICondition.h"
+#include "CAIScriptFile.h"
+#include "CAITrigger.h"
 #include "CBaldurChitin.h"
 #include "CButtonData.h"
 #include "CChitin.h"
 #include "CDerivedStats.h"
 #include "CGameArea.h"
+#include "CGameContainer.h"
 #include "CGameObjectArray.h"
 #include "CGameSprite.h"
 #include "CInfButtonArray.h"
@@ -849,6 +853,62 @@ TEST_CASE("toolbar: a selected character's buttons and weapon set reach the acti
     pGame->SelectToolbar();
 }
 
+// UpdateButtons (0x58A340), the quick weapons (types 60-67): the button of
+// the selected weapon gets the selected frame (field_1CC) only while a
+// weapon button is the selected button (0x58D2C0 tests m_nSelectedButton).
+// With none selected it keeps an unselected button's look (render round 5
+// found ours testing the button's own type: the red frame where the
+// original draws the green highlight).
+TEST_CASE("toolbar: the selected weapon's button is framed only while a weapon button is selected", "[uimisc][toolbar][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    CGameSprite* pSprite = PartyMember();
+    if (pSprite == NULL) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    if (pGame->GetGroup()->GetCount() == 0) {
+        pGame->SelectCharacter(pSprite->GetId(), FALSE);
+    }
+    pGame->SelectToolbar();
+    CInfButtonArray* pButtonArray = pGame->GetButtonArray();
+    INT savedTypes[12];
+    memcpy(savedTypes, pButtonArray->m_buttonTypes, sizeof(savedTypes));
+    const INT nSavedSelected = pButtonArray->m_nSelectedButton;
+
+    // Button 0: the current weapon set's weapon, the selected weapon.
+    const INT nType = 60 + 2 * pSprite->m_nWeaponSet;
+    pButtonArray->m_buttonTypes[0] = nType;
+
+    pButtonArray->m_nSelectedButton = nType;
+    pButtonArray->UpdateButtons();
+    REQUIRE(pButtonArray->m_buttonArray[0].field_1CC == 1);
+
+    // Another weapon button selected: still framed.
+    pButtonArray->m_nSelectedButton = nType == 67 ? 60 : 67;
+    pButtonArray->UpdateButtons();
+    CHECK(pButtonArray->m_buttonArray[0].field_1CC == 1);
+
+    // No button selected (100, as Escape leaves it) or another action's.
+    pButtonArray->m_nSelectedButton = 100;
+    pButtonArray->UpdateButtons();
+    CHECK(pButtonArray->m_buttonArray[0].field_1CC == 0);
+    pButtonArray->m_nSelectedButton = 2;
+    pButtonArray->UpdateButtons();
+    CHECK(pButtonArray->m_buttonArray[0].field_1CC == 0);
+
+    memcpy(pButtonArray->m_buttonTypes, savedTypes, sizeof(savedTypes));
+    pButtonArray->m_nSelectedButton = nSavedSelected;
+    pGame->SelectToolbar();
+}
+
 namespace {
 
 // The world screen with game input on (CGameSave::m_mode bit 0), the
@@ -1089,6 +1149,71 @@ TEST_CASE("world keys: the inventory key opens the inventory", "[uimisc][worldke
     g_pBaldurChitin->pActiveEngine = pPrevious;
     pGame->GetWorldTimer()->m_active = bTimeActive;
     pGame->GetGameSave()->m_mode = nMode;
+}
+
+// CAIScriptFile::ParseTrigger (0x410B40), an object and two numbers
+// (TRIGGER.IDS 0x40E7 CheckSkillGT(O:Object*,I:Value*,I:SkillNum*Skills)):
+// the last one is read without the closing bracket (0x41212A-0x412151), so
+// an IDS name resolves. Brogan's Intimidate reply (10BROGAN state 7) asks
+// for it; it used to keep the bracket and read 0.
+TEST_CASE("dialog script: a trigger's last number is found by its IDS name", "[uimisc][script][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+
+    CAIScriptFile scriptFile;
+    scriptFile.ParseConditionalString(CString("CheckSkillGT(Protagonist, 0, Intimidate)\n"));
+    INFO(static_cast<const char*>(scriptFile.m_errors));
+    REQUIRE(scriptFile.m_curCondition->m_triggerList.GetCount() == 1);
+    CAITrigger* pTrigger = scriptFile.m_curCondition->m_triggerList.GetHead();
+    CHECK(pTrigger->m_triggerID == 0x40E7);
+    CHECK(pTrigger->m_specificID == 0);
+    CHECK(pTrigger->m_specific2 == 7); // SKILLS.IDS: 7 Intimidate
+
+    // A number as before.
+    scriptFile.ParseConditionalString(CString("CheckSkillLT(Protagonist, 1, 4)\n"));
+    REQUIRE(scriptFile.m_curCondition->m_triggerList.GetCount() == 1);
+    pTrigger = scriptFile.m_curCondition->m_triggerList.GetHead();
+    CHECK(pTrigger->m_triggerID == 0x40E8);
+    CHECK(pTrigger->m_specificID == 1);
+    CHECK(pTrigger->m_specific2 == 4);
+}
+
+// CGameContainer::MarshalMessage (0x480C00) for a new ground pile, as
+// CInfGame::GetGroundPile (0x5B75C0) makes one at the inventory's opening:
+// no polygon, no items. The item count starts at 0 (0x480D09); it used to
+// be read uninitialised and fail the size assert inside the constructor's
+// CGameObjectArray::Add.
+TEST_CASE("container: a new ground pile marshals no items", "[uimisc][container][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    CGameSprite* pSprite = PartyMember();
+    if (pSprite == NULL) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+
+    const CPoint& pt = pSprite->GetPos();
+    CGameContainer* pPile = new CGameContainer(pSprite->GetArea(), CRect(pt.x - 8, pt.y - 6, pt.x + 9, pt.y + 7));
+    REQUIRE(pPile->m_lstItems.GetCount() == 0);
+
+    BYTE* pData = NULL;
+    DWORD dwSize = 0;
+    pPile->MarshalMessage(&pData, &dwSize);
+    CString sArea;
+    pSprite->GetArea()->m_resRef.CopyToString(sArea);
+    // The record, the area name's length and name, the polygon's count and
+    // the item count; no points and no items.
+    CHECK(dwSize == sizeof(CAreaFileContainer) + sizeof(BYTE) + 2 * sizeof(WORD) + static_cast<DWORD>(sArea.GetLength()));
 }
 
 // The text character sheet's lines (0x5EF760): the label over a row of
