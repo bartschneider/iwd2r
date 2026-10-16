@@ -5,7 +5,6 @@
 #include "CGameSprite.h"
 #include "CIcon.h"
 #include "CInfCursor.h"
-#include "CInfGameItemUse.h"
 #include "CInfGame.h"
 #include "CScreenInventory.h"
 #include "CScreenSpellbook.h"
@@ -1681,8 +1680,7 @@ void CScreenStore::UpdateBuySellPanel()
 
         pStoreItem->SetSelected(cItem.m_bSelected);
         pStoreItem->SetEnabled(bCanBuy && cItem.m_bEnabled);
-        pStoreItem->SetValid(CInfGame_CheckIfPlayerInPortraitSlotCanUseItem(pGame,
-            static_cast<SHORT>(m_nSelectedCharacter),
+        pStoreItem->SetValid(pGame->CheckIfPlayerInPortraitSlotCanUseItem(static_cast<SHORT>(m_nSelectedCharacter),
             cItem.m_pItem,
             &strError,
             TRUE));
@@ -1783,8 +1781,7 @@ void CScreenStore::UpdateBuySellPanel()
                 pGroupItem->SetEnabled(bCanSell && cItem.m_bEnabled);
             }
 
-            pGroupItem->SetValid(CInfGame_CheckIfPlayerInPortraitSlotCanUseItem(pGame,
-                static_cast<SHORT>(m_nSelectedCharacter),
+            pGroupItem->SetValid(pGame->CheckIfPlayerInPortraitSlotCanUseItem(static_cast<SHORT>(m_nSelectedCharacter),
                 cItem.m_pItem,
                 &strError,
                 TRUE));
@@ -3331,7 +3328,7 @@ void CScreenStore::BuyStoreItems()
             nAmount = pStoreItem->m_nCount;
         }
 
-        SHORT nSlot = CInfGame_FindEmptyItemPersonalInventory(pGame, static_cast<SHORT>(m_nSelectedCharacter));
+        SHORT nSlot = pGame->FindEmptyItemPersonalInventory(static_cast<SHORT>(m_nSelectedCharacter));
         while (nSlot >= 0) {
             CItem* pNewItem = new CItem(cItem);
 
@@ -3404,7 +3401,7 @@ void CScreenStore::BuyStoreItems()
                 break;
             }
 
-            nSlot = CInfGame_FindEmptyItemPersonalInventory(pGame, static_cast<SHORT>(m_nSelectedCharacter));
+            nSlot = pGame->FindEmptyItemPersonalInventory(static_cast<SHORT>(m_nSelectedCharacter));
         }
 
         pStoreItem->m_bSelected = FALSE;
@@ -3521,7 +3518,7 @@ void CScreenStore::BuyBagItems()
 
         // NOTE: The items go to the bag, yet the loop also stops when the
         // character has no free slot (as the original).
-        SHORT nSlot = CInfGame_FindEmptyItemPersonalInventory(pGame, static_cast<SHORT>(m_nSelectedCharacter));
+        SHORT nSlot = pGame->FindEmptyItemPersonalInventory(static_cast<SHORT>(m_nSelectedCharacter));
         while (nSlot >= 0) {
             DWORD nCount;
             if (cItem.GetMaxStackable() > 1) {
@@ -3602,7 +3599,7 @@ void CScreenStore::BuyBagItems()
                 break;
             }
 
-            nSlot = CInfGame_FindEmptyItemPersonalInventory(pGame, static_cast<SHORT>(m_nSelectedCharacter));
+            nSlot = pGame->FindEmptyItemPersonalInventory(static_cast<SHORT>(m_nSelectedCharacter));
         }
 
         pStoreItem->m_bSelected = FALSE;
@@ -3704,7 +3701,7 @@ void CScreenStore::BuyContainerItems()
             nAmount = pStoreItem->m_nCount;
         }
 
-        SHORT nSlot = CInfGame_FindEmptyItemPersonalInventory(pGame, static_cast<SHORT>(m_nSelectedCharacter));
+        SHORT nSlot = pGame->FindEmptyItemPersonalInventory(static_cast<SHORT>(m_nSelectedCharacter));
         while (nSlot >= 0) {
             CItem* pNewItem = new CItem(cItem);
 
@@ -3766,7 +3763,7 @@ void CScreenStore::BuyContainerItems()
                 break;
             }
 
-            nSlot = CInfGame_FindEmptyItemPersonalInventory(pGame, static_cast<SHORT>(m_nSelectedCharacter));
+            nSlot = pGame->FindEmptyItemPersonalInventory(static_cast<SHORT>(m_nSelectedCharacter));
         }
 
         pStoreItem->m_bSelected = FALSE;
@@ -3868,7 +3865,7 @@ void CScreenStore::BuyContainerBagItems()
 
         // NOTE: The items go to the bag, yet the loop also stops when the
         // character has no free slot (as the original).
-        SHORT nSlot = CInfGame_FindEmptyItemPersonalInventory(pGame, static_cast<SHORT>(m_nSelectedCharacter));
+        SHORT nSlot = pGame->FindEmptyItemPersonalInventory(static_cast<SHORT>(m_nSelectedCharacter));
         while (nSlot >= 0) {
             DWORD nCount;
             if (cItem.GetMaxStackable() > 1) {
@@ -3943,7 +3940,7 @@ void CScreenStore::BuyContainerBagItems()
                 break;
             }
 
-            nSlot = CInfGame_FindEmptyItemPersonalInventory(pGame, static_cast<SHORT>(m_nSelectedCharacter));
+            nSlot = pGame->FindEmptyItemPersonalInventory(static_cast<SHORT>(m_nSelectedCharacter));
         }
 
         pStoreItem->m_bSelected = FALSE;
