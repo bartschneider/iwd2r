@@ -261,7 +261,9 @@ BYTE CVisibilityMap::GetSubTileCode(LONG nTile)
         code |= 0x8;
     }
 
-    code <<= 8;
+    // The visibility code is the high nibble (FOGOWAR_SHIFT, `shl bl, 4`
+    // at 0x552668).
+    code <<= 4;
 
     if (!IsTileExplored(nTile)) {
         code |= 0x1;

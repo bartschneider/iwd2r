@@ -17,6 +17,7 @@
 #include "CVidImage.h"
 #include "CVidInf.h"
 #include "CVidPoly.h"
+#include "CVisibility.h"
 #include "CWarp.h"
 
 #include <algorithm>
@@ -2024,4 +2025,47 @@ TEST_CASE("bk_render_particle_returns_true", "[vid]")
 
     mode.m_SurfaceDesc.lpSurface = NULL;
     CHECK(mode.BKRender(&particle, CRect(0, 0, 8, 8), CParticle::DOTS, 1) == FALSE);
+}
+
+// CVisibilityMap::GetSubTileCode (0x5525C0) puts the corners that are not
+// visible in the high nibble (`shl bl, 4` at 0x552668) and the unexplored
+// ones in the low nibble: bit 0x1 the tile, 0x2 the one below, 0x4 below
+// right, 0x8 right; a tile off the map counts as neither. Ours shifted by 8,
+// which dropped the visibility bits from the BYTE, so the fog never showed
+// what the party does not see.
+TEST_CASE("visibility_sub_tile_code_keeps_the_unseen_corners", "[vid]")
+{
+    // GetSubTileCode reads only the map and its size; the constructor would
+    // need the current video mode (sub_5518A0).
+    alignas(CVisibilityMap) unsigned char storage[sizeof(CVisibilityMap)];
+    std::memset(storage, 0, sizeof(storage));
+    auto* map = reinterpret_cast<CVisibilityMap*>(storage);
+    // 4x2 tiles: 0x80 explored, 0x3F the characters that see the tile.
+    BYTE tiles[8] = {
+        0x81,
+        0x80,
+        0x80,
+        0x82,
+        0x00,
+        0x82,
+        0x81,
+        0x00,
+    };
+    map->m_pMap = tiles;
+    map->m_nWidth = 4;
+    map->m_nHeight = 2;
+    map->m_nMapSize = 8;
+
+    // Tile 0: seen; below (4) unseen and unexplored; below right (5) seen;
+    // right (1) explored but unseen.
+    CHECK(map->GetSubTileCode(0) == 0xA2);
+    // Tile 2: itself explored but unseen; below right (7) neither seen nor
+    // explored; below (6) and right (3) both.
+    CHECK(map->GetSubTileCode(2) == 0x54);
+    // Tile 3: below right (8) is off the map, and its right is tile 4, the
+    // next row's first (nothing stops at the row's end).
+    CHECK(map->GetSubTileCode(3) == 0xEE);
+    // Every corner seen and explored.
+    tiles[0] = tiles[1] = tiles[4] = tiles[5] = 0x81;
+    CHECK(map->GetSubTileCode(0) == 0x00);
 }
