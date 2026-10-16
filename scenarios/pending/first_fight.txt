@@ -27,6 +27,10 @@
 # Needs on our side what first does not have yet: the world screen's keys
 # (CScreenWorld::OnKeyDown, ui-misc round 2) for Space; without them the
 # game stays paused after Enemy Sighted.
+# About 5400 frames, with character generation: at walk_and_talk's pace in
+# Windows Sandbox (4100 frames in 300 s) about 400 s, past the default
+# 180 s of replay record and compare:
+# timeout: 720
 wait 60
 checkpoint menu
 # New Game (645,262), then Done (537,562) with New Party selected, then the
