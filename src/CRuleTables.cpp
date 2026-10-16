@@ -2077,6 +2077,23 @@ INT CRuleTables::sub_542CB0(INT nClass, CDerivedStats& oldDStats, CDerivedStats&
     return 0;
 }
 
+// 0x542EC0
+void CRuleTables::sub_542EC0(BYTE nClass, BYTE nCON, INT& nBonus, INT& nRolls) const
+{
+    // The hit points a level gains from constitution, as the character
+    // sheet export (0x5EFFD0) shows them: (CON - 10) / 2, one less below 10,
+    // truncated by __ftol. The class is not read.
+    (void)nClass;
+
+    float fCON = static_cast<float>(nCON);
+    if (nCON < 10) {
+        fCON -= 1.0f;
+    }
+
+    nBonus = static_cast<INT>((fCON - 10.0f) / 2.0f);
+    nRolls = 1;
+}
+
 // 0x542F20
 INT CRuleTables::GetHPCONBonusTotal(const CAIObjectType& typeAI, CDerivedStats& DStats, BYTE nCON) const
 {

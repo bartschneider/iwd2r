@@ -505,8 +505,12 @@ LPSTR lstrcatA(LPSTR destination, LPCSTR source);
 int lstrlenA(LPCSTR text);
 int lstrcmpA(LPCSTR a, LPCSTR b);
 int lstrcmpiA(LPCSTR a, LPCSTR b);
-// Single-byte code page: never a lead byte.
+// Single-byte code page: never a lead byte, unless a test has set a
+// double-byte code page's lead bytes with iwd2r_SetTestLeadBytes.
 BOOL IsDBCSLeadByte(BYTE testChar);
+// Tests only: `table` (256 entries, kept by the caller) marks the lead
+// bytes IsDBCSLeadByte reports; NULL restores the single-byte code page.
+void iwd2r_SetTestLeadBytes(const bool* table);
 // ASCII letters and digits only.
 BOOL IsCharAlphaNumericA(CHAR ch);
 // No access checking: only a null pointer with a nonzero size is bad.

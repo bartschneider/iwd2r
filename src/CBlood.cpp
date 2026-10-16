@@ -152,7 +152,7 @@ BOOLEAN CBlood::AsynchronousUpdate()
                         INT nRandom = rand() % 4;
                         pSplash->m_vel.x = pParticle->m_vel.x;
                         pSplash->m_vel.y = (pParticle->m_vel.y * 3) >> 2;
-                        pSplash->m_vel.z = (nRandom + 1) * 1024;
+                        pSplash->m_vel.z = (nRandom + 1) * CParticle::GRAVITY;
                         pSplash->m_nTailLength = SPLASH_LENGTH;
                     }
                 } else if (nResult == CParticle::DEAD) {
@@ -179,6 +179,7 @@ void CBlood::Render(CVidMode* pVidMode, INT nSurface)
 {
     CInfinity* pInfinity = &(m_pArea->m_cInfinity);
     COLORREF rgbGlobalLighting = pInfinity->GetGlobalLighting();
+    DWORD dwRenderFlags = CInfinity::FXPREP_CLEARFILL | 0x1;
 
     CRect rView;
     rView.left = pInfinity->nCurrentX;
@@ -196,8 +197,8 @@ void CBlood::Render(CVidMode* pVidMode, INT nSurface)
 
     CRect rFX(0, 0, m_rBounding.right - m_rBounding.left, m_rBounding.bottom - m_rBounding.top);
 
-    pInfinity->FXPrep(rFX, 0x101, -1, CPoint(0, 0), CPoint(0, 0));
-    if (!pInfinity->FXLock(rFX, 0x101)) {
+    pInfinity->FXPrep(rFX, dwRenderFlags, -1, CPoint(0, 0), CPoint(0, 0));
+    if (!pInfinity->FXLock(rFX, dwRenderFlags)) {
         return;
     }
 
@@ -245,9 +246,9 @@ void CBlood::Render(CVidMode* pVidMode, INT nSurface)
         m_rBounding.top + m_posZ,
         m_rBounding.right,
         m_rBounding.bottom + m_posZ);
-    pInfinity->FXRenderClippingPolys(m_pos.x, m_pos.y, -m_posZ, CPoint(0, 0), rClip, FALSE, 0x101);
-    pInfinity->FXUnlock(0x101, NULL, CPoint(0, 0));
-    pInfinity->FXBltFrom(nSurface, rFX, m_refPoint.x, m_refPoint.y, 0, 0, 0x101);
+    pInfinity->FXRenderClippingPolys(m_pos.x, m_pos.y, -m_posZ, CPoint(0, 0), rClip, FALSE, dwRenderFlags);
+    pInfinity->FXUnlock(dwRenderFlags, NULL, CPoint(0, 0));
+    pInfinity->FXBltFrom(nSurface, rFX, m_refPoint.x, m_refPoint.y, 0, 0, dwRenderFlags);
 }
 
 // 0x519C40

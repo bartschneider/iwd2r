@@ -1,7 +1,7 @@
 ---
 address: 0x5ADAE0
 name: CInfGame::SelectToolbar
-exemption: "needs the object array, the selection and the world screen; run by Unmarshal in world_entry"
+exemption: "needs the object array, the selection and the world screen; run by Unmarshal in world_entry and checked by tests/test_ui_misc.cpp [uimisc]"
 ghidra_version: 12.1.4
 ---
 
@@ -128,13 +128,17 @@ sprite gives 114 for a PC and 110 otherwise (state 0 when the group list is
 empty or the sprite cannot be shared); several give 110. When the world
 screen's active panel is 8 (the container panel) the container closes.
 
-Partial: for one selected sprite the original first copies its nine
-customizable button types (`field_3D14`, sprite + 0x3D14) into the button
-array at +0x19B6 (0x595E70) and, for PCs and others alike, its weapon set
-(`m_nWeaponSet`, +0x4C68) into the button array at +0x19E8 (0x595F70).
-CInfButtonArray has neither function nor fields (TODO in the code). The
-active panel accessor 0x691130 is not in our tree either; it returns
+For one selected sprite the original first copies its nine customizable
+button types (`field_3D14`, sprite + 0x3D14) into the button array
+(CInfButtonArray::UpdateCustomizableButtonTypes 0x595E70, PCs only, call
+at 0x5ADBBC) and, for PCs and others alike, its weapon set (`m_nWeaponSet`,
++0x4C68) with UpdateSelectedWeaponSet (0x595F70, calls at 0x5ADBD0 and
+0x5ADC12); round 2 of the ui-misc stream added both calls (the TODOs are
+gone). The active panel accessor 0x691130 is not in our tree; it returns
 CScreenWorld::field_EA4, which ours reads directly.
+
+Test: tests/test_ui_misc.cpp "toolbar: a selected character's buttons and
+weapon set reach the action bar".
 
 No oracle case: it needs the object array, the selection and the world
 screen. Unmarshal calls it at every game load (`world_entry`).
