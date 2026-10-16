@@ -36,7 +36,7 @@ public:
     /* 0004 */ CTypedPtrList<CPtrList, CUIControlBase*> m_lControls; // #guess
     /* 0020 */ DWORD m_nID;
     /* 0024 */ CPoint m_ptOrigin;
-    /* 0030 */ CPoint m_ptBaseOrigin;
+    /* 002C */ CPoint m_ptBaseOrigin;
     /* 0034 */ CSize m_size;
     /* 003C */ WORD m_wFlags;
     /* 003E */ CVidMosaic m_mosBackground;

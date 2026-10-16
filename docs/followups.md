@@ -68,7 +68,7 @@ These are in `oracle/replay/` and `tools/`.
 ## Tooling
 
 - `ORACLE_DIR` in `tools/oracle.py` and `WIN_CHECKOUT` in `tools/play.py` are hardcoded to `/mnt/c/Users/thier/...`, so the Windows side works only for this user. Derive them from `%USERPROFILE%` (through `cmd.exe /c echo` or `wslvar`) or an environment variable.
-- Windows Sandbox real-input mode (`--vm windows`) is untested. It needs the Windows feature enabled and a reboot.
+- **walk_and_talk's door step in real input.** In replay the last leg reaches AR1000_Door5 (party 840,978, the door open), but in every real-input run so far, on Xvfb and in Windows Sandbox, Probe stops at about 904..968,942..966 with the door closed: after the portrait double click the view sits about 80 px further right than the original's, so the `origin screen` click at 213,144 (scenarios/walk_and_talk.txt) lands left of the door. `walk_and_talk.expect.json` leaves the doors out (`realinput.EXPECT_FIELDS`); add `world.doors` once the door step reaches the door in real input.
 - `replay compare` reports a `known_differences.json` entry that matched nothing, but does not fail on it. An entry carries no scenario, so one valid for another scenario would look stale. It stays a warning until entries carry a `scenario` field.
 - Consider a data-gated test through `CRuleTables::GetClassStringMixed` (the fighter-type string choice: Barbarian 34, otherwise 16799). The id choice is confirmed by the disassembly noted in `docs/evidence/544120.md` and exercised by the chargen replay.
 
@@ -130,7 +130,7 @@ The guards in `src/render/api.h` leave these for the renderer that first draws t
 ## Derived stats, spells and projectiles (from project 3, milestone 3)
 
 - Stoneskin (218) and other damage reductions: when the source effect leaves without its pool running out (dispel, `RemoveAllOfType`, expiry), the `m_damageReductions` entries keep pointers into the deleted effect until the next `ProcessEffectList` rebuild; a hit or a character-screen lookup in that window touches freed memory, as in the original. Ruling M3-10 only bounds the exhausted-pool path. A faithful-in-play fix would clear matching entries when the effect is removed.
-- Not ported: CheckAdd's SPWI420 part (0x547620); `CGameEffect::CheckSave` (0x4A42F0), the only reader of `m_spellPenetrationBonus`; the persistent effects' TODOs (0x4C1C00, 0x4C21E0, 0x4C2CB0, 0x4C3280); the derived-stats arrays at +0x328 and +0x378.
+- Not ported: `CGameEffect::CheckSave` (0x4A42F0), the only reader of `m_spellPenetrationBonus`; the persistent effects' TODOs (0x4C1C00, 0x4C21E0, 0x4C2CB0, 0x4C3280); the derived-stats arrays at +0x328 and +0x378.
 - Projectiles: the decoder 0x51EAF0 sends about 380 unported types to the instant projectile (a temporary DEVIATION): effects land on the Fire frame and later object ids shift, so a combat replay diverges from the first unported projectile fired. `Render`, sparkle, the visual-effect and area-explosion objects are not ported (projectiles are invisible). Spell-hit types 45, 52, 57 and 72 return NULL (see the warning in `CProjectile.h`). The cone projectile 0x579B40 is missing, so effect 293 stays blocked.
 - Effect TODOs now wirable with the merged projectile classes (src/IcewindCGameEffects.cpp): 233, 235, 255, 256, 264, 449, 265, 294, 295, 417 (types 0 and 2) and 430 (partly).
 
@@ -192,10 +192,9 @@ The crisp-text requirement is met by `Program Options/Text Renderer=scalable` (s
 
 ## UI controls and visual systems (from project 3, milestone 5, ui-misc)
 
-- Spontaneous casting (the seam's 0x716770) skips `CGameSprite::CheckQuickLists` (0x71ABA0), so the quick spell slots keep a converted spell's old count until they are rebuilt.
-- `CScreenWorld::OnKeyDown` should call `CInfButtonArray::sub_594170` (at 0x688D2A, 0x688E17, 0x6890E2, 0x689146 and 0x6891B9): the customize state's keys. The 'I' key does not open the inventory. `CInfGame::SelectToolbar`'s TODOs can call 0x595E70 and 0x595F70 now.
-- `CScreenCharacter::UpdateEquipmentInformation` (0x5DE2C0) and `sub_5E4560` wait for CGameSprite 0x723EA0 (not ported anywhere) and the p3/combat ports of 0x73CF10, 0x73D080, CItem 0x4E9840 and `CRuleTables::GetIterativeAttackBonus`.
-- `CUtil::FindOneOf` (0x781180) tests `IsDBCSLeadByte(sMutableSeparators[nIndex])` for every index of the searched string, reading the separators past their end; the original tests the searched string's byte, and only with Double Byte Character Support. Harmless on Linux (IsDBCSLeadByte is always FALSE) but an out-of-bounds read.
+- `CGameSprite::CheckQuickLists` (0x71ABA0) is ported and spontaneous casting (0x716770) calls it (ui-misc round 2); its other callers in CGameSprite.cpp (Swing, the Spell actions, UseItem, the shapeshift and innate paths) and CGameEffect.cpp keep their TODOs for their owners.
+- `CScreenWorld::OnKeyDown` (0x6872D0) is ported (ui-misc round 2) but for three TODOs: the cheat keys (0x68956A-0x68BC5D, Ctrl with `field_156`, which nothing sets), the keymap's spell keys 53-371 (0x6893FD-0x689502: CGameSprite 0x719180 and the shared table at 0x8B4EB0) and keymap 21's CGameSprite 0x75E150.
+- The text character sheet export (`CScreenCharacter::sub_5E4560`, 0x5EFFD0) ends in the original's assert at the spell lists (it passes a list index where `CGameSprite::GetSpells` wants a class); ours keeps it (ruling P4-10). No vanilla button starts it (GUIREC panel 2 has no control 51).
 - Movie subtitles (`CBaldurProjector` 0x43E300, 0x43EA70, 0x43EC20, 0x43EED0) are not ported: Bink playback needs binkw32 (absent on Linux) and the subtitles blit DirectDraw surfaces.
 - The Lua console's Enter (0x77BF30, `CLUAConsole` 0x5838A0) is not ported; iwd2r has no Lua runtime.
 - Character generation reports no Ctrl (its vtable's GetCtrlKey is CWarp's) and ignores Enter in the biography popup, in the original too: the biography edit has no Ctrl shortcuts or line breaks there. The character screen's and the journal's edits have them.

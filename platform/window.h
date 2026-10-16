@@ -62,6 +62,16 @@ bool NativeDesktopSize(int* width, int* height);
 // The live window, or NULL.
 HWND MainWindow();
 
+// How many times the engine has read a mouse button's state
+// (GetAsyncKeyState(VK_LBUTTON) or VK_RBUTTON) outside the replay mode: its
+// input thread reads them once per AI update (CChitin::AsynchronousUpdate).
+// The control channel reports it (platform/script.h, input.req), so a
+// real-input driver can wait until the engine has seen a press and then a
+// release: it reads only "down" and "pressed since the last read", and a
+// release and the next press with no read between them look like one
+// press.
+unsigned ButtonPolls();
+
 // After n presented frames the pump prints "framebuffer-hash: <hex>" once and
 // posts WM_DESTROY. 0 disables. CreateWindowExA sets it from
 // IWD2R_SMOKE_FRAMES when that variable is present, and starts the script

@@ -10056,6 +10056,145 @@ void CGameSprite::sub_71A550(CButtonData buttonData, BOOLEAN firstCall)
     }
 }
 
+// 0x71ABA0
+void CGameSprite::CheckQuickLists(CAbilityId* ability, SHORT changeAmount, BOOL remove, BOOL removeSpellIfZero)
+{
+    // The quick buttons that hold `ability` take `changeAmount` uses; an
+    // emptied button (or every one, with `remove`) is cleared. Party members
+    // and allies only.
+    if (!m_bGlobal
+        && g_pBaldurChitin->GetObjectGame()->m_allies.Find(reinterpret_cast<int*>(m_id)) == NULL) {
+        return;
+    }
+
+    // NOTE: The resource references are compared as two DWORDs except for
+    // the songs, which call CResRef::operator== (0x40F940); both compare the
+    // eight bytes.
+    for (INT nButton = 0; nButton < 8; nButton++) {
+        CButtonData* pButton = &(m_quickWeapons[nButton]);
+        if (pButton->m_abilityId.m_itemType == ability->m_itemType
+            && pButton->m_abilityId.m_itemNum == ability->m_itemNum
+            && pButton->m_abilityId.m_abilityNum == ability->m_abilityNum
+            && pButton->m_abilityId.m_res == ability->m_res
+            && pButton->m_abilityId.m_nClass == ability->m_nClass
+            && pButton->m_abilityId.field_1D == ability->field_1D
+            && pButton->m_abilityId.field_1E == ability->field_1E) {
+            pButton->m_count += changeAmount;
+            if (pButton->m_count < 0) {
+                pButton->m_count = 0;
+            }
+
+            if (pButton->m_count <= 0 || remove) {
+                *pButton = CButtonData();
+                field_3D3A[nButton] = 0;
+            }
+        }
+    }
+
+    for (INT nButton = 0; nButton < 9; nButton++) {
+        CButtonData* pButton = &(m_quickSpells[nButton]);
+        if (pButton->m_abilityId.m_itemType == ability->m_itemType
+            && pButton->m_abilityId.m_itemNum == ability->m_itemNum
+            && pButton->m_abilityId.m_abilityNum == ability->m_abilityNum
+            && pButton->m_abilityId.m_res == ability->m_res
+            && pButton->m_abilityId.m_nClass == ability->m_nClass
+            && pButton->m_abilityId.field_1D == ability->field_1D
+            && pButton->m_abilityId.field_1E == ability->field_1E) {
+            pButton->m_count += changeAmount;
+            if (pButton->m_count < 0) {
+                pButton->m_count = 0;
+            }
+
+            if (remove || (pButton->m_count <= 0 && removeSpellIfZero)) {
+                *pButton = CButtonData();
+            } else if (pButton->m_count <= 0) {
+                // An emptied spell stays on its button, greyed out.
+                pButton->m_bDisabled = TRUE;
+            } else {
+                pButton->m_bDisabled = FALSE;
+            }
+        }
+    }
+
+    // Only the first quick item that holds it.
+    for (INT nButton = 0; nButton < 3; nButton++) {
+        CButtonData* pButton = &(m_quickItems[nButton]);
+        if (pButton->m_abilityId.m_itemType == ability->m_itemType
+            && pButton->m_abilityId.m_itemNum == ability->m_itemNum
+            && pButton->m_abilityId.m_abilityNum == ability->m_abilityNum
+            && pButton->m_abilityId.m_res == ability->m_res
+            && pButton->m_abilityId.m_nClass == ability->m_nClass
+            && pButton->m_abilityId.field_1D == ability->field_1D
+            && pButton->m_abilityId.field_1E == ability->field_1E) {
+            pButton->m_count += changeAmount;
+            if (pButton->m_count < 0) {
+                pButton->m_count = 0;
+            }
+
+            if (remove || (pButton->m_count <= 0 && removeSpellIfZero)) {
+                *pButton = CButtonData();
+            }
+            break;
+        }
+    }
+
+    for (INT nButton = 0; nButton < 9; nButton++) {
+        CButtonData* pButton = &(m_quickInnates[nButton]);
+        if (pButton->m_abilityId.m_itemType == ability->m_itemType
+            && pButton->m_abilityId.m_itemNum == ability->m_itemNum
+            && pButton->m_abilityId.m_abilityNum == ability->m_abilityNum
+            && pButton->m_abilityId.m_res == ability->m_res
+            && pButton->m_abilityId.m_nClass == ability->m_nClass
+            && pButton->m_abilityId.field_1D == ability->field_1D
+            && pButton->m_abilityId.field_1E == ability->field_1E) {
+            pButton->m_count += changeAmount;
+            if (pButton->m_count < 0) {
+                pButton->m_count = 0;
+            }
+
+            if (remove || (pButton->m_count <= 0 && removeSpellIfZero)) {
+                *pButton = CButtonData();
+            } else if (pButton->m_count <= 0) {
+                pButton->m_bDisabled = TRUE;
+            } else {
+                pButton->m_bDisabled = FALSE;
+            }
+        }
+    }
+
+    // NOTE: The original checks the first six of the nine song buttons.
+    for (INT nButton = 0; nButton < 6; nButton++) {
+        CButtonData* pButton = &(m_quickSongs[nButton]);
+        if (pButton->m_abilityId.m_itemType == ability->m_itemType
+            && pButton->m_abilityId.m_itemNum == ability->m_itemNum
+            && pButton->m_abilityId.m_abilityNum == ability->m_abilityNum
+            && pButton->m_abilityId.m_res == ability->m_res
+            && pButton->m_abilityId.m_nClass == ability->m_nClass
+            && pButton->m_abilityId.field_1D == ability->field_1D
+            && pButton->m_abilityId.field_1E == ability->field_1E) {
+            pButton->m_count += changeAmount;
+            if (pButton->m_count < 0) {
+                pButton->m_count = 0;
+            }
+
+            if (remove || (pButton->m_count <= 0 && removeSpellIfZero)) {
+                *pButton = CButtonData();
+            }
+        }
+    }
+
+    if (g_pBaldurChitin->GetActiveEngine()->GetSelectedCharacter() == g_pBaldurChitin->GetObjectGame()->GetCharacterPortraitNum(m_id)) {
+        g_pBaldurChitin->GetObjectGame()->GetButtonArray()->UpdateState();
+    }
+
+    if (g_pBaldurChitin->GetObjectGame()->GetGroup()->InList(m_id)) {
+        CUIPanel* pPanel = g_pBaldurChitin->m_pEngineWorld->GetManager()->GetPanel(3);
+        if (pPanel != NULL) {
+            pPanel->InvalidateRect(NULL);
+        }
+    }
+}
+
 // 0x71B3B0
 void CGameSprite::CheckToolTipItem(BYTE buttonNum)
 {
@@ -12177,6 +12316,57 @@ skip:
         + sub_723F60()
         + nDexMod
         + 10;
+}
+
+// 0x723EA0
+INT CGameSprite::sub_723EA0()
+{
+    // The dexterity bonus to the armor class, as GetAC counts it: capped by
+    // the armor, and none while blind without Blind Fight.
+    INT nDexMod = g_pBaldurChitin->GetObjectGame()->GetRuleTables().GetAbilityScoreModifier(m_derivedStats.m_nDEX);
+
+    if (m_equipment.m_items[1] != NULL) {
+        INT nMaxDexMod;
+        switch (m_equipment.m_items[1]->GetItemType()) {
+        case 60:
+            nMaxDexMod = 6;
+            break;
+        case 61:
+            nMaxDexMod = 5;
+            break;
+        case 62:
+            nMaxDexMod = 2;
+            break;
+        case 63:
+        case 64:
+            nMaxDexMod = 0;
+            break;
+        case 65:
+            nMaxDexMod = 1;
+            break;
+        case 66:
+            nMaxDexMod = 4;
+            break;
+        case 68:
+            nMaxDexMod = 3;
+            break;
+        default:
+            goto skip;
+        }
+
+        if (nMaxDexMod < nDexMod) {
+            nDexMod = nMaxDexMod;
+        }
+    }
+skip:
+
+    if ((m_derivedStats.m_generalState & STATE_BLIND) != 0
+        && nDexMod > 0
+        && !sub_763150(CGAMESPRITE_FEAT_BLIND_FIGHT)) {
+        return 0;
+    }
+
+    return nDexMod;
 }
 
 // 0x723F60
@@ -27438,10 +27628,8 @@ void CGameSprite::sub_716770(CButtonData* pData)
         }
     }
 
-    // TODO: Incomplete. The original calls CGameSprite::CheckQuickLists
-    // (0x71ABA0) with `&pData->m_abilityId`, -1, 0, 0 here; it is not ported
-    // (CGameSprite.cpp, another stream's file). Until then the quick spell
-    // slots keep the converted spell's old count until they are rebuilt.
+    // The converted spell's quick buttons lose the use.
+    CheckQuickLists(&pData->m_abilityId, -1, FALSE, FALSE);
 
     FeedBack(CGameSprite::FEEDBACK_SPONTANEOUSCASTING,
         0,

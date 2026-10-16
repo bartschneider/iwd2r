@@ -528,6 +528,7 @@ public:
     void ReadyOffInternalList(CButtonData buttonData, BOOLEAN firstCall);
     void sub_71A0E0(CButtonData buttonData, BOOLEAN firstCall);
     void sub_71A550(CButtonData buttonData, BOOLEAN firstCall);
+    void CheckQuickLists(CAbilityId* ability, SHORT changeAmount, BOOL remove, BOOL removeSpellIfZero);
     void CheckToolTipItem(BYTE buttonNum);
     CItem* GetQuickItem(BYTE buttonNum);
     void UnequipAll(BOOL a1);
@@ -568,6 +569,7 @@ public:
     void sub_723BF0(BOOLEAN a1, BOOLEAN a2);
     INT GetAC();
     INT sub_723DB0();
+    INT sub_723EA0();
     INT sub_723F60();
     void sub_71E240(CCreatureFileHeader& oldBaseStats, CDerivedStats& oldDStats);
     void sub_71E750(CCreatureFileHeader& oldBaseStats, CDerivedStats& oldDStats);
