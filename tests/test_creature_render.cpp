@@ -457,3 +457,52 @@ TEST_CASE("creature render: CGameAnimationTypeMonsterAnkheg draws its hole and i
     CHECK(pAnkheg->m_currentVidCell->GetTintColor() == RGB(255, 255, 0));
     CHECK(pAnkheg->m_currentVidCellHole->GetTintColor() == RGB(255, 255, 0));
 }
+
+// The black dragon (0x1201, 60GUARDI.CRE): a CGameAnimationTypeMonsterMulti
+// of nine quadrants with split BAMs, MDR2 + group + quadrant + sequence
+// character + direction character. Its ChangeDirection (0x6B5D80) and
+// SetSequence (0x6B7660) were missing too: the constructor's facing never
+// reached the cells, and no sequence changed them. The groups each
+// sequence picks are the ones the game data has (MDR21xx0 .. MDR25xx1).
+TEST_CASE("creature render: CGameAnimationTypeMonsterMulti draws the black dragon's quadrants", "[render][data]")
+{
+    std::string why;
+    if (!Begin(why)) {
+        SKIP("[iwd2r-skip] " + why);
+    }
+    RenderScope scope;
+    REQUIRE(scope.Ok());
+    BYTE colors[16] = {};
+    std::unique_ptr<CGameAnimationType> pAnimation(CGameAnimationType::SetAnimationType(0x1201, colors, 0));
+    auto* pDragon = dynamic_cast<CGameAnimationTypeMonsterMulti*>(pAnimation.get());
+    REQUIRE(pDragon != nullptr);
+    REQUIRE(pDragon->m_nQuadrants == 9);
+    CHECK(pDragon->m_currentBamDirection == 0);
+    CHECK(pDragon->m_currentVidCell == pDragon->m_g2VidCellBase);
+    CHECK(pDragon->m_currentVidCell[0].GetResRef().GetResRefStr() == "MDR22100");
+    CHECK(pDragon->m_currentVidCell[8].GetResRef().GetResRefStr() == "MDR22900");
+    CheckRender(scope, pDragon, CPoint(320, 330), "dragon_0");
+
+    // Sequence 9: group 4 with the sequence character 2.
+    CHECK(pDragon->SetSequence(9) == 9);
+    CHECK(pDragon->m_currentVidCell == pDragon->m_g4VidCellBase);
+    CHECK(pDragon->m_currentBamSequence == 2);
+    CHECK(pDragon->field_44A == &pDragon->field_67C);
+    CHECK(pDragon->m_currentVidCell[0].GetResRef().GetResRefStr() == "MDR24120");
+    CHECK(pDragon->field_800 == 9);
+    // Sequences 14 and 15 become 7 (group 2), 11 to 13 become 0 (group 3).
+    CHECK(pDragon->SetSequence(14) == 7);
+    CHECK(pDragon->m_currentVidCell[0].GetResRef().GetResRefStr() == "MDR22100");
+    CHECK(pDragon->SetSequence(11) == 0);
+    CHECK(pDragon->m_currentVidCell == pDragon->m_g3VidCellBase);
+    CHECK(pDragon->m_currentVidCell[4].GetResRef().GetResRefStr() == "MDR23500");
+
+    // Facing 12 (north-east) mirrors direction 4: the files of direction 4,
+    // sequence 9 * 0 - 12 + 16 = 4.
+    pDragon->ChangeDirection(12);
+    CHECK(pDragon->m_splitDirectionBamChar == '4');
+    CHECK(pDragon->m_currentVidCell[0].GetResRef().GetResRefStr() == "MDR23104");
+    CHECK(pDragon->m_currentVidCell[0].m_nCurrentSequence == 4);
+    CHECK(pDragon->IsMirroring());
+    CheckRender(scope, pDragon, CPoint(320, 330), "dragon_12");
+}
