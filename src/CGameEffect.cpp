@@ -1534,10 +1534,41 @@ BOOL CGameEffect::sub_4A3310(CGameSprite* pSprite, BYTE* pRoll1, BYTE* pRoll2, B
             return FALSE;
         }
 
-        // TODO: Incomplete. The original takes the source object's share
-        // (0x4A362B), marks a party source hostile through
-        // CGameSprite::sub_6F50A0 (0x6F50A0, not in src/) and sends the
-        // target two trigger messages (0x20 and 0x02) before it returns.
+        // The effect is refused, but the target still knows it was attacked.
+        CGameObject* pSource;
+        BYTE rc;
+        do {
+            rc = pGame->GetObjectArray()->GetShare(m_sourceID,
+                CGameObjectArray::THREAD_ASYNCH,
+                &pSource,
+                INFINITE);
+        } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+        if (rc != CGameObjectArray::SUCCESS) {
+            return FALSE;
+        }
+
+        if ((pSprite->field_58C & 0x200000) == 0
+            && pSource->GetAIType().m_nEnemyAlly <= CAIObjectType::EA_GOODCUTOFF) {
+            pSprite->field_58C |= 0x200000;
+
+            // TODO: Incomplete. The original calls CGameSprite::sub_6F50A0
+            // (0x6F50A0) on the target here; it is ported on p3/combat and not
+            // yet on first. Wire it once that branch is merged.
+        }
+
+        CAITrigger hitBy(CAITRIGGER_HITBY, pSource->GetAIType(), 0);
+        CMessage* message = new CMessageSetTrigger(hitBy, m_sourceID, pSprite->GetId());
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+        CAITrigger attackedBy(CAITRIGGER_ATTACKEDBY, pSource->GetAIType(), 0);
+        message = new CMessageSetTrigger(attackedBy, m_sourceID, pSprite->GetId());
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+        pGame->GetObjectArray()->ReleaseShare(m_sourceID,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+
         return FALSE;
     }
 
