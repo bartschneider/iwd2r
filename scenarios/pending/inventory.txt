@@ -1,0 +1,247 @@
+# M5: the inventory screen. walk_and_talk.txt's steps to the end of the
+# opening dialog (character generation of the fighter Probe, Party
+# Formation, the chapter screen, AR1000, Hedron's opening dialog), then the
+# inventory (the I key, CScreenWorld::OnKeyDown keymap entry 0): the
+# quarterstaff out of the first weapon slot into the backpack, into the
+# second weapon set's slot and that set selected, back to the first set,
+# dropped on the ground, the world, then picked up and equipped again.
+# Coordinates for Resolution=800 (GUIINV.CHU panel 2): weapon sets' weapon
+# slots 101 (618,67) and 105 (725,67), set selectors 109 (584,66) and 111
+# (691,66), backpack 30 (269,317), ground 68 (590,317). An item is moved
+# by a click on it and a click on the target slot.
+#
+# State in the checkpoint dumps (oracle/replay/schema.json): the screen
+# (inventory or world) and, in the world, the party's position, hit points
+# and action, the area's creatures. The dump has no inventory, gold or XP
+# fields yet, so these checkpoints compare where the item went only through
+# the screens and the shots; the comparison needs the recorder and our state
+# dump to write the party's item slots (CGameSpriteEquipment::m_items
+# resrefs and the selected weapon) and the party gold.
+#
+# Status (2026-10-16, ui-misc round 3): played on our side only (replay
+# mode, headless, seed 1); two runs give identical dumps at all 37
+# checkpoints. The shots show the staff unequipped, in the second set with
+# that set selected, and back. The drop fails on our side:
+# CInfGame::GetGroundPile (0x5B75C0) makes a new pile only when the area
+# already has one at the party member's feet (`!=` where the original
+# jumps on -1 at 0x5B763B), so CScreenInventory finds no pile, the ground
+# slot is refused (red frames) and the staff stays in hand; Escape's
+# CancelEngine puts it in the first backpack slot, and picked_up shows it
+# there with the fist selected. CInfGame is the vis-probe stream's file.
+#
+# What the original recording needs: a sandbox run of oracle.py replay
+# record (the vanilla copy, Resolution=800, seed 1), then a look at its
+# shots: the staff in the first ground slot after the drop, on the deck at
+# world_dropped, and back in the first weapon slot at picked_up.
+wait 60
+checkpoint menu
+# New Game (645,262), then Done (537,562) with New Party selected, then the
+# first slot's Create Character (530,100).
+click 645 262
+wait 90
+click 537 562
+wait 60
+click 530 100
+wait 90
+checkpoint chargen
+# Gender (400,128): Male (400,286), Next (536,562) to Appearance.
+click 400 128
+wait 30
+click 400 286
+wait 20
+checkpoint male
+click 536 562
+wait 30
+checkpoint appearance
+# Next keeps the first portrait and returns to the main menu.
+click 536 562
+wait 30
+checkpoint gender_done
+# Race (400,163): Elf (400,198), which is a Moon Elf, then Next.
+click 400 163
+wait 30
+click 400 198
+wait 20
+checkpoint elf
+click 536 562
+wait 30
+checkpoint race_done
+# Class (400,198): Fighter (400,268), then Next.
+click 400 198
+wait 30
+click 400 268
+wait 20
+checkpoint fighter
+click 536 562
+wait 30
+checkpoint class_done
+# Alignment (400,233): Chaotic Good (400,198), then Next.
+click 400 233
+wait 30
+click 400 198
+wait 20
+checkpoint chaotic_good
+click 536 562
+wait 30
+checkpoint alignment_done
+# Abilities (400,268): + at x 499 and - at x 517, rows at y 170 (STR),
+# 206 (DEX), 242 (CON), 278 (INT), 314 (WIS), 350 (CHA).
+click 400 268
+wait 30
+checkpoint abilities
+click 499 170
+wait 20
+checkpoint str_up_1
+click 499 170
+wait 20
+checkpoint str_up_2
+click 499 170
+wait 20
+checkpoint str_up_3
+click 499 242
+wait 20
+checkpoint con_up
+click 517 278
+wait 20
+checkpoint int_down
+click 517 350
+wait 20
+checkpoint cha_down
+# Next (536,562) with points left asks "You have some unallocated points
+# left. Are you sure you want to continue?"; Yes (338,331) keeps the
+# abilities and returns to the main menu, which offers Skills.
+click 536 562
+wait 30
+checkpoint points_prompt
+click 338 331
+wait 30
+checkpoint abilities_done
+# Skills (400,303): Intimidate's + (499,420) four times, then Next
+# (536,562), which goes on to Feats.
+click 400 303
+wait 30
+click 499 420
+wait 15
+click 499 420
+wait 15
+click 499 420
+wait 15
+click 499 420
+wait 15
+click 536 562
+wait 30
+checkpoint skills_done
+# Feats: Blind-Fight's + (499,168) and Dash's + (499,384), then Next back
+# to the main menu.
+click 499 168
+wait 15
+click 499 384
+wait 15
+click 536 562
+wait 30
+checkpoint feats_done
+# Appearance (400,338): Next keeps the colours and goes on to Sound; Next
+# keeps the voice and returns to the main menu.
+click 400 338
+wait 30
+click 536 562
+wait 30
+click 536 562
+wait 30
+# Name (400,373): type Probe, Done (458,268).
+click 400 373
+wait 30
+type Probe
+wait 15
+click 458 268
+wait 30
+checkpoint named
+# Next (536,562) finishes the character and shows Party Formation.
+click 536 562
+wait 60
+checkpoint party_formation
+# Done (634,507) starts the game on the chapter screen (the Prologue text,
+# which would move on to the world by itself after about 3,400 frames); its
+# Done (514,549) loads the start area into the world screen.
+click 634 507
+wait 150
+checkpoint chapter
+click 514 549
+wait 150
+checkpoint world
+wait 300
+checkpoint world_settled
+# M2. The opening dialog (Hedron, entry 0): "No, we're here to stay" (1),
+# "Do you know where I can go to sign on with the Targos guard?" (4), "Where
+# can I find Lord Ulbrec?" (1), "All right. Thanks for your help" (1),
+# Continue, "We'll be careful. Farewell, Hedron." (1) ends it.
+checkpoint opening_dialog
+click 300 399
+wait 60
+click 340 437
+wait 60
+click 250 386
+wait 60
+click 280 437
+wait 60
+click 398 583
+wait 60
+click 250 399
+wait 120
+checkpoint opening_done
+shot world
+# The inventory: I (keymap entry 0).
+key I
+wait 60
+checkpoint inventory
+shot inventory
+# The staff from the first set's weapon slot into the first backpack slot.
+click 618 67
+wait 20
+click 269 317
+wait 20
+checkpoint unequipped
+shot unequipped
+# Into the second set's weapon slot, and that set selected.
+click 269 317
+wait 20
+click 725 67
+wait 20
+click 691 66
+wait 30
+checkpoint second_set
+shot second_set
+# Back to the first set's weapon slot, the first set selected.
+click 725 67
+wait 20
+click 618 67
+wait 20
+click 584 66
+wait 30
+checkpoint first_set
+shot first_set
+# Dropped on the ground (the first ground slot).
+click 618 67
+wait 20
+click 590 317
+wait 30
+checkpoint dropped
+shot dropped
+# The world: the staff lies at Probe's feet.
+key ESCAPE
+wait 60
+checkpoint world_dropped
+shot world_dropped
+# Picked up again from the ground into the first weapon slot.
+key I
+wait 60
+click 590 317
+wait 20
+click 618 67
+wait 30
+checkpoint picked_up
+shot picked_up
+key ESCAPE
+wait 60
+checkpoint world_end
+quit
