@@ -17,10 +17,16 @@
 //   sizes with the same members, g_pBaldurChitin put back to null at the
 //   end.
 // - FindOneOf reads g_pChitin (0x8CF6D8) + 0x1A0 (Double Byte Character
-//   Support) and calls IsDBCSLeadByte, the system's on both sides. Both
-//   strings are original CStrings from its constructor (0x7FCC88) in leaked
-//   memory (R10a); the original copies the separators (0x7FC98F, the copy
-//   constructor) into their argument's slot (0x7811A5).
+//   Support) and calls IsDBCSLeadByte. The original's is the system's (the
+//   host's ANSI code page); ours is the shim's stub (platform/
+//   win32_stubs.cpp), FALSE for every byte unless a test installs a lead
+//   byte table. So the case covers the single-byte behaviour only: with
+//   the flag on, no separator is removed and no byte skipped (the input's
+//   high bytes are not lead bytes on the host, or the two would differ).
+//   The double-byte paths have the unit test (tests/test_ui_misc.cpp).
+//   Both strings are original CStrings from its constructor (0x7FCC88) in
+//   leaked memory (R10a); the original copies the separators (0x7FC98F, the
+//   copy constructor) into their argument's slot (0x7811A5).
 // - 0x542EC0 reads neither `this` nor the class (zeroed blocks).
 //
 // Calling conventions (objdump of the vanilla exe): 0x723EA0 __thiscall
@@ -163,8 +169,9 @@ void DexArmorClass(CaseContext& ctx)
 }
 
 // FindOneOf over strings of letters, separators and high bytes, every start
-// from -1 to past the end, with Double Byte Character Support off and on;
-// then --iterations random cases.
+// from -1 to past the end, with Double Byte Character Support off and on
+// (no lead bytes on either side; see the fixtures); then --iterations
+// random cases.
 void FindOneOf(CaseContext& ctx)
 {
     OurGlobalsReset reset;
