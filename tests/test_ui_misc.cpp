@@ -2030,3 +2030,42 @@ TEST_CASE("weather: a melted snow flake comes back rolling its height first", "[
         CHECK(storm.m_pSnowFlakes[n].m_nMeltTime == 30);
     }
 }
+
+// CUIControlTextDisplay::DisplayString (0x4E20F0): a new string clears the
+// scroll still to run for the last one (field_A65, at 0x4E2171) before it
+// decides the top line.
+TEST_CASE("text display: a new string ends the scroll still to run", "[uimisc][textdisplay][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    // A game, whose message log the display shows.
+    if (PartyMember() == NULL) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+
+    CScreenWorld* pWorld = g_pBaldurChitin->m_pEngineWorld;
+    CUIControlTextDisplay* pDisplay = static_cast<CUIControlTextDisplay*>(pWorld->GetManager()->GetPanel(pWorld->GetPanel_22_0())->GetControl(1));
+    REQUIRE(pDisplay != NULL);
+    REQUIRE(pDisplay->m_plstStrings != NULL);
+    pDisplay->RemoveAll();
+
+    pDisplay->DisplayString(CString(""), CString("first"), RGB(255, 255, 255), RGB(255, 255, 255), -1, FALSE, TRUE);
+    pDisplay->field_A65 = 4;
+    pDisplay->DisplayString(CString(""), CString("second"), RGB(255, 255, 255), RGB(255, 255, 255), -1, FALSE, TRUE);
+    CHECK(pDisplay->field_A65 == 0);
+    // The display does not overflow: the top line stays.
+    CHECK(pDisplay->field_5A == 0);
+
+    pDisplay->field_A65 = 4;
+    pDisplay->DisplayString(CString(""), CString("third"), RGB(255, 255, 255), RGB(255, 255, 255), -1, TRUE, TRUE);
+    CHECK(pDisplay->field_A65 == 0);
+    // Moved to the top: the new string's index.
+    CHECK(pDisplay->field_5A == 2);
+
+    pDisplay->RemoveAll();
+}
