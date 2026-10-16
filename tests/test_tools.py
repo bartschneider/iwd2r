@@ -4151,6 +4151,43 @@ class SandboxReplayTest(unittest.TestCase):
             oracle.main(['replay', 'compare', 'chargen_replay', '--host'])
         self.assertEqual(seen, [False, True])
 
+    def test_load_gives_the_run_a_mpsave_of_its_own(self):
+        # --load: the sandbox sees only the save (and default); the copy's
+        # saves wait beside it and come back; what the run saved is kept.
+        game = os.path.join(self.tmp, 'game')
+        mpsave = os.path.join(game, 'mpsave')
+        make_save(mpsave, '000000002-Quick-Save')
+        make_save(mpsave, 'default')
+        save = make_save(os.path.join(self.tmp, 'in'), '000000004-Probe')
+        seen = []
+
+        def run(build_dir, game_dir, script, env, timeout, host_run,
+                out_dir, log):
+            seen.append(sorted(os.listdir(os.path.join(game_dir, 'mpsave'))))
+            seen.append(sorted(os.listdir(oracle.save_aside(game_dir))))
+            make_save(os.path.join(game_dir, 'mpsave'), '000000005-New')
+            os.makedirs(out_dir)
+            with open(os.path.join(out_dir, 'status.txt'), 'w') as f:
+                f.write('frame=10\nstate=finished\n')
+            return {'code': 0, 'stdout': '', 'stderr': '', 'error': None,
+                    'seconds': 1.0}
+        code, _, _, _ = self.record(['replay', 'record', 'start_screen',
+                                     '--load', save], run)
+        self.assertEqual(seen, [['000000004-Probe', 'default'],
+                                ['000000002-Quick-Save']])
+        self.assertEqual(sorted(os.listdir(mpsave)),
+                         ['000000002-Quick-Save', 'default'])
+        self.assertFalse(os.path.exists(oracle.save_aside(game)))
+        run_dir = glob.glob(os.path.join(self.tmp, 'runs', '*', 'replay'))[0]
+        self.assertEqual(os.listdir(os.path.join(run_dir, 'saves')),
+                         ['000000005-New'])
+        with open(os.path.join(run_dir, 'replay.json')) as f:
+            self.assertEqual(json.load(f)['saves'], {
+                'mode': 'load', 'load': save, 'slot': '000000004-Probe',
+                'made': ['000000005-New']})
+        self.assertEqual(oracle.save_aside(oracle.GAME_DIR),
+                         oracle.ORACLE_DIR + '/mpsave-aside')
+
     def test_sandbox_error_fails_the_run(self):
         def failing(build_dir, game_dir, script, env, timeout, host_run,
                     out_dir, log):
@@ -4730,6 +4767,399 @@ class KnownDifferencesTest(unittest.TestCase):
             dirs[0], dirs[1], ['cp'], ['connection'], known)
         self.assertEqual(failures, 0)
         self.assertEqual(oracle.stale_known(known, hits), [known[1]])
+
+
+def make_save(folder, name, payload='x'):
+    """A save folder as the game writes it: ICEWIND2.GAM with the
+    GAMEV2.2 signature (CInfGame::SaveGameExists)."""
+    path = os.path.join(folder, name)
+    os.makedirs(path)
+    with open(os.path.join(path, 'ICEWIND2.GAM'), 'wb') as f:
+        f.write(b'GAMEV2.2' + payload.encode())
+    with open(os.path.join(path, 'ICEWIND2.SAV'), 'w') as f:
+        f.write(payload)
+    return path
+
+
+class OracleSavesTest(unittest.TestCase):
+    """replay --load, the "# saves:" header and the saves of a run
+    (tools/oracle.py prepared_saves)."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp = self._tmp.name
+
+    def scenario(self, header, name='s.txt'):
+        path = os.path.join(self.tmp, name)
+        with open(path, 'w') as f:
+            f.write(header + 'wait 1\ncheckpoint a\n# saves: ignored\n')
+        return path
+
+    def test_header_saves(self):
+        self.assertIsNone(oracle.header_saves(self.scenario('# x\n')))
+        self.assertEqual(oracle.header_saves(self.scenario(
+            '# M4\n\n# saves: empty\n# timeout: 9\n')), 'empty')
+        self.assertEqual(oracle.header_saves(self.scenario(
+            '#saves:  LOAD \n')), 'load')
+        for bad in ('# saves: some\n', '# saves: empty\n# saves: load\n'):
+            with self.assertRaises(SystemExit, msg=bad):
+                oracle.header_saves(self.scenario(bad))
+        self.assertEqual(oracle.header_saves(
+            os.path.join(ROOT, 'scenarios', 'pending', 'save_load.txt')),
+            'empty')
+        self.assertEqual(oracle.header_saves(
+            os.path.join(ROOT, 'scenarios', 'pending', 'load_game.txt')),
+            'load')
+        self.assertIsNone(oracle.header_saves(
+            os.path.join(ROOT, 'scenarios', 'walk_and_talk.txt')))
+
+    def test_save_plan(self):
+        plain = self.scenario('# x\n')
+        empty = self.scenario('# saves: empty\n', 'e.txt')
+        load = self.scenario('# saves: load\n', 'l.txt')
+        save = make_save(self.tmp, '000000004-Probe Save')
+        self.assertIsNone(oracle.save_plan(plain, None))
+        self.assertEqual(oracle.save_plan(empty, None),
+                         {'mode': 'empty', 'load': None})
+        for script in (plain, empty, load):
+            self.assertEqual(oracle.save_plan(script, save),
+                             {'mode': 'load', 'load': save})
+        os.makedirs(os.path.join(self.tmp, 'not-a-save'))
+        make_save(self.tmp, 'default')
+        for script, arg, why in (
+                (load, None, 'give one with --load'),
+                (plain, os.path.join(self.tmp, 'not-a-save'),
+                 'not a save folder'),
+                (plain, os.path.join(self.tmp, 'nowhere'),
+                 'not a save folder'),
+                (plain, os.path.join(self.tmp, 'default'), 'its own')):
+            with self.assertRaises(SystemExit) as cm:
+                oracle.save_plan(script, arg)
+            self.assertIn(why, str(cm.exception))
+
+    def test_is_save(self):
+        save = make_save(self.tmp, '000000000-Auto-Save')
+        self.assertTrue(oracle.is_save(save))
+        os.rename(os.path.join(save, 'ICEWIND2.GAM'),
+                  os.path.join(save, 'icewind2.gam'))
+        self.assertTrue(oracle.is_save(save))
+        with open(os.path.join(save, 'icewind2.gam'), 'wb') as f:
+            f.write(b'GAMEV2.0')
+        self.assertFalse(oracle.is_save(save))
+
+    def listing(self, folder):
+        return sorted(os.listdir(folder)) if os.path.isdir(folder) else None
+
+    def test_vanilla_copy_saves_go_aside_and_come_back(self):
+        mpsave = os.path.join(self.tmp, 'game', 'mpsave')
+        aside = os.path.join(self.tmp, 'mpsave-aside')
+        for name in ('000000000-Auto-Save', '000000004-big12345',
+                     'default'):
+            make_save(mpsave, name, name)
+        load = make_save(os.path.join(self.tmp, 'in'), '000000004-Probe Save')
+        out = os.path.join(self.tmp, 'run', 'original')
+        seen = []
+        with contextlib.redirect_stdout(io.StringIO()):
+            with oracle.prepared_saves(mpsave, {'mode': 'load',
+                                                'load': load}, out,
+                                       aside) as report:
+                seen.append(self.listing(mpsave))
+                seen.append(self.listing(aside))
+                # The run saves and autosaves.
+                make_save(mpsave, '000000005-Second', 'new')
+                make_save(mpsave, '000000000-Autosave - Prologue', 'auto')
+        self.assertEqual(seen, [['000000004-Probe Save', 'default'],
+                                ['000000000-Auto-Save',
+                                 '000000004-big12345']])
+        self.assertEqual(self.listing(mpsave), [
+            '000000000-Auto-Save', '000000004-big12345', 'default'])
+        self.assertIsNone(self.listing(aside))
+        self.assertEqual(self.listing(os.path.join(out, 'saves')), [
+            '000000000-Autosave - Prologue', '000000005-Second'])
+        self.assertEqual(report, {
+            'mode': 'load', 'load': load, 'slot': '000000004-Probe Save',
+            'made': ['000000000-Autosave - Prologue', '000000005-Second']})
+        with open(os.path.join(mpsave, '000000004-big12345',
+                               'ICEWIND2.SAV')) as f:
+            self.assertEqual(f.read(), '000000004-big12345')
+
+    def test_saves_come_back_when_the_run_fails(self):
+        mpsave = os.path.join(self.tmp, 'mpsave')
+        aside = os.path.join(self.tmp, 'aside')
+        make_save(mpsave, '000000002-Quick-Save')
+        out = os.path.join(self.tmp, 'out')
+        with self.assertRaises(KeyboardInterrupt), \
+                contextlib.redirect_stdout(io.StringIO()):
+            with oracle.prepared_saves(mpsave, {'mode': 'empty',
+                                                'load': None}, out, aside):
+                self.assertEqual(self.listing(mpsave), [])
+                make_save(mpsave, '000000004-Half')
+                raise KeyboardInterrupt
+        self.assertEqual(self.listing(mpsave), ['000000002-Quick-Save'])
+        self.assertEqual(self.listing(os.path.join(out, 'saves')),
+                         ['000000004-Half'])
+
+    def test_a_dead_runs_saves_are_put_back_first(self):
+        mpsave = os.path.join(self.tmp, 'mpsave')
+        aside = os.path.join(self.tmp, 'aside')
+        make_save(aside, '000000004-big12345', 'user')
+        make_save(mpsave, '000000004-big12345', 'dead run')
+        make_save(mpsave, 'default')
+        with contextlib.redirect_stdout(io.StringIO()) as text:
+            with oracle.prepared_saves(mpsave, None, self.tmp, aside) as r:
+                self.assertEqual(r, {})
+        self.assertIn('put back 1 entry a run that died left',
+                      text.getvalue())
+        self.assertEqual(self.listing(mpsave),
+                         ['000000004-big12345', 'default'])
+        self.assertIsNone(self.listing(aside))
+        with open(os.path.join(mpsave, '000000004-big12345',
+                               'ICEWIND2.SAV')) as f:
+            self.assertEqual(f.read(), 'user')
+
+    def test_a_private_view_is_emptied_in_place(self):
+        mpsave = os.path.join(self.tmp, 'view', 'mpsave')
+        make_save(mpsave, '000000000-Auto-Save')
+        make_save(mpsave, 'default')
+        out = os.path.join(self.tmp, 'ours')
+        with contextlib.redirect_stdout(io.StringIO()):
+            with oracle.prepared_saves(mpsave, {'mode': 'empty',
+                                                'load': None}, out):
+                self.assertEqual(self.listing(mpsave), ['default'])
+        self.assertEqual(self.listing(mpsave), ['default'])
+        self.assertIsNone(self.listing(os.path.join(out, 'saves')))
+        # A view whose install has no mpsave gets one.
+        mpsave = os.path.join(self.tmp, 'bare', 'mpsave')
+        with contextlib.redirect_stdout(io.StringIO()):
+            with oracle.prepared_saves(mpsave, {'mode': 'empty',
+                                                'load': None}, out):
+                self.assertEqual(self.listing(mpsave), [])
+
+    def test_pick_save(self):
+        self.assertEqual(oracle.save_number('000000004-Probe Save'), 4)
+        self.assertEqual(oracle.save_number('crash_07_23'), -1)
+        made = ['000000000-Autosave - Prologue', '000000004-Probe Save']
+        self.assertEqual(oracle.pick_save(made, made),
+                         ('000000004-Probe Save', None))
+        self.assertEqual(oracle.pick_save(made, made,
+                                          '000000000-Autosave - Prologue'),
+                         ('000000000-Autosave - Prologue', None))
+        name, why = oracle.pick_save(made, made[:1])
+        self.assertIsNone(name)
+        self.assertIn('different saves', why)
+        self.assertIn('neither', oracle.pick_save([], [])[1])
+        self.assertIn('not both x', oracle.pick_save(made, made, 'x')[1])
+
+    def test_record_and_compare_pass_the_plan_to_both_sides(self):
+        from unittest import mock
+        save = make_save(self.tmp, '000000004-Probe Save')
+        seen = []
+
+        def record(script, actions, *a, **kw):
+            seen.append(('original', os.path.basename(script),
+                         kw.get('saves')))
+            return 0
+
+        def ours(exe, game, script, actions, *a, **kw):
+            seen.append(('ours', os.path.basename(script), kw.get('saves')))
+            return 0
+        oracle_play = __import__('play')
+        with LockRecorder.patch(oracle, LockRecorder()), \
+                mock.patch.object(oracle, 'record_original', record), \
+                mock.patch.object(oracle, 'run_ours', ours), \
+                mock.patch.object(oracle, 'ensure_vanilla', lambda: self.tmp), \
+                mock.patch.object(oracle, 'prepare_replay_ini', lambda g: None), \
+                mock.patch.object(oracle, 'RUNS_DIR',
+                                  os.path.join(self.tmp, 'runs')), \
+                mock.patch.object(oracle_play, 'backup_inis',
+                                  lambda g, b: []), \
+                mock.patch.object(oracle_play, 'restore_inis',
+                                  lambda b, g, n: None), \
+                contextlib.redirect_stdout(io.StringIO()):
+            oracle.main(['replay', 'record', 'start_screen', '--load', save])
+            oracle.main(['replay', 'compare', 'start_screen', '--no-build',
+                         '--load', save])
+            oracle.main(['replay', 'compare', os.path.join(
+                ROOT, 'scenarios', 'pending', 'save_load.txt'),
+                '--no-build'])
+            oracle.main(['replay', 'record', 'start_screen'])
+        plan = {'mode': 'load', 'load': save}
+        empty = {'mode': 'empty', 'load': None}
+        self.assertEqual(seen, [
+            ('original', 'start_screen.txt', plan),
+            ('original', 'start_screen.txt', plan),
+            ('ours', 'start_screen.txt', plan),
+            ('original', 'save_load.txt', empty),
+            ('ours', 'save_load.txt', empty),
+            ('original', 'start_screen.txt', None)])
+
+    def test_load_scenario(self):
+        actions = realinput.load_scenario(os.path.join(
+            ROOT, 'scenarios', 'pending', 'load_game.txt'))
+        self.assertEqual([a['name'] for a in actions
+                          if a['op'] == 'checkpoint'],
+                         ['menu', 'load_screen', 'loaded', 'loaded_settled'])
+        actions = realinput.load_scenario(os.path.join(
+            ROOT, 'scenarios', 'pending', 'save_load.txt'))
+        names = [a['name'] for a in actions if a['op'] == 'checkpoint']
+        self.assertEqual(names[0], 'menu')
+        self.assertEqual(names[-6:], ['save_screen', 'saved', 'walked_on',
+                                      'load_screen', 'loaded',
+                                      'loaded_settled'])
+        self.assertEqual(oracle.replay_timeout(None, os.path.join(
+            ROOT, 'scenarios', 'pending', 'save_load.txt')), 420)
+
+
+class CrossloadTest(unittest.TestCase):
+    """tools/oracle.py replay crossload, with both engines stubbed: each
+    run writes its checkpoint dumps and, in the save scenario, a save."""
+
+    CHECKPOINTS = ('menu', 'load_screen', 'loaded', 'loaded_settled')
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp = self._tmp.name
+
+    def dump(self, name, gold):
+        return {'frame': 10, 'checkpoint': name,
+                'screen': 'world' if name.startswith('loaded')
+                else 'connection', 'rng_state': 1,
+                'globals': {'au_counter': 10, 'ai_stalled_frames': 0,
+                            'ai_overlap_frames': 0, 'in_async_update': 0,
+                            'reinitializing': 0, 'fullscreen': 0,
+                            'loading': 0, 'loads': 0, 'held_frames': 0,
+                            'ai_rng_state': 3},
+                'chargen': None, 'world': None,
+                'game': {'party_gold': gold, 'members': []}}
+
+    def crossload(self, argv, gold=None, saves=None):
+        """oracle.main(['replay', 'crossload'] + argv) with the runs
+        stubbed. gold: {run folder: party gold in its dumps} (36 for any
+        other); saves: {'original': [...], 'ours': [...]}, the saves each
+        engine's save run makes. Returns (exit code, runs, output)."""
+        from unittest import mock
+        gold = gold or {}
+        saves = saves or {'original': ['000000000-Autosave - Prologue',
+                                       '000000004-Probe Save'],
+                          'ours': ['000000000-Autosave - Prologue',
+                                   '000000004-Probe Save']}
+        runs = []
+
+        def fake(engine, script, run_dir, subdir, plan):
+            out = os.path.join(run_dir, subdir)
+            os.makedirs(out)
+            runs.append((subdir, engine, os.path.basename(script),
+                         plan and plan['mode'],
+                         plan and plan['load'] and os.path.relpath(
+                             plan['load'], run_dir)))
+            names = [a['name'] for a in realinput.load_scenario(script)
+                     if a['op'] == 'checkpoint']
+            for name in names:
+                with open(os.path.join(out, 'checkpoint-%s.json' % name),
+                          'w') as f:
+                    json.dump(self.dump(name, gold.get(subdir, 36)), f)
+            if subdir.startswith('save-'):
+                for name in saves[engine]:
+                    make_save(os.path.join(out, 'saves'), name, subdir)
+            return 0
+
+        def record(script, actions, seed, timeout, dump_every, run_dir,
+                   subdir, **kw):
+            return fake('original', script, run_dir, subdir, kw['saves'])
+
+        def ours(exe, game, script, actions, seed, timeout, dump_every,
+                 run_dir, subdir, **kw):
+            return fake('ours', script, run_dir, subdir, kw['saves'])
+        oracle_play = __import__('play')
+        with LockRecorder.patch(oracle, LockRecorder()), \
+                mock.patch.object(oracle, 'record_original', record), \
+                mock.patch.object(oracle, 'run_ours', ours), \
+                mock.patch.object(oracle, 'ensure_vanilla', lambda: self.tmp), \
+                mock.patch.object(oracle, 'prepare_replay_ini', lambda g: None), \
+                mock.patch.object(oracle, 'RUNS_DIR',
+                                  os.path.join(self.tmp, 'runs')), \
+                mock.patch.object(oracle_play, 'backup_inis',
+                                  lambda g, b: []), \
+                mock.patch.object(oracle_play, 'restore_inis',
+                                  lambda b, g, n: None), \
+                contextlib.redirect_stdout(io.StringIO()) as text:
+            code = oracle.main(['replay', 'crossload', '--no-build'] + argv)
+        return code, runs, text.getvalue()
+
+    def test_each_engine_loads_the_others_save(self):
+        code, runs, text = self.crossload([])
+        self.assertEqual(code, 0, text)
+        save = '000000004-Probe Save'
+        self.assertEqual(runs, [
+            ('save-original', 'original', 'save_load.txt', 'empty', None),
+            ('save-ours', 'ours', 'save_load.txt', 'empty', None),
+            ('original-loads-ours', 'original', 'load_game.txt', 'load',
+             'save-ours/saves/' + save),
+            ('ours-loads-original', 'ours', 'load_game.txt', 'load',
+             'save-original/saves/' + save),
+            ('ours-loads-ours', 'ours', 'load_game.txt', 'load',
+             'save-ours/saves/' + save)])
+        self.assertIn('== compare original-loads-ours with '
+                      'ours-loads-original: match at 4 of 4 checkpoints',
+                      text)
+        self.assertIn('result: MATCH: each engine loads the other\'s save '
+                      '(000000004-Probe Save)', text)
+        report = glob.glob(os.path.join(self.tmp, 'runs', '*',
+                                        'crossload.json'))
+        with open(report[0]) as f:
+            report = json.load(f)
+        self.assertEqual(report['save'], save)
+        self.assertEqual([(p['first'], p['second']) for p in
+                          report['pairs']], list(oracle.CROSSLOAD_PAIRS))
+
+    def test_a_difference_names_the_runs(self):
+        code, _, text = self.crossload([], gold={'original-loads-ours': 40})
+        self.assertEqual(code, 1)
+        self.assertIn('  DIFF game.party_gold: original-loads-ours 40, '
+                      'ours-loads-original 36', text)
+        self.assertIn('== compare ours-loads-original with ours-loads-ours: '
+                      'match', text)
+        # Two pairs have the original's run, 4 checkpoints each.
+        self.assertIn('result: DIFFERENT: 8 differences', text)
+
+    def test_full_adds_the_originals_own_save(self):
+        code, runs, text = self.crossload(['--full', '--seed', '7'])
+        self.assertEqual(code, 0, text)
+        self.assertEqual(runs[-1], (
+            'original-loads-original', 'original', 'load_game.txt', 'load',
+            'save-original/saves/000000004-Probe Save'))
+        self.assertIn('== compare original-loads-original with '
+                      'original-loads-ours: match', text)
+
+    def test_the_sides_must_make_the_same_saves(self):
+        code, runs, text = self.crossload([], saves={
+            'original': ['000000004-Probe Save'],
+            'ours': ['000000000-Autosave - Prologue',
+                     '000000004-Probe Save']})
+        self.assertEqual(code, 1)
+        self.assertEqual(len(runs), 2)
+        self.assertIn('crossload: the sides made different saves', text)
+        code, runs, text = self.crossload(['--slot', '000000004-Probe Save'],
+                                          saves={
+            'original': ['000000004-Probe Save'],
+            'ours': ['000000000-Autosave - Prologue',
+                     '000000004-Probe Save']})
+        self.assertEqual(code, 0, text)
+
+    def test_saves_from_an_earlier_run(self):
+        earlier = os.path.join(self.tmp, 'earlier')
+        make_save(os.path.join(earlier, 'original', 'saves'), '000000004-A')
+        make_save(os.path.join(earlier, 'ours', 'saves'), '000000004-A')
+        code, runs, text = self.crossload(['--saves-from', earlier])
+        self.assertEqual(code, 0, text)
+        self.assertEqual([r[0] for r in runs], [
+            'original-loads-ours', 'ours-loads-original', 'ours-loads-ours'])
+        self.assertTrue(runs[0][4].endswith('earlier/ours/saves/000000004-A'))
+        with self.assertRaises(SystemExit), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.crossload(['--saves-from', self.tmp])
 
 
 class DataViewTest(unittest.TestCase):

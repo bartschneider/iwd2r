@@ -13,9 +13,16 @@ Usage (from WSL, in the repository):
                                         [--dump-every N] [--test-steal-focus N]
                                         [--test-no-focus-guard]
                                         [--test-slow-reads MS] [--host]
+                                        [--load SAVE]
   python3 tools/oracle.py replay compare <scenario> [--seed N] [--timeout S]
                                          [--dump-every N] [--no-build]
-                                         [--host]
+                                         [--host] [--load SAVE]
+  python3 tools/oracle.py replay crossload [<save scenario>]
+                                           [--load-scenario S]
+                                           [--saves-from RUN] [--slot NAME]
+                                           [--full] [--seed N] [--timeout S]
+                                           [--dump-every N] [--no-build]
+                                           [--host]
 
 evidence writes a draft docs/evidence/<ADDR>.md for each function named, all
 in one Ghidra run: the front matter (address, name, an empty oracle_case,
@@ -144,8 +151,39 @@ fail. It exits 0 on a match (known differences allowed) and 1 on any other
 difference in an enabled screen, a missing checkpoint dump, or a failed run
 on either side; runs/<stamp>/compare.json keeps the result.
 
-The vanilla copy is shared by every worktree: replay record and replay
-compare each hold C:/Users/thier/iwd2r-oracle/replay.lock for the whole run,
+Saves. The load and save screens list the saves of mpsave in folder name
+order, so a replay that loads or saves gets a mpsave of its own on both
+sides (prepared_saves): with --load SAVE (a save folder, NNNNNNNNN-Name
+with its ICEWIND2.GAM) mpsave holds only that save (and the game's own
+default folder), so the scenario loads it from the load screen's first
+slot (scenarios/pending/load_game.txt does, from the main menu); a
+scenario whose header says "# saves: empty" starts with no saves, and one
+that says "# saves: load" refuses to run without --load. The saves such a
+run makes are moved into its folder's saves/ (runs/<stamp>/original/saves,
+ours/saves). The vanilla copy's own saves wait in
+C:/Users/thier/iwd2r-oracle/mpsave-aside meanwhile and are put back after
+the run, or by the next recording when a run died; our engine's data view
+has a private copy of mpsave, emptied in place. Both sides keep the same
+seed and frame alignment as a new-game replay.
+
+replay crossload is M4's exit check: a game saved in each engine loads in
+the other to the same state. It runs the save scenario (default
+scenarios/pending/save_load.txt) in both engines with no saves at the start
+(save-original, save-ours; its checkpoints are compared and shown), picks
+the save both made with the highest slot number (or --slot NAME), and runs
+the load scenario (default scenarios/pending/load_game.txt) three times:
+the original on our save (original-loads-ours), ours on the original's
+(ours-loads-original) and ours on our own (ours-loads-ours); --full adds
+the original on its own (original-loads-original), one more sandbox run.
+--saves-from RUN takes the saves of an earlier crossload or replay compare
+run instead of running the save scenario. The loaded states are compared
+pairwise as replay compare compares (screens, known differences): the
+cross-load, then the pairs that tell which side a difference comes from.
+It exits 0 when every pair matches and every run succeeded; the result is
+in runs/<stamp>/crossload.json.
+
+The vanilla copy is shared by every worktree: replay record, replay
+compare and replay crossload each hold C:/Users/thier/iwd2r-oracle/replay.lock for the whole run,
 and building the copy holds vanilla.lock beside it (tools/filelock.py). In
 the sandbox, a recording also holds C:/Users/thier/iwd2r-vm/sandbox.lock
 (one sandbox at a time, shared with play.py --vm windows), always taken
@@ -156,6 +194,7 @@ Standard library only.
 """
 
 import argparse
+import contextlib
 import datetime
 import hashlib
 import json
@@ -1452,11 +1491,12 @@ def recorder_env(script_win, replay_dir_win, seed, dump_every,
 
 def record_original(script, actions, seed, timeout, dump_every, run_dir,
                     subdir='replay', steal_focus=None, no_focus_guard=False,
-                    sandbox=True, slow_reads=None):
+                    sandbox=True, slow_reads=None, saves=None):
     """Record script in the original with the recorder DLL into
     run_dir/subdir, inside Windows Sandbox (record_in_sandbox) or with
     sandbox False on the host's desktop; prints the run as replay record
-    does and returns its exit code (0, 1 or INJECTOR_TIMEOUT)."""
+    does and returns its exit code (0, 1 or INJECTOR_TIMEOUT). saves (a
+    save_plan) gives the run a mpsave of its own (prepared_saves)."""
     import play
     build = os.path.join(play.WIN_CHECKOUT, REPLAY_DIR_REL)
     injector = os.path.join(build, INJECTOR)
@@ -1475,15 +1515,20 @@ def record_original(script, actions, seed, timeout, dump_every, run_dir,
                           timeout, dump_every,
                           'in Windows Sandbox' if sandbox else 'on the host'))
     extra = {}
-    if sandbox:
-        code, stdout, stderr, extra = record_in_sandbox(
-            build, game, script, seed, timeout, dump_every, stamp, subdir,
-            out_dir, steal_focus, no_focus_guard, slow_reads=slow_reads)
-    else:
-        code, stdout, stderr = record_on_host(
-            injector, recorder, game, script, seed, timeout, dump_every,
-            stamp, out_dir, steal_focus, no_focus_guard,
-            slow_reads=slow_reads)
+    with prepared_saves(mpsave_dir(game), saves, out_dir,
+                        save_aside(game)) as save_report:
+        if sandbox:
+            code, stdout, stderr, extra = record_in_sandbox(
+                build, game, script, seed, timeout, dump_every, stamp,
+                subdir, out_dir, steal_focus, no_focus_guard,
+                slow_reads=slow_reads)
+        else:
+            code, stdout, stderr = record_on_host(
+                injector, recorder, game, script, seed, timeout, dump_every,
+                stamp, out_dir, steal_focus, no_focus_guard,
+                slow_reads=slow_reads)
+    if saves:
+        extra = dict(extra, saves=save_report)
     for line in stdout.splitlines():
         print('  %s' % line)
     for line in stderr.splitlines():
@@ -1621,6 +1666,214 @@ def load_actions(script):
         sys.exit('oracle: %s' % e)
 
 
+# ---------------------------------------------------------------------------
+# Saves (replay --load, a scenario's "# saves:" header, replay crossload)
+#
+# The game lists the saves of mpsave (CInfGame::GetDirSaveRoot) in folder
+# name order (CInfGame::GetSaveGames 0x5C0520) on the load and save
+# screens, so a replay that saves or loads needs to know what is there. A
+# run with a save plan gets a mpsave of its own: everything but the game's
+# own folder (default) is taken out first, the --load save (if any) is
+# copied in under its own name, so it is the load screen's first slot, and
+# afterwards every save the run made is moved into <out>/saves/ and what
+# was there is put back. On the vanilla copy, which every worktree shares,
+# what was there waits in save_aside (beside the copy, on its volume) and
+# every recording first puts back what a run that died left there; our
+# engine's data view has a private mpsave, emptied in place.
+
+MPSAVE = 'mpsave'
+# The game's own folder in mpsave (the game in progress): kept in place and
+# never harvested; the load screen does not list it (0x63C940).
+MPSAVE_OWN = 'default'
+
+
+def save_aside(game):
+    """Where a recording keeps the saves of the game folder game's mpsave
+    while it runs: mpsave-aside beside game (for the vanilla copy,
+    ORACLE_DIR/mpsave-aside), on the same volume, so they move by
+    renaming."""
+    return os.path.join(os.path.dirname(os.path.abspath(game)),
+                        'mpsave-aside')
+
+
+# CInfGame::SaveGameExists (0x5C0890): a folder is a save when its
+# ICEWIND2.GAM starts with this.
+SAVE_SIGNATURE = b'GAMEV2.2'
+SAVES_LINE = re.compile(r'^#\s*saves:\s*(.*?)\s*$', re.IGNORECASE)
+# "# saves: empty": the scenario starts with no saves; "# saves: load": it
+# starts on the main menu with only the --load save, which it must be given.
+SAVES_MODES = ('empty', 'load')
+
+
+def header_saves(script):
+    """The save mode a scenario's header sets with "# saves: MODE"
+    (SAVES_MODES), or None. The header is the comment and blank lines
+    before the first command, as for "# timeout:"."""
+    with open(script, encoding='utf-8') as f:
+        text = f.read()
+    found = None
+    for number, raw in enumerate(text.split('\n'), 1):
+        line = raw.strip()
+        if not line:
+            continue
+        if not line.startswith('#'):
+            break
+        m = SAVES_LINE.match(line)
+        if not m:
+            continue
+        if found is not None:
+            sys.exit('oracle: %s: line %d: a second "# saves:" line'
+                     % (script, number))
+        if m.group(1).lower() not in SAVES_MODES:
+            sys.exit('oracle: %s: line %d: "# saves:" takes %s, not %r'
+                     % (script, number, ' or '.join(SAVES_MODES),
+                        m.group(1)))
+        found = m.group(1).lower()
+    return found
+
+
+def entry_named(folder, name):
+    """folder's entry named name in any case (the game's file system is
+    Windows'), or folder/name when there is none."""
+    try:
+        for entry in os.listdir(folder):
+            if entry.lower() == name.lower():
+                return os.path.join(folder, entry)
+    except OSError:
+        pass
+    return os.path.join(folder, name)
+
+
+def mpsave_dir(game):
+    return entry_named(game, MPSAVE)
+
+
+def is_save(folder):
+    """True when folder is a save the game lists (SAVE_SIGNATURE)."""
+    try:
+        with open(entry_named(folder, 'ICEWIND2.GAM'), 'rb') as f:
+            return f.read(len(SAVE_SIGNATURE)) == SAVE_SIGNATURE
+    except OSError:
+        return False
+
+
+def save_plan(script, load):
+    """A run's save plan, or None for a run that keeps mpsave as it is:
+    {'mode': 'load', 'load': the save folder} with --load (load), else
+    {'mode': 'empty', 'load': None} for a scenario whose header says
+    "# saves: empty". A "# saves: load" scenario needs --load; --load
+    needs a save folder."""
+    mode = header_saves(script)
+    if load is None:
+        if mode == 'load':
+            sys.exit('oracle: %s starts from a save ("# saves: load"); '
+                     'give one with --load' % script)
+        return {'mode': 'empty', 'load': None} if mode == 'empty' else None
+    load = os.path.abspath(load)
+    if not is_save(load):
+        sys.exit('oracle: --load %s is not a save folder (no ICEWIND2.GAM '
+                 'starting with %s)' % (load, SAVE_SIGNATURE.decode()))
+    if os.path.basename(load).lower() == MPSAVE_OWN:
+        sys.exit('oracle: --load %s: the game keeps its own folder of that '
+                 'name; copy the save under another name' % load)
+    return {'mode': 'load', 'load': load}
+
+
+def mpsave_entries(mpsave):
+    """mpsave's entries but the game's own folder, in name order."""
+    try:
+        names = os.listdir(mpsave)
+    except FileNotFoundError:
+        return []
+    return sorted(n for n in names if n.lower() != MPSAVE_OWN)
+
+
+def remove_entry(path):
+    if os.path.isdir(path) and not os.path.islink(path):
+        shutil.rmtree(path)
+    else:
+        os.remove(path)
+
+
+def put_back(mpsave, aside):
+    """Moves aside's entries back into mpsave (an entry of the same name in
+    mpsave is deleted first) and removes aside; returns the names."""
+    names = mpsave_entries(aside) if os.path.isdir(aside) else []
+    for name in names:
+        target = os.path.join(mpsave, name)
+        if os.path.lexists(target):
+            remove_entry(target)
+        os.rename(os.path.join(aside, name), target)
+    if os.path.isdir(aside):
+        shutil.rmtree(aside)
+    return names
+
+
+def recover_saves(mpsave, aside):
+    """Puts back what a run that died left in aside (put_back); the
+    entries of the same name in mpsave are that run's."""
+    names = put_back(mpsave, aside)
+    if names:
+        print('saves: put back %d entr%s a run that died left in %s'
+              % (len(names), 'y' if len(names) == 1 else 'ies', aside))
+    return names
+
+
+@contextlib.contextmanager
+def prepared_saves(mpsave, plan, out_dir, aside=None):
+    """The save plan around a run (see the section's comment). With no plan
+    mpsave stays as it is; only what a dead run left in aside goes back.
+    With one, mpsave's entries but default move into aside (or are deleted
+    when aside is None: a private view's copy), the plan's save is copied
+    in, and on the way out every entry the run left but the loaded save is
+    moved into out_dir/saves (copied, then deleted) before the entries
+    aside go back. Yields the report, filled in on the way out: {'mode',
+    'load', 'slot' (the loaded save's folder name), 'made' (the saves
+    moved out, by name)}."""
+    if aside is not None:
+        recover_saves(mpsave, aside)
+    report = {}
+    if not plan:
+        yield report
+        return
+    os.makedirs(mpsave, exist_ok=True)
+    report.update(mode=plan['mode'], load=plan['load'], slot=None, made=[])
+    moved = []
+    try:
+        for name in mpsave_entries(mpsave):
+            if aside is None:
+                remove_entry(os.path.join(mpsave, name))
+                continue
+            os.makedirs(aside, exist_ok=True)
+            os.rename(os.path.join(mpsave, name), os.path.join(aside, name))
+            moved.append(name)
+        if plan['load']:
+            report['slot'] = os.path.basename(plan['load'])
+            shutil.copytree(plan['load'],
+                            os.path.join(mpsave, report['slot']))
+        yield report
+    finally:
+        try:
+            for name in mpsave_entries(mpsave):
+                path = os.path.join(mpsave, name)
+                if name != report['slot']:
+                    dest = os.path.join(out_dir, 'saves', name)
+                    os.makedirs(os.path.dirname(dest), exist_ok=True)
+                    if os.path.isdir(path):
+                        shutil.copytree(path, dest)
+                    else:
+                        shutil.copyfile(path, dest)
+                    report['made'].append(name)
+                remove_entry(path)
+        finally:
+            if aside is not None:
+                put_back(mpsave, aside)
+        if report['made']:
+            print('saves: the run made %s (in %s)'
+                  % (', '.join(report['made']), os.path.relpath(
+                      os.path.join(out_dir, 'saves'), ROOT)))
+
+
 def cmd_replay_record(args):
     with filelock.hold(REPLAY_LOCK, 'replay'):
         return replay_record(args)
@@ -1630,13 +1883,14 @@ def replay_record(args):
     import play
     script = scenario_path(args.scenario)
     actions = load_actions(script)
+    saves = save_plan(script, args.load)
     run_dir = play.make_run_folder(RUNS_DIR, datetime.datetime.now())
     return record_original(script, actions, args.seed,
                            replay_timeout(args.timeout, script),
                            args.dump_every, run_dir, 'replay',
                            args.test_steal_focus, args.test_no_focus_guard,
                            sandbox=not args.host,
-                           slow_reads=args.test_slow_reads)
+                           slow_reads=args.test_slow_reads, saves=saves)
 
 
 # ---------------------------------------------------------------------------
@@ -1682,9 +1936,11 @@ def our_outcome(code, status, timeout):
 
 
 def run_ours(exe, game, script, actions, seed, timeout, dump_every, run_dir,
-             subdir='ours'):
+             subdir='ours', saves=None):
     """Run script in our engine's replay mode into run_dir/subdir; prints
-    the run as record_original does and returns its exit code."""
+    the run as record_original does and returns its exit code. saves (a
+    save_plan) is applied to the data view's private mpsave
+    (prepared_saves)."""
     with open(REPLAY_SCHEMA) as f:
         schema = json.load(f)
     out_dir = os.path.join(run_dir, subdir)
@@ -1700,27 +1956,31 @@ def run_ours(exe, game, script, actions, seed, timeout, dump_every, run_dir,
                       timeout, dump_every))
     print('running %s headless on %s' % (os.path.relpath(exe, ROOT), game))
     log_path = os.path.join(out_dir, 'log.txt')
-    with open(log_path, 'w') as log:
-        proc = subprocess.Popen([exe], cwd=ROOT, env=env, stdout=log,
-                                stderr=subprocess.STDOUT)
-        try:
-            code = proc.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
-            code = None
-        except KeyboardInterrupt:
-            proc.kill()
-            raise
-        finally:
-            if os.environ.get('IWD2R_KEEP_DATA_VIEW') != '1':
-                dataview.remove_view(view)
+    try:
+        with prepared_saves(mpsave_dir(view), saves, out_dir) \
+                as save_report, open(log_path, 'w') as log:
+            proc = subprocess.Popen([exe], cwd=ROOT, env=env, stdout=log,
+                                    stderr=subprocess.STDOUT)
+            try:
+                code = proc.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+                code = None
+            except KeyboardInterrupt:
+                proc.kill()
+                raise
+    finally:
+        if os.environ.get('IWD2R_KEEP_DATA_VIEW') != '1':
+            dataview.remove_view(view)
     status = read_status(out_dir)
     result, summary = our_outcome(code, status, timeout)
     report = {'scenario': os.path.relpath(script, ROOT), 'seed': seed,
               'timeout': timeout, 'dump_every': dump_every,
               'exit_code': code, 'status': status, 'outcome': summary,
               'overrides': our_overrides()}
+    if saves:
+        report['saves'] = save_report
     return finish_replay(out_dir, schema, actions, result, summary, report)
 
 
@@ -1828,7 +2088,7 @@ def known_entry(known, checkpoint, field):
 
 
 def compare_checkpoints(original_dir, our_dir, names, screens, known,
-                        counts=None):
+                        counts=None, labels=None):
     """Compare the checkpoint dumps of two replay folders.
 
     Returns (lines, failures, known_hits): the report lines, the number of
@@ -1838,7 +2098,12 @@ def compare_checkpoints(original_dir, our_dir, names, screens, known,
     checkpoint where neither side is on an enabled screen is reported as
     not enabled and does not fail. A dict passed as counts receives
     'enabled', the checkpoints present on both sides with an enabled
-    screen, and 'outside', the other present checkpoints that differed."""
+    screen, and 'outside', the other present checkpoints that differed.
+    labels names the two folders in the lines (replay crossload compares
+    runs of one engine too); by default they are the original and ours."""
+    first, second = labels or ('original', 'ours')
+    missing = (('the ' + first, 'the ' + second) if labels
+               else ('the original', 'our side'))
     if counts is None:
         counts = {}
     counts['enabled'] = 0
@@ -1859,7 +2124,7 @@ def compare_checkpoints(original_dir, our_dir, names, screens, known,
         if original is None or ours is None:
             lines.append('checkpoint %s: MISSING on %s' % (
                 name, 'both sides' if original is None and ours is None
-                else 'the original' if original is None else 'our side'))
+                else missing[0] if original is None else missing[1]))
             failures += 1
             continue
         timing = ', '.join('%s %s/%s' % (
@@ -1885,19 +2150,18 @@ def compare_checkpoints(original_dir, our_dir, names, screens, known,
         else:
             state = 'different, screen not enabled'
             counts['outside'] += 1
-        lines.append('checkpoint %s (%s): %s (%s; original/ours)' % (
-            name, original.get('screen'), state, timing))
+        lines.append('checkpoint %s (%s): %s (%s; %s/%s)' % (
+            name, original.get('screen'), state, timing, first, second))
         for field, va, vb in unknown:
-            lines.append('  %s %s: original %s, ours %s' % (
-                'DIFF' if enabled else 'diff', field, json.dumps(va),
-                json.dumps(vb)))
+            lines.append('  %s %s: %s %s, %s %s' % (
+                'DIFF' if enabled else 'diff', field, first, json.dumps(va),
+                second, json.dumps(vb)))
         for hit in known_hits:
             if hit[0] == name:
-                lines.append('  KNOWN %s: original %s, ours %s (%s; '
-                             'evidence %s)' % (hit[1], json.dumps(hit[2]),
-                                               json.dumps(hit[3]),
-                                               hit[4]['reason'],
-                                               hit[4]['evidence']))
+                lines.append('  KNOWN %s: %s %s, %s %s (%s; evidence %s)'
+                             % (hit[1], first, json.dumps(hit[2]), second,
+                                json.dumps(hit[3]), hit[4]['reason'],
+                                hit[4]['evidence']))
     return lines, failures, known_hits
 
 
@@ -1915,6 +2179,7 @@ def replay_compare(args):
         sys.exit('oracle: %s has no checkpoint lines to compare' % script)
     screens = load_screens()
     known = load_known()
+    saves = save_plan(script, args.load)
     exe = os.path.join(ROOT, 'build', play.LINUX_PRESET, 'iwd2r') \
         if args.no_build else play.build_linux()
     game = ensure_vanilla()
@@ -1929,11 +2194,11 @@ def replay_compare(args):
         timeout = replay_timeout(args.timeout, script)
         original = record_original(script, actions, args.seed, timeout,
                                    args.dump_every, run_dir, 'original',
-                                   sandbox=not args.host)
+                                   sandbox=not args.host, saves=saves)
         play.restore_inis(backup, game, ini_names)
         print('== ours')
         ours = run_ours(exe, game, script, actions, args.seed, timeout,
-                        args.dump_every, run_dir, 'ours')
+                        args.dump_every, run_dir, 'ours', saves=saves)
     finally:
         play.restore_inis(backup, game, ini_names)
     print('== compare %s, seed %d (screens compared: %s)' % (
@@ -1993,6 +2258,201 @@ def compare_verdict(failures, original, ours, known_hits, counts):
     return lines
 
 
+# ---------------------------------------------------------------------------
+# Cross-loading (oracle.py replay crossload)
+
+CROSSLOAD_SAVE_SCENARIO = os.path.join(ROOT, 'scenarios', 'pending',
+                                       'save_load.txt')
+CROSSLOAD_LOAD_SCENARIO = os.path.join(ROOT, 'scenarios', 'pending',
+                                       'load_game.txt')
+# The load runs: (run folder, engine, whose save it loads). The first two
+# are the exit criterion: each engine loads the other's save.
+CROSSLOAD_RUNS = (('original-loads-ours', 'original', 'ours'),
+                  ('ours-loads-original', 'ours', 'original'),
+                  ('ours-loads-ours', 'ours', 'ours'))
+CROSSLOAD_FULL_RUN = ('original-loads-original', 'original', 'original')
+# The comparisons: the cross-load itself, then each pair that tells which
+# side a difference comes from (our save in both engines; both saves in
+# ours; with --full, the original's save in both engines and both saves in
+# the original).
+CROSSLOAD_PAIRS = (('original-loads-ours', 'ours-loads-original'),
+                   ('original-loads-ours', 'ours-loads-ours'),
+                   ('ours-loads-original', 'ours-loads-ours'))
+CROSSLOAD_FULL_PAIRS = (('original-loads-original', 'ours-loads-original'),
+                        ('original-loads-original', 'original-loads-ours'))
+
+
+def saves_in(folder):
+    """The save folders (is_save) in folder, by name."""
+    try:
+        names = sorted(os.listdir(folder))
+    except OSError:
+        return []
+    return [n for n in names if is_save(os.path.join(folder, n))]
+
+
+def save_number(name):
+    """A save folder's slot number, its leading digits before a '-' (as
+    CScreenLoad::RefreshGameSlots 0x63C940 reads it); -1 without one."""
+    m = re.match(r'(\d+)-', name)
+    return int(m.group(1)) if m else -1
+
+
+def pick_save(original, ours, name=None):
+    """(the save to cross-load, None) from the names of the saves each side
+    made, or (None, why not): name when given and both sides made it;
+    else the one with the highest slot number, the saves of both sides
+    being the same by name (an autosave is 0, a save screen's from 4)."""
+    both = sorted(set(original) & set(ours))
+    if name is not None:
+        if name in both:
+            return name, None
+        return None, ('the original made %s and ours %s, not both %s'
+                      % (', '.join(original) or 'no save',
+                         ', '.join(ours) or 'no save', name))
+    if set(original) != set(ours):
+        return None, ('the sides made different saves: the original %s, ours '
+                      '%s' % (', '.join(original) or 'none',
+                              ', '.join(ours) or 'none'))
+    if not both:
+        return None, 'neither side made a save'
+    return max(both, key=lambda n: (save_number(n), n)), None
+
+
+def crossload_saves_folders(run):
+    """The two saves/ folders of an earlier run folder: a crossload's
+    (save-original, save-ours) or a compare's (original, ours)."""
+    for pair in (('save-original', 'save-ours'), ('original', 'ours')):
+        folders = tuple(os.path.join(run, d, 'saves') for d in pair)
+        if all(os.path.isdir(f) for f in folders):
+            return folders
+    sys.exit('oracle: %s has no save-original/saves and save-ours/saves, nor '
+             'original/saves and ours/saves' % run)
+
+
+def cmd_replay_crossload(args):
+    with filelock.hold(REPLAY_LOCK, 'replay'):
+        return replay_crossload(args)
+
+
+def replay_crossload(args):
+    import play
+    load_script = scenario_path(args.load_scenario)
+    load_steps = load_actions(load_script)
+    names = [a['name'] for a in load_steps if a['op'] == 'checkpoint']
+    if header_saves(load_script) != 'load' or not names:
+        sys.exit('oracle: the load scenario %s needs a "# saves: load" '
+                 'header and checkpoints' % load_script)
+    save_script = None
+    if not args.saves_from:
+        save_script = scenario_path(args.save_scenario)
+        save_steps = load_actions(save_script)
+    screens = load_screens()
+    known = load_known()
+    exe = os.path.join(ROOT, 'build', play.LINUX_PRESET, 'iwd2r') \
+        if args.no_build else play.build_linux()
+    game = ensure_vanilla()
+    prepare_replay_ini(game)
+    run_dir = play.make_run_folder(RUNS_DIR, datetime.datetime.now())
+    backup = os.path.join(run_dir, 'ini-backup')
+    ini_names = play.backup_inis(game, backup)
+    results = {}
+    save_lines = []
+
+    def run(subdir, engine, script, steps, saves):
+        print('== %s' % subdir)
+        timeout = replay_timeout(args.timeout, script)
+        if engine == 'original':
+            results[subdir] = record_original(
+                script, steps, args.seed, timeout, args.dump_every, run_dir,
+                subdir, sandbox=not args.host, saves=saves)
+        else:
+            results[subdir] = run_ours(exe, game, script, steps, args.seed,
+                                       timeout, args.dump_every, run_dir,
+                                       subdir, saves=saves)
+        play.restore_inis(backup, game, ini_names)
+
+    try:
+        if save_script:
+            # The save scenario runs with no saves (its header may say so
+            # too), so the saves each side made are the run's own.
+            plan = save_plan(save_script, None) or {'mode': 'empty',
+                                                    'load': None}
+            run('save-original', 'original', save_script, save_steps, plan)
+            run('save-ours', 'ours', save_script, save_steps, plan)
+            folders = (os.path.join(run_dir, 'save-original', 'saves'),
+                       os.path.join(run_dir, 'save-ours', 'saves'))
+            save_names = [a['name'] for a in save_steps
+                          if a['op'] == 'checkpoint']
+            save_lines, save_failures, _ = compare_checkpoints(
+                os.path.join(run_dir, 'save-original'),
+                os.path.join(run_dir, 'save-ours'), save_names, screens,
+                known)
+            print('== the save scenario %s: %s' % (
+                os.path.relpath(save_script, ROOT),
+                'match' if save_failures == 0 else '%d difference%s' % (
+                    save_failures, '' if save_failures == 1 else 's')))
+            for line in save_lines:
+                print(line)
+        else:
+            folders = crossload_saves_folders(args.saves_from)
+        slot, why = pick_save(saves_in(folders[0]), saves_in(folders[1]),
+                              args.slot)
+        if why:
+            print('crossload: %s' % why)
+            print('compare: %s' % os.path.relpath(run_dir, ROOT))
+            return 1
+        made = {'original': os.path.join(folders[0], slot),
+                'ours': os.path.join(folders[1], slot)}
+        print('crossload: %s, the original\'s from %s, ours from %s'
+              % (slot, folders[0], folders[1]))
+        for subdir, engine, whose in CROSSLOAD_RUNS + (
+                (CROSSLOAD_FULL_RUN,) if args.full else ()):
+            run(subdir, engine, load_script, load_steps,
+                {'mode': 'load', 'load': made[whose]})
+    finally:
+        play.restore_inis(backup, game, ini_names)
+    failures = 0
+    report_pairs = []
+    for first, second in CROSSLOAD_PAIRS + (CROSSLOAD_FULL_PAIRS
+                                            if args.full else ()):
+        counts = {}
+        lines, pair_failures, known_hits = compare_checkpoints(
+            os.path.join(run_dir, first), os.path.join(run_dir, second),
+            names, screens, known, counts, labels=(first, second))
+        print('== compare %s with %s: %s' % (
+            first, second, 'match at %d of %d checkpoints' % (
+                counts['enabled'], counts['enabled']) if pair_failures == 0
+            else 'DIFFERENT: %d difference%s' % (
+                pair_failures, '' if pair_failures == 1 else 's')))
+        for line in lines:
+            print(line)
+        failures += pair_failures
+        report_pairs.append({'first': first, 'second': second,
+                             'failures': pair_failures, 'lines': lines})
+    failed_runs = sorted(k for k, v in results.items() if v != 0)
+    report = {'save_scenario': save_script and os.path.relpath(save_script,
+                                                               ROOT),
+              'saves_from': args.saves_from, 'save': slot,
+              'load_scenario': os.path.relpath(load_script, ROOT),
+              'seed': args.seed, 'results': results,
+              'save_lines': save_lines, 'pairs': report_pairs,
+              'failures': failures}
+    with open(os.path.join(run_dir, 'crossload.json'), 'w') as f:
+        json.dump(report, f, indent=2)
+        f.write('\n')
+    if failures == 0 and not failed_runs:
+        print('result: MATCH: each engine loads the other\'s save (%s) to '
+              'the same state' % slot)
+    else:
+        print('result: DIFFERENT: %d difference%s%s' % (
+            failures, '' if failures == 1 else 's',
+            '; runs failed: %s' % ', '.join(failed_runs) if failed_runs
+            else ''))
+    print('compare: %s' % os.path.relpath(run_dir, ROOT))
+    return 0 if failures == 0 and not failed_runs else 1
+
+
 def positive_int(text):
     value = int(text) if re.fullmatch(r'\d+', text) else 0
     if value <= 0:
@@ -2020,6 +2480,12 @@ def seed_arg(text):
 HOST_HELP = ('run the original on the host\'s desktop instead of in Windows '
              'Sandbox (for debugging: it takes the focus, and a stray click '
              'lands in the recording)')
+
+
+LOAD_HELP = ('start from this save folder (NNNNNNNNN-Name, with '
+             'ICEWIND2.GAM): it is the only save in each side\'s mpsave, so '
+             'the scenario loads it from the load screen\'s first slot; the '
+             'saves the run makes are kept in the run folder\'s saves/')
 
 
 def main(argv=None):
@@ -2081,6 +2547,7 @@ def main(argv=None):
                         'ReadFile off the main thread sleeps MS ms first (a '
                         'slow disk)')
     record.add_argument('--host', action='store_true', help=HOST_HELP)
+    record.add_argument('--load', metavar='SAVE', help=LOAD_HELP)
     record.set_defaults(run=cmd_replay_record)
     compare = replay_sub.add_parser(
         'compare', help='run a scenario in the original and in our engine '
@@ -2101,7 +2568,44 @@ def main(argv=None):
     compare.add_argument('--no-build', action='store_true',
                          help='use the existing build/linux-gcc/iwd2r')
     compare.add_argument('--host', action='store_true', help=HOST_HELP)
+    compare.add_argument('--load', metavar='SAVE', help=LOAD_HELP)
     compare.set_defaults(run=cmd_replay_compare)
+    cross = replay_sub.add_parser(
+        'crossload', help='save a game in each engine, load each save in '
+        'the other engine and compare the loaded states')
+    cross.add_argument('save_scenario', nargs='?',
+                       default=CROSSLOAD_SAVE_SCENARIO,
+                       help='the scenario that makes the save, run in both '
+                       'engines with no saves at the start (default '
+                       'scenarios/pending/save_load.txt)')
+    cross.add_argument('--load-scenario', default=CROSSLOAD_LOAD_SCENARIO,
+                       help='the scenario that loads it from the main menu, '
+                       'with a "# saves: load" header (default '
+                       'scenarios/pending/load_game.txt)')
+    cross.add_argument('--saves-from', metavar='RUN',
+                       help='take the saves from an earlier run folder (a '
+                       'crossload\'s or a replay compare\'s) instead of '
+                       'running the save scenario')
+    cross.add_argument('--slot', metavar='NAME',
+                       help='the save folder to cross-load (default: the '
+                       'one with the highest slot number both sides made)')
+    cross.add_argument('--full', action='store_true',
+                       help='also load the original\'s save in the original '
+                       '(one more sandbox run)')
+    cross.add_argument('--seed', type=seed_arg, default=1,
+                       help='seed for every run (default %(default)s)')
+    cross.add_argument('--timeout', type=positive_int,
+                       help='seconds before a run is killed (default: each '
+                       'scenario header\'s "# timeout: S", else %d)'
+                       % REPLAY_TIMEOUT)
+    cross.add_argument('--dump-every', type=non_negative_int,
+                       default=REPLAY_DUMP_EVERY,
+                       help='a dump every N frames, 0 for none (default '
+                       '%(default)s)')
+    cross.add_argument('--no-build', action='store_true',
+                       help='use the existing build/linux-gcc/iwd2r')
+    cross.add_argument('--host', action='store_true', help=HOST_HELP)
+    cross.set_defaults(run=cmd_replay_crossload)
     args = ap.parse_args(argv)
     return args.run(args)
 
