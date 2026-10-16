@@ -54,7 +54,6 @@ const char RESREF_JACKALWERE_GAZE[] = "SpIn179";
 // 0x8AF154
 const char RESREF_UMBER_HULK_GAZE[] = "SpIn994";
 
-// 0x5466F0
 // NOTE: Its `this` is the game, and the table it reads, at +0x1300, is
 // CRuleTables::m_tTracking (the rule tables start the CInfGame object): a
 // CRuleTables member by what it reads. Kept here, file-static, until
@@ -62,6 +61,7 @@ const char RESREF_UMBER_HULK_GAZE[] = "SpIn994";
 // 286) calls it. The area's row in TRACKING.2DA: when the sprite has
 // wilderness lore, a d20 plus the skill against the row's difficulty / 5 +
 // 10 gives the row's string; otherwise 19534.
+// 0x5466F0
 static STRREF RuleTables_GetTrackingString5466F0(const CRuleTables& ruleTables, CGameSprite* pSprite, CString& sAreaName)
 {
     STRREF strTracks = 19534;

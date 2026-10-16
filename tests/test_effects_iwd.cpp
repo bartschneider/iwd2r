@@ -20,6 +20,7 @@
 #include "IcewindMisc.h"
 #include "ScreenLayout.h"
 #include "data_view.h"
+#include "msvc_rand.h"
 #include "platform/data_dir.h"
 #include "platform/window.h"
 
@@ -1243,29 +1244,65 @@ TEST_CASE("effects-iwd: turn undead (280) type 2 destroys with a CGameEffectDeat
     pSprite->GetDerivedStats()->m_spellStates.reset(SPLSTATE_TURNED);
 }
 
+// The tracking string (0x5466F0): the area's row in TRACKING.2DA; with
+// wilderness lore a d20 plus the skill against Mod / 5 + 10 picks the row's
+// string, else the fallback 19534. Without the skill nothing is drawn.
 TEST_CASE("effects-iwd: ranger tracking (286) shows the tracking string under the sprite's name", "[effects][data]")
 {
     PROBE_OR_SKIP(pSprite);
     CUIControlTextDisplay* pDisplay = g_pBaldurChitin->m_pEngineWorld->m_pActiveDialogDisplay;
     REQUIRE(pDisplay != NULL);
     REQUIRE(pDisplay->m_plstStrings != NULL);
-    const INT_PTR before = pDisplay->m_plstStrings->GetCount();
-    std::unique_ptr<CGameEffect> pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_RANGERTRACKING, 0, 0);
-    CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
-    CHECK(pEffect->m_done == TRUE);
-    REQUIRE(pDisplay->m_plstStrings->GetCount() > before);
-    // The stubbed lookup (0x5466F0) gives the fallback 19534.
-    STR_RES strRes;
-    g_pBaldurChitin->m_cTlkTable.Fetch(19534, strRes);
-    bool found = false;
-    POSITION pos = pDisplay->m_plstStrings->GetHeadPosition();
-    while (pos != NULL) {
-        CDisplayString* pString = pDisplay->m_plstStrings->GetNext(pos);
-        if (!strRes.szText.IsEmpty() && pString->GetString().Find(strRes.szText) != -1) {
-            found = true;
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CString sAreaName;
+    pGame->m_gameAreas[pGame->m_visibleArea]->m_resRef.CopyToString(sAreaName);
+    CPoint row(-1, -1);
+    pGame->GetRuleTables().m_tTracking.Find(sAreaName, row, TRUE);
+    REQUIRE(row.y != -1);
+    const STRREF strArea = pGame->GetRuleTables().m_tTracking.GetAtLong(CPoint(0, row.y));
+    REQUIRE(strArea != 19534);
+
+    auto shows = [&](STRREF strRef) {
+        STR_RES strRes;
+        g_pBaldurChitin->m_cTlkTable.Fetch(strRef, strRes);
+        bool found = false;
+        POSITION pos = pDisplay->m_plstStrings->GetHeadPosition();
+        while (pos != NULL) {
+            CDisplayString* pString = pDisplay->m_plstStrings->GetNext(pos);
+            if (!strRes.szText.IsEmpty() && pString->GetString().Find(strRes.szText) != -1) {
+                found = true;
+            }
         }
+        return found;
+    };
+
+    const signed char skill = pSprite->m_derivedStats.m_nSkills[CGAMESPRITE_SKILL_WILDERNESS_LORE];
+
+    SECTION("no wilderness lore: the fallback, no draw")
+    {
+        pSprite->m_derivedStats.m_nSkills[CGAMESPRITE_SKILL_WILDERNESS_LORE] = 0;
+        const INT_PTR before = pDisplay->m_plstStrings->GetCount();
+        std::unique_ptr<CGameEffect> pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_RANGERTRACKING, 0, 0);
+        iwd2r_srand(17);
+        CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+        CHECK(iwd2r_rand_state() == 17);
+        CHECK(pEffect->m_done == TRUE);
+        REQUIRE(pDisplay->m_plstStrings->GetCount() > before);
+        CHECK(shows(19534));
     }
-    CHECK(found);
+
+    SECTION("enough wilderness lore: one d20 and the area's string")
+    {
+        pSprite->m_derivedStats.m_nSkills[CGAMESPRITE_SKILL_WILDERNESS_LORE] = 40;
+        std::unique_ptr<CGameEffect> pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_RANGERTRACKING, 0, 0);
+        iwd2r_srand(17);
+        CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+        CHECK(iwd2r_rand_state() == 17u * 214013u + 2531011u);
+        CHECK(shows(strArea));
+    }
+
+    pSprite->m_derivedStats.m_nSkills[CGAMESPRITE_SKILL_WILDERNESS_LORE] = skill;
 }
 
 TEST_CASE("effects-iwd: casting glow (235) queues its message and fires the school's glow", "[effects][data]")
