@@ -461,6 +461,7 @@ public:
     BOOL ApplyEffect(CGameSprite* pSprite) override;
     void OnAddSpecific(CGameSprite* pSprite) override;
     BOOL CheckSave(CGameSprite* pSprite, BYTE* pFortitudeRoll, BYTE* pReflexRoll, BYTE* pWillRoll, BYTE* pResistMagicRoll) override;
+    void DisplayString(CGameSprite* pSprite) override;
 
     void sub_4A7750(CGameSprite* pSprite);
     void sub_4A8DF0(DWORD dwDamageType, CGameSprite* pSprite);

@@ -1416,3 +1416,67 @@ TEST_CASE("Replace self (0x4BD050) puts the new creature where the old one stood
 
     ClearMessages();
 }
+
+// A damage effect's DisplayString is the shared empty slot (0x4A51D0), not
+// the base's effect text line: with effect text bit 8 the only line a hit
+// shows is the feedback line (0x4AA6D0).
+TEST_CASE("Damage (0x4A51D0 DisplayString): a hit shows only its feedback line", "[effects][checksave][data]")
+{
+    PROBE_OR_SKIP(pProbe);
+    CGameSprite* pGoblin = MakeGoblin();
+    Neutralize(pGoblin);
+    pGoblin->m_baseStats.m_hitPoints = 50;
+    pGoblin->m_derivedStats.m_nMaxHitPoints = 50;
+    pGoblin->m_derivedStats.m_nResistCrushing = 0;
+    ClearMessages();
+
+    CGameOptions* pOptions = g_pBaldurChitin->GetObjectGame()->GetOptions();
+    const DWORD level = pOptions->m_nEffectTextLevel;
+    pOptions->m_nEffectTextLevel = 0x2 | 0x8;
+    CTimerWorld* pTimer = g_pBaldurChitin->GetObjectGame()->GetWorldTimer();
+    const BOOL active = pTimer->m_active;
+    pTimer->m_active = TRUE;
+
+    SECTION("the base's line would be the effect text 14027; the damage's is empty")
+    {
+        std::unique_ptr<CGameEffect> pDamage = Decode(CGAMEEFFECT_DAMAGE, 0, 3, pProbe->GetId());
+        pDamage->CGameEffect::DisplayString(pGoblin);
+        std::vector<CMessage*> messages = Messages();
+        REQUIRE(messages.size() == 1);
+        CMessageDisplayTextRef* pRef = dynamic_cast<CMessageDisplayTextRef*>(messages[0]);
+        REQUIRE(pRef != nullptr);
+        CHECK(pRef->m_text == 14027);
+
+        ClearMessages();
+        pDamage->DisplayString(pGoblin);
+        CHECK(Messages().empty());
+    }
+
+    SECTION("through AddEffect: one feedback line, no effect text line")
+    {
+        CGameEffect* pDamage = Decode(CGAMEEFFECT_DAMAGE, 0, 3, pProbe->GetId()).release();
+        pDamage->m_durationType = 1;
+        pGoblin->field_70FA = 0;
+        pGoblin->AddEffect(pDamage, CGameAIBase::EFFECT_LIST_TIMED, TRUE, TRUE);
+
+        int lines = 0;
+        for (CMessage* pMessage : Messages()) {
+            CMessageDisplayTextRef* pRef = dynamic_cast<CMessageDisplayTextRef*>(pMessage);
+            if (pRef != nullptr) {
+                CHECK(pRef->m_text != 14027);
+            }
+            CMessageDisplayText* pText = dynamic_cast<CMessageDisplayText*>(pMessage);
+            if (pText != nullptr) {
+                lines++;
+                CHECK(pText->m_text == Text(25028));
+            }
+        }
+        CHECK(lines == 1);
+        CHECK(pGoblin->m_baseStats.m_hitPoints == 47);
+    }
+
+    pOptions->m_nEffectTextLevel = level;
+    pTimer->m_active = active;
+    ClearMessages();
+    delete pGoblin;
+}

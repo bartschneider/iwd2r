@@ -4778,6 +4778,15 @@ BOOL CGameEffectDamage::CheckSave(CGameSprite* pSprite, BYTE* pFortitudeRoll, BY
     return bResult;
 }
 
+// 0x4A51D0
+void CGameEffectDamage::DisplayString(CGameSprite* pSprite)
+{
+    // NOTE: The vtable's slot +0x20 (0x84AE5C) is the shared empty `ret 4`
+    // (identical code folding with CGameEffect::OnRemove), not the base's
+    // effect text line (0x4A4BB0): a damage effect's only line is its
+    // feedback (0x4AA6D0, slot +0x28).
+}
+
 // 0x4AA6D0
 void CGameEffectDamage::sub_4AA6D0(CGameSprite* pSprite, INT nResisted)
 {
