@@ -233,9 +233,10 @@ def parse_args(argv):
     ap.add_argument('--jobs', type=int, default=1, metavar='N',
                     help='with --vm linux --suite: scenarios run at once '
                     '(default 1)')
-    ap.add_argument('--timeout', type=int, default=realinput.DEFAULT_TIMEOUT,
-                    metavar='S', help='with --vm: per-scenario timeout in '
-                    'seconds (default %d)' % realinput.DEFAULT_TIMEOUT)
+    ap.add_argument('--timeout', type=int, metavar='S',
+                    help='with --vm: per-scenario timeout in seconds, for '
+                    'every scenario (default: the scenario header\'s '
+                    '"# timeout: S", else %d)' % realinput.DEFAULT_TIMEOUT)
     args = ap.parse_args(argv)
     if args.vm:
         if not args.suite and not args.script:
@@ -252,7 +253,7 @@ def parse_args(argv):
         ap.error('--suite needs --vm')
     if args.jobs < 1:
         ap.error('--jobs must be positive')
-    if args.timeout <= 0:
+    if args.timeout is not None and args.timeout <= 0:
         ap.error('--timeout must be positive')
     for entry in args.sets:
         if not SET_RE.match(entry):
@@ -570,6 +571,15 @@ def scenario_name(path):
     return os.path.splitext(os.path.basename(path))[0]
 
 
+def scenario_timeout(arg, path):
+    """A --vm scenario's timeout in seconds: --timeout (arg) when given,
+    else the scenario header's "# timeout: S" (realinput.header_timeout),
+    else realinput.DEFAULT_TIMEOUT."""
+    if arg is not None:
+        return arg
+    return realinput.load_header_timeout(path) or realinput.DEFAULT_TIMEOUT
+
+
 def format_table(title, rows):
     """rows: (scenario, code, seconds, screenshots) tuples."""
     lines = [title,
@@ -613,6 +623,27 @@ def check_shots(result, run_dir, actions, presented=False):
         error = 'missing shot ' + ', '.join(missing)
         result['error'] = error if not result.get('error') \
             else result['error'] + '; ' + error
+    return result
+
+
+def check_checkpoints(result, run_dir, actions, scenario):
+    """A scenario that exited 0 with its shots passes only when the engine
+    dumped its state at every checkpoint and each dump has what the
+    scenario's expectations (realinput.load_expectations: what the original
+    reached there) name: a lost click that leaves the run on another screen
+    or with other choices fails here with code 1 and the first field."""
+    if result['code'] != 0:
+        return result
+    problems = realinput.check_checkpoints(
+        actions, run_dir, realinput.load_expectations(scenario))
+    if problems:
+        result['code'] = 1
+        error = problems[0] if len(problems) == 1 else '%s (and %d more)' % (
+            problems[0], len(problems) - 1)
+        result['error'] = error if not result.get('error') \
+            else result['error'] + '; ' + error
+        with open(os.path.join(run_dir, 'checkpoints.txt'), 'w') as f:
+            f.write('\n'.join(problems) + '\n')
     return result
 
 
@@ -680,13 +711,15 @@ def run_linux_vm(args, argv, scenarios, data, overrides, base_dir, nested,
         env = dict(base_env, IWD2_DATA=view)
         try:
             result = realinput.run_scenario(
-                exe, env, actions, run_dir, geometry, args.timeout,
+                exe, env, actions, run_dir, geometry,
+                scenario_timeout(args.timeout, path),
                 taken, cwd=ROOT, abort=abort,
                 cpu=realinput.job_cpu(slot, cpus) if args.jobs > 1 else None)
         finally:
             if not args.keep_data_view:
                 dataview.remove_view(view)
         check_shots(result, run_dir, actions, args.shot_presented)
+        check_checkpoints(result, run_dir, actions, path)
         write_vm_summary(run_dir, argv, 'linux-vm', path, overrides, result)
         log('linux: %s exit %s in %.1f s%s' % (
             name, result['code'], result['seconds'],
@@ -754,11 +787,13 @@ def run_windows_vm(args, argv, scenarios, data, overrides, base_dir, nested,
             result = winsandbox.run_scenario(
                 exe, winsandbox.GAME_CACHE,
                 realinput.windows_actions(actions, geometry),
-                overrides, name, run_dir, host_run, args.timeout,
-                realinput.FRAME_RATE, log)
+                overrides, name, run_dir, host_run,
+                scenario_timeout(args.timeout, path), realinput.FRAME_RATE,
+                log)
         # --shot-presented is not passed into the sandbox, so only the
         # engine's NAME.png is required there.
         check_shots(result, run_dir, actions)
+        check_checkpoints(result, run_dir, actions, path)
         write_vm_summary(run_dir, argv, 'windows-vm', path, overrides,
                          result)
         log('windows: %s exit %s in %.1f s%s' % (
@@ -781,6 +816,7 @@ def main_vm(args, argv):
             sys.exit('play: no script %s' % path)
         try:
             scenarios.append((path, realinput.load_scenario(path)))
+            scenario_timeout(args.timeout, path)
         except realinput.ScenarioError as e:
             sys.exit('play: %s' % e)
     platforms = ['linux', 'windows'] if args.vm == 'all' else [args.vm]

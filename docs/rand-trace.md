@@ -51,7 +51,7 @@ append the same text block to `probe.txt` at each of those frames, at the
 frame's start (before its AI update, where the dumps are taken), so
 
 ```sh
-IWD2R_PROBE=1492-1499 IWD2R_RAND_TRACE=1 python3 tools/oracle.py replay compare scenarios/pending/walk_and_talk.txt --seed 1
+IWD2R_PROBE=1492-1499 IWD2R_RAND_TRACE=1 python3 tools/oracle.py replay compare scenarios/walk_and_talk.txt --seed 1
 diff runs/<stamp>/original/probe.txt runs/<stamp>/ours/probe.txt
 ```
 
