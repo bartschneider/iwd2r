@@ -17915,7 +17915,8 @@ BOOL CGameSprite::Hit(CGameSprite* target, CItem* curWeapon, SHORT nAbility, BOO
     }
 
     if (target->m_derivedStats.m_spellStates[SPLSTATE_BLINK] && rand() % 100 < 50) {
-        FeedBack(FEEDBACK_63, 0, 0, 0, -1, 0, 0);
+        // 0x73B947: `mov ecx,ebx`, the target.
+        target->FeedBack(FEEDBACK_63, 0, 0, 0, -1, 0, 0);
         return FALSE;
     }
 

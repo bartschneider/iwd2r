@@ -624,6 +624,39 @@ TEST_CASE("combat: Hit draws the d20 and the confirmation d20 of a threat", "[co
     CHECK(threats > 0);
     CHECK(hits > 0);
     CHECK(hits < 200);
+
+    // A blinking target avoids the attack on rand() % 100 < 50, and the
+    // feedback (63, strref 18353) is the target's (0x73B947 `mov ecx,ebx`).
+    CGameOptions* pOptions = g_pBaldurChitin->GetObjectGame()->GetOptions();
+    const DWORD nEffectTextLevel = pOptions->m_nEffectTextLevel;
+    pOptions->m_nEffectTextLevel |= 0x2;
+    pCharacter->GetDerivedStats()->m_spellStates[SPLSTATE_BLINK] = false;
+    pGoblin->GetDerivedStats()->m_spellStates[SPLSTATE_BLINK] = true;
+    int blinks = 0;
+    for (unsigned int seed = 1; seed <= 20; seed++) {
+        ClearMessages();
+        srand(Seed(seed));
+        const unsigned int before = iwd2r_rand_state();
+        if (NextRands(before, 1)[0] % 100 >= 50) {
+            continue;
+        }
+        INFO("blink seed " << seed);
+        BOOL bCritical = FALSE;
+        CHECK_FALSE(pCharacter->Hit(pGoblin, pWeapon, 0, &bCritical, FALSE, 1));
+        CHECK(Draws(before, iwd2r_rand_state()) == 1);
+        CMessageHandler& handler = g_pBaldurChitin->m_cMessageHandler;
+        REQUIRE(handler.m_messageList.GetCount() == 1);
+        auto* pMessage = dynamic_cast<CMessageDisplayTextRef*>(handler.m_messageList.GetHead());
+        REQUIRE(pMessage != NULL);
+        CHECK(pMessage->m_text == 18353);
+        CHECK(pMessage->GetSource() == pGoblin->GetId());
+        CHECK(pMessage->GetTarget() == pGoblin->GetId());
+        blinks++;
+    }
+    CHECK(blinks > 0);
+    pGoblin->GetDerivedStats()->m_spellStates[SPLSTATE_BLINK] = false;
+    pOptions->m_nEffectTextLevel = nEffectTextLevel;
+    ClearMessages();
 }
 
 TEST_CASE("combat: Damage rolls each die of the weapon once and Kai maximises them", "[combat][data]")
