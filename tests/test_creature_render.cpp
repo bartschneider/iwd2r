@@ -24,8 +24,11 @@
 #include "engine_world.h"
 #include "render_surfaces.h"
 
+#include <cstring>
 #include <functional>
+#include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <typeinfo>
 #include <vector>
@@ -1091,4 +1094,145 @@ TEST_CASE("container: a pile without bounds gets its search square", "[render][d
     CHECK(pPile->m_rBounding == CRect(480, 948, 496, 960));
     CHECK(pPile->m_ptWalkToUse == CPoint(487, 953));
     CHECK(pPile->GetPos() == CPoint(487, 953));
+}
+
+// The constructors of CGameTrigger (0x4CCAB0), CGameDoor (0x485AC0) and
+// CGameContainer (0x47BFA0) copy each polygon from the area file and drop
+// a point only when it lies on the line through its two neighbours: the
+// same x, the same y, or equal slopes 1000 * dy / dx (`cmp eax, edi; jne`
+// keeps it, 0x4CCE1E-0x4CCE20, 0x486031, 0x4861D0, 0x47C45F). Ours had the
+// slope test the wrong way round and dropped every point between two
+// different slopes: AR1000's Half-Built Ship kept 2 of its 35 points and
+// every door's open polygon 2 of 3. The counts expected here are those the
+// original saved for AR1000 (its Probe Save, AR1000.ARE in ICEWIND2.SAV of
+// the crossload run 20261016-171655): every point, except one of Barrel
+// Three's ten, which lies on a straight line.
+TEST_CASE("area objects: AR1000's polygons keep the original's points", "[render][data]")
+{
+    std::string why;
+    if (!Begin(why)) {
+        SKIP("[iwd2r-skip] " + why);
+    }
+    FramePump pump;
+    World world;
+    if (!NewWorld(world, why)) {
+        SKIP("[iwd2r-skip] " + why);
+    }
+    CGameArea* pArea = world.pArea;
+
+    enum Kind { kTrigger,
+        kDoorOpen,
+        kDoorClosed,
+        kContainer };
+    struct Expected {
+        Kind kind;
+        const char* name;
+        int points;
+    };
+    const Expected expected[] = {
+        { kTrigger, "Door_Hint_Trap_00", 4 },
+        { kTrigger, "Door_Hint_Trap_01", 4 },
+        { kTrigger, "To1001", 4 },
+        { kTrigger, "To1002", 4 },
+        { kTrigger, "To1003", 4 },
+        { kTrigger, "To1004", 4 },
+        { kTrigger, "To1005", 4 },
+        { kTrigger, "To1006", 4 },
+        { kTrigger, "To1100", 4 },
+        { kTrigger, "Info Text for Cranes", 42 },
+        { kTrigger, "Wicked Wench", 13 },
+        { kTrigger, "Half-Built Ship", 35 },
+        { kTrigger, "Life Raft", 11 },
+        { kTrigger, "Gutboy's Regrets", 23 },
+        { kTrigger, "Light House", 4 },
+        { kTrigger, "Dualdon's Wake", 22 },
+        { kTrigger, "Salty Dog Tavern", 4 },
+        { kDoorOpen, "AR1000_Door4", 3 },
+        { kDoorClosed, "AR1000_Door4", 4 },
+        { kDoorOpen, "AR1000_Door3", 3 },
+        { kDoorClosed, "AR1000_Door3", 4 },
+        { kDoorOpen, "AR1000_Door6", 3 },
+        { kDoorClosed, "AR1000_Door6", 4 },
+        { kDoorOpen, "AR1000_Door5", 3 },
+        { kDoorClosed, "AR1000_Door5", 4 },
+        { kDoorOpen, "AR1000_Door2", 3 },
+        { kDoorClosed, "AR1000_Door2", 4 },
+        { kDoorOpen, "AR1000_Door1", 3 },
+        { kDoorClosed, "AR1000_Door1", 4 },
+        { kContainer, "Goblin Shield", 0 },
+        { kContainer, "Goblin Axe", 0 },
+        { kContainer, "Goblin Short Sword", 0 },
+        { kContainer, "Goblin Short Bow", 0 },
+        { kContainer, "Goblin Arrows", 0 },
+        { kContainer, "Soldier Helmet", 0 },
+        { kContainer, "Soldier Spear", 0 },
+        { kContainer, "Soldier Armor", 0 },
+        { kContainer, "Sailor Club", 0 },
+        { kContainer, "Goblin Axe", 0 },
+        { kContainer, "Goblin Shield", 0 },
+        { kContainer, "Goblin Sword", 0 },
+        { kContainer, "Goblin Axe", 0 },
+        { kContainer, "Soldier Spear", 0 },
+        { kContainer, "Soldier Helmet", 0 },
+        { kContainer, "Soldier Armor", 0 },
+        { kContainer, "Throwing Axe", 0 },
+        { kContainer, "Throwing Axe", 0 },
+        { kContainer, "Barrel One", 10 },
+        { kContainer, "Barrel Two", 9 },
+        { kContainer, "Barrel Three", 9 },
+        { kContainer, "Barrel Four", 14 },
+        { kContainer, "Barrel Five", 11 },
+        { kContainer, "Dingy Barrel", 7 },
+        { kContainer, "Townsperson Axe", 0 },
+    };
+
+    // (kind, script name) -> the point counts of the objects of that name.
+    std::map<std::pair<int, std::string>, std::multiset<int>> found;
+    std::set<LONG> seen;
+    CGameObjectArray* pObjects = g_pBaldurChitin->GetObjectGame()->GetObjectArray();
+    for (CTypedPtrList<CPtrList, int*>* pList : { &pArea->m_lVertSort, &pArea->m_lVertSortBack, &pArea->m_lVertSortFlight, &pArea->m_lVertSortAdd, &pArea->m_lVertSortBackAdd, &pArea->m_lVertSortFlightAdd }) {
+        POSITION pos = pList->GetHeadPosition();
+        while (pos != NULL) {
+            LONG id = static_cast<LONG>(reinterpret_cast<INT_PTR>(pList->GetNext(pos)));
+            CGameObject* pObject;
+            if (!seen.insert(id).second
+                || pObjects->GetShare(id, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) != CGameObjectArray::SUCCESS) {
+                continue;
+            }
+            pObjects->ReleaseShare(id, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+            if (pObject->GetObjectType() == CGameObject::TYPE_TRIGGER) {
+                auto* p = static_cast<CGameTrigger*>(pObject);
+                found[{ kTrigger, std::string(p->m_scriptName, strnlen(p->m_scriptName, SCRIPTNAME_SIZE)) }].insert(p->m_nPolygon);
+            } else if (pObject->GetObjectType() == CGameObject::TYPE_DOOR) {
+                auto* p = static_cast<CGameDoor*>(pObject);
+                const std::string name(p->m_scriptName, strnlen(p->m_scriptName, SCRIPTNAME_SIZE));
+                found[{ kDoorOpen, name }].insert(p->m_nOpenPolygon);
+                found[{ kDoorClosed, name }].insert(p->m_nClosedPolygon);
+            } else if (pObject->GetObjectType() == CGameObject::TYPE_CONTAINER) {
+                auto* p = static_cast<CGameContainer*>(pObject);
+                found[{ kContainer, std::string(p->m_scriptName, strnlen(p->m_scriptName, SCRIPTNAME_SIZE)) }].insert(p->m_nPolygon);
+            }
+        }
+    }
+
+    std::map<std::pair<int, std::string>, std::multiset<int>> wanted;
+    int total = 0;
+    for (const Expected& e : expected) {
+        wanted[{ e.kind, e.name }].insert(e.points);
+        total += e.points;
+    }
+    CHECK(total == 292);
+    for (const auto& [key, counts] : wanted) {
+        INFO("kind " << key.first << " " << key.second);
+        auto it = found.find(key);
+        REQUIRE(it != found.end());
+        CHECK(it->second == counts);
+    }
+    int foundTotal = 0;
+    for (const auto& [key, counts] : found) {
+        for (int n : counts) {
+            foundTotal += n;
+        }
+    }
+    CHECK(foundTotal == total);
 }
