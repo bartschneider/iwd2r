@@ -13655,19 +13655,144 @@ CGameEffect* CGameEffectPolymorph::Copy()
 // 0x4BB110
 BOOL CGameEffectPolymorph::ApplyEffect(CGameSprite* pSprite)
 {
-    // iwd2r: said once on stderr (ruling M3-7), so a missing port cannot
-    // pass unnoticed; the game goes on.
-    static bool bWarned = false;
-    if (!bWarned) {
-        bWarned = true;
-        fprintf(stderr, "iwd2r: effect %d (CGameEffectPolymorph::ApplyEffect, 0x4BB110) is not ported; it does nothing\n",
-            135);
+    if (m_res == "") {
+        pSprite->m_timedEffectList.RemoveAllOfType(pSprite, CGAMEEFFECT_POLYMORPH, pSprite->m_timedEffectList.m_posCurrent, -1);
+        pSprite->m_equipedEffectList.RemoveAllOfType(pSprite, CGAMEEFFECT_POLYMORPH, pSprite->m_equipedEffectList.m_posCurrent, -1);
+        sub_4B8730(pSprite, 42);
+        m_forceRepass = TRUE;
+        m_done = TRUE;
+        return TRUE;
     }
 
-    // TODO: Incomplete. Not ported yet (a creature file swap through a new
-    // CGameSprite, CGameObjectArray::Delete and the search map); until then
-    // the override only keeps the effect from reaching the asserting base
-    // ApplyEffect.
+    pSprite->SetIdleSequence();
+
+    if (pSprite->m_pPath != NULL) {
+        CMessage* message = new CMessageDropPath(pSprite->GetId(), pSprite->GetId());
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+    }
+
+    // The creature to take the shape of, made from its file.
+    CCreatureFile creatureData;
+    creatureData.SetResRef(m_res, TRUE, TRUE);
+
+    LONG nSize = creatureData.GetDataSize();
+    CGameSprite* pShape = new CGameSprite(creatureData.GetData(),
+        nSize,
+        0,
+        0,
+        -1,
+        0,
+        0,
+        0x7FFFFFFF,
+        CPoint(-1, -1),
+        0);
+    pShape->SetResRef(creatureData.GetResRef());
+    creatureData.ReleaseData();
+
+    if (pShape != NULL) {
+        LONG nShapeId = pShape->GetId();
+
+        pSprite->m_derivedStats.m_disabledSpellTypes[0] = TRUE;
+        pSprite->m_derivedStats.m_disabledSpellTypes[1] = TRUE;
+        for (INT nButton = 2; nButton <= 11; nButton++) {
+            pSprite->m_derivedStats.m_disabledButtons[nButton] = TRUE;
+        }
+
+        CString sResRef;
+        m_res.CopyToString(sResRef);
+        pShape->SetResRef(CResRef(sResRef));
+
+        BYTE rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetDeny(nShapeId,
+            CGameObjectArray::THREAD_ASYNCH,
+            reinterpret_cast<CGameObject**>(&pShape),
+            INFINITE);
+        if (rc == CGameObjectArray::SUCCESS) {
+            // NOTE: Inlined CGameAnimation::GetListType (ObjAnimation.h line
+            // 2086) and GetPersonalSpace (line 2093).
+            if (pSprite->GetArea() != NULL) {
+                if (pSprite->GetAnimation()->GetListType() != CGameObject::LIST_FLIGHT) {
+                    pSprite->GetArea()->m_search.RemoveObject(CPoint(pSprite->GetPos().x / CPathSearch::GRID_SQUARE_SIZEX,
+                                                                  pSprite->GetPos().y / CPathSearch::GRID_SQUARE_SIZEY),
+                        pSprite->GetAIType().m_nEnemyAlly,
+                        pSprite->GetAnimation()->GetPersonalSpace(),
+                        pSprite->field_54A8,
+                        pSprite->field_7430);
+                }
+            }
+
+            // NOTE: Inlined CGameAnimation::GetAnimationId (ObjAnimation.h
+            // line 2115) and SetAnimationType.
+            pSprite->GetAnimation()->SetAnimationType(pShape->GetAnimation()->GetAnimationId(),
+                pShape->m_baseStats.m_colors,
+                pSprite->m_nDirection);
+            pSprite->GetAnimation()->m_animation->SetSequence(6);
+
+            if (pSprite->GetArea() != NULL) {
+                if (pSprite->GetAnimation()->GetListType() != CGameObject::LIST_FLIGHT) {
+                    pSprite->GetArea()->m_search.AddObject(CPoint(pSprite->GetPos().x / CPathSearch::GRID_SQUARE_SIZEX,
+                                                               pSprite->GetPos().y / CPathSearch::GRID_SQUARE_SIZEY),
+                        pSprite->GetAIType().m_nEnemyAlly,
+                        pSprite->GetAnimation()->GetPersonalSpace(),
+                        pSprite->field_54A8,
+                        pSprite->field_7430);
+                }
+            }
+
+            CMessage* message = new CMessageAnimationChange(pShape->GetAnimation()->GetAnimationId(),
+                pSprite->GetId(),
+                pSprite->GetId());
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+            // The shape's armor class, attacks, resistances and physical
+            // scores.
+            pSprite->m_derivedStats.m_bPolymorphed = TRUE;
+            pSprite->m_derivedStats.field_6 = pShape->m_derivedStats.field_6;
+            pSprite->m_derivedStats.field_8 = pShape->m_derivedStats.field_8;
+            pSprite->m_derivedStats.field_A = pShape->m_derivedStats.field_A;
+            pSprite->m_derivedStats.field_C = pShape->m_derivedStats.field_C;
+            pSprite->m_derivedStats.m_nACCrushingMod = pShape->m_derivedStats.m_nACCrushingMod;
+            pSprite->m_derivedStats.m_nACMissileMod = pShape->m_derivedStats.m_nACMissileMod;
+            pSprite->m_derivedStats.m_nACPiercingMod = pShape->m_derivedStats.m_nACPiercingMod;
+            pSprite->m_derivedStats.m_nACSlashingMod = pShape->m_derivedStats.m_nACSlashingMod;
+            pSprite->m_derivedStats.m_nCON = pShape->m_derivedStats.m_nCON;
+            pSprite->m_derivedStats.m_nDEX = pShape->m_derivedStats.m_nDEX;
+            pSprite->m_derivedStats.m_nSTR = pShape->m_derivedStats.m_nSTR;
+            pSprite->m_derivedStats.m_nNumberOfAttacks = pShape->m_derivedStats.m_nNumberOfAttacks;
+            pSprite->m_derivedStats.m_nResistFire = pShape->m_derivedStats.m_nResistFire;
+            pSprite->m_derivedStats.m_nResistCold = pShape->m_derivedStats.m_nResistCold;
+            pSprite->m_derivedStats.m_nResistElectricity = pShape->m_derivedStats.m_nResistElectricity;
+            pSprite->m_derivedStats.m_nResistAcid = pShape->m_derivedStats.m_nResistAcid;
+            pSprite->m_derivedStats.m_nResistMagic = pShape->m_derivedStats.m_nResistMagic;
+            pSprite->m_derivedStats.m_nResistMagicFire = pShape->m_derivedStats.m_nResistMagicFire;
+            pSprite->m_derivedStats.m_nResistMagicCold = pShape->m_derivedStats.m_nResistMagicCold;
+            pSprite->m_derivedStats.m_nResistSlashing = pShape->m_derivedStats.m_nResistSlashing;
+            pSprite->m_derivedStats.m_nResistCrushing = pShape->m_derivedStats.m_nResistCrushing;
+            pSprite->m_derivedStats.m_nResistPiercing = pShape->m_derivedStats.m_nResistPiercing;
+            pSprite->m_derivedStats.m_nResistMissile = pShape->m_derivedStats.m_nResistMissile;
+            pSprite->m_derivedStats.m_nMagicDamageResistance = pShape->m_derivedStats.m_nMagicDamageResistance;
+            pSprite->m_derivedStats.m_nResistPoison = pShape->m_derivedStats.m_nResistPoison;
+
+            if (m_secondaryType) {
+                g_pBaldurChitin->GetObjectGame()->m_cButtonArray.ResetState();
+            }
+
+            g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(nShapeId,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+
+            rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->Delete(nShapeId,
+                CGameObjectArray::THREAD_ASYNCH,
+                NULL,
+                INFINITE);
+            if (rc == CGameObjectArray::SUCCESS && pShape != NULL) {
+                delete pShape;
+            }
+
+            pSprite->JumpToPoint(pSprite->GetPos(), TRUE);
+            pSprite->SetIdleSequence();
+        }
+    }
+
     return TRUE;
 }
 
