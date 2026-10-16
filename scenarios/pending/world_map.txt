@@ -21,12 +21,19 @@
 # the world the area (AR1000, then AR1005 in the original) and the party's
 # position.
 #
-# Status (2026-10-16, ui-misc round 3): played on our side only (replay
-# mode, headless, seed 1); two runs give identical dumps. The area map and
-# the world map (Targos Docks marked) come up and go back. Our side does
-# not travel: Probe walks into the doorway (840,918) and stays in AR1000,
-# because CGameSprite::LeaveArea (0x74C0D0) is not ported (the vis-probe
-# stream's file); travelled is AR1000 on our side.
+# Status (2026-10-16, ui-misc round 4): played on our side only (replay
+# mode, headless, seed 1); two runs give identical dumps (globals.held_frames
+# is timing and differs). The area map and the world map (Targos Docks
+# marked) come up and go back. Our side travels: the click on the open
+# door's travel region (CGameTrigger::OnActionButton 0x4CED10) queues the
+# walk and LEAVEAREANAME, Probe walks into To1005, and
+# CGameSprite::LeaveAreaName (0x74CDB0) loads AR1005 and places him by
+# FR1000 (165,224, facing 8) at 136,222 (the formation's first place, the
+# nearest open square); travelled is in AR1005 with the house drawn, and its
+# two goblins pause the game (Enemy Sighted).
+# This needed the entry points kept by CGameArea::Unmarshal (0x472DE0,
+# CPtrList::AddTail at 0x473F9B, ruling M5-17); without them LeaveAreaName
+# stops at its assert "AR1005 missing FR1000".
 #
 # What the original recording needs: a sandbox run of oracle.py replay
 # record (the vanilla copy, Resolution=800, seed 1); travelled should be in
