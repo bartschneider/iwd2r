@@ -1061,3 +1061,34 @@ TEST_CASE("trigger: a creature inside a travel region sets it off", "[render][da
     }
     CHECK(inside > 0);
 }
+
+// A pile (container type 4) with no bounding rectangle in the area file gets
+// its search square: left and top rounded down to the 16x12 grid, right and
+// bottom the square's last pixel, (pos / 16 + 1) * 16 - 1 and
+// (pos / 12 + 1) * 12 - 1 (0x47C17A-0x47C1C2 of the constructor 0x47BFA0).
+// Its walk-to point, which is also its position, is the rectangle's middle.
+// Ours computed 16 * (pos / 17) - 1 and 12 * (pos / 13) - 1, so AR1000's
+// goblin axe (file position 490,956) stood at 463,911 and was drawn 27 and
+// 45 pixels off; it is at 487,953 as in the original's shots.
+TEST_CASE("container: a pile without bounds gets its search square", "[render][data]")
+{
+    std::string why;
+    if (!Begin(why)) {
+        SKIP("[iwd2r-skip] " + why);
+    }
+    FramePump pump;
+    World world;
+    if (!NewWorld(world, why)) {
+        SKIP("[iwd2r-skip] " + why);
+    }
+    CGameArea* pArea = world.pArea;
+    auto accept = [](CGameContainer* p) { return p->m_containerType == 4 && p->m_rBounding.left == 480 && p->m_rBounding.top == 948; };
+    CGameContainer* pPile = FindObject<CGameContainer>(pArea->m_lVertSortBack, CGameObject::TYPE_CONTAINER, accept);
+    if (pPile == NULL) {
+        pPile = FindObject<CGameContainer>(pArea->m_lVertSort, CGameObject::TYPE_CONTAINER, accept);
+    }
+    REQUIRE(pPile != NULL);
+    CHECK(pPile->m_rBounding == CRect(480, 948, 496, 960));
+    CHECK(pPile->m_ptWalkToUse == CPoint(487, 953));
+    CHECK(pPile->GetPos() == CPoint(487, 953));
+}
