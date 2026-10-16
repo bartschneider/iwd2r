@@ -4560,10 +4560,7 @@ class OracleReplayCompareTest(unittest.TestCase):
             self.assertIn(screen, enum)
 
     def test_known_differences_file(self):
-        self.assertEqual(
-            [(k['field'], k['checkpoint']) for k in oracle.load_known()],
-            [('game.members[0].inventory[18]', 'reig_done'),
-             ('game.members[0].inventory[18]', 'door_open')])
+        self.assertEqual(oracle.load_known(), [])
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, 'k.json')
             good = [{'field': 'globals.ai_rng_state', 'checkpoint': '*',
