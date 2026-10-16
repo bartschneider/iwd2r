@@ -2200,11 +2200,15 @@ void CGameSprite::AIUpdate()
                     || m_nSequence == CGAMESPRITE_SEQ_ATTACK_SLASH
                     || m_nSequence == CGAMESPRITE_SEQ_ATTACK_BACKSLASH
                     || m_nSequence == CGAMESPRITE_SEQ_ATTACK_JAB) {
-                    SHORT lSlot;
-                    CItem* pItem = m_equipment.m_items[m_equipment.m_selectedWeapon];
-                    pItem->Demand();
-                    sub_756930(pItem, GetLauncher(pItem->GetAbility(m_equipment.m_selectedWeaponAbility), lSlot));
-                    pItem->Release();
+                    // NOTE: The original picks the swing sound at the first
+                    // frame of the attack only (0x6F7656-0x6F7672).
+                    if (m_animation.IsBeginningOfSequence()) {
+                        SHORT lSlot;
+                        CItem* pItem = m_equipment.m_items[m_equipment.m_selectedWeapon];
+                        pItem->Demand();
+                        sub_756930(pItem, GetLauncher(pItem->GetAbility(m_equipment.m_selectedWeaponAbility), lSlot));
+                        pItem->Release();
+                    }
                 }
                 switch (m_nSequence) {
                 case CGAMESPRITE_SEQ_ATTACK:
@@ -21773,7 +21777,202 @@ BOOL CGameSprite::sub_7567F0(CSpell* pSpell, const CPoint& ptTarget, BYTE nClass
 // 0x756930
 void CGameSprite::sub_756930(CItem* pItem, CItem* pLauncher)
 {
-    // TODO: Incomplete.
+    if ((m_derivedStats.m_generalState & STATE_SILENCED) != 0) {
+        return;
+    }
+
+    CString sSound("");
+    CString sCandidate;
+    CString sEntry;
+    sEntry = "";
+    INT nEntryFrame = 0;
+
+    // The creature's own swing sounds for the sequence (its INI's att1 to
+    // att4), one at random, the next one when it is the one played last.
+    if (field_70FB) {
+        // NOTE: Inlined CGameAnimation getter.
+        // __FILE__: .\Include\ObjAnimation.h
+        // __LINE__: 2118
+        UTIL_ASSERT(m_animation.m_animation != NULL);
+
+        CList<CGameSpriteSoundEntry, CGameSpriteSoundEntry>* pList;
+        switch (m_animation.m_nSequence) {
+        case CGAMESPRITE_SEQ_ATTACK_SLASH:
+            pList = &field_72F0;
+            break;
+        case CGAMESPRITE_SEQ_ATTACK_BACKSLASH:
+            pList = &field_730C;
+            break;
+        case CGAMESPRITE_SEQ_ATTACK_JAB:
+            pList = &field_7328;
+            break;
+        default:
+            pList = &field_7344;
+            break;
+        }
+
+        INT nCount = pList->GetCount();
+        if (nCount != 0) {
+            INT nIndex = rand() % nCount;
+
+            // NOTE: The original walks the list itself; an index out of the
+            // list (never) dereferences NULL.
+            const CGameSpriteSoundEntry& entry = pList->GetAt(pList->FindIndex(nIndex));
+            sEntry = entry.field_0;
+            nEntryFrame = entry.field_4;
+
+            if (strcmp(sEntry, field_7408) != 0) {
+                field_7408 = sEntry;
+                field_740C = nEntryFrame;
+            } else if (nIndex == nCount - 1) {
+                const CGameSpriteSoundEntry& first = pList->GetHead();
+                field_7408 = first.field_0;
+                field_740C = first.field_4;
+            } else {
+                const CGameSpriteSoundEntry& next = pList->GetAt(pList->FindIndex(nIndex + 1));
+                field_7408 = next.field_0;
+                field_740C = next.field_4;
+            }
+            return;
+        }
+    }
+
+    // A weapon's swing sound: "Sw_", its kind and a number at random (the
+    // next one when it is the one played last). NOTE: The original writes
+    // the numbers below 10 itself and calls _itoa (0x7F79D7) for the others,
+    // which no count here reaches.
+    auto twoDigits = [&](const char* szKind, INT nSounds) {
+        sSound += szKind;
+        INT nNumber = rand() % nSounds;
+        char szNumber[3] = { '0', static_cast<char>('1' + nNumber), '\0' };
+        sCandidate = sSound;
+        sCandidate += szNumber;
+        if (strcmp(sCandidate, field_7408) == 0) {
+            if (nNumber == nSounds - 1) {
+                szNumber[1] = '1';
+            } else {
+                szNumber[1] = static_cast<char>('1' + nNumber + 1);
+            }
+            sSound += szNumber;
+        } else {
+            sSound = sCandidate;
+        }
+    };
+    auto oneDigit = [&](const char* szKind, INT nSounds) {
+        sSound += szKind;
+        INT nNumber = rand() % nSounds;
+        char szNumber[3] = { static_cast<char>('0' + nNumber), '\0', '\0' };
+        sCandidate = sSound;
+        sCandidate += szNumber;
+        if (strcmp(sCandidate, field_7408) == 0) {
+            if (nNumber == nSounds - 1) {
+                szNumber[0] = '0';
+            } else {
+                szNumber[0] = static_cast<char>('0' + nNumber + 1);
+            }
+            sSound += szNumber;
+        } else {
+            sSound = sCandidate;
+        }
+    };
+
+    BOOL bCreatureSound = FALSE;
+    const CResRef& resRef = pItem->GetResRef();
+    if (resRef == "WYVERN1") {
+        sSound = "WYVER05";
+    } else if (resRef == "WYVERN2") {
+        sSound = "WYVER06";
+    } else if (resRef == "WOLFWI1") {
+        sSound = "WWOLF07";
+    } else if (resRef == "WOLFWI2") {
+        sSound = "WWOLF06";
+    } else {
+        WORD nItemType = pItem->GetItemType();
+        if (pLauncher != NULL) {
+            nItemType = pLauncher->GetItemType();
+        }
+
+        if (nItemType == 0) {
+            nItemType = 20;
+        }
+
+        sSound = "Sw_";
+
+        switch (nItemType) {
+        case 15:
+            twoDigits("Ms", 5);
+            break;
+        case 16:
+        case 17:
+        case 22:
+        case 29:
+            twoDigits("Sm", 7);
+            break;
+        case 18:
+            twoDigits("Slg", 5);
+            break;
+        case 19:
+        case 20:
+        case 57:
+        case 69:
+            twoDigits("Swd", 5);
+            break;
+        case 21:
+        case 25:
+        case 26:
+        case 30:
+        case 44:
+            twoDigits("Lg", 6);
+            break;
+        case 23:
+            oneDigit("Flal", 5);
+            break;
+        case 24:
+        case 28:
+            oneDigit("Fist", 3);
+            break;
+        case 27:
+            oneDigit("Xbow", 5);
+            break;
+        default:
+            bCreatureSound = TRUE;
+            break;
+        }
+    }
+
+    // No weapon sound, or fists: the creature's sound set has the sound of
+    // the attack sequence.
+    CString sPrefix = sSound.Left(7);
+    if (bCreatureSound || strcmp(sPrefix, "Sw_Fist") == 0) {
+        // NOTE: Inlined CGameAnimation getter.
+        // __FILE__: .\Include\ObjAnimation.h
+        // __LINE__: 2118
+        UTIL_ASSERT(m_animation.m_animation != NULL);
+
+        INT nSpeech = -1;
+        switch (m_animation.m_nSequence) {
+        case CGAMESPRITE_SEQ_ATTACK_SLASH:
+            nSpeech = 40;
+            break;
+        case CGAMESPRITE_SEQ_ATTACK_BACKSLASH:
+            nSpeech = 41;
+            break;
+        case CGAMESPRITE_SEQ_ATTACK_JAB:
+            nSpeech = 42;
+            break;
+        }
+
+        if (nSpeech != -1 && m_baseStats.m_speech[nSpeech] != -1) {
+            STR_RES strRes;
+            g_pBaldurChitin->GetTlkTable().Fetch(m_baseStats.m_speech[nSpeech], strRes);
+            strRes.cSound.GetResRef().CopyToString(sSound);
+        }
+    }
+
+    if (strcmp(sSound, "") != 0) {
+        field_7408 = sSound;
+        field_740C = 0;
+    }
 }
 
 // 0x7579C0

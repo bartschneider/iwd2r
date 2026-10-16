@@ -358,7 +358,7 @@ bool SetUpFight(Fight& fight, std::string& why)
 
 // One tick as the area runs it, for the fighters and the projectiles in
 // flight only: the game time, each object's AIUpdate when DoAIUpdate lets
-// it, then the messages. (Not the whole world screen: the area's scripts
+// it, the messages, then the area's lists sorted. (Not the whole world screen: the area's scripts
 // start AR1000's cut-scene, which switches engines and starts the sound.)
 void Tick(CGameArea* pArea, std::initializer_list<CGameSprite*> fighters)
 {
@@ -397,6 +397,11 @@ void Tick(CGameArea* pArea, std::initializer_list<CGameSprite*> fighters)
     }
 
     g_pBaldurChitin->GetMessageHandler()->AsynchronousUpdate();
+
+    // The objects added during the tick (a projectile that flies, as Magic
+    // Missile's) join the lists the next tick walks, and the removed ones
+    // leave them.
+    pArea->SortLists();
 }
 
 }
@@ -1337,7 +1342,10 @@ TEST_CASE("combat: ForceSpell and ForceSpellPoint wait for the casting time and 
             const unsigned int before = iwd2r_rand_state();
             const SHORT result = point ? pCharacter->ForceSpellPoint() : pCharacter->ForceSpell(pGoblin);
             CHECK(result == tick.result);
-            CHECK(Draws(before, iwd2r_rand_state()) == 0);
+            // Magic Missile's missile changes its speed by rand() % 20 - 10
+            // when it is fired at the goblin (CProjectile84E030::Fire); at a
+            // point it has no target to fire at and fires nothing.
+            CHECK(Draws(before, iwd2r_rand_state()) == (tick.fire != 0 && point == 0 ? 1 : 0));
             int conjure = 0;
             int cast = 0;
             for (CMessageSetSequence* message : Queued<CMessageSetSequence>()) {
@@ -1501,7 +1509,8 @@ TEST_CASE("combat: a goblin archer shoots arrows at the party member", "[combat]
     CHECK(nearest >= 5);
     CHECK_FALSE(hpRose);
     CHECK(characterStart == 9);
-    CHECK(pCharacter->GetBaseStats()->m_hitPoints == 6);
+    // Each shot also draws its swing sound (sub_756930: the bow's "Sw_Ms").
+    CHECK(pCharacter->GetBaseStats()->m_hitPoints == 7);
 }
 
 namespace {
@@ -1826,7 +1835,8 @@ TEST_CASE("combat: Spell draws the concentration and spellcraft rolls and then t
     before = iwd2r_rand_state();
     CHECK(pGoblin->Spell(pCharacter) == CGameAIBase::ACTION_DONE);
     CHECK(pGoblin->field_9D14 == 1);
-    CHECK(Draws(before, iwd2r_rand_state()) == 2);
+    // The two rolls, then the missile's speed (CProjectile84E030::Fire).
+    CHECK(Draws(before, iwd2r_rand_state()) == 3);
 
     // The party member, a cleric, finishes SPPR613 at the goblin: the
     // failure roll, then the type-304 draw.
@@ -1854,4 +1864,100 @@ TEST_CASE("combat: Spell draws the concentration and spellcraft rolls and then t
     CHECK(fire[0]->m_projectileType == 304);
     CHECK(fire[0]->field_20 == values[1] % 1000000);
     ClearMessages();
+}
+
+// sub_756930 (0x756930), at the first frame of an attack sequence: the
+// sound the swing plays (+0x7408) and its frame (+0x740C).
+TEST_CASE("combat: a swing picks its weapon's sound and the next one when it would repeat", "[combat][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    Fight fight;
+    std::string why;
+    if (!SetUpFight(fight, why)) {
+        if (why.find("CHR") != std::string::npos) {
+            SKIP("[iwd2r-skip] " + why);
+        }
+        FAIL(why);
+    }
+    CGameSprite* pGoblin = fight.pGoblin;
+    pGoblin->field_70FB = FALSE;
+    pGoblin->GetDerivedStats()->m_generalState &= ~STATE_SILENCED;
+    const SHORT savedSequence = pGoblin->m_animation.m_nSequence;
+    pGoblin->m_animation.m_nSequence = CGAMESPRITE_SEQ_ATTACK_SLASH;
+
+    // A long sword (type 20): "Sw_Swd" and 01 to 05, rand() % 5.
+    CItem sword(CResRef("00CWSWDB"), 0, 0, 0, 0, 0);
+    REQUIRE(sword.GetItemType() == 20);
+    srand(5);
+    const int n = NextRands(iwd2r_rand_state(), 1)[0] % 5;
+    pGoblin->field_7408 = "";
+    pGoblin->field_740C = 7;
+    unsigned int before = iwd2r_rand_state();
+    pGoblin->sub_756930(&sword, NULL);
+    CHECK(Draws(before, iwd2r_rand_state()) == 1);
+    CString expected;
+    expected.Format("Sw_Swd0%d", n + 1);
+    CHECK(pGoblin->field_7408 == expected);
+    CHECK(pGoblin->field_740C == 0);
+
+    // The same draw again: the next sound, after the fifth the first.
+    srand(5);
+    pGoblin->sub_756930(&sword, NULL);
+    expected.Format("Sw_Swd0%d", n == 4 ? 1 : n + 2);
+    CHECK(pGoblin->field_7408 == expected);
+
+    // Silenced: no sound and no draw.
+    pGoblin->GetDerivedStats()->m_generalState |= STATE_SILENCED;
+    before = iwd2r_rand_state();
+    pGoblin->sub_756930(&sword, NULL);
+    CHECK(Draws(before, iwd2r_rand_state()) == 0);
+    CHECK(pGoblin->field_7408 == expected);
+    pGoblin->GetDerivedStats()->m_generalState &= ~STATE_SILENCED;
+
+    // An amulet has no swing sound: outside the three attack sequences the
+    // creature's sound set has none either and "Sw_" is kept as it is.
+    CItem amulet(CResRef("00AMUL01"), 0, 0, 0, 0, 0);
+    const WORD amuletType = amulet.GetItemType();
+    INFO("amulet type " << amuletType);
+    REQUIRE((amuletType < 15 || (amuletType > 30 && amuletType != 44 && amuletType != 57 && amuletType != 69)));
+    REQUIRE(amuletType != 0);
+    pGoblin->m_animation.m_nSequence = CGAMESPRITE_SEQ_ATTACK;
+    before = iwd2r_rand_state();
+    pGoblin->sub_756930(&amulet, NULL);
+    CHECK(Draws(before, iwd2r_rand_state()) == 0);
+    CHECK(pGoblin->field_7408 == CString("Sw_"));
+
+    // The creature's own sounds for the sequence (its INI's att4 for a
+    // sequence other than the three): one at random with its frame, the
+    // next one when it is the one played last.
+    pGoblin->field_70FB = TRUE;
+    CGameSpriteSoundEntry first;
+    first.field_0 = "GOBSW1";
+    first.field_4 = 3;
+    CGameSpriteSoundEntry second;
+    second.field_0 = "GOBSW2";
+    second.field_4 = 5;
+    pGoblin->field_7344.AddTail(first);
+    pGoblin->field_7344.AddTail(second);
+    srand(9);
+    const int m = NextRands(iwd2r_rand_state(), 1)[0] % 2;
+    before = iwd2r_rand_state();
+    pGoblin->sub_756930(&sword, NULL);
+    CHECK(Draws(before, iwd2r_rand_state()) == 1);
+    CHECK(pGoblin->field_7408 == CString(m == 0 ? "GOBSW1" : "GOBSW2"));
+    CHECK(pGoblin->field_740C == (m == 0 ? 3 : 5));
+    srand(9);
+    pGoblin->sub_756930(&sword, NULL);
+    CHECK(pGoblin->field_7408 == CString(m == 0 ? "GOBSW2" : "GOBSW1"));
+    CHECK(pGoblin->field_740C == (m == 0 ? 5 : 3));
+
+    pGoblin->field_7344.RemoveAll();
+    pGoblin->field_70FB = FALSE;
+    pGoblin->m_animation.m_nSequence = savedSequence;
 }
