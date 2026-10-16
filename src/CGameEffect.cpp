@@ -5237,8 +5237,7 @@ BOOL CGameEffectDeath::ApplyEffect(CGameSprite* pSprite)
         return TRUE;
     }
 
-    // TODO: Incomplete. The original calls CGameSprite 0x6F5330 here (not
-    // in src/; it resets sprite state at +0x54A4..+0x54B4 and +0x50BA).
+    pSprite->sub_6F5330();
 
     if ((pSprite->m_derivedStats.m_generalState & STATE_DEAD) != 0) {
         if (pSprite->m_nSequence == CGameSprite::SEQ_SLEEP) {
@@ -5653,16 +5652,14 @@ BOOL CGameEffectDeath::ApplyEffect(CGameSprite* pSprite)
 
         // NOTE: Inlined CGameObject::InControl.
         if (pSprite->InControl()) {
-            // TODO: Incomplete. CGameSprite 0x754EE0 (DropInventory, "",
-            // FALSE) is not in src/.
+            pSprite->DropInventory(FALSE, CString(""));
         }
 
         if (pGame->GetCharacterPortraitNum(pSprite->GetId()) == -1) {
             if ((pSprite->m_baseStats.m_flags & 0x2) != 0) {
                 pSprite->m_expirationTime = pGame->GetWorldTimer()->m_gameTime;
 
-                // TODO: Incomplete. CGameSprite 0x754EE0 (DropInventory,
-                // "", TRUE) is not in src/.
+                pSprite->DropInventory(TRUE, CString(""));
             }
         } else if (pSprite->InControl()) {
             message = new CMessageVisibilityMapMove(FALSE, pSprite->GetId(), pSprite->GetId());
@@ -5707,12 +5704,14 @@ BOOL CGameEffectDeath::ApplyEffect(CGameSprite* pSprite)
 
     // TODO: Incomplete. The original calls
     // Icewind586B70::Instance()->CSummonLimitStruct_Unsummon(pSprite)
-    // (0x586DC0, not in src/) and queues a message of subtype 89 (vtable
-    // 0x84C3A8, not in src/) for the sprite.
+    // (0x586DC0, not in src/) here.
+    message = new CMessage89(pSprite->GetId(), pSprite->GetId(), pSprite->GetId());
+    g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
     Icewind586B70::Instance()->Remove(pSprite);
 
-    // TODO: Incomplete. The original queues a message of subtype 96 (vtable
-    // 0x84C38C, not in src/) for the sprite.
+    message = new CMessage96(pSprite->GetId(), pSprite->GetId(), pSprite->GetId());
+    g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
 
     m_done = TRUE;
 
