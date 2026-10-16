@@ -9,6 +9,7 @@
 #include "CGameAnimationTypeMonsterAnkheg.h"
 #include "CGameAnimationTypeMonsterIcewind.h"
 #include "CGameAnimationTypeMonsterLarge.h"
+#include "CGameAnimationTypeMonsterLarge16.h"
 #include "CGameAnimationTypeMonsterMulti.h"
 #include "CGameAnimationTypeMonsterOld.h"
 #include "CGameAnimationTypeMonsterQuadrant.h"
@@ -372,10 +373,7 @@ TEST_CASE("creature render: CGameAnimationTypeMonsterQuadrant draws each quadran
 // MonsterLarge 0x6B1E70, MonsterLarge16 0x6B3C60, MonsterQuadrant 0x6BC5F0,
 // TownStatic 0x6A55C0): each channel is the cell's and the tint's added less
 // 255, red from the low bytes (for instance 0x6A85BC). Ours took red from the
-// blue bytes, so a yellow tint (blue 0) left no red at all. MonsterLarge16
-// is not drawn here: its constructor (0x6B23B0) leaves m_currentVidCellBase
-// unset in ours (the original sets it at 0x6B26F8), so building one makes
-// ChangeDirection use a stale pointer (vis-probe's file; reported).
+// blue bytes, so a yellow tint (blue 0) left no red at all.
 TEST_CASE("creature render: the earlier Renders keep red in a yellow tint", "[render][data]")
 {
     std::string why;
@@ -396,6 +394,7 @@ TEST_CASE("creature render: the earlier Renders keep red in a yellow tint", "[re
         { 0xD400, "Flying (bird, the one Flying animation that is tinted)", [](CGameAnimationType* p) { return dynamic_cast<CGameAnimationTypeFlying*>(p) != nullptr; } },
         { 0xE408, "MonsterIcewind (goblin)", [](CGameAnimationType* p) { return dynamic_cast<CGameAnimationTypeMonsterIcewind*>(p) != nullptr; } },
         { 0x9000, "MonsterLarge (ogre)", [](CGameAnimationType* p) { return dynamic_cast<CGameAnimationTypeMonsterLarge*>(p) != nullptr; } },
+        { 0xA000, "MonsterLarge16 (wyvern)", [](CGameAnimationType* p) { return dynamic_cast<CGameAnimationTypeMonsterLarge16*>(p) != nullptr; } },
         { 0x1001, "MonsterQuadrant (white wyvern)", [](CGameAnimationType* p) { return dynamic_cast<CGameAnimationTypeMonsterQuadrant*>(p) != nullptr; } },
         { 0x4400, "TownStatic (townsman)", [](CGameAnimationType* p) { return dynamic_cast<CGameAnimationTypeTownStatic*>(p) != nullptr; } },
     };
@@ -849,6 +848,39 @@ TEST_CASE("creature render: CGameAnimationTypeAmbientStatic builds and draws a c
         CHECK(pCow->m_currentVidCell->GetCurrentFrameSize(frameSize, FALSE));
         if (facing == 0 || facing == 12) {
             CheckRender(scope, pCow, CPoint(320, 300), "cow_" + std::to_string(facing));
+        }
+    }
+}
+
+// A wyvern (0xA000, MWYV in three groups of BAMs: 00SWYV, 50WYV, 61WYVERN
+// and eight other CRE files) of CGameAnimationTypeMonsterLarge16, whose
+// constructor (0x6B23B0) sets m_currentVidCellBase to its first base cell
+// (0x6B26F8). Ours left it unset, as AmbientStatic's, so the constructor's
+// ChangeDirection made whatever the heap held the current cell. Every
+// facing now picks the base cell, or the extended one past
+// m_extendDirectionTest without mirrored BAMs, with a frame to draw.
+TEST_CASE("creature render: CGameAnimationTypeMonsterLarge16 builds and draws a wyvern", "[render][data]")
+{
+    std::string why;
+    if (!Begin(why)) {
+        SKIP("[iwd2r-skip] " + why);
+    }
+    RenderScope scope;
+    REQUIRE(scope.Ok());
+    BYTE colors[16] = {};
+    for (WORD facing = 0; facing < 16; facing++) {
+        INFO("facing " << facing);
+        std::unique_ptr<CGameAnimationType> pAnimation(CGameAnimationType::SetAnimationType(0xA000, colors, facing));
+        auto* pWyvern = dynamic_cast<CGameAnimationTypeMonsterLarge16*>(pAnimation.get());
+        REQUIRE(pWyvern != nullptr);
+        CHECK(pWyvern->m_currentVidCellBase == &pWyvern->m_g1VidCellBase);
+        CHECK(pWyvern->m_currentVidCellExtend == &pWyvern->m_g1VidCellExtend);
+        const bool extended = !CGameAnimationType::MIRROR_BAM && pWyvern->m_currentBamDirection > pWyvern->m_extendDirectionTest;
+        CHECK(pWyvern->m_currentVidCell == (extended ? pWyvern->m_currentVidCellExtend : pWyvern->m_currentVidCellBase));
+        CSize frameSize;
+        CHECK(pWyvern->m_currentVidCell->GetCurrentFrameSize(frameSize, FALSE));
+        if (facing == 0 || facing == 12) {
+            CheckRender(scope, pWyvern, CPoint(320, 330), "wyvern16_" + std::to_string(facing));
         }
     }
 }
