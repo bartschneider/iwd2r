@@ -1,0 +1,325 @@
+# M5: the world map and travel out of AR1000. It is walk_and_talk.txt's
+# steps to AR1000_Door5, open (the fighter Probe at 840,978 after the
+# dialogs with Hedron and Reig), then the area map (the M key) and its
+# World Map button, back to the world, and through the open door into the
+# house beyond it (the travel region To1005 to AR1005, entrance FR1000).
+# Coordinates for Resolution=800: the area map's World Map button is
+# GUIMAP.CHU panel 2 control 1 (722,343), the world map's button back is
+# GUIWMAP.CHU panel 2 control 0 (722,343).
+#
+# World map travel: the world map opened from the area map is view only
+# (CUIControlButtonMapWorld 0x6427E0 starts CScreenWorldMap in state 0,
+# and only state 1 travels). State 1 comes from the travel code,
+# CGameSprite::LeaveArea (0x74C0D0, which calls StartWorldMap at
+# 0x74CD59). Every travel region of AR1000 names a destination area
+# (To1001-To1006 the houses, To1100 Targos at its north-west corner, party
+# required), and so do AR1100's; which exit first offers the world map for
+# travel is to be found with the original. This scenario travels by the
+# nearest exit instead, the house behind Door5.
+#
+# State in the checkpoint dumps: the screen (map, world_map, world), and in
+# the world the area (AR1000, then AR1005 in the original) and the party's
+# position.
+#
+# Status (2026-10-16, ui-misc round 3): played on our side only (replay
+# mode, headless, seed 1); two runs give identical dumps. The area map and
+# the world map (Targos Docks marked) come up and go back. Our side does
+# not travel: Probe walks into the doorway (840,918) and stays in AR1000,
+# because CGameSprite::LeaveArea (0x74C0D0) is not ported (the vis-probe
+# stream's file); travelled is AR1000 on our side.
+#
+# What the original recording needs: a sandbox run of oracle.py replay
+# record (the vanilla copy, Resolution=800, seed 1); travelled should be in
+# AR1005 at FR1000 (809,1053 is AR1000's FR1005, the way back).
+#
+# A real-input run takes longer than play.py's default timeout:
+# timeout: 480
+wait 60
+checkpoint menu
+# New Game (645,262), then Done (537,562) with New Party selected, then the
+# first slot's Create Character (530,100).
+click 645 262
+wait 90
+click 537 562
+wait 60
+click 530 100
+wait 90
+checkpoint chargen
+# Gender (400,128): Male (400,286), Next (536,562) to Appearance.
+click 400 128
+wait 30
+click 400 286
+wait 20
+checkpoint male
+click 536 562
+wait 30
+checkpoint appearance
+# Next keeps the first portrait and returns to the main menu.
+click 536 562
+wait 30
+checkpoint gender_done
+# Race (400,163): Elf (400,198), which is a Moon Elf, then Next.
+click 400 163
+wait 30
+click 400 198
+wait 20
+checkpoint elf
+click 536 562
+wait 30
+checkpoint race_done
+# Class (400,198): Fighter (400,268), then Next.
+click 400 198
+wait 30
+click 400 268
+wait 20
+checkpoint fighter
+click 536 562
+wait 30
+checkpoint class_done
+# Alignment (400,233): Chaotic Good (400,198), then Next.
+click 400 233
+wait 30
+click 400 198
+wait 20
+checkpoint chaotic_good
+click 536 562
+wait 30
+checkpoint alignment_done
+# Abilities (400,268): + at x 499 and - at x 517, rows at y 170 (STR),
+# 206 (DEX), 242 (CON), 278 (INT), 314 (WIS), 350 (CHA).
+click 400 268
+wait 30
+checkpoint abilities
+click 499 170
+wait 20
+checkpoint str_up_1
+click 499 170
+wait 20
+checkpoint str_up_2
+click 499 170
+wait 20
+checkpoint str_up_3
+click 499 242
+wait 20
+checkpoint con_up
+click 517 278
+wait 20
+checkpoint int_down
+click 517 350
+wait 20
+checkpoint cha_down
+# Next (536,562) with points left asks "You have some unallocated points
+# left. Are you sure you want to continue?"; Yes (338,331) keeps the
+# abilities and returns to the main menu, which offers Skills.
+click 536 562
+wait 30
+checkpoint points_prompt
+click 338 331
+wait 30
+checkpoint abilities_done
+# Skills (400,303): Intimidate's + (499,420) four times, then Next
+# (536,562), which goes on to Feats.
+click 400 303
+wait 30
+click 499 420
+wait 15
+click 499 420
+wait 15
+click 499 420
+wait 15
+click 499 420
+wait 15
+click 536 562
+wait 30
+checkpoint skills_done
+# Feats: Blind-Fight's + (499,168) and Dash's + (499,384), then Next back
+# to the main menu.
+click 499 168
+wait 15
+click 499 384
+wait 15
+click 536 562
+wait 30
+checkpoint feats_done
+# Appearance (400,338): Next keeps the colours and goes on to Sound; Next
+# keeps the voice and returns to the main menu.
+click 400 338
+wait 30
+click 536 562
+wait 30
+click 536 562
+wait 30
+# Name (400,373): type Probe, Done (458,268).
+click 400 373
+wait 30
+type Probe
+wait 15
+click 458 268
+wait 30
+checkpoint named
+# Next (536,562) finishes the character and shows Party Formation.
+click 536 562
+wait 60
+checkpoint party_formation
+# Done (634,507) starts the game on the chapter screen (the Prologue text,
+# which would move on to the world by itself after about 3,400 frames); its
+# Done (514,549) loads the start area into the world screen.
+click 634 507
+wait 150
+checkpoint chapter
+click 514 549
+wait 150
+checkpoint world
+wait 300
+checkpoint world_settled
+# M2. The opening dialog (Hedron, entry 0): "No, we're here to stay" (1),
+# "Do you know where I can go to sign on with the Targos guard?" (4), "Where
+# can I find Lord Ulbrec?" (1), "All right. Thanks for your help" (1),
+# Continue, "We'll be careful. Farewell, Hedron." (1) ends it.
+checkpoint opening_dialog
+click 300 399
+wait 60
+click 340 437
+wait 60
+click 250 386
+wait 60
+click 280 437
+wait 60
+click 398 583
+wait 60
+click 250 399
+wait 120
+checkpoint opening_done
+# Centre the view on Probe (2414,897): the view the opening cut-scene leaves
+# depends on real time (with real input, play.py --vm, it ends about 12
+# pixels east of a replay's), and the next two clicks need it exact.
+# Centred, Probe is at screen 400,216 (view 2014,681).
+origin ui
+click 528 460
+click 528 460
+wait 10
+# Click-to-move on the deck: Probe walks to 2328,905 and stops.
+origin screen
+click 314 224
+wait 90
+checkpoint moved
+# Hedron's circle (he stands at 2503,900): the party walks up and his dialog
+# opens at entry 34 with 5 responses; "Nothing today, thanks. Farewell." (5)
+# goes to entry 37, whose "Very well. Farewell." (1) ends it.
+move 497 217
+wait 5
+click 497 217
+wait 90
+checkpoint dialog
+shot dialog
+origin ui
+click 260 424
+wait 60
+click 220 399
+wait 60
+checkpoint dialog_end
+# Leg 1: centre on Probe (2448,906), walk to 2104,1002 below the gangplank.
+click 528 460
+click 528 460
+wait 10
+origin screen
+click 56 312
+wait 150
+# Leg 2: centre, walk to 1784,960 (the click target; the party stops at 1784,966) along the dock.
+origin ui
+click 528 460
+click 528 460
+wait 10
+origin screen
+click 80 174
+wait 150
+# Leg 3: centre, walk towards 1528,924 (the click target; Reig stops the party at about 1667,949); Reig stops the party with his dialog.
+origin ui
+click 528 460
+click 528 460
+wait 10
+origin screen
+click 144 180
+wait 150
+checkpoint reig_dialog
+# Reig: "Calm down - what's wrong with your arm?" (2), "We've come from
+# Luskan to aid Targos" (1), Continue three times (Reig, Jon, Reig), "Your
+# arm looks in pretty bad shape" (2), "I'll go see if I can find Magdar,
+# then. Farewell." (1), "I'll be careful. Farewell." (1) ends it.
+origin ui
+click 290 386
+wait 60
+click 340 399
+wait 60
+click 398 583
+wait 60
+click 398 583
+wait 60
+click 398 583
+wait 60
+click 340 424
+wait 60
+click 300 399
+wait 60
+click 230 386
+wait 90
+checkpoint reig_done
+# Leg 4: centre on Probe (1667,949), walk to 1352,846 past Reig and Jon.
+click 528 460
+click 528 460
+wait 10
+origin screen
+click 85 113
+wait 150
+# Leg 5: centre, walk to 1032,972 (the click target; the party stops at 1032,977) in front of the houses.
+origin ui
+click 528 460
+click 528 460
+wait 10
+origin screen
+click 80 342
+wait 150
+# Centre on Probe (1032,977) and click AR1000_Door5: Probe walks to 840,978
+# and opens it.
+origin ui
+click 528 460
+click 528 460
+wait 10
+origin screen
+move 213 144
+wait 5
+click 213 144
+wait 150
+checkpoint door_open
+shot door_open
+# The area map (M), its World Map button, the world map's button back to
+# the area map, and Escape back to the world.
+key M
+wait 60
+checkpoint area_map
+shot area_map
+click 722 343
+wait 60
+checkpoint world_map
+shot world_map
+click 722 343
+wait 60
+checkpoint area_map_again
+key ESCAPE
+wait 60
+checkpoint world_again
+# Centre on Probe (840,978) and click into the open door, the travel
+# region To1005 (825..866,875..928, the travel cursor): the party leaves
+# for AR1005.
+origin ui
+click 528 460
+click 528 460
+wait 10
+origin screen
+move 405 150
+wait 5
+click 405 150
+wait 300
+checkpoint travelled
+shot travelled
+quit
