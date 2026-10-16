@@ -5012,6 +5012,62 @@ class OracleSavesTest(unittest.TestCase):
         self.assertEqual(self.listing(os.path.join(out, 'saves')),
                          ['000000004-Half'])
 
+    def test_a_refused_move_leaves_the_copys_saves_in_place(self):
+        # The second rename is refused: the first comes back from aside,
+        # the second never left, and nothing of the copy's is harvested
+        # or deleted.
+        from unittest import mock
+        mpsave = os.path.join(self.tmp, 'game', 'mpsave')
+        aside = os.path.join(self.tmp, 'aside')
+        for name in ('000000000-Auto-Save', '000000002-Quick-Save',
+                     '000000004-big12345', 'default'):
+            make_save(mpsave, name, name)
+        out = os.path.join(self.tmp, 'out')
+        real_rename = os.rename
+        calls = []
+
+        def rename(src, dst):
+            calls.append(os.path.basename(src))
+            if len(calls) == 2:
+                raise PermissionError(13, 'refused', src)
+            return real_rename(src, dst)
+        ran = []
+        with mock.patch.object(oracle.os, 'rename', rename), \
+                self.assertRaises(PermissionError), \
+                contextlib.redirect_stdout(io.StringIO()):
+            with oracle.prepared_saves(mpsave, {'mode': 'empty',
+                                                'load': None}, out, aside):
+                ran.append(True)
+        self.assertEqual(ran, [])
+        self.assertEqual(self.listing(mpsave), [
+            '000000000-Auto-Save', '000000002-Quick-Save',
+            '000000004-big12345', 'default'])
+        self.assertIsNone(self.listing(aside))
+        self.assertIsNone(self.listing(os.path.join(out, 'saves')))
+        for name in ('000000000-Auto-Save', '000000004-big12345'):
+            with open(os.path.join(mpsave, name, 'ICEWIND2.SAV')) as f:
+                self.assertEqual(f.read(), name)
+
+    def test_a_save_over_the_loaded_slot_is_kept(self):
+        mpsave = os.path.join(self.tmp, 'mpsave')
+        load = make_save(os.path.join(self.tmp, 'in'), '000000004-Probe',
+                         'loaded')
+        for saves_over, kept in ((False, None), (True, ['000000004-Probe'])):
+            out = os.path.join(self.tmp, 'out-%s' % saves_over)
+            with contextlib.redirect_stdout(io.StringIO()):
+                with oracle.prepared_saves(mpsave, {'mode': 'load',
+                                                    'load': load}, out) as r:
+                    if saves_over:
+                        with open(os.path.join(mpsave, '000000004-Probe',
+                                               'ICEWIND2.SAV'), 'w') as f:
+                            f.write('saved over')
+            self.assertEqual(self.listing(mpsave), [])
+            self.assertEqual(self.listing(os.path.join(out, 'saves')), kept)
+            self.assertEqual(r['made'], kept or [])
+        with open(os.path.join(self.tmp, 'out-True', 'saves',
+                               '000000004-Probe', 'ICEWIND2.SAV')) as f:
+            self.assertEqual(f.read(), 'saved over')
+
     def test_a_dead_runs_saves_are_put_back_first(self):
         mpsave = os.path.join(self.tmp, 'mpsave')
         aside = os.path.join(self.tmp, 'aside')

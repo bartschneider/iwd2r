@@ -1821,17 +1821,40 @@ def recover_saves(mpsave, aside):
     return names
 
 
+def same_tree(a, b):
+    """True when folders a and b hold the same files with the same bytes."""
+    def files(root):
+        out = {}
+        for folder, _, names in os.walk(root):
+            for name in names:
+                path = os.path.join(folder, name)
+                out[os.path.relpath(path, root)] = path
+        return out
+    fa, fb = files(a), files(b)
+    if set(fa) != set(fb):
+        return False
+    for rel, path in fa.items():
+        with open(path, 'rb') as x, open(fb[rel], 'rb') as y:
+            if x.read() != y.read():
+                return False
+    return True
+
+
 @contextlib.contextmanager
 def prepared_saves(mpsave, plan, out_dir, aside=None):
     """The save plan around a run (see the section's comment). With no plan
     mpsave stays as it is; only what a dead run left in aside goes back.
-    With one, mpsave's entries but default move into aside (or are deleted
-    when aside is None: a private view's copy), the plan's save is copied
-    in, and on the way out every entry the run left but the loaded save is
-    moved into out_dir/saves (copied, then deleted) before the entries
-    aside go back. Yields the report, filled in on the way out: {'mode',
-    'load', 'slot' (the loaded save's folder name), 'made' (the saves
-    moved out, by name)}."""
+    With one, the names in mpsave are noted, its entries but default move
+    into aside (or are deleted when aside is None: a private view's copy),
+    and the plan's save is copied in. On the way out an entry that was
+    never taken out (the setup stopped before it) stays where it is; the
+    loaded save's copy is deleted unless the run saved over it (its files
+    differ from the --load folder's); every other entry is the run's (a new
+    save, or one written under a name taken out) and moves into
+    out_dir/saves (copied, then deleted); then the entries aside go back.
+    Yields the report, filled in on the way out: {'mode', 'load', 'slot'
+    (the loaded save's folder name), 'made' (the saves moved out, by
+    name)}."""
     if aside is not None:
         recover_saves(mpsave, aside)
     report = {}
@@ -1840,16 +1863,19 @@ def prepared_saves(mpsave, plan, out_dir, aside=None):
         return
     os.makedirs(mpsave, exist_ok=True)
     report.update(mode=plan['mode'], load=plan['load'], slot=None, made=[])
-    moved = []
+    before = set(mpsave_entries(mpsave))
+    taken = set()
     try:
-        for name in mpsave_entries(mpsave):
+        for name in sorted(before):
+            path = os.path.join(mpsave, name)
             if aside is None:
-                remove_entry(os.path.join(mpsave, name))
-                continue
-            os.makedirs(aside, exist_ok=True)
-            os.rename(os.path.join(mpsave, name), os.path.join(aside, name))
-            moved.append(name)
+                remove_entry(path)
+            else:
+                os.makedirs(aside, exist_ok=True)
+                os.rename(path, os.path.join(aside, name))
+            taken.add(name)
         if plan['load']:
+            # Set first: a copy that stops halfway is the run's to delete.
             report['slot'] = os.path.basename(plan['load'])
             shutil.copytree(plan['load'],
                             os.path.join(mpsave, report['slot']))
@@ -1858,7 +1884,10 @@ def prepared_saves(mpsave, plan, out_dir, aside=None):
         try:
             for name in mpsave_entries(mpsave):
                 path = os.path.join(mpsave, name)
-                if name != report['slot']:
+                if name in before and name not in taken:
+                    continue
+                if name != report['slot'] or not same_tree(path,
+                                                           plan['load']):
                     dest = os.path.join(out_dir, 'saves', name)
                     os.makedirs(os.path.dirname(dest), exist_ok=True)
                     if os.path.isdir(path):
