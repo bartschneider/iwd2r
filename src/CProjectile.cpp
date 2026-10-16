@@ -95,8 +95,7 @@ CProjectile* CProjectile::DecodeProjectile(WORD nProjectileType, CGameAIBase* pS
         pProjectile = DecodeSpellHitProjectile(nProjectileType - 0x1001, NULL, FALSE);
         if (pProjectile == NULL) {
             // NOTE: The original writes the type through the NULL that
-            // DecodeSpellHitProjectile returns for a type it does not know
-            // (and, here, for the shaft and sunray types not ported yet).
+            // DecodeSpellHitProjectile returns for a type it does not know.
             // Bounded (ruling P4-10): the instant projectile takes its place.
             pProjectile = new CProjectile84D8B8();
         }

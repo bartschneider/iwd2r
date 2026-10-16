@@ -238,6 +238,8 @@ set(IWD2R_ENGINE_SOURCES
     "src/CProjectileSingleTarget.h"
     "src/CProjectileSpellHit.cpp"
     "src/CProjectileSpellHit.h"
+    "src/CProjectileSunray.cpp"
+    "src/CProjectileSunray.h"
     "src/CRes.cpp"
     "src/CRes.h"
     "src/CResArea.cpp"

@@ -14,6 +14,7 @@
 #include "CProjectileShaft.h"
 #include "CProjectileSingleTarget.h"
 #include "CProjectileSpellHit.h"
+#include "CProjectileSunray.h"
 #include "CSpell.h"
 #include "CVidPalette.h"
 #include "engine_world.h"
@@ -1248,4 +1249,84 @@ TEST_CASE("visual projectiles: a chunk falls, bounces three times and fades wher
     CHECK(UpdateUntilGone(id, 400) == 128);
     CHECK(Draws(41, iwd2r_rand_state()) == 0);
     pArea->SortLists();
+}
+
+// The sunray (CProjectileSunray, spell hit 57, 0x57E860): fired at a sprite
+// (0x57F050) it stands 13 below it and delivers its effects; it plays its
+// rising sequences once (state 0), its standing ones until its 325 ticks
+// are up (state 1), then its fading ones once (state 2), and removes
+// itself (0x57EB30). Render (0x57ED30) stacks the state's four sequences.
+// No rand draws.
+TEST_CASE("visual projectiles: the sunray rises, stands for its duration and fades", "[visualprojectile][data]")
+{
+    WORLD_OR_SKIP(world);
+    CGameArea* pArea = world.pArea;
+    CGameSprite* pSprite = world.pCharacter;
+    pArea->SortLists();
+    ClearMessages();
+    const CPoint pos = pSprite->GetPos();
+
+    CProjectile* pProjectile = CProjectile::DecodeSpellHitProjectile(57, NULL, FALSE);
+    CProjectileSunray* pSunray = dynamic_cast<CProjectileSunray*>(pProjectile);
+    REQUIRE(pSunray != nullptr);
+    REQUIRE(pSunray->m_animation.GetNumberSequences(FALSE) >= 12);
+
+    iwd2r_srand(47);
+    pSunray->Fire(pArea, pSprite->GetId(), pSprite->GetId(), pos, 0, 0);
+    CHECK(Draws(47, iwd2r_rand_state()) == 0);
+    const LONG id = pSunray->GetId();
+    REQUIRE(id != CGameObjectArray::INVALID_INDEX);
+    CHECK(pSunray->GetPos() == CPoint(pos.x, pos.y + 13));
+    CHECK(AddedOne<CProjectileSunray>(pArea) == pSunray);
+    ClearMessages();
+
+    AreaScope scope(pArea);
+    REQUIRE(scope.Ok());
+    scope.CentreOn(CPoint(pos.x, pos.y - 100));
+    const CRect rColumn(pos.x - 150, pos.y - 600, pos.x + 150, pos.y + 13 + 60);
+    {
+        const Lit lit = RenderLit(scope, pSunray, rColumn, "sunray");
+        CHECK(lit.inside > 0);
+        CHECK(lit.outside == 0);
+    }
+    // Render leaves the block's last sequence set and keeps the frame
+    // (CVidCell::SequenceSet), so the updates play that sequence, as the
+    // original's do: the rising block ends after its length in updates.
+    CHECK(pSunray->m_animation.m_nCurrentSequence == 3);
+    const int nRising = pSunray->m_animation.GetSequenceLength(3, FALSE);
+    REQUIRE(nRising > 1);
+
+    iwd2r_srand(48);
+    int updates = 0;
+    while (pSunray->m_nState == CProjectileSunray::STATE_RISING && updates < 400) {
+        pSunray->AIUpdate();
+        updates++;
+    }
+    CHECK(pSunray->m_nState == CProjectileSunray::STATE_STANDING);
+    CHECK(updates == nRising);
+    CHECK(pSunray->m_animation.m_nCurrentFrame == 0);
+
+    // The 325th update ends the duration: frame 0 of the fading block, then
+    // the same update advances it (or ends a one-frame sequence).
+    while (pSunray->m_nState == CProjectileSunray::STATE_STANDING && updates < 400) {
+        pSunray->AIUpdate();
+        updates++;
+    }
+    CHECK(updates == 325);
+    CHECK(pSunray->m_nState == CProjectileSunray::STATE_FADING);
+    REQUIRE(Alive(id));
+    CHECK(pSunray->m_animation.m_nCurrentFrame == 1);
+    {
+        const Lit lit = RenderLit(scope, pSunray, rColumn, "sunray_fading");
+        CHECK(lit.inside > 0);
+        CHECK(lit.outside == 0);
+    }
+    CHECK(pSunray->m_animation.m_nCurrentSequence == 11);
+    const int nFading = pSunray->m_animation.GetSequenceLength(11, FALSE);
+    REQUIRE(nFading > 1);
+    // From frame 1 to the last, then the update that removes it.
+    CHECK(UpdateUntilGone(id, 400) == nFading - 1);
+    CHECK(Draws(48, iwd2r_rand_state()) == 0);
+    pArea->SortLists();
+    ClearMessages();
 }
