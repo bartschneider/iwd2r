@@ -518,6 +518,165 @@ BOOL CGameTrigger::IsOverActivate(const CPoint& pt)
     return TRUE;
 }
 
+// 0x4CED10
+void CGameTrigger::OnActionButton(const CPoint& pt)
+{
+    // A click on the region: its script learns it was clicked (by the
+    // group's leader); then by the game's state: a travel region sends the
+    // group there to leave the area, an info region shows its text, a trap
+    // with the disarm cursor is disarmed, anything else is a click on the
+    // ground.
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CAIGroup* pGroup = &pGame->m_group;
+    BYTE rc;
+
+    if (pGroup->m_memberList.GetCount() != 0) {
+        CAIObjectType leaderType;
+
+        LONG nLeader = pGroup->GetGroupLeader();
+        if (nLeader != CGameObjectArray::INVALID_INDEX) {
+            // NOTE: The original's retry loop tests the result for SHARED
+            // and then for DENIED on the same path (0x4CEE6B-0x4CEE79), so
+            // it never retries; one attempt here.
+            CGameAIBase* pLeader;
+            rc = pGame->GetObjectArray()->GetShare(nLeader,
+                CGameObjectArray::THREAD_ASYNCH,
+                reinterpret_cast<CGameObject**>(&pLeader),
+                INFINITE);
+
+            if (rc == CGameObjectArray::SUCCESS) {
+                leaderType.Set(pLeader->GetAIType());
+                pGame->GetObjectArray()->ReleaseShare(nLeader,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    INFINITE);
+            }
+        }
+
+        // NOTE: CAITrigger::CLICKED (0x847E78).
+        CAITrigger clicked(CAITRIGGER_CLICKED, leaderType, 0);
+        CMessage* message = new CMessageSetTrigger(clicked, m_id, m_id);
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+    }
+
+    switch (pGame->m_nState) {
+    case 0:
+        pGame->m_lastClick.x = -1;
+        pGame->m_lastClick.y = -1;
+        pGame->m_lastTarget = CGameObjectArray::INVALID_INDEX;
+
+        if (pGroup->GetCount() == 0) {
+            return;
+        }
+
+        if (m_triggerType == 2) {
+            // Travel: LeaveAreaName (93, the SHORT at 0x84782E) on this
+            // region, then a move to it (its alternate point with the flag
+            // 0x200); the group's AddAction puts the move first.
+            CAIAction leave(93, CAIObjectType(), m_id, 0, 0);
+            pGroup->GroupAction(leave, TRUE, NULL);
+
+            CPoint ptDest = (m_dwFlags & 0x200) != 0 ? field_628 : m_pos;
+            CAIAction move(CAIAction::MOVETOPOINT, ptDest, 0, -1);
+            pGroup->GroupAction(move, FALSE, NULL);
+
+            pGroup->SetGroupTriggerId(m_id);
+
+            if (m_description != -1 && m_description != 0) {
+                STR_RES strRes;
+                g_pBaldurChitin->GetTlkTable().Fetch(m_description, strRes);
+                g_pBaldurChitin->m_pEngineWorld->DisplayText(CString(""),
+                    strRes.szText,
+                    RGB(0xD7, 0xD7, 0xBE),
+                    RGB(0xB4, 0xB4, 0xFF),
+                    -1,
+                    FALSE);
+            }
+            return;
+        }
+
+        if (m_triggerType == 1) {
+            // Info: the text floats over the region.
+            if (m_description != -1) {
+                FloatText(m_description, 10, 5);
+            }
+            return;
+        }
+
+        CGameObject::OnActionButton(pt);
+        return;
+    case 2:
+        pGame->m_lastClick.x = -1;
+        pGame->m_lastClick.y = -1;
+        pGame->m_lastTarget = CGameObjectArray::INVALID_INDEX;
+
+        switch (pGame->m_iconIndex) {
+        case 0x0C:
+        case 0x12:
+        case 0x14:
+        case 0x28:
+        case 0xFF:
+            CGameObject::OnActionButton(pt);
+            return;
+        case 0x24:
+            // The disarm cursor on an active, detected trap: the selected
+            // character with ranks in Disable Device (the base skill 5)
+            // sends the group to remove it.
+            if (m_triggerType == 0 && m_trapActivated != 0 && m_trapDetected != 0) {
+                SHORT nSelected = static_cast<SHORT>(g_pBaldurChitin->m_pEngineWorld->GetSelectedCharacter());
+                LONG nSelectedId = nSelected < pGame->m_nCharacters
+                    ? pGame->m_characterPortraits[nSelected]
+                    : CGameObjectArray::INVALID_INDEX;
+
+                CGameSprite* pSprite;
+                do {
+                    rc = pGame->GetObjectArray()->GetShare(nSelectedId,
+                        CGameObjectArray::THREAD_ASYNCH,
+                        reinterpret_cast<CGameObject**>(&pSprite),
+                        INFINITE);
+                } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+                if (rc == CGameObjectArray::SUCCESS) {
+                    BYTE nDisableDevice = pSprite->m_baseStats.m_skills[5];
+                    pGame->GetObjectArray()->ReleaseShare(nSelectedId,
+                        CGameObjectArray::THREAD_ASYNCH,
+                        INFINITE);
+                    if (nDisableDevice == 0) {
+                        return;
+                    }
+                }
+
+                // RemoveTraps (28, the SHORT at 0x8477BA) on this region.
+                CAIAction removeTraps(28, m_typeAI, 0, 0, 0);
+                pGroup->GroupAction(removeTraps, TRUE, NULL);
+
+                pGame->m_nState = 0;
+                pGame->m_cButtonArray.m_nSelectedButton = 100;
+                pGame->m_cButtonArray.UpdateState();
+                return;
+            }
+
+            CGameObject::OnActionButton(pt);
+            return;
+        default:
+            // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameTrigger.cpp
+            // __LINE__: 973
+            UTIL_ASSERT(FALSE);
+            return;
+        }
+    case 3:
+        pGame->m_lastClick.x = -1;
+        pGame->m_lastClick.y = -1;
+        pGame->m_lastTarget = CGameObjectArray::INVALID_INDEX;
+        CGameObject::OnActionButton(pt);
+        return;
+    default:
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameTrigger.cpp
+        // __LINE__: 984
+        UTIL_ASSERT(FALSE);
+        return;
+    }
+}
+
 // 0x4CFA60
 void CGameTrigger::Render(CGameArea* pArea, CVidMode* pVidMode, INT nSurface)
 {
