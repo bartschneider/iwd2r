@@ -3,8 +3,10 @@
 #include "CBaldurChitin.h"
 #include "CGameArea.h"
 #include "CGameEffect.h"
+#include "CGameObject84D624.h"
 #include "CGameSprite.h"
 #include "CInfGame.h"
+#include "CInfinity.h"
 #include "CParticle.h"
 #include "CPathSearch.h"
 #include "CUtil.h"
@@ -43,7 +45,11 @@ CProjectileBAM::CProjectileBAM(CResRef resRef)
     field_E6 = 0x20000;
     field_1DA = 0;
     field_29C = 0;
-    memcpy(m_terrainTable, CGameObject::DEFAULT_TERRAIN_TABLE, sizeof(m_terrainTable));
+    // NOTE: The original copies the 16 bytes at 0x8A8154, a copy of the
+    // visible terrain table's defaults (CGameObject 0x84C514), not
+    // DEFAULT_TERRAIN_TABLE: a square with a creature on it (entry 8) is
+    // passable to projectiles.
+    memcpy(m_terrainTable, CGameObject::DEFAULT_VISIBLE_TERRAIN_TABLE, sizeof(m_terrainTable));
     m_callBackProjectile = CGameObjectArray::INVALID_INDEX;
     m_sVisualEffect = "";
     field_182 = CGameObjectArray::INVALID_INDEX;
@@ -171,10 +177,11 @@ void CProjectileBAM::AIUpdate()
     }
 
     if (m_bSparkle) {
-        // TODO: Incomplete (0x578E38-0x578EA2). The original adds a sparkle
-        // object (operator new(0xCA), 0x51AE40 with m_nSparkleColour and the
-        // WORDs at 0x84D600 and 0x84D5F0) to the area at the projectile's
-        // position; its class is not ported.
+        // A puff of sparkles at the projectile.
+        CGameObject84D624* pSparkle = new CGameObject84D624(m_nSparkleColour,
+            CGameObject84D624::TYPE_SPARKLE,
+            CGameObject84D624::EXPLOSION_PUFFS);
+        pSparkle->AddToArea(m_pArea, m_pos, m_posZ, CGameObject::LIST_FRONT);
     }
 
     m_sound.SetCoordinates(m_pos.x, m_pos.y, m_posZ);
@@ -183,12 +190,302 @@ void CProjectileBAM::AIUpdate()
 // 0x52B190
 void CProjectileBAM::Render(CGameArea* pArea, CVidMode* pVidMode, int a3)
 {
-    // TODO: Incomplete. The original draws m_animation (and m_shadow when
-    // field_1D4 is set) through CInfinity's FX functions when the tile under
-    // the projectile is visible and passable.
     (void)pArea;
-    (void)pVidMode;
-    (void)a3;
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\CProjectile.cpp
+    // __LINE__: 4190
+    UTIL_ASSERT(pVidMode != NULL);
+
+    CRect rBounds(0, 0, 0, 0);
+    COLORREF rgbTint = RGB(CVidPalette::NO_TINT, CVidPalette::NO_TINT, CVidPalette::NO_TINT);
+
+    DWORD dwFlags = GetField_E6();
+    if (field_1C6) {
+        dwFlags |= 0x200;
+    }
+
+    if (!m_pArea->m_visibility.IsTileVisible(m_pArea->m_visibility.PointToTile(m_pos))) {
+        return;
+    }
+
+    CPoint ptGrid(m_pos.x / CPathSearch::GRID_SQUARE_SIZEX, m_pos.y / CPathSearch::GRID_SQUARE_SIZEY);
+    if (m_pArea->m_search.GetMobileCost(ptGrid, m_terrainTable, 3, TRUE) == CPathSearch::COST_IMPASSABLE) {
+        return;
+    }
+
+    if (!field_1DE) {
+        return;
+    }
+
+    if (field_1BE) {
+        dwFlags |= 0x10000;
+    }
+
+    if (field_1D4) {
+        dwFlags |= 0x4;
+    }
+
+    if (field_1D8 > 1) {
+        SetSequenceDirection(NULL);
+    }
+
+    CInfinity* pInfinity = &(m_pArea->m_cInfinity);
+
+    CRect rView;
+    rView.left = pInfinity->nCurrentX;
+    rView.top = pInfinity->nCurrentY;
+    rView.right = pInfinity->rViewPort.right - pInfinity->rViewPort.left + rView.left;
+    rView.bottom = pInfinity->rViewPort.bottom - pInfinity->rViewPort.top + rView.top;
+
+    CRect rFx;
+    CPoint ptReference;
+    CalculateFxRect(rFx, ptReference, NULL);
+
+    CPoint ptPos;
+    LONG nHeight;
+    ptPos.x = m_pos.x;
+    if (!field_1C6 && !field_1D4) {
+        ptPos.y = m_pos.y - m_posZ;
+        nHeight = 0;
+    } else {
+        ptPos.y = m_pos.y;
+        nHeight = m_posZ;
+    }
+
+    if (field_1C2) {
+        ptPos.y += m_pArea->GetHeightOffset(m_pos, m_listType);
+    }
+
+    // Mirrored left to right past north, upside down between west and
+    // east.
+    if (field_1DA > CGameSprite::DIR_N) {
+        rBounds.left = ptReference.x - rFx.right + ptPos.x + rFx.left;
+    } else {
+        rBounds.left = ptPos.x - ptReference.x;
+    }
+
+    if (field_1DA > CGameSprite::DIR_W && field_1DA < CGameSprite::DIR_E) {
+        if (!field_1C6 && !field_1D4) {
+            rBounds.top = rFx.top - rFx.bottom + ptReference.y + ptPos.y;
+        } else {
+            ptReference.y = rFx.bottom - rFx.top - ptReference.y;
+            rBounds.top = ptPos.y - m_posZ - ptReference.y;
+        }
+        nHeight = -nHeight;
+    } else {
+        rBounds.top = ptPos.y - ptReference.y;
+    }
+
+    rBounds.right = rFx.right - rFx.left + rBounds.left;
+    rBounds.bottom = rFx.bottom - rFx.top + rBounds.top;
+
+    if (!rView.IntersectRect(rBounds, rView)) {
+        return;
+    }
+
+    if (field_1BE || field_1C6) {
+        rgbTint = m_pArea->GetTintColor(ptPos, m_listType);
+    }
+
+    if (field_1DA > CGameSprite::DIR_N) {
+        dwFlags |= CInfinity::MIRROR_FX;
+    }
+
+    if (field_1DA > CGameSprite::DIR_W && field_1DA < CGameSprite::DIR_E) {
+        dwFlags |= CInfinity::MIRROR_FX_UPDOWN;
+    }
+
+    dwFlags |= CInfinity::FXPREP_COPYFROMBACK;
+
+    pInfinity->FXPrep(rFx, dwFlags, a3, ptPos, ptReference);
+    if (!pInfinity->FXLock(rFx, dwFlags)) {
+        return;
+    }
+
+    if (field_1BE) {
+        m_animation->SetTintColor(rgbTint);
+    }
+
+    if (field_1D4) {
+        pInfinity->FXRender(m_shadow, ptReference.x, ptReference.y, dwFlags, 0);
+    }
+
+    if (field_29C) {
+        field_1E2.GetRes()->Demand();
+        m_animation->SetPalette(field_1E2.GetRes()->GetColorTable(),
+            field_1E2.GetRes()->GetColorCount(),
+            CVidPalette::TYPE_RESOURCE);
+        pInfinity->FXRender(m_animation, ptReference.x, ptReference.y - nHeight, dwFlags, 128);
+        field_1E2.GetRes()->Release();
+    } else {
+        pInfinity->FXRender(m_animation, ptReference.x, ptReference.y - nHeight, dwFlags, 128);
+    }
+
+    pInfinity->FXRenderClippingPolys(ptPos.x, ptPos.y, 0, ptReference, rBounds, FALSE, dwFlags);
+    pInfinity->FXUnlock(dwFlags, NULL, CPoint(0, 0));
+    pInfinity->FXBltFrom(a3, rFx, ptPos.x, ptPos.y, ptReference.x, ptReference.y, dwFlags);
+}
+
+// 0x52B6B0
+void CProjectileBAM::CalculateFxRect(CRect& rFx, CPoint& ptReference, CVidCell* pVidCell)
+{
+    CPoint ptCenter;
+    CPoint ptShadowCenter;
+    CSize frameSize;
+
+    if (pVidCell == NULL) {
+        pVidCell = m_animation;
+    }
+
+    if (!field_1C6) {
+        if (!field_1D4) {
+            pVidCell->GetCurrentCenterPoint(ptReference, FALSE);
+            pVidCell->GetCurrentFrameSize(frameSize, FALSE);
+            rFx.SetRect(0, 0, frameSize.cx, frameSize.cy);
+        }
+    }
+
+    // With a shadow: the frame and the shadow's frame on one reference
+    // point, the frame raised by the height.
+    if (field_1D4) {
+        pVidCell->GetCurrentCenterPoint(ptCenter, FALSE);
+        ptCenter.y += m_posZ;
+        m_shadow->GetCurrentCenterPoint(ptShadowCenter, FALSE);
+
+        ptReference = ptCenter;
+        if (ptReference.x < ptShadowCenter.x) {
+            ptReference.x = ptShadowCenter.x;
+        }
+        if (ptReference.y < ptShadowCenter.y) {
+            ptReference.y = ptShadowCenter.y;
+        }
+
+        pVidCell->GetCurrentFrameSize(frameSize, FALSE);
+        frameSize.cx += ptReference.x - ptCenter.x;
+        frameSize.cy += ptReference.y - ptCenter.y;
+        rFx.SetRect(0, 0, frameSize.cx, frameSize.cy);
+
+        m_shadow->GetCurrentFrameSize(frameSize, FALSE);
+        frameSize.cx += ptReference.x - ptShadowCenter.x;
+        frameSize.cy += ptReference.y - ptShadowCenter.y;
+        if (frameSize.cx > rFx.right) {
+            rFx.right = frameSize.cx;
+        }
+        if (frameSize.cy > rFx.bottom) {
+            rFx.bottom = frameSize.cy;
+        }
+    }
+
+    // With field_1C6: the frame, flipped upside down between west and
+    // east, raised by the height, and the rectangle of field_1CA by
+    // field_1CE around the reference point.
+    if (field_1C6) {
+        pVidCell->GetCurrentCenterPoint(ptCenter, FALSE);
+        pVidCell->GetCurrentFrameSize(frameSize, FALSE);
+        if (field_1DA > CGameSprite::DIR_W && field_1DA < CGameSprite::DIR_E) {
+            ptCenter.y = frameSize.cy - ptCenter.y;
+        }
+        ptCenter.y += m_posZ;
+
+        ptReference = ptCenter;
+        if (ptReference.x < static_cast<LONG>(field_1CA)) {
+            ptReference.x = field_1CA;
+        }
+        if (ptReference.y < static_cast<LONG>(field_1CE)) {
+            ptReference.y = field_1CE;
+        }
+
+        frameSize.cx += ptReference.x - ptCenter.x;
+        frameSize.cy += ptReference.y - ptCenter.y;
+        rFx.SetRect(0, 0, frameSize.cx, frameSize.cy);
+
+        LONG nRight = ptReference.x - field_1CA + field_1CA * 2;
+        LONG nBottom = ptReference.y - field_1CE + field_1CE * 2;
+        if (nRight > rFx.right) {
+            rFx.right = nRight;
+        }
+        if (nBottom > rFx.bottom) {
+            rFx.bottom = nBottom;
+        }
+    }
+}
+
+// 0x52C8C0
+void CProjectileBAM::SetSequenceDirection(CVidCell* pVidCell)
+{
+    if (pVidCell == NULL) {
+        pVidCell = m_animation;
+    }
+
+    if (field_1D8 == 1) {
+        return;
+    }
+
+    if (field_1DA == m_nDirection) {
+        return;
+    }
+
+    if (field_1D8 == 16) {
+        switch (m_nDirection) {
+        case 0:
+        case 8:
+            pVidCell->SequenceSet(0);
+            break;
+        case 1:
+        case 7:
+        case 9:
+        case 15:
+            pVidCell->SequenceSet(1);
+            break;
+        case 2:
+        case 6:
+        case 10:
+        case 14:
+            pVidCell->SequenceSet(2);
+            break;
+        case 3:
+        case 5:
+        case 11:
+        case 13:
+            pVidCell->SequenceSet(3);
+            break;
+        case 4:
+        case 12:
+            pVidCell->SequenceSet(4);
+            break;
+        default:
+            // __FILE__: C:\Projects\Icewind2\src\Baldur\CProjectile.cpp
+            // __LINE__: 4930
+            UTIL_ASSERT(FALSE);
+            break;
+        }
+    } else if (field_1D8 == 8) {
+        switch ((m_nDirection / 2) * 2) {
+        case 0:
+        case 8:
+            pVidCell->SequenceSet(0);
+            break;
+        case 2:
+        case 6:
+        case 10:
+        case 14:
+            pVidCell->SequenceSet(2);
+            break;
+        case 4:
+        case 12:
+            pVidCell->SequenceSet(4);
+            break;
+        default:
+            // __FILE__: C:\Projects\Icewind2\src\Baldur\CProjectile.cpp
+            // __LINE__: 4965
+            UTIL_ASSERT(FALSE);
+            break;
+        }
+    }
+
+    if (pVidCell == m_animation) {
+        field_1DA = m_nDirection;
+    }
 }
 
 // 0x52C050
@@ -335,6 +632,13 @@ void CProjectileBAM::Fire(CGameArea* pArea, LONG source, LONG target, CPoint tar
     m_posExactY = ((ptLaunch.y << CParticle::RESOLUTION_INC) * 4) / 3;
     m_targetPos.y = ptTarget.y;
     m_nDirection = GetDirection(ptTarget);
+}
+
+// 0x52B150
+void CProjectileBAM::SetColorRange(USHORT nRange, USHORT nColor)
+{
+    m_animation->SetPalette(m_palette);
+    m_palette.SetRange(nRange, nColor, *g_pBaldurChitin->GetObjectGame()->GetMasterBitmap());
 }
 
 // 0x5297D0
