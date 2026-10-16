@@ -4504,7 +4504,10 @@ class OracleReplayCompareTest(unittest.TestCase):
             self.assertIn(screen, enum)
 
     def test_known_differences_file(self):
-        self.assertEqual(oracle.load_known(), [])
+        self.assertEqual(
+            [(k['field'], k['checkpoint']) for k in oracle.load_known()],
+            [('game.members[0].inventory[18]', 'reig_done'),
+             ('game.members[0].inventory[18]', 'door_open')])
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, 'k.json')
             good = [{'field': 'globals.ai_rng_state', 'checkpoint': '*',
@@ -4787,6 +4790,25 @@ class KnownDifferencesTest(unittest.TestCase):
         self.assertEqual(oracle.stale_known([used, unused], hits), [unused])
         self.assertEqual(oracle.stale_known([used], hits), [])
         self.assertEqual(oracle.stale_known([], []), [])
+        # Another scenario's checkpoint: not stale in this one.
+        other = self.entry(field='z', checkpoint='reig_done')
+        star = self.entry(field='z', checkpoint='*')
+        self.assertEqual(oracle.stale_known([used, other, star], hits,
+                                            ['cp']), [star])
+        self.assertEqual(oracle.stale_known([other], [], ['reig_done']),
+                         [other])
+
+    def test_a_field_covers_the_values_inside_it(self):
+        entry = self.entry(field='game.members[0].inventory[18]',
+                           checkpoint='cp')
+        for field in ('game.members[0].inventory[18]',
+                      'game.members[0].inventory[18].resref',
+                      'game.members[0].inventory[18].uses[2]'):
+            self.assertIs(oracle.known_entry([entry], 'cp', field), entry)
+        for field in ('game.members[0].inventory[180]',
+                      'game.members[0].inventory[1]',
+                      'game.members[0].inventory'):
+            self.assertIsNone(oracle.known_entry([entry], 'cp', field))
 
     def test_known_hit_is_not_stale_end_to_end(self):
         folder = tempfile.mkdtemp()

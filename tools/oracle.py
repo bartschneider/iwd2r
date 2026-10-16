@@ -183,8 +183,9 @@ It exits 0 when every pair matches and every run succeeded; the result is
 in runs/<stamp>/crossload.json.
 
 The vanilla copy is shared by every worktree: replay record, replay
-compare and replay crossload each hold C:/Users/thier/iwd2r-oracle/replay.lock for the whole run,
-and building the copy holds vanilla.lock beside it (tools/filelock.py). In
+compare and replay crossload each hold
+C:/Users/thier/iwd2r-oracle/replay.lock for the whole run, and building
+the copy holds vanilla.lock beside it (tools/filelock.py). In
 the sandbox, a recording also holds C:/Users/thier/iwd2r-vm/sandbox.lock
 (one sandbox at a time, shared with play.py --vm windows), always taken
 inside replay.lock. A run that has to wait says so on stderr after 5
@@ -2052,9 +2053,10 @@ def known_evidence_path(evidence):
 
 def load_known(path=KNOWN_DIFFERENCES):
     """known_differences.json: a list of {field, checkpoint, reason,
-    evidence}; field is a flatten() path, checkpoint a scenario checkpoint
-    name or "*" for every checkpoint. evidence names an existing file under
-    docs/evidence, by address or path."""
+    evidence}; field is a flatten() path, which covers the values inside
+    it too (covers), checkpoint a scenario checkpoint name or "*" for every
+    checkpoint. evidence names an existing file under docs/evidence, by
+    address or path."""
     with open(path) as f:
         known = json.load(f)
     keys = {'field', 'checkpoint', 'reason', 'evidence'}
@@ -2072,17 +2074,29 @@ def load_known(path=KNOWN_DIFFERENCES):
     return known
 
 
-def stale_known(known, known_hits):
-    """The known_differences entries that matched no difference."""
+def stale_known(known, known_hits, names=None):
+    """The known_differences entries that matched no difference; with
+    names (the scenario's checkpoints), only those for "*" or one of them:
+    an entry for another scenario's checkpoint is not stale here."""
     used = {id(hit[4]) for hit in known_hits}
-    return [entry for entry in known if id(entry) not in used]
+    return [entry for entry in known if id(entry) not in used
+            and (names is None or entry['checkpoint'] == '*'
+                 or entry['checkpoint'] in names)]
+
+
+def covers(path, field):
+    """True when the flatten() path names field or a value inside it
+    ("game.members[0].inventory[18]" covers its ".resref" and its
+    ".uses[0]")."""
+    return field == path or field.startswith(path + '.') \
+        or field.startswith(path + '[')
 
 
 def known_entry(known, checkpoint, field):
     """The known difference covering field at checkpoint, or None."""
     for entry in known:
-        if entry['field'] == field and entry['checkpoint'] in ('*',
-                                                               checkpoint):
+        if covers(entry['field'], field) and entry['checkpoint'] in (
+                '*', checkpoint):
             return entry
     return None
 
@@ -2209,7 +2223,7 @@ def replay_compare(args):
         names, screens, known, counts)
     for line in lines:
         print(line)
-    for entry in stale_known(known, known_hits):
+    for entry in stale_known(known, known_hits, names):
         stale = ('STALE known difference: %s at %s matched nothing; '
                  'remove it from %s' % (
                      entry['field'], entry['checkpoint'],

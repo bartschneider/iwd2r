@@ -1,1 +1,14 @@
-[]
+[
+  {
+    "field": "game.members[0].inventory[18]",
+    "checkpoint": "reig_done",
+    "reason": "Reig's dialog (10REIG, action 9) runs GiveItemCreate(\"00Swds01\", Protagonist, 0, 0, 0): the original puts the short sword in slot 18; ours does nothing, since CGameAIBase::ExecuteAction's GiveItemCreate case (action 140, 0x44EEB9-0x44EF37, which calls 0x464EB0) is not ported. Seen since the dump has the inventory (the game block).",
+    "evidence": "0x44DC10"
+  },
+  {
+    "field": "game.members[0].inventory[18]",
+    "checkpoint": "door_open",
+    "reason": "Reig's dialog (10REIG, action 9) runs GiveItemCreate(\"00Swds01\", Protagonist, 0, 0, 0): the original puts the short sword in slot 18; ours does nothing, since CGameAIBase::ExecuteAction's GiveItemCreate case (action 140, 0x44EEB9-0x44EF37, which calls 0x464EB0) is not ported. Seen since the dump has the inventory (the game block).",
+    "evidence": "0x44DC10"
+  }
+]
