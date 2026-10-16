@@ -203,3 +203,14 @@ The crisp-text requirement is met by `Program Options/Text Renderer=scalable` (s
 - The Lua console's Enter (0x77BF30, `CLUAConsole` 0x5838A0) is not ported; iwd2r has no Lua runtime.
 - Character generation reports no Ctrl (its vtable's GetCtrlKey is CWarp's) and ignores Enter in the biography popup, in the original too: the biography edit has no Ctrl shortcuts or line breaks there. The character screen's and the journal's edits have them.
 - `CDerivedStats`' arrays at +0x328 and +0x378 and its six lists at +0x4AC to +0x538 are still undeclared; only the constructor, ClearAll and the copy touch them.
+
+## Combat and spell casting (from project 3, milestone 3, combat)
+
+These block TODOs in the combat stream's ports; each is in a file or function the stream was not granted.
+
+- `CGameSprite::EquipMostDamagingMelee` 0x75DFD0 is a stub that returns `ACTION_ERROR` (TODO in its body). Its callers (the action 149, Attack, Swing, AttackReevaluate, CheckIfUsedUp, `sub_75E330`, several effect opcodes and others; docs/evidence/75DFD0.md lists them) get no weapon change: the creature keeps its empty or launcher slot instead of its best melee weapon or the fist.
+- `CGameSprite` 0x75E150, CheckIfUsedUp for a creature outside the party or charmed, is not ported.
+- `CGameSprite` 0x71F860, the ammunition's and launcher's effects on a missile's projectile, is not ported: Swing's missile branch fires without them.
+- `CGameSprite::CheckQuickLists` 0x71ABA0 is not ported: Swing's and Spell's quick-button refreshes are TODOs.
+- `CGameArea` 0x46E130, which gives an effect to the area's creatures (target types 4-8), is not ported: FireSpell, FireSpellPoint, ForceSpell, ForceSpellPoint, Spell, Swing's melee effects and 0x755A70 drop those effects (TODOs).
+- The projectile class DecodeProjectile builds for type 304 is not ported, so it has no member at +0x356: the five spell and missile paths draw the type-304 `rand() % 1000000` for the fire message but do not store it in the projectile (TODOs).
