@@ -2032,3 +2032,58 @@ TEST_CASE("combat: the area finds the n-th nearest enemy of a point", "[combat][
     INFO("decoded instance " << second.m_nInstance);
     CHECK(second.m_nInstance == pFarGoblin->GetId());
 }
+
+// CBaldurMessage::BroadcastUpdateCharacterSlot (0x42DCF0), which SaveGame
+// calls: each party member's effect list and visual effects are redone at
+// its next AI update.
+TEST_CASE("combat: a save marks the party members for an effect list update", "[combat][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    Fight fight;
+    std::string why;
+    if (!SetUpFight(fight, why)) {
+        if (why.find("CHR") != std::string::npos) {
+            SKIP("[iwd2r-skip] " + why);
+        }
+        FAIL(why);
+    }
+    CGameSprite* pCharacter = fight.pCharacter;
+    CGameSprite* pGoblin = fight.pGoblin;
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    REQUIRE(pGame->m_characters[0] == pCharacter->GetId());
+
+    const BOOLEAN bConnection = g_pChitin->cNetwork.m_bConnectionEstablished;
+
+    // No open session: nothing.
+    g_pChitin->cNetwork.m_bConnectionEstablished = FALSE;
+    pCharacter->field_562C = FALSE;
+    pCharacter->m_bForceVisualEffects = FALSE;
+    g_pBaldurChitin->GetBaldurMessage()->BroadcastUpdateCharacterSlot(TRUE, 0, FALSE);
+    CHECK_FALSE(pCharacter->field_562C);
+    CHECK_FALSE(pCharacter->m_bForceVisualEffects);
+
+    // The single player game's open session: every slot's character, and
+    // only the party's.
+    g_pChitin->cNetwork.m_bConnectionEstablished = TRUE;
+    pGoblin->field_562C = FALSE;
+    const LONG progress = g_pChitin->cProgressBar.m_nActionProgress;
+    g_pBaldurChitin->GetBaldurMessage()->BroadcastUpdateCharacterSlot(TRUE, 0, FALSE);
+    CHECK(pCharacter->field_562C);
+    CHECK(pCharacter->m_bForceVisualEffects);
+    CHECK_FALSE(pGoblin->field_562C);
+    CHECK(g_pChitin->cProgressBar.m_nActionProgress == progress);
+
+    // With the progress bar: 500000 units a slot, six slots.
+    g_pBaldurChitin->GetBaldurMessage()->BroadcastUpdateCharacterSlot(TRUE, 0, TRUE);
+    CHECK(g_pChitin->cProgressBar.m_nActionProgress == progress + 6 * 500000);
+    CHECK_FALSE(g_pChitin->cProgressBar.m_bWaiting);
+    g_pChitin->cProgressBar.m_nActionProgress = progress;
+
+    g_pChitin->cNetwork.m_bConnectionEstablished = bConnection;
+}

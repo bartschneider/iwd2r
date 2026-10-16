@@ -2008,7 +2008,81 @@ void CBaldurMessage::UpdateDemandCharacters(unsigned char a1, int a2, unsigned c
 // 0x42DCF0
 void CBaldurMessage::BroadcastUpdateCharacterSlot(BOOLEAN bUpdateAllCharacters, INT nUpdatedCharacterSlot, BOOLEAN bProgressBarInPlace)
 {
-    // TODO: Incomplete.
+    // NOTE: Unused.
+    CString sUnused;
+
+    BOOLEAN bSent = FALSE;
+
+    // In single player too: the game runs as the host of an open session.
+    if (!g_pChitin->cNetwork.m_bConnectionEstablished) {
+        return;
+    }
+
+    INT nFirst;
+    INT nLast;
+    if (bUpdateAllCharacters == TRUE) {
+        nFirst = 0;
+        nLast = 5;
+    } else {
+        nFirst = nUpdatedCharacterSlot;
+        nLast = nUpdatedCharacterSlot;
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    for (INT nSlot = nFirst; nSlot <= nLast; nSlot++) {
+        LONG nCharacterId = static_cast<SHORT>(nSlot) < 6
+            ? pGame->m_characters[static_cast<SHORT>(nSlot)]
+            : CGameObjectArray::INVALID_INDEX;
+
+        CGameSprite* pSprite;
+        BYTE rc;
+        do {
+            rc = pGame->GetObjectArray()->GetDeny(nCharacterId,
+                CGameObjectArray::THREAD_ASYNCH,
+                reinterpret_cast<CGameObject**>(&pSprite),
+                INFINITE);
+        } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+        if (rc == CGameObjectArray::SUCCESS) {
+            BOOLEAN bLocal = g_pChitin->cNetwork.m_nServiceProvider == 0
+                ? TRUE
+                : g_pChitin->cNetwork.m_idLocalPlayer == pSprite->m_remotePlayerID;
+
+            // The character gets its visual effects and its effect list
+            // redone at its next AI update.
+            pSprite->m_bForceVisualEffects = TRUE;
+            pSprite->field_562C = TRUE;
+
+            pGame->GetObjectArray()->ReleaseDeny(nCharacterId,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+
+            if (bLocal == TRUE || g_pChitin->cNetwork.m_bIsHost == TRUE) {
+                if (!bSent) {
+                    if (bProgressBarInPlace == TRUE
+                        && g_pChitin->cNetwork.m_nServiceProvider != CNetwork::SERV_PROV_NULL) {
+                        g_pChitin->cProgressBar.m_nWaitingReason = 19715;
+                        g_pChitin->cProgressBar.m_bWaiting = TRUE;
+                    }
+                    bSent = TRUE;
+                }
+
+                // NOTE: The original then marshals the character and sends
+                // it to the other players (0x42E1B0); single player only
+                // (docs/adr/0002-single-player-only.md), so not ported.
+            }
+        }
+
+        if (bProgressBarInPlace == TRUE) {
+            // NOTE: The DWORD at 0x8518A8 (500000).
+            g_pChitin->cProgressBar.m_nActionProgress += 500000;
+        }
+    }
+
+    if (bSent == TRUE && bProgressBarInPlace == TRUE) {
+        g_pChitin->cProgressBar.m_bWaiting = FALSE;
+        g_pBaldurChitin->m_cCachingStatus.InvalidateScreen();
+    }
 }
 
 // 0x42E0C0
