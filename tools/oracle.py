@@ -95,8 +95,9 @@ failure exits 1: a dump that does not validate, a game exit code other than
 checkpoint dump that breaks the recorder's invariant (invariant_problem:
 not reinitializing, no frame without an AI update of its own,
 ai_stalled_frames 0, no frame whose AI update began before its render
-ended, ai_overlap_frames 0, and no load in progress, loading and
-in_async_update 0). The calls a load draws from inside an AI update are held, not frames:
+ended, ai_overlap_frames 0, no wait of our replay mode for the search
+thread that gave up, search_wait_timeouts 0 where our engine writes it, and
+no load in progress, loading and in_async_update 0). The calls a load draws from inside an AI update are held, not frames:
 the clock stands still for them and no timer fires, so a load costs the
 same AI updates on every machine (platform/replay_clock.h FrameGate,
 globals.loads and held_frames). --test-steal-focus N makes a window of the
@@ -132,7 +133,8 @@ sides' dumps get replay record's checks (schema, invariant, every
 checkpoint present). Then every scenario checkpoint is compared field by
 field (lists element by element); frame, au_counter, ai_stalled_frames,
 ai_overlap_frames, in_async_update and held_frames are timing, reported
-and not compared. A
+and not compared, and search_wait_timeouts, which only our engine writes,
+is not compared either. A
 checkpoint is compared when its screen on either side is listed in
 oracle/replay/screens.json; a difference elsewhere is shown as not enabled.
 A difference listed in oracle/replay/known_differences.json (field,
@@ -1340,7 +1342,10 @@ def invariant_problem(name, dump):
     AI update would land in the middle of a load. No frame's AI update began
     before its render ended (ai_overlap_frames is 0): both sides wake the
     AI thread after the render, but its 100 ms wait can time out during a
-    long frame (platform/replay_clock.h, "The order inside a frame")."""
+    long frame (platform/replay_clock.h, "The order inside a frame"). Our
+    engine's dumps also have search_wait_timeouts, which must be 0: no wait
+    of the replay mode for the search thread gave up at its deadline
+    (platform/replay.h WaitForSearch); the original's have no such field."""
     g = dump.get('globals') or {}
     frame = dump.get('frame')
     if g.get('reinitializing'):
@@ -1355,6 +1360,10 @@ def invariant_problem(name, dump):
         return ('%s: %s frames by frame %s had their AI update begin before '
                 'their render ended: the frame order did not hold'
                 % (name, g.get('ai_overlap_frames'), frame))
+    if g.get('search_wait_timeouts', 0) != 0:
+        return ('%s: %s waits for the search thread by frame %s gave up at '
+                'their deadline: a path search was never taken up'
+                % (name, g.get('search_wait_timeouts'), frame))
     if g.get('loading') or g.get('in_async_update'):
         return ('%s: a load is in progress at frame %s (loading %s, '
                 'in_async_update %s): the checkpoint lands inside it'
@@ -1706,6 +1715,9 @@ def run_ours(exe, game, script, actions, seed, timeout, dump_every, run_dir,
 TIMING_FIELDS = ('frame', 'globals.au_counter', 'globals.ai_stalled_frames',
                  'globals.ai_overlap_frames', 'globals.in_async_update',
                  'globals.held_frames')
+# Written only by our engine (the recorder has no such count), so never
+# compared; the invariant fails a checkpoint dump where it is not 0.
+OURS_ONLY_FIELDS = ('globals.search_wait_timeouts',)
 SCREENS_JSON = os.path.join(ROOT, 'oracle', 'replay', 'screens.json')
 KNOWN_DIFFERENCES = os.path.join(ROOT, 'oracle', 'replay',
                                  'known_differences.json')
@@ -1729,13 +1741,14 @@ def flatten(value, prefix=''):
 
 def field_differences(original, ours):
     """[(field, original value, our value)] over every compared field (all
-    but 'checkpoint' and TIMING_FIELDS), in field order; a field one side
-    lacks reads as '<missing>'."""
+    but 'checkpoint', TIMING_FIELDS and OURS_ONLY_FIELDS), in field order; a
+    field one side lacks reads as '<missing>'."""
     a = flatten(original)
     b = flatten(ours)
     out = []
     for name in sorted(set(a) | set(b)):
-        if name == 'checkpoint' or name in TIMING_FIELDS:
+        if name == 'checkpoint' or name in TIMING_FIELDS \
+                or name in OURS_ONLY_FIELDS:
             continue
         va = a.get(name, '<missing>')
         vb = b.get(name, '<missing>')

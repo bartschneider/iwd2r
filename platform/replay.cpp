@@ -12,10 +12,12 @@
 
 #include <atomic>
 #include <cerrno>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace platform::replay {
@@ -101,6 +103,8 @@ namespace {
     // render ended, and whether g_lastAu was read for this frame.
     uint32_t g_overlapFrames = 0;
     bool g_haveFrameAu = false;
+    // WaitForSearch's expiries, counted on the AI thread.
+    std::atomic<uint32_t> g_searchWaitTimeouts { 0 };
     clock::FrameGate g_gate;
     // The current call of CBaldurChitin::SynchronousUpdate counted as a
     // frame: OnFrameEnd fires its timers.
@@ -152,6 +156,7 @@ namespace {
         s.rngState = iwd2r_rand_state(); // the main thread's
         s.aiStalledFrames = g_stalledFrames;
         s.aiOverlapFrames = g_overlapFrames;
+        s.searchWaitTimeouts = g_searchWaitTimeouts.load();
         s.loads = g_gate.Loads();
         s.heldFrames = g_gate.HeldFrames();
         if (const unsigned int* ai = g_inputRandState.load()) {
@@ -258,6 +263,35 @@ uint32_t NowMs()
 uint32_t Frame()
 {
     return g_frame.load();
+}
+
+bool WaitForSearch(uint32_t deadlineMs, const std::function<bool(std::string* what)>& pending)
+{
+    const auto start = std::chrono::steady_clock::now();
+    const auto deadline = start + std::chrono::milliseconds(deadlineMs);
+    std::string what;
+    for (;;) {
+        what.clear();
+        if (!pending(&what))
+            return true;
+        if (std::chrono::steady_clock::now() >= deadline)
+            break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    const uint32_t count = ++g_searchWaitTimeouts;
+    if (count <= kSearchWaitLines) {
+        const long long waited
+            = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
+        std::fprintf(stderr, "replay: [frame %u] gave up waiting for a path search after %lld ms (search_wait_timeouts %u%s): %s\n",
+            g_frame.load(), waited, count, count == kSearchWaitLines ? ", later ones only counted" : "", what.c_str());
+        std::fflush(stderr);
+    }
+    return false;
+}
+
+uint32_t SearchWaitTimeouts()
+{
+    return g_searchWaitTimeouts.load();
 }
 
 void Checkpoint(const std::string& name, int line)
