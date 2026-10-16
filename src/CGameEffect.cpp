@@ -5702,9 +5702,8 @@ BOOL CGameEffectDeath::ApplyEffect(CGameSprite* pSprite)
     // NOTE: The BYTE at 0x85BC7E (10).
     pSprite->m_baseStats.m_morale = 10;
 
-    // TODO: Incomplete. The original calls
-    // Icewind586B70::Instance()->CSummonLimitStruct_Unsummon(pSprite)
-    // (0x586DC0, not in src/) here.
+    Icewind586B70::Instance()->Unsummon(pSprite);
+
     message = new CMessage89(pSprite->GetId(), pSprite->GetId(), pSprite->GetId());
     g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
 
@@ -9710,10 +9709,7 @@ BOOL CGameEffectSkillUnsummon::ApplyEffect(CGameSprite* pSprite)
 {
     CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
     if (pGame->GetCharacterPortraitNum(pSprite->GetId()) == -1) {
-        // TODO: Incomplete. The original calls
-        // Icewind586B70::Instance()->CSummonLimitStruct_Unsummon(pSprite)
-        // (0x586DC0, not in src/) here.
-        Icewind586B70::Instance();
+        Icewind586B70::Instance()->Unsummon(pSprite);
 
         CMessage* message = new CMessage89(pSprite->GetId(), pSprite->GetId(), pSprite->GetId());
         g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
