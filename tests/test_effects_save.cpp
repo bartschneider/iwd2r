@@ -1511,7 +1511,6 @@ TEST_CASE("Damage (0x4A51D0 DisplayString): a hit shows only its feedback line",
     delete pGoblin;
 }
 
-
 namespace {
 
 // The CMessageDisplayText lines queued since the last ClearMessages.
