@@ -546,7 +546,7 @@
       }
     },
     "slots": {
-      "description": "The save slots the load or save screen lists, null on every other screen: CScreenLoad::m_aGameSlots[0 .. m_nNumGameSlots - 1] (CScreenLoadGameSlot) or CScreenSave's (CScreenSaveGameSlot), in their order (mpsave's saves by folder name, CInfGame::GetSaveGames 0x5C0520, without default), as RefreshGameSlots (0x63C940, 0x65BCF0) read them from each save's game file. The file times (m_sFileTime) are the real time of the files and are left out.",
+      "description": "The save slots the load or save screen lists, null on every other screen: CScreenLoad::m_aGameSlots[0 .. m_nNumGameSlots - 1] (bounded by the array's m_nSize) (CScreenLoadGameSlot) or CScreenSave's (CScreenSaveGameSlot), in their order (mpsave's saves by folder name, CInfGame::GetSaveGames 0x5C0520, without default), as RefreshGameSlots (0x63C940, 0x65BCF0) read them from each save's game file. The file times (m_sFileTime) are the real time of the files and are left out.",
       "type": [
         "array",
         "null"
@@ -1218,6 +1218,10 @@
       "class": "CScreenLoad",
       "member": "m_nNumGameSlots"
     },
+    "load_slots_size": {
+      "class": "CScreenLoad",
+      "member": "m_aGameSlots.m_nSize"
+    },
     "save_slots": {
       "class": "CScreenSave",
       "member": "m_aGameSlots.m_pData"
@@ -1225,6 +1229,10 @@
     "save_slots_count": {
       "class": "CScreenSave",
       "member": "m_nNumGameSlots"
+    },
+    "save_slots_size": {
+      "class": "CScreenSave",
+      "member": "m_aGameSlots.m_nSize"
     },
     "load_slot_file": {
       "class": "CScreenLoadGameSlot",

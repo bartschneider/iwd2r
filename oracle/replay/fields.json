@@ -777,6 +777,11 @@
     "offset": "0x01CA",
     "type": "i32"
   },
+  "load_slots_size": {
+    "base": "CScreenLoad",
+    "offset": "0x01DA",
+    "type": "i32"
+  },
   "save_slots": {
     "base": "CScreenSave",
     "offset": "0x0464",
@@ -785,6 +790,11 @@
   "save_slots_count": {
     "base": "CScreenSave",
     "offset": "0x0458",
+    "type": "i32"
+  },
+  "save_slots_size": {
+    "base": "CScreenSave",
+    "offset": "0x0468",
     "type": "i32"
   },
   "load_slot_file": {

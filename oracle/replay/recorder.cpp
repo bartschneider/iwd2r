@@ -790,6 +790,7 @@ std::string GameJson(uint32_t chitin)
 static_assert(kField_load_slots.type == ReplayType::k_ptr && kField_save_slots.type == ReplayType::k_ptr, "");
 static_assert(kField_load_slots_count.type == ReplayType::k_i32, "");
 static_assert(kField_save_slots_count.type == ReplayType::k_i32, "");
+static_assert(kField_load_slots_size.type == ReplayType::k_i32 && kField_save_slots_size.type == ReplayType::k_i32, "");
 static_assert(kField_load_slot_file.type == ReplayType::k_ptr && kField_save_slot_file.type == ReplayType::k_ptr, "");
 static_assert(kField_load_slot_time.type == ReplayType::k_u32 && kField_save_slot_time.type == ReplayType::k_u32, "");
 static_assert(kField_load_slot_chapter.type == ReplayType::k_i32 && kField_save_slot_chapter.type == ReplayType::k_i32,
@@ -817,6 +818,7 @@ std::string CStringJson(uint32_t address)
 struct SlotFields {
     ReplayField slots;
     ReplayField count;
+    ReplayField size;
     ReplayField file;
     ReplayField name;
     ReplayField character;
@@ -825,16 +827,18 @@ struct SlotFields {
     ReplayField chapterText;
 };
 
-// screen's m_aGameSlots[0 .. m_nNumGameSlots - 1]; a slot that cannot be
-// read is left out, as our engine leaves out a null slot.
+// screen's m_aGameSlots[0 .. m_nNumGameSlots - 1], bounded by the array's
+// m_nSize as our engine bounds it by GetSize; a slot that cannot be read is
+// left out, as our engine leaves out a null slot.
 std::string SlotsJson(uint32_t screen, const SlotFields& f)
 {
     bool ok = true;
     const uint32_t slots = ReadU32(At(screen, f.slots), &ok);
     const int32_t count = ReadI32(At(screen, f.count), &ok);
+    const int32_t size = ReadI32(At(screen, f.size), &ok);
     std::string out = "[";
     bool first = true;
-    for (int32_t i = 0; ok && slots && i < count && i < kMaxListNodes; ++i) {
+    for (int32_t i = 0; ok && slots && i < count && i < size && i < kMaxListNodes; ++i) {
         bool slotOk = true;
         const uint32_t slot = ReadU32(slots + 4u * static_cast<uint32_t>(i), &slotOk);
         if (!slotOk || !slot) {
@@ -907,12 +911,14 @@ std::string DumpJson(const char* checkpoint)
     std::string slots = "null";
     if (std::strcmp(screen, "load") == 0) {
         slots = SlotsJson(active,
-            { kField_load_slots, kField_load_slots_count, kField_load_slot_file, kField_load_slot_name,
+            { kField_load_slots, kField_load_slots_count, kField_load_slots_size, kField_load_slot_file,
+                kField_load_slot_name,
                 kField_load_slot_character, kField_load_slot_time, kField_load_slot_chapter,
                 kField_load_slot_chapter_text });
     } else if (std::strcmp(screen, "save") == 0) {
         slots = SlotsJson(active,
-            { kField_save_slots, kField_save_slots_count, kField_save_slot_file, kField_save_slot_name,
+            { kField_save_slots, kField_save_slots_count, kField_save_slots_size, kField_save_slot_file,
+                kField_save_slot_name,
                 kField_save_slot_character, kField_save_slot_time, kField_save_slot_chapter,
                 kField_save_slot_chapter_text });
     }
