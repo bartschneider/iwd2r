@@ -2152,6 +2152,77 @@ TEST_CASE("combat: GiveItem moves a goblin's weapon into the party member's inve
     ClearMessages();
 }
 
+// GiveItemCreate (action 140, 0x44EEB9-0x44EF37, and 0x464EB0), which
+// Reig's dialog runs for the short sword: a new item, with the action's
+// three numbers as its use counts, lands in the party member's first empty
+// inventory slot (CMessageAddItem); the caller keeps nothing.
+TEST_CASE("combat: GiveItemCreate puts a new short sword in the party member's inventory", "[combat][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    Fight fight;
+    std::string why;
+    if (!SetUpFight(fight, why)) {
+        if (why.find("CHR") != std::string::npos) {
+            SKIP("[iwd2r-skip] " + why);
+        }
+        FAIL(why);
+    }
+    CGameSprite* pCharacter = fight.pCharacter;
+    CGameSprite* pGoblin = fight.pGoblin;
+
+    CAIObjectType actee(pCharacter->GetAIType());
+    actee.m_nInstance = pCharacter->GetId();
+    CAIAction create(140, actee, 0, 0, 0);
+    create.m_string1 = "00Swds01";
+
+    // No target, or an item the game does not have: an error.
+    pGoblin->m_curAction = create;
+    CHECK(pGoblin->GiveItemCreate(NULL) == CGameAIBase::ACTION_ERROR);
+    CAIAction missing = create;
+    missing.m_string1 = "NOSUCH";
+    pGoblin->m_curAction = missing;
+    CHECK(pGoblin->GiveItemCreate(pCharacter) == CGameAIBase::ACTION_ERROR);
+
+    INT nFirstEmpty = -1;
+    for (INT n = 18; n < 42; n++) {
+        if (pCharacter->GetEquipment()->m_items[n] == NULL) {
+            nFirstEmpty = n;
+            break;
+        }
+    }
+    REQUIRE(nFirstEmpty != -1);
+    INT nGoblinItems = 0;
+    for (INT n = 0; n < 51; n++) {
+        if (pGoblin->GetEquipment()->m_items[n] != NULL) {
+            nGoblinItems++;
+        }
+    }
+
+    // Through ExecuteAction, the action's actee: done, and the message
+    // gives the party member the sword.
+    ClearMessages();
+    pGoblin->m_curAction = create;
+    CHECK(pGoblin->CGameAIBase::ExecuteAction() == CGameAIBase::ACTION_DONE);
+    g_pBaldurChitin->GetMessageHandler()->AsynchronousUpdate();
+    CItem* pGiven = pCharacter->GetEquipment()->m_items[nFirstEmpty];
+    REQUIRE(pGiven != NULL);
+    CHECK(pGiven->GetResRef() == CResRef("00SWDS01"));
+    INT nGoblinItemsAfter = 0;
+    for (INT n = 0; n < 51; n++) {
+        if (pGoblin->GetEquipment()->m_items[n] != NULL) {
+            nGoblinItemsAfter++;
+        }
+    }
+    CHECK(nGoblinItemsAfter == nGoblinItems);
+    ClearMessages();
+}
+
 // SetBestWeapon (action 255, 0x72AB84-0x72ACB5): the target within the
 // action's range in search squares asks for a melee weapon, beyond it for a
 // ranged one.
