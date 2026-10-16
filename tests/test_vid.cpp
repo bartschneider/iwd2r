@@ -7,10 +7,14 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "CChitin.h"
+#include "CParticle.h"
 #include "CResBitmap.h"
 #include "CResCell.h"
+#include "CResTile.h"
 #include "CVidBitmap.h"
 #include "CVidCell.h"
+#include "CVidFont.h"
+#include "CVidImage.h"
 #include "CVidInf.h"
 #include "CVidPoly.h"
 #include "CWarp.h"
@@ -26,12 +30,28 @@ extern CChitin* g_pChitin;
 
 namespace {
 
+// A failed UTIL_ASSERT, thrown by TestChitin::ShutDown.
+struct FailedAssert {
+    int nLine;
+};
+
 class TestChitin : public CChitin {
 public:
     void MessageThreadMain(void*) override { }
     void RSThreadMain(void*) override { }
     void MainAIThread(void*) override { }
     void MusicThreadMain(void*) override { }
+
+    // CUtil::UtilAssert (0x780C00), the only caller with a line number,
+    // calls ShutDown and then aborts; throwing here lets a test see the
+    // state at a failed assert instead of losing the process.
+    void ShutDown(int nLineNumber, const char* szFileName, const char* text) override
+    {
+        if (nLineNumber != -1) {
+            throw FailedAssert { nLineNumber };
+        }
+        CChitin::ShutDown(nLineNumber, szFileName, text);
+    }
 };
 
 class ChitinScope {
@@ -1472,4 +1492,158 @@ TEST_CASE("blt_bmp8to24_and_24to24", "[vid]")
 
     ::operator delete(bitmapStorage);
     ::operator delete(resStorage);
+}
+
+// Regression tests for the render stream's fixes on the 32-bit path the game
+// reaches (render-report.md section 4).
+namespace {
+
+// A resource whose data is in memory. CDimm::Demand (0x783D00) takes its
+// loaded path (RES_FLAG_0x04 and RES_FLAG_0x10, no resource file) and
+// returns m_pData; CRes::field_40, which CDimm::Demand raises and
+// CDimm::Release (0x787BA0) lowers, is its demand count (GetDemands).
+// field_44, a pending request, keeps the last release off CDimm's freed
+// list. Empty bytes leave m_pData NULL, so a demand finds no data. The
+// destructor takes the data back before ~CRes, whose Dump would free() it;
+// it must run while a ChitinScope is installed.
+template <typename T>
+struct MemoryRes {
+    explicit MemoryRes(std::vector<BYTE> bytes)
+        : data(std::move(bytes))
+    {
+        res.m_pData = data.empty() ? nullptr : data.data();
+        res.nSize = static_cast<DWORD>(data.size());
+        res.dwFlags = CRes::RES_FLAG_0x04 | CRes::RES_FLAG_0x10;
+        res.m_nID = 0xFC000000;
+        res.field_44 = 1;
+    }
+    ~MemoryRes()
+    {
+        res.m_pData = nullptr;
+        res.dwFlags = 0;
+        res.field_40 = 0;
+        res.field_44 = 0;
+    }
+    MemoryRes(const MemoryRes&) = delete;
+    MemoryRes& operator=(const MemoryRes&) = delete;
+
+    std::vector<BYTE> data;
+    T res;
+};
+
+// A TIS tile's data: a grey palette, then 64 x 64 palette indexes.
+std::vector<BYTE> TileBytes(BYTE index)
+{
+    std::vector<BYTE> bytes(1024 + 64 * 64, index);
+    for (int i = 0; i < 256; ++i) {
+        bytes[i * 4] = static_cast<BYTE>(i);
+        bytes[i * 4 + 1] = static_cast<BYTE>(i);
+        bytes[i * 4 + 2] = static_cast<BYTE>(i);
+        bytes[i * 4 + 3] = 0;
+    }
+    return bytes;
+}
+
+// A w x h system-memory surface of the DirectDraw shim.
+IDirectDrawSurface* MakeSurface(IDirectDraw* pDirectDraw, DWORD w, DWORD h)
+{
+    DDSURFACEDESC desc;
+    std::memset(&desc, 0, sizeof(desc));
+    desc.dwSize = sizeof(desc);
+    desc.dwFlags = DDSD_CAPS | DDSD_HEIGHT | DDSD_WIDTH;
+    desc.ddsCaps.dwCaps = DDSCAPS_SYSTEMMEMORY | DDSCAPS_OFFSCREENPLAIN;
+    desc.dwWidth = w;
+    desc.dwHeight = h;
+    IDirectDrawSurface* p = NULL;
+    REQUIRE(pDirectDraw->CreateSurface(&desc, &p, NULL) == DD_OK);
+    return p;
+}
+
+}
+
+// CVidTile::Render with a stencil (0x7B1B30) demands both tiles (0x7B1BA8,
+// 0x7B1BB6) before it reads either, and every way out after that gives both
+// demands back: the clipped-away tile, the failed lock and the drawn tile.
+// The tiles here are held by their owner (one demand each, parsed), as the
+// tile set holds them. Ours released the stencil without demanding it, so
+// each render dropped the owner's demand and, at 0, CResTile::Release
+// (0x7807D0) cleared the stencil's parsed data: the drawn tile leaves the
+// stencil's count at 0 and its data gone, which fails here (checked by
+// removing the stencil's Demand).
+//
+// Missing tile or stencil data fails an assert (lines 6344 and 6351). Its
+// tail (the original returns without releasing for the tile, releases both
+// for the stencil) cannot run in iwd2r: CUtil::UtilAssert never returns. The
+// test's chitin throws from ShutDown, so it checks the counts at the assert:
+// both tiles demanded once more, neither released. Ours used to reach either
+// assert with the stencil not demanded.
+TEST_CASE("stencil_tile_render_balances_its_demands", "[vid]")
+{
+    ChitinScope scope;
+    CVidInf mode;
+    mode.m_dwRBitShift = 16;
+    mode.m_dwGBitShift = 8;
+    mode.m_dwBBitShift = 0;
+    ActiveModeScope active(&mode);
+    IDirectDraw* pDirectDraw = NULL;
+    REQUIRE(DirectDrawCreate(NULL, &pDirectDraw, NULL) == DD_OK);
+    IDirectDrawSurface* pSurface = MakeSurface(pDirectDraw, 64, 64);
+    IDirectDrawSurface* pSmall = MakeSurface(pDirectDraw, 16, 16);
+
+    {
+        MemoryRes<CResTile> main(TileBytes(5));
+        MemoryRes<CResTile> stencil(TileBytes(1));
+        REQUIRE(main.res.Demand() != nullptr);
+        REQUIRE(stencil.res.Demand() != nullptr);
+        auto held = [&](const char* step) {
+            INFO(step);
+            CHECK(main.res.GetDemands() == 1);
+            CHECK(stencil.res.GetDemands() == 1);
+            CHECK(main.res.GetTileData() != nullptr);
+            CHECK(stencil.res.GetTileData() != nullptr);
+        };
+
+        CVidTile tile;
+        tile.SetRes(&main.res);
+
+        // Drawn: the blit's result.
+        CHECK(tile.Render(pSurface, 0, 0, &stencil.res, CRect(0, 0, 64, 64), 0) == TRUE);
+        held("drawn");
+        CHECK(tile.Render(pSurface, 0, 0, &stencil.res, CRect(0, 0, 64, 64), 0) == TRUE);
+        held("drawn twice");
+
+        // An empty clip returns before either demand.
+        CHECK(tile.Render(pSurface, 0, 0, &stencil.res, CRect(), 0) == FALSE);
+        held("empty clip");
+
+        // A tile wholly outside the clip: its rectangle clips to nothing.
+        CHECK(tile.Render(pSurface, 100, 100, &stencil.res, CRect(0, 0, 32, 32), 0) == FALSE);
+        held("clipped away");
+
+        // The tile's rectangle runs past the 16 x 16 surface: Lock fails.
+        CHECK(tile.Render(pSmall, 0, 0, &stencil.res, CRect(0, 0, 64, 64), 0) == FALSE);
+        held("lock failed");
+
+        // No tile data: the assert fires with both demanded.
+        MemoryRes<CResTile> noTile(std::vector<BYTE> {});
+        tile.SetRes(&noTile.res);
+        CHECK_THROWS_AS(tile.Render(pSurface, 0, 0, &stencil.res, CRect(0, 0, 64, 64), 0), FailedAssert);
+        CHECK(noTile.res.GetDemands() == 1);
+        CHECK(stencil.res.GetDemands() == 2);
+        stencil.res.Release();
+        held("no tile data, the stencil's demand given back by the test");
+
+        // No stencil data: likewise.
+        MemoryRes<CResTile> noStencil(std::vector<BYTE> {});
+        tile.SetRes(&main.res);
+        CHECK_THROWS_AS(tile.Render(pSurface, 0, 0, &noStencil.res, CRect(0, 0, 64, 64), 0), FailedAssert);
+        CHECK(main.res.GetDemands() == 2);
+        CHECK(noStencil.res.GetDemands() == 1);
+        main.res.Release();
+        held("no stencil data, the tile's demand given back by the test");
+    }
+
+    pSmall->Release();
+    pSurface->Release();
+    pDirectDraw->Release();
 }
