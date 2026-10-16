@@ -9,6 +9,7 @@
 #include "CMessage.h"
 #include "CProjectile850F9C.h"
 #include "CProjectileArea.h"
+#include "CProjectileShaft.h"
 #include "CProjectileSingleTarget.h"
 #include "CProjectileSpellHit.h"
 #include "CScreenCreateChar.h"
@@ -468,9 +469,24 @@ TEST_CASE("effects-iwd: visual spell hit (233) queues a CMessageFireProjectile a
     RemoveAdded(pArea);
     ClearMessages();
 
-    // A shaft type (45) still decodes to NULL: the message is queued and
-    // nothing is fired (the DEVIATION's NULL check).
+    // A shaft type (45, Call Lightning) fires a CProjectileShaft with the
+    // spell's sound; it delivers its (no) effects at once.
     pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_VISUALSPELLHIT, 45, 0);
+    CHECK(pEffect->ApplyEffect(pSprite) == FALSE);
+    CHECK(pEffect->m_done == TRUE);
+    REQUIRE(handler.m_messageList.GetCount() == 2);
+    CProjectileShaft* pShaft = AddedOne<CProjectileShaft>(pArea);
+    REQUIRE(pShaft != nullptr);
+    CHECK(pShaft->m_animation.GetResRef() == CResRef("CallLiH"));
+    CHECK(pShaft->m_fireSoundRef == "EFF_P19");
+    CHECK(pShaft->m_nDuration == 20);
+    CHECK(pShaft->m_bTransparent == TRUE);
+    RemoveAdded(pArea);
+    ClearMessages();
+
+    // The sunray type (57) still decodes to NULL: the message is queued and
+    // nothing is fired (the DEVIATION's NULL check).
+    pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_VISUALSPELLHIT, 57, 0);
     CHECK(pEffect->ApplyEffect(pSprite) == FALSE);
     CHECK(pEffect->m_done == TRUE);
     REQUIRE(handler.m_messageList.GetCount() == 1);
