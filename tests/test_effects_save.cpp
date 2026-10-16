@@ -8,6 +8,7 @@
 #include "CGameEffectList.h"
 #include "CGameSprite.h"
 #include "CInfGame.h"
+#include "CItem.h"
 #include "CMessage.h"
 #include "CScreenCreateChar.h"
 #include "CScreenWorld.h"
@@ -595,6 +596,20 @@ TEST_CASE("CheckSave (0x4A42F0): spell resistance, cutscenes and the poison guar
         pGoblin->m_derivedStats.m_nResistMagic = 34;
         rolls = { 20, 20, 20, 6 };
         CHECK(Check(pHalf.get(), pGoblin, rolls) == FALSE);
+    }
+
+    SECTION("a negative resistance always resists: the compare is unsigned (0x4A44AA)")
+    {
+        std::unique_ptr<CGameEffect> pEffect = Decode(CGAMEEFFECT_HOLDCREATURE, 0, 0, CGameObjectArray::INVALID_INDEX);
+        pEffect->m_sourceFlags = 0x400;
+        pEffect->m_flags = 0x1;
+        pEffect->m_casterLevel = 30;
+        pGoblin->m_derivedStats.m_nResistMagic = -5;
+        Rolls rolls { 20, 20, 20, 20 };
+        CHECK(Check(pEffect.get(), pGoblin, rolls) == FALSE);
+        pGoblin->m_derivedStats.m_nResistMagic = 0;
+        rolls = { 20, 20, 20, 20 };
+        CHECK(Check(pEffect.get(), pGoblin, rolls) == TRUE);
     }
 
     SECTION("in a cutscene only the creature's own effects, 104 and a forced death apply")
@@ -1492,6 +1507,161 @@ TEST_CASE("Damage (0x4A51D0 DisplayString): a hit shows only its feedback line",
 
     pOptions->m_nEffectTextLevel = level;
     pTimer->m_active = active;
+    ClearMessages();
+    delete pGoblin;
+}
+
+
+namespace {
+
+// The CMessageDisplayText lines queued since the last ClearMessages.
+std::vector<CMessageDisplayText*> TextLines()
+{
+    std::vector<CMessageDisplayText*> lines;
+    for (CMessage* pMessage : Messages()) {
+        CMessageDisplayText* pText = dynamic_cast<CMessageDisplayText*>(pMessage);
+        if (pText != nullptr) {
+            lines.push_back(pText);
+        }
+    }
+    return lines;
+}
+
+}
+
+TEST_CASE("CheckSave (0x4A42F0): trap sense, and the save and resistance lines (0x765830, 0x5864F0)", "[effects][checksave][data]")
+{
+    PROBE_OR_SKIP(pProbe);
+    CGameSprite* pGoblin = MakeGoblin();
+    Neutralize(pGoblin);
+    ClearMessages();
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CGameOptions* pOptions = pGame->GetOptions();
+    const DWORD level = pOptions->m_nEffectTextLevel;
+
+    SECTION("trap sense adds to a reflex save against a trap's effect")
+    {
+        CGameObject* pTrap = nullptr;
+        CTypedPtrList<CPtrList, int*>* lists[] = { &pProbe->GetArea()->m_lVertSort, &pProbe->GetArea()->m_lVertSortBack };
+        for (CTypedPtrList<CPtrList, int*>* list : lists) {
+            POSITION pos = list->GetHeadPosition();
+            while (pos != NULL && pTrap == nullptr) {
+                LONG id = static_cast<LONG>(reinterpret_cast<INT_PTR>(list->GetNext(pos)));
+                CGameObject* pObject;
+                if (pGame->GetObjectArray()->GetShare(id, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) == CGameObjectArray::SUCCESS) {
+                    pGame->GetObjectArray()->ReleaseShare(id, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+                    if (pObject->GetObjectType() == CGameObject::TYPE_TRIGGER) {
+                        pTrap = pObject;
+                    }
+                }
+            }
+        }
+        REQUIRE(pTrap != nullptr);
+
+        // TRAPSAVE.2DA gives barbarians 1 from level 10 and 2 from 13.
+        pGoblin->m_derivedStats.m_nClassLevels[CAIOBJECTTYPE_C_BARBARIAN - 1] = 13;
+        const INT nTrapSense = pGame->GetRuleTables().GetTrapSenseBonus(pGoblin->m_derivedStats);
+        REQUIRE(nTrapSense >= 1);
+        REQUIRE(nTrapSense <= 8);
+
+        // DC 10, reflex 0: the roll 10 - trap sense makes it only against a
+        // trap.
+        std::unique_ptr<CGameEffect> pEffect = Decode(CGAMEEFFECT_HOLDCREATURE, 0, 0, pTrap->GetId());
+        pEffect->m_savingThrow = 0x8;
+        pEffect->m_flags = 0x2;
+        const BYTE roll = static_cast<BYTE>(10 - nTrapSense);
+        Rolls rolls { 1, roll, 1, 1 };
+        CHECK(Check(pEffect.get(), pGoblin, rolls) == FALSE);
+
+        pEffect->m_sourceID = pProbe->GetId();
+        rolls = { 1, roll, 1, 1 };
+        CHECK(Check(pEffect.get(), pGoblin, rolls) == TRUE);
+    }
+
+    SECTION("the save line: the save, the source's name, the roll with effect text bit 8, the result")
+    {
+        CSpell spell { CResRef("SPPR208") };
+        const CString sSpell = Text(spell.GetGenericName());
+        REQUIRE(!sSpell.IsEmpty());
+
+        std::unique_ptr<CGameEffect> pEffect = Decode(CGAMEEFFECT_HOLDCREATURE, 0, 0, CGameObjectArray::INVALID_INDEX);
+        pEffect->m_savingThrow = 0x10;
+        pEffect->m_flags = 0x2;
+        pEffect->m_saveMod = 2;
+        pEffect->m_spellLevel = 1;
+        pEffect->m_sourceRes = CResRef("SPPR208");
+        pGoblin->m_derivedStats.m_nSaveVSWill = 5;
+
+        pOptions->m_nEffectTextLevel = 0x1 | 0x8;
+        Rolls rolls { 1, 1, 9, 1 };
+        CHECK(Check(pEffect.get(), pGoblin, rolls) == FALSE);
+        std::vector<CMessageDisplayText*> lines = TextLines();
+        REQUIRE(lines.size() == 1);
+        CHECK(lines[0]->m_name == pGoblin->GetName());
+        CHECK(lines[0]->m_text == Text(14005) + " (" + sSpell + ") : 9 + 5 = 14 : " + Text(33753));
+
+        // The roll is shown once.
+        ClearMessages();
+        CHECK(Check(pEffect.get(), pGoblin, rolls) == FALSE);
+        CHECK(TextLines().empty());
+
+        // A failed save with a negative bonus.
+        ClearMessages();
+        pGoblin->m_derivedStats.m_nSaveVSWill = -7;
+        rolls = { 1, 1, 9, 1 };
+        CHECK(Check(pEffect.get(), pGoblin, rolls) == TRUE);
+        lines = TextLines();
+        REQUIRE(lines.size() == 1);
+        CHECK(lines[0]->m_text == Text(14005) + " (" + sSpell + ") : 9 - 7 = 2 : " + Text(33752));
+
+        // Without bit 8 no roll; without bit 1 no line.
+        ClearMessages();
+        pOptions->m_nEffectTextLevel = 0x1;
+        rolls = { 1, 1, 9, 1 };
+        CHECK(Check(pEffect.get(), pGoblin, rolls) == TRUE);
+        lines = TextLines();
+        REQUIRE(lines.size() == 1);
+        CHECK(lines[0]->m_text == Text(14005) + " (" + sSpell + ") : " + Text(33752));
+
+        ClearMessages();
+        pOptions->m_nEffectTextLevel = 0;
+        rolls = { 1, 1, 9, 1 };
+        CHECK(Check(pEffect.get(), pGoblin, rolls) == TRUE);
+        CHECK(TextLines().empty());
+    }
+
+    SECTION("the resistance line names the source: an item, or nothing for no resref")
+    {
+        CItem item(CResRef("00POTN02"), 1, 0, 0, 0, 0);
+        const CString sItem = Text(item.GetIdentifiedName());
+        REQUIRE(!sItem.IsEmpty());
+
+        std::unique_ptr<CGameEffect> pEffect = Decode(CGAMEEFFECT_HOLDCREATURE, 0, 0, CGameObjectArray::INVALID_INDEX);
+        pEffect->m_sourceFlags = 0x400;
+        pEffect->m_flags = 0x1;
+        pEffect->m_casterLevel = 10;
+        pEffect->m_sourceRes = CResRef("00POTN02");
+        pGoblin->m_derivedStats.m_nResistMagic = 18;
+
+        // Shown whatever the effect text option says.
+        pOptions->m_nEffectTextLevel = 0;
+        Rolls rolls { 20, 20, 20, 5 };
+        CHECK(Check(pEffect.get(), pGoblin, rolls) == FALSE);
+        std::vector<CMessageDisplayText*> lines = TextLines();
+        REQUIRE(lines.size() == 1);
+        CHECK(lines[0]->m_name == pGoblin->GetName());
+        CHECK(lines[0]->m_text == Text(19224) + " (" + sItem + ")");
+
+        ClearMessages();
+        pEffect->m_sourceRes = CResRef("");
+        rolls = { 20, 20, 20, 5 };
+        CHECK(Check(pEffect.get(), pGoblin, rolls) == FALSE);
+        lines = TextLines();
+        REQUIRE(lines.size() == 1);
+        CHECK(lines[0]->m_text == Text(19224));
+    }
+
+    pOptions->m_nEffectTextLevel = level;
     ClearMessages();
     delete pGoblin;
 }
