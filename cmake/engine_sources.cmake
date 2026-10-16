@@ -127,6 +127,8 @@ set(IWD2R_ENGINE_SOURCES
     "src/CGameAreaNotes.cpp"
     "src/CGameAreaNotes.h"
     "src/CGameButtonList.h"
+    "src/CGameChunk.cpp"
+    "src/CGameChunk.h"
     "src/CGameContainer.cpp"
     "src/CGameContainer.h"
     "src/CGameDialog.cpp"

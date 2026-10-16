@@ -1,10 +1,12 @@
 #define NOMINMAX
 #include <catch2/catch_test_macros.hpp>
 
+#include "CGameChunk.h"
 #include "CGameEffect.h"
 #include "CGameObject84D624.h"
 #include "CGameObjectArray.h"
 #include "CMessage.h"
+#include "CPathSearch.h"
 #include "CProjectile84DFA4.h"
 #include "CProjectile84E940.h"
 #include "CProjectile84E9C0.h"
@@ -13,10 +15,13 @@
 #include "CProjectileSingleTarget.h"
 #include "CProjectileSpellHit.h"
 #include "CSpell.h"
+#include "CVidPalette.h"
 #include "engine_world.h"
 #include "msvc_rand.h"
 #include "render_surfaces.h"
 
+#include <algorithm>
+#include <climits>
 #include <memory>
 #include <string>
 #include <vector>
@@ -52,6 +57,12 @@ int Draws(unsigned int before, unsigned int after)
         }
     }
     return -1;
+}
+
+// The k-th number rand() returns after srand(seed), k from 1.
+int RandAt(unsigned int seed, int k)
+{
+    return static_cast<int>((Advance(seed, k) >> 16) & 0x7FFF);
 }
 
 struct World {
@@ -387,6 +398,18 @@ std::vector<CGameObject84D624*> AddedParticles(CGameArea* pArea)
     return particles;
 }
 
+// The chunks the area holds in its add lists.
+std::vector<CGameChunk*> AddedChunks(CGameArea* pArea)
+{
+    std::vector<CGameChunk*> chunks;
+    for (CGameObject* pObject : AddedObjects(pArea)) {
+        if (CGameChunk* pChunk = dynamic_cast<CGameChunk*>(pObject)) {
+            chunks.push_back(pChunk);
+        }
+    }
+    return chunks;
+}
+
 std::unique_ptr<CGameEffect> DecodeAt(WORD effectID, DWORD dwFlags, LONG effectAmount, const CPoint& source, LONG sourceID, const CPoint& target)
 {
     ITEM_EFFECT effect;
@@ -404,7 +427,9 @@ std::unique_ptr<CGameEffect> DecodeAt(WORD effectID, DWORD dwFlags, LONG effectA
 // two explosions at the creature on the area's back list, one flying away
 // from the effect's source and one from its mirror (the source negated), as
 // high as half the creature's fx rect, their particles' gravity starting at
-// 100. Each explosion draws 84 numbers.
+// 100. Each explosion draws 84 numbers. Then CGameSprite::Shatter
+// (0x70A810, at 0x4ACD31) breaks the creature into 10 to 25 chunks: one
+// number for its bounce, one for the count, six for each chunk.
 TEST_CASE("visual projectiles: a shattering death throws two explosions", "[visualprojectile][data]")
 {
     WORLD_OR_SKIP(world);
@@ -418,7 +443,7 @@ TEST_CASE("visual projectiles: a shattering death throws two explosions", "[visu
     struct Shatter {
         DWORD dwFlags;
         COLORREF rgbStart;
-        int draws;
+        int before;
     };
     const Shatter shatters[] = {
         { 0x80, RGB(235, 245, 245), 168 },
@@ -437,8 +462,10 @@ TEST_CASE("visual projectiles: a shattering death throws two explosions", "[visu
         REQUIRE(pDeath != nullptr);
         iwd2r_srand(17);
         pDeath->ApplyEffect(pGoblin);
+        const int nChunks = RandAt(17, shatter.before + 2) % 16 + 10;
         INFO("draws " << Draws(17, iwd2r_rand_state()));
-        CHECK(Draws(17, iwd2r_rand_state()) == shatter.draws);
+        CHECK(Draws(17, iwd2r_rand_state()) == shatter.before + 2 + 6 * nChunks);
+        CHECK(AddedChunks(pArea).size() == static_cast<size_t>(nChunks));
 
         std::vector<CGameObject84D624*> explosions = AddedParticles(pArea);
         REQUIRE(explosions.size() == 2);
@@ -459,6 +486,9 @@ TEST_CASE("visual projectiles: a shattering death throws two explosions", "[visu
 
         for (CGameObject84D624* pExplosion : explosions) {
             CHECK(UpdateUntilGone(pExplosion->GetId(), 400) > 0);
+        }
+        for (CGameChunk* pChunk : AddedChunks(pArea)) {
+            pChunk->RemoveFromArea();
         }
         pArea->SortLists();
     }
@@ -977,4 +1007,245 @@ TEST_CASE("visual projectiles: a spell hit draws on its target", "[visualproject
     CHECK(UpdateUntilGone(id, 2000) > 0);
     pArea->SortLists();
     ClearMessages();
+}
+
+namespace {
+
+// A point near `near` whose grid square and its neighbours are open ground
+// (not impassable, not deep water: CGameChunk removes itself landing in
+// table index 12).
+bool DryGround(CGameArea* pArea, const CPoint& near, CPoint& found)
+{
+    for (int dy = 0; dy < 200; dy += 12) {
+        for (int dx = 0; dx < 300; dx += 16) {
+            const CPoint pos(near.x + dx, near.y + dy);
+            bool dry = true;
+            for (int gy = -2; gy <= 2 && dry; gy++) {
+                for (int gx = -3; gx <= 3 && dry; gx++) {
+                    CPoint grid(pos.x / CPathSearch::GRID_SQUARE_SIZEX + gx, pos.y / CPathSearch::GRID_SQUARE_SIZEY + gy);
+                    SHORT nTableIndex = 0;
+                    BYTE cost = pArea->m_search.GetLOSCost(grid, CGameObject::DEFAULT_VISIBLE_TERRAIN_TABLE, nTableIndex, FALSE);
+                    dry = cost != CPathSearch::COST_IMPASSABLE && nTableIndex != 12;
+                }
+            }
+            if (dry) {
+                found = pos;
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+}
+
+// CGameSprite::Shatter (0x70A810) types 0 (ice) and 1 (stone): it lifts the
+// creature by half its reference height, draws its bounce, tints its eight
+// colour ranges, clears its animation ID (the creature is no longer drawn)
+// and throws rand() % 16 + 10 chunks of SPCHUNKS (animation 0x100) on the
+// front list at its position. Each chunk draws four numbers in Shatter
+// (bounce, rise, then the velocity's y and x) and two in its animation
+// (sequence and frame); it lives 128 ticks after landing and fades over the
+// last 32 (CHUNK_DURATION + 1).
+TEST_CASE("visual projectiles: Shatter tints the creature and throws ice or stone chunks", "[visualprojectile][data]")
+{
+    WORLD_OR_SKIP(world);
+    CGameArea* pArea = world.pArea;
+
+    struct Kind {
+        BYTE nType;
+        BYTE nColor;
+    };
+    const Kind kinds[] = {
+        { 0, CVidPalette::ICE },
+        { 1, CVidPalette::STONE },
+    };
+    int n = 0;
+    for (const Kind& kind : kinds) {
+        INFO("type " << static_cast<int>(kind.nType));
+        const CPoint pos(world.pCharacter->GetPos().x + 80 + 40 * n++, world.pCharacter->GetPos().y + 30);
+        CGameSprite* pGoblin = AddCreature(pArea, "00GOB", pos);
+        REQUIRE(pGoblin != NULL);
+        pArea->SortLists();
+
+        CRect rFx;
+        CPoint ptReference;
+        pGoblin->GetAnimation()->CalculateFxRect(rFx, ptReference, pGoblin->m_posZ);
+        const LONG nHeight = ptReference.y;
+        REQUIRE(nHeight * 3 / 5 != 0);
+        const INT_PTR nRanges = pGoblin->m_derivedStats.m_appliedColorRanges.GetCount();
+
+        const unsigned int seed = 23 + kind.nType;
+        iwd2r_srand(seed);
+        pGoblin->Shatter(kind.nType);
+
+        const int nChunks = RandAt(seed, 2) % 16 + 10;
+        CHECK(Draws(seed, iwd2r_rand_state()) == 2 + 6 * nChunks);
+        CHECK(pGoblin->m_posZ == -(nHeight / 2));
+        CHECK(pGoblin->m_animationRunning == TRUE);
+        CHECK(pGoblin->m_posZDelta == (RandAt(seed, 1) % 3 + 1) * pGoblin->m_doBounce);
+        CHECK(pGoblin->m_baseStats.m_animationType == 0);
+        REQUIRE(pGoblin->m_derivedStats.m_appliedColorRanges.GetCount() == nRanges + 8);
+        POSITION posRange = pGoblin->m_derivedStats.m_appliedColorRanges.FindIndex(nRanges);
+        for (int nRange = 0; nRange < 8; nRange++) {
+            CColorRange* pColorRange = pGoblin->m_derivedStats.m_appliedColorRanges.GetNext(posRange);
+            CHECK(pColorRange->m_range == nRange);
+            CHECK(pColorRange->m_color == kind.nColor);
+        }
+
+        std::vector<CGameChunk*> chunks = AddedChunks(pArea);
+        REQUIRE(chunks.size() == static_cast<size_t>(nChunks));
+        for (CGameChunk* pChunk : chunks) {
+            CHECK(pChunk->GetPos() == pos);
+            CHECK(pChunk->GetVertListType() == CGameObject::LIST_FRONT);
+            CHECK(pChunk->m_animation.GetAnimationId() == 0x100);
+            CHECK(pChunk->m_bMoving == TRUE);
+            CHECK(pChunk->m_nBounces == 3);
+            CHECK(pChunk->m_nLife == 128);
+            CHECK(pChunk->m_nFade == 32);
+            CHECK(memcmp(pChunk->m_terrainTable, CGameObject::DEFAULT_VISIBLE_TERRAIN_TABLE, sizeof(pChunk->m_terrainTable)) == 0);
+        }
+
+        // The first chunk's numbers are the third to the sixth.
+        CGameChunk* pFirst = chunks.front();
+        CHECK(pFirst->m_posZDelta == (RandAt(seed, 3) % 3 + 1) * pGoblin->m_doBounce);
+        CHECK(pFirst->m_posZ == -(RandAt(seed, 4) % (nHeight * 3 / 5)) - nHeight / 5);
+        CHECK(pFirst->m_velocity == CPoint(RandAt(seed, 6) % 7 - 3, RandAt(seed, 5) % 7 - 3));
+
+        STRREF strError = 0;
+        CHECK(pFirst->CanSaveGame(strError) == TRUE);
+        CHECK(strError == 16502);
+
+        for (CGameChunk* pChunk : chunks) {
+            pChunk->RemoveFromArea();
+        }
+        pArea->SortLists();
+    }
+}
+
+// Shatter type 2 (flesh): seven chunks of the blood animations 0x210, 0x200,
+// 0x200, 0x220, 0x220, 0x240 and 0x240 (four numbers each in Shatter, one
+// for the animation's frame), then AddBlood's exploding death, which makes
+// blood only with the gore option on. The exploding blood sizes itself by
+// the video mode's FX surface (CBlood::CalcBoundingRect), so the shim
+// surfaces are in place.
+TEST_CASE("visual projectiles: Shatter throws seven flesh chunks and blood", "[visualprojectile][data]")
+{
+    WORLD_OR_SKIP(world);
+    CGameArea* pArea = world.pArea;
+    CGameOptions* pOptions = g_pBaldurChitin->GetObjectGame()->GetOptions();
+    const DWORD nGoreOption = pOptions->m_nGoreOption;
+    AreaScope scope(pArea);
+    REQUIRE(scope.Ok());
+
+    const WORD animations[7] = { 0x210, 0x200, 0x200, 0x220, 0x220, 0x240, 0x240 };
+    for (DWORD nGore = 0; nGore < 2; nGore++) {
+        INFO("gore option " << nGore);
+        pOptions->m_nGoreOption = nGore;
+        const CPoint pos(world.pCharacter->GetPos().x + 80 + 40 * static_cast<int>(nGore), world.pCharacter->GetPos().y + 30);
+        CGameSprite* pGoblin = AddCreature(pArea, "00GOB", pos);
+        REQUIRE(pGoblin != NULL);
+        pArea->SortLists();
+        const INT_PTR nBlood = pGoblin->m_lstBlood.GetCount();
+
+        iwd2r_srand(29);
+        pGoblin->Shatter(2);
+        const int draws = Draws(29, iwd2r_rand_state());
+        INFO("draws " << draws);
+        if (nGore == 0) {
+            CHECK(draws == 1 + 7 * 5);
+            CHECK(pGoblin->m_lstBlood.GetCount() == nBlood);
+        } else {
+            CHECK(draws > 1 + 7 * 5);
+            CHECK(pGoblin->m_lstBlood.GetCount() == nBlood + 1);
+        }
+        CHECK(pGoblin->m_baseStats.m_animationType == 0);
+
+        std::vector<CGameChunk*> chunks = AddedChunks(pArea);
+        REQUIRE(chunks.size() == 7);
+        for (int nChunk = 0; nChunk < 7; nChunk++) {
+            CHECK(chunks[nChunk]->m_animation.GetAnimationId() == animations[nChunk]);
+        }
+
+        for (CGameChunk* pChunk : chunks) {
+            pChunk->RemoveFromArea();
+        }
+        pArea->SortLists();
+    }
+
+    pOptions->m_nGoreOption = nGoreOption;
+}
+
+// CGameChunk (0x70F4F0) on open ground: AIUpdate (0x70F800) lowers it by
+// its fall speed, which grows by one each tick; landing, it draws one
+// number for each of its three bounces (the bounce speed rand() % 3 + 1
+// times the bounces left), then lies still and removes itself after its
+// 128 ticks of life. Render (0x70FA90) draws it on screen.
+TEST_CASE("visual projectiles: a chunk falls, bounces three times and fades where it lies", "[visualprojectile][data]")
+{
+    WORLD_OR_SKIP(world);
+    CGameArea* pArea = world.pArea;
+    pArea->SortLists();
+    CPoint pos;
+    REQUIRE(DryGround(pArea, CPoint(world.pCharacter->GetPos().x + 60, world.pCharacter->GetPos().y + 40), pos));
+
+    BYTE colorRangeValues[7];
+    memset(colorRangeValues, CVidPalette::STONE, sizeof(colorRangeValues));
+    iwd2r_srand(31);
+    CGameChunk* pChunk = new CGameChunk(0x100, colorRangeValues, CString(""), pArea, pos, CPoint(1, 0), -20, 6, 128, 32);
+    CHECK(Draws(31, iwd2r_rand_state()) == 2);
+    const LONG id = pChunk->GetId();
+    REQUIRE(Alive(id));
+    CHECK(pChunk->GetPos() == pos);
+    CHECK(pChunk->m_posZ == -20);
+
+    {
+        // 20 above the ground: the piece on top, its shadow on the ground,
+        // posZ lower (CGameAnimationTypeEffect::Render 0x6A36A0). The
+        // shadow only darkens, so the buffer is cleared to grey first.
+        AreaScope scope(pArea);
+        REQUIRE(scope.Ok());
+        scope.CentreOn(pos);
+        const std::vector<DWORD> pixels = RenderObject(scope, pChunk);
+        scope.Shot(pixels, "chunk");
+        const Lit lit = CountLit(pixels, scope.Screen(), scope.ToScreen(CRect(pos.x - 40, pos.y - 80, pos.x + 40, pos.y + 40)));
+        CHECK(lit.inside > 0);
+        CHECK(lit.outside == 0);
+
+        const DWORD grey = 0x00808080;
+        scope.Back(true, grey);
+        pChunk->Render(pArea, scope.VidMode(), CVIDINF_SURFACE_BACK);
+        const std::vector<DWORD> greyPixels = scope.Back();
+        int top = INT_MAX;
+        int bottom = -1;
+        for (int y = 0; y < scope.Screen().Height(); y++) {
+            for (int x = 0; x < scope.Screen().Width(); x++) {
+                if ((greyPixels[y * scope.Screen().Width() + x] & 0xFFFFFF) != grey) {
+                    top = std::min(top, y);
+                    bottom = std::max(bottom, y);
+                }
+            }
+        }
+        INFO("drawn rows " << top << " to " << bottom);
+        CHECK(bottom - top + 1 > 20);
+    }
+
+    iwd2r_srand(37);
+    int updates = 0;
+    while (pChunk->m_bMoving && updates < 400) {
+        pChunk->AIUpdate();
+        updates++;
+    }
+    REQUIRE(Alive(id));
+    CHECK(!pChunk->m_bMoving);
+    CHECK(pChunk->m_nBounces == 0);
+    CHECK(pChunk->m_posZ == 0);
+    CHECK(pChunk->m_nLife == 128);
+    CHECK(updates > 3);
+    CHECK(Draws(37, iwd2r_rand_state()) == 3);
+
+    iwd2r_srand(41);
+    CHECK(UpdateUntilGone(id, 400) == 128);
+    CHECK(Draws(41, iwd2r_rand_state()) == 0);
+    pArea->SortLists();
 }

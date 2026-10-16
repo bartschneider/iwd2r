@@ -1543,7 +1543,10 @@ class LabelsTest(unittest.TestCase):
     def test_committed_extra_labels_parse_and_are_not_ours(self):
         path = os.path.join(ROOT, 'tools', 'ghidra', 'extra_labels.txt')
         extra = labels.extra(path)
-        self.assertTrue(extra)
+        # The file may be empty: its last name (CGameSprite::Shatter,
+        # 0x70A810) left when src/ came to define it. What it holds must
+        # parse, be unique and not be ours.
+        self.assertIsInstance(extra, list)
         ours = {a for a, _ in labels.ours(os.path.join(ROOT, 'src'))}
         self.assertEqual([a for a, _ in extra if a in ours], [])
         self.assertEqual(len({a for a, _ in extra}), len(extra))
