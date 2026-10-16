@@ -7,6 +7,7 @@
 #include "CCreatureFile.h"
 #include "CGameAnimationType.h"
 #include "CGameArea.h"
+#include "CGameObject84D624.h"
 #include "CGameSprite.h"
 #include "CInfCursor.h"
 #include "CInfGame.h"
@@ -5535,10 +5536,28 @@ BOOL CGameEffectDeath::ApplyEffect(CGameSprite* pSprite)
         PlaySound(CResRef("SHATTER"), pSprite);
         nShatterType = 1;
 
-        // TODO: Incomplete. The original adds two stone explosion particles
-        // (CParticle 0x51AE40, type 0x84D5EC) at the effect's source and its
-        // mirror, sized by the sprite's fx rect; CParticle is not in src/.
-        (void)nPosZ;
+        // Two stone explosions at the sprite, half as high as its fx rect,
+        // flying away from the effect's source and from its mirror.
+        {
+            CGameObject84D624* pExplosion = new CGameObject84D624(CGameObject84D624::COLORTYPE_STONE,
+                CGameObject84D624::TYPE_EXPLOSION,
+                CGameObject84D624::EXPLOSION_PUFFS);
+            // NOTE: Inlined CGameObject84D624::SetSource.
+            pExplosion->SetSource(m_source);
+            CRect rFx;
+            CPoint ptReference;
+            pSprite->GetAnimation()->CalculateFxRect(rFx, ptReference, nPosZ);
+            SHORT nHeight = static_cast<SHORT>((rFx.bottom - rFx.top) * 5 / 10);
+            pExplosion->m_nGravity = 100;
+            pExplosion->AddToArea(pSprite->GetArea(), pSprite->GetPos(), nHeight, CGameObject::LIST_BACK);
+
+            pExplosion = new CGameObject84D624(CGameObject84D624::COLORTYPE_STONE,
+                CGameObject84D624::TYPE_EXPLOSION,
+                CGameObject84D624::EXPLOSION_PUFFS);
+            pExplosion->SetSource(CPoint(-m_source.x, -m_source.y));
+            pExplosion->m_nGravity = 100;
+            pExplosion->AddToArea(pSprite->GetArea(), pSprite->GetPos(), nHeight, CGameObject::LIST_BACK);
+        }
         break;
     case 0x80:
         // Shattered ice.
@@ -5548,8 +5567,27 @@ BOOL CGameEffectDeath::ApplyEffect(CGameSprite* pSprite)
         PlaySound(CResRef("SHATTER"), pSprite);
         nShatterType = 0;
 
-        // TODO: Incomplete. The ice explosion particles (CParticle 0x51AE40,
-        // type 0x84D5EA), as for 0x40.
+        // The ice explosions, as for 0x40.
+        {
+            CGameObject84D624* pExplosion = new CGameObject84D624(CGameObject84D624::COLORTYPE_ICE,
+                CGameObject84D624::TYPE_EXPLOSION,
+                CGameObject84D624::EXPLOSION_PUFFS);
+            // NOTE: Inlined CGameObject84D624::SetSource.
+            pExplosion->SetSource(m_source);
+            CRect rFx;
+            CPoint ptReference;
+            pSprite->GetAnimation()->CalculateFxRect(rFx, ptReference, nPosZ);
+            SHORT nHeight = static_cast<SHORT>((rFx.bottom - rFx.top) * 5 / 10);
+            pExplosion->m_nGravity = 100;
+            pExplosion->AddToArea(pSprite->GetArea(), pSprite->GetPos(), nHeight, CGameObject::LIST_BACK);
+
+            pExplosion = new CGameObject84D624(CGameObject84D624::COLORTYPE_ICE,
+                CGameObject84D624::TYPE_EXPLOSION,
+                CGameObject84D624::EXPLOSION_PUFFS);
+            pExplosion->SetSource(CPoint(-m_source.x, -m_source.y));
+            pExplosion->m_nGravity = 100;
+            pExplosion->AddToArea(pSprite->GetArea(), pSprite->GetPos(), nHeight, CGameObject::LIST_BACK);
+        }
         break;
     case 0x100:
         // Electrocuted.
@@ -8039,10 +8077,44 @@ CGameEffect* CGameEffectSparkle::Copy()
 // 0x4B1700
 BOOL CGameEffectSparkle::ApplyEffect(CGameSprite* pSprite)
 {
-    // TODO: Incomplete. Not ported: it adds particle explosions (CParticle
-    // 0x51AE40) and calls CGameSprite 0x756770, none of them in src/; the
-    // override only keeps the effect from reaching the asserting base
-    // ApplyEffect.
+    WORD nType = static_cast<WORD>(m_dwFlags);
+
+    CRect rFx;
+    CPoint ptReference;
+    pSprite->GetAnimation()->CalculateFxRect(rFx, ptReference, pSprite->m_posZ);
+    LONG nHeight = (rFx.bottom - rFx.top) * 8 / 10;
+
+    CPoint ptPos = pSprite->GetPos();
+    if ((m_source.x != -1 || m_source.y != -1)
+        && (pSprite->GetPos().x != m_source.x || pSprite->GetPos().y != m_source.y)) {
+        // TODO: Incomplete. The original moves the position towards
+        // m_source by CGameSprite 0x756770 (not in src/: the vector from the
+        // sprite to m_source scaled to a length of 15, no rand); until then
+        // the sparkles start at the sprite's position.
+    } else {
+        ptPos.y++;
+    }
+
+    CGameObject84D624* pSparkle;
+    switch (nType) {
+    case 1:
+        pSparkle = new CGameObject84D624(static_cast<WORD>(m_effectAmount),
+            CGameObject84D624::TYPE_EXPLOSION,
+            CGameObject84D624::EXPLOSION_PUFFS);
+        // NOTE: Inlined CGameObject84D624::SetSource.
+        pSparkle->SetSource(m_source);
+        pSparkle->AddToArea(pSprite->GetArea(), ptPos, static_cast<SHORT>(nHeight), CGameObject::LIST_FRONT);
+        break;
+    case 3:
+        pSparkle = new CGameObject84D624(static_cast<WORD>(m_effectAmount),
+            CGameObject84D624::TYPE_SHOWER,
+            static_cast<WORD>(m_duration - g_pBaldurChitin->GetObjectGame()->GetWorldTimer()->m_gameTime));
+        pSparkle->AddToArea(pSprite->GetArea(), ptPos, static_cast<SHORT>(nHeight), CGameObject::LIST_FRONT);
+        break;
+    }
+
+    m_done = TRUE;
+
     return TRUE;
 }
 
