@@ -577,6 +577,22 @@ TEST_CASE("dialog: the script parser reads a trigger's object and number and an 
     CHECK(pTrigger->m_triggerCause.m_sName == "Hedron");
     CHECK(pTrigger->m_flags == 0);
 
+    // An object and two numbers (0x40E7 CheckSkillGT(O:Object*,I:Value*,
+    // I:Skill*Skills), case 19): the last one runs to the closing bracket,
+    // so its IDS name (SKILLS.IDS 4 Diplomacy) resolves.
+    scriptFile.ParseConditionalString(CString("CheckSkillGT(Protagonist, 0, Diplomacy)\n"));
+    REQUIRE(scriptFile.m_curCondition->m_triggerList.GetCount() == 1);
+    pTrigger = scriptFile.m_curCondition->m_triggerList.GetHead();
+    CHECK(pTrigger->m_triggerID == 0x40E7);
+    CHECK(pTrigger->m_specificID == 0);
+    CHECK(pTrigger->m_specific2 == 4);
+    scriptFile.ParseConditionalString(CString("CheckStatGT(Protagonist, 11, INT)\n"));
+    REQUIRE(scriptFile.m_curCondition->m_triggerList.GetCount() == 1);
+    pTrigger = scriptFile.m_curCondition->m_triggerList.GetHead();
+    CHECK(pTrigger->m_triggerID == 0x4045);
+    CHECK(pTrigger->m_specificID == 11);
+    CHECK(pTrigger->m_specific2 == STAT_INT);
+
     // One number (0x4039 NumTimesTalkedTo(I:Num*), case 6), negated.
     scriptFile.ParseConditionalString(CString("!NumTimesTalkedTo(2)\n"));
     REQUIRE(scriptFile.m_curCondition->m_triggerList.GetCount() == 1);
