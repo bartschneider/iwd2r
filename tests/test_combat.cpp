@@ -517,48 +517,38 @@ TEST_CASE("combat: GetAC sums the armour class modifiers and the capped dexterit
     // Blind, without blind fight, the dexterity bonus is lost; a penalty
     // stays.
     pStats->m_generalState |= STATE_BLIND;
-    if (!pGoblin->sub_763150(CGAMESPRITE_FEAT_BLIND_FIGHT)) {
-        CHECK(pGoblin->GetAC() == 1 + 2 + 3 + 4 + 10);
-        pStats->m_nDEX = 6;
-        CHECK(pGoblin->GetAC() == 1 + 2 + 3 + 4 + 10 - 2);
-    }
+    REQUIRE_FALSE(pGoblin->sub_763150(CGAMESPRITE_FEAT_BLIND_FIGHT));
+    CHECK(pGoblin->GetAC() == 1 + 2 + 3 + 4 + 10);
+    pStats->m_nDEX = 6;
+    CHECK(pGoblin->GetAC() == 1 + 2 + 3 + 4 + 10 - 2);
     pStats->m_generalState &= ~STATE_BLIND;
 
-    // Armour caps the dexterity bonus by its type (the goblin's own, when it
-    // wears any).
-    pGoblin->m_equipment.m_items[1] = pArmor;
-    if (pArmor != NULL) {
-        pStats->m_nDEX = 30;
-        INT nCap;
-        switch (pArmor->GetItemType()) {
-        case 60:
-            nCap = 6;
-            break;
-        case 61:
-            nCap = 5;
-            break;
-        case 62:
-            nCap = 2;
-            break;
-        case 63:
-        case 64:
-            nCap = 0;
-            break;
-        case 65:
-            nCap = 1;
-            break;
-        case 66:
-            nCap = 4;
-            break;
-        case 68:
-            nCap = 3;
-            break;
-        default:
-            nCap = 10;
-            break;
-        }
-        CHECK(pGoblin->GetAC() == 1 + 2 + 3 + 4 + 10 + std::min(nCap, 10));
+    // Armour caps the dexterity bonus by its type: leather (60) at 6, chain
+    // mail (62) at 2, plate (64) at 0. The goblin wears none, so it is
+    // given each; only the item type is read.
+    struct Armor {
+        const char* resRef;
+        WORD type;
+        INT cap;
+    };
+    const Armor armors[] = {
+        { "00LEAT01", 60, 6 },
+        { "00CHAN01", 62, 2 },
+        { "00PLAT01", 64, 0 },
+    };
+    pStats->m_nDEX = 30;
+    for (const Armor& armor : armors) {
+        INFO(armor.resRef);
+        CItem* pWorn = new CItem(CResRef(armor.resRef), 0, 0, 0, 0, 0);
+        REQUIRE(pWorn->GetItemType() == armor.type);
+        pGoblin->m_equipment.m_items[1] = pWorn;
+        CHECK(pGoblin->GetAC() == 1 + 2 + 3 + 4 + 10 + armor.cap);
+        pGoblin->m_equipment.m_items[1] = NULL;
+        delete pWorn;
     }
+    // Without armour, the whole bonus (+10 at 30).
+    CHECK(pGoblin->GetAC() == 1 + 2 + 3 + 4 + 10 + 10);
+    pGoblin->m_equipment.m_items[1] = pArmor;
 }
 
 TEST_CASE("combat: Hit draws the d20 and the confirmation d20 of a threat", "[combat][data]")
@@ -836,8 +826,9 @@ TEST_CASE("combat: a goblin given AttackReevaluate swings at the party member", 
                    << pCharacter->GetBaseStats()->m_hitPoints);
     CHECK(blows > 2);
     CHECK(pGoblin->m_curAction.m_actionID == 134);
+    // Hit points only drop. (Whether a blow lands in 16 rounds varies from
+    // run to run, so no hit is required.)
     CHECK_FALSE(hpRose);
-    CHECK(pCharacter->GetBaseStats()->m_hitPoints <= characterStart);
 }
 
 TEST_CASE("combat: a party member casts Magic Missile through the Spell action", "[combat][data]")
@@ -1100,6 +1091,8 @@ TEST_CASE("combat: RenderDamageArrow points at an off-screen party member; Rende
     pCharacter->RenderDamageArrow(fight.pArea, pVidMode, CVIDINF_SURFACE_BACK);
     CHECK(pGame->m_vcLocator.m_nCurrentSequence == 7);
     pGame->GetOptions()->m_nLocatorFeedbackLevel = savedLevel;
+    // No arrow drew rand().
+    CHECK(iwd2r_rand_state() == seed);
 
     // The fire particles. The splash cell has nothing to play, so the
     // particles show at once. The effect's rectangle comes from the
@@ -1122,7 +1115,6 @@ TEST_CASE("combat: RenderDamageArrow points at an off-screen party member; Rende
     pCharacter->RenderSpriteEffect(pVidMode, CVIDINF_SURFACE_BACK);
     CHECK(iwd2r_rand_state() == beforeRender);
     CHECK(Changed(before, surfaces.Back(rScreen)) > 0);
-    (void)seed;
 
     pInfinity->nCurrentX = savedX;
     pInfinity->nCurrentY = savedY;
@@ -1239,9 +1231,20 @@ TEST_CASE("combat: ForceSpell and ForceSpellPoint wait for the casting time and 
     CHECK(Queued<CMessageSetSequence>().empty());
     CHECK(Queued<CMessageFireProjectile>().size() == 1);
 
-    // No spell: an error.
+    // No target: an error.
     pCharacter->m_curAction = CAIAction(CAIAction::FORCESPELL, goblin, CString("SPWI112"), 1, 0);
     CHECK(pCharacter->ForceSpell(NULL) == CGameAIBase::ACTION_ERROR);
+
+    // No spell (no resref, no spell id and none kept at +0x588): an error,
+    // and nothing is queued.
+    ClearMessages();
+    const int savedSpell = pCharacter->field_588;
+    pCharacter->field_588 = 0;
+    pCharacter->m_curAction = CAIAction(CAIAction::FORCESPELL, goblin, CString(""), 0, 0);
+    pCharacter->m_actionCount = 0;
+    CHECK(pCharacter->ForceSpell(pGoblin) == CGameAIBase::ACTION_ERROR);
+    CHECK(Queued<CMessage>().empty());
+    pCharacter->field_588 = savedSpell;
     ClearMessages();
 }
 
@@ -1332,7 +1335,8 @@ TEST_CASE("combat: a goblin archer shoots arrows at the party member", "[combat]
     INFO("archer's weapon " << pWeapon->GetResRef().GetResRefStr() << ", ability type " << type);
     REQUIRE(type == 2);
 
-    // A fixed rand() stream: the hits are the same on every run.
+    // A fixed rand() stream to start from. The runs still differ (the hit
+    // points end at 6 or 7): something else draws rand() during the fight.
     srand(21);
     pArcher->ClearActions(FALSE);
     pArcher->AddAction(CAIAction(CAIAction::ATTACK, CAIObjectType(0, 0, 0, 0, 0, 0, 0, 0, pCharacter->GetId()), 0, 0, 0));
