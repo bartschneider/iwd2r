@@ -156,6 +156,7 @@ Standard library only.
 
 import argparse
 import datetime
+import fnmatch
 import hashlib
 import json
 import os
@@ -1666,6 +1667,61 @@ def our_outcome(code, status, timeout):
     return 0, 'our engine exited with code 0 (%s, scenario finished)' % where
 
 
+# Our side's copy of the vanilla install on the Linux disk (linux_mirror).
+MIRROR_DIR = os.path.join(os.path.expanduser('~'), '.local', 'share',
+                          'iwd2r', 'vanilla-mirror')
+
+
+def linux_mirror(game, mirror=MIRROR_DIR, force=False):
+    """The folder our engine plays a replay on: game itself on a Linux file
+    system, else a copy of it on the Linux disk. Through /mnt/c (drvfs) the
+    first render of a screen that loads many resources (character
+    generation's spell selection: 88-143 ms frames) outlasts the AI
+    thread's 100 ms wait, and the frame counts in ai_overlap_frames; from
+    the Linux disk none does. The copy is made again when game's MARKER
+    differs from the copy's (a rebuilt vanilla copy), and before each run
+    its INI files and the folders a data view copies (tools/dataview_rules
+    .json) are refreshed from game, which the replays rewrite. force makes
+    the copy for a game on a Linux file system too (tests)."""
+    if not force and not dataview.on_windows_drive(game):
+        return game
+    os.makedirs(os.path.dirname(mirror), exist_ok=True)
+    with filelock.hold(mirror + '.lock', 'mirror'):
+        return _update_mirror(game, mirror)
+
+
+def _update_mirror(game, mirror):
+    rules = dataview.load_rules()
+    skipped = {n.lower() for n in rules['empty_dirs']} | {'crash'}
+
+    def read(path):
+        try:
+            with open(path, 'rb') as f:
+                return f.read()
+        except OSError:
+            return None
+
+    marker = read(os.path.join(game, MARKER))
+    if marker is None or read(os.path.join(mirror, MARKER)) != marker:
+        shutil.rmtree(mirror, ignore_errors=True)
+        shutil.copytree(game, mirror, ignore=lambda d, names: [
+            n for n in names if d == game and n.lower() in skipped])
+        return mirror
+    copied_dirs = {n.lower() for n in rules['copied_dirs']}
+    patterns = [p.lower() for p in rules['copied_files']]
+    for name in os.listdir(game):
+        low = name.lower()
+        src = os.path.join(game, name)
+        dst = os.path.join(mirror, name)
+        if low in copied_dirs and os.path.isdir(src):
+            shutil.rmtree(dst, ignore_errors=True)
+            shutil.copytree(src, dst, symlinks=True)
+        elif os.path.isfile(src) and any(fnmatch.fnmatchcase(low, p)
+                                         for p in patterns):
+            shutil.copy2(src, dst)
+    return mirror
+
+
 def run_ours(exe, game, script, actions, seed, timeout, dump_every, run_dir,
              subdir='ours'):
     """Run script in our engine's replay mode into run_dir/subdir; prints
@@ -1678,7 +1734,8 @@ def run_ours(exe, game, script, actions, seed, timeout, dump_every, run_dir,
     # A private view of the game folder: engines at once do not share its
     # temp/cache folders, and it is never written (IWD2R_KEEP_DATA_VIEW=1
     # keeps the view in the run folder).
-    view = dataview.make_view(game, os.path.join(run_dir, 'data-' + subdir))
+    view = dataview.make_view(linux_mirror(game),
+                              os.path.join(run_dir, 'data-' + subdir))
     env = our_env(os.environ, view, script, out_dir, seed, dump_every)
     print('ours %s (%d actions), seed %d, timeout %d s, dumps every %d '
           'frames' % (os.path.relpath(script, ROOT), len(actions), seed,
