@@ -11,6 +11,7 @@
 #include "CUIPanel.h"
 #include "CUtil.h"
 #include "CVidInf.h"
+#include "CVidPoly.h"
 
 // 0x667EC0
 CScreenSpellbook::CScreenSpellbook()
@@ -2387,9 +2388,23 @@ BOOL CUIControlButtonSpellbookSpell::Render(BOOL bForce)
             }
 
             if (field_676 == FALSE) {
-                // NOTE: The original darkens the icon here with a filled
-                // polygon (CVidInf 0x79D680, not ported). Unreachable in
+                // 0x66DF8B: the icon's frame filled with the colour key
+                // (field_24) as a dither (flags 2), so every other pixel
+                // shows the background after the blit. NOTE: Unreachable in
                 // practice: buttons get an icon only with this flag set.
+                CVIDPOLY_VERTEX vertices[4];
+                vertices[0].x = static_cast<WORD>(x);
+                vertices[0].y = static_cast<WORD>(y);
+                vertices[1].x = static_cast<WORD>(x + iconSize.cx);
+                vertices[1].y = static_cast<WORD>(y);
+                vertices[2].x = static_cast<WORD>(x + iconSize.cx);
+                vertices[2].y = static_cast<WORD>(y + iconSize.cy);
+                vertices[3].x = static_cast<WORD>(x);
+                vertices[3].y = static_cast<WORD>(y + iconSize.cy);
+
+                CVidPoly poly;
+                poly.SetPoly(vertices, 4);
+                pVidInf->FXRender(&poly, rFX, pVidInf->field_24, 0x2, CPoint(0, 0), FALSE);
             }
         }
 
