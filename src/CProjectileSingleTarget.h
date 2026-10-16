@@ -24,13 +24,20 @@ public:
     /* 0080 */ virtual DWORD GetField_E6();
     /* 0084 */ virtual void UpdateBasedOnTargetPoint(LONG x, LONG y);
 
+    void CalculateFxRect(CRect& rFx, CPoint& ptReference, CVidCell* pVidCell);
+    void SetSequenceDirection(CVidCell* pVidCell);
+
     /* 0192 */ CVidCell* m_animation;
     /* 0196 */ CVidCell* m_shadow;
     /* 019A */ CVidPalette m_palette;
     /* 01C2 */ BOOL field_1C2;
     /* 01C6 */ DWORD field_1C6;
     /* 01D4 */ DWORD field_1D4;
-    /* 01D8 */ WORD field_1D8;
+    // NOTE: The constructor (0x578110) leaves +0x1D8 to the subclasses and
+    // only CProjectileSpellHit sets it; Render reads it (heap garbage in
+    // the original for the cone and its puffs). Bounded (ruling P4-10): ours
+    // starts at 0.
+    /* 01D8 */ WORD field_1D8 = 0;
     /* 01DA */ WORD field_1DA;
     /* 01DC */ SHORT m_nDirection;
     /* 01DE */ BOOL field_1DE;

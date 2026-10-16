@@ -19,19 +19,28 @@ public:
     /* 0080 */ virtual DWORD GetField_E6();
     /* 0084 */ virtual void UpdateBasedOnTargetPoint(LONG x, LONG y);
 
+    void CalculateFxRect(CRect& rFx, CPoint& ptReference, CVidCell* pVidCell);
+    void SetColorRange(USHORT nRange, USHORT nColor);
+    void SetSequenceDirection(CVidCell* pVidCell);
+
     /* 0192 */ CVidCell* m_animation;
     /* 0196 */ CVidCell* m_shadow;
     /* 019A */ CVidPalette m_palette;
-    // NOTE: The constructor (0x52AD60) leaves 0x1BE and 0x1D2 as they are;
-    // ours starts them at 0. Only the magic missile classes set them.
+    // NOTE: The constructor (0x52AD60) leaves +0x1BE, +0x1C2, +0x1D2 and
+    // +0x1D8 to the subclasses, and not all of them set every one:
+    // CProjectile84DFA4 sets +0x1BE, +0x1C2 and +0x1D8, CProjectile84DF1C
+    // only +0x1D8, and CProjectile8510A4 (0x57E030, type 218) all but
+    // +0x1D8, which Render reads, so the original mirrors that missile by
+    // direction whenever the heap garbage there is 2 or more. Bounded
+    // (ruling P4-10): ours starts all four at 0, so it never mirrors.
     /* 01BE */ DWORD field_1BE = 0;
-    /* 01C2 */ BOOL field_1C2;
+    /* 01C2 */ BOOL field_1C2 = FALSE;
     /* 01C6 */ DWORD field_1C6;
     /* 01CA */ DWORD field_1CA;
     /* 01CE */ DWORD field_1CE;
     /* 01D2 */ WORD field_1D2 = 0;
     /* 01D4 */ DWORD field_1D4;
-    /* 01D8 */ WORD field_1D8;
+    /* 01D8 */ WORD field_1D8 = 0;
     /* 01DA */ WORD field_1DA;
     /* 01DC */ SHORT m_nDirection;
     /* 01DE */ BOOL field_1DE;

@@ -4,6 +4,7 @@
 #include "CGameSprite.h"
 #include "CInfGame.h"
 #include "CMessage.h"
+#include "CProjectileShaft.h"
 #include "CUtil.h"
 #include "IcewindMisc.h"
 
@@ -473,11 +474,11 @@ CProjectile* CProjectile::DecodeSpellHitProjectile(DWORD nType, CGameSprite* pSp
                 TRUE);
         }
         break;
-    case 45:
-        // TODO: Incomplete. The original builds a CProjectileShaft
-        // (0x5348C0, not ported) of "CallLiH" and gives it its fire sound;
-        // no projectile comes back until then.
-        return NULL;
+    case 45: {
+        CProjectileShaft* pShaft = new CProjectileShaft(CString("CallLiH"), CString(""), 0xFF, TRUE, FALSE, 20);
+        pShaft->m_fireSoundRef = CResRef("EFF_P19");
+        return pShaft;
+    }
     case 46:
         pSpellHit = new CProjectileSpellHit("SChargH", visualEffect);
         pSpellHit->m_visualEffect.sub_586A90(TRUE);
@@ -520,11 +521,11 @@ CProjectile* CProjectile::DecodeSpellHitProjectile(DWORD nType, CGameSprite* pSp
         pSpellHit->m_visualEffect.sub_586A90(TRUE);
         pSpellHit->m_fireSoundRef = "EFF_M41";
         break;
-    case 52:
-        // TODO: Incomplete. The original builds a CProjectileShaft
-        // (0x5348C0, not ported) of "FStrikH" and gives it its fire sound;
-        // no projectile comes back until then.
-        return NULL;
+    case 52: {
+        CProjectileShaft* pShaft = new CProjectileShaft(CString("FStrikH"), CString(""), 0xFF, TRUE, FALSE, 28);
+        pShaft->m_fireSoundRef = CResRef("EFF_P16");
+        return pShaft;
+    }
     case 53:
         pSpellHit = new CProjectileSpellHit("RDeadH", visualEffect);
         pSpellHit->m_visualEffect.sub_586A90(TRUE);
@@ -646,11 +647,11 @@ CProjectile* CProjectile::DecodeSpellHitProjectile(DWORD nType, CGameSprite* pSp
         pSpellHit = new CProjectileSpellHit("PortalH", visualEffect);
         pSpellHit->m_visualEffect.sub_586A90(TRUE);
         break;
-    case 72:
-        // TODO: Incomplete. The original builds a CProjectileShaft
-        // (0x5348C0, not ported) of "SunscoH" and gives it its fire sound;
-        // no projectile comes back until then.
-        return NULL;
+    case 72: {
+        CProjectileShaft* pShaft = new CProjectileShaft(CString("SunscoH"), CString(""), 0xFF, TRUE, FALSE, 24);
+        pShaft->m_fireSoundRef = CResRef("EFF_P39");
+        return pShaft;
+    }
     case 73:
         pSpellHit = new CProjectileSpellHit("BBarrH1", visualEffect);
         pSpellHit->m_visualEffect.sub_586A60(TRUE);

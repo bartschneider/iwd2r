@@ -2622,6 +2622,62 @@ class OracleVanillaTest(unittest.TestCase):
         self.assertEqual(self.verify(), [])
 
 
+class OracleMirrorTest(unittest.TestCase):
+    """tools/oracle.py linux_mirror: our side's copy of the vanilla install
+    on the Linux disk."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.game = os.path.join(self.tmp.name, 'game')
+        self.mirror = os.path.join(self.tmp.name, 'mirror')
+        for rel, data in (('vanilla.ok', b'{"md5": "1"}'),
+                          ('CHITIN.KEY', b'KEY V1  '),
+                          ('icewind2.ini', b'[Program Options]\r\n'),
+                          ('Data/AR1000.bif', b'BIFF'),
+                          ('Characters/a.chr', b'CHR'),
+                          ('temp/junk', b'x')):
+            path = os.path.join(self.game, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, 'wb') as f:
+                f.write(data)
+
+    def read(self, rel):
+        with open(os.path.join(self.mirror, rel), 'rb') as f:
+            return f.read()
+
+    def test_a_linux_install_is_used_as_it_is(self):
+        self.assertEqual(oracle.linux_mirror(self.game, self.mirror),
+                         self.game)
+        self.assertFalse(os.path.exists(self.mirror))
+
+    def test_copy_refresh_and_rebuild(self):
+        self.assertEqual(
+            oracle.linux_mirror(self.game, self.mirror, force=True),
+            self.mirror)
+        self.assertEqual(self.read('Data/AR1000.bif'), b'BIFF')
+        self.assertEqual(self.read('icewind2.ini'), b'[Program Options]\r\n')
+        # The engine's own folders are not copied.
+        self.assertFalse(os.path.exists(os.path.join(self.mirror, 'temp')))
+        # Same marker: the INIs and the copied folders follow the install,
+        # the rest stays.
+        with open(os.path.join(self.game, 'icewind2.ini'), 'wb') as f:
+            f.write(b'changed')
+        with open(os.path.join(self.game, 'Characters', 'b.chr'), 'wb') as f:
+            f.write(b'B')
+        with open(os.path.join(self.game, 'Data', 'AR1000.bif'), 'wb') as f:
+            f.write(b'NEW!')
+        oracle.linux_mirror(self.game, self.mirror, force=True)
+        self.assertEqual(self.read('icewind2.ini'), b'changed')
+        self.assertEqual(self.read('Characters/b.chr'), b'B')
+        self.assertEqual(self.read('Data/AR1000.bif'), b'BIFF')
+        # A new marker: copied again.
+        with open(os.path.join(self.game, 'vanilla.ok'), 'wb') as f:
+            f.write(b'{"md5": "2"}')
+        oracle.linux_mirror(self.game, self.mirror, force=True)
+        self.assertEqual(self.read('Data/AR1000.bif'), b'NEW!')
+
+
 class OracleSafeTargetTest(unittest.TestCase):
     """tools/oracle.py vanilla: the guard before deleting or writing the
     copy."""

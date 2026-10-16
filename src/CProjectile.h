@@ -21,10 +21,10 @@ public:
     /* 007C */ virtual void CallBack();
 
     static CProjectile* DecodeProjectile(WORD nProjectileType, CGameAIBase* pSprite, BYTE nUnknown);
-    // WARNING: The spell hit types 45, 52 and 72 (CProjectileShaft) and 57
-    // (CProjectileSunrayX) return NULL until those classes are ported. The
-    // original's callers (0x482073, 0x56024E, 0x5759FC, 0x586E1C, 0x762526)
-    // use the result without a NULL check; whoever ports them must add one.
+    // WARNING: The spell hit type 57 (CProjectileSunrayX) returns NULL until
+    // that class is ported. The original's callers (0x482073, 0x56024E,
+    // 0x5759FC, 0x586E1C, 0x762526) use the result without a NULL check;
+    // whoever ports them must add one.
     static CProjectile* DecodeSpellHitProjectile(DWORD nType, CGameSprite* pSprite, BOOLEAN bPriest);
 
     void AddEffect(CGameEffect* pEffect);

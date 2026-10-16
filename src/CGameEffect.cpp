@@ -7,12 +7,17 @@
 #include "CCreatureFile.h"
 #include "CGameAnimationType.h"
 #include "CGameArea.h"
+#include "CGameObject84D624.h"
 #include "CGameSprite.h"
 #include "CInfCursor.h"
 #include "CInfGame.h"
 #include "CPathSearch.h"
 #include "CProjectile.h"
+#include "CProjectile84DFA4.h"
+#include "CProjectile84E940.h"
+#include "CProjectile84E9C0.h"
 #include "CProjectileArea.h"
+#include "CProjectileShaft.h"
 #include "CResEffect.h"
 #include "CScreenWorld.h"
 #include "CSevenEyes.h"
@@ -4551,14 +4556,18 @@ void CGameEffectDamage::sub_4A8DF0(DWORD dwDamageType, CGameSprite* pSprite)
         sSound = sPrefix;
         sSound += nDigit;
 
-        // TODO: Incomplete. The original compares sSound with the sprite's
-        // last hit sound (a CString at CGameSprite + 0x7102, not in
-        // CGameSprite.h): when they are equal the digit moves on by one,
-        // wrapping to '1'. Without the field the comparison never holds.
+        // The same sound twice in a row moves on to the next, wrapping to
+        // the first.
+        if (strcmp(sSound, pSprite->m_sLastHitSound) == 0) {
+            if (nDigit - '1' == nDigits - 1) {
+                nDigit = '1';
+            } else {
+                nDigit++;
+            }
+        }
         sPrefix += nDigit;
 
-        // TODO: Incomplete. The original stores sPrefix as the sprite's last
-        // hit sound (CGameSprite + 0x7102).
+        pSprite->m_sLastHitSound = sPrefix;
     }
 
     CResRef res(sPrefix);
@@ -5228,8 +5237,7 @@ BOOL CGameEffectDeath::ApplyEffect(CGameSprite* pSprite)
         return TRUE;
     }
 
-    // TODO: Incomplete. The original calls CGameSprite 0x6F5330 here (not
-    // in src/; it resets sprite state at +0x54A4..+0x54B4 and +0x50BA).
+    pSprite->sub_6F5330();
 
     if ((pSprite->m_derivedStats.m_generalState & STATE_DEAD) != 0) {
         if (pSprite->m_nSequence == CGameSprite::SEQ_SLEEP) {
@@ -5535,10 +5543,28 @@ BOOL CGameEffectDeath::ApplyEffect(CGameSprite* pSprite)
         PlaySound(CResRef("SHATTER"), pSprite);
         nShatterType = 1;
 
-        // TODO: Incomplete. The original adds two stone explosion particles
-        // (CParticle 0x51AE40, type 0x84D5EC) at the effect's source and its
-        // mirror, sized by the sprite's fx rect; CParticle is not in src/.
-        (void)nPosZ;
+        // Two stone explosions at the sprite, half as high as its fx rect,
+        // flying away from the effect's source and from its mirror.
+        {
+            CGameObject84D624* pExplosion = new CGameObject84D624(CGameObject84D624::COLORTYPE_STONE,
+                CGameObject84D624::TYPE_EXPLOSION,
+                CGameObject84D624::EXPLOSION_PUFFS);
+            // NOTE: Inlined CGameObject84D624::SetSource.
+            pExplosion->SetSource(m_source);
+            CRect rFx;
+            CPoint ptReference;
+            pSprite->GetAnimation()->CalculateFxRect(rFx, ptReference, nPosZ);
+            SHORT nHeight = static_cast<SHORT>((rFx.bottom - rFx.top) * 5 / 10);
+            pExplosion->m_nGravity = 100;
+            pExplosion->AddToArea(pSprite->GetArea(), pSprite->GetPos(), nHeight, CGameObject::LIST_BACK);
+
+            pExplosion = new CGameObject84D624(CGameObject84D624::COLORTYPE_STONE,
+                CGameObject84D624::TYPE_EXPLOSION,
+                CGameObject84D624::EXPLOSION_PUFFS);
+            pExplosion->SetSource(CPoint(-m_source.x, -m_source.y));
+            pExplosion->m_nGravity = 100;
+            pExplosion->AddToArea(pSprite->GetArea(), pSprite->GetPos(), nHeight, CGameObject::LIST_BACK);
+        }
         break;
     case 0x80:
         // Shattered ice.
@@ -5548,8 +5574,27 @@ BOOL CGameEffectDeath::ApplyEffect(CGameSprite* pSprite)
         PlaySound(CResRef("SHATTER"), pSprite);
         nShatterType = 0;
 
-        // TODO: Incomplete. The ice explosion particles (CParticle 0x51AE40,
-        // type 0x84D5EA), as for 0x40.
+        // The ice explosions, as for 0x40.
+        {
+            CGameObject84D624* pExplosion = new CGameObject84D624(CGameObject84D624::COLORTYPE_ICE,
+                CGameObject84D624::TYPE_EXPLOSION,
+                CGameObject84D624::EXPLOSION_PUFFS);
+            // NOTE: Inlined CGameObject84D624::SetSource.
+            pExplosion->SetSource(m_source);
+            CRect rFx;
+            CPoint ptReference;
+            pSprite->GetAnimation()->CalculateFxRect(rFx, ptReference, nPosZ);
+            SHORT nHeight = static_cast<SHORT>((rFx.bottom - rFx.top) * 5 / 10);
+            pExplosion->m_nGravity = 100;
+            pExplosion->AddToArea(pSprite->GetArea(), pSprite->GetPos(), nHeight, CGameObject::LIST_BACK);
+
+            pExplosion = new CGameObject84D624(CGameObject84D624::COLORTYPE_ICE,
+                CGameObject84D624::TYPE_EXPLOSION,
+                CGameObject84D624::EXPLOSION_PUFFS);
+            pExplosion->SetSource(CPoint(-m_source.x, -m_source.y));
+            pExplosion->m_nGravity = 100;
+            pExplosion->AddToArea(pSprite->GetArea(), pSprite->GetPos(), nHeight, CGameObject::LIST_BACK);
+        }
         break;
     case 0x100:
         // Electrocuted.
@@ -5607,16 +5652,14 @@ BOOL CGameEffectDeath::ApplyEffect(CGameSprite* pSprite)
 
         // NOTE: Inlined CGameObject::InControl.
         if (pSprite->InControl()) {
-            // TODO: Incomplete. CGameSprite 0x754EE0 (DropInventory, "",
-            // FALSE) is not in src/.
+            pSprite->DropInventory(FALSE, CString(""));
         }
 
         if (pGame->GetCharacterPortraitNum(pSprite->GetId()) == -1) {
             if ((pSprite->m_baseStats.m_flags & 0x2) != 0) {
                 pSprite->m_expirationTime = pGame->GetWorldTimer()->m_gameTime;
 
-                // TODO: Incomplete. CGameSprite 0x754EE0 (DropInventory,
-                // "", TRUE) is not in src/.
+                pSprite->DropInventory(TRUE, CString(""));
             }
         } else if (pSprite->InControl()) {
             message = new CMessageVisibilityMapMove(FALSE, pSprite->GetId(), pSprite->GetId());
@@ -5661,12 +5704,14 @@ BOOL CGameEffectDeath::ApplyEffect(CGameSprite* pSprite)
 
     // TODO: Incomplete. The original calls
     // Icewind586B70::Instance()->CSummonLimitStruct_Unsummon(pSprite)
-    // (0x586DC0, not in src/) and queues a message of subtype 89 (vtable
-    // 0x84C3A8, not in src/) for the sprite.
+    // (0x586DC0, not in src/) here.
+    message = new CMessage89(pSprite->GetId(), pSprite->GetId(), pSprite->GetId());
+    g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
     Icewind586B70::Instance()->Remove(pSprite);
 
-    // TODO: Incomplete. The original queues a message of subtype 96 (vtable
-    // 0x84C38C, not in src/) for the sprite.
+    message = new CMessage96(pSprite->GetId(), pSprite->GetId(), pSprite->GetId());
+    g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
 
     m_done = TRUE;
 
@@ -6820,9 +6865,7 @@ BOOL CGameEffectRemoveCurse::ApplyEffect(CGameSprite* pSprite)
             abilityId.m_itemNum = nSelectedWeapon;
             abilityId.m_abilityNum = pSprite->m_equipment.m_selectedWeaponAbility;
 
-            // TODO: Incomplete. The original calls CGameSprite 0x71ABA0
-            // (CheckQuickLists, abilityId, 0, 1, 0), which is not in src/.
-            (void)abilityId;
+            pSprite->CheckQuickLists(&abilityId, 0, TRUE, FALSE);
         } else if (nSlot == nLauncher) {
             pSprite->Unequip(static_cast<SHORT>(nSlot));
             bReequip = TRUE;
@@ -7514,8 +7557,7 @@ BOOL CGameEffectResurrect::ApplyEffect(CGameSprite* pSprite)
 
     // NOTE: Inlined CGameObject::InControl.
     if (pSprite->InControl()) {
-        // TODO: Incomplete. The original also sets CGameSprite + 0x752A to 1,
-        // a field CGameSprite.h does not declare.
+        pSprite->m_cLastSpriteUpdate.m_bFullUpdateRequired = TRUE;
         pSprite->m_bSendSpriteUpdate = TRUE;
     }
 
@@ -8039,10 +8081,44 @@ CGameEffect* CGameEffectSparkle::Copy()
 // 0x4B1700
 BOOL CGameEffectSparkle::ApplyEffect(CGameSprite* pSprite)
 {
-    // TODO: Incomplete. Not ported: it adds particle explosions (CParticle
-    // 0x51AE40) and calls CGameSprite 0x756770, none of them in src/; the
-    // override only keeps the effect from reaching the asserting base
-    // ApplyEffect.
+    WORD nType = static_cast<WORD>(m_dwFlags);
+
+    CRect rFx;
+    CPoint ptReference;
+    pSprite->GetAnimation()->CalculateFxRect(rFx, ptReference, pSprite->m_posZ);
+    LONG nHeight = (rFx.bottom - rFx.top) * 8 / 10;
+
+    CPoint ptPos = pSprite->GetPos();
+    if ((m_source.x != -1 || m_source.y != -1)
+        && (pSprite->GetPos().x != m_source.x || pSprite->GetPos().y != m_source.y)) {
+        // TODO: Incomplete. The original moves the position towards
+        // m_source by CGameSprite 0x756770 (not in src/: the vector from the
+        // sprite to m_source scaled to a length of 15, no rand); until then
+        // the sparkles start at the sprite's position.
+    } else {
+        ptPos.y++;
+    }
+
+    CGameObject84D624* pSparkle;
+    switch (nType) {
+    case 1:
+        pSparkle = new CGameObject84D624(static_cast<WORD>(m_effectAmount),
+            CGameObject84D624::TYPE_EXPLOSION,
+            CGameObject84D624::EXPLOSION_PUFFS);
+        // NOTE: Inlined CGameObject84D624::SetSource.
+        pSparkle->SetSource(m_source);
+        pSparkle->AddToArea(pSprite->GetArea(), ptPos, static_cast<SHORT>(nHeight), CGameObject::LIST_FRONT);
+        break;
+    case 3:
+        pSparkle = new CGameObject84D624(static_cast<WORD>(m_effectAmount),
+            CGameObject84D624::TYPE_SHOWER,
+            static_cast<WORD>(m_duration - g_pBaldurChitin->GetObjectGame()->GetWorldTimer()->m_gameTime));
+        pSparkle->AddToArea(pSprite->GetArea(), ptPos, static_cast<SHORT>(nHeight), CGameObject::LIST_FRONT);
+        break;
+    }
+
+    m_done = TRUE;
+
     return TRUE;
 }
 
@@ -9636,10 +9712,11 @@ BOOL CGameEffectSkillUnsummon::ApplyEffect(CGameSprite* pSprite)
     if (pGame->GetCharacterPortraitNum(pSprite->GetId()) == -1) {
         // TODO: Incomplete. The original calls
         // Icewind586B70::Instance()->CSummonLimitStruct_Unsummon(pSprite)
-        // (0x586DC0, not in src/) and queues a message of subtype 89
-        // (vtable 0x84C3A8, not in src/) with the sprite's id as caller,
-        // target and payload.
+        // (0x586DC0, not in src/) here.
         Icewind586B70::Instance();
+
+        CMessage* message = new CMessage89(pSprite->GetId(), pSprite->GetId(), pSprite->GetId());
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
 
         pSprite->m_removeFromArea = TRUE;
     }
@@ -13578,19 +13655,144 @@ CGameEffect* CGameEffectPolymorph::Copy()
 // 0x4BB110
 BOOL CGameEffectPolymorph::ApplyEffect(CGameSprite* pSprite)
 {
-    // iwd2r: said once on stderr (ruling M3-7), so a missing port cannot
-    // pass unnoticed; the game goes on.
-    static bool bWarned = false;
-    if (!bWarned) {
-        bWarned = true;
-        fprintf(stderr, "iwd2r: effect %d (CGameEffectPolymorph::ApplyEffect, 0x4BB110) is not ported; it does nothing\n",
-            135);
+    if (m_res == "") {
+        pSprite->m_timedEffectList.RemoveAllOfType(pSprite, CGAMEEFFECT_POLYMORPH, pSprite->m_timedEffectList.m_posCurrent, -1);
+        pSprite->m_equipedEffectList.RemoveAllOfType(pSprite, CGAMEEFFECT_POLYMORPH, pSprite->m_equipedEffectList.m_posCurrent, -1);
+        sub_4B8730(pSprite, 42);
+        m_forceRepass = TRUE;
+        m_done = TRUE;
+        return TRUE;
     }
 
-    // TODO: Incomplete. Not ported yet (a creature file swap through a new
-    // CGameSprite, CGameObjectArray::Delete and the search map); until then
-    // the override only keeps the effect from reaching the asserting base
-    // ApplyEffect.
+    pSprite->SetIdleSequence();
+
+    if (pSprite->m_pPath != NULL) {
+        CMessage* message = new CMessageDropPath(pSprite->GetId(), pSprite->GetId());
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+    }
+
+    // The creature to take the shape of, made from its file.
+    CCreatureFile creatureData;
+    creatureData.SetResRef(m_res, TRUE, TRUE);
+
+    LONG nSize = creatureData.GetDataSize();
+    CGameSprite* pShape = new CGameSprite(creatureData.GetData(),
+        nSize,
+        0,
+        0,
+        -1,
+        0,
+        0,
+        0x7FFFFFFF,
+        CPoint(-1, -1),
+        0);
+    pShape->SetResRef(creatureData.GetResRef());
+    creatureData.ReleaseData();
+
+    if (pShape != NULL) {
+        LONG nShapeId = pShape->GetId();
+
+        pSprite->m_derivedStats.m_disabledSpellTypes[0] = TRUE;
+        pSprite->m_derivedStats.m_disabledSpellTypes[1] = TRUE;
+        for (INT nButton = 2; nButton <= 11; nButton++) {
+            pSprite->m_derivedStats.m_disabledButtons[nButton] = TRUE;
+        }
+
+        CString sResRef;
+        m_res.CopyToString(sResRef);
+        pShape->SetResRef(CResRef(sResRef));
+
+        BYTE rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetDeny(nShapeId,
+            CGameObjectArray::THREAD_ASYNCH,
+            reinterpret_cast<CGameObject**>(&pShape),
+            INFINITE);
+        if (rc == CGameObjectArray::SUCCESS) {
+            // NOTE: Inlined CGameAnimation::GetListType (ObjAnimation.h line
+            // 2086) and GetPersonalSpace (line 2093).
+            if (pSprite->GetArea() != NULL) {
+                if (pSprite->GetAnimation()->GetListType() != CGameObject::LIST_FLIGHT) {
+                    pSprite->GetArea()->m_search.RemoveObject(CPoint(pSprite->GetPos().x / CPathSearch::GRID_SQUARE_SIZEX,
+                                                                  pSprite->GetPos().y / CPathSearch::GRID_SQUARE_SIZEY),
+                        pSprite->GetAIType().m_nEnemyAlly,
+                        pSprite->GetAnimation()->GetPersonalSpace(),
+                        pSprite->field_54A8,
+                        pSprite->field_7430);
+                }
+            }
+
+            // NOTE: Inlined CGameAnimation::GetAnimationId (ObjAnimation.h
+            // line 2115) and SetAnimationType.
+            pSprite->GetAnimation()->SetAnimationType(pShape->GetAnimation()->GetAnimationId(),
+                pShape->m_baseStats.m_colors,
+                pSprite->m_nDirection);
+            pSprite->GetAnimation()->m_animation->SetSequence(6);
+
+            if (pSprite->GetArea() != NULL) {
+                if (pSprite->GetAnimation()->GetListType() != CGameObject::LIST_FLIGHT) {
+                    pSprite->GetArea()->m_search.AddObject(CPoint(pSprite->GetPos().x / CPathSearch::GRID_SQUARE_SIZEX,
+                                                               pSprite->GetPos().y / CPathSearch::GRID_SQUARE_SIZEY),
+                        pSprite->GetAIType().m_nEnemyAlly,
+                        pSprite->GetAnimation()->GetPersonalSpace(),
+                        pSprite->field_54A8,
+                        pSprite->field_7430);
+                }
+            }
+
+            CMessage* message = new CMessageAnimationChange(pShape->GetAnimation()->GetAnimationId(),
+                pSprite->GetId(),
+                pSprite->GetId());
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+            // The shape's armor class, attacks, resistances and physical
+            // scores.
+            pSprite->m_derivedStats.m_bPolymorphed = TRUE;
+            pSprite->m_derivedStats.field_6 = pShape->m_derivedStats.field_6;
+            pSprite->m_derivedStats.field_8 = pShape->m_derivedStats.field_8;
+            pSprite->m_derivedStats.field_A = pShape->m_derivedStats.field_A;
+            pSprite->m_derivedStats.field_C = pShape->m_derivedStats.field_C;
+            pSprite->m_derivedStats.m_nACCrushingMod = pShape->m_derivedStats.m_nACCrushingMod;
+            pSprite->m_derivedStats.m_nACMissileMod = pShape->m_derivedStats.m_nACMissileMod;
+            pSprite->m_derivedStats.m_nACPiercingMod = pShape->m_derivedStats.m_nACPiercingMod;
+            pSprite->m_derivedStats.m_nACSlashingMod = pShape->m_derivedStats.m_nACSlashingMod;
+            pSprite->m_derivedStats.m_nCON = pShape->m_derivedStats.m_nCON;
+            pSprite->m_derivedStats.m_nDEX = pShape->m_derivedStats.m_nDEX;
+            pSprite->m_derivedStats.m_nSTR = pShape->m_derivedStats.m_nSTR;
+            pSprite->m_derivedStats.m_nNumberOfAttacks = pShape->m_derivedStats.m_nNumberOfAttacks;
+            pSprite->m_derivedStats.m_nResistFire = pShape->m_derivedStats.m_nResistFire;
+            pSprite->m_derivedStats.m_nResistCold = pShape->m_derivedStats.m_nResistCold;
+            pSprite->m_derivedStats.m_nResistElectricity = pShape->m_derivedStats.m_nResistElectricity;
+            pSprite->m_derivedStats.m_nResistAcid = pShape->m_derivedStats.m_nResistAcid;
+            pSprite->m_derivedStats.m_nResistMagic = pShape->m_derivedStats.m_nResistMagic;
+            pSprite->m_derivedStats.m_nResistMagicFire = pShape->m_derivedStats.m_nResistMagicFire;
+            pSprite->m_derivedStats.m_nResistMagicCold = pShape->m_derivedStats.m_nResistMagicCold;
+            pSprite->m_derivedStats.m_nResistSlashing = pShape->m_derivedStats.m_nResistSlashing;
+            pSprite->m_derivedStats.m_nResistCrushing = pShape->m_derivedStats.m_nResistCrushing;
+            pSprite->m_derivedStats.m_nResistPiercing = pShape->m_derivedStats.m_nResistPiercing;
+            pSprite->m_derivedStats.m_nResistMissile = pShape->m_derivedStats.m_nResistMissile;
+            pSprite->m_derivedStats.m_nMagicDamageResistance = pShape->m_derivedStats.m_nMagicDamageResistance;
+            pSprite->m_derivedStats.m_nResistPoison = pShape->m_derivedStats.m_nResistPoison;
+
+            if (m_secondaryType) {
+                g_pBaldurChitin->GetObjectGame()->m_cButtonArray.ResetState();
+            }
+
+            g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(nShapeId,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+
+            rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->Delete(nShapeId,
+                CGameObjectArray::THREAD_ASYNCH,
+                NULL,
+                INFINITE);
+            if (rc == CGameObjectArray::SUCCESS && pShape != NULL) {
+                delete pShape;
+            }
+
+            pSprite->JumpToPoint(pSprite->GetPos(), TRUE);
+            pSprite->SetIdleSequence();
+        }
+    }
+
     return TRUE;
 }
 
@@ -13729,6 +13931,10 @@ CGameEffect* CGameEffectVisualSpellHit::Copy()
 // 0x4BBCB0
 BOOL CGameEffectVisualSpellHit::ApplyEffect(CGameSprite* pSprite)
 {
+    CString sPalette;
+    CString sSound;
+    CString sAnimation;
+
     if (pSprite->GetArea() == NULL) {
         m_done = TRUE;
         return TRUE;
@@ -13736,39 +13942,86 @@ BOOL CGameEffectVisualSpellHit::ApplyEffect(CGameSprite* pSprite)
 
     // NOTE: The original keeps the projectile type in its sprite argument;
     // a mode with no entry below leaves the sprite's address there and
-    // fires that as the type. Bounded here (ruling P4-10): such a mode
-    // fires nothing.
+    // fires that as the type: an address-dependent value, inert in single
+    // player (CMessageFireProjectile fires nothing without a service
+    // provider). Ours sends no message for such a mode (its local hit
+    // still plays).
     LONG nProjectile = -1;
+
+    CProjectile84DFA4* pBurst = NULL;
+    USHORT nColor = 0;
 
     switch (m_dwFlags) {
     case 0x20:
+        pBurst = new CProjectile84DFA4();
+        nColor = 0x43;
+        break;
     case 0x21:
+        pBurst = new CProjectile84DFA4();
+        nColor = 0x41;
+        break;
     case 0x22:
-        // TODO: Incomplete. The original adds a 0x2A0-byte projectile
-        // (0x530300; 0x52B150 with 0x43, 0x41 or 0x45, then vtable +0x88 at
-        // the sprite's position, y - 2); the projectile classes are not in
-        // src/.
+        pBurst = new CProjectile84DFA4();
+        nColor = 0x45;
+        break;
+    case 0x23: {
+        CProjectileShaft* pShaft = new CProjectileShaft(CString("FlmStrk"),
+            CString(""),
+            0xFF,
+            FALSE,
+            FALSE,
+            CTimerWorld::TIMESCALE_MSEC_PER_SEC * 2);
+        pShaft->Fire(pSprite->GetArea(),
+            pSprite->GetId(),
+            pSprite->GetId(),
+            pSprite->GetPos(),
+            pShaft->DetermineHeight(pSprite),
+            0);
         m_done = TRUE;
         return TRUE;
-    case 0x23:
-        // TODO: Incomplete. A shaft projectile "FlmStrk" (0x5348C0) added at
-        // the sprite through vtable +0x6C; not in src/.
+    }
+    case 0x24: {
+        CProjectileShaft* pShaft = new CProjectileShaft(CString("HLYMITE"),
+            CString(""),
+            0xFF,
+            TRUE,
+            FALSE,
+            CTimerWorld::TIMESCALE_MSEC_PER_SEC * 2);
+        pShaft->Fire(pSprite->GetArea(),
+            pSprite->GetId(),
+            pSprite->GetId(),
+            pSprite->GetPos(),
+            pShaft->DetermineHeight(pSprite),
+            0);
         m_done = TRUE;
         return TRUE;
-    case 0x24:
-        // TODO: Incomplete. A shaft projectile "HLYMITE" (0x5348C0); not in
-        // src/.
-        m_done = TRUE;
-        return TRUE;
+    }
     case 0x25:
         nProjectile = 0x93;
+        sAnimation = "SHAir";
+        sPalette = "SHAir7";
+        sSound = "";
         break;
-    case 0x26:
-        // TODO: Incomplete. A "DDoorH" projectile (0x535320); not in src/.
+    case 0x26: {
+        CProjectile84E940* pDoor = new CProjectile84E940(CString("DDoorH"),
+            CString(""),
+            CString(""),
+            0,
+            0);
+        pDoor->Fire(pSprite->GetArea(),
+            pSprite->GetId(),
+            pSprite->GetId(),
+            pSprite->GetPos(),
+            0,
+            0);
         m_done = TRUE;
         return TRUE;
+    }
     case 0x27:
+        sAnimation = "SPFDEATH";
         nProjectile = 0xCF;
+        sPalette = "";
+        sSound = "";
         break;
     default:
         switch (m_dwFlags) {
@@ -13846,37 +14099,78 @@ BOOL CGameEffectVisualSpellHit::ApplyEffect(CGameSprite* pSprite)
             break;
         }
 
-        // The low two bits pick air, earth or water (the "SHAir",
-        // "SHEarth", "SHWater" animations of the local projectile below).
-        if ((m_dwFlags & 3) == 3) {
+        // The low two bits pick air, earth or water, the rest the palette
+        // (none for 0, else "SHAir1".."SHAir7" and so on).
+        switch (m_dwFlags & 3) {
+        case 0:
+            sAnimation = "SHAir";
+            if ((m_dwFlags & ~3) != 0) {
+                sPalette = "SHAir0";
+                sPalette.SetAt(sPalette.GetLength() - 1, static_cast<char>((m_dwFlags >> 2) + '0'));
+            } else {
+                sPalette = "";
+            }
+            sSound = "";
+            break;
+        case 1:
+            sAnimation = "SHEarth";
+            if ((m_dwFlags & ~3) != 0) {
+                sPalette = "SHEarth0";
+                sPalette.SetAt(sPalette.GetLength() - 1, static_cast<char>((m_dwFlags >> 2) + '0'));
+            } else {
+                sPalette = "";
+            }
+            sSound = "";
+            break;
+        case 2:
+            sAnimation = "SHWater";
+            if ((m_dwFlags & ~3) != 0) {
+                sPalette = "SHWater0";
+                sPalette.SetAt(sPalette.GetLength() - 1, static_cast<char>((m_dwFlags >> 2) + '0'));
+            } else {
+                sPalette = "";
+            }
+            sSound = "";
+            break;
+        default:
             // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameEffect.cpp
             // __LINE__: 19999
             UTIL_ASSERT(FALSE);
+            break;
         }
         break;
     }
 
-    // TODO: Incomplete. The original also builds a local 0x32C-byte
-    // projectile (0x535F20) from the animation names and adds it at the
-    // sprite through vtable +0x6C; not in src/.
+    if (pBurst != NULL) {
+        // A burst of the colour at the sprite, two pixels up.
+        pBurst->SetColorRange(0, nColor);
+        CPoint pos = pSprite->GetPos();
+        pBurst->PlayAt(pSprite->GetArea(), CPoint(pos.x, pos.y - 2));
+        m_done = TRUE;
+        return TRUE;
+    }
+
+    // The hit plays here (a local projectile) and, through the message, the
+    // projectile of the type on the other machines.
+    CProjectile84E9C0* pHit = new CProjectile84E9C0(sAnimation, sSound, sPalette, 8, 0);
 
     if (nProjectile != -1) {
-        // NOTE: The height is the local projectile's DetermineHeight
-        // (0x529F40) for the sprite; that projectile's constructor sets
-        // m_bHasHeight (0x53625C), so it is the sprite's cast height.
-        LONG nHeight = pSprite->GetObjectType() != CGameObject::TYPE_SPRITE
-            ? 32
-            : pSprite->GetAnimation()->GetCastHeight();
-
         CMessage* message = new CMessageFireProjectile(static_cast<WORD>(nProjectile),
             pSprite->GetId(),
             pSprite->GetPos(),
-            nHeight,
+            pHit->DetermineHeight(pSprite),
             pSprite->GetId(),
             pSprite->GetId(),
             0);
         g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
     }
+
+    pHit->Fire(pSprite->GetArea(),
+        pSprite->GetId(),
+        pSprite->GetId(),
+        pSprite->GetPos(),
+        pHit->DetermineHeight(pSprite),
+        0);
 
     m_done = TRUE;
     return TRUE;
@@ -15978,19 +16272,61 @@ BOOL CGameEffectFeatCleave::ApplyEffect(CGameSprite* pSprite)
         return TRUE;
     }
 
-    // iwd2r: said once on stderr (ruling M3-7), so a missing port cannot
-    // pass unnoticed; the game goes on.
-    static bool bWarned = false;
-    if (!bWarned) {
-        bWarned = true;
-        fprintf(stderr, "iwd2r: effect %d (CGameEffectFeatCleave::ApplyEffect, 0x4B9AA0) is not ported; it does nothing\n",
-            442);
+    CAIObjectType typeEnemy = pSprite->GetAIType().GetEnemyOf();
+
+    // NOTE: Inlined CGameAnimation::GetPersonalSpace (ObjAnimation.h line
+    // 2093). The product is a BYTE.
+    SHORT nRange = static_cast<BYTE>(pSprite->GetAnimation()->GetPersonalSpace() * 5) + 50;
+
+    // The nearest enemy in reach (the BYTEs 0x847D1D and 0x847D25, 29 and
+    // 37: the n-th nearest from 0 to 8); the one in m_special is passed
+    // over once.
+    LONG nTarget = CGameObjectArray::INVALID_INDEX;
+    LONG nLast = CGameObjectArray::INVALID_INDEX;
+    for (BYTE nObject = 29; nObject <= 37; nObject++) {
+        nTarget = pSprite->GetArea()->sub_46DDC0(pSprite->GetPos().x,
+            pSprite->GetPos().y,
+            typeEnemy,
+            nRange,
+            pSprite->GetVisibleTerrainTable(),
+            FALSE,
+            FALSE,
+            nObject - 29,
+            FALSE);
+        if (nTarget == CGameObjectArray::INVALID_INDEX) {
+            break;
+        }
+
+        if (nTarget != static_cast<LONG>(m_special)) {
+            break;
+        }
+
+        nTarget = CGameObjectArray::INVALID_INDEX;
+        if (nLast == static_cast<LONG>(m_special)) {
+            break;
+        }
+        nLast = m_special;
     }
 
-    // TODO: Incomplete. Not ported: it needs the area's nearest-enemy search
-    // (CGameArea 0x46DDC0, not in src/) to pick the next target; without one
-    // the original ends the effect (m_done).
-    m_done = TRUE;
+    if (nTarget == CGameObjectArray::INVALID_INDEX) {
+        m_done = TRUE;
+        return TRUE;
+    }
+
+    // Another swing at it.
+    pSprite->FeedBack(CGameSprite::FEEDBACK_CLEAVE, pSprite->field_5636, 0, 0, -1, 0, 0);
+    pSprite->m_attackFrame = -2;
+    pSprite->field_5636 = static_cast<BYTE>(m_effectAmount);
+
+    CMessage* message = new CMessageSetSequence(CGameSprite::SEQ_ATTACK, pSprite->GetId(), pSprite->GetId());
+    g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+    CAIAction action(CAIAction::ATTACK, typeEnemy, nTarget, 0, 0);
+    pSprite->ClearActions(FALSE);
+    pSprite->DropPath();
+    pSprite->m_interrupt = TRUE;
+    pSprite->AddAction(action);
+
     return TRUE;
 }
 

@@ -12,10 +12,3 @@
 # bounce, for the chunk count (rand() % 16 + 10, types 0 and 1) and three or
 # four times per chunk. Evidence: 4AB510.md.
 0x70A810 CGameSprite::Shatter
-
-# A constructor (CGameObject::CGameObject first, vtable 0x84D624, a list at
-# +0x72 with vtable 0x84D618) of the object the death effect (0x4AC720..
-# 0x4ACA8B) and Sparkle (0x4B185E, 0x4B18CB) add for their explosions; its
-# first argument picks colours from the rule tables ("RGB %u %u %u"). Named
-# by its vtable as src/ names such classes. Evidence: 4AB510.md.
-0x51AE40 CGameObject84D624::CGameObject84D624

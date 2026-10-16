@@ -1664,3 +1664,212 @@ TEST_CASE("CheckSave (0x4A42F0): trap sense, and the save and resistance lines (
     ClearMessages();
     delete pGoblin;
 }
+
+// Death (0x4AB510) with vis-probe's callees wired: the sprite's death
+// variables (0x6F5330), the dropped inventory (0x754EE0), and the messages of
+// subtype 89 and 96 for the sprite at the end of the queue, in that order.
+TEST_CASE("Death (0x4AB510) ends with the messages 89 and 96 for the sprite", "[effects][checksave][data]")
+{
+    PROBE_OR_SKIP(pProbe);
+    CGameArea* pArea = pProbe->GetArea();
+    REQUIRE(pArea != NULL);
+    CGameSprite* pGoblin = MakeGoblin();
+    pGoblin->AddToArea(pArea, CPoint(pProbe->GetPos().x - 60, pProbe->GetPos().y + 50), 0, CGameObject::LIST_FRONT);
+    pArea->SortLists();
+    ClearMessages();
+
+    std::unique_ptr<CGameEffect> pDeath = Decode(CGAMEEFFECT_DEATH, 0, 0, pProbe->GetId());
+    iwd2r_srand(37);
+    pDeath->ApplyEffect(pGoblin);
+    INFO("draws " << Draws(37, iwd2r_rand_state()));
+    CHECK(Draws(37, iwd2r_rand_state()) == 0);
+    CHECK(pDeath->m_done == TRUE);
+
+    std::vector<CMessage*> messages = Messages();
+    REQUIRE(messages.size() >= 2);
+    CMessage89* p89 = dynamic_cast<CMessage89*>(messages[messages.size() - 2]);
+    CMessage96* p96 = dynamic_cast<CMessage96*>(messages.back());
+    REQUIRE(p89 != nullptr);
+    REQUIRE(p96 != nullptr);
+    CHECK(p89->m_spriteId == pGoblin->GetId());
+    CHECK(p89->GetSource() == pGoblin->GetId());
+    CHECK(p89->GetTarget() == pGoblin->GetId());
+    CHECK(p96->m_spriteId == pGoblin->GetId());
+    ClearMessages();
+}
+
+// The hit sound (CGameEffectDamage 0x4A8DF0) remembers the last one the
+// sprite played (+0x7102): the same pick twice in a row moves on to the next
+// digit, wrapping to 1. One draw each time. (The sound's message goes to the
+// other players only, so the remembered name is what shows.)
+TEST_CASE("Damage's hit sound (0x4A8DF0) does not repeat the sprite's last one", "[effects][checksave][data]")
+{
+    PROBE_OR_SKIP(pProbe);
+    CGameSprite* pGoblin = MakeGoblin();
+    ClearMessages();
+    std::unique_ptr<CGameEffect> pEffect = Decode(CGAMEEFFECT_DAMAGE, 0, 0, pProbe->GetId());
+    CGameEffectDamage* pDamage = dynamic_cast<CGameEffectDamage*>(pEffect.get());
+    REQUIRE(pDamage != nullptr);
+
+    pGoblin->m_sLastHitSound = "";
+    iwd2r_srand(43);
+    pDamage->sub_4A8DF0(0x1000000, pGoblin);
+    CHECK(Draws(43, iwd2r_rand_state()) == 1);
+    const std::string first(static_cast<const char*>(pGoblin->m_sLastHitSound));
+    INFO("first " << first);
+    REQUIRE(first.size() > 4);
+    CHECK(first.compare(0, 5, "H_SL_") == 0);
+
+    // The same draw again: the next digit.
+    iwd2r_srand(43);
+    pDamage->sub_4A8DF0(0x1000000, pGoblin);
+    CHECK(Draws(43, iwd2r_rand_state()) == 1);
+    const std::string second(static_cast<const char*>(pGoblin->m_sLastHitSound));
+    INFO("second " << second);
+    CHECK(second != first);
+    CHECK(second.substr(0, second.size() - 1) == first.substr(0, first.size() - 1));
+    CHECK((second.back() == first.back() + 1 || second.back() == '1'));
+
+    // And once more: back to the first pick, which differs from the last.
+    iwd2r_srand(43);
+    pDamage->sub_4A8DF0(0x1000000, pGoblin);
+    CHECK(std::string(static_cast<const char*>(pGoblin->m_sLastHitSound)) == first);
+
+    ClearMessages();
+    delete pGoblin;
+}
+
+// Cleave (opcode 442, 0x4B9AA0): with a kill to follow up (the secondary
+// type set) the attacker looks for the nearest enemy within its reach
+// (CGameArea::sub_46DDC0), passing over the one in m_special once; it shows
+// feedback 87, readies a swing (the attack frame -2, the sequence message)
+// and queues an attack on it; with none it is done. No draws.
+TEST_CASE("Cleave (0x4B9AA0) turns on the next enemy in reach", "[effects][checksave][data]")
+{
+    PROBE_OR_SKIP(pProbe);
+    CGameArea* pArea = pProbe->GetArea();
+    REQUIRE(pArea != NULL);
+    CGameSprite* pGoblin = MakeGoblin();
+    pGoblin->AddToArea(pArea, CPoint(pProbe->GetPos().x + 30, pProbe->GetPos().y + 10), 0, CGameObject::LIST_FRONT);
+    pArea->SortLists();
+    ClearMessages();
+    while (!pProbe->m_queuedActions.IsEmpty()) {
+        delete pProbe->m_queuedActions.RemoveHead();
+    }
+
+    auto sequenceMessages = []() {
+        int count = 0;
+        for (CMessage* pMessage : Messages()) {
+            CMessageSetSequence* pSequence = dynamic_cast<CMessageSetSequence*>(pMessage);
+            if (pSequence != nullptr) {
+                count++;
+                CHECK(pSequence->m_sequence == CGameSprite::SEQ_ATTACK);
+            }
+        }
+        return count;
+    };
+
+    // No kill to follow up (the secondary type, which effects start with
+    // set, cleared): nothing.
+    std::unique_ptr<CGameEffect> pCleave = Decode(ICEWIND_CGAMEEFFECT_FEATCLEAVE, 0, 5, pProbe->GetId());
+    pCleave->m_secondaryType = 0;
+    CHECK(pCleave->ApplyEffect(pProbe) == TRUE);
+    CHECK(pCleave->m_done == FALSE);
+    CHECK(sequenceMessages() == 0);
+    CHECK(pProbe->m_queuedActions.IsEmpty());
+
+    // The goblin just felled is passed over, and nothing else is in reach:
+    // done.
+    pCleave = Decode(ICEWIND_CGAMEEFFECT_FEATCLEAVE, 0, 5, pProbe->GetId());
+    pCleave->m_secondaryType = 1;
+    pCleave->m_special = static_cast<DWORD>(pGoblin->GetId());
+    CHECK(pCleave->ApplyEffect(pProbe) == TRUE);
+    CHECK(pCleave->m_done == TRUE);
+    CHECK(pProbe->m_queuedActions.IsEmpty());
+    CHECK(sequenceMessages() == 0);
+
+    // Another kill: the goblin in reach is attacked.
+    pCleave = Decode(ICEWIND_CGAMEEFFECT_FEATCLEAVE, 0, 5, pProbe->GetId());
+    pCleave->m_secondaryType = 1;
+    pCleave->m_special = static_cast<DWORD>(CGameObjectArray::INVALID_INDEX - 1);
+    iwd2r_srand(47);
+    CHECK(pCleave->ApplyEffect(pProbe) == TRUE);
+    CHECK(Draws(47, iwd2r_rand_state()) == 0);
+    CHECK(pCleave->m_done == FALSE);
+    CHECK(pProbe->m_attackFrame == -2);
+    CHECK(pProbe->field_5636 == 5);
+    CHECK(pProbe->m_interrupt == TRUE);
+    REQUIRE(!pProbe->m_queuedActions.IsEmpty());
+    CAIAction* pAction = pProbe->m_queuedActions.GetHead();
+    CHECK(pAction->m_actionID == CAIAction::ATTACK);
+    CHECK(pAction->m_specificID == pGoblin->GetId());
+    CHECK(sequenceMessages() == 1);
+
+    while (!pProbe->m_queuedActions.IsEmpty()) {
+        delete pProbe->m_queuedActions.RemoveHead();
+    }
+    ClearMessages();
+}
+
+// Polymorph (opcode 135, 0x4BB110) into a wolf (12WOLF): a sprite of the
+// creature is made to copy from and deleted again; the goblin takes its
+// animation (CMessageAnimationChange goes to the others), its armor class, attacks,
+// resistances and physical scores, is marked polymorphed and loses its
+// spell types and buttons 2 to 11. Without a resource it ends the
+// polymorph instead.
+TEST_CASE("Polymorph (0x4BB110) gives a goblin a wolf's shape", "[effects][checksave][data]")
+{
+    PROBE_OR_SKIP(pProbe);
+    CGameArea* pArea = pProbe->GetArea();
+    REQUIRE(pArea != NULL);
+    CGameSprite* pGoblin = MakeGoblin();
+    pGoblin->AddToArea(pArea, CPoint(pProbe->GetPos().x + 90, pProbe->GetPos().y - 40), 0, CGameObject::LIST_FRONT);
+    pArea->SortLists();
+    ClearMessages();
+
+    std::vector<BYTE> wolfBytes = LoadCreature("12WOLF");
+    REQUIRE(!wolfBytes.empty());
+
+    CGameObjectArray* pArray = g_pBaldurChitin->GetObjectGame()->GetObjectArray();
+    std::unique_ptr<CGameEffect> pPolymorph = Decode(CGAMEEFFECT_POLYMORPH, 0, 0, pProbe->GetId());
+    pPolymorph->m_res = CResRef("12WOLF");
+    const SHORT nNextId = pArray->m_nNextObjectId;
+    iwd2r_srand(53);
+    CHECK(pPolymorph->ApplyEffect(pGoblin) == TRUE);
+    INFO("draws " << Draws(53, iwd2r_rand_state()));
+    // The draws of the shape's construction (the CGameSprite constructor)
+    // and of the goblin's sequences.
+    CHECK(Draws(53, iwd2r_rand_state()) == 9);
+    CHECK(pPolymorph->m_done == FALSE);
+
+    CHECK(pGoblin->GetAnimation()->GetAnimationId() == 0x7B00);
+    CHECK(pGoblin->m_derivedStats.m_bPolymorphed == TRUE);
+    CHECK(pGoblin->m_derivedStats.m_disabledSpellTypes[0] == TRUE);
+    CHECK(pGoblin->m_derivedStats.m_disabledSpellTypes[1] == TRUE);
+    for (int n = 2; n <= 11; n++) {
+        CHECK(pGoblin->m_derivedStats.m_disabledButtons[n] == TRUE);
+    }
+    // The shape was made and deleted again.
+    CHECK(pArray->m_nNextObjectId != nNextId);
+    CGameObject* pObject;
+    CHECK(pArray->GetShare(nNextId, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) != CGameObjectArray::SUCCESS);
+
+    // CMessageAnimationChange goes to the other players only.
+    ClearMessages();
+
+    // A wolf of the same file has the stats the goblin took.
+    CGameSprite* pWolf = new CGameSprite(wolfBytes.data(), static_cast<LONG>(wolfBytes.size()), 0, 0, -1, 0, 0, INT_MAX, CPoint(-1, -1), 0);
+    CHECK(pGoblin->m_derivedStats.m_nNumberOfAttacks == pWolf->m_derivedStats.m_nNumberOfAttacks);
+    CHECK(pGoblin->m_derivedStats.m_nSTR == pWolf->m_derivedStats.m_nSTR);
+    CHECK(pGoblin->m_derivedStats.m_nResistFire == pWolf->m_derivedStats.m_nResistFire);
+    CHECK(pGoblin->m_derivedStats.m_nACSlashingMod == pWolf->m_derivedStats.m_nACSlashingMod);
+    pArray->Delete(pWolf->GetId(), CGameObjectArray::THREAD_ASYNCH, NULL, INFINITE);
+    delete pWolf;
+
+    // Without a resource: the polymorph ends.
+    std::unique_ptr<CGameEffect> pEnd = Decode(CGAMEEFFECT_POLYMORPH, 0, 0, pProbe->GetId());
+    CHECK(pEnd->ApplyEffect(pGoblin) == TRUE);
+    CHECK(pEnd->m_done == TRUE);
+    CHECK(pEnd->m_forceRepass == TRUE);
+    ClearMessages();
+}
