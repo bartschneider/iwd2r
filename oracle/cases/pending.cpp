@@ -168,8 +168,8 @@ ORACLE_CASE_PENDING("pending/iterative_attack_bonus", IterativeAttackBonus,
 // (CGameObjectArray::GetShare) and party; it reports through FeedBack,
 // CBaldurMessage::DisplayText and CGameSprite_DisplaySaveString.
 ORACLE_CASE_PENDING("pending/check_save", nullptr,
-    "ours not implemented (CGameEffect::CheckSave 0x4A42F0); needs engine state (g_pBaldurChitin's game, a "
-    "sprite with its vtable, feats and class levels, the object array)");
+    "needs engine state (g_pBaldurChitin's game, a sprite from the original's constructor for its vtable, "
+    "feats and class levels, the object array); ours covered by tests/test_effects_save.cpp");
 // CGameSprite::ProcessEffectList (0x72DE60; src/ also labels the address
 // CGameSprite::sub_72DE60) rolls the four save d20s (rand() % 20 + 1) and a
 // rand() % 100 into the sprite (0x70F6-0x70FA) as part of processing the
