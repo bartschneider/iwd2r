@@ -1,7 +1,7 @@
 ---
 address: 0x4CCAB0
 name: CGameTrigger::CGameTrigger
-exemption: "needs an area, the object array and the ARE data; covered by tests/test_sprite_actions.cpp (trigger: DoAIUpdate ..., every AR1000 trigger's m_scriptRes is its override script's name)"
+exemption: "needs an area, the object array and the ARE data; covered by tests/test_sprite_actions.cpp (trigger: DoAIUpdate ..., every AR1000 trigger's m_scriptRes is its override script's name); the polygon set-up is pinned by tests/test_creature_render.cpp 'area objects: AR1000's polygons keep the original's points'"
 ghidra_version: 12.1.4
 ---
 
@@ -256,3 +256,24 @@ LAB_004cce39:
 ## Notes
 
 Ported earlier; this entry records one fix. The original copies the ARE trigger's script name into m_scriptRes (+0x5E6): `mov ecx,[ebx+0x7C]; mov [ebp+0x5E6],ecx; mov edx,[esi+4]; mov [ebp+0x5EA],edx` at 0x4CCC01-0x4CCC1A, just before the strncpy of the script name (0x7E83A0, 0x20 bytes). Ours never set it, so m_scriptRes held whatever the allocation held; CGameTrigger::DoAIUpdate (0x4CD220) and Marshal read it. Replay-verified with IWD2R_RAND_TRACE (docs/rand-trace.md) on walk_and_talk, seed 1: with the round-2 fixes our AI thread's rand() calls in the load frame (Party Formation's Done, frame 1491) and the paused frames after it (1492-1497) match the original's call for call.
+
+## Polygon set-up (render round 9)
+
+A point is dropped only when it lies on the line through its two
+neighbours. With x2,y2 two points back, x1,y1 the previous point and x0,y0
+the current one, it goes when:
+
+- x2 == x1 == x0, or y2 == y1 == y0; or
+- x2 != x1, x1 != x0, and 1000*(y2-y1)/(x2-x1) == 1000*(y1-y0)/(x1-x0)
+  (idiv truncation).
+
+The equal-slope case is `cmp eax, <slope>; jne <keep>` at 0x4CCE1E (the loop 0x4CCD9C-0x4CCE35). Dropping
+copies the current point over the previous one and counts it in `adjust`,
+as ours does.
+
+Fixed: ours compared the slopes with `!=`, so it dropped the middle point
+whenever the two slopes *differed*, that is almost every point. Half-Built Ship kept 2 of its 35 points; Info Text for Cranes 16 of 42. AR1000
+now keeps 292 points in its triggers, doors and containers, the count the
+original saved (Probe Save of the crossload run 20261016-171655). Ours kept
+133. The only point dropped is one of Barrel Three's ten. The test checks
+all 54 polygons against that save.
