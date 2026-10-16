@@ -1,5 +1,7 @@
 [
   "connection",
   "create_char",
-  "world"
+  "world",
+  "load",
+  "save"
 ]

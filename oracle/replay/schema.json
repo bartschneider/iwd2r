@@ -585,7 +585,7 @@
             ]
           },
           "time": {
-            "description": "The game time the save shows, m_nTime: the game file's world time in seconds times CTimerWorld::TIMESCALE_MSEC_PER_SEC.",
+            "description": "The game time the save shows, m_nTime, as RefreshGameSlots computes it from the game file's world time (CSavedGameHeader::m_worldTime).",
             "type": "integer",
             "minimum": 0,
             "maximum": 4294967295

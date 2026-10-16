@@ -4497,7 +4497,8 @@ class OracleReplayCompareTest(unittest.TestCase):
 
     def test_screens(self):
         self.assertEqual(oracle.load_screens(),
-                         ['connection', 'create_char', 'world'])
+                         ['connection', 'create_char', 'world', 'load',
+                          'save'])
         enum = self.schema()['properties']['screen']['enum']
         for screen in oracle.load_screens():
             self.assertIn(screen, enum)

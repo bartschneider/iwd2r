@@ -5,6 +5,9 @@
 # oracle.py replay crossload loads each engine's save in the other engine
 # with it. It stays out of the suites (scenarios/*.txt), which have no save
 # to give it. Coordinates for Resolution=800.
+#
+# Status (2026-10-16): with save_load.txt's save from either engine, the
+# original and ours match at every checkpoint (replay crossload, seed 1).
 # saves: load
 # timeout: 240
 wait 60

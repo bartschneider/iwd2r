@@ -16,6 +16,24 @@
 # numbers its saves from 4: CScreenSave::RefreshGameSlots 0x65BCF0 counts
 # only slot numbers of 4 and up, SaveGame 0x65DB30 formats the next); in
 # name order the save is the load screen's second slot.
+#
+# Status (2026-10-16, crossload stream; replay compare, seed 1, sandbox):
+# every checkpoint matches through save_screen (its slots included); from
+# saved on, each differs only in globals.ai_rng_state, the positions,
+# party, doors, game block and slots all match, and the loaded state is
+# the saved one on both sides. The AI thread's rand streams part at frame
+# 2928, the second world frame after the save: the save marshals the start
+# area's creatures (CGameArea::Marshal 0x471630, CGameSprite::Marshal
+# 0x70B2F0), whose local variables become effects (CVariableHash::
+# MarshalToCharacter 0x550600, AddEffect 0x733050, which sets field_562C)
+# on Jorun (655370), Eldgull (851981) and Screed (1114129) on both sides;
+# the original then draws ProcessEffectList's five saving-throw rolls
+# (0x72DF5F-0x72DFB3) for three creatures at frame 2928, ours for two
+# (Eldgull, Screed) and for Jorun, whose AI is slowed (inhibitor 2), at
+# 2929. The state probe (IWD2R_PROBE=2905-2930) is the same on both sides,
+# so it is when ProcessEffectList runs for that creature, not the save's
+# data: oracle.py replay crossload loads each engine's save in the other to
+# the same state.
 # saves: empty
 # timeout: 420
 wait 60
