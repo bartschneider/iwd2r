@@ -675,6 +675,45 @@ TEST_CASE("ai: See at a distance, a dead sprite, Range's equal mode, HP's edges 
     ClearMessages();
 }
 
+TEST_CASE("ai: CheckStat, CheckStatGT and CheckStatLT compare the cause's derived stat", "[ai][data]")
+{
+    REQUIRE_ENGINE();
+    ClearMessages();
+    CGameAIBase* pCaller = AddAIObject();
+    CGameSprite* pSprite = MakeSprite();
+    CAIObjectType sprite(0, 0, 0, 0, 0, 0, 0, 0, pSprite->m_id, 0, 0);
+
+    // Int1 is the stat (STAT_STR, 36), the value its specific.
+    const SHORT saved = pSprite->m_derivedStats.m_nSTR;
+    pSprite->m_derivedStats.m_nSTR = 12;
+    CAITrigger check(0x4044, sprite, 12);
+    check.m_specific2 = STAT_STR;
+    CHECK(pCaller->EvaluateStatusTrigger(check) == TRUE);
+    check.m_specificID = 11;
+    CHECK(pCaller->EvaluateStatusTrigger(check) == FALSE);
+
+    CAITrigger greater(0x4045, sprite, 11);
+    greater.m_specific2 = STAT_STR;
+    CHECK(pCaller->EvaluateStatusTrigger(greater) == TRUE);
+    greater.m_specificID = 12;
+    CHECK(pCaller->EvaluateStatusTrigger(greater) == FALSE);
+
+    CAITrigger less(0x4046, sprite, 13);
+    less.m_specific2 = STAT_STR;
+    CHECK(pCaller->EvaluateStatusTrigger(less) == TRUE);
+    less.m_specificID = 12;
+    CHECK(pCaller->EvaluateStatusTrigger(less) == FALSE);
+
+    // No sprite (the caller is a plain AI object): FALSE.
+    CAIObjectType object(0, 0, 0, 0, 0, 0, 0, 0, pCaller->m_id, 0, 0);
+    CAITrigger other(0x4045, object, -100);
+    other.m_specific2 = STAT_STR;
+    CHECK(pCaller->EvaluateStatusTrigger(other) == FALSE);
+
+    pSprite->m_derivedStats.m_nSTR = saved;
+    ClearMessages();
+}
+
 TEST_CASE("ai: the party specifiers decode to the party member the game picks", "[ai][data]")
 {
     REQUIRE_ENGINE();
@@ -720,6 +759,107 @@ TEST_CASE("ai: the party specifiers decode to the party member the game picks", 
 
     pGame->m_nCharacters = nCharacters;
     pGame->m_characterPortraits[0] = portrait;
+}
+
+// NearestPC (special 52, 0x40C46C): the nearest live good party member by
+// the squared distance to the caller, y not scaled; dead and evil members
+// do not count, and none is NOONE.
+TEST_CASE("ai: NearestPC decodes to the nearest live good party member", "[ai][data]")
+{
+    REQUIRE_ENGINE();
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CGameAIBase* pCaller = AddAIObject();
+    pCaller->m_pos = CPoint(1000, 1000);
+    CGameSprite* pNear = MakeSprite();
+    CGameSprite* pFar = MakeSprite();
+    for (CGameSprite* pSprite : { pNear, pFar }) {
+        pSprite->m_derivedStats.m_generalState &= ~(STATE_DEAD | STATE_INVISIBLE);
+        pSprite->m_typeAI.m_nEnemyAlly = 2; // PC
+    }
+    pNear->m_pos = CPoint(1000, 1100);
+    pFar->m_pos = CPoint(1150, 1000);
+
+    const SHORT nCharacters = pGame->m_nCharacters;
+    const LONG portrait0 = pGame->m_characterPortraits[0];
+    const LONG portrait1 = pGame->m_characterPortraits[1];
+    pGame->m_nCharacters = 2;
+    pGame->m_characterPortraits[0] = pFar->m_id;
+    pGame->m_characterPortraits[1] = pNear->m_id;
+
+    auto decode = [&]() {
+        CAIObjectType type(0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0);
+        type.m_SpecialCase[0] = 52;
+        type.Decode(pCaller);
+        return type;
+    };
+
+    CHECK(decode().m_nInstance == pNear->m_id);
+
+    // A dead one, or one of the other side, is not a PC to find.
+    pNear->m_derivedStats.m_generalState |= STATE_DEAD;
+    CHECK(decode().m_nInstance == pFar->m_id);
+    pNear->m_derivedStats.m_generalState &= ~STATE_DEAD;
+    pNear->m_typeAI.m_nEnemyAlly = 255;
+    CHECK(decode().m_nInstance == pFar->m_id);
+    pFar->m_typeAI.m_nEnemyAlly = 255;
+    CHECK(decode().Equal(CAIObjectType::NOONE));
+
+    pGame->m_nCharacters = nCharacters;
+    pGame->m_characterPortraits[0] = portrait0;
+    pGame->m_characterPortraits[1] = portrait1;
+}
+
+// A creature's death on the host (0x6F5330): its <script name>_DEAD, its
+// KILL_<race>_CNT and the creature file's death and kill variables. Only
+// the host counts.
+TEST_CASE("ai: a death sets the creature's death variables on the host", "[ai][data]")
+{
+    REQUIRE_ENGINE();
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CGameSprite* pSprite = MakeSprite();
+    pSprite->m_bBumped = FALSE;
+    pSprite->m_bVisibleMonster = FALSE;
+    pSprite->m_bInfravisionOn = FALSE;
+    std::memset(pSprite->m_scriptName, 0, sizeof(pSprite->m_scriptName));
+    std::memcpy(pSprite->m_scriptName, "AITESTGOB", 9);
+    pSprite->m_typeAI.m_nRace = 155; // goblin
+    pSprite->m_baseStats.field_295[0] = 1;
+    pSprite->m_baseStats.field_295[1] = 1;
+    std::memset(&pSprite->m_baseStats.field_295[0xD], 0, 64);
+    std::memcpy(&pSprite->m_baseStats.field_295[0xD], "  AITEST_DEATHVAR ", 18);
+    std::memcpy(&pSprite->m_baseStats.field_295[0x2D], "aitest_a:aitest_b", 17);
+
+    auto value = [&](const char* name) -> LONG {
+        CVariable* pVariable = pGame->GetVariables()->FindKey(CString(name));
+        return pVariable != NULL ? pVariable->m_intValue : -1;
+    };
+
+    CHECK(CGameSprite::GetRaceString(155) == CString("GOBLIN"));
+    CHECK(CGameSprite::GetRaceString(114) == CString(""));
+
+    const BOOLEAN bHost = g_pChitin->cNetwork.m_bIsHost;
+    g_pChitin->cNetwork.m_bIsHost = FALSE;
+    pSprite->sub_6F5330();
+    CHECK(value("AITESTGOB_DEAD") == -1);
+
+    g_pChitin->cNetwork.m_bIsHost = TRUE;
+    const LONG kills = value("KILL_GOBLIN_CNT");
+    pSprite->sub_6F5330();
+    CHECK(value("AITESTGOB_DEAD") == 1);
+    CHECK(value("KILL_GOBLIN_CNT") == (kills == -1 ? 1 : kills + 1));
+    CHECK(value("AITEST_DEATHVAR") == 1);
+    CHECK(value("AITEST_A") == 1);
+    CHECK(value("AITEST_B") == 1);
+
+    // A second death counts the kills again; the death variables stay 1.
+    pSprite->sub_6F5330();
+    CHECK(value("AITESTGOB_DEAD") == 1);
+    CHECK(value("AITEST_DEATHVAR") == 1);
+    CHECK(value("AITEST_A") == 2);
+    CHECK(value("AITEST_B") == 2);
+
+    g_pChitin->cNetwork.m_bIsHost = bHost;
+    ClearMessages();
 }
 
 TEST_CASE("ai: closing AR5004's door on a creature tells the creature to move and closes again", "[ai][data]")

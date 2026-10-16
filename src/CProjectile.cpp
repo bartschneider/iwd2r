@@ -108,8 +108,26 @@ CProjectile* CProjectile::DecodeProjectile(WORD nProjectileType, CGameAIBase* pS
     case 1:
         pProjectile = new CProjectile84D8B8();
         break;
+    case 68:
+    case 69:
+    case 70:
+    case 71:
+    case 72:
+        // Magic Missile, 1 to 5 missiles. NOTE: The WORD at 0x85E84A is 1.
+        pProjectile = new CProjectile84E0C4(nProjectileType - 67, 1);
+        pProjectile->m_fireSoundRef = "TRA_22";
+        pProjectile->m_arrivalSoundRef = "";
+        pProjectile->m_bHasHeight = TRUE;
+        break;
     case 79:
         pProjectile = new CProjectile84DF1C();
+        break;
+    case 218:
+        // One magic missile. NOTE: The WORD at 0x85E848 is 0.
+        pProjectile = new CProjectile8510A4(0);
+        pProjectile->m_bHasHeight = TRUE;
+        pProjectile->m_fireSoundRef = "TRA_02";
+        pProjectile->m_arrivalSoundRef = "";
         break;
     default:
         if (static_cast<UINT>(nProjectileType - 1) > 0x181) {
@@ -119,8 +137,8 @@ CProjectile* CProjectile::DecodeProjectile(WORD nProjectileType, CGameAIBase* pS
         }
 
         // TODO: Incomplete (0x51EB93-0x528DEF). The jump table at 0x528E7C
-        // builds one class per type, 2 to 386; only types 1 and 79 are
-        // ported.
+        // builds one class per type, 2 to 386; only types 1, 68 to 72, 79
+        // and 218 are ported.
         // DEVIATION (temporary): unported type -> instant projectile. The
         // original reaches the fallback below only for types out of range
         // and for the table entries 106, 107, 219-226, 259 and 265. Until

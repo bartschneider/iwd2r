@@ -2200,11 +2200,15 @@ void CGameSprite::AIUpdate()
                     || m_nSequence == CGAMESPRITE_SEQ_ATTACK_SLASH
                     || m_nSequence == CGAMESPRITE_SEQ_ATTACK_BACKSLASH
                     || m_nSequence == CGAMESPRITE_SEQ_ATTACK_JAB) {
-                    SHORT lSlot;
-                    CItem* pItem = m_equipment.m_items[m_equipment.m_selectedWeapon];
-                    pItem->Demand();
-                    sub_756930(pItem, GetLauncher(pItem->GetAbility(m_equipment.m_selectedWeaponAbility), lSlot));
-                    pItem->Release();
+                    // NOTE: The original picks the swing sound at the first
+                    // frame of the attack only (0x6F7656-0x6F7672).
+                    if (m_animation.IsBeginningOfSequence()) {
+                        SHORT lSlot;
+                        CItem* pItem = m_equipment.m_items[m_equipment.m_selectedWeapon];
+                        pItem->Demand();
+                        sub_756930(pItem, GetLauncher(pItem->GetAbility(m_equipment.m_selectedWeaponAbility), lSlot));
+                        pItem->Release();
+                    }
                 }
                 switch (m_nSequence) {
                 case CGAMESPRITE_SEQ_ATTACK:
@@ -3595,7 +3599,9 @@ void CGameSprite::CheckIfVisible()
                     && !m_baseStats.field_294
                     && (m_baseStats.m_flags & 0x8000) == 0) {
                     if (m_pArea->m_nVisibleMonster == 0) {
-                        AutoPause(0x200);
+                        // The party member that sees it pauses the game
+                        // (`mov ecx,[esp+0x8]` at 0x6FC0D9).
+                        pSprite->AutoPause(0x200);
                     }
 
                     m_bVisibleMonster = TRUE;
@@ -3898,7 +3904,9 @@ void CGameSprite::OnActionButton(const CPoint& pt)
                 break;
             case 20:
             case -1:
-                pGame->UseMagicOnGround(m_id);
+                // A spell or item aimed at this sprite (`call 0x5BC450` at
+                // 0x6FFB27).
+                pGame->UseMagicOnObject(m_id);
 
                 pGame->SetState(0);
                 pGame->GetButtonArray()->SetSelectedButton(100);
@@ -8233,6 +8241,10 @@ void CGameSprite::Unmarshal(CSavedGamePartyCreature* pCreature, BOOLEAN bPartyMe
     m_nLastSpellbookSpellLevel = pCreature->m_nLastSpellbookSpellLevel;
     m_nLastSong = pCreature->m_nLastSong;
 
+    // NOTE: Inlined ResetQuickSlots (0x70C8E6-0x70C96E): the empty action
+    // bar buttons get the class's defaults (QSLOTS.2DA).
+    ResetQuickSlots();
+
     m_nNumberOfTimesTalkedTo = pCreature->m_nNumberOfTimesTalkedTo;
     m_nHappiness = pCreature->m_nHappiness;
 
@@ -12184,7 +12196,9 @@ BOOLEAN CGameSprite::DoAIUpdate(BOOLEAN active, LONG counter)
 // 0x723B20
 void CGameSpriteLastUpdate::Initialize(BOOL bFullUpdateRequired)
 {
-    // TODO: Incomplete.
+    // TODO: Incomplete. The original also clears the update's other members
+    // (0x723B20-0x723BD8), which CGameSpriteLastUpdate does not declare.
+    m_bFullUpdateRequired = bFullUpdateRequired;
 }
 
 // 0x723BF0
@@ -13374,10 +13388,19 @@ SHORT CGameSprite::ExecuteAction()
         returnValue = ACTION_ERROR;
         goto done;
     case 105:
-        // AttackOneRound
-        // TODO: 0x72A094-0x72A0E7 not ported (CGameSprite_Attack).
-        returnValue = ACTION_ERROR;
-        goto done;
+        // AttackOneRound (0x72A094-0x72A0E7): Attack's case without its
+        // timing counters and without a party member's fallback target;
+        // Attack ends the action after one round (0x737EF0).
+        pTarget = GetTargetShareType(CGameObject::TYPE_SPRITE);
+        bShare = TRUE;
+        if (pTarget != NULL
+            && (m_baseStats.m_flags & 0x100000) == 0
+            && pTarget->GetAIType().m_nEnemyAlly <= CAIObjectType::EA_GOODCUTOFF) {
+            m_baseStats.m_flags |= 0x100000;
+        }
+
+        returnValue = Attack(static_cast<CGameSprite*>(pTarget));
+        goto release;
     case 107:
         // MoveToOffset (0x72A0E7-0x72A197)
         if (m_interrupt) {
@@ -13416,9 +13439,9 @@ SHORT CGameSprite::ExecuteAction()
         returnValue = ACTION_ERROR;
         goto done;
     case 119:
-        // DropInventory
-        // TODO: 0x72A764-0x72A787 not ported (0x754EE0).
-        returnValue = ACTION_ERROR;
+        // DropInventory (0x72A764-0x72A787): everything droppable, no
+        // exception.
+        returnValue = DropInventory(FALSE, CString(""));
         goto done;
     case 124:
         // Berserk
@@ -13512,9 +13535,8 @@ SHORT CGameSprite::ExecuteAction()
         returnValue = ACTION_ERROR;
         goto done;
     case 174:
-        // EquipRanged
-        // TODO: 0x72AE54-0x72AE64 not ported (0x75E150).
-        returnValue = ACTION_ERROR;
+        // EquipRanged (0x72AE54-0x72AE64)
+        returnValue = EquipRanged();
         goto done;
     case 175:
         // SetLeavePartyDialogFile
@@ -13690,9 +13712,15 @@ SHORT CGameSprite::ExecuteAction()
         returnValue = ACTION_ERROR;
         goto done;
     case 299:
-        // EquipWeapon
-        // TODO: 0x72AE1F-0x72AE43 not ported (0x75E150).
-        returnValue = ACTION_ERROR;
+        // EquipWeapon (0x72AE1F-0x72AE43): a sprite holding nothing or its
+        // fists (00FIST) takes its best ranged weapon; one with a weapon is
+        // done.
+        if (m_equipment.m_items[m_equipment.m_selectedWeapon] != NULL
+            && !(m_equipment.m_items[m_equipment.m_selectedWeapon]->cResRef == "00FIST")) {
+            returnValue = ACTION_DONE;
+            goto done;
+        }
+        returnValue = EquipRanged();
         goto done;
     case 300:
         // JumpToSavedLocation (0x729BA8-0x729BDE)
@@ -21943,7 +21971,202 @@ BOOL CGameSprite::sub_7567F0(CSpell* pSpell, const CPoint& ptTarget, BYTE nClass
 // 0x756930
 void CGameSprite::sub_756930(CItem* pItem, CItem* pLauncher)
 {
-    // TODO: Incomplete.
+    if ((m_derivedStats.m_generalState & STATE_SILENCED) != 0) {
+        return;
+    }
+
+    CString sSound("");
+    CString sCandidate;
+    CString sEntry;
+    sEntry = "";
+    INT nEntryFrame = 0;
+
+    // The creature's own swing sounds for the sequence (its INI's att1 to
+    // att4), one at random, the next one when it is the one played last.
+    if (field_70FB) {
+        // NOTE: Inlined CGameAnimation getter.
+        // __FILE__: .\Include\ObjAnimation.h
+        // __LINE__: 2118
+        UTIL_ASSERT(m_animation.m_animation != NULL);
+
+        CList<CGameSpriteSoundEntry, CGameSpriteSoundEntry>* pList;
+        switch (m_animation.m_nSequence) {
+        case CGAMESPRITE_SEQ_ATTACK_SLASH:
+            pList = &field_72F0;
+            break;
+        case CGAMESPRITE_SEQ_ATTACK_BACKSLASH:
+            pList = &field_730C;
+            break;
+        case CGAMESPRITE_SEQ_ATTACK_JAB:
+            pList = &field_7328;
+            break;
+        default:
+            pList = &field_7344;
+            break;
+        }
+
+        INT nCount = pList->GetCount();
+        if (nCount != 0) {
+            INT nIndex = rand() % nCount;
+
+            // NOTE: The original walks the list itself; an index out of the
+            // list (never) dereferences NULL.
+            const CGameSpriteSoundEntry& entry = pList->GetAt(pList->FindIndex(nIndex));
+            sEntry = entry.field_0;
+            nEntryFrame = entry.field_4;
+
+            if (strcmp(sEntry, field_7408) != 0) {
+                field_7408 = sEntry;
+                field_740C = nEntryFrame;
+            } else if (nIndex == nCount - 1) {
+                const CGameSpriteSoundEntry& first = pList->GetHead();
+                field_7408 = first.field_0;
+                field_740C = first.field_4;
+            } else {
+                const CGameSpriteSoundEntry& next = pList->GetAt(pList->FindIndex(nIndex + 1));
+                field_7408 = next.field_0;
+                field_740C = next.field_4;
+            }
+            return;
+        }
+    }
+
+    // A weapon's swing sound: "Sw_", its kind and a number at random (the
+    // next one when it is the one played last). NOTE: The original writes
+    // the numbers below 10 itself and calls _itoa (0x7F79D7) for the others,
+    // which no count here reaches.
+    auto twoDigits = [&](const char* szKind, INT nSounds) {
+        sSound += szKind;
+        INT nNumber = rand() % nSounds;
+        char szNumber[3] = { '0', static_cast<char>('1' + nNumber), '\0' };
+        sCandidate = sSound;
+        sCandidate += szNumber;
+        if (strcmp(sCandidate, field_7408) == 0) {
+            if (nNumber == nSounds - 1) {
+                szNumber[1] = '1';
+            } else {
+                szNumber[1] = static_cast<char>('1' + nNumber + 1);
+            }
+            sSound += szNumber;
+        } else {
+            sSound = sCandidate;
+        }
+    };
+    auto oneDigit = [&](const char* szKind, INT nSounds) {
+        sSound += szKind;
+        INT nNumber = rand() % nSounds;
+        char szNumber[3] = { static_cast<char>('0' + nNumber), '\0', '\0' };
+        sCandidate = sSound;
+        sCandidate += szNumber;
+        if (strcmp(sCandidate, field_7408) == 0) {
+            if (nNumber == nSounds - 1) {
+                szNumber[0] = '0';
+            } else {
+                szNumber[0] = static_cast<char>('0' + nNumber + 1);
+            }
+            sSound += szNumber;
+        } else {
+            sSound = sCandidate;
+        }
+    };
+
+    BOOL bCreatureSound = FALSE;
+    const CResRef& resRef = pItem->GetResRef();
+    if (resRef == "WYVERN1") {
+        sSound = "WYVER05";
+    } else if (resRef == "WYVERN2") {
+        sSound = "WYVER06";
+    } else if (resRef == "WOLFWI1") {
+        sSound = "WWOLF07";
+    } else if (resRef == "WOLFWI2") {
+        sSound = "WWOLF06";
+    } else {
+        WORD nItemType = pItem->GetItemType();
+        if (pLauncher != NULL) {
+            nItemType = pLauncher->GetItemType();
+        }
+
+        if (nItemType == 0) {
+            nItemType = 20;
+        }
+
+        sSound = "Sw_";
+
+        switch (nItemType) {
+        case 15:
+            twoDigits("Ms", 5);
+            break;
+        case 16:
+        case 17:
+        case 22:
+        case 29:
+            twoDigits("Sm", 7);
+            break;
+        case 18:
+            twoDigits("Slg", 5);
+            break;
+        case 19:
+        case 20:
+        case 57:
+        case 69:
+            twoDigits("Swd", 5);
+            break;
+        case 21:
+        case 25:
+        case 26:
+        case 30:
+        case 44:
+            twoDigits("Lg", 6);
+            break;
+        case 23:
+            oneDigit("Flal", 5);
+            break;
+        case 24:
+        case 28:
+            oneDigit("Fist", 3);
+            break;
+        case 27:
+            oneDigit("Xbow", 5);
+            break;
+        default:
+            bCreatureSound = TRUE;
+            break;
+        }
+    }
+
+    // No weapon sound, or fists: the creature's sound set has the sound of
+    // the attack sequence.
+    CString sPrefix = sSound.Left(7);
+    if (bCreatureSound || strcmp(sPrefix, "Sw_Fist") == 0) {
+        // NOTE: Inlined CGameAnimation getter.
+        // __FILE__: .\Include\ObjAnimation.h
+        // __LINE__: 2118
+        UTIL_ASSERT(m_animation.m_animation != NULL);
+
+        INT nSpeech = -1;
+        switch (m_animation.m_nSequence) {
+        case CGAMESPRITE_SEQ_ATTACK_SLASH:
+            nSpeech = 40;
+            break;
+        case CGAMESPRITE_SEQ_ATTACK_BACKSLASH:
+            nSpeech = 41;
+            break;
+        case CGAMESPRITE_SEQ_ATTACK_JAB:
+            nSpeech = 42;
+            break;
+        }
+
+        if (nSpeech != -1 && m_baseStats.m_speech[nSpeech] != -1) {
+            STR_RES strRes;
+            g_pBaldurChitin->GetTlkTable().Fetch(m_baseStats.m_speech[nSpeech], strRes);
+            strRes.cSound.GetResRef().CopyToString(sSound);
+        }
+    }
+
+    if (strcmp(sSound, "") != 0) {
+        field_7408 = sSound;
+        field_740C = 0;
+    }
 }
 
 // 0x7579C0
@@ -22316,9 +22539,8 @@ BOOL CGameSprite::CheckIfUsedUp(SHORT nSlot, SHORT nAbility)
             && (m_derivedStats.m_generalState & STATE_CHARMED) == 0) {
             sub_726810(m_nWeaponSet);
         } else {
-            // TODO: 0x75DAFC calls CGameSprite 0x75E150 (not ported; outside
-            // this stream's grant) for a creature outside the party or
-            // charmed.
+            // A creature outside the party or charmed (0x75DAFA-0x75DB01).
+            EquipRanged();
         }
         break;
     }
@@ -22338,13 +22560,126 @@ BOOL CGameSprite::CheckIfUsedUp(SHORT nSlot, SHORT nAbility)
 // 0x75DFD0
 SHORT CGameSprite::EquipMostDamagingMelee()
 {
-    // TODO: EquipMostDamagingMelee 0x75DFD0 is not ported. Unless the magic
-    // weapon slot (42) holds an item (then ACTION_ERROR), the original
-    // selects the weapon set (slots 43-50) whose melee ability does the most
-    // damage (dice count times size plus bonus) through sub_726810
-    // (0x75E0B4), or the fist (SelectWeaponAbility, 0x75E09F), and returns
-    // ACTION_DONE. Ours selects nothing. Listed in docs/followups.md.
-    return ACTION_ERROR;
+    if (m_equipment.m_items[42] != NULL) {
+        return ACTION_ERROR;
+    }
+
+    // The weapon set (slots 43-50) whose melee ability (type byte 1) does the most
+    // damage, dice count times dice size plus the bonus, a SHORT; a later
+    // one wins a tie, and nothing better than 0 counts.
+    SHORT nBestSlot = -1;
+    SHORT nBestAbility = -1;
+    SHORT nBestDamage = 0;
+    for (INT nSet = 0; nSet < 8; nSet++) {
+        CItem* pItem = m_equipment.m_items[CGameSpriteEquipment::SLOT_WEAPON + nSet];
+        if (pItem == NULL) {
+            continue;
+        }
+
+        pItem->Demand();
+        for (INT nAbility = 0; nAbility < pItem->GetAbilityCount(); nAbility++) {
+            const ITEM_ABILITY* pAbility = pItem->GetAbility(nAbility);
+            if (pAbility != NULL && (pAbility->type & 0xFF) == 1) {
+                SHORT nDamage = static_cast<SHORT>(pAbility->damageDiceCount * pAbility->damageDice + pAbility->damageDiceBonus);
+                if (nDamage >= nBestDamage) {
+                    nBestDamage = nDamage;
+                    nBestAbility = static_cast<SHORT>(nAbility);
+                    nBestSlot = static_cast<SHORT>(CGameSpriteEquipment::SLOT_WEAPON + nSet);
+                }
+            }
+        }
+        pItem->Release();
+    }
+
+    if (nBestSlot == -1 && nBestAbility == -1) {
+        SelectWeaponAbility(CGameSpriteEquipment::SLOT_FIST, 0, 1, 1);
+    } else {
+        sub_726810(static_cast<BYTE>((nBestSlot - CGameSpriteEquipment::SLOT_WEAPON) / 2));
+    }
+
+    // A PC that leads the party gets its action bar redrawn.
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    if (IcewindMisc::IsPC(this) == TRUE
+        && pGame->m_group.m_memberList.GetCount() != 0) {
+        LONG* pList = pGame->m_group.GetGroupList();
+        LONG nLeader = pList[0];
+        delete[] pList;
+        if (nLeader == m_id) {
+            pGame->GetButtonArray()->UpdateState();
+        }
+    }
+
+    return ACTION_DONE;
+}
+
+// The best ranged weapon (EquipRanged and, for a sprite holding its fists,
+// EquipWeapon): unless the magic weapon slot holds an item (ACTION_ERROR).
+// A party member that already holds a ranged ability keeps it; otherwise
+// the first quiver item (slots 11-14) whose ranged ability fits a launcher
+// selects that launcher's weapon set, else the first weapon set (slots
+// 43-50) with a ranged ability that needs no launcher, else the most
+// damaging melee weapon. ACTION_DONE.
+//
+// 0x75E150
+SHORT CGameSprite::EquipRanged()
+{
+    if (m_equipment.m_items[42] != NULL) {
+        return ACTION_ERROR;
+    }
+
+    if (g_pBaldurChitin->GetObjectGame()->GetCharacterPortraitNum(m_id) != -1) {
+        // NOTE: The original demands and releases the selected weapon
+        // without testing it for NULL; the selected slot always holds one
+        // (the fist at least).
+        CItem* pSelected = m_equipment.m_items[m_equipment.m_selectedWeapon];
+        if (pSelected != NULL) {
+            pSelected->Demand();
+            const ITEM_ABILITY* pAbility = pSelected->GetAbility(m_equipment.m_selectedWeaponAbility);
+            if (pAbility != NULL && (pAbility->type & 0xFF) == 2) {
+                pSelected->Release();
+                return ACTION_DONE;
+            }
+            pSelected->Release();
+        }
+    }
+
+    for (INT nQuiver = 0; nQuiver < 4; nQuiver++) {
+        CItem* pAmmo = m_equipment.m_items[CGameSpriteEquipment::SLOT_AMMO + nQuiver];
+        if (pAmmo == NULL) {
+            continue;
+        }
+
+        pAmmo->Demand();
+        const ITEM_ABILITY* pAbility = pAmmo->GetAbility(0);
+        if (pAbility != NULL && (pAbility->type & 0xFF) == 2 && CheckLauncherType(pAbility, NULL)) {
+            SHORT nLauncherSlot;
+            if (GetLauncher(pAbility, nLauncherSlot) != NULL) {
+                sub_726810(static_cast<BYTE>((nLauncherSlot - CGameSpriteEquipment::SLOT_WEAPON) / 2));
+            }
+            pAmmo->Release();
+            return ACTION_DONE;
+        }
+        pAmmo->Release();
+    }
+
+    for (INT nSet = 0; nSet < 8; nSet++) {
+        CItem* pWeapon = m_equipment.m_items[CGameSpriteEquipment::SLOT_WEAPON + nSet];
+        if (pWeapon == NULL) {
+            continue;
+        }
+
+        pWeapon->Demand();
+        const ITEM_ABILITY* pAbility = pWeapon->GetAbility(0);
+        if (pAbility != NULL && (pAbility->type & 0xFF) == 2 && CheckLauncherType(pAbility, NULL)) {
+            sub_726810(static_cast<BYTE>(nSet / 2));
+            pWeapon->Release();
+            return ACTION_DONE;
+        }
+        pWeapon->Release();
+    }
+
+    EquipMostDamagingMelee();
+    return ACTION_DONE;
 }
 
 // 0x75E330
@@ -22373,11 +22708,6 @@ SHORT CGameSprite::sub_75E330(CItem* pLauncher, BOOL bEquipMelee)
 
     if (static_cast<SHORT>(nBest) == -1) {
         if (bEquipMelee == TRUE) {
-            // TODO: EquipMostDamagingMelee (0x75DFD0) is still a stub that
-            // returns ACTION_ERROR. The original picks the best melee weapon
-            // here (and re-enters sub_726810 at 0x75E0B4); ours equips
-            // nothing, so a non-PC with a launcher and no fitting ammunition
-            // keeps the launcher. Listed in docs/followups.md.
             EquipMostDamagingMelee();
             return CGameAIBase::ACTION_DONE;
         }
@@ -24130,6 +24460,32 @@ BOOL CGameSprite::sub_763200(UINT nFeatNumber, INT a2)
     case CGAMESPRITE_FEAT_MERCANTILE_BACKGROUND:
         // TODO: Incomplete.
         return FALSE;
+    case CGAMESPRITE_FEAT_RESIST_POISON:
+        // A half-orc, or a dwarf of subrace 2 (0x7636E9), of character level
+        // 1.
+        if (!(m_typeAI.m_nRace == CAIOBJECTTYPE_R_DWARF && m_typeAI.m_nSubRace == 2)
+            && m_typeAI.m_nRace != CAIOBJECTTYPE_R_HALF_ORC) {
+            return FALSE;
+        }
+        if (1) {
+            // Character level 1: the levels of the classes in the type's
+            // class mask add up to 1.
+            DWORD dwMask = GetAIType().m_nClassMask & 0xFFF;
+            if (dwMask == 0) {
+                return FALSE;
+            }
+
+            INT nLevels = 0;
+            DWORD dwBit = 1;
+            for (INT nClass = 0; nClass < 11 && dwBit <= 0xFFF; nClass++) {
+                if ((dwBit & dwMask) != 0) {
+                    nLevels += m_baseStats.m_classLevels[nClass];
+                }
+                dwBit <<= 1;
+            }
+
+            return nLevels == 1;
+        }
     case CGAMESPRITE_FEAT_SIMPLE_CROSSBOW:
     case CGAMESPRITE_FEAT_SIMPLE_MACE:
     case CGAMESPRITE_FEAT_SIMPLE_MISSILE:
@@ -24137,8 +24493,29 @@ BOOL CGameSprite::sub_763200(UINT nFeatNumber, INT a2)
     case CGAMESPRITE_FEAT_SIMPLE_SMALLBLADE:
         return GetFeatValue(nFeatNumber) != 3 || m_baseStats.m_fighterLevel >= 4;
     case CGAMESPRITE_FEAT_SNAKE_BLOOD:
-        // TODO: Incomplete.
-        return FALSE;
+        // A human (0x7637AE) of character level 1.
+        if (m_typeAI.m_nRace != CAIOBJECTTYPE_R_HUMAN) {
+            return FALSE;
+        }
+        if (1) {
+            // Character level 1: the levels of the classes in the type's
+            // class mask add up to 1.
+            DWORD dwMask = GetAIType().m_nClassMask & 0xFFF;
+            if (dwMask == 0) {
+                return FALSE;
+            }
+
+            INT nLevels = 0;
+            DWORD dwBit = 1;
+            for (INT nClass = 0; nClass < 11 && dwBit <= 0xFFF; nClass++) {
+                if ((dwBit & dwMask) != 0) {
+                    nLevels += m_baseStats.m_classLevels[nClass];
+                }
+                dwBit <<= 1;
+            }
+
+            return nLevels == 1;
+        }
     case CGAMESPRITE_FEAT_STUNNING_FIST:
         return (nDEX >= 13 && nWIS >= 13 && m_baseStats.m_attackBase >= 8)
             || m_baseStats.m_monkLevel > 0;
@@ -27314,4 +27691,445 @@ BOOL CGameSprite::sub_718390(const CResRef& cResRef, BYTE nClass, DWORD nSpecial
     cSpell.Release();
 
     return bResult;
+}
+
+// The death of a creature, before CGameEffectDeath (0x4AB510) lays it down:
+// it stops being bumped, a visible monster and an infravision source, and
+// on the host its death is counted in global variables, each set on every
+// machine through a CMessageSetVariable (vtable 0x84882C) with the scope
+// GLOBAL:
+// - <script name>_DEAD = 1 when the creature's file asks for it (base stats
+//   +0x295);
+// - TEAM_<n>_ENEMY = 1 for its teams (sub_6F50A0);
+// - KILL_<race>_CNT + 1 when the file asks for it (base stats +0x296), the
+//   race named by GetRaceString;
+// - the file's death variable (base stats +0x2A2, 32 characters) = 1;
+// - the file's kill variables (base stats +0x2C2, 32 characters, "A:B",
+//   upper case) + 1 each.
+// A variable not yet in the game's table is added with the value.
+//
+// 0x6F5330
+void CGameSprite::sub_6F5330()
+{
+    if (m_bBumped) {
+        m_ptBumpedFrom.x = -1;
+        m_bBumped = FALSE;
+        m_ptBumpedFrom.y = -1;
+    }
+
+    if (m_bVisibleMonster) {
+        m_bVisibleMonster = FALSE;
+        m_pArea->m_nVisibleMonster--;
+    }
+
+    if (m_bInfravisionOn) {
+        m_bInfravisionOn = FALSE;
+        m_pArea->m_nInfravision--;
+    }
+
+    // NOTE: Compared with 1 (`cmp al,0x1` at 0x6F53B7).
+    if (g_pChitin->cNetwork.m_bIsHost != TRUE) {
+        return;
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+    char szName[SCRIPTNAME_SIZE + 1];
+    memcpy(szName, &(m_baseStats.field_295[0xD]), SCRIPTNAME_SIZE);
+    szName[SCRIPTNAME_SIZE] = '\0';
+    CString sDeathVariable(szName);
+    sDeathVariable.TrimLeft();
+    sDeathVariable.TrimRight();
+
+    memcpy(szName, &(m_baseStats.field_295[0x2D]), SCRIPTNAME_SIZE);
+    szName[SCRIPTNAME_SIZE] = '\0';
+    CString sKillVariables(szName);
+    sKillVariables.TrimLeft();
+    sKillVariables.TrimRight();
+
+    CString sName;
+    CString sScope("GLOBAL");
+
+    // The variable named sName set to 1, or incremented, then the message.
+    auto SetVariable = [&](BOOL bIncrement) {
+        LONG nValue;
+        CVariable* pVariable = pGame->GetVariables()->FindKey(sName);
+        if (pVariable != NULL) {
+            if (bIncrement) {
+                pVariable->m_intValue++;
+            } else {
+                pVariable->m_intValue = 1;
+            }
+            nValue = pVariable->m_intValue;
+        } else {
+            CVariable var;
+            var.SetName(sName);
+            var.m_intValue = 1;
+            pGame->m_variables.AddKey(var);
+            nValue = var.m_intValue;
+        }
+
+        CMessage* message = new CMessageSetVariable(sScope, sName, nValue, m_id, m_id);
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+    };
+
+    if (m_baseStats.field_295[0] != 0) {
+        sName = m_scriptName;
+        sName += "_DEAD";
+        SetVariable(FALSE);
+    }
+
+    sub_6F50A0();
+
+    if (m_baseStats.field_295[1] != 0) {
+        sName = "KILL_";
+        sName += GetRaceString(GetAIType().m_nRace);
+        sName += "_CNT";
+        SetVariable(TRUE);
+    }
+
+    if (strcmp(sDeathVariable, "") != 0) {
+        sName = sDeathVariable;
+        SetVariable(FALSE);
+    }
+
+    if (strcmp(sKillVariables, "") != 0) {
+        CString sFirst;
+        CString sSecond;
+        CString sUpper(sKillVariables);
+        sUpper.MakeUpper();
+
+        INT nColon = sUpper.Find(":");
+        if (nColon >= 0) {
+            sFirst = sUpper.Left(nColon);
+            sSecond = sUpper.Right(sUpper.GetLength() - nColon - 1);
+        } else {
+            sFirst = sUpper;
+        }
+
+        if (strcmp(sFirst, "") != 0) {
+            sName = sFirst;
+            SetVariable(TRUE);
+        }
+
+        if (strcmp(sSecond, "") != 0) {
+            sName = sSecond;
+            SetVariable(TRUE);
+        }
+    }
+
+    // NOTE: Only a multiplayer guest gets here past the host test above, so
+    // this never runs (0x6F5F3B).
+    if (g_pChitin->cNetwork.GetServiceProvider() != CNetwork::SERV_PROV_NULL
+        && pGame->GetCharacterPortraitNum(m_id) != -1
+        && g_pChitin->cNetwork.m_bIsHost == FALSE
+        && g_pBaldurChitin->m_pEngineWorld != g_pBaldurChitin->pActiveEngine) {
+        g_pBaldurChitin->pActiveEngine->SelectEngine(g_pBaldurChitin->m_pEngineWorld);
+    }
+}
+
+// The race's name in the KILL_<race>_CNT variables: one string per race
+// value (the jump table 0x72232C by the byte table 0x722414), none for the
+// others.
+//
+// 0x722090
+CString CGameSprite::GetRaceString(BYTE nRace)
+{
+    CString sRace;
+
+    switch (nRace) {
+    case 1:
+        sRace = "HUMAN";
+        break;
+    case 2:
+        sRace = "ELF";
+        break;
+    case 3:
+        sRace = "HALF_ELF";
+        break;
+    case 4:
+        sRace = "DWARF";
+        break;
+    case 5:
+        sRace = "HALFLING";
+        break;
+    case 6:
+        sRace = "GNOME";
+        break;
+    case 7:
+        sRace = "HALF_ORC";
+        break;
+    case 101:
+        sRace = "ANKHEG";
+        break;
+    case 102:
+        sRace = "BASILISK";
+        break;
+    case 103:
+        sRace = "BEAR";
+        break;
+    case 104:
+        sRace = "CARRIONCRAWLER";
+        break;
+    case 105:
+        sRace = "DOG";
+        break;
+    case 106:
+        sRace = "DOPPLEGANGER";
+        break;
+    case 107:
+        sRace = "ETTERCAP";
+        break;
+    case 108:
+        sRace = "GHOUL";
+        break;
+    case 109:
+        sRace = "GIBBERLING";
+        break;
+    case 110:
+        sRace = "GNOLL";
+        break;
+    case 111:
+        sRace = "HOBGOBLIN";
+        break;
+    case 112:
+        sRace = "KOBOLD";
+        break;
+    case 113:
+        sRace = "OGRE";
+        break;
+    case 115:
+        sRace = "SKELETON";
+        break;
+    case 116:
+        sRace = "SPIDER";
+        break;
+    case 117:
+        sRace = "WOLF";
+        break;
+    case 118:
+        sRace = "WYVERN";
+        break;
+    case 119:
+        sRace = "SLIME";
+        break;
+    case 120:
+        sRace = "FAIRY";
+        break;
+    case 150:
+        sRace = "BEETLE";
+        break;
+    case 151:
+        sRace = "CARRION_CRAWLER";
+        break;
+    case 152:
+        sRace = "ELEMENTAL";
+        break;
+    case 153:
+        sRace = "GIANT";
+        break;
+    case 154:
+        sRace = "DRAKE";
+        break;
+    case 155:
+        sRace = "GOBLIN";
+        break;
+    case 156:
+        sRace = "GOLEM";
+        break;
+    case 157:
+        sRace = "LIZARDMAN";
+        break;
+    case 158:
+        sRace = "MANTICORE";
+        break;
+    case 159:
+        sRace = "MYCONID";
+        break;
+    case 160:
+        sRace = "ORC";
+        break;
+    case 161:
+        sRace = "SALAMANDER";
+        break;
+    case 162:
+        sRace = "SHRIEKER";
+        break;
+    case 163:
+        sRace = "SVIRFNEBLIN";
+        break;
+    case 164:
+        sRace = "TANARI";
+        break;
+    case 165:
+        sRace = "TROLL";
+        break;
+    case 166:
+        sRace = "UMBERHULK";
+        break;
+    case 167:
+        sRace = "UNDEAD";
+        break;
+    case 168:
+        sRace = "YUANTI";
+        break;
+    case 174:
+        sRace = "HARPY";
+        break;
+    case 177:
+        sRace = "BEHOLDER";
+        break;
+    case 179:
+        sRace = "MINOTAUR";
+        break;
+    case 180:
+        sRace = "BUGBEAR";
+        break;
+    case 181:
+        sRace = "HOOKHORROR";
+        break;
+    case 182:
+        sRace = "DRIDER";
+        break;
+    case 183:
+        sRace = "DROW";
+        break;
+    case 184:
+        sRace = "MIND_FLAYER";
+        break;
+    case 191:
+        sRace = "SHAPESHIFTER";
+        break;
+    case 192:
+        sRace = "WILLOWISP";
+        break;
+    case 193:
+        sRace = "OTYUGH";
+        break;
+    case 255:
+        sRace = "NO_RACE";
+        break;
+    default:
+        break;
+    }
+
+    return sRace;
+}
+
+// The creature's droppable items (file flag 0x4) and its gold (as MISC07)
+// go onto its ground pile, except an item whose resref is sException; with
+// bCriticalOnly only the droppable items with file flag 0x1 drop, and every
+// other item is unequipped. The fist slot stays. When something dropped, the
+// equipment is sent on (a single player game or the owner, with the
+// connection up) and the quick weapons and quick items are emptied.
+// ACTION_ERROR when the ground pile cannot be had; ACTION_DONE otherwise.
+//
+// 0x754EE0
+SHORT CGameSprite::DropInventory(BOOLEAN bCriticalOnly, CString sException)
+{
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    BOOLEAN bGroundPile = FALSE;
+    LONG nGroundPile = CGameObjectArray::INVALID_INDEX;
+    CGameContainer* pGroundPile = NULL;
+    BYTE rc;
+
+    if (m_pArea == NULL) {
+        return ACTION_DONE;
+    }
+
+    for (SHORT nSlot = 0; nSlot < CGameSpriteEquipment::NUM_SLOT; nSlot++) {
+        if (nSlot == CGameSpriteEquipment::SLOT_FIST) {
+            continue;
+        }
+
+        CItem** ppItem = &(m_equipment.m_items[nSlot]);
+        if (*ppItem == NULL) {
+            continue;
+        }
+
+        if ((*ppItem)->GetFlagsFile() & 0x4) {
+            if (!bCriticalOnly || ((*ppItem)->GetFlagsFile() & 0x1) != 0) {
+                if (!bGroundPile) {
+                    nGroundPile = pGame->GetGroundPile(m_id);
+                    if (nGroundPile == CGameObjectArray::INVALID_INDEX) {
+                        return ACTION_ERROR;
+                    }
+
+                    rc = pGame->GetObjectArray()->GetDeny(nGroundPile,
+                        CGameObjectArray::THREAD_ASYNCH,
+                        reinterpret_cast<CGameObject**>(&pGroundPile),
+                        INFINITE);
+                    if (rc != CGameObjectArray::SUCCESS) {
+                        return ACTION_ERROR;
+                    }
+
+                    bGroundPile = TRUE;
+                }
+
+                if ((*ppItem)->cResRef != sException) {
+                    Unequip(nSlot);
+                    pGroundPile->PlaceItemInBlankSlot(*ppItem, TRUE, 0x7FFF);
+                    *ppItem = NULL;
+                }
+                continue;
+            }
+        }
+
+        if (bCriticalOnly) {
+            Unequip(nSlot);
+        }
+    }
+
+    SelectWeaponAbility(CGameSpriteEquipment::SLOT_FIST, 0, 0, 1);
+
+    if (m_baseStats.m_gold > 0) {
+        CItem* pGold = new CItem(CResRef("MISC07"), static_cast<WORD>(m_baseStats.m_gold), 0, 0, 0, 0);
+        if (pGold != NULL) {
+            if (!bGroundPile) {
+                nGroundPile = pGame->GetGroundPile(m_id);
+                if (nGroundPile == CGameObjectArray::INVALID_INDEX) {
+                    return ACTION_ERROR;
+                }
+
+                rc = pGame->GetObjectArray()->GetDeny(nGroundPile,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    reinterpret_cast<CGameObject**>(&pGroundPile),
+                    INFINITE);
+                if (rc != CGameObjectArray::SUCCESS) {
+                    return ACTION_ERROR;
+                }
+
+                bGroundPile = TRUE;
+            }
+
+            pGroundPile->PlaceItemInBlankSlot(pGold, TRUE, 0x7FFF);
+            m_baseStats.m_gold = 0;
+        }
+    }
+
+    if (!bGroundPile) {
+        return ACTION_DONE;
+    }
+
+    if ((g_pChitin->cNetwork.GetServiceProvider() == CNetwork::SERV_PROV_NULL
+            || g_pChitin->cNetwork.m_idLocalPlayer == m_remotePlayerID)
+        && g_pChitin->cNetwork.m_bConnectionEstablished == TRUE) {
+        CMessage* message = new CMessageSpriteEquipment(this, m_id, m_id);
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+    }
+
+    for (BYTE nButton = 0; nButton < 8; nButton++) {
+        SetQuickWeapon(nButton, CButtonData());
+        SetQuickWeapon(nButton, static_cast<BYTE>(0));
+    }
+
+    for (BYTE nButton = 0; nButton < 3; nButton++) {
+        SetQuickItem(nButton, CButtonData());
+    }
+
+    pGame->GetObjectArray()->ReleaseDeny(nGroundPile,
+        CGameObjectArray::THREAD_ASYNCH,
+        INFINITE);
+
+    return ACTION_DONE;
 }

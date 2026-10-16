@@ -450,8 +450,10 @@ SHORT CAIScriptFile::ParseTrigger(CString sData)
         constFile = GetConstFile(GetParameter(2, triggerIdLine));
         specifics = ParseInt(element, constFile);
 
+        // The last parameter runs to the closing bracket (0x412117-0x412156:
+        // ReadAfterChar, then Left(GetLength() - 1)).
         restOfLine = ReadAfterChar(restOfLine, ',');
-        element = ReadToChar(restOfLine, ',');
+        element = restOfLine.Left(restOfLine.GetLength() - 1);
 
         if (element.IsEmpty()) {
             // FIXME: Typo - should be "Third".
