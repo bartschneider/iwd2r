@@ -1078,8 +1078,10 @@ void CGameContainer::MarshalMessage(BYTE** pData, DWORD* dwSize)
     }
 
     pItems = NULL;
+    // The count starts at 0 before the list is looked at (0x480D09): an
+    // empty pile (a new ground pile) marshals no items.
+    nItems = 0;
     if (m_lstItems.GetCount() > 0) {
-        nItems = 0;
         pos = m_lstItems.GetHeadPosition();
         while (pos != NULL) {
             tempItem = m_lstItems.GetNext(pos);
