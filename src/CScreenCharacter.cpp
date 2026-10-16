@@ -10,7 +10,6 @@
 #include "CIcon.h"
 #include "CInfCursor.h"
 #include "CInfGame.h"
-#include "CInfGameItemUse.h"
 #include "CItem.h"
 #include "CMessage.h"
 #include "CMultiplayerSettings.h"
@@ -6705,8 +6704,7 @@ void CScreenCharacter::CheckDropSlot(INT nSlot)
     if (nSlot < 43
         || nSlot > 50
         || nSlot - 43 < pGame->GetNumQuickWeaponSlots(static_cast<SHORT>(m_nSelectedCharacter))) {
-        if (CInfGame_CheckIfPlayerInPortraitSlotCanUseItem(pGame,
-                static_cast<SHORT>(m_nSelectedCharacter),
+        if (pGame->CheckIfPlayerInPortraitSlotCanUseItem(static_cast<SHORT>(m_nSelectedCharacter),
                 pItem,
                 &error,
                 TRUE)) {
@@ -6762,8 +6760,7 @@ void CScreenCharacter::CheckDropSlot(INT nSlot)
     }
 
     pItem = NULL;
-    if (CInfGame_SwapItemPersonal(pGame,
-            static_cast<SHORT>(m_nSelectedCharacter),
+    if (pGame->SwapItemPersonal(static_cast<SHORT>(m_nSelectedCharacter),
             static_cast<SHORT>(nSlot),
             pItem,
             error,
@@ -6778,7 +6775,7 @@ void CScreenCharacter::CheckDropSlot(INT nSlot)
             FALSE,
             TRUE)) {
         LONG nGroundPile = pGame->GetGroundPile(nCharacterId);
-        CInfGame_SwapItemGround(pGame, nGroundPile, 0x7FFF, pItem, error, 0xFFFF, FALSE);
+        pGame->SwapItemGround(nGroundPile, 0x7FFF, pItem, error, 0xFFFF, FALSE);
 
         // NOTE: The original sends a default-constructed CItem, not the item
         // just dropped (SwapItemGround above already put it on the pile).

@@ -7,10 +7,8 @@
 #include "CGameButtonList.h"
 #include "CGameEffect.h"
 #include "CGameSprite.h"
-#include "CGameSpriteButtonLists.h"
 #include "CIcon.h"
 #include "CInfGame.h"
-#include "CInfGameItemUse.h"
 #include "CItem.h"
 #include "CMessage.h"
 #include "CScreenWorld.h"
@@ -49,333 +47,6 @@ static const COLORREF dword_84EBB0 = RGB(255, 255, 0);
 //
 // NOTE: `CAIAction::HIDE`, not in our CAIAction.h.
 static const SHORT CAIACTION_HIDE = 18;
-
-// 0x8B4EB0 (entries 0x35 to 0x173)
-//
-// NOTE: The keymap's spell resrefs. CInfGame.cpp keeps the same table
-// file-static (`off_8B4F84`, from entry 0x35 of the original's table at
-// 0x8B4EB0); this copy serves UpdateButtons' hot key lookup.
-static const char* const KEYMAP_SPELLS[] = {
-    "SPPR101",
-    "SPPR102",
-    "SPPR103",
-    "SPPR105",
-    "SPPR106",
-    "SPPR107",
-    "SPPR108",
-    "SPPR109",
-    "SPPR110",
-    "SPPR111",
-    "SPPR112",
-    "SPPR113",
-    "SPPR114",
-    "SPPR115",
-    "SPPR116",
-    "SPPR117",
-    "SPPR201",
-    "SPPR202",
-    "SPPR203",
-    "SPPR204",
-    "SPPR205",
-    "SPPR206",
-    "SPPR207",
-    "SPPR208",
-    "SPPR210",
-    "SPPR211",
-    "SPPR212",
-    "SPPR213",
-    "SPPR214",
-    "SPPR215",
-    "SPPR216",
-    "SPPR217",
-    "SPPR218",
-    "SPPR219",
-    "SPPR220",
-    "SPPR221",
-    "SPPR222",
-    "SPPR301",
-    "SPPR302",
-    "SPPR303",
-    "SPPR304",
-    "SPPR305",
-    "SPPR306",
-    "SPPR307",
-    "SPPR308",
-    "SPPR309",
-    "SPPR310",
-    "SPPR311",
-    "SPPR312",
-    "SPPR313",
-    "SPPR314",
-    "SPPR315",
-    "SPPR316",
-    "SPPR318",
-    "SPPR319",
-    "SPPR320",
-    "SPPR322",
-    "SPPR323",
-    "SPPR324",
-    "SPPR325",
-    "SPPR326",
-    "SPPR327",
-    "SPPR328",
-    "SPPR401",
-    "SPPR402",
-    "SPPR403",
-    "SPPR404",
-    "SPPR405",
-    "SPPR406",
-    "SPPR407",
-    "SPPR408",
-    "SPPR409",
-    "SPPR410",
-    "SPPR411",
-    "SPPR414",
-    "SPPR415",
-    "SPPR416",
-    "SPPR417",
-    "SPPR418",
-    "SPPR420",
-    "SPPR422",
-    "SPPR423",
-    "SPPR424",
-    "SPPR425",
-    "SPPR426",
-    "SPPR427",
-    "SPPR428",
-    "SPPR429",
-    "SPPR501",
-    "SPPR502",
-    "SPPR503",
-    "SPPR504",
-    "SPPR507",
-    "SPPR508",
-    "SPPR510",
-    "SPPR511",
-    "SPPR512",
-    "SPPR513",
-    "SPPR514",
-    "SPPR515",
-    "SPPR516",
-    "SPPR517",
-    "SPPR518",
-    "SPPR519",
-    "SPPR520",
-    "SPPR521",
-    "SPPR522",
-    "SPPR523",
-    "SPPR524",
-    "SPPR602",
-    "SPPR605",
-    "SPPR606",
-    "SPPR607",
-    "SPPR608",
-    "SPPR609",
-    "SPPR610",
-    "SPPR611",
-    "SPPR612",
-    "SPPR613",
-    "SPPR614",
-    "SPPR615",
-    "SPPR616",
-    "SPPR702",
-    "SPPR704",
-    "SPPR705",
-    "SPPR707",
-    "SPPR709",
-    "SPPR712",
-    "SPPR714",
-    "SPPR715",
-    "SPPR716",
-    "SPPR717",
-    "SPPR718",
-    "SPPR719",
-    "SPPR720",
-    "SPPR721",
-    "SPPR722",
-    "SPPR723",
-    "SPPR724",
-    "SPPR725",
-    "SPPR726",
-    "SPPR727",
-    "SPPR728",
-    "SPPR729",
-    "SPWI101",
-    "SPWI102",
-    "SPWI103",
-    "SPWI104",
-    "SPWI105",
-    "SPWI107",
-    "SPWI108",
-    "SPWI112",
-    "SPWI113",
-    "SPWI114",
-    "SPWI115",
-    "SPWI116",
-    "SPWI117",
-    "SPWI118",
-    "SPWI119",
-    "SPWI120",
-    "SPWI121",
-    "SPWI122",
-    "SPWI201",
-    "SPWI203",
-    "SPWI205",
-    "SPWI206",
-    "SPWI207",
-    "SPWI209",
-    "SPWI210",
-    "SPWI211",
-    "SPWI212",
-    "SPWI213",
-    "SPWI214",
-    "SPWI215",
-    "SPWI217",
-    "SPWI218",
-    "SPWI219",
-    "SPWI220",
-    "SPWI221",
-    "SPWI222",
-    "SPWI223",
-    "SPWI224",
-    "SPWI225",
-    "SPWI226",
-    "SPWI227",
-    "SPWI228",
-    "SPWI302",
-    "SPWI303",
-    "SPWI304",
-    "SPWI305",
-    "SPWI306",
-    "SPWI308",
-    "SPWI309",
-    "SPWI310",
-    "SPWI311",
-    "SPWI312",
-    "SPWI313",
-    "SPWI314",
-    "SPWI316",
-    "SPWI317",
-    "SPWI318",
-    "SPWI319",
-    "SPWI320",
-    "SPWI321",
-    "SPWI322",
-    "SPWI323",
-    "SPWI401",
-    "SPWI402",
-    "SPWI404",
-    "SPWI405",
-    "SPWI406",
-    "SPWI407",
-    "SPWI408",
-    "SPWI410",
-    "SPWI411",
-    "SPWI412",
-    "SPWI413",
-    "SPWI414",
-    "SPWI417",
-    "SPWI418",
-    "SPWI419",
-    "SPWI420",
-    "SPWI421",
-    "SPWI422",
-    "SPWI423",
-    "SPWI424",
-    "SPWI425",
-    "SPWI426",
-    "SPWI427",
-    "SPWI428",
-    "SPWI501",
-    "SPWI503",
-    "SPWI504",
-    "SPWI505",
-    "SPWI507",
-    "SPWI508",
-    "SPWI509",
-    "SPWI510",
-    "SPWI511",
-    "SPWI512",
-    "SPWI513",
-    "SPWI514",
-    "SPWI515",
-    "SPWI516",
-    "SPWI517",
-    "SPWI518",
-    "SPWI519",
-    "SPWI520",
-    "SPWI521",
-    "SPWI522",
-    "SPWI523",
-    "SPWI524",
-    "SPWI525",
-    "SPWI526",
-    "SPWI601",
-    "SPWI603",
-    "SPWI605",
-    "SPWI606",
-    "SPWI607",
-    "SPWI608",
-    "SPWI609",
-    "SPWI610",
-    "SPWI611",
-    "SPWI612",
-    "SPWI613",
-    "SPWI614",
-    "SPWI615",
-    "SPWI616",
-    "SPWI617",
-    "SPWI618",
-    "SPWI619",
-    "SPWI620",
-    "SPWI621",
-    "SPWI622",
-    "SPWI623",
-    "SPWI624",
-    "SPWI626",
-    "SPWI627",
-    "SPWI628",
-    "SPWI629",
-    "SPWI630",
-    "SPWI702",
-    "SPWI703",
-    "SPWI704",
-    "SPWI705",
-    "SPWI706",
-    "SPWI707",
-    "SPWI708",
-    "SPWI709",
-    "SPWI710",
-    "SPWI711",
-    "SPWI712",
-    "SPWI713",
-    "SPWI714",
-    "SPWI715",
-    "SPWI716",
-    "SPWI717",
-    "SPWI718",
-    "SPWI719",
-    "SPWI802",
-    "SPWI803",
-    "SPWI804",
-    "SPWI805",
-    "SPWI806",
-    "SPWI807",
-    "SPWI808",
-    "SPWI809",
-    "SPWI810",
-    "SPWI902",
-    "SPWI903",
-    "SPWI905",
-    "SPWI906",
-    "SPWI907",
-    "SPWI908",
-    "SPWI909",
-    "SPWI910",
-    "SPWI911",
-    "", // NULL
-    "", // NULL
-};
 
 // 0x587960
 CInfButtonSettings::CInfButtonSettings()
@@ -489,25 +160,25 @@ CGameButtonList* CInfButtonArray::sub_587C20(INT nIndex, INT nType, BYTE& nClass
         if (bItemUsages) {
             pList = pSprite->GetItemUsages(static_cast<SHORT>(nIndex), 1, -1);
         } else {
-            pList = CGameSprite_sub_717250(pSprite, FALSE);
+            pList = pSprite->sub_717250(FALSE);
         }
         break;
     case 2:
         if (nClass == CAIOBJECTTYPE_C_CLERIC && nDomain != 0) {
-            pList = CGameSprite_GetDomainQuickButtons(pSprite, nClass, nDomain);
+            pList = pSprite->GetDomainQuickButtons(nClass, nDomain);
         } else {
-            pList = CGameSprite_GetSpellQuickButtons(pSprite, nClass);
+            pList = pSprite->GetSpellQuickButtons(nClass);
         }
         break;
     case 3:
         if (!pGame->m_cOptions.m_bQuickItemMapping || bItemUsages) {
-            pList = CGameSprite_sub_716E80(pSprite, FALSE);
+            pList = pSprite->sub_716E80(FALSE);
         } else {
             pList = pSprite->GetItemUsages(static_cast<SHORT>(nIndex + 15), 3, -1);
         }
         break;
     case 4:
-        pList = CGameSprite_GetInnateQuickButtons(pSprite);
+        pList = pSprite->GetInnateQuickButtons();
         break;
     case 5:
         pList = pSprite->GetInternalButtonList();
@@ -559,14 +230,14 @@ CGameButtonList* CInfButtonArray::sub_587DF0(const CResRef& cResRef)
             pGame->GetRuleTables().sub_546B60(pSprite, nLevel, nUnused1, nUnused2, FALSE);
             // NOTE: Unsigned compare.
             UINT nCount = static_cast<UINT>(nLevel) > dword_85BCB4 ? dword_85BCB4 : static_cast<UINT>(nLevel);
-            pList = CGameSprite_sub_717FC0(pSprite, cResRef, nCount + 1);
+            pList = pSprite->sub_717FC0(cResRef, nCount + 1);
         }
     } else if (cResRef == CGameSprite::SPIN276) {
         if (pSprite->sub_763150(CGAMESPRITE_FEAT_EXPERTISE)) {
             pGame->GetRuleTables().sub_546B60(pSprite, nLevel, nUnused2, nUnused1, FALSE);
             // NOTE: Unsigned compare.
             UINT nCount = static_cast<UINT>(nLevel) > dword_85BCB4 ? dword_85BCB4 : static_cast<UINT>(nLevel);
-            pList = CGameSprite_sub_717FC0(pSprite, cResRef, nCount + 1);
+            pList = pSprite->sub_717FC0(cResRef, nCount + 1);
         }
     }
 
@@ -2234,7 +1905,7 @@ BOOL CInfButtonArray::UpdateButtons()
             pSettings->field_1D8 = 0;
             pSettings->field_1D0 = 0;
 
-            CGameButtonList* pItems = CGameSprite_sub_716E80(pSprite, TRUE);
+            CGameButtonList* pItems = pSprite->sub_716E80(TRUE);
             if (pItems == NULL
                 || pItems->GetCount() == 0
                 || pSprite->m_derivedStats.m_bPolymorphed == TRUE) {
@@ -2655,7 +2326,7 @@ BOOL CInfButtonArray::UpdateButtons()
 
             USHORT nHotKey = 53;
             while (nHotKey < 372) {
-                if (buttonData.m_abilityId.m_res == CString(KEYMAP_SPELLS[nHotKey - 53])) {
+                if (buttonData.m_abilityId.m_res == CString(off_8B4F84[nHotKey - 53])) {
                     break;
                 }
                 nHotKey++;
@@ -3448,7 +3119,7 @@ BOOL CInfButtonArray::OnLButtonPressed(int buttonID)
                             && pButtonData->m_abilityId.m_nClass == CAIOBJECTTYPE_C_CLERIC
                             && pButtonData->m_abilityId.field_1E == 0
                             && !pButtonData->m_bDisabled) {
-                            CGameSprite_sub_716770(pSprite, pButtonData);
+                            pSprite->sub_716770(pButtonData);
                             bReady = FALSE;
                         }
                     }
@@ -3844,7 +3515,7 @@ BOOL CInfButtonArray::OnLButtonPressed(int buttonID)
         case 13:
             if (pSprite->m_derivedStats.m_nSkills[1] > 0) {
                 CButtonData buttonData;
-                CGameSprite_sub_718390(pSprite, CGameSprite::SPIN108, 0, 0, buttonData);
+                pSprite->sub_718390(CGameSprite::SPIN108, 0, 0, buttonData);
                 sub_5886A0(&buttonData, TRUE);
             }
 
@@ -4236,7 +3907,7 @@ BOOL CInfButtonArray::OnLButtonPressed(int buttonID)
         case 13:
             if (pSprite->GetDerivedStats()->m_nSkills[1] > 0) {
                 CButtonData buttonData;
-                CGameSprite_sub_718390(pSprite, CGameSprite::SPIN108, 0, 0, buttonData);
+                pSprite->sub_718390(CGameSprite::SPIN108, 0, 0, buttonData);
                 sub_5886A0(&buttonData, TRUE);
             }
             UpdateButtons();
@@ -4384,7 +4055,7 @@ BOOL CInfButtonArray::OnLButtonPressed(int buttonID)
                 && pButtonData->m_abilityId.field_1E == 0
                 && g_pBaldurChitin->GetActiveEngine()->GetShiftKey() == TRUE
                 && !pButtonData->m_bDisabled) {
-                CGameSprite_sub_716770(pSprite, pButtonData);
+                pSprite->sub_716770(pButtonData);
             } else {
                 pGame->SetState(0);
                 SetSelectedButton(*pButtonType);
