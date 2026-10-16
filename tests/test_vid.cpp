@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <ios>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -1645,5 +1646,88 @@ TEST_CASE("stencil_tile_render_balances_its_demands", "[vid]")
 
     pSmall->Release();
     pSurface->Release();
+    pDirectDraw->Release();
+}
+
+// CVidCell::BltFromFX (0x7B06E0) copies the cell's frame from the FX surface
+// to the destination, leaving the destination where the FX surface holds the
+// colour key. Mirrored (dwFlags 0x10 left-right, 0x20 up-down) it goes
+// through Blt with DDBLT_WAIT | DDBLT_KEYSRC | DDBLT_DDFX (push 0x1008800 at
+// 0x7B090F); ours left out DDBLT_KEYSRC, which copied the key over the
+// destination (fails here for 0x10, 0x20 and 0x30, checked by removing the
+// flag). Unmirrored it is a keyed BltFast. A 4 x 2 frame at (0, 0); the
+// mirrored destination rectangle is (destX, destY, width, height), as the
+// original's, so it starts at the origin here.
+TEST_CASE("cell_blt_from_fx_keeps_the_key_mirrored", "[vid]")
+{
+    ChitinScope scope;
+    CVidInf mode;
+    IDirectDraw* pDirectDraw = NULL;
+    REQUIRE(DirectDrawCreate(NULL, &pDirectDraw, NULL) == DD_OK);
+    IDirectDrawSurface* pBack = MakeSurface(pDirectDraw, 8, 4);
+    IDirectDrawSurface* pFx = MakeSurface(pDirectDraw, 8, 4);
+    constexpr DWORD kKey = 0x0000FF00;
+    constexpr DWORD kBack = 0x00ABCDEF;
+    DDCOLORKEY key = { kKey, kKey };
+    REQUIRE(pFx->SetColorKey(DDCKEY_SRCBLT, &key) == DD_OK);
+    IDirectDrawSurface* surfaces[3] = { pBack, NULL, pFx };
+    mode.m_nSurfaces = 3;
+    mode.pSurfaces = surfaces;
+    ActiveModeScope active(&mode);
+
+    // The frame in the FX surface: key pixels between colours.
+    const DWORD frame[2][4] = {
+        { 0x00000011, kKey, 0x00000033, kKey },
+        { kKey, 0x00000022, kKey, 0x00000044 },
+    };
+    auto fill = [&](UINT nSurface, auto&& pixel) {
+        DDSURFACEDESC ddsd;
+        ddsd.dwSize = sizeof(ddsd);
+        REQUIRE(mode.LockSurface(nSurface, &ddsd, CRect(0, 0, 8, 4)));
+        for (int y = 0; y < 4; ++y) {
+            for (int x = 0; x < 8; ++x) {
+                reinterpret_cast<DWORD*>(reinterpret_cast<BYTE*>(ddsd.lpSurface) + y * ddsd.lPitch)[x] = pixel(x, y);
+            }
+        }
+        mode.UnLockSurface(nSurface, ddsd.lpSurface);
+    };
+    fill(2, [&](int x, int y) { return x < 4 && y < 2 ? frame[y][x] : 0x00777777u; });
+
+    CVidCell cell;
+    FRAMEENTRY entry = {};
+    entry.nWidth = 4;
+    entry.nHeight = 2;
+    cell.m_pFrame = &entry;
+    cell.m_nFxSurface = 2;
+
+    for (const DWORD dwFlags : { 0x0u, 0x10u, 0x20u, 0x30u }) {
+        INFO("dwFlags 0x" << std::hex << dwFlags);
+        fill(0, [&](int, int) { return kBack; });
+        CHECK(cell.BltFromFX(pBack, 0, 0, CRect(0, 0, 8, 4), dwFlags));
+
+        DDSURFACEDESC ddsd;
+        ddsd.dwSize = sizeof(ddsd);
+        REQUIRE(mode.LockSurface(0, &ddsd, CRect(0, 0, 8, 4)));
+        for (int y = 0; y < 4; ++y) {
+            for (int x = 0; x < 8; ++x) {
+                DWORD expected = kBack;
+                if (x < 4 && y < 2) {
+                    const DWORD source = frame[(dwFlags & 0x20) != 0 ? 1 - y : y][(dwFlags & 0x10) != 0 ? 3 - x : x];
+                    if (source != kKey) {
+                        expected = source;
+                    }
+                }
+                INFO("x " << x << " y " << y);
+                CHECK(reinterpret_cast<DWORD*>(reinterpret_cast<BYTE*>(ddsd.lpSurface) + y * ddsd.lPitch)[x] == expected);
+            }
+        }
+        mode.UnLockSurface(0, ddsd.lpSurface);
+    }
+
+    cell.m_pFrame = NULL;
+    mode.m_nSurfaces = 0;
+    mode.pSurfaces = NULL;
+    pFx->Release();
+    pBack->Release();
     pDirectDraw->Release();
 }
