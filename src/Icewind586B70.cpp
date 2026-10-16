@@ -3,8 +3,6 @@
 #include "CBaldurChitin.h"
 #include "CGameSprite.h"
 #include "CInfGame.h"
-#include "CMessage.h"
-#include "CProjectile.h"
 #include "IcewindMisc.h"
 
 // 0x8E6400
@@ -117,54 +115,6 @@ void Icewind586B70::sub_586F20(CGameSprite* sprite1, CGameSprite* sprite2)
         mEntries[index].field_4 = sprite1->GetId();
         mEntries[index].field_8 = true;
     }
-}
-
-// 0x586DC0
-void Icewind586B70::Unsummon(CGameSprite* sprite)
-{
-    std::vector<Entry>::iterator it = mEntries.begin();
-    while (it != mEntries.end()) {
-        if (sprite->GetId() == it->field_0) {
-            break;
-        }
-        it++;
-    }
-
-    if (it == mEntries.end() || it->field_8 == true) {
-        return;
-    }
-
-    it->field_0 = 0;
-    it->field_4 = 0;
-    it->field_8 = false;
-
-    // The summoning's light goes off (spell hit 21) where the creature was.
-    CProjectile* pProjectile = CProjectile::DecodeSpellHitProjectile(21, NULL, FALSE);
-
-    CMessage* message = new CMessageFireProjectile(0x1015,
-        sprite->GetId(),
-        sprite->GetPos(),
-        0,
-        sprite->GetId(),
-        sprite->GetId(),
-        0);
-    g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
-
-    pProjectile->Fire(sprite->GetArea(),
-        sprite->GetId(),
-        sprite->GetId(),
-        sprite->GetPos(),
-        0,
-        0);
-
-    sprite->sub_75F3D0(1);
-
-    if (g_pChitin->cNetwork.GetServiceProvider() != CNetwork::SERV_PROV_NULL) {
-        message = new CMessage90(sprite->GetId(), sprite->GetId(), 1);
-        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
-    }
-
-    sprite->m_removeFromArea = TRUE;
 }
 
 // 0x586F80

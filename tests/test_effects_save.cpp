@@ -10,12 +10,10 @@
 #include "CInfGame.h"
 #include "CItem.h"
 #include "CMessage.h"
-#include "CProjectileSpellHit.h"
 #include "CScreenCreateChar.h"
 #include "CScreenWorld.h"
 #include "CSpell.h"
 #include "CVariableHash.h"
-#include "Icewind586B70.h"
 #include "IcewindCGameEffects.h"
 #include "ScreenLayout.h"
 #include "data_view.h"
@@ -1873,88 +1871,5 @@ TEST_CASE("Polymorph (0x4BB110) gives a goblin a wolf's shape", "[effects][check
     CHECK(pEnd->ApplyEffect(pGoblin) == TRUE);
     CHECK(pEnd->m_done == TRUE);
     CHECK(pEnd->m_forceRepass == TRUE);
-    ClearMessages();
-}
-
-// The summon limit (Icewind586B70): a party member's summoning takes the
-// first free of the six entries (0x586D60); Unsummon (0x586DC0) on the
-// summoned creature frees its entry, fires spell hit 21 at it (a
-// CMessageFireProjectile of type 0x1015 and the hit itself), hides its
-// animation (0x75F3D0) and marks it for removal. An entry kept by
-// 0x586F20 (its flag set) is left alone. Skill Unsummon (opcode 68,
-// 0x4B4BD0) calls it for a creature outside the party.
-TEST_CASE("Unsummon (0x586DC0) frees the summon entry and sends the creature off", "[effects][checksave][data]")
-{
-    PROBE_OR_SKIP(pProbe);
-    CGameArea* pArea = pProbe->GetArea();
-    REQUIRE(pArea != NULL);
-    Icewind586B70* pLimit = Icewind586B70::Instance();
-    pLimit->Clear();
-    CGameSprite* pGoblin = MakeGoblin();
-    pGoblin->AddToArea(pArea, CPoint(pProbe->GetPos().x - 90, pProbe->GetPos().y - 20), 0, CGameObject::LIST_FRONT);
-    CGameSprite* pOther = MakeGoblin();
-    pOther->AddToArea(pArea, CPoint(pProbe->GetPos().x - 120, pProbe->GetPos().y - 20), 0, CGameObject::LIST_FRONT);
-    pArea->SortLists();
-    ClearMessages();
-
-    // One entry each, the first free one.
-    pLimit->sub_586D60(pProbe, pGoblin);
-    pLimit->sub_586F20(pProbe, pOther);
-    CHECK(pLimit->mEntries[0].field_0 == pGoblin->GetId());
-    CHECK(pLimit->mEntries[0].field_4 == pProbe->GetId());
-    CHECK(pLimit->mEntries[0].field_8 == false);
-    CHECK(pLimit->mEntries[1].field_0 == pOther->GetId());
-    CHECK(pLimit->mEntries[1].field_8 == true);
-    CHECK(pLimit->mEntries[2].field_0 == 0);
-    CHECK(pLimit->GetCount() == 2);
-
-    std::unique_ptr<CGameEffect> pUnsummon = Decode(CGAMEEFFECT_SKILLUNSUMMON, 0, 0, pProbe->GetId());
-    iwd2r_srand(59);
-    CHECK(pUnsummon->ApplyEffect(pGoblin) == TRUE);
-    INFO("draws " << Draws(59, iwd2r_rand_state()));
-    CHECK(Draws(59, iwd2r_rand_state()) == 0);
-    CHECK(pGoblin->m_removeFromArea == TRUE);
-    CHECK(pLimit->mEntries[0].field_0 == 0);
-    CHECK(pLimit->mEntries[0].field_4 == 0);
-    CHECK(pLimit->mEntries[1].field_0 == pOther->GetId());
-
-    bool fired = false;
-    for (CMessage* pMessage : Messages()) {
-        CMessageFireProjectile* pFire = dynamic_cast<CMessageFireProjectile*>(pMessage);
-        if (pFire != nullptr) {
-            fired = true;
-            CHECK(pFire->m_projectileType == 0x1015);
-            CHECK(pFire->m_projectileTargetId == pGoblin->GetId());
-        }
-    }
-    CHECK(fired);
-    bool hit = false;
-    CGameObjectArray* pArray = g_pBaldurChitin->GetObjectGame()->GetObjectArray();
-    POSITION pos = pArea->m_lVertSortAdd.GetHeadPosition();
-    while (pos != NULL) {
-        LONG id = static_cast<LONG>(reinterpret_cast<INT_PTR>(pArea->m_lVertSortAdd.GetNext(pos)));
-        CGameObject* pObject;
-        if (pArray->GetShare(id, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) == CGameObjectArray::SUCCESS) {
-            pArray->ReleaseShare(id, CGameObjectArray::THREAD_ASYNCH, INFINITE);
-            if (dynamic_cast<CProjectileSpellHit*>(pObject) != nullptr) {
-                hit = true;
-            }
-        }
-    }
-    CHECK(hit);
-    ClearMessages();
-
-    // The kept entry: no spell hit, the entry stays (the effect still marks
-    // the creature for removal).
-    pArea->SortLists();
-    std::unique_ptr<CGameEffect> pKept = Decode(CGAMEEFFECT_SKILLUNSUMMON, 0, 0, pProbe->GetId());
-    CHECK(pKept->ApplyEffect(pOther) == TRUE);
-    CHECK(pLimit->mEntries[1].field_0 == pOther->GetId());
-    for (CMessage* pMessage : Messages()) {
-        CHECK(dynamic_cast<CMessageFireProjectile*>(pMessage) == nullptr);
-    }
-    CHECK(pArea->m_lVertSortAdd.IsEmpty());
-
-    pLimit->Clear();
     ClearMessages();
 }
