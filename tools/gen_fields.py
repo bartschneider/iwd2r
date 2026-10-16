@@ -103,14 +103,42 @@ MFC_ALIASES = {'CObList': 'CPtrList', 'CTypedPtrList': 'CPtrList',
 MEMBER_LINE = re.compile(
     r'^\s*/\*\s*(?:0x)?([0-9A-Fa-f]+)\s*\*/\s*([^;]*);')
 DECL = re.compile(r'^(.*?)\b([A-Za-z_]\w*)\s*((?:\[[^\]]*\]\s*)*)$')
-BASE = re.compile(r'\b(?:public|protected|private)\s+([A-Za-z_]\w*)'
-                  r'(?:\s*<[^<>]*>)?'
-                  r'(?:\s*/\*\s*base\s+(?:0x)?([0-9A-Fa-f]+)\s*\*/)?')
+BASE_COMMENT = re.compile(r'/\*\s*base\s+(?:0x)?([0-9A-Fa-f]+)\s*\*/')
+BASE_NAME = re.compile(r'^\s*(?:(?:public|protected|private|virtual)\s+)*'
+                       r'([A-Za-z_]\w*)')
 DEFINE = re.compile(r'^\s*#define\s+([A-Za-z_]\w*)\s+(\d+)\s*$', re.M)
 
 
 class FieldError(Exception):
     pass
+
+
+def bases(head):
+    """[(name, shift)] of the base classes in a class head ("class X :
+    public A<B, C<D>*>, public E /* base 0x4 */ {"): the text after the
+    head's colon split at the commas outside template brackets; a base's
+    name is its first identifier after the access keywords, its shift the
+    `/* base 0xNNNN */` comment in its part (0 without one)."""
+    colon = re.search(r'(?<!:):(?!:)', head)
+    if not colon:
+        return []
+    parts, depth, part = [], 0, ''
+    for ch in head[colon.end():].rstrip().rstrip('{'):
+        depth += {'<': 1, '>': -1}.get(ch, 0)
+        if ch == ',' and depth == 0:
+            parts.append(part)
+            part = ''
+        else:
+            part += ch
+    parts.append(part)
+    out = []
+    for part in parts:
+        comment = BASE_COMMENT.search(part)
+        name = BASE_NAME.match(BASE_COMMENT.sub(' ', part))
+        if name:
+            out.append((name.group(1),
+                        int(comment.group(1), 16) if comment else 0))
+    return out
 
 
 def bare(type_name):
@@ -223,13 +251,11 @@ class Headers:
         # moved by the base's `/* base 0xNNNN */` offset when the head
         # gives one; the class's own members win. A base without comments
         # adds none.
-        for base, shift in BASE.findall(head.split(':', 1)[1] if ':' in head
-                                        else ''):
+        for base, shift in bases(head):
             try:
                 inherited = self.members(base)
             except FieldError:
                 continue
-            shift = int(shift, 16) if shift else 0
             for member_name, member in inherited.items():
                 if shift:
                     member = Member(member.offset + shift, member.type_name,

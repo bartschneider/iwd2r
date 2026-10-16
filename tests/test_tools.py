@@ -3179,6 +3179,11 @@ public:
     /* 0020 */ WORD m_count;
 };
 
+class CNested : public CTypedPtrList<CPtrList, CPair<int, CResX*>*>, public CResHolder<CResX, 7> /* base 0x0010 */ {
+public:
+    /* 0030 */ BYTE m_last;
+};
+
 class CHolderNamed {
 public:
     /* 0004 */ int m_n;
@@ -3323,6 +3328,21 @@ class GenFieldsTest(unittest.TestCase):
             'count': {'base': 'CHeldToo', 'offset': '0x0020',
                       'type': 'u16'},
         })
+        # Nested template arguments: the bases split at the commas outside
+        # the brackets.
+        out = self.generate({
+            'head': {'class': 'CNested', 'member': 'm_pNodeHead'},
+            'ref': {'class': 'CNested', 'member': 'cResRef'},
+        })
+        self.assertEqual(out, {
+            'head': {'base': 'CNested', 'offset': '0x0004', 'type': 'ptr'},
+            'ref': {'base': 'CNested', 'offset': '0x0018',
+                    'type': 'resref'}})
+        self.assertEqual(gen_fields.bases(
+            'class C : public A<B, C<D, E>*>, protected F /* base 0x8 */ {'),
+            [('A', 0), ('F', 8)])
+        self.assertEqual(gen_fields.bases('class C {'), [])
+        self.assertEqual(gen_fields.bases('struct S : T {'), [('T', 0)])
         # CString: its m_pchData, the pointer to its characters.
         out = self.generate({'name': {'class': 'CHolderNamed',
                                       'member': 'm_sName.m_pchData'}})
@@ -3431,6 +3451,8 @@ class GenFieldsTest(unittest.TestCase):
         self.assertEqual(fields['load_slots']['offset'], '0x01D6')
         self.assertEqual(fields['save_slots_count']['offset'], '0x0458')
         self.assertEqual(fields['save_slots']['offset'], '0x0464')
+        self.assertEqual(fields['load_slots_size']['offset'], '0x01DA')
+        self.assertEqual(fields['save_slots_size']['offset'], '0x0468')
         for kind in ('load', 'save'):
             self.assertEqual(fields[kind + '_slot_character']['offset'],
                              '0x0304')
