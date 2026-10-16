@@ -3990,6 +3990,8 @@ void CGameArea::Unmarshal(BYTE* pArea, LONG areaSize, const CString& sName, BOOL
             // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameArea.cpp
             // __LINE__: 5421
             UTIL_ASSERT(areaSize >= 0);
+
+            m_entryPoints.AddTail(pEntryPoint);
         }
     }
 
