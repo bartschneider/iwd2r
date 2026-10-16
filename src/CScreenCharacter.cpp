@@ -5,6 +5,7 @@
 #include "CBaldurChitin.h"
 #include "CButtonData.h"
 #include "CGameAnimationType.h"
+#include "CGameEffect.h"
 #include "CGameSprite.h"
 #include "CIcon.h"
 #include "CInfCursor.h"
@@ -3441,9 +3442,839 @@ void CScreenCharacter::UpdateGeneralInformation(CUIControlTextDisplay* pText, CG
 // 0x5DE2C0
 void CScreenCharacter::UpdateEquipmentInformation(CUIControlTextDisplay* pText, CGameSprite* pSprite)
 {
-    // TODO: Incomplete. Blocked on CGameSprite 0x723EA0, 0x73CF10 and
-    // 0x73D080, on CItem 0x4E9840 and on CRuleTables::GetIterativeAttackBonus
-    // 0x547020, none on first (all but 0x723EA0 are ported on p3/combat).
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CTlkTable& tlk = g_pBaldurChitin->GetTlkTable();
+    CString sNumber;
+
+    // NOTE: The original calls it and drops the result.
+    pSprite->GetSpecialization();
+
+    CDerivedStats* pDStats = pSprite->GetDerivedStats();
+    CCreatureFileHeader* pBStats = pSprite->GetBaseStats();
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenCharacter.cpp
+    // __LINE__: 5386
+    UTIL_ASSERT(pDStats != NULL);
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenCharacter.cpp
+    // __LINE__: 5388
+    UTIL_ASSERT(pBStats != NULL);
+
+    INT nBaseAttackBonus;
+    INT nBaseAttacks;
+    INT nAttackStep;
+    pGame->GetRuleTables().sub_546B60(pSprite, nBaseAttackBonus, nBaseAttacks, nAttackStep, TRUE);
+
+    CGameSpriteEquipment* pEquipment = pSprite->GetEquipment();
+    CItem* curWeapon = NULL;
+    CItem* pLeftWeapon = NULL;
+    const ITEM_ABILITY* curAttackSecond = NULL;
+
+    // NOTE: The original tests the equipment's address.
+    if (pEquipment != NULL) {
+        curWeapon = pEquipment->m_items[pEquipment->m_selectedWeapon];
+        pLeftWeapon = pEquipment->m_items[pSprite->sub_726800() & 0xFF];
+
+        if (curWeapon != NULL) {
+            curWeapon->Demand();
+        }
+
+        if (pLeftWeapon != NULL) {
+            pLeftWeapon->Demand();
+        }
+
+        // The magic weapon slot and a shield leave no off-hand weapon.
+        if (pEquipment->m_selectedWeapon == 42
+            || (pLeftWeapon != NULL
+                && (pLeftWeapon->GetItemType() == 47
+                    || pLeftWeapon->GetItemType() == 53
+                    || pLeftWeapon->GetItemType() == 49
+                    || pLeftWeapon->GetItemType() == 41))) {
+            if (pLeftWeapon != NULL) {
+                pLeftWeapon->Release();
+            }
+            pLeftWeapon = NULL;
+        }
+
+        if (curWeapon == NULL) {
+            pSprite->SelectWeaponAbility(CGameSpriteEquipment::SLOT_FIST, 0, 0, 1);
+            curWeapon = pEquipment->m_items[pEquipment->m_selectedWeapon];
+            if (curWeapon != NULL) {
+                curWeapon->Demand();
+            }
+        }
+    }
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenCharacter.cpp
+    // __LINE__: 5425
+    UTIL_ASSERT(curWeapon != NULL);
+
+    INT nLeftWeaponMod = 0;
+    INT nLeftProficiencyMod = 0;
+    INT nLeftAbilityMod = 0;
+
+    INT nArmorPenalty = pSprite->sub_7240A0();
+    INT nShieldPenalty = pSprite->sub_724170();
+
+    const ITEM_ABILITY* curAttack = curWeapon->GetAbility(pEquipment->m_selectedWeaponAbility);
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenCharacter.cpp
+    // __LINE__: 5440
+    UTIL_ASSERT(curAttack != NULL);
+
+    INT nWeaponMod = pSprite->sub_73CAE0(curWeapon, curAttack);
+    nWeaponMod += pSprite->sub_73CC40(curWeapon, curAttack);
+
+    INT nProficiencyMod = pSprite->sub_73CA20(curWeapon, curAttack);
+    nProficiencyMod += pSprite->sub_73CF10(curWeapon, curAttack);
+    nProficiencyMod += pSprite->sub_73D080(FALSE);
+
+    INT nAbilityMod = pSprite->sub_73CB10(curWeapon, curAttack);
+
+    if (pLeftWeapon != NULL) {
+        CButtonData buttonData;
+        pSprite->GetQuickWeapon(static_cast<BYTE>(pSprite->sub_726800() - 43), buttonData);
+
+        curAttackSecond = pLeftWeapon->GetAbility(buttonData.m_abilityId.m_abilityNum);
+
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenCharacter.cpp
+        // __LINE__: 5464
+        UTIL_ASSERT(curAttackSecond != NULL);
+
+        nLeftWeaponMod = pSprite->sub_73CA20(pLeftWeapon, curAttackSecond);
+        nLeftWeaponMod += pSprite->sub_73CAE0(pLeftWeapon, curAttackSecond);
+        nLeftWeaponMod += pSprite->sub_73CC40(pLeftWeapon, curAttackSecond);
+
+        nLeftProficiencyMod = pSprite->sub_73CF10(pLeftWeapon, curAttackSecond);
+        nLeftProficiencyMod += pSprite->sub_73D080(TRUE);
+
+        nLeftAbilityMod = pSprite->sub_73CB10(pLeftWeapon, curAttackSecond);
+    }
+
+    // NOTE: The original zero-extends 0x73D420's SHORT; every use below
+    // truncates the sum to a SHORT again.
+    INT nOtherMod = pSprite->sub_73C7E0();
+    nOtherMod += static_cast<WORD>(pSprite->sub_73D420());
+    nOtherMod += pSprite->sub_73CAD0();
+
+    CString sLine;
+    CString sValue;
+
+    UpdateTextForceColor(pText,
+        RGB(200, 200, 0),
+        "%s",
+        (LPCSTR)FetchString(9457)); // "Attack Roll Modifiers"
+
+    // A launcher with an ability, or a ranged attack, shoots.
+    BOOLEAN bRanged = FALSE;
+    SHORT nLauncherSlot;
+    CItem* pLauncher = pSprite->GetLauncher(curAttack, nLauncherSlot);
+    if (pLauncher != NULL) {
+        pLauncher->Demand();
+        if (pLauncher->GetAbility(0) != NULL) {
+            bRanged = TRUE;
+        } else if ((curAttack->type & 0xFF) == 2) {
+            bRanged = TRUE;
+        }
+    } else if ((curAttack->type & 0xFF) == 2) {
+        bRanged = TRUE;
+    }
+
+    if (pLauncher != NULL) {
+        pLauncher->Release();
+    }
+
+    INT nBaseAttacksShown = nBaseAttacks;
+
+    // The off-hand weapon takes one attack of the round.
+    INT nAttacks;
+    if (curWeapon != NULL
+        && pLeftWeapon != NULL
+        && curWeapon != pLeftWeapon
+        && pLeftWeapon->GetItemType() != 47
+        && pLeftWeapon->GetItemType() != 53
+        && pLeftWeapon->GetItemType() != 49
+        && pLeftWeapon->GetItemType() != 41) {
+        nAttacks = pDStats->m_nNumberOfAttacks - 1;
+    } else {
+        nAttacks = pDStats->m_nNumberOfAttacks;
+    }
+
+    BOOL bRapidShot = pDStats->m_spellStates.test(SPLSTATE_FEAT_RAPID_SHOT);
+
+    if (curWeapon != NULL && curWeapon != pLeftWeapon) {
+        sLine.Format("%s: ", (LPCSTR)FetchString(734)); // "Main Hand"
+
+        for (INT nAttack = 0; nAttack < nAttacks; nAttack++) {
+            INT nBonus = nBaseAttackBonus;
+            if (bRapidShot && bRanged == TRUE && nAttack == 0) {
+                nBonus -= 5;
+            }
+
+            INT nTotal = pGame->GetRuleTables().GetIterativeAttackBonus(nBonus, nAttackStep, nAttack)
+                + nShieldPenalty
+                + nArmorPenalty
+                + nOtherMod
+                + nAbilityMod
+                + nProficiencyMod
+                + nWeaponMod;
+            if (bRapidShot && bRanged == TRUE) {
+                nTotal -= 2;
+            }
+
+            sValue.Format("%+d", static_cast<SHORT>(nTotal));
+            sLine += sValue;
+
+            if (nAttack + 1 >= nAttacks) {
+                break;
+            }
+
+            sLine += "/";
+        }
+
+        UpdateText(pText, "%s", (LPCSTR)sLine);
+
+        sLine.Format("  %s: ", (LPCSTR)FetchString(31353)); // "Base"
+
+        for (INT nAttack = 0; nAttack < nAttacks; nAttack++) {
+            INT nBonus = nBaseAttackBonus;
+            if (bRapidShot && bRanged == TRUE) {
+                if (nAttack == 0) {
+                    nBonus -= 5;
+                }
+                nBonus -= 2;
+            }
+
+            if (static_cast<UINT>(nAttack) < static_cast<UINT>(nBaseAttacksShown)) {
+                sValue.Format("%+d", pGame->GetRuleTables().GetIterativeAttackBonus(nBonus, nAttackStep, nAttack));
+                sLine += sValue;
+            }
+
+            if (static_cast<UINT>(nAttack + 1) < static_cast<UINT>(nBaseAttacksShown)) {
+                sLine += "/";
+            }
+        }
+
+        UpdateTextNoTrim(pText, "%s", (LPCSTR)sLine);
+
+        if (static_cast<SHORT>(nWeaponMod) != 0) {
+            UpdateTextNoTrim(pText,
+                "  %s: %+d",
+                (LPCSTR)FetchString(32560), // "Weapon"
+                static_cast<SHORT>(nWeaponMod));
+        }
+
+        if (static_cast<SHORT>(nProficiencyMod) != 0) {
+            UpdateTextNoTrim(pText,
+                "  %s: %+d",
+                (LPCSTR)FetchString(32561), // "Proficiency"
+                static_cast<SHORT>(nProficiencyMod));
+        }
+
+        if (static_cast<SHORT>(nAbilityMod) != 0) {
+            UpdateTextNoTrim(pText,
+                "  %s: %+d",
+                (LPCSTR)FetchString(33547), // "Abilities"
+                static_cast<SHORT>(nAbilityMod));
+        }
+
+        if (nArmorPenalty != 0) {
+            UpdateTextNoTrim(pText,
+                "  %s: %+d",
+                (LPCSTR)FetchString(39816), // "Armor Penalty"
+                nArmorPenalty);
+        }
+
+        if (nShieldPenalty != 0) {
+            UpdateTextNoTrim(pText,
+                "  %s: %+d",
+                (LPCSTR)FetchString(39822), // "Shield Penalty"
+                nShieldPenalty);
+        }
+    }
+
+    if (pLeftWeapon != NULL) {
+        if (curWeapon != pLeftWeapon) {
+            UpdateText(pText, "");
+        }
+
+        SHORT nLeftTotal = static_cast<SHORT>(nBaseAttackBonus
+            + nArmorPenalty
+            + nOtherMod
+            + nLeftAbilityMod
+            + nLeftProficiencyMod
+            + nLeftWeaponMod);
+        sLine.Format("%s: %+d",
+            (LPCSTR)FetchString(733), // "Off Hand"
+            nLeftTotal);
+        UpdateText(pText, "%s", (LPCSTR)sLine);
+
+        sLine.Format("  %s: ", (LPCSTR)FetchString(31353)); // "Base"
+        sValue.Format("%+d", nBaseAttackBonus);
+        sLine += sValue;
+        UpdateTextNoTrim(pText, "%s", (LPCSTR)sLine);
+
+        if (static_cast<SHORT>(nLeftWeaponMod) != 0) {
+            UpdateTextNoTrim(pText,
+                "  %s: %+d",
+                (LPCSTR)FetchString(32560), // "Weapon"
+                static_cast<SHORT>(nLeftWeaponMod));
+        }
+
+        if (static_cast<SHORT>(nLeftProficiencyMod) != 0) {
+            UpdateTextNoTrim(pText,
+                "  %s: %+d",
+                (LPCSTR)FetchString(32561), // "Proficiency"
+                static_cast<SHORT>(nLeftProficiencyMod));
+        }
+
+        if (static_cast<SHORT>(nLeftAbilityMod) != 0) {
+            UpdateTextNoTrim(pText,
+                "  %s: %+d",
+                (LPCSTR)FetchString(33547), // "Abilities"
+                static_cast<SHORT>(nLeftAbilityMod));
+        }
+
+        if (nArmorPenalty != 0) {
+            UpdateTextNoTrim(pText,
+                "  %s: %+d",
+                (LPCSTR)FetchString(39816), // "Armor Penalty"
+                nArmorPenalty);
+        }
+
+        if (nShieldPenalty != 0) {
+            UpdateTextNoTrim(pText,
+                "  %s: %+d",
+                (LPCSTR)FetchString(39822), // "Shield Penalty"
+                nShieldPenalty);
+        }
+    }
+
+    if (static_cast<SHORT>(nOtherMod) != 0) {
+        UpdateTextNoTrim(pText,
+            "  %s: %+d",
+            (LPCSTR)FetchString(33548), // "Others"
+            static_cast<SHORT>(nOtherMod));
+    }
+
+    UpdateText(pText, "");
+
+    if (pDStats->m_nDamageBonus != 0) {
+        UpdateText(pText,
+            "%s: %+d",
+            (LPCSTR)FetchString(40353), // "Damage Bonus"
+            pDStats->m_nDamageBonus);
+        UpdateText(pText, "");
+    }
+
+    if (curWeapon == pLeftWeapon) {
+        sNumber.Format("%d", 1);
+    } else if (pEquipment->m_selectedWeapon != 42
+        && pEquipment->m_items[pSprite->sub_726800() & 0xFF] != NULL
+        && pEquipment->m_items[pSprite->sub_726800() & 0xFF]->GetItemType() != 47
+        && pEquipment->m_items[pSprite->sub_726800() & 0xFF]->GetItemType() != 53
+        && pEquipment->m_items[pSprite->sub_726800() & 0xFF]->GetItemType() != 49
+        && pEquipment->m_items[pSprite->sub_726800() & 0xFF]->GetItemType() != 41) {
+        sNumber.Format("%d+%d", pDStats->m_nNumberOfAttacks - 1, 1);
+    } else {
+        sNumber.Format("%d", pDStats->m_nNumberOfAttacks);
+    }
+
+    if (pSprite->GetCriticalHitBonus() != 0) {
+        INT nCriticalHitBonus = pSprite->GetCriticalHitBonus();
+        CString sCritical;
+        // NOTE: The zero branch cannot be taken; the original has it.
+        if (nCriticalHitBonus == 0) {
+            sCritical.Format("%s: %d",
+                (LPCSTR)FetchString(41025), // "Critical Hit Bonus"
+                0);
+        } else {
+            sCritical.Format("%s: %+d",
+                (LPCSTR)FetchString(41025), // "Critical Hit Bonus"
+                nCriticalHitBonus);
+        }
+        UpdateText(pText, "%s", (LPCSTR)sCritical);
+    }
+
+    UpdateText(pText,
+        "%s: %s",
+        (LPCSTR)FetchString(9458), // "Number of Attacks"
+        (LPCSTR)sNumber);
+    UpdateText(pText, "");
+
+    UpdateTextForceColor(pText,
+        RGB(200, 200, 0),
+        "%s",
+        (LPCSTR)FetchString(33553)); // "Armor Class"
+
+    UpdateText(pText,
+        "%s: %d",
+        (LPCSTR)FetchString(33553), // "Armor Class"
+        pSprite->GetAC());
+
+    // NOTE: The DWORD at 0x84EBBC is 10.
+    UpdateTextNoTrim(pText,
+        "  %s: %d",
+        (LPCSTR)FetchString(31353), // "Base"
+        10);
+
+    // Expertise trades attack for armor class, but not when shooting.
+    INT nExpertise = pSprite->sub_726270(CGAMESPRITE_FEAT_EXPERTISE);
+    if (bRanged == TRUE) {
+        nExpertise = 0;
+    }
+
+    if (pDStats->field_6 != 0) {
+        UpdateTextNoTrim(pText,
+            "  %s: %+d",
+            (LPCSTR)FetchString(11997), // "Armor"
+            pDStats->field_6);
+    }
+
+    if (pDStats->field_8 != 0) {
+        UpdateTextNoTrim(pText,
+            "  %s: %+d",
+            (LPCSTR)FetchString(33551), // "Deflection"
+            pDStats->field_8);
+    }
+
+    if (pDStats->field_A != 0) {
+        UpdateTextNoTrim(pText,
+            "  %s: %+d",
+            (LPCSTR)FetchString(12006), // "Shield"
+            pDStats->field_A);
+    }
+
+    if (pDStats->field_C - nExpertise != 0) {
+        UpdateTextNoTrim(pText,
+            "  %s: %+d",
+            (LPCSTR)FetchString(33552), // "Generic"
+            pDStats->field_C - nExpertise);
+    }
+
+    if (pSprite->sub_723EA0() != 0) {
+        UpdateTextNoTrim(pText,
+            "  %s: %+d",
+            (LPCSTR)FetchString(1151), // "Dexterity"
+            pSprite->sub_723EA0());
+    }
+
+    if (pSprite->HasClassLevel(CAIOBJECTTYPE_C_MONK)) {
+        sNumber.Format("%+d", pSprite->sub_723F60());
+        tlk.SetToken(TOKEN_NUMBER, sNumber);
+        UpdateText(pText,
+            "%s",
+            (LPCSTR)FetchString(39431)); // "Monk Wisdom Bonus: <number> to AC"
+    }
+
+    if (nExpertise != 0 && bRanged == FALSE) {
+        UpdateTextNoTrim(pText,
+            "  %s: %+d",
+            (LPCSTR)FetchString(pGame->GetRuleTables().GetFeatName(CGAMESPRITE_FEAT_EXPERTISE)),
+            nExpertise);
+    }
+
+    if (pDStats->m_nACCrushingMod != 0
+        || pDStats->m_nACMissileMod != 0
+        || pDStats->m_nACPiercingMod != 0
+        || pDStats->m_nACSlashingMod != 0) {
+        UpdateText(pText, "");
+        UpdateTextForceColor(pText,
+            RGB(200, 200, 0),
+            "%s",
+            (LPCSTR)FetchString(11766)); // "Armor Class Modifiers"
+    }
+
+    if (pDStats->m_nACCrushingMod != 0) {
+        UpdateText(pText,
+            "%s: %+d",
+            (LPCSTR)FetchString(11770), // "Bludgeoning"
+            pDStats->m_nACCrushingMod);
+    }
+
+    if (pDStats->m_nACMissileMod != 0) {
+        UpdateText(pText,
+            "%s: %+d",
+            (LPCSTR)FetchString(11767), // "Missile"
+            pDStats->m_nACMissileMod);
+    }
+
+    if (pDStats->m_nACPiercingMod != 0) {
+        UpdateText(pText,
+            "%s: %+d",
+            (LPCSTR)FetchString(11769), // "Piercing"
+            pDStats->m_nACPiercingMod);
+    }
+
+    if (pDStats->m_nACSlashingMod != 0) {
+        UpdateText(pText,
+            "%s: %+d",
+            (LPCSTR)FetchString(11768), // "Slashing"
+            pDStats->m_nACSlashingMod);
+    }
+
+    INT nSpellFailure = static_cast<SHORT>(pSprite->sub_724430());
+    if (pSprite->HasClassMask(CLASSMASK_BARD | CLASSMASK_SORCERER | CLASSMASK_WIZARD)) {
+        UpdateText(pText, "");
+        UpdateTextForceColor(pText,
+            RGB(200, 200, 0),
+            "%s",
+            (LPCSTR)FetchString(41391)); // "Arcane Spell Failure"
+        UpdateText(pText,
+            "%s: %d%%",
+            (LPCSTR)FetchString(41390), // "Casting Failure"
+            nSpellFailure);
+
+        INT nArmorFailure = pSprite->sub_724360();
+        if (nArmorFailure != 0) {
+            UpdateTextNoTrim(pText,
+                "  %s: %+d%%",
+                (LPCSTR)FetchString(39816), // "Armor Penalty"
+                nArmorFailure);
+        }
+
+        INT nShieldFailure = pSprite->sub_724270();
+        if (nShieldFailure != 0) {
+            UpdateTextNoTrim(pText,
+                "  %s: %+d%%",
+                (LPCSTR)FetchString(39822), // "Shield Penalty"
+                nShieldFailure);
+        }
+
+        INT nArmoredArcana = 0;
+        if (pSprite->sub_763150(CGAMESPRITE_FEAT_ARMORED_ARCANA) == TRUE) {
+            nArmoredArcana = 5 * pSprite->GetFeatValue(CGAMESPRITE_FEAT_ARMORED_ARCANA);
+            UpdateTextNoTrim(pText,
+                "  %s: %+d%%",
+                (LPCSTR)FetchString(36352), // "Armored Arcana"
+                -nArmoredArcana);
+        }
+
+        INT nOtherFailure = nArmoredArcana - nShieldFailure - nArmorFailure + nSpellFailure;
+        if (nOtherFailure < 0) {
+            nOtherFailure = 0;
+        }
+
+        if (nSpellFailure != 0 && nOtherFailure != 0) {
+            UpdateTextNoTrim(pText,
+                "  %s: %+d%%",
+                (LPCSTR)FetchString(33548), // "Others"
+                nOtherFailure);
+        }
+    }
+
+    UpdateText(pText, "");
+
+    if (curWeapon != NULL || pLeftWeapon != NULL) {
+        UpdateTextForceColor(pText,
+            RGB(200, 200, 0),
+            "%s",
+            (LPCSTR)FetchString(41119)); // "Weapon Statistics"
+
+        if (curWeapon != NULL) {
+            if (curWeapon != pLeftWeapon) {
+                sub_5DF910(pText, pSprite, curWeapon, curAttack, TRUE);
+                UpdateText(pText, "");
+            }
+            curWeapon->Release();
+        }
+
+        if (pLeftWeapon != NULL
+            && pLeftWeapon->GetItemType() != 47
+            && pLeftWeapon->GetItemType() != 53
+            && pLeftWeapon->GetItemType() != 49
+            && pLeftWeapon->GetItemType() != 41) {
+            sub_5DF910(pText, pSprite, pLeftWeapon, curAttackSecond, FALSE);
+            UpdateText(pText, "");
+            pLeftWeapon->Release();
+        }
+    }
+
+    UpdateSavingThrows(pText, *pDStats);
+}
+
+// 0x5DF910
+void CScreenCharacter::sub_5DF910(CUIControlTextDisplay* pText, CGameSprite* pSprite, CItem* pItem, const ITEM_ABILITY* ability, BOOL bMainHand)
+{
+    // The weapon statistics of one hand: its damage, the damage effects of
+    // the selected ability, the bonuses, the damage range and the critical
+    // hit.
+    const CRuleTables& rule = g_pBaldurChitin->GetObjectGame()->GetRuleTables();
+    CString sLine;
+
+    if (pItem == NULL) {
+        return;
+    }
+
+    STRREF strHand;
+    if (bMainHand) {
+        strHand = (ability->type & 0xFF) == 2
+            ? 41123 // "Ranged"
+            : 734; // "Main Hand"
+    } else {
+        strHand = 733; // "Off Hand"
+    }
+
+    UpdateText(pText,
+        "%s - %s",
+        (LPCSTR)FetchString(strHand),
+        (LPCSTR)FetchString(pItem->GetGenericName()));
+
+    if ((pItem->m_flags & 0x1) == 0) {
+        UpdateTextNoTrim(pText,
+            "  %s",
+            (LPCSTR)FetchString(41121)); // "Unidentified - Details Unknown"
+        return;
+    }
+
+    // NOTE: The original zero-extends the launcher's damage bonus.
+    INT nLauncherBonus = 0;
+    SHORT nLauncherSlot;
+    CItem* pLauncher = pSprite->GetLauncher(ability, nLauncherSlot);
+    if (pLauncher != NULL) {
+        pLauncher->Demand();
+        const ITEM_ABILITY* pLauncherAbility = pLauncher->GetAbility(0);
+        if (pLauncherAbility != NULL) {
+            nLauncherBonus = static_cast<WORD>(pLauncherAbility->damageDiceBonus);
+        }
+        pLauncher->Release();
+    }
+
+    SHORT nDamageBonus = ability->damageDiceBonus;
+    if (ability->damageDiceCount == 0) {
+        UpdateTextNoTrim(pText,
+            "  %s: %s",
+            (LPCSTR)FetchString(39518), // "Damage"
+            (LPCSTR)FetchString(41409)); // "Special"
+    } else if (nDamageBonus == 0) {
+        UpdateTextNoTrim(pText,
+            "  %s: %dd%d",
+            (LPCSTR)FetchString(39518), // "Damage"
+            ability->damageDiceCount,
+            ability->damageDice);
+    } else {
+        UpdateTextNoTrim(pText,
+            "  %s: %dd%d%+d",
+            (LPCSTR)FetchString(39518), // "Damage"
+            ability->damageDiceCount,
+            ability->damageDice,
+            nDamageBonus);
+    }
+
+    INT nMin = ability->damageDiceCount + nDamageBonus;
+    INT nMax = ability->damageDice * ability->damageDiceCount + nDamageBonus;
+
+    // NOTE: The effects are the sprite's selected ability's, for either
+    // hand, as in the original.
+    LONG nAbility = pSprite->GetEquipment()->m_selectedWeaponAbility;
+    LONG nEffect = 0;
+    CGameEffect* pEffect = pItem->GetAbilityEffect(nAbility, nEffect, NULL);
+    while (pEffect != NULL) {
+        UINT nChance = static_cast<UINT>(pEffect->m_probabilityUpper) - static_cast<UINT>(pEffect->m_probabilityLower) + 1;
+        if (nChance > 100) {
+            nChance = 100;
+        }
+        if (pEffect->m_probabilityLower == 0 && pEffect->m_probabilityUpper != 100) {
+            nChance--;
+        }
+
+        STRREF strType = 0;
+        BOOL bShown = TRUE;
+        if (pEffect->m_effectID == CGAMEEFFECT_DAMAGE) {
+            switch (pEffect->m_dwFlags & 0xFFFF0000) {
+            case 0x0:
+            case 0x4000000:
+                strType = 11770; // "Bludgeoning"
+                break;
+            case 0x10000:
+                strType = 15578; // "Acid"
+                break;
+            case 0x20000:
+                strType = 15546; // "Cold"
+                break;
+            case 0x40000:
+                strType = 15577; // "Electricity"
+                break;
+            case 0x80000:
+                strType = 15545; // "Fire"
+                break;
+            case 0x100000:
+            case 0x2000000:
+                strType = 11769; // "Piercing"
+                break;
+            case 0x200000:
+                strType = 38135; // "Poison"
+                break;
+            case 0x400000:
+                strType = 40319; // "Magic Damage"
+                break;
+            case 0x1000000:
+                strType = 11768; // "Slashing"
+                break;
+            case 0x8000000:
+                strType = 14043; // "Stun"
+                break;
+            case 0x20000000:
+                strType = 39609; // "Bleeding Wounds"
+                break;
+            case 0x40000000:
+                strType = 39575; // "Disease"
+                break;
+            default:
+                bShown = FALSE;
+                break;
+            }
+        } else if (pEffect->m_effectID == 241) {
+            strType = 41410; // "Vampiric"
+        } else {
+            bShown = FALSE;
+        }
+
+        if (bShown) {
+            CString sValue;
+            sLine.Format("  %s: ", (LPCSTR)FetchString(strType));
+
+            if (pEffect->m_numDice != 0 && pEffect->m_diceSize != 0) {
+                if (pEffect->m_effectAmount == 0) {
+                    if (ability->damageDiceCount != 0) {
+                        sValue.Format("%+dd%d", pEffect->m_numDice, pEffect->m_diceSize);
+                    } else {
+                        sValue.Format("%dd%d", pEffect->m_numDice, pEffect->m_diceSize);
+                    }
+                } else {
+                    if (ability->damageDiceCount != 0) {
+                        sValue.Format("%+dd%d%+d", pEffect->m_numDice, pEffect->m_diceSize, pEffect->m_effectAmount);
+                    } else {
+                        sValue.Format("%dd%d%+d", pEffect->m_numDice, pEffect->m_diceSize, pEffect->m_effectAmount);
+                    }
+                }
+                sLine += sValue;
+            } else if (pEffect->m_effectAmount != 0) {
+                sValue.Format("%+d", pEffect->m_effectAmount);
+                sLine += sValue;
+            }
+
+            if (nChance == 100) {
+                nMin += pEffect->m_effectAmount + pEffect->m_numDice;
+            }
+
+            nMax += pEffect->m_diceSize * pEffect->m_numDice + pEffect->m_effectAmount;
+
+            if (nChance != 100) {
+                sValue.Format(" (%d%%)", nChance);
+                sLine += sValue;
+            }
+
+            UpdateTextNoTrim(pText, "%s", (LPCSTR)sLine);
+        }
+
+        // NOTE: The original never deletes the decoded effects.
+        delete pEffect;
+
+        nEffect++;
+        pEffect = pItem->GetAbilityEffect(nAbility, nEffect, NULL);
+    }
+
+    if (nLauncherBonus != 0) {
+        UpdateTextNoTrim(pText,
+            "  %s: %+d",
+            (LPCSTR)FetchString(41408), // "Launcher"
+            nLauncherBonus);
+        nMin += nLauncherBonus;
+        nMax += nLauncherBonus;
+    }
+
+    INT nSTRMod = rule.GetAbilityScoreModifier(pSprite->GetDerivedStats()->m_nSTR);
+    if ((ability->abilityFlags & 0x1) != 0 && nSTRMod != 0) {
+        if (!bMainHand) {
+            // The off hand adds half the strength bonus.
+            if (nSTRMod > 1) {
+                nSTRMod /= 2;
+            }
+        } else {
+            // A two-handed weapon (but not the fist) adds one and a half.
+            if ((pItem->GetFlagsFile() & 0x2) != 0
+                && pItem->GetItemIcon() != CResRef("FIST")
+                && nSTRMod > 0) {
+                nSTRMod = static_cast<INT>(static_cast<float>(nSTRMod) * 1.5f);
+            }
+        }
+
+        nMin += nSTRMod;
+        nMax += nSTRMod;
+        UpdateTextNoTrim(pText,
+            "  %s: %+d",
+            (LPCSTR)FetchString(1145), // "Strength"
+            nSTRMod);
+    }
+
+    INT nDamageBonusHand = bMainHand
+        ? pSprite->GetDerivedStats()->m_DamageBonusRight
+        : pSprite->GetDerivedStats()->m_DamageBonusLeft;
+    if (nDamageBonusHand != 0) {
+        nMin += nDamageBonusHand;
+        nMax += nDamageBonusHand;
+        UpdateTextNoTrim(pText,
+            "  %s: %+d",
+            (LPCSTR)FetchString(32561), // "Proficiency"
+            nDamageBonusHand);
+    }
+
+    INT nPowerAttack = pSprite->sub_726270(CGAMESPRITE_FEAT_POWER_ATTACK);
+    if (nPowerAttack > 0
+        && (ability->type & 0x1) != 0
+        && pSprite->sub_763150(CGAMESPRITE_FEAT_POWER_ATTACK)) {
+        nMin += nPowerAttack;
+        nMax += nPowerAttack;
+        UpdateTextNoTrim(pText,
+            "  %s: %+d",
+            (LPCSTR)FetchString(rule.GetFeatName(CGAMESPRITE_FEAT_POWER_ATTACK)),
+            nPowerAttack);
+    }
+
+    if (nMax != 0) {
+        if (nMin < 1) {
+            nMin = 1;
+        }
+
+        if (nMax < 1) {
+            nMax = 1;
+        }
+
+        if (nMin != nMax) {
+            UpdateTextNoTrim(pText,
+                "  %s: %d-%d",
+                (LPCSTR)FetchString(41120), // "Damage Potential"
+                nMin,
+                nMax);
+        } else {
+            UpdateTextNoTrim(pText,
+                "  %s: %d",
+                (LPCSTR)FetchString(41120), // "Damage Potential"
+                nMax);
+        }
+    }
+
+    // NOTE: The original zero-extends CItem 0x4E9840's SHORT and tests the
+    // sum's low word.
+    SHORT nThreat = static_cast<SHORT>(static_cast<WORD>(pItem->sub_4E9840(ability)) + pSprite->GetCriticalHitBonus());
+    WORD nMultiplier = static_cast<WORD>(pItem->GetCriticalHitMultiplier());
+    if (nThreat != 0) {
+        INT nLow = 20 - nThreat;
+        if (nLow < 1) {
+            nLow = 1;
+        }
+        UpdateTextNoTrim(pText,
+            "  %s: %d-20 / x%d",
+            (LPCSTR)FetchString(41122), // "Critical Hit"
+            nLow,
+            nMultiplier);
+    } else {
+        UpdateTextNoTrim(pText,
+            "  %s: 20 / x%d",
+            (LPCSTR)FetchString(41122), // "Critical Hit"
+            nMultiplier);
+    }
 }
 
 // 0x5E0200

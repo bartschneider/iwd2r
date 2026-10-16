@@ -21,6 +21,7 @@
 class CCreatureFileHeader;
 class CDerivedStats;
 class CGameSprite;
+class CItem;
 class CUIPanel;
 
 class CScreenCharacter : public CBaldurEngine {
@@ -103,6 +104,7 @@ public:
     void UpdateMainPanel(BOOL bCharacterChanged);
     void UpdateGeneralInformation(CUIControlTextDisplay* pText, CGameSprite* pSprite);
     void UpdateEquipmentInformation(CUIControlTextDisplay* pText, CGameSprite* pSprite);
+    void sub_5DF910(CUIControlTextDisplay* pText, CGameSprite* pSprite, CItem* pItem, const ITEM_ABILITY* ability, BOOL bMainHand);
     void UpdateMiscInformation(CUIControlTextDisplay* pText, CGameSprite* pSprite);
     void ResetPopupPanel(DWORD dwPanelId, CGameSprite* pSprite, int a3);
     void UpdatePopupPanel(DWORD dwPanelId, CGameSprite* pSprite);
