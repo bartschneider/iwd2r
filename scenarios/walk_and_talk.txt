@@ -1,10 +1,17 @@
 # Milestone 2's exit scenario: the party moves and interacts. It is
 # world_entry.txt's steps and checkpoints (character generation, Party
 # Formation, the chapter screen, the start area AR1000), then the M2 steps.
-# It stays in scenarios/pending/ until our engine plays it through; then it
-# moves to scenarios/. Coordinates for Resolution=800: dialog responses,
-# Continue and the portrait in origin ui, map positions in origin screen
-# (the same pixels at 800x600).
+# It moved up from scenarios/pending/ when our engine matched the original
+# at every checkpoint in replay (oracle.py replay compare, seed 1) and both
+# real-input runs (play.py --vm linux and --vm windows) reached the
+# original's states at its checkpoints (walk_and_talk.expect.json).
+# Coordinates for Resolution=800: dialog responses, Continue and the
+# portrait in origin ui, map positions in origin screen (the same pixels at
+# 800x600).
+#
+# A real-input run takes about 170 s on Xvfb and 230 s in Windows Sandbox,
+# past play.py's default timeout:
+# timeout: 420
 #
 # What the original does here (sandbox recordings, seed 1):
 # - The party (one character, Probe, at 2414,897 on the Wicked Wench's deck)

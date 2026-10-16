@@ -405,6 +405,9 @@ class PlayVmArgsTest(unittest.TestCase):
             self.assertEqual(play.scenario_timeout(60, own), 60)
             self.assertEqual(play.scenario_timeout(None, plain),
                              realinput.DEFAULT_TIMEOUT)
+        # The scenarios that run longer than the default say so.
+        self.assertGreaterEqual(play.scenario_timeout(None, os.path.join(
+            ROOT, 'scenarios', 'walk_and_talk.txt')), 400)
 
     def test_suite_files_are_the_scenarios(self):
         self.assertEqual(play.suite_files(), scenario_files())
@@ -543,17 +546,19 @@ class ScenarioParseTest(unittest.TestCase):
         self.assertEqual(actions[-1]['op'], 'quit')
 
     def test_walk_and_talk_checkpoints(self):
-        def load(name):
-            return realinput.load_scenario(os.path.join(
-                ROOT, 'scenarios', 'pending', name))
-        actions = load('walk_and_talk.txt')
+        actions = realinput.load_scenario(os.path.join(
+            ROOT, 'scenarios', 'walk_and_talk.txt'))
         names = [a['name'] for a in actions if a['op'] == 'checkpoint']
-        world = [a['name'] for a in load('world_entry.txt')
+        world = [a['name'] for a in realinput.load_scenario(os.path.join(
+            ROOT, 'scenarios', 'pending', 'world_entry.txt'))
                  if a['op'] == 'checkpoint']
         self.assertEqual(names, world + [
             'opening_dialog', 'opening_done', 'moved', 'dialog',
             'dialog_end', 'reig_dialog', 'reig_done', 'door_open'])
         self.assertEqual(len(names), len(set(names)))
+        # M2 Task 7: a shot of Hedron's dialog panel and of the door.
+        self.assertEqual([a['name'] for a in actions if a['op'] == 'shot'],
+                         ['dialog', 'door_open'])
         self.assertEqual(actions[-1]['op'], 'quit')
 
     def test_keysym_table_covers_every_key_name(self):
@@ -1020,8 +1025,10 @@ class CheckpointExpectationTest(unittest.TestCase):
                              path)
             for fields in expect['checkpoints'].values():
                 self.assertIn('screen', fields)
-        # The scenario whose lost Gender click the old pass test missed.
+        # The scenario whose lost Gender click the old pass test missed,
+        # and M2's exit scenario.
         self.assertIn('chargen_replay', found)
+        self.assertIn('walk_and_talk', found)
 
 
 class SandboxWsbTest(unittest.TestCase):
