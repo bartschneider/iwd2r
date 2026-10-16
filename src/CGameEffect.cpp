@@ -4,6 +4,7 @@
 #include "CBaldurChitin.h"
 #include "CBaldurProjector.h"
 #include "CBlood.h"
+#include "CCreatureFile.h"
 #include "CGameAnimationType.h"
 #include "CGameArea.h"
 #include "CGameSprite.h"
@@ -14355,17 +14356,99 @@ CGameEffect* CGameEffectReplaceSelf::Copy()
 // 0x4BD050
 BOOL CGameEffectReplaceSelf::ApplyEffect(CGameSprite* pSprite)
 {
-    // iwd2r: said once on stderr (ruling M3-7), so a missing port cannot
-    // pass unnoticed; the game goes on.
-    static bool bWarned = false;
-    if (!bWarned) {
-        bWarned = true;
-        fprintf(stderr, "iwd2r: effect %d (CGameEffectReplaceSelf::ApplyEffect, 0x4BD050) is not ported; it does nothing\n",
-            151);
+    // The creature m_res names takes the sprite's place: the sprite dies (a
+    // party member always, a creature only with gore and flags; otherwise it
+    // just leaves the area) and the new creature is added where it stood,
+    // under its script name in the area's named creatures.
+    if (!g_pBaldurChitin->cDimm.m_cKeyTable.FindKey(m_res, 1009, TRUE)) {
+        m_done = TRUE;
+        return TRUE;
     }
 
-    // TODO: Incomplete. Not ported yet; until then the override only keeps the
-    // effect from reaching the asserting base ApplyEffect.
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+    CGameEffect* pDeath = NULL;
+    if (pGame->GetCharacterPortraitNum(pSprite->GetId()) == -1) {
+        if (m_dwFlags != 0 && pGame->GetOptions()->m_nGore != 0) {
+            pDeath = new CGameEffectDeath();
+            pDeath->m_source = m_source;
+            pDeath->m_sourceID = m_sourceID;
+            pDeath->m_dwFlags = 8;
+            pDeath->m_effectAmount = 1;
+            pDeath->m_casterLevel = m_casterLevel;
+        } else {
+            pSprite->m_removeFromArea = TRUE;
+        }
+    } else {
+        pDeath = new CGameEffectDeath();
+        pDeath->m_source = m_source;
+        pDeath->m_sourceID = m_sourceID;
+        pDeath->m_dwFlags = 8;
+    }
+
+    if (pDeath != NULL) {
+        pSprite->AddEffect(pDeath, CGameAIBase::EFFECT_LIST_TIMED, TRUE, TRUE);
+    }
+
+    CPoint pos = pSprite->GetPos();
+
+    CCreatureFile creatureFile;
+
+    // NOTE: Uninline.
+    creatureFile.SetResRef(m_res, TRUE, TRUE);
+
+    // NOTE: The original evaluates the size first.
+    DWORD nSize = creatureFile.GetDataSize();
+    BYTE* pData = creatureFile.GetData();
+
+    CGameSprite* pNewSprite = new CGameSprite(pData,
+        nSize,
+        0,
+        0,
+        -1,
+        0,
+        0,
+        0x7FFFFFFF,
+        CPoint(-1, -1),
+        0);
+
+    pNewSprite->SetResRef(CResRef(creatureFile.GetResRef().GetResRefStr()));
+
+    creatureFile.ReleaseData();
+
+    if (pNewSprite != NULL) {
+        LONG nNewId = pNewSprite->GetId();
+
+        CString sResRef;
+        m_res.CopyToString(sResRef);
+        pNewSprite->SetResRef(CResRef(sResRef));
+
+        CGameObject* pObject;
+        if (pGame->GetObjectArray()->GetDeny(nNewId,
+                CGameObjectArray::THREAD_ASYNCH,
+                &pObject,
+                INFINITE)
+            == CGameObjectArray::SUCCESS) {
+            pNewSprite = static_cast<CGameSprite*>(pObject);
+
+            // NOTE: Inlined CGameAnimation::GetListType (ObjAnimation.h line
+            // 2086 asserts m_animation).
+            BYTE nListType = pNewSprite->GetAnimation()->m_animation->GetListType();
+            pNewSprite->AddToArea(pSprite->GetArea(), pos, 0, nListType);
+
+            CVariable cVariable;
+            cVariable.SetName(CString(reinterpret_cast<const char*>(pNewSprite->GetScriptName())));
+            cVariable.m_intValue = nNewId;
+            pSprite->GetArea()->m_namedCreatures.AddKey(cVariable);
+
+            pGame->GetObjectArray()->ReleaseDeny(nNewId,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+
+            m_done = TRUE;
+        }
+    }
+
     return TRUE;
 }
 

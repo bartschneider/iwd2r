@@ -1325,3 +1325,71 @@ TEST_CASE("Calm (0x4A5E50) removes berserk from both effect lists", "[effects][c
     ClearMessages();
     delete pGoblin;
 }
+
+// Replace Self (151). The vanilla spells that use it (SPWI961: GDOPP71,
+// SPIN150: EMMRCHD, SPWI983: PHEOGURD, SPIN176: DEDDOG, ...) name creatures
+// CHITIN.KEY does not have, so in the game it only ends; with a creature
+// that exists (00GOB here), on a goblin standing in AR1000 with p2 0 (no
+// death), the goblin leaves the area and the new one takes its place under
+// its script name.
+TEST_CASE("Replace self (0x4BD050) puts the new creature where the old one stood", "[effects][checksave][data]")
+{
+    PROBE_OR_SKIP(pProbe);
+    CGameSprite* pGoblin = MakeGoblin();
+    ClearMessages();
+    CGameArea* pArea = pProbe->GetArea();
+    REQUIRE(pArea != NULL);
+    const CPoint pos(pProbe->GetPos().x + 40, pProbe->GetPos().y);
+    pGoblin->AddToArea(pArea, pos, 0, CGameObject::LIST_FRONT);
+    REQUIRE(pGoblin->GetArea() == pArea);
+    CGameObjectArray* pArray = g_pBaldurChitin->GetObjectGame()->GetObjectArray();
+
+    SECTION("a missing creature: done, nothing else")
+    {
+        std::unique_ptr<CGameEffect> pReplace = Decode(CGAMEEFFECT_REPLACESELF, 0, 0, pProbe->GetId());
+        pReplace->m_res = CResRef("GDOPP71");
+        const INT_PTR added = pArea->m_lVertSortAdd.GetCount();
+        CHECK(pReplace->ApplyEffect(pGoblin) == TRUE);
+        CHECK(pReplace->m_done == TRUE);
+        CHECK(pGoblin->m_removeFromArea == FALSE);
+        CHECK(pArea->m_lVertSortAdd.GetCount() == added);
+    }
+
+    SECTION("an existing creature replaces the goblin")
+    {
+        std::unique_ptr<CGameEffect> pReplace = Decode(CGAMEEFFECT_REPLACESELF, 0, 0, pProbe->GetId());
+        pReplace->m_res = CResRef("00GOB");
+        std::set<LONG> before;
+        POSITION posAdd = pArea->m_lVertSortAdd.GetHeadPosition();
+        while (posAdd != NULL) {
+            before.insert(static_cast<LONG>(reinterpret_cast<INT_PTR>(pArea->m_lVertSortAdd.GetNext(posAdd))));
+        }
+
+        CHECK(pReplace->ApplyEffect(pGoblin) == TRUE);
+        CHECK(pReplace->m_done == TRUE);
+        CHECK(pGoblin->m_removeFromArea == TRUE);
+        CHECK(!HasEffect(pGoblin->m_timedEffectList, CGAMEEFFECT_DEATH, CResRef("")));
+
+        CGameSprite* pNew = nullptr;
+        posAdd = pArea->m_lVertSortAdd.GetHeadPosition();
+        while (posAdd != NULL) {
+            LONG id = static_cast<LONG>(reinterpret_cast<INT_PTR>(pArea->m_lVertSortAdd.GetNext(posAdd)));
+            CGameObject* pObject;
+            if (before.count(id) == 0
+                && pArray->GetShare(id, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) == CGameObjectArray::SUCCESS) {
+                pArray->ReleaseShare(id, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+                pNew = dynamic_cast<CGameSprite*>(pObject);
+            }
+        }
+        REQUIRE(pNew != nullptr);
+        CHECK(pNew != pGoblin);
+        CHECK(pNew->m_resRef == CResRef("00GOB"));
+        CHECK(pNew->GetArea() == pArea);
+        CHECK(pNew->GetPos() == pos);
+        CVariable* pNamed = pArea->m_namedCreatures.FindKey(CString(reinterpret_cast<const char*>(pNew->GetScriptName())));
+        REQUIRE(pNamed != NULL);
+        CHECK(pNamed->m_intValue == pNew->GetId());
+    }
+
+    ClearMessages();
+}
