@@ -10,7 +10,6 @@
 #include "CGameSpriteButtonLists.h"
 #include "CIcon.h"
 #include "CInfGame.h"
-#include "CInfGameItemUse.h"
 #include "CItem.h"
 #include "CMessage.h"
 #include "CScreenWorld.h"
