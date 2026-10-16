@@ -471,12 +471,16 @@ void CBaldurProjector::TimerAsynchronousUpdate()
 
         if (g_pChitin->cNetwork.GetSessionOpen() == TRUE
             && !g_pChitin->cNetwork.GetSessionHosting()) {
-            // TODO: Incomplete.
+            // NOTE: A client tells the host its movie is over
+            // (CBaldurMessage::SendSignal 0x53, 0x31); multiplayer is not
+            // ported (ADR 0002).
         }
 
         if (g_pChitin->cNetwork.GetSessionHosting() == 1
             && g_pChitin->cNetwork.GetServiceProvider() != CNetwork::SERV_PROV_NULL) {
-            // TODO: Incomplete.
+            // NOTE: The host lets players join again
+            // (CMultiplayerSettings::SetListenToJoinOption); multiplayer is
+            // not ported (ADR 0002).
         }
 
         SelectEngine(pLastEngine);

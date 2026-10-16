@@ -28,6 +28,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <memory>
 #include <random>
 #include <string>
 #include <vector>
@@ -233,7 +234,11 @@ void ButtonArrayUpdates(CaseContext& ctx)
             originalSet = self[kWeaponSetOffset];
         });
 
-        CInfButtonArray* ours = new CInfButtonArray();
+        // Ours is zeroed storage too, not constructed: the ported constructor
+        // (0x5879E0) sets state 0 through SetState and UpdateButtons, which
+        // read the engine. Both functions only write members.
+        std::unique_ptr<uint8_t[]> storage(new uint8_t[sizeof(CInfButtonArray)]());
+        CInfButtonArray* ours = reinterpret_cast<CInfButtonArray*>(storage.get());
         ours->UpdateCustomizableButtonTypes(types);
         ours->UpdateSelectedWeaponSet(static_cast<BYTE>(nIndex));
 
@@ -242,7 +247,6 @@ void ButtonArrayUpdates(CaseContext& ctx)
             oracle::Compare(ctx, originalTypes[i], ours->m_customizableButtonTypes[i]);
         }
         oracle::Compare(ctx, originalSet, ours->m_nSelectedWeaponSet);
-        delete ours;
     }
 }
 

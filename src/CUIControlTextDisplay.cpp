@@ -438,8 +438,9 @@ void CUIControlTextDisplay::OnMouseMove(CPoint pt)
 void CUIControlTextDisplay::OnScroll(SHORT a1, SHORT a2)
 {
     SHORT nOldIndex = field_5A;
-    // TODO: Odd code, check.
-    field_5A = max(m_plstStrings->GetCount() - field_A6A, 0) * a1 / a2;
+    // NOTE: Checked against 0x4E2797-0x4E27C9: the strings past the visible
+    // lines (0 at least) times `a1` divided by `a2`, in signed 32 bits.
+    field_5A = static_cast<SHORT>(a1 * max(m_plstStrings->GetCount() - field_A6A, 0) / a2);
     if (nOldIndex != field_5A) {
         m_posTopString = m_plstStrings->FindIndex(field_5A);
 
@@ -480,9 +481,10 @@ void CUIControlTextDisplay::OnPageDown(DWORD nLines)
 {
     if (m_plstStrings->GetCount() > field_A6A) {
         SHORT nOldIndex = field_5A;
-        // TODO: Check casts.
-        SHORT v1 = static_cast<SHORT> min(nLines, static_cast<DWORD>(field_A6A - 1));
-        field_5A = min(field_5A + v1, m_plstStrings->GetCount() - field_A6A);
+        // NOTE: An unsigned compare with the visible lines, as the original
+        // (0x4E28CE); with 0 lines the step is -1.
+        SHORT v1 = static_cast<SHORT>(nLines >= static_cast<DWORD>(field_A6A) ? static_cast<DWORD>(field_A6A - 1) : nLines);
+        field_5A = static_cast<SHORT>(min(field_5A + v1, m_plstStrings->GetCount() - field_A6A));
         if (nOldIndex != field_5A) {
             m_posTopString = m_plstStrings->FindIndex(field_5A);
 
@@ -501,9 +503,10 @@ void CUIControlTextDisplay::OnPageUp(DWORD nLines)
 {
     if (!m_plstStrings->IsEmpty()) {
         SHORT nOldIndex = field_5A;
-        // TODO: Check casts.
-        SHORT v1 = static_cast<SHORT> min(nLines, static_cast<DWORD>(field_A6A - 1));
-        field_5A = max(field_5A - v1, 0);
+        // NOTE: An unsigned compare with the visible lines, as the original
+        // (0x4E2A1E); with 0 lines the step is -1.
+        SHORT v1 = static_cast<SHORT>(nLines >= static_cast<DWORD>(field_A6A) ? static_cast<DWORD>(field_A6A - 1) : nLines);
+        field_5A = static_cast<SHORT>(max(field_5A - v1, 0));
         if (nOldIndex != field_5A) {
             m_posTopString = m_plstStrings->FindIndex(field_5A);
 
@@ -1091,14 +1094,20 @@ BOOLEAN CUIControlTextDisplay::GetItem(INT nItemIndex, CString& sLabel, CString&
     POSITION pos = posBossItem;
     m_plstStrings->GetNext(pos);
 
-    // TODO: Loop looks odd, might be broken. Check.
+    // NOTE: Checked against 0x4E3F38-0x4E3F69: each following line's own
+    // string is appended (ours appended the next one's, and read past the
+    // list's tail on the last line). The loop runs while the count is below
+    // the line just appended's line count less one, and only the item's
+    // first line has a count (ParseAndInsertStringAfter 0x4E2E20 gives the
+    // others 0): an item of three or more lines comes back as its first two,
+    // as in the original.
     INT nLine = 0;
     if (m_plstStrings->GetAt(posBossItem)->GetNumLines() - 1 > 0) {
         CDisplayString* pDisplayString;
         do {
             pDisplayString = m_plstStrings->GetNext(pos);
             sString += " ";
-            sString += m_plstStrings->GetAt(pos)->GetString();
+            sString += pDisplayString->GetString();
             nLine++;
         } while (nLine < pDisplayString->GetNumLines() - 1);
     }

@@ -39,7 +39,10 @@ CUIControlScrollBar::CUIControlScrollBar(CUIPanel* panel, UI_CONTROL_SCROLLBAR* 
         buttonPressedSize.cy /= 2;
     }
 
-    // TODO: Many narrowing casts, check.
+    // NOTE: Checked against 0x4E48E0-0x4E4B74: the original computes the
+    // buttons' heights and positions and `field_140` in 16 bits (signed
+    // compares for the larger frame, arithmetic shifts for the double size);
+    // ours keeps the same low words.
 
     buttonInfo.base.nID = 0;
     buttonInfo.base.x = controlInfo->base.x;
@@ -249,7 +252,8 @@ BOOLEAN CUIControlScrollBar::OverThumb(const CPoint& pt)
         return FALSE;
     }
 
-    // TODO: Check cast.
+    // NOTE: The original's rectangle corner is 16-bit (0x4E5048-0x4E5056)
+    // and the grab offset the low word of `pt.y` less it.
     field_148 = static_cast<short>(pt.y - origin.y);
     return TRUE;
 }
