@@ -1824,7 +1824,7 @@ static void CGameSprite_DisplaySaveString765830(CGameSprite* pSprite, DWORD nSav
     sTemp.Format(" = %d", nRoll + nBonus);
     sRoll += sTemp;
 
-    STRREF strSave;
+    STRREF strSave = -1;
     if (nSaveType == 4) {
         strSave = 14009; // Fortitude
     } else if (nSaveType == 8) {
