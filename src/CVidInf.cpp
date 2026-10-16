@@ -1363,6 +1363,83 @@ BOOL CVidInf::FXRender(CPoint* pPoints, INT nPoints, const CRect& rSurface, COLO
     return FALSE;
 }
 
+// A polygon filled into the locked FX surface: convex or not, with the fill
+// flags CVidPoly takes (the container and door highlights pass 0x10, the
+// translucent blend).
+//
+// 0x79D680
+BOOL CVidInf::FXRender(CVidPoly* pPoly, const CRect& rClip, DWORD dwColor, DWORD dwFlags, const CPoint& ptRef, BOOL bConvex)
+{
+    if (auto* b = render::Active(); b && b->Clipped(rClip).DrawPoly(render::Vertices(*pPoly).data(), pPoly->m_nVertices, dwColor, true, dwFlags)) return TRUE;
+    if (g_pChitin->cVideo.m_bIs3dAccelerated) {
+        CVideo3d::glEnable(GL_TEXTURE_2D);
+        g_pChitin->GetCurrentVideoMode()->CheckResults3d(0);
+
+        g_pChitin->cVideo.field_13E = 2;
+
+        CVideo3d::glBindTexture(GL_TEXTURE_2D, 2);
+        g_pChitin->GetCurrentVideoMode()->CheckResults3d(0);
+
+        CVideo3d::glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        g_pChitin->GetCurrentVideoMode()->CheckResults3d(0);
+
+        CVideo3d::glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        g_pChitin->GetCurrentVideoMode()->CheckResults3d(0);
+
+        CVideo3d::glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+        g_pChitin->GetCurrentVideoMode()->CheckResults3d(0);
+
+        CVideo3d::glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+        g_pChitin->GetCurrentVideoMode()->CheckResults3d(0);
+
+        CVideo3d::glColor4f(1.0, 1.0, 1.0, 1.0);
+        g_pChitin->GetCurrentVideoMode()->CheckResults3d(0);
+
+        LONG lPitch;
+        if (g_pChitin->cVideo.field_13A) {
+            lPitch = CVidTile::BYTES_PER_TEXEL * CVIDINF_FX_WIDTH;
+        } else {
+            lPitch = CVidTile::BYTES_PER_TEXEL * m_rLockedRect.Width();
+        }
+
+        if (bConvex) {
+            return pPoly->FillConvexPoly(reinterpret_cast<WORD*>(CVideo3d::texImageData),
+                lPitch,
+                rClip,
+                dwColor,
+                dwFlags,
+                ptRef);
+        } else {
+            return pPoly->FillPoly(reinterpret_cast<WORD*>(CVideo3d::texImageData),
+                lPitch,
+                rClip,
+                dwColor,
+                dwFlags,
+                ptRef);
+        }
+    }
+
+    if (m_SurfaceDesc.lpSurface == NULL) {
+        return FALSE;
+    }
+
+    if (bConvex) {
+        return pPoly->FillConvexPoly(reinterpret_cast<WORD*>(m_SurfaceDesc.lpSurface),
+            m_SurfaceDesc.lPitch,
+            rClip,
+            dwColor,
+            dwFlags,
+            ptRef);
+    } else {
+        return pPoly->FillPoly(reinterpret_cast<WORD*>(m_SurfaceDesc.lpSurface),
+            m_SurfaceDesc.lPitch,
+            rClip,
+            dwColor,
+            dwFlags,
+            ptRef);
+    }
+}
+
 // #binary-identical
 // 0x79D050
 BOOL CVidInf::FXLock(CRect& rFXRect, DWORD dwFlags)
