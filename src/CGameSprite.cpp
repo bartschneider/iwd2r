@@ -3900,7 +3900,9 @@ void CGameSprite::OnActionButton(const CPoint& pt)
                 break;
             case 20:
             case -1:
-                pGame->UseMagicOnGround(m_id);
+                // A spell or item aimed at this sprite (`call 0x5BC450` at
+                // 0x6FFB27).
+                pGame->UseMagicOnObject(m_id);
 
                 pGame->SetState(0);
                 pGame->GetButtonArray()->SetSelectedButton(100);
