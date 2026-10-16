@@ -18,6 +18,8 @@
 #include "CItem.h"
 #include "CMessage.h"
 #include "CScreenCreateChar.h"
+#include "CScreenLoad.h"
+#include "CScreenSave.h"
 #include "CScreenWorld.h"
 #include "CTimerWorld.h"
 #include "platform/replay.h"
@@ -34,6 +36,7 @@ using platform::state_dump::EngineState;
 using platform::state_dump::Game;
 using platform::state_dump::GameMember;
 using platform::state_dump::PartyMember;
+using platform::state_dump::Slot;
 using platform::state_dump::World;
 
 // The active engine named by the m_pEngine* member it equals, by the
@@ -282,6 +285,26 @@ void ReadGame(CBaldurChitin* chitin, CInfGame* game, Game* out)
     }
 }
 
+// The save slots a load or save screen lists, the recorder's SlotsJson:
+// m_aGameSlots[0 .. m_nNumGameSlots - 1].
+template <typename Screen>
+void ReadSlots(Screen* screen, std::vector<Slot>* out)
+{
+    for (INT i = 0; i < screen->m_nNumGameSlots && i < screen->m_aGameSlots.GetSize(); ++i) {
+        const auto* slot = screen->m_aGameSlots[i];
+        if (!slot)
+            continue;
+        Slot s;
+        s.file = static_cast<const char*>(slot->m_sFileName);
+        s.name = static_cast<const char*>(slot->m_sSlotName);
+        s.character = static_cast<const char*>(slot->m_sCharacterName);
+        s.time = slot->m_nTime;
+        s.chapter = slot->m_nChapter;
+        s.chapterText = static_cast<const char*>(slot->m_sChapter);
+        out->push_back(s);
+    }
+}
+
 // IWD2R_PROBE's block (platform/replay_probe.h), the recorder's ReadProbe.
 void ReadProbe(platform::replay_probe::Frame* out)
 {
@@ -443,6 +466,11 @@ public:
         out->hasGame = chitin->m_pObjectGame != nullptr;
         if (out->hasGame)
             ReadGame(chitin, chitin->m_pObjectGame, &out->game);
+        out->hasSlots = out->screen == "load" || out->screen == "save";
+        if (out->screen == "load")
+            ReadSlots(chitin->m_pEngineLoad, &out->slots);
+        else if (out->screen == "save")
+            ReadSlots(chitin->m_pEngineSave, &out->slots);
     }
 
     void ReadAi(platform::state_dump::AiState* out) const override

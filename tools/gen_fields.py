@@ -36,8 +36,9 @@ MFC's containers have no comments of ours: their 32-bit layout (VC6 MFC
 4.2, afxcoll.h) is built in. CPtrList (and CObList, CTypedPtrList) has
 m_pNodeHead, m_pNodeTail and m_nCount; its node, "CPtrList::CNode", has
 pNext, pPrev and data; CPtrArray (and CObArray, CTypedPtrArray) has m_pData
-and m_nSize. A member path may go into them ("m_lVertSort.m_pNodeHead"), and
-a class deriving from one has their members.
+and m_nSize; CString (afx.h) is its one m_pchData, the pointer to the
+characters. A member path may go into them ("m_lVertSort.m_pNodeHead",
+"m_sFileName.m_pchData"), and a class deriving from one has their members.
 
 fields.json maps each field to {"base", "offset", "type"} (plus "count"):
 base is the class name, or the global's address for a global; offset is a
@@ -92,6 +93,9 @@ MFC = {
     'CPtrList::CNode': {'pNext': (0x00, 'void*'), 'pPrev': (0x04, 'void*'),
                         'data': (0x08, 'void*')},
     'CPtrArray': {'m_pData': (0x04, 'void*'), 'm_nSize': (0x08, 'int')},
+    # afx.h: no vtable; the characters, with the CStringData header
+    # (nRefs, nDataLength, nAllocLength) before them.
+    'CString': {'m_pchData': (0x00, 'char*')},
 }
 MFC_ALIASES = {'CObList': 'CPtrList', 'CTypedPtrList': 'CPtrList',
                'CObArray': 'CPtrArray', 'CTypedPtrArray': 'CPtrArray'}

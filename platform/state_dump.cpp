@@ -127,6 +127,19 @@ namespace {
         return "{\"party_gold\": " + Number(g.partyGold) + ", \"members\": " + members + "}";
     }
 
+    // recorder.cpp's SlotsJson.
+    std::string SlotsJson(const std::vector<Slot>& slots)
+    {
+        std::string out = "[";
+        for (size_t i = 0; i < slots.size(); ++i) {
+            const Slot& s = slots[i];
+            out += std::string(i ? ", " : "") + "{\"file\": " + JsonString(s.file) + ", \"name\": " + JsonString(s.name)
+                + ", \"character\": " + JsonString(s.character) + ", \"time\": " + Number(s.time)
+                + ", \"chapter\": " + Number(s.chapter) + ", \"chapter_text\": " + JsonString(s.chapterText) + "}";
+        }
+        return out + "]";
+    }
+
 }
 
 void SetSource(const DumpSource* source)
@@ -156,7 +169,8 @@ std::string ToJson(const Snapshot& s)
         + ", \"ai_rng_state\": " + (s.hasAiRngState ? Number(s.aiRngState) : std::string("null")) + "},\n";
     json += "  \"chargen\": " + (e.hasChargen ? ChargenJson(e.chargen) : std::string("null")) + ",\n";
     json += "  \"world\": " + (e.hasWorld ? WorldJson(e.world) : std::string("null")) + ",\n";
-    json += "  \"game\": " + (e.hasGame ? GameJson(e.game) : std::string("null")) + "\n}\n";
+    json += "  \"game\": " + (e.hasGame ? GameJson(e.game) : std::string("null")) + ",\n";
+    json += "  \"slots\": " + (e.hasSlots ? SlotsJson(e.slots) : std::string("null")) + "\n}\n";
     return json;
 }
 

@@ -766,5 +766,85 @@
     "base": "CItem",
     "offset": "0x0020",
     "type": "u32"
+  },
+  "load_slots": {
+    "base": "CScreenLoad",
+    "offset": "0x01D6",
+    "type": "ptr"
+  },
+  "load_slots_count": {
+    "base": "CScreenLoad",
+    "offset": "0x01CA",
+    "type": "i32"
+  },
+  "save_slots": {
+    "base": "CScreenSave",
+    "offset": "0x0464",
+    "type": "ptr"
+  },
+  "save_slots_count": {
+    "base": "CScreenSave",
+    "offset": "0x0458",
+    "type": "i32"
+  },
+  "load_slot_file": {
+    "base": "CScreenLoadGameSlot",
+    "offset": "0x0000",
+    "type": "ptr"
+  },
+  "load_slot_name": {
+    "base": "CScreenLoadGameSlot",
+    "offset": "0x0004",
+    "type": "ptr"
+  },
+  "load_slot_character": {
+    "base": "CScreenLoadGameSlot",
+    "offset": "0x0304",
+    "type": "ptr"
+  },
+  "load_slot_time": {
+    "base": "CScreenLoadGameSlot",
+    "offset": "0x0308",
+    "type": "u32"
+  },
+  "load_slot_chapter": {
+    "base": "CScreenLoadGameSlot",
+    "offset": "0x030C",
+    "type": "i32"
+  },
+  "load_slot_chapter_text": {
+    "base": "CScreenLoadGameSlot",
+    "offset": "0x0310",
+    "type": "ptr"
+  },
+  "save_slot_file": {
+    "base": "CScreenSaveGameSlot",
+    "offset": "0x0000",
+    "type": "ptr"
+  },
+  "save_slot_name": {
+    "base": "CScreenSaveGameSlot",
+    "offset": "0x0004",
+    "type": "ptr"
+  },
+  "save_slot_character": {
+    "base": "CScreenSaveGameSlot",
+    "offset": "0x0304",
+    "type": "ptr"
+  },
+  "save_slot_time": {
+    "base": "CScreenSaveGameSlot",
+    "offset": "0x0308",
+    "type": "u32"
+  },
+  "save_slot_chapter": {
+    "base": "CScreenSaveGameSlot",
+    "offset": "0x030C",
+    "type": "i32"
+  },
+  "save_slot_chapter_text": {
+    "base": "CScreenSaveGameSlot",
+    "offset": "0x0310",
+    "type": "ptr"
   }
 }

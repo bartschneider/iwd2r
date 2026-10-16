@@ -10,7 +10,8 @@
     "globals",
     "chargen",
     "world",
-    "game"
+    "game",
+    "slots"
   ],
   "additionalProperties": false,
   "properties": {
@@ -540,6 +541,65 @@
                 "maxItems": 51
               }
             }
+          }
+        }
+      }
+    },
+    "slots": {
+      "description": "The save slots the load or save screen lists, null on every other screen: CScreenLoad::m_aGameSlots[0 .. m_nNumGameSlots - 1] (CScreenLoadGameSlot) or CScreenSave's (CScreenSaveGameSlot), in their order (mpsave's saves by folder name, CInfGame::GetSaveGames 0x5C0520, without default), as RefreshGameSlots (0x63C940, 0x65BCF0) read them from each save's game file. The file times (m_sFileTime) are the real time of the files and are left out.",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "object",
+        "required": [
+          "file",
+          "name",
+          "character",
+          "time",
+          "chapter",
+          "chapter_text"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "file": {
+            "description": "The save's folder in mpsave, m_sFileName (null when the recorder cannot read the CString).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "description": "The name shown, m_sSlotName: the folder name after its NNNNNNNNN- number.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "character": {
+            "description": "The first party member's name from the save's game file, m_sCharacterName.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "time": {
+            "description": "The game time the save shows, m_nTime: the game file's world time in seconds times CTimerWorld::TIMESCALE_MSEC_PER_SEC.",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          "chapter": {
+            "description": "The save's chapter, m_nChapter: the CHAPTER global of its game file (0 without one).",
+            "type": "integer"
+          },
+          "chapter_text": {
+            "description": "The chapter's title, m_sChapter (CHAPTERS.2DA through the string table).",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       }
@@ -1149,6 +1209,70 @@
     "item_flags": {
       "class": "CItem",
       "member": "m_flags"
+    },
+    "load_slots": {
+      "class": "CScreenLoad",
+      "member": "m_aGameSlots.m_pData"
+    },
+    "load_slots_count": {
+      "class": "CScreenLoad",
+      "member": "m_nNumGameSlots"
+    },
+    "save_slots": {
+      "class": "CScreenSave",
+      "member": "m_aGameSlots.m_pData"
+    },
+    "save_slots_count": {
+      "class": "CScreenSave",
+      "member": "m_nNumGameSlots"
+    },
+    "load_slot_file": {
+      "class": "CScreenLoadGameSlot",
+      "member": "m_sFileName.m_pchData"
+    },
+    "load_slot_name": {
+      "class": "CScreenLoadGameSlot",
+      "member": "m_sSlotName.m_pchData"
+    },
+    "load_slot_character": {
+      "class": "CScreenLoadGameSlot",
+      "member": "m_sCharacterName.m_pchData"
+    },
+    "load_slot_time": {
+      "class": "CScreenLoadGameSlot",
+      "member": "m_nTime"
+    },
+    "load_slot_chapter": {
+      "class": "CScreenLoadGameSlot",
+      "member": "m_nChapter"
+    },
+    "load_slot_chapter_text": {
+      "class": "CScreenLoadGameSlot",
+      "member": "m_sChapter.m_pchData"
+    },
+    "save_slot_file": {
+      "class": "CScreenSaveGameSlot",
+      "member": "m_sFileName.m_pchData"
+    },
+    "save_slot_name": {
+      "class": "CScreenSaveGameSlot",
+      "member": "m_sSlotName.m_pchData"
+    },
+    "save_slot_character": {
+      "class": "CScreenSaveGameSlot",
+      "member": "m_sCharacterName.m_pchData"
+    },
+    "save_slot_time": {
+      "class": "CScreenSaveGameSlot",
+      "member": "m_nTime"
+    },
+    "save_slot_chapter": {
+      "class": "CScreenSaveGameSlot",
+      "member": "m_nChapter"
+    },
+    "save_slot_chapter_text": {
+      "class": "CScreenSaveGameSlot",
+      "member": "m_sChapter.m_pchData"
     }
   }
 }

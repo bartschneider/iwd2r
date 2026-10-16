@@ -3123,6 +3123,12 @@ public:
     /* 0020 */ WORD m_count;
 };
 
+class CHolderNamed {
+public:
+    /* 0004 */ int m_n;
+    /* 0008 */ CString m_sName;
+};
+
 class CHolder {
 public:
     /* 0000 */ SCRIPTNAME m_name;
@@ -3261,6 +3267,11 @@ class GenFieldsTest(unittest.TestCase):
             'count': {'base': 'CHeldToo', 'offset': '0x0020',
                       'type': 'u16'},
         })
+        # CString: its m_pchData, the pointer to its characters.
+        out = self.generate({'name': {'class': 'CHolderNamed',
+                                      'member': 'm_sName.m_pchData'}})
+        self.assertEqual(out, {'name': {'base': 'CHolderNamed',
+                                        'offset': '0x0008', 'type': 'ptr'}})
         # The repository's CItem (src/CItem.h): its resref is at 0x0C in the
         # original (0x4E785C lea ebx, [esi+0xC]).
         with open(os.path.join(ROOT, 'oracle', 'replay', 'fields.json')) as f:
@@ -3355,6 +3366,23 @@ class GenFieldsTest(unittest.TestCase):
         self.assertEqual(fields['item_resref']['offset'], '0x000C')
         self.assertEqual(fields['item_use_count1']['offset'], '0x0018')
         self.assertEqual(fields['item_flags']['offset'], '0x0020')
+        # The slots: CScreenLoad::RefreshGameSlots 0x63CA0A (m_nNumGameSlots
+        # [edi+0x1CA]), 0x63CAAE (m_aGameSlots.m_pData [edi+0x1D6]);
+        # CScreenSave::RefreshGameSlots 0x65BDBB ([edi+0x458]), 0x65BE5F
+        # ([edi+0x464]); a slot's 0x63D354 (add ecx, 0x304), 0x63D36C
+        # ([ecx+0x308]), 0x63D37F ([ecx+0x30C]), 0x63D393 (add ecx, 0x310).
+        self.assertEqual(fields['load_slots_count']['offset'], '0x01CA')
+        self.assertEqual(fields['load_slots']['offset'], '0x01D6')
+        self.assertEqual(fields['save_slots_count']['offset'], '0x0458')
+        self.assertEqual(fields['save_slots']['offset'], '0x0464')
+        for kind in ('load', 'save'):
+            self.assertEqual(fields[kind + '_slot_character']['offset'],
+                             '0x0304')
+            self.assertEqual(fields[kind + '_slot_time']['offset'], '0x0308')
+            self.assertEqual(fields[kind + '_slot_chapter']['offset'],
+                             '0x030C')
+            self.assertEqual(fields[kind + '_slot_chapter_text']['offset'],
+                             '0x0310')
 
 
 class MiniSchemaTest(unittest.TestCase):
@@ -3420,7 +3448,7 @@ class MiniSchemaTest(unittest.TestCase):
                             'reinitializing': 0, 'loading': 0, 'loads': 0,
                             'held_frames': 0, 'ai_rng_state': None},
                 'chargen': None, 'world': None,
-                'game': {'party_gold': 0, 'members': []}}
+                'game': {'party_gold': 0, 'members': []}, 'slots': None}
         self.assertEqual(minischema.validate(dump, schema), [])
         dump['chargen'] = {'race': 1, 'subrace': 0, 'class': 5,
                            'abilities': [10, 11, 12, 13, 14, 15],
@@ -3453,7 +3481,7 @@ class MiniSchemaTest(unittest.TestCase):
                           'dialog': {'active': 1, 'speaker': 3, 'entry': 0,
                                      'responses': 2},
                           'explored_count': 12, 'creatures': 3},
-                'game': None}
+                'game': None, 'slots': None}
         self.assertEqual(minischema.validate(dump, schema), [])
         dump['world']['party'].append(
             {'id': 131073, 'x': None, 'y': None, 'hp': None, 'max_hp': None,
@@ -3501,7 +3529,13 @@ class MiniSchemaTest(unittest.TestCase):
                             'reinitializing': 0, 'loading': 0, 'loads': 1,
                             'held_frames': 13, 'ai_rng_state': 7},
                 'chargen': None, 'world': None,
-                'game': {'party_gold': 75, 'members': [member, gone]}}
+                'game': {'party_gold': 75, 'members': [member, gone]},
+                'slots': [{'file': '000000004-Probe Save',
+                           'name': 'Probe Save', 'character': 'Probe',
+                           'time': 25200000, 'chapter': 0,
+                           'chapter_text': 'Prologue'},
+                          {'file': None, 'name': None, 'character': None,
+                           'time': 0, 'chapter': -1, 'chapter_text': None}]}
         self.assertEqual(minischema.validate(dump, schema), [])
         member['inventory'] = inventory[:50]
         member['class_levels'] = [0] * 12
@@ -3514,8 +3548,10 @@ class MiniSchemaTest(unittest.TestCase):
         del dump['game']['party_gold']
         member['class_levels'] = [0] * 11
         inventory[16]['uses'] = [40, 0, 0]
+        del dump['slots'][1]['time']
         self.assertEqual(minischema.validate(dump, schema), [
-            "$.game: missing required property 'party_gold'"])
+            "$.game: missing required property 'party_gold'",
+            "$.slots[1]: missing required property 'time'"])
 
     def test_game_fields_are_compared(self):
         """The game block's fields are compared, an item's by slot."""

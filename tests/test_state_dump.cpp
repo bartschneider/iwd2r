@@ -225,7 +225,7 @@ TEST_CASE("state dump writes the doors, the dialog, the explored tiles and the c
     REQUIRE(ReadFile(path).find("\"world\": {\"area\": \"AR1000\", \"party\": [], "
                                 "\"doors\": [{\"name\": \"DOOR01\", \"open\": 0, \"locked\": 1}], "
                                 "\"dialog\": {\"active\": 1, \"speaker\": 3, \"entry\": 0, \"responses\": 2}, "
-                                "\"explored_count\": 12, \"creatures\": 3},\n  \"game\": null\n}\n")
+                                "\"explored_count\": 12, \"creatures\": 3},\n  \"game\": null,\n  \"slots\": null\n}\n")
         != std::string::npos);
     std::error_code ec;
     fs::remove_all(dir, ec);
@@ -239,7 +239,33 @@ TEST_CASE("state dump world block with no area and no party", "[dump]")
     REQUIRE(platform::state_dump::ToJson(s).find(
                 "\"world\": {\"area\": \"\", \"party\": [], \"doors\": [], "
                 "\"dialog\": {\"active\": 0, \"speaker\": -1, \"entry\": -1, \"responses\": 0}, "
-                "\"explored_count\": 0, \"creatures\": 0},\n  \"game\": null\n}\n")
+                "\"explored_count\": 0, \"creatures\": 0},\n  \"game\": null,\n  \"slots\": null\n}\n")
+        != std::string::npos);
+}
+
+TEST_CASE("state dump writes the load and save screens' slots", "[dump]")
+{
+    Snapshot s = MenuSnapshot();
+    s.engine.screen = "load";
+    s.engine.hasSlots = true;
+    REQUIRE(platform::state_dump::ToJson(s).find("\"slots\": []\n}\n") != std::string::npos);
+    platform::state_dump::Slot slot;
+    slot.file = "000000004-Probe Save";
+    slot.name = "Probe Save";
+    slot.character = "Probe";
+    slot.time = 25200000;
+    slot.chapter = 0;
+    slot.chapterText = "Prologue";
+    s.engine.slots.push_back(slot);
+    slot.file = "crash\"1";
+    slot.name = "crash\"1";
+    slot.chapter = -1;
+    s.engine.slots.push_back(slot);
+    REQUIRE(platform::state_dump::ToJson(s).find(
+                "\"slots\": [{\"file\": \"000000004-Probe Save\", \"name\": \"Probe Save\", \"character\": \"Probe\", "
+                "\"time\": 25200000, \"chapter\": 0, \"chapter_text\": \"Prologue\"}, "
+                "{\"file\": \"crash\\\"1\", \"name\": \"crash\\\"1\", \"character\": \"Probe\", \"time\": 25200000, "
+                "\"chapter\": -1, \"chapter_text\": \"Prologue\"}]\n}\n")
         != std::string::npos);
 }
 
@@ -511,7 +537,7 @@ TEST_CASE("replay mode dumps the start screen checkpoint", "[dump][data]")
         == "{\n  \"frame\": 61,\n  \"checkpoint\": \"start\",\n  \"screen\": \"connection\",\n  \"rng_state\": 1,\n"
            "  \"globals\": {\"au_counter\": 61, \"fullscreen\": 0, \"in_async_update\": 0, \"ai_stalled_frames\": 0, \"ai_overlap_frames\": 0, "
            "\"search_wait_timeouts\": 0, \"reinitializing\": 0, \"loading\": 0, \"loads\": 0, \"held_frames\": 0, \"ai_rng_state\": 3861535683},\n  \"chargen\": null,\n  \"world\": null,\n"
-           "  \"game\": {\"party_gold\": 0, \"members\": []}\n}\n");
+           "  \"game\": {\"party_gold\": 0, \"members\": []},\n  \"slots\": null\n}\n");
     REQUIRE(periodic.find("\"frame\": 30,") != std::string::npos);
     REQUIRE(statusText == "frame=61\nscript_line=0\nstate=finished\n");
 }

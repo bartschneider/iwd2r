@@ -105,6 +105,16 @@ struct Game {
     std::vector<GameMember> members;
 };
 
+// One schema.json "slots" entry: a save the load or save screen lists.
+struct Slot {
+    std::string file;
+    std::string name;
+    std::string character;
+    uint32_t time = 0;
+    int32_t chapter = 0;
+    std::string chapterText;
+};
+
 // What the engine's DumpSource reads.
 struct EngineState {
     // schema.json "screen": none, unknown or the m_pEngine* member's name.
@@ -124,6 +134,9 @@ struct EngineState {
     // On every screen while the engine has a CInfGame.
     bool hasGame = false;
     Game game;
+    // Only on the load and save screens.
+    bool hasSlots = false;
+    std::vector<Slot> slots;
 };
 
 // One dump.
