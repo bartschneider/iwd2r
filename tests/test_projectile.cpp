@@ -1002,17 +1002,29 @@ TEST_CASE("projectile: Magic Missile fires its missiles at the target with copie
     CHECK(missiles[2]->m_driftDecay == 20);
     CHECK(missiles[2]->m_bTrackTargetHeight == FALSE);
 
-    // Each one is at its target: its next update delivers its copy of the
-    // effect and removes it.
-    for (CProjectile* pMissile : missiles) {
-        LONG id = pMissile->GetId();
-        pMissile->AIUpdate();
+    // Each one flies to its target (from the caster's launch point, which
+    // depends on its facing: a few updates at most), delivers its copy of
+    // the effect and removes itself.
+    for (size_t n = 0; n < missiles.size(); n++) {
+        INFO("missile " << n);
+        LONG id = missiles[n]->GetId();
+        const INT nBefore = g_pBaldurChitin->m_cMessageHandler.m_messageList.GetCount();
+        bool removed = false;
+        for (int update = 0; update < 100 && !removed; update++) {
+            CGameObject* pObject;
+            if (pArray->GetShare(id, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) != CGameObjectArray::SUCCESS) {
+                removed = true;
+                break;
+            }
+            pArray->ReleaseShare(id, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+            pObject->AIUpdate();
+        }
+        CHECK(removed);
+        CHECK(g_pBaldurChitin->m_cMessageHandler.m_messageList.GetCount() == nBefore + 1);
         CMessageGroup* pGroup = LastGroup();
         REQUIRE(pGroup != nullptr);
         CHECK(pGroup->GetTarget() == pSprite->GetId());
         CHECK(pGroup->GetSource() == pSprite->GetId());
-        CGameObject* pObject;
-        CHECK(pArray->GetShare(id, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) != CGameObjectArray::SUCCESS);
     }
     CHECK(g_pBaldurChitin->m_cMessageHandler.m_messageList.GetCount() == 3);
 
