@@ -1225,14 +1225,70 @@ void CAIObjectType::Decode(CGameAIBase* caller)
         case 43:
         case 44:
         case 45:
-        case 46:
-            // Nearest, SecondNearest to TenthNearest and SecondNearestEnemyOf
-            // to TenthNearestEnemyOf.
-            // TODO: 0x40C039-0x40C14E and 0x40C208-0x40C2B9 not ported (they
-            // need the area's n-th nearest searches 0x46BAD0 and 0x46DDC0);
-            // the object is not found.
-            Set(NOONE);
-            return;
+        case 46: {
+            // SecondNearestEnemyOf to TenthNearestEnemyOf (0x40C039): the
+            // other side's, as NearestEnemyOf; Nearest and SecondNearest to
+            // TenthNearest (0x40C208): the current object's type. Both take
+            // the area's n-th nearest search (0x46BAD0, or from the caller's
+            // point off the front list, 0x46DDC0).
+            BYTE nNearest;
+            if (nSpecial <= 37 && nSpecial != 14) {
+                nNearest = static_cast<BYTE>(nSpecial - 28);
+                if (typeAI.m_nEnemyAlly <= CAIOBJECTTYPE_EA_GOODCUTOFF) {
+                    typeAI.Set(CAIObjectType(CAIOBJECTTYPE_EA_EVILCUTOFF, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0));
+                } else if (typeAI.m_nEnemyAlly >= CAIOBJECTTYPE_EA_EVILCUTOFF) {
+                    typeAI.Set(CAIObjectType(CAIOBJECTTYPE_EA_GOODCUTOFF, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0));
+                } else {
+                    g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(pObject->m_id,
+                        CGameObjectArray::THREAD_ASYNCH,
+                        INFINITE);
+                    Set(NOONE);
+                    return;
+                }
+            } else {
+                // NOTE: Nearest asks for the second nearest, as
+                // SecondNearest does (0x40C208-0x40C231: the ordinal - 38,
+                // 0 for Nearest, then + 1).
+                nNearest = nSpecial == 14 ? 1 : static_cast<BYTE>(nSpecial - 37);
+                typeAI.m_nInstance = CGameObjectArray::INVALID_INDEX;
+            }
+            LONG nId;
+            if (caller->GetVertListType() == CGameObject::LIST_FRONT) {
+                nId = caller->GetArea()->sub_46BAD0(caller->m_id,
+                    typeAI,
+                    caller->GetVisualRange(),
+                    caller->GetVisibleTerrainTable(),
+                    TRUE,
+                    caller->GetCanSeeInvisible(),
+                    FALSE,
+                    nNearest,
+                    FALSE);
+            } else {
+                nId = caller->GetArea()->sub_46DDC0(caller->GetPos().x,
+                    caller->GetPos().y,
+                    typeAI,
+                    caller->GetVisualRange(),
+                    caller->GetVisibleTerrainTable(),
+                    TRUE,
+                    caller->GetCanSeeInvisible(),
+                    nNearest,
+                    FALSE);
+            }
+            // NOTE: Not found leaves the instance at -1, and sub_40CB20 then
+            // looks for the nearest of the type (0x40C7E2).
+            typeAI.m_nInstance = nId;
+            g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(pObject->m_id,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+            pObject = typeAI.sub_40CB20(caller, CGameObject::TYPE_AIBASE, TRUE);
+            if (pObject == NULL) {
+                Set(NOONE);
+                return;
+            }
+            typeAI.Set(pObject->GetAIType());
+            typeAI.m_nInstance = pObject->m_id;
+            continue;
+        }
         case 49:
         case 50: {
             // Farthest (0x40C2B9): the current object's type; FarthestEnemyOf

@@ -178,6 +178,7 @@ public:
     void GetAllInPoly(const CRect& rBounding, CPoint* pPoly, SHORT nPoly, const CAIObjectType& type, const BYTE* terrainTable, CTypedPtrList<CPtrList, LONG*>& targets, BOOLEAN checkBackList);
     LONG sub_46DAE0(INT x, INT y, const CAIObjectType& type, int a4, const BYTE* terrainTable, int a6, int a7, int a8, int a9);
     LONG sub_46DDC0(INT x, INT y, const CAIObjectType& type, SHORT range, const BYTE* terrainTable, BOOL checkLOS, BOOL seeInvisible, BYTE nNearest, BOOL summonedOnly);
+    LONG sub_46BAD0(LONG startObject, const CAIObjectType& type, SHORT range, const BYTE* terrainTable, BOOL checkLOS, BOOL seeInvisible, BOOL ignoreSleeping, BYTE nNearest, BOOL summonedOnly);
     BOOLEAN CanSaveGame(STRREF& strError);
     void AIUpdate();
     void CompressTime(DWORD deltaTime);

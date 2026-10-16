@@ -2012,4 +2012,23 @@ TEST_CASE("combat: the area finds the n-th nearest enemy of a point", "[combat][
 
     // A point off the area: none.
     CHECK(pArea->sub_46DDC0(-1, pos.y, enemy, 400, terrain, FALSE, FALSE, 0, FALSE) == CGameObjectArray::INVALID_INDEX);
+
+    // 0x46BAD0, the same from the party member on the front list, outward
+    // from its place in the list.
+    CHECK(pArea->sub_46BAD0(pCharacter->GetId(), enemy, 400, terrain, FALSE, FALSE, FALSE, 0, FALSE) == pGoblin->GetId());
+    CHECK(pArea->sub_46BAD0(pCharacter->GetId(), enemy, 400, terrain, FALSE, FALSE, FALSE, 1, FALSE) == pFarGoblin->GetId());
+    CHECK(pArea->sub_46BAD0(pCharacter->GetId(), enemy, 400, terrain, FALSE, FALSE, FALSE, 2, FALSE) == pFarGoblin->GetId());
+    // A dead goblin is left out.
+    const DWORD state = pGoblin->GetDerivedStats()->m_generalState;
+    pGoblin->GetDerivedStats()->m_generalState = state | STATE_DEAD;
+    CHECK(pArea->sub_46BAD0(pCharacter->GetId(), enemy, 400, terrain, FALSE, FALSE, FALSE, 0, FALSE) == pFarGoblin->GetId());
+    pGoblin->GetDerivedStats()->m_generalState = state;
+
+    // CAIObjectType::Decode: SecondNearestEnemyOf (29) of the party member
+    // is the far goblin.
+    CAIObjectType second(0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0);
+    second.m_SpecialCase[0] = 29;
+    second.Decode(pCharacter);
+    INFO("decoded instance " << second.m_nInstance);
+    CHECK(second.m_nInstance == pFarGoblin->GetId());
 }
