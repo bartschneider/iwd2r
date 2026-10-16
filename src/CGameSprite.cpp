@@ -13667,9 +13667,52 @@ SHORT CGameSprite::ExecuteAction()
         returnValue = ACTION_ERROR;
         goto done;
     case 255:
-        // SetBestWeapon
-        // TODO: 0x72AB84-0x72ACB5 not ported.
-        returnValue = ACTION_ERROR;
+        // SetBestWeapon (0x72AB84-0x72ACB5): within the action's range (in
+        // search squares) of the target, the best melee weapon unless the
+        // selected ability is a melee one; beyond it, the best ranged one
+        // unless the selected ability is a ranged or launcher one.
+        // NOTE: The original never releases the target's share (a no-op for
+        // the AI thread).
+        pTarget = GetTargetShareType(CGameObject::TYPE_SPRITE);
+        if (pTarget == NULL) {
+            returnValue = ACTION_ERROR;
+            goto done;
+        }
+
+        {
+            CItem* pItem = m_equipment.m_items[m_equipment.m_selectedWeapon];
+            const ITEM_ABILITY* pAbility = NULL;
+            if (pItem != NULL) {
+                pItem->Demand();
+                pAbility = pItem->GetAbility(m_equipment.m_selectedWeaponAbility);
+            }
+
+            const CPoint& ptTarget = pTarget->GetPos();
+            LONG nTargetX = ptTarget.x / CPathSearch::GRID_SQUARE_SIZEX;
+            LONG nTargetY = ptTarget.y / CPathSearch::GRID_SQUARE_SIZEY;
+            LONG dy = GetPos().y / CPathSearch::GRID_SQUARE_SIZEY - nTargetY;
+            LONG dx = GetPos().x / CPathSearch::GRID_SQUARE_SIZEX - nTargetX;
+            LONG nRange = m_curAction.m_specificID + 1;
+
+            if (dx * dx + dy * dy <= nRange * nRange) {
+                // NOTE: The type's low byte (`cmp byte ptr [eax], 1`).
+                if (pAbility != NULL && (pAbility->type & 0xFF) == 1) {
+                    returnValue = ACTION_DONE;
+                } else {
+                    returnValue = EquipMostDamagingMelee();
+                }
+            } else {
+                if (pAbility != NULL && ((pAbility->type & 0xFF) == 4 || (pAbility->type & 0xFF) == 2)) {
+                    returnValue = ACTION_DONE;
+                } else {
+                    returnValue = EquipRanged();
+                }
+            }
+
+            if (pItem != NULL) {
+                pItem->Release();
+            }
+        }
         goto done;
     case 256:
         // SetDialogueRange (0x72ACB5-0x72ACD1)

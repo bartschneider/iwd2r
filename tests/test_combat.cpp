@@ -2151,3 +2151,51 @@ TEST_CASE("combat: GiveItem moves a goblin's weapon into the party member's inve
     CHECK(pGiven->GetResRef() == CResRef(sWeapon));
     ClearMessages();
 }
+
+// SetBestWeapon (action 255, 0x72AB84-0x72ACB5): the target within the
+// action's range in search squares asks for a melee weapon, beyond it for a
+// ranged one.
+TEST_CASE("combat: SetBestWeapon picks the goblin's melee weapon within its range", "[combat][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    Fight fight;
+    std::string why;
+    if (!SetUpFight(fight, why)) {
+        if (why.find("CHR") != std::string::npos) {
+            SKIP("[iwd2r-skip] " + why);
+        }
+        FAIL(why);
+    }
+    CGameSprite* pCharacter = fight.pCharacter;
+    CGameSprite* pGoblin = fight.pGoblin;
+    CGameSpriteEquipment* pEquipment = pGoblin->GetEquipment();
+    const BYTE nWeapon = pEquipment->m_selectedWeapon;
+    REQUIRE(nWeapon >= CGameSpriteEquipment::SLOT_WEAPON);
+    const CAIObjectType character(0, 0, 0, 0, 0, 0, 0, 0, pCharacter->GetId());
+
+    // The party member is two search squares away: a range of 5 holds it.
+    pGoblin->ClearActions(FALSE);
+    pGoblin->SelectWeaponAbility(CGameSpriteEquipment::SLOT_FIST, 0, 0, 1);
+    REQUIRE(pEquipment->m_selectedWeapon == CGameSpriteEquipment::SLOT_FIST);
+    pGoblin->m_curAction = CAIAction(255, character, 5, 0, 0);
+    CHECK(pGoblin->ExecuteAction() == CGameAIBase::ACTION_DONE);
+    // The fists are a melee ability: they stay.
+    CHECK(pEquipment->m_selectedWeapon == CGameSpriteEquipment::SLOT_FIST);
+
+    // Beyond a range of 0 the goblin wants a ranged weapon; it has none, so
+    // EquipRanged falls back to its most damaging melee weapon.
+    pGoblin->m_curAction = CAIAction(255, character, 0, 0, 0);
+    CHECK(pGoblin->ExecuteAction() == CGameAIBase::ACTION_DONE);
+    CHECK(pEquipment->m_selectedWeapon == nWeapon);
+
+    // No target: an error.
+    pGoblin->m_curAction = CAIAction(255, CAIObjectType(0, 0, 0, 0, 0, 0, 0, 0, 0x7FFF0000), 5, 0, 0);
+    CHECK(pGoblin->ExecuteAction() == CGameAIBase::ACTION_ERROR);
+    ClearMessages();
+}
