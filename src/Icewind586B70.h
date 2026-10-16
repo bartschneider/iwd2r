@@ -25,11 +25,13 @@ public:
     bool sub_586CA0(CGameSprite* sprite);
     bool sub_586CF0(CGameSprite* sprite1, CGameSprite* sprite2);
     void sub_586D60(CGameSprite* sprite1, CGameSprite* sprite2);
+    void sub_586DC0(CGameSprite* sprite);
     void sub_586F20(CGameSprite* sprite1, CGameSprite* sprite2);
     void Remove(CGameSprite* sprite);
     void sub_586FC0(CGameSprite* sprite);
     void sub_587190();
     void Clear();
+    void sub_5872C0(CGameSprite* sprite);
     std::vector<int> sub_587510();
     int GetCount();
 
