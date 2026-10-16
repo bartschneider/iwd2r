@@ -453,6 +453,7 @@ public:
     DWORD GetMaxSpellLevel(const BYTE& nClass, const UINT& nLevel) const;
     BYTE GetSpecializationIndex(BYTE nClass, DWORD nSpecialization) const;
     DWORD GetSpecializationMask(BYTE nClass, BYTE nIndex) const;
+    INT sub_547620(INT nType, CGameSprite* pSprite, LONG nSaveMod, DWORD nSpellLevel) const;
 
     /* 0000 */ C2DArray m_tReactionModCharisma;
     /* 0024 */ C2DArray m_tReactionModReputation;

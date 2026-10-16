@@ -447,7 +447,8 @@ void CScreenChapter::ResetMainPanel()
         g_pBaldurChitin->GetTlkTable().Fetch(m_pTextList->GetAt(pos), strRes);
 
         if (nLine == 0) {
-            // TODO: Check `Right`, doesn't make sense.
+            // NOTE: `Right(GetLength())`, the whole string, as the original
+            // calls it (0x5D3CE9).
             m_pTextControl->DisplayString(CString(""),
                 strRes.szText.Right(strRes.szText.GetLength()),
                 m_pTextControl->m_rgbLabelColor,
@@ -564,7 +565,8 @@ void CScreenChapter::OnDoneButtonClick()
 
         if (g_pBaldurChitin->cNetwork.GetServiceProvider() != CNetwork::SERV_PROV_NULL
             && g_pBaldurChitin->cNetwork.GetSessionHosting() == TRUE) {
-            // TODO: Incomplete.
+            // NOTE: The host's message to the clients is not ported
+            // (multiplayer, ADR 0002).
             Sleep(25);
         }
 

@@ -157,6 +157,8 @@ set(IWD2R_ENGINE_SOURCES
     "src/CGameSpawning.h"
     "src/CGameSprite.cpp"
     "src/CGameSprite.h"
+    "src/CGameSpriteButtonLists.cpp"
+    "src/CGameSpriteButtonLists.h"
     "src/CGameSpriteEquipment.cpp"
     "src/CGameSpriteEquipment.h"
     "src/CGameSpriteSpells.cpp"

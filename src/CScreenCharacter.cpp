@@ -9,6 +9,7 @@
 #include "CIcon.h"
 #include "CInfCursor.h"
 #include "CInfGame.h"
+#include "CInfGameItemUse.h"
 #include "CItem.h"
 #include "CMessage.h"
 #include "CMultiplayerSettings.h"
@@ -703,28 +704,28 @@ void CScreenCharacter::OnKeyDown(SHORT nKeysFlags)
                         && pGame->GetKeymapFlag(index) == m_bCtrlKeyDown) {
                         switch (index) {
                         case 0:
-                            OnLeftPanelButtonClick(5);
+                            g_pBaldurChitin->GetActiveEngine()->OnLeftPanelButtonClick(5);
                             break;
                         case 1:
-                            OnLeftPanelButtonClick(8);
+                            g_pBaldurChitin->GetActiveEngine()->OnLeftPanelButtonClick(8);
                             break;
                         case 2:
-                            OnLeftPanelButtonClick(0);
+                            g_pBaldurChitin->GetActiveEngine()->OnLeftPanelButtonClick(0);
                             break;
                         case 3:
-                            OnLeftPanelButtonClick(6);
+                            g_pBaldurChitin->GetActiveEngine()->OnLeftPanelButtonClick(6);
                             break;
                         case 4:
-                            OnLeftPanelButtonClick(7);
+                            g_pBaldurChitin->GetActiveEngine()->OnLeftPanelButtonClick(7);
                             break;
                         case 5:
-                            OnLeftPanelButtonClick(4);
+                            g_pBaldurChitin->GetActiveEngine()->OnLeftPanelButtonClick(4);
                             break;
                         case 6:
-                            OnLeftPanelButtonClick(9);
+                            g_pBaldurChitin->GetActiveEngine()->OnLeftPanelButtonClick(9);
                             break;
                         case 7:
-                            OnLeftPanelButtonClick(13);
+                            g_pBaldurChitin->GetActiveEngine()->OnLeftPanelButtonClick(13);
                             break;
                         case 29:
                             OnRestButtonClick();
@@ -3440,7 +3441,9 @@ void CScreenCharacter::UpdateGeneralInformation(CUIControlTextDisplay* pText, CG
 // 0x5DE2C0
 void CScreenCharacter::UpdateEquipmentInformation(CUIControlTextDisplay* pText, CGameSprite* pSprite)
 {
-    // TODO: Incomplete.
+    // TODO: Incomplete. Blocked on CGameSprite 0x723EA0, 0x73CF10 and
+    // 0x73D080, on CItem 0x4E9840 and on CRuleTables::GetIterativeAttackBonus
+    // 0x547020, none on first (all but 0x723EA0 are ported on p3/combat).
 }
 
 // 0x5E0200
@@ -5009,7 +5012,9 @@ BOOL CScreenCharacter::OnCancelButtonClick()
 // 0x5E4560
 void CScreenCharacter::sub_5E4560()
 {
-    // TODO: Incomplete.
+    // TODO: Incomplete. The character record export (with 0x5EFFD0) is
+    // blocked on the same CGameSprite helpers as UpdateEquipmentInformation
+    // (0x723EA0, 0x73CF10, 0x73D080) and CItem 0x4E9840.
 }
 
 // 0x5E46C0
@@ -5811,7 +5816,117 @@ void CScreenCharacter::CheckDropEquipment()
 // 0x5E6A30
 void CScreenCharacter::CheckDropSlot(INT nSlot)
 {
-    // TODO: Incomplete.
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenCharacter.cpp
+    // __LINE__: 9499
+    UTIL_ASSERT(pGame != NULL);
+
+    CItem* pItem;
+    STRREF error = -1;
+    CResRef cResIcon("");
+    CResRef cResItem("");
+    WORD wCount = 0;
+    pGame->InventoryInfoPersonal(static_cast<SHORT>(m_nSelectedCharacter),
+        static_cast<SHORT>(nSlot),
+        pItem,
+        error,
+        cResIcon,
+        cResItem,
+        wCount,
+        TRUE);
+    if (pItem == NULL) {
+        return;
+    }
+
+    if (nSlot < 43
+        || nSlot > 50
+        || nSlot - 43 < pGame->GetNumQuickWeaponSlots(static_cast<SHORT>(m_nSelectedCharacter))) {
+        if (CInfGame_CheckIfPlayerInPortraitSlotCanUseItem(pGame,
+                static_cast<SHORT>(m_nSelectedCharacter),
+                pItem,
+                &error,
+                TRUE)) {
+            return;
+        }
+    }
+
+    // NOTE: Uninline.
+    LONG nCharacterId = pGame->GetCharacterId(static_cast<SHORT>(m_nSelectedCharacter));
+
+    CButtonData buttonData;
+
+    CGameSprite* pSprite;
+    BYTE rc;
+
+    if (nSlot > 42 && nSlot < 51) {
+        do {
+            rc = pGame->GetObjectArray()->GetDeny(nCharacterId,
+                CGameObjectArray::THREAD_ASYNCH,
+                reinterpret_cast<CGameObject**>(&pSprite),
+                INFINITE);
+        } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+        if (rc == CGameObjectArray::SUCCESS) {
+            pSprite->SetQuickWeapon(static_cast<BYTE>(nSlot - 43), buttonData);
+            pSprite->SetQuickWeapon(static_cast<BYTE>(nSlot - 43), static_cast<BYTE>(0));
+
+            pGame->GetObjectArray()->ReleaseDeny(nCharacterId,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+        }
+    }
+
+    if (nSlot > 10 && nSlot < 14) {
+        do {
+            rc = pGame->GetObjectArray()->GetDeny(nCharacterId,
+                CGameObjectArray::THREAD_ASYNCH,
+                reinterpret_cast<CGameObject**>(&pSprite),
+                INFINITE);
+        } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+        if (rc == CGameObjectArray::SUCCESS) {
+            SHORT nLauncherSlot = pSprite->GetLauncherSlot(static_cast<SHORT>(nSlot), 0);
+            if (nLauncherSlot != -1) {
+                pSprite->SetQuickWeapon(static_cast<BYTE>(nLauncherSlot - 43), buttonData);
+                pSprite->SetQuickWeapon(static_cast<BYTE>(nLauncherSlot - 43), static_cast<BYTE>(0));
+            }
+
+            pGame->GetObjectArray()->ReleaseDeny(nCharacterId,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+        }
+    }
+
+    pItem = NULL;
+    if (CInfGame_SwapItemPersonal(pGame,
+            static_cast<SHORT>(m_nSelectedCharacter),
+            static_cast<SHORT>(nSlot),
+            pItem,
+            error,
+            0xFFFF,
+            FALSE)
+        && pItem != NULL
+        && !pGame->SwapItemPersonalInventory(static_cast<SHORT>(m_nSelectedCharacter),
+            pItem,
+            0x7FFF,
+            error,
+            0xFFFF,
+            FALSE,
+            TRUE)) {
+        LONG nGroundPile = pGame->GetGroundPile(nCharacterId);
+        CInfGame_SwapItemGround(pGame, nGroundPile, 0x7FFF, pItem, error, 0xFFFF, FALSE);
+
+        // NOTE: The original sends a default-constructed CItem, not the item
+        // just dropped (SwapItemGround above already put it on the pile).
+        CItem item;
+        CMessageContainerAddItem* pMessage = new CMessageContainerAddItem(item,
+            0x7FFF,
+            TRUE,
+            nGroundPile,
+            nGroundPile);
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(pMessage, FALSE);
+    }
 }
 
 // 0x5E7020

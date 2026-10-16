@@ -27,6 +27,7 @@
 #include "CUtil.h"
 #include "compat/marshal_ptr.h"
 #include "CVidPoly.h"
+#include "platform/replay.h"
 
 // 0x8D212C
 INT CGameArea::dword_8D212C;
@@ -1510,6 +1511,54 @@ BOOLEAN CGameArea::CanSaveGame(STRREF& strError)
     return TRUE;
 }
 
+namespace {
+
+// iwd2r: the replay mode (platform/replay.h) makes the search thread's
+// timing deterministic. A path search an object's update queued
+// (CGameSprite::SetTarget 0x707D40, AIUpdateWalk 0x6F9040) waits for the
+// object's deny, so the search thread takes the object's share and its
+// snapshot of the search map when the update releases it; in the original
+// it is spinning on that share by then, so the snapshot comes before the
+// next object moves, and the search is done at the object's next update in
+// every recording. Here the AI thread waits after the update until the
+// search is done, so neither the snapshot nor the result depend on how the
+// threads are scheduled.
+void ReplayWaitForSearch(CInfGame* pGame, LONG iObject)
+{
+    if (!platform::replay::Active()) {
+        return;
+    }
+
+    for (;;) {
+        BOOL bPending = FALSE;
+        CGameObject* pObject;
+        CSingleLock searchLock(&(pGame->field_1B58), TRUE);
+        if (!pGame->m_searchRequests.IsEmpty() || !pGame->m_searchRequestsBack.IsEmpty()) {
+            bPending = TRUE;
+        } else if (pGame->GetObjectArray()->GetShare(iObject, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) == CGameObjectArray::SUCCESS
+            && pObject->GetObjectType() == CGameObject::TYPE_SPRITE) {
+            // A request is off the lists while the search thread runs it; one
+            // still waiting with a collision delay is not queued yet.
+            const CSearchRequest* pRequest = static_cast<CGameSprite*>(pObject)->m_currentSearchRequest;
+            if (pRequest != NULL
+                && (pRequest->m_serviceState == CSearchRequest::STATE_PROCESSING
+                    || (pRequest->m_serviceState == CSearchRequest::STATE_WAITING
+                        && pRequest->m_collisionDelay == 0))) {
+                bPending = TRUE;
+            }
+        }
+        searchLock.Unlock();
+
+        if (!bPending) {
+            return;
+        }
+
+        SleepEx(1, FALSE);
+    }
+}
+
+}
+
 // 0x46E3D0
 void CGameArea::AIUpdate()
 {
@@ -1804,6 +1853,9 @@ void CGameArea::AIUpdate()
                     m_pGame->GetObjectArray()->ReleaseDeny(iObject,
                         CGameObjectArray::THREAD_ASYNCH,
                         INFINITE);
+
+                    // iwd2r: a no-op unless IWD2R_STATE_DUMP is set.
+                    ReplayWaitForSearch(m_pGame, iObject);
                 }
             }
 
@@ -1862,6 +1914,9 @@ void CGameArea::AIUpdate()
                     m_pGame->GetObjectArray()->ReleaseDeny(iObject,
                         CGameObjectArray::THREAD_ASYNCH,
                         INFINITE);
+
+                    // iwd2r: a no-op unless IWD2R_STATE_DUMP is set.
+                    ReplayWaitForSearch(m_pGame, iObject);
                 }
             }
 
@@ -1920,6 +1975,9 @@ void CGameArea::AIUpdate()
                     m_pGame->GetObjectArray()->ReleaseDeny(iObject,
                         CGameObjectArray::THREAD_ASYNCH,
                         INFINITE);
+
+                    // iwd2r: a no-op unless IWD2R_STATE_DUMP is set.
+                    ReplayWaitForSearch(m_pGame, iObject);
                 }
             }
 

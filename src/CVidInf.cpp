@@ -107,6 +107,10 @@ BOOL CVidInf::ActivateVideoMode(CVidMode* pPrevVidMode, HWND hWnd, BOOLEAN bFull
 
         SetWindowedMode(hWnd);
     } else {
+        // NOTE: The original takes the saved depth here (CChitin vtable
+        // 0xB4, GetSavedBitsPerPixel; 0x79B1C8). iwd2r's presenter offers
+        // 32 bpp only, so ours takes the desktop's, which is 32: a saved 16
+        // or 24 would fail the support test below and quit.
         int nBpp = CUtil::GetCurrentBitsPerPixels();
         switch (nBpp) {
         case 16:
@@ -274,7 +278,7 @@ BOOL CVidInf::CreateSurfaces(BOOLEAN bFullscreen)
         }
     }
 
-    surfaceDesc.ddpfPixelFormat.dwFlags = sizeof(surfaceDesc.ddpfPixelFormat);
+    surfaceDesc.ddpfPixelFormat.dwSize = sizeof(surfaceDesc.ddpfPixelFormat);
 
     hr = pSurfaces[CVIDINF_SURFACE_BACK]->GetPixelFormat(&(surfaceDesc.ddpfPixelFormat));
     if (hr != DD_OK) {
@@ -283,9 +287,15 @@ BOOL CVidInf::CreateSurfaces(BOOLEAN bFullscreen)
 
     ParsePixelFormat(surfaceDesc.ddpfPixelFormat);
 
+    // The pure green of the surface's format is the colour key of the
+    // keyed surfaces and the transparent colour the engine fills with
+    // (field_24: the FX fill, wall polygons, dithered tiles, a cell's
+    // shadow entry with the shadow off) (0x79B75B).
+    field_24 = m_dwGBitMask;
+
     DDCOLORKEY colorKey;
     colorKey.dwColorSpaceLowValue = m_dwGBitMask;
-    colorKey.dwColorSpaceLowValue = m_dwGBitMask;
+    colorKey.dwColorSpaceHighValue = m_dwGBitMask;
 
     surfaceDesc.dwFlags = DDSD_CAPS | DDSD_HEIGHT | DDSD_WIDTH;
 
@@ -500,7 +510,11 @@ void CVidInf::DestroySurfaces()
             pSurfaces[CVIDINF_SURFACE_FRONT] = NULL;
         }
 
-        if (pSurfaces[CVIDINF_SURFACE_BACK] != NULL) {
+        // In full screen the back buffer is the primary's attached surface
+        // and is not released here (0x79BEC0).
+        // NOTE: GetAttachedSurface took a reference to it in CreateSurfaces,
+        // so in full screen that reference leaks, in the original as in ours.
+        if (!g_pChitin->m_bFullscreen && pSurfaces[CVIDINF_SURFACE_BACK] != NULL) {
             pSurfaces[CVIDINF_SURFACE_BACK]->Release();
             pSurfaces[CVIDINF_SURFACE_BACK] = NULL;
         }
@@ -705,10 +719,12 @@ BOOL CVidInf::FullScreenFlip(BOOL bRenderCursor)
 
     if (bRenderCursor) {
         if (field_14) {
+            // Without the second cursor surface the pointer just drawn is
+            // restored from surface 4 (0x79C3B1).
             if (bPointerRendered
-                && rOldPointerStorage.Width() > 0
-                && rOldPointerStorage.Height() > 0) {
-                m_pPointerVidCell->RestoreBackground(CVIDINF_SURFACE_4, CVIDINF_SURFACE_BACK, rOldPointerStorage);
+                && m_rPointerStorage.Width() > 0
+                && m_rPointerStorage.Height() > 0) {
+                m_pPointerVidCell->RestoreBackground(CVIDINF_SURFACE_4, CVIDINF_SURFACE_BACK, m_rPointerStorage);
             }
         } else {
             if (bPointerRendered
@@ -1143,6 +1159,7 @@ BOOL CVidInf::FXBltToBack(CRect& rFXRect, INT x, INT y, INT nRefPointX, INT nRef
     } else {
         if (pt.x < rClip.left) {
             rSrc.left += rClip.left - pt.x;
+            pt.x = rClip.left;
         }
 
         if (rSrc.Width() + pt.x - 1 >= rClip.right) {
@@ -1152,6 +1169,7 @@ BOOL CVidInf::FXBltToBack(CRect& rFXRect, INT x, INT y, INT nRefPointX, INT nRef
 
     if (rSrc.bottom > rSrc.top && rSrc.right > rSrc.left) {
         if (bUseFX) {
+            fx.dwSize = sizeof(fx);
             while (1) {
                 HRESULT hr = g_pChitin->cVideo.cVidBlitter.Blt(pSurfaces[CVIDINF_SURFACE_BACK],
                     CRect(pt, rSrc.Size()),
@@ -1401,8 +1419,11 @@ BOOL CVidInf::FXTextOut(CVidFont* pFont, const CString& sString, INT x, INT y, c
             bDemanded);
     }
 
+    // FALSE when there is no FX surface (GetFXSurface at 0x79DA7B).
     INT nSurface;
-    g_pChitin->GetCurrentVideoMode()->GetFXSurface(nSurface, dwFlags);
+    if (!g_pChitin->GetCurrentVideoMode()->GetFXSurface(nSurface, dwFlags)) {
+        return FALSE;
+    }
 
     return pFont->TextOutEx(nSurface,
         sString,
@@ -1608,6 +1629,7 @@ BOOL CVidInf::BKRender(CParticle* pParticle, const CRect& rClip, USHORT nFlag, U
 
     if (m_SurfaceDesc.lpSurface != NULL) {
         pParticle->Render(m_SurfaceDesc.lpSurface, m_SurfaceDesc.lPitch, rClip, nFlag, nBlobSize);
+        return TRUE;
     }
 
     return FALSE;
@@ -1714,7 +1736,7 @@ BOOL CVidInf::BKTextOut(CVidFont* pFont, const CString& sString, int x, int y, c
     CRect rNewClip;
     rNewClip.left = m_rLockedRect.left + rClip.left;
     rNewClip.top = m_rLockedRect.top + rClip.top;
-    rNewClip.top = m_rLockedRect.left + rClip.right;
+    rNewClip.right = m_rLockedRect.left + rClip.right;
     rNewClip.bottom = m_rLockedRect.top + rClip.bottom;
 
     return pFont->TextOutEx(CVIDINF_SURFACE_BACK,
@@ -1805,7 +1827,7 @@ void CVidInf::LoadFogOWarSurfaces(const CString& a2)
                     tileVidCell.FrameSet(2);
                     tileVidCell.Render(reinterpret_cast<WORD*>(surfaceDesc.lpSurface), surfaceDesc.lPitch, 0, 32, rTileRect, TRUE, 0, CPoint(0, 0));
 
-                    tileVidCell.FrameSet(2);
+                    tileVidCell.FrameSet(3);
                     tileVidCell.Render(reinterpret_cast<WORD*>(surfaceDesc.lpSurface), surfaceDesc.lPitch, 32, 32, rTileRect, TRUE, 0, CPoint(0, 0));
 
                     // NOTE: Uninline.
@@ -2149,12 +2171,14 @@ void CVidInf::RenderFlash(UINT nSurface, COLORREF rgbColor, unsigned char a4, co
         fx.dwFillColor = ConvertToSurfaceRGB(rgbColor);
 
         do {
-            HRESULT hr = g_pChitin->cVideo.cVidBlitter.Blt(pSurfaces[CVIDINF_SURFACE_FRONT],
+            // The fill goes to nSurface with the colour in fx (push eax, the
+            // DDBLTFX, at 0x79F64A; the surface from [edx+ebp*4] at 0x79F650).
+            HRESULT hr = g_pChitin->cVideo.cVidBlitter.Blt(pSurfaces[nSurface],
                 &destRect,
                 NULL,
                 NULL,
                 DDBLT_WAIT | DDBLT_COLORFILL,
-                NULL);
+                &fx);
             CheckResults(hr);
             if (hr != DDERR_SURFACELOST && hr != DDERR_WASSTILLDRAWING) {
                 break;
