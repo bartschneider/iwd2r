@@ -7,10 +7,14 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "CChitin.h"
+#include "CParticle.h"
 #include "CResBitmap.h"
 #include "CResCell.h"
+#include "CResTile.h"
 #include "CVidBitmap.h"
 #include "CVidCell.h"
+#include "CVidFont.h"
+#include "CVidImage.h"
 #include "CVidInf.h"
 #include "CVidPoly.h"
 #include "CWarp.h"
@@ -18,6 +22,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <ios>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -26,12 +31,28 @@ extern CChitin* g_pChitin;
 
 namespace {
 
+// A failed UTIL_ASSERT, thrown by TestChitin::ShutDown.
+struct FailedAssert {
+    int nLine;
+};
+
 class TestChitin : public CChitin {
 public:
     void MessageThreadMain(void*) override { }
     void RSThreadMain(void*) override { }
     void MainAIThread(void*) override { }
     void MusicThreadMain(void*) override { }
+
+    // CUtil::UtilAssert (0x780C00), the only caller with a line number,
+    // calls ShutDown and then aborts; throwing here lets a test see the
+    // state at a failed assert instead of losing the process.
+    void ShutDown(int nLineNumber, const char* szFileName, const char* text) override
+    {
+        if (nLineNumber != -1) {
+            throw FailedAssert { nLineNumber };
+        }
+        CChitin::ShutDown(nLineNumber, szFileName, text);
+    }
 };
 
 class ChitinScope {
@@ -1472,4 +1493,507 @@ TEST_CASE("blt_bmp8to24_and_24to24", "[vid]")
 
     ::operator delete(bitmapStorage);
     ::operator delete(resStorage);
+}
+
+// Regression tests for the render stream's fixes on the 32-bit path the game
+// reaches (render-report.md section 4).
+namespace {
+
+// A resource whose data is in memory. CDimm::Demand (0x783D00) takes its
+// loaded path (RES_FLAG_0x04 and RES_FLAG_0x10, no resource file) and
+// returns m_pData; CRes::field_40, which CDimm::Demand raises and
+// CDimm::Release (0x787BA0) lowers, is its demand count (GetDemands).
+// field_44, a pending request, keeps the last release off CDimm's freed
+// list. Empty bytes leave m_pData NULL, so a demand finds no data. The
+// destructor takes the data back before ~CRes, whose Dump would free() it;
+// it must run while a ChitinScope is installed.
+template <typename T>
+struct MemoryRes {
+    explicit MemoryRes(std::vector<BYTE> bytes)
+        : data(std::move(bytes))
+    {
+        res.m_pData = data.empty() ? nullptr : data.data();
+        res.nSize = static_cast<DWORD>(data.size());
+        res.dwFlags = CRes::RES_FLAG_0x04 | CRes::RES_FLAG_0x10;
+        res.m_nID = 0xFC000000;
+        res.field_44 = 1;
+    }
+    ~MemoryRes()
+    {
+        res.m_pData = nullptr;
+        res.dwFlags = 0;
+        res.field_40 = 0;
+        res.field_44 = 0;
+    }
+    MemoryRes(const MemoryRes&) = delete;
+    MemoryRes& operator=(const MemoryRes&) = delete;
+
+    std::vector<BYTE> data;
+    T res;
+};
+
+// A TIS tile's data: a grey palette, then 64 x 64 palette indexes.
+std::vector<BYTE> TileBytes(BYTE index)
+{
+    std::vector<BYTE> bytes(1024 + 64 * 64, index);
+    for (int i = 0; i < 256; ++i) {
+        bytes[i * 4] = static_cast<BYTE>(i);
+        bytes[i * 4 + 1] = static_cast<BYTE>(i);
+        bytes[i * 4 + 2] = static_cast<BYTE>(i);
+        bytes[i * 4 + 3] = 0;
+    }
+    return bytes;
+}
+
+// A w x h system-memory surface of the DirectDraw shim.
+IDirectDrawSurface* MakeSurface(IDirectDraw* pDirectDraw, DWORD w, DWORD h)
+{
+    DDSURFACEDESC desc;
+    std::memset(&desc, 0, sizeof(desc));
+    desc.dwSize = sizeof(desc);
+    desc.dwFlags = DDSD_CAPS | DDSD_HEIGHT | DDSD_WIDTH;
+    desc.ddsCaps.dwCaps = DDSCAPS_SYSTEMMEMORY | DDSCAPS_OFFSCREENPLAIN;
+    desc.dwWidth = w;
+    desc.dwHeight = h;
+    IDirectDrawSurface* p = NULL;
+    REQUIRE(pDirectDraw->CreateSurface(&desc, &p, NULL) == DD_OK);
+    return p;
+}
+
+}
+
+// CVidTile::Render with a stencil (0x7B1B30) demands both tiles (0x7B1BA8,
+// 0x7B1BB6) before it reads either, and every way out after that gives both
+// demands back: the clipped-away tile, the failed lock and the drawn tile.
+// The tiles here are held by their owner (one demand each, parsed), as the
+// tile set holds them. Ours released the stencil without demanding it, so
+// each render dropped the owner's demand and, at 0, CResTile::Release
+// (0x7807D0) cleared the stencil's parsed data: the drawn tile leaves the
+// stencil's count at 0 and its data gone, which fails here (checked by
+// removing the stencil's Demand).
+//
+// Missing tile or stencil data fails an assert (lines 6344 and 6351). Its
+// tail (the original returns without releasing for the tile, releases both
+// for the stencil) cannot run in iwd2r: CUtil::UtilAssert never returns. The
+// test's chitin throws from ShutDown, so it checks the counts at the assert:
+// both tiles demanded once more, neither released. Ours used to reach either
+// assert with the stencil not demanded.
+TEST_CASE("stencil_tile_render_balances_its_demands", "[vid]")
+{
+    ChitinScope scope;
+    CVidInf mode;
+    mode.m_dwRBitShift = 16;
+    mode.m_dwGBitShift = 8;
+    mode.m_dwBBitShift = 0;
+    ActiveModeScope active(&mode);
+    IDirectDraw* pDirectDraw = NULL;
+    REQUIRE(DirectDrawCreate(NULL, &pDirectDraw, NULL) == DD_OK);
+    IDirectDrawSurface* pSurface = MakeSurface(pDirectDraw, 64, 64);
+    IDirectDrawSurface* pSmall = MakeSurface(pDirectDraw, 16, 16);
+
+    {
+        MemoryRes<CResTile> main(TileBytes(5));
+        MemoryRes<CResTile> stencil(TileBytes(1));
+        REQUIRE(main.res.Demand() != nullptr);
+        REQUIRE(stencil.res.Demand() != nullptr);
+        auto held = [&](const char* step) {
+            INFO(step);
+            CHECK(main.res.GetDemands() == 1);
+            CHECK(stencil.res.GetDemands() == 1);
+            CHECK(main.res.GetTileData() != nullptr);
+            CHECK(stencil.res.GetTileData() != nullptr);
+        };
+
+        CVidTile tile;
+        tile.SetRes(&main.res);
+
+        // Drawn: the blit's result.
+        CHECK(tile.Render(pSurface, 0, 0, &stencil.res, CRect(0, 0, 64, 64), 0) == TRUE);
+        held("drawn");
+        CHECK(tile.Render(pSurface, 0, 0, &stencil.res, CRect(0, 0, 64, 64), 0) == TRUE);
+        held("drawn twice");
+
+        // An empty clip returns before either demand.
+        CHECK(tile.Render(pSurface, 0, 0, &stencil.res, CRect(), 0) == FALSE);
+        held("empty clip");
+
+        // A tile wholly outside the clip: its rectangle clips to nothing.
+        CHECK(tile.Render(pSurface, 100, 100, &stencil.res, CRect(0, 0, 32, 32), 0) == FALSE);
+        held("clipped away");
+
+        // The tile's rectangle runs past the 16 x 16 surface: Lock fails.
+        CHECK(tile.Render(pSmall, 0, 0, &stencil.res, CRect(0, 0, 64, 64), 0) == FALSE);
+        held("lock failed");
+
+        // No tile data: the assert fires with both demanded.
+        MemoryRes<CResTile> noTile(std::vector<BYTE> {});
+        tile.SetRes(&noTile.res);
+        CHECK_THROWS_AS(tile.Render(pSurface, 0, 0, &stencil.res, CRect(0, 0, 64, 64), 0), FailedAssert);
+        CHECK(noTile.res.GetDemands() == 1);
+        CHECK(stencil.res.GetDemands() == 2);
+        stencil.res.Release();
+        held("no tile data, the stencil's demand given back by the test");
+
+        // No stencil data: likewise.
+        MemoryRes<CResTile> noStencil(std::vector<BYTE> {});
+        tile.SetRes(&main.res);
+        CHECK_THROWS_AS(tile.Render(pSurface, 0, 0, &noStencil.res, CRect(0, 0, 64, 64), 0), FailedAssert);
+        CHECK(main.res.GetDemands() == 2);
+        CHECK(noStencil.res.GetDemands() == 1);
+        main.res.Release();
+        held("no stencil data, the tile's demand given back by the test");
+    }
+
+    pSmall->Release();
+    pSurface->Release();
+    pDirectDraw->Release();
+}
+
+// CVidCell::BltFromFX (0x7B06E0) copies the cell's frame from the FX surface
+// to the destination, leaving the destination where the FX surface holds the
+// colour key. Mirrored (dwFlags 0x10 left-right, 0x20 up-down) it goes
+// through Blt with DDBLT_WAIT | DDBLT_KEYSRC | DDBLT_DDFX (push 0x1008800 at
+// 0x7B090F); ours left out DDBLT_KEYSRC, which copied the key over the
+// destination (fails here for 0x10, 0x20 and 0x30, checked by removing the
+// flag). Unmirrored it is a keyed BltFast. A 4 x 2 frame at (0, 0); the
+// mirrored destination rectangle is (destX, destY, width, height), as the
+// original's, so it starts at the origin here.
+TEST_CASE("cell_blt_from_fx_keeps_the_key_mirrored", "[vid]")
+{
+    ChitinScope scope;
+    CVidInf mode;
+    IDirectDraw* pDirectDraw = NULL;
+    REQUIRE(DirectDrawCreate(NULL, &pDirectDraw, NULL) == DD_OK);
+    IDirectDrawSurface* pBack = MakeSurface(pDirectDraw, 8, 4);
+    IDirectDrawSurface* pFx = MakeSurface(pDirectDraw, 8, 4);
+    constexpr DWORD kKey = 0x0000FF00;
+    constexpr DWORD kBack = 0x00ABCDEF;
+    DDCOLORKEY key = { kKey, kKey };
+    REQUIRE(pFx->SetColorKey(DDCKEY_SRCBLT, &key) == DD_OK);
+    IDirectDrawSurface* surfaces[3] = { pBack, NULL, pFx };
+    mode.m_nSurfaces = 3;
+    mode.pSurfaces = surfaces;
+    ActiveModeScope active(&mode);
+
+    // The frame in the FX surface: key pixels between colours.
+    const DWORD frame[2][4] = {
+        { 0x00000011, kKey, 0x00000033, kKey },
+        { kKey, 0x00000022, kKey, 0x00000044 },
+    };
+    auto fill = [&](UINT nSurface, auto&& pixel) {
+        DDSURFACEDESC ddsd;
+        ddsd.dwSize = sizeof(ddsd);
+        REQUIRE(mode.LockSurface(nSurface, &ddsd, CRect(0, 0, 8, 4)));
+        for (int y = 0; y < 4; ++y) {
+            for (int x = 0; x < 8; ++x) {
+                reinterpret_cast<DWORD*>(reinterpret_cast<BYTE*>(ddsd.lpSurface) + y * ddsd.lPitch)[x] = pixel(x, y);
+            }
+        }
+        mode.UnLockSurface(nSurface, ddsd.lpSurface);
+    };
+    fill(2, [&](int x, int y) { return x < 4 && y < 2 ? frame[y][x] : 0x00777777u; });
+
+    CVidCell cell;
+    FRAMEENTRY entry = {};
+    entry.nWidth = 4;
+    entry.nHeight = 2;
+    cell.m_pFrame = &entry;
+    cell.m_nFxSurface = 2;
+
+    for (const DWORD dwFlags : { 0x0u, 0x10u, 0x20u, 0x30u }) {
+        INFO("dwFlags 0x" << std::hex << dwFlags);
+        fill(0, [&](int, int) { return kBack; });
+        CHECK(cell.BltFromFX(pBack, 0, 0, CRect(0, 0, 8, 4), dwFlags));
+
+        DDSURFACEDESC ddsd;
+        ddsd.dwSize = sizeof(ddsd);
+        REQUIRE(mode.LockSurface(0, &ddsd, CRect(0, 0, 8, 4)));
+        for (int y = 0; y < 4; ++y) {
+            for (int x = 0; x < 8; ++x) {
+                DWORD expected = kBack;
+                if (x < 4 && y < 2) {
+                    const DWORD source = frame[(dwFlags & 0x20) != 0 ? 1 - y : y][(dwFlags & 0x10) != 0 ? 3 - x : x];
+                    if (source != kKey) {
+                        expected = source;
+                    }
+                }
+                INFO("x " << x << " y " << y);
+                CHECK(reinterpret_cast<DWORD*>(reinterpret_cast<BYTE*>(ddsd.lpSurface) + y * ddsd.lPitch)[x] == expected);
+            }
+        }
+        mode.UnLockSurface(0, ddsd.lpSurface);
+    }
+
+    cell.m_pFrame = NULL;
+    mode.m_nSurfaces = 0;
+    mode.pSurfaces = NULL;
+    pFx->Release();
+    pBack->Release();
+    pDirectDraw->Release();
+}
+
+// CVidBitmap::RenderDirect (0x7B3190) draws a 24-bit bitmap on a 32-bit
+// surface with BltBmp24To32Tint when any flag of the high word is set
+// (dwFlags & 0xFFFF0000, tested before each ApplyBrightnessContrast), or
+// when the brightness and contrast move mid grey. With them neutral, ours
+// tinted only for the latter, so the greyscale (0x80000) and tint (0x20000)
+// flags were dropped and the pixels copied as they are (fails here, checked
+// by removing the flag test). Keyed (0x1): each pixel is written with alpha
+// 0xFF. A 2 x 1 bitmap (row padded to 8 bytes) drawn at (1, 0).
+TEST_CASE("render_direct_tints_24bit_on_high_word_flags", "[vid]")
+{
+    ChitinScope scope;
+    CVidInf mode;
+    mode.m_dwRBitShift = 16;
+    mode.m_dwGBitShift = 8;
+    mode.m_dwBBitShift = 0;
+    IDirectDraw* pDirectDraw = NULL;
+    REQUIRE(DirectDrawCreate(NULL, &pDirectDraw, NULL) == DD_OK);
+    IDirectDrawSurface* pSurface = MakeSurface(pDirectDraw, 4, 2);
+    IDirectDrawSurface* surfaces[1] = { pSurface };
+    mode.m_nSurfaces = 1;
+    mode.pSurfaces = surfaces;
+    ActiveModeScope active(&mode);
+
+    BITMAPINFOHEADER info;
+    std::memset(&info, 0, sizeof(info));
+    info.biWidth = 2;
+    info.biHeight = 1;
+    info.biBitCount = 24;
+    // B, G, R per pixel: (R 0x60, G 0x30, B 0x90) and (R 0x10, G 0x20, B 0x30).
+    BYTE data[8] = { 0x90, 0x30, 0x60, 0x30, 0x20, 0x10, 0, 0 };
+    auto* resStorage = static_cast<unsigned char*>(::operator new(sizeof(CResBitmap)));
+    std::memset(resStorage, 0, sizeof(CResBitmap));
+    auto* res = reinterpret_cast<CResBitmap*>(resStorage);
+    res->bParsed = TRUE;
+    res->pBitmapInfoHeader = &info;
+    res->pBitmapData = data;
+    auto* bitmapStorage = static_cast<unsigned char*>(::operator new(sizeof(CVidBitmap)));
+    std::memset(bitmapStorage, 0, sizeof(CVidBitmap));
+    auto* bitmap = reinterpret_cast<CVidBitmap*>(bitmapStorage);
+    static_cast<CResHelper<CResBitmap, 1>*>(bitmap)->pRes = res;
+    bitmap->m_paletteAffects.rgbTintColor = RGB(0x80, 0x40, 0xFF);
+
+    auto pixel = [](DWORD r, DWORD g, DWORD b) { return 0xFF000000u | (r << 16) | (g << 8) | b; };
+    struct Case {
+        DWORD dwFlags;
+        DWORD first;
+        DWORD second;
+    };
+    const Case cases[] = {
+        // No high-word flag: copied.
+        { 0x1, pixel(0x60, 0x30, 0x90), pixel(0x10, 0x20, 0x30) },
+        // Greyscale: (r + g + b) >> 2 in each channel.
+        { 0x80001, pixel(0x48, 0x48, 0x48), pixel(0x18, 0x18, 0x18) },
+        // Tint by rgbTintColor: c * t >> 8.
+        { 0x20001, pixel(0x30, 0x0C, 0x8F), pixel(0x08, 0x08, 0x2F) },
+    };
+    for (const Case& c : cases) {
+        INFO("dwFlags 0x" << std::hex << c.dwFlags);
+        DDSURFACEDESC ddsd;
+        ddsd.dwSize = sizeof(ddsd);
+        REQUIRE(mode.LockSurface(0, &ddsd, CRect(0, 0, 4, 2)));
+        for (int y = 0; y < 2; ++y) {
+            std::memset(reinterpret_cast<BYTE*>(ddsd.lpSurface) + y * ddsd.lPitch, 0, 4 * 4);
+        }
+        mode.UnLockSurface(0, ddsd.lpSurface);
+
+        CHECK(bitmap->RenderDirect(0, 1, 0, CRect(0, 0, 4, 2), c.dwFlags, TRUE));
+
+        REQUIRE(mode.LockSurface(0, &ddsd, CRect(0, 0, 4, 2)));
+        const DWORD* row = reinterpret_cast<const DWORD*>(ddsd.lpSurface);
+        const std::vector<DWORD> drawn(row, row + 4);
+        const DWORD* below = reinterpret_cast<const DWORD*>(reinterpret_cast<const BYTE*>(ddsd.lpSurface) + ddsd.lPitch);
+        const std::vector<DWORD> under(below, below + 4);
+        mode.UnLockSurface(0, ddsd.lpSurface);
+        CHECK(drawn == std::vector<DWORD> { 0, c.first, c.second, 0 });
+        CHECK(under == std::vector<DWORD>(4, 0u));
+    }
+
+    mode.m_nSurfaces = 0;
+    mode.pSurfaces = NULL;
+    ::operator delete(bitmapStorage);
+    ::operator delete(resStorage);
+    pSurface->Release();
+    pDirectDraw->Release();
+}
+
+namespace {
+
+// A surface that only hands out device contexts, counting them. The shim's
+// surfaces have none, so CVidFont::TextOutEx stops at GetDC on them.
+class DcSurface final : public IDirectDrawSurface {
+public:
+    int getDCs = 0;
+    int releaseDCs = 0;
+
+    ULONG AddRef() override { return 1; }
+    ULONG Release() override { return 1; }
+    HRESULT Lock(LPRECT, LPDDSURFACEDESC, DWORD, HANDLE) override { return DDERR_UNSUPPORTED; }
+    HRESULT Unlock(LPVOID) override { return DDERR_UNSUPPORTED; }
+    HRESULT Blt(LPRECT, IDirectDrawSurface*, LPRECT, DWORD, LPDDBLTFX) override { return DDERR_UNSUPPORTED; }
+    HRESULT BltFast(DWORD, DWORD, IDirectDrawSurface*, LPRECT, DWORD) override { return DDERR_UNSUPPORTED; }
+    HRESULT Flip(IDirectDrawSurface*, DWORD) override { return DDERR_UNSUPPORTED; }
+    HRESULT GetAttachedSurface(LPDDSCAPS, IDirectDrawSurface**) override { return DDERR_UNSUPPORTED; }
+    HRESULT SetColorKey(DWORD, LPDDCOLORKEY) override { return DDERR_UNSUPPORTED; }
+    HRESULT GetColorKey(DWORD, LPDDCOLORKEY) override { return DDERR_UNSUPPORTED; }
+    HRESULT GetPixelFormat(LPDDPIXELFORMAT) override { return DDERR_UNSUPPORTED; }
+    HRESULT SetClipper(IDirectDrawClipper*) override { return DDERR_UNSUPPORTED; }
+    HRESULT SetPalette(IDirectDrawPalette*) override { return DDERR_UNSUPPORTED; }
+    HRESULT GetPalette(IDirectDrawPalette**) override { return DDERR_UNSUPPORTED; }
+    HRESULT GetDC(HDC* lphDC) override
+    {
+        ++getDCs;
+        *lphDC = reinterpret_cast<HDC>(this);
+        return DD_OK;
+    }
+    HRESULT ReleaseDC(HDC) override
+    {
+        ++releaseDCs;
+        return DD_OK;
+    }
+    HRESULT Restore() override { return DD_OK; }
+    HRESULT IsLost() override { return DD_OK; }
+};
+
+// A BAM of one sequence of one 5 x 7 frame: the header, the frame entry, the
+// sequence entry, the frame list and a palette.
+std::vector<BYTE> OneFrameBam()
+{
+    std::vector<BYTE> bytes(0x2C + 1024, 0);
+    BAMHEADER header = {};
+    std::memcpy(&header.nFileType, "BAM ", 4);
+    std::memcpy(&header.nFileVersion, "V1  ", 4);
+    header.nFrames = 1;
+    header.nSequences = 1;
+    header.nTableOffset = 0x18;
+    header.nFrameListOffset = 0x28;
+    header.nPaletteOffset = 0x2C;
+    std::memcpy(bytes.data(), &header, sizeof(header));
+    FRAMEENTRY frame = { 5, 7, 0, 0, 0x80000000 };
+    std::memcpy(bytes.data() + 0x18, &frame, sizeof(frame));
+    SEQUENCEENTRY sequence = { 1, 0 };
+    std::memcpy(bytes.data() + 0x24, &sequence, sizeof(sequence));
+    return bytes;
+}
+
+// A font that draws white on black, so TextOutEx reads no resource name for
+// its colour, and whose TrueType font counts as set.
+void PrepareFont(CVidFont& font)
+{
+    font.m_bFontSet = TRUE;
+    font.m_rgbForegroundColor = RGB(255, 255, 255);
+    font.m_rgbBackgroundColor = RGB(0, 0, 0);
+}
+
+}
+
+// CVidFont::TextOutEx (0x793A70), the TrueType text path, returns TRUE once
+// the text is out; ours returned FALSE, which BKTextOut and FXTextOut pass
+// on. It measures the baseline with the caller's bDemanded (0x793CF5); ours
+// passed TRUE. With no TrueType font named, the baseline is the font BAM's
+// first frame height. That BAM starts parsed with no demand, a state only a
+// demand and its release change (CResCell::Release clears the parse at 0):
+// with bDemanded FALSE the text demands the BAM and gives it back, with TRUE
+// it leaves it alone. Both fail on the old code (checked by restoring it).
+TEST_CASE("font_text_out_ex_returns_true_and_passes_bdemanded", "[vid]")
+{
+    ChitinScope scope;
+    g_pChitin->m_sFontName = "";
+    CVidInf mode;
+    DcSurface dc;
+    IDirectDrawSurface* surfaces[1] = { &dc };
+    mode.m_nSurfaces = 1;
+    mode.pSurfaces = surfaces;
+    ActiveModeScope active(&mode);
+
+    {
+        MemoryRes<CResCell> bam(OneFrameBam());
+        bam.res.m_bCacheHeader = FALSE;
+        CVidFont font;
+        PrepareFont(font);
+        static_cast<CResHelper<CResCell, 1000>&>(font).pRes = &bam.res;
+
+        for (const BOOL bDemanded : { TRUE, FALSE }) {
+            INFO("bDemanded " << bDemanded);
+            REQUIRE(bam.res.Parse(bam.data.data()));
+            dc.getDCs = 0;
+            dc.releaseDCs = 0;
+            CHECK(font.TextOutEx(0, CString("text"), 2, 20, CRect(0, 0, 64, 32), 0, bDemanded) == TRUE);
+            CHECK(dc.getDCs == 1);
+            CHECK(dc.releaseDCs == 1);
+            CHECK(bam.res.GetDemands() == 0);
+            CHECK(bam.res.m_bParsed == bDemanded);
+        }
+        static_cast<CResHelper<CResCell, 1000>&>(font).pRes = NULL;
+    }
+
+    mode.m_nSurfaces = 0;
+    mode.pSurfaces = NULL;
+}
+
+// CVidInf::FXTextOut (0x79D970) returns FALSE when the mode has no FX
+// surface (GetFXSurface at 0x79DA7B) and draws nothing. Ours passed
+// GetFXSurface's -1 on to TextOutEx, which took the surface pointer before
+// the array; a guard sits in that slot here, so the old code draws on it and
+// returns TRUE (checked by restoring it). With an FX surface the text goes
+// there and TextOutEx's TRUE comes back.
+TEST_CASE("fx_text_out_without_fx_surface_returns_false", "[vid]")
+{
+    ChitinScope scope;
+    g_pChitin->m_sFontName = "Arial";
+    g_pChitin->m_bUseMirrorFX = FALSE;
+    CVidInf mode;
+    DcSurface guard;
+    DcSurface fx;
+    IDirectDrawSurface* slots[1 + 9] = { &guard };
+    mode.m_nSurfaces = 9;
+    mode.pSurfaces = slots + 1;
+    std::vector<DWORD> locked(4 * 4, 0);
+    mode.m_SurfaceDesc.lpSurface = locked.data();
+    mode.m_SurfaceDesc.lPitch = 4 * 4;
+    ActiveModeScope active(&mode);
+
+    CVidFont font;
+    PrepareFont(font);
+    font.m_nBaseLineHeight = 10;
+
+    CHECK(mode.FXTextOut(&font, CString("fx"), 1, 12, CRect(0, 0, 32, 16), 0, TRUE) == FALSE);
+    CHECK(guard.getDCs == 0);
+
+    slots[1 + CVIDINF_SURFACE_2] = &fx;
+    CHECK(mode.FXTextOut(&font, CString("fx"), 1, 12, CRect(0, 0, 32, 16), 0, TRUE) == TRUE);
+    CHECK(fx.getDCs == 1);
+    CHECK(fx.releaseDCs == 1);
+    CHECK(guard.getDCs == 0);
+
+    mode.m_SurfaceDesc.lpSurface = NULL;
+    mode.m_nSurfaces = 0;
+    mode.pSurfaces = NULL;
+}
+
+// CVidInf::BKRender(CParticle*) (0x79E060) returns TRUE after drawing the
+// particle into the locked back buffer (ours fell through to FALSE, checked
+// by restoring it), and FALSE when nothing is locked. A dot at (3, 3):
+// x = posX >> 10, y = (3 * posY / 4 - posZ) >> 10.
+TEST_CASE("bk_render_particle_returns_true", "[vid]")
+{
+    ChitinScope scope;
+    CVidInf mode;
+    mode.m_dwRBitShift = 16;
+    mode.m_dwGBitShift = 8;
+    mode.m_dwBBitShift = 0;
+    ActiveModeScope active(&mode);
+    std::vector<DWORD> pixels(8 * 8, 0);
+    mode.m_SurfaceDesc.lpSurface = pixels.data();
+    mode.m_SurfaceDesc.lPitch = 8 * 4;
+
+    CParticle particle(3 << 10, 4 << 10, 0, 0, 0, 0, RGB(1, 2, 3), 0, 0, CParticle::BLOB);
+    CHECK(mode.BKRender(&particle, CRect(0, 0, 8, 8), CParticle::DOTS, 1) == TRUE);
+    std::vector<DWORD> expected(8 * 8, 0);
+    expected[3 * 8 + 3] = 0x00010203;
+    CHECK(pixels == expected);
+
+    mode.m_SurfaceDesc.lpSurface = NULL;
+    CHECK(mode.BKRender(&particle, CRect(0, 0, 8, 8), CParticle::DOTS, 1) == FALSE);
 }
