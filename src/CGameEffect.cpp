@@ -13816,8 +13816,10 @@ BOOL CGameEffectVisualSpellHit::ApplyEffect(CGameSprite* pSprite)
 
     // NOTE: The original keeps the projectile type in its sprite argument;
     // a mode with no entry below leaves the sprite's address there and
-    // fires that as the type. Bounded here (ruling P4-10): such a mode
-    // fires no message (its local projectile still plays).
+    // fires that as the type: an address-dependent value, inert in single
+    // player (CMessageFireProjectile fires nothing without a service
+    // provider). Ours sends no message for such a mode (its local hit
+    // still plays).
     LONG nProjectile = -1;
 
     CProjectile84DFA4* pBurst = NULL;

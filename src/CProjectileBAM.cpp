@@ -49,13 +49,6 @@ CProjectileBAM::CProjectileBAM(CResRef resRef)
     m_callBackProjectile = CGameObjectArray::INVALID_INDEX;
     m_sVisualEffect = "";
     field_182 = CGameObjectArray::INVALID_INDEX;
-
-    // NOTE: The original leaves +0x1BE, +0x1C2 and +0x1D8 to the subclasses,
-    // and some never set them, yet Render reads all three (uninitialized
-    // heap memory). Bounded here (ruling P4-10): they start at 0.
-    field_1BE = FALSE;
-    field_1C2 = FALSE;
-    field_1D8 = 0;
 }
 
 // 0x52B030
