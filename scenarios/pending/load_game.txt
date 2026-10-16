@@ -7,7 +7,8 @@
 # to give it. Coordinates for Resolution=800.
 #
 # Status (2026-10-16): with save_load.txt's save from either engine, the
-# original and ours match at every checkpoint (replay crossload, seed 1).
+# original and ours match at every checkpoint (replay crossload, seed 1),
+# though the two saves differ as data (AR1000's vertices and entrances).
 # saves: load
 # timeout: 240
 wait 60
