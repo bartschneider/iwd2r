@@ -9,7 +9,6 @@
 #include "CIcon.h"
 #include "CInfCursor.h"
 #include "CInfGame.h"
-#include "CInfGameItemUse.h"
 #include "CScreenWorld.h"
 #include "CSpell.h"
 #include "CUIControlLabel.h"
@@ -2328,8 +2327,7 @@ BOOL CScreenInventory::IsUseButtonActive()
                 || pItem->GetItemType() == 58
                 || pItem->GetItemType() == 71) {
                 STRREF strError;
-                if (CInfGame_CheckIfPlayerInPortraitSlotCanUseItem(pGame,
-                        static_cast<SHORT>(m_nSelectedCharacter),
+                if (pGame->CheckIfPlayerInPortraitSlotCanUseItem(static_cast<SHORT>(m_nSelectedCharacter),
                         pItem,
                         &strError,
                         TRUE)) {
@@ -3668,8 +3666,7 @@ void CScreenInventory::CancelEngine()
                 BOOL bDropped = FALSE;
                 if (nGroundPile != CGameObjectArray::INVALID_INDEX) {
                     STRREF strError;
-                    BOOLEAN bResult = CInfGame_SwapItemGround(pGame,
-                        nGroundPile,
+                    BOOLEAN bResult = pGame->SwapItemGround(nGroundPile,
                         SHORT_MAX,
                         m_pTempItem,
                         strError,
@@ -4864,7 +4861,7 @@ BOOL CScreenInventory::SwapWithSlot(INT nButtonId, BOOL bShowError, WORD wCount,
                 // Fill the pile up to the slot with empty slots.
                 CItem* pNoItem = NULL;
                 for (SHORT nSlot = pGame->GetNumGroundSlots(nContainerId); nSlot < nGroundSlot; nSlot++) {
-                    CInfGame_SwapItemGround(pGame, nContainerId, nSlot, pNoItem, strError, 0xFFFF, FALSE);
+                    pGame->SwapItemGround(nContainerId, nSlot, pNoItem, strError, 0xFFFF, FALSE);
                 }
 
                 CUIPanel* pPanel = m_cUIManager.GetPanel(2);
@@ -4873,7 +4870,7 @@ BOOL CScreenInventory::SwapWithSlot(INT nButtonId, BOOL bShowError, WORD wCount,
                 // __LINE__: 7708
                 UTIL_ASSERT(pPanel != NULL);
 
-                if (CInfGame_SwapItemGround(pGame, nContainerId, nGroundSlot, m_pTempItem, strError, wCount, FALSE)) {
+                if (pGame->SwapItemGround(nContainerId, nGroundSlot, m_pTempItem, strError, wCount, FALSE)) {
                     UpdateCursorShape();
 
                     CUIControlBase* pControl = pPanel->GetControl(nButtonId);
@@ -4982,8 +4979,7 @@ BOOL CScreenInventory::SwapWithSlot(INT nButtonId, BOOL bShowError, WORD wCount,
     case 108:
         if (1) {
             // The equipment.
-            if (!CInfGame_CheckIfPlayerInPortraitSlotCanUseItem(pGame,
-                    static_cast<SHORT>(GetSelectedCharacter()),
+            if (!pGame->CheckIfPlayerInPortraitSlotCanUseItem(static_cast<SHORT>(GetSelectedCharacter()),
                     m_pTempItem,
                     &strError,
                     TRUE)) {
@@ -5023,8 +5019,7 @@ BOOL CScreenInventory::SwapWithSlot(INT nButtonId, BOOL bShowError, WORD wCount,
             }
 
             SHORT nSlot = static_cast<SHORT>(MapButtonIdToInventoryId(nButtonId));
-            if (!CInfGame_SwapItemPersonal(pGame,
-                    static_cast<SHORT>(m_nSelectedCharacter),
+            if (!pGame->SwapItemPersonal(static_cast<SHORT>(m_nSelectedCharacter),
                     nSlot,
                     m_pTempItem,
                     strError,
@@ -5307,7 +5302,7 @@ BOOL CScreenInventory::SwapWithPortrait(INT nButtonId, BOOL bShowError)
 
     if (nPortrait == field_510) {
         // Back to its owner: the first free backpack slot.
-        nSlot = CInfGame_FindEmptyItemPersonalInventory(pGame, nPortrait);
+        nSlot = pGame->FindEmptyItemPersonalInventory(nPortrait);
         if (nSlot == -1) {
             bSwap = FALSE;
             strError = 17999;
@@ -5563,8 +5558,7 @@ void CUIControlButtonInventorySlot::UpdateHighlight(INT x, INT y)
     if (pItem != NULL) {
         STRREF strError;
         SHORT nSlot = static_cast<SHORT>(pInventory->MapButtonIdToInventoryId(m_nID));
-        if (!CInfGame_CanPortraitEquipInSlot(g_pBaldurChitin->GetObjectGame(),
-                static_cast<SHORT>(pInventory->GetSelectedCharacter()),
+        if (!g_pBaldurChitin->GetObjectGame()->CanPortraitEquipInSlot(static_cast<SHORT>(pInventory->GetSelectedCharacter()),
                 nSlot,
                 &pItem,
                 &strError)) {
@@ -5659,8 +5653,7 @@ void CUIControlButtonInventorySlot::UpdateWeaponHighlight(INT x, INT y)
             }
         } else {
             STRREF strError;
-            if (!CInfGame_CanPortraitEquipInSlot(pGame,
-                    static_cast<SHORT>(pInventory->GetSelectedCharacter()),
+            if (!pGame->CanPortraitEquipInSlot(static_cast<SHORT>(pInventory->GetSelectedCharacter()),
                     static_cast<SHORT>(nSlot),
                     &pItem,
                     &strError)) {
@@ -6318,8 +6311,7 @@ BOOL CUIControlButtonInventorySlot::Render(BOOL bForce)
                 vcTint.Render(0, x, y, rClip, NULL, 0, 2, 0xC0);
             } else {
                 STRREF strError;
-                if (!CInfGame_CheckIfPlayerInPortraitSlotCanUseItem(pGame,
-                        static_cast<SHORT>(pInventory->GetSelectedCharacter()),
+                if (!pGame->CheckIfPlayerInPortraitSlotCanUseItem(static_cast<SHORT>(pInventory->GetSelectedCharacter()),
                         pItem,
                         &strError,
                         FALSE)) {

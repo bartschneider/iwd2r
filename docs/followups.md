@@ -173,14 +173,13 @@ The crisp-text requirement is met by `Program Options/Text Renderer=scalable` (s
 
 ## Character, spellbook and options screens (from project 3, milestone 5, screens-char)
 
-- Blocked stubs in src/CScreenCharacter.cpp: `UpdateEquipmentInformation` 0x5DE2C0 and the character text export `sub_5E4560` need CGameSprite 0x723EA0, 0x73CF10 and 0x73D080, CRuleTables 0x547020 and CItem 0x4E9840 (all but 0x723EA0 are ported on p3/combat, none on first); their comments name them. (`CheckDropSlot` 0x5E6A30 is ported, through the CInfGameItemUse seam.)
+- Blocked stubs in src/CScreenCharacter.cpp: `UpdateEquipmentInformation` 0x5DE2C0 and the character text export `sub_5E4560` need CGameSprite 0x723EA0, 0x73CF10 and 0x73D080, CRuleTables 0x547020 and CItem 0x4E9840 (all but 0x723EA0 are ported on p3/combat, none on first); their comments name them. (`CheckDropSlot` 0x5E6A30 is ported.)
 - `CGameSprite::CheckQuickLists` 0x71ABA0 is not ported: forgetting a spell and level-up skip it, so quick slots keep a forgotten spell until rebuilt.
 - `CGameSprite::GetAC` is a stub returning 0, so the character screen shows AC 0 (milestone 3 combat).
 - `CGameSprite.h` lacks `BYTE field_7282[11]`, so level-up always rolls hit points; the original skips that roll (and its `rand()`) in one rare drained-level case. No test pins level-up's rand count.
 
 ## Inventory, containers and stores (from project 3, milestone 5, screens-items)
 
-- `src/CInfGameItemUse.*` holds eight CInfGame functions as free functions, a temporary seam while another stream owned `CInfGame.*`. Fold them into CInfGame members once that stream merges.
 - TODOs left in the item-use paths: `CGameSprite::CheckQuickLists`, `CheckIfUsedUp` and 0x723830 are not called yet.
 - The container slot handler 0x6957E0 needs `SwapItemGround` before dropping onto the ground works as in the original.
 - Container, bag and temple buy paths have no tests yet.
@@ -194,7 +193,6 @@ The crisp-text requirement is met by `Program Options/Text Renderer=scalable` (s
 
 ## UI controls and visual systems (from project 3, milestone 5, ui-misc)
 
-- `src/CGameSpriteButtonLists.*` holds the action bar's eight sprite button lists (0x714F70, 0x7155C0, 0x715BD0, 0x716E80, 0x717250, 0x717FC0, 0x716770, 0x718390) as free functions taking the sprite, a temporary seam like `CInfGameItemUse` while vis-probe owns `CGameSprite.*`. Fold them into CGameSprite members.
 - Spontaneous casting (the seam's 0x716770) skips `CGameSprite::CheckQuickLists` (0x71ABA0), so the quick spell slots keep a converted spell's old count until they are rebuilt.
 - `CScreenWorld::OnKeyDown` should call `CInfButtonArray::sub_594170` (at 0x688D2A, 0x688E17, 0x6890E2, 0x689146 and 0x6891B9): the customize state's keys. The 'I' key does not open the inventory. `CInfGame::SelectToolbar`'s TODOs can call 0x595E70 and 0x595F70 now.
 - `CScreenCharacter::UpdateEquipmentInformation` (0x5DE2C0) and `sub_5E4560` wait for CGameSprite 0x723EA0 (not ported anywhere) and the p3/combat ports of 0x73CF10, 0x73D080, CItem 0x4E9840 and `CRuleTables::GetIterativeAttackBonus`.
