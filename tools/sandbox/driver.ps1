@@ -98,7 +98,13 @@ public static class IwdInput {
         public string Time;
         public uint Pid;
         public string Window;
+        // The game window (GameWindow) still existed and was visible: the
+        // window took the foreground from it, rather than after it closed.
+        public bool GameShown;
     }
+
+    // The game window, for the watcher; the driver sets it.
+    public static volatile IntPtr GameWindow = IntPtr.Zero;
 
     [DllImport("user32.dll", SetLastError = true)]
     static extern uint SendInput(uint count, INPUT[] inputs, int size);
@@ -106,6 +112,7 @@ public static class IwdInput {
     [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr hWnd, ref POINT point);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] static extern bool IsWindow(IntPtr hWnd);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int size);
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
@@ -190,6 +197,8 @@ public static class IwdInput {
                         GetWindowThreadProcessId(now, out pid);
                     change.Pid = pid;
                     change.Window = Describe(now);
+                    IntPtr game = GameWindow;
+                    change.GameShown = game != IntPtr.Zero && IsWindow(game) && IsWindowVisible(game);
                     changes.Enqueue(change);
                 }
                 System.Threading.Thread.Sleep(2);
@@ -304,12 +313,14 @@ $script:watching = $false
 $script:focusLosses = New-Object System.Collections.Generic.List[string]
 
 # Logs the foreground changes the watcher saw since the last call. While the
-# scenario runs, a window of another process taking the foreground counts as
-# a focus loss: input sent meanwhile may not have reached the game.
+# scenario runs, a window of another process taking the foreground from the
+# game window counts as a focus loss: input sent meanwhile may not have
+# reached the game. When the game closes its window (it quits by itself), the
+# window that comes to the front is no loss.
 function Watch-Foreground {
     foreach ($c in [IwdInput]::ForegroundChanges()) {
         Log "  foreground at $($c.Time): $($c.Window)"
-        if ($script:watching -and $c.Pid -ne 0 -and $c.Pid -ne [uint32]$script:game.Id) {
+        if ($script:watching -and $c.GameShown -and $c.Pid -ne 0 -and $c.Pid -ne [uint32]$script:game.Id) {
             $script:focusLosses.Add("line $($script:line): $($c.Window) at $($c.Time)")
         }
     }
@@ -434,6 +445,7 @@ function Find-Window {
             $stable++
             if ($stable -ge 5) {
                 $script:window = $current
+                [IwdInput]::GameWindow = $current
                 Log ('game window 0x{0:x}' -f $current.ToInt64())
                 return
             }
@@ -452,6 +464,7 @@ function Refresh-Window {
     $ids = [IwdInput]::Windows($script:game.Id, 'SDL_app')
     if ($ids.Count -gt 0 -and -not ($ids -contains $script:window)) {
         $script:window = $ids[0]
+        [IwdInput]::GameWindow = $script:window
         Log ('  game window is now 0x{0:x}' -f $script:window.ToInt64())
     }
     if (-not [IwdInput]::SetForegroundWindow($script:window)) {
