@@ -2355,6 +2355,13 @@ DWORD CInfinity::Render(CVidMode* pNewVidMode, INT nSurface, INT nScrollState, C
             nCurrentTileY + nVisibleTilesY + 2);
     }
 
+    // One tile code for the whole pass, as the original's one stack slot:
+    // GetTileCode leaves the corners it cannot see (the east ones in the
+    // last column, the south ones in the last row) as the previous tile
+    // left them. NOTE: The original's slot holds whatever its stack held
+    // before the first tile; ours starts at 0.
+    TILE_CODE tileCode = { 0, 0, 0, 0 };
+
     for (int nTileY = nCurrentTileY; nTileY < nCurrentTileY + nVisibleTilesY; nTileY++) {
         for (int nTileX = nCurrentTileX; nTileX < nCurrentTileX + nVisibleTilesX; nTileX++) {
             int x;
@@ -2437,7 +2444,6 @@ DWORD CInfinity::Render(CVidMode* pNewVidMode, INT nSurface, INT nScrollState, C
                             nTile = pTileList[pTileData->nStartingTile + (currTime / nAnimSpeed) % pTileData->nNumTiles];
                         }
 
-                        TILE_CODE tileCode;
                         pVisibilityMap->GetTileCode(nTileY * nTilesX + nTileX, tileCode);
 
                         if ((pTileData->bFlags & 0x1E) != 0) {
