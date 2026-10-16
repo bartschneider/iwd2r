@@ -9,7 +9,6 @@
 #include "CGameJournal.h"
 #include "CGameSprite.h"
 #include "CInfGame.h"
-#include "CInfGameItemUse.h"
 #include "CItem.h"
 #include "CMemINI.h"
 #include "CMessage.h"
@@ -728,38 +727,38 @@ TEST_CASE("inventory: SwapItemPersonal fits helmets and rings and quiver items o
     // The wrong slot: "That item cannot be put there" (9375), the hand
     // keeps the item.
     CItem* pHand = pRing;
-    CHECK(CInfGame_SwapItemPersonal(pGame, 0, 6, pHand, strError, 1, FALSE) == FALSE);
+    CHECK(pGame->SwapItemPersonal(0, 6, pHand, strError, 1, FALSE) == FALSE);
     CHECK(strError == 9375);
     CHECK(pHand == pRing);
     pHand = pHelm;
-    CHECK(CInfGame_SwapItemPersonal(pGame, 0, 7, pHand, strError, 1, FALSE) == FALSE);
+    CHECK(pGame->SwapItemPersonal(0, 7, pHand, strError, 1, FALSE) == FALSE);
     CHECK(strError == 9375);
     pHand = pHelm;
-    CHECK(CInfGame_SwapItemPersonal(pGame, 0, 11, pHand, strError, 1, FALSE) == FALSE);
+    CHECK(pGame->SwapItemPersonal(0, 11, pHand, strError, 1, FALSE) == FALSE);
     CHECK(strError == 9375);
     pHand = pBolts;
-    CHECK(CInfGame_SwapItemPersonal(pGame, 0, 6, pHand, strError, 1, FALSE) == FALSE);
+    CHECK(pGame->SwapItemPersonal(0, 6, pHand, strError, 1, FALSE) == FALSE);
 
     // The right slot: the item goes in and the hand empties.
     pHand = pHelm;
-    CHECK(CInfGame_SwapItemPersonal(pGame, 0, 6, pHand, strError, 1, FALSE) == TRUE);
+    CHECK(pGame->SwapItemPersonal(0, 6, pHand, strError, 1, FALSE) == TRUE);
     CHECK(pHand == NULL);
     CHECK(pSprite->m_equipment.m_items[6] != NULL);
     pHand = pRing;
-    CHECK(CInfGame_SwapItemPersonal(pGame, 0, 7, pHand, strError, 1, FALSE) == TRUE);
+    CHECK(pGame->SwapItemPersonal(0, 7, pHand, strError, 1, FALSE) == TRUE);
     CHECK(pHand == NULL);
     pHand = pBolts;
-    CHECK(CInfGame_SwapItemPersonal(pGame, 0, 11, pHand, strError, 10, FALSE) == TRUE);
+    CHECK(pGame->SwapItemPersonal(0, 11, pHand, strError, 10, FALSE) == TRUE);
     CHECK(pSprite->m_equipment.m_items[11] != NULL);
 
     // The slot predicate the highlights use agrees.
     CItem* pProbe = new CItem(CResRef("00HELM01"), 0, 0, 0, 0, 0);
-    CHECK(CInfGame_CanEquipInSlot(pGame, pSprite, 6, &pProbe, &strError) == TRUE);
-    CHECK(CInfGame_CanEquipInSlot(pGame, pSprite, 7, &pProbe, &strError) == FALSE);
+    CHECK(pGame->CanEquipInSlot(pSprite, 6, &pProbe, &strError) == TRUE);
+    CHECK(pGame->CanEquipInSlot(pSprite, 7, &pProbe, &strError) == FALSE);
     CHECK(strError == 9375);
-    CHECK(CInfGame_CanPortraitEquipInSlot(pGame, 0, 11, &pProbe, &strError) == FALSE);
-    CHECK(CInfGame_CanEquipInSlot(pGame, pSprite, 10, &pProbe, &strError) == FALSE);
-    CHECK(CInfGame_CanEquipInSlot(pGame, pSprite, 51, &pProbe, &strError) == FALSE);
+    CHECK(pGame->CanPortraitEquipInSlot(0, 11, &pProbe, &strError) == FALSE);
+    CHECK(pGame->CanEquipInSlot(pSprite, 10, &pProbe, &strError) == FALSE);
+    CHECK(pGame->CanEquipInSlot(pSprite, 51, &pProbe, &strError) == FALSE);
     CHECK(strError == 9374);
     delete pProbe;
 
@@ -788,20 +787,20 @@ TEST_CASE("inventory: FindEmptyItemPersonalInventory gives the first free pack s
     for (INT n = 0; n < 24; n++) {
         saved[n] = TakeSlot(pSprite, 18 + n);
     }
-    CHECK(CInfGame_FindEmptyItemPersonalInventory(pGame, 0) == 18);
+    CHECK(pGame->FindEmptyItemPersonalInventory(0) == 18);
 
     CItem gem(CResRef("00GEM01"), 1, 0, 0, 0, 0);
     pSprite->m_equipment.m_items[18] = &gem;
     pSprite->m_equipment.m_items[19] = &gem;
-    CHECK(CInfGame_FindEmptyItemPersonalInventory(pGame, 0) == 20);
+    CHECK(pGame->FindEmptyItemPersonalInventory(0) == 20);
 
     for (INT n = 0; n < 24; n++) {
         pSprite->m_equipment.m_items[18 + n] = &gem;
     }
-    CHECK(CInfGame_FindEmptyItemPersonalInventory(pGame, 0) == -1);
+    CHECK(pGame->FindEmptyItemPersonalInventory(0) == -1);
 
     // No character in the slot.
-    CHECK(CInfGame_FindEmptyItemPersonalInventory(pGame, 5) == -1);
+    CHECK(pGame->FindEmptyItemPersonalInventory(5) == -1);
 
     for (INT n = 0; n < 24; n++) {
         pSprite->m_equipment.m_items[18 + n] = saved[n];
