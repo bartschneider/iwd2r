@@ -198,6 +198,8 @@ The crisp-text requirement is met by `Program Options/Text Renderer=scalable` (s
 - The Lua console's Enter (0x77BF30, `CLUAConsole` 0x5838A0) is not ported; iwd2r has no Lua runtime.
 - Character generation reports no Ctrl (its vtable's GetCtrlKey is CWarp's) and ignores Enter in the biography popup, in the original too: the biography edit has no Ctrl shortcuts or line breaks there. The character screen's and the journal's edits have them.
 - `CDerivedStats`' arrays at +0x328 and +0x378 and its six lists at +0x4AC to +0x538 are still undeclared; only the constructor, ClearAll and the copy touch them.
+- `CBaldurMessage::SendMapWorldAnnounceStatus` (0x4354E0) is still a stub that returns FALSE. `CGameSprite::LeaveArea` (0x74C0D0) calls it in a single-player game too, because a single-player game is a host session. It sends the world map's state to the other players, so with no other player nothing is lost; port it with the rest of CBaldurMessage's announcements.
+- Area travel (ui-misc round 4) leaves these parts of `CBaldurMessage` and `CInfGame` 0x5C4AD0 as NOTEs because they need a remote player: the client's request in 0x438710, the message 0x438F90 to the other players, the host's wait for slow clients (0x5C5FEE-0x5C686A), the clients' sprite updates, and a client's own wait.
 
 ## Combat and spell casting (from project 3, milestone 3, combat)
 
