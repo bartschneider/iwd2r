@@ -6,6 +6,32 @@
 #include "CScreenWorld.h"
 #include "CUtil.h"
 
+// TEMPORARY ui-misc round-5 debug WIP (committed as a checkpoint; revert
+// before gate): IWD2R_UM5_TIMERDBG=<file> logs every StartTime/StopTime/
+// tick with the engine frame, the object, the game time before/after, and
+// the true caller's return address (macro, so return_address(0) is the
+// caller).
+#include <cstdio>
+#include <cstdlib>
+#include "msvc_rand.h"
+#define IWD2R_UM5_TIMER_TRACE(what, before)                                  \
+    do {                                                                     \
+        const char* um5Path = std::getenv("IWD2R_UM5_TIMERDBG");             \
+        if (um5Path != nullptr && *um5Path != '\0') {                        \
+            std::FILE* um5F = std::fopen(um5Path, "a");                      \
+            if (um5F != nullptr) {                                           \
+                std::fprintf(um5F,                                           \
+                    what " this=%p fr=%u t=%u->%u ret=%p\n",                 \
+                    static_cast<const void*>(this),                          \
+                    iwd2r_rand_trace_frame_value(),                          \
+                    static_cast<unsigned>(before),                           \
+                    static_cast<unsigned>(m_gameTime),                       \
+                    __builtin_return_address(0));                            \
+                std::fclose(um5F);                                           \
+            }                                                                \
+        }                                                                    \
+    } while (0)
+
 // 0x8E078C
 const CString CTimerWorld::TOKEN_MINUTE("MINUTE");
 
@@ -375,31 +401,6 @@ void CTimerWorld::GetCurrentTimeString(ULONG nFromTime, STRREF strTimeFormat, CS
     tlk.Fetch(strTimeFormat, strRes);
     sTime = strRes.szText;
 }
-
-// TEMPORARY ui-misc round-5 debug WIP (committed as a checkpoint; revert
-// before gate): IWD2R_UM5_TIMERDBG=<file> logs every StartTime/StopTime with
-// the engine frame, the object, the game time before/after, and the true
-// caller's return address (macro, so return_address(0) is the caller).
-#include <cstdio>
-#include <cstdlib>
-#include "msvc_rand.h"
-#define IWD2R_UM5_TIMER_TRACE(what, before)                                  \
-    do {                                                                     \
-        const char* um5Path = std::getenv("IWD2R_UM5_TIMERDBG");             \
-        if (um5Path != nullptr && *um5Path != '\0') {                        \
-            std::FILE* um5F = std::fopen(um5Path, "a");                      \
-            if (um5F != nullptr) {                                           \
-                std::fprintf(um5F,                                           \
-                    what " this=%p fr=%u t=%u->%u ret=%p\n",                 \
-                    static_cast<const void*>(this),                          \
-                    iwd2r_rand_trace_frame_value(),                          \
-                    static_cast<unsigned>(before),                           \
-                    static_cast<unsigned>(m_gameTime),                       \
-                    __builtin_return_address(0));                            \
-                std::fclose(um5F);                                           \
-            }                                                                \
-        }                                                                    \
-    } while (0)
 
 // 0x54F970
 void CTimerWorld::StartTime()
