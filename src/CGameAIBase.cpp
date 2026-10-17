@@ -631,8 +631,10 @@ SHORT CGameAIBase::ExecuteAction()
         goto done;
     case 140:
         // GiveItemCreate
-        // TODO: 0x44EEB9-0x44EF37 calls 0x464EB0 (not ported).
-        goto done;
+        pTarget = ExecuteActionGetActee(this);
+        bShare = TRUE;
+        returnValue = GiveItemCreate(pTarget);
+        goto release;
     case 141:
         // GivePartyGoldGlobal
         // TODO: 0x44EF53-0x44EF61 calls 0x465220 (not ported).
@@ -2318,6 +2320,48 @@ SHORT CGameAIBase::ClearActions(CGameObject* target)
     g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
 
     return ACTION_DONE;
+}
+
+// 0x464EB0
+SHORT CGameAIBase::GiveItemCreate(CGameObject* pTarget)
+{
+    if (pTarget == NULL) {
+        return ACTION_ERROR;
+    }
+
+    if (g_pBaldurChitin->cDimm.m_cKeyTable.FindKey(CResRef(m_curAction.GetString1()), 1005, TRUE) == NULL) {
+        return ACTION_ERROR;
+    }
+
+    CItem* pItem = new CItem(CResRef(m_curAction.GetString1()),
+        static_cast<WORD>(m_curAction.m_specificID),
+        static_cast<WORD>(m_curAction.m_specificID2),
+        static_cast<WORD>(m_curAction.m_specificID3),
+        0,
+        0);
+
+    if (pTarget->m_objectType == TYPE_SPRITE) {
+        CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+        if (pGame->GetCharacterPortraitNum(pTarget->GetId()) != -1) {
+            pGame->FeedBack(CInfGame::FEEDBACK_ITEMGAINED, 0, TRUE);
+        }
+
+        // The target puts a copy in its inventory; the game keeps the item
+        // until it is thrown away.
+        CMessageAddItem* pMessage = new CMessageAddItem(*pItem, m_id, pTarget->GetId());
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(pMessage, FALSE);
+
+        pGame->AddDisposableItem(pItem);
+        return ACTION_DONE;
+    }
+
+    if (pTarget->m_objectType == TYPE_CONTAINER) {
+        static_cast<CGameContainer*>(pTarget)->PlaceItemInBlankSlot(pItem, TRUE, 0x7FFF);
+        return ACTION_DONE;
+    }
+
+    // NOTE: The original leaks the item for a target of another type.
+    return ACTION_ERROR;
 }
 
 // 0x465110
@@ -4428,18 +4472,43 @@ SHORT CGameAIBase::IncrementChapter()
         nChapter = nCurrent + 1;
     }
 
-    // NOTE: A connected client asks the host for the chapter here
-    // (0x434BA0), and a connected host announces it to the clients
-    // (CScreenChapter::StartChapterMultiplayerHost and the journal entry).
-    // Omitted: single player only (docs/adr/0002-single-player-only.md).
+    if (g_pChitin->cNetwork.m_bConnectionEstablished == TRUE
+        && !g_pChitin->cNetwork.m_bIsHost) {
+        // NOTE: A client asks the host for the chapter (CBaldurMessage
+        // 0x434BA0) and is done. Not ported: iwd2r has no client
+        // (docs/adr/0002-single-player-only.md).
+        return ACTION_DONE;
+    }
 
     CVariable* pChapterVariable = pGame->GetVariables()->FindKey(CInfGame::CHAPTER_GLOBAL);
     if (pChapterVariable != NULL) {
         pChapterVariable->m_intValue = nChapter;
     }
 
-    pChapter->StartChapter(cResText);
-    g_pBaldurChitin->GetActiveEngine()->SelectEngine(pChapter);
+    if (g_pChitin->cNetwork.m_bConnectionEstablished == TRUE
+        && g_pChitin->cNetwork.m_bIsHost == TRUE) {
+        // 0x4659CB: the host (a single-player game is a host session of the
+        // null provider) starts the chapter through
+        // StartChapterMultiplayerHost, which pauses the game for the
+        // chapter text ("Paused for chapter text") and announces it, with
+        // the chapter now in the variable and the text's resref.
+        CString sResText;
+        cResText.CopyToString(sResText);
+
+        CVariable* pCurrentVariable = pGame->GetVariables()->FindKey(CInfGame::CHAPTER_GLOBAL);
+        LONG nCurrentChapter = pCurrentVariable != NULL ? pCurrentVariable->m_intValue : 0;
+
+        // NOTE: The original copies the string's characters (its length,
+        // at most a resref's) over eight zero bytes.
+        BYTE resRef[RESREF_SIZE] = { 0 };
+        INT nLength = sResText.GetLength() < RESREF_SIZE ? sResText.GetLength() : RESREF_SIZE;
+        memcpy(resRef, static_cast<LPCSTR>(sResText), nLength);
+
+        pChapter->StartChapterMultiplayerHost(static_cast<BYTE>(nCurrentChapter), resRef);
+    } else {
+        pChapter->StartChapter(cResText);
+        g_pBaldurChitin->GetActiveEngine()->SelectEngine(pChapter);
+    }
 
     C2DArray tChapters;
     tChapters.Load(CResRef("chapters"));

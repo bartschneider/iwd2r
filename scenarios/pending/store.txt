@@ -1,3 +1,9 @@
+# To be re-based on a save (2026-10-16, ui-misc round 4): this scenario
+# will start from a saved game instead of a new one, once the crossload
+# stream (p3/crossload) lands `oracle.py replay --load <save>` and the dump
+# fields for gold, experience, levels and inventory. The steps below are
+# kept as they are until then.
+#
 # M5: a store visit, planned for the Salty Dog tavern (AR1003, behind the
 # travel region To1003 at 893..937,1766..1820), the nearest stores to the
 # start: Gohar Tavernkeep (store 10GOHAR) and Guthewulfe Henghelm (store

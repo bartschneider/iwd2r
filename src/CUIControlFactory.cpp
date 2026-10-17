@@ -3939,6 +3939,13 @@ BOOL CUIControlPortraitWorld::Render(BOOL bForce)
         return FALSE;
     }
 
+    // The button's own frame first (0x77B399): the ring between the
+    // selection frame and the portrait, which RenderPortrait draws two
+    // pixels in, is the frame's.
+    if (!CUIControlButton::Render(bForce)) {
+        return FALSE;
+    }
+
     CPoint pt = m_pPanel->m_ptOrigin + m_ptOrigin;
     g_pBaldurChitin->GetObjectGame()->RenderPortrait(m_nID,
         pt,

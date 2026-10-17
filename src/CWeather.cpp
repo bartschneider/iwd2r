@@ -1022,8 +1022,9 @@ void CRainStorm::AsynchronousUpdate()
                     m_pRainDrops[index].m_vel.y = 0;
                     m_pRainDrops[index].m_vel.z = 0;
 
-                    m_pRainDrops[index].m_pos.x = (rNewWorldViewPort.left + rand() % rNewWorldViewPort.Width()) << CParticle::RESOLUTION_INC;
+                    // The height first, then the width (0x557B9F, 0x557BC5).
                     m_pRainDrops[index].m_pos.y = (rand() % (4 * rNewWorldViewPort.bottom / 3 - 4 * rNewWorldViewPort.top / 3) + 4 * rNewWorldViewPort.top / 3 + RAINDROP_MAX_HEIGHT) << CParticle::RESOLUTION_INC;
+                    m_pRainDrops[index].m_pos.x = (rNewWorldViewPort.left + rand() % rNewWorldViewPort.Width()) << CParticle::RESOLUTION_INC;
                     m_pRainDrops[index].m_pos.z = RAINDROP_MAX_HEIGHT << CParticle::RESOLUTION_INC;
                 }
             }
@@ -1041,9 +1042,10 @@ void CRainStorm::GenerateDrops(const CPoint& ptViewPort, const CRect& rBounds)
     m_pRainDrops = new CRainDrop[250];
     if (m_pRainDrops != NULL) {
         for (int i = 0; i < 250; i++) {
+            // The rolls go z, y, x (0x557D04, 0x557D23, 0x557D3D).
             WORD z = rand() % RAINDROP_MAX_HEIGHT;
-            m_pRainDrops[i].m_pos.x = (ptViewPort.x + rand() % rBounds.Width()) << CParticle::RESOLUTION_INC;
             m_pRainDrops[i].m_pos.y = (4 * ptViewPort.y / 3 + z + rand() % (4 * rBounds.Height() / 3)) << CParticle::RESOLUTION_INC;
+            m_pRainDrops[i].m_pos.x = (ptViewPort.x + rand() % rBounds.Width()) << CParticle::RESOLUTION_INC;
             m_pRainDrops[i].m_pos.z = z << CParticle::RESOLUTION_INC;
         }
     }
@@ -1144,8 +1146,9 @@ void CSnowStorm::AsynchronousUpdate()
                     // __LINE__: 2125
                     UTIL_ASSERT(m_pSnowFlakes != NULL);
 
-                    m_pSnowFlakes[index].m_pos.x = (rNewWorldViewPort.left + rand() % rNewWorldViewPort.Width()) << CParticle::RESOLUTION_INC;
+                    // The height first, then the width (0x558120, 0x55813A).
                     m_pSnowFlakes[index].m_pos.y = (rand() % (4 * rNewWorldViewPort.bottom / 3 - 4 * rNewWorldViewPort.top / 3) + 4 * rNewWorldViewPort.top / 3 + SNOWFLAKE_MAX_HEIGHT) << CParticle::RESOLUTION_INC;
+                    m_pSnowFlakes[index].m_pos.x = (rNewWorldViewPort.left + rand() % rNewWorldViewPort.Width()) << CParticle::RESOLUTION_INC;
                     m_pSnowFlakes[index].m_pos.z = SNOWFLAKE_MAX_HEIGHT << CParticle::RESOLUTION_INC;
                 }
             }
@@ -1163,9 +1166,10 @@ void CSnowStorm::GenerateFlakes(const CPoint& ptViewPort, const CRect& rBounds)
     m_pSnowFlakes = new CSnowFlake[250];
     if (m_pSnowFlakes != NULL) {
         for (int index = 0; index < 250; index++) {
+            // The rolls go z, y, x (0x558284, 0x5582A3, 0x5582BD).
             WORD z = rand() % SNOWFLAKE_MAX_HEIGHT;
-            m_pSnowFlakes[index].m_pos.x = (ptViewPort.x + rand() % rBounds.Width()) << CParticle::RESOLUTION_INC;
             m_pSnowFlakes[index].m_pos.y = (4 * ptViewPort.y / 3 + z + rand() % (4 * rBounds.Height() / 3)) << CParticle::RESOLUTION_INC;
+            m_pSnowFlakes[index].m_pos.x = (ptViewPort.x + rand() % rBounds.Width()) << CParticle::RESOLUTION_INC;
             m_pSnowFlakes[index].m_pos.z = z << CParticle::RESOLUTION_INC;
         }
     }

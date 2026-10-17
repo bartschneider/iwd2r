@@ -93,6 +93,53 @@ namespace {
             + ", \"creatures\": " + Number(w.creatures) + "}";
     }
 
+    // recorder.cpp's GameJson: one member's values, or nulls without a
+    // sprite; an empty slot is null.
+    std::string GameMemberJson(const GameMember& m)
+    {
+        if (!m.sprite) {
+            return "{\"id\": " + Number(m.id)
+                + ", \"gold\": null, \"xp\": null, \"level\": null, \"class_levels\": null, \"inventory\": null}";
+        }
+        std::string inventory = "[";
+        for (size_t i = 0; i < 51; ++i) {
+            inventory += i ? ", " : "";
+            if (!m.hasItem[i]) {
+                inventory += "null";
+                continue;
+            }
+            const Item& item = m.items[i];
+            inventory += "{\"resref\": " + JsonString(item.resref) + ", \"uses\": " + List(item.uses)
+                + ", \"flags\": " + Number(item.flags) + "}";
+        }
+        inventory += "]";
+        return "{\"id\": " + Number(m.id) + ", \"gold\": " + Number(m.gold) + ", \"xp\": " + Number(m.xp)
+            + ", \"level\": " + Number(m.level) + ", \"class_levels\": " + List(m.classLevels)
+            + ", \"inventory\": " + inventory + "}";
+    }
+
+    std::string GameJson(const Game& g)
+    {
+        std::string members = "[";
+        for (size_t i = 0; i < g.members.size(); ++i)
+            members += (i ? ", " : "") + GameMemberJson(g.members[i]);
+        members += "]";
+        return "{\"party_gold\": " + Number(g.partyGold) + ", \"members\": " + members + "}";
+    }
+
+    // recorder.cpp's SlotsJson.
+    std::string SlotsJson(const std::vector<Slot>& slots)
+    {
+        std::string out = "[";
+        for (size_t i = 0; i < slots.size(); ++i) {
+            const Slot& s = slots[i];
+            out += std::string(i ? ", " : "") + "{\"file\": " + JsonString(s.file) + ", \"name\": " + JsonString(s.name)
+                + ", \"character\": " + JsonString(s.character) + ", \"time\": " + Number(s.time)
+                + ", \"chapter\": " + Number(s.chapter) + ", \"chapter_text\": " + JsonString(s.chapterText) + "}";
+        }
+        return out + "]";
+    }
+
 }
 
 void SetSource(const DumpSource* source)
@@ -121,7 +168,9 @@ std::string ToJson(const Snapshot& s)
         + ", \"loads\": " + Number(s.loads) + ", \"held_frames\": " + Number(s.heldFrames)
         + ", \"ai_rng_state\": " + (s.hasAiRngState ? Number(s.aiRngState) : std::string("null")) + "},\n";
     json += "  \"chargen\": " + (e.hasChargen ? ChargenJson(e.chargen) : std::string("null")) + ",\n";
-    json += "  \"world\": " + (e.hasWorld ? WorldJson(e.world) : std::string("null")) + "\n}\n";
+    json += "  \"world\": " + (e.hasWorld ? WorldJson(e.world) : std::string("null")) + ",\n";
+    json += "  \"game\": " + (e.hasGame ? GameJson(e.game) : std::string("null")) + ",\n";
+    json += "  \"slots\": " + (e.hasSlots ? SlotsJson(e.slots) : std::string("null")) + "\n}\n";
     return json;
 }
 

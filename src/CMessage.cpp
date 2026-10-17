@@ -3388,6 +3388,54 @@ BOOLEAN CBaldurMessage::OnLeaveAreaLuaRequestToServer(INT nMsgFrom, BYTE* pByteM
     return FALSE;
 }
 
+// A party's travel through a party required region (LeaveAreaName,
+// 0x74DA6B): in a session the host makes the transition itself (CInfGame
+// 0x5C4AD0) and answers 1, done; a paused game, a dialog or cutscene mode
+// or a host-permitted dialog answer 0, an error. A client asks the host
+// instead (see below). Without a connection the answer is 0.
+//
+// 0x438710
+BYTE CBaldurMessage::sub_438710(LONG nCharacterId, LONG nTriggerId, CString sAreaName)
+{
+    if (!g_pChitin->cNetwork.m_bConnectionEstablished) {
+        m_bLeaveAreaNameRequestPending = FALSE;
+        return 0;
+    }
+
+    if (g_pChitin->cNetwork.m_bIsHost == TRUE) {
+        CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+        // NOTE: The BYTE compares of the original (`cmp byte ptr ..., 1`).
+        if (g_pBaldurChitin->m_pEngineWorld->m_bPaused == TRUE) {
+            m_bLeaveAreaNameRequestPending = FALSE;
+            return 0;
+        }
+
+        if (pGame->GetGameSave()->m_mode == 0x182 || pGame->GetGameSave()->m_mode == 0x502) {
+            m_bLeaveAreaNameRequestPending = FALSE;
+            return 0;
+        }
+
+        if (pGame->GetMultiplayerSettings()->m_bHostPermittedDialog == TRUE) {
+            m_bLeaveAreaNameRequestPending = FALSE;
+            return 0;
+        }
+
+        g_pBaldurChitin->GetObjectGame()->sub_5C4AD0(nCharacterId, nTriggerId, CString(sAreaName));
+        m_bLeaveAreaNameRequestPending = FALSE;
+        return 1;
+    }
+
+    // NOTE: A client (0x43881C-0x438BC5) sends the host its request
+    // (MSG_TYPE_LEAVEAREANAME, MSG_SUBTYPE_LEAVEAREANAME_PERMIT_REQUEST, with
+    // the character's and the region's remote ids and the area name), marks
+    // it pending and answers 2 until the reply comes. Not ported: iwd2r has
+    // no client (docs/adr/0002-single-player-only.md, a client that is not
+    // the host); it answers 0.
+    m_bLeaveAreaNameRequestPending = FALSE;
+    return 0;
+}
+
 // 0x438BF0
 BOOLEAN CBaldurMessage::OnLeaveAreaNameRequestToServer(INT nMsgFrom, BYTE* pByteMessage, DWORD dwSize)
 {

@@ -443,8 +443,12 @@ TEST_CASE("visual projectiles: a shattering death throws two explosions", "[visu
     const DWORD nGore = pOptions->m_nGore;
     pOptions->m_nGore = 1;
 
-    // The stone shatter sets the die sequence first (CGameSprite::
-    // SetSequence draws one number), as the original does at 0x4AC907.
+    // The stone shatter sets the die sequence first, as the original does
+    // at 0x4AC907, but that draws nothing: CGameSprite::SetSequence's
+    // switch draws its rand (0x7077AE) for SEQ_ATTACK only (case 5 goes
+    // straight to the switch's exit, 0x7078BC), and the animation's case 5
+    // breaks at 0x6E7F0F instead of falling into TWITCH's random frame
+    // (vis-probe round 10; the first_fight replay pins the goblin's death).
     struct Shatter {
         DWORD dwFlags;
         COLORREF rgbStart;
@@ -452,7 +456,7 @@ TEST_CASE("visual projectiles: a shattering death throws two explosions", "[visu
     };
     const Shatter shatters[] = {
         { 0x80, RGB(235, 245, 245), 168 },
-        { 0x40, RGB(150, 150, 150), 1 + 168 },
+        { 0x40, RGB(150, 150, 150), 168 },
     };
     int n = 0;
     for (const Shatter& shatter : shatters) {
