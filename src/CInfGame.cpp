@@ -9559,46 +9559,132 @@ BOOL CInfGame::sub_5C79C0(CString sArea)
 INT CInfGame::AddItemToBag(const CResRef& cResBag, CItem* pItem, STRREF& strError)
 {
     INT nCount = 0;
+    INT nOriginalUsage = 0;
 
     strError = -1;
 
-    if (g_pChitin->cNetwork.m_bConnectionEstablished) {
-        // NOTE: In a session the original fills the server's copy of the bag
-        // (`DemandServerStore` 0x5ADC90, `GetServerStore` 0x5ADF60,
-        // `ReleaseServerStore` 0x5ADE90) or asks the server for it
-        // (`CBaldurMessage::DemandResourceFromServer`) and announces the
-        // change (0x5C7B5B-0x5C8023). Multiplayer is removed (ADR 0002).
+    if (g_pChitin->cNetwork.m_bConnectionEstablished == FALSE) {
+        CStore cStore(cResBag);
+        if (cStore.GetType() == 4 && cStore.IsItemAcceptable(pItem)) {
+            // NOTE: The bag's capacity is the WORD at the header's +0x94; the
+            // original compares it with the number of items in the bag.
+            WORD nCapacity = static_cast<WORD>(cStore.m_header.field_94);
+            if (nCapacity != 0 && nCapacity != cStore.GetNumItems()) {
+                nCount = 1;
+                if (pItem->GetMaxStackable() > 1) {
+                    nCount = pItem->GetUsageCount(0);
+                }
+
+                if (cStore.GetNumItems() + nCount > nCapacity) {
+                    nCount = nCapacity - cStore.GetNumItems();
+                }
+
+                pItem->SetUsageCount(0, static_cast<WORD>(nCount));
+                cStore.AddItemExt(*pItem, 1);
+            } else {
+                // "Container Is Full"
+                strError = 24889;
+            }
+        } else {
+            // "Wrong Item Type"
+            strError = 26285;
+        }
+
+        if (strError == -1) {
+            cStore.Marshal(m_sTempDir);
+        }
+
         return nCount;
     }
 
-    CStore cStore(cResBag);
+    // A session: a single-player game runs this as the host. The host fills
+    // the server's copy of the bag; a client asks the server for it first
+    // and works on its local copy.
+    BOOL bStoreDemanded = FALSE;
+    CStore cStore;
+    if (g_pChitin->cNetwork.GetSessionHosting()) {
+        DemandServerStore(cResBag, TRUE);
+        cStore.SetResRef(cResBag);
+    } else {
+        cStore.SetResRef(cResBag);
+        if (!cStore.m_bLocalCopy || memcmp(cStore.m_pVersion, "STORV9.0", 8) != 0) {
+            if (!g_pBaldurChitin->GetBaldurMessage()->DemandResourceFromServer(cResBag.GetResRefStr(),
+                    1014,
+                    TRUE,
+                    TRUE,
+                    TRUE)) {
+                g_pChitin->cNetwork.CloseSession(TRUE);
+                return 0;
+            }
+
+            cStore.SetResRef(cResBag);
+            bStoreDemanded = TRUE;
+        }
+    }
+
     if (cStore.GetType() == 4 && cStore.IsItemAcceptable(pItem)) {
         // NOTE: The bag's capacity is the WORD at the header's +0x94; the
         // original compares it with the number of items in the bag.
         WORD nCapacity = static_cast<WORD>(cStore.m_header.field_94);
-        if (nCapacity != 0 && nCapacity != cStore.GetNumItems()) {
-            nCount = 1;
-            if (pItem->GetMaxStackable() > 1) {
-                nCount = pItem->GetUsageCount(0);
-            }
-
-            if (cStore.GetNumItems() + nCount > nCapacity) {
-                nCount = nCapacity - cStore.GetNumItems();
-            }
-
-            pItem->SetUsageCount(0, static_cast<WORD>(nCount));
-            cStore.AddItemExt(*pItem, 1);
-        } else {
+        if (nCapacity == 0 || nCapacity == cStore.GetNumItems()) {
             // "Container Is Full"
             strError = 24889;
+        } else {
+            if (pItem->GetMaxStackable() < 2) {
+                nCount = 1;
+            } else {
+                nCount = pItem->GetUsageCount(0);
+                nOriginalUsage = nCount;
+
+                // NOTE: The capacity of a bag counts stacks, so a stackable
+                // item's count is divided by its maximum stack first.
+                if (nCount / pItem->GetMaxStackable() + cStore.GetNumItems() > nCapacity) {
+                    nCount = nCapacity - cStore.GetNumItems();
+                }
+
+                pItem->SetUsageCount(0, static_cast<WORD>(nCount));
+            }
+
+            if (g_pChitin->cNetwork.GetSessionHosting() == FALSE && bStoreDemanded == FALSE) {
+                bStoreDemanded = TRUE;
+                CMessageStoreDemand* pDemandMessage = new CMessageStoreDemand(cResBag, -1, -1);
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(pDemandMessage, FALSE);
+            }
+
+            // NOTE: `CMessageStoreAddItem` is BROADCAST_FORCED_OTHERS, so
+            // the message handler deletes it in a single-player session.
+            CMessageStoreAddItem* pAddMessage = new CMessageStoreAddItem(cResBag,
+                pItem->GetItemFile(),
+                -1,
+                -1);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(pAddMessage, FALSE);
+
+            if (g_pChitin->cNetwork.GetSessionHosting()) {
+                CStore* pServerStore = GetServerStore(cResBag);
+
+                // __FILE__: C:\Projects\Icewind2\src\Baldur\InfGame.cpp
+                // __LINE__: 22140
+                UTIL_ASSERT(pServerStore != NULL);
+
+                pServerStore->AddItemExt(*pItem, 1);
+            } else {
+                CStore::InvalidateStore(cResBag);
+            }
+
+            if (pItem->GetMaxStackable() > 1) {
+                pItem->SetUsageCount(0, static_cast<WORD>(nOriginalUsage));
+            }
         }
     } else {
         // "Wrong Item Type"
         strError = 26285;
     }
 
-    if (strError == -1) {
-        cStore.Marshal(m_sTempDir);
+    if (g_pChitin->cNetwork.GetSessionHosting()) {
+        ReleaseServerStore(cResBag);
+    } else if (bStoreDemanded) {
+        CMessageStoreRelease* pReleaseMessage = new CMessageStoreRelease(cResBag, -1, -1);
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(pReleaseMessage, FALSE);
     }
 
     return nCount;
