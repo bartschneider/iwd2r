@@ -374,9 +374,33 @@ void CTimerWorld::GetCurrentTimeString(ULONG nFromTime, STRREF strTimeFormat, CS
     sTime = strRes.szText;
 }
 
+// TEMPORARY ui-misc round-5 debug WIP (uncommitted; revert before gate):
+// IWD2R_UM5_TIMERDBG=<file> logs every StartTime/StopTime with the engine
+// frame and the caller's return address.
+#include <cstdio>
+#include <cstdlib>
+#include "msvc_rand.h"
+namespace {
+void Iwd2rUm5TimerTrace(const char* what)
+{
+    const char* path = std::getenv("IWD2R_UM5_TIMERDBG");
+    if (path == nullptr || *path == '\0') {
+        return;
+    }
+    std::FILE* f = std::fopen(path, "a");
+    if (f == nullptr) {
+        return;
+    }
+    std::fprintf(f, "%s fr=%u ret=%p\n", what, iwd2r_rand_trace_frame_value(),
+        __builtin_return_address(0));
+    std::fclose(f);
+}
+} // namespace
+
 // 0x54F970
 void CTimerWorld::StartTime()
 {
+    Iwd2rUm5TimerTrace("START");
     m_active = TRUE;
 
     if (g_pBaldurChitin->m_pEngineWorld->m_nAutoHideInterface != 0) {
@@ -395,6 +419,7 @@ void CTimerWorld::StartTime()
 // 0x54F9F0
 void CTimerWorld::StopTime()
 {
+    Iwd2rUm5TimerTrace("STOP");
     m_active = FALSE;
     m_gameTime--;
     m_nLastPercentage = -1;

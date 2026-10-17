@@ -68,6 +68,11 @@ void iwd2r_srand(unsigned int seed)
     g_state = seed;
 }
 
+unsigned int iwd2r_rand_trace_frame_value()
+{
+    return g_traceFrame.load();
+}
+
 unsigned int iwd2r_rand_state()
 {
     return g_state;

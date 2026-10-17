@@ -1,5 +1,9 @@
 #include "CWeather.h"
 
+#include <cstdio>
+#include <cstdlib>
+#include "msvc_rand.h"
+
 #include "CBaldurChitin.h"
 #include "CGameArea.h"
 #include "CInfGame.h"
@@ -675,6 +679,16 @@ void CWeather::OnAreaChange(BOOLEAN bForceOff)
 // 0x556FF0
 void CWeather::Update()
 {
+    if (std::getenv("IWD2R_UM5_SNOWDBG") != nullptr) {
+        static FILE* f = std::fopen(std::getenv("IWD2R_UM5_SNOWDBG"), "w");
+        if (f) {
+            std::fprintf(f, "upd fr=%u w=%d lvl=%d t=%lu last=%lu stageEnd=%lu\n", iwd2r_rand_trace_frame_value(),
+                m_nCurrentWeather, m_nWeatherLevel,
+                g_pBaldurChitin->GetObjectGame()->GetWorldTimer()->m_gameTime,
+                m_nLastTimeChecked, m_nWeatherStageEndTime);
+            std::fflush(f);
+        }
+    }
     switch (m_nCurrentWeather) {
     case 1:
         if (g_pBaldurChitin->GetObjectGame()->GetOptions()->m_bWeatherEnabled) {
@@ -1120,6 +1134,11 @@ CSnowStorm::~CSnowStorm()
 // 0x557FC0
 void CSnowStorm::AsynchronousUpdate()
 {
+    static FILE* respLog = std::getenv("IWD2R_UM5_SNOWRESP") != nullptr
+        ? std::fopen(std::getenv("IWD2R_UM5_SNOWRESP"), "w")
+        : nullptr;
+    int respawnCount = 0;
+
     if (IsInitialized()) {
         CGameArea* pArea = g_pBaldurChitin->GetObjectGame()->GetVisibleArea();
         if ((pArea->m_header.m_areaType & 0x4) != 0) {
@@ -1148,7 +1167,15 @@ void CSnowStorm::AsynchronousUpdate()
                     m_pSnowFlakes[index].m_pos.y = (rand() % (4 * rNewWorldViewPort.bottom / 3 - 4 * rNewWorldViewPort.top / 3) + 4 * rNewWorldViewPort.top / 3 + SNOWFLAKE_MAX_HEIGHT) << CParticle::RESOLUTION_INC;
                     m_pSnowFlakes[index].m_pos.x = (rNewWorldViewPort.left + rand() % rNewWorldViewPort.Width()) << CParticle::RESOLUTION_INC;
                     m_pSnowFlakes[index].m_pos.z = SNOWFLAKE_MAX_HEIGHT << CParticle::RESOLUTION_INC;
+                    respawnCount++;
                 }
+            }
+
+            if (respLog != nullptr) {
+                std::fprintf(respLog, "resp fr=%u n=%d act=%d t=%lu\n", iwd2r_rand_trace_frame_value(), respawnCount,
+                    g_pBaldurChitin->GetObjectGame()->GetWorldTimer()->m_active,
+                    g_pBaldurChitin->GetObjectGame()->GetWorldTimer()->m_gameTime);
+                std::fflush(respLog);
             }
 
             m_rOldWorldViewPort = rNewWorldViewPort;
