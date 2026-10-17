@@ -15,8 +15,11 @@
 #include "CGameSprite.h"
 #include "CGameTimer.h"
 #include "CInfGame.h"
+#include "CItem.h"
 #include "CMessage.h"
 #include "CScreenCreateChar.h"
+#include "CScreenLoad.h"
+#include "CScreenSave.h"
 #include "CScreenWorld.h"
 #include "CTimerWorld.h"
 #include "platform/replay.h"
@@ -30,7 +33,10 @@ using platform::state_dump::Chargen;
 using platform::state_dump::Dialog;
 using platform::state_dump::Door;
 using platform::state_dump::EngineState;
+using platform::state_dump::Game;
+using platform::state_dump::GameMember;
 using platform::state_dump::PartyMember;
+using platform::state_dump::Slot;
 using platform::state_dump::World;
 
 // The active engine named by the m_pEngine* member it equals, by the
@@ -238,6 +244,67 @@ void ReadWorld(CBaldurChitin* chitin, World* out)
         ReadDialog(chitin->m_pEngineWorld->m_internalLoadedDialog, &out->dialog);
 }
 
+// The party's purse and what a save carries of each member, the recorder's
+// GameJson. NOTE: A real-input run's state request reads the item pointers
+// while the AI thread runs; the replay mode reads while it waits.
+void ReadGame(CBaldurChitin* chitin, CInfGame* game, Game* out)
+{
+    out->partyGold = game->m_gameSave.m_nPartyGold;
+    SHORT count = game->m_nCharacters;
+    if (count < 0)
+        count = 0;
+    if (count > 6)
+        count = 6;
+    for (SHORT i = 0; i < count; ++i) {
+        GameMember member;
+        member.id = game->m_characterPortraits[i];
+        CGameSprite* sprite = SpriteById(chitin, member.id);
+        member.sprite = sprite != nullptr;
+        if (sprite) {
+            const CCreatureFileHeader& stats = sprite->m_baseStats;
+            member.gold = stats.m_gold;
+            member.xp = stats.m_xp;
+            member.level = stats.m_characterLevel;
+            for (int k = 0; k < 11; ++k)
+                member.classLevels[k] = stats.m_classLevels[k];
+            for (int slot = 0; slot < 51; ++slot) {
+                const CItem* item = sprite->m_equipment.m_items[slot];
+                member.hasItem[slot] = item != nullptr;
+                if (!item)
+                    continue;
+                char resref[RESREF_SIZE + 1] = {};
+                std::memcpy(resref, item->cResRef.GetResRef(), RESREF_SIZE);
+                member.items[slot].resref = resref;
+                member.items[slot].uses[0] = item->m_useCount1;
+                member.items[slot].uses[1] = item->m_useCount2;
+                member.items[slot].uses[2] = item->m_useCount3;
+                member.items[slot].flags = item->m_flags;
+            }
+        }
+        out->members.push_back(member);
+    }
+}
+
+// The save slots a load or save screen lists, the recorder's SlotsJson:
+// m_aGameSlots[0 .. m_nNumGameSlots - 1].
+template <typename Screen>
+void ReadSlots(Screen* screen, std::vector<Slot>* out)
+{
+    for (INT i = 0; i < screen->m_nNumGameSlots && i < screen->m_aGameSlots.GetSize(); ++i) {
+        const auto* slot = screen->m_aGameSlots[i];
+        if (!slot)
+            continue;
+        Slot s;
+        s.file = static_cast<const char*>(slot->m_sFileName);
+        s.name = static_cast<const char*>(slot->m_sSlotName);
+        s.character = static_cast<const char*>(slot->m_sCharacterName);
+        s.time = slot->m_nTime;
+        s.chapter = slot->m_nChapter;
+        s.chapterText = static_cast<const char*>(slot->m_sChapter);
+        out->push_back(s);
+    }
+}
+
 // IWD2R_PROBE's block (platform/replay_probe.h), the recorder's ReadProbe.
 void ReadProbe(platform::replay_probe::Frame* out)
 {
@@ -396,6 +463,14 @@ public:
         out->hasWorld = out->screen == "world";
         if (out->hasWorld)
             ReadWorld(chitin, &out->world);
+        out->hasGame = chitin->m_pObjectGame != nullptr;
+        if (out->hasGame)
+            ReadGame(chitin, chitin->m_pObjectGame, &out->game);
+        out->hasSlots = out->screen == "load" || out->screen == "save";
+        if (out->screen == "load")
+            ReadSlots(chitin->m_pEngineLoad, &out->slots);
+        else if (out->screen == "save")
+            ReadSlots(chitin->m_pEngineSave, &out->slots);
     }
 
     void ReadAi(platform::state_dump::AiState* out) const override

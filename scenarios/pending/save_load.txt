@@ -1,0 +1,237 @@
+# Milestone 4's exit scenario: a game saved and loaded in one session. A new
+# party enters the world (walk_and_talk.txt's steps to the end of the
+# opening dialog, with fewer checkpoints), walks, saves into the save
+# screen's empty slot through Options, walks on, then loads that save
+# through Options and the load screen. The checkpoints after the load must
+# match the original's (oracle.py replay compare); the save each side made
+# is kept in the run folder's original/saves and ours/saves, which
+# oracle.py replay crossload loads in the other engine.
+# Coordinates for Resolution=800.
+#
+# The run starts with no saves in mpsave (the header below; oracle.py
+# moves the vanilla copy's saves aside for it and puts them back after), so
+# the save screen and the load screen list only what the run made: the
+# start area's autosave, 000000000-Autosave - Prologue, written when the
+# party arrives, and this save, 000000004-Probe Save (the save screen
+# numbers its saves from 4: CScreenSave::RefreshGameSlots 0x65BCF0 counts
+# only slot numbers of 4 and up, SaveGame 0x65DB30 formats the next); in
+# name order the save is the load screen's second slot.
+#
+# Status (2026-10-16, crossload stream; replay compare, seed 1, sandbox):
+# every checkpoint matches through save_screen (its slots included); from
+# saved on, each differs only in globals.ai_rng_state (positions, party,
+# doors, the game block and the slots match, and on both sides the loaded
+# state is the saved one). The AI thread's rand streams part at frame 2928,
+# the second world frame after the save, where the original draws
+# ProcessEffectList's five saving-throw rolls (0x72DF5F-0x72DFB3) for
+# three creatures and ours for two. Known: the save marshals the area's
+# creatures (CGameArea::Marshal 0x471630, CGameSprite::Marshal 0x70B2F0),
+# and their local variables become effects (CVariableHash::
+# MarshalToCharacter 0x550600, AddEffect 0x733050, which sets field_562C):
+# three AddEffect calls at frame 2920 on both sides (the original's from
+# its rand trace's stack; ours on Jorun 655370, Eldgull 851981 and Screed
+# 1114129). Ours rolls Eldgull and Screed at 2928 and Jorun at 2929.
+# Hypothesis, not shown: the same three get the effects in the original,
+# and the third creature it rolls at 2928 is Jorun. Jorun's
+# AI inhibitor and speed are the same on both sides at every frame of the
+# state probe (IWD2R_PROBE=2905-2930), so the AIUpdate gate on the
+# inhibitor cannot be why. The probes do differ from frame 2905 on, in the
+# doors' and the type-17 objects' positions (obj 83 at 375,2117 in the
+# original, 359,2033 in ours), which the polygon bug the render stream is
+# fixing would explain; the saves show it too (oracle.py replay crossload's
+# save diff: AR1000's region and door vertex counts and its entrances).
+# Next: log m_id for the rolls at 0x72DF5F-0x72DFB3 on both sides.
+# saves: empty
+# timeout: 420
+wait 60
+checkpoint menu
+# New Game (645,262), then Done (537,562) with New Party selected, then the
+# first slot's Create Character (530,100).
+click 645 262
+wait 90
+click 537 562
+wait 60
+click 530 100
+wait 90
+# Gender (400,128): Male (400,286), Next (536,562) to Appearance.
+click 400 128
+wait 30
+click 400 286
+wait 20
+click 536 562
+wait 30
+# Next keeps the first portrait and returns to the main menu.
+click 536 562
+wait 30
+# Race (400,163): Elf (400,198), which is a Moon Elf, then Next.
+click 400 163
+wait 30
+click 400 198
+wait 20
+click 536 562
+wait 30
+# Class (400,198): Fighter (400,268), then Next.
+click 400 198
+wait 30
+click 400 268
+wait 20
+click 536 562
+wait 30
+# Alignment (400,233): Chaotic Good (400,198), then Next.
+click 400 233
+wait 30
+click 400 198
+wait 20
+click 536 562
+wait 30
+# Abilities (400,268): + at x 499 and - at x 517, rows at y 170 (STR),
+# 206 (DEX), 242 (CON), 278 (INT), 314 (WIS), 350 (CHA).
+click 400 268
+wait 30
+click 499 170
+wait 20
+click 499 170
+wait 20
+click 499 170
+wait 20
+click 499 242
+wait 20
+click 517 278
+wait 20
+click 517 350
+wait 20
+# Next (536,562) with points left asks "You have some unallocated points
+# left. Are you sure you want to continue?"; Yes (338,331) keeps the
+# abilities and returns to the main menu, which offers Skills.
+click 536 562
+wait 30
+click 338 331
+wait 30
+# Skills (400,303): Intimidate's + (499,420) four times, then Next
+# (536,562), which goes on to Feats.
+click 400 303
+wait 30
+click 499 420
+wait 15
+click 499 420
+wait 15
+click 499 420
+wait 15
+click 499 420
+wait 15
+click 536 562
+wait 30
+# Feats: Blind-Fight's + (499,168) and Dash's + (499,384), then Next back
+# to the main menu.
+click 499 168
+wait 15
+click 499 384
+wait 15
+click 536 562
+wait 30
+# Appearance (400,338): Next keeps the colours and goes on to Sound; Next
+# keeps the voice and returns to the main menu.
+click 400 338
+wait 30
+click 536 562
+wait 30
+click 536 562
+wait 30
+# Name (400,373): type Probe, Done (458,268).
+click 400 373
+wait 30
+type Probe
+wait 15
+click 458 268
+wait 30
+# Next (536,562) finishes the character and shows Party Formation.
+click 536 562
+wait 60
+checkpoint party_formation
+# Done (634,507) starts the game on the chapter screen (the Prologue text,
+# which would move on to the world by itself after about 3,400 frames); its
+# Done (514,549) loads the start area into the world screen.
+click 634 507
+wait 150
+click 514 549
+wait 150
+checkpoint world
+wait 300
+checkpoint world_settled
+# M2. The opening dialog (Hedron, entry 0): "No, we're here to stay" (1),
+# "Do you know where I can go to sign on with the Targos guard?" (4), "Where
+# can I find Lord Ulbrec?" (1), "All right. Thanks for your help" (1),
+# Continue, "We'll be careful. Farewell, Hedron." (1) ends it.
+click 300 399
+wait 60
+click 340 437
+wait 60
+click 250 386
+wait 60
+click 280 437
+wait 60
+click 398 583
+wait 60
+click 250 399
+wait 120
+checkpoint opening_done
+# Centre the view on Probe (2414,897): the view the opening cut-scene leaves
+# depends on real time (with real input, play.py --vm, it ends about 12
+# pixels east of a replay's), and the next two clicks need it exact.
+# Centred, Probe is at screen 400,216 (view 2014,681).
+origin ui
+click 528 460
+click 528 460
+wait 10
+# Click-to-move on the deck: Probe walks to 2328,905 and stops.
+origin screen
+click 314 224
+wait 90
+checkpoint moved
+origin ui
+# Options (690,568) on the wheel, then Save Game (612,111): the save
+# screen lists the saves in name order and then "Empty": the autosave in
+# the first slot, "Empty" in the second.
+click 690 568
+wait 60
+click 612 111
+wait 60
+checkpoint save_screen
+shot 01_save
+# The second slot's Save (685,203): the Save As popup with an empty name
+# (the first slot's Save would offer to overwrite the autosave, its name
+# filled in); the name, then the popup's Save (464,320): back in the
+# world, "Save successful".
+click 685 203
+wait 60
+type Probe Save
+wait 15
+shot 02_save_as
+click 464 320
+wait 300
+checkpoint saved
+shot 03_saved
+# Walk on after the save, west along the deck (the view has not moved since
+# the walk above), so the load has something to undo.
+origin screen
+click 200 240
+wait 120
+checkpoint walked_on
+origin ui
+# Options, Load Game (612,81), the popup's Load (458,240): the load screen.
+click 690 568
+wait 60
+click 612 81
+wait 60
+click 458 240
+wait 90
+checkpoint load_screen
+shot 04_load
+# The second slot's Load (685,203): the world again, as saved.
+click 685 203
+wait 400
+checkpoint loaded
+shot 05_loaded
+wait 150
+checkpoint loaded_settled
+quit
