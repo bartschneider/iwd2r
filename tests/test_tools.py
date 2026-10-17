@@ -425,8 +425,8 @@ class PlayVmArgsTest(unittest.TestCase):
             self.assertEqual(play.suite_files(tmp),
                              [os.path.join(tmp, 'a.txt'),
                               os.path.join(tmp, 'b.txt')])
-        self.assertNotIn('first_fight',
-                         [play.scenario_name(p) for p in play.suite_files()])
+        self.assertFalse([p for p in play.suite_files()
+                          if os.sep + 'pending' + os.sep in p])
 
     def test_table(self):
         text = play.format_table('linux', [('a', 0, 1.25, 3),
