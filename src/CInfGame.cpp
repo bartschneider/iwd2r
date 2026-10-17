@@ -1721,9 +1721,11 @@ BOOL CInfGame::SaveGame(BOOLEAN bProgressBarRequired, BOOLEAN bProgressBarInPlac
     }
 
     // NOTE: The original passes each of these ids to a CBaldurMessage
-    // helper (0x43D8D0) that returns at once without a network session
-    // (`test [cNetwork+0x1032]` at 0x43D8F3). Multiplayer is removed (ADR
-    // 0002), so the ids are fetched and the helper is not called.
+    // helper (0x43D8D0) that hands an object held by another player to that
+    // player's machine and waits for it. It returns at once when there is
+    // no session or the provider is the null one (0x43D8F3, 0x43DA22), so a
+    // single-player host session never sends; it needs a remote player, so
+    // the helper is not ported and the ids are fetched and dropped.
     std::vector<int> ids = Icewind586B70::Instance()->sub_587510();
     (void)ids;
 
@@ -6478,8 +6480,9 @@ BOOL CInfGame::SwapItemPersonalInventory(SHORT nPortraitNum, CItem*& pNewItem, S
         // NOTE: A client asks the server for the swap here (0x431560 on
         // `m_cBaldurMessage` with the character, the slot, the item, the
         // error and the count) and returns its answer
-        // (0x5BAE6D-0x5BAEBC). Multiplayer is removed (ADR 0002); without a
-        // session this branch is never taken.
+        // (0x5BAE6D-0x5BAEBC). The branch needs a provider other than the
+        // null one, so a single-player host session never takes it; the
+        // send is not ported.
         g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(nCharacterId,
             CGameObjectArray::THREAD_ASYNCH,
             INFINITE);
@@ -8884,13 +8887,46 @@ BOOLEAN CInfGame::RestParty(INT nHP, BOOLEAN bRenting)
         }
     }
 
-    // NOTE: The original hands a multiplayer game to the server
-    // (0x436290, `CScreenWorld::StartRestMultiplayerHost` 0x693520 or
-    // `CScreenWorld::SetPendingRest` 0x6934F0, 0x5C1245-0x5C1347) and returns
-    // TRUE, or FALSE when the session state is neither. Multiplayer is
-    // removed (ADR 0002): only the single-player branch is ported.
-    if (!g_pChitin->cNetwork.m_bConnectionEstablished) {
+    // A single-player game is a connected host session under the null
+    // provider, so the host branch below runs in single player too.
+    if (g_pChitin->cNetwork.m_bConnectionEstablished == FALSE) {
         return RestPartyPrivate(nHP, bRenting);
+    }
+
+    if (g_pChitin->cNetwork.m_bIsHost == FALSE) {
+        if (g_pBaldurChitin->m_cBaldurMessage.m_bInOnRestAnnounce == FALSE) {
+            // NOTE: A client asks the server to start the rest here
+            // (0x436290 on `m_cBaldurMessage` with nHP, bRenting and
+            // `CInfGame::m_bHealPartyOnRest`, 0x5C1265-0x5C1292); it needs a
+            // remote server, so it is not ported. The rest happens when the
+            // server's announcement arrives.
+            return TRUE;
+        }
+
+        return RestPartyPrivate(nHP, bRenting);
+    }
+
+    if (g_pChitin->cNetwork.m_bIsHost == TRUE) {
+        CScreenWorld* pWorld = g_pBaldurChitin->m_pEngineWorld;
+
+        // The rest waits while a save is in a dialog mode, the host must
+        // permit a dialog, or the world is hard-paused.
+        BOOLEAN bStart = TRUE;
+        if (m_gameSave.m_mode == 386 || m_gameSave.m_mode == 1282) {
+            bStart = FALSE;
+        }
+
+        if (m_multiplayerSettings.m_bHostPermittedDialog == TRUE) {
+            bStart = FALSE;
+        }
+
+        if (pWorld->m_bHardPaused == TRUE || bStart == FALSE) {
+            pWorld->SetPendingRest(nHP, bRenting, FALSE);
+        } else {
+            pWorld->StartRestMultiplayerHost(nHP, bRenting, CInfGame::m_bHealPartyOnRest);
+        }
+
+        return TRUE;
     }
 
     return FALSE;
@@ -8919,8 +8955,9 @@ BOOLEAN CInfGame::RestPartyPrivate(INT nHP, BOOLEAN bRenting)
         g_pBaldurChitin->GetObjectGame()->GetVariables()->FindKey(CHAPTER_GLOBAL);
 
         // NOTE: The original announces the rest to the clients here
-        // (`CBaldurMessage` 0x436500 with nHP, bRenting and 0); it returns
-        // at once without a session. Multiplayer is removed (ADR 0002).
+        // (`CBaldurMessage` 0x436500 with nHP, bRenting and 0); a
+        // single-player host session calls it too, and its broadcast is a
+        // no-op under the null provider. It is not ported.
 
         nHealed = 0;
 
