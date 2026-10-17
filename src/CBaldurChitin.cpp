@@ -1091,7 +1091,12 @@ void CBaldurChitin::MainAIThread(void* userInfo)
 
     SetThreadPriority(m_hMusicThread, nMusicThreadPriority);
 
-    int v1 = 0;
+    // 0x424465 ([esp+0x10], a DWORD): incremented on every iteration the
+    // projector engine is active, and the wait below runs when the OLD
+    // value is 10. 0x4244af then zeroes the slot (mov [esp+0x18],0 with
+    // esp 8 below the loop base between the two argument pushes), so the
+    // wait lands on every 11th iteration for the whole session.
+    DWORD v1 = 0;
     while (!m_bExitMainAIThread) {
         if (g_pBaldurChitin->pActiveEngine == g_pBaldurChitin->m_pEngineProjector) {
             if (v1++ == 10) {

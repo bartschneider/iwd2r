@@ -15,10 +15,10 @@
 - Every function ported or changed in `src/` is ported from the Ghidra decompile of the vanilla exe, keeps the original's structure and its `// 0xADDR` comment, and has `docs/evidence/<ADDR>.md` (`check_evidence.py` enforces this; header layout changes are filed by hand per `docs/evidence/README.md`). No new functions the original lacks, except test seams that are load-bearing and listed in the README's deviations.
 - Vanilla IWD2 behaviour only. IWD2EE changes are project 5. Multiplayer stays removed: `CMessageHandler` is ported for the local path only (ADR 0002).
 - Platform bugs found on the way are fixed immediately in `platform/` or `compat/` with a test.
-- Never commit game files, extracted game data, dumps, `runs/` or `build/`. Never modify `/mnt/c/Games/Icewind Dale II`. On Windows write only under `C:\Users\thier\iwd2r-build*`, `C:\Users\thier\iwd2r-oracle` and `C:\Users\thier\iwd2r-vm`.
+- Never commit game files, extracted game data, dumps, `runs/` or `build/`. Never modify `/mnt/c/Games/Icewind Dale II`. On Windows write only under `%USERPROFILE%\iwd2r-build*`, `%USERPROFILE%\iwd2r-oracle` and `%USERPROFILE%\iwd2r-vm`.
 - No per-file header or notice lines. Commit messages end with `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`.
 - Gates at every integration: linux-gcc and linux-clang ctest; `python3 -I tests/test_tools.py`; `check_evidence.py`; `gen_map.py --check`; `gen_fields.py --check`; the CI clang-format check; `oracle.py run`; `oracle.py replay compare` for every scenario in `scenarios/`; the Windows x64 build.
-- Streams own disjoint files (section 5.1 of the spec). A stream that needs a change in another stream's file asks the coordinator. Each stream works in `/home/thier/iwd2-re-worktrees/p3-<stream>` on branch `p3/<stream>`, branched from `first`, and never pushes.
+- Streams own disjoint files (section 5.1 of the spec). A stream that needs a change in another stream's file asks the coordinator. Each stream works in `~/iwd2-re-worktrees/p3-<stream>` on branch `p3/<stream>`, branched from `first`, and never pushes.
 - Ghidra: one headless process at a time (the lock from Task 1); never modify the project except through `make_project.py`.
 
 ## Review Focus
@@ -75,10 +75,10 @@
 - Test: `tests/test_tools.py`
 
 **Interfaces:**
-- Produces: `play.win_checkout(root: str, env: dict) -> str`: `env['IWD2R_WIN_CHECKOUT']` if set; else `/mnt/c/Users/thier/iwd2r-build` when `basename(root) == 'first'`; else `/mnt/c/Users/thier/iwd2r-build-<basename(root)>`. `WIN_CHECKOUT = win_checkout(ROOT, os.environ)`. Locks: `ORACLE_DIR/replay.lock` held for the whole of `replay record` and `replay compare` (`what='replay'`); `ORACLE_DIR/vanilla.lock` held around `build_vanilla`; `VM_ROOT/sandbox.lock` held around each `--vm windows` scenario run (`what='sandbox'`).
+- Produces: `play.win_checkout(root: str, env: dict) -> str`: `env['IWD2R_WIN_CHECKOUT']` if set; else `/mnt/c/Users/<you>/iwd2r-build` when `basename(root) == 'first'`; else `/mnt/c/Users/<you>/iwd2r-build-<basename(root)>`. `WIN_CHECKOUT = win_checkout(ROOT, os.environ)`. Locks: `ORACLE_DIR/replay.lock` held for the whole of `replay record` and `replay compare` (`what='replay'`); `ORACLE_DIR/vanilla.lock` held around `build_vanilla`; `VM_ROOT/sandbox.lock` held around each `--vm windows` scenario run (`what='sandbox'`).
 
 - [ ] **Step 1: Tests.** `test_win_checkout_defaults` (the three cases above); `test_replay_holds_lock` (patch `filelock.hold` with a recorder; `replay record` with a stubbed runner records `replay.lock`); same for the sandbox run with a stubbed sandbox.
-- [ ] **Step 2–4:** run (fail), implement, run (pass). Then `python3 tools/play.py --linux --headless --frames 60 --data /mnt/c/Users/thier/iwd2r-oracle/game` still runs; `python3 tools/oracle.py run --selftest` still passes (the `first` worktree keeps its existing build folder).
+- [ ] **Step 2–4:** run (fail), implement, run (pass). Then `python3 tools/play.py --linux --headless --frames 60 --data /mnt/c/Users/<you>/iwd2r-oracle/game` still runs; `python3 tools/oracle.py run --selftest` still passes (the `first` worktree keeps its existing build folder).
 - [ ] **Step 5: Commit** "Give each worktree its own Windows build folder and lock the shared resources".
 
 ### Task 3: Stream worktrees and the world_entry scenario
@@ -89,7 +89,7 @@
 - Test: `tests/test_tools.py`
 
 **Interfaces:**
-- Produces: `tools/worktree.sh new <stream>` creates `/home/thier/iwd2-re-worktrees/p3-<stream>` on branch `p3/<stream>` from the current `first` HEAD and prints the path; `tools/worktree.sh done <stream>` removes the worktree and deletes the branch only if it is merged into `first`, else refuses. `scenarios/pending/world_entry.txt`: `chargen_replay.txt`'s steps with its checkpoints, then skills (Intimidate + ×4), feats (Blind-Fight, Dash), appearance, sound, name `Probe`, with checkpoints `skills_done`, `feats_done`, `named`, `party_formation`, then Done (634,507), `wait 150`, `checkpoint world`, `wait 300`, `checkpoint world_settled`, `shot world`, `quit`. Coordinates at 800×600 from `/tmp/claude-probe/play_to_world.txt` (copy it; it is outside the repo).
+- Produces: `tools/worktree.sh new <stream>` creates `~/iwd2-re-worktrees/p3-<stream>` on branch `p3/<stream>` from the current `first` HEAD and prints the path; `tools/worktree.sh done <stream>` removes the worktree and deletes the branch only if it is merged into `first`, else refuses. `scenarios/pending/world_entry.txt`: `chargen_replay.txt`'s steps with its checkpoints, then skills (Intimidate + ×4), feats (Blind-Fight, Dash), appearance, sound, name `Probe`, with checkpoints `skills_done`, `feats_done`, `named`, `party_formation`, then Done (634,507), `wait 150`, `checkpoint world`, `wait 300`, `checkpoint world_settled`, `shot world`, `quit`. Coordinates at 800×600 from `/tmp/claude-probe/play_to_world.txt` (copy it; it is outside the repo).
 
 - [ ] **Step 1: Tests.** `test_worktree_script_new_and_done` in a temporary repo with a `first` branch (`new` creates the directory and branch; `done` refuses while unmerged, succeeds after `git merge`). `test_suite_ignores_pending` (a `scenarios/pending/x.txt` fixture is not in the suite list).
 - [ ] **Step 2–4:** run (fail), implement, run (pass). Then validate the scenario on the original: `python3 tools/oracle.py replay record scenarios/pending/world_entry.txt --seed 1` must exit 0 and `checkpoint-world.json` must have `screen: "world"`; record it twice and diff the dumps (identical). Record the exact frame numbers in the task report.
@@ -125,7 +125,7 @@ Each stream: `tools/worktree.sh new <stream>`; draft evidence for the whole batc
 - Produces: the GAM round trip. `SaveGame` writes `mpsave/default/ICEWIND2.GAM` and the area `.ARE` files; `Unmarshal` reads them back and loads the master area through `LoadArea`.
 
 - [ ] **Step 1: Tests.** `[gam][data]` Catch2 (skipped without `IWD2_DATA`): after a `SaveGame` of a game built by `NewGame` plus one sprite from `CHARBASE.CRE`, `Unmarshal` of the written bytes yields the same master area resref and party count; a second `SaveGame` produces byte-identical `ICEWIND2.GAM`. Review Focus 2: `Unmarshal` of a GAM listing two areas with only the master area's ARE present loads one area and reports no error. Review Focus 4: `SetupCharacters` called twice adds the party once (assert party count). Review Focus 5: `CharacterExport` with an existing `characters/<name>.chr` behaves as the original's `Marshal` path (read the decompile for overwrite vs. numbering) and the test pins that behaviour.
-- [ ] **Step 2–4:** write failing tests, port, pass. Verification: `python3 tools/play.py --vm linux --script scenarios/pending/world_entry.txt --data /mnt/c/Users/thier/iwd2r-oracle/game` reaches the world screen (the `world` shot shows the start area) once Tasks 6 and 7 are merged; before that, report how far it gets and the exact assertion text.
+- [ ] **Step 2–4:** write failing tests, port, pass. Verification: `python3 tools/play.py --vm linux --script scenarios/pending/world_entry.txt --data /mnt/c/Users/<you>/iwd2r-oracle/game` reaches the world screen (the `world` shot shows the start area) once Tasks 6 and 7 are merged; before that, report how far it gets and the exact assertion text.
 - [ ] **Step 5:** Commits per function, e.g. "Port CInfGame::Unmarshal from the original".
 
 ### Task 6: Stream creature-file

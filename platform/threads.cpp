@@ -5,11 +5,13 @@
 #include "platform/handles.h"
 // clang-format on
 #include "platform/affinity.h"
+#include "platform/replay.h"
 
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstdio>
+#include <cstring>
 #include <memory>
 #include <mutex>
 #include <new>
@@ -64,6 +66,8 @@ struct HandleObject {
     std::condition_variable cv;
     bool signaled = false;
     bool manualReset = false;
+    // iwd2r: the engine's named AI-thread timer event (see WaitForSingleObject).
+    bool replayTimer = false;
     LONG count = 0;
     LONG maximum = 0;
 
@@ -140,8 +144,26 @@ DWORD WaitForSingleObject(HANDLE handle, DWORD milliseconds)
     }
     case HandleObject::Kind::Event: {
         std::unique_lock<std::mutex> guard(object->lock);
-        if (!waitFor(guard, object->cv, milliseconds, [&] { return object->signaled; }))
+        if (object->replayTimer && milliseconds != INFINITE && platform::replay::Active()) {
+            // iwd2r: the engine's AI thread waits on the BaldurTimerEvent
+            // for up to 100 ms (CBaldurChitin::MainAIThread 0x4242B0; the
+            // two 100 ms waits sit at 0x4244B7 and 0x4244D8). The
+            // replay mode sets that event at frame ends on the virtual
+            // clock (platform/replay.cpp FireTimers), so the timeout is
+            // measured on that clock too: a frame slowed by machine load
+            // must not let the wait expire and start the AI update before
+            // the render ends (the ai_overlap_frames invariant). Without a
+            // replay the wait is exactly the asked-for real time.
+            const uint32_t deadline = platform::replay::NowMs() + milliseconds;
+            while (!object->cv.wait_for(guard, std::chrono::milliseconds(milliseconds),
+                [&] { return object->signaled; })) {
+                if (platform::replay::NowMs() >= deadline) {
+                    return WAIT_TIMEOUT;
+                }
+            }
+        } else if (!waitFor(guard, object->cv, milliseconds, [&] { return object->signaled; })) {
             return WAIT_TIMEOUT;
+        }
         if (!object->manualReset)
             object->signaled = false;
         return WAIT_OBJECT_0;
@@ -291,11 +313,16 @@ std::FILE* FileOf(HANDLE handle)
 
 }
 
-HANDLE CreateEventA(LPVOID, BOOL manualReset, BOOL initialState, LPCSTR)
+HANDLE CreateEventA(LPVOID, BOOL manualReset, BOOL initialState, LPCSTR name)
 {
     HandleObject* object = new HandleObject(HandleObject::Kind::Event);
     object->manualReset = manualReset != FALSE;
     object->signaled = initialState != FALSE;
+    // iwd2r: CChitin's ctor makes the AI thread's timer event under this
+    // name (CreateEventA call 0x7901A8, name string 0x8BA024, handle
+    // stored to the field MainAIThread waits on at 0x4244A6); only that
+    // event's waits follow the replay clock.
+    object->replayTimer = name != nullptr && std::strcmp(name, "BaldurTimerEvent") == 0;
     return object;
 }
 
