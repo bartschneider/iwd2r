@@ -5222,22 +5222,48 @@ savediff = load_tool('savediff')
 
 
 def area_bytes(entrances=7, vertices=386, region_vertices=4,
-               door_vertices=3):
-    """An ARE V9.1 area file with one region and one door at the offsets
-    tools/savediff.py reads."""
+               door_vertices=3, wed=b'AR1000\0P', unset=b'0 0 0 OB',
+               travel=b'\xd6\x03\0\0\x16\x02\0\0'):
+    """An ARE V9.1 area file at the offsets tools/savediff.py reads: its
+    WED resref (wed: the original's has stack bytes after the NUL), a
+    region without flag 0x200 whose +0x88-0x8F hold unset bytes (unset),
+    one with it whose +0x88-0x8F are set (travel), and one door."""
     data = bytearray(0x400)
-    struct.pack_into('<H', data, 0x6A, 1)
+    data[0x08:0x10] = wed
+    struct.pack_into('<H', data, 0x6A, 2)
     struct.pack_into('<I', data, 0x6C, 0x100)
-    struct.pack_into('<II', data, 0x78, 0x300, entrances)
+    struct.pack_into('<II', data, 0x78, 0x380, entrances)
     struct.pack_into('<H', data, 0x84, 25)
     struct.pack_into('<H', data, 0x90, vertices)
-    struct.pack_into('<II', data, 0xB4, 1, 0x200)
+    struct.pack_into('<II', data, 0xB4, 1, 0x300)
     data[0x100:0x100 + 9] = b'Life Raft'
     struct.pack_into('<H', data, 0x100 + 0x2A, region_vertices)
-    data[0x200:0x200 + 12] = b'AR1000_Door1'
-    struct.pack_into('<HH', data, 0x200 + 0x30, door_vertices, 4)
-    struct.pack_into('<8H', data, 0x200 + 0x38, 3174, 3, 3183, 13, 958, 486,
+    data[0x100 + 0x88:0x100 + 0x90] = unset
+    data[0x1C4:0x1C4 + 6] = b'To1001'
+    struct.pack_into('<I', data, 0x1C4 + 0x60, 0x200)
+    data[0x1C4 + 0x88:0x1C4 + 0x90] = travel
+    data[0x300:0x300 + 12] = b'AR1000_Door1'
+    struct.pack_into('<HH', data, 0x300 + 0x30, door_vertices, 4)
+    struct.pack_into('<8H', data, 0x300 + 0x38, 3174, 3, 3183, 13, 958, 486,
                      1005, 540)
+    return bytes(data)
+
+
+def gam_bytes(names=(b'FEMALE_BARBARIAN_1\0f\0oracle\\game',),
+              npcs=(b'NPC\0garbage',), before=b''):
+    """A GAM V2.2 game file with party and other-creature entries (0x340
+    bytes, from 0xB4) whose field_25E (+0x25E, 32 bytes) hold names, with
+    whatever follows their NUL."""
+    data = bytearray(b'GAMEV2.2' + bytes(0xAC) + before)
+    tables = []
+    for entries in (names, npcs):
+        tables.append((len(data), len(entries)))
+        for name in entries:
+            entry = bytearray(0x340)
+            entry[0x25E:0x25E + len(name[:32])] = name[:32]
+            data += entry
+    struct.pack_into('<II', data, 0x20, *tables[0])
+    struct.pack_into('<II', data, 0x30, *tables[1])
     return bytes(data)
 
 
@@ -5249,11 +5275,11 @@ class SaveDiffTest(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
         self.tmp = self._tmp.name
 
-    def save(self, side, gam=b'', area=None, extra=None, wmp=b'map',
+    def save(self, side, gam=None, area=None, extra=None, wmp=b'map',
              bmp=b'shot'):
         path = os.path.join(self.tmp, side)
         os.makedirs(path)
-        files = {'ICEWIND2.GAM': b'GAMEV2.2' + bytes(0x340) + gam,
+        files = {'ICEWIND2.GAM': gam or gam_bytes(),
                  'ICEWIND2.SAV': sav_bytes(dict(
                      {'AR1000.ARE': area or area_bytes()}, **(extra or {}))),
                  'WORLDMAP.WMP': wmp, 'ICEWIND2.BMP': bmp,
@@ -5269,24 +5295,47 @@ class SaveDiffTest(unittest.TestCase):
         lines, different = savediff.compare_saves(a, b)
         self.assertEqual(different, 0)
         self.assertEqual(lines, [
-            '  ICEWIND2.GAM: same (0x325-0x331 masked)',
-            '  ICEWIND2.SAV:AR1000.ARE: same', '  WORLDMAP.WMP: same'])
+            '  ICEWIND2.GAM: same (41 unset bytes masked)',
+            '  ICEWIND2.SAV:AR1000.ARE: same (9 unset bytes masked)',
+            '  WORLDMAP.WMP: same'])
 
-    def test_the_original_s_uninitialised_bytes_are_masked(self):
+    def test_the_original_s_unset_bytes_are_masked(self):
+        # Two of the original's saves of one game hold different stack
+        # bytes after a name's NUL, in the WED resref and in a region
+        # without flag 0x200 (as runs 20261016-171655 and -173235 did);
+        # ours holds zeros there. All compare the same.
         a = self.save('a')
-        b = self.save('b')
-        with open(os.path.join(b, 'ICEWIND2.GAM'), 'r+b') as f:
-            f.seek(0x325)
-            f.write(b'\xfe' * (0x331 - 0x325 + 1))
-        self.assertEqual(savediff.compare_saves(a, b)[1], 0)
-        with open(os.path.join(b, 'ICEWIND2.GAM'), 'r+b') as f:
-            f.seek(0x332)
-            f.write(b'\x01')
-        lines, different = savediff.compare_saves(a, b)
-        self.assertEqual(different, 1)
-        self.assertEqual(lines[:2], [
-            '  ICEWIND2.GAM: DIFFERENT (840 and 840 bytes, 1 run of '
-            'differing bytes)', '    0x0332-0x0332: 00 / 01'])
+        b = self.save('b', gam=gam_bytes(
+            names=(b'FEMALE_BARBARIAN_1\0' + bytes(13),),
+            npcs=(b'NPC\0other bytes',)),
+            area=area_bytes(wed=b'AR1000\0\0', unset=bytes(8)))
+        c = self.save('c', area=area_bytes(unset=b'"" 0 0 0'))
+        for other in (b, c):
+            lines, different = savediff.compare_saves(a, other)
+            self.assertEqual(different, 0, lines)
+        # Set bytes are not masked: a name before its NUL, a travel
+        # region's +0x88, the WED resref itself.
+        for side, save in (
+                ('d', {'gam': gam_bytes(names=(b'MALE_BARBARIAN_1\0x',))}),
+                ('e', {'area': area_bytes(travel=bytes(8))}),
+                ('f', {'area': area_bytes(wed=b'AR1001\0P')})):
+            lines, different = savediff.compare_saves(a, self.save(side,
+                                                                   **save))
+            self.assertEqual(different, 1, (side, lines))
+
+    def test_masks(self):
+        gam = gam_bytes()
+        self.assertEqual(savediff.gam_masks(gam), [
+            (0xB4 + 0x25E + 19, 0xB4 + 0x25E + 32),
+            (0xB4 + 0x340 + 0x25E + 4, 0xB4 + 0x340 + 0x25E + 32)])
+        self.assertEqual(savediff.gam_masks(b'GAMEV2.2'), [])
+        area = area_bytes()
+        self.assertEqual(savediff.are_masks(area),
+                         [(0x0F, 0x10), (0x188, 0x190)])
+        self.assertEqual(savediff.are_masks(area_bytes(wed=b'AR100000')),
+                         [(0x188, 0x190)])
+        self.assertEqual(savediff.masked(b'abcdef', [(1, 3), (5, 9)]),
+                         b'a\0\0de\0')
 
     def test_an_area_differs_by_its_parts(self):
         a = self.save('a', extra={'default.toh': b'toh'})

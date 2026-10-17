@@ -9,15 +9,16 @@ data: replay crossload (tools/oracle.py) compares the save each engine made
 with this before it loads them, so a field both our saver and our loader
 get wrong, which the loaded states cannot show, still shows here.
 
-- ICEWIND2.GAM byte by byte, except GAM_MASKED: 0x325-0x331, the original's
-  uninitialised path fragment (stack bytes the original copies into the
-  file; ours writes zeros there).
-- ICEWIND2.SAV: SAV V1.0, a list of (name length, name, uncompressed size,
-  compressed size, zlib data); each entry decompressed and compared byte by
-  byte, and an area (.ARE, V9.1) also by its parts (are_summary): the
-  counts of entrances, regions, containers, vertices and doors, each
-  region's vertex count, and each door's vertex counts and bounding boxes.
-- WORLDMAP.WMP byte by byte.
+- ICEWIND2.GAM byte by byte, ICEWIND2.SAV's entries decompressed (SAV
+  V1.0, a list of (name length, name, uncompressed size, compressed size,
+  zlib data)) byte by byte, an area (.ARE, V9.1) also by its parts
+  (are_summary): the counts of entrances, regions, containers, vertices and
+  doors, each region's vertex count, and each door's vertex counts and
+  bounding boxes; WORLDMAP.WMP byte by byte.
+- The bytes the original writes from memory it never set are masked
+  (zeroed on both sides) first, each by the field that holds them
+  (gam_masks, are_masks). The list holds what the saves seen so far show;
+  it will grow as the saves cover more of the game.
 - The bitmaps (ICEWIND2.BMP, the screen shot, and PORTRT<n>.BMP) are what
   the renderer drew, not game state, and are not compared.
 
@@ -34,7 +35,6 @@ import zlib
 GAM = 'ICEWIND2.GAM'
 SAV = 'ICEWIND2.SAV'
 WMP = 'WORLDMAP.WMP'
-GAM_MASKED = (0x325, 0x331)  # inclusive
 SAV_SIGNATURE = b'SAV V1.0'
 # A run of differing bytes ends after this many equal ones.
 RUN_GAP = 4
@@ -69,13 +69,90 @@ def read_sav(data):
     return out
 
 
-def mask_gam(data):
-    """The game file with GAM_MASKED zeroed."""
-    first, last = GAM_MASKED
-    if len(data) <= first:
-        return data
-    end = min(last + 1, len(data))
-    return data[:first] + bytes(end - first) + data[end:]
+# The game file (GAM V2.2): the party's and the other creatures' tables,
+# their (offset, count) at 0x20 and 0x30, entries of 0x340 bytes
+# (CSavedGamePartyCreature).
+GAM_PARTY_TABLE = 0x20
+GAM_NPC_TABLE = 0x30
+GAM_ENTRY_SIZE = 0x340
+# CSavedGamePartyCreature::field_25E, a 32-byte name (a path fragment in the
+# original's saves): the original copies it whole with the stack bytes
+# after its NUL, ours writes zeros there.
+GAM_ENTRY_NAME = (0x25E, 32)
+# The area (ARE V9.1): its WED resref at 0x08 holds stack bytes after the
+# NUL in the original's saves.
+ARE_WED = (0x08, 8)
+# A region (0xC4 bytes, from the offset at 0x6C, count at 0x6A): +0x88-0x8F
+# (field_88, field_8C) are set only with flag 0x200 (the travel regions:
+# CGameTrigger's constructor, 0x4CD07B-0x4CD095, reads them then), but
+# Marshal writes them either way (0x4D020A-0x4D0222): without the flag the
+# original's are whatever its memory held.
+ARE_REGION_SIZE = 0xC4
+ARE_REGION_FLAGS = 0x60
+ARE_REGION_SET = 0x200
+ARE_REGION_UNSET = (0x88, 8)
+
+
+def after_nul(data, start, size):
+    """[(first, end)]: the bytes of the string at start after its NUL."""
+    field = data[start:start + size]
+    nul = field.find(b'\0')
+    if nul < 0 or nul + 1 >= len(field):
+        return []
+    return [(start + nul + 1, start + len(field))]
+
+
+def gam_masks(data):
+    """[(first, end)] of a game file's bytes the original leaves unset."""
+    out = []
+    for table in (GAM_PARTY_TABLE, GAM_NPC_TABLE):
+        try:
+            offset, count = struct.unpack_from('<II', data, table)
+        except struct.error:
+            return out
+        for i in range(min(count, 1000)):
+            entry = offset + i * GAM_ENTRY_SIZE
+            if entry + GAM_ENTRY_SIZE > len(data):
+                break
+            out += after_nul(data, entry + GAM_ENTRY_NAME[0],
+                             GAM_ENTRY_NAME[1])
+    return out
+
+
+def are_masks(data):
+    """[(first, end)] of an area file's bytes the original leaves unset."""
+    out = after_nul(data, *ARE_WED)
+    try:
+        count, = struct.unpack_from('<H', data, 0x6A)
+        offset, = struct.unpack_from('<I', data, 0x6C)
+        for i in range(count):
+            region = offset + i * ARE_REGION_SIZE
+            flags, = struct.unpack_from('<I', data,
+                                        region + ARE_REGION_FLAGS)
+            if flags & ARE_REGION_SET == 0:
+                first = region + ARE_REGION_UNSET[0]
+                out.append((first, first + ARE_REGION_UNSET[1]))
+    except struct.error:
+        pass
+    return out
+
+
+def masked(data, masks):
+    """data with the masks' bytes zeroed (masks: [(first, end)])."""
+    out = bytearray(data)
+    for first, end in masks:
+        end = min(end, len(out))
+        if first < end:
+            out[first:end] = bytes(end - first)
+    return bytes(out)
+
+
+def mask_pair(a, b, masks_of):
+    """a and b, each with the bytes either one leaves unset zeroed, and
+    the number of bytes masked."""
+    masks = masks_of(a) + masks_of(b)
+    return masked(a, masks), masked(b, masks), \
+        len(set(i for first, end in masks for i in range(first, end)))
 
 
 def byte_runs(a, b, gap=RUN_GAP):
@@ -202,10 +279,11 @@ def compare_saves(a, b):
 
     gam_a, gam_b = read_file(a, GAM), read_file(b, GAM)
     if not missing(GAM, gam_a, gam_b):
-        found = data_lines(GAM, mask_gam(gam_a), mask_gam(gam_b))
+        x, y, count = mask_pair(gam_a, gam_b, gam_masks)
+        found = data_lines(GAM, x, y)
         different += bool(found)
-        lines += found or ['  %s: same (0x%X-0x%X masked)' % (
-            (GAM,) + GAM_MASKED)]
+        lines += found or ['  %s: same (%d unset bytes masked)'
+                           % (GAM, count)]
     sav_a, sav_b = read_file(a, SAV), read_file(b, SAV)
     if not missing(SAV, sav_a, sav_b):
         try:
@@ -219,9 +297,13 @@ def compare_saves(a, b):
             x, y = entries_a.get(name), entries_b.get(name)
             if missing(label, x, y):
                 continue
+            count = 0
+            if name.upper().endswith('.ARE'):
+                x, y, count = mask_pair(x, y, are_masks)
             found = data_lines(label, x, y)
             different += bool(found)
-            lines += found or ['  %s: same' % label]
+            lines += found or ['  %s: same%s' % (
+                label, ' (%d unset bytes masked)' % count if count else '')]
     wmp_a, wmp_b = read_file(a, WMP), read_file(b, WMP)
     if not missing(WMP, wmp_a, wmp_b):
         found = data_lines(WMP, wmp_a, wmp_b)
