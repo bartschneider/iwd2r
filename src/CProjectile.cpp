@@ -12,6 +12,7 @@
 #include "CProjectileBAM.h"
 #include "CUtil.h"
 #include "IcewindCVisualEffect.h"
+#include "IcewindMisc.h"
 
 #include <list>
 #include <math.h>
@@ -87,6 +88,7 @@ void CProjectile::AddEffect(CGameEffect* pEffect)
 CProjectile* CProjectile::DecodeProjectile(WORD nProjectileType, CGameAIBase* pSprite, BYTE nUnknown)
 {
     CProjectile* pProjectile = NULL;
+    CProjectileArea* pArea;
     CString sResRef;
     CString sTemp1;
     CString sTemp2;
@@ -123,8 +125,60 @@ CProjectile* CProjectile::DecodeProjectile(WORD nProjectileType, CGameAIBase* pS
         // Fireball.
         pProjectile = new CProjectileArea84F580();
         break;
+    case 42:
+        // Sleep: those not evil, or not those, by the caster's side.
+        pArea = new CProjectileArea84FEA4();
+        if (pSprite != NULL) {
+            CAIObjectType type(0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0);
+            if (pSprite->GetAIType().m_nEnemyAlly <= CAIObjectType::EA_NOTEVIL) {
+                type.m_nEnemyAlly = CAIObjectType::EA_EVILCUTOFF;
+            } else {
+                type.m_nEnemyAlly = CAIObjectType::EA_NOTEVIL;
+            }
+            pArea->m_targetType.Set(type);
+        }
+        pArea->m_fireSoundRef = "TRA_04C";
+        pArea->m_arrivalSoundRef = "EFF_M05";
+        pProjectile = pArea;
+        break;
+    case 64:
+        // Web.
+        pProjectile = new CProjectileArea8502E8();
+        break;
+    case 67:
+        // Flame Strike.
+        pProjectile = new CProjectileArea84F754();
+        break;
     case 79:
         pProjectile = new CProjectile84DF1C();
+        break;
+    case 92:
+        // Fire Storm, Lightning Bolt.
+        pProjectile = new CProjectileArea84F6B8();
+        break;
+    case 95:
+        // Stinking Cloud.
+        pProjectile = new CProjectileArea8501B0();
+        break;
+    case 101:
+        // Grease.
+        pProjectile = new CProjectileArea84F7F0();
+        break;
+    case 187:
+        // Cloudkill.
+        pProjectile = new CProjectileArea84F310();
+        break;
+    case 190:
+        // Hold Person.
+        pArea = new CProjectileArea84F9C4();
+        pArea->TargetEnemy(pSprite);
+        pArea->m_fireSoundRef = CResRef("TRA_04C");
+        pArea->m_arrivalSoundRef = CResRef("EFF_M05");
+        pProjectile = pArea;
+        break;
+    case 212:
+        // Acid Fog.
+        pProjectile = new CProjectileArea84F3AC();
         break;
     case 218:
         // One magic missile. NOTE: The WORD at 0x85E848 is 0.
@@ -132,6 +186,242 @@ CProjectile* CProjectile::DecodeProjectile(WORD nProjectileType, CGameAIBase* pS
         pProjectile->m_bHasHeight = TRUE;
         pProjectile->m_fireSoundRef = "TRA_02";
         pProjectile->m_arrivalSoundRef = "";
+        break;
+    case 235:
+        // Entangle.
+        pProjectile = new CProjectileArea84F4E4();
+        break;
+    case 236:
+        // Bless.
+        pArea = new CProjectileArea(250);
+        pArea->TargetFriend(pSprite);
+        pArea->m_explosion1.m_animation = "Area1X";
+        pArea->m_explosion1.m_sound = "EFF_P99";
+        pArea->m_explosion1.m_visualEffect.sub_586A90(TRUE);
+        pProjectile = pArea;
+        break;
+    case 237:
+        // Bane.
+        pArea = new CProjectileArea(250);
+        pArea->TargetEnemy(pSprite);
+        pArea->m_explosion1.m_animation = "Area1X";
+        pArea->m_explosion1.m_sound = "EFF_P99";
+        pArea->m_explosion1.m_visualEffect.sub_586A90(TRUE);
+        pProjectile = pArea;
+        break;
+    case 238:
+        // Remove Fear.
+        pArea = new CProjectileArea(300);
+        pArea->TargetFriend(pSprite);
+        pArea->m_explosion1.m_animation = "AbjuraX";
+        pArea->m_explosion1.m_sound = "ARE_M20";
+        pArea->m_explosion1.m_visualEffect.sub_586A90(TRUE);
+        pProjectile = pArea;
+        break;
+    case 240:
+        // See Invisibility, Invisibility Purge.
+        pArea = new CProjectileArea(300);
+        pArea->TargetEnemy(pSprite);
+        pArea->m_explosion1.m_animation = "Area2X";
+        pArea->m_explosion1.m_sound = "EFF_M99";
+        pArea->m_explosion1.m_visualEffect.sub_586A90(TRUE);
+        pProjectile = pArea;
+        break;
+    case 241:
+        // Horror.
+        pArea = new CProjectileArea(150);
+        pArea->TargetEnemy(pSprite);
+        pArea->m_explosion1.m_animation = "Area4X";
+        pArea->m_explosion1.m_sound = "EFF_M99";
+        pArea->m_explosion1.m_visualEffect.sub_586A90(TRUE);
+        pProjectile = pArea;
+        break;
+    case 244:
+        // Find Traps.
+        pArea = new CProjectileArea(250);
+        pArea->m_bCheckForNonSprites = TRUE;
+        pProjectile = pArea;
+        break;
+    case 245:
+        // Silence.
+        pArea = new CProjectileArea(150);
+        pArea->m_explosion1.m_animation = "AlteraX";
+        pArea->m_explosion1.m_sound = "ARE_M19";
+        pArea->m_explosion1.m_visualEffect.sub_586A90(TRUE);
+        pProjectile = pArea;
+        break;
+    case 246:
+        // Dispel Magic.
+        pProjectile = new CProjectileArea850C0C();
+        break;
+    case 250:
+        // Remove Paralysis.
+        pArea = new CProjectileArea(200);
+        pArea->TargetFriend(pSprite);
+        pArea->m_explosion1.m_animation = "AbjuraX";
+        pArea->m_explosion1.m_sound = "ARE_M20";
+        pArea->m_explosion1.m_visualEffect.sub_586A90(TRUE);
+        pProjectile = pArea;
+        break;
+    case 253:
+        // Prayer.
+        pArea = new CProjectileArea(600);
+        pArea->m_explosion1.m_animation = "Area1X";
+        pArea->m_explosion1.m_sound = "EFF_P99";
+        pArea->m_explosion1.m_visualEffect.sub_586A90(TRUE);
+        pProjectile = pArea;
+        break;
+    case 255:
+        // Emotion.
+        pArea = new CProjectileArea(150);
+        pArea->m_explosion1.m_animation = "EnchanX";
+        pArea->m_explosion1.m_sound = "ARE_M21";
+        pArea->m_explosion1.m_visualEffect.sub_586A90(TRUE);
+        pProjectile = pArea;
+        break;
+    case 258:
+        // Magic Circle Against Evil, Holy Aura.
+        pArea = new CProjectileArea(200);
+        pArea->TargetFriend(pSprite);
+        pArea->m_explosion1.m_animation = "AbjuraX";
+        pArea->m_explosion1.m_sound = "ARE_M20";
+        pArea->m_explosion1.m_visualEffect.sub_586A90(TRUE);
+        pProjectile = pArea;
+        break;
+    case 260:
+        // Recitation.
+        pArea = new CProjectileArea(600);
+        pArea->m_explosion1.m_animation = "Area1X";
+        pArea->m_explosion1.m_sound = "EFF_P99";
+        pArea->m_explosion1.m_visualEffect.sub_586A90(TRUE);
+        pProjectile = pArea;
+        break;
+    case 266:
+        // Righteous Wrath of the Faithful.
+        pArea = new CProjectileArea(350);
+        pArea->m_explosion1.m_animation = "AbjuraX";
+        pArea->m_explosion1.m_sound = "ARE_M20";
+        pArea->m_explosion1.m_visualEffect.sub_586A90(TRUE);
+        pArea->TargetFriend(pSprite);
+        pProjectile = pArea;
+        break;
+    case 275:
+        pArea = new CProjectileArea(200);
+        pArea->TargetEnemy(pSprite);
+        pArea->m_explosion1.m_animation = "EnchanX";
+        pArea->m_explosion1.m_sound = "ARE_M21";
+        pArea->m_explosion1.m_visualEffect.sub_586A90(TRUE);
+        pProjectile = pArea;
+        break;
+    case 270:
+        // Fire Seeds, Flaming Oil.
+        pProjectile = new CProjectileArea84F61C();
+        break;
+    case 276:
+        // Symbol of Pain, Symbol of Stunning.
+        pArea = new CProjectileArea(300);
+        pArea->TargetEnemy(pSprite);
+        pArea->m_explosion1.m_animation = "SoPainX";
+        pArea->m_explosion1.m_sound = "EFF_P49";
+        pArea->m_explosion1.m_visualEffect.sub_586A90(TRUE);
+        pProjectile = pArea;
+        break;
+    case 277:
+        // Symbol of Hopelessness, Symbol of Fear.
+        pArea = new CProjectileArea(300);
+        pArea->TargetEnemy(pSprite);
+        pArea->m_explosion1.m_animation = "SoHopeX";
+        pArea->m_explosion1.m_sound = "EFF_P50";
+        pArea->m_explosion1.m_visualEffect.sub_586A90(TRUE);
+        pProjectile = pArea;
+        break;
+    case 284:
+        // SPIN991: the same cloud, after a floating line over the caster.
+        IcewindMisc::sub_584880(static_cast<CGameSprite*>(pSprite), 4387, 0);
+        pProjectile = new CProjectileArea84F310();
+        break;
+    case 287:
+        // An incendiary cloud.
+        pArea = new CProjectileArea(150);
+        pArea->m_explosion3.m_animation = "ICloudA";
+        pArea->m_explosion3.m_visualEffect.sub_586A90(TRUE);
+        pArea->m_explosion3.field_35 = TRUE;
+        pArea->m_explosion3.field_34 = TRUE;
+        pArea->m_explosion3.field_38 = 500;
+        pArea->m_nDuration = 200;
+        pProjectile = pArea;
+        break;
+    case 299:
+        // Soul Eater.
+        pArea = new CProjectileArea(120);
+        pArea->m_explosion3.m_animation = "SEaterA";
+        pArea->m_explosion3.m_visualEffect.sub_586A90(TRUE);
+        pArea->m_explosion3.field_35 = TRUE;
+        pArea->m_explosion3.field_34 = TRUE;
+        pArea->m_explosion3.m_sound = "ARE_M18";
+        pArea->m_explosion3.field_38 = 200;
+        pProjectile = pArea;
+        break;
+    case 300:
+        // Spike Growth.
+        pArea = new CProjectileArea(150);
+        pArea->m_explosion1.m_animation = "SGrowtX";
+        pArea->m_explosion1.m_sound = "EFF_P111";
+        pArea->m_explosion1.m_visualEffect.sub_586A90(TRUE);
+        pArea->m_explosion3.m_animation = "SGrowtA";
+        pArea->m_explosion3.m_visualEffect.sub_586A90(TRUE);
+        pArea->m_explosion3.field_35 = TRUE;
+        pArea->m_explosion3.field_34 = TRUE;
+        pArea->m_explosion3.m_sound = "AFT_P24";
+        pArea->m_explosion3.field_38 = 250;
+        pArea->m_nTriggerInterval = 10;
+        pArea->m_nTriggerCountdown = 0;
+        pArea->m_nHitModulus = 10;
+        pArea->m_nDuration = 2000;
+        pProjectile = pArea;
+        break;
+    case 337:
+        // Holy Smite.
+        pArea = new CProjectileArea(200);
+        pArea->m_explosion3.m_animation = "HSmiteA";
+        pArea->m_explosion3.m_visualEffect.sub_586AC0(TRUE, 0x40);
+        pArea->m_explosion3.field_34 = TRUE;
+        pArea->m_explosion3.field_35 = TRUE;
+        pArea->m_explosion3.field_38 = 300;
+        pArea->m_nTriggerInterval = 10000;
+        pArea->m_nTriggerCountdown = 0;
+        pArea->m_nHitModulus = 10;
+        pArea->m_nDuration = 45;
+        pProjectile = pArea;
+        break;
+    case 341:
+        // Holy Word, Blasphemy.
+        pArea = new CProjectileArea(300);
+        pArea->m_explosion1.m_animation = "SoHopeX";
+        pArea->m_explosion1.m_sound = "EFF_P50";
+        pArea->m_explosion1.m_visualEffect.sub_586A90(TRUE);
+        pProjectile = pArea;
+        break;
+    case 349:
+        // A breath.
+        pProjectile = new CProjectileArea85072C();
+        break;
+    case 359:
+        // Healing Circle, Mass Heal.
+        pArea = new CProjectileArea(300);
+        pArea->TargetFriend(pSprite);
+        pArea->m_explosion1.m_animation = "Area1X";
+        pArea->m_explosion1.m_sound = "EFF_P99";
+        pArea->m_explosion1.m_visualEffect.sub_586A90(TRUE);
+        pProjectile = pArea;
+        break;
+    case 373:
+        // Control Undead, Mass Dominate.
+        pArea = new CProjectileArea(200);
+        pArea->m_explosion1.m_animation = "EnchanX";
+        pArea->m_explosion1.m_sound = "ARE_M21";
+        pArea->m_explosion1.m_visualEffect.sub_586A90(TRUE);
+        pProjectile = pArea;
         break;
     default:
         if (static_cast<UINT>(nProjectileType - 1) > 0x181) {
@@ -142,7 +432,8 @@ CProjectile* CProjectile::DecodeProjectile(WORD nProjectileType, CGameAIBase* pS
 
         // TODO: Incomplete (0x51EB93-0x528DEF). The jump table at 0x528E7C
         // builds one class per type, 2 to 386; only types 1, 38, 68 to 72,
-        // 79 and 218 are ported.
+        // 79, 218 and the area types used by the game's spells and items
+        // are ported.
         // DEVIATION (temporary): unported type -> instant projectile. The
         // original reaches the fallback below only for types out of range
         // and for the table entries 106, 107, 219-226, 259 and 265. Until
