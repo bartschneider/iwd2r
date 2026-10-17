@@ -1722,9 +1722,11 @@ BOOL CInfGame::SaveGame(BOOLEAN bProgressBarRequired, BOOLEAN bProgressBarInPlac
     }
 
     // NOTE: The original passes each of these ids to a CBaldurMessage
-    // helper (0x43D8D0) that returns at once without a network session
-    // (`test [cNetwork+0x1032]` at 0x43D8F3). Multiplayer is removed (ADR
-    // 0002), so the ids are fetched and the helper is not called.
+    // helper (0x43D8D0) that hands an object held by another player to that
+    // player's machine and waits for it. It returns at once when there is
+    // no session or the provider is the null one (0x43D8F3, 0x43DA22), so a
+    // single-player host session never sends; it needs a remote player, so
+    // the helper is not ported and the ids are fetched and dropped.
     std::vector<int> ids = Icewind586B70::Instance()->sub_587510();
     (void)ids;
 
@@ -6479,8 +6481,9 @@ BOOL CInfGame::SwapItemPersonalInventory(SHORT nPortraitNum, CItem*& pNewItem, S
         // NOTE: A client asks the server for the swap here (0x431560 on
         // `m_cBaldurMessage` with the character, the slot, the item, the
         // error and the count) and returns its answer
-        // (0x5BAE6D-0x5BAEBC). Multiplayer is removed (ADR 0002); without a
-        // session this branch is never taken.
+        // (0x5BAE6D-0x5BAEBC). The branch needs a provider other than the
+        // null one, so a single-player host session never takes it; the
+        // send is not ported.
         g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(nCharacterId,
             CGameObjectArray::THREAD_ASYNCH,
             INFINITE);
@@ -8885,13 +8888,46 @@ BOOLEAN CInfGame::RestParty(INT nHP, BOOLEAN bRenting)
         }
     }
 
-    // NOTE: The original hands a multiplayer game to the server
-    // (0x436290, `CScreenWorld::StartRestMultiplayerHost` 0x693520 or
-    // `CScreenWorld::SetPendingRest` 0x6934F0, 0x5C1245-0x5C1347) and returns
-    // TRUE, or FALSE when the session state is neither. Multiplayer is
-    // removed (ADR 0002): only the single-player branch is ported.
-    if (!g_pChitin->cNetwork.m_bConnectionEstablished) {
+    // A single-player game is a connected host session under the null
+    // provider, so the host branch below runs in single player too.
+    if (g_pChitin->cNetwork.m_bConnectionEstablished == FALSE) {
         return RestPartyPrivate(nHP, bRenting);
+    }
+
+    if (g_pChitin->cNetwork.m_bIsHost == FALSE) {
+        if (g_pBaldurChitin->m_cBaldurMessage.m_bInOnRestAnnounce == FALSE) {
+            // NOTE: A client asks the server to start the rest here
+            // (0x436290 on `m_cBaldurMessage` with nHP, bRenting and
+            // `CInfGame::m_bHealPartyOnRest`, 0x5C1265-0x5C1292); it needs a
+            // remote server, so it is not ported. The rest happens when the
+            // server's announcement arrives.
+            return TRUE;
+        }
+
+        return RestPartyPrivate(nHP, bRenting);
+    }
+
+    if (g_pChitin->cNetwork.m_bIsHost == TRUE) {
+        CScreenWorld* pWorld = g_pBaldurChitin->m_pEngineWorld;
+
+        // The rest waits while a save is in a dialog mode, the host must
+        // permit a dialog, or the world is hard-paused.
+        BOOLEAN bStart = TRUE;
+        if (m_gameSave.m_mode == 386 || m_gameSave.m_mode == 1282) {
+            bStart = FALSE;
+        }
+
+        if (m_multiplayerSettings.m_bHostPermittedDialog == TRUE) {
+            bStart = FALSE;
+        }
+
+        if (pWorld->m_bHardPaused == TRUE || bStart == FALSE) {
+            pWorld->SetPendingRest(nHP, bRenting, FALSE);
+        } else {
+            pWorld->StartRestMultiplayerHost(nHP, bRenting, CInfGame::m_bHealPartyOnRest);
+        }
+
+        return TRUE;
     }
 
     return FALSE;
@@ -8920,8 +8956,9 @@ BOOLEAN CInfGame::RestPartyPrivate(INT nHP, BOOLEAN bRenting)
         g_pBaldurChitin->GetObjectGame()->GetVariables()->FindKey(CHAPTER_GLOBAL);
 
         // NOTE: The original announces the rest to the clients here
-        // (`CBaldurMessage` 0x436500 with nHP, bRenting and 0); it returns
-        // at once without a session. Multiplayer is removed (ADR 0002).
+        // (`CBaldurMessage` 0x436500 with nHP, bRenting and 0); a
+        // single-player host session calls it too, and its broadcast is a
+        // no-op under the null provider. It is not ported.
 
         nHealed = 0;
 
@@ -10133,46 +10170,132 @@ BOOL CInfGame::sub_5C79C0(CString sArea)
 INT CInfGame::AddItemToBag(const CResRef& cResBag, CItem* pItem, STRREF& strError)
 {
     INT nCount = 0;
+    INT nOriginalUsage = 0;
 
     strError = -1;
 
-    if (g_pChitin->cNetwork.m_bConnectionEstablished) {
-        // NOTE: In a session the original fills the server's copy of the bag
-        // (`DemandServerStore` 0x5ADC90, `GetServerStore` 0x5ADF60,
-        // `ReleaseServerStore` 0x5ADE90) or asks the server for it
-        // (`CBaldurMessage::DemandResourceFromServer`) and announces the
-        // change (0x5C7B5B-0x5C8023). Multiplayer is removed (ADR 0002).
+    if (g_pChitin->cNetwork.m_bConnectionEstablished == FALSE) {
+        CStore cStore(cResBag);
+        if (cStore.GetType() == 4 && cStore.IsItemAcceptable(pItem)) {
+            // NOTE: The bag's capacity is the WORD at the header's +0x94; the
+            // original compares it with the number of items in the bag.
+            WORD nCapacity = static_cast<WORD>(cStore.m_header.field_94);
+            if (nCapacity != 0 && nCapacity != cStore.GetNumItems()) {
+                nCount = 1;
+                if (pItem->GetMaxStackable() > 1) {
+                    nCount = pItem->GetUsageCount(0);
+                }
+
+                if (cStore.GetNumItems() + nCount > nCapacity) {
+                    nCount = nCapacity - cStore.GetNumItems();
+                }
+
+                pItem->SetUsageCount(0, static_cast<WORD>(nCount));
+                cStore.AddItemExt(*pItem, 1);
+            } else {
+                // "Container Is Full"
+                strError = 24889;
+            }
+        } else {
+            // "Wrong Item Type"
+            strError = 26285;
+        }
+
+        if (strError == -1) {
+            cStore.Marshal(m_sTempDir);
+        }
+
         return nCount;
     }
 
-    CStore cStore(cResBag);
+    // A session: a single-player game runs this as the host. The host fills
+    // the server's copy of the bag; a client asks the server for it first
+    // and works on its local copy.
+    BOOL bStoreDemanded = FALSE;
+    CStore cStore;
+    if (g_pChitin->cNetwork.GetSessionHosting()) {
+        DemandServerStore(cResBag, TRUE);
+        cStore.SetResRef(cResBag);
+    } else {
+        cStore.SetResRef(cResBag);
+        if (!cStore.m_bLocalCopy || memcmp(cStore.m_pVersion, "STORV9.0", 8) != 0) {
+            if (!g_pBaldurChitin->GetBaldurMessage()->DemandResourceFromServer(cResBag.GetResRefStr(),
+                    1014,
+                    TRUE,
+                    TRUE,
+                    TRUE)) {
+                g_pChitin->cNetwork.CloseSession(TRUE);
+                return 0;
+            }
+
+            cStore.SetResRef(cResBag);
+            bStoreDemanded = TRUE;
+        }
+    }
+
     if (cStore.GetType() == 4 && cStore.IsItemAcceptable(pItem)) {
         // NOTE: The bag's capacity is the WORD at the header's +0x94; the
         // original compares it with the number of items in the bag.
         WORD nCapacity = static_cast<WORD>(cStore.m_header.field_94);
-        if (nCapacity != 0 && nCapacity != cStore.GetNumItems()) {
-            nCount = 1;
-            if (pItem->GetMaxStackable() > 1) {
-                nCount = pItem->GetUsageCount(0);
-            }
-
-            if (cStore.GetNumItems() + nCount > nCapacity) {
-                nCount = nCapacity - cStore.GetNumItems();
-            }
-
-            pItem->SetUsageCount(0, static_cast<WORD>(nCount));
-            cStore.AddItemExt(*pItem, 1);
-        } else {
+        if (nCapacity == 0 || nCapacity == cStore.GetNumItems()) {
             // "Container Is Full"
             strError = 24889;
+        } else {
+            if (pItem->GetMaxStackable() < 2) {
+                nCount = 1;
+            } else {
+                nCount = pItem->GetUsageCount(0);
+                nOriginalUsage = nCount;
+
+                // NOTE: The capacity of a bag counts stacks, so a stackable
+                // item's count is divided by its maximum stack first.
+                if (nCount / pItem->GetMaxStackable() + cStore.GetNumItems() > nCapacity) {
+                    nCount = nCapacity - cStore.GetNumItems();
+                }
+
+                pItem->SetUsageCount(0, static_cast<WORD>(nCount));
+            }
+
+            if (g_pChitin->cNetwork.GetSessionHosting() == FALSE && bStoreDemanded == FALSE) {
+                bStoreDemanded = TRUE;
+                CMessageStoreDemand* pDemandMessage = new CMessageStoreDemand(cResBag, -1, -1);
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(pDemandMessage, FALSE);
+            }
+
+            // NOTE: `CMessageStoreAddItem` is BROADCAST_FORCED_OTHERS, so
+            // the message handler deletes it in a single-player session.
+            CMessageStoreAddItem* pAddMessage = new CMessageStoreAddItem(cResBag,
+                pItem->GetItemFile(),
+                -1,
+                -1);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(pAddMessage, FALSE);
+
+            if (g_pChitin->cNetwork.GetSessionHosting()) {
+                CStore* pServerStore = GetServerStore(cResBag);
+
+                // __FILE__: C:\Projects\Icewind2\src\Baldur\InfGame.cpp
+                // __LINE__: 22140
+                UTIL_ASSERT(pServerStore != NULL);
+
+                pServerStore->AddItemExt(*pItem, 1);
+            } else {
+                CStore::InvalidateStore(cResBag);
+            }
+
+            if (pItem->GetMaxStackable() > 1) {
+                pItem->SetUsageCount(0, static_cast<WORD>(nOriginalUsage));
+            }
         }
     } else {
         // "Wrong Item Type"
         strError = 26285;
     }
 
-    if (strError == -1) {
-        cStore.Marshal(m_sTempDir);
+    if (g_pChitin->cNetwork.GetSessionHosting()) {
+        ReleaseServerStore(cResBag);
+    } else if (bStoreDemanded) {
+        CMessageStoreRelease* pReleaseMessage = new CMessageStoreRelease(cResBag, -1, -1);
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(pReleaseMessage, FALSE);
     }
 
     return nCount;

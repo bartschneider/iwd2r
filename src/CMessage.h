@@ -161,6 +161,10 @@ public:
     static const BYTE MSG_SUBTYPE_BIOGRAPHY_CHANGE;
     static const BYTE MSG_SUBTYPE_BIOGRAPHY_CHANGE_ANNOUNCE;
 
+    static const BYTE MSG_TYPE_DELETEAREA;
+    static const BYTE MSG_SUBTYPE_DELETEAREA_POLL;
+    static const BYTE MSG_SUBTYPE_DELETEAREA_RESULT;
+
     static const BYTE MSG_TYPE_KICK_PLAYER;
     static const BYTE MSG_SUBTYPE_KICK_PLAYER_REQUEST;
     static const BYTE MSG_SUBTYPE_KICK_PLAYER_SERVER_SUPPORT;
@@ -340,6 +344,9 @@ public:
     BOOLEAN OnAnnounceBiography(INT nMsgFrom, BYTE* pByteMessage, DWORD dwSize);
     void SetDeleteAreaString(CString sAreaString);
     CString GetDeleteAreaString();
+    BOOLEAN StartDeleteAreaPoll(CString sAreaString, BOOLEAN bResend);
+    BOOLEAN ResolveDeleteAreaPoll(CString sAreaString, BOOLEAN bResult);
+    BOOLEAN CanResolveDeleteAreaPoll();
     BOOLEAN CancelDeleteAreaPoll();
     BOOLEAN DeleteAreaBallotResult();
     BOOLEAN MultiplayerSynchRequest();
