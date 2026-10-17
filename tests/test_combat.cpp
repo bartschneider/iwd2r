@@ -4,6 +4,7 @@
 #include "CAIAction.h"
 #include "CBaldurChitin.h"
 #include "CCreatureFile.h"
+#include "CGameAnimationTypeMonsterIcewind.h"
 #include "CGameArea.h"
 #include "CGameContainer.h"
 #include "CGameEffect.h"
@@ -2516,4 +2517,48 @@ TEST_CASE("combat: the area tints a point with its light map", "[combat][data]")
         != off(d00.rgbRed, d01.rgbRed, d10.rgbRed, d11.rgbRed));
 
     pArea->m_cInfinity.m_areaType = areaType;
+}
+
+// CGameAnimationTypeMonsterIcewind::SetSequence (0x6E7DF0), the goblin's
+// animation: DIE (5) takes the DE cells and draws no frame (its jump table
+// entry, 0x6E7F0F, ends at 0x6E80DB; ours fell into TWITCH, which draws a
+// random first frame: first_fight's Magic Missile kill drew once more than
+// the original at frame 5450), TWITCH (6) after it draws one, and SLEEP
+// (17) takes the SL cells (0x6E7F57).
+TEST_CASE("combat: an Icewind monster dies on its DE cells without a frame draw", "[combat][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    Fight fight;
+    std::string why;
+    if (!SetUpFight(fight, why)) {
+        if (why.find("CHR") != std::string::npos) {
+            SKIP("[iwd2r-skip] " + why);
+        }
+        FAIL(why);
+    }
+    CGameAnimationTypeMonsterIcewind* pAnimation = dynamic_cast<CGameAnimationTypeMonsterIcewind*>(fight.pGoblin->m_animation.m_animation);
+    REQUIRE(pAnimation != NULL);
+
+    srand(1);
+    CHECK(pAnimation->SetSequence(5) == 5);
+    CHECK(pAnimation->m_currentVidCellBase == &pAnimation->m_deVidCellBase);
+    CHECK(pAnimation->m_currentVidCellExtend == &pAnimation->m_deVidCellExtend);
+    CHECK(iwd2r_rand_state() == 1);
+
+    CHECK(pAnimation->SetSequence(6) == 6);
+    CHECK(pAnimation->m_currentVidCellBase == &pAnimation->m_sdVidCellBase);
+    CHECK(iwd2r_rand_state() == 1u * 214013u + 2531011u);
+
+    srand(1);
+    CHECK(pAnimation->SetSequence(17) == 17);
+    CHECK(pAnimation->m_currentVidCellBase == &pAnimation->m_slVidCellBase);
+    CHECK(pAnimation->m_currentVidCellExtend == &pAnimation->m_slVidCellExtend);
+    CHECK(iwd2r_rand_state() == 1);
+    ClearMessages();
 }
