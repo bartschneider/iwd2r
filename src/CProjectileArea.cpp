@@ -7,6 +7,7 @@
 #include "CGameObject84F0DC.h"
 #include "CGameSprite.h"
 #include "CInfGame.h"
+#include "CMessage.h"
 #include "CParticle.h"
 #include "CProjectileShaft.h"
 #include "CUtil.h"
@@ -955,6 +956,183 @@ void CProjectileArea85072C::AIUpdate()
 void CProjectileArea85072C::OnArrival()
 {
     // NOTE: An empty function; its own AIUpdate makes it arrive.
+}
+
+// 0x576D40
+// NOTE: The same file-static helper IcewindCGameEffects.cpp has for the turn
+// undead effect (the original inlines it into ApplyToTargets below).
+static INT CalculateTurnUndeadFinalSourceRoll(CGameSprite* pSprite)
+{
+    INT nModifier = g_pBaldurChitin->GetObjectGame()->GetRuleTables().GetAbilityScoreModifier(pSprite->GetDerivedStats()->m_nCHR);
+    INT nRoll = nModifier + 1 + CUtil::UtilRandInt(20, pSprite->GetDerivedStats()->m_nLuck);
+    SHORT nTurnUndeadLevel = pSprite->GetTurnUndeadLevel();
+    if (nRoll - 10 >= 0) {
+        return (nRoll - 10) / 3 + nTurnUndeadLevel;
+    }
+    return (nRoll - 9) / 3 - 1 + nTurnUndeadLevel;
+}
+
+// 0x577380
+// NOTE: A file-static of the original; it rewrites the list in place to the
+// sprites whose level is above -1.
+static void FilterTurnUndeadTargets(std::list<LONG>& targets)
+{
+    std::list<LONG> kept;
+
+    for (std::list<LONG>::iterator it = targets.begin(); it != targets.end(); ++it) {
+        CGameObject* pObject;
+        if (g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(*it,
+                CGameObjectArray::THREAD_ASYNCH,
+                &pObject,
+                INFINITE)
+            != CGameObjectArray::SUCCESS) {
+            continue;
+        }
+
+        if (pObject->GetObjectType() != CGameObject::TYPE_SPRITE) {
+            g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(*it,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+            continue;
+        }
+
+        CGameSprite* pSprite = static_cast<CGameSprite*>(pObject);
+        if (pSprite->GetLevel() <= -1) {
+            g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(*it,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+            continue;
+        }
+
+        // NOTE: The original calls GetLevel a second time here and drops the
+        // result.
+        pSprite->GetLevel();
+
+        kept.push_back(*it);
+        g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(*it,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+    }
+
+    targets = kept;
+}
+
+// 0x576CF0
+CProjectileArea850A38::CProjectileArea850A38()
+    // NOTE: The radius is the WORD at 0x84F1BC (256), then 300.
+    : CProjectileArea(256)
+{
+    m_nTriggerInterval = 10000;
+    m_nTriggerCountdown = 0;
+    m_nHitModulus = 10;
+    m_nDuration = 45;
+    m_nRadius = 300;
+}
+
+// 0x576DC0
+void CProjectileArea850A38::ApplyToTargets(std::list<LONG>& targets)
+{
+    CGameObject* pSourceObject;
+    if (g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(m_sourceId,
+            CGameObjectArray::THREAD_ASYNCH,
+            &pSourceObject,
+            INFINITE)
+        != CGameObjectArray::SUCCESS) {
+        // NOTE: The original releases the share it failed to take.
+        g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(m_sourceId,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+        return;
+    }
+
+    if (pSourceObject->GetObjectType() != CGameObject::TYPE_SPRITE) {
+        g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(m_sourceId,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+        return;
+    }
+    CGameSprite* pSource = static_cast<CGameSprite*>(pSourceObject);
+
+    // The turn roll, then the destroying threshold: a d20, then two d6.
+    INT nTurnRoll = CalculateTurnUndeadFinalSourceRoll(pSource);
+    INT nThreshold = g_pBaldurChitin->GetObjectGame()->GetRuleTables().GetAbilityScoreModifier(pSource->GetDerivedStats()->m_nCHR)
+        + CUtil::UtilRandInt(6, pSource->GetDerivedStats()->m_nLuck)
+        + CUtil::UtilRandInt(6, pSource->GetDerivedStats()->m_nLuck)
+        + 2;
+    if (pSource->sub_763150(CGAMESPRITE_FEAT_IMPROVED_TURNING) == 1) {
+        nThreshold += 2;
+    }
+
+    FilterTurnUndeadTargets(targets);
+
+    for (std::list<LONG>::iterator it = targets.begin(); it != targets.end(); ++it) {
+        CGameObject* pObject;
+        if (g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(*it,
+                CGameObjectArray::THREAD_ASYNCH,
+                &pObject,
+                INFINITE)
+            != CGameObjectArray::SUCCESS) {
+            continue;
+        }
+
+        if (pObject->GetObjectType() != CGameObject::TYPE_SPRITE) {
+            g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(*it,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+            continue;
+        }
+        CGameSprite* pTarget = static_cast<CGameSprite*>(pObject);
+
+        if (IcewindMisc::IsUndead(pTarget) != TRUE) {
+            g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(*it,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+            continue;
+        }
+
+        if (pTarget->GetDerivedStats()->m_spellStates[SPLSTATE_TURNED]) {
+            g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(*it,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+            continue;
+        }
+
+        LONG nLevel = pTarget->GetLevel();
+        if (nLevel > nTurnRoll || nLevel > nThreshold) {
+            g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(*it,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+            continue;
+        }
+
+        SHORT nTurnUndeadLevel = pSource->GetTurnUndeadLevel();
+        const char* szResRef;
+        if (IcewindMisc::IsEvil(pSource) == TRUE) {
+            szResRef = (nTurnUndeadLevel >= 2 * nLevel) ? "EffTU1" : "EffTU2";
+        } else {
+            szResRef = (nTurnUndeadLevel >= 2 * nLevel) ? "EffTU3" : "EffTU4";
+        }
+
+        std::list<CGameEffect*> effects = IcewindMisc::GetSpellResrefEffects(pSource,
+            reinterpret_cast<const BYTE*>(szResRef),
+            1);
+        for (std::list<CGameEffect*>::iterator effectIt = effects.begin(); effectIt != effects.end(); ++effectIt) {
+            (*effectIt)->m_casterLevel = nTurnUndeadLevel;
+            if ((*effectIt)->m_effectID == 280) {
+                (*effectIt)->m_numDice = m_sourceId;
+            }
+            CMessage* pMessage = new CMessageAddEffect(*effectIt, m_sourceId, *it);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(pMessage, FALSE);
+        }
+
+        g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(*it,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+    }
+
+    g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(m_sourceId,
+        CGameObjectArray::THREAD_ASYNCH,
+        INFINITE);
 }
 
 // -----------------------------------------------------------------------------

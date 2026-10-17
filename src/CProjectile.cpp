@@ -423,6 +423,10 @@ CProjectile* CProjectile::DecodeProjectile(WORD nProjectileType, CGameAIBase* pS
         pArea->m_explosion1.m_visualEffect.sub_586A90(TRUE);
         pProjectile = pArea;
         break;
+    case 376:
+        // Turn Undead.
+        pProjectile = new CProjectileArea850A38();
+        break;
     default:
         if (static_cast<UINT>(nProjectileType - 1) > 0x181) {
             // __FILE__: C:\Projects\Icewind2\src\Baldur\CProjectile.cpp

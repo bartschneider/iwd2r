@@ -215,6 +215,14 @@ public:
     /* 065E */ LONG m_nTicks;
 };
 
+// Turn Undead (projectile type 376, vtable 0x850A38): 300 around; it turns
+// or destroys the undead the caster's turning check beats.
+class CProjectileArea850A38 : public CProjectileArea {
+public:
+    CProjectileArea850A38();
+    /* 0094 */ void ApplyToTargets(std::list<LONG>& targets) override;
+};
+
 // Dispel Magic (projectile type 246, vtable 0x850C0C): AbjuraX, 150 around;
 // it removes a sprite's Globe of Invulnerability (effect 450) before the
 // secondary projectile.

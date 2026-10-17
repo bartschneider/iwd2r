@@ -1956,6 +1956,181 @@ TEST_CASE("visual projectiles: Sleep takes the sprites below level 5 while their
     }
 }
 
+namespace {
+
+// The add-effect messages the handler holds, drained (the caller owns and
+// deletes them; each one owns its effect).
+std::vector<CMessageAddEffect*> AddEffectMessages()
+{
+    std::vector<CMessageAddEffect*> messages;
+    CMessageHandler& handler = g_pBaldurChitin->m_cMessageHandler;
+    while (!handler.m_messageList.IsEmpty()) {
+        CMessage* pMessage = handler.m_messageList.RemoveHead();
+        CMessageAddEffect* pAdd = dynamic_cast<CMessageAddEffect*>(pMessage);
+        if (pAdd != NULL) {
+            messages.push_back(pAdd);
+        } else {
+            delete pMessage;
+        }
+    }
+    return messages;
+}
+
+// CUtil::UtilRandInt's math on a known rand() value.
+int Scaled(int nRand, int nRange, int nWeight)
+{
+    int nValue = nWeight + ((nRange * nRand) >> 15);
+    if (nValue >= nRange) {
+        nValue = nRange - 1;
+    }
+    if (nValue < 0) {
+        nValue = 0;
+    }
+    return nValue;
+}
+
+}
+
+// Turn Undead (type 376, CProjectileArea850A38::ApplyToTargets 0x576DC0):
+// three numbers, a d20 turn roll and two d6 thresholds; the list is first
+// rewritten to its sprites above level -1 (the 0x577380 filter), then only
+// the undead that are not already turned and whose level fits both the
+// turn roll and the threshold stay, and each of them is sent the effects of
+// one EffTU spell as add-effect messages whose caller is the turning
+// sprite. The spell is EffTU1/EffTU3 when the turner's turn undead level
+// reaches twice the target's level (Evil/other turners), EffTU2/EffTU4
+// when it does not.
+TEST_CASE("visual projectiles: Turn Undead turns the undead that fit the rolls", "[visualprojectile][data]")
+{
+    WORLD_OR_SKIP(world);
+    CGameArea* pArea = world.pArea;
+    CGameSprite* pTurner = world.pCharacter;
+    std::vector<CGameSprite*> goblins = AddGoblins(pArea, CPoint(pTurner->GetPos().x + 80, pTurner->GetPos().y + 30), 6);
+    REQUIRE(goblins.size() == 6);
+    // Goblin 0 fits every roll at level 0; 1 fits while the rolls reach 1;
+    // 2 is already turned; 3 is not undead; 4 is above every roll (the best
+    // d20 only reaches turn roll 3); 5 never fits. The filter's "above level
+    // -1" guard reads the level through GetAtOffset's class-level byte
+    // (0x4471c3, zero-extended), so it can never fire for a real sprite and
+    // only the entry whose share fails is dropped.
+    const int levels[] = { 0, 1, 1, 1, 4, 50 };
+    std::list<LONG> targets;
+    targets.push_back(CGameObjectArray::INVALID_INDEX);
+    for (size_t n = 0; n < goblins.size(); n++) {
+        goblins[n]->GetDerivedStats()->m_nLevel = levels[n];
+        goblins[n]->m_typeAI.m_nGeneral = (n == 3) ? CAIObjectType::G_MONSTER : CAIObjectType::G_UNDEAD;
+        targets.push_back(goblins[n]->GetId());
+    }
+    goblins[2]->GetDerivedStats()->m_spellStates[SPLSTATE_TURNED] = true;
+
+    // The turner's maths, mirrored: charisma modifier, luck and turn undead
+    // level decide with the three rolls.
+    const INT nChrMod = g_pBaldurChitin->GetObjectGame()->GetRuleTables().GetAbilityScoreModifier(pTurner->GetDerivedStats()->m_nCHR);
+    const int nLuck = pTurner->GetDerivedStats()->m_nLuck;
+    const SHORT nTurnLevel = pTurner->GetTurnUndeadLevel();
+
+    const BYTE nOldAlignment = pTurner->m_typeAI.m_nAlignment;
+    for (int evil = 0; evil < 2; evil++) {
+        INFO((evil ? "evil " : "good ") << "turner");
+        pTurner->m_typeAI.m_nAlignment = evil ? CAIObjectType::CHAOTIC_EVIL : CAIObjectType::NEUTRAL_GOOD;
+
+        // Seeds whose first draw spreads the d20 over the roll's range: turn
+        // rolls below 0, exactly 0, and 1..3 (the maximum this charisma and
+        // turn undead level can reach). Small consecutive seeds would not do:
+        // their first draw stays under 32768/20, so the d20 is always 0.
+        const unsigned int seeds[] = { 1, 2497, 4504, 5006, 6009, 6511, 8016, 9521 };
+        bool seenG0 = false;
+        bool seenG1 = false;
+        for (unsigned int seed : seeds) {
+            INFO("seed " << seed);
+            const int nRoll = nChrMod + 1 + Scaled(RandAt(seed, 1), 20, nLuck);
+            const int nTurnRoll = (nRoll - 10 >= 0)
+                ? (nRoll - 10) / 3 + nTurnLevel
+                : (nRoll - 9) / 3 - 1 + nTurnLevel;
+            const int nThreshold = nChrMod + Scaled(RandAt(seed, 2), 6, nLuck) + Scaled(RandAt(seed, 3), 6, nLuck) + 2;
+            seenG0 = seenG0 || nTurnRoll >= 0;
+            seenG1 = seenG1 || (nTurnRoll >= levels[1] && nThreshold >= levels[1]);
+
+            std::unique_ptr<CProjectileArea850A38> pTurn(new CProjectileArea850A38());
+            pTurn->m_sourceId = pTurner->GetId();
+            std::list<LONG> list = targets;
+            ClearMessages();
+            iwd2r_srand(seed);
+            pTurn->ApplyToTargets(list);
+            CHECK(Draws(seed, iwd2r_rand_state()) == 3);
+
+            // The filter rewrites the list to the sprites it could take and
+            // whose type and level pass, in order.
+            std::vector<LONG> kept;
+            for (size_t n = 0; n < goblins.size(); n++) {
+                kept.push_back(goblins[n]->GetId());
+            }
+            CHECK(list == std::list<LONG>(kept.begin(), kept.end()));
+
+            // Only goblin 0 and, while its level fits both rolls, goblin 1
+            // are turned; each of them gets one message per effect of the
+            // tier's spell, so the targets are compared per unique sprite.
+            std::vector<CMessageAddEffect*> messages = AddEffectMessages();
+            std::vector<LONG> turned;
+            for (CMessageAddEffect* pMessage : messages) {
+                CHECK(pMessage->GetSource() == pTurner->GetId());
+                if (std::find(turned.begin(), turned.end(), pMessage->GetTarget()) == turned.end()) {
+                    turned.push_back(pMessage->GetTarget());
+                }
+            }
+            for (size_t n = 0; n < turned.size(); n++) {
+                CHECK((turned[n] == goblins[0]->GetId() || turned[n] == goblins[1]->GetId()));
+            }
+            if (nTurnRoll >= levels[1] && nThreshold >= levels[1]) {
+                CHECK(turned.size() == 2);
+                CHECK(turned[0] == goblins[0]->GetId());
+                CHECK(turned[1] == goblins[1]->GetId());
+            } else if (nTurnRoll >= levels[0]) {
+                CHECK(turned.size() == 1);
+                CHECK(turned[0] == goblins[0]->GetId());
+            } else {
+                CHECK(turned.empty());
+            }
+
+            // Each message carries one EffTU effect: its caster level is the
+            // turner's turn undead level, and effect 280's die count is the
+            // turner's id, so the turned state remembers who turned it.
+            for (CMessageAddEffect* pMessage : messages) {
+                CGameEffect* pEffect = pMessage->m_effect;
+                CHECK(pEffect->m_casterLevel == static_cast<DWORD>(nTurnLevel));
+                const LONG nLevel = (pMessage->GetTarget() == goblins[0]->GetId()) ? levels[0] : levels[1];
+                const char* szTier;
+                if (evil) {
+                    szTier = (nTurnLevel >= 2 * nLevel) ? "EffTU1" : "EffTU2";
+                } else {
+                    szTier = (nTurnLevel >= 2 * nLevel) ? "EffTU3" : "EffTU4";
+                }
+                CHECK(pEffect->m_sourceRes == szTier);
+                if (pEffect->m_effectID == 280) {
+                    CHECK(pEffect->m_numDice == static_cast<DWORD>(pTurner->GetId()));
+                }
+            }
+            for (CMessageAddEffect* pMessage : messages) {
+                delete pMessage;
+            }
+        }
+        CHECK(seenG0);
+        CHECK(seenG1);
+    }
+    pTurner->m_typeAI.m_nAlignment = nOldAlignment;
+
+    // A source that is not in the object array turns nobody (and, as in the
+    // original, the share it failed to take is still released).
+    std::unique_ptr<CProjectileArea850A38> pTurn(new CProjectileArea850A38());
+    pTurn->m_sourceId = CGameObjectArray::INVALID_INDEX;
+    std::list<LONG> list = targets;
+    ClearMessages();
+    iwd2r_srand(97);
+    pTurn->ApplyToTargets(list);
+    CHECK(Draws(97, iwd2r_rand_state()) == 0);
+    CHECK(AddEffectMessages().empty());
+}
+
 // Cloudkill (type 187, CProjectileArea84F310 0x571310) does not travel: it
 // arrives where it is fired (CProjectileArea::Fire 0x56F820, OnArrival
 // 0x56F410) and its explosion object takes its three descriptions. It
