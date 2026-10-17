@@ -102,6 +102,7 @@ public:
     SHORT Shout();
     void PutItemGround(CItem* pItem);
     SHORT ClearActions(CGameObject* target);
+    SHORT GiveItemCreate(CGameObject* pTarget);
     SHORT TakePartyGold();
     SHORT GivePartyGold();
     SHORT GiveOrder(CGameAIBase* sprite);

@@ -2863,8 +2863,8 @@ COLORREF CGameArea::GetTintColor(const CPoint& cPoint, BYTE listType)
 
     // NOTE: The original leaves the corners on its stack as they are when it
     // samples neither map (a code with neither bit); ours starts them at 0.
-    // GetPixelColor answers TRUE for a loaded map, so the falls back to the
-    // first corner below do not happen.
+    // GetPixelColor answers TRUE for a loaded map, so the fallbacks to the
+    // first corner below never run.
     RGBQUAD corners[4] = {};
     if ((nCode & DAY) != 0) {
         m_bmLum.GetPixelColor(corners[0], nX, nY, TRUE);
