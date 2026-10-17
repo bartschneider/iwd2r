@@ -695,7 +695,8 @@ SHORT CGameAIBase::ExecuteAction()
         goto done;
     case 164:
         // AddexperienceParty
-        // TODO: 0x44FC9A-0x44FCBE calls CInfGame 0x5C0BB0 (not ported).
+        g_pBaldurChitin->GetObjectGame()->AddExperienceParty(m_curAction.m_specificID, FALSE, FALSE);
+        returnValue = ACTION_DONE;
         goto done;
     case 165:
         // AddexperiencePartyGlobal

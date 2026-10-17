@@ -74,15 +74,22 @@ void Icewind586B70::sub_586D60(CGameSprite* sprite1, CGameSprite* sprite2)
         return;
     }
 
-    for (int index = 0; index < 6; index++) {
+    // NOTE: Inlined: the first free entry's index, or -1 (none; the
+    // original returns once all six are taken).
+    int index;
+    for (index = 0; index < 6; index++) {
         if (mEntries[index].field_0 == 0 || mEntries[index].field_4 == 0) {
-            // NOTE: Odd check, looks like inlining.
-            if (index != -1) {
-                mEntries[index].field_0 = sprite2->GetId();
-                mEntries[index].field_4 = sprite1->GetId();
-                mEntries[index].field_8 = false;
-            }
+            break;
         }
+    }
+    if (index >= 6) {
+        return;
+    }
+
+    if (index != -1) {
+        mEntries[index].field_0 = sprite2->GetId();
+        mEntries[index].field_4 = sprite1->GetId();
+        mEntries[index].field_8 = false;
     }
 }
 
@@ -134,15 +141,22 @@ void Icewind586B70::sub_586F20(CGameSprite* sprite1, CGameSprite* sprite2)
         return;
     }
 
-    for (int index = 0; index < 6; index++) {
+    // NOTE: Inlined: the first free entry's index, or -1 (none; the
+    // original returns once all six are taken).
+    int index;
+    for (index = 0; index < 6; index++) {
         if (mEntries[index].field_0 == 0 || mEntries[index].field_4 == 0) {
-            // NOTE: Odd check, looks like inlining.
-            if (index != -1) {
-                mEntries[index].field_0 = sprite2->GetId();
-                mEntries[index].field_4 = sprite1->GetId();
-                mEntries[index].field_8 = true;
-            }
+            break;
         }
+    }
+    if (index >= 6) {
+        return;
+    }
+
+    if (index != -1) {
+        mEntries[index].field_0 = sprite2->GetId();
+        mEntries[index].field_4 = sprite1->GetId();
+        mEntries[index].field_8 = true;
     }
 }
 

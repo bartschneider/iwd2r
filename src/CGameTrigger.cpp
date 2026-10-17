@@ -86,7 +86,7 @@ CGameTrigger::CGameTrigger(CGameArea* pArea, CAreaFileTriggerObject* pTriggerObj
                     || (y2 == y1 && y1 == y0)
                     || (x2 != x1
                         && x1 != x0
-                        && 1000 * (y2 - y1) / (x2 - x1) != 1000 * (y1 - y0) / (x1 - x0))) {
+                        && 1000 * (y2 - y1) / (x2 - x1) == 1000 * (y1 - y0) / (x1 - x0))) {
                     m_pPolygon[cnt - adjust - 1] = m_pPolygon[cnt - adjust];
                     adjust++;
                 }

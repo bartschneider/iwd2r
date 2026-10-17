@@ -557,7 +557,8 @@ class ScenarioParseTest(unittest.TestCase):
                  if a['op'] == 'checkpoint']
         self.assertEqual(names, world + [
             'opening_dialog', 'opening_done', 'moved', 'dialog',
-            'dialog_end', 'reig_dialog', 'reig_done', 'door_open'])
+            'dialog_end', 'reig_dialog', 'jon_dialog', 'reig_done',
+            'door_open'])
         self.assertEqual(len(names), len(set(names)))
         # M2 Task 7: a shot of Hedron's dialog panel and of the door.
         self.assertEqual([a['name'] for a in actions if a['op'] == 'shot'],
@@ -1000,7 +1001,9 @@ class CheckpointExpectationTest(unittest.TestCase):
                        'rng_state': 1, 'globals': {'au_counter': 986},
                        'chargen': chargen, 'world': world}, f)
 
-    WORLD = {'area': 'AR1000', 'party': [{'id': 1, 'x': 2414, 'y': 897}],
+    WORLD = {'area': 'AR1000', 'party': [{'id': 1, 'x': 2414, 'y': 897,
+                                          'hp': 9, 'max_hp': 9,
+                                          'facing': 4}],
              'doors': [{'name': 'AR1000_Door5', 'open': 0, 'locked': 0}],
              'dialog': {'active': 1, 'speaker': 1048592, 'entry': 34,
                         'responses': 5},
@@ -1024,7 +1027,9 @@ class CheckpointExpectationTest(unittest.TestCase):
             'world.dialog.active': 1, 'world.dialog.speaker': 1048592,
             'world.dialog.entry': 34, 'world.dialog.responses': 5,
             'world.doors[0].name': 'AR1000_Door5',
-            'world.doors[0].open': 0, 'world.doors[0].locked': 0})
+            'world.doors[0].open': 0, 'world.doors[0].locked': 0,
+            'world.party_count': 1, 'world.party[0].hp': 9,
+            'world.party[0].max_hp': 9})
         os.remove(os.path.join(original, 'checkpoint-w.json'))
         with self.assertRaisesRegex(ValueError, 'checkpoint-w.json'):
             realinput.make_expectations(self.actions, original, 'test')
@@ -1036,10 +1041,20 @@ class CheckpointExpectationTest(unittest.TestCase):
         expect = realinput.make_expectations(self.actions, original, 'test')
         run = os.path.join(self.tmp, 'run')
         self.dump(run, 'gender')
-        moved = dict(self.WORLD, party=[{'id': 1, 'x': 2000, 'y': 900}])
+        moved = dict(self.WORLD, party=[dict(self.WORLD['party'][0],
+                                             x=2000, y=900, facing=2)])
         self.dump(run, 'w', screen='world', world=moved)
         self.assertEqual(realinput.check_checkpoints(self.actions, run,
                                                      expect), [])
+        # A party member hurt, or one more member, is not what the
+        # original reached.
+        hurt = dict(self.WORLD, party=[dict(self.WORLD['party'][0], hp=4),
+                                       dict(self.WORLD['party'][0], id=2)])
+        self.dump(run, 'w', screen='world', world=hurt)
+        self.assertEqual(
+            realinput.check_checkpoints(self.actions, run, expect),
+            ['checkpoint w: world.party[0].hp is 4, expected 9',
+             'checkpoint w: world.party_count is 2, expected 1'])
         # The Gender click was lost: no race, and the run is elsewhere.
         self.dump(run, 'gender', race=0)
         self.dump(run, 'w', screen='connection')
@@ -1115,6 +1130,57 @@ class CheckpointExpectationTest(unittest.TestCase):
         self.assertIn('chargen_replay', found)
         self.assertIn('world_entry', found)
         self.assertIn('walk_and_talk', found)
+
+
+class EngineMemoryCapTest(unittest.TestCase):
+    """The engine runs of play.py --vm linux (realinput.run_scenario) and
+    of oracle.py replay compare (run_ours) go under the memory cap engine
+    tests run with (M1/M2 review item 11)."""
+
+    def which(self, name):
+        return '/usr/bin/' + name
+
+    def test_memory_capped(self):
+        from unittest import mock
+        with mock.patch.object(realinput.shutil, 'which', self.which):
+            self.assertEqual(realinput.memory_capped(['/b/iwd2r'], {}), [
+                'systemd-run', '--user', '--scope', '-q', '-p',
+                'MemoryMax=8G', '-p', 'MemorySwapMax=0', '--', '/b/iwd2r'])
+            self.assertIn('MemoryMax=4G', realinput.memory_capped(
+                ['/b/iwd2r'], {'IWD2R_TEST_MEMORY_MAX': '4G'}))
+        with mock.patch.object(realinput.shutil, 'which', lambda n: None):
+            with self.assertRaisesRegex(RuntimeError, 'memory cap'):
+                realinput.memory_capped(['/b/iwd2r'], {})
+
+    def test_run_ours_runs_under_the_cap(self):
+        from unittest import mock
+        seen = []
+
+        class Proc:
+            def __init__(self, argv, **kw):
+                seen.append((argv, kw['env']['IWD2R_SEED']))
+
+            def wait(self, timeout=None):
+                return 0
+
+        script = os.path.join(ROOT, 'scenarios', 'chargen_replay.txt')
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(oracle.subprocess, 'Popen', Proc), \
+                mock.patch.object(oracle.dataview, 'make_view',
+                                  lambda game, path: path), \
+                mock.patch.object(oracle.dataview, 'remove_view',
+                                  lambda view: None), \
+                mock.patch.object(oracle, 'finish_replay',
+                                  lambda *a: 0), \
+                mock.patch.object(realinput.shutil, 'which', self.which), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(oracle.run_ours('/b/iwd2r', tmp, script, [],
+                                             7, 5, 30, tmp, 'ours'), 0)
+        limit = os.environ.get('IWD2R_TEST_MEMORY_MAX') or '8G'
+        self.assertEqual(seen, [(['systemd-run', '--user', '--scope', '-q',
+                                  '-p', 'MemoryMax=' + limit, '-p',
+                                  'MemorySwapMax=0', '--', '/b/iwd2r'],
+                                 '7')])
 
 
 class SandboxWsbTest(unittest.TestCase):
@@ -1543,7 +1609,10 @@ class LabelsTest(unittest.TestCase):
     def test_committed_extra_labels_parse_and_are_not_ours(self):
         path = os.path.join(ROOT, 'tools', 'ghidra', 'extra_labels.txt')
         extra = labels.extra(path)
-        self.assertTrue(extra)
+        # The file may be empty: its last name (CGameSprite::Shatter,
+        # 0x70A810) left when src/ came to define it. What it holds must
+        # parse, be unique and not be ours.
+        self.assertIsInstance(extra, list)
         ours = {a for a, _ in labels.ours(os.path.join(ROOT, 'src'))}
         self.assertEqual([a for a, _ in extra if a in ours], [])
         self.assertEqual(len({a for a, _ in extra}), len(extra))
@@ -4356,8 +4425,11 @@ class OracleReplayCompareTest(unittest.TestCase):
             self.assertEqual(minischema.validate(dump, schema), [], path)
 
     def test_screens(self):
+        # Every screen the M1 and M2 scenarios pass through (Party
+        # Formation is single_player).
         self.assertEqual(oracle.load_screens(),
-                         ['connection', 'create_char', 'world'])
+                         ['chapter', 'connection', 'create_char',
+                          'single_player', 'world'])
         enum = self.schema()['properties']['screen']['enum']
         for screen in oracle.load_screens():
             self.assertIn(screen, enum)
@@ -4542,6 +4614,143 @@ class OracleReplayCompareTest(unittest.TestCase):
             2, 0, 1, [], {'enabled': 3, 'outside': 0}),
             ['result: DIFFERENT: 2 differences; a run failed (original 0, '
              'ours 1)'])
+        # With the periodic dumps (compare_frames' counts).
+        self.assertEqual(oracle.compare_verdict(
+            0, 0, 0, [], {'enabled': 3, 'outside': 0, 'frames': 150,
+                          'frames_outside': 1}),
+            ['result: MATCH at 3 of 3 checkpoints and 150 of 150 periodic '
+             'dumps',
+             'note: 1 periodic dump differed outside the enabled screens'])
+
+    def write_frames(self, folder, dumps):
+        os.makedirs(folder, exist_ok=True)
+        for frame, dump in dumps.items():
+            with open(os.path.join(folder, 'frame-%d.json' % frame),
+                      'w') as f:
+                json.dump(dict(dump, frame=frame), f)
+
+    def test_compare_frames(self):
+        # M1/M2 review item 2: walk_and_talk's dialog had Reig, not Jon,
+        # speak Jon's state between two checkpoints that both matched.
+        screens = ['connection', 'create_char', 'world']
+        with tempfile.TemporaryDirectory() as tmp:
+            a = os.path.join(tmp, 'original')
+            b = os.path.join(tmp, 'ours')
+            self.write_frames(a, {30: self.dump('connection'),
+                                  60: self.dump('create_char', rng=5),
+                                  90: self.dump('single_player', rng=1),
+                                  120: self.dump('world', rng=6),
+                                  150: self.dump('world', rng=6),
+                                  180: self.dump('world'),
+                                  210: self.dump('world')})
+            self.write_frames(b, {30: self.dump('connection', au=29),
+                                  60: self.dump('create_char', rng=7),
+                                  90: self.dump('single_player', rng=2),
+                                  120: self.dump('world', rng=8),
+                                  150: self.dump('world', rng=8),
+                                  180: self.dump('world')})
+            # Not a frame file: ignored.
+            self.write_dumps(os.path.join(a, 'x'), {})
+            with open(os.path.join(b, 'frame-x.json'), 'w') as f:
+                f.write('{}')
+            # A checkpoint's entry does not cover a frame; frame-N and "*"
+            # do.
+            known = [{'field': 'rng_state', 'checkpoint': 'frame-120',
+                      'reason': 'r', 'evidence': '0x72DE60'},
+                     {'field': 'rng_state', 'checkpoint': 'world',
+                      'reason': 'r', 'evidence': '0x72DE60'}]
+            counts = {}
+            lines, failures, hits = oracle.compare_frames(a, b, screens,
+                                                          known, counts)
+            self.assertEqual(failures, 2)
+            self.assertEqual(counts, {'frames': 5, 'frames_outside': 1})
+            self.assertEqual([h[:4] for h in hits],
+                             [('frame-120', 'rng_state', 6, 8)])
+            self.assertEqual(lines, [
+                'periodic dumps: 6 on both sides, 5 on an enabled screen',
+                'frame 60 (create_char): DIFFERENT',
+                '  DIFF rng_state: original 5, ours 7',
+                'frame 90 (single_player): different, screen not enabled',
+                '  diff rng_state: original 1, ours 2',
+                'frame 120 (world): match',
+                '  KNOWN rng_state: original 6, ours 8 (r; evidence '
+                '0x72DE60)',
+                'frame 150 (world): DIFFERENT',
+                '  DIFF rng_state: original 6, ours 8',
+                'note: 1 periodic dump only on the original (frame 210)'])
+            # A "*" entry covers every frame.
+            star = [dict(known[0], checkpoint='*')]
+            lines, failures, hits = oracle.compare_frames(a, b, screens,
+                                                          star)
+            self.assertEqual(failures, 0)
+            self.assertEqual([h[0] for h in hits], [
+                'frame-60', 'frame-90', 'frame-120', 'frame-150'])
+            # An unreadable dump fails; no dumps at all is no failure.
+            with open(os.path.join(b, 'frame-180.json'), 'w') as f:
+                f.write('{')
+            lines, failures, hits = oracle.compare_frames(a, b, screens,
+                                                          star)
+            self.assertEqual(failures, 1)
+            self.assertIn('frame 180: UNREADABLE on our side', lines)
+            empty = os.path.join(tmp, 'empty')
+            self.assertEqual(oracle.compare_frames(empty, empty, screens,
+                                                   []),
+                             (['periodic dumps: 0 on both sides, 0 on an '
+                               'enabled screen'], 0, []))
+
+    def test_replay_compare_fails_on_a_periodic_dump(self):
+        from unittest import mock
+        names = [a['name'] for a in realinput.load_scenario(
+            os.path.join(ROOT, 'scenarios', 'chargen_replay.txt'))
+            if a['op'] == 'checkpoint']
+
+        def fake_run(speaker, ours=False):
+            def run(*args, **kw):
+                # record_original(script, actions, seed, timeout,
+                # dump_every, run_dir, subdir, ...); run_ours has exe and
+                # game first.
+                run_dir, subdir = args[7:9] if ours else args[5:7]
+                out = os.path.join(run_dir, subdir)
+                self.write_dumps(out, {n: self.dump('create_char')
+                                       for n in names})
+                world = dict(self.dump('world'),
+                             world={'dialog': {'speaker': speaker}})
+                self.write_frames(out, {30: self.dump('create_char'),
+                                        60: world})
+                return 0
+            return run
+
+        def compare(our_speaker):
+            game = tempfile.mkdtemp(dir=self.tmp)
+            out = io.StringIO()
+            with mock.patch.object(oracle, 'RUNS_DIR', self.tmp), \
+                    mock.patch.object(oracle, 'ensure_vanilla',
+                                      lambda: game), \
+                    mock.patch.object(oracle, 'prepare_replay_ini',
+                                      lambda g: None), \
+                    mock.patch.object(oracle, 'record_original',
+                                      fake_run(786444)), \
+                    mock.patch.object(oracle, 'run_ours',
+                                      fake_run(our_speaker, True)), \
+                    contextlib.redirect_stdout(out):
+                code = oracle.replay_compare(types.SimpleNamespace(
+                    scenario='chargen_replay', seed=1, timeout=None,
+                    dump_every=30, no_build=True, host=False))
+            return code, out.getvalue()
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp = self._tmp.name
+        code, out = compare(786444)
+        self.assertEqual(code, 0, out)
+        self.assertIn('result: MATCH at %d of %d checkpoints and 2 of 2 '
+                      'periodic dumps' % (len(names), len(names)), out)
+        code, out = compare(983055)
+        self.assertEqual(code, 1, out)
+        self.assertIn('frame 60 (world): DIFFERENT\n  DIFF '
+                      'world.dialog.speaker: original 786444, ours 983055',
+                      out)
+        self.assertIn('result: DIFFERENT: 1 difference', out)
 
     def test_run_arguments(self):
         for args in (['--seed', '-1'], ['--seed', '4294967296'],

@@ -2847,9 +2847,7 @@ void CInfGame::Unmarshal(BYTE* pGame, LONG nGame, BOOLEAN bProgressBarInPlace)
             pWorldScreen->SetNewViewSize(rViewSize, FALSE);
             pWorldScreen->GetManager()->InvalidateRect(NULL);
         } else if ((pHeader->m_dwFlags & 0x40) != 0) {
-            // TODO: Incomplete. The original also stores `rViewSize.bottom`
-            // at CScreenWorld + 0x11FC, which CScreenWorld.h does not declare
-            // (outside this stream's files).
+            pWorldScreen->field_11FC = rViewSize.bottom;
             pWorldScreen->field_11F4 = 0;
             pBottomPanel->m_bActive = FALSE;
             pLeftPanel->m_ptOrigin.x = pLeftPanel->m_ptBaseOrigin.x;
@@ -8002,13 +8000,14 @@ void CInfGame::SetupCharacters(BOOLEAN bProgressBarInPlace)
                 ptStart = ruleTables.GetStartPoint(nCharacterSlot);
                 nStartRotation = ruleTables.GetStartRotation(nCharacterSlot);
             } else if (pNetwork->m_bConnectionEstablished) {
-                // TODO: Incomplete. The original asks the area's search map
-                // for the nearest open square to this one (0x548B80 on
-                // `pArea->m_search`, with the sprite's terrain table and the
-                // animation's personal space; not in our tree yet). A new
-                // single-player game takes the branch above.
-                ptStart.x = (m_multiplayerSettings.m_ptAreaStart.x / CPathSearch::GRID_SQUARE_SIZEX) * CPathSearch::GRID_SQUARE_SIZEX;
-                ptStart.y = (m_multiplayerSettings.m_ptAreaStart.y / CPathSearch::GRID_SQUARE_SIZEY) * CPathSearch::GRID_SQUARE_SIZEY;
+                BYTE nPersonalSpace = pSprite->m_animation.GetPersonalSpace();
+                CPoint ptOpen = pArea->m_search.GetNearestOpenSquare(CPoint(m_multiplayerSettings.m_ptAreaStart.x / CPathSearch::GRID_SQUARE_SIZEX,
+                                                                         m_multiplayerSettings.m_ptAreaStart.y / CPathSearch::GRID_SQUARE_SIZEY),
+                    pSprite->GetTerrainTable(),
+                    nPersonalSpace,
+                    -1);
+                ptStart.x = ptOpen.x * CPathSearch::GRID_SQUARE_SIZEX;
+                ptStart.y = ptOpen.y * CPathSearch::GRID_SQUARE_SIZEY;
             } else {
                 ptStart.x = -1;
                 ptStart.y = -1;

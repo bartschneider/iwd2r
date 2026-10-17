@@ -11,7 +11,6 @@
 #include "CGameSprite.h"
 #include "CInfGame.h"
 #include "CMessage.h"
-#include "CResDLG.h"
 #include "CScreenCreateChar.h"
 #include "CScreenWorld.h"
 #include "ScreenLayout.h"
@@ -260,36 +259,6 @@ int ShownReplies(CGameDialogSprite& dialog)
     return count;
 }
 
-// Keeps a demanded resource and puts back one byte patched in its data
-// when the test case leaves, by a failed REQUIRE too.
-class DemandedResource {
-public:
-    explicit DemandedResource(CRes* pRes)
-        : m_pRes(pRes)
-    {
-    }
-    ~DemandedResource()
-    {
-        if (m_pByte != NULL) {
-            *m_pByte = m_original;
-        }
-        m_pRes->Release();
-    }
-    void Patch(BYTE* pByte, BYTE value)
-    {
-        m_pByte = pByte;
-        m_original = *pByte;
-        *pByte = value;
-    }
-    DemandedResource(const DemandedResource&) = delete;
-    DemandedResource& operator=(const DemandedResource&) = delete;
-
-private:
-    CRes* m_pRes;
-    BYTE* m_pByte = NULL;
-    BYTE m_original = 0;
-};
-
 void RunMessages()
 {
     g_pBaldurChitin->GetMessageHandler()->AsynchronousUpdate();
@@ -351,8 +320,9 @@ TEST_CASE("dialog: Hedron's opening conversation shows three responses and ends 
     // empties m_file (0x483994) after Load set it, as in the original.
     CHECK(dialog.m_file == "");
 
-    // StartDialog opens the dialog exactly when a start condition holds for
-    // Hedron (CGameDialogSprite::StartDialog walks the ordered states).
+    // State 0's start condition, NumTimesTalkedTo(0), holds for Hedron
+    // (CGameSprite::EvaluateStatusTrigger 0x731B30), so StartDialog opens
+    // the dialog (CGameDialogSprite::StartDialog walks the ordered states).
     BOOL bAnyHolds = FALSE;
     for (INT n = 0; n < dialog.m_dialogEntriesOrdered.GetSize(); n++) {
         CTypedPtrList<CPtrList, CAITrigger*> triggerList;
@@ -361,42 +331,10 @@ TEST_CASE("dialog: Hedron's opening conversation shows three responses and ends 
             break;
         }
     }
+    CHECK(bAnyHolds);
 
     BOOL bStarted = pWorld->StartDialog(pCharacter, pHedron, FALSE, FALSE);
-    REQUIRE(bStarted == bAnyHolds);
-
-    // The file's bytes as the resource manager holds them, kept demanded
-    // so StartDialog's Load reads the same buffer.
-    CResHelper<CResDLG, 1011> file;
-    file.SetResRef(CResRef("10HEDRON"), TRUE, TRUE);
-    REQUIRE(file.GetRes() != NULL);
-    BYTE* pData = static_cast<BYTE*>(file.GetRes()->Demand());
-    REQUIRE(pData != NULL);
-    DemandedResource demanded(file.GetRes());
-    const DWORD nSize = file.GetRes()->m_nResSizeActual;
-    const std::string sTrigger = "NumTimesTalkedTo(0)";
-    BYTE* pTrigger = std::search(pData, pData + nSize, sTrigger.begin(), sTrigger.end());
-    REQUIRE(pTrigger != pData + nSize);
-
-    if (!bStarted) {
-        // No start condition held, so the dialog closed again
-        // (EndDialog(FALSE, FALSE)): the world screen is back.
-        CHECK(pWorld->field_EA4 == -1);
-        CHECK(dialog.field_54 == 0);
-        CHECK_FALSE(dialog.m_waitingForResponse);
-        WARN("NumTimesTalkedTo(0) did not hold: CGameSprite::EvaluateStatusTrigger is not ported yet; "
-             "the rest runs with an unknown trigger name in state 0, a condition without triggers");
-
-        // An unknown trigger name is a parse error that adds no trigger, so
-        // state 0's condition holds (CAICondition::Hold of an empty list).
-        //
-        // TODO(remove): this patch of the cached DLG exists only until
-        // CGameSprite::EvaluateStatusTrigger is ported (the movement
-        // stream) and runs only when !bStarted; `demanded` puts the byte
-        // back (docs/followups.md).
-        demanded.Patch(&pTrigger[15], 'X');
-        REQUIRE(pWorld->StartDialog(pCharacter, pHedron, FALSE, FALSE));
-    }
+    REQUIRE(bStarted);
 
     // The dialog panel is up and the game paused; CMessageEnterDialog makes
     // the entry show (EnterDialog, Handle). The dump reads `active` from
@@ -472,6 +410,51 @@ TEST_CASE("dialog: Hedron's opening conversation shows three responses and ends 
     CHECK(pWorld->field_EA4 == -1);
     CHECK_FALSE(pWorld->m_bPaused);
     CHECK(ShownReplies(dialog) == 0);
+}
+
+TEST_CASE("dialog: Reload gives a state in another creature's dialog to that creature: Reig's 10JON is Jon", "[dialog][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CGameSprite* pCharacter = NewGameInStartArea(cre);
+    REQUIRE(pGame->m_pGameAreaMaster != NULL);
+    CGameSprite* pReig = FindSpeaker(pGame->m_pGameAreaMaster, "10REIG");
+    CGameSprite* pJon = FindSpeaker(pGame->m_pGameAreaMaster, "10JON");
+    REQUIRE(pReig != NULL);
+    REQUIRE(pJon != NULL);
+
+    CGameDialogSprite dialog;
+    dialog.Load(CResRef("10REIG"), pCharacter->GetId(), pReig->GetId());
+    REQUIRE(dialog.m_talkerIndex == pReig->GetId());
+
+    // No file, or the talker's own: the talker is kept (0x4829BD, 0x48258F).
+    dialog.Reload(CResRef(""), pReig);
+    CHECK(dialog.m_talkerIndex == pReig->GetId());
+    dialog.Reload(CResRef("10REIG"), pReig);
+    CHECK(dialog.m_talkerIndex == pReig->GetId());
+
+    // Reig's state 4 goes on to Jon's state 2 in 10JON: the nearest creature
+    // of Reig's area with that dialog (GetNearestDialogMatch 0x46C460, from
+    // 0x482570/0x482586) speaks it, as in the original's walk_and_talk
+    // (speaker 786444 at frames 3570 and 3600).
+    dialog.Reload(CResRef("10JON"), pReig);
+    CHECK(dialog.m_talkerIndex == pJon->GetId());
+    CHECK(dialog.m_characterIndex == pCharacter->GetId());
+
+    // And Jon's state 2 back to Reig's 5.
+    dialog.Reload(CResRef("10REIG"), pJon);
+    CHECK(dialog.m_talkerIndex == pReig->GetId());
 }
 
 TEST_CASE("dialog: TogglePauseGame pauses and unpauses the world and returns TRUE", "[dialog][data]")
