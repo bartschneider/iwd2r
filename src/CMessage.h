@@ -318,6 +318,7 @@ public:
     void TimeSynchBroadcast(ULONG nGameTime, BOOLEAN bCompressTime);
     void TimeChangeToServer(ULONG deltaTime);
     BOOLEAN OnLeaveAreaLuaRequestToServer(INT nMsgFrom, BYTE* pByteMessage, DWORD dwSize);
+    BYTE sub_438710(LONG nCharacterId, LONG nTriggerId, CString sAreaName);
     BOOLEAN OnLeaveAreaNameRequestToServer(INT nMsgFrom, BYTE* pByteMessage, DWORD dwSize);
     void CleanLeaveAreaLuaRequest();
     void CleanLeaveAreaNameRequest();

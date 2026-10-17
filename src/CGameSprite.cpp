@@ -21376,10 +21376,9 @@ SHORT CGameSprite::LeaveAreaName()
     // this one) is near, the area left behind is saved, the destination is
     // loaded and the party is put at its entry point.
     //
-    // NOTE: The multiplayer parts are not ported: iwd2r has no multiplayer
-    // (the permit request 0x74DA2E-0x74DB22 through CBaldurMessage 0x438710;
-    // the engine changes for the session 0x74DBC9-0x74DC2F are kept, they
-    // test the connection).
+    // A single-player game is a host session (the null provider): the
+    // branches that test the connection or the host run. Only what needs a
+    // remote player is not ported (NOTEs).
     CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
     CGameObjectArray* pObjectArray = pGame->GetObjectArray();
     LONG nTriggerId = m_curAction.m_specificID;
@@ -21647,8 +21646,35 @@ SHORT CGameSprite::LeaveAreaName()
 
     pObjectArray->ReleaseDeny(m_id, CGameObjectArray::THREAD_ASYNCH, INFINITE);
 
-    // NOTE: 0x74DA2E-0x74DB22, the multiplayer permit request for a party
-    // required region, is not ported (see above).
+    // 0x74DA2E: a party required region in a session (a single-player game
+    // is one: the null provider's host) goes through CBaldurMessage
+    // 0x438710; the host makes the whole party's transition there (CInfGame
+    // 0x5C4AD0) and answers 1. The answer 2 waits (a client's pending
+    // request), 0 is an error; any other answer goes on below.
+    // NOTE: These returns keep the region's share (as the original).
+    if (bPartyRequired && g_pChitin->cNetwork.m_bConnectionEstablished == TRUE) {
+        BYTE nAnswer = g_pBaldurChitin->GetBaldurMessage()->sub_438710(m_id, nTriggerId, CString(sArea));
+
+        CGameObject* pObject;
+        do {
+            rc = pObjectArray->GetDeny(m_id, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE);
+        } while (rc == CGameObjectArray::SHARED);
+
+        // NOTE: The BYTE at 0x84CFDF (2).
+        if (nAnswer == 2) {
+            return ACTION_NORMAL;
+        }
+
+        if (nAnswer == 0) {
+            return ACTION_ERROR;
+        }
+
+        if (nAnswer == 1) {
+            return ACTION_DONE;
+        }
+
+        pObjectArray->ReleaseDeny(m_id, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+    }
 
     if (pGame->GetArea(sArea) != NULL && !bPartyRequired) {
         if (!pGame->GetArea(sArea)->field_AE6) {
@@ -21832,7 +21858,7 @@ SHORT CGameSprite::LeaveAreaName()
             UTIL_ASSERT(FALSE);
 
             pGame->SelectToolbar();
-            delete pOffsets;
+            delete[] pOffsets;
             return ACTION_ERROR;
         }
 
@@ -21873,7 +21899,7 @@ SHORT CGameSprite::LeaveAreaName()
             UTIL_ASSERT(FALSE);
 
             pGame->SelectToolbar();
-            delete pOffsets;
+            delete[] pOffsets;
             return ACTION_ERROR;
         }
 
@@ -21899,7 +21925,7 @@ SHORT CGameSprite::LeaveAreaName()
     }
 
     // 0x74F45C
-    delete pOffsets;
+    delete[] pOffsets;
 
     if ((bNotLoaded == TRUE && bPartyRequired) || bMarshalled == TRUE) {
         g_pChitin->cProgressBar.m_nActionProgress = g_pChitin->cProgressBar.m_nActionTarget;
