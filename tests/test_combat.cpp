@@ -2602,6 +2602,63 @@ TEST_CASE("combat: a party member's kill gives the party the goblin's experience
     ClearMessages();
 }
 
+// CGameSprite::HandlePersistantEffects (0x733200), which ProcessEffectList
+// runs while the world timer is active (0x72FBA7-0x72FBC3): each persistent
+// effect's AIUpdate, and the finished ones removed. A colour pulse of period
+// 3 (as Magic Missile's glow on its target) takes its first tick, goes on
+// at the second (counter 2 < 3) and ends at the third (counter 3, compared
+// as incremented at 0x4C1777; ours ended a tick early), clearing the colour
+// effects and setting field_562C so the effect list's saving throws are
+// rolled again (first_fight's dead goblin at frame 5511).
+TEST_CASE("combat: a colour pulse runs its period and asks for the effect list again", "[combat][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    Fight fight;
+    std::string why;
+    if (!SetUpFight(fight, why)) {
+        if (why.find("CHR") != std::string::npos) {
+            SKIP("[iwd2r-skip] " + why);
+        }
+        FAIL(why);
+    }
+    CGameSprite* pGoblin = fight.pGoblin;
+    pGoblin->m_persistantEffects.RemoveAll();
+
+    CPersistantEffectColorEffect* pPulse = new CPersistantEffectColorEffect();
+    pPulse->m_effectFinalRed = 200;
+    pPulse->m_effectFinalGreen = 100;
+    pPulse->m_effectFinalBlue = 50;
+    pPulse->m_effectDegreeRed = 0;
+    pPulse->m_effectDegreeGreen = 0;
+    pPulse->m_effectDegreeBlue = 0;
+    pPulse->m_undo = TRUE;
+    pPulse->m_colorEffect = 1;
+    pPulse->m_period = 3;
+    pGoblin->m_persistantEffects.AddTail(pPulse);
+    pGoblin->field_562C = 0;
+
+    CHECK(pGoblin->HandlePersistantEffects(1) == TRUE);
+    REQUIRE(pGoblin->m_persistantEffects.GetCount() == 1);
+    CHECK(pPulse->m_counter == 1);
+    CHECK(pPulse->m_effectDegreeRed == 200 / 3);
+    CHECK(pGoblin->HandlePersistantEffects(1) == TRUE);
+    REQUIRE(pGoblin->m_persistantEffects.GetCount() == 1);
+    CHECK(pPulse->m_counter == 2);
+    CHECK(pPulse->m_effectDegreeRed == 2 * (200 / 3));
+    CHECK(pGoblin->field_562C == 0);
+
+    CHECK(pGoblin->HandlePersistantEffects(1) == TRUE);
+    CHECK(pGoblin->m_persistantEffects.IsEmpty());
+    CHECK(pGoblin->field_562C == 1);
+    ClearMessages();
+}
+
 // CGameAnimationTypeMonsterIcewind::SetSequence (0x6E7DF0), the goblin's
 // animation, which takes the sprite's sequence numbers: DIE (5) takes the
 // DE cells and draws no frame (its jump table entry, 0x6E7F0F, ends at

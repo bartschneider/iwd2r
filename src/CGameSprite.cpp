@@ -15111,8 +15111,7 @@ BOOL CGameSprite::ProcessEffectList()
             m_bAllowEffectListCall = TRUE;
 
             if (g_pBaldurChitin->GetObjectGame()->GetWorldTimer()->m_active) {
-                // TODO: Incomplete: HandlePersistantEffects (0x733200, with
-                // 1; 0x72FBA7-0x72FBC3), which src/ does not define yet.
+                HandlePersistantEffects(1);
             }
 
             return bResult;
@@ -15491,6 +15490,63 @@ void CGameSprite::AddEffect(CGameEffect* pEffect, BYTE list, BOOL noSave, BOOL i
     if (!g_pBaldurChitin->GetObjectGame()->GetWorldTimer()->m_active && immediateApply) {
         ProcessEffectList();
     }
+}
+
+// 0x51E8B0
+//
+// The regenerating persistent effects of the derived stats (+0xE74), as
+// HandlePersistantEffects walks the sprite's own; it stops at once when an
+// effect leaves the sprite dead.
+// NOTE: The original's list type has a DWORD after the list (+0x1C, the
+// derived stats' +0x570) that it increments after a whole pass; ours does
+// not model it, and nothing in src/ reads it.
+static void UpdateRegeneratedPersistantEffects(CTypedPtrList<CPtrList, CPersistantEffect*>& list, CGameSprite* pSprite, LONG deltaT)
+{
+    POSITION pos = list.GetHeadPosition();
+    while (pos != NULL) {
+        POSITION posOld = pos;
+        CPersistantEffect* pEffect = list.GetNext(pos);
+        if (pEffect->m_deleted) {
+            list.RemoveAt(posOld);
+            delete pEffect;
+            continue;
+        }
+
+        pEffect->AIUpdate(pSprite, deltaT);
+        if ((pSprite->m_baseStats.m_generalState & STATE_DEAD) != 0) {
+            return;
+        }
+
+        if (pEffect->m_deleted || pEffect->m_done) {
+            list.RemoveAt(posOld);
+            delete pEffect;
+        }
+    }
+}
+
+// 0x733200
+BOOL CGameSprite::HandlePersistantEffects(LONG deltaT)
+{
+    POSITION pos = m_persistantEffects.GetHeadPosition();
+    while (pos != NULL) {
+        POSITION posOld = pos;
+        CPersistantEffect* pEffect = m_persistantEffects.GetNext(pos);
+        if (pEffect->m_deleted) {
+            m_persistantEffects.RemoveAt(posOld);
+            delete pEffect;
+            continue;
+        }
+
+        pEffect->AIUpdate(this, deltaT);
+        if (pEffect->m_deleted || pEffect->m_done) {
+            m_persistantEffects.RemoveAt(posOld);
+            delete pEffect;
+        }
+    }
+
+    UpdateRegeneratedPersistantEffects(m_derivedStats.m_cRegeneratedPersistantEffectList, this, deltaT);
+
+    return TRUE;
 }
 
 // 0x733290
