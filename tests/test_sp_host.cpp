@@ -334,10 +334,9 @@ TEST_CASE("sp-host: the delete-area poll starts on one rand and deletes the empt
     // the resolve half in the same call, 0x693a4c-0x693a5e), deletes the
     // area and draws exactly one rand, the slot roll.
     iwd2r_srand(1);
-    const unsigned int nStateBefore = iwd2r_rand_state();
     pWorld->DeleteAreaMultiplayer();
-    const unsigned int nStateAfterStart = iwd2r_rand_state();
-    CHECK(nStateAfterStart != nStateBefore);
+    // Exactly one draw: the state after it is 214013*1 + 2531011.
+    CHECK(iwd2r_rand_state() == 2745024u);
 
     CHECK(pSecond->field_AE6 == 0);
     CHECK(pMessage->m_bDeleteAreaPolling == FALSE);
@@ -348,10 +347,12 @@ TEST_CASE("sp-host: the delete-area poll starts on one rand and deletes the empt
     CHECK(pGame->m_pGameAreaMaster == pFirst);
 
     // With the second area gone there is no candidate: one roll per idle
-    // call, and no poll starts.
-    const unsigned int nStateIdle = iwd2r_rand_state();
+    // call, and no poll starts. The state has not moved since the pinned
+    // draw above, and the idle call advances it by exactly one more draw
+    // (2745024*214013 + 2531011).
+    CHECK(iwd2r_rand_state() == 2745024u);
     pWorld->DeleteAreaMultiplayer();
-    CHECK(iwd2r_rand_state() != nStateIdle);
+    CHECK(iwd2r_rand_state() == 3357800067u);
     CHECK(pMessage->m_bDeleteAreaPolling == FALSE);
 
     ClearPartySlot(pSprite);
@@ -381,6 +382,7 @@ TEST_CASE("sp-host: the poll guards and the ballot run on the host", "[sp-host][
     // A poll the host starts itself resolves: the local player's empty
     // vote is the whole ballot, and a living party member is enough.
     REQUIRE(pMessage->StartDeleteAreaPoll(CString("AR1000"), FALSE) == TRUE);
+    CHECK(pMessage->GetDeleteAreaString() == CString("AR1000"));
     CHECK(pMessage->CanResolveDeleteAreaPoll() == TRUE);
     CHECK(pMessage->DeleteAreaBallotResult() == TRUE);
 
@@ -392,6 +394,7 @@ TEST_CASE("sp-host: the poll guards and the ballot run on the host", "[sp-host][
 
     // Cancelling resets the poll and runs on the host.
     REQUIRE(pMessage->CancelDeleteAreaPoll() == TRUE);
+    CHECK(pMessage->GetDeleteAreaString() == CString(""));
     CHECK(pMessage->m_bDeleteAreaPolling == FALSE);
     CHECK(pMessage->m_dwDeleteAreaTimeout == 0);
 

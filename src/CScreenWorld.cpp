@@ -4253,7 +4253,7 @@ void CScreenWorld::DeleteArea(CGameArea* pArea)
     CAreaFile areaFile;
 
     // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenWorld.cpp
-    // __LINE__: 9770
+    // __LINE__: 9297
     UTIL_ASSERT(pArea != NULL);
 
     CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
@@ -4302,7 +4302,7 @@ void CScreenWorld::DeleteArea(CGameArea* pArea)
             if (g_pChitin->cNetwork.GetServiceProvider() == CNetwork::SERV_PROV_NULL) {
                 // The next visible area is the area of the first party
                 // member found; the original releases that member's share
-                // twice (0x69409D and 0x6940BB).
+                // twice (0x694098 and 0x6940BB).
                 BOOL bMoved = FALSE;
                 for (SHORT nCharacter = 0; nCharacter < 6 && bMoved == FALSE; nCharacter++) {
                     LONG nCharacterId = pGame->GetFixedOrderCharacterId(nCharacter);
