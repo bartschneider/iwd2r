@@ -18104,9 +18104,8 @@ void CMessage89::Run()
             return;
         }
 
-        // TODO: Incomplete. The original calls the summon limit table's
-        // CSummonLimitStruct_Unsummon (Icewind586B70 0x586DC0, not ported)
-        // with the sprite.
+        // 0x586DC0
+        Icewind586B70::Instance()->sub_586DC0(static_cast<CGameSprite*>(pObject));
     }
 
     g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(m_spriteId,

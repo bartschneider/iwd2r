@@ -121,6 +121,117 @@ public:
     CProjectileArea84F580();
 };
 
+// Cloudkill (projectile type 187, vtable 0x84F310): CloudKX, up to 13
+// CloudKR clouds and lingering CloudKA ones, 150 around, 1000 ticks.
+class CProjectileArea84F310 : public CProjectileArea {
+public:
+    CProjectileArea84F310();
+};
+
+// Acid Fog (projectile type 212, vtable 0x84F3AC): DFogX, up to 20 DFogR
+// clouds and lingering DFogA ones, 150 around, 1100 ticks. Its secondary
+// projectiles need the caster in the game and go to dead and excluded
+// sprites too.
+class CProjectileArea84F3AC : public CProjectileArea {
+public:
+    CProjectileArea84F3AC();
+    /* 0098 */ void CreateSecondary(LONG nTargetId) override;
+};
+
+// Entangle (projectile type 235, vtable 0x84F4E4): EntangX and lingering
+// EntangA vines, 200 around, 1000 ticks.
+class CProjectileArea84F4E4 : public CProjectileArea {
+public:
+    CProjectileArea84F4E4();
+};
+
+// Fire Seeds, Flaming Oil (projectile type 270, vtable 0x84F61C): flies as
+// MagicStn and bursts in FSeedsX, 70 around.
+class CProjectileArea84F61C : public CProjectileArea {
+public:
+    CProjectileArea84F61C();
+};
+
+// Fire Storm, Lightning Bolt (projectile type 92, vtable 0x84F6B8): FStormX
+// and lingering FStormA flames, 200 around, 105 ticks.
+class CProjectileArea84F6B8 : public CProjectileArea {
+public:
+    CProjectileArea84F6B8();
+};
+
+// Flame Strike (projectile type 67, vtable 0x84F754): a FStrikH column on the
+// target point, then the area, 140 around.
+class CProjectileArea84F754 : public CProjectileArea {
+public:
+    CProjectileArea84F754();
+    /* 006C */ void Fire(CGameArea* pArea, LONG source, LONG target, CPoint targetPos, LONG nHeight, SHORT nType) override;
+};
+
+// Grease (projectile type 101, vtable 0x84F7F0): GreaseX and lingering
+// GreaseA, 100 around, 1000 ticks.
+class CProjectileArea84F7F0 : public CProjectileArea {
+public:
+    CProjectileArea84F7F0();
+};
+
+// Hold Person (projectile type 190, vtable 0x84F9C4): EnchanX, 150 around;
+// it holds every sprite found up to 1 to 4 humanoids.
+class CProjectileArea84F9C4 : public CProjectileArea {
+public:
+    CProjectileArea84F9C4();
+    /* 0094 */ void ApplyToTargets(std::list<LONG>& targets) override;
+};
+
+// Sleep (projectile type 42, vtable 0x84FEA4): EnchanX, 150 around; it puts
+// to sleep creatures below level 5, up to 2 to 8 levels.
+class CProjectileArea84FEA4 : public CProjectileArea {
+public:
+    CProjectileArea84FEA4();
+    /* 0094 */ void ApplyToTargets(std::list<LONG>& targets) override;
+};
+
+// Stinking Cloud (projectile type 95, vtable 0x8501B0): SCloudX, up to 13
+// SCloudR clouds and lingering SCloudA ones, 100 around, 1000 ticks.
+class CProjectileArea8501B0 : public CProjectileArea {
+public:
+    CProjectileArea8501B0();
+};
+
+// Web (projectile type 64, vtable 0x8502E8): WebX and lingering WebA
+// strands, 150 around, 1500 ticks.
+class CProjectileArea8502E8 : public CProjectileArea {
+public:
+    CProjectileArea8502E8();
+};
+
+// A breath (projectile type 349, vtable 0x85072C): it arrives on its
+// seventh tick, DBreatH and lingering DBreatA, 200 around.
+class CProjectileArea85072C : public CProjectileArea {
+public:
+    CProjectileArea85072C();
+    /* 000C */ void AIUpdate() override;
+    /* 0070 */ void OnArrival() override;
+
+    /* 065E */ LONG m_nTicks;
+};
+
+// Turn Undead (projectile type 376, vtable 0x850A38): 300 around; it turns
+// or destroys the undead the caster's turning check beats.
+class CProjectileArea850A38 : public CProjectileArea {
+public:
+    CProjectileArea850A38();
+    /* 0094 */ void ApplyToTargets(std::list<LONG>& targets) override;
+};
+
+// Dispel Magic (projectile type 246, vtable 0x850C0C): AbjuraX, 150 around;
+// it removes a sprite's Globe of Invulnerability (effect 450) before the
+// secondary projectile.
+class CProjectileArea850C0C : public CProjectileArea {
+public:
+    CProjectileArea850C0C();
+    /* 0098 */ void CreateSecondary(LONG nTargetId) override;
+};
+
 // The area projectile of Static Charge (effect 264, vtable 0x850078): it
 // strikes the first target found, else the caster's spell ends.
 class CProjectileArea850078 : public CProjectileArea {
