@@ -1004,11 +1004,14 @@ class CheckpointExpectationTest(unittest.TestCase):
 
     WORLD = {'area': 'AR1000', 'party': [{'id': 1, 'x': 2414, 'y': 897,
                                           'hp': 9, 'max_hp': 9,
-                                          'facing': 4}],
+                                          'facing': 4, 'morale': 10}],
              'doors': [{'name': 'AR1000_Door5', 'open': 0, 'locked': 0}],
              'dialog': {'active': 1, 'speaker': 1048592, 'entry': 34,
                         'responses': 5},
-             'explored_count': 560, 'creatures': 36}
+             'explored_count': 560, 'creatures': 36,
+             'enemy_creatures': [{'id': 7, 'hp': 4, 'max_hp': 7,
+                                  'timed_effects': 2,
+                                  'equiped_effects': 1}]}
 
     def test_expected_fields_leave_out_timing_and_position(self):
         original = os.path.join(self.tmp, 'original')
@@ -1030,7 +1033,11 @@ class CheckpointExpectationTest(unittest.TestCase):
             'world.doors[0].name': 'AR1000_Door5',
             'world.doors[0].open': 0, 'world.doors[0].locked': 0,
             'world.party_count': 1, 'world.party[0].hp': 9,
-            'world.party[0].max_hp': 9})
+            'world.party[0].max_hp': 9, 'world.party[0].morale': 10,
+            'world.enemy_creatures[0].hp': 4,
+            'world.enemy_creatures[0].max_hp': 7,
+            'world.enemy_creatures[0].timed_effects': 2,
+            'world.enemy_creatures[0].equiped_effects': 1})
         os.remove(os.path.join(original, 'checkpoint-w.json'))
         with self.assertRaisesRegex(ValueError, 'checkpoint-w.json'):
             realinput.make_expectations(self.actions, original, 'test')
@@ -1056,6 +1063,15 @@ class CheckpointExpectationTest(unittest.TestCase):
             realinput.check_checkpoints(self.actions, run, expect),
             ['checkpoint w: world.party[0].hp is 4, expected 9',
              'checkpoint w: world.party_count is 2, expected 1'])
+        # An enemy hurt, or one more effect on it, is not either.
+        hurtEnemy = dict(self.WORLD, enemy_creatures=[
+            dict(self.WORLD['enemy_creatures'][0], hp=1, timed_effects=3)])
+        self.dump(run, 'w', screen='world', world=hurtEnemy)
+        self.assertEqual(
+            realinput.check_checkpoints(self.actions, run, expect),
+            ['checkpoint w: world.enemy_creatures[0].hp is 1, expected 4',
+             'checkpoint w: world.enemy_creatures[0].timed_effects is 3, '
+             'expected 2'])
         # The Gender click was lost: no race, and the run is elsewhere.
         self.dump(run, 'gender', race=0)
         self.dump(run, 'w', screen='connection')
@@ -3659,7 +3675,10 @@ class MiniSchemaTest(unittest.TestCase):
         with open(os.path.join(ROOT, 'oracle', 'replay', 'schema.json')) as f:
             schema = json.load(f)
         member = {'id': 65536, 'x': 1046, 'y': 1258, 'hp': 9, 'max_hp': 12,
-                  'skills': [0] * 64, 'action': 0, 'modal': 0, 'facing': 4}
+                  'skills': [0] * 64, 'action': 0, 'modal': 0, 'facing': 4,
+                  'morale': 10}
+        enemy = {'id': 196613, 'hp': 4, 'max_hp': 7, 'timed_effects': 2,
+                 'equiped_effects': 1}
         dump = {'frame': 1500, 'checkpoint': 'world', 'screen': 'world',
                 'rng_state': 1,
                 'globals': {'au_counter': 1498, 'fullscreen': 0,
@@ -3673,12 +3692,14 @@ class MiniSchemaTest(unittest.TestCase):
                                      'locked': 1}],
                           'dialog': {'active': 1, 'speaker': 3, 'entry': 0,
                                      'responses': 2},
-                          'explored_count': 12, 'creatures': 3},
+                          'explored_count': 12, 'creatures': 3,
+                          'enemy_creatures': [enemy]},
                 'game': None, 'slots': None}
         self.assertEqual(minischema.validate(dump, schema), [])
         dump['world']['party'].append(
             {'id': 131073, 'x': None, 'y': None, 'hp': None, 'max_hp': None,
-             'skills': None, 'action': None, 'modal': None, 'facing': None})
+             'skills': None, 'action': None, 'modal': None, 'facing': None,
+             'morale': None})
         self.assertEqual(minischema.validate(dump, schema), [])
         dump['world']['party'][0] = dict(member, hp='9')
         self.assertEqual(minischema.validate(dump, schema), [
@@ -3695,6 +3716,21 @@ class MiniSchemaTest(unittest.TestCase):
         dump['world']['dialog'] = {'active': 0, 'speaker': -1, 'entry': -1,
                                    'responses': 0}
         self.assertEqual(minischema.validate(dump, schema), [])
+        dump['world']['enemy_creatures'][0]['hp'] = '4'
+        self.assertEqual(minischema.validate(dump, schema), [
+            "$.world.enemy_creatures[0].hp: '4' is not of type integer "
+            "or null"])
+        dump['world']['enemy_creatures'][0]['hp'] = 4
+        dump['world']['enemy_creatures'].append(dict(enemy, id=196614,
+                                                     hp=None, max_hp=None,
+                                                     timed_effects=None,
+                                                     equiped_effects=None))
+        self.assertEqual(minischema.validate(dump, schema), [])
+        del dump['world']['enemy_creatures'][1]['timed_effects']
+        self.assertEqual(minischema.validate(dump, schema), [
+            "$.world.enemy_creatures[1]: missing required property "
+            "'timed_effects'"])
+        dump['world']['enemy_creatures'][1] = enemy
         del dump['world']['creatures']
         self.assertEqual(minischema.validate(dump, schema), [
             "$.world: missing required property 'creatures'"])
