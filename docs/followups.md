@@ -169,7 +169,6 @@ The crisp-text requirement is met by `Program Options/Text Renderer=scalable` (s
 ## Character, spellbook and options screens (from project 3, milestone 5, screens-char)
 
 - Blocked stubs in src/CScreenCharacter.cpp: `UpdateEquipmentInformation` 0x5DE2C0 and the character text export `sub_5E4560` need CGameSprite 0x723EA0, 0x73CF10 and 0x73D080, CRuleTables 0x547020 and CItem 0x4E9840 (all but 0x723EA0 are ported on p3/combat, none on first); their comments name them. (`CheckDropSlot` 0x5E6A30 is ported.)
-- `CGameSprite::GetAC` is a stub returning 0, so the character screen shows AC 0 (milestone 3 combat).
 - `CGameSprite.h` lacks `BYTE field_7282[11]`, so level-up always rolls hit points; the original skips that roll (and its `rand()`) in one rare drained-level case. No test pins level-up's rand count.
 
 ## Inventory, containers and stores (from project 3, milestone 5, screens-items)
@@ -188,7 +187,7 @@ The crisp-text requirement is met by `Program Options/Text Renderer=scalable` (s
 ## UI controls and visual systems (from project 3, milestone 5, ui-misc)
 
 - `CGameSprite::CheckQuickLists` (0x71ABA0) is ported and called by spontaneous casting (0x716770), the inventory, spellbook and level-up screens, Swing (0x739B60), the three refreshes of the Spell action (0x740270) and `sub_75E330` (M1/M2 review fix round).
-- `CScreenWorld::OnKeyDown` (0x6872D0) is ported (ui-misc round 2) but for three TODOs: the cheat keys (0x68956A-0x68BC5D, Ctrl with `field_156`, which nothing sets), the keymap's spell keys 53-371 (0x6893FD-0x689502: CGameSprite 0x719180 and the shared table at 0x8B4EB0) and keymap 21's CGameSprite 0x75E150.
+- `CScreenWorld::OnKeyDown` (0x6872D0) is ported (ui-misc round 2) but for two TODOs: the cheat keys (0x68956A-0x68BC5D, Ctrl with `field_156`, which nothing sets) and the keymap's spell keys 53-371 (0x6893FD-0x689502: CGameSprite 0x719180 and the shared table at 0x8B4EB0). Keymap 21 now calls the ported `CGameSprite::EquipRanged` (0x75E150) as at 0x6893E8.
 - The text character sheet export (`CScreenCharacter::sub_5E4560`, 0x5EFFD0) ends in the original's assert at the spell lists (it passes a list index where `CGameSprite::GetSpells` wants a class); ours keeps it (ruling P4-10). No vanilla button starts it (GUIREC panel 2 has no control 51).
 - Movie subtitles (`CBaldurProjector` 0x43E300, 0x43EA70, 0x43EC20, 0x43EED0) are not ported: Bink playback needs binkw32 (absent on Linux) and the subtitles blit DirectDraw surfaces.
 - The Lua console's Enter (0x77BF30, `CLUAConsole` 0x5838A0) is not ported; iwd2r has no Lua runtime.
@@ -204,3 +203,4 @@ These block TODOs in the combat stream's ports; each is in a file or function th
 - `CGameSprite` 0x71F860, the ammunition's and launcher's effects on a missile's projectile, is not ported: Swing's missile branch fires without them.
 - `CGameArea` 0x46E130, which gives an effect to the area's creatures (target types 4-8), is not ported: FireSpell, FireSpellPoint, ForceSpell, ForceSpellPoint, Spell, Swing's melee effects and 0x755A70 drop those effects (TODOs).
 - The projectile class DecodeProjectile builds for type 304 is not ported, so it has no member at +0x356: the five spell and missile paths draw the type-304 `rand() % 1000000` for the fire message but do not store it in the projectile (TODOs).
+- The first_fight scenario ends at its `fight_done` checkpoint, so nothing after the fight is covered: loot pickup, corpse fade and the area's next spawn. A later scenario that runs past the fight (M4/M5) should pin them.

@@ -75,9 +75,19 @@ namespace {
                 + ", \"skills\": " + (m.sprite ? List(m.skills) : null)
                 + ", \"action\": " + (m.sprite ? Number(m.action) : null)
                 + ", \"modal\": " + (m.sprite ? Number(m.modal) : null)
-                + ", \"facing\": " + (m.sprite ? Number(m.facing) : null) + "}";
+                + ", \"facing\": " + (m.sprite ? Number(m.facing) : null)
+                + ", \"morale\": " + (m.sprite ? Number(m.morale) : null) + "}";
         }
         party += "]";
+        std::string enemies = "[";
+        for (size_t i = 0; i < w.enemyCreatures.size(); ++i) {
+            const EnemyCreature& e = w.enemyCreatures[i];
+            enemies += std::string(i ? ", " : "") + "{\"id\": " + Number(e.id)
+                + ", \"hp\": " + Number(e.hp) + ", \"max_hp\": " + Number(e.maxHp)
+                + ", \"timed_effects\": " + Number(e.timedEffects)
+                + ", \"equiped_effects\": " + Number(e.equipedEffects) + "}";
+        }
+        enemies += "]";
         std::string doors = "[";
         for (size_t i = 0; i < w.doors.size(); ++i) {
             const Door& d = w.doors[i];
@@ -90,7 +100,8 @@ namespace {
             + ", \"entry\": " + Number(g.entry) + ", \"responses\": " + Number(g.responses) + "}";
         return "{\"area\": " + JsonString(w.area) + ", \"party\": " + party + ", \"doors\": " + doors
             + ", \"dialog\": " + dialog + ", \"explored_count\": " + Number(w.exploredCount)
-            + ", \"creatures\": " + Number(w.creatures) + "}";
+            + ", \"creatures\": " + Number(w.creatures)
+            + ", \"enemy_creatures\": " + enemies + "}";
     }
 
     // recorder.cpp's GameJson: one member's values, or nulls without a

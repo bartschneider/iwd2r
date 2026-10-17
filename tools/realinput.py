@@ -324,7 +324,12 @@ EXPECT_FIELDS = ('screen', 'chargen.race', 'chargen.subrace',
                  'world.area', 'world.dialog.active', 'world.dialog.speaker',
                  'world.dialog.entry', 'world.dialog.responses',
                  'world.doors', 'world.party_count', 'world.party[].hp',
-                 'world.party[].max_hp')
+                 'world.party[].max_hp', 'world.party[].morale',
+                 'world.enemy_creatures[].hp',
+                 'world.enemy_creatures[].max_hp',
+                 'world.enemy_creatures[].timed_effects',
+                 'world.enemy_creatures[].equiped_effects',
+                 'game.members[].xp')
 LIST_INDEX = re.compile(r'\[\d+\]')
 
 
