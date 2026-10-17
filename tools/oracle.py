@@ -40,11 +40,11 @@ route and play.win_checkout) and builds the 32-bit runner iwd2r_oracle, the repl
 DLL with the windows-msvc-x86 preset.
 
 run copies the vanilla iwd2.exe (MD5 from oracle/loader/vanilla.json) to
-C:/Users/thier/iwd2r-oracle and runs the runner on it.
+%USERPROFILE%/iwd2r-oracle and runs the runner on it.
 
 Without --selftest it runs comparison cases: the case file named by --file,
 or every case file the runner lists, one fresh runner process per file. Each
-process writes <file>.json under C:/Users/thier/iwd2r-oracle/out/<stamp>;
+process writes <file>.json under %USERPROFILE%/iwd2r-oracle/out/<stamp>;
 they are merged into runs/<stamp>/oracle.json and summarised. A case declared
 to fail (selftest/must_fail) is listed under expected_failures and one
 declared to crash (selftest/crash) under expected_crashes. A case declared
@@ -56,7 +56,7 @@ PENDING (ran 0 inputs). The run fails
 without its report.
 
 Before the cases run, the game files they read (TABLES) are extracted from the
-vanilla copy by tools/bif.py into C:/Users/thier/iwd2r-oracle/tables, which
+vanilla copy by tools/bif.py into %USERPROFILE%/iwd2r-oracle/tables, which
 the runner gets as --tables.
 
 --selftest checks the loader itself in six runs: the self-test, whose image
@@ -71,7 +71,7 @@ Each case file's runner gets --timeout 600: the runner itself kills its child
 process (through its job) and exits 10, reported as "timed out". Reports are
 rewritten after every case, so a killed run keeps its finished cases.
 
-vanilla builds C:/Users/thier/iwd2r-oracle/game, a vanilla copy of the game
+vanilla builds %USERPROFILE%/iwd2r-oracle/game, a vanilla copy of the game
 for the original engine: rsync of the real install (read only, never written),
 WeiDU's uninstall of every IWD2EE component run inside the copy, deletion of
 the IEex and IWD2EE files WeiDU does not track, and icewind2.ini's [Alias]
@@ -91,7 +91,7 @@ its working directory, a virtual clock, scenario input instead of the real
 mouse and keyboard, and the original srand seeded with --seed (default 1).
 It writes frame-<N>.json every --dump-every frames (default 30, 0 for none)
 and checkpoint-<NAME>.json at the scenario's checkpoint lines, under
-C:/Users/thier/iwd2r-oracle/replays/<stamp>, then moves them with
+%USERPROFILE%/iwd2r-oracle/replays/<stamp>, then moves them with
 recorder.log, status.txt and replay.json (the summary) to
 runs/<stamp>/replay/. Every dump is validated against
 oracle/replay/schema.json (tools/minischema.py). The injector kills the game
@@ -162,7 +162,7 @@ it from the load screen's first slot (scenarios/pending/load_game.txt
 does, from the main menu); a run that saves over it keeps that save too.
 A scenario whose header says "# saves: load" refuses to run without
 --load ("# saves: empty" is the default, said where it matters). The
-vanilla copy's own saves wait in C:/Users/thier/iwd2r-oracle/mpsave-aside
+vanilla copy's own saves wait in %USERPROFILE%/iwd2r-oracle/mpsave-aside
 meanwhile and are put back after the run, or by the next recording when a
 run died; our engine's data view has a private copy of mpsave, emptied in
 place. Both sides keep the same seed and frame alignment as a new-game
@@ -190,9 +190,9 @@ every run succeeded; the result is in runs/<stamp>/crossload.json.
 
 The vanilla copy is shared by every worktree: replay record, replay
 compare and replay crossload each hold
-C:/Users/thier/iwd2r-oracle/replay.lock for the whole run, and building
+%USERPROFILE%/iwd2r-oracle/replay.lock for the whole run, and building
 the copy holds vanilla.lock beside it (tools/filelock.py). A recording
-also holds C:/Users/thier/iwd2r-vm/sandbox.lock (one sandbox at a time,
+also holds %USERPROFILE%/iwd2r-vm/sandbox.lock (one sandbox at a time,
 shared with play.py --vm windows), always taken inside replay.lock, from
 before the copy's saves go aside to after they are back, in --host mode
 too: play.py --vm windows copies the copy into its game cache under it. A
@@ -224,12 +224,13 @@ import check_evidence  # noqa: E402
 import dataview  # noqa: E402
 import filelock  # noqa: E402
 import minischema  # noqa: E402
+import winhome  # noqa: E402
 
 EVIDENCE_DIR = os.path.join(ROOT, 'docs', 'evidence')
 VERSIONS = os.path.join(HERE, 'ghidra', 'versions.json')
 VANILLA_JSON = os.path.join(ROOT, 'oracle', 'loader', 'vanilla.json')
 VANILLA_EXE = os.path.expanduser('~/.local/share/iwd2r/vanilla/iwd2.exe')
-ORACLE_DIR = '/mnt/c/Users/thier/iwd2r-oracle'
+ORACLE_DIR = winhome.WIN_HOME + '/iwd2r-oracle'
 INSTALL = '/mnt/c/Games/Icewind Dale II'
 INSTALL_WIN = 'C:\\Games\\Icewind Dale II'
 GAME_DIR = ORACLE_DIR + '/game'

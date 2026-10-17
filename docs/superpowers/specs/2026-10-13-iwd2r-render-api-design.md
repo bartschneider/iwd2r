@@ -102,7 +102,7 @@ INI keys under `[Program Options]`: `Presenter=auto|gpu|classic` (auto: gpu when
 
 Project 4 owns `platform/present*`, `platform/shaders/`, `src/ScreenLayout*`, `src/render/`, `src/CVid*`, `src/CInfinity.cpp`'s render functions, `src/CVisibilityMap.cpp`'s blits, the mouse-mapping functions in `platform/window.cpp`, and `tools/shaders.py`. Project 3 owns the rest of `src/`; its M5 rendering stubs are now section 3's list here. A change needed across the boundary goes through the coordinator.
 
-Execution follows the project 3 model: streams in their own worktrees (`/home/thier/iwd2-re-worktrees/p4-<stream>`), the wave 0 locks for shared resources, one review per stream batch and a whole-project review at the end. The streams are presenter (4.1 and the shaders), layout and composition (4.2), render API and guards (4.3), and the stub ports; the first three are independent in files and run in parallel.
+Execution follows the project 3 model: streams in their own worktrees (`~/iwd2-re-worktrees/p4-<stream>`), the wave 0 locks for shared resources, one review per stream batch and a whole-project review at the end. The streams are presenter (4.1 and the shaders), layout and composition (4.2), render API and guards (4.3), and the stub ports; the first three are independent in files and run in parallel.
 
 ## 9. Risks
 
