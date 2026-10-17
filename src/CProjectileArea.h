@@ -157,6 +157,22 @@ public:
     CProjectileArea84F7F0();
 };
 
+// Hold Person (projectile type 190, vtable 0x84F9C4): EnchanX, 150 around;
+// it holds every sprite found up to 1 to 4 humanoids.
+class CProjectileArea84F9C4 : public CProjectileArea {
+public:
+    CProjectileArea84F9C4();
+    /* 0094 */ void ApplyToTargets(std::list<LONG>& targets) override;
+};
+
+// Sleep (projectile type 42, vtable 0x84FEA4): EnchanX, 150 around; it puts
+// to sleep creatures below level 5, up to 2 to 8 levels.
+class CProjectileArea84FEA4 : public CProjectileArea {
+public:
+    CProjectileArea84FEA4();
+    /* 0094 */ void ApplyToTargets(std::list<LONG>& targets) override;
+};
+
 // Stinking Cloud (projectile type 95, vtable 0x8501B0): SCloudX, up to 13
 // SCloudR clouds and lingering SCloudA ones, 100 around, 1000 ticks.
 class CProjectileArea8501B0 : public CProjectileArea {

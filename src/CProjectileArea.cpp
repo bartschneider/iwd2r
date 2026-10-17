@@ -644,6 +644,115 @@ CProjectileArea84F7F0::CProjectileArea84F7F0()
 
 // -----------------------------------------------------------------------------
 
+// 0x572E60
+CProjectileArea84F9C4::CProjectileArea84F9C4()
+    // NOTE: The radius is the WORD at 0x84F1BC (256), then 150.
+    : CProjectileArea(256)
+{
+    m_explosion1.m_animation = "EnchanX";
+    m_explosion1.m_sound = "ARE_M21";
+    m_explosion1.m_visualEffect.sub_586A90(TRUE);
+
+    m_nTriggerInterval = 10000;
+    m_nTriggerCountdown = 0;
+    m_nHitModulus = 10;
+    m_nDuration = 45;
+    m_nRadius = 150;
+}
+
+// 0x572F90
+void CProjectileArea84F9C4::ApplyToTargets(std::list<LONG>& targets)
+{
+    // The sprites in the list up to the 1st to 4th humanoid.
+    std::list<LONG> held;
+    INT nHumanoids = rand() % 4;
+    INT nFound = 0;
+
+    for (std::list<LONG>::iterator it = targets.begin(); it != targets.end(); ++it) {
+        CGameObject* pObject;
+        if (g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(*it,
+                CGameObjectArray::THREAD_ASYNCH,
+                &pObject,
+                INFINITE)
+            != CGameObjectArray::SUCCESS) {
+            continue;
+        }
+
+        if (pObject->GetObjectType() == CGameObject::TYPE_SPRITE) {
+            held.push_back(*it);
+            if (IcewindMisc::IsHumanoid(static_cast<CGameSprite*>(pObject)) == TRUE
+                && ++nFound == nHumanoids + 1) {
+                g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(*it,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    INFINITE);
+                break;
+            }
+        }
+
+        g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(*it,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+    }
+
+    CProjectileArea::ApplyToTargets(held);
+}
+
+// -----------------------------------------------------------------------------
+
+// 0x574300
+CProjectileArea84FEA4::CProjectileArea84FEA4()
+    // NOTE: The radius is the WORD at 0x84F1BC (256), then 150.
+    : CProjectileArea(256)
+{
+    m_explosion1.m_animation = "EnchanX";
+    m_explosion1.m_sound = "ARE_M21";
+    m_explosion1.m_visualEffect.sub_586A90(TRUE);
+
+    m_nTriggerInterval = 10000;
+    m_nTriggerCountdown = 0;
+    m_nHitModulus = 10;
+    m_nDuration = 45;
+    m_nRadius = 150;
+}
+
+// 0x574430
+void CProjectileArea84FEA4::ApplyToTargets(std::list<LONG>& targets)
+{
+    // Sprites below level 5, in order, while their levels fit in 2 to 8
+    // (rand() % 4 twice, plus 2).
+    std::list<LONG> asleep;
+    INT nFirst = rand() % 4;
+    INT nSecond = rand() % 4;
+    INT nLevels = nSecond + 2 + nFirst;
+
+    for (std::list<LONG>::iterator it = targets.begin(); it != targets.end(); ++it) {
+        CGameObject* pObject;
+        if (g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(*it,
+                CGameObjectArray::THREAD_ASYNCH,
+                &pObject,
+                INFINITE)
+            != CGameObjectArray::SUCCESS) {
+            continue;
+        }
+
+        if (pObject->GetObjectType() == CGameObject::TYPE_SPRITE) {
+            BYTE nLevel = static_cast<CGameSprite*>(pObject)->m_derivedStats.GetLevel();
+            if (nLevel < 5 && nLevels - nLevel >= 0) {
+                asleep.push_back(*it);
+                nLevels -= nLevel;
+            }
+        }
+
+        g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(*it,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+    }
+
+    CProjectileArea::ApplyToTargets(asleep);
+}
+
+// -----------------------------------------------------------------------------
+
 // 0x574B80
 CProjectileArea8501B0::CProjectileArea8501B0()
     // NOTE: The radius is the WORD at 0x84F1BC (256), then 100.
