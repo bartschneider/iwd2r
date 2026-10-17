@@ -2676,6 +2676,48 @@ class OracleMirrorTest(unittest.TestCase):
             f.write(b'{"md5": "2"}')
         oracle.linux_mirror(self.game, self.mirror, force=True)
         self.assertEqual(self.read('Data/AR1000.bif'), b'NEW!')
+        self.assertFalse(os.path.exists(self.mirror + '.tmp'))
+
+    def test_a_copy_cut_short_is_made_again(self):
+        # A copy that stopped part way (left beside the mirror) is not
+        # taken for the mirror and is replaced by a whole one.
+        from unittest import mock
+        partial = self.mirror + '.tmp'
+        os.makedirs(partial)
+        with open(os.path.join(partial, 'vanilla.ok'), 'wb') as f:
+            f.write(b'{"md5": "1"}')
+        real_copytree = shutil.copytree
+        calls = []
+
+        def failing_copytree(src, dst, *args, **kwargs):
+            calls.append(dst)
+            if len(calls) == 1:
+                raise OSError('disk full')
+            return real_copytree(src, dst, *args, **kwargs)
+
+        with mock.patch.object(oracle.shutil, 'copytree', failing_copytree):
+            with self.assertRaises(OSError):
+                oracle.linux_mirror(self.game, self.mirror, force=True)
+            self.assertFalse(os.path.exists(self.mirror))
+            oracle.linux_mirror(self.game, self.mirror, force=True)
+        self.assertEqual(calls[:2], [partial, partial])
+        self.assertEqual(self.read('Data/AR1000.bif'), b'BIFF')
+        self.assertEqual(self.read('vanilla.ok'), b'{"md5": "1"}')
+        self.assertFalse(os.path.exists(partial))
+
+    def test_an_ini_the_install_lost_goes_from_the_mirror(self):
+        with open(os.path.join(self.game, 'Party.ini'), 'wb') as f:
+            f.write(b'[Party]\r\n')
+        oracle.linux_mirror(self.game, self.mirror, force=True)
+        self.assertEqual(self.read('Party.ini'), b'[Party]\r\n')
+        os.remove(os.path.join(self.game, 'Party.ini'))
+        oracle.linux_mirror(self.game, self.mirror, force=True)
+        self.assertFalse(os.path.exists(os.path.join(self.mirror, 'Party.ini')))
+        # Other files the install lost stay until the next marker.
+        os.remove(os.path.join(self.game, 'CHITIN.KEY'))
+        oracle.linux_mirror(self.game, self.mirror, force=True)
+        self.assertEqual(self.read('CHITIN.KEY'), b'KEY V1  ')
+        self.assertEqual(self.read('icewind2.ini'), b'[Program Options]\r\n')
 
 
 class OracleSafeTargetTest(unittest.TestCase):

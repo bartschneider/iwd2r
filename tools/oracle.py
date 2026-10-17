@@ -1718,22 +1718,39 @@ def _update_mirror(game, mirror):
 
     marker = read(os.path.join(game, MARKER))
     if marker is None or read(os.path.join(mirror, MARKER)) != marker:
-        shutil.rmtree(mirror, ignore_errors=True)
-        shutil.copytree(game, mirror, ignore=lambda d, names: [
+        # Copied beside the mirror and renamed into place, so a copy cut
+        # short (a full disk, an interrupted run) never passes for a whole
+        # one: the marker is in the mirror only once all of it is.
+        partial = mirror + '.tmp'
+        shutil.rmtree(partial, ignore_errors=True)
+        shutil.copytree(game, partial, ignore=lambda d, names: [
             n for n in names if d == game and n.lower() in skipped])
+        shutil.rmtree(mirror, ignore_errors=True)
+        os.rename(partial, mirror)
         return mirror
     copied_dirs = {n.lower() for n in rules['copied_dirs']}
     patterns = [p.lower() for p in rules['copied_files']]
-    for name in os.listdir(game):
+
+    def copied_file(name):
+        return any(fnmatch.fnmatchcase(name.lower(), p) for p in patterns)
+
+    names = os.listdir(game)
+    for name in names:
         low = name.lower()
         src = os.path.join(game, name)
         dst = os.path.join(mirror, name)
         if low in copied_dirs and os.path.isdir(src):
             shutil.rmtree(dst, ignore_errors=True)
             shutil.copytree(src, dst, symlinks=True)
-        elif os.path.isfile(src) and any(fnmatch.fnmatchcase(low, p)
-                                         for p in patterns):
+        elif os.path.isfile(src) and copied_file(name):
             shutil.copy2(src, dst)
+    # An INI file the install no longer has (a replay's INI backup restored
+    # without it) goes from the mirror too.
+    kept = {n.lower() for n in names}
+    for name in os.listdir(mirror):
+        path = os.path.join(mirror, name)
+        if name.lower() not in kept and copied_file(name) and os.path.isfile(path):
+            os.remove(path)
     return mirror
 
 
@@ -1748,14 +1765,20 @@ def run_ours(exe, game, script, actions, seed, timeout, dump_every, run_dir,
     shutil.copyfile(script, os.path.join(out_dir, 'scenario.txt'))
     # A private view of the game folder: engines at once do not share its
     # temp/cache folders, and it is never written (IWD2R_KEEP_DATA_VIEW=1
-    # keeps the view in the run folder).
-    view = dataview.make_view(linux_mirror(game),
-                              os.path.join(run_dir, 'data-' + subdir))
+    # keeps the view in the run folder). The caller holds REPLAY_LOCK
+    # (cmd_replay_compare), so no other replay rewrites or restores game's
+    # INI files while linux_mirror copies them and make_view links them.
+    data = linux_mirror(game)
+    view = dataview.make_view(data, os.path.join(run_dir, 'data-' + subdir))
     env = our_env(os.environ, view, script, out_dir, seed, dump_every)
     print('ours %s (%d actions), seed %d, timeout %d s, dumps every %d '
           'frames' % (os.path.relpath(script, ROOT), len(actions), seed,
                       timeout, dump_every))
-    print('running %s headless on %s' % (os.path.relpath(exe, ROOT), game))
+    if data == game:
+        print('running %s headless on %s' % (os.path.relpath(exe, ROOT), game))
+    else:
+        print('running %s headless on %s (the Linux mirror of %s)'
+              % (os.path.relpath(exe, ROOT), data, game))
     log_path = os.path.join(out_dir, 'log.txt')
     with open(log_path, 'w') as log:
         proc = subprocess.Popen([exe], cwd=ROOT, env=env, stdout=log,
