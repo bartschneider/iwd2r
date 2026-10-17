@@ -1911,7 +1911,7 @@ class EvidenceFormatTest(unittest.TestCase):
             oracle.parse_decompile(SCRIPT_OUTPUT)[0], '12.1.4')
         self.assertTrue(text.startswith(
             '---\naddress: 0x5845D0\nname: IcewindMisc::Roll\n'
-            'oracle_case:\nghidra_version: 12.1.4\n---\n'))
+            'oracle_case:\nkind:\nghidra_version: 12.1.4\n---\n'))
         self.assertEqual(check_evidence.front_matter(text)['address'],
                          '0x5845D0')
         for heading in ('## Decompiled (Ghidra)', '## Callers',
