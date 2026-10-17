@@ -539,6 +539,82 @@ CProjectileArea84F310::CProjectileArea84F310()
 
 // -----------------------------------------------------------------------------
 
+// 0x5714E0
+CProjectileArea84F3AC::CProjectileArea84F3AC()
+    // NOTE: The radius is the WORD at 0x84F1BC (256), then 150.
+    : CProjectileArea(256)
+{
+    m_explosion1.m_animation = "DFogX";
+    m_explosion1.m_sound = "RNG_M01";
+    m_explosion1.m_visualEffect.sub_586A90(TRUE);
+
+    m_explosion2.m_animation = "DFogR";
+    m_explosion2.m_visualEffect.sub_586A90(TRUE);
+    m_explosion2.field_2C = TRUE;
+    m_explosion2.field_2E = 20;
+
+    m_explosion3.m_animation = "DFogA";
+    m_explosion3.m_sound = "ARE_M02";
+    m_explosion3.m_visualEffect.sub_586A90(TRUE);
+
+    m_nTriggerInterval = 10;
+    m_nHitModulus = 10;
+    m_explosion3.field_34 = TRUE;
+    m_explosion3.field_35 = TRUE;
+    m_nTriggerCountdown = 0;
+    m_nDuration = 1100;
+    field_1D8 = 1;
+    m_nRadius = 150;
+}
+
+// 0x5716B0
+void CProjectileArea84F3AC::CreateSecondary(LONG nTargetId)
+{
+    CGameObjectArray* pArray = g_pBaldurChitin->GetObjectGame()->GetObjectArray();
+
+    CGameObject* pSource;
+    if (pArray->GetShare(m_sourceId, CGameObjectArray::THREAD_ASYNCH, &pSource, INFINITE) != CGameObjectArray::SUCCESS) {
+        return;
+    }
+
+    CGameObject* pTarget;
+    if (pArray->GetShare(nTargetId, CGameObjectArray::THREAD_ASYNCH, &pTarget, INFINITE) != CGameObjectArray::SUCCESS) {
+        pArray->ReleaseShare(m_sourceId, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+        return;
+    }
+
+    if (pTarget->GetObjectType() != CGameObject::TYPE_SPRITE) {
+        pArray->ReleaseShare(m_sourceId, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+        pArray->ReleaseShare(nTargetId, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+        return;
+    }
+
+    static_cast<CGameSprite*>(pTarget)->m_posOld = pTarget->GetPos();
+
+    CProjectile* pProjectile = CProjectile::DecodeProjectile(m_nSecondaryType + 1, NULL, 0);
+    pProjectile->m_sourceRes = m_sourceRes;
+    pProjectile->m_nSpellLevel = m_nSpellLevel;
+    pProjectile->m_fireSoundRef = CResRef("");
+
+    POSITION pos = m_effectList.GetHeadPosition();
+    while (pos != NULL) {
+        CGameEffect* pEffect = m_effectList.GetNext(pos);
+        pProjectile->AddEffect(pEffect->Copy());
+    }
+
+    // NOTE: The original looks the target up in the hit counts here
+    // (0x571885) and drops the result.
+    pProjectile->Fire(m_pArea, m_id, nTargetId, pTarget->GetPos(), 50, 0);
+
+    // NOTE: As in CProjectileArea::CreateSecondary, the original releases a
+    // share of the callback projectile it never took (0x5718D4).
+    pArray->ReleaseShare(m_callBackProjectile, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+    pArray->ReleaseShare(nTargetId, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+    pArray->ReleaseShare(m_sourceId, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+}
+
+// -----------------------------------------------------------------------------
+
 // 0x571CE0
 CProjectileArea84F4E4::CProjectileArea84F4E4()
     // NOTE: The radius is the WORD at 0x84F1BC (256), then 200.
@@ -806,6 +882,107 @@ CProjectileArea8502E8::CProjectileArea8502E8()
     m_nDuration = 1500;
     m_nRadius = 150;
 }
+
+// -----------------------------------------------------------------------------
+
+// 0x575EA0
+CProjectileArea85072C::CProjectileArea85072C()
+    // NOTE: The radius is the WORD at 0x84F1BC (256), then 200.
+    : CProjectileArea(256)
+{
+    m_nTicks = 0;
+
+    m_explosion1.m_animation = "DBreatH";
+    m_explosion1.m_sound = "ARE_M21";
+    m_explosion1.m_visualEffect.sub_586A90(TRUE);
+
+    m_explosion3.m_animation = "DBreatA";
+    m_explosion3.m_visualEffect.sub_586A90(TRUE);
+
+    m_nTriggerCountdown = 0;
+    field_1DE = FALSE;
+    m_explosion3.field_35 = TRUE;
+    m_explosion3.field_36 = TRUE;
+    m_explosion3.field_38 = 500;
+    m_nTriggerInterval = 10000;
+    m_nHitModulus = 10;
+    m_nDuration = 45;
+    m_nRadius = 200;
+}
+
+// 0x576040
+void CProjectileArea85072C::AIUpdate()
+{
+    // It arrives on its seventh tick and works as an area from then on.
+    m_nTicks++;
+    if (m_nTicks == 7) {
+        field_1DE = TRUE;
+        CProjectileArea::OnArrival();
+    }
+
+    if (m_nTicks > 6) {
+        CProjectileArea::AIUpdate();
+    }
+}
+
+// 0x799CA0
+void CProjectileArea85072C::OnArrival()
+{
+    // NOTE: An empty function; its own AIUpdate makes it arrive.
+}
+
+// -----------------------------------------------------------------------------
+
+// 0x577B20
+CProjectileArea850C0C::CProjectileArea850C0C()
+    // NOTE: The radius is the WORD at 0x84F1BC (256), then 150.
+    : CProjectileArea(256)
+{
+    m_fireSoundRef = CResRef("TRA_04A");
+    m_arrivalSoundRef = CResRef("CAS_P02");
+
+    m_explosion1.m_animation = "AbjuraX";
+    m_explosion1.m_sound = "ARE_M20";
+    m_explosion1.m_visualEffect.sub_586A90(TRUE);
+
+    m_nRadius = 150;
+}
+
+// 0x577C70
+void CProjectileArea850C0C::CreateSecondary(LONG nTargetId)
+{
+    CGameObject* pObject;
+    if (g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(nTargetId,
+            CGameObjectArray::THREAD_ASYNCH,
+            &pObject,
+            INFINITE)
+        != CGameObjectArray::SUCCESS) {
+        return;
+    }
+
+    if (pObject->GetObjectType() != CGameObject::TYPE_SPRITE) {
+        g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(nTargetId,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+        return;
+    }
+
+    // NOTE: Inlined CGameObject::InControl.
+    if (pObject->InControl()) {
+        CGameEffect* pEffect = IcewindMisc::CreateEffectRemoveAllOfType(pObject,
+            ICEWIND_CGAMEEFFECT_GLOBEOFINVULNERABILITY,
+            0);
+        static_cast<CGameSprite*>(pObject)->AddEffect(pEffect, CGameAIBase::EFFECT_LIST_TIMED, TRUE, TRUE);
+    }
+
+    g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(nTargetId,
+        CGameObjectArray::THREAD_ASYNCH,
+        INFINITE);
+
+    CProjectileArea::CreateSecondary(nTargetId);
+}
+
+// -----------------------------------------------------------------------------
 
 // 0x574970
 CProjectileArea850078::CProjectileArea850078()

@@ -128,6 +128,15 @@ public:
     CProjectileArea84F310();
 };
 
+// Acid Fog (projectile type 212, vtable 0x84F3AC): DFogX, up to 20 DFogR
+// clouds and lingering DFogA ones, 150 around, 1100 ticks. Its secondary
+// projectiles need the caster in the game and go to dead and excluded
+// sprites too.
+class CProjectileArea84F3AC : public CProjectileArea {
+public:
+    CProjectileArea84F3AC();
+    /* 0098 */ void CreateSecondary(LONG nTargetId) override;
+};
 
 // Entangle (projectile type 235, vtable 0x84F4E4): EntangX and lingering
 // EntangA vines, 200 around, 1000 ticks.
@@ -185,6 +194,26 @@ public:
 class CProjectileArea8502E8 : public CProjectileArea {
 public:
     CProjectileArea8502E8();
+};
+
+// A breath (projectile type 349, vtable 0x85072C): it arrives on its
+// seventh tick, DBreatH and lingering DBreatA, 200 around.
+class CProjectileArea85072C : public CProjectileArea {
+public:
+    CProjectileArea85072C();
+    /* 000C */ void AIUpdate() override;
+    /* 0070 */ void OnArrival() override;
+
+    /* 065E */ LONG m_nTicks;
+};
+
+// Dispel Magic (projectile type 246, vtable 0x850C0C): AbjuraX, 150 around;
+// it removes a sprite's Globe of Invulnerability (effect 450) before the
+// secondary projectile.
+class CProjectileArea850C0C : public CProjectileArea {
+public:
+    CProjectileArea850C0C();
+    /* 0098 */ void CreateSecondary(LONG nTargetId) override;
 };
 
 // The area projectile of Static Charge (effect 264, vtable 0x850078): it
