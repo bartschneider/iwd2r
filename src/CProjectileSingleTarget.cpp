@@ -36,6 +36,11 @@ CProjectileSingleTarget::CProjectileSingleTarget()
     m_randomMinY = 0;
     m_randomMaxY = 0;
     m_nStartHeight = 0;
+    field_1BE = FALSE;
+    field_1C2 = FALSE;
+    field_1D2 = 0;
+    field_1D8 = 0;
+    m_nDirection = 0;
     m_bLimitedLifetime = FALSE;
     m_nLifetime = 0x7FFF;
     // NOTE: No animation: the one difference from 0x578110.

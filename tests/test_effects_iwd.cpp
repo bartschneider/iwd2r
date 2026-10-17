@@ -12,6 +12,7 @@
 #include "CProjectileShaft.h"
 #include "CProjectileSingleTarget.h"
 #include "CProjectileSpellHit.h"
+#include "CProjectileSunray.h"
 #include "CScreenCreateChar.h"
 #include "CScreenWorld.h"
 #include "CSpell.h"
@@ -484,13 +485,21 @@ TEST_CASE("effects-iwd: visual spell hit (233) queues a CMessageFireProjectile a
     RemoveAdded(pArea);
     ClearMessages();
 
-    // The sunray type (57) still decodes to NULL: the message is queued and
-    // nothing is fired (the DEVIATION's NULL check).
+    // The sunray type (57) fires a CProjectileSunray of SunrayX without a
+    // sound; it delivers its (no) effects at once.
     pEffect = Decode(pSprite, ICEWIND_CGAMEEFFECT_VISUALSPELLHIT, 57, 0);
     CHECK(pEffect->ApplyEffect(pSprite) == FALSE);
     CHECK(pEffect->m_done == TRUE);
-    REQUIRE(handler.m_messageList.GetCount() == 1);
-    CHECK(Added(pArea).empty());
+    REQUIRE(handler.m_messageList.GetCount() == 2);
+    CProjectileSunray* pSunray = AddedOne<CProjectileSunray>(pArea);
+    REQUIRE(pSunray != nullptr);
+    CHECK(pSunray->m_animation.GetResRef() == CResRef("SunrayX"));
+    CHECK(pSunray->m_fireSoundRef == "");
+    CHECK(pSunray->m_nDuration == 325);
+    CHECK(pSunray->m_bTransparent == TRUE);
+    CHECK(pSunray->m_bRandomFrame == FALSE);
+    CHECK(pSunray->m_nState == CProjectileSunray::STATE_RISING);
+    RemoveAdded(pArea);
     ClearMessages();
 }
 

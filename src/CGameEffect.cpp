@@ -5629,11 +5629,9 @@ BOOL CGameEffectDeath::ApplyEffect(CGameSprite* pSprite)
         if (nShatterType != 0xFF) {
             if (pSprite->m_baseStats.m_hitPoints <= -30
                 && pGame->GetCharacterPortraitNum(pSprite->GetId()) != -1) {
-                // TODO: Incomplete. CGameSprite 0x70A810 (Shatter,
-                // nShatterType) is not in src/.
+                pSprite->Shatter(nShatterType);
             } else if (pSprite->m_baseStats.m_hitPoints <= -10) {
-                // TODO: Incomplete. CGameSprite 0x70A810 (Shatter,
-                // nShatterType) is not in src/.
+                pSprite->Shatter(nShatterType);
             }
         }
 

@@ -626,6 +626,7 @@ public:
     SHORT OneSwing();
     void sub_6F50A0();
     void sub_6F5330();
+    void Shatter(BYTE nType);
     static CString GetRaceString(BYTE nRace);
     SHORT DropInventory(BOOLEAN bCriticalOnly, CString sException);
     BOOL CheckIfUsedUp(SHORT nSlot, SHORT nAbility);
