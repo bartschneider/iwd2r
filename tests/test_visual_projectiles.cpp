@@ -21,6 +21,7 @@
 #include "CProjectileSunray.h"
 #include "CSpell.h"
 #include "CVidPalette.h"
+#include "IcewindCGameEffects.h"
 #include "engine_world.h"
 #include "msvc_rand.h"
 #include "render_surfaces.h"
@@ -443,8 +444,12 @@ TEST_CASE("visual projectiles: a shattering death throws two explosions", "[visu
     const DWORD nGore = pOptions->m_nGore;
     pOptions->m_nGore = 1;
 
-    // The stone shatter sets the die sequence first (CGameSprite::
-    // SetSequence draws one number), as the original does at 0x4AC907.
+    // The stone shatter sets the die sequence first, as the original does
+    // at 0x4AC907, but that draws nothing: CGameSprite::SetSequence's
+    // switch draws its rand (0x7077AE) for SEQ_ATTACK only (case 5 goes
+    // straight to the switch's exit, 0x7078BC), and the animation's case 5
+    // breaks at 0x6E7F0F instead of falling into TWITCH's random frame
+    // (vis-probe round 10; the first_fight replay pins the goblin's death).
     struct Shatter {
         DWORD dwFlags;
         COLORREF rgbStart;
@@ -452,7 +457,7 @@ TEST_CASE("visual projectiles: a shattering death throws two explosions", "[visu
     };
     const Shatter shatters[] = {
         { 0x80, RGB(235, 245, 245), 168 },
-        { 0x40, RGB(150, 150, 150), 1 + 168 },
+        { 0x40, RGB(150, 150, 150), 168 },
     };
     int n = 0;
     for (const Shatter& shatter : shatters) {
@@ -1673,4 +1678,551 @@ TEST_CASE("visual projectiles: a cloud explosion throws flying and lingering pie
     }
     CHECK(Draws(67, iwd2r_rand_state()) == nLived);
     pArea->SortLists();
+}
+
+namespace {
+
+// An area projectile type as DecodeProjectile (0x51EAF0) builds it: its
+// radius, its three explosion descriptions, its timing and its targets.
+struct AreaType {
+    WORD nType;
+    int nRadius;
+    const char* x;
+    const char* xSound;
+    const char* r;
+    LONG nMaxFlames;
+    const char* a;
+    const char* aSound;
+    BOOLEAN bWander;
+    BOOLEAN bRandom;
+    BOOLEAN bOnce;
+    LONG nChance;
+    LONG nDuration;
+    LONG nInterval;
+    BYTE nEnemyAlly; // 0: the default target type, ANYONE
+};
+
+const AreaType kAreaTypes[] = {
+    { 42, 150, "EnchanX", "ARE_M21", "", 0x7FFFFFFF, "", "", 0, 0, 0, 250, 45, 10000, CAIObjectType::EA_EVILCUTOFF },
+    { 64, 150, "WebX", "EFF_M19", "", 0x7FFFFFFF, "WebA", "ARE_M03", 1, 1, 0, 450, 1500, 10, 0 },
+    { 67, 140, "", "EFF_P16", "", 0x7FFFFFFF, "", "", 0, 0, 0, 250, 45, 10000, 0 },
+    { 92, 200, "FStormX", "EFF_P45", "", 0x7FFFFFFF, "FStormA", "ARE_P03", 1, 1, 0, 250, 105, 10, 0 },
+    { 95, 100, "SCloudX", "RNG_M01", "SCloudR", 13, "SCloudA", "ARE_M02", 1, 1, 0, 1000, 1000, 10, 0 },
+    { 101, 100, "GreaseX", "EFF_M31b", "", 0x7FFFFFFF, "GreaseA", "ARE_M01", 1, 1, 0, 1000, 1000, 10, 0 },
+    { 187, 150, "CloudKX", "RNG_M01", "CloudKR", 13, "CloudKA", "ARE_M02", 1, 1, 0, 500, 1000, 10, 0 },
+    { 284, 150, "CloudKX", "RNG_M01", "CloudKR", 13, "CloudKA", "ARE_M02", 1, 1, 0, 500, 1000, 10, 0 },
+    { 190, 150, "EnchanX", "ARE_M21", "", 0x7FFFFFFF, "", "", 0, 0, 0, 250, 45, 10000, CAIObjectType::EA_ENEMY },
+    { 212, 150, "DFogX", "RNG_M01", "DFogR", 20, "DFogA", "ARE_M02", 1, 1, 0, 250, 1100, 10, 0 },
+    { 235, 200, "EntangX", "", "", 0x7FFFFFFF, "EntangA", "ARE_P01", 1, 1, 0, 450, 1000, 10, 0 },
+    { 236, 250, "Area1X", "EFF_P99", "", 0x7FFFFFFF, "", "", 0, 0, 0, 250, 45, 10000, CAIObjectType::EA_ALLY },
+    { 237, 250, "Area1X", "EFF_P99", "", 0x7FFFFFFF, "", "", 0, 0, 0, 250, 45, 10000, CAIObjectType::EA_ENEMY },
+    { 238, 300, "AbjuraX", "ARE_M20", "", 0x7FFFFFFF, "", "", 0, 0, 0, 250, 45, 10000, CAIObjectType::EA_ALLY },
+    { 240, 300, "Area2X", "EFF_M99", "", 0x7FFFFFFF, "", "", 0, 0, 0, 250, 45, 10000, CAIObjectType::EA_ENEMY },
+    { 241, 150, "Area4X", "EFF_M99", "", 0x7FFFFFFF, "", "", 0, 0, 0, 250, 45, 10000, CAIObjectType::EA_ENEMY },
+    { 244, 250, "", "", "", 0x7FFFFFFF, "", "", 0, 0, 0, 250, 45, 10000, 0 },
+    { 245, 150, "AlteraX", "ARE_M19", "", 0x7FFFFFFF, "", "", 0, 0, 0, 250, 45, 10000, 0 },
+    { 246, 150, "AbjuraX", "ARE_M20", "", 0x7FFFFFFF, "", "", 0, 0, 0, 250, 45, 10000, 0 },
+    { 250, 200, "AbjuraX", "ARE_M20", "", 0x7FFFFFFF, "", "", 0, 0, 0, 250, 45, 10000, CAIObjectType::EA_ALLY },
+    { 253, 600, "Area1X", "EFF_P99", "", 0x7FFFFFFF, "", "", 0, 0, 0, 250, 45, 10000, 0 },
+    { 255, 150, "EnchanX", "ARE_M21", "", 0x7FFFFFFF, "", "", 0, 0, 0, 250, 45, 10000, 0 },
+    { 258, 200, "AbjuraX", "ARE_M20", "", 0x7FFFFFFF, "", "", 0, 0, 0, 250, 45, 10000, CAIObjectType::EA_ALLY },
+    { 260, 600, "Area1X", "EFF_P99", "", 0x7FFFFFFF, "", "", 0, 0, 0, 250, 45, 10000, 0 },
+    { 266, 350, "AbjuraX", "ARE_M20", "", 0x7FFFFFFF, "", "", 0, 0, 0, 250, 45, 10000, CAIObjectType::EA_ALLY },
+    { 270, 70, "FSeedsX", "EFF_P45", "", 0x7FFFFFFF, "", "", 0, 0, 0, 250, 45, 10000, 0 },
+    { 275, 200, "EnchanX", "ARE_M21", "", 0x7FFFFFFF, "", "", 0, 0, 0, 250, 45, 10000, CAIObjectType::EA_ENEMY },
+    { 276, 300, "SoPainX", "EFF_P49", "", 0x7FFFFFFF, "", "", 0, 0, 0, 250, 45, 10000, CAIObjectType::EA_ENEMY },
+    { 277, 300, "SoHopeX", "EFF_P50", "", 0x7FFFFFFF, "", "", 0, 0, 0, 250, 45, 10000, CAIObjectType::EA_ENEMY },
+    { 287, 150, "", "", "", 0x7FFFFFFF, "ICloudA", "", 1, 1, 0, 500, 200, 10000, 0 },
+    { 299, 120, "", "", "", 0x7FFFFFFF, "SEaterA", "ARE_M18", 1, 1, 0, 200, 45, 10000, 0 },
+    { 300, 150, "SGrowtX", "EFF_P111", "", 0x7FFFFFFF, "SGrowtA", "AFT_P24", 1, 1, 0, 250, 2000, 10, 0 },
+    { 337, 200, "", "", "", 0x7FFFFFFF, "HSmiteA", "", 1, 1, 0, 300, 45, 10000, 0 },
+    { 341, 300, "SoHopeX", "EFF_P50", "", 0x7FFFFFFF, "", "", 0, 0, 0, 250, 45, 10000, 0 },
+    { 349, 200, "DBreatH", "ARE_M21", "", 0x7FFFFFFF, "DBreatA", "", 0, 1, 1, 500, 45, 10000, 0 },
+    { 359, 300, "Area1X", "EFF_P99", "", 0x7FFFFFFF, "", "", 0, 0, 0, 250, 45, 10000, CAIObjectType::EA_ALLY },
+    { 373, 200, "EnchanX", "ARE_M21", "", 0x7FFFFFFF, "", "", 0, 0, 0, 250, 45, 10000, 0 },
+};
+
+}
+
+// The area projectile types the game's spells and items use (DecodeProjectile
+// 0x51EAF0): the plain CProjectileArea ones built in the switch and the
+// classes of 0x571310 to 0x577B20. The party member casts (EA_PC): a spell
+// on friends targets EA_ALLY, one on enemies EA_ENEMY, Sleep those evil
+// (EA_EVILCUTOFF). Decoding draws nothing.
+TEST_CASE("visual projectiles: the area spells decode to their area projectiles", "[visualprojectile][data]")
+{
+    WORLD_OR_SKIP(world);
+    for (const AreaType& spec : kAreaTypes) {
+        INFO("type " << spec.nType);
+        iwd2r_srand(71);
+        CProjectile* pProjectile = CProjectile::DecodeProjectile(spec.nType, world.pCharacter, 0);
+        CHECK(Draws(71, iwd2r_rand_state()) == 0);
+        CProjectileArea* pArea = dynamic_cast<CProjectileArea*>(pProjectile);
+        REQUIRE(pArea != nullptr);
+        CHECK(pArea->m_projectileType == spec.nType - 1);
+        CHECK(pArea->m_nRadius == spec.nRadius);
+        CHECK(pArea->m_explosion1.m_animation == spec.x);
+        CHECK(pArea->m_explosion1.m_sound == spec.xSound);
+        CHECK(pArea->m_explosion2.m_animation == spec.r);
+        CHECK(pArea->m_explosion2.field_2E == spec.nMaxFlames);
+        CHECK(pArea->m_explosion3.m_animation == spec.a);
+        CHECK(pArea->m_explosion3.m_sound == spec.aSound);
+        CHECK(pArea->m_explosion3.field_34 == spec.bWander);
+        CHECK(pArea->m_explosion3.field_35 == spec.bRandom);
+        CHECK(pArea->m_explosion3.field_36 == spec.bOnce);
+        CHECK(pArea->m_explosion3.field_38 == spec.nChance);
+        CHECK(pArea->m_nDuration == spec.nDuration);
+        CHECK(pArea->m_nTriggerInterval == spec.nInterval);
+        CHECK(pArea->m_nHitModulus == 10);
+        CHECK(pArea->m_bTravels == (spec.nType == 270));
+        if (spec.nEnemyAlly != 0) {
+            CHECK(pArea->m_targetType.m_nEnemyAlly == spec.nEnemyAlly);
+        } else {
+            CHECK(pArea->m_targetType.m_nEnemyAlly == CAIObjectType::ANYONE.m_nEnemyAlly);
+        }
+        delete pProjectile;
+    }
+
+    CProjectile* pProjectile = CProjectile::DecodeProjectile(244, world.pCharacter, 0);
+    CHECK(static_cast<CProjectileArea*>(pProjectile)->m_bCheckForNonSprites == TRUE);
+    delete pProjectile;
+    pProjectile = CProjectile::DecodeProjectile(190, world.pCharacter, 0);
+    CHECK(dynamic_cast<CProjectileArea84F9C4*>(pProjectile) != nullptr);
+    CHECK(pProjectile->m_fireSoundRef == "TRA_04C");
+    CHECK(pProjectile->m_arrivalSoundRef == "EFF_M05");
+    delete pProjectile;
+    pProjectile = CProjectile::DecodeProjectile(246, world.pCharacter, 0);
+    CHECK(dynamic_cast<CProjectileArea850C0C*>(pProjectile) != nullptr);
+    CHECK(pProjectile->m_fireSoundRef == "TRA_04A");
+    CHECK(pProjectile->m_arrivalSoundRef == "CAS_P02");
+    delete pProjectile;
+}
+
+namespace {
+
+// An area projectile that records the targets it would fire its secondary
+// projectile at instead of firing it (CreateSecondary, vtable 0x98).
+template <class T>
+class Recording : public T {
+public:
+    void CreateSecondary(LONG nTargetId) override
+    {
+        CGameObject* pObj;
+        if (g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(nTargetId, CGameObjectArray::THREAD_ASYNCH, &pObj, INFINITE) == CGameObjectArray::SUCCESS) {
+            std::cerr << "SEC " << std::hex << nTargetId << " '" << (pObj->GetObjectType() == CGameObject::TYPE_SPRITE ? static_cast<CGameSprite*>(pObj)->GetName() : "?") << "' " << std::dec << pObj->GetPos().x << "," << pObj->GetPos().y << std::endl;
+            g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(nTargetId, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+        }
+        m_secondaries.push_back(nTargetId);
+    }
+
+    std::vector<LONG> m_secondaries;
+};
+
+// Goblins in a row from `near`, on open ground.
+std::vector<CGameSprite*> AddGoblins(CGameArea* pArea, const CPoint& near, size_t count)
+{
+    std::vector<CGameSprite*> goblins;
+    for (size_t n = 0; n < count; n++) {
+        CPoint pos;
+        if (!DryGround(pArea, CPoint(near.x + 40 * static_cast<LONG>(n), near.y), pos)) {
+            break;
+        }
+        CGameSprite* pGoblin = AddCreature(pArea, "00GOB", pos);
+        if (pGoblin == NULL) {
+            break;
+        }
+        goblins.push_back(pGoblin);
+    }
+    pArea->SortLists();
+    return goblins;
+}
+
+// The secondary projectiles (type 79, CProjectile84DF1C) the area holds in
+// its add lists, by target.
+std::vector<LONG> AddedSecondaries(CGameArea* pArea)
+{
+    std::vector<LONG> targets;
+    for (CGameObject* pObject : AddedObjects(pArea)) {
+        if (CProjectile84DF1C* pSecondary = dynamic_cast<CProjectile84DF1C*>(pObject)) {
+            targets.push_back(pSecondary->m_targetId);
+        }
+    }
+    return targets;
+}
+
+}
+
+// Hold Person (type 190, CProjectileArea84F9C4::ApplyToTargets 0x572F90):
+// one number, rand() % 4; it keeps the sprites in the list, in order, up to
+// and including the 1st to 4th humanoid (general G_HUMANOID). Ids that are
+// not in the object array are skipped.
+TEST_CASE("visual projectiles: Hold Person holds the sprites up to the first to fourth humanoid", "[visualprojectile][data]")
+{
+    WORLD_OR_SKIP(world);
+    CGameArea* pArea = world.pArea;
+    std::vector<CGameSprite*> goblins = AddGoblins(pArea, CPoint(world.pCharacter->GetPos().x + 80, world.pCharacter->GetPos().y + 30), 6);
+    REQUIRE(goblins.size() == 6);
+    const BYTE generals[] = { CAIObjectType::G_HUMANOID,
+        CAIObjectType::G_MONSTER,
+        CAIObjectType::G_HUMANOID,
+        CAIObjectType::G_HUMANOID,
+        CAIObjectType::G_HUMANOID,
+        CAIObjectType::G_HUMANOID };
+    std::list<LONG> targets;
+    targets.push_back(CGameObjectArray::INVALID_INDEX);
+    for (size_t n = 0; n < goblins.size(); n++) {
+        goblins[n]->m_typeAI.m_nGeneral = generals[n];
+        targets.push_back(goblins[n]->GetId());
+    }
+    // The goblin each roll stops at: the first, third, fourth or fifth.
+    const size_t last[] = { 0, 2, 3, 4 };
+
+    bool seen[4] = {};
+    for (unsigned int seed = 1; seed <= 24; seed++) {
+        INFO("seed " << seed);
+        const int nRoll = RandAt(seed, 1) % 4;
+        seen[nRoll] = true;
+        std::unique_ptr<Recording<CProjectileArea84F9C4>> pHold(new Recording<CProjectileArea84F9C4>());
+        std::list<LONG> list = targets;
+        iwd2r_srand(seed);
+        pHold->ApplyToTargets(list);
+        CHECK(Draws(seed, iwd2r_rand_state()) == 1);
+        std::vector<LONG> expected;
+        for (size_t n = 0; n <= last[nRoll]; n++) {
+            expected.push_back(goblins[n]->GetId());
+        }
+        CHECK(pHold->m_secondaries == expected);
+    }
+    CHECK((seen[0] && seen[1] && seen[2] && seen[3]));
+
+    // Without enough humanoids it keeps every sprite.
+    for (CGameSprite* pGoblin : goblins) {
+        pGoblin->m_typeAI.m_nGeneral = CAIObjectType::G_ANIMAL;
+    }
+    std::unique_ptr<Recording<CProjectileArea84F9C4>> pHold(new Recording<CProjectileArea84F9C4>());
+    std::list<LONG> list = targets;
+    pHold->ApplyToTargets(list);
+    CHECK(pHold->m_secondaries.size() == goblins.size());
+}
+
+// Sleep (type 42, CProjectileArea84FEA4::ApplyToTargets 0x574430): two
+// numbers, 2 + rand() % 4 + rand() % 4 levels; it takes the sprites below
+// level 5, in order, whose level still fits in what is left.
+TEST_CASE("visual projectiles: Sleep takes the sprites below level 5 while their levels fit", "[visualprojectile][data]")
+{
+    WORLD_OR_SKIP(world);
+    CGameArea* pArea = world.pArea;
+    std::vector<CGameSprite*> goblins = AddGoblins(pArea, CPoint(world.pCharacter->GetPos().x + 80, world.pCharacter->GetPos().y + 30), 6);
+    REQUIRE(goblins.size() == 6);
+    const BYTE levels[] = { 1, 5, 3, 2, 4, 1 };
+    std::list<LONG> targets;
+    targets.push_back(CGameObjectArray::INVALID_INDEX);
+    for (size_t n = 0; n < goblins.size(); n++) {
+        goblins[n]->GetDerivedStats()->m_nLevel = levels[n];
+        targets.push_back(goblins[n]->GetId());
+    }
+
+    bool seen[9] = {};
+    for (unsigned int seed = 1; seed <= 200; seed++) {
+        INFO("seed " << seed);
+        const int nLevels = 2 + RandAt(seed, 1) % 4 + RandAt(seed, 2) % 4;
+        seen[nLevels] = true;
+        std::vector<LONG> expected;
+        int nLeft = nLevels;
+        for (size_t n = 0; n < goblins.size(); n++) {
+            if (levels[n] < 5 && nLeft - levels[n] >= 0) {
+                expected.push_back(goblins[n]->GetId());
+                nLeft -= levels[n];
+            }
+        }
+        std::unique_ptr<Recording<CProjectileArea84FEA4>> pSleep(new Recording<CProjectileArea84FEA4>());
+        std::list<LONG> list = targets;
+        iwd2r_srand(seed);
+        pSleep->ApplyToTargets(list);
+        CHECK(Draws(seed, iwd2r_rand_state()) == 2);
+        CHECK(pSleep->m_secondaries == expected);
+        // Two levels take the first goblin and the last one; eight take
+        // all of them but the level 5 one and the level 4 one after the 1,
+        // 3 and 2.
+        if (nLevels == 2) {
+            CHECK(expected == std::vector<LONG> { goblins[0]->GetId(), goblins[5]->GetId() });
+        } else if (nLevels == 8) {
+            CHECK(expected == std::vector<LONG> { goblins[0]->GetId(), goblins[2]->GetId(), goblins[3]->GetId(), goblins[5]->GetId() });
+        }
+    }
+    for (int nLevels = 2; nLevels <= 8; nLevels++) {
+        INFO("levels " << nLevels);
+        CHECK(seen[nLevels]);
+    }
+}
+
+// Cloudkill (type 187, CProjectileArea84F310 0x571310) does not travel: it
+// arrives where it is fired (CProjectileArea::Fire 0x56F820, OnArrival
+// 0x56F410) and its explosion object takes its three descriptions. It
+// checks for targets every 10 updates (m_nTriggerInterval) and hits each
+// one inside on its every 10th check (m_nHitModulus), so once every 100
+// updates, until its 1000 updates are over. No rand draws.
+TEST_CASE("visual projectiles: Cloudkill lingers 1000 updates and hits who stands in it every 100", "[visualprojectile][data]")
+{
+    WORLD_OR_SKIP(world);
+    CGameArea* pArea = world.pArea;
+    CGameSprite* pSprite = world.pCharacter;
+    std::vector<CGameSprite*> goblins = AddGoblins(pArea, CPoint(pSprite->GetPos().x + 400, pSprite->GetPos().y + 30), 1);
+    REQUIRE(goblins.size() == 1);
+    CGameSprite* pGoblin = goblins.front();
+    ClearMessages();
+
+    Recording<CProjectileArea84F310>* pCloud = new Recording<CProjectileArea84F310>();
+    pCloud->m_projectileType = 186;
+    iwd2r_srand(61);
+    pCloud->Fire(pArea, pSprite->GetId(), CGameObjectArray::INVALID_INDEX, pGoblin->GetPos(), 0, 0);
+    const LONG id = pCloud->GetId();
+    REQUIRE(id != CGameObjectArray::INVALID_INDEX);
+    CHECK(pCloud->m_bExploded == TRUE);
+    CHECK(pCloud->GetPos() == pGoblin->GetPos());
+    REQUIRE(pCloud->m_explosion3.m_pPoints != nullptr);
+    std::vector<CGameObject84F0DC*> explosions;
+    for (CGameObject* pObject : AddedObjects(pArea)) {
+        if (CGameObject84F0DC* pExplosion = dynamic_cast<CGameObject84F0DC*>(pObject)) {
+            explosions.push_back(pExplosion);
+        }
+    }
+    REQUIRE(explosions.size() == 1);
+    CGameObject84F0DC* pExplosion = explosions.front();
+    CHECK(pExplosion->GetPos() == pGoblin->GetPos());
+    CHECK(pExplosion->m_nDuration == 1000);
+    CHECK(pExplosion->m_animation.GetResRef() == CResRef("CloudKX"));
+    CHECK(pExplosion->m_explosion2.m_animation == "CloudKR");
+    CHECK(pExplosion->m_explosion2.field_2E == 13);
+    CHECK(pExplosion->m_explosion3.m_animation == "CloudKA");
+    CHECK(pExplosion->m_explosion3.m_pPoints == pCloud->m_explosion3.m_pPoints);
+    CHECK(pExplosion->m_nWallMode == CGameObject84F0DC::WALL_STOP);
+    pArea->SortLists();
+    ClearMessages();
+
+    std::vector<int> hits;
+    int updates = 0;
+    while (Alive(id) && updates < 2000) {
+        const size_t before = pCloud->m_secondaries.size();
+        pCloud->AIUpdate();
+        updates++;
+        if (Alive(id) && pCloud->m_secondaries.size() != before) {
+            // The cloud's own explosion object stands in it too, and its
+            // type (a Set of NOT_SPRITE, whose subRace byte 0xFF the copy
+            // maps to 0) still matches the cloud's default target type, so
+            // both it and the goblin are hit each trigger.
+            REQUIRE(pCloud->m_secondaries.size() == before + 2);
+            CHECK(pCloud->m_secondaries.back() == pGoblin->GetId());
+            hits.push_back(updates);
+        }
+    }
+    CHECK(updates == 1000);
+    CHECK(Draws(61, iwd2r_rand_state()) == 0);
+    const std::vector<int> expected = { 1, 101, 201, 301, 401, 501, 601, 701, 801, 901 };
+    CHECK(hits == expected);
+
+    pExplosion->RemoveFromArea();
+    pArea->SortLists();
+    ClearMessages();
+}
+
+// The breath (type 349, CProjectileArea85072C 0x575EA0): fired, it does not
+// arrive (its OnArrival, 0x799CA0, is empty); its AIUpdate (0x576040)
+// counts updates and arrives on the seventh (CProjectileArea::OnArrival:
+// the DBreatH explosion), then works as an area projectile from that one
+// on. No rand draws.
+TEST_CASE("visual projectiles: a breath arrives on its seventh update", "[visualprojectile][data]")
+{
+    WORLD_OR_SKIP(world);
+    CGameArea* pArea = world.pArea;
+    CGameSprite* pSprite = world.pCharacter;
+    std::vector<CGameSprite*> goblins = AddGoblins(pArea, CPoint(pSprite->GetPos().x + 400, pSprite->GetPos().y + 30), 1);
+    REQUIRE(goblins.size() == 1);
+    CGameSprite* pGoblin = goblins.front();
+    ClearMessages();
+
+    Recording<CProjectileArea85072C>* pBreath = new Recording<CProjectileArea85072C>();
+    pBreath->m_projectileType = 348;
+    iwd2r_srand(63);
+    pBreath->Fire(pArea, pSprite->GetId(), CGameObjectArray::INVALID_INDEX, pGoblin->GetPos(), 0, 0);
+    const LONG id = pBreath->GetId();
+    REQUIRE(id != CGameObjectArray::INVALID_INDEX);
+    CHECK(pBreath->m_bExploded == FALSE);
+    CHECK(AddedOne<CProjectileArea85072C>(pArea) == pBreath);
+    CHECK(pBreath->m_nTicks == 0);
+
+    for (int update = 1; update <= 6; update++) {
+        pBreath->AIUpdate();
+        CHECK(pBreath->m_nTicks == update);
+        CHECK(pBreath->m_bExploded == FALSE);
+    }
+    CHECK(AddedObjects(pArea).size() == 1);
+    CHECK(pBreath->m_secondaries.empty());
+    // The engine sorts the area's lists before its update pump; the area
+    // projectile's GetTargets walks the sorted list from its own place in
+    // it (m_posVertList).
+    pArea->SortLists();
+
+    pBreath->AIUpdate();
+    CHECK(pBreath->m_nTicks == 7);
+    CHECK(pBreath->m_bExploded == TRUE);
+    CHECK(pBreath->field_1DE == FALSE);
+    CGameObject84F0DC* pExplosion = nullptr;
+    for (CGameObject* pObject : AddedObjects(pArea)) {
+        if (CGameObject84F0DC* pFound = dynamic_cast<CGameObject84F0DC*>(pObject)) {
+            pExplosion = pFound;
+        }
+    }
+    REQUIRE(pExplosion != nullptr);
+    CHECK(pExplosion->m_animation.GetResRef() == CResRef("DBreatH"));
+    CHECK(pExplosion->m_explosion3.m_animation == "DBreatA");
+    CHECK(pExplosion->m_explosion3.field_36 == TRUE);
+    // The same update checks for targets: every sprite inside the 200
+    // radius, not just the goblin it was fired at. The goblin's ground is
+    // within 200 of Eldgull, a creature standing in the start area, so it
+    // is hit too, after the goblin in the list's order (sorted by y).
+    REQUIRE(pBreath->m_secondaries.size() == 2);
+    CHECK(pBreath->m_secondaries.front() == pGoblin->GetId());
+    CHECK(pBreath->m_secondaries[1] != pGoblin->GetId());
+    CHECK(Draws(63, iwd2r_rand_state()) == 0);
+
+    CHECK(UpdateUntilGone(id, 100) == 44);
+    pExplosion->RemoveFromArea();
+    pArea->SortLists();
+    ClearMessages();
+}
+
+// Flame Strike (type 67, CProjectileArea84F754::Fire 0x572540): a column of
+// flame (CProjectileShaft "FStrikH", 28 updates) fired with the same
+// arguments, then the area projectile, which has no explosion animation.
+TEST_CASE("visual projectiles: Flame Strike fires a column of flame and its area", "[visualprojectile][data]")
+{
+    WORLD_OR_SKIP(world);
+    CGameArea* pArea = world.pArea;
+    CGameSprite* pSprite = world.pCharacter;
+    pArea->SortLists();
+    ClearMessages();
+
+    CProjectile* pProjectile = CProjectile::DecodeProjectile(67, pSprite, 0);
+    CProjectileArea84F754* pStrike = dynamic_cast<CProjectileArea84F754*>(pProjectile);
+    REQUIRE(pStrike != nullptr);
+    CPoint target;
+    REQUIRE(DryGround(pArea, CPoint(pSprite->GetPos().x + 160, pSprite->GetPos().y + 40), target));
+    iwd2r_srand(65);
+    pStrike->Fire(pArea, pSprite->GetId(), CGameObjectArray::INVALID_INDEX, target, 0, 0);
+    CHECK(Draws(65, iwd2r_rand_state()) == 0);
+    std::vector<CGameObject*> objects = AddedObjects(pArea);
+    REQUIRE(objects.size() == 2);
+    CProjectileShaft* pShaft = dynamic_cast<CProjectileShaft*>(objects[0]);
+    REQUIRE(pShaft != nullptr);
+    CHECK(objects[1] == pStrike);
+    CHECK(pShaft->m_nDuration == 28);
+    CHECK(pShaft->m_bTransparent == FALSE);
+    CHECK(pShaft->m_bRandomFrame == FALSE);
+    CHECK(pShaft->m_sourceId == pSprite->GetId());
+    CHECK(pShaft->GetPos() == CPoint(target.x, target.y + 13));
+    CHECK(pStrike->m_bExploded == TRUE);
+    CHECK(pStrike->GetPos() == target);
+    // The engine sorts the area's lists before its update pump; the area
+    // projectile's GetTargets walks the sorted list from its own place in
+    // it (m_posVertList).
+    pArea->SortLists();
+
+    CHECK(UpdateUntilGone(pShaft->GetId(), 100) == 28);
+    CHECK(UpdateUntilGone(pStrike->GetId(), 100) == 45);
+    pArea->SortLists();
+    ClearMessages();
+}
+
+// Dispel Magic (type 246, CProjectileArea850C0C::CreateSecondary
+// 0x577C70): at a sprite, it first removes its Globes of Invulnerability
+// (effect 450) at once, then fires the secondary projectile as every area
+// projectile does (CProjectileArea::CreateSecondary 0x5701E0).
+TEST_CASE("visual projectiles: Dispel Magic removes a Globe of Invulnerability before its secondary", "[visualprojectile][data]")
+{
+    WORLD_OR_SKIP(world);
+    CGameArea* pArea = world.pArea;
+    CGameSprite* pSprite = world.pCharacter;
+    std::vector<CGameSprite*> goblins = AddGoblins(pArea, CPoint(pSprite->GetPos().x + 400, pSprite->GetPos().y + 30), 1);
+    REQUIRE(goblins.size() == 1);
+    CGameSprite* pGoblin = goblins.front();
+    ClearMessages();
+
+    std::unique_ptr<CGameEffect> pGlobe = DecodeAt(ICEWIND_CGAMEEFFECT_GLOBEOFINVULNERABILITY, 0, 0, pGoblin->GetPos(), pGoblin->GetId(), pGoblin->GetPos());
+    REQUIRE(pGlobe != nullptr);
+    pGoblin->m_timedEffectList.AddTail(pGlobe.release());
+    auto globes = [&]() {
+        int count = 0;
+        POSITION pos = pGoblin->m_timedEffectList.GetHeadPosition();
+        while (pos != NULL) {
+            count += pGoblin->m_timedEffectList.GetNext(pos)->m_effectID == ICEWIND_CGAMEEFFECT_GLOBEOFINVULNERABILITY;
+        }
+        return count;
+    };
+    REQUIRE(globes() == 1);
+
+    CProjectile* pProjectile = CProjectile::DecodeProjectile(246, pSprite, 0);
+    CProjectileArea850C0C* pDispel = dynamic_cast<CProjectileArea850C0C*>(pProjectile);
+    REQUIRE(pDispel != nullptr);
+    pDispel->Fire(pArea, pSprite->GetId(), CGameObjectArray::INVALID_INDEX, pGoblin->GetPos(), 0, 0);
+    REQUIRE(pDispel->GetId() != CGameObjectArray::INVALID_INDEX);
+    pArea->SortLists();
+    ClearMessages();
+
+    iwd2r_srand(67);
+    pDispel->CreateSecondary(pGoblin->GetId());
+    // One draw: AddEffect runs the effect through CheckAdd (0x4A3310),
+    // which draws a number and discards it (0x4A38A6).
+    CHECK(Draws(67, iwd2r_rand_state()) == 1);
+    CHECK(globes() == 0);
+    CHECK(AddedSecondaries(pArea) == std::vector<LONG> { pGoblin->GetId() });
+    pArea->SortLists();
+
+    // Not a sprite: neither.
+    pDispel->CreateSecondary(pDispel->GetId());
+    CHECK(AddedSecondaries(pArea).empty());
+
+    CHECK(UpdateUntilGone(pDispel->GetId(), 100) > 0);
+    pArea->SortLists();
+    ClearMessages();
+}
+
+// Acid Fog (type 212, CProjectileArea84F3AC::CreateSecondary 0x5716B0):
+// its secondary projectile at any sprite, without the checks of
+// CProjectileArea::CreateSecondary (0x5701E0): a dead sprite or one in the
+// excluded targets is hit too; not a sprite is not.
+TEST_CASE("visual projectiles: Acid Fog fires its secondary at any sprite, dead or excluded", "[visualprojectile][data]")
+{
+    WORLD_OR_SKIP(world);
+    CGameArea* pArea = world.pArea;
+    CGameSprite* pSprite = world.pCharacter;
+    std::vector<CGameSprite*> goblins = AddGoblins(pArea, CPoint(pSprite->GetPos().x + 400, pSprite->GetPos().y + 30), 1);
+    REQUIRE(goblins.size() == 1);
+    CGameSprite* pGoblin = goblins.front();
+    ClearMessages();
+
+    CProjectile* pProjectile = CProjectile::DecodeProjectile(212, pSprite, 0);
+    CProjectileArea84F3AC* pFog = dynamic_cast<CProjectileArea84F3AC*>(pProjectile);
+    REQUIRE(pFog != nullptr);
+    pFog->Fire(pArea, pSprite->GetId(), CGameObjectArray::INVALID_INDEX, pGoblin->GetPos(), 0, 0);
+    REQUIRE(pFog->GetId() != CGameObjectArray::INVALID_INDEX);
+    pArea->SortLists();
+    ClearMessages();
+
+    const DWORD generalState = pGoblin->GetDerivedStats()->m_generalState;
+    pGoblin->GetDerivedStats()->m_generalState |= STATE_DEAD;
+    pFog->m_excludedTargets.insert(pGoblin->GetId());
+    pGoblin->m_posOld = CPoint(0, 0);
+    iwd2r_srand(69);
+    pFog->CreateSecondary(pGoblin->GetId());
+    CHECK(Draws(69, iwd2r_rand_state()) == 0);
+    CHECK(AddedSecondaries(pArea) == std::vector<LONG> { pGoblin->GetId() });
+    CHECK(pGoblin->m_posOld == pGoblin->GetPos());
+    pGoblin->GetDerivedStats()->m_generalState = generalState;
+    pArea->SortLists();
+
+    pFog->CreateSecondary(pFog->GetId());
+    CHECK(AddedSecondaries(pArea).empty());
+    pArea->SortLists();
+    ClearMessages();
 }
