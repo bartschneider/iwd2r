@@ -5087,6 +5087,29 @@ class OracleSavesTest(unittest.TestCase):
             with open(os.path.join(mpsave, name, 'ICEWIND2.SAV')) as f:
                 self.assertEqual(f.read(), name)
 
+    def test_a_load_copy_that_stops_halfway_is_deleted(self):
+        from unittest import mock
+        mpsave = os.path.join(self.tmp, 'game', 'mpsave')
+        aside = os.path.join(self.tmp, 'aside')
+        make_save(mpsave, '000000002-Quick-Save', 'own')
+        load = make_save(os.path.join(self.tmp, 'in'), '000000004-Probe')
+        out = os.path.join(self.tmp, 'out')
+
+        def copytree(src, dst):
+            os.makedirs(dst)
+            with open(os.path.join(dst, 'ICEWIND2.GAM'), 'w') as f:
+                f.write('half')
+            raise OSError(28, 'no space left')
+        with mock.patch.object(oracle.shutil, 'copytree', copytree), \
+                self.assertRaises(OSError), \
+                contextlib.redirect_stdout(io.StringIO()):
+            with oracle.prepared_saves(mpsave, {'mode': 'load',
+                                                'load': load}, out, aside):
+                self.fail('the run must not start')
+        self.assertEqual(self.listing(mpsave), ['000000002-Quick-Save'])
+        self.assertIsNone(self.listing(os.path.join(out, 'saves')))
+        self.assertIsNone(self.listing(aside))
+
     def test_a_save_over_the_loaded_slot_is_kept(self):
         mpsave = os.path.join(self.tmp, 'mpsave')
         load = make_save(os.path.join(self.tmp, 'in'), '000000004-Probe',
@@ -5124,6 +5147,42 @@ class OracleSavesTest(unittest.TestCase):
         with open(os.path.join(mpsave, '000000004-big12345',
                                'ICEWIND2.SAV')) as f:
             self.assertEqual(f.read(), 'user')
+
+    def test_a_dead_runs_own_saves_leave_the_copy(self):
+        # A run died with the copy's saves aside: its record names what
+        # mpsave held before; what else is there is that run's (its load
+        # copy, an autosave it wrote) and moves into the next run's folder.
+        mpsave = os.path.join(self.tmp, 'game', 'mpsave')
+        aside = os.path.join(self.tmp, 'mpsave-aside')
+        make_save(aside, '000000000-Autosave - Prologue', 'user')
+        make_save(aside, '000000004-big12345', 'user')
+        make_save(mpsave, '000000000-Autosave - Prologue', 'dead run')
+        make_save(mpsave, '000000005-Probe', 'dead run')
+        make_save(mpsave, 'default')
+        with open(oracle.aside_record(aside), 'w') as f:
+            json.dump(['000000000-Autosave - Prologue',
+                       '000000004-big12345'], f)
+        out = os.path.join(self.tmp, 'next')
+        with contextlib.redirect_stdout(io.StringIO()) as text:
+            with oracle.prepared_saves(mpsave, None, out, aside):
+                pass
+        self.assertIn('moved 000000005-Probe, which a run that died made',
+                      text.getvalue())
+        self.assertEqual(self.listing(mpsave), [
+            '000000000-Autosave - Prologue', '000000004-big12345',
+            'default'])
+        with open(os.path.join(mpsave, '000000000-Autosave - Prologue',
+                               'ICEWIND2.SAV')) as f:
+            self.assertEqual(f.read(), 'user')
+        self.assertEqual(self.listing(os.path.join(out, 'dead-run-saves')),
+                         ['000000005-Probe'])
+        self.assertFalse(os.path.exists(oracle.aside_record(aside)))
+        # A run that ends normally leaves no record behind.
+        with contextlib.redirect_stdout(io.StringIO()):
+            with oracle.prepared_saves(mpsave, {'mode': 'empty',
+                                                'load': None}, out, aside):
+                self.assertTrue(os.path.exists(oracle.aside_record(aside)))
+        self.assertFalse(os.path.exists(oracle.aside_record(aside)))
 
     def test_a_private_view_is_emptied_in_place(self):
         mpsave = os.path.join(self.tmp, 'view', 'mpsave')

@@ -1690,7 +1690,9 @@ def load_actions(script):
 # afterwards every save the run made is moved into <out>/saves/ and what
 # was there is put back. On the vanilla copy, which every worktree shares,
 # what was there waits in save_aside (beside the copy, on its volume) and
-# every recording first puts back what a run that died left there; a
+# every recording first puts back what a run that died left there, and
+# moves the saves that run made out of the copy (aside_record names what
+# was there before it); a
 # recording holds winsandbox.SANDBOX_LOCK while the saves are aside, so
 # play.py --vm windows, which copies the vanilla copy into its game cache
 # under that lock, never copies it then. Our engine's data view has a
@@ -1825,13 +1827,48 @@ def put_back(mpsave, aside):
     return names
 
 
-def recover_saves(mpsave, aside):
+def aside_record(aside):
+    """The file beside aside that names mpsave's entries before a run took
+    any out (prepared_saves writes it first and removes it last)."""
+    return aside + '.json'
+
+
+def harvest(path, dest):
+    """Moves the entry at path to dest (copied, then deleted)."""
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    if os.path.isdir(path):
+        shutil.copytree(path, dest)
+    else:
+        shutil.copyfile(path, dest)
+    remove_entry(path)
+
+
+def recover_saves(mpsave, aside, keep=None):
     """Puts back what a run that died left in aside (put_back); the
-    entries of the same name in mpsave are that run's."""
+    entries of the same name in mpsave are that run's. With the dead run's
+    record (aside_record), the other entries in mpsave that it does not
+    name are that run's too (the saves it made, its --load copy): they move
+    into keep (copied, then deleted) when keep is given, so the copy holds
+    only its own saves again. Returns the names put back."""
+    record = aside_record(aside)
+    try:
+        with open(record) as f:
+            before = set(json.load(f))
+    except (OSError, ValueError):
+        before = None
     names = put_back(mpsave, aside)
     if names:
         print('saves: put back %d entr%s a run that died left in %s'
               % (len(names), 'y' if len(names) == 1 else 'ies', aside))
+    if before is not None:
+        if keep is not None:
+            moved = [n for n in mpsave_entries(mpsave) if n not in before]
+            for name in moved:
+                harvest(os.path.join(mpsave, name), os.path.join(keep, name))
+            if moved:
+                print('saves: moved %s, which a run that died made, out of '
+                      '%s into %s' % (', '.join(moved), mpsave, keep))
+        os.remove(record)
     return names
 
 
@@ -1870,7 +1907,7 @@ def prepared_saves(mpsave, plan, out_dir, aside=None):
     (the loaded save's folder name), 'made' (the saves moved out, by
     name)}."""
     if aside is not None:
-        recover_saves(mpsave, aside)
+        recover_saves(mpsave, aside, os.path.join(out_dir, 'dead-run-saves'))
     report = {}
     if not plan:
         yield report
@@ -1879,6 +1916,10 @@ def prepared_saves(mpsave, plan, out_dir, aside=None):
     report.update(mode=plan['mode'], load=plan['load'], slot=None, made=[])
     before = set(mpsave_entries(mpsave))
     taken = set()
+    staged = False
+    if aside is not None:
+        with open(aside_record(aside), 'w') as f:
+            json.dump(sorted(before), f)
     try:
         for name in sorted(before):
             path = os.path.join(mpsave, name)
@@ -1889,10 +1930,12 @@ def prepared_saves(mpsave, plan, out_dir, aside=None):
                 os.rename(path, os.path.join(aside, name))
             taken.add(name)
         if plan['load']:
-            # Set first: a copy that stops halfway is the run's to delete.
+            # Named before the copy, so a copy that stops halfway (staged
+            # still False) is deleted on the way out, not kept as a save.
             report['slot'] = os.path.basename(plan['load'])
             shutil.copytree(plan['load'],
                             os.path.join(mpsave, report['slot']))
+            staged = True
         yield report
     finally:
         try:
@@ -1900,19 +1943,17 @@ def prepared_saves(mpsave, plan, out_dir, aside=None):
                 path = os.path.join(mpsave, name)
                 if name in before and name not in taken:
                     continue
-                if name != report['slot'] or not same_tree(path,
-                                                           plan['load']):
-                    dest = os.path.join(out_dir, 'saves', name)
-                    os.makedirs(os.path.dirname(dest), exist_ok=True)
-                    if os.path.isdir(path):
-                        shutil.copytree(path, dest)
-                    else:
-                        shutil.copyfile(path, dest)
+                loaded_copy = name == report['slot'] and (
+                    not staged or same_tree(path, plan['load']))
+                if loaded_copy:
+                    remove_entry(path)
+                else:
+                    harvest(path, os.path.join(out_dir, 'saves', name))
                     report['made'].append(name)
-                remove_entry(path)
         finally:
             if aside is not None:
                 put_back(mpsave, aside)
+                os.remove(aside_record(aside))
         if report['made']:
             print('saves: the run made %s (in %s)'
                   % (', '.join(report['made']), os.path.relpath(
