@@ -2271,6 +2271,61 @@ TEST_CASE("combat: SetBestWeapon picks the goblin's melee weapon within its rang
     ClearMessages();
 }
 
+// SetBestWeapon's other two branches, with AR1000's goblin archer (10GOBAR:
+// a shortbow, arrows, and 001D3P, a melee weapon in its second set), which
+// starts with the arrows (the first quiver slot, a ranged ability) selected:
+// beyond the range a ranged ability stays; within it the archer takes its
+// most damaging melee weapon.
+TEST_CASE("combat: SetBestWeapon keeps an archer's arrows beyond its range and takes a melee weapon within it", "[combat][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    Fight fight;
+    std::string why;
+    if (!SetUpFight(fight, why)) {
+        if (why.find("CHR") != std::string::npos) {
+            SKIP("[iwd2r-skip] " + why);
+        }
+        FAIL(why);
+    }
+    CGameSprite* pCharacter = fight.pCharacter;
+    const CPoint pos = pCharacter->GetPos();
+    CGameSprite* pArcher = AddCreature(fight.pArea, "10GOBAR", CPoint(pos.x + 2 * CPathSearch::GRID_SQUARE_SIZEX, pos.y));
+    REQUIRE(pArcher != NULL);
+    CGameSpriteEquipment* pEquipment = pArcher->GetEquipment();
+    REQUIRE(pEquipment->m_selectedWeapon == 11);
+    const CAIObjectType character(0, 0, 0, 0, 0, 0, 0, 0, pCharacter->GetId());
+
+    // The ability type of the archer's selected weapon (1 melee, 2 ranged).
+    auto selectedType = [pEquipment]() {
+        CItem* pItem = pEquipment->m_items[pEquipment->m_selectedWeapon];
+        REQUIRE(pItem != NULL);
+        pItem->Demand();
+        const ITEM_ABILITY* pAbility = pItem->GetAbility(pEquipment->m_selectedWeaponAbility);
+        const int type = pAbility != NULL ? (pAbility->type & 0xFF) : -1;
+        pItem->Release();
+        return type;
+    };
+    REQUIRE(selectedType() == 2);
+
+    // Two search squares away, beyond a range of 0: the arrows stay.
+    pArcher->m_curAction = CAIAction(255, character, 0, 0, 0);
+    CHECK(pArcher->ExecuteAction() == CGameAIBase::ACTION_DONE);
+    CHECK(pEquipment->m_selectedWeapon == 11);
+
+    // Within a range of 5: a melee weapon.
+    pArcher->m_curAction = CAIAction(255, character, 5, 0, 0);
+    CHECK(pArcher->ExecuteAction() == CGameAIBase::ACTION_DONE);
+    CHECK(pEquipment->m_selectedWeapon != 11);
+    CHECK(selectedType() == 1);
+    ClearMessages();
+}
+
 // CAIObjectType::Decode's NearestEnemyOf (12, 0x40BF48) and Nearest (14,
 // 0x40C208): Nearest asks the area for the second nearest of the current
 // object's type, as SecondNearest does.
@@ -2412,6 +2467,53 @@ TEST_CASE("combat: the area tints a point with its light map", "[combat][data]")
         == RGB(mid(c00.rgbRed, c10.rgbRed, c01.rgbRed, c11.rgbRed),
             mid(c00.rgbGreen, c10.rgbGreen, c01.rgbGreen, c11.rgbGreen),
             mid(c00.rgbBlue, c10.rgbBlue, c01.rgbBlue, c11.rgbBlue)));
+
+    // 5 pixels across and 3 down in the first cell (row by row) whose four
+    // corners have four different reds (that cell's corners are uniform):
+    // the left corners weigh 11/16 and the right ones 5/16, the top edge
+    // 9/12 and the bottom one 3/12, so swapping x and y or two corners
+    // changes the colour.
+    INT nCellX = -1;
+    INT nCellY = -1;
+    RGBQUAD d00;
+    RGBQUAD d10;
+    RGBQUAD d01;
+    RGBQUAD d11;
+    for (INT y = 0; y < 200 && nCellX == -1; y++) {
+        for (INT x = 0; x < 300; x++) {
+            if (!pArea->m_bmLum.GetPixelColor(d00, x, y, FALSE)
+                || !pArea->m_bmLum.GetPixelColor(d10, x + 1, y, FALSE)
+                || !pArea->m_bmLum.GetPixelColor(d01, x, y + 1, FALSE)
+                || !pArea->m_bmLum.GetPixelColor(d11, x + 1, y + 1, FALSE)) {
+                break;
+            }
+            const BYTE reds[4] = { d00.rgbRed, d10.rgbRed, d01.rgbRed, d11.rgbRed };
+            bool bDistinct = true;
+            for (int i = 0; i < 4; i++) {
+                for (int j = i + 1; j < 4; j++) {
+                    bDistinct = bDistinct && reds[i] != reds[j];
+                }
+            }
+            if (bDistinct) {
+                nCellX = x;
+                nCellY = y;
+                break;
+            }
+        }
+    }
+    REQUIRE(nCellX != -1);
+    INFO("cell " << nCellX << "," << nCellY);
+    auto off = [](BYTE a, BYTE b, BYTE c, BYTE d) {
+        INT nTop = (a * 11 + b * 5) / 16;
+        INT nBottom = (c * 11 + d * 5) / 16;
+        return static_cast<BYTE>((nTop * 9 + nBottom * 3) / 12);
+    };
+    CHECK(pArea->GetTintColor(CPoint(nCellX * 16 + 5, nCellY * 12 + 3), CGameObject::LIST_FRONT)
+        == RGB(off(d00.rgbRed, d10.rgbRed, d01.rgbRed, d11.rgbRed),
+            off(d00.rgbGreen, d10.rgbGreen, d01.rgbGreen, d11.rgbGreen),
+            off(d00.rgbBlue, d10.rgbBlue, d01.rgbBlue, d11.rgbBlue)));
+    CHECK(GetRValue(pArea->GetTintColor(CPoint(nCellX * 16 + 5, nCellY * 12 + 3), CGameObject::LIST_FRONT))
+        != off(d00.rgbRed, d01.rgbRed, d10.rgbRed, d11.rgbRed));
 
     pArea->m_cInfinity.m_areaType = areaType;
 }
