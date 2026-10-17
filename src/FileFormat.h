@@ -502,7 +502,7 @@ public:
             /* 008C */ BYTE m_sorcererLevel;
             /* 008D */ BYTE m_wizardLevel;
         };
-        BYTE m_classLevels[11];
+        /* 0083 */ BYTE m_classLevels[11];
     };
     /* 008E */ unsigned char field_8E[22];
     /* 00A4 */ STRREF m_speech[63];

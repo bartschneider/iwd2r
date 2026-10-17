@@ -11,7 +11,11 @@ class CGameSprite;
 class CUIControlTextDisplay;
 class CWeaponIdentification;
 
-class CItem : public CResHelper<CResItem, 1005> {
+// The original's CItem has a vtable at 0 (its constructor 0x4E7840 stores
+// 0x84CED0 there), so its CResHelper base starts at 0x0004 and cResRef is
+// at 0x000C (0x4E785C: lea ebx, [esi+0xC] before CResRef::CResRef).
+// tools/gen_fields.py reads the base comment.
+class CItem : public CResHelper<CResItem, 1005> /* base 0x0004 */ {
 public:
     static const CString VALUE;
 

@@ -425,8 +425,8 @@ class PlayVmArgsTest(unittest.TestCase):
             self.assertEqual(play.suite_files(tmp),
                              [os.path.join(tmp, 'a.txt'),
                               os.path.join(tmp, 'b.txt')])
-        self.assertNotIn('first_fight',
-                         [play.scenario_name(p) for p in play.suite_files()])
+        self.assertFalse([p for p in play.suite_files()
+                          if os.sep + 'pending' + os.sep in p])
 
     def test_table(self):
         text = play.format_table('linux', [('a', 0, 1.25, 3),
@@ -2745,6 +2745,48 @@ class OracleMirrorTest(unittest.TestCase):
             f.write(b'{"md5": "2"}')
         oracle.linux_mirror(self.game, self.mirror, force=True)
         self.assertEqual(self.read('Data/AR1000.bif'), b'NEW!')
+        self.assertFalse(os.path.exists(self.mirror + '.tmp'))
+
+    def test_a_copy_cut_short_is_made_again(self):
+        # A copy that stopped part way (left beside the mirror) is not
+        # taken for the mirror and is replaced by a whole one.
+        from unittest import mock
+        partial = self.mirror + '.tmp'
+        os.makedirs(partial)
+        with open(os.path.join(partial, 'vanilla.ok'), 'wb') as f:
+            f.write(b'{"md5": "1"}')
+        real_copytree = shutil.copytree
+        calls = []
+
+        def failing_copytree(src, dst, *args, **kwargs):
+            calls.append(dst)
+            if len(calls) == 1:
+                raise OSError('disk full')
+            return real_copytree(src, dst, *args, **kwargs)
+
+        with mock.patch.object(oracle.shutil, 'copytree', failing_copytree):
+            with self.assertRaises(OSError):
+                oracle.linux_mirror(self.game, self.mirror, force=True)
+            self.assertFalse(os.path.exists(self.mirror))
+            oracle.linux_mirror(self.game, self.mirror, force=True)
+        self.assertEqual(calls[:2], [partial, partial])
+        self.assertEqual(self.read('Data/AR1000.bif'), b'BIFF')
+        self.assertEqual(self.read('vanilla.ok'), b'{"md5": "1"}')
+        self.assertFalse(os.path.exists(partial))
+
+    def test_an_ini_the_install_lost_goes_from_the_mirror(self):
+        with open(os.path.join(self.game, 'Party.ini'), 'wb') as f:
+            f.write(b'[Party]\r\n')
+        oracle.linux_mirror(self.game, self.mirror, force=True)
+        self.assertEqual(self.read('Party.ini'), b'[Party]\r\n')
+        os.remove(os.path.join(self.game, 'Party.ini'))
+        oracle.linux_mirror(self.game, self.mirror, force=True)
+        self.assertFalse(os.path.exists(os.path.join(self.mirror, 'Party.ini')))
+        # Other files the install lost stay until the next marker.
+        os.remove(os.path.join(self.game, 'CHITIN.KEY'))
+        oracle.linux_mirror(self.game, self.mirror, force=True)
+        self.assertEqual(self.read('CHITIN.KEY'), b'KEY V1  ')
+        self.assertEqual(self.read('icewind2.ini'), b'[Program Options]\r\n')
 
 
 class OracleSafeTargetTest(unittest.TestCase):
@@ -3229,6 +3271,36 @@ public:
     /* 0014 */ STRREF m_text;
 };
 
+template <class T, int nType>
+class CResHolder {
+public:
+    /* 0000 */ BOOL bLoading;
+    /* 0004 */ T* pRes;
+    /* 0008 */ CResRef cResRef;
+};
+
+// The original has a vtable at 0: the base starts at 4.
+class CHeld : public CResHolder<CResX, 5> /* base 0x0004 */ {
+public:
+    /* 0014 */ INT m_nAbilities;
+};
+
+class CHeldToo : public CObject, public CResHolder<CResX, 6> /* base 0x10 */ {
+public:
+    /* 0020 */ WORD m_count;
+};
+
+class CNested : public CTypedPtrList<CPtrList, CPair<int, CResX*>*>, public CResHolder<CResX, 7> /* base 0x0010 */ {
+public:
+    /* 0030 */ BYTE m_last;
+};
+
+class CHolderNamed {
+public:
+    /* 0004 */ int m_n;
+    /* 0008 */ CString m_sName;
+};
+
 class CHolder {
 public:
     /* 0000 */ SCRIPTNAME m_name;
@@ -3346,6 +3418,57 @@ class GenFieldsTest(unittest.TestCase):
                                  'member': 'm_list.m_nSize'}})
         self.assertIn('no commented member m_nSize', str(e.exception))
 
+    def test_base_offset_comment(self):
+        # `/* base 0xNNNN */` after a base class moves its members.
+        out = self.generate({
+            'ref': {'class': 'CHeld', 'member': 'cResRef'},
+            'loading': {'class': 'CHeld', 'member': 'bLoading'},
+            'own': {'class': 'CHeld', 'member': 'm_nAbilities'},
+            'plain': {'class': 'CResHolder', 'member': 'cResRef'},
+            'second': {'class': 'CHeldToo', 'member': 'pRes'},
+            'count': {'class': 'CHeldToo', 'member': 'm_count'},
+        })
+        self.assertEqual(out, {
+            'ref': {'base': 'CHeld', 'offset': '0x000C', 'type': 'resref'},
+            'loading': {'base': 'CHeld', 'offset': '0x0004', 'type': 'i32'},
+            'own': {'base': 'CHeld', 'offset': '0x0014', 'type': 'i32'},
+            'plain': {'base': 'CResHolder', 'offset': '0x0008',
+                      'type': 'resref'},
+            'second': {'base': 'CHeldToo', 'offset': '0x0014',
+                       'type': 'ptr'},
+            'count': {'base': 'CHeldToo', 'offset': '0x0020',
+                      'type': 'u16'},
+        })
+        # Nested template arguments: the bases split at the commas outside
+        # the brackets.
+        out = self.generate({
+            'head': {'class': 'CNested', 'member': 'm_pNodeHead'},
+            'ref': {'class': 'CNested', 'member': 'cResRef'},
+        })
+        self.assertEqual(out, {
+            'head': {'base': 'CNested', 'offset': '0x0004', 'type': 'ptr'},
+            'ref': {'base': 'CNested', 'offset': '0x0018',
+                    'type': 'resref'}})
+        self.assertEqual(gen_fields.bases(
+            'class C : public A<B, C<D, E>*>, protected F /* base 0x8 */ {'),
+            [('A', 0), ('F', 8)])
+        self.assertEqual(gen_fields.bases('class C {'), [])
+        self.assertEqual(gen_fields.bases('struct S : T {'), [('T', 0)])
+        self.assertEqual(gen_fields.bases(
+            'class C : public ns::B<int>, private ::top :: D /* base 4 */ {'),
+            [('B', 0), ('D', 4)])
+        # CString: its m_pchData, the pointer to its characters.
+        out = self.generate({'name': {'class': 'CHolderNamed',
+                                      'member': 'm_sName.m_pchData'}})
+        self.assertEqual(out, {'name': {'base': 'CHolderNamed',
+                                        'offset': '0x0008', 'type': 'ptr'}})
+        # The repository's CItem (src/CItem.h): its resref is at 0x0C in the
+        # original (0x4E785C lea ebx, [esi+0xC]).
+        with open(os.path.join(ROOT, 'oracle', 'replay', 'fields.json')) as f:
+            fields = json.load(f)
+        self.assertEqual(fields['item_resref'], {
+            'base': 'CItem', 'offset': '0x000C', 'type': 'resref'})
+
     def test_global_and_sizeof(self):
         out = self.generate({
             'thing': {'global': 'g_pThing', 'type': 'ptr'},
@@ -3421,6 +3544,37 @@ class GenFieldsTest(unittest.TestCase):
         self.assertEqual(fields['object_entry_size']['offset'], '0x000C')
         self.assertEqual(fields['object_entry_id']['offset'], '0x0006')
         self.assertEqual(fields['object_entry_ptr']['offset'], '0x0008')
+        # The game block: CInfGame::AddPartyGold 0x5BF68B (add [ecx+0x4238]),
+        # CGameSprite::Marshal 0x70B4E0 (lea ecx, [ebp+0x4AD8], the
+        # equipment), CDerivedStats::Reload 0x4443D0/0x4443D9 (the base
+        # stats' levels at 0x83 and 0x82), CItem::CItem 0x4E7840 (resref
+        # 0x0C, use counts 0x18-0x1C, flags 0x20).
+        self.assertEqual(fields['party_gold']['offset'], '0x4238')
+        self.assertEqual(fields['sprite_items']['offset'], '0x4AD8')
+        self.assertEqual(fields['sprite_level']['offset'], '0x0626')
+        self.assertEqual(fields['sprite_class_levels']['offset'], '0x0627')
+        self.assertEqual(fields['item_resref']['offset'], '0x000C')
+        self.assertEqual(fields['item_use_count1']['offset'], '0x0018')
+        self.assertEqual(fields['item_flags']['offset'], '0x0020')
+        # The slots: CScreenLoad::RefreshGameSlots 0x63CA0A (m_nNumGameSlots
+        # [edi+0x1CA]), 0x63CAAE (m_aGameSlots.m_pData [edi+0x1D6]);
+        # CScreenSave::RefreshGameSlots 0x65BDBB ([edi+0x458]), 0x65BE5F
+        # ([edi+0x464]); a slot's 0x63D354 (add ecx, 0x304), 0x63D36C
+        # ([ecx+0x308]), 0x63D37F ([ecx+0x30C]), 0x63D393 (add ecx, 0x310).
+        self.assertEqual(fields['load_slots_count']['offset'], '0x01CA')
+        self.assertEqual(fields['load_slots']['offset'], '0x01D6')
+        self.assertEqual(fields['save_slots_count']['offset'], '0x0458')
+        self.assertEqual(fields['save_slots']['offset'], '0x0464')
+        self.assertEqual(fields['load_slots_size']['offset'], '0x01DA')
+        self.assertEqual(fields['save_slots_size']['offset'], '0x0468')
+        for kind in ('load', 'save'):
+            self.assertEqual(fields[kind + '_slot_character']['offset'],
+                             '0x0304')
+            self.assertEqual(fields[kind + '_slot_time']['offset'], '0x0308')
+            self.assertEqual(fields[kind + '_slot_chapter']['offset'],
+                             '0x030C')
+            self.assertEqual(fields[kind + '_slot_chapter_text']['offset'],
+                             '0x0310')
 
 
 class MiniSchemaTest(unittest.TestCase):
@@ -3485,7 +3639,8 @@ class MiniSchemaTest(unittest.TestCase):
                             'ai_overlap_frames': 0,
                             'reinitializing': 0, 'loading': 0, 'loads': 0,
                             'held_frames': 0, 'ai_rng_state': None},
-                'chargen': None, 'world': None}
+                'chargen': None, 'world': None,
+                'game': {'party_gold': 0, 'members': []}, 'slots': None}
         self.assertEqual(minischema.validate(dump, schema), [])
         dump['chargen'] = {'race': 1, 'subrace': 0, 'class': 5,
                            'abilities': [10, 11, 12, 13, 14, 15],
@@ -3517,7 +3672,8 @@ class MiniSchemaTest(unittest.TestCase):
                                      'locked': 1}],
                           'dialog': {'active': 1, 'speaker': 3, 'entry': 0,
                                      'responses': 2},
-                          'explored_count': 12, 'creatures': 3}}
+                          'explored_count': 12, 'creatures': 3},
+                'game': None, 'slots': None}
         self.assertEqual(minischema.validate(dump, schema), [])
         dump['world']['party'].append(
             {'id': 131073, 'x': None, 'y': None, 'hp': None, 'max_hp': None,
@@ -3544,6 +3700,76 @@ class MiniSchemaTest(unittest.TestCase):
         del dump['world']
         self.assertEqual(minischema.validate(dump, schema),
                          ["$: missing required property 'world'"])
+
+    def test_replay_schema_game(self):
+        with open(os.path.join(ROOT, 'oracle', 'replay', 'schema.json')) as f:
+            schema = json.load(f)
+        inventory = [None] * 51
+        inventory[0] = {'resref': '00HELM01', 'uses': [0, 0, 0], 'flags': 1}
+        inventory[16] = {'resref': '00ARRO01', 'uses': [40, 0, 0],
+                         'flags': 0}
+        member = {'id': 65536, 'gold': 0, 'xp': 300, 'level': 1,
+                  'class_levels': [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0],
+                  'inventory': inventory}
+        gone = {'id': 131073, 'gold': None, 'xp': None, 'level': None,
+                'class_levels': None, 'inventory': None}
+        dump = {'frame': 1500, 'checkpoint': 'loaded', 'screen': 'inventory',
+                'rng_state': 1,
+                'globals': {'au_counter': 1498, 'fullscreen': 0,
+                            'in_async_update': 0, 'ai_stalled_frames': 0,
+                            'ai_overlap_frames': 0,
+                            'reinitializing': 0, 'loading': 0, 'loads': 1,
+                            'held_frames': 13, 'ai_rng_state': 7},
+                'chargen': None, 'world': None,
+                'game': {'party_gold': 75, 'members': [member, gone]},
+                'slots': [{'file': '000000004-Probe Save',
+                           'name': 'Probe Save', 'character': 'Probe',
+                           'time': 25200000, 'chapter': 0,
+                           'chapter_text': 'Prologue'},
+                          {'file': None, 'name': None, 'character': None,
+                           'time': 0, 'chapter': -1, 'chapter_text': None}]}
+        self.assertEqual(minischema.validate(dump, schema), [])
+        member['inventory'] = inventory[:50]
+        member['class_levels'] = [0] * 12
+        inventory[16] = dict(inventory[16], uses=[70000, 0, 0])
+        member['inventory'] = inventory
+        self.assertEqual(minischema.validate(dump, schema), [
+            '$.game.members[0].class_levels: 12 items, more than 11',
+            '$.game.members[0].inventory[16].uses[0]: 70000 is above the '
+            'maximum 65535'])
+        del dump['game']['party_gold']
+        member['class_levels'] = [0] * 11
+        inventory[16]['uses'] = [40, 0, 0]
+        del dump['slots'][1]['time']
+        self.assertEqual(minischema.validate(dump, schema), [
+            "$.game: missing required property 'party_gold'",
+            "$.slots[1]: missing required property 'time'"])
+
+    def test_game_fields_are_compared(self):
+        """The game block's fields are compared, an item's by slot."""
+        slots = [None] * 51
+        original = {'game': {'party_gold': 75, 'members': [
+            {'id': 1, 'gold': 0, 'xp': 300, 'level': 1,
+             'class_levels': [0] * 11,
+             'inventory': slots[:16] + [{'resref': 'A', 'uses': [40, 0, 0],
+                                         'flags': 0}] + slots[17:]}]}}
+        ours = json.loads(json.dumps(original))
+        ours['game']['party_gold'] = 80
+        ours['game']['members'][0]['xp'] = 0
+        ours['game']['members'][0]['inventory'][16]['uses'][0] = 39
+        ours['game']['members'][0]['inventory'][17] = {'resref': 'B',
+                                                       'uses': [1, 0, 0],
+                                                       'flags': 1}
+        self.assertEqual(oracle.field_differences(original, ours), [
+            ('game.members[0].inventory[16].uses[0]', 40, 39),
+            ('game.members[0].inventory[17]', None, '<missing>'),
+            ('game.members[0].inventory[17].flags', '<missing>', 1),
+            ('game.members[0].inventory[17].resref', '<missing>', 'B'),
+            ('game.members[0].inventory[17].uses[0]', '<missing>', 1),
+            ('game.members[0].inventory[17].uses[1]', '<missing>', 0),
+            ('game.members[0].inventory[17].uses[2]', '<missing>', 0),
+            ('game.members[0].xp', 300, 0),
+            ('game.party_gold', 75, 80)])
 
     def test_world_fields_are_compared(self):
         """The world block's fields are compared, none of them timing."""
@@ -4134,11 +4360,15 @@ class SandboxReplayTest(unittest.TestCase):
             ROOT, 'scenarios', 'walk_and_talk.txt')), 420)
 
     def test_host_switch(self):
-        code, events, locks, _ = self.record(
+        code, events, locks, sandbox = self.record(
             ['replay', 'record', 'start_screen', '--host'])
         self.assertEqual(code, 0)
-        self.assertEqual(events, [('host', [oracle.REPLAY_LOCK])])
-        self.assertEqual(locks.paths, [(oracle.REPLAY_LOCK, 'replay')])
+        # The sandbox lock too, while the copy's saves are aside: play.py
+        # --vm windows copies the copy into its cache under it.
+        self.assertEqual(events, [('host', [oracle.REPLAY_LOCK,
+                                            sandbox.SANDBOX_LOCK])])
+        self.assertEqual(locks.paths, [(oracle.REPLAY_LOCK, 'replay'),
+                                       (sandbox.SANDBOX_LOCK, 'sandbox')])
         run = glob.glob(os.path.join(self.tmp, 'runs', '*', 'replay'))[0]
         with open(os.path.join(run, 'replay.json')) as f:
             self.assertEqual(json.load(f)['mode'], 'host')
@@ -4152,6 +4382,43 @@ class SandboxReplayTest(unittest.TestCase):
             oracle.main(['replay', 'compare', 'chargen_replay'])
             oracle.main(['replay', 'compare', 'chargen_replay', '--host'])
         self.assertEqual(seen, [False, True])
+
+    def test_load_gives_the_run_a_mpsave_of_its_own(self):
+        # --load: the sandbox sees only the save (and default); the copy's
+        # saves wait beside it and come back; what the run saved is kept.
+        game = os.path.join(self.tmp, 'game')
+        mpsave = os.path.join(game, 'mpsave')
+        make_save(mpsave, '000000002-Quick-Save')
+        make_save(mpsave, 'default')
+        save = make_save(os.path.join(self.tmp, 'in'), '000000004-Probe')
+        seen = []
+
+        def run(build_dir, game_dir, script, env, timeout, host_run,
+                out_dir, log):
+            seen.append(sorted(os.listdir(os.path.join(game_dir, 'mpsave'))))
+            seen.append(sorted(os.listdir(oracle.save_aside(game_dir))))
+            make_save(os.path.join(game_dir, 'mpsave'), '000000005-New')
+            os.makedirs(out_dir)
+            with open(os.path.join(out_dir, 'status.txt'), 'w') as f:
+                f.write('frame=10\nstate=finished\n')
+            return {'code': 0, 'stdout': '', 'stderr': '', 'error': None,
+                    'seconds': 1.0}
+        code, _, _, _ = self.record(['replay', 'record', 'start_screen',
+                                     '--load', save], run)
+        self.assertEqual(seen, [['000000004-Probe', 'default'],
+                                ['000000002-Quick-Save']])
+        self.assertEqual(sorted(os.listdir(mpsave)),
+                         ['000000002-Quick-Save', 'default'])
+        self.assertFalse(os.path.exists(oracle.save_aside(game)))
+        run_dir = glob.glob(os.path.join(self.tmp, 'runs', '*', 'replay'))[0]
+        self.assertEqual(os.listdir(os.path.join(run_dir, 'saves')),
+                         ['000000005-New'])
+        with open(os.path.join(run_dir, 'replay.json')) as f:
+            self.assertEqual(json.load(f)['saves'], {
+                'mode': 'load', 'load': save, 'slot': '000000004-Probe',
+                'made': ['000000005-New']})
+        self.assertEqual(oracle.save_aside(oracle.GAME_DIR),
+                         oracle.ORACLE_DIR + '/mpsave-aside')
 
     def test_sandbox_error_fails_the_run(self):
         def failing(build_dir, game_dir, script, env, timeout, host_run,
@@ -4426,10 +4693,10 @@ class OracleReplayCompareTest(unittest.TestCase):
 
     def test_screens(self):
         # Every screen the M1 and M2 scenarios pass through (Party
-        # Formation is single_player).
+        # Formation is single_player), and M4's load and save screens.
         self.assertEqual(oracle.load_screens(),
                          ['chapter', 'connection', 'create_char',
-                          'single_player', 'world'])
+                          'single_player', 'world', 'load', 'save'])
         enum = self.schema()['properties']['screen']['enum']
         for screen in oracle.load_screens():
             self.assertIn(screen, enum)
@@ -4855,6 +5122,25 @@ class KnownDifferencesTest(unittest.TestCase):
         self.assertEqual(oracle.stale_known([used, unused], hits), [unused])
         self.assertEqual(oracle.stale_known([used], hits), [])
         self.assertEqual(oracle.stale_known([], []), [])
+        # Another scenario's checkpoint: not stale in this one.
+        other = self.entry(field='z', checkpoint='reig_done')
+        star = self.entry(field='z', checkpoint='*')
+        self.assertEqual(oracle.stale_known([used, other, star], hits,
+                                            ['cp']), [star])
+        self.assertEqual(oracle.stale_known([other], [], ['reig_done']),
+                         [other])
+
+    def test_a_field_covers_the_values_inside_it(self):
+        entry = self.entry(field='game.members[0].inventory[18]',
+                           checkpoint='cp')
+        for field in ('game.members[0].inventory[18]',
+                      'game.members[0].inventory[18].resref',
+                      'game.members[0].inventory[18].uses[2]'):
+            self.assertIs(oracle.known_entry([entry], 'cp', field), entry)
+        for field in ('game.members[0].inventory[180]',
+                      'game.members[0].inventory[1]',
+                      'game.members[0].inventory'):
+            self.assertIsNone(oracle.known_entry([entry], 'cp', field))
 
     def test_known_hit_is_not_stale_end_to_end(self):
         folder = tempfile.mkdtemp()
@@ -4872,6 +5158,723 @@ class KnownDifferencesTest(unittest.TestCase):
             dirs[0], dirs[1], ['cp'], ['connection'], known)
         self.assertEqual(failures, 0)
         self.assertEqual(oracle.stale_known(known, hits), [known[1]])
+
+
+def sav_bytes(entries):
+    """A SAV V1.0 file holding entries ({name: data}), as the game packs
+    ICEWIND2.SAV."""
+    out = b'SAV V1.0'
+    for name, data in entries.items():
+        packed = zlib.compress(data)
+        raw = name.encode('latin-1') + b'\0'
+        out += struct.pack('<I', len(raw)) + raw
+        out += struct.pack('<II', len(data), len(packed)) + packed
+    return out
+
+
+def make_save(folder, name, payload='x', sav=None):
+    """A save folder as the game writes it: ICEWIND2.GAM with the
+    GAMEV2.2 signature (CInfGame::SaveGameExists) and ICEWIND2.SAV, the
+    payload itself or, with sav ({name: data}), a SAV V1.0 file of it."""
+    path = os.path.join(folder, name)
+    os.makedirs(path)
+    with open(os.path.join(path, 'ICEWIND2.GAM'), 'wb') as f:
+        f.write(b'GAMEV2.2' + payload.encode())
+    with open(os.path.join(path, 'ICEWIND2.SAV'), 'wb') as f:
+        f.write(sav_bytes(sav) if sav is not None else payload.encode())
+    return path
+
+
+class OracleSavesTest(unittest.TestCase):
+    """replay --load, the "# saves:" header and the saves of a run
+    (tools/oracle.py prepared_saves)."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp = self._tmp.name
+
+    def scenario(self, header, name='s.txt'):
+        path = os.path.join(self.tmp, name)
+        with open(path, 'w') as f:
+            f.write(header + 'wait 1\ncheckpoint a\n# saves: ignored\n')
+        return path
+
+    def test_header_saves(self):
+        self.assertIsNone(oracle.header_saves(self.scenario('# x\n')))
+        self.assertEqual(oracle.header_saves(self.scenario(
+            '# M4\n\n# saves: empty\n# timeout: 9\n')), 'empty')
+        self.assertEqual(oracle.header_saves(self.scenario(
+            '#saves:  LOAD \n')), 'load')
+        for bad in ('# saves: some\n', '# saves: empty\n# saves: load\n'):
+            with self.assertRaises(SystemExit, msg=bad):
+                oracle.header_saves(self.scenario(bad))
+        self.assertEqual(oracle.header_saves(
+            os.path.join(ROOT, 'scenarios', 'pending', 'save_load.txt')),
+            'empty')
+        self.assertEqual(oracle.header_saves(
+            os.path.join(ROOT, 'scenarios', 'pending', 'load_game.txt')),
+            'load')
+        self.assertIsNone(oracle.header_saves(
+            os.path.join(ROOT, 'scenarios', 'walk_and_talk.txt')))
+
+    def test_save_plan(self):
+        plain = self.scenario('# x\n')
+        empty = self.scenario('# saves: empty\n', 'e.txt')
+        load = self.scenario('# saves: load\n', 'l.txt')
+        save = make_save(self.tmp, '000000004-Probe Save')
+        for script in (plain, empty):
+            self.assertEqual(oracle.save_plan(script, None),
+                             {'mode': 'empty', 'load': None})
+        for script in (plain, empty, load):
+            self.assertEqual(oracle.save_plan(script, save),
+                             {'mode': 'load', 'load': save})
+        os.makedirs(os.path.join(self.tmp, 'not-a-save'))
+        make_save(self.tmp, 'default')
+        for script, arg, why in (
+                (load, None, 'give one with --load'),
+                (plain, os.path.join(self.tmp, 'not-a-save'),
+                 'not a save folder'),
+                (plain, os.path.join(self.tmp, 'nowhere'),
+                 'not a save folder'),
+                (plain, os.path.join(self.tmp, 'default'), 'its own')):
+            with self.assertRaises(SystemExit) as cm:
+                oracle.save_plan(script, arg)
+            self.assertIn(why, str(cm.exception))
+
+    def test_is_save(self):
+        save = make_save(self.tmp, '000000000-Auto-Save')
+        self.assertTrue(oracle.is_save(save))
+        os.rename(os.path.join(save, 'ICEWIND2.GAM'),
+                  os.path.join(save, 'icewind2.gam'))
+        self.assertTrue(oracle.is_save(save))
+        with open(os.path.join(save, 'icewind2.gam'), 'wb') as f:
+            f.write(b'GAMEV2.0')
+        self.assertFalse(oracle.is_save(save))
+
+    def listing(self, folder):
+        return sorted(os.listdir(folder)) if os.path.isdir(folder) else None
+
+    def test_vanilla_copy_saves_go_aside_and_come_back(self):
+        mpsave = os.path.join(self.tmp, 'game', 'mpsave')
+        aside = os.path.join(self.tmp, 'mpsave-aside')
+        for name in ('000000000-Auto-Save', '000000004-big12345',
+                     'default'):
+            make_save(mpsave, name, name)
+        load = make_save(os.path.join(self.tmp, 'in'), '000000004-Probe Save')
+        out = os.path.join(self.tmp, 'run', 'original')
+        seen = []
+        with contextlib.redirect_stdout(io.StringIO()):
+            with oracle.prepared_saves(mpsave, {'mode': 'load',
+                                                'load': load}, out,
+                                       aside) as report:
+                seen.append(self.listing(mpsave))
+                seen.append(self.listing(aside))
+                # The run saves and autosaves.
+                make_save(mpsave, '000000005-Second', 'new')
+                make_save(mpsave, '000000000-Autosave - Prologue', 'auto')
+        self.assertEqual(seen, [['000000004-Probe Save', 'default'],
+                                ['000000000-Auto-Save',
+                                 '000000004-big12345']])
+        self.assertEqual(self.listing(mpsave), [
+            '000000000-Auto-Save', '000000004-big12345', 'default'])
+        self.assertIsNone(self.listing(aside))
+        self.assertEqual(self.listing(os.path.join(out, 'saves')), [
+            '000000000-Autosave - Prologue', '000000005-Second'])
+        self.assertEqual(report, {
+            'mode': 'load', 'load': load, 'slot': '000000004-Probe Save',
+            'made': ['000000000-Autosave - Prologue', '000000005-Second']})
+        with open(os.path.join(mpsave, '000000004-big12345',
+                               'ICEWIND2.SAV')) as f:
+            self.assertEqual(f.read(), '000000004-big12345')
+
+    def test_saves_come_back_when_the_run_fails(self):
+        mpsave = os.path.join(self.tmp, 'mpsave')
+        aside = os.path.join(self.tmp, 'aside')
+        make_save(mpsave, '000000002-Quick-Save')
+        out = os.path.join(self.tmp, 'out')
+        with self.assertRaises(KeyboardInterrupt), \
+                contextlib.redirect_stdout(io.StringIO()):
+            with oracle.prepared_saves(mpsave, {'mode': 'empty',
+                                                'load': None}, out, aside):
+                self.assertEqual(self.listing(mpsave), [])
+                make_save(mpsave, '000000004-Half')
+                raise KeyboardInterrupt
+        self.assertEqual(self.listing(mpsave), ['000000002-Quick-Save'])
+        self.assertEqual(self.listing(os.path.join(out, 'saves')),
+                         ['000000004-Half'])
+
+    def test_a_refused_move_leaves_the_copys_saves_in_place(self):
+        # The second rename is refused: the first comes back from aside,
+        # the second never left, and nothing of the copy's is harvested
+        # or deleted.
+        from unittest import mock
+        mpsave = os.path.join(self.tmp, 'game', 'mpsave')
+        aside = os.path.join(self.tmp, 'aside')
+        for name in ('000000000-Auto-Save', '000000002-Quick-Save',
+                     '000000004-big12345', 'default'):
+            make_save(mpsave, name, name)
+        out = os.path.join(self.tmp, 'out')
+        real_rename = os.rename
+        calls = []
+
+        def rename(src, dst):
+            calls.append(os.path.basename(src))
+            if len(calls) == 2:
+                raise PermissionError(13, 'refused', src)
+            return real_rename(src, dst)
+        ran = []
+        with mock.patch.object(oracle.os, 'rename', rename), \
+                self.assertRaises(PermissionError), \
+                contextlib.redirect_stdout(io.StringIO()):
+            with oracle.prepared_saves(mpsave, {'mode': 'empty',
+                                                'load': None}, out, aside):
+                ran.append(True)
+        self.assertEqual(ran, [])
+        self.assertEqual(self.listing(mpsave), [
+            '000000000-Auto-Save', '000000002-Quick-Save',
+            '000000004-big12345', 'default'])
+        self.assertIsNone(self.listing(aside))
+        self.assertIsNone(self.listing(os.path.join(out, 'saves')))
+        for name in ('000000000-Auto-Save', '000000004-big12345'):
+            with open(os.path.join(mpsave, name, 'ICEWIND2.SAV')) as f:
+                self.assertEqual(f.read(), name)
+
+    def test_a_load_copy_that_stops_halfway_is_deleted(self):
+        from unittest import mock
+        mpsave = os.path.join(self.tmp, 'game', 'mpsave')
+        aside = os.path.join(self.tmp, 'aside')
+        make_save(mpsave, '000000002-Quick-Save', 'own')
+        load = make_save(os.path.join(self.tmp, 'in'), '000000004-Probe')
+        out = os.path.join(self.tmp, 'out')
+
+        def copytree(src, dst):
+            os.makedirs(dst)
+            with open(os.path.join(dst, 'ICEWIND2.GAM'), 'w') as f:
+                f.write('half')
+            raise OSError(28, 'no space left')
+        with mock.patch.object(oracle.shutil, 'copytree', copytree), \
+                self.assertRaises(OSError), \
+                contextlib.redirect_stdout(io.StringIO()):
+            with oracle.prepared_saves(mpsave, {'mode': 'load',
+                                                'load': load}, out, aside):
+                self.fail('the run must not start')
+        self.assertEqual(self.listing(mpsave), ['000000002-Quick-Save'])
+        self.assertIsNone(self.listing(os.path.join(out, 'saves')))
+        self.assertIsNone(self.listing(aside))
+
+    def test_a_save_over_the_loaded_slot_is_kept(self):
+        mpsave = os.path.join(self.tmp, 'mpsave')
+        load = make_save(os.path.join(self.tmp, 'in'), '000000004-Probe',
+                         'loaded')
+        for saves_over, kept in ((False, None), (True, ['000000004-Probe'])):
+            out = os.path.join(self.tmp, 'out-%s' % saves_over)
+            with contextlib.redirect_stdout(io.StringIO()):
+                with oracle.prepared_saves(mpsave, {'mode': 'load',
+                                                    'load': load}, out) as r:
+                    if saves_over:
+                        with open(os.path.join(mpsave, '000000004-Probe',
+                                               'ICEWIND2.SAV'), 'w') as f:
+                            f.write('saved over')
+            self.assertEqual(self.listing(mpsave), [])
+            self.assertEqual(self.listing(os.path.join(out, 'saves')), kept)
+            self.assertEqual(r['made'], kept or [])
+        with open(os.path.join(self.tmp, 'out-True', 'saves',
+                               '000000004-Probe', 'ICEWIND2.SAV')) as f:
+            self.assertEqual(f.read(), 'saved over')
+
+    def test_a_dead_runs_saves_are_put_back_first(self):
+        mpsave = os.path.join(self.tmp, 'mpsave')
+        aside = os.path.join(self.tmp, 'aside')
+        make_save(aside, '000000004-big12345', 'user')
+        make_save(mpsave, '000000004-big12345', 'dead run')
+        make_save(mpsave, 'default')
+        with contextlib.redirect_stdout(io.StringIO()) as text:
+            with oracle.prepared_saves(mpsave, None, self.tmp, aside) as r:
+                self.assertEqual(r, {})
+        self.assertIn('put back 1 entry a run that died left',
+                      text.getvalue())
+        self.assertEqual(self.listing(mpsave),
+                         ['000000004-big12345', 'default'])
+        self.assertIsNone(self.listing(aside))
+        with open(os.path.join(mpsave, '000000004-big12345',
+                               'ICEWIND2.SAV')) as f:
+            self.assertEqual(f.read(), 'user')
+
+    def test_a_dead_runs_own_saves_leave_the_copy(self):
+        # A run died with the copy's saves aside: its record names what
+        # mpsave held before; what else is there is that run's (its load
+        # copy, an autosave it wrote) and moves into the next run's folder.
+        mpsave = os.path.join(self.tmp, 'game', 'mpsave')
+        aside = os.path.join(self.tmp, 'mpsave-aside')
+        make_save(aside, '000000000-Autosave - Prologue', 'user')
+        make_save(aside, '000000004-big12345', 'user')
+        make_save(mpsave, '000000000-Autosave - Prologue', 'dead run')
+        make_save(mpsave, '000000005-Probe', 'dead run')
+        make_save(mpsave, 'default')
+        with open(oracle.aside_record(aside), 'w') as f:
+            json.dump(['000000000-Autosave - Prologue',
+                       '000000004-big12345'], f)
+        out = os.path.join(self.tmp, 'next')
+        with contextlib.redirect_stdout(io.StringIO()) as text:
+            with oracle.prepared_saves(mpsave, None, out, aside):
+                pass
+        self.assertIn('moved 000000005-Probe, which a run that died made',
+                      text.getvalue())
+        self.assertEqual(self.listing(mpsave), [
+            '000000000-Autosave - Prologue', '000000004-big12345',
+            'default'])
+        with open(os.path.join(mpsave, '000000000-Autosave - Prologue',
+                               'ICEWIND2.SAV')) as f:
+            self.assertEqual(f.read(), 'user')
+        self.assertEqual(self.listing(os.path.join(out, 'dead-run-saves')),
+                         ['000000005-Probe'])
+        self.assertFalse(os.path.exists(oracle.aside_record(aside)))
+        # A run that ends normally leaves no record behind.
+        with contextlib.redirect_stdout(io.StringIO()):
+            with oracle.prepared_saves(mpsave, {'mode': 'empty',
+                                                'load': None}, out, aside):
+                self.assertTrue(os.path.exists(oracle.aside_record(aside)))
+        self.assertFalse(os.path.exists(oracle.aside_record(aside)))
+
+    def test_a_private_view_is_emptied_in_place(self):
+        mpsave = os.path.join(self.tmp, 'view', 'mpsave')
+        make_save(mpsave, '000000000-Auto-Save')
+        make_save(mpsave, 'default')
+        out = os.path.join(self.tmp, 'ours')
+        with contextlib.redirect_stdout(io.StringIO()):
+            with oracle.prepared_saves(mpsave, {'mode': 'empty',
+                                                'load': None}, out):
+                self.assertEqual(self.listing(mpsave), ['default'])
+        self.assertEqual(self.listing(mpsave), ['default'])
+        self.assertIsNone(self.listing(os.path.join(out, 'saves')))
+        # A view whose install has no mpsave gets one.
+        mpsave = os.path.join(self.tmp, 'bare', 'mpsave')
+        with contextlib.redirect_stdout(io.StringIO()):
+            with oracle.prepared_saves(mpsave, {'mode': 'empty',
+                                                'load': None}, out):
+                self.assertEqual(self.listing(mpsave), [])
+
+    def test_pick_save(self):
+        self.assertEqual(oracle.save_number('000000004-Probe Save'), 4)
+        self.assertEqual(oracle.save_number('crash_07_23'), -1)
+        made = ['000000000-Autosave - Prologue', '000000004-Probe Save']
+        self.assertEqual(oracle.pick_save(made, made),
+                         ('000000004-Probe Save', None))
+        self.assertEqual(oracle.pick_save(made, made,
+                                          '000000000-Autosave - Prologue'),
+                         ('000000000-Autosave - Prologue', None))
+        name, why = oracle.pick_save(made, made[:1])
+        self.assertIsNone(name)
+        self.assertIn('different saves', why)
+        self.assertIn('neither', oracle.pick_save([], [])[1])
+        self.assertIn('not both x', oracle.pick_save(made, made, 'x')[1])
+
+    def test_record_and_compare_pass_the_plan_to_both_sides(self):
+        from unittest import mock
+        save = make_save(self.tmp, '000000004-Probe Save')
+        seen = []
+
+        def record(script, actions, *a, **kw):
+            seen.append(('original', os.path.basename(script),
+                         kw.get('saves')))
+            return 0
+
+        def ours(exe, game, script, actions, *a, **kw):
+            seen.append(('ours', os.path.basename(script), kw.get('saves')))
+            return 0
+        oracle_play = __import__('play')
+        with LockRecorder.patch(oracle, LockRecorder()), \
+                mock.patch.object(oracle, 'record_original', record), \
+                mock.patch.object(oracle, 'run_ours', ours), \
+                mock.patch.object(oracle, 'ensure_vanilla', lambda: self.tmp), \
+                mock.patch.object(oracle, 'prepare_replay_ini', lambda g: None), \
+                mock.patch.object(oracle, 'RUNS_DIR',
+                                  os.path.join(self.tmp, 'runs')), \
+                mock.patch.object(oracle_play, 'backup_inis',
+                                  lambda g, b: []), \
+                mock.patch.object(oracle_play, 'restore_inis',
+                                  lambda b, g, n: None), \
+                contextlib.redirect_stdout(io.StringIO()):
+            oracle.main(['replay', 'record', 'start_screen', '--load', save])
+            oracle.main(['replay', 'compare', 'start_screen', '--no-build',
+                         '--load', save])
+            oracle.main(['replay', 'compare', os.path.join(
+                ROOT, 'scenarios', 'pending', 'save_load.txt'),
+                '--no-build'])
+            oracle.main(['replay', 'record', 'start_screen'])
+        plan = {'mode': 'load', 'load': save}
+        empty = {'mode': 'empty', 'load': None}
+        self.assertEqual(seen, [
+            ('original', 'start_screen.txt', plan),
+            ('original', 'start_screen.txt', plan),
+            ('ours', 'start_screen.txt', plan),
+            ('original', 'save_load.txt', empty),
+            ('ours', 'save_load.txt', empty),
+            ('original', 'start_screen.txt', empty)])
+
+    def test_load_scenario(self):
+        actions = realinput.load_scenario(os.path.join(
+            ROOT, 'scenarios', 'pending', 'load_game.txt'))
+        self.assertEqual([a['name'] for a in actions
+                          if a['op'] == 'checkpoint'],
+                         ['menu', 'load_screen', 'loaded', 'loaded_settled'])
+        actions = realinput.load_scenario(os.path.join(
+            ROOT, 'scenarios', 'pending', 'save_load.txt'))
+        names = [a['name'] for a in actions if a['op'] == 'checkpoint']
+        self.assertEqual(names[0], 'menu')
+        self.assertEqual(names[-6:], ['save_screen', 'saved', 'walked_on',
+                                      'load_screen', 'loaded',
+                                      'loaded_settled'])
+        self.assertEqual(oracle.replay_timeout(None, os.path.join(
+            ROOT, 'scenarios', 'pending', 'save_load.txt')), 420)
+
+
+savediff = load_tool('savediff')
+
+
+def area_bytes(entrances=7, vertices=386, region_vertices=4,
+               door_vertices=3, wed=b'AR1000\0P', unset=b'0 0 0 OB',
+               travel=b'\xd6\x03\0\0\x16\x02\0\0'):
+    """An ARE V9.1 area file at the offsets tools/savediff.py reads: its
+    WED resref (wed: the original's has stack bytes after the NUL), a
+    region without flag 0x200 whose +0x88-0x8F hold unset bytes (unset),
+    one with it whose +0x88-0x8F are set (travel), and one door."""
+    data = bytearray(0x400)
+    data[0x08:0x10] = wed
+    struct.pack_into('<H', data, 0x6A, 2)
+    struct.pack_into('<I', data, 0x6C, 0x100)
+    struct.pack_into('<II', data, 0x78, 0x380, entrances)
+    struct.pack_into('<H', data, 0x84, 25)
+    struct.pack_into('<H', data, 0x90, vertices)
+    struct.pack_into('<II', data, 0xB4, 1, 0x300)
+    data[0x100:0x100 + 9] = b'Life Raft'
+    struct.pack_into('<H', data, 0x100 + 0x2A, region_vertices)
+    data[0x100 + 0x88:0x100 + 0x90] = unset
+    data[0x1C4:0x1C4 + 6] = b'To1001'
+    struct.pack_into('<I', data, 0x1C4 + 0x60, 0x200)
+    data[0x1C4 + 0x88:0x1C4 + 0x90] = travel
+    data[0x300:0x300 + 12] = b'AR1000_Door1'
+    struct.pack_into('<HH', data, 0x300 + 0x30, door_vertices, 4)
+    struct.pack_into('<8H', data, 0x300 + 0x38, 3174, 3, 3183, 13, 958, 486,
+                     1005, 540)
+    return bytes(data)
+
+
+def gam_bytes(names=(b'FEMALE_BARBARIAN_1\0f\0oracle\\game',),
+              npcs=(b'NPC\0garbage',), before=b''):
+    """A GAM V2.2 game file with party and other-creature entries (0x340
+    bytes, from 0xB4) whose field_25E (+0x25E, 32 bytes) hold names, with
+    whatever follows their NUL."""
+    data = bytearray(b'GAMEV2.2' + bytes(0xAC) + before)
+    tables = []
+    for entries in (names, npcs):
+        tables.append((len(data), len(entries)))
+        for name in entries:
+            entry = bytearray(0x340)
+            entry[0x25E:0x25E + len(name[:32])] = name[:32]
+            data += entry
+    struct.pack_into('<II', data, 0x20, *tables[0])
+    struct.pack_into('<II', data, 0x30, *tables[1])
+    return bytes(data)
+
+
+class SaveDiffTest(unittest.TestCase):
+    """tools/savediff.py on two save folders."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp = self._tmp.name
+
+    def save(self, side, gam=None, area=None, extra=None, wmp=b'map',
+             bmp=b'shot'):
+        path = os.path.join(self.tmp, side)
+        os.makedirs(path)
+        files = {'ICEWIND2.GAM': gam or gam_bytes(),
+                 'ICEWIND2.SAV': sav_bytes(dict(
+                     {'AR1000.ARE': area or area_bytes()}, **(extra or {}))),
+                 'WORLDMAP.WMP': wmp, 'ICEWIND2.BMP': bmp,
+                 'PORTRT0.BMP': bmp}
+        for name, data in files.items():
+            with open(os.path.join(path, name), 'wb') as f:
+                f.write(data)
+        return path
+
+    def test_the_same_data(self):
+        a = self.save('a')
+        b = self.save('b', bmp=b'another shot')
+        lines, different = savediff.compare_saves(a, b)
+        self.assertEqual(different, 0)
+        self.assertEqual(lines, [
+            '  ICEWIND2.GAM: same (41 unset bytes masked)',
+            '  ICEWIND2.SAV:AR1000.ARE: same (9 unset bytes masked)',
+            '  WORLDMAP.WMP: same'])
+
+    def test_the_original_s_unset_bytes_are_masked(self):
+        # Two of the original's saves of one game hold different stack
+        # bytes after a name's NUL, in the WED resref and in a region
+        # without flag 0x200 (as runs 20261016-171655 and -173235 did);
+        # ours holds zeros there. All compare the same.
+        a = self.save('a')
+        b = self.save('b', gam=gam_bytes(
+            names=(b'FEMALE_BARBARIAN_1\0' + bytes(13),),
+            npcs=(b'NPC\0other bytes',)),
+            area=area_bytes(wed=b'AR1000\0\0', unset=bytes(8)))
+        c = self.save('c', area=area_bytes(unset=b'"" 0 0 0'))
+        for other in (b, c):
+            lines, different = savediff.compare_saves(a, other)
+            self.assertEqual(different, 0, lines)
+        # Set bytes are not masked: a name before its NUL, a travel
+        # region's +0x88, the WED resref itself.
+        for side, save in (
+                ('d', {'gam': gam_bytes(names=(b'MALE_BARBARIAN_1\0x',))}),
+                ('e', {'area': area_bytes(travel=bytes(8))}),
+                ('f', {'area': area_bytes(wed=b'AR1001\0P')})):
+            lines, different = savediff.compare_saves(a, self.save(side,
+                                                                   **save))
+            self.assertEqual(different, 1, (side, lines))
+
+    def test_masks(self):
+        gam = gam_bytes()
+        self.assertEqual(savediff.gam_masks(gam), [
+            (0xB4 + 0x25E + 19, 0xB4 + 0x25E + 32),
+            (0xB4 + 0x340 + 0x25E + 4, 0xB4 + 0x340 + 0x25E + 32)])
+        self.assertEqual(savediff.gam_masks(b'GAMEV2.2'), [])
+        area = area_bytes()
+        self.assertEqual(savediff.are_masks(area),
+                         [(0x0F, 0x10), (0x188, 0x190)])
+        self.assertEqual(savediff.are_masks(area_bytes(wed=b'AR100000')),
+                         [(0x188, 0x190)])
+        self.assertEqual(savediff.masked(b'abcdef', [(1, 3), (5, 9)]),
+                         b'a\0\0de\0')
+
+    def test_an_area_differs_by_its_parts(self):
+        a = self.save('a', extra={'default.toh': b'toh'})
+        b = self.save('b', area=area_bytes(entrances=0, vertices=225,
+                                           region_vertices=2,
+                                           door_vertices=2))
+        lines, different = savediff.compare_saves(a, b)
+        self.assertEqual(different, 2)
+        self.assertIn('    entrances: 7, 0', lines)
+        self.assertIn('    vertices: 386, 225', lines)
+        self.assertIn('    region Life Raft: 4 vertices; 2', lines)
+        self.assertIn('    door AR1000_Door1: vertices 3 open, 4 closed, '
+                      'boxes (3174, 3, 3183, 13) (958, 486, 1005, 540); 2, '
+                      '4, (3174, 3, 3183, 13) (958, 486, 1005, 540)', lines)
+        self.assertIn('  ICEWIND2.SAV:default.toh: MISSING in %s' % b, lines)
+
+    def test_unreadable_and_missing_files(self):
+        a = self.save('a')
+        b = self.save('b')
+        with open(os.path.join(b, 'ICEWIND2.SAV'), 'wb') as f:
+            f.write(b'SAV V1.0' + b'\x05')
+        os.remove(os.path.join(b, 'WORLDMAP.WMP'))
+        lines, different = savediff.compare_saves(a, b)
+        self.assertEqual(different, 2)
+        self.assertTrue(lines[1].startswith('  ICEWIND2.SAV: unreadable'))
+        self.assertEqual(lines[2], '  WORLDMAP.WMP: MISSING in %s' % b)
+        with contextlib.redirect_stdout(io.StringIO()) as text:
+            self.assertEqual(savediff.main([a, b]), 1)
+            self.assertEqual(savediff.main([a, a]), 0)
+            self.assertEqual(savediff.main([a]), 2)
+        self.assertIn('savediff: 2 files differ', text.getvalue())
+        self.assertIn('savediff: the saves hold the same data',
+                      text.getvalue())
+
+
+class CrossloadTest(unittest.TestCase):
+    """tools/oracle.py replay crossload, with both engines stubbed: each
+    run writes its checkpoint dumps and, in the save scenario, a save."""
+
+    CHECKPOINTS = ('menu', 'load_screen', 'loaded', 'loaded_settled')
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp = self._tmp.name
+
+    def dump(self, name, gold):
+        return {'frame': 10, 'checkpoint': name,
+                'screen': 'world' if name.startswith('loaded')
+                else 'connection', 'rng_state': 1,
+                'globals': {'au_counter': 10, 'ai_stalled_frames': 0,
+                            'ai_overlap_frames': 0, 'in_async_update': 0,
+                            'reinitializing': 0, 'fullscreen': 0,
+                            'loading': 0, 'loads': 0, 'held_frames': 0,
+                            'ai_rng_state': 3},
+                'chargen': None, 'world': None,
+                'game': {'party_gold': gold, 'members': []}}
+
+    def crossload(self, argv, gold=None, saves=None, payload=None):
+        """oracle.main(['replay', 'crossload'] + argv) with the runs
+        stubbed. gold: {run folder: party gold in its dumps} (36 for any
+        other); saves: {'original': [...], 'ours': [...]}, the saves each
+        engine's save run makes; payload: {engine: its saves' game file
+        bytes} (the same for both by default). Returns (exit code, runs,
+        output)."""
+        from unittest import mock
+        gold = gold or {}
+        payload = payload or {}
+        saves = saves or {'original': ['000000000-Autosave - Prologue',
+                                       '000000004-Probe Save'],
+                          'ours': ['000000000-Autosave - Prologue',
+                                   '000000004-Probe Save']}
+        runs = []
+
+        def fake(engine, script, run_dir, subdir, plan):
+            out = os.path.join(run_dir, subdir)
+            os.makedirs(out)
+            runs.append((subdir, engine, os.path.basename(script),
+                         plan and plan['mode'],
+                         plan and plan['load'] and os.path.relpath(
+                             plan['load'], run_dir)))
+            names = [a['name'] for a in realinput.load_scenario(script)
+                     if a['op'] == 'checkpoint']
+            for name in names:
+                with open(os.path.join(out, 'checkpoint-%s.json' % name),
+                          'w') as f:
+                    json.dump(self.dump(name, gold.get(subdir, 36)), f)
+            # One periodic dump, on the world screen.
+            with open(os.path.join(out, 'frame-30.json'), 'w') as f:
+                periodic = self.dump('loaded', gold.get(subdir, 36))
+                del periodic['checkpoint']
+                json.dump(periodic, f)
+            if subdir.startswith('save-'):
+                for name in saves[engine]:
+                    make_save(os.path.join(out, 'saves'), name,
+                              payload.get(engine, 'game'),
+                              {'AR1000.ARE': b'area'})
+            return 0
+
+        def record(script, actions, seed, timeout, dump_every, run_dir,
+                   subdir, **kw):
+            return fake('original', script, run_dir, subdir, kw['saves'])
+
+        def ours(exe, game, script, actions, seed, timeout, dump_every,
+                 run_dir, subdir, **kw):
+            return fake('ours', script, run_dir, subdir, kw['saves'])
+        oracle_play = __import__('play')
+        with LockRecorder.patch(oracle, LockRecorder()), \
+                mock.patch.object(oracle, 'record_original', record), \
+                mock.patch.object(oracle, 'run_ours', ours), \
+                mock.patch.object(oracle, 'ensure_vanilla', lambda: self.tmp), \
+                mock.patch.object(oracle, 'prepare_replay_ini', lambda g: None), \
+                mock.patch.object(oracle, 'RUNS_DIR',
+                                  os.path.join(self.tmp, 'runs')), \
+                mock.patch.object(oracle_play, 'backup_inis',
+                                  lambda g, b: []), \
+                mock.patch.object(oracle_play, 'restore_inis',
+                                  lambda b, g, n: None), \
+                contextlib.redirect_stdout(io.StringIO()) as text:
+            code = oracle.main(['replay', 'crossload', '--no-build'] + argv)
+        return code, runs, text.getvalue()
+
+    def test_each_engine_loads_the_others_save(self):
+        code, runs, text = self.crossload([])
+        self.assertEqual(code, 0, text)
+        save = '000000004-Probe Save'
+        self.assertEqual(runs, [
+            ('save-original', 'original', 'save_load.txt', 'empty', None),
+            ('save-ours', 'ours', 'save_load.txt', 'empty', None),
+            ('original-loads-ours', 'original', 'load_game.txt', 'load',
+             'save-ours/saves/' + save),
+            ('ours-loads-original', 'ours', 'load_game.txt', 'load',
+             'save-original/saves/' + save),
+            ('ours-loads-ours', 'ours', 'load_game.txt', 'load',
+             'save-ours/saves/' + save),
+            # By default the original loads its own save too.
+            ('original-loads-original', 'original', 'load_game.txt',
+             'load', 'save-original/saves/' + save)])
+        self.assertIn('== the saves, the original\'s and ours: the same '
+                      'data', text)
+        self.assertIn('== compare original-loads-ours with '
+                      'ours-loads-original: match at 4 of 4 checkpoints '
+                      'and 1 periodic dump', text)
+        self.assertIn('== compare original-loads-original with '
+                      'original-loads-ours: match', text)
+        self.assertIn('result: MATCH: the saves (000000004-Probe Save) hold '
+                      'the same data and each engine loads the other\'s to '
+                      'the same state', text)
+        report = glob.glob(os.path.join(self.tmp, 'runs', '*',
+                                        'crossload.json'))
+        with open(report[0]) as f:
+            report = json.load(f)
+        self.assertEqual(report['save'], save)
+        self.assertEqual(report['save_files_differ'], 0)
+        self.assertEqual([(p['first'], p['second']) for p in
+                          report['pairs']],
+                         list(oracle.CROSSLOAD_PAIRS
+                              + oracle.CROSSLOAD_OWN_PAIRS))
+
+    def test_a_difference_names_the_runs(self):
+        code, _, text = self.crossload([], gold={'original-loads-ours': 40})
+        self.assertEqual(code, 1)
+        self.assertIn('  DIFF game.party_gold: original-loads-ours 40, '
+                      'ours-loads-original 36', text)
+        self.assertIn('== compare ours-loads-original with ours-loads-ours: '
+                      'match', text)
+        self.assertIn('frame 30 (world): DIFFERENT', text)
+        # Three pairs have that run, 4 checkpoints and a periodic dump
+        # each.
+        self.assertIn('result: DIFFERENT: 15 differences in the loaded '
+                      'states, 0 files of the saves', text)
+
+    def test_the_saves_are_compared_as_data(self):
+        # A field both our saver and our loader get wrong: the loaded
+        # states match, the saves do not.
+        code, runs, text = self.crossload([], payload={'ours': 'other'})
+        self.assertEqual(code, 1)
+        self.assertEqual(len(runs), 6)
+        self.assertIn('== the saves, the original\'s and ours: 1 file '
+                      'DIFFERENT', text)
+        self.assertIn('  ICEWIND2.GAM: DIFFERENT', text)
+        self.assertIn('  ICEWIND2.SAV:AR1000.ARE: same', text)
+        self.assertIn('result: DIFFERENT: 0 differences in the loaded '
+                      'states, 1 file of the saves', text)
+
+    def test_quick_leaves_out_the_originals_own_save(self):
+        code, runs, text = self.crossload(['--quick', '--seed', '7'])
+        self.assertEqual(code, 0, text)
+        self.assertEqual([r[0] for r in runs][2:], [
+            'original-loads-ours', 'ours-loads-original', 'ours-loads-ours'])
+        self.assertNotIn('original-loads-original', text)
+
+    def test_the_sides_must_make_the_same_saves(self):
+        code, runs, text = self.crossload([], saves={
+            'original': ['000000004-Probe Save'],
+            'ours': ['000000000-Autosave - Prologue',
+                     '000000004-Probe Save']})
+        self.assertEqual(code, 1)
+        self.assertEqual(len(runs), 2)
+        self.assertIn('crossload: the sides made different saves', text)
+        code, runs, text = self.crossload(['--slot', '000000004-Probe Save'],
+                                          saves={
+            'original': ['000000004-Probe Save'],
+            'ours': ['000000000-Autosave - Prologue',
+                     '000000004-Probe Save']})
+        self.assertEqual(code, 0, text)
+
+    def test_saves_from_an_earlier_run(self):
+        earlier = os.path.join(self.tmp, 'earlier')
+        for side in ('original', 'ours'):
+            make_save(os.path.join(earlier, side, 'saves'), '000000004-A',
+                      'game', {})
+        # A relative path is taken as it reads from here.
+        code, runs, text = self.crossload(['--saves-from',
+                                           os.path.relpath(earlier)])
+        self.assertEqual(code, 0, text)
+        self.assertEqual([r[0] for r in runs], [
+            'original-loads-ours', 'ours-loads-original', 'ours-loads-ours',
+            'original-loads-original'])
+        self.assertTrue(runs[0][4].endswith('earlier/ours/saves/000000004-A'))
+        report = glob.glob(os.path.join(self.tmp, 'runs', '*',
+                                        'crossload.json'))
+        with open(report[0]) as f:
+            self.assertEqual(json.load(f)['saves_from'], earlier)
+        with self.assertRaises(SystemExit), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.crossload(['--saves-from', self.tmp])
 
 
 class DataViewTest(unittest.TestCase):

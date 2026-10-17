@@ -631,8 +631,10 @@ SHORT CGameAIBase::ExecuteAction()
         goto done;
     case 140:
         // GiveItemCreate
-        // TODO: 0x44EEB9-0x44EF37 calls 0x464EB0 (not ported).
-        goto done;
+        pTarget = ExecuteActionGetActee(this);
+        bShare = TRUE;
+        returnValue = GiveItemCreate(pTarget);
+        goto release;
     case 141:
         // GivePartyGoldGlobal
         // TODO: 0x44EF53-0x44EF61 calls 0x465220 (not ported).
@@ -2318,6 +2320,48 @@ SHORT CGameAIBase::ClearActions(CGameObject* target)
     g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
 
     return ACTION_DONE;
+}
+
+// 0x464EB0
+SHORT CGameAIBase::GiveItemCreate(CGameObject* pTarget)
+{
+    if (pTarget == NULL) {
+        return ACTION_ERROR;
+    }
+
+    if (g_pBaldurChitin->cDimm.m_cKeyTable.FindKey(CResRef(m_curAction.GetString1()), 1005, TRUE) == NULL) {
+        return ACTION_ERROR;
+    }
+
+    CItem* pItem = new CItem(CResRef(m_curAction.GetString1()),
+        static_cast<WORD>(m_curAction.m_specificID),
+        static_cast<WORD>(m_curAction.m_specificID2),
+        static_cast<WORD>(m_curAction.m_specificID3),
+        0,
+        0);
+
+    if (pTarget->m_objectType == TYPE_SPRITE) {
+        CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+        if (pGame->GetCharacterPortraitNum(pTarget->GetId()) != -1) {
+            pGame->FeedBack(CInfGame::FEEDBACK_ITEMGAINED, 0, TRUE);
+        }
+
+        // The target puts a copy in its inventory; the game keeps the item
+        // until it is thrown away.
+        CMessageAddItem* pMessage = new CMessageAddItem(*pItem, m_id, pTarget->GetId());
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(pMessage, FALSE);
+
+        pGame->AddDisposableItem(pItem);
+        return ACTION_DONE;
+    }
+
+    if (pTarget->m_objectType == TYPE_CONTAINER) {
+        static_cast<CGameContainer*>(pTarget)->PlaceItemInBlankSlot(pItem, TRUE, 0x7FFF);
+        return ACTION_DONE;
+    }
+
+    // NOTE: The original leaks the item for a target of another type.
+    return ACTION_ERROR;
 }
 
 // 0x465110

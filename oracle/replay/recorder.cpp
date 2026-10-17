@@ -681,6 +681,183 @@ std::string WorldJson(uint32_t chitin, uint32_t world)
         + ", \"creatures\": " + Number(values.creatures) + "}";
 }
 
+// ---------------------------------------------------------------------------
+// The "game" block (schema.json): the party's purse and what a save carries
+// of each member, on every screen.
+
+static_assert(kField_party_gold.type == ReplayType::k_u32, "");
+static_assert(kField_sprite_gold.type == ReplayType::k_u32, "");
+static_assert(kField_sprite_level.type == ReplayType::k_u8, "");
+static_assert(kField_sprite_class_levels.type == ReplayType::k_u8 && kField_sprite_class_levels.count == 11, "");
+static_assert(kField_sprite_items.type == ReplayType::k_ptr && kField_sprite_items.count == 51, "");
+static_assert(kField_item_resref.type == ReplayType::k_resref, "");
+static_assert(kField_item_use_count1.type == ReplayType::k_u16, "");
+static_assert(kField_item_use_count2.type == ReplayType::k_u16, "");
+static_assert(kField_item_use_count3.type == ReplayType::k_u16, "");
+static_assert(kField_item_flags.type == ReplayType::k_u32, "");
+
+uint16_t ReadU16(uint32_t address, bool* ok)
+{
+    uint16_t value = 0;
+    *ok = SafeRead(address, &value, sizeof(value)) && *ok;
+    return value;
+}
+
+// One slot of m_equipment.m_items: null when empty, or when the item cannot
+// be read.
+std::string ItemJson(uint32_t item)
+{
+    if (!item) {
+        return "null";
+    }
+    char resref[8] = {};
+    bool ok = SafeRead(At(item, kField_item_resref), resref, sizeof(resref));
+    const uint16_t use1 = ReadU16(At(item, kField_item_use_count1), &ok);
+    const uint16_t use2 = ReadU16(At(item, kField_item_use_count2), &ok);
+    const uint16_t use3 = ReadU16(At(item, kField_item_use_count3), &ok);
+    const uint32_t flags = ReadU32(At(item, kField_item_flags), &ok);
+    if (!ok) {
+        return "null";
+    }
+    return "{\"resref\": " + JsonString(resref, strnlen(resref, sizeof(resref))) + ", \"uses\": [" + Number(use1)
+        + ", " + Number(use2) + ", " + Number(use3) + "], \"flags\": " + Number(flags) + "}";
+}
+
+// One party member: its values are null when the id does not resolve or a
+// read fails.
+std::string GameMemberJson(uint32_t chitin, int32_t id)
+{
+    std::string values = "\"gold\": null, \"xp\": null, \"level\": null, \"class_levels\": null, \"inventory\": null";
+    const uint32_t sprite = ObjectById(chitin, id);
+    if (sprite) {
+        bool ok = true;
+        const uint32_t gold = ReadU32(At(sprite, kField_sprite_gold), &ok);
+        const uint32_t xp = ReadU32(At(sprite, kField_sprite_xp), &ok);
+        const uint8_t level = ReadU8(At(sprite, kField_sprite_level), &ok);
+        std::string levels = "[";
+        for (uint32_t i = 0; i < kField_sprite_class_levels.count; ++i) {
+            levels += (i ? ", " : "") + Number(ReadU8(At(sprite, kField_sprite_class_levels) + i, &ok));
+        }
+        levels += "]";
+        std::string inventory = "[";
+        for (uint32_t slot = 0; slot < kField_sprite_items.count; ++slot) {
+            const uint32_t item = ReadU32(At(sprite, kField_sprite_items) + 4u * slot, &ok);
+            inventory += (slot ? ", " : "") + ItemJson(ok ? item : 0);
+        }
+        inventory += "]";
+        if (ok) {
+            values = "\"gold\": " + Number(gold) + ", \"xp\": " + Number(xp) + ", \"level\": " + Number(level)
+                + ", \"class_levels\": " + levels + ", \"inventory\": " + inventory;
+        }
+    }
+    return "{\"id\": " + Number(id) + ", " + values + "}";
+}
+
+// The game block: null when CInfGame cannot be read.
+std::string GameJson(uint32_t chitin)
+{
+    bool ok = true;
+    const uint32_t game = chitin ? ReadU32(At(chitin, kField_object_game), &ok) : 0;
+    if (!ok || !game) {
+        return "null";
+    }
+    const uint32_t gold = ReadU32(At(game, kField_party_gold), &ok);
+    int16_t count = ReadI16(At(game, kField_characters_count), &ok);
+    if (!ok) {
+        return "null";
+    }
+    if (count < 0) {
+        count = 0;
+    }
+    if (count > static_cast<int16_t>(kField_character_portraits.count)) {
+        count = static_cast<int16_t>(kField_character_portraits.count);
+    }
+    std::string members = "[";
+    for (int16_t i = 0; i < count; ++i) {
+        const int32_t id = ReadI32(At(game, kField_character_portraits) + 4u * i, &ok);
+        members += (i ? ", " : "") + GameMemberJson(chitin, id);
+    }
+    members += "]";
+    if (!ok) {
+        return "null";
+    }
+    return "{\"party_gold\": " + Number(gold) + ", \"members\": " + members + "}";
+}
+
+// ---------------------------------------------------------------------------
+// The "slots" block (schema.json): the saves the load or save screen lists.
+
+static_assert(kField_load_slots.type == ReplayType::k_ptr && kField_save_slots.type == ReplayType::k_ptr, "");
+static_assert(kField_load_slots_count.type == ReplayType::k_i32, "");
+static_assert(kField_save_slots_count.type == ReplayType::k_i32, "");
+static_assert(kField_load_slots_size.type == ReplayType::k_i32 && kField_save_slots_size.type == ReplayType::k_i32, "");
+static_assert(kField_load_slot_file.type == ReplayType::k_ptr && kField_save_slot_file.type == ReplayType::k_ptr, "");
+static_assert(kField_load_slot_time.type == ReplayType::k_u32 && kField_save_slot_time.type == ReplayType::k_u32, "");
+static_assert(kField_load_slot_chapter.type == ReplayType::k_i32 && kField_save_slot_chapter.type == ReplayType::k_i32,
+    "");
+
+// A CString's characters (its m_pchData at address), JSON-quoted; null when
+// they cannot be read. Bounded against a pointer into garbage.
+std::string CStringJson(uint32_t address)
+{
+    bool ok = true;
+    const uint32_t chars = ReadU32(address, &ok);
+    std::string text;
+    for (uint32_t i = 0; ok && chars && i < 1024; ++i) {
+        const uint8_t c = ReadU8(chars + i, &ok);
+        if (!ok || c == 0) {
+            break;
+        }
+        text += static_cast<char>(c);
+    }
+    return ok && chars ? JsonString(text.data(), text.size()) : std::string("null");
+}
+
+// The slot fields of one screen's slot class (CScreenLoadGameSlot and
+// CScreenSaveGameSlot have the same layout, each from its own header).
+struct SlotFields {
+    ReplayField slots;
+    ReplayField count;
+    ReplayField size;
+    ReplayField file;
+    ReplayField name;
+    ReplayField character;
+    ReplayField time;
+    ReplayField chapter;
+    ReplayField chapterText;
+};
+
+// screen's m_aGameSlots[0 .. m_nNumGameSlots - 1], bounded by the array's
+// m_nSize as our engine bounds it by GetSize; a slot that cannot be read is
+// left out, as our engine leaves out a null slot.
+std::string SlotsJson(uint32_t screen, const SlotFields& f)
+{
+    bool ok = true;
+    const uint32_t slots = ReadU32(At(screen, f.slots), &ok);
+    const int32_t count = ReadI32(At(screen, f.count), &ok);
+    const int32_t size = ReadI32(At(screen, f.size), &ok);
+    std::string out = "[";
+    bool first = true;
+    for (int32_t i = 0; ok && slots && i < count && i < size && i < kMaxListNodes; ++i) {
+        bool slotOk = true;
+        const uint32_t slot = ReadU32(slots + 4u * static_cast<uint32_t>(i), &slotOk);
+        if (!slotOk || !slot) {
+            continue;
+        }
+        const uint32_t time = ReadU32(At(slot, f.time), &slotOk);
+        const int32_t chapter = ReadI32(At(slot, f.chapter), &slotOk);
+        if (!slotOk) {
+            continue;
+        }
+        out += std::string(first ? "" : ", ") + "{\"file\": " + CStringJson(At(slot, f.file))
+            + ", \"name\": " + CStringJson(At(slot, f.name)) + ", \"character\": " + CStringJson(At(slot, f.character))
+            + ", \"time\": " + Number(time) + ", \"chapter\": " + Number(chapter)
+            + ", \"chapter_text\": " + CStringJson(At(slot, f.chapterText)) + "}";
+        first = false;
+    }
+    return out + "]";
+}
+
 // The active engine's name (the last kReplayScreens match), none or unknown.
 const char* ScreenName(uint32_t chitin, uint32_t active, bool* ok)
 {
@@ -729,7 +906,23 @@ std::string DumpJson(const char* checkpoint)
     const bool chargen = std::strcmp(screen, "create_char") == 0;
     json += "  \"chargen\": " + (chargen ? ChargenJson(chitin, active) : std::string("null")) + ",\n";
     const bool world = std::strcmp(screen, "world") == 0;
-    json += "  \"world\": " + (world ? WorldJson(chitin, active) : std::string("null")) + "\n}\n";
+    json += "  \"world\": " + (world ? WorldJson(chitin, active) : std::string("null")) + ",\n";
+    json += "  \"game\": " + GameJson(chitin) + ",\n";
+    std::string slots = "null";
+    if (std::strcmp(screen, "load") == 0) {
+        slots = SlotsJson(active,
+            { kField_load_slots, kField_load_slots_count, kField_load_slots_size, kField_load_slot_file,
+                kField_load_slot_name,
+                kField_load_slot_character, kField_load_slot_time, kField_load_slot_chapter,
+                kField_load_slot_chapter_text });
+    } else if (std::strcmp(screen, "save") == 0) {
+        slots = SlotsJson(active,
+            { kField_save_slots, kField_save_slots_count, kField_save_slots_size, kField_save_slot_file,
+                kField_save_slot_name,
+                kField_save_slot_character, kField_save_slot_time, kField_save_slot_chapter,
+                kField_save_slot_chapter_text });
+    }
+    json += "  \"slots\": " + slots + "\n}\n";
     return json;
 }
 

@@ -1,0 +1,29 @@
+# Milestone 4: a game loaded from the main menu. oracle.py replay record and
+# compare run it with --load SAVE (a save folder, NNNNNNNNN-Name, as a run
+# keeps them in its saves/ folder): the header below makes that save the
+# only one in mpsave on both sides, so it is the load screen's first slot.
+# oracle.py replay crossload loads each engine's save in the other engine
+# with it. It stays out of the suites (scenarios/*.txt), which have no save
+# to give it. Coordinates for Resolution=800.
+#
+# Status (2026-10-16): with save_load.txt's save from either engine, the
+# original and ours match at every checkpoint (replay crossload, seed 1),
+# though the two saves differ as data (AR1000's vertices and entrances).
+# saves: load
+# timeout: 240
+wait 60
+checkpoint menu
+# Load Game (645,295) on the main menu, below New Game (645,262): the load
+# screen.
+click 645 295
+wait 60
+checkpoint load_screen
+shot load_screen
+# The first slot's Load (685,102): the world as saved.
+click 685 102
+wait 400
+checkpoint loaded
+shot loaded
+wait 150
+checkpoint loaded_settled
+quit
