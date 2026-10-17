@@ -2039,7 +2039,10 @@ void CGameAnimationTypeCharacter::Render(CInfinity* pInfinity, CVidMode* pVidMod
         case 5:
         case 6:
         case 7:
-            if (m_renderWeapons) {
+            // The weapon goes behind the body unless its item has flag 0x80
+            // (field_1434), in which case it goes last, in front
+            // (0x6CD6AD, 0x6CD7B2).
+            if (m_renderWeapons && !field_1434) {
                 if (m_currentVidCellWeapon != NULL && m_currentVidCellWeapon->GetResRef().IsValid()) {
                     pInfinity->FXRender(m_currentVidCellWeapon,
                         ptReference.x,
@@ -2075,7 +2078,7 @@ void CGameAnimationTypeCharacter::Render(CInfinity* pInfinity, CVidMode* pVidMod
                 }
 
                 // FIXME: Redunant.
-                if (m_renderWeapons) {
+                if (m_renderWeapons && field_1434) {
                     if (m_currentVidCellWeapon != NULL && m_currentVidCellWeapon->GetResRef().IsValid()) {
                         pInfinity->FXRender(m_currentVidCellWeapon,
                             ptReference.x,

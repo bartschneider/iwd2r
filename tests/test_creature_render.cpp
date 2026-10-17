@@ -4,6 +4,7 @@
 #include "CGameAnimationType.h"
 #include "CGameAnimationTypeAmbient.h"
 #include "CGameAnimationTypeAmbientStatic.h"
+#include "CGameAnimationTypeCharacter.h"
 #include "CGameAnimationTypeFlying.h"
 #include "CGameAnimationTypeMonster.h"
 #include "CGameAnimationTypeMonsterAnkheg.h"
@@ -1284,6 +1285,85 @@ TEST_CASE("door: its bounding rectangles end one past the file's", "[render][dat
         REQUIRE(pDoor != NULL);
         CHECK(pDoor->m_rOpenBounding == CRect(e.open.left, e.open.top, e.open.right + 1, e.open.bottom + 1));
         CHECK(pDoor->m_rClosedBounding == CRect(e.closed.left, e.closed.top, e.closed.right + 1, e.closed.bottom + 1));
+    }
+}
+
+// CGameAnimationTypeCharacter::Render (0x6CD400), facing 3 to 7 (south
+// west round to north east, and their mirrors): the weapon is drawn behind
+// the body, before it, unless the weapon's item has flag 0x80 (field_1434,
+// set by EquipWeapon 0x6C8390), in which case it is drawn last, in front
+// (the tests of +0x1434 at 0x6CD6AD and 0x6CD7B2). Ours drew it both before
+// and after the body, so a spear held across the body showed its shaft over
+// it: the crew in world_entry's world shot.
+//
+// The "weapon" here is a second cell on the body's own BAM at another
+// frame, so the two overlap: behind the body, every pixel the body draws
+// keeps the body's colour; in front, the weapon replaces some of them.
+TEST_CASE("creature render: a character's weapon goes behind its body unless its item puts it in front", "[render][data]")
+{
+    std::string why;
+    if (!Begin(why)) {
+        SKIP("[iwd2r-skip] " + why);
+    }
+    RenderScope scope;
+    REQUIRE(scope.Ok());
+    BYTE colors[16] = {};
+    for (WORD facing : { 3, 4, 6, 12 }) {
+        INFO("facing " << facing);
+        std::unique_ptr<CGameAnimationType> pAnimation(CGameAnimationType::SetAnimationType(0x6100, colors, facing));
+        auto* pCharacter = dynamic_cast<CGameAnimationTypeCharacter*>(pAnimation.get());
+        REQUIRE(pCharacter != nullptr);
+        const SHORT nDirection = pCharacter->m_currentBamDirection > pCharacter->m_extendDirectionTest
+            ? 16 - pCharacter->m_currentBamDirection
+            : pCharacter->m_currentBamDirection;
+        REQUIRE(nDirection >= 3);
+        REQUIRE(nDirection <= 7);
+
+        CVidCell weapon;
+        weapon.SetResRef(pCharacter->m_currentVidCell->cResRef, FALSE, TRUE, TRUE);
+        weapon.SequenceSet(pCharacter->m_currentVidCell->m_nCurrentSequence);
+        weapon.FrameSet(static_cast<SHORT>(pCharacter->m_currentVidCell->m_nCurrentFrame + 3));
+        CVidCell* pWeaponBefore = pCharacter->m_currentVidCellWeapon;
+        const BOOLEAN renderWeaponsBefore = pCharacter->m_renderWeapons;
+
+        auto draw = [&](bool weapons, bool front) {
+            pCharacter->m_renderWeapons = weapons;
+            pCharacter->m_currentVidCellWeapon = weapons ? &weapon : pWeaponBefore;
+            pCharacter->field_1434 = front ? 1 : 0;
+            scope.Back(true, 0);
+            CRect rFx;
+            CPoint ptReference;
+            pCharacter->CalculateFxRect(rFx, ptReference, 0);
+            CRect rBounds;
+            const CPoint pos(320, 330);
+            pCharacter->CalculateGCBoundsRect(rBounds, pos, ptReference, 0, rFx.Width(), rFx.Height());
+            pCharacter->Render(scope.Infinity(), scope.VidMode(), CVIDINF_SURFACE_BACK, rFx, pos, ptReference, 0, RGB(255, 255, 255), rBounds, FALSE, FALSE, 0, 0);
+            return scope.Back();
+        };
+        const std::vector<DWORD> body = draw(false, false);
+        const std::vector<DWORD> behind = draw(true, false);
+        const std::vector<DWORD> front = draw(true, true);
+        pCharacter->m_currentVidCellWeapon = pWeaponBefore;
+        pCharacter->m_renderWeapons = renderWeaponsBefore;
+
+        int bodyPixels = 0;
+        int hiddenWrong = 0;
+        int frontOver = 0;
+        int weaponOutside = 0;
+        for (size_t i = 0; i < body.size(); i++) {
+            if ((body[i] & 0xFFFFFF) != 0) {
+                bodyPixels++;
+                hiddenWrong += (behind[i] & 0xFFFFFF) != (body[i] & 0xFFFFFF);
+                frontOver += (front[i] & 0xFFFFFF) != (body[i] & 0xFFFFFF);
+            } else {
+                weaponOutside += (behind[i] & 0xFFFFFF) != 0;
+            }
+        }
+        INFO("body " << bodyPixels << ", behind but changed " << hiddenWrong << ", in front over the body " << frontOver << ", weapon around the body " << weaponOutside);
+        CHECK(bodyPixels > 100);
+        CHECK(hiddenWrong == 0);
+        CHECK(frontOver > 20);
+        CHECK(weaponOutside > 0);
     }
 }
 
