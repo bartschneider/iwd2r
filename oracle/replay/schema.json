@@ -546,7 +546,7 @@
       }
     },
     "slots": {
-      "description": "The save slots the load or save screen lists, null on every other screen: CScreenLoad::m_aGameSlots[0 .. m_nNumGameSlots - 1] (bounded by the array's m_nSize) (CScreenLoadGameSlot) or CScreenSave's (CScreenSaveGameSlot), in their order (mpsave's saves by folder name, CInfGame::GetSaveGames 0x5C0520, without default), as RefreshGameSlots (0x63C940, 0x65BCF0) read them from each save's game file. The file times (m_sFileTime) are the real time of the files and are left out.",
+      "description": "The save slots the load or save screen lists, null on every other screen: CScreenLoad::m_aGameSlots[0 .. m_nNumGameSlots - 1] (bounded by the array's m_nSize) (CScreenLoadGameSlot) or CScreenSave's (CScreenSaveGameSlot), in their order (mpsave's saves by folder name, CInfGame::GetSaveGames 0x5C0520, without default), as RefreshGameSlots (0x63C940, 0x65BCF0) read them from each save's game file. The file times (m_sFileTime) are the real time of the files and are left out. The save screen's list ends with its Empty slot, the one a new save goes into: a slot whose strings are all \"\" and whose time and chapter are 0.",
       "type": [
         "array",
         "null"
