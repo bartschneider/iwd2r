@@ -4025,7 +4025,10 @@ void CScreenWorld::SetPendingRest(INT nHP, BOOLEAN bRenting, BOOLEAN bMovie)
 // 0x693520
 void CScreenWorld::StartRestMultiplayerHost(INT nHP, BOOLEAN bRenting, BOOLEAN bMovie)
 {
-    if (g_pChitin->cNetwork.GetServiceProvider() == CNetwork::SERV_PROV_NULL) {
+    // The listen-to-join save and restore run only under a real provider
+    // (the `je` over the block at 0x693535); the null provider of a
+    // single-player session never listens to join.
+    if (g_pChitin->cNetwork.GetServiceProvider() != CNetwork::SERV_PROV_NULL) {
         CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
         BOOL bListenToJoin = pGame->GetMultiplayerSettings()->GetListenToJoinOption();
         pGame->GetMultiplayerSettings()->SetListenToJoinOption(FALSE, TRUE);
@@ -4051,7 +4054,7 @@ void CScreenWorld::StartRestMultiplayerHost(INT nHP, BOOLEAN bRenting, BOOLEAN b
     m_bRestMovie = FALSE;
 
     if (g_pChitin->cNetwork.GetServiceProvider() != CNetwork::SERV_PROV_NULL) {
-        BOOL bListenToJoin = g_pBaldurChitin->m_pEngineWorld->m_bEndMajorEventPauseStatus;
+        BOOL bListenToJoin = g_pBaldurChitin->m_pEngineWorld->m_bEndMajorEventListenToJoin;
         g_pBaldurChitin->GetObjectGame()->GetMultiplayerSettings()->SetListenToJoinOption(bListenToJoin, TRUE);
     }
 }

@@ -3674,7 +3674,7 @@ BOOLEAN CBaldurMessage::AnnounceJournalUserEntry(CString szText, BYTE nCharacter
     DWORD cnt;
 
     if (!g_pChitin->cNetwork.GetSessionOpen()
-        || g_pChitin->cNetwork.GetSessionHosting() == TRUE) {
+        || g_pChitin->cNetwork.GetSessionHosting() != TRUE) {
         return FALSE;
     }
 
@@ -3874,7 +3874,7 @@ BOOLEAN CBaldurMessage::AnnounceJournalEntryChange(CString szText, BYTE nCharact
     DWORD cnt;
 
     if (!g_pChitin->cNetwork.GetSessionOpen()
-        || g_pChitin->cNetwork.GetSessionHosting() == TRUE) {
+        || g_pChitin->cNetwork.GetSessionHosting() != TRUE) {
         return FALSE;
     }
 
@@ -3969,7 +3969,7 @@ BOOLEAN CBaldurMessage::SendBiographyToServer(BYTE nFixedPartyId, CString szBio)
     DWORD nTextLength;
 
     if (!g_pChitin->cNetwork.GetSessionOpen()
-        || g_pChitin->cNetwork.GetSessionHosting() != TRUE) {
+        || g_pChitin->cNetwork.GetSessionHosting() == TRUE) {
         return FALSE;
     }
 
@@ -4197,7 +4197,7 @@ BOOLEAN CBaldurMessage::MultiplayerSynchRequest()
     CString sHostName;
 
     if (!g_pChitin->cNetwork.GetSessionOpen()
-        || g_pChitin->cNetwork.GetSessionHosting() != TRUE) {
+        || g_pChitin->cNetwork.GetSessionHosting() == TRUE) {
         return FALSE;
     }
 
