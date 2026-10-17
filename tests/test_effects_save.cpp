@@ -14,6 +14,7 @@
 #include "CScreenWorld.h"
 #include "CSpell.h"
 #include "CVariableHash.h"
+#include "Icewind586B70.h"
 #include "IcewindCGameEffects.h"
 #include "ScreenLayout.h"
 #include "data_view.h"
@@ -1696,6 +1697,102 @@ TEST_CASE("Death (0x4AB510) ends with the messages 89 and 96 for the sprite", "[
     CHECK(p89->GetTarget() == pGoblin->GetId());
     CHECK(p96->m_spriteId == pGoblin->GetId());
     ClearMessages();
+}
+
+// The 0x586DC0 wiring (the summon limit table, Icewind586B70): Death
+// (0x4AB510, the call at 0x4AD165) and Skill Unsummon (0x4B4BD0, the call
+// at 0x4B4BFB) unsummon a summoned creature of the table before they queue
+// the message of subtype 89: its entry is cleared and the unsummon visual
+// (spell hit 0x15, "MSumm1H", which picks no random sequence) is fired at
+// it. The whole path draws no rand; another summoner's entry stays.
+TEST_CASE("Death and Skill Unsummon unsummon through the summon limit table (0x586DC0)", "[effects][checksave][data]")
+{
+    PROBE_OR_SKIP(pProbe);
+    CGameArea* pArea = pProbe->GetArea();
+    REQUIRE(pArea != NULL);
+    CGameSprite* pGoblin = MakeGoblin();
+    pGoblin->AddToArea(pArea, CPoint(pProbe->GetPos().x - 60, pProbe->GetPos().y + 50), 0, CGameObject::LIST_FRONT);
+    pArea->SortLists();
+
+    Icewind586B70* pTable = Icewind586B70::Instance();
+    pTable->Clear();
+
+    SECTION("Death (0x4AB510)")
+    {
+        pTable->mEntries[0] = Icewind586B70::Entry(pGoblin->GetId(), pProbe->GetId());
+        pTable->mEntries[1] = Icewind586B70::Entry(12345, 67890);
+        ClearMessages();
+        std::unique_ptr<CGameEffect> pDeath = Decode(CGAMEEFFECT_DEATH, 0, 0, pProbe->GetId());
+        iwd2r_srand(37);
+        pDeath->ApplyEffect(pGoblin);
+        CHECK(pDeath->m_done == TRUE);
+
+        // Spell hit 0x15 draws nothing: no random sequence, no roll.
+        INFO("draws " << Draws(37, iwd2r_rand_state()));
+        CHECK(Draws(37, iwd2r_rand_state()) == 0);
+
+        CHECK(pTable->mEntries[0].field_0 == 0);
+        CHECK(pTable->mEntries[0].field_4 == 0);
+        CHECK(pTable->mEntries[1].field_0 == 12345);
+        CHECK(pTable->mEntries[1].field_4 == 67890);
+
+        // The unsummon visual is fired before the subtype 89 and 96 messages,
+        // with the hide's group update between it and them.
+        std::vector<CMessage*> messages = Messages();
+        REQUIRE(messages.size() >= 4);
+        CMessageFireProjectile* pFire = dynamic_cast<CMessageFireProjectile*>(messages[messages.size() - 4]);
+        CMessage89* p89 = dynamic_cast<CMessage89*>(messages[messages.size() - 2]);
+        CMessage96* p96 = dynamic_cast<CMessage96*>(messages.back());
+        REQUIRE(pFire != nullptr);
+        REQUIRE(p89 != nullptr);
+        REQUIRE(p96 != nullptr);
+        CHECK(pFire->m_projectileType == 0x1015);
+        CHECK(pFire->m_projectileTargetId == pGoblin->GetId());
+        CHECK(pFire->GetTarget() == pGoblin->GetId());
+        CHECK(p89->m_spriteId == pGoblin->GetId());
+        ClearMessages();
+    }
+
+    SECTION("Skill Unsummon (0x4B4BD0)")
+    {
+        pTable->mEntries[0] = Icewind586B70::Entry(pGoblin->GetId(), pProbe->GetId());
+        pTable->mEntries[1] = Icewind586B70::Entry(12345, 67890);
+        ClearMessages();
+        std::unique_ptr<CGameEffect> pUnsummon = Decode(CGAMEEFFECT_SKILLUNSUMMON, 0, 0, pProbe->GetId());
+        iwd2r_srand(43);
+        pUnsummon->ApplyEffect(pGoblin);
+        CHECK(pUnsummon->m_done == TRUE);
+
+        INFO("draws " << Draws(43, iwd2r_rand_state()));
+        CHECK(Draws(43, iwd2r_rand_state()) == 0);
+
+        std::string list;
+        for (CMessage* pMessage : Messages()) {
+            list += " t" + std::to_string(pMessage->GetMsgType()) + "/" + std::to_string(pMessage->GetMsgSubType());
+        }
+        INFO("effect queue:" << list);
+
+        CHECK(pTable->mEntries[0].field_0 == 0);
+        CHECK(pTable->mEntries[0].field_4 == 0);
+        CHECK(pTable->mEntries[1].field_0 == 12345);
+        CHECK(pTable->mEntries[1].field_4 == 67890);
+        CHECK(pGoblin->m_removeFromArea == TRUE);
+
+        // The unsummon visual's message, then the hide's group update, then
+        // the subtype 89 message.
+        std::vector<CMessage*> messages = Messages();
+        REQUIRE(messages.size() >= 3);
+        CMessageFireProjectile* pFire = dynamic_cast<CMessageFireProjectile*>(messages[messages.size() - 3]);
+        CMessage89* p89 = dynamic_cast<CMessage89*>(messages.back());
+        REQUIRE(pFire != nullptr);
+        REQUIRE(p89 != nullptr);
+        CHECK(pFire->m_projectileType == 0x1015);
+        CHECK(pFire->m_projectileTargetId == pGoblin->GetId());
+        CHECK(p89->m_spriteId == pGoblin->GetId());
+        ClearMessages();
+    }
+
+    pTable->Clear();
 }
 
 // The hit sound (CGameEffectDamage 0x4A8DF0) remembers the last one the
