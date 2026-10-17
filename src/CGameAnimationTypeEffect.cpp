@@ -375,7 +375,7 @@ void CGameAnimationTypeEffect::ChangeDirection(SHORT nDirection)
 // 0x55D2A0
 BOOL CGameAnimationTypeEffect::IsMirroring()
 {
-    return m_currentBamSequence > m_extendDirectionTest;
+    return m_currentBamDirection > m_extendDirectionTest;
 }
 
 // 0x6A3550
