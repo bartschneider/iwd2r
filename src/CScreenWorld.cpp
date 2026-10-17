@@ -1120,9 +1120,8 @@ void CScreenWorld::OnKeyDown(SHORT nKeysFlags)
                             reinterpret_cast<CGameObject**>(&pSprite),
                             INFINITE)
                         == CGameObjectArray::SUCCESS) {
-                        // TODO: Incomplete. 0x6893E8 calls CGameSprite
-                        // 0x75E150 (the ranged weapon's selection), not
-                        // ported.
+                        // 0x6893E8
+                        pSprite->EquipRanged();
 
                         pGame->GetObjectArray()->ReleaseDeny(pGame->GetGroup()->GetGroupLeader(),
                             CGameObjectArray::THREAD_ASYNCH,
