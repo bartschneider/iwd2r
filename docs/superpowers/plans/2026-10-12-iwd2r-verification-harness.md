@@ -13,8 +13,8 @@
 ## Global Constraints
 
 - The vanilla exe is `<install>/iwd2ee/backup/1000/iwd2.exe`, MD5 `200f038bec3ed50a964d68b3f0f1f0e7`, image base `0x400000`, image size `0x621000`, `.data` at `0x8A5000`. The loader refuses any other MD5.
-- The real install `/mnt/c/Games/Icewind Dale II` is never modified. Oracle runs use the vanilla copy at `C:\Users\thier\iwd2r-oracle\game` (Task 7).
-- Oracle code is Windows x86 only, built with the `windows-msvc-x86` preset through the same cmd.exe route `tools/play.py` uses (`/mnt/c/Users/thier/iwd2r-build`). Data-free parts (parsers, schema, rand, checkers) also build and test on Linux and in CI.
+- The real install `/mnt/c/Games/Icewind Dale II` is never modified. Oracle runs use the vanilla copy at `%USERPROFILE%\iwd2r-oracle\game` (Task 7).
+- Oracle code is Windows x86 only, built with the `windows-msvc-x86` preset through the same cmd.exe route `tools/play.py` uses (`/mnt/c/Users/<you>/iwd2r-build`). Data-free parts (parsers, schema, rand, checkers) also build and test on Linux and in CI.
 - Tools: OpenJDK 21 from apt (the user installs `openjdk-21-jdk-headless unzip`); Ghidra (latest stable release at execution time, version and SHA-256 recorded in `tools/ghidra/versions.json`) and Node.js 22 LTS install user-locally under `~/.local/share/iwd2r/` (Ubuntu 24.04's nodejs is v18, too old for REA).
 - No per-file notice or header lines (the user removed them on 2026-10-12; the README's statement that iwd2r modifies iwd2-re is the license's required notice). Never remove `// 0x...` comments.
 - `compat/`, `platform/`, `oracle/`, `tests/` build with `-Wall -Wextra -Werror` (MSVC `/W4 /WX`). `tools/gen_map.py --check` (regenerate `docs/MAP.md` when counts change) and the clang-format 18 check stay green.
@@ -131,7 +131,7 @@
 
 **Files:** Modify `tools/oracle.py` (`vanilla` subcommand), `tests/test_tools.py`.
 
-**Interfaces:** Produces `C:\Users\thier\iwd2r-oracle\game` and a marker `vanilla.ok` written only after verification passes; `oracle.py vanilla [--rebuild]`; other subcommands call it implicitly when the marker is missing.
+**Interfaces:** Produces `%USERPROFILE%\iwd2r-oracle\game` and a marker `vanilla.ok` written only after verification passes; `oracle.py vanilla [--rebuild]`; other subcommands call it implicitly when the marker is missing.
 
 - [ ] **Step 1: Tests** for the pure parts: the verification function returns failure for a directory containing `IEex.dll`, for a `WeiDU.log` listing `IWD2EE.TP2`, and for an `iwd2.exe` with the wrong MD5; success for a clean fixture.
 - [ ] **Step 2-4:** run (fail), implement, run (pass).

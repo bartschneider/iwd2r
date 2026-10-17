@@ -4,7 +4,7 @@
 > drive it step by step in order; every step names the exact command and
 > the output that means it passed. Steps use checkbox (`- [ ]`) syntax.
 > No source files are created or modified; the only artifacts are run
-> folders under /home/thier/iwd2r-runs/ and a report.
+> folders under ~/iwd2r-runs/ and a report.
 
 **Goal:** Close M3 with the full on-record verification set at one pinned
 fix-round head: replay compares twice for world_entry, walk_and_talk and
@@ -13,7 +13,7 @@ oracle, and both real-input suites.
 
 **Architecture:** One serialized block of sandbox-bound and host-bound
 commands, all at a single recorded commit; every run folder moved out of
-the worktree to /home/thier/iwd2r-runs/ as it completes; a results table
+the worktree to ~/iwd2r-runs/ as it completes; a results table
 reported to the coordinator at the end.
 
 **Tech Stack:** tools/oracle.py (replay compare, run), tools/play.py
@@ -36,7 +36,7 @@ per M2-27"); harness doc `docs/superpowers/plans/2026-10-12-iwd2r-verification-h
 - NEVER regenerate expect.json from our side. first_fight's (and any other)
   re-derived expects come from m3-fix's `realinput.py expect` — Block A
   starts only after those are merged (precondition P4).
-- Run folders live in `/home/thier/iwd2r-runs/` only: move each
+- Run folders live in `~/iwd2r-runs/` only: move each
   `runs/<stamp>/` out of the worktree as soon as its command finishes.
 - No desktop windows: everything headless or in the sandbox; never set
   IWD2R_DESKTOP_OK; never write to the real install or
@@ -92,7 +92,7 @@ dump-every 30, timeout from the scenario header — do not override.
   Pass: compare.json ends with no `differ`/`mismatch` line,
   `"original_result": 0`, `"our_result": 0`, every checkpoint line says
   `match` with `ai_stalled_frames 0/0` and `ai_overlap_frames 0/0`.
-  Then `mv runs/<stamp> /home/thier/iwd2r-runs/m3-end-world_entry-a-<stamp>`.
+  Then `mv runs/<stamp> ~/iwd2r-runs/m3-end-world_entry-a-<stamp>`.
 - [ ] **A2. world_entry, run 2 of 2.** Same command after the sandbox
   clears (`pgrep -af "[w]insandbox"`). Pass: identical outcome to A1 —
   two independent MATCHes are the determinism evidence.
@@ -107,7 +107,7 @@ dump-every 30, timeout from the scenario header — do not override.
   Scenario is pending, so pass the path:
   `systemd-run --user --scope -q -p MemoryMax=8G -p MemorySwapMax=0 -- python3 tools/oracle.py replay compare scenarios/pending/save_load.txt`
   Pass: MATCH 12/12 checkpoints + 129/129 periodic dumps including
-  loaded/loaded_settled (first run on record: /home/thier/iwd2r-runs/
+  loaded/loaded_settled (first run on record: ~/iwd2r-runs/
   20261017-121626 at f5f5971b), and the run folder's saves/ contains
   both `000000000-Autosave - Prologue`-style and
   `000000004-Probe Save`-style folders. ~10 min.

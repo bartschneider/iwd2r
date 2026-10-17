@@ -14,9 +14,9 @@
 
 - The classic path's pixels do not change at default settings, except the fixes toward the original listed in the README (`CVidPoly::FillConvexPoly`, `CVidPalette::GetTint`, `CVidMode::ApplyBrightnessContrast` and `CVidPalette::RealizeResource`): the smoke test's frame hash, the `--vm linux` and sandbox suites and `replay compare chargen_replay` pass unchanged with default settings at every integration.
 - Decompiled code changes are limited to one guard line at the top of each drawing entry point (section 3 of the spec) and the stub ports; each touched function gets `docs/evidence/<ADDR>.md` (`check_evidence.py` enforces it), the guards with an `exemption` naming the render API.
-- Never commit game files, dumps, `runs/` or `build/`. Never modify `/mnt/c/Games/Icewind Dale II`. On Windows write only under `C:\Users\thier\iwd2r-build*`, `iwd2r-oracle` and `iwd2r-vm`.
+- Never commit game files, dumps, `runs/` or `build/`. Never modify `/mnt/c/Games/Icewind Dale II`. On Windows write only under `%USERPROFILE%\iwd2r-build*`, `iwd2r-oracle` and `iwd2r-vm`.
 - No per-file header lines. Commit messages end with `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`.
-- Streams work in `/home/thier/iwd2-re-worktrees/p4-<stream>` on branch `p4/<stream>` from `first` (`tools/worktree.sh new <stream>` once project 3's M1 Task 3 lands; `git worktree add -b p4/<stream> <path> first` before), own disjoint files (section 8 of the spec and the table below), never push, and use the shared-resource locks from M1 wave 0 for Windows builds, replays and the sandbox.
+- Streams work in `~/iwd2-re-worktrees/p4-<stream>` on branch `p4/<stream>` from `first` (`tools/worktree.sh new <stream>` once project 3's M1 Task 3 lands; `git worktree add -b p4/<stream> <path> first` before), own disjoint files (section 8 of the spec and the table below), never push, and use the shared-resource locks from M1 wave 0 for Windows builds, replays and the sandbox.
 - Gates at every integration: linux-gcc and linux-clang ctest; `tests/test_tools.py`; `check_evidence.py`; `gen_map.py --check`; `gen_fields.py --check`; `tools/shaders.py --check`; the clang-format check; the Windows x64 build; `oracle.py run`; `oracle.py replay compare` for every scenario in `scenarios/`.
 
 ## Review Focus

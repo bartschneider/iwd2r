@@ -26,7 +26,7 @@ export IWD2R_AUDIO=null SDL_AUDIO_DRIVER=dummy
 # Its icewind2.ini [Alias] paths still name the oracle copy, but the engine maps
 # every drive path into the data root (platform/fs.cpp), so a Linux run never
 # reads the Windows drive. Make it with: rsync -a --exclude temp --exclude cache --exclude tempsave
-#   --exclude mpsave --exclude ScrnShot /mnt/c/Users/thier/iwd2r-oracle/game/ ~/.local/share/iwd2r/game/
+#   --exclude mpsave --exclude ScrnShot /mnt/c/Users/<you>/iwd2r-oracle/game/ ~/.local/share/iwd2r/game/
 # Tests never write the copy: every engine-starting test runs on a private
 # view of it (tests/data_view.h), and copy_unchanged below fails a preset whose
 # tests changed it anyway.

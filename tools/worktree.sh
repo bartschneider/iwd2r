@@ -8,12 +8,12 @@
 #                                     branch, only when the branch is merged
 #                                     into first; otherwise refuses
 #
-# BASE is $IWD2R_WORKTREES, default /home/thier/iwd2-re-worktrees. Run it
+# BASE is $IWD2R_WORKTREES, default ~/iwd2-re-worktrees. Run it
 # from any checkout of the repository. A worktree's Windows build folder is
-# C:\Users\thier\iwd2r-build-p3-<stream> (tools/play.py win_checkout).
+# %USERPROFILE%\iwd2r-build-p3-<stream> (tools/play.py win_checkout).
 set -euo pipefail
 
-BASE=${IWD2R_WORKTREES:-/home/thier/iwd2-re-worktrees}
+BASE=${IWD2R_WORKTREES:-$HOME/iwd2-re-worktrees}
 TRUNK=first
 
 usage() {

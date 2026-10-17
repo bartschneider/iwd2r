@@ -1246,9 +1246,16 @@ def main(argv):
     scenario, dumps = argv[1], os.path.abspath(argv[2])
     actions = load_scenario(scenario)
     # A run folder is named from runs/ on, whichever worktree holds it.
+    # Elsewhere, keep it readable without naming the home folder.
     at = dumps.find('/runs/')
-    expect = make_expectations(actions, dumps, 'checkpoint dumps in %s' % (
-        dumps[at + 1:] if at >= 0 else dumps))
+    home = os.path.expanduser('~')
+    if at >= 0:
+        shown = dumps[at + 1:]
+    elif dumps.startswith(home + '/'):
+        shown = '~' + dumps[len(home):]
+    else:
+        shown = dumps
+    expect = make_expectations(actions, dumps, 'checkpoint dumps in %s' % shown)
     path = expectation_path(scenario)
     with open(path, 'w') as f:
         json.dump(expect, f, indent=1, sort_keys=True)

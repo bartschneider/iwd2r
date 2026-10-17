@@ -108,6 +108,7 @@ play = load_tool('play')
 realinput = load_tool('realinput')
 dataview = load_tool('dataview')
 winsandbox = load_tool('winsandbox')
+winhome = load_tool('winhome')
 
 
 def load_ghidra_tool(name):
@@ -1202,7 +1203,7 @@ class EngineMemoryCapTest(unittest.TestCase):
 class SandboxWsbTest(unittest.TestCase):
     def test_wsb_is_well_formed_with_the_mapped_folders(self):
         folders = [(r'C:\b', winsandbox.BOX_BIN, True),
-                   (r'C:\Users\thier\iwd2r-vm\game', winsandbox.BOX_GAME,
+                   (r'C:\Users\alice\iwd2r-vm\game', winsandbox.BOX_GAME,
                     False),
                    (r'C:\r & s', winsandbox.BOX_RESULTS, False),
                    (r'C:\t', winsandbox.BOX_TOOLS, True)]
@@ -1217,7 +1218,7 @@ class SandboxWsbTest(unittest.TestCase):
                   for m in root.find('MappedFolders')]
         self.assertEqual(mapped, [
             (r'C:\b', r'C:\iwd2r\bin', 'true'),
-            (r'C:\Users\thier\iwd2r-vm\game', r'C:\iwd2r\game', 'false'),
+            (r'C:\Users\alice\iwd2r-vm\game', r'C:\iwd2r\game', 'false'),
             (r'C:\r & s', r'C:\iwd2r\results', 'false'),
             (r'C:\t', r'C:\iwd2r\tools', 'true')])
         command = root.find('LogonCommand').findtext('Command')
@@ -2583,12 +2584,12 @@ class OracleVanillaTest(unittest.TestCase):
 
     def test_rewrite_ini(self):
         text = oracle.rewrite_ini(INI, oracle.INSTALL_WIN,
-                                  'C:\\Users\\thier\\iwd2r-oracle\\game')
+                                  'C:\\Users\\alice\\iwd2r-oracle\\game')
         self.assertEqual(text, (
             '[Alias]\r\n'
-            'HD0:=C:\\Users\\thier\\iwd2r-oracle\\game\\\r\n'
-            'CD1:=C:\\Users\\thier\\iwd2r-oracle\\game\\Data\\\r\n'
-            'CD2:=C:\\Users\\thier\\iwd2r-oracle\\game\\CD2\\\r\n'
+            'HD0:=C:\\Users\\alice\\iwd2r-oracle\\game\\\r\n'
+            'CD1:=C:\\Users\\alice\\iwd2r-oracle\\game\\Data\\\r\n'
+            'CD2:=C:\\Users\\alice\\iwd2r-oracle\\game\\CD2\\\r\n'
             '[Program Options]\r\n'
             'Resolution=800\r\n'
             'Last Resolution=1366x768\r\n'))
@@ -2904,7 +2905,7 @@ def fake_cmd(returncode=0, stdout='', stderr='', raises=None):
 class OracleWindowsReparseTest(unittest.TestCase):
     """tools/oracle.py: windows_reparse fails closed."""
 
-    GAME = '/mnt/c/Users/thier/iwd2r-oracle/game'
+    GAME = '/mnt/c/Users/alice/iwd2r-oracle/game'
 
     def check(self, run, path=GAME):
         return oracle.windows_reparse(path, run=run)
@@ -2913,7 +2914,7 @@ class OracleWindowsReparseTest(unittest.TestCase):
         run = fake_cmd(0, 'other\r\n')
         self.assertIsNone(self.check(run))
         self.assertEqual(run.calls, [['dir', '/AL', '/B',
-                                      'C:\\Users\\thier\\iwd2r-oracle']])
+                                      'C:\\Users\\alice\\iwd2r-oracle']])
 
     def test_exit_0_naming_the_target(self):
         reason = self.check(fake_cmd(0, 'junk\r\nGAME\r\n'))
@@ -2948,17 +2949,17 @@ class OracleWindowsReparseTest(unittest.TestCase):
 
     def test_path_off_drvfs(self):
         run = fake_cmd(0, '')
-        for path in ('/home/thier/game', '/tmp/x', '/mnt/c', 'relative/game',
+        for path in ('/home/alice/game', '/tmp/x', '/mnt/c', 'relative/game',
                      '/mnt/wsl/game'):
             self.assertIn('not on a Windows drive', self.check(run, path),
                           path)
         self.assertEqual(run.calls, [])
 
     def test_drvfs_win(self):
-        self.assertEqual(oracle.drvfs_win('/mnt/c/Users/thier/'),
-                         'C:\\Users\\thier')
+        self.assertEqual(oracle.drvfs_win('/mnt/c/Users/alice/'),
+                         'C:\\Users\\alice')
         self.assertEqual(oracle.drvfs_win('/mnt/d'), 'D:\\')
-        self.assertIsNone(oracle.drvfs_win('/home/thier'))
+        self.assertIsNone(oracle.drvfs_win('/home/alice'))
 
 
 class OracleBuildOrderTest(unittest.TestCase):
@@ -3993,9 +3994,32 @@ class ShotCheckTest(unittest.TestCase):
                                    if a['op'] == 'shot')), path)
 
 
+class WinHomeTest(unittest.TestCase):
+    """tools/winhome.py: the Windows profile the Windows-side folders hang
+    off, from $IWD2R_WIN_HOME or the WSL user name."""
+
+    def test_explicit_wins_and_drops_trailing_slash(self):
+        self.assertEqual(winhome.win_home({'IWD2R_WIN_HOME': '/mnt/d/Me/',
+                                           'USER': 'bob'}), '/mnt/d/Me')
+
+    def test_empty_counts_as_unset(self):
+        self.assertEqual(winhome.win_home({'IWD2R_WIN_HOME': '',
+                                           'USER': 'bob'}),
+                         '/mnt/c/Users/bob')
+
+    def test_falls_back_to_the_wsl_user(self):
+        self.assertEqual(winhome.win_home({'LOGNAME': 'carol'}),
+                         '/mnt/c/Users/carol')
+
+    def test_tools_hang_off_it(self):
+        self.assertEqual(oracle.ORACLE_DIR, winhome.WIN_HOME + '/iwd2r-oracle')
+        self.assertEqual(play.WIN_BUILD_BASE, winhome.WIN_HOME + '/iwd2r-build')
+        self.assertEqual(winsandbox.VM_ROOT, winhome.WIN_HOME + '/iwd2r-vm')
+
+
 class WinCheckoutTest(unittest.TestCase):
     def test_win_checkout_defaults(self):
-        base = '/mnt/c/Users/thier/iwd2r-build'
+        base = play.WIN_BUILD_BASE
         self.assertEqual(play.win_checkout('/home/u/iwd2-re-worktrees/first',
                                            {}), base)
         self.assertEqual(play.win_checkout('/home/u/iwd2-re-worktrees/first/',
@@ -4177,7 +4201,7 @@ class SandboxReplayTest(unittest.TestCase):
     """replay record/compare in Windows Sandbox (winsandbox.run_replay,
     tools/sandbox/replay-driver.ps1), with the sandbox stubbed."""
 
-    GAME = r'C:\Users\thier\iwd2r-oracle\game'
+    GAME = r'C:\Users\alice\iwd2r-oracle\game'
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
