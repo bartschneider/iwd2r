@@ -16,6 +16,11 @@ a non-empty `oracle_case` or `exemption`. Prints each offending function and
 exits 1, else exits 0. A base that is not a commit or shares no history with
 HEAD (a force push, or a `before` missing from the clone) is reported on
 stderr and skipped with exit 0.
+
+For the same touched functions the checker also reports how many evidence
+files carry each `kind` (`oracle`, `replay` or `read-only`), and warns about
+the files whose `kind` is missing or not one of those three. The kind is not
+enforced: a missing one is only a warning.
 """
 
 import argparse
@@ -30,6 +35,7 @@ import labels  # noqa: E402
 
 EVIDENCE_DIR = 'docs/evidence'
 HUNK = re.compile(r'^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@')
+KINDS = ('oracle', 'replay', 'read-only')
 
 
 def git(repo, *args, check=True):
@@ -131,21 +137,22 @@ def touched(repo, base):
 
 
 def problem(repo, address):
-    """Why the evidence for address is insufficient, or None."""
+    """(why, fields): why the evidence for address is insufficient, else
+    None with the file's front matter."""
     rel = f'{EVIDENCE_DIR}/{evidence_name(address)}'
     r = git(repo, 'show', f'HEAD:{rel}', check=False)
     if r.returncode != 0:
-        return f'no {rel}'
+        return f'no {rel}', None
     fields = front_matter(r.stdout)
     recorded = fields.get('address', '')
     try:
         if recorded and int(recorded, 16) != address:
-            return f'{rel} records address {recorded}'
+            return f'{rel} records address {recorded}', fields
     except ValueError:
-        return f'{rel} has a malformed address {recorded!r}'
+        return f'{rel} has a malformed address {recorded!r}', fields
     if not fields.get('oracle_case') and not fields.get('exemption'):
-        return f'{rel} has neither oracle_case nor exemption'
-    return None
+        return f'{rel} has neither oracle_case nor exemption', fields
+    return None, fields
 
 
 def main(argv=None):
@@ -159,19 +166,40 @@ def main(argv=None):
               file=sys.stderr)
         return 0
     errors = []
+    kinds = {}
+    untagged = []
     found = touched(args.repo, args.base)
     for path, address, name in found:
-        why = problem(args.repo, address)
+        why, fields = problem(args.repo, address)
         if why:
             errors.append(f'{path}: 0x{address:X} {name}: {why}')
+            continue
+        kind = fields.get('kind')
+        if kind in KINDS:
+            kinds[kind] = kinds.get(kind, 0) + 1
+            continue
+        rel = f'{EVIDENCE_DIR}/{evidence_name(address)}'
+        if kind:
+            untagged.append(f'warning: {rel} has kind: {kind!r}; expected '
+                            f'one of {", ".join(KINDS)}')
+        else:
+            untagged.append(f'warning: {rel} has no kind: '
+                            f'({", ".join(KINDS)})')
     for line in errors:
         print(line)
     if errors:
         print(f'{len(errors)} touched function(s) lack evidence; '
               'see docs/evidence/README.md')
-        return 1
-    print(f'{len(found)} touched function(s), all with evidence')
-    return 0
+    else:
+        print(f'{len(found)} touched function(s), all with evidence')
+    counted = sum(kinds.values())
+    if counted:
+        print('evidence kinds: '
+              + ', '.join(f'{k} {kinds.get(k, 0)}' for k in KINDS)
+              + f' ({counted} of {len(found)} touched function(s))')
+    for line in untagged:
+        print(line)
+    return 1 if errors else 0
 
 
 if __name__ == '__main__':

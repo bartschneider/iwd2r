@@ -334,6 +334,11 @@
     "offset": "0x5380",
     "type": "i16"
   },
+  "sprite_morale": {
+    "base": "CGameSprite",
+    "offset": "0x0808",
+    "type": "u8"
+  },
   "object_type": {
     "base": "CGameObject",
     "offset": "0x0004",

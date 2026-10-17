@@ -2,6 +2,7 @@
 address: 0x5DBDE0
 name: CScreenCharacter::UpdateMainPanel
 exemption: "main panel update; covered by tests/test_character_screen.cpp (the main panel enables Level Up with the experience for it)"
+kind: read-only
 ghidra_version: 12.1.4
 ---
 

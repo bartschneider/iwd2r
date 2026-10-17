@@ -32,6 +32,7 @@ namespace {
 using platform::state_dump::Chargen;
 using platform::state_dump::Dialog;
 using platform::state_dump::Door;
+using platform::state_dump::EnemyCreature;
 using platform::state_dump::EngineState;
 using platform::state_dump::Game;
 using platform::state_dump::GameMember;
@@ -136,7 +137,8 @@ void ReadChargen(CBaldurChitin* chitin, CScreenCreateChar* screen, Chargen* out)
 }
 
 // The objects of type on an area list, head to tail (ids, as the lists
-// store them), the recorder's ObjectsOn.
+// store them), the recorder's ObjectsOn. The visit receives the object and
+// its id.
 template <typename Visit>
 void ObjectsOn(CBaldurChitin* chitin, CTypedPtrList<CPtrList, int*>& list, BYTE type, Visit visit)
 {
@@ -145,14 +147,14 @@ void ObjectsOn(CBaldurChitin* chitin, CTypedPtrList<CPtrList, int*>& list, BYTE 
         const LONG id = static_cast<LONG>(reinterpret_cast<INT_PTR>(list.GetNext(pos)));
         CGameObject* object = ObjectById(chitin, id);
         if (object && object->m_objectType == type)
-            visit(object);
+            visit(object, id);
     }
 }
 
 // The area's doors, explored tiles and sprites, the recorder's ReadArea.
 void ReadArea(CBaldurChitin* chitin, CGameArea* area, World* out)
 {
-    ObjectsOn(chitin, area->m_lVertSort, CGameObject::TYPE_DOOR, [&](CGameObject* object) {
+    ObjectsOn(chitin, area->m_lVertSort, CGameObject::TYPE_DOOR, [&](CGameObject* object, LONG) {
         const CGameDoor* door = static_cast<CGameDoor*>(object);
         Door d;
         d.name.assign(door->m_scriptName, strnlen(door->m_scriptName, SCRIPTNAME_SIZE));
@@ -168,7 +170,23 @@ void ReadArea(CBaldurChitin* chitin, CGameArea* area, World* out)
         }
     }
     for (CTypedPtrList<CPtrList, int*>* list : { &area->m_lVertSort, &area->m_lVertSortBack, &area->m_lVertSortFlight })
-        ObjectsOn(chitin, *list, CGameObject::TYPE_SPRITE, [&](CGameObject*) { ++out->creatures; });
+        ObjectsOn(chitin, *list, CGameObject::TYPE_SPRITE, [&](CGameObject* object, LONG id) {
+            ++out->creatures;
+            // Every sprite the three lists name that is not a party member,
+            // in the lists' order (schema.json "world.enemy_creatures").
+            // ReadWorld fills the party before ReadArea runs.
+            for (const PartyMember& member : out->party)
+                if (static_cast<int32_t>(id) == member.id)
+                    return;
+            const CGameSprite* sprite = static_cast<CGameSprite*>(object);
+            EnemyCreature enemy;
+            enemy.id = static_cast<int32_t>(id);
+            enemy.hp = sprite->m_baseStats.m_hitPoints;
+            enemy.maxHp = sprite->m_derivedStats.m_nMaxHitPoints;
+            enemy.timedEffects = sprite->m_timedEffectList.GetCount();
+            enemy.equipedEffects = sprite->m_equipedEffectList.GetCount();
+            out->enemyCreatures.push_back(enemy);
+        });
 }
 
 // The world screen's dialog, the recorder's DialogJson.
@@ -226,6 +244,7 @@ void ReadWorld(CBaldurChitin* chitin, World* out)
             member.action = sprite->m_curAction.m_actionID;
             member.modal = sprite->m_nModalState;
             member.facing = sprite->m_nDirection;
+            member.morale = sprite->m_baseStats.m_morale;
         }
         out->party.push_back(member);
     }

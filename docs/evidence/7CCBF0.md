@@ -2,6 +2,7 @@
 address: 0x7CCBF0
 name: CVidBitmap::BltBmp24To24
 oracle_case: vid/blt_bmp24to24
+kind: oracle
 ghidra_version: 12.1.4
 ---
 

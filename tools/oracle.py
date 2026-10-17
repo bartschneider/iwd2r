@@ -25,15 +25,17 @@ Usage (from WSL, in the repository):
                                            [--host]
 
 evidence writes a draft docs/evidence/<ADDR>.md for each function named, all
-in one Ghidra run: the front matter (address, name, an empty oracle_case,
-ghidra_version), Ghidra's decompilation, the callers and the callees. It reads
+in one Ghidra run: the front matter (address, name, an empty oracle_case, an
+empty kind, ghidra_version), Ghidra's decompilation, the callers and the
+callees. It reads
 the labelled Ghidra project that tools/ghidra/make_project.py creates, opened
 read-only through tools/ghidra/DecompileToEvidence.java; Ghidra runs one at a
 time across worktrees (make_project.py's lock). An existing evidence file is
 kept unless --force is given. A name shared by several functions (overloads)
 lists them and asks for an address. Such names, missing ones and kept files
 are listed, and the command exits 1 after writing the rest. Fill in
-oracle_case or exemption and the Notes by hand (docs/evidence/README.md).
+oracle_case or exemption, the kind (oracle, replay or read-only) and the
+Notes by hand (docs/evidence/README.md).
 
 build syncs the checkout to this worktree's Windows build folder (play.py's
 route and play.win_checkout) and builds the 32-bit runner iwd2r_oracle, the replay injector and the recorder
@@ -334,6 +336,7 @@ def render_evidence(parsed, version):
            f'address: 0x{address:X}',
            f'name: {name}',
            'oracle_case:',
+           'kind:',
            f'ghidra_version: {version}',
            '---',
            '',
@@ -415,7 +418,7 @@ def cmd_evidence(args):
         with open(path, 'w') as f:
             f.write(render_evidence(entry, ghidra_version()))
         print(f'wrote {rel} (0x{address:X} {name}); fill in oracle_case or '
-              'exemption and the Notes')
+              'exemption, the kind and the Notes')
     return 1 if failed else 0
 
 
