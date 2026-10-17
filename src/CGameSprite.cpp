@@ -21165,9 +21165,14 @@ static BOOLEAN byte_8F9AF5;
 // toward zero, as `imul 0x38E38E39` and the sign fix do).
 static LONG TravelDistance(const CPoint& pt1, const CPoint& pt2)
 {
-    LONG dy = pt1.y - pt2.y;
-    LONG dx = pt1.x - pt2.x;
-    return dy * dy * 16 / 9 + dx * dx;
+    // NOTE: 32-bit arithmetic that wraps, as the original's imul and shl do
+    // (0x74CEF3-0x74CF15): the squares and the sum are computed unsigned;
+    // the division by 9 is signed (truncated toward zero).
+    DWORD dy = static_cast<DWORD>(pt1.y) - static_cast<DWORD>(pt2.y);
+    DWORD dx = static_cast<DWORD>(pt1.x) - static_cast<DWORD>(pt2.x);
+    LONG nY = static_cast<LONG>((dy * dy) << 4) / 9;
+    DWORD nX = dx * dx;
+    return static_cast<LONG>(static_cast<DWORD>(nY) + nX);
 }
 
 // NOTE: Inlined twice in 0x74CDB0, for the party (0x74E117-0x74EA55) and
