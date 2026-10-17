@@ -81,7 +81,7 @@ A case declares: the original function's address and signature (calling conventi
 
 ### 4.5 Vanilla data
 
-`tools/oracle.py vanilla` builds `C:\Users\thier\iwd2r-oracle\game` once: copy the install, then run IWD2EE's own uninstaller (`Setup-iwd2ee.exe --uninstall`, WeiDU) inside the copy, non-interactively. It verifies the result: no `IEex*.dll`, `WeiDU.log` lists no IWD2EE components, and `iwd2.exe`'s MD5 matches section 3. The real install is never modified. Both the original and our engine use this copy for every comparison; our engine runs in vanilla mode.
+`tools/oracle.py vanilla` builds `%USERPROFILE%\iwd2r-oracle\game` once: copy the install, then run IWD2EE's own uninstaller (`Setup-iwd2ee.exe --uninstall`, WeiDU) inside the copy, non-interactively. It verifies the result: no `IEex*.dll`, `WeiDU.log` lists no IWD2EE components, and `iwd2.exe`'s MD5 matches section 3. The real install is never modified. Both the original and our engine use this copy for every comparison; our engine runs in vanilla mode.
 
 ### 4.6 Replay recorder
 

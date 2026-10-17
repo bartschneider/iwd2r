@@ -9,7 +9,7 @@ starts the sandbox, waits for the driver's done.txt and closes it.
 
   host                                   sandbox
   build output (read-only)               C:\\iwd2r\\bin
-  C:\\Users\\thier\\iwd2r-vm\\game (rw)       C:\\iwd2r\\game
+  %USERPROFILE%\\iwd2r-vm\\game (rw)        C:\\iwd2r\\game
   <run>\\results (rw)                     C:\\iwd2r\\results
   <run>\\tools (read-only)                C:\\iwd2r\\tools
 
@@ -25,8 +25,14 @@ import shutil
 import stat
 import struct
 import subprocess
+import sys
 import time
 import xml.etree.ElementTree as ET
+
+# The sibling module (python3 -I does not put the script's folder on the
+# path).
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import winhome  # noqa: E402
 
 SANDBOX_EXE = '/mnt/c/Windows/System32/WindowsSandbox.exe'
 SANDBOX_EXE_WIN = r'C:\Windows\System32\WindowsSandbox.exe'
@@ -37,7 +43,7 @@ ENABLE_HINT = ('play: Windows Sandbox is not enabled (no %s); in an admin '
 CMD_EXE = '/mnt/c/Windows/System32/cmd.exe'
 TASKKILL_NAMES = ('WindowsSandbox.exe', 'WindowsSandboxClient.exe',
                   'WindowsSandboxRemoteSession.exe')
-VM_ROOT = '/mnt/c/Users/thier/iwd2r-vm'
+VM_ROOT = winhome.WIN_HOME + '/iwd2r-vm'
 GAME_CACHE = VM_ROOT + '/game'
 # One sandbox at a time across worktrees (filelock.hold in play.py).
 SANDBOX_LOCK = VM_ROOT + '/sandbox.lock'
@@ -496,7 +502,7 @@ def run_scenario(exe, game_cache, actions, overrides, scenario, run_dir,
 #
 #   host                                       sandbox
 #   oracle build output (read-only)            C:\iwd2r\oracle
-#   C:\Users\thier\iwd2r-oracle\game (rw)       the same path
+#   %USERPROFILE%\iwd2r-oracle\game (rw)       the same path
 #   <run>\results (rw)                         C:\iwd2r\results
 #   <run>\tools (read-only)                    C:\iwd2r\tools
 #

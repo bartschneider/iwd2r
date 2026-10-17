@@ -139,7 +139,7 @@ Before M1's streams start, one short tooling batch removes the collisions betwee
 - **Ghidra.** Headless Ghidra opens the project exclusively. `make_project.headless()` takes a file lock so parallel callers queue instead of failing. `oracle.py evidence` accepts several addresses and decompiles them in one Ghidra run, so a stream drafts a batch's evidence in one call.
 - **Windows build folders.** `tools/play.py`'s `WIN_CHECKOUT` becomes per-worktree (derived from the worktree's name, overridable by `IWD2R_WIN_CHECKOUT`), so streams can build x86 and run oracle cases without clobbering each other. The oracle's game copy and tables stay shared; the runner only writes under per-run folders.
 - **Replays and the sandbox.** `oracle.py replay record` and `compare` take a lock on the oracle directory, because the original's run writes INI and cache state into the shared vanilla copy. `play.py --vm windows` takes a lock too: Windows runs one sandbox at a time.
-- **Worktrees.** A script creates a stream worktree from `first` under `/home/thier/iwd2-re-worktrees/p3-<stream>` and removes it after merge.
+- **Worktrees.** A script creates a stream worktree from `first` under `~/iwd2-re-worktrees/p3-<stream>` and removes it after merge.
 - **Scenarios.** `scenarios/world_entry.txt` is written from the probe's play-through (character creation to the Done button), with checkpoints, so M1's exit criterion exists before its code.
 
 ### 5.5 Batching and evidence
