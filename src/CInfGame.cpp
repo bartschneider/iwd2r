@@ -1613,6 +1613,7 @@ LONG CInfGame::ImportCharacter(const CString& sFileName, INT nIndex)
 // 0x5AC430
 BOOL CInfGame::SaveGame(BOOLEAN bProgressBarRequired, BOOLEAN bProgressBarInPlace, BOOLEAN bSaveScreen)
 {
+    { FILE* dbgf = std::fopen("/tmp/claude-1000/-home-thier-iwd2-re-worktrees-first/9a6f5d61-dc4a-43dc-ba4d-8701eb27873b/scratchpad/dbg562c.txt", "a"); if (dbgf) { std::fprintf(dbgf, "SAVE open=%d t=%u\n", (int)g_pChitin->cNetwork.GetSessionOpen(), (unsigned)m_worldTime.m_gameTime); std::fclose(dbgf); } }
     CGameFile cGameFile;
     BOOL bResult;
     DWORD dwSectorsPerCluster;

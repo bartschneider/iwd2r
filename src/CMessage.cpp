@@ -2016,6 +2016,7 @@ void CBaldurMessage::BroadcastUpdateCharacterSlot(BOOLEAN bUpdateAllCharacters, 
 
     BOOLEAN bSent = FALSE;
 
+    { FILE* dbgf = std::fopen("/tmp/claude-1000/-home-thier-iwd2-re-worktrees-first/9a6f5d61-dc4a-43dc-ba4d-8701eb27873b/scratchpad/dbg562c.txt", "a"); if (dbgf) { std::fprintf(dbgf, "BCAST entry est=%d\n", (int)g_pChitin->cNetwork.m_bConnectionEstablished); std::fclose(dbgf); } }
     // In single player too: the game runs as the host of an open session.
     if (!g_pChitin->cNetwork.m_bConnectionEstablished) {
         return;
@@ -2055,6 +2056,7 @@ void CBaldurMessage::BroadcastUpdateCharacterSlot(BOOLEAN bUpdateAllCharacters, 
             // redone at its next AI update.
             pSprite->m_bForceVisualEffects = TRUE;
             pSprite->field_562C = TRUE;
+            { FILE* dbgf = std::fopen("/tmp/claude-1000/-home-thier-iwd2-re-worktrees-first/9a6f5d61-dc4a-43dc-ba4d-8701eb27873b/scratchpad/dbg562c.txt", "a"); if (dbgf) { std::fprintf(dbgf, "BCAST id=%x\n", (unsigned)pSprite->GetId()); std::fclose(dbgf); } }
 
             pGame->GetObjectArray()->ReleaseDeny(nCharacterId,
                 CGameObjectArray::THREAD_ASYNCH,

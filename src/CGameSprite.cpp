@@ -15007,6 +15007,7 @@ BOOL CGameSprite::ProcessEffectList()
 
     BOOL bResult = TRUE;
 
+    if (g_pBaldurChitin->GetObjectGame()->GetCharacterPortraitNum(m_id) != -1) { FILE* dbgf = std::fopen("/tmp/claude-1000/-home-thier-iwd2-re-worktrees-first/9a6f5d61-dc4a-43dc-ba4d-8701eb27873b/scratchpad/dbg562c.txt", "a"); if (dbgf) { std::fprintf(dbgf, "PEL t=%u id=%x 562c=%d hpcon=%d 44a=%d allow=%d active=%d\n", (unsigned)g_pBaldurChitin->GetObjectGame()->GetWorldTimer()->m_gameTime, (unsigned)m_id, (int)field_562C, (int)m_bHPCONBonusTotalUpdate, (int)field_44A, (int)m_bAllowEffectListCall, (int)g_pBaldurChitin->GetObjectGame()->GetWorldTimer()->m_active); std::fclose(dbgf); } }
     if (!m_bAllowEffectListCall) {
         field_72A2++;
         return TRUE;
