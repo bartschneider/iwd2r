@@ -694,6 +694,32 @@ CProjectileArea84F6B8::CProjectileArea84F6B8()
 
 // -----------------------------------------------------------------------------
 
+// 0x572470
+CProjectileArea84F754::CProjectileArea84F754()
+    // NOTE: The radius is the WORD at 0x84F1BC (256), then 140.
+    : CProjectileArea(256)
+{
+    m_explosion1.m_sound = "EFF_P16";
+
+    m_nTriggerInterval = 10000;
+    m_nTriggerCountdown = 0;
+    m_nHitModulus = 10;
+    m_nDuration = 45;
+    m_nRadius = 140;
+}
+
+// 0x572540
+void CProjectileArea84F754::Fire(CGameArea* pArea, LONG source, LONG target, CPoint targetPos, LONG nHeight, SHORT nType)
+{
+    // A column of flame at the point, then the area.
+    CProjectileShaft* pShaft = new CProjectileShaft(CString("FStrikH"), CString(""), 0xFF, FALSE, FALSE, 28);
+    pShaft->Fire(pArea, source, target, targetPos, nHeight, nType);
+
+    CProjectileArea::Fire(pArea, source, target, targetPos, nHeight, nType);
+}
+
+// -----------------------------------------------------------------------------
+
 // 0x572670
 CProjectileArea84F7F0::CProjectileArea84F7F0()
     // NOTE: The radius is the WORD at 0x84F1BC (256), then 100.

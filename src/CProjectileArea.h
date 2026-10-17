@@ -159,6 +159,14 @@ public:
     CProjectileArea84F6B8();
 };
 
+// Flame Strike (projectile type 67, vtable 0x84F754): a FStrikH column on the
+// target point, then the area, 140 around.
+class CProjectileArea84F754 : public CProjectileArea {
+public:
+    CProjectileArea84F754();
+    /* 006C */ void Fire(CGameArea* pArea, LONG source, LONG target, CPoint targetPos, LONG nHeight, SHORT nType) override;
+};
+
 // Grease (projectile type 101, vtable 0x84F7F0): GreaseX and lingering
 // GreaseA, 100 around, 1000 ticks.
 class CProjectileArea84F7F0 : public CProjectileArea {
