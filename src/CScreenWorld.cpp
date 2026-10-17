@@ -639,8 +639,10 @@ void CScreenWorld::OnKeyDown(SHORT nKeysFlags)
 
             if (nKey == pGame->m_pKeymap[24]
                 && pGame->m_pKeymapFlags[24] == m_bCtrlKeyDown) {
-                // NOTE: 0x694510 (the multiplayer chat's panel) returns at
-                // once without a network session (ADR 0002); not called.
+                // NOTE: 0x694510 (the multiplayer chat's panel) runs only
+                // under a provider other than the null one (its gate at
+                // 0x6945C1), so a single-player host session returns from
+                // it at once; not called.
                 sub_693710();
                 continue;
             }
@@ -1172,8 +1174,10 @@ void CScreenWorld::OnKeyDown(SHORT nKeysFlags)
                 }
                 break;
             case 24:
-                // NOTE: 0x694510 (the multiplayer chat's panel) returns at
-                // once without a network session (ADR 0002); not called.
+                // NOTE: 0x694510 (the multiplayer chat's panel) runs only
+                // under a provider other than the null one (its gate at
+                // 0x6945C1), so a single-player host session returns from
+                // it at once; not called.
                 sub_693710();
                 break;
             case 25: {
@@ -4183,26 +4187,188 @@ void CScreenWorld::DeleteAreaMultiplayer()
                 pArea->m_resRef.CopyToString(sArea);
                 pArea->field_AE6 = 0;
 
-                // TODO: Incomplete. The original starts the delete-area poll
-                // for sArea here (0x43AE40, not in our tree yet).
+                pMessage->StartDeleteAreaPoll(sArea, FALSE);
                 break;
             }
         }
     }
 
     if (pMessage->m_bDeleteAreaPolling == TRUE) {
-        // TODO: Incomplete. The original resolves a running poll here
-        // (0x43B7E0, CBaldurMessage::DeleteAreaBallotResult 0x43B980 and
-        // DeleteArea when every vote says yes and another area is loaded) or
-        // re-sends it after m_dwDeleteAreaTimeout (0x43AE40). A poll never
-        // starts while 0x43AE40 is missing.
+        if (pMessage->CanResolveDeleteAreaPoll() == TRUE) {
+            // NOTE: The resolve frame draws no rand, where a frame without a
+            // running poll draws the slot roll above.
+            BOOLEAN bBallot = pMessage->DeleteAreaBallotResult();
+            CString sArea = pMessage->GetDeleteAreaString();
+
+            // The area named by the poll is deleted only when the party
+            // left it (m_nCharacters), it is not the master area, no
+            // character-termination sequence is running, and more than one
+            // area is loaded; otherwise it is kept but flagged.
+            BOOLEAN bDelete = FALSE;
+            CGameArea* pPolled = pGame->GetArea(sArea);
+            if (pPolled != NULL
+                && pPolled->m_nCharacters == 0
+                && pPolled != pGame->m_pGameAreaMaster
+                && pGame->m_nCharacterTerminationSequenceDelay == 0) {
+                INT nAreas = 0;
+                for (INT nSlot = 0; nSlot < CINFGAME_MAX_AREAS; nSlot++) {
+                    if (pGame->m_gameAreas[nSlot] != NULL) {
+                        nAreas++;
+                    }
+                }
+
+                if (nAreas > 1) {
+                    bDelete = TRUE;
+                }
+            }
+
+            bDelete = static_cast<BOOLEAN>(bDelete != FALSE && bBallot != FALSE);
+
+            CGameArea* pArea = pGame->GetArea(sArea);
+            if (bDelete == TRUE) {
+                if (pArea != NULL) {
+                    DeleteArea(pArea);
+                }
+            } else if (pArea != NULL) {
+                pArea->field_AE6 = 1;
+            }
+
+            pMessage->ResolveDeleteAreaPoll(sArea, bDelete);
+        } else {
+            CString sArea = pMessage->GetDeleteAreaString();
+
+            CGameArea* pArea = pGame->GetArea(sArea);
+            if (pArea == NULL) {
+                pMessage->CancelDeleteAreaPoll();
+            } else if (GetTickCount() > pMessage->m_dwDeleteAreaTimeout) {
+                pMessage->StartDeleteAreaPoll(sArea, TRUE);
+            }
+        }
     }
 }
 
 // 0x693C60
 void CScreenWorld::DeleteArea(CGameArea* pArea)
 {
-    // TODO: Incomplete.
+    CAreaFile areaFile;
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenWorld.cpp
+    // __LINE__: 9770
+    UTIL_ASSERT(pArea != NULL);
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+    EnterCriticalSection(&field_106);
+    pArea->SortLists();
+
+    // The area is written to the temp folder unless this is a client, the
+    // area is flagged not to be saved, or it was left less than 45 game
+    // seconds ago.
+    if ((!g_pChitin->cNetwork.m_bConnectionEstablished
+            || g_pChitin->cNetwork.m_bIsHost == TRUE)
+        && (pArea->m_header.m_flags & 1) == 0
+        && (pArea->field_436 == 0
+            || static_cast<DWORD>(pGame->m_worldTime.m_gameTime - pArea->field_438) >= 0x2d)) {
+        BYTE* pAreaData = NULL;
+        DWORD nAreaData = 0;
+        pArea->Marshal(&pAreaData, &nAreaData, FALSE);
+        if (pAreaData != NULL) {
+            areaFile.SetResRef(pArea->m_resRef, TRUE, TRUE);
+            areaFile.GetRes()->Write(pGame->m_sTempDir, pAreaData, nAreaData);
+            delete pAreaData;
+        }
+    }
+
+    // Find the area's slot.
+    BYTE nSlot = 0;
+    BOOL bFound = FALSE;
+    while (nSlot < CINFGAME_MAX_AREAS) {
+        if (pArea == pGame->m_gameAreas[nSlot]) {
+            bFound = TRUE;
+            break;
+        }
+        nSlot++;
+    }
+
+    if (bFound) {
+        if (pArea == pGame->m_gameAreas[pGame->m_visibleArea]) {
+            pGame->UnselectAll();
+            CGameArea* pVisibleArea = pGame->m_gameAreas[pGame->m_visibleArea];
+            pVisibleArea->m_bPicked = FALSE;
+            pVisibleArea->m_iPicked = CGameObjectArray::INVALID_INDEX;
+            pVisibleArea->m_nToolTip = 0;
+            pVisibleArea->OnDeactivation();
+
+            if (g_pChitin->cNetwork.GetServiceProvider() == CNetwork::SERV_PROV_NULL) {
+                // The next visible area is the area of the first party
+                // member found; the original releases that member's share
+                // twice (0x69409D and 0x6940BB).
+                BOOL bMoved = FALSE;
+                for (SHORT nCharacter = 0; nCharacter < 6 && bMoved == FALSE; nCharacter++) {
+                    LONG nCharacterId = pGame->GetFixedOrderCharacterId(nCharacter);
+                    if (nCharacterId == CGameObjectArray::INVALID_INDEX) {
+                        continue;
+                    }
+
+                    CGameObject* pObject;
+                    BYTE rc;
+                    do {
+                        rc = pGame->GetObjectArray()->GetShare(nCharacterId,
+                            CGameObjectArray::THREAD_ASYNCH,
+                            &pObject,
+                            INFINITE);
+                    } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+                    if (rc == CGameObjectArray::SUCCESS) {
+                        if (pObject->m_pArea != NULL) {
+                            pGame->m_visibleArea = pObject->m_pArea->m_id;
+                            pGame->GetObjectArray()->ReleaseShare(nCharacterId,
+                                CGameObjectArray::THREAD_ASYNCH,
+                                INFINITE);
+                            pGame->GetObjectArray()->ReleaseShare(nCharacterId,
+                                CGameObjectArray::THREAD_ASYNCH,
+                                INFINITE);
+                            bMoved = TRUE;
+                        } else {
+                            pGame->GetObjectArray()->ReleaseShare(nCharacterId,
+                                CGameObjectArray::THREAD_ASYNCH,
+                                INFINITE);
+                        }
+                    }
+                }
+
+                if (bMoved == FALSE) {
+                    // No party member's area: the first loaded slot.
+                    for (BYTE nArea = 0; nArea < CINFGAME_MAX_AREAS; nArea++) {
+                        if (pGame->m_gameAreas[nArea] != NULL) {
+                            pGame->m_visibleArea = nArea;
+                        }
+                    }
+                }
+            } else {
+                for (BYTE nArea = 0; nArea < CINFGAME_MAX_AREAS; nArea++) {
+                    if (pGame->m_gameAreas[nArea] != NULL) {
+                        pGame->m_visibleArea = nArea;
+                    }
+                }
+            }
+
+            pGame->m_gameAreas[pGame->m_visibleArea]->OnActivation();
+        }
+
+        if (nSlot >= CINFGAME_MAX_AREAS || pGame->m_gameAreas[nSlot] == NULL) {
+            // __FILE__: .\Include\InfGame.h
+            // __LINE__: 1389
+            UTIL_ASSERT(FALSE);
+        }
+        pGame->m_gameAreas[nSlot] = NULL;
+    }
+
+    if (pArea != NULL) {
+        delete pArea;
+    }
+
+    LeaveCriticalSection(&field_106);
 }
 
 // 0x694210
