@@ -68,6 +68,13 @@ struct HandleObject {
     bool manualReset = false;
     // iwd2r: the engine's named AI-thread timer event (see WaitForSingleObject).
     bool replayTimer = false;
+    // iwd2r: CloseHandle may run while a waiter is still inside the waits
+    // below (CChitin::~CChitin 0x7923B0 closes m_eventTimer). Destroying a
+    // condition variable with a waiter in it aborts the process, so a
+    // handle closed under a waiter is only marked here, and the waiter
+    // that finds waiters back at 0 deletes the object.
+    uint32_t waiters = 0;
+    bool closed = false;
     LONG count = 0;
     LONG maximum = 0;
 
@@ -144,6 +151,18 @@ DWORD WaitForSingleObject(HANDLE handle, DWORD milliseconds)
     }
     case HandleObject::Kind::Event: {
         std::unique_lock<std::mutex> guard(object->lock);
+        ++object->waiters;
+        // Leaving the wait: drop the waiter count and, when CloseHandle
+        // marked the object closed under us and we are the last waiter,
+        // destroy it -- after the lock is gone, never inside the wait.
+        const auto leave = [&](bool signaled) {
+            --object->waiters;
+            const bool doomed = object->closed && object->waiters == 0;
+            guard.unlock();
+            if (doomed)
+                delete object;
+            return signaled ? WAIT_OBJECT_0 : WAIT_TIMEOUT;
+        };
         if (object->replayTimer && milliseconds != INFINITE && platform::replay::Active()) {
             // iwd2r: the engine's AI thread waits on the BaldurTimerEvent
             // for up to 100 ms (CBaldurChitin::MainAIThread 0x4242B0; the
@@ -154,19 +173,45 @@ DWORD WaitForSingleObject(HANDLE handle, DWORD milliseconds)
             // must not let the wait expire and start the AI update before
             // the render ends (the ai_overlap_frames invariant). Without a
             // replay the wait is exactly the asked-for real time.
+            //
+            // iwd2r: the virtual clock stops for good after the last frame
+            // (the scenario is over; nothing advances g_now any more), so
+            // a virtual deadline in that state never arrives: the wait --
+            // and with it the engine's whole exit -- would hang forever
+            // (the intermittent world_entry INJECTOR_TIMEOUT). While the
+            // AI thread sits in this wait, a frame count frozen for 2 s of
+            // real time means no frame will come again: a frame still
+            // being rendered counts at its start (platform/replay.cpp
+            // OnFrame) and keeps the count moving, and the renders the
+            // M2-26 property protects are far shorter than 2 s even at a
+            // 10x load (a violation would be counted in ai_overlap_frames
+            // and fail the compare, not pass silently). On the fallback
+            // the wait times out on the real clock, the loop above sees
+            // the exit flag and the thread parks. The fallback is armed
+            // only after the first frame: before it, the original's AI
+            // thread does run early updates on its 100 ms real timeout,
+            // and ours must not.
             const uint32_t deadline = platform::replay::NowMs() + milliseconds;
-            while (!object->cv.wait_for(guard, std::chrono::milliseconds(milliseconds),
-                [&] { return object->signaled; })) {
-                if (platform::replay::NowMs() >= deadline) {
-                    return WAIT_TIMEOUT;
+            uint32_t frame = platform::replay::Frame();
+            std::chrono::steady_clock::time_point froze = std::chrono::steady_clock::now();
+            while (!object->signaled) {
+                if (platform::replay::NowMs() >= deadline)
+                    return leave(false);
+                if (const uint32_t now = platform::replay::Frame(); now != frame) {
+                    frame = now;
+                    froze = std::chrono::steady_clock::now();
+                } else if (frame != 0 && std::chrono::steady_clock::now() - froze > std::chrono::seconds(2)) {
+                    return leave(false);
                 }
+                object->cv.wait_for(guard, std::chrono::milliseconds(milliseconds),
+                    [&] { return object->signaled; });
             }
         } else if (!waitFor(guard, object->cv, milliseconds, [&] { return object->signaled; })) {
-            return WAIT_TIMEOUT;
+            return leave(false);
         }
         if (!object->manualReset)
             object->signaled = false;
-        return WAIT_OBJECT_0;
+        return leave(true);
     }
     case HandleObject::Kind::Semaphore: {
         std::unique_lock<std::mutex> guard(object->lock);
@@ -201,6 +246,19 @@ BOOL CloseHandle(HANDLE handle)
     }
     if (object->kind == HandleObject::Kind::File && object->file)
         std::fclose(object->file);
+    if (object->kind == HandleObject::Kind::Event) {
+        // iwd2r: CChitin::~CChitin (0x7923B0) closes m_eventTimer while the
+        // AI thread can still be inside its 100 ms wait (the replay clock's
+        // post-scenario freeze delayed it past WaitForMainAIThread's 10 s).
+        // Destroying the event's condition variable under that waiter
+        // aborts the process (pthread_cond_destroy with a waiter); mark it
+        // and let the last waiter out delete it (see WaitForSingleObject).
+        std::lock_guard<std::mutex> guard(object->lock);
+        if (object->waiters > 0) {
+            object->closed = true;
+            return TRUE;
+        }
+    }
     delete object;
     return TRUE;
 }
