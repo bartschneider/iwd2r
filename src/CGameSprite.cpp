@@ -10,6 +10,7 @@
 #include "CGameAnimationTypeMonsterIcewindNew.h"
 #include "CGameArea.h"
 #include "CGameButtonList.h"
+#include "CGameChunk.h"
 #include "CGameContainer.h"
 #include "CGameDoor.h"
 #include "CGameTimer.h"
@@ -7575,6 +7576,159 @@ void CGameSprite::UpdateSpriteEffect()
             delete m_pSpriteEffectArrayPosition;
             m_pSpriteEffectArrayPosition = NULL;
         }
+    }
+}
+
+// 0x70A810
+void CGameSprite::Shatter(BYTE nType)
+{
+    CString sSound("");
+    LONG posZ = m_posZ;
+    WORD chunkAnimations[7] = { 0x210, 0x200, 0x200, 0x220, 0x220, 0x240, 0x240 };
+    BYTE colorRangeValues[7];
+    CRect rFx;
+    CPoint ptReference;
+    INT nRange;
+    INT nBounce;
+    INT nHeight;
+    INT nRise;
+    CPoint ptVelocity;
+    BYTE nChunks;
+
+    // NOTE: Uninline.
+    m_animation.CalculateFxRect(rFx, ptReference, posZ);
+
+    m_posZ = -(ptReference.y / 2);
+    nBounce = rand() % 3;
+    m_animationRunning = TRUE;
+    m_posZDelta = (nBounce + 1) * m_doBounce;
+
+    // The chunks start between a fifth and four fifths of the creature's
+    // height above it and fly off at up to three pixels a tick.
+    switch (nType) {
+    case 0:
+        // Ice.
+        for (nRange = 0; nRange < 8; nRange++) {
+            CColorRange* pColorRange = new CColorRange();
+            pColorRange->m_range = static_cast<BYTE>(nRange);
+            pColorRange->m_color = CVidPalette::ICE;
+            m_derivedStats.m_appliedColorRanges.AddTail(pColorRange);
+
+            // NOTE: Uninline.
+            m_animation.SetColorRange(static_cast<BYTE>(nRange), CVidPalette::ICE);
+        }
+
+        memset(colorRangeValues, CVidPalette::ICE, sizeof(colorRangeValues));
+
+        // NOTE: One DWORD store at +0x5C4 clears the animation ID and the
+        // WORD after it, so the creature is no longer drawn.
+        m_baseStats.m_animationType = 0;
+        m_baseStats.field_22 = 0;
+
+        nChunks = static_cast<BYTE>(rand() % 16 + 10);
+        while (nChunks != 0) {
+            nBounce = rand() % 3;
+            nHeight = ptReference.y * 3 / 5;
+            nRise = nHeight != 0 ? rand() % nHeight : 0;
+            ptVelocity.y = rand() % 7 - 3;
+            ptVelocity.x = rand() % 7 - 3;
+
+            new CGameChunk(0x100,
+                colorRangeValues,
+                sSound,
+                m_pArea,
+                m_pos,
+                ptVelocity,
+                -nRise - ptReference.y / 5,
+                (nBounce + 1) * m_doBounce,
+                (CHUNK_DURATION + 1) << 2,
+                CHUNK_DURATION + 1);
+
+            nChunks--;
+        }
+        break;
+    case 1:
+        // Stone.
+        for (nRange = 0; nRange < 8; nRange++) {
+            CColorRange* pColorRange = new CColorRange();
+            pColorRange->m_range = static_cast<BYTE>(nRange);
+            pColorRange->m_color = CVidPalette::STONE;
+            m_derivedStats.m_appliedColorRanges.AddTail(pColorRange);
+
+            // NOTE: Uninline.
+            m_animation.SetColorRange(static_cast<BYTE>(nRange), CVidPalette::STONE);
+        }
+
+        memset(colorRangeValues, CVidPalette::STONE, sizeof(colorRangeValues));
+
+        m_baseStats.m_animationType = 0;
+        m_baseStats.field_22 = 0;
+
+        nChunks = static_cast<BYTE>(rand() % 16 + 10);
+        while (nChunks != 0) {
+            nBounce = rand() % 3;
+            nHeight = ptReference.y * 3 / 5;
+            nRise = nHeight != 0 ? rand() % nHeight : 0;
+            ptVelocity.y = rand() % 7 - 3;
+            ptVelocity.x = rand() % 7 - 3;
+
+            new CGameChunk(0x100,
+                colorRangeValues,
+                sSound,
+                m_pArea,
+                m_pos,
+                ptVelocity,
+                -nRise - ptReference.y / 5,
+                (nBounce + 1) * m_doBounce,
+                (CHUNK_DURATION + 1) << 2,
+                CHUNK_DURATION + 1);
+
+            nChunks--;
+        }
+        break;
+    case 2:
+        // Flesh: the seven chunk animations, and blood.
+        for (nRange = 0; nRange < 8; nRange++) {
+            CColorRange* pColorRange = new CColorRange();
+            pColorRange->m_range = static_cast<BYTE>(nRange);
+            pColorRange->m_color = CVidPalette::FLESH_RENDERED;
+            m_derivedStats.m_appliedColorRanges.AddTail(pColorRange);
+
+            // NOTE: Uninline.
+            m_animation.SetColorRange(static_cast<BYTE>(nRange), CVidPalette::FLESH_RENDERED);
+        }
+
+        memset(colorRangeValues, CVidPalette::FLESH_RENDERED, sizeof(colorRangeValues));
+
+        m_baseStats.m_animationType = 0;
+        m_baseStats.field_22 = 0;
+
+        for (nChunks = 0; nChunks < 7; nChunks++) {
+            nBounce = rand() % 3;
+            nHeight = ptReference.y * 3 / 5;
+            nRise = nHeight != 0 ? rand() % nHeight : 0;
+            ptVelocity.y = rand() % 7 - 3;
+            ptVelocity.x = rand() % 7 - 3;
+
+            new CGameChunk(chunkAnimations[nChunks],
+                colorRangeValues,
+                sSound,
+                m_pArea,
+                m_pos,
+                ptVelocity,
+                -nRise - ptReference.y / 5,
+                (nBounce + 1) * m_doBounce,
+                (CHUNK_DURATION + 1) << 2,
+                CHUNK_DURATION + 1);
+        }
+
+        AddBlood(0, 0, CBlood::EXPLODING_DEATH);
+        break;
+    default:
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjCreature.cpp
+        // __LINE__: 11715
+        UTIL_ASSERT(FALSE);
+        break;
     }
 }
 

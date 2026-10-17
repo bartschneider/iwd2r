@@ -928,18 +928,12 @@ BOOL IcewindCGameEffectVisualSpellHit::ApplyEffect(CGameSprite* pSprite)
         0);
     g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
 
-    // DEVIATION: the original calls Fire on the decoded projectile
-    // unconditionally. The NULL check is there because our
-    // DecodeSpellHitProjectile (0x560310) still returns NULL for the sunray
-    // type 57 (see CProjectile.h); remove it when that class is ported.
-    if (pProjectile != NULL) {
-        pProjectile->Fire(pSprite->GetArea(),
-            pSprite->GetId(),
-            pSprite->GetId(),
-            pSprite->GetPos(),
-            0,
-            0);
-    }
+    pProjectile->Fire(pSprite->GetArea(),
+        pSprite->GetId(),
+        pSprite->GetId(),
+        pSprite->GetPos(),
+        0,
+        0);
 
     m_done = TRUE;
 

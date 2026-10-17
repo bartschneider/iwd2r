@@ -3,6 +3,8 @@
 #include "CBaldurChitin.h"
 #include "CGameArea.h"
 #include "CGameEffect.h"
+#include "CGameObject84D624.h"
+#include "CGameObject84F0DC.h"
 #include "CGameSprite.h"
 #include "CInfGame.h"
 #include "CParticle.h"
@@ -17,7 +19,7 @@ CProjectileArea::CProjectileArea(WORD nRadius)
 {
     m_explosion2.field_2C = 0;
     m_explosion2.field_2E = 0x7FFFFFFF;
-    m_explosion3.field_2C = 0;
+    m_explosion3.m_pPoints = NULL;
     m_explosion3.field_30 = 0;
     m_explosion3.field_34 = 0;
     m_explosion3.field_35 = 0;
@@ -82,9 +84,11 @@ void CProjectileArea::AIUpdate()
         UpdateBasedOnTargetPoint(m_targetPos.x, m_targetPos.y);
 
         if (m_bSparkle) {
-            // TODO: Incomplete (0x56FC02-0x56FC69). The original adds a
-            // sparkle object (0x51AE40, 0xCA bytes; not ported) to the area
-            // at the projectile's position.
+            // A puff of sparkles at the projectile.
+            CGameObject84D624* pSparkle = new CGameObject84D624(m_nSparkleColour,
+                CGameObject84D624::TYPE_SPARKLE,
+                CGameObject84D624::EXPLOSION_PUFFS);
+            pSparkle->AddToArea(m_pArea, m_pos, m_posZ, CGameObject::LIST_FRONT);
         }
 
         m_sound.SetCoordinates(m_pos.x, m_pos.y, m_posZ);
@@ -232,18 +236,26 @@ void CProjectileArea::OnArrival()
 
     PlaySound(m_arrivalSoundRef, m_loopArrivalSound, TRUE);
 
+    // The points the explosion's lingering pieces burn at. NOTE: The
+    // original never deletes them here; the last piece does (none made, they
+    // stay).
     if (!m_explosion3.m_animation.empty()) {
-        // TODO: Incomplete (0x56F4E7-0x56F510). The original keeps a new
-        // 0x14-byte object (0x5868E0, not ported) in m_explosion3.field_2C.
+        m_explosion3.m_pPoints = new CProjectileAreaPoints();
     }
 
     if (!m_explosion2.m_animation.empty()
         || !m_explosion3.m_animation.empty()
         || !m_explosion1.m_animation.empty()) {
-        // TODO: Incomplete (0x56F52E-0x56F591). The original creates the
-        // explosion object (operator new(0x2A2), 0x56BF30; not ported) from
-        // the three explosion descriptions, the area, the position, the
-        // radius, the speed's low byte, TRUE (0x85BD6D) and the duration.
+        // Its particles stop at walls.
+        new CGameObject84F0DC(m_explosion1,
+            m_explosion2,
+            m_explosion3,
+            m_pArea,
+            m_pos,
+            static_cast<SHORT>(m_nRadius),
+            static_cast<BYTE>(m_speed),
+            CGameObject84F0DC::WALL_STOP,
+            static_cast<WORD>(m_nDuration));
     }
 
     if (!m_explosion1.m_sound.empty()) {
@@ -441,6 +453,59 @@ void CProjectileArea::TargetFriend(CGameAIBase* pCaster)
 
 // -----------------------------------------------------------------------------
 
+// 0x571E80
+CProjectileArea84F580::CProjectileArea84F580()
+    // NOTE: The radius is the WORD at 0x84F1BC (256), then 200.
+    : CProjectileArea(256)
+{
+    // NOTE: Inlined: the travel animation of a name that is not empty.
+    const char* szTravel = "FirebaT";
+    if (strlen(szTravel) != 0) {
+        field_1DE = TRUE;
+        SetTravelAnimation(CResRef(szTravel));
+        m_bTravels = TRUE;
+    } else {
+        field_1DE = FALSE;
+        m_bTravels = FALSE;
+    }
+
+    m_fireSoundRef = "TRA_06";
+    m_visualEffect.sub_586A90(TRUE);
+
+    m_explosion1.m_animation = "FirebaX";
+    m_explosion1.m_sound = "RNG_M03";
+    m_explosion1.m_visualEffect.sub_586A90(TRUE);
+
+    m_explosion2.m_animation = "FirebaR";
+    m_explosion2.m_visualEffect.sub_586A90(TRUE);
+    m_explosion2.field_2C = TRUE;
+    m_explosion2.field_2E = 20;
+
+    m_explosion3.m_animation = "FirebaA";
+    m_explosion3.m_visualEffect.sub_586A90(TRUE);
+
+    m_nTriggerCountdown = 0;
+    m_speed <<= 1;
+    m_explosion3.field_34 = TRUE;
+    m_explosion3.field_35 = TRUE;
+    m_explosion3.field_36 = TRUE;
+    m_nTriggerInterval = 10000;
+    m_nHitModulus = 10;
+    m_nDuration = 45;
+    field_1D8 = 16;
+    m_nRadius = 200;
+}
+
+// 0x572080
+void CProjectileArea::SetTravelAnimation(const CResRef& resRef)
+{
+    if (m_animation != NULL) {
+        delete m_animation;
+    }
+
+    m_animation = new CVidCell(resRef, FALSE);
+}
+
 // 0x574970
 CProjectileArea850078::CProjectileArea850078()
     // NOTE: The radius is the WORD at 0x84F1BC (256), then the WORD at
@@ -623,4 +688,29 @@ void CProjectileArea850690::ApplyToTargets(std::list<LONG>& targets)
                 INFINITE);
         }
     }
+}
+
+// -----------------------------------------------------------------------------
+
+// 0x5868C0
+CProjectileAreaPoints::Point::Point(LONG x, LONG y, BYTE bTaken)
+{
+    this->x = x;
+    this->y = y;
+    m_bTaken = bTaken;
+}
+
+// 0x5868E0
+CProjectileAreaPoints::CProjectileAreaPoints()
+{
+    m_nRefCount = 0;
+    m_points.reserve(512);
+}
+
+// -----------------------------------------------------------------------------
+
+// 0x56FEC0
+LONG CProjectileAreaExplosion3::GetChanceRange()
+{
+    return 10000;
 }

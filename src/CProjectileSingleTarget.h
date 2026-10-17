@@ -30,13 +30,16 @@ public:
     /* 0192 */ CVidCell* m_animation;
     /* 0196 */ CVidCell* m_shadow;
     /* 019A */ CVidPalette m_palette;
+    /* 01BE */ BOOL field_1BE;
     /* 01C2 */ BOOL field_1C2;
     /* 01C6 */ DWORD field_1C6;
     /* 01D4 */ DWORD field_1D4;
-    // NOTE: The constructor (0x578110) leaves +0x1D8 to the subclasses and
-    // only CProjectileSpellHit sets it; Render reads it (heap garbage in
-    // the original for the cone and its puffs). Bounded (ruling P4-10): ours
-    // starts at 0.
+    /* 01D2 */ WORD field_1D2;
+    // NOTE: 0x577E40 zeroes +0x1BE, +0x1D2, +0x1D8 and +0x1DC; 0x578110
+    // leaves them to the subclasses, and at least ten set +0x1D8 (16 at
+    // 0x57AFF0, 0x57C60C, 0x57D42D, 0x57F56F and 0x580321, 1 at 0x57F6C4).
+    // Render reads +0x1D8. Bounded (ruling P4-10): ours also starts it at 0
+    // for an object on 0x578110 that its creator leaves unset.
     /* 01D8 */ WORD field_1D8 = 0;
     /* 01DA */ WORD field_1DA;
     /* 01DC */ SHORT m_nDirection;

@@ -31,8 +31,9 @@ public:
     // CProjectile84DFA4 sets +0x1BE, +0x1C2 and +0x1D8, CProjectile84DF1C
     // only +0x1D8, and CProjectile8510A4 (0x57E030, type 218) all but
     // +0x1D8, which Render reads, so the original mirrors that missile by
-    // direction whenever the heap garbage there is 2 or more. Bounded
-    // (ruling P4-10): ours starts all four at 0, so it never mirrors.
+    // direction whenever the heap garbage there is 2 to 0x7FFF (the WORD
+    // compare is signed). Bounded (ruling P4-10): ours starts all four at
+    // 0, so it never mirrors.
     /* 01BE */ DWORD field_1BE = 0;
     /* 01C2 */ BOOL field_1C2 = FALSE;
     /* 01C6 */ DWORD field_1C6;

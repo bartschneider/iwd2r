@@ -5,6 +5,7 @@
 #include "CInfGame.h"
 #include "CMessage.h"
 #include "CProjectileShaft.h"
+#include "CProjectileSunray.h"
 #include "CUtil.h"
 #include "IcewindMisc.h"
 
@@ -553,10 +554,7 @@ CProjectile* CProjectile::DecodeSpellHitProjectile(DWORD nType, CGameSprite* pSp
         pSpellHit->m_fireSoundRef = "EFF_P36";
         break;
     case 57:
-        // TODO: Incomplete. The original builds a CProjectileSunrayX
-        // (0x57E860, not ported) of "SunrayX"; no projectile comes back until
-        // then.
-        return NULL;
+        return new CProjectileSunray(CString("SunrayX"), CString(""), 0xFF, TRUE, FALSE, 325);
     case 58:
         pSpellHit = new CProjectileSpellHit("SStoneA", visualEffect);
         pSpellHit->m_fireSoundRef = "CRE_P03";

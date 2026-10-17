@@ -4,11 +4,3 @@
 # was identified (objdump of the vanilla exe, the Ghidra decompilation, and
 # docs/evidence/<ADDR>.md).
 
-
-# IEex calls it CGameSprite_Shatter. Only the death effect calls it (0x4AC157,
-# 0x4ACD31) for a chunk or shattered-statue death at -10 hit points or below.
-# By the argument (0 ice, 1 stone, 2 chunks) it tints the animation's colour
-# ranges and creates CGameChunk objects (0x70F4F0), drawing rand() for the
-# bounce, for the chunk count (rand() % 16 + 10, types 0 and 1) and three or
-# four times per chunk. Evidence: 4AB510.md.
-0x70A810 CGameSprite::Shatter

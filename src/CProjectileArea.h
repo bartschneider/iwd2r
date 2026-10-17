@@ -8,6 +8,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <vector>
 
 // An animation and a sound the explosion object of an area projectile plays
 // (built at 0x56FDC0 and 0x56FE30 for the second and third).
@@ -24,9 +25,33 @@ public:
     /* 002E */ LONG field_2E;
 };
 
+// The points an area projectile's explosion burned (the third
+// description's, 0x14 bytes): the explosion adds one for each try at a
+// lingering piece, taken (m_bTaken) where a piece was made; a wandering
+// piece moves to a free one when its sequence ends. The pieces share it
+// and the last one deletes it (m_nRefCount).
+class CProjectileAreaPoints {
+public:
+    class Point {
+    public:
+        Point(LONG x, LONG y, BYTE bTaken);
+
+        /* 0000 */ LONG x;
+        /* 0004 */ LONG y;
+        /* 0008 */ BYTE m_bTaken;
+    };
+
+    CProjectileAreaPoints();
+
+    /* 0004 */ std::vector<Point> m_points;
+    /* 0010 */ LONG m_nRefCount;
+};
+
 class CProjectileAreaExplosion3 : public CProjectileAreaExplosion {
 public:
-    /* 002C */ LONG field_2C;
+    LONG GetChanceRange();
+
+    /* 002C */ CProjectileAreaPoints* m_pPoints;
     /* 0030 */ LONG field_30;
     /* 0034 */ BYTE field_34;
     /* 0035 */ BYTE field_35;
@@ -56,6 +81,7 @@ public:
 
     void TargetEnemy(CGameAIBase* pCaster);
     void TargetFriend(CGameAIBase* pCaster);
+    void SetTravelAnimation(const CResRef& resRef);
 
     /* 02AE */ WORD m_nRadius;
     /* 02B2 */ WORD m_nSecondaryType;
@@ -84,6 +110,15 @@ public:
     /* 0586 */ CSound m_explosionSound;
     /* 05EA */ CSound m_loopingSound;
     /* 064E */ std::set<LONG> m_excludedTargets;
+};
+
+// Fireball (projectile type 38, vtable 0x84F580): it flies as FirebaT to
+// the target point and explodes there in FirebaX, throwing up to 20
+// FirebaR flames and leaving FirebaA embers that wander over the burned
+// points (CGameObject84F0DC), 200 around.
+class CProjectileArea84F580 : public CProjectileArea {
+public:
+    CProjectileArea84F580();
 };
 
 // The area projectile of Static Charge (effect 264, vtable 0x850078): it
