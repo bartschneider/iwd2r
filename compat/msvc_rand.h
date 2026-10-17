@@ -13,4 +13,3 @@ const unsigned int* iwd2r_rand_state_address();
 // The frame number IWD2R_RAND_TRACE writes with each call (docs/rand-trace.md);
 // the replay mode sets it every frame.
 void iwd2r_rand_trace_frame(unsigned int frame);
-unsigned int iwd2r_rand_trace_frame_value();
