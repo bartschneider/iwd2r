@@ -79,8 +79,16 @@ why it is pending.
 
 - **With a body.** Only when the original runs on a fixture the case builds:
   a zeroed block of the original object's size with just the members the
-  function reads filled in (no faked engine globals, sprites, items or effect
-  lists). The body seeds the original's `srand`, calls the function, seeds
+  function reads filled in (no faked sprites, items or effect lists, and no
+  faked engine globals but for one exception).
+  The exception (ruling M1-3): an engine global the function reads, such
+  as the original's `g_pBaldurChitin` (0x8CF6DC), may point at a zeroed
+  block with only the members the function reads filled in, ours at the
+  same, both put back after each case. The original runs against the same
+  fixture, so a read past those members crashes rather than passes.
+  `oracle/cases/rules.cpp` (starting_hp), `combat.cpp`, `ui_misc.cpp` and
+  others do this; each says in its header which members it fills.
+  The body seeds the original's `srand`, calls the function, seeds
   again with the same value and calls it with the same inputs, and requires
   the same result and the same following `rand` value. It must run at least
   one input: a body that runs none fails as `PENDING (ran 0 inputs)`.

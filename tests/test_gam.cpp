@@ -718,11 +718,80 @@ TEST_CASE("gam: SortLists drops a queued object deleted before the sort", "[gam]
     CHECK(FrontIds(pArea) == front);
 }
 
-// A load-robustness check. The real two-area save (LoadArea AR1001 beside
-// AR1000, SaveGame, check 0x40 and what 0x5AC430 writes for each loaded
-// area, reload) is deferred to M2/M3: AR1001's creatures carry effect 261,
-// whose ApplyEffect (IcewindCGameEffectImmunityToEffectAndResource) is not
-// ported yet.
+// M1 Review Focus 2, the two-area save: AR1001 loaded beside AR1000 (its
+// creatures carry effect 261, IcewindCGameEffectImmunityToEffectAndResource,
+// whose ApplyEffect is ported). AR1001 is in MASTAREA.2DA, so loading it
+// makes it the master area (CGameArea 0x472DE0). SaveGame (0x5AC430)
+// marshals every loaded area whose header flag 0x1 is clear, so
+// ICEWIND2.SAV packs both; the game file names AR1000, where the party
+// stands, as the current world area (file offset 0x40, after the
+// signature) and AR1001 as the master area (0x58). LoadGame brings both
+// back from the save (each header's save time is set), AR1001 with the
+// same objects. (Which of the two is the master after the load depends on
+// the load order and is not pinned here.)
+TEST_CASE("gam: SaveGame writes both loaded areas and LoadGame brings both back from the save", "[gam][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CGameSprite* pSprite = NewGameWithOneCharacter(cre, "Probe");
+    pGame->UpdateCharacterSlots();
+    pGame->SetupCharacters(FALSE);
+    REQUIRE(pGame->m_pGameAreaMaster != NULL);
+    REQUIRE(pGame->m_pGameAreaMaster->m_resRef == "AR1000");
+    CGameArea* pFirst = pGame->m_pGameAreaMaster;
+
+    CGameArea* pSecond = pGame->LoadArea(CString("AR1001"), 255, FALSE, FALSE);
+    REQUIRE(pSecond != NULL);
+    CHECK(pSecond->m_resRef == "AR1001");
+    CHECK(pGame->m_pGameAreaMaster == pSecond);
+    CHECK(pSprite->GetArea() == pFirst);
+    CHECK(LoadedAreas(pGame) == 2);
+    CHECK(pSecond->m_header.m_lastSaved == 0);
+    for (int n = 0; n < CINFGAME_MAX_AREAS; n++) {
+        if (pGame->m_gameAreas[n] != NULL)
+            pGame->m_gameAreas[n]->SortLists();
+    }
+    const std::map<int, int> before = ObjectTypesIn(pSecond);
+    REQUIRE(before.count(CGameObject::TYPE_SPRITE) == 1);
+
+    REQUIRE(pGame->SaveGame(FALSE, FALSE, FALSE));
+    const std::string gam = SavedGame();
+    CheckGameFile(gam);
+    CHECK(gam.compare(0x40, 6, std::string("AR1000", 6)) == 0);
+    CHECK(gam.compare(0x58, 6, std::string("AR1001", 6)) == 0);
+    const fs::path dir = Child(Child(g_view, "mpsave"), "default");
+    const std::map<std::string, std::string> packed = UnpackSav(ReadFile(Child(dir, "ICEWIND2.SAV")));
+    REQUIRE(packed.count("AR1000.ARE") == 1);
+    REQUIRE(packed.count("AR1001.ARE") == 1);
+    CHECK(CheckAreaCreatures(packed.at("AR1000.ARE")) == 35);
+    CHECK(CheckAreaCreatures(packed.at("AR1001.ARE")) == before.at(CGameObject::TYPE_SPRITE));
+
+    pGame->DestroyGame(FALSE, FALSE);
+    pGame->LoadGame(FALSE, FALSE);
+    CHECK(LoadedAreas(pGame) == 2);
+    CGameArea* pReloaded = pGame->GetArea(CString("AR1001"));
+    REQUIRE(pReloaded != NULL);
+    CHECK(pReloaded->m_header.m_lastSaved != 0);
+    CGameArea* pParty = pGame->GetArea(CString("AR1000"));
+    REQUIRE(pParty != NULL);
+    CHECK(pParty->m_header.m_lastSaved != 0);
+    CHECK(pGame->m_nCharacters == 1);
+    CHECK(ObjectTypesIn(pReloaded) == before);
+}
+
+// A load-robustness check: a game file whose current area names an area the
+// save has no ARE for.
 TEST_CASE("gam: loading a game file that names an unsaved second area does not assert", "[gam][data]")
 {
     if (DataDir() == nullptr) {

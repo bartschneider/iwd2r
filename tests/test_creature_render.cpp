@@ -4,6 +4,7 @@
 #include "CGameAnimationType.h"
 #include "CGameAnimationTypeAmbient.h"
 #include "CGameAnimationTypeAmbientStatic.h"
+#include "CGameAnimationTypeCharacter.h"
 #include "CGameAnimationTypeFlying.h"
 #include "CGameAnimationTypeMonster.h"
 #include "CGameAnimationTypeMonsterAnkheg.h"
@@ -24,8 +25,12 @@
 #include "engine_world.h"
 #include "render_surfaces.h"
 
+#include <algorithm>
+#include <cstring>
 #include <functional>
+#include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <typeinfo>
 #include <vector>
@@ -530,8 +535,11 @@ TEST_CASE("creature render: creatures of the new Renders stand visible in AR1000
         CRect rFx;
         CPoint ptReference;
         c.pSprite->GetAnimation()->CalculateFxRect(rFx, ptReference, c.pSprite->m_posZ);
+        // The sprite is drawn at its position lowered by the height map
+        // (CGameSprite::Render 0x70396F).
+        const CPoint ptDrawn(c.pSprite->GetPos().x, c.pSprite->GetPos().y + pArea->GetHeightOffset(c.pSprite->GetPos(), c.pSprite->m_listType));
         CRect rBounds;
-        c.pSprite->GetAnimation()->CalculateGCBoundsRect(rBounds, c.pSprite->GetPos(), ptReference, c.pSprite->m_posZ, rFx.Width(), rFx.Height());
+        c.pSprite->GetAnimation()->CalculateGCBoundsRect(rBounds, ptDrawn, ptReference, c.pSprite->m_posZ, rFx.Width(), rFx.Height());
         const CRect rScreen = scope.ToScreen(rBounds);
         INFO("bounds on screen " << rScreen.left << "," << rScreen.top << " - " << rScreen.right << "," << rScreen.bottom);
         const Difference inside = Compare(without, all, scope.Screen(), rScreen);
@@ -1091,4 +1099,374 @@ TEST_CASE("container: a pile without bounds gets its search square", "[render][d
     CHECK(pPile->m_rBounding == CRect(480, 948, 496, 960));
     CHECK(pPile->m_ptWalkToUse == CPoint(487, 953));
     CHECK(pPile->GetPos() == CPoint(487, 953));
+}
+
+// The constructors of CGameTrigger (0x4CCAB0), CGameDoor (0x485AC0) and
+// CGameContainer (0x47BFA0) copy each polygon from the area file and drop
+// a point only when it lies on the line through its two neighbours: the
+// same x, the same y, or equal slopes 1000 * dy / dx (`cmp eax, edi; jne`
+// keeps it, 0x4CCE1E-0x4CCE20, 0x486031, 0x4861D0, 0x47C45F). Ours had the
+// slope test the wrong way round and dropped every point between two
+// different slopes: AR1000's Half-Built Ship kept 2 of its 35 points and
+// every door's open polygon 2 of 3. The counts expected here are those the
+// original saved for AR1000 (its Probe Save, AR1000.ARE in ICEWIND2.SAV of
+// the crossload run 20261016-171655): every point, except one of Barrel
+// Three's ten, which lies on a straight line.
+TEST_CASE("area objects: AR1000's polygons keep the original's points", "[render][data]")
+{
+    std::string why;
+    if (!Begin(why)) {
+        SKIP("[iwd2r-skip] " + why);
+    }
+    FramePump pump;
+    World world;
+    if (!NewWorld(world, why)) {
+        SKIP("[iwd2r-skip] " + why);
+    }
+    CGameArea* pArea = world.pArea;
+
+    enum Kind { kTrigger,
+        kDoorOpen,
+        kDoorClosed,
+        kContainer };
+    struct Expected {
+        Kind kind;
+        const char* name;
+        int points;
+    };
+    const Expected expected[] = {
+        { kTrigger, "Door_Hint_Trap_00", 4 },
+        { kTrigger, "Door_Hint_Trap_01", 4 },
+        { kTrigger, "To1001", 4 },
+        { kTrigger, "To1002", 4 },
+        { kTrigger, "To1003", 4 },
+        { kTrigger, "To1004", 4 },
+        { kTrigger, "To1005", 4 },
+        { kTrigger, "To1006", 4 },
+        { kTrigger, "To1100", 4 },
+        { kTrigger, "Info Text for Cranes", 42 },
+        { kTrigger, "Wicked Wench", 13 },
+        { kTrigger, "Half-Built Ship", 35 },
+        { kTrigger, "Life Raft", 11 },
+        { kTrigger, "Gutboy's Regrets", 23 },
+        { kTrigger, "Light House", 4 },
+        { kTrigger, "Dualdon's Wake", 22 },
+        { kTrigger, "Salty Dog Tavern", 4 },
+        { kDoorOpen, "AR1000_Door4", 3 },
+        { kDoorClosed, "AR1000_Door4", 4 },
+        { kDoorOpen, "AR1000_Door3", 3 },
+        { kDoorClosed, "AR1000_Door3", 4 },
+        { kDoorOpen, "AR1000_Door6", 3 },
+        { kDoorClosed, "AR1000_Door6", 4 },
+        { kDoorOpen, "AR1000_Door5", 3 },
+        { kDoorClosed, "AR1000_Door5", 4 },
+        { kDoorOpen, "AR1000_Door2", 3 },
+        { kDoorClosed, "AR1000_Door2", 4 },
+        { kDoorOpen, "AR1000_Door1", 3 },
+        { kDoorClosed, "AR1000_Door1", 4 },
+        { kContainer, "Goblin Shield", 0 },
+        { kContainer, "Goblin Axe", 0 },
+        { kContainer, "Goblin Short Sword", 0 },
+        { kContainer, "Goblin Short Bow", 0 },
+        { kContainer, "Goblin Arrows", 0 },
+        { kContainer, "Soldier Helmet", 0 },
+        { kContainer, "Soldier Spear", 0 },
+        { kContainer, "Soldier Armor", 0 },
+        { kContainer, "Sailor Club", 0 },
+        { kContainer, "Goblin Axe", 0 },
+        { kContainer, "Goblin Shield", 0 },
+        { kContainer, "Goblin Sword", 0 },
+        { kContainer, "Goblin Axe", 0 },
+        { kContainer, "Soldier Spear", 0 },
+        { kContainer, "Soldier Helmet", 0 },
+        { kContainer, "Soldier Armor", 0 },
+        { kContainer, "Throwing Axe", 0 },
+        { kContainer, "Throwing Axe", 0 },
+        { kContainer, "Barrel One", 10 },
+        { kContainer, "Barrel Two", 9 },
+        { kContainer, "Barrel Three", 9 },
+        { kContainer, "Barrel Four", 14 },
+        { kContainer, "Barrel Five", 11 },
+        { kContainer, "Dingy Barrel", 7 },
+        { kContainer, "Townsperson Axe", 0 },
+    };
+
+    // (kind, script name) -> the point counts of the objects of that name.
+    std::map<std::pair<int, std::string>, std::multiset<int>> found;
+    std::set<LONG> seen;
+    CGameObjectArray* pObjects = g_pBaldurChitin->GetObjectGame()->GetObjectArray();
+    for (CTypedPtrList<CPtrList, int*>* pList : { &pArea->m_lVertSort, &pArea->m_lVertSortBack, &pArea->m_lVertSortFlight, &pArea->m_lVertSortAdd, &pArea->m_lVertSortBackAdd, &pArea->m_lVertSortFlightAdd }) {
+        POSITION pos = pList->GetHeadPosition();
+        while (pos != NULL) {
+            LONG id = static_cast<LONG>(reinterpret_cast<INT_PTR>(pList->GetNext(pos)));
+            CGameObject* pObject;
+            if (!seen.insert(id).second
+                || pObjects->GetShare(id, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) != CGameObjectArray::SUCCESS) {
+                continue;
+            }
+            pObjects->ReleaseShare(id, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+            if (pObject->GetObjectType() == CGameObject::TYPE_TRIGGER) {
+                auto* p = static_cast<CGameTrigger*>(pObject);
+                found[{ kTrigger, std::string(p->m_scriptName, strnlen(p->m_scriptName, SCRIPTNAME_SIZE)) }].insert(p->m_nPolygon);
+            } else if (pObject->GetObjectType() == CGameObject::TYPE_DOOR) {
+                auto* p = static_cast<CGameDoor*>(pObject);
+                const std::string name(p->m_scriptName, strnlen(p->m_scriptName, SCRIPTNAME_SIZE));
+                found[{ kDoorOpen, name }].insert(p->m_nOpenPolygon);
+                found[{ kDoorClosed, name }].insert(p->m_nClosedPolygon);
+            } else if (pObject->GetObjectType() == CGameObject::TYPE_CONTAINER) {
+                auto* p = static_cast<CGameContainer*>(pObject);
+                found[{ kContainer, std::string(p->m_scriptName, strnlen(p->m_scriptName, SCRIPTNAME_SIZE)) }].insert(p->m_nPolygon);
+            }
+        }
+    }
+
+    std::map<std::pair<int, std::string>, std::multiset<int>> wanted;
+    int total = 0;
+    for (const Expected& e : expected) {
+        wanted[{ e.kind, e.name }].insert(e.points);
+        total += e.points;
+    }
+    CHECK(total == 292);
+    for (const auto& [key, counts] : wanted) {
+        INFO("kind " << key.first << " " << key.second);
+        auto it = found.find(key);
+        REQUIRE(it != found.end());
+        CHECK(it->second == counts);
+    }
+    int foundTotal = 0;
+    for (const auto& [key, counts] : found) {
+        for (int n : counts) {
+            foundTotal += n;
+        }
+    }
+    CHECK(foundTotal == total);
+}
+
+// CGameDoor's constructor (0x485AC0) takes the open and closed bounding
+// rectangles from the area file with right and bottom one past the file's
+// last pixel (`inc` at 0x485CA6, 0x485CB3, 0x485CD6 and 0x485CE1), and
+// Marshal writes them back less one, so a save keeps the file's rectangles.
+// Ours took them as they are, so a door was picked one pixel short on the
+// right and the bottom and each save shrank them by a pixel. The rectangles
+// expected here are those the original saved for AR1000 (the save of the
+// test above), plus one on the right and the bottom.
+TEST_CASE("door: its bounding rectangles end one past the file's", "[render][data]")
+{
+    std::string why;
+    if (!Begin(why)) {
+        SKIP("[iwd2r-skip] " + why);
+    }
+    FramePump pump;
+    World world;
+    if (!NewWorld(world, why)) {
+        SKIP("[iwd2r-skip] " + why);
+    }
+    CGameArea* pArea = world.pArea;
+    struct Expected {
+        const char* name;
+        CRect open; // left, top, right, bottom as saved (inclusive)
+        CRect closed;
+    };
+    const Expected expected[] = {
+        { "AR1000_Door4", CRect(3175, 4, 3182, 12), CRect(766, 2192, 815, 2253) },
+        { "AR1000_Door3", CRect(3170, 6, 3177, 12), CRect(892, 1764, 938, 1822) },
+        { "AR1000_Door6", CRect(3180, 4, 3188, 12), CRect(259, 1649, 306, 1713) },
+        { "AR1000_Door5", CRect(3180, 3, 3188, 8), CRect(823, 870, 868, 930) },
+        { "AR1000_Door2", CRect(3179, 2, 3187, 10), CRect(2252, 455, 2503, 601) },
+        { "AR1000_Door1", CRect(3174, 3, 3183, 13), CRect(958, 486, 1005, 540) },
+    };
+    for (const Expected& e : expected) {
+        INFO(e.name);
+        auto accept = [&](CGameDoor* p) { return strncmp(p->m_scriptName, e.name, SCRIPTNAME_SIZE) == 0; };
+        CGameDoor* pDoor = FindObject<CGameDoor>(pArea->m_lVertSort, CGameObject::TYPE_DOOR, accept);
+        if (pDoor == NULL) {
+            pDoor = FindObject<CGameDoor>(pArea->m_lVertSortBack, CGameObject::TYPE_DOOR, accept);
+        }
+        REQUIRE(pDoor != NULL);
+        CHECK(pDoor->m_rOpenBounding == CRect(e.open.left, e.open.top, e.open.right + 1, e.open.bottom + 1));
+        CHECK(pDoor->m_rClosedBounding == CRect(e.closed.left, e.closed.top, e.closed.right + 1, e.closed.bottom + 1));
+    }
+}
+
+// CGameAnimationTypeCharacter::Render (0x6CD400), facing 3 to 7 (south
+// west round to north east, and their mirrors): the weapon is drawn behind
+// the body, before it, unless the weapon's item has flag 0x80 (field_1434,
+// set by EquipWeapon 0x6C8390), in which case it is drawn last, in front
+// (the tests of +0x1434 at 0x6CD6AD and 0x6CD7B2). Ours drew it both before
+// and after the body, so a spear held across the body showed its shaft over
+// it: the crew in world_entry's world shot.
+//
+// The "weapon" here is a second cell on the body's own BAM at another
+// frame, so the two overlap: behind the body, every pixel the body draws
+// keeps the body's colour; in front, the weapon replaces some of them.
+TEST_CASE("creature render: a character's weapon goes behind its body unless its item puts it in front", "[render][data]")
+{
+    std::string why;
+    if (!Begin(why)) {
+        SKIP("[iwd2r-skip] " + why);
+    }
+    RenderScope scope;
+    REQUIRE(scope.Ok());
+    BYTE colors[16] = {};
+    for (WORD facing : { 3, 4, 6, 12 }) {
+        INFO("facing " << facing);
+        std::unique_ptr<CGameAnimationType> pAnimation(CGameAnimationType::SetAnimationType(0x6100, colors, facing));
+        auto* pCharacter = dynamic_cast<CGameAnimationTypeCharacter*>(pAnimation.get());
+        REQUIRE(pCharacter != nullptr);
+        const SHORT nDirection = pCharacter->m_currentBamDirection > pCharacter->m_extendDirectionTest
+            ? 16 - pCharacter->m_currentBamDirection
+            : pCharacter->m_currentBamDirection;
+        REQUIRE(nDirection >= 3);
+        REQUIRE(nDirection <= 7);
+
+        CVidCell weapon;
+        weapon.SetResRef(pCharacter->m_currentVidCell->cResRef, FALSE, TRUE, TRUE);
+        weapon.SequenceSet(pCharacter->m_currentVidCell->m_nCurrentSequence);
+        weapon.FrameSet(static_cast<SHORT>(pCharacter->m_currentVidCell->m_nCurrentFrame + 3));
+        CVidCell* pWeaponBefore = pCharacter->m_currentVidCellWeapon;
+        const BOOLEAN renderWeaponsBefore = pCharacter->m_renderWeapons;
+
+        auto draw = [&](bool weapons, bool front) {
+            pCharacter->m_renderWeapons = weapons;
+            pCharacter->m_currentVidCellWeapon = weapons ? &weapon : pWeaponBefore;
+            pCharacter->field_1434 = front ? 1 : 0;
+            scope.Back(true, 0);
+            CRect rFx;
+            CPoint ptReference;
+            pCharacter->CalculateFxRect(rFx, ptReference, 0);
+            CRect rBounds;
+            const CPoint pos(320, 330);
+            pCharacter->CalculateGCBoundsRect(rBounds, pos, ptReference, 0, rFx.Width(), rFx.Height());
+            pCharacter->Render(scope.Infinity(), scope.VidMode(), CVIDINF_SURFACE_BACK, rFx, pos, ptReference, 0, RGB(255, 255, 255), rBounds, FALSE, FALSE, 0, 0);
+            return scope.Back();
+        };
+        const std::vector<DWORD> body = draw(false, false);
+        const std::vector<DWORD> behind = draw(true, false);
+        const std::vector<DWORD> front = draw(true, true);
+        pCharacter->m_currentVidCellWeapon = pWeaponBefore;
+        pCharacter->m_renderWeapons = renderWeaponsBefore;
+
+        int bodyPixels = 0;
+        int hiddenWrong = 0;
+        int frontOver = 0;
+        int weaponOutside = 0;
+        for (size_t i = 0; i < body.size(); i++) {
+            if ((body[i] & 0xFFFFFF) != 0) {
+                bodyPixels++;
+                hiddenWrong += (behind[i] & 0xFFFFFF) != (body[i] & 0xFFFFFF);
+                frontOver += (front[i] & 0xFFFFFF) != (body[i] & 0xFFFFFF);
+            } else {
+                weaponOutside += (behind[i] & 0xFFFFFF) != 0;
+            }
+        }
+        INFO("body " << bodyPixels << ", behind but changed " << hiddenWrong << ", in front over the body " << frontOver << ", weapon around the body " << weaponOutside);
+        CHECK(bodyPixels > 100);
+        CHECK(hiddenWrong == 0);
+        CHECK(frontOver > 20);
+        CHECK(weaponOutside > 0);
+    }
+}
+
+// CGameSprite::Render (0x703700) draws the creature at its position lowered
+// by the area's height map: after CalculateFxRect it sets the render point
+// to (m_pos.x, m_pos.y + GetHeightOffset(m_pos, m_listType)) (0x70396F-
+// 0x703998) and asks GetTintColor at that point plus m_posZ (0x7039CB-
+// 0x7039F4). Ours drew it at the clamped position with no height offset,
+// so on AR1000's +1 ground every creature stood a pixel too high. Here the
+// same wolf is drawn at two points whose height offsets differ: the second
+// drawing is the first moved by the difference in
+// position plus the offset. (AR1000 is at +1 around the party, so the
+// points are two whose offsets differ.)
+TEST_CASE("creature render: a creature is drawn at its height offset", "[render][data]")
+{
+    std::string why;
+    if (!Begin(why)) {
+        SKIP("[iwd2r-skip] " + why);
+    }
+    FramePump pump;
+    World world;
+    if (!NewWorld(world, why)) {
+        SKIP("[iwd2r-skip] " + why);
+    }
+    CGameArea* pArea = world.pArea;
+    const CPoint base = world.pCharacter->GetPos();
+
+    // Two points 64 to 160 pixels apart on one row whose height offsets
+    // differ, searched from the party's position outwards.
+    CPoint pt0(-1, -1);
+    CPoint pt1(-1, -1);
+    int h0 = 0;
+    int h1 = 0;
+    for (int r = 0; r < 1200 && pt0.x < 0; r += 12) {
+        for (int sy : { 1, -1 }) {
+            const int y = base.y + sy * r;
+            if (pt0.x >= 0 || y < 200 || y >= pArea->GetInfinity()->nAreaY - 200) {
+                continue;
+            }
+            for (int x = 200; x + 160 < pArea->GetInfinity()->nAreaX - 200 && pt0.x < 0; x += 16) {
+                const int a = pArea->GetHeightOffset(CPoint(x, y), CGameObject::LIST_FRONT);
+                for (int d = 64; d <= 160; d += 16) {
+                    const int b = pArea->GetHeightOffset(CPoint(x + d, y), CGameObject::LIST_FRONT);
+                    if (a != b) {
+                        pt0 = CPoint(x, y);
+                        pt1 = CPoint(x + d, y);
+                        h0 = a;
+                        h1 = b;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    REQUIRE(pt0.x >= 0);
+    INFO("offset " << h0 << " at " << pt0.x << "," << pt0.y << "; offset " << h1 << " at " << pt1.x << "," << pt1.y);
+
+    CGameSprite* pWolf = AddCreature(pArea, "12WOLF", pt0);
+    REQUIRE(pWolf != NULL);
+    pWolf->m_canBeSeen = CGameObject::VISIBLE_DELAY + 10;
+    pWolf->m_baseStats.field_294 = 0;
+    pArea->SortLists();
+
+    AreaScope scope(pArea);
+    REQUIRE(scope.Ok());
+    scope.CentreOn(CPoint((pt0.x + pt1.x) / 2, (pt0.y + pt1.y) / 2));
+    const int width = scope.Screen().Width();
+    const int height = scope.Screen().Height();
+    auto mask = [&](const CPoint& pt) {
+        pWolf->m_pos = pt;
+        pWolf->m_baseStats.field_294 = 0;
+        const std::vector<DWORD> with = scope.RenderArea(pArea);
+        pWolf->m_baseStats.field_294 = 1;
+        const std::vector<DWORD> without = scope.RenderArea(pArea);
+        pWolf->m_baseStats.field_294 = 0;
+        std::vector<bool> changed(with.size());
+        for (size_t i = 0; i < with.size(); i++) {
+            changed[i] = (with[i] & 0xFFFFFF) != (without[i] & 0xFFFFFF);
+        }
+        return changed;
+    };
+    const std::vector<bool> m0 = mask(pt0);
+    const std::vector<bool> m1 = mask(pt1);
+    auto overlap = [&](int dx, int dy) {
+        int n = 0;
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                const int x1 = x + dx;
+                const int y1 = y + dy;
+                if (m0[y * width + x] && x1 >= 0 && x1 < width && y1 >= 0 && y1 < height && m1[y1 * width + x1]) {
+                    n++;
+                }
+            }
+        }
+        return n;
+    };
+    const int n0 = static_cast<int>(std::count(m0.begin(), m0.end(), true));
+    const int dx = pt1.x - pt0.x;
+    const int dy = pt1.y - pt0.y;
+    const int atOffset = overlap(dx, dy + h1 - h0);
+    const int withoutOffset = overlap(dx, dy);
+    INFO("drawn " << n0 << ", matching at the offset " << atOffset << ", without it " << withoutOffset);
+    CHECK(n0 > 300);
+    CHECK(atOffset * 20 > n0 * 17);
+    CHECK(atOffset > withoutOffset);
 }
