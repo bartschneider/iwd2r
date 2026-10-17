@@ -2,6 +2,7 @@
 address: 0x6EEBA0
 name: CGameAnimationTypeMonsterIcewindNew::Render
 exemption: "a render function; checked by the world_entry render shot (tools/play.py --linux --headless, scenarios/pending/world_entry.txt)"
+kind: replay
 ghidra_version: 12.1.4
 ---
 

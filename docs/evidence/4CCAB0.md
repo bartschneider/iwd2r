@@ -2,6 +2,7 @@
 address: 0x4CCAB0
 name: CGameTrigger::CGameTrigger
 exemption: "needs an area, the object array and the ARE data; covered by tests/test_sprite_actions.cpp (trigger: DoAIUpdate ..., every AR1000 trigger's m_scriptRes is its override script's name); the polygon set-up is pinned by tests/test_creature_render.cpp 'area objects: AR1000's polygons keep the original's points'"
+kind: read-only
 ghidra_version: 12.1.4
 ---
 

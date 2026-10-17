@@ -2,6 +2,7 @@
 address: 0x5BDFE0
 name: CInfGame_B3AUTO_005bdfe0
 exemption: "needs the party in the object array; reached only by CAIObjectType::Decode (0x40C445, whose cases are still a TODO in CAIObjectType.cpp)"
+kind: read-only
 ghidra_version: 12.1.4
 ---
 

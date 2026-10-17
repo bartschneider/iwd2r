@@ -2,6 +2,7 @@
 address: 0x6BEBB0
 name: CGameAnimationTypeMonsterLayered::Render
 exemption: "a render function; checked by the world_entry render shot (tools/play.py --linux --headless, scenarios/pending/world_entry.txt)"
+kind: replay
 ghidra_version: 12.1.4
 ---
 

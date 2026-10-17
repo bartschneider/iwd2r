@@ -2,6 +2,7 @@
 address: 0x7ADBC0
 name: CVidCell::GetFrameCenterPoint
 exemption: "reads the cell's resource"
+kind: read-only
 ghidra_version: 12.1.4
 ---
 

@@ -2,6 +2,7 @@
 address: 0x4BBCB0
 name: CGameEffect_opcode_141_2
 exemption: "visual only; needs a sprite in an area; tested in tests/test_visual_projectiles.cpp [visualprojectile]"
+kind: read-only
 ghidra_version: 12.1.4
 ---
 

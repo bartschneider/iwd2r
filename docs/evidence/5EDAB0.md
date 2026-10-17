@@ -2,6 +2,7 @@
 address: 0x5EDAB0
 name: CUIControlButtonCharacterAbilitiesPlusMinus::OnLButtonDown
 exemption: "ability +/- button press: sets the MINIMUM/MAXIMUM tokens and the help text; UI only, checked against the asm"
+kind: read-only
 ghidra_version: 12.1.4
 ---
 

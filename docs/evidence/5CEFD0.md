@@ -2,6 +2,7 @@
 address: 0x5CEFD0
 name: CInfinity::Render
 exemption: "renders tiles through the video mode and the area's tilesets; checked against the decompilation"
+kind: read-only
 ghidra_version: 12.1.4
 ---
 

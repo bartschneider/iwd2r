@@ -2,6 +2,7 @@
 address: 0x5ADAE0
 name: CInfGame::SelectToolbar
 exemption: "needs the object array, the selection and the world screen; run by Unmarshal in world_entry and checked by tests/test_ui_misc.cpp [uimisc]"
+kind: read-only
 ghidra_version: 12.1.4
 ---
 
