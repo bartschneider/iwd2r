@@ -233,7 +233,7 @@
       }
     },
     "world": {
-      "description": "The world screen, null unless the screen is world: the area on view, the party, the area's doors, the world screen's dialog and the area's explored tiles and creatures. A party member's values are null while its id does not resolve in the object array. With no area on view, doors is empty and explored_count and creatures are 0.",
+      "description": "The world screen, null unless the screen is world: the area on view, the party (with morale), the area's doors, the world screen's dialog, the area's explored tiles and creatures, and its non-party sprites with their hit points and effect lists. A party member's values are null while its id does not resolve in the object array. With no area on view, doors and enemy_creatures are empty and explored_count and creatures are 0.",
       "type": [
         "object",
         "null"
@@ -244,7 +244,8 @@
         "doors",
         "dialog",
         "explored_count",
-        "creatures"
+        "creatures",
+        "enemy_creatures"
       ],
       "additionalProperties": false,
       "properties": {
@@ -267,7 +268,8 @@
               "skills",
               "action",
               "modal",
-              "facing"
+              "facing",
+              "morale"
             ],
             "additionalProperties": false,
             "properties": {
@@ -337,6 +339,15 @@
                   "integer",
                   "null"
                 ]
+              },
+              "morale": {
+                "description": "The morale, m_baseStats.m_morale, read unsigned (0..255). ApplyTriggers (0x728580) raises it on a kill and lowers it when hit below half hit points.",
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "maximum": 255
               }
             }
           }
@@ -413,6 +424,57 @@
           "description": "The sprites in the area: the objects on its front, back and flight vertical lists (CGameArea::m_lVertSort, m_lVertSortBack, m_lVertSortFlight) whose CGameObject::m_objectType is TYPE_SPRITE (0x31), the party included.",
           "type": "integer",
           "minimum": 0
+        },
+        "enemy_creatures": {
+          "description": "The area's sprites that are not party members, one entry per sprite: the same walk as creatures counts them (the objects on the front list CGameArea::m_lVertSort first, then the back list m_lVertSortBack, then the flight list m_lVertSortFlight, each head to tail) that are TYPE_SPRITE (0x31), leaving out every id in m_characterPortraits[0 .. m_nCharacters - 1]. Corpses stay listed, so a death shows as hit points at 0 or below. hp is m_baseStats.m_hitPoints, max_hp is m_derivedStats.m_nMaxHitPoints, timed_effects is the count of m_timedEffectList's nodes and equiped_effects the count of m_equipedEffectList's; the four are null when the recorder cannot read them (the id always resolves, the entry exists because the list named it).",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "hp",
+              "max_hp",
+              "timed_effects",
+              "equiped_effects"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "description": "The object id the list holds.",
+                "type": "integer"
+              },
+              "hp": {
+                "description": "The current hit points, m_baseStats.m_hitPoints.",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "max_hp": {
+                "description": "The maximum hit points, m_derivedStats.m_nMaxHitPoints.",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "timed_effects": {
+                "description": "The number of effects on the sprite's timed list, m_timedEffectList.m_nCount.",
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "equiped_effects": {
+                "description": "The number of effects on the sprite's equipped list, m_equipedEffectList.m_nCount.",
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              }
+            }
+          }
         }
       }
     },
@@ -869,6 +931,10 @@
     "sprite_facing": {
       "class": "CGameSprite",
       "member": "m_nDirection"
+    },
+    "sprite_morale": {
+      "class": "CGameSprite",
+      "member": "m_baseStats.m_morale"
     },
     "object_type": {
       "class": "CGameObject",

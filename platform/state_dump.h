@@ -35,7 +35,7 @@ struct Chargen {
 struct PartyMember {
     int32_t id = 0;
     // False while the id does not resolve in the object array: x, y, hp,
-    // max_hp, skills, action, modal and facing are then null.
+    // max_hp, skills, action, modal, facing and morale are then null.
     bool sprite = false;
     int32_t x = 0;
     int32_t y = 0;
@@ -45,6 +45,17 @@ struct PartyMember {
     int action = 0;
     int modal = 0;
     int facing = 0;
+    int morale = 0;
+};
+
+// One schema.json "world.enemy_creatures" entry: a sprite in the area that
+// is not a party member.
+struct EnemyCreature {
+    int32_t id = 0;
+    int hp = 0;
+    int maxHp = 0;
+    int timedEffects = 0;
+    int equipedEffects = 0;
 };
 
 // One schema.json "world.doors" entry.
@@ -74,6 +85,9 @@ struct World {
     Dialog dialog;
     int64_t exploredCount = 0;
     int64_t creatures = 0;
+    // The sprites of the three vertical lists that are not party members,
+    // in the lists' order (schema.json "world.enemy_creatures").
+    std::vector<EnemyCreature> enemyCreatures;
 };
 
 // One schema.json "game.members[i].inventory" slot that holds an item.

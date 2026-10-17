@@ -169,16 +169,31 @@ TEST_CASE("state dump JSON matches the golden dumps", "[dump]")
     member.action = 23;
     member.modal = 1;
     member.facing = 12;
+    member.morale = 10;
     world.engine.world.party.push_back(member);
     platform::state_dump::PartyMember missing;
     missing.id = 0x20001;
     missing.hp = 5; // ignored without a sprite
     missing.action = 3; // ignored without a sprite
+    missing.morale = 7; // ignored without a sprite
     world.engine.world.party.push_back(missing);
     world.engine.world.doors.push_back({ "AR1000_Door1", 0, 0 });
     world.engine.world.doors.push_back({ "Door\"2", 1, 1 });
     world.engine.world.exploredCount = 345;
     world.engine.world.creatures = 7;
+    // The area's sprites that are not party members, the lists' order.
+    platform::state_dump::EnemyCreature goblin;
+    goblin.id = 0x30005;
+    goblin.hp = 4;
+    goblin.maxHp = 7;
+    goblin.timedEffects = 2;
+    goblin.equipedEffects = 1;
+    world.engine.world.enemyCreatures.push_back(goblin);
+    platform::state_dump::EnemyCreature corpse; // dead, effects expired
+    corpse.id = 0x30006;
+    corpse.hp = -3;
+    corpse.maxHp = 6;
+    world.engine.world.enemyCreatures.push_back(corpse);
     // The game block: one member with three items, one whose id does not
     // resolve.
     world.engine.hasGame = true;
@@ -225,7 +240,7 @@ TEST_CASE("state dump writes the doors, the dialog, the explored tiles and the c
     REQUIRE(ReadFile(path).find("\"world\": {\"area\": \"AR1000\", \"party\": [], "
                                 "\"doors\": [{\"name\": \"DOOR01\", \"open\": 0, \"locked\": 1}], "
                                 "\"dialog\": {\"active\": 1, \"speaker\": 3, \"entry\": 0, \"responses\": 2}, "
-                                "\"explored_count\": 12, \"creatures\": 3},\n  \"game\": null,\n  \"slots\": null\n}\n")
+                                "\"explored_count\": 12, \"creatures\": 3, \"enemy_creatures\": []},\n  \"game\": null,\n  \"slots\": null\n}\n")
         != std::string::npos);
     std::error_code ec;
     fs::remove_all(dir, ec);
@@ -239,7 +254,7 @@ TEST_CASE("state dump world block with no area and no party", "[dump]")
     REQUIRE(platform::state_dump::ToJson(s).find(
                 "\"world\": {\"area\": \"\", \"party\": [], \"doors\": [], "
                 "\"dialog\": {\"active\": 0, \"speaker\": -1, \"entry\": -1, \"responses\": 0}, "
-                "\"explored_count\": 0, \"creatures\": 0},\n  \"game\": null,\n  \"slots\": null\n}\n")
+                "\"explored_count\": 0, \"creatures\": 0, \"enemy_creatures\": []},\n  \"game\": null,\n  \"slots\": null\n}\n")
         != std::string::npos);
 }
 
