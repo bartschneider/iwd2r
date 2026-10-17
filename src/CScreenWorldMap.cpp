@@ -1139,6 +1139,7 @@ static void MoveSpriteToArea(CGameArea* pArea,
     LONG nSpriteId,
     const CPoint& ptEntry,
     const CPoint* pOffsets,
+    SHORT nOffsetRead,
     SHORT& nOffsetIndex,
     CPoint& ptPrev,
     BOOLEAN& bMarshalled,
@@ -1184,8 +1185,12 @@ static void MoveSpriteToArea(CGameArea* pArea,
     if (pSprite->m_pArea != NULL) {
         pSprite->RemoveFromArea();
 
-        CPoint ptOffset(pOffsets[nOffsetIndex].x / CAIGroup::OFFSET_MULTIPLIER,
-            pOffsets[nOffsetIndex].y / CAIGroup::OFFSET_MULTIPLIER);
+        // NOTE: A connected host indexes the formation by the member's own
+        // slot, not by the running count (0x69DAE5-0x69DB07 for the party,
+        // 0x69E336-0x69E35A for the familiars); the running count steps
+        // either way, and only a session that is not connected reads it.
+        CPoint ptOffset(pOffsets[nOffsetRead].x / CAIGroup::OFFSET_MULTIPLIER,
+            pOffsets[nOffsetRead].y / CAIGroup::OFFSET_MULTIPLIER);
         nOffsetIndex++;
 
         BYTE nPersonalSpace = pSprite->m_animation.GetPersonalSpace();
@@ -1395,7 +1400,17 @@ void CScreenWorldMap::MoveToArea(const CResRef& cResArea, CString sEntryPoint, D
     if (bFound == TRUE) {
         CPoint ptPrev(-1, -1);
 
-        SHORT nFormation = g_pChitin->cNetwork.GetSessionOpen()
+        // NOTE: A single-player game is a connected host session (the null
+        // provider), so the connected placing runs there: the party comes in
+        // the fixed order of m_characters[0..5], one slot per character, an
+        // empty slot skipped without consuming a place, the formation offset
+        // indexed by the slot itself, and the familiars from offset 6
+        // (0x69D7E8-0x69D87D, 0x69DAE5-0x69DB07, 0x69E336-0x69E35A). Only a
+        // session that is not connected places the party in portrait order
+        // with a running offset.
+        BOOLEAN bConnected = g_pChitin->cNetwork.GetSessionOpen();
+
+        SHORT nFormation = bConnected
             ? CAIGroup::FORMATION_2BY3
             : pGame->GetGameSave()->m_curFormation;
 
@@ -1409,9 +1424,26 @@ void CScreenWorldMap::MoveToArea(const CResRef& cResArea, CString sEntryPoint, D
 
         SHORT nOffsetIndex = 0;
 
-        for (SHORT nCharacter = 0; nCharacter < pGame->m_nCharacters; nCharacter++) {
-            // NOTE: Uninline.
-            LONG nCharacterId = pGame->GetCharacterId(nCharacter);
+        SHORT nPartySlots = bConnected ? 6 : pGame->m_nCharacters;
+
+        // The familiars' first offset: the party's slot count (0x69E336 reads
+        // the count the party loop left, 6 when connected).
+        SHORT nFamiliarOffset = nPartySlots;
+
+        // NOTE: GetOffsets(TRUE) returns max(6, the group's member count)
+        // places, so a familiar's offset 6 is inside the array exactly when
+        // the group counts its familiars; the original relies on that, and
+        // keeps reading past the end otherwise.
+        for (SHORT nCharacter = 0; nCharacter < nPartySlots; nCharacter++) {
+            // NOTE: Uninline. The fixed order when connected, the portrait
+            // order otherwise.
+            LONG nCharacterId = bConnected
+                ? pGame->GetFixedOrderCharacterId(nCharacter)
+                : pGame->GetCharacterId(nCharacter);
+
+            if (nCharacterId == CGameObjectArray::INVALID_INDEX) {
+                continue;
+            }
 
             CGameSprite* pSprite;
             do {
@@ -1442,6 +1474,7 @@ void CScreenWorldMap::MoveToArea(const CResRef& cResArea, CString sEntryPoint, D
                     nCharacterId,
                     ptEntry,
                     pOffsets,
+                    bConnected ? nCharacter : nOffsetIndex,
                     nOffsetIndex,
                     ptPrev,
                     bMarshalled,
@@ -1486,11 +1519,16 @@ void CScreenWorldMap::MoveToArea(const CResRef& cResArea, CString sEntryPoint, D
                     nFamiliarId,
                     ptEntry,
                     pOffsets,
+                    bConnected ? nFamiliarOffset : nOffsetIndex,
                     nOffsetIndex,
                     ptPrev,
                     bMarshalled,
                     nFacing);
             }
+
+            // The familiars' offsets step per familiar, placed or not
+            // (0x69E8AE).
+            nFamiliarOffset++;
 
             pGame->GetObjectArray()->ReleaseDeny(nFamiliarId,
                 CGameObjectArray::THREAD_ASYNCH,
