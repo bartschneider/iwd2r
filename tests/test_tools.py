@@ -1860,6 +1860,119 @@ class CheckEvidenceTest(unittest.TestCase):
                                                       'return x * 2;'))
         self.assertEqual(self.check().returncode, 0)
 
+    def rules_address(self):
+        """A rules-math address that cannot collide with the fixture's."""
+        for address in sorted(check_evidence.RULES_MATH):
+            if address not in (0x401000, 0x401020):
+                return address
+        self.fail('no rules-math address outside the fixture addresses')
+
+    def touch_rules_math(self, extra):
+        """Change a rules-math function's body; extra goes in its evidence."""
+        address = self.rules_address()
+        source = TWO_FUNCTIONS.replace('0x401000', f'0x{address:X}')
+        self.write('src/a.cpp', source.replace('return x;', 'return x * 2;'))
+        if extra is not None:
+            self.evidence(f'{address:X}', extra)
+        self.commit()
+        return address
+
+    def test_rules_math_read_only_fails(self):
+        address = self.touch_rules_math('exemption: "pure data"\n'
+                                        'kind: read-only')
+        r = self.check()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn(f'0x{address:X} A::f', r.stdout)
+        self.assertIn('kind: read-only', r.stdout)
+        self.assertIn('requires kind: oracle', r.stdout)
+        self.assertNotIn('0x401020', r.stdout)
+
+    def test_rules_math_replay_fails(self):
+        address = self.touch_rules_math('exemption: "replay covers it"\n'
+                                        'kind: replay')
+        r = self.check()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn(f'0x{address:X} A::f', r.stdout)
+        self.assertIn('kind: replay', r.stdout)
+        self.assertIn('requires kind: oracle', r.stdout)
+
+    def test_rules_math_untagged_fails(self):
+        address = self.touch_rules_math('exemption: "pure data"')
+        r = self.check()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn(f'0x{address:X} A::f', r.stdout)
+        self.assertIn('no kind', r.stdout)
+        self.assertIn('requires kind: oracle', r.stdout)
+
+    def test_rules_math_missing_doc_fails(self):
+        address = self.touch_rules_math(None)
+        r = self.check()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn(f'docs/evidence/{address:X}.md', r.stdout)
+        self.assertIn('requires kind: oracle', r.stdout)
+
+    def test_rules_math_oracle_passes(self):
+        self.touch_rules_math('oracle_case: rand/roll\n'
+                              'kind: oracle')
+        r = self.check()
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertIn('rules math: oracle 1, replay 0, read-only 0 '
+                      '(1 of 1 touched function(s)', r.stdout)
+
+    def test_rules_math_counted_in_evidence_kinds(self):
+        self.touch_rules_math('exemption: "pure data"\nkind: read-only')
+        r = self.check()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn('evidence kinds: oracle 0, replay 0, read-only 1 '
+                      '(1 of 1 touched function(s))', r.stdout)
+
+    def test_rules_math_note_on_missing_evidence(self):
+        # A pure deletion inside the body still touches the function, and
+        # the plain missing-evidence error carries the rules-math note.
+        address = self.rules_address()
+        self.write('src/a.cpp', TWO_FUNCTIONS.replace(
+            '0x401000', f'0x{address:X}').replace('    return x;\n', ''))
+        self.commit()
+        r = self.check()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn(f'docs/evidence/{address:X}.md', r.stdout)
+        self.assertIn('requires kind: oracle', r.stdout)
+
+    def test_non_rules_math_untagged_still_warns_only(self):
+        # Outside the set an untagged document keeps the warn-only behaviour
+        # (0x401000 is not in RULES_MATH).
+        self.write('src/a.cpp', TWO_FUNCTIONS.replace('return x;',
+                                                      'return x * 2;'))
+        self.evidence('401000', 'oracle_case: rand/roll')
+        self.commit()
+        r = self.check()
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertIn('warning:', r.stdout)
+        self.assertNotIn('rules math:', r.stdout)
+
+
+class RulesMathSetTest(unittest.TestCase):
+    """The curated rules-math set stays in step with the repository."""
+
+    def test_set_is_curated(self):
+        self.assertGreaterEqual(len(check_evidence.RULES_MATH), 10)
+        for address in check_evidence.RULES_MATH:
+            self.assertIsInstance(address, int)
+            self.assertGreaterEqual(address, 0x401000)
+
+    def test_every_address_has_an_evidence_doc(self):
+        for address in sorted(check_evidence.RULES_MATH):
+            path = os.path.join(ROOT, 'docs', 'evidence', f'{address:X}.md')
+            self.assertTrue(os.path.isfile(path), f'missing {path}')
+
+    def test_triage_doc_covers_the_set(self):
+        path = os.path.join(ROOT, 'docs', 'evidence',
+                            'rules-math-triage.md')
+        with open(path) as f:
+            text = f.read()
+        for address in sorted(check_evidence.RULES_MATH):
+            self.assertIn(f'0x{address:X}', text, f'unlisted 0x{address:X}')
+
 
 check_evidence = load_tool('check_evidence')
 oracle = load_tool('oracle')

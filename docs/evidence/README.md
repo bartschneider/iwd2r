@@ -45,7 +45,10 @@ The file name is the address in upper-case hex without `0x`:
 - `kind`: how the function is evidenced — `oracle` (its `oracle_case` runs in
   the gate), `replay` (a replay scenario or compare run covers it) or
   `read-only` (nothing runs it; the exemption stands on its own). The checker
-  reports counts per kind but does not require one.
+  reports counts per kind but does not require one — except for the
+  rules-math set (`RULES_MATH` in `tools/check_evidence.py`: attack rolls,
+  saving throws, damage resolution, effect application), which requires
+  `kind: oracle`; triaged in `rules-math-triage.md`.
 - `ghidra_version`: the Ghidra that produced the decompilation
   (`tools/ghidra/versions.json`).
 
