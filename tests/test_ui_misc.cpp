@@ -1466,6 +1466,56 @@ CGameTrigger* AreaRegion(CGameArea* pArea, const char* name)
     return NULL;
 }
 
+// A single-player game as the game runs one: a host session of the null
+// service provider with its one local player (CScreenConnection's new game
+// calls HostNewSession and CreatePlayer, which set the connection and host
+// flags and the player id). The test engine starts with no provider (-1)
+// and no session; the session is closed when the case ends.
+class HostSession {
+public:
+    HostSession()
+        : m_nServiceProvider(g_pChitin->cNetwork.m_nServiceProvider)
+        , m_bPlayerShutdown(g_pBaldurChitin->m_cBaldurMessage.m_bPlayerShutdown)
+        , m_bOpened(false)
+    {
+        CNetwork& network = g_pChitin->cNetwork;
+        if (!network.m_bConnectionEstablished) {
+            if (!network.m_bServiceProviderEnumerated) {
+                network.EnumerateServiceProviders();
+            }
+            network.SelectServiceProvider(CNetwork::SERV_PROV_NULL);
+            network.InitializeConnectionToServiceProvider(TRUE);
+            network.m_sSessionNameToMake = "Session";
+            network.m_bSessionNameToMake = TRUE;
+            network.m_sLocalPlayerName = "Player";
+            network.m_bPlayerNameToMake = TRUE;
+            INT nError = -1;
+            m_bOpened = network.HostNewSession() == TRUE && network.CreatePlayer(nError) == TRUE;
+        }
+        network.m_nServiceProvider = CNetwork::SERV_PROV_NULL;
+    }
+    ~HostSession()
+    {
+        if (m_bOpened) {
+            g_pChitin->cNetwork.CloseSession(TRUE);
+            g_pBaldurChitin->m_cBaldurMessage.m_bPlayerShutdown = m_bPlayerShutdown;
+        }
+        g_pChitin->cNetwork.m_nServiceProvider = m_nServiceProvider;
+    }
+    HostSession(const HostSession&) = delete;
+    HostSession& operator=(const HostSession&) = delete;
+
+    bool Open() const
+    {
+        return g_pChitin->cNetwork.m_bConnectionEstablished == TRUE && g_pChitin->cNetwork.m_bIsHost == TRUE;
+    }
+
+private:
+    INT m_nServiceProvider;
+    BOOLEAN m_bPlayerShutdown;
+    bool m_bOpened;
+};
+
 // The party member selected alone, its action queue empty, in a single
 // player game: the null service provider, which the connection screen
 // selects (the test engine starts with none, -1, which the travel actions
@@ -1534,6 +1584,8 @@ TEST_CASE("travel: a loaded area's entry points are found by name", "[uimisc][tr
     if (pSprite == NULL) {
         SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
     }
+    HostSession session;
+    REQUIRE(session.Open());
 
     CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
     CGameArea* pStart = pSprite->GetArea();
@@ -1575,6 +1627,8 @@ TEST_CASE("travel: a click at the area's edge queues the walk before one LeaveAr
     if (pSprite == NULL) {
         SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
     }
+    HostSession session;
+    REQUIRE(session.Open());
 
     CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
     CGameArea* pArea = pSprite->GetArea();
@@ -1625,6 +1679,8 @@ TEST_CASE("travel: a click on a travel region queues the walk before LeaveAreaNa
     if (pSprite == NULL) {
         SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
     }
+    HostSession session;
+    REQUIRE(session.Open());
 
     CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
     CGameArea* pArea = pSprite->GetArea();
@@ -1667,6 +1723,144 @@ TEST_CASE("travel: a click on a travel region queues the walk before LeaveAreaNa
     pSprite->m_triggerId = CGameObjectArray::INVALID_INDEX;
 }
 
+// The first region of `pArea` of the type `nType` that `accept` takes.
+template <typename F>
+CGameTrigger* AreaRegionOfType(CGameArea* pArea, WORD nType, F accept)
+{
+    CGameObjectArray* pObjects = g_pBaldurChitin->GetObjectGame()->GetObjectArray();
+    CTypedPtrList<CPtrList, int*>* lists[] = { &pArea->m_lVertSort, &pArea->m_lVertSortBack };
+    for (CTypedPtrList<CPtrList, int*>* list : lists) {
+        POSITION pos = list->GetHeadPosition();
+        while (pos != NULL) {
+            LONG id = static_cast<LONG>(reinterpret_cast<INT_PTR>(list->GetNext(pos)));
+            CGameObject* pObject;
+            if (pObjects->GetShare(id, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) == CGameObjectArray::SUCCESS) {
+                pObjects->ReleaseShare(id, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+                if (pObject->GetObjectType() == CGameObject::TYPE_TRIGGER) {
+                    CGameTrigger* pTrigger = static_cast<CGameTrigger*>(pObject);
+                    if (pTrigger->m_triggerType == nType && accept(pTrigger)) {
+                        return pTrigger;
+                    }
+                }
+            }
+        }
+    }
+    return NULL;
+}
+
+// CGameTrigger::OnActionButton (0x4CED10), an info region (type 1): the
+// click floats the region's text over it (FloatText 10, 5: a text object in
+// field_1C) and queues nothing.
+TEST_CASE("travel: a click on an info region floats its text", "[uimisc][travel][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    CGameSprite* pSprite = PartyMember();
+    if (pSprite == NULL) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    HostSession session;
+    REQUIRE(session.Open());
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CGameArea* pArea = pSprite->GetArea();
+    REQUIRE(pArea != NULL);
+    REQUIRE(pGame->GetVisibleArea() == pArea);
+    CGameTrigger* pInfo = AreaRegionOfType(pArea, 1, [](CGameTrigger* p) {
+        return p->m_description != static_cast<STRREF>(-1) && p->m_description != 0;
+    });
+    REQUIRE(pInfo != NULL);
+    SelectAlone(pSprite);
+    pGame->m_nState = 0;
+    pInfo->field_1C = 0;
+
+    // The floating text sizes itself by the current video mode's FX size
+    // (character generation's, which StartEngine sets up, whichever engine
+    // another case left active); the test engine never activates its video
+    // mode, so it has no FX surface, and the 3D flag makes GetFXSize answer
+    // with the size instead.
+    CWarp* pActive = g_pChitin->pActiveEngine;
+    g_pChitin->pActiveEngine = g_pBaldurChitin->m_pEngineCreateChar;
+    const BOOL bIs3dAccelerated = g_pChitin->cVideo.m_bIs3dAccelerated;
+    g_pChitin->cVideo.m_bIs3dAccelerated = TRUE;
+    pInfo->OnActionButton(pInfo->m_pos);
+    g_pChitin->cVideo.m_bIs3dAccelerated = bIs3dAccelerated;
+    g_pChitin->pActiveEngine = pActive;
+    g_pBaldurChitin->GetMessageHandler()->AsynchronousUpdate();
+
+    CHECK(pInfo->field_1C != 0);
+    CHECK(pSprite->m_queuedActions.GetCount() == 0);
+    CHECK(pGame->m_lastClick == CPoint(-1, -1));
+}
+
+// CGameTrigger::OnActionButton (0x4CED10), state 2 with the disarm icon
+// (0x24) on an active, detected trap: the group is sent to RemoveTraps (28)
+// on it and the state and the selected button go back (0, 100), when the
+// selected character has ranks in Disable Device (the base skill 5); without
+// them nothing happens.
+TEST_CASE("travel: the disarm cursor on a detected trap sends the group to remove it", "[uimisc][travel][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    CGameSprite* pSprite = PartyMember();
+    if (pSprite == NULL) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    HostSession session;
+    REQUIRE(session.Open());
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CGameArea* pArea = pSprite->GetArea();
+    REQUIRE(pArea != NULL);
+    CGameTrigger* pTrap = AreaRegionOfType(pArea, 0, [](CGameTrigger*) {
+        return true;
+    });
+    REQUIRE(pTrap != NULL);
+    SelectAlone(pSprite);
+
+    const WORD nActivated = pTrap->m_trapActivated;
+    const WORD nDetected = pTrap->m_trapDetected;
+    const BYTE nSkill = pSprite->m_baseStats.m_skills[5];
+    pTrap->m_trapActivated = 1;
+    pTrap->m_trapDetected = 1;
+
+    // No Disable Device: nothing.
+    pSprite->m_baseStats.m_skills[5] = 0;
+    pGame->m_nState = 2;
+    pGame->m_iconIndex = 0x24;
+    pTrap->OnActionButton(pTrap->m_pos);
+    g_pBaldurChitin->GetMessageHandler()->AsynchronousUpdate();
+    CHECK(pSprite->m_queuedActions.GetCount() == 0);
+    CHECK(pGame->m_nState == 2);
+
+    // With ranks: RemoveTraps on the trap.
+    pSprite->m_baseStats.m_skills[5] = 4;
+    pTrap->OnActionButton(pTrap->m_pos);
+    g_pBaldurChitin->GetMessageHandler()->AsynchronousUpdate();
+    REQUIRE(pSprite->m_queuedActions.GetCount() == 1);
+    CHECK(pSprite->m_queuedActions.GetHead()->m_actionID == 28);
+    CHECK(pGame->m_nState == 0);
+    CHECK(pGame->m_cButtonArray.m_nSelectedButton == 100);
+
+    pSprite->m_baseStats.m_skills[5] = nSkill;
+    pTrap->m_trapActivated = nActivated;
+    pTrap->m_trapDetected = nDetected;
+    pGame->m_iconIndex = 0xFF;
+    pGame->m_nState = 0;
+    pSprite->ClearActions(FALSE);
+    pSprite->m_queuedActions.RemoveAll();
+}
+
 // LeaveAreaName (0x74CDB0) stops when the member is not by the region: done
 // beyond the travel distance (0x10000 by dy*dy*16/9 + dx*dx), an error
 // within it but off the region (RANGE_TRIGGER), an error for a region that
@@ -1684,6 +1878,8 @@ TEST_CASE("travel: LeaveAreaName waits until the member stands on the region", "
     if (pSprite == NULL) {
         SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
     }
+    HostSession session;
+    REQUIRE(session.Open());
 
     CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
     CGameArea* pArea = pSprite->GetArea();
@@ -1741,6 +1937,8 @@ TEST_CASE("travel: LeaveAreaName on the region takes the member to the entry poi
     if (pSprite == NULL) {
         SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
     }
+    HostSession session;
+    REQUIRE(session.Open());
 
     CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
     CGameArea* pArea = pSprite->GetArea();
@@ -1758,6 +1956,10 @@ TEST_CASE("travel: LeaveAreaName on the region takes the member to the entry poi
     // channel volumes: the mixer CChitin::InitializeServices (0x790240)
     // starts with the video.
     g_pChitin->cSoundMixer.Initialize(&g_pChitin->cWnd, 16, g_pChitin->GetNumberSoundChannels());
+    // In a session the travel brings the world screen up (SelectEngine);
+    // the engine that was active comes back at the end without an
+    // activation.
+    CWarp* pEngine = g_pChitin->pActiveEngine;
 
     const CAIAction leave(LEAVEAREANAME, CAIObjectType(), pRegion->GetId(), 0, 0);
     CHECK(RunTravelAction(pSprite, leave) == CGameAIBase::ACTION_DONE);
@@ -1783,7 +1985,101 @@ TEST_CASE("travel: LeaveAreaName on the region takes the member to the entry poi
     pGame->UnselectAll();
     pGame->SelectCharacter(pSprite->GetId(), FALSE);
     CHECK(pGame->GetVisibleArea() == pArea);
+    g_pChitin->pActiveEngine = pEngine;
     g_pChitin->cSoundMixer.CleanUp();
+}
+
+// LeaveAreaName (0x74CDB0) on a party required region (To1100, flag 0x4) in
+// a single-player game, a host session: CBaldurMessage 0x438710 answers 0
+// while the game is paused (an error, nothing loaded), else the host makes
+// the party's transition (CInfGame 0x5C4AD0) and the action is done: the
+// auto-save, AR1100 loaded and the member put by its FR1000 (249,1376) in
+// the 2 by 3 formation, the area left behind marshalled, the progress
+// screen down.
+TEST_CASE("travel: a party required region takes the party through the host's transition", "[uimisc][travel][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    CGameSprite* pSprite = PartyMember();
+    if (pSprite == NULL) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    HostSession session;
+    REQUIRE(session.Open());
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CScreenWorld* pWorld = g_pBaldurChitin->m_pEngineWorld;
+    CGameArea* pArea = pSprite->GetArea();
+    REQUIRE(pArea != NULL);
+    CGameTrigger* pRegion = AreaRegion(pArea, "To1100");
+    REQUIRE(pRegion != NULL);
+    REQUIRE((pRegion->m_dwFlags & 0x4) != 0);
+    const CPoint ptStart = pSprite->GetPos();
+    SelectAlone(pSprite);
+    pGame->m_singlePlayerPermissions.SetSinglePermission(CGamePermission::AREA_TRANSITION, TRUE);
+    PutAt(pSprite, pRegion->GetPos());
+    pSprite->m_triggerId = pRegion->GetId();
+    g_pChitin->cSoundMixer.Initialize(&g_pChitin->cWnd, 16, g_pChitin->GetNumberSoundChannels());
+    // In a session the travel brings the world screen up (SelectEngine);
+    // the engine that was active comes back at the end without an
+    // activation.
+    CWarp* pEngine = g_pChitin->pActiveEngine;
+
+    const CAIAction leave(LEAVEAREANAME, CAIObjectType(), pRegion->GetId(), 0, 0);
+
+    // Paused: refused.
+    const BOOL bPaused = pWorld->m_bPaused;
+    pWorld->m_bPaused = TRUE;
+    CHECK(RunTravelAction(pSprite, leave) == CGameAIBase::ACTION_ERROR);
+    pWorld->m_bPaused = bPaused;
+    CHECK(pGame->GetArea(CString("AR1100")) == NULL);
+    CHECK(pSprite->GetArea() == pArea);
+
+    pWorld->m_bPaused = FALSE;
+    // The save names come back at the end (the character sheet cases write
+    // into the current save's folder).
+    const CString sSaveGame = pGame->m_sSaveGame;
+    const CString sCharacterSaveName = CScreenCharacter::SAVE_NAME;
+    const BOOL bScreenGrabbed = pGame->field_50D8;
+    pGame->m_sSaveGame = "";
+    // The auto-save's screen grab (SynchronousUpdate) is taken once
+    // field_50D8 is clear; the test engine draws no frame, so it counts as
+    // taken.
+    pGame->field_50D8 = TRUE;
+    CHECK(RunTravelAction(pSprite, leave) == CGameAIBase::ACTION_DONE);
+    pWorld->m_bPaused = bPaused;
+    g_pBaldurChitin->GetMessageHandler()->AsynchronousUpdate();
+
+    CGameArea* pTargos = pGame->GetArea(CString("AR1100"));
+    REQUIRE(pTargos != NULL);
+    CHECK(pSprite->GetArea() == pTargos);
+    const CPoint pos = pSprite->GetPos();
+    INFO("pos " << pos.x << "," << pos.y);
+    CHECK(std::abs(pos.x - 249) <= 6 * CPathSearch::GRID_SQUARE_SIZEX);
+    CHECK(std::abs(pos.y - 1376) <= 6 * CPathSearch::GRID_SQUARE_SIZEY);
+    CHECK(std::string(static_cast<LPCSTR>(pGame->m_sSaveGame)) == std::string(static_cast<LPCSTR>(CInfGame::AUTO_SAVE_NAME)));
+    CHECK(pGame->m_nTravelScreenImageToUse < 5);
+    CHECK(pArea->field_436 == 1);
+    CHECK(pGame->m_bInAreaTransition == FALSE);
+    CHECK(pSprite->m_triggerId == CGameObjectArray::INVALID_INDEX);
+
+    // Back to AR1000 for the other cases.
+    pSprite->RemoveFromArea();
+    pSprite->m_pos = ptStart;
+    pSprite->AddToArea(pArea, ptStart, 0, CGameObject::LIST_FRONT);
+    pGame->UnselectAll();
+    pGame->SelectCharacter(pSprite->GetId(), FALSE);
+    CHECK(pGame->GetVisibleArea() == pArea);
+    g_pChitin->pActiveEngine = pEngine;
+    g_pChitin->cSoundMixer.CleanUp();
+    pGame->m_sSaveGame = sSaveGame;
+    CScreenCharacter::SAVE_NAME = sCharacterSaveName;
+    pGame->field_50D8 = bScreenGrabbed;
 }
 
 // LeaveArea (0x74C0D0): a member by the clicked edge point (RANGE_EDGE) with
@@ -1804,6 +2100,8 @@ TEST_CASE("travel: LeaveArea opens the world map for travel by the edge", "[uimi
     if (pSprite == NULL) {
         SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
     }
+    HostSession session;
+    REQUIRE(session.Open());
 
     CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
     CScreenWorldMap* pWorldMap = g_pBaldurChitin->m_pEngineWorldMap;
@@ -1876,6 +2174,12 @@ TEST_CASE("travel: a member leaving unsummons its summons", "[uimisc][travel][da
     const CPoint ptSummoned(pSprite->GetPos().x + 3 * CPathSearch::GRID_SQUARE_SIZEX, pSprite->GetPos().y);
     pSummoned->m_pos = ptSummoned;
     pSummoned->AddToArea(pArea, ptSummoned, 0, CGameObject::LIST_FRONT);
+
+    // The summon table's work runs in a host session; the creature is made
+    // before it opens (a new sprite in a session registers with the remote
+    // object array).
+    HostSession session;
+    REQUIRE(session.Open());
 
     Icewind586B70* pTable = Icewind586B70::Instance();
     pTable->Clear();
