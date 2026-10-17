@@ -154,7 +154,9 @@ void CTimerWorld::UpdateTime(BOOLEAN forceUpdate)
 {
     if (m_active || forceUpdate) {
         if ((g_pBaldurChitin->nAUCounter & 1) != 1) {
+            const ULONG um5Before = m_gameTime;
             m_gameTime++;
+            IWD2R_UM5_TIMER_TRACE("TICK", um5Before);
             CheckForTriggerEventAbsolute();
         }
     }
@@ -374,33 +376,35 @@ void CTimerWorld::GetCurrentTimeString(ULONG nFromTime, STRREF strTimeFormat, CS
     sTime = strRes.szText;
 }
 
-// TEMPORARY ui-misc round-5 debug WIP (uncommitted; revert before gate):
-// IWD2R_UM5_TIMERDBG=<file> logs every StartTime/StopTime with the engine
-// frame and the caller's return address.
+// TEMPORARY ui-misc round-5 debug WIP (committed as a checkpoint; revert
+// before gate): IWD2R_UM5_TIMERDBG=<file> logs every StartTime/StopTime with
+// the engine frame, the object, the game time before/after, and the true
+// caller's return address (macro, so return_address(0) is the caller).
 #include <cstdio>
 #include <cstdlib>
 #include "msvc_rand.h"
-namespace {
-void Iwd2rUm5TimerTrace(const char* what)
-{
-    const char* path = std::getenv("IWD2R_UM5_TIMERDBG");
-    if (path == nullptr || *path == '\0') {
-        return;
-    }
-    std::FILE* f = std::fopen(path, "a");
-    if (f == nullptr) {
-        return;
-    }
-    std::fprintf(f, "%s fr=%u ret=%p\n", what, iwd2r_rand_trace_frame_value(),
-        __builtin_return_address(0));
-    std::fclose(f);
-}
-} // namespace
+#define IWD2R_UM5_TIMER_TRACE(what, before)                                  \
+    do {                                                                     \
+        const char* um5Path = std::getenv("IWD2R_UM5_TIMERDBG");             \
+        if (um5Path != nullptr && *um5Path != '\0') {                        \
+            std::FILE* um5F = std::fopen(um5Path, "a");                      \
+            if (um5F != nullptr) {                                           \
+                std::fprintf(um5F,                                           \
+                    what " this=%p fr=%u t=%u->%u ret=%p\n",                 \
+                    static_cast<const void*>(this),                          \
+                    iwd2r_rand_trace_frame_value(),                          \
+                    static_cast<unsigned>(before),                           \
+                    static_cast<unsigned>(m_gameTime),                       \
+                    __builtin_return_address(0));                            \
+                std::fclose(um5F);                                           \
+            }                                                                \
+        }                                                                    \
+    } while (0)
 
 // 0x54F970
 void CTimerWorld::StartTime()
 {
-    Iwd2rUm5TimerTrace("START");
+    const ULONG um5Before = m_gameTime;
     m_active = TRUE;
 
     if (g_pBaldurChitin->m_pEngineWorld->m_nAutoHideInterface != 0) {
@@ -414,12 +418,13 @@ void CTimerWorld::StartTime()
             g_pBaldurChitin->m_pEngineWorld->UnhideInterface();
         }
     }
+    IWD2R_UM5_TIMER_TRACE("START", um5Before);
 }
 
 // 0x54F9F0
 void CTimerWorld::StopTime()
 {
-    Iwd2rUm5TimerTrace("STOP");
+    const ULONG um5Before = m_gameTime;
     m_active = FALSE;
     m_gameTime--;
     m_nLastPercentage = -1;
@@ -428,6 +433,7 @@ void CTimerWorld::StopTime()
         g_pBaldurChitin->m_pEngineWorld->m_nAutoHideInterface++;
         g_pBaldurChitin->m_pEngineWorld->UnhideInterface();
     }
+    IWD2R_UM5_TIMER_TRACE("STOP", um5Before);
 }
 
 // 0x45B540
