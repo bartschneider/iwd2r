@@ -394,5 +394,10 @@ FodyWeavers.xsd
 build/
 build-*/
 
-# play.py run folders
+# play.py / oracle.py output: run folders (host and Windows Sandbox results,
+# .wsb configs, checkpoint dumps) and any game save that lands in a checkout
 runs/
+oracle/runs/
+*.wsb
+*.sav
+*.SAV
