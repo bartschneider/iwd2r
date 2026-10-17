@@ -1447,7 +1447,9 @@ TEST_CASE("character screen: the text character sheet up to the original's asser
 namespace {
 
 // Runs `press` on a thread of its own and says whether it returned within
-// five seconds. A hung press is left spinning; the case fails.
+// five seconds. A hung press cannot be joined without hanging the case too,
+// so its thread is detached and left to the process's end: the case fails,
+// and ctest runs one case per process.
 bool ReturnsInTime(std::function<void()> press)
 {
     auto done = std::make_shared<std::atomic<bool>>(false);
@@ -1480,6 +1482,21 @@ void UnbindKey(CInfGame* pGame, BYTE nKey)
     }
 }
 
+// Presses the unbound key on `pScreen` with the key flags saved and restored:
+// the pressed-key flag and Ctrl's state are the screen's, and a later case in
+// the same process would see whatever the press left.
+template <typename TScreen>
+void PressUnboundKey(TScreen* pScreen)
+{
+    const BYTE savedPressed = pScreen->m_pVirtualKeysFlags[0];
+    const BOOL savedCtrl = pScreen->m_bCtrlKeyDown;
+    pScreen->m_bCtrlKeyDown = FALSE;
+    pScreen->m_pVirtualKeysFlags[0] = KEY_UNBOUND;
+    CHECK(ReturnsInTime([pScreen] { pScreen->OnKeyDown(1); }));
+    pScreen->m_pVirtualKeysFlags[0] = savedPressed;
+    pScreen->m_bCtrlKeyDown = savedCtrl;
+}
+
 } // namespace
 
 TEST_CASE("keys: an unbound key returns from the journal and the store and both maps", "[uimisc][keys][data]")
@@ -1498,34 +1515,22 @@ TEST_CASE("keys: an unbound key returns from the journal and the store and both 
 
     SECTION("journal")
     {
-        CScreenJournal* pJournal = g_pBaldurChitin->m_pEngineJournal;
-        pJournal->m_bCtrlKeyDown = FALSE;
-        pJournal->m_pVirtualKeysFlags[0] = KEY_UNBOUND;
-        CHECK(ReturnsInTime([pJournal] { pJournal->OnKeyDown(1); }));
+        PressUnboundKey(g_pBaldurChitin->m_pEngineJournal);
     }
 
     SECTION("store")
     {
-        CScreenStore* pStore = g_pBaldurChitin->m_pEngineStore;
-        pStore->m_bCtrlKeyDown = FALSE;
-        pStore->m_pVirtualKeysFlags[0] = KEY_UNBOUND;
-        CHECK(ReturnsInTime([pStore] { pStore->OnKeyDown(1); }));
+        PressUnboundKey(g_pBaldurChitin->m_pEngineStore);
     }
 
     SECTION("area map")
     {
-        CScreenMap* pMap = g_pBaldurChitin->m_pEngineMap;
-        pMap->m_bCtrlKeyDown = FALSE;
-        pMap->m_pVirtualKeysFlags[0] = KEY_UNBOUND;
-        CHECK(ReturnsInTime([pMap] { pMap->OnKeyDown(1); }));
+        PressUnboundKey(g_pBaldurChitin->m_pEngineMap);
     }
 
     SECTION("world map")
     {
-        CScreenWorldMap* pWorldMap = g_pBaldurChitin->m_pEngineWorldMap;
-        pWorldMap->m_bCtrlKeyDown = FALSE;
-        pWorldMap->m_pVirtualKeysFlags[0] = KEY_UNBOUND;
-        CHECK(ReturnsInTime([pWorldMap] { pWorldMap->OnKeyDown(1); }));
+        PressUnboundKey(g_pBaldurChitin->m_pEngineWorldMap);
     }
 
     memcpy(pGame->m_pKeymap, savedKeys, sizeof(savedKeys));
@@ -2232,6 +2237,93 @@ TEST_CASE("travel: LeaveArea opens the world map for travel by the edge", "[uimi
 
     g_pChitin->SelectEngine(pPrevious);
     pGame->SelectCharacter(pSprite->GetId(), FALSE);
+}
+
+// CScreenWorldMap::MoveToArea (0x69D0F0) in a host session (a single-player
+// game is one): the party is placed in the fixed order of
+// m_characters[0..5], the formation offset indexed by the slot itself
+// (0x69D7E8-0x69D87D, 0x69DAE5-0x69DB07), an empty slot skipped without
+// consuming a place; not in portrait order with a running offset. Here the
+// sole member sits in fixed-order slot 1 with slot 0 empty and portrait 0
+// still naming him, so the connected path stands him at the formation's
+// second place, two squares east of the entry (0x8C6C08, turned by the entry
+// point's direction), where the portrait order would stand him at the entry
+// itself.
+TEST_CASE("travel: a host session's MoveToArea places the party in the fixed order", "[uimisc][travel][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    CGameSprite* pSprite = PartyMember();
+    if (pSprite == NULL) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CGameArea* pArea = pSprite->GetArea();
+    REQUIRE(pArea != NULL);
+    const CPoint ptStart = pSprite->GetPos();
+
+    // The member in fixed-order slot 1, slot 0 empty; the portrait order
+    // (what the unconnected path reads) still names him at 0.
+    const LONG nMember = pGame->m_characters[0];
+    REQUIRE(pGame->m_characterPortraits[0] == nMember);
+    pGame->m_characters[0] = CGameObjectArray::INVALID_INDEX;
+    pGame->m_characters[1] = nMember;
+
+    HostSession session;
+    REQUIRE(session.Open());
+
+    // Selecting the member in the new area activates it, which sets the
+    // channel volumes: the mixer CChitin::InitializeServices (0x790240)
+    // starts with the video.
+    g_pChitin->cSoundMixer.Initialize(&g_pChitin->cWnd, 16, g_pChitin->GetNumberSoundChannels());
+    CWarp* pEngine = g_pChitin->pActiveEngine;
+
+    // AR1005's FR1000 entry point (165,224, facing 8): the small house's
+    // floor is open around it, where AR1001's north edge band is walled and
+    // the nearest-open search lands far from the point.
+    const CResRef cResDest("AR1005");
+    g_pBaldurChitin->m_pEngineWorldMap->MoveToArea(cResDest, CString("FR1000"), 8, FALSE, 0);
+    g_pBaldurChitin->GetMessageHandler()->AsynchronousUpdate();
+
+    CGameArea* pHouse = pSprite->GetArea();
+    REQUIRE(pHouse != NULL);
+    REQUIRE(pHouse->m_resRef == cResDest);
+
+    // FR1000 in search squares (0x69D13D-0x69D15E divides the point by the
+    // grid).
+    const INT nEntryX = 165 / CPathSearch::GRID_SQUARE_SIZEX;
+    const INT nEntryY = 224 / CPathSearch::GRID_SQUARE_SIZEY;
+    const CPoint sq(pSprite->GetPos().x / CPathSearch::GRID_SQUARE_SIZEX,
+        pSprite->GetPos().y / CPathSearch::GRID_SQUARE_SIZEY);
+    INFO("member " << sq.x << "," << sq.y << " entry " << nEntryX << "," << nEntryY);
+    // Slot 1: the formation's second place, the entry and two squares east.
+    // The nearest open square shifts the entry's own blocked place two west
+    // (136,222 against FR1000's 165,224, as the region travel's single
+    // member lands).
+    CHECK(std::abs(sq.x - (nEntryX + 2)) <= 1);
+    CHECK(std::abs(sq.y - nEntryY) <= 1);
+    // The portrait order's running offset would stand him at the entry's own
+    // place (square 8, west of the entry).
+    CHECK(sq.x > nEntryX);
+
+    // Back to AR1000 and the slots for the other cases (one process may run
+    // them all).
+    pSprite->RemoveFromArea();
+    pSprite->m_pos = ptStart;
+    pSprite->AddToArea(pArea, ptStart, 0, CGameObject::LIST_FRONT);
+    pGame->m_characters[0] = nMember;
+    pGame->m_characters[1] = CGameObjectArray::INVALID_INDEX;
+    pGame->UnselectAll();
+    pGame->SelectCharacter(pSprite->GetId(), FALSE);
+    CHECK(pGame->GetVisibleArea() == pArea);
+    g_pChitin->pActiveEngine = pEngine;
+    g_pChitin->cSoundMixer.CleanUp();
 }
 
 // Icewind586B70::sub_5872C0 (0x5872C0) and sub_586DC0 (0x586DC0): a member
