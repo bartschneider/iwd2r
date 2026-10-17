@@ -24,6 +24,9 @@
 #include "CScreenCharacter.h"
 #include "CScreenCreateChar.h"
 #include "CScreenInventory.h"
+#include "CScreenJournal.h"
+#include "CScreenMap.h"
+#include "CScreenStore.h"
 #include "CScreenWorld.h"
 #include "CScreenWorldMap.h"
 #include "CTimerWorld.h"
@@ -52,6 +55,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iterator>
 #include <memory>
 #include <string>
@@ -1435,6 +1439,97 @@ TEST_CASE("character screen: the text character sheet up to the original's asser
 }
 
 #endif
+
+// The keymap loops of four screens' OnKeyDown (the journal, the store, the
+// area map and the world map): a key at no keymap index 0 walks the whole
+// keymap and returns. Ours never moved its index, so such a key hung the
+// game (the original increments it).
+namespace {
+
+// Runs `press` on a thread of its own and says whether it returned within
+// five seconds. A hung press is left spinning; the case fails.
+bool ReturnsInTime(std::function<void()> press)
+{
+    auto done = std::make_shared<std::atomic<bool>>(false);
+    std::thread worker([press, done] {
+        press();
+        done->store(true);
+    });
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!done->load() && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    if (done->load()) {
+        worker.join();
+        return true;
+    }
+    worker.detach();
+    return false;
+}
+
+// VK_F13, in no raw key case of the four screens, taken out of the keymap:
+// every keymap entry is tested and none matches.
+const BYTE KEY_UNBOUND = 0x7C;
+
+void UnbindKey(CInfGame* pGame, BYTE nKey)
+{
+    for (int n = 0; n < CINFGAME_KEYMAP_SIZE; n++) {
+        if (pGame->m_pKeymap[n] == nKey) {
+            pGame->m_pKeymap[n] = 0;
+        }
+    }
+}
+
+} // namespace
+
+TEST_CASE("keys: an unbound key returns from the journal and the store and both maps", "[uimisc][keys][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    BYTE savedKeys[CINFGAME_KEYMAP_SIZE];
+    memcpy(savedKeys, pGame->m_pKeymap, sizeof(savedKeys));
+    UnbindKey(pGame, KEY_UNBOUND);
+
+    SECTION("journal")
+    {
+        CScreenJournal* pJournal = g_pBaldurChitin->m_pEngineJournal;
+        pJournal->m_bCtrlKeyDown = FALSE;
+        pJournal->m_pVirtualKeysFlags[0] = KEY_UNBOUND;
+        CHECK(ReturnsInTime([pJournal] { pJournal->OnKeyDown(1); }));
+    }
+
+    SECTION("store")
+    {
+        CScreenStore* pStore = g_pBaldurChitin->m_pEngineStore;
+        pStore->m_bCtrlKeyDown = FALSE;
+        pStore->m_pVirtualKeysFlags[0] = KEY_UNBOUND;
+        CHECK(ReturnsInTime([pStore] { pStore->OnKeyDown(1); }));
+    }
+
+    SECTION("area map")
+    {
+        CScreenMap* pMap = g_pBaldurChitin->m_pEngineMap;
+        pMap->m_bCtrlKeyDown = FALSE;
+        pMap->m_pVirtualKeysFlags[0] = KEY_UNBOUND;
+        CHECK(ReturnsInTime([pMap] { pMap->OnKeyDown(1); }));
+    }
+
+    SECTION("world map")
+    {
+        CScreenWorldMap* pWorldMap = g_pBaldurChitin->m_pEngineWorldMap;
+        pWorldMap->m_bCtrlKeyDown = FALSE;
+        pWorldMap->m_pVirtualKeysFlags[0] = KEY_UNBOUND;
+        CHECK(ReturnsInTime([pWorldMap] { pWorldMap->OnKeyDown(1); }));
+    }
+
+    memcpy(pGame->m_pKeymap, savedKeys, sizeof(savedKeys));
+}
 
 // Area travel (ui-misc round 4): a click on a travel region or at an area's
 // edge, the actions it queues, and the two travel actions (LeaveAreaName
