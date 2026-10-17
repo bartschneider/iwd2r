@@ -1542,3 +1542,135 @@ TEST_CASE("visual projectiles: Fireball flies, bursts in a ring of flames and le
     pArea->SortLists();
     ClearMessages();
 }
+
+namespace {
+
+// The cloud pieces the area holds in its add lists.
+std::vector<CGameObject85BF7C*> AddedCloudPieces(CGameArea* pArea)
+{
+    std::vector<CGameObject85BF7C*> pieces;
+    for (CGameObject* pObject : AddedObjects(pArea)) {
+        if (CGameObject85BF7C* pPiece = dynamic_cast<CGameObject85BF7C*>(pObject)) {
+            pieces.push_back(pPiece);
+        }
+    }
+    return pieces;
+}
+
+}
+
+// The cloud explosion (CGameObject85BFE8 0x7105B0) of type 1 (a stinking
+// cloud: EFF_M18a, flying pieces of effect animation 0x500 and lingering
+// ones of 0x510, both STNKCLDD) on open ground, radius 32 at speed 8: it
+// leaves a lingering piece at its centre (life (4 << 1) + the duration),
+// then for three ticks each particle not stopped draws one number (a
+// lingering piece when rand() % (((ticks left)^3 / 1000 + 10) * 3 / 2) is
+// 0) and the first in a square throws a flying piece (0x711D90); it draws
+// nothing itself (0x7122E0). A piece (CGameObject85BF7C 0x70FD50) draws one
+// number each tick it lives through (its sound, one chance in 200;
+// 0x710090). The effect animations 0x500 and 0x510 draw nothing.
+TEST_CASE("visual projectiles: a cloud explosion throws flying and lingering pieces", "[visualprojectile][data]")
+{
+    WORLD_OR_SKIP(world);
+    CGameArea* pArea = world.pArea;
+    pArea->SortLists();
+    CPoint pos;
+    REQUIRE(DryGround(pArea, CPoint(world.pCharacter->GetPos().x + 60, world.pCharacter->GetPos().y + 40), pos));
+
+    BYTE colorRangeValues[7] = { 0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36 };
+    iwd2r_srand(59);
+    CGameObject85BFE8* pCloud = new CGameObject85BFE8(1, colorRangeValues, pArea, pos, 32, 8, 1, 30);
+    CHECK(Draws(59, iwd2r_rand_state()) == 0);
+    const LONG id = pCloud->GetId();
+    REQUIRE(Alive(id));
+    CHECK(pCloud->GetPos() == pos);
+    CHECK(pCloud->m_nExpandTicks == 31 / 8 + 1);
+    CHECK(pCloud->m_nFlyingAnimation == 0x500);
+    CHECK(pCloud->m_nLingeringAnimation == 0x510);
+    CHECK(pCloud->m_sPieceSound == "EFF_M18c");
+    CHECK(memcmp(pCloud->m_colorRangeValues, colorRangeValues, sizeof(colorRangeValues)) == 0);
+    CHECK(memcmp(pCloud->m_terrainTable, CGameObject::DEFAULT_VISIBLE_TERRAIN_TABLE, sizeof(pCloud->m_terrainTable)) == 0);
+
+    std::vector<CGameObject85BF7C*> pieces = AddedCloudPieces(pArea);
+    REQUIRE(pieces.size() == 1);
+    CHECK(pieces.front()->GetPos() == pos);
+    CHECK(pieces.front()->m_nLife == (4 << 1) + 30);
+    CHECK(pieces.front()->m_velocity == CPoint(0, 0));
+    CHECK(pieces.front()->m_animation.GetAnimationId() == 0x510);
+
+    AreaScope scope(pArea);
+    REQUIRE(scope.Ok());
+    scope.CentreOn(pos);
+    {
+        // The explosion draws nothing; its pieces do.
+        const std::vector<DWORD> pixels = RenderObject(scope, pCloud);
+        const Lit lit = CountLit(pixels, scope.Screen(), scope.ToScreen(CRect(pos.x - 200, pos.y - 200, pos.x + 200, pos.y + 200)));
+        CHECK(lit.inside == 0);
+        CHECK(lit.outside == 0);
+    }
+
+    iwd2r_srand(61);
+    int nRolls = 0;
+    int ticks = 0;
+    while (Alive(id) && ticks < 400) {
+        if (pCloud->m_nExpandTicks > 1) {
+            for (int nParticle = 0; nParticle < 4 * (pCloud->m_nArc1 + pCloud->m_nArc2); nParticle++) {
+                nRolls += pCloud->m_pStates[nParticle] != 2 ? 1 : 0;
+            }
+        }
+        pCloud->AIUpdate();
+        ticks++;
+    }
+    CHECK(!Alive(id));
+    CHECK(nRolls > 0);
+    CHECK(Draws(61, iwd2r_rand_state()) == nRolls);
+
+    pieces = AddedCloudPieces(pArea);
+    int nFlying = 0;
+    for (CGameObject85BF7C* pPiece : pieces) {
+        if (pPiece->m_animation.GetAnimationId() == 0x500) {
+            nFlying++;
+            CHECK(pPiece->m_nLife <= 3);
+        } else {
+            CHECK(pPiece->m_animation.GetAnimationId() == 0x510);
+            CHECK(pPiece->m_velocity == CPoint(0, 0));
+        }
+        CHECK(pPiece->m_nWallMode == 1);
+    }
+    CHECK(nFlying > 0);
+    {
+        const Lit lit = RenderLit(scope, pieces.front(), CRect(pos.x - 200, pos.y - 200, pos.x + 200, pos.y + 200), "cloud_piece");
+        CHECK(lit.inside > 0);
+        CHECK(lit.outside == 0);
+    }
+
+    // The pieces live out their lives, one number for each tick a piece
+    // lives through.
+    std::vector<LONG> ids;
+    for (CGameObject85BF7C* pPiece : pieces) {
+        ids.push_back(pPiece->GetId());
+    }
+    iwd2r_srand(67);
+    int nLived = 0;
+    for (int frame = 0; frame < 400; frame++) {
+        bool any = false;
+        for (LONG pieceId : ids) {
+            CGameObject* pObject;
+            CGameObjectArray* pArray = g_pBaldurChitin->GetObjectGame()->GetObjectArray();
+            if (pArray->GetShare(pieceId, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) == CGameObjectArray::SUCCESS) {
+                pArray->ReleaseShare(pieceId, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+                pObject->AIUpdate();
+                nLived += Alive(pieceId) ? 1 : 0;
+                any = true;
+            }
+        }
+        if (!any) {
+            break;
+        }
+    }
+    for (LONG pieceId : ids) {
+        CHECK(!Alive(pieceId));
+    }
+    CHECK(Draws(67, iwd2r_rand_state()) == nLived);
+    pArea->SortLists();
+}
