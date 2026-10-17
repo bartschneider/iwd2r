@@ -1,21 +1,21 @@
 # Subsystem map
 
-Generated from commit `520ae5bd` by `tools/gen_map.py`. Do not edit; CI runs `python3 -I tools/gen_map.py --check`.
+Generated from commit `7c5b4da4` by `tools/gen_map.py`. Do not edit; CI runs `python3 -I tools/gen_map.py --check`.
 
-Totals: 556 files, 360712 lines, 150 `TODO: Incomplete`, 10723 address comments.
+Totals: 556 files, 363671 lines, 146 `TODO: Incomplete`, 10764 address comments.
 
 | Family | Files | Lines | `TODO: Incomplete` | Address comments | Platform headers included |
 |---|---:|---:|---:|---:|---|
 | AI | 22 | 8830 | 2 | 410 | — |
-| Game | 113 | 119773 | 45 | 2807 | replay.h |
-| Screens | 36 | 78560 | 12 | 2067 | — |
-| UI | 28 | 13785 | 0 | 517 | — |
+| Game | 113 | 121995 | 44 | 2832 | replay.h |
+| Screens | 36 | 78732 | 9 | 2069 | — |
+| UI | 28 | 13795 | 0 | 517 | — |
 | Video | 34 | 27290 | 28 | 1133 | ddraw_shim.h, gl_compat.h |
 | Resources | 63 | 10789 | 1 | 332 | dsound_shim.h |
 | Sound | 20 | 7829 | 0 | 266 | dsound_shim.h, win32_api.h |
-| Messaging | 10 | 23844 | 33 | 1209 | — |
-| Engine core | 10 | 7164 | 9 | 413 | data_dir.h, fs.h, present.h, replay.h, text_layer.h, window.h |
-| Other | 112 | 44275 | 20 | 1567 | compose.h, replay.h, state_dump.h, text_fonts.h, text_layer.h, window.h |
+| Messaging | 10 | 24088 | 33 | 1218 | — |
+| Engine core | 10 | 7169 | 9 | 414 | data_dir.h, fs.h, present.h, replay.h, text_layer.h, window.h |
+| Other | 112 | 44460 | 20 | 1571 | compose.h, replay.h, state_dump.h, text_fonts.h, text_layer.h, window.h |
 | compat | 33 | 3872 | 0 | 0 | win32_api.h |
-| platform | 75 | 14701 | 0 | 2 | affinity.h, clock.h, compose.h, crash.h, data_dir.h, ddraw_shim.h, dsound_shim.h, fs.h, gl_compat.h, gpu_probe.h, handles.h, imm_stub.h, input_settings.h, png.h, present.h, present_backend.h, replay.h, replay_clock.h, replay_probe.h, script.h, script_core.h, state_dump.h, text_atlas.h, text_fonts.h, text_layer.h, text_overlay.h, win32_api.h, window.h |
-| **Total** | 556 | 360712 | 150 | 10723 | |
+| platform | 75 | 14822 | 0 | 2 | affinity.h, clock.h, compose.h, crash.h, data_dir.h, ddraw_shim.h, dsound_shim.h, fs.h, gl_compat.h, gpu_probe.h, handles.h, imm_stub.h, input_settings.h, png.h, present.h, present_backend.h, replay.h, replay_clock.h, replay_probe.h, script.h, script_core.h, state_dump.h, text_atlas.h, text_fonts.h, text_layer.h, text_overlay.h, win32_api.h, window.h |
+| **Total** | 556 | 363671 | 146 | 10764 | |

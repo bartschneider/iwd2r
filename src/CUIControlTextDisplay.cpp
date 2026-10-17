@@ -239,6 +239,9 @@ POSITION CUIControlTextDisplay::DisplayString(const CString& sLabel, const CStri
         posTopString,
         bTrim);
 
+    // The scroll still to run for the last string ends (0x4E2171).
+    field_A65 = 0;
+
     if (a6 || nOldCount == 0) {
         m_posTopString = posTopString;
         field_5A = m_plstStrings->GetCount() - v1;

@@ -2863,8 +2863,8 @@ COLORREF CGameArea::GetTintColor(const CPoint& cPoint, BYTE listType)
 
     // NOTE: The original leaves the corners on its stack as they are when it
     // samples neither map (a code with neither bit); ours starts them at 0.
-    // GetPixelColor answers TRUE for a loaded map, so the falls back to the
-    // first corner below do not happen.
+    // GetPixelColor answers TRUE for a loaded map, so the fallbacks to the
+    // first corner below never run.
     RGBQUAD corners[4] = {};
     if ((nCode & DAY) != 0) {
         m_bmLum.GetPixelColor(corners[0], nX, nY, TRUE);
@@ -4077,6 +4077,8 @@ void CGameArea::Unmarshal(BYTE* pArea, LONG areaSize, const CString& sName, BOOL
             // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameArea.cpp
             // __LINE__: 5421
             UTIL_ASSERT(areaSize >= 0);
+
+            m_entryPoints.AddTail(pEntryPoint);
         }
     }
 
@@ -4971,7 +4973,7 @@ void CGameArea::OnActionButtonClickTravel(const CPoint& pt)
     m_pGame->GetGroup()->GroupAction(leave, TRUE, NULL);
 
     CAIAction move(CAIAction::MOVETOPOINT, pt, 0, -1);
-    m_pGame->GetGroup()->GroupAction(leave, TRUE, NULL);
+    m_pGame->GetGroup()->GroupAction(move, FALSE, NULL);
 }
 
 // 0x4765C0

@@ -3,6 +3,8 @@
 #include "CBaldurChitin.h"
 #include "CGameSprite.h"
 #include "CInfGame.h"
+#include "CMessage.h"
+#include "CProjectile.h"
 #include "IcewindMisc.h"
 
 // 0x8E6400
@@ -89,6 +91,47 @@ void Icewind586B70::sub_586D60(CGameSprite* sprite1, CGameSprite* sprite2)
         mEntries[index].field_4 = sprite1->GetId();
         mEntries[index].field_8 = false;
     }
+}
+
+// 0x586DC0
+void Icewind586B70::sub_586DC0(CGameSprite* sprite)
+{
+    // Unsummons `sprite` when it is a summoned creature of the table that
+    // does not stay (field_8): its entry is cleared, the unsummon visual
+    // (spell hit 0x15) is fired at it and it is hidden and removed.
+    std::vector<Entry>::iterator it;
+    for (it = mEntries.begin(); it != mEntries.end(); it++) {
+        if (sprite->GetId() == it->field_0) {
+            break;
+        }
+    }
+
+    if (it == mEntries.end() || it->field_8 == true) {
+        return;
+    }
+
+    it->field_0 = 0;
+    it->field_4 = 0;
+    it->field_8 = false;
+
+    CProjectile* pProjectile = CProjectile::DecodeSpellHitProjectile(0x15, NULL, FALSE);
+
+    LONG nId = sprite->GetId();
+    CMessage* message = new CMessageFireProjectile(0x1015, nId, sprite->GetPos(), 0, nId, nId, 0);
+    g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+    CGameArea* pArea = sprite->GetArea();
+    CPoint pos = sprite->GetPos();
+    pProjectile->Fire(pArea, nId, nId, pos, 0, 0);
+
+    sprite->sub_75F3D0(1);
+
+    if (g_pChitin->cNetwork.GetServiceProvider() != CNetwork::SERV_PROV_NULL) {
+        // NOTE: The message 0x8488E0 to the other players is not ported
+        // (single player only, docs/adr/0002-single-player-only.md).
+    }
+
+    sprite->m_removeFromArea = TRUE;
 }
 
 // 0x586F20
@@ -213,6 +256,67 @@ void Icewind586B70::Clear()
         mEntries[index].field_0 = 0;
         mEntries[index].field_4 = 0;
         mEntries[index].field_8 = false;
+    }
+}
+
+// 0x5872C0
+void Icewind586B70::sub_5872C0(CGameSprite* sprite)
+{
+    // The creatures `sprite` has summoned (the entries whose summoner is
+    // its id) are unsummoned, as when it leaves the area: 0x586DC0 on each,
+    // then the summon limit messages 89 (unsummon) and 96 (forget).
+    CGameObjectArray* pObjectArray = g_pBaldurChitin->GetObjectGame()->GetObjectArray();
+
+    for (size_t index = 0; index < mEntries.size();) {
+        while (index < mEntries.size() && sprite->GetId() != mEntries[index].field_4) {
+            index++;
+        }
+
+        if (index == mEntries.size()) {
+            break;
+        }
+
+        LONG nSummonedId = mEntries[index].field_0;
+        if (nSummonedId == 0) {
+            index++;
+            continue;
+        }
+
+        CGameSprite* pSummoned;
+        BYTE rc = pObjectArray->GetDeny(nSummonedId,
+            CGameObjectArray::THREAD_ASYNCH,
+            reinterpret_cast<CGameObject**>(&pSummoned),
+            INFINITE);
+        if (rc != CGameObjectArray::SUCCESS) {
+            index++;
+            continue;
+        }
+
+        Instance()->sub_586DC0(pSummoned);
+
+        CMessage* message = new CMessage89(pSummoned->GetId(), pSummoned->GetId(), pSummoned->GetId());
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+        Icewind586B70* pInstance = Instance();
+        LONG nId = pSummoned->GetId();
+        std::vector<Entry>::iterator it;
+        for (it = pInstance->mEntries.begin(); it != pInstance->mEntries.end(); it++) {
+            // 0x587650: the entry's first field against the id.
+            if (nId == it->field_0) {
+                break;
+            }
+        }
+
+        if (it != pInstance->mEntries.end() && it->field_8) {
+            it->Clear();
+        }
+
+        message = new CMessage96(pSummoned->GetId(), pSummoned->GetId(), pSummoned->GetId());
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+        pObjectArray->ReleaseDeny(nSummonedId, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+
+        index++;
     }
 }
 

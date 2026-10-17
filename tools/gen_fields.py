@@ -20,7 +20,11 @@ under "x-fields", one entry per field:
 Offsets come from the layout comments in our headers under --src (default
 src/): a member line starts with `/* NNNN */` or `/* 0xNNNN */`, the offset
 from the start of the object, base classes included, so a class also has
-its base classes' commented members. The member's declared
+its base classes' commented members. A base class named in the class head
+with a `/* base 0xNNNN */` comment after it starts at that offset in the
+original instead of at 0 (a vtable our port does not declare comes first:
+`class CItem : public CResHelper<CResItem, 1005> /* base 0x0004 */ {`), and
+its members move by as much. The member's declared
 type gives the field type: u8, i8, u16, i16, u32, i32, ptr (any pointer),
 resref (RESREF, 8 bytes); an array member adds "count". Two classes the
 original lays out as plain values count as such: CResRef is a resref and
@@ -32,8 +36,9 @@ MFC's containers have no comments of ours: their 32-bit layout (VC6 MFC
 4.2, afxcoll.h) is built in. CPtrList (and CObList, CTypedPtrList) has
 m_pNodeHead, m_pNodeTail and m_nCount; its node, "CPtrList::CNode", has
 pNext, pPrev and data; CPtrArray (and CObArray, CTypedPtrArray) has m_pData
-and m_nSize. A member path may go into them ("m_lVertSort.m_pNodeHead"), and
-a class deriving from one has their members.
+and m_nSize; CString (afx.h) is its one m_pchData, the pointer to the
+characters. A member path may go into them ("m_lVertSort.m_pNodeHead",
+"m_sFileName.m_pchData"), and a class deriving from one has their members.
 
 fields.json maps each field to {"base", "offset", "type"} (plus "count"):
 base is the class name, or the global's address for a global; offset is a
@@ -88,6 +93,9 @@ MFC = {
     'CPtrList::CNode': {'pNext': (0x00, 'void*'), 'pPrev': (0x04, 'void*'),
                         'data': (0x08, 'void*')},
     'CPtrArray': {'m_pData': (0x04, 'void*'), 'm_nSize': (0x08, 'int')},
+    # afx.h: no vtable; the characters, with the CStringData header
+    # (nRefs, nDataLength, nAllocLength) before them.
+    'CString': {'m_pchData': (0x00, 'char*')},
 }
 MFC_ALIASES = {'CObList': 'CPtrList', 'CTypedPtrList': 'CPtrList',
                'CObArray': 'CPtrArray', 'CTypedPtrArray': 'CPtrArray'}
@@ -95,12 +103,43 @@ MFC_ALIASES = {'CObList': 'CPtrList', 'CTypedPtrList': 'CPtrList',
 MEMBER_LINE = re.compile(
     r'^\s*/\*\s*(?:0x)?([0-9A-Fa-f]+)\s*\*/\s*([^;]*);')
 DECL = re.compile(r'^(.*?)\b([A-Za-z_]\w*)\s*((?:\[[^\]]*\]\s*)*)$')
-BASE = re.compile(r'\b(?:public|protected|private)\s+([A-Za-z_]\w*)')
+BASE_COMMENT = re.compile(r'/\*\s*base\s+(?:0x)?([0-9A-Fa-f]+)\s*\*/')
+BASE_NAME = re.compile(r'^\s*(?:(?:public|protected|private|virtual)\s+)*'
+                       r'((?:[A-Za-z_]\w*\s*::\s*)*[A-Za-z_]\w*)')
 DEFINE = re.compile(r'^\s*#define\s+([A-Za-z_]\w*)\s+(\d+)\s*$', re.M)
 
 
 class FieldError(Exception):
     pass
+
+
+def bases(head):
+    """[(name, shift)] of the base classes in a class head ("class X :
+    public A<B, C<D>*>, public E /* base 0x4 */ {"): the text after the
+    head's colon split at the commas outside template brackets; a base's
+    name is its first name after the access keywords, without its
+    namespaces (ns::B is B), its shift the `/* base 0xNNNN */` comment in
+    its part (0 without one)."""
+    colon = re.search(r'(?<!:):(?!:)', head)
+    if not colon:
+        return []
+    parts, depth, part = [], 0, ''
+    for ch in head[colon.end():].rstrip().rstrip('{'):
+        depth += {'<': 1, '>': -1}.get(ch, 0)
+        if ch == ',' and depth == 0:
+            parts.append(part)
+            part = ''
+        else:
+            part += ch
+    parts.append(part)
+    out = []
+    for part in parts:
+        comment = BASE_COMMENT.search(part)
+        name = BASE_NAME.match(BASE_COMMENT.sub(' ', part))
+        if name:
+            out.append((name.group(1).split('::')[-1].strip(),
+                        int(comment.group(1), 16) if comment else 0))
+    return out
 
 
 def bare(type_name):
@@ -209,15 +248,21 @@ class Headers:
             members[decl.group(2)] = Member(int(m.group(1), 16), type_name,
                                             decl.group(2), count, where)
         # A base class's members are at the offsets their comments give
-        # (offsets count from the start of the object, bases included);
-        # the class's own members win. A base without comments adds none.
-        for base in BASE.findall(head.split(':', 1)[1] if ':' in head
-                                 else ''):
+        # (offsets count from the start of the object, bases included),
+        # moved by the base's `/* base 0xNNNN */` offset when the head
+        # gives one; the class's own members win. A base without comments
+        # adds none.
+        for base, shift in bases(head):
             try:
                 inherited = self.members(base)
             except FieldError:
                 continue
             for member_name, member in inherited.items():
+                if shift:
+                    member = Member(member.offset + shift, member.type_name,
+                                    member.name, member.count,
+                                    '%s (base %s at 0x%04X)'
+                                    % (member.line, base, shift))
                 members.setdefault(member_name, member)
         if not members:
             raise FieldError('class %s (%s) has no /* NNNN */ member '

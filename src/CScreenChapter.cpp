@@ -665,6 +665,9 @@ void CScreenChapter::StartChapterMultiplayerHost(BYTE nChapter, BYTE* resRef)
 
     // NOTE: Uninline.
     StartChapter(CResRef(resRef));
+
+    // The chapter screen comes up (0x5D4639).
+    SelectEngine(g_pBaldurChitin->m_pEngineChapter);
 }
 
 // 0x5D4650

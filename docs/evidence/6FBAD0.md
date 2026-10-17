@@ -2,6 +2,7 @@
 address: 0x6FBAD0
 name: CGameSprite::ChangeDirection
 exemption: "needs a sprite with an animation and the game's world timer; tests/test_sprite_actions.cpp [ai][data] checks the turn gating"
+kind: read-only
 ghidra_version: 12.1.4
 ---
 

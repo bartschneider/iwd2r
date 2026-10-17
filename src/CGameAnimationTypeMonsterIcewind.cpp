@@ -2386,6 +2386,7 @@ SHORT CGameAnimationTypeMonsterIcewind::SetSequence(SHORT nSequence)
         m_currentVidCellBase = &m_deVidCellBase;
         m_currentVidCellExtend = &m_deVidCellExtend;
         m_currentBamSequence = 0;
+        break;
     case 6:
         if (m_currentBamSequence != 0
             || m_currentVidCellBase != &m_sdVidCellBase) {
@@ -2462,8 +2463,8 @@ SHORT CGameAnimationTypeMonsterIcewind::SetSequence(SHORT nSequence)
         m_currentBamSequence = 0;
         break;
     case 17:
-        m_currentVidCellBase = &m_a1VidCellBase;
-        m_currentVidCellExtend = &m_a1VidCellExtend;
+        m_currentVidCellBase = &m_slVidCellBase;
+        m_currentVidCellExtend = &m_slVidCellExtend;
         m_currentBamSequence = 0;
         break;
     default:

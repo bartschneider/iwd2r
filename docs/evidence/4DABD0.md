@@ -2,6 +2,7 @@
 address: 0x4DABD0
 name: CUIControlEditMultiLine::OnLButtonDown
 exemption: "checked by tests/test_action_bar.cpp [editml] (clicking and dragging)"
+kind: read-only
 ghidra_version: 12.1.4
 ---
 

@@ -4,6 +4,7 @@
 #include "CAIAction.h"
 #include "CBaldurChitin.h"
 #include "CCreatureFile.h"
+#include "CGameAnimationTypeMonsterIcewind.h"
 #include "CGameArea.h"
 #include "CGameContainer.h"
 #include "CGameEffect.h"
@@ -2152,6 +2153,77 @@ TEST_CASE("combat: GiveItem moves a goblin's weapon into the party member's inve
     ClearMessages();
 }
 
+// GiveItemCreate (action 140, 0x44EEB9-0x44EF37, and 0x464EB0), which
+// Reig's dialog runs for the short sword: a new item, with the action's
+// three numbers as its use counts, lands in the party member's first empty
+// inventory slot (CMessageAddItem); the caller keeps nothing.
+TEST_CASE("combat: GiveItemCreate puts a new short sword in the party member's inventory", "[combat][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    Fight fight;
+    std::string why;
+    if (!SetUpFight(fight, why)) {
+        if (why.find("CHR") != std::string::npos) {
+            SKIP("[iwd2r-skip] " + why);
+        }
+        FAIL(why);
+    }
+    CGameSprite* pCharacter = fight.pCharacter;
+    CGameSprite* pGoblin = fight.pGoblin;
+
+    CAIObjectType actee(pCharacter->GetAIType());
+    actee.m_nInstance = pCharacter->GetId();
+    CAIAction create(140, actee, 0, 0, 0);
+    create.m_string1 = "00Swds01";
+
+    // No target, or an item the game does not have: an error.
+    pGoblin->m_curAction = create;
+    CHECK(pGoblin->GiveItemCreate(NULL) == CGameAIBase::ACTION_ERROR);
+    CAIAction missing = create;
+    missing.m_string1 = "NOSUCH";
+    pGoblin->m_curAction = missing;
+    CHECK(pGoblin->GiveItemCreate(pCharacter) == CGameAIBase::ACTION_ERROR);
+
+    INT nFirstEmpty = -1;
+    for (INT n = 18; n < 42; n++) {
+        if (pCharacter->GetEquipment()->m_items[n] == NULL) {
+            nFirstEmpty = n;
+            break;
+        }
+    }
+    REQUIRE(nFirstEmpty != -1);
+    INT nGoblinItems = 0;
+    for (INT n = 0; n < 51; n++) {
+        if (pGoblin->GetEquipment()->m_items[n] != NULL) {
+            nGoblinItems++;
+        }
+    }
+
+    // Through ExecuteAction, the action's actee: done, and the message
+    // gives the party member the sword.
+    ClearMessages();
+    pGoblin->m_curAction = create;
+    CHECK(pGoblin->CGameAIBase::ExecuteAction() == CGameAIBase::ACTION_DONE);
+    g_pBaldurChitin->GetMessageHandler()->AsynchronousUpdate();
+    CItem* pGiven = pCharacter->GetEquipment()->m_items[nFirstEmpty];
+    REQUIRE(pGiven != NULL);
+    CHECK(pGiven->GetResRef() == CResRef("00SWDS01"));
+    INT nGoblinItemsAfter = 0;
+    for (INT n = 0; n < 51; n++) {
+        if (pGoblin->GetEquipment()->m_items[n] != NULL) {
+            nGoblinItemsAfter++;
+        }
+    }
+    CHECK(nGoblinItemsAfter == nGoblinItems);
+    ClearMessages();
+}
+
 // SetBestWeapon (action 255, 0x72AB84-0x72ACB5): the target within the
 // action's range in search squares asks for a melee weapon, beyond it for a
 // ranged one.
@@ -2197,6 +2269,61 @@ TEST_CASE("combat: SetBestWeapon picks the goblin's melee weapon within its rang
     // No target: an error.
     pGoblin->m_curAction = CAIAction(255, CAIObjectType(0, 0, 0, 0, 0, 0, 0, 0, 0x7FFF0000), 5, 0, 0);
     CHECK(pGoblin->ExecuteAction() == CGameAIBase::ACTION_ERROR);
+    ClearMessages();
+}
+
+// SetBestWeapon's other two branches, with AR1000's goblin archer (10GOBAR:
+// a shortbow, arrows, and 001D3P, a melee weapon in its second set), which
+// starts with the arrows (the first quiver slot, a ranged ability) selected:
+// beyond the range a ranged ability stays; within it the archer takes its
+// most damaging melee weapon.
+TEST_CASE("combat: SetBestWeapon keeps an archer's arrows beyond its range and takes a melee weapon within it", "[combat][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    Fight fight;
+    std::string why;
+    if (!SetUpFight(fight, why)) {
+        if (why.find("CHR") != std::string::npos) {
+            SKIP("[iwd2r-skip] " + why);
+        }
+        FAIL(why);
+    }
+    CGameSprite* pCharacter = fight.pCharacter;
+    const CPoint pos = pCharacter->GetPos();
+    CGameSprite* pArcher = AddCreature(fight.pArea, "10GOBAR", CPoint(pos.x + 2 * CPathSearch::GRID_SQUARE_SIZEX, pos.y));
+    REQUIRE(pArcher != NULL);
+    CGameSpriteEquipment* pEquipment = pArcher->GetEquipment();
+    REQUIRE(pEquipment->m_selectedWeapon == 11);
+    const CAIObjectType character(0, 0, 0, 0, 0, 0, 0, 0, pCharacter->GetId());
+
+    // The ability type of the archer's selected weapon (1 melee, 2 ranged).
+    auto selectedType = [pEquipment]() {
+        CItem* pItem = pEquipment->m_items[pEquipment->m_selectedWeapon];
+        REQUIRE(pItem != NULL);
+        pItem->Demand();
+        const ITEM_ABILITY* pAbility = pItem->GetAbility(pEquipment->m_selectedWeaponAbility);
+        const int type = pAbility != NULL ? (pAbility->type & 0xFF) : -1;
+        pItem->Release();
+        return type;
+    };
+    REQUIRE(selectedType() == 2);
+
+    // Two search squares away, beyond a range of 0: the arrows stay.
+    pArcher->m_curAction = CAIAction(255, character, 0, 0, 0);
+    CHECK(pArcher->ExecuteAction() == CGameAIBase::ACTION_DONE);
+    CHECK(pEquipment->m_selectedWeapon == 11);
+
+    // Within a range of 5: a melee weapon.
+    pArcher->m_curAction = CAIAction(255, character, 5, 0, 0);
+    CHECK(pArcher->ExecuteAction() == CGameAIBase::ACTION_DONE);
+    CHECK(pEquipment->m_selectedWeapon != 11);
+    CHECK(selectedType() == 1);
     ClearMessages();
 }
 
@@ -2342,5 +2469,237 @@ TEST_CASE("combat: the area tints a point with its light map", "[combat][data]")
             mid(c00.rgbGreen, c10.rgbGreen, c01.rgbGreen, c11.rgbGreen),
             mid(c00.rgbBlue, c10.rgbBlue, c01.rgbBlue, c11.rgbBlue)));
 
+    // 5 pixels across and 3 down in the first cell (row by row) whose four
+    // corners have four different reds (that cell's corners are uniform):
+    // the left corners weigh 11/16 and the right ones 5/16, the top edge
+    // 9/12 and the bottom one 3/12, so swapping x and y or two corners
+    // changes the colour.
+    INT nCellX = -1;
+    INT nCellY = -1;
+    RGBQUAD d00;
+    RGBQUAD d10;
+    RGBQUAD d01;
+    RGBQUAD d11;
+    for (INT y = 0; y < 200 && nCellX == -1; y++) {
+        for (INT x = 0; x < 300; x++) {
+            if (!pArea->m_bmLum.GetPixelColor(d00, x, y, FALSE)
+                || !pArea->m_bmLum.GetPixelColor(d10, x + 1, y, FALSE)
+                || !pArea->m_bmLum.GetPixelColor(d01, x, y + 1, FALSE)
+                || !pArea->m_bmLum.GetPixelColor(d11, x + 1, y + 1, FALSE)) {
+                break;
+            }
+            const BYTE reds[4] = { d00.rgbRed, d10.rgbRed, d01.rgbRed, d11.rgbRed };
+            bool bDistinct = true;
+            for (int i = 0; i < 4; i++) {
+                for (int j = i + 1; j < 4; j++) {
+                    bDistinct = bDistinct && reds[i] != reds[j];
+                }
+            }
+            if (bDistinct) {
+                nCellX = x;
+                nCellY = y;
+                break;
+            }
+        }
+    }
+    REQUIRE(nCellX != -1);
+    INFO("cell " << nCellX << "," << nCellY);
+    auto off = [](BYTE a, BYTE b, BYTE c, BYTE d) {
+        INT nTop = (a * 11 + b * 5) / 16;
+        INT nBottom = (c * 11 + d * 5) / 16;
+        return static_cast<BYTE>((nTop * 9 + nBottom * 3) / 12);
+    };
+    CHECK(pArea->GetTintColor(CPoint(nCellX * 16 + 5, nCellY * 12 + 3), CGameObject::LIST_FRONT)
+        == RGB(off(d00.rgbRed, d10.rgbRed, d01.rgbRed, d11.rgbRed),
+            off(d00.rgbGreen, d10.rgbGreen, d01.rgbGreen, d11.rgbGreen),
+            off(d00.rgbBlue, d10.rgbBlue, d01.rgbBlue, d11.rgbBlue)));
+    CHECK(GetRValue(pArea->GetTintColor(CPoint(nCellX * 16 + 5, nCellY * 12 + 3), CGameObject::LIST_FRONT))
+        != off(d00.rgbRed, d01.rgbRed, d10.rgbRed, d11.rgbRed));
+
     pArea->m_cInfinity.m_areaType = areaType;
+}
+
+// CGameSprite::ApplyTriggers (0x728580), the sprite's override of vtable
+// +0xAC: a KILLED trigger (0x4B) raises the killer's morale by 3 and, for a
+// party member's kill of an enemy, shares the enemy's challenge rating
+// experience through an XP effect message per member and keeps the total
+// in the enemy's derived experience value (first_fight's kill: the
+// original's party member had 37 experience points at frame 5452, ours 0);
+// each trigger is read once (flag 0x2). HITBY (0x20) lowers morale by 2 as
+// the hit points fall below half.
+TEST_CASE("combat: a party member's kill gives the party the goblin's experience", "[combat][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    Fight fight;
+    std::string why;
+    if (!SetUpFight(fight, why)) {
+        if (why.find("CHR") != std::string::npos) {
+            SKIP("[iwd2r-skip] " + why);
+        }
+        FAIL(why);
+    }
+    CGameSprite* pCharacter = fight.pCharacter;
+    CGameSprite* pGoblin = fight.pGoblin;
+    REQUIRE(pGoblin->GetAIType().m_nEnemyAlly > CAIObjectType::EA_EVILCUTOFF);
+    REQUIRE(pCharacter->GetAIType().m_nEnemyAlly <= CAIObjectType::EA_GOODCUTOFF);
+
+    pCharacter->m_baseStats.m_morale = 10;
+    ClearMessages();
+    CAITrigger killed(CAITRIGGER_KILLED, pGoblin->GetAIType(), 0);
+    killed.m_triggerCause.m_nInstance = pGoblin->GetId();
+    killed.m_specificID = pGoblin->m_baseStats.m_xpValue;
+    pCharacter->SetTrigger(killed);
+    pCharacter->ApplyTriggers();
+    CHECK(pCharacter->m_baseStats.m_morale == 13);
+
+    // One XP effect (104) for the one party member, the total kept in the
+    // goblin's derived stats.
+    LONG nGiven = pGoblin->m_derivedStats.m_nXPValue;
+    CHECK(nGiven > 0);
+    INT nXPMessages = 0;
+    CMessageHandler& handler = g_pBaldurChitin->m_cMessageHandler;
+    POSITION pos = handler.m_messageList.GetHeadPosition();
+    while (pos != NULL) {
+        CMessageAddEffect* pMessage = dynamic_cast<CMessageAddEffect*>(handler.m_messageList.GetNext(pos));
+        if (pMessage != NULL && pMessage->m_effect->m_effectID == 104) {
+            nXPMessages++;
+            CHECK(pMessage->GetTarget() == pCharacter->GetId());
+            CHECK(pMessage->m_effect->m_effectAmount == nGiven);
+        }
+    }
+    CHECK(nXPMessages == 1);
+
+    // Read once: a second pass changes nothing.
+    ClearMessages();
+    pCharacter->ApplyTriggers();
+    CHECK(pCharacter->m_baseStats.m_morale == 13);
+    CHECK(handler.m_messageList.IsEmpty());
+
+    // HITBY: from full hit points to below half, morale drops by 2.
+    const SHORT nMax = pCharacter->m_derivedStats.m_nMaxHitPoints;
+    REQUIRE(nMax >= 4);
+    const SHORT nHitPoints = pCharacter->m_baseStats.m_hitPoints;
+    pCharacter->field_7110 = nMax;
+    pCharacter->m_baseStats.m_hitPoints = static_cast<SHORT>((nMax - 1) / 2);
+    if (pCharacter->m_baseStats.m_hitPoints * 100 / nMax < 25) {
+        pCharacter->m_baseStats.m_hitPoints = static_cast<SHORT>(nMax * 40 / 100);
+    }
+    INFO("hit points " << pCharacter->m_baseStats.m_hitPoints << " of " << nMax);
+    REQUIRE(pCharacter->m_baseStats.m_hitPoints * 100 / nMax < 50);
+    REQUIRE(pCharacter->m_baseStats.m_hitPoints * 100 / nMax >= 25);
+    CAITrigger hit(CAITRIGGER_HITBY, pGoblin->GetAIType(), 0);
+    pCharacter->SetTrigger(hit);
+    pCharacter->ApplyTriggers();
+    CHECK(pCharacter->m_baseStats.m_morale == 11);
+    CHECK(pCharacter->field_7110 == pCharacter->m_baseStats.m_hitPoints);
+    pCharacter->m_baseStats.m_hitPoints = nHitPoints;
+    ClearMessages();
+}
+
+// CGameSprite::HandlePersistantEffects (0x733200), which ProcessEffectList
+// runs while the world timer is active (0x72FBA7-0x72FBC3): each persistent
+// effect's AIUpdate, and the finished ones removed. A colour pulse of period
+// 3 (as Magic Missile's glow on its target) takes its first tick, goes on
+// at the second (counter 2 < 3) and ends at the third (counter 3, compared
+// as incremented at 0x4C1777; ours ended a tick early), clearing the colour
+// effects and setting field_562C so the effect list's saving throws are
+// rolled again (first_fight's dead goblin at frame 5511).
+TEST_CASE("combat: a colour pulse runs its period and asks for the effect list again", "[combat][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    Fight fight;
+    std::string why;
+    if (!SetUpFight(fight, why)) {
+        if (why.find("CHR") != std::string::npos) {
+            SKIP("[iwd2r-skip] " + why);
+        }
+        FAIL(why);
+    }
+    CGameSprite* pGoblin = fight.pGoblin;
+    pGoblin->m_persistantEffects.RemoveAll();
+
+    CPersistantEffectColorEffect* pPulse = new CPersistantEffectColorEffect();
+    pPulse->m_effectFinalRed = 200;
+    pPulse->m_effectFinalGreen = 100;
+    pPulse->m_effectFinalBlue = 50;
+    pPulse->m_effectDegreeRed = 0;
+    pPulse->m_effectDegreeGreen = 0;
+    pPulse->m_effectDegreeBlue = 0;
+    pPulse->m_undo = TRUE;
+    pPulse->m_colorEffect = 1;
+    pPulse->m_period = 3;
+    pGoblin->m_persistantEffects.AddTail(pPulse);
+    pGoblin->field_562C = 0;
+
+    CHECK(pGoblin->HandlePersistantEffects(1) == TRUE);
+    REQUIRE(pGoblin->m_persistantEffects.GetCount() == 1);
+    CHECK(pPulse->m_counter == 1);
+    CHECK(pPulse->m_effectDegreeRed == 200 / 3);
+    CHECK(pGoblin->HandlePersistantEffects(1) == TRUE);
+    REQUIRE(pGoblin->m_persistantEffects.GetCount() == 1);
+    CHECK(pPulse->m_counter == 2);
+    CHECK(pPulse->m_effectDegreeRed == 2 * (200 / 3));
+    CHECK(pGoblin->field_562C == 0);
+
+    CHECK(pGoblin->HandlePersistantEffects(1) == TRUE);
+    CHECK(pGoblin->m_persistantEffects.IsEmpty());
+    CHECK(pGoblin->field_562C == 1);
+    ClearMessages();
+}
+
+// CGameAnimationTypeMonsterIcewind::SetSequence (0x6E7DF0), the goblin's
+// animation, which takes the sprite's sequence numbers: DIE (5) takes the
+// DE cells and draws no frame (its jump table entry, 0x6E7F0F, ends at
+// 0x6E80DB; ours fell into HEAD_TURN's case, which draws a random first
+// frame on the SD cells: first_fight's Magic Missile kill drew once more
+// than the original at frame 5450), HEAD_TURN (6) after it draws one, and
+// SLEEP (17) takes the SL cells (0x6E7F57).
+TEST_CASE("combat: an Icewind monster dies on its DE cells without a frame draw", "[combat][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    Fight fight;
+    std::string why;
+    if (!SetUpFight(fight, why)) {
+        if (why.find("CHR") != std::string::npos) {
+            SKIP("[iwd2r-skip] " + why);
+        }
+        FAIL(why);
+    }
+    CGameAnimationTypeMonsterIcewind* pAnimation = dynamic_cast<CGameAnimationTypeMonsterIcewind*>(fight.pGoblin->m_animation.m_animation);
+    REQUIRE(pAnimation != NULL);
+
+    srand(1);
+    CHECK(pAnimation->SetSequence(5) == 5);
+    CHECK(pAnimation->m_currentVidCellBase == &pAnimation->m_deVidCellBase);
+    CHECK(pAnimation->m_currentVidCellExtend == &pAnimation->m_deVidCellExtend);
+    CHECK(iwd2r_rand_state() == 1);
+
+    CHECK(pAnimation->SetSequence(6) == 6);
+    CHECK(pAnimation->m_currentVidCellBase == &pAnimation->m_sdVidCellBase);
+    CHECK(iwd2r_rand_state() == 1u * 214013u + 2531011u);
+
+    srand(1);
+    CHECK(pAnimation->SetSequence(17) == 17);
+    CHECK(pAnimation->m_currentVidCellBase == &pAnimation->m_slVidCellBase);
+    CHECK(pAnimation->m_currentVidCellExtend == &pAnimation->m_slVidCellExtend);
+    CHECK(iwd2r_rand_state() == 1);
+    ClearMessages();
 }

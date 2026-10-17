@@ -2,6 +2,7 @@
 address: 0x5EBDD0
 name: FUN_005ebdd0
 exemption: "sets a known-spell button's spell and icon; UI only"
+kind: read-only
 ghidra_version: 12.1.4
 ---
 

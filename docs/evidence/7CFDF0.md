@@ -2,6 +2,7 @@
 address: 0x7CFDF0
 name: CVidCell::Blt8To32
 oracle_case: vid/cell_blt8to32_point
+kind: oracle
 ghidra_version: 12.1.4
 ---
 

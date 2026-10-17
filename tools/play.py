@@ -17,18 +17,19 @@ which move up to scenarios/ when they pass.
 Windows runs (the default) copy the working tree (tracked files plus modified
 and untracked non-ignored ones) into a persistent checkout, build it there
 with MSVC, and launch the exe. Each worktree has its own checkout:
-C:\\Users\\thier\\iwd2r-build for the `first` worktree,
-C:\\Users\\thier\\iwd2r-build-<worktree folder name> for any other, or
-$IWD2R_WIN_CHECKOUT (a WSL path) when set. --linux builds and runs
+%USERPROFILE%\\iwd2r-build for the `first` worktree,
+%USERPROFILE%\\iwd2r-build-<worktree folder name> for any other, or
+$IWD2R_WIN_CHECKOUT (a WSL path) when set. %USERPROFILE% is the folder
+tools/winhome.py resolves ($IWD2R_WIN_HOME, default /mnt/c/Users/<you>). --linux builds and runs
 build/linux-gcc instead.
 
 Windows Sandbox runs one sandbox at a time, so every --vm windows scenario
-holds C:\\Users\\thier\\iwd2r-vm\\sandbox.lock (tools/filelock.py) while it
+holds %USERPROFILE%\\iwd2r-vm\\sandbox.lock (tools/filelock.py) while it
 prepares the shared game cache and runs; another worktree's run waits.
 
 The game data is --data, else IWD2_DATA, else a vanilla copy: for Linux runs
 ${IWD2R_HOME:-~/.local/share/iwd2r}/game (as tools/gates.sh), for Windows runs
-(the host build and --vm windows) C:\\Users\\thier\\iwd2r-oracle\\game, the
+(the host build and --vm windows) %USERPROFILE%\\iwd2r-oracle\\game, the
 verified copy `oracle.py vanilla` builds. When the copy is missing the run
 stops and says how to make it; the IWD2EE install is never the default.
 
@@ -72,6 +73,7 @@ import dataview  # noqa: E402
 import filelock  # noqa: E402
 import oracle  # noqa: E402
 import realinput  # noqa: E402
+import winhome  # noqa: E402
 import winsandbox  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -83,7 +85,7 @@ WINDOWS_DATA = oracle.GAME_DIR
 LINUX_COPY_HINT = ('rsync -a --exclude temp --exclude cache --exclude '
                    'tempsave --exclude mpsave --exclude ScrnShot '
                    + oracle.GAME_DIR + '/ ~/.local/share/iwd2r/game/')
-WIN_BUILD_BASE = '/mnt/c/Users/thier/iwd2r-build'
+WIN_BUILD_BASE = winhome.WIN_HOME + '/iwd2r-build'
 
 
 def win_checkout(root, env):

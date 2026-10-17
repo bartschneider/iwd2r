@@ -17,8 +17,8 @@ compares the two at run time or a reason why none is needed.
    A name shared by several functions (overloads) lists their addresses;
    run the command again with one of them. An existing file is kept unless
    `--force` is given.
-3. Fill in `oracle_case` (or replace it with `exemption`) and the Notes.
-   Leave the generated decompilation as Ghidra wrote it.
+3. Fill in `oracle_case` (or replace it with `exemption`), the `kind` and the
+   Notes. Leave the generated decompilation as Ghidra wrote it.
 4. Check before pushing:
 
        python3 -I tools/check_evidence.py --base origin/main
@@ -33,6 +33,7 @@ The file name is the address in upper-case hex without `0x`:
     address: 0x5845D0
     name: IcewindMisc::Roll
     oracle_case: rand/roll
+    kind: oracle
     ghidra_version: 12.1.4
     ---
 
@@ -41,6 +42,10 @@ The file name is the address in upper-case hex without `0x`:
 - `oracle_case`: the oracle case that compares this function with the
   original, or instead
 - `exemption`: a short reason no case is needed, such as `"pure data"`.
+- `kind`: how the function is evidenced — `oracle` (its `oracle_case` runs in
+  the gate), `replay` (a replay scenario or compare run covers it) or
+  `read-only` (nothing runs it; the exemption stands on its own). The checker
+  reports counts per kind but does not require one.
 - `ghidra_version`: the Ghidra that produced the decompilation
   (`tools/ghidra/versions.json`).
 

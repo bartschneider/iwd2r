@@ -2,6 +2,7 @@
 address: 0x5EBFA0
 name: CUIControlButtonCharacter5EBC60::OnLButtonClick
 exemption: "known-spell button click in the level-up; UI state on a sprite"
+kind: read-only
 ghidra_version: 12.1.4
 ---
 

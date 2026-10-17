@@ -12,20 +12,31 @@
 #include "CGameContainer.h"
 #include "CGameObjectArray.h"
 #include "CGameSprite.h"
+#include "CGameTrigger.h"
 #include "CInfButtonArray.h"
 #include "CInfGame.h"
+#include "CInfinity.h"
 #include "CItem.h"
+#include "CMessage.h"
+#include "CParticle.h"
+#include "CPathSearch.h"
 #include "CRuleTables.h"
 #include "CScreenCharacter.h"
 #include "CScreenCreateChar.h"
 #include "CScreenInventory.h"
+#include "CScreenJournal.h"
+#include "CScreenMap.h"
+#include "CScreenStore.h"
 #include "CScreenWorld.h"
+#include "CScreenWorldMap.h"
 #include "CTimerWorld.h"
 #include "CUIControlTextDisplay.h"
 #include "CUIManager.h"
 #include "CUIPanel.h"
 #include "CUtil.h"
 #include "CWarp.h"
+#include "CWeather.h"
+#include "Icewind586B70.h"
 #include "ScreenLayout.h"
 #include "compat/msvc_rand.h"
 #include "data_view.h"
@@ -44,6 +55,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iterator>
 #include <memory>
 #include <string>
@@ -1427,3 +1439,1032 @@ TEST_CASE("character screen: the text character sheet up to the original's asser
 }
 
 #endif
+
+// The keymap loops of four screens' OnKeyDown (the journal, the store, the
+// area map and the world map): a key at no keymap index 0 walks the whole
+// keymap and returns. Ours never moved its index, so such a key hung the
+// game (the original increments it).
+namespace {
+
+// Runs `press` on a thread of its own and says whether it returned within
+// five seconds. A hung press is left spinning; the case fails.
+bool ReturnsInTime(std::function<void()> press)
+{
+    auto done = std::make_shared<std::atomic<bool>>(false);
+    std::thread worker([press, done] {
+        press();
+        done->store(true);
+    });
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!done->load() && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    if (done->load()) {
+        worker.join();
+        return true;
+    }
+    worker.detach();
+    return false;
+}
+
+// VK_F13, in no raw key case of the four screens, taken out of the keymap:
+// every keymap entry is tested and none matches.
+const BYTE KEY_UNBOUND = 0x7C;
+
+void UnbindKey(CInfGame* pGame, BYTE nKey)
+{
+    for (int n = 0; n < CINFGAME_KEYMAP_SIZE; n++) {
+        if (pGame->m_pKeymap[n] == nKey) {
+            pGame->m_pKeymap[n] = 0;
+        }
+    }
+}
+
+} // namespace
+
+TEST_CASE("keys: an unbound key returns from the journal and the store and both maps", "[uimisc][keys][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    BYTE savedKeys[CINFGAME_KEYMAP_SIZE];
+    memcpy(savedKeys, pGame->m_pKeymap, sizeof(savedKeys));
+    UnbindKey(pGame, KEY_UNBOUND);
+
+    SECTION("journal")
+    {
+        CScreenJournal* pJournal = g_pBaldurChitin->m_pEngineJournal;
+        pJournal->m_bCtrlKeyDown = FALSE;
+        pJournal->m_pVirtualKeysFlags[0] = KEY_UNBOUND;
+        CHECK(ReturnsInTime([pJournal] { pJournal->OnKeyDown(1); }));
+    }
+
+    SECTION("store")
+    {
+        CScreenStore* pStore = g_pBaldurChitin->m_pEngineStore;
+        pStore->m_bCtrlKeyDown = FALSE;
+        pStore->m_pVirtualKeysFlags[0] = KEY_UNBOUND;
+        CHECK(ReturnsInTime([pStore] { pStore->OnKeyDown(1); }));
+    }
+
+    SECTION("area map")
+    {
+        CScreenMap* pMap = g_pBaldurChitin->m_pEngineMap;
+        pMap->m_bCtrlKeyDown = FALSE;
+        pMap->m_pVirtualKeysFlags[0] = KEY_UNBOUND;
+        CHECK(ReturnsInTime([pMap] { pMap->OnKeyDown(1); }));
+    }
+
+    SECTION("world map")
+    {
+        CScreenWorldMap* pWorldMap = g_pBaldurChitin->m_pEngineWorldMap;
+        pWorldMap->m_bCtrlKeyDown = FALSE;
+        pWorldMap->m_pVirtualKeysFlags[0] = KEY_UNBOUND;
+        CHECK(ReturnsInTime([pWorldMap] { pWorldMap->OnKeyDown(1); }));
+    }
+
+    memcpy(pGame->m_pKeymap, savedKeys, sizeof(savedKeys));
+}
+
+// Area travel (ui-misc round 4): a click on a travel region or at an area's
+// edge, the actions it queues, and the two travel actions (LeaveAreaName
+// 0x74CDB0 through a region, LeaveArea 0x74C0D0 to the world map), on a new
+// game's party member in AR1000.
+namespace {
+
+// The region of `pArea` whose script name is `name`, or NULL.
+CGameTrigger* AreaRegion(CGameArea* pArea, const char* name)
+{
+    CGameObjectArray* pObjects = g_pBaldurChitin->GetObjectGame()->GetObjectArray();
+    CTypedPtrList<CPtrList, int*>* lists[] = { &pArea->m_lVertSort, &pArea->m_lVertSortBack };
+    for (CTypedPtrList<CPtrList, int*>* list : lists) {
+        POSITION pos = list->GetHeadPosition();
+        while (pos != NULL) {
+            LONG id = static_cast<LONG>(reinterpret_cast<INT_PTR>(list->GetNext(pos)));
+            CGameObject* pObject;
+            if (pObjects->GetShare(id, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) == CGameObjectArray::SUCCESS) {
+                pObjects->ReleaseShare(id, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+                if (pObject->GetObjectType() == CGameObject::TYPE_TRIGGER) {
+                    CGameTrigger* pTrigger = static_cast<CGameTrigger*>(pObject);
+                    if (_strnicmp(pTrigger->m_scriptName, name, SCRIPTNAME_SIZE) == 0) {
+                        return pTrigger;
+                    }
+                }
+            }
+        }
+    }
+    return NULL;
+}
+
+// A single-player game as the game runs one: a host session of the null
+// service provider with its one local player (CScreenConnection's new game
+// calls HostNewSession and CreatePlayer, which set the connection and host
+// flags and the player id). The test engine starts with no provider (-1)
+// and no session; the session is closed when the case ends.
+class HostSession {
+public:
+    HostSession()
+        : m_nServiceProvider(g_pChitin->cNetwork.m_nServiceProvider)
+        , m_bPlayerShutdown(g_pBaldurChitin->m_cBaldurMessage.m_bPlayerShutdown)
+        , m_bOpened(false)
+    {
+        CNetwork& network = g_pChitin->cNetwork;
+        if (!network.m_bConnectionEstablished) {
+            if (!network.m_bServiceProviderEnumerated) {
+                network.EnumerateServiceProviders();
+            }
+            network.SelectServiceProvider(CNetwork::SERV_PROV_NULL);
+            network.InitializeConnectionToServiceProvider(TRUE);
+            network.m_sSessionNameToMake = "Session";
+            network.m_bSessionNameToMake = TRUE;
+            network.m_sLocalPlayerName = "Player";
+            network.m_bPlayerNameToMake = TRUE;
+            INT nError = -1;
+            m_bOpened = network.HostNewSession() == TRUE && network.CreatePlayer(nError) == TRUE;
+        }
+        network.m_nServiceProvider = CNetwork::SERV_PROV_NULL;
+    }
+    ~HostSession()
+    {
+        if (m_bOpened) {
+            g_pChitin->cNetwork.CloseSession(TRUE);
+            g_pBaldurChitin->m_cBaldurMessage.m_bPlayerShutdown = m_bPlayerShutdown;
+        }
+        g_pChitin->cNetwork.m_nServiceProvider = m_nServiceProvider;
+    }
+    HostSession(const HostSession&) = delete;
+    HostSession& operator=(const HostSession&) = delete;
+
+    bool Open() const
+    {
+        return g_pChitin->cNetwork.m_bConnectionEstablished == TRUE && g_pChitin->cNetwork.m_bIsHost == TRUE;
+    }
+
+private:
+    INT m_nServiceProvider;
+    BOOLEAN m_bPlayerShutdown;
+    bool m_bOpened;
+};
+
+// The party member selected alone, its action queue empty, in a single
+// player game: the null service provider, which the connection screen
+// selects (the test engine starts with none, -1, which the travel actions
+// take for a multiplayer game).
+void SelectAlone(CGameSprite* pSprite)
+{
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    g_pChitin->cNetwork.m_nServiceProvider = CNetwork::SERV_PROV_NULL;
+    pGame->UnselectAll();
+    pGame->SelectCharacter(pSprite->GetId(), FALSE);
+    pSprite->ClearActions(FALSE);
+    pSprite->m_queuedActions.RemoveAll();
+}
+
+// The sprite moved to `pt` in its area (out of the area and back in).
+void PutAt(CGameSprite* pSprite, const CPoint& pt)
+{
+    CGameArea* pArea = pSprite->GetArea();
+    pSprite->RemoveFromArea();
+    pSprite->m_pos = pt;
+    pSprite->AddToArea(pArea, pt, 0, CGameObject::LIST_FRONT);
+}
+
+int CountActions(CGameSprite* pSprite, SHORT actionID)
+{
+    int count = 0;
+    POSITION pos = pSprite->m_queuedActions.GetHeadPosition();
+    while (pos != NULL) {
+        if (pSprite->m_queuedActions.GetNext(pos)->m_actionID == actionID) {
+            count++;
+        }
+    }
+    return count;
+}
+
+// LeaveAreaName (93) or LeaveArea (91) run as the AI update runs an action:
+// with the sprite denied.
+SHORT RunTravelAction(CGameSprite* pSprite, const CAIAction& action)
+{
+    CGameObjectArray* pObjects = g_pBaldurChitin->GetObjectGame()->GetObjectArray();
+    CGameObject* pObject;
+    REQUIRE(pObjects->GetDeny(pSprite->GetId(), CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) == CGameObjectArray::SUCCESS);
+    pSprite->m_curAction = action;
+    SHORT result = action.m_actionID == CAIAction::LEAVEAREA ? pSprite->LeaveArea() : pSprite->LeaveAreaName();
+    pObjects->ReleaseDeny(pSprite->GetId(), CGameObjectArray::THREAD_ASYNCH, INFINITE);
+    return result;
+}
+
+const SHORT LEAVEAREANAME = 93;
+
+} // namespace
+
+// CGameArea::Unmarshal (0x472DE0) keeps each entry point of the area file in
+// m_entryPoints (CPtrList::AddTail at 0x473F9B), where GetEntryPoint finds
+// the travel's destination.
+TEST_CASE("travel: a loaded area's entry points are found by name", "[uimisc][travel][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    CGameSprite* pSprite = PartyMember();
+    if (pSprite == NULL) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    HostSession session;
+    REQUIRE(session.Open());
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CGameArea* pStart = pSprite->GetArea();
+    REQUIRE(pStart != NULL);
+
+    CPoint pt;
+    SHORT facing = -1;
+    // AR1000's way back from the house behind Door5.
+    REQUIRE(pStart->GetEntryPoint(CString("FR1005"), pt, facing));
+    CHECK(pt == CPoint(809, 1053));
+    CHECK(facing == 0);
+    CHECK_FALSE(pStart->GetEntryPoint(CString("NoSuchEntry"), pt, facing));
+
+    // The house's entrance from AR1000 (AR1005.ARE: 165,224, facing 8).
+    CGameArea* pHouse = pGame->LoadArea(CString("AR1005"), 0, FALSE, FALSE);
+    REQUIRE(pHouse != NULL);
+    REQUIRE(pHouse->GetEntryPoint(CString("FR1000"), pt, facing));
+    CHECK(pt == CPoint(165, 224));
+    CHECK(facing == 8);
+    // Names are compared without regard to case.
+    CHECK(pHouse->GetEntryPoint(CString("fr1000"), pt, facing));
+}
+
+// CGameArea::OnActionButtonClickTravel (0x475870): a click at the edge gives
+// the group LeaveArea (91) on the point with the edge's direction and area,
+// clearing their actions, then MoveToPoint (23) to it without clearing
+// (0x475C69); AddAction puts each at the head and GetNextAction takes the
+// head, so the walk runs first and one LeaveArea follows it.
+TEST_CASE("travel: a click at the area's edge queues the walk before one LeaveArea", "[uimisc][travel][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    CGameSprite* pSprite = PartyMember();
+    if (pSprite == NULL) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    HostSession session;
+    REQUIRE(session.Open());
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CGameArea* pArea = pSprite->GetArea();
+    REQUIRE(pArea != NULL);
+    SelectAlone(pSprite);
+
+    // The west edge: the first search squares.
+    const CPoint pt(CPathSearch::GRID_SQUARE_SIZEX / 2, 600);
+    pArea->OnActionButtonClickTravel(pt);
+    g_pBaldurChitin->GetMessageHandler()->AsynchronousUpdate();
+
+    CHECK(pGame->m_lastClick == CPoint(-1, -1));
+    REQUIRE(pSprite->m_queuedActions.GetCount() == 2);
+    CHECK(CountActions(pSprite, CAIAction::LEAVEAREA) == 1);
+
+    const CAIAction* pMove = pSprite->m_queuedActions.GetHead();
+    CHECK(pMove->m_actionID == CAIAction::MOVETOPOINT);
+    CHECK(pMove->m_dest == pt);
+    CHECK(pMove->m_specificID == 0);
+    CHECK(pMove->m_specificID2 == -1);
+
+    const CAIAction* pLeave = pSprite->m_queuedActions.GetTail();
+    CHECK(pLeave->m_actionID == CAIAction::LEAVEAREA);
+    CHECK(pLeave->m_dest == pt);
+    CHECK(pLeave->m_specificID == static_cast<LONG>(4 | ((pArea->m_header.m_flagsEdgeWest & 0x1) << 16)));
+    CHECK(std::string(static_cast<LPCSTR>(pLeave->m_string1))
+        == std::string(static_cast<LPCSTR>(CString(pArea->m_header.m_areaEdgeWest))));
+
+    pSprite->ClearActions(FALSE);
+    pSprite->m_queuedActions.RemoveAll();
+}
+
+// CGameTrigger::OnActionButton (0x4CED10): a click on a travel region tells
+// the region it was clicked (CLICKED, 112) and gives the group LeaveAreaName
+// (93) on the region, clearing their actions, then MoveToPoint (23) to its
+// position (its alternate point with the flag 0x200, as To1005 has), and
+// the region's id as the group's trigger id.
+TEST_CASE("travel: a click on a travel region queues the walk before LeaveAreaName", "[uimisc][travel][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    CGameSprite* pSprite = PartyMember();
+    if (pSprite == NULL) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    HostSession session;
+    REQUIRE(session.Open());
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CGameArea* pArea = pSprite->GetArea();
+    REQUIRE(pArea != NULL);
+    CGameTrigger* pRegion = AreaRegion(pArea, "To1005");
+    REQUIRE(pRegion != NULL);
+    REQUIRE(pRegion->m_triggerType == 2);
+    REQUIRE((pRegion->m_dwFlags & 0x200) != 0);
+    SelectAlone(pSprite);
+    pRegion->m_pendingTriggers.RemoveAll();
+    pGame->m_nState = 0;
+
+    pRegion->OnActionButton(pRegion->m_pos);
+    g_pBaldurChitin->GetMessageHandler()->AsynchronousUpdate();
+
+    CHECK(pSprite->m_triggerId == pRegion->GetId());
+    REQUIRE(pSprite->m_queuedActions.GetCount() == 2);
+    CHECK(CountActions(pSprite, LEAVEAREANAME) == 1);
+
+    const CAIAction* pMove = pSprite->m_queuedActions.GetHead();
+    CHECK(pMove->m_actionID == CAIAction::MOVETOPOINT);
+    CHECK(pMove->m_dest == pRegion->field_628);
+    CHECK(pMove->m_specificID2 == -1);
+
+    const CAIAction* pLeave = pSprite->m_queuedActions.GetTail();
+    CHECK(pLeave->m_actionID == LEAVEAREANAME);
+    CHECK(pLeave->m_specificID == pRegion->GetId());
+
+    bool bClicked = false;
+    POSITION pos = pRegion->m_pendingTriggers.GetHeadPosition();
+    while (pos != NULL) {
+        if (pRegion->m_pendingTriggers.GetNext(pos)->m_triggerID == CAITRIGGER_CLICKED) {
+            bClicked = true;
+        }
+    }
+    CHECK(bClicked);
+
+    pSprite->ClearActions(FALSE);
+    pSprite->m_queuedActions.RemoveAll();
+    pSprite->m_triggerId = CGameObjectArray::INVALID_INDEX;
+}
+
+// The first region of `pArea` of the type `nType` that `accept` takes.
+template <typename F>
+CGameTrigger* AreaRegionOfType(CGameArea* pArea, WORD nType, F accept)
+{
+    CGameObjectArray* pObjects = g_pBaldurChitin->GetObjectGame()->GetObjectArray();
+    CTypedPtrList<CPtrList, int*>* lists[] = { &pArea->m_lVertSort, &pArea->m_lVertSortBack };
+    for (CTypedPtrList<CPtrList, int*>* list : lists) {
+        POSITION pos = list->GetHeadPosition();
+        while (pos != NULL) {
+            LONG id = static_cast<LONG>(reinterpret_cast<INT_PTR>(list->GetNext(pos)));
+            CGameObject* pObject;
+            if (pObjects->GetShare(id, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) == CGameObjectArray::SUCCESS) {
+                pObjects->ReleaseShare(id, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+                if (pObject->GetObjectType() == CGameObject::TYPE_TRIGGER) {
+                    CGameTrigger* pTrigger = static_cast<CGameTrigger*>(pObject);
+                    if (pTrigger->m_triggerType == nType && accept(pTrigger)) {
+                        return pTrigger;
+                    }
+                }
+            }
+        }
+    }
+    return NULL;
+}
+
+// CGameTrigger::OnActionButton (0x4CED10), an info region (type 1): the
+// click floats the region's text over it (FloatText 10, 5: a text object in
+// field_1C) and queues nothing.
+TEST_CASE("travel: a click on an info region floats its text", "[uimisc][travel][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    CGameSprite* pSprite = PartyMember();
+    if (pSprite == NULL) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    HostSession session;
+    REQUIRE(session.Open());
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CGameArea* pArea = pSprite->GetArea();
+    REQUIRE(pArea != NULL);
+    REQUIRE(pGame->GetVisibleArea() == pArea);
+    CGameTrigger* pInfo = AreaRegionOfType(pArea, 1, [](CGameTrigger* p) {
+        return p->m_description != static_cast<STRREF>(-1) && p->m_description != 0;
+    });
+    REQUIRE(pInfo != NULL);
+    SelectAlone(pSprite);
+    pGame->m_nState = 0;
+    pInfo->field_1C = 0;
+
+    // The floating text sizes itself by the current video mode's FX size
+    // (character generation's, which StartEngine sets up, whichever engine
+    // another case left active); the test engine never activates its video
+    // mode, so it has no FX surface, and the 3D flag makes GetFXSize answer
+    // with the size instead.
+    CWarp* pActive = g_pChitin->pActiveEngine;
+    g_pChitin->pActiveEngine = g_pBaldurChitin->m_pEngineCreateChar;
+    const BOOL bIs3dAccelerated = g_pChitin->cVideo.m_bIs3dAccelerated;
+    g_pChitin->cVideo.m_bIs3dAccelerated = TRUE;
+    pInfo->OnActionButton(pInfo->m_pos);
+    g_pChitin->cVideo.m_bIs3dAccelerated = bIs3dAccelerated;
+    g_pChitin->pActiveEngine = pActive;
+    g_pBaldurChitin->GetMessageHandler()->AsynchronousUpdate();
+
+    CHECK(pInfo->field_1C != 0);
+    CHECK(pSprite->m_queuedActions.GetCount() == 0);
+    CHECK(pGame->m_lastClick == CPoint(-1, -1));
+}
+
+// CGameTrigger::OnActionButton (0x4CED10), state 2 with the disarm icon
+// (0x24) on an active, detected trap: the group is sent to RemoveTraps (28)
+// on it and the state and the selected button go back (0, 100), when the
+// selected character has ranks in Disable Device (the base skill 5); without
+// them nothing happens.
+TEST_CASE("travel: the disarm cursor on a detected trap sends the group to remove it", "[uimisc][travel][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    CGameSprite* pSprite = PartyMember();
+    if (pSprite == NULL) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    HostSession session;
+    REQUIRE(session.Open());
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CGameArea* pArea = pSprite->GetArea();
+    REQUIRE(pArea != NULL);
+    CGameTrigger* pTrap = AreaRegionOfType(pArea, 0, [](CGameTrigger*) {
+        return true;
+    });
+    REQUIRE(pTrap != NULL);
+    SelectAlone(pSprite);
+
+    const WORD nActivated = pTrap->m_trapActivated;
+    const WORD nDetected = pTrap->m_trapDetected;
+    const BYTE nSkill = pSprite->m_baseStats.m_skills[5];
+    pTrap->m_trapActivated = 1;
+    pTrap->m_trapDetected = 1;
+
+    // No Disable Device: nothing.
+    pSprite->m_baseStats.m_skills[5] = 0;
+    pGame->m_nState = 2;
+    pGame->m_iconIndex = 0x24;
+    pTrap->OnActionButton(pTrap->m_pos);
+    g_pBaldurChitin->GetMessageHandler()->AsynchronousUpdate();
+    CHECK(pSprite->m_queuedActions.GetCount() == 0);
+    CHECK(pGame->m_nState == 2);
+
+    // With ranks: RemoveTraps on the trap.
+    pSprite->m_baseStats.m_skills[5] = 4;
+    pTrap->OnActionButton(pTrap->m_pos);
+    g_pBaldurChitin->GetMessageHandler()->AsynchronousUpdate();
+    REQUIRE(pSprite->m_queuedActions.GetCount() == 1);
+    CHECK(pSprite->m_queuedActions.GetHead()->m_actionID == 28);
+    CHECK(pGame->m_nState == 0);
+    CHECK(pGame->m_cButtonArray.m_nSelectedButton == 100);
+
+    pSprite->m_baseStats.m_skills[5] = nSkill;
+    pTrap->m_trapActivated = nActivated;
+    pTrap->m_trapDetected = nDetected;
+    pGame->m_iconIndex = 0xFF;
+    pGame->m_nState = 0;
+    pSprite->ClearActions(FALSE);
+    pSprite->m_queuedActions.RemoveAll();
+}
+
+// LeaveAreaName (0x74CDB0) stops when the member is not by the region: done
+// beyond the travel distance (0x10000 by dy*dy*16/9 + dx*dx), an error
+// within it but off the region (RANGE_TRIGGER), an error for a region that
+// is gone; nothing is loaded.
+TEST_CASE("travel: LeaveAreaName waits until the member stands on the region", "[uimisc][travel][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    CGameSprite* pSprite = PartyMember();
+    if (pSprite == NULL) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    HostSession session;
+    REQUIRE(session.Open());
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CGameArea* pArea = pSprite->GetArea();
+    REQUIRE(pArea != NULL);
+    CGameTrigger* pRegion = AreaRegion(pArea, "To1005");
+    REQUIRE(pRegion != NULL);
+    const CPoint ptRegion = pRegion->GetPos();
+    const CPoint ptStart = pSprite->GetPos();
+    SelectAlone(pSprite);
+
+    int nAreas = 0;
+    for (int n = 0; n < CINFGAME_MAX_AREAS; n++) {
+        nAreas += pGame->m_gameAreas[n] != NULL;
+    }
+
+    const CAIAction leave(LEAVEAREANAME, CAIObjectType(), pRegion->GetId(), 0, 0);
+
+    // 300 pixels away: 90000 > 0x10000.
+    PutAt(pSprite, CPoint(ptRegion.x + 300, ptRegion.y));
+    CHECK(RunTravelAction(pSprite, leave) == CGameAIBase::ACTION_DONE);
+    CHECK(pSprite->GetArea() == pArea);
+
+    // 100 pixels away: 10000 is within 0x10000 but past RANGE_TRIGGER (4096).
+    PutAt(pSprite, CPoint(ptRegion.x + 100, ptRegion.y));
+    CHECK(RunTravelAction(pSprite, leave) == CGameAIBase::ACTION_ERROR);
+    CHECK(pSprite->GetArea() == pArea);
+
+    // No such object.
+    const CAIAction nowhere(LEAVEAREANAME, CAIObjectType(), CGameObjectArray::INVALID_INDEX, 0, 0);
+    CHECK(RunTravelAction(pSprite, nowhere) == CGameAIBase::ACTION_ERROR);
+
+    int nAreasAfter = 0;
+    for (int n = 0; n < CINFGAME_MAX_AREAS; n++) {
+        nAreasAfter += pGame->m_gameAreas[n] != NULL;
+    }
+    CHECK(nAreasAfter == nAreas);
+
+    PutAt(pSprite, ptStart);
+}
+
+// LeaveAreaName (0x74CDB0) with the member on the region: the region's area
+// is loaded and the member put at its entry point (in search squares, the
+// formation's first place, the nearest open square), in the new area and
+// selected; the action is done.
+TEST_CASE("travel: LeaveAreaName on the region takes the member to the entry point", "[uimisc][travel][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    CGameSprite* pSprite = PartyMember();
+    if (pSprite == NULL) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    HostSession session;
+    REQUIRE(session.Open());
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CGameArea* pArea = pSprite->GetArea();
+    REQUIRE(pArea != NULL);
+    CGameTrigger* pRegion = AreaRegion(pArea, "To1005");
+    REQUIRE(pRegion != NULL);
+    const CPoint ptStart = pSprite->GetPos();
+    SelectAlone(pSprite);
+    PutAt(pSprite, pRegion->GetPos());
+    // The click's SetGroupTriggerId: the members that go are those with
+    // the region's id (To1005 does not need the whole party).
+    REQUIRE((pRegion->m_dwFlags & 0x4) == 0);
+    pSprite->m_triggerId = pRegion->GetId();
+    // Selecting the member in the new area activates it, which sets the
+    // channel volumes: the mixer CChitin::InitializeServices (0x790240)
+    // starts with the video.
+    g_pChitin->cSoundMixer.Initialize(&g_pChitin->cWnd, 16, g_pChitin->GetNumberSoundChannels());
+    // In a session the travel brings the world screen up (SelectEngine);
+    // the engine that was active comes back at the end without an
+    // activation.
+    CWarp* pEngine = g_pChitin->pActiveEngine;
+
+    const CAIAction leave(LEAVEAREANAME, CAIObjectType(), pRegion->GetId(), 0, 0);
+    CHECK(RunTravelAction(pSprite, leave) == CGameAIBase::ACTION_DONE);
+    g_pBaldurChitin->GetMessageHandler()->AsynchronousUpdate();
+
+    CGameArea* pHouse = pGame->GetArea(CString("AR1005"));
+    REQUIRE(pHouse != NULL);
+    CHECK(pSprite->GetArea() == pHouse);
+    // FR1000 is 165,224 (search square 10,18); the sprite stands within a
+    // few squares of it.
+    const CPoint pos = pSprite->GetPos();
+    INFO("pos " << pos.x << "," << pos.y);
+    CHECK(std::abs(pos.x - 165) <= 4 * CPathSearch::GRID_SQUARE_SIZEX);
+    CHECK(std::abs(pos.y - 224) <= 4 * CPathSearch::GRID_SQUARE_SIZEY);
+    CHECK(pSprite->m_triggerId == CGameObjectArray::INVALID_INDEX);
+    CHECK(pGame->GetGroup()->GetCount() == 1);
+    CHECK(pArea->field_436 == 1);
+
+    // Back to AR1000 for the other cases (one process may run them all).
+    pSprite->RemoveFromArea();
+    pSprite->m_pos = ptStart;
+    pSprite->AddToArea(pArea, ptStart, 0, CGameObject::LIST_FRONT);
+    pGame->UnselectAll();
+    pGame->SelectCharacter(pSprite->GetId(), FALSE);
+    CHECK(pGame->GetVisibleArea() == pArea);
+    g_pChitin->pActiveEngine = pEngine;
+    g_pChitin->cSoundMixer.CleanUp();
+}
+
+// LeaveAreaName (0x74CDB0) on a party required region (To1100, flag 0x4) in
+// a single-player game, a host session: CBaldurMessage 0x438710 answers 0
+// while the game is paused (an error, nothing loaded), else the host makes
+// the party's transition (CInfGame 0x5C4AD0) and the action is done: the
+// auto-save, AR1100 loaded and the member put by its FR1000 (249,1376) in
+// the 2 by 3 formation, the area left behind marshalled, the progress
+// screen down.
+TEST_CASE("travel: a party required region takes the party through the host's transition", "[uimisc][travel][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    CGameSprite* pSprite = PartyMember();
+    if (pSprite == NULL) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    HostSession session;
+    REQUIRE(session.Open());
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CScreenWorld* pWorld = g_pBaldurChitin->m_pEngineWorld;
+    CGameArea* pArea = pSprite->GetArea();
+    REQUIRE(pArea != NULL);
+    CGameTrigger* pRegion = AreaRegion(pArea, "To1100");
+    REQUIRE(pRegion != NULL);
+    REQUIRE((pRegion->m_dwFlags & 0x4) != 0);
+    const CPoint ptStart = pSprite->GetPos();
+    SelectAlone(pSprite);
+    pGame->m_singlePlayerPermissions.SetSinglePermission(CGamePermission::AREA_TRANSITION, TRUE);
+    PutAt(pSprite, pRegion->GetPos());
+    pSprite->m_triggerId = pRegion->GetId();
+    g_pChitin->cSoundMixer.Initialize(&g_pChitin->cWnd, 16, g_pChitin->GetNumberSoundChannels());
+    // In a session the travel brings the world screen up (SelectEngine);
+    // the engine that was active comes back at the end without an
+    // activation.
+    CWarp* pEngine = g_pChitin->pActiveEngine;
+
+    const CAIAction leave(LEAVEAREANAME, CAIObjectType(), pRegion->GetId(), 0, 0);
+
+    // Paused: refused.
+    const BOOL bPaused = pWorld->m_bPaused;
+    pWorld->m_bPaused = TRUE;
+    CHECK(RunTravelAction(pSprite, leave) == CGameAIBase::ACTION_ERROR);
+    pWorld->m_bPaused = bPaused;
+    CHECK(pGame->GetArea(CString("AR1100")) == NULL);
+    CHECK(pSprite->GetArea() == pArea);
+
+    pWorld->m_bPaused = FALSE;
+    // The save names come back at the end (the character sheet cases write
+    // into the current save's folder).
+    const CString sSaveGame = pGame->m_sSaveGame;
+    const CString sCharacterSaveName = CScreenCharacter::SAVE_NAME;
+    const BOOL bScreenGrabbed = pGame->field_50D8;
+    pGame->m_sSaveGame = "";
+    // The auto-save's screen grab (SynchronousUpdate) is taken once
+    // field_50D8 is clear; the test engine draws no frame, so it counts as
+    // taken.
+    pGame->field_50D8 = TRUE;
+    CHECK(RunTravelAction(pSprite, leave) == CGameAIBase::ACTION_DONE);
+    pWorld->m_bPaused = bPaused;
+    g_pBaldurChitin->GetMessageHandler()->AsynchronousUpdate();
+
+    CGameArea* pTargos = pGame->GetArea(CString("AR1100"));
+    REQUIRE(pTargos != NULL);
+    CHECK(pSprite->GetArea() == pTargos);
+    const CPoint pos = pSprite->GetPos();
+    INFO("pos " << pos.x << "," << pos.y);
+    CHECK(std::abs(pos.x - 249) <= 6 * CPathSearch::GRID_SQUARE_SIZEX);
+    CHECK(std::abs(pos.y - 1376) <= 6 * CPathSearch::GRID_SQUARE_SIZEY);
+    CHECK(std::string(static_cast<LPCSTR>(pGame->m_sSaveGame)) == std::string(static_cast<LPCSTR>(CInfGame::AUTO_SAVE_NAME)));
+    CHECK(pGame->m_nTravelScreenImageToUse < 5);
+    CHECK(pArea->field_436 == 1);
+    CHECK(pGame->m_bInAreaTransition == FALSE);
+    CHECK(pSprite->m_triggerId == CGameObjectArray::INVALID_INDEX);
+
+    // Back to AR1000 for the other cases.
+    pSprite->RemoveFromArea();
+    pSprite->m_pos = ptStart;
+    pSprite->AddToArea(pArea, ptStart, 0, CGameObject::LIST_FRONT);
+    pGame->UnselectAll();
+    pGame->SelectCharacter(pSprite->GetId(), FALSE);
+    CHECK(pGame->GetVisibleArea() == pArea);
+    g_pChitin->pActiveEngine = pEngine;
+    g_pChitin->cSoundMixer.CleanUp();
+    pGame->m_sSaveGame = sSaveGame;
+    CScreenCharacter::SAVE_NAME = sCharacterSaveName;
+    pGame->field_50D8 = bScreenGrabbed;
+}
+
+// LeaveArea (0x74C0D0): a member by the clicked edge point (RANGE_EDGE) with
+// the party near opens the world map for travel (state 1) in the edge's
+// direction; one further away is told to gather (an error, the walk goes
+// on); one beyond the travel distance, or without the area transition
+// permission, is done.
+TEST_CASE("travel: LeaveArea opens the world map for travel by the edge", "[uimisc][travel][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    CGameSprite* pSprite = PartyMember();
+    if (pSprite == NULL) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    HostSession session;
+    REQUIRE(session.Open());
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CScreenWorldMap* pWorldMap = g_pBaldurChitin->m_pEngineWorldMap;
+    const CPoint ptStart = pSprite->GetPos();
+    SelectAlone(pSprite);
+
+    // Without the area transition permission (InitGame gives it in a single
+    // player game): done, nothing opens.
+    pGame->m_singlePlayerPermissions.SetSinglePermission(CGamePermission::AREA_TRANSITION, FALSE);
+    CAIAction leaveDenied(CAIAction::LEAVEAREA, CString(""), ptStart, 4);
+    CHECK(RunTravelAction(pSprite, leaveDenied) == CGameAIBase::ACTION_DONE);
+    CHECK(g_pChitin->pActiveEngine != pWorldMap);
+    pGame->m_singlePlayerPermissions.SetSinglePermission(CGamePermission::AREA_TRANSITION, TRUE);
+
+    // 300 pixels away: done, nothing opens.
+    CAIAction leaveFar(CAIAction::LEAVEAREA, CString(""), CPoint(ptStart.x + 300, ptStart.y), 4);
+    CHECK(RunTravelAction(pSprite, leaveFar) == CGameAIBase::ACTION_DONE);
+    CHECK(g_pChitin->pActiveEngine != pWorldMap);
+
+    // 200 pixels away: within 0x10000 (40000) but past RANGE_EDGE (36864):
+    // an error, the world map stays shut.
+    CAIAction leaveNear(CAIAction::LEAVEAREA, CString(""), CPoint(ptStart.x + 200, ptStart.y), 4);
+    CHECK(RunTravelAction(pSprite, leaveNear) == CGameAIBase::ACTION_ERROR);
+    CHECK(g_pChitin->pActiveEngine != pWorldMap);
+
+    // At the point: the world map, for travel, westwards.
+    CWarp* pPrevious = g_pChitin->pActiveEngine;
+    CAIAction leaveAt(CAIAction::LEAVEAREA, CString(""), ptStart, 4);
+    CHECK(RunTravelAction(pSprite, leaveAt) == CGameAIBase::ACTION_DONE);
+    CHECK(g_pChitin->pActiveEngine == pWorldMap);
+    CHECK(pWorldMap->m_nEngineState == 1);
+    CHECK(pGame->GetGroup()->GetCount() == 0);
+
+    g_pChitin->SelectEngine(pPrevious);
+    pGame->SelectCharacter(pSprite->GetId(), FALSE);
+}
+
+// Icewind586B70::sub_5872C0 (0x5872C0) and sub_586DC0 (0x586DC0): a member
+// leaving unsummons what it summoned (the entries naming it as summoner):
+// the entry is cleared and the creature marked for removal. Entries of
+// others stay.
+TEST_CASE("travel: a member leaving unsummons its summons", "[uimisc][travel][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    CGameSprite* pSprite = PartyMember();
+    if (pSprite == NULL) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    CGameArea* pArea = pSprite->GetArea();
+    REQUIRE(pArea != NULL);
+
+    std::vector<BYTE> cre = FinishedCharacter();
+    REQUIRE(!cre.empty());
+    CGameSprite* pSummoned = new CGameSprite(cre.data(),
+        static_cast<LONG>(cre.size()),
+        0,
+        0,
+        -1,
+        0,
+        0,
+        INT_MAX,
+        CPoint(-1, -1),
+        0);
+    const CPoint ptSummoned(pSprite->GetPos().x + 3 * CPathSearch::GRID_SQUARE_SIZEX, pSprite->GetPos().y);
+    pSummoned->m_pos = ptSummoned;
+    pSummoned->AddToArea(pArea, ptSummoned, 0, CGameObject::LIST_FRONT);
+
+    // The summon table's work runs in a host session; the creature is made
+    // before it opens (a new sprite in a session registers with the remote
+    // object array).
+    HostSession session;
+    REQUIRE(session.Open());
+
+    Icewind586B70* pTable = Icewind586B70::Instance();
+    pTable->Clear();
+    pTable->mEntries[0] = Icewind586B70::Entry(pSummoned->GetId(), pSprite->GetId());
+    // Another summoner's entry.
+    pTable->mEntries[1] = Icewind586B70::Entry(12345, 67890);
+
+    // Nothing for a sprite that summoned nothing.
+    pTable->sub_5872C0(pSummoned);
+    CHECK(pTable->mEntries[0].field_0 == pSummoned->GetId());
+    CHECK_FALSE(pSummoned->m_removeFromArea);
+
+    pTable->sub_5872C0(pSprite);
+    g_pBaldurChitin->GetMessageHandler()->AsynchronousUpdate();
+    CHECK(pTable->mEntries[0].field_0 == 0);
+    CHECK(pTable->mEntries[0].field_4 == 0);
+    CHECK(pSummoned->m_removeFromArea);
+    CHECK(pTable->mEntries[1].field_0 == 12345);
+    CHECK(pTable->mEntries[1].field_4 == 67890);
+
+    pTable->Clear();
+}
+
+// Weather particles (ui-misc round 4): the original builds a new particle's
+// position with the height rolled before the width (its arguments are
+// evaluated right to left), in the generation (z, y, x) and in the respawn
+// of a melted flake or a fallen drop (y, x).
+namespace {
+
+// The VC6 generator, as compat/msvc_rand rolls it for one thread.
+class Vc6Rand {
+public:
+    explicit Vc6Rand(unsigned int seed)
+        : m_state(seed)
+    {
+    }
+    int operator()()
+    {
+        m_state = m_state * 214013u + 2531011u;
+        return static_cast<int>((m_state >> 16) & 0x7FFF);
+    }
+
+private:
+    unsigned int m_state;
+};
+
+} // namespace
+
+// CSnowStorm::GenerateFlakes (0x5581B0): the 250 flakes' constructors roll
+// their drift (two each), then each flake rolls z, y (0x5582A3) and x
+// (0x5582BD).
+TEST_CASE("weather: a new snow flake rolls its height before its width", "[uimisc][weather]")
+{
+    iwd2r_srand(7);
+    const CPoint pt(320, 240);
+    const CRect bounds(0, 0, 800, 433);
+    CSnowStorm storm;
+    storm.GenerateFlakes(pt, bounds);
+    REQUIRE(storm.m_pSnowFlakes != NULL);
+
+    Vc6Rand roll(7);
+    for (int n = 0; n < 250; n++) {
+        const bool bRight = (roll() & 1) != 0;
+        INFO("flake " << n);
+        CHECK(storm.m_pSnowFlakes[n].m_vel.x == (bRight ? 1 : -1) * CSnowFlake::DRIFT_VELOCITY);
+        CHECK(storm.m_pSnowFlakes[n].m_nDriftWidth == 5 + roll() % 5);
+    }
+    for (int n = 0; n < 250; n++) {
+        INFO("flake " << n);
+        const int z = roll() % 100;
+        const int y = 4 * pt.y / 3 + z + roll() % (4 * bounds.Height() / 3);
+        const int x = pt.x + roll() % bounds.Width();
+        CHECK(storm.m_pSnowFlakes[n].m_pos.z == z << CParticle::RESOLUTION_INC);
+        CHECK(storm.m_pSnowFlakes[n].m_pos.y == y << CParticle::RESOLUTION_INC);
+        CHECK(storm.m_pSnowFlakes[n].m_pos.x == x << CParticle::RESOLUTION_INC);
+    }
+}
+
+// CRainStorm::GenerateDrops (0x557C30): the drops' constructors roll
+// nothing; each drop rolls z, y (0x557D23) and x (0x557D3D).
+TEST_CASE("weather: a new rain drop rolls its height before its width", "[uimisc][weather]")
+{
+    iwd2r_srand(11);
+    const CPoint pt(64, 96);
+    const CRect bounds(0, 0, 640, 400);
+    CRainStorm storm;
+    storm.GenerateDrops(pt, bounds);
+    REQUIRE(storm.m_pRainDrops != NULL);
+
+    Vc6Rand roll(11);
+    for (int n = 0; n < 250; n++) {
+        INFO("drop " << n);
+        const int z = roll() % 100;
+        const int y = 4 * pt.y / 3 + z + roll() % (4 * bounds.Height() / 3);
+        const int x = pt.x + roll() % bounds.Width();
+        CHECK(storm.m_pRainDrops[n].m_pos.z == z << CParticle::RESOLUTION_INC);
+        CHECK(storm.m_pRainDrops[n].m_pos.y == y << CParticle::RESOLUTION_INC);
+        CHECK(storm.m_pRainDrops[n].m_pos.x == x << CParticle::RESOLUTION_INC);
+    }
+}
+
+// CSnowStorm::AsynchronousUpdate (0x557FC0): a melted flake comes back at
+// the top of the view, rolling y (0x558120) before x (0x55813A).
+TEST_CASE("weather: a melted snow flake comes back rolling its height first", "[uimisc][weather][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    CGameSprite* pSprite = PartyMember();
+    if (pSprite == NULL) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CGameArea* pArea = pGame->GetVisibleArea();
+    REQUIRE(pArea != NULL);
+    // AR1000 is outdoors (area type 0x4), where the weather runs.
+    REQUIRE((pArea->m_header.m_areaType & 0x4) != 0);
+    CInfinity* pInfinity = pArea->GetInfinity();
+    const CRect rView(pInfinity->nNewX,
+        pInfinity->nNewY,
+        pInfinity->nNewX + pInfinity->rViewPort.Width(),
+        pInfinity->nNewY + pInfinity->rViewPort.Height());
+
+    CSnowStorm storm;
+    storm.GenerateFlakes(rView.TopLeft(), CRect(0, 0, rView.Width(), rView.Height()));
+    REQUIRE(storm.m_pSnowFlakes != NULL);
+    // Every flake on the ground with one update of melting left.
+    for (int n = 0; n < 250; n++) {
+        storm.m_pSnowFlakes[n].m_pos.z = 0;
+        storm.m_pSnowFlakes[n].m_nMeltTime = 1;
+    }
+
+    const BOOLEAN bActive = pGame->GetWorldTimer()->m_active;
+    pGame->GetWorldTimer()->m_active = TRUE;
+    iwd2r_srand(5);
+    storm.AsynchronousUpdate();
+    pGame->GetWorldTimer()->m_active = bActive;
+
+    Vc6Rand roll(5);
+    for (int n = 0; n < 250; n++) {
+        INFO("flake " << n);
+        const int y = roll() % (4 * rView.bottom / 3 - 4 * rView.top / 3) + 4 * rView.top / 3 + 100;
+        const int x = rView.left + roll() % rView.Width();
+        CHECK(storm.m_pSnowFlakes[n].m_pos.y == y << CParticle::RESOLUTION_INC);
+        CHECK(storm.m_pSnowFlakes[n].m_pos.x == x << CParticle::RESOLUTION_INC);
+        CHECK(storm.m_pSnowFlakes[n].m_pos.z == 100 << CParticle::RESOLUTION_INC);
+        CHECK(storm.m_pSnowFlakes[n].m_nMeltTime == 30);
+    }
+}
+
+// CUIControlTextDisplay::DisplayString (0x4E20F0): a new string clears the
+// scroll still to run for the last one (field_A65, at 0x4E2171) before it
+// decides the top line.
+TEST_CASE("text display: a new string ends the scroll still to run", "[uimisc][textdisplay][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    // A game, whose message log the display shows.
+    if (PartyMember() == NULL) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+
+    CScreenWorld* pWorld = g_pBaldurChitin->m_pEngineWorld;
+    CUIControlTextDisplay* pDisplay = static_cast<CUIControlTextDisplay*>(pWorld->GetManager()->GetPanel(pWorld->GetPanel_22_0())->GetControl(1));
+    REQUIRE(pDisplay != NULL);
+    REQUIRE(pDisplay->m_plstStrings != NULL);
+    pDisplay->RemoveAll();
+
+    pDisplay->DisplayString(CString(""), CString("first"), RGB(255, 255, 255), RGB(255, 255, 255), -1, FALSE, TRUE);
+    pDisplay->field_A65 = 4;
+    pDisplay->DisplayString(CString(""), CString("second"), RGB(255, 255, 255), RGB(255, 255, 255), -1, FALSE, TRUE);
+    CHECK(pDisplay->field_A65 == 0);
+    // The display does not overflow: the top line stays.
+    CHECK(pDisplay->field_5A == 0);
+
+    pDisplay->field_A65 = 4;
+    pDisplay->DisplayString(CString(""), CString("third"), RGB(255, 255, 255), RGB(255, 255, 255), -1, TRUE, TRUE);
+    CHECK(pDisplay->field_A65 == 0);
+    // Moved to the top: the new string's index.
+    CHECK(pDisplay->field_5A == 2);
+
+    pDisplay->RemoveAll();
+}

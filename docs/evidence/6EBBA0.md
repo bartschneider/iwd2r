@@ -2,6 +2,7 @@
 address: 0x6EBBA0
 name: CGameAnimationTypeMonsterIcewindNew::EquipWeapon
 exemption: "needs a constructed 0xF000 animation and weapon BAMs; reached by the 10GUTHE construction data test"
+kind: read-only
 ghidra_version: 12.1.4
 ---
 

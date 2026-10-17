@@ -436,6 +436,7 @@ public:
     /* 0094 */ void SetScript(SHORT level, CAIScript* script) override;
     /* 009C */ const BYTE* GetVisibleTerrainTable() override;
     /* 00A0 */ const BYTE* GetTerrainTable() override;
+    /* 00AC */ void ApplyTriggers() override;
     /* 00B0 */ void AutoPause(DWORD type) override;
     /* 00B4 */ BOOL GetCanSeeInvisible() override;
     BOOL EvaluateStatusTrigger(const CAITrigger& trigger) override;
@@ -585,6 +586,7 @@ public:
     void ResolvePausedAction(const CAIAction* curAction, POSITION pos);
     void ResolveTargetPoint(const CAIAction* curAction, POSITION pos);
     BOOL ProcessEffectList();
+    BOOL HandlePersistantEffects(LONG deltaT);
     void ClearStoredPaths();
     void ClearDialogActions();
     BOOL HandleEffects();
@@ -655,6 +657,8 @@ public:
     SHORT GetCasterLevel(CSpell* pSpell, BYTE nClass, DWORD nSpecialization);
     SHORT sub_75F240();
     SHORT sub_75F3D0(int a1);
+    SHORT LeaveArea();
+    SHORT LeaveAreaName();
     SHORT SetAtOffset(DWORD stat, DWORD value, BOOL modify);
     SHORT ForceHide(CGameSprite* pSprite);
     SHORT sub_7615F0(int a1);

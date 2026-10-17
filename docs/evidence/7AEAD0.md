@@ -2,6 +2,7 @@
 address: 0x7AEAD0
 name: CVidCell::Render
 exemption: render API dispatch guard
+kind: read-only
 ghidra_version: 12.1.4
 ---
 

@@ -3,5 +3,7 @@
   "connection",
   "create_char",
   "single_player",
-  "world"
+  "world",
+  "load",
+  "save"
 ]

@@ -2,6 +2,7 @@
 address: 0x4CECB0
 name: CGameTrigger::IsOverActivate
 exemption: "needs an area with its triggers; pinned by tests/test_creature_render.cpp "trigger: a creature inside a travel region sets it off""
+kind: read-only
 ghidra_version: 12.1.4
 ---
 

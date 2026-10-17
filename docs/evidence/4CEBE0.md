@@ -2,6 +2,7 @@
 address: 0x4CEBE0
 name: CGameTrigger::IsOver
 exemption: "needs an area with its triggers and a party; pinned by tests/test_creature_render.cpp "trigger: a travel region is picked inside its bounds""
+kind: read-only
 ghidra_version: 12.1.4
 ---
 
