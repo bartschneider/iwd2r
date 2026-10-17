@@ -52,6 +52,14 @@ From WSL, one command syncs the working tree to a Windows checkout, builds it wi
 python3 tools/play.py
 ```
 
+To try it at your desktop resolution with the UI drawn at 2x, the world at 1x, TrueType text and sound:
+
+```
+IWD2R_DESKTOP_OK=1 python3 tools/play.py --sound --resolution desktop --scale 2 --set "Program Options/World Scale=1" --set "Program Options/Text Renderer=scalable"
+```
+
+`IWD2R_DESKTOP_OK=1` is the opt-in for a window on your desktop: without it `play.py` refuses, because the agents that drive the game run it headless or in a sandbox, where a stray click would land in their run. The run needs the vanilla copy that `python3 tools/oracle.py vanilla` builds from a GOG install (see below).
+
 An automated check on Linux, headless, driven by an input script that takes screenshots:
 
 ```
