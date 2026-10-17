@@ -2519,12 +2519,96 @@ TEST_CASE("combat: the area tints a point with its light map", "[combat][data]")
     pArea->m_cInfinity.m_areaType = areaType;
 }
 
+// CGameSprite::ApplyTriggers (0x728580), the sprite's override of vtable
+// +0xAC: a KILLED trigger (0x4B) raises the killer's morale by 3 and, for a
+// party member's kill of an enemy, shares the enemy's challenge rating
+// experience through an XP effect message per member and keeps the total
+// in the enemy's derived experience value (first_fight's kill: the
+// original's party member had 37 experience points at frame 5452, ours 0);
+// each trigger is read once (flag 0x2). HITBY (0x20) lowers morale by 2 as
+// the hit points fall below half.
+TEST_CASE("combat: a party member's kill gives the party the goblin's experience", "[combat][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    Fight fight;
+    std::string why;
+    if (!SetUpFight(fight, why)) {
+        if (why.find("CHR") != std::string::npos) {
+            SKIP("[iwd2r-skip] " + why);
+        }
+        FAIL(why);
+    }
+    CGameSprite* pCharacter = fight.pCharacter;
+    CGameSprite* pGoblin = fight.pGoblin;
+    REQUIRE(pGoblin->GetAIType().m_nEnemyAlly > CAIObjectType::EA_EVILCUTOFF);
+    REQUIRE(pCharacter->GetAIType().m_nEnemyAlly <= CAIObjectType::EA_GOODCUTOFF);
+
+    pCharacter->m_baseStats.m_morale = 10;
+    ClearMessages();
+    CAITrigger killed(CAITRIGGER_KILLED, pGoblin->GetAIType(), 0);
+    killed.m_triggerCause.m_nInstance = pGoblin->GetId();
+    killed.m_specificID = pGoblin->m_baseStats.m_xpValue;
+    pCharacter->SetTrigger(killed);
+    pCharacter->ApplyTriggers();
+    CHECK(pCharacter->m_baseStats.m_morale == 13);
+
+    // One XP effect (104) for the one party member, the total kept in the
+    // goblin's derived stats.
+    LONG nGiven = pGoblin->m_derivedStats.m_nXPValue;
+    CHECK(nGiven > 0);
+    INT nXPMessages = 0;
+    CMessageHandler& handler = g_pBaldurChitin->m_cMessageHandler;
+    POSITION pos = handler.m_messageList.GetHeadPosition();
+    while (pos != NULL) {
+        CMessageAddEffect* pMessage = dynamic_cast<CMessageAddEffect*>(handler.m_messageList.GetNext(pos));
+        if (pMessage != NULL && pMessage->m_effect->m_effectID == 104) {
+            nXPMessages++;
+            CHECK(pMessage->GetTarget() == pCharacter->GetId());
+            CHECK(pMessage->m_effect->m_effectAmount == nGiven);
+        }
+    }
+    CHECK(nXPMessages == 1);
+
+    // Read once: a second pass changes nothing.
+    ClearMessages();
+    pCharacter->ApplyTriggers();
+    CHECK(pCharacter->m_baseStats.m_morale == 13);
+    CHECK(handler.m_messageList.IsEmpty());
+
+    // HITBY: from full hit points to below half, morale drops by 2.
+    const SHORT nMax = pCharacter->m_derivedStats.m_nMaxHitPoints;
+    REQUIRE(nMax >= 4);
+    const SHORT nHitPoints = pCharacter->m_baseStats.m_hitPoints;
+    pCharacter->field_7110 = nMax;
+    pCharacter->m_baseStats.m_hitPoints = static_cast<SHORT>((nMax - 1) / 2);
+    if (pCharacter->m_baseStats.m_hitPoints * 100 / nMax < 25) {
+        pCharacter->m_baseStats.m_hitPoints = static_cast<SHORT>(nMax * 40 / 100);
+    }
+    INFO("hit points " << pCharacter->m_baseStats.m_hitPoints << " of " << nMax);
+    REQUIRE(pCharacter->m_baseStats.m_hitPoints * 100 / nMax < 50);
+    REQUIRE(pCharacter->m_baseStats.m_hitPoints * 100 / nMax >= 25);
+    CAITrigger hit(CAITRIGGER_HITBY, pGoblin->GetAIType(), 0);
+    pCharacter->SetTrigger(hit);
+    pCharacter->ApplyTriggers();
+    CHECK(pCharacter->m_baseStats.m_morale == 11);
+    CHECK(pCharacter->field_7110 == pCharacter->m_baseStats.m_hitPoints);
+    pCharacter->m_baseStats.m_hitPoints = nHitPoints;
+    ClearMessages();
+}
+
 // CGameAnimationTypeMonsterIcewind::SetSequence (0x6E7DF0), the goblin's
-// animation: DIE (5) takes the DE cells and draws no frame (its jump table
-// entry, 0x6E7F0F, ends at 0x6E80DB; ours fell into TWITCH, which draws a
-// random first frame: first_fight's Magic Missile kill drew once more than
-// the original at frame 5450), TWITCH (6) after it draws one, and SLEEP
-// (17) takes the SL cells (0x6E7F57).
+// animation, which takes the sprite's sequence numbers: DIE (5) takes the
+// DE cells and draws no frame (its jump table entry, 0x6E7F0F, ends at
+// 0x6E80DB; ours fell into HEAD_TURN's case, which draws a random first
+// frame on the SD cells: first_fight's Magic Missile kill drew once more
+// than the original at frame 5450), HEAD_TURN (6) after it draws one, and
+// SLEEP (17) takes the SL cells (0x6E7F57).
 TEST_CASE("combat: an Icewind monster dies on its DE cells without a frame draw", "[combat][data]")
 {
     if (DataDir() == nullptr) {
