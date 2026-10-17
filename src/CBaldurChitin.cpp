@@ -1091,11 +1091,12 @@ void CBaldurChitin::MainAIThread(void* userInfo)
 
     SetThreadPriority(m_hMusicThread, nMusicThreadPriority);
 
-    int v1 = 0;
+    // 0x424465 ([esp+0x10], a DWORD): only ever initialized and incremented;
+    // the wait below runs on the single iteration whose old value is 10.
+    DWORD v1 = 0;
     while (!m_bExitMainAIThread) {
         if (g_pBaldurChitin->pActiveEngine == g_pBaldurChitin->m_pEngineProjector) {
             if (v1++ == 10) {
-                v1 = 0;
                 if (WaitForSingleObject(m_eventTimer, 100) == WAIT_ABANDONED) {
                     return;
                 }
