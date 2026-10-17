@@ -4943,13 +4943,16 @@ void CGameSprite::Render(CGameArea* pArea, CVidMode* pVidMode, INT nSurface)
             // NOTE: Uninline.
             m_animation.CalculateFxRect(rFX, ptReference, m_posZ);
 
+            newPos.x = m_pos.x;
+            newPos.y = m_pArea->GetHeightOffset(m_pos, m_listType) + m_pos.y;
+
             if (m_id == m_pArea->m_iPicked
                 || g_pBaldurChitin->GetObjectGame()->GetOptions()->m_bAlwaysDither
                 || g_pBaldurChitin->GetObjectGame()->m_bForceDither) {
                 bDithered = TRUE;
             }
 
-            rgbTint = m_pArea->GetTintColor(CPoint(m_pos.x, m_pos.y + m_posZ),
+            rgbTint = m_pArea->GetTintColor(CPoint(newPos.x, newPos.y + m_posZ),
                 m_listType);
 
             if (m_pArea->m_nInfravision

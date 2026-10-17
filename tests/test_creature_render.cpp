@@ -24,6 +24,7 @@
 #include "engine_world.h"
 #include "render_surfaces.h"
 
+#include <algorithm>
 #include <cstring>
 #include <functional>
 #include <map>
@@ -533,8 +534,11 @@ TEST_CASE("creature render: creatures of the new Renders stand visible in AR1000
         CRect rFx;
         CPoint ptReference;
         c.pSprite->GetAnimation()->CalculateFxRect(rFx, ptReference, c.pSprite->m_posZ);
+        // The sprite is drawn at its position lowered by the height map
+        // (CGameSprite::Render 0x70396F).
+        const CPoint ptDrawn(c.pSprite->GetPos().x, c.pSprite->GetPos().y + pArea->GetHeightOffset(c.pSprite->GetPos(), c.pSprite->m_listType));
         CRect rBounds;
-        c.pSprite->GetAnimation()->CalculateGCBoundsRect(rBounds, c.pSprite->GetPos(), ptReference, c.pSprite->m_posZ, rFx.Width(), rFx.Height());
+        c.pSprite->GetAnimation()->CalculateGCBoundsRect(rBounds, ptDrawn, ptReference, c.pSprite->m_posZ, rFx.Width(), rFx.Height());
         const CRect rScreen = scope.ToScreen(rBounds);
         INFO("bounds on screen " << rScreen.left << "," << rScreen.top << " - " << rScreen.right << "," << rScreen.bottom);
         const Difference inside = Compare(without, all, scope.Screen(), rScreen);
@@ -1281,4 +1285,108 @@ TEST_CASE("door: its bounding rectangles end one past the file's", "[render][dat
         CHECK(pDoor->m_rOpenBounding == CRect(e.open.left, e.open.top, e.open.right + 1, e.open.bottom + 1));
         CHECK(pDoor->m_rClosedBounding == CRect(e.closed.left, e.closed.top, e.closed.right + 1, e.closed.bottom + 1));
     }
+}
+
+// CGameSprite::Render (0x703700) draws the creature at its position lowered
+// by the area's height map: after CalculateFxRect it sets the render point
+// to (m_pos.x, m_pos.y + GetHeightOffset(m_pos, m_listType)) (0x70396F-
+// 0x703998) and asks GetTintColor at that point plus m_posZ (0x7039CB-
+// 0x7039F4). Ours drew it at the clamped position with no height offset,
+// so on AR1000's +1 ground every creature stood a pixel too high. Here the
+// same wolf is drawn at two points whose height offsets differ: the second
+// drawing is the first moved by the difference in
+// position plus the offset. (AR1000 is at +1 around the party, so the
+// points are two whose offsets differ.)
+TEST_CASE("creature render: a creature is drawn at its height offset", "[render][data]")
+{
+    std::string why;
+    if (!Begin(why)) {
+        SKIP("[iwd2r-skip] " + why);
+    }
+    FramePump pump;
+    World world;
+    if (!NewWorld(world, why)) {
+        SKIP("[iwd2r-skip] " + why);
+    }
+    CGameArea* pArea = world.pArea;
+    const CPoint base = world.pCharacter->GetPos();
+
+    // Two points 64 to 160 pixels apart on one row whose height offsets
+    // differ, searched from the party's position outwards.
+    CPoint pt0(-1, -1);
+    CPoint pt1(-1, -1);
+    int h0 = 0;
+    int h1 = 0;
+    for (int r = 0; r < 1200 && pt0.x < 0; r += 12) {
+        for (int sy : { 1, -1 }) {
+            const int y = base.y + sy * r;
+            if (pt0.x >= 0 || y < 200 || y >= pArea->GetInfinity()->nAreaY - 200) {
+                continue;
+            }
+            for (int x = 200; x + 160 < pArea->GetInfinity()->nAreaX - 200 && pt0.x < 0; x += 16) {
+                const int a = pArea->GetHeightOffset(CPoint(x, y), CGameObject::LIST_FRONT);
+                for (int d = 64; d <= 160; d += 16) {
+                    const int b = pArea->GetHeightOffset(CPoint(x + d, y), CGameObject::LIST_FRONT);
+                    if (a != b) {
+                        pt0 = CPoint(x, y);
+                        pt1 = CPoint(x + d, y);
+                        h0 = a;
+                        h1 = b;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    REQUIRE(pt0.x >= 0);
+    INFO("offset " << h0 << " at " << pt0.x << "," << pt0.y << "; offset " << h1 << " at " << pt1.x << "," << pt1.y);
+
+    CGameSprite* pWolf = AddCreature(pArea, "12WOLF", pt0);
+    REQUIRE(pWolf != NULL);
+    pWolf->m_canBeSeen = CGameObject::VISIBLE_DELAY + 10;
+    pWolf->m_baseStats.field_294 = 0;
+    pArea->SortLists();
+
+    AreaScope scope(pArea);
+    REQUIRE(scope.Ok());
+    scope.CentreOn(CPoint((pt0.x + pt1.x) / 2, (pt0.y + pt1.y) / 2));
+    const int width = scope.Screen().Width();
+    const int height = scope.Screen().Height();
+    auto mask = [&](const CPoint& pt) {
+        pWolf->m_pos = pt;
+        pWolf->m_baseStats.field_294 = 0;
+        const std::vector<DWORD> with = scope.RenderArea(pArea);
+        pWolf->m_baseStats.field_294 = 1;
+        const std::vector<DWORD> without = scope.RenderArea(pArea);
+        pWolf->m_baseStats.field_294 = 0;
+        std::vector<bool> changed(with.size());
+        for (size_t i = 0; i < with.size(); i++) {
+            changed[i] = (with[i] & 0xFFFFFF) != (without[i] & 0xFFFFFF);
+        }
+        return changed;
+    };
+    const std::vector<bool> m0 = mask(pt0);
+    const std::vector<bool> m1 = mask(pt1);
+    auto overlap = [&](int dx, int dy) {
+        int n = 0;
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                const int x1 = x + dx;
+                const int y1 = y + dy;
+                if (m0[y * width + x] && x1 >= 0 && x1 < width && y1 >= 0 && y1 < height && m1[y1 * width + x1]) {
+                    n++;
+                }
+            }
+        }
+        return n;
+    };
+    const int n0 = static_cast<int>(std::count(m0.begin(), m0.end(), true));
+    const int dx = pt1.x - pt0.x;
+    const int dy = pt1.y - pt0.y;
+    const int atOffset = overlap(dx, dy + h1 - h0);
+    const int withoutOffset = overlap(dx, dy);
+    INFO("drawn " << n0 << ", matching at the offset " << atOffset << ", without it " << withoutOffset);
+    CHECK(n0 > 300);
+    CHECK(atOffset * 20 > n0 * 17);
+    CHECK(atOffset > withoutOffset);
 }
