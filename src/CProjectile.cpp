@@ -8,6 +8,7 @@
 #include "CGameTrigger.h"
 #include "CInfGame.h"
 #include "CMessage.h"
+#include "CProjectileArea.h"
 #include "CProjectileBAM.h"
 #include "CUtil.h"
 #include "IcewindCVisualEffect.h"
@@ -118,6 +119,10 @@ CProjectile* CProjectile::DecodeProjectile(WORD nProjectileType, CGameAIBase* pS
         pProjectile->m_arrivalSoundRef = "";
         pProjectile->m_bHasHeight = TRUE;
         break;
+    case 38:
+        // Fireball.
+        pProjectile = new CProjectileArea84F580();
+        break;
     case 79:
         pProjectile = new CProjectile84DF1C();
         break;
@@ -136,8 +141,8 @@ CProjectile* CProjectile::DecodeProjectile(WORD nProjectileType, CGameAIBase* pS
         }
 
         // TODO: Incomplete (0x51EB93-0x528DEF). The jump table at 0x528E7C
-        // builds one class per type, 2 to 386; only types 1, 68 to 72, 79
-        // and 218 are ported.
+        // builds one class per type, 2 to 386; only types 1, 38, 68 to 72,
+        // 79 and 218 are ported.
         // DEVIATION (temporary): unported type -> instant projectile. The
         // original reaches the fallback below only for types out of range
         // and for the table entries 106, 107, 219-226, 259 and 265. Until

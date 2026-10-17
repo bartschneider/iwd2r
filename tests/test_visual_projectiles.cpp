@@ -1,15 +1,19 @@
 #define NOMINMAX
 #include <catch2/catch_test_macros.hpp>
 
+#include "CGameAnimationType84EEB8.h"
 #include "CGameChunk.h"
 #include "CGameEffect.h"
 #include "CGameObject84D624.h"
+#include "CGameObject84F0DC.h"
+#include "CGameObject84F14C.h"
 #include "CGameObjectArray.h"
 #include "CMessage.h"
 #include "CPathSearch.h"
 #include "CProjectile84DFA4.h"
 #include "CProjectile84E940.h"
 #include "CProjectile84E9C0.h"
+#include "CProjectileArea.h"
 #include "CProjectileBAM.h"
 #include "CProjectileShaft.h"
 #include "CProjectileSingleTarget.h"
@@ -1327,6 +1331,214 @@ TEST_CASE("visual projectiles: the sunray rises, stands for its duration and fad
     // From frame 1 to the last, then the update that removes it.
     CHECK(UpdateUntilGone(id, 400) == nFading - 1);
     CHECK(Draws(48, iwd2r_rand_state()) == 0);
+    pArea->SortLists();
+    ClearMessages();
+}
+
+namespace {
+
+// The explosion pieces the area holds in its add lists.
+std::vector<CGameObject84F14C*> AddedPieces(CGameArea* pArea)
+{
+    std::vector<CGameObject84F14C*> pieces;
+    for (CGameObject* pObject : AddedObjects(pArea)) {
+        if (CGameObject84F14C* pPiece = dynamic_cast<CGameObject84F14C*>(pObject)) {
+            pieces.push_back(pPiece);
+        }
+    }
+    return pieces;
+}
+
+const std::string& PieceAnimation(CGameObject84F14C* pPiece)
+{
+    return static_cast<CGameAnimationType84EEB8*>(pPiece->m_animation.m_animation)->m_sAnimation;
+}
+
+}
+
+// Fireball (projectile type 38, CProjectileArea84F580 0x571E80): fired at a
+// point it flies there as FirebaT at twice the area projectile's speed and
+// explodes (CProjectileArea::OnArrival 0x56F410): an explosion object
+// (CGameObject84F0DC 0x56BF30) plays FirebaX and sends its ring out to the
+// radius, 200, in (200 - 1) / 40 + 1 ticks (0x56D0A0). The first particle
+// in a square of its grid throws a FirebaR flame (CGameObject84F14C
+// 0x56DF00), at most 20; each try at a lingering FirebaA ember draws one
+// number (rand() % 10000 against the chance) and adds a point, taken where
+// an ember is made (0x56E280). Each piece's animation draws one number for
+// its random sequence. The flames fly on and die; the embers wander over
+// the taken points.
+TEST_CASE("visual projectiles: Fireball flies, bursts in a ring of flames and leaves embers", "[visualprojectile][data]")
+{
+    WORLD_OR_SKIP(world);
+    CGameArea* pArea = world.pArea;
+    CGameSprite* pSprite = world.pCharacter;
+    pArea->SortLists();
+    ClearMessages();
+
+    CProjectile* pProjectile = CProjectile::DecodeProjectile(38, pSprite, 0);
+    CProjectileArea84F580* pFireball = dynamic_cast<CProjectileArea84F580*>(pProjectile);
+    REQUIRE(pFireball != nullptr);
+    CHECK(pFireball->m_projectileType == 37);
+    CHECK(pFireball->m_nRadius == 200);
+    CHECK(pFireball->m_speed == 40);
+    CHECK(pFireball->m_bTravels == TRUE);
+    CHECK(pFireball->field_1DE == TRUE);
+    CHECK(pFireball->m_nDuration == 45);
+    CHECK(pFireball->m_fireSoundRef == "TRA_06");
+    CHECK(pFireball->m_explosion1.m_animation == "FirebaX");
+    CHECK(pFireball->m_explosion1.m_sound == "RNG_M03");
+    CHECK(pFireball->m_explosion2.m_animation == "FirebaR");
+    CHECK(pFireball->m_explosion2.field_2E == 20);
+    CHECK(pFireball->m_explosion3.m_animation == "FirebaA");
+    CHECK(pFireball->m_explosion3.field_34 == TRUE);
+
+    CPoint target;
+    REQUIRE(DryGround(pArea, CPoint(pSprite->GetPos().x + 160, pSprite->GetPos().y + 40), target));
+    pFireball->Fire(pArea, pSprite->GetId(), CGameObjectArray::INVALID_INDEX, target, 0, 0);
+    const LONG id = pFireball->GetId();
+    REQUIRE(id != CGameObjectArray::INVALID_INDEX);
+    pArea->SortLists();
+    ClearMessages();
+
+    int flight = 0;
+    while (!pFireball->m_bExploded && flight < 200) {
+        pFireball->AIUpdate();
+        flight++;
+    }
+    REQUIRE(pFireball->m_bExploded);
+    CHECK(flight > 1);
+    // It arrives within one step (its speed plus one) of the point.
+    const LONG dx = pFireball->GetPos().x - target.x;
+    const LONG dy = pFireball->GetPos().y - target.y;
+    CHECK(dy * dy * 16 / 9 + dx * dx <= 41 * 41);
+    CProjectileAreaPoints* pPoints = pFireball->m_explosion3.m_pPoints;
+    REQUIRE(pPoints != nullptr);
+    CHECK(pPoints->m_points.empty());
+    CHECK(pPoints->m_points.capacity() >= 512);
+
+    CGameObject84F0DC* pExplosion = AddedOne<CGameObject84F0DC>(pArea);
+    REQUIRE(pExplosion != nullptr);
+    const LONG explosionId = pExplosion->GetId();
+    CHECK(pExplosion->GetPos() == pFireball->GetPos());
+    CHECK(pExplosion->m_bAnimation == TRUE);
+    CHECK(pExplosion->m_nExpandTicks == (200 - 1) / 40 + 1);
+    CHECK(pExplosion->m_nWallMode == CGameObject84F0DC::WALL_STOP);
+    CHECK(pExplosion->m_nDuration == 45);
+    CHECK(pExplosion->m_nGridX == (200 - 1) / 16 + 1);
+    CHECK(pExplosion->m_nArc1 > 1);
+    CHECK(pExplosion->m_nArc2 > 1);
+    CHECK(pExplosion->m_explosion3.m_pPoints == pPoints);
+    CHECK(memcmp(pExplosion->m_terrainTable, CGameObject::DEFAULT_VISIBLE_TERRAIN_TABLE, sizeof(pExplosion->m_terrainTable)) == 0);
+    // The particles start at the centre.
+    CHECK(pExplosion->m_pParticles[0].x == 0);
+    CHECK(pExplosion->m_pParticles[0].vx == 0);
+    CHECK(pExplosion->m_pParticles[0].vy == 40 << 10);
+
+    AreaScope scope(pArea);
+    REQUIRE(scope.Ok());
+    scope.CentreOn(target);
+    const CRect rBurst(target.x - 260, target.y - 260, target.x + 260, target.y + 260);
+    {
+        const Lit lit = RenderLit(scope, pExplosion, rBurst, "fireball_burst");
+        CHECK(lit.inside > 0);
+        CHECK(lit.outside == 0);
+    }
+
+    // The expansion and the burst's end. Three ticks in, the burst and its
+    // flames together light more than the burst alone did.
+    iwd2r_srand(53);
+    int updates = 0;
+    int nBurstLit = 0;
+    {
+        scope.Back(true, 0);
+        pExplosion->Render(pArea, scope.VidMode(), CVIDINF_SURFACE_BACK);
+        nBurstLit = CountLit(scope.Back(), scope.Screen(), scope.ToScreen(rBurst)).inside;
+    }
+    while (Alive(explosionId) && updates < 400) {
+        pExplosion->AIUpdate();
+        updates++;
+        if (updates == 3) {
+            REQUIRE(Alive(explosionId));
+            scope.Back(true, 0);
+            pExplosion->Render(pArea, scope.VidMode(), CVIDINF_SURFACE_BACK);
+            for (CGameObject84F14C* pPiece : AddedPieces(pArea)) {
+                pPiece->Render(pArea, scope.VidMode(), CVIDINF_SURFACE_BACK);
+            }
+            const std::vector<DWORD> pixels = scope.Back();
+            scope.Shot(pixels, "fireball_ring");
+            const Lit lit = CountLit(pixels, scope.Screen(), scope.ToScreen(rBurst));
+            CHECK(lit.inside > nBurstLit);
+            CHECK(lit.outside == 0);
+        }
+    }
+    CHECK(!Alive(explosionId));
+    CHECK(updates >= 5);
+
+    std::vector<CGameObject84F14C*> pieces = AddedPieces(pArea);
+    int nFlames = 0;
+    int nEmbers = 0;
+    for (CGameObject84F14C* pPiece : pieces) {
+        if (PieceAnimation(pPiece) == "FirebaR") {
+            nFlames++;
+            CHECK(pPiece->m_pPoints == nullptr);
+            CHECK(pPiece->m_nLife <= 5);
+        } else {
+            CHECK(PieceAnimation(pPiece) == "FirebaA");
+            nEmbers++;
+            CHECK(pPiece->m_pPoints == pPoints);
+            CHECK(pPiece->m_bWander == TRUE);
+            CHECK(pPoints->m_points[pPiece->m_nPoint].m_bTaken == 1);
+        }
+        CHECK(pPiece->m_nWallMode == CGameObject84F0DC::WALL_STOP);
+    }
+    CHECK(nFlames > 0);
+    CHECK(nFlames <= 20);
+    CHECK(pPoints->m_nRefCount == nEmbers);
+    int nTaken = 0;
+    for (const CProjectileAreaPoints::Point& point : pPoints->m_points) {
+        nTaken += point.m_bTaken;
+    }
+    CHECK(nTaken == nEmbers);
+
+    // One number for each try at an ember, one for each piece's sequence.
+    CVidCell flame(CResRef("FirebaR"), FALSE);
+    CVidCell ember(CResRef("FirebaA"), FALSE);
+    const int nFlameDraws = flame.GetNumberSequences(FALSE) != 0 ? 1 : 0;
+    const int nEmberDraws = ember.GetNumberSequences(FALSE) != 0 ? 1 : 0;
+    INFO("flames " << nFlames << ", embers " << nEmbers << ", tries " << pPoints->m_points.size());
+    CHECK(Draws(53, iwd2r_rand_state()) == static_cast<int>(pPoints->m_points.size()) + nFlames * nFlameDraws + nEmbers * nEmberDraws);
+
+    {
+        const Lit lit = RenderLit(scope, pieces.front(), rBurst, "fireball_piece");
+        CHECK(lit.inside > 0);
+        CHECK(lit.outside == 0);
+    }
+
+    // The pieces burn out; the last ember deletes the points.
+    std::vector<LONG> ids;
+    for (CGameObject84F14C* pPiece : pieces) {
+        ids.push_back(pPiece->GetId());
+    }
+    for (int frame = 0; frame < 2000; frame++) {
+        bool any = false;
+        for (LONG pieceId : ids) {
+            CGameObject* pObject;
+            CGameObjectArray* pArray = g_pBaldurChitin->GetObjectGame()->GetObjectArray();
+            if (pArray->GetShare(pieceId, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) == CGameObjectArray::SUCCESS) {
+                pArray->ReleaseShare(pieceId, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+                pObject->AIUpdate();
+                any = true;
+            }
+        }
+        if (!any) {
+            break;
+        }
+    }
+    for (LONG pieceId : ids) {
+        CHECK(!Alive(pieceId));
+    }
+
+    CHECK(UpdateUntilGone(id, 200) > 0);
     pArea->SortLists();
     ClearMessages();
 }
