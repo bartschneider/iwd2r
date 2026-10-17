@@ -76,6 +76,45 @@ struct World {
     int64_t creatures = 0;
 };
 
+// One schema.json "game.members[i].inventory" slot that holds an item.
+struct Item {
+    std::string resref;
+    int uses[3] = {};
+    uint32_t flags = 0;
+};
+
+// One schema.json "game.members" entry.
+struct GameMember {
+    int32_t id = 0;
+    // False while the id does not resolve in the object array: gold, xp,
+    // level, class_levels and inventory are then null.
+    bool sprite = false;
+    uint32_t gold = 0;
+    uint32_t xp = 0;
+    int level = 0;
+    int classLevels[11] = {};
+    // The 51 slots in order; false where a slot is empty (null).
+    bool hasItem[51] = {};
+    Item items[51];
+};
+
+// schema.json "game".
+struct Game {
+    uint32_t partyGold = 0;
+    // At most 6, in portrait order.
+    std::vector<GameMember> members;
+};
+
+// One schema.json "slots" entry: a save the load or save screen lists.
+struct Slot {
+    std::string file;
+    std::string name;
+    std::string character;
+    uint32_t time = 0;
+    int32_t chapter = 0;
+    std::string chapterText;
+};
+
 // What the engine's DumpSource reads.
 struct EngineState {
     // schema.json "screen": none, unknown or the m_pEngine* member's name.
@@ -92,6 +131,12 @@ struct EngineState {
     // Only on the world screen.
     bool hasWorld = false;
     World world;
+    // On every screen while the engine has a CInfGame.
+    bool hasGame = false;
+    Game game;
+    // Only on the load and save screens.
+    bool hasSlots = false;
+    std::vector<Slot> slots;
 };
 
 // One dump.

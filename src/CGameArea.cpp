@@ -4077,6 +4077,8 @@ void CGameArea::Unmarshal(BYTE* pArea, LONG areaSize, const CString& sName, BOOL
             // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameArea.cpp
             // __LINE__: 5421
             UTIL_ASSERT(areaSize >= 0);
+
+            m_entryPoints.AddTail(pEntryPoint);
         }
     }
 
@@ -4971,7 +4973,7 @@ void CGameArea::OnActionButtonClickTravel(const CPoint& pt)
     m_pGame->GetGroup()->GroupAction(leave, TRUE, NULL);
 
     CAIAction move(CAIAction::MOVETOPOINT, pt, 0, -1);
-    m_pGame->GetGroup()->GroupAction(leave, TRUE, NULL);
+    m_pGame->GetGroup()->GroupAction(move, FALSE, NULL);
 }
 
 // 0x4765C0
