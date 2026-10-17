@@ -146,7 +146,8 @@ DWORD WaitForSingleObject(HANDLE handle, DWORD milliseconds)
         std::unique_lock<std::mutex> guard(object->lock);
         if (object->replayTimer && milliseconds != INFINITE && platform::replay::Active()) {
             // iwd2r: the engine's AI thread waits on the BaldurTimerEvent
-            // for up to 100 ms (CBaldurChitin::MainAIThread 0x4244D8). The
+            // for up to 100 ms (CBaldurChitin::MainAIThread 0x4242B0; the
+            // two 100 ms waits sit at 0x4244B7 and 0x4244D8). The
             // replay mode sets that event at frame ends on the virtual
             // clock (platform/replay.cpp FireTimers), so the timeout is
             // measured on that clock too: a frame slowed by machine load
@@ -318,7 +319,9 @@ HANDLE CreateEventA(LPVOID, BOOL manualReset, BOOL initialState, LPCSTR name)
     object->manualReset = manualReset != FALSE;
     object->signaled = initialState != FALSE;
     // iwd2r: CChitin's ctor makes the AI thread's timer event under this
-    // name (0x790198); only that event's waits follow the replay clock.
+    // name (CreateEventA call 0x7901A8, name string 0x8BA024, handle
+    // stored to the field MainAIThread waits on at 0x4244A6); only that
+    // event's waits follow the replay clock.
     object->replayTimer = name != nullptr && std::strcmp(name, "BaldurTimerEvent") == 0;
     return object;
 }
