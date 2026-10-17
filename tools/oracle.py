@@ -1758,7 +1758,10 @@ def run_ours(exe, game, script, actions, seed, timeout, dump_every, run_dir,
     print('running %s headless on %s' % (os.path.relpath(exe, ROOT), game))
     log_path = os.path.join(out_dir, 'log.txt')
     with open(log_path, 'w') as log:
-        proc = subprocess.Popen([exe], cwd=ROOT, env=env, stdout=log,
+        # Under the memory cap engine tests run with (tools/gates.sh).
+        import realinput
+        proc = subprocess.Popen(realinput.memory_capped([exe], env),
+                                cwd=ROOT, env=env, stdout=log,
                                 stderr=subprocess.STDOUT)
         try:
             code = proc.wait(timeout=timeout)
@@ -1958,6 +1961,112 @@ def compare_checkpoints(original_dir, our_dir, names, screens, known,
     return lines, failures, known_hits
 
 
+FRAME_DUMP = re.compile(r'^frame-(\d+)\.json$')
+
+
+def frame_dumps(folder):
+    """{frame: file name} of a replay folder's periodic dumps
+    (frame-N.json, written every --dump-every frames)."""
+    out = {}
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return out
+    for name in names:
+        match = FRAME_DUMP.match(name)
+        if match:
+            out[int(match.group(1))] = name
+    return out
+
+
+def compare_frames(original_dir, our_dir, screens, known, counts=None):
+    """Compare the periodic dumps both replay folders have, frame by frame,
+    as compare_checkpoints compares a checkpoint: a frame whose screen on
+    either side is in screens fails on each difference that is not a
+    known difference, whose checkpoint must be "*" or the dump's name,
+    frame-N. A state that diverges between two checkpoints and converges
+    again shows only here.
+
+    Returns (lines, failures, known_hits), as compare_checkpoints. The
+    first line counts the dumps; a frame adds lines only when it differs
+    or meets a known difference, and a note names the frames one side
+    lacks (a side that stopped early fails its run and its checkpoints).
+    A dict passed as counts receives 'frames', the frames compared on an
+    enabled screen, and 'frames_outside', the other frames that
+    differed."""
+    if counts is None:
+        counts = {}
+    counts['frames'] = 0
+    counts['frames_outside'] = 0
+    files = (frame_dumps(original_dir), frame_dumps(our_dir))
+    both = sorted(set(files[0]) & set(files[1]))
+    lines = []
+    failures = 0
+    known_hits = []
+    for frame in both:
+        name = 'frame-%d' % frame
+        dumps = []
+        for folder, names in zip((original_dir, our_dir), files):
+            try:
+                with open(os.path.join(folder, names[frame])) as f:
+                    dumps.append(json.load(f))
+            except (OSError, ValueError):
+                dumps.append(None)
+        original, ours = dumps
+        if original is None or ours is None:
+            lines.append('frame %d: UNREADABLE on %s' % (
+                frame, 'both sides' if original is None and ours is None
+                else 'the original' if original is None else 'our side'))
+            failures += 1
+            continue
+        enabled = original.get('screen') in screens or \
+            ours.get('screen') in screens
+        if enabled:
+            counts['frames'] += 1
+        unknown = []
+        hits = []
+        for field, va, vb in field_differences(original, ours):
+            entry = known_entry(known, name, field)
+            if entry:
+                hits.append((name, field, va, vb, entry))
+            else:
+                unknown.append((field, va, vb))
+        known_hits.extend(hits)
+        if not unknown and not hits:
+            continue
+        if not unknown:
+            state = 'match'
+        elif enabled:
+            state = 'DIFFERENT'
+            failures += len(unknown)
+        else:
+            state = 'different, screen not enabled'
+            counts['frames_outside'] += 1
+        lines.append('frame %d (%s): %s' % (frame, original.get('screen'),
+                                            state))
+        for field, va, vb in unknown:
+            lines.append('  %s %s: original %s, ours %s' % (
+                'DIFF' if enabled else 'diff', field, json.dumps(va),
+                json.dumps(vb)))
+        for hit in hits:
+            lines.append('  KNOWN %s: original %s, ours %s (%s; evidence %s)'
+                         % (hit[1], json.dumps(hit[2]), json.dumps(hit[3]),
+                            hit[4]['reason'], hit[4]['evidence']))
+    lines.insert(0, 'periodic dumps: %d on both sides, %d on an enabled '
+                 'screen' % (len(both), counts['frames']))
+    for label, only in (('the original', set(files[0]) - set(files[1])),
+                        ('our side', set(files[1]) - set(files[0]))):
+        if only:
+            only = sorted(only)
+            lines.append('note: %d periodic dump%s only on %s (frame%s %s)'
+                         % (len(only), '' if len(only) == 1 else 's', label,
+                            '' if len(only) == 1 else 's',
+                            ', '.join(str(f) for f in only)
+                            if len(only) <= 5 else
+                            '%d to %d' % (only[0], only[-1])))
+    return lines, failures, known_hits
+
+
 def cmd_replay_compare(args):
     with filelock.hold(REPLAY_LOCK, 'replay'):
         return replay_compare(args)
@@ -1999,6 +2108,13 @@ def replay_compare(args):
     lines, failures, known_hits = compare_checkpoints(
         os.path.join(run_dir, 'original'), os.path.join(run_dir, 'ours'),
         names, screens, known, counts)
+    # The periodic dumps between the checkpoints, on the same screens.
+    frame_lines, frame_failures, frame_hits = compare_frames(
+        os.path.join(run_dir, 'original'), os.path.join(run_dir, 'ours'),
+        screens, known, counts)
+    lines += frame_lines
+    failures += frame_failures
+    known_hits += frame_hits
     for line in lines:
         print(line)
     for entry in stale_known(known, known_hits):
@@ -2025,14 +2141,17 @@ def replay_compare(args):
 
 def compare_verdict(failures, original, ours, known_hits, counts):
     """The result lines of replay compare: failures and known_hits from
-    compare_checkpoints, original and ours the two runs' exit codes, and
-    counts the dict compare_checkpoints filled. A match counts only the
-    checkpoints on enabled screens; a second line says how many others
-    differed."""
+    compare_checkpoints and compare_frames, original and ours the two runs'
+    exit codes, and counts the dict they filled. A match counts only the
+    checkpoints and periodic dumps on enabled screens; a note says how many
+    others differed."""
     runs_ok = original == 0 and ours == 0
     if failures == 0 and runs_ok:
         verdict = 'MATCH at %d of %d checkpoints' % (counts['enabled'],
                                                      counts['enabled'])
+        if counts.get('frames'):
+            verdict += ' and %d of %d periodic dumps' % (counts['frames'],
+                                                         counts['frames'])
         if known_hits:
             verdict += ', with %d known difference%s' % (
                 len(known_hits), '' if len(known_hits) == 1 else 's')
@@ -2047,6 +2166,11 @@ def compare_verdict(failures, original, ours, known_hits, counts):
         lines.append('note: %d checkpoint%s differed outside the enabled '
                      'screens' % (counts['outside'],
                                   '' if counts['outside'] == 1 else 's'))
+    if counts.get('frames_outside'):
+        lines.append('note: %d periodic dump%s differed outside the enabled '
+                     'screens' % (counts['frames_outside'],
+                                  '' if counts['frames_outside'] == 1
+                                  else 's'))
     return lines
 
 

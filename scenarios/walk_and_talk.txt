@@ -261,6 +261,10 @@ click 340 399
 wait 60
 click 398 583
 wait 60
+# Reig's state 4 goes on to state 2 of 10JON, Jon's dialog: Jon (786444)
+# speaks it (CGameDialogSprite::Reload finds him with
+# GetNearestDialogMatch), with one response, Continue.
+checkpoint jon_dialog
 click 398 583
 wait 60
 click 398 583

@@ -2,10 +2,12 @@
 
 #include "CAIScriptFile.h"
 #include "CBaldurChitin.h"
+#include "CCreatureFile.h"
 #include "CGameArea.h"
 #include "CGameSprite.h"
 #include "CInfGame.h"
 #include "CMessage.h"
+#include "CPathSearch.h"
 #include "CResDLG.h"
 #include "CScreenWorld.h"
 #include "CUIControlButton.h"
@@ -14,8 +16,6 @@
 #include "CUtil.h"
 #include "CVidPalette.h"
 #include "ScreenLayout.h"
-
-#include <cstdio>
 
 // NOTE: Inlined.
 CGameDialogSprite::CGameDialogSprite()
@@ -394,26 +394,92 @@ void CGameDialogSprite::Reload(CResRef file, CGameSprite* pTalker)
         if (pTalker->m_dialog == file || pTalker->field_56E4 == file) {
             nTalkerId = pTalker->GetId();
         } else {
-            // TODO: Incomplete. 0x48254A..0x482596: the nearest creature of
-            // the talker's area whose dialog is `file`
-            // (CGameArea::GetNearestDialogMatch, 0x46C460, not ported; the
-            // movement stream's file). The talker is kept.
-            //
-            // iwd2r: said on stderr, so a link to another creature's dialog
-            // cannot diverge from the original unnoticed.
-            fprintf(stderr,
-                "iwd2r: CGameDialogSprite::Reload: dialog %s is not the talker's; keeping talker %d (GetNearestDialogMatch not ported)\n",
-                static_cast<const char*>(file.GetResRefStr()),
-                static_cast<int>(m_talkerIndex));
-            nTalkerId = m_talkerIndex;
+            CGameArea* pArea = pTalker->m_pArea;
+            if (pArea->m_cInfinity.nAreaX > pArea->m_cInfinity.nAreaY) {
+                nTalkerId = pArea->GetNearestDialogMatch(pTalker->GetId(),
+                    file,
+                    pArea->m_cInfinity.nAreaX);
+            } else {
+                nTalkerId = pArea->GetNearestDialogMatch(pTalker->GetId(),
+                    file,
+                    pArea->m_cInfinity.nAreaY);
+            }
         }
 
-        if (nTalkerId == -1) {
-            // TODO: Incomplete. 0x4825A0..0x4829BB: no creature has the
-            // dialog; the original creates the DIALOGMO understudy ("Where's
-            // Mo the understudy?") next to the talker and talks through it.
-            // Unreachable until GetNearestDialogMatch is ported.
-            return;
+        if (nTalkerId == CGameObjectArray::INVALID_INDEX) {
+            // No creature of the area has the dialog: the DIALOGMO
+            // understudy is made next to the talker and speaks it.
+            CString sFile;
+            file.CopyToString(sFile);
+
+            // NOTE: Unused.
+            CString sError = "No sprite with dialog file: " + sFile;
+
+            CPoint ptTalker = pTalker->GetPos();
+            LONG nGridY = ptTalker.y / CPathSearch::GRID_SQUARE_SIZEY;
+            LONG nGridX = ptTalker.x / CPathSearch::GRID_SQUARE_SIZEX;
+            BYTE nPersonalSpace = pTalker->m_animation.GetPersonalSpace();
+            CPoint ptOpen = pTalker->m_pArea->m_search.GetNearestOpenSquare(CPoint(nGridX, nGridY),
+                pTalker->GetTerrainTable(),
+                nPersonalSpace,
+                -1);
+
+            CCreatureFile creatureData;
+
+            // NOTE: Uninline.
+            creatureData.SetResRef(CResRef("DIALOGMO"), TRUE, TRUE);
+
+            CGameSprite* pUnderstudy = new CGameSprite(creatureData.GetData(),
+                creatureData.GetDataSize(),
+                0,
+                0,
+                -1,
+                0,
+                0,
+                0x7FFFFFFF,
+                CPoint(-1, -1),
+                0);
+
+            pUnderstudy->SetResRef(CResRef(creatureData.GetResRef().GetResRefStr()));
+
+            creatureData.ReleaseData();
+
+            if (pUnderstudy == NULL) {
+                // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameDialog.cpp
+                // __LINE__: 349
+                UTIL_ASSERT_MSG(FALSE, "Where's Mo the understudy?");
+                return;
+            }
+
+            LONG nUnderstudy = pUnderstudy->GetId();
+            CString sName("DIALOGMO");
+            pUnderstudy->SetResRef(CResRef(sName));
+
+            if (g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetDeny(nUnderstudy,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    reinterpret_cast<CGameObject**>(&pUnderstudy),
+                    INFINITE)
+                != CGameObjectArray::SUCCESS) {
+                // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameDialog.cpp
+                // __LINE__: 360
+                UTIL_ASSERT_MSG(FALSE, "Where's Mo the understudy?");
+                return;
+            }
+
+            pUnderstudy->AddToArea(pTalker->m_pArea,
+                CPoint(ptOpen.x * CPathSearch::GRID_SQUARE_SIZEX, ptOpen.y * CPathSearch::GRID_SQUARE_SIZEY),
+                0,
+                pUnderstudy->m_animation.GetListType());
+            pUnderstudy->m_dialog = CResRef(sFile);
+
+            nUnderstudy = pUnderstudy->GetId();
+            pUnderstudy->SetSequence(CGameSprite::SEQ_READY);
+
+            g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(nUnderstudy,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+
+            nTalkerId = nUnderstudy;
         }
     }
 

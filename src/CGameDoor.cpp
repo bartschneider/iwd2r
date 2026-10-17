@@ -49,13 +49,13 @@ CGameDoor::CGameDoor(CGameArea* pArea, CAreaFileDoorObject* pDoorObject, CAreaPo
 
     m_rOpenBounding.left = pDoorObject->m_openBoundingRectLeft;
     m_rOpenBounding.top = pDoorObject->m_openBoundingRectTop;
-    m_rOpenBounding.right = pDoorObject->m_openBoundingRectRight;
-    m_rOpenBounding.bottom = pDoorObject->m_openBoundingRectBottom;
+    m_rOpenBounding.right = pDoorObject->m_openBoundingRectRight + 1;
+    m_rOpenBounding.bottom = pDoorObject->m_openBoundingRectBottom + 1;
 
     m_rClosedBounding.left = pDoorObject->m_closedBoundingRectLeft;
     m_rClosedBounding.top = pDoorObject->m_closedBoundingRectTop;
-    m_rClosedBounding.right = pDoorObject->m_closedBoundingRectRight;
-    m_rClosedBounding.bottom = pDoorObject->m_closedBoundingRectBottom;
+    m_rClosedBounding.right = pDoorObject->m_closedBoundingRectRight + 1;
+    m_rClosedBounding.bottom = pDoorObject->m_closedBoundingRectBottom + 1;
 
     m_cursorType = pDoorObject->m_cursorType;
     m_dwFlags = pDoorObject->m_dwFlags;
@@ -128,7 +128,7 @@ CGameDoor::CGameDoor(CGameArea* pArea, CAreaFileDoorObject* pDoorObject, CAreaPo
                     || (y2 == y1 && y1 == y0)
                     || (x2 != x1
                         && x1 != x0
-                        && 1000 * (y2 - y1) / (x2 - x1) != 1000 * (y1 - y0) / (x1 - x0))) {
+                        && 1000 * (y2 - y1) / (x2 - x1) == 1000 * (y1 - y0) / (x1 - x0))) {
                     m_pOpenPolygon[cnt - adjust - 1] = m_pOpenPolygon[cnt - adjust];
                     adjust++;
                 }
@@ -167,7 +167,7 @@ CGameDoor::CGameDoor(CGameArea* pArea, CAreaFileDoorObject* pDoorObject, CAreaPo
                     || (y2 == y1 && y1 == y0)
                     || (x2 != x1
                         && x1 != x0
-                        && 1000 * (y2 - y1) / (x2 - x1) != 1000 * (y1 - y0) / (x1 - x0))) {
+                        && 1000 * (y2 - y1) / (x2 - x1) == 1000 * (y1 - y0) / (x1 - x0))) {
                     m_pClosedPolygon[cnt - adjust - 1] = m_pClosedPolygon[cnt - adjust];
                     adjust++;
                 }
@@ -1240,8 +1240,7 @@ void CGameDoor::ToggleDoor(const CAIObjectType& cause, BOOL bForce)
             STRREF strNotPickable = m_strNotPickable;
             if (static_cast<LONG>(strNotPickable) > -1) {
                 if (g_pChitin->cNetwork.GetServiceProvider() == CNetwork::SERV_PROV_NULL) {
-                    // TODO: 0x48A54A-0x48A556, the door's floating text
-                    // (CGameObject 0x4C80E0 with 10 and 5, not ported).
+                    FloatText(strNotPickable, 10, 5);
                 } else {
                     // NOTE: A connected game sends the floating text
                     // (CMessageFloatText). Omitted: single player only
