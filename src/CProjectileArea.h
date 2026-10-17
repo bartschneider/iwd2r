@@ -121,6 +121,56 @@ public:
     CProjectileArea84F580();
 };
 
+// Cloudkill (projectile type 187, vtable 0x84F310): CloudKX, up to 13
+// CloudKR clouds and lingering CloudKA ones, 150 around, 1000 ticks.
+class CProjectileArea84F310 : public CProjectileArea {
+public:
+    CProjectileArea84F310();
+};
+
+
+// Entangle (projectile type 235, vtable 0x84F4E4): EntangX and lingering
+// EntangA vines, 200 around, 1000 ticks.
+class CProjectileArea84F4E4 : public CProjectileArea {
+public:
+    CProjectileArea84F4E4();
+};
+
+// Fire Seeds, Flaming Oil (projectile type 270, vtable 0x84F61C): flies as
+// MagicStn and bursts in FSeedsX, 70 around.
+class CProjectileArea84F61C : public CProjectileArea {
+public:
+    CProjectileArea84F61C();
+};
+
+// Fire Storm, Lightning Bolt (projectile type 92, vtable 0x84F6B8): FStormX
+// and lingering FStormA flames, 200 around, 105 ticks.
+class CProjectileArea84F6B8 : public CProjectileArea {
+public:
+    CProjectileArea84F6B8();
+};
+
+// Grease (projectile type 101, vtable 0x84F7F0): GreaseX and lingering
+// GreaseA, 100 around, 1000 ticks.
+class CProjectileArea84F7F0 : public CProjectileArea {
+public:
+    CProjectileArea84F7F0();
+};
+
+// Stinking Cloud (projectile type 95, vtable 0x8501B0): SCloudX, up to 13
+// SCloudR clouds and lingering SCloudA ones, 100 around, 1000 ticks.
+class CProjectileArea8501B0 : public CProjectileArea {
+public:
+    CProjectileArea8501B0();
+};
+
+// Web (projectile type 64, vtable 0x8502E8): WebX and lingering WebA
+// strands, 150 around, 1500 ticks.
+class CProjectileArea8502E8 : public CProjectileArea {
+public:
+    CProjectileArea8502E8();
+};
+
 // The area projectile of Static Charge (effect 264, vtable 0x850078): it
 // strikes the first target found, else the caster's spell ends.
 class CProjectileArea850078 : public CProjectileArea {

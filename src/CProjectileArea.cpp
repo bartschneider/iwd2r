@@ -8,7 +8,9 @@
 #include "CGameSprite.h"
 #include "CInfGame.h"
 #include "CParticle.h"
+#include "CProjectileShaft.h"
 #include "CUtil.h"
+#include "IcewindCGameEffects.h"
 #include "IcewindMisc.h"
 
 #include <math.h>
@@ -504,6 +506,196 @@ void CProjectileArea::SetTravelAnimation(const CResRef& resRef)
     }
 
     m_animation = new CVidCell(resRef, FALSE);
+}
+
+// 0x571310
+CProjectileArea84F310::CProjectileArea84F310()
+    // NOTE: The radius is the WORD at 0x84F1BC (256), then 150.
+    : CProjectileArea(256)
+{
+    m_explosion1.m_animation = "CloudKX";
+    m_explosion1.m_sound = "RNG_M01";
+    m_explosion1.m_visualEffect.sub_586A90(TRUE);
+
+    m_explosion2.m_animation = "CloudKR";
+    m_explosion2.m_visualEffect.sub_586A90(TRUE);
+    m_explosion2.field_2C = TRUE;
+    m_explosion2.field_2E = 13;
+
+    m_explosion3.m_animation = "CloudKA";
+    m_explosion3.m_sound = "ARE_M02";
+    m_explosion3.m_visualEffect.sub_586A90(TRUE);
+
+    m_nTriggerInterval = 10;
+    m_nHitModulus = 10;
+    m_explosion3.field_34 = TRUE;
+    m_explosion3.field_35 = TRUE;
+    m_explosion3.field_38 = 500;
+    m_nTriggerCountdown = 0;
+    m_nDuration = 1000;
+    field_1D8 = 1;
+    m_nRadius = 150;
+}
+
+// -----------------------------------------------------------------------------
+
+// 0x571CE0
+CProjectileArea84F4E4::CProjectileArea84F4E4()
+    // NOTE: The radius is the WORD at 0x84F1BC (256), then 200.
+    : CProjectileArea(256)
+{
+    m_explosion1.m_animation = "EntangX";
+    m_explosion1.m_visualEffect.sub_586A90(TRUE);
+
+    m_explosion3.m_animation = "EntangA";
+    m_explosion3.m_sound = "ARE_P01";
+    m_explosion3.m_visualEffect.sub_586A90(TRUE);
+
+    m_nTriggerInterval = 10;
+    m_nHitModulus = 10;
+    m_explosion3.field_34 = TRUE;
+    m_explosion3.field_35 = TRUE;
+    m_explosion3.field_38 = 450;
+    m_nTriggerCountdown = 0;
+    m_nDuration = 1000;
+    m_nRadius = 200;
+}
+
+// -----------------------------------------------------------------------------
+
+// 0x572110
+CProjectileArea84F61C::CProjectileArea84F61C()
+    // NOTE: The radius is the WORD at 0x84F1BC (256), then 70.
+    : CProjectileArea(256)
+{
+    // NOTE: Inlined: the travel animation of a name that is not empty.
+    const char* szTravel = "MagicStn";
+    if (strlen(szTravel) != 0) {
+        field_1DE = TRUE;
+        SetTravelAnimation(CResRef(szTravel));
+        m_bTravels = TRUE;
+    } else {
+        field_1DE = FALSE;
+        m_bTravels = FALSE;
+    }
+
+    m_explosion1.m_animation = "FSeedsX";
+    m_explosion1.m_sound = "EFF_P45";
+    m_explosion1.m_visualEffect.sub_586A90(TRUE);
+
+    m_nTriggerInterval = 10000;
+    m_nTriggerCountdown = 0;
+    m_nHitModulus = 10;
+    m_nDuration = 45;
+    field_1D8 = 16;
+    m_nRadius = 70;
+}
+
+// -----------------------------------------------------------------------------
+
+// 0x572290
+CProjectileArea84F6B8::CProjectileArea84F6B8()
+    // NOTE: The radius is the WORD at 0x84F1BC (256), then 200.
+    : CProjectileArea(256)
+{
+    m_explosion1.m_animation = "FStormX";
+    m_explosion1.m_sound = "EFF_P45";
+    m_explosion1.m_visualEffect.sub_586A90(TRUE);
+
+    m_explosion3.m_animation = "FStormA";
+    m_explosion3.m_sound = "ARE_P03";
+    m_explosion3.m_visualEffect.sub_586A90(TRUE);
+
+    m_nTriggerInterval = 10;
+    m_nHitModulus = 10;
+    m_explosion3.field_34 = TRUE;
+    m_explosion3.field_35 = TRUE;
+    m_nTriggerCountdown = 0;
+    m_nDuration = 105;
+    field_1D8 = 1;
+    m_nRadius = 200;
+}
+
+// -----------------------------------------------------------------------------
+
+// 0x572670
+CProjectileArea84F7F0::CProjectileArea84F7F0()
+    // NOTE: The radius is the WORD at 0x84F1BC (256), then 100.
+    : CProjectileArea(256)
+{
+    m_explosion1.m_animation = "GreaseX";
+    m_explosion1.m_sound = "EFF_M31b";
+    m_explosion1.m_visualEffect.sub_586A90(TRUE);
+
+    m_explosion3.m_animation = "GreaseA";
+    m_explosion3.m_sound = "ARE_M01";
+    m_explosion3.m_visualEffect.sub_586A90(TRUE);
+
+    m_nTriggerInterval = 10;
+    m_nHitModulus = 10;
+    m_explosion3.field_38 = 1000;
+    m_nDuration = 1000;
+    m_explosion3.field_34 = TRUE;
+    m_explosion3.field_35 = TRUE;
+    m_nTriggerCountdown = 0;
+    field_1D8 = 1;
+    m_nRadius = 100;
+}
+
+// -----------------------------------------------------------------------------
+
+// 0x574B80
+CProjectileArea8501B0::CProjectileArea8501B0()
+    // NOTE: The radius is the WORD at 0x84F1BC (256), then 100.
+    : CProjectileArea(256)
+{
+    m_explosion1.m_animation = "SCloudX";
+    m_explosion1.m_sound = "RNG_M01";
+    m_explosion1.m_visualEffect.sub_586A90(TRUE);
+
+    m_explosion2.m_animation = "SCloudR";
+    m_explosion2.m_visualEffect.sub_586A90(TRUE);
+    m_explosion2.field_2C = TRUE;
+    m_explosion2.field_2E = 13;
+
+    m_explosion3.m_animation = "SCloudA";
+    m_explosion3.m_sound = "ARE_M02";
+    m_explosion3.m_visualEffect.sub_586A90(TRUE);
+
+    m_nTriggerInterval = 10;
+    m_nHitModulus = 10;
+    m_explosion3.field_38 = 1000;
+    m_nDuration = 1000;
+    m_explosion3.field_34 = TRUE;
+    m_explosion3.field_35 = TRUE;
+    m_nTriggerCountdown = 0;
+    field_1D8 = 1;
+    m_nRadius = 100;
+}
+
+// -----------------------------------------------------------------------------
+
+// 0x574EB0
+CProjectileArea8502E8::CProjectileArea8502E8()
+    // NOTE: The radius is the WORD at 0x84F1BC (256), then 150.
+    : CProjectileArea(256)
+{
+    m_explosion1.m_animation = "WebX";
+    m_explosion1.m_sound = "EFF_M19";
+    m_explosion1.m_visualEffect.sub_586A90(TRUE);
+
+    m_explosion3.m_animation = "WebA";
+    m_explosion3.m_sound = "ARE_M03";
+    m_explosion3.m_visualEffect.sub_586A90(TRUE);
+
+    m_nTriggerInterval = 10;
+    m_nHitModulus = 10;
+    m_explosion3.field_34 = TRUE;
+    m_explosion3.field_35 = TRUE;
+    m_explosion3.field_38 = 450;
+    m_nTriggerCountdown = 0;
+    m_nDuration = 1500;
+    m_nRadius = 150;
 }
 
 // 0x574970
