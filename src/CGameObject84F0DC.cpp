@@ -254,12 +254,15 @@ void CGameObject84F0DC::AIUpdate()
         CPoint ptGrid(((particle.x >> CGameSprite::EXACT_SCALE) + m_pos.x) / CPathSearch::GRID_SQUARE_SIZEX,
             (((particle.y * 3) / 4 >> CGameSprite::EXACT_SCALE) + m_pos.y) / CPathSearch::GRID_SQUARE_SIZEY);
 
-        // NOTE: The original checks no bounds, so a particle past the area's
-        // left or top edge reads the search map before its start. Ours
-        // takes such a square for a wall (P4-10).
+        // NOTE: CSearchBitmap::GetLOSCost reads the map at x + width * y with
+        // no lower bound, so the original reads before the map for a square
+        // whose index is negative (left of the area's first row, or above
+        // the area). Ours takes such a square for a wall (P4-10); a square
+        // left of the area on a later row reads the row above's last
+        // squares, as the original does.
         SHORT nTableIndex;
         BYTE nCost = CPathSearch::COST_IMPASSABLE;
-        if (ptGrid.x >= 0 && ptGrid.y >= 0) {
+        if (ptGrid.x + m_pArea->m_search.m_GridSquareDimensions.cx * ptGrid.y >= 0) {
             nCost = m_pArea->m_search.GetLOSCost(ptGrid, m_terrainTable, nTableIndex, FALSE);
         }
 
@@ -366,8 +369,10 @@ void CGameObject84F0DC::AIUpdate()
     if (bDone) {
         if (m_bAnimation == TRUE) {
             if (m_animation.IsEndOfSequence(FALSE)) {
-                // NOTE: The original reads +0x2A0 of the deleted explosion
-                // next (0x56D6EF); ours returns (P4-10).
+                // NOTE: On both paths, this one (0x56D6DF) and the one
+                // without an animation (0x56D6E8), the original goes on to
+                // 0x56D6EF and reads +0x2A0 of the deleted explosion; ours
+                // returns (P4-10).
                 RemoveFromArea();
                 return;
             }

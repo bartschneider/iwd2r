@@ -150,12 +150,15 @@ void CGameObject84F14C::AIUpdate()
     CPoint ptNewGrid(m_pos.x / CPathSearch::GRID_SQUARE_SIZEX,
         m_pos.y / CPathSearch::GRID_SQUARE_SIZEY);
     if (ptOldGrid.x != ptNewGrid.x || ptOldGrid.y != ptNewGrid.y) {
-        // NOTE: The original checks no bounds, so a piece past the area's
-        // left or top edge reads the search map before its start. Ours
-        // takes such a square for a wall (P4-10).
+        // NOTE: CSearchBitmap::GetLOSCost reads the map at x + width * y with
+        // no lower bound, so the original reads before the map for a square
+        // whose index is negative (left of the area's first row, or above
+        // the area). Ours takes such a square for a wall (P4-10); a square
+        // left of the area on a later row reads the row above's last
+        // squares, as the original does.
         SHORT nTableIndex;
         BYTE nCost = CPathSearch::COST_IMPASSABLE;
-        if (ptNewGrid.x >= 0 && ptNewGrid.y >= 0) {
+        if (ptNewGrid.x + m_pArea->m_search.m_GridSquareDimensions.cx * ptNewGrid.y >= 0) {
             nCost = m_pArea->m_search.GetLOSCost(ptNewGrid, m_terrainTable, nTableIndex, FALSE);
         }
 
