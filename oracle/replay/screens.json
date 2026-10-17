@@ -1,6 +1,8 @@
 [
+  "chapter",
   "connection",
   "create_char",
+  "single_player",
   "world",
   "load",
   "save"

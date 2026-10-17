@@ -11223,16 +11223,28 @@ void CGameSprite::SetModalState(BYTE modalState, BOOL bUpdateToolbar)
                                 && IcewindMisc::sud_585070(pTarget) != TRUE
                                 && !pTarget->m_derivedStats.m_spellStates.test(SPLSTATE_DEAFENED)))
                         && IcewindMisc::sub_585230(this, pTarget)) {
-                        // TODO: Incomplete (0x720004-0x7201A0): one effect
-                        // per effect of the song's first ability
-                        // (CSpell_DecodeEffect, 0x54A510, with the caster's
-                        // position and id, IcewindMisc::sub_5860F0, a
-                        // permanent effect of duration type 7 made timed for
-                        // 200 ticks), each wrapped in a CMessageAddEffect
-                        // (vtable 0x8487CC) and all sent as one CMessageGroup
-                        // (0x5152C0). Neither CSpell_DecodeEffect nor
-                        // CMessageGroup is in src/ yet.
-                        (void)pAbility;
+                        // The song lingers: each effect of its first ability,
+                        // from this creature, as one group of messages.
+                        std::list<CMessage*> messages;
+                        for (INT nEffect = 0; nEffect < pAbility->effectCount; nEffect++) {
+                            CGameEffect* pEffect = cSpell.GetAbilityEffect(0, nEffect, this, 0, 0, 0);
+                            pEffect->m_source = m_pos;
+                            pEffect->m_sourceID = m_id;
+                            IcewindMisc::sub_5860F0(this, pEffect);
+
+                            // NOTE: The duration types are the WORD constants
+                            // at 0x8491A8 (0) and 0x8491BC (0x1000: the
+                            // duration is absolute).
+                            if (pEffect->m_durationType == 0 && pEffect->m_duration == 7) {
+                                pEffect->m_durationType = 0x1000;
+                                pEffect->m_duration = g_pBaldurChitin->GetObjectGame()->GetWorldTimer()->m_gameTime + 200;
+                            }
+
+                            messages.push_back(new CMessageAddEffect(pEffect, m_id, pTarget->m_id));
+                        }
+
+                        CMessageGroup* pMessage = new CMessageGroup(messages, m_id, pTarget->m_id);
+                        g_pBaldurChitin->GetMessageHandler()->AddMessage(pMessage, FALSE);
                     }
                 }
 
@@ -17991,8 +18003,7 @@ SHORT CGameSprite::Swing(CGameSprite* target)
             abilityId.m_itemType = 2;
             abilityId.m_itemNum = nSlot;
             abilityId.m_abilityNum = nAbility;
-            // TODO: 0x73B19A-0x73B1BD calls CheckQuickLists 0x71ABA0 (not
-            // ported) with the ability, -1, 0, 0.
+            CheckQuickLists(&abilityId, -1, FALSE, FALSE);
         }
 
         if (m_derivedStats.m_spellStates[SPLSTATE_SMITE_EVIL]) {
@@ -20371,10 +20382,18 @@ SHORT CGameSprite::Spell(CGameAIBase* target)
                         BOOLEAN a3 = FALSE;
                         m_spells.Get(nClassIndex)->sub_7261A0(nLevel, a2, a3);
                         bRefresh = FALSE;
-                        // TODO: The original then refreshes the quick
-                        // spells of each spell of the level through
-                        // CheckQuickLists 0x71ABA0 (not ported),
-                        // 0x7412F5-0x741465.
+
+                        // Every spell of the level shares the slot spent:
+                        // each one's quick buttons are refreshed.
+                        CAbilityId abilityId;
+                        abilityId.m_itemType = 1;
+                        abilityId.m_nClass = nClass;
+                        abilityId.field_1D = static_cast<BYTE>(nSpellLevel);
+                        for (UINT nSpell = 0; nSpell < m_spells.Get(nClassIndex)->GetSpellsAtLevel(nLevel)->m_List.size(); nSpell++) {
+                            UINT nSpellID = m_spells.Get(nClassIndex)->GetSpellsAtLevel(nLevel)->Get(nSpell)->m_nID;
+                            abilityId.m_res = pGame->m_spells.Get(nSpellID);
+                            CheckQuickLists(&abilityId, -1, FALSE, FALSE);
+                        }
                     } else {
                         UINT nLevel = static_cast<BYTE>(nSpellLevel) - 1;
                         unsigned int a4 = 1;
@@ -20444,9 +20463,17 @@ SHORT CGameSprite::Spell(CGameAIBase* target)
                     }
 
                     bRefresh = FALSE;
-                    // TODO: The original then refreshes the quick spells of
-                    // each shapeshift through CheckQuickLists 0x71ABA0 (not
-                    // ported), 0x7417D5-0x7418A3.
+
+                    // Each shapeshift's quick buttons are refreshed.
+                    CAbilityId abilityId;
+                    abilityId.m_itemType = 1;
+                    abilityId.m_nClass = nClass;
+                    abilityId.field_1D = static_cast<BYTE>(nSpellLevel);
+                    for (UINT nShape = 0; nShape < m_shapeshifts.m_List.size(); nShape++) {
+                        UINT nShapeID = m_shapeshifts.Get(nShape)->m_nID;
+                        abilityId.m_res = pGame->m_shapeshifts.Get(nShapeID);
+                        CheckQuickLists(&abilityId, -1, FALSE, FALSE);
+                    }
                 }
             }
 
@@ -20459,9 +20486,17 @@ SHORT CGameSprite::Spell(CGameAIBase* target)
             }
 
             if (bRefresh) {
-                // TODO: The original refreshes the spell's quick buttons
-                // through CheckQuickLists 0x71ABA0 (not ported),
-                // 0x7418A3-0x741971.
+                // The spell's own quick buttons are refreshed; a class
+                // spell names its class, level and domain.
+                CAbilityId abilityId;
+                abilityId.m_itemType = 1;
+                abilityId.m_res = sResRef;
+                if (nSpellType == 1) {
+                    abilityId.m_nClass = nClass;
+                    abilityId.field_1E = nDomain;
+                    abilityId.field_1D = static_cast<BYTE>(nSpellLevel);
+                }
+                CheckQuickLists(&abilityId, -1, FALSE, FALSE);
             }
         }
     }
@@ -22784,10 +22819,8 @@ SHORT CGameSprite::sub_75E330(CItem* pLauncher, BOOL bEquipMelee)
                         SetQuickWeapon(buttonNum, static_cast<BYTE>(nItemNum));
                     }
 
-                    // TODO: The original calls CheckQuickLists (0x71ABA0,
-                    // not ported) with a default CAbilityId and 0, FALSE,
-                    // FALSE here: it refreshes the quick lists' counts and
-                    // the action bar.
+                    CAbilityId abilityId;
+                    CheckQuickLists(&abilityId, 0, FALSE, FALSE);
 
                     // NOTE: The original deletes the list without its other
                     // nodes' button data (a leak, kept).
