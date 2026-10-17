@@ -3343,6 +3343,9 @@ class GenFieldsTest(unittest.TestCase):
             [('A', 0), ('F', 8)])
         self.assertEqual(gen_fields.bases('class C {'), [])
         self.assertEqual(gen_fields.bases('struct S : T {'), [('T', 0)])
+        self.assertEqual(gen_fields.bases(
+            'class C : public ns::B<int>, private ::top :: D /* base 4 */ {'),
+            [('B', 0), ('D', 4)])
         # CString: its m_pchData, the pointer to its characters.
         out = self.generate({'name': {'class': 'CHolderNamed',
                                       'member': 'm_sName.m_pchData'}})
