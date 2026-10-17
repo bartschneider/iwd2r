@@ -449,6 +449,15 @@ const BYTE CBaldurMessage::MSG_SUBTYPE_BIOGRAPHY_CHANGE = 99;
 // 0x84CF6D
 const BYTE CBaldurMessage::MSG_SUBTYPE_BIOGRAPHY_CHANGE_ANNOUNCE = 67;
 
+// 0x84CF72
+const BYTE CBaldurMessage::MSG_TYPE_DELETEAREA = 107;
+
+// 0x84CF73
+const BYTE CBaldurMessage::MSG_SUBTYPE_DELETEAREA_POLL = 115;
+
+// 0x84CF75
+const BYTE CBaldurMessage::MSG_SUBTYPE_DELETEAREA_RESULT = 100;
+
 // 0x84CF6E
 const BYTE CBaldurMessage::MSG_TYPE_KICK_PLAYER = 75;
 
@@ -3722,7 +3731,7 @@ BOOLEAN CBaldurMessage::AnnounceJournalUserEntry(CString szText, BYTE nCharacter
     DWORD cnt;
 
     if (!g_pChitin->cNetwork.GetSessionOpen()
-        || g_pChitin->cNetwork.GetSessionHosting() == TRUE) {
+        || g_pChitin->cNetwork.GetSessionHosting() != TRUE) {
         return FALSE;
     }
 
@@ -3922,7 +3931,7 @@ BOOLEAN CBaldurMessage::AnnounceJournalEntryChange(CString szText, BYTE nCharact
     DWORD cnt;
 
     if (!g_pChitin->cNetwork.GetSessionOpen()
-        || g_pChitin->cNetwork.GetSessionHosting() == TRUE) {
+        || g_pChitin->cNetwork.GetSessionHosting() != TRUE) {
         return FALSE;
     }
 
@@ -4017,7 +4026,7 @@ BOOLEAN CBaldurMessage::SendBiographyToServer(BYTE nFixedPartyId, CString szBio)
     DWORD nTextLength;
 
     if (!g_pChitin->cNetwork.GetSessionOpen()
-        || g_pChitin->cNetwork.GetSessionHosting() != TRUE) {
+        || g_pChitin->cNetwork.GetSessionHosting() == TRUE) {
         return FALSE;
     }
 
@@ -4173,6 +4182,66 @@ BOOLEAN CBaldurMessage::OnAnnounceBiography(INT nMsgFrom, BYTE* pByteMessage, DW
 
 // FIXME: `sAreaString` should be reference.
 //
+// 0x43AE40
+BOOLEAN CBaldurMessage::StartDeleteAreaPoll(CString sAreaString, BOOLEAN bResend)
+{
+    DWORD nLength;
+    DWORD cnt;
+    BYTE* pMessage;
+
+    if (!g_pChitin->cNetwork.GetSessionOpen()
+        || !g_pChitin->cNetwork.GetSessionHosting()) {
+        return FALSE;
+    }
+
+    // A resend keeps the votes already cast; a new poll asks every player.
+    if (bResend == FALSE) {
+        for (BYTE nPlayer = 0; nPlayer < CMultiplayerSettings::MAX_PLAYERS; nPlayer++) {
+            PLAYER_ID idPlayer = g_pChitin->cNetwork.GetPlayerID(nPlayer);
+            m_pnDeleteAreaVoters[nPlayer] = idPlayer;
+
+            if (idPlayer == 0 || idPlayer == g_pChitin->cNetwork.m_idLocalPlayer) {
+                m_pnDeleteAreaVotes[nPlayer] = DELETEAREA_EMPTY_VOTE;
+            } else {
+                m_pnDeleteAreaVotes[nPlayer] = DELETEAREA_PENDING_VOTE;
+            }
+        }
+    }
+
+    SetDeleteAreaString(sAreaString);
+    m_bDeleteAreaPolling = TRUE;
+    m_dwDeleteAreaTimeout = GetTickCount() + 5000;
+
+    // NOTE: The original prefixes the area name with its length as a single
+    // byte (0x43AF63).
+    nLength = sAreaString.GetLength() & 0xff;
+    pMessage = CreateBuffer(nLength + 1);
+    if (pMessage == NULL) {
+        return FALSE;
+    }
+
+    cnt = 0;
+
+    *reinterpret_cast<BYTE*>(pMessage + cnt) = static_cast<BYTE>(nLength);
+    cnt += sizeof(BYTE);
+
+    memcpy(pMessage + cnt, sAreaString, nLength);
+    cnt += nLength;
+
+    g_pChitin->cNetwork.SendSpecificMessage(CString(""),
+        CNetwork::SEND_GUARANTEED | CNetwork::SEND_ALL_PLAYERS,
+        MSG_TYPE_DELETEAREA,
+        MSG_SUBTYPE_DELETEAREA_POLL,
+        pMessage,
+        cnt);
+
+    DestroyBuffer(pMessage);
+
+    return TRUE;
+}
+
+// FIXME: `sAreaString` should be reference.
+//
 // 0x43B030
 void CBaldurMessage::SetDeleteAreaString(CString sAreaString)
 {
@@ -4185,13 +4254,67 @@ CString CBaldurMessage::GetDeleteAreaString()
     return m_sDeleteAreaString;
 }
 
+// FIXME: `sAreaString` should be reference.
+//
+// 0x43B4E0
+BOOLEAN CBaldurMessage::ResolveDeleteAreaPoll(CString sAreaString, BOOLEAN bResult)
+{
+    DWORD nLength;
+    DWORD cnt;
+    BYTE* pMessage;
+
+    if (!g_pChitin->cNetwork.GetSessionOpen()
+        || !g_pChitin->cNetwork.GetSessionHosting()) {
+        return FALSE;
+    }
+
+    m_sDeleteAreaString = "";
+    m_bDeleteAreaPolling = FALSE;
+    m_dwDeleteAreaTimeout = 0;
+
+    for (BYTE nPlayer = 0; nPlayer < CMultiplayerSettings::MAX_PLAYERS; nPlayer++) {
+        m_pnDeleteAreaVoters[nPlayer] = 0;
+        m_pnDeleteAreaVotes[nPlayer] = DELETEAREA_EMPTY_VOTE;
+    }
+
+    // NOTE: The original prefixes the area name with its length as a single
+    // byte and appends the result after it (0x43B59D, 0x43B5C6).
+    nLength = sAreaString.GetLength() & 0xff;
+    pMessage = CreateBuffer(nLength + 2);
+    if (pMessage == NULL) {
+        return FALSE;
+    }
+
+    cnt = 0;
+
+    *reinterpret_cast<BYTE*>(pMessage + cnt) = static_cast<BYTE>(nLength);
+    cnt += sizeof(BYTE);
+
+    memcpy(pMessage + cnt, sAreaString, nLength);
+    cnt += nLength;
+
+    *reinterpret_cast<BYTE*>(pMessage + cnt) = bResult;
+    cnt += sizeof(BYTE);
+
+    g_pChitin->cNetwork.SendSpecificMessage(CString(""),
+        CNetwork::SEND_GUARANTEED | CNetwork::SEND_ALL_PLAYERS,
+        MSG_TYPE_DELETEAREA,
+        MSG_SUBTYPE_DELETEAREA_RESULT,
+        pMessage,
+        cnt);
+
+    DestroyBuffer(pMessage);
+
+    return TRUE;
+}
+
 // 0x43B780
 BOOLEAN CBaldurMessage::CancelDeleteAreaPoll()
 {
     BYTE cnt;
 
     if (!g_pChitin->cNetwork.GetSessionOpen()
-        || g_pChitin->cNetwork.GetSessionHosting()) {
+        || !g_pChitin->cNetwork.GetSessionHosting()) {
         return FALSE;
     }
 
@@ -4207,13 +4330,78 @@ BOOLEAN CBaldurMessage::CancelDeleteAreaPoll()
     return TRUE;
 }
 
+// 0x43B7E0
+BOOLEAN CBaldurMessage::CanResolveDeleteAreaPoll()
+{
+    BYTE cnt;
+    BOOLEAN bPendingVote;
+    BOOLEAN bAlive;
+
+    if (!g_pChitin->cNetwork.GetSessionOpen()
+        || !g_pChitin->cNetwork.GetSessionHosting()) {
+        return FALSE;
+    }
+
+    // A voter that left or joined since the poll started resolves it.
+    for (cnt = 0; cnt < CMultiplayerSettings::MAX_PLAYERS; cnt++) {
+        if (cnt != g_pChitin->cNetwork.m_nLocalPlayer) {
+            if (m_pnDeleteAreaVoters[cnt] != g_pChitin->cNetwork.GetPlayerID(cnt)) {
+                return TRUE;
+            }
+        }
+    }
+
+    bPendingVote = FALSE;
+
+    for (cnt = 0; cnt < CMultiplayerSettings::MAX_PLAYERS; cnt++) {
+        if (cnt != g_pChitin->cNetwork.m_nLocalPlayer
+            && m_pnDeleteAreaVoters[cnt] != 0
+            && m_pnDeleteAreaVotes[cnt] == DELETEAREA_PENDING_VOTE) {
+            bPendingVote = TRUE;
+        }
+    }
+
+    bAlive = FALSE;
+
+    for (SHORT nSlot = 0; nSlot < 6; nSlot++) {
+        LONG nCharacterId = g_pBaldurChitin->GetObjectGame()->GetFixedOrderCharacterId(nSlot);
+        CGameObject* pObject;
+
+        BYTE rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(nCharacterId,
+            CGameObjectArray::THREAD_ASYNCH,
+            &pObject,
+            INFINITE);
+        if (rc == CGameObjectArray::SUCCESS) {
+            // NOTE: The party can wait out the poll as long as one member
+            // is not dead (`m_baseStats.m_generalState` & STATE_DEAD).
+            if ((static_cast<CGameSprite*>(pObject)->m_baseStats.m_generalState & STATE_DEAD) == 0) {
+                g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(nCharacterId,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    INFINITE);
+                bAlive = TRUE;
+                break;
+            }
+
+            g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(nCharacterId,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+        }
+    }
+
+    if (bPendingVote == FALSE && bAlive == TRUE) {
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
 // 0x43B980
 BOOLEAN CBaldurMessage::DeleteAreaBallotResult()
 {
     BYTE cnt;
 
     if (!g_pChitin->cNetwork.GetSessionOpen()
-        || g_pChitin->cNetwork.GetSessionHosting()) {
+        || !g_pChitin->cNetwork.GetSessionHosting()) {
         return FALSE;
     }
 
@@ -4245,7 +4433,7 @@ BOOLEAN CBaldurMessage::MultiplayerSynchRequest()
     CString sHostName;
 
     if (!g_pChitin->cNetwork.GetSessionOpen()
-        || g_pChitin->cNetwork.GetSessionHosting() != TRUE) {
+        || g_pChitin->cNetwork.GetSessionHosting() == TRUE) {
         return FALSE;
     }
 
