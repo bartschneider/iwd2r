@@ -181,9 +181,13 @@ def render_brief(template_path=TEMPLATE_PATH, state_path=STATE_PATH,
         f'theirs {r["their_len"]} / ours {r["our_len"]} chars)'
         for i, r in enumerate(batch['rows'], 1))
     files = '\n'.join(f'- `{f}`' for f in batch['files'])
+    # The fork is read by pinned sha, never by branch name (wso/main moves).
+    fork_base = str(state.get('fork_base') or
+                    'e8dd16a750966af53f24daaf49dcb4fb13594c13')
     brief = (template
              .replace('{{id}}', batch_id)
              .replace('{{branch}}', batch['branch'])
+             .replace('{{fork_base}}', fork_base)
              .replace('{{size}}', str(len(batch['rows'])))
              .replace('{{files}}', files)
              .replace('{{rows}}', rows))
