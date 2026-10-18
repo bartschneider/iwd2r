@@ -33,6 +33,29 @@ pairs — the trees' name drift hid real disagreements. both_changed_differ
 grows 406 to 529, theirs_changed_ours_base 528 to 592, identical real bodies
 4,337 to 4,424.
 
+The rider 22960d3b (base looked up by address in the name loop too) changes
+nothing in the recorded run: against base 4fa36bcd, rerun with the pre-rider
+tool at ten ours refs (HEAD, the base itself, and eight branch and side
+refs), the JSON is byte-identical. Base
+stamps 0x4B0050 on two functions (`CGameEffectResistElectricity` and
+`CGameEffectResistFire::ApplyEffect`) and 0x5ED130 on two
+(`...CharacterScriptScripts` and `...CharacterExportCharacters::OnItemSelected`),
+so neither address is a unique key and the lookup falls back to the by-name
+one the rider replaced; base's single 0x44DC10 stamp is the `ExecuteAction`
+stub, which puts `CGameAIBase::StartCutScene` and `IncrementChapter` in
+`both_changed_differ` under either lookup (base has neither function by
+name). The same four rows do move `theirs_changed_ours_base` →
+`both_changed_differ` if the comparison is run against base 8ce297d7
+(iwd2r/main): there 0x4B0050 and 0x5ED130 carry a single stamp each, the
+address lookup engages and returns bodies matching neither tree
+(`CGameEffectResistFire::ApplyEffect`, `CGameAIBase::StartCutScene`,
+`CGameAIBase::IncrementChapter`,
+`CUIControlTextDisplayCharacterScriptScripts::OnItemSelected`). That base is
+this branch's own src state — against it no row is
+`ours_changed_theirs_base` or `both_changed_differ` at all — so it is not
+the comparison recorded here; the table keeps base 4fa36bcd, the base this
+report documents.
+
 ## Spot check (20 rows, mandated by the spec)
 
 Method: an independent script (kept in /tmp, not the repo) extracted each
