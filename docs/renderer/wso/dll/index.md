@@ -126,6 +126,20 @@ Decompile scratch output lives in `runs/dll-decomp/` (git-ignored).
 - [`IEex_Helper_RenderFoW`](IEex_Helper_RenderFoW.md)
 - [`IEex_Helper_RenderFoWSolid`](IEex_Helper_RenderFoWSolid.md)
 
+## HD sprite / font rendering
+
+- [`IEex_Helper_CGameText_RenderHD`](IEex_Helper_CGameText_RenderHD.md)
+- [`IEex_Helper_CVidCell_FXRender3dHD`](IEex_Helper_CVidCell_FXRender3dHD.md)
+- [`IEex_Helper_CVidFont_CreateTextureHD`](IEex_Helper_CVidFont_CreateTextureHD.md)
+- [`IEex_Helper_CVidFont_GetFontHeightHD`](IEex_Helper_CVidFont_GetFontHeightHD.md)
+- [`IEex_Helper_CVidFont_GetStringLengthHD`](IEex_Helper_CVidFont_GetStringLengthHD.md)
+- [`IEex_Helper_CVidFont_TextOut3dHD`](IEex_Helper_CVidFont_TextOut3dHD.md)
+- [`IEex_Helper_CVidFont_TextOutHP`](IEex_Helper_CVidFont_TextOutHP.md)
+- [`IEex_Helper_CVidInf_FXBltToBackHD`](IEex_Helper_CVidInf_FXBltToBackHD.md)
+- [`IEex_Helper_RegisterHDSprite`](IEex_Helper_RegisterHDSprite.md)
+- [`IEex_Helper_RegisterSupersampleFont`](IEex_Helper_RegisterSupersampleFont.md)
+- [`IEex_Helper_ReloadFloatTextScale`](IEex_Helper_ReloadFloatTextScale.md)
+
 ## Staged Lua evidence (sha256)
 
 The staged Lua patches at `~/.local/share/iwd2r/wso/lua/` are used as evidence for who calls each helper (and, for the keys-screen group, for hook sites and Lua-callback contracts). The staged corpus itself has no pin yet; these hashes let it be pinned retroactively.
