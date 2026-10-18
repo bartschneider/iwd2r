@@ -7903,6 +7903,12 @@ class GltraceTest(unittest.TestCase):
         # picked, its confirmations are answered at close time, and the
         # dialog itself is answered at boot.
         self.assertGreaterEqual(driver.count('#32770'), 3)
+        # Answering with no list entry selected ends the game cleanly
+        # (the 20261018-180428 run): the driver must wait for the list,
+        # pick an entry, set it and only then confirm.
+        for present in ('LB_GETCOUNT', 'LB_SETCURSEL', 'SELECT',
+                        'CtrlId', 'list['):
+            self.assertIn(present, driver)
 
     def test_gltrace_pe_machine(self):
         # The wrapper and the game must match bitness: parse the machine

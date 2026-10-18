@@ -590,6 +590,7 @@ public static class IwdInput {
     static extern IntPtr SendMessage(IntPtr hWnd, uint msg, IntPtr w, IntPtr l);
     [DllImport("user32.dll", SetLastError = true)]
     static extern IntPtr SendMessage(IntPtr hWnd, uint msg, IntPtr w, StringBuilder l);
+    [DllImport("user32.dll")] public static extern int GetDlgCtrlID(IntPtr hWnd);
 
     const uint INPUT_MOUSE = 0, INPUT_KEYBOARD = 1;
     const uint MOUSEEVENTF_LEFTDOWN = 0x02, MOUSEEVENTF_LEFTUP = 0x04;
@@ -598,8 +599,11 @@ public static class IwdInput {
     public const uint WM_CLOSE = 0x10;
     public const uint WM_GETTEXT = 0x000D, WM_GETTEXTLENGTH = 0x000E;
     public const uint BM_CLICK = 0x00F5;
-    public const uint LB_GETCURSEL = 0x0188, LB_GETTEXTLEN = 0x0189, LB_GETTEXT = 0x018A;
+    public const uint LB_SETCURSEL = 0x0186, LB_GETCURSEL = 0x0188;
+    public const uint LB_GETTEXTLEN = 0x0189, LB_GETTEXT = 0x018A;
+    public const uint LB_GETCOUNT = 0x018B;
     public const uint CB_GETCURSEL = 0x0147, CB_GETLBTEXTLEN = 0x0149, CB_GETLBTEXT = 0x0148;
+    public const uint CB_GETCOUNT = 0x0146, CB_SETCURSEL = 0x0143;
 
     static void Send(INPUT input) {
         INPUT[] inputs = new INPUT[] { input };
@@ -793,6 +797,11 @@ public static class IwdInput {
     public static int Send(uint msg, IntPtr hWnd, IntPtr w, IntPtr l) {
         return (int)SendMessage(hWnd, msg, w, l);
     }
+
+    // A child dialog control's resource id (-1 when it has none).
+    public static int CtrlId(IntPtr hWnd) {
+        return GetDlgCtrlID(hWnd);
+    }
 }
 '@
 Add-Type -TypeDefinition $source -Language CSharp
@@ -887,10 +896,17 @@ function Get-DescendantIds([uint32]$root) {
 }
 
 # The game's first window is the modal "IWD2:EE Resolution Select" box
-# (#32770): startup blocks until it is answered. Click its OK (BM_CLICK,
-# no focus steal); with no clickable button child, fall back to Return.
-# When the dialog never shows, the choice is persisted - log and move on,
-# that is not a failure.
+# (#32770): startup blocks until it is answered. IEexHelperGUI.dll resource
+# 1007 (a DLGTEMPLATEEX whose items carry DWORD ids) holds three controls:
+# a 'CMyBox' group (id 1015), the default button 'SELECT' (id 1) and the
+# resolution ListBox (id 1004). Confirming with no list entry selected ends
+# the game - the 20261018-180428 run showed a clean exit with no window -
+# so wait until the game fills the list, pick an entry (1366x768 when it
+# is offered, else the first), set it with LB_SETCURSEL and only then
+# BM_CLICK the button (id 1 / 'SELECT' / 'OK', else the first button);
+# with no clickable button child, fall back to Return. When the dialog
+# never shows, the choice is persisted - log and move on, that is not a
+# failure.
 function Answer-ResolutionDialog {
     $end = (Get-Date).AddSeconds(20)
     while ((Get-Date) -lt $end) {
@@ -901,19 +917,53 @@ function Answer-ResolutionDialog {
             if ($title -notmatch 'Resolution') { continue }
             $ownerPid = [IwdInput]::PidOf($h)
             $owner = try { (Get-Process -Id $ownerPid -ErrorAction Stop).ProcessName } catch { '?' }
+            foreach ($c in [IwdInput]::ChildWindows($h)) {
+                Log ("  dialog child 0x{0:x} class '{1}' id {2} text '{3}'" -f $c.ToInt64(), [IwdInput]::ClassOf($c), [IwdInput]::CtrlId($c), [IwdInput]::TextOf($c))
+            }
             $selection = ''
+            $list = [IntPtr]::Zero
             foreach ($c in [IwdInput]::ChildWindows($h)) {
                 $class = [IwdInput]::ClassOf($c)
-                if ($class -eq 'ListBox') {
-                    $sel = [IwdInput]::Send([IwdInput]::LB_GETCURSEL, $c, [IntPtr]::Zero, [IntPtr]::Zero)
-                    if ($sel -ge 0) {
-                        $selection = [IwdInput]::ListText($c, $sel, [IwdInput]::LB_GETTEXTLEN, [IwdInput]::LB_GETTEXT)
+                if ($list -eq [IntPtr]::Zero -and $class -eq 'ListBox') { $list = $c }
+                if ($list -eq [IntPtr]::Zero -and $class -eq 'ComboBox') { $list = $c }
+            }
+            if ($list -ne [IntPtr]::Zero) {
+                $listClass = [IwdInput]::ClassOf($list)
+                $getListSel = [IwdInput]::LB_GETCURSEL
+                $getListTextLen = [IwdInput]::LB_GETTEXTLEN
+                $getListText = [IwdInput]::LB_GETTEXT
+                $getCount = [IwdInput]::LB_GETCOUNT
+                $setCurSel = [IwdInput]::LB_SETCURSEL
+                if ($listClass -eq 'ComboBox') {
+                    $getListSel = [IwdInput]::CB_GETCURSEL
+                    $getListTextLen = [IwdInput]::CB_GETLBTEXTLEN
+                    $getListText = [IwdInput]::CB_GETLBTEXT
+                    $getCount = [IwdInput]::CB_GETCOUNT
+                    $setCurSel = [IwdInput]::CB_SETCURSEL
+                }
+                # The game fills the list after the dialog is up: wait for
+                # the entries before choosing.
+                $listEnd = (Get-Date).AddSeconds(10)
+                do {
+                    $count = [IwdInput]::Send($getCount, $list, [IntPtr]::Zero, [IntPtr]::Zero)
+                    if ($count -gt 0) { break }
+                    Start-Sleep -Milliseconds 200
+                } while ((Get-Date) -lt $listEnd)
+                for ($i = 0; $i -lt $count; $i++) {
+                    Log ("  list[{0}] = '{1}'" -f $i, [IwdInput]::ListText($list, $i, $getListTextLen, $getListText))
+                }
+                if ($count -gt 0) {
+                    $choice = 0
+                    for ($i = 0; $i -lt $count; $i++) {
+                        if ([IwdInput]::ListText($list, $i, $getListTextLen, $getListText) -match '1366') { $choice = $i; break }
                     }
-                } elseif ($class -eq 'ComboBox') {
-                    $sel = [IwdInput]::Send([IwdInput]::CB_GETCURSEL, $c, [IntPtr]::Zero, [IntPtr]::Zero)
+                    [void][IwdInput]::Send($setCurSel, $list, [IntPtr]$choice, [IntPtr]::Zero)
+                    $sel = [IwdInput]::Send($getListSel, $list, [IntPtr]::Zero, [IntPtr]::Zero)
                     if ($sel -ge 0) {
-                        $selection = [IwdInput]::ListText($c, $sel, [IwdInput]::CB_GETLBTEXTLEN, [IwdInput]::CB_GETLBTEXT)
+                        $selection = '{0}:{1}' -f $sel, [IwdInput]::ListText($list, $sel, $getListTextLen, $getListText)
                     }
+                } else {
+                    Log '  the list never filled; answering without a selection'
                 }
             }
             $buttons = @()
@@ -922,12 +972,12 @@ function Answer-ResolutionDialog {
             }
             $button = [IntPtr]::Zero
             foreach ($b in $buttons) {
-                if ([IwdInput]::TextOf($b) -match '^OK') { $button = $b; break }
+                if ([IwdInput]::CtrlId($b) -eq 1 -or [IwdInput]::TextOf($b) -match '^(OK|SELECT)') { $button = $b; break }
             }
             if ($button -eq [IntPtr]::Zero -and $buttons.Count -gt 0) { $button = $buttons[0] }
             if ($button -ne [IntPtr]::Zero) {
                 [void][IwdInput]::Send([IwdInput]::BM_CLICK, $button, [IntPtr]::Zero, [IntPtr]::Zero)
-                $how = 'BM_CLICK on 0x{0:x}' -f $button.ToInt64()
+                $how = 'BM_CLICK on 0x{0:x} (id {1} ''{2}'')' -f $button.ToInt64(), [IwdInput]::CtrlId($button), [IwdInput]::TextOf($button)
             } else {
                 [void][IwdInput]::SetForegroundWindow($h)
                 Start-Sleep -Milliseconds 150
@@ -1337,14 +1387,17 @@ def desktop_run(name, game, actions, timeout, run_dir):
     exitcode, error = None, None
     with open(os.path.join(run_dir, 'driver-output.log'), 'w') as log_file:
         code = stream([CMD_EXE, '/c', winsandbox.wslpath_w(bat)], log_file)
+    # The driver's own error.txt is the real diagnosis; the generic
+    # 'no driver exit code' line is only the fallback when the driver
+    # died before writing anything (empty exitcode.txt drops the real
+    # error otherwise).
+    error = winsandbox.read_text(os.path.join(results, 'error.txt'))
     text = winsandbox.read_text(os.path.join(results, 'exitcode.txt'))
     if text.lstrip('-').isdigit():
         exitcode = int(text)
-    else:
+    elif not error:
         error = ('no driver exit code (cmd exit %s); see %s'
                  % (code, os.path.join(run_dir, 'driver-output.log')))
-    if not error:
-        error = winsandbox.read_text(os.path.join(results, 'error.txt'))
     trace_bytes = copy_home(results, run_dir, name)
     log('trace: %s (%d bytes)' % (os.path.join(run_dir, name + '.trace'),
                                   trace_bytes))
