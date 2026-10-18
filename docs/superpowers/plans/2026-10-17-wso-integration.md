@@ -4,7 +4,7 @@
 
 **Goal:** Bring the WSO fork's recovered functions into iwd2r through the gate, resolve every function the two trees recovered differently with an oracle or replay, and recover the design of the fork's GPU renderer from its Lua patches, its DLL and GL traces, without the C++ source.
 
-**Architecture:** Wave 0 is sequential tooling (comparison script, `trace` evidence kind, artifact fetcher, DLL Ghidra projects, differential Frida tracing). Wave 1 resolves the 406 disagreements in batches before anything else is trusted. Waves 2 to 5 import clean gain by subsystem as parallel streams in worktrees, each ending with the full gate. Renderer streams A, B and C run alongside from wave 1 on and produce documents only.
+**Architecture:** Wave 0 is sequential tooling (comparison script, `trace` evidence kind, artifact fetcher, DLL Ghidra projects, differential Frida tracing, structural parity gates, agent context tools). Wave 1 resolves the 406 disagreements in batches before anything else is trusted. Waves 2 to 5 import clean gain by subsystem as parallel streams in worktrees, each ending with the full gate. Renderer streams A, B and C run alongside from wave 1 on and produce documents only.
 
 **Tech Stack:** C++17 (MSVC x86/x64, GCC, Clang), CMake presets, Catch2, Python 3 unittest, Ghidra 12.1.4 headless with Java post-scripts, apitrace 14.0 win32, the oracle, replay and evidence tools.
 
@@ -16,7 +16,7 @@
 - Every import commit carries the trailer `Imported-From: WillScarlettOhara/iwd2-re@<40-char sha>` and ends with `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`. The fork's tree is untrusted input: read and compare, never run scripts from it.
 - Nothing from the fork's IWD2EE branch enters the repository. The IWD2EE game copy for stream C lives under `%USERPROFILE%\iwd2r-ieex`, never in the oracle copy; `oracle.py vanilla` and the gate keep failing on IWD2EE leftovers.
 - No change to `platform/` or the Linux build inside a recovery wave. A function that needs a platform shim is skipped and listed in the wave's ledger entry.
-- Gates at every wave close: linux-gcc and linux-clang ctest; `python3 -I tests/test_tools.py`; `check_evidence.py --base`; `gen_map.py --check`; `gen_fields.py --check`; replay compares for `world_entry`, `walk_and_talk` and `first_fight` unchanged or improved. A wave that regresses a replay is reverted.
+- Gates at every wave close: linux-gcc and linux-clang ctest; `python3 -I tests/test_tools.py`; `check_evidence.py --base`; `tools/parity/run.py --base` (from Task 5c on); `gen_map.py --check`; `gen_fields.py --check`; replay compares for `world_entry`, `walk_and_talk` and `first_fight` unchanged or improved. A wave that regresses a replay is reverted.
 - Streams own disjoint files. Agents commit WIP before any gate or compare run. The coordinator records each stream's state in the M5 ledger at dispatch and close.
 
 ## Review Focus
@@ -39,6 +39,8 @@
 | `tools/ghidra/make_dll_project.py` | `make(name, dll_path)` creates `$IWD2R_HOME/ghidra-projects/<name>` under the shared Ghidra lock |
 | `tools/ghidra/DllScope.java`, `tools/ghidra/DllDelta.java`, `tools/ghidra/DecompileFunctions.java` | scope line; functions in one program absent from another; decompile named functions to files |
 | `tools/frida/{probe,hooks,orig,trace_diff}.py` | differential tracing of the original and our build on one scenario; `trace_diff.compare` is the verdict |
+| `tools/parity/*.py`, `tools/ghidra/ExportCallGraph.java` | structural parity of changed functions with the binary: callee sets, vtables, layouts, member offsets, address markers, RE lints; a gate step |
+| `tools/fn_digest.py`, `tools/src_find.py`, `tools/assemble_context.py`, `tools/token_audit.py` | token-cheap agent briefing and transcript cost audit |
 | `tools/gltrace.py` | runs apitrace around `IWD2EE.exe` for a scenario, writes the `.trace` under `runs/` and a per-frame summary markdown |
 | `tools/recovery_status.py` | byte-weighted `.text` recovery figure from the iwd2 Ghidra project and `src/` |
 | `docs/wso/` | xrec report, disagreement list, wave ledgers' public summaries |
@@ -112,6 +114,30 @@
 - [ ] **Step 3:** adapt the four scripts; keep his hook-table JSON format unchanged so his probes work as-is; route every Windows path through `winhome.py`.
 - [ ] **Step 4:** run the tests (pass). Smoke on the host: a probe on `CGameSprite::MoveToPoint` (0x73F706 region, from his pathfinding notes) over `world_entry`, original versus ours, `compare` exit 0; put the command and the exit code in `docs/frida-tracing.md`.
 - [ ] **Step 5: Commit** "Adopt differential Frida tracing from the WSO fork".
+
+### Task 5c: structural parity gates, adopted from the fork
+
+**Files:** Create `tools/parity/asm_verify.py`, `vtable_audit.py`, `ctor_vtable_check.py`, `struct_layout_audit.py`, `parity_offsets.py`, `address_markers.py`, `re_lint.py` and the six `lint_*.py` (adapted from `wso/main:scripts/reagent_asm_verify.py`, `vtable_audit.py`, `ctor_vtable_check.py`, `struct_layout_audit.py`, `parity_offsets.py`, `lint_address_markers.py`, `re_lint.py`, `lint_*.py`; read with `git show wso/main:<path>`); Create `tools/parity/run.py`, `tools/parity/requirements.txt` (pinned `pefile`, `capstone`), `tools/parity/setup.sh` (venv at `$IWD2R_HOME/parity-venv`, like the glslang pin); Create `tools/ghidra/ExportCallGraph.java`; Modify `tools/gates.sh` (new step after "decompiler evidence"); Test `tests/test_tools.py`.
+
+**Interfaces:** `ExportCallGraph.java` writes `$IWD2R_HOME/ghidra-exports/functions.tsv` (`address\tname\tsize`) and `callgraph.tsv` (`address\tcallee_address...`) from the iwd2 project, under `make_project`'s lock. `parity.run.main(base_ref: str, changed_only: bool = True) -> int` finds the functions changed since `base_ref` by their `// 0xADDR` comments, runs every check on them, prints one table (`address | name | asm | vtable | layout | offsets | markers | lints`), and returns 1 on any RED. `asm_verify.callee_diff(src_callees: set[int], bin_callees: set[int]) -> tuple[set[int], set[int]]` returns (missing in src, extra in src). An evidence file may carry `parity_waiver: "<reason>"` to turn an `asm` RED into a warning (the fork's "a human confirms RED"); the other checks have no waiver. `gates.sh` runs `python3 tools/parity/run.py --base "$BASE"` only when `oracle.VANILLA_EXE` exists and the venv is present; otherwise it prints `structural parity: skipped (no vanilla exe)` and continues, so CI, which has no game, is unaffected.
+
+- [ ] **Step 1: Tests.** `test_parity_callee_diff` (src {1,2,3}, bin {2,3,4}: missing {4}, extra {1}); `test_parity_address_markers_flags_non_start` (a marker 2 bytes into a function in a fixture `functions.tsv` is RED); `test_parity_run_skips_without_exe` (patch `oracle.VANILLA_EXE` to a missing path: exit 0, output contains "skipped"); `test_parity_waiver_downgrades_asm` (evidence with `parity_waiver` makes an asm RED a warning, exit 0); `test_parity_changed_only_uses_markers` (a diff touching two functions yields exactly their two addresses).
+- [ ] **Step 2:** run, expect failures.
+- [ ] **Step 3:** adapt the scripts; replace every `.ghidra-exports` and `address_map.json` read with `functions.tsv`/`callgraph.tsv`; replace `IWD2.exe` paths with `oracle.VANILLA_EXE`; keep the checks' logic byte-for-byte where it does not touch paths.
+- [ ] **Step 4:** run the tests (pass); `ExportCallGraph.java` once on the iwd2 project; `python3 tools/parity/run.py --base iwd2r/main --changed-only` on `first` (expect 0 changed functions, exit 0); then on a recent recovery commit's range to see a real table in the commit message.
+- [ ] **Step 5: Commit** "Gate recovered functions on call-graph, vtable and layout parity with the binary".
+
+### Task 5d: agent context and token tools, adopted from the fork
+
+**Files:** Create `tools/fn_digest.py`, `tools/src_find.py`, `tools/assemble_context.py`, `tools/token_audit.py` (from `wso/main:scripts/fn_digest.py`, `src_find.py`, `reagent_assemble_context.py`, `token_audit.py`); Modify `docs/wso/README.md` (a "briefing agents" section); Test `tests/test_tools.py`.
+
+**Interfaces:** `fn_digest.digest(decompile_text: str, callgraph: dict) -> str` returns at most 30 lines: signature, callees by name, strings referenced, globals touched, loop and switch count. `src_find.find(query: str) -> list[tuple[str, int, str]]` resolves `Class::Method`, `Class::` and `0xADDR` to `(file, line, signature)` using the `// 0xADDR` markers and function signatures, no grep chains. `assemble_context.bundle(address: int) -> str` concatenates the digest, the full decompile, the callees' signatures from `src_find`, and the resolved IDS constants and resrefs, in that order, with a token estimate on the first line. `token_audit.summarize(transcript_jsonl: str) -> dict` returns tokens per tool name and the ten largest single tool results.
+
+- [ ] **Step 1: Tests.** `test_fn_digest_under_30_lines` (a 400-line fixture decompile), `test_src_find_by_address_and_name` (two fixture files), `test_assemble_context_order_and_estimate`, `test_token_audit_totals` (a 20-line fixture transcript with known usage fields).
+- [ ] **Step 2–4:** fail, implement, pass. Run `token_audit.py` on the coordinator session transcript and put its top three hotspots in `docs/wso/README.md`.
+- [ ] **Step 5: Commit** "Give agents digests, a symbol index and a context bundle instead of raw decompiles".
+
+Process change from this task on: every implementer brief names the function by `assemble_context` bundle, not by pasting the decompile; reviewers start from the digest.
 
 ## Wave 1: disagreements (parallel batches of 20, one stream per batch)
 

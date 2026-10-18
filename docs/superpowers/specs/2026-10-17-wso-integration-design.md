@@ -51,7 +51,7 @@ Out of scope: any change to the platform layer or the Linux build during the rec
 
 **Evidence.** `tools/check_evidence.py` gains a kind, `trace`, meaning "verified by a differential Frida trace of the original against a reconstruction": either the fork's, citing its recovery note, or ours, produced with the fork's tracing scripts adopted into `tools/frida/` (plan Task 5b) and citing the capture hashes. An evidence file of that kind cites the fork commit and the note path. It satisfies the gate for imported functions outside rules math. Rules math (attack rolls, saving throws, damage, effect application) keeps the oracle requirement from the 2026-10-17 process note, imported or not. Where the two trees agree on a function we recovered read-only, the evidence file records the agreement as corroboration without changing its kind.
 
-**Gate per wave.** Each wave ends with the full gate on both compilers, the tool tests, the evidence check, and the replay compares (`world_entry`, `walk_and_talk`, `first_fight`) unchanged or improved. A wave that regresses a replay is reverted, not patched forward.
+**Gate per wave.** Each wave ends with the full gate on both compilers, the tool tests, the evidence check, the structural parity checks adopted from the fork (call-graph, vtable, layout and member-offset parity with the binary, plus its reverse-engineering lints; plan Task 5c), and the replay compares (`world_entry`, `walk_and_talk`, `first_fight`) unchanged or improved. A wave that regresses a replay is reverted, not patched forward.
 
 ## 6. Waves
 
