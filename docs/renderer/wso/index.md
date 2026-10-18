@@ -2,8 +2,9 @@
 
 One note per staged patch file under `~/.local/share/iwd2r/wso/lua/`, each
 with the fork's intent, a hooks table resolved against our tree, data
-flow, and the complete `IEex_Helper_*` entry-point list (stream B1's seed
-and cross-check).
+flow, and the complete `IEex_Helper_*` entry-point list (stream B1's seed;
+the dll-delta.tsv cross-check matched none of these names — every one is a
+B1 must-verify).
 
 Provenance (`~/.local/share/iwd2r/wso/PINS`): fork commit
 `138495fde69b6092b7318fad462d571864e9d9b8`, ref `opengl-hd-beta7`; IEex
