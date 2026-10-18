@@ -1,5 +1,6 @@
 ---
-status: "UNSIGNED — hand-written diagnosis (no oracle draft); scoped reviewer to sign, preferably by re-running the exact case below"
+status: "SIGNED 2026-10-17 by the coordinator (verifier ≠ implementer). Basis: independently recomputed the three load-bearing claims read-only before accepting the verdict — (1) the original's own frame-3030 vs frame-3060 dumps re-sort index 5 from 851981(hp4,eq0) to 1048592(hp37,eq6) with identical multisets; (2) all four m3-end live runs' dialog_end enemy multisets (id,hp,max_hp,equiped_effects,timed_effects), n=35, equal the original's; (3) Probe hp 4/4/3/4 across our own four live runs (linux3 differs from linux/linux2 on the same binary) and the original's morale trace 15→10 over frames 5460–5610 makes the pinned 11 a mid-decay transient. Validation matrix re-checked from the suite folders' own records (12/12 ×3, first_fight exit 0). Remedy reviewed: drop-only against original-derived pins, replay path untouched."
+kind: read-only
 ---
 
 # first_fight real-input divergence: a live-sampling diagnosis (2026-10-17)
