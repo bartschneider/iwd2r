@@ -181,6 +181,20 @@ From this task on, the coordinator's wave-1 loop is: `next` → dispatch `brief`
 - [ ] **Step 3:** build both Linux compilers; a function that needs a platform shim is reverted and listed in the ledger entry.
 - [ ] **Step 4:** gate including replays; **Step 5: Commit** per file group with the trailer: "Import <subsystem> from the WSO fork".
 
+## Wave 5b: the Deoroot delta
+
+### Task 7b: import what the Deoroot fork has that the WSO fork lacks
+
+A second fork of the WSO tree, `Deoroot/iwd2-re` (remote `deo`, author Angel Sanchez), split from WSO at `9c7f7002` (2026-08-05) and carries 241 commits of its own to 2026-10-03, same method (session tags, parity tooling, Frida probes). Measured with `xrec.py` against WSO's current main with that split as the base: about 107 functions only Deoroot has or recovered where WSO is at base or stub (CGameSprite, CGameAIBase, CInfButtonArray, CMessage, CGameDoor, CGameArea: AI, doors, area transitions, travel triggers, combat attack resolution), 32 functions both forks recovered differently, 22 conflicted files on a dry merge into WSO. Against our tree the numbers look like WSO's because his tree contains WSO's August state; only the delta matters.
+
+**Files:** `src/<the delta's files>`, `docs/evidence/<addr>.md`, `docs/wso/deo-report.md`, `docs/wso/deo-disagreements.json`.
+
+- [ ] **Step 1:** `python3 tools/xrec.py 9c7f7002 deo/main wso/main --json docs/wso/deo-disagreements.json`; commit the printed table as `docs/wso/deo-report.md`.
+- [ ] **Step 2:** the ~107 gain functions go through Task 7's import procedure with the trailer `Imported-From: Deoroot/iwd2-re@<sha>` and `trace_source` pointing at his `docs/sessions.md` entry when one covers the function.
+- [ ] **Step 3:** the 32 Deoroot-versus-WSO disagreements go through Task 6's procedure via `wave.py` (one batch), and a function all three trees agree on gets "corroborated by WSO and Deoroot" in its evidence file.
+- [ ] **Step 4:** `jumptable_audit.py`, `class_layout.py` and `layout_offsets.py` from `deo/main:scripts/` join `tools/parity/` if they check something Task 5c's set does not; same adoption steps as 5c.
+- [ ] **Step 5:** gate; commit per file group "Import <subsystem> from the Deoroot fork"; THIRD_PARTY gains a row for the fork.
+
 ## Wave 6: status
 
 ### Task 8: `tools/recovery_status.py`
