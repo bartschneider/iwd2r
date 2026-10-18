@@ -116,8 +116,9 @@ subtraction is mod-2^32. Differences larger than that come out wrapped.
 (the DLL's ordinal-1 export at `0x1000e260`, called by the host at load): it
 captures `_Xtime_get_ticks() / 10` (MSVCP140.dll `_Xtime_get_ticks`,
 100 ns ticks since 1601-01-01 UTC, divided via `__alldiv`) into the global,
-stores its second argument into `DAT_100944fc` (the `LogVariadic` function
-pointer the fork logs through) and its third into `DAT_100944f8`; the first
+stores its second argument into `DAT_100944fc` (a host-provided logging
+function pointer the fork logs through all over its code) and its third into
+`DAT_100944f8` (the sink the DLL's exported `LogVariadic` forwards to); the first
 argument is ignored. Stored values are therefore **microseconds since DLL
 initialization** -- not wall clock, not game ticks.
 
