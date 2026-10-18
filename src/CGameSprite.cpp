@@ -15368,20 +15368,241 @@ void CGameSprite::CheckModal()
     }
 
     // The modal actions (the byte switch at 0x730029, jump table 0x731B20).
-    switch (m_nModalState) {
-    case 1:
-        // TODO: 0x730030-0x73055C not ported (the battle song: the song's
-        // spell effects on everyone in range).
+    // The song, detect-traps and stealth arms are ported from
+    // WillScarlettOhara/iwd2-re@e8dd16a, re-expressed on this tree's names
+    // (GetBaseMovementRate->sub_71F6E0, CheckInvisibility->IsVisibleToCaller,
+    // GetSkillModifier->sub_763E40, BuildAbilityEffect->GetAbilityEffect,
+    // ApplyDamageModifiers->IcewindMisc::sub_5860F0,
+    // GetCloseObjects->GetAllInRange, CMessage105->CMessageGroup); see
+    // docs/evidence/72FD20.md.
+    switch (m_nModalState - 1) {
+    case 0: {
+        // The battle song: re-apply the song's spell effects to everyone in
+        // range.
+        CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+        // A silenced singer (derived or base general state) cannot sing; a
+        // running cutscene also suppresses it.
+        if ((m_derivedStats.m_generalState & STATE_SILENCED) == 0
+            && (m_baseStats.m_generalState & STATE_SILENCED) == 0
+            && pGame->m_gameSave.m_cutScene != 1) {
+            if (!IsVisibleToCaller(FALSE)) {
+                // Singing is a visible action: a non-invisible singer
+                // re-asserts visibility this cycle by delivering a FORCEVISIBLE
+                // effect (0x88) to itself, mirroring the spell-cast path.
+                ITEM_EFFECT effect;
+                CGameEffect::ClearItemEffect(&effect, CGAMEEFFECT_FORCEVISIBLE);
+                effect.durationType = 1;
+                CGameEffect* visibleEffect = CGameEffect::DecodeEffect(
+                    &effect,
+                    m_pos,
+                    m_id,
+                    CPoint(-1, -1));
+                CMessage* message = new CMessageAddEffect(visibleEffect, m_id, m_id);
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+            }
+
+            UTIL_ASSERT(m_nLastSong < pGame->m_songs.m_nCount);
+            // (The binary also asserts the resolved song ResRef is non-empty.)
+            CResRef songRes = pGame->m_songs.Get636(m_nLastSong);
+
+            CSpell spell(songRes);
+            spell.Demand();
+            if (spell.GetCasterType() == 5) {
+                FeedBack(FEEDBACK_BATTLESONGSTART, 0, 0, 0, spell.GetGenericName(), 0, 0);
+                SPELL_ABILITY* pAbility = spell.GetAbility(0);
+
+                // Gather everyone within 400 of the singer, plus the singer.
+                CTypedPtrList<CPtrList, LONG*> targets;
+                m_pArea->GetAllInRange(GetVertListPos(), GetPos(), CAIObjectType::ANYONE,
+                    400, GetTerrainTable(), targets, TRUE, FALSE);
+                m_pArea->GetAllInRangeBack(GetPos(), CAIObjectType::ANYONE, 400,
+                    GetTerrainTable(), targets, TRUE, FALSE, FALSE);
+                targets.AddTail(reinterpret_cast<LONG*>(m_id));
+
+                SHORT nEffects = static_cast<SHORT>(pAbility->effectCount);
+
+                POSITION pos = targets.GetHeadPosition();
+                while (pos != NULL) {
+                    LONG nAllyId = static_cast<LONG>(reinterpret_cast<INT_PTR>(targets.GetNext(pos)));
+
+                    CGameObject* pAlly;
+                    BYTE rc = pGame->GetObjectArray()->GetShare(nAllyId,
+                        CGameObjectArray::THREAD_ASYNCH, &pAlly, INFINITE);
+                    if (rc != CGameObjectArray::SUCCESS) {
+                        continue;
+                    }
+
+                    if (pAlly->GetObjectType() == CGameObject::TYPE_SPRITE) {
+                        // Build one CMessageAddEffect per song effect, addressed
+                        // singer -> ally, into a local list, then deliver the
+                        // whole list to the ally through a CMessageGroup (the
+                        // message takes over the sub-messages).
+                        std::list<CMessage*> messages;
+
+                        for (SHORT i = 0; i < nEffects; i++) {
+                            CGameEffect* pEffect = spell.GetAbilityEffect(0, i, this, 0, 0, 0);
+                            // Source the effect at the singer's position and id.
+                            pEffect->m_source.x = m_pos.x;
+                            pEffect->m_source.y = m_pos.y;
+                            pEffect->m_sourceID = m_id;
+                            IcewindMisc::sub_5860F0(this, pEffect);
+                            // Re-tag a "Duration"-timed song effect so it expires
+                            // a round later (game time + 100), keeping the
+                            // per-cycle buff alive instead of letting
+                            // ResolveEffect treat it as already past.
+                            if (pEffect->m_durationType == 0 && pEffect->m_duration == 7) {
+                                pEffect->m_durationType = 0x1000;
+                                pEffect->m_duration =
+                                    g_pBaldurChitin->GetObjectGame()->GetWorldTimer()->m_gameTime + 100;
+                            }
+
+                            messages.push_back(new CMessageAddEffect(pEffect, m_id, nAllyId));
+                        }
+
+                        CMessage* pMessage = new CMessageGroup(messages, m_id, nAllyId);
+                        g_pBaldurChitin->GetMessageHandler()->AddMessage(pMessage, FALSE);
+                    }
+
+                    pGame->GetObjectArray()->ReleaseShare(nAllyId,
+                        CGameObjectArray::THREAD_ASYNCH, INFINITE);
+                }
+            }
+            spell.Release();
+        }
         break;
+    }
+    case 1: {
+        // Detect Traps -- the searcher actively sweeps everything within half
+        // its visual range for armed-but-undetected traps on doors, triggers
+        // and containers, revealing each one whose Search skill beats the
+        // trap's detection difficulty.
+        CTypedPtrList<CPtrList, LONG*> objects;
+        m_pArea->GetAllInRange(m_pos, CAIObjectType::ANYONE, GetVisualRange() >> 1,
+            GetVisibleTerrainTable(), objects, TRUE, TRUE);
+        m_pArea->GetAllInRangeBack(m_pos, CAIObjectType::ANYONE, GetVisualRange() >> 1,
+            GetVisibleTerrainTable(), objects, TRUE, TRUE, TRUE);
+
+        // Search skill rank, read signed (penalties can drive it negative).
+        int searchSkill = static_cast<char>(m_derivedStats.m_nSkills[CGAMESPRITE_SKILL_SEARCH]);
+
+        POSITION pos = objects.GetHeadPosition();
+        while (pos != NULL) {
+            LONG nObjId = static_cast<LONG>(reinterpret_cast<INT_PTR>(objects.GetNext(pos)));
+
+            CGameObject* pObject;
+            BYTE rc;
+            do {
+                rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(nObjId,
+                    CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE);
+            } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+            if (rc == CGameObjectArray::SUCCESS) {
+                BYTE type = pObject->GetObjectType();
+
+                if (type == CGameObject::TYPE_DOOR) {
+                    CGameDoor* pDoor = static_cast<CGameDoor*>(pObject);
+                    BOOL bDetected = FALSE;
+                    if (pDoor->m_trapActivated != 0) {
+                        if (pDoor->m_trapDetected == 0) {
+                            int difficulty = pDoor->m_trapDetectionDifficulty;
+                            // "Search (detect traps) check. Search skill %d vs.
+                            // trap's difficulty %d (searcher's %d INT bonus)."
+                            FeedBack(FEEDBACK_ROLL, searchSkill, difficulty / 5,
+                                sub_763E40(CGAMESPRITE_SKILL_SEARCH), 39303, 0, 0);
+                            if (difficulty <= searchSkill * 7 && difficulty != 100
+                                && (pDoor->m_dwFlags & 0x8)) {  // TRAPDETECTABLE
+                                CAITrigger trapFound(CAITRIGGER_DETECTED, m_typeAI, 0);
+                                CMessage* message = new CMessageSetTrigger(trapFound,
+                                    pDoor->m_id, m_id);
+                                g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+                                pDoor->m_trapDetected = 1;
+                                bDetected = TRUE;
+                                AutoPause(0x80);
+                            }
+                        }
+                        if (pDoor->m_trapDetected != 0) {
+                            pDoor->SetDrawPoly(400);
+                        }
+                        if (bDetected) {
+                            CMessage* message = new CMessageDoorStatus(pDoor, m_id, pDoor->m_id);
+                            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+                        }
+                    }
+                } else if (type == CGameObject::TYPE_TRIGGER) {
+                    CGameTrigger* pTrigger = static_cast<CGameTrigger*>(pObject);
+                    BOOL bDetected = FALSE;
+                    if (pTrigger->m_trapActivated != 0 && (pTrigger->m_dwFlags & 0x100) == 0) {
+                        if (pTrigger->m_trapDetected == 0) {
+                            int difficulty = pTrigger->m_trapDetectionDifficulty;
+                            if (difficulty <= searchSkill * 7 && difficulty != 100
+                                && (pTrigger->m_dwFlags & 0x8)) {  // TRAPDETECTABLE
+                                CAITrigger trapFound(CAITRIGGER_DETECTED, m_typeAI, 0);
+                                CMessage* message = new CMessageSetTrigger(trapFound,
+                                    pTrigger->m_id, m_id);
+                                g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+                                pTrigger->m_trapDetected = 1;
+                                bDetected = TRUE;
+                                AutoPause(0x80);
+                            }
+                        }
+                        if (pTrigger->m_trapDetected != 0) {
+                            pTrigger->SetDrawPoly(400);
+                        }
+                        if (bDetected) {
+                            CMessage* message = new CMessageTriggerStatus(pTrigger->m_dwFlags,
+                                pTrigger->m_trapActivated, pTrigger->m_trapDetected,
+                                pTrigger->m_id, m_id);
+                            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+                        }
+                    }
+                } else if (type == CGameObject::TYPE_CONTAINER) {
+                    CGameContainer* pContainer = static_cast<CGameContainer*>(pObject);
+                    BOOL bDetected = FALSE;
+                    if (pContainer->m_trapActivated != 0) {
+                        if (pContainer->m_trapDetected == 0) {
+                            int difficulty = pContainer->m_trapDetectionDifficulty;
+                            // Containers carry no TRAPDETECTABLE flag gate.
+                            if (difficulty <= searchSkill * 7 && difficulty != 100) {
+                                CAITrigger trapFound(CAITRIGGER_DETECTED, m_typeAI, 0);
+                                CMessage* message = new CMessageSetTrigger(trapFound,
+                                    pContainer->m_id, m_id);
+                                g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+                                pContainer->SetTrapDetected(1);
+                                pContainer->SetDrawPoly(400);
+                                bDetected = TRUE;
+                                AutoPause(0x80);
+                            }
+                        }
+                        if (pContainer->m_trapDetected != 0) {
+                            pContainer->SetDrawPoly(400);
+                        }
+                        if (bDetected) {
+                            CMessage* message = new CMessageContainerStatus(pContainer->m_dwFlags,
+                                pContainer->m_trapActivated, pContainer->m_trapDetected,
+                                pContainer->m_id, pContainer->m_id);
+                            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+                        }
+                    }
+                }
+
+                g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(nObjId,
+                    CGameObjectArray::THREAD_ASYNCH, INFINITE);
+            }
+        }
+        break;
+    }
     case 2:
-        // TODO: 0x73055C-0x730EA2 not ported (detect traps).
+        // TODO: 0x730EA2-0x730EC4 not ported (stealth). The exe re-runs
+        // CGameSprite::Hide (0x757B40) every third modal count; this tree has
+        // no declaration for 0x757B40 under any name yet, so the arm waits on
+        // that recovery (the WSO fork's arm is `if (m_modalCounter % 3 == 0)
+        // sub_757B40();`).
         break;
     case 3:
-        // TODO: 0x730EA2-0x730EC4 not ported (stealth: CGameSprite_Hide
-        // 0x757B40 every [0x85BD08] modal counts).
-        break;
-    case 4:
         // TODO: 0x730EC4-0x731B04 not ported (turn undead).
+        break;
+    default:
         break;
     }
 }
