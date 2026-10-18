@@ -157,6 +157,25 @@ Decompile scratch output lives in `runs/dll-decomp/` (git-ignored).
 - [`IEex_Helper_UIScaleRenderEndUI`](IEex_Helper_UIScaleRenderEndUI.md)
 - [`IEex_Helper_UIScaleTorchBegin`](IEex_Helper_UIScaleTorchBegin.md)
 
+## Camera zoom
+
+- [`IEex_Helper_BandSelectGrow`](IEex_Helper_BandSelectGrow.md)
+- [`IEex_Helper_ClampScriptViewDest`](IEex_Helper_ClampScriptViewDest.md)
+- [`IEex_Helper_CInfinity_GetWorldCoordinatesOverride`](IEex_Helper_CInfinity_GetWorldCoordinatesOverride.md)
+- [`IEex_Helper_CInfinity_SetViewPositionOverride`](IEex_Helper_CInfinity_SetViewPositionOverride.md)
+- [`IEex_Helper_CVidMode_DrawEllipse3dOverride`](IEex_Helper_CVidMode_DrawEllipse3dOverride.md)
+- [`IEex_Helper_CVidMode_DrawRecticle3dOverride`](IEex_Helper_CVidMode_DrawRecticle3dOverride.md)
+- [`IEex_Helper_DialogPanCompensateY`](IEex_Helper_DialogPanCompensateY.md)
+- [`IEex_Helper_DialogZoomTick`](IEex_Helper_DialogZoomTick.md)
+- [`IEex_Helper_GetCameraZoom`](IEex_Helper_GetCameraZoom.md)
+- [`IEex_Helper_MapCenterViewPort`](IEex_Helper_MapCenterViewPort.md)
+- [`IEex_Helper_MapGrabHitTest`](IEex_Helper_MapGrabHitTest.md)
+- [`IEex_Helper_MapViewRectZoom`](IEex_Helper_MapViewRectZoom.md)
+- [`IEex_Helper_MapWheelPump`](IEex_Helper_MapWheelPump.md)
+- [`IEex_Helper_WheelShouldZoom`](IEex_Helper_WheelShouldZoom.md)
+- [`IEex_Helper_ZoomWorldBegin`](IEex_Helper_ZoomWorldBegin.md)
+- [`IEex_Helper_ZoomWorldEnd`](IEex_Helper_ZoomWorldEnd.md)
+
 ## Staged Lua evidence (sha256)
 
 The staged Lua patches at `~/.local/share/iwd2r/wso/lua/` are used as evidence for who calls each helper (and, for the keys-screen group, for hook sites and Lua-callback contracts). The staged corpus itself has no pin yet; these hashes let it be pinned retroactively.
