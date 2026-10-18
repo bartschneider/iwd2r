@@ -2261,7 +2261,10 @@ CUIControlBase* CUIControlBase::CreateControl(CUIPanel* pPanel, UI_CONTROL* cont
             // 0x77385F
             switch (controlInfo->nID) {
             case 1:
-                return new CUIControlButtonCharacterPopupCancel(pPanel, reinterpret_cast<UI_CONTROL_BUTTON*>(controlInfo), 0);
+                // 0x772753: the exe constructs the Done button here
+                // (CUIControlButtonCharacterPopupDone(panel, control, 0),
+                // vtable tag 0x25a), not the Cancel button.
+                return new CUIControlButtonCharacterPopupDone(pPanel, reinterpret_cast<UI_CONTROL_BUTTON*>(controlInfo), 0);
             case 2:
                 return new CUIControlTextDisplay(pPanel, reinterpret_cast<UI_CONTROL_TEXTDISPLAY*>(controlInfo), TRUE);
             case 3:
