@@ -91,7 +91,8 @@ synchronizes the two - same model as the other fork registries
   glTexSubImage2D, then requires the matrix six (calls FUN_100257e0);
   returns 1 only if all eight are live.
 - **Fog sixteen** - the fog group's FUN_10027020 (documented in the
-  FogTexDraw note). CGameText_RenderHD reuses four of its slots:
+  FogTexDraw note): 16 procs from opengl32.dll, gate passes only when
+  all sixteen are live. CGameText_RenderHD reuses five of its slots:
   `DAT_104df040` glDisable, `DAT_104df5a4` glEnable, `DAT_104df570`
   glColor4f, `DAT_104df5c8` glBegin, `DAT_104df208` glEnd.
 

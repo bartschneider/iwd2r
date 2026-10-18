@@ -492,10 +492,12 @@ clear:
    `DAT_10092770`; below 1 falls back to FUN_1002cfa0() (Selection
    Circle Thickness getter); clamped to [1,6]. Pixel thickness =
    `(int)(t * zoom * 0.5 + 0.5)` clamped to the half-extents.
-4. Blend state: FUN_10027020() gate (16-proc GL resolver), then
-   glDisable(GL_BLEND) / glEnable(GL_BLEND) through `DAT_104df040` /
-   `DAT_104df5a4` bracketing the spans (the decompiler drops the args;
-   the second call's literal 0xbe2 = GL_BLEND is in the disassembly).
+4. Blend state: FUN_10027020() gate (the 16-proc GL resolver), then
+   glDisable (first call's args dropped by the decompiler) followed by
+   glDisable(GL_BLEND 0xbe2) -- BOTH through `DAT_104df040`, which the
+   FUN_10027020 resolver resolves to glDisable; there is no glEnable
+   pair and no re-enable at the tail (the same untextured-solid-span
+   head LightningPolyLine3d uses).
 5. Span plumbing: local function pointers local_50 = 0x7BCBB0
    (horizontal), local_4c = 0x7BCE20 (vertical), local_48 = 0x7BC250
    (third span fn) are passed by address into a stack context struct
