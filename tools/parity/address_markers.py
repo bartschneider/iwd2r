@@ -29,6 +29,13 @@ functions read as "inside". functions.tsv has the size, so a marker lands
 "inside" only within the owner's own bytes; past them it is ``undefined``
 (a real gap or a stale marker -- both worth seeing).
 
+A second deliberate narrowing, in what --strict fails on: the fork's exit
+was ``if args.strict and (merged or unchecked or undefined): return 1`` --
+strict also failed on merged hits and on unchecked markers (no callgraph to
+check against). Ours fails only on ``undefined``, so --strict stays a
+statement about markers that name no function start, not about the state
+of the export; merged and unchecked are always eyes-only here.
+
 Usage::
 
     python3 tools/parity/address_markers.py [--source-root src] [--strict]

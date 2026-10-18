@@ -126,6 +126,18 @@
       "url": "https://raw.githubusercontent.com/RedChimera/IWD2EE/60de54611b249d3bcca3f6522ef9db5e7ec27339/iwd2ee/ieex_override/IEex_Render_Patch.lua",
       "dest": "lua/IEex_Render_Patch.upstream.lua",
       "sha256": "b888f22e02c258cc5261f6a637f6c9bf9e5ee63ae62ba5ebc4e59768a7ad7ccc"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/WillScarlettOhara/iwd2-re/e8dd16a750966af53f24daaf49dcb4fb13594c13/data/pdb/bg2_pdb_extracted.zip",
+      "dest": "bg2/bg2_pdb_extracted.zip",
+      "sha256": "3dd54088a3c3a7465a321b45167e8650dc3ce0b6e6716c14773d611cae302b64",
+      "unzip": true
+    },
+    {
+      "url": "https://raw.githubusercontent.com/WillScarlettOhara/iwd2-re/e8dd16a750966af53f24daaf49dcb4fb13594c13/data/ghidra/BG2EE_rep.zip",
+      "dest": "bg2/BG2EE_rep.zip",
+      "sha256": "26f63ac9426f9704870fdb06ae0d8096bc8bdf5f9cfea391df90ab1ad0345f2b",
+      "unzip": true
     }
   ]
 }

@@ -97,6 +97,41 @@ unrecognizable citation fails the gate; the format contract is in
 rolls, saving throws, damage, effect application — never accepts a trace:
 those functions require `kind: oracle`, imported or not.
 
+## Briefing agents
+
+Five tools under `tools/`, adopted from the fork's `scripts/` at
+`e8dd16a`, change how work is handed to an agent: implementer briefs name
+functions by `assemble_context` bundle, reviewers start from the digest,
+and nobody answers "what does this call" by reading a raw decompile.
+
+- [tools/fn_digest.py](../../tools/fn_digest.py) — `digest(decompile_text,
+  callgraph)` → a ≤30-line brief: signature, callees with resolved names,
+  string literals, globals, unresolved calls, loop and switch counts.
+- [tools/src_find.py](../../tools/src_find.py) — `find(query)` →
+  `(file, line, signature)` for `0xADDR`, `Class::`, `Class::Method` or a
+  bare name, resolved from the `// 0xADDR` markers. No grep chains.
+- [tools/assemble_context.py](../../tools/assemble_context.py) —
+  `bundle(address)` → digest, decompile, callees' signatures, resolved IDS
+  constants and resrefs, in that order, with a token estimate on the first
+  line; when the function belongs to a class and the BG2 index exists, the
+  class's BG2 layout is appended as a hypothesis to check against IWD2
+  (the offsets are BG2's, never quoted as ours).
+- [tools/token_audit.py](../../tools/token_audit.py) —
+  `summarize(transcript.jsonl)` → where a session's context went: usage
+  totals, per-tool result weight, largest single results.
+- [tools/bg2_find.py](../../tools/bg2_find.py) — `lookup(query)` →
+  class/member/method layout from a SQLite index built once from the
+  BG2:EE PDB symbol dumps (131 MB of dumps → 12 MB index, ~1 s to build,
+  ~1 ms per lookup). The dumps are pinned like everything else — see the
+  next section.
+
+Measured on this stream's own coordinator transcript (12.4 MB, 901
+messages carrying usage): tool results dominated the context — Read
+~76K tokens over 40 calls, Bash ~51K over 183, Agent ~5K over 22 — with
+the largest single Read ~13.6K tokens, and ~49.2M cumulative cache-read
+tokens (~54,655 per message). That measurement is why the bundle caps
+callees at 20 and states its own token cost on line one.
+
 ## Nothing from his IWD2EE branch enters the repository
 
 His renderer is built into IEex, and his IWD2EE work is game-data overrides
@@ -114,13 +149,20 @@ upstream IEex is [RedChimera/IWD2EE](https://github.com/RedChimera/IWD2EE)
 at `60de54611b249d3bcca3f6522ef9db5e7ec27339`. Both sides are pinned — DLLs
 and Lua from each — so the renderer streams can diff the fork's work
 against upstream's. [tools/wso_pins.json](../../tools/wso_pins.json) is the
-authoritative list: 25 files — the 3 DLLs, 20 fork Lua files (14 patch
+authoritative list: 27 files — the 3 DLLs, 20 fork Lua files (14 patch
 scripts and 6 `_State` scripts; about 53,000 lines — the spec's early count
-of 16 patch files was an undercount), and the 2 upstream Lua files.
+of 16 patch files was an undercount), the 2 upstream Lua files, and the 2
+BG2:EE symbol-dump archives (`bg2_pdb_extracted.zip`, `BG2EE_rep.zip`)
+pinned from the fork's own repo at `e8dd16a`, which
+[tools/bg2_find.py](../../tools/bg2_find.py) indexes.
 
     python3 -I tools/wso_fetch.py --check    # verify the staged copies
     python3 -I tools/wso_fetch.py            # fetch by pinned hash
 
 Both land under `${IWD2R_HOME:-~/.local/share/iwd2r}/wso/` and nowhere
 else: a download is hashed in memory and written only when it matches its
-pin.
+pin. Two pins are zip archives (`unzip: true`): `wso_fetch` verifies the
+archive's hash first, then extracts it beside the archive under the same
+`wso/` tree — member names are sanitized (no absolute paths, no `..`, no
+symlinks, no drive letters) and capped at 4,096 files and 2 GiB — and
+nothing extracted is ever executed.

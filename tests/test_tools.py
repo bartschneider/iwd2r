@@ -28,6 +28,7 @@ import tempfile
 import time
 import types
 import unittest
+import zipfile
 import xml.etree.ElementTree as ET
 import zlib
 
@@ -114,6 +115,11 @@ winsandbox = load_tool('winsandbox')
 winhome = load_tool('winhome')
 xrec = load_tool('xrec')
 wso_fetch = load_tool('wso_fetch')
+fn_digest = load_tool('fn_digest')
+src_find = load_tool('src_find')
+assemble_context = load_tool('assemble_context')
+token_audit = load_tool('token_audit')
+bg2_find = load_tool('bg2_find')
 
 
 def load_ghidra_tool(name):
@@ -6602,6 +6608,67 @@ class WsoFetchTest(unittest.TestCase):
             self.assertIn('wso_fetch:', lines[0])
             self.assertIn(os.path.basename(pins), lines[0])
 
+    @staticmethod
+    def make_zip(path, members):
+        with zipfile.ZipFile(path, 'w') as z:
+            for name, data in members:
+                z.writestr(name, data)
+
+    def test_wso_fetch_extracts_after_hash_match(self):
+        """A pin with "unzip": true is extracted beside its archive only
+        after the archive's bytes match the pin; member names are
+        sanitized (no '..', no absolute paths) and --check verifies the
+        extracted members are still there."""
+        payload = 'pinned dump\n'.encode('utf-16')
+        src = os.path.join(self.home, 'src', 'dump.zip')
+        os.makedirs(os.path.dirname(src))
+        self.make_zip(src, [('bg2_pdb_types.txt', payload),
+                            ('sub/nested.txt', b'nested\n')])
+        pins = {'fork_commit': 'f' * 40, 'upstream_commit': 'u' * 40,
+                'files': [{'url': 'file://' + src,
+                           'dest': 'bg2/dump.zip', 'unzip': True,
+                           'sha256': hashlib.sha256(open(src, 'rb').read()).hexdigest()}]}
+        self.assertEqual(wso_fetch.fetch(pins, wso_fetch.wso_root()), [])
+        self.root = wso_fetch.wso_root()
+        with open(os.path.join(self.root, 'bg2', 'bg2_pdb_types.txt'), 'rb') as f:
+            self.assertEqual(f.read(), payload)
+        self.assertTrue(os.path.isfile(os.path.join(self.root, 'bg2', 'sub',
+                                                    'nested.txt')))
+        # --check verifies both the archive and its extracted members.
+        os.unlink(os.path.join(self.root, 'bg2', 'bg2_pdb_types.txt'))
+        problems = wso_fetch.check(pins, self.root)
+        self.assertEqual([p for p in problems if 'bg2_pdb_types.txt' in p],
+                         problems, problems)
+        # A hash mismatch leaves nothing extracted.
+        tampered = os.path.join(self.home, 'src', 'tampered.zip')
+        self.make_zip(tampered, [('bg2_pdb_types.txt', b'attacker\n')])
+        pins['files'][0]['url'] = 'file://' + tampered
+        problems = wso_fetch.fetch(pins, self.root)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn('sha256', problems[0])
+        self.assertEqual(sorted(os.listdir(os.path.join(self.root, 'bg2'))),
+                         ['dump.zip', 'dump.zip.extracted.json', 'sub'])
+
+    def test_wso_fetch_refuses_unsafe_archive_members(self):
+        """A member named to escape the extraction directory (`..` or an
+        absolute path) fails the whole extraction: the problem is
+        reported, nothing is written outside the wso root, and none of
+        the archive's members -- the safe ones included -- are
+        extracted."""
+        src = os.path.join(self.home, 'src', 'evil.zip')
+        os.makedirs(os.path.dirname(src))
+        self.make_zip(src, [('ok.txt', b'fine\n'), ('../evil.txt', b'escape\n')])
+        pins = {'fork_commit': 'f' * 40, 'upstream_commit': 'u' * 40,
+                'files': [{'url': 'file://' + src,
+                           'dest': 'bg2/evil.zip', 'unzip': True,
+                           'sha256': hashlib.sha256(open(src, 'rb').read()).hexdigest()}]}
+        problems = wso_fetch.fetch(pins, wso_fetch.wso_root())
+        self.assertEqual([p for p in problems if 'evil.txt' in p], problems,
+                         problems)
+        self.assertFalse(os.path.exists(os.path.join(self.home, 'evil.txt')))
+        self.assertEqual(os.listdir(os.path.join(wso_fetch.wso_root(), 'bg2')),
+                         ['evil.zip'])
+
 
 trace_diff = load_tool('frida/trace_diff')
 
@@ -6939,6 +7006,364 @@ class ParityTest(unittest.TestCase):
         found = parity_run.touched(self.repo, base)
         self.assertEqual({address for _, address, _ in found},
                          {0x401000, 0x401040})
+
+
+class FnDigestTest(unittest.TestCase):
+    """tools/fn_digest.digest -- a <=30-line brief of a decompile."""
+
+    def tiny_case(self):
+        return ('int f()\n'
+                '{\n'
+                '    for (;;) { }\n'
+                '    while (x) { }\n'
+                '    do { } while (y);\n'
+                '    switch (z) { }\n'
+                '}\n')
+
+    def test_fn_digest_under_30_lines(self):
+        # A 400-line decompile with strings, globals, calls, loops, a switch.
+        body = []
+        i = 0
+        while len(body) < 396:
+            body.append(f'    g_arr[{i % 8}] = DAT_009{i % 10:05d}'
+                        f' + FUN_0041{i % 100:04d}();')
+            if i % 40 == 0:
+                body.append('    for (int j = 0; j < 3; j++) { }')
+            if i % 80 == 0:
+                body.append('    switch (g_mode) { case 1: break; }')
+            if i % 60 == 0:
+                body.append('    printf("sprite %d", i);')
+            i += 1
+        del body[396:]  # exactly 396 body lines
+        lines = (['int CGameSprite::Render(int nX, int nY)', '{'] + body
+                 + ['    return g_arr[0];', '}'])
+        self.assertEqual(len(lines), 400)
+        decompile = '\n'.join(lines)
+
+        d = fn_digest.digest(decompile, {
+            'name': 'CGameSprite::Render',
+            'address': 0x5845D0,
+            'signature': 'int CGameSprite::Render(int, int)',
+            'callees': ['FUN_00410000', 'CInfGame::GetDice',
+                        'CInfGame::GetDice', 'memcpy'],
+            'callers': ['CGameSprite::Draw'],
+        })
+        out = d.splitlines()
+        self.assertLessEqual(len(out), 30)
+        self.assertIn('CGameSprite::Render', out[0])
+        self.assertIn('0x5845d0', out[0])
+        self.assertIn('400', out[0])
+        self.assertTrue(any('signature: int CGameSprite::Render(int, int)' == l
+                            for l in out))
+        # callees are deduped, kept in order
+        self.assertTrue(any(l == 'callees (3): FUN_00410000, CInfGame::GetDice, '
+                              'memcpy' for l in out))
+        self.assertTrue(any(l == 'callers (1): CGameSprite::Draw' for l in out))
+        self.assertTrue(any(l == 'strings: "sprite %d"' for l in out))
+        gline = next(l for l in out if l.startswith('globals: '))
+        self.assertIn('DAT_00900000', gline)
+        self.assertIn('g_mode', gline)
+        self.assertIn('g_arr', gline)
+        lline = next(l for l in out if l.startswith('loops: '))
+        self.assertRegex(lline, r'^loops: \d+  switches: \d+$')
+
+        # loops counts `for`/`while` keywords (a do-while's while included).
+        tiny = fn_digest.digest(self.tiny_case(), None).splitlines()
+        self.assertIn('loops: 3  switches: 1', tiny)
+
+
+_SRC_CPP = '''// CGameSprite::Render draws one frame.
+// 0x5845D0
+void CGameSprite::Render(int nFrame)
+{
+    if (nFrame < 0)
+        return;
+    SetFrame(nFrame);
+}
+
+// 0x584600
+int CGameSprite::GetFrame() const
+{
+    return m_nFrame;
+}
+'''
+
+_SRC_CPP2 = '''// 0x401000
+int CInfGame::GetDice(int nSides)
+{
+    return nSides;
+}
+'''
+
+_DECOMP = '''int CGameSprite::Render(int nFrame)
+{
+    if (nFrame < 0)
+        return 0;
+    SetFrame(nFrame);
+    ApplyEffect(FOO_BAR, "SW1H01");
+    SetGlobal(ODD_CASE, "AR1000");
+    return 0;
+}
+'''
+
+
+def _write(path, text):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w') as f:
+        f.write(text)
+
+
+class SrcFindTest(unittest.TestCase):
+    """tools/src_find.find -- markers and signatures, no grep chains."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = tmp.name
+        _write(os.path.join(self.root, 'CGameSprite.cpp'), _SRC_CPP)
+        _write(os.path.join(self.root, 'CInfGame.cpp'), _SRC_CPP2)
+
+    def test_src_find_by_address_and_name(self):
+        by_addr = src_find.find('0x5845D0', root=self.root)
+        self.assertEqual(by_addr,
+                         [('CGameSprite.cpp', 2, 'void CGameSprite::Render(int nFrame)')])
+        by_name = src_find.find('CGameSprite::Render', root=self.root)
+        self.assertEqual(by_name, by_addr)
+
+        whole_class = src_find.find('CGameSprite::', root=self.root)
+        self.assertEqual(whole_class,
+                         [('CGameSprite.cpp', 2, 'void CGameSprite::Render(int nFrame)'),
+                          ('CGameSprite.cpp', 10, 'int CGameSprite::GetFrame() const')])
+
+        self.assertEqual(src_find.find('0x401000', root=self.root),
+                         [('CInfGame.cpp', 2, 'int CInfGame::GetDice(int nSides)')])
+        self.assertEqual(src_find.find('NoSuch::Thing', root=self.root), [])
+
+
+class AssembleContextTest(unittest.TestCase):
+    """tools/assemble_context.bundle -- one brief, in the brief's order."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.tmp = tmp.name
+        self.exports = os.path.join(self.tmp, 'exports')
+        self.src = os.path.join(self.tmp, 'src')
+        self.ids = os.path.join(self.tmp, 'ids')
+        _write(os.path.join(self.exports, 'functions.tsv'),
+               '5845D0\tCGameSprite::Render\t120\n'
+               '584600\tCGameSprite::GetFrame\t24\n')
+        _write(os.path.join(self.exports, 'callgraph.tsv'),
+               '5845D0\t584600\n')
+        _write(os.path.join(self.exports, 'CGameSprite::Render.c'), _DECOMP)
+        _write(os.path.join(self.src, 'CGameSprite.cpp'), _SRC_CPP)
+        _write(os.path.join(self.ids, 'DEMO.IDS'), 'FOO_BAR 0\n8 ODD_CASE\n')
+
+    def test_assemble_context_order_and_estimate(self):
+        b = assemble_context.bundle(0x5845D0, exports=self.exports,
+                                    src_root=self.src, ids_dir=self.ids)
+        first = b.splitlines()[0]
+        m = re.match(r'^context bundle: .*0x5845d0.*CGameSprite::Render'
+                     r' ~(\d+) tokens$', first)
+        self.assertIsNotNone(m, first)
+        self.assertEqual(int(m.group(1)), len(b.split('\n', 1)[1]) // 4)
+
+        i_digest = b.index('## digest')
+        i_decomp = b.index('## decompile')
+        i_callees = b.index('## callees')
+        i_ids = b.index('## ids')
+        self.assertLess(i_digest, i_decomp)
+        self.assertLess(i_decomp, i_callees)
+        self.assertLess(i_callees, i_ids)
+
+        self.assertIn('ApplyEffect(FOO_BAR', b[i_decomp:i_callees])
+        self.assertIn('CGameSprite::GetFrame', b[i_callees:i_ids])
+        self.assertIn('int CGameSprite::GetFrame() const', b[i_callees:i_ids])
+        self.assertIn('FOO_BAR = 0', b[i_ids:])
+        self.assertIn('ODD_CASE = 8', b[i_ids:])
+        resref_line = next(l for l in b[i_ids:].splitlines()
+                           if l.startswith('resrefs:'))
+        self.assertIn('SW1H01', resref_line)
+        self.assertIn('AR1000', resref_line)
+        self.assertIn('loops:', b[i_digest:i_decomp])
+
+        # No exports, no ids dir: honest degradation, still the same order.
+        bare = assemble_context.bundle(
+            0x5845D0, exports=os.path.join(self.tmp, 'no-such-exports'),
+            bg2_db=False)
+        self.assertIn('~', bare.splitlines()[0])
+        self.assertLess(bare.index('## digest'), bare.index('## decompile'))
+        self.assertLess(bare.index('## decompile'), bare.index('## callees'))
+        self.assertIn('no functions.tsv', bare)
+
+
+_BG2_TYPES = '''\
+    0x1000 | LF_FIELDLIST [size = 92]
+\t- LF_MEMBER [name = `m_flags`, Type = 0x0074 (int), offset = 4, attrs = public]
+\t- LF_ONEMETHOD [name = `Render`]
+\t\ttype = 0x1018, vftable offset = 0, attrs = public virtual intro
+\t- LF_MEMBER [name = `m_pThing`, Type = 0x1008, offset = 8, attrs = public]
+    0x1008 | LF_POINTER [size = 12]
+\t\treferent = 0x103C, mode = ptr
+    0x100C | LF_ARGLIST [size = 8]
+    0x1010 | LF_FIELDLIST [size = 72]
+\t- LF_METHOD [name = `Draw`, # overloads = 2, overload list = 0x1014]
+\t- LF_MEMBER [name = `m_count`, Type = 0x0074 (int), offset = 0, attrs = public]
+\t- LF_MEMBER [name = `m_name`, Type = 0x0470 (char*), offset = 8, attrs = public]
+\t- LF_MEMBER [name = `m_next`, Type = 0x1008, offset = 16, attrs = public]
+    0x1014 | LF_METHODLIST [size = 20]
+\t- Method [type = 0x1030, vftable offset = -1, attrs = private static]
+\t- Method [type = 0x1034, vftable offset = 4, attrs = public virtual]
+    0x1018 | LF_MFUNCTION [size = 28]
+\t\treturn type = 0x0003 (void), # args = 0, param list = 0x100C
+\t\tcalling conv = thiscall, options = none
+    0x1030 | LF_MFUNCTION [size = 28]
+\t\treturn type = 0x0003 (void), # args = 0, param list = 0x100C
+\t\tcalling conv = thiscall, options = none
+    0x1034 | LF_MFUNCTION [size = 28]
+\t\treturn type = 0x0074 (int), # args = 0, param list = 0x100C
+\t\tcalling conv = thiscall, options = none
+    0x1038 | LF_FIELDLIST [size = 32]
+\t- LF_ENUMERATE [THING_ON = 0]
+\t- LF_ENUMERATE [THING_OFF = 1]
+    0x103C | LF_CLASS [size = 48] `CThing`
+\t\tfield list: 0x1000
+\t\toptions: contains intro virtual, sizeof 48
+    0x1040 | LF_CLASS [size = 44] `CWidget`
+\t\tfield list: 0x1010
+\t\toptions: contains intro virtual, sizeof 44
+    0x1044 | LF_CLASS [size = 0] `CThing`
+\t\tfield list: <no type>
+\t\toptions: forward ref, sizeof 0
+    0x1048 | LF_ENUM [size = 40] `THING_STATE`
+\t\tfield list: 0x1038
+\t\toptions: sizeof 4
+'''
+
+
+class Bg2FindTest(unittest.TestCase):
+    """tools/bg2_find -- a SQLite index over the extracted PDB dumps."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dumps = os.path.join(tmp.name, 'bg2')
+        os.makedirs(self.dumps)
+        # The real dumps are UTF-16; exercise that path.
+        with open(os.path.join(self.dumps, 'bg2_pdb_types.txt'), 'w',
+                  encoding='utf-16') as f:
+            f.write(_BG2_TYPES)
+        self.db = os.path.join(self.dumps, 'bg2_pdb.sqlite')
+
+    def test_bg2_find_builds_index_and_answers(self):
+        self.assertEqual(bg2_find.build_db(dumps=self.dumps, db=self.db),
+                         self.db)
+        self.assertTrue(os.path.isfile(self.db))
+
+        rows = bg2_find.lookup('CThing::', db=self.db)
+        flags = next(r for r in rows
+                     if r['kind'] == 'member' and r['name'] == 'm_flags')
+        self.assertEqual(flags['class'], 'CThing')
+        self.assertEqual(flags['offset'], 4)
+        self.assertEqual(flags['type'], 'int')
+        ptr = next(r for r in rows
+                   if r['kind'] == 'member' and r['name'] == 'm_pThing')
+        self.assertEqual(ptr['offset'], 8)
+        self.assertEqual(ptr['type'], 'CThing*')
+        render = next(r for r in rows
+                      if r['kind'] == 'method' and r['name'] == 'Render')
+        self.assertEqual(render['vtable'], 0)
+        self.assertEqual(render['type'], '()')
+        self.assertTrue(any(r['kind'] == 'class' and r['name'] == 'CThing'
+                            and r['size'] == 48 for r in rows))
+        self.assertFalse(any(r.get('name') == 'm_count' for r in rows))
+
+        # Bare member name, and a scoped Class::Method query.
+        bare = bg2_find.lookup('m_flags', db=self.db)
+        self.assertEqual([(r['class'], r['offset'], r['type']) for r in bare
+                          if r['kind'] == 'member'],
+                         [('CThing', 4, 'int')])
+        draw = bg2_find.lookup('CWidget::Draw', db=self.db)
+        self.assertEqual(sorted((r['vtable'], r['type']) for r in draw),
+                         [(-1, '()'), (4, '() -> int')])
+
+        # The enum values are indexed; the forward ref never became a row.
+        states = bg2_find.lookup('THING_STATE::', db=self.db)
+        self.assertEqual([(r['name'], r['value']) for r in states],
+                         [('THING_ON', 0), ('THING_OFF', 1)])
+        self.assertEqual([r['name'] for r in
+                          bg2_find.lookup('CThing', db=self.db)
+                          if r['kind'] == 'class'], ['CThing'])
+
+
+class TokenAuditTest(unittest.TestCase):
+    """tools/token_audit.summarize -- where a session's tokens went."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.path = os.path.join(tmp.name, 'session.jsonl')
+
+    def test_token_audit_totals(self):
+        usage = {'input_tokens': 100, 'output_tokens': 50,
+                 'cache_creation_input_tokens': 10,
+                 'cache_read_input_tokens': 5}
+
+        def assistant(tools=()):
+            content = [{'type': 'text', 'text': 'thinking'}]
+            content += [{'type': 'tool_use', 'id': tid, 'name': name,
+                         'input': {}} for tid, name in tools]
+            return json.dumps({'type': 'assistant', 'message': {
+                'role': 'assistant', 'usage': dict(usage),
+                'content': content}})
+
+        def result(tid, text):
+            return json.dumps({'type': 'user', 'message': {'role': 'user',
+                'content': [{'type': 'tool_result', 'tool_use_id': tid,
+                             'content': text}]}})
+
+        lines = [
+            assistant([('t1', 'Bash')]),
+            result('t1', 'x' * 4000),
+            assistant([('t2', 'Read')]),
+            result('t2', 'y' * 1200),
+            assistant([('t3', 'Grep')]),
+            result('t3', 'z' * 800),
+            assistant([('t4', 'Bash')]),
+            result('t4', 'w' * 50),
+            assistant(),
+            json.dumps({'type': 'user', 'message': {'role': 'user',
+                                                    'content': 'continue'}}),
+            assistant([('t6', 'Read')]),
+            json.dumps({'type': 'user', 'message': {'role': 'user',
+                'content': [{'type': 'tool_result', 'tool_use_id': 't6',
+                             'content': [{'type': 'text', 'text': 'q' * 999}]}]}}),
+            assistant([('t7', 'Agent')]),
+            result('t7', 'r' * 3000),
+        ]
+        lines += [assistant() for _ in range(5)]
+        lines.append('{"type":"assistant","message":{"usage":{"input_tok')
+        self.assertEqual(len(lines), 20)
+        with open(self.path, 'w') as f:
+            f.write('\n'.join(lines) + '\n')
+
+        s = token_audit.summarize(self.path)
+        self.assertEqual(s['usage'], {'input_tokens': 1200, 'output_tokens': 600,
+                                      'cache_creation_input_tokens': 120,
+                                      'cache_read_input_tokens': 60,
+                                      'messages': 12})
+        self.assertEqual(s['tools']['Bash'],
+                         {'calls': 2, 'result_chars': 4050, 'result_tokens': 1012})
+        self.assertEqual(s['tools']['Read'],
+                         {'calls': 2, 'result_chars': 2199, 'result_tokens': 549})
+        self.assertEqual(s['tools']['Grep']['result_tokens'], 200)
+        self.assertEqual(s['tools']['Agent']['result_tokens'], 750)
+        self.assertEqual(s['largest'][0]['tool'], 'Bash')
+        self.assertEqual(s['largest'][0]['chars'], 4000)
+        self.assertEqual(len(s['largest']), 6)
+        self.assertEqual([r['chars'] for r in s['largest']],
+                         sorted((r['chars'] for r in s['largest']),
+                                reverse=True))
 
 
 if __name__ == '__main__':
