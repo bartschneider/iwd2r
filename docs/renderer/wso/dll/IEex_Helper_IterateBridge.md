@@ -77,7 +77,7 @@ lua_pushstring). Each entry: the callback from the stack is pushed, then the
 key, then the value through the standard tag switch (0 nil / 1 boolean /
 3 integer / 4 string / 5 lightuserdata; ref-count bump under LOCK while
 pushing; unknown tag -> ostringstream of the tag + luaL_traceback +
-log call + lua_pushnil). lua_pcall(2, 1, 0) runs the callback; a pcall
+LogVariadic + lua_pushnil). lua_pcall(2, 1, 0) runs the callback; a pcall
 error is logged ("%s" via DAT_100944fc) and iteration continues; a **truthy
 callback return stops the iteration early**. The impl carries a "Type
 propagation algorithm not settling" warning. Returns 0 to Lua. No GL calls.

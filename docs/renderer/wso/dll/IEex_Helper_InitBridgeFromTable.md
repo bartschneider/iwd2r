@@ -78,7 +78,7 @@ FUN_10018880, which consumes the stack value:
 - stack value is a table (type 5) -> lua_pushvalue + lua_setfield (stored by
   reference), then FUN_10016440(2) trims the stack.
 - stack value is a function (type 6) -> store it, lua_pcall it (error ->
-  lua_tolstring + log "%s" via the host log pointer DAT_100944fc), lua_getfield the
+  lua_tolstring + LogVariadic "%s" via DAT_100944fc), lua_getfield the
   result back and convert with FUN_10016440, then lua_settop.
 
 Other types fall through and do nothing. Returns 0 to Lua. No GL calls.

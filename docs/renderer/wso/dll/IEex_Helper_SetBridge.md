@@ -78,7 +78,7 @@ LuaContainer + 0x10-byte `std::_Ref_count<LuaContainer>` and links it; the
 value argument is then converted into the slot by FUN_10015d60 (tagged
 LuaData: boolean/integer/string/bridge-handle, ref-counted under LOCK).
 Any other key type: ostringstream of the type number + luaL_traceback +
-log call + stack reset. Returns 0 to Lua. The middle of the decompile is
+LogVariadic + stack reset. Returns 0 to Lua. The middle of the decompile is
 obscured by shared_ptr bookkeeping and five "Removing unreachable block"
 warnings -- treat the replace-vs-reuse detail as approximate. No GL calls.
 

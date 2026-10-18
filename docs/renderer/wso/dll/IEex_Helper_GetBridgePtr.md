@@ -72,7 +72,7 @@ blocking-acquire-shared handle+0, then TryAcquireShared handle+4; contention
 releases handle+0, clears the slot flag, _Thrd_yield()s and retries.
 Release order after the work is +4 then +0. inner FUN_100183b0 resolves the path, does an
 integer- or string-key lookup (other key types -> error path: ostringstream
-of the type number + traceback + log call), and ends with
+of the type number + traceback + LogVariadic), and ends with
 lua_pushinteger of the stored pointer. The impl carries a "Type propagation
 algorithm not settling" warning (recovered around the switch, same shape as
 GetBridge). Returns 1. No GL calls.

@@ -74,7 +74,7 @@ FUN_10016fc0: resolve the path (args up to gettop-1), then erase the final
 key -- integer keys via FUN_1001a760, string keys via hash-bucket unlink
 (FUN_1001c8b0) and a single node free (0x28 bytes); any other key type takes
 the error path (ostringstream of the type number, luaL_traceback,
-log call through the host log pointer DAT_100944fc, lua_settop(L,-2)). Returns 0 to Lua. No GL
+LogVariadic through DAT_100944fc, lua_settop(L,-2)). Returns 0 to Lua. No GL
 calls.
 
 ##### Failure fallbacks
