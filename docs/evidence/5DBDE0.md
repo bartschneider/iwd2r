@@ -387,9 +387,3 @@ void CScreenCharacter::UpdateMainPanel(int param_1)
 ## Notes
 
 Fixed: the Level Up button (37) is enabled by CanLevelUp (0x5E4E80) when the creature is not dead; ours left that call commented out, so Level Up never enabled. Added the race label (0x1000000F, GetRaceStringMixed of the start AI type, or of race 0 when the character is not viewable) and the alignment check (an assert for alignments outside the nine valid values) that the original makes; ours had neither.
-
-## WSO delta
-
-disagreed with WSO at e8dd16a: his body drops the race-label fill and the whole alignment switch the exe performs, and drops the exe's gated level-up enable entirely; case dump-5DBDE0 decides
-
-WSO's UpdateMainPanel never calls GetRaceStringMixed/UpdateLabel(0x1000000F) in either branch, so the race text would keep its previous value, where ours fills it like the decompile. The alignment block (valid 0x00, 0x11-0x13, 0x21-0x23, 0x31-0x33; default UTIL_ASSERT at InfScreenCharacter.cpp:1546) is gone entirely. He renames pText->field_5A to m_nTopIndex (a member our tree does not carry, unportable), drops the (LPCSTR) casts, and comments the exe's SetEnabled(CanLevelUp(pSprite) && (m_generalState & STATE_DEAD) == 0) out entirely (fork src/CScreenCharacter.cpp at e8dd16a, lines 2492-2493 — his tree's only IsLevelUpButtonClickable occurrence is that comment; the helper exists neither in the exe nor in our tree), so the button would keep whatever enabled-state it had; ours keeps the gated enable (src/CScreenCharacter.cpp:2827-2828). Sealed dump comparison stands with ours.

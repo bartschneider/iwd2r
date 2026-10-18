@@ -573,7 +573,7 @@
     "b003": {
       "assigned_at": "2026-10-18T15:16:11+00:00",
       "branch": "p3/wso-b003",
-      "closed_at": null,
+      "closed_at": "2026-10-18T18:23:34+00:00",
       "files": [
         "src/CScreenCharacter.cpp",
         "src/CScreenWorld.cpp",
@@ -755,7 +755,7 @@
           "their_len": 4044
         }
       ],
-      "status": "assigned",
+      "status": "closed",
       "verdicts": {
         "0x445330": {
           "case": "dump-445330",
@@ -854,6 +854,204 @@
         },
         "0x7CFDF0": {
           "case": "vid/cell_blt8to32_point",
+          "losing_kind": "trace",
+          "side": "ours"
+        }
+      }
+    },
+    "b004": {
+      "assigned_at": "2026-10-18T17:55:54+00:00",
+      "branch": "p3/wso-b004",
+      "closed_at": null,
+      "files": [
+        "src/CInfGame.cpp",
+        "src/CGameSprite.cpp",
+        "src/CGameAIBase.cpp",
+        "src/CGameEffect.cpp",
+        "src/CInfButtonArray.cpp",
+        "src/CGameArea.cpp"
+      ],
+      "rows": [
+        {
+          "address": "0x5A7E40",
+          "category": "both_changed_differ",
+          "file": "src/CInfGame.cpp",
+          "name": "CInfGame::Unmarshal",
+          "our_len": 13650,
+          "their_len": 8402
+        },
+        {
+          "address": "0x70CF90",
+          "category": "both_changed_differ",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::Unmarshal",
+          "our_len": 10264,
+          "their_len": 10655
+        },
+        {
+          "address": "0x6F9040",
+          "category": "both_changed_differ",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::AIUpdateWalk",
+          "our_len": 10311,
+          "their_len": 10329
+        },
+        {
+          "address": "0x703700",
+          "category": "both_changed_differ",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::Render",
+          "our_len": 10228,
+          "their_len": 10223
+        },
+        {
+          "address": "0x453840",
+          "category": "both_changed_differ",
+          "file": "src/CGameAIBase.cpp",
+          "name": "CGameAIBase::EvaluateStatusTrigger",
+          "our_len": 12604,
+          "their_len": 7798
+        },
+        {
+          "address": "0x4AB510",
+          "category": "both_changed_differ",
+          "file": "src/CGameEffect.cpp",
+          "name": "CGameEffectDeath::ApplyEffect",
+          "our_len": 14347,
+          "their_len": 2872
+        },
+        {
+          "address": "0x73B760",
+          "category": "both_changed_differ",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::Hit",
+          "our_len": 8298,
+          "their_len": 7982
+        },
+        {
+          "address": "0x5A3230",
+          "category": "both_changed_differ",
+          "file": "src/CInfGame.cpp",
+          "name": "CInfGame::Marshal",
+          "our_len": 9027,
+          "their_len": 5886
+        },
+        {
+          "address": "0x5A24D0",
+          "category": "both_changed_differ",
+          "file": "src/CInfGame.cpp",
+          "name": "CInfGame::LoadArea",
+          "our_len": 7240,
+          "their_len": 7226
+        },
+        {
+          "address": "0x72DE60",
+          "category": "both_changed_differ",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::ProcessEffectList",
+          "our_len": 2705,
+          "their_len": 10634
+        },
+        {
+          "address": "0x763200",
+          "category": "both_changed_differ",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::sub_763200",
+          "our_len": 6935,
+          "their_len": 6230
+        },
+        {
+          "address": "0x7338E0",
+          "category": "both_changed_differ",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::SetCurrAction",
+          "our_len": 7025,
+          "their_len": 5868
+        },
+        {
+          "address": "0x589110",
+          "category": "both_changed_differ",
+          "file": "src/CInfButtonArray.cpp",
+          "name": "CInfButtonArray::SetState",
+          "our_len": 7280,
+          "their_len": 5513
+        },
+        {
+          "address": "0x709B60",
+          "category": "both_changed_differ",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::UpdateSpriteEffect",
+          "our_len": 6584,
+          "their_len": 6138
+        },
+        {
+          "address": "0x704D40",
+          "category": "both_changed_differ",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::RenderPortrait",
+          "our_len": 6048,
+          "their_len": 6103
+        },
+        {
+          "address": "0x5AC430",
+          "category": "both_changed_differ",
+          "file": "src/CInfGame.cpp",
+          "name": "CInfGame::SaveGame",
+          "our_len": 7883,
+          "their_len": 3411
+        },
+        {
+          "address": "0x6FA900",
+          "category": "both_changed_differ",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::ClearBumpPath",
+          "our_len": 5205,
+          "their_len": 5969
+        },
+        {
+          "address": "0x738E70",
+          "category": "both_changed_differ",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::AttackReevaluate",
+          "our_len": 5409,
+          "their_len": 4635
+        },
+        {
+          "address": "0x737EF0",
+          "category": "both_changed_differ",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::Attack",
+          "our_len": 5427,
+          "their_len": 4524
+        },
+        {
+          "address": "0x4794E0",
+          "category": "both_changed_differ",
+          "file": "src/CGameArea.cpp",
+          "name": "CGameArea::SortLists",
+          "our_len": 5003,
+          "their_len": 4846
+        }
+      ],
+      "status": "assigned",
+      "verdicts": {
+        "0x5A7E40": {
+          "case": "dump-5A7E40",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x6F9040": {
+          "case": "dump-6F9040",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x703700": {
+          "case": "dump-703700",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x70CF90": {
+          "case": "dump-70CF90",
           "losing_kind": "trace",
           "side": "ours"
         }
