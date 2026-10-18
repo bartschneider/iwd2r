@@ -1,7 +1,7 @@
 """Tests for tools/gen_map.py, tools/check_evidence.py, tools/gen_fields.py,
-tools/minischema.py, tools/shaders.py, tools/xrec.py and the pure parts of
-tools/play.py, tools/realinput.py, tools/winsandbox.py, tools/oracle.py and
-tools/ghidra/labels.py.
+tools/minischema.py, tools/shaders.py, tools/xrec.py, tools/wso_fetch.py and
+the pure parts of tools/play.py, tools/realinput.py, tools/winsandbox.py,
+tools/oracle.py and tools/ghidra/labels.py.
 
 Run from the repository root: python3 -I tests/test_tools.py
 
@@ -13,6 +13,7 @@ directory afterwards.
 import contextlib
 import datetime
 import glob
+import hashlib
 import importlib.util
 import io
 import json
@@ -111,6 +112,7 @@ dataview = load_tool('dataview')
 winsandbox = load_tool('winsandbox')
 winhome = load_tool('winhome')
 xrec = load_tool('xrec')
+wso_fetch = load_tool('wso_fetch')
 
 
 def load_ghidra_tool(name):
@@ -6410,6 +6412,88 @@ class XrecTest(unittest.TestCase):
                   'both_changed_differ', 'both_stub_diff']:
             self.assertEqual(c[k], 1, k)
         self.assertEqual(sum(c.values()), 10)
+
+
+class WsoFetchTest(unittest.TestCase):
+    """wso_fetch: a dest resolves under <IWD2R_HOME>/wso and one containing
+    '..' (or absolute) is rejected; --check lists files whose sha256 differs
+    from the pin and exits non-zero; fetching creates missing directories and
+    writes only after the downloaded bytes match the pin."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.home = tmp.name
+        self.root = os.path.join(self.home, 'wso')
+        self.addCleanup(os.environ.pop, 'IWD2R_HOME', None)
+        os.environ['IWD2R_HOME'] = self.home
+
+    def pins_file(self, pins):
+        path = os.path.join(self.home, 'pins.json')
+        with open(path, 'w') as f:
+            json.dump(pins, f)
+        return path
+
+    def run_cli(self, *args):
+        return subprocess.run([sys.executable, '-I',
+                               os.path.join(ROOT, 'tools', 'wso_fetch.py'), *args],
+                              capture_output=True, text=True)
+
+    def test_wso_fetch_dest_under_home(self):
+        root = wso_fetch.wso_root()
+        self.assertEqual(str(wso_fetch.resolve_dest('lua/IEex_Core_State.lua', root)),
+                         os.path.join(self.root, 'lua', 'IEex_Core_State.lua'))
+        for dest in ('../escape.dll', 'lua/../../escape.dll', '/abs.dll', '', '.'):
+            with self.assertRaises(ValueError):
+                wso_fetch.resolve_dest(dest, root)
+
+    def test_wso_fetch_check_reports_mismatch(self):
+        os.makedirs(os.path.join(self.root, 'dll'))
+        with open(os.path.join(self.root, 'dll', 'IEex.dll'), 'wb') as f:
+            f.write(b'tampered bytes')
+        pins = {'fork_commit': 'f' * 40, 'upstream_commit': 'u' * 40,
+                'files': [{'url': 'https://example.invalid/IEex.dll',
+                           'dest': 'dll/IEex.dll',
+                           'sha256': hashlib.sha256(b'pinned bytes').hexdigest()}]}
+        problems = wso_fetch.check(pins, wso_fetch.wso_root())
+        self.assertEqual([p for p in problems if 'dll/IEex.dll' in p and
+                          'sha256' in p], problems, problems)
+        run = self.run_cli('--check', '--pins', self.pins_file(pins))
+        self.assertEqual(run.returncode, 1)
+        self.assertIn('dll/IEex.dll', run.stderr)
+        self.assertIn('sha256', run.stderr)
+
+    def test_wso_fetch_creates_dir_when_absent(self):
+        payload = b'-- pinned lua\n'
+        src = os.path.join(self.home, 'src', 'IEex_X.lua')
+        os.makedirs(os.path.dirname(src))
+        with open(src, 'wb') as f:
+            f.write(payload)
+        pins = {'fork_commit': 'f' * 40, 'upstream_commit': 'u' * 40,
+                'files': [{'url': 'file://' + src,
+                           'dest': 'lua/sub/IEex_X.lua',
+                           'sha256': hashlib.sha256(payload).hexdigest()}]}
+        self.assertFalse(os.path.exists(self.root))
+        self.assertEqual(wso_fetch.fetch(pins, wso_fetch.wso_root()), [])
+        with open(os.path.join(self.root, 'lua', 'sub', 'IEex_X.lua'), 'rb') as f:
+            self.assertEqual(f.read(), payload)
+
+    def test_wso_fetch_writes_only_after_hash_matches(self):
+        src = os.path.join(self.home, 'src', 'IEex_Y.lua')
+        os.makedirs(os.path.dirname(src))
+        with open(src, 'wb') as f:
+            f.write(b'attacker bytes')
+        pins = {'fork_commit': 'f' * 40, 'upstream_commit': 'u' * 40,
+                'files': [{'url': 'file://' + src,
+                           'dest': 'lua/IEex_Y.lua',
+                           'sha256': hashlib.sha256(b'pinned bytes').hexdigest()}]}
+        problems = wso_fetch.fetch(pins, wso_fetch.wso_root())
+        self.assertEqual([p for p in problems if 'lua/IEex_Y.lua' in p and
+                          'sha256' in p], problems, problems)
+        self.assertFalse(os.path.exists(self.root))
+        run = self.run_cli('--pins', self.pins_file(pins))
+        self.assertEqual(run.returncode, 1)
+        self.assertIn('lua/IEex_Y.lua', run.stderr)
 
 
 if __name__ == '__main__':
