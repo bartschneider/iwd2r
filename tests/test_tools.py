@@ -120,6 +120,7 @@ src_find = load_tool('src_find')
 assemble_context = load_tool('assemble_context')
 token_audit = load_tool('token_audit')
 bg2_find = load_tool('bg2_find')
+gltrace = load_tool('gltrace')
 
 
 def load_ghidra_tool(name):
@@ -7710,6 +7711,80 @@ class WaveTest(unittest.TestCase):
         self.assertEqual(rc, 0, out)
         with open(report) as f:
             self.assertEqual(f.read(), text)
+
+
+class GltraceTest(unittest.TestCase):
+    """tools/gltrace.summarize -- apitrace dump text to per-frame counts."""
+
+    # 12 calls: frame 1 is calls 1-8 (up to the first wglSwapBuffers),
+    # frame 2 is calls 9-11; call 12 trails the last swap, so it is not
+    # a frame. Frame 1: one 2048x2048 GL_RGBA upload, one FBO bind, two
+    # draws. Frame 2: one draw.
+    DUMP = [
+        '1 glEnable(GL_TEXTURE_2D)',
+        '2 glTexImage2D(target = GL_TEXTURE_2D, level = 0, '
+        'internalformat = GL_RGBA, width = 2048, height = 2048, '
+        'border = 0, format = GL_RGBA, type = GL_UNSIGNED_BYTE, '
+        'pixels = blob(16777216))',
+        '3 glBindTexture(GL_TEXTURE_2D, 1)',
+        '4 glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)',
+        '5 glBindFramebuffer(GL_FRAMEBUFFER, 1)',
+        '6 glDrawArrays(GL_TRIANGLES, 0, 3)',
+        '7 glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, blob(12))',
+        '8 wglSwapBuffers(hdc = 0x10010e) = TRUE',
+        '9 glUseProgram(5)',
+        '10 glDrawArrays(GL_TRIANGLES, 0, 3)',
+        '11 wglSwapBuffers(hdc = 0x10010e) = TRUE',
+        '12 glGetError() = GL_NO_ERROR',
+    ]
+
+    def test_gltrace_summarize_counts(self):
+        self.assertEqual(gltrace.summarize(self.DUMP), {
+            'frames': [
+                {'draws': 2, 'fbo_binds': 1, 'texture_uploads': [
+                    {'size': '2048x2048', 'format': 'GL_RGBA'}]},
+                {'draws': 1, 'fbo_binds': 0, 'texture_uploads': []},
+            ],
+            'texture_dimensions': ['2048x2048'],
+        })
+
+    def test_gltrace_summarize_dump_variants(self):
+        # apitrace dump without call numbers and without argument names
+        # (--call-nos=no --arg-names=no), and a GLX swap, must read the
+        # same. Upload format is the internal format (the 3rd argument of
+        # glTexImage2D), size its width x height.
+        self.assertEqual(gltrace.summarize([
+            'glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 64, 32, 0, GL_RGB, '
+            'GL_UNSIGNED_BYTE, blob(6144))',
+            'glBindFramebuffer(GL_FRAMEBUFFER, 0)',
+            'glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, blob(12))',
+            'glXSwapBuffers(dpy = 0x1, drawable = 2)',
+        ]), {
+            'frames': [
+                {'draws': 1, 'fbo_binds': 1, 'texture_uploads': [
+                    {'size': '64x32', 'format': 'GL_RGB'}]},
+            ],
+            'texture_dimensions': ['64x32'],
+        })
+
+    def test_gltrace_trim_after_last_checkpoint(self):
+        # Everything after the last checkpoint op is dropped: the state
+        # dump / shot / quit ops of the iwd2r control channel have no
+        # counterpart in the original engine.
+        actions = [
+            {'op': 'wait', 'frames': 150, 'line': 4},
+            {'op': 'checkpoint', 'name': 'menu', 'line': 5},
+            {'op': 'click', 'x': 645, 'y': 262, 'line': 6},
+            {'op': 'checkpoint', 'name': 'world', 'line': 7},
+            {'op': 'shot', 'name': 'world', 'line': 8},
+            {'op': 'quit', 'line': 9},
+        ]
+        trimmed = gltrace.trim_after_last_checkpoint(actions)
+        self.assertEqual([a['op'] for a in trimmed],
+                         ['wait', 'checkpoint', 'click', 'checkpoint'])
+        self.assertEqual([a['name'] for a in trimmed
+                          if a['op'] == 'checkpoint'],
+                         ['menu', 'world'])
 
 
 if __name__ == '__main__':
