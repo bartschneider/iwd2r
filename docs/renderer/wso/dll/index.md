@@ -188,6 +188,14 @@ Decompile scratch output lives in `runs/dll-decomp/` (git-ignored).
 - [`IEex_Helper_MarkerTintPC`](IEex_Helper_MarkerTintPC.md)
 - [`IEex_Helper_SetMarkerStyle`](IEex_Helper_SetMarkerStyle.md)
 
+## Sound
+
+- [`IEex_Helper_CSoundImp_DestructHook`](IEex_Helper_CSoundImp_DestructHook.md)
+- [`IEex_Helper_EllipticalSoundDist`](IEex_Helper_EllipticalSoundDist.md)
+- [`IEex_Helper_FixSoundSetFolder`](IEex_Helper_FixSoundSetFolder.md)
+- [`IEex_Helper_ScaleSoundRange`](IEex_Helper_ScaleSoundRange.md)
+- [`IEex_Helper_ScaleVoiceRange`](IEex_Helper_ScaleVoiceRange.md)
+
 ## Staged Lua evidence (sha256)
 
 The staged Lua patches at `~/.local/share/iwd2r/wso/lua/` are used as evidence for who calls each helper (and, for the keys-screen group, for hook sites and Lua-callback contracts). The staged corpus itself has no pin yet; these hashes let it be pinned retroactively.
