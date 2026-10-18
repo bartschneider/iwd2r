@@ -64,3 +64,17 @@ Imported-From: WillScarlettOhara/iwd2-re@<40-char sha> (MIT per author, 2026-10-
 
 The additions are MIT, under the standard MIT text quoted at the top of this file. Nothing from the fork's IWD2EE branch — game-data overrides, compiled binaries — is vendored; the renderer artifacts are fetched by pinned hash outside the repository (docs/wso/README.md).
 
+## Differential Frida tracing
+
+The differential-tracing toolchain (docs/frida-tracing.md) is adopted from the same fork, at commit e8dd16a750966af53f24daaf49dcb4fb13594c13, under the same MIT grant.
+
+| Our files | Ported from | Copyright |
+|---|---|---|
+| `tools/frida/hooks.py` | `scripts/frida_hooks.py` (the readers, argument expressions, prelude and render functions) | Copyright the fork's author (WillScarlettOhara). MIT, as granted to Thierry on 2026-10-17 |
+| `tools/frida/orig.py` | `scripts/frida_orig.py` (Trace/verdict shape, hook wiring) with the exception guard from his `scripts/frida_crash_guard.py` | as above |
+| `tools/frida/trace_diff.py` | `scripts/frida_trace_diff.py` (CLI and comparison machinery) | as above |
+| `tools/frida/probe.py` | `scripts/frida_probe.py` (the two-runtime shape), rewritten for our sandbox pipeline | as above |
+| `docs/frida-tracing.md` | his `docs/frida-trace-comparison.md` and `docs/frida-differential-tracing.md` (the method and the gotchas), rewritten for our paths | as above |
+
+Dropped on purpose: the fork's in-target load driver (cursor calibration, movie skip, the click driver — the house pipeline drives scenarios), and his PROCESS-EXITED verdict (tools/frida/orig.py explains why). Our additions: `rva` hook sites for our rebuild-moving build, the sandbox staging in probe.py, the in-memory compare wrappers.
+

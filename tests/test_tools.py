@@ -6603,5 +6603,177 @@ class WsoFetchTest(unittest.TestCase):
             self.assertIn(os.path.basename(pins), lines[0])
 
 
+trace_diff = load_tool('frida/trace_diff')
+
+
+class TraceDiffTest(unittest.TestCase):
+    """The in-memory interface the smoke gate uses: normalize drops the
+    harness noise, compare turns a trace pair into an exit code."""
+
+    @staticmethod
+    def capture():
+        return [
+            {'tag': 'ready', 'pid': 4242},
+            {'tag': 'Move', 'this': '0x1234', 'a0_s32': 7, 'ts': 11},
+            {'tag': 'HITS', 'counts': {'Move': 1}},
+            {'type': 'send', 'payload': {'tag': 'Move', 'this': '0x9988',
+                                         'a0_s32': 9, 'tid': 3}},
+            {'tag': 'Attack', 'this': '0x0', 'a0_s32': 5,
+             'bt': ['0x401000', '0x401020']},
+        ]
+
+    def test_trace_diff_normalize_drops_harness_and_pointers(self):
+        events = trace_diff.normalize(self.capture())
+        self.assertEqual([e['tag'] for e in events],
+                         ['Move', 'Move', 'Attack'])
+        self.assertEqual(events[0], {'tag': 'Move', 'this': '<ptr>',
+                                     'a0_s32': 7})
+        self.assertEqual(events[1], {'tag': 'Move', 'this': '<ptr>',
+                                     'a0_s32': 9})
+        self.assertEqual(events[2], {'tag': 'Attack', 'this': '<null>',
+                                     'a0_s32': 5})
+        raw = trace_diff.normalize(self.capture(), raw_pointers=True)
+        self.assertEqual(raw[0]['this'], '0x1234')
+        self.assertEqual(raw[2]['this'], '0x0')
+
+    def test_trace_diff_compare_match_order_args(self):
+        events = [e for e in self.capture() if e.get('tag') in ('Move',
+                                                                'Attack')]
+        self.assertEqual(trace_diff.compare(events, events), 0)
+        self.assertEqual(trace_diff.compare(events, list(reversed(events))),
+                         1)
+        shifted = [dict(e, a0_s32=e['a0_s32'] + 1) for e in events]
+        self.assertEqual(trace_diff.compare(events, shifted), 1)
+
+    def test_trace_diff_crash_never_passes(self):
+        events = self.capture() + [{'tag': 'assert', 'where': 'Move'}]
+        self.assertNotEqual(trace_diff.compare(events, events), 0)
+
+    def test_trace_diff_empty_is_2(self):
+        self.assertEqual(trace_diff.compare([], []), 2)
+
+
+probe = load_tool('frida/probe')
+
+
+class ProbePlanTest(unittest.TestCase):
+    """probe.plan_folders' staging invariants: every mapped-folder HOST path
+    must be a Windows path (the box cannot see /mnt/... and refuses the
+    whole configuration over one bad folder), and both logon commands must
+    be wrapped for the shell-less LogonCommand."""
+
+    def plan(self, target):
+        return probe.plan_folders(
+            target,
+            'C:\\Users\\thier\\iwd2r-frida\\venv',
+            'C:\\Users\\thier\\iwd2r-build-p3-wso-tools\\replay',
+            'C:\\Users\\thier\\iwd2r-oracle\\game',
+            'C:\\Users\\thier\\iwd2r-vm\\replays\\s\\results',
+            'C:\\Users\\thier\\iwd2r-vm\\replays\\s\\tools')
+
+    def test_mapped_host_paths_are_windows_paths(self):
+        for target in ('original', 'ours'):
+            for host, box, _ro in self.plan(target):
+                self.assertFalse(host.startswith('/'), (target, host, box))
+                self.assertTrue(host[1:3] == ':\\', (target, host, box))
+                self.assertTrue(box.startswith('C:\\'), (target, box))
+
+    def test_logon_commands_survive_shell_less_logon(self):
+        ns = types.SimpleNamespace(hit='MTP', hit_min=1, attach_timeout=None,
+                                   loaded_addr=None, loaded_rva='0x330000',
+                                   module=None, no_loaded=False)
+        args = probe.sidecar_args(ns, 't.jsonl', 't.jsonl.status')
+        orig = probe.original_logon(
+            'C:\\Users\\thier\\iwd2r-frida\\venv\\Scripts\\python.exe',
+            120, args)
+        ours = probe.ours_logon(
+            'C:\\Users\\thier\\iwd2r-frida\\venv\\Scripts\\python.exe',
+            'C:\\game', probe.ours_env('C:\\game', 1), 120, args)
+        self.assertTrue(orig.startswith('cmd.exe /c '), orig)
+        self.assertIn('replay-driver.ps1 -Config', orig)
+        self.assertTrue(ours.startswith('cmd.exe /c '), ours)
+        self.assertIn('& echo done > ', ours)
+        self.assertTrue(ours.endswith('shutdown /s /t 0'), ours)
+
+
+class OrigAttachTest(unittest.TestCase):
+    """attach_when_there must ride out every flavour of "process not found"
+    frida raises while polling for the game -- frida 17 raises
+    InvalidArgumentError there, not ProcessNotFoundError -- and only give up
+    at the deadline (the replay driver boots IWD2.exe seconds after the
+    sidecar starts)."""
+
+    @classmethod
+    def setUpClass(cls):
+        stub = types.ModuleType('frida')
+        stub.ProcessNotFoundError = type('ProcessNotFoundError', (Exception,),
+                                         {})
+        stub.InvalidArgumentError = type('InvalidArgumentError', (Exception,),
+                                         {})
+        cls._saved_frida = sys.modules.get('frida')
+        sys.modules['frida'] = stub
+        cls.frida_stub = stub
+        cls.orig = load_tool('frida/orig')
+
+    @classmethod
+    def tearDownClass(cls):
+        if cls._saved_frida is not None:
+            sys.modules['frida'] = cls._saved_frida
+        else:
+            del sys.modules['frida']
+
+    def setUp(self):
+        now = [0.0]
+        self.clock = now
+        self.fake_time = types.SimpleNamespace(
+            monotonic=lambda: now[0],
+            sleep=lambda s: now.__setitem__(0, now[0] + s))
+        saved = self.orig.time
+        self.orig.time = self.fake_time
+        self.addCleanup(setattr, self.orig, 'time', saved)
+
+    def install_device(self, device):
+        self.frida_stub.get_local_device = lambda: device
+        self.addCleanup(delattr, self.frida_stub, 'get_local_device')
+
+    def test_polls_through_invalid_argument_until_found(self):
+        calls = []
+        frida_stub = self.frida_stub
+
+        class Device:
+            def get_process_by_name(self, name):
+                calls.append(name)
+                if len(calls) < 3:
+                    raise frida_stub.InvalidArgumentError(
+                        'process not found')
+                return types.SimpleNamespace(pid=7932)
+
+            def attach(self, pid):
+                return 'session-%d' % pid
+
+        self.install_device(Device())
+        session, pid = self.orig.attach_when_there('IWD2.exe',
+                                                   self.clock[0] + 90.0)
+        self.assertEqual((session, pid), ('session-7932', 7932))
+        self.assertEqual(calls, ['IWD2.exe'] * 3)
+
+    def test_gives_up_at_the_deadline(self):
+        calls = []
+        frida_stub = self.frida_stub
+
+        class Device:
+            def get_process_by_name(self, name):
+                calls.append(name)
+                raise frida_stub.InvalidArgumentError('process not found')
+
+            def attach(self, pid):  # pragma: no cover - never reached
+                return None
+
+        self.install_device(Device())
+        with self.assertRaises(frida_stub.InvalidArgumentError):
+            self.orig.attach_when_there('IWD2.exe', self.clock[0] + 1.0)
+        self.assertGreaterEqual(len(calls), 2)
+
+
 if __name__ == '__main__':
     unittest.main()
