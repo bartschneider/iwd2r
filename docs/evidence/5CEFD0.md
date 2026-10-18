@@ -522,3 +522,9 @@ LAB_005cfa67:
 ## Notes
 
 vis-probe round 9 (from render round 5): the tile code passed to CInfinityTileSet::Render (a TILE_CODE, 4 bytes) is one stack slot for the whole tile pass. GetTileCode (0x5526E0) writes NE only when the tile is not in the last column and SW/SE only when it is not in the last row, so those corners keep the previous tile's values. The port declared it inside the loop without an initialiser (a fresh, indeterminate value per tile, visible with odd map heights on the last row). Now declared once before the loops; ours starts at 0 where the original's slot holds whatever its stack held before the first tile.
+
+## WSO delta
+
+disagreed with WSO at e8dd16a: he declares TILE_CODE uninitialized inside the tile loop where the exe reuses one stack slot across the pass; case dump-5CEFD0 decides
+
+Ours hoists one zero-initialized slot with a NOTE on the exe's residual-corner behavior (GetTileCode leaves the unseen east/south corners as the previous tile left them); his per-iteration declaration re-reads dead stack for the corners the exe never writes. Read-only verdict.
