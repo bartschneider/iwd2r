@@ -119,7 +119,8 @@ def pairs(theirs, ours, base):
     rest match by name; a function only one tree has gets 0 for the other
     side. An address two functions of one tree carry (shared thunks and
     unknown addresses get stamped with one comment) is no key. The row keeps
-    our name for a renamed pair."""
+    our name for a renamed pair. The base function is looked up by the
+    pair's address first and by name second, in both loops."""
     used = set()
     def unique(fs):
         n = collections.Counter(a for a, b in fs.values() if a is not None)
@@ -137,7 +138,8 @@ def pairs(theirs, ours, base):
     free_o = {n for n in ours if n not in used}
     for n in sorted(free_t & free_o):
         t, o = theirs[n], ours[n]
-        yield n, t[0] if t[0] is not None else o[0], category(t, o, base.get(n)), len(t[1]), len(o[1])
+        a = t[0] if t[0] is not None else o[0]
+        yield n, a, category(t, o, b_at.get(a) or base.get(n)), len(t[1]), len(o[1])
     for n in sorted(free_t - free_o):
         yield n, theirs[n][0], 'only_theirs', len(theirs[n][1]), 0
     for n in sorted(free_o - free_t):

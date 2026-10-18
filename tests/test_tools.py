@@ -6298,6 +6298,23 @@ class XrecTest(unittest.TestCase):
         self.assertEqual(c['ours_real_theirs_stub'], 0)
         self.assertEqual(sum(c.values()), 2)
 
+    def test_xrec_name_pair_finds_renamed_base_by_address(self):
+        """A pair the name loop holds still finds its base function by
+        address: both trees renamed it, theirs carries the stamp twice (the
+        duplicate-stamp files), and base keeps it under the old name."""
+        real1 = '{ints=m_x;s+=x;s+=m_y;s-=x;return s==0&&x!=0;}'
+        real2 = '{ints=m_x;s-=x;s+=m_y;s-=x;return s==0&&x!=0;}'
+        base = xrec.funcs('// 0x401000\nint CThing::Old(int x)\n%s\n' % real1)
+        theirs = xrec.funcs('// 0x401000\nint CThing::P(int x)\n%s\n'
+                            '\n'
+                            '// 0x401000\nint CThing::Q(int x)\n%s\n' % (real2, real1))
+        ours = xrec.funcs('// 0x401000\nint CThing::P(int x)\n%s\n' % real1)
+        c = xrec.classify(theirs, ours, base)
+        self.assertEqual(c['theirs_changed_ours_base'], 1)
+        self.assertEqual(c['both_changed_differ'], 0)
+        self.assertEqual(c['only_theirs'], 1)
+        self.assertEqual(sum(c.values()), 2)
+
     def test_xrec_classify_table(self):
         real1 = '{ints=m_x;s+=x;s+=m_y;s-=x;return s==0&&x!=0;}'
         real2 = '{ints=m_x;s-=x;s+=m_y;s-=x;return s==0&&x!=0;}'
