@@ -4,7 +4,7 @@
 
 **Goal:** Bring the WSO fork's recovered functions into iwd2r through the gate, resolve every function the two trees recovered differently with an oracle or replay, and recover the design of the fork's GPU renderer from its Lua patches, its DLL and GL traces, without the C++ source.
 
-**Architecture:** Wave 0 is sequential tooling (comparison script, `trace` evidence kind, artifact fetcher, DLL Ghidra projects, differential Frida tracing, structural parity gates, agent context tools). Wave 1 resolves the 406 disagreements in batches before anything else is trusted. Waves 2 to 5 import clean gain by subsystem as parallel streams in worktrees, each ending with the full gate. Renderer streams A, B and C run alongside from wave 1 on and produce documents only.
+**Architecture:** Wave 0 is sequential tooling (comparison script, `trace` evidence kind, artifact fetcher, DLL Ghidra projects, differential Frida tracing, structural parity gates, agent context tools, the wave runner). Wave 1 resolves the 406 disagreements in batches before anything else is trusted. Waves 2 to 5 import clean gain by subsystem as parallel streams in worktrees, each ending with the full gate. Renderer streams A, B and C run alongside from wave 1 on and produce documents only.
 
 **Tech Stack:** C++17 (MSVC x86/x64, GCC, Clang), CMake presets, Catch2, Python 3 unittest, Ghidra 12.1.4 headless with Java post-scripts, apitrace 14.0 win32, the oracle, replay and evidence tools.
 
@@ -41,6 +41,7 @@
 | `tools/frida/{probe,hooks,orig,trace_diff}.py` | differential tracing of the original and our build on one scenario; `trace_diff.compare` is the verdict |
 | `tools/parity/*.py`, `tools/ghidra/ExportCallGraph.java` | structural parity of changed functions with the binary: callee sets, vtables, layouts, member offsets, address markers, RE lints; a gate step |
 | `tools/fn_digest.py`, `tools/src_find.py`, `tools/assemble_context.py`, `tools/token_audit.py` | token-cheap agent briefing and transcript cost audit |
+| `tools/wave.py`, `docs/wso/brief-template.md`, `docs/wso/wave-state.json` | deterministic batch assignment, brief rendering, verdict bookkeeping, wave close with the gate, scorecard |
 | `tools/gltrace.py` | runs apitrace around `IWD2EE.exe` for a scenario, writes the `.trace` under `runs/` and a per-frame summary markdown |
 | `tools/recovery_status.py` | byte-weighted `.text` recovery figure from the iwd2 Ghidra project and `src/` |
 | `docs/wso/` | xrec report, disagreement list, wave ledgers' public summaries |
@@ -139,11 +140,30 @@
 
 Process change from this task on: every implementer brief names the function by `assemble_context` bundle, not by pasting the decompile; reviewers start from the digest.
 
+### Task 5e: the wave runner (deterministic batch loop and wave close)
+
+**Files:** Create `tools/wave.py`, `docs/wso/brief-template.md`, `docs/wso/wave-state.json` (created empty by the first `next`); Test `tests/test_tools.py`; Modify `docs/wso/README.md` ("how the coordinator drives a wave").
+
+**Interfaces:** State lives in `docs/wso/wave-state.json`: `{"batches": {"<id>": {"rows": [...], "files": [...], "branch": "p3/wso-b<id>", "status": "assigned" | "closed", "assigned_at", "closed_at", "verdicts": {"<address>": {"side": "fork" | "ours" | "neither", "case": "<oracle case, probe or replay checkpoint id>", "losing_kind": "oracle" | "replay" | "read-only" | "trace" | null}}}}}`. CLI `python3 tools/wave.py <command>`:
+- `next [--size 20]`: picks the next unassigned rows from `docs/wso/disagreements.json` ranked by `their_len + our_len` descending, only from files not owned by an `assigned` batch (disjoint ownership), records the batch, prints its id, files and rows. Exit 2 when nothing is left.
+- `brief <id>`: renders `docs/wso/brief-template.md` with the batch's rows, owned files, branch name, and the fixed rules (the deciding case per function, the evidence line, the trailer, WIP before gates). The coordinator dispatches this text verbatim.
+- `verdict <id> <address> fork|ours|neither <case>`: records one row's outcome; `losing_kind` is read from the losing side's evidence file (ours) or set to `trace` (fork).
+- `close <id>`: refuses with a list unless every row has a verdict, the branch's worktree has no uncommitted paths, every touched function has an evidence file whose body contains "disagreed with WSO" or "corroborated by WSO", and `tools/gates.sh --base first` exits 0 in that worktree; then fast-forwards `first` to the branch, marks the batch closed, and prints the batch's tally. Exit 0 or 1.
+- `scorecard`: writes the per-side tally into `docs/wso/xrec-report.md` under "## Scorecard" (decided for the fork, for ours, for neither; split by `losing_kind`), from state. Idempotent.
+- `status`: one line per batch.
+Waves 2 to 5 reuse `close` with `--kind import` (no verdict requirement; evidence kind `trace` or better required instead).
+
+- [ ] **Step 1: Tests.** `test_wave_next_ranks_and_keeps_files_disjoint` (fixture disagreements with three files; two `next` calls never share a file; rows ranked by size); `test_wave_next_exhausted_exit_2`; `test_wave_brief_contains_rows_and_rules`; `test_wave_close_refuses_missing_verdict`, `test_wave_close_refuses_uncommitted` and `test_wave_close_refuses_failed_gate` (subprocess patched; each refusal names the reason); `test_wave_close_fast_forwards` (temp repo with `first` and a batch branch); `test_wave_scorecard_tally`.
+- [ ] **Step 2:** run, expect failures. **Step 3:** implement; standard library only; every state write is atomic (`os.replace`). **Step 4:** run the tests; `python3 tools/wave.py next` on the real `disagreements.json` (then `status`; no dispatch yet, the batch is simply the first one wave 1 will run).
+- [ ] **Step 5: Commit** "Drive the disagreement batches and wave closes from a script".
+
+From this task on, the coordinator's wave-1 loop is: `next` → dispatch `brief` verbatim → agent reports → `verdict` per row → `close` → `scorecard`. It writes no batch bookkeeping by hand.
+
 ## Wave 1: disagreements (parallel batches of 20, one stream per batch)
 
 ### Task 6 (template, instantiated per batch): resolve a disagreement batch
 
-**Files:** `src/<the batch's files>`, `docs/evidence/<addr>.md` per function, `oracle/cases/` or `scenarios/` as needed. The coordinator assigns batches from `docs/wso/disagreements.json` ranked by `their_len + our_len`, disjoint files per concurrent batch.
+**Files:** `src/<the batch's files>`, `docs/evidence/<addr>.md` per function, `oracle/cases/` or `scenarios/` as needed. Batches come from `python3 tools/wave.py next` (Task 5e), the brief from `wave.py brief`, verdicts and the close through `wave.py verdict` and `wave.py close`; the coordinator never assembles a batch by hand.
 
 - [ ] **Step 1:** for each function, read both bodies and the Ghidra decompile; write the oracle case (pure function), a Frida probe (Task 5b; any function reachable in a scenario), or the replay checkpoint that distinguishes them. Run it against the original.
 - [ ] **Step 2:** keep the body the case agrees with. If it is the fork's, apply it with the trailer. If neither matches, port from the decompile and note both errors.
