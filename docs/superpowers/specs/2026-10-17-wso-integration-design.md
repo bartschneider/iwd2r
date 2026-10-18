@@ -1,6 +1,6 @@
 # WSO integration — design (2026-10-17)
 
-Status: draft for Thierry's review. Nothing in this document runs until he approves it and a plan is written from it.
+Status: approved by Thierry 2026-10-17 ("go"). Plan: docs/superpowers/plans/2026-10-17-wso-integration.md.
 
 ## 1. Goal
 
@@ -62,14 +62,24 @@ Out of scope: any change to the platform layer or the Linux build during the rec
 4. **Clean gain, AI and messaging.** `CGameAIBase`, `CMessage`, `CNetwork`, `CGameArea`. Replay-verified.
 5. **His files we lack.** The 14 files and 159 functions, plus the 746 functions only he has in shared files. Each gets evidence of kind `trace` or better.
 6. **Status.** Adopt his byte-weighted `.text` recovery measure as a tracked number in the README, computed with our own script.
+7. **Renderer streams A, B, C** (section 7) run in parallel with waves 1 to 5; they touch only `docs/renderer/` and `tools/`.
 
 Waves 2 to 5 can run as parallel streams in worktrees after wave 1, each owning disjoint files, the usual rule.
 
-## 7. Renderer port (blocked on source)
+## 7. Renderer: recover the design, then port into our own GL path
 
-What exists: a GPU pipeline inside `IEexHelper.dll` with a tile atlas (upload and draw), fog of war as a texture, an off-thread present, HUD compositing from its own framebuffer, scaled present, and a 3D lightning polyline. His IWD2EE branch ships it compiled; the C++ is not public.
+What exists. The original engine already has an OpenGL path behind the "3D Acceleration" option, and iwd2r holds it recovered: `CVidInf::CreateSurfaces3d` (`src/CVideo3d.cpp`), `CInfTileSet::Render3d` and the tile cache `m_nVRamSurfaces` (`src/CInfinity.cpp`), `CVidCell::FXRender3d` and `CVidCell::RenderTexture` (`src/CVidCell.cpp`), `CVidInf::FXBltToBack` (`src/CVidInf.cpp`), plus `platform/gl_compat.cpp` and `platform/present.cpp`. The fork's "OpenGL renderer" is that path, enlarged.
 
-Blocked until the author provides the C++ for IEexHelper's renderer. When it arrives, a separate spec covers: mapping his hook points to the engine functions we own, placing the pipeline behind the existing GPU presenter, keeping the classic presenter as the replay reference, and what of it is his code versus IEex's.
+What the fork adds, and where it lives:
+- About 6,900 lines of IEex Lua across 16 patch files (`IEex_Render_Patch`, `IEex_UIScale_Patch`, `IEex_HDTiles_Patch`, `IEex_HDSprites_Patch`, `IEex_SupersampleFont_Patch`, `IEex_CameraZoom_Patch`, `IEex_Gui_State`, `IEex_Gui_Patch`, `IEex_Pathfinding_Patch`, `IEex_Sound_Patch`, `IEex_MiscFixes_Patch`, `IEex_UncapFPS` and four smaller ones). These are commented design notes with the engine addresses they hook and the reasoning: the tile cache raised from 780 to 4096 with the texture-id base relocated, HD sprites drawn at half scale, a single persistent FBO present path and its consequences (save capture, Bink video, fog's late pass), UI scaling, zoom, supersampled fonts, pathfinding, viewport-relative audio.
+- `IEexHelper.dll`: the compiled bodies the Lua calls ("render.cpp" in the author's comments: tile atlas upload and draw, fog as a texture, a present thread, HUD composited from its own framebuffer, scaled present, a 3D lightning polyline). Ghidra: 1,585 functions and 354 KB of code against upstream's 1,298 and 236 KB, so the delta is about 290 functions. No static GL imports; procs are resolved at runtime. The C++ source is private (`C:\Users\leilu\Repo\IEexHelper_Shared`), and both the DLL's author and IEex's author have authorised reverse engineering it.
+
+Approach, three streams, all read-only against the fork's artifacts staged under `${IWD2R_HOME:-~/.local/share/iwd2r}/wso` by `tools/wso_fetch.py`:
+- **Stream A, Lua to design.** One design note per patch file under `docs/renderer/wso/`: intent, each hook's engine address mapped to the iwd2r function that carries that `// 0xADDR` comment, the helper entry points it calls, and the data flow. No code.
+- **Stream B, DLL delta.** Both DLLs as Ghidra projects (`tools/ghidra/make_dll_project.py`). A delta script lists the fork's functions absent from upstream; agents name and decompile them, anchored on the strings and on the Lua's helper names, into `docs/renderer/wso/dll/<helper>.md` with the decompiled C and a prose summary of the technique and its parameters.
+- **Stream C, ground truth.** An IWD2EE install with his DLL in a separate game copy (never the oracle copy), run on the host under apitrace 14.0 win32 for the `world_entry` and `first_fight` scenarios. `tools/gltrace.py` captures and summarises the GL stream per frame: texture sizes and formats, FBO binds, draw counts, atlas uploads. The summaries land under `docs/renderer/wso/gltrace/`. They are the renderer's oracle for the port.
+
+Out of scope for this spec: the port itself. Engine behaviour changes are not vanilla, so the port is its own project with its own spec, written from the three streams' deliverables, implemented inside the existing GL path as engine changes, and verified by GL trace and replay compares. The classic presenter stays the replay reference.
 
 ## 8. Process and budget
 
@@ -89,3 +99,4 @@ The coordinator session stays on glm-5.3; subagents on glm-5.3-flash under the f
 - Gate green on both compilers after every wave; replay compares never regress.
 - README byte-recovery figure at or above his 78.9%, computed by our script.
 - Zero bytes of his IWD2EE branch in the repository.
+- Renderer: a design note per patch file, a note per DLL helper in the delta, and GL trace summaries for both scenarios, enough to write the port's spec without the C++ source.
