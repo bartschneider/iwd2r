@@ -140,6 +140,23 @@ Decompile scratch output lives in `runs/dll-decomp/` (git-ignored).
 - [`IEex_Helper_RegisterSupersampleFont`](IEex_Helper_RegisterSupersampleFont.md)
 - [`IEex_Helper_ReloadFloatTextScale`](IEex_Helper_ReloadFloatTextScale.md)
 
+## UI scale / capture
+
+- [`IEex_Helper_BlankCCache1`](IEex_Helper_BlankCCache1.md)
+- [`IEex_Helper_BlankCCache2`](IEex_Helper_BlankCCache2.md)
+- [`IEex_Helper_CVidBitmap_RenderTextureInset`](IEex_Helper_CVidBitmap_RenderTextureInset.md)
+- [`IEex_Helper_CVidCell_RenderTextureHD`](IEex_Helper_CVidCell_RenderTextureHD.md)
+- [`IEex_Helper_CVidMosaic_RenderTextureInset`](IEex_Helper_CVidMosaic_RenderTextureInset.md)
+- [`IEex_Helper_SetHDUI`](IEex_Helper_SetHDUI.md)
+- [`IEex_Helper_SetMenuTorch`](IEex_Helper_SetMenuTorch.md)
+- [`IEex_Helper_UIScaleCaptureMap`](IEex_Helper_UIScaleCaptureMap.md)
+- [`IEex_Helper_UIScaleCursorBegin`](IEex_Helper_UIScaleCursorBegin.md)
+- [`IEex_Helper_UIScaleMapWorldCursor`](IEex_Helper_UIScaleMapWorldCursor.md)
+- [`IEex_Helper_UIScaleRenderBegin`](IEex_Helper_UIScaleRenderBegin.md)
+- [`IEex_Helper_UIScaleRenderEnd`](IEex_Helper_UIScaleRenderEnd.md)
+- [`IEex_Helper_UIScaleRenderEndUI`](IEex_Helper_UIScaleRenderEndUI.md)
+- [`IEex_Helper_UIScaleTorchBegin`](IEex_Helper_UIScaleTorchBegin.md)
+
 ## Staged Lua evidence (sha256)
 
 The staged Lua patches at `~/.local/share/iwd2r/wso/lua/` are used as evidence for who calls each helper (and, for the keys-screen group, for hook sites and Lua-callback contracts). The staged corpus itself has no pin yet; these hashes let it be pinned retroactively.
