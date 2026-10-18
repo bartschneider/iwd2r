@@ -149,7 +149,9 @@ takes twenty, and never lets two live batches own the same file.
 `close` refuses — listing every reason — unless each row has a verdict,
 the batch's worktree has no uncommitted paths, every touched function's
 `docs/evidence/<ADDRESS>.md` says `disagreed with WSO` or
-`corroborated by WSO`, and `tools/gates.sh --base first` exits 0 in that
+`corroborated by WSO`, the branch has not modified `tools/gates.sh` or
+`tools/parity` (a batch must not change the gate that certifies it), and
+`tools/gates.sh --base first` exits 0 in that
 worktree; only then does it fast-forward `first` to the batch branch and
 print the tally. After a close, sync the worktree that has `first`
 checked out: `git -C <path> reset --hard first`. `status` is one line

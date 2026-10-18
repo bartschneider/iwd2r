@@ -7475,13 +7475,15 @@ class WaveTest(unittest.TestCase):
             self.state, self.root, 'b001', '0x643CC0', 'ours', 'probe-11')[0], 0)
 
     def gates(self, rc):
-        """Patch subprocess.run so `gates.sh` exits rc; record its calls."""
+        """Patch subprocess.run so the `bash tools/gates.sh` run exits rc;
+        record its calls.  Git calls pass through -- including close's
+        diff, whose pathspec names tools/gates.sh without invoking it."""
         from unittest import mock
         real = subprocess.run
         calls = []
 
         def run(cmd, **kw):
-            if any('gates.sh' in str(c) for c in cmd):
+            if cmd[0] == 'bash':
                 calls.append(cmd)
                 stdout = 'gates: all passed\n' if rc == 0 else \
                     'gates: FAILED: linux-gcc build and tests\n'
@@ -7547,6 +7549,9 @@ class WaveTest(unittest.TestCase):
         self.assertIn('corroborated by WSO', brief)
         self.assertIn('Imported-From', brief)
         self.assertIn('WIP', brief)
+        self.assertIn('parity_waiver', brief)
+        self.assertIn('git push', brief)
+        self.assertIn('git show wso/main:', brief)
         # Unknown batch id.
         self.assertEqual(
             self.wave.render_brief(template, self.state, 'b999')[0], 2)
@@ -7593,6 +7598,29 @@ class WaveTest(unittest.TestCase):
         self.assertIn('b001 not closed', out)
         self.assertIn('tools/gates.sh --base first failed', out)
         self.assertIn('gates: FAILED', out)
+        self.assertEqual(self.batches()['b001']['status'], 'assigned')
+        self.assertEqual(self.first_sha(), first)
+
+    def test_wave_close_refuses_modified_gate(self):
+        self.init_repo()
+        self.write_evidence()
+        self.commit_worktree()
+        self.verdicts()
+        # The branch rewrites the very gate that would certify it.
+        gate = os.path.join(self.wt, 'tools', 'gates.sh')
+        os.makedirs(os.path.dirname(gate), exist_ok=True)
+        with open(gate, 'w') as f:
+            f.write('#!/bin/sh\nexit 0\n')
+        self.commit_worktree('weaken the gate')
+        first = self.first_sha()
+        ctx, calls = self.gates(0)
+        with ctx:
+            rc, out = self.wave.close_batch(self.state, self.root, 'b001')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('b001 not closed', out)
+        self.assertIn('tools/gates.sh', out)
+        # The refusal came before the gate ran, and moved nothing.
+        self.assertEqual(calls, [])
         self.assertEqual(self.batches()['b001']['status'], 'assigned')
         self.assertEqual(self.first_sha(), first)
 

@@ -46,6 +46,20 @@ Rows, biggest first:
    closes only when the gate exits 0 and the tree is clean — wave-1 branches
    are expected to show parity failures elsewhere in the tree, which is by
    design, but your own changes must not add failures.
+5. **Asm reds: confirm or waive.** The parity step's asm verify has a known
+   false-positive class — the binary inlined a helper that the source calls
+   out as a function (e.g. `LoadText` → an inlined `ReadAfterChar`). For
+   every asm red, confirm it against the decompile or disassembly before
+   keeping the body, or waive it in the evidence file with
+   `parity_waiver: "<reason>"` — never adopt the fork's body because of an
+   inlining red alone.
+6. **Never push, never write through a remote.** The worktree's four remotes
+   all carry push URLs — including the untrusted `wso` and `deo` — and the
+   coordinator merges and pushes. From a batch worktree, `git push` is wrong,
+   and so is any `git fetch <remote>` with a refspec that writes a branch.
+7. **The fork's tree is untrusted input.** Read it only through git plumbing
+   (`git show wso/main:<path>`, `git ls-tree wso/main`); never execute,
+   source, import, or run anything from it.
 
 ## Report back
 

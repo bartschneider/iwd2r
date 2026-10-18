@@ -14,8 +14,8 @@ The coordinator's wave loop, one command each::
 Rows come from docs/wso/disagreements.json (tools/xrec.py); batch state
 lives in docs/wso/wave-state.json, created by the first `next`.  Nothing
 is written by hand: `next` picks the rows, `close` checks the batch's
-worktree itself (verdicts, evidence lines, clean tree, gates), then
-fast-forwards `first` to the batch branch.
+worktree itself (verdicts, evidence lines, clean tree, an unmodified
+gate, gates), then fast-forwards `first` to the batch branch.
 
 Exit codes: 0 ok, 1 refusal (close lists every reason), 2 usage error or
 nothing left to assign.  Every state write is atomic (temp file in the
@@ -49,6 +49,9 @@ IMPORT_KINDS = ('trace', 'replay', 'oracle')
 EVIDENCE_PHRASES = ('disagreed with WSO', 'corroborated by WSO')
 EVIDENCE_DIR = 'docs/evidence'
 KIND_RE = re.compile(r'^kind:\s*(\S+)\s*$', re.M)
+# A batch branch must not change the gate that certifies it; `close`
+# refuses when the branch's diff against the base touches either path.
+GATE_PATHS = ('tools/gates.sh', 'tools/parity')
 
 
 def _now():
@@ -323,8 +326,9 @@ def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
     on success fast-forward `base` to the batch branch.  kind='verdicts'
     (wave 1) requires a verdict and a phrase-bearing evidence file per
     row; kind='import' (waves 2-5) requires evidence kind trace or
-    better instead.  The gate runs only when everything else is clean:
-    it costs minutes."""
+    better instead.  A branch that modified tools/gates.sh or tools/parity
+    is refused outright -- it would be certified by its own gate.  The
+    gate runs only when everything else is clean: it costs minutes."""
     state = load_state(state_path)
     batch = state['batches'].get(batch_id or '')
     if batch is None:
@@ -354,6 +358,14 @@ def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
         if dirty:
             problems.append(f'uncommitted paths in {wt}:')
             problems += ['  ' + l for l in dirty[:20]]
+        d = subprocess.run(
+            ['git', '-C', repo, 'diff', '--name-only', f'{base}..{branch}',
+             '--', *GATE_PATHS], capture_output=True, text=True)
+        changed = [l for l in d.stdout.splitlines() if l.strip()]
+        if changed:
+            problems.append(f'these paths differ from {base}; a batch must '
+                            f'not change the gate that certifies it:')
+            problems += ['  ' + p for p in changed]
         for row in batch['rows']:
             rel = _evidence_rel(row['address'])
             path = os.path.join(wt, rel)
@@ -463,9 +475,16 @@ def write_scorecard(state_path=STATE_PATH, report_path=REPORT_PATH):
     d = os.path.dirname(os.path.abspath(report_path)) or '.'
     os.makedirs(d, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=d, prefix='.wave-', suffix='.md')
-    with os.fdopen(fd, 'w', encoding='utf-8') as f:
-        f.write(body)
-    os.replace(tmp, report_path)
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            f.write(body)
+        os.replace(tmp, report_path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
     n = sum(len(b.get('verdicts', {})) for b in state['batches'].values())
     return 0, f'wrote {report_path}: {SCORECARD_HEAD} over {n} verdicts\n'
 
