@@ -3,12 +3,17 @@
 
 Adopted from WillScarlettOhara/iwd2-re@e8dd16a scripts/fn_digest.py: the
 output shapes are his (the string/globals regexes, the dedupe-keep-first
-callees in first-seen order, the caps, the exact line spellings), so a
-digest reads the same whether it came from his tree or ours.  The
-interface is rehosted: his script walked his ``_index.json`` +
-per-function JSON exports, ours takes the decompile text and a callgraph
-dict directly (from ghidra-exports' ``functions.tsv``/``callgraph.tsv``
-and ``<name>.c``, as assembled by tools/assemble_context.py).
+callees in first-seen order, the caps); where a line spelling differs it
+is a deliberate trim, not a redesign: ours drop his parentheticals (the
+calling-convention and src-location tail on the header line, the
+"(FUN_/DAT_ without names)" suffix on the unresolved count, the backticks
+around his signature line) and count distinct names where his caller list
+repeats.  His VIRTUAL/THUNK annotations and template-smell warnings are
+not rehosted.  The interface is rehosted: his script walked his
+``_index.json`` + per-function JSON exports, ours takes the decompile
+text and a callgraph dict directly (from ghidra-exports'
+``functions.tsv``/``callgraph.tsv`` and ``<name>.c``, as assembled by
+tools/assemble_context.py).
 
 The digest carries the signature, callees and callers by name, the
 strings referenced, the globals touched, a loop/switch count (ours; his

@@ -7,7 +7,8 @@ the forward-ref rule (a class commits only when its field list is a real
 index and sizeof is non-zero), the primitive/pointer/modifier/array/
 bitfield type resolution, the noise prefixes for his WebRTC baggage, the
 SQLite schema and its NOCASE indexes are his, byte-for-byte where paths
-are not involved.  Two rehosts:
+are not involved.  Two rehosts, and one deliberate deviation from his
+spellings:
 
 * his build read the PDB via llvm-pdbutil or his extracted zip members;
   ours reads the dumps extracted under ``$IWD2R_HOME/wso/bg2/`` by
@@ -16,6 +17,16 @@ are not involved.  Two rehosts:
   data.  Build once (~132 MB of text), then queries are instant.
 * his CLI printed results; ours exposes ``lookup(query) -> list[dict]``
   (the CLI is a thin wrapper over it).
+* the inline-type capture.  His spellings kept the inline type in a
+  separate pattern, ``RE_TI_INLINE = (0x...) \(([^()]*)\)``, consulted
+  as a second channel beside the type index (``ret_inline or
+  resolve(ret_ti)``); ours folds it into each record regex as the shared
+  ``_T`` group above, and RE_TI_INLINE is gone.  ``_T`` tolerates one
+  level of nested parens where his ``[^()]*`` stops at the first inner
+  one: a function pointer's inline spelling carries its own parameter
+  list, and a flat capture would truncate such a line and drop the
+  member.  (Measured over the real dumps: no line exercises the nesting
+  today, so the tolerance is currently free.)
 
 The engine is shared with IWD2: names carry over (roughly 70% in
 practice), offsets and sizes DO NOT -- they are BG2's.  Every answer is

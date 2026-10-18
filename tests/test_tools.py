@@ -1,8 +1,8 @@
 """Tests for tools/gen_map.py, tools/check_evidence.py, tools/gen_fields.py,
-tools/minischema.py, tools/shaders.py, tools/xrec.py, tools/wso_fetch.py and
-the pure parts of tools/play.py, tools/realinput.py, tools/winsandbox.py,
-tools/oracle.py, tools/ghidra/labels.py and the project bookkeeping of
-tools/ghidra/make_dll_project.py.
+tools/minischema.py, tools/shaders.py, tools/xrec.py, tools/wso_fetch.py,
+tools/wave.py and the pure parts of tools/play.py, tools/realinput.py,
+tools/winsandbox.py, tools/oracle.py, tools/ghidra/labels.py and the project
+bookkeeping of tools/ghidra/make_dll_project.py.
 
 Run from the repository root: python3 -I tests/test_tools.py
 
@@ -7364,6 +7364,313 @@ class TokenAuditTest(unittest.TestCase):
         self.assertEqual([r['chars'] for r in s['largest']],
                          sorted((r['chars'] for r in s['largest']),
                                 reverse=True))
+
+
+# tools/wave.py: the coordinator's batch loop.  The fixtures mirror
+# docs/wso/disagreements.json's row shape; the close tests build a real
+# temp repo (first + a batch branch + a worktree) like WorktreeScriptTest,
+# with gates.sh's subprocess patched out -- the fake answers for any
+# command that names gates.sh and passes everything else through.
+
+_WAVE_ROWS = [
+    dict(file='src/A.cpp', name='Render', address='0x643CC0',
+         category='both_changed_differ', their_len=500, our_len=400),
+    dict(file='src/A.cpp', name='Draw', address='0x643CD0',
+         category='both_changed_differ', their_len=100, our_len=100),
+    dict(file='src/B.cpp', name='Tick', address='0x20010',
+         category='both_changed_differ', their_len=300, our_len=300),
+    # Big, but the wrong category: `next` must never pick it.
+    dict(file='src/B.cpp', name='TooBigButSame', address='0x20000',
+         category='same', their_len=9000, our_len=999),
+    dict(file='src/C.cpp', name='Init', address='0x30010',
+         category='both_changed_differ', their_len=150, our_len=50),
+    dict(file='src/D.cpp', name='NoAddr', category='both_changed_differ',
+         their_len=8000, our_len=800),
+]
+
+
+class WaveTest(unittest.TestCase):
+    """tools/wave.py -- next/brief/verdict/close/scorecard from state."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp = self._tmp.name
+        self.wave = load_tool('wave')
+        self.state = os.path.join(self.tmp, 'wave-state.json')
+        self.disagreements = os.path.join(self.tmp, 'disagreements.json')
+        with open(self.disagreements, 'w') as f:
+            json.dump(_WAVE_ROWS, f)
+
+    def write_disagreements(self, rows):
+        with open(self.disagreements, 'w') as f:
+            json.dump(rows, f)
+
+    def next(self, size=20):
+        return self.wave.next_batch(self.disagreements, self.state, size=size)
+
+    def batches(self):
+        with open(self.state) as f:
+            return json.load(f)['batches']
+
+    # -- a real repo for the close tests ---------------------------------
+
+    def git(self, *args, cwd=None):
+        env = dict(os.environ, GIT_AUTHOR_NAME='t', GIT_AUTHOR_EMAIL='t@t',
+                   GIT_COMMITTER_NAME='t', GIT_COMMITTER_EMAIL='t@t',
+                   GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM='1')
+        return subprocess.run(['git', *args], cwd=cwd or self.root, env=env,
+                              check=True, capture_output=True, text=True)
+
+    def init_repo(self):
+        """A repo whose `first` carries the fixture disagreements, with the
+        branch and worktree `next` will name already checked out."""
+        self.root = os.path.join(self.tmp, 'repo')
+        os.makedirs(self.root)
+        self.git('init', '-q', '-b', 'first', cwd=self.root)
+        docs = os.path.join(self.root, 'docs', 'wso')
+        os.makedirs(docs)
+        # Draw outranks Tick here, so the batch is exactly Render + Draw
+        # (both in src/A.cpp) -- the rows the evidence and verdict helpers
+        # below cover.
+        rows = [dict(r) for r in _WAVE_ROWS]
+        rows[1]['their_len'] = 700
+        with open(self.disagreements, 'w') as f:
+            json.dump(rows, f)
+        path = os.path.join(docs, 'disagreements.json')
+        shutil.copy(self.disagreements, path)
+        self.disagreements = path
+        self.git('add', '-A', cwd=self.root)
+        self.git('commit', '-qm', 'base', cwd=self.root)
+        rc, out = self.next(size=2)
+        self.assertEqual(rc, 0, out)
+        self.wt = os.path.join(self.tmp, 'wt')
+        self.git('worktree', 'add', '-q', '-b', 'p3/wso-b001', self.wt, 'first')
+
+    EVIDENCE = {  # row address -> (evidence stem, kind)
+        '0x643CC0': ('643CC0', 'oracle'),
+        '0x643CD0': ('643CD0', 'replay'),
+    }
+
+    def write_evidence(self):
+        for addr, (stem, kind) in self.EVIDENCE.items():
+            path = os.path.join(self.wt, 'docs', 'evidence', stem + '.md')
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, 'w') as f:
+                f.write(f'---\naddress: 0x{stem}\nname: fn-{stem}\n'
+                        f'kind: {kind}\n---\n\n'
+                        f'disagreed with WSO at e8dd16a: the guard differs; '
+                        f'case probe-9 decides.\n')
+
+    def commit_worktree(self, msg='batch work'):
+        self.git('add', '-A', cwd=self.wt)
+        self.git('commit', '-qm', msg, cwd=self.wt)
+
+    def verdicts(self):
+        # Draw decided for the fork: ours' evidence kind is read from
+        # 643CD0.md (replay).  Render decided for ours: a trace.
+        self.assertEqual(self.wave.record_verdict(
+            self.state, self.root, 'b001', '0x643CD0', 'fork', 'probe-9')[0], 0)
+        self.assertEqual(self.wave.record_verdict(
+            self.state, self.root, 'b001', '0x643CC0', 'ours', 'probe-11')[0], 0)
+
+    def gates(self, rc):
+        """Patch subprocess.run so `gates.sh` exits rc; record its calls."""
+        from unittest import mock
+        real = subprocess.run
+        calls = []
+
+        def run(cmd, **kw):
+            if any('gates.sh' in str(c) for c in cmd):
+                calls.append(cmd)
+                stdout = 'gates: all passed\n' if rc == 0 else \
+                    'gates: FAILED: linux-gcc build and tests\n'
+                return subprocess.CompletedProcess(cmd, rc, stdout=stdout,
+                                                   stderr='')
+            return real(cmd, **kw)
+
+        return mock.patch.object(self.wave.subprocess, 'run', run), calls
+
+    def first_sha(self):
+        return self.git('rev-parse', 'refs/heads/first').stdout.strip()
+
+    # -- the eight --------------------------------------------------------
+
+    def test_wave_next_ranks_and_keeps_files_disjoint(self):
+        rc, out = self.next(size=2)
+        self.assertEqual(rc, 0, out)
+        self.assertIn('b001', out)
+        self.assertIn('p3/wso-b001', out)
+        # The category filter held: the 9,999-char "same" row is never picked.
+        self.assertNotIn('TooBigButSame', out)
+        # Address-less rows are counted, not silently dropped.
+        self.assertIn('(skipped 1 row without an address)', out)
+        b1 = self.batches()['b001']
+        self.assertEqual(b1['branch'], 'p3/wso-b001')
+        self.assertEqual(b1['status'], 'assigned')
+        self.assertTrue(b1['assigned_at'])
+        self.assertEqual(b1['verdicts'], {})
+        # Ranked by their_len + our_len descending: 900 before 600.
+        self.assertEqual([r['address'] for r in b1['rows']],
+                         ['0x643CC0', '0x20010'])
+        self.assertEqual(b1['files'], ['src/A.cpp', 'src/B.cpp'])
+
+        rc, out = self.next(size=2)
+        self.assertEqual(rc, 0, out)
+        b2 = self.batches()['b002']
+        # Init (C.cpp) is next; Draw waits because A.cpp is owned by b001.
+        self.assertEqual([r['address'] for r in b2['rows']], ['0x30010'])
+        self.assertEqual(b2['files'], ['src/C.cpp'])
+        self.assertFalse(set(b1['files']) & set(b2['files']))
+
+    def test_wave_next_exhausted_exit_2(self):
+        self.write_disagreements(_WAVE_ROWS[:1])
+        self.assertEqual(self.next(size=5)[0], 0)
+        rc, out = self.next(size=5)
+        self.assertEqual(rc, 2, out)
+        self.assertEqual(list(self.batches()), ['b001'])
+
+    def test_wave_brief_contains_rows_and_rules(self):
+        self.write_disagreements(_WAVE_ROWS[:2])
+        self.next(size=2)
+        template = os.path.join(ROOT, 'docs', 'wso', 'brief-template.md')
+        rc, brief = self.wave.render_brief(template, self.state, 'b001')
+        self.assertEqual(rc, 0, brief)
+        self.assertIn('p3/wso-b001', brief)
+        self.assertIn('0x643CC0', brief)
+        self.assertIn('Render', brief)
+        self.assertIn('src/A.cpp', brief)
+        self.assertIn('theirs 500', brief)
+        # The fixed rules, as the template states them:
+        self.assertIn('case ', brief)
+        self.assertIn('disagreed with WSO', brief)
+        self.assertIn('corroborated by WSO', brief)
+        self.assertIn('Imported-From', brief)
+        self.assertIn('WIP', brief)
+        # Unknown batch id.
+        self.assertEqual(
+            self.wave.render_brief(template, self.state, 'b999')[0], 2)
+
+    def test_wave_close_refuses_missing_verdict(self):
+        self.init_repo()
+        self.write_evidence()
+        self.commit_worktree()
+        # Render decided; only Draw's verdict is missing.
+        self.assertEqual(self.wave.record_verdict(
+            self.state, self.root, 'b001', '0x643CC0', 'ours', 'probe-11')[0], 0)
+        first = self.first_sha()
+        with self.gates(0)[0]:
+            rc, out = self.wave.close_batch(self.state, self.root, 'b001')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('b001 not closed', out)
+        self.assertIn('no verdict for 0x643CD0', out)
+        self.assertNotIn('no verdict for 0x643CC0', out)
+        self.assertEqual(self.batches()['b001']['status'], 'assigned')
+        self.assertEqual(self.first_sha(), first)
+
+    def test_wave_close_refuses_uncommitted(self):
+        self.init_repo()
+        self.write_evidence()
+        self.verdicts()
+        first = self.first_sha()
+        with self.gates(0)[0] as _:
+            rc, out = self.wave.close_batch(self.state, self.root, 'b001')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('b001 not closed', out)
+        self.assertIn('uncommitted paths in', out)
+        self.assertIn('docs/evidence/643CC0.md', out)
+        self.assertEqual(self.first_sha(), first)
+
+    def test_wave_close_refuses_failed_gate(self):
+        self.init_repo()
+        self.write_evidence()
+        self.commit_worktree()
+        self.verdicts()
+        first = self.first_sha()
+        with self.gates(1)[0]:
+            rc, out = self.wave.close_batch(self.state, self.root, 'b001')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('b001 not closed', out)
+        self.assertIn('tools/gates.sh --base first failed', out)
+        self.assertIn('gates: FAILED', out)
+        self.assertEqual(self.batches()['b001']['status'], 'assigned')
+        self.assertEqual(self.first_sha(), first)
+
+    def test_wave_close_fast_forwards(self):
+        self.init_repo()
+        self.write_evidence()
+        self.commit_worktree()
+        self.verdicts()
+        first_before = self.first_sha()
+        branch_sha = self.git('rev-parse', 'p3/wso-b001').stdout.strip()
+        self.assertNotEqual(first_before, branch_sha)
+        ctx, calls = self.gates(0)
+        with ctx:
+            rc, out = self.wave.close_batch(self.state, self.root, 'b001')
+        self.assertEqual(rc, 0, out)
+        # The gate ran once, in the batch's worktree, against first.
+        self.assertEqual(len(calls), 1)
+        self.assertIn('tools/gates.sh', calls[0])
+        self.assertIn('--base', calls[0])
+        self.assertIn('first', calls[0])
+        self.assertEqual(self.first_sha(), branch_sha)
+        b = self.batches()['b001']
+        self.assertEqual(b['status'], 'closed')
+        self.assertTrue(b['closed_at'])
+        self.assertIn('fork 1', out)
+        self.assertIn('ours 1', out)
+        # The fork won Draw, so ours' evidence kind is the loser (replay);
+        # ours won Render, his verification is a trace.
+        self.assertIn('trace 1', out)
+        self.assertIn('replay 1', out)
+        # A second close is refused, and moves nothing.
+        rc, out = self.wave.close_batch(self.state, self.root, 'b001')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('already closed', out)
+        self.assertEqual(self.first_sha(), branch_sha)
+
+    def test_wave_scorecard_tally(self):
+        state = {'batches': {
+            'b001': {
+                'rows': [{'address': f'0x{i}'} for i in range(4)],
+                'files': ['src/A.cpp'], 'branch': 'p3/wso-b001',
+                'status': 'closed', 'assigned_at': 't', 'closed_at': 't',
+                'verdicts': {
+                    '0x0': {'side': 'fork', 'case': 'c1',
+                            'losing_kind': 'oracle'},
+                    '0x1': {'side': 'fork', 'case': 'c2',
+                            'losing_kind': 'replay'},
+                    '0x2': {'side': 'ours', 'case': 'c3',
+                            'losing_kind': 'trace'},
+                    '0x3': {'side': 'neither', 'case': 'c4',
+                            'losing_kind': None},
+                }}}
+        }
+        with open(self.state, 'w') as f:
+            json.dump(state, f)
+        report = os.path.join(self.tmp, 'xrec-report.md')
+        with open(report, 'w') as f:
+            f.write('# Xrec\n\n## JSON\n\nrows.\n\n## Scorecard\n\nstale: fork 99\n')
+        rc, out = self.wave.write_scorecard(self.state, report)
+        self.assertEqual(rc, 0, out)
+        with open(report) as f:
+            text = f.read()
+        self.assertEqual(text.count('## Scorecard'), 1)
+        self.assertIn('# Xrec', text)
+        self.assertIn('## JSON', text)
+        self.assertNotIn('stale', text)
+        self.assertIn('Decided for the fork: 2', text)
+        self.assertIn('oracle 1', text)
+        self.assertIn('replay 1', text)
+        self.assertIn('Decided for ours: 1', text)
+        self.assertIn('trace 1', text)
+        self.assertIn('Decided for neither: 1', text)
+        self.assertIn('b001 closed (4 rows)', text)
+        # Idempotent: a second run writes the same bytes.
+        rc, out = self.wave.write_scorecard(self.state, report)
+        self.assertEqual(rc, 0, out)
+        with open(report) as f:
+            self.assertEqual(f.read(), text)
 
 
 if __name__ == '__main__':

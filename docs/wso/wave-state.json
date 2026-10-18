@@ -1,0 +1,185 @@
+{
+  "batches": {
+    "b001": {
+      "assigned_at": "2026-10-18T12:37:16+00:00",
+      "branch": "p3/wso-b001",
+      "closed_at": null,
+      "files": [
+        "src/CUIControlFactory.cpp",
+        "src/CProjectile.cpp",
+        "src/CInfButtonArray.cpp",
+        "src/CGameSprite.cpp",
+        "src/CGameAIBase.cpp",
+        "src/CCacheStatus.cpp",
+        "src/CGameArea.cpp",
+        "src/CInfGame.cpp",
+        "src/CGameEffect.cpp",
+        "src/CBaldurChitin.cpp"
+      ],
+      "rows": [
+        {
+          "address": "0x76D370",
+          "category": "both_changed_differ",
+          "file": "src/CUIControlFactory.cpp",
+          "name": "CUIControlBase::CreateControl",
+          "our_len": 90825,
+          "their_len": 95790
+        },
+        {
+          "address": "0x51EAF0",
+          "category": "both_changed_differ",
+          "file": "src/CProjectile.cpp",
+          "name": "CProjectile::DecodeProjectile",
+          "our_len": 7825,
+          "their_len": 41865
+        },
+        {
+          "address": "0x58A340",
+          "category": "both_changed_differ",
+          "file": "src/CInfButtonArray.cpp",
+          "name": "CInfButtonArray::UpdateButtons",
+          "our_len": 36830,
+          "their_len": 11108
+        },
+        {
+          "address": "0x7349A0",
+          "category": "both_changed_differ",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::FeedBack",
+          "our_len": 23487,
+          "their_len": 23485
+        },
+        {
+          "address": "0x58FF20",
+          "category": "both_changed_differ",
+          "file": "src/CInfButtonArray.cpp",
+          "name": "CInfButtonArray::OnLButtonPressed",
+          "our_len": 22679,
+          "their_len": 21515
+        },
+        {
+          "address": "0x6F5FF0",
+          "category": "both_changed_differ",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::AIUpdate",
+          "our_len": 21624,
+          "their_len": 21665
+        },
+        {
+          "address": "0x44DC10",
+          "category": "both_changed_differ",
+          "file": "src/CGameAIBase.cpp",
+          "name": "CGameAIBase::ExecuteAction",
+          "our_len": 13971,
+          "their_len": 28427
+        },
+        {
+          "address": "0x4406B0",
+          "category": "both_changed_differ",
+          "file": "src/CCacheStatus.cpp",
+          "name": "CCacheStatus::Update",
+          "our_len": 19560,
+          "their_len": 19470
+        },
+        {
+          "address": "0x72B9A0",
+          "category": "both_changed_differ",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::ProcessAI",
+          "our_len": 17689,
+          "their_len": 16905
+        },
+        {
+          "address": "0x472DE0",
+          "category": "both_changed_differ",
+          "file": "src/CGameArea.cpp",
+          "name": "CGameArea::Unmarshal",
+          "our_len": 16979,
+          "their_len": 16366
+        },
+        {
+          "address": "0x5B81C0",
+          "category": "both_changed_differ",
+          "file": "src/CInfGame.cpp",
+          "name": "CInfGame::SwapItemPersonal",
+          "our_len": 13457,
+          "their_len": 17234
+        },
+        {
+          "address": "0x740270",
+          "category": "both_changed_differ",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::Spell",
+          "our_len": 15442,
+          "their_len": 14966
+        },
+        {
+          "address": "0x4A7900",
+          "category": "both_changed_differ",
+          "file": "src/CGameEffect.cpp",
+          "name": "CGameEffectDamage::ApplyEffect",
+          "our_len": 13909,
+          "their_len": 13848
+        },
+        {
+          "address": "0x471630",
+          "category": "both_changed_differ",
+          "file": "src/CGameArea.cpp",
+          "name": "CGameArea::Marshal",
+          "our_len": 16570,
+          "their_len": 9026
+        },
+        {
+          "address": "0x421E40",
+          "category": "both_changed_differ",
+          "file": "src/CBaldurChitin.cpp",
+          "name": "CBaldurChitin::CBaldurChitin",
+          "our_len": 13672,
+          "their_len": 11283
+        },
+        {
+          "address": "0x46E3D0",
+          "category": "both_changed_differ",
+          "file": "src/CGameArea.cpp",
+          "name": "CGameArea::AIUpdate",
+          "our_len": 12508,
+          "their_len": 12369
+        },
+        {
+          "address": "0x73D560",
+          "category": "both_changed_differ",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::Damage",
+          "our_len": 13072,
+          "their_len": 11087
+        },
+        {
+          "address": "0x728F80",
+          "category": "both_changed_differ",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::ExecuteAction",
+          "our_len": 13309,
+          "their_len": 10823
+        },
+        {
+          "address": "0x739B60",
+          "category": "both_changed_differ",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::Swing",
+          "our_len": 12371,
+          "their_len": 11196
+        },
+        {
+          "address": "0x6EF990",
+          "category": "both_changed_differ",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::CGameSprite",
+          "our_len": 11733,
+          "their_len": 11710
+        }
+      ],
+      "status": "assigned",
+      "verdicts": {}
+    }
+  }
+}

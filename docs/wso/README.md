@@ -132,6 +132,33 @@ the largest single Read ~13.6K tokens, and ~49.2M cumulative cache-read
 tokens (~54,655 per message). That measurement is why the bundle caps
 callees at 20 and states its own token cost on line one.
 
+## How the coordinator drives a wave
+
+Wave 1's loop is five commands, all in [tools/wave.py](../../tools/wave.py);
+batch state lives in [wave-state.json](wave-state.json), created by the
+first `next`, and no batch bookkeeping is written by hand:
+
+    python3 tools/wave.py next            # rank unclaimed rows, record the batch
+    python3 tools/wave.py brief b001      # the dispatch text, from brief-template.md
+    python3 tools/wave.py verdict b001 0x643CC0 ours probe-17   # per reported row
+    python3 tools/wave.py close b001      # evidence + clean tree + gates, then ff `first`
+    python3 tools/wave.py scorecard       # the tally into xrec-report.md
+
+`next` ranks `both_changed_differ` rows by size (his length + ours),
+takes twenty, and never lets two live batches own the same file.
+`close` refuses — listing every reason — unless each row has a verdict,
+the batch's worktree has no uncommitted paths, every touched function's
+`docs/evidence/<ADDRESS>.md` says `disagreed with WSO` or
+`corroborated by WSO`, and `tools/gates.sh --base first` exits 0 in that
+worktree; only then does it fast-forward `first` to the batch branch and
+print the tally. After a close, sync the worktree that has `first`
+checked out: `git -C <path> reset --hard first`. `status` is one line
+per batch, and `scorecard` rewrites the "## Scorecard" section of
+[xrec-report.md](xrec-report.md) from state (idempotent — the same
+state writes the same bytes). Waves 2 to 5 are imports and reuse
+`close --kind import`: no verdicts are required, but every row's
+evidence must be `kind: trace` or better instead.
+
 ## Nothing from his IWD2EE branch enters the repository
 
 His renderer is built into IEex, and his IWD2EE work is game-data overrides
