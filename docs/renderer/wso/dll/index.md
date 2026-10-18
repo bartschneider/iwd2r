@@ -176,6 +176,13 @@ Decompile scratch output lives in `runs/dll-decomp/` (git-ignored).
 - [`IEex_Helper_ZoomWorldBegin`](IEex_Helper_ZoomWorldBegin.md)
 - [`IEex_Helper_ZoomWorldEnd`](IEex_Helper_ZoomWorldEnd.md)
 
+## 3D overlays
+
+- [`IEex_Helper_CInfinity_FillHighlightPoly3d`](IEex_Helper_CInfinity_FillHighlightPoly3d.md)
+- [`IEex_Helper_CInfinity_FillTextBackdrop3d`](IEex_Helper_CInfinity_FillTextBackdrop3d.md)
+- [`IEex_Helper_LightningPolyLine3d`](IEex_Helper_LightningPolyLine3d.md)
+- [`IEex_Helper_CVidPalette_RealizeResource3dGrey`](IEex_Helper_CVidPalette_RealizeResource3dGrey.md)
+
 ## Staged Lua evidence (sha256)
 
 The staged Lua patches at `~/.local/share/iwd2r/wso/lua/` are used as evidence for who calls each helper (and, for the keys-screen group, for hook sites and Lua-callback contracts). The staged corpus itself has no pin yet; these hashes let it be pinned retroactively.
