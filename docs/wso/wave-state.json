@@ -862,7 +862,7 @@
     "b004": {
       "assigned_at": "2026-10-18T17:55:54+00:00",
       "branch": "p3/wso-b004",
-      "closed_at": null,
+      "closed_at": "2026-10-18T22:08:49+00:00",
       "files": [
         "src/CInfGame.cpp",
         "src/CGameSprite.cpp",
@@ -1033,8 +1033,18 @@
           "their_len": 4846
         }
       ],
-      "status": "assigned",
+      "status": "closed",
       "verdicts": {
+        "0x453840": {
+          "case": "dump-453840",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x4794E0": {
+          "case": "dump-4794E0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
         "0x4AB510": {
           "case": "dump-4AB510",
           "losing_kind": "trace",
@@ -1105,10 +1115,15 @@
           "losing_kind": "trace",
           "side": "ours"
         },
+        "0x737EF0": {
+          "case": "dump-737EF0",
+          "losing_kind": "read-only",
+          "side": "fork"
+        },
         "0x738E70": {
           "case": "dump-738E70",
-          "losing_kind": "trace",
-          "side": "ours"
+          "losing_kind": "read-only",
+          "side": "fork"
         },
         "0x73B760": {
           "case": "dump-73B760",
@@ -1401,6 +1416,294 @@
         },
         "0x7C0F40": {
           "case": "vid/fill_convex_poly",
+          "losing_kind": "trace",
+          "side": "ours"
+        }
+      }
+    },
+    "b006": {
+      "assigned_at": "2026-10-18T19:57:55+00:00",
+      "branch": "p3/wso-b006",
+      "closed_at": null,
+      "files": [
+        "src/CSpell.cpp",
+        "src/CGameTrigger.cpp",
+        "src/CScreenStore.cpp",
+        "src/CVisibility.cpp",
+        "src/CScreenSpellbook.cpp",
+        "src/CGameDialog.cpp",
+        "src/CDimm.cpp",
+        "src/CScreenWorld.cpp",
+        "src/CVidBitmap.cpp",
+        "src/CDerivedStats.cpp",
+        "src/CBaldurChitin.cpp",
+        "src/CAIGroup.cpp",
+        "src/CScreenCharacter.cpp",
+        "src/CVidInf.cpp",
+        "src/CScreenInventory.cpp",
+        "src/CVidCell.cpp"
+      ],
+      "rows": [
+        {
+          "address": "0x54A510",
+          "category": "both_changed_differ",
+          "file": "src/CSpell.cpp",
+          "name": "CSpell::GetAbilityEffect",
+          "our_len": 3163,
+          "their_len": 3267
+        },
+        {
+          "address": "0x4CCAB0",
+          "category": "both_changed_differ",
+          "file": "src/CGameTrigger.cpp",
+          "name": "CGameTrigger::CGameTrigger",
+          "our_len": 3140,
+          "their_len": 3193
+        },
+        {
+          "address": "0x676EF0",
+          "category": "both_changed_differ",
+          "file": "src/CScreenStore.cpp",
+          "name": "CScreenStore::UpdateStoreItems",
+          "our_len": 2942,
+          "their_len": 3375
+        },
+        {
+          "address": "0x551FF0",
+          "category": "both_changed_differ",
+          "file": "src/CVisibility.cpp",
+          "name": "CVisibilityMap::BltFogOWar",
+          "our_len": 3165,
+          "their_len": 3119
+        },
+        {
+          "address": "0x66CAF0",
+          "category": "both_changed_differ",
+          "file": "src/CScreenSpellbook.cpp",
+          "name": "CScreenSpellbook::UnmemorizeSpell",
+          "our_len": 4270,
+          "their_len": 1886
+        },
+        {
+          "address": "0x483F00",
+          "category": "both_changed_differ",
+          "file": "src/CGameDialog.cpp",
+          "name": "CGameDialogSprite::AsynchronousUpdate",
+          "our_len": 3542,
+          "their_len": 2593
+        },
+        {
+          "address": "0x785C10",
+          "category": "both_changed_differ",
+          "file": "src/CDimm.cpp",
+          "name": "CDimm::Dump",
+          "our_len": 3003,
+          "their_len": 3123
+        },
+        {
+          "address": "0x68DFD0",
+          "category": "both_changed_differ",
+          "file": "src/CScreenWorld.cpp",
+          "name": "CScreenWorld::TogglePauseGame",
+          "our_len": 2911,
+          "their_len": 3174
+        },
+        {
+          "address": "0x7B3190",
+          "category": "both_changed_differ",
+          "file": "src/CVidBitmap.cpp",
+          "name": "CVidBitmap::RenderDirect",
+          "our_len": 3108,
+          "their_len": 2967
+        },
+        {
+          "address": "0x445E40",
+          "category": "both_changed_differ",
+          "file": "src/CDerivedStats.cpp",
+          "name": "CDerivedStats::BonusInit",
+          "our_len": 3821,
+          "their_len": 2214
+        },
+        {
+          "address": "0x423800",
+          "category": "both_changed_differ",
+          "file": "src/CBaldurChitin.cpp",
+          "name": "CBaldurChitin::Init",
+          "our_len": 2717,
+          "their_len": 3218
+        },
+        {
+          "address": "0x679170",
+          "category": "both_changed_differ",
+          "file": "src/CScreenStore.cpp",
+          "name": "CScreenStore::BuyContainerItems",
+          "our_len": 2909,
+          "their_len": 3007
+        },
+        {
+          "address": "0x784A50",
+          "category": "both_changed_differ",
+          "file": "src/CDimm.cpp",
+          "name": "CDimm::CompressDirectory",
+          "our_len": 3091,
+          "their_len": 2741
+        },
+        {
+          "address": "0x686DE0",
+          "category": "both_changed_differ",
+          "file": "src/CScreenWorld.cpp",
+          "name": "CScreenWorld::EngineGameInit",
+          "our_len": 2962,
+          "their_len": 2859
+        },
+        {
+          "address": "0x4CED10",
+          "category": "both_changed_differ",
+          "file": "src/CGameTrigger.cpp",
+          "name": "CGameTrigger::OnActionButton",
+          "our_len": 2887,
+          "their_len": 2891
+        },
+        {
+          "address": "0x409820",
+          "category": "both_changed_differ",
+          "file": "src/CAIGroup.cpp",
+          "name": "CAIGroup::HandleFollowPath",
+          "our_len": 2710,
+          "their_len": 3017
+        },
+        {
+          "address": "0x5E3B80",
+          "category": "both_changed_differ",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CScreenCharacter::OnCancelButtonClick",
+          "our_len": 5387,
+          "their_len": 339
+        },
+        {
+          "address": "0x79EC20",
+          "category": "both_changed_differ",
+          "file": "src/CVidInf.cpp",
+          "name": "CVidInf::PrintSurfaceToBmp",
+          "our_len": 2786,
+          "their_len": 2832
+        },
+        {
+          "address": "0x6285B0",
+          "category": "both_changed_differ",
+          "file": "src/CScreenInventory.cpp",
+          "name": "CScreenInventory::OnDoneButtonClick",
+          "our_len": 3510,
+          "their_len": 2103
+        },
+        {
+          "address": "0x7D1190",
+          "category": "both_changed_differ",
+          "file": "src/CVidCell.cpp",
+          "name": "CVidCell::sub_7D1190",
+          "our_len": 2890,
+          "their_len": 2578
+        }
+      ],
+      "status": "assigned",
+      "verdicts": {
+        "0x409820": {
+          "case": "move/follow_path",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x423800": {
+          "case": "dump-423800",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x445E40": {
+          "case": "dump-445E40",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x483F00": {
+          "case": "dump-483F00",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x4CCAB0": {
+          "case": "dump-4CCAB0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x4CED10": {
+          "case": "dump-4CED10",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x54A510": {
+          "case": "dump-54A510",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x551FF0": {
+          "case": "dump-551FF0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5E3B80": {
+          "case": "dump-5E3B80",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x6285B0": {
+          "case": "dump-6285B0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x66CAF0": {
+          "case": "dump-66CAF0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x676EF0": {
+          "case": "dump-676EF0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x679170": {
+          "case": "dump-679170",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x686DE0": {
+          "case": "dump-686DE0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x68DFD0": {
+          "case": "dump-68DFD0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x784A50": {
+          "case": "dump-784A50",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x785C10": {
+          "case": "dump-785C10",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x79EC20": {
+          "case": "dump-79EC20",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x7B3190": {
+          "case": "dump-7B3190",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x7D1190": {
+          "case": "vid/cell_brightness32",
           "losing_kind": "trace",
           "side": "ours"
         }
