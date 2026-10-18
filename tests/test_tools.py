@@ -6495,6 +6495,47 @@ class WsoFetchTest(unittest.TestCase):
         self.assertEqual(run.returncode, 1)
         self.assertIn('lua/IEex_Y.lua', run.stderr)
 
+    def test_wso_fetch_symlink_escape_is_rejected(self):
+        """A symlink under the wso root pointing outside it is not a
+        destination: resolve_dest follows the link before the containment
+        check, so a matched hash cannot land outside the root either."""
+        outside = os.path.join(self.home, 'outside')
+        os.makedirs(outside)
+        os.makedirs(os.path.join(self.root, 'dll'))
+        os.symlink(outside, os.path.join(self.root, 'dll', 'up'))
+        root = wso_fetch.wso_root()
+        with self.assertRaises(ValueError):
+            wso_fetch.resolve_dest('dll/up/IEex.dll', root)
+        src = os.path.join(self.home, 'src', 'IEex.dll')
+        os.makedirs(os.path.dirname(src))
+        with open(src, 'wb') as f:
+            f.write(b'pinned bytes')
+        pins = {'fork_commit': 'f' * 40, 'upstream_commit': 'u' * 40,
+                'files': [{'url': 'file://' + src,
+                           'dest': 'dll/up/IEex.dll',
+                           'sha256': hashlib.sha256(b'pinned bytes').hexdigest()}]}
+        problems = wso_fetch.fetch(pins, root)
+        self.assertEqual([p for p in problems if 'escapes the wso root' in p],
+                         problems, problems)
+        self.assertFalse(os.path.exists(os.path.join(outside, 'IEex.dll')))
+
+    def test_wso_fetch_bad_pins_file_is_a_clean_error(self):
+        """A missing, malformed or wrongly shaped pins file exits 1 with one
+        stderr line instead of a traceback."""
+        malformed = os.path.join(self.home, 'malformed.json')
+        with open(malformed, 'w') as f:
+            f.write('{oops')
+        shape = os.path.join(self.home, 'shape.json')
+        with open(shape, 'w') as f:
+            json.dump({'fork_commit': 'f' * 40, 'files': 'not a list'}, f)
+        for pins in (os.path.join(self.home, 'absent.json'), malformed, shape):
+            run = self.run_cli('--check', '--pins', pins)
+            self.assertEqual(run.returncode, 1, (pins, run.stderr))
+            lines = run.stderr.splitlines()
+            self.assertEqual(len(lines), 1, (pins, run.stderr))
+            self.assertIn('wso_fetch:', lines[0])
+            self.assertIn(os.path.basename(pins), lines[0])
+
 
 if __name__ == '__main__':
     unittest.main()

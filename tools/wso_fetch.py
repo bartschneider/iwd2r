@@ -107,8 +107,16 @@ def main(argv=None):
     parser.add_argument('--pins', default=PINS,
                         help='pins JSON (default: tools/wso_pins.json)')
     args = parser.parse_args(argv)
-    with open(args.pins) as f:
-        pins = json.load(f)
+    try:
+        with open(args.pins) as f:
+            pins = json.load(f)
+    except (OSError, ValueError) as e:  # JSONDecodeError is a ValueError
+        print(f'wso_fetch: {args.pins}: {e}', file=sys.stderr)
+        return 1
+    if not isinstance(pins, dict) or not isinstance(pins.get('files'), list):
+        print(f'wso_fetch: {args.pins}: "files" must be a list of pins',
+              file=sys.stderr)
+        return 1
     root = wso_root()
     problems = check(pins, root) if args.check else fetch(pins, root)
     for p in problems:
