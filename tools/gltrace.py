@@ -9,19 +9,26 @@ gate: the game window opens on the user's desktop, who is there and
 expects it; Windows Sandbox breaks the IEex DLL injection, so the trace
 cannot be taken there). The tool writes config.json, actions.json and
 its driver into a staging folder next to the game copy and runs them
-through cmd.exe the way play.py launches the Windows build. The driver
-runs
+through cmd.exe the way play.py launches the Windows build.
 
-    apitrace.exe trace --api gl -m -o <results>/<scenario>.trace IWD2EE.exe
+Both IWD2EE.exe and iwd2.exe are packed (empty import tables), so
+`apitrace trace` cannot hook either. The capture instead uses apitrace's
+wrapper: the tool copies apitrace's 32-bit lib/wrappers/opengl32.dll into
+the game folder for the run and the driver launches the exact IEex chain
+(IWD2EE.exe, which spawns iwd2.exe with IEex.dll injected and exits). The
+game loads OpenGL32.dll by bare name, the DLL search finds the wrapper in
+the application directory first, and the wrapper records the GL stream to
+the path in TRACE_FILE while forwarding every call to the real system
+DLL. The wrapper is removed after the run and the copy is re-hashed
+against its pre-run state.
 
-in the game folder and drives the scenario's input actions with
-realinput's coordinates; waits are wall-clock, because the original has
-none of iwd2r's control channel. The run stops after the scenario's last
-checkpoint op (shot/quit ops would need the control channel) and closes
-the game; apitrace flushes the trace when the game exits. -m makes
-apitrace hook with mhook instead of IAT patching: IWD2EE.exe imports
-only kernel32, user32 and version, and loads OpenGL32.dll dynamically,
-so there is no IAT to patch.
+The driver answers the game's modal "IWD2:EE Resolution Select" dialog
+(a BM_CLICK on its OK; startup blocks until it is answered) and drives
+the scenario's input actions with realinput's coordinates; waits are
+wall-clock, because the original has none of iwd2r's control channel.
+The run stops after the scenario's last checkpoint op (shot/quit ops
+would need the control channel) and closes the game; the wrapper's trace
+is complete when the game exits.
 
 Before the launch the copy's icewind2.ini is rewritten for the run and
 restored after: its [Alias] paths name the source install, which the
@@ -73,11 +80,21 @@ DEFAULT_TIMEOUT = 600  # when the scenario header sets none
 # top of the scenario's header timeout and the lead.
 LOAD_HEADROOM = 300
 LEAD_SECONDS = 50
-# Seconds apitrace gets to flush the trace after the game exits, and the
-# per-frame rows written into the .md (the whole table goes into the run
+# Per-frame rows written into the .md (the whole table goes into the run
 # folder as <scenario>-frames.json).
-TRACE_WAIT = 300
 FRAME_TABLE_MAX = 40
+
+# The capture wrapper: apitrace's lib/wrappers/opengl32.dll goes beside
+# iwd2.exe for the run (the game loads OpenGL32.dll by bare name; the
+# application directory wins the DLL search), records the GL stream to
+# TRACE_FILE and forwards to the real system DLL.
+WRAPPER_SUBPATH = os.path.join('lib', 'wrappers', 'opengl32.dll')
+WRAPPER_NAME = 'opengl32.dll'
+TRACE_ENV = 'TRACE_FILE'
+# Top-level folders of the game copy the game freely rewrites at runtime;
+# the post-run tree comparison skips them.
+MANIFEST_EXCLUDES = frozenset(('cache', 'temp', 'tempsave', 'mpsave',
+                               'crash'))
 
 # The calls a frame's "draw calls" count. glDrawBuffers names a different
 # thing (render targets) and is not here.
@@ -230,6 +247,113 @@ def apitrace_version(apitrace):
         os.path.dirname(apitrace)))
 
 
+def find_wrapper(root):
+    """The lib/wrappers/opengl32.dll under the unpacked apitrace folder
+    (a WSL path; it is copied into the game folder for the run)."""
+    wanted = os.path.normpath(WRAPPER_SUBPATH)
+    hits = []
+    for base, dirs, files in os.walk(root):
+        rel = os.path.normpath(os.path.relpath(base, root))
+        # Match <root>/.../lib/wrappers (the unpacked tree has a versioned
+        # folder such as apitrace-14.0-win32 above lib/).
+        parts = rel.split(os.sep)
+        tail = os.path.join(*parts[-2:]) if len(parts) >= 2 else ''
+        if tail == os.path.dirname(wanted) and WRAPPER_NAME in files:
+            dirs[:] = []
+            hits.append(os.path.join(base, WRAPPER_NAME))
+    if not hits:
+        raise SystemExit('gltrace: no %s under %s' % (WRAPPER_SUBPATH, root))
+    return sorted(hits)[0]
+
+
+def pe_machine(path):
+    """The machine type of a PE image (0x014c x86, 0x8664 x64), or None
+    when the file is not a PE image."""
+    try:
+        with open(path, 'rb') as f:
+            data = f.read(4096)
+    except OSError:
+        return None
+    if len(data) < 0x40 or data[:2] != b'MZ':
+        return None
+    pe = int.from_bytes(data[0x3c:0x40], 'little')
+    if pe < 0 or pe + 6 > len(data) or data[pe:pe + 4] != b'PE\x00\x00':
+        return None
+    return int.from_bytes(data[pe + 4:pe + 6], 'little')
+
+
+def snapshot_manifest(root, excludes=MANIFEST_EXCLUDES):
+    """{relpath: {'size', 'sha256'}} of every file under root, skipping
+    the top-level folders in excludes (the game rewrites them at
+    runtime). Relpaths use '/'."""
+    manifest = {}
+    for base, dirs, files in os.walk(root):
+        top = os.path.relpath(base, root).split(os.sep)[0]
+        if top in excludes:
+            dirs[:] = []
+            continue
+        for entry in files:
+            path = os.path.join(base, entry)
+            key = os.path.relpath(path, root).replace(os.sep, '/')
+            digest = hashlib.sha256()
+            size = 0
+            with open(path, 'rb') as f:
+                while True:
+                    chunk = f.read(1 << 20)
+                    if not chunk:
+                        break
+                    size += len(chunk)
+                    digest.update(chunk)
+            manifest[key] = {'size': size, 'sha256': digest.hexdigest()}
+    return manifest
+
+
+def manifest_delta(before, after):
+    """The file-level difference of two snapshot_manifest() results:
+    sorted added, removed and changed relpaths."""
+    return {
+        'added': sorted(set(after) - set(before)),
+        'removed': sorted(set(before) - set(after)),
+        'changed': sorted(key for key in set(before) & set(after)
+                          if before[key] != after[key]),
+    }
+
+
+def place_wrapper(wrapper, game):
+    """Copies the apitrace wrapper beside iwd2.exe for the run. Refuses
+    to overwrite an opengl32.dll that is already there (a real wrapper
+    left over, or something else entirely)."""
+    dest = os.path.join(game, WRAPPER_NAME)
+    if os.path.exists(dest):
+        raise SystemExit('gltrace: %s already exists in the game folder; '
+                         'not overwriting it' % dest)
+    shutil.copy2(wrapper, dest)
+    return dest
+
+
+def remove_wrapper(game):
+    """Undoes place_wrapper(); returns whether a wrapper was removed."""
+    try:
+        os.unlink(os.path.join(game, WRAPPER_NAME))
+    except FileNotFoundError:
+        return False
+    return True
+
+
+def remove_stray_traces(game):
+    """Deletes any .trace under the game folder (a trace belongs under
+    runs/, never in the copy) and returns their relpaths."""
+    strays = []
+    for base, dirs, files in os.walk(game):
+        for entry in files:
+            if entry.lower().endswith('.trace'):
+                path = os.path.join(base, entry)
+                os.unlink(path)
+                strays.append(os.path.relpath(path, game).replace(os.sep,
+                                                                  '/'))
+    return sorted(strays)
+
+
 def make_run_dir(now):
     """runs/<stamp> (with -2, -3... if taken), like play.make_run_folder."""
     base = os.path.join(RUNS, now.strftime('%Y%m%d-%H%M%S'))
@@ -295,20 +419,19 @@ def ini_overrides(text, game):
     return '\n'.join(out)
 
 
-def desktop_config(name, game, apitrace, results, timeout):
+def desktop_config(name, game, results, timeout):
     """The desktop driver's config: everything on the Windows side, no
-    sandbox mappings."""
+    sandbox mappings. The trace path doubles as the wrapper's TRACE_FILE
+    value."""
     return {
         'scenario': name,
         'exe': game + '\\IWD2EE.exe',
         'data': game,
-        'apitrace': apitrace,
         'trace': results + '\\' + name + '.trace',
         'results': results,
         'actions': results + '\\actions.json',
         'frame_rate': realinput.FRAME_RATE,
         'timeout': timeout,
-        'trace_wait': TRACE_WAIT,
     }
 
 
@@ -329,10 +452,11 @@ def desktop_bat(results_win):
 # gone: this script changes nothing on the machine (no service, scheduled
 # task, antivirus or system-file change, no shutdown); its only effects are
 # its own processes, the synthetic input it sends, and the game folder's
-# icewind2.ini, which gltrace.py rewrites for the run and restores.
+# icewind2.ini, which gltrace.py rewrites for the run and restores, and
+# the opengl32.dll wrapper, which gltrace.py places and removes.
 DESKTOP_DRIVER = r'''<#
 .SYNOPSIS
-Traces one scenario of the IWD2EE build with apitrace on the host desktop.
+Traces one scenario of the IWD2EE build on the host desktop.
 
 .DESCRIPTION
 tools/gltrace.py writes config.json, actions.json and this script into a
@@ -343,33 +467,37 @@ user's explicit opt-in to a game window on their desktop for a few minutes
 (the desktop is the only place the game runs - Windows Sandbox breaks the
 IEex DLL injection). One launch per scenario; there is no retry.
 
-The script runs
+The capture is apitrace's opengl32.dll wrapper: gltrace.py copies it into
+the game folder for the run (beside iwd2.exe; the game loads OpenGL32.dll
+by bare name and the application directory wins the DLL search), and this
+script starts the exact IEex chain
 
-  apitrace.exe trace --api gl -m -o <results>\<scenario>.trace IWD2EE.exe
+  IWD2EE.exe   (with TRACE_FILE=<results>\<scenario>.trace in the env)
 
-in the game folder. -m hooks with mhook instead of IAT patching: IWD2EE.exe
-imports only kernel32, user32 and version and loads OpenGL32.dll
-dynamically, so there is no IAT entry to patch. IWD2EE.exe is a loader: it
-shows a small dialog, spawns iwd2.exe with IEex.dll injected and exits. The
-script therefore looks for the game window among the visible top-level
-windows of apitrace's descendants (three levels deep by parent process id,
-which survives IWD2EE.exe exiting), skips dialog-class windows, and drives
-the scenario's input actions with SendInput. Waits are wall-clock only: the
+IWD2EE.exe spawns iwd2.exe with IEex.dll injected and exits, so the script
+looks for the game window among the visible top-level windows of the
+loader's descendants (three levels deep by parent process id, which
+survives IWD2EE.exe exiting), skips dialog-class windows, and drives the
+scenario's input actions with SendInput. Waits are wall-clock only: the
 original has none of iwd2r's control channel, so frames cannot be polled,
 and shot/checkpoint ops (gltrace.py drops them) are logged and skipped.
 
+The game's first window is the modal "IWD2:EE Resolution Select" box and
+startup blocks until it is answered: the script polls for it for ~20 s and
+clicks its OK (BM_CLICK on the button child; a Return when there is none).
+When no dialog appears the choice is persisted and the script moves on.
+
 After the last action the script closes the game (WM_CLOSE, its
-confirmation dialog answered with Return, then a force kill); apitrace
-flushes the trace when the game exits, and the script waits for it and
-checks the trace is there and non-empty.
+confirmation dialog answered with Return, then a force kill). The wrapper
+finishes the trace when the game exits; the script then checks the trace
+is there and non-empty.
 
 Foreground losses are logged, not fatal: this is a capture tool, and the
 trace of what did run is still worth keeping.
 
-The results folder receives driver.log, trace-stdout.txt (the game's
-stdout passes through apitrace), trace-stderr.txt, <scenario>.trace,
-exitcode.txt (apitrace's exit code), error.txt (only when the driver
-failed) and finally done.txt; gltrace.py copies them home.
+The results folder receives driver.log, <scenario>.trace, exitcode.txt
+(the game's exit code), error.txt (only when the driver failed) and
+finally done.txt; gltrace.py copies them home.
 #>
 param(
     [Parameter(Mandatory = $true)][string]$Config
@@ -384,8 +512,6 @@ $actions = @((Get-Content -Raw -LiteralPath $cfg.actions | ConvertFrom-Json) | F
 $frameRate = [double]$cfg.frame_rate
 $deadline = $started.AddSeconds([double]$cfg.timeout)
 $logPath = Join-Path $cfg.results 'driver.log'
-$stdoutPath = Join-Path $cfg.results 'trace-stdout.txt'
-$stderrPath = Join-Path $cfg.results 'trace-stderr.txt'
 
 function Log([string]$message) {
     $elapsed = ((Get-Date) - $started).TotalSeconds
@@ -459,12 +585,21 @@ public static class IwdInput {
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     static extern int GetClassName(IntPtr hWnd, StringBuilder name, int size);
     [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
+    [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr hWnd, EnumWindowsProc proc, IntPtr lParam);
+    [DllImport("user32.dll", SetLastError = true)]
+    static extern IntPtr SendMessage(IntPtr hWnd, uint msg, IntPtr w, IntPtr l);
+    [DllImport("user32.dll", SetLastError = true)]
+    static extern IntPtr SendMessage(IntPtr hWnd, uint msg, IntPtr w, StringBuilder l);
 
     const uint INPUT_MOUSE = 0, INPUT_KEYBOARD = 1;
     const uint MOUSEEVENTF_LEFTDOWN = 0x02, MOUSEEVENTF_LEFTUP = 0x04;
     const uint MOUSEEVENTF_RIGHTDOWN = 0x08, MOUSEEVENTF_RIGHTUP = 0x10;
     const uint KEYEVENTF_EXTENDEDKEY = 0x1, KEYEVENTF_KEYUP = 0x2;
     public const uint WM_CLOSE = 0x10;
+    public const uint WM_GETTEXT = 0x000D, WM_GETTEXTLENGTH = 0x000E;
+    public const uint BM_CLICK = 0x00F5;
+    public const uint LB_GETCURSEL = 0x0188, LB_GETTEXTLEN = 0x0189, LB_GETTEXT = 0x018A;
+    public const uint CB_GETCURSEL = 0x0147, CB_GETLBTEXTLEN = 0x0149, CB_GETLBTEXT = 0x0148;
 
     static void Send(INPUT input) {
         INPUT[] inputs = new INPUT[] { input };
@@ -604,13 +739,67 @@ public static class IwdInput {
         EnumWindows(windowsProc, IntPtr.Zero);
         return windowsFound.ToArray();
     }
+
+    // Every visible top-level window on the desktop (any process). Same
+    // static-delegate pattern as Windows(): the callback must stay rooted
+    // for the whole native call.
+    static List<IntPtr> allFound;
+    static bool AllCallback(IntPtr hWnd, IntPtr lParam) {
+        if (IsWindowVisible(hWnd))
+            allFound.Add(hWnd);
+        return true;
+    }
+    static EnumWindowsProc allProc = new EnumWindowsProc(AllCallback);
+    public static IntPtr[] AllWindows() {
+        allFound = new List<IntPtr>();
+        EnumWindows(allProc, IntPtr.Zero);
+        return allFound.ToArray();
+    }
+
+    // The child windows of a dialog (its buttons, lists, ...).
+    static List<IntPtr> childrenFound;
+    static bool ChildrenCallback(IntPtr hWnd, IntPtr lParam) {
+        childrenFound.Add(hWnd);
+        return true;
+    }
+    static EnumWindowsProc childrenProc = new EnumWindowsProc(ChildrenCallback);
+    public static IntPtr[] ChildWindows(IntPtr hWnd) {
+        childrenFound = new List<IntPtr>();
+        EnumChildWindows(hWnd, childrenProc, IntPtr.Zero);
+        return childrenFound.ToArray();
+    }
+
+    // A window's title text.
+    public static string TextOf(IntPtr hWnd) {
+        int len = (int)SendMessage(hWnd, WM_GETTEXTLENGTH, IntPtr.Zero, IntPtr.Zero);
+        if (len <= 0)
+            return "";
+        StringBuilder text = new StringBuilder(len + 1);
+        SendMessage(hWnd, WM_GETTEXT, (IntPtr)text.Capacity, text);
+        return text.ToString();
+    }
+
+    // A list entry: index-th item of a ListBox (LB_*) or ComboBox (CB_*).
+    public static string ListText(IntPtr hWnd, int index, uint lenMsg, uint textMsg) {
+        int len = (int)SendMessage(hWnd, lenMsg, (IntPtr)index, IntPtr.Zero);
+        if (len <= 0)
+            return "";
+        StringBuilder text = new StringBuilder(len + 1);
+        SendMessage(hWnd, textMsg, (IntPtr)index, text);
+        return text.ToString();
+    }
+
+    // Sends a message and returns its result as int (-1 = LB_ERR etc.).
+    public static int Send(uint msg, IntPtr hWnd, IntPtr w, IntPtr l) {
+        return (int)SendMessage(hWnd, msg, w, l);
+    }
 }
 '@
 Add-Type -TypeDefinition $source -Language CSharp
 Add-Type -AssemblyName System.Drawing
 Add-Type -AssemblyName System.Windows.Forms
 
-$script:tracer = $null
+$script:loader = $null   # IWD2EE.exe; it exits once iwd2.exe is going
 $script:game = $null
 $script:gamePid = [uint32]0
 $script:window = [IntPtr]::Zero
@@ -619,6 +808,8 @@ $script:window = [IntPtr]::Zero
 $script:line = 0
 $script:watching = $false
 $script:focusLosses = New-Object System.Collections.Generic.List[string]
+$script:lastTraceLog = [DateTime]::MinValue
+$script:lastTraceSize = -1
 
 # Logs the foreground changes the watcher saw since the last call. While the
 # scenario runs, a window of another process taking the foreground from the
@@ -633,17 +824,30 @@ function Watch-Foreground {
     }
 }
 
-# Throws when the run cannot go on: apitrace or the game died early, or the
-# deadline passed.
+# Throws when the run cannot go on: the game died early, or the deadline
+# passed.
 function Check {
-    if ($script:tracer -ne $null -and $script:tracer.HasExited) {
-        throw "apitrace exited early (code $($script:tracer.ExitCode))"
-    }
     if ($script:game -ne $null -and $script:game.HasExited) {
         throw [System.OperationCanceledException]::new('game exited')
     }
     Watch-Foreground
+    Trace-Progress
     if ((Get-Date) -gt $deadline) { throw "scenario timeout ($($cfg.timeout) s)" }
+}
+
+# Logs the trace's growth once in a while: a wrapper that never got loaded
+# shows up as a size stuck at 0.
+function Trace-Progress {
+    if ((Get-Date) -lt $script:lastTraceLog.AddSeconds(30)) { return }
+    $script:lastTraceLog = Get-Date
+    $size = 0
+    if ([System.IO.File]::Exists($cfg.trace)) {
+        $size = (Get-Item -LiteralPath $cfg.trace).Length
+    }
+    if ($size -ne $script:lastTraceSize) {
+        $script:lastTraceSize = $size
+        Log ('  trace {0} bytes' -f $size)
+    }
 }
 
 # Wall-clock only: the original has none of iwd2r's control channel, so
@@ -658,9 +862,9 @@ function Sleep-Frames([double]$frames) {
     }
 }
 
-# The pids of apitrace's descendants, three levels deep (apitrace.exe ->
-# IWD2EE.exe -> iwd2.exe -> any child it spawns). The walk is by recorded
-# parent process id, so it survives IWD2EE.exe exiting.
+# The pids of the loader's descendants, three levels deep (IWD2EE.exe ->
+# iwd2.exe -> any child it spawns). The walk is by recorded parent process
+# id, so it survives IWD2EE.exe exiting.
 function Get-DescendantIds([uint32]$root) {
     $all = New-Object System.Collections.Generic.List[uint32]
     $frontier = New-Object System.Collections.Generic.List[uint32]
@@ -682,10 +886,68 @@ function Get-DescendantIds([uint32]$root) {
     return ,$all
 }
 
-# The game window: the largest visible top-level window of apitrace's
+# The game's first window is the modal "IWD2:EE Resolution Select" box
+# (#32770): startup blocks until it is answered. Click its OK (BM_CLICK,
+# no focus steal); with no clickable button child, fall back to Return.
+# When the dialog never shows, the choice is persisted - log and move on,
+# that is not a failure.
+function Answer-ResolutionDialog {
+    $end = (Get-Date).AddSeconds(20)
+    while ((Get-Date) -lt $end) {
+        Check
+        foreach ($h in [IwdInput]::AllWindows()) {
+            if ([IwdInput]::ClassOf($h) -ne '#32770') { continue }
+            $title = [IwdInput]::TextOf($h)
+            if ($title -notmatch 'Resolution') { continue }
+            $ownerPid = [IwdInput]::PidOf($h)
+            $owner = try { (Get-Process -Id $ownerPid -ErrorAction Stop).ProcessName } catch { '?' }
+            $selection = ''
+            foreach ($c in [IwdInput]::ChildWindows($h)) {
+                $class = [IwdInput]::ClassOf($c)
+                if ($class -eq 'ListBox') {
+                    $sel = [IwdInput]::Send([IwdInput]::LB_GETCURSEL, $c, [IntPtr]::Zero, [IntPtr]::Zero)
+                    if ($sel -ge 0) {
+                        $selection = [IwdInput]::ListText($c, $sel, [IwdInput]::LB_GETTEXTLEN, [IwdInput]::LB_GETTEXT)
+                    }
+                } elseif ($class -eq 'ComboBox') {
+                    $sel = [IwdInput]::Send([IwdInput]::CB_GETCURSEL, $c, [IntPtr]::Zero, [IntPtr]::Zero)
+                    if ($sel -ge 0) {
+                        $selection = [IwdInput]::ListText($c, $sel, [IwdInput]::CB_GETLBTEXTLEN, [IwdInput]::CB_GETLBTEXT)
+                    }
+                }
+            }
+            $buttons = @()
+            foreach ($c in [IwdInput]::ChildWindows($h)) {
+                if ([IwdInput]::ClassOf($c) -eq 'Button') { $buttons += $c }
+            }
+            $button = [IntPtr]::Zero
+            foreach ($b in $buttons) {
+                if ([IwdInput]::TextOf($b) -match '^OK') { $button = $b; break }
+            }
+            if ($button -eq [IntPtr]::Zero -and $buttons.Count -gt 0) { $button = $buttons[0] }
+            if ($button -ne [IntPtr]::Zero) {
+                [void][IwdInput]::Send([IwdInput]::BM_CLICK, $button, [IntPtr]::Zero, [IntPtr]::Zero)
+                $how = 'BM_CLICK on 0x{0:x}' -f $button.ToInt64()
+            } else {
+                [void][IwdInput]::SetForegroundWindow($h)
+                Start-Sleep -Milliseconds 150
+                [IwdInput]::Key(0x0D, $true, $false)
+                Start-Sleep -Milliseconds 50
+                [IwdInput]::Key(0x0D, $false, $false)
+                $how = 'Return'
+            }
+            Log ('resolution dialog 0x{0:x} ''{1}'' pid {2} ({3}): selection ''{4}'', answered with {5}' -f $h.ToInt64(), $title, $ownerPid, $owner, $selection, $how)
+            return
+        }
+        Start-Sleep -Milliseconds 250
+    }
+    Log 'no resolution dialog within 20 s (the choice may be persisted); proceeding'
+}
+
+# The game window: the largest visible top-level window of the loader's
 # descendants, stable over five 200 ms polls, within 180 s. Dialog-class
-# windows are skipped: IWD2EE.exe's "IEex loader" box is one, and the game
-# is not.
+# windows are skipped: the resolution box and IWD2EE.exe's "IEex loader"
+# box are ones, and the game is not.
 function Find-GameWindow {
     $end = (Get-Date).AddSeconds(180)
     $last = [IntPtr]::Zero
@@ -694,7 +956,7 @@ function Find-GameWindow {
         Check
         $best = [IntPtr]::Zero
         $bestArea = 0
-        foreach ($procId in (Get-DescendantIds $script:tracer.Id)) {
+        foreach ($procId in (Get-DescendantIds $script:loader.Id)) {
             foreach ($h in [IwdInput]::Windows([int]$procId, $null)) {
                 if ([IwdInput]::ClassOf($h) -eq '#32770') { continue }
                 $a = [IwdInput]::Area($h)
@@ -805,24 +1067,22 @@ function Do-Action($a) {
     return $false
 }
 
-# One trace: apitrace trace, find the game window, run the actions, close
-# the game and wait for the trace. Throws when there is no trace.
+# One trace: start the IEex chain with TRACE_FILE set (the opengl32.dll
+# wrapper in the game folder records the GL stream), answer the resolution
+# dialog, find the game window, run the actions, close the game. Throws
+# when the game never came up.
 function Run-Trace {
-    Log "running $($cfg.apitrace) trace --api gl -m -o `"$($cfg.trace)`" `"$($cfg.exe)`""
-    Log "  in $($cfg.data) (the game inherits it as its working directory)"
-    $arguments = @('trace', '--api', 'gl', '-m', '-o',
-        "`"$($cfg.trace)`"", "`"$($cfg.exe)`"")
-    $script:tracer = Start-Process -FilePath $cfg.apitrace -ArgumentList $arguments `
-        -WorkingDirectory $cfg.data -PassThru -NoNewWindow `
-        -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
-    $null = $script:tracer.Handle # keeps ExitCode readable after exit
-    Log "apitrace pid $($script:tracer.Id)"
+    if (-not [System.IO.File]::Exists((Join-Path $cfg.data 'opengl32.dll'))) {
+        throw 'no opengl32.dll wrapper in the game folder (gltrace.py places it before the run)'
+    }
+    Log "starting $($cfg.exe) in $($cfg.data)"
+    Log ('  TRACE_FILE={0} (the wrapper opengl32.dll records the GL stream there)' -f $cfg.trace)
+    $env:TRACE_FILE = $cfg.trace
+    $script:loader = Start-Process -FilePath $cfg.exe -WorkingDirectory $cfg.data -PassThru
+    $null = $script:loader.Handle # keeps ExitCode readable after exit
+    Log "IWD2EE.exe pid $($script:loader.Id) (its descendants carry the game)"
+    Answer-ResolutionDialog
     Find-GameWindow
-    # A tap of ALT lifts Windows' SetForegroundWindow lock for this process
-    # (the driver did not launch the game, apitrace did).
-    [IwdInput]::Key(0x12, $true, $false)
-    [IwdInput]::Key(0x12, $false, $false)
-    Start-Sleep -Milliseconds 100
     Refresh-Window
     Screen-Shot 'ready'
     try {
@@ -842,8 +1102,8 @@ function Run-Trace {
     End-Run
 }
 
-# Closes the game (the trace is flushed when it exits), waits for apitrace
-# and verifies the trace.
+# Closes the game (the wrapper finishes the trace when it exits) and
+# verifies the trace is there and non-empty.
 function End-Run {
     Screen-Shot 'end'
     if ($script:game -ne $null -and -not $script:game.HasExited) {
@@ -871,16 +1131,6 @@ function End-Run {
             $script:game.WaitForExit(10000) | Out-Null
         }
     }
-    Log "waiting for apitrace to flush the trace ($($cfg.trace_wait) s)"
-    $end = (Get-Date).AddSeconds([double]$cfg.trace_wait)
-    while (-not $script:tracer.WaitForExit(1000)) {
-        if ((Get-Date) -gt $end) {
-            Log '  apitrace did not exit; killing it'
-            Stop-Process -Id $script:tracer.Id -Force -ErrorAction SilentlyContinue
-            $script:tracer.WaitForExit(10000) | Out-Null
-            break
-        }
-    }
     if (-not [System.IO.File]::Exists($cfg.trace)) { throw "no trace at $($cfg.trace)" }
     $size = (Get-Item -LiteralPath $cfg.trace).Length
     if ($size -le 0) { throw "the trace at $($cfg.trace) is empty" }
@@ -896,7 +1146,6 @@ try {
     Log "desktop user $([Environment]::UserName) (the run was allowed: IWD2R_DESKTOP_OK=1)"
     [IwdInput]::WatchForeground()
     Run-Trace
-    $exitCode = $script:tracer.ExitCode
     if ($script:focusLosses.Count -gt 0) {
         Log ("the game lost the foreground {0} time(s) while the scenario ran, so input may have missed it; first {1}" -f $script:focusLosses.Count, $script:focusLosses[0])
     }
@@ -908,14 +1157,14 @@ try {
     Log "  stack $($_.ScriptStackTrace -replace '\r?\n', ' <- ')"
     try { Screen-Shot 'stuck' } catch { Log "  no screen shot: $_" }
 } finally {
-    if ($script:tracer -ne $null -and -not $script:tracer.HasExited) {
-        Stop-Process -Id $script:tracer.Id -Force -ErrorAction SilentlyContinue
+    if ($script:loader -ne $null -and -not $script:loader.HasExited) {
+        Stop-Process -Id $script:loader.Id -Force -ErrorAction SilentlyContinue
     }
     if ($script:game -ne $null -and -not $script:game.HasExited) {
         Stop-Process -Id $script:gamePid -Force -ErrorAction SilentlyContinue
     }
-    if ($script:tracer -ne $null -and $exitCode -eq $null -and $script:tracer.HasExited) {
-        $exitCode = $script:tracer.ExitCode
+    if ($script:game -ne $null) {
+        try { $exitCode = $script:game.ExitCode } catch { $exitCode = $null }
     }
     Log "exit code $exitCode"
     Set-Content -LiteralPath (Join-Path $cfg.results 'exitcode.txt') -Value "$exitCode" -Encoding ASCII
@@ -973,8 +1222,8 @@ def write_md(path, name, summary, meta):
     lines.append('')
     lines.append('- game: %s (IWD2EE.exe sha256 %s)'
                  % (meta['game'], meta['exe_sha']))
-    lines.append('- apitrace: %s (trace --api gl -m: mhook, the game loads '
-                 'OpenGL32.dll dynamically)' % meta['version'])
+    lines.append('- apitrace: %s (captured by its lib/wrappers/opengl32.dll '
+                 'proxy in the game folder, writing $TRACE_FILE)' % meta['version'])
     lines.append('- GPU: %s' % meta['gpu'])
     lines.append('- scenario: scenarios/%s.txt, driven to its last '
                  'checkpoint (waits are wall-clock; %s s lead for the intro '
@@ -1032,8 +1281,7 @@ def exe_sha(game):
 def copy_home(results, run_dir, name):
     """Brings the driver's files and the trace home into run_dir."""
     keep = ('driver.log', 'exitcode.txt', 'error.txt', 'done.txt',
-            'log.txt', 'stderr.txt', 'trace-stdout.txt',
-            'trace-stderr.txt')
+            'log.txt', 'stderr.txt')
     for entry in sorted(os.listdir(results)):
         source = os.path.join(results, entry)
         if entry in keep or (entry.endswith('-screen.png')):
@@ -1063,18 +1311,19 @@ def stream(cmd, log_file):
         raise
 
 
-def desktop_run(name, game, apitrace, actions, timeout, run_dir):
+def desktop_run(name, game, actions, timeout, run_dir):
     """One desktop launch: config.json, actions.json and the driver go
     into a staging folder next to the game copy (on the Windows side),
     and cmd.exe runs the driver the way play.py launches the Windows
     build. One launch, no retries: a failure is reported, not retried.
-    Returns (exitcode, error, trace_bytes)."""
+    The opengl32.dll wrapper must already sit in the game folder
+    (place_wrapper); the driver starts IWD2EE.exe with TRACE_FILE pointing
+    into the staging folder. Returns (exitcode, error, trace_bytes)."""
     results = os.path.join(winhome.WIN_HOME, 'iwd2r-ieex', 'runs',
                            os.path.basename(run_dir), name)
     os.makedirs(results)
     results_win = winsandbox.wslpath_w(results)
-    config = desktop_config(name, winsandbox.wslpath_w(game),
-                            winsandbox.wslpath_w(apitrace), results_win,
+    config = desktop_config(name, winsandbox.wslpath_w(game), results_win,
                             timeout)
     with open(os.path.join(results, 'config.json'), 'w') as f:
         json.dump(config, f, indent=1)
@@ -1140,6 +1389,18 @@ def run(args):
                          % DESKTOP_OK)
     now = datetime.datetime.now()
     run_dir = make_run_dir(now)
+    wrapper = find_wrapper(args.apitrace)
+    for label, path in (('the apitrace wrapper', wrapper),
+                        ('iwd2.exe', os.path.join(game, 'iwd2.exe'))):
+        machine = pe_machine(path)
+        if machine != 0x014c:
+            raise SystemExit(
+                'gltrace: %s must be 32-bit x86 (found %s); the wrapper and '
+                'the game must match bitness'
+                % (label, 'not a PE image' if machine is None
+                   else hex(machine)))
+    log('apitrace wrapper: %s (x86; the game loads OpenGL32.dll by bare '
+        'name, the application directory wins the DLL search)' % wrapper)
     ini = os.path.join(game, 'icewind2.ini')
     if not os.path.isfile(ini):
         raise SystemExit('gltrace: no icewind2.ini in %s (the run rewrites '
@@ -1154,14 +1415,40 @@ def run(args):
         f.write(overridden)
     log('icewind2.ini: aliases pointed at %s, volumes 0 (the original is '
         'backed up and restored)' % game)
+    manifest_before = snapshot_manifest(game)
+    place_wrapper(wrapper, game)
+    log('wrapper placed in %s for the run' % game)
     started = time.time()
     try:
         exitcode, error, trace_bytes = desktop_run(
-            name, game, apitrace, actions, timeout, run_dir)
+            name, game, actions, timeout, run_dir)
     finally:
+        if remove_wrapper(game):
+            log('wrapper removed from %s' % game)
+        strays = remove_stray_traces(game)
+        if strays:
+            log('stray traces deleted from the game folder: %s'
+                % ', '.join(strays))
         shutil.copy2(ini, os.path.join(run_dir, 'icewind2.ini.after'))
         shutil.copy2(ini_before, ini)
         log('restored icewind2.ini')
+        manifest_after = snapshot_manifest(game)
+        delta = manifest_delta(manifest_before, manifest_after)
+        for entry, obj in (('manifest-before.json', manifest_before),
+                           ('manifest-after.json', manifest_after),
+                           ('manifest-delta.json', delta)):
+            with open(os.path.join(run_dir, entry), 'w') as f:
+                json.dump(obj, f, indent=1, sort_keys=True)
+        counts = (len(delta['added']), len(delta['removed']),
+                  len(delta['changed']))
+        if any(counts):
+            log('game copy delta: +%d added, -%d removed, %d changed '
+                '(manifest-*.json in the run folder)' % counts)
+            for key in delta['added'] + delta['removed'] + delta['changed']:
+                log('  %s' % key)
+        else:
+            log('game copy delta: none (all %d files byte-identical)'
+                % len(manifest_after))
     seconds = time.time() - started
     if error:
         raise RuntimeError('driver: %s' % error)
@@ -1190,7 +1477,7 @@ def run(args):
     log_totals(summary)
     log('summary: %s' % md)
     if exitcode:
-        log('warning: apitrace exit code %s (see runs/%s/driver.log)'
+        log('warning: game exit code %s (see runs/%s/driver.log)'
             % (exitcode, os.path.basename(run_dir)))
     return 0
 
