@@ -196,6 +196,20 @@ Decompile scratch output lives in `runs/dll-decomp/` (git-ignored).
 - [`IEex_Helper_ScaleSoundRange`](IEex_Helper_ScaleSoundRange.md)
 - [`IEex_Helper_ScaleVoiceRange`](IEex_Helper_ScaleVoiceRange.md)
 
+## Pathfinding policies
+
+- [`IEex_Helper_PF_ArrivalPolicy`](IEex_Helper_PF_ArrivalPolicy.md)
+- [`IEex_Helper_PF_BumpCrowdPolicy`](IEex_Helper_PF_BumpCrowdPolicy.md)
+- [`IEex_Helper_PF_BumpGatePolicy`](IEex_Helper_PF_BumpGatePolicy.md)
+- [`IEex_Helper_PF_BumpObstaclePolicy`](IEex_Helper_PF_BumpObstaclePolicy.md)
+- [`IEex_Helper_PF_BumpSlidePolicy`](IEex_Helper_PF_BumpSlidePolicy.md)
+- [`IEex_Helper_PF_CanAnimatePolicy`](IEex_Helper_PF_CanAnimatePolicy.md)
+- [`IEex_Helper_PF_CollisionPolicy`](IEex_Helper_PF_CollisionPolicy.md)
+- [`IEex_Helper_PF_GlideTick`](IEex_Helper_PF_GlideTick.md)
+- [`IEex_Helper_PF_PursuitSetTarget`](IEex_Helper_PF_PursuitSetTarget.md)
+- [`IEex_Helper_PF_SlideJump`](IEex_Helper_PF_SlideJump.md)
+- [`IEex_Helper_PF_SnapshotAdjustTarget`](IEex_Helper_PF_SnapshotAdjustTarget.md)
+
 ## Staged Lua evidence (sha256)
 
 The staged Lua patches at `~/.local/share/iwd2r/wso/lua/` are used as evidence for who calls each helper (and, for the keys-screen group, for hook sites and Lua-callback contracts). The staged corpus itself has no pin yet; these hashes let it be pinned retroactively.
