@@ -5479,7 +5479,7 @@ STRREF CScreenStore::GetPanelButtonToolTip(INT nButtonIndex)
 }
 
 // 0x67E560
-BOOL CScreenStore::CheckSpellUsable(SHORT nPortrait, const CResRef& cResSpell)
+BOOL CScreenStore::CheckSpellUsable(SHORT nPortraitNum, const CResRef& cResSpell)
 {
     CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
 
@@ -5489,16 +5489,18 @@ BOOL CScreenStore::CheckSpellUsable(SHORT nPortrait, const CResRef& cResSpell)
 
     BOOL bUsable = FALSE;
 
-    // NOTE: Uninline.
-    LONG nCharacterId = pGame->GetCharacterId(nPortrait);
+    LONG nCharacterId = CGameObjectArray::INVALID_INDEX;
+    if (static_cast<SHORT>(nPortraitNum) < pGame->m_nCharacters) {
+        nCharacterId = pGame->m_characterPortraits[static_cast<SHORT>(nPortraitNum)];
+    }
 
-    CGameSprite* pSprite;
+    CGameObject* pObject;
 
     BYTE rc;
     do {
         rc = pGame->GetObjectArray()->GetShare(nCharacterId,
             CGameObjectArray::THREAD_ASYNCH,
-            reinterpret_cast<CGameObject**>(&pSprite),
+            &pObject,
             INFINITE);
     } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
 
@@ -5506,16 +5508,19 @@ BOOL CScreenStore::CheckSpellUsable(SHORT nPortrait, const CResRef& cResSpell)
         return FALSE;
     }
 
-    DWORD dwState = pSprite->m_derivedStats.m_generalState;
+    CGameSprite* pSprite = static_cast<CGameSprite*>(pObject);
 
-    if (cResSpell == "SPPR101" || cResSpell == "SPPR103") {
-        bUsable = (dwState & STATE_DEAD) == 0;
-    } else if (cResSpell == "SPPR303") {
-        // An effect flagged 0x1 among the equipped or timed effects.
-        if ((dwState & STATE_DEAD) == 0) {
+    // The temple services are hard-coded by resref: each one is offered only
+    // while the selected character is in the state it cures.
+    if (cResSpell == CResRef("SPPR101")           // Bless
+        || cResSpell == CResRef("SPPR103")) {     // Cure Light Wounds
+        bUsable = (pSprite->m_derivedStats.m_generalState & STATE_DEAD) == 0;
+    } else if (cResSpell == CResRef("SPPR303")) { // Dispel Magic
+        if ((pSprite->m_derivedStats.m_generalState & STATE_DEAD) == 0) {
             POSITION pos = pSprite->m_timedEffectList.GetHeadPosition();
             while (pos != NULL) {
-                if ((pSprite->m_timedEffectList.GetNext(pos)->m_flags & 0x1) != 0) {
+                CGameEffect* pEffect = pSprite->m_timedEffectList.GetNext(pos);
+                if ((pEffect->m_effectAmount2 & 0x1) != 0) {
                     bUsable = TRUE;
                     break;
                 }
@@ -5524,44 +5529,51 @@ BOOL CScreenStore::CheckSpellUsable(SHORT nPortrait, const CResRef& cResSpell)
             if (!bUsable) {
                 pos = pSprite->m_equipedEffectList.GetHeadPosition();
                 while (pos != NULL) {
-                    if ((pSprite->m_equipedEffectList.GetNext(pos)->m_flags & 0x1) != 0) {
+                    CGameEffect* pEffect = pSprite->m_equipedEffectList.GetNext(pos);
+                    if ((pEffect->m_effectAmount2 & 0x1) != 0) {
                         bUsable = TRUE;
                         break;
                     }
                 }
             }
         }
-    } else if (cResSpell == "SPPR307") {
-        // An equipped item flagged 0x10 in its file.
-        if ((dwState & STATE_DEAD) == 0) {
+    } else if (cResSpell == CResRef("SPPR307")) { // Remove Curse
+        if ((pSprite->m_derivedStats.m_generalState & STATE_DEAD) == 0) {
             for (INT nSlot = 0; nSlot < CGameSpriteEquipment::NUM_SLOT; nSlot++) {
-                CItem* pItem = pSprite->m_equipment.m_items[nSlot];
-                if (pItem != NULL && (pItem->GetFlagsFile() & 0x10) != 0) {
+                if (pSprite->m_equipment.m_items[nSlot] != NULL
+                    && (pSprite->m_equipment.m_items[nSlot]->GetFlagsFile() & 0x10) != 0) {
                     bUsable = TRUE;
                     break;
                 }
             }
         }
-    } else if (cResSpell == "SPPR308") {
-        bUsable = (dwState & STATE_DEAD) == 0 && (dwState & 0x8) != 0;
-    } else if (cResSpell == "SPPR214" || cResSpell == "SPPR401" || cResSpell == "SPWI407") {
-        bUsable = (dwState & STATE_DEAD) == 0;
-    } else if (cResSpell == "SPPR314") {
-        bUsable = (dwState & STATE_DEAD) == 0 && (dwState & 0x80000) != 0;
-    } else if (cResSpell == "SPPR404") {
-        bUsable = (dwState & STATE_DEAD) == 0 && (dwState & 0x4000) != 0;
-    } else if (cResSpell == "SPPR212") {
-        bUsable = (dwState & STATE_DEAD) == 0 && (dwState & 0x4000) != 0;
-    } else if (cResSpell == "SPPR504") {
-        // NOTE: Returns the raw dead bit (0x800), not TRUE (as the original).
-        bUsable = pSprite->m_liveTypeAI.m_nRace != 2
-            ? (dwState & STATE_DEAD)
-            : 0;
-    } else if (cResSpell == "SPPR712") {
-        // NOTE: Returns the raw dead bit (0x800), not TRUE (as the original).
-        bUsable = dwState & STATE_DEAD;
+    } else if (cResSpell == CResRef("SPPR308")) { // Remove Paralysis
+        bUsable = (pSprite->m_derivedStats.m_generalState & STATE_DEAD) == 0
+            && (pSprite->m_derivedStats.m_generalState & STATE_STUNNED) != 0;
+    } else if (cResSpell == CResRef("SPPR214")            // Cure Moderate Wounds
+        || cResSpell == CResRef("SPPR401")                // Cure Serious Wounds
+        || cResSpell == CResRef("SPWI407")) {             // Summon Monster IV
+        bUsable = (pSprite->m_derivedStats.m_generalState & STATE_DEAD) == 0;
+    } else if (cResSpell == CResRef("SPPR314")) { // Remove Disease
+        bUsable = (pSprite->m_derivedStats.m_generalState & STATE_DEAD) == 0
+            && (pSprite->m_derivedStats.m_generalState & STATE_DISEASED) != 0;
+    } else if (cResSpell == CResRef("SPPR404")) { // Neutralize Poison
+        bUsable = (pSprite->m_derivedStats.m_generalState & STATE_DEAD) == 0
+            && (pSprite->m_derivedStats.m_generalState & STATE_POISONED) != 0;
+    } else if (cResSpell == CResRef("SPPR212")) { // Delay Poison
+        bUsable = (pSprite->m_derivedStats.m_generalState & STATE_DEAD) == 0
+            && (pSprite->m_derivedStats.m_generalState & STATE_POISONED) != 0;
+    } else if (cResSpell == CResRef("SPPR504")) { // Raise Dead
+        bUsable = pSprite->m_derivedStats.m_generalState & STATE_DEAD;
+
+        // Elves cannot be raised, only resurrected.
+        if (pSprite->m_liveTypeAI.m_nRace == 2) {
+            bUsable = FALSE;
+        }
+    } else if (cResSpell == CResRef("SPPR712")) { // Resurrection
+        bUsable = pSprite->m_derivedStats.m_generalState & STATE_DEAD;
     } else {
-        bUsable = (dwState & STATE_DEAD) == 0;
+        bUsable = (pSprite->m_derivedStats.m_generalState & STATE_DEAD) == 0;
     }
 
     pGame->GetObjectArray()->ReleaseShare(nCharacterId,
@@ -5569,6 +5581,7 @@ BOOL CScreenStore::CheckSpellUsable(SHORT nPortrait, const CResRef& cResSpell)
         INFINITE);
 
     return bUsable;
+}
 }
 
 // 0x67E840
