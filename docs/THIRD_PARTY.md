@@ -78,3 +78,24 @@ The differential-tracing toolchain (docs/frida-tracing.md) is adopted from the s
 
 Dropped on purpose: the fork's in-target load driver (cursor calibration, movie skip, the click driver — the house pipeline drives scenarios), and his PROCESS-EXITED verdict (tools/frida/orig.py explains why). Our additions: `rva` hook sites for our rebuild-moving build, the sandbox staging in probe.py, the in-memory compare wrappers.
 
+## Structural parity gates
+
+The structural-parity gate itself — tools/parity/run.py (the changed-functions table, verdicts and exports plumbing), tools/parity/setup.sh, requirements.txt and tools/ghidra/ExportCallGraph.java — is ours. Its checks are adopted from the same fork, at commit e8dd16a750966af53f24daaf49dcb4fb13594c13, under the same MIT grant; each file's docstring names its deviations (the fork's Ghidra-bridge and VM dependencies are rehosted on this repo's exports and oracle exe).
+
+| Our files | Ported from | Copyright |
+|---|---|---|
+| `tools/parity/asm_verify.py` | `scripts/reagent_asm_verify.py` (the body/callee diffing) | Copyright the fork's author (WillScarlettOhara). MIT, as granted to Thierry on 2026-10-17 |
+| `tools/parity/address_markers.py` | `scripts/lint_address_markers.py` (the marker checks; the TSV export reader is ours) | as above |
+| `tools/parity/re_lint.py` | `scripts/re_lint.py` (rules and CLI; the per-function entry is ours) | as above |
+| `tools/parity/lint_extend_cells.py` | `scripts/lint_extend_cells.py` | as above |
+| `tools/parity/lint_infinite_loop.py` | `scripts/lint_infinite_loop.py` | as above |
+| `tools/parity/lint_pragma_pack_balance.py` | `scripts/lint_pragma_pack_balance.py` | as above |
+| `tools/parity/lint_stuck_loop_index.py` | `scripts/lint_stuck_loop_index.py` | as above |
+| `tools/parity/lint_twin_symmetry.py` | `scripts/lint_twin_symmetry.py` | as above |
+| `tools/parity/lint_uninit_member.py` | `scripts/lint_uninit_member.py` | as above |
+| `tools/parity/vtable_audit.py` | `scripts/vtable_audit.py` (the vtable location and slot-diff audit) | as above |
+| `tools/parity/ctor_vtable_check.py` | `scripts/ctor_vtable_check.py` | as above |
+| `tools/parity/struct_layout_audit.py` | `scripts/struct_layout_audit.py` (the `/* 0xNNN */` layout audit) | as above |
+| `tools/parity/parity_offsets.py` | `scripts/parity_offsets.py` (the thiscall member audit; his `scripts/sym.py`/`scripts/src_find.py` dependencies rehosted on direct capstone disassembly and marker scans) | as above |
+
+

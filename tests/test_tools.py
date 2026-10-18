@@ -6775,5 +6775,171 @@ class OrigAttachTest(unittest.TestCase):
         self.assertGreaterEqual(len(calls), 2)
 
 
+def load_parity_tool(name):
+    spec = importlib.util.spec_from_file_location(
+        'parity_' + name, os.path.join(ROOT, 'tools', 'parity', name + '.py'))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+THREE_FUNCTIONS = ('// test fixture\n'
+                   '#include "a.h"\n'
+                   '\n'
+                   '// 0x401000\n'
+                   'int A::f(int x)\n'
+                   '{\n'
+                   '    return x;\n'
+                   '}\n'
+                   '\n'
+                   '// 0x401020\n'
+                   'int A::g(int y)\n'
+                   '{\n'
+                   '    return y;\n'
+                   '}\n'
+                   '\n'
+                   '// 0x401040\n'
+                   'int A::h(int z)\n'
+                   '{\n'
+                   '    return z;\n'
+                   '}\n')
+
+
+class ParityTest(unittest.TestCase):
+    """tools/parity: the fork's structural parity gates, on our exports."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.repo = os.path.join(tmp.name, 'repo')
+        os.makedirs(self.repo)
+        home = tempfile.TemporaryDirectory()
+        self.addCleanup(home.cleanup)
+        self.home = home.name
+        # run.py resolves the exports (functions.tsv, callgraph.tsv) under
+        # IWD2R_HOME at call time, the way make_project.py does.
+        self.addCleanup(os.environ.pop, 'IWD2R_HOME', None)
+        os.environ['IWD2R_HOME'] = self.home
+        self.git('init', '-q')
+        self.git('config', 'user.name', 'Test')
+        self.git('config', 'user.email', 'test@example.com')
+        self.git('config', 'commit.gpgsign', 'false')
+
+    def git(self, *args):
+        return subprocess.run(['git', *args], cwd=self.repo, check=True,
+                              capture_output=True, text=True).stdout
+
+    def write(self, rel, text):
+        path = os.path.join(self.repo, rel)
+        os.makedirs(os.path.dirname(path) or self.repo, exist_ok=True)
+        with open(path, 'w') as f:
+            f.write(text)
+
+    def commit(self, message='change'):
+        self.git('add', '-A')
+        self.git('commit', '-q', '--allow-empty', '-m', message)
+
+    def exports(self, functions, callgraph):
+        """functions.tsv / callgraph.tsv under the fixture IWD2R_HOME."""
+        out = os.path.join(self.home, 'ghidra-exports')
+        os.makedirs(out, exist_ok=True)
+        for name, text in (('functions.tsv', functions),
+                           ('callgraph.tsv', callgraph)):
+            with open(os.path.join(out, name), 'w') as f:
+                f.write(text)
+        return out
+
+    def test_parity_callee_diff(self):
+        asm = load_parity_tool('asm_verify')
+        missing, extra = asm.callee_diff({1, 2, 3}, {2, 3, 4})
+        self.assertEqual(missing, {4})
+        self.assertEqual(extra, {1})
+
+    def test_parity_address_markers_flags_non_start(self):
+        markers = load_parity_tool('address_markers')
+        self.write('src/a.cpp',
+                   '// 0x401002\n'
+                   'int A::g(int x)\n'
+                   '{\n'
+                   '    return x;\n'
+                   '}\n')
+        exports = self.exports('401000\tA::f\t100\n', '401000\n')
+        code, lines = markers.check(
+            os.path.join(self.repo, 'src'),
+            os.path.join(exports, 'functions.tsv'),
+            os.path.join(exports, 'callgraph.tsv'), repo=self.repo)
+        self.assertEqual(code, 1, lines)
+        self.assertTrue(any('401002' in line for line in lines), lines)
+
+    def test_parity_run_skips_without_exe(self):
+        parity_run = load_parity_tool('run')
+        old = parity_run.oracle.VANILLA_EXE
+        setattr(parity_run.oracle, 'VANILLA_EXE',
+                os.path.join(self.home, 'no-such.exe'))
+        self.addCleanup(setattr, parity_run.oracle, 'VANILLA_EXE', old)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = parity_run.main('HEAD')
+        self.assertEqual(code, 0)
+        self.assertIn('skipped', out.getvalue())
+
+    def test_parity_waiver_downgrades_asm(self):
+        self.write('src/a.cpp',
+                   '// 0x401000\n'
+                   'int A::f(int x)\n'
+                   '{\n'
+                   '    return x;\n'
+                   '}\n')
+        self.commit('base')
+        base = self.git('rev-parse', 'HEAD').strip()
+        self.write('src/a.cpp',
+                   '// 0x401000\n'
+                   'int A::f(int x)\n'
+                   '{\n'
+                   '    return x * 2;\n'
+                   '}\n')
+        self.commit('body change')
+        # The binary calls Helper::Do (0x405000); the source calls nothing.
+        self.exports('401000\tA::f\t100\n405000\tHelper::Do\t50\n',
+                     '401000\t405000\n')
+
+        def evidence(waiver):
+            self.write('docs/evidence/401000.md',
+                       '---\n'
+                       'address: 0x401000\n'
+                       'name: A::f\n'
+                       'exemption: "fixture"\n'
+                       + (f'parity_waiver: "{waiver}"\n' if waiver else '')
+                       + '---\n\n## Notes\n')
+
+        parity_run = load_parity_tool('run')
+        evidence(None)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = parity_run.main(base, repo=self.repo)
+        self.assertEqual(code, 1, out.getvalue())
+        self.assertIn('405000', out.getvalue())
+
+        evidence('known thin wrapper')
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = parity_run.main(base, repo=self.repo)
+        self.assertEqual(code, 0, out.getvalue())
+        self.assertIn('warning', out.getvalue())
+
+    def test_parity_changed_only_uses_markers(self):
+        self.write('src/a.cpp', THREE_FUNCTIONS)
+        self.commit('base')
+        base = self.git('rev-parse', 'HEAD').strip()
+        changed = THREE_FUNCTIONS.replace('return x;', 'return x * 2;') \
+                                 .replace('return z;', 'return z * 2;')
+        self.write('src/a.cpp', changed)
+        self.commit('two bodies')
+        parity_run = load_parity_tool('run')
+        found = parity_run.touched(self.repo, base)
+        self.assertEqual({address for _, address, _ in found},
+                         {0x401000, 0x401040})
+
+
 if __name__ == '__main__':
     unittest.main()

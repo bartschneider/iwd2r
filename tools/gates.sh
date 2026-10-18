@@ -126,6 +126,24 @@ step "subsystem map" python3 -I tools/gen_map.py --check
 step "replay fields" python3 tools/gen_fields.py --check
 [ -x tools/shaders.py ] && step "shader blobs" python3 tools/shaders.py --check
 step "decompiler evidence (base $BASE)" python3 -I tools/check_evidence.py --base "$BASE"
+# Structural parity (tools/parity/run.py): the changed functions' call graph,
+# vtables, struct layout, member offsets and address markers against the
+# vanilla exe. The exe-based columns need pefile/capstone from the parity venv
+# (tools/parity/setup.sh); on bare python3 they SKIP and the lints still run.
+# Without the exe there is nothing to diff against.
+parity_py=python3
+parity_venv="${IWD2R_HOME:-$HOME/.local/share/iwd2r}/parity-venv/bin/python"
+[ -x "$parity_venv" ] && parity_py="$parity_venv"
+parity_step() {
+    local exe
+    exe=$(python3 -I -c "import sys; sys.path.insert(0, 'tools'); import oracle; print(oracle.VANILLA_EXE)")
+    if [ -f "$exe" ]; then
+        "$parity_py" tools/parity/run.py --base "$BASE"
+    else
+        echo "structural parity: skipped (no vanilla exe)"
+    fi
+}
+step "structural parity (base $BASE)" parity_step
 format_check() {
     local files
     files=$(git diff --name-only --diff-filter=d 4fa36bc -- '*.cpp' '*.h' | grep -v '^src/' || true)
