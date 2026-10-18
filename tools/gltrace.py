@@ -901,12 +901,13 @@ function Get-DescendantIds([uint32]$root) {
 # a 'CMyBox' group (id 1015), the default button 'SELECT' (id 1) and the
 # resolution ListBox (id 1004). Confirming with no list entry selected ends
 # the game - the 20261018-180428 run showed a clean exit with no window -
-# so wait until the game fills the list, pick an entry (1366x768 when it
-# is offered, else the first), set it with LB_SETCURSEL and only then
-# BM_CLICK the button (id 1 / 'SELECT' / 'OK', else the first button);
-# with no clickable button child, fall back to Return. When the dialog
-# never shows, the choice is persisted - log and move on, that is not a
-# failure.
+# so wait until the game fills the list, pick the scenario's resolution
+# (800x600: the scenario coordinates are written for the copy's
+# Resolution=800; 1366x768 would leave every click misaligned), set it
+# with LB_SETCURSEL and only then BM_CLICK the button (id 1 / 'SELECT' /
+# 'OK', else the first button); with no clickable button child, fall back
+# to Return. When the dialog never shows, the choice is persisted - log
+# and move on, that is not a failure.
 function Answer-ResolutionDialog {
     $end = (Get-Date).AddSeconds(20)
     while ((Get-Date) -lt $end) {
@@ -955,7 +956,7 @@ function Answer-ResolutionDialog {
                 if ($count -gt 0) {
                     $choice = 0
                     for ($i = 0; $i -lt $count; $i++) {
-                        if ([IwdInput]::ListText($list, $i, $getListTextLen, $getListText) -match '1366') { $choice = $i; break }
+                        if ([IwdInput]::ListText($list, $i, $getListTextLen, $getListText) -match '800x600') { $choice = $i; break }
                     }
                     [void][IwdInput]::Send($setCurSel, $list, [IntPtr]$choice, [IntPtr]::Zero)
                     $sel = [IwdInput]::Send($getListSel, $list, [IntPtr]::Zero, [IntPtr]::Zero)
