@@ -7551,7 +7551,18 @@ class WaveTest(unittest.TestCase):
         self.assertIn('WIP', brief)
         self.assertIn('parity_waiver', brief)
         self.assertIn('git push', brief)
-        self.assertIn('git show wso/main:', brief)
+        # The fork is read at the pinned sha, never by branch name.
+        self.assertIn(
+            'git show e8dd16a750966af53f24daaf49dcb4fb13594c13:', brief)
+        # A fork_base recorded in the state overrides the default pin.
+        with open(self.state) as f:
+            state = json.load(f)
+        state['fork_base'] = 'a' * 40
+        with open(self.state, 'w') as f:
+            json.dump(state, f)
+        rc, brief = self.wave.render_brief(template, self.state, 'b001')
+        self.assertEqual(rc, 0, brief)
+        self.assertIn('git show ' + 'a' * 40 + ':', brief)
         # Unknown batch id.
         self.assertEqual(
             self.wave.render_brief(template, self.state, 'b999')[0], 2)
