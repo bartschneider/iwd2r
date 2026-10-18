@@ -23,9 +23,13 @@ where the columns are:
     lints    re_lint + the six lint_* passes find nothing in the span
 
 Verdicts: GREEN / YELLOW / RED, plus SKIP (check could not run -- no pefile,
-no compiler dump) and WARNING (a RED a human waived with `parity_waiver` in
-the evidence file; asm only, the fork's "a human confirms RED"). RED and
-ERROR exit 1; everything else never fails the run.
+no compiler dump) and WARNING. A WARNING is a RED that does not fail the
+change under test: either a human waived it (`parity_waiver` in the evidence
+file; asm only, the fork's "a human confirms RED"), or this gate re-ran the
+red against --base and it reproduced there verbatim -- pre-existing, so the
+batch did not cause it (this gate certifies that a change did not REGRESS
+parity, not that the whole port is complete). RED and ERROR exit 1;
+everything else never fails the run.
 
 Skips (exit 0, never a failure): no vanilla exe at oracle.VANILLA_EXE, a
 base that cannot be diffed, or missing exports (run
@@ -39,7 +43,11 @@ from __future__ import annotations
 import argparse
 import importlib
 import os
+import re
+import shutil
+import subprocess
 import sys
+import tempfile
 from collections import Counter
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -63,6 +71,11 @@ COLUMNS = ('asm', 'vtable', 'layout', 'offsets', 'markers', 'lints')
 LINT_NAMES = ('re_lint', 'lint_extend_cells', 'lint_infinite_loop',
               'lint_pragma_pack_balance', 'lint_stuck_loop_index',
               'lint_twin_symmetry', 'lint_uninit_member')
+
+# The columns a RED is re-run against --base for (the _delegated checks plus
+# markers/lints). asm is excluded: its RED keeps the human `parity_waiver`
+# path in asm_check.
+DELEGATED_COLUMNS = frozenset(COLUMNS[1:])
 
 # --exports override for the CLI (load_exports's dirpath argument).
 EXPORTS_DIR = None
@@ -133,6 +146,15 @@ def _module(name):
         return importlib.import_module(name)
     except ImportError:
         return None
+
+
+def run_check(check, address, name, ctx, label='check'):
+    """check(...), with a raised check folded to ERROR: a broken check must
+    not kill the run, and must never look like a clean re-run."""
+    try:
+        return check(address, name, ctx)
+    except Exception as exc:
+        return ERROR, [f'{label} raised: {exc!r}']
 
 
 def _delegated(module_name, column):
@@ -255,13 +277,13 @@ def all_functions(repo):
     return work
 
 
-def run_row(item, repo, exports, exe, lints, lint_cache):
+def make_ctx(item, repo, exports, exe, lints, lint_cache):
+    """The check ctx for one row: the row's function span, the exports triple
+    and the run-wide caches. The exports triple and the exe are
+    tree-independent and reused as-is; repo/lines/span point at whichever
+    tree is under audit (HEAD or the --base extract)."""
     rel, address, name, lines, first, last = item
-    if first is None:
-        row = {col: (SKIP, ['marker not in the working tree'])
-               for col in COLUMNS}
-        return address, name, row
-    ctx = {
+    return {
         'repo': repo, 'rel': rel, 'exports': exports, 'exe': exe,
         'starts': sorted(exports[0]),
         'targets': {c for cs in exports[2].values() for c in cs},
@@ -269,12 +291,19 @@ def run_row(item, repo, exports, exe, lints, lint_cache):
         'span_text': '\n'.join(lines[first:last + 1]),
         'first': first, 'last': last,
     }
+
+
+def run_row(item, repo, exports, exe, lints, lint_cache):
+    rel, address, name, lines, first, last = item
+    if first is None:
+        row = {col: (SKIP, ['marker not in the working tree'])
+               for col in COLUMNS}
+        return address, name, row
+    ctx = make_ctx(item, repo, exports, exe, lints, lint_cache)
     row = {}
     for column, check in CHECKS:
-        try:
-            row[column] = check(address, name, ctx)
-        except Exception as exc:
-            row[column] = (ERROR, [f'{column} check raised: {exc!r}'])
+        row[column] = run_check(check, address, name, ctx,
+                                label=f'{column} check')
     return address, name, row
 
 
@@ -286,6 +315,125 @@ CHECKS = (
     ('markers', markers_check),
     ('lints', lints_check),
 )
+
+
+# ---- pre-existing reds ------------------------------------------------------
+# The gate certifies that a change did not REGRESS parity, not that the whole
+# port is complete. A RED in a delegated column is re-run against a pristine
+# extract of the --base tree -- this copy's check code, the base tree's
+# sources; the exports triple and the exe are tree-independent and reused --
+# and a red whose notes match HEAD's once line references are masked is
+# downgraded to WARNING (mechanically: no special-casing of known reds).
+# Anything else -- a red that does not reproduce at base, a check that raises
+# there, a function the change added -- stays RED.
+
+def mask_line_refs(text):
+    """Mask `L<digits>` line references -- and nothing else.
+
+    The same finding sits at different lines in two trees (`re_lint: L5874:`
+    vs `re_lint: L5901:`); masking both sides to `L#` makes the notes
+    comparable. Hex offsets and addresses (`0x56DF`, `0x6fc260`) hold no `L`,
+    so they survive untouched.
+    """
+    return re.sub(r'L\d+', 'L#', text)
+
+
+def same_after_mask(head_notes, base_notes):
+    """Do two note lists agree once line references are masked?"""
+    return ([mask_line_refs(n) for n in head_notes]
+            == [mask_line_refs(n) for n in base_notes])
+
+
+def base_tree(repo, base_ref):
+    """A pristine extract of base_ref under a fresh temp dir, else None.
+
+    `git archive <base_ref> | tar -x`: read-only against the repo -- never
+    `git worktree add` (it registers state in the shared .git) and never a
+    path inside any repo. The caller removes the returned directory.
+    """
+    tmpdir = tempfile.mkdtemp(prefix='parity-base-')
+    archive = subprocess.run(
+        ['git', '-C', os.fspath(repo), 'archive', base_ref],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if archive.returncode == 0 and archive.stdout:
+        tar = subprocess.run(['tar', '-x', '-C', tmpdir],
+                             input=archive.stdout, stderr=subprocess.DEVNULL)
+        if tar.returncode == 0:
+            return tmpdir
+    shutil.rmtree(tmpdir, ignore_errors=True)
+    return None
+
+
+def base_item(base_repo, rel, address, name):
+    """The base tree's work item for this labelled function, else None.
+
+    None (the file or the labelled function is not at base) keeps the HEAD
+    verdict: a function the change added cannot have a pre-existing red.
+    """
+    try:
+        lines = read_lines(base_repo, rel)
+    except OSError:
+        return None
+    for first, last, span_address, span_name in check_evidence.spans(lines):
+        if span_address == address:
+            return (rel, span_address, span_name or name, lines, first, last)
+    return None
+
+
+def downgrade_cell(check, address, name, cell, base_ctx, base_ref):
+    """The cell again, or WARNING when the identical RED reproduces at base.
+
+    Only a RED can downgrade: ERROR stays ERROR (a broken check is not
+    evidence of anything), and asm never reaches this -- its RED keeps the
+    human `parity_waiver` path. The pre-existing line is prepended so the
+    detail block shows why the cell is only a warning.
+    """
+    verdict, notes = cell
+    if verdict != RED or base_ctx is None:
+        return cell
+    base_verdict, base_notes = run_check(check, address, name, base_ctx,
+                                         label='base re-run')
+    if base_verdict != RED or not same_after_mask(notes, base_notes):
+        return cell
+    return WARNING, [f'pre-existing at base {base_ref}: red reproduces there',
+                     *notes]
+
+
+def downgrade_preexisting(rows, work, repo, base_ref, exports, exe, lints):
+    """Downgrade every delegated RED that already reproduces at --base.
+
+    Extracts the base tree once, only when a delegated RED exists, and
+    re-runs just those cells against it. The base lint cache is fresh: the
+    same rel maps to different lines per tree.
+    """
+    targets = [i for i, (_, _, row) in enumerate(rows)
+               for column, (verdict, _) in row.items()
+               if verdict == RED and column in DELEGATED_COLUMNS]
+    if not targets:
+        return
+    base_repo = base_tree(repo, base_ref)
+    if base_repo is None:
+        print(f'parity: extracting the {base_ref} tree failed; '
+              'RED cells stay RED', file=sys.stderr)
+        return
+    try:
+        base_cache = {}
+        for i in targets:
+            rel, address, name = work[i][:3]
+            item = base_item(base_repo, rel, address, name)
+            for column, check in CHECKS:
+                if column not in DELEGATED_COLUMNS or \
+                        rows[i][2][column][0] != RED:
+                    continue
+                base_ctx = None
+                if item is not None:
+                    base_ctx = make_ctx(item, base_repo, exports, exe, lints,
+                                        base_cache)
+                rows[i][2][column] = downgrade_cell(check, address, name,
+                                                    rows[i][2][column],
+                                                    base_ctx, base_ref)
+    finally:
+        shutil.rmtree(base_repo, ignore_errors=True)
 
 
 # ---- the table -------------------------------------------------------------
@@ -341,6 +489,7 @@ def main(base_ref, changed_only=True, repo=None):
     lint_cache = {}
     rows = [run_row(item, repo, exports, exe, lints, lint_cache)
             for item in work]
+    downgrade_preexisting(rows, work, repo, base_ref, exports, exe, lints)
     print_table(base_ref, exe, rows)
 
     counts = Counter(v for _, _, row in rows for v, _ in row.values())

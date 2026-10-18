@@ -288,7 +288,7 @@ BOOL CResCache::CopyFile(UINT nIndex, const CString& sName, const CString& sSrcF
 
                     nCompressedBufferSize = max(nCompressedChunkSize, 1024);
                     pCompressedBuffer = new BYTE[nCompressedBufferSize];
-                    if (pBuffer == NULL) {
+                    if (pCompressedBuffer == NULL) {
                         delete pBuffer;
                         return FALSE;
                     }

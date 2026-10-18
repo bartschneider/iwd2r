@@ -94,6 +94,19 @@ class AuditError(RuntimeError):
 _HDR_MEMBER = re.compile(
     r"/\*\s*(?:0x)?([0-9A-Fa-f]+)\s*\*/\s*(.*?)\b([A-Za-z_]\w*)\s*(?:\[[^\]]*\])?\s*;")
 
+
+def _is_phantom_member(match):
+    """A _HDR_MEMBER match that captured a method declarator, not a member.
+
+    `/* 0xNNN */ virtual void Foo(int x) override;` matches with the "member"
+    name `override` (the last identifier before the `;`), so every offset
+    comment on a virtual declaration reads as a phantom data member and its
+    neighbours read as declaration-order inversions. Reject the match when
+    the captured "type" carries a parameter list or the captured name is an
+    override/final qualifier; the regex itself stays as adopted.
+    """
+    return "(" in match.group(2) or match.group(3) in ("override", "final")
+
 # Classify a spacing break by the PRECEDING member's type. The gap INTO a member
 # grows either because the preceding member's compiled size differs (benign when
 # that type is compiler-divergent) or because alignment padding was inserted
@@ -152,7 +165,7 @@ def parse_header(header: Path, cls: str):
         at_class_scope = seen and depth == 1
         if at_class_scope:
             m = _HDR_MEMBER.search(ln)
-            if m:
+            if m and not _is_phantom_member(m):
                 members.append((m.group(3), int(m.group(1), 16), m.group(2).strip()))
         depth += opens - closes
         if opens:
