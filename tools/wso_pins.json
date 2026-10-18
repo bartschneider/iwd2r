@@ -1,0 +1,143 @@
+{
+  "fork_commit": "138495fde69b6092b7318fad462d571864e9d9b8",
+  "upstream_commit": "60de54611b249d3bcca3f6522ef9db5e7ec27339",
+  "files": [
+    {
+      "url": "https://raw.githubusercontent.com/WillScarlettOhara/IWD2EE/138495fde69b6092b7318fad462d571864e9d9b8/iwd2ee/ieex_main_folder/IEexHelper.dll",
+      "dest": "dll/IEexHelper.fork.dll",
+      "sha256": "414f106584a74eebf25c8118af9125b65a9eedca44c2ebbf48e67e38bd6c820f"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/RedChimera/IWD2EE/60de54611b249d3bcca3f6522ef9db5e7ec27339/iwd2ee/ieex_main_folder/IEexHelper.dll",
+      "dest": "dll/IEexHelper.upstream.dll",
+      "sha256": "9a3f25020be8c4bd8b7ba13cd9a994af4e6f1ae1bdc51a0e543e6185cc4e7d97"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/WillScarlettOhara/IWD2EE/138495fde69b6092b7318fad462d571864e9d9b8/iwd2ee/ieex_main_folder/IEex.dll",
+      "dest": "dll/IEex.fork.dll",
+      "sha256": "bcbb3e2f147c8e75f55dd8d333bb7cd05a3b63470065306d450795f5a5165d51"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/WillScarlettOhara/IWD2EE/138495fde69b6092b7318fad462d571864e9d9b8/iwd2ee/ieex_override/IEex_CameraZoom_Patch.lua",
+      "dest": "lua/IEex_CameraZoom_Patch.lua",
+      "sha256": "75c0a9c4f061a922fdab0cff327084d24e9f9f861514386ad8afd2e55c46b062"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/WillScarlettOhara/IWD2EE/138495fde69b6092b7318fad462d571864e9d9b8/iwd2ee/ieex_override/IEex_Core_State.lua",
+      "dest": "lua/IEex_Core_State.lua",
+      "sha256": "f3ebe4bc2e13648f78d79e4112ebd336fe0b430a40de6c1d4e3f19cee8266db0"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/WillScarlettOhara/IWD2EE/138495fde69b6092b7318fad462d571864e9d9b8/iwd2ee/ieex_override/IEex_Creature_State.lua",
+      "dest": "lua/IEex_Creature_State.lua",
+      "sha256": "13d185e466b0c4d7dae973173d75d59c00db83198a4fa43b513170a8021dabcc"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/WillScarlettOhara/IWD2EE/138495fde69b6092b7318fad462d571864e9d9b8/iwd2ee/ieex_override/IEex_Gui_Patch.lua",
+      "dest": "lua/IEex_Gui_Patch.lua",
+      "sha256": "7999b9687807c8fbc9671888cd80751dba9271463342d21604fe409964fa3aa6"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/WillScarlettOhara/IWD2EE/138495fde69b6092b7318fad462d571864e9d9b8/iwd2ee/ieex_override/IEex_Gui_State.lua",
+      "dest": "lua/IEex_Gui_State.lua",
+      "sha256": "45e98ba2127a036bfccdb5fbc3fdd91e59d8e2db1da7b6139e8c40b56161912a"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/WillScarlettOhara/IWD2EE/138495fde69b6092b7318fad462d571864e9d9b8/iwd2ee/ieex_override/IEex_HDSprites_Patch.lua",
+      "dest": "lua/IEex_HDSprites_Patch.lua",
+      "sha256": "c04048a8fd26028701a8d2cd12403b61ec01bf54f737af425bf59108bd6ae74e"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/WillScarlettOhara/IWD2EE/138495fde69b6092b7318fad462d571864e9d9b8/iwd2ee/ieex_override/IEex_HDTiles_Patch.lua",
+      "dest": "lua/IEex_HDTiles_Patch.lua",
+      "sha256": "c2911978926e42c291d2d1b3f3305f730c5e686d5c90a666d2d98c1251684dcc"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/WillScarlettOhara/IWD2EE/138495fde69b6092b7318fad462d571864e9d9b8/iwd2ee/ieex_override/IEex_IWD2_Patch.lua",
+      "dest": "lua/IEex_IWD2_Patch.lua",
+      "sha256": "b2f7c156c3df208ed6352a771190ac60a1359029e2f4880a020abfea00febf00"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/WillScarlettOhara/IWD2EE/138495fde69b6092b7318fad462d571864e9d9b8/iwd2ee/ieex_override/IEex_IWD2_State.lua",
+      "dest": "lua/IEex_IWD2_State.lua",
+      "sha256": "57f15170ab95e03d317eb52652d7e8290154d74a70c43645fc10fb1e18fb93de"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/WillScarlettOhara/IWD2EE/138495fde69b6092b7318fad462d571864e9d9b8/iwd2ee/ieex_override/IEex_Key_State.lua",
+      "dest": "lua/IEex_Key_State.lua",
+      "sha256": "a5033f1090ae1f8ef3ef66b94979b5b118ddb6e107ee34456b744efe48095f56"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/WillScarlettOhara/IWD2EE/138495fde69b6092b7318fad462d571864e9d9b8/iwd2ee/ieex_override/IEex_LoadTimes_Patch.lua",
+      "dest": "lua/IEex_LoadTimes_Patch.lua",
+      "sha256": "836a373541f030a5faa21586f4a8e8185309a3267ba6d6c0196e7ce2919748a1"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/WillScarlettOhara/IWD2EE/138495fde69b6092b7318fad462d571864e9d9b8/iwd2ee/ieex_override/IEex_Markers_Patch.lua",
+      "dest": "lua/IEex_Markers_Patch.lua",
+      "sha256": "bfef597b599e573d711a8d153a9d6810d94f82097f46a1abb3c3ed058e470370"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/WillScarlettOhara/IWD2EE/138495fde69b6092b7318fad462d571864e9d9b8/iwd2ee/ieex_override/IEex_MiscFixes_Patch.lua",
+      "dest": "lua/IEex_MiscFixes_Patch.lua",
+      "sha256": "289eeca2cf48d8ab5dc0367d7c93e87e555b517ec792162735fca92ad1778104"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/WillScarlettOhara/IWD2EE/138495fde69b6092b7318fad462d571864e9d9b8/iwd2ee/ieex_override/IEex_Pathfinding_Patch.lua",
+      "dest": "lua/IEex_Pathfinding_Patch.lua",
+      "sha256": "e261da64d4632b4b2e20f633757989165b734ebbce4324a13a62e52a3749a7dc"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/WillScarlettOhara/IWD2EE/138495fde69b6092b7318fad462d571864e9d9b8/iwd2ee/ieex_override/IEex_Render_Patch.lua",
+      "dest": "lua/IEex_Render_Patch.lua",
+      "sha256": "7821b7075bd75f48f75f062584138489b83faf5a1e4dc442c0de627d93d5bc41"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/WillScarlettOhara/IWD2EE/138495fde69b6092b7318fad462d571864e9d9b8/iwd2ee/ieex_override/IEex_Sound_Patch.lua",
+      "dest": "lua/IEex_Sound_Patch.lua",
+      "sha256": "2ee8eb6ec937cc8ff335e662c9d49345811ff8cbf039363b86b68e42b3152c70"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/WillScarlettOhara/IWD2EE/138495fde69b6092b7318fad462d571864e9d9b8/iwd2ee/ieex_override/IEex_StartupFixes_State.lua",
+      "dest": "lua/IEex_StartupFixes_State.lua",
+      "sha256": "3edbab717f232bb6eb2ed008d5eaaa4adf12fab9cb03d38b6c9482028d1e2805"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/WillScarlettOhara/IWD2EE/138495fde69b6092b7318fad462d571864e9d9b8/iwd2ee/ieex_override/IEex_SupersampleFont_Patch.lua",
+      "dest": "lua/IEex_SupersampleFont_Patch.lua",
+      "sha256": "d60e3d73a59722741e4b225ca48c286707a779225cc290e91640c704a6f0abc4"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/WillScarlettOhara/IWD2EE/138495fde69b6092b7318fad462d571864e9d9b8/iwd2ee/ieex_override/IEex_UIScale_Patch.lua",
+      "dest": "lua/IEex_UIScale_Patch.lua",
+      "sha256": "b3113f1dc61b59344a3a77f1a84db2c5c1bc370535f96c67db17c003f4da922a"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/WillScarlettOhara/IWD2EE/138495fde69b6092b7318fad462d571864e9d9b8/iwd2ee/ieex_override/IEex_UncapFPS.lua",
+      "dest": "lua/IEex_UncapFPS.lua",
+      "sha256": "6425b1363e0eee2d782af2485c29a995c85136b993437af277e1f8590159074e"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/RedChimera/IWD2EE/60de54611b249d3bcca3f6522ef9db5e7ec27339/iwd2ee/ieex_override/IEex_Gui_State.lua",
+      "dest": "lua/IEex_Gui_State.upstream.lua",
+      "sha256": "0e84bad3c6187b3e9b5e1461595b2e75b121962f9729aab37015033ecbfdfe96"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/RedChimera/IWD2EE/60de54611b249d3bcca3f6522ef9db5e7ec27339/iwd2ee/ieex_override/IEex_Render_Patch.lua",
+      "dest": "lua/IEex_Render_Patch.upstream.lua",
+      "sha256": "b888f22e02c258cc5261f6a637f6c9bf9e5ee63ae62ba5ebc4e59768a7ad7ccc"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/WillScarlettOhara/iwd2-re/e8dd16a750966af53f24daaf49dcb4fb13594c13/data/pdb/bg2_pdb_extracted.zip",
+      "dest": "bg2/bg2_pdb_extracted.zip",
+      "sha256": "3dd54088a3c3a7465a321b45167e8650dc3ce0b6e6716c14773d611cae302b64",
+      "unzip": true
+    },
+    {
+      "url": "https://raw.githubusercontent.com/WillScarlettOhara/iwd2-re/e8dd16a750966af53f24daaf49dcb4fb13594c13/data/ghidra/BG2EE_rep.zip",
+      "dest": "bg2/BG2EE_rep.zip",
+      "sha256": "26f63ac9426f9704870fdb06ae0d8096bc8bdf5f9cfea391df90ab1ad0345f2b",
+      "unzip": true
+    }
+  ]
+}

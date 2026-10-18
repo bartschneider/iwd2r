@@ -50,3 +50,52 @@ Changes from the originals:
 
 The fonts are embedded unmodified under their original names (the OFL allows bundling them with software; the licence files travel with them in the source tree). SHA-256: CrimsonPro-Bold.ttf d8fc7d47b2b8681e7513e365764808b986999e1a78928cc58d04f237d8b8f798, Marcellus-Regular.ttf 1cf0cd10b17d35e852729962cc1ffaffed94514895972458345e2df34abb2f81, MarcellusSC-Regular.ttf 03044ab65228b0554c9a5c1e63df29d4e58a71857e212801aaf768dfd106bdf0, UncialAntiqua-Regular.ttf 33a5128b59d1c95d4f3788164f4ab3a1196f0a982263cb2cd278c47418366766.
 
+## Recovered engine code from the WSO fork
+
+Engine functions recovered by the parallel effort at [WillScarlettOhara/iwd2-re](https://github.com/WillScarlettOhara/iwd2-re) (the WSO fork) are imported behind the evidence gate, per function or as whole files where we lack the file; [docs/wso/README.md](wso/README.md) describes the project and the import rules. Each import commit marks the functions it brings with the trailer:
+
+```
+Imported-From: WillScarlettOhara/iwd2-re@<40-char sha> (MIT per author, 2026-10-17)
+```
+
+| Our files | Ported from | Copyright |
+|---|---|---|
+| Functions carrying the `Imported-From` trailer | [WillScarlettOhara/iwd2-re](https://github.com/WillScarlettOhara/iwd2-re), recovered engine functions | Copyright the fork's author (WillScarlettOhara). MIT, as granted to Thierry on 2026-10-17; the link to his LICENSE goes here when it is published. |
+
+The additions are MIT, under the standard MIT text quoted at the top of this file. Nothing from the fork's IWD2EE branch — game-data overrides, compiled binaries — is vendored; the renderer artifacts are fetched by pinned hash outside the repository (docs/wso/README.md).
+
+## Differential Frida tracing
+
+The differential-tracing toolchain (docs/frida-tracing.md) is adopted from the same fork, at commit e8dd16a750966af53f24daaf49dcb4fb13594c13, under the same MIT grant.
+
+| Our files | Ported from | Copyright |
+|---|---|---|
+| `tools/frida/hooks.py` | `scripts/frida_hooks.py` (the readers, argument expressions, prelude and render functions) | Copyright the fork's author (WillScarlettOhara). MIT, as granted to Thierry on 2026-10-17 |
+| `tools/frida/orig.py` | `scripts/frida_orig.py` (Trace/verdict shape, hook wiring) with the exception guard from his `scripts/frida_crash_guard.py` | as above |
+| `tools/frida/trace_diff.py` | `scripts/frida_trace_diff.py` (CLI and comparison machinery) | as above |
+| `tools/frida/probe.py` | `scripts/frida_probe.py` (the two-runtime shape), rewritten for our sandbox pipeline | as above |
+| `docs/frida-tracing.md` | his `docs/frida-trace-comparison.md` and `docs/frida-differential-tracing.md` (the method and the gotchas), rewritten for our paths | as above |
+
+Dropped on purpose: the fork's in-target load driver (cursor calibration, movie skip, the click driver — the house pipeline drives scenarios), and his PROCESS-EXITED verdict (tools/frida/orig.py explains why). Our additions: `rva` hook sites for our rebuild-moving build, the sandbox staging in probe.py, the in-memory compare wrappers.
+
+## Structural parity gates
+
+The structural-parity gate itself — tools/parity/run.py (the changed-functions table, verdicts and exports plumbing), tools/parity/setup.sh, requirements.txt and tools/ghidra/ExportCallGraph.java — is ours. Its checks are adopted from the same fork, at commit e8dd16a750966af53f24daaf49dcb4fb13594c13, under the same MIT grant; each file's docstring names its deviations (the fork's Ghidra-bridge and VM dependencies are rehosted on this repo's exports and oracle exe).
+
+| Our files | Ported from | Copyright |
+|---|---|---|
+| `tools/parity/asm_verify.py` | `scripts/reagent_asm_verify.py` (the body/callee diffing) | Copyright the fork's author (WillScarlettOhara). MIT, as granted to Thierry on 2026-10-17 |
+| `tools/parity/address_markers.py` | `scripts/lint_address_markers.py` (the marker checks; the TSV export reader is ours) | as above |
+| `tools/parity/re_lint.py` | `scripts/re_lint.py` (rules and CLI; the per-function entry is ours) | as above |
+| `tools/parity/lint_extend_cells.py` | `scripts/lint_extend_cells.py` | as above |
+| `tools/parity/lint_infinite_loop.py` | `scripts/lint_infinite_loop.py` | as above |
+| `tools/parity/lint_pragma_pack_balance.py` | `scripts/lint_pragma_pack_balance.py` | as above |
+| `tools/parity/lint_stuck_loop_index.py` | `scripts/lint_stuck_loop_index.py` | as above |
+| `tools/parity/lint_twin_symmetry.py` | `scripts/lint_twin_symmetry.py` | as above |
+| `tools/parity/lint_uninit_member.py` | `scripts/lint_uninit_member.py` | as above |
+| `tools/parity/vtable_audit.py` | `scripts/vtable_audit.py` (the vtable location and slot-diff audit) | as above |
+| `tools/parity/ctor_vtable_check.py` | `scripts/ctor_vtable_check.py` | as above |
+| `tools/parity/struct_layout_audit.py` | `scripts/struct_layout_audit.py` (the `/* 0xNNN */` layout audit) | as above |
+| `tools/parity/parity_offsets.py` | `scripts/parity_offsets.py` (the thiscall member audit; his `scripts/sym.py`/`scripts/src_find.py` dependencies rehosted on direct capstone disassembly and marker scans) | as above |
+
+

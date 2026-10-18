@@ -1,6 +1,8 @@
 """Tests for tools/gen_map.py, tools/check_evidence.py, tools/gen_fields.py,
-tools/minischema.py, tools/shaders.py and the pure parts of tools/play.py, tools/realinput.py,
-tools/winsandbox.py, tools/oracle.py and tools/ghidra/labels.py.
+tools/minischema.py, tools/shaders.py, tools/xrec.py, tools/wso_fetch.py,
+tools/wave.py and the pure parts of tools/play.py, tools/realinput.py,
+tools/winsandbox.py, tools/oracle.py, tools/ghidra/labels.py and the project
+bookkeeping of tools/ghidra/make_dll_project.py.
 
 Run from the repository root: python3 -I tests/test_tools.py
 
@@ -12,6 +14,7 @@ directory afterwards.
 import contextlib
 import datetime
 import glob
+import hashlib
 import importlib.util
 import io
 import json
@@ -25,6 +28,7 @@ import tempfile
 import time
 import types
 import unittest
+import zipfile
 import xml.etree.ElementTree as ET
 import zlib
 
@@ -109,6 +113,13 @@ realinput = load_tool('realinput')
 dataview = load_tool('dataview')
 winsandbox = load_tool('winsandbox')
 winhome = load_tool('winhome')
+xrec = load_tool('xrec')
+wso_fetch = load_tool('wso_fetch')
+fn_digest = load_tool('fn_digest')
+src_find = load_tool('src_find')
+assemble_context = load_tool('assemble_context')
+token_audit = load_tool('token_audit')
+bg2_find = load_tool('bg2_find')
 
 
 def load_ghidra_tool(name):
@@ -1940,15 +1951,15 @@ class CheckEvidenceTest(unittest.TestCase):
                               'kind: oracle')
         r = self.check()
         self.assertEqual(r.returncode, 0, r.stdout)
-        self.assertIn('rules math: oracle 1, replay 0, read-only 0 '
+        self.assertIn('rules math: oracle 1, replay 0, read-only 0, trace 0 '
                       '(1 of 1 touched function(s)', r.stdout)
 
     def test_rules_math_counted_in_evidence_kinds(self):
         self.touch_rules_math('exemption: "pure data"\nkind: read-only')
         r = self.check()
         self.assertEqual(r.returncode, 1)
-        self.assertIn('evidence kinds: oracle 0, replay 0, read-only 1 '
-                      '(1 of 1 touched function(s))', r.stdout)
+        self.assertIn('evidence kinds: oracle 0, replay 0, read-only 1, '
+                      'trace 0 (1 of 1 touched function(s))', r.stdout)
 
     def test_rules_math_note_on_missing_evidence(self):
         # A pure deletion inside the body still touches the function, and
@@ -1973,6 +1984,60 @@ class CheckEvidenceTest(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout)
         self.assertIn('warning:', r.stdout)
         self.assertNotIn('rules math:', r.stdout)
+
+    def trace_sources(self):
+        """The two trace_source citation forms ruling 6 accepts: the fork's
+        recovery note and a frida capture of our own binary."""
+        return ['WillScarlettOhara/iwd2-re@e8dd16a7'
+                ' docs/wso/recovery/CScreenMap.md',
+                'frida sendmsg_probe orig:%s ours:%s compare=0'
+                % ('a' * 64, 'b' * 64)]
+
+    def test_trace_kind_accepted_with_source(self):
+        self.write('src/a.cpp', TWO_FUNCTIONS.replace('return x;',
+                                                      'return x * 2;'))
+        for source in self.trace_sources():
+            with self.subTest(source=source):
+                self.evidence('401000', 'oracle_case: rand/roll\n'
+                                        'kind: trace\n'
+                                        f'trace_source: "{source}"')
+                self.commit()
+                r = self.check()
+                self.assertEqual(r.returncode, 0, r.stdout)
+                self.assertIn('trace 1 (1 of 1 touched function(s))',
+                              r.stdout)
+
+    def test_trace_kind_without_source_fails(self):
+        self.write('src/a.cpp', TWO_FUNCTIONS.replace('return x;',
+                                                      'return x * 2;'))
+        self.evidence('401000', 'oracle_case: rand/roll\nkind: trace')
+        self.commit()
+        r = self.check()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn('docs/evidence/401000.md', r.stdout)
+        self.assertIn('trace_source', r.stdout)
+
+    def test_trace_source_of_unknown_form_fails(self):
+        self.write('src/a.cpp', TWO_FUNCTIONS.replace('return x;',
+                                                      'return x * 2;'))
+        self.evidence('401000', 'oracle_case: rand/roll\nkind: trace\n'
+                                'trace_source: "checked by eye"')
+        self.commit()
+        r = self.check()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn('docs/evidence/401000.md', r.stdout)
+        self.assertIn('trace_source', r.stdout)
+
+    def test_rules_math_rejects_trace(self):
+        address = self.touch_rules_math('oracle_case: rand/roll\n'
+                                        'kind: trace\n'
+                                        'trace_source: "%s"'
+                                        % self.trace_sources()[0])
+        r = self.check()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn(f'0x{address:X} A::f', r.stdout)
+        self.assertIn('kind: trace', r.stdout)
+        self.assertIn('requires kind: oracle', r.stdout)
 
 
 class RulesMathSetTest(unittest.TestCase):
@@ -6249,6 +6314,1391 @@ class GhidraCloneTest(unittest.TestCase):
         os.remove(os.path.join(clone, 'iwd2.gpr'))
         self.mp.worktree_clone('/w/p3-a')
         self.assertEqual(self.read(clone, 'iwd2.gpr'), 'gpr')
+
+
+class MakeDllProjectTest(unittest.TestCase):
+    """make_dll_project: one analysed Ghidra project per DLL under
+    ghidra-projects/<name>, imported under make_project's lock."""
+
+    def setUp(self):
+        self.mdp = load_ghidra_tool('make_dll_project')
+        # The make_project instance this module imported (the shared
+        # sys.modules one), whose headless() the tool runs through.
+        self.mp = self.mdp.make_project
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        root = self._tmp.name
+        self.projects = os.path.join(root, 'ghidra-projects')
+        self.dll = os.path.join(root, 'dll', 'IEexHelper.fork.dll')
+        os.makedirs(os.path.dirname(self.dll))
+        with open(self.dll, 'wb') as f:
+            f.write(b'MZ fake dll')
+        self.mdp.PROJECTS_DIR = self.projects
+        self.mp.LOCK_PATH = os.path.join(self.projects, 'iwd2.lock')
+
+    def fake_headless(self, runs):
+        """Patch subprocess so analyzeHeadless only writes the .gpr."""
+
+        def run(cmd, env=None, capture_output=True, text=True):
+            runs.append(cmd)
+            # Ghidra would create <project_location>/<project_name>.gpr.
+            with open(os.path.join(cmd[1], cmd[2] + '.gpr'), 'w') as f:
+                f.write('gpr')
+            return subprocess.CompletedProcess(cmd, 0, 'stdout', '')
+
+        self.addCleanup(setattr, self.mp, 'subprocess', subprocess)
+        self.mp.subprocess = types.SimpleNamespace(run=run)
+
+    def test_make_dll_project_paths_and_noop(self):
+        runs = []
+        self.fake_headless(runs)
+        target = os.path.join(self.projects, 'ieexhelper-fork')
+        self.assertEqual(self.mdp.make('ieexhelper-fork', self.dll), target)
+        self.assertEqual(len(runs), 1)
+        self.assertIn('-import', runs[0])
+        self.assertIn(self.dll, runs[0])
+        self.assertTrue(os.path.exists(
+            os.path.join(target, 'ieexhelper-fork.gpr')))
+        self.assertEqual(self.mdp.make('ieexhelper-fork', self.dll), target)
+        self.assertEqual(len(runs), 1)  # .gpr exists: no second headless run
+        with self.assertRaises(ValueError):
+            self.mdp.make('../escape', self.dll)
+
+    def test_make_dll_project_holds_lock(self):
+        held = []
+
+        @contextlib.contextmanager
+        def spy(path, what, timeout=None):
+            held.append(os.path.normpath(str(path)))
+            yield
+
+        self.addCleanup(setattr, self.mp.filelock, 'hold',
+                        self.mp.filelock.hold)
+        self.mp.filelock.hold = spy
+        runs = []
+        self.fake_headless(runs)
+        self.mdp.make('ieexhelper-fork', self.dll)
+        self.assertEqual(held, [os.path.normpath(self.mp.LOCK_PATH)])
+
+
+class XrecTest(unittest.TestCase):
+    """xrec: funcs reads the // 0xADDR comment with the signature, and
+    classify matches the two recoveries by address before name."""
+
+    def test_xrec_funcs_parses_signature_and_address(self):
+        f = xrec.funcs(
+            'int CThing::Alpha(int x)\n'
+            '{\n'
+            '    // TODO: real body\n'
+            '    return x + 1;\n'
+            '}\n'
+            '\n'
+            '// 0x401000\n'
+            'int CThing::Beta(void)\n'
+            '{\n'
+            '    return 2;\n'
+            '}\n')
+        self.assertEqual(sorted(f), ['CThing::Alpha', 'CThing::Beta'])
+        self.assertEqual(f['CThing::Alpha'], (None, '{returnx+1;}'))
+        self.assertEqual(f['CThing::Beta'], ('0x401000', '{return2;}'))
+
+    def test_xrec_matches_renamed_function_by_address(self):
+        real = '{ints=m_x;s+=x;s+=m_y;s-=x;return s==0&&x!=0;}'
+        theirs = xrec.funcs('// 0x401000\nint CThing::HisName(int x)\n%s\n' % real)
+        ours = xrec.funcs('// 0x401000\nint CThing::OurName(int x)\n%s\n' % real)
+        c = xrec.classify(theirs, ours, {})
+        self.assertEqual(c['same'], 1)
+        self.assertEqual(c['only_theirs'] + c['only_ours'], 0)
+        self.assertEqual(sum(c.values()), 1)
+
+    def test_xrec_ambiguous_address_pairs_by_name(self):
+        """An address two functions of one file carry is not a key: CScreenMap
+        had a stub and a real body sharing 0x643CC0 in their tree only."""
+        real = '{ints=m_x;s+=x;s+=m_y;s-=x;return s==0&&x!=0;}'
+        stub = '{return 0;}'
+        theirs = xrec.funcs('// 0x401000\nint CThing::Real(int x)\n%s\n'
+                            '\n'
+                            '// 0x401000\nint CThing::Stub(void)\n%s\n' % (real, stub))
+        ours = xrec.funcs('// 0x401000\nint CThing::Real(int x)\n%s\n' % real)
+        c = xrec.classify(theirs, ours, {})
+        self.assertEqual(c['same'], 1)
+        self.assertEqual(c['only_theirs'], 1)
+        self.assertEqual(c['ours_real_theirs_stub'], 0)
+        self.assertEqual(sum(c.values()), 2)
+
+    def test_xrec_name_pair_finds_renamed_base_by_address(self):
+        """A pair the name loop holds still finds its base function by
+        address: both trees renamed it, theirs carries the stamp twice (the
+        duplicate-stamp files), and base keeps it under the old name."""
+        real1 = '{ints=m_x;s+=x;s+=m_y;s-=x;return s==0&&x!=0;}'
+        real2 = '{ints=m_x;s-=x;s+=m_y;s-=x;return s==0&&x!=0;}'
+        base = xrec.funcs('// 0x401000\nint CThing::Old(int x)\n%s\n' % real1)
+        theirs = xrec.funcs('// 0x401000\nint CThing::P(int x)\n%s\n'
+                            '\n'
+                            '// 0x401000\nint CThing::Q(int x)\n%s\n' % (real2, real1))
+        ours = xrec.funcs('// 0x401000\nint CThing::P(int x)\n%s\n' % real1)
+        c = xrec.classify(theirs, ours, base)
+        self.assertEqual(c['theirs_changed_ours_base'], 1)
+        self.assertEqual(c['both_changed_differ'], 0)
+        self.assertEqual(c['only_theirs'], 1)
+        self.assertEqual(sum(c.values()), 2)
+
+    def test_xrec_classify_table(self):
+        real1 = '{ints=m_x;s+=x;s+=m_y;s-=x;return s==0&&x!=0;}'
+        real2 = '{ints=m_x;s-=x;s+=m_y;s-=x;return s==0&&x!=0;}'
+        real3 = '{ints=m_x;s+=x;s-=m_y;s+=x;return s==0&&x!=0;}'
+        stub1 = '{return 0;}'
+        stub2 = '{return m_x;}'
+        theirs = {
+            'same': ('0x1000', real1),
+            'same_stub': ('0x1001', stub1),
+            'only_theirs': ('0x1002', real1),
+            'theirs_real_ours_stub': ('0x1003', real1),
+            'ours_real_theirs_stub': ('0x1004', stub1),
+            'theirs_changed_ours_base': ('0x1005', real2),
+            'ours_changed_theirs_base': ('0x1006', real1),
+            'both_changed_differ': ('0x1007', real2),
+            'both_stub_diff': ('0x1008', stub1),
+        }
+        ours = {
+            'same': ('0x1000', real1),
+            'same_stub': ('0x1001', stub1),
+            'only_ours': ('0x1009', real1),
+            'theirs_real_ours_stub': ('0x1003', stub1),
+            'ours_real_theirs_stub': ('0x1004', real1),
+            'theirs_changed_ours_base': ('0x1005', real1),
+            'ours_changed_theirs_base': ('0x1006', real2),
+            'both_changed_differ': ('0x1007', real3),
+            'both_stub_diff': ('0x1008', stub2),
+        }
+        base = {
+            'theirs_changed_ours_base': ('0x1005', real1),
+            'ours_changed_theirs_base': ('0x1006', real1),
+            'both_changed_differ': ('0x1007', real1),
+            'both_stub_diff': ('0x1008', stub1),
+        }
+        c = xrec.classify(theirs, ours, base)
+        for k in ['same', 'same_stub', 'only_theirs', 'only_ours',
+                  'theirs_real_ours_stub', 'ours_real_theirs_stub',
+                  'theirs_changed_ours_base', 'ours_changed_theirs_base',
+                  'both_changed_differ', 'both_stub_diff']:
+            self.assertEqual(c[k], 1, k)
+        self.assertEqual(sum(c.values()), 10)
+
+
+class WsoFetchTest(unittest.TestCase):
+    """wso_fetch: a dest resolves under <IWD2R_HOME>/wso and one containing
+    '..' (or absolute) is rejected; --check lists files whose sha256 differs
+    from the pin and exits non-zero; fetching creates missing directories and
+    writes only after the downloaded bytes match the pin."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.home = tmp.name
+        self.root = os.path.join(self.home, 'wso')
+        self.addCleanup(os.environ.pop, 'IWD2R_HOME', None)
+        os.environ['IWD2R_HOME'] = self.home
+
+    def pins_file(self, pins):
+        path = os.path.join(self.home, 'pins.json')
+        with open(path, 'w') as f:
+            json.dump(pins, f)
+        return path
+
+    def run_cli(self, *args):
+        return subprocess.run([sys.executable, '-I',
+                               os.path.join(ROOT, 'tools', 'wso_fetch.py'), *args],
+                              capture_output=True, text=True)
+
+    def test_wso_fetch_dest_under_home(self):
+        root = wso_fetch.wso_root()
+        self.assertEqual(str(wso_fetch.resolve_dest('lua/IEex_Core_State.lua', root)),
+                         os.path.join(self.root, 'lua', 'IEex_Core_State.lua'))
+        for dest in ('../escape.dll', 'lua/../../escape.dll', '/abs.dll', '', '.'):
+            with self.assertRaises(ValueError):
+                wso_fetch.resolve_dest(dest, root)
+
+    def test_wso_fetch_check_reports_mismatch(self):
+        os.makedirs(os.path.join(self.root, 'dll'))
+        with open(os.path.join(self.root, 'dll', 'IEex.dll'), 'wb') as f:
+            f.write(b'tampered bytes')
+        pins = {'fork_commit': 'f' * 40, 'upstream_commit': 'u' * 40,
+                'files': [{'url': 'https://example.invalid/IEex.dll',
+                           'dest': 'dll/IEex.dll',
+                           'sha256': hashlib.sha256(b'pinned bytes').hexdigest()}]}
+        problems = wso_fetch.check(pins, wso_fetch.wso_root())
+        self.assertEqual([p for p in problems if 'dll/IEex.dll' in p and
+                          'sha256' in p], problems, problems)
+        run = self.run_cli('--check', '--pins', self.pins_file(pins))
+        self.assertEqual(run.returncode, 1)
+        self.assertIn('dll/IEex.dll', run.stderr)
+        self.assertIn('sha256', run.stderr)
+
+    def test_wso_fetch_creates_dir_when_absent(self):
+        payload = b'-- pinned lua\n'
+        src = os.path.join(self.home, 'src', 'IEex_X.lua')
+        os.makedirs(os.path.dirname(src))
+        with open(src, 'wb') as f:
+            f.write(payload)
+        pins = {'fork_commit': 'f' * 40, 'upstream_commit': 'u' * 40,
+                'files': [{'url': 'file://' + src,
+                           'dest': 'lua/sub/IEex_X.lua',
+                           'sha256': hashlib.sha256(payload).hexdigest()}]}
+        self.assertFalse(os.path.exists(self.root))
+        self.assertEqual(wso_fetch.fetch(pins, wso_fetch.wso_root()), [])
+        with open(os.path.join(self.root, 'lua', 'sub', 'IEex_X.lua'), 'rb') as f:
+            self.assertEqual(f.read(), payload)
+
+    def test_wso_fetch_writes_only_after_hash_matches(self):
+        src = os.path.join(self.home, 'src', 'IEex_Y.lua')
+        os.makedirs(os.path.dirname(src))
+        with open(src, 'wb') as f:
+            f.write(b'attacker bytes')
+        pins = {'fork_commit': 'f' * 40, 'upstream_commit': 'u' * 40,
+                'files': [{'url': 'file://' + src,
+                           'dest': 'lua/IEex_Y.lua',
+                           'sha256': hashlib.sha256(b'pinned bytes').hexdigest()}]}
+        problems = wso_fetch.fetch(pins, wso_fetch.wso_root())
+        self.assertEqual([p for p in problems if 'lua/IEex_Y.lua' in p and
+                          'sha256' in p], problems, problems)
+        self.assertFalse(os.path.exists(self.root))
+        run = self.run_cli('--pins', self.pins_file(pins))
+        self.assertEqual(run.returncode, 1)
+        self.assertIn('lua/IEex_Y.lua', run.stderr)
+
+    def test_wso_fetch_symlink_escape_is_rejected(self):
+        """A symlink under the wso root pointing outside it is not a
+        destination: resolve_dest follows the link before the containment
+        check, so a matched hash cannot land outside the root either."""
+        outside = os.path.join(self.home, 'outside')
+        os.makedirs(outside)
+        os.makedirs(os.path.join(self.root, 'dll'))
+        os.symlink(outside, os.path.join(self.root, 'dll', 'up'))
+        root = wso_fetch.wso_root()
+        with self.assertRaises(ValueError):
+            wso_fetch.resolve_dest('dll/up/IEex.dll', root)
+        src = os.path.join(self.home, 'src', 'IEex.dll')
+        os.makedirs(os.path.dirname(src))
+        with open(src, 'wb') as f:
+            f.write(b'pinned bytes')
+        pins = {'fork_commit': 'f' * 40, 'upstream_commit': 'u' * 40,
+                'files': [{'url': 'file://' + src,
+                           'dest': 'dll/up/IEex.dll',
+                           'sha256': hashlib.sha256(b'pinned bytes').hexdigest()}]}
+        problems = wso_fetch.fetch(pins, root)
+        self.assertEqual([p for p in problems if 'escapes the wso root' in p],
+                         problems, problems)
+        self.assertFalse(os.path.exists(os.path.join(outside, 'IEex.dll')))
+
+    def test_wso_fetch_bad_pins_file_is_a_clean_error(self):
+        """A missing, malformed or wrongly shaped pins file exits 1 with one
+        stderr line instead of a traceback."""
+        malformed = os.path.join(self.home, 'malformed.json')
+        with open(malformed, 'w') as f:
+            f.write('{oops')
+        shape = os.path.join(self.home, 'shape.json')
+        with open(shape, 'w') as f:
+            json.dump({'fork_commit': 'f' * 40, 'files': 'not a list'}, f)
+        for pins in (os.path.join(self.home, 'absent.json'), malformed, shape):
+            run = self.run_cli('--check', '--pins', pins)
+            self.assertEqual(run.returncode, 1, (pins, run.stderr))
+            lines = run.stderr.splitlines()
+            self.assertEqual(len(lines), 1, (pins, run.stderr))
+            self.assertIn('wso_fetch:', lines[0])
+            self.assertIn(os.path.basename(pins), lines[0])
+
+    @staticmethod
+    def make_zip(path, members):
+        with zipfile.ZipFile(path, 'w') as z:
+            for name, data in members:
+                z.writestr(name, data)
+
+    def test_wso_fetch_extracts_after_hash_match(self):
+        """A pin with "unzip": true is extracted beside its archive only
+        after the archive's bytes match the pin; member names are
+        sanitized (no '..', no absolute paths) and --check verifies the
+        extracted members are still there."""
+        payload = 'pinned dump\n'.encode('utf-16')
+        src = os.path.join(self.home, 'src', 'dump.zip')
+        os.makedirs(os.path.dirname(src))
+        self.make_zip(src, [('bg2_pdb_types.txt', payload),
+                            ('sub/nested.txt', b'nested\n')])
+        pins = {'fork_commit': 'f' * 40, 'upstream_commit': 'u' * 40,
+                'files': [{'url': 'file://' + src,
+                           'dest': 'bg2/dump.zip', 'unzip': True,
+                           'sha256': hashlib.sha256(open(src, 'rb').read()).hexdigest()}]}
+        self.assertEqual(wso_fetch.fetch(pins, wso_fetch.wso_root()), [])
+        self.root = wso_fetch.wso_root()
+        with open(os.path.join(self.root, 'bg2', 'bg2_pdb_types.txt'), 'rb') as f:
+            self.assertEqual(f.read(), payload)
+        self.assertTrue(os.path.isfile(os.path.join(self.root, 'bg2', 'sub',
+                                                    'nested.txt')))
+        # --check verifies both the archive and its extracted members.
+        os.unlink(os.path.join(self.root, 'bg2', 'bg2_pdb_types.txt'))
+        problems = wso_fetch.check(pins, self.root)
+        self.assertEqual([p for p in problems if 'bg2_pdb_types.txt' in p],
+                         problems, problems)
+        # A hash mismatch leaves nothing extracted.
+        tampered = os.path.join(self.home, 'src', 'tampered.zip')
+        self.make_zip(tampered, [('bg2_pdb_types.txt', b'attacker\n')])
+        pins['files'][0]['url'] = 'file://' + tampered
+        problems = wso_fetch.fetch(pins, self.root)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn('sha256', problems[0])
+        self.assertEqual(sorted(os.listdir(os.path.join(self.root, 'bg2'))),
+                         ['dump.zip', 'dump.zip.extracted.json', 'sub'])
+
+    def test_wso_fetch_refuses_unsafe_archive_members(self):
+        """A member named to escape the extraction directory (`..` or an
+        absolute path) fails the whole extraction: the problem is
+        reported, nothing is written outside the wso root, and none of
+        the archive's members -- the safe ones included -- are
+        extracted."""
+        src = os.path.join(self.home, 'src', 'evil.zip')
+        os.makedirs(os.path.dirname(src))
+        self.make_zip(src, [('ok.txt', b'fine\n'), ('../evil.txt', b'escape\n')])
+        pins = {'fork_commit': 'f' * 40, 'upstream_commit': 'u' * 40,
+                'files': [{'url': 'file://' + src,
+                           'dest': 'bg2/evil.zip', 'unzip': True,
+                           'sha256': hashlib.sha256(open(src, 'rb').read()).hexdigest()}]}
+        problems = wso_fetch.fetch(pins, wso_fetch.wso_root())
+        self.assertEqual([p for p in problems if 'evil.txt' in p], problems,
+                         problems)
+        self.assertFalse(os.path.exists(os.path.join(self.home, 'evil.txt')))
+        self.assertEqual(os.listdir(os.path.join(wso_fetch.wso_root(), 'bg2')),
+                         ['evil.zip'])
+
+
+trace_diff = load_tool('frida/trace_diff')
+
+
+class TraceDiffTest(unittest.TestCase):
+    """The in-memory interface the smoke gate uses: normalize drops the
+    harness noise, compare turns a trace pair into an exit code."""
+
+    @staticmethod
+    def capture():
+        return [
+            {'tag': 'ready', 'pid': 4242},
+            {'tag': 'Move', 'this': '0x1234', 'a0_s32': 7, 'ts': 11},
+            {'tag': 'HITS', 'counts': {'Move': 1}},
+            {'type': 'send', 'payload': {'tag': 'Move', 'this': '0x9988',
+                                         'a0_s32': 9, 'tid': 3}},
+            {'tag': 'Attack', 'this': '0x0', 'a0_s32': 5,
+             'bt': ['0x401000', '0x401020']},
+        ]
+
+    def test_trace_diff_normalize_drops_harness_and_pointers(self):
+        events = trace_diff.normalize(self.capture())
+        self.assertEqual([e['tag'] for e in events],
+                         ['Move', 'Move', 'Attack'])
+        self.assertEqual(events[0], {'tag': 'Move', 'this': '<ptr>',
+                                     'a0_s32': 7})
+        self.assertEqual(events[1], {'tag': 'Move', 'this': '<ptr>',
+                                     'a0_s32': 9})
+        self.assertEqual(events[2], {'tag': 'Attack', 'this': '<null>',
+                                     'a0_s32': 5})
+        raw = trace_diff.normalize(self.capture(), raw_pointers=True)
+        self.assertEqual(raw[0]['this'], '0x1234')
+        self.assertEqual(raw[2]['this'], '0x0')
+
+    def test_trace_diff_compare_match_order_args(self):
+        events = [e for e in self.capture() if e.get('tag') in ('Move',
+                                                                'Attack')]
+        self.assertEqual(trace_diff.compare(events, events), 0)
+        self.assertEqual(trace_diff.compare(events, list(reversed(events))),
+                         1)
+        shifted = [dict(e, a0_s32=e['a0_s32'] + 1) for e in events]
+        self.assertEqual(trace_diff.compare(events, shifted), 1)
+
+    def test_trace_diff_crash_never_passes(self):
+        events = self.capture() + [{'tag': 'assert', 'where': 'Move'}]
+        self.assertNotEqual(trace_diff.compare(events, events), 0)
+
+    def test_trace_diff_empty_is_2(self):
+        self.assertEqual(trace_diff.compare([], []), 2)
+
+
+probe = load_tool('frida/probe')
+
+
+class ProbePlanTest(unittest.TestCase):
+    """probe.plan_folders' staging invariants: every mapped-folder HOST path
+    must be a Windows path (the box cannot see /mnt/... and refuses the
+    whole configuration over one bad folder), and both logon commands must
+    be wrapped for the shell-less LogonCommand."""
+
+    def plan(self, target):
+        return probe.plan_folders(
+            target,
+            'C:\\Users\\thier\\iwd2r-frida\\venv',
+            'C:\\Users\\thier\\iwd2r-build-p3-wso-tools\\replay',
+            'C:\\Users\\thier\\iwd2r-oracle\\game',
+            'C:\\Users\\thier\\iwd2r-vm\\replays\\s\\results',
+            'C:\\Users\\thier\\iwd2r-vm\\replays\\s\\tools')
+
+    def test_mapped_host_paths_are_windows_paths(self):
+        for target in ('original', 'ours'):
+            for host, box, _ro in self.plan(target):
+                self.assertFalse(host.startswith('/'), (target, host, box))
+                self.assertTrue(host[1:3] == ':\\', (target, host, box))
+                self.assertTrue(box.startswith('C:\\'), (target, box))
+
+    def test_logon_commands_survive_shell_less_logon(self):
+        ns = types.SimpleNamespace(hit='MTP', hit_min=1, attach_timeout=None,
+                                   loaded_addr=None, loaded_rva='0x330000',
+                                   module=None, no_loaded=False)
+        args = probe.sidecar_args(ns, 't.jsonl', 't.jsonl.status')
+        orig = probe.original_logon(
+            'C:\\Users\\thier\\iwd2r-frida\\venv\\Scripts\\python.exe',
+            120, args)
+        ours = probe.ours_logon(
+            'C:\\Users\\thier\\iwd2r-frida\\venv\\Scripts\\python.exe',
+            'C:\\game', probe.ours_env('C:\\game', 1), 120, args)
+        self.assertTrue(orig.startswith('cmd.exe /c '), orig)
+        self.assertIn('replay-driver.ps1 -Config', orig)
+        self.assertTrue(ours.startswith('cmd.exe /c '), ours)
+        self.assertIn('& echo done > ', ours)
+        self.assertTrue(ours.endswith('shutdown /s /t 0'), ours)
+
+
+class OrigAttachTest(unittest.TestCase):
+    """attach_when_there must ride out every flavour of "process not found"
+    frida raises while polling for the game -- frida 17 raises
+    InvalidArgumentError there, not ProcessNotFoundError -- and only give up
+    at the deadline (the replay driver boots IWD2.exe seconds after the
+    sidecar starts)."""
+
+    @classmethod
+    def setUpClass(cls):
+        stub = types.ModuleType('frida')
+        stub.ProcessNotFoundError = type('ProcessNotFoundError', (Exception,),
+                                         {})
+        stub.InvalidArgumentError = type('InvalidArgumentError', (Exception,),
+                                         {})
+        cls._saved_frida = sys.modules.get('frida')
+        sys.modules['frida'] = stub
+        cls.frida_stub = stub
+        cls.orig = load_tool('frida/orig')
+
+    @classmethod
+    def tearDownClass(cls):
+        if cls._saved_frida is not None:
+            sys.modules['frida'] = cls._saved_frida
+        else:
+            del sys.modules['frida']
+
+    def setUp(self):
+        now = [0.0]
+        self.clock = now
+        self.fake_time = types.SimpleNamespace(
+            monotonic=lambda: now[0],
+            sleep=lambda s: now.__setitem__(0, now[0] + s))
+        saved = self.orig.time
+        self.orig.time = self.fake_time
+        self.addCleanup(setattr, self.orig, 'time', saved)
+
+    def install_device(self, device):
+        self.frida_stub.get_local_device = lambda: device
+        self.addCleanup(delattr, self.frida_stub, 'get_local_device')
+
+    def test_polls_through_invalid_argument_until_found(self):
+        calls = []
+        frida_stub = self.frida_stub
+
+        class Device:
+            def get_process_by_name(self, name):
+                calls.append(name)
+                if len(calls) < 3:
+                    raise frida_stub.InvalidArgumentError(
+                        'process not found')
+                return types.SimpleNamespace(pid=7932)
+
+            def attach(self, pid):
+                return 'session-%d' % pid
+
+        self.install_device(Device())
+        session, pid = self.orig.attach_when_there('IWD2.exe',
+                                                   self.clock[0] + 90.0)
+        self.assertEqual((session, pid), ('session-7932', 7932))
+        self.assertEqual(calls, ['IWD2.exe'] * 3)
+
+    def test_gives_up_at_the_deadline(self):
+        calls = []
+        frida_stub = self.frida_stub
+
+        class Device:
+            def get_process_by_name(self, name):
+                calls.append(name)
+                raise frida_stub.InvalidArgumentError('process not found')
+
+            def attach(self, pid):  # pragma: no cover - never reached
+                return None
+
+        self.install_device(Device())
+        with self.assertRaises(frida_stub.InvalidArgumentError):
+            self.orig.attach_when_there('IWD2.exe', self.clock[0] + 1.0)
+        self.assertGreaterEqual(len(calls), 2)
+
+
+def load_parity_tool(name):
+    spec = importlib.util.spec_from_file_location(
+        'parity_' + name, os.path.join(ROOT, 'tools', 'parity', name + '.py'))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+THREE_FUNCTIONS = ('// test fixture\n'
+                   '#include "a.h"\n'
+                   '\n'
+                   '// 0x401000\n'
+                   'int A::f(int x)\n'
+                   '{\n'
+                   '    return x;\n'
+                   '}\n'
+                   '\n'
+                   '// 0x401020\n'
+                   'int A::g(int y)\n'
+                   '{\n'
+                   '    return y;\n'
+                   '}\n'
+                   '\n'
+                   '// 0x401040\n'
+                   'int A::h(int z)\n'
+                   '{\n'
+                   '    return z;\n'
+                   '}\n')
+
+
+class ParityTest(unittest.TestCase):
+    """tools/parity: the fork's structural parity gates, on our exports."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.repo = os.path.join(tmp.name, 'repo')
+        os.makedirs(self.repo)
+        home = tempfile.TemporaryDirectory()
+        self.addCleanup(home.cleanup)
+        self.home = home.name
+        # run.py resolves the exports (functions.tsv, callgraph.tsv) under
+        # IWD2R_HOME at call time, the way make_project.py does.
+        self.addCleanup(os.environ.pop, 'IWD2R_HOME', None)
+        os.environ['IWD2R_HOME'] = self.home
+        self.git('init', '-q')
+        self.git('config', 'user.name', 'Test')
+        self.git('config', 'user.email', 'test@example.com')
+        self.git('config', 'commit.gpgsign', 'false')
+
+    def git(self, *args):
+        return subprocess.run(['git', *args], cwd=self.repo, check=True,
+                              capture_output=True, text=True).stdout
+
+    def write(self, rel, text):
+        path = os.path.join(self.repo, rel)
+        os.makedirs(os.path.dirname(path) or self.repo, exist_ok=True)
+        with open(path, 'w') as f:
+            f.write(text)
+
+    def commit(self, message='change'):
+        self.git('add', '-A')
+        self.git('commit', '-q', '--allow-empty', '-m', message)
+
+    def exports(self, functions, callgraph):
+        """functions.tsv / callgraph.tsv under the fixture IWD2R_HOME."""
+        out = os.path.join(self.home, 'ghidra-exports')
+        os.makedirs(out, exist_ok=True)
+        for name, text in (('functions.tsv', functions),
+                           ('callgraph.tsv', callgraph)):
+            with open(os.path.join(out, name), 'w') as f:
+                f.write(text)
+        return out
+
+    def test_parity_callee_diff(self):
+        asm = load_parity_tool('asm_verify')
+        missing, extra = asm.callee_diff({1, 2, 3}, {2, 3, 4})
+        self.assertEqual(missing, {4})
+        self.assertEqual(extra, {1})
+
+    def test_parity_address_markers_flags_non_start(self):
+        markers = load_parity_tool('address_markers')
+        self.write('src/a.cpp',
+                   '// 0x401002\n'
+                   'int A::g(int x)\n'
+                   '{\n'
+                   '    return x;\n'
+                   '}\n')
+        exports = self.exports('401000\tA::f\t100\n', '401000\n')
+        code, lines = markers.check(
+            os.path.join(self.repo, 'src'),
+            os.path.join(exports, 'functions.tsv'),
+            os.path.join(exports, 'callgraph.tsv'), repo=self.repo)
+        self.assertEqual(code, 1, lines)
+        self.assertTrue(any('401002' in line for line in lines), lines)
+
+    def test_parity_run_skips_without_exe(self):
+        parity_run = load_parity_tool('run')
+        old = parity_run.oracle.VANILLA_EXE
+        setattr(parity_run.oracle, 'VANILLA_EXE',
+                os.path.join(self.home, 'no-such.exe'))
+        self.addCleanup(setattr, parity_run.oracle, 'VANILLA_EXE', old)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = parity_run.main('HEAD')
+        self.assertEqual(code, 0)
+        self.assertIn('skipped', out.getvalue())
+
+    def test_parity_waiver_downgrades_asm(self):
+        self.write('src/a.cpp',
+                   '// 0x401000\n'
+                   'int A::f(int x)\n'
+                   '{\n'
+                   '    return x;\n'
+                   '}\n')
+        self.commit('base')
+        base = self.git('rev-parse', 'HEAD').strip()
+        self.write('src/a.cpp',
+                   '// 0x401000\n'
+                   'int A::f(int x)\n'
+                   '{\n'
+                   '    return x * 2;\n'
+                   '}\n')
+        self.commit('body change')
+        # The binary calls Helper::Do (0x405000); the source calls nothing.
+        self.exports('401000\tA::f\t100\n405000\tHelper::Do\t50\n',
+                     '401000\t405000\n')
+
+        def evidence(waiver):
+            self.write('docs/evidence/401000.md',
+                       '---\n'
+                       'address: 0x401000\n'
+                       'name: A::f\n'
+                       'exemption: "fixture"\n'
+                       + (f'parity_waiver: "{waiver}"\n' if waiver else '')
+                       + '---\n\n## Notes\n')
+
+        parity_run = load_parity_tool('run')
+        evidence(None)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = parity_run.main(base, repo=self.repo)
+        self.assertEqual(code, 1, out.getvalue())
+        self.assertIn('405000', out.getvalue())
+
+        evidence('known thin wrapper')
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = parity_run.main(base, repo=self.repo)
+        self.assertEqual(code, 0, out.getvalue())
+        self.assertIn('warning', out.getvalue())
+
+    def test_parity_changed_only_uses_markers(self):
+        self.write('src/a.cpp', THREE_FUNCTIONS)
+        self.commit('base')
+        base = self.git('rev-parse', 'HEAD').strip()
+        changed = THREE_FUNCTIONS.replace('return x;', 'return x * 2;') \
+                                 .replace('return z;', 'return z * 2;')
+        self.write('src/a.cpp', changed)
+        self.commit('two bodies')
+        parity_run = load_parity_tool('run')
+        found = parity_run.touched(self.repo, base)
+        self.assertEqual({address for _, address, _ in found},
+                         {0x401000, 0x401040})
+
+
+class FnDigestTest(unittest.TestCase):
+    """tools/fn_digest.digest -- a <=30-line brief of a decompile."""
+
+    def tiny_case(self):
+        return ('int f()\n'
+                '{\n'
+                '    for (;;) { }\n'
+                '    while (x) { }\n'
+                '    do { } while (y);\n'
+                '    switch (z) { }\n'
+                '}\n')
+
+    def test_fn_digest_under_30_lines(self):
+        # A 400-line decompile with strings, globals, calls, loops, a switch.
+        body = []
+        i = 0
+        while len(body) < 396:
+            body.append(f'    g_arr[{i % 8}] = DAT_009{i % 10:05d}'
+                        f' + FUN_0041{i % 100:04d}();')
+            if i % 40 == 0:
+                body.append('    for (int j = 0; j < 3; j++) { }')
+            if i % 80 == 0:
+                body.append('    switch (g_mode) { case 1: break; }')
+            if i % 60 == 0:
+                body.append('    printf("sprite %d", i);')
+            i += 1
+        del body[396:]  # exactly 396 body lines
+        lines = (['int CGameSprite::Render(int nX, int nY)', '{'] + body
+                 + ['    return g_arr[0];', '}'])
+        self.assertEqual(len(lines), 400)
+        decompile = '\n'.join(lines)
+
+        d = fn_digest.digest(decompile, {
+            'name': 'CGameSprite::Render',
+            'address': 0x5845D0,
+            'signature': 'int CGameSprite::Render(int, int)',
+            'callees': ['FUN_00410000', 'CInfGame::GetDice',
+                        'CInfGame::GetDice', 'memcpy'],
+            'callers': ['CGameSprite::Draw'],
+        })
+        out = d.splitlines()
+        self.assertLessEqual(len(out), 30)
+        self.assertIn('CGameSprite::Render', out[0])
+        self.assertIn('0x5845d0', out[0])
+        self.assertIn('400', out[0])
+        self.assertTrue(any('signature: int CGameSprite::Render(int, int)' == l
+                            for l in out))
+        # callees are deduped, kept in order
+        self.assertTrue(any(l == 'callees (3): FUN_00410000, CInfGame::GetDice, '
+                              'memcpy' for l in out))
+        self.assertTrue(any(l == 'callers (1): CGameSprite::Draw' for l in out))
+        self.assertTrue(any(l == 'strings: "sprite %d"' for l in out))
+        gline = next(l for l in out if l.startswith('globals: '))
+        self.assertIn('DAT_00900000', gline)
+        self.assertIn('g_mode', gline)
+        self.assertIn('g_arr', gline)
+        lline = next(l for l in out if l.startswith('loops: '))
+        self.assertRegex(lline, r'^loops: \d+  switches: \d+$')
+
+        # loops counts `for`/`while` keywords (a do-while's while included).
+        tiny = fn_digest.digest(self.tiny_case(), None).splitlines()
+        self.assertIn('loops: 3  switches: 1', tiny)
+
+
+_SRC_CPP = '''// CGameSprite::Render draws one frame.
+// 0x5845D0
+void CGameSprite::Render(int nFrame)
+{
+    if (nFrame < 0)
+        return;
+    SetFrame(nFrame);
+}
+
+// 0x584600
+int CGameSprite::GetFrame() const
+{
+    return m_nFrame;
+}
+'''
+
+_SRC_CPP2 = '''// 0x401000
+int CInfGame::GetDice(int nSides)
+{
+    return nSides;
+}
+'''
+
+_DECOMP = '''int CGameSprite::Render(int nFrame)
+{
+    if (nFrame < 0)
+        return 0;
+    SetFrame(nFrame);
+    ApplyEffect(FOO_BAR, "SW1H01");
+    SetGlobal(ODD_CASE, "AR1000");
+    return 0;
+}
+'''
+
+
+def _write(path, text):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w') as f:
+        f.write(text)
+
+
+class SrcFindTest(unittest.TestCase):
+    """tools/src_find.find -- markers and signatures, no grep chains."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = tmp.name
+        _write(os.path.join(self.root, 'CGameSprite.cpp'), _SRC_CPP)
+        _write(os.path.join(self.root, 'CInfGame.cpp'), _SRC_CPP2)
+
+    def test_src_find_by_address_and_name(self):
+        by_addr = src_find.find('0x5845D0', root=self.root)
+        self.assertEqual(by_addr,
+                         [('CGameSprite.cpp', 2, 'void CGameSprite::Render(int nFrame)')])
+        by_name = src_find.find('CGameSprite::Render', root=self.root)
+        self.assertEqual(by_name, by_addr)
+
+        whole_class = src_find.find('CGameSprite::', root=self.root)
+        self.assertEqual(whole_class,
+                         [('CGameSprite.cpp', 2, 'void CGameSprite::Render(int nFrame)'),
+                          ('CGameSprite.cpp', 10, 'int CGameSprite::GetFrame() const')])
+
+        self.assertEqual(src_find.find('0x401000', root=self.root),
+                         [('CInfGame.cpp', 2, 'int CInfGame::GetDice(int nSides)')])
+        self.assertEqual(src_find.find('NoSuch::Thing', root=self.root), [])
+
+
+class AssembleContextTest(unittest.TestCase):
+    """tools/assemble_context.bundle -- one brief, in the brief's order."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.tmp = tmp.name
+        self.exports = os.path.join(self.tmp, 'exports')
+        self.src = os.path.join(self.tmp, 'src')
+        self.ids = os.path.join(self.tmp, 'ids')
+        _write(os.path.join(self.exports, 'functions.tsv'),
+               '5845D0\tCGameSprite::Render\t120\n'
+               '584600\tCGameSprite::GetFrame\t24\n')
+        _write(os.path.join(self.exports, 'callgraph.tsv'),
+               '5845D0\t584600\n')
+        _write(os.path.join(self.exports, 'CGameSprite::Render.c'), _DECOMP)
+        _write(os.path.join(self.src, 'CGameSprite.cpp'), _SRC_CPP)
+        _write(os.path.join(self.ids, 'DEMO.IDS'), 'FOO_BAR 0\n8 ODD_CASE\n')
+
+    def test_assemble_context_order_and_estimate(self):
+        b = assemble_context.bundle(0x5845D0, exports=self.exports,
+                                    src_root=self.src, ids_dir=self.ids)
+        first = b.splitlines()[0]
+        m = re.match(r'^context bundle: .*0x5845d0.*CGameSprite::Render'
+                     r' ~(\d+) tokens$', first)
+        self.assertIsNotNone(m, first)
+        self.assertEqual(int(m.group(1)), len(b.split('\n', 1)[1]) // 4)
+
+        i_digest = b.index('## digest')
+        i_decomp = b.index('## decompile')
+        i_callees = b.index('## callees')
+        i_ids = b.index('## ids')
+        self.assertLess(i_digest, i_decomp)
+        self.assertLess(i_decomp, i_callees)
+        self.assertLess(i_callees, i_ids)
+
+        self.assertIn('ApplyEffect(FOO_BAR', b[i_decomp:i_callees])
+        self.assertIn('CGameSprite::GetFrame', b[i_callees:i_ids])
+        self.assertIn('int CGameSprite::GetFrame() const', b[i_callees:i_ids])
+        self.assertIn('FOO_BAR = 0', b[i_ids:])
+        self.assertIn('ODD_CASE = 8', b[i_ids:])
+        resref_line = next(l for l in b[i_ids:].splitlines()
+                           if l.startswith('resrefs:'))
+        self.assertIn('SW1H01', resref_line)
+        self.assertIn('AR1000', resref_line)
+        self.assertIn('loops:', b[i_digest:i_decomp])
+
+        # No exports, no ids dir: honest degradation, still the same order.
+        bare = assemble_context.bundle(
+            0x5845D0, exports=os.path.join(self.tmp, 'no-such-exports'),
+            bg2_db=False)
+        self.assertIn('~', bare.splitlines()[0])
+        self.assertLess(bare.index('## digest'), bare.index('## decompile'))
+        self.assertLess(bare.index('## decompile'), bare.index('## callees'))
+        self.assertIn('no functions.tsv', bare)
+
+
+_BG2_TYPES = '''\
+    0x1000 | LF_FIELDLIST [size = 92]
+\t- LF_MEMBER [name = `m_flags`, Type = 0x0074 (int), offset = 4, attrs = public]
+\t- LF_ONEMETHOD [name = `Render`]
+\t\ttype = 0x1018, vftable offset = 0, attrs = public virtual intro
+\t- LF_MEMBER [name = `m_pThing`, Type = 0x1008, offset = 8, attrs = public]
+    0x1008 | LF_POINTER [size = 12]
+\t\treferent = 0x103C, mode = ptr
+    0x100C | LF_ARGLIST [size = 8]
+    0x1010 | LF_FIELDLIST [size = 72]
+\t- LF_METHOD [name = `Draw`, # overloads = 2, overload list = 0x1014]
+\t- LF_MEMBER [name = `m_count`, Type = 0x0074 (int), offset = 0, attrs = public]
+\t- LF_MEMBER [name = `m_name`, Type = 0x0470 (char*), offset = 8, attrs = public]
+\t- LF_MEMBER [name = `m_next`, Type = 0x1008, offset = 16, attrs = public]
+    0x1014 | LF_METHODLIST [size = 20]
+\t- Method [type = 0x1030, vftable offset = -1, attrs = private static]
+\t- Method [type = 0x1034, vftable offset = 4, attrs = public virtual]
+    0x1018 | LF_MFUNCTION [size = 28]
+\t\treturn type = 0x0003 (void), # args = 0, param list = 0x100C
+\t\tcalling conv = thiscall, options = none
+    0x1030 | LF_MFUNCTION [size = 28]
+\t\treturn type = 0x0003 (void), # args = 0, param list = 0x100C
+\t\tcalling conv = thiscall, options = none
+    0x1034 | LF_MFUNCTION [size = 28]
+\t\treturn type = 0x0074 (int), # args = 0, param list = 0x100C
+\t\tcalling conv = thiscall, options = none
+    0x1038 | LF_FIELDLIST [size = 32]
+\t- LF_ENUMERATE [THING_ON = 0]
+\t- LF_ENUMERATE [THING_OFF = 1]
+    0x103C | LF_CLASS [size = 48] `CThing`
+\t\tfield list: 0x1000
+\t\toptions: contains intro virtual, sizeof 48
+    0x1040 | LF_CLASS [size = 44] `CWidget`
+\t\tfield list: 0x1010
+\t\toptions: contains intro virtual, sizeof 44
+    0x1044 | LF_CLASS [size = 0] `CThing`
+\t\tfield list: <no type>
+\t\toptions: forward ref, sizeof 0
+    0x1048 | LF_ENUM [size = 40] `THING_STATE`
+\t\tfield list: 0x1038
+\t\toptions: sizeof 4
+'''
+
+
+class Bg2FindTest(unittest.TestCase):
+    """tools/bg2_find -- a SQLite index over the extracted PDB dumps."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dumps = os.path.join(tmp.name, 'bg2')
+        os.makedirs(self.dumps)
+        # The real dumps are UTF-16; exercise that path.
+        with open(os.path.join(self.dumps, 'bg2_pdb_types.txt'), 'w',
+                  encoding='utf-16') as f:
+            f.write(_BG2_TYPES)
+        self.db = os.path.join(self.dumps, 'bg2_pdb.sqlite')
+
+    def test_bg2_find_builds_index_and_answers(self):
+        self.assertEqual(bg2_find.build_db(dumps=self.dumps, db=self.db),
+                         self.db)
+        self.assertTrue(os.path.isfile(self.db))
+
+        rows = bg2_find.lookup('CThing::', db=self.db)
+        flags = next(r for r in rows
+                     if r['kind'] == 'member' and r['name'] == 'm_flags')
+        self.assertEqual(flags['class'], 'CThing')
+        self.assertEqual(flags['offset'], 4)
+        self.assertEqual(flags['type'], 'int')
+        ptr = next(r for r in rows
+                   if r['kind'] == 'member' and r['name'] == 'm_pThing')
+        self.assertEqual(ptr['offset'], 8)
+        self.assertEqual(ptr['type'], 'CThing*')
+        render = next(r for r in rows
+                      if r['kind'] == 'method' and r['name'] == 'Render')
+        self.assertEqual(render['vtable'], 0)
+        self.assertEqual(render['type'], '()')
+        self.assertTrue(any(r['kind'] == 'class' and r['name'] == 'CThing'
+                            and r['size'] == 48 for r in rows))
+        self.assertFalse(any(r.get('name') == 'm_count' for r in rows))
+
+        # Bare member name, and a scoped Class::Method query.
+        bare = bg2_find.lookup('m_flags', db=self.db)
+        self.assertEqual([(r['class'], r['offset'], r['type']) for r in bare
+                          if r['kind'] == 'member'],
+                         [('CThing', 4, 'int')])
+        draw = bg2_find.lookup('CWidget::Draw', db=self.db)
+        self.assertEqual(sorted((r['vtable'], r['type']) for r in draw),
+                         [(-1, '()'), (4, '() -> int')])
+
+        # The enum values are indexed; the forward ref never became a row.
+        states = bg2_find.lookup('THING_STATE::', db=self.db)
+        self.assertEqual([(r['name'], r['value']) for r in states],
+                         [('THING_ON', 0), ('THING_OFF', 1)])
+        self.assertEqual([r['name'] for r in
+                          bg2_find.lookup('CThing', db=self.db)
+                          if r['kind'] == 'class'], ['CThing'])
+
+
+class TokenAuditTest(unittest.TestCase):
+    """tools/token_audit.summarize -- where a session's tokens went."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.path = os.path.join(tmp.name, 'session.jsonl')
+
+    def test_token_audit_totals(self):
+        usage = {'input_tokens': 100, 'output_tokens': 50,
+                 'cache_creation_input_tokens': 10,
+                 'cache_read_input_tokens': 5}
+
+        def assistant(tools=()):
+            content = [{'type': 'text', 'text': 'thinking'}]
+            content += [{'type': 'tool_use', 'id': tid, 'name': name,
+                         'input': {}} for tid, name in tools]
+            return json.dumps({'type': 'assistant', 'message': {
+                'role': 'assistant', 'usage': dict(usage),
+                'content': content}})
+
+        def result(tid, text):
+            return json.dumps({'type': 'user', 'message': {'role': 'user',
+                'content': [{'type': 'tool_result', 'tool_use_id': tid,
+                             'content': text}]}})
+
+        lines = [
+            assistant([('t1', 'Bash')]),
+            result('t1', 'x' * 4000),
+            assistant([('t2', 'Read')]),
+            result('t2', 'y' * 1200),
+            assistant([('t3', 'Grep')]),
+            result('t3', 'z' * 800),
+            assistant([('t4', 'Bash')]),
+            result('t4', 'w' * 50),
+            assistant(),
+            json.dumps({'type': 'user', 'message': {'role': 'user',
+                                                    'content': 'continue'}}),
+            assistant([('t6', 'Read')]),
+            json.dumps({'type': 'user', 'message': {'role': 'user',
+                'content': [{'type': 'tool_result', 'tool_use_id': 't6',
+                             'content': [{'type': 'text', 'text': 'q' * 999}]}]}}),
+            assistant([('t7', 'Agent')]),
+            result('t7', 'r' * 3000),
+        ]
+        lines += [assistant() for _ in range(5)]
+        lines.append('{"type":"assistant","message":{"usage":{"input_tok')
+        self.assertEqual(len(lines), 20)
+        with open(self.path, 'w') as f:
+            f.write('\n'.join(lines) + '\n')
+
+        s = token_audit.summarize(self.path)
+        self.assertEqual(s['usage'], {'input_tokens': 1200, 'output_tokens': 600,
+                                      'cache_creation_input_tokens': 120,
+                                      'cache_read_input_tokens': 60,
+                                      'messages': 12})
+        self.assertEqual(s['tools']['Bash'],
+                         {'calls': 2, 'result_chars': 4050, 'result_tokens': 1012})
+        self.assertEqual(s['tools']['Read'],
+                         {'calls': 2, 'result_chars': 2199, 'result_tokens': 549})
+        self.assertEqual(s['tools']['Grep']['result_tokens'], 200)
+        self.assertEqual(s['tools']['Agent']['result_tokens'], 750)
+        self.assertEqual(s['largest'][0]['tool'], 'Bash')
+        self.assertEqual(s['largest'][0]['chars'], 4000)
+        self.assertEqual(len(s['largest']), 6)
+        self.assertEqual([r['chars'] for r in s['largest']],
+                         sorted((r['chars'] for r in s['largest']),
+                                reverse=True))
+
+
+# tools/wave.py: the coordinator's batch loop.  The fixtures mirror
+# docs/wso/disagreements.json's row shape; the close tests build a real
+# temp repo (first + a batch branch + a worktree) like WorktreeScriptTest,
+# with gates.sh's subprocess patched out -- the fake answers for any
+# command that names gates.sh and passes everything else through.
+
+_WAVE_ROWS = [
+    dict(file='src/A.cpp', name='Render', address='0x643CC0',
+         category='both_changed_differ', their_len=500, our_len=400),
+    dict(file='src/A.cpp', name='Draw', address='0x643CD0',
+         category='both_changed_differ', their_len=100, our_len=100),
+    dict(file='src/B.cpp', name='Tick', address='0x20010',
+         category='both_changed_differ', their_len=300, our_len=300),
+    # Big, but the wrong category: `next` must never pick it.
+    dict(file='src/B.cpp', name='TooBigButSame', address='0x20000',
+         category='same', their_len=9000, our_len=999),
+    dict(file='src/C.cpp', name='Init', address='0x30010',
+         category='both_changed_differ', their_len=150, our_len=50),
+    dict(file='src/D.cpp', name='NoAddr', category='both_changed_differ',
+         their_len=8000, our_len=800),
+]
+
+
+class WaveTest(unittest.TestCase):
+    """tools/wave.py -- next/brief/verdict/close/scorecard from state."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp = self._tmp.name
+        self.wave = load_tool('wave')
+        self.state = os.path.join(self.tmp, 'wave-state.json')
+        self.disagreements = os.path.join(self.tmp, 'disagreements.json')
+        with open(self.disagreements, 'w') as f:
+            json.dump(_WAVE_ROWS, f)
+
+    def write_disagreements(self, rows):
+        with open(self.disagreements, 'w') as f:
+            json.dump(rows, f)
+
+    def next(self, size=20):
+        return self.wave.next_batch(self.disagreements, self.state, size=size)
+
+    def batches(self):
+        with open(self.state) as f:
+            return json.load(f)['batches']
+
+    # -- a real repo for the close tests ---------------------------------
+
+    def git(self, *args, cwd=None):
+        env = dict(os.environ, GIT_AUTHOR_NAME='t', GIT_AUTHOR_EMAIL='t@t',
+                   GIT_COMMITTER_NAME='t', GIT_COMMITTER_EMAIL='t@t',
+                   GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM='1')
+        return subprocess.run(['git', *args], cwd=cwd or self.root, env=env,
+                              check=True, capture_output=True, text=True)
+
+    def init_repo(self):
+        """A repo whose `first` carries the fixture disagreements, with the
+        branch and worktree `next` will name already checked out."""
+        self.root = os.path.join(self.tmp, 'repo')
+        os.makedirs(self.root)
+        self.git('init', '-q', '-b', 'first', cwd=self.root)
+        docs = os.path.join(self.root, 'docs', 'wso')
+        os.makedirs(docs)
+        # Draw outranks Tick here, so the batch is exactly Render + Draw
+        # (both in src/A.cpp) -- the rows the evidence and verdict helpers
+        # below cover.
+        rows = [dict(r) for r in _WAVE_ROWS]
+        rows[1]['their_len'] = 700
+        with open(self.disagreements, 'w') as f:
+            json.dump(rows, f)
+        path = os.path.join(docs, 'disagreements.json')
+        shutil.copy(self.disagreements, path)
+        self.disagreements = path
+        self.git('add', '-A', cwd=self.root)
+        self.git('commit', '-qm', 'base', cwd=self.root)
+        rc, out = self.next(size=2)
+        self.assertEqual(rc, 0, out)
+        self.wt = os.path.join(self.tmp, 'wt')
+        self.git('worktree', 'add', '-q', '-b', 'p3/wso-b001', self.wt, 'first')
+
+    EVIDENCE = {  # row address -> (evidence stem, kind)
+        '0x643CC0': ('643CC0', 'oracle'),
+        '0x643CD0': ('643CD0', 'replay'),
+    }
+
+    def write_evidence(self):
+        for addr, (stem, kind) in self.EVIDENCE.items():
+            path = os.path.join(self.wt, 'docs', 'evidence', stem + '.md')
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, 'w') as f:
+                f.write(f'---\naddress: 0x{stem}\nname: fn-{stem}\n'
+                        f'kind: {kind}\n---\n\n'
+                        f'disagreed with WSO at e8dd16a: the guard differs; '
+                        f'case probe-9 decides.\n')
+
+    def commit_worktree(self, msg='batch work'):
+        self.git('add', '-A', cwd=self.wt)
+        self.git('commit', '-qm', msg, cwd=self.wt)
+
+    def verdicts(self):
+        # Draw decided for the fork: ours' evidence kind is read from
+        # 643CD0.md (replay).  Render decided for ours: a trace.
+        self.assertEqual(self.wave.record_verdict(
+            self.state, self.root, 'b001', '0x643CD0', 'fork', 'probe-9')[0], 0)
+        self.assertEqual(self.wave.record_verdict(
+            self.state, self.root, 'b001', '0x643CC0', 'ours', 'probe-11')[0], 0)
+
+    def gates(self, rc):
+        """Patch subprocess.run so the `bash tools/gates.sh` run exits rc;
+        record its calls.  Git calls pass through -- including close's
+        diff, whose pathspec names tools/gates.sh without invoking it."""
+        from unittest import mock
+        real = subprocess.run
+        calls = []
+
+        def run(cmd, **kw):
+            if cmd[0] == 'bash':
+                calls.append(cmd)
+                stdout = 'gates: all passed\n' if rc == 0 else \
+                    'gates: FAILED: linux-gcc build and tests\n'
+                return subprocess.CompletedProcess(cmd, rc, stdout=stdout,
+                                                   stderr='')
+            return real(cmd, **kw)
+
+        return mock.patch.object(self.wave.subprocess, 'run', run), calls
+
+    def first_sha(self):
+        return self.git('rev-parse', 'refs/heads/first').stdout.strip()
+
+    # -- the eight --------------------------------------------------------
+
+    def test_wave_next_ranks_and_keeps_files_disjoint(self):
+        rc, out = self.next(size=2)
+        self.assertEqual(rc, 0, out)
+        self.assertIn('b001', out)
+        self.assertIn('p3/wso-b001', out)
+        # The category filter held: the 9,999-char "same" row is never picked.
+        self.assertNotIn('TooBigButSame', out)
+        # Address-less rows are counted, not silently dropped.
+        self.assertIn('(skipped 1 row without an address)', out)
+        b1 = self.batches()['b001']
+        self.assertEqual(b1['branch'], 'p3/wso-b001')
+        self.assertEqual(b1['status'], 'assigned')
+        self.assertTrue(b1['assigned_at'])
+        self.assertEqual(b1['verdicts'], {})
+        # Ranked by their_len + our_len descending: 900 before 600.
+        self.assertEqual([r['address'] for r in b1['rows']],
+                         ['0x643CC0', '0x20010'])
+        self.assertEqual(b1['files'], ['src/A.cpp', 'src/B.cpp'])
+
+        rc, out = self.next(size=2)
+        self.assertEqual(rc, 0, out)
+        b2 = self.batches()['b002']
+        # Init (C.cpp) is next; Draw waits because A.cpp is owned by b001.
+        self.assertEqual([r['address'] for r in b2['rows']], ['0x30010'])
+        self.assertEqual(b2['files'], ['src/C.cpp'])
+        self.assertFalse(set(b1['files']) & set(b2['files']))
+
+    def test_wave_next_exhausted_exit_2(self):
+        self.write_disagreements(_WAVE_ROWS[:1])
+        self.assertEqual(self.next(size=5)[0], 0)
+        rc, out = self.next(size=5)
+        self.assertEqual(rc, 2, out)
+        self.assertEqual(list(self.batches()), ['b001'])
+
+    def test_wave_brief_contains_rows_and_rules(self):
+        self.write_disagreements(_WAVE_ROWS[:2])
+        self.next(size=2)
+        template = os.path.join(ROOT, 'docs', 'wso', 'brief-template.md')
+        rc, brief = self.wave.render_brief(template, self.state, 'b001')
+        self.assertEqual(rc, 0, brief)
+        self.assertIn('p3/wso-b001', brief)
+        self.assertIn('0x643CC0', brief)
+        self.assertIn('Render', brief)
+        self.assertIn('src/A.cpp', brief)
+        self.assertIn('theirs 500', brief)
+        # The fixed rules, as the template states them:
+        self.assertIn('case ', brief)
+        self.assertIn('disagreed with WSO', brief)
+        self.assertIn('corroborated by WSO', brief)
+        self.assertIn('Imported-From', brief)
+        self.assertIn('WIP', brief)
+        self.assertIn('parity_waiver', brief)
+        self.assertIn('git push', brief)
+        self.assertIn('git show wso/main:', brief)
+        # Unknown batch id.
+        self.assertEqual(
+            self.wave.render_brief(template, self.state, 'b999')[0], 2)
+
+    def test_wave_close_refuses_missing_verdict(self):
+        self.init_repo()
+        self.write_evidence()
+        self.commit_worktree()
+        # Render decided; only Draw's verdict is missing.
+        self.assertEqual(self.wave.record_verdict(
+            self.state, self.root, 'b001', '0x643CC0', 'ours', 'probe-11')[0], 0)
+        first = self.first_sha()
+        with self.gates(0)[0]:
+            rc, out = self.wave.close_batch(self.state, self.root, 'b001')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('b001 not closed', out)
+        self.assertIn('no verdict for 0x643CD0', out)
+        self.assertNotIn('no verdict for 0x643CC0', out)
+        self.assertEqual(self.batches()['b001']['status'], 'assigned')
+        self.assertEqual(self.first_sha(), first)
+
+    def test_wave_close_refuses_uncommitted(self):
+        self.init_repo()
+        self.write_evidence()
+        self.verdicts()
+        first = self.first_sha()
+        with self.gates(0)[0] as _:
+            rc, out = self.wave.close_batch(self.state, self.root, 'b001')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('b001 not closed', out)
+        self.assertIn('uncommitted paths in', out)
+        self.assertIn('docs/evidence/643CC0.md', out)
+        self.assertEqual(self.first_sha(), first)
+
+    def test_wave_close_refuses_failed_gate(self):
+        self.init_repo()
+        self.write_evidence()
+        self.commit_worktree()
+        self.verdicts()
+        first = self.first_sha()
+        with self.gates(1)[0]:
+            rc, out = self.wave.close_batch(self.state, self.root, 'b001')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('b001 not closed', out)
+        self.assertIn('tools/gates.sh --base first failed', out)
+        self.assertIn('gates: FAILED', out)
+        self.assertEqual(self.batches()['b001']['status'], 'assigned')
+        self.assertEqual(self.first_sha(), first)
+
+    def test_wave_close_refuses_modified_gate(self):
+        self.init_repo()
+        self.write_evidence()
+        self.commit_worktree()
+        self.verdicts()
+        # The branch rewrites the very gate that would certify it.
+        gate = os.path.join(self.wt, 'tools', 'gates.sh')
+        os.makedirs(os.path.dirname(gate), exist_ok=True)
+        with open(gate, 'w') as f:
+            f.write('#!/bin/sh\nexit 0\n')
+        self.commit_worktree('weaken the gate')
+        first = self.first_sha()
+        ctx, calls = self.gates(0)
+        with ctx:
+            rc, out = self.wave.close_batch(self.state, self.root, 'b001')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('b001 not closed', out)
+        self.assertIn('tools/gates.sh', out)
+        # The refusal came before the gate ran, and moved nothing.
+        self.assertEqual(calls, [])
+        self.assertEqual(self.batches()['b001']['status'], 'assigned')
+        self.assertEqual(self.first_sha(), first)
+
+    def test_wave_close_fast_forwards(self):
+        self.init_repo()
+        self.write_evidence()
+        self.commit_worktree()
+        self.verdicts()
+        first_before = self.first_sha()
+        branch_sha = self.git('rev-parse', 'p3/wso-b001').stdout.strip()
+        self.assertNotEqual(first_before, branch_sha)
+        ctx, calls = self.gates(0)
+        with ctx:
+            rc, out = self.wave.close_batch(self.state, self.root, 'b001')
+        self.assertEqual(rc, 0, out)
+        # The gate ran once, in the batch's worktree, against first.
+        self.assertEqual(len(calls), 1)
+        self.assertIn('tools/gates.sh', calls[0])
+        self.assertIn('--base', calls[0])
+        self.assertIn('first', calls[0])
+        self.assertEqual(self.first_sha(), branch_sha)
+        b = self.batches()['b001']
+        self.assertEqual(b['status'], 'closed')
+        self.assertTrue(b['closed_at'])
+        self.assertIn('fork 1', out)
+        self.assertIn('ours 1', out)
+        # The fork won Draw, so ours' evidence kind is the loser (replay);
+        # ours won Render, his verification is a trace.
+        self.assertIn('trace 1', out)
+        self.assertIn('replay 1', out)
+        # A second close is refused, and moves nothing.
+        rc, out = self.wave.close_batch(self.state, self.root, 'b001')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('already closed', out)
+        self.assertEqual(self.first_sha(), branch_sha)
+
+    def test_wave_scorecard_tally(self):
+        state = {'batches': {
+            'b001': {
+                'rows': [{'address': f'0x{i}'} for i in range(4)],
+                'files': ['src/A.cpp'], 'branch': 'p3/wso-b001',
+                'status': 'closed', 'assigned_at': 't', 'closed_at': 't',
+                'verdicts': {
+                    '0x0': {'side': 'fork', 'case': 'c1',
+                            'losing_kind': 'oracle'},
+                    '0x1': {'side': 'fork', 'case': 'c2',
+                            'losing_kind': 'replay'},
+                    '0x2': {'side': 'ours', 'case': 'c3',
+                            'losing_kind': 'trace'},
+                    '0x3': {'side': 'neither', 'case': 'c4',
+                            'losing_kind': None},
+                }}}
+        }
+        with open(self.state, 'w') as f:
+            json.dump(state, f)
+        report = os.path.join(self.tmp, 'xrec-report.md')
+        with open(report, 'w') as f:
+            f.write('# Xrec\n\n## JSON\n\nrows.\n\n## Scorecard\n\nstale: fork 99\n')
+        rc, out = self.wave.write_scorecard(self.state, report)
+        self.assertEqual(rc, 0, out)
+        with open(report) as f:
+            text = f.read()
+        self.assertEqual(text.count('## Scorecard'), 1)
+        self.assertIn('# Xrec', text)
+        self.assertIn('## JSON', text)
+        self.assertNotIn('stale', text)
+        self.assertIn('Decided for the fork: 2', text)
+        self.assertIn('oracle 1', text)
+        self.assertIn('replay 1', text)
+        self.assertIn('Decided for ours: 1', text)
+        self.assertIn('trace 1', text)
+        self.assertIn('Decided for neither: 1', text)
+        self.assertIn('b001 closed (4 rows)', text)
+        # Idempotent: a second run writes the same bytes.
+        rc, out = self.wave.write_scorecard(self.state, report)
+        self.assertEqual(rc, 0, out)
+        with open(report) as f:
+            self.assertEqual(f.read(), text)
 
 
 if __name__ == '__main__':

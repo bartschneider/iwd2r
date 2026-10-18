@@ -130,15 +130,19 @@ def worktree_clone(worktree=None):
     return clone, lock
 
 
-def headless(args, log, read_only=False):
+def headless(args, log, read_only=False, project=None, project_name=None):
     """Run analyzeHeadless on the project; returns the CompletedProcess.
 
     Ghidra refuses project paths with an element starting with '.', such as
     ~/.local, so the project is reached through a temporary symlink. A
     read-only run uses this worktree's copy and holds only its lock; any
     other run uses the main project and holds LOCK_PATH, so a second
-    worktree's run waits for this one."""
-    project, lock = PROJECT_DIR, LOCK_PATH
+    worktree's run waits for this one. Another project (its directory and
+    name, e.g. a DLL project of make_dll_project) can be passed instead; it
+    still runs under LOCK_PATH."""
+    lock = LOCK_PATH
+    if project is None or project_name is None:
+        project, project_name = PROJECT_DIR, PROJECT_NAME
     if read_only:
         project, lock = worktree_clone()
         log = os.path.join(os.path.dirname(project), os.path.basename(log))
@@ -148,9 +152,9 @@ def headless(args, log, read_only=False):
         if any(part.startswith('.') for part in tmp.split(os.sep)):
             sys.exit(f'make_project: temporary directory {tmp} has a '
                      "path element starting with '.'; set TMPDIR")
-        link = os.path.join(tmp, 'iwd2')
+        link = os.path.join(tmp, project_name)
         os.symlink(project, link)
-        cmd = [HEADLESS, link, PROJECT_NAME, *args,
+        cmd = [HEADLESS, link, project_name, *args,
                '-scriptPath', HERE, '-log', log]
         with filelock.hold(lock, 'ghidra'):
             return subprocess.run(cmd, env=env, capture_output=True,

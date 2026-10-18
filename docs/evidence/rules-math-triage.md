@@ -31,13 +31,14 @@ For a touched address in the set, the checker (`python3 -I
 tools/check_evidence.py --base <rev>`) fails unless the evidence doc has
 `kind: oracle`:
 
-- read-only or replay kind →
-  `src/CGameEffect.cpp: 0x4A9E30 CGameEffect_opcode_12_6: rules math: evidence has kind: read-only; requires kind: oracle (an exemption or a replay does not pass)`
+- read-only, replay or trace kind →
+  `src/CGameEffect.cpp: 0x4A9E30 CGameEffect_opcode_12_6: rules math: evidence has kind: read-only; requires kind: oracle (an exemption, a replay or a trace does not pass)`
 - no doc → `no docs/evidence/4A9E30.md (rules math: requires kind: oracle)`
 - doc without a `kind:` → counted as not-oracle (an error here, while
   outside the set it stays a warning)
 
-The report adds a `rules math: oracle N, replay N, read-only N (...)`
+The report adds a `rules math: oracle N, replay N, read-only N, trace N
+(...)`
 summary line next to the all-function kinds line. Outside the set nothing
 changes: warn-only, as before.
 
