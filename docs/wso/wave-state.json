@@ -1424,7 +1424,7 @@
     "b006": {
       "assigned_at": "2026-10-18T19:57:55+00:00",
       "branch": "p3/wso-b006",
-      "closed_at": null,
+      "closed_at": "2026-10-18T22:57:04+00:00",
       "files": [
         "src/CSpell.cpp",
         "src/CGameTrigger.cpp",
@@ -1605,7 +1605,7 @@
           "their_len": 2578
         }
       ],
-      "status": "assigned",
+      "status": "closed",
       "verdicts": {
         "0x409820": {
           "case": "move/follow_path",
@@ -1708,6 +1708,183 @@
           "side": "ours"
         }
       }
+    },
+    "b007": {
+      "assigned_at": "2026-10-18T22:09:22+00:00",
+      "branch": "p3/wso-b007",
+      "closed_at": null,
+      "files": [
+        "src/CGameArea.cpp",
+        "src/CGameSprite.cpp",
+        "src/CInfGame.cpp",
+        "src/CGameAIBase.cpp",
+        "src/CGameEffect.cpp",
+        "src/CInfButtonArray.cpp"
+      ],
+      "rows": [
+        {
+          "address": "0x477740",
+          "category": "both_changed_differ",
+          "file": "src/CGameArea.cpp",
+          "name": "CGameArea::Render",
+          "our_len": 4965,
+          "their_len": 4881
+        },
+        {
+          "address": "0x7093E0",
+          "category": "both_changed_differ",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::RenderSpriteEffect",
+          "our_len": 5076,
+          "their_len": 4479
+        },
+        {
+          "address": "0x5BAD70",
+          "category": "both_changed_differ",
+          "file": "src/CInfGame.cpp",
+          "name": "CInfGame::SwapItemPersonalInventory",
+          "our_len": 4883,
+          "their_len": 4562
+        },
+        {
+          "address": "0x72FD20",
+          "category": "both_changed_differ",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::CheckModal",
+          "our_len": 1572,
+          "their_len": 7708
+        },
+        {
+          "address": "0x461B80",
+          "category": "both_changed_differ",
+          "file": "src/CGameAIBase.cpp",
+          "name": "CGameAIBase::ForceSpellPoint",
+          "our_len": 4346,
+          "their_len": 4884
+        },
+        {
+          "address": "0x4A42F0",
+          "category": "both_changed_differ",
+          "file": "src/CGameEffect.cpp",
+          "name": "CGameEffect::CheckSave",
+          "our_len": 5560,
+          "their_len": 3423
+        },
+        {
+          "address": "0x46B160",
+          "category": "both_changed_differ",
+          "file": "src/CGameArea.cpp",
+          "name": "CGameArea::GetNearest",
+          "our_len": 4351,
+          "their_len": 4539
+        },
+        {
+          "address": "0x726810",
+          "category": "both_changed_differ",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::sub_726810",
+          "our_len": 3681,
+          "their_len": 5030
+        },
+        {
+          "address": "0x70BEE0",
+          "category": "both_changed_differ",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::Marshal",
+          "our_len": 4344,
+          "their_len": 4358
+        },
+        {
+          "address": "0x708280",
+          "category": "both_changed_differ",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::StartSpriteEffect",
+          "our_len": 4303,
+          "their_len": 4305
+        },
+        {
+          "address": "0x59FB50",
+          "category": "both_changed_differ",
+          "file": "src/CInfGame.cpp",
+          "name": "CInfGame::DestroyGame",
+          "our_len": 4067,
+          "their_len": 4062
+        },
+        {
+          "address": "0x594720",
+          "category": "both_changed_differ",
+          "file": "src/CInfButtonArray.cpp",
+          "name": "CInfButtonArray::OnRButtonPressed",
+          "our_len": 4171,
+          "their_len": 3885
+        },
+        {
+          "address": "0x5BE900",
+          "category": "both_changed_differ",
+          "file": "src/CInfGame.cpp",
+          "name": "CInfGame::SynchronousUpdate",
+          "our_len": 4157,
+          "their_len": 3871
+        },
+        {
+          "address": "0x715BD0",
+          "category": "both_changed_differ",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::GetInnateQuickButtons",
+          "our_len": 3899,
+          "their_len": 3896
+        },
+        {
+          "address": "0x6FF8A0",
+          "category": "both_changed_differ",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::OnActionButton",
+          "our_len": 3848,
+          "their_len": 3792
+        },
+        {
+          "address": "0x71E240",
+          "category": "both_changed_differ",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::sub_71E240",
+          "our_len": 4252,
+          "their_len": 3330
+        },
+        {
+          "address": "0x728580",
+          "category": "both_changed_differ",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::ApplyTriggers",
+          "our_len": 3736,
+          "their_len": 3518
+        },
+        {
+          "address": "0x755A70",
+          "category": "both_changed_differ",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::sub_755A70",
+          "our_len": 4414,
+          "their_len": 2702
+        },
+        {
+          "address": "0x470F10",
+          "category": "both_changed_differ",
+          "file": "src/CGameArea.cpp",
+          "name": "CGameArea::GetTintColor",
+          "our_len": 2010,
+          "their_len": 4933
+        },
+        {
+          "address": "0x75D450",
+          "category": "both_changed_differ",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::CheckIfUsedUp",
+          "our_len": 3924,
+          "their_len": 2981
+        }
+      ],
+      "status": "assigned",
+      "verdicts": {}
     }
   },
   "fork_base": "e8dd16a750966af53f24daaf49dcb4fb13594c13"
