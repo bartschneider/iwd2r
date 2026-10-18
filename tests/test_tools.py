@@ -1942,15 +1942,15 @@ class CheckEvidenceTest(unittest.TestCase):
                               'kind: oracle')
         r = self.check()
         self.assertEqual(r.returncode, 0, r.stdout)
-        self.assertIn('rules math: oracle 1, replay 0, read-only 0 '
+        self.assertIn('rules math: oracle 1, replay 0, read-only 0, trace 0 '
                       '(1 of 1 touched function(s)', r.stdout)
 
     def test_rules_math_counted_in_evidence_kinds(self):
         self.touch_rules_math('exemption: "pure data"\nkind: read-only')
         r = self.check()
         self.assertEqual(r.returncode, 1)
-        self.assertIn('evidence kinds: oracle 0, replay 0, read-only 1 '
-                      '(1 of 1 touched function(s))', r.stdout)
+        self.assertIn('evidence kinds: oracle 0, replay 0, read-only 1, '
+                      'trace 0 (1 of 1 touched function(s))', r.stdout)
 
     def test_rules_math_note_on_missing_evidence(self):
         # A pure deletion inside the body still touches the function, and
@@ -1975,6 +1975,60 @@ class CheckEvidenceTest(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout)
         self.assertIn('warning:', r.stdout)
         self.assertNotIn('rules math:', r.stdout)
+
+    def trace_sources(self):
+        """The two trace_source citation forms ruling 6 accepts: the fork's
+        recovery note and a frida capture of our own binary."""
+        return ['WillScarlettOhara/iwd2-re@e8dd16a7'
+                ' docs/wso/recovery/CScreenMap.md',
+                'frida sendmsg_probe orig:%s ours:%s compare=0'
+                % ('a' * 64, 'b' * 64)]
+
+    def test_trace_kind_accepted_with_source(self):
+        self.write('src/a.cpp', TWO_FUNCTIONS.replace('return x;',
+                                                      'return x * 2;'))
+        for source in self.trace_sources():
+            with self.subTest(source=source):
+                self.evidence('401000', 'oracle_case: rand/roll\n'
+                                        'kind: trace\n'
+                                        f'trace_source: "{source}"')
+                self.commit()
+                r = self.check()
+                self.assertEqual(r.returncode, 0, r.stdout)
+                self.assertIn('trace 1 (1 of 1 touched function(s))',
+                              r.stdout)
+
+    def test_trace_kind_without_source_fails(self):
+        self.write('src/a.cpp', TWO_FUNCTIONS.replace('return x;',
+                                                      'return x * 2;'))
+        self.evidence('401000', 'oracle_case: rand/roll\nkind: trace')
+        self.commit()
+        r = self.check()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn('docs/evidence/401000.md', r.stdout)
+        self.assertIn('trace_source', r.stdout)
+
+    def test_trace_source_of_unknown_form_fails(self):
+        self.write('src/a.cpp', TWO_FUNCTIONS.replace('return x;',
+                                                      'return x * 2;'))
+        self.evidence('401000', 'oracle_case: rand/roll\nkind: trace\n'
+                                'trace_source: "checked by eye"')
+        self.commit()
+        r = self.check()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn('docs/evidence/401000.md', r.stdout)
+        self.assertIn('trace_source', r.stdout)
+
+    def test_rules_math_rejects_trace(self):
+        address = self.touch_rules_math('oracle_case: rand/roll\n'
+                                        'kind: trace\n'
+                                        'trace_source: "%s"'
+                                        % self.trace_sources()[0])
+        r = self.check()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn(f'0x{address:X} A::f', r.stdout)
+        self.assertIn('kind: trace', r.stdout)
+        self.assertIn('requires kind: oracle', r.stdout)
 
 
 class RulesMathSetTest(unittest.TestCase):

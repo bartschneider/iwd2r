@@ -18,15 +18,22 @@ HEAD (a force push, or a `before` missing from the clone) is reported on
 stderr and skipped with exit 0.
 
 For the same touched functions the checker also reports how many evidence
-files carry each `kind` (`oracle`, `replay` or `read-only`), and warns about
-the files whose `kind` is missing or not one of those three. Outside the
-rules-math set the kind is not enforced: a missing one is only a warning.
+files carry each `kind` (`oracle`, `replay`, `read-only` or `trace`), and
+warns about the files whose `kind` is missing or not one of those four.
+Outside the rules-math set the kind is not enforced: a missing one is only a
+warning. A `kind: trace` document — the function evidenced by tracing, the
+kind the WSO fork's imports carry — must say where the trace came from in
+`trace_source`: a citation of the fork's recovery note
+(`WillScarlettOhara/iwd2-re@<sha> <path>`) or of a frida capture of our own
+binary (`frida <probe> orig:<sha256> ours:<sha256> compare=0`); anything
+else fails like a missing citation.
 Functions in RULES_MATH below — the rules-math set, whose correctness is the
 D&D 3e rules themselves (attack rolls, AC, saving throws, damage
 resolution, effect application; triaged in docs/evidence/rules-math-triage.md)
-— must have `kind: oracle`: a replay or a read-only exemption fails, and an
-untagged document counts as not-oracle instead of a warning. The report
-also prints the per-kind split of the touched rules-math functions.
+— must have `kind: oracle`: a replay, a read-only exemption or a trace
+fails, and an untagged document counts as not-oracle instead of a warning.
+The report also prints the per-kind split of the touched rules-math
+functions.
 """
 
 import argparse
@@ -41,7 +48,15 @@ import labels  # noqa: E402
 
 EVIDENCE_DIR = 'docs/evidence'
 HUNK = re.compile(r'^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@')
-KINDS = ('oracle', 'replay', 'read-only')
+KINDS = ('oracle', 'replay', 'read-only', 'trace')
+TRACE_SOURCES = (
+    # The fork's recovery note: repo@sha, then the note's path in it.
+    re.compile(r'WillScarlettOhara/iwd2-re@[0-9A-Fa-f]{7,40}\s+\S+$'),
+    # A frida capture of our own binary against the original, the line the
+    # compare harness prints (plan @8ce297d7, Task 5b).
+    re.compile(r'frida\s+\S+\s+orig:[0-9A-Fa-f]{64}\s+'
+               r'ours:[0-9A-Fa-f]{64}\s+compare=0$'),
+)
 
 # The rules-math set: functions whose correctness IS a D&D 3e rule — the
 # to-hit and AC math, saving throws, damage resolution, and the
@@ -52,7 +67,7 @@ KINDS = ('oracle', 'replay', 'read-only')
 # a rule; callers, orchestration and display stay out. Each entry says what
 # the function computes and lists the ones considered and left out with the
 # reasons. A diff touching one of these addresses requires evidence with
-# `kind: oracle` — an exemption or a replay does not pass.
+# `kind: oracle` — an exemption, a replay or a trace does not pass.
 RULES_MATH = frozenset({
     # Attack rolls, to-hit modifiers and AC.
     0x723CC0,  # CGameSprite::GetAC: base 10, armor-capped DEX, blind penalty,
@@ -225,6 +240,11 @@ def problem(repo, address):
         return f'{rel} has a malformed address {recorded!r}', fields
     if not fields.get('oracle_case') and not fields.get('exemption'):
         return f'{rel} has neither oracle_case nor exemption', fields
+    if fields.get('kind') == 'trace' and not any(
+            p.fullmatch(fields.get('trace_source') or '')
+            for p in TRACE_SOURCES):
+        return (f'{rel} has kind: trace without a trace_source citing a '
+                'fork note or a frida capture'), fields
     return None, fields
 
 
@@ -273,7 +293,7 @@ def main(argv=None):
             current = f'kind: {kind}' if kind else 'no kind'
             errors.append(f'{path}: 0x{address:X} {name}: rules math: '
                           f'evidence has {current}; requires kind: oracle '
-                          f'(an exemption or a replay does not pass)')
+                          f'(an exemption, a replay or a trace does not pass)')
     for line in errors:
         print(line)
     if errors:

@@ -43,10 +43,15 @@ The file name is the address in upper-case hex without `0x`:
   original, or instead
 - `exemption`: a short reason no case is needed, such as `"pure data"`.
 - `kind`: how the function is evidenced — `oracle` (its `oracle_case` runs in
-  the gate), `replay` (a replay scenario or compare run covers it) or
-  `read-only` (nothing runs it; the exemption stands on its own). The checker
-  reports counts per kind but does not require one — except for the
-  rules-math set (`RULES_MATH` in `tools/check_evidence.py`: attack rolls,
+  the gate), `replay` (a replay scenario or compare run covers it),
+  `read-only` (nothing runs it; the exemption stands on its own) or `trace`
+  (a run trace covers it; the kind the WSO fork's imports carry). A
+  `trace` document's `trace_source` cites where the trace came from — the
+  fork's recovery note (`WillScarlettOhara/iwd2-re@<sha> <path>`) or a
+  frida capture of our own binary (`frida <probe> orig:<sha256>
+  ours:<sha256> compare=0`) — and the gate rejects a `trace` without one.
+  The checker reports counts per kind but does not require one — except for
+  the rules-math set (`RULES_MATH` in `tools/check_evidence.py`: attack rolls,
   saving throws, damage resolution, effect application), which requires
   `kind: oracle`; triaged in `rules-math-triage.md`.
 - `ghidra_version`: the Ghidra that produced the decompilation
