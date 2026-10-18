@@ -50,3 +50,17 @@ Changes from the originals:
 
 The fonts are embedded unmodified under their original names (the OFL allows bundling them with software; the licence files travel with them in the source tree). SHA-256: CrimsonPro-Bold.ttf d8fc7d47b2b8681e7513e365764808b986999e1a78928cc58d04f237d8b8f798, Marcellus-Regular.ttf 1cf0cd10b17d35e852729962cc1ffaffed94514895972458345e2df34abb2f81, MarcellusSC-Regular.ttf 03044ab65228b0554c9a5c1e63df29d4e58a71857e212801aaf768dfd106bdf0, UncialAntiqua-Regular.ttf 33a5128b59d1c95d4f3788164f4ab3a1196f0a982263cb2cd278c47418366766.
 
+## Recovered engine code from the WSO fork
+
+Engine functions recovered by the parallel effort at [WillScarlettOhara/iwd2-re](https://github.com/WillScarlettOhara/iwd2-re) (the WSO fork) are imported behind the evidence gate, per function or as whole files where we lack the file; [docs/wso/README.md](wso/README.md) describes the project and the import rules. Each import commit marks the functions it brings with the trailer:
+
+```
+Imported-From: WillScarlettOhara/iwd2-re@<40-char sha> (MIT per author, 2026-10-17)
+```
+
+| Our files | Ported from | Copyright |
+|---|---|---|
+| Functions carrying the `Imported-From` trailer | [WillScarlettOhara/iwd2-re](https://github.com/WillScarlettOhara/iwd2-re), recovered engine functions | Copyright the fork's author (WillScarlettOhara). MIT, as granted to Thierry on 2026-10-17; the link to his LICENSE goes here when it is published. |
+
+The additions are MIT, under the standard MIT text quoted at the top of this file. Nothing from the fork's IWD2EE branch — game-data overrides, compiled binaries — is vendored; the renderer artifacts are fetched by pinned hash outside the repository (docs/wso/README.md).
+
