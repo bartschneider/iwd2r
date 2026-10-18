@@ -50,6 +50,15 @@ Decompile scratch output lives in `runs/dll-decomp/` (git-ignored).
 - [`IEex_Helper_WriteDump`](IEex_Helper_WriteDump.md)
 - [`IEex_Helper_sscanf`](IEex_Helper_sscanf.md)
 
+## Key state / raw input
+
+- [`IEex_Helper_FakeKeyEvent`](IEex_Helper_FakeKeyEvent.md)
+- [`IEex_Helper_GetAsyncKeyStateClient`](IEex_Helper_GetAsyncKeyStateClient.md)
+- [`IEex_Helper_GetAsyncKeyStateWrapper`](IEex_Helper_GetAsyncKeyStateWrapper.md)
+- [`IEex_Helper_GetPressedKeysStackNL`](IEex_Helper_GetPressedKeysStackNL.md)
+- [`IEex_Helper_GetCursorPhysicalXY`](IEex_Helper_GetCursorPhysicalXY.md)
+- [`IEex_Helper_RunWithRawInputLock`](IEex_Helper_RunWithRawInputLock.md)
+
 ## Lua-side names that are not DLL helpers
 
 - `IEex_DefineAddress` / `IEex_SupressScrollCheck` are implemented purely in the staged Lua patches; there is no `IEexHelper.fork.dll` export or registration behind them, so they have no note here.
