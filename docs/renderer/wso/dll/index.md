@@ -90,6 +90,15 @@ Decompile scratch output lives in `runs/dll-decomp/` (git-ignored).
 - [`IEex_Helper_UIRDownGated`](IEex_Helper_UIRDownGated.md)
 - [`IEex_Helper_WorldRejectMapCursor`](IEex_Helper_WorldRejectMapCursor.md)
 
+## HUD layer
+
+- [`IEex_Helper_HudAddPanelContentRect`](IEex_Helper_HudAddPanelContentRect.md)
+- [`IEex_Helper_HudClearPanelContentRects`](IEex_Helper_HudClearPanelContentRects.md)
+- [`IEex_Helper_HudLayerRender`](IEex_Helper_HudLayerRender.md)
+- [`IEex_Helper_HudLayerSkipFrame`](IEex_Helper_HudLayerSkipFrame.md)
+- [`IEex_Helper_HudPanelRenderDither`](IEex_Helper_HudPanelRenderDither.md)
+- [`IEex_Helper_IsHudLayerActive`](IEex_Helper_IsHudLayerActive.md)
+
 ## Staged Lua evidence (sha256)
 
 The staged Lua patches at `~/.local/share/iwd2r/wso/lua/` are used as evidence for who calls each helper (and, for the keys-screen group, for hook sites and Lua-callback contracts). The staged corpus itself has no pin yet; these hashes let it be pinned retroactively.
