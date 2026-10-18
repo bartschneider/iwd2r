@@ -1929,11 +1929,6 @@ void CGameSprite::AIUpdate()
                     ITEM_EFFECT effect;
                     CGameEffect::ClearItemEffect(&effect, ICEWIND_CGAMEEFFECT_DAYBLINDNESS);
 
-                    // NOTE: The binary sets durationType (ITEM_EFFECT offset 0xC)
-                    // to 1 before DecodeEffect (0x6F7xxx: uStack_30 = 1 with
-                    // auStack_3c as the ITEM_EFFECT base).
-                    effect.durationType = 1;
-
                     CGameEffect* pEffect = CGameEffect::DecodeEffect(&effect,
                         GetPos(),
                         m_id,
@@ -2047,7 +2042,7 @@ void CGameSprite::AIUpdate()
         return;
     }
 
-    BOOL v1 = CanAnimate();
+    BOOL v1 = sub_6FB440();
     if (v1 != field_54A8
         && Animate()
         && !m_baseStats.field_294) {
@@ -2225,7 +2220,7 @@ void CGameSprite::AIUpdate()
                         SHORT lSlot;
                         CItem* pItem = m_equipment.m_items[m_equipment.m_selectedWeapon];
                         pItem->Demand();
-                        DecodeSwingSound(pItem, GetLauncher(pItem->GetAbility(m_equipment.m_selectedWeaponAbility), lSlot));
+                        sub_756930(pItem, GetLauncher(pItem->GetAbility(m_equipment.m_selectedWeaponAbility), lSlot));
                         pItem->Release();
                     }
                 }
@@ -2474,14 +2469,8 @@ void CGameSprite::AIUpdate()
                             || (pGame->GetCharacterPortraitNum(m_id) != -1
                                 && (m_derivedStats.m_generalState & STATE_STONE_DEATH) != 0)) {
                             if (InControl()) {
-                                // NOTE: RemoveFromArea (0x4C7F60) clears
-                                // m_pArea, but the binary reads m_nCharacters
-                                // off the pointer it saved before the call
-                                // (0x6F7xxx: iVar11 = m_pArea; call; then
-                                // *(iVar11 + 0x1ed) == 0). Cache it the same way.
-                                CGameArea* pArea = m_pArea;
                                 RemoveFromArea();
-                                if (pArea->m_nCharacters == 0) {
+                                if (m_pArea->m_nCharacters == 0) {
                                     pGame->SelectCharacter(pGame->GetProtagonist(), FALSE);
                                     pGame->SelectToolbar();
                                     if (g_pBaldurChitin->GetActiveEngine() != g_pBaldurChitin->GetScreenWorld()
@@ -2567,11 +2556,6 @@ void CGameSprite::AIUpdate()
                             && (m_baseStats.m_generalState & STATE_NONDETECTION) == 0) {
                             ITEM_EFFECT effect;
                             CGameEffect::ClearItemEffect(&effect, CGAMEEFFECT_NONDETECTION);
-
-                            // NOTE: As above, durationType (offset 0xC) is set
-                            // to 1 before DecodeEffect (uStack_60 = 1 with
-                            // auStack_6c as the ITEM_EFFECT base).
-                            effect.durationType = 1;
 
                             CGameEffect* pEffect = CGameEffect::DecodeEffect(&effect,
                                 GetPos(),
@@ -3396,18 +3380,10 @@ BOOL CGameSprite::ClearBumpPath(const CPoint& start, const CPoint& goal)
 }
 
 // 0x6FB440
-BOOL CGameSprite::CanAnimate()
+BOOL CGameSprite::sub_6FB440()
 {
     if (!InControl()) {
         return FALSE;
-    }
-
-    // NOTE: Inlined CGameAnimation getter.
-    // __FILE__: .\Include\ObjAnimation.h
-    // __LINE__: 2087
-    if (m_animation.m_animation == NULL) {
-        CUtil::UtilAssert(2087, ".\\Include\\ObjAnimation.h",
-            "m_animation != NULL", NULL);
     }
 
     if (m_animation.GetMoveScale() == 0
@@ -15411,8 +15387,8 @@ void CGameSprite::CheckModal()
     }
 }
 
-// NOTE: The sprite's override of the status triggers (vtable slot 0x64
-// in the exe table at 0x85BDD4). Any trigger it does not know goes to
+// NOTE: The sprite's override of the status triggers (the vtable at
+// 0x85BDD4, slot 0x64). Any trigger it does not know goes to
 // CGameAIBase::EvaluateStatusTrigger (0x453840).
 //
 // 0x731B30
@@ -16341,7 +16317,7 @@ void CGameSprite::FeedBack(WORD nFeedBackId, LONG a3, LONG a4, LONG a5, LONG a6,
                 STR_RES strRes;
                 CString sText;
                 g_pBaldurChitin->GetTlkTable().Fetch(16462, strRes); // "Critical Hit!"
-                sText.Format("%s (%+d)", strRes.szText, a3); // re-lint: disable RE001
+                sText.Format("%s (%+d)", strRes.szText, a3);
                 g_pBaldurChitin->GetBaldurMessage()->DisplayText(GetName(),
                     sText,
                     rgbNameColor,
@@ -16375,7 +16351,7 @@ void CGameSprite::FeedBack(WORD nFeedBackId, LONG a3, LONG a4, LONG a5, LONG a6,
         if ((g_pBaldurChitin->GetObjectGame()->GetOptions()->m_nEffectTextLevel & 0x1) != 0) {
             CString sText1;
             CString sText2;
-            sText2.Format("%d ", a8); // re-lint: disable RE001
+            sText2.Format("%d ", a8);
 
             if (a7 > 0) {
                 STR_RES strRes;
@@ -16384,11 +16360,11 @@ void CGameSprite::FeedBack(WORD nFeedBackId, LONG a3, LONG a4, LONG a5, LONG a6,
             }
 
             if (a5 > 0) {
-                sText1.Format(": %d + %d = %d", a3, a5, a3 + a5); // re-lint: disable RE001
+                sText1.Format(": %d + %d = %d", a3, a5, a3 + a5);
             } else if (a5 < 0) {
-                sText1.Format(": %d - %d = %d", a3, -a5, a3 + a5); // re-lint: disable RE001
+                sText1.Format(": %d - %d = %d", a3, -a5, a3 + a5);
             } else {
-                sText1.Format(": %d", a3); // re-lint: disable RE001
+                sText1.Format(": %d", a3);
             }
 
             STR_RES strRes;
@@ -16621,8 +16597,7 @@ void CGameSprite::FeedBack(WORD nFeedBackId, LONG a3, LONG a4, LONG a5, LONG a6,
         break;
     case FEEDBACK_TOOHEAVY_SLOWED:
         if ((g_pBaldurChitin->GetObjectGame()->GetOptions()->m_nEffectTextLevel & 0x10) != 0) {
-            if (m_bPlayedEncumberedSlowed == 0 || a3 == 1) {
-                m_bPlayedEncumberedSlowed = 1;
+            if (m_bPlayedEncumberedSlowed || a3 == 1) {
                 g_pBaldurChitin->GetBaldurMessage()->DisplayTextRef(GetNameRef(),
                     19503, // "Encumbered: Slowed"
                     rgbNameColor,
@@ -16635,8 +16610,7 @@ void CGameSprite::FeedBack(WORD nFeedBackId, LONG a3, LONG a4, LONG a5, LONG a6,
         break;
     case FEEDBACK_TOOHEAVY_STOPPED:
         if ((g_pBaldurChitin->GetObjectGame()->GetOptions()->m_nEffectTextLevel & 0x10) != 0) {
-            if (m_bPlayedEncumberedStopped == 0 || a3 == 1) {
-                m_bPlayedEncumberedStopped = 1;
+            if (m_bPlayedEncumberedStopped || a3 == 1) {
                 g_pBaldurChitin->GetBaldurMessage()->DisplayTextRef(GetNameRef(),
                     19504, // "Encumbered: Can not move"
                     rgbNameColor,
@@ -16867,7 +16841,7 @@ void CGameSprite::FeedBack(WORD nFeedBackId, LONG a3, LONG a4, LONG a5, LONG a6,
             CString sText1;
             CString sText2;
             STR_RES strRes;
-            sText2.Format("%d ", a8); // re-lint: disable RE001
+            sText2.Format("%d ", a8);
 
             if (a7 > 0) {
                 g_pBaldurChitin->GetTlkTable().Fetch(733, strRes); // "Off Hand"
@@ -16875,11 +16849,11 @@ void CGameSprite::FeedBack(WORD nFeedBackId, LONG a3, LONG a4, LONG a5, LONG a6,
             }
 
             if (a5 > 0) {
-                sText1.Format(": %d + %d = %d", a3, a5, a3 + a5); // re-lint: disable RE001
+                sText1.Format(": %d + %d = %d", a3, a5, a3 + a5);
             } else if (a5 < 0) {
-                sText1.Format(": %d - %d = %d", a3, -a5, a3 + a5); // re-lint: disable RE001
+                sText1.Format(": %d - %d = %d", a3, -a5, a3 + a5);
             } else {
-                sText1.Format(": %d", a3); // re-lint: disable RE001
+                sText1.Format(": %d", a3);
             }
 
             g_pBaldurChitin->GetTlkTable().Fetch(39874, strRes); // "Critical Threat Roll"
@@ -16956,7 +16930,7 @@ void CGameSprite::FeedBack(WORD nFeedBackId, LONG a3, LONG a4, LONG a5, LONG a6,
             CString sText;
             g_pBaldurChitin->GetTlkTable().Fetch(a6, strRes);
             sText.Format(strRes.szText, a3);
-            if (sub_763150(CGAMESPRITE_FEAT_CRIPPLING_STRIKE)) { // re-lint: disable RE004
+            if (sub_763150(CGAMESPRITE_FEAT_CRIPPLING_STRIKE)) {
                 g_pBaldurChitin->GetTlkTable().Fetch(25070, strRes); // " with Crippling Strike (-1 Str)"
                 sText.Format(strRes.szText, a3);
             }
@@ -16989,7 +16963,7 @@ void CGameSprite::FeedBack(WORD nFeedBackId, LONG a3, LONG a4, LONG a5, LONG a6,
                 STR_RES strRes;
                 CString sText;
                 g_pBaldurChitin->GetTlkTable().Fetch(a6, strRes);
-                g_pBaldurChitin->GetTlkTable().SetToken(CString("RESOURCE"), strRes.szText); // re-lint: disable RE002
+                g_pBaldurChitin->GetTlkTable().SetToken(CString("RESOURCE"), strRes.szText);
             } else {
                 strEvasion = 25369; // "Evades effects"
             }
@@ -17048,9 +17022,9 @@ void CGameSprite::FeedBack(WORD nFeedBackId, LONG a3, LONG a4, LONG a5, LONG a6,
                 STR_RES strRes;
                 CString sText;
                 g_pBaldurChitin->GetTlkTable().Fetch(a6, strRes);
-                g_pBaldurChitin->GetTlkTable().SetToken(CString("RESOURCE"), strRes.szText); // re-lint: disable RE002
+                g_pBaldurChitin->GetTlkTable().SetToken(CString("RESOURCE"), strRes.szText);
                 g_pBaldurChitin->GetTlkTable().Fetch(26818, strRes); // "Unaffected by effects from <RESOURCE>"
-                sText.Format("%s (%+d)", strRes.szText, a3); // re-lint: disable RE001
+                sText.Format("%s (%+d)", strRes.szText, a3);
                 g_pBaldurChitin->GetBaldurMessage()->DisplayText(GetName(),
                     sText,
                     rgbNameColor,
@@ -17130,7 +17104,6 @@ void CGameSprite::FeedBack(WORD nFeedBackId, LONG a3, LONG a4, LONG a5, LONG a6,
                 rgbNameColor,
                 RGB(215, 215, 190));
         }
-        break;
     case FEEDBACK_SEARCHSTART:
         if ((g_pBaldurChitin->GetObjectGame()->GetOptions()->m_nEffectTextLevel & 0x10) != 0) {
             DisplayTextRef(GetNameRef(),
@@ -17164,7 +17137,7 @@ void CGameSprite::FeedBack(WORD nFeedBackId, LONG a3, LONG a4, LONG a5, LONG a6,
 
                 g_pBaldurChitin->GetTlkTable().Fetch(25138, strRes1); // "Singing Battlesong"
                 g_pBaldurChitin->GetTlkTable().Fetch(a6, strRes2);
-                sText.Format("%s: %s", strRes1.szText, strRes2.szText); // re-lint: disable RE001
+                sText.Format("%s: %s", strRes1.szText, strRes2.szText);
 
                 g_pBaldurChitin->GetBaldurMessage()->DisplayText(GetName(),
                     sText,
@@ -17209,7 +17182,7 @@ void CGameSprite::FeedBack(WORD nFeedBackId, LONG a3, LONG a4, LONG a5, LONG a6,
             STR_RES strRes;
             CString sText;
             g_pBaldurChitin->GetTlkTable().Fetch(37668, strRes); // "Missed <TARGETNAME> due to concealment."
-            sText.Format("%s (%+d)", strRes.szText, a3); // re-lint: disable RE001
+            sText.Format("%s (%+d)", strRes.szText, a3);
             g_pBaldurChitin->GetBaldurMessage()->DisplayText(GetName(),
                 sText,
                 rgbNameColor,
@@ -17272,7 +17245,7 @@ void CGameSprite::FeedBack(WORD nFeedBackId, LONG a3, LONG a4, LONG a5, LONG a6,
 
                 g_pBaldurChitin->GetTlkTable().Fetch(39742, strRes1); // "Spontaneous Casting"
                 g_pBaldurChitin->GetTlkTable().Fetch(a6, strRes2);
-                sText.Format("%s: %s", strRes1.szText, strRes2.szText); // re-lint: disable RE001
+                sText.Format("%s: %s", strRes1.szText, strRes2.szText);
 
                 g_pBaldurChitin->GetBaldurMessage()->DisplayText(GetName(),
                     sText,
@@ -17297,9 +17270,9 @@ void CGameSprite::FeedBack(WORD nFeedBackId, LONG a3, LONG a4, LONG a5, LONG a6,
                 g_pBaldurChitin->GetTlkTable().Fetch(a6, strRes2);
 
                 if (a4 > 0) {
-                    sText.Format("%s: %s %d", strRes1.szText, strRes2.szText, a4); // re-lint: disable RE001
+                    sText.Format("%s: %s %d", strRes1.szText, strRes2.szText, a4);
                 } else {
-                    sText.Format("%s: %s", strRes1.szText, strRes2.szText); // re-lint: disable RE001
+                    sText.Format("%s: %s", strRes1.szText, strRes2.szText);
                 }
 
                 g_pBaldurChitin->GetBaldurMessage()->DisplayText(GetName(),
@@ -17317,7 +17290,7 @@ void CGameSprite::FeedBack(WORD nFeedBackId, LONG a3, LONG a4, LONG a5, LONG a6,
             STR_RES strRes;
             CString sText;
             g_pBaldurChitin->GetTlkTable().Fetch(39846, strRes); // "Cleave feat adds another level %d attack."
-            sText.Format("%s (%+d)", strRes.szText, a3); // re-lint: disable RE001
+            sText.Format("%s (%+d)", strRes.szText, a3);
             g_pBaldurChitin->GetBaldurMessage()->DisplayText(GetName(),
                 sText,
                 rgbNameColor,
@@ -17336,7 +17309,7 @@ void CGameSprite::FeedBack(WORD nFeedBackId, LONG a3, LONG a4, LONG a5, LONG a6,
 
                 g_pBaldurChitin->GetTlkTable().Fetch(39881, strRes1); // "Using Feat: Lingering Song"
                 g_pBaldurChitin->GetTlkTable().Fetch(a6, strRes2);
-                sText.Format("%s: %s", strRes1.szText, strRes2.szText); // re-lint: disable RE001
+                sText.Format("%s: %s", strRes1.szText, strRes2.szText);
 
                 g_pBaldurChitin->GetBaldurMessage()->DisplayText(GetName(),
                     sText,
@@ -17352,9 +17325,9 @@ void CGameSprite::FeedBack(WORD nFeedBackId, LONG a3, LONG a4, LONG a5, LONG a6,
         if ((g_pBaldurChitin->GetObjectGame()->GetOptions()->m_nEffectTextLevel & 0x10) != 0) {
             if (a6 != 0) {
                 STR_RES strRes;
-                CString sText(" "); // re-lint: disable RE002
+                CString sText(" ");
                 g_pBaldurChitin->GetTlkTable().Fetch(a6, strRes);
-                sText.Format("%s", strRes.szText); // re-lint: disable RE001
+                sText.Format("%s", strRes.szText);
                 g_pBaldurChitin->GetBaldurMessage()->DisplayText(GetName(),
                     sText,
                     rgbNameColor,
@@ -23511,13 +23484,13 @@ BOOL CGameSprite::sub_7567F0(CSpell* pSpell, const CPoint& ptTarget, BYTE nClass
 }
 
 // 0x756930
-void CGameSprite::DecodeSwingSound(CItem* pItem, CItem* pLauncher)
+void CGameSprite::sub_756930(CItem* pItem, CItem* pLauncher)
 {
     if ((m_derivedStats.m_generalState & STATE_SILENCED) != 0) {
         return;
     }
 
-    CString sSound(""); // re-lint: disable RE002
+    CString sSound("");
     CString sCandidate;
     CString sEntry;
     sEntry = "";

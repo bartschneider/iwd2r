@@ -2423,18 +2423,12 @@ void CGameArea::AIUpdate()
                         }
                     }
 
-                    // NOTE: The binary guards both starts with m_nCurrentSong
-                    // (0x6F74xx in 0x46E3D0: `song != 1` on the day side,
-                    // `song != 0` inside the night branch), so PlaySong runs
-                    // once per day/night transition, not on every update.
-                    if (g_pBaldurChitin->GetObjectGame()->GetWorldTimer()->IsDay()
-                        && m_nCurrentSong == 1) {
+                    if (g_pBaldurChitin->GetObjectGame()->GetWorldTimer()->IsDay()) {
                         PlaySong(-1, 0x4 | 0x2);
                         m_nCurrentSong = 0;
                         m_startedMusic = FALSE;
                         m_startedMusicCounter = 600;
-                    } else if (g_pBaldurChitin->GetObjectGame()->GetWorldTimer()->IsNight()
-                        && m_nCurrentSong == 0) {
+                    } else if (g_pBaldurChitin->GetObjectGame()->GetWorldTimer()->IsNight()) {
                         PlaySong(-1, 0x4 | 0x2);
                         m_nCurrentSong = 1;
                         m_startedMusic = FALSE;

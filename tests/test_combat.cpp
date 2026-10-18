@@ -1510,7 +1510,7 @@ TEST_CASE("combat: a goblin archer shoots arrows at the party member", "[combat]
     CHECK(nearest >= 5);
     CHECK_FALSE(hpRose);
     CHECK(characterStart == 9);
-    // Each shot also draws its swing sound (DecodeSwingSound: the bow's "Sw_Ms").
+    // Each shot also draws its swing sound (sub_756930: the bow's "Sw_Ms").
     CHECK(pCharacter->GetBaseStats()->m_hitPoints == 7);
 }
 
@@ -1867,7 +1867,7 @@ TEST_CASE("combat: Spell draws the concentration and spellcraft rolls and then t
     ClearMessages();
 }
 
-// DecodeSwingSound (0x756930), at the first frame of an attack sequence: the
+// sub_756930 (0x756930), at the first frame of an attack sequence: the
 // sound the swing plays (+0x7408) and its frame (+0x740C).
 TEST_CASE("combat: a swing picks its weapon's sound and the next one when it would repeat", "[combat][data]")
 {
@@ -1900,7 +1900,7 @@ TEST_CASE("combat: a swing picks its weapon's sound and the next one when it wou
     pGoblin->field_7408 = "";
     pGoblin->field_740C = 7;
     unsigned int before = iwd2r_rand_state();
-    pGoblin->DecodeSwingSound(&sword, NULL);
+    pGoblin->sub_756930(&sword, NULL);
     CHECK(Draws(before, iwd2r_rand_state()) == 1);
     CString expected;
     expected.Format("Sw_Swd0%d", n + 1);
@@ -1909,14 +1909,14 @@ TEST_CASE("combat: a swing picks its weapon's sound and the next one when it wou
 
     // The same draw again: the next sound, after the fifth the first.
     srand(5);
-    pGoblin->DecodeSwingSound(&sword, NULL);
+    pGoblin->sub_756930(&sword, NULL);
     expected.Format("Sw_Swd0%d", n == 4 ? 1 : n + 2);
     CHECK(pGoblin->field_7408 == expected);
 
     // Silenced: no sound and no draw.
     pGoblin->GetDerivedStats()->m_generalState |= STATE_SILENCED;
     before = iwd2r_rand_state();
-    pGoblin->DecodeSwingSound(&sword, NULL);
+    pGoblin->sub_756930(&sword, NULL);
     CHECK(Draws(before, iwd2r_rand_state()) == 0);
     CHECK(pGoblin->field_7408 == expected);
     pGoblin->GetDerivedStats()->m_generalState &= ~STATE_SILENCED;
@@ -1930,7 +1930,7 @@ TEST_CASE("combat: a swing picks its weapon's sound and the next one when it wou
     REQUIRE(amuletType != 0);
     pGoblin->m_animation.m_nSequence = CGAMESPRITE_SEQ_ATTACK;
     before = iwd2r_rand_state();
-    pGoblin->DecodeSwingSound(&amulet, NULL);
+    pGoblin->sub_756930(&amulet, NULL);
     CHECK(Draws(before, iwd2r_rand_state()) == 0);
     CHECK(pGoblin->field_7408 == CString("Sw_"));
 
@@ -1949,12 +1949,12 @@ TEST_CASE("combat: a swing picks its weapon's sound and the next one when it wou
     srand(9);
     const int m = NextRands(iwd2r_rand_state(), 1)[0] % 2;
     before = iwd2r_rand_state();
-    pGoblin->DecodeSwingSound(&sword, NULL);
+    pGoblin->sub_756930(&sword, NULL);
     CHECK(Draws(before, iwd2r_rand_state()) == 1);
     CHECK(pGoblin->field_7408 == CString(m == 0 ? "GOBSW1" : "GOBSW2"));
     CHECK(pGoblin->field_740C == (m == 0 ? 3 : 5));
     srand(9);
-    pGoblin->DecodeSwingSound(&sword, NULL);
+    pGoblin->sub_756930(&sword, NULL);
     CHECK(pGoblin->field_7408 == CString(m == 0 ? "GOBSW2" : "GOBSW1"));
     CHECK(pGoblin->field_740C == (m == 0 ? 5 : 3));
 

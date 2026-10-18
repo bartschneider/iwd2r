@@ -3,7 +3,7 @@
     "b001": {
       "assigned_at": "2026-10-18T12:37:16+00:00",
       "branch": "p3/wso-b001",
-      "closed_at": null,
+      "closed_at": "2026-10-18T17:54:53+00:00",
       "files": [
         "src/CUIControlFactory.cpp",
         "src/CProjectile.cpp",
@@ -178,8 +178,109 @@
           "their_len": 11710
         }
       ],
-      "status": "assigned",
-      "verdicts": {}
+      "status": "closed",
+      "verdicts": {
+        "0x421E40": {
+          "case": "readout-421E40",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x4406B0": {
+          "case": "readout-4406B0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x44DC10": {
+          "case": "readout-44DC10",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x46E3D0": {
+          "case": "readout-46E3D0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x471630": {
+          "case": "readout-471630",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x472DE0": {
+          "case": "readout-472DE0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x4A7900": {
+          "case": "readout-4A7900",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x51EAF0": {
+          "case": "readout-51EAF0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x58A340": {
+          "case": "readout-58A340",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x58FF20": {
+          "case": "readout-58FF20",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5B81C0": {
+          "case": "readout-5B81C0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x6EF990": {
+          "case": "readout-6EF990",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x6F5FF0": {
+          "case": "readout-6F5FF0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x728F80": {
+          "case": "readout-728F80",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x72B9A0": {
+          "case": "readout-72B9A0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x7349A0": {
+          "case": "readout-7349A0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x739B60": {
+          "case": "readout-739B60",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x73D560": {
+          "case": "readout-73D560",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x740270": {
+          "case": "readout-740270",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x76D370": {
+          "case": "readout-76D370",
+          "losing_kind": "trace",
+          "side": "ours"
+        }
+      }
     },
     "b002": {
       "assigned_at": "2026-10-18T13:15:50+00:00",
@@ -468,6 +569,296 @@
           "side": "ours"
         }
       }
+    },
+    "b003": {
+      "assigned_at": "2026-10-18T15:16:11+00:00",
+      "branch": "p3/wso-b003",
+      "closed_at": null,
+      "files": [
+        "src/CScreenCharacter.cpp",
+        "src/CScreenWorld.cpp",
+        "src/CGameDialog.cpp",
+        "src/CGameDoor.cpp",
+        "src/CDerivedStats.cpp",
+        "src/CScreenSave.cpp",
+        "src/CScreenSpellbook.cpp",
+        "src/CGameSpriteEquipment.cpp",
+        "src/CScreenLoad.cpp",
+        "src/CGameContainer.cpp",
+        "src/CVidCell.cpp",
+        "src/CScreenConnection.cpp",
+        "src/CVidBitmap.cpp",
+        "src/CItem.cpp",
+        "src/CScreenInventory.cpp",
+        "src/CVidMode.cpp",
+        "src/CScreenOptions.cpp"
+      ],
+      "rows": [
+        {
+          "address": "0x5DBDE0",
+          "category": "both_changed_differ",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CScreenCharacter::UpdateMainPanel",
+          "our_len": 6286,
+          "their_len": 5816
+        },
+        {
+          "address": "0x685610",
+          "category": "both_changed_differ",
+          "file": "src/CScreenWorld.cpp",
+          "name": "CScreenWorld::CScreenWorld",
+          "our_len": 5963,
+          "their_len": 5945
+        },
+        {
+          "address": "0x484900",
+          "category": "both_changed_differ",
+          "file": "src/CGameDialog.cpp",
+          "name": "CGameDialogEntry::Handle",
+          "our_len": 6852,
+          "their_len": 4901
+        },
+        {
+          "address": "0x489680",
+          "category": "both_changed_differ",
+          "file": "src/CGameDoor.cpp",
+          "name": "CGameDoor::ToggleDoor",
+          "our_len": 6019,
+          "their_len": 4371
+        },
+        {
+          "address": "0x445330",
+          "category": "both_changed_differ",
+          "file": "src/CDerivedStats.cpp",
+          "name": "CDerivedStats::operator=",
+          "our_len": 5339,
+          "their_len": 4877
+        },
+        {
+          "address": "0x65BCF0",
+          "category": "both_changed_differ",
+          "file": "src/CScreenSave.cpp",
+          "name": "CScreenSave::RefreshGameSlots",
+          "our_len": 5031,
+          "their_len": 4709
+        },
+        {
+          "address": "0x66A980",
+          "category": "both_changed_differ",
+          "file": "src/CScreenSpellbook.cpp",
+          "name": "CScreenSpellbook::UpdateMainPanel",
+          "our_len": 4977,
+          "their_len": 4595
+        },
+        {
+          "address": "0x7124C0",
+          "category": "both_changed_differ",
+          "file": "src/CGameSpriteEquipment.cpp",
+          "name": "CGameSpriteEquipment::Marshal",
+          "our_len": 7425,
+          "their_len": 2089
+        },
+        {
+          "address": "0x63C940",
+          "category": "both_changed_differ",
+          "file": "src/CScreenLoad.cpp",
+          "name": "CScreenLoad::RefreshGameSlots",
+          "our_len": 4834,
+          "their_len": 4623
+        },
+        {
+          "address": "0x47F580",
+          "category": "both_changed_differ",
+          "file": "src/CGameContainer.cpp",
+          "name": "CGameContainer::Render",
+          "our_len": 4782,
+          "their_len": 4560
+        },
+        {
+          "address": "0x7CFDF0",
+          "category": "both_changed_differ",
+          "file": "src/CVidCell.cpp",
+          "name": "CVidCell::Blt8To32",
+          "our_len": 4523,
+          "their_len": 4673
+        },
+        {
+          "address": "0x600B50",
+          "category": "both_changed_differ",
+          "file": "src/CScreenConnection.cpp",
+          "name": "CScreenConnection::HandleEMEvent",
+          "our_len": 4419,
+          "their_len": 4590
+        },
+        {
+          "address": "0x7CD870",
+          "category": "both_changed_differ",
+          "file": "src/CVidBitmap.cpp",
+          "name": "CVidBitmap::BltBmp24To32Tint",
+          "our_len": 2853,
+          "their_len": 6118
+        },
+        {
+          "address": "0x4EA750",
+          "category": "both_changed_differ",
+          "file": "src/CItem.cpp",
+          "name": "CItem::sub_4EA750",
+          "our_len": 3477,
+          "their_len": 5309
+        },
+        {
+          "address": "0x626DD0",
+          "category": "both_changed_differ",
+          "file": "src/CScreenInventory.cpp",
+          "name": "CScreenInventory::UpdateMainPanel",
+          "our_len": 3943,
+          "their_len": 4814
+        },
+        {
+          "address": "0x623EA0",
+          "category": "both_changed_differ",
+          "file": "src/CScreenInventory.cpp",
+          "name": "CScreenInventory::CScreenInventory",
+          "our_len": 4166,
+          "their_len": 4536
+        },
+        {
+          "address": "0x68F9D0",
+          "category": "both_changed_differ",
+          "file": "src/CScreenWorld.cpp",
+          "name": "CScreenWorld::EndDialog",
+          "our_len": 4901,
+          "their_len": 3564
+        },
+        {
+          "address": "0x7CB670",
+          "category": "both_changed_differ",
+          "file": "src/CVidMode.cpp",
+          "name": "CVidMode::DrawRecticle32",
+          "our_len": 4217,
+          "their_len": 4215
+        },
+        {
+          "address": "0x62DDE0",
+          "category": "both_changed_differ",
+          "file": "src/CScreenInventory.cpp",
+          "name": "CUIControlButtonInventorySlot::Render",
+          "our_len": 4889,
+          "their_len": 3448
+        },
+        {
+          "address": "0x6580B0",
+          "category": "both_changed_differ",
+          "file": "src/CScreenOptions.cpp",
+          "name": "CUIControlSliderOptionsSlider::OnThumbFinalChange",
+          "our_len": 4010,
+          "their_len": 4044
+        }
+      ],
+      "status": "assigned",
+      "verdicts": {
+        "0x445330": {
+          "case": "dump-445330",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x47F580": {
+          "case": "dump-47F580",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x484900": {
+          "case": "dump-484900",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x489680": {
+          "case": "dump-489680",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x4EA750": {
+          "case": "dump-4EA750",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5DBDE0": {
+          "case": "dump-5DBDE0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x600B50": {
+          "case": "dump-600B50",
+          "losing_kind": null,
+          "side": "neither"
+        },
+        "0x623EA0": {
+          "case": "dump-623EA0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x626DD0": {
+          "case": "dump-626DD0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x62DDE0": {
+          "case": "dump-62DDE0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x63C940": {
+          "case": "dump-63C940",
+          "losing_kind": null,
+          "side": "neither"
+        },
+        "0x6580B0": {
+          "case": "dump-6580B0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x65BCF0": {
+          "case": "dump-65BCF0",
+          "losing_kind": null,
+          "side": "neither"
+        },
+        "0x66A980": {
+          "case": "dump-66A980",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x685610": {
+          "case": "dump-685610",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x68F9D0": {
+          "case": "dump-68F9D0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x7124C0": {
+          "case": "dump-7124C0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x7CB670": {
+          "case": "vid/draw_recticle32",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x7CD870": {
+          "case": "dump-7CD870",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x7CFDF0": {
+          "case": "vid/cell_blt8to32_point",
+          "losing_kind": "trace",
+          "side": "ours"
+        }
+      }
     }
-  }
+  },
+  "fork_base": "e8dd16a750966af53f24daaf49dcb4fb13594c13"
 }
