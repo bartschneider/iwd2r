@@ -12,7 +12,8 @@ renderer artifacts come from. The design spec is
 
 Both trees descend from the same upstream commit (Batalov `4fa36bcd`,
 2023-12-29). The fork's `main` (`wso/main`, fetched 2026-10-17) is 1,572
-commits past it; ours is 1,295 — about five months of recovered engine code
+commits past it; ours was 1,295 when the spec measured it — about five
+months of recovered engine code
 on his side, and on ours the Linux build, the oracle, the replays and the
 evidence gate. His verification is a differential Frida trace of the real
 `IWD2.exe` against his own build, a recovery note per function under
@@ -57,7 +58,8 @@ not 406. The current table and the account of every moved number are in
 
 ## Attribution
 
-From wave 2 on, every import commit carries exactly:
+Every commit that brings in the fork's code — a wave-1 adopted body
+included — carries exactly:
 
 ```
 Imported-From: WillScarlettOhara/iwd2-re@<40-char sha> (MIT per author, 2026-10-17)
@@ -82,9 +84,14 @@ WillScarlettOhara/iwd2-re@<sha> <path to recovery note>
 frida <probe name> orig:<sha256> ours:<sha256> compare=0
 ```
 
-The first cites his recovery note; the second cites a capture made with the
-fork's tracing scripts adopted into `tools/frida/`, where `compare=0` means
-the original and our build produced identical traces. A missing, empty or
+The first cites his recovery note; the second is the line
+`check_evidence.py` accepts today for a differential Frida capture of our
+own binary against the original. The harness that produces such captures is
+planned, not yet in the tree: the integration plan's Task 5b
+([docs/superpowers/plans/2026-10-17-wso-integration.md](../superpowers/plans/2026-10-17-wso-integration.md),
+added at 8ce297d7 — the plan revision `check_evidence.py` cites) adopts the
+fork's tracing scripts into `tools/frida/`, and its `compare=0` verdict
+means the two captures agree call for call. A missing, empty or
 unrecognizable citation fails the gate; the format contract is in
 [docs/evidence/README.md](../evidence/README.md). Rules math — attack
 rolls, saving throws, damage, effect application — never accepts a trace:
@@ -102,14 +109,14 @@ carries only URLs and sha256 hashes: pointer metadata, not bytes.
 
 The artifacts are not in the `iwd2-re` fork. They live in
 [WillScarlettOhara/IWD2EE](https://github.com/WillScarlettOhara/IWD2EE) at
-branch `opengl-hd-beta7` (commit `138495fde69b6092b7318fad462d571864e9d9b8`);
+commit `138495fde69b6092b7318fad462d571864e9d9b8`;
 upstream IEex is [RedChimera/IWD2EE](https://github.com/RedChimera/IWD2EE)
 at `60de54611b249d3bcca3f6522ef9db5e7ec27339`. Both sides are pinned — DLLs
 and Lua from each — so the renderer streams can diff the fork's work
 against upstream's. [tools/wso_pins.json](../../tools/wso_pins.json) is the
-authoritative list: 25 files — the 3 DLLs, 20 fork Lua patch files (about
-53,000 lines; the spec's early count of 16 patch files was an undercount),
-and the 2 upstream Lua files.
+authoritative list: 25 files — the 3 DLLs, 20 fork Lua files (14 patch
+scripts and 6 `_State` scripts; about 53,000 lines — the spec's early count
+of 16 patch files was an undercount), and the 2 upstream Lua files.
 
     python3 -I tools/wso_fetch.py --check    # verify the staged copies
     python3 -I tools/wso_fetch.py            # fetch by pinned hash
