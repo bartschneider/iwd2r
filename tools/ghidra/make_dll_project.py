@@ -24,8 +24,6 @@ sys.path.insert(0, os.path.dirname(HERE))
 import make_project  # noqa: E402
 
 PROJECTS_DIR = os.path.join(make_project.HOME, 'ghidra-projects')
-# One file per script argument, so Ghidra compiles them at run time from
-# -scriptPath HERE (see DllScope.java, DllDelta.java, DecompileFunctions.java).
 NAME_RE = re.compile(r'[A-Za-z0-9][A-Za-z0-9_-]*')
 
 
@@ -60,7 +58,12 @@ def make(name, dll):
 
 
 def run_script(name, program, script, *script_args):
-    """Run one Ghidra script against the program of project <name>."""
+    """Run one Ghidra script against the program of project <name>.
+
+    One file per script argument, so Ghidra compiles them at run time from
+    -scriptPath HERE (see DllScope.java, DllDelta.java,
+    DecompileFunctions.java).
+    """
     target = project_dir(name)
     if not os.path.exists(os.path.join(target, name + '.gpr')):
         sys.exit(f'make_dll_project: no project {target}; make it first')
