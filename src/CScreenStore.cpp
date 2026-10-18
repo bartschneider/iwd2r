@@ -4785,7 +4785,7 @@ void CScreenStore::OnBuySpellButtonClick()
     while (pos != NULL) {
         CAIAction* pAction = actions.GetNext(pos);
 
-        CMessage* message = new CMessageAddAction(*pAction, nCustomerId, nProprietorId);
+        CMessage* message = new CMessageAddAction(*pAction, nProprietorId, nCustomerId);
         g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
 
         delete pAction;
