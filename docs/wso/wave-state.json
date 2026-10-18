@@ -180,6 +180,294 @@
       ],
       "status": "assigned",
       "verdicts": {}
+    },
+    "b002": {
+      "assigned_at": "2026-10-18T13:15:50+00:00",
+      "branch": "p3/wso-b002",
+      "closed_at": "2026-10-18T15:08:35+00:00",
+      "files": [
+        "src/CScreenCharacter.cpp",
+        "src/CScreenWorld.cpp",
+        "src/CAIScriptFile.cpp",
+        "src/CGameAnimationTypeCharacter.cpp",
+        "src/CScreenStore.cpp",
+        "src/IcewindCGameEffects.cpp",
+        "src/CScreenInventory.cpp",
+        "src/CScreenConnection.cpp",
+        "src/CVidInf.cpp",
+        "src/CVidPalette.cpp",
+        "src/CAIObjectType.cpp",
+        "src/CDerivedStats.cpp",
+        "src/CScreenCreateChar.cpp",
+        "src/CUIControlEdit.cpp",
+        "src/CGameDoor.cpp",
+        "src/CInfinity.cpp"
+      ],
+      "rows": [
+        {
+          "address": "0x5DC9D0",
+          "category": "both_changed_differ",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CScreenCharacter::UpdateGeneralInformation",
+          "our_len": 11513,
+          "their_len": 10824
+        },
+        {
+          "address": "0x5DE2C0",
+          "category": "both_changed_differ",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CScreenCharacter::UpdateEquipmentInformation",
+          "our_len": 10793,
+          "their_len": 9892
+        },
+        {
+          "address": "0x6872D0",
+          "category": "both_changed_differ",
+          "file": "src/CScreenWorld.cpp",
+          "name": "CScreenWorld::OnKeyDown",
+          "our_len": 18573,
+          "their_len": 1338
+        },
+        {
+          "address": "0x410B40",
+          "category": "both_changed_differ",
+          "file": "src/CAIScriptFile.cpp",
+          "name": "CAIScriptFile::ParseTrigger",
+          "our_len": 9688,
+          "their_len": 9685
+        },
+        {
+          "address": "0x6CDA00",
+          "category": "both_changed_differ",
+          "file": "src/CGameAnimationTypeCharacter.cpp",
+          "name": "CGameAnimationTypeCharacter::SetSequence",
+          "our_len": 8872,
+          "their_len": 9229
+        },
+        {
+          "address": "0x6740F0",
+          "category": "both_changed_differ",
+          "file": "src/CScreenStore.cpp",
+          "name": "CScreenStore::UpdateBuySellPanel",
+          "our_len": 8736,
+          "their_len": 9263
+        },
+        {
+          "address": "0x5675E0",
+          "category": "both_changed_differ",
+          "file": "src/IcewindCGameEffects.cpp",
+          "name": "IcewindCGameEffectApplyEffectsList::ApplyEffect",
+          "our_len": 9992,
+          "their_len": 7700
+        },
+        {
+          "address": "0x62F360",
+          "category": "both_changed_differ",
+          "file": "src/CScreenInventory.cpp",
+          "name": "CScreenInventory::SwapWithSlot",
+          "our_len": 8495,
+          "their_len": 8545
+        },
+        {
+          "address": "0x5FDB20",
+          "category": "both_changed_differ",
+          "file": "src/CScreenConnection.cpp",
+          "name": "CScreenConnection::OnDoneButtonClick",
+          "our_len": 8032,
+          "their_len": 8296
+        },
+        {
+          "address": "0x79B4A0",
+          "category": "both_changed_differ",
+          "file": "src/CVidInf.cpp",
+          "name": "CVidInf::CreateSurfaces",
+          "our_len": 7611,
+          "their_len": 7616
+        },
+        {
+          "address": "0x7BF870",
+          "category": "both_changed_differ",
+          "file": "src/CVidPalette.cpp",
+          "name": "CVidPalette::RealizeRange",
+          "our_len": 7714,
+          "their_len": 7280
+        },
+        {
+          "address": "0x40B880",
+          "category": "both_changed_differ",
+          "file": "src/CAIObjectType.cpp",
+          "name": "CAIObjectType::Decode",
+          "our_len": 11857,
+          "their_len": 2843
+        },
+        {
+          "address": "0x7C04B0",
+          "category": "both_changed_differ",
+          "file": "src/CVidPalette.cpp",
+          "name": "CVidPalette::RealizeResource",
+          "our_len": 7538,
+          "their_len": 6720
+        },
+        {
+          "address": "0x68EA00",
+          "category": "both_changed_differ",
+          "file": "src/CScreenWorld.cpp",
+          "name": "CScreenWorld::StartDialog",
+          "our_len": 8345,
+          "their_len": 5802
+        },
+        {
+          "address": "0x4440F0",
+          "category": "both_changed_differ",
+          "file": "src/CDerivedStats.cpp",
+          "name": "CDerivedStats::Reload",
+          "our_len": 8329,
+          "their_len": 5509
+        },
+        {
+          "address": "0x611AF0",
+          "category": "both_changed_differ",
+          "file": "src/CScreenCreateChar.cpp",
+          "name": "CScreenCreateChar::UpdateCharacterStats",
+          "our_len": 7073,
+          "their_len": 6390
+        },
+        {
+          "address": "0x4D7130",
+          "category": "both_changed_differ",
+          "file": "src/CUIControlEdit.cpp",
+          "name": "CUIControlEdit::OnKeyDown",
+          "our_len": 7810,
+          "their_len": 5352
+        },
+        {
+          "address": "0x485AC0",
+          "category": "both_changed_differ",
+          "file": "src/CGameDoor.cpp",
+          "name": "CGameDoor::CGameDoor",
+          "our_len": 6406,
+          "their_len": 6552
+        },
+        {
+          "address": "0x5CEFD0",
+          "category": "both_changed_differ",
+          "file": "src/CInfinity.cpp",
+          "name": "CInfinity::Render",
+          "our_len": 6277,
+          "their_len": 6271
+        },
+        {
+          "address": "0x5D5220",
+          "category": "both_changed_differ",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CScreenCharacter::CScreenCharacter",
+          "our_len": 6229,
+          "their_len": 6158
+        }
+      ],
+      "status": "closed",
+      "verdicts": {
+        "0x40B880": {
+          "case": "ai/decode",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x410B40": {
+          "case": "dump-410B40",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x4440F0": {
+          "case": "chargen_replay/abilities",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x485AC0": {
+          "case": "world_entry/world_settled",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x4D7130": {
+          "case": "dump-4D7130",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5675E0": {
+          "case": "dump-5675E0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5CEFD0": {
+          "case": "dump-5CEFD0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5D5220": {
+          "case": "dump-5D5220",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5DC9D0": {
+          "case": "dump-5DC9D0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5DE2C0": {
+          "case": "dump-5DE2C0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5FDB20": {
+          "case": "dump-5FDB20",
+          "losing_kind": null,
+          "side": "neither"
+        },
+        "0x611AF0": {
+          "case": "world_entry/abilities_done",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x62F360": {
+          "case": "dump-62F360",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x6740F0": {
+          "case": "dump-6740F0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x6872D0": {
+          "case": "uimisc/worldkeys",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x68EA00": {
+          "case": "walk_and_talk/dialog",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x6CDA00": {
+          "case": "walk_and_talk/door_open",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x79B4A0": {
+          "case": "dump-79B4A0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x7BF870": {
+          "case": "vid/realize_range",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x7C04B0": {
+          "case": "vid/realize_resource",
+          "losing_kind": "trace",
+          "side": "ours"
+        }
+      }
     }
   }
 }
