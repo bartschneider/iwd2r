@@ -1,6 +1,7 @@
 """Tests for tools/gen_map.py, tools/check_evidence.py, tools/gen_fields.py,
-tools/minischema.py, tools/shaders.py and the pure parts of tools/play.py, tools/realinput.py,
-tools/winsandbox.py, tools/oracle.py and tools/ghidra/labels.py.
+tools/minischema.py, tools/shaders.py, tools/xrec.py and the pure parts of
+tools/play.py, tools/realinput.py, tools/winsandbox.py, tools/oracle.py and
+tools/ghidra/labels.py.
 
 Run from the repository root: python3 -I tests/test_tools.py
 
@@ -109,6 +110,7 @@ realinput = load_tool('realinput')
 dataview = load_tool('dataview')
 winsandbox = load_tool('winsandbox')
 winhome = load_tool('winhome')
+xrec = load_tool('xrec')
 
 
 def load_ghidra_tool(name):
@@ -6249,6 +6251,94 @@ class GhidraCloneTest(unittest.TestCase):
         os.remove(os.path.join(clone, 'iwd2.gpr'))
         self.mp.worktree_clone('/w/p3-a')
         self.assertEqual(self.read(clone, 'iwd2.gpr'), 'gpr')
+
+
+class XrecTest(unittest.TestCase):
+    """xrec: funcs reads the // 0xADDR comment with the signature, and
+    classify matches the two recoveries by address before name."""
+
+    def test_xrec_funcs_parses_signature_and_address(self):
+        f = xrec.funcs(
+            'int CThing::Alpha(int x)\n'
+            '{\n'
+            '    // TODO: real body\n'
+            '    return x + 1;\n'
+            '}\n'
+            '\n'
+            '// 0x401000\n'
+            'int CThing::Beta(void)\n'
+            '{\n'
+            '    return 2;\n'
+            '}\n')
+        self.assertEqual(sorted(f), ['CThing::Alpha', 'CThing::Beta'])
+        self.assertEqual(f['CThing::Alpha'], (None, '{returnx+1;}'))
+        self.assertEqual(f['CThing::Beta'], ('0x401000', '{return2;}'))
+
+    def test_xrec_matches_renamed_function_by_address(self):
+        real = '{ints=m_x;s+=x;s+=m_y;s-=x;return s==0&&x!=0;}'
+        theirs = xrec.funcs('// 0x401000\nint CThing::HisName(int x)\n%s\n' % real)
+        ours = xrec.funcs('// 0x401000\nint CThing::OurName(int x)\n%s\n' % real)
+        c = xrec.classify(theirs, ours, {})
+        self.assertEqual(c['same'], 1)
+        self.assertEqual(c['only_theirs'] + c['only_ours'], 0)
+        self.assertEqual(sum(c.values()), 1)
+
+    def test_xrec_ambiguous_address_pairs_by_name(self):
+        """An address two functions of one file carry is not a key: CScreenMap
+        had a stub and a real body sharing 0x643CC0 in their tree only."""
+        real = '{ints=m_x;s+=x;s+=m_y;s-=x;return s==0&&x!=0;}'
+        stub = '{return 0;}'
+        theirs = xrec.funcs('// 0x401000\nint CThing::Real(int x)\n%s\n'
+                            '\n'
+                            '// 0x401000\nint CThing::Stub(void)\n%s\n' % (real, stub))
+        ours = xrec.funcs('// 0x401000\nint CThing::Real(int x)\n%s\n' % real)
+        c = xrec.classify(theirs, ours, {})
+        self.assertEqual(c['same'], 1)
+        self.assertEqual(c['only_theirs'], 1)
+        self.assertEqual(c['ours_real_theirs_stub'], 0)
+        self.assertEqual(sum(c.values()), 2)
+
+    def test_xrec_classify_table(self):
+        real1 = '{ints=m_x;s+=x;s+=m_y;s-=x;return s==0&&x!=0;}'
+        real2 = '{ints=m_x;s-=x;s+=m_y;s-=x;return s==0&&x!=0;}'
+        real3 = '{ints=m_x;s+=x;s-=m_y;s+=x;return s==0&&x!=0;}'
+        stub1 = '{return 0;}'
+        stub2 = '{return m_x;}'
+        theirs = {
+            'same': ('0x1000', real1),
+            'same_stub': ('0x1001', stub1),
+            'only_theirs': ('0x1002', real1),
+            'theirs_real_ours_stub': ('0x1003', real1),
+            'ours_real_theirs_stub': ('0x1004', stub1),
+            'theirs_changed_ours_base': ('0x1005', real2),
+            'ours_changed_theirs_base': ('0x1006', real1),
+            'both_changed_differ': ('0x1007', real2),
+            'both_stub_diff': ('0x1008', stub1),
+        }
+        ours = {
+            'same': ('0x1000', real1),
+            'same_stub': ('0x1001', stub1),
+            'only_ours': ('0x1009', real1),
+            'theirs_real_ours_stub': ('0x1003', stub1),
+            'ours_real_theirs_stub': ('0x1004', real1),
+            'theirs_changed_ours_base': ('0x1005', real1),
+            'ours_changed_theirs_base': ('0x1006', real2),
+            'both_changed_differ': ('0x1007', real3),
+            'both_stub_diff': ('0x1008', stub2),
+        }
+        base = {
+            'theirs_changed_ours_base': ('0x1005', real1),
+            'ours_changed_theirs_base': ('0x1006', real1),
+            'both_changed_differ': ('0x1007', real1),
+            'both_stub_diff': ('0x1008', stub1),
+        }
+        c = xrec.classify(theirs, ours, base)
+        for k in ['same', 'same_stub', 'only_theirs', 'only_ours',
+                  'theirs_real_ours_stub', 'ours_real_theirs_stub',
+                  'theirs_changed_ours_base', 'ours_changed_theirs_base',
+                  'both_changed_differ', 'both_stub_diff']:
+            self.assertEqual(c[k], 1, k)
+        self.assertEqual(sum(c.values()), 10)
 
 
 if __name__ == '__main__':
