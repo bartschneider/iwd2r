@@ -2979,8 +2979,7 @@ void CGameSprite::AIUpdateWalk()
             field_54A8,
             field_7430);
 
-        if (InControl()
-            && m_pArea->m_search.GetMobileCost(ptSearch, m_terrainTable, m_animation.GetPersonalSpace(), TRUE) == CPathSearch::COST_IMPASSABLE
+        if (m_pArea->m_search.GetMobileCost(ptSearch, m_terrainTable, m_animation.GetPersonalSpace(), TRUE) == CPathSearch::COST_IMPASSABLE
             && !ClearBumpPath(ptOldSearch, ptSearch)) {
             if (!m_baseStats.field_294) {
                 m_pArea->m_search.AddObject(ptOldSearch,
@@ -5862,7 +5861,7 @@ void CGameSprite::RenderPortrait(const CPoint& cpRenderPosition, const CSize& sz
 
                 CString sHealth;
                 INT iHealthPercent = 100 * m_baseStats.m_hitPoints / m_derivedStats.m_nMaxHitPoints;
-                COLORREF rgbColor;
+                COLORREF rgbColor = RGB(255, 0, 0);
 
                 for (int index = 0; index < 4; index++) {
                     if (iHealthPercent >= HEALTH_VALUE[index]) {
@@ -17545,7 +17544,7 @@ SHORT CGameSprite::Attack(CGameSprite* target)
             }
 
             INT nDistance;
-            if (curAttack->type == 2) {
+            if (static_cast<BYTE>(curAttack->type) == 2) {
                 const CPoint& ptTarget = target->GetPos();
                 INT nTargetY = ptTarget.y / CPathSearch::GRID_SQUARE_SIZEY;
                 INT nTargetX = ptTarget.x / CPathSearch::GRID_SQUARE_SIZEX;
@@ -17754,7 +17753,7 @@ SHORT CGameSprite::AttackReevaluate()
         }
 
         INT nDistance;
-        if (curAttack->type == 2) {
+        if (static_cast<BYTE>(curAttack->type) == 2) {
             const CPoint& ptTarget = target->GetPos();
             INT nTargetY = ptTarget.y / CPathSearch::GRID_SQUARE_SIZEY;
             INT nTargetX = ptTarget.x / CPathSearch::GRID_SQUARE_SIZEX;
@@ -18809,8 +18808,8 @@ BOOL CGameSprite::Hit(CGameSprite* target, CItem* curWeapon, SHORT nAbility, BOO
             }
 
             if (sub_763150(CGAMESPRITE_FEAT_DIRTY_FIGHTING) == TRUE) {
-                BYTE nGeneral = target->GetAIType().m_nGeneral;
-                if (nGeneral != 0xA7 && nGeneral != 0x9C && nGeneral != 0x98) {
+                BYTE nRace = target->GetAIType().m_nRace;
+                if (nRace != 0xA7 && nRace != 0x9C && nRace != 0x98) {
                     WORD nEffectId = CGAMEEFFECT_BLINDNESS;
                     if (rand() % 2 == 1) {
                         nEffectId = CGAMEEFFECT_SLOW;
