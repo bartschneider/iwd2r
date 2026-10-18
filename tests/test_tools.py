@@ -7787,5 +7787,180 @@ class GltraceTest(unittest.TestCase):
                          ['menu', 'world'])
 
 
+def load_parity_tool(name):
+    """load_tool for the tools/parity/ subdirectory."""
+    spec = importlib.util.spec_from_file_location(
+        f'parity_{name}', os.path.join(ROOT, 'tools', 'parity', f'{name}.py'))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+parity_run = load_parity_tool('run')
+struct_layout_audit = load_parity_tool('struct_layout_audit')
+
+
+class ParityPreexistTest(unittest.TestCase):
+    """tools/parity/run.py's pre-existing-red downgrade (mask + decision) and
+    struct_layout_audit's phantom-member filter. Pure-function tests: the
+    decision is exercised through a synthetic check function, no git."""
+
+    HEAD_REPO = '/repo/head'
+    BASE_REPO = '/repo/base'
+
+    def synth_check(self, base_cell, calls=None):
+        """A check() returning base_cell for the base tree's ctx."""
+        def check(address, name, ctx):
+            if calls is not None:
+                calls.append(ctx['repo'])
+            return base_cell
+        return check
+
+    # (a) the line-mask / equality helper
+    def test_mask_line_refs_masks_line_numbers_only(self):
+        self.assertEqual(
+            parity_run.mask_line_refs(
+                're_lint: L5874: RE001: CString::Format uses a narrow literal'),
+            're_lint: L#: RE001: CString::Format uses a narrow literal')
+        # hex offsets and addresses are NOT masked
+        self.assertEqual(
+            parity_run.mask_line_refs(
+                'm_sequenceTest (0x56EC) -> m_dialog (0x56DC): '
+                'offset goes backwards'),
+            'm_sequenceTest (0x56EC) -> m_dialog (0x56DC): '
+            'offset goes backwards')
+        self.assertEqual(
+            parity_run.mask_line_refs(
+                '[MISSING] slot 0x002c: binary overrides -> 0x6fc260'),
+            '[MISSING] slot 0x002c: binary overrides -> 0x6fc260')
+
+    def test_same_after_mask(self):
+        # equal after masking line references: downgrades
+        self.assertTrue(parity_run.same_after_mask(
+            ['re_lint: L5874: RE001: x', 're_lint: L5877: RE001: y'],
+            ['re_lint: L5901: RE001: x', 're_lint: L5904: RE001: y']))
+        # differing notes do not
+        self.assertFalse(parity_run.same_after_mask(
+            ['re_lint: L5874: RE001: x'],
+            ['re_lint: L5874: RE002: x']))
+        # order and count must match too
+        self.assertFalse(parity_run.same_after_mask(
+            ['re_lint: L1: x', 're_lint: L2: y'],
+            ['re_lint: L9: y', 're_lint: L8: x']))
+        self.assertFalse(parity_run.same_after_mask(
+            ['re_lint: L1: x'], []))
+
+    # (b) the downgrade decision, via a synthetic check
+    def test_identical_red_downgrades_to_warning(self):
+        calls = []
+        head_cell = (parity_run.RED,
+                     ['re_lint: L5874: RE001: narrow literal',
+                      're_lint: L5877: RE001: narrow literal'])
+        out = parity_run.downgrade_cell(
+            self.synth_check(
+                (parity_run.RED,
+                 ['re_lint: L5901: RE001: narrow literal',
+                  're_lint: L5904: RE001: narrow literal']), calls),
+            0x704D40, 'CGameSprite::RenderPortrait', head_cell,
+            {'repo': self.BASE_REPO}, 'first')
+        self.assertEqual(calls, [self.BASE_REPO])   # the base re-run happened
+        self.assertEqual(out[0], parity_run.WARNING)
+        self.assertEqual(
+            out[1][0], 'pre-existing at base first: red reproduces there')
+        self.assertEqual(out[1][1:], head_cell[1])
+
+    def test_differing_red_stays_red(self):
+        head_cell = (parity_run.RED,
+                     ['m_sequenceTest (0x56EC) -> m_dialog (0x56DC): '
+                      'offset goes backwards'])
+        out = parity_run.downgrade_cell(
+            self.synth_check(
+                (parity_run.RED,
+                 ['m_other (0x56EC) -> m_dialog (0x56DC): '
+                  'offset goes backwards'])),
+            0x73B760, 'CGameSprite::Hit', head_cell,
+            {'repo': self.BASE_REPO}, 'first')
+        self.assertEqual(out, head_cell)
+
+    def test_non_reproducing_red_stays_red(self):
+        head_cell = (parity_run.RED, ['[MISSING] slot 0x002c: no source decl'])
+        # base re-runs clean: the red is new with this change
+        out = parity_run.downgrade_cell(
+            self.synth_check((parity_run.GREEN, ['overrides match'])),
+            0x1, 'C::F', head_cell, {'repo': self.BASE_REPO}, 'first')
+        self.assertEqual(out, head_cell)
+        # the base re-run raising is not a reproduction
+        def boom(address, name, ctx):
+            raise RuntimeError('no exe')
+        self.assertEqual(
+            parity_run.downgrade_cell(boom, 0x1, 'C::F', head_cell,
+                                      {'repo': self.BASE_REPO}, 'first'),
+            head_cell)
+        # no base ctx (the function is not in the base tree)
+        self.assertEqual(
+            parity_run.downgrade_cell(self.synth_check(head_cell),
+                                      0x1, 'C::F', head_cell, None, 'first'),
+            head_cell)
+
+    def test_error_and_non_red_cells_never_downgrade(self):
+        # an ERROR stays ERROR even though the base re-run is red
+        check = self.synth_check((parity_run.RED, ['same at base']))
+        self.assertEqual(
+            parity_run.downgrade_cell(check, 0x1, 'C::F',
+                                      (parity_run.ERROR, ['raised']),
+                                      {'repo': self.BASE_REPO}, 'first'),
+            (parity_run.ERROR, ['raised']))
+        # WARNING (a human-waived asm cell), GREEN, YELLOW and SKIP pass
+        # through untouched
+        for cell in ((parity_run.WARNING, ['waived: confirmed by hand']),
+                     (parity_run.GREEN, ['clean']),
+                     (parity_run.YELLOW, ['soft']),
+                     (parity_run.SKIP, ['no pefile'])):
+            self.assertEqual(
+                parity_run.downgrade_cell(check, 0x1, 'C::F', cell,
+                                          {'repo': self.BASE_REPO}, 'first'),
+                cell)
+        # asm is not a delegated column: its RED never reaches the downgrade
+        self.assertNotIn('asm', parity_run.DELEGATED_COLUMNS)
+        self.assertEqual(parity_run.DELEGATED_COLUMNS,
+                         {'vtable', 'layout', 'offsets', 'markers', 'lints'})
+
+    # (c) the phantom-member filter
+    HEADER = """\
+class CPhantom : public CGameObject {
+public:
+    /* 0x6E */ char m_tail;
+    /* 0x78 */ void AddEffect(CGameEffect* pEffect, BYTE list) override;
+    /* 0x70 */ void SetTargetObject(CGameObject* pTarget) override;
+    /* 0x74 */ LONG m_real;
+};
+"""
+
+    def test_layout_parse_rejects_override_phantom_member(self):
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, 'CPhantom.h')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(self.HEADER)
+            members = struct_layout_audit.parse_header(Path(path), 'CPhantom')
+        # no phantom member named `override`; the real members survive
+        self.assertEqual([(m[0], m[1]) for m in members],
+                         [('m_tail', 0x6E), ('m_real', 0x74)])
+
+    def test_layout_check_not_red_on_override_only_inversions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = os.path.join(tmp, 'src')
+            os.makedirs(src)
+            with open(os.path.join(src, 'CPhantom.h'), 'w',
+                      encoding='utf-8') as f:
+                f.write(self.HEADER)
+            verdict, notes = struct_layout_audit.check(
+                0x401000, 'CPhantom::AddEffect', tmp, None, None)
+        # used to RED on `override (0x78) -> override (0x70)`; the phantom
+        # pair is gone, and the two real members are in order
+        self.assertEqual(verdict, struct_layout_audit.SKIP)
+        self.assertNotIn('goes backwards', ' '.join(notes))
+
+
 if __name__ == '__main__':
     unittest.main()
