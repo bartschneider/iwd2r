@@ -19,8 +19,14 @@ stderr and skipped with exit 0.
 
 For the same touched functions the checker also reports how many evidence
 files carry each `kind` (`oracle`, `replay` or `read-only`), and warns about
-the files whose `kind` is missing or not one of those three. The kind is not
-enforced: a missing one is only a warning.
+the files whose `kind` is missing or not one of those three. Outside the
+rules-math set the kind is not enforced: a missing one is only a warning.
+Functions in RULES_MATH below — the rules-math set, whose correctness is the
+D&D 3e rules themselves (attack rolls, AC, saving throws, damage
+resolution, effect application; triaged in docs/evidence/rules-math-triage.md)
+— must have `kind: oracle`: a replay or a read-only exemption fails, and an
+untagged document counts as not-oracle instead of a warning. The report
+also prints the per-kind split of the touched rules-math functions.
 """
 
 import argparse
@@ -36,6 +42,73 @@ import labels  # noqa: E402
 EVIDENCE_DIR = 'docs/evidence'
 HUNK = re.compile(r'^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@')
 KINDS = ('oracle', 'replay', 'read-only')
+
+# The rules-math set: functions whose correctness IS a D&D 3e rule — the
+# to-hit and AC math, saving throws, damage resolution, and the
+# effect-application paths that roll saves and apply damage. Keyed by
+# function address (the `// 0xADDR` comment, the same address the evidence
+# file name uses), so the set survives renames. Hand-maintained and
+# conservative: an address enters only when the function computes or applies
+# a rule; callers, orchestration and display stay out. Each entry says what
+# the function computes and lists the ones considered and left out with the
+# reasons. A diff touching one of these addresses requires evidence with
+# `kind: oracle` — an exemption or a replay does not pass.
+RULES_MATH = frozenset({
+    # Attack rolls, to-hit modifiers and AC.
+    0x723CC0,  # CGameSprite::GetAC: base 10, armor-capped DEX, blind penalty,
+               # monk WIS bonus
+    0x723DB0,  # touch AC: GetAC minus the armor and shield components
+    0x723EA0,  # DEX-only AC bonus (touch attacks)
+    0x723F60,  # monk WIS AC bonus (unarmored, no shield)
+    0x73B760,  # CGameSprite::Hit: the d20 to-hit, nat 20/1, flat-footed,
+               # iteratives, crit confirm, concealment
+    0x73C490,  # concealment / miss-chance roll against an attack
+    0x73CD00,  # bane weapon attack bonus
+    0x73CF10,  # weapon proficiency attack bonus/penalty
+    0x73D080,  # two-weapon fighting attack penalties
+    0x73D1B0,  # situational attack modifiers (flanking, prone, charging...)
+    0x547020,  # CRuleTables::GetIterativeAttackBonus (src/CRuleTables.cpp):
+               # max(0, bonus - step*attack)
+    0x4E9840,  # CItem critical threat range (src/CItem.cpp): base 20, item
+               # types, Keen
+    # Saving throws.
+    0x4A42F0,  # CGameEffect::CheckSave (src/CGameEffect.cpp): the save d20
+               # vs DC 10 + level + saveMod, racial/class save bonuses
+    0x4A9E30,  # CGameEffectDamage::CheckSave (src/CGameEffect.cpp): save
+               # (for half) against a damage effect
+    0x547040,  # CRuleTables::GetSaveAdjustmentForSourceSprite
+               # (src/CRuleTables.cpp)
+    0x547620,  # CRuleTables::sub_547620 (src/CRuleTables.cpp): SPIN108
+               # animal-empathy save adjustment
+    0x4A3310,  # CGameEffect::CheckAdd (src/CGameEffect.cpp): the
+               # pre-application gate — immunity, probability, spell
+               # resistance penetration
+    # Damage resolution.
+    0x73D560,  # CGameSprite::Damage: weapon dice, STR (×1.5 two-handed,
+               # half off-hand), sneak attack and uncanny dodge, crit
+               # multiplier, damage-type mapping
+    0x4A7900,  # CGameEffectDamage::ApplyEffect (src/CGameEffect.cpp): dice
+               # roll, resistance subtraction, damage reduction, HP floor
+    0x5845D0,  # IcewindMisc::Roll (src/IcewindMisc.cpp): sum of
+               # rand()%sides+1 — the dice primitive
+    0x447C20,  # CDamageReduction::Apply (src/CDerivedStats.cpp)
+    0x447E30,  # CDamageReduction::GetEffectiveAmount
+               # (src/CDerivedStats.cpp)
+    0x448130,  # CDamageReductionList::GetBestGeneric
+               # (src/CDerivedStats.cpp)
+    0x4481A0,  # CDamageReductionList::GetBest (src/CDerivedStats.cpp)
+    0x448250,  # CDamageReductionList::Apply (src/CDerivedStats.cpp): the
+               # DR X/enchantment rule
+    # Effect application paths that carry rules math.
+    0x72DE60,  # CGameSprite::ProcessEffectList (src/CGameSprite.cpp): the
+               # per-tick effect pass; rolls the four save d20s and the d100
+    0x4A3030,  # CGameEffect::ResolveEffect (src/CGameEffect.cpp): effect
+               # duration units (rounds ×15 ticks) and expiry
+    0x733200,  # CGameSprite::HandlePersistantEffects
+               # (src/CGameSprite.cpp): persistent-effect timing
+})
+
+RULES_MATH_NOTE = ' (rules math: requires kind: oracle)'
 
 
 def git(repo, *args, check=True):
@@ -168,23 +241,39 @@ def main(argv=None):
     errors = []
     kinds = {}
     untagged = []
+    rules_kinds = {}
+    rules_found = 0
     found = touched(args.repo, args.base)
     for path, address, name in found:
+        rules = address in RULES_MATH
         why, fields = problem(args.repo, address)
+        if rules:
+            rules_found += 1
         if why:
+            if rules:
+                why += RULES_MATH_NOTE
             errors.append(f'{path}: 0x{address:X} {name}: {why}')
             continue
         kind = fields.get('kind')
         if kind in KINDS:
             kinds[kind] = kinds.get(kind, 0) + 1
-            continue
-        rel = f'{EVIDENCE_DIR}/{evidence_name(address)}'
-        if kind:
-            untagged.append(f'warning: {rel} has kind: {kind!r}; expected '
-                            f'one of {", ".join(KINDS)}')
-        else:
-            untagged.append(f'warning: {rel} has no kind: '
-                            f'({", ".join(KINDS)})')
+            if rules:
+                rules_kinds[kind] = rules_kinds.get(kind, 0) + 1
+        elif not rules:
+            # Inside the set an untagged document is the rules-math error
+            # below; outside it stays a warning.
+            rel = f'{EVIDENCE_DIR}/{evidence_name(address)}'
+            if kind:
+                untagged.append(f'warning: {rel} has kind: {kind!r}; expected '
+                                f'one of {", ".join(KINDS)}')
+            else:
+                untagged.append(f'warning: {rel} has no kind: '
+                                f'({", ".join(KINDS)})')
+        if rules and kind != 'oracle':
+            current = f'kind: {kind}' if kind else 'no kind'
+            errors.append(f'{path}: 0x{address:X} {name}: rules math: '
+                          f'evidence has {current}; requires kind: oracle '
+                          f'(an exemption or a replay does not pass)')
     for line in errors:
         print(line)
     if errors:
@@ -197,6 +286,11 @@ def main(argv=None):
         print('evidence kinds: '
               + ', '.join(f'{k} {kinds.get(k, 0)}' for k in KINDS)
               + f' ({counted} of {len(found)} touched function(s))')
+    if rules_found:
+        print('rules math: '
+              + ', '.join(f'{k} {rules_kinds.get(k, 0)}' for k in KINDS)
+              + f' ({rules_found} of {len(found)} touched function(s); '
+              'set and triage in docs/evidence/rules-math-triage.md)')
     for line in untagged:
         print(line)
     return 1 if errors else 0
