@@ -6821,7 +6821,7 @@ void CGameSprite::StartSpriteEffect(BYTE spriteEffect, BYTE intensityLevel, BYTE
         m_spriteEffectSequenceLength = m_spriteEffectVidCell.GetSequenceLength(m_spriteEffectVidCell.m_nCurrentSequence, FALSE);
         m_effectExtendDirection = 1;
         m_spriteEffectBaseIntensity = 0;
-        m_spriteEffectBaseIntensity = 1;
+        m_spriteEffectRandomIntensity = 1;
         break;
     case 4:
         if (a4 == TRUE) {
