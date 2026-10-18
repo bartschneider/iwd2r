@@ -7786,6 +7786,121 @@ class GltraceTest(unittest.TestCase):
                           if a['op'] == 'checkpoint'],
                          ['menu', 'world'])
 
+    # --- the desktop leg: the sandbox launch is replaced by a direct
+    # desktop launch through cmd.exe (play.py's pattern), gated on
+    # IWD2R_DESKTOP_OK=1. The copy's icewind2.ini is rewritten for the
+    # run and restored after.
+
+    INI = '\n'.join([
+        '[Alias]',
+        'HD0:=C:\\Games\\Icewind Dale II\\',
+        'CD1:=C:\\Games\\Icewind Dale II\\Data\\',
+        'CD2:=C:\\Games\\Icewind Dale II\\CD2\\',
+        '',
+        '[Program Options]',
+        'Full Screen=1',
+        'Resolution=800',
+        'Volume Movie=85',
+        'Volume Music=60',
+        'Volume Voices=100',
+        'Volume Ambients=70',
+        'Volume SFX=80',
+        'Maximum Frame Rate=30',
+        '',
+    ])
+
+    def test_gltrace_ini_overrides(self):
+        # The copy's icewind2.ini points [Alias] at the source install:
+        # the run rewrites it to the game folder (the game would otherwise
+        # read and write the source install) and silences the game's own
+        # volumes (there is no system-wide muting on the desktop), and
+        # touches nothing else.
+        game = r'C:\Users\thier\iwd2r-ieex\game'
+        text = gltrace.ini_overrides(self.INI, game)
+        self.assertEqual(text, '\n'.join([
+            '[Alias]',
+            'HD0:=' + game + '\\',
+            'CD1:=' + game + '\\Data\\',
+            'CD2:=' + game + '\\CD2\\',
+            '',
+            '[Program Options]',
+            'Full Screen=1',
+            'Resolution=800',
+            'Volume Movie=0',
+            'Volume Music=0',
+            'Volume Voices=0',
+            'Volume Ambients=0',
+            'Volume SFX=0',
+            'Maximum Frame Rate=30',
+            '',
+        ]))
+        # Idempotent: the rewritten text is already right.
+        self.assertEqual(gltrace.ini_overrides(text, game), text)
+        # A missing alias key must fail loudly rather than leave the game
+        # pointing at the source install.
+        with self.assertRaises(ValueError):
+            gltrace.ini_overrides('[Alias]\nHD0:=C:\\x\\\n', game)
+
+    def test_gltrace_desktop_config(self):
+        config = gltrace.desktop_config(
+            'world_entry', r'C:\g', r'C:\apitrace\bin\apitrace.exe',
+            r'C:\Users\thier\iwd2r-ieex\runs\stamped\world_entry', 660)
+        results = r'C:\Users\thier\iwd2r-ieex\runs\stamped\world_entry'
+        self.assertEqual(config, {
+            'scenario': 'world_entry',
+            'exe': r'C:\g\IWD2EE.exe',
+            'data': r'C:\g',
+            'apitrace': r'C:\apitrace\bin\apitrace.exe',
+            'trace': results + r'\world_entry.trace',
+            'results': results,
+            'actions': results + r'\actions.json',
+            'frame_rate': 30,
+            'timeout': 660,
+            'trace_wait': gltrace.TRACE_WAIT,
+        })
+        # Nothing sandbox-only: no machine shutdown, no Defender, no
+        # DirectPlay surgery.
+        for absent in ('shutdown', 'exclusions', 'directplay'):
+            self.assertNotIn(absent, config)
+
+    def test_gltrace_desktop_bat(self):
+        bat = gltrace.desktop_bat(r'C:\Users\thier\iwd2r-ieex\runs\s\w')
+        lines = bat.split('\n')
+        self.assertEqual(lines[0], '@echo off')
+        self.assertEqual(lines[1],
+                         r'cd /d C:\Users\thier\iwd2r-ieex\runs\s\w')
+        self.assertEqual(lines[2],
+                         'powershell.exe -NoProfile -ExecutionPolicy '
+                         'Bypass -File gltrace-desktop-driver.ps1 '
+                         '-Config config.json')
+        self.assertEqual(lines[-1], 'exit /b %ERRORLEVEL%')
+
+    def test_gltrace_desktop_driver_scope(self):
+        # The desktop driver drives input and the trace, and nothing else:
+        # the sandbox driver's machine mutations (audio services, Defender,
+        # DirectPlay files, logon tasks, the shutdown, the WDAG gate, the
+        # second attempt) must not be in it.
+        driver = gltrace.DESKTOP_DRIVER
+        for absent in ('WDAGUtilityAccount', 'Stop-Service',
+                       'Add-MpPreference', 'Get-MpComputerStatus',
+                       'shutdown.exe', 'Install-DirectPlay', 'rgnupdt',
+                       'IwdAudio', 'Set-Aside', 'attempt1'):
+            self.assertNotIn(absent, driver)
+        for present in ('SendInput', 'trace --api gl', '-m',
+                        'Find-GameWindow', 'SetForegroundWindow',
+                        'WM_CLOSE', 'exitcode.txt', 'error.txt',
+                        'done.txt', 'video adapter', 'driver.log'):
+            self.assertIn(present, driver)
+        # The IEex loader dialog is not the game window when the window is
+        # picked, and its confirmations are answered at close time.
+        self.assertGreaterEqual(driver.count('#32770'), 2)
+
+    def test_gltrace_desktop_allowed(self):
+        # play.py's gate: the desktop launch is the user's opt-in.
+        self.assertFalse(gltrace.desktop_allowed({}))
+        self.assertFalse(gltrace.desktop_allowed({'IWD2R_DESKTOP_OK': '0'}))
+        self.assertTrue(gltrace.desktop_allowed({'IWD2R_DESKTOP_OK': '1'}))
+
 
 if __name__ == '__main__':
     unittest.main()
