@@ -24,6 +24,14 @@ Decompile scratch output lives in `runs/dll-decomp/` (git-ignored).
 - [`IEex_Helper_SetBridgeNL`](IEex_Helper_SetBridgeNL.md)
 - [`IEex_Helper_SynchronizedBridgeOperation`](IEex_Helper_SynchronizedBridgeOperation.md)
 
+## Global locks
+
+- [`IEex_Helper_GetOrCreateGlobalLock`](IEex_Helper_GetOrCreateGlobalLock.md)
+- [`IEex_Helper_LockGlobal`](IEex_Helper_LockGlobal.md)
+- [`IEex_Helper_LockGlobalDirect`](IEex_Helper_LockGlobalDirect.md)
+- [`IEex_Helper_UnlockGlobal`](IEex_Helper_UnlockGlobal.md)
+- [`IEex_Helper_UnlockGlobalDirect`](IEex_Helper_UnlockGlobalDirect.md)
+
 ## Lua-side names that are not DLL helpers
 
 - `IEex_DefineAddress` / `IEex_SupressScrollCheck` are implemented purely in the staged Lua patches; there is no `IEexHelper.fork.dll` export or registration behind them, so they have no note here.
