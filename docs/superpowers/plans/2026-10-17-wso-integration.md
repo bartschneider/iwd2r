@@ -4,7 +4,7 @@
 
 **Goal:** Bring the WSO fork's recovered functions into iwd2r through the gate, resolve every function the two trees recovered differently with an oracle or replay, and recover the design of the fork's GPU renderer from its Lua patches, its DLL and GL traces, without the C++ source.
 
-**Architecture:** Wave 0 is sequential tooling (comparison script, `trace` evidence kind, artifact fetcher, DLL Ghidra projects). Wave 1 resolves the 406 disagreements in batches before anything else is trusted. Waves 2 to 5 import clean gain by subsystem as parallel streams in worktrees, each ending with the full gate. Renderer streams A, B and C run alongside from wave 1 on and produce documents only.
+**Architecture:** Wave 0 is sequential tooling (comparison script, `trace` evidence kind, artifact fetcher, DLL Ghidra projects, differential Frida tracing). Wave 1 resolves the 406 disagreements in batches before anything else is trusted. Waves 2 to 5 import clean gain by subsystem as parallel streams in worktrees, each ending with the full gate. Renderer streams A, B and C run alongside from wave 1 on and produce documents only.
 
 **Tech Stack:** C++17 (MSVC x86/x64, GCC, Clang), CMake presets, Catch2, Python 3 unittest, Ghidra 12.1.4 headless with Java post-scripts, apitrace 14.0 win32, the oracle, replay and evidence tools.
 
@@ -38,6 +38,7 @@
 | `tools/wso_fetch.py` + `tools/wso_pins.json` | downloads the pinned DLLs and Lua files into `$IWD2R_HOME/wso`, verifies sha256; `--check` only verifies |
 | `tools/ghidra/make_dll_project.py` | `make(name, dll_path)` creates `$IWD2R_HOME/ghidra-projects/<name>` under the shared Ghidra lock |
 | `tools/ghidra/DllScope.java`, `tools/ghidra/DllDelta.java`, `tools/ghidra/DecompileFunctions.java` | scope line; functions in one program absent from another; decompile named functions to files |
+| `tools/frida/{probe,hooks,orig,trace_diff}.py` | differential tracing of the original and our build on one scenario; `trace_diff.compare` is the verdict |
 | `tools/gltrace.py` | runs apitrace around `IWD2EE.exe` for a scenario, writes the `.trace` under `runs/` and a per-frame summary markdown |
 | `tools/recovery_status.py` | byte-weighted `.text` recovery figure from the iwd2 Ghidra project and `src/` |
 | `docs/wso/` | xrec report, disagreement list, wave ledgers' public summaries |
@@ -99,13 +100,26 @@
 - [ ] **Step 4:** run the tests; `python3 tools/ghidra/make_dll_project.py ieexhelper-fork $IWD2R_HOME/wso/dll/IEexHelper.fork.dll` and the same for `ieexhelper-upstream`; run `DllScope.java` on both and record the two lines in `docs/renderer/wso/scope.md` (expected: 1585/353902 and 1298/236197); run `DllDelta.java` fork against upstream, commit the TSV's row count in the same note.
 - [ ] **Step 5: Commit** "Ghidra projects and delta listing for the IEexHelper DLLs".
 
+### Task 5b: differential Frida tracing, adopted from the fork
+
+**Files:** Create `tools/frida/probe.py`, `tools/frida/hooks.py`, `tools/frida/orig.py`, `tools/frida/trace_diff.py` (adapted from `wso/main:scripts/frida_probe.py`, `frida_hooks.py`, `frida_orig.py`, `frida_trace_diff.py`; read them with `git show wso/main:<path>`, never run them from the fork's tree), `docs/frida-tracing.md` (from his `docs/frida-trace-comparison.md` and `docs/frida-differential-tracing.md`, rewritten for our paths); Test `tests/test_tools.py` (`trace_diff = load_tool('frida/trace_diff')` or an equivalent loader for the subpackage).
+
+**Interfaces:** `trace_diff.normalize(events: Iterable[dict]) -> list[dict]` strips harness events, timestamps, thread and process ids and backtraces, and maps pointer fields to `<null>` or `<ptr>` unless `raw_pointers=True`. `trace_diff.compare(orig: list[dict], ours: list[dict]) -> int` returns 0 when calls per tag, call order and per-occurrence arguments all match, 1 on any behavioural difference, 2 on malformed or empty input; any `crash`, `exception`, `assert` or `ERROR` event returns non-zero. `probe.py run --target original|ours --probe <hooks.json> --scenario <name> --out <file.jsonl>` launches the target through `cmd.exe` with the Windows Python at `%USERPROFILE%\iwd2r-frida\venv\Scripts\python.exe` (resolved via `winhome.py`), the original from the oracle copy, ours from `play.win_checkout`'s `windows-msvc-x86` build, drives the scenario with `realinput.py`, and writes the capture under `runs/<stamp>/`. An evidence file produced this way is `kind: trace` with `trace_source: "frida <probe name> orig:<sha256 of orig.jsonl> ours:<sha256 of ours.jsonl> compare=0"`; the captures stay under `runs/`, never committed.
+
+- [ ] **Step 0 (once, host):** on Windows, `py -3 -m venv %USERPROFILE%\iwd2r-frida\venv` and `pip install frida-tools` in it. Frida attaches to a 32-bit process from a 64-bit Python without special handling. Record the frida version in `docs/frida-tracing.md`.
+- [ ] **Step 1: Tests.** `test_trace_diff_normalize_drops_harness_and_pointers` (five events incl. a `ready` and a `this: 0x1234`; assert the remaining events and `<ptr>`); `test_trace_diff_compare_match_order_args` (two identical captures: 0; same calls, different order: 1; one argument differs: 1); `test_trace_diff_crash_never_passes` (a capture with an `assert` event against itself: non-zero); `test_trace_diff_empty_is_2`.
+- [ ] **Step 2:** run, expect failures.
+- [ ] **Step 3:** adapt the four scripts; keep his hook-table JSON format unchanged so his probes work as-is; route every Windows path through `winhome.py`.
+- [ ] **Step 4:** run the tests (pass). Smoke on the host: a probe on `CGameSprite::MoveToPoint` (0x73F706 region, from his pathfinding notes) over `world_entry`, original versus ours, `compare` exit 0; put the command and the exit code in `docs/frida-tracing.md`.
+- [ ] **Step 5: Commit** "Adopt differential Frida tracing from the WSO fork".
+
 ## Wave 1: disagreements (parallel batches of 20, one stream per batch)
 
 ### Task 6 (template, instantiated per batch): resolve a disagreement batch
 
 **Files:** `src/<the batch's files>`, `docs/evidence/<addr>.md` per function, `oracle/cases/` or `scenarios/` as needed. The coordinator assigns batches from `docs/wso/disagreements.json` ranked by `their_len + our_len`, disjoint files per concurrent batch.
 
-- [ ] **Step 1:** for each function, read both bodies and the Ghidra decompile; write the oracle case (pure function) or the replay checkpoint (needs a loaded area) that distinguishes them. Run it against the original.
+- [ ] **Step 1:** for each function, read both bodies and the Ghidra decompile; write the oracle case (pure function), a Frida probe (Task 5b; any function reachable in a scenario), or the replay checkpoint that distinguishes them. Run it against the original.
 - [ ] **Step 2:** keep the body the case agrees with. If it is the fork's, apply it with the trailer. If neither matches, port from the decompile and note both errors.
 - [ ] **Step 3:** evidence file: `kind: oracle` or `replay`, one line "disagreed with WSO at <sha>: <what differed>; case <id> decides". Where the fork and ours agree after all (parser noise), add "corroborated by WSO at <sha>" and leave the kind.
 - [ ] **Step 4:** gate; **Step 5: Commit** per batch "Resolve WSO disagreement batch N: <subsystem>".
