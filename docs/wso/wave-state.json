@@ -1035,8 +1035,33 @@
       ],
       "status": "assigned",
       "verdicts": {
+        "0x4AB510": {
+          "case": "dump-4AB510",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x589110": {
+          "case": "dump-589110",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5A24D0": {
+          "case": "dump-5A24D0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5A3230": {
+          "case": "dump-5A3230",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
         "0x5A7E40": {
           "case": "dump-5A7E40",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5AC430": {
+          "case": "dump-5AC430",
           "losing_kind": "trace",
           "side": "ours"
         },
@@ -1045,13 +1070,337 @@
           "losing_kind": "trace",
           "side": "ours"
         },
+        "0x6FA900": {
+          "case": "dump-6FA900",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
         "0x703700": {
           "case": "dump-703700",
           "losing_kind": "trace",
           "side": "ours"
         },
+        "0x704D40": {
+          "case": "dump-704D40",
+          "losing_kind": "read-only",
+          "side": "fork"
+        },
+        "0x709B60": {
+          "case": "dump-709B60",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
         "0x70CF90": {
           "case": "dump-70CF90",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x72DE60": {
+          "case": "dump-72DE60",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x7338E0": {
+          "case": "dump-7338E0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x738E70": {
+          "case": "dump-738E70",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x73B760": {
+          "case": "dump-73B760",
+          "losing_kind": "oracle",
+          "side": "fork"
+        },
+        "0x763200": {
+          "case": "dump-763200",
+          "losing_kind": "trace",
+          "side": "ours"
+        }
+      }
+    },
+    "b005": {
+      "assigned_at": "2026-10-18T18:23:53+00:00",
+      "branch": "p3/wso-b005",
+      "closed_at": "2026-10-18T19:57:08+00:00",
+      "files": [
+        "src/CScreenCharacter.cpp",
+        "src/CScreenStore.cpp",
+        "src/CGameAnimationTypeCharacter.cpp",
+        "src/CAIGroup.cpp",
+        "src/CScreenSpellbook.cpp",
+        "src/CScreenConnection.cpp",
+        "src/CScreenLoad.cpp",
+        "src/CGameContainer.cpp",
+        "src/CVidPoly.cpp",
+        "src/CVisibility.cpp",
+        "src/CScreenCreateChar.cpp",
+        "src/CResCache.cpp"
+      ],
+      "rows": [
+        {
+          "address": "0x5E2210",
+          "category": "both_changed_differ",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CScreenCharacter::OnDoneButtonClick",
+          "our_len": 7759,
+          "their_len": 109
+        },
+        {
+          "address": "0x67B8A0",
+          "category": "both_changed_differ",
+          "file": "src/CScreenStore.cpp",
+          "name": "CScreenStore::OnBuySpellButtonClick",
+          "our_len": 3871,
+          "their_len": 3912
+        },
+        {
+          "address": "0x6C8390",
+          "category": "both_changed_differ",
+          "file": "src/CGameAnimationTypeCharacter.cpp",
+          "name": "CGameAnimationTypeCharacter::EquipWeapon",
+          "our_len": 3837,
+          "their_len": 3854
+        },
+        {
+          "address": "0x678900",
+          "category": "both_changed_differ",
+          "file": "src/CScreenStore.cpp",
+          "name": "CScreenStore::BuyBagItems",
+          "our_len": 3800,
+          "their_len": 3827
+        },
+        {
+          "address": "0x6CD400",
+          "category": "both_changed_differ",
+          "file": "src/CGameAnimationTypeCharacter.cpp",
+          "name": "CGameAnimationTypeCharacter::Render",
+          "our_len": 3783,
+          "their_len": 3758
+        },
+        {
+          "address": "0x405370",
+          "category": "both_changed_differ",
+          "file": "src/CAIGroup.cpp",
+          "name": "CAIGroup::GetOffsets",
+          "our_len": 3328,
+          "their_len": 3972
+        },
+        {
+          "address": "0x669830",
+          "category": "both_changed_differ",
+          "file": "src/CScreenSpellbook.cpp",
+          "name": "CScreenSpellbook::sub_669830",
+          "our_len": 3615,
+          "their_len": 3650
+        },
+        {
+          "address": "0x5FD0A0",
+          "category": "both_changed_differ",
+          "file": "src/CScreenConnection.cpp",
+          "name": "CScreenConnection::OnNewGameButtonClick",
+          "our_len": 3534,
+          "their_len": 3707
+        },
+        {
+          "address": "0x63BE80",
+          "category": "both_changed_differ",
+          "file": "src/CScreenLoad.cpp",
+          "name": "CScreenLoad::LoadGame",
+          "our_len": 3516,
+          "their_len": 3685
+        },
+        {
+          "address": "0x678110",
+          "category": "both_changed_differ",
+          "file": "src/CScreenStore.cpp",
+          "name": "CScreenStore::BuyStoreItems",
+          "our_len": 3476,
+          "their_len": 3723
+        },
+        {
+          "address": "0x480C00",
+          "category": "both_changed_differ",
+          "file": "src/CGameContainer.cpp",
+          "name": "CGameContainer::MarshalMessage",
+          "our_len": 3555,
+          "their_len": 3564
+        },
+        {
+          "address": "0x7C0F40",
+          "category": "both_changed_differ",
+          "file": "src/CVidPoly.cpp",
+          "name": "CVidPoly::FillConvexPoly",
+          "our_len": 3430,
+          "their_len": 3515
+        },
+        {
+          "address": "0x552A50",
+          "category": "both_changed_differ",
+          "file": "src/CVisibility.cpp",
+          "name": "CVisibilityMap::MarkTileLine",
+          "our_len": 4518,
+          "their_len": 2425
+        },
+        {
+          "address": "0x676780",
+          "category": "both_changed_differ",
+          "file": "src/CScreenStore.cpp",
+          "name": "CScreenStore::UpdateGroupItems",
+          "our_len": 3432,
+          "their_len": 3494
+        },
+        {
+          "address": "0x614EF0",
+          "category": "both_changed_differ",
+          "file": "src/CScreenCreateChar.cpp",
+          "name": "CUIControlButtonCharGenAccept::OnLButtonClick",
+          "our_len": 3356,
+          "their_len": 3545
+        },
+        {
+          "address": "0x5D6C60",
+          "category": "both_changed_differ",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CScreenCharacter::EngineGameInit",
+          "our_len": 3438,
+          "their_len": 3199
+        },
+        {
+          "address": "0x551A90",
+          "category": "both_changed_differ",
+          "file": "src/CVisibility.cpp",
+          "name": "CVisibilityMap::BltDitherPattern",
+          "our_len": 3414,
+          "their_len": 3209
+        },
+        {
+          "address": "0x675380",
+          "category": "both_changed_differ",
+          "file": "src/CScreenStore.cpp",
+          "name": "CScreenStore::UpdateIdentifyPanel",
+          "our_len": 3167,
+          "their_len": 3399
+        },
+        {
+          "address": "0x78C4F0",
+          "category": "both_changed_differ",
+          "file": "src/CResCache.cpp",
+          "name": "CResCache::CopyFile",
+          "our_len": 3214,
+          "their_len": 3254
+        },
+        {
+          "address": "0x679810",
+          "category": "both_changed_differ",
+          "file": "src/CScreenStore.cpp",
+          "name": "CScreenStore::BuyContainerBagItems",
+          "our_len": 3280,
+          "their_len": 3184
+        }
+      ],
+      "status": "closed",
+      "verdicts": {
+        "0x405370": {
+          "case": "group/rotate_offsets",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x480C00": {
+          "case": "dump-480C00",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x551A90": {
+          "case": "dump-551A90",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x552A50": {
+          "case": "vis/mark_tile_line",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5D6C60": {
+          "case": "dump-5D6C60",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5E2210": {
+          "case": "dump-5E2210",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5FD0A0": {
+          "case": "dump-5FD0A0",
+          "losing_kind": null,
+          "side": "neither"
+        },
+        "0x614EF0": {
+          "case": "dump-614EF0",
+          "losing_kind": null,
+          "side": "neither"
+        },
+        "0x63BE80": {
+          "case": "dump-63BE80",
+          "losing_kind": null,
+          "side": "neither"
+        },
+        "0x669830": {
+          "case": "dump-669830",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x675380": {
+          "case": "dump-675380",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x676780": {
+          "case": "dump-676780",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x678110": {
+          "case": "dump-678110",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x678900": {
+          "case": "dump-678900",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x679810": {
+          "case": "dump-679810",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x67B8A0": {
+          "case": "dump-67B8A0",
+          "losing_kind": null,
+          "side": "neither"
+        },
+        "0x6C8390": {
+          "case": "dump-6C8390",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x6CD400": {
+          "case": "world_entry",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x78C4F0": {
+          "case": "world_entry",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x7C0F40": {
+          "case": "vid/fill_convex_poly",
           "losing_kind": "trace",
           "side": "ours"
         }
