@@ -1,7 +1,8 @@
 """Tests for tools/gen_map.py, tools/check_evidence.py, tools/gen_fields.py,
 tools/minischema.py, tools/shaders.py, tools/xrec.py, tools/wso_fetch.py and
 the pure parts of tools/play.py, tools/realinput.py, tools/winsandbox.py,
-tools/oracle.py and tools/ghidra/labels.py.
+tools/oracle.py, tools/ghidra/labels.py and the project bookkeeping of
+tools/ghidra/make_dll_project.py.
 
 Run from the repository root: python3 -I tests/test_tools.py
 
@@ -6307,6 +6308,71 @@ class GhidraCloneTest(unittest.TestCase):
         os.remove(os.path.join(clone, 'iwd2.gpr'))
         self.mp.worktree_clone('/w/p3-a')
         self.assertEqual(self.read(clone, 'iwd2.gpr'), 'gpr')
+
+
+class MakeDllProjectTest(unittest.TestCase):
+    """make_dll_project: one analysed Ghidra project per DLL under
+    ghidra-projects/<name>, imported under make_project's lock."""
+
+    def setUp(self):
+        self.mdp = load_ghidra_tool('make_dll_project')
+        # The make_project instance this module imported (the shared
+        # sys.modules one), whose headless() the tool runs through.
+        self.mp = self.mdp.make_project
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        root = self._tmp.name
+        self.projects = os.path.join(root, 'ghidra-projects')
+        self.dll = os.path.join(root, 'dll', 'IEexHelper.fork.dll')
+        os.makedirs(os.path.dirname(self.dll))
+        with open(self.dll, 'wb') as f:
+            f.write(b'MZ fake dll')
+        self.mdp.PROJECTS_DIR = self.projects
+        self.mp.LOCK_PATH = os.path.join(self.projects, 'iwd2.lock')
+
+    def fake_headless(self, runs):
+        """Patch subprocess so analyzeHeadless only writes the .gpr."""
+
+        def run(cmd, env=None, capture_output=True, text=True):
+            runs.append(cmd)
+            # Ghidra would create <project_location>/<project_name>.gpr.
+            with open(os.path.join(cmd[1], cmd[2] + '.gpr'), 'w') as f:
+                f.write('gpr')
+            return subprocess.CompletedProcess(cmd, 0, 'stdout', '')
+
+        self.addCleanup(setattr, self.mp, 'subprocess', subprocess)
+        self.mp.subprocess = types.SimpleNamespace(run=run)
+
+    def test_make_dll_project_paths_and_noop(self):
+        runs = []
+        self.fake_headless(runs)
+        target = os.path.join(self.projects, 'ieexhelper-fork')
+        self.assertEqual(self.mdp.make('ieexhelper-fork', self.dll), target)
+        self.assertEqual(len(runs), 1)
+        self.assertIn('-import', runs[0])
+        self.assertIn(self.dll, runs[0])
+        self.assertTrue(os.path.exists(
+            os.path.join(target, 'ieexhelper-fork.gpr')))
+        self.assertEqual(self.mdp.make('ieexhelper-fork', self.dll), target)
+        self.assertEqual(len(runs), 1)  # .gpr exists: no second headless run
+        with self.assertRaises(ValueError):
+            self.mdp.make('../escape', self.dll)
+
+    def test_make_dll_project_holds_lock(self):
+        held = []
+
+        @contextlib.contextmanager
+        def spy(path, what, timeout=None):
+            held.append(os.path.normpath(str(path)))
+            yield
+
+        self.addCleanup(setattr, self.mp.filelock, 'hold',
+                        self.mp.filelock.hold)
+        self.mp.filelock.hold = spy
+        runs = []
+        self.fake_headless(runs)
+        self.mdp.make('ieexhelper-fork', self.dll)
+        self.assertEqual(held, [os.path.normpath(self.mp.LOCK_PATH)])
 
 
 class XrecTest(unittest.TestCase):
