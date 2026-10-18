@@ -418,6 +418,14 @@ public:
     /* 0014 */ LONG GetTargetId() override;
     /* 0018 */ void GetNextWaypoint(CPoint* pt) override;
     /* 0028 */ BOOLEAN CanSaveGame(STRREF& strError) override;
+    // NOTE: The exe overrides this slot (0x6FC260) with sprite-specific time
+    // work that is not ported; delegate to the ported base, which is exactly
+    // what ran before the slot was declared.
+    /* 002C */ BOOLEAN CompressTime(DWORD deltaTime) override { return CGameAIBase::CompressTime(deltaTime); }
+    // NOTE: The exe overrides this slot (0x6FD9F0) with a large sprite dump
+    // that is not ported; the base body (0x778900) is empty, so this is what
+    // ran before the slot was declared.
+    /* 0030 */ void DebugDump(const CString& a1, BOOLEAN a2) override { CGameObject::DebugDump(a1, a2); }
     /* 0034 */ BOOL IsOver(const CPoint& pt) override;
     /* 0038 */ BOOL DoesIntersect(CRect r);
     /* 003C */ BOOL OnSearchMap() override;
@@ -427,8 +435,9 @@ public:
     /* 004C */ void Render(CGameArea* pArea, CVidMode* pVidMode, INT nSurface) override;
     /* 0050 */ BOOLEAN DoAIUpdate(BOOLEAN active, LONG counter) override;
     /* 0058 */ void SetCursor(LONG nToolTip) override;
-    /* 0078 */ void AddEffect(CGameEffect* pEffect, BYTE list, BOOL noSave, BOOL immediateApply) override;
+    /* 0064 */ BOOL EvaluateStatusTrigger(const CAITrigger& trigger) override;
     /* 0070 */ void SetTargetObject(CGameObject* pTarget) override;
+    /* 0078 */ void AddEffect(CGameEffect* pEffect, BYTE list, BOOL noSave, BOOL immediateApply) override;
     /* 007C */ void ClearAI(BOOLEAN bSetSequence) override;
     /* 0084 */ SHORT ExecuteAction() override;
     /* 008C */ void ProcessAI() override;
@@ -439,7 +448,6 @@ public:
     /* 00AC */ void ApplyTriggers() override;
     /* 00B0 */ void AutoPause(DWORD type) override;
     /* 00B4 */ BOOL GetCanSeeInvisible() override;
-    BOOL EvaluateStatusTrigger(const CAITrigger& trigger) override;
     /* 00B8 */ virtual void SetTarget(const CPoint& target, BOOL collisionPath);
     /* 00BC */ virtual void SetAIType(const CAIObjectType& typeAI, BOOL updateLive, BOOL updateStart);
     /* 00C0 */ virtual void ResetAITypeLive();
@@ -452,7 +460,7 @@ public:
     void SetPath(LONG* pPath, SHORT nPath);
     BOOL ClearBumpPath(const CPoint& start, const CPoint& goal);
     BOOL IsVisibleToCaller(BOOL bSeeInvisible);
-    BOOL sub_6FB440();
+    BOOL CanAnimate();
     void AIUpdateFly();
     void ChangeDirection();
     void CheckIfVisible();
@@ -645,7 +653,7 @@ public:
     SHORT Enemy();
     SHORT SetDialog();
     void SelectWeaponAbility(unsigned char buttonNum, unsigned char abilityNum, unsigned char feedBack, unsigned char retry);
-    void sub_756930(CItem* pItem, CItem* pLauncher);
+    void DecodeSwingSound(CItem* pItem, CItem* pLauncher);
     SHORT EquipItem();
     SHORT FindTraps();
     SHORT Panic();
@@ -975,11 +983,11 @@ public:
     /* 5694 */ CPoint m_targetPoint;
     /* 569C */ short m_targetAreaSize;
     /* 569E */ BYTE m_nTempSelectedWeapon;
-    /* 56DF */ BYTE m_nTempSelectedWeaponAbility;
+    /* 569F */ BYTE m_nTempSelectedWeaponAbility;
     /* 56A0 */ CButtonData m_currentUseButton;
+    /* 56DC */ CResRef m_dialog;
     /* 56E4 */ CResRef field_56E4;
     /* 56EC */ BOOLEAN m_sequenceTest;
-    /* 56DC */ CResRef m_dialog;
     /* 56EE */ STR_RES m_speech[64];
     /* 70EE */ int field_70EE;
     /* 70F2 */ int field_70F2;
