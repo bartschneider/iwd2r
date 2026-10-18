@@ -1929,6 +1929,11 @@ void CGameSprite::AIUpdate()
                     ITEM_EFFECT effect;
                     CGameEffect::ClearItemEffect(&effect, ICEWIND_CGAMEEFFECT_DAYBLINDNESS);
 
+                    // NOTE: The binary sets durationType (ITEM_EFFECT offset 0xC)
+                    // to 1 before DecodeEffect (0x6F7xxx: uStack_30 = 1 with
+                    // auStack_3c as the ITEM_EFFECT base).
+                    effect.durationType = 1;
+
                     CGameEffect* pEffect = CGameEffect::DecodeEffect(&effect,
                         GetPos(),
                         m_id,
@@ -2469,8 +2474,14 @@ void CGameSprite::AIUpdate()
                             || (pGame->GetCharacterPortraitNum(m_id) != -1
                                 && (m_derivedStats.m_generalState & STATE_STONE_DEATH) != 0)) {
                             if (InControl()) {
+                                // NOTE: RemoveFromArea (0x4C7F60) clears
+                                // m_pArea, but the binary reads m_nCharacters
+                                // off the pointer it saved before the call
+                                // (0x6F7xxx: iVar11 = m_pArea; call; then
+                                // *(iVar11 + 0x1ed) == 0). Cache it the same way.
+                                CGameArea* pArea = m_pArea;
                                 RemoveFromArea();
-                                if (m_pArea->m_nCharacters == 0) {
+                                if (pArea->m_nCharacters == 0) {
                                     pGame->SelectCharacter(pGame->GetProtagonist(), FALSE);
                                     pGame->SelectToolbar();
                                     if (g_pBaldurChitin->GetActiveEngine() != g_pBaldurChitin->GetScreenWorld()
@@ -2556,6 +2567,11 @@ void CGameSprite::AIUpdate()
                             && (m_baseStats.m_generalState & STATE_NONDETECTION) == 0) {
                             ITEM_EFFECT effect;
                             CGameEffect::ClearItemEffect(&effect, CGAMEEFFECT_NONDETECTION);
+
+                            // NOTE: As above, durationType (offset 0xC) is set
+                            // to 1 before DecodeEffect (uStack_60 = 1 with
+                            // auStack_6c as the ITEM_EFFECT base).
+                            effect.durationType = 1;
 
                             CGameEffect* pEffect = CGameEffect::DecodeEffect(&effect,
                                 GetPos(),
@@ -16597,7 +16613,8 @@ void CGameSprite::FeedBack(WORD nFeedBackId, LONG a3, LONG a4, LONG a5, LONG a6,
         break;
     case FEEDBACK_TOOHEAVY_SLOWED:
         if ((g_pBaldurChitin->GetObjectGame()->GetOptions()->m_nEffectTextLevel & 0x10) != 0) {
-            if (m_bPlayedEncumberedSlowed || a3 == 1) {
+            if (m_bPlayedEncumberedSlowed == 0 || a3 == 1) {
+                m_bPlayedEncumberedSlowed = 1;
                 g_pBaldurChitin->GetBaldurMessage()->DisplayTextRef(GetNameRef(),
                     19503, // "Encumbered: Slowed"
                     rgbNameColor,
@@ -16610,7 +16627,8 @@ void CGameSprite::FeedBack(WORD nFeedBackId, LONG a3, LONG a4, LONG a5, LONG a6,
         break;
     case FEEDBACK_TOOHEAVY_STOPPED:
         if ((g_pBaldurChitin->GetObjectGame()->GetOptions()->m_nEffectTextLevel & 0x10) != 0) {
-            if (m_bPlayedEncumberedStopped || a3 == 1) {
+            if (m_bPlayedEncumberedStopped == 0 || a3 == 1) {
+                m_bPlayedEncumberedStopped = 1;
                 g_pBaldurChitin->GetBaldurMessage()->DisplayTextRef(GetNameRef(),
                     19504, // "Encumbered: Can not move"
                     rgbNameColor,
@@ -17104,6 +17122,7 @@ void CGameSprite::FeedBack(WORD nFeedBackId, LONG a3, LONG a4, LONG a5, LONG a6,
                 rgbNameColor,
                 RGB(215, 215, 190));
         }
+        break;
     case FEEDBACK_SEARCHSTART:
         if ((g_pBaldurChitin->GetObjectGame()->GetOptions()->m_nEffectTextLevel & 0x10) != 0) {
             DisplayTextRef(GetNameRef(),
