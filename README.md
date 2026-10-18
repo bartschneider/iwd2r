@@ -15,12 +15,23 @@ Bring your own copy of Icewind Dale II: Complete from GOG. The DRM-free GOG vers
 |---|---|---|
 | 1 | Portability foundation | Done |
 | 2 | Verification harness | Done |
-| 3 | Finish the simulation | In progress: milestone 1 (a new party enters the world) in final integration; milestone 2 (move and interact) executing |
+| 3 | Finish the simulation | In progress: milestones 1 to 3 done, each matched against the original (a new party enters the world; moves and interacts; wins its first fight); milestone 4 (save, load and rest) and milestone 5 (the remaining screens and rendering) next |
 | 4 | Render API and classic renderer | Done (classic presenter default; SDL3 GPU presenter opt-in with nearest/sharp/smooth/FSR/NIS filters; the HD classic renderer is a later project) |
 | 5 | IEex native layer and Lua API | Not started |
-| 6 | Remaster renderer | Not started |
+| 6 | Remaster renderer | Not started; its design is being recovered from the IWD2EE OpenGL/HD work (see project 7) before a spec is written |
+| 7 | Cross-recovery with [WillScarlettOhara/iwd2-re](https://github.com/WillScarlettOhara/iwd2-re) | In progress: [design](docs/superpowers/specs/2026-10-17-wso-integration-design.md), [plan](docs/superpowers/plans/2026-10-17-wso-integration.md). A second recovery of the same engine, five months deep; its functions come in through the gate, the functions both trees recovered differently get an oracle case each, and its renderer's design is recovered from its patches, DLL and GL traces |
 
-Current numbers: four presets build; 329 tests pass on Linux; character generation matches the original field for field through party formation, and a new party reaches the start area headlessly on Linux and in Windows Sandbox.
+Current numbers: four presets build; 738 engine tests and 353 tool tests pass on Linux; character generation matches the original field for field through party formation; the `world_entry`, `walk_and_talk` and `first_fight` scenarios match the original's state dumps at every checkpoint (190 of 190 on the first fight), on Linux and in Windows Sandbox. Not playable end to end yet.
+
+### Roadmap
+
+In this order, because each step is what makes the next one verifiable:
+
+1. The engine runs the game correctly: project 3 to its end, every function checked against the original before anything is changed.
+2. Absorb the parallel recovery (project 7), and use the two independent recoveries to cross-check each other.
+3. Presentation: the SDL3 GPU presenter draws the world from an atlas, fog as a texture, HD UI and sprites from packs the player installs in `override/`, zoom, and later lighting over the same pre-rendered scenes, with the original look one toggle away. A 2.5D remaster in the Pillars of Eternity sense, not a 3D one.
+4. Native IEex layer and Lua API (project 5), so IWD2EE runs without an injected DLL.
+5. Fixes to original bugs, 3e rule corrections and additions, and quality-of-life features, each as a switchable option so vanilla stays available for comparison. WeiDU mods and the `override/` folder keep working as they do today.
 
 Engine sites that still truncate pointers to 32 bits on 64-bit targets are listed for project 3 in [docs/64bit-cast-sites.md](docs/64bit-cast-sites.md).
 
@@ -200,3 +211,4 @@ CI runs the parts that need no game data: the PE loader tests (`[pe]`), the VC6 
 - GemRB, as a behavioral reference only (GPL; nothing is copied).
 - benilla, as a pattern reference for the data environment variable, no bundled assets and generated-map conventions.
 - IWD2EE, the mod this engine ships; its code is part of iwd2r.
+- [WillScarlettOhara/iwd2-re](https://github.com/WillScarlettOhara/iwd2-re), the parallel recovery being integrated (project 7), and its author's [IWD2EE OpenGL/HD branch](https://github.com/WillScarlettOhara/IWD2EE/tree/opengl-hd-beta7), the design reference for the remaster renderer.
