@@ -76,6 +76,20 @@ Decompile scratch output lives in `runs/dll-decomp/` (git-ignored).
 - [`IEex_Helper_CScreenKeys_UpdateMainPanelOverride`](IEex_Helper_CScreenKeys_UpdateMainPanelOverride.md)
 - [`IEex_Helper_CUIControlButtonKeys_OnLButtonClickOverride`](IEex_Helper_CUIControlButtonKeys_OnLButtonClickOverride.md)
 
+## UI mouse input gates
+
+- [`IEex_Helper_ActionDblClkPhys`](IEex_Helper_ActionDblClkPhys.md)
+- [`IEex_Helper_ActionDownPhys`](IEex_Helper_ActionDownPhys.md)
+- [`IEex_Helper_ActionUpPhys`](IEex_Helper_ActionUpPhys.md)
+- [`IEex_Helper_MouseMovePhys`](IEex_Helper_MouseMovePhys.md)
+- [`IEex_Helper_FormationRDown`](IEex_Helper_FormationRDown.md)
+- [`IEex_Helper_FormationRUp`](IEex_Helper_FormationRUp.md)
+- [`IEex_Helper_UIDblClkGated`](IEex_Helper_UIDblClkGated.md)
+- [`IEex_Helper_UILDownGated`](IEex_Helper_UILDownGated.md)
+- [`IEex_Helper_UIMouseMoveGated`](IEex_Helper_UIMouseMoveGated.md)
+- [`IEex_Helper_UIRDownGated`](IEex_Helper_UIRDownGated.md)
+- [`IEex_Helper_WorldRejectMapCursor`](IEex_Helper_WorldRejectMapCursor.md)
+
 ## Staged Lua evidence (sha256)
 
 The staged Lua patches at `~/.local/share/iwd2r/wso/lua/` are used as evidence for who calls each helper (and, for the keys-screen group, for hook sites and Lua-callback contracts). The staged corpus itself has no pin yet; these hashes let it be pinned retroactively.
