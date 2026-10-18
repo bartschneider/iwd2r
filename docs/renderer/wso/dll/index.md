@@ -183,6 +183,11 @@ Decompile scratch output lives in `runs/dll-decomp/` (git-ignored).
 - [`IEex_Helper_LightningPolyLine3d`](IEex_Helper_LightningPolyLine3d.md)
 - [`IEex_Helper_CVidPalette_RealizeResource3dGrey`](IEex_Helper_CVidPalette_RealizeResource3dGrey.md)
 
+## Selection / destination markers
+
+- [`IEex_Helper_MarkerTintPC`](IEex_Helper_MarkerTintPC.md)
+- [`IEex_Helper_SetMarkerStyle`](IEex_Helper_SetMarkerStyle.md)
+
 ## Staged Lua evidence (sha256)
 
 The staged Lua patches at `~/.local/share/iwd2r/wso/lua/` are used as evidence for who calls each helper (and, for the keys-screen group, for hook sites and Lua-callback contracts). The staged corpus itself has no pin yet; these hashes let it be pinned retroactively.
