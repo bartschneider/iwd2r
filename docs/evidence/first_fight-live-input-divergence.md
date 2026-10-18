@@ -188,28 +188,74 @@ All numbers above are recomputed from the run folders by read-only scripts
 against `scenarios/first_fight.expect.json` (expectations were generated from
 the original's replay dumps only: `~/iwd2r-runs/20261017-174428/original`).
 
-## Remedy (a validation-design decision, not an engine fix)
+## Remedy implemented (options 1+2; no engine change, replay path untouched)
 
-The live expectation field set pins two things its own design rule excludes
-(`tools/realinput.py`: expectations name "the fields input decides … not
-those that depend on real time"): index-bound positions in a list the engine
-re-sorts every frame, and transient mid-combat values. Options, for the
-coordinator:
+Scope as directed: `tools/realinput.py`, `scenarios/first_fight.expect.json`,
+this document. `oracle.py`/compare untouched; every other scenario and
+checkpoint byte-identical (the regeneration diff was exactly the 2240 enemy
+lines: 35 enemies × 4 fields × 16 world checkpoints).
 
-1. **Order-insensitive enemy pins for live**: compare enemy creatures as an
-   id-keyed map instead of an index-bound list (the live dumps already carry
-   `id`; the expect format does not pin it). This alone clears every Class-A
-   mismatch.
-2. **Settled-state party pins**: drop `party[0].hp` at melee/spell (chaotic)
-   and morale at spell (mid-decay); pin morale at fight_done+settle (baseline
-   10 is reached 150 au after the kill), or add a settle `wait` before the
-   fight_done checkpoint. An exact Probe hp can never be pinned under live
-   timing — either drop it or pin only "alive and undamaged-beyond-X".
-3. **Keep the replay path as the engine-equivalence oracle** (bit-for-bit,
-   39/39 + 190/190): the live path validates the real-input pipeline (OS
-   input, windowing, timing), which the current field set conflates with
-   engine state.
+1. **Id-keyed enemy pins for live** (`tools/realinput.py`). Live expects
+   resolve enemy rows by creature id, `world.enemy_creatures[id=N].<field>`,
+   full field set per row (hp, max_hp, equiped_effects, timed_effects), all
+   35 enemies of every world checkpoint — order-free, strictly more signal
+   than the index-bound rows. `expected_fields()` emits the keyed fields from
+   a dump; `check_checkpoints()` merges them into the compared view; the
+   compare semantics, the screen early-out and the `'<missing>'` sentinel are
+   unchanged. (Rationale in the module comment: the engine re-sorts render
+   order every frame — the original's own dumps prove it, step 2 above.)
+2. **Combat-beat pins dropped, settled pins kept**
+   (`scenarios/first_fight.expect.json`). Regenerated from the original's
+   replay dumps only (`~/iwd2r-runs/20261017-174428/original`), then exactly
+   seven pins dropped by the deriving criterion — *a live pin is valid only
+   if it is invariant across all four existing live runs AND consistent with
+   the original's dumps*:
+   - `melee`: `party[0].hp` (orig 3; live 4/4/3/4), `party[0].morale`
+     (linux2 15, the kill bump at its peak), enemy id 1179666 `hp`
+     (orig 1; live 4/0/4/4), `members[0].xp` (orig 0; linux2 37);
+   - `spell`: `party[0].hp`, `party[0].morale` (orig 11, one 30-frame dump
+     before the decay ends; live 10 in all four);
+   - `fight_done`: `party[0].hp` (4/4/3/4).
+   `fight_done` morale **10** is invariant in all four live runs and equals
+   the original's settled baseline → pinned. Party hp is pinned nowhere
+   post-combat. A `notes.live_pins` key in the expect file records the drops
+   (the checker ignores it). Expectations remain 100% original-derived: the
+   remedy only drops, never revalues.
+3. **Replay stays the engine-equivalence oracle** (unchanged, option 3):
+   bit-for-bit 39/39 checkpoints + 190/190 periodic dumps at this head.
 
-Recommended: 1 + 2 for the live path, 3 unchanged. No engine change; the
-Milestone 3 verdict should record the four suite failures as expectation
-artifacts with this document as evidence.
+`tests/test_tools.py` was updated beyond the literal scope list because its
+assertions pinned the changed representation: the enemy-field cases now use
+the id-keyed form, plus two added cases (an inserted earlier row must not
+disturb the pins — order-freedom; an absent row must yield four
+`'<missing>'` problems in the checker's sorted order). 325 tool tests pass.
+Derivation was mechanical (`analyze_pins.py`), verification read-only
+(`retrofit_check.py`), both one-off scripts outside the tree.
+
+## Validation (2026-10-17)
+
+Step b — retrofit check, read-only, no engine runs: the new pins against
+`realinput.check_checkpoints` for all six dirs of the matrix, **6/6 PASS,
+0 problems** each: the original's replay (`20261017-174428/original`), our
+replay of it (`.../ours`), and the four m3-end live dirs (linux-184619,
+linux2-185926, linux3-190902, windows-191841). (The two 2026-10-16 suite
+folders predate the current dump/scenario schema and fail with
+`'<missing>'`-shaped diffs; they are outside this matrix.)
+
+Step c — fresh full suites, 12 scenarios each, first_fight against the new
+pins (checker re-run read-only on each folder: all 39 checkpoint dumps
+present, 0 problems):
+
+| suite | folder (`~/iwd2r-runs/`) | result |
+|---|---|---|
+| C1 linux #1 | `m3-fix-suite-linux-20261017-205742` | 12/12 passed, first_fight exit 0 (217.3 s) |
+| C1 linux #2 | `m3-fix-suite-linux2-20261017-210148` | 12/12 passed, first_fight exit 0 (217.1 s) |
+| C2 windows | `m3-fix-suite-windows-20261017-210555` | 12/12 passed, first_fight exit 0 (304.4 s) |
+
+Commands as recorded in each folder's `suite.txt` (`--vm linux --suite
+--jobs 3`; `--vm windows --suite`); play.py sets `IWD2R_AUDIO=null` and
+`SDL_AUDIO_DRIVER=dummy`, uses the Linux-local vanilla copy for Linux runs,
+and copies the tree into the VM cache for Windows runs (the install on the
+Windows drive is never written). INI backups restored byte-identical in all
+three. No engine change; the Milestone 3 verdict should record the four
+suite failures as expectation artifacts with this document as evidence.
