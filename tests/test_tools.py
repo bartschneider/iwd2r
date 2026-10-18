@@ -1034,10 +1034,10 @@ class CheckpointExpectationTest(unittest.TestCase):
             'world.doors[0].open': 0, 'world.doors[0].locked': 0,
             'world.party_count': 1, 'world.party[0].hp': 9,
             'world.party[0].max_hp': 9, 'world.party[0].morale': 10,
-            'world.enemy_creatures[0].hp': 4,
-            'world.enemy_creatures[0].max_hp': 7,
-            'world.enemy_creatures[0].timed_effects': 2,
-            'world.enemy_creatures[0].equiped_effects': 1})
+            'world.enemy_creatures[id=7].hp': 4,
+            'world.enemy_creatures[id=7].max_hp': 7,
+            'world.enemy_creatures[id=7].timed_effects': 2,
+            'world.enemy_creatures[id=7].equiped_effects': 1})
         os.remove(os.path.join(original, 'checkpoint-w.json'))
         with self.assertRaisesRegex(ValueError, 'checkpoint-w.json'):
             realinput.make_expectations(self.actions, original, 'test')
@@ -1069,9 +1069,33 @@ class CheckpointExpectationTest(unittest.TestCase):
         self.dump(run, 'w', screen='world', world=hurtEnemy)
         self.assertEqual(
             realinput.check_checkpoints(self.actions, run, expect),
-            ['checkpoint w: world.enemy_creatures[0].hp is 1, expected 4',
-             'checkpoint w: world.enemy_creatures[0].timed_effects is 3, '
+            ['checkpoint w: world.enemy_creatures[id=7].hp is 1, expected 4',
+             'checkpoint w: world.enemy_creatures[id=7].timed_effects is 3, '
              'expected 2'])
+        # The same enemy at another list index is: the render sort reorders
+        # the list every frame (an id pin is order-free); another creature
+        # around it says nothing about it.
+        reordered = dict(self.WORLD, enemy_creatures=[
+            {'id': 8, 'hp': 3, 'max_hp': 3, 'timed_effects': 0,
+             'equiped_effects': 0},
+            self.WORLD['enemy_creatures'][0]])
+        self.dump(run, 'w', screen='world', world=reordered)
+        self.assertEqual(realinput.check_checkpoints(self.actions, run,
+                                                     expect), [])
+        # A pinned enemy gone (or its state changed under its id) is not.
+        gone = dict(self.WORLD, enemy_creatures=reordered['enemy_creatures'][
+            :1])
+        self.dump(run, 'w', screen='world', world=gone)
+        self.assertEqual(
+            realinput.check_checkpoints(self.actions, run, expect),
+            ['checkpoint w: world.enemy_creatures[id=7].equiped_effects is '
+             '"<missing>", expected 1',
+             'checkpoint w: world.enemy_creatures[id=7].hp is "<missing>", '
+             'expected 4',
+             'checkpoint w: world.enemy_creatures[id=7].max_hp is '
+             '"<missing>", expected 7',
+             'checkpoint w: world.enemy_creatures[id=7].timed_effects is '
+             '"<missing>", expected 2'])
         # The Gender click was lost: no race, and the run is elsewhere.
         self.dump(run, 'gender', race=0)
         self.dump(run, 'w', screen='connection')

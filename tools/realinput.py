@@ -318,6 +318,14 @@ def load_header_timeout(path):
 # world.doors[2].open), or the path with each list index written '[]'
 # (world.party[].hp covers world.party[0].hp and not world.party[0].x).
 # world.party_count is not in the dump: expect_view counts world.party.
+#
+# Enemy rows are the exception: they are pinned by id, not list index
+# (enemy_id_fields). The engine re-sorts the render order every frame -- the
+# original's own replay dumps do (its frame 3030 order at the first_fight
+# dialog is not its frame 3060 one) -- so an index-bound row names a
+# different creature a moment later under live timing, while the creature
+# states themselves agree. Keyed by the creature's id the pin is order-free
+# and covers every enemy instead of the rows one index happened to hold.
 
 EXPECT_FIELDS = ('screen', 'chargen.race', 'chargen.subrace',
                  'chargen.class', 'chargen.abilities', 'chargen.portrait',
@@ -325,11 +333,9 @@ EXPECT_FIELDS = ('screen', 'chargen.race', 'chargen.subrace',
                  'world.dialog.entry', 'world.dialog.responses',
                  'world.doors', 'world.party_count', 'world.party[].hp',
                  'world.party[].max_hp', 'world.party[].morale',
-                 'world.enemy_creatures[].hp',
-                 'world.enemy_creatures[].max_hp',
-                 'world.enemy_creatures[].timed_effects',
-                 'world.enemy_creatures[].equiped_effects',
                  'game.members[].xp')
+# The fields pinned on every enemy row.
+ENEMY_FIELDS = ('hp', 'max_hp', 'timed_effects', 'equiped_effects')
 LIST_INDEX = re.compile(r'\[\d+\]')
 
 
@@ -359,14 +365,34 @@ def expect_view(dump):
     return out
 
 
+def enemy_id_fields(dump):
+    """The id-keyed enemy pins of a dump: world.enemy_creatures[id=N].<field>
+    for every enemy of its world that carries an id (see the module comment
+    on why enemies are pinned by id and not list index)."""
+    world = dump.get('world') if isinstance(dump, dict) else None
+    enemies = world.get('enemy_creatures') if isinstance(world, dict) else None
+    out = {}
+    if isinstance(enemies, list):
+        for enemy in enemies:
+            if not isinstance(enemy, dict) or 'id' not in enemy:
+                continue
+            for field in ENEMY_FIELDS:
+                if field in enemy:
+                    out['world.enemy_creatures[id=%s].%s' % (enemy['id'],
+                                                             field)] = \
+                        enemy[field]
+    return out
+
+
 def expected_fields(dump):
     """The EXPECT_FIELDS of a dump (a list field by its items) that it
-    has."""
+    has, plus its id-keyed enemy pins (enemy_id_fields)."""
     out = {}
     for path, value in expect_view(dump).items():
         if path.split('[')[0] in EXPECT_FIELDS \
                 or LIST_INDEX.sub('[]', path) in EXPECT_FIELDS:
             out[path] = value
+    out.update(enemy_id_fields(dump))
     return out
 
 
@@ -424,6 +450,8 @@ def check_checkpoints(actions, run_dir, expectations):
             problems.append('no state dump at checkpoint %s' % name)
             continue
         have = expect_view(dump)
+        # Id-keyed enemy pins resolve against the dump's rows by id.
+        have.update(enemy_id_fields(dump))
         fields = want.get(name, {})
         # On another screen the other fields say nothing more.
         if 'screen' in fields and have.get('screen') != fields['screen']:
