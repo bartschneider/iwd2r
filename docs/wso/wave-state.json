@@ -2461,7 +2461,383 @@
         }
       ],
       "status": "assigned",
-      "verdicts": {}
+      "verdicts": {
+        "0x4242B0": {
+          "case": "dump-4242B0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x4CFF70": {
+          "case": "dump-4CFF70",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x51DE40": {
+          "case": "dump-51DE40",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x54B2A0": {
+          "case": "dump-54B2A0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x54C770": {
+          "case": "dump-54C770",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5D1380": {
+          "case": "dump-5D1380",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5D3A80": {
+          "case": "dump-5D3A80",
+          "losing_kind": "read-only",
+          "side": "fork"
+        },
+        "0x5F7340": {
+          "case": "dump-5F7340",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x613310": {
+          "case": "dump-613310",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x62C4E0": {
+          "case": "dump-62C4E0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x62D1F0": {
+          "case": "dump-62D1F0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x656FF0": {
+          "case": "dump-656FF0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x65CAB0": {
+          "case": "dump-65CAB0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x675940": {
+          "case": "dump-675940",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x677610": {
+          "case": "dump-677610",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x6BC5F0": {
+          "case": "dump-6BC5F0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x7941D0": {
+          "case": "dump-7941D0",
+          "losing_kind": "read-only",
+          "side": "fork"
+        },
+        "0x7A3FD0": {
+          "case": "dump-7A3FD0",
+          "losing_kind": "read-only",
+          "side": "fork"
+        },
+        "0x7C13A0": {
+          "case": "dump-7C13A0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x7D0950": {
+          "case": "vid/cell_translucent32",
+          "losing_kind": "trace",
+          "side": "ours"
+        }
+      }
+    },
+    "b010": {
+      "assigned_at": "2026-10-19T01:29:43+00:00",
+      "branch": "p3/wso-b010",
+      "closed_at": "2026-10-19T02:59:25+00:00",
+      "files": [
+        "src/CGameSprite.cpp",
+        "src/CInfGame.cpp",
+        "src/CGameEffect.cpp"
+      ],
+      "rows": [
+        {
+          "address": "0x73EDD0",
+          "category": "both_changed_differ",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::MoveToObject",
+          "our_len": 3552,
+          "their_len": 3215
+        },
+        {
+          "address": "0x745950",
+          "category": "both_changed_differ",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::JumpToPoint",
+          "our_len": 4082,
+          "their_len": 2620
+        },
+        {
+          "address": "0x5AD470",
+          "category": "both_changed_differ",
+          "file": "src/CInfGame.cpp",
+          "name": "CInfGame::SelectAll",
+          "our_len": 3163,
+          "their_len": 3199
+        },
+        {
+          "address": "0x5A0F50",
+          "category": "both_changed_differ",
+          "file": "src/CInfGame.cpp",
+          "name": "CInfGame::ImportCharacter",
+          "our_len": 3996,
+          "their_len": 2187
+        },
+        {
+          "address": "0x6F40F0",
+          "category": "both_changed_differ",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::AddToArea",
+          "our_len": 3039,
+          "their_len": 3086
+        },
+        {
+          "address": "0x71FC00",
+          "category": "both_changed_differ",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::SetModalState",
+          "our_len": 2910,
+          "their_len": 3126
+        },
+        {
+          "address": "0x731B30",
+          "category": "both_changed_differ",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::EvaluateStatusTrigger",
+          "our_len": 3607,
+          "their_len": 2000
+        },
+        {
+          "address": "0x756930",
+          "category": "both_changed_differ",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::sub_756930",
+          "our_len": 3057,
+          "their_len": 2487
+        },
+        {
+          "address": "0x5BC450",
+          "category": "both_changed_differ",
+          "file": "src/CInfGame.cpp",
+          "name": "CInfGame::UseMagicOnObject",
+          "our_len": 2688,
+          "their_len": 2675
+        },
+        {
+          "address": "0x5ABA20",
+          "category": "both_changed_differ",
+          "file": "src/CInfGame.cpp",
+          "name": "CInfGame::NewGame",
+          "our_len": 2615,
+          "their_len": 2660
+        },
+        {
+          "address": "0x4BBCB0",
+          "category": "both_changed_differ",
+          "file": "src/CGameEffect.cpp",
+          "name": "CGameEffectVisualSpellHit::ApplyEffect",
+          "our_len": 3312,
+          "their_len": 1908
+        },
+        {
+          "address": "0x714F70",
+          "category": "both_changed_differ",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::GetSpellQuickButtons",
+          "our_len": 2582,
+          "their_len": 2634
+        },
+        {
+          "address": "0x726F20",
+          "category": "both_changed_differ",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::sub_726F20",
+          "our_len": 2364,
+          "their_len": 2797
+        },
+        {
+          "address": "0x5B7850",
+          "category": "both_changed_differ",
+          "file": "src/CInfGame.cpp",
+          "name": "CInfGame::SwapItemGround",
+          "our_len": 2707,
+          "their_len": 2450
+        },
+        {
+          "address": "0x74F830",
+          "category": "both_changed_differ",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::SelectWeaponAbility",
+          "our_len": 2620,
+          "their_len": 2511
+        },
+        {
+          "address": "0x7155C0",
+          "category": "both_changed_differ",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::GetDomainQuickButtons",
+          "our_len": 2441,
+          "their_len": 2559
+        },
+        {
+          "address": "0x6F4B90",
+          "category": "both_changed_differ",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::RemoveFromArea",
+          "our_len": 2445,
+          "their_len": 2456
+        },
+        {
+          "address": "0x708FC0",
+          "category": "both_changed_differ",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::RenderDamageArrow",
+          "our_len": 2642,
+          "their_len": 2188
+        },
+        {
+          "address": "0x7537A0",
+          "category": "both_changed_differ",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::PlayerDialog",
+          "our_len": 2708,
+          "their_len": 2034
+        },
+        {
+          "address": "0x5BF6A0",
+          "category": "both_changed_differ",
+          "file": "src/CInfGame.cpp",
+          "name": "CInfGame::SetupCharacters",
+          "our_len": 3218,
+          "their_len": 1503
+        }
+      ],
+      "status": "closed",
+      "verdicts": {
+        "0x4BBCB0": {
+          "case": "dump-4BBCB0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5A0F50": {
+          "case": "dump-5A0F50",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5ABA20": {
+          "case": "dump-5ABA20",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5AD470": {
+          "case": "dump-5AD470",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5B7850": {
+          "case": "dump-5B7850",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5BC450": {
+          "case": "dump-5BC450",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5BF6A0": {
+          "case": "dump-5BF6A0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x6F40F0": {
+          "case": "dump-6F40F0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x6F4B90": {
+          "case": "dump-6F4B90",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x708FC0": {
+          "case": "dump-708FC0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x714F70": {
+          "case": "dump-714F70",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x7155C0": {
+          "case": "dump-7155C0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x71FC00": {
+          "case": "dump-71FC00",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x726F20": {
+          "case": "dump-726F20",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x731B30": {
+          "case": "dump-731B30",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x73EDD0": {
+          "case": "dump-73EDD0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x745950": {
+          "case": "dump-745950",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x74F830": {
+          "case": "dump-74F830",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x7537A0": {
+          "case": "dump-7537A0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x756930": {
+          "case": "dump-756930",
+          "losing_kind": "trace",
+          "side": "ours"
+        }
+      }
     }
   },
   "fork_base": "e8dd16a750966af53f24daaf49dcb4fb13594c13"
