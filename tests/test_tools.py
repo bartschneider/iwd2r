@@ -7936,6 +7936,13 @@ class GltraceTest(unittest.TestCase):
                       driver)
         self.assertGreaterEqual(driver.count('Find-GameProcess'), 3)
         self.assertIn("ProcessName -eq 'iwd2'", driver)
+        # The game's process handle is cached where the game object is
+        # adopted (the loader already does this): run 203206 finished the
+        # scenario and copied a 6 GB trace home, but ExitCode threw after
+        # the Stop-Process kill because the handle was never opened, and
+        # the empty exitcode.txt failed the run.
+        self.assertGreaterEqual(driver.count('# keeps ExitCode readable'),
+                                3)
         # The kill is always by exact pid, never by image name.
         self.assertNotIn('Stop-Process -Name', driver)
         self.assertNotIn('taskkill', driver)

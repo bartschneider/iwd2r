@@ -928,6 +928,7 @@ function Find-GameProcess {
         if ($p -ne $null -and $p.ProcessName -eq 'iwd2') {
             $script:gamePid = [uint32]$p.Id
             $script:game = $p
+            $null = $script:game.Handle # keeps ExitCode readable after exit
             Log ('  game process by parent walk, no window: pid {0}' -f $p.Id)
             return
         }
@@ -1076,6 +1077,7 @@ function Find-GameWindow {
                 [IwdInput]::GameWindow = $best
                 $script:gamePid = [IwdInput]::PidOf($best)
                 $script:game = Get-Process -Id $script:gamePid -ErrorAction Stop
+                $null = $script:game.Handle # keeps ExitCode readable after exit
                 Log ('game window 0x{0:x}, {1} px area, pid {2}' -f $best.ToInt64(), $bestArea, $script:gamePid)
                 return
             }
