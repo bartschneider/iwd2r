@@ -7903,13 +7903,23 @@ class GltraceTest(unittest.TestCase):
         # picked, its confirmations are answered at close time, and the
         # dialog itself is answered at boot.
         self.assertGreaterEqual(driver.count('#32770'), 3)
-        # Answering with no list entry selected ends the game cleanly
-        # (the 20261018-180428 run): the driver must wait for the list,
-        # pick the scenario's 800x600 (the coordinates are written for
-        # the copy's Resolution=800), set it and only then confirm.
-        for present in ('LB_GETCOUNT', 'LB_SETCURSEL', 'SELECT',
-                        'CtrlId', 'list[', '800x600'):
+        # The dialog always shows (IEex calls IEex_Helper_AskResolution
+        # unconditionally) and its ListBox is owner-drawn: cross-process
+        # LB_GETTEXT reads empty strings for every entry (runs 185556,
+        # 200445), so no text match can pick 800x600 from it. The pick
+        # goes through the Custom fields instead: WM_SETTEXT the
+        # width/height edits (ids 1201/1203), BM_CLICK 'Custom:' (1200),
+        # then 'SELECT' (1), answering the 2x UI minimum warning box if
+        # it comes up. 800x600 because the scenario coordinates are
+        # written for the copy's Resolution=800.
+        for present in ('WM_SETTEXT', 'SendText', '1201', '1203',
+                        '1200', 'Custom:', 'SELECT', '800x600',
+                        'popup', 'CtrlId'):
             self.assertIn(present, driver)
+        # The dead ListBox path must be gone, not just bypassed.
+        for absent in ('LB_SETCURSEL', 'LB_GETCOUNT', 'ListText',
+                       'list[', 'CB_SETCURSEL'):
+            self.assertNotIn(absent, driver)
         # Every cross-process send carries a deadline: run 185556 sat 48
         # minutes inside one SendMessage into a game thread that had
         # stopped pumping, and no loop deadline can interrupt that.

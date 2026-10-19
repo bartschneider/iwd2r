@@ -574,7 +574,7 @@ public static class IwdInput {
     [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr hWnd, ref POINT point);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
-    [DllImport("user32.dll")] static extern bool IsWindow(IntPtr hWnd);
+    [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr hWnd);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int size);
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
@@ -590,6 +590,8 @@ public static class IwdInput {
     static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint msg, IntPtr w, IntPtr l, uint flags, uint timeout, out IntPtr result);
     [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint msg, IntPtr w, StringBuilder l, uint flags, uint timeout, out IntPtr result);
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint msg, IntPtr w, string l, uint flags, uint timeout, out IntPtr result);
     [DllImport("user32.dll")] public static extern int GetDlgCtrlID(IntPtr hWnd);
 
     const uint INPUT_MOUSE = 0, INPUT_KEYBOARD = 1;
@@ -597,13 +599,9 @@ public static class IwdInput {
     const uint MOUSEEVENTF_RIGHTDOWN = 0x08, MOUSEEVENTF_RIGHTUP = 0x10;
     const uint KEYEVENTF_EXTENDEDKEY = 0x1, KEYEVENTF_KEYUP = 0x2;
     public const uint WM_CLOSE = 0x10;
+    public const uint WM_SETTEXT = 0x000C;
     public const uint WM_GETTEXT = 0x000D, WM_GETTEXTLENGTH = 0x000E;
     public const uint BM_CLICK = 0x00F5;
-    public const uint LB_SETCURSEL = 0x0186, LB_GETCURSEL = 0x0188;
-    public const uint LB_GETTEXTLEN = 0x0189, LB_GETTEXT = 0x018A;
-    public const uint LB_GETCOUNT = 0x018B;
-    public const uint CB_GETCURSEL = 0x0147, CB_GETLBTEXTLEN = 0x0149, CB_GETLBTEXT = 0x0148;
-    public const uint CB_GETCOUNT = 0x0146, CB_SETCURSEL = 0x0143;
 
     static void Send(INPUT input) {
         INPUT[] inputs = new INPUT[] { input };
@@ -780,7 +778,7 @@ public static class IwdInput {
     // killed by hand). SMTO_ABORTIFHUNG aborts once Windows marks the
     // target hung, the 10 s timeout catches the rest; a healthy window
     // answers in milliseconds either way. On abort the call returns 0,
-    // which the callers already treat as "no text" / LB_ERR.
+    // which the callers already treat as "no answer / empty text".
     static IntPtr SendDeadline(IntPtr hWnd, uint msg, IntPtr w, IntPtr l) {
         IntPtr res;
         SendMessageTimeout(hWnd, msg, w, l, 0x2 /* SMTO_ABORTIFHUNG */, 10000, out res);
@@ -802,14 +800,15 @@ public static class IwdInput {
         return text.ToString();
     }
 
-    // A list entry: index-th item of a ListBox (LB_*) or ComboBox (CB_*).
-    public static string ListText(IntPtr hWnd, int index, uint lenMsg, uint textMsg) {
-        int len = (int)SendDeadline(hWnd, lenMsg, (IntPtr)index, IntPtr.Zero);
-        if (len <= 0)
-            return "";
-        StringBuilder text = new StringBuilder(len + 1);
-        SendDeadline(hWnd, textMsg, (IntPtr)index, text);
-        return text.ToString();
+    // Sets a window's text with a deadline: WM_SETTEXT into the resolution
+    // dialog's Custom width/height edits is the one cross-process write
+    // that works here (LB_GETTEXT reads nothing from the owner-drawn list,
+    // runs 185556 and 200445). Returns whether the target answered.
+    public static bool SendText(IntPtr hWnd, string text) {
+        IntPtr res;
+        SendMessageTimeout(hWnd, WM_SETTEXT, IntPtr.Zero, text,
+                           0x2 /* SMTO_ABORTIFHUNG */, 10000, out res);
+        return res != IntPtr.Zero;
     }
 
     // Sends a message and returns its result as int (-1 = LB_ERR etc.).
@@ -936,18 +935,23 @@ function Find-GameProcess {
 }
 
 # The game's first window is the modal "IWD2:EE Resolution Select" box
-# (#32770): startup blocks until it is answered. IEexHelperGUI.dll resource
-# 1007 (a DLGTEMPLATEEX whose items carry DWORD ids) holds three controls:
-# a 'CMyBox' group (id 1015), the default button 'SELECT' (id 1) and the
-# resolution ListBox (id 1004). Confirming with no list entry selected ends
-# the game - the 20261018-180428 run showed a clean exit with no window -
-# so wait until the game fills the list, pick the scenario's resolution
-# (800x600: the scenario coordinates are written for the copy's
-# Resolution=800; 1366x768 would leave every click misaligned), set it
-# with LB_SETCURSEL and only then BM_CLICK the button (id 1 / 'SELECT' /
-# 'OK', else the first button); with no clickable button child, fall back
-# to Return. When the dialog never shows, the choice is persisted - log
-# and move on, that is not a failure.
+# (#32770): IEex_Gui_State.lua:2895 calls IEex_Helper_AskResolution
+# unconditionally, so the dialog shows on every launch (the ini's
+# AskResolution string is the helper function's name, not a key) and
+# startup blocks until it is answered. Its ListBox (id 1004) is
+# owner-drawn: cross-process LB_GETTEXT returns empty strings for every
+# entry (runs 20261018-185556 and -200445), so no text match can ever
+# pick 800x600 from it. The Custom fields are plain Edit controls and
+# WM_SETTEXT works across processes: write 800 and 600 into the width
+# (id 1201) and height (id 1203) edits, BM_CLICK 'Custom:' (id 1200),
+# then BM_CLICK 'SELECT' (id 1). 800x600 because the scenario
+# coordinates are written for the copy's Resolution=800; 1366x768 would
+# leave every click misaligned. A pick below IEex's 2x UI minimum brings
+# up a warning box: if one appears, BM_CLICK its confirm button (id 1
+# or 6, else the first button). Confirming with nothing selected ends
+# the game (the 20261018-180428 run) - the read-back of both edits is
+# logged before anything is clicked. When the dialog never shows, the
+# choice is persisted - log and move on, that is not a failure.
 function Answer-ResolutionDialog {
     $end = (Get-Date).AddSeconds(20)
     while ((Get-Date) -lt $end) {
@@ -961,73 +965,62 @@ function Answer-ResolutionDialog {
             foreach ($c in [IwdInput]::ChildWindows($h)) {
                 Log ("  dialog child 0x{0:x} class '{1}' id {2} text '{3}'" -f $c.ToInt64(), [IwdInput]::ClassOf($c), [IwdInput]::CtrlId($c), [IwdInput]::TextOf($c))
             }
-            $selection = ''
-            $list = [IntPtr]::Zero
-            foreach ($c in [IwdInput]::ChildWindows($h)) {
-                $class = [IwdInput]::ClassOf($c)
-                if ($list -eq [IntPtr]::Zero -and $class -eq 'ListBox') { $list = $c }
-                if ($list -eq [IntPtr]::Zero -and $class -eq 'ComboBox') { $list = $c }
-            }
-            if ($list -ne [IntPtr]::Zero) {
-                $listClass = [IwdInput]::ClassOf($list)
-                $getListSel = [IwdInput]::LB_GETCURSEL
-                $getListTextLen = [IwdInput]::LB_GETTEXTLEN
-                $getListText = [IwdInput]::LB_GETTEXT
-                $getCount = [IwdInput]::LB_GETCOUNT
-                $setCurSel = [IwdInput]::LB_SETCURSEL
-                if ($listClass -eq 'ComboBox') {
-                    $getListSel = [IwdInput]::CB_GETCURSEL
-                    $getListTextLen = [IwdInput]::CB_GETLBTEXTLEN
-                    $getListText = [IwdInput]::CB_GETLBTEXT
-                    $getCount = [IwdInput]::CB_GETCOUNT
-                    $setCurSel = [IwdInput]::CB_SETCURSEL
-                }
-                # The game fills the list after the dialog is up: wait for
-                # the entries before choosing.
-                $listEnd = (Get-Date).AddSeconds(10)
-                do {
-                    $count = [IwdInput]::Send($getCount, $list, [IntPtr]::Zero, [IntPtr]::Zero)
-                    if ($count -gt 0) { break }
-                    Start-Sleep -Milliseconds 200
-                } while ((Get-Date) -lt $listEnd)
-                for ($i = 0; $i -lt $count; $i++) {
-                    Log ("  list[{0}] = '{1}'" -f $i, [IwdInput]::ListText($list, $i, $getListTextLen, $getListText))
-                }
-                if ($count -gt 0) {
-                    $choice = 0
-                    for ($i = 0; $i -lt $count; $i++) {
-                        if ([IwdInput]::ListText($list, $i, $getListTextLen, $getListText) -match '800x600') { $choice = $i; break }
-                    }
-                    [void][IwdInput]::Send($setCurSel, $list, [IntPtr]$choice, [IntPtr]::Zero)
-                    $sel = [IwdInput]::Send($getListSel, $list, [IntPtr]::Zero, [IntPtr]::Zero)
-                    if ($sel -ge 0) {
-                        $selection = '{0}:{1}' -f $sel, [IwdInput]::ListText($list, $sel, $getListTextLen, $getListText)
-                    }
-                } else {
-                    Log '  the list never filled; answering without a selection'
-                }
-            }
-            $buttons = @()
-            foreach ($c in [IwdInput]::ChildWindows($h)) {
-                if ([IwdInput]::ClassOf($c) -eq 'Button') { $buttons += $c }
-            }
+            $width = [IntPtr]::Zero
+            $height = [IntPtr]::Zero
+            $custom = [IntPtr]::Zero
             $button = [IntPtr]::Zero
-            foreach ($b in $buttons) {
-                if ([IwdInput]::CtrlId($b) -eq 1 -or [IwdInput]::TextOf($b) -match '^(OK|SELECT)') { $button = $b; break }
+            foreach ($c in [IwdInput]::ChildWindows($h)) {
+                $id = [IwdInput]::CtrlId($c)
+                $class = [IwdInput]::ClassOf($c)
+                if ($id -eq 1201 -and $class -eq 'Edit') { $width = $c }
+                if ($id -eq 1203 -and $class -eq 'Edit') { $height = $c }
+                if ($id -eq 1200 -and $class -eq 'Button') { $custom = $c }
+                if ($id -eq 1 -and $class -eq 'Button') { $button = $c }
             }
-            if ($button -eq [IntPtr]::Zero -and $buttons.Count -gt 0) { $button = $buttons[0] }
-            if ($button -ne [IntPtr]::Zero) {
-                [void][IwdInput]::Send([IwdInput]::BM_CLICK, $button, [IntPtr]::Zero, [IntPtr]::Zero)
-                $how = 'BM_CLICK on 0x{0:x} (id {1} ''{2}'')' -f $button.ToInt64(), [IwdInput]::CtrlId($button), [IwdInput]::TextOf($button)
-            } else {
-                [void][IwdInput]::SetForegroundWindow($h)
-                Start-Sleep -Milliseconds 150
-                [IwdInput]::Key(0x0D, $true, $false)
-                Start-Sleep -Milliseconds 50
-                [IwdInput]::Key(0x0D, $false, $false)
-                $how = 'Return'
+            if ($width -eq [IntPtr]::Zero -or $height -eq [IntPtr]::Zero -or $custom -eq [IntPtr]::Zero -or $button -eq [IntPtr]::Zero) {
+                throw ('resolution dialog is missing a control (width 0x{0:x}, height 0x{1:x}, custom 0x{2:x}, select 0x{3:x})' -f $width.ToInt64(), $height.ToInt64(), $custom.ToInt64(), $button.ToInt64())
             }
-            Log ('resolution dialog 0x{0:x} ''{1}'' pid {2} ({3}): selection ''{4}'', answered with {5}' -f $h.ToInt64(), $title, $ownerPid, $owner, $selection, $how)
+            # WM_SETTEXT with a deadline on both edits; the read-back in the
+            # log proves what was written before anything is clicked.
+            $wOk = [IwdInput]::SendText($width, '800')
+            $hOk = [IwdInput]::SendText($height, '600')
+            Log ('  custom width now ''{0}'' (sent {1}), height now ''{2}'' (sent {3})' -f [IwdInput]::TextOf($width), $wOk, [IwdInput]::TextOf($height), $hOk)
+            [void][IwdInput]::Send([IwdInput]::BM_CLICK, $custom, [IntPtr]::Zero, [IntPtr]::Zero)
+            Log ('  clicked ''Custom:'' 0x{0:x}' -f $custom.ToInt64())
+            [void][IwdInput]::Send([IwdInput]::BM_CLICK, $button, [IntPtr]::Zero, [IntPtr]::Zero)
+            Log ('  clicked ''SELECT'' 0x{0:x} (pid {1}, {2})' -f $button.ToInt64(), $ownerPid, $owner)
+            # A pick below IEex's 2x UI minimum brings up a warning box:
+            # answer its confirm button, once per popup handle.
+            $answered = @{}
+            $warnEnd = (Get-Date).AddSeconds(15)
+            while ((Get-Date) -lt $warnEnd -and [IwdInput]::IsWindow($h)) {
+                Check
+                foreach ($w in [IwdInput]::AllWindows()) {
+                    if ($w -eq $h -or $answered.ContainsKey($w)) { continue }
+                    if ([IwdInput]::ClassOf($w) -ne '#32770') { continue }
+                    if ([IwdInput]::PidOf($w) -ne $ownerPid) { continue }
+                    $answered[$w] = $true
+                    Log ('  popup 0x{0:x} ''{1}'' (pid {2})' -f $w.ToInt64(), [IwdInput]::TextOf($w), [IwdInput]::PidOf($w))
+                    foreach ($c in [IwdInput]::ChildWindows($w)) {
+                        Log ("    popup child 0x{0:x} class '{1}' id {2} text '{3}'" -f $c.ToInt64(), [IwdInput]::ClassOf($c), [IwdInput]::CtrlId($c), [IwdInput]::TextOf($c))
+                    }
+                    $confirm = [IntPtr]::Zero
+                    foreach ($c in [IwdInput]::ChildWindows($w)) {
+                        if ([IwdInput]::ClassOf($c) -ne 'Button') { continue }
+                        $id = [IwdInput]::CtrlId($c)
+                        if ($id -eq 1 -or $id -eq 6) { $confirm = $c; break }
+                        if ($confirm -eq [IntPtr]::Zero) { $confirm = $c }
+                    }
+                    if ($confirm -ne [IntPtr]::Zero) {
+                        [void][IwdInput]::Send([IwdInput]::BM_CLICK, $confirm, [IntPtr]::Zero, [IntPtr]::Zero)
+                        Log ('    BM_CLICK on 0x{0:x} (id {1} ''{2}'')' -f $confirm.ToInt64(), [IwdInput]::CtrlId($confirm), [IwdInput]::TextOf($confirm))
+                    } else {
+                        Log '    no button child; leaving the popup alone'
+                    }
+                }
+                Start-Sleep -Milliseconds 250
+            }
+            Log ('resolution dialog 0x{0:x} (pid {1}, {2}): custom 800x600 written and confirmed' -f $h.ToInt64(), $ownerPid, $owner)
             return
         }
         Start-Sleep -Milliseconds 250
@@ -1046,6 +1039,7 @@ function Find-GameWindow {
     $end = $deadline
     $last = [IntPtr]::Zero
     $stable = 0
+    $lastIdle = (Get-Date)
     while ((Get-Date) -lt $end) {
         Check
         $best = [IntPtr]::Zero
@@ -1055,6 +1049,16 @@ function Find-GameWindow {
                 if ([IwdInput]::ClassOf($h) -eq '#32770') { continue }
                 $a = [IwdInput]::Area($h)
                 if ($a -gt $bestArea) { $bestArea = $a; $best = $h }
+            }
+        }
+        # Run 200445 waited its full 650 s in silence: log what the wait
+        # sees every 15 s so a stuck launch leaves evidence behind.
+        if (((Get-Date) - $lastIdle).TotalSeconds -ge 15) {
+            $lastIdle = (Get-Date)
+            if ($best -eq [IntPtr]::Zero) {
+                Log '  still no game window (dialog-class windows are skipped)'
+            } else {
+                Log ('  game window not stable yet: best 0x{0:x} {1}' -f $best.ToInt64(), [IwdInput]::Describe($best))
             }
         }
         if ($best -ne [IntPtr]::Zero -and $best -eq $last) {
