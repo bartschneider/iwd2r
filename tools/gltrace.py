@@ -23,7 +23,9 @@ DLL. The wrapper is removed after the run and the copy is re-hashed
 against its pre-run state.
 
 The driver answers the game's modal "IWD2:EE Resolution Select" dialog
-(a BM_CLICK on its OK; startup blocks until it is answered) and drives
+(WM_SETTEXT 800/600 into the Custom edits, then 'Custom:' and 'SELECT',
+then the 2x-UI warning's confirm; startup blocks until it is answered)
+and drives
 the scenario's input actions with realinput's coordinates; waits are
 wall-clock, because the original has none of iwd2r's control channel.
 The run stops after the scenario's last checkpoint op (shot/quit ops
@@ -522,9 +524,12 @@ original has none of iwd2r's control channel, so frames cannot be polled,
 and shot/checkpoint ops (gltrace.py drops them) are logged and skipped.
 
 The game's first window is the modal "IWD2:EE Resolution Select" box and
-startup blocks until it is answered: the script polls for it for ~20 s and
-clicks its OK (BM_CLICK on the button child; a Return when there is none).
-When no dialog appears the choice is persisted and the script moves on.
+startup blocks until it is answered: the script polls for it for ~20 s,
+writes 800/600 into the Custom width/height edits (WM_SETTEXT under the
+send deadline; the read-back is logged before anything is clicked),
+BM_CLICKs 'Custom:' (id 1200) and 'SELECT' (id 1), and answers the
+2x-UI minimum warning at its confirm button. When no dialog appears the
+choice is persisted and the script moves on.
 
 After the last action the script closes the game (WM_CLOSE, its
 confirmation dialog answered with Return, then a force kill). The wrapper
@@ -850,7 +855,8 @@ public static class IwdInput {
         return res != IntPtr.Zero;
     }
 
-    // Sends a message and returns its result as int (-1 = LB_ERR etc.).
+    // Sends a message and returns its result as int (the driver's
+    // BM_CLICK calls go through this).
     public static int Send(uint msg, IntPtr hWnd, IntPtr w, IntPtr l) {
         return (int)SendDeadline(hWnd, msg, w, l);
     }
