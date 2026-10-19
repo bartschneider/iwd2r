@@ -5582,7 +5582,6 @@ BOOL CScreenStore::CheckSpellUsable(SHORT nPortraitNum, const CResRef& cResSpell
 
     return bUsable;
 }
-}
 
 // 0x67E840
 void CScreenStore::CancelEngine()
