@@ -1712,7 +1712,7 @@
     "b007": {
       "assigned_at": "2026-10-18T22:09:22+00:00",
       "branch": "p3/wso-b007",
-      "closed_at": null,
+      "closed_at": "2026-10-19T01:26:16+00:00",
       "files": [
         "src/CGameArea.cpp",
         "src/CGameSprite.cpp",
@@ -1883,8 +1883,109 @@
           "their_len": 2981
         }
       ],
-      "status": "assigned",
-      "verdicts": {}
+      "status": "closed",
+      "verdicts": {
+        "0x461B80": {
+          "case": "dump-461B80",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x46B160": {
+          "case": "dump-46B160",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x470F10": {
+          "case": "dump-470F10",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x477740": {
+          "case": "dump-477740",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x4A42F0": {
+          "case": "dump-4A42F0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x594720": {
+          "case": "dump-594720",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x59FB50": {
+          "case": "dump-59FB50",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5BAD70": {
+          "case": "dump-5BAD70",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5BE900": {
+          "case": "dump-5BE900",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x6FF8A0": {
+          "case": "walk_and_talk/dialog",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x708280": {
+          "case": "dump-708280",
+          "losing_kind": "read-only",
+          "side": "fork"
+        },
+        "0x7093E0": {
+          "case": "dump-7093E0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x70BEE0": {
+          "case": "dump-70BEE0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x715BD0": {
+          "case": "dump-715BD0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x71E240": {
+          "case": "dump-71E240",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x726810": {
+          "case": "dump-726810",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x728580": {
+          "case": "dump-728580",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x72FD20": {
+          "case": "dump-72FD20",
+          "losing_kind": "replay",
+          "side": "fork"
+        },
+        "0x755A70": {
+          "case": "dump-755A70",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x75D450": {
+          "case": "dump-75D450",
+          "losing_kind": "trace",
+          "side": "ours"
+        }
+      }
     },
     "b008": {
       "assigned_at": "2026-10-18T22:57:24+00:00",
@@ -2173,6 +2274,194 @@
           "side": "ours"
         }
       }
+    },
+    "b009": {
+      "assigned_at": "2026-10-19T01:14:36+00:00",
+      "branch": "p3/wso-b009",
+      "closed_at": null,
+      "files": [
+        "src/CScreenStore.cpp",
+        "src/CVidPoly.cpp",
+        "src/CScreenCharacter.cpp",
+        "src/CInfinity.cpp",
+        "src/CStore.cpp",
+        "src/CVidCell.cpp",
+        "src/CScreenChapter.cpp",
+        "src/CNetwork.cpp",
+        "src/CGameTrigger.cpp",
+        "src/CBaldurChitin.cpp",
+        "src/CScreenInventory.cpp",
+        "src/CScreenOptions.cpp",
+        "src/CTlkTable.cpp",
+        "src/CGameAnimationTypeMonsterQuadrant.cpp",
+        "src/CScreenSave.cpp",
+        "src/CPathSearch.cpp",
+        "src/CScreenCreateChar.cpp"
+      ],
+      "rows": [
+        {
+          "address": "0x677610",
+          "category": "both_changed_differ",
+          "file": "src/CScreenStore.cpp",
+          "name": "CScreenStore::UpdateSpellItems",
+          "our_len": 2285,
+          "their_len": 2318
+        },
+        {
+          "address": "0x7C13A0",
+          "category": "both_changed_differ",
+          "file": "src/CVidPoly.cpp",
+          "name": "CVidPoly::FillPoly",
+          "our_len": 2175,
+          "their_len": 2304
+        },
+        {
+          "address": "0x5F7340",
+          "category": "both_changed_differ",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CUIControlButtonCharacterFeatsCircle::Render",
+          "our_len": 2258,
+          "their_len": 2216
+        },
+        {
+          "address": "0x675940",
+          "category": "both_changed_differ",
+          "file": "src/CScreenStore.cpp",
+          "name": "CScreenStore::UpdateBuySpellPanel",
+          "our_len": 2236,
+          "their_len": 2232
+        },
+        {
+          "address": "0x5D1380",
+          "category": "both_changed_differ",
+          "file": "src/CInfinity.cpp",
+          "name": "CInfinity::Scroll",
+          "our_len": 2665,
+          "their_len": 1781
+        },
+        {
+          "address": "0x54C770",
+          "category": "both_changed_differ",
+          "file": "src/CStore.cpp",
+          "name": "CStore::AddItemToStore",
+          "our_len": 2155,
+          "their_len": 2251
+        },
+        {
+          "address": "0x7D0950",
+          "category": "both_changed_differ",
+          "file": "src/CVidCell.cpp",
+          "name": "CVidCell::sub_7D0950",
+          "our_len": 2332,
+          "their_len": 2062
+        },
+        {
+          "address": "0x5D3A80",
+          "category": "both_changed_differ",
+          "file": "src/CScreenChapter.cpp",
+          "name": "CScreenChapter::ResetMainPanel",
+          "our_len": 2170,
+          "their_len": 2203
+        },
+        {
+          "address": "0x7A3FD0",
+          "category": "both_changed_differ",
+          "file": "src/CNetwork.cpp",
+          "name": "CNetwork::CNetwork",
+          "our_len": 2061,
+          "their_len": 2287
+        },
+        {
+          "address": "0x4CFF70",
+          "category": "both_changed_differ",
+          "file": "src/CGameTrigger.cpp",
+          "name": "CGameTrigger::Marshal",
+          "our_len": 2207,
+          "their_len": 2109
+        },
+        {
+          "address": "0x54B2A0",
+          "category": "both_changed_differ",
+          "file": "src/CStore.cpp",
+          "name": "CStore::SetResRef",
+          "our_len": 2214,
+          "their_len": 2090
+        },
+        {
+          "address": "0x4242B0",
+          "category": "both_changed_differ",
+          "file": "src/CBaldurChitin.cpp",
+          "name": "CBaldurChitin::MainAIThread",
+          "our_len": 2131,
+          "their_len": 2159
+        },
+        {
+          "address": "0x62D1F0",
+          "category": "both_changed_differ",
+          "file": "src/CScreenInventory.cpp",
+          "name": "CUIControlButtonInventorySlot::UpdateWeaponHighlight",
+          "our_len": 2092,
+          "their_len": 2153
+        },
+        {
+          "address": "0x656FF0",
+          "category": "both_changed_differ",
+          "file": "src/CScreenOptions.cpp",
+          "name": "CScreenOptions::OnErrorButtonClick",
+          "our_len": 2144,
+          "their_len": 2096
+        },
+        {
+          "address": "0x7941D0",
+          "category": "both_changed_differ",
+          "file": "src/CTlkTable.cpp",
+          "name": "CTlkTable::Fetch",
+          "our_len": 2063,
+          "their_len": 2066
+        },
+        {
+          "address": "0x6BC5F0",
+          "category": "both_changed_differ",
+          "file": "src/CGameAnimationTypeMonsterQuadrant.cpp",
+          "name": "CGameAnimationTypeMonsterQuadrant::Render",
+          "our_len": 2032,
+          "their_len": 2078
+        },
+        {
+          "address": "0x62C4E0",
+          "category": "both_changed_differ",
+          "file": "src/CScreenInventory.cpp",
+          "name": "CScreenInventory::CancelEngine",
+          "our_len": 2251,
+          "their_len": 1852
+        },
+        {
+          "address": "0x65CAB0",
+          "category": "both_changed_differ",
+          "file": "src/CScreenSave.cpp",
+          "name": "CScreenSave::DrawPortrait",
+          "our_len": 2031,
+          "their_len": 2033
+        },
+        {
+          "address": "0x51DE40",
+          "category": "both_changed_differ",
+          "file": "src/CPathSearch.cpp",
+          "name": "CPathSearch::BuildPathList",
+          "our_len": 1999,
+          "their_len": 2001
+        },
+        {
+          "address": "0x613310",
+          "category": "both_changed_differ",
+          "file": "src/CScreenCreateChar.cpp",
+          "name": "CScreenCreateChar::CompleteCharacterWrapup",
+          "our_len": 2163,
+          "their_len": 1811
+        }
+      ],
+      "status": "assigned",
+      "verdicts": {}
     }
   },
   "fork_base": "e8dd16a750966af53f24daaf49dcb4fb13594c13"
