@@ -97,8 +97,12 @@ MANIFEST_EXCLUDES = frozenset(('cache', 'temp', 'tempsave', 'mpsave',
                                'crash'))
 
 # The calls a frame's "draw calls" count. glDrawBuffers names a different
-# thing (render targets) and is not here.
+# thing (render targets) and is not here. glBegin is here because the
+# engine's renderer is immediate mode (the 203206 trace holds 166204
+# glBegin blocks and not one vertex-array draw): a glBegin/glEnd block
+# is one draw.
 DRAW_CALLS = frozenset((
+    'glBegin',
     'glDrawArrays', 'glDrawArraysInstanced',
     'glDrawArraysInstancedBaseInstance', 'glDrawArraysIndirect',
     'glDrawElements', 'glDrawElementsBaseVertex', 'glDrawElementsInstanced',
@@ -113,6 +117,10 @@ DRAW_CALLS = frozenset((
 ))
 # A frame ends at a buffer swap; calls after the last swap are no frame.
 SWAP_CALLS = frozenset(('wglSwapBuffers', 'glXSwapBuffers', 'eglSwapBuffers'))
+# The FBO binds an "fbo binds" count (the engine uses the EXT names on
+# Windows: 130824 glBindFramebufferEXT in the 203206 trace, and no core
+# glBindFramebuffer at all).
+FBO_BIND_CALLS = frozenset(('glBindFramebuffer', 'glBindFramebufferEXT'))
 CALL_RE = re.compile(r'^(?:\d+ )?([A-Za-z0-9_]+)\((.*)\)\s*(?:=.*)?$')
 NAMED_RE = re.compile(r'^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$', re.S)
 
@@ -147,33 +155,62 @@ def arg_value(part):
     return m.group(2).strip() if m else part
 
 
+def parsed_args(args_text):
+    """One dumped argument list as {'named': {name: value}, 'pos':
+    [value, ...]} — every value in call order, plus the named form when
+    apitrace printed argument names."""
+    named, pos = {}, []
+    for part in split_args(args_text):
+        value = arg_value(part)
+        pos.append(value)
+        m = NAMED_RE.match(part)
+        if m:
+            named[m.group(1)] = value
+    return {'named': named, 'pos': pos}
+
+
+def _upload_size(args, width_at, height_at):
+    """The 'WxH' of an upload's width/height ('%sx%s' of the raw values
+    when they are not whole numbers)."""
+    named, pos = args['named'], args['pos']
+    width = named.get('width', pos[width_at] if len(pos) > width_at else '')
+    height = named.get('height', pos[height_at] if len(pos) > height_at
+                       else '')
+    return '%sx%s' % (width, height)
+
+
 def tex_upload(args_text):
     """The {'size', 'format'} of one glTexImage2D argument list. The
     format is the texture's internal format (its third argument); size is
     'WxH', or the raw numbers when they are not whole."""
-    named = {}
-    positional = []
-    for part in split_args(args_text):
-        value = arg_value(part)
-        positional.append(value)
-        m = NAMED_RE.match(part)
-        if m:
-            named[m.group(1)] = value
-    width = named.get('width', positional[3] if len(positional) > 3 else '')
-    height = named.get('height', positional[4] if len(positional) > 4 else '')
-    fmt = named.get('internalformat',
-                    named.get('format', positional[2] if len(positional) > 2
-                              else ''))
-    return {'size': '%sx%s' % (width, height), 'format': fmt}
+    args = parsed_args(args_text)
+    fmt = args['named'].get(
+        'internalformat',
+        args['named'].get('format', args['pos'][2] if len(args['pos']) > 2
+                          else ''))
+    return {'size': _upload_size(args, 3, 4), 'format': fmt}
+
+
+def tex_sub_upload(args_text):
+    """The {'size', 'format'} of one glTexSubImage2D argument list. A
+    sub-image replaces pixels of an existing texture: its format argument
+    (the seventh) is the client-side pixel layout, not the texture's
+    internal format, which this call does not carry — so the format is
+    left empty. Size is width x height (the fifth and sixth arguments)."""
+    return {'size': _upload_size(parsed_args(args_text), 4, 5),
+            'format': ''}
 
 
 def summarize(lines):
     """Per-frame counts of an `apitrace dump`: {'frames': [{'draws',
     'fbo_binds', 'texture_uploads': [{'size', 'format'}]}], ...},
-    'texture_dimensions': [...]} — every frame from after the previous
-    buffer swap through the swap; draw calls are DRAW_CALLS; texture
-    uploads are glTexImage2D (size x internal format); FBO binds are
-    glBindFramebuffer calls; the distinct texture dimensions seen."""
+    'texture_dimensions': [...]} — every buffer swap ends a frame (the
+    calls from after the previous swap through the swap; an empty swap
+    still presented a frame); draw calls are DRAW_CALLS (the engine's
+    immediate-mode glBegin blocks included); texture uploads are
+    glTexImage2D (size x internal format) and glTexSubImage2D (size,
+    empty format); FBO binds are FBO_BIND_CALLS; the distinct texture
+    dimensions seen."""
     frames = []
     dimensions = set()
     frame = None
@@ -190,15 +227,17 @@ def summarize(lines):
             continue
         name, args_text = m.group(1), m.group(2)
         if name in SWAP_CALLS:
-            if frame is not None:
-                frames.append(frame)
+            frames.append(frame if frame is not None
+                          else {'draws': 0, 'fbo_binds': 0,
+                                'texture_uploads': []})
             frame = None
-        elif name == 'glTexImage2D':
-            upload = tex_upload(args_text)
+        elif name in ('glTexImage2D', 'glTexSubImage2D'):
+            upload = (tex_upload if name == 'glTexImage2D'
+                      else tex_sub_upload)(args_text)
             current()['texture_uploads'].append(upload)
             if upload['size'].replace('x', '').isdigit():
                 dimensions.add(upload['size'])
-        elif name == 'glBindFramebuffer':
+        elif name in FBO_BIND_CALLS:
             current()['fbo_binds'] += 1
         elif name in DRAW_CALLS:
             current()['draws'] += 1
@@ -1344,15 +1383,22 @@ def write_md(path, name, summary, meta):
     lines.append('- frames: %d' % len(frames))
     lines.append('- draw calls: %d total (mean %.1f/frame, max %d)'
                  % (sum(draws), mean, max(draws) if draws else 0))
-    lines.append('- texture uploads (glTexImage2D): %d total' % len(uploads))
+    lines.append('- texture uploads (glTexImage2D + glTexSubImage2D): '
+                 '%d total' % len(uploads))
     for (size, fmt), count in groups:
-        lines.append('  - %s %s: %d' % (size, fmt, count))
-    lines.append('- FBO binds (glBindFramebuffer): %d' % fbo)
+        lines.append('  - %s %s: %d'
+                     % (size, fmt or '(subimage: internal format n/a)',
+                        count))
+    lines.append('- FBO binds (glBindFramebuffer + -EXT): %d' % fbo)
     lines.append('- distinct texture dimensions: %s'
                  % (', '.join(summary['texture_dimensions']) or 'none'))
     lines.append('')
     lines.append('A frame is the calls from after the previous buffer swap '
-                 'through the swap; calls after the last swap are no frame.')
+                 'through the swap; calls after the last swap are no frame. '
+                 'Draw calls are vertex-array draws and immediate-mode '
+                 'glBegin blocks; FBO binds are glBindFramebuffer(-EXT); '
+                 'glTexSubImage2D carries no internal format, so its '
+                 'uploads have none.')
     lines.append('')
     if frames:
         lines.append('| frame | draws | fbo binds | uploads |')

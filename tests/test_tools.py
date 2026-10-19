@@ -7767,6 +7767,38 @@ class GltraceTest(unittest.TestCase):
             'texture_dimensions': ['64x32'],
         })
 
+    def test_gltrace_summarize_immediate_profile(self):
+        # The engine's renderer is immediate-mode fixed function (the
+        # 203206 trace histogram: 166204 glBegin blocks, zero
+        # vertex-array draws, FBO binds as glBindFramebufferEXT, most
+        # uploads as glTexSubImage2D). A glBegin/glEnd block is one
+        # draw; a sub-image upload has no internal format to report; a
+        # swap with nothing counted still presented a frame.
+        self.assertEqual(gltrace.summarize([
+            '1 glGenFramebuffersEXT(1, blob(4))',
+            '2 glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 640, 480, '
+            'GL_RGBA, GL_UNSIGNED_BYTE, blob(1228800))',
+            '3 glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, 1)',
+            '4 glBegin(GL_QUADS)',
+            '5 glTexCoord2f(0, 0)',
+            '6 glVertex2f(0, 0)',
+            '7 glEnd()',
+            '8 wglSwapBuffers(hdc = 0x10010e) = TRUE',
+            '9 wglSwapBuffers(hdc = 0x10010e) = TRUE',
+            '10 glBegin(GL_QUADS)',
+            '11 glEnd()',
+            '12 wglSwapBuffers(hdc = 0x10010e) = TRUE',
+            '13 glClear(GL_COLOR_BUFFER_BIT)',
+        ]), {
+            'frames': [
+                {'draws': 1, 'fbo_binds': 1, 'texture_uploads': [
+                    {'size': '640x480', 'format': ''}]},
+                {'draws': 0, 'fbo_binds': 0, 'texture_uploads': []},
+                {'draws': 1, 'fbo_binds': 0, 'texture_uploads': []},
+            ],
+            'texture_dimensions': ['640x480'],
+        })
+
     def test_gltrace_trim_after_last_checkpoint(self):
         # Everything after the last checkpoint op is dropped: the state
         # dump / shot / quit ops of the iwd2r control channel have no
