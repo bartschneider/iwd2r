@@ -7767,6 +7767,38 @@ class GltraceTest(unittest.TestCase):
             'texture_dimensions': ['64x32'],
         })
 
+    def test_gltrace_summarize_immediate_profile(self):
+        # The engine's renderer is immediate-mode fixed function (the
+        # 203206 trace histogram: 166204 glBegin blocks, zero
+        # vertex-array draws, FBO binds as glBindFramebufferEXT, most
+        # uploads as glTexSubImage2D). A glBegin/glEnd block is one
+        # draw; a sub-image upload has no internal format to report; a
+        # swap with nothing counted still presented a frame.
+        self.assertEqual(gltrace.summarize([
+            '1 glGenFramebuffersEXT(1, blob(4))',
+            '2 glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 640, 480, '
+            'GL_RGBA, GL_UNSIGNED_BYTE, blob(1228800))',
+            '3 glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, 1)',
+            '4 glBegin(GL_QUADS)',
+            '5 glTexCoord2f(0, 0)',
+            '6 glVertex2f(0, 0)',
+            '7 glEnd()',
+            '8 wglSwapBuffers(hdc = 0x10010e) = TRUE',
+            '9 wglSwapBuffers(hdc = 0x10010e) = TRUE',
+            '10 glBegin(GL_QUADS)',
+            '11 glEnd()',
+            '12 wglSwapBuffers(hdc = 0x10010e) = TRUE',
+            '13 glClear(GL_COLOR_BUFFER_BIT)',
+        ]), {
+            'frames': [
+                {'draws': 1, 'fbo_binds': 1, 'texture_uploads': [
+                    {'size': '640x480', 'format': ''}]},
+                {'draws': 0, 'fbo_binds': 0, 'texture_uploads': []},
+                {'draws': 1, 'fbo_binds': 0, 'texture_uploads': []},
+            ],
+            'texture_dimensions': ['640x480'],
+        })
+
     def test_gltrace_trim_after_last_checkpoint(self):
         # Everything after the last checkpoint op is dropped: the state
         # dump / shot / quit ops of the iwd2r control channel have no
@@ -7785,6 +7817,279 @@ class GltraceTest(unittest.TestCase):
         self.assertEqual([a['name'] for a in trimmed
                           if a['op'] == 'checkpoint'],
                          ['menu', 'world'])
+
+    # --- the desktop leg: the sandbox launch is replaced by a direct
+    # desktop launch through cmd.exe (play.py's pattern), gated on
+    # IWD2R_DESKTOP_OK=1. The copy's icewind2.ini is rewritten for the
+    # run and restored after.
+
+    INI = '\n'.join([
+        '[Alias]',
+        'HD0:=C:\\Games\\Icewind Dale II\\',
+        'CD1:=C:\\Games\\Icewind Dale II\\Data\\',
+        'CD2:=C:\\Games\\Icewind Dale II\\CD2\\',
+        '',
+        '[Program Options]',
+        'Full Screen=1',
+        'Resolution=800',
+        'Volume Movie=85',
+        'Volume Music=60',
+        'Volume Voices=100',
+        'Volume Ambients=70',
+        'Volume SFX=80',
+        'Maximum Frame Rate=30',
+        '',
+    ])
+
+    def test_gltrace_ini_overrides(self):
+        # The copy's icewind2.ini points [Alias] at the source install:
+        # the run rewrites it to the game folder (the game would otherwise
+        # read and write the source install) and silences the game's own
+        # volumes (there is no system-wide muting on the desktop), and
+        # touches nothing else.
+        game = r'C:\Users\thier\iwd2r-ieex\game'
+        text = gltrace.ini_overrides(self.INI, game)
+        self.assertEqual(text, '\n'.join([
+            '[Alias]',
+            'HD0:=' + game + '\\',
+            'CD1:=' + game + '\\Data\\',
+            'CD2:=' + game + '\\CD2\\',
+            '',
+            '[Program Options]',
+            'Full Screen=1',
+            'Resolution=800',
+            'Volume Movie=0',
+            'Volume Music=0',
+            'Volume Voices=0',
+            'Volume Ambients=0',
+            'Volume SFX=0',
+            'Maximum Frame Rate=30',
+            '',
+        ]))
+        # Idempotent: the rewritten text is already right.
+        self.assertEqual(gltrace.ini_overrides(text, game), text)
+        # A missing alias key must fail loudly rather than leave the game
+        # pointing at the source install.
+        with self.assertRaises(ValueError):
+            gltrace.ini_overrides('[Alias]\nHD0:=C:\\x\\\n', game)
+
+    def test_gltrace_desktop_config(self):
+        results = r'C:\Users\thier\iwd2r-ieex\runs\stamped\world_entry'
+        config = gltrace.desktop_config(
+            'world_entry', r'C:\g', results, 660)
+        self.assertEqual(config, {
+            'scenario': 'world_entry',
+            'exe': r'C:\g\IWD2EE.exe',
+            'data': r'C:\g',
+            'trace': results + r'\world_entry.trace',
+            'results': results,
+            'actions': results + r'\actions.json',
+            'frame_rate': 30,
+            'timeout': 660,
+        })
+        # The launch is IWD2EE.exe directly: apitrace only provides the
+        # wrapper, nothing is traced through apitrace.exe itself.
+        self.assertNotIn('apitrace', config)
+        # Nothing sandbox-only: no machine shutdown, no Defender, no
+        # DirectPlay surgery.
+        for absent in ('shutdown', 'exclusions', 'directplay'):
+            self.assertNotIn(absent, config)
+
+    def test_gltrace_desktop_bat(self):
+        bat = gltrace.desktop_bat(r'C:\Users\thier\iwd2r-ieex\runs\s\w')
+        lines = bat.split('\n')
+        self.assertEqual(lines[0], '@echo off')
+        self.assertEqual(lines[1],
+                         r'cd /d C:\Users\thier\iwd2r-ieex\runs\s\w')
+        self.assertEqual(lines[2],
+                         'powershell.exe -NoProfile -ExecutionPolicy '
+                         'Bypass -File gltrace-desktop-driver.ps1 '
+                         '-Config config.json')
+        self.assertEqual(lines[-1], 'exit /b %ERRORLEVEL%')
+
+    def test_gltrace_desktop_driver_scope(self):
+        # The desktop driver drives input and the trace, and nothing else:
+        # the sandbox driver's machine mutations (audio services, Defender,
+        # DirectPlay files, logon tasks, the shutdown, the WDAG gate, the
+        # second attempt) must not be in it.
+        driver = gltrace.DESKTOP_DRIVER
+        for absent in ('WDAGUtilityAccount', 'Stop-Service',
+                       'Add-MpPreference', 'Get-MpComputerStatus',
+                       'shutdown.exe', 'Install-DirectPlay', 'rgnupdt',
+                       'IwdAudio', 'Set-Aside', 'attempt1'):
+            self.assertNotIn(absent, driver)
+        # The capture is the wrapper: IWD2EE.exe starts directly with
+        # TRACE_FILE set (both exes are packed, so apitrace cannot hook
+        # them); the resolution dialog is answered before the window is
+        # awaited.
+        for present in ('SendInput', 'TRACE_FILE', 'IWD2EE.exe',
+                        'opengl32.dll', 'Answer-ResolutionDialog',
+                        'BM_CLICK', 'Resolution', 'Find-GameWindow',
+                        'SetForegroundWindow', 'WM_CLOSE', 'exitcode.txt',
+                        'error.txt', 'done.txt', 'video adapter',
+                        'driver.log'):
+            self.assertIn(present, driver)
+        # The old apitrace-hooked launch must be gone entirely.
+        self.assertNotIn('trace --api gl', driver)
+        # The resolution dialog is not the game window when the window is
+        # picked, its confirmations are answered at close time, and the
+        # dialog itself is answered at boot.
+        self.assertGreaterEqual(driver.count('#32770'), 3)
+        # The dialog always shows (IEex calls IEex_Helper_AskResolution
+        # unconditionally) and its ListBox is owner-drawn: cross-process
+        # LB_GETTEXT reads empty strings for every entry (runs 185556,
+        # 200445), so no text match can pick 800x600 from it. The pick
+        # goes through the Custom fields instead: WM_SETTEXT the
+        # width/height edits (ids 1201/1203), BM_CLICK 'Custom:' (1200),
+        # then 'SELECT' (1), answering the 2x UI minimum warning box if
+        # it comes up. 800x600 because the scenario coordinates are
+        # written for the copy's Resolution=800.
+        for present in ('WM_SETTEXT', 'SendText', '1201', '1203',
+                        '1200', 'Custom:', 'SELECT', '800x600',
+                        'popup', 'CtrlId'):
+            self.assertIn(present, driver)
+        # The dead ListBox path must be gone, not just bypassed.
+        for absent in ('LB_SETCURSEL', 'LB_GETCOUNT', 'ListText',
+                       'list[', 'CB_SETCURSEL'):
+            self.assertNotIn(absent, driver)
+        # Every cross-process send carries a deadline: run 185556 sat 48
+        # minutes inside one SendMessage into a game thread that had
+        # stopped pumping, and no loop deadline can interrupt that.
+        for present in ('SendMessageTimeout', 'SMTO_ABORTIFHUNG',
+                        'SendDeadline'):
+            self.assertIn(present, driver)
+        self.assertNotIn('SendMessage(IntPtr', driver)
+        # The game-window wait runs to the scenario timeout, and on expiry
+        # the run ends with the game resolved to an exact pid for the
+        # finally's kill (185556 left iwd2.exe alive at the dialog: the
+        # kill only ever reached a window-found game).
+        self.assertIn('$end = $deadline', driver)
+        self.assertIn('no game window within the {0} s scenario timeout',
+                      driver)
+        self.assertGreaterEqual(driver.count('Find-GameProcess'), 3)
+        self.assertIn("ProcessName -eq 'iwd2'", driver)
+        # The game's process handle is cached where the game object is
+        # adopted (the loader already does this): run 203206 finished the
+        # scenario and copied a 6 GB trace home, but ExitCode threw after
+        # the Stop-Process kill because the handle was never opened, and
+        # the empty exitcode.txt failed the run.
+        self.assertGreaterEqual(driver.count('# keeps ExitCode readable'),
+                                3)
+        # The kill is always by exact pid, never by image name.
+        self.assertNotIn('Stop-Process -Name', driver)
+        self.assertNotIn('taskkill', driver)
+
+    def test_gltrace_pe_machine(self):
+        # The wrapper and the game must match bitness: parse the machine
+        # field out of synthetic PE images (DOS header, e_lfanew to the PE
+        # signature, then the COFF machine).
+        def pe_image(machine):
+            header = bytearray(64)
+            header[0:2] = b'MZ'
+            header[0x3c:0x40] = (64).to_bytes(4, 'little')
+            return bytes(header) + b'PE\x00\x00' + machine.to_bytes(
+                2, 'little') + b'\x00' * 8
+
+        with tempfile.TemporaryDirectory() as tmp:
+            for machine, expected in ((0x014c, 0x014c), (0x8664, 0x8664)):
+                path = os.path.join(tmp, 'x%d.dll' % machine)
+                with open(path, 'wb') as f:
+                    f.write(pe_image(machine))
+                self.assertEqual(gltrace.pe_machine(path), expected)
+            for name, data in (('not-pe.dll', b'MZ' + b'\x00' * 62),
+                               ('truncated.dll', b'M'),
+                               ('empty.dll', b'')):
+                path = os.path.join(tmp, name)
+                with open(path, 'wb') as f:
+                    f.write(data)
+                self.assertIsNone(gltrace.pe_machine(path), name)
+            self.assertIsNone(
+                gltrace.pe_machine(os.path.join(tmp, 'missing.dll')))
+
+    def test_gltrace_manifest(self):
+        # The post-run tree comparison: added/removed/changed relpaths,
+        # '/'-normalized, with the game's scratch folders skipped.
+        with tempfile.TemporaryDirectory() as tmp:
+            def put(rel, data):
+                path = os.path.join(tmp, rel.replace('/', os.sep))
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, 'wb') as f:
+                    f.write(data)
+
+            put('data/keep.bin', b'one')
+            put('logs/IEex.log', b'boot')
+            put('cache/junk.bin', b'junk')
+            before = gltrace.snapshot_manifest(tmp)
+            # cache/ is a game scratch folder: absent from the snapshot.
+            self.assertEqual(sorted(before), ['data/keep.bin',
+                                              'logs/IEex.log'])
+            put('data/keep.bin', b'two')
+            put('logs/IEex.log', b'boot 2')
+            put('cache/junk.bin', b'junk 2')
+            put('save/new.sav', b'save')
+            delta = gltrace.manifest_delta(before,
+                                           gltrace.snapshot_manifest(tmp))
+            self.assertEqual(delta, {
+                'added': ['save/new.sav'],
+                'removed': [],
+                'changed': ['data/keep.bin', 'logs/IEex.log'],
+            })
+            # Byte-identical trees produce an empty delta.
+            self.assertEqual(
+                gltrace.manifest_delta(before, before),
+                {'added': [], 'removed': [], 'changed': []})
+
+    def test_gltrace_wrapper(self):
+        # place_wrapper copies apitrace's wrapper beside iwd2.exe for the
+        # run and refuses to overwrite one that is already there;
+        # remove_wrapper undoes it; remove_stray_traces clears any .trace
+        # that landed in the copy.
+        with tempfile.TemporaryDirectory() as tmp:
+            wrapper = os.path.join(tmp, 'wrapper', 'opengl32.dll')
+            os.makedirs(os.path.dirname(wrapper))
+            with open(wrapper, 'wb') as f:
+                f.write(b'wrapper dll')
+            game = os.path.join(tmp, 'game')
+            os.makedirs(os.path.join(game, 'Data'))
+
+            dest = gltrace.place_wrapper(wrapper, game)
+            self.assertEqual(dest, os.path.join(game, 'opengl32.dll'))
+            with open(dest, 'rb') as f:
+                self.assertEqual(f.read(), b'wrapper dll')
+            with self.assertRaises(SystemExit):
+                gltrace.place_wrapper(wrapper, game)
+
+            self.assertTrue(gltrace.remove_wrapper(game))
+            self.assertFalse(os.path.exists(dest))
+            self.assertFalse(gltrace.remove_wrapper(game))
+
+            for rel in ('root.trace', os.path.join('Data', 'deep.trace')):
+                with open(os.path.join(game, rel), 'wb') as f:
+                    f.write(b'trace')
+            self.assertEqual(gltrace.remove_stray_traces(game),
+                             ['Data/deep.trace', 'root.trace'])
+            self.assertEqual([name for _base, _dirs, files in
+                              os.walk(game) for name in files], [])
+
+    def test_gltrace_find_wrapper(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            wrapper = os.path.join(tmp, 'apitrace-14.0-win32', 'lib',
+                                   'wrappers', 'opengl32.dll')
+            os.makedirs(os.path.dirname(wrapper))
+            with open(wrapper, 'wb') as f:
+                f.write(b'wrapper')
+            self.assertEqual(gltrace.find_wrapper(tmp), wrapper)
+            # Not a wrapper layout: fail loudly instead of tracing nothing.
+            other = os.path.join(tmp, 'other')
+            os.makedirs(other)
+            with self.assertRaises(SystemExit):
+                gltrace.find_wrapper(other)
+
+    def test_gltrace_desktop_allowed(self):
+        # play.py's gate: the desktop launch is the user's opt-in.
+        self.assertFalse(gltrace.desktop_allowed({}))
+        self.assertFalse(gltrace.desktop_allowed({'IWD2R_DESKTOP_OK': '0'}))
+        self.assertTrue(gltrace.desktop_allowed({'IWD2R_DESKTOP_OK': '1'}))
 
 
 def load_parity_tool(name):
