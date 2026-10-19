@@ -2278,7 +2278,7 @@
     "b009": {
       "assigned_at": "2026-10-19T01:14:36+00:00",
       "branch": "p3/wso-b009",
-      "closed_at": null,
+      "closed_at": "2026-10-19T03:07:17+00:00",
       "files": [
         "src/CScreenStore.cpp",
         "src/CVidPoly.cpp",
@@ -2460,7 +2460,7 @@
           "their_len": 1811
         }
       ],
-      "status": "assigned",
+      "status": "closed",
       "verdicts": {
         "0x4242B0": {
           "case": "dump-4242B0",
@@ -2838,6 +2838,189 @@
           "side": "ours"
         }
       }
+    },
+    "b011": {
+      "assigned_at": "2026-10-19T03:00:24+00:00",
+      "branch": "p3/wso-b011",
+      "closed_at": null,
+      "files": [
+        "src/CGameSprite.cpp",
+        "src/CGameAIBase.cpp",
+        "src/CInfGame.cpp",
+        "src/CInfButtonArray.cpp",
+        "src/CGameArea.cpp",
+        "src/CGameSound.cpp",
+        "src/CGameAnimationTypeMonsterOld.cpp",
+        "src/CGameAnimationTypeAmbient.cpp",
+        "src/CMessage.cpp",
+        "src/CResCellHeader.cpp",
+        "src/CProjectile.cpp",
+        "src/CAIGroup.cpp"
+      ],
+      "rows": [
+        {
+          "address": "0x73FEC0",
+          "category": "both_changed_differ",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::MoveToPoint",
+          "our_len": 2266,
+          "their_len": 2306
+        },
+        {
+          "address": "0x45CA10",
+          "category": "both_changed_differ",
+          "file": "src/CGameAIBase.cpp",
+          "name": "CGameAIBase::ProcessPendingTriggers",
+          "our_len": 2684,
+          "their_len": 1881
+        },
+        {
+          "address": "0x5BB980",
+          "category": "both_changed_differ",
+          "file": "src/CInfGame.cpp",
+          "name": "CInfGame::UseMagicOnGround",
+          "our_len": 2247,
+          "their_len": 2234
+        },
+        {
+          "address": "0x716E80",
+          "category": "both_changed_differ",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::sub_716E80",
+          "our_len": 2118,
+          "their_len": 2219
+        },
+        {
+          "address": "0x594280",
+          "category": "both_changed_differ",
+          "file": "src/CInfButtonArray.cpp",
+          "name": "CInfButtonArray::sub_594280",
+          "our_len": 2020,
+          "their_len": 2286
+        },
+        {
+          "address": "0x46D7E0",
+          "category": "both_changed_differ",
+          "file": "src/CGameArea.cpp",
+          "name": "CGameArea::GetAllInPoly",
+          "our_len": 2118,
+          "their_len": 2084
+        },
+        {
+          "address": "0x733340",
+          "category": "both_changed_differ",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::GetTargetShare",
+          "our_len": 2146,
+          "their_len": 2043
+        },
+        {
+          "address": "0x752DD0",
+          "category": "both_changed_differ",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::Dialog",
+          "our_len": 2370,
+          "their_len": 1610
+        },
+        {
+          "address": "0x4C8B10",
+          "category": "both_changed_differ",
+          "file": "src/CGameSound.cpp",
+          "name": "CGameSound::CGameSound",
+          "our_len": 1955,
+          "their_len": 1975
+        },
+        {
+          "address": "0x6B03E0",
+          "category": "both_changed_differ",
+          "file": "src/CGameAnimationTypeMonsterOld.cpp",
+          "name": "CGameAnimationTypeMonsterOld::Render",
+          "our_len": 1914,
+          "their_len": 2006
+        },
+        {
+          "address": "0x6A8470",
+          "category": "both_changed_differ",
+          "file": "src/CGameAnimationTypeAmbient.cpp",
+          "name": "CGameAnimationTypeAmbient::Render",
+          "our_len": 1935,
+          "their_len": 1935
+        },
+        {
+          "address": "0x50A820",
+          "category": "both_changed_differ",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageSetVariable::Run",
+          "our_len": 2233,
+          "their_len": 1620
+        },
+        {
+          "address": "0x46DAE0",
+          "category": "both_changed_differ",
+          "file": "src/CGameArea.cpp",
+          "name": "CGameArea::sub_46DAE0",
+          "our_len": 1823,
+          "their_len": 1961
+        },
+        {
+          "address": "0x77FF50",
+          "category": "both_changed_differ",
+          "file": "src/CResCellHeader.cpp",
+          "name": "CResCellHeader::Parse",
+          "our_len": 1870,
+          "their_len": 1875
+        },
+        {
+          "address": "0x47A1C0",
+          "category": "both_changed_differ",
+          "file": "src/CGameArea.cpp",
+          "name": "CGameArea::sub_47A1C0",
+          "our_len": 2258,
+          "their_len": 1451
+        },
+        {
+          "address": "0x722820",
+          "category": "both_changed_differ",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::sub_722820",
+          "our_len": 2013,
+          "their_len": 1658
+        },
+        {
+          "address": "0x52A640",
+          "category": "both_changed_differ",
+          "file": "src/CProjectile.cpp",
+          "name": "CProjectile::GetSourcePosition",
+          "our_len": 1609,
+          "their_len": 2028
+        },
+        {
+          "address": "0x4C90A0",
+          "category": "both_changed_differ",
+          "file": "src/CGameSound.cpp",
+          "name": "CGameSound::DoAIUpdate",
+          "our_len": 1948,
+          "their_len": 1658
+        },
+        {
+          "address": "0x6F47F0",
+          "category": "both_changed_differ",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::RemoveReplacementFromArea",
+          "our_len": 1797,
+          "their_len": 1808
+        },
+        {
+          "address": "0x404D00",
+          "category": "both_changed_differ",
+          "file": "src/CAIGroup.cpp",
+          "name": "CAIGroup::GroupAction",
+          "our_len": 1652,
+          "their_len": 1942
+        }
+      ],
+      "status": "assigned",
+      "verdicts": {}
     }
   },
   "fork_base": "e8dd16a750966af53f24daaf49dcb4fb13594c13"
