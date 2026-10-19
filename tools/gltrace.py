@@ -587,9 +587,9 @@ public static class IwdInput {
     [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
     [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr hWnd, EnumWindowsProc proc, IntPtr lParam);
     [DllImport("user32.dll", SetLastError = true)]
-    static extern IntPtr SendMessage(IntPtr hWnd, uint msg, IntPtr w, IntPtr l);
-    [DllImport("user32.dll", SetLastError = true)]
-    static extern IntPtr SendMessage(IntPtr hWnd, uint msg, IntPtr w, StringBuilder l);
+    static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint msg, IntPtr w, IntPtr l, uint flags, uint timeout, out IntPtr result);
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint msg, IntPtr w, StringBuilder l, uint flags, uint timeout, out IntPtr result);
     [DllImport("user32.dll")] public static extern int GetDlgCtrlID(IntPtr hWnd);
 
     const uint INPUT_MOUSE = 0, INPUT_KEYBOARD = 1;
@@ -773,29 +773,48 @@ public static class IwdInput {
         return childrenFound.ToArray();
     }
 
+    // Sends a window message with a deadline. Every cross-process send in
+    // this driver goes through here: a game UI thread that stopped pumping
+    // must not block the driver on one SendMessage forever (run
+    // 20261018-185556 sat 48 minutes inside such a send until the game was
+    // killed by hand). SMTO_ABORTIFHUNG aborts once Windows marks the
+    // target hung, the 10 s timeout catches the rest; a healthy window
+    // answers in milliseconds either way. On abort the call returns 0,
+    // which the callers already treat as "no text" / LB_ERR.
+    static IntPtr SendDeadline(IntPtr hWnd, uint msg, IntPtr w, IntPtr l) {
+        IntPtr res;
+        SendMessageTimeout(hWnd, msg, w, l, 0x2 /* SMTO_ABORTIFHUNG */, 10000, out res);
+        return res;
+    }
+    static IntPtr SendDeadline(IntPtr hWnd, uint msg, IntPtr w, StringBuilder l) {
+        IntPtr res;
+        SendMessageTimeout(hWnd, msg, w, l, 0x2 /* SMTO_ABORTIFHUNG */, 10000, out res);
+        return res;
+    }
+
     // A window's title text.
     public static string TextOf(IntPtr hWnd) {
-        int len = (int)SendMessage(hWnd, WM_GETTEXTLENGTH, IntPtr.Zero, IntPtr.Zero);
+        int len = (int)SendDeadline(hWnd, WM_GETTEXTLENGTH, IntPtr.Zero, IntPtr.Zero);
         if (len <= 0)
             return "";
         StringBuilder text = new StringBuilder(len + 1);
-        SendMessage(hWnd, WM_GETTEXT, (IntPtr)text.Capacity, text);
+        SendDeadline(hWnd, WM_GETTEXT, (IntPtr)text.Capacity, text);
         return text.ToString();
     }
 
     // A list entry: index-th item of a ListBox (LB_*) or ComboBox (CB_*).
     public static string ListText(IntPtr hWnd, int index, uint lenMsg, uint textMsg) {
-        int len = (int)SendMessage(hWnd, lenMsg, (IntPtr)index, IntPtr.Zero);
+        int len = (int)SendDeadline(hWnd, lenMsg, (IntPtr)index, IntPtr.Zero);
         if (len <= 0)
             return "";
         StringBuilder text = new StringBuilder(len + 1);
-        SendMessage(hWnd, textMsg, (IntPtr)index, text);
+        SendDeadline(hWnd, textMsg, (IntPtr)index, text);
         return text.ToString();
     }
 
     // Sends a message and returns its result as int (-1 = LB_ERR etc.).
     public static int Send(uint msg, IntPtr hWnd, IntPtr w, IntPtr l) {
-        return (int)SendMessage(hWnd, msg, w, l);
+        return (int)SendDeadline(hWnd, msg, w, l);
     }
 
     // A child dialog control's resource id (-1 when it has none).
@@ -893,6 +912,27 @@ function Get-DescendantIds([uint32]$root) {
         $frontier = $next
     }
     return ,$all
+}
+
+# The game process for the error paths: the iwd2.exe among the loader's
+# descendants, resolved to an exact pid, which the finally then kills by
+# pid (never by image name - a name-wide kill could hit a process this run
+# did not start). This is what a run ends without Find-GameWindow having
+# identified the game: the window-wait expiry, and every other throw via
+# the finally. The stuck 20261018-185556 run left iwd2.exe sitting at the
+# resolution dialog for 48 minutes because $script:game stayed null on
+# that path and the finally only ever killed what it knew.
+function Find-GameProcess {
+    if ($script:loader -eq $null -or $script:game -ne $null) { return }
+    foreach ($procId in (Get-DescendantIds $script:loader.Id)) {
+        $p = Get-Process -Id $procId -ErrorAction SilentlyContinue
+        if ($p -ne $null -and $p.ProcessName -eq 'iwd2') {
+            $script:gamePid = [uint32]$p.Id
+            $script:game = $p
+            Log ('  game process by parent walk, no window: pid {0}' -f $p.Id)
+            return
+        }
+    }
 }
 
 # The game's first window is the modal "IWD2:EE Resolution Select" box
@@ -996,11 +1036,14 @@ function Answer-ResolutionDialog {
 }
 
 # The game window: the largest visible top-level window of the loader's
-# descendants, stable over five 200 ms polls, within 180 s. Dialog-class
-# windows are skipped: the resolution box and IWD2EE.exe's "IEex loader"
-# box are ones, and the game is not.
+# descendants, stable over five 200 ms polls, within the scenario timeout
+# (the same deadline the Check calls race; a stuck launch cannot outlive
+# the run's own budget). Dialog-class windows are skipped: the resolution
+# box and IWD2EE.exe's "IEex loader" box are ones, and the game is not.
+# On expiry the game process is resolved by exact pid (Find-GameProcess)
+# before the throw, so the finally's kill reaches it.
 function Find-GameWindow {
-    $end = (Get-Date).AddSeconds(180)
+    $end = $deadline
     $last = [IntPtr]::Zero
     $stable = 0
     while ((Get-Date) -lt $end) {
@@ -1030,7 +1073,8 @@ function Find-GameWindow {
         $last = $best
         Start-Sleep -Milliseconds 200
     }
-    throw 'no game window after 180 s'
+    Find-GameProcess
+    throw ('no game window within the {0} s scenario timeout' -f $cfg.timeout)
 }
 
 # Follows the game window if the process recreated it, and brings it to the
@@ -1208,6 +1252,10 @@ try {
     Log "  stack $($_.ScriptStackTrace -replace '\r?\n', ' <- ')"
     try { Screen-Shot 'stuck' } catch { Log "  no screen shot: $_" }
 } finally {
+    # Every run ends by killing what it started, by exact pid: resolve the
+    # game from the loader's descendants when no window was ever found
+    # (before the loader kill, while the chain is still intact).
+    Find-GameProcess
     if ($script:loader -ne $null -and -not $script:loader.HasExited) {
         Stop-Process -Id $script:loader.Id -Force -ErrorAction SilentlyContinue
     }

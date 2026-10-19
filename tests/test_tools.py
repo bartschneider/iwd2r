@@ -7910,6 +7910,25 @@ class GltraceTest(unittest.TestCase):
         for present in ('LB_GETCOUNT', 'LB_SETCURSEL', 'SELECT',
                         'CtrlId', 'list[', '800x600'):
             self.assertIn(present, driver)
+        # Every cross-process send carries a deadline: run 185556 sat 48
+        # minutes inside one SendMessage into a game thread that had
+        # stopped pumping, and no loop deadline can interrupt that.
+        for present in ('SendMessageTimeout', 'SMTO_ABORTIFHUNG',
+                        'SendDeadline'):
+            self.assertIn(present, driver)
+        self.assertNotIn('SendMessage(IntPtr', driver)
+        # The game-window wait runs to the scenario timeout, and on expiry
+        # the run ends with the game resolved to an exact pid for the
+        # finally's kill (185556 left iwd2.exe alive at the dialog: the
+        # kill only ever reached a window-found game).
+        self.assertIn('$end = $deadline', driver)
+        self.assertIn('no game window within the {0} s scenario timeout',
+                      driver)
+        self.assertGreaterEqual(driver.count('Find-GameProcess'), 3)
+        self.assertIn("ProcessName -eq 'iwd2'", driver)
+        # The kill is always by exact pid, never by image name.
+        self.assertNotIn('Stop-Process -Name', driver)
+        self.assertNotIn('taskkill', driver)
 
     def test_gltrace_pe_machine(self):
         # The wrapper and the game must match bitness: parse the machine
