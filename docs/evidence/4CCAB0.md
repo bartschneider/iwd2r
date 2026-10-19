@@ -278,3 +278,18 @@ now keeps 292 points in its triggers, doors and containers, the count the
 original saved (Probe Save of the crossload run 20261016-171655). Ours kept
 133. The only point dropped is one of Barrel Three's ten. The test checks
 all 54 polygons against that save.
+
+## WSO delta
+
+disagreed with WSO at e8dd16a: he renames field_628/field_630/field_644 and sub_481890 to member names our headers do not declare and moves the m_scriptRes copy above m_dwFlags; case dump-4CCAB0 decides
+
+The three members are declared in CGameTrigger.h as field_628 (CPoint, +0x628),
+field_630 (CArray<CRect*>, +0x630) and field_644 (CAreaPoint*, +0x644), and
+the rect splitter is CGameAIBase::sub_481890 (0x481890) shared with the door
+and container ctors; his m_ptUsePoint, m_boundingGrid, m_pPolygonPoints and
+SplitRectIntoGrid exist nowhere in this tree, so his body does not compile
+here. The moved memcpy stores a distinct destination from a distinct source
+between stores to other distinct fields, so both orders are the same program.
+On every point where the two bodies differ in behavior they do not: the
+bounding rect, the cursor 30-to-42 swap, the pick points and the assert are
+character-for-character equal, and both match the decompile. ours stands.
