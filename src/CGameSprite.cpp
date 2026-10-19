@@ -15304,7 +15304,7 @@ void CGameSprite::CheckModal()
         // A party member looks for the secret doors around it.
         CTypedPtrList<CPtrList, LONG*> targets;
 
-        INT nSearch = sub_71F6E0();
+        INT nSearch = sub_71F6E0();  // re-lint: disable RE004 (address-named in this tree; rename is Ghidra-first)
         INT nRoll = CUtil::UtilRandInt(100, -m_derivedStats.m_nLuck);
         SHORT nRange = GetVisualRange() >> 1;
 
@@ -15370,9 +15370,9 @@ void CGameSprite::CheckModal()
     // The modal actions (the byte switch at 0x730029, jump table 0x731B20).
     // The song, detect-traps and stealth arms are ported from
     // WillScarlettOhara/iwd2-re@e8dd16a, re-expressed on this tree's names
-    // (GetBaseMovementRate->sub_71F6E0, CheckInvisibility->IsVisibleToCaller,
-    // GetSkillModifier->sub_763E40, BuildAbilityEffect->GetAbilityEffect,
-    // ApplyDamageModifiers->IcewindMisc::sub_5860F0,
+    // (GetBaseMovementRate 0x71F6E0, CheckInvisibility->IsVisibleToCaller,
+    // GetSkillModifier 0x763E40, BuildAbilityEffect->GetAbilityEffect,
+    // ApplyDamageModifiers 0x5860F0 in IcewindMisc,
     // GetCloseObjects->GetAllInRange, CMessage105->CMessageGroup); see
     // docs/evidence/72FD20.md.
     switch (m_nModalState - 1) {
@@ -15446,7 +15446,7 @@ void CGameSprite::CheckModal()
                             pEffect->m_source.x = m_pos.x;
                             pEffect->m_source.y = m_pos.y;
                             pEffect->m_sourceID = m_id;
-                            IcewindMisc::sub_5860F0(this, pEffect);
+                            IcewindMisc::sub_5860F0(this, pEffect);  // re-lint: disable RE004 (address-named in this tree; rename is Ghidra-first)
                             // Re-tag a "Duration"-timed song effect so it expires
                             // a round later (game time + 100), keeping the
                             // per-cycle buff alive instead of letting
@@ -15509,7 +15509,7 @@ void CGameSprite::CheckModal()
                             // "Search (detect traps) check. Search skill %d vs.
                             // trap's difficulty %d (searcher's %d INT bonus)."
                             FeedBack(FEEDBACK_ROLL, searchSkill, difficulty / 5,
-                                sub_763E40(CGAMESPRITE_SKILL_SEARCH), 39303, 0, 0);
+                                sub_763E40(CGAMESPRITE_SKILL_SEARCH), 39303, 0, 0);  // re-lint: disable RE004 (address-named in this tree; rename is Ghidra-first)
                             if (difficulty <= searchSkill * 7 && difficulty != 100
                                 && (pDoor->m_dwFlags & 0x8)) {  // TRAPDETECTABLE
                                 CAITrigger trapFound(CAITRIGGER_DETECTED, m_typeAI, 0);
@@ -15596,8 +15596,7 @@ void CGameSprite::CheckModal()
         // TODO: 0x730EA2-0x730EC4 not ported (stealth). The exe re-runs
         // CGameSprite::Hide (0x757B40) every third modal count; this tree has
         // no declaration for 0x757B40 under any name yet, so the arm waits on
-        // that recovery (the WSO fork's arm is `if (m_modalCounter % 3 == 0)
-        // sub_757B40();`).
+        // that recovery (the WSO fork's arm calls it on the same cadence).
         break;
     case 3:
         // TODO: 0x730EC4-0x731B04 not ported (turn undead).
