@@ -1020,6 +1020,14 @@ function Answer-ResolutionDialog {
                 }
                 Start-Sleep -Milliseconds 250
             }
+            if ([IwdInput]::IsWindow($h)) {
+                # Still up after the warning window: dump again so the log
+                # shows what the one-shot run was looking at.
+                Log '  resolution dialog still up after SELECT; children now:'
+                foreach ($c in [IwdInput]::ChildWindows($h)) {
+                    Log ("    dialog child 0x{0:x} class '{1}' id {2} text '{3}'" -f $c.ToInt64(), [IwdInput]::ClassOf($c), [IwdInput]::CtrlId($c), [IwdInput]::TextOf($c))
+                }
+            }
             Log ('resolution dialog 0x{0:x} (pid {1}, {2}): custom 800x600 written and confirmed' -f $h.ToInt64(), $ownerPid, $owner)
             return
         }
