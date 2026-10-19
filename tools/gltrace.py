@@ -1369,7 +1369,7 @@ def write_md(path, name, summary, meta):
     mean = sum(draws) / len(draws) if draws else 0.0
     lines = ['# GL trace: %s' % name, '']
     lines.append('Captured %s by tools/gltrace.py (%s), summary of '
-                 '`apitrace %s dump`.' % (meta['stamp'][:10],
+                 '`apitrace %s dump`.' % (meta['stamp'][:8],
                                           meta['commit'], meta['version']))
     lines.append('')
     lines.append('- game: %s (IWD2EE.exe sha256 %s)'
