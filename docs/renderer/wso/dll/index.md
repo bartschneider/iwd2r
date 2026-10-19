@@ -210,6 +210,26 @@ Decompile scratch output lives in `runs/dll-decomp/` (git-ignored).
 - [`IEex_Helper_PF_SlideJump`](IEex_Helper_PF_SlideJump.md)
 - [`IEex_Helper_PF_SnapshotAdjustTarget`](IEex_Helper_PF_SnapshotAdjustTarget.md)
 
+## Misc GUI hooks
+
+- [`IEex_Helper_AskResolution`](IEex_Helper_AskResolution.md)
+- [`IEex_Helper_ButtonKillFocus`](IEex_Helper_ButtonKillFocus.md)
+- [`IEex_Helper_CInfCursor_SetToolTipOverride`](IEex_Helper_CInfCursor_SetToolTipOverride.md)
+- [`IEex_Helper_CUIControlButtonChargenAnimationPreview_TimerAsynchronousUpdateOverride`](IEex_Helper_CUIControlButtonChargenAnimationPreview_TimerAsynchronousUpdateOverride.md)
+- [`IEex_Helper_CVidCell_RenderIconOverride`](IEex_Helper_CVidCell_RenderIconOverride.md)
+- [`IEex_Helper_DecrementButtonDoRender`](IEex_Helper_DecrementButtonDoRender.md)
+- [`IEex_Helper_GetAttackItemFields`](IEex_Helper_GetAttackItemFields.md)
+- [`IEex_Helper_GetUseItemFields`](IEex_Helper_GetUseItemFields.md)
+- [`IEex_Helper_PanelMosaicRender`](IEex_Helper_PanelMosaicRender.md)
+- [`IEex_Helper_PanelRClickRefonte`](IEex_Helper_PanelRClickRefonte.md)
+- [`IEex_Helper_PanelTimerGated`](IEex_Helper_PanelTimerGated.md)
+- [`IEex_Helper_PortraitButtonCellRender`](IEex_Helper_PortraitButtonCellRender.md)
+- [`IEex_Helper_PostItemSlotRenderHook`](IEex_Helper_PostItemSlotRenderHook.md)
+- [`IEex_Helper_RenderButtonIcon`](IEex_Helper_RenderButtonIcon.md)
+- [`IEex_Helper_RenderPortraitRect`](IEex_Helper_RenderPortraitRect.md)
+- [`IEex_Helper_SetPanelMosaicResref`](IEex_Helper_SetPanelMosaicResref.md)
+- [`IEex_Helper__CUIPanel_Render__CVidMosaic_Render`](IEex_Helper__CUIPanel_Render__CVidMosaic_Render.md)
+
 ## Staged Lua evidence (sha256)
 
 The staged Lua patches at `~/.local/share/iwd2r/wso/lua/` are used as evidence for who calls each helper (and, for the keys-screen group, for hook sites and Lua-callback contracts). The staged corpus itself has no pin yet; these hashes let it be pinned retroactively.

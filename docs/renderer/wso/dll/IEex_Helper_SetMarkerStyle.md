@@ -111,7 +111,7 @@ min-brightness floor)`:
    `0x10624dd3` + shift) -- the palette color at the engine's own
    green intensity -- returned as a COLORREF.
 
-`RenderPortraitRect` (hud-group note) reuses steps 1-5 verbatim
+`RenderPortraitRect` (gui-misc-group note) reuses steps 1-5 verbatim
 with its own inputs: floors of `G * 587 / 1000` (derived from a
 green channel, same /1000 magic) or literal 146, and base colors of
 the engine call 0x705cc0's result or pure green `0xfa00`.
