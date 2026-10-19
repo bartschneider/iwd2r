@@ -432,3 +432,7 @@ CGameEffectVisualSpellHit::ApplyEffect, opcode 141 (vtable 0x849A64), ported fro
 NOTE (an address-dependent value, inert in single player): the projectile type lives in the sprite argument, so a mode without an entry (low bits 3, after the assert at line 19999, or above 0x27) fires the sprite's address as the type; CMessageFireProjectile fires nothing without a service provider (tests/test_projectile.cpp), so ours sends no message for such a mode (its local hit still plays).
 
 tests/test_visual_projectiles.cpp applies the effects of SPWI984 (modes 24, 25, 26), SPWI980 (32) and SPWI995 (38) to a goblin in AR1000: the messages, the objects, their render and their end.
+
+## WSO delta
+
+disagreed with WSO at e8dd16a: his body needs CProjectileSPBOOM/CProjectileCallLightning/CProjectilePhaseBAM, undeclared in our src/*.h, and his type-field composition is arithmetically equal to ours' case table — nothing behavioural to adopt; case dump-4BBCB0 decides
