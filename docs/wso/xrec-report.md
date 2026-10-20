@@ -97,8 +97,8 @@ above; the sort order was verified programmatically.
 Per-side tally across every batch in docs/wso/wave-state.json, split by deciding evidence kind (regenerate with `python3 tools/wave.py scorecard`):
 
 Decided for the fork: 10 (losing kind: oracle 1, replay 1, read-only 8) -- deciding evidence: dump reading 10
-Decided for ours: 182 (losing kind: trace 182) -- deciding evidence: replay checkpoint 19, dump reading 161, trace 2
+Decided for ours: 182 (losing kind: trace 182) -- deciding evidence: replay checkpoint 21, dump reading 161
 Decided for neither: 8 -- deciding evidence: dump reading 8
-Deciding evidence across all 200 verdicts: oracle probe 0, replay checkpoint 19, dump reading 179, trace 2
+Deciding evidence across all 200 verdicts: oracle probe 0, replay checkpoint 21, dump reading 179, trace 0
 
 Batches: b001 closed (20 rows), b002 closed (20 rows), b003 closed (20 rows), b004 closed (20 rows), b005 closed (20 rows), b006 closed (20 rows), b007 closed (20 rows), b008 closed (20 rows), b009 closed (20 rows), b010 closed (20 rows), b011 assigned (20 rows)
