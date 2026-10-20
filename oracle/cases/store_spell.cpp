@@ -58,18 +58,29 @@ struct Input {
     short portrait;
     uint32_t state, flags;
     int32_t amount2;
-    int list; uint8_t race; // list 0 none / 1 timed / 2 equipped; race 2 elf
+    int list;
+    uint8_t race; // list 0 none / 1 timed / 2 equipped; race 2 elf
 };
 // Decisive pair first (bit 0 of the effect byte at +0x58 set with m_flags
 // clear, then the inverse), then the arm matrix: lists, dead, the not-dead
 // arms, SPPR712's raw 0x800 and default, SPPR504's dead gate and elf
 // override, SPPR314/404/308's masks, the SPPR307 empty walk, a bad portrait.
 const Input kInputs[] = {
-    { "SPPR303", 0, 0x0, 0x0, 1, 1, 0 }, { "SPPR303", 0, 0x0, 0x1, 0, 1, 0 }, { "SPPR303", 0, 0x0, 0x0, 2, 1, 0 },
-    { "SPPR303", 0, 0x0, 0x0, 1, 2, 0 }, { "SPPR303", 0, 0x800, 0x0, 1, 1, 0 }, { "SPPR101", 0, 0x0, 0x0, 0, 0, 0 },
-    { "SPPR712", 0, 0x800, 0x0, 0, 0, 0 }, { "SPPR712", 0, 0x0, 0x0, 0, 0, 0 }, { "SPPR504", 0, 0x0, 0x0, 0, 0, 0 },
-    { "SPPR504", 0, 0x800, 0x0, 0, 0, 0 }, { "SPPR504", 0, 0x800, 0x0, 0, 0, 2 }, { "SPPR314", 0, 0x80000, 0x0, 0, 0, 0 },
-    { "SPPR404", 0, 0x4000, 0x0, 0, 0, 0 }, { "SPPR308", 0, 0x8, 0x0, 0, 0, 0 }, { "SPPR307", 0, 0x0, 0x0, 0, 0, 0 },
+    { "SPPR303", 0, 0x0, 0x0, 1, 1, 0 },
+    { "SPPR303", 0, 0x0, 0x1, 0, 1, 0 },
+    { "SPPR303", 0, 0x0, 0x0, 2, 1, 0 },
+    { "SPPR303", 0, 0x0, 0x0, 1, 2, 0 },
+    { "SPPR303", 0, 0x800, 0x0, 1, 1, 0 },
+    { "SPPR101", 0, 0x0, 0x0, 0, 0, 0 },
+    { "SPPR712", 0, 0x800, 0x0, 0, 0, 0 },
+    { "SPPR712", 0, 0x0, 0x0, 0, 0, 0 },
+    { "SPPR504", 0, 0x0, 0x0, 0, 0, 0 },
+    { "SPPR504", 0, 0x800, 0x0, 0, 0, 0 },
+    { "SPPR504", 0, 0x800, 0x0, 0, 0, 2 },
+    { "SPPR314", 0, 0x80000, 0x0, 0, 0, 0 },
+    { "SPPR404", 0, 0x4000, 0x0, 0, 0, 0 },
+    { "SPPR308", 0, 0x8, 0x0, 0, 0, 0 },
+    { "SPPR307", 0, 0x0, 0x0, 0, 0, 0 },
     { "SPPR101", 5, 0x0, 0x0, 0, 0, 0 },
 };
 // The g_pBaldurChitin write lands in the original's .data, restored between cases.
