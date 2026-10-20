@@ -424,17 +424,23 @@ SCORECARD_HEAD = '## Scorecard'
 # is a different thing (the loser's kind, not what decided).
 DECIDING_ORDER = ('oracle probe', 'replay checkpoint', 'dump reading',
                   'trace')
+# Bare case ids that name a replay scenario: b005 decided rows with the
+# scenario name alone; later replay cases are scenario/checkpoint, which
+# the / rule already catches.  Membership is exact, and the classifier
+# stays a pure function -- no probing scenarios/ on disk.
+LEGACY_REPLAY_CASES = frozenset({'world_entry'})
 
 
 def deciding_kind(case):
     """The evidence kind that decided a verdict, from its case id:
-    probe-N an oracle probe, replay-* or any scenario/checkpoint id
-    (a / in it) a replay checkpoint, dump-N / readout-ADDR a dump
-    reading, anything else a trace."""
+    probe-N an oracle probe, replay-*, any scenario/checkpoint id
+    (a / in it) or a bare legacy scenario name a replay checkpoint,
+    dump-N / readout-ADDR a dump reading, anything else a trace."""
     c = case or ''
     if c.startswith('probe'):
         return 'oracle probe'
-    if c.startswith('replay') or '/' in c:
+    if (c.startswith('replay') or '/' in c
+            or c in LEGACY_REPLAY_CASES):
         return 'replay checkpoint'
     if c.startswith('dump-') or c.startswith('readout-'):
         return 'dump reading'

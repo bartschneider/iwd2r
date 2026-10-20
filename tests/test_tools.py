@@ -7726,6 +7726,10 @@ class WaveTest(unittest.TestCase):
         self.assertEqual(k('replay-world_entry'), 'replay checkpoint')
         self.assertEqual(k('walk_and_talk/dialog'), 'replay checkpoint')
         self.assertEqual(k('vid/cell_blt'), 'replay checkpoint')
+        # b005 used the bare scenario name; the legacy set is exact, so
+        # only that id reads as a replay checkpoint.
+        self.assertEqual(k('world_entry'), 'replay checkpoint')
+        self.assertEqual(k('world_entries'), 'trace')
         self.assertEqual(k('weird'), 'trace')
         self.assertEqual(k(''), 'trace')
         # A verdict dict without the case key is read defensively: a
