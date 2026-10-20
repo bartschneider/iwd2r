@@ -1,6 +1,6 @@
 # Wave 0b: a driver that runs the batches, triage before any agent reads, and measured verdicts
 
-Date: 2026-10-20. Status: draft for Thierry's review. Implements before batch b011 of
+Date: 2026-10-20. Status: draft for thierbig's review. Implements before batch b011 of
 the WSO integration plan (`docs/superpowers/plans/2026-10-17-wso-integration.md`);
 extends `tools/wave.py` and the brief template from Task 5e of that plan.
 

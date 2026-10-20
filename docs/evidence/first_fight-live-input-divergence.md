@@ -172,7 +172,7 @@ differences. The evidence rules them out:
 Replay oracle (should be, and is, green):
 
 ```
-cd /home/thier/iwd2-re-worktrees/p3-vis-probe
+cd ~/iwd2-re-worktrees/p3-vis-probe
 python3 -I tools/play.py --vm windows scenarios/first_fight.txt   # replay
 # last green run at ddda21ab: ~/iwd2r-runs/post-effects-a5-20261017-200003
 # (MATCH 39/39 + 190/190)

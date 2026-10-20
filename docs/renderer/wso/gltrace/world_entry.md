@@ -2,7 +2,7 @@
 
 Captured 20261018 by tools/gltrace.py (cea94381), summary of `apitrace 14.0 dump`.
 
-- game: /mnt/c/Users/thier/iwd2r-ieex/game (IWD2EE.exe sha256 0c6d1dde22dcd53a)
+- game: /mnt/c/Users/<user>/iwd2r-ieex/game (IWD2EE.exe sha256 0c6d1dde22dcd53a)
 - apitrace: 14.0 (captured by its lib/wrappers/opengl32.dll proxy in the game folder, writing $TRACE_FILE)
 - GPU: Parsec Virtual Display Adapter
 - scenario: scenarios/world_entry.txt, driven to its last checkpoint (waits are wall-clock; 50 s lead for the intro movies)

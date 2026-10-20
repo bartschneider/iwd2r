@@ -1,6 +1,6 @@
 # WSO integration — design (2026-10-17)
 
-Status: approved by Thierry 2026-10-17 ("go"). Plan: docs/superpowers/plans/2026-10-17-wso-integration.md.
+Status: approved by thierbig 2026-10-17 ("go"). Plan: docs/superpowers/plans/2026-10-17-wso-integration.md.
 
 ## 1. Goal
 
@@ -31,7 +31,7 @@ His verification: Frida traces of the real `IWD2.exe` compared against his build
 ## 3. Licensing and attribution
 
 - The engine base stays under the Sustainable Use License, as upstream requires.
-- The fork's author has told Thierry his additions are MIT. This is not yet recorded in writing where others can see it. Thierry chose to proceed without waiting. Until a written grant exists, every import commit carries an `Imported-From: WillScarlettOhara/iwd2-re@<sha> (MIT per author, 2026-10-17)` trailer, and `docs/THIRD_PARTY.md` gets an entry naming him, the repository, and the grant. When he publishes a LICENSE or posts the grant on GitHub, the entry gets the link.
+- The fork's author has told thierbig his additions are MIT. This is not yet recorded in writing where others can see it. thierbig chose to proceed without waiting. Until a written grant exists, every import commit carries an `Imported-From: WillScarlettOhara/iwd2-re@<sha> (MIT per author, 2026-10-17)` trailer, and `docs/THIRD_PARTY.md` gets an entry naming him, the repository, and the grant. When he publishes a LICENSE or posts the grant on GitHub, the entry gets the link.
 - IEex, the extender his renderer is built into, is Bubb's work. His MIT grant cannot cover that base. The renderer port (section 7) must not carry IEex code, only his own.
 - Nothing from his IWD2EE branch enters this repository: it is game-data overrides and compiled binaries, excluded by the bring-your-own-copy rule and by the gate.
 

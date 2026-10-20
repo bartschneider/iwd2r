@@ -60,7 +60,7 @@ Imported-From: WillScarlettOhara/iwd2-re@<40-char sha> (MIT per author, 2026-10-
 
 | Our files | Ported from | Copyright |
 |---|---|---|
-| Functions carrying the `Imported-From` trailer | [WillScarlettOhara/iwd2-re](https://github.com/WillScarlettOhara/iwd2-re), recovered engine functions | Copyright the fork's author (WillScarlettOhara). MIT, as granted to Thierry on 2026-10-17; the link to his LICENSE goes here when it is published. |
+| Functions carrying the `Imported-From` trailer | [WillScarlettOhara/iwd2-re](https://github.com/WillScarlettOhara/iwd2-re), recovered engine functions | Copyright the fork's author (WillScarlettOhara). MIT, as granted to thierbig on 2026-10-17; the link to his LICENSE goes here when it is published. |
 
 The additions are MIT, under the standard MIT text quoted at the top of this file. Nothing from the fork's IWD2EE branch — game-data overrides, compiled binaries — is vendored; the renderer artifacts are fetched by pinned hash outside the repository (docs/wso/README.md).
 
@@ -70,7 +70,7 @@ The differential-tracing toolchain (docs/frida-tracing.md) is adopted from the s
 
 | Our files | Ported from | Copyright |
 |---|---|---|
-| `tools/frida/hooks.py` | `scripts/frida_hooks.py` (the readers, argument expressions, prelude and render functions) | Copyright the fork's author (WillScarlettOhara). MIT, as granted to Thierry on 2026-10-17 |
+| `tools/frida/hooks.py` | `scripts/frida_hooks.py` (the readers, argument expressions, prelude and render functions) | Copyright the fork's author (WillScarlettOhara). MIT, as granted to thierbig on 2026-10-17 |
 | `tools/frida/orig.py` | `scripts/frida_orig.py` (Trace/verdict shape, hook wiring) with the exception guard from his `scripts/frida_crash_guard.py` | as above |
 | `tools/frida/trace_diff.py` | `scripts/frida_trace_diff.py` (CLI and comparison machinery) | as above |
 | `tools/frida/probe.py` | `scripts/frida_probe.py` (the two-runtime shape), rewritten for our sandbox pipeline | as above |
@@ -84,7 +84,7 @@ The structural-parity gate itself — tools/parity/run.py (the changed-functions
 
 | Our files | Ported from | Copyright |
 |---|---|---|
-| `tools/parity/asm_verify.py` | `scripts/reagent_asm_verify.py` (the body/callee diffing) | Copyright the fork's author (WillScarlettOhara). MIT, as granted to Thierry on 2026-10-17 |
+| `tools/parity/asm_verify.py` | `scripts/reagent_asm_verify.py` (the body/callee diffing) | Copyright the fork's author (WillScarlettOhara). MIT, as granted to thierbig on 2026-10-17 |
 | `tools/parity/address_markers.py` | `scripts/lint_address_markers.py` (the marker checks; the TSV export reader is ours) | as above |
 | `tools/parity/re_lint.py` | `scripts/re_lint.py` (rules and CLI; the per-function entry is ours) | as above |
 | `tools/parity/lint_extend_cells.py` | `scripts/lint_extend_cells.py` | as above |

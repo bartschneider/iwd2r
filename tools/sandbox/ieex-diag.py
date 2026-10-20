@@ -10,7 +10,7 @@ read-write under VM_ROOT, tools read-only, done.txt as the completion
 signal, icewind2.ini backed up and restored around the launch.
 
     python3 -I tools/sandbox/ieex-diag.py \
-        --game /mnt/c/Users/thier/iwd2r-ieex/game --timeout 150
+        --game /mnt/c/Users/<user>/iwd2r-ieex/game --timeout 150
 """
 
 import argparse

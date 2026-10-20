@@ -80,7 +80,7 @@
 
 **Files:** Create `tools/wso_fetch.py`, `tools/wso_pins.json`; Test `tests/test_tools.py`.
 
-**Interfaces:** `wso_fetch.py` reads `wso_pins.json` (`{"fork_commit", "upstream_commit", "files": [{"url", "dest", "sha256"}]}`), downloads into `${IWD2R_HOME:-~/.local/share/iwd2r}/wso/<dest>`, verifies sha256, refuses to write anywhere else. `--check` verifies existing files only. Pins: the fork at `138495fde69b6092b7318fad462d571864e9d9b8`, upstream IWD2EE at `60de54611b249d3bcca3f6522ef9db5e7ec27339`; files: `IEexHelper.dll` from both, `IEex.dll` from the fork, the 16 modified or added Lua files from the fork, `IEex_Render_Patch.lua` and `IEex_Gui_State.lua` from upstream. The sha256 values come from the copies already staged under `~/.local/share/iwd2r/wso` on Thierry's machine.
+**Interfaces:** `wso_fetch.py` reads `wso_pins.json` (`{"fork_commit", "upstream_commit", "files": [{"url", "dest", "sha256"}]}`), downloads into `${IWD2R_HOME:-~/.local/share/iwd2r}/wso/<dest>`, verifies sha256, refuses to write anywhere else. `--check` verifies existing files only. Pins: the fork at `138495fde69b6092b7318fad462d571864e9d9b8`, upstream IWD2EE at `60de54611b249d3bcca3f6522ef9db5e7ec27339`; files: `IEexHelper.dll` from both, `IEex.dll` from the fork, the 16 modified or added Lua files from the fork, `IEex_Render_Patch.lua` and `IEex_Gui_State.lua` from upstream. The sha256 values come from the copies already staged under `~/.local/share/iwd2r/wso` on thierbig's machine.
 - [ ] **Step 1: Tests.** `test_wso_fetch_dest_under_home` (with `IWD2R_HOME` set to a temp dir, destinations resolve under it; a `dest` containing `..` is rejected); `test_wso_fetch_check_reports_mismatch` (a file with the wrong hash is listed, exit non-zero); `test_wso_fetch_creates_dir_when_absent`.
 - [ ] **Step 2:** run, expect failures. **Step 3:** implement with `urllib` only. **Step 4:** run the tests; run `python3 tools/wso_fetch.py --check` on the staged copies (all OK).
 - [ ] **Step 5: Commit** "Fetch the WSO fork's renderer artifacts by pinned hash".
@@ -89,7 +89,7 @@
 
 **Files:** Modify `docs/THIRD_PARTY.md`; Create `docs/wso/README.md`.
 
-- [ ] **Step 1:** THIRD_PARTY gains a row: our files "functions carrying the `Imported-From` trailer", ported from `WillScarlettOhara/iwd2-re`, copyright the fork's author, MIT as granted to Thierry on 2026-10-17 (link to his LICENSE when published).
+- [ ] **Step 1:** THIRD_PARTY gains a row: our files "functions carrying the `Imported-From` trailer", ported from `WillScarlettOhara/iwd2-re`, copyright the fork's author, MIT as granted to thierbig on 2026-10-17 (link to his LICENSE when published).
 - [ ] **Step 2:** `docs/wso/README.md`: what the fork is, the numbers from the spec's table, the trailer format, the `trace` kind, and the rule that nothing from the IWD2EE branch enters the repo.
 - [ ] **Step 3: Commit** "Credit the WSO fork and document the import rules".
 
@@ -229,7 +229,7 @@ A second fork of the WSO tree, `Deoroot/iwd2-re` (remote `deo`, author Angel San
 **Files:** Create `tools/gltrace.py`; Test `tests/test_tools.py`; Create `docs/renderer/wso/gltrace/<scenario>.md`.
 
 **Interfaces:** `gltrace.py <scenario> --game %USERPROFILE%\iwd2r-ieex\game --apitrace %USERPROFILE%\iwd2r-apitrace` runs `apitrace trace --api gl IWD2EE.exe` through `cmd.exe` the way `play.py` launches the Windows build, drives the scenario with `realinput.py`, stops after the scenario's last checkpoint, writes `runs/<stamp>/<scenario>.trace`, then `apitrace dump` piped into `summarize(lines: Iterable[str]) -> dict` producing per-frame counts of draw calls, texture uploads with size and format, FBO binds, and the distinct texture dimensions seen.
-- [ ] **Step 0 (once, by Thierry or a host agent):** install IWD2EE from the fork's `iwd2ee-installer-windows-x86_64.exe` into a copy of the GOG install at `%USERPROFILE%\iwd2r-ieex\game`; unpack apitrace 14.0 win32 to `%USERPROFILE%\iwd2r-apitrace`. Never touch the oracle copy.
+- [ ] **Step 0 (once, by thierbig or a host agent):** install IWD2EE from the fork's `iwd2ee-installer-windows-x86_64.exe` into a copy of the GOG install at `%USERPROFILE%\iwd2r-ieex\game`; unpack apitrace 14.0 win32 to `%USERPROFILE%\iwd2r-apitrace`. Never touch the oracle copy.
 - [ ] **Step 1: Tests.** `test_gltrace_summarize_counts` on a 12-line fake dump (two frames, one glTexImage2D 2048x2048 RGBA, one glBindFramebuffer, three draws; assert the dict).
 - [ ] **Step 2–4:** fail, implement, pass; capture `world_entry` and `first_fight`; commit the two summaries (never the `.trace` files).
 - [ ] **Step 5: Commit** "Capture the WSO renderer's GL stream per scenario".

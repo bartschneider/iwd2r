@@ -27,8 +27,8 @@ every sandbox at its host path (probe.py maps the venv and its base
 interpreter, `C:\Python314`, into the box):
 
 ```
-C:\Python314\python.exe -m venv C:\Users\thier\iwd2r-frida\venv
-C:\Users\thier\iwd2r-frida\venv\Scripts\python.exe -m pip install frida==17.24.1
+C:\Python314\python.exe -m venv %USERPROFILE%\iwd2r-frida\venv
+%USERPROFILE%\iwd2r-frida\venv\Scripts\python.exe -m pip install frida==17.24.1
 ```
 
 Measured: frida 17.24.1 on Python 3.14.8 (MSC v.1944, 64 bit). The games are

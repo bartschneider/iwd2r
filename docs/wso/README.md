@@ -65,7 +65,7 @@ included — carries exactly:
 Imported-From: WillScarlettOhara/iwd2-re@<40-char sha> (MIT per author, 2026-10-17)
 ```
 
-His additions are MIT, as granted to Thierry on 2026-10-17;
+His additions are MIT, as granted to thierbig on 2026-10-17;
 [docs/THIRD_PARTY.md](../THIRD_PARTY.md) records the grant and links his
 LICENSE when it is published. IEex, the extender his renderer is built
 into, is Bubb's work and that grant cannot cover it: the renderer port may
