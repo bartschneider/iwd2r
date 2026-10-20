@@ -101,4 +101,4 @@ Decided for ours: 182 (losing kind: trace 182) -- deciding evidence: replay chec
 Decided for neither: 8 -- deciding evidence: dump reading 8
 Deciding evidence across all 200 verdicts: oracle probe 0, replay checkpoint 21, dump reading 179, trace 0
 
-Batches: b001 closed (20 rows), b002 closed (20 rows), b003 closed (20 rows), b004 closed (20 rows), b005 closed (20 rows), b006 closed (20 rows), b007 closed (20 rows), b008 closed (20 rows), b009 closed (20 rows), b010 closed (20 rows), b011 assigned (20 rows)
+Batches: b001 closed (20 rows), b002 closed (20 rows), b003 closed (20 rows), b004 closed (20 rows), b005 closed (20 rows), b006 closed (20 rows), b007 closed (20 rows), b008 closed (20 rows), b009 closed (20 rows), b010 closed (20 rows), b011 assigned (20 rows), b012 assigned (20 rows)
