@@ -7712,6 +7712,85 @@ class WaveTest(unittest.TestCase):
         with open(report) as f:
             self.assertEqual(f.read(), text)
 
+    def test_wave_deciding_kind_buckets(self):
+        """A verdict's case id picks its deciding-evidence bucket: probe,
+        then replay, then dump/readout, else trace."""
+        k = self.wave.deciding_kind
+        self.assertEqual(k('dump-421E40'), 'dump reading')
+        self.assertEqual(k('readout-421E40'), 'dump reading')
+        self.assertEqual(k('probe-3'), 'oracle probe')
+        # probe is checked first, so a probe id carrying a / still reads
+        # as an oracle probe.
+        self.assertEqual(k('probe-3/recheck'), 'oracle probe')
+        self.assertEqual(k('replay'), 'replay checkpoint')
+        self.assertEqual(k('replay-world_entry'), 'replay checkpoint')
+        self.assertEqual(k('walk_and_talk/dialog'), 'replay checkpoint')
+        self.assertEqual(k('vid/cell_blt'), 'replay checkpoint')
+        self.assertEqual(k('weird'), 'trace')
+        self.assertEqual(k(''), 'trace')
+        # A verdict dict without the case key is read defensively: a
+        # missing case counts as a trace, not a crash.
+        self.assertEqual(k(None), 'trace')
+
+    def test_wave_scorecard_split_by_deciding_evidence(self):
+        state = {'batches': {
+            'b001': {
+                'rows': [{'address': f'0x{i}'} for i in range(6)],
+                'files': ['src/A.cpp'], 'branch': 'p3/wso-b001',
+                'status': 'closed', 'assigned_at': 't', 'closed_at': 't',
+                'verdicts': {
+                    '0x0': {'side': 'fork', 'case': 'dump-421E40',
+                            'losing_kind': 'oracle'},
+                    '0x1': {'side': 'fork', 'case': 'readout-421E40',
+                            'losing_kind': 'read-only'},
+                    '0x2': {'side': 'ours', 'case': 'probe-3',
+                            'losing_kind': 'trace'},
+                    '0x3': {'side': 'ours', 'case': 'walk_and_talk/dialog',
+                            'losing_kind': 'trace'},
+                    '0x4': {'side': 'ours', 'case': 'replay',
+                            'losing_kind': 'trace'},
+                    # No case key: the deciding split reads it as a trace.
+                    '0x5': {'side': 'neither', 'losing_kind': None},
+                }}}}
+        text = self.wave.scorecard_text(state)
+        self.assertIn('split by deciding evidence kind', text)
+        self.assertIn('Decided for the fork: 2 (losing kind: '
+                      'oracle 1, read-only 1)'
+                      ' -- deciding evidence: dump reading 2', text)
+        self.assertIn('Decided for ours: 3 (losing kind: trace 3)'
+                      ' -- deciding evidence: oracle probe 1, '
+                      'replay checkpoint 2', text)
+        self.assertIn('Decided for neither: 1 -- deciding evidence: '
+                      'trace 1', text)
+        self.assertIn('Deciding evidence across all 6 verdicts: '
+                      'oracle probe 1, replay checkpoint 2, '
+                      'dump reading 2, trace 1', text)
+        # The four bucket names, verbatim.
+        for bucket in ('dump reading', 'oracle probe',
+                       'replay checkpoint', 'trace'):
+            self.assertIn(bucket, text)
+        self.assertIn('b001 closed (6 rows)', text)
+        # write_scorecard replaces the section, once, byte-for-byte the
+        # same on a second run.
+        with open(self.state, 'w') as f:
+            json.dump(state, f)
+        report = os.path.join(self.tmp, 'xrec-report.md')
+        with open(report, 'w') as f:
+            f.write('# Xrec\n\n## JSON\n\nrows.\n\n## Scorecard\n\nstale\n')
+        rc, out = self.wave.write_scorecard(self.state, report)
+        self.assertEqual(rc, 0, out)
+        with open(report) as f:
+            first = f.read()
+        self.assertEqual(first.count('## Scorecard'), 1)
+        self.assertIn('# Xrec', first)
+        self.assertIn('## JSON', first)
+        self.assertNotIn('stale', first)
+        self.assertIn('dump reading 2', first)
+        rc, out = self.wave.write_scorecard(self.state, report)
+        self.assertEqual(rc, 0, out)
+        with open(report) as f:
+            self.assertEqual(f.read(), first)
+
 
 class GltraceTest(unittest.TestCase):
     """tools/gltrace.summarize -- apitrace dump text to per-frame counts."""

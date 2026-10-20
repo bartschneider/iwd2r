@@ -418,20 +418,48 @@ def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
 # -- scorecard -----------------------------------------------------------
 
 SCORECARD_HEAD = '## Scorecard'
+# Deciding-evidence buckets, in display order -- strongest verification
+# first, the way DISPLAY_ORDER orders the losing kinds.  A verdict's
+# free-form case id picks exactly one, by deciding_kind(); `losing_kind`
+# is a different thing (the loser's kind, not what decided).
+DECIDING_ORDER = ('oracle probe', 'replay checkpoint', 'dump reading',
+                  'trace')
+
+
+def deciding_kind(case):
+    """The evidence kind that decided a verdict, from its case id:
+    probe-N an oracle probe, replay-* or any scenario/checkpoint id
+    (a / in it) a replay checkpoint, dump-N / readout-ADDR a dump
+    reading, anything else a trace."""
+    c = case or ''
+    if c.startswith('probe'):
+        return 'oracle probe'
+    if c.startswith('replay') or '/' in c:
+        return 'replay checkpoint'
+    if c.startswith('dump-') or c.startswith('readout-'):
+        return 'dump reading'
+    return 'trace'
 
 
 def scorecard_text(state):
-    """The '## Scorecard' section: per-side tally, split by losing kind,
-    plus one line per batch."""
+    """The '## Scorecard' section: per-side tally, split by losing kind
+    and by deciding evidence kind, plus one line per batch."""
     sides = {s: 0 for s in SIDES}
     kinds = {s: {} for s in SIDES}
+    deciding = {s: {} for s in SIDES}
+    every = {}
+    total = 0
     batches = []
     for bid, b in sorted(state['batches'].items()):
         for v in b.get('verdicts', {}).values():
+            total += 1
             sides[v['side']] += 1
             k = v.get('losing_kind')
             if k:
                 kinds[v['side']][k] = kinds[v['side']].get(k, 0) + 1
+            d = deciding_kind(v.get('case', ''))
+            deciding[v['side']][d] = deciding[v['side']].get(d, 0) + 1
+            every[d] = every.get(d, 0) + 1
         batches.append(f'{bid} {b["status"]} ({len(b["rows"])} rows)')
 
     def split(side):
@@ -442,15 +470,28 @@ def scorecard_text(state):
                 + ', '.join(f'{k} {ks[k]}' for k in DISPLAY_ORDER if k in ks)
                 + ')')
 
+    def by_deciding(side):
+        ks = deciding[side]
+        if not sides[side] or not ks:
+            return ''
+        return (' -- deciding evidence: '
+                + ', '.join(f'{k} {ks[k]}' for k in DECIDING_ORDER if k in ks))
+
     lines = [
         SCORECARD_HEAD,
         '',
-        'Per-side tally across every batch in docs/wso/wave-state.json '
-        '(regenerate with `python3 tools/wave.py scorecard`):',
+        'Per-side tally across every batch in docs/wso/wave-state.json, '
+        'split by deciding evidence kind (regenerate with '
+        '`python3 tools/wave.py scorecard`):',
         '',
-        f'Decided for the fork: {sides["fork"]}{split("fork")}',
-        f'Decided for ours: {sides["ours"]}{split("ours")}',
-        f'Decided for neither: {sides["neither"]}{split("neither")}',
+        f'Decided for the fork: {sides["fork"]}{split("fork")}'
+        f'{by_deciding("fork")}',
+        f'Decided for ours: {sides["ours"]}{split("ours")}'
+        f'{by_deciding("ours")}',
+        f'Decided for neither: {sides["neither"]}{split("neither")}'
+        f'{by_deciding("neither")}',
+        f'Deciding evidence across all {total} verdicts: '
+        + ', '.join(f'{k} {every.get(k, 0)}' for k in DECIDING_ORDER),
     ]
     if batches:
         lines += ['', 'Batches: ' + ', '.join(batches)]
