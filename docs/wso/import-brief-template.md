@@ -49,6 +49,23 @@ Context bundles (one per row; read these before the source):
 
    Rules math (attack rolls, saving throws, damage, effect application)
    never accepts a trace: those functions need `kind: oracle`.
+   **Measured rows.** After your first report the driver runs the Frida
+   phase over every row (`world_entry`, `first_fight`, `walk_and_talk`):
+   a row that behaves like the original gets its evidence rewritten to
+   `kind: trace` by the driver. You do not write the `frida` citation.
+   A row the phase reports as different needs its body fixed, or its import
+   reverted (say which in your report).
+   **Unmeasured rows.** A row the phase reports as "exercised by no
+   scenario" cannot close. In your fix round revert its body to the merge
+   base (`git diff first...HEAD` shows what changed), delete
+   `docs/evidence/<ADDRESS>.md`, and append an entry to
+   `docs/wso/import-parked.json` (a JSON list; create it as `[]` first if
+   missing):
+
+       {"address": "0x...", "name": "...", "file": "src/...", "batch": "{{id}}",
+        "needs": "world_entry, first_fight, walk_and_talk: not exercised"}
+
+   `needs` names what was tried. Commit all three changes together.
 5. **No verdicts.** This is an import: nobody decides fork, ours or neither,
    so write no `verdict` lines, no deciding case ids and no "disagreed with
    WSO" or "corroborated by WSO" phrase. The driver closes the batch with

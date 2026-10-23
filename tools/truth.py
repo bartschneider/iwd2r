@@ -666,14 +666,60 @@ def _read_events(path):
     return events
 
 
-def frida_run(batch_id, table, scenarios, run=subprocess.run, root=ROOT, loaded_rva=None):
+SCENARIO_TIMEOUT = re.compile(r'^#\s*timeout:\s*(\d+)', re.M)
+DEFAULT_SCENARIO_TIMEOUT = 180
+
+
+def _scenario_timeout(root, scenario):
+    """The scenario's `# timeout: S` header (scenarios/<name>.txt under root),
+    else 180: the value probe.py itself would resolve."""
+    try:
+        with open(os.path.join(root, 'scenarios', scenario + '.txt'), encoding='utf-8',
+                  errors='replace') as f:
+            m = SCENARIO_TIMEOUT.search(f.read())
+        if m:
+            return int(m.group(1))
+    except OSError:
+        pass
+    return DEFAULT_SCENARIO_TIMEOUT
+
+
+def _read_status(path):
+    """(RESULT: verdict word or None, {hook: total hits}) of a sidecar status
+    file (`HITS <name> <n>` lines, then `RESULT: <verdict> ...`); (None, None)
+    when there is no file."""
+    try:
+        with open(path, encoding='utf-8', errors='replace') as f:
+            lines = f.read().splitlines()
+    except OSError:
+        return None, None
+    verdict, hits = None, {}
+    for line in lines:
+        parts = line.split()
+        if len(parts) == 3 and parts[0] == 'HITS' and parts[2].isdigit():
+            hits[parts[1]] = int(parts[2])
+        elif parts[:1] == ['RESULT:'] and len(parts) > 1:
+            verdict = parts[1]
+    return verdict, hits
+
+
+def frida_run(batch_id, table, scenarios, run=subprocess.run, root=ROOT, loaded_rva=None,
+              clicks=3, hit_min=1, timeout=None):
     """{scenario: {'orig': events, 'ours': events, 'orig_path': path or None,
-    'ours_path': path or None, 'failed': reason or None}}: for each scenario,
-    both targets run through `probe.py run` (one sandbox each) with this
-    batch's hook tables, and the traces they leave under runs/<stamp>/replay/
-    are read back (paths are absolute; the trace_source hashes are of these
-    files). A scenario is failed when either probe exits non-zero or leaves no
-    trace file; frida_verdicts leaves failed scenarios out and reports them.
+    'ours_path': path or None, 'orig_exit': int, 'ours_exit': int,
+    'result': {'orig': verdict word, 'ours': verdict word}, 'hits': {'orig':
+    {hook: total}, 'ours': {...}} (None per side without a status file),
+    'measured': bool, 'failed': reason or None}}: for each scenario, both
+    targets run through `probe.py run` (one sandbox each, one at a time) the
+    way a hand run does: --clicks (the table's `clicks`, an int or a
+    {scenario: n}, else the clicks argument), --hit-min (no --hit: any hook
+    counts), --timeout (the argument, else the scenario's `# timeout:`
+    header, else 180) and --new-attempt "driver frida <batch> <scenario>".
+    The traces and `.status` files they leave under runs/<stamp>/replay/ are
+    read back (paths are absolute; the trace_source hashes are of these
+    files). A scenario is failed (not measured) when either probe exits
+    non-zero (a side that proves nothing exits 2) or leaves no trace file;
+    frida_verdicts leaves failed scenarios out and reports them.
 
     Ours must pass --loaded-rva, else orig.py would hook the original's
     EngineActivated address inside iwd2r.exe: loaded_rva (or the table's
@@ -696,15 +742,23 @@ def frida_run(batch_id, table, scenarios, run=subprocess.run, root=ROOT, loaded_
         for scenario in scenarios:
             if not loaded_rva:
                 traces[scenario] = {'orig': [], 'ours': [], 'orig_path': None, 'ours_path': None,
+                                    'orig_exit': None, 'ours_exit': None,
+                                    'result': {'orig': None, 'ours': None},
+                                    'hits': {'orig': None, 'ours': None}, 'measured': False,
                                     'failed': 'no %s in our map: ours cannot signal loaded '
                                               '(pass loaded_rva)' % LOADED_NAME}
                 continue
-            result = {'failed': None}
+            own = table.get('clicks', clicks)
+            n_clicks = own.get(scenario, clicks) if isinstance(own, dict) else own
+            limit = timeout or _scenario_timeout(root, scenario)
+            result = {'failed': None, 'result': {}, 'hits': {}}
             for target, key in (('original', 'orig'), ('ours', 'ours')):
                 out = 'frida-%s-%s-%s.jsonl' % (batch_id, scenario, target)
                 cmd = [sys.executable, '-I', probe, 'run', '--target', target,
                        '--probe', tables[target], '--scenario', scenario, '--out', out,
-                       '--new-attempt', 'driver frida %s' % batch_id]
+                       '--clicks', str(n_clicks), '--hit-min', str(hit_min),
+                       '--timeout', str(limit),
+                       '--new-attempt', 'driver frida %s %s' % (batch_id, scenario)]
                 if target == 'ours':
                     cmd += ['--loaded-rva', loaded_rva]
                 done = run(cmd, capture_output=True, text=True, cwd=root)
@@ -717,10 +771,17 @@ def frida_run(batch_id, table, scenarios, run=subprocess.run, root=ROOT, loaded_
                     path = None
                 result[key + '_path'] = path
                 result[key] = _read_events(path) if path else []
+                verdict, hits = _read_status(os.path.join(root, folder, 'replay', out + '.status')
+                                             ) if folder else (None, None)
+                result['result'][key] = verdict
+                result['hits'][key] = hits
                 rc = getattr(done, 'returncode', 0)
+                result[key + '_exit'] = rc
                 if result['failed'] is None and (rc != 0 or path is None):
-                    result['failed'] = '%s side %s' % (
-                        target, 'exited %s' % rc if rc != 0 else 'left no trace file')
+                    result['failed'] = '%s side %s%s' % (
+                        target, 'exited %s' % rc if rc != 0 else 'left no trace file',
+                        ' (%s)' % verdict if verdict else '')
+            result['measured'] = result['failed'] is None
             traces[scenario] = result
     return traces
 
@@ -773,6 +834,9 @@ def _as_scenario(value):
     return {'orig': value[0], 'ours': value[1], 'failed': None}
 
 
+EQUAL_PREFIX = 'identical in '
+
+
 def frida_verdicts(traces, rows, skipped=None):
     """{'0x<ADDR>': (status, detail)} from the {scenario: ...} traces frida_run
     returns (a bare (orig, ours) pair per scenario is accepted too) and the
@@ -819,7 +883,14 @@ def frida_verdicts(traces, rows, skipped=None):
             if not [e for e in orig + ours if str(e.get('tag', '')).startswith(tag)]:
                 continue
             code = trace_diff.compare(orig, ours)
-            if code == 0:
+            # The hooks cap the events they log, so equal events do not show
+            # equal frequency: the sidecars' totals must match too.
+            totals = t.get('hits') or {}
+            if code == 0 and totals.get('orig') is not None and totals.get('ours') is not None \
+                    and totals['orig'].get(tag, 0) != totals['ours'].get(tag, 0):
+                different.append('%s: hit totals differ: original %d, ours %d' % (
+                    scenario, totals['orig'].get(tag, 0), totals['ours'].get(tag, 0)))
+            elif code == 0:
                 equal.append(scenario)
             else:
                 different.append('%s: %s' % (scenario, _first_difference(orig, ours)))
@@ -828,7 +899,7 @@ def frida_verdicts(traces, rows, skipped=None):
         elif partial:
             verdicts[key] = ('scenario failed', '; '.join(partial))
         elif equal:
-            verdicts[key] = ('equal', 'identical in ' + ', '.join(equal))
+            verdicts[key] = ('equal', EQUAL_PREFIX + ', '.join(equal))
         elif failed:
             verdicts[key] = ('scenario failed', '; '.join('%s: %s' % kv for kv in sorted(failed.items())))
         else:
@@ -848,6 +919,9 @@ def trace_source(probe, orig_path, ours_path):
     paths frida_run returns). Only meaningful for an equal verdict."""
     return 'frida %s orig:%s ours:%s compare=0' % (
         probe, _file_hash(orig_path), _file_hash(ours_path))
+
+
+trace_source_line = trace_source
 
 
 # ---- the oracle path, end to end -------------------------------------------------

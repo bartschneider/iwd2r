@@ -57,6 +57,9 @@ CALIBRATION_PATH = os.path.join(ROOT, 'docs', 'wso', 'truth-calibration.json')
 IMPORT_LIST_REL = os.path.join('docs', 'wso', 'import-list.json')
 # Rows a worker could not decide (ruling R73): they wait for a probe.
 PROBE_LIST_REL = os.path.join('docs', 'wso', 'probe-list.json')
+# Import rows no scenario could measure: reverted, evidence deleted, listed
+# here by the worker; `close --kind import` accepts them as dropped.
+IMPORT_PARKED_REL = 'docs/wso/import-parked.json'
 DISAGREEMENTS_REL = os.path.join('docs', 'wso', 'disagreements.json')
 # The fork is read by pinned sha, never by branch name (wso/main moves).
 DEFAULT_FORK_BASE = 'e8dd16a750966af53f24daaf49dcb4fb13594c13'
@@ -210,6 +213,38 @@ def _driver():
         spec.loader.exec_module(module)
         _driver_module = module
     return _driver_module
+
+
+_check_evidence_module = None
+
+
+def _check_evidence():
+    """tools/check_evidence.py, loaded by path (tools/ is not on sys.path
+    under -I)."""
+    global _check_evidence_module
+    if _check_evidence_module is None:
+        spec = importlib.util.spec_from_file_location(
+            'check_evidence', os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), 'check_evidence.py'))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _check_evidence_module = module
+    return _check_evidence_module
+
+
+def _parked_rows(worktree):
+    """({address key: entry}, problem or None) of the worktree's
+    docs/wso/import-parked.json: the rows an import batch dropped, which the
+    worker appended in its fix round."""
+    path = os.path.join(worktree, IMPORT_PARKED_REL)
+    if not os.path.isfile(path):
+        return {}, None
+    try:
+        with open(path, encoding='utf-8') as f:
+            data = json.load(f)
+        return {_addr_key(e['address']): e for e in data}, None
+    except (OSError, ValueError, TypeError, KeyError) as e:
+        return {}, f'{IMPORT_PARKED_REL} is unreadable ({e!r}); it is a JSON list of entries with an address'
 
 
 _assemble_module = None
@@ -897,7 +932,8 @@ def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
     on success fast-forward `base` to the batch branch.  kind='verdicts'
     (wave 1) requires a verdict and a phrase-bearing evidence file per
     row; kind='import' (waves 2-5) requires evidence kind trace or
-    better instead.  A branch that modified tools/gates.sh or tools/parity
+    better instead, or the row listed in docs/wso/import-parked.json with
+    its body reverted and its evidence deleted.  A branch that modified tools/gates.sh or tools/parity
     is refused outright -- it would be certified by its own gate.  The
     gate runs only when everything else is clean: it costs minutes.
     gate=False skips tools/gates.sh (tests only).  A fork or neither
@@ -955,6 +991,17 @@ def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
             problems.append(f'these paths differ from {base}; a batch must '
                             f'not change the gate that certifies it:')
             problems += ['  ' + p for p in changed]
+        parked = {}
+        if kind != 'verdicts':
+            parked, bad = _parked_rows(wt)
+            if bad:
+                problems.append(bad)
+            try:
+                touched = {_addr_key('0x%X' % a) for _p, a, _n in
+                           _check_evidence().touched(wt, base)}
+            except Exception as e:
+                touched = set()
+                problems.append(f'cannot tell which bodies the batch touched ({e!r})')
         for row in batch['rows']:
             rel = _evidence_rel(row['address'])
             path = os.path.join(wt, rel)
@@ -962,8 +1009,20 @@ def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
             if os.path.isfile(path):
                 with open(path, encoding='utf-8') as f:
                     text = f.read()
+            k = _addr_key(row['address'])
+            if k in parked:
+                if text is not None:
+                    problems.append(f'{row["address"]}: listed in {IMPORT_PARKED_REL} '
+                                    f'but {rel} still exists; delete it')
+                if k in touched:
+                    problems.append(f'{row["address"]}: listed in {IMPORT_PARKED_REL} '
+                                    f'but its body is still changed against {base}; '
+                                    f'revert it to the merge base')
+                continue
             if text is None:
-                problems.append(f'no evidence file {rel}')
+                problems.append(f'no evidence file {rel}' + (
+                    f' (and {row["address"]} is not in {IMPORT_PARKED_REL})'
+                    if kind != 'verdicts' else ''))
                 continue
             if kind == 'verdicts':
                 if not any(p in text for p in EVIDENCE_PHRASES):
@@ -975,7 +1034,8 @@ def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
                 have = m.group(1) if m else 'none'
                 if have not in IMPORT_KINDS:
                     problems.append(f'{rel}: kind {have} is not trace or '
-                                    f'better')
+                                    f'better; measure it, or revert it and '
+                                    f'list it in {IMPORT_PARKED_REL}')
     if gate and not problems and wt is not None:
         g = subprocess.run(['bash', 'tools/gates.sh', '--base', base],
                            cwd=wt, capture_output=True, text=True)

@@ -9941,6 +9941,128 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(calls, [1])
         self.assertEqual(self._state()['verdicts']['0x402000']['measured'], 'frida')
 
+    @property
+    def IMPORT_MAP(self):
+        return (TruthTest.MAP + ' 0001:00007000       ?Render@Rules@@YAHHH@Z 00408000 f   r.obj\n'
+                ' 0001:00007100       ?Tick@Rules@@YAHHH@Z 00408100 f   r.obj\n')
+
+    def _import_phase_driver(self):
+        d = self._measured_driver(frida=True, frida_map=None, queue='import')
+        d.kind = 'import'
+        self.assertEqual(d.kind, 'import')
+        map_path = os.path.join(self.tmp, 'iwd2r.map')
+        with open(map_path, 'w') as f:
+            f.write(self.IMPORT_MAP)
+        d.frida_map = map_path
+        decomp = '\n## Decompiled (Ghidra)\n\n```c\nint %s(int a, int b)\n\n{\n  return g_x;\n}\n```\n'
+        # 401000 equal (with an exemption to drop), 402000 different, 403000 never exercised
+        with open(os.path.join(self.wt, 'docs', 'evidence', '401000.md'), 'w') as f:
+            f.write('---\naddress: 0x401000\nname: Rules::Render\nkind: oracle\n'
+                    'exemption: "thin"\n---\n' + decomp % 'Render')
+        with open(os.path.join(self.wt, 'docs', 'evidence', '403000.md'), 'w') as f:
+            f.write('---\naddress: 0x403000\nname: Rules::Tick\nkind: replay\n---\n' + decomp % 'Tick')
+        self.git('commit', '-qam', 'import evidence', cwd=self.wt)
+        rows = [{'address': '0x401000', 'name': 'Rules::Render'},
+                {'address': '0x402000', 'name': 'IcewindMisc::Roll'},
+                {'address': '0x403000', 'name': 'Rules::Tick'}]
+        return d, {'branch': 'p3/wso-b011', 'rows': rows}
+
+    def test_driver_frida_phase_runs_for_import_kind(self):
+        trace = TruthTest._trace
+        d, batch = self._import_phase_driver()
+        files = os.path.join(self.tmp, 'traces')
+        os.makedirs(files)
+        calls = []
+
+        def frida_run(batch_id, table, scenarios):
+            calls.append((batch_id, sorted(h['name'] for h in table['original']['hooks']),
+                          list(scenarios)))
+            out = {}
+            for scenario in scenarios:
+                orig = trace(('fn_401000', 7, 3), ('fn_402000', 7, 3))
+                ours = trace(('fn_401000', 7, 3), ('fn_402000', 7, 4))
+                paths = {}
+                for side, events in (('orig', orig), ('ours', ours)):
+                    paths[side] = os.path.join(files, '%s-%s.jsonl' % (scenario, side))
+                    with open(paths[side], 'w') as f:
+                        f.write(''.join(json.dumps(e) + '\n' for e in events))
+                out[scenario] = {'orig': orig, 'ours': ours, 'orig_path': paths['orig'],
+                                 'ours_path': paths['ours'], 'failed': None}
+            return out
+        d.frida_run = frida_run
+        before = self.git('rev-parse', 'HEAD', cwd=self.wt).stdout.strip()
+        findings = d._frida_phase('b011', batch, self.wt, {})
+        self.assertEqual(calls, [('b011', ['fn_401000', 'fn_402000', 'fn_403000'],
+                                  list(driver._tool('truth').FRIDA_SCENARIOS))])
+        # equal: evidence rewritten and committed on the batch branch
+        text = open(os.path.join(self.wt, 'docs', 'evidence', '401000.md')).read()
+        ce = load_tool('check_evidence')
+        fields = ce.front_matter(text)
+        self.assertEqual(fields['kind'], 'trace')
+        self.assertNotIn('exemption', fields)
+        self.assertTrue(any(p.fullmatch(fields['trace_source']) for p in ce.TRACE_SOURCES),
+                        fields['trace_source'])
+        self.assertIn('frida b011-world_entry orig:', fields['trace_source'])
+        self.assertEqual(self.git('status', '--porcelain', cwd=self.wt).stdout, '')
+        self.assertEqual(self.git('log', '-1', '--format=%s', cwd=self.wt).stdout.strip(),
+                         'frida: trace evidence for 1 rows of b011')
+        self.assertEqual(self.git('rev-list', '--count', before + '..HEAD', cwd=self.wt).stdout.strip(), '1')
+        # different: a finding with the diff summary; the file is untouched
+        self.assertTrue(any(f.startswith('0x402000:') and 'different' in f and 'world_entry' in f
+                            for f in findings), findings)
+        self.assertIn('kind: oracle', open(os.path.join(self.wt, 'docs', 'evidence', '402000.md')).read())
+        # never exercised: the exact message
+        self.assertIn('0x403000: exercised by no scenario (world_entry, first_fight, walk_and_talk); '
+                      'revert its body to the merge base, delete docs/evidence/403000.md and '
+                      'append it to docs/wso/import-parked.json', findings)
+        self.assertIn('kind: replay', open(os.path.join(self.wt, 'docs', 'evidence', '403000.md')).read())
+        self.assertEqual(len(findings), 2)
+
+    def test_driver_frida_phase_leaves_a_wave_one_batch_as_before_and_honours_no_frida(self):
+        d, batch = self._import_phase_driver()
+        d.frida_run = lambda *a: self.fail('no run expected')
+        d.frida = False
+        self.assertEqual(d._frida_phase('b011', batch, self.wt, {}), [])
+
+    def test_write_trace_evidence_touches_only_front_matter(self):
+        d = self._tmpdir()
+        orig, ours = os.path.join(d, 'o.jsonl'), os.path.join(d, 'r.jsonl')
+        for path, data in ((orig, b'{"tag":"a"}\n'), (ours, b'{"tag":"b"}\n')):
+            with open(path, 'wb') as f:
+                f.write(data)
+        want = driver._tool('truth').trace_source_line('i001-world_entry', orig, ours)
+        body = '\n# Notes\r\n\nexemption: not front matter\nkind: oracle\n  trailing  \n'
+        for head, expect_head in (
+                ('---\naddress: 0x401000\nname: F\nkind: oracle\nexemption: "thin"\n'
+                 'oracle_case: x\n---\n',
+                 ['---', 'address: 0x401000', 'name: F', 'kind: trace',
+                  'trace_source: ' + want, 'oracle_case: x', '---']),
+                ('---\nname: F\nkind: replay\ntrace_source: stale\nexemption: y\n---\n',
+                 ['---', 'name: F', 'kind: trace', 'trace_source: ' + want, '---']),
+                ('---\nname: F\n---\n', ['---', 'name: F', 'kind: trace',
+                                           'trace_source: ' + want, '---'])):
+            path = os.path.join(d, 'E.md')
+            with open(path, 'w', newline='') as f:
+                f.write(head + body)
+            driver._write_trace_evidence(path, 'i001-world_entry', orig, ours)
+            with open(path, newline='') as f:
+                got = f.read()
+            self.assertEqual(got.splitlines(keepends=True)[len(expect_head):],
+                             body.splitlines(keepends=True), head)
+            self.assertEqual(got.splitlines()[:len(expect_head)], expect_head)
+        # CRLF front matter keeps its endings
+        path = os.path.join(d, 'C.md')
+        with open(path, 'w', newline='') as f:
+            f.write('---\r\nkind: oracle\r\nexemption: z\r\n---\r\nbody\r\n')
+        driver._write_trace_evidence(path, 'p', orig, ours)
+        with open(path, newline='') as f:
+            self.assertEqual(f.read(), '---\r\nkind: trace\r\ntrace_source: %s\r\n---\r\nbody\r\n'
+                             % driver._tool('truth').trace_source_line('p', orig, ours))
+        with open(path, 'w') as f:
+            f.write('no front matter\n')
+        with self.assertRaises(ValueError):
+            driver._write_trace_evidence(path, 'p', orig, ours)
+
     def test_driver_repeats_oracle_failures_on_a_resumed_brief(self):
         d = self._measured_driver(oracle_run=lambda b, w, c: {'0x401000': ('fail', 'failure_count 2')})
         brief = d._oracle_phase('b011', self._state(), self.wt)
@@ -12424,7 +12546,7 @@ class DriverTest(unittest.TestCase):
                         root=self._tmpdir(), loaded_rva='0x1')
         self.assertTrue(cmds)
         for c in cmds:
-            self.assertEqual(c[c.index('--new-attempt') + 1], 'driver frida b011')
+            self.assertEqual(c[c.index('--new-attempt') + 1], 'driver frida b011 s1')
 
     def test_union_merge_attribute_lets_parallel_probe_lines_merge(self):
         anchor = driver._tool('truth').CMAKE_ANCHOR
@@ -13112,6 +13234,98 @@ class TruthTest(unittest.TestCase):
             traces = truth.frida_run('b011', table, ['s1'], run=rc2, root=root)
             self.assertIn('exited 2', traces['s1']['failed'])
 
+    def _frida_fake(self, root, exits=None, status=None):
+        """A fake probe runner leaving a trace (and, with `status`, a .status
+        file per side) under root/runs; records each argv in .calls."""
+        import subprocess as sp
+        calls = []
+
+        def fake(cmd, **kw):
+            calls.append(cmd)
+            target = cmd[cmd.index('--target') + 1]
+            out = cmd[cmd.index('--out') + 1]
+            d = os.path.join(root, 'runs', 'x-' + target, 'replay')
+            os.makedirs(d, exist_ok=True)
+            with open(os.path.join(d, out), 'w') as f:
+                f.write(json.dumps({'tag': 'fn_5845D0', 'a0_s32': 1}) + '\n')
+            if status:
+                with open(os.path.join(d, out + '.status'), 'w') as f:
+                    f.write(status[target])
+            return sp.CompletedProcess(cmd, (exits or {}).get(target, 0),
+                                       stdout='probe: runs/x-%s\n' % target, stderr='')
+        fake.calls = calls
+        return fake
+
+    def test_frida_run_argv_per_side(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as root:
+            fake = self._frida_fake(root)
+            table = truth.hook_table(self.ROWS, self.SIGS, self.MAP, ['a', 'b'])
+            truth.frida_run('b011', table, ['world_entry', 'walk_and_talk'], run=fake, root=root)
+            self.assertEqual(len(fake.calls), 4)
+            for c in fake.calls:
+                scenario = c[c.index('--scenario') + 1]
+                self.assertEqual(c[c.index('--clicks') + 1], '3')
+                self.assertEqual(c[c.index('--hit-min') + 1], '1')
+                self.assertEqual(c[c.index('--timeout') + 1], '180')
+                self.assertEqual(c[c.index('--new-attempt') + 1],
+                                 'driver frida b011 %s' % scenario)
+                self.assertNotIn('--hit', c)
+            self.assertEqual([('--loaded-rva' in c) for c in fake.calls], [False, True, False, True])
+            self.assertEqual([c[c.index('--scenario') + 1] for c in fake.calls],
+                             ['world_entry', 'world_entry', 'walk_and_talk', 'walk_and_talk'])
+            # explicit values and the scenario's own timeout header win
+            _write(os.path.join(root, 'scenarios', 'first_fight.txt'), '# timeout: 240\nclick 1 1\n')
+            fake.calls.clear()
+            truth.frida_run('b011', dict(table, clicks=5), ['first_fight'], run=fake, root=root,
+                            hit_min=2)
+            c = fake.calls[0]
+            self.assertEqual((c[c.index('--clicks') + 1], c[c.index('--hit-min') + 1],
+                              c[c.index('--timeout') + 1]), ('5', '2', '240'))
+            fake.calls.clear()
+            truth.frida_run('b011', table, ['first_fight'], run=fake, root=root, clicks=1, timeout=77)
+            c = fake.calls[0]
+            self.assertEqual((c[c.index('--clicks') + 1], c[c.index('--timeout') + 1]), ('1', '77'))
+
+    def test_frida_run_marks_exit2_side_not_measured(self):
+        import tempfile
+        status = {'original': 'HITS fn_5845D0 283\nRESULT: CLEAN  (x)\n',
+                  'ours': 'HITS fn_5845D0 0\nRESULT: NOT-EXERCISED\n'}
+        with tempfile.TemporaryDirectory() as root:
+            fake = self._frida_fake(root, exits={'ours': 2}, status=status)
+            table = truth.hook_table(self.ROWS, self.SIGS, self.MAP, ['s1'])
+            r = truth.frida_run('b011', table, ['s1'], run=fake, root=root)['s1']
+            self.assertEqual((r['orig_exit'], r['ours_exit']), (0, 2))
+            self.assertEqual(r['result'], {'orig': 'CLEAN', 'ours': 'NOT-EXERCISED'})
+            self.assertFalse(r['measured'])
+            self.assertIn('ours side exited 2', r['failed'])
+            self.assertEqual(r['hits']['orig'], {'fn_5845D0': 283})
+            # not fatal: the verdicts name the scenario instead of raising
+            v = truth.frida_verdicts({'s1': r}, self.ROWS[:1])
+            self.assertEqual(v['0x5845D0'][0], 'scenario failed')
+            clean = {'original': 'HITS fn_5845D0 4\nRESULT: CLEAN\n',
+                     'ours': 'HITS fn_5845D0 4\nRESULT: CLEAN\n'}
+            fake = self._frida_fake(root, status=clean)
+            r = truth.frida_run('b011', table, ['s1'], run=fake, root=root)['s1']
+            self.assertTrue(r['measured'])
+            self.assertEqual(r['result'], {'orig': 'CLEAN', 'ours': 'CLEAN'})
+
+    def test_frida_verdicts_equal_needs_equal_hit_totals(self):
+        t = self._trace(('fn_5845D0', 7, 3))
+        rows = self.ROWS[:1]
+
+        def scenario(orig_n, ours_n):
+            return {'orig': t, 'ours': t, 'failed': None,
+                    'hits': {'orig': {'fn_5845D0': orig_n}, 'ours': {'fn_5845D0': ours_n}}}
+        v = truth.frida_verdicts({'walk_and_talk': scenario(283, 310)}, rows)
+        self.assertEqual(v['0x5845D0'][0], 'different')
+        self.assertIn('hit totals differ: original 283, ours 310', v['0x5845D0'][1])
+        self.assertIn('walk_and_talk', v['0x5845D0'][1])
+        self.assertEqual(truth.frida_verdicts({'w': scenario(283, 283)}, rows)['0x5845D0'][0], 'equal')
+        # no totals (a side without a status file): the events decide
+        bare = dict(scenario(1, 2), hits={'orig': None, 'ours': None})
+        self.assertEqual(truth.frida_verdicts({'w': bare}, rows)['0x5845D0'][0], 'equal')
+
     def test_trace_source_hashes_the_files_and_check_evidence_accepts_it(self):
         import tempfile
         ce = load_tool('check_evidence')
@@ -13584,6 +13798,61 @@ class WaveCloseRulesTest(unittest.TestCase):
         self.assertEqual(rc, 0, out)
         self.assertIn('Ruling R70: dump readings may decide b001.', out)
         self.assertEqual(self.batches()['b001']['status'], 'closed')
+
+    # -- import batches: measured rows and parked rows ----------------------
+
+    SRC_BODY = '// 0x643CD0\nint Draw()\n{\n  return %d;\n}\n'
+
+    def _import_ready(self, trace=('0x643CC0',), src=None, parked=None, evidence=()):
+        """An import batch: evidence kind trace for `trace`, evidence of other
+        kinds for `evidence`, an optional src/A.cpp body for Draw, and the
+        parked file."""
+        self.init_repo()
+        for addr in trace + tuple(evidence):
+            stem = addr[2:]
+            kind = 'trace' if addr in trace else 'replay'
+            _write(os.path.join(self.wt, 'docs', 'evidence', stem + '.md'),
+                   f'---\naddress: {addr}\nname: fn\nkind: {kind}\n---\n\nnotes\n')
+        if src is not None:
+            _write(os.path.join(self.wt, 'src', 'A.cpp'), self.SRC_BODY % src)
+        if parked is not None:
+            _write(os.path.join(self.wt, 'docs', 'wso', 'import-parked.json'),
+                   json.dumps(parked))
+        self.commit_worktree()
+
+    PARKED = [{'address': '0x643CD0', 'name': 'Draw', 'file': 'src/A.cpp', 'batch': 'b001',
+               'needs': 'world_entry, first_fight, walk_and_talk'}]
+
+    def test_import_close_accepts_parked_rows(self):
+        self._import_ready(parked=self.PARKED)
+        rc, out = self.close(kind='import')
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.batches()['b001']['status'], 'closed')
+
+    def test_import_close_refuses_unparked_dropped_row(self):
+        self._import_ready(parked=[])
+        first = self.first_sha()
+        rc, out = self.close(kind='import')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('no evidence file docs/evidence/643CD0.md', out)
+        self.assertIn('import-parked.json', out)
+        self.assertNotIn('643CC0', out)
+        self.assertEqual(self.first_sha(), first)
+
+    def test_import_close_refuses_parked_row_with_body(self):
+        self._import_ready(parked=self.PARKED, src=1)
+        rc, out = self.close(kind='import')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('0x643CD0: listed in docs/wso/import-parked.json but its body is still '
+                      'changed against first', out)
+        self.assertEqual(self.batches()['b001']['status'], 'assigned')
+
+    def test_import_close_refuses_parked_row_whose_evidence_remains(self):
+        self._import_ready(parked=self.PARKED, evidence=('0x643CD0',))
+        rc, out = self.close(kind='import')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('0x643CD0: listed in docs/wso/import-parked.json but '
+                      'docs/evidence/643CD0.md still exists', out)
 
     def test_close_cli_takes_allow_dump_and_ledger(self):
         from unittest import mock

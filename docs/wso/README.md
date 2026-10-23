@@ -307,7 +307,23 @@ launches per attempt until `--new-attempt "<why>"`; and every merge into
   `close --kind import`: no verdict lines or evidence phrases are
   checked, the evidence must be `kind: trace` or better, and the tool
   tests, `check_evidence` and parity still run. The import queue skips
-  the oracle and Frida phases and never rewrites wave 1's scorecard.
+  the oracle phase and never rewrites wave 1's scorecard. It runs the
+  Frida phase (with `--frida`): all three scenarios (`world_entry`,
+  `first_fight`, `walk_and_talk`), each through `probe.py run` once per
+  side. A row is measured equal only when `trace_diff compare` exits 0 over
+  the captured events and the sidecars' total hits for its hook match (the
+  hooks cap what they log, so equal events alone do not prove equal
+  frequency). The driver then rewrites that row's evidence front matter to
+  `kind: trace` with `trace_source: frida <batch>-<scenario> orig:<sha256>
+  ours:<sha256> compare=0` (dropping `exemption:`) and commits it as
+  `frida: trace evidence for <N> rows of <batch>`. A row measured
+  different is a finding for the fix round. A row no scenario exercised
+  cannot close: the worker's fix round reverts its body to the merge base,
+  deletes its evidence file and appends `{address, name, file, batch,
+  needs}` to `docs/wso/import-parked.json` (`needs` names the scenarios
+  tried; a batch may change that file). `close --kind import` accepts a
+  batch when every row is `trace` or better, or is in the parked list with
+  its body reverted and its evidence gone.
   The two queues' assigned batches all hold files, so they stay
   disjoint (`tools/claims.py` counts both state files). Each queue has
   its own status file and run lock, so one driver per queue can run at
