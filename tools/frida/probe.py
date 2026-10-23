@@ -21,6 +21,10 @@ two traces is trace_diff.py compare (docs/frida-tracing.md).
             the shutdown are chained after the sidecar with cmd's & so a
             dead sidecar cannot hang the host.
 
+On the original side the replay driver's shutdown is off (its done.txt comes
+when the game exits, before the sidecar's verdict) and the host holds the box
+open itself until the status file has RESULT:, within scenario timeout + 60 s.
+
 The Frida venv (%USERPROFILE%\\iwd2r-frida\\venv -- 64-bit python, which
 attaches to the 32-bit games fine) and its base interpreter C:\\Python314
 are mapped into every sandbox read-only at their host paths, so the sidecar
@@ -270,18 +274,22 @@ def plan_folders(target, venv_win, build_win, game_win, results_win,
 
 
 def wait_for_result_file(path, seconds):
-    """Polls path for a RESULT: line; False after seconds (report() then
-    says so)."""
+    """Polls path for a RESULT: line; True once there.  False at once when
+    the file does not exist (the sidecar creates it before it attaches, so a
+    missing file means no verdict is coming) and False after seconds."""
+    if not os.path.exists(path):
+        return False
     end = time.time() + seconds
-    while time.time() < end:
+    while True:
         try:
             with open(path, encoding='utf-8', errors='replace') as f:
-                if any(l.startswith('RESULT:') for l in f):
+                if any(line.startswith('RESULT:') for line in f):
                     return True
         except OSError:
             pass
+        if time.time() >= end:
+            return False
         time.sleep(2)
-    return False
 
 
 def run_side(target, script, folders, logon_cmd, timeout, host_run, out_dir,
@@ -325,10 +333,14 @@ def run_side(target, script, folders, logon_cmd, timeout, host_run, out_dir,
                 + winsandbox.REPLAY_BOOT_ALLOWANCE)
             # The replay driver writes done.txt when the game exits, which
             # on the original side is before the sidecar's verdict: keep
-            # the box open until the status file has its RESULT: line.
-            wait_for_result_file(
-                os.path.join(results, 'replay', status_name),
-                timeout + RESULT_GRACE + 30)
+            # the box open until the status file has its RESULT: line,
+            # within timeout + RESULT_GRACE (the in-box wait's own bound).
+            # Ours needs none: its done.txt already follows the in-box wait.
+            if target == 'original' and not wait_for_result_file(
+                    os.path.join(results, 'replay', status_name),
+                    timeout + RESULT_GRACE):
+                log('no RESULT: line in %s within %d s; closing the box'
+                    % (status_name, timeout + RESULT_GRACE))
             error = winsandbox.read_text(os.path.join(results, 'error.txt'))
             if error:
                 result['error'] = 'driver: %s' % error

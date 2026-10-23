@@ -99,6 +99,10 @@ sidecar before its verdict), and the host keeps the box open until the
 status file carries `RESULT:` because that driver writes its own `done.txt`
 when the game exits.
 
+On the original side the host has its own deadline (scenario timeout + 60 s
+for the `RESULT:` line, after the replay driver's `done.txt`) and the driver's
+shutdown is off.
+
 `plan` stages the same run and prints the sandbox plan (folders, logon
 command) without starting a box — use it to check a new table's staging
 before spending a launch.
@@ -211,8 +215,11 @@ session, measured):
         MTP[2].ret: 65535|0
     RESULT: DIFFERENT      # exit 1 — one ret field changed
 
-When the slot comes: relaunch the original side with the RESULT-wait fix,
-expect `RESULT: CLEAN` with MTP hits, then the ours side
-(`--loaded-rva 0x330000`, probe rva 0x1A7CA0), then
-`trace_diff.py compare` — exit 0 or the measured difference, reported as
-measured.
+State as measured 2026-10-23: the RESULT-wait fix has landed and both sides
+now end with a verdict, but the `world_entry` pair ends NOT-EXERCISED on both
+sides because the scenario ends in a dialog (the clicks never move a sprite).
+RVAs in the 2026-10-23 map: `CScreenWorld::EngineActivated` 0x330E60
+(`--loaded-rva`), `CGameSprite::MoveToPoint` 0x1A8A90; the original's no-arg
+`MoveToPoint` is 0x73F560 (0x73FEC0 is the `(dest, range)` overload). Next:
+a scenario that walks the party (`walk_and_talk`), then `trace_diff.py
+compare`, exit 0 or the measured difference, reported as measured.

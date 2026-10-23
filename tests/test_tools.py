@@ -6803,9 +6803,8 @@ class FridaProbeTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        stub = types.ModuleType('frida')
         cls._saved_frida = sys.modules.get('frida')
-        sys.modules['frida'] = stub     # build_parser needs no real frida
+        sys.modules['frida'] = None     # any `import frida` now raises
         cls.orig = load_tool('frida/orig')
 
     @classmethod
@@ -6873,6 +6872,78 @@ class FridaProbeTest(unittest.TestCase):
                 args = self.args(post_load=got)
                 self.assertEqual(args[args.index('--post-load') + 1],
                                  str(want))
+
+    def stage(self, host_run, target='original', dry=True):
+        script = os.path.join(os.path.dirname(host_run), 'scenario-src.txt')
+        with open(script, 'w') as f:
+            f.write('wait 5\nquit\n')
+        probe_json = os.path.join(os.path.dirname(host_run), 'p.json')
+        with open(probe_json, 'w') as f:
+            f.write('{"hooks": []}')
+        out = os.path.join(os.path.dirname(host_run), 'out')
+        with mock.patch.object(probe.winsandbox, 'stage_directplay'), \
+                mock.patch.object(probe.winsandbox, 'make_wsb',
+                                  return_value='wsb'):
+            return probe.run_side(target, script, [], 'cmd', 100, host_run,
+                                  out, probe_json, 1, 0, dry)
+
+    def test_original_driver_shutdown_is_off(self):
+        with tempfile.TemporaryDirectory() as d:
+            host_run = os.path.join(d, 'run')
+            self.stage(host_run)
+            with open(os.path.join(host_run, 'tools', 'config.json')) as f:
+                self.assertIs(json.load(f)['shutdown'], False)
+
+    def test_wait_for_result_file(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, 's.status')
+            self.assertFalse(probe.wait_for_result_file(path, 0))
+            with open(path, 'w') as f:
+                f.write('ARMED pid=1\n')
+            self.assertFalse(probe.wait_for_result_file(path, 0))
+            with open(path, 'a') as f:
+                f.write('RESULT: CLEAN\n')
+            self.assertTrue(probe.wait_for_result_file(path, 0))
+            started = time.time()
+            self.assertFalse(probe.wait_for_result_file(
+                os.path.join(d, 'none'), 600))
+            self.assertLess(time.time() - started, 5)
+
+    def run_live(self, target):
+        calls = []
+        with tempfile.TemporaryDirectory() as d:
+            host_run = os.path.join(d, 'run')
+            os.makedirs(os.path.join(d, 'out'))
+            patches = [
+                mock.patch.object(probe.winsandbox, 'start_sandbox',
+                                  side_effect=lambda *a: calls.append('start')),
+                mock.patch.object(probe.winsandbox, 'wait_done',
+                                  side_effect=lambda r, t: calls.append(
+                                      ('wait_done', t))),
+                mock.patch.object(probe.winsandbox, 'close_sandbox',
+                                  side_effect=lambda *a: calls.append('close')),
+                mock.patch.object(probe, 'wait_for_result_file',
+                                  side_effect=lambda p, s: calls.append(
+                                      ('host_wait', s)) or True),
+                mock.patch.object(probe.winsandbox, 'replay_copy_plan',
+                                  return_value=[])]
+            for p in patches:
+                p.start()
+                self.addCleanup(p.stop)
+            self.stage(host_run, target, dry=False)
+        return calls
+
+    def test_original_host_waits_for_result_before_close(self):
+        calls = self.run_live('original')
+        self.assertEqual([c if isinstance(c, str) else c[0] for c in calls],
+                         ['start', 'wait_done', 'host_wait', 'close'])
+        self.assertEqual(calls[2], ('host_wait', 100 + probe.RESULT_GRACE))
+        self.assertEqual(probe.RESULT_GRACE, 60)
+
+    def test_ours_has_no_host_result_wait(self):
+        calls = self.run_live('ours')
+        self.assertEqual([c if isinstance(c, str) else c[0] for c in calls],
+                         ['start', 'wait_done', 'close'])
 
     def test_build_windows_x86_uses_x86_preset(self):
         calls = []
