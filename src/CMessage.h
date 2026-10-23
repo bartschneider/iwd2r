@@ -148,6 +148,8 @@ public:
     static const BYTE MSG_TYPE_SWAPITEM;
     static const BYTE MSG_SUBTYPE_SWAPITEM_REQUEST;
     static const BYTE MSG_SUBTYPE_SWAPITEM_REPLY;
+    static const BYTE MSG_TYPE_CHAPTER;
+    static const BYTE MSG_SUBTYPE_CHAPTER_ANNOUNCE_STATUS;
 
     static const BYTE MSG_TYPE_JOURNAL;
     static const BYTE MSG_SUBTYPE_JOURNAL_ADD_ENTRY;
