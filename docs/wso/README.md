@@ -158,6 +158,28 @@ worktree keeps it). Then it applies [triage.json](triage.json):
 
 It reports `triage: n auto, n import, n ambiguous`. Do not
 `git worktree add` after `next`: the worktree already exists.
+
+### Will's tip: `recompare`
+
+Will pushes daily, and the rows were compared at one sha. `wave.py recompare
+[--tip SHA] [--no-fetch]` fetches `wso`, resolves the tip (default `wso/main`),
+runs `tools/xrec.py 4fa36bcd <tip> first` and appends to `disagreements.json`
+the `both_changed_differ` rows that are in no batch and have no verdict (an
+older undecided row for the same address is replaced by the tip's). The state's
+`fork_base` becomes the tip. It prints `recompare: N new rows at <tip7> (M
+already queued, K decided)` and exits 0, or 2 when the tip does not resolve
+(nothing is written). The fork is only read, through `git show` and `git
+ls-tree`. `--state`, `--disagreements` and `--repo` point it at copies, to look
+without touching the live files.
+
+Each batch carries the `fork_base` its rows were compared at, recorded at cut
+(old batches fall back to the state's). `brief`, the triage evidence line and
+`close`'s check read the batch's pin: a batch cut before a recompare is briefed
+and closed at its own sha, and its evidence must say `disagreed with WSO at
+<sha>` or `corroborated by WSO at <sha>` with that sha (an abbreviation of at
+least seven digits is enough). `wave.py run` calls `recompare` once when the
+wave-1 queue is exhausted, logs `recompare: N new rows at <tip7>`, and cuts
+again when N is not zero.
 `close` refuses — listing every reason — unless each row has a verdict,
 the batch's worktree has no uncommitted paths, every touched function's
 `docs/evidence/<ADDRESS>.md` says `disagreed with WSO` or

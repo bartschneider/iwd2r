@@ -1363,6 +1363,8 @@ class Driver:
         self.oracle_run = truth.run_oracle if oracle_run is None else oracle_run
         self.frida_run = truth.frida_run if frida_run is None else frida_run
         self.next_batch = wave.next_batch
+        self.recompare = wave.recompare
+        self._recompared = False
         self.render_brief = wave.render_brief
         self.record_verdict = wave.record_verdict
         self.close_batch = wave.close_batch
@@ -2519,6 +2521,23 @@ class Driver:
 
     # -- the loop: cuts and retries -------------------------------------------
 
+    def _recompare(self):
+        """Once per run, when the wave-1 list is exhausted: look at Will's
+        tip.  Logs `recompare: N new rows at <tip7>`; returns N (0 when
+        the comparison failed, which only costs the exit the run had)."""
+        if self._recompared:
+            return 0
+        self._recompared = True
+        try:
+            with self._lock:
+                rc, text = self.recompare(
+                    self.state_path, self.disagreements_path, repo=self.repo)
+        except Exception as e:
+            rc, text = 2, 'recompare raised %r\n' % (e,)
+        self.log(text.rstrip())
+        m = re.match(r'recompare: (\d+) new rows', text)
+        return int(m.group(1)) if rc == 0 and m else 0
+
     def _cut(self):
         """(batch_id, None) for a batch cut and triaged, else (None, exit)."""
         triage = (self.triage_path
@@ -2531,6 +2550,11 @@ class Driver:
                     base=self.base, queue=self.queue)
         except Exception as e:
             rc, text = 1, 'next_batch raised %r\n' % (e,)
+        if (rc == 2 and text.startswith('nothing left:')
+                and self.queue == 'wave1' and not self.dry_run):
+            n = self._recompare()
+            if n:
+                return self._cut()
         self.log(text.rstrip())
         m = re.match(r'(\S+) assigned:', text)
         if m:
