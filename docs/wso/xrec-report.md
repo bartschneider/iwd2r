@@ -97,23 +97,21 @@ above; the sort order was verified programmatically.
 Per-side tally across every batch in docs/wso/wave-state.json, split by deciding evidence kind (regenerate with `python3 tools/wave.py scorecard`):
 
 Decided for the fork: 10 (losing kind: oracle 1, replay 1, read-only 8) -- deciding evidence: dump reading 10; measured: probe 0, frida 0, replay 0, none 10
-Decided for ours: 222 (losing kind: trace 222) -- deciding evidence: replay checkpoint 22, dump reading 200; measured: probe 0, frida 0, replay 0, none 222
+Decided for ours: 240 (losing kind: trace 240) -- deciding evidence: replay checkpoint 22, dump reading 218; measured: probe 0, frida 0, replay 0, none 240
 Decided for neither: 8 -- deciding evidence: dump reading 8; measured: probe 0, frida 0, replay 0, none 8
-Deciding evidence across all 240 verdicts: oracle probe 0, replay checkpoint 22, dump reading 218, trace 0, triage 0
+Deciding evidence across all 258 verdicts: oracle probe 0, replay checkpoint 22, dump reading 236, trace 0, triage 0
 
-Batches: b001 closed (20 rows), b002 closed (20 rows), b003 closed (20 rows), b004 closed (20 rows), b005 closed (20 rows), b006 closed (20 rows), b007 closed (20 rows), b008 closed (20 rows), b009 closed (20 rows), b010 closed (20 rows), b011 closed (20 rows, pool claude), b012 closed (20 rows, pool claude)
+Batches: b001 closed (20 rows), b002 closed (20 rows), b003 closed (20 rows), b004 closed (20 rows), b005 closed (20 rows), b006 closed (20 rows), b007 closed (20 rows), b008 closed (20 rows), b009 closed (20 rows), b010 closed (20 rows), b011 closed (20 rows, pool claude), b012 closed (20 rows, pool claude), b013 closed (18 rows, pool glm)
 
 Calibration, computed from triage.json classes over closed verdicts:
 
 class           agree total  status
-rename-only         0     2  disabled by calibration
-    mismatches: 0x708280, 0x7941D0
-signature-only      0     1  disabled by calibration
-    mismatches: 0x67E560
+rename-only         0     0  disabled (no verdicts)
+signature-only      0     0  disabled (no verdicts)
 fork-stub           2     2  enabled
 ours-stub           0     0  never enabled
-ambiguous         220   235  never enabled
-    mismatches: 0x5FDB20, 0x600B50, 0x63C940, 0x65BCF0, 0x704D40, 0x737EF0, 0x738E70, 0x73B760, 0x5FD0A0, 0x614EF0, 0x63BE80, 0x67B8A0, 0x72FD20, 0x5D3A80, 0x7A3FD0
+ambiguous         238   256  never enabled
+    mismatches: 0x5FDB20, 0x600B50, 0x63C940, 0x65BCF0, 0x704D40, 0x737EF0, 0x738E70, 0x73B760, 0x5FD0A0, 0x614EF0, 0x63BE80, 0x67B8A0, 0x708280, 0x72FD20, 0x67E560, 0x5D3A80, 0x7941D0, 0x7A3FD0
 
 Truth calibration (seed 2026-10-22, sample 0x58FF20, 0x5DE2C0, 0x62F360, 0x709B60, 0x7338E0, 0x46B160, 0x54C770, 0x4BBCB0, 0x5ABA20, 0x71FC00, tools/truth.py over the 18 ruling rows with side fork or neither plus a sample of 10 dump-decided ours rows; a path measures a row when it gives pass/fail (oracle) or equal/different (Frida) and agrees on pass or equal): oracle probes: measured 0 of 28 rows, agreed 0, disagreed 0; Frida trace diff: measured 0 of 28 rows, agreed 0, disagreed 0 (deferred: not run); Frida on by default: no.
 
