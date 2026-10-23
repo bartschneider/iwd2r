@@ -8465,6 +8465,23 @@ class TriageTest(unittest.TestCase):
         self.assertEqual(triage.enabled_classes(cal), frozenset({'rename-only'}))
         self.assertIn('fork-stub', triage.calibration_text(cal))
 
+    def test_calibrate_skips_triage_verdicts(self):
+        # An auto verdict is always 'ours': counting it would let a class
+        # vouch for itself.
+        triaged = [{'address': '0x1', 'class': 'rename-only'},
+                   {'address': '0x2', 'class': 'rename-only'}]
+        state = {'batches': {'b001': {'status': 'closed', 'verdicts': {
+            '0x1': {'side': 'ours', 'case': 'triage-rename'}}}}}
+        cal = triage.calibrate(state, triaged)
+        self.assertEqual(cal['rename-only'], {'agree': 0, 'total': 0, 'mismatches': []})
+        self.assertEqual(triage.enabled_classes(cal), frozenset())
+        # An independent verdict still counts.
+        state['batches']['b002'] = {'status': 'closed', 'verdicts': {
+            '0x2': {'side': 'ours', 'case': 'dump-1'}}}
+        cal = triage.calibrate(state, triaged)
+        self.assertEqual(cal['rename-only'], {'agree': 1, 'total': 1, 'mismatches': []})
+        self.assertEqual(triage.enabled_classes(cal), frozenset({'rename-only'}))
+
     def assert_auto_classes_agree(self, cal):
         # Every auto class, enabled or not: a flip of a fork-verdict row into
         # an auto class must fail even though that disables the class.

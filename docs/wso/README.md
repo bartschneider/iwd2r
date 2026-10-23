@@ -138,14 +138,26 @@ Wave 1's loop is five commands, all in [tools/wave.py](../../tools/wave.py);
 batch state lives in [wave-state.json](wave-state.json), created by the
 first `next`, and no batch bookkeeping is written by hand:
 
-    python3 tools/wave.py next            # rank unclaimed rows, record the batch
+    python3 tools/wave.py next            # rank rows, record the batch, cut its worktree, triage it
     python3 tools/wave.py brief b001      # the dispatch text, from brief-template.md
     python3 tools/wave.py verdict b001 0x643CC0 ours probe-17   # per reported row
     python3 tools/wave.py close b001      # evidence + clean tree + gates, then ff `first`
     python3 tools/wave.py scorecard       # the tally into xrec-report.md
 
 `next` ranks `both_changed_differ` rows by size (his length + ours),
-takes twenty, and never lets two live batches own the same file.
+takes twenty, and never lets two live batches own the same file. It
+also cuts the batch branch `p3/wso-<id>` from `first`, with its worktree
+at `<main worktree>-worktrees/p3-wso-<id>` (a branch that already has a
+worktree keeps it). Then it applies [triage.json](triage.json):
+- a row whose class calibration enables, and whose evidence file is in
+  the worktree, gets its `ours` verdict and the evidence line, committed
+  on the batch branch;
+- an `ours-stub` row leaves the batch for `docs/wso/import-list.json`
+  (created when missing);
+- every other row stays for the worker.
+
+It reports `triage: n auto, n import, n ambiguous`. Do not
+`git worktree add` after `next`: the worktree already exists.
 `close` refuses — listing every reason — unless each row has a verdict,
 the batch's worktree has no uncommitted paths, every touched function's
 `docs/evidence/<ADDRESS>.md` says `disagreed with WSO` or

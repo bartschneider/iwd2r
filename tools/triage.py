@@ -252,13 +252,17 @@ def _write_atomic(path, data):
 
 def calibrate(state, triaged):
     """class -> {agree, total, mismatches}: each triaged row that has a
-    recorded verdict in a closed batch, agreeing when the side is 'ours'."""
+    recorded verdict in a closed batch, agreeing when the side is 'ours'.
+    Auto verdicts (case triage-*) are skipped: they are always 'ours', so
+    a class would vouch for itself."""
     cls_of = {r['address']: r.get('auto_class', r['class']) for r in triaged}
     cal = {c: {'agree': 0, 'total': 0, 'mismatches': []} for c in CLASSES}
     for b in state.get('batches', {}).values():
         if b.get('status') != 'closed':
             continue
         for addr, v in (b.get('verdicts') or {}).items():
+            if str(v.get('case') or '').startswith('triage-'):
+                continue
             c = cls_of.get(addr)
             if c is None:
                 continue
