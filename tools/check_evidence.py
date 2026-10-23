@@ -12,7 +12,8 @@ the branch count in full. Only committed changes are compared.
 
 Each touched function needs docs/evidence/<ADDR>.md at HEAD (ADDR in upper-case
 hex without 0x, docs/evidence/README.md has the format) whose front matter has
-a non-empty `oracle_case` or `exemption`. Prints each offending function and
+a non-empty `oracle_case` or `exemption`, or is `kind: trace` with a
+`trace_source` that checks out (below), which needs neither. Prints each offending function and
 exits 1, else exits 0. A base that is not a commit or shares no history with
 HEAD (a force push, or a `before` missing from the clone) is reported on
 stderr and skipped with exit 0.
@@ -25,7 +26,8 @@ warning. A `kind: trace` document — the function evidenced by tracing, the
 kind the WSO fork's imports carry — must say where the trace came from in
 `trace_source`: a citation of the fork's recovery note
 (`WillScarlettOhara/iwd2-re@<sha> docs/<name>-recovery.md`, which must name
-the function) or of a frida capture of our own
+the function: its address, or its name as a whole word together with its
+class's name) or of a frida capture of our own
 binary (`frida <probe> orig:<sha256> ours:<sha256> compare=0`); anything
 else fails like a missing citation.
 Functions in RULES_MATH below — the rules-math set, whose correctness is the
@@ -230,8 +232,11 @@ def touched(repo, base):
 def fork_note_mentions(sha, path, address, name, run=subprocess.run):
     """(ok, reason): whether the fork's note `path` at `sha` (read with
     `git show sha:path`, never checked out or run) names the function: its
-    address in hex (any case, with or without 0x) or its unqualified name.
-    An unreadable note, an unfetched sha included, is not ok."""
+    address in hex (any case, with or without 0x), or its unqualified name
+    as a whole word (case-sensitive) and, for a member, its class's name
+    too: a short name alone ("Render", "Fetch") names a method of every
+    class, and a note whose citation keeps a row unmeasured must name this
+    one.  An unreadable note, an unfetched sha included, is not ok."""
     r = run(['git', 'show', f'{sha}:{path}'], capture_output=True)
     if r.returncode != 0:
         return False, (f'cannot read the fork note {path} at {sha} (git show '
@@ -243,13 +248,15 @@ def fork_note_mentions(sha, path, address, name, run=subprocess.run):
     if re.search(r'(?<![0-9A-Fa-f])(?:0[xX])?0*%X(?![0-9A-Fa-f])'
                  % address, text, re.IGNORECASE):
         return True, ''
-    short = (name or '').split('::')[-1]
-    if short and re.search(r'(?<![A-Za-z0-9_])%s(?![A-Za-z0-9_])'
-                           % re.escape(short), text):
+    parts = (name or '').split('::')
+    word = lambda w: bool(w) and re.search(
+        r'(?<![A-Za-z0-9_])%s(?![A-Za-z0-9_])' % re.escape(w), text)
+    if word(parts[-1]) and (len(parts) == 1 or word(parts[-2])):
         return True, ''
     return False, (f'the fork note {path} at {sha} names neither the address '
-                   f'0x{address:X} nor the name {name}; cite the note that '
-                   'covers this function')
+                   f'0x{address:X} nor the name {name}'
+                   + (f' (its class {parts[-2]} with {parts[-1]})' if len(parts) > 1 else '')
+                   + '; cite the note that covers this function')
 
 
 def problem(repo, address, name='', run=None):

@@ -2102,6 +2102,30 @@ class CheckEvidenceTest(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn('docs/missing-recovery.md', why)
         self.assertIn('fetched', why)
+
+    def test_fork_note_short_name_needs_its_class_and_a_whole_word(self):
+        # "Render" names a method of every class: a note that names another
+        # class's Render (and not this address) does not name this function
+        d, sha = self.fork_repo({
+            'docs/beam-recovery.md': 'Recovered Render 57B780 of IcewindCProjectileScorcher.\n',
+            'docs/split-recovery.md': 'CUIControlPortraitWorld redraws; see Render below.\n',
+            'docs/part-recovery.md': 'CUIControlPortraitWorld::Rendered and render\n',
+            'docs/free-recovery.md': 'the helper sub_401000x and Roll\n'})
+        run = lambda argv, **kw: subprocess.run(argv, cwd=d, **kw)
+        f = lambda path, address, name: check_evidence.fork_note_mentions(
+            sha, path, address, name, run=run)[0]
+        self.assertFalse(f('docs/beam-recovery.md', 0x77B360, 'CUIControlPortraitWorld::Render'))
+        self.assertTrue(f('docs/beam-recovery.md', 0x57B780, 'IcewindCProjectileScorcher::Render'))
+        self.assertTrue(f('docs/beam-recovery.md', 0x111111, 'IcewindCProjectileScorcher::Render'))
+        self.assertTrue(f('docs/split-recovery.md', 0x77B360, 'CUIControlPortraitWorld::Render'))
+        # whole words, case-sensitive
+        self.assertFalse(f('docs/part-recovery.md', 0x77B360, 'CUIControlPortraitWorld::Render'))
+        # an unqualified name needs only itself, as a whole word
+        self.assertTrue(f('docs/free-recovery.md', 0x222222, 'Roll'))
+        self.assertFalse(f('docs/free-recovery.md', 0x222222, 'Rol'))
+        ok, why = check_evidence.fork_note_mentions(sha, 'docs/beam-recovery.md', 0x77B360,
+                                                    'CUIControlPortraitWorld::Render', run=run)
+        self.assertIn('its class CUIControlPortraitWorld with Render', why)
         # an unfetched sha is a failure, not a pass
         ok, why = check_evidence.fork_note_mentions(
             'e' * 40, 'docs/addr-recovery.md', 0x401000, 'CFoo::Bar', run=run)

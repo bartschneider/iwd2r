@@ -156,7 +156,26 @@ PROCESS-EXITED verdict (a scenario ends with `quit`, so the process exiting
 after the world screen came up is what success looks like; dying before
 `loaded` is still NOT-LOADED).
 
-## Measured smoke (PENDING)
+## Measured state
+
+As measured on 2026-10-23, newest first:
+
+- The calibration (`truth.py calibrate`, the 28 calibration rows, all three
+  scenarios, both sides under the replay clock, typed tables, exit-time hit
+  totals; runs `runs/20261023-1321..1328`): every side `RESULT: CLEAN` with
+  `HITS-FINAL yes`, frame counts equal (world_entry 2623, first_fight 5924,
+  walk_and_talk 4839), every checkpoint and periodic dump equal (27/87,
+  39/197, 36/158). Frida measured 13 of 28 rows; re-derived under the
+  frequency rule (no launches) it agrees on 12 and disagrees on 1
+  (0x704D40, an argument at event 13 of first_fight); 0x7941D0's call
+  counts differ by 23 to 31 per scenario with every captured event equal, a
+  caller finding. `docs/wso/truth-calibration.json` holds the record.
+- The MoveToPoint pair on `walk_and_talk` (before the replay clock): both
+  sides CLEAN (283 and 310 hits), compare DIFFERENT on two returns; the
+  pipeline worked end to end, the difference was the free-running clock.
+
+The rest of this section is the history of the smoke, kept for its
+diagnoses.
 
 2026-10-23 (after the sidecar wait, `--post-load` and the x86 build): both
 sides now finish with a verdict, `RESULT: NOT-EXERCISED (MTP hit x0)` each,

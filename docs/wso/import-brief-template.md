@@ -67,9 +67,10 @@ Each bundle carries the function's decompile and its callers' decompiles; objdum
          WillScarlettOhara/iwd2-re@<sha> docs/<name>-recovery.md
 
      The note must exist at that sha (`git ls-tree {{fork_base}} docs/`)
-     and must name the function by its address or its qualified name
-     (`Class::Method`); his source files are not traces, and the gate reads
-     the note and fails one that does not cover the function.
+     and must name the function by its address, or by its name as a whole
+     word together with its class's name; his source files are not traces,
+     and the gate reads the note and fails one that does not cover the
+     function.
 
    Rules math (attack rolls, saving throws, damage, effect application)
    never accepts a trace: those functions need `kind: oracle`.

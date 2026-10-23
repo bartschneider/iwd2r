@@ -85,16 +85,14 @@ frida <probe name> orig:<sha256> ours:<sha256> compare=0
 ```
 
 The first cites his recovery note (never a source file): the gate reads
-the note at that sha with `git show` and requires the function's address or
-short name in it, and an unreadable note (the fork not fetched) fails. The
-second is the line
-`check_evidence.py` accepts today for a differential Frida capture of our
-own binary against the original. The harness that produces such captures is
-planned, not yet in the tree: the integration plan's Task 5b
-([docs/superpowers/plans/2026-10-17-wso-integration.md](../superpowers/plans/2026-10-17-wso-integration.md),
-added at 8ce297d7 — the plan revision `check_evidence.py` cites) adopts the
-fork's tracing scripts into `tools/frida/`, and its `compare=0` verdict
-means the two captures agree call for call. A missing, empty or
+the note at that sha with `git show` and requires the function's address in
+it, or its name as a whole word together with its class's name (a bare
+"Render" names a method of every class), and an unreadable note (the fork
+not fetched) fails. The second is the line the wave driver's Frida phase
+writes for a differential capture of our own binary against the original
+(`tools/frida/`, [docs/frida-tracing.md](../frida-tracing.md)): its
+`compare=0` means the two captures agree call for call in a run whose state
+dumps matched, and only the driver writes it. A missing, empty or
 unrecognizable citation fails the gate; the format contract is in
 [docs/evidence/README.md](../evidence/README.md). Rules math — attack
 rolls, saving throws, damage, effect application — never accepts a trace:
