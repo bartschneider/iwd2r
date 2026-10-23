@@ -11371,6 +11371,31 @@ class DriverTest(unittest.TestCase):
             ('Bash', {'command': 'git reset --hard'})), ['src/A.cpp'])
         self.assertEqual([k for k, _t, _f in fs], ['history'])
 
+    def test_transcript_splitter_sees_commands_after_comments_and_heredocs(self):
+        cases = (
+            ("git status  # check the worker's state\ngit reset --hard HEAD~1",
+             'history rewrite'),
+            ("# it's time\nWindowsSandbox.exe run.wsb", 'launch outside'),
+            ("# what's here\ncat src/A.cpp", 'cat of src/A.cpp'),
+            ("# what's here\ngit show wso/main:src/A.cpp", 'wso/ ref'),
+            ("cat > docs/evidence/x.md <<'EOF'\nThe binary's body differs\nEOF\n"
+             "git reset --hard", 'history rewrite'),
+            ("cat > docs/evidence/x.md <<'EOF'\nThe binary's body differs\nEOF\n"
+             "WindowsSandbox.exe run.wsb", 'launch outside'),
+            ("git commit -m 'it is' && git reset --hard", 'history rewrite'),
+            ("echo 'unclosed; git reset --hard", 'history rewrite'),
+            ('git branch -C a b', 'history rewrite'),
+        )
+        for cmd, why in cases:
+            probs = self._bash(cmd)
+            self.assertEqual(len(probs), 1, cmd)
+            self.assertIn(why, probs[0], cmd)
+        self.assertEqual(self._bash(
+            "git commit -F - <<'EOF'\nfix the thing\ngit push later\nEOF"), [])
+        self.assertEqual(self._bash(
+            "cat <<EOF > docs/evidence/n.md\nit's git reset --hard\nEOF\ngit status"), [])
+        self.assertEqual(self._bash("git status # git push is bad\ngit log"), [])
+
     def test_transcript_history_allows_add_commit_and_branches(self):
         for cmd in ('git checkout -b feature', 'git checkout -b feature first',
                     'git checkout main', 'git checkout p3/batch-1',

@@ -594,10 +594,16 @@ _HISTORY_VERBS = ('reset', 'rebase', 'revert', 'restore', 'clean', 'stash',
 _BATCH_DIRS = ('src', 'compat', 'docs', 'oracle', 'tools', 'tests')
 
 
+_HEREDOC = re.compile(r"""<<-?[ \t]*(?:'([^'\n]*)'|"([^"\n]*)"|([^\s;&|<>()]+))""")
+
+
 def _split_unquoted(text, seps):
     """text split at any of seps (longest first) outside quotes; a
-    backslash escapes the next character."""
-    parts, cur, quote, i = [], [], None, 0
+    backslash escapes the next character, an unquoted # at the start of a
+    word is a comment to the end of the line, and the body of a heredoc
+    (<<WORD, <<-WORD, <<'WORD') is data up to its delimiter line.  Fails
+    closed: a quote still open at the end falls back to _SEGMENT."""
+    parts, cur, quote, i, pending = [], [], None, 0, []
     while i < len(text):
         ch = text[i]
         if quote:
@@ -613,6 +619,30 @@ def _split_unquoted(text, seps):
         elif ch in '\'"':
             quote = ch
             cur.append(ch)
+        elif ch == '#' and (not cur or cur[-1][-1:] in ' \t'):
+            j = text.find('\n', i)
+            i = len(text) if j < 0 else j
+            continue
+        elif ch == '\n' and pending:
+            parts.append(''.join(cur))
+            cur = []
+            delims, pending = pending, []
+            i += 1
+            for d in delims:
+                while i < len(text):
+                    j = text.find('\n', i)
+                    line = text[i:len(text) if j < 0 else j]
+                    i = len(text) if j < 0 else j + 1
+                    if line.strip() == d:
+                        break
+            continue
+        elif text.startswith('<<', i) and not text.startswith('<<<', i) \
+                and _HEREDOC.match(text, i):
+            m = _HEREDOC.match(text, i)
+            pending.append(next(g for g in m.groups() if g is not None))
+            cur.append(text[i:m.end()])
+            i = m.end()
+            continue
         else:
             sep = next((x for x in seps if text.startswith(x, i)), None)
             if sep:
@@ -622,6 +652,8 @@ def _split_unquoted(text, seps):
             else:
                 cur.append(ch)
         i += 1
+    if quote:
+        return _SEGMENT.split(text) if seps != ('|',) else text.split('|')
     parts.append(''.join(cur))
     return parts
 
@@ -633,7 +665,8 @@ def _history_rewrite(args, covered=()):
     -d/-D, reflog expire, gc --prune, and a checkout that is not a plain
     branch switch (`--`, -f, -B, `.`, a path after a start point, or one
     argument that names a covered file, looks like a path or starts with a
-    batch directory), branch -f/-M and switch -C/--force-create.  add, commit, switch, checkout -b / <branch> and the read-only
+    batch directory), branch -f/-M/-C and switch -C/--force-create.
+    add, commit, switch, checkout -b / <branch> and the read-only
     commands are not."""
     rest = list(args)
     while rest and rest[0].startswith('-'):      # git -C dir / -c k=v / --x
@@ -647,7 +680,7 @@ def _history_rewrite(args, covered=()):
         return any(a == '--amend' for a in rest)
     if sub == 'branch':
         return any(a in ('--delete', '--force')
-                   or re.fullmatch(r'-[a-zA-Z]*[dDfM][a-zA-Z]*', a)
+                   or re.fullmatch(r'-[a-zA-Z]*[dDfMC][a-zA-Z]*', a)
                    for a in rest)
     if sub == 'reflog':
         return 'expire' in rest or 'delete' in rest
@@ -683,8 +716,8 @@ def transcript_findings(transcript_path, covered_files):
     source file: no Read limit or one over READ_LIMIT; cat, a sed -n span
     or head/tail -n over READ_LIMIT; file is the covered file),
     'history' (a git command that rewrites history or discards work, see
-    _history_rewrite; terminal like launch) or 'unreadable'.  cat and the launch words count only as a command
-    word, and a cat piped into a bounded head/tail/sed is bounded."""
+    _history_rewrite; terminal like launch) or 'unreadable'.  cat and the launch words count only as a
+    command word, and a cat piped into a bounded head/tail/sed is bounded."""
     covered = [c for c in covered_files if c]
     out = []
     calls = []
