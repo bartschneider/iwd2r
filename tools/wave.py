@@ -57,7 +57,6 @@ CALIBRATION_PATH = os.path.join(ROOT, 'docs', 'wso', 'truth-calibration.json')
 IMPORT_LIST_REL = os.path.join('docs', 'wso', 'import-list.json')
 # Rows a worker could not decide (ruling R73): they wait for a probe.
 PROBE_LIST_REL = os.path.join('docs', 'wso', 'probe-list.json')
-TRIAGE_REL = os.path.join('docs', 'wso', 'triage.json')
 DISAGREEMENTS_REL = os.path.join('docs', 'wso', 'disagreements.json')
 # The fork is read by pinned sha, never by branch name (wso/main moves).
 DEFAULT_FORK_BASE = 'e8dd16a750966af53f24daaf49dcb4fb13594c13'
@@ -1027,7 +1026,12 @@ def resolve_probe(address, side, case, state_path=STATE_PATH, repo=ROOT):
     """Record the verdict of a row on the probe list (ruling R73): the row
     returns to the batch it was moved out of, with the verdict `verdict`
     would record, and leaves the list.  Exit 1 refuses (a dump-decided
-    fork/neither verdict, or no evidence line naming the case)."""
+    fork/neither verdict, or no evidence line naming the case).
+
+    Evidence is read from two places: the phrase check reads
+    <repo>/docs/evidence/<ADDR>.md, while a fork/neither resolve takes the
+    losing kind from the batch branch (its worktree or tip), like `verdict`,
+    so that branch must still exist and carry the evidence file."""
     if side not in SIDES:
         return 2, f'side must be one of {"|".join(SIDES)}\n'
     if not case:
@@ -1069,15 +1073,11 @@ def resolve_probe(address, side, case, state_path=STATE_PATH, repo=ROOT):
                     if _addr_key(r['address']) == _addr_key(addr)), None)
         if row is None:
             return 2, f'{addr} is not in {DISAGREEMENTS_REL}\n'
-        tri, err = _load_list(os.path.join(repo, TRIAGE_REL), 'triage file',
-                              missing_ok=True)
-        if err:
-            return 2, err
-        t = next((e for e in tri
-                  if _addr_key(e['address']) == _addr_key(addr)), None)
-        row['class'] = (t.get('auto_class', t['class']) if t and 'class' in t
-                        else row.get('class', 'ambiguous'))
+        # Only rows triage left for a worker reach the probe list, and
+        # apply_triage classes every such row ambiguous.
+        row['class'] = 'ambiguous'
         batch['rows'].append(row)
+        batch['files'] = _files_of(batch['rows'])
     verdict, err = _verdict_entry(repo, batch, addr, side, case)
     if verdict is None:
         return 1, err + '\n'

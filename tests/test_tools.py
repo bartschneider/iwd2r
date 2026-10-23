@@ -13230,6 +13230,9 @@ class WaveResolveTest(unittest.TestCase):
         self.assertEqual([r['address'] for r in b['rows']], ['0x643CC0', '0x716E80'])
         self.assertEqual(sorted(b['rows'][1]), sorted(b['rows'][0]))
         self.assertEqual(b['rows'][1], self.ROW)
+        self.assertEqual(b['rows'][1]['class'], 'ambiguous')
+        self.assertIn('src/CGameSprite.cpp', b['files'])
+        self.assertEqual(b['files'], self.wave._files_of(b['rows']))
         self.assertEqual(b['verdicts']['0x716E80'],
                          {'side': 'ours', 'case': 'dump-716E80',
                           'losing_kind': 'trace', 'measured': 'none'})
@@ -13336,9 +13339,10 @@ class WaveResolveTest(unittest.TestCase):
                     {'seed': 's', 'pool': 1, 'state': 'b', 'drawn': 1,
                      'rows': [{'probe': 'replay', 'result': 'maybe'}]},
                     {'seed': 's', 'pool': 1, 'state': 'b', 'drawn': 1,
-                     'rows': [{'probe': 'guess', 'result': 'match'}]}):
+                     'rows': [{'probe': 'guess', 'result': 'match'}]},
+                    [], 'just a string', '"a json string"', '{not json'):
             _write(os.path.join(os.path.dirname(self.state), 'audit.json'),
-                   json.dumps(bad))
+                   bad if isinstance(bad, str) else json.dumps(bad))
             report = os.path.join(self.tmp, 'bad.md')
             rc, out = self.wave.write_scorecard(
                 self.state, report, os.path.join(self.tmp, 'no-triage.json'), None)

@@ -202,7 +202,9 @@ fork/neither verdict decided by a dump reading (as `close` does), appends
 the row (rebuilt from `disagreements.json`) to the batch it left unless
 it is already there, records the verdict as `verdict` does (`measured:
 none`), and removes the entry from the probe list; the batch's status is
-not touched.
+not touched.  A fork/neither resolve reads the losing kind from the batch
+branch, like `verdict`, so the branch must still exist and carry the
+evidence file.
 
 A rule that is not a check, a flag or a test is not a rule.
 
