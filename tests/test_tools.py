@@ -13405,10 +13405,11 @@ class TruthTest(unittest.TestCase):
         good = {'orig': t, 'ours': t, 'failed': None}
         v = truth.frida_verdicts({'a': failed, 'b': good}, rows)
         self.assertEqual(v['0x5845D0'][0], 'equal')
-        self.assertEqual(v['0x73F560'][0], 'scenario failed')
+        # hit by no scenario at all: not exercised, whatever else failed
+        self.assertEqual(v['0x73F560'][0], 'not-exercised')
+        self.assertEqual(v['0x73F560'][1], 'no scenario hit it: a, b')
         v = truth.frida_verdicts({'a': failed}, rows)
-        self.assertEqual(v['0x5845D0'][0], 'scenario failed')
-        self.assertIn('a: ours side exited 2', v['0x5845D0'][1])
+        self.assertEqual(v['0x5845D0'], ('not-exercised', 'no scenario hit it: a'))
         # a row that appears in a failed scenario is never equal: ours crashed in a
         crash = {'orig': t, 'ours': t[:2] + [{'tag': 'crash', 'where': 'x'}], 'failed': 'ours side exited 1'}
         v = truth.frida_verdicts({'a': crash, 'b': good}, rows)
@@ -13644,6 +13645,25 @@ class TruthTest(unittest.TestCase):
         text = truth.calibration_text(cal)
         self.assertIn('Truth calibration (seed s, sample ' + ', '.join(sample), text)
 
+    def test_frida_default_needs_agreement(self):
+        state = self._cal_state()
+        rows, sample = truth.calibration_rows(state, 's')
+        mixed = {sample[0]: ('equal', '')}
+        mixed.update({a: ('different', 'd') for a in sample[1:9]})
+        cal = truth.calibrate(state, rows, {'oracle': {}, 'frida': mixed}, seed='s', sample=sample)
+        self.assertEqual((cal['paths']['frida']['agree'], cal['paths']['frida']['disagree']), (1, 8))
+        self.assertFalse(cal['frida_default'])
+        self.assertIn('measured 9 of 14, agree 1, disagree 8', cal['note'])
+        self.assertIn('miscalibrated', cal['note'])
+        good = {sample[0]: ('equal', ''), sample[1]: ('equal', ''), sample[2]: ('equal', ''),
+                sample[3]: ('different', 'd')}
+        cal = truth.calibrate(state, rows, {'oracle': {}, 'frida': good}, seed='s', sample=sample)
+        self.assertTrue(cal['frida_default'])
+        self.assertNotIn('note', cal)
+        cal = truth.calibrate(state, rows, {'oracle': {}, 'frida': None}, seed='s', sample=sample)
+        self.assertFalse(cal['frida_default'])
+        self.assertIn('deferred', cal['note'])
+
     def test_evidence_signature_and_oracle_candidates(self):
         pure = ('---\naddress: 0x1\n---\n## Decompiled (Ghidra)\n\n```c\n'
                 'int Rules::Mix(int a,\n    int b)\n\n{\n  return a * 3 + b;\n}\n```\n')
@@ -13751,6 +13771,7 @@ class TruthTest(unittest.TestCase):
                 cal = json.load(f)
             self.assertEqual(cal['paths']['frida'], {'measured': 4, 'agree': 3, 'disagree': 1, 'of': 14})
             self.assertTrue(cal['frida_default'])
+            self.assertNotIn('note', cal)
             self.assertEqual(cal['frida_scenarios']['first_fight']['ours_exit'], 2)
             self.assertEqual(cal['frida_rows'][diff_row['address']][0], 'different')
             unmeasured = [a for a, (s, _c) in cal['frida_rows'].items() if s not in ('equal', 'different')]

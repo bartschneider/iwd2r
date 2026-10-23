@@ -908,10 +908,10 @@ def frida_verdicts(traces, rows, skipped=None):
             verdicts[key] = ('not measured', 'no HITS totals in %s' % ', '.join(unmeasured))
         elif equal:
             verdicts[key] = ('equal', EQUAL_PREFIX + ', '.join(equal))
-        elif failed:
-            verdicts[key] = ('scenario failed', '; '.join('%s: %s' % kv for kv in sorted(failed.items())))
         else:
-            verdicts[key] = ('not-exercised', 'no hook fired in %s' % (', '.join(traces) or 'any scenario'))
+            # Hit by no scenario at all (a failed scenario's trace showed nothing of it
+            # either): not exercised, not a failure.
+            verdicts[key] = ('not-exercised', 'no scenario hit it: %s' % (', '.join(traces) or 'any scenario'))
     return verdicts
 
 
@@ -1144,7 +1144,7 @@ def calibrate(state, rows, results, seed=None, sample=None):
     detail)}, 'frida': {...} or None}. A path measures a row when it gives
     pass or fail (oracle) or equal or different (Frida); it agrees on pass or
     equal and disagrees on fail or different. frida_default is true only when
-    Frida measured at least a fifth of the sample. A None Frida result means
+    Frida measured at least a fifth of the sample and agreed at least as often as it disagreed (else `note` says why). A None Frida result means
     the path was deferred: measured 0, marked deferred. (state is accepted for
     the interface; the rows already carry their recorded verdicts.)"""
     sample = list(sample if sample is not None else [r['address'] for r in rows if r.get('sample')])
@@ -1157,9 +1157,23 @@ def calibrate(state, rows, results, seed=None, sample=None):
     in_sample = [r for r in rows if r['address'] in sample]
     frida_in_sample = _path_counts(norm(results.get('frida')), ('equal', 'different'), 'equal',
                                    in_sample)['measured']
-    return {'seed': seed, 'sample': sample,
-            'paths': {'oracle': oracle, 'frida': frida},
-            'frida_default': bool(sample) and frida_in_sample * 5 >= len(sample)}
+    enough = bool(sample) and frida_in_sample * 5 >= len(sample)
+    on = enough and frida['agree'] >= frida['disagree']
+    cal = {'seed': seed, 'sample': sample,
+           'paths': {'oracle': oracle, 'frida': frida},
+           'frida_default': on}
+    if not on:
+        if results.get('frida') is None:
+            cal['note'] = 'frida off: the path was deferred (not run).'
+        elif not enough:
+            cal['note'] = ('frida off: measured %d of %d, agree %d, disagree %d: fewer than a fifth of the '
+                           '%d sample rows were measured.' % (frida['measured'], frida['of'], frida['agree'],
+                                                            frida['disagree'], len(sample)))
+        else:
+            cal['note'] = ('frida off: measured %d of %d, agree %d, disagree %d: a path that contradicts '
+                           'replay-verified rows more often than it agrees is miscalibrated.' % (
+                               frida['measured'], frida['of'], frida['agree'], frida['disagree']))
+    return cal
 
 
 def calibration_text(cal):
