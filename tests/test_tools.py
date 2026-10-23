@@ -12630,7 +12630,7 @@ class DriverTest(unittest.TestCase):
         with open(os.path.join(ROOT, 'docs', 'wso', 'brief-template.md')) as f:
             text = f.read()
         for needle in ('wso/main', 'systemd-run --user --scope -q -p MemoryMax=8G '
-                       '-p MemorySwapMax=0 --', 'python3 -I tools/gen_map.py',
+                       '-p MemorySwapMax=0 --', 'Do not edit `docs/MAP.md`',
                        '--host', 'desktop'):
             self.assertIn(needle, text)
 
@@ -12700,6 +12700,7 @@ class DriverTest(unittest.TestCase):
         """A signal can land while the same thread holds the live-groups
         lock: the handler must not deadlock on it."""
         done = threading.Event()
+        self.addCleanup(driver._STOPPED.clear)
 
         def hold_and_kill():
             with driver._LIVE_LOCK:
@@ -12774,11 +12775,16 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(started, [])
 
     def test_map_regenerated_once_at_close(self):
-        src = {'src/CAIFoo.cpp': 'int x;\n', 'docs/MAP.md': 'stale\n'}
+        gen = os.path.join(ROOT, 'tools', 'gen_map.py')
+        src = {'src/CAIFoo.cpp': 'int x;\n', 'docs/MAP.md': 'stale\n',
+               'tools/gen_map.py': _slurp(gen)}
+        added = {'b011': 'src/CGameNew.cpp', 'b012': 'src/CScreenNew.cpp'}
+
+        def on_branch(wt, bid):    # a worker's source file and its own MAP edit
+            _write(os.path.join(wt, added[bid]), '// 0x401000\nint y; // TODO: Incomplete\n')
+            _write(os.path.join(wt, 'docs', 'MAP.md'), 'mine ' + bid + '\n')
         d = self._pool_driver(self._two_pools()[:1], {'a': self._BatchWorker(credits=0.0)},
-                              ids=('b011', 'b012'), base_files=src,
-                              on_branch=lambda wt, bid: _write(   # a worker's own edit
-                                  os.path.join(wt, 'docs', 'MAP.md'), 'mine ' + bid + '\n'))
+                              ids=('b011', 'b012'), base_files=src, on_branch=on_branch)
         calls = []
         real = d._regen_map
 
@@ -12789,15 +12795,55 @@ class DriverTest(unittest.TestCase):
         with mock.patch.dict(os.environ, self.GIT_ENV):
             self.assertEqual(d.run(), 0)
         self.assertEqual(sorted(calls), ['wt-b011', 'wt-b012'])   # once per close
-        r = subprocess.run([sys.executable, '-I', os.path.join(ROOT, 'tools', 'gen_map.py'),
-                            '--repo', self.root, '--check'], capture_output=True, text=True)
+        r = subprocess.run([sys.executable, '-I', gen, '--repo', self.root, '--check'],
+                           capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stdout)
-        # No batch branch carries a MAP.md edit of its own but the close's.
-        self.assertIn('Subsystem map', _slurp(os.path.join(self.root, 'docs', 'MAP.md')))
-        # Regenerating a fresh tree again changes nothing.
+        # first's map equals the generator on a fresh clone of the final tree
+        ref = os.path.join(self.tmp, 'ref')
+        subprocess.run(['git', 'clone', '-q', self.root, ref], check=True)
+        subprocess.run([sys.executable, '-I', gen, '--repo', ref], check=True)
+
+        def body(t):
+            return [l for l in t.splitlines() if not l.startswith('Generated from commit')]
+        mine = _slurp(os.path.join(self.root, 'docs', 'MAP.md'))
+        self.assertEqual(body(mine), body(_slurp(os.path.join(ref, 'docs', 'MAP.md'))))
+        self.assertIn('| Game | 1 |', mine)
+        self.assertIn('| Screens | 1 |', mine)
+        # Regenerating the final tree again changes nothing.
         before = self.git('rev-parse', 'first').stdout
         self.assertIsNone(real(self.root))
         self.assertEqual(self.git('rev-parse', 'first').stdout, before)
+
+    def test_stop_mid_cut_lets_the_cut_finish_and_starts_nothing(self):
+        pools = [driver.parse_pool('a=claude-glm:glm-5.3-flash[1m]:2')]
+        w = self._BatchWorker(credits=0.0)
+        d = self._pool_driver(pools, {'a': w}, ids=('b011', 'b012'))
+        d._runner = None                       # real threads: two workers
+        trace = []
+        real_cut = d.next_batch
+
+        def slow_cut(*a, **kw):
+            trace.append('cut start')
+            time.sleep(1.0)                    # stands in for the branch and worktree
+            r = real_cut(*a, **kw)
+            trace.append('cut end')
+            return r
+        d.next_batch = slow_cut
+        timer = threading.Timer(0.4, os.kill, (os.getpid(), signal.SIGTERM))
+        timer.start()
+        self.addCleanup(timer.cancel)
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 1)
+        self.assertEqual(trace, ['cut start', 'cut end'])    # not aborted, no second cut
+        self.assertEqual(w.briefs, [])                       # no worker launched
+
+    def test_run_group_started_after_a_stop_is_killed_at_once(self):
+        driver._STOPPED.set()
+        self.addCleanup(driver._STOPPED.clear)
+        start = time.monotonic()
+        res = driver._run_group(['sleep', '60'], timeout=30)
+        self.assertLess(time.monotonic() - start, 10)
+        self.assertNotEqual(res.returncode, 0)
 
     def test_mechanical_checks_leave_the_map_to_the_close(self):
         d = self._mc_repo({'76D370': 'corroborated by WSO at abc'})
@@ -12856,7 +12902,7 @@ class DriverTest(unittest.TestCase):
         self.assertRegex(r.stdout, r'(?m)^step fixture one: \d+s$')
         self.assertRegex(r.stdout, r'(?m)^step fixture two: \d+s$')
         self.assertRegex(r.stdout, r'(?m)^gates: total \d+s$')
-        self.assertRegex(r.stdout, r'(?m)^gates: ccache (used|not used)')
+        self.assertRegex(r.stdout, r'(?m)^gates: (ccache: installed, launcher set for|ccache not used)')
         self.assertIn('gates: all passed', r.stdout)
         # With ccache absent from PATH the summary says it was not used.
         r = subprocess.run(['/bin/bash', os.path.join(ROOT, 'tools', 'gates.sh'),

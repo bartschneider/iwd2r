@@ -306,9 +306,15 @@ launches per attempt until `--new-attempt "<why>"`; and every merge into
   the base is merged in, and commits it by name (`map: regenerate ...`), so
   `gen_map.py --check` passes after the fast-forward and two parallel closes
   never conflict on it (a worker's own edit of it loses to the base's copy at
-  the sync). A stop (SIGTERM, SIGINT) starts no new worker, waits up to 30 s
-  for a git write in progress (a stop landing on the writing thread is
-  raised when its write ends), and takes only re-entrant locks in the handler.
+  the sync). A stop (SIGTERM, SIGINT) starts no new worker (a worker forked
+  just as it lands is killed on joining), and takes only re-entrant locks in
+  the handler. The signal reaches only the main thread: its own writes (the
+  cut, an adoption, the recompare) finish before the stop is raised, and the
+  stop waits up to 30 s for a git write in progress on another thread. The
+  run still joins a close in flight without a limit (the gate included, about
+  ten minutes), and a Ctrl-C in the terminal also reaches the git and gate
+  children directly (same process group); the bounded wait is for a SIGTERM
+  sent to the driver's pid.
 - Two `claude-glm` launches at once race on the wrapper's re-link of
   `~/.claude` into `~/.claude-glm` (and on its `settings.json.tmp`). The
   wrapper lives outside the repo, so the fix is a patch the coordinator

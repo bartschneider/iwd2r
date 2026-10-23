@@ -340,6 +340,11 @@ _LIVE = set()
 _LIVE_LOCK = threading.RLock()
 
 
+# Set (under _LIVE_LOCK) once a stop has killed the live groups: a worker
+# forked after that kill, before it joined _LIVE, is killed on joining.
+_STOPPED = threading.Event()
+
+
 class _Stop(BaseException):
     """The driver was told to stop (SIGTERM, SIGINT)."""
 
@@ -348,6 +353,7 @@ def kill_live_groups():
     """SIGKILL every live worker process group; the pgids killed."""
     with _LIVE_LOCK:
         groups = sorted(_LIVE)
+        _STOPPED.set()
     for pgid in groups:
         try:
             os.killpg(pgid, signal.SIGKILL)
@@ -366,6 +372,11 @@ def _run_group(argv, timeout=None, **kw):
                                if k not in ('capture_output',)})
     with _LIVE_LOCK:
         _LIVE.add(proc.pid)
+        if _STOPPED.is_set():      # forked after the stop's kill: not missed
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except OSError:
+                pass
     try:
         out, err = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
@@ -1553,7 +1564,7 @@ class Driver:
         # them: a signal must not land mid commit or fast-forward.
         self._write_cv = threading.Condition(threading.RLock())
         self._writers = {}         # thread ident -> nesting depth
-        self._stop_deferred = False
+        self._stop_deferred = None    # ident of the thread whose write defers the stop
         self._ctx = _BatchContext()
         self._runner = runner      # runs a callable on its own thread; None: threads
         self._clock = time.monotonic if clock is None else clock
@@ -2310,9 +2321,9 @@ class Driver:
                 else:
                     del self._writers[tid]
                 self._write_cv.notify_all()
-                deferred = not n and self._stop_deferred
+                deferred = not n and self._stop_deferred == tid
             if deferred:
-                self._stop_deferred = False
+                self._stop_deferred = None
                 raise _Stop()
 
     def _on_stop(self, signum, _frame):
@@ -2323,7 +2334,9 @@ class Driver:
         kill_live_groups()
         with self._write_cv:
             if threading.get_ident() in self._writers:
-                self._stop_deferred = True   # raised when its write ends
+                # Raised on this thread when its write ends (the main
+                # thread's cut, adoption and recompare are writes too).
+                self._stop_deferred = threading.get_ident()
                 return
             deadline = time.monotonic() + self.STOP_WAIT
             while self._writers:
@@ -2346,7 +2359,9 @@ class Driver:
         (batches no longer carry it, so parallel closes cannot conflict)
         and commit it by name when it changed; `gen_map.py --check` passes
         after the fast-forward.  Under the lock."""
-        gen = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'gen_map.py')
+        # The worktree's own tool, the one the gate's check runs, so the two
+        # cannot disagree.
+        gen = os.path.join(worktree, 'tools', 'gen_map.py')
         if not os.path.isfile(os.path.join(worktree, 'docs', 'MAP.md')):
             return None        # no map to keep current
         if subprocess.run([sys.executable, '-I', gen, '--repo', worktree,
@@ -2808,7 +2823,7 @@ class Driver:
             return 0
         self._recompared = True
         try:
-            with self._lock:
+            with self._lock, self._writing():
                 rc, text = self.recompare(
                     self.state_path, self.disagreements_path, repo=self.repo)
         except Exception as e:
@@ -2822,7 +2837,7 @@ class Driver:
         triage = (self.triage_path
                   if _tool('wave').QUEUES[self.queue]['triage'] else None)
         try:
-            with self._lock:
+            with self._lock, self._writing():
                 rc, text = self.next_batch(
                     self.disagreements_path, self.state_path, self.size,
                     self.category, triage_path=triage, repo=self.repo,
@@ -2889,8 +2904,8 @@ class Driver:
         claims = os.path.join(os.path.dirname(os.path.abspath(self.state_path)),
                               'claims.json')
         try:
-            with self._lock, wave._filelock().hold(claims + '.lock',
-                                                   'wave adopt'):
+            with self._lock, self._writing(), \
+                    wave._filelock().hold(claims + '.lock', 'wave adopt'):
                 wt, how = self.cut_worktree(self.repo, batch['branch'],
                                             self.base)
                 if wt is None:
@@ -3277,7 +3292,8 @@ class Driver:
                      'stops' % (holder, self.status_path))
             return 1
         self._stopping = False
-        self._stop_deferred = False
+        self._stop_deferred = None
+        _STOPPED.clear()
         previous = {}
         for sig in (signal.SIGTERM, signal.SIGINT):
             try:
@@ -3297,6 +3313,7 @@ class Driver:
         finally:
             for sig, handler in previous.items():
                 signal.signal(sig, handler)
+            _STOPPED.clear()
             try:
                 os.ftruncate(fd, 0)
             except OSError:
@@ -3395,6 +3412,8 @@ class Driver:
 
         def launch_next():
             nonlocal exhausted, cut_blocked, failure, capped
+            if self._stopping:
+                return False
             if self._halt:
                 return False
             if self.max_batches is not None and self._began >= self.max_batches:

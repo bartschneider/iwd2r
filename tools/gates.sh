@@ -49,7 +49,7 @@ step() {
 summary() {
     echo
     echo "gates: total $((SECONDS - GATE_START))s"
-    if [ "$USE_CCACHE" = 1 ]; then echo "gates: ccache used (both linux presets)"
+    if [ "$USE_CCACHE" = 1 ]; then echo "gates: ccache: installed, launcher set for ${PRESETS_BUILT:-no preset (none built)}"
     else echo "gates: ccache not used (not installed)"; fi
     if [ ${#failed[@]} -eq 0 ]; then echo "gates: all passed"; return 0; fi
     echo "gates: FAILED: ${failed[*]}"; return 1
@@ -151,6 +151,7 @@ copy_unchanged() {
 }
 linux_preset() {
     local preset="$1" log rc skipped
+    PRESETS_BUILT="${PRESETS_BUILT:+$PRESETS_BUILT, }$preset"
     # ccache: the launcher is a cache variable, so an existing build directory
     # is reconfigured once when it does not match (and cleared when ccache is
     # gone, or every compile would fail on the missing launcher).
