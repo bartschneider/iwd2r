@@ -180,6 +180,105 @@
       ],
       "status": "closed",
       "verdicts": {}
+    },
+    "i002": {
+      "assigned_at": "2026-10-23T21:46:46+00:00",
+      "branch": "p3/wso-i002",
+      "closed_at": "2026-10-23T22:49:07+00:00",
+      "files": [
+        "src/CGameSprite.cpp",
+        "src/CMessage.cpp",
+        "src/CNetwork.cpp",
+        "src/CUnknown2.cpp",
+        "src/CVideo.cpp",
+        "src/CGameSpriteSpells.cpp",
+        "src/CResPLT.cpp"
+      ],
+      "pool": "claude",
+      "rows": [
+        {
+          "address": "0x71E760",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::sub_71E760",
+          "our_len": 2,
+          "their_len": 499
+        },
+        {
+          "address": "0x5152C0",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageGroup::CMessageGroup",
+          "our_len": 22,
+          "their_len": 428
+        },
+        {
+          "address": "0x7A73D0",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CNetwork.cpp",
+          "name": "CNetwork::sub_7A73D0",
+          "our_len": 8,
+          "their_len": 401
+        },
+        {
+          "address": "0x720310",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::CheckSequence",
+          "our_len": 2,
+          "their_len": 346
+        },
+        {
+          "address": "0x7C25B0",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CUnknown2.cpp",
+          "name": "CUnknown2::sub_7C25B0",
+          "our_len": 2,
+          "their_len": 301
+        },
+        {
+          "address": "0x7A5720",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CNetwork.cpp",
+          "name": "CNetwork::RemoveInitializeConnection",
+          "our_len": 33,
+          "their_len": 173
+        },
+        {
+          "address": "0x7950A0",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CVideo.cpp",
+          "name": "CVideo::~CVideo",
+          "our_len": 21,
+          "their_len": 173
+        },
+        {
+          "address": "0x4F7490",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageHandler::~CMessageHandler",
+          "our_len": 2,
+          "their_len": 167
+        },
+        {
+          "address": "0x443350",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CGameSpriteSpells.cpp",
+          "name": "CGameSpriteSpellList::CGameSpriteSpellList",
+          "our_len": 35,
+          "their_len": 53
+        },
+        {
+          "address": "0x77F330",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CResPLT.cpp",
+          "name": "CResPLT::CResPLT",
+          "our_len": 35,
+          "their_len": 41
+        }
+      ],
+      "status": "closed",
+      "verdicts": {}
     }
   }
 }
