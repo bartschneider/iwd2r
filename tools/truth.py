@@ -898,20 +898,59 @@ def _oracle():
     return _ORACLE
 
 
+SCHEMA_HINTS = {
+    'original': ('the recorder.dll that ran is out of step with the schema (built before it '
+                 'changed?); rebuild it from the tree under test (tools/oracle.py build, or '
+                 'the frida phase\'s build of the batch checkout) and run again'),
+    'ours': 'our state dumper is out of step with the schema; fix it and run again',
+}
+
+
+def _schema_failures(oracle, folder):
+    """(invalid dump count, dump count, first 'file: error') of a replay
+    folder under oracle.check_dumps and schema.json, the check replay record
+    makes on every run (finish_replay); (0, 0, '') without the folder."""
+    if not os.path.isdir(folder):
+        return 0, 0, ''
+    with open(oracle.REPLAY_SCHEMA, encoding='utf-8') as f:
+        schema = json.load(f)
+    dumps = oracle.check_dumps(folder, schema)
+    bad = sorted((name, errors) for name, errors in dumps.items() if errors)
+    return len(bad), len(dumps), ('%s: %s' % (bad[0][0], bad[0][1][0]) if bad else '')
+
+
 def compare_dumps(orig_dir, ours_dir, script):
     """{'match': True | False | None, 'detail': text}: whether the state
-    dumps both sides of one scenario wrote agree, compared with the replay
-    tooling's own functions and data (oracle.compare_checkpoints over the
-    scenario copy's checkpoint lines, oracle.compare_frames over the periodic
-    dumps both folders hold, the screens.json screens and the known
-    differences), as `oracle.py replay compare` does.  A missing checkpoint
-    dump is a difference; None means nothing on a compared screen was there
-    to compare (no verdict either way)."""
+    dumps both sides of one scenario wrote agree, with the replay tooling's
+    own semantics end to end.  First the check `oracle.py replay record`
+    makes on every run before anything compares it (finish_replay:
+    oracle.check_dumps against oracle/replay/schema.json): a side with a dump
+    the schema refuses gets no verdict (match None, 'invalid': {side: count},
+    the detail names the side, the first refusal and the likely cause -- the
+    b014/i001 batches ran a recorder.dll built before the schema grew
+    world.enemy_creatures and party morale, which read as 4224 "differences"
+    while our engine was right).  Then the compare `oracle.py replay compare`
+    makes: oracle.compare_checkpoints over the scenario copy's checkpoint
+    lines and oracle.compare_frames over the periodic dumps both folders
+    hold, with the screens.json screens and the known differences; both skip
+    oracle.TIMING_FIELDS and oracle.OURS_ONLY_FIELDS (field_differences).  A
+    missing checkpoint dump is a difference; None also means nothing on a
+    compared screen was there to compare (no verdict either way)."""
     oracle = _oracle()
     try:
         actions = oracle.load_actions(script)
     except (OSError, SystemExit, ValueError) as e:
         return {'match': None, 'detail': 'scenario copy %s unreadable: %s' % (script, e)}
+    invalid, why = {}, []
+    for side, folder, owner in (('original', orig_dir, "the original's"),
+                                ('ours', ours_dir, 'our')):
+        bad, total, first = _schema_failures(oracle, folder)
+        if bad:
+            invalid[side] = bad
+            why.append('%s dumps fail oracle/replay/schema.json (%d of %d; first: %s): %s'
+                       % (owner, bad, total, first, SCHEMA_HINTS[side]))
+    if invalid:
+        return {'match': None, 'detail': '; '.join(why), 'invalid': invalid}
     names = [a['name'] for a in actions if a.get('op') == 'checkpoint']
     screens, known = oracle.load_screens(), oracle.load_known()
     counts = {}
@@ -966,9 +1005,14 @@ def frida_run(batch_id, table, scenarios, run=subprocess.run, root=ROOT, loaded_
     our build. With neither, every scenario fails with that reason and nothing
     is run. attempt_reason(scenario, 'orig'|'ours'), when given, replaces the
     default --new-attempt text. build_checkout (a WSL path) is the Windows
-    checkout whose x86 build ours runs (probe.py --build-checkout): the batch
-    worktree's, so the bodies under test are the ones the map's RVAs name;
-    without it probe.py runs this checkout's build. `run` is injectable
+    checkout both sides run from (probe.py --build-checkout): ours its x86
+    exe, the batch worktree's, so the bodies under test are the ones the
+    map's RVAs name; the original its oracle build's injector and recorder,
+    so the recorder that writes the original's dumps comes from the same tree
+    as the dumper that writes ours and both follow one schema.json (the
+    driver's checkout held a recorder.dll older than the schema: every dump
+    guard of b014 and i001 failed on it). Without it probe.py runs this
+    checkout's builds. `run` is injectable
     (the tests never launch anything); the real call is made by hand on the
     Windows machine under the one-launch rules."""
     import tempfile
@@ -1006,8 +1050,8 @@ def frida_run(batch_id, table, scenarios, run=subprocess.run, root=ROOT, loaded_
                                          'driver frida %s %s' % (batch_id, scenario))]
                 if target == 'ours':
                     cmd += ['--loaded-rva', loaded_rva]
-                    if build_checkout:
-                        cmd += ['--build-checkout', build_checkout]
+                if build_checkout:
+                    cmd += ['--build-checkout', build_checkout]
                 done = run(cmd, capture_output=True, text=True, cwd=root)
                 folder = None
                 for line in (getattr(done, 'stdout', '') or '').splitlines():
@@ -1119,7 +1163,10 @@ def frida_verdicts(traces, rows, skipped=None, info=None):
     or a return at a call both sides made, or a crash event; detail carries
     the first differing pair); 'not measured' (a compared scenario without
     final HITS totals on both sides where they are needed, one whose state
-    dumps do not match (the dump guard), or a row called on one side only);
+    dumps do not match (the dump guard), one where Frida could not hook the
+    row on a side (orig.py's {tag: 'unhooked'} event: that side saw nothing,
+    so neither its calls nor their absence count), or a row called on one
+    side only);
     'scenario failed'; 'not-exercised'; 'skipped' (the row had no hook;
     detail is the reason).
 
@@ -1161,7 +1208,7 @@ def frida_verdicts(traces, rows, skipped=None, info=None):
             continue
         tag = hook_name(key)
         different, exact, prefix, partial, crashed = [], [], [], [], []
-        unmeasured, dumped, one_sided, notes = [], [], [], []
+        unmeasured, dumped, one_sided, notes, blind = [], [], [], [], []
         for scenario, value in traces.items():
             t = _as_scenario(value)
             if t['failed']:
@@ -1181,6 +1228,14 @@ def frida_verdicts(traces, rows, skipped=None, info=None):
                     ohits = (t.get('hits') or {}).get('orig')
                     if not (t.get('orig_exit') == 0 and ohits and tag in ohits and ohits[tag] == 0):
                         partial.append('%s: %s' % (scenario, t['failed']))
+                continue
+            refused = [(side, e) for side, events in (('the original', t['orig']), ('ours', t['ours']))
+                       for e in events if e.get('tag') == 'unhooked' and e.get('name') == tag]
+            if refused:
+                # Frida refused the site on that side (a body too short for its
+                # jump): that side's trace is blind to the row, called or not.
+                blind.append('Frida could not hook it on %s in %s (%s)' % (
+                    refused[0][0], scenario, refused[0][1].get('error') or 'no reason given'))
                 continue
             orig, ours = _row_events(t['orig'], tag), _row_events(t['ours'], tag)
             if not [e for e in orig + ours if str(e.get('tag', '')).startswith(tag)]:
@@ -1230,10 +1285,10 @@ def frida_verdicts(traces, rows, skipped=None, info=None):
             verdicts[key] = ('different', 'differs in ' + '; '.join(different + crashed))
         elif partial:
             verdicts[key] = ('scenario failed', '; '.join(partial))
-        elif unmeasured or dumped:
+        elif unmeasured or dumped or blind:
             verdicts[key] = ('not measured', '; '.join(
                 (['no final HITS totals in %s' % ', '.join(unmeasured)] if unmeasured else [])
-                + dumped))
+                + dumped + blind))
         elif exact or prefix:
             verdicts[key] = ('equal', EQUAL_PREFIX + ', '.join(exact + prefix))
         elif one_sided:
