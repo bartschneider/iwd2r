@@ -8465,6 +8465,12 @@ class TriageTest(unittest.TestCase):
         self.assertEqual(triage.enabled_classes(cal), frozenset({'rename-only'}))
         self.assertIn('fork-stub', triage.calibration_text(cal))
 
+    def assert_auto_classes_agree(self, cal):
+        # Every auto class, enabled or not: a flip of a fork-verdict row into
+        # an auto class must fail even though that disables the class.
+        for cls in triage.AUTO_OURS:
+            self.assertEqual(cal[cls]['mismatches'], [], cls)
+
     def test_reclassified_closed_rows_agree_with_recorded_verdicts(self):
         state = json.load(open(os.path.join(ROOT, 'docs/wso/wave-state.json')))
         fork = state['fork_base']
@@ -8475,11 +8481,24 @@ class TriageTest(unittest.TestCase):
         rows = json.load(open(os.path.join(ROOT, 'docs/wso/disagreements.json')))
         committed = json.load(open(os.path.join(ROOT, 'docs/wso/triage.json')))
         cal = triage.calibrate(state, triage.calibration_triage(state, rows, fork))
+        self.assert_auto_classes_agree(cal)
         enabled = triage.enabled_classes(cal)
-        for cls in enabled:
-            self.assertEqual(cal[cls]['mismatches'], [], cls)
         self.assertEqual(enabled, frozenset(r['class'] for r in committed
                                             if r['class'] in triage.AUTO_OURS))
+
+    def test_flipped_fork_row_reported_even_when_class_is_disabled(self):
+        state = {'batches': {'b': {'status': 'closed', 'rows': [{'address': '0x401000'}],
+                                   'verdicts': {'0x401000': {'side': 'fork'}}}}}
+        rows = [{'file': 'src/A.cpp', 'name': 'f', 'address': '0x401000',
+                 'category': 'both_changed_differ', 'their_len': 1, 'our_len': 1}]
+        files = {'F': '// 0x401000\nint f(int a){return a+1;}\n',
+                 triage.CALIBRATION_OURS_REF: '// 0x401000\nint f(int b){return b+1;}\n'}
+        cal = triage.calibrate(state, triage.calibration_triage(
+            state, rows, 'F', show=lambda ref, p: files[ref], type_names=frozenset({'int'})))
+        self.assertEqual(triage.enabled_classes(cal), frozenset())
+        self.assertEqual(cal['rename-only']['mismatches'], ['0x401000'])
+        with self.assertRaises(AssertionError):
+            self.assert_auto_classes_agree(cal)
 
     def test_apply_calibration_disables_unproven_classes(self):
         cal = triage.calibrate({'batches': {'b': {'status': 'closed', 'verdicts': {
