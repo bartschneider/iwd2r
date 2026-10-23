@@ -15,6 +15,7 @@ import random
 import re
 import subprocess
 import sys
+import time
 
 Result = collections.namedtuple(
     'Result', 'exit_code report transcript credits rate_limited')
@@ -326,12 +327,15 @@ def _side_case(v):
     return v[0], v[1]
 
 
-def ledger_entry(batch, verdicts, classes, review, commits, credits, now=None):
+def ledger_entry(batch, verdicts, classes, review, commits, credits, now=None,
+                 ignored=None):
     """The templated progress.md entry for one batch.
 
     batch carries 'id'; verdicts maps address to a wave-state verdict or a
     (side, case) tuple; classes maps class to row count; review is
-    (reviewed, outcome); credits None prints as 'credits unknown'."""
+    (reviewed, outcome); credits None prints as 'credits unknown';
+    ignored maps address to the (side, case) of a worker line set aside
+    because the row was triage-decided (a line only when there are any)."""
     wave = _tool('wave')
     known = _tool('triage').CLASSES
     order = [c for c in known if c in classes] + sorted(
@@ -351,6 +355,10 @@ def ledger_entry(batch, verdicts, classes, review, commits, credits, now=None):
                                or 'none'),
         '- verdicts: fork %d, ours %d, neither %d' % (
             sides['fork'], sides['ours'], sides['neither']),
+    ] + ([
+        '- ignored for triage-decided rows: ' + ', '.join(
+            '%s %s' % (a, _side_case(v)[0]) for a, v in sorted(ignored.items())),
+    ] if ignored else []) + [
         '- deciding evidence: ' + ', '.join(
             '%s %d' % (k, deciding.get(k, 0)) for k in wave.DECIDING_ORDER),
         '- review: %s, %s' % ('yes' if reviewed else 'no', outcome),
@@ -431,42 +439,64 @@ class Driver:
         self.push = self._git_push if push is None else push
         self.send = self._aoe_send if send is None else send
         self.log = (lambda m: print(m, flush=True)) if log is None else log
-        self.status = self._load_status()
+        self._read_status()   # a corrupt status file refuses here
         self._imported = {}
         self._runs = []
+        self._ignored = {}
         self._halt = False
 
     # -- status, ledger, results ----------------------------------------
 
-    def _load_status(self):
-        try:
-            with open(self.status_path, encoding='utf-8') as f:
-                status = json.load(f)
-        except FileNotFoundError:
-            status = {}
+    def _read_status(self):
+        """The status file as it is on disk now: the coordinator edits it
+        (clearing an exception is how it asks for a retry)."""
+        for attempt in range(3):
+            try:
+                with open(self.status_path, encoding='utf-8') as f:
+                    status = json.load(f)
+                break
+            except FileNotFoundError:
+                status = {}
+                break
+            except ValueError:
+                if attempt == 2:
+                    raise
+                time.sleep(0.2)   # a torn read while the coordinator writes
         if not isinstance(status, dict):
             raise ValueError('%s: not a driver status file' % self.status_path)
         for key, empty in (('exceptions', {}), ('batches', {}),
-                           ('current', None), ('parked', None)):
+                           ('current', None), ('parked', None),
+                           ('stalled', None)):
             status.setdefault(key, empty)
-        if self.dry_run:
-            status['dry_run'] = True
         return status
 
-    def _save_status(self):
-        self.status['updated_at'] = _now()
-        _tool('wave')._save_json(self.status_path, self.status)
+    def _update_status(self, change):
+        """Read-modify-write: re-read the file, apply only this change,
+        write it atomically.  What the coordinator removed stays removed."""
+        status = self._read_status()
+        change(status)
+        if self.dry_run:
+            status['dry_run'] = True
+        status['updated_at'] = _now()
+        _tool('wave')._save_json(self.status_path, status)
+        return status
 
     def _stage(self, batch_id, stage):
-        self.status['current'] = {'batch': batch_id, 'stage': stage, 'at': _now()}
-        self._save_status()
+        current = {'batch': batch_id, 'stage': stage, 'at': _now()}
+        self._update_status(lambda s: s.__setitem__('current', current))
         self.log('%s: %s' % (batch_id, stage))
 
-    def _finish(self, batch_id, outcome, **extra):
-        self.status['batches'][batch_id] = dict(
-            outcome=outcome, credits=self._credits(), at=_now(), **extra)
-        self.status['current'] = None
-        self._save_status()
+    def _finish(self, batch_id, outcome, change=None, **extra):
+        """Record the batch's outcome; `change` edits the status in the
+        same write."""
+        entry = dict(outcome=outcome, credits=self._credits(), at=_now(), **extra)
+
+        def apply(s):
+            s['batches'][batch_id] = entry
+            s['current'] = None
+            if change:
+                change(s)
+        self._update_status(apply)
 
     def _append_ledger(self, text):
         os.makedirs(os.path.dirname(os.path.abspath(self.ledger_path)),
@@ -506,9 +536,9 @@ class Driver:
     def _exception(self, batch_id, stage, problems):
         at = _now()
         problems = [str(p) for p in problems if str(p).strip()] or ['(no detail)']
-        self.status['exceptions'][batch_id] = {
-            'stage': stage, 'problems': problems, 'at': at}
-        self._finish(batch_id, 'exception', stage=stage)
+        exc = {'stage': stage, 'problems': problems, 'at': at}
+        self._finish(batch_id, 'exception', stage=stage,
+                     change=lambda s: s['exceptions'].__setitem__(batch_id, exc))
         if stage in GLOBAL_STAGES:
             self._halt = True
         n = len(problems)
@@ -528,9 +558,9 @@ class Driver:
         return 'exception'
 
     def _park(self, batch_id, reason):
-        self.status['parked'] = {'batch_id': batch_id, 'at': _now(),
-                                 'reason': reason}
-        self._finish(batch_id, 'parked')
+        parked = {'batch_id': batch_id, 'at': _now(), 'reason': reason}
+        self._finish(batch_id, 'parked',
+                     change=lambda s: s.__setitem__('parked', parked))
         self.log('%s: parked (%s)' % (batch_id, reason))
         return 'parked'
 
@@ -548,15 +578,27 @@ class Driver:
 
     def _check(self, batch_id, worktree, report):
         """(verdicts, problems) for a report: the parse, then the
-        mechanical checks."""
+        mechanical checks.  Lines for rows whose recorded verdict is a
+        triage-* case are set aside in self._ignored (ruling R33): never
+        recorded, never checked, never a reason to review."""
+        self._ignored = {}
         try:
-            verdicts = parse_report(report)
+            parsed = parse_report(report)
         except ReportError as e:
             return {}, ['report: %s; fix that line under ## Verdicts (one '
                         '"verdict <0xADDR> <fork|ours|neither> case <id>" '
                         'per row)' % e]
         self._stage(batch_id, 'checks')
         batch = self.load_state(self.state_path)['batches'][batch_id]
+        key = _tool('wave')._addr_key
+        auto = {key(a) for a, v in batch.get('verdicts', {}).items()
+                if _side_case(v)[1].startswith('triage-')}
+        verdicts = {}
+        for addr, sc in parsed.items():
+            (self._ignored if key(addr) in auto else verdicts)[addr] = sc
+        if self._ignored:
+            self.log('%s: ignored for triage-decided rows: %s' % (
+                batch_id, ', '.join(sorted(self._ignored))))
         return verdicts, self.mechanical_checks(batch, worktree, verdicts)
 
     def _merged(self, batch_id, verdicts):
@@ -624,12 +666,14 @@ class Driver:
         batch = self.load_state(self.state_path)['batches'][batch_id]
         self._append_ledger(ledger_entry(
             dict(batch, id=batch_id), verdicts, self._classes(batch_id, batch),
-            review, self._commits(batch['branch']), self._credits()))
+            review, self._commits(batch['branch']), self._credits(),
+            ignored=self._ignored))
 
     def run_batch(self, batch_id):
         """One assigned batch, start to end: 'closed', 'exception' or
         'parked' ('checked' for a dry run whose checks passed)."""
         self._runs = []
+        self._ignored = {}
         state = self.load_state(self.state_path)
         batch = state['batches'].get(batch_id)
         if batch is None:
@@ -743,7 +787,8 @@ class Driver:
         batch = self.load_state(self.state_path)['batches'][batch_id]
         self._append_ledger(ledger_entry(
             dict(batch, id=batch_id), batch['verdicts'],
-            self._classes(batch_id, batch), review, commits, self._credits()))
+            self._classes(batch_id, batch), review, commits, self._credits(),
+            ignored=self._ignored))
         self._finish(batch_id, 'closed')
         if err:
             return self._exception(batch_id, 'push', ['git push failed: %s' % err])
@@ -771,7 +816,13 @@ class Driver:
             if rc != 0:
                 self.log('%s: triage exited %s; the rows it could not decide '
                          'stay for the worker' % (batch_id, rc))
+            self._update_status(lambda s: s.__setitem__('stalled', None))
             return batch_id, None
+        if rc == 2 and text.startswith('nothing left to assign'):
+            # Rows remain, but only on files that assigned batches own.
+            stalled = {'at': _now(), 'message': text.strip()}
+            self._update_status(lambda s: s.__setitem__('stalled', stalled))
+            return None, 4
         if rc == 2 and text.startswith('nothing left'):
             return None, 0
         m = re.match(r'(\S+) not assigned:', text)
@@ -781,17 +832,20 @@ class Driver:
         return None, 1
 
     def _cleared(self):
-        """Batches whose exception the coordinator cleared: retried first."""
+        """Batches whose exception the coordinator cleared on disk: retried
+        first."""
         state = self.load_state(self.state_path)
-        return [bid for bid, info in sorted(self.status['batches'].items())
+        status = self._read_status()
+        return [bid for bid, info in sorted(status['batches'].items())
                 if isinstance(info, dict) and info.get('outcome') == 'exception'
-                and bid not in self.status['exceptions']
+                and bid not in status['exceptions']
                 and state['batches'].get(bid, {}).get('status') == 'assigned']
 
     def run(self):
-        """0 when nothing is left, 3 when parked, 1 when an exception that
-        is not the batch's own stopped the run.  A dry run processes one
-        batch and exits 0."""
+        """0 when every row is assigned or decided, 3 when parked, 4 when
+        stalled (the rows left wait on files owned by assigned batches), 1
+        when an exception that is not the batch's own stopped the run.  A
+        dry run processes one batch and exits 0."""
         if self.dry_run:
             batch_id, code = self._cut()
             if batch_id is None:
@@ -873,6 +927,13 @@ def driver_from_args(argv, repo=None):
                          '--state PATH: a dry run cuts a real batch (branch, '
                          'worktree, triage commits) in that state file. Point '
                          'it at a copy, never at docs/wso/wave-state.json.')
+    if args.dry_run:
+        live = {os.path.realpath(wave.STATE_PATH), os.path.realpath(
+            os.path.join(repo, 'docs', 'wso', 'wave-state.json'))}
+        if os.path.realpath(args.state) in live:
+            return None, (2, 'wave.py run --dry-run refuses %s: that is the '
+                             'live wave-state file. Copy it outside docs/wso '
+                             'and pass the copy.' % args.state)
     state = os.path.abspath(args.state) if args.state else wave.STATE_PATH
     ledger = os.path.join(repo, LEDGER_REL)
     status = os.path.join(repo, STATUS_REL)

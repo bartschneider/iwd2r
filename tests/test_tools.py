@@ -9405,6 +9405,7 @@ class DriverTest(unittest.TestCase):
         self.assertIn('triage 8', text)
         self.assertIn('review: no, not sampled', text)
         self.assertIn('commits a1..b2', text)
+        self.assertNotIn('ignored', text)
         none = driver.ledger_entry({'id': 'b011'}, {}, {}, (True, 'sample: clean'), 'x..y', None)
         self.assertIn('credits unknown', none)
         self.assertIn('review: yes, sample: clean', none)
@@ -9413,7 +9414,8 @@ class DriverTest(unittest.TestCase):
         d = self._driver(worker=driver.FakeWorker(self.REPORT))   # fake wave functions injected
         first = self.git('rev-parse', 'first').stdout.strip()
         self.assertEqual(d.run_batch('b011'), 'closed')
-        self.assertIn('## driver b011', open(d.ledger_path).read())
+        with open(d.ledger_path) as f:
+            self.assertIn('## driver b011', f.read())
         b = self._state()
         self.assertEqual(b['status'], 'closed')
         self.assertEqual(b['verdicts']['0x402000']['side'], 'fork')
@@ -9427,6 +9429,7 @@ class DriverTest(unittest.TestCase):
         self.assertIn('verdicts: fork 1, ours 2, neither 0', ledger)
         self.assertIn('review: yes, fork/neither rows (seed 2026-10-22): clean', ledger)
         self.assertIn('credits unknown', ledger)
+        self.assertNotIn('ignored for', ledger)
         # Bundles go to <driver folder>/bundles/<id>; results to <driver folder>/<id>.
         folder = os.path.dirname(d.status_path)
         self.assertEqual(self.bundle_dirs, [os.path.join(folder, 'bundles', 'b011')])
@@ -9445,7 +9448,8 @@ class DriverTest(unittest.TestCase):
     def test_run_batch_second_check_failure_is_exception(self):
         d = self._driver(worker=driver.FakeWorker('# report\n## Verdicts\n'))  # no verdicts, twice
         self.assertEqual(d.run_batch('b011'), 'exception')
-        self.assertIn('b011', json.load(open(d.status_path))['exceptions'])
+        with open(d.status_path) as f:
+            self.assertIn('b011', json.load(f)['exceptions'])
         exc = self._status(d)['exceptions']['b011']
         self.assertEqual(exc['stage'], 'checks')
         self.assertTrue(any(p.startswith('0x401000: no verdict line') for p in exc['problems']))
@@ -9705,6 +9709,90 @@ class DriverTest(unittest.TestCase):
         with contextlib.redirect_stderr(err):
             self.assertEqual(wave.main(['run', '--dry-run']), 2)
         self.assertIn('--state', err.getvalue())
+
+    def test_worker_line_never_overwrites_a_triage_verdict(self):
+        """R33: a worker line for a triage-decided row is ignored: not
+        recorded, no fix round, no review, and named in the ledger entry."""
+        r = _SeqWorker(self.CLEAN_REVIEW)
+        d = self._driver(worker=_SeqWorker(
+            self.ALL_OURS + 'verdict 0x403000 fork case probe-x\n'), reviewer=r)
+        with open(self.state_path) as f:
+            state = json.load(f)
+        b = state['batches']['b011']
+        b['rows'][2]['class'] = 'fork-stub'
+        auto = {'side': 'ours', 'case': 'triage-stub', 'losing_kind': 'trace'}
+        b['verdicts']['0x403000'] = auto
+        with open(self.state_path, 'w') as f:
+            json.dump(state, f)
+        self.assertEqual(d.run_batch('b011'), 'closed')
+        self.assertEqual(self._state()['verdicts']['0x403000'], auto)
+        self.assertEqual(len(d.worker.briefs), 1)
+        # b011 is not sampled under this seed, so only the fork line could
+        # have asked for a review; it did not.
+        self.assertFalse(driver.review_needed('b011', {'0x1': ('ours', 'a')}, '2026-10-22')[0])
+        self.assertEqual(r.briefs, [])
+        ledger = self._ledger(d)
+        self.assertIn('- ignored for triage-decided rows: 0x403000 fork\n', ledger)
+        self.assertIn('verdicts: fork 0, ours 3, neither 0', ledger)
+
+    def test_status_writes_keep_a_cleared_exception_cleared(self):
+        d = self._driver(worker=driver.FakeWorker(self.REPORT))
+        with open(self.state_path) as f:
+            state = json.load(f)
+        state['batches']['b012'] = dict(state['batches']['b011'],
+                                        branch='p3/wso-b012', verdicts={})
+        with open(self.state_path, 'w') as f:
+            json.dump(state, f)
+        self.assertEqual(d.run_batch('b012'), 'exception')   # it has no worktree
+        status = self._status(d)
+        self.assertEqual(status['exceptions']['b012']['stage'], 'worktree')
+        del status['exceptions']['b012']                     # the coordinator clears it
+        with open(d.status_path, 'w') as f:
+            json.dump(status, f)
+        self.assertEqual(d.run_batch('b011'), 'closed')
+        status = self._status(d)
+        self.assertNotIn('b012', status['exceptions'])
+        self.assertEqual(status['batches']['b011']['outcome'], 'closed')
+
+    def test_run_reads_cleared_exceptions_from_disk(self):
+        w = _SeqWorker('', self.REPORT)
+        d = self._driver(worker=w)
+        self.assertEqual(d.run_batch('b011'), 'exception')
+        status = self._status(d)
+        status['exceptions'] = {}
+        with open(d.status_path, 'w') as f:
+            json.dump(status, f)
+        d.next_batch = lambda *a, **kw: self.NOTHING
+        self.assertEqual(d.run(), 0)                 # the same Driver retries it
+        self.assertEqual(self._state()['status'], 'closed')
+        self.assertEqual(len(w.briefs), 2)
+
+    def test_stalled_run_exits_4_and_a_cut_clears_it(self):
+        d = self._driver(worker=driver.FakeWorker(self.REPORT))
+        msg = 'nothing left to assign: 3 rows wait on files owned by assigned batches\n'
+        d.next_batch = lambda *a, **kw: (2, msg)
+        self.assertEqual(d.run(), 4)
+        stalled = self._status(d)['stalled']
+        self.assertEqual(stalled['message'], msg.strip())
+        self.assertTrue(stalled['at'])
+        cuts = iter([(0, self.CUT), self.NOTHING])
+        d.next_batch = lambda *a, **kw: next(cuts)
+        d.run_batch = lambda bid: 'closed'
+        self.assertEqual(d.run(), 0)
+        self.assertIsNone(self._status(d)['stalled'])
+
+    def test_dry_run_refuses_the_live_state(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        live = driver._tool('wave').STATE_PATH
+        link = os.path.join(tmp, 'link.json')
+        os.symlink(live, link)   # resolves to the live file: refused too
+        own = os.path.join(tmp, 'docs', 'wso', 'wave-state.json')
+        for path in (live, link, own):
+            d, err = driver.driver_from_args(['--dry-run', '--state', path], repo=tmp)
+            self.assertIsNone(d)
+            self.assertEqual(err[0], 2)
+            self.assertIn('live wave-state file', err[1])
 
 
 if __name__ == '__main__':
