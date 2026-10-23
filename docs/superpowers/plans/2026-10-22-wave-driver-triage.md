@@ -516,6 +516,91 @@ Expected: the table printed and written to the report; the ten sample addresses 
 
 - [ ] **Step 5: Commit** `truth: calibration on the ruling rows, driver records measured verdicts`
 
+### Task 14: ownership claims and a gate lock
+
+Added by thierbig on 2026-10-23. It runs after Task 12 and before Task 13, so that a Claude stream and the GLM driver can work in the same repo independently.
+
+**Files:**
+- Create: `tools/claims.py`, `docs/wso/claims.json` (committed, starts as `{}`)
+- Modify: `tools/wave.py` (`next_batch`), `tools/gates.sh` (the lock), `docs/wso/README.md` (one paragraph)
+- Test: `tests/test_tools.py` (new class `ClaimsTest`)
+
+**Interfaces:**
+- Consumes: `wave.load_state` and the assigned batches' files in `docs/wso/wave-state.json`; `wave.save_state`'s atomic write pattern.
+- Produces:
+  - `docs/wso/claims.json`: a map of stream name to `{holder, since, files: [src paths]}`.
+  - `claims.claim(stream, holder, files, claims_path=..., state_path=...)` fails, raising `ClaimError` that names the conflicting holder, when any file is already held by another stream or by an assigned batch in wave-state.json.
+  - `claims.release(stream, ...)`.
+  - `claims.owned(path, ...) -> str | None`, which returns the holding stream name or the batch id. Assigned batches count as holders.
+  - A CLI, `python3 -I tools/claims.py claim <stream> <holder> <file>... | release <stream> | list`. Writes are atomic: a temp file plus `os.replace`.
+  - `wave.next_batch` skips files held in claims.json exactly as it skips files owned by assigned batches.
+  - `tools/gates.sh` takes an exclusive `flock` on `.gates.lock` at the repo root before running its steps, so a second gate waits. `--no-wait` fails fast with a clear message instead. `.gates.lock` is git-ignored.
+
+- [ ] **Step 1: Write the failing tests:**
+  - `test_claim_and_release`;
+  - `test_claim_conflicts_with_other_stream`;
+  - `test_claim_conflicts_with_assigned_batch`;
+  - `test_owned_reports_batches_and_streams`;
+  - `test_next_batch_skips_claimed_file`;
+  - `test_gate_lock_serializes`: two concurrent invocations of the gate's lock prologue in a temp repo serialise, and `--no-wait` fails fast while the lock is held. Exercise the lock through a dry entry point, not a full gate run.
+- [ ] **Step 2: Run, see them fail**
+- [ ] **Step 3: Implement**
+- [ ] **Step 4: Run, see them pass**; then `tools/gates.sh --base iwd2r/main` (the lock is on the gate's own path)
+- [ ] **Step 5: README paragraph.** In `docs/wso/README.md`:
+  - one writer for wave-state.json, the driver;
+  - claim before you edit, release at merge;
+  - `git pull --ff-only` before every merge into first;
+  - one ledger per plan.
+- [ ] **Step 6: Commit** `claims: ownership claims for streams and a lock that serialises gates`
+
+### Task 15: worker pools and a second queue
+
+Added by thierbig on 2026-10-23. It runs after Task 14 and before Task 13. Several model pools can share the batches, and a second driver can work the import list independently of wave 1.
+
+**Files:**
+- Modify: `tools/driver.py` (pools), `tools/wave.py` (`run` flags, `--queue`, `scorecard_text` pool column, `next_batch` queue source), `tools/claims.py` (holders from every queue's state file), `docs/wso/README.md` (the "Running the batches" section)
+- Test: `tests/test_tools.py` (`DriverTest`, `ClaimsTest`)
+
+**Interfaces:**
+- Consumes: `HeadlessWorker(model, max_turns, wrapper)` (Task 6), `Driver` and its park and budget logic (Tasks 8-9), `claims.owned` (Task 14).
+- Produces:
+  - `Pool = namedtuple('Pool', 'name wrapper model workers')`.
+  - `parse_pool(spec: str) -> Pool` for `NAME=WRAPPER:MODEL[:WORKERS]`. WORKERS defaults to 1, and a malformed spec raises `ValueError`. `DEFAULT_POOL = 'glm=claude-glm:glm-5.3-flash[1m]:2'`.
+  - `Driver(..., pools=[Pool], workers_by_pool=None, budgets={name: credits})`. Each pool gets its own `HeadlessWorker(model=pool.model, wrapper=pool.wrapper)`; tests inject `workers_by_pool={name: FakeWorker}` instead.
+  - The status file holds `status['pools'][name] = {'credits': float, 'budget': float|None, 'parked': {batch_id, at, reason}|None, 'stopped': None|'budget'}`. This replaces Task 9's top-level `status['parked']`, which a run still reads once for migration.
+  - `Driver.pick_pool() -> str | None` returns the first pool, in declaration order, that has a free worker (busy < workers), is not parked and is under its budget. When several pools qualify, a cursor that advances after each assignment rotates the choice (round-robin on ties).
+  - A worker's 429 parks only its own pool: the WIP is committed and `parked` is set on that pool. The other pools keep taking batches.
+  - A pool whose `credits + estimate_next > budget` stops (`stopped: 'budget'`) without affecting the others.
+  - `run()` returns 3 when any pool ended parked by a 429, else 0. A later run resumes each pool's parked batch on that pool before cutting new ones.
+  - The deciding pool is recorded as `batch['pool'] = name` in the batch's state entry (ruling R10). It is printed as a `pool <name>` line in `ledger_entry` and as a pool column in `scorecard_text`.
+  - `wave.py run` flags:
+    - `--pool NAME=WRAPPER:MODEL[:WORKERS]` is repeatable; with no `--pool`, the driver uses one pool, `DEFAULT_POOL`.
+    - `--budget-NAME C` sets a budget per pool; it is parsed after the pools are known.
+    - `--budget C` stays a cap over the sum of all pools' tallies.
+    - `--workers N` still sets the default pool's worker count. Combining it with `--pool` is an error, so that Task 13's command line stays valid.
+  - `--queue wave1|import` selects the state file through `wave.QUEUES`:
+    - `wave1` maps to `docs/wso/wave-state.json`: the `both_changed_differ` rows, with triage applied, and batch ids `b<NNN>`.
+    - `import` maps to `docs/wso/import-state.json`: the `theirs_real_ours_stub` rows plus the entries of `docs/wso/import-list.json`, with no triage, and batch ids `i<NNN>`, so branches and worktrees never collide with wave 1 (ruling R11).
+    - Both use the same schema.
+  - `claims.owned` and `claims.claim` count the assigned batches of every queue's state file as holders; a missing state file holds nothing. As a result, `next_batch` on one queue skips files held by the other queue's assigned batches, and the two queues' files stay disjoint.
+
+- [ ] **Step 1: Write the failing tests** (all with `FakeWorker` and temp state, status and ledger files; never the real wave-state.json):
+  - `test_parse_pool_default_and_errors`;
+  - `test_two_pools_share_batches`: pools a and b, three batches, assigned a, b, a, each recorded in `batch['pool']`;
+  - `test_parked_pool_is_skipped`: a's worker returns `rate_limited` on its first batch; a is parked with the WIP committed, b closes the remaining batches, and `run()` returns 3;
+  - `test_pool_budget_stops_only_that_pool`: a's budget is below one batch's credits, so a stops after its first batch and b continues;
+  - `test_pool_name_reaches_ledger_entry`: `pool b` appears in the `## driver` entry and in the scorecard;
+  - `test_queue_import_uses_its_own_state_and_ids`: a batch cut on `--queue import` lands in import-state.json with id `i001`;
+  - `test_queues_keep_files_disjoint`: a file in an assigned wave1 batch is skipped by the import queue's `next_batch`, and `claims.owned` names that batch.
+- [ ] **Step 2: Run, see them fail**
+- [ ] **Step 3: Implement**
+- [ ] **Step 4: Run, see them pass**; the full tool suite; then `tools/gates.sh --base iwd2r/main`
+- [ ] **Step 5: README.** Update "Running the batches":
+  - `--pool`, `--budget-NAME` and `--queue`;
+  - the per-pool status shape;
+  - the fact that a 429 parks one pool only.
+- [ ] **Step 6: Commit** `driver: worker pools with per-pool budget and park, a second queue for the import list`
+
 ### Task 13: first real batch under watch
 
 **Files:** none new.
