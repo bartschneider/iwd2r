@@ -749,6 +749,7 @@ WIP_GATE_MESSAGE = 'WIP: before gate'
 # The breaker (ruling R45): this many batch exceptions in a row whose
 # worker never produced a transcript halt the run.
 BREAKER_LIMIT = 3
+STATE_COMMIT_TRAILER = 'Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>'
 PUSH_ARGS = ('push', 'iwd2r', 'first:main', 'first:first')
 # Exceptions at these stages are not the batch's own: the run stops.
 GLOBAL_STAGES = ('cut', 'push')
@@ -1046,7 +1047,7 @@ class Driver:
                  base='first', log=None, frida=False, frida_map=None,
                  oracle_run=None, frida_run=None, pools=None,
                  workers_by_pool=None, reviewers_by_pool=None, budgets=None,
-                 queue='wave1', runner=None, clock=None):
+                 queue='wave1', runner=None, clock=None, max_batches=None):
         wave = _tool('wave')
         if queue not in wave.QUEUES:
             raise ValueError('unknown queue %r (one of %s)' % (
@@ -1087,6 +1088,7 @@ class Driver:
         self.workers = (workers if pools is None
                         else sum(p.workers for p in self.pools))
         self.dry_run = dry_run
+        self.max_batches = max_batches
         self.gate = gate
         self.base = base
         self.size = wave.DEFAULT_SIZE
@@ -1109,6 +1111,8 @@ class Driver:
         self.close_batch = wave.close_batch
         self.sync_base = wave._sync_base
         self.write_scorecard = wave.write_scorecard
+        self.cut_worktree = wave._cut_worktree
+        self.apply_triage = wave.apply_triage
         self.worktree_for = wave.worktree_for
         self.load_state = wave.load_state
         self.mechanical_checks = mechanical_checks
@@ -1133,6 +1137,7 @@ class Driver:
         self._halt = False
         self._batch_credits = []   # this run's batches: credits or None
         self._no_transcript = 0    # batch exceptions in a row without one
+        self._began = 0            # batches started in this run (--max-batches)
 
     _runs = _per_thread('runs')
     _worker_ran = _per_thread('worker_ran')
@@ -1251,7 +1256,6 @@ class Driver:
         except OSError as e:
             raise _launch_failed(label, cwd, e) from None
         self._runs.append(res.credits)
-        self._scan_transcript(batch_id, label, res)
         if label.startswith('worker'):
             self._worker_ran.append(worker_ran(res))
         if res.transcript:
@@ -1277,6 +1281,10 @@ class Driver:
         self.log('%s: %s exited %s, credits %s' % (
             batch_id, label, res.exit_code,
             'unknown' if res.credits is None else '%.1f' % res.credits))
+        # Last, after the bookkeeping above: a transcript violation is an
+        # exception, but the run it found still counts as a worker run
+        # for the breaker and its evidence is saved (ruling R68).
+        self._scan_transcript(batch_id, label, res)
         return res
 
     def _scan_transcript(self, batch_id, label, res):
@@ -1807,6 +1815,52 @@ class Driver:
         return 'merging %s into %s failed: %s' % (
             self.base, branch, _one_line((r.stderr or '') + (r.stdout or '')))
 
+    def _commit_state(self, batch_id):
+        """After a close, before the push (ruling R66): commit the wave
+        state and the regenerated scorecard, and only those, on the base,
+        in the worktree that has it checked out, staged by name.  Skipped
+        in a dry run, with nothing to commit, or when a file lies outside
+        that worktree.  Under the lock; a failure is logged (the close
+        stands)."""
+        if self.dry_run:
+            return
+        wt = self.worktree_for(self.repo, self.base)
+        if wt is None:
+            self.log('%s: no worktree has %s; the state is not committed' % (
+                batch_id, self.base))
+            return
+        top = os.path.realpath(wt)
+        rels = []
+        for path in (self.state_path,
+                     self.report_path if self.kind == 'verdicts' else None):
+            if path is None or not os.path.exists(path):
+                continue
+            rel = os.path.relpath(os.path.realpath(path), top)
+            if rel != os.pardir and not rel.startswith(os.pardir + os.sep) \
+                    and rel not in rels:
+                rels.append(rel)
+        if not rels:
+            return
+
+        def git(*args):
+            return subprocess.run(['git', '-C', wt, *args],
+                                  capture_output=True, text=True)
+
+        r = git('add', '--', *rels)
+        if r.returncode == 0 and git('diff', '--cached', '--quiet',
+                                     '--', *rels).returncode == 0:
+            return
+        if r.returncode == 0:
+            sides = [v.get('side') for v in self.load_state(self.state_path)[
+                'batches'][batch_id]['verdicts'].values()]
+            msg = 'wave-state: close %s (ours %d, fork %d, neither %d)\n\n%s\n' % (
+                batch_id, sides.count('ours'), sides.count('fork'),
+                sides.count('neither'), STATE_COMMIT_TRAILER)
+            r = git('commit', '-q', '-m', msg, '--', *rels)
+        if r.returncode != 0:
+            self.log('%s: the state commit failed: %s' % (batch_id, _one_line(
+                (r.stderr or '') + (r.stdout or ''))))
+
     def _wip_tip(self, batch_id, branch):
         """The branch tip's sha when it is the driver's own unpushed WIP
         commit: the one this batch's park recorded, with WIP_MESSAGE, not
@@ -2032,6 +2086,7 @@ class Driver:
                     self.log(text.rstrip())
                 except Exception as e:   # the batch is closed; the scorecard can wait
                     self.log('scorecard not written: %r' % (e,))
+            self._commit_state(batch_id)
             err = self.push()
         batch = self.load_state(self.state_path)['batches'][batch_id]
         entry = ledger_entry(
@@ -2088,6 +2143,65 @@ class Driver:
                         [l for l in text.splitlines() if l.strip()]
                         or ['next_batch exited %s' % rc])
         return None, 1
+
+    def _adoptable(self, taken):
+        """Ids of the batches to adopt (ruling R69), oldest assigned_at
+        first: assigned, no verdict recorded, and claimed by nothing
+        (`taken`: this run's resumes and retries; the status file's
+        running, parked and exception entries).  Wave 1 only."""
+        if self.dry_run or self.queue != 'wave1':
+            return []
+        status = self._read_status()
+        claimed = set(taken) | set(status['running']) | set(status['exceptions'])
+        for holder in [status] + [p for p in status['pools'].values()
+                                  if isinstance(p, dict)]:
+            claimed.update(parked_map(holder.get('parked')))
+        if isinstance(status['current'], dict) and status['current'].get('batch'):
+            claimed.add(status['current']['batch'])
+        batches = self.load_state(self.state_path)['batches']
+        free = [(b.get('assigned_at') or '', bid) for bid, b in batches.items()
+                if b.get('status') == 'assigned' and not b.get('verdicts')
+                and bid not in claimed]
+        return [bid for _at, bid in sorted(free)]
+
+    def _adopt(self, batch_id):
+        """None when batch_id is cut (branch and worktree, as next_batch
+        does under R14) and triaged like a fresh one, else an exit code."""
+        wave = _tool('wave')
+        batch = self.load_state(self.state_path)['batches'][batch_id]
+        claims = os.path.join(os.path.dirname(os.path.abspath(self.state_path)),
+                              'claims.json')
+        try:
+            with self._lock, wave._filelock().hold(claims + '.lock',
+                                                   'wave adopt'):
+                wt, how = self.cut_worktree(self.repo, batch['branch'],
+                                            self.base)
+                if wt is None:
+                    rc, text = 1, '%s not adopted: %s\n' % (batch_id, how)
+                else:
+                    state = self.load_state(self.state_path)
+                    rc, text = self.apply_triage(
+                        self.state_path, self.repo, batch_id, self.triage_path,
+                        state.get('fork_base') or wave.DEFAULT_FORK_BASE)
+                    text = ('%s adopted: worktree %s (%s)\n' % (
+                        batch_id, wt, how)) + text
+        except Exception as e:
+            rc, text = 1, '%s not adopted: adoption raised %r\n' % (batch_id, e)
+        self.log(text.rstrip())
+        if text.startswith(batch_id + ' adopted:'):
+            self._started[batch_id] = self._clock()
+            t = re.search(r'^triage: \d+ auto, (\d+) import, \d+ ambiguous$',
+                          text, re.M)
+            if t:
+                self._imported[batch_id] = int(t.group(1))
+            if rc != 0:
+                self.log('%s: triage exited %s; the rows it could not decide '
+                         'stay for the worker' % (batch_id, rc))
+            self._update_status(lambda s: s.__setitem__('stalled', None))
+            return None
+        self._exception(batch_id, 'cut', [l for l in text.splitlines()
+                                          if l.strip()])
+        return 1
 
     def _cleared(self):
         """Batches whose exception the coordinator cleared on disk: retried
@@ -2449,6 +2563,7 @@ class Driver:
         self._no_transcript = 0
         self._busy = {p.name: 0 for p in self.pools}
         self._parked_now = set()
+        self._began = 0
         self._init_pools()
         if self._read_status()['halted'] is not None:
             self._update_status(lambda s: s.__setitem__('halted', None))
@@ -2484,6 +2599,8 @@ class Driver:
         exhausted = None      # the exit code once a cut finds nothing
         cut_blocked = False   # stalled while batches run: retry after one ends
         failure = None        # 1 when the run must stop
+        adopt = self._adoptable([b for b, _w, _n in pending] + retries)
+        capped = False        # --max-batches reached
         crash = None          # an exception that escaped a batch thread
 
         threads = self._threads = []
@@ -2502,6 +2619,7 @@ class Driver:
         def launch(batch_id, why, name):
             nonlocal running
             running += 1
+            self._began += 1
             self._start(lambda: body(batch_id, why, name))
 
         def reap(block):
@@ -2519,8 +2637,17 @@ class Driver:
             return True
 
         def launch_next():
-            nonlocal exhausted, cut_blocked, failure
+            nonlocal exhausted, cut_blocked, failure, capped
             if self._halt:
+                return False
+            if self.max_batches is not None and self._began >= self.max_batches:
+                if exhausted is None and not capped:
+                    capped = True
+                    stopped = {'at': _now(), 'reason': 'max-batches',
+                               'n': self.max_batches}
+                    self._update_status(lambda s: s.__setitem__('stopped', stopped))
+                    self.log('--max-batches %d: %d started; no new batch '
+                             'starts' % (self.max_batches, self._began))
                 return False
             if pending:
                 with self._lock:
@@ -2552,6 +2679,17 @@ class Driver:
                 return False
             if retries:
                 launch(retries.pop(0), None, name)
+                return True
+            if adopt:
+                batch_id = adopt.pop(0)
+                code = self._adopt(batch_id)
+                if code is not None:
+                    with self._lock:
+                        self._busy[name] -= 1
+                    failure = code
+                    return False
+                self._record_pool(batch_id, name)
+                launch(batch_id, None, name)
                 return True
             batch_id, code = self._cut()
             if batch_id is None:
@@ -2647,6 +2785,10 @@ def _parse(argv):
     p.add_argument('--budget', type=float, default=None,
                    help='credits over all pools: stop before a new batch '
                         'would pass it; --budget-NAME C caps one GLM pool')
+    p.add_argument('--max-batches', type=int, default=None, metavar='N',
+                   help='stop starting batches once N have started in this '
+                        'run (adopted, cut or resumed); the ones in flight '
+                        'finish, and the run exits 0')
     p.add_argument('--seed', default=DEFAULT_SEED,
                    help='the review sample seed (default %(default)s)')
     p.add_argument('--state', help='the queue\'s state file '
@@ -2728,6 +2870,8 @@ def _build(args, repo):
                          '--state PATH: a dry run cuts a real batch (branch, '
                          'worktree, triage commits) in that state file. Point '
                          'it at a copy, never at docs/wso/wave-state.json.')
+    if args.max_batches is not None and args.max_batches < 1:
+        return None, (2, 'wave.py run: --max-batches must be at least 1')
     live_path = wave.QUEUES[queue]['state']
     if args.dry_run:
         live = {os.path.realpath(live_path), os.path.realpath(
@@ -2765,7 +2909,8 @@ def _build(args, repo):
                    frida_map=args.frida_map, pools=pools,
                    workers_by_pool=workers_by_pool,
                    reviewers_by_pool=reviewers_by_pool,
-                   budgets=args.budgets, queue=queue)
+                   budgets=args.budgets, queue=queue,
+                   max_batches=args.max_batches)
     except StatusError as e:
         return None, (1, 'wave.py run: the status file cannot be read: %s' % e)
     except ValueError as e:

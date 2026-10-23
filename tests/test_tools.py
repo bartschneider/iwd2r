@@ -10826,6 +10826,9 @@ class DriverTest(unittest.TestCase):
                 return 0, '%s assigned: 1 rows\n' % self.pending.pop(0)
             return self.NOTHING
         d.next_batch = cut
+        # These batches are assigned already and are handed out by the cut
+        # stub; adoption (R69) has its own tests.
+        d._adoptable = lambda taken: []
         return d
 
     class _BatchWorker(_SeqWorker):
@@ -11354,6 +11357,211 @@ class DriverTest(unittest.TestCase):
             d.run()
         self.assertEqual(self._status(d)['exceptions']['b011']['stage'], 'transcript')
         self.assertEqual(len(w.briefs), 2)
+
+    # -- adoption, --max-batches, the state commit, the breaker (Task 13 prep)
+
+    def _adopt_driver(self, verdict_on=(), **kw):
+        """b011 and b012 assigned in the state with no branch and no
+        worktree, as the old coordinator left them: rows without a class.
+        b011 has a second row triage moves to the import list."""
+        evidence = {'docs/evidence/%X.md' % a: (
+            '---\naddress: 0x%X\nname: F\nkind: oracle\n---\n\n'
+            'corroborated by WSO at e8dd16a7\n' % a)
+            for a in (0x40B000, 0x40C000)}
+        w = self._BatchWorker(credits=0.0)
+        d = self._pool_driver(self._two_pools()[:1], {'a': w},
+                              ids=('b011', 'b012'), base_files=evidence, **kw)
+        del d._adoptable          # the real one
+        for bid in ('b011', 'b012'):
+            wt = os.path.join(self.tmp, 'wt-' + bid)
+            self.git('worktree', 'remove', '--force', wt)
+            self.git('branch', '-D', 'p3/wso-' + bid)
+        with open(self.state_path) as f:
+            state = json.load(f)
+        b = state['batches']
+        b['b011']['assigned_at'] = '2026-10-02T00:00:00+00:00'
+        b['b012']['assigned_at'] = '2026-10-01T00:00:00+00:00'
+        stub = dict(b['b011']['rows'][0], address='0x40B001', name='Stub',
+                    file='src/Stub.cpp')
+        b['b011']['rows'].append(stub)
+        b['b011']['files'].append('src/Stub.cpp')
+        for bid in verdict_on:
+            addr = b[bid]['rows'][0]['address']
+            b[bid]['verdicts'][addr] = {'side': 'ours', 'case': 'x',
+                                        'losing_kind': 'trace'}
+        with open(self.state_path, 'w') as f:
+            json.dump(state, f)
+        triage = [{'address': '0x40B000', 'class': 'ambiguous', 'file': 'src/F11.cpp',
+                   'name': 'F11', 'reason': 'r'},
+                  {'address': '0x40B001', 'class': 'ours-stub', 'file': 'src/Stub.cpp',
+                   'name': 'Stub', 'reason': 'r'},
+                  {'address': '0x40C000', 'class': 'ambiguous', 'file': 'src/F12.cpp',
+                   'name': 'F12', 'reason': 'r'}]
+        d.triage_path = os.path.join(self.tmp, 'triage.json')
+        with open(d.triage_path, 'w') as f:
+            json.dump(triage, f)
+        return d, w
+
+    def test_assigned_batches_without_worktrees_are_adopted_in_order_before_any_cut(self):
+        d, w = self._adopt_driver()
+        order = []
+        d.next_batch = lambda *a, **kw: order.append('cut') or self.NOTHING
+        run = w.run
+        w.run = lambda brief, cwd: order.append('worker') or run(brief, cwd)
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 0)
+        self.assertEqual(w.ids, ['b012', 'b011'])       # oldest assigned_at first
+        self.assertEqual(order, ['worker', 'worker', 'cut'])
+        root = os.path.join(self.tmp, 'repo-worktrees')
+        for bid in ('b011', 'b012'):
+            self.assertTrue(os.path.isdir(os.path.join(root, 'p3-wso-' + bid)))
+            self.assertEqual(self._state_of(d, bid)['status'], 'closed')
+            self.assertEqual(self._state_of(d, bid)['pool'], 'a')
+        self.assertTrue(any('b012 adopted' in l for l in self.logs))
+
+    def test_adoption_applies_triage(self):
+        d, w = self._adopt_driver()
+        d.next_batch = lambda *a, **kw: self.NOTHING
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 0)
+        b = self._state_of(d, 'b011')
+        self.assertEqual([r['address'] for r in b['rows']], ['0x40B000'])
+        self.assertTrue(all(r['class'] == 'ambiguous' for r in b['rows']))
+        self.assertEqual(b['files'], ['src/F11.cpp'])
+        self.assertEqual(self._state_of(d, 'b012')['rows'][0]['class'], 'ambiguous')
+        with open(os.path.join(self.root, 'docs', 'wso', 'import-list.json')) as f:
+            self.assertEqual([e['address'] for e in json.load(f)], ['0x40B001'])
+
+    def test_an_assigned_batch_with_a_verdict_is_not_adopted(self):
+        d, w = self._adopt_driver(verdict_on=('b012',))
+        d.next_batch = lambda *a, **kw: self.NOTHING
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 0)
+        self.assertEqual(w.ids, ['b011'])
+        self.assertEqual(self._state_of(d, 'b012')['status'], 'assigned')
+        self.assertNotIn('class', self._state_of(d, 'b012')['rows'][0])
+        self.assertFalse(os.path.exists(os.path.join(
+            self.tmp, 'repo-worktrees', 'p3-wso-b012')))
+
+    def test_adoption_skips_batches_claimed_in_the_status_file(self):
+        d, w = self._adopt_driver()
+        os.makedirs(os.path.dirname(d.status_path), exist_ok=True)
+        with open(d.status_path, 'w') as f:
+            json.dump({'exceptions': {'b012': {'stage': 'checks', 'at': 't',
+                                               'problems': ['x']}}}, f)
+        d.next_batch = lambda *a, **kw: self.NOTHING
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 0)
+        self.assertEqual(w.ids, ['b011'])
+
+    def test_adoption_only_on_wave1(self):
+        d, w = self._adopt_driver()
+        d.queue = 'import'
+        self.assertEqual(d._adoptable([]), [])
+
+    def test_max_batches_starts_exactly_n_and_exits_0(self):
+        w = self._BatchWorker(credits=0.0)
+        d = self._pool_driver(self._two_pools()[:1], {'a': w}, max_batches=2)
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 0)
+        self.assertEqual(w.ids, ['b011', 'b012'])
+        self.assertEqual(self.pending, ['b013'])
+        stopped = self._status(d)['stopped']
+        self.assertEqual((stopped['reason'], stopped['n']), ('max-batches', 2))
+        self.assertTrue(stopped['at'])
+        self.assertEqual(self._state_of(d, 'b013')['status'], 'assigned')
+        # The next run, without the cap, clears it and does the third.
+        d.max_batches = None
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 0)
+        self.assertIsNone(self._status(d)['stopped'])
+        self.assertEqual(w.ids, ['b011', 'b012', 'b013'])
+
+    def test_max_batches_with_a_park_still_exits_3(self):
+        wa = self._BatchWorker(credits=0.0, rate_limited=True)
+        wb = self._BatchWorker(credits=0.0)
+        d = self._pool_driver(self._two_pools(), {'a': wa, 'b': wb}, max_batches=2)
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 3)
+        self.assertEqual(wa.ids + wb.ids, ['b011', 'b012'])
+        self.assertEqual(self.pending, ['b013'])
+        self.assertEqual(self._status(d)['stopped']['reason'], 'max-batches')
+
+    def test_max_batches_counts_adopted_batches_and_is_validated(self):
+        d, w = self._adopt_driver(max_batches=1)
+        cuts = []
+        d.next_batch = lambda *a, **kw: cuts.append(1) or self.NOTHING
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 0)
+        self.assertEqual(w.ids, ['b012'])
+        self.assertEqual(cuts, [])
+        args, err = driver._parse(['--max-batches', '3'])
+        self.assertEqual(args.max_batches, 3)
+        d, err = driver.driver_from_args(['--max-batches', '0'], repo=self._tmpdir())
+        self.assertEqual(err[0], 2)
+
+    def test_the_state_is_committed_after_each_close_before_the_push(self):
+        w = self._BatchWorker(credits=0.0)
+        d = self._pool_driver(self._two_pools()[:1], {'a': w}, ids=('b011',))
+        docs = os.path.join(self.root, 'docs', 'wso')
+        os.makedirs(docs)
+        state = os.path.join(docs, 'wave-state.json')
+        shutil.move(self.state_path, state)
+        d.state_path = state
+        d.report_path = os.path.join(docs, 'xrec-report.md')
+        _write(d.report_path, 'old\n')
+        self.git('add', 'docs/wso/wave-state.json', 'docs/wso/xrec-report.md')
+        self.git('commit', '-qm', 'state')
+        _write(os.path.join(self.root, 'README'), 'dirty\n')   # not ours to commit
+        d.write_scorecard = lambda sp, rp, tp, calibration_path=None: (
+            _write(rp, 'scorecard\n') or (0, 'scorecard written'))
+        at_push = []
+        d.push = lambda: at_push.append(self.git('log', '-1', '--format=%s', 'first').stdout.strip())
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 0)
+        self.assertEqual(at_push, ['wave-state: close b011 (ours 1, fork 0, neither 0)'])
+        head = self.git('show', '--format=%B', '--name-only', 'first').stdout
+        self.assertIn('Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>', head)
+        names = self.git('show', '--format=', '--name-only', 'first').stdout.split()
+        self.assertEqual(sorted(names), ['docs/wso/wave-state.json', 'docs/wso/xrec-report.md'])
+        self.assertEqual(self.git('status', '--porcelain').stdout.strip(), 'M README')
+        # Nothing to commit: no second commit.
+        before = self.git('rev-parse', 'first').stdout
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            d._commit_state('b011')
+        self.assertEqual(self.git('rev-parse', 'first').stdout, before)
+
+    def test_a_dry_run_never_commits_the_state(self):
+        d = self._pool_driver(self._two_pools()[:1], {'a': None}, ids=('b011',))
+        d.dry_run = True
+        docs = os.path.join(self.root, 'docs', 'wso')
+        os.makedirs(docs)
+        d.state_path = os.path.join(docs, 'wave-state.json')
+        _write(d.state_path, '{}\n')
+        before = self.git('rev-parse', 'first').stdout
+        d._commit_state('b011')
+        self.assertEqual(self.git('rev-parse', 'first').stdout, before)
+        self.assertNotIn('wave-state.json', self.git('diff', '--cached', '--name-only').stdout)
+
+    def test_a_transcript_violation_on_the_first_run_does_not_trip_the_breaker(self):
+        """R68: the scan runs after the run's bookkeeping, so the run still
+        counts as a worker run and its evidence is saved."""
+        bad = self._tcalls(('Bash', {'command': 'git show wso/main:src/F11.cpp'}))
+        with open(bad, 'a') as f:      # the worker really ran: a successful turn
+            f.write(json.dumps(self._turn()) + '\n')
+        w = self._twork([bad])
+        d = self._pool_driver(self._two_pools()[:1], {'a': w})
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 0)
+        status = self._status(d)
+        self.assertEqual(sorted(status['exceptions']), ['b011', 'b012', 'b013'])
+        self.assertTrue(all(e['stage'] == 'transcript'
+                            for e in status['exceptions'].values()))
+        self.assertIsNone(status['halted'])
+        self.assertEqual(len(w.briefs), 3)
+        for bid in ('b011', 'b012', 'b013'):
+            for name in ('worker.json', 'worker.report.md', 'worker.brief.md'):
+                self.assertTrue(os.path.exists(os.path.join(d.driver_dir, bid, name)))
 
     def test_frida_run_passes_new_attempt(self):
         truth = driver._tool('truth')

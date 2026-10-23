@@ -230,6 +230,20 @@ launches per attempt until `--new-attempt "<why>"`; and every merge into
   (`stopped: "budget"`) and the others go on. Z.ai credits price only
   GLM turns, so `--budget-NAME` on a pool whose model is not GLM is
   refused with a message (ruling R40), and so is a name that is no pool.
+- `--max-batches N`: stop starting batches once N have started in this
+  run, counting adopted, cut and resumed ones. The batches in flight
+  finish; the run then exits 0 (3 if a pool ended parked) with
+  `stopped: {reason: "max-batches", n: N}` in the status file.
+- Adoption (`--queue wave1`): before any new cut, the driver adopts every
+  batch in state `assigned` with no recorded verdict that nothing in the
+  status file claims (running, parked or exception), oldest `assigned_at`
+  first. It cuts the branch and worktree when they are missing, as `next`
+  does, applies triage (auto verdicts, ours-stub rows to the import list,
+  a `class` on every row), then runs it like a fresh cut. A batch with
+  any verdict is left for the coordinator.
+- After every close the driver commits `docs/wso/wave-state.json` and the
+  regenerated `docs/wso/xrec-report.md` on `first` (staged by name, message
+  `wave-state: close <id> (ours N, fork N, neither N)`), before the push.
 - `--queue wave1|import`: which list to work (default `wave1`). `wave1`
   is `docs/wso/wave-state.json`: the `both_changed_differ` rows, triaged,
   batch ids `b<NNN>`, brief `brief-template.md`, closed with verdicts.
