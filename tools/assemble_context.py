@@ -188,6 +188,27 @@ def _bg2_lines(fname, bg2_db):
     return out
 
 
+CALLER_CAP = 12
+CALLER_LINES = 40
+
+
+def _decompile_path(exports, address, name=None):
+    """<exports>/decompile/ADDR.c (tools/ghidra/export_decompiles.py), else
+    the older <exports>/<name>.c; None when neither exists."""
+    cands = [os.path.join(exports, "decompile", f"{address:X}.c")]
+    if name:
+        cands.append(os.path.join(exports, name + ".c"))
+    for path in cands:
+        if os.path.isfile(path):
+            return path
+    return None
+
+
+def _read_text(path):
+    with open(path, encoding="utf-8", errors="replace") as f:
+        return f.read()
+
+
 def bundle(address: int, *, exports=None, src_root=None, ids_dir=None,
            bg2_db=None, decompile_text=None) -> str:
     """The brief for one function: digest, decompile, callees with
@@ -209,11 +230,10 @@ def bundle(address: int, *, exports=None, src_root=None, ids_dir=None,
     src_ok = bool(src_root) and os.path.isdir(src_root)
 
     text = decompile_text
-    if text is None and fname:
-        path = os.path.join(exports, fname + ".c")
-        if os.path.isfile(path):
-            with open(path, encoding="utf-8", errors="replace") as f:
-                text = f.read()
+    if text is None:
+        path = _decompile_path(exports, address, fname)
+        if path:
+            text = _read_text(path)
 
     # ## digest
     if text:
@@ -232,9 +252,32 @@ def bundle(address: int, *, exports=None, src_root=None, ids_dir=None,
     if text is not None:
         decomp_text = text.rstrip("\n")
     elif fname:
-        decomp_text = f"(no decompile: no {fname}.c under {exports})"
+        decomp_text = "decompile: not exported"
     else:
         decomp_text = (f"(no decompile: no functions.tsv under {exports})")
+
+    # ## callers (decompile)
+    caller_addrs = sorted(a for a, dsts in callgraph.items()
+                          if address in dsts and a != address)
+    caller_lines = []
+    shown = 0
+    for caddr in caller_addrs:
+        cname = functions.get(caddr, (f"0x{caddr:x}", 0))[0]
+        path = _decompile_path(exports, caddr, functions.get(caddr, ("",))[0])
+        if path is None:
+            continue
+        if shown >= CALLER_CAP:
+            caller_lines.append(f"... (+{len(caller_addrs)} callers in all; "
+                                f"first {CALLER_CAP} with a decompile shown)")
+            break
+        shown += 1
+        head = _read_text(path).splitlines()[:CALLER_LINES]
+        caller_lines.append(f"### {cname} @ 0x{caddr:x}")
+        caller_lines.extend(head)
+    if not caller_addrs:
+        caller_lines = [f"(no callers in the callgraph for {hexaddr})"]
+    elif not caller_lines:
+        caller_lines = ["decompile: not exported"]
 
     # ## callees
     callee_addrs = callgraph.get(address, [])
@@ -286,7 +329,9 @@ def bundle(address: int, *, exports=None, src_root=None, ids_dir=None,
         ids_lines.append("(no ids dir)")
 
     body = "\n".join(["## digest", digest_text, "",
-                      "## decompile", decomp_text, "",
+                      "## Decompile", decomp_text, "",
+                      "## Callers (decompile, first 40 lines each)"]
+                     + caller_lines + ["",
                       "## callees"] + callee_lines + ["",
                       "## ids"] + ids_lines)
 
