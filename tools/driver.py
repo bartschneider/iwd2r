@@ -7,6 +7,7 @@ template, the batch loop (`wave.py run`) with its budget stop, 429 park
 and resume, and `--clear`.  The driver itself uses no model."""
 import argparse
 import collections
+import contextlib
 import datetime
 import fcntl
 import glob
@@ -335,7 +336,8 @@ DEFAULT_TIMEOUT = 10800   # seconds a worker or reviewer run may take (R71)
 # Process groups of the live worker and reviewer runs (pgid = child pid), so
 # that stopping the driver stops them (ruling R72).
 _LIVE = set()
-_LIVE_LOCK = threading.Lock()
+# Re-entrant: the stop handler runs on a thread that may hold it already.
+_LIVE_LOCK = threading.RLock()
 
 
 class _Stop(BaseException):
@@ -1008,9 +1010,8 @@ def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
     if os.path.isfile(_vanilla_exe()):
         steps.append((_parity_python() + ['tools/parity/run.py', '--base', 'first'],
                       'tools/parity/run.py'))
-    steps.append((['python3', '-I', 'tools/gen_map.py', '--check'],
-                  'tools/gen_map.py --check (run `python3 -I tools/gen_map.py` '
-                  'and commit docs/MAP.md)'))
+    # docs/MAP.md is not the batch's: the driver regenerates it once at close,
+    # on the merged tree (_regen_map), so parallel batches never conflict.
     for argv, label in steps:
         proc = run(argv, cwd=worktree, capture_output=True, text=True)
         if proc.returncode != 0:
@@ -1520,6 +1521,7 @@ class Driver:
             docs, os.path.basename(wave.QUEUES[queue]['template']))
         self.report_path = os.path.join(docs, 'xrec-report.md')
         self.probe_path = os.path.join(docs, 'probe-list.json')
+        self.import_list_path = os.path.join(repo, wave.IMPORT_LIST_REL)
         self.calibration_path = os.path.join(docs, 'truth-calibration.json')
         truth = _tool('truth')
         self.frida = frida
@@ -1547,6 +1549,11 @@ class Driver:
         # Ruling R62: the one lock over every wave-state mutation and
         # repo-level git operation; never taken twice by one thread.
         self._lock = threading.Lock()
+        # Git writes in progress (their thread idents), so a stop waits for
+        # them: a signal must not land mid commit or fast-forward.
+        self._write_cv = threading.Condition(threading.RLock())
+        self._writers = {}         # thread ident -> nesting depth
+        self._stop_deferred = False
         self._ctx = _BatchContext()
         self._runner = runner      # runs a callable on its own thread; None: threads
         self._clock = time.monotonic if clock is None else clock
@@ -1677,6 +1684,8 @@ class Driver:
     def _run(self, worker, brief, cwd, batch_id, label):
         """One worker run; the brief, report and result land in
         <driver folder>/<batch_id>/<label>.*"""
+        if self._stopping:     # stopped before this launch: start nothing
+            raise _Stop()
         try:
             res = worker.run(brief, cwd)
         except OSError as e:
@@ -2265,6 +2274,14 @@ class Driver:
         self._union_merge_attributes()
         r = subprocess.run(['git', '-C', worktree, 'merge', '--no-edit', '-q',
                             self.base], capture_output=True, text=True)
+        if r.returncode != 0 and self._only_map_conflicts(worktree):
+            # A worker's own docs/MAP.md edit: the close regenerates the map
+            # on the merged tree anyway, so the base's copy stands.
+            r = self._git_in(worktree, 'checkout', '--theirs', '--', 'docs/MAP.md')
+            if r.returncode == 0:
+                r = self._git_in(worktree, 'add', '--', 'docs/MAP.md')
+            if r.returncode == 0:
+                r = self._git_in(worktree, 'commit', '-q', '--no-edit')
         if r.returncode == 0:
             self.log('%s: %s merged into it before the close' % (branch, self.base))
             return None
@@ -2273,18 +2290,101 @@ class Driver:
         return 'merging %s into %s failed: %s' % (
             self.base, branch, _one_line((r.stderr or '') + (r.stdout or '')))
 
+    STOP_WAIT = 30     # seconds a stop waits for a git write in progress
+
+    @contextlib.contextmanager
+    def _writing(self):
+        """A git write is in progress on this thread: a stop waits for it
+        (bounded by STOP_WAIT), and a stop that lands on this very thread
+        waits for the write's end and is raised there."""
+        tid = threading.get_ident()
+        with self._write_cv:
+            self._writers[tid] = self._writers.get(tid, 0) + 1
+        try:
+            yield
+        finally:
+            with self._write_cv:
+                n = self._writers[tid] - 1
+                if n:
+                    self._writers[tid] = n
+                else:
+                    del self._writers[tid]
+                self._write_cv.notify_all()
+                deferred = not n and self._stop_deferred
+            if deferred:
+                self._stop_deferred = False
+                raise _Stop()
+
+    def _on_stop(self, signum, _frame):
+        """SIGTERM/SIGINT: kill the workers, let a git write in progress
+        finish (bounded), then raise _Stop.  Only locks that are re-entrant
+        are taken here: the signal may land while this thread holds them."""
+        self._stopping = True
+        kill_live_groups()
+        with self._write_cv:
+            if threading.get_ident() in self._writers:
+                self._stop_deferred = True   # raised when its write ends
+                return
+            deadline = time.monotonic() + self.STOP_WAIT
+            while self._writers:
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    break
+                self._write_cv.wait(left)
+        raise _Stop()
+
+    def _git_in(self, worktree, *args):
+        return subprocess.run(['git', '-C', worktree, *args],
+                              capture_output=True, text=True)
+
+    def _only_map_conflicts(self, worktree):
+        r = self._git_in(worktree, 'diff', '--name-only', '--diff-filter=U')
+        return r.returncode == 0 and r.stdout.split() == ['docs/MAP.md']
+
+    def _regen_map(self, worktree):
+        """None, or why not: regenerate docs/MAP.md on the merged tree
+        (batches no longer carry it, so parallel closes cannot conflict)
+        and commit it by name when it changed; `gen_map.py --check` passes
+        after the fast-forward.  Under the lock."""
+        gen = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'gen_map.py')
+        if not os.path.isfile(os.path.join(worktree, 'docs', 'MAP.md')):
+            return None        # no map to keep current
+        if subprocess.run([sys.executable, '-I', gen, '--repo', worktree,
+                           '--check'], capture_output=True,
+                          text=True).returncode == 0:
+            return None        # current already (the commit line aside)
+        r = subprocess.run([sys.executable, '-I', gen, '--repo', worktree],
+                           capture_output=True, text=True)
+        if r.returncode != 0:
+            return _one_line((r.stderr or '') + (r.stdout or '')) or \
+                'gen_map.py exit %s' % r.returncode
+        st = self._git_in(worktree, 'status', '--porcelain', '--', 'docs/MAP.md')
+        if st.returncode != 0:
+            return _one_line(st.stderr) or 'git status failed'
+        if not st.stdout.strip():
+            return None
+        r = self._git_in(worktree, 'add', '--', 'docs/MAP.md')
+        if r.returncode == 0:
+            r = self._git_in(
+                worktree, 'commit', '-q', '-m',
+                'map: regenerate docs/MAP.md on the merged tree\n\n%s\n'
+                % STATE_COMMIT_TRAILER, '--', 'docs/MAP.md')
+        if r.returncode != 0:
+            return _one_line((r.stderr or '') + (r.stdout or '')) or \
+                'exit %s' % r.returncode
+        return None
+
     def _commit_state(self, batch_id):
         """After a close, before the push (rulings R66, R71): commit the
         wave state, the regenerated scorecard and the probe list (ruling
         R73, when it exists), and only those, on the base, in the
-        worktree that has it checked out, staged by name.
-        Wave 1 only: the import queue's state is not committed (its
-        scorecard is never written, and its state file stays a working
-        file of the coordinator).  Skipped in a dry run, with nothing to
+        worktree that has it checked out, staged by name.  The import
+        list goes with either queue's state, and the import queue
+        commits its state file (no scorecard).  Skipped in a dry run, with nothing to
         commit, or when a file lies outside that worktree.  Under the
         lock.  Whatever goes wrong is logged, those paths are unstaged,
         one aoe line is sent, and the push still happens."""
-        if self.dry_run or self.kind != 'verdicts':
+        if self.dry_run:
             return
         rels = []
         try:
@@ -2309,9 +2409,13 @@ class Driver:
         if wt is None:
             return 'no worktree has %s' % self.base
         top = os.path.realpath(wt)
-        paths = [self.state_path, self.report_path, self.probe_path]
-        if self._recompared:
-            paths.append(self.disagreements_path)   # recompare rewrote it
+        if self.kind == 'verdicts':
+            paths = [self.state_path, self.report_path, self.probe_path]
+            if self._recompared:
+                paths.append(self.disagreements_path)   # recompare rewrote it
+        else:    # the import queue: its state (never a scorecard)
+            paths = [self.state_path]
+        paths.append(self.import_list_path)   # ours-stub rows leave wave 1 for it
         for path in paths:
             if not os.path.exists(path):
                 continue
@@ -2337,7 +2441,8 @@ class Driver:
             return None
         sides = [v.get('side') for v in self.load_state(self.state_path)[
             'batches'][batch_id]['verdicts'].values()]
-        msg = 'wave-state: close %s (ours %d, fork %d, neither %d)\n\n%s\n' % (
+        msg = '%s: close %s (ours %d, fork %d, neither %d)\n\n%s\n' % (
+            'wave-state' if self.kind == 'verdicts' else 'import-state',
             batch_id, sides.count('ours'), sides.count('fork'),
             sides.count('neither'), STATE_COMMIT_TRAILER)
         r = git('commit', '-q', '-m', msg, '--', *rels)
@@ -2630,7 +2735,7 @@ class Driver:
         if failed:
             return self._exception(batch_id, 'record', failed)
         self._stage(batch_id, 'close')
-        with self._lock:
+        with self._lock, self._writing():
             commits = self._commits(batch['branch'])
             # Uncommitted paths were a mechanical-check problem already
             # (ruling R71); nothing is committed on the worker's behalf.
@@ -2641,6 +2746,13 @@ class Driver:
                 sync = self._sync_branch(batch['branch'], worktree)
                 if sync:
                     rc, text = 1, sync
+                    break
+                try:
+                    why = self._regen_map(worktree)
+                except Exception as e:
+                    why = 'raised %r' % (e,)
+                if why:
+                    rc, text = 1, 'regenerating docs/MAP.md failed: %s' % why
                     break
                 try:
                     rc, text = self.close_batch(
@@ -2657,7 +2769,7 @@ class Driver:
             return self._exception(batch_id, 'close', [
                 l.strip() for l in text.splitlines() if l.strip()])
         self.log(text.rstrip())
-        with self._lock:
+        with self._lock, self._writing():
             if self.kind == 'verdicts':
                 # The import queue has no verdicts: its state must not
                 # overwrite wave 1's scorecard.
@@ -3165,15 +3277,11 @@ class Driver:
                      'stops' % (holder, self.status_path))
             return 1
         self._stopping = False
+        self._stop_deferred = False
         previous = {}
-
-        def stop(signum, _frame):
-            self._stopping = True
-            kill_live_groups()
-            raise _Stop()
         for sig in (signal.SIGTERM, signal.SIGINT):
             try:
-                previous[sig] = signal.signal(sig, stop)
+                previous[sig] = signal.signal(sig, self._on_stop)
             except ValueError:     # not the main thread: no handler
                 pass
         try:
@@ -3225,6 +3333,8 @@ class Driver:
         """Run fn on its own thread (the default), or as the injected
         runner says; the synchronous runner `lambda fn: fn()` keeps a
         test deterministic."""
+        if self._stopping:
+            raise _Stop()
         if self._runner is not None:
             self._runner(fn)
         elif sum(p.workers for p in self.pools) <= 1:

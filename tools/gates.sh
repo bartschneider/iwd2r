@@ -4,6 +4,7 @@
 # minutes. Linux presets always; the Windows builds with --windows.
 #
 #   tools/gates.sh [--base REV] [--windows] [--skip-clang] [--no-wait]
+#                  [--summary-fixture]
 #
 # --base is the evidence check's base (default: iwd2r/main, what CI's push
 # event would have used). Engine tests run serially and muted. Exits 1 on the
@@ -13,12 +14,15 @@
 # the MAIN repo root (shared by every worktree) and a second gate waits for it.
 # --no-wait fails fast, naming the holder, instead. --dry-lock SECONDS takes
 # the lock, holds it that long and exits 0 without running any step (tests).
+# The summary prints `step <name>: <seconds>s` per step, `gates: total <s>s` and
+# whether ccache was used (both Linux presets, when `command -v ccache`
+# succeeds). --summary-fixture runs two trivial steps and the summary (tests).
 # Exit status: 3 for --no-wait with the lock held, 4 when flock itself fails.
 # The lock file is git-ignored: `git clean -X` deletes it mid-hold, and a new
 # gate would then lock a fresh inode and run beside the old one.
 set -u
 cd "$(dirname "$0")/.."
-BASE=iwd2r/main; WINDOWS=0; CLANG=1; NOWAIT=0; DRYLOCK=
+BASE=iwd2r/main; WINDOWS=0; CLANG=1; NOWAIT=0; DRYLOCK=; FIXTURE=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --base) BASE="$2"; shift 2 ;;
@@ -26,9 +30,35 @@ while [ $# -gt 0 ]; do
         --skip-clang) CLANG=0; shift ;;
         --no-wait) NOWAIT=1; shift ;;
         --dry-lock) DRYLOCK="$2"; shift 2 ;;
+        --summary-fixture) FIXTURE=1; shift ;;
         *) echo "gates: unknown option $1" >&2; exit 2 ;;
     esac
 done
+failed=()
+GATE_START=$SECONDS
+USE_CCACHE=0
+command -v ccache >/dev/null 2>&1 && USE_CCACHE=1
+step() {
+    local name="$1" t0=$SECONDS; shift
+    echo "=== $name"
+    # fd 9 (the gate lock) is closed in every child: a surviving orphan must
+    # not keep the lock after this script is killed.
+    if "$@" 9>&-; then echo "--- $name: ok"; else echo "--- $name: FAILED"; failed+=("$name"); fi
+    echo "step $name: $((SECONDS - t0))s"
+}
+summary() {
+    echo
+    echo "gates: total $((SECONDS - GATE_START))s"
+    if [ "$USE_CCACHE" = 1 ]; then echo "gates: ccache used (both linux presets)"
+    else echo "gates: ccache not used (not installed)"; fi
+    if [ ${#failed[@]} -eq 0 ]; then echo "gates: all passed"; return 0; fi
+    echo "gates: FAILED: ${failed[*]}"; return 1
+}
+if [ "$FIXTURE" = 1 ]; then
+    step "fixture one" true
+    step "fixture two" true
+    summary; exit $?
+fi
 # The lock lives at the main repo root, not at this worktree's root: batch
 # worktrees run this script too, and a per-worktree lock would serialise nothing.
 GATE_LOCK="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.gates.lock"
@@ -50,6 +80,7 @@ fi
 # Record the holder for the messages above (the lock is on the inode, so
 # rewriting the file through its path keeps it).
 echo "held by pid $$ in $PWD since $(date -u +%FT%TZ)" > "$GATE_LOCK"
+GATE_START=$SECONDS   # the total excludes the wait for the lock
 if [ -n "$DRYLOCK" ]; then sleep "$DRYLOCK" 9>&-; exit 0; fi
 export IWD2R_AUDIO=null SDL_AUDIO_DRIVER=dummy
 # Data tests read a Linux-local copy of the vanilla game when one exists:
@@ -118,17 +149,17 @@ copy_unchanged() {
     fi
     rm -f "$now"
 }
-failed=()
-step() {
-    local name="$1"; shift
-    echo "=== $name"
-    # fd 9 (the gate lock) is closed in every child: a surviving orphan must
-    # not keep the lock after this script is killed.
-    if "$@" 9>&-; then echo "--- $name: ok"; else echo "--- $name: FAILED"; failed+=("$name"); fi
-}
 linux_preset() {
     local preset="$1" log rc skipped
-    [ -f "build/$preset/CMakeCache.txt" ] || cmake --preset "$preset" || return 1
+    # ccache: the launcher is a cache variable, so an existing build directory
+    # is reconfigured once when it does not match (and cleared when ccache is
+    # gone, or every compile would fail on the missing launcher).
+    local want="" cache="build/$preset/CMakeCache.txt"
+    [ "$USE_CCACHE" = 1 ] && want=ccache
+    if [ ! -f "$cache" ] || [ "$(sed -n 's/^CMAKE_CXX_COMPILER_LAUNCHER:[A-Z]*=//p' "$cache")" != "$want" ]; then
+        cmake --preset "$preset" -DCMAKE_C_COMPILER_LAUNCHER="$want" \
+            -DCMAKE_CXX_COMPILER_LAUNCHER="$want" || return 1
+    fi
     cmake --build --preset "$preset" || return 1
     log=$(mktemp)
     # The cases are independent processes (data views, no shared state), so
@@ -192,6 +223,4 @@ if [ "$WINDOWS" = 1 ]; then
     step "windows x64 build" python3 -c "import sys; sys.path.insert(0, 'tools'); import play; play.sync_windows(); play.build_windows()"
 fi
 [ -n "$COPY_MANIFEST" ] && rm -f "$COPY_MANIFEST"
-echo
-if [ ${#failed[@]} -eq 0 ]; then echo "gates: all passed"; exit 0; fi
-echo "gates: FAILED: ${failed[*]}"; exit 1
+summary; exit $?
