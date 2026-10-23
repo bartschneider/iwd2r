@@ -19,14 +19,31 @@ CASES_DIR = os.path.join(ROOT, 'oracle', 'cases')
 
 SECTION = '## Decompiled (Ghidra)'
 
-KEYWORDS = frozenset({'return', 'sizeof', 'if', 'while', 'for', 'switch',
-                      'else', 'do', 'case', 'goto', 'defined'})
+KEYWORDS = frozenset({
+    'return', 'sizeof', 'if', 'while', 'for', 'switch', 'else', 'do', 'case',
+    'default', 'break', 'continue', 'goto', 'const', 'static', 'inline',
+    'volatile', 'register', 'signed', 'unsigned', 'true', 'false', 'NULL',
+    'typedef'})
+QUALIFIERS = frozenset({'const', 'static', 'volatile', 'register', 'signed', 'unsigned'})
+# C and Ghidra type names (a cast or a local's declaration).
+TYPE_NAMES = frozenset({
+    'void', 'bool', 'char', 'short', 'int', 'long', 'float', 'double',
+    'uchar', 'ushort', 'uint', 'ulong', 'longlong', 'ulonglong', 'byte',
+    'sbyte', 'word', 'dword', 'qword', 'size_t', 'intptr_t', 'uintptr_t',
+    'wchar_t', 'int8_t', 'int16_t', 'int32_t', 'int64_t', 'uint8_t',
+    'uint16_t', 'uint32_t', 'uint64_t'})
+TYPE_PATTERN = re.compile(r'^(?:(?:u?int|undefined|float|code)\d*)$')
 # Ghidra pseudo-operations: pure arithmetic helpers, not calls.
 PSEUDO_OPS = re.compile(
-    r'^(?:CONCAT|SUB|ZEXT|SEXT|SBORROW|SCARRY|CARRY|POPCOUNT|LZCOUNT|ROL|ROR'
-    r'|PIECE|MULT|ABS|FLOAT2INT|INT2FLOAT|NAN|TRUNC|CEIL|FLOOR|ROUND|SQRT)\d*$')
-CALL = re.compile(r'\b([A-Za-z_][\w:~]*)\s*\(')
-DEREF_AFTER = frozenset({'return', 'else', 'case', 'do'})
+    r'^(?:CONCAT|SUB|ZEXT|SEXT|SBORROW|SCARRY|CARRY|PIECE|MULT)\d*$'
+    r'|^(?:POPCOUNT|LZCOUNT|abs|ROL\d*|ROR\d*|ABS|FLOAT2INT|INT2FLOAT|NAN'
+    r'|TRUNC|CEIL|FLOOR|ROUND|SQRT)$')
+IDENT = re.compile(r'[A-Za-z_]\w*(?:::[A-Za-z_~]\w*)*')
+NUMBER = re.compile(r'\b\d[\w.]*')
+
+
+def _is_type(word):
+    return word in TYPE_NAMES or bool(TYPE_PATTERN.match(word))
 
 
 def _section_code(text):
@@ -42,23 +59,78 @@ def _section_code(text):
     return '\n'.join(lines)
 
 
+def _is_cast(inner):
+    """Whether the text between parentheses is a bare type (a cast)."""
+    words = re.findall(r'[A-Za-z_]\w*|\*', inner)
+    return bool(words) and all(w == '*' or w in KEYWORDS or _is_type(w) for w in words) \
+        and any(w != '*' for w in words)
+
+
 def _is_deref(line):
-    """Whether the line has a unary `*` (a pointer read or write)."""
+    """Whether the line has a unary `*` (a pointer read or write), including
+    one right after a (type) cast."""
     for i, ch in enumerate(line):
         if ch != '*':
             continue
         before = line[:i].rstrip()
-        if not before or before[-1] not in ')]' and not (before[-1].isalnum() or before[-1] == '_'):
+        if not before:
             return True
-        word = re.search(r'[A-Za-z_]\w*$', before)
-        if word and word.group(0) in DEREF_AFTER:
-            return True
+        last = before[-1]
+        if last == ')':
+            depth, j = 0, len(before) - 1
+            while j >= 0:
+                depth += (before[j] == ')') - (before[j] == '(')
+                if depth == 0:
+                    break
+                j -= 1
+            if j >= 0 and _is_cast(before[j + 1:-1]):
+                return True
+            continue
+        if last == ']' or last.isalnum() or last == '_':
+            word = re.search(r'[A-Za-z_]\w*$', before)
+            if word and word.group(0) in ('return', 'else', 'case', 'do'):
+                return True
+            continue
+        return True
     return False
 
 
-def _offence(line, pure_names):
+def _signature_params(signature):
+    names = set()
+    start, end = signature.find('('), signature.rfind(')')
+    if start < 0 or end < start:
+        return names
+    for part in signature[start + 1:end].split(','):
+        words = re.findall(r'[A-Za-z_]\w*', part)
+        if words and words != ['void']:
+            names.add(words[-1])
+    return names
+
+
+def _body_locals(body):
+    """Names declared in the body: statements that start with type words."""
+    names = set()
+    for stmt in re.split(r'[;{}]', body):
+        stmt = stmt.strip()
+        if not stmt or not (stmt[0].isalpha() or stmt[0] == '_'):
+            continue  # a cast or expression, not a declaration
+        words = re.findall(r'[A-Za-z_]\w*|\*|,|=', stmt)
+        i = 0
+        while i < len(words) and (words[i] in QUALIFIERS or _is_type(words[i])):
+            i += 1
+        if i == 0 or i >= len(words) or all(w in QUALIFIERS for w in words[:i]) \
+                and not any(w in ('signed', 'unsigned') for w in words[:i]):
+            continue
+        for piece in re.split(r',', ' '.join(words[i:])):
+            m = re.match(r'^[\s*]*([A-Za-z_]\w*)', piece)
+            if m:
+                names.add(m.group(1))
+    return names
+
+
+def _offence(line, allowed, pure_names):
     """The first reason this body line is impure, or None."""
-    m = re.search(r'\bDAT_[0-9a-fA-F]+', line)
+    m = re.search(r'DAT_[0-9a-fA-F]+', line)
     if m:
         return 'global %s' % m.group(0)
     m = re.search(r'\b(?:in|unaff|extraout)_\w+', line)
@@ -72,34 +144,44 @@ def _offence(line, pure_names):
         return 'pointer dereference'
     if re.search(r'[\w)]\s*\[', line):
         return 'indexed memory access'
-    for m in CALL.finditer(line):
-        name = m.group(1)
-        if name in KEYWORDS or PSEUDO_OPS.match(name) or name in pure_names:
+    text = NUMBER.sub(' ', line)
+    for m in IDENT.finditer(text):
+        name = m.group(0)
+        if name in allowed or name in KEYWORDS or name in pure_names \
+                or _is_type(name) or PSEUDO_OPS.match(name):
             continue
-        return 'call to %s' % name
+        if re.match(r'\s*\(', text[m.end():]):
+            return 'call to %s' % name
+        return 'identifier %s is not a parameter, local or known type' % name
     return None
 
 
 def is_pure(evidence_text, pure_names=frozenset()):
     """(pure, reason) for an evidence file's decompiled function.
 
-    Impure on any DAT_ global, a pointer dereference (a global read through a
-    pointer chain, or a write through a pointer parameter), a this member
-    access, or a call to a function not in pure_names. The signature line is
-    not read for calls. The reason names the first offending line."""
+    An allowlist: every identifier in the body must be a parameter from the
+    signature, a local declared in the body, a C keyword or type name
+    (Ghidra's included), a Ghidra pseudo-op (CONCAT*, SUB*, ZEXT*, ...), or in
+    pure_names. Anything else (a global, a class static, a call) is impure,
+    as is any `*` dereference (also after a cast), `->`, this, and in_/
+    unaff_/extraout_ register state. The signature is not read as a call. The
+    reason names the first offending line."""
     code = _section_code(evidence_text)
     if code is None:
         return False, 'no Decompiled (Ghidra) section'
     code = re.sub(r'/\*.*?\*/', '', code, flags=re.S)
     code = re.sub(r'//[^\n]*', '', code)
+    code = re.sub(r'"(?:\\.|[^"\\])*"', '""', code)
     brace = code.find('{')
     if brace < 0:
         return False, 'no function body in the Decompiled (Ghidra) section'
-    for line in code[brace + 1:].split('\n'):
+    body = code[brace + 1:]
+    allowed = _signature_params(code[:brace]) | _body_locals(body)
+    for line in body.split('\n'):
         stripped = line.strip()
         if not stripped:
             continue
-        why = _offence(stripped, pure_names)
+        why = _offence(stripped, allowed, pure_names)
         if why:
             return False, '%s in: %s' % (why, stripped)
     return True, 'arithmetic on its arguments only'
@@ -171,7 +253,7 @@ def _parse_signature(signature):
     return conv, ret, params
 
 
-def draft_case(address, name, signature, batch_id, thiscall=False):
+def draft_case(address, name, signature, batch_id, thiscall=False, header=None):
     """A C++ oracle case for one pure function, in the shape of
     oracle/cases/rand.cpp, or a one-line skip comment naming the reason.
 
@@ -181,6 +263,12 @@ def draft_case(address, name, signature, batch_id, thiscall=False):
     needs __thiscall and a this: pass thiscall=True) are skipped."""
     addr = address[2:] if address.lower().startswith('0x') else address
     addr = addr.upper()
+    if not re.match(r'^[A-Za-z_]\w*(?:::[A-Za-z_]\w*)*$', name or ''):
+        return _skip(address, name, 'name is not a callable C++ identifier')
+    if re.match(r'^(?:FUN_|thunk_)', name.rsplit('::', 1)[-1]) and not header:
+        return _skip(address, name, 'an unnamed Ghidra function: ours has no knowable name (give the row a header)')
+    if '::' not in name and not header:
+        return _skip(address, name, 'no Class:: in the name and no header: no header for ours is knowable')
     if thiscall:
         return _skip(address, name, 'non-static member: __thiscall needs a this the draft cannot build')
     parsed = _parse_signature(signature)
@@ -271,13 +359,19 @@ def write_cases(batch_id, rows, cases_dir=CASES_DIR):
     skips = []
     includes = set()
     for row in rows:
-        src = draft_case(row['address'], row['name'], row['signature'], batch_id,
-                         row.get('thiscall', False))
+        try:
+            src = draft_case(row['address'], row['name'], row['signature'], batch_id,
+                             row.get('thiscall', False), row.get('header'))
+        except Exception as e:  # one bad row must not break the wave file
+            src = _skip(row.get('address', '?'), row.get('name', '?'),
+                        'the row could not be drafted (%s: %s)' % (type(e).__name__, e))
         if src.startswith('// skipped'):
             skips.append(src)
             continue
         drafts.append(_split_case(src))
-        if '::' in row['name']:
+        if row.get('header'):
+            includes.add('#include "%s"' % row['header'])
+        else:
             includes.add('#include "%s.h"' % row['name'].rsplit('::', 1)[0].split('::')[-1])
     text = PRELUDE % {'batch': batch_id, 'includes': '\n'.join(sorted(includes))}
     text += '\n'.join(body for body, _ in drafts)
@@ -294,34 +388,36 @@ def write_cases(batch_id, rows, cases_dir=CASES_DIR):
 
 # ---- the oracle's report ------------------------------------------------------
 
-HEAP_CORRUPT = 'heap corrupt after case'  # tools/oracle.py HEAP_CORRUPT
-WAVE_CASE = re.compile(r'^wave/[^/]+/([0-9A-Fa-f]+)$')
+WAVE_CASE = re.compile(r'^wave/([^/]+)/([0-9A-Fa-f]+)$')
 
 
-def _case_ok(case):
-    """Whether a case did what it declared: tools/oracle.py case_ok, kept in
-    step with it (importing oracle.py would pull in its whole toolchain)."""
-    if case.get('pending') and case.get('has_body') \
-            and not case['iterations'] and not case['crashed']:
-        return False
-    expect = case.get('expect', 'pass')
-    if expect == 'fail':
-        return not case['crashed'] and case['failure_count'] > 0
-    if expect == 'crash':
+def _status(case):
+    """(status, detail) of one report case. The real report names a case by
+    case['case'] (oracle/runner/report.cpp); tools/oracle.py case_ok is the
+    pass test for a declared-pass case, kept in step here (importing oracle.py
+    would pull in its whole toolchain)."""
+    if case.get('crashed'):
         crash = case.get('crash') or {}
-        return (case['crashed'] and case['failure_count'] == 0
-                and crash.get('kind') != HEAP_CORRUPT)
-    return not case['crashed'] and case['failure_count'] == 0
+        return 'crash', '%s (%s)' % (crash.get('kind') or 'crashed', crash.get('inputs', ''))
+    if case.get('failure_count'):
+        return 'fail', 'failure_count %d' % case['failure_count']
+    if not case.get('iterations'):
+        return 'pending', 'ran no input' + (' (%s)' % case['pending'] if case.get('pending') else '')
+    return 'pass', '%d inputs' % case['iterations']
 
 
-def probe_verdicts(report_json):
-    """{'0x<ADDR>': ok} for the wave/<batch>/<ADDR> cases of an oracle.py run
-    report (a JSON string or the parsed dict), the keys in the
-    disagreements.json format. Other cases are not probes and are ignored."""
+def probe_verdicts(report_json, batch_id=None):
+    """{'0x<ADDR>': (status, detail)} for the wave/<batch>/<ADDR> cases of an
+    oracle.py run report (a JSON string or the parsed dict), the keys in the
+    disagreements.json format. status is 'pass', 'fail' (ran and disagreed),
+    'crash' (crashed: inputs outside the domain, say a divide by zero) or
+    'pending' (ran nothing). With batch_id only that batch's cases count;
+    without it, when two batches probe one address the last in report order
+    wins. Other cases are not probes and are ignored."""
     report = json.loads(report_json) if isinstance(report_json, (str, bytes)) else report_json
     verdicts = {}
     for case in report.get('cases', []):
-        m = WAVE_CASE.match(case.get('name', ''))
-        if m:
-            verdicts['0x' + m.group(1).upper()] = _case_ok(case)
+        m = WAVE_CASE.match(case.get('case', ''))
+        if m and (batch_id is None or m.group(1) == batch_id):
+            verdicts['0x' + m.group(2).upper()] = _status(case)
     return verdicts

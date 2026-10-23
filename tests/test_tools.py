@@ -10491,21 +10491,74 @@ class TruthTest(unittest.TestCase):
         self.assertNotIn('<windows.h>', text.replace('must not include <windows.h>', ''))
         self.assertLess(text.index('} // namespace'), text.index('ORACLE_CASE('))
 
-    def test_probe_verdicts_uses_case_ok_semantics(self):
-        def case(name, **kw):
-            c = {'name': name, 'pending': False, 'has_body': True, 'iterations': 36,
-                 'crashed': False, 'failure_count': 0}
+    def test_is_pure_allowlist_rejects_globals_statics_and_deref_after_cast(self):
+        for body in ('return _DAT_008cf6d8 + param_1;', '_DAT_008cf6d8 = param_1;',
+                     'return (int)PTR_DAT_00812345 + param_1;', 'return (int)s_hello_00812345;',
+                     'return (int)*(char *)(param_1 + 0x10);', 'return (uint)*(byte *)param_1;',
+                     'return g_nTicks + param_1;', 'CChitin::m_nTicks = param_1;'):
+            ok, why = truth.is_pure('## Decompiled (Ghidra)\nint f(int param_1)\n{\n  %s\n}\n' % body)
+            self.assertFalse(ok, body)
+            self.assertIn(body, why)
+
+    def test_is_pure_allowlist_accepts_locals_types_and_pseudo_ops(self):
+        text = ('## Decompiled (Ghidra)\nulonglong f(uint param_1, ushort param_2)\n{\n'
+                '  undefined4 uVar1;\n  int iVar2, iVar3;\n  uVar1 = (undefined4)(param_1 * 3);\n'
+                '  iVar2 = (int)param_2 * (iVar3 + 0x10) + abs(iVar3);\n'
+                '  return CONCAT44(uVar1,ZEXT24(param_2)) + Helper(iVar2);\n}\n')
+        self.assertFalse(truth.is_pure(text)[0])
+        ok, why = truth.is_pure(text, frozenset({'Helper'}))
+        self.assertTrue(ok, why)
+        ok, why = truth.is_pure('## Decompiled (Ghidra)\nint f(int a)\n{\n  return f(a - 1);\n}\n')
+        self.assertFalse(ok); self.assertIn('call to f', why)
+
+    def test_draft_case_skips_unknowable_ours_and_one_bad_row_is_harmless(self):
+        for name in ('Roll', 'FUN_005845d0', 'IcewindMisc::FUN_005845d0', 'thunk_Roll'):
+            src = truth.draft_case('0x5845D0', name, 'int Roll(int a)', 'b011')
+            self.assertTrue(src.startswith('// skipped 0x5845D0'), name)
+        src = truth.draft_case('0x5845D0', 'Roll', 'int Roll(int a)', 'b011', header='Roll.h')
+        self.assertIn('ORACLE_CASE', src)
+        with tempfile.TemporaryDirectory() as d:
+            path = truth.write_cases('b011', [
+                {'address': '0x1'},
+                {'address': '0x401000', 'name': 'FUN_00401000', 'signature': 'int F(int a)'},
+                {'address': '0x5845D0', 'name': 'IcewindMisc::Roll', 'signature': 'int Roll(int a, int b)'}],
+                cases_dir=d)
+            with open(path) as f:
+                text = f.read()
+        self.assertIn('ORACLE_CASE("wave/b011/5845D0"', text)
+        self.assertEqual(text.count('// skipped'), 2)
+
+    def _report(self, *cases):
+        base = {'expect': 'pass', 'pending': None, 'has_body': True, 'iterations': 36,
+                'passed': True, 'failure_count': 0, 'failures': [], 'crashed': False, 'crash': None}
+        out = []
+        for name, kw in cases:
+            c = dict(base, case=name)
             c.update(kw)
-            return c
-        report = json.dumps({'cases': [
-            case('wave/b011/5845D0'), case('wave/b011/401000', failure_count=2),
-            case('wave/b012/402000', crashed=True),
-            case('wave/b011/403000', pending=True, iterations=0),
-            case('wave/b011/404000', expect='fail', failure_count=1),
-            case('rand/roll'), case('wave/b011/not-hex')]})
-        self.assertEqual(truth.probe_verdicts(report), {
-            '0x5845D0': True, '0x401000': False, '0x402000': False,
-            '0x403000': False, '0x404000': True})
+            out.append(c)
+        return json.dumps({'file': 'wave-b011', 'complete': True, 'running': None,
+                           'seed': 1, 'iterations': 10, 'cases': out})
+
+    def test_probe_verdicts_reports_each_status(self):
+        crash = {'inputs': 'F(0)', 'exception': '0xC0000094', 'address': '0x1', 'kind': 'divide by zero', 'type': 'x'}
+        report = self._report(
+            ('wave/b011/5845D0', {}),
+            ('wave/b011/401000', {'failure_count': 2, 'passed': False}),
+            ('wave/b012/402000', {'crashed': True, 'crash': crash}),
+            ('wave/b011/403000', {'pending': 'not yet', 'iterations': 0}),
+            ('rand/roll', {}), ('wave/b011/not-hex', {}))
+        got = truth.probe_verdicts(report)
+        self.assertEqual({k: v[0] for k, v in got.items()}, {
+            '0x5845D0': 'pass', '0x401000': 'fail', '0x402000': 'crash', '0x403000': 'pending'})
+        self.assertIn('divide by zero', got['0x402000'][1])
+        self.assertIn('2', got['0x401000'][1])
+
+    def test_probe_verdicts_batch_filter_and_last_wins(self):
+        report = self._report(('wave/b011/5845D0', {}),
+                              ('wave/b012/5845D0', {'failure_count': 1, 'passed': False}))
+        self.assertEqual(truth.probe_verdicts(report)['0x5845D0'][0], 'fail')
+        self.assertEqual(truth.probe_verdicts(report, 'b011')['0x5845D0'][0], 'pass')
+        self.assertEqual(truth.probe_verdicts(report, 'b013'), {})
 
 
 if __name__ == '__main__':
