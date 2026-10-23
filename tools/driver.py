@@ -5,7 +5,9 @@ This part: the worker protocol, a fake worker, the report parser and the
 credit estimate. The driver itself uses no model."""
 import collections
 import json
+import importlib.util
 import os
+import random
 import re
 import subprocess
 
@@ -37,6 +39,8 @@ def parse_report(text):
             in_section = line.lstrip('#').strip().lower() == 'verdicts'
             continue
         if not in_section or not line:
+            continue
+        if re.fullmatch(r'```[^`]*', line):
             continue
         cand = MARKER_RE.sub('', line, count=1).strip().strip('`').strip()
         m = VERDICT_RE.match(cand)
@@ -154,3 +158,95 @@ class HeadlessWorker:
                 transcript = path
                 credits = credits_of(path)
         return Result(exit_code, report, transcript, credits, False)
+
+
+_TOOLS = {}
+
+
+def _tool(name):
+    """tools/<name>.py loaded by path: under -I tools/ is not on sys.path."""
+    if name not in _TOOLS:
+        spec = importlib.util.spec_from_file_location(
+            'driver_' + name, os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), name + '.py'))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _TOOLS[name] = module
+    return _TOOLS[name]
+
+
+def _vanilla_exe():
+    return _tool('oracle').VANILLA_EXE
+
+
+def _parity_python():
+    """As tools/gates.sh: the parity venv when executable, else python3 -I."""
+    home = os.environ.get('IWD2R_HOME') or os.path.expanduser('~/.local/share/iwd2r')
+    venv = os.path.join(home, 'parity-venv', 'bin', 'python')
+    if os.access(venv, os.X_OK):
+        return [venv]
+    return ['python3', '-I']
+
+
+def _tail(proc, n=5):
+    text = ((proc.stdout or '') + (proc.stderr or '')).strip()
+    return ' | '.join(text.splitlines()[-n:])
+
+
+def mechanical_checks(batch, worktree, verdicts, run=subprocess.run):
+    """Problems that stop a batch before any review; [] when clean.
+
+    Each problem says what failed and how to fix it (it is the worker's
+    fix-round prompt)."""
+    wave = _tool('wave')
+    problems = []
+    key = wave._addr_key
+    rows = batch.get('rows', [])
+    row_keys = {key(r['address']) for r in rows}
+    given = {key(a): a for a in verdicts}
+    for r in rows:
+        if r.get('class') == 'ambiguous' or (
+                'class' not in r and not r.get('verdict')):
+            if key(r['address']) not in given:
+                problems.append('%s: no verdict line in the report; add '
+                                '"verdict <addr> ours|fork|neither case <id>" '
+                                'under ## Verdicts' % r['address'])
+    for k, a in given.items():
+        if k not in row_keys:
+            problems.append('%s: verdict for an address outside this batch; '
+                            'remove that line' % a)
+    for r in rows:
+        k = key(r['address'])
+        if k not in given:
+            continue
+        rel = '%s/%s.md' % (wave.EVIDENCE_DIR, k.upper())
+        text, err = wave._read_evidence(worktree, batch['branch'], r['address'])
+        if text is None:
+            problems.append('%s: missing; write it and commit it' % rel)
+        elif not any(p in text for p in wave.EVIDENCE_PHRASES):
+            problems.append("%s: no 'disagreed with WSO' or 'corroborated by "
+                            "WSO' phrase; add one of the exact phrases" % rel)
+    steps = [
+        (['python3', '-I', 'tests/test_tools.py'], 'tests/test_tools.py'),
+        (['python3', '-I', 'tools/check_evidence.py', '--base', 'first'],
+         'tools/check_evidence.py'),
+    ]
+    if os.path.isfile(_vanilla_exe()):
+        steps.append((_parity_python() + ['tools/parity/run.py', '--base', 'first'],
+                      'tools/parity/run.py'))
+    for argv, label in steps:
+        proc = run(argv, cwd=worktree, capture_output=True, text=True)
+        if proc.returncode != 0:
+            problems.append('%s failed (exit %s); last lines: %s; fix it and '
+                            'rerun' % (label, proc.returncode, _tail(proc)))
+    return problems
+
+
+def review_needed(batch, verdicts, seed, sample=0.2):
+    """(needed, reason): fork/neither rows always, else a seeded sample."""
+    if any(side != 'ours' for side, _case in verdicts.values()):
+        return True, 'fork/neither rows'
+    batch_id = batch if isinstance(batch, str) else batch.get('id')
+    if random.Random('%s:%s' % (seed, batch_id)).random() < sample:
+        return True, 'sample'
+    return False, ''

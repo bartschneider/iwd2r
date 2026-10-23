@@ -9167,6 +9167,106 @@ class DriverTest(unittest.TestCase):
         r = driver.FakeWorker('R', exit_code=2, rate_limited=True).run('b', '/tmp')
         self.assertEqual((r.exit_code, r.report, r.rate_limited), (2, 'R', True))
 
+    def test_parse_report_skips_code_fences(self):
+        text = ('## Verdicts\n```text\nverdict 0x401000 ours case a\n```\n'
+                '```\nverdict 0x76d370 fork case b\n```\n')
+        self.assertEqual(driver.parse_report(text),
+                         {'0x401000': ('ours', 'a'), '0x76D370': ('fork', 'b')})
+
+    def _mc_repo(self, evidence):
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, True)
+        g = lambda *a: subprocess.run(['git', '-C', d, *a], check=True, capture_output=True)
+        g('init', '-q', '-b', 'p3/wso-b011')
+        os.makedirs(os.path.join(d, 'docs', 'evidence'))
+        for addr, text in evidence.items():
+            with open(os.path.join(d, 'docs', 'evidence', addr + '.md'), 'w') as f:
+                f.write(text)
+        return d
+
+    @staticmethod
+    def _mc_batch():
+        return {'id': 'b011', 'branch': 'p3/wso-b011', 'rows': [
+            {'address': '0x76D370', 'class': 'ambiguous'},
+            {'address': '0x401000', 'class': 'ambiguous'},
+            {'address': '0x402000', 'class': 'ours-auto', 'verdict': 'ours'}]}
+
+    def _mc_run(self, rc=0, calls=None):
+        def run(argv, **kw):
+            calls.append((argv, kw.get('cwd')))
+            return subprocess.CompletedProcess(argv, rc, '', 'boom\n')
+        return run
+
+    def test_mechanical_checks_flags_missing_and_foreign_verdicts(self):
+        d = self._mc_repo({'76D370': 'corroborated by WSO at abc'})
+        calls = []
+        with mock.patch.object(driver, '_vanilla_exe', return_value='/nonexistent'):
+            probs = driver.mechanical_checks(
+                self._mc_batch(), d, {'0x76d370': ('ours', 'c'), '0x999999': ('ours', 'c')},
+                run=self._mc_run(0, calls))
+        self.assertEqual(len(probs), 2)
+        self.assertTrue(any(p.startswith('0x401000: no verdict line') for p in probs))
+        self.assertTrue(any(p.startswith('0x999999:') and 'outside' in p for p in probs))
+        self.assertEqual([c[0][-3:] for c in calls][1:], [['tools/check_evidence.py', '--base', 'first']])
+        self.assertTrue(all(c[1] == d for c in calls))
+
+    def test_mechanical_checks_requires_phrase(self):
+        d = self._mc_repo({'76D370': 'nothing here'})
+        batch = self._mc_batch()
+        batch['rows'] = batch['rows'][:1]
+        calls = []
+        with mock.patch.object(driver, '_vanilla_exe', return_value='/nonexistent'):
+            probs = driver.mechanical_checks(batch, d, {'0x76D370': ('ours', 'c')},
+                                             run=self._mc_run(0, calls))
+        self.assertEqual(len(probs), 1)
+        self.assertIn('docs/evidence/76D370.md', probs[0])
+        self.assertIn('disagreed with WSO', probs[0])
+        # a missing evidence file is a problem too
+        os.unlink(os.path.join(d, 'docs', 'evidence', '76D370.md'))
+        with mock.patch.object(driver, '_vanilla_exe', return_value='/nonexistent'):
+            probs = driver.mechanical_checks(batch, d, {'0x76D370': ('ours', 'c')},
+                                             run=self._mc_run(0, []))
+        self.assertEqual(len(probs), 1)
+        self.assertIn('76D370.md', probs[0])
+
+    def test_mechanical_checks_subprocess_steps(self):
+        d = self._mc_repo({'76D370': 'disagreed with WSO at x'})
+        batch = self._mc_batch()
+        batch['rows'] = batch['rows'][:1]
+        exe = os.path.join(d, 'iwd2.exe')
+        open(exe, 'w').close()
+        calls = []
+        with mock.patch.object(driver, '_vanilla_exe', return_value=exe), \
+                mock.patch.dict(os.environ, {'IWD2R_HOME': d}):
+            probs = driver.mechanical_checks(batch, d, {'0x76D370': ('ours', 'c')},
+                                             run=self._mc_run(1, calls))
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(calls[2][0], ['python3', '-I', 'tools/parity/run.py', '--base', 'first'])
+        self.assertEqual(len(probs), 3)
+        self.assertIn('failed (exit 1); last lines: boom', probs[0])
+        venv = os.path.join(d, 'parity-venv', 'bin')
+        os.makedirs(venv)
+        py = os.path.join(venv, 'python')
+        open(py, 'w').close()
+        os.chmod(py, 0o755)
+        calls = []
+        with mock.patch.object(driver, '_vanilla_exe', return_value=exe), \
+                mock.patch.dict(os.environ, {'IWD2R_HOME': d}):
+            driver.mechanical_checks(batch, d, {'0x76D370': ('ours', 'c')},
+                                     run=self._mc_run(0, calls))
+        self.assertEqual(calls[2][0][0], py)
+
+    def test_review_needed_for_fork_rows(self):
+        self.assertEqual(driver.review_needed({'id': 'b011'}, {'0x1': ('ours', 'a'), '0x2': ('fork', 'b')}, 's'),
+                         (True, 'fork/neither rows'))
+
+    def test_review_sample_is_deterministic(self):
+        v = {'0x1': ('ours', 'a')}
+        a = driver.review_needed({'id': 'b011'}, v, '2026-10-22')
+        self.assertEqual(a, driver.review_needed({'id': 'b011'}, v, '2026-10-22'))
+        self.assertEqual(driver.review_needed({'id': 'b011'}, v, 's', sample=1.0), (True, 'sample'))
+        self.assertEqual(driver.review_needed({'id': 'b011'}, v, 's', sample=0.0), (False, ''))
+
 
 if __name__ == '__main__':
     unittest.main()
