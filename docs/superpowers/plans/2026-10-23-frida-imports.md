@@ -104,3 +104,18 @@
 - [ ] **Step 1: Tests**: `test_trace_source_requires_recovery_note_path` (a `src/...cpp` path fails the regex), `test_fork_note_must_mention_function` (fixture repo: a note with the address passes, with the short name passes, without either fails, missing note fails), `test_driver_path_check_uses_merge_base` (a commit from `first` merged into the batch is not "outside"), `test_triage_regen_keeps_closed_entries`.
 - [ ] **Step 2: Run them** — expected fail. **Step 3: Implement. Step 4: Suite OK.**
 - [ ] **Step 5: Rewrite the import brief rules**: rule 1 drops "nothing to adjudicate" and adds "check his body against the disassembly; refuse what the exe contradicts, and record the refusal in the report and in docs/wso/import-parked.json with needs 'fork body contradicts the exe: …'"; a new rule: "a stub dependency inside your files is imported with the row, with its own trailer; a dependency outside your files parks the row with that reason"; the fix-round rule from Task 2 stays. **Commit** `evidence: a trace cites a recovery note that names the function; driver diffs against the merge base; triage keeps closed rows; import brief tells the truth`.
+
+### Task 5: typed hook tables; ours under the replay clock; the calibration re-run
+
+**Files:**
+- Modify: `tools/truth.py` (`hook_table`: argument and return types from our decorated names and headers; `_frida_type`), `tools/frida/probe.py` (`ours_env`: replay mode on), `tools/frida/hooks.py` only if a new type token is needed, `docs/frida-tracing.md`, `docs/wso/truth-calibration.json` + `docs/wso/xrec-report.md` (the re-run)
+- Test: `tests/test_tools.py`
+- Launch budget: 6 (3 scenarios × 2 sides) + 2 retries.
+
+**Interfaces:**
+- Consumes: `truth.decorated_convention` (parses the calling convention from our decorated names), `truth.parse_map` (decorated names per RVA), our headers `src/*.h` (prototypes), `tools/frida/hooks.py` schema (`conv`, `args` types, `ret`), `platform/replay.cpp:74` (replay mode is on when `IWD2R_STATE_DUMP` is set; `IWD2R_SEED` is read only then).
+- Produces: `hook_table` types every argument from our prototype when the function is in our map and header: references and pointers → `ptr` (canonicalised by trace_diff), `BYTE`/`BOOLEAN`/`u8` → `u8`, `SHORT`/`WORD` → `s16`/`u16`, `BOOL`/`LONG`/`int` → `s32`, `DWORD` → `u32`; the return typed from the prototype (`void` → no return logged; `BOOLEAN` → `u8`; `SHORT` → `s16`; pointer/reference → `ptr`); when no prototype is found, the Ghidra signature is used as today and the row is marked `typed_from: ghidra` in the table. `ours_env` sets `IWD2R_STATE_DUMP` (to the run folder's dump path, as the replay tooling does) and `IWD2R_SEED` so ours runs under the replay clock; a test asserts both keys.
+
+- [ ] **Step 1: Tests** `test_hook_table_types_from_our_prototype` (a fixture header with `BOOLEAN Fetch(DWORD, STR_RES&)`, `void CheckModal()`, `BOOL Hit(CGameSprite*, CItem*, SHORT, BOOL*, BOOL, BYTE)` → the exact `args`/`ret` per hook), `test_hook_table_falls_back_to_ghidra_types`, `test_ours_env_runs_under_replay_clock`.
+- [ ] **Step 2: RED. Step 3: implement. Step 4: suite GREEN. Step 5: commit** `frida: hook tables typed from our prototypes; ours runs under the replay clock`.
+- [ ] **Step 6 (acceptance): re-run the calibration** (`truth.py calibrate --frida-map <map>` after rebuilding x86 from this worktree) under the budget; commit the record and the report: `truth: calibration re-run on 2026-10-23 (frida measured N/28, agree A, disagree D)`. Report every row as before, both sides' frame counts from the status/dump files (they must now match), and whether `frida_default` flipped under the agree ≥ disagree rule.
