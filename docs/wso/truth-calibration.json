@@ -1,9 +1,9 @@
 {
- "frida_default": false,
+ "frida_default": true,
  "frida_rows": {
   "0x46B160": [
-   "not measured",
-   "no final HITS totals in world_entry, first_fight, walk_and_talk"
+   "equal",
+   "identical in world_entry, first_fight, walk_and_talk"
   ],
   "0x4BBCB0": [
    "not-exercised",
@@ -14,24 +14,24 @@
    "no scenario hit it: world_entry, first_fight, walk_and_talk"
   ],
   "0x58FF20": [
-   "not measured",
-   "no final HITS totals in first_fight"
+   "equal",
+   "identical in first_fight"
   ],
   "0x5ABA20": [
-   "not measured",
-   "no final HITS totals in world_entry, first_fight, walk_and_talk"
+   "equal",
+   "identical in world_entry, first_fight, walk_and_talk"
   ],
   "0x5D3A80": [
-   "not measured",
-   "no final HITS totals in world_entry, first_fight, walk_and_talk"
+   "equal",
+   "identical in world_entry, first_fight, walk_and_talk"
   ],
   "0x5DE2C0": [
    "not-exercised",
    "no scenario hit it: world_entry, first_fight, walk_and_talk"
   ],
   "0x5FD0A0": [
-   "not measured",
-   "no final HITS totals in world_entry, first_fight, walk_and_talk"
+   "equal",
+   "identical in world_entry, first_fight, walk_and_talk"
   ],
   "0x5FDB20": [
    "not-exercised",
@@ -42,8 +42,8 @@
    "no scenario hit it: world_entry, first_fight, walk_and_talk"
   ],
   "0x614EF0": [
-   "not measured",
-   "no final HITS totals in world_entry, first_fight, walk_and_talk"
+   "equal",
+   "identical in world_entry, first_fight, walk_and_talk"
   ],
   "0x6175A0": [
    "not-exercised",
@@ -75,39 +75,39 @@
   ],
   "0x704D40": [
    "different",
-   "differs in first_fight: event 13: original {\"a0_ptr\": \"<ptr>\", \"a1_ptr\": \"<ptr>\", \"a2_s32\": 1, \"a3_s32\": 0, \"a4_s32\": 1, \"a5_ptr\": \"<ptr>\", \"a6_s32\": 0, \"tag\": \"fn_704D40\", \"this\": \"<ptr>\"}, ours {\"a0_ptr\": \"<ptr>\", \"a1_ptr\": \"<ptr>\", \"a2_s32\": 0, \"a3_s32\": 0, \"a4_s32\": 1, \"a5_ptr\": \"<ptr>\", \"a6_s32\": 0, \"tag\": \"fn_704D40\", \"this\": \"<ptr>\"}; walk_and_talk: event 13: original {\"a0_ptr\": \"<ptr>\", \"a1_ptr\": \"<ptr>\", \"a2_s32\": 1, \"a3_s32\": 0, \"a4_s32\": 1, \"a5_ptr\": \"<ptr>\", \"a6_s32\": 0, \"tag\": \"fn_704D40\", \"this\": \"<ptr>\"}, ours {\"a0_ptr\": \"<ptr>\", \"a1_ptr\": \"<ptr>\", \"a2_s32\": 0, \"a3_s32\": 0, \"a4_s32\": 1, \"a5_ptr\": \"<ptr>\", \"a6_s32\": 0, \"tag\": \"fn_704D40\", \"this\": \"<ptr>\"}"
+   "differs in first_fight: event 13: original {\"a0_ptr\": \"<ptr>\", \"a1_ptr\": \"<ptr>\", \"a2_s32\": 1, \"a3_s32\": 0, \"a4_s32\": 1, \"a5_ptr\": \"<ptr>\", \"a6_s32\": 0, \"tag\": \"fn_704D40\", \"this\": \"<ptr>\"}, ours {\"a0_ptr\": \"<ptr>\", \"a1_ptr\": \"<ptr>\", \"a2_s32\": 0, \"a3_s32\": 0, \"a4_s32\": 1, \"a5_ptr\": \"<ptr>\", \"a6_s32\": 0, \"tag\": \"fn_704D40\", \"this\": \"<ptr>\"}"
   ],
   "0x708280": [
-   "not measured",
-   "no final HITS totals in first_fight"
+   "equal",
+   "identical in first_fight"
   ],
   "0x71FC00": [
    "not-exercised",
    "no scenario hit it: world_entry, first_fight, walk_and_talk"
   ],
   "0x72FD20": [
-   "not measured",
-   "no final HITS totals in world_entry, first_fight, walk_and_talk"
+   "equal",
+   "identical in world_entry, first_fight, walk_and_talk"
   ],
   "0x7338E0": [
-   "not measured",
-   "no final HITS totals in world_entry, first_fight, walk_and_talk"
+   "equal",
+   "identical in world_entry, first_fight, walk_and_talk"
   ],
   "0x737EF0": [
-   "not measured",
-   "no final HITS totals in first_fight"
+   "equal",
+   "identical in first_fight"
   ],
   "0x738E70": [
    "not-exercised",
    "no scenario hit it: world_entry, first_fight, walk_and_talk"
   ],
   "0x73B760": [
-   "not measured",
-   "no final HITS totals in first_fight"
+   "equal",
+   "identical in first_fight"
   ],
   "0x7941D0": [
-   "not measured",
-   "no final HITS totals in world_entry, first_fight, walk_and_talk"
+   "different",
+   "differs in world_entry: hit totals differ: original 4068, ours 4037; first_fight: hit totals differ: original 4435, ours 4412; walk_and_talk: hit totals differ: original 4167, ours 4137"
   ],
   "0x7A3FD0": [
    "skipped",
@@ -118,12 +118,12 @@
   "first_fight": {
    "failed": null,
    "final": {
-    "orig": false,
-    "ours": false
+    "orig": true,
+    "ours": true
    },
    "hits": {
     "orig": {
-     "fn_46B160": 1933,
+     "fn_46B160": 2293,
      "fn_4BBCB0": 0,
      "fn_54C770": 0,
      "fn_58FF20": 2,
@@ -141,15 +141,15 @@
      "fn_65BCF0": 0,
      "fn_67B8A0": 0,
      "fn_67E560": 0,
-     "fn_704D40": 371,
+     "fn_704D40": 460,
      "fn_708280": 3,
      "fn_71FC00": 0,
-     "fn_72FD20": 20536,
-     "fn_7338E0": 20447,
+     "fn_72FD20": 24683,
+     "fn_7338E0": 24591,
      "fn_737EF0": 142,
      "fn_738E70": 0,
      "fn_73B760": 2,
-     "fn_7941D0": 4429,
+     "fn_7941D0": 4435,
      "loaded": 4
     },
     "ours": {
@@ -190,19 +190,19 @@
     "ours": "CLEAN"
    },
    "trace": {
-    "orig": "runs/20261023-124046/replay/frida-cal-first_fight-original.jsonl",
-    "ours": "runs/20261023-130147/replay/frida-cal-first_fight-ours.jsonl"
+    "orig": "runs/20261023-132359/replay/frida-cal-first_fight-original.jsonl",
+    "ours": "runs/20261023-132508/replay/frida-cal-first_fight-ours.jsonl"
    }
   },
   "walk_and_talk": {
    "failed": null,
    "final": {
-    "orig": false,
-    "ours": false
+    "orig": true,
+    "ours": true
    },
    "hits": {
     "orig": {
-     "fn_46B160": 2023,
+     "fn_46B160": 2082,
      "fn_4BBCB0": 0,
      "fn_54C770": 0,
      "fn_58FF20": 0,
@@ -220,15 +220,15 @@
      "fn_65BCF0": 0,
      "fn_67B8A0": 0,
      "fn_67E560": 0,
-     "fn_704D40": 372,
+     "fn_704D40": 399,
      "fn_708280": 0,
      "fn_71FC00": 0,
-     "fn_72FD20": 21129,
-     "fn_7338E0": 21236,
+     "fn_72FD20": 21766,
+     "fn_7338E0": 21889,
      "fn_737EF0": 0,
      "fn_738E70": 0,
      "fn_73B760": 0,
-     "fn_7941D0": 4165,
+     "fn_7941D0": 4167,
      "loaded": 5
     },
     "ours": {
@@ -250,7 +250,7 @@
      "fn_65BCF0": 0,
      "fn_67B8A0": 0,
      "fn_67E560": 0,
-     "fn_704D40": 400,
+     "fn_704D40": 399,
      "fn_708280": 0,
      "fn_71FC00": 0,
      "fn_72FD20": 21766,
@@ -258,7 +258,7 @@
      "fn_737EF0": 0,
      "fn_738E70": 0,
      "fn_73B760": 0,
-     "fn_7941D0": 4138,
+     "fn_7941D0": 4137,
      "loaded": 5
     }
    },
@@ -269,15 +269,15 @@
     "ours": "CLEAN"
    },
    "trace": {
-    "orig": "runs/20261023-125807/replay/frida-cal-walk_and_talk-original.jsonl",
-    "ours": "runs/20261023-125911/replay/frida-cal-walk_and_talk-ours.jsonl"
+    "orig": "runs/20261023-132709/replay/frida-cal-walk_and_talk-original.jsonl",
+    "ours": "runs/20261023-132807/replay/frida-cal-walk_and_talk-ours.jsonl"
    }
   },
   "world_entry": {
    "failed": null,
    "final": {
-    "orig": false,
-    "ours": false
+    "orig": true,
+    "ours": true
    },
    "hits": {
     "orig": {
@@ -348,8 +348,8 @@
     "ours": "CLEAN"
    },
    "trace": {
-    "orig": "runs/20261023-123817/replay/frida-cal-world_entry-original.jsonl",
-    "ours": "runs/20261023-123909/replay/frida-cal-world_entry-ours.jsonl"
+    "orig": "runs/20261023-132150/replay/frida-cal-world_entry-original.jsonl",
+    "ours": "runs/20261023-132235/replay/frida-cal-world_entry-ours.jsonl"
    }
   }
  },
@@ -382,13 +382,12 @@
   "0x73B760": "ours",
   "0x7941D0": "ours"
  },
- "note": "frida off: measured 1 of 28, agree 0, disagree 1: fewer than a fifth of the 10 sample rows were measured.",
  "oracle_rows": {},
  "paths": {
   "frida": {
-   "agree": 0,
-   "disagree": 1,
-   "measured": 1,
+   "agree": 11,
+   "disagree": 2,
+   "measured": 13,
    "of": 28
   },
   "oracle": {
