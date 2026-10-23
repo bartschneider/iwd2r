@@ -106,16 +106,14 @@ Batches: b001 closed (20 rows), b002 closed (20 rows), b003 closed (20 rows), b0
 Calibration, computed from triage.json classes over closed verdicts:
 
 class           agree total  status
-rename-only         0     2  disabled by calibration
-    mismatches: 0x708280, 0x7941D0
-signature-only      0     1  disabled by calibration
-    mismatches: 0x67E560
+rename-only         0     0  disabled (no verdicts)
+signature-only      0     0  disabled (no verdicts)
 fork-stub           2     2  enabled
 ours-stub           0     0  never enabled
-ambiguous         220   235  never enabled
-    mismatches: 0x5FDB20, 0x600B50, 0x63C940, 0x65BCF0, 0x704D40, 0x737EF0, 0x738E70, 0x73B760, 0x5FD0A0, 0x614EF0, 0x63BE80, 0x67B8A0, 0x72FD20, 0x5D3A80, 0x7A3FD0
+ambiguous         220   238  never enabled
+    mismatches: 0x5FDB20, 0x600B50, 0x63C940, 0x65BCF0, 0x704D40, 0x737EF0, 0x738E70, 0x73B760, 0x5FD0A0, 0x614EF0, 0x63BE80, 0x67B8A0, 0x708280, 0x72FD20, 0x67E560, 0x5D3A80, 0x7941D0, 0x7A3FD0
 
-Truth calibration (seed 2026-10-22, sample 0x58FF20, 0x5DE2C0, 0x62F360, 0x709B60, 0x7338E0, 0x46B160, 0x54C770, 0x4BBCB0, 0x5ABA20, 0x71FC00, tools/truth.py over the 18 ruling rows with side fork or neither plus a sample of 10 dump-decided ours rows; a path measures a row when it gives pass/fail (oracle) or equal/different (Frida) and agrees on pass or equal): oracle probes: measured 0 of 28 rows, agreed 0, disagreed 0; Frida trace diff: measured 0 of 28 rows, agreed 0, disagreed 0 (deferred: not run); Frida on by default: no.
+Truth calibration (seed 2026-10-22, sample 0x58FF20, 0x5DE2C0, 0x62F360, 0x7338E0, 0x46B160, 0x54C770, 0x4BBCB0, 0x5ABA20, 0x71FC00, 0x6175A0, tools/truth.py over the 18 ruling rows with side fork or neither plus a sample of 10 dump-decided ours rows; a path measures a row when it gives pass/fail (oracle) or equal/different (Frida) and agrees on pass or equal): oracle probes: measured 0 of 28 rows, agreed 0, disagreed 0; Frida trace diff: measured 9 of 28 rows, agreed 1, disagreed 8; Frida on by default: yes.
 
 Audit sample (rule 3): seed rule3-2026-10-23 over 199 dump-decided ours rows at 9fad8484; 10 drawn: 3 probed (replay 2, oracle 1), 7 parked, 0 flips.
 

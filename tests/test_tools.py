@@ -13702,6 +13702,69 @@ class TruthTest(unittest.TestCase):
                 truth.run_oracle('b011', wt, cases, build=built.append,
                                  run=lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, 'nothing\n', 'boom'))
 
+    def test_calibrate_runs_frida_with_injected_runner(self):
+        with tempfile.TemporaryDirectory() as d:
+            state = self._cal_state()
+            state_path = os.path.join(d, 'state.json')
+            with open(state_path, 'w') as f:
+                json.dump(state, f)
+            rows, sample = truth.calibration_rows(state, 's')
+            os.makedirs(os.path.join(d, 'docs', 'evidence'))
+            lines = [' Preferred load address is 00400000\n']
+            for r in rows:
+                _write(os.path.join(d, 'docs', 'evidence', r['address'][2:] + '.md'),
+                       '## Decompiled (Ghidra)\n\n```c\nint %s(int a)\n\n{\n  return a;\n}\n```\n'
+                       % r['name'].split('::')[1])
+                lines.append(' 0001:00000010       ?%s@C@@QAEHH@Z %08X f   c.obj\n'
+                             % (r['name'].split('::')[1], 0x401000 + int(r['address'], 16) % 0x1000))
+            lines.append(' 0001:00000020       ?EngineActivated@CScreenWorld@@UAEXXZ 00402000 f   w.obj\n')
+            map_path = os.path.join(d, 'x.map')
+            _write(map_path, ''.join(lines))
+            picked = [r for r in rows if r['sample']]
+            equal_rows, diff_row = picked[:3], picked[3]
+
+            def events(addr, ret):
+                tag = 'fn_%s' % addr[2:]
+                return [{'tag': tag, 'args': [1]}, {'tag': tag + '_ret', 'ret': ret}]
+
+            def fake_run(batch_id, table, scenarios, **kw):
+                self.assertEqual(kw['attempt_reason']('world_entry', 'orig'), 'calibrate world_entry original')
+                self.assertEqual(kw['attempt_reason']('world_entry', 'ours'), 'calibrate world_entry ours')
+                orig = [e for r in picked[:4] for e in events(r['address'], 1)]
+                ours = [e for r in equal_rows for e in events(r['address'], 1)] + events(diff_row['address'], 2)
+                hits = {'orig': {'fn_%s' % r['address'][2:]: 1 for r in picked[:4]}}
+                hits['ours'] = dict(hits['orig'])
+                ok = {'orig': orig, 'ours': ours, 'orig_path': None, 'ours_path': None, 'orig_exit': 0,
+                      'ours_exit': 0, 'result': {'orig': 'CLEAN', 'ours': 'CLEAN'}, 'hits': hits,
+                      'measured': True, 'failed': None}
+                bad = dict(ok, orig=[], ours=[], ours_exit=2, hits={'orig': None, 'ours': None},
+                           measured=False, failed='ours side exited 2')
+                return {'world_entry': ok, 'first_fight': bad, 'walk_and_talk': bad}
+            out = os.path.join(d, 'cal.json')
+            with mock.patch.object(truth, 'frida_run', fake_run), \
+                    mock.patch.object(truth, 'run_oracle', lambda b, w, c: {}):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    rc = truth.main(['calibrate', '--seed', 's', '--state', state_path, '--out', out,
+                                     '--evidence-root', d, '--frida-map', map_path, '--worktree', d])
+            self.assertEqual(rc, 0)
+            with open(out) as f:
+                cal = json.load(f)
+            self.assertEqual(cal['paths']['frida'], {'measured': 4, 'agree': 3, 'disagree': 1, 'of': 14})
+            self.assertTrue(cal['frida_default'])
+            self.assertEqual(cal['frida_scenarios']['first_fight']['ours_exit'], 2)
+            self.assertEqual(cal['frida_rows'][diff_row['address']][0], 'different')
+            unmeasured = [a for a, (s, _c) in cal['frida_rows'].items() if s not in ('equal', 'different')]
+            self.assertEqual(len(unmeasured), 10)
+            # no map: refused; --no-frida: the deferred record
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                with mock.patch.object(truth, 'run_oracle', lambda b, w, c: {}):
+                    self.assertEqual(truth.main(['calibrate', '--seed', 's', '--state', state_path,
+                                                 '--out', out, '--evidence-root', d, '--worktree', d]), 2)
+                    truth.main(['calibrate', '--seed', 's', '--state', state_path, '--out', out,
+                                '--evidence-root', d, '--worktree', d, '--no-frida'])
+            with open(out) as f:
+                self.assertTrue(json.load(f)['paths']['frida']['deferred'])
+
     def test_calibrate_cli_writes_the_record_and_the_scorecard_paragraph(self):
         with tempfile.TemporaryDirectory() as d:
             state = self._cal_state()
@@ -13714,7 +13777,7 @@ class TruthTest(unittest.TestCase):
             with mock.patch.object(truth, 'run_oracle', lambda b, w, c: seen.append((b, w, c)) or {}):
                 with contextlib.redirect_stdout(io.StringIO()) as buf:
                     rc = truth.main(['calibrate', '--seed', 's', '--state', state_path, '--out', out,
-                                     '--evidence-root', d, '--worktree', d])
+                                     '--evidence-root', d, '--worktree', d, '--no-frida'])
             self.assertEqual(rc, 0)
             self.assertEqual(seen, [])                          # no evidence, no pure row, no build
             with open(out) as f:

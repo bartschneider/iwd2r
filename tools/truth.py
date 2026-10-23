@@ -704,7 +704,7 @@ def _read_status(path):
 
 
 def frida_run(batch_id, table, scenarios, run=subprocess.run, root=ROOT, loaded_rva=None,
-              clicks=3, hit_min=1, timeout=None):
+              clicks=3, hit_min=1, timeout=None, attempt_reason=None):
     """{scenario: {'orig': events, 'ours': events, 'orig_path': path or None,
     'ours_path': path or None, 'orig_exit': int, 'ours_exit': int,
     'result': {'orig': verdict word, 'ours': verdict word}, 'hits': {'orig':
@@ -725,7 +725,8 @@ def frida_run(batch_id, table, scenarios, run=subprocess.run, root=ROOT, loaded_
     EngineActivated address inside iwd2r.exe: loaded_rva (or the table's
     ours_loaded_rva, read from the map) names CScreenWorld::EngineActivated in
     our build. With neither, every scenario fails with that reason and nothing
-    is run. `run` is injectable
+    is run. attempt_reason(scenario, 'orig'|'ours'), when given, replaces the
+    default --new-attempt text. `run` is injectable
     (the tests never launch anything); the real call is made by hand on the
     Windows machine under the one-launch rules."""
     import tempfile
@@ -758,7 +759,8 @@ def frida_run(batch_id, table, scenarios, run=subprocess.run, root=ROOT, loaded_
                        '--probe', tables[target], '--scenario', scenario, '--out', out,
                        '--clicks', str(n_clicks), '--hit-min', str(hit_min),
                        '--timeout', str(limit),
-                       '--new-attempt', 'driver frida %s %s' % (batch_id, scenario)]
+                       '--new-attempt', (attempt_reason(scenario, key) if attempt_reason else
+                                         'driver frida %s %s' % (batch_id, scenario))]
                 if target == 'ours':
                     cmd += ['--loaded-rva', loaded_rva]
                 done = run(cmd, capture_output=True, text=True, cwd=root)
@@ -1199,6 +1201,48 @@ def frida_batch(batch_id, rows, signatures, map_text, scenarios=FRIDA_SCENARIOS,
     return frida_verdicts(traces, rows, table['skipped'])
 
 
+def _scenario_summary(traces):
+    out = {}
+    for name, t in traces.items():
+        t = _as_scenario(t)
+        out[name] = {k: t.get(k) for k in ('orig_exit', 'ours_exit', 'failed', 'result', 'hits')}
+        out[name]['trace'] = {side: os.path.relpath(t[side + '_path'], ROOT) if t.get(side + '_path') else None
+                              for side in ('orig', 'ours')}
+    return out
+
+
+def _calibrate_frida(rows, read_evidence, map_path):
+    """({address: (status, detail)}, {'scenarios': summary, 'error': text}):
+    one batched Frida run over every row. frida_run is looked up at call time
+    (tests patch it); each side's --new-attempt reason is `calibrate
+    <scenario> <side>`. A failure of the run itself leaves every row
+    unmeasured and is recorded under `error`."""
+    sigs = {}
+    for r in rows:
+        text = read_evidence(r['address'])
+        sig = evidence_signature(text) if text else None
+        if sig:
+            sigs[r['address']] = sig
+    captured = {}
+
+    def run_frida(batch_id, table, scenarios):
+        captured.update(frida_run(batch_id, table, scenarios,
+                                  attempt_reason=lambda scenario, side: 'calibrate %s %s' % (
+                                      scenario, 'original' if side == 'orig' else 'ours')))
+        return captured
+    try:
+        with open(map_path, encoding='utf-8', errors='replace') as f:
+            map_text = f.read()
+        got = frida_batch('cal', rows, sigs, map_text, run_frida=run_frida)
+        error = None
+    except Exception as e:
+        got, error = {}, repr(e)[:300]
+    got = {_key(a): v for a, v in got.items()}
+    for r in rows:
+        got.setdefault(_key(r['address']), ('not measured', error or 'no result'))
+    return got, {'scenarios': _scenario_summary(captured), 'error': error}
+
+
 def _calibrate_main(args):
     here = os.path.dirname(os.path.abspath(__file__))
     root = os.path.dirname(here)
@@ -1230,8 +1274,21 @@ def _calibrate_main(args):
         oracle = run_oracle('cal', args.worktree, cases)
     for address, (status, detail) in sorted(oracle.items()):
         print('  probe %s: %s (%s)' % (address, status, detail))
-    # Frida launches the game on the desktop: deferred unless a run is wired in by hand.
-    cal = calibrate(state, rows, {'oracle': oracle, 'frida': None}, seed=args.seed, sample=sample)
+    frida, frida_info = None, {}
+    if not args.no_frida:
+        if not args.frida_map:
+            print('truth.py calibrate: pass --frida-map <our iwd2r.map> (or --no-frida for the deferred record)',
+                  file=sys.stderr)
+            return 2
+        frida, frida_info = _calibrate_frida(rows, read_evidence, args.frida_map)
+    cal = calibrate(state, rows, {'oracle': oracle, 'frida': frida}, seed=args.seed, sample=sample)
+    if frida is not None:
+        cal['frida_rows'] = {a: list(v) for a, v in sorted(frida.items())}
+        cal['frida_scenarios'] = frida_info.get('scenarios', {})
+        if frida_info.get('error'):
+            cal['paths']['frida']['error'] = frida_info['error']
+        for a, (status, detail) in sorted(frida.items()):
+            print('  frida %s: %s (%s)' % (a, status, detail))
     cal['oracle_rows'] = {a: list(v) for a, v in sorted(oracle.items())}
     out = args.out or os.path.join(root, CALIBRATION_REL)
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
@@ -1253,6 +1310,9 @@ def main(argv=None):
     c.add_argument('--worktree', help='where the oracle cases are written, wired and built '
                                       '(required when a row is probed; use a disposable clone)')
     c.add_argument('--evidence-root', help='checkout whose docs/evidence to read (default this one)')
+    c.add_argument('--no-frida', action='store_true',
+                   help='skip the Frida path: record it as deferred (default: run it, needs --frida-map)')
+    c.add_argument('--frida-map', help='the x86 build\'s iwd2r.map (ours-side RVAs for the Frida run)')
     c.add_argument('--out', help='calibration file to write (default docs/wso/truth-calibration.json)')
     args = p.parse_args(argv)
     return _calibrate_main(args)
