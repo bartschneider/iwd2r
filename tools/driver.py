@@ -590,13 +590,50 @@ _HISTORY_VERBS = ('reset', 'rebase', 'revert', 'restore', 'clean', 'stash',
                   'filter-repo', 'push', 'update-ref')
 
 
-def _history_rewrite(args):
+# No real branch is named for these (the batch's own path prefixes).
+_BATCH_DIRS = ('src', 'compat', 'docs', 'oracle', 'tools', 'tests')
+
+
+def _split_unquoted(text, seps):
+    """text split at any of seps (longest first) outside quotes; a
+    backslash escapes the next character."""
+    parts, cur, quote, i = [], [], None, 0
+    while i < len(text):
+        ch = text[i]
+        if quote:
+            cur.append(ch)
+            if ch == '\\' and quote == '"' and i + 1 < len(text):
+                i += 1
+                cur.append(text[i])
+            elif ch == quote:
+                quote = None
+        elif ch == '\\' and i + 1 < len(text):
+            cur.append(ch + text[i + 1])
+            i += 1
+        elif ch in '\'"':
+            quote = ch
+            cur.append(ch)
+        else:
+            sep = next((x for x in seps if text.startswith(x, i)), None)
+            if sep:
+                parts.append(''.join(cur))
+                cur = []
+                i += len(sep) - 1
+            else:
+                cur.append(ch)
+        i += 1
+    parts.append(''.join(cur))
+    return parts
+
+
+def _history_rewrite(args, covered=()):
     """True when the arguments of a `git` command (after the command word)
     rewrite or discard history or work: reset, rebase, revert, restore,
     clean, stash, filter-repo, push, update-ref, commit --amend, branch
     -d/-D, reflog expire, gc --prune, and a checkout that is not a plain
-    branch switch (`--`, -f, `.`, or a path after a start point).
-    add, commit, switch, checkout -b / <branch> and the read-only
+    branch switch (`--`, -f, -B, `.`, a path after a start point, or one
+    argument that names a covered file, looks like a path or starts with a
+    batch directory), branch -f/-M and switch -C/--force-create.  add, commit, switch, checkout -b / <branch> and the read-only
     commands are not."""
     rest = list(args)
     while rest and rest[0].startswith('-'):      # git -C dir / -c k=v / --x
@@ -609,22 +646,32 @@ def _history_rewrite(args):
     if sub == 'commit':
         return any(a == '--amend' for a in rest)
     if sub == 'branch':
-        return any(a in ('--delete', '--force') or re.fullmatch(r'-[a-zA-Z]*[dD][a-zA-Z]*', a)
+        return any(a in ('--delete', '--force')
+                   or re.fullmatch(r'-[a-zA-Z]*[dDfM][a-zA-Z]*', a)
                    for a in rest)
     if sub == 'reflog':
         return 'expire' in rest or 'delete' in rest
     if sub == 'gc':
         return any(a.startswith('--prune') for a in rest)
     if sub == 'switch':
-        return any(a in ('-f', '--force', '--discard-changes') for a in rest)
+        return any(a in ('--force', '--discard-changes', '--force-create')
+                   or re.fullmatch(r'-[a-zA-Z]*[fC][a-zA-Z]*', a)
+                   for a in rest)
     if sub == 'checkout':
-        if '--' in rest or any(a in ('-f', '--force', '-p', '--patch', '--ours',
-                                     '--theirs') for a in rest):
+        if '--' in rest or any(
+                a in ('--force', '--patch', '--ours', '--theirs')
+                or re.fullmatch(r'-[a-zA-Z]*[fpB][a-zA-Z]*', a) for a in rest):
             return True
-        if any(a in ('-b', '-B') for a in rest):
+        if '-b' in rest:
             return False
         pos = [a for a in rest if not a.startswith('-')]
-        return len(pos) > 1 or pos == ['.']
+        if len(pos) != 1:
+            return len(pos) > 1
+        a = pos[0]
+        return (a == '.' or a.startswith(('./', '../'))
+                or any(ch in a for ch in '*?[')
+                or a.split('/')[0] in _BATCH_DIRS
+                or any(a == c or a.endswith('/' + c) for c in covered))
     return False
 
 
@@ -636,8 +683,8 @@ def transcript_findings(transcript_path, covered_files):
     source file: no Read limit or one over READ_LIMIT; cat, a sed -n span
     or head/tail -n over READ_LIMIT; file is the covered file),
     'history' (a git command that rewrites history or discards work, see
-    _history_rewrite; terminal like launch) or 'unreadable'.  cat and the launch words count only as a command word,
-    and a cat piped into a bounded head/tail/sed is bounded."""
+    _history_rewrite; terminal like launch) or 'unreadable'.  cat and the launch words count only as a command
+    word, and a cat piped into a bounded head/tail/sed is bounded."""
     covered = [c for c in covered_files if c]
     out = []
     calls = []
@@ -664,11 +711,12 @@ def transcript_findings(transcript_path, covered_files):
                                 hit[0], 'no limit' if not isinstance(limit, int)
                                 else 'limit %d' % limit, READ_LIMIT), hit[0]))
         elif name == 'Bash':
-            for seg in _SEGMENT.split(str(inp.get('command', ''))):
+            for seg in _split_unquoted(str(inp.get('command', '')),
+                                       ('&&', '||', ';', '\n')):
                 seg = seg.strip()
                 if not seg:
                     continue
-                stages = [_words(st) for st in seg.split('|')]
+                stages = [_words(st) for st in _split_unquoted(seg, ('|',))]
                 for i, (cw, args) in enumerate(stages):
                     text = ' '.join(args)
                     if cw == 'git' and _WSO_REF.search(' ' + text):
@@ -676,7 +724,7 @@ def transcript_findings(transcript_path, covered_files):
                                     '(%s): read the fork only at the pinned '
                                     'sha, `git show <sha>:<path>`'
                                     % _short(seg), None))
-                    if cw == 'git' and _history_rewrite(args):
+                    if cw == 'git' and _history_rewrite(args, covered):
                         out.append(('history', 'history rewrite in a worker '
                                     '(%s): workers only add and commit'
                                     % _short(seg), None))
@@ -1598,8 +1646,8 @@ class Driver:
 
     def _scan_transcript(self, batch_id, label, res):
         """Every run's transcript, worker, fix rounds and reviewer: a wso/
-        ref or a launch outside the house runners is a past call nobody can
-        undo, so a `transcript` exception with no fix round; a whole-file
+        ref, a launch outside the house runners or a history rewrite is a
+        past call nobody can undo, so a `transcript` exception with no fix round; a whole-file
         read is a ledger line only; a missing transcript is a ledger line."""
         lines = self._ctx.transcript_lines
         if not res.transcript:

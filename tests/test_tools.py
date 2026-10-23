@@ -11351,6 +11351,14 @@ class DriverTest(unittest.TestCase):
             'git branch -d old', 'git branch --delete old', 'git update-ref -d refs/x',
             'git reflog expire --expire=now --all', 'git gc --prune=now',
             'git -C /w reset --hard', 'git -c core.x=1 revert abc1234',
+            'git checkout src/A.cpp', 'git checkout ./src/A.cpp',
+            'git checkout ../x/A.cpp', "git checkout 'src/*.cpp'",
+            'git checkout src', 'git checkout src/B.cpp', 'git checkout docs/MAP.md',
+            'git checkout compat/x.h', 'git checkout oracle/cases/a',
+            'git checkout x?.c',
+            'git branch -f p3/x first', 'git branch -M p3/x', 'git branch -fq p3/x',
+            'git branch -Mf p3/x', 'git checkout -B p3/x first',
+            'git switch -C p3/x first', 'git switch --force-create p3/x',
         )
         for cmd in forbidden:
             for form in (cmd, 'git add -A && ' + cmd, 'git status; ' + cmd,
@@ -11373,6 +11381,10 @@ class DriverTest(unittest.TestCase):
                     'git merge-base first HEAD', 'git rev-parse HEAD',
                     'git blame src/A.cpp', 'git branch', 'git branch -a',
                     'git commit -m x; git status', 'git -C /w log -3',
+                    'git checkout -b X first', 'git commit -m "WIP; git push later"',
+                    'git commit -m "a\ngit push\nb"',
+                    'git commit -m "$(cat <<\'EOF\'\nfix\ngit push\nEOF\n)"',
+                    'git commit -m "x && git reset --hard"', 'git branch -m new',
                     'echo reset && git status', 'grep -r "git push" docs'):
             self.assertEqual(self._bash(cmd), [], cmd)
 
@@ -11529,7 +11541,8 @@ class DriverTest(unittest.TestCase):
         self.assertIn('transcript: none', self._ledger_text(d))
 
     def test_wso_ref_or_launch_in_a_transcript_is_an_exception_without_a_fix_round(self):
-        for cmd in ('git show wso/main:src/F11.cpp', 'WindowsSandbox.exe run.wsb'):
+        for cmd in ('git show wso/main:src/F11.cpp', 'WindowsSandbox.exe run.wsb',
+                    'git reset --hard'):
             t = self._tcalls(('Bash', {'command': cmd}))
             w = self._twork([t])
             d = self._pool_driver(self._two_pools()[:1], {'a': w}, ids=('b011',))
