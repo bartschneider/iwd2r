@@ -8070,6 +8070,9 @@ class WaveTest(unittest.TestCase):
         self.assertIn('case ', brief)
         self.assertIn('disagreed with WSO', brief)
         self.assertIn('corroborated by WSO', brief)
+        self.assertIn('; case <id> decides', brief)
+        self.assertIn("the driver's checks refuse a verdict row whose "
+                      "evidence lacks it", brief)
         self.assertIn('Imported-From', brief)
         self.assertIn('WIP', brief)
         self.assertIn('parity_waiver', brief)
@@ -9813,6 +9816,73 @@ class _DirtyWorker(_SeqWorker):
         return super().run(brief, cwd)
 
 
+class EvidenceParagraphsTest(unittest.TestCase):
+    FIXTURE = ('---\nkind: oracle\n---\n\n# 0x401000\n\n## WSO delta\n\n'
+               'disagreed with WSO at e8dd16a7: the guard differs; the\n'
+               'clamp is the same in both builds; the oracle sweep\n'
+               'agrees on every sampled argument; the trace shows one\n'
+               'path; nothing else reads the result; the other callers\n'
+               'only forward it; the replay confirms it;\n'
+               'case probe-9 decides.\n\n'
+               '```c\nint f(int a)\n{\n  return a;\n}\n```\n\n'
+               'first paragraph\nsecond line\n\nlast paragraph\n')
+
+    def setUp(self):
+        self.wave = load_tool('wave')
+
+    def test_paragraphs(self):
+        self.assertEqual(self.wave.evidence_paragraphs(self.FIXTURE), [
+            '---', 'kind: oracle', '---',
+            '# 0x401000', '## WSO delta',
+            'disagreed with WSO at e8dd16a7: the guard differs; the clamp is the '
+            'same in both builds; the oracle sweep agrees on every sampled '
+            'argument; the trace shows one path; nothing else reads the result; '
+            'the other callers only forward it; the replay confirms it; '
+            'case probe-9 decides.',
+            '```c', 'int f(int a)', '{', '  return a;', '}', '```',
+            'first paragraph second line', 'last paragraph'])
+
+    def test_a_single_line_is_unchanged(self):
+        self.assertEqual(self.wave.evidence_paragraphs('one line\n'), ['one line'])
+        self.assertEqual(self.wave.evidence_paragraphs(''), [])
+
+    def test_decided_by_reads_the_wrapped_sentence(self):
+        w = self.wave
+        self.assertTrue(w._evidence_decided_by(self.FIXTURE, 'probe-9'))
+        self.assertFalse(w._evidence_decided_by(self.FIXTURE, 'probe-8'))
+        self.assertFalse(w._evidence_decided_by(
+            self.FIXTURE.replace('disagreed with WSO', 'disagreed with us'), 'probe-9'))
+        self.assertTrue(w._evidence_decided_by(
+            'corroborated by WSO at abc1234; case c decides', 'c'))
+
+    def test_decided_by_keeps_the_physical_line_reading(self):
+        w = self.wave
+        text = ('- disagreed with WSO at abc1234: x; case c decides\n'
+                '- another bullet\n')
+        self.assertTrue(w._evidence_decided_by(text, 'c'))
+        text = ('disagreed with WSO at abc1234: x; case c decides.\n'
+                'more prose right after it\n')
+        self.assertTrue(w._evidence_decided_by(text, 'c'))
+        self.assertFalse(w._evidence_decided_by(text, 'd'))
+
+    def test_front_matter_does_not_join_the_body(self):
+        paras = self.wave.evidence_paragraphs('---\nkind: oracle\n---\nbody a\nbody b\n')
+        self.assertEqual(paras, ['---', 'kind: oracle', '---', 'body a body b'])
+
+    def test_decided_by_does_not_join_across_a_blank_line_or_fence(self):
+        w = self.wave
+        text = 'disagreed with WSO at abc1234: x\n\ncase c decides\n'
+        self.assertFalse(w._evidence_decided_by(text, 'c'))
+
+    def test_cites_pin_across_a_wrap(self):
+        w = self.wave
+        self.assertTrue(w._cites_pin(self.FIXTURE, 'e8dd16a7' + '0' * 32))
+        wrapped = 'disagreed with WSO\nat e8dd16a7: x;\ncase c decides\n'
+        self.assertTrue(w._cites_pin(wrapped, 'e8dd16a7'))
+        self.assertFalse(w._cites_pin(wrapped, '1234567'))
+        self.assertFalse(w._cites_pin('disagreed with WSO\n\nat e8dd16a7', 'e8dd16a7'))
+
+
 class DriverTest(unittest.TestCase):
     REPORT = ('# report\n\n## Verdicts\n\nverdict 0x401000 ours case dump-401000\n'
               'verdict 0x402000 fork case probe-b011-402000\n')
@@ -9997,6 +10067,12 @@ class DriverTest(unittest.TestCase):
         g('init', '-q', '-b', 'p3/wso-b011')
         os.makedirs(os.path.join(d, 'docs', 'evidence'))
         for addr, text in evidence.items():
+            phrase = next((p for p in ('disagreed with WSO', 'corroborated by WSO') if p in text), None)
+            if phrase:
+                # every case id the tests below give a verdict decides
+                text += ''.join('\n\n%s at abc; case %s decides' % (phrase, c) for c in (
+                    'c', 'dump-3', 'probe-3', 'probe-4', 'probe-17', 'x',
+                    'probe-b011-76D370', 'readout-401000'))
             with open(os.path.join(d, 'docs', 'evidence', addr + '.md'), 'w') as f:
                 f.write(text)
         return d
@@ -10069,7 +10145,7 @@ class DriverTest(unittest.TestCase):
         self.assertNotIn('docs/plan.md', outside[0])
 
     def test_mechanical_checks_flags_missing_and_foreign_verdicts(self):
-        d = self._mc_repo({'76D370': 'corroborated by WSO at abc'})
+        d = self._mc_repo({'76D370': 'corroborated by WSO at abc; case c decides'})
         calls = []
         with mock.patch.object(driver, '_vanilla_exe', return_value='/nonexistent'):
             probs = driver.mechanical_checks(
@@ -10084,7 +10160,7 @@ class DriverTest(unittest.TestCase):
         self.assertTrue(all(c[1] == d for c in calls))
 
     def test_mechanical_checks_accept_undecided_in_place_of_a_verdict(self):
-        d = self._mc_repo({'76D370': 'corroborated by WSO at abc'})
+        d = self._mc_repo({'76D370': 'corroborated by WSO at abc; case c decides'})
         batch = self._mc_batch()
         with mock.patch.object(driver, '_vanilla_exe', return_value='/nonexistent'), \
                 mock.patch.object(driver._tool('check_evidence'), 'touched',
@@ -10107,7 +10183,7 @@ class DriverTest(unittest.TestCase):
         self.assertTrue(any(p.startswith('0x999999:') and 'outside' in p for p in probs))
 
     def test_mechanical_checks_undecided_row_must_keep_our_body(self):
-        d = self._mc_repo({'76D370': 'corroborated by WSO at abc'})
+        d = self._mc_repo({'76D370': 'corroborated by WSO at abc; case c decides'})
         batch = self._mc_batch()
         ce = driver._tool('check_evidence')
         args = (batch, d, {'0x76D370': ('ours', 'c')})
@@ -10162,7 +10238,7 @@ class DriverTest(unittest.TestCase):
         self.assertIn('76D370.md', probs[0])
 
     def test_mechanical_checks_subprocess_steps(self):
-        d = self._mc_repo({'76D370': 'disagreed with WSO at x'})
+        d = self._mc_repo({'76D370': 'disagreed with WSO at x; case c decides'})
         batch = self._mc_batch()
         batch['rows'] = batch['rows'][:1]
         exe = os.path.join(d, 'iwd2.exe')
@@ -10238,8 +10314,13 @@ class DriverTest(unittest.TestCase):
         self.git('worktree', 'add', '-q', '-b', 'p3/wso-b011', self.wt, 'first')
         lines = {'403000': self.AUTO_LINE}
         if phrases:
-            lines['401000'] = 'disagreed with WSO at e8dd16a7: the guard; case probe-1 decides'
-            lines['402000'] = 'corroborated by WSO at e8dd16a7'
+            lines['401000'] = ('disagreed with WSO at e8dd16a7: the guard; case dump-401000 decides\n\n'
+                               'disagreed with WSO at e8dd16a7: the guard; case probe-b011-401000 decides\n\n'
+                               'disagreed with WSO at e8dd16a7: the guard; case dry-0x401000 decides')
+            lines['402000'] = ('corroborated by WSO at e8dd16a7; case dump-402000 decides\n\n'
+                               'corroborated by WSO at e8dd16a7; case probe-b011-402000 decides\n\n'
+                               'corroborated by WSO at e8dd16a7; case probe-12 decides\n\n'
+                               'corroborated by WSO at e8dd16a7; case dry-0x402000 decides')
         for stem, line in lines.items():
             with open(os.path.join(self.wt, 'docs', 'evidence', stem + '.md'), 'a') as f:
                 f.write('\n' + line + '\n')
@@ -10331,7 +10412,7 @@ class DriverTest(unittest.TestCase):
         with open(self.state_path, 'w') as f:
             json.dump(state, f)
         with open(os.path.join(self.wt, 'docs', 'evidence', '401000.md'), 'a') as f:
-            f.write('\ncorroborated by WSO at e8dd16a7\n' + self.PURE_EVIDENCE)
+            f.write('\ncorroborated by WSO at e8dd16a7; case dump-401000 decides\n' + self.PURE_EVIDENCE)
         with open(os.path.join(self.wt, 'docs', 'evidence', '402000.md'), 'a') as f:
             f.write('\n## Decompiled (Ghidra)\n\n```c\nint Roll(int a, int b)\n\n{\n  return g_x;\n}\n```\n')
         self.git('commit', '-qam', 'decompiled', cwd=self.wt)
@@ -11362,6 +11443,88 @@ class DriverTest(unittest.TestCase):
         self.assertIn('0x401000: no verdict line', w.briefs[1])
         self.assertIn('BRIEF b011', w.briefs[1])
 
+    WRAPPED = ('corroborated by WSO at e8dd16a7: the guard and the clamp are\n'
+               'the same in both builds, the oracle sweep agrees on every\n'
+               'sampled argument and the trace shows one path, so the\n'
+               'original and ours cannot differ on the swept domain,\n'
+               'which is what the replay needs, and nothing else reads the\n'
+               'result; the other callers only forward it to the renderer;\n'
+               'case %s decides.\n')
+
+    def _set_evidence(self, stem, body):
+        path = os.path.join(self.wt, 'docs', 'evidence', stem + '.md')
+        with open(path, 'w') as f:
+            f.write('---\naddress: 0x%s\nname: F\nkind: oracle\n---\n\n%s' % (stem, body))
+        self.git('commit', '-qam', 'evidence ' + stem, cwd=self.wt)
+
+    def test_check_flags_evidence_without_the_deciding_sentence(self):
+        d = self._driver(worker=driver.FakeWorker(self.REPORT))
+        self._set_evidence('401000', 'disagreed with WSO at e8dd16a7: the guard; case other decides\n')
+        self._set_evidence('402000', self.WRAPPED % 'probe-b011-402000')
+        _verdicts, probs = d._check('b011', self.wt, self.REPORT)
+        self.assertEqual(probs, [
+            '0x401000: docs/evidence/401000.md has no sentence reading "disagreed '
+            'with WSO at <sha>: ...; case dump-401000 decides" (or "corroborated '
+            'by WSO ..."); write it in the ## WSO delta section'])
+
+    def test_check_probe_row_needs_the_deciding_sentence_too(self):
+        d = self._driver(worker=driver.FakeWorker(self.REPORT))
+        case = 'probe-b011-402000'
+        self._set_evidence('401000', self.WRAPPED % 'dump-401000')
+        self._set_evidence('402000', 'corroborated by WSO at e8dd16a7: same\n')
+        _v, probs = d._check('b011', self.wt, self.REPORT.replace(
+            'fork case probe-b011-402000', 'ours case ' + case))
+        self.assertEqual(probs, [
+            '0x402000: docs/evidence/402000.md has no sentence reading "disagreed '
+            'with WSO at <sha>: ...; case %s decides" (or "corroborated by WSO '
+            '..."); write it in the ## WSO delta section' % case])
+        self._set_evidence('402000', self.WRAPPED % case)
+        _v, probs = d._check('b011', self.wt, self.REPORT.replace(
+            'fork case probe-b011-402000', 'ours case ' + case))
+        self.assertEqual(probs, [])
+
+    def test_check_flags_a_pin_the_evidence_does_not_cite(self):
+        d = self._driver(worker=driver.FakeWorker(self.REPORT))
+        with open(self.state_path) as f:
+            state = json.load(f)
+        state['batches']['b011']['fork_base'] = 'e8dd16a7'
+        with open(self.state_path, 'w') as f:
+            json.dump(state, f)
+        self._set_evidence('401000', 'disagreed with WSO at 1234567: the guard; case dump-401000 decides\n')
+        self._set_evidence('402000', self.WRAPPED % 'probe-b011-402000')
+        _verdicts, probs = d._check('b011', self.wt, self.REPORT)
+        self.assertEqual(probs, [
+            'docs/evidence/401000.md: no "disagreed with WSO at <sha>" / '
+            '"corroborated by WSO at <sha>" line names this batch\'s pin e8dd16a'])
+
+    def test_check_does_not_read_evidence_of_triage_decided_rows(self):
+        d = self._driver(worker=driver.FakeWorker(self.REPORT))
+        self._set_evidence('401000', self.WRAPPED % 'dump-401000')
+        self._set_evidence('402000', self.WRAPPED % 'probe-b011-402000')
+        self._set_evidence('403000', 'disagreed with WSO at e8dd16a7: x; case nothing decides\n')
+        report = self.REPORT + 'verdict 0x403000 fork case probe-x\n'
+        verdicts, probs = d._check('b011', self.wt, report)
+        self.assertEqual(probs, [])
+        self.assertNotIn('0x403000', verdicts)
+        self.assertIn('0x403000', d._ignored)
+
+    def test_check_fix_round_carries_the_evidence_problem_to_the_worker(self):
+        outer = self
+
+        class Fixer(_SeqWorker):
+            def run(self, brief, cwd):
+                res = super().run(brief, cwd)
+                if len(self.briefs) == 2:
+                    outer._set_evidence('401000', outer.WRAPPED % 'dump-401000')
+                return res
+        w = Fixer(self.REPORT)
+        d = self._driver(worker=w)
+        self._set_evidence('401000', 'disagreed with WSO at e8dd16a7: the guard; case other decides\n')
+        self.assertEqual(d.run_batch('b011'), 'closed')
+        self.assertEqual(len(w.briefs), 2)
+        self.assertIn('docs/evidence/401000.md has no sentence reading "disagreed '
+                      'with WSO at <sha>: ...; case dump-401000 decides"', w.briefs[1])
+
     def test_malformed_report_is_a_check_failure(self):
         w = _SeqWorker('## Verdicts\nI think 0x401000 is ours.\n', self.REPORT)
         d = self._driver(worker=w)
@@ -11394,7 +11557,7 @@ class DriverTest(unittest.TestCase):
         diff = os.path.join(os.path.dirname(d.status_path), 'b011', 'review.diff')
         self.assertIn(diff, r.briefs[0])
         with open(diff) as f:
-            self.assertIn('probe-1 decides', f.read())
+            self.assertIn('dump-401000 decides', f.read())
         self.assertEqual(self._state()['status'], 'assigned')
         self.assertEqual(self.pushes, [])
         self.assertEqual(len(self.sent), 1)
@@ -12497,7 +12660,7 @@ class DriverTest(unittest.TestCase):
             self.git('worktree', 'add', '-q', '-b', 'p3/wso-' + bid, wt, 'first')
             _write(os.path.join(wt, 'docs', 'evidence', addr[2:] + '.md'),
                    f'---\naddress: {addr}\nname: F{n}\nkind: oracle\n---\n\n'
-                   'corroborated by WSO at e8dd16a7\n')
+                   f'corroborated by WSO at e8dd16a7; case dump-{bid} decides\n')
             if on_branch:
                 on_branch(wt, bid)
             self.git('add', '-A', cwd=wt)
@@ -13102,7 +13265,7 @@ class DriverTest(unittest.TestCase):
         self.assertIn('could not be read', probs[0])
 
     def test_mechanical_checks_include_transcript_problems(self):
-        d = self._mc_repo({'76D370': 'corroborated by WSO at abc'})
+        d = self._mc_repo({'76D370': 'corroborated by WSO at abc; case c decides'})
         batch = self._mc_batch()
         batch['rows'] = batch['rows'][:1]
         path = self._tcalls(('Bash', {'command': 'git show wso/main:src/A.cpp'}))
@@ -13194,8 +13357,8 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(len(self._bash('cat src/A.cpp | head -300')), 1)
 
     def test_mechanical_checks_refuse_dump_decided_fork_or_neither(self):
-        d = self._mc_repo({'76D370': 'kind: oracle\ncorroborated by WSO at abc',
-                           '401000': 'kind: oracle\ncorroborated by WSO at abc'})
+        d = self._mc_repo({'76D370': 'kind: oracle\ncorroborated by WSO at abc; case c decides',
+                           '401000': 'kind: oracle\ncorroborated by WSO at abc; case c decides'})
         batch = self._mc_batch()
         batch['rows'] = batch['rows'][:2]
         with mock.patch.object(driver, '_vanilla_exe', return_value='/nonexistent'):
@@ -13289,8 +13452,8 @@ class DriverTest(unittest.TestCase):
         b011 has a second row triage moves to the import list."""
         evidence = {'docs/evidence/%X.md' % a: (
             '---\naddress: 0x%X\nname: F\nkind: oracle\n---\n\n'
-            'corroborated by WSO at e8dd16a7\n' % a)
-            for a in (0x40B000, 0x40C000)}
+            'corroborated by WSO at e8dd16a7; case dump-%s decides\n' % (a, b))
+            for a, b in ((0x40B000, 'b011'), (0x40C000, 'b012'))}
         w = self._BatchWorker(credits=0.0)
         d = self._pool_driver(self._two_pools()[:1], {'a': w},
                               ids=('b011', 'b012'), base_files=evidence, **kw)
@@ -13660,8 +13823,8 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(self.sent, ['driver: b011 exception at worker; see %s' % d.status_path])
 
     def test_probe_phrase_applies_only_to_driver_recorded_probe_passes(self):
-        d = self._mc_repo({'76D370': 'kind: oracle\ndisagreed with WSO at abc',
-                           '401000': 'kind: oracle\ndisagreed with WSO at abc'})
+        d = self._mc_repo({'76D370': 'kind: oracle\ndisagreed with WSO at abc; case c decides',
+                           '401000': 'kind: oracle\ndisagreed with WSO at abc; case c decides'})
         batch = self._mc_batch()
         batch['rows'] = batch['rows'][:2]
         ok = self._mc_run(0, [])
@@ -13675,7 +13838,7 @@ class DriverTest(unittest.TestCase):
                 batch, d, {'0x76D370': ('ours', 'probe-b011-76D370'), '0x401000': ('ours', 'x')},
                 run=ok)
             self.assertEqual(len(probs), 1)
-            self.assertIn("'corroborated by WSO at <sha>'", probs[0])
+            self.assertIn("'corroborated by WSO at <sha>: ...; case probe-b011-76D370 decides'", probs[0])
             # The driver's probe set decides whatever the case says.
             probs = driver.mechanical_checks(
                 batch, d, {'0x76D370': ('ours', 'x'), '0x401000': ('ours', 'x')},
@@ -13684,8 +13847,8 @@ class DriverTest(unittest.TestCase):
             self.assertIn('401000.md', probs[0])
 
     def test_a_fork_verdict_needs_a_kind_line_in_the_evidence(self):
-        d = self._mc_repo({'76D370': 'corroborated by WSO at abc',
-                           '401000': 'kind: oracle\ncorroborated by WSO at abc'})
+        d = self._mc_repo({'76D370': 'corroborated by WSO at abc; case c decides',
+                           '401000': 'kind: oracle\ncorroborated by WSO at abc; case c decides'})
         batch = self._mc_batch()
         batch['rows'] = batch['rows'][:2]
         with mock.patch.object(driver, '_vanilla_exe', return_value='/nonexistent'):
@@ -14158,7 +14321,7 @@ class DriverTest(unittest.TestCase):
         self.assertNotEqual(res.returncode, 0)
 
     def test_mechanical_checks_leave_the_map_to_the_close(self):
-        d = self._mc_repo({'76D370': 'corroborated by WSO at abc'})
+        d = self._mc_repo({'76D370': 'corroborated by WSO at abc; case c decides'})
         calls = []
         with mock.patch.object(driver, '_vanilla_exe', return_value='/nonexistent'):
             driver.mechanical_checks(self._mc_batch(), d, {'0x76d370': ('ours', 'c')},
@@ -16361,6 +16524,18 @@ class WaveCloseRulesTest(unittest.TestCase):
         rc, out = self.close()
         self.assertEqual(rc, 1, out)
         self.assertIn('a fork/neither verdict decided by a dump reading (readout-643CD0)', out)
+
+    def test_close_passes_a_wrapped_deciding_sentence(self):
+        self.ready()
+        wrapped = ('---\nkind: replay\n---\n\n## WSO delta\n\n'
+                   'disagreed with\nWSO at e8dd16a: the guard\ndiffers in both\n'
+                   'builds and the replay\nshows it; case probe-9\ndecides.\n')
+        for stem in ('643CC0', '643CD0'):
+            with open(os.path.join(self.wt, 'docs', 'evidence', stem + '.md'), 'w') as f:
+                f.write(wrapped)
+        self.commit_worktree('wrap')
+        rc, out = self.close()
+        self.assertEqual(rc, 0, out)
 
     def test_close_dump_decided_ours_verdict_passes(self):
         self.ready(render=('ours', 'dump-1'))

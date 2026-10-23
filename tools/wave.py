@@ -1063,14 +1063,48 @@ def _ruling_line(ledger_path, ruling):
     return None
 
 
+def evidence_paragraphs(text):
+    """The logical lines of an evidence file: a run of consecutive non-empty
+    lines is one Markdown paragraph, joined with single spaces (workers
+    hard-wrap prose); a heading and each line of a fenced code block stay
+    their own entries; a blank line separates."""
+    out, run, fence = [], [], False
+
+    def flush():
+        if run:
+            out.append(' '.join(run))
+            del run[:]
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line.startswith('```') or line.startswith('~~~'):
+            flush()
+            out.append(raw.rstrip())
+            fence = not fence
+        elif fence:
+            out.append(raw.rstrip())
+        elif not line or line == '---':
+            flush()
+            if line:
+                out.append(line)
+        elif line.startswith('#'):
+            flush()
+            out.append(line)
+        else:
+            run.append(line)
+    flush()
+    return out
+
+
 def _cites_pin(text, pin):
     """True when an evidence phrase names `pin` (either may be the
     abbreviation of the other, 7 hex digits at least)."""
-    for p in EVIDENCE_PHRASES:
-        for m in re.finditer(re.escape(p) + r' at ([0-9a-fA-F]{7,40})', text):
-            sha = m.group(1).lower()
-            if pin.lower().startswith(sha) or sha.startswith(pin.lower()):
-                return True
+    for para in evidence_paragraphs(text):
+        for p in EVIDENCE_PHRASES:
+            for m in re.finditer(re.escape(p) + r'\s+at\s+([0-9a-fA-F]{7,40})',
+                                 para):
+                sha = m.group(1).lower()
+                if pin.lower().startswith(sha) or sha.startswith(pin.lower()):
+                    return True
     return False
 
 
@@ -1175,7 +1209,8 @@ def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
                     if kind != 'verdicts' else ''))
                 continue
             if kind == 'verdicts':
-                if not any(p in text for p in EVIDENCE_PHRASES):
+                if not any(p in para for para in evidence_paragraphs(text)
+                           for p in EVIDENCE_PHRASES):
                     problems.append(
                         f'{rel}: neither {" nor ".join(EVIDENCE_PHRASES)} '
                         f'in the body')
@@ -1412,11 +1447,13 @@ def _dump_refusal(addr, case, remedy):
 
 
 def _evidence_decided_by(text, case):
-    """True when a line of an evidence file carries one of EVIDENCE_PHRASES
-    and ends with `case <case> decides`."""
+    """True when a physical line or a logical line (paragraph, see
+    evidence_paragraphs) of an evidence file carries one of EVIDENCE_PHRASES and ends with
+    `case <case> decides`."""
+    tail = f'case {case} decides'
     return any(any(p in line for p in EVIDENCE_PHRASES)
-               and line.rstrip().rstrip('.').endswith(f'case {case} decides')
-               for line in text.splitlines())
+               and line.rstrip().rstrip('.').endswith(tail)
+               for line in text.splitlines() + evidence_paragraphs(text))
 
 
 def resolve_probe(address, side, case, state_path=STATE_PATH, repo=ROOT):
