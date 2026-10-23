@@ -9117,6 +9117,52 @@ class DriverTest(unittest.TestCase):
             self.assertIsNone(r.transcript)
             self.assertIsNone(r.credits)
 
+    def _credits(self, lines):
+        with tempfile.NamedTemporaryFile('w', suffix='.jsonl', delete=False) as f:
+            f.write('\n'.join(json.dumps(x) for x in lines))
+        self.addCleanup(os.unlink, f.name)
+        return driver.credits_of(f.name)
+
+    def test_credits_dedup_by_message_id(self):
+        line = {'message': {'id': 'm1', 'model': 'glm-5.3-flash',
+                'usage': {'output_tokens': 10000}}}
+        self.assertAlmostEqual(self._credits([line, line, line]), 8.0)
+        last = {'message': {'id': 'm1', 'model': 'glm-5.3-flash',
+                'usage': {'output_tokens': 20000}}}
+        self.assertAlmostEqual(self._credits([line, last]), 16.0)
+
+    def test_credits_model_rules(self):
+        u = {'output_tokens': 10000}
+        def one(model):
+            return self._credits([{'message': {'model': model, 'usage': u}}])
+        self.assertAlmostEqual(one('glm-5.3-flash[1m]'), 8.0)
+        self.assertAlmostEqual(one('glm-4.9'), 24.0)
+        self.assertEqual(one('claude-opus-5'), 0.0)
+        self.assertEqual(one('<synthetic>'), 0.0)
+        self.assertEqual(self._credits([{'message': {'usage': u}}]), 0.0)
+
+    def test_parse_report_tolerant_forms(self):
+        h = '## Verdicts\n'
+        self.assertEqual(driver.parse_report(h + '- verdict 0x76d370 ours case c1\n'),
+                         {'0x76D370': ('ours', 'c1')})
+        self.assertEqual(driver.parse_report(h + '`verdict 0x1 fork case c2`\n2. Verdict 0X02 neither case c3\n'),
+                         {'0x1': ('fork', 'c2'), '0x2': ('neither', 'c3')})
+        with self.assertRaises(driver.ReportError) as cm:
+            driver.parse_report(h + '\nI think it is ours.\n')
+        self.assertIn('line 3', str(cm.exception))
+        with self.assertRaises(driver.ReportError):
+            driver.parse_report(h + 'verdict 0x401000 ours case a\nverdict 0x0401000 fork case b\n')
+
+    def test_run_non_json_output(self):
+        def stub(argv, **kw):
+            return subprocess.CompletedProcess(argv, 0, 'boom', '')
+        r = driver.HeadlessWorker(config_dir='/nonexistent', run=stub).run('B', '/tmp')
+        self.assertEqual((r.exit_code, r.report), (1, 'boom'))
+        def stub2(argv, **kw):
+            return subprocess.CompletedProcess(argv, 3, 'x', '')
+        r = driver.HeadlessWorker(config_dir='/nonexistent', run=stub2).run('B', '/tmp')
+        self.assertEqual(r.exit_code, 3)
+
     def test_fake_worker(self):
         r = driver.FakeWorker('R', exit_code=2, rate_limited=True).run('b', '/tmp')
         self.assertEqual((r.exit_code, r.report, r.rate_limited), (2, 'R', True))

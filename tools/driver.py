@@ -16,7 +16,9 @@ Result = collections.namedtuple(
 FLASH_RATES = (2.3, 0.56, 8.0)
 GLM53_RATES = (6.9, 1.7, 24.0)
 
-VERDICT_RE = re.compile(r'^verdict (0x[0-9a-fA-F]+) (ours|fork|neither) case (\S+)$')
+VERDICT_RE = re.compile(
+    r'^verdict (0[xX][0-9a-fA-F]+) (ours|fork|neither) case (\S+)$', re.IGNORECASE)
+MARKER_RE = re.compile(r'^(?:[-*]|\d+\.)\s+')
 
 
 class ReportError(ValueError):
@@ -24,36 +26,45 @@ class ReportError(ValueError):
 
 
 def parse_report(text):
-    """Parse the '## Verdicts' section into {addr: (side, case)}."""
+    """Parse the '## Verdicts' section into {addr: (side, case)}.
+
+    Addresses are normalised to '0x' + uppercase hex without leading zeros."""
     out = {}
     in_section = False
-    for raw in text.splitlines():
+    for n, raw in enumerate(text.splitlines(), 1):
         line = raw.strip()
         if line.startswith('#'):
             in_section = line.lstrip('#').strip().lower() == 'verdicts'
             continue
         if not in_section or not line:
             continue
-        if not line.startswith('verdict'):
-            continue
-        m = VERDICT_RE.match(line)
+        cand = MARKER_RE.sub('', line, count=1).strip().strip('`').strip()
+        m = VERDICT_RE.match(cand)
         if not m:
-            raise ReportError('malformed verdict line: %r' % raw)
-        addr, side, case = m.groups()
+            raise ReportError('line %d: malformed verdict line: %r' % (n, raw))
+        addr = '0x%X' % int(m.group(1), 16)
+        side, case = m.group(2).lower(), m.group(3)
         if addr in out:
-            raise ReportError('duplicate verdict for %s' % addr)
+            raise ReportError('line %d: duplicate verdict for %s' % (n, addr))
         out[addr] = (side, case)
     return out
 
 
 def _rates(model):
+    """Rates for a model name, or None for a non-glm model (skipped)."""
     model = re.sub(r'\[1m\]$', '', model or '')
-    return FLASH_RATES if 'flash' in model else GLM53_RATES
+    if 'flash' in model:
+        return FLASH_RATES
+    if model.startswith('glm'):
+        return GLM53_RATES
+    return None
 
 
 def credits_of(path):
-    """Sum per-turn usage in a transcript. Lines are data, never executed."""
-    total = 0.0
+    """Sum usage in a transcript, once per message.id (last line wins).
+    Lines are data, never executed."""
+    by_id = {}
+    anon = []
     with open(path, encoding='utf-8', errors='replace') as f:
         for line in f:
             try:
@@ -64,12 +75,21 @@ def credits_of(path):
             usage = msg.get('usage') if isinstance(msg, dict) else None
             if not isinstance(usage, dict):
                 continue
-            r_in, r_cache, r_out = _rates(msg.get('model'))
-            inp = (usage.get('input_tokens') or 0) + \
-                (usage.get('cache_creation_input_tokens') or 0)
-            total += (inp * r_in
-                      + (usage.get('cache_read_input_tokens') or 0) * r_cache
-                      + (usage.get('output_tokens') or 0) * r_out) / 10000
+            mid = msg.get('id')
+            if isinstance(mid, str) and mid:
+                by_id[mid] = (msg.get('model'), usage)
+            else:
+                anon.append((msg.get('model'), usage))
+    total = 0.0
+    for model, usage in list(by_id.values()) + anon:
+        rates = _rates(model)
+        if rates is None:
+            continue
+        inp = (usage.get('input_tokens') or 0) + \
+            (usage.get('cache_creation_input_tokens') or 0)
+        total += (inp * rates[0]
+                  + (usage.get('cache_read_input_tokens') or 0) * rates[1]
+                  + (usage.get('output_tokens') or 0) * rates[2]) / 10000
     return total
 
 
@@ -118,6 +138,7 @@ class HeadlessWorker:
         argv, env = self.command(brief)
         proc = self._run(argv, cwd=cwd, env=env, capture_output=True, text=True)
         report, session_id = '', None
+        exit_code = proc.returncode
         try:
             data = json.loads(proc.stdout)
             if isinstance(data, dict):
@@ -125,10 +146,11 @@ class HeadlessWorker:
                 session_id = data.get('session_id')
         except ValueError:
             report = proc.stdout or ''
+            exit_code = exit_code or 1
         transcript = credits = None
         if isinstance(session_id, str) and re.fullmatch(r'[A-Za-z0-9_-]+', session_id):
             path = self.transcript_path(cwd, session_id)
             if os.path.isfile(path):
                 transcript = path
                 credits = credits_of(path)
-        return Result(proc.returncode, report, transcript, credits, False)
+        return Result(exit_code, report, transcript, credits, False)
