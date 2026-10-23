@@ -586,14 +586,57 @@ def _tool_calls(path):
                     yield block.get('name'), block['input']
 
 
+_HISTORY_VERBS = ('reset', 'rebase', 'revert', 'restore', 'clean', 'stash',
+                  'filter-repo', 'push', 'update-ref')
+
+
+def _history_rewrite(args):
+    """True when the arguments of a `git` command (after the command word)
+    rewrite or discard history or work: reset, rebase, revert, restore,
+    clean, stash, filter-repo, push, update-ref, commit --amend, branch
+    -d/-D, reflog expire, gc --prune, and a checkout that is not a plain
+    branch switch (`--`, -f, `.`, or a path after a start point).
+    add, commit, switch, checkout -b / <branch> and the read-only
+    commands are not."""
+    rest = list(args)
+    while rest and rest[0].startswith('-'):      # git -C dir / -c k=v / --x
+        rest = rest[2:] if rest[0] in ('-C', '-c') else rest[1:]
+    if not rest:
+        return False
+    sub, rest = rest[0], rest[1:]
+    if sub in _HISTORY_VERBS:
+        return True
+    if sub == 'commit':
+        return any(a == '--amend' for a in rest)
+    if sub == 'branch':
+        return any(a in ('--delete', '--force') or re.fullmatch(r'-[a-zA-Z]*[dD][a-zA-Z]*', a)
+                   for a in rest)
+    if sub == 'reflog':
+        return 'expire' in rest or 'delete' in rest
+    if sub == 'gc':
+        return any(a.startswith('--prune') for a in rest)
+    if sub == 'switch':
+        return any(a in ('-f', '--force', '--discard-changes') for a in rest)
+    if sub == 'checkout':
+        if '--' in rest or any(a in ('-f', '--force', '-p', '--patch', '--ours',
+                                     '--theirs') for a in rest):
+            return True
+        if any(a in ('-b', '-B') for a in rest):
+            return False
+        pos = [a for a in rest if not a.startswith('-')]
+        return len(pos) > 1 or pos == ['.']
+    return False
+
+
 def transcript_findings(transcript_path, covered_files):
     """[(kind, problem, file)] for the forbidden tool calls in a worker's
     transcript.  kind 'wso' (a git command naming a wso/ ref; the pinned
     sha is allowed), 'launch' (a .wsb, WindowsSandbox or Start-Process
     launch outside HOUSE_RUNNERS), 'read' (a whole-file read of a covered
     source file: no Read limit or one over READ_LIMIT; cat, a sed -n span
-    or head/tail -n over READ_LIMIT; file is the covered file) or
-    'unreadable'.  cat and the launch words count only as a command word,
+    or head/tail -n over READ_LIMIT; file is the covered file),
+    'history' (a git command that rewrites history or discards work, see
+    _history_rewrite; terminal like launch) or 'unreadable'.  cat and the launch words count only as a command word,
     and a cat piped into a bounded head/tail/sed is bounded."""
     covered = [c for c in covered_files if c]
     out = []
@@ -632,6 +675,10 @@ def transcript_findings(transcript_path, covered_files):
                         out.append(('wso', 'git command naming a wso/ ref '
                                     '(%s): read the fork only at the pinned '
                                     'sha, `git show <sha>:<path>`'
+                                    % _short(seg), None))
+                    if cw == 'git' and _history_rewrite(args):
+                        out.append(('history', 'history rewrite in a worker '
+                                    '(%s): workers only add and commit'
                                     % _short(seg), None))
                     launch = cw in ('windowssandbox', 'start-process', 'start') \
                         or (cw in _LAUNCH_SHELLS and _LAUNCH.search(text))

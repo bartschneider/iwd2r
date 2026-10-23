@@ -212,7 +212,10 @@ A rule that is not a check, a flag or a test is not a rule.
 a fork or neither verdict decided by a dump reading unless
 `--allow-dump RULING --ledger PATH` names a `Ruling <id>` line of that file;
 the driver rejects a worker whose transcript shows a git command naming a
-`wso/` ref, a whole-file read of a covered source file or a launch outside
+`wso/` ref, a whole-file read of a covered source file, a history rewrite
+(`reset`, `rebase`, `revert`, `restore`, `clean`, `stash`, `push`,
+`commit --amend`, `checkout -- <path>`, `branch -d`; workers only add and
+commit) or a launch outside
 `tools/play.py` and `tools/gltrace.py`; those two launchers allow two
 launches per attempt until `--new-attempt "<why>"`; and every merge into
 `first` pulls first (`git pull --ff-only`) and fast-forwards.

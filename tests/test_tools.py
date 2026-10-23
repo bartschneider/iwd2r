@@ -11337,6 +11337,45 @@ class DriverTest(unittest.TestCase):
             self.assertEqual(len(probs), 1, cmd)
             self.assertIn('launch outside a house runner', probs[0])
 
+    def test_transcript_history_refuses_rewrites(self):
+        forbidden = (
+            'git checkout -- src/A.cpp', 'git checkout HEAD src/A.cpp',
+            'git checkout abc1234 -- src/A.cpp', 'git checkout .',
+            'git checkout -f main', 'git restore src/A.cpp',
+            'git restore --staged src/A.cpp', 'git reset', 'git reset --hard HEAD~1',
+            'git reset --soft abc1234', 'git rebase first', 'git rebase -i HEAD~3',
+            'git revert abc1234', 'git clean -fd', 'git stash', 'git stash pop',
+            'git commit --amend', 'git commit --amend -m x',
+            'git commit -a --amend --no-edit', 'git filter-repo --path src',
+            'git push', 'git push origin HEAD', 'git branch -D old',
+            'git branch -d old', 'git branch --delete old', 'git update-ref -d refs/x',
+            'git reflog expire --expire=now --all', 'git gc --prune=now',
+            'git -C /w reset --hard', 'git -c core.x=1 revert abc1234',
+        )
+        for cmd in forbidden:
+            for form in (cmd, 'git add -A && ' + cmd, 'git status; ' + cmd,
+                         'git log | head -3 && ' + cmd):
+                probs = self._bash(form)
+                self.assertEqual(len(probs), 1, form)
+                self.assertIn('history rewrite in a worker', probs[0])
+                self.assertIn('workers only add and commit', probs[0])
+        fs = driver.transcript_findings(self._tcalls(
+            ('Bash', {'command': 'git reset --hard'})), ['src/A.cpp'])
+        self.assertEqual([k for k, _t, _f in fs], ['history'])
+
+    def test_transcript_history_allows_add_commit_and_branches(self):
+        for cmd in ('git checkout -b feature', 'git checkout -b feature first',
+                    'git checkout main', 'git checkout p3/batch-1',
+                    'git switch main', 'git switch -c feature', 'git add src/A.cpp',
+                    'git add -A && git commit -m "x"', 'git commit -m "reset the thing"',
+                    'git status', 'git diff HEAD~1', 'git log --oneline -5',
+                    'git show abc1234:src/A.cpp', 'git ls-tree -r HEAD',
+                    'git merge-base first HEAD', 'git rev-parse HEAD',
+                    'git blame src/A.cpp', 'git branch', 'git branch -a',
+                    'git commit -m x; git status', 'git -C /w log -3',
+                    'echo reset && git status', 'grep -r "git push" docs'):
+            self.assertEqual(self._bash(cmd), [], cmd)
+
     def test_transcript_allows_house_runner(self):
         for cmd in ('python3 -I tools/play.py --vm windows --script s.txt',
                     'python3 -I tools/gltrace.py boot --dry-run',
