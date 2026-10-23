@@ -18,8 +18,10 @@ import subprocess
 import sys
 import time
 
+# api_error: the kind of an API error no retry cures (ruling R46), or None.
 Result = collections.namedtuple(
-    'Result', 'exit_code report transcript credits rate_limited')
+    'Result', 'exit_code report transcript credits rate_limited api_error',
+    defaults=(None,))
 
 # (input, cached, output) credits per 10000 tokens.
 FLASH_RATES = (2.3, 0.56, 8.0)
@@ -27,6 +29,9 @@ GLM53_RATES = (6.9, 1.7, 24.0)
 # Z.ai's rate-limit refusal, in a worker's final JSON result or in the
 # transcript's last API-error entry (ruling R41).
 RATE_LIMIT_TEXT = 'Request rejected (429)'
+# API errors no retry cures: the run halts (ruling R46).
+FATAL_API_ERRORS = ('authentication_failed', 'billing_error')
+FATAL_API_STATUSES = (401, 402, 403)
 
 VERDICT_RE = re.compile(
     r'^verdict (0[xX][0-9a-fA-F]+) (ours|fork|neither) case (\S+)$', re.IGNORECASE)
@@ -117,16 +122,30 @@ def _texts(content):
             and b.get('type') == 'text' and isinstance(b.get('text'), str)]
 
 
-def rate_limited_in(path):
-    """True when the transcript's last API-error entry is a rate limit
-    and no successful assistant turn follows it (rulings R41, R44).  The
-    API-error entry is the synthetic assistant line Claude Code writes
-    with isApiErrorMessage; its apiErrorStatus 429 or error 'rate_limit'
-    decides, its own text (RATE_LIMIT_TEXT) is the fallback.  Never
-    tool_use or tool_result content, file text or the worker's prose.  A
-    429 the worker retried past is not a park.  Lines are parsed as JSON
-    data, never executed."""
-    hit = False
+def fatal_api_error(entry):
+    """The kind of an auth or billing error in a dict carrying Claude
+    Code's API-error keys (`error`, `apiErrorStatus`), else None."""
+    error = entry.get('error')
+    if error in FATAL_API_ERRORS:
+        return error
+    status = entry.get('apiErrorStatus')
+    if status in FATAL_API_STATUSES:
+        return 'status %d' % status
+    return None
+
+
+def scan_transcript(path):
+    """(kind, ran) for a worker transcript.  kind is what the LAST
+    API-error entry says when no successful assistant turn follows it:
+    'rate_limit' (apiErrorStatus 429 or error rate_limit, RATE_LIMIT_TEXT
+    in its own text as the fallback), an auth or billing kind, or None
+    (rulings R41, R44, R46).  ran is whether any successful, non-synthetic
+    assistant turn exists: the worker really ran (R46).  The API-error
+    entry is the synthetic assistant line Claude Code writes with
+    isApiErrorMessage; tool_use and tool_result content, file text and
+    the worker's prose are never read.  Lines are parsed as JSON data,
+    never executed."""
+    kind, ran = None, False
     with open(path, encoding='utf-8', errors='replace') as f:
         for line in f:
             try:
@@ -138,13 +157,27 @@ def rate_limited_in(path):
             msg = obj.get('message')
             msg = msg if isinstance(msg, dict) else {}
             if obj.get('isApiErrorMessage') is True:
-                hit = (obj.get('apiErrorStatus') == 429
-                       or obj.get('error') == 'rate_limit'
-                       or any(RATE_LIMIT_TEXT in t
-                              for t in _texts(msg.get('content'))))
+                if (obj.get('apiErrorStatus') == 429
+                        or obj.get('error') == 'rate_limit'
+                        or any(RATE_LIMIT_TEXT in t
+                               for t in _texts(msg.get('content')))):
+                    kind = 'rate_limit'
+                else:
+                    kind = fatal_api_error(obj)
             elif msg.get('model') != '<synthetic>':
-                hit = False      # a successful turn: the 429 was retried past
-    return hit
+                kind, ran = None, True   # a successful turn: retried past
+    return kind, ran
+
+
+def worker_ran(res):
+    """True when a run's transcript holds a successful, non-synthetic
+    assistant turn: the worker really ran (the breaker, ruling R46)."""
+    if res.transcript is None:
+        return False
+    try:
+        return scan_transcript(res.transcript)[1]
+    except OSError:
+        return False
 
 
 def project_slug(cwd):
@@ -193,7 +226,7 @@ class HeadlessWorker:
         proc = self._run(argv, cwd=cwd, env=env, capture_output=True, text=True)
         report, session_id = '', None
         exit_code = proc.returncode
-        rate_limited = False
+        rate_limited, api_error = False, None
         try:
             data = json.loads(proc.stdout)
             if isinstance(data, dict):
@@ -206,6 +239,7 @@ class HeadlessWorker:
                     isinstance(report, str) and RATE_LIMIT_TEXT in report
                     and (data.get('is_error') is True
                          or report.lstrip().startswith('API Error')))
+                api_error = fatal_api_error(data)
         except ValueError:
             report = proc.stdout or ''
             exit_code = exit_code or 1
@@ -215,8 +249,13 @@ class HeadlessWorker:
             if os.path.isfile(path):
                 transcript = path
                 credits = credits_of(path)
-                rate_limited = rate_limited or rate_limited_in(path)
-        return Result(exit_code, report, transcript, credits, rate_limited)
+                kind, _ran = scan_transcript(path)
+                if kind == 'rate_limit':
+                    rate_limited = True
+                elif kind is not None and api_error is None:
+                    api_error = kind
+        return Result(exit_code, report, transcript, credits, rate_limited,
+                      api_error)
 
 
 _TOOLS = {}
@@ -619,7 +658,7 @@ class Driver:
         self._ignored = {}
         self._halt = False
         self._batch_credits = []   # this run's batches: credits or None
-        self._transcripts = []     # this batch's worker runs: had a transcript
+        self._worker_ran = []      # this batch's worker runs: really ran
         self._no_transcript = 0    # batch exceptions in a row without one
 
     # -- status, ledger, results ----------------------------------------
@@ -685,7 +724,7 @@ class Driver:
             raise _launch_failed(label, cwd, e) from None
         self._runs.append(res.credits)
         if label.startswith('worker'):
-            self._transcripts.append(res.transcript is not None)
+            self._worker_ran.append(worker_ran(res))
         folder = os.path.join(self.driver_dir, batch_id)
         os.makedirs(folder, exist_ok=True)
         for name, text in (('brief.md', brief), ('report.md', res.report or '')):
@@ -771,7 +810,13 @@ class Driver:
         return 'parked'
 
     def _settle(self, batch_id, res, label, worktree):
-        """'parked' or 'exception' when a run gave nothing to check."""
+        """'parked' or 'exception' when a run gave nothing to check.  An
+        auth or billing error parks the batch and halts the run (R46)."""
+        if res.api_error:
+            reason = 'api error: %s' % res.api_error
+            out = self._park(batch_id, reason, worktree)
+            self._halt_run(reason)
+            return out
         if res.rate_limited:
             return self._park(batch_id, '%s rate limited' % label, worktree)
         if not (res.report or '').strip():
@@ -931,7 +976,7 @@ class Driver:
 
     def _run_batch(self, batch_id, resume):
         self._runs = []
-        self._transcripts = []
+        self._worker_ran = []
         self._ignored = {}
         state = self.load_state(self.state_path)
         batch = state['batches'].get(batch_id)
@@ -1243,7 +1288,7 @@ class Driver:
         and feed the breaker; an exit code when the run must stop, else
         None."""
         self._runs = []
-        self._transcripts = []
+        self._worker_ran = []
         if self._read_status()['halted'] is not None:
             self._update_status(lambda s: s.__setitem__('halted', None))
         out = (self.run_batch(batch_id, resume=resume) if resume
@@ -1254,10 +1299,11 @@ class Driver:
             return 1
         if out == 'parked':
             return 3
-        # The breaker (ruling R45): a batch exception whose worker never
-        # produced a transcript (the worker never really ran) counts; any
-        # other batch resets.  Credits are no signal: a Claude pool's read 0.
-        if out == 'exception' and not any(self._transcripts):
+        # The breaker (rulings R45, R46): a batch exception whose worker
+        # never really ran (no transcript, or one with no successful
+        # non-synthetic turn) counts; any other batch resets.  Credits are
+        # no signal: a Claude pool's read 0.
+        if out == 'exception' and not any(self._worker_ran):
             self._no_transcript += 1
             if self._no_transcript >= BREAKER_LIMIT:
                 self._halt_run('breaker: %d batches without a worker transcript'
@@ -1291,12 +1337,12 @@ class Driver:
         """0 when every row is assigned or decided, or at the budget stop;
         3 when parked; 4 when stalled (the rows left wait on files owned by
         assigned batches); 1 when an exception that is not the batch's own
-        stopped the run, the run halted (a launch failure, the breaker:
-        status['halted']), the status file cannot be read, or another
-        driver runs on the same status file.  What the last run left goes
-        first: a closed batch's missing ledger entry and push, then the
-        parked batch, then an interrupted one.  A dry run processes one
-        batch and exits 0."""
+        stopped the run, the run halted (a launch failure, an auth or
+        billing API error, the breaker: status['halted']), the status file
+        cannot be read, or another driver runs on the same status file.
+        What the last run left goes first: a closed batch's missing ledger
+        entry and push, then the parked batch, then an interrupted one.  A
+        dry run processes one batch and exits 0."""
         fd, holder = self._take_run_lock()
         if fd is None:
             self.log('another driver is running (pid %s) on %s; this one '

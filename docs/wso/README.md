@@ -225,8 +225,9 @@ The status file is
   stop; a later run clears it.
 - `stalled`: `{at, message}`, set when the rows left wait on files that
   assigned batches own; the next cut clears it.
-- `halted`: `{at, reason}`, set when the run halted (a launch failure, or
-  the breaker); a later run that starts a batch clears it.
+- `halted`: `{at, reason}`, set when the run halted (a launch failure,
+  an auth or billing API error, or the breaker); a later run that starts
+  a batch clears it.
 - `exceptions`: `{<id>: {stage, problems, at}}`, the batches waiting on
   the coordinator.
 - `batches`: `{<id>: {...}}`, each batch's last outcome: `outcome`
@@ -255,7 +256,8 @@ Exit codes:
   like a run: 0 when nothing is left, 4 when stalled, 1 on a cut failure.
   Any dry run exits 1 on a held run lock or a corrupt status file.
 - 1: a cut or push failure (an exception that is not the batch's own),
-  a halt (`halted`: a launch failure, or the breaker), a status file that
+  a halt (`halted`: a launch failure, an auth or billing API error, or
+  the breaker), a status file that
   cannot be read (the message names it), or another driver already
   running on the same status file.
 - 3: parked on a Z.ai rate limit.
@@ -286,17 +288,24 @@ ends any other way. A batch whose worktree is gone (a directory removed
 by hand stays listed until `git worktree prune`) becomes its `worktree`
 exception, which also ends its park, and the run goes on.
 
-**Halts.** Two failures are not a batch's own, so the run halts (exit 1,
-`halted` written, one `aoe send` line) instead of cutting every row left
-into a batch and an exception:
+**Halts.** Three failures are not a batch's own, so the run halts (exit
+1, `halted` written, one `aoe send` line) instead of cutting every row
+left into a batch and an exception:
 
 - A launch failure: a worker, reviewer or check step that cannot be
   started in an existing worktree (for example `claude-glm` not on the
   timer's `PATH`). The batch is parked with reason `launch failed:
   <error>`, so the next run resumes it first.
-- The breaker: 3 batch exceptions in a row whose worker produced no
-  transcript (it never really ran). A batch whose worker did produce one
-  resets the count. It counts transcripts, not credits, because a Claude
+- An API error no retry cures: the final JSON result, or the last
+  API-error entry in the transcript with no successful turn after it,
+  carries `error` `authentication_failed` or `billing_error`, or
+  `apiErrorStatus` 401, 402 or 403. The batch is parked with reason
+  `api error: <kind>` and resumed first once the login or the credit is
+  fixed. One the worker got past does not halt.
+- The breaker: 3 batch exceptions in a row whose worker never really
+  ran: no transcript, or a transcript with no successful turn (only
+  `<synthetic>` or API-error entries). A batch whose worker did run
+  resets the count. It counts real turns, not credits, because a Claude
   pool's credits read 0.
 
 **The Friday timer** (user-side; the timer is not in the repo) starts

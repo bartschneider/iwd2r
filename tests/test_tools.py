@@ -10259,10 +10259,17 @@ class DriverTest(unittest.TestCase):
         def run(self, brief, cwd):
             return driver.Result(1, '', self.transcripts.pop(0), None, False)
 
+    def _jsonl(self, name, lines):
+        path = os.path.join(self.tmp, name)
+        with open(path, 'w') as f:
+            f.write(''.join(json.dumps(x) + '\n' for x in lines))
+        return path
+
     def test_breaker_trips_after_three_batches_without_a_transcript(self):
-        """R45: three batch exceptions in a row whose worker produced no
-        transcript halt the run (exit 1, no fourth cut); a batch whose
-        worker produced one resets the count."""
+        """R45, R46: three batch exceptions in a row whose worker never
+        really ran (no transcript, or one with no successful non-synthetic
+        turn) halt the run (exit 1, no fourth cut); a batch whose worker
+        really ran resets the count."""
         self.assertEqual(driver.BREAKER_LIMIT, 3)
         d = self._driver(worker=self._NoReport([None] * 4))
         cuts = []
@@ -10273,13 +10280,113 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(halted['reason'], 'breaker: 3 batches without a worker transcript')
         self.assertEqual(len(self.sent), 4)                 # 3 exceptions, 1 halt
         self.assertIn('halted: breaker', self.sent[-1])
-        # A transcript-bearing batch in between resets the count; a later
-        # run that cuts a batch clears `halted`.
-        d.worker = self._NoReport([None, None, '/t/one.jsonl', None, None])
+        # Transcripts holding only synthetic entries count as never ran.
+        d = self._driver(worker=None)
+        fake = self._jsonl('fake.jsonl', [
+            {'type': 'user', 'message': {'role': 'user', 'content': 'BRIEF'}},
+            {'type': 'assistant', 'message': {'model': '<synthetic>', 'content': [
+                {'type': 'text', 'text': 'No response requested.'}]}},
+            self._api_error('API Error: 500 internal error', error='api_error', status=500)])
+        real = self._jsonl('real.jsonl', [self._turn(), self._api_error(
+            'API Error: 500 internal error', error='api_error', status=500)])
+        self.assertEqual(driver.scan_transcript(fake), (None, False))
+        self.assertEqual(driver.scan_transcript(real), (None, True))
+        d.worker = self._NoReport([fake] * 4)
+        cuts = []
+        d.next_batch = lambda *a, **kw: cuts.append(1) or (0, self.CUT)
+        self.assertEqual(d.run(), 1)
+        self.assertEqual(len(cuts), 3)
+        self.assertIn('breaker', self._status(d)['halted']['reason'])
+        # A batch whose worker really ran, in between, resets the count; a
+        # later run that cuts a batch clears `halted`.
+        d.worker = self._NoReport([None, fake, real, None, fake])
         cuts = iter([(0, self.CUT)] * 5 + [self.NOTHING])
         d.next_batch = lambda *a, **kw: next(cuts)
         self.assertEqual(d.run(), 0)
         self.assertEqual(d.worker.transcripts, [])          # all five ran
+        self.assertIsNone(self._status(d)['halted'])
+
+    def _auth_error(self):
+        return self._api_error('Not logged in · Please run /login',
+                               error='authentication_failed', status=None)
+
+    def test_headless_worker_reports_auth_and_billing_errors(self):
+        """R46: Result.api_error carries the kind when the final JSON result,
+        or the transcript's last API-error entry with no successful turn
+        after it, says authentication_failed or billing_error, or status
+        401, 402 or 403."""
+        billing = self._api_error('Credit balance is too low', error='billing_error', status=400)
+        cases = [   # (name, transcript lines, JSON result, api_error, rate limited)
+            ('billing-result', None, {'is_error': True, 'error': 'billing_error',
+                                      'result': 'Credit balance is too low'}, 'billing_error', False),
+            ('status-result', None, {'is_error': True, 'apiErrorStatus': 403,
+                                     'result': 'Forbidden'}, 'status 403', False),
+            ('auth-last', [self._turn(), self._auth_error()],
+             {'is_error': True, 'result': 'Not logged in · Please run /login'},
+             'authentication_failed', False),
+            ('auth-retried', [self._auth_error(), self._turn(), self._turn()],
+             {'result': '# report\n'}, None, False),
+            ('billing-then-429', [self._turn(), billing, self._api_error()],
+             {'is_error': True, 'result': ''}, None, True),
+            ('normal', [self._turn()], {'result': '# report\n'}, None, False),
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = os.path.join(tmp, 'wt')
+            os.mkdir(cwd)
+            proj = os.path.join(tmp, 'cfg', 'projects', driver.project_slug(cwd))
+            os.makedirs(proj)
+            w = driver.HeadlessWorker(config_dir=os.path.join(tmp, 'cfg'))
+            for name, lines, result, kind, limited in cases:
+                if lines is not None:
+                    with open(os.path.join(proj, name + '.jsonl'), 'w') as f:
+                        f.write(''.join(json.dumps(x) + '\n' for x in lines))
+                out = json.dumps(dict(result, session_id=name))
+                w._run = lambda argv, **kw: subprocess.CompletedProcess(argv, 1, out, '')
+                r = w.run('B', cwd)
+                self.assertEqual((r.api_error, r.rate_limited), (kind, limited), name)
+        self.assertIsNone(driver.FakeWorker('R').run('b', '/tmp').api_error)
+
+    def test_api_error_halts_and_parks(self):
+        """R46: an auth or billing error halts the run like a launch
+        failure: exit 1 after one cut, the batch parked `api error:
+        <kind>`, `halted` set, one AoE line.  One the worker got past does
+        not halt."""
+        def headless(name, result, lines=None):
+            cfg = os.path.join(self.tmp, 'cfg')
+            if lines is not None:
+                proj = os.path.join(cfg, 'projects', driver.project_slug(self.wt))
+                os.makedirs(proj, exist_ok=True)
+                with open(os.path.join(proj, name + '.jsonl'), 'w') as f:
+                    f.write(''.join(json.dumps(x) + '\n' for x in lines))
+            out = json.dumps(dict(result, session_id=name))
+            return driver.HeadlessWorker(config_dir=cfg, run=lambda argv, **kw:
+                                         subprocess.CompletedProcess(argv, 1, out, ''))
+        for name, result, lines, kind in (
+                ('billing', {'is_error': True, 'error': 'billing_error',
+                             'result': 'Credit balance is too low'}, None, 'billing_error'),
+                ('auth', {'is_error': True, 'result': 'Not logged in · Please run /login'},
+                 [self._turn(), self._auth_error()], 'authentication_failed')):
+            d = self._driver(worker=None)
+            d.worker = headless(name, result, lines)
+            cuts = []
+            d.next_batch = lambda *a, **kw: cuts.append(1) or (0, self.CUT)
+            self.assertEqual(d.run(), 1, name)
+            self.assertEqual(len(cuts), 1, name)
+            status = self._status(d)
+            self.assertEqual(status['parked']['batch_id'], 'b011')
+            self.assertEqual(status['parked']['reason'], 'api error: %s' % kind)
+            self.assertEqual(status['halted']['reason'], 'api error: %s' % kind)
+            self.assertEqual(status['exceptions'], {})
+            self.assertEqual(len(self.sent), 1)
+            self.assertIn('halted: api error: %s' % kind, self.sent[0])
+        # An auth error followed by successful turns does not halt.
+        d = self._driver(worker=None)
+        d.worker = headless('auth-ok', {'result': self.REPORT},
+                            [self._auth_error(), self._turn(), self._turn()])
+        cuts = iter([(0, self.CUT), self.NOTHING])
+        d.next_batch = lambda *a, **kw: next(cuts)
+        self.assertEqual(d.run(), 0)
+        self.assertEqual(self._state()['status'], 'closed')
         self.assertIsNone(self._status(d)['halted'])
 
     def test_one_driver_per_status_file(self):
