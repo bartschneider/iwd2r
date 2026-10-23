@@ -7672,6 +7672,20 @@ class WaveTest(unittest.TestCase):
         self.assertIn('already closed', out)
         self.assertEqual(self.first_sha(), branch_sha)
 
+    def test_wave_close_gate_false_skips_the_gate(self):
+        self.init_repo()
+        self.write_evidence()
+        self.commit_worktree()
+        self.verdicts()
+        branch_sha = self.git('rev-parse', 'p3/wso-b001').stdout.strip()
+        ctx, calls = self.gates(1)   # a gate that would refuse
+        with ctx:
+            rc, out = self.wave.close_batch(self.state, self.root, 'b001', gate=False)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(calls, [])
+        self.assertEqual(self.first_sha(), branch_sha)
+        self.assertEqual(self.batches()['b001']['status'], 'closed')
+
     def test_wave_scorecard_tally(self):
         state = {'batches': {
             'b001': {
@@ -9036,6 +9050,24 @@ class WaveTriageTest(unittest.TestCase):
         with open(report) as f:
             self.assertNotIn('computed from triage.json', f.read())
 
+class _SeqWorker:
+    """A worker that returns its reports in turn (the last one repeats)
+    and records every brief and cwd it was given."""
+
+    def __init__(self, *reports, credits=None, rate_limited=False):
+        self.reports = list(reports)
+        self.credits = credits
+        self.rate_limited = rate_limited
+        self.briefs = []
+        self.cwds = []
+
+    def run(self, brief, cwd):
+        self.briefs.append(brief)
+        self.cwds.append(cwd)
+        report = self.reports[min(len(self.briefs), len(self.reports)) - 1]
+        return driver.Result(0, report, None, self.credits, self.rate_limited)
+
+
 class DriverTest(unittest.TestCase):
     REPORT = ('# report\n\n## Verdicts\n\nverdict 0x401000 ours case dump-401000\n'
               'verdict 0x402000 fork case probe-b011-402000\n')
@@ -9266,6 +9298,413 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(a, driver.review_needed({'id': 'b011'}, v, '2026-10-22'))
         self.assertEqual(driver.review_needed({'id': 'b011'}, v, 's', sample=1.0), (True, 'sample'))
         self.assertEqual(driver.review_needed({'id': 'b011'}, v, 's', sample=0.0), (False, ''))
+
+    # -- the batch loop ---------------------------------------------------
+
+    LOOP_ROWS = (('0x401000', 'Render', 'src/A.cpp', 'ambiguous'),
+                 ('0x402000', 'Draw', 'src/A.cpp', 'ambiguous'),
+                 ('0x403000', 'Tick', 'src/B.cpp', 'rename-only'))
+    AUTO_LINE = ('disagreed with WSO at e8dd16a7: rename-only; '
+                 'case triage-rename decides')
+    CLEAN_REVIEW = '# review\n\nNothing blocks.\n'
+    ALL_OURS = ('# report\n\n## Verdicts\n\nverdict 0x401000 ours case dump-401000\n'
+                'verdict 0x402000 ours case dump-402000\n')
+    CUT = ('b011 assigned: 3 rows, 2 files, branch p3/wso-b011\n'
+           'triage: 1 auto, 2 import, 2 ambiguous\n')
+    NOTHING = (2, 'nothing left: every both_changed_differ row is assigned or decided\n')
+
+    git = WaveTest.git
+
+    def _driver(self, worker, reviewer=None, phrases=True, **kw):
+        """A Driver over a temp repo: `first`, batch b011 assigned with its
+        branch and worktree, two ambiguous rows and one auto row.  The
+        evidence files the worker would write are committed already when
+        `phrases`.  The brief and the subprocess check steps are faked;
+        record_verdict and close_batch (gate=False) are the real ones."""
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        self.tmp = tmp
+        self.root = os.path.join(tmp, 'repo')
+        os.makedirs(self.root)
+        self.git('init', '-q', '-b', 'first')
+        for addr, name, _file, _cls in self.LOOP_ROWS:
+            _write(os.path.join(self.root, 'docs', 'evidence', addr[2:] + '.md'),
+                   f'---\naddress: {addr}\nname: {name}\nkind: oracle\n---\n\n# {addr}\n')
+        self.git('add', '-A')
+        self.git('commit', '-qm', 'base')
+        self.wt = os.path.join(tmp, 'wt')
+        self.git('worktree', 'add', '-q', '-b', 'p3/wso-b011', self.wt, 'first')
+        lines = {'403000': self.AUTO_LINE}
+        if phrases:
+            lines['401000'] = 'disagreed with WSO at e8dd16a7: the guard; case probe-1 decides'
+            lines['402000'] = 'corroborated by WSO at e8dd16a7'
+        for stem, line in lines.items():
+            with open(os.path.join(self.wt, 'docs', 'evidence', stem + '.md'), 'a') as f:
+                f.write('\n' + line + '\n')
+        self.git('commit', '-qam', 'evidence', cwd=self.wt)
+        rows = [{'address': a, 'name': n, 'file': f, 'category': 'both_changed_differ',
+                 'their_len': 100, 'our_len': 100, 'class': c}
+                for a, n, f, c in self.LOOP_ROWS]
+        self.state_path = os.path.join(tmp, 'wave-state.json')
+        with open(self.state_path, 'w') as f:
+            json.dump({'fork_base': 'e8dd16a7', 'batches': {'b011': {
+                'rows': rows, 'files': ['src/A.cpp', 'src/B.cpp'],
+                'branch': 'p3/wso-b011', 'status': 'assigned', 'assigned_at': 't',
+                'closed_at': None, 'verdicts': {'0x403000': {
+                    'side': 'ours', 'case': 'triage-rename', 'losing_kind': 'trace'}}}}}, f)
+        self.pushes, self.sent, self.bundle_dirs, self.logs = [], [], [], []
+        d = driver.Driver(
+            self.root, self.state_path, worker,
+            driver.FakeWorker(self.CLEAN_REVIEW) if reviewer is None else reviewer,
+            os.path.join(tmp, 'ledger.md'), os.path.join(tmp, 'driver', 'status.json'),
+            push=lambda: self.pushes.append(1), send=self.sent.append, gate=False,
+            log=self.logs.append, **kw)
+
+        def brief(template_path, state_path, batch_id, bundle_dir=None, **_):
+            self.bundle_dirs.append(bundle_dir)
+            return 0, f'BRIEF {batch_id}'
+
+        def checks(batch, wt, verdicts):
+            ok = lambda argv, **_: subprocess.CompletedProcess(argv, 0, '', '')
+            with mock.patch.object(driver, '_vanilla_exe', return_value='/nonexistent'):
+                return driver.mechanical_checks(batch, wt, verdicts, run=ok)
+        d.render_brief = brief
+        d.mechanical_checks = checks
+        d.report_path = os.path.join(tmp, 'xrec-report.md')
+        d.triage_path = os.path.join(tmp, 'no-triage.json')
+        return d
+
+    def _state(self):
+        with open(self.state_path) as f:
+            return json.load(f)['batches']['b011']
+
+    def _status(self, d):
+        with open(d.status_path) as f:
+            return json.load(f)
+
+    def _ledger(self, d):
+        with open(d.ledger_path) as f:
+            return f.read()
+
+    def test_ledger_entry_shape(self):
+        rows = [{'address': '0x%X' % (0x401000 + i)} for i in range(20)]
+        verdicts = {r['address']: {'side': 'ours', 'case': 'triage-rename'} for r in rows[:8]}
+        verdicts.update({r['address']: ('ours', 'dump-1') for r in rows[8:19]})
+        verdicts[rows[19]['address']] = ('fork', 'probe-b011-1')
+        text = driver.ledger_entry(batch={'id': 'b011', 'rows': rows}, verdicts=verdicts,
+                                   classes={'rename-only': 8, 'ambiguous': 12},
+                                   review=(False, 'not sampled'), commits='a1..b2', credits=1180.5)
+        self.assertTrue(text.startswith('## driver b011 ('))
+        self.assertRegex(text.splitlines()[0], r'^## driver b011 \(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\+00:00\)$')
+        self.assertIn('rename-only 8', text)
+        self.assertIn('credits 1180', text)
+        self.assertIn('rows by class: rename-only 8, ambiguous 12', text)
+        self.assertIn('verdicts: fork 1, ours 19, neither 0', text)
+        self.assertIn('oracle probe 1', text)
+        self.assertIn('dump reading 11', text)
+        self.assertIn('triage 8', text)
+        self.assertIn('review: no, not sampled', text)
+        self.assertIn('commits a1..b2', text)
+        none = driver.ledger_entry({'id': 'b011'}, {}, {}, (True, 'sample: clean'), 'x..y', None)
+        self.assertIn('credits unknown', none)
+        self.assertIn('review: yes, sample: clean', none)
+
+    def test_run_batch_happy_path_closes(self):
+        d = self._driver(worker=driver.FakeWorker(self.REPORT))   # fake wave functions injected
+        first = self.git('rev-parse', 'first').stdout.strip()
+        self.assertEqual(d.run_batch('b011'), 'closed')
+        self.assertIn('## driver b011', open(d.ledger_path).read())
+        b = self._state()
+        self.assertEqual(b['status'], 'closed')
+        self.assertEqual(b['verdicts']['0x402000']['side'], 'fork')
+        self.assertEqual(b['verdicts']['0x401000']['case'], 'dump-401000')
+        self.assertEqual(self.git('rev-parse', 'first').stdout.strip(),
+                         self.git('rev-parse', 'p3/wso-b011').stdout.strip())
+        self.assertEqual(self.pushes, [1])
+        self.assertEqual(self.sent, [])
+        ledger = self._ledger(d)
+        self.assertIn('commits %s..' % first[:8], ledger)
+        self.assertIn('verdicts: fork 1, ours 2, neither 0', ledger)
+        self.assertIn('review: yes, fork/neither rows (seed 2026-10-22): clean', ledger)
+        self.assertIn('credits unknown', ledger)
+        # Bundles go to <driver folder>/bundles/<id>; results to <driver folder>/<id>.
+        folder = os.path.dirname(d.status_path)
+        self.assertEqual(self.bundle_dirs, [os.path.join(folder, 'bundles', 'b011')])
+        with open(os.path.join(folder, 'b011', 'worker.report.md')) as f:
+            self.assertEqual(f.read(), self.REPORT)
+        with open(os.path.join(folder, 'b011', 'worker.json')) as f:
+            self.assertEqual(json.load(f)['report'], self.REPORT)
+        self.assertTrue(os.path.isfile(os.path.join(folder, 'b011', 'review.diff')))
+        status = self._status(d)
+        self.assertEqual(status['exceptions'], {})
+        self.assertEqual(status['batches']['b011']['outcome'], 'closed')
+        self.assertIsNone(status['current'])
+        with open(d.report_path) as f:
+            self.assertIn('## Scorecard', f.read())
+
+    def test_run_batch_second_check_failure_is_exception(self):
+        d = self._driver(worker=driver.FakeWorker('# report\n## Verdicts\n'))  # no verdicts, twice
+        self.assertEqual(d.run_batch('b011'), 'exception')
+        self.assertIn('b011', json.load(open(d.status_path))['exceptions'])
+        exc = self._status(d)['exceptions']['b011']
+        self.assertEqual(exc['stage'], 'checks')
+        self.assertTrue(any(p.startswith('0x401000: no verdict line') for p in exc['problems']))
+        self.assertTrue(exc['at'])
+        self.assertEqual(self._state()['status'], 'assigned')
+        self.assertEqual(self.pushes, [])
+        self.assertEqual(len(self.sent), 1)
+        self.assertIn('b011', self.sent[0])
+        self.assertNotIn('\n', self.sent[0])
+        ledger = self._ledger(d).strip().splitlines()
+        self.assertEqual(len(ledger), 1)
+        self.assertIn('b011', ledger[0])
+        self.assertIn('exception at checks', ledger[0])
+
+    def test_check_fix_round_gets_problems_then_closes(self):
+        w = _SeqWorker('# report\n## Verdicts\n', self.REPORT)
+        d = self._driver(worker=w)
+        self.assertEqual(d.run_batch('b011'), 'closed')
+        self.assertEqual(len(w.briefs), 2)
+        self.assertEqual(w.cwds, [self.wt, self.wt])
+        self.assertEqual(w.briefs[0], 'BRIEF b011')
+        self.assertIn('0x401000: no verdict line', w.briefs[1])
+        self.assertIn('BRIEF b011', w.briefs[1])
+
+    def test_malformed_report_is_a_check_failure(self):
+        w = _SeqWorker('## Verdicts\nI think it is ours.\n', self.REPORT)
+        d = self._driver(worker=w)
+        self.assertEqual(d.run_batch('b011'), 'closed')
+        self.assertIn('malformed verdict line', w.briefs[1])
+
+    def test_worker_without_report_is_exception(self):
+        w = _SeqWorker('')
+        d = self._driver(worker=w)
+        self.assertEqual(d.run_batch('b011'), 'exception')
+        self.assertEqual(len(w.briefs), 1)
+        exc = self._status(d)['exceptions']['b011']
+        self.assertEqual(exc['stage'], 'worker')
+        self.assertIn('without a report', exc['problems'][0])
+        self.assertEqual(len(self.sent), 1)
+
+    def test_second_blocking_review_is_exception(self):
+        w = _SeqWorker(self.REPORT)
+        r = _SeqWorker('# review\n\nBLOCKING: 0x402000 the Imported-From trailer is missing\n',
+                       '- BLOCKING: 0x402000 still no trailer\n')
+        d = self._driver(worker=w, reviewer=r)
+        self.assertEqual(d.run_batch('b011'), 'exception')
+        exc = self._status(d)['exceptions']['b011']
+        self.assertEqual(exc['stage'], 'review')
+        self.assertIn('BLOCKING: 0x402000 still no trailer', exc['problems'])
+        # One fix round, to the batch's worker, with the findings as its prompt.
+        self.assertEqual(len(w.briefs), 2)
+        self.assertIn('BLOCKING: 0x402000 the Imported-From trailer is missing', w.briefs[1])
+        self.assertEqual(len(r.briefs), 2)
+        diff = os.path.join(os.path.dirname(d.status_path), 'b011', 'review.diff')
+        self.assertIn(diff, r.briefs[0])
+        with open(diff) as f:
+            self.assertIn('probe-1 decides', f.read())
+        self.assertEqual(self._state()['status'], 'assigned')
+        self.assertEqual(self.pushes, [])
+        self.assertEqual(len(self.sent), 1)
+
+    def test_blocking_then_clean_review_closes(self):
+        w = _SeqWorker(self.REPORT, credits=10.25)
+        r = _SeqWorker('BLOCKING: fix the trailer\n', self.CLEAN_REVIEW, credits=1.0)
+        d = self._driver(worker=w, reviewer=r)
+        self.assertEqual(d.run_batch('b011'), 'closed')
+        ledger = self._ledger(d)
+        self.assertIn('clean after one fix round', ledger)
+        self.assertIn('credits 22', ledger)   # 2 worker runs + 2 reviews
+
+    def test_review_line_is_seeded(self):
+        """The same seed and batch id draw the same review answer, so the
+        ledger line is reproducible."""
+        lines = []
+        for _ in range(2):
+            r = _SeqWorker(self.CLEAN_REVIEW)
+            d = self._driver(worker=driver.FakeWorker(self.ALL_OURS), reviewer=r)
+            self.assertEqual(d.run_batch('b011'), 'closed')
+            line = [l for l in self._ledger(d).splitlines() if l.startswith('- review:')]
+            lines.append(line)
+            needed, _ = driver.review_needed('b011', {'0x401000': ('ours', 'a')}, '2026-10-22')
+            self.assertEqual(len(r.briefs), 1 if needed else 0)
+        self.assertEqual(len(lines[0]), 1)
+        self.assertEqual(lines[0], lines[1])
+        self.assertIn('seed 2026-10-22', lines[0][0])
+
+    def test_rate_limited_worker_parks(self):
+        d = self._driver(worker=_SeqWorker('', rate_limited=True))
+        self.assertEqual(d.run_batch('b011'), 'parked')
+        self.assertEqual(self._status(d)['parked']['batch_id'], 'b011')
+        self.assertEqual(self.sent, [])
+        self.assertEqual(self._state()['status'], 'assigned')
+
+    def test_push_failure_stops_the_run(self):
+        d = self._driver(worker=driver.FakeWorker(self.REPORT))
+        d.push = lambda: 'rejected'
+        d.next_batch = lambda *a, **kw: (0, self.CUT)
+        self.assertEqual(d.run(), 1)
+        self.assertEqual(self._state()['status'], 'closed')
+        exc = self._status(d)['exceptions']['b011']
+        self.assertEqual(exc['stage'], 'push')
+        self.assertIn('rejected', exc['problems'][0])
+        self.assertIn('## driver b011', self._ledger(d))
+
+    def test_run_loops_until_nothing_left(self):
+        d = self._driver(worker=driver.FakeWorker(self.REPORT))
+        cuts = iter([(0, self.CUT), self.NOTHING])
+        d.next_batch = lambda *a, **kw: next(cuts)
+        self.assertEqual(d.run(), 0)
+        self.assertEqual(self._state()['status'], 'closed')
+        # ours-stub rows that triage moved out are still counted.
+        self.assertIn('rows by class: rename-only 1, ours-stub 2, ambiguous 2', self._ledger(d))
+
+    def test_run_continues_after_exception_and_exits_3_on_park(self):
+        d = self._driver(worker=driver.FakeWorker(self.REPORT))
+        cuts = iter([(0, 'b011 assigned: x\n'), (0, 'b012 assigned: x\n'),
+                     (0, 'b013 assigned: x\n'), (0, 'b014 assigned: x\n')])
+        d.next_batch = lambda *a, **kw: next(cuts)
+        outcomes = {'b011': 'exception', 'b012': 'closed', 'b013': 'parked'}
+        ran = []
+        d.run_batch = lambda bid: ran.append(bid) or outcomes[bid]
+        self.assertEqual(d.run(), 3)
+        self.assertEqual(ran, ['b011', 'b012', 'b013'])
+
+    def test_cut_failure_is_an_exception_and_stops(self):
+        d = self._driver(worker=driver.FakeWorker(self.REPORT))
+        d.next_batch = lambda *a, **kw: (1, 'b013 not assigned: git worktree add failed\n')
+        d.run_batch = lambda bid: self.fail('nothing was cut')
+        self.assertEqual(d.run(), 1)
+        self.assertEqual(self._status(d)['exceptions']['b013']['stage'], 'cut')
+        self.assertEqual(len(self.sent), 1)
+
+    def test_run_retries_a_cleared_exception_first(self):
+        d = self._driver(worker=driver.FakeWorker(self.REPORT))
+        os.makedirs(os.path.dirname(d.status_path))
+        with open(d.status_path, 'w') as f:
+            json.dump({'exceptions': {}, 'batches': {'b011': {'outcome': 'exception'}}}, f)
+        d = self._reload(d)
+        ran = []
+        d.run_batch = lambda bid: ran.append(bid) or 'closed'
+        d.next_batch = lambda *a, **kw: self.NOTHING
+        self.assertEqual(d.run(), 0)
+        self.assertEqual(ran, ['b011'])
+        # Not while the exception is still in the status file.
+        with open(d.status_path, 'w') as f:
+            json.dump({'exceptions': {'b011': {'stage': 'checks'}},
+                       'batches': {'b011': {'outcome': 'exception'}}}, f)
+        d = self._reload(d)
+        ran.clear()
+        d.run_batch = lambda bid: ran.append(bid) or 'closed'
+        d.next_batch = lambda *a, **kw: self.NOTHING
+        self.assertEqual(d.run(), 0)
+        self.assertEqual(ran, [])
+
+    def _reload(self, d):
+        """A fresh Driver over the same paths, reading the status file again."""
+        n = driver.Driver(d.repo, d.state_path, d.worker, d.reviewer, d.ledger_path,
+                          d.status_path, push=d.push, send=d.send, gate=False,
+                          log=self.logs.append)
+        n.render_brief, n.mechanical_checks = d.render_brief, d.mechanical_checks
+        n.report_path, n.triage_path = d.report_path, d.triage_path
+        return n
+
+    def test_dry_report(self):
+        batch = {'rows': [{'address': '0x401000', 'class': 'ambiguous'},
+                          {'address': '0x402000', 'class': 'rename-only'},
+                          {'address': '0x403000'}, {'address': '0x404000'}],
+                 'verdicts': {'0x402000': {}, '0x404000': {}}}
+        self.assertEqual(driver.parse_report(driver.dry_report(batch)),
+                         {'0x401000': ('ours', 'dry-0x401000'),
+                          '0x403000': ('ours', 'dry-0x403000')})
+
+    def _dry(self, phrases):
+        d = self._driver(worker=None, phrases=phrases, dry_run=True)
+        cuts = iter([(0, self.CUT)])
+        d.next_batch = lambda *a, **kw: next(cuts)
+        d.close_batch = lambda *a, **kw: self.fail('a dry run never closes')
+        d.record_verdict = lambda *a, **kw: self.fail('a dry run records nothing')
+        d.push = lambda: self.fail('a dry run never pushes')
+        d.send = lambda line: self.fail('a dry run never sends')
+        return d
+
+    def test_dry_run_one_batch_no_close(self):
+        d = self._dry(phrases=True)
+        self.assertEqual(d.run(), 0)
+        self.assertEqual(self._state()['status'], 'assigned')
+        self.assertEqual(set(self._state()['verdicts']), {'0x403000'})
+        folder = os.path.dirname(d.status_path)
+        with open(os.path.join(folder, 'b011', 'worker.report.md')) as f:
+            report = f.read()
+        self.assertEqual(driver.parse_report(report),
+                         {'0x401000': ('ours', 'dry-0x401000'),
+                          '0x402000': ('ours', 'dry-0x402000')})
+        ledger = self._ledger(d)
+        self.assertIn('## driver b011', ledger)
+        self.assertIn('verdicts: fork 0, ours 3, neither 0', ledger)
+        self.assertIn('dry run', ledger)
+        status = self._status(d)
+        self.assertEqual(status['exceptions'], {})
+        self.assertTrue(status['dry_run'])
+
+    def test_dry_run_check_failure_writes_exception_but_exits_0(self):
+        d = self._dry(phrases=False)
+        self.assertEqual(d.run(), 0)
+        self.assertEqual(self._status(d)['exceptions']['b011']['stage'], 'checks')
+        ledger = self._ledger(d)
+        self.assertIn('exception at checks', ledger)
+        self.assertIn('## driver b011', ledger)
+        self.assertEqual(self._state()['status'], 'assigned')
+
+    def test_default_push_and_send(self):
+        d = self._driver(worker=None)
+        d = driver.Driver(d.repo, d.state_path, None, None, d.ledger_path, d.status_path)
+        calls = []
+
+        def stub(argv, **kw):
+            calls.append(argv)
+            return subprocess.CompletedProcess(argv, 0, '', '')
+        with mock.patch.object(driver.subprocess, 'run', stub):
+            self.assertIsNone(d.push())
+            d.send('b011 exception')      # no aoe_session: nothing is sent
+            d.aoe_session = 'sess-1'
+            d.send('b011 exception')
+        self.assertEqual(calls, [['git', '-C', d.repo, 'push', 'iwd2r', 'first:main', 'first:first'],
+                                 ['aoe', 'send', 'sess-1', 'b011 exception']])
+
+    def test_driver_from_args(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self.assertEqual(driver.main(['--dry-run'], repo=tmp), 2)
+        self.assertIn('--state', err.getvalue())
+        state = os.path.join(tmp, 'state.json')
+        folder = os.path.join(tmp, '.superpowers', 'sdd', '2026-10-17-wso-integration', 'driver')
+        d, e = driver.driver_from_args(['--dry-run', '--state', state], repo=tmp)
+        self.assertIsNone(e)
+        self.assertTrue(d.dry_run)
+        self.assertEqual(d.ledger_path, os.path.join(folder, 'dry-run', 'progress.md'))
+        self.assertEqual(d.status_path, os.path.join(folder, 'dry-run', 'status.json'))
+        self.assertEqual(d.state_path, state)
+        d, e = driver.driver_from_args(['--workers', '2', '--budget', '4000', '--seed', 's',
+                                        '--state', state, '--aoe-session', 'S1'], repo=tmp)
+        self.assertIsNone(e)
+        self.assertFalse(d.dry_run)
+        self.assertIsInstance(d.worker, driver.HeadlessWorker)
+        self.assertIsInstance(d.reviewer, driver.HeadlessWorker)
+        self.assertEqual((d.workers, d.budget, d.seed, d.aoe_session), (2, 4000.0, 's', 'S1'))
+        self.assertEqual(d.ledger_path, os.path.join(
+            tmp, '.superpowers', 'sdd', '2026-10-17-wso-integration', 'progress.md'))
+        self.assertEqual(d.status_path, os.path.join(folder, 'status.json'))
+        self.assertTrue(d.gate)
+
+    def test_wave_run_delegates_and_refuses_dry_run_without_state(self):
+        wave = load_tool('wave')
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self.assertEqual(wave.main(['run', '--dry-run']), 2)
+        self.assertIn('--state', err.getvalue())
 
 
 if __name__ == '__main__':

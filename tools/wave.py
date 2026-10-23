@@ -10,6 +10,8 @@ The coordinator's wave loop, one command each::
     python3 tools/wave.py close b002 --kind import   # waves 2-5
     python3 tools/wave.py scorecard            # the tally into xrec-report.md
     python3 tools/wave.py status
+    python3 tools/wave.py run [--workers N] [--budget C] [--seed S]   # the driver
+    python3 tools/wave.py run --dry-run --state COPY.json   # one batch, fake worker
 
 Rows come from docs/wso/disagreements.json (tools/xrec.py); batch state
 lives in docs/wso/wave-state.json, created by the first `next`.  Nothing
@@ -21,7 +23,9 @@ docs/wso/import-list.json), `close` checks the batch's worktree itself
 fast-forwards `first` to the batch branch.
 
 Exit codes: 0 ok, 1 refusal (close lists every reason), 2 usage error or
-nothing left to assign.  Every state write is atomic (temp file in the
+nothing left to assign.  `run` (tools/driver.py) exits 0 when nothing is
+left, 1 when an exception that is not a batch's own (cut, push) stopped
+it, 3 when parked.  Every state write is atomic (temp file in the
 same directory, then os.replace), so a killed `next` cannot corrupt it.
 """
 from __future__ import annotations
@@ -146,6 +150,22 @@ def _triage():
         spec.loader.exec_module(module)
         _triage_module = module
     return _triage_module
+
+
+_driver_module = None
+
+
+def _driver():
+    """tools/driver.py, loaded by path: under -I tools/ is not on sys.path."""
+    global _driver_module
+    if _driver_module is None:
+        spec = importlib.util.spec_from_file_location(
+            'driver', os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                   'driver.py'))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _driver_module = module
+    return _driver_module
 
 
 _assemble_module = None
@@ -677,14 +697,15 @@ def _fast_forward(repo, base, branch):
 
 
 def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
-                kind='verdicts', base='first'):
+                kind='verdicts', base='first', gate=True):
     """Close a batch: every reason checked, one refusal naming them all;
     on success fast-forward `base` to the batch branch.  kind='verdicts'
     (wave 1) requires a verdict and a phrase-bearing evidence file per
     row; kind='import' (waves 2-5) requires evidence kind trace or
     better instead.  A branch that modified tools/gates.sh or tools/parity
     is refused outright -- it would be certified by its own gate.  The
-    gate runs only when everything else is clean: it costs minutes."""
+    gate runs only when everything else is clean: it costs minutes.
+    gate=False skips tools/gates.sh (tests only)."""
     state = load_state(state_path)
     batch = state['batches'].get(batch_id or '')
     if batch is None:
@@ -743,7 +764,7 @@ def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
                 if have not in IMPORT_KINDS:
                     problems.append(f'{rel}: kind {have} is not trace or '
                                     f'better')
-    if not problems and wt is not None:
+    if gate and not problems and wt is not None:
         g = subprocess.run(['bash', 'tools/gates.sh', '--base', base],
                            cwd=wt, capture_output=True, text=True)
         if g.returncode != 0:
@@ -993,6 +1014,8 @@ def main(argv=None):
         rc, out = write_scorecard()
     elif cmd == 'status':
         rc, out = status()
+    elif cmd == 'run':
+        return _driver().main(rest)
     else:
         print(f'wave.py: unknown command {cmd}', file=sys.stderr)
         return 2
