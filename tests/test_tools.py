@@ -10324,6 +10324,9 @@ class DriverTest(unittest.TestCase):
         with open(os.path.join(self.wt, 'docs', 'evidence', '402000.md'), 'a') as f:
             f.write('\n## Decompiled (Ghidra)\n\n```c\nint Roll(int a, int b)\n\n{\n  return g_x;\n}\n```\n')
         self.git('commit', '-qam', 'decompiled', cwd=self.wt)
+        # hermetic: a row without a signature never reads the machine's real
+        # ghidra-exports (tests that want the fallback set their own folder)
+        d.exports_dir = os.path.join(self.tmp, 'no-exports')
         return d
 
     def test_driver_records_measured_from_probe_results(self):
@@ -10788,6 +10791,43 @@ class DriverTest(unittest.TestCase):
                 {'address': '0x402000', 'name': 'IcewindMisc::Roll'},
                 {'address': '0x403000', 'name': 'Rules::Tick'}]
         return d, {'branch': 'p3/wso-b011', 'rows': rows}
+
+    def test_driver_frida_phase_falls_back_to_the_ghidra_export_signature(self):
+        d, batch = self._import_phase_driver()
+        # 403000's evidence loses its Decompiled section
+        with open(os.path.join(self.wt, 'docs', 'evidence', '403000.md'), 'w') as f:
+            f.write('---\naddress: 0x403000\nname: Rules::Tick\nkind: read-only\n---\n')
+        self.git('commit', '-qam', 'no decompiled section', cwd=self.wt)
+        ex = os.path.join(self.tmp, 'exports')
+        os.makedirs(os.path.join(ex, 'decompile'))
+        with open(os.path.join(ex, 'decompile', '403000.c'), 'w') as f:
+            f.write('\nint Tick(int a,\n         int b)\n\n{\n  return 0;\n}\n')
+        names = []
+
+        def frida_run(batch_id, table, scenarios, **kw):
+            names.append(sorted(h['name'] for h in table['original']['hooks']))
+            return {sc: {'orig': [], 'ours': [], 'orig_path': None, 'ours_path': None,
+                         'failed': 'x', 'dumps': None} for sc in scenarios}
+        d.frida_run = frida_run
+        line = ('b011: frida: 0x403000 signature from the Ghidra export '
+                '(the evidence gives none)')
+        d.exports_dir = ex
+        try:
+            d._frida_phase('b011', batch, self.wt, {})
+        except driver._StageError:
+            pass
+        self.assertIn('fn_403000', names[0])
+        self.assertIn(line, self.logs)
+        # without the export the row is skipped as before
+        names.clear()
+        self.logs.clear()
+        d.exports_dir = os.path.join(self.tmp, 'no-exports')
+        try:
+            d._frida_phase('b011', batch, self.wt, {})
+        except driver._StageError:
+            pass
+        self.assertNotIn('fn_403000', names[0] if names else [])
+        self.assertNotIn(line, self.logs)
 
     def test_driver_frida_phase_runs_for_import_kind(self):
         trace = TruthTest._trace
@@ -12777,7 +12817,7 @@ class DriverTest(unittest.TestCase):
                 pass
         # the fix-round, resume and check texts, rendered
         quoted += re.findall(r'`(git [^`]*)`', driver.FIX_PROMPT + driver.RESUME_PREAMBLE
-                             + driver.REVIEW_BRIEF)
+                             + driver.REVIEW_BRIEF + ''.join(driver.FIX_REPORT_RULES.values()))
         self.assertTrue(any(q.startswith('git show') for q in quoted), quoted)
         self.assertTrue(any(q.startswith('git rm') for q in quoted), quoted)
         for q in quoted:
@@ -12793,6 +12833,7 @@ class DriverTest(unittest.TestCase):
                  if isinstance(n, ast.Constant) and isinstance(n.value, str)
                  and id(n) not in docs and ' ' in n.value]
         prose += [driver.FIX_PROMPT, driver.RESUME_PREAMBLE, driver.REVIEW_BRIEF]
+        prose += list(driver.FIX_REPORT_RULES.values())
         for rel in ('import-brief-template.md', 'brief-template.md', 'README.md'):
             prose.append(_slurp(os.path.join(ROOT, 'docs', 'wso', rel)))
         verb = re.compile(r'\b(?:revert|restor)\w*', re.I)
@@ -13454,9 +13495,22 @@ class DriverTest(unittest.TestCase):
         self.assertTrue(any('both a verdict line and an undecided line' in p
                             for p in problems), problems)
 
+    def test_fix_prompt_report_rule_follows_the_batch_kind(self):
+        # i002 wrote "(none; this is an import batch)" under ## Verdicts because
+        # the fix-round prompt asked every batch for that section
+        imp = driver.fix_prompt('i002', 'checks', 'p3/wso-i002', 'BRIEF', ['p1', 'p2'], 'import')
+        self.assertIn('do not write a `## Verdicts` section at all', imp)
+        self.assertNotIn('full `## Verdicts` section', imp)
+        self.assertIn('- p1\n- p2', imp)
+        self.assertTrue(imp.rstrip().endswith('BRIEF'))
+        wave = driver.fix_prompt('b011', 'checks', 'p3/wso-b011', 'BRIEF', ['p1'])
+        self.assertIn('full `## Verdicts` section', wave)
+        self.assertNotIn('import batch', wave)
+
     def test_the_fix_round_header_names_undecided_and_notes(self):
+        rendered = driver.fix_prompt('b011', 'checks', 'p3/wso-b011', '', ['p'])
         for needle in ('## Undecided', '## Notes', 'verdict lines only', 'Never write `ours`'):
-            self.assertIn(needle, driver.FIX_PROMPT)
+            self.assertIn(needle, rendered)
         with open(os.path.join(ROOT, 'docs', 'wso', 'brief-template.md')) as f:
             text = f.read()
         for needle in ('undecided <0xADDR> <fork|neither> <one-line reason>',
@@ -15134,6 +15188,123 @@ class TruthTest(unittest.TestCase):
             self.assertEqual([c[c.index('--build-checkout') + 1] if '--build-checkout' in c else None
                               for c in fake.calls],
                              ['/mnt/c/Users/u/iwd2r-build-p3-wso-i009'] * 2)
+
+    def test_map_matches_constructors_and_destructors(self):
+        publics = {'??0CMessageHandler@@QAE@XZ': 0x220830,
+                   '??1CMessageHandler@@QAE@XZ': 0x222d20,
+                   '??_GCMessageHandler@@QAEPAXI@Z': 0x222d90,
+                   '?AddMessage@CMessageHandler@@QAEFPAVCMessage@@H@Z': 0x224a60,
+                   '??1CInner@COuter@@QAE@XZ': 0x300000}
+        self.assertEqual(truth._map_matches('CMessageHandler::~CMessageHandler', publics),
+                         {0x222d20: '??1CMessageHandler@@QAE@XZ'})
+        self.assertEqual(truth._map_matches('CMessageHandler::CMessageHandler', publics),
+                         {0x220830: '??0CMessageHandler@@QAE@XZ'})
+        self.assertEqual(truth._map_matches('COuter::CInner::~CInner', publics),
+                         {0x300000: '??1CInner@COuter@@QAE@XZ'})
+        self.assertEqual(truth._map_matches('CMessageHandler::AddMessage', publics),
+                         {0x224a60: '?AddMessage@CMessageHandler@@QAEFPAVCMessage@@H@Z'})
+        # the special members' tails read like any member's
+        self.assertEqual(truth.decorated_convention('??1CMessageHandler@@QAE@XZ'), '__thiscall')
+        self.assertEqual(truth.decorated_convention('??0CMessageHandler@@QAE@XZ'), '__thiscall')
+        self.assertEqual(truth.decorated_convention('?Roll@IcewindMisc@@YAHHH@Z'), '__cdecl')
+        # a destructor's Ghidra head hooks as a thiscall with no arguments
+        self.assertEqual(truth._hook_signature('void CMessageHandler::~CMessageHandler(void)',
+                                               '??1CMessageHandler@@QAE@XZ'),
+                         ('thiscall', [], None))
+
+    def test_exports_default_matches_export_decompiles(self):
+        # truth repeats the four-line default rather than loading the module
+        # (which puts tools/ on sys.path); this keeps the two in step
+        import importlib.util
+        path = os.path.join(ROOT, 'tools', 'ghidra', 'export_decompiles.py')
+        spec = importlib.util.spec_from_file_location('_export_decompiles_for_test', path)
+        mod = importlib.util.module_from_spec(spec)
+        saved_path, saved_mods = list(sys.path), set(sys.modules)
+        try:
+            spec.loader.exec_module(mod)
+            for home in (os.path.join(tempfile.gettempdir(), 'iwd2r-home-for-test'), '', None):
+                with mock.patch.dict(os.environ, {'IWD2R_HOME': home} if home is not None else {},
+                                     clear=False):
+                    if home is None:
+                        os.environ.pop('IWD2R_HOME', None)
+                    self.assertEqual(truth.exports_default(), mod._exports_default())
+        finally:
+            sys.path[:] = saved_path
+            for name in set(sys.modules) - saved_mods:
+                del sys.modules[name]
+
+    def test_export_signature_reads_the_ghidra_export_head(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as ex:
+            os.makedirs(os.path.join(ex, 'decompile'))
+            with open(os.path.join(ex, 'decompile', '407280.c'), 'w') as f:
+                f.write('/* header */\nvoid CAIGroup::GroupProtectPoint\n'
+                        '  /* the args */\n          (uint param_1,int param_2,undefined4 param_3)\n'
+                        '\n{\n  return;\n}\n')
+            with open(os.path.join(ex, 'decompile', '407FC0.c'), 'w') as f:
+                f.write('// nothing here\n')
+            want = 'void CAIGroup::GroupProtectPoint (uint param_1,int param_2,undefined4 param_3)'
+            self.assertEqual(truth.export_signature('0x407280', ex), want)
+            self.assertEqual(truth.export_signature('0x407fc0', ex), None)
+            self.assertEqual(truth.export_signature('0x999999', ex), None)
+
+    def test_frida_run_retries_a_side_that_came_home_with_no_status_once(self):
+        import tempfile
+        import subprocess as sp
+        clean = 'HITS fn_5845D0 4\nRESULT: CLEAN\n'
+        table = truth.hook_table(self.ROWS, self.SIGS, self.MAP, ['s1'])
+
+        def make(root, ours_statuses, ours_exit_first=2):
+            calls = []
+
+            def fake(cmd, **kw):
+                calls.append(cmd)
+                target = cmd[cmd.index('--target') + 1]
+                out = cmd[cmd.index('--out') + 1]
+                d = os.path.join(root, 'runs', 'x-' + target, 'replay')
+                os.makedirs(d, exist_ok=True)
+                with open(os.path.join(d, out), 'w') as f:
+                    f.write(json.dumps({'tag': 'fn_5845D0', 'a0_s32': 1}) + '\n')
+                rc, st = 0, clean
+                if target == 'ours':
+                    n = sum(1 for c in calls if c[c.index('--target') + 1] == 'ours') - 1
+                    rc, st = ours_statuses[min(n, len(ours_statuses) - 1)]
+                sp_path = os.path.join(d, out + '.status')
+                if os.path.exists(sp_path):
+                    os.remove(sp_path)
+                if st is not None:
+                    with open(sp_path, 'w') as f:
+                        f.write(st)
+                return sp.CompletedProcess(cmd, rc, stdout='probe: runs/x-%s\n' % target, stderr='')
+            fake.calls = calls
+            return fake
+
+        def ours_calls(fake):
+            return [c for c in fake.calls if c[c.index('--target') + 1] == 'ours']
+        with tempfile.TemporaryDirectory() as root:
+            fake = make(root, [(2, None), (0, clean)])
+            r = truth.frida_run('b011', table, ['s1'], run=fake, root=root,
+                                dumps=lambda *a: {'match': True, 'detail': 'x'})['s1']
+            self.assertTrue(r['measured'])
+            self.assertTrue(r['ours_retried'])
+            self.assertNotIn('orig_retried', r)
+            ours = ours_calls(fake)
+            self.assertEqual(len(ours), 2)
+            self.assertEqual(ours[1][ours[1].index('--new-attempt') + 1],
+                             'driver frida b011 s1 retry: ours side came home with no status')
+            fake = make(root, [(2, None)])
+            r = truth.frida_run('b011', table, ['s1'], run=fake, root=root,
+                                attempt_reason=lambda sc, k: 'why %s %s' % (sc, k))['s1']
+            self.assertFalse(r['measured'])
+            self.assertIn('ours side exited 2', r['failed'])
+            self.assertEqual(len(ours_calls(fake)), 2)
+            self.assertEqual(ours_calls(fake)[1][ours_calls(fake)[1].index('--new-attempt') + 1],
+                             'why s1 ours retry: no status')
+            fake = make(root, [(2, 'HITS fn_5845D0 0\nRESULT: UNSAFE\n')])
+            r = truth.frida_run('b011', table, ['s1'], run=fake, root=root)['s1']
+            self.assertFalse(r['measured'])
+            self.assertNotIn('ours_retried', r)
+            self.assertEqual(len(ours_calls(fake)), 1)
 
     def test_frida_run_marks_exit2_side_not_measured(self):
         import tempfile
