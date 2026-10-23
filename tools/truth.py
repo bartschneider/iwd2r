@@ -609,7 +609,16 @@ PROTO_TYPES = {
     'short': 's16', 'int16_t': 's16', 'word': 'u16', 'ushort': 'u16', 'uint16_t': 'u16',
     'int': 's32', 'long': 's32', 'int32_t': 's32',
     'dword': 'u32', 'uint': 'u32', 'ulong': 'u32', 'uint32_t': 'u32', 'size_t': 'u32',
+    # MFC/Win32 typedefs (x86: every pointer-sized integer is 32 bits)
+    'resid': 'u32', 'colorref': 'u32', 'wparam': 'u32', 'uint_ptr': 'u32', 'dword_ptr': 'u32',
+    'lparam': 's32', 'lresult': 's32', 'int_ptr': 's32', 'long_ptr': 's32',
 }
+_CORE_PROTO = frozenset(PROTO_TYPES) - frozenset(
+    'resid colorref wparam uint_ptr dword_ptr lparam lresult int_ptr long_ptr'.split())
+for _name in ('POSITION HANDLE HWND HDC HINSTANCE HMODULE HBITMAP HPALETTE HRGN HFONT HGDIOBJ HGLOBAL '
+              'LPVOID LPCVOID LPSTR LPCSTR LPBYTE LPDWORD LPWORD PVOID PBYTE RESREF FARPROC PROC').split():
+    PROTO_TYPES[_name.lower()] = 'ptr'   # RESREF: a BYTE array parameter decays to a pointer
+
 _PROTO_MODIFIERS = frozenset({'const', 'volatile', 'struct', 'class', 'enum', 'virtual', 'static',
                               'inline', 'explicit', 'extern', 'friend', 'constexpr'})
 _PROTO_SIGN = frozenset({'unsigned', 'signed'})
@@ -700,7 +709,11 @@ def _split_params(raw):
 def _param_type(part):
     part = re.sub(r'=.*$', '', part, flags=re.S).strip()
     words = re.findall(r'[A-Za-z_]\w*|[*&]', part)
-    if len(words) >= 2 and re.match(r'[A-Za-z_]', words[-1]) and words[-1].lower() not in PROTO_TYPES \
+    # a typedef spelled last is the type only when nothing but modifiers precedes it (`const RESREF`)
+    is_type = bool(words) and words[-1].lower() in _CORE_PROTO or (
+        bool(words) and words[-1].lower() in PROTO_TYPES
+        and all(w in _PROTO_MODIFIERS or w in _PROTO_SIGN for w in words[:-1]))
+    if len(words) >= 2 and re.match(r'[A-Za-z_]', words[-1]) and not is_type \
             and words[-1] not in _PROTO_SIGN and words[-1] not in _PROTO_MODIFIERS \
             and words[-1] not in ('void',):
         words = words[:-1]
@@ -738,11 +751,16 @@ def _header_prototypes(texts, name):
     return found
 
 
-def _typed_from_headers(texts, name, ghidra_argc, conv):
-    """(conv, args, ret or None) typed from our prototype, or None when no
-    header declares it (unambiguously) or a type cannot be logged honestly.
-    With several overloads, the ones with the evidence signature's argument
-    count are kept, and the typing stands only when they all agree."""
+def _typed_from_headers(texts, name, ghidra_argc, conv, ghidra_args=None, ghidra_ret=None):
+    """(conv, args, ret or None, slots, mixed) typed from our prototype, or
+    None when no header declares it (unambiguously) or a type cannot be
+    logged honestly. With several overloads, the ones with the evidence
+    signature's argument count are kept, and the typing stands only when
+    they all agree. A parameter (or return) whose spelling _proto_type does
+    not know takes the Ghidra type of its slot (ghidra_args/ghidra_ret, as
+    _hook_signature returns them) when the prototype has as many parameters
+    as ghidra_args. slots is 'ours' or 'ghidra' per argument; mixed is True
+    when any slot or the return came from Ghidra."""
     protos = _header_prototypes(texts, name)
     if len(protos) > 1 and ghidra_argc is not None:
         protos = [p for p in protos if len(p[1]) == ghidra_argc]
@@ -750,13 +768,25 @@ def _typed_from_headers(texts, name, ghidra_argc, conv):
     for ret, params in protos:
         r = _proto_type(ret)
         a = [_proto_type(p) for p in params]
-        if r is None or None in a or 'void' in a:
+        if 'void' in a:
             return None
-        typed.add((tuple(a), None if r == 'void' else r))
+        slots = ['ours'] * len(a)
+        ret_ghidra = False
+        if ghidra_args is not None and len(ghidra_args) == len(a):
+            for i, t in enumerate(a):
+                if t is None:
+                    a[i], slots[i] = ghidra_args[i], 'ghidra'
+        if None in a:
+            return None
+        if r is None:
+            if ghidra_args is None or len(ghidra_args) != len(a) or ghidra_ret is None:
+                return None
+            r, ret_ghidra = ghidra_ret, True
+        typed.add((tuple(a), None if r == 'void' else r, tuple(slots), ret_ghidra))
     if len(typed) != 1:
         return None
-    args, ret = next(iter(typed))
-    return conv, list(args), ret
+    args, ret, slots, ret_ghidra = next(iter(typed))
+    return conv, list(args), ret, list(slots), ('ghidra' in slots or ret_ghidra)
 
 
 def hook_table(rows, signatures, our_map, scenarios, headers=None):
@@ -767,8 +797,9 @@ def hook_table(rows, signatures, our_map, scenarios, headers=None):
     rows are dicts with address and name; signatures maps address to a C
     signature; headers (header text or a list of them, optional) are our
     src/*.h: a function found there is typed from our prototype (args and
-    return; typed_from[addr] is 'ours'), otherwise from the evidence
-    signature ('ghidra'); our_map is the build's .map text (or a {name: rva} dict). Each
+    return; typed_from[addr] is 'ours', or 'mixed' when a slot the header
+    spells with an unknown type took Ghidra's), otherwise from the evidence
+    signature ('ghidra'); typed_slots[addr] says per argument which; our_map is the build's .map text (or a {name: rva} dict). Each
     row gets one hook per target, named fn_<ADDR> so the traces line up: the
     original's by absolute addr, ours by rva. A row is listed in skipped, with
     no hook on either side, when its signature does not parse or has a
@@ -780,7 +811,7 @@ def hook_table(rows, signatures, our_map, scenarios, headers=None):
     from_text = isinstance(our_map, str)
     publics = parse_map(our_map) if from_text else dict(our_map)
     texts = [headers] if isinstance(headers, str) else list(headers or [])
-    original, ours, skipped, typed = [], [], {}, {}
+    original, ours, skipped, typed, slots = [], [], {}, {}, {}
     for row in rows:
         address = row['address']
         key = '0x' + address[2:].upper() if address.lower().startswith('0x') else '0x' + address.upper()
@@ -792,6 +823,7 @@ def hook_table(rows, signatures, our_map, scenarios, headers=None):
         decorated = found[rvas[0]] if len(rvas) == 1 else None
         sig = _hook_signature(signatures.get(address) or signatures.get(key), decorated)
         typed_from = 'ghidra'
+        slot_src = None
         if texts and len(rvas) == 1:
             named = decorated_convention(decorated)
             conv_name = None
@@ -801,9 +833,13 @@ def hook_table(rows, signatures, our_map, scenarios, headers=None):
                 conv_name = FRIDA_CONVS[named]
             if conv_name:
                 argc = len(sig[1]) if not isinstance(sig, str) else None
-                mine = _typed_from_headers(texts, row['name'], argc, conv_name)
+                mine = _typed_from_headers(
+                    texts, row['name'], argc, conv_name,
+                    sig[1] if not isinstance(sig, str) else None,
+                    sig[2] if not isinstance(sig, str) else None)
                 if mine:
-                    sig, typed_from = mine, 'ours'
+                    sig, typed_from = mine[:3], 'mixed' if mine[4] else 'ours'
+                    slot_src = mine[3]
         if isinstance(sig, str) and len(rvas) != 1:
             sig = None  # ambiguity is the more useful reason; reported below
         if isinstance(sig, str):
@@ -817,6 +853,7 @@ def hook_table(rows, signatures, our_map, scenarios, headers=None):
             continue
         typed[key] = typed_from
         conv, args, ret = sig
+        slots[key] = slot_src if slot_src is not None else ['ghidra'] * len(args)
         hook = {'name': hook_name(key), 'conv': conv, 'args': args}
         if ret:
             hook['ret'] = ret
@@ -826,7 +863,7 @@ def hook_table(rows, signatures, our_map, scenarios, headers=None):
     loaded = sorted(_map_matches(LOADED_NAME, publics)) if from_text else (
         [publics[LOADED_NAME]] if LOADED_NAME in publics else [])
     return {'original': {'hooks': original}, 'ours': {'hooks': ours},
-            'scenarios': list(scenarios), 'skipped': skipped, 'typed_from': typed,
+            'scenarios': list(scenarios), 'skipped': skipped, 'typed_from': typed, 'typed_slots': slots,
             'ours_loaded_rva': hex(loaded[0]) if len(loaded) == 1 else None}
 
 
@@ -1137,6 +1174,10 @@ def _row_events(events, tag):
                          or str(e.get('tag', '')).lower() in trace_diff.TERMINAL_FAILURE_TAGS])
 
 
+def _row_crash(orig, ours):
+    return any(str(e.get('tag', '')).lower() in trace_diff.TERMINAL_FAILURE_TAGS for e in orig + ours)
+
+
 def _first_difference(orig, ours):
     """A short description of the first differing event pair, or of a crash."""
     try:
@@ -1182,6 +1223,40 @@ def _prefix_side(orig, ours, tag):
     if len(short) == len(other) or calls(short) >= HOOK_MAX:
         return None
     return side if trace_diff.compare(short, other[:len(short)]) == 0 else None
+
+
+ADDRESS_LIKE = (0x00010000, 0x7FFFFFFF)
+
+
+def _address_like_difference(orig, ours, tag, sources):
+    """When every differing field of the row's two traces is an argument slot
+    typed from Ghidra (sources: 'ours'/'ghidra' per argument) holding a
+    value in ADDRESS_LIKE on both sides, the detail naming the first such
+    slot; otherwise None. Same event counts and order are required."""
+    if not sources:
+        return None
+    try:
+        o, r = trace_diff.normalize(orig), trace_diff.normalize(ours)
+    except trace_diff.TraceInputError:
+        return None
+    if len(o) != len(r) or any(e.get('tag') != f.get('tag') for e, f in zip(o, r)) \
+            or any(str(e.get('tag', '')).lower() in trace_diff.TERMINAL_FAILURE_TAGS for e in o + r):
+        return None
+    first = None
+    for e, f in zip(o, r):
+        left = {k: v for k, v in e.items() if k != 'tag'}
+        right = {k: v for k, v in f.items() if k != 'tag'}
+        for field, a, b in trace_diff._value_diffs(left, right, '', 0.0):
+            m = re.match(r'^a(\d+)_\w+$', field)
+            if not m or int(m.group(1)) >= len(sources) or sources[int(m.group(1))] != 'ghidra':
+                return None
+            if not all(isinstance(v, int) and not isinstance(v, bool)
+                       and ADDRESS_LIKE[0] <= v <= ADDRESS_LIKE[1] for v in (a, b)):
+                return None
+            if first is None:
+                first = 'address-like untyped argument a%s (%s vs %s); type it from the header' % (
+                    m.group(1), a, b)
+    return first
 
 
 def frida_verdicts(traces, rows, skipped=None, info=None):
@@ -1239,6 +1314,10 @@ def frida_verdicts(traces, rows, skipped=None, info=None):
         tag = hook_name(key)
         different, exact, prefix, partial, crashed = [], [], [], [], []
         unmeasured, dumped, one_sided, notes, blind = [], [], [], [], []
+        addrlike = []
+        sources = (info.get('typed_slots') or {}).get(key)
+        if sources is None and (info.get('typed_from') or {}).get(key) == 'ghidra':
+            sources = ['ghidra'] * 64
         for scenario, value in traces.items():
             t = _as_scenario(value)
             if t['failed']:
@@ -1298,7 +1377,10 @@ def frida_verdicts(traces, rows, skipped=None, info=None):
                                  'every captured event equal' % ((scenario,) + counts))
                 continue
             side = _prefix_side(orig, ours, tag)
-            if side is None:
+            if side is None and not _row_crash(orig, ours) and \
+                    (why := _address_like_difference(orig, ours, tag, sources)):
+                addrlike.append(why)
+            elif side is None:
                 different.append('%s: %s' % (scenario, _first_difference(orig, ours)))
             elif not have_final:
                 unmeasured.append(scenario)
@@ -1315,10 +1397,10 @@ def frida_verdicts(traces, rows, skipped=None, info=None):
             verdicts[key] = ('different', 'differs in ' + '; '.join(different + crashed))
         elif partial:
             verdicts[key] = ('scenario failed', '; '.join(partial))
-        elif unmeasured or dumped or blind:
+        elif unmeasured or dumped or blind or addrlike:
             verdicts[key] = ('not measured', '; '.join(
                 (['no final HITS totals in %s' % ', '.join(unmeasured)] if unmeasured else [])
-                + dumped + blind))
+                + dumped + blind + addrlike[:1]))
         elif exact or prefix:
             verdicts[key] = ('equal', EQUAL_PREFIX + ', '.join(exact + prefix))
         elif one_sided:
@@ -1671,6 +1753,7 @@ def frida_batch(batch_id, rows, signatures, map_text, scenarios=FRIDA_SCENARIOS,
                        _our_headers() if headers is None else headers)
     if info is not None:
         info['typed_from'] = dict(table.get('typed_from', {}))
+        info['typed_slots'] = {k: list(v) for k, v in table.get('typed_slots', {}).items()}
     traces = run_frida(batch_id, table, list(scenarios)) if table['original']['hooks'] else {}
     return frida_verdicts(traces, rows, table['skipped'], info=info)
 
