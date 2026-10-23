@@ -834,8 +834,9 @@ def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
     if bad:
         problems.append(bad)
     changed, bad = _git_paths(run, worktree,
-                              ('diff', '--name-only',
-                               mbs[0] if mbs else base, 'HEAD'),
+                              ('diff', '--name-only') + (
+                                  (mbs[0], 'HEAD') if mbs
+                                  else ('%s...HEAD' % base,)),
                               str.strip)
     if bad:
         problems.append(bad)

@@ -66,9 +66,10 @@ Context bundles (one per row; read these before the source):
    WSO" or "corroborated by WSO" phrase. The driver closes the batch with
    `close --kind import`, which requires only the evidence kind above.
    **Dependencies.** A stub dependency that sits inside your own files is
-   imported with the row, in its own commit with its own trailer. A
-   dependency outside your files parks the row: restore our body, delete its
-   evidence file and append it to `docs/wso/import-parked.json` with `needs`
+   imported with the row, in its own commit with its own trailer, and with
+   its own `docs/evidence/<ADDR>.md` (the gate demands one for every touched
+   function). A dependency outside your files parks the row: restore our
+   body, delete the parked row's evidence file and append it to `docs/wso/import-parked.json` with `needs`
    of `"dependency outside the batch's files: <name>"`.
 6. **Commit as you go.** WIP commits are fine.
 7. **Asm reds: confirm or waive.** The parity step's asm verify has a known

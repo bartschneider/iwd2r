@@ -24,7 +24,8 @@ Outside the rules-math set the kind is not enforced: a missing one is only a
 warning. A `kind: trace` document — the function evidenced by tracing, the
 kind the WSO fork's imports carry — must say where the trace came from in
 `trace_source`: a citation of the fork's recovery note
-(`WillScarlettOhara/iwd2-re@<sha> <path>`) or of a frida capture of our own
+(`WillScarlettOhara/iwd2-re@<sha> docs/<name>-recovery.md`, which must name
+the function) or of a frida capture of our own
 binary (`frida <probe> orig:<sha256> ours:<sha256> compare=0`); anything
 else fails like a missing citation.
 Functions in RULES_MATH below — the rules-math set, whose correctness is the
@@ -231,12 +232,14 @@ def fork_note_mentions(sha, path, address, name, run=subprocess.run):
     `git show sha:path`, never checked out or run) names the function: its
     address in hex (any case, with or without 0x) or its unqualified name.
     An unreadable note, an unfetched sha included, is not ok."""
-    r = run(['git', 'show', f'{sha}:{path}'], capture_output=True, text=True)
+    r = run(['git', 'show', f'{sha}:{path}'], capture_output=True)
     if r.returncode != 0:
         return False, (f'cannot read the fork note {path} at {sha} (git show '
                        'failed; is the fork fetched, remote wso? an unread '
                        'note is a failure, not a pass)')
-    text = r.stdout or ''
+    # Notes are not guaranteed UTF-8 (a stray 0x97 is in the real ones);
+    # addresses and names are ASCII, so replacement characters cost nothing.
+    text = (r.stdout or b'').decode('utf-8', errors='replace')
     if re.search(r'(?<![0-9A-Fa-f])(?:0[xX])?0*%X(?![0-9A-Fa-f])'
                  % address, text, re.IGNORECASE):
         return True, ''
@@ -263,9 +266,9 @@ def problem(repo, address, name='', run=None):
             return f'{rel} records address {recorded}', fields
     except ValueError:
         return f'{rel} has a malformed address {recorded!r}', fields
-    if not fields.get('oracle_case') and not fields.get('exemption'):
-        return f'{rel} has neither oracle_case nor exemption', fields
     if fields.get('kind') == 'trace':
+        # A trace whose source checks out is its own evidence: it needs
+        # neither oracle_case nor exemption.
         source = fields.get('trace_source') or ''
         matches = [p.fullmatch(source) for p in TRACE_SOURCES]
         if not any(matches):
@@ -280,6 +283,9 @@ def problem(repo, address, name='', run=None):
                     argv, cwd=repo, **kw)))
             if not ok:
                 return f'{rel}: {why}', fields
+        return None, fields
+    if not fields.get('oracle_case') and not fields.get('exemption'):
+        return f'{rel} has neither oracle_case nor exemption', fields
     return None, fields
 
 

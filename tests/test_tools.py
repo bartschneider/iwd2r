@@ -2071,8 +2071,8 @@ class CheckEvidenceTest(unittest.TestCase):
         g('config', 'commit.gpgsign', 'false')
         for path, text in notes.items():
             os.makedirs(os.path.dirname(os.path.join(d, path)), exist_ok=True)
-            with open(os.path.join(d, path), 'w') as f:
-                f.write(text)
+            with open(os.path.join(d, path), 'wb') as f:
+                f.write(text if isinstance(text, bytes) else text.encode())
         g('add', '-A')
         g('commit', '-q', '-m', 'fork')
         return d, g('rev-parse', 'HEAD').stdout.strip()
@@ -2082,6 +2082,7 @@ class CheckEvidenceTest(unittest.TestCase):
             'docs/addr-recovery.md': 'body at 00401000 ok\n',
             'docs/pre-recovery.md': 'body at 0X401000 ok\n',
             'docs/name-recovery.md': 'the CFoo::Bar routine\n',
+            'docs/cp1252-recovery.md': b'caf\x97 CFoo::Bar \x97 ok\n',
             'docs/none-recovery.md': 'something else 0x4010000 Barista\n'})
         run = lambda argv, **kw: subprocess.run(argv, cwd=d, **kw)
         f = lambda path: check_evidence.fork_note_mentions(
@@ -2089,6 +2090,7 @@ class CheckEvidenceTest(unittest.TestCase):
         self.assertEqual(f('docs/addr-recovery.md'), (True, ''))
         self.assertTrue(f('docs/pre-recovery.md')[0])
         self.assertTrue(f('docs/name-recovery.md')[0])
+        self.assertTrue(f('docs/cp1252-recovery.md')[0])  # byte 0x97
         ok, why = f('docs/none-recovery.md')
         self.assertFalse(ok)
         self.assertIn('docs/none-recovery.md', why)
@@ -2118,6 +2120,27 @@ class CheckEvidenceTest(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         self.assertIn('docs/b-recovery.md', r.stdout)
         self.assertIn('0x401000', r.stdout)
+
+    def test_trace_file_needs_no_exemption(self):
+        self.write('src/a.cpp', TWO_FUNCTIONS.replace('return x;',
+                                                      'return x * 2;'))
+        frida = ('frida sendmsg_probe orig:%s ours:%s compare=0'
+                 % ('a' * 64, 'b' * 64))
+        self.evidence('401000', 'kind: trace\ntrace_source: "%s"' % frida)
+        self.commit()
+        r = self.check()
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertIn('trace 1 (1 of 1 touched function(s))', r.stdout)
+        self.evidence('401000', 'kind: trace\ntrace_source: "by eye"')
+        self.commit()
+        r = self.check()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn('trace_source', r.stdout)
+        self.assertNotIn('neither oracle_case nor exemption', r.stdout)
+        # a non-trace file still needs one
+        self.evidence('401000', 'kind: replay')
+        self.commit()
+        self.assertIn('neither oracle_case nor exemption', self.check().stdout)
 
     def test_rules_math_rejects_trace(self):
         address = self.touch_rules_math('oracle_case: rand/roll\n'
@@ -8818,32 +8841,42 @@ class TriageTest(unittest.TestCase):
         self.assertEqual(out[1]['auto_class'], 'rename-only')
 
     def test_triage_regen_keeps_closed_entries(self):
-        state = {'batches': {'b': {'status': 'closed',
-                                   'verdicts': {'0x1': {'side': 'ours'}}}}}
-        committed = [{'address': '0x1', 'class': 'ambiguous', 'name': 'A',
-                      'file': 'src/a.cpp', 'ours_ref': '82d75232',
-                      'reason': 'old'},
-                     {'address': '0x2', 'class': 'ambiguous', 'name': 'B',
-                      'file': 'src/a.cpp', 'ours_ref': '82d75232',
-                      'reason': 'old'}]
-        rows = [{'address': '0x1', 'name': 'A', 'file': 'src/a.cpp'},
-                {'address': '0x2', 'name': 'B', 'file': 'src/a.cpp'},
-                {'address': '0x3', 'name': 'C', 'file': 'src/a.cpp'}]
+        state = {'batches': {'b': {'status': 'closed', 'verdicts': {
+            '0x1': {'side': 'ours'}, '0x4': {'side': 'ours'}}}}}
+
+        def entry(addr, name, cls='ambiguous'):
+            return {'address': addr, 'class': cls, 'name': name,
+                    'file': 'src/a.cpp', 'ours_ref': '82d75232',
+                    'reason': 'old'}
+        committed = [entry('0x4', 'Exec'), entry(None, 'Parse'),
+                     entry('0x1', 'A'), entry('0x2', 'B'),
+                     entry('0x4', 'Start')]
+
+        def row(addr, name, cat='both_changed_differ'):
+            return {'address': addr, 'name': name, 'file': 'src/a.cpp',
+                    'category': cat}
+        rows = [row('0x1', 'A'), row('0x2', 'B'), row('0x3', 'C'),
+                row('0x4', 'Exec'), row('0x4', 'Start'), row(None, 'Parse'),
+                row(None, 'Parse'), row('0x5', 'D', 'only_ours')]
         seen = []
 
         def fake(todo, fork, ours, **kw):
-            seen.append(([r['address'] for r in todo], ours))
+            seen.append((ours, [(r['address'], r['name']) for r in todo]))
             return [dict(r, **{'class': 'rename-only', 'reason': 'new'})
-                    for r in todo]
+                    for r in todo if r['category'] == 'both_changed_differ']
         with mock.patch.object(triage, 'triage_rows', fake):
             out = triage.regen_triage(state, rows, committed, 'fork', 'first')
-        self.assertEqual(seen, [(['0x2', '0x3'], 'first')])
-        by = {r['address']: r for r in out}
-        self.assertEqual(by['0x1'], committed[0])
-        self.assertEqual(by['0x2']['class'], 'rename-only')
-        self.assertEqual(by['0x2']['ours_ref'], 'first')
-        self.assertEqual(by['0x3']['ours_ref'], 'first')
-        self.assertEqual([r['address'] for r in out], ['0x1', '0x2', '0x3'])
+        # the closed rows' committed entries, in committed order, then the
+        # open both_changed_differ rows; nothing re-keyed by address
+        self.assertEqual([(r['address'], r['name']) for r in out],
+                         [('0x4', 'Exec'), ('0x1', 'A'), ('0x4', 'Start'),
+                          ('0x2', 'B'), ('0x3', 'C'), (None, 'Parse'),
+                          (None, 'Parse')])
+        self.assertEqual(out[:3], [committed[0], committed[2], committed[4]])
+        self.assertEqual({r['ours_ref'] for r in out[3:]}, {'first'})
+        self.assertEqual([r['class'] for r in out[3:]], ['rename-only'] * 4)
+        self.assertEqual(seen[0][0], 'first')
+        self.assertNotIn('0x1', [a for a, _ in seen[0][1]])
 
     def test_calibration_against_committed_batches(self):
         if subprocess.run(['git', '-C', ROOT, 'rev-parse', '--verify', '--quiet',
