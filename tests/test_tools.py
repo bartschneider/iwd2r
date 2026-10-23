@@ -4629,7 +4629,28 @@ class SandboxReplayTest(unittest.TestCase):
         self.assertEqual(oracle.replay_timeout(None, os.path.join(
             ROOT, 'scenarios', 'walk_and_talk.txt')), 420)
 
+    def test_host_is_refused_without_the_desktop_opt_in(self):
+        from unittest import mock
+        env = {k: v for k, v in os.environ.items() if k != 'IWD2R_DESKTOP_OK'}
+        for sub in (['record', 'start_screen'], ['compare', 'chargen_replay'],
+                    ['crossload', 'x']):
+            with mock.patch.dict(os.environ, env, clear=True), \
+                    self.assertRaises(SystemExit) as cm:
+                oracle.main(['replay', *sub, '--host'])
+            self.assertEqual(cm.exception.code, 2, sub)
+        with mock.patch.dict(os.environ, dict(env, IWD2R_DESKTOP_OK='0'), clear=True), \
+                self.assertRaises(SystemExit):
+            oracle.main(['replay', 'compare', 'chargen_replay', '--host'])
+        # The error text agents read no longer points at --host.
+        import inspect
+        self.assertNotIn('with --host', inspect.getsource(oracle.record_in_sandbox))
+
     def test_host_switch(self):
+        from unittest import mock
+        with mock.patch.dict(os.environ, {'IWD2R_DESKTOP_OK': '1'}):
+            self._host_switch()
+
+    def _host_switch(self):
         code, events, locks, sandbox = self.record(
             ['replay', 'record', 'start_screen', '--host'])
         self.assertEqual(code, 0)
@@ -4648,7 +4669,8 @@ class SandboxReplayTest(unittest.TestCase):
         seen = []
         with mock.patch.object(oracle, 'replay_compare',
                                lambda a: seen.append(a.host) or 0), \
-                LockRecorder.patch(oracle, LockRecorder()):
+                LockRecorder.patch(oracle, LockRecorder()), \
+                mock.patch.dict(os.environ, {'IWD2R_DESKTOP_OK': '1'}):
             oracle.main(['replay', 'compare', 'chargen_replay'])
             oracle.main(['replay', 'compare', 'chargen_replay', '--host'])
         self.assertEqual(seen, [False, True])

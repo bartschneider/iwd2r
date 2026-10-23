@@ -1603,7 +1603,7 @@ def record_in_sandbox(build, game, script, seed, timeout, dump_every, stamp,
     None, stdout, stderr, extra report fields)."""
     import winsandbox
     if not winsandbox.available():
-        sys.exit('oracle: %s; or record on the host with --host'
+        sys.exit('oracle: %s'
                  % winsandbox.ENABLE_HINT.replace('play: ', '', 1))
     winsandbox.deploy_runtime(os.path.join(build, INJECTOR), sandbox_log,
                               arch='x86')
@@ -2817,9 +2817,11 @@ def seed_arg(text):
     return value
 
 
+DESKTOP_OK = 'IWD2R_DESKTOP_OK'   # as tools/play.py and tools/gltrace.py
+
 HOST_HELP = ('run the original on the host\'s desktop instead of in Windows '
              'Sandbox (for debugging: it takes the focus, and a stray click '
-             'lands in the recording)')
+             'lands in the recording); refused unless IWD2R_DESKTOP_OK=1')
 
 
 LOAD_HELP = ('start from this save folder (NNNNNNNNN-Name, with '
@@ -2955,6 +2957,10 @@ def main(argv=None):
     cross.add_argument('--new-attempt', metavar='REASON', help=NEW_ATTEMPT_HELP)
     cross.set_defaults(run=cmd_replay_crossload)
     args = ap.parse_args(argv)
+    if getattr(args, 'host', False) and os.environ.get(DESKTOP_OK) != '1':
+        ap.error('--host would open the original on the desktop; set %s=1 to '
+                 'allow it (a person at the PC), or record in Windows '
+                 'Sandbox, the default' % DESKTOP_OK)
     if getattr(args, 'new_attempt', None) is not None:
         import attempt
         import winsandbox
