@@ -29,6 +29,11 @@ like any other, verified against the original.
 
 ## 2. What already exists
 
+The graphics API is SDL3 GPU, full stop. There is no OpenGL anywhere in this plan: the
+original's OpenGL 3D mode stays inert in the engine, and IWD2EE's OpenGL/HD renderer is not
+ported. What we take from that work is ideas (zoom, HD packs, UI scale, viewport sound),
+re-implemented on our own presenter.
+
 | piece | state |
 |---|---|
 | Render API seam (project 4) | done: the engine draws into one CPU back buffer; a presenter puts it on screen |
@@ -37,7 +42,7 @@ like any other, verified against the original.
 | Region composition | done: each UI panel's 1× rectangle is composited at the UI scale, the world at its own scale, so the UI can be 2× at desktop resolution while the world stays 1× |
 | Scalable text | done, opt-in: TrueType text rendering (`Text Renderer=scalable`) |
 | Desktop runs | `IWD2R_DESKTOP_OK=1 python3 tools/play.py --sound --resolution desktop --scale 2 ...` |
-| Ideas from IWD2EE's OpenGL/HD work | notes and traces under [renderer/wso/](renderer/wso/index.md): camera zoom, HD tiles, HD sprites, UI scale, supersampled fonts, viewport-relative sound, pathfinding, uncapped FPS, markers, load times. Its author never finished it; these are ideas, not a specification |
+| Ideas borrowed from IWD2EE's unfinished OpenGL/HD work (not ported) | notes and traces under [renderer/wso/](renderer/wso/index.md): camera zoom, HD tiles, HD sprites, UI scale, supersampled fonts, viewport-relative sound, pathfinding, uncapped FPS, markers, load times. Its author never finished it; these are ideas, not a specification |
 
 Vulkan is reached through SDL3 GPU, never written directly: SDL3 GPU owns the device, the
 swapchain and the shader loading, and its other backends (D3D12, Metal) become available by
@@ -150,8 +155,8 @@ resources. None of these changes the simulation.
   layer and Lua API) and the later options project, after this one.
 - No bundled assets: packs are the player's, like WeiDU mods are.
 - No raw Vulkan, D3D12 or Metal code; SDL3 GPU is the only graphics API we program.
-- No reconstruction of IWD2EE's unfinished OpenGL renderer; its notes are read for ideas and
-  credited where an idea is taken.
+- No OpenGL, and no reconstruction of IWD2EE's unfinished OpenGL renderer; its notes are read
+  for ideas and credited where an idea is taken.
 
 ## 6. Open questions, to settle when phase 1 is specified
 
