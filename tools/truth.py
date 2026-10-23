@@ -882,7 +882,7 @@ def _read_status(path):
 
 
 def frida_run(batch_id, table, scenarios, run=subprocess.run, root=ROOT, loaded_rva=None,
-              clicks=3, hit_min=1, timeout=None, attempt_reason=None):
+              clicks=3, hit_min=1, timeout=None, attempt_reason=None, build_checkout=None):
     """{scenario: {'orig': events, 'ours': events, 'orig_path': path or None,
     'ours_path': path or None, 'orig_exit': int, 'ours_exit': int, 'final':
     {'orig': bool, 'ours': bool} (the totals are the exit-time ones),
@@ -905,7 +905,10 @@ def frida_run(batch_id, table, scenarios, run=subprocess.run, root=ROOT, loaded_
     ours_loaded_rva, read from the map) names CScreenWorld::EngineActivated in
     our build. With neither, every scenario fails with that reason and nothing
     is run. attempt_reason(scenario, 'orig'|'ours'), when given, replaces the
-    default --new-attempt text. `run` is injectable
+    default --new-attempt text. build_checkout (a WSL path) is the Windows
+    checkout whose x86 build ours runs (probe.py --build-checkout): the batch
+    worktree's, so the bodies under test are the ones the map's RVAs name;
+    without it probe.py runs this checkout's build. `run` is injectable
     (the tests never launch anything); the real call is made by hand on the
     Windows machine under the one-launch rules."""
     import tempfile
@@ -942,6 +945,8 @@ def frida_run(batch_id, table, scenarios, run=subprocess.run, root=ROOT, loaded_
                                          'driver frida %s %s' % (batch_id, scenario))]
                 if target == 'ours':
                     cmd += ['--loaded-rva', loaded_rva]
+                    if build_checkout:
+                        cmd += ['--build-checkout', build_checkout]
                 done = run(cmd, capture_output=True, text=True, cwd=root)
                 folder = None
                 for line in (getattr(done, 'stdout', '') or '').splitlines():

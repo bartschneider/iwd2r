@@ -387,6 +387,16 @@ def report(out_dir, status_name):
     return 2
 
 
+def ours_build(target, build_checkout=None):
+    """The build folder a side runs from: the original's injector and
+    recorder from this checkout's oracle build; ours from build_checkout's
+    x86 RelWithDebInfo build (the checkout that built the bodies under
+    test, e.g. a batch worktree's), else this checkout's."""
+    if target == 'original':
+        return os.path.join(play.WIN_CHECKOUT, oracle.REPLAY_DIR_REL)
+    return os.path.join(build_checkout or play.WIN_CHECKOUT, OURS_EXE_REL)
+
+
 def run(ns):
     dry = ns.dry or ns.command == 'plan'
     load_probe(ns.probe)
@@ -409,9 +419,7 @@ def run(ns):
             sys.exit('probe: plan: no %s' % game)
     game_win = winsandbox.wslpath_w(game)
 
-    build = os.path.join(play.WIN_CHECKOUT,
-                         oracle.REPLAY_DIR_REL if ns.target == 'original'
-                         else OURS_EXE_REL)
+    build = ours_build(ns.target, ns.build_checkout)
     exe = os.path.join(build, oracle.INJECTOR if ns.target == 'original'
                        else 'iwd2r.exe')
     if not os.path.isfile(exe):
@@ -430,6 +438,7 @@ def run(ns):
           % (ns.target, os.path.relpath(script, ROOT), len(actions), ns.seed,
              timeout, os.path.relpath(ns.probe, ROOT),
              'PLAN ONLY' if dry else 'in Windows Sandbox'))
+    print('probe %s: exe %s' % (ns.target, exe))
 
     stamp = os.path.basename(run_dir)
     host_run = os.path.join(winsandbox.VM_ROOT, 'replays',
@@ -520,6 +529,12 @@ def add_side_args(p):
     p.add_argument('--loaded-rva',
                    help="ours side: loaded observation site as an RVA off "
                         '--module')
+    p.add_argument('--build-checkout', metavar='CHECKOUT',
+                   help='ours side: the Windows checkout (a WSL path) whose '
+                        + OURS_EXE_REL + '/iwd2r.exe runs, e.g. a batch '
+                        "worktree's (default: this checkout's, "
+                        'play.WIN_CHECKOUT); the tools are staged from this '
+                        'checkout either way')
     p.add_argument('--module', default=None,
                    help='module --loaded-rva resolves against '
                         '(default iwd2r.exe)')

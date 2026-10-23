@@ -390,15 +390,17 @@ def sync_list(paths):
 # ---------------------------------------------------------------------------
 # Running
 
-def stream(cmd, log_file=None, **kw):
-    """Runs cmd, echoing its output (and appending it to log_file)."""
+def stream(cmd, log_file=None, echo=True, **kw):
+    """Runs cmd, echoing its output (unless echo is False) and appending it
+    to log_file."""
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT, **kw)
     try:
         for raw in proc.stdout:
             line = raw.decode('utf-8', errors='replace')
-            sys.stdout.write(line)
-            sys.stdout.flush()
+            if echo:
+                sys.stdout.write(line)
+                sys.stdout.flush()
             if log_file:
                 log_file.write(line)
                 log_file.flush()
@@ -478,31 +480,39 @@ def build_linux():
     return os.path.join(build_dir, 'iwd2r')
 
 
-def sync_windows():
-    os.makedirs(WIN_CHECKOUT, exist_ok=True)
+def sync_windows(root=None, checkout=None):
+    """Copies the worktree at root (default this one) into its Windows
+    checkout (default WIN_CHECKOUT): tracked files plus modified and
+    untracked non-ignored ones."""
+    root = root or ROOT
+    checkout = checkout or WIN_CHECKOUT
+    os.makedirs(checkout, exist_ok=True)
     out = subprocess.run(['git', 'ls-files', '-z', '--cached', '--others',
-                          '--exclude-standard'], cwd=ROOT, check=True,
+                          '--exclude-standard'], cwd=root, check=True,
                          capture_output=True).stdout.decode('utf-8')
     files = [p for p in sync_list(out.split('\0'))
-             if os.path.lexists(os.path.join(ROOT, p))]
-    log('syncing %d files to %s' % (len(files), WIN_CHECKOUT))
+             if os.path.lexists(os.path.join(root, p))]
+    log('syncing %d files to %s' % (len(files), checkout))
     proc = subprocess.run(['rsync', '-rlt', '--from0', '--files-from=-',
-                           ROOT + '/', WIN_CHECKOUT + '/'],
+                           root + '/', checkout + '/'],
                           input='\0'.join(files).encode('utf-8'))
     if proc.returncode != 0:
         sys.exit('play: rsync failed')
 
 
 def build_windows(preset=WIN_PRESET, target='iwd2r', exe_rel=WIN_EXE_REL,
-                  bat_name='play-build.bat'):
-    """Builds target with the Windows CMake preset in WIN_CHECKOUT; returns
-    the WSL path of exe_rel. Defaults build the game (play.py's use)."""
+                  bat_name='play-build.bat', checkout=None, log_path=None):
+    """Builds target with the Windows CMake preset in checkout (default
+    WIN_CHECKOUT); returns the WSL path of exe_rel. Defaults build the game
+    (play.py's use). With log_path the compiler output goes to that file
+    instead of the terminal. A failure exits (SystemExit)."""
+    checkout = checkout or WIN_CHECKOUT
     for path in (VCVARS, CMAKE_WIN):
         if not os.path.exists(wslpath('-u', path)):
             sys.exit('play: missing %s' % path)
-    win_root = wslpath('-w', WIN_CHECKOUT)
+    win_root = wslpath('-w', checkout)
     configured = os.path.isfile(os.path.join(
-        WIN_CHECKOUT, 'build', preset, 'CMakeCache.txt'))
+        checkout, 'build', preset, 'CMakeCache.txt'))
     lines = [
         '@echo off',
         'call "%s" >nul || exit /b 1' % VCVARS,
@@ -512,30 +522,46 @@ def build_windows(preset=WIN_PRESET, target='iwd2r', exe_rel=WIN_EXE_REL,
         lines.append('"%s" --preset %s || exit /b 1' % (CMAKE_WIN, preset))
     lines.append('"%s" --build --preset %s --target %s || exit /b 1'
                  % (CMAKE_WIN, preset, target))
-    bat = os.path.join(WIN_CHECKOUT, bat_name)
+    bat = os.path.join(checkout, bat_name)
     with open(bat, 'w', newline='\r\n') as f:
         f.write('\n'.join(lines) + '\n')
     if not configured:
         log('first Windows build: configuring and compiling SDL3 takes several '
             'minutes')
-    log('building %s with MSVC (target %s)' % (preset, target))
+    log('building %s with MSVC (target %s) in %s' % (preset, target, checkout))
     started = time.time()
-    if stream([CMD_EXE, '/c', wslpath('-w', bat)], cwd=WIN_CHECKOUT) != 0:
-        sys.exit('play: Windows build failed')
+    if log_path:
+        with open(log_path, 'a', encoding='utf-8') as out:
+            rc = stream([CMD_EXE, '/c', wslpath('-w', bat)], log_file=out,
+                        echo=False, cwd=checkout)
+    else:
+        rc = stream([CMD_EXE, '/c', wslpath('-w', bat)], cwd=checkout)
+    if rc != 0:
+        sys.exit('play: Windows build failed%s' % (
+            ' (log: %s)' % log_path if log_path else ''))
     log('build done in %.0f s' % (time.time() - started))
-    exe = os.path.join(WIN_CHECKOUT, exe_rel)
+    exe = os.path.join(checkout, exe_rel)
     if not os.path.isfile(exe):
         sys.exit('play: build produced no %s' % exe)
     return exe
 
 
-def build_windows_x86(bat_name='play-build-x86.bat', build=build_windows):
-    """Builds the x86 RelWithDebInfo exe (with its linker map) that
-    tools/frida/probe.py runs in the sandbox; returns the WSL path of the
-    exe. build is injectable for tests."""
-    return build(preset='windows-msvc-x86', target='iwd2r',
-                 exe_rel='build/windows-msvc-x86/RelWithDebInfo/iwd2r.exe',
-                 bat_name=bat_name)
+X86_EXE_REL = 'build/windows-msvc-x86/RelWithDebInfo/iwd2r.exe'
+
+
+def build_windows_x86(bat_name='play-build-x86.bat', build=build_windows,
+                      checkout=None, log_path=None):
+    """Builds the x86 RelWithDebInfo exe (with its linker map, iwd2r.map
+    beside it) that tools/frida/probe.py runs in the sandbox, in checkout
+    (default WIN_CHECKOUT); returns the WSL path of the exe. build is
+    injectable for tests."""
+    kw = dict(preset='windows-msvc-x86', target='iwd2r', exe_rel=X86_EXE_REL,
+              bat_name=bat_name)
+    if checkout:
+        kw['checkout'] = checkout
+    if log_path:
+        kw['log_path'] = log_path
+    return build(**kw)
 
 
 def run_linux(exe, env, log_file):

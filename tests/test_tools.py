@@ -7062,6 +7062,19 @@ class FridaProbeTest(unittest.TestCase):
             preset='windows-msvc-x86', target='iwd2r',
             exe_rel='build/windows-msvc-x86/RelWithDebInfo/iwd2r.exe',
             bat_name='play-build-x86.bat')])
+        calls.clear()
+        play.build_windows_x86(build=lambda **kw: calls.append(kw) or '/x/iwd2r.exe',
+                               checkout='/mnt/c/b', log_path='/l')
+        self.assertEqual((calls[0]['checkout'], calls[0]['log_path']), ('/mnt/c/b', '/l'))
+
+    def test_ours_runs_the_build_checkout_it_is_given(self):
+        probe = load_tool('frida/probe')
+        self.assertEqual(probe.ours_build('ours', '/mnt/c/b'),
+                         os.path.join('/mnt/c/b', probe.OURS_EXE_REL))
+        self.assertEqual(probe.ours_build('ours'),
+                         os.path.join(play.WIN_CHECKOUT, probe.OURS_EXE_REL))
+        self.assertEqual(probe.ours_build('original', '/mnt/c/b'),
+                         os.path.join(play.WIN_CHECKOUT, load_tool('oracle').REPLAY_DIR_REL))
 
 
 class OrigAttachTest(unittest.TestCase):
@@ -10439,15 +10452,12 @@ class DriverTest(unittest.TestCase):
                 (4, 'verdict 0x401000 ours case dump-401000\nverdict 0x402000 ours case dump-402000\n', 'different')):
             seen = []
 
-            def frida_run(batch_id, table, scenarios, ours_ret=ours_ret):
+            def frida_run(batch_id, table, scenarios, ours_ret=ours_ret, **kw):
                 seen.append((batch_id, [h['name'] for h in table['original']['hooks']], list(scenarios)))
                 return {'world_entry': (trace(('fn_402000', 7, 3)), trace(('fn_402000', 7, ours_ret)))}
-            map_path = os.path.join(tempfile.mkdtemp(), 'iwd2r.map')
-            self.addCleanup(shutil.rmtree, os.path.dirname(map_path), True)
-            with open(map_path, 'w') as f:
-                f.write(TruthTest.MAP)
             d = self._measured_driver(worker=_SeqWorker('# r\n\n## Verdicts\n\n' + report),
-                                      frida=True, frida_map=map_path, frida_run=frida_run,
+                                      frida=True, frida_build=self._frida_builder()[0],
+                                      frida_run=frida_run,
                                       oracle_run=lambda *a: {'0x401000': ('pass', 'ok')})
             d.run_batch('b011')
             self.assertEqual(seen[0][1], ['fn_402000'])
@@ -10475,12 +10485,8 @@ class DriverTest(unittest.TestCase):
         def spy(*a, **kw):
             got.append(kw.get('headers'))
             return real(*a, **kw)
-        map_path = os.path.join(tempfile.mkdtemp(), 'iwd2r.map')
-        self.addCleanup(shutil.rmtree, os.path.dirname(map_path), True)
-        with open(map_path, 'w') as f:
-            f.write(TruthTest.MAP)
         d = self._measured_driver(worker=_SeqWorker('# r\n\n## Verdicts\n\nverdict 0x401000 ours case dump-401000\nverdict 0x402000 ours case dump-402000\n'),
-                                  frida=True, frida_map=map_path,
+                                  frida=True, frida_build=self._frida_builder()[0],
                                   frida_run=lambda *a, **k: {'world_entry': (trace(('fn_402000', 7, 3)), trace(('fn_402000', 7, 3)))},
                                   oracle_run=lambda *a: {'0x401000': ('pass', 'ok')})
         os.makedirs(os.path.join(self.wt, 'src'), exist_ok=True)
@@ -10494,22 +10500,113 @@ class DriverTest(unittest.TestCase):
 
     def test_driver_frida_runs_once_even_with_a_fix_round(self):
         calls = []
-        map_path = os.path.join(tempfile.mkdtemp(), 'iwd2r.map')
-        self.addCleanup(shutil.rmtree, os.path.dirname(map_path), True)
-        with open(map_path, 'w') as f:
-            f.write(TruthTest.MAP)
 
-        def frida_run(batch_id, table, scenarios):
+        def frida_run(batch_id, table, scenarios, **kw):
             calls.append(1)
             t = TruthTest._trace(('fn_402000', 7, 3))
             return {'world_entry': (t, t)}
         bad = '# r\n\n## Verdicts\n\nverdict 0x401000 ours case dump-401000\n'   # 0x402000 missing: a problem
         good = bad + 'verdict 0x402000 ours case dump-402000\n'
-        d = self._measured_driver(worker=_SeqWorker(bad, good), frida=True, frida_map=map_path,
+        d = self._measured_driver(worker=_SeqWorker(bad, good), frida=True,
+                                  frida_build=self._frida_builder()[0],
                                   frida_run=frida_run, oracle_run=lambda *a: {})
         self.assertEqual(d.run_batch('b011'), 'closed', self._status(d)['exceptions'])
         self.assertEqual(calls, [1])
         self.assertEqual(self._state()['verdicts']['0x402000']['measured'], 'frida')
+
+    def _frida_builder(self, map_text=None):
+        """(builder, calls, checkout): a fake per-batch x86 build whose map
+        sits where the x86 build writes it, under a fake Windows checkout."""
+        checkout = os.path.join(tempfile.mkdtemp(), 'iwd2r-build-wt')
+        self.addCleanup(shutil.rmtree, os.path.dirname(checkout), True)
+        map_path = os.path.join(checkout, driver.X86_MAP_REL)
+        os.makedirs(os.path.dirname(map_path))
+        with open(map_path, 'w') as f:
+            f.write(TruthTest.MAP if map_text is None else map_text)
+        calls = []
+
+        def build(worktree, log_path=None):
+            calls.append((worktree, log_path))
+            return checkout, map_path
+        return build, calls, checkout
+
+    def test_driver_frida_phase_builds_and_runs_the_batch_worktree(self):
+        trace = TruthTest._trace
+        build, built, checkout = self._frida_builder(
+            TruthTest.MAP.replace('0001:00001230       ?Roll@IcewindMisc@@YAHHH@Z 00402230',
+                                  '0001:00009990       ?Roll@IcewindMisc@@YAHHH@Z 0040A990'))
+        seen = []
+
+        def frida_run(batch_id, table, scenarios, build_checkout=None):
+            seen.append((build_checkout, [h['rva'] for h in table['ours']['hooks']]))
+            t = trace(('fn_402000', 7, 3))
+            return {'world_entry': (t, t)}
+        d = self._measured_driver(worker=_SeqWorker('# r\n\n## Verdicts\n\nverdict 0x401000 ours case dump-401000\nverdict 0x402000 ours case dump-402000\n'),
+                                  frida=True, frida_build=build, frida_run=frida_run,
+                                  oracle_run=lambda *a: {'0x401000': ('pass', 'ok')})
+        self.assertEqual(d.run_batch('b011'), 'closed', self._status(d)['exceptions'])
+        # built once, from the batch worktree, the compiler output in the batch's folder
+        self.assertEqual(built, [(self.wt, os.path.join(os.path.dirname(d.status_path), 'b011',
+                                                        'frida-build.log'))])
+        # ours runs that build, hooked at the RVAs of that build's map
+        self.assertEqual(seen, [(checkout, ['0xa990'])])
+        self.assertIn('x86 build of %s in %s' % (self.wt, checkout), '\n'.join(self.logs))
+
+    def test_driver_frida_build_failure_is_a_phase_error(self):
+        d, batch = self._import_phase_driver()
+
+        def build(worktree, log_path=None):
+            raise SystemExit('play: Windows build failed (log %s)' % log_path)
+        d.frida_build = build
+        d.frida_run = lambda *a, **kw: self.fail('nothing runs without a build')
+        findings = d._frida_phase('b011', batch, self.wt, {})
+        self.assertIsInstance(findings, list)
+        for k in ('401000', '402000', '403000'):
+            status, detail = d._frida_got[k]
+            self.assertEqual(status, 'not measured')
+            self.assertIn('the x86 build of %s failed: play: Windows build failed' % self.wt, detail)
+        self.assertIn('frida phase error', '\n'.join(self.logs))
+
+    def test_driver_frida_map_override_measures_the_build_beside_it(self):
+        d, batch = self._import_phase_driver()
+        _build, _calls, checkout = self._frida_builder(self.IMPORT_MAP)
+        d.frida_build = lambda *a, **kw: self.fail('the override builds nothing')
+        d.frida_map = os.path.join(checkout, driver.X86_MAP_REL)
+        seen = []
+        d.frida_run = lambda b, table, scenarios, build_checkout=None: seen.append(build_checkout) or {}
+        d._frida_phase('b011', batch, self.wt, {})
+        self.assertEqual(seen, [checkout])
+        # a map that is not where an x86 build puts it measures nothing
+        stray = os.path.join(self.tmp, 'iwd2r.map')
+        with open(stray, 'w') as f:
+            f.write(self.IMPORT_MAP)
+        d.frida_map = stray
+        d.frida_run = lambda *a, **kw: self.fail('no build to run')
+        d._frida_phase('b011', batch, self.wt, {})
+        self.assertEqual(d._frida_got['401000'][0], 'not measured')
+        self.assertIn('not where an x86 build writes its map', d._frida_got['401000'][1])
+
+    def test_frida_build_uses_the_worktrees_own_checkout(self):
+        play = driver._tool('play')
+        calls = []
+        out = os.path.join(tempfile.mkdtemp(), 'iwd2r.exe')
+        self.addCleanup(shutil.rmtree, os.path.dirname(out), True)
+        open(os.path.splitext(out)[0] + '.map', 'w').close()
+        with mock.patch.object(play, 'sync_windows',
+                               lambda **kw: calls.append(('sync', kw))), \
+                mock.patch.object(play, 'build_windows_x86',
+                                  lambda **kw: calls.append(('build', kw)) or out), \
+                mock.patch.dict(os.environ, {'IWD2R_WIN_CHECKOUT': '/mnt/c/driver-checkout'}):
+            got = driver.frida_build('/home/x/wt/p3-wso-i009', log_path='/l/b.log')
+        want = play.WIN_BUILD_BASE + '-p3-wso-i009'
+        self.assertEqual(got, (want, os.path.splitext(out)[0] + '.map'))
+        self.assertEqual(calls, [('sync', {'root': '/home/x/wt/p3-wso-i009', 'checkout': want}),
+                                 ('build', {'checkout': want, 'log_path': '/l/b.log'})])
+        os.unlink(os.path.splitext(out)[0] + '.map')
+        with mock.patch.object(play, 'sync_windows', lambda **kw: None), \
+                mock.patch.object(play, 'build_windows_x86', lambda **kw: out):
+            with self.assertRaises(RuntimeError):
+                driver.frida_build('/home/x/wt/p3-wso-i009')
 
     @property
     def IMPORT_MAP(self):
@@ -10520,10 +10617,7 @@ class DriverTest(unittest.TestCase):
         d = self._measured_driver(frida=True, frida_map=None, queue='import')
         d.kind = 'import'
         self.assertEqual(d.kind, 'import')
-        map_path = os.path.join(self.tmp, 'iwd2r.map')
-        with open(map_path, 'w') as f:
-            f.write(self.IMPORT_MAP)
-        d.frida_map = map_path
+        d.frida_build = self._frida_builder(self.IMPORT_MAP)[0]
         decomp = '\n## Decompiled (Ghidra)\n\n```c\nint %s(int a, int b)\n\n{\n  return g_x;\n}\n```\n'
         # 401000 equal (with an exemption to drop), 402000 different, 403000 never exercised
         with open(os.path.join(self.wt, 'docs', 'evidence', '401000.md'), 'w') as f:
@@ -10544,7 +10638,7 @@ class DriverTest(unittest.TestCase):
         os.makedirs(files)
         calls = []
 
-        def frida_run(batch_id, table, scenarios):
+        def frida_run(batch_id, table, scenarios, **kw):
             calls.append((batch_id, sorted(h['name'] for h in table['original']['hooks']),
                           list(scenarios)))
             out = {}
@@ -10593,7 +10687,7 @@ class DriverTest(unittest.TestCase):
     def test_driver_frida_phase_never_lowers_evidence_and_parks_different_rows(self):
         trace = TruthTest._trace
         d, batch = self._import_phase_driver()
-        d.frida_run = lambda b, table, scenarios: {sc: (
+        d.frida_run = lambda b, table, scenarios, **kw: {sc: (
             trace(('fn_401000', 7, 3), ('fn_402000', 7, 3)),
             trace(('fn_401000', 7, 3), ('fn_402000', 7, 4))) for sc in scenarios}
         # 401000 oracle and equal, 402000 replay and different, 403000 replay and unexercised
@@ -10620,7 +10714,7 @@ class DriverTest(unittest.TestCase):
     def test_driver_frida_phase_different_read_only_row_is_parked(self):
         trace = TruthTest._trace
         d, batch = self._import_phase_driver()
-        d.frida_run = lambda b, table, scenarios: {sc: (
+        d.frida_run = lambda b, table, scenarios, **kw: {sc: (
             trace(('fn_401000', 7, 3), ('fn_402000', 7, 3)),
             trace(('fn_401000', 7, 3), ('fn_402000', 7, 4))) for sc in scenarios}
         path = os.path.join(self.wt, 'docs', 'evidence', '402000.md')
@@ -14420,6 +14514,15 @@ class TruthTest(unittest.TestCase):
             truth.frida_run('b011', table, ['first_fight'], run=fake, root=root, clicks=1, timeout=77)
             c = fake.calls[0]
             self.assertEqual((c[c.index('--clicks') + 1], c[c.index('--timeout') + 1]), ('1', '77'))
+            # no build checkout: probe.py runs this checkout's build; with one,
+            # only ours runs it (the original side is the oracle's injector)
+            self.assertFalse(any('--build-checkout' in c for c in fake.calls))
+            fake.calls.clear()
+            truth.frida_run('b011', table, ['first_fight'], run=fake, root=root,
+                            build_checkout='/mnt/c/Users/u/iwd2r-build-p3-wso-i009')
+            self.assertEqual([c[c.index('--build-checkout') + 1] if '--build-checkout' in c else None
+                              for c in fake.calls],
+                             [None, '/mnt/c/Users/u/iwd2r-build-p3-wso-i009'])
 
     def test_frida_run_marks_exit2_side_not_measured(self):
         import tempfile

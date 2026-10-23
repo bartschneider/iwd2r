@@ -371,7 +371,15 @@ launches per attempt until `--new-attempt "<why>"`; and every merge into
   the oracle phase and never rewrites wave 1's scorecard. It runs the
   Frida phase (with `--frida`): all three scenarios (`world_entry`,
   `first_fight`, `walk_and_talk`), each through `probe.py run` once per
-  side. A row is measured equal only when `trace_diff compare` exits 0 over
+  side. Before it the driver builds our x86 exe from the batch worktree in
+  that worktree's own Windows checkout (`%USERPROFILE%\iwd2r-build-<worktree
+  name>`, `driver.frida_build`, compiler output in the batch's
+  `frida-build.log`), hooks at the RVAs of that build's map and runs that
+  exe (`probe.py run --build-checkout`), so the bodies measured are the
+  batch's; the tools are staged from the driver's checkout. A failed build
+  is a phase error: logged, every row `not measured`. `--frida-map MAP`
+  overrides the build with an existing one (the exe beside MAP), for hand
+  runs. A row is measured equal only when `trace_diff compare` exits 0 over
   the captured events and the sidecars' total hits for its hook match (the
   hooks cap what they log, so equal events alone do not prove equal
   frequency). The driver then rewrites that row's evidence front matter to

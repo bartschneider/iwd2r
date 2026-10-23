@@ -114,6 +114,12 @@ before spending a launch.
   RunScenario drives the same scenario in-engine. `--loaded-rva` points the
   `loaded` observation at `CScreenWorld::EngineActivated` (the default,
   0x6869C0, is the original's absolute address; ours needs the RVA).
+- `--build-checkout CHECKOUT` (ours only) runs the x86 build of another
+  Windows checkout: the driver's Frida phase builds each batch worktree in
+  its own checkout (`%USERPROFILE%\iwd2r-build-<worktree name>`) and passes
+  it here, with the hook table's RVAs from that build's map, so the bodies
+  under test are the batch's. The default is this checkout's build; the
+  sidecar tools are staged from this checkout either way.
 - `--clicks N` inserts N `click 400 300` actions (each followed by a wait)
   before the scenario's trailing `quit`, on a run-folder-local copy — the
   repo's scenarios/ tree is never written. A click is what drives

@@ -916,6 +916,37 @@ def _merge_base(worktree, base):
     return sha[:12] if sha else base
 
 
+X86_MAP_REL = 'build/windows-msvc-x86/RelWithDebInfo/iwd2r.map'
+
+
+def frida_build(worktree, log_path=None):
+    """Our x86 build of a batch worktree, for its Frida phase (spec B): the
+    worktree synced into its own Windows checkout (play.win_checkout:
+    %USERPROFILE%\\iwd2r-build-<worktree folder name>, never the driver's,
+    whatever IWD2R_WIN_CHECKOUT says) and built there with the x86 preset,
+    the compiler output in log_path.  Returns (checkout, map path): the map
+    beside the exe names the RVAs of the bodies under test, and probe.py
+    --build-checkout runs that exe.  Raises on any failure (play exits with
+    SystemExit)."""
+    play = _tool('play')
+    checkout = play.win_checkout(worktree, {})
+    play.sync_windows(root=worktree, checkout=checkout)
+    exe = play.build_windows_x86(checkout=checkout, log_path=log_path)
+    map_path = os.path.splitext(exe)[0] + '.map'
+    if not os.path.isfile(map_path):
+        raise RuntimeError('the x86 build left no %s' % map_path)
+    return checkout, map_path
+
+
+def _map_checkout(map_path):
+    """The Windows checkout whose x86 build wrote map_path (the --frida-map
+    override measures the exe beside it), or None when the map is not where
+    that build puts it."""
+    norm = os.path.normpath(os.path.abspath(map_path))
+    rel = os.path.normpath(X86_MAP_REL)
+    return norm[:-len(rel) - 1] if norm.endswith(os.sep + rel) else None
+
+
 def _write_trace_evidence(path, probe, orig_path, ours_path):
     """Rewrite one evidence file's front matter to `kind: trace` with the
     `trace_source:` of a measured Frida pair (truth.trace_source_line) and no
@@ -1555,7 +1586,7 @@ class Driver:
                  status_path, aoe_session=None, seed=DEFAULT_SEED, budget=None,
                  workers=1, *, push=None, send=None, dry_run=False, gate=True,
                  base='first', log=None, frida=False, frida_map=None,
-                 oracle_run=None, frida_run=None, pools=None,
+                 oracle_run=None, frida_run=None, frida_build=None, pools=None,
                  workers_by_pool=None, reviewers_by_pool=None, budgets=None,
                  queue='wave1', runner=None, clock=None, max_batches=None):
         wave = _tool('wave')
@@ -1617,6 +1648,8 @@ class Driver:
         self.frida_map = frida_map
         self.oracle_run = truth.run_oracle if oracle_run is None else oracle_run
         self.frida_run = truth.frida_run if frida_run is None else frida_run
+        # The per-batch x86 build the phase measures (spec B); injectable.
+        self.frida_build = globals()['frida_build'] if frida_build is None else frida_build
         self.next_batch = wave.next_batch
         self.recompare = wave.recompare
         self._recompared = False
@@ -2193,9 +2226,7 @@ class Driver:
             r for r in self._open_rows(batch) if key(r['address']) not in self._probe]
         if not rows:
             return []
-        if not self.frida_map or not os.path.isfile(self.frida_map):
-            self.log('%s: frida skipped: no --frida-map (our build\'s .map)' % batch_id)
-            return []
+        checkout, map_path, why = self._frida_target(batch_id, worktree)
         sigs = {}
         for r in rows:
             text, _err = wave._read_evidence(self.repo, batch['branch'], r['address'])
@@ -2204,19 +2235,26 @@ class Driver:
                 sigs[r['address']] = sig
         traces = {}
 
-        def run_frida(*args, **kw):
-            traces.update(self.frida_run(*args, **kw))
+        def run_frida(batch_id, table, scenarios):
+            # Ours runs the batch worktree's own build (the map's RVAs).
+            traces.update(self.frida_run(batch_id, table, scenarios,
+                                         build_checkout=checkout))
             return traces
-        try:
-            with open(self.frida_map, encoding='utf-8', errors='replace') as f:
-                map_text = f.read()
-            self._stage(batch_id, 'frida')
-            got = truth.frida_batch(batch_id, rows, sigs, map_text, run_frida=run_frida,
-                                    headers=truth._our_headers(worktree))
-            got = {key(a): v for a, v in got.items()}
-        except Exception as e:
-            self.log('%s: frida path skipped: %s' % (batch_id, _one_line(repr(e), 300)))
-            return []
+        if why:
+            # A phase error (the build failed): nothing measured, no crash.
+            self.log('%s: frida phase error: %s' % (batch_id, why))
+            got = {key(r['address']): ('not measured', why) for r in rows}
+        else:
+            try:
+                with open(map_path, encoding='utf-8', errors='replace') as f:
+                    map_text = f.read()
+                self._stage(batch_id, 'frida')
+                got = truth.frida_batch(batch_id, rows, sigs, map_text, run_frida=run_frida,
+                                        headers=truth._our_headers(worktree))
+                got = {key(a): v for a, v in got.items()}
+            except Exception as e:
+                self.log('%s: frida path skipped: %s' % (batch_id, _one_line(repr(e), 300)))
+                return []
         self._frida_got = {key(r['address']): got.get(key(r['address']), ('skipped', 'no result'))
                            for r in rows}
         sides = {key(a): s for a, (s, _c) in verdicts.items()}
@@ -2269,6 +2307,34 @@ class Driver:
         if written:
             self._commit_trace_evidence(batch_id, worktree, written)
         return findings
+
+    def _frida_target(self, batch_id, worktree):
+        """(checkout, map path, phase error or None): what the Frida phase
+        measures.  By default the batch worktree is built for x86 in its own
+        Windows checkout (self.frida_build), so the bodies under test are the
+        batch's and the map's RVAs are theirs; --frida-map overrides that
+        with an existing build (the exe beside the map), for hand runs.  A
+        failed build is a phase error, never a crash."""
+        if self.frida_map:
+            checkout = _map_checkout(self.frida_map)
+            if not os.path.isfile(self.frida_map):
+                return None, None, '--frida-map %s does not exist' % self.frida_map
+            if checkout is None:
+                return None, None, ('--frida-map %s is not where an x86 build writes its map '
+                                    '(<checkout>/%s)' % (self.frida_map, X86_MAP_REL))
+            self.log('%s: frida: --frida-map given: measuring the build in %s, not a build '
+                     'of %s' % (batch_id, checkout, worktree))
+            return checkout, self.frida_map, None
+        self._stage(batch_id, 'frida build')
+        log_path = os.path.join(self.driver_dir, batch_id, 'frida-build.log')
+        try:
+            os.makedirs(os.path.dirname(log_path), exist_ok=True)
+            checkout, map_path = self.frida_build(worktree, log_path=log_path)
+        except (Exception, SystemExit) as e:
+            return None, None, 'the x86 build of %s failed: %s (log %s)' % (
+                worktree, _one_line(str(e) or repr(e), 300), log_path)
+        self.log('%s: frida: x86 build of %s in %s' % (batch_id, worktree, checkout))
+        return checkout, map_path, None
 
     def _evidence_kind(self, worktree, address):
         """The `kind:` of a row's evidence file in the worktree, or None."""
@@ -3801,7 +3867,11 @@ def _parse(argv):
                    help='run the batched Frida differential path after the worker '
                         '(default: docs/wso/truth-calibration.json frida_default; '
                         'off when that file is missing)')
-    p.add_argument('--frida-map', help="our build's iwd2r.map, for the Frida hook table")
+    p.add_argument('--frida-map',
+                   help='override: measure an existing x86 build (the exe beside this '
+                        'iwd2r.map, at <checkout>/' + X86_MAP_REL + ') instead of '
+                        "building each batch's worktree (hand runs; the default builds "
+                        'the batch so the bodies under test are its own)')
     one = p.add_mutually_exclusive_group()
     one.add_argument('--dry-run', action='store_true',
                      help='one batch with a fake worker; no review, no close, '
