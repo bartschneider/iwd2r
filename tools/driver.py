@@ -694,7 +694,7 @@ def _split_unquoted(text, seps):
     return parts
 
 
-def _history_rewrite(args, covered=()):
+def _history_rewrite(args, covered=(), tracked=None):
     """True when the arguments of a `git` command (after the command word)
     rewrite or discard history or work: reset, rebase, revert, restore,
     clean, stash, filter-repo, push, update-ref, commit --amend, branch
@@ -703,7 +703,9 @@ def _history_rewrite(args, covered=()):
     argument that names a covered file, looks like a path or starts with a
     batch directory), branch -f/-M/-C and switch -C/--force-create.
     add, commit, switch, checkout -b / <branch> and the read-only
-    commands are not."""
+    commands are not.  `tracked(name)`, when given, says whether a name is a
+    file tracked in the worktree: one checkout argument naming one is a
+    path restore, not a branch switch."""
     rest = list(args)
     while rest and rest[0].startswith('-'):      # git -C dir / -c k=v / --x
         rest = rest[2:] if rest[0] in ('-C', '-c') else rest[1:]
@@ -740,11 +742,12 @@ def _history_rewrite(args, covered=()):
         return (a == '.' or a.startswith(('./', '../'))
                 or any(ch in a for ch in '*?[')
                 or a.split('/')[0] in _BATCH_DIRS
-                or any(a == c or a.endswith('/' + c) for c in covered))
+                or any(a == c or a.endswith('/' + c) for c in covered)
+                or bool(tracked and tracked(a)))
     return False
 
 
-def transcript_findings(transcript_path, covered_files):
+def transcript_findings(transcript_path, covered_files, tracked=None):
     """[(kind, problem, file)] for the forbidden tool calls in a worker's
     transcript.  kind 'wso' (a git command naming a wso/ ref; the pinned
     sha is allowed), 'launch' (a .wsb, WindowsSandbox or Start-Process
@@ -793,7 +796,7 @@ def transcript_findings(transcript_path, covered_files):
                                     '(%s): read the fork only at the pinned '
                                     'sha, `git show <sha>:<path>`'
                                     % _short(seg), None))
-                    if cw == 'git' and _history_rewrite(args, covered):
+                    if cw == 'git' and _history_rewrite(args, covered, tracked):
                         out.append(('history', 'history rewrite in a worker '
                                     '(%s): workers only add and commit'
                                     % _short(seg), None))
@@ -824,10 +827,10 @@ def transcript_findings(transcript_path, covered_files):
     return out
 
 
-def transcript_checks(transcript_path, covered_files):
+def transcript_checks(transcript_path, covered_files, tracked=None):
     """One problem per forbidden worker tool call (transcript_findings)."""
     return [text for _kind, text, _f in
-            transcript_findings(transcript_path, covered_files)]
+            transcript_findings(transcript_path, covered_files, tracked)]
 
 
 # The paths a batch may change (ruling R71): anything else on the branch is
@@ -951,8 +954,9 @@ def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
         for k, a in sorted(inside.items()):
             if k in changed:
                 problems.append('%s: listed under ## Undecided but its body '
-                                'changed against %s; restore our body and '
-                                'commit.' % (a, base))
+                                'changed against %s; restore our body (`git show %s:<path> > <path>`, '
+                                '`git rm <path>` when %s lacks the file) and '
+                                'commit.' % (a, base, base, base))
     for k, a in given.items():
         if k not in row_keys:
             problems.append('%s: verdict for an address outside this batch; '
@@ -997,9 +1001,10 @@ def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
     outside = sorted(p for p in changed if not _path_allowed(p))
     if outside:
         problems.append('changed outside the paths a batch may touch (%s): '
-                        '%s; revert them (git checkout %s -- <path>) and '
-                        'commit' % (', '.join(ALLOWED_PATHS),
-                                    ', '.join(outside), base))
+                        '%s; restore the base copy of each (`git show %s:<path> > '
+                        '<path>`, or `git rm <path>` when %s lacks the file) '
+                        'and commit' % (', '.join(ALLOWED_PATHS),
+                                        ', '.join(outside), base, base))
     steps = [
         (['python3', '-I', 'tests/test_tools.py'], 'tests/test_tools.py'),
         (['python3', '-I', 'tools/check_evidence.py', '--base', 'first'],
@@ -1207,7 +1212,7 @@ blocks, say so in one line.
 RESUME_PREAMBLE = """Resume: batch {id} {why}. This run takes the batch up again in
 the same worktree, on `{branch}`. The work done so far is on that branch:
 `git log {base}..{branch}`, and `git status` for anything not committed
-(a `{wip}` commit holds what a park saved). Build on it: do not redo
+(a `{wip}` commit, if one is still there, holds what a park saved). Build on it: do not redo
 finished work, and do not rewrite that history.{reset}
 
 Verdicts already recorded in the wave state:
@@ -1728,7 +1733,8 @@ class Driver:
         covered = sorted({r['file'] for r in batch.get('rows', [])
                           if r.get('file')})
         fatal = []
-        for kind, text, f in transcript_findings(res.transcript, covered):
+        for kind, text, f in transcript_findings(res.transcript, covered,
+                                              self._is_tracked):
             if kind == 'read':
                 line = 'transcript: whole read of %s' % f
                 if line not in lines:
@@ -2179,6 +2185,11 @@ class Driver:
         return subprocess.run(['git', '-C', self.repo, *args],
                               capture_output=True, text=True)
 
+    def _is_tracked(self, name):
+        """True when `name` is a file tracked in the driver's worktree."""
+        return self._git('ls-files', '--error-unmatch', '--', name
+                         ).returncode == 0
+
     def _commits(self, branch):
         """'<merge-base>..<tip> (n commits)' of the batch branch over base."""
         mb = self._git('merge-base', self.base, branch).stdout.strip()
@@ -2309,9 +2320,9 @@ class Driver:
         if wt is None:
             return 'no worktree has %s' % self.base
         top = os.path.realpath(wt)
-        paths = [self.state_path, self.report_path, self.probe_path]
-        if self._recompared:
-            paths.append(self.disagreements_path)   # recompare rewrote it
+        # disagreements.json too: add and diff --cached skip it unchanged
+        paths = [self.state_path, self.report_path, self.probe_path,
+                 self.disagreements_path]
         for path in paths:
             if not os.path.exists(path):
                 continue
@@ -2360,18 +2371,41 @@ class Driver:
             return None
         return tip
 
-    def _resume_preamble(self, batch_id, batch, why):
+    def _undo_wip(self, worktree, tip):
+        """`git reset --soft HEAD~1` of the driver's own WIP commit, made
+        in the batch worktree when that worktree's HEAD is `tip`: `tip`, or
+        None when nothing was undone."""
+        if not worktree or os.path.realpath(worktree) == os.path.realpath(
+                self.repo):
+            return None
+
+        def git(*args):
+            return subprocess.run(['git', '-C', worktree, *args],
+                                  capture_output=True, text=True)
+        if git('rev-parse', 'HEAD').stdout.strip() != tip:
+            return None
+        r = git('reset', '--soft', 'HEAD~1')
+        if r.returncode != 0:
+            self.log('WIP commit not undone: %s' % _one_line(
+                (r.stderr or '') + (r.stdout or '')))
+            return None
+        return tip
+
+    def _resume_preamble(self, batch_id, batch, why, worktree=None):
         key = _tool('wave')._addr_key
         recorded = sorted(batch.get('verdicts', {}).items(),
                           key=lambda kv: key(kv[0]))
         tip = self._wip_tip(batch_id, batch['branch'])
-        # Ruling R44: the one rewrite allowed, so an adopted fork body in
-        # the WIP commit can get its Imported-From: trailer.
+        # Ruling R44: the driver, not the worker, undoes its own WIP commit
+        # (a worker's `git reset` is a history exception), so an adopted fork
+        # body in it can get its Imported-From: trailer.
+        if tip is not None:
+            tip = self._undo_wip(worktree, tip)
         reset = '' if tip is None else (
-            ' The branch tip, %s, is the driver\'s own unpushed `%s` commit, '
-            'so you may `git reset --soft HEAD~1` once and commit that work '
-            'again with proper messages and its `Imported-From:` trailers; '
-            'rewrite nothing else.' % (tip[:8], WIP_MESSAGE))
+            ' The driver undid its own `%s` commit before resuming: the '
+            'previous work is staged in the worktree, no git command needed. '
+            'Commit it with proper messages and its `Imported-From:` '
+            'trailers.' % WIP_MESSAGE)
         return RESUME_PREAMBLE.format(
             id=batch_id, why=why, branch=batch['branch'], base=self.base,
             wip=WIP_MESSAGE, reset=reset, verdicts='\n'.join(
@@ -2459,7 +2493,8 @@ class Driver:
         if rc != 0:
             return self._exception(batch_id, 'brief', [brief.strip()])
         if resume:
-            brief = self._resume_preamble(batch_id, batch, resume) + brief
+            brief = self._resume_preamble(batch_id, batch, resume,
+                                          worktree) + brief
             self.log('%s: resumed (%s)' % (batch_id, resume))
         worker = (FakeWorker(dry_report(batch)) if self.dry_run
                   else self._worker_of(name))

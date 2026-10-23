@@ -241,9 +241,12 @@ a fork or neither verdict decided by a dump reading unless
 `--allow-dump RULING --ledger PATH` names a `Ruling <id>` line of that file;
 the driver rejects a worker whose transcript shows a git command naming a
 `wso/` ref, a whole-file read of a covered source file, a history rewrite
-(`reset`, `rebase`, `revert`, `restore`, `clean`, `stash`, `push`,
-`commit --amend`, `checkout -- <path>`, `branch -d`; workers only add and
-commit) or a launch outside
+(refused: `reset`, `rebase`, `revert`, `restore`, `clean`, any `stash`,
+`commit --amend`, `filter-repo`, `push`, `branch -d/-D/-f/-M/-C`,
+`checkout -B`, `switch -C`, `checkout -- <path>`, `checkout <sha> <path>`
+and a bare `git checkout <path>` of a file; allowed: `add`, `commit`,
+`status`, `diff`, `log`, `show`, `ls-tree`, `merge-base`, `rev-parse`,
+`blame`, `checkout -b`, `checkout <branch>`, `switch -c`) or a launch outside
 `tools/play.py` and `tools/gltrace.py`; those two launchers allow two
 launches per attempt until `--new-attempt "<why>"`; and every merge into
 `first` pulls first (`git pull --ff-only`) and fast-forwards.
@@ -471,10 +474,11 @@ closed without writing the ledger entry gets the entry and the push. Then
 each pool's parked batch (on that pool), and after them a batch left
 in `current` or `running` (the process died mid-batch), run again, each with its
 brief re-rendered under a `Resume:` preamble that lists the verdicts
-already recorded. The preamble forbids rewriting the branch, except that
-when its tip is the driver's own unpushed WIP commit the worker may
-`git reset --soft HEAD~1` once, to commit that work again with proper
-messages and `Imported-From:` trailers. `parked` clears when that batch
+already recorded. The preamble forbids rewriting the branch. When its tip is
+the driver's own unpushed WIP commit, the driver itself soft-resets it
+before resuming, so the previous work is staged in the worktree and the
+worker commits it again with proper messages and `Imported-From:` trailers
+without any git command. `parked` clears when that batch
 ends any other way. A batch whose worktree is gone (a directory removed
 by hand stays listed until `git worktree prune`) becomes its `worktree`
 exception, which also ends its park, and the run goes on.

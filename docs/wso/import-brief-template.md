@@ -64,9 +64,16 @@ Each bundle carries the function's decompile and its callers' decompiles; objdum
 8. **Never push, never write through a remote.** From a batch worktree,
    `git push` is wrong, and so is any `git fetch <remote>` with a refspec that
    writes a branch. The coordinator merges and pushes.
-9. **Never rewrite history.** No `git reset`, `rebase`, `revert`, `restore`,
-   `clean`, `stash`, `commit --amend`, `checkout -- <path>` or `branch -d`;
-   workers only add and commit. The driver stops a batch that does.
+9. **Never rewrite history.**
+   Refused: `git reset`, `rebase`, `revert`, `restore`, `clean`, any `stash`,
+   `commit --amend`, `filter-repo`, `push`, `branch -d/-D/-f/-M/-C`,
+   `checkout -B`, `switch -C`, `checkout -- <path>`, `checkout <sha> <path>`
+   and a bare `git checkout <path>` of a file. Allowed: `add`, `commit`,
+   `status`, `diff`, `log`, `show`, `ls-tree`, `merge-base`, `rev-parse`,
+   `blame`, `checkout -b`, `checkout <branch>`, `switch -c`. To undo a change
+   to a file, restore the base's copy with `git show <base>:<path> > <path>`
+   (`git rm <path>` when the base lacks it) and commit; workers only add and
+   commit. The driver stops a batch that does.
 
 ## Report back
 

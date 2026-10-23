@@ -21,6 +21,7 @@ import io
 import json
 import os
 import re
+import shlex
 import shutil
 import signal
 import struct
@@ -7272,9 +7273,18 @@ class ExportDecompilesTest(unittest.TestCase):
         _write(os.path.join(d, '401010.c'), '// decompilation failed: x\n')
         with contextlib.redirect_stdout(io.StringIO()) as buf:
             rc.append(export_decompiles.main(['--exports', self.exports]))
-        self.assertEqual(rc[1], 1)
+        # a failed decompile is listed, not an error
+        self.assertEqual(rc[1], 0)
         self.assertIn('failed: 401010: // decompilation failed: x',
                       buf.getvalue())
+        # only a requested address nobody reported makes it exit 1
+        os.remove(os.path.join(d, '401010.c'))
+        export_decompiles.mp.headless = lambda *a, **kw: types.SimpleNamespace(
+            returncode=0, stdout='', stderr='')
+        with contextlib.redirect_stdout(io.StringIO()) as buf:
+            rc.append(export_decompiles.main(['--exports', self.exports]))
+        self.assertEqual(rc[2], 1)
+        self.assertIn('1 not reported', buf.getvalue())
 
     def test_export_decompiles_splits_repeated_names(self):
         _write(os.path.join(self.exports, 'functions.tsv'),
@@ -10678,9 +10688,16 @@ class DriverTest(unittest.TestCase):
         # The resume may undo only that WIP commit (R44): its own, unpushed.
         wip = self._rev('p3/wso-b011')
         self.assertEqual(status['batches']['b011']['wip'], wip)
-        preamble = d._resume_preamble('b011', self._state(), 'was parked')
-        self.assertIn('The branch tip, %s, is the driver\'s own unpushed' % wip[:8], preamble)
-        self.assertIn('`git reset --soft HEAD~1` once', preamble)
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            preamble = d._resume_preamble('b011', self._state(), 'was parked',
+                                          self.wt)
+        # the driver undid its own WIP commit; the work is staged
+        self.assertNotIn('git reset', preamble)
+        self.assertIn('staged in the worktree', preamble)
+        self.assertEqual(self._rev('p3/wso-b011'), tip)
+        staged = self.git('diff', '--cached', '--name-only', cwd=self.wt).stdout.split()
+        self.assertEqual(sorted(staged), ['docs/evidence/401000.md', 'scratch.txt'])
+        self.git('reset', '-q', '--hard', wip, cwd=self.wt)    # back to the park
         # A clean worktree parks without a commit.
         d.worker = _SeqWorker('', rate_limited=True)
         with mock.patch.dict(os.environ, self.GIT_ENV):
@@ -11634,9 +11651,51 @@ class DriverTest(unittest.TestCase):
                     {'type': 'tool_use', 'id': 't%d' % i, 'name': name, 'input': inp}]}}) + '\n')
         return path
 
-    def _bash(self, cmd):
+    def _bash(self, cmd, tracked=None):
         return driver.transcript_checks(self._tcalls(('Bash', {'command': cmd})),
-                                        ['src/A.cpp'])
+                                        ['src/A.cpp'], tracked)
+
+    def test_transcript_history_refuses_a_checkout_of_a_tracked_root_file(self):
+        tracked = lambda n: n == 'CMakeLists.txt'
+        probs = self._bash('git checkout CMakeLists.txt', tracked)
+        self.assertEqual(len(probs), 1)
+        self.assertIn('history rewrite in a worker', probs[0])
+        self.assertEqual(self._bash('git checkout feature', tracked), [])
+        self.assertEqual(self._bash('git checkout CMakeLists.txt'), [])  # no lookup
+        # the driver's own lookup goes through git ls-files
+        d = driver.Driver.__new__(driver.Driver)
+        d.repo = ROOT
+        self.assertTrue(d._is_tracked('tests/test_tools.py'))
+        self.assertFalse(d._is_tracked('no-such-file.zzz'))
+
+    def test_git_commands_quoted_to_workers_obey_the_history_rule(self):
+        import ast
+        with open(os.path.join(ROOT, 'tools', 'driver.py')) as f:
+            tree = ast.parse(f.read())
+        docs = set()
+        for n in ast.walk(tree):
+            if isinstance(n, (ast.Module, ast.ClassDef, ast.FunctionDef)) \
+                    and n.body and isinstance(n.body[0], ast.Expr) \
+                    and isinstance(n.body[0].value, ast.Constant):
+                docs.add(id(n.body[0].value))
+        quoted = []
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Constant) and isinstance(n.value, str) \
+                    and id(n) not in docs:
+                quoted += re.findall(r'`(git [^`]*)`', n.value)
+            elif isinstance(n, ast.JoinedStr):
+                pass
+        # the fix-round, resume and check texts, rendered
+        quoted += re.findall(r'`(git [^`]*)`', driver.FIX_PROMPT + driver.RESUME_PREAMBLE
+                             + driver.REVIEW_BRIEF)
+        self.assertTrue(any(q.startswith('git show') for q in quoted), quoted)
+        self.assertTrue(any(q.startswith('git rm') for q in quoted), quoted)
+        for q in quoted:
+            q = re.sub(r'<[^>]*>|\{[^}]*\}|%s', 'x', q.split(' > ')[0])
+            args = shlex.split(q)[1:]
+            self.assertFalse(driver._history_rewrite(args, ['src/A.cpp']), q)
+        # and the checker notices a forbidden quote
+        self.assertTrue(driver._history_rewrite(['checkout', 'first', '--', 'x']))
 
     def test_transcript_rejects_wso_ref(self):
         for cmd in ('git show wso/main:src/A.cpp', 'git show wso/x', 'git diff wso/main -- src',
@@ -12239,12 +12298,14 @@ class DriverTest(unittest.TestCase):
     def test_commit_state_stages_disagreements_after_a_recompare(self):
         d = self._undecided_driver('x')
         _write(d.probe_path, '[]\n')
-        _write(d.disagreements_path, '[]\n')
+        _write(d.disagreements_path, '[{"address": "0x1"}]\n')
+        self.assertFalse(getattr(d, '_recompared', False))
         with mock.patch.dict(os.environ, self.GIT_ENV):
             d._commit_state('b011')
         names = self.git('show', '--format=', '--name-only', 'first').stdout.split()
-        self.assertEqual(names, ['docs/wso/probe-list.json'])
-        _write(d.disagreements_path, '[{"address": "0x1"}]\n')
+        self.assertEqual(sorted(names), ['docs/wso/disagreements.json',
+                                         'docs/wso/probe-list.json'])
+        _write(d.disagreements_path, '[{"address": "0x2"}]\n')
         d._recompared = True
         with mock.patch.dict(os.environ, self.GIT_ENV):
             d._commit_state('b011')

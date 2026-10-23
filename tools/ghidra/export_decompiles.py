@@ -12,7 +12,8 @@ writes <name>.c, so a chunk never holds two functions of one name (the
 repeats go to a later run in the same chunk); files are renamed to ADDR.c.
 A function Ghidra could not decompile gets a file whose first line is
 "// decompilation failed"; a function it did not report at all is listed in
-the log and retried by the next run.
+the log (exit 1) and retried by the next run; failed ones are listed with
+exit 0.
 
 Ghidra is memory-hungry; run it as
     systemd-run --user --scope -q -p MemoryMax=8G -p MemorySwapMax=0 -- \\
@@ -196,7 +197,7 @@ def main(argv=None):
         print(f'not reported: {addr:X}')
     for addr, line in failed:
         print(f'failed: {addr:X}: {line}')
-    return 1 if missing or failed else 0
+    return 1 if missing else 0
 
 
 if __name__ == '__main__':
