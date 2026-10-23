@@ -8409,6 +8409,32 @@ class TriageTest(unittest.TestCase):
         self.assertNotEqual(triage.normalize('void f(){p.hp=1;}', self.TYPES),
                             triage.normalize('void f(){p.mp=1;}', self.TYPES))
 
+    def test_triage_rows_uses_injected_show(self):
+        files = {('F', 'src/A.cpp'): '// 0x401000\nint f(int a){return a+1;}\n',
+                 ('O', 'src/A.cpp'): '// 0x401000\nint f(int b){return b+1;}\n'}
+        rows = [{'file': 'src/A.cpp', 'name': 'f', 'address': '0x401000',
+                 'category': 'both_changed_differ', 'their_len': 1, 'our_len': 1},
+                {'file': 'src/A.cpp', 'name': 'g', 'address': '0x402000',
+                 'category': 'same', 'their_len': 1, 'our_len': 1}]
+        out = triage.triage_rows(rows, 'F', 'O', show=lambda ref, p: files[(ref, p)],
+                                 type_names=frozenset({'int'}))
+        self.assertEqual([(r['address'], r['class']) for r in out], [('0x401000', 'rename-only')])
+
+    def test_triage_rows_missing_function_is_ambiguous(self):
+        rows = [{'file': 'src/A.cpp', 'name': 'f', 'address': '0x401000',
+                 'category': 'both_changed_differ', 'their_len': 1, 'our_len': 1}]
+        out = triage.triage_rows(rows, 'F', 'O', show=lambda ref, p: 'int g(){return 0;}',
+                                 type_names=frozenset())
+        self.assertEqual(out[0]['class'], 'ambiguous')
+        self.assertIn('not found', out[0]['reason'])
+
+    def test_load_type_names_reads_class_and_struct(self):
+        src = {'src/a.h': 'class CPoint;\n// struct Hidden {}\nstruct CRect { int x; };\n',
+               'src/b.h': 'typedef class CFoo CFoo;'}
+        names = triage.load_type_names(lambda ref, p: src[p], 'O',
+                                       list_headers=lambda ref: sorted(src))
+        self.assertEqual(names, frozenset({'CPoint', 'CRect', 'CFoo'}))
+
 
 if __name__ == '__main__':
     unittest.main()

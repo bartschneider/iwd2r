@@ -3,9 +3,14 @@
 
 The mechanical cases (a rename, a changed signature, a stub on one side)
 need no agent; everything else is 'ambiguous' and goes to a worker."""
+import argparse
+import collections
 import importlib.util
+import json
 import os
 import re
+import subprocess
+import tempfile
 
 _here = os.path.dirname(os.path.abspath(__file__))
 _spec = importlib.util.spec_from_file_location('xrec', os.path.join(_here, 'xrec.py'))
@@ -125,3 +130,123 @@ def classify(theirs, ours, type_names):
             and normalize(tsig, type_names) != normalize(osig, type_names)):
         return 'signature-only', 'bodies match under the signature parameters; signatures differ'
     return 'ambiguous', 'the bodies differ beyond identifier names'
+
+
+# like xrec.sig, but a plain function name also matches
+SIG = re.compile(r'^(?:[A-Za-z_][\w:<>,*&\s]*?\s+)?([A-Za-z_]\w*(?:::[~A-Za-z_]\w*)*'
+                 r'|[A-Za-z_]\w*::operator\S*)\s*\([^;{]*\)\s*(?:const)?\s*\{', re.M)
+TYPE_DECL = re.compile(r'\b(?:class|struct)\s+([A-Za-z_]\w*)')
+
+
+def extract(text):
+    """name -> (address, full text of signature and body, whitespace kept,
+    comments blanked). Overloads collapse to the last."""
+    masked = xrec.blank_comments(text)
+    out = {}
+    for m in SIG.finditer(masked):
+        if m.group(1) in KEYWORDS:
+            continue
+        i = m.end() - 1
+        depth, j = 0, i
+        while j < len(masked):
+            if masked[j] == '{':
+                depth += 1
+            elif masked[j] == '}':
+                depth -= 1
+                if depth == 0:
+                    break
+            j += 1
+        out[m.group(1)] = (xrec.signature_addr(text, masked, m), masked[m.start():j + 1])
+    return out
+
+
+def _headers(ref):
+    r = subprocess.run(['git', 'ls-tree', '-r', '--name-only', ref, 'src'],
+                       capture_output=True, text=True)
+    return [f for f in r.stdout.splitlines() if f.endswith('.h')]
+
+
+def load_type_names(show, ours_ref, list_headers=_headers):
+    """class X / struct X names declared in src/*.h at ours_ref."""
+    names = set()
+    for path in list_headers(ours_ref):
+        names.update(TYPE_DECL.findall(xrec.blank_comments(show(ours_ref, path))))
+    return frozenset(names)
+
+
+def _find(table, name, address):
+    if name in table:
+        return table[name][1]
+    if address:
+        for addr, text in table.values():
+            if addr and addr.lower() == address.lower():
+                return text
+    return None
+
+
+def triage_rows(rows, fork_ref, ours_ref, show=xrec.show, type_names=None):
+    """Entries {address, file, name, class, reason} for every
+    both_changed_differ row."""
+    if type_names is None:
+        type_names = load_type_names(show, ours_ref)
+    by_file = collections.OrderedDict()
+    for r in rows:
+        if r['category'] == 'both_changed_differ':
+            by_file.setdefault(r['file'], []).append(r)
+    out = []
+    for path, group in by_file.items():
+        theirs, ours = extract(show(fork_ref, path)), extract(show(ours_ref, path))
+        for r in group:
+            t, o = _find(theirs, r['name'], r['address']), _find(ours, r['name'], r['address'])
+            if t is None or o is None:
+                cls, why = 'ambiguous', 'function not found in %s' % (
+                    'both bodies' if t is None and o is None else
+                    'the fork' if t is None else 'our tree')
+            else:
+                cls, why = classify(t, o, type_names)
+            out.append({'address': r['address'], 'file': path, 'name': r['name'],
+                        'class': cls, 'reason': why})
+    return out
+
+
+def _write_atomic(path, data):
+    d = os.path.dirname(os.path.abspath(path)) or '.'
+    os.makedirs(d, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=d, prefix='.triage-', suffix='.json')
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2, sort_keys=True)
+            f.write('\n')
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def main(argv=None):
+    root = os.path.dirname(_here)
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument('--fork-ref')
+    ap.add_argument('--ours-ref', default='first')
+    ap.add_argument('--disagreements', default=os.path.join(root, 'docs/wso/disagreements.json'))
+    ap.add_argument('--out', default=os.path.join(root, 'docs/wso/triage.json'))
+    a = ap.parse_args(argv)
+    fork = a.fork_ref
+    if not fork:
+        with open(os.path.join(root, 'docs/wso/wave-state.json'), encoding='utf-8') as f:
+            fork = json.load(f)['fork_base']
+    with open(a.disagreements, encoding='utf-8') as f:
+        rows = json.load(f)
+    out = triage_rows(rows, fork, a.ours_ref)
+    _write_atomic(a.out, out)
+    counts = collections.Counter(r['class'] for r in out)
+    for c in CLASSES:
+        print('%-15s %d' % (c, counts.get(c, 0)))
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
