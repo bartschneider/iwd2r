@@ -1555,8 +1555,8 @@ def run(args):
         return 0
     if not desktop_allowed(os.environ):
         raise SystemExit('gltrace: this run opens the game on the desktop; '
-                         'set %s=1 to allow it (the user must be at the PC)'
-                         % DESKTOP_OK)
+                         'desktop runs need a person at the PC (%s is set '
+                         'only by them)' % DESKTOP_OK)
     now = datetime.datetime.now()
     run_dir = make_run_dir(now)
     wrapper = find_wrapper(args.apitrace)

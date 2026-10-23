@@ -256,7 +256,12 @@ launches per attempt until `--new-attempt "<why>"`; and every merge into
   group is killed and the batch is parked with the reason `timeout`, like a
   429 park (the run exits 3 once the other pools are done). A worker's
   subagent transcripts (`<session>/subagents/*.jsonl`) are scanned and
-  counted too.
+  counted too. Stopping the driver (SIGTERM or SIGINT) stops its workers: the
+  handler kills every live worker and reviewer process group, the run exits 1
+  through its normal cleanup (locks released), and the batches in flight stay
+  in `running` for the next run to resume. Workers get
+  `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`, and a Bash command that sets
+  `IWD2R_DESKTOP_OK` is a terminal `transcript` exception.
 - The mechanical checks (the worker's fix round) also fail on: uncommitted
   paths in the batch worktree ("commit or delete: ..."; the driver no longer
   commits them for you), a path changed against `first` outside `src/`,

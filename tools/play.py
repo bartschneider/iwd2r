@@ -909,9 +909,9 @@ def desktop_refusal(headless, env):
     IWD2R_DESKTOP_OK=1."""
     if headless or env.get(DESKTOP_OK) == '1':
         return None
-    return ('play: this run would open a window on the desktop; set %s=1 '
-            'to allow it, or use --headless, --vm linux or --vm windows'
-            % DESKTOP_OK)
+    return ('play: this run would open a window on the desktop; desktop runs '
+            'need a person at the PC (%s is set only by them); use '
+            '--headless, --vm linux or --vm windows' % DESKTOP_OK)
 
 
 def main(argv):

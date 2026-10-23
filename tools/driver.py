@@ -311,8 +311,11 @@ def worker_env(environ, glm):
     """environ without the variables that tie a worker to the launching
     session; for a wrapper other than claude-glm (glm False) also without
     the GLM wrapper's endpoint, token and model settings.  Nothing is
-    added."""
+    added but CLAUDE_CODE_DISABLE_AUTO_MEMORY=1."""
     env = dict(environ)
+    # Worktrees share the project's auto-memory folder; a worker must not
+    # write to it (ruling R72).
+    env['CLAUDE_CODE_DISABLE_AUTO_MEMORY'] = '1'
     for k in list(env):
         drop = (k in SESSION_VARS or k.startswith(SESSION_PREFIXES)
                 or k.startswith(AOE_PREFIX))
@@ -327,6 +330,28 @@ def worker_env(environ, glm):
 DEFAULT_TIMEOUT = 10800   # seconds a worker or reviewer run may take (R71)
 
 
+# Process groups of the live worker and reviewer runs (pgid = child pid), so
+# that stopping the driver stops them (ruling R72).
+_LIVE = set()
+_LIVE_LOCK = threading.Lock()
+
+
+class _Stop(BaseException):
+    """The driver was told to stop (SIGTERM, SIGINT)."""
+
+
+def kill_live_groups():
+    """SIGKILL every live worker process group; the pgids killed."""
+    with _LIVE_LOCK:
+        groups = sorted(_LIVE)
+    for pgid in groups:
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except OSError:
+            pass
+    return groups
+
+
 def _run_group(argv, timeout=None, **kw):
     """subprocess.run in a session of its own, so that a timeout kills the
     whole process group (the worker's children too), then raises
@@ -335,6 +360,8 @@ def _run_group(argv, timeout=None, **kw):
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             **{k: v for k, v in kw.items()
                                if k not in ('capture_output',)})
+    with _LIVE_LOCK:
+        _LIVE.add(proc.pid)
     try:
         out, err = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
@@ -351,6 +378,9 @@ def _run_group(argv, timeout=None, **kw):
             pass
         proc.wait()
         raise
+    finally:
+        with _LIVE_LOCK:
+            _LIVE.discard(proc.pid)
     return subprocess.CompletedProcess(argv, proc.returncode, out, err)
 
 
@@ -480,6 +510,11 @@ _SEGMENT = re.compile(r'&&|\|\||;|\n')
 _WSO_REF = re.compile(r"(?:(?<=[\s'\"=:.^~@])|(?<=remotes/)|(?<=heads/))wso/")
 _SED_SPAN = re.compile(r"(\d+),(\d+)p")
 _LAUNCH = re.compile(r'\.wsb\b|WindowsSandbox|Start-Process', re.I)
+# A command that sets the desktop override: an assignment (leading word,
+# export, env), os.environ or putenv in python -c, setenv, `set`.
+_DESKTOP_SET = re.compile(
+    r'IWD2R_DESKTOP_OK\s*='
+    r'|(?:os\.environ|putenv|setenv|export|\$env:|\bset\b)[^;\n]*IWD2R_DESKTOP_OK')
 _LAUNCH_SHELLS = ('cmd', 'powershell', 'pwsh', 'explorer', 'wsl', 'bash', 'sh')
 
 
@@ -569,6 +604,10 @@ def transcript_findings(transcript_path, covered_files):
                      'the rules about tool calls cannot be checked'
                      % (path, e), None)]
     for name, inp in calls:
+        if name == 'Bash' and _DESKTOP_SET.search(str(inp.get('command', ''))):
+            out.append(('launch', 'sets IWD2R_DESKTOP_OK (%s): only a person '
+                        'at the PC sets it' % _short(inp.get('command', '')),
+                        None))
         if name == 'Read':
             fp = str(inp.get('file_path', ''))
             hit = [c for c in covered if fp == c or fp.endswith('/' + c)]
@@ -1275,6 +1314,7 @@ class Driver:
         self._threads = []
         self._pool_batch_credits = {p.name: [] for p in self.pools}
         self._imported = {}
+        self._stopping = False     # SIGTERM or SIGINT arrived (ruling R72)
         self._retry_stage = {}     # cleared batch id -> the stage it failed at
         self._halt = False
         self._batch_credits = []   # this run's batches: credits or None
@@ -1397,6 +1437,8 @@ class Driver:
             res = worker.run(brief, cwd)
         except OSError as e:
             raise _launch_failed(label, cwd, e) from None
+        if self._stopping:     # killed with its driver: nothing to record
+            raise _Stop()
         self._runs.append(res.credits)
         if label.startswith('worker'):
             self._worker_ran.append(worker_ran(res))
@@ -2761,13 +2803,31 @@ class Driver:
             self.log('another driver is running (pid %s) on %s; this one '
                      'stops' % (holder, self.status_path))
             return 1
+        self._stopping = False
+        previous = {}
+
+        def stop(signum, _frame):
+            self._stopping = True
+            kill_live_groups()
+            raise _Stop()
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            try:
+                previous[sig] = signal.signal(sig, stop)
+            except ValueError:     # not the main thread: no handler
+                pass
         try:
             return self._loop()
+        except _Stop:
+            self.log('driver stopped by a signal: its workers are killed; '
+                     'the batches in flight stay recorded for resume')
+            return 1
         except StatusError as e:
             self.log('driver stopped: the status file cannot be read: %s. '
                      'Repair it (one JSON object), then run again.' % e)
             return 1
         finally:
+            for sig, handler in previous.items():
+                signal.signal(sig, handler)
             try:
                 os.ftruncate(fd, 0)
             except OSError:

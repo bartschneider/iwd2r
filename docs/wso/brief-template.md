@@ -70,7 +70,8 @@ Context bundles (one per row you must decide; read these before the source):
     `python3 -I tools/gen_map.py` and commit `docs/MAP.md`; the gate runs
     `gen_map.py --check`.
 12. **Nothing on the desktop.** Never use `--host` with `oracle.py`, and never
-    launch the game on the desktop.
+    launch the game on the desktop. Never set IWD2R_DESKTOP_OK; only a
+    person at the PC does.
 
 ## Report back
 

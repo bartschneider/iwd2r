@@ -2958,9 +2958,9 @@ def main(argv=None):
     cross.set_defaults(run=cmd_replay_crossload)
     args = ap.parse_args(argv)
     if getattr(args, 'host', False) and os.environ.get(DESKTOP_OK) != '1':
-        ap.error('--host would open the original on the desktop; set %s=1 to '
-                 'allow it (a person at the PC), or record in Windows '
-                 'Sandbox, the default' % DESKTOP_OK)
+        ap.error('--host would open the original on the desktop; desktop runs '
+                 'need a person at the PC (%s is set only by them); record in '
+                 'Windows Sandbox, the default' % DESKTOP_OK)
     if getattr(args, 'new_attempt', None) is not None:
         import attempt
         import winsandbox

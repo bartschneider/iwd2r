@@ -11151,12 +11151,14 @@ class DriverTest(unittest.TestCase):
             w = driver.HeadlessWorker(model='sonnet', wrapper='claude')
             _, e = w.command('B')
             self.assertEqual(sorted(e), ['ANTHROPIC_API_KEY',
+                                         'CLAUDE_CODE_DISABLE_AUTO_MEMORY',
                                          'ENABLE_CLAUDEAI_MCP_SERVERS', 'HOME', 'PATH'])
             self.assertEqual(w.config_dir, os.path.expanduser('~/.claude'))
         with mock.patch.dict(os.environ, {'CLAUDE_CONFIG_DIR': '/own/cfg', 'X': '1'}, clear=True):
             w = driver.HeadlessWorker(model='sonnet', wrapper='claude')
             _, e = w.command('B')
             self.assertEqual(e, {'CLAUDE_CONFIG_DIR': '/own/cfg', 'X': '1',
+                                 'CLAUDE_CODE_DISABLE_AUTO_MEMORY': '1',
                                  'ENABLE_CLAUDEAI_MCP_SERVERS': '0'})
             self.assertEqual(w.config_dir, '/own/cfg')
 
@@ -11169,7 +11171,7 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(glm['CLAUDE_CODE_AUTO_COMPACT_WINDOW'], '400000')
         self.assertEqual(glm['API_TIMEOUT_MS'], '3000000')
         plain = driver.worker_env(env, False)
-        self.assertEqual(plain, {'PATH': '/bin'})
+        self.assertEqual(plain, {'PATH': '/bin', 'CLAUDE_CODE_DISABLE_AUTO_MEMORY': '1'})
 
     # -- the worker's transcript (Task 16) --------------------------------
 
@@ -11621,7 +11623,8 @@ class DriverTest(unittest.TestCase):
                'AOE_AGENT_PID': '1', 'AOE_PROFILE': 'x', 'AOE_SERVE_INSTANCE_ID': 's',
                'AOE_FUTURE_THING': 'f', 'NOT_AOE': 'keep'}
         for glm in (True, False):
-            self.assertEqual(driver.worker_env(env, glm), {'PATH': '/bin', 'NOT_AOE': 'keep'})
+            self.assertEqual(driver.worker_env(env, glm), {
+                'PATH': '/bin', 'NOT_AOE': 'keep', 'CLAUDE_CODE_DISABLE_AUTO_MEMORY': '1'})
         with mock.patch.dict(os.environ, env, clear=True):
             for wrapper in ('claude-glm', 'claude'):
                 _, e = driver.HeadlessWorker(wrapper=wrapper).command('B')
@@ -11936,6 +11939,66 @@ class DriverTest(unittest.TestCase):
                        '-p MemorySwapMax=0 --', 'python3 -I tools/gen_map.py',
                        '--host', 'desktop'):
             self.assertIn(needle, text)
+
+    def test_setting_the_desktop_override_is_a_launch_finding(self):
+        setters = ['IWD2R_DESKTOP_OK=1 python3 -I tools/oracle.py replay record --host',
+                   'export IWD2R_DESKTOP_OK=1', 'env IWD2R_DESKTOP_OK=1 python3 x.py',
+                   "python3 -c \"import os; os.environ['IWD2R_DESKTOP_OK']='1'\"",
+                   'cd x && export IWD2R_DESKTOP_OK', 'set IWD2R_DESKTOP_OK=1']
+        for cmd in setters:
+            found = driver.transcript_findings(
+                self._tcalls(('Bash', {'command': cmd})), [])
+            self.assertEqual([k for k, _t, _f in found].count('launch'), 1, cmd)
+        for cmd in ('grep -n DESKTOP_OK tools/play.py', 'ls', 'echo $IWD2R_DESKTOP_OK'):
+            self.assertEqual(driver.transcript_findings(
+                self._tcalls(('Bash', {'command': cmd})), []), [], cmd)
+        self.assertIn('Never set IWD2R_DESKTOP_OK', open(os.path.join(
+            ROOT, 'docs', 'wso', 'brief-template.md')).read())
+
+    def test_the_desktop_refusals_say_a_person_must_be_at_the_pc(self):
+        play = load_tool('play')
+        self.assertIn('need a person at the PC (IWD2R_DESKTOP_OK is set only by them)',
+                      play.desktop_refusal(False, {}))
+        self.assertIsNone(play.desktop_refusal(False, {'IWD2R_DESKTOP_OK': '1'}))
+        oracle = load_tool('oracle')
+        err = io.StringIO()
+        env = {k: v for k, v in os.environ.items() if k != 'IWD2R_DESKTOP_OK'}
+        with mock.patch.dict(os.environ, env, clear=True), \
+                contextlib.redirect_stderr(err), self.assertRaises(SystemExit):
+            oracle.main(['replay', 'compare', 'chargen_replay', '--host'])
+        self.assertIn('need a person at the PC (IWD2R_DESKTOP_OK is set only by them)',
+                      ' '.join(err.getvalue().split()))
+        with open(os.path.join(ROOT, 'tools', 'gltrace.py')) as f:
+            text = ' '.join(f.read().split())
+        self.assertIn("'desktop runs need a person at the PC (%s is set ' 'only by them)'", text)
+
+    def test_sigterm_kills_the_workers_and_leaves_the_batch_running(self):
+        sleeper = subprocess.Popen(['sleep', '60'], start_new_session=True)
+        self.addCleanup(lambda: sleeper.poll() is None and sleeper.kill())
+        w = self._BatchWorker(credits=0.0)
+
+        def run(brief, cwd):
+            driver._LIVE.add(sleeper.pid)
+            os.kill(os.getpid(), signal.SIGTERM)
+            time.sleep(5)                        # the handler raises before this ends
+            self.fail('not stopped')
+        w.run = run
+        d = self._pool_driver(self._two_pools()[:1], {'a': w}, ids=('b011',))
+        before = (signal.getsignal(signal.SIGTERM), signal.getsignal(signal.SIGINT))
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 1)
+        driver._LIVE.discard(sleeper.pid)
+        self.assertIsNotNone(sleeper.wait(timeout=5))
+        self.assertEqual((signal.getsignal(signal.SIGTERM), signal.getsignal(signal.SIGINT)), before)
+        status = self._status(d)
+        self.assertIn('b011', status['running'])
+        self.assertEqual(status['exceptions'], {})
+        self.assertEqual(self._state_of(d, 'b011')['status'], 'assigned')
+        # The run lock was released: another run starts (and resumes b011).
+        d.worker = d.workers_by_pool['a'] = self._BatchWorker(credits=0.0)
+        self.pending[:] = []
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 0)
 
     def test_a_dry_run_never_commits_the_state(self):
         d = self._pool_driver(self._two_pools()[:1], {'a': None}, ids=('b011',))
