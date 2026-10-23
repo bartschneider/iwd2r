@@ -68,6 +68,13 @@ def parse_report(text):
         cand = MARKER_RE.sub('', line, count=1).strip().strip('`').strip()
         m = VERDICT_RE.match(cand)
         if not m:
+            # Prose that names no address and does not try to be a verdict
+            # ("All 20 rows are decided; there is no ## Undecided section.")
+            # decides nothing and is skipped: a mangled verdict line always
+            # carries its address or the word verdict, and those still fail.
+            if not re.search(r'0[xX][0-9a-fA-F]+', cand) and \
+                    not cand.lower().startswith('verdict'):
+                continue
             raise ReportError('line %d: malformed verdict line: %r' % (n, raw))
         addr = '0x%X' % int(m.group(1), 16)
         side, case = m.group(2).lower(), m.group(3)
@@ -1365,13 +1372,8 @@ BLOCKING_RE = re.compile(r'^(?:[-*]|\d+\.)?\s*[*_`]*BLOCKING[*_`]*:')
 FIX_PROMPT = """# Fix round for batch {id}
 
 The driver's {stage} found the problems below in your work on `{branch}`
-(this worktree). Fix every one, commit, and write your report again: the
-full `## Verdicts` section, one line for every row you decide, not only
-the rows you fixed. `## Verdicts` holds verdict lines only; put notes under
-`## Notes`. A row whose reading is fork or neither, with no probe, replay
-or trace case you can run to decide it, gets no verdict line: keep our
-body and list it under `## Undecided` as `undecided <0xADDR> <fork|neither>
-<one-line reason>`. Never write `ours` for such a row.
+(this worktree). Fix every one, commit, and write your report again.
+{report_rule}
 
 {problems}
 
@@ -1380,6 +1382,33 @@ The original brief follows.
 ---
 
 {brief}"""
+
+
+FIX_REPORT_RULES = {
+    'verdicts': ("Write the full `## Verdicts` section, one line for every row you "
+                 "decide, not only the rows you fixed. `## Verdicts` holds verdict lines "
+                 "only; put notes under `## Notes`. A row whose reading is fork or neither, "
+                 "with no probe, replay or trace case you can run to decide it, gets no "
+                 "verdict line: keep our body and list it under `## Undecided` as "
+                 "`undecided <0xADDR> <fork|neither> <one-line reason>`. Never write "
+                 "`ours` for such a row."),
+    'import': ("This is an import batch: do not write a `## Verdicts` section at all, "
+               "not even an empty one or a placeholder line. Report as the brief says: "
+               "`## Imported` with one `imported <0xADDR> <evidence kind>` line per "
+               "function, then the commits you made, the evidence files you wrote and "
+               "anything you could not import (the rows you parked, with their parked "
+               "files)."),
+}
+
+
+def fix_prompt(batch_id, stage, branch, brief, problems, kind='verdicts'):
+    """The fix-round prompt: the problems, the report rule for the batch's
+    kind (a verdicts batch rewrites ## Verdicts; an import batch has none),
+    then the original brief."""
+    return FIX_PROMPT.format(
+        id=batch_id, stage=stage, branch=branch, brief=brief,
+        report_rule=FIX_REPORT_RULES['import' if kind == 'import' else 'verdicts'],
+        problems='\n'.join('- ' + p for p in problems))
 
 REVIEW_BRIEF = """# Review of wave-1 batch {id}
 
@@ -1724,6 +1753,7 @@ class Driver:
         self.calibration_path = os.path.join(docs, 'truth-calibration.json')
         truth = _tool('truth')
         self.frida = frida
+        self.exports_dir = None
         self.frida_map = frida_map
         self.oracle_run = truth.run_oracle if oracle_run is None else oracle_run
         self.frida_run = truth.frida_run if frida_run is None else frida_run
@@ -2332,6 +2362,11 @@ class Driver:
         for r in rows:
             text, _err = wave._read_evidence(self.repo, batch['branch'], r['address'])
             sig = truth.evidence_signature(text) if text else None
+            if not sig:
+                sig = truth.export_signature(r['address'], self.exports_dir)
+                if sig:
+                    self.log('%s: frida: %s signature from the Ghidra export (the evidence '
+                             'gives none)' % (batch_id, r['address']))
             if sig:
                 sigs[r['address']] = sig
         traces = {}
@@ -2612,9 +2647,7 @@ class Driver:
         return out
 
     def _fix(self, batch_id, batch, worker, worktree, stage, problems, brief, label):
-        prompt = FIX_PROMPT.format(
-            id=batch_id, stage=stage, branch=batch['branch'], brief=brief,
-            problems='\n'.join('- ' + p for p in problems))
+        prompt = fix_prompt(batch_id, stage, batch['branch'], brief, problems, self.kind)
         self._stage(batch_id, label)
         return self._run(worker, prompt, worktree, batch_id, label)
 

@@ -1,0 +1,315 @@
+{
+  "batches": {
+    "i001": {
+      "assigned_at": "2026-10-23T19:22:55+00:00",
+      "branch": "p3/wso-i001",
+      "closed_at": "2026-10-23T21:46:42+00:00",
+      "files": [
+        "src/CAIGroup.cpp",
+        "src/CScreenWorld.cpp",
+        "src/CMessage.cpp",
+        "src/CInfGame.cpp",
+        "src/CVidCell.cpp",
+        "src/CNetwork.cpp",
+        "src/CGameAIBase.cpp",
+        "src/CGameContainer.cpp",
+        "src/CGameSprite.cpp"
+      ],
+      "pool": "claude",
+      "rows": [
+        {
+          "address": "0x696140",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CScreenWorld.cpp",
+          "name": "CUIControlButtonWorldContainerSlot::Render",
+          "our_len": 14,
+          "their_len": 2907
+        },
+        {
+          "address": "0x433950",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CMessage.cpp",
+          "name": "CBaldurMessage::WaitForSignal",
+          "our_len": 14,
+          "their_len": 2004
+        },
+        {
+          "address": "0x5A0950",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CInfGame.cpp",
+          "name": "CInfGame::CacheResFileWithResource",
+          "our_len": 2,
+          "their_len": 1845
+        },
+        {
+          "address": "0x7B49D0",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CVidCell.cpp",
+          "name": "CVidCell::sub_7B49D0",
+          "our_len": 13,
+          "their_len": 1755
+        },
+        {
+          "address": "0x7D0C60",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CVidCell.cpp",
+          "name": "CVidCell::sub_7D0C60",
+          "our_len": 13,
+          "their_len": 1693
+        },
+        {
+          "address": "0x7A5F00",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CNetwork.cpp",
+          "name": "CNetwork::EnumerateSessions",
+          "our_len": 14,
+          "their_len": 1583
+        },
+        {
+          "address": "0x5A04B0",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CInfGame.cpp",
+          "name": "CInfGame::CachingRequirements",
+          "our_len": 10,
+          "their_len": 1352
+        },
+        {
+          "address": "0x7A64B0",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CNetwork.cpp",
+          "name": "CNetwork::JoinSelectedSession",
+          "our_len": 14,
+          "their_len": 1240
+        },
+        {
+          "address": "0x4337D0",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CMessage.cpp",
+          "name": "CBaldurMessage::KickOutWaitingForSignal",
+          "our_len": 14,
+          "their_len": 1184
+        },
+        {
+          "address": "0x480480",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CGameContainer.cpp",
+          "name": "CGameContainer::sub_480480",
+          "our_len": 2,
+          "their_len": 844
+        },
+        {
+          "address": "0x691B50",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CScreenWorld.cpp",
+          "name": "CScreenWorld::StopStore",
+          "our_len": 2,
+          "their_len": 781
+        },
+        {
+          "address": "0x71BC60",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::RemoveSpecialAbility",
+          "our_len": 2,
+          "their_len": 752
+        }
+      ],
+      "status": "closed",
+      "unparked": [
+        {
+          "address": "0x407280",
+          "at": "2026-10-23T23:10:10+00:00",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CAIGroup.cpp",
+          "name": "CAIGroup::GroupProtectPoint",
+          "needs": "no Frida hook: the signature does not parse",
+          "our_len": 2,
+          "reason": "tooling fixed 2026-10-23: export-signature fallback (6), no-status retry (2), destructor map names (1)",
+          "their_len": 5488
+        },
+        {
+          "address": "0x407FC0",
+          "at": "2026-10-23T23:10:10+00:00",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CAIGroup.cpp",
+          "name": "CAIGroup::GroupDrawMove",
+          "needs": "no Frida hook: the signature does not parse",
+          "our_len": 2,
+          "reason": "tooling fixed 2026-10-23: export-signature fallback (6), no-status retry (2), destructor map names (1)",
+          "their_len": 4975
+        },
+        {
+          "address": "0x6957E0",
+          "at": "2026-10-23T23:10:10+00:00",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CScreenWorld.cpp",
+          "name": "CUIControlButtonWorldContainerSlot::OnLButtonClick",
+          "needs": "no Frida hook: the signature does not parse",
+          "our_len": 2,
+          "reason": "tooling fixed 2026-10-23: export-signature fallback (6), no-status retry (2), destructor map names (1)",
+          "their_len": 4560
+        },
+        {
+          "address": "0x6913C0",
+          "at": "2026-10-23T23:10:10+00:00",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CScreenWorld.cpp",
+          "name": "CScreenWorld::StartStore",
+          "needs": "no Frida hook: the signature does not parse",
+          "our_len": 2,
+          "reason": "tooling fixed 2026-10-23: export-signature fallback (6), no-status retry (2), destructor map names (1)",
+          "their_len": 4359
+        },
+        {
+          "address": "0x45F6D0",
+          "at": "2026-10-23T23:10:10+00:00",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CGameAIBase.cpp",
+          "name": "CGameAIBase::MoveCursor",
+          "needs": "no Frida hook: the signature does not parse",
+          "our_len": 20,
+          "reason": "tooling fixed 2026-10-23: export-signature fallback (6), no-status retry (2), destructor map names (1)",
+          "their_len": 1273
+        },
+        {
+          "address": "0x434EB0",
+          "at": "2026-10-23T23:10:10+00:00",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CMessage.cpp",
+          "name": "CBaldurMessage::ChapterAnnounceStatus",
+          "needs": "no Frida hook: the signature does not parse",
+          "our_len": 14,
+          "reason": "tooling fixed 2026-10-23: export-signature fallback (6), no-status retry (2), destructor map names (1)",
+          "their_len": 734
+        },
+        {
+          "address": "0x5A0160",
+          "at": "2026-10-23T23:10:10+00:00",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CInfGame.cpp",
+          "name": "CInfGame::sub_5A0160",
+          "needs": "scenario failed: world_entry: ours side exited 2",
+          "our_len": 2,
+          "reason": "tooling fixed 2026-10-23: export-signature fallback (6), no-status retry (2), destructor map names (1)",
+          "their_len": 1247
+        },
+        {
+          "address": "0x723BF0",
+          "at": "2026-10-23T23:10:10+00:00",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::sub_723BF0",
+          "needs": "scenario failed: world_entry: ours side exited 2",
+          "our_len": 2,
+          "reason": "tooling fixed 2026-10-23: export-signature fallback (6), no-status retry (2), destructor map names (1)",
+          "their_len": 614
+        }
+      ],
+      "verdicts": {}
+    },
+    "i002": {
+      "assigned_at": "2026-10-23T21:46:46+00:00",
+      "branch": "p3/wso-i002",
+      "closed_at": "2026-10-23T22:49:07+00:00",
+      "files": [
+        "src/CGameSprite.cpp",
+        "src/CMessage.cpp",
+        "src/CNetwork.cpp",
+        "src/CUnknown2.cpp",
+        "src/CVideo.cpp",
+        "src/CGameSpriteSpells.cpp",
+        "src/CResPLT.cpp"
+      ],
+      "pool": "claude",
+      "rows": [
+        {
+          "address": "0x71E760",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::sub_71E760",
+          "our_len": 2,
+          "their_len": 499
+        },
+        {
+          "address": "0x5152C0",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageGroup::CMessageGroup",
+          "our_len": 22,
+          "their_len": 428
+        },
+        {
+          "address": "0x7A73D0",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CNetwork.cpp",
+          "name": "CNetwork::sub_7A73D0",
+          "our_len": 8,
+          "their_len": 401
+        },
+        {
+          "address": "0x720310",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::CheckSequence",
+          "our_len": 2,
+          "their_len": 346
+        },
+        {
+          "address": "0x7C25B0",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CUnknown2.cpp",
+          "name": "CUnknown2::sub_7C25B0",
+          "our_len": 2,
+          "their_len": 301
+        },
+        {
+          "address": "0x7A5720",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CNetwork.cpp",
+          "name": "CNetwork::RemoveInitializeConnection",
+          "our_len": 33,
+          "their_len": 173
+        },
+        {
+          "address": "0x7950A0",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CVideo.cpp",
+          "name": "CVideo::~CVideo",
+          "our_len": 21,
+          "their_len": 173
+        },
+        {
+          "address": "0x443350",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CGameSpriteSpells.cpp",
+          "name": "CGameSpriteSpellList::CGameSpriteSpellList",
+          "our_len": 35,
+          "their_len": 53
+        },
+        {
+          "address": "0x77F330",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CResPLT.cpp",
+          "name": "CResPLT::CResPLT",
+          "our_len": 35,
+          "their_len": 41
+        }
+      ],
+      "status": "closed",
+      "unparked": [
+        {
+          "address": "0x4F7490",
+          "at": "2026-10-23T23:10:10+00:00",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageHandler::~CMessageHandler",
+          "needs": "no Frida hook: no entry for CMessageHandler::~CMessageHandler in our map",
+          "our_len": 2,
+          "reason": "tooling fixed 2026-10-23: export-signature fallback (6), no-status retry (2), destructor map names (1)",
+          "their_len": 167
+        }
+      ],
+      "verdicts": {}
+    }
+  }
+}

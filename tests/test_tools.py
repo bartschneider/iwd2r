@@ -9953,11 +9953,22 @@ class DriverTest(unittest.TestCase):
                          {'0x76D370': ('ours', 'c1')})
         self.assertEqual(driver.parse_report(h + '`verdict 0x1 fork case c2`\n2. Verdict 0X02 neither case c3\n'),
                          {'0x1': ('fork', 'c2'), '0x2': ('neither', 'c3')})
+        # a mangled verdict (it names an address, or starts with the word)
+        # still fails, with its line number
         with self.assertRaises(driver.ReportError) as cm:
-            driver.parse_report(h + '\nI think it is ours.\n')
+            driver.parse_report(h + '\nI think 0x401000 is ours.\n')
         self.assertIn('line 3', str(cm.exception))
         with self.assertRaises(driver.ReportError):
+            driver.parse_report(h + 'verdict ours case a\n')
+        with self.assertRaises(driver.ReportError):
             driver.parse_report(h + 'verdict 0x401000 ours case a\nverdict 0x0401000 fork case b\n')
+        # prose that names no address decides nothing and is skipped (b017's
+        # Flash worker wrote this sentence under ## Verdicts three times)
+        self.assertEqual(driver.parse_report(
+            h + 'verdict 0x1 ours case a\n'
+                'All 20 rows are decided; there is no `## Undecided` section.\n'
+                '(none; this is an import batch)\nverdict 0x2 fork case b\n'),
+            {'0x1': ('ours', 'a'), '0x2': ('fork', 'b')})
 
     def test_run_non_json_output(self):
         def stub(argv, **kw):
@@ -10324,6 +10335,9 @@ class DriverTest(unittest.TestCase):
         with open(os.path.join(self.wt, 'docs', 'evidence', '402000.md'), 'a') as f:
             f.write('\n## Decompiled (Ghidra)\n\n```c\nint Roll(int a, int b)\n\n{\n  return g_x;\n}\n```\n')
         self.git('commit', '-qam', 'decompiled', cwd=self.wt)
+        # hermetic: a row without a signature never reads the machine's real
+        # ghidra-exports (tests that want the fallback set their own folder)
+        d.exports_dir = os.path.join(self.tmp, 'no-exports')
         return d
 
     def test_driver_records_measured_from_probe_results(self):
@@ -10788,6 +10802,43 @@ class DriverTest(unittest.TestCase):
                 {'address': '0x402000', 'name': 'IcewindMisc::Roll'},
                 {'address': '0x403000', 'name': 'Rules::Tick'}]
         return d, {'branch': 'p3/wso-b011', 'rows': rows}
+
+    def test_driver_frida_phase_falls_back_to_the_ghidra_export_signature(self):
+        d, batch = self._import_phase_driver()
+        # 403000's evidence loses its Decompiled section
+        with open(os.path.join(self.wt, 'docs', 'evidence', '403000.md'), 'w') as f:
+            f.write('---\naddress: 0x403000\nname: Rules::Tick\nkind: read-only\n---\n')
+        self.git('commit', '-qam', 'no decompiled section', cwd=self.wt)
+        ex = os.path.join(self.tmp, 'exports')
+        os.makedirs(os.path.join(ex, 'decompile'))
+        with open(os.path.join(ex, 'decompile', '403000.c'), 'w') as f:
+            f.write('\nint Tick(int a,\n         int b)\n\n{\n  return 0;\n}\n')
+        names = []
+
+        def frida_run(batch_id, table, scenarios, **kw):
+            names.append(sorted(h['name'] for h in table['original']['hooks']))
+            return {sc: {'orig': [], 'ours': [], 'orig_path': None, 'ours_path': None,
+                         'failed': 'x', 'dumps': None} for sc in scenarios}
+        d.frida_run = frida_run
+        line = ('b011: frida: 0x403000 signature from the Ghidra export '
+                '(the evidence gives none)')
+        d.exports_dir = ex
+        try:
+            d._frida_phase('b011', batch, self.wt, {})
+        except driver._StageError:
+            pass
+        self.assertIn('fn_403000', names[0])
+        self.assertIn(line, self.logs)
+        # without the export the row is skipped as before
+        names.clear()
+        self.logs.clear()
+        d.exports_dir = os.path.join(self.tmp, 'no-exports')
+        try:
+            d._frida_phase('b011', batch, self.wt, {})
+        except driver._StageError:
+            pass
+        self.assertNotIn('fn_403000', names[0] if names else [])
+        self.assertNotIn(line, self.logs)
 
     def test_driver_frida_phase_runs_for_import_kind(self):
         trace = TruthTest._trace
@@ -11312,7 +11363,7 @@ class DriverTest(unittest.TestCase):
         self.assertIn('BRIEF b011', w.briefs[1])
 
     def test_malformed_report_is_a_check_failure(self):
-        w = _SeqWorker('## Verdicts\nI think it is ours.\n', self.REPORT)
+        w = _SeqWorker('## Verdicts\nI think 0x401000 is ours.\n', self.REPORT)
         d = self._driver(worker=w)
         self.assertEqual(d.run_batch('b011'), 'closed')
         self.assertIn('malformed verdict line', w.briefs[1])
@@ -12777,7 +12828,7 @@ class DriverTest(unittest.TestCase):
                 pass
         # the fix-round, resume and check texts, rendered
         quoted += re.findall(r'`(git [^`]*)`', driver.FIX_PROMPT + driver.RESUME_PREAMBLE
-                             + driver.REVIEW_BRIEF)
+                             + driver.REVIEW_BRIEF + ''.join(driver.FIX_REPORT_RULES.values()))
         self.assertTrue(any(q.startswith('git show') for q in quoted), quoted)
         self.assertTrue(any(q.startswith('git rm') for q in quoted), quoted)
         for q in quoted:
@@ -12793,6 +12844,7 @@ class DriverTest(unittest.TestCase):
                  if isinstance(n, ast.Constant) and isinstance(n.value, str)
                  and id(n) not in docs and ' ' in n.value]
         prose += [driver.FIX_PROMPT, driver.RESUME_PREAMBLE, driver.REVIEW_BRIEF]
+        prose += list(driver.FIX_REPORT_RULES.values())
         for rel in ('import-brief-template.md', 'brief-template.md', 'README.md'):
             prose.append(_slurp(os.path.join(ROOT, 'docs', 'wso', rel)))
         verb = re.compile(r'\b(?:revert|restor)\w*', re.I)
@@ -13454,9 +13506,22 @@ class DriverTest(unittest.TestCase):
         self.assertTrue(any('both a verdict line and an undecided line' in p
                             for p in problems), problems)
 
+    def test_fix_prompt_report_rule_follows_the_batch_kind(self):
+        # i002 wrote "(none; this is an import batch)" under ## Verdicts because
+        # the fix-round prompt asked every batch for that section
+        imp = driver.fix_prompt('i002', 'checks', 'p3/wso-i002', 'BRIEF', ['p1', 'p2'], 'import')
+        self.assertIn('do not write a `## Verdicts` section at all', imp)
+        self.assertNotIn('full `## Verdicts` section', imp)
+        self.assertIn('- p1\n- p2', imp)
+        self.assertTrue(imp.rstrip().endswith('BRIEF'))
+        wave = driver.fix_prompt('b011', 'checks', 'p3/wso-b011', 'BRIEF', ['p1'])
+        self.assertIn('full `## Verdicts` section', wave)
+        self.assertNotIn('import batch', wave)
+
     def test_the_fix_round_header_names_undecided_and_notes(self):
+        rendered = driver.fix_prompt('b011', 'checks', 'p3/wso-b011', '', ['p'])
         for needle in ('## Undecided', '## Notes', 'verdict lines only', 'Never write `ours`'):
-            self.assertIn(needle, driver.FIX_PROMPT)
+            self.assertIn(needle, rendered)
         with open(os.path.join(ROOT, 'docs', 'wso', 'brief-template.md')) as f:
             text = f.read()
         for needle in ('undecided <0xADDR> <fork|neither> <one-line reason>',
@@ -14267,6 +14332,119 @@ class DriverTest(unittest.TestCase):
             rc, out = wave.next_batch(dp, w1, 20, repo=self.root, import_path=ip)
         self.assertTrue(out.startswith('b001 assigned'), out)
 
+    # -- wave.py unpark ----------------------------------------------------------
+
+    def _unpark_fixture(self):
+        tmp, dp, ip = self._import_repo()
+        wave = driver._tool('wave')
+        imp = os.path.join(tmp, 'import-state.json')
+        row = lambda a, n, f: {'address': a, 'name': n, 'file': f, 'their_len': 70, 'our_len': 2}
+        state = {'batches': {
+            'i001': {'status': 'closed', 'branch': 'p3/wso-i001', 'files': ['src/A.cpp', 'src/C.cpp'],
+                     'verdicts': {}, 'rows': [row('0x401000', 'F', 'src/A.cpp'),
+                                              row('0x403000', 'H', 'src/C.cpp')]},
+            'i002': {'status': 'assigned', 'branch': 'p3/wso-i002', 'files': ['src/D.cpp'],
+                     'verdicts': {}, 'rows': [row('0x404000', 'I', 'src/D.cpp')]}}}
+        with open(imp, 'w') as f:
+            json.dump(state, f)
+        folder = os.path.join(self.root, 'docs', 'wso', 'import-parked')
+        os.makedirs(folder)
+        for a, n, b in (('403000', 'H', 'i001'), ('404000', 'I', 'i002'), ('405000', 'J', 'i001')):
+            with open(os.path.join(folder, a + '.json'), 'w') as f:
+                json.dump({'address': '0x' + a, 'name': n, 'file': 'src/x.cpp', 'batch': b,
+                           'needs': 'world_entry: not exercised'}, f)
+        return tmp, dp, ip, imp, folder, wave
+
+    def _unpark_snapshot(self, imp, folder):
+        with open(imp) as f:
+            st = f.read()
+        return st, sorted(os.listdir(folder))
+
+    def test_unpark_moves_the_row_and_next_offers_it_again(self):
+        tmp, dp, ip, imp, folder, wave = self._unpark_fixture()
+        rc, out = wave.unpark(['0x403000'], None, state_path=imp, repo=self.root)
+        self.assertEqual(rc, 0, out)
+        lines = out.splitlines()
+        self.assertEqual(lines[0], 'unparked 0x403000 H (was world_entry: not exercised) from i001')
+        self.assertIn('import-state.json', lines[-1])
+        self.assertIn('docs/wso/import-parked', lines[-1])
+        self.assertFalse(os.path.exists(os.path.join(folder, '403000.json')))
+        with open(imp) as f:
+            b = json.load(f)['batches']['i001']
+        self.assertEqual([r['address'] for r in b['rows']], ['0x401000'])
+        (u,) = b['unparked']
+        self.assertEqual((u['address'], u['reason'], u['needs']),
+                         ('0x403000', 'needs met', 'world_entry: not exercised'))
+        self.assertRegex(u['at'], r'^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d')
+        rc, out = wave.next_batch(dp, imp, 20, wave.IMPORT_CATEGORY, repo=self.root,
+                                  import_path=ip, worktree_root=os.path.join(tmp, 'wts'),
+                                  queue='import')
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(out.startswith('i003 assigned: 1 rows'), out)
+        with open(imp) as f:
+            (r,) = json.load(f)['batches']['i003']['rows']
+        self.assertEqual((r['address'], r['category']), ('0x403000', 'theirs_real_ours_stub'))
+        # A second unpark of the same address: not parked any more.
+        rc, out = wave.unpark(['403000'], None, state_path=imp, repo=self.root)
+        self.assertEqual((rc, out), (1, '403000: not parked\n'))
+
+    def test_unpark_reason_and_any_address_spelling(self):
+        tmp, dp, ip, imp, folder, wave = self._unpark_fixture()
+        # the parked file may carry a worker's spelling (0x prefix, lower
+        # case): the file that was read is the file that goes
+        os.rename(os.path.join(folder, '403000.json'), os.path.join(folder, '0x403000.json'))
+        rc, out = wave.unpark(['0X403000'], 'signature parses now', state_path=imp, repo=self.root)
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn('0x403000.json', os.listdir(folder))
+        with open(imp) as f:
+            self.assertEqual(json.load(f)['batches']['i001']['unparked'][0]['reason'],
+                             'signature parses now')
+
+    def test_unpark_reports_a_parked_file_it_could_not_delete(self):
+        tmp, dp, ip, imp, folder, wave = self._unpark_fixture()
+        real_unlink = os.unlink
+
+        def failing(path):
+            if path.endswith('403000.json'):
+                raise PermissionError(13, 'Permission denied', path)
+            real_unlink(path)
+        with mock.patch.object(os, 'unlink', failing):
+            rc, out = wave.unpark(['403000'], None, state_path=imp, repo=self.root)
+        self.assertEqual(rc, 1, out)
+        self.assertIn('unparked 0x403000 H', out)
+        self.assertIn('the state is saved but these parked files remain', out)
+        self.assertIn('403000.json (Permission denied)', out)
+        self.assertIn('403000.json', os.listdir(folder))
+        with open(imp) as f:
+            st = json.load(f)
+        self.assertEqual([r['address'] for r in st['batches']['i001'].get('unparked', [])],
+                         ['0x403000'])
+
+    def test_unpark_refusals_write_nothing(self):
+        tmp, dp, ip, imp, folder, wave = self._unpark_fixture()
+        before = self._unpark_snapshot(imp, folder)
+        for args, msg in ((['0x401000'], '0x401000: not parked\n'),
+                          (['0x404000'], '0x404000: in assigned batch i002; close or clear it first\n'),
+                          (['0x405000'], '0x405000: in no import batch\n'),
+                          # one good address does not carry a bad one through
+                          (['0x403000', '0x404000'],
+                           '0x404000: in assigned batch i002; close or clear it first\n')):
+            rc, out = wave.unpark(args, None, state_path=imp, repo=self.root)
+            self.assertEqual((rc, out), (1, msg))
+            self.assertEqual(self._unpark_snapshot(imp, folder), before)
+
+    def test_unpark_leaves_scorecard_and_status_working(self):
+        tmp, dp, ip, imp, folder, wave = self._unpark_fixture()
+        self.assertEqual(wave.unpark(['0x403000'], None, state_path=imp, repo=self.root)[0], 0)
+        report = os.path.join(tmp, 'report.md')
+        with open(report, 'w') as f:
+            f.write('# R\n\n## Scorecard\n\nold\n')
+        rc, out = wave.write_scorecard(imp, report, os.path.join(tmp, 'no-triage.json'))
+        self.assertEqual(rc, 0, out)
+        rc, out = wave.status(imp)
+        self.assertEqual(rc, 0, out)
+        self.assertIn('i001 closed p3/wso-i001 1 rows', out)
+
     def test_queue_import_driver_wiring(self):
         tmp, dp, ip = self._import_repo()
         d, err = driver.driver_from_args(
@@ -14731,6 +14909,69 @@ class TruthTest(unittest.TestCase):
         table = truth.hook_table(self.TYPED_ROWS[3:], self.TYPED_SIGS, self.TYPED_MAP, ['s'], headers)
         self.assertEqual(table['typed_from'], {'0x400': 'ghidra', '0x500': 'ghidra'})
 
+    def test_proto_type_typedefs(self):
+        self.assertEqual(truth._proto_type('POSITION'), 'ptr')
+        self.assertEqual(truth._proto_type('const RESREF'), 'ptr')
+        self.assertEqual(truth._proto_type('HWND'), 'ptr')
+        self.assertEqual(truth._proto_type('RESID'), 'u32')
+        self.assertEqual(truth._proto_type('WPARAM'), 'u32')
+        self.assertEqual(truth._proto_type('LRESULT'), 's32')
+        self.assertEqual(truth._proto_type('LONG_PTR'), 's32')
+        self.assertIsNone(truth._proto_type('CString'))
+
+    B019_HEADERS = ('class CGameEffectList {\npublic:\n'
+                    '    void RemoveAllOfType(CGameSprite* pSprite, WORD effectID, POSITION posLeave, LONG effectAmount);\n'
+                    '    void Take(CString s, RESREF resref, DWORD n);\n};\n')
+
+    def test_typed_from_headers_takes_ghidra_type_for_unknown_slot(self):
+        got = truth._typed_from_headers([self.B019_HEADERS], 'CGameEffectList::RemoveAllOfType', 4, 'thiscall',
+                                        ['u32', 'u16', 'u32', 's32'], None)
+        self.assertEqual(got[:3], ('thiscall', ['ptr', 'u16', 'ptr', 's32'], None))
+        self.assertFalse(got[4])
+        # a class by value with Ghidra's slot count: the slot takes Ghidra's type, the row is mixed
+        got = truth._typed_from_headers([self.B019_HEADERS], 'CGameEffectList::Take', 3, 'thiscall',
+                                        ['u32', 'ptr', 'u32'], None)
+        self.assertEqual((got[1], got[3], got[4]), (['u32', 'ptr', 'u32'], ['ghidra', 'ours', 'ours'], True))
+        # a different count rejects it
+        self.assertIsNone(truth._typed_from_headers([self.B019_HEADERS], 'CGameEffectList::Take', 2, 'thiscall',
+                                                    ['u32', 'ptr'], None))
+        self.assertIsNone(truth._typed_from_headers([self.B019_HEADERS], 'CGameEffectList::Take', 3, 'thiscall'))
+
+    def test_hook_table_mixed_typing_and_slots(self):
+        m = ' 0001:00001000       ?Take@CGameEffectList@@QAEXPAEK@Z 00401000 f a.obj\n'
+        rows = [{'address': '0x100', 'name': 'CGameEffectList::Take'}]
+        table = truth.hook_table(rows, {'0x100': 'void Take(uint a, byte *b, uint c)'}, m, ['s'], self.B019_HEADERS)
+        self.assertEqual(table['typed_from'], {'0x100': 'mixed'})
+        self.assertEqual(table['typed_slots'], {'0x100': ['ghidra', 'ours', 'ours']})
+
+    B019_ORIG = [{'tag': 'fn_100', 'a0_u32': 91363456, 'a1_u32': 142, 'a2_ptr': None, 'a3_s32': 39}]
+    B019_OURS = [{'tag': 'fn_100', 'a0_u32': 145435200, 'a1_u32': 142, 'a2_ptr': None, 'a3_s32': 39}]
+
+    def test_address_like_untyped_argument_is_not_measured(self):
+        rows = [{'address': '0x100', 'name': 'X'}]
+        v = truth.frida_verdicts({'s': (self.B019_ORIG, self.B019_OURS)}, rows, info={'typed_from': {'0x100': 'ghidra'}})
+        self.assertEqual(v['0x100'], ('not measured', 'address-like untyped argument a0 (91363456 vs 145435200); '
+                                                    'type it from the header'))
+        # exact slots of a mixed row
+        info = {'typed_from': {'0x100': 'mixed'}, 'typed_slots': {'0x100': ['ghidra', 'ours', 'ours', 'ours']}}
+        v = truth.frida_verdicts({'s': (self.B019_ORIG, self.B019_OURS)}, rows, info=info)
+        self.assertEqual(v['0x100'][0], 'not measured')
+        # header-typed slot stays different
+        info = {'typed_from': {'0x100': 'ours'}, 'typed_slots': {'0x100': ['ours'] * 4}}
+        v = truth.frida_verdicts({'s': (self.B019_ORIG, self.B019_OURS)}, rows, info=info)
+        self.assertEqual(v['0x100'][0], 'different')
+        # another field differing too, or a non-address value, stays different
+        other = [dict(self.B019_OURS[0], a1_u32=143)]
+        v = truth.frida_verdicts({'s': (self.B019_ORIG, other)}, rows, info={'typed_from': {'0x100': 'ghidra'}})
+        self.assertEqual(v['0x100'][0], 'different')
+        small = [dict(self.B019_OURS[0], a0_u32=5)]
+        v = truth.frida_verdicts({'s': (self.B019_ORIG, small)}, rows, info={'typed_from': {'0x100': 'ghidra'}})
+        self.assertEqual(v['0x100'][0], 'different')
+        only1 = [dict(self.B019_ORIG[0], a1_u32=142)]
+        v = truth.frida_verdicts({'s': ([dict(self.B019_ORIG[0], a1_u32=142)], [dict(self.B019_ORIG[0], a1_u32=143)])},
+                                 rows, info={'typed_from': {'0x100': 'ghidra'}})
+        self.assertEqual(v['0x100'][0], 'different')
+
     def test_ours_env_runs_under_replay_clock(self):
         env = probe.ours_env('C:\\game', 7)
         self.assertEqual(env['IWD2R_SEED'], '7')
@@ -15134,6 +15375,123 @@ class TruthTest(unittest.TestCase):
             self.assertEqual([c[c.index('--build-checkout') + 1] if '--build-checkout' in c else None
                               for c in fake.calls],
                              ['/mnt/c/Users/u/iwd2r-build-p3-wso-i009'] * 2)
+
+    def test_map_matches_constructors_and_destructors(self):
+        publics = {'??0CMessageHandler@@QAE@XZ': 0x220830,
+                   '??1CMessageHandler@@QAE@XZ': 0x222d20,
+                   '??_GCMessageHandler@@QAEPAXI@Z': 0x222d90,
+                   '?AddMessage@CMessageHandler@@QAEFPAVCMessage@@H@Z': 0x224a60,
+                   '??1CInner@COuter@@QAE@XZ': 0x300000}
+        self.assertEqual(truth._map_matches('CMessageHandler::~CMessageHandler', publics),
+                         {0x222d20: '??1CMessageHandler@@QAE@XZ'})
+        self.assertEqual(truth._map_matches('CMessageHandler::CMessageHandler', publics),
+                         {0x220830: '??0CMessageHandler@@QAE@XZ'})
+        self.assertEqual(truth._map_matches('COuter::CInner::~CInner', publics),
+                         {0x300000: '??1CInner@COuter@@QAE@XZ'})
+        self.assertEqual(truth._map_matches('CMessageHandler::AddMessage', publics),
+                         {0x224a60: '?AddMessage@CMessageHandler@@QAEFPAVCMessage@@H@Z'})
+        # the special members' tails read like any member's
+        self.assertEqual(truth.decorated_convention('??1CMessageHandler@@QAE@XZ'), '__thiscall')
+        self.assertEqual(truth.decorated_convention('??0CMessageHandler@@QAE@XZ'), '__thiscall')
+        self.assertEqual(truth.decorated_convention('?Roll@IcewindMisc@@YAHHH@Z'), '__cdecl')
+        # a destructor's Ghidra head hooks as a thiscall with no arguments
+        self.assertEqual(truth._hook_signature('void CMessageHandler::~CMessageHandler(void)',
+                                               '??1CMessageHandler@@QAE@XZ'),
+                         ('thiscall', [], None))
+
+    def test_exports_default_matches_export_decompiles(self):
+        # truth repeats the four-line default rather than loading the module
+        # (which puts tools/ on sys.path); this keeps the two in step
+        import importlib.util
+        path = os.path.join(ROOT, 'tools', 'ghidra', 'export_decompiles.py')
+        spec = importlib.util.spec_from_file_location('_export_decompiles_for_test', path)
+        mod = importlib.util.module_from_spec(spec)
+        saved_path, saved_mods = list(sys.path), set(sys.modules)
+        try:
+            spec.loader.exec_module(mod)
+            for home in (os.path.join(tempfile.gettempdir(), 'iwd2r-home-for-test'), '', None):
+                with mock.patch.dict(os.environ, {'IWD2R_HOME': home} if home is not None else {},
+                                     clear=False):
+                    if home is None:
+                        os.environ.pop('IWD2R_HOME', None)
+                    self.assertEqual(truth.exports_default(), mod._exports_default())
+        finally:
+            sys.path[:] = saved_path
+            for name in set(sys.modules) - saved_mods:
+                del sys.modules[name]
+
+    def test_export_signature_reads_the_ghidra_export_head(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as ex:
+            os.makedirs(os.path.join(ex, 'decompile'))
+            with open(os.path.join(ex, 'decompile', '407280.c'), 'w') as f:
+                f.write('/* header */\nvoid CAIGroup::GroupProtectPoint\n'
+                        '  /* the args */\n          (uint param_1,int param_2,undefined4 param_3)\n'
+                        '\n{\n  return;\n}\n')
+            with open(os.path.join(ex, 'decompile', '407FC0.c'), 'w') as f:
+                f.write('// nothing here\n')
+            want = 'void CAIGroup::GroupProtectPoint (uint param_1,int param_2,undefined4 param_3)'
+            self.assertEqual(truth.export_signature('0x407280', ex), want)
+            self.assertEqual(truth.export_signature('0x407fc0', ex), None)
+            self.assertEqual(truth.export_signature('0x999999', ex), None)
+
+    def test_frida_run_retries_a_side_that_came_home_with_no_status_once(self):
+        import tempfile
+        import subprocess as sp
+        clean = 'HITS fn_5845D0 4\nRESULT: CLEAN\n'
+        table = truth.hook_table(self.ROWS, self.SIGS, self.MAP, ['s1'])
+
+        def make(root, ours_statuses, ours_exit_first=2):
+            calls = []
+
+            def fake(cmd, **kw):
+                calls.append(cmd)
+                target = cmd[cmd.index('--target') + 1]
+                out = cmd[cmd.index('--out') + 1]
+                d = os.path.join(root, 'runs', 'x-' + target, 'replay')
+                os.makedirs(d, exist_ok=True)
+                with open(os.path.join(d, out), 'w') as f:
+                    f.write(json.dumps({'tag': 'fn_5845D0', 'a0_s32': 1}) + '\n')
+                rc, st = 0, clean
+                if target == 'ours':
+                    n = sum(1 for c in calls if c[c.index('--target') + 1] == 'ours') - 1
+                    rc, st = ours_statuses[min(n, len(ours_statuses) - 1)]
+                sp_path = os.path.join(d, out + '.status')
+                if os.path.exists(sp_path):
+                    os.remove(sp_path)
+                if st is not None:
+                    with open(sp_path, 'w') as f:
+                        f.write(st)
+                return sp.CompletedProcess(cmd, rc, stdout='probe: runs/x-%s\n' % target, stderr='')
+            fake.calls = calls
+            return fake
+
+        def ours_calls(fake):
+            return [c for c in fake.calls if c[c.index('--target') + 1] == 'ours']
+        with tempfile.TemporaryDirectory() as root:
+            fake = make(root, [(2, None), (0, clean)])
+            r = truth.frida_run('b011', table, ['s1'], run=fake, root=root,
+                                dumps=lambda *a: {'match': True, 'detail': 'x'})['s1']
+            self.assertTrue(r['measured'])
+            self.assertTrue(r['ours_retried'])
+            self.assertNotIn('orig_retried', r)
+            ours = ours_calls(fake)
+            self.assertEqual(len(ours), 2)
+            self.assertEqual(ours[1][ours[1].index('--new-attempt') + 1],
+                             'driver frida b011 s1 retry: ours side came home with no status')
+            fake = make(root, [(2, None)])
+            r = truth.frida_run('b011', table, ['s1'], run=fake, root=root,
+                                attempt_reason=lambda sc, k: 'why %s %s' % (sc, k))['s1']
+            self.assertFalse(r['measured'])
+            self.assertIn('ours side exited 2', r['failed'])
+            self.assertEqual(len(ours_calls(fake)), 2)
+            self.assertEqual(ours_calls(fake)[1][ours_calls(fake)[1].index('--new-attempt') + 1],
+                             'why s1 ours retry: no status')
+            fake = make(root, [(2, 'HITS fn_5845D0 0\nRESULT: UNSAFE\n')])
+            r = truth.frida_run('b011', table, ['s1'], run=fake, root=root)['s1']
+            self.assertFalse(r['measured'])
+            self.assertNotIn('ours_retried', r)
+            self.assertEqual(len(ours_calls(fake)), 1)
 
     def test_frida_run_marks_exit2_side_not_measured(self):
         import tempfile
