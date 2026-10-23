@@ -10576,6 +10576,17 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(calls, [1])
         self.assertEqual(self._state()['verdicts']['0x402000']['measured'], 'frida')
 
+    @staticmethod
+    def _stage_oracle_tools(checkout):
+        """The injector and recorder an x86 build leaves under checkout, as
+        empty files (the original side of a Frida pair runs them)."""
+        oracle = driver._tool('oracle')
+        folder = os.path.join(checkout, oracle.REPLAY_DIR_REL)
+        os.makedirs(folder, exist_ok=True)
+        for name in (oracle.INJECTOR, oracle.RECORDER):
+            with open(os.path.join(folder, name), 'w'):
+                pass
+
     def _frida_builder(self, map_text=None):
         """(builder, calls, checkout): a fake per-batch x86 build whose map
         sits where the x86 build writes it, under a fake Windows checkout."""
@@ -10702,6 +10713,14 @@ class DriverTest(unittest.TestCase):
         d.frida_map = os.path.join(checkout, driver.X86_MAP_REL)
         seen = []
         d.frida_run = lambda b, table, scenarios, build_checkout=None: seen.append(build_checkout) or {}
+        # the original side runs the injector and recorder beside the map:
+        # without them the override measures nothing (the batch's exception)
+        with self.assertRaises(driver._StageError) as cm:
+            d._frida_phase('b011', batch, self.wt, {})
+        self.assertIn('no %s beside it' % os.path.join(
+            checkout, driver._tool('oracle').REPLAY_DIR_REL, 'injector.exe'), cm.exception.problem)
+        self.assertEqual(seen, [])
+        self._stage_oracle_tools(checkout)
         d._frida_phase('b011', batch, self.wt, {})
         self.assertEqual(seen, [checkout])
         # a map that is not where an x86 build puts it measures nothing: the
@@ -16102,6 +16121,23 @@ class WaveCloseRulesTest(unittest.TestCase):
         self.assertIsNone(bad)
         self.assertEqual(sorted(parked), ['643cc0', '643cd0'])
         self.assertEqual(parked['643cc0']['batch'], 'i002')
+
+    def test_parked_file_named_with_0x_prefix_is_read(self):
+        # i001's worker wrote docs/wso/import-parked/0x5A0950.json; the reader
+        # keys it by the bare address like a <ADDR>.json file (the brief asks
+        # for caps, no 0x; either spelling is the same row)
+        self.init_repo()
+        entry = dict(self.PARKED[0], address='0x5A0950', name='Stub', batch='i001')
+        _write(os.path.join(self.root, 'docs', 'wso', 'import-parked', '0x5A0950.json'),
+               json.dumps(entry))
+        parked, bad = self.wave._parked_rows(self.root)
+        self.assertIsNone(bad)
+        self.assertEqual(list(parked), ['5a0950'])
+        self.assertEqual(parked['5a0950']['batch'], 'i001')
+        # anything else in the folder is still refused
+        _write(os.path.join(self.root, 'docs', 'wso', 'import-parked', 'notes.json'), '{}')
+        parked, bad = self.wave._parked_rows(self.root)
+        self.assertIn('notes.json: not a parked row', bad)
 
     def test_import_close_refuses_parked_row_whose_evidence_remains(self):
         self._import_ready(parked=self.PARKED, evidence=('0x643CD0',))

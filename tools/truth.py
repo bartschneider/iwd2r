@@ -900,9 +900,11 @@ def _oracle():
 
 SCHEMA_HINTS = {
     'original': ('the recorder.dll that ran is out of step with the schema (built before it '
-                 'changed?); rebuild it from the tree under test (tools/oracle.py build, or '
-                 'the frida phase\'s build of the batch checkout) and run again'),
-    'ours': 'our state dumper is out of step with the schema; fix it and run again',
+                 'changed, or the tree under test predates a schema change: merge first into '
+                 'it); rebuild it from the tree under test (tools/oracle.py build, or the '
+                 'frida phase\'s build of the batch checkout) and run again'),
+    'ours': ('our state dumper is out of step with the schema (or the tree under test predates '
+             'a schema change: merge first into it); fix it and run again'),
 }
 
 

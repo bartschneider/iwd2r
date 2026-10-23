@@ -2505,6 +2505,13 @@ class Driver:
             if checkout is None:
                 return None, None, ('--frida-map %s is not where an x86 build writes its map '
                                     '(<checkout>/%s)' % (self.frida_map, X86_MAP_REL))
+            oracle = _tool('oracle')
+            for name in (oracle.INJECTOR, oracle.RECORDER):
+                path = os.path.join(checkout, oracle.REPLAY_DIR_REL, name)
+                if not os.path.isfile(path):
+                    return None, None, ('--frida-map %s: no %s beside it; the original side runs '
+                                        'that checkout\'s injector and recorder (tools/oracle.py '
+                                        'build from it)' % (self.frida_map, path))
             self.log('%s: frida: --frida-map given: measuring the build in %s, not a build '
                      'of %s' % (batch_id, checkout, worktree))
             return checkout, self.frida_map, None

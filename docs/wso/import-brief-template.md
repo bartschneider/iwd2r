@@ -36,7 +36,8 @@ Each bundle carries the function's decompile and its callers' decompiles; objdum
    base's body: `git show <merge-base>:<path>` shows it, `git merge-base
    first HEAD` names the merge base), delete the row's evidence file, and
    record the refusal in the report and in the row's own
-   `docs/wso/import-parked/<ADDRESS>.json` (one JSON object
+   `docs/wso/import-parked/<ADDRESS>.json` (address in caps, no `0x`, the
+   same stem as its evidence file; one JSON object
    `{address, name, file, batch, needs}`) with `needs` of
    `"fork body contradicts the exe: <what differs>"`. Three of seven fork
    bodies in batch i002 did.
@@ -88,8 +89,9 @@ Each bundle carries the function's decompile and its callers' decompiles; objdum
    (`git show <merge-base>:<path>` shows it; `git merge-base first HEAD`
    names the merge base; do not replace a file that holds other rows'
    changes), delete `docs/evidence/<ADDRESS>.md`, and write the row's own
-   file `docs/wso/import-parked/<ADDRESS>.json` (one file per row, so
-   parallel batches never collide; never one shared list):
+   file `docs/wso/import-parked/<ADDRESS>.json` (address in caps, no `0x`;
+   one file per row, so parallel batches never collide; never one shared
+   list):
 
        {"address": "0x...", "name": "...", "file": "src/...", "batch": "{{id}}",
         "needs": "world_entry, first_fight, walk_and_talk: not exercised"}

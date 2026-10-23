@@ -355,7 +355,7 @@ def _parked_rows(worktree):
     for name in names:
         rel = f'{IMPORT_PARKED_DIR}/{name}'
         stem = name[:-len('.json')] if name.endswith('.json') else None
-        if not stem or not re.fullmatch(r'[0-9A-Fa-f]+', stem):
+        if not stem or not re.fullmatch(r'(?:0[xX])?[0-9A-Fa-f]+', stem):
             problems.append(f'{rel}: not a parked row; the folder holds only <ADDR>.json files')
             continue
         try:
