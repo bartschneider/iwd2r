@@ -1139,22 +1139,18 @@ def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
         if side == 'fork' and not wave.KIND_RE.search(text):
             problems.append("%s: no 'kind:' line in the front matter; add "
                             "'kind: oracle' or 'kind: replay'" % rel)
-        n_before = len(problems)
         driver_probe = k in probe_keys or (
             side == 'ours' and batch.get('id') is not None
             and case.startswith('probe-%s-' % batch['id']))
-        if driver_probe:
+        paras = wave.evidence_paragraphs(text)
+        if driver_probe and not any(wave.EVIDENCE_PHRASES[1] in para
+                                    for para in paras):
             # A probe pass says ours matches the original (ruling R57).
-            if not any(wave.EVIDENCE_PHRASES[1] in para
-                       for para in wave.evidence_paragraphs(text)):
-                problems.append("%s: its verdict case is a probe; add the exact "
-                                "phrase 'corroborated by WSO at <sha>'" % rel)
-        elif not any(p in para for para in wave.evidence_paragraphs(text)
-                     for p in wave.EVIDENCE_PHRASES):
-            problems.append("%s: no 'disagreed with WSO' or 'corroborated by "
-                            "WSO' phrase; add one of the exact phrases" % rel)
-        if len(problems) == n_before and not wave._evidence_decided_by(
-                text, case):
+            problems.append("%s: its verdict case is a probe; write the "
+                            "sentence 'corroborated by WSO at <sha>: ...; "
+                            "case %s decides' in the ## WSO delta section"
+                            % (rel, case))
+        elif not wave._evidence_decided_by(text, case):
             problems.append(
                 '%s: docs/evidence/%s.md has no sentence reading "disagreed '
                 'with WSO at <sha>: ...; case %s decides" (or "corroborated '
@@ -2219,7 +2215,7 @@ class Driver:
             if not carried:
                 return again
             return again + ('## Measured before you started\n\nThe oracle probe passed these rows earlier '
-                    '(the driver records each as `ours`; cite `corroborated by WSO at <sha>`):\n'
+                    '(the driver records each as `ours`; write the ## WSO delta sentence `corroborated by WSO at <sha>: ...; case probe-<batch>-<ADDR> decides`, the exact case shown):\n'
                     + ''.join('- 0x%s: case %s\n' % (k.upper(), self._probe[k][1]) for k in sorted(carried))
                     + '\n')
 
@@ -2258,8 +2254,9 @@ class Driver:
         if passed:
             lines.append('The oracle probe passed these rows (ours matches the original over a '
                          'swept domain). The driver records each as `ours`, with the case shown; '
-                         'write the evidence file with the exact phrase '
-                         '`corroborated by WSO at <sha>` and cite that case:')
+                         'write the evidence file with the sentence '
+                         '`corroborated by WSO at <sha>: ...; case probe-<batch>-<ADDR> decides` '
+                         'in the ## WSO delta section, with the exact case shown:')
             lines += ['- %s: case %s (%s)' % p for p in passed]
         if failed:
             lines.append('The oracle probe FAILED these rows (ours and the original disagree). '

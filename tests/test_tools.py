@@ -9829,7 +9829,7 @@ class EvidenceParagraphsTest(unittest.TestCase):
 
     def test_paragraphs(self):
         self.assertEqual(self.wave.evidence_paragraphs(self.FIXTURE), [
-            '--- kind: oracle ---',
+            '---', 'kind: oracle', '---',
             '# 0x401000', '## WSO delta',
             'disagreed with WSO at e8dd16a7: the guard differs; the clamp is the '
             'same in both builds; the oracle sweep agrees on every sampled '
@@ -9851,6 +9851,20 @@ class EvidenceParagraphsTest(unittest.TestCase):
             self.FIXTURE.replace('disagreed with WSO', 'disagreed with us'), 'probe-9'))
         self.assertTrue(w._evidence_decided_by(
             'corroborated by WSO at abc1234; case c decides', 'c'))
+
+    def test_decided_by_keeps_the_physical_line_reading(self):
+        w = self.wave
+        text = ('- disagreed with WSO at abc1234: x; case c decides\n'
+                '- another bullet\n')
+        self.assertTrue(w._evidence_decided_by(text, 'c'))
+        text = ('disagreed with WSO at abc1234: x; case c decides.\n'
+                'more prose right after it\n')
+        self.assertTrue(w._evidence_decided_by(text, 'c'))
+        self.assertFalse(w._evidence_decided_by(text, 'd'))
+
+    def test_front_matter_does_not_join_the_body(self):
+        paras = self.wave.evidence_paragraphs('---\nkind: oracle\n---\nbody a\nbody b\n')
+        self.assertEqual(paras, ['---', 'kind: oracle', '---', 'body a body b'])
 
     def test_decided_by_does_not_join_across_a_blank_line_or_fence(self):
         w = self.wave
@@ -13729,7 +13743,7 @@ class DriverTest(unittest.TestCase):
                 batch, d, {'0x76D370': ('ours', 'probe-b011-76D370'), '0x401000': ('ours', 'x')},
                 run=ok)
             self.assertEqual(len(probs), 1)
-            self.assertIn("'corroborated by WSO at <sha>'", probs[0])
+            self.assertIn("'corroborated by WSO at <sha>: ...; case probe-b011-76D370 decides'", probs[0])
             # The driver's probe set decides whatever the case says.
             probs = driver.mechanical_checks(
                 batch, d, {'0x76D370': ('ours', 'x'), '0x401000': ('ours', 'x')},

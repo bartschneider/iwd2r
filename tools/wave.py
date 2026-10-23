@@ -1082,8 +1082,10 @@ def evidence_paragraphs(text):
             fence = not fence
         elif fence:
             out.append(raw.rstrip())
-        elif not line:
+        elif not line or line == '---':
             flush()
+            if line:
+                out.append(line)
         elif line.startswith('#'):
             flush()
             out.append(line)
@@ -1445,12 +1447,13 @@ def _dump_refusal(addr, case, remedy):
 
 
 def _evidence_decided_by(text, case):
-    """True when a logical line (paragraph, see evidence_paragraphs) of an
-    evidence file carries one of EVIDENCE_PHRASES and ends with
+    """True when a physical line or a logical line (paragraph, see
+    evidence_paragraphs) of an evidence file carries one of EVIDENCE_PHRASES and ends with
     `case <case> decides`."""
+    tail = f'case {case} decides'
     return any(any(p in line for p in EVIDENCE_PHRASES)
-               and line.rstrip().rstrip('.').endswith(f'case {case} decides')
-               for line in evidence_paragraphs(text))
+               and line.rstrip().rstrip('.').endswith(tail)
+               for line in text.splitlines() + evidence_paragraphs(text))
 
 
 def resolve_probe(address, side, case, state_path=STATE_PATH, repo=ROOT):
