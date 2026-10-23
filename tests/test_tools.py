@@ -9623,13 +9623,49 @@ class DriverTest(unittest.TestCase):
                 self.assertEqual(b['status'], 'closed')
                 self.assertEqual(b['verdicts']['0x402000']['measured'], 'frida')
                 self.assertEqual(b['verdicts']['0x401000']['measured'], 'probe')
-            else:   # different, yet the verdict is ours: one fix round, then Frida runs again
-                self.assertEqual(b['status'], 'assigned')
-                self.assertEqual(len(seen), 2)       # after the first check and after the fix round
-                self.assertEqual(self._status(d)['exceptions']['b011']['stage'], 'checks')
-                self.assertIn('Frida trace diff shows ours different from the original',
-                              self._status(d)['exceptions']['b011']['problems'][0])
-                self.assertNotIn('measured', b['verdicts'].get('0x402000', {}))
+            else:   # different while the worker keeps ours: one fix round (the finding), Frida ran once,
+                # the verdict stays unmeasured and the ledger says so; no exception
+                self.assertEqual(b['status'], 'closed')
+                self.assertEqual(len(seen), 1)
+                self.assertNotIn('measured', b['verdicts']['0x402000'])
+                with open(os.path.join(os.path.dirname(d.status_path), 'b011', 'worker-fix-checks.brief.md')) as f:
+                    self.assertIn('Frida trace diff shows ours different from the original', f.read())
+                self.assertIn('- frida different, kept ours: 0x402000 differs in world_entry', self._ledger(d))
+
+    def test_driver_frida_runs_once_even_with_a_fix_round(self):
+        calls = []
+        map_path = os.path.join(tempfile.mkdtemp(), 'iwd2r.map')
+        self.addCleanup(shutil.rmtree, os.path.dirname(map_path), True)
+        with open(map_path, 'w') as f:
+            f.write(TruthTest.MAP)
+
+        def frida_run(batch_id, table, scenarios):
+            calls.append(1)
+            t = TruthTest._trace(('fn_402000', 7, 3))
+            return {'world_entry': (t, t)}
+        bad = '# r\n\n## Verdicts\n\nverdict 0x401000 ours case dump-401000\n'   # 0x402000 missing: a problem
+        good = bad + 'verdict 0x402000 ours case dump-402000\n'
+        d = self._measured_driver(worker=_SeqWorker(bad, good), frida=True, frida_map=map_path,
+                                  frida_run=frida_run, oracle_run=lambda *a: {})
+        self.assertEqual(d.run_batch('b011'), 'closed', self._status(d)['exceptions'])
+        self.assertEqual(calls, [1])
+        self.assertEqual(self._state()['verdicts']['0x402000']['measured'], 'frida')
+
+    def test_driver_repeats_oracle_failures_on_a_resumed_brief(self):
+        d = self._measured_driver(oracle_run=lambda b, w, c: {'0x401000': ('fail', 'failure_count 2')})
+        brief = d._oracle_phase('b011', self._state(), self.wt)
+        self.assertIn('FAILED', brief)
+        saved = self._status(d)['batches']['b011']['oracle_findings']
+        self.assertTrue(any('401000' in l for l in saved))
+        d._finish('b011', 'parked')                                  # the park keeps them
+        self.assertTrue(self._status(d)['batches']['b011']['oracle_findings'])
+        d2 = self._measured_driver(oracle_run=lambda *a: self.fail('resume: no oracle run'))
+        d2.status_path = d.status_path
+        # the resumed driver reads the same status file; the oracle phase restates the finding
+        d2.oracle_run = lambda b, w, c: {}
+        resumed = d2._oracle_phase('b011', self._state(), self.wt)
+        self.assertIn('Oracle findings from the earlier run', resumed)
+        self.assertIn('401000', resumed)
 
     def test_driver_frida_off_by_default_and_read_from_the_calibration(self):
         d = self._measured_driver(frida_run=lambda *a: self.fail('--no-frida'),
@@ -11212,19 +11248,32 @@ class TruthTest(unittest.TestCase):
             with open(report) as f:
                 self.assertNotIn('Truth calibration', f.read())
 
-    def test_rules_math_names_are_the_default_pure_helpers(self):
+    def test_rules_math_names_are_the_pure_fixpoint(self):
+        def ev(name, body):
+            return ('---\nname: %s\n---\n## Decompiled (Ghidra)\n\n```c\nint %s(int a)\n\n{\n%s\n}\n```\n'
+                    % (name, name, body))
+        texts = {'0x1': ev('R::A', '  return a * 2;'),
+                 '0x2': ev('R::B', '  int x;\n  x = R::A(a);\n  return x + 1;'),
+                 '0x3': ev('R::C', '  int in_ECX;\n  return *(int *)(in_ECX + 0x92a) + a;'),
+                 '0x4': ev('R::D', '  return R::C(a);')}
+        names = truth.rules_math_names(texts.get, addresses=[1, 2, 3, 4])
+        self.assertEqual(names, frozenset({'R::A', 'R::B'}))      # C reads in_ECX; D calls C
+        caller = '---\naddress: 0x9\n---\n' + ev('Rules::Mix', '  return R::C(a);').split('---\n', 2)[2]
+        impure = '---\naddress: 0x9\n---\n' + ev('Rules::Mix', '  return R::C(a);').split('---\n', 2)[2]
+        good = '---\naddress: 0x8\n---\n' + ev('Rules::Ok', '  return R::B(a);').split('---\n', 2)[2]
+        self.assertFalse(truth.is_pure(impure, names)[0])
+        self.assertTrue(truth.is_pure(good, names)[0])
+        texts['0x8'], texts['0x9'] = good, caller
+        keep, why = truth.oracle_candidates(
+            [{'address': '0x8', 'name': 'Rules::Ok'}, {'address': '0x9', 'name': 'Rules::Mix'}], texts.get,
+            pure_names=names)
+        self.assertEqual([c['address'] for c in keep], ['0x8'])
+        self.assertIn('not pure', why['0x9'])
+        # the real set: nothing outside the fixpoint is admitted, and a repeat call is the cached object
         ce = load_tool('check_evidence')
-        addr = sorted(ce.RULES_MATH)[0]
-        texts = {'0x%X' % addr: '---\nname: CRuleTables::Helper\n---\n'}
-        self.assertEqual(truth.rules_math_names(texts.get), frozenset({'CRuleTables::Helper'}))
-        body = ('---\naddress: 0x1\n---\n## Decompiled (Ghidra)\n\n```c\nint Rules::Mix(int a)\n\n{\n'
-                '  return CRuleTables::Helper(a);\n}\n```\n')
-        texts['0x1'] = body
-        rows = [{'address': '0x1', 'name': 'Rules::Mix'}]
-        keep, why = truth.oracle_candidates(rows, texts.get)
-        self.assertEqual([c['address'] for c in keep], ['0x1'], why)
-        keep, why = truth.oracle_candidates(rows, texts.get, pure_names=frozenset())
-        self.assertEqual(keep, [])
+        real = truth.rules_math_names(lambda a: None)
+        self.assertEqual(real, frozenset())
+        self.assertIs(truth.rules_math_names(texts.get, addresses=[1, 2, 3, 4]), names)
 
     def test_calibrate_requires_a_worktree_to_probe(self):
         with tempfile.TemporaryDirectory() as d:

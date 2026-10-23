@@ -673,7 +673,7 @@ class Driver:
         self._worker_ran = []      # this batch's worker runs: really ran
         self._no_transcript = 0    # batch exceptions in a row without one
         self._probe = {}           # this batch: address key -> (side, case) the oracle passed
-        self._frida_equal = set()  # this batch: address keys Frida found equal
+        self._frida_got = {}       # this batch: address key -> (status, detail) of its one Frida run
 
     # -- status, ledger, results ----------------------------------------
 
@@ -706,6 +706,9 @@ class Driver:
         entry = dict(outcome=outcome, credits=self._credits(), at=_now(), **extra)
 
         def apply(s):
+            old = s['batches'].get(batch_id)
+            if isinstance(old, dict) and old.get('oracle_findings'):
+                entry['oracle_findings'] = old['oracle_findings']
             s['batches'][batch_id] = entry
             s['current'] = None
             parked = s.get('parked')
@@ -901,7 +904,7 @@ class Driver:
         key = _tool('wave')._addr_key(addr)
         if key in self._probe:
             return 'probe'
-        if key in self._frida_equal and side == 'ours':
+        if side == 'ours' and self._frida_got.get(key, ('',))[0] == 'equal':
             return 'frida'
         return None
 
@@ -919,6 +922,8 @@ class Driver:
         rows = [r for r in self._open_rows(batch)
                 if wave._addr_key(r['address']) not in decided]
         carried = self._carry_probe_passes(batch_id, worktree)
+        saved = (self._read_status()['batches'].get(batch_id) or {}).get('oracle_findings') or []
+        again = ('## Oracle findings from the earlier run\n\n' + '\n'.join(saved) + '\n\n') if saved else ''
         if carried is not None:
             # A resume: the probe file is already committed, so its passes
             # stand and the oracle does not run again (it would rewrite it).
@@ -927,8 +932,8 @@ class Driver:
             self.log('%s: oracle: %d earlier probe pass(es) carried forward' % (
                 batch_id, len(carried)))
             if not carried:
-                return ''
-            return ('## Measured before you started\n\nThe oracle probe passed these rows earlier '
+                return again
+            return again + ('## Measured before you started\n\nThe oracle probe passed these rows earlier '
                     '(the driver records each as `ours`; cite `corroborated by WSO at <sha>`):\n'
                     + ''.join('- 0x%s: case %s\n' % (k.upper(), self._probe[k][1]) for k in sorted(carried))
                     + '\n')
@@ -940,9 +945,9 @@ class Driver:
             cases, _why = truth.oracle_candidates(rows, read)
         except Exception as e:
             self.log('%s: oracle path skipped: %s' % (batch_id, _one_line(repr(e), 300)))
-            return ''
+            return again
         if not cases:
-            return ''
+            return again
         try:
             self._stage(batch_id, 'oracle')
             got = self.oracle_run(batch_id, worktree, cases)
@@ -950,7 +955,7 @@ class Driver:
         except Exception as e:   # measurement is best effort
             self.log('%s: oracle path skipped: %s' % (batch_id, _one_line(repr(e), 300)))
             self._settle_oracle_files(batch_id, worktree, cases, ())
-            return ''
+            return again
         self._settle_oracle_files(batch_id, worktree, cases, [
             c for c in cases if got.get(wave._addr_key(c['address']), ('',))[0] == 'pass'])
         key = wave._addr_key
@@ -980,7 +985,12 @@ class Driver:
                     address, name, batch_id, key(address)[0:].upper(), detail))
                 lines.append('```cpp\n' + truth.draft_case(
                     c['address'], c['name'], c['signature'], batch_id).rstrip() + '\n```')
-        return ('## Measured before you started\n\n' + '\n'.join(lines) + '\n\n') if lines else ''
+        if failed:
+            texts = [l for l in lines[lines.index(next(x for x in lines if x.startswith('The oracle probe FAILED'))):]]
+            self._update_status(lambda s: s['batches'].setdefault(batch_id, {}).__setitem__(
+                'oracle_findings', texts))
+        text = ('## Measured before you started\n\n' + '\n'.join(lines) + '\n\n') if lines else ''
+        return text if failed else again + text
 
     def _tracked(self, worktree, rel):
         r = subprocess.run(['git', '-C', worktree, 'ls-files', '--error-unmatch', '--', rel],
@@ -1045,9 +1055,9 @@ class Driver:
         """After the worker, with --frida: one batched Frida differential run
         over the open rows the oracle did not decide.  Equal confirms a
         verdict of ours (measured frida); different where the verdict says
-        ours, or equal where it says the fork, is a finding for the fix
-        round.  Returns the findings."""
-        self._frida_equal = set()
+        ours, or equal where it says the fork, is a finding for the one fix
+        round.  It runs once per batch, never again.  Returns the findings."""
+        self._frida_got = {}
         if not self.frida or self.dry_run:
             return []
         truth = _tool('truth')
@@ -1075,6 +1085,8 @@ class Driver:
         except Exception as e:
             self.log('%s: frida path skipped: %s' % (batch_id, _one_line(repr(e), 300)))
             return []
+        self._frida_got = {key(r['address']): got.get(key(r['address']), ('skipped', 'no result'))
+                           for r in rows}
         sides = {key(a): s for a, (s, _c) in verdicts.items()}
         findings = []
         for r in rows:
@@ -1083,9 +1095,7 @@ class Driver:
             self.log('%s: frida %s %s (%s)' % (batch_id, r['address'], status, detail))
             side = sides.get(k)
             if status == 'equal':
-                if side == 'ours':
-                    self._frida_equal.add(k)
-                elif side:
+                if side and side != 'ours':
                     findings.append('%s: the Frida trace diff shows ours equal to the original (%s) '
                                     'but the verdict is %s; recheck it' % (r['address'], detail, side))
             elif status == 'different' and side == 'ours':
@@ -1217,7 +1227,7 @@ class Driver:
         self._worker_ran = []
         self._ignored = {}
         self._probe = {}
-        self._frida_equal = set()
+        self._frida_got = {}
         state = self.load_state(self.state_path)
         batch = state['batches'].get(batch_id)
         if batch is None:
@@ -1258,8 +1268,9 @@ class Driver:
         if out:
             return out
         verdicts, problems = self._check(batch_id, worktree, res.report)
-        if not problems:
-            problems = self._frida_phase(batch_id, batch, worktree, verdicts)
+        # Frida runs once, here, clean check or not; what it finds joins the
+        # one fix round (ruling R58).
+        problems = problems + self._frida_phase(batch_id, batch, worktree, verdicts)
         if problems:
             self.log('%s: %d problem(s); one fix round' % (batch_id, len(problems)))
             res = self._fix(batch_id, batch, worker, worktree, 'mechanical checks',
@@ -1268,11 +1279,6 @@ class Driver:
             if out:
                 return out
             verdicts, problems = self._check(batch_id, worktree, res.report)
-            if not problems:
-                # The first check was not clean, so Frida has not run (or the
-                # worker may have changed verdicts): run it now; what it finds
-                # after the one fix round is an exception.
-                problems = self._frida_phase(batch_id, batch, worktree, verdicts)
         if self.dry_run:
             self._ledger_for(batch_id, self._merged(batch_id, verdicts), (
                 False, 'dry run: no review, nothing recorded, no close'))
@@ -1348,10 +1354,15 @@ class Driver:
             self.log('scorecard not written: %r' % (e,))
         err = self.push()
         batch = self.load_state(self.state_path)['batches'][batch_id]
-        self._append_ledger(ledger_entry(
+        entry = ledger_entry(
             dict(batch, id=batch_id), batch['verdicts'],
             self._classes(batch_id, batch), review, commits, self._credits(),
-            ignored=self._ignored))
+            ignored=self._ignored)
+        kept = [(a, d) for a, (side, _c) in sorted(verdicts.items())
+                for st, d in [self._frida_got.get(_tool('wave')._addr_key(a), ('', ''))]
+                if side == 'ours' and st == 'different']
+        entry += ''.join('- frida different, kept ours: %s %s\n' % kd for kd in kept)
+        self._append_ledger(entry)
         self._finish(batch_id, 'closed')
         if err:
             return self._exception(batch_id, 'push', ['git push failed: %s' % err])

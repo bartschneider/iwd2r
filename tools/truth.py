@@ -874,27 +874,43 @@ def evidence_signature(evidence_text):
 
 
 _check_evidence = None
+_fixpoint_cache = {}
 
 
-def rules_math_names(read_evidence):
-    """The names of the rules-math set (tools/check_evidence.py RULES_MATH,
-    keyed by address): the known pure helpers a pure function may call. The
-    name of each is the `name:` of its evidence file (read_evidence takes
-    '0x<ADDR>'); one with no evidence file is left out."""
+def rules_math_names(read_evidence, addresses=None):
+    """The pure helpers among the rules-math set (tools/check_evidence.py
+    RULES_MATH, keyed by address; read_evidence takes '0x<ADDR>'). RULES_MATH
+    lists the functions whose correctness needs the oracle, not pure ones, so
+    its names are not trusted: this is the fixpoint of is_pure over the
+    helpers' own evidence. Start from the empty set, add each helper whose
+    evidence passes is_pure(text, current set), repeat until nothing changes.
+    The name of a helper is the `name:` of its evidence file; one with no
+    evidence file is left out. Cached per process, by the evidence read."""
     global _check_evidence
-    if _check_evidence is None:
-        import importlib.util
-        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'check_evidence.py')
-        spec = importlib.util.spec_from_file_location('truth_check_evidence', path)
-        _check_evidence = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(_check_evidence)
-    names = set()
-    for address in _check_evidence.RULES_MATH:
+    if addresses is None:
+        if _check_evidence is None:
+            import importlib.util
+            path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'check_evidence.py')
+            spec = importlib.util.spec_from_file_location('truth_check_evidence', path)
+            _check_evidence = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(_check_evidence)
+        addresses = _check_evidence.RULES_MATH
+    helpers = {}
+    for address in sorted(addresses):
         text = read_evidence('0x%X' % address)
         m = re.search(r'^name:\s*(\S+)\s*$', text or '', re.M)
         if m:
-            names.add(m.group(1))
-    return frozenset(names)
+            helpers[m.group(1)] = text
+    cache_key = hashlib.sha256(json.dumps(sorted(helpers.items())).encode('utf-8')).hexdigest()
+    if cache_key not in _fixpoint_cache:
+        pure = frozenset()
+        while True:
+            grown = pure | {n for n, t in helpers.items() if n not in pure and is_pure(t, pure)[0]}
+            if grown == pure:
+                break
+            pure = grown
+        _fixpoint_cache[cache_key] = pure
+    return _fixpoint_cache[cache_key]
 
 
 def oracle_candidates(rows, read_evidence, pure_names=None):
