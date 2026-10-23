@@ -302,9 +302,11 @@ per scenario, then across the three scenarios:
   (without them it is `not measured`: a killed run's shorter trace proves
   nothing). The difference goes out of band (`info['notes']`), and the
   driver writes it to the ledger (`- frida frequency only (a caller
-  finding): ...`), for wave-1 and import batches alike, never as a finding,
-  a park or a verdict change. A row called on one side only compares no call:
-  `not measured`, with a note.
+  finding): ...`), for wave-1 and import batches alike, never as a finding
+  or a verdict change. One exception: an import row that is equal only as a
+  prefix IS parked, since no scenario compared it exactly and a `compare=0`
+  citation would be false; wave-1 and the calibration treat it as equal. A
+  row called on one side only compares no call: `not measured`, with a note.
 - **Different** means an event-level difference: an argument or a return at
   a call both sides made, or a crash event.
 - **The dump guard.** Both sides write checkpoint and periodic state dumps
@@ -323,3 +325,11 @@ per scenario, then across the three scenarios:
 
 Precedence across scenarios: any difference, then a failed scenario, then
 not measured, then equal; a row no scenario exercised is `not-exercised`.
+
+The phase measures the batch's own build, so for a wave-1 batch an `equal`
+row confirms whichever side the verdict records (ours, neither, or a fork
+body the worker adopted: `measured: frida`) and `different` is a finding
+for whichever side it is. A phase-wide failure (the x86 build fails, the run
+raises, or every scenario failed with no status on either side) is the
+batch's exception at stage `frida`: nothing is measured, parked or
+rewritten; one row's or one scenario's failure stays a row-level outcome.

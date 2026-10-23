@@ -251,11 +251,20 @@ ORACLE_CASE_RE = re.compile(r'ORACLE_CASE\(\s*"([^"]+)"')
 
 
 def _oracle_case_names(worktree):
-    """Every case id an oracle/cases/*.cpp of the worktree registers."""
+    """Every case id registered (ORACLE_CASE) by an oracle/cases/*.cpp of the
+    worktree that oracle/CMakeLists.txt lists: a case file the runner does
+    not build never runs, so its ids count for nothing."""
     names = set()
     folder = os.path.join(worktree, 'oracle', 'cases')
+    try:
+        with open(os.path.join(worktree, 'oracle', 'CMakeLists.txt'), encoding='utf-8',
+                  errors='replace') as f:
+            cmake = '\n'.join(line.split('#', 1)[0] for line in f.read().splitlines())
+    except OSError:
+        return names
+    wired = set(re.findall(r'(?<![\w/.-])cases/([A-Za-z0-9_.+-]+\.cpp)(?![\w.])', cmake))
     for name in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
-        if name.endswith('.cpp'):
+        if name.endswith('.cpp') and name in wired:
             with open(os.path.join(folder, name), encoding='utf-8', errors='replace') as f:
                 names.update(ORACLE_CASE_RE.findall(f.read()))
     return names
@@ -274,10 +283,10 @@ def frida_trace(text):
 def kept_evidence(worktree, merge_base, address, name, text):
     """Why an import row's evidence stands as it is written, or None when
     the Frida phase must measure it (the whole-branch review's ruling):
-    `kind: oracle` with an oracle_case that a case in the worktree's
-    oracle/cases registers; `kind: trace` citing a fork recovery note that
-    names the function (check_evidence.fork_note_mentions, the note read
-    with git show); or an evidence file unchanged since the merge base whose
+    `kind: oracle` with an oracle_case that a case file in the worktree's
+    oracle/cases registers and oracle/CMakeLists.txt wires; `kind: trace`
+    citing a fork recovery note that names the function
+    (check_evidence.fork_note_mentions, the note read with git show); or an evidence file unchanged since the merge base whose
     kind is trace or better.  Anything else a worker wrote (read-only, a
     declared replay, an oracle without its case, a trace citing anything
     else) is measured; a frida line is the driver's alone."""
@@ -320,7 +329,8 @@ def _import_bar(worktree, merge_base, address, name, rel, text):
     if frida_trace(text) or kept_evidence(worktree, merge_base, address, name, text):
         return None
     return (f'{rel}: kind {have} was written in this batch and nothing measured it: only '
-            f'the driver\'s frida trace, an oracle case registered in oracle/cases, a fork '
+            f'the driver\'s frida trace, an oracle case registered in a case file '
+            f'oracle/CMakeLists.txt wires, a fork '
             f'recovery note that names the function, or evidence unchanged since the merge '
             f'base stands; let the Frida phase measure it, or park it ({parked_rel(address)})')
 

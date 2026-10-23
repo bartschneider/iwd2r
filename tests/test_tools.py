@@ -10497,8 +10497,38 @@ class DriverTest(unittest.TestCase):
                 self.assertEqual(len(seen), 1)
                 self.assertNotIn('measured', b['verdicts']['0x402000'])
                 with open(os.path.join(os.path.dirname(d.status_path), 'b011', 'worker-fix-checks.brief.md')) as f:
-                    self.assertIn('Frida trace diff shows ours different from the original', f.read())
+                    self.assertIn('the Frida trace diff shows the body on the branch (verdict ours) '
+                                  'different from the original', f.read())
                 self.assertIn('- frida different, kept ours: 0x402000 differs in world_entry', self._ledger(d))
+
+    def test_driver_frida_on_the_batch_build_equal_confirms_a_fork_verdict(self):
+        # the phase measures the branch's body: for a fork verdict that is the
+        # adopted fork body, so equal confirms it (measured frida, no finding)
+        # and different is a finding
+        trace = TruthTest._trace
+        report = ('# r\n\n## Verdicts\n\nverdict 0x401000 ours case dump-401000\n'
+                  'verdict 0x402000 fork case probe-12\n')
+        for ours_ret, outcome in ((3, 'equal'), (4, 'different')):
+            d = self._measured_driver(
+                worker=_SeqWorker(report, report), frida=True, frida_build=self._frida_builder()[0],
+                frida_run=lambda b, table, scenarios, r=ours_ret, **kw: {
+                    'world_entry': (trace(('fn_402000', 7, 3)), trace(('fn_402000', 7, r)))},
+                oracle_run=lambda *a: {})
+            self.assertEqual(d.run_batch('b011'), 'closed', self._status(d)['exceptions'])
+            v = self._state()['verdicts']['0x402000']
+            self.assertEqual(v['side'], 'fork')
+            fix = os.path.join(os.path.dirname(d.status_path), 'b011', 'worker-fix-checks.brief.md')
+            if outcome == 'equal':
+                self.assertEqual(v['measured'], 'frida')
+                self.assertFalse(os.path.exists(fix))
+                self.assertNotIn('recheck', self._ledger(d))
+            else:
+                self.assertNotIn('measured', v)
+                with open(fix) as f:
+                    self.assertIn('0x402000: the Frida trace diff shows the body on the branch '
+                                  '(verdict fork) different from the original', f.read())
+                self.assertIn('- frida different, kept fork: 0x402000 differs in world_entry',
+                              self._ledger(d))
 
     def test_driver_frida_phase_types_tables_from_the_batch_worktrees_headers(self):
         trace = TruthTest._trace
@@ -10576,20 +10606,64 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(seen, [(checkout, ['0xa990'])])
         self.assertIn('x86 build of %s in %s' % (self.wt, checkout), '\n'.join(self.logs))
 
-    def test_driver_frida_build_failure_is_a_phase_error(self):
+    def test_driver_frida_build_failure_is_the_batchs_exception(self):
+        # a phase-wide failure parks nothing: the batch goes to the human
         d, batch = self._import_phase_driver()
 
         def build(worktree, log_path=None):
-            raise SystemExit('play: Windows build failed (log %s)' % log_path)
+            raise SystemExit('play: Windows build failed')
         d.frida_build = build
         d.frida_run = lambda *a, **kw: self.fail('nothing runs without a build')
+        before = self.git('rev-parse', 'HEAD', cwd=self.wt).stdout
+        with self.assertRaises(driver._StageError) as cm:
+            d._frida_phase('b011', batch, self.wt, {})
+        self.assertEqual(cm.exception.stage, 'frida')
+        self.assertIn('the x86 build of %s failed: play: Windows build failed' % self.wt,
+                      cm.exception.problem)
+        self.assertIn('no row was measured, parked or rewritten', cm.exception.problem)
+        self.assertEqual(self.git('rev-parse', 'HEAD', cwd=self.wt).stdout, before)
+        self.assertEqual(self.git('status', '--porcelain', cwd=self.wt).stdout, '')
+        # through run_batch: the exception path (status file, ledger, one aoe line)
+        d = self._measured_driver(worker=_SeqWorker('# r\n\n## Verdicts\n\nverdict 0x401000 ours case '
+                                                    'dump-401000\nverdict 0x402000 ours case dump-402000\n'),
+                                  frida=True, frida_build=build,
+                                  frida_run=lambda *a, **kw: self.fail('no build, no run'),
+                                  oracle_run=lambda *a: {})
+        self.assertEqual(d.run_batch('b011'), 'exception')
+        exc = self._status(d)['exceptions']['b011']
+        self.assertEqual(exc['stage'], 'frida')
+        self.assertIn('play: Windows build failed', exc['problems'][0])
+        self.assertEqual(self.sent, ['driver: b011 exception at frida; see %s' % d.status_path])
+        self.assertNotIn('measured', self._state()['verdicts'].get('0x402000', {}))
+
+    def test_driver_frida_infrastructure_failure_is_an_exception_row_failures_park(self):
+        d, batch = self._import_phase_driver()
+        dead = {sc: {'orig': [], 'ours': [], 'orig_path': None, 'ours_path': None,
+                     'orig_exit': 2, 'ours_exit': 2, 'failed': 'original side exited 2',
+                     'result': {'orig': None, 'ours': None}, 'hits': {'orig': None, 'ours': None},
+                     'dumps': None} for sc in driver._tool('truth').FRIDA_SCENARIOS}
+        d.frida_run = lambda *a, **kw: dict(dead)
+        with self.assertRaises(driver._StageError) as cm:
+            d._frida_phase('b011', batch, self.wt, {})
+        self.assertEqual(cm.exception.stage, 'frida')
+        self.assertIn('every Frida scenario failed on infrastructure (no side produced a status): '
+                      'first_fight: original side exited 2', cm.exception.problem)
+        self.assertIn('kind: read-only', _slurp(os.path.join(self.wt, 'docs', 'evidence', '401000.md')))
+        # the run itself raising is the same exception
+        d.frida_run = lambda *a, **kw: (_ for _ in ()).throw(RuntimeError('sandbox gone'))
+        with self.assertRaises(driver._StageError) as cm:
+            d._frida_phase('b011', batch, self.wt, {})
+        self.assertIn("the Frida run raised RuntimeError('sandbox gone')", cm.exception.problem)
+        # one scenario failed where a side did produce a status: row-level, the row parks
+        trace = TruthTest._trace
+        t = trace(('fn_401000', 7, 3))
+        out = self._file_traces(['world_entry', 'walk_and_talk'], t, t)
+        out['first_fight'] = dict(dead['first_fight'], orig=t, ours=t[:2], failed='ours side exited 2',
+                                  result={'orig': 'CLEAN', 'ours': None}, orig_exit=0)
+        d.frida_run = lambda *a, **kw: dict(out)
         findings = d._frida_phase('b011', batch, self.wt, {})
-        self.assertIsInstance(findings, list)
-        for k in ('401000', '402000', '403000'):
-            status, detail = d._frida_got[k]
-            self.assertEqual(status, 'not measured')
-            self.assertIn('the x86 build of %s failed: play: Windows build failed' % self.wt, detail)
-        self.assertIn('frida phase error', '\n'.join(self.logs))
+        self.assertEqual(d._frida_got['401000'][0], 'scenario failed')
+        self.assertTrue(any(f.startswith('0x401000:') and 'park it' in f for f in findings), findings)
 
     def test_driver_frida_map_override_measures_the_build_beside_it(self):
         d, batch = self._import_phase_driver()
@@ -10600,15 +10674,16 @@ class DriverTest(unittest.TestCase):
         d.frida_run = lambda b, table, scenarios, build_checkout=None: seen.append(build_checkout) or {}
         d._frida_phase('b011', batch, self.wt, {})
         self.assertEqual(seen, [checkout])
-        # a map that is not where an x86 build puts it measures nothing
+        # a map that is not where an x86 build puts it measures nothing: the
+        # batch's exception at stage frida
         stray = os.path.join(self.tmp, 'iwd2r.map')
         with open(stray, 'w') as f:
             f.write(self.IMPORT_MAP)
         d.frida_map = stray
         d.frida_run = lambda *a, **kw: self.fail('no build to run')
-        d._frida_phase('b011', batch, self.wt, {})
-        self.assertEqual(d._frida_got['401000'][0], 'not measured')
-        self.assertIn('not where an x86 build writes its map', d._frida_got['401000'][1])
+        with self.assertRaises(driver._StageError) as cm:
+            d._frida_phase('b011', batch, self.wt, {})
+        self.assertIn('not where an x86 build writes its map', cm.exception.problem)
 
     def test_frida_build_uses_the_worktrees_own_checkout(self):
         play = driver._tool('play')
@@ -10782,6 +10857,8 @@ class DriverTest(unittest.TestCase):
         # function, and a file unchanged since the merge base (trace or better)
         _write(os.path.join(self.wt, 'oracle', 'cases', 'rules.cpp'),
                'ORACLE_CASE("rules/render", Render);\n')
+        _write(os.path.join(self.wt, 'oracle', 'CMakeLists.txt'),
+               'add_executable(oracle_runner\n        cases/rules.cpp\n)\n')
         _write(os.path.join(ev, '401000.md'), '---\naddress: 0x401000\nname: Rules::Render\n'
                'kind: oracle\noracle_case: rules/render\n---\n')
         _write(os.path.join(ev, '402000.md'), '---\naddress: 0x402000\nname: IcewindMisc::Roll\n'
@@ -10853,12 +10930,6 @@ class DriverTest(unittest.TestCase):
                       by['0x401000'])
         self.assertIn('with needs "not measured: no final HITS totals in world_entry"', by['0x401000'])
         self.assertIn('with needs "scenario failed: first_fight: ours side exited 2"', by['0x402000'])
-        # a failed build parks too: nothing measured the rows
-        d.frida_build = lambda wt, log_path=None: (_ for _ in ()).throw(RuntimeError('no MSVC'))
-        findings = d._frida_phase('b011', batch, self.wt, {})
-        self.assertEqual(len(findings), 3)
-        self.assertTrue(all('with needs "not measured: the x86 build of' in f for f in findings),
-                        findings)
 
     def test_driver_writes_trace_evidence_only_from_matching_dumps(self):
         trace = TruthTest._trace
@@ -14217,6 +14288,8 @@ class DriverTest(unittest.TestCase):
                '// 0x402000\nint Draw()\n{\n  return 2;\n}\n')
         _write(os.path.join(self.wt, 'oracle', 'cases', 'loop.cpp'),
                'ORACLE_CASE("loop/render", Render);\n')
+        _write(os.path.join(self.wt, 'oracle', 'CMakeLists.txt'),
+               'add_executable(oracle_runner\n        cases/loop.cpp\n)\n')
         _write(os.path.join(self.wt, 'docs', 'evidence', '401000.md'),
                '---\naddress: 0x401000\nname: Render\nkind: oracle\noracle_case: loop/render\n---\n')
         _write(os.path.join(self.wt, 'docs', 'evidence', '402000.md'),
@@ -15750,7 +15823,19 @@ class WaveCloseRulesTest(unittest.TestCase):
         self.assertIn('kind oracle was written in this batch and nothing measured it', out)
         _write(os.path.join(self.wt, 'oracle', 'cases', 'render.cpp'),
                'ORACLE_CASE("render/seven", Seven);\n')
-        self.commit_worktree('the case')
+        self.commit_worktree('the case, not wired')
+        rc, out = self.close(kind='import')
+        # a case file oracle/CMakeLists.txt does not list never runs: not registered
+        self.assertIn('kind oracle was written in this batch and nothing measured it', out)
+        _write(os.path.join(self.wt, 'oracle', 'CMakeLists.txt'),
+               '# cases/render.cpp is listed below\nadd_executable(oracle_runner\n'
+               '        cases/selftest.cpp\n)\n')
+        self.commit_worktree('a comment is not a listing')
+        rc, out = self.close(kind='import')
+        self.assertIn('kind oracle was written in this batch and nothing measured it', out)
+        _write(os.path.join(self.wt, 'oracle', 'CMakeLists.txt'),
+               'add_executable(oracle_runner\n        cases/selftest.cpp cases/render.cpp\n)\n')
+        self.commit_worktree('wired')
         rc, out = self.close(kind='import')
         self.assertEqual(rc, 0, out)
 

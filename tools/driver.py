@@ -961,6 +961,17 @@ def _map_checkout(map_path):
     return norm[:-len(rel) - 1] if norm.endswith(os.sep + rel) else None
 
 
+def _infrastructure_failure(traces):
+    """The failures of a Frida run in which every scenario failed with no
+    status file on either side (nothing measured anything: an infrastructure
+    failure, the batch's exception, not its rows' park), else ''."""
+    runs = [(sc, t) for sc, t in sorted(traces.items()) if isinstance(t, dict)]
+    if not runs or len(runs) != len(traces) or not all(
+            t.get('failed') and not any((t.get('result') or {}).values()) for _sc, t in runs):
+        return ''
+    return '; '.join('%s: %s' % (sc, t['failed']) for sc, t in runs)
+
+
 def _write_trace_evidence(path, probe, orig_path, ours_path):
     """Rewrite one evidence file's front matter to `kind: trace` with the
     `trace_source:` of a measured Frida pair (truth.trace_source_line) and no
@@ -2105,7 +2116,9 @@ class Driver:
         key = _tool('wave')._addr_key(addr)
         if key in self._probe:
             return 'probe'
-        if side == 'ours' and self._frida_got.get(key, ('',))[0] == 'equal':
+        # The Frida phase measures the batch's own build, so an equal row
+        # confirms whichever side's body the branch holds.
+        if side and self._frida_got.get(key, ('',))[0] == 'equal':
             return 'frida'
         return None
 
@@ -2256,17 +2269,20 @@ class Driver:
         """After the worker, with --frida: one batched Frida differential run
         (all three scenarios) of an x86 build of the batch worktree
         (_frida_target).  Wave 1 measures the open rows the oracle did not
-        decide: equal confirms a verdict of ours (measured frida); different
-        where the verdict says ours, or equal where it says the fork, is a
-        finding.  An import batch measures every row not parked plus every
+        decide; the build is the branch's, so equal confirms whichever side
+        the verdict records (measured frida) and different is a finding for
+        that side.  An import batch measures every row not parked plus every
         function the batch touched that carries a `// 0xADDR` marker (a
         dependency imported with a row), except the ones whose evidence
         stands as written (wave.kept_evidence: an oracle case, a fork note
         that names the function, or evidence unchanged since the merge base);
         an equal row's evidence is rewritten to kind: trace and committed on
         the batch branch, and any other outcome (different, not exercised, no
-        hook, scenario failed, not measured) is a finding that parks it.  It
-        runs once per batch, never again.  Returns the findings."""
+        hook, scenario failed, not measured) is a finding that parks it.  A
+        phase-wide failure (no build, the run raised, every scenario failed
+        with no status on either side) raises _StageError('frida'): the
+        batch's exception, nothing measured, parked or rewritten.  It runs
+        once per batch, never again.  Returns the findings."""
         self._frida_got = {}
         self._frida_notes = {}
         if not self.frida or self.dry_run:
@@ -2299,22 +2315,29 @@ class Driver:
             traces.update(self.frida_run(batch_id, table, scenarios,
                                          build_checkout=checkout))
             return traces
+        # A phase-wide failure (no build, the run raised, every scenario
+        # failed on infrastructure) is an exception for the human at stage
+        # frida: no row is measured, parked or rewritten (ruled).  Row-level
+        # outcomes below still park.
         if why:
-            # A phase error (the build failed): nothing measured, no crash.
-            self.log('%s: frida phase error: %s' % (batch_id, why))
-            got = {key(r['address']): ('not measured', why) for r in rows}
-        else:
-            try:
-                with open(map_path, encoding='utf-8', errors='replace') as f:
-                    map_text = f.read()
-                self._stage(batch_id, 'frida')
-                got = truth.frida_batch(batch_id, rows, sigs, map_text, run_frida=run_frida,
-                                        headers=truth._our_headers(worktree), info=info)
-                got = {key(a): v for a, v in got.items()}
-            except Exception as e:
-                self.log('%s: frida path skipped: %s' % (batch_id, _one_line(repr(e), 300)))
-                got = {key(r['address']): ('not measured', 'the frida run raised %s'
-                                           % _one_line(repr(e), 200)) for r in rows}
+            raise _StageError('frida', 'the Frida phase could not run: %s; no row was measured, '
+                                       'parked or rewritten; fix it and clear this exception' % why)
+        try:
+            with open(map_path, encoding='utf-8', errors='replace') as f:
+                map_text = f.read()
+            self._stage(batch_id, 'frida')
+            got = truth.frida_batch(batch_id, rows, sigs, map_text, run_frida=run_frida,
+                                    headers=truth._our_headers(worktree), info=info)
+            got = {key(a): v for a, v in got.items()}
+        except Exception as e:
+            raise _StageError('frida', 'the Frida run raised %s; no row was measured, parked or '
+                                       'rewritten; fix it and clear this exception'
+                              % _one_line(repr(e), 300)) from None
+        dead = _infrastructure_failure(traces)
+        if dead:
+            raise _StageError('frida', 'every Frida scenario failed on infrastructure (no side '
+                                       'produced a status): %s; no row was measured, parked or '
+                                       'rewritten; fix it and clear this exception' % dead)
         self._frida_got = {key(r['address']): got.get(key(r['address']), ('skipped', 'no result'))
                            for r in rows}
         # Frequency-only differences are caller findings: ledger lines in
@@ -2343,14 +2366,15 @@ class Driver:
                 elif status == 'equal':
                     written.append(r['address'])
                 continue
+            # The phase measured the batch's own build: the body on the branch
+            # is the recorded side's (ours or neither keep ours', a fork verdict
+            # adopted the fork's).  Equal confirms that side (measured frida,
+            # _measured_for); different is a finding whatever the side.
             side = sides.get(k)
-            if status == 'equal':
-                if side and side != 'ours':
-                    findings.append('%s: the Frida trace diff shows ours equal to the original (%s) '
-                                    'but the verdict is %s; recheck it' % (r['address'], detail, side))
-            elif status == 'different' and side == 'ours':
-                findings.append('%s: the Frida trace diff shows ours different from the original '
-                                '(%s) but the verdict is ours; recheck it' % (r['address'], detail))
+            if side and status == 'different':
+                findings.append('%s: the Frida trace diff shows the body on the branch (verdict %s) '
+                                'different from the original (%s); recheck it' % (
+                                    r['address'], side, detail))
         if written:
             self._commit_trace_evidence(batch_id, worktree, written)
         return findings
@@ -2440,7 +2464,8 @@ class Driver:
         Windows checkout (self.frida_build), so the bodies under test are the
         batch's and the map's RVAs are theirs; --frida-map overrides that
         with an existing build (the exe beside the map), for hand runs.  A
-        failed build is a phase error, never a crash."""
+        failed build is returned as the phase error (the caller makes it the
+        batch's exception at stage frida), never a crash."""
         if self.frida_map:
             checkout = _map_checkout(self.frida_map)
             if not os.path.isfile(self.frida_map):
@@ -3227,10 +3252,10 @@ class Driver:
             self._classes(batch_id, batch), review, commits, self._credits(),
             ignored=self._ignored, undecided=self._undecided,
             **self._figure_kw())
-        kept = [(a, d) for a, (side, _c) in sorted(verdicts.items())
+        kept = [(side, a, d) for a, (side, _c) in sorted(verdicts.items())
                 for st, d in [self._frida_got.get(_tool('wave')._addr_key(a), ('', ''))]
-                if side == 'ours' and st == 'different']
-        entry += ''.join('- frida different, kept ours: %s %s\n' % kd for kd in kept)
+                if st == 'different']
+        entry += ''.join('- frida different, kept %s: %s %s\n' % skd for skd in kept)
         # Frequency-only differences (both kinds): a caller finding for the
         # ledger, never a verdict change or a park.
         entry += ''.join('- frida frequency only (a caller finding): 0x%s %s\n' % (k.upper(), n)
