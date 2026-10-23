@@ -8,14 +8,25 @@ draft_case and write_cases turn a pure function into an oracle case in the
 shape of oracle/cases/rand.cpp; probe_verdicts reads what `oracle.py run`
 reported for those cases. Nothing here runs the oracle, the game or any exe.
 
+Some rows are decided by tracing instead: hook_table builds one Frida hook table
+per target from the rows' signatures and our build's .map, frida_run drives
+tools/frida/probe.py (its subprocess injectable; nothing here launches a game
+on its own), and frida_verdicts compares the two traces with trace_diff.
+
 Python 3 standard library only; run under `python3 -I`.
 """
+import hashlib
 import json
 import os
 import re
+import subprocess
+import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CASES_DIR = os.path.join(ROOT, 'oracle', 'cases')
+FRIDA_DIR = os.path.join(ROOT, 'tools', 'frida')
+sys.path.insert(0, FRIDA_DIR)
+import trace_diff  # noqa: E402
 
 SECTION = '## Decompiled (Ghidra)'
 
@@ -31,7 +42,10 @@ TYPE_NAMES = frozenset({
     'uchar', 'ushort', 'uint', 'ulong', 'longlong', 'ulonglong', 'byte',
     'sbyte', 'word', 'dword', 'qword', 'size_t', 'intptr_t', 'uintptr_t',
     'wchar_t', 'int8_t', 'int16_t', 'int32_t', 'int64_t', 'uint8_t',
-    'uint16_t', 'uint32_t', 'uint64_t'})
+    'uint16_t', 'uint32_t', 'uint64_t',
+    # Win32 integer typedefs (no HANDLE or other pointer types).
+    'DWORD', 'BOOL', 'UINT', 'WORD', 'BYTE', 'LONG', 'ULONG', 'SHORT',
+    'USHORT', 'CHAR', 'UCHAR', 'INT'})
 TYPE_PATTERN = re.compile(r'^(?:(?:u?int|undefined|float|code)\d*)$')
 # Ghidra pseudo-operations: pure arithmetic helpers, not calls.
 PSEUDO_OPS = re.compile(
@@ -83,6 +97,8 @@ def _is_deref(line):
                 if depth == 0:
                     break
                 j -= 1
+            if j >= 0 and re.search(r'\bsizeof\s*$', before[:j]):
+                continue  # sizeof(T) * x is a multiplication, not a cast and a read
             if j >= 0 and _is_cast(before[j + 1:-1]):
                 return True
             continue
@@ -114,6 +130,8 @@ def _body_locals(body):
         stmt = stmt.strip()
         if not stmt or not (stmt[0].isalpha() or stmt[0] == '_'):
             continue  # a cast or expression, not a declaration
+        if '(' in stmt:
+            continue  # a call or cast in it: its commas and names are not declarators
         words = re.findall(r'[A-Za-z_]\w*|\*|,|=', stmt)
         i = 0
         while i < len(words) and (words[i] in QUALIFIERS or _is_type(words[i])):
@@ -122,6 +140,7 @@ def _body_locals(body):
                 and not any(w in ('signed', 'unsigned') for w in words[:i]):
             continue
         for piece in re.split(r',', ' '.join(words[i:])):
+            piece = piece.split('=', 1)[0]  # an initializer's names are not declared
             m = re.match(r'^[\s*]*([A-Za-z_]\w*)', piece)
             if m:
                 names.add(m.group(1))
@@ -130,6 +149,9 @@ def _body_locals(body):
 
 def _offence(line, allowed, pure_names):
     """The first reason this body line is impure, or None."""
+    if re.fullmatch(r'LAB_\w+:', line):
+        return None
+    line = re.sub(r'\bgoto\s+LAB_\w+\s*;', ';', line)
     m = re.search(r'DAT_[0-9a-fA-F]+', line)
     if m:
         return 'global %s' % m.group(0)
@@ -421,3 +443,235 @@ def probe_verdicts(report_json, batch_id=None):
         if m and (batch_id is None or m.group(1) == batch_id):
             verdicts['0x' + m.group(2).upper()] = _status(case)
     return verdicts
+
+
+# ---- hook tables and the batched Frida run -------------------------------------
+
+HOOK_MAX = 200
+FRIDA_TYPES = {
+    'int': 's32', 'long': 's32', 'int32_t': 's32', 'uint': 'u32', 'ulong': 'u32',
+    'uint32_t': 'u32', 'dword': 'u32', 'undefined4': 'u32', 'short': 's16',
+    'int16_t': 's16', 'ushort': 'u16', 'uint16_t': 'u16', 'word': 'u16',
+    'undefined2': 'u16', 'char': 'u8', 'uchar': 'u8', 'byte': 'u8', 'bool': 'u8',
+    'undefined1': 'u8', 'uint8_t': 'u8', 'float': 'f32',
+}
+FRIDA_CONVS = {'__thiscall': 'thiscall', '__cdecl': 'cdecl', '__stdcall': 'stdcall'}
+MAP_LOAD = re.compile(r'Preferred load address is\s+([0-9A-Fa-f]+)')
+MAP_PUBLIC = re.compile(r'^\s*[0-9A-Fa-f]{4}:[0-9A-Fa-f]{8}\s+(\S+)\s+([0-9A-Fa-f]{8,16})\b')
+
+
+def hook_name(address):
+    """The hook (and trace tag) name of a row: the same on both targets."""
+    addr = address[2:] if address.lower().startswith('0x') else address
+    return 'fn_' + addr.upper()
+
+
+def _frida_type(text):
+    text = re.sub(r'\bconst\b', '', text).strip()
+    if '*' in text or '&' in text:
+        return 'ptr'
+    words = text.split()
+    if words[:1] in (['unsigned'], ['signed']) and len(words) > 1:
+        base = FRIDA_TYPES.get(words[1].lower(), 'u32')
+        return base if words[0] == 'signed' else base.replace('s', 'u')
+    return FRIDA_TYPES.get(text.lower(), 'u32')
+
+
+def _hook_signature(signature):
+    """(conv, args, ret or None) of a C signature. Parameters that are the
+    implicit this are dropped for thiscall; void returns log no value."""
+    m = SIGNATURE.match(signature or '')
+    if not m:
+        return None
+    head = m.group('head')
+    conv = 'cdecl'
+    for key, value in FRIDA_CONVS.items():
+        if key in head:
+            conv = value
+            head = head.replace(key, ' ')
+    head = re.sub(r'\s+', ' ', head).strip()
+    ret = None if head in ('void', '') else _frida_type(head)
+    raw = m.group('params').strip()
+    args = []
+    if raw and raw != 'void':
+        for i, part in enumerate(raw.split(',')):
+            part = part.strip()
+            if part == '...':
+                continue
+            pm = re.match(r'^(.*?)(?:\s*\b([A-Za-z_]\w*))?$', part)
+            ptype = pm.group(1).strip() if pm.group(1).strip() else part
+            if ptype.lower() in FRIDA_TYPES or '*' in ptype or ' ' in ptype:
+                pass
+            else:
+                ptype = part  # a lone type name such as "uint"
+            if conv == 'thiscall' and i == 0 and pm.group(2) == 'this':
+                continue
+            args.append(_frida_type(ptype))
+    return conv, args, ret
+
+
+def parse_map(text):
+    """{decorated name: rva} from an MSVC link map: the Rva+Base column of the
+    publics minus the preferred load address."""
+    base = 0x400000
+    m = MAP_LOAD.search(text)
+    if m:
+        base = int(m.group(1), 16)
+    out = {}
+    for line in text.split('\n'):
+        m = MAP_PUBLIC.match(line)
+        if m:
+            out.setdefault(m.group(1), int(m.group(2), 16) - base)
+    return out
+
+
+def _map_rva(name, publics):
+    """The rva of Class::Method (decorated ?Method@Class@@...) or a plain
+    name, or None. An ambiguous overload set takes the first public."""
+    parts = name.split('::')
+    prefix = '?' + '@'.join(reversed(parts)) + '@@'
+    for decorated, rva in publics.items():
+        if decorated.startswith(prefix) or (len(parts) == 1 and decorated in (name, '_' + name)):
+            return rva
+    return None
+
+
+def hook_table(rows, signatures, our_map, scenarios):
+    """The hook tables for one batch: {'original': {'hooks': [...]}, 'ours':
+    {'hooks': [...]}, 'scenarios': [...], 'skipped': {addr: reason}}.
+
+    rows are dicts with address and name; signatures maps address to a C
+    signature; our_map is the build's .map text (or a {name: rva} dict). Each
+    row gets one hook per target, named fn_<ADDR> so the traces line up: the
+    original's by absolute addr, ours by rva. A row without a parseable
+    signature or without a map entry for ours is listed in skipped and has no
+    hook on either side (a one-sided table could only say 'different')."""
+    publics = parse_map(our_map) if isinstance(our_map, str) else dict(our_map)
+    original, ours, skipped = [], [], {}
+    for row in rows:
+        address = row['address']
+        key = '0x' + address[2:].upper() if address.lower().startswith('0x') else '0x' + address.upper()
+        sig = _hook_signature(signatures.get(address) or signatures.get(key))
+        if sig is None:
+            skipped[key] = 'the signature does not parse'
+            continue
+        if isinstance(our_map, str):
+            rva = _map_rva(row['name'], publics)
+        else:
+            rva = publics.get(row['name'])
+        if rva is None:
+            skipped[key] = 'no entry for %s in our map' % row['name']
+            continue
+        conv, args, ret = sig
+        hook = {'name': hook_name(key), 'conv': conv, 'args': args}
+        if ret:
+            hook['ret'] = ret
+        hook['max'] = HOOK_MAX
+        original.append(dict(hook, addr=key))
+        ours.append(dict(hook, rva=hex(rva)))
+    return {'original': {'hooks': original}, 'ours': {'hooks': ours},
+            'scenarios': list(scenarios), 'skipped': skipped}
+
+
+def _read_events(path):
+    events = []
+    try:
+        with open(path, encoding='utf-8', errors='replace') as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        row = json.loads(line)
+                    except ValueError:
+                        continue
+                    if isinstance(row, dict):
+                        events.append(row)
+    except OSError:
+        pass
+    return events
+
+
+def frida_run(batch_id, table, scenarios, run=subprocess.run, root=ROOT):
+    """{scenario: (original events, ours events)}: for each scenario, both
+    targets run through `probe.py run` (one sandbox each) with this batch's
+    hook tables, and the traces they leave under runs/<stamp>/replay/ are read
+    back. A side that left no trace gives []. `run` is injectable (the tests
+    never launch anything); the real call is made by hand on the Windows
+    machine under the one-launch rules."""
+    import tempfile
+    probe = os.path.join(FRIDA_DIR, 'probe.py')
+    traces = {}
+    with tempfile.TemporaryDirectory() as tmp:
+        tables = {}
+        for target, side in (('original', 'original'), ('ours', 'ours')):
+            path = os.path.join(tmp, 'hooks-%s-%s.json' % (batch_id, side))
+            with open(path, 'w', encoding='utf-8', newline='\n') as f:
+                json.dump(table[side], f, indent=1)
+            tables[target] = path
+        for scenario in scenarios:
+            sides = []
+            for target in ('original', 'ours'):
+                out = 'frida-%s-%s-%s.jsonl' % (batch_id, scenario, target)
+                cmd = [sys.executable, '-I', probe, 'run', '--target', target,
+                       '--probe', tables[target], '--scenario', scenario, '--out', out]
+                done = run(cmd, capture_output=True, text=True, cwd=root)
+                folder = None
+                for line in (getattr(done, 'stdout', '') or '').splitlines():
+                    if line.startswith('probe: ') and line[7:].startswith('runs'):
+                        folder = line[7:].strip()
+                sides.append(_read_events(os.path.join(root, folder, 'replay', out))
+                             if folder else [])
+            traces[scenario] = (sides[0], sides[1])
+    return traces
+
+
+def _row_events(events, tag):
+    """The events of one hooked function (entry and return), plus any terminal
+    failure event (a crash never passes)."""
+    keep = {tag, tag + '_ret'} | trace_diff.TERMINAL_FAILURE_TAGS
+    return [e for e in events if str(e.get('tag', '')).lower() in keep
+            or str(e.get('tag', '')) in keep]
+
+
+def frida_verdicts(traces, rows):
+    """{'0x<ADDR>': ('equal'|'different'|'not-exercised', detail)} from the
+    {scenario: (orig, ours)} traces frida_run returns. A row is exercised in a
+    scenario when either side logged one of its hooks; across scenarios any
+    difference wins, otherwise a row exercised anywhere is equal, and one
+    exercised nowhere is not-exercised (and stays as it is)."""
+    verdicts = {}
+    for row in rows:
+        address = row['address']
+        key = '0x' + (address[2:] if address.lower().startswith('0x') else address).upper()
+        tag = hook_name(key)
+        different, equal = [], []
+        for scenario, (orig, ours) in traces.items():
+            o = [e for e in _row_events(orig, tag) if str(e.get('tag', '')).startswith(tag)]
+            r = [e for e in _row_events(ours, tag) if str(e.get('tag', '')).startswith(tag)]
+            if not o and not r:
+                continue
+            code = trace_diff.compare(_row_events(orig, tag), _row_events(ours, tag))
+            if code == 0:
+                equal.append(scenario)
+            else:
+                different.append('%s (%s)' % (scenario, 'compare=%d' % code))
+        if different:
+            verdicts[key] = ('different', 'differs in ' + ', '.join(different))
+        elif equal:
+            verdicts[key] = ('equal', 'identical in ' + ', '.join(equal))
+        else:
+            verdicts[key] = ('not-exercised', 'no hook fired in %s' % (', '.join(traces) or 'any scenario'))
+    return verdicts
+
+
+def _trace_hash(events):
+    blob = json.dumps(events, sort_keys=True, separators=(',', ':')).encode('utf-8')
+    return hashlib.sha256(blob).hexdigest()
+
+
+def trace_source(probe, orig_events, ours_events):
+    """The trace_source of a `kind: trace` evidence document, in the form
+    tools/check_evidence.py accepts: frida <probe> orig:<sha256>
+    ours:<sha256> compare=0. Only meaningful for an equal verdict."""
+    return 'frida %s orig:%s ours:%s compare=0' % (
+        probe, _trace_hash(orig_events), _trace_hash(ours_events))
