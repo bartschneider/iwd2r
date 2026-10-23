@@ -70,6 +70,7 @@ import winsandbox
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RUNS = os.path.join(ROOT, 'runs')
+ATTEMPT_FILE = 'attempt-gltrace.json'
 SCENARIOS = os.path.join(ROOT, 'scenarios')
 DOCS = os.path.join(ROOT, 'docs', 'renderer', 'wso', 'gltrace')
 
@@ -1556,9 +1557,6 @@ def run(args):
         raise SystemExit('gltrace: this run opens the game on the desktop; '
                          'set %s=1 to allow it (the user must be at the PC)'
                          % DESKTOP_OK)
-    refusal = attempt.gate(RUNS, 'gltrace', args.new_attempt)
-    if refusal:
-        raise SystemExit('gltrace: ' + refusal)
     now = datetime.datetime.now()
     run_dir = make_run_dir(now)
     wrapper = find_wrapper(args.apitrace)
@@ -1578,6 +1576,12 @@ def run(args):
         raise SystemExit('gltrace: no icewind2.ini in %s (the run rewrites '
                          'its aliases, so there must be one to rewrite)'
                          % game)
+    # Just before the launch: the checks above cost nothing to repeat.
+    refusal = attempt.gate(RUNS, 'gltrace', args.new_attempt,
+                           name=ATTEMPT_FILE)
+    if refusal:
+        shutil.rmtree(run_dir, ignore_errors=True)
+        raise SystemExit('gltrace: ' + refusal)
     ini_before = os.path.join(run_dir, 'icewind2.ini.before')
     shutil.copy2(ini, ini_before)
     with open(ini, 'rb') as f:
@@ -1700,7 +1704,11 @@ def parse_args(argv):
                         help='start a new attempt: reset the launch count '
                              '(%d launches per attempt) and record why'
                              % attempt.LIMIT)
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    bad = attempt.reason_error(args.new_attempt)
+    if bad:
+        parser.error(bad)
+    return args
 
 
 def main(argv):

@@ -2828,6 +2828,10 @@ LOAD_HELP = ('start from this save folder (NNNNNNNNN-Name, with '
              'saves the run makes are kept in the run folder\'s saves/')
 
 
+NEW_ATTEMPT_HELP = ('start a new attempt: reset the sandbox launch count and '
+                    'record why')
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     sub = ap.add_subparsers(dest='command', required=True)
@@ -2887,6 +2891,7 @@ def main(argv=None):
                         'ReadFile off the main thread sleeps MS ms first (a '
                         'slow disk)')
     record.add_argument('--host', action='store_true', help=HOST_HELP)
+    record.add_argument('--new-attempt', metavar='REASON', help=NEW_ATTEMPT_HELP)
     record.add_argument('--load', metavar='SAVE', help=LOAD_HELP)
     record.set_defaults(run=cmd_replay_record)
     compare = replay_sub.add_parser(
@@ -2908,6 +2913,7 @@ def main(argv=None):
     compare.add_argument('--no-build', action='store_true',
                          help='use the existing build/linux-gcc/iwd2r')
     compare.add_argument('--host', action='store_true', help=HOST_HELP)
+    compare.add_argument('--new-attempt', metavar='REASON', help=NEW_ATTEMPT_HELP)
     compare.add_argument('--load', metavar='SAVE', help=LOAD_HELP)
     compare.set_defaults(run=cmd_replay_compare)
     cross = replay_sub.add_parser(
@@ -2946,8 +2952,16 @@ def main(argv=None):
     cross.add_argument('--no-build', action='store_true',
                        help='use the existing build/linux-gcc/iwd2r')
     cross.add_argument('--host', action='store_true', help=HOST_HELP)
+    cross.add_argument('--new-attempt', metavar='REASON', help=NEW_ATTEMPT_HELP)
     cross.set_defaults(run=cmd_replay_crossload)
     args = ap.parse_args(argv)
+    if getattr(args, 'new_attempt', None) is not None:
+        import attempt
+        import winsandbox
+        bad = attempt.reason_error(args.new_attempt)
+        if bad:
+            ap.error(bad)
+        winsandbox.set_new_attempt(args.new_attempt)
     return args.run(args)
 
 

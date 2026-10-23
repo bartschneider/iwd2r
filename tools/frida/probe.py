@@ -418,6 +418,9 @@ def add_side_args(p):
                         '(default iwd2r.exe)')
     p.add_argument('--no-loaded', action='store_true',
                    help='drop the loaded observation')
+    p.add_argument('--new-attempt', metavar='REASON',
+                   help='start a new attempt: reset the sandbox launch '
+                        'count and record why')
     p.add_argument('--dry', action='store_true',
                    help='stage and print the plan without starting a '
                         'sandbox (same as the plan subcommand)')
@@ -433,6 +436,12 @@ def main(argv=None):
         add_side_args(p)
         p.set_defaults(fn=run, dry=name == 'plan')
     ns = ap.parse_args(argv)
+    if ns.new_attempt is not None:
+        import attempt
+        bad = attempt.reason_error(ns.new_attempt)
+        if bad:
+            ap.error(bad)
+        winsandbox.set_new_attempt(ns.new_attempt)
     return ns.fn(ns)
 
 

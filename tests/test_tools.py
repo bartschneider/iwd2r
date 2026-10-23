@@ -4388,7 +4388,7 @@ class SharedLockTest(unittest.TestCase):
         scenarios = [(path, realinput.load_scenario(path))
                      for path in scenario_files()[:2]]
         base_dir = os.path.join(self.tmp, 'runs', 'stamp')
-        args = types.SimpleNamespace(timeout=10, no_build=True)
+        args = types.SimpleNamespace(timeout=10, no_build=True, new_attempt=None)
         with LockRecorder.patch(play, locks), \
                 mock.patch.object(play, 'winsandbox', sandbox), \
                 mock.patch.object(play, 'ROOT', self.tmp), \
@@ -11187,7 +11187,7 @@ class DriverTest(unittest.TestCase):
         self.assertIn('no limit', probs[0])
         self.assertIn('limit 201', probs[1])
         self.assertIn('cat', probs[2])
-        self.assertIn('201 lines', probs[3])
+        self.assertIn('sed of', probs[3])
 
     def test_transcript_allows_short_read(self):
         path = self._tcalls(
@@ -11259,6 +11259,114 @@ class DriverTest(unittest.TestCase):
         self.assertIn('sync', order)
         self.assertEqual(self.git('rev-parse', 'first').stdout,
                          self.git('rev-parse', 'p3/wso-b011').stdout)
+
+    def test_transcript_does_not_flag_look_alikes(self):
+        for cmd in ('git cat-file -p e8dd16a7:src/A.cpp', 'grep -n cat src/A.cpp',
+                    'cat src/A.cpp | head -40', 'grep -rn WindowsSandbox tools',
+                    'ls runs/*/run.wsb', "cat src/A.cpp | sed -n '1,50p'"):
+            self.assertEqual(self._bash(cmd), [], cmd)
+        self.assertEqual(len(self._bash('cat src/A.cpp | wc -l')), 1)
+        self.assertEqual(len(self._bash('cat src/A.cpp | head -300')), 1)
+
+    def test_mechanical_checks_refuse_dump_decided_fork_or_neither(self):
+        d = self._mc_repo({'76D370': 'corroborated by WSO at abc',
+                           '401000': 'corroborated by WSO at abc'})
+        batch = self._mc_batch()
+        batch['rows'] = batch['rows'][:2]
+        with mock.patch.object(driver, '_vanilla_exe', return_value='/nonexistent'):
+            probs = driver.mechanical_checks(
+                batch, d, {'0x76D370': ('fork', 'dump-3'), '0x401000': ('neither', 'readout-401000')},
+                run=self._mc_run(0, []))
+            ok = driver.mechanical_checks(
+                batch, d, {'0x76D370': ('ours', 'dump-3'), '0x401000': ('fork', 'probe-4')},
+                run=self._mc_run(0, []))
+        self.assertEqual(ok, [])
+        self.assertEqual(len(probs), 2, probs)
+        self.assertIn('needs a probe, replay or trace case', probs[0])
+        self.assertIn('(dump-3)', ' '.join(probs))
+
+    def _twork(self, transcripts):
+        """A _BatchWorker whose nth run leaves transcript transcripts[n]."""
+        outer = self
+        paths = list(transcripts)
+
+        class W(self._BatchWorker):
+            def run(self, brief, cwd):
+                res = super().run(brief, cwd)
+                n = len(self.briefs) - 1
+                path = paths[min(n, len(paths) - 1)]
+                return res._replace(transcript=path)
+        return W(credits=0.0)
+
+    def _ledger_text(self, d):
+        with open(d.ledger_path) as f:
+            return f.read()
+
+    def test_whole_read_is_a_ledger_line_only(self):
+        t = self._tcalls(('Read', {'file_path': '/wt/src/F11.cpp'}))
+        w = self._twork([t])
+        d = self._pool_driver(self._two_pools()[:1], {'a': w}, ids=('b011',))
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 0)
+        self.assertEqual(self._status(d)['exceptions'], {})
+        self.assertIn('transcript: whole read of src/F11.cpp', self._ledger_text(d))
+
+    def test_missing_transcript_is_a_ledger_line(self):
+        w = self._BatchWorker(credits=0.0)
+        d = self._pool_driver(self._two_pools()[:1], {'a': w}, ids=('b011',))
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 0)
+        self.assertIn('transcript: none', self._ledger_text(d))
+
+    def test_wso_ref_or_launch_in_a_transcript_is_an_exception_without_a_fix_round(self):
+        for cmd in ('git show wso/main:src/F11.cpp', 'WindowsSandbox.exe run.wsb'):
+            t = self._tcalls(('Bash', {'command': cmd}))
+            w = self._twork([t])
+            d = self._pool_driver(self._two_pools()[:1], {'a': w}, ids=('b011',))
+            with mock.patch.dict(os.environ, self.GIT_ENV):
+                d.run()
+            exc = self._status(d)['exceptions']['b011']
+            self.assertEqual(exc['stage'], 'transcript', cmd)
+            self.assertEqual(len(w.briefs), 1)          # no fix round
+            self.assertEqual(self._state_of(d, 'b011')['status'], 'assigned')
+
+    def _state_of(self, d, bid):
+        with open(d.state_path) as f:
+            return json.load(f)['batches'][bid]
+
+    def test_every_transcript_is_checked_not_only_the_fix_rounds(self):
+        bad = self._tcalls(('Bash', {'command': 'git log wso/main'}))
+        clean = self._tcalls(('Bash', {'command': 'ls'}))
+        # The first run is the offender; the fix round's transcript is clean.
+        w = self._twork([bad, clean])
+        d = self._pool_driver(self._two_pools()[:1], {'a': w}, ids=('b011',))
+        calls = []
+        d.mechanical_checks = lambda *a, **kw: calls.append(1) or ['fix me']
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            d.run()
+        self.assertEqual(self._status(d)['exceptions']['b011']['stage'], 'transcript')
+        self.assertEqual(calls, [])
+        # A bad transcript in the fix round is caught too.
+        w = self._twork([clean, bad])
+        d = self._pool_driver(self._two_pools()[:1], {'a': w}, ids=('b011',))
+        d.mechanical_checks = lambda *a, **kw: ['fix me']
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            d.run()
+        self.assertEqual(self._status(d)['exceptions']['b011']['stage'], 'transcript')
+        self.assertEqual(len(w.briefs), 2)
+
+    def test_frida_run_passes_new_attempt(self):
+        truth = driver._tool('truth')
+        cmds = []
+
+        def fake(cmd, **kw):
+            cmds.append(cmd)
+            return subprocess.CompletedProcess(cmd, 1, '', '')
+        truth.frida_run('b011', {'original': {}, 'ours': {}}, ['s1'], run=fake,
+                        root=self._tmpdir(), loaded_rva='0x1')
+        self.assertTrue(cmds)
+        for c in cmds:
+            self.assertEqual(c[c.index('--new-attempt') + 1], 'driver frida b011')
 
     def test_union_merge_attribute_lets_parallel_probe_lines_merge(self):
         anchor = driver._tool('truth').CMAKE_ANCHOR
@@ -12332,6 +12440,19 @@ class WaveCloseRulesTest(unittest.TestCase):
         rc, out = self.close()
         self.assertEqual(rc, 1, out)
 
+    def test_sync_base_survives_pull_rebase_config_and_a_dirty_tree(self):
+        self.ready()
+        other = self.upstream()
+        self.git('config', 'pull.rebase', 'true')
+        path = os.path.join(self.root, 'docs', 'wso', 'disagreements.json')
+        with open(path, 'a') as f:
+            f.write('\n')                       # a dirty, unrelated tracked file
+        self.assertIsNone(self.wave._sync_base(self.root, 'first'))   # nothing incoming
+        x = self.push_upstream(other)
+        self.assertIsNone(self.wave._sync_base(self.root, 'first'))   # incoming
+        self.assertEqual(self.first_sha(), x)
+        self.assertTrue(os.path.isfile(os.path.join(self.root, 'upstream.txt')))
+
     def test_sync_base_without_upstream_is_a_no_op(self):
         self.ready()
         self.assertIsNone(self.wave._sync_base(self.root, 'first'))
@@ -12408,6 +12529,73 @@ class AttemptTest(unittest.TestCase):
             f.write('{broken')
         self.assertIsNone(self.attempt.launch(folder, 'x'))
         self.assertIsNone(self.attempt.launch(os.path.join(self.tmp, 'new', 'runs'), 'x'))
+
+    def test_counters_are_separate_files(self):
+        self.attempt.launch(self.tmp, 'play', name='attempt-play.json')
+        self.attempt.launch(self.tmp, 'gltrace', name='attempt-gltrace.json')
+        self.assertEqual(sorted(os.listdir(self.tmp)),
+                         ['attempt-gltrace.json', 'attempt-play.json'])
+
+    def test_empty_new_attempt_reason_exits_2(self):
+        gltrace = load_tool('gltrace')
+        play = load_tool('play')
+        oracle = load_tool('oracle')
+        for fn, argv in ((gltrace.parse_args, ['s', '--new-attempt', '']),
+                         (play.parse_args, ['--linux', '--new-attempt', ' ']),
+                         (oracle.main, ['replay', 'record', 'x', '--new-attempt', ''])):
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as cm:
+                fn(argv)
+            self.assertEqual(cm.exception.code, 2)
+            self.assertIn('needs a reason', err.getvalue())
+
+    def test_winsandbox_start_counts_once_per_process_and_refuses_at_the_limit(self):
+        from unittest import mock
+        ws = load_tool('winsandbox')
+        launches = []
+        host = os.path.join(self.tmp, 'host')
+        os.makedirs(host)
+        wsb = os.path.join(host, 'run.wsb')
+        patches = [mock.patch.object(ws, 'sandbox_running', lambda: False),
+                   mock.patch.object(ws, 'wslpath_w', lambda p: p),
+                   mock.patch.object(ws, 'RUNS_ROOT', self.tmp),
+                   mock.patch.object(ws, '_attempt', {'counted': False, 'reason': None}),
+                   mock.patch.object(ws.subprocess, 'run',
+                                     lambda *a, **k: launches.append(a))]
+        for pt in patches:
+            pt.start()
+            self.addCleanup(pt.stop)
+        ws.start_sandbox(host, wsb, lambda m: None)
+        ws.start_sandbox(host, wsb, lambda m: None)    # the same process: one launch
+        self.assertEqual(len(launches), 2)
+        with open(os.path.join(self.tmp, 'attempt-winsandbox.json')) as f:
+            self.assertEqual(json.load(f)['launches'], 1)
+        # A new process at the limit is refused before anything launches.
+        with open(os.path.join(self.tmp, 'attempt-winsandbox.json'), 'w') as f:
+            json.dump({'launches': 2, 'limit': 2, 'history': []}, f)
+        ws._attempt.update(counted=False, reason=None)
+        with self.assertRaises(RuntimeError) as cm:
+            ws.start_sandbox(host, wsb, lambda m: None)
+        self.assertIn('launch limit reached (2 of 2)', str(cm.exception))
+        self.assertEqual(len(launches), 2)
+        ws.set_new_attempt('driver frida b011')
+        ws.start_sandbox(host, wsb, lambda m: None)
+        self.assertEqual(len(launches), 3)
+        with open(os.path.join(self.tmp, 'attempt-winsandbox.json')) as f:
+            d = json.load(f)
+        self.assertEqual((d['launches'], d['history'][-1]['reason']), (1, 'driver frida b011'))
+
+    def test_play_counts_once_per_process(self):
+        from unittest import mock
+        play = load_tool('play')
+        args = play.parse_args(['--linux', '--headless'])
+        with mock.patch.object(play, '_LAUNCH_COUNTED', False), \
+                mock.patch.object(play, 'launch_refusal',
+                                  lambda a: calls.append(1)) as _:
+            calls = []
+            play.count_launch(args)
+            play.count_launch(args)
+        self.assertEqual(calls, [1])
 
     def test_launchers_take_new_attempt_and_check_the_counter(self):
         gltrace = load_tool('gltrace')

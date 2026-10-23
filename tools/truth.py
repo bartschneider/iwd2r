@@ -703,7 +703,8 @@ def frida_run(batch_id, table, scenarios, run=subprocess.run, root=ROOT, loaded_
             for target, key in (('original', 'orig'), ('ours', 'ours')):
                 out = 'frida-%s-%s-%s.jsonl' % (batch_id, scenario, target)
                 cmd = [sys.executable, '-I', probe, 'run', '--target', target,
-                       '--probe', tables[target], '--scenario', scenario, '--out', out]
+                       '--probe', tables[target], '--scenario', scenario, '--out', out,
+                       '--new-attempt', 'driver frida %s' % batch_id]
                 if target == 'ours':
                     cmd += ['--loaded-rva', loaded_rva]
                 done = run(cmd, capture_output=True, text=True, cwd=root)

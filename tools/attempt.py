@@ -5,7 +5,7 @@ lives in that root as attempt.json: {launches, limit, history}.  A launch
 past the limit is refused until the caller says why a new attempt starts
 (--new-attempt REASON), which zeroes the count and records the reason.
 
-    launch(folder, tool, limit=2) -> None to go ahead, or the refusal text
+    launch(folder, tool, limit=2, name='attempt.json') -> None to go ahead, or the refusal text
     reset(folder, reason)         -> the new attempt.json contents
 """
 import datetime
@@ -22,13 +22,13 @@ def _now():
         '%Y-%m-%dT%H:%M:%SZ')
 
 
-def _path(folder):
-    return os.path.join(folder, NAME)
+def _path(folder, name=NAME):
+    return os.path.join(folder, name)
 
 
-def _load(folder, limit):
+def _load(folder, limit, name=NAME):
     try:
-        with open(_path(folder), encoding='utf-8') as f:
+        with open(_path(folder, name), encoding='utf-8') as f:
             data = json.load(f)
         if not isinstance(data, dict):
             raise ValueError('not an object')
@@ -43,14 +43,14 @@ def _load(folder, limit):
     return data
 
 
-def _save(folder, data):
+def _save(folder, data, name=NAME):
     os.makedirs(folder, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=folder, prefix='.attempt-', suffix='.tmp')
     try:
         with os.fdopen(fd, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2, sort_keys=True)
             f.write('\n')
-        os.replace(tmp, _path(folder))
+        os.replace(tmp, _path(folder, name))
     except BaseException:
         try:
             os.unlink(tmp)
@@ -59,34 +59,41 @@ def _save(folder, data):
         raise
 
 
-def launch(folder, tool, limit=LIMIT):
+def launch(folder, tool, limit=LIMIT, name=NAME):
     """Count one launch of `tool` in `folder`.  None when it may go ahead,
     else the refusal; a refused call launches nothing and counts nothing."""
-    data = _load(folder, limit)
+    data = _load(folder, limit, name)
     data['limit'] = limit
     if data['launches'] >= limit:
         return (f'launch limit reached ({data["launches"]} of {limit}) for '
                 f'this attempt; rerun with --new-attempt "<why>"')
     data['launches'] += 1
     data['last'] = {'at': _now(), 'tool': tool}
-    _save(folder, data)
+    _save(folder, data, name)
     return None
 
 
-def reset(folder, reason):
+def reset(folder, reason, name=NAME):
     """Start a new attempt: zero the count, record why."""
     if not (reason or '').strip():
         raise ValueError('--new-attempt needs a reason')
-    data = _load(folder, LIMIT)
+    data = _load(folder, LIMIT, name)
     data['launches'] = 0
     data['history'].append({'at': _now(), 'reason': reason})
-    _save(folder, data)
+    _save(folder, data, name)
     return data
 
 
-def gate(folder, tool, new_attempt=None, limit=LIMIT):
+def gate(folder, tool, new_attempt=None, limit=LIMIT, name=NAME):
     """What a launcher calls before it launches: with a --new-attempt
     reason the count is reset first.  None to go ahead, else the refusal."""
     if new_attempt is not None:
-        reset(folder, new_attempt)
-    return launch(folder, tool, limit)
+        reset(folder, new_attempt, name)
+    return launch(folder, tool, limit, name)
+
+
+def reason_error(reason):
+    """The message for an empty --new-attempt reason, else None."""
+    if reason is not None and not reason.strip():
+        return '--new-attempt needs a reason, e.g. --new-attempt "fixed the scenario"'
+    return None

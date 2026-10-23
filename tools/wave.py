@@ -801,7 +801,7 @@ def _tally_line(batch):
 
 
 def _sync_base(repo, base):
-    """None, or why not: `git pull --ff-only` in the worktree that has
+    """None, or why not: `git pull --no-rebase --ff-only` in the worktree that has
     `base` checked out, so a merge into it starts from what the upstream
     holds (ruling R17).  Nothing to pull when no worktree has `base`
     checked out or the branch has no upstream."""
@@ -813,7 +813,7 @@ def _sync_base(repo, base):
                         capture_output=True, text=True)
     if up.returncode != 0:
         return None
-    r = subprocess.run(['git', '-C', wt, 'pull', '--ff-only', '-q'],
+    r = subprocess.run(['git', '-C', wt, 'pull', '--no-rebase', '--ff-only', '-q'],
                        capture_output=True, text=True)
     if r.returncode != 0:
         msg = ' '.join(((r.stderr or '') + (r.stdout or '')).split())

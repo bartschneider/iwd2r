@@ -13,6 +13,7 @@ import json
 import importlib.util
 import os
 import random
+import shlex
 import re
 import queue as queue_mod
 import subprocess
@@ -390,22 +391,53 @@ def _tail(proc, n=5):
 # The runners a worker may launch the game, a sandbox or a trace with.
 HOUSE_RUNNERS = ('tools/play.py', 'tools/gltrace.py')
 READ_LIMIT = 200      # lines of a covered source file one read may take
-_SEGMENT = re.compile(r'&&|\|\||;|\||\n')
+_SEGMENT = re.compile(r'&&|\|\||;|\n')
 _WSO_REF = re.compile(r"(?:(?<=[\s'\"=:.^~@])|(?<=remotes/)|(?<=heads/))wso/")
-_SED_SPAN = re.compile(r"\bsed\s+(?:-\w+\s+)*['\"]?(\d+),(\d+)p")
-_HEAD_TAIL = re.compile(r"\b(?:head|tail)\s+(?:-n\s*|-)(\d+)\b")
+_SED_SPAN = re.compile(r"(\d+),(\d+)p")
 _LAUNCH = re.compile(r'\.wsb\b|WindowsSandbox|Start-Process', re.I)
+_LAUNCH_SHELLS = ('cmd', 'powershell', 'pwsh', 'explorer', 'wsl', 'bash', 'sh')
 
 
-def _is_runner(segment):
+def _is_runner(text):
     for r in HOUSE_RUNNERS:
-        if re.search(r'\bpython3\s+-I\s+(?:\S*/)?%s\b' % re.escape(r), segment):
+        if re.search(r'\bpython3\s+-I\s+(?:\S*/)?%s\b' % re.escape(r), text):
             return True
     return False
 
 
-def _names(segment, covered):
-    return [c for c in covered if c in segment]
+def _words(stage):
+    """(command word, its arguments): leading VAR=value words and sudo
+    skipped; the command word without its directory or .exe."""
+    try:
+        toks = shlex.split(stage)
+    except ValueError:
+        toks = stage.split()
+    while toks and (re.match(r'^[A-Za-z_]\w*=', toks[0]) or toks[0] == 'sudo'):
+        toks = toks[1:]
+    if not toks:
+        return '', []
+    cw = os.path.basename(toks[0].replace('\\', '/')).lower()
+    if cw.endswith('.exe'):
+        cw = cw[:-4]
+    return cw, toks[1:]
+
+
+def _bound(cw, args):
+    """The most lines a head, tail or sed -n stage passes on, or None."""
+    if cw in ('head', 'tail'):
+        for i, a in enumerate(args):
+            m = re.match(r'^-n(\d+)$', a) or re.match(r'^-(\d+)$', a)
+            if m:
+                return int(m.group(1))
+            if a == '-n' and i + 1 < len(args) and args[i + 1].isdigit():
+                return int(args[i + 1])
+        return 10
+    if cw == 'sed' and '-n' in args:
+        for a in args:
+            m = _SED_SPAN.search(a)
+            if m:
+                return int(m.group(2)) - int(m.group(1)) + 1
+    return None
 
 
 def _short(text, n=100):
@@ -432,62 +464,78 @@ def _tool_calls(path):
                     yield block.get('name'), block['input']
 
 
-def transcript_checks(transcript_path, covered_files):
-    """One problem per forbidden worker tool call in the transcript: a git
-    command naming a wso/ ref (the pinned sha is allowed), a whole-file read
-    of a covered source file (no limit or over READ_LIMIT lines; cat, sed -n
-    spans and head/tail -n likewise), a .wsb, WindowsSandbox or
-    Start-Process launch outside HOUSE_RUNNERS."""
+def transcript_findings(transcript_path, covered_files):
+    """[(kind, problem, file)] for the forbidden tool calls in a worker's
+    transcript.  kind 'wso' (a git command naming a wso/ ref; the pinned
+    sha is allowed), 'launch' (a .wsb, WindowsSandbox or Start-Process
+    launch outside HOUSE_RUNNERS), 'read' (a whole-file read of a covered
+    source file: no Read limit or one over READ_LIMIT; cat, a sed -n span
+    or head/tail -n over READ_LIMIT; file is the covered file) or
+    'unreadable'.  cat and the launch words count only as a command word,
+    and a cat piped into a bounded head/tail/sed is bounded."""
     covered = [c for c in covered_files if c]
-    problems = []
+    out = []
     try:
         calls = list(_tool_calls(transcript_path))
     except OSError as e:
-        return ['transcript %s could not be read (%s); the rules about '
-                'tool calls cannot be checked' % (transcript_path, e)]
+        return [('unreadable', 'transcript %s could not be read (%s); the '
+                 'rules about tool calls cannot be checked'
+                 % (transcript_path, e), None)]
     for name, inp in calls:
         if name == 'Read':
             fp = str(inp.get('file_path', ''))
             hit = [c for c in covered if fp == c or fp.endswith('/' + c)]
             limit = inp.get('limit')
             if hit and (not isinstance(limit, int) or limit > READ_LIMIT):
-                problems.append(
-                    'Read of %s with %s: read a covered source file in '
-                    'slices of at most %d lines (offset and limit)' % (
-                        hit[0], 'no limit' if not isinstance(limit, int)
-                        else 'limit %d' % limit, READ_LIMIT))
+                out.append(('read', 'Read of %s with %s: read a covered '
+                            'source file in slices of at most %d lines '
+                            '(offset and limit)' % (
+                                hit[0], 'no limit' if not isinstance(limit, int)
+                                else 'limit %d' % limit, READ_LIMIT), hit[0]))
         elif name == 'Bash':
-            cmd = str(inp.get('command', ''))
-            for seg in _SEGMENT.split(cmd):
+            for seg in _SEGMENT.split(str(inp.get('command', ''))):
                 seg = seg.strip()
                 if not seg:
                     continue
-                if re.search(r'\bgit\b', seg) and _WSO_REF.search(seg):
-                    problems.append(
-                        'git command naming a wso/ ref (%s): read the fork '
-                        'only at the pinned sha, `git show <sha>:<path>`'
-                        % _short(seg))
-                if _LAUNCH.search(seg) and not _is_runner(seg):
-                    problems.append(
-                        'launch outside a house runner (%s): launch only '
-                        'through `python3 -I %s`' % (
-                            _short(seg), '` or `python3 -I '.join(HOUSE_RUNNERS)))
-                for c in _names(seg, covered):
-                    why = None
-                    if re.search(r'\bcat\b', seg):
-                        why = 'cat of %s' % c
-                    m = _SED_SPAN.search(seg)
-                    if m and int(m.group(2)) - int(m.group(1)) + 1 > READ_LIMIT:
-                        why = 'sed span of %d lines of %s' % (
-                            int(m.group(2)) - int(m.group(1)) + 1, c)
-                    m = _HEAD_TAIL.search(seg)
-                    if m and int(m.group(1)) > READ_LIMIT:
-                        why = '%s of %s' % (_short(m.group(0), 40), c)
-                    if why:
-                        problems.append(
-                            '%s: read a covered source file in slices of at '
-                            'most %d lines' % (why, READ_LIMIT))
-    return problems
+                stages = [_words(st) for st in seg.split('|')]
+                for i, (cw, args) in enumerate(stages):
+                    text = ' '.join(args)
+                    if cw == 'git' and _WSO_REF.search(' ' + text):
+                        out.append(('wso', 'git command naming a wso/ ref '
+                                    '(%s): read the fork only at the pinned '
+                                    'sha, `git show <sha>:<path>`'
+                                    % _short(seg), None))
+                    launch = cw in ('windowssandbox', 'start-process', 'start') \
+                        or (cw in _LAUNCH_SHELLS and _LAUNCH.search(text))
+                    if launch and not _is_runner(seg):
+                        out.append(('launch', 'launch outside a house runner '
+                                    '(%s): launch only through `python3 -I %s`'
+                                    % (_short(seg), '` or `python3 -I '.join(
+                                        HOUSE_RUNNERS)), None))
+                    for c in covered:
+                        if not any(a == c or a.endswith('/' + c) for a in args):
+                            continue
+                        why = None
+                        if cw == 'cat':
+                            later = [_bound(*st) for st in stages[i + 1:]]
+                            if not any(b is not None and b <= READ_LIMIT
+                                       for b in later):
+                                why = 'cat of %s' % c
+                        else:
+                            b = _bound(cw, args)
+                            if b is not None and b > READ_LIMIT:
+                                why = '%s of %s over %d lines' % (cw, c, READ_LIMIT)
+                        if why:
+                            out.append(('read', '%s: read a covered source '
+                                        'file in slices of at most %d lines'
+                                        % (why, READ_LIMIT), c))
+    return out
+
+
+def transcript_checks(transcript_path, covered_files):
+    """One problem per forbidden worker tool call (transcript_findings)."""
+    return [text for _kind, text, _f in
+            transcript_findings(transcript_path, covered_files)]
 
 
 def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
@@ -509,6 +557,16 @@ def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
     given = {key(a): a for a in verdicts}
     if kind == 'import':
         rows, given = [], {}
+    if kind != 'import':
+        for k, a in sorted(given.items()):
+            side, case = verdicts[a][0], verdicts[a][1]
+            if side in ('fork', 'neither') and \
+                    wave.deciding_kind(case) == 'dump reading':
+                problems.append(
+                    '%s: a %s verdict decided by a dump reading (%s); a fork '
+                    'or neither verdict needs a probe, replay or trace case '
+                    '(probe-N, a replay checkpoint or a trace id); dump-* and '
+                    'readout-* decide only ours' % (a, side, case))
     for r in rows:
         if r.get('class') == 'ambiguous' or (
                 'class' not in r and not r.get('verdict')):
@@ -865,7 +923,7 @@ def _side_case(v):
 
 def ledger_entry(batch, verdicts, classes, review, commits, credits, now=None,
                  ignored=None, pool=None, wall=None, tokens=None,
-                 tool_calls=None):
+                 tool_calls=None, transcript=None):
     """The templated progress.md entry for one batch.
 
     batch carries 'id'; verdicts maps address to a wave-state verdict or a
@@ -913,6 +971,7 @@ def ledger_entry(batch, verdicts, classes, review, commits, credits, now=None,
             tokens['input'], tokens['cached'], tokens['output']))
     if tool_calls is not None:
         lines.append('- tool calls %d' % tool_calls)
+    lines += ['- ' + t for t in transcript or ()]
     return '\n'.join(lines) + '\n'
 
 
@@ -952,6 +1011,7 @@ class _BatchContext(threading.local):
         self.t0 = None          # clock() at the cut or resume (ruling R61)
         self.usage = {'input': 0, 'cached': 0, 'output': 0, 'tool_calls': 0}
         self.final = None       # the figures once the ledger has used them
+        self.transcript_lines = []   # ledger lines about this batch's transcripts
 
 
 def _per_thread(name):
@@ -1191,6 +1251,7 @@ class Driver:
         except OSError as e:
             raise _launch_failed(label, cwd, e) from None
         self._runs.append(res.credits)
+        self._scan_transcript(batch_id, label, res)
         if label.startswith('worker'):
             self._worker_ran.append(worker_ran(res))
         if res.transcript:
@@ -1217,6 +1278,31 @@ class Driver:
             batch_id, label, res.exit_code,
             'unknown' if res.credits is None else '%.1f' % res.credits))
         return res
+
+    def _scan_transcript(self, batch_id, label, res):
+        """Every run's transcript, worker, fix rounds and reviewer: a wso/
+        ref or a launch outside the house runners is a past call nobody can
+        undo, so a `transcript` exception with no fix round; a whole-file
+        read is a ledger line only; a missing transcript is a ledger line."""
+        lines = self._ctx.transcript_lines
+        if not res.transcript:
+            lines.append('transcript: none (%s)' % label)
+            return
+        batch = self.load_state(self.state_path)['batches'].get(batch_id) or {}
+        covered = sorted({r['file'] for r in batch.get('rows', [])
+                          if r.get('file')})
+        fatal = []
+        for kind, text, f in transcript_findings(res.transcript, covered):
+            if kind == 'read':
+                line = 'transcript: whole read of %s' % f
+                if line not in lines:
+                    lines.append(line)
+            elif kind == 'unreadable':
+                lines.append('transcript: unreadable (%s)' % label)
+            else:
+                fatal.append('%s (%s)' % (text, label))
+        if fatal:
+            raise _StageError('transcript', ' | '.join(fatal))
 
     # -- outcomes ---------------------------------------------------------
 
@@ -1313,7 +1399,7 @@ class Driver:
 
     # -- the stages ---------------------------------------------------------
 
-    def _check(self, batch_id, worktree, report, transcript=None):
+    def _check(self, batch_id, worktree, report):
         """(verdicts, problems) for a report: the parse, then the
         mechanical checks.  Lines for rows whose recorded verdict is a
         triage-* case are set aside in self._ignored (ruling R33): never
@@ -1344,9 +1430,6 @@ class Driver:
             verdicts[addr] = sc
         try:
             kw = {'kind': 'import'} if self.kind == 'import' else {}
-            if transcript:
-                kw.update(transcript=transcript, covered_files=sorted(
-                    {r['file'] for r in batch.get('rows', []) if r.get('file')}))
             return verdicts, self.mechanical_checks(batch, worktree, verdicts,
                                                     **kw)
         except OSError as e:
@@ -1650,7 +1733,8 @@ class Driver:
         """ledger_entry's pool, wall, tokens and tool_calls (R10, R61)."""
         f = self._figures() or {}
         return dict(pool=self._pool_name(), wall=f.get('wall'),
-                    tokens=f.get('tokens'), tool_calls=f.get('tool_calls'))
+                    tokens=f.get('tokens'), tool_calls=f.get('tool_calls'),
+                    transcript=list(self._ctx.transcript_lines))
 
     def _ledger_for(self, batch_id, verdicts, review):
         batch = self.load_state(self.state_path)['batches'][batch_id]
@@ -1782,6 +1866,7 @@ class Driver:
         self._frida_got = {}
         self._ctx.usage = {'input': 0, 'cached': 0, 'output': 0, 'tool_calls': 0}
         self._ctx.final = None
+        self._ctx.transcript_lines = []
         self._ctx.t0 = self._started.pop(batch_id, None)
         if self._ctx.t0 is None:
             self._ctx.t0 = self._clock()
@@ -1833,7 +1918,7 @@ class Driver:
         out = self._settle(batch_id, res, 'worker', worktree)
         if out:
             return out
-        verdicts, problems = self._check(batch_id, worktree, res.report, res.transcript)
+        verdicts, problems = self._check(batch_id, worktree, res.report)
         # Frida runs once, here, clean check or not; what it finds joins the
         # one fix round (ruling R58).
         problems = problems + self._frida_phase(batch_id, batch, worktree, verdicts)
@@ -1844,7 +1929,7 @@ class Driver:
             out = self._settle(batch_id, res, 'worker-fix-checks', worktree)
             if out:
                 return out
-            verdicts, problems = self._check(batch_id, worktree, res.report, res.transcript)
+            verdicts, problems = self._check(batch_id, worktree, res.report)
         if self.dry_run:
             self._ledger_for(batch_id, self._merged(batch_id, verdicts), (
                 False, 'dry run: no review, nothing recorded, no close'))
@@ -1875,7 +1960,7 @@ class Driver:
                 out = self._settle(batch_id, res, 'worker-fix-review', worktree)
                 if out:
                     return out
-                verdicts, problems = self._check(batch_id, worktree, res.report, res.transcript)
+                verdicts, problems = self._check(batch_id, worktree, res.report)
                 if problems:
                     return self._exception(batch_id, 'checks', problems)
                 merged = self._merged(batch_id, verdicts)

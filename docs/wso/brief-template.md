@@ -32,7 +32,8 @@ Context bundles (one per row you must decide; read these before the source):
 1. **One deciding case per function.** For every row where you claim fork or
    ours, name the single probe or replay checkpoint that decides it —
    `case <id>` in your report (an oracle probe id like `probe-17`, or a replay
-   checkpoint id).
+   checkpoint id). A fork or neither verdict needs a probe, replay or trace
+   case; dump-* and readout-* decide only ours.
 2. **The evidence line.** Write `docs/evidence/<ADDRESS>.md` (address in caps,
    no `0x`) for every function you touch, front matter `address:` / `name:` /
    `kind:` (`kind: oracle` or `kind: replay`), and exactly one line in the body

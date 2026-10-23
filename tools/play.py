@@ -245,6 +245,9 @@ def parse_args(argv):
                     '(%d launches per attempt) and record why'
                     % attempt.LIMIT)
     args = ap.parse_args(argv)
+    bad = attempt.reason_error(args.new_attempt)
+    if bad:
+        ap.error(bad)
     if args.vm:
         if not args.suite and not args.script:
             ap.error('--vm needs --script FILE or --suite')
@@ -683,6 +686,7 @@ def run_linux_vm(args, argv, scenarios, data, overrides, base_dir, nested,
         return None
     exe = os.path.join(ROOT, 'build', LINUX_PRESET, 'iwd2r') \
         if args.no_build else build_linux()
+    count_launch(args)
     backup = os.path.join(base_dir, 'ini-backup')
     names = backup_inis(data, backup)
     log('backed up %d INI files to %s' % (len(names), backup))
@@ -771,6 +775,7 @@ def run_windows_vm(args, argv, scenarios, data, overrides, base_dir, nested,
         print(winsandbox.ENABLE_HINT, flush=True)
         return None
     exe = build_windows_vm(args)
+    count_launch(args)
     rows = []
     stamp = os.path.relpath(base_dir, os.path.join(ROOT, 'runs'))
     for path, actions in scenarios:
@@ -826,9 +831,6 @@ def main_vm(args, argv):
             scenario_timeout(args.timeout, path)
         except realinput.ScenarioError as e:
             sys.exit('play: %s' % e)
-    refusal = launch_refusal(args)
-    if refusal:
-        sys.exit('play: ' + refusal)
     platforms = ['linux', 'windows'] if args.vm == 'all' else [args.vm]
     datas = {p: resolve_data(args.data, p) for p in platforms}
     for platform in platforms:
@@ -876,9 +878,25 @@ def launch_refusal(args, runs_dir=None):
     or None.  One play.py invocation is one launch, a suite included; the
     count lives in the runs root the run folders are created under."""
     return attempt.gate(runs_dir or os.path.join(ROOT, 'runs'), 'play',
-                        args.new_attempt)
+                        args.new_attempt, name=ATTEMPT_FILE)
 
 
+_LAUNCH_COUNTED = False
+
+
+def count_launch(args):
+    """Count this process's launch once, just before the first launch;
+    exits with the refusal."""
+    global _LAUNCH_COUNTED
+    if _LAUNCH_COUNTED:
+        return
+    refusal = launch_refusal(args)
+    if refusal:
+        sys.exit('play: ' + refusal)
+    _LAUNCH_COUNTED = True
+
+
+ATTEMPT_FILE = 'attempt-play.json'
 DESKTOP_OK = 'IWD2R_DESKTOP_OK'
 
 
@@ -915,9 +933,6 @@ def main(argv):
         sys.exit('play: no script %s' % script)
     overrides = build_overrides(args.resolution, args.fullscreen, args.sets,
                                 args.scale)
-    refusal = launch_refusal(args)
-    if refusal:
-        sys.exit('play: ' + refusal)
 
     if args.linux:
         exe = os.path.join(ROOT, 'build', LINUX_PRESET, 'iwd2r') \
@@ -928,6 +943,7 @@ def main(argv):
         exe = build_windows() if not args.no_build else \
             os.path.join(WIN_CHECKOUT, WIN_EXE_REL)
 
+    count_launch(args)
     now = datetime.datetime.now()
     run_dir = make_run_folder(os.path.join(ROOT, 'runs'), now)
     if script:

@@ -32,6 +32,7 @@ import xml.etree.ElementTree as ET
 # The sibling module (python3 -I does not put the script's folder on the
 # path).
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import attempt  # noqa: E402
 import winhome  # noqa: E402
 
 SANDBOX_EXE = '/mnt/c/Windows/System32/WindowsSandbox.exe'
@@ -410,12 +411,39 @@ def close_sandbox(log, timeout=CLOSE_TIMEOUT):
                        capture_output=True, cwd='/mnt/c')
 
 
+# The launch limit (ruling R67).  Every sandbox launch goes through
+# start_sandbox, which counts one launch per process, in the calling
+# checkout's runs folder (VM_ROOT is shared by parallel workers).
+ATTEMPT_FILE = 'attempt-winsandbox.json'
+RUNS_ROOT = os.path.join(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__))), 'runs')
+_attempt = {'counted': False, 'reason': None}
+
+
+def set_new_attempt(reason):
+    """The --new-attempt reason the next counted launch starts with."""
+    _attempt['reason'] = reason
+
+
+def count_launch(runs_dir=None):
+    """Counts this process's sandbox launch once; RuntimeError with the
+    refusal when the attempt's limit is reached."""
+    if _attempt['counted']:
+        return
+    refusal = attempt.gate(runs_dir or RUNS_ROOT, 'winsandbox',
+                           _attempt['reason'], name=ATTEMPT_FILE)
+    if refusal:
+        raise RuntimeError(refusal)
+    _attempt['counted'] = True
+
+
 def start_sandbox(host_run, wsb, log):
     """Starts Windows Sandbox with the .wsb file wsb (under host_run) without
     waiting for it. Raises RuntimeError when a sandbox is already running."""
     if sandbox_running():
         raise RuntimeError('a Windows Sandbox is already running (only '
                            'one can run at a time)')
+    count_launch()
     log('starting Windows Sandbox with %s' % wslpath_w(wsb))
     # A batch file keeps start's empty title argument intact (WSL would
     # escape the quotes of a command-line argument with backslashes, which
