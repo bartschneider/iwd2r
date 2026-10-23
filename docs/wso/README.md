@@ -169,7 +169,11 @@ print the tally. After a close, sync the worktree that has `first`
 checked out: `git -C <path> reset --hard first`. `status` is one line
 per batch, and `scorecard` rewrites the "## Scorecard" section of
 [xrec-report.md](xrec-report.md) from state (idempotent — the same
-state writes the same bytes). Waves 2 to 5 are imports and reuse
+state writes the same bytes); when `docs/wso/audit.json` (rule, seed,
+state, pool, drawn, and rows with `probe` replay|oracle|park and `result`
+match|flip|parked) exists, the section ends with one rule-3 audit sample
+paragraph rendered from it, and a malformed file fails the scorecard with
+exit 2. Waves 2 to 5 are imports and reuse
 `close --kind import`: no verdicts are required, but every row's
 evidence must be `kind: trace` or better instead.
 
@@ -190,6 +194,15 @@ A row the worker's reading calls fork or neither, with no probe, replay or
 trace case it can run, goes under `## Undecided` (no verdict line); the
 driver moves it out of the batch to `docs/wso/probe-list.json`, which
 `next` treats as decided, for a later probe.
+
+`python3 tools/wave.py resolve <address> fork|ours|neither <case>` settles
+such a row: it checks `docs/evidence/<ADDR>.md` for a `disagreed with WSO` /
+`corroborated by WSO` line ending `case <case> decides`, refuses a
+fork/neither verdict decided by a dump reading (as `close` does), appends
+the row (rebuilt from `disagreements.json`) to the batch it left unless
+it is already there, records the verdict as `verdict` does (`measured:
+none`), and removes the entry from the probe list; the batch's status is
+not touched.
 
 A rule that is not a check, a flag or a test is not a rule.
 
