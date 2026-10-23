@@ -1,113 +1,113 @@
 {
- "frida_default": false,
+ "frida_default": true,
  "frida_rows": {
   "0x46B160": [
    "different",
-   "differs in first_fight: event 1: original {\"a0_u32\": 131074, \"a1_s32\": 122482992, \"a2_u32\": 37749184, \"a3_s32\": 134783187, \"a4_s32\": 1, \"a5_u32\": 0, \"a6_s32\": 0, \"a7_s32\": 0, \"a8_s32\": 0, \"tag\": \"fn_46B160\", \"this\": \"<ptr>\"}, ours {\"a0_u32\": 131074, \"a1_s32\": 146010032, \"a2_u32\": 448, \"a3_s32\": 290300505, \"a4_s32\": 1, \"a5_u32\": 0, \"a6_s32\": 0, \"a7_s32\": 0, \"a8_s32\": 0, \"tag\": \"fn_46B160\", \"this\": \"<ptr>\"}; world_entry: event 1: original {\"a0_u32\": 131074, \"a1_s32\": 255127856, \"a2_u32\": 360710592, \"a3_s32\": 268335467, \"a4_s32\": 1, \"a5_u32\": 0, \"a6_s32\": 0, \"a7_s32\": 0, \"a8_s32\": 0, \"tag\": \"fn_46B160\", \"this\": \"<ptr>\"}, ours {\"a0_u32\": 131074, \"a1_s32\": 154464224, \"a2_u32\": 448, \"a3_s32\": 213922489, \"a4_s32\": 1, \"a5_u32\": 0, \"a6_s32\": 0, \"a7_s32\": 0, \"a8_s32\": 0, \"tag\": \"fn_46B160\", \"this\": \"<ptr>\"}"
+   "differs in first_fight: hit totals differ: original 1933, ours 2293; walk_and_talk: hit totals differ: original 2023, ours 2082"
   ],
   "0x4BBCB0": [
    "not-exercised",
-   "no scenario hit it: first_fight, walk_and_talk, world_entry"
+   "no scenario hit it: world_entry, first_fight, walk_and_talk"
   ],
   "0x54C770": [
    "not-exercised",
-   "no scenario hit it: first_fight, walk_and_talk, world_entry"
+   "no scenario hit it: world_entry, first_fight, walk_and_talk"
   ],
   "0x58FF20": [
    "equal",
    "identical in first_fight"
   ],
   "0x5ABA20": [
-   "scenario failed",
-   "walk_and_talk: ours side exited 2 (NOT-LOADED)"
+   "equal",
+   "identical in world_entry, first_fight, walk_and_talk"
   ],
   "0x5D3A80": [
-   "scenario failed",
-   "walk_and_talk: ours side exited 2 (NOT-LOADED)"
+   "equal",
+   "identical in world_entry, first_fight, walk_and_talk"
   ],
   "0x5DE2C0": [
    "not-exercised",
-   "no scenario hit it: first_fight, walk_and_talk, world_entry"
+   "no scenario hit it: world_entry, first_fight, walk_and_talk"
   ],
   "0x5FD0A0": [
-   "scenario failed",
-   "walk_and_talk: ours side exited 2 (NOT-LOADED)"
+   "equal",
+   "identical in world_entry, first_fight, walk_and_talk"
   ],
   "0x5FDB20": [
    "not-exercised",
-   "no scenario hit it: first_fight, walk_and_talk, world_entry"
+   "no scenario hit it: world_entry, first_fight, walk_and_talk"
   ],
   "0x600B50": [
    "not-exercised",
-   "no scenario hit it: first_fight, walk_and_talk, world_entry"
+   "no scenario hit it: world_entry, first_fight, walk_and_talk"
   ],
   "0x614EF0": [
-   "scenario failed",
-   "walk_and_talk: ours side exited 2 (NOT-LOADED)"
+   "equal",
+   "identical in world_entry, first_fight, walk_and_talk"
   ],
   "0x6175A0": [
    "not-exercised",
-   "no scenario hit it: first_fight, walk_and_talk, world_entry"
+   "no scenario hit it: world_entry, first_fight, walk_and_talk"
   ],
   "0x62F360": [
    "not-exercised",
-   "no scenario hit it: first_fight, walk_and_talk, world_entry"
+   "no scenario hit it: world_entry, first_fight, walk_and_talk"
   ],
   "0x63BE80": [
    "not-exercised",
-   "no scenario hit it: first_fight, walk_and_talk, world_entry"
+   "no scenario hit it: world_entry, first_fight, walk_and_talk"
   ],
   "0x63C940": [
    "not-exercised",
-   "no scenario hit it: first_fight, walk_and_talk, world_entry"
+   "no scenario hit it: world_entry, first_fight, walk_and_talk"
   ],
   "0x65BCF0": [
    "not-exercised",
-   "no scenario hit it: first_fight, walk_and_talk, world_entry"
+   "no scenario hit it: world_entry, first_fight, walk_and_talk"
   ],
   "0x67B8A0": [
    "not-exercised",
-   "no scenario hit it: first_fight, walk_and_talk, world_entry"
+   "no scenario hit it: world_entry, first_fight, walk_and_talk"
   ],
   "0x67E560": [
    "not-exercised",
-   "no scenario hit it: first_fight, walk_and_talk, world_entry"
+   "no scenario hit it: world_entry, first_fight, walk_and_talk"
   ],
   "0x704D40": [
    "different",
-   "differs in first_fight: event 1: original {\"a0_ptr\": \"<ptr>\", \"a1_u32\": 142905462, \"a2_u32\": 0, \"a3_s32\": 0, \"a4_s32\": 1, \"a5_ptr\": \"<ptr>\", \"a6_s32\": 0, \"tag\": \"fn_704D40\", \"this\": \"<ptr>\"}, ours {\"a0_ptr\": \"<ptr>\", \"a1_u32\": 132896752, \"a2_u32\": 0, \"a3_s32\": 0, \"a4_s32\": 1, \"a5_ptr\": \"<ptr>\", \"a6_s32\": 0, \"tag\": \"fn_704D40\", \"this\": \"<ptr>\"}; world_entry: event 1: original {\"a0_ptr\": \"<ptr>\", \"a1_u32\": 277774886, \"a2_u32\": 0, \"a3_s32\": 0, \"a4_s32\": 1, \"a5_ptr\": \"<ptr>\", \"a6_s32\": 0, \"tag\": \"fn_704D40\", \"this\": \"<ptr>\"}, ours {\"a0_ptr\": \"<ptr>\", \"a1_u32\": 146011736, \"a2_u32\": 0, \"a3_s32\": 0, \"a4_s32\": 1, \"a5_ptr\": \"<ptr>\", \"a6_s32\": 0, \"tag\": \"fn_704D40\", \"this\": \"<ptr>\"}"
+   "differs in first_fight: event 13: original {\"a0_ptr\": \"<ptr>\", \"a1_ptr\": \"<ptr>\", \"a2_s32\": 1, \"a3_s32\": 0, \"a4_s32\": 1, \"a5_ptr\": \"<ptr>\", \"a6_s32\": 0, \"tag\": \"fn_704D40\", \"this\": \"<ptr>\"}, ours {\"a0_ptr\": \"<ptr>\", \"a1_ptr\": \"<ptr>\", \"a2_s32\": 0, \"a3_s32\": 0, \"a4_s32\": 1, \"a5_ptr\": \"<ptr>\", \"a6_s32\": 0, \"tag\": \"fn_704D40\", \"this\": \"<ptr>\"}; walk_and_talk: event 13: original {\"a0_ptr\": \"<ptr>\", \"a1_ptr\": \"<ptr>\", \"a2_s32\": 1, \"a3_s32\": 0, \"a4_s32\": 1, \"a5_ptr\": \"<ptr>\", \"a6_s32\": 0, \"tag\": \"fn_704D40\", \"this\": \"<ptr>\"}, ours {\"a0_ptr\": \"<ptr>\", \"a1_ptr\": \"<ptr>\", \"a2_s32\": 0, \"a3_s32\": 0, \"a4_s32\": 1, \"a5_ptr\": \"<ptr>\", \"a6_s32\": 0, \"tag\": \"fn_704D40\", \"this\": \"<ptr>\"}"
   ],
   "0x708280": [
-   "different",
-   "differs in first_fight: event 2: original {\"a0_u8\": 0, \"a1_u8\": 5, \"a2_u8\": 0, \"a3_u8\": 1, \"tag\": \"fn_708280\", \"this\": \"<ptr>\"}, ours {\"a0_u8\": 0, \"a1_u8\": 3, \"a2_u8\": 0, \"a3_u8\": 1, \"tag\": \"fn_708280\", \"this\": \"<ptr>\"}"
+   "equal",
+   "identical in first_fight"
   ],
   "0x71FC00": [
    "not-exercised",
-   "no scenario hit it: first_fight, walk_and_talk, world_entry"
+   "no scenario hit it: world_entry, first_fight, walk_and_talk"
   ],
   "0x72FD20": [
    "different",
-   "differs in first_fight: event 2: original {\"ret\": 1310, \"tag\": \"fn_72FD20_ret\"}, ours {\"ret\": 1966, \"tag\": \"fn_72FD20_ret\"}; world_entry: event 78: original {\"ret\": 1310, \"tag\": \"fn_72FD20_ret\"}, ours {\"ret\": 1966, \"tag\": \"fn_72FD20_ret\"}"
+   "differs in first_fight: hit totals differ: original 20536, ours 24683; walk_and_talk: hit totals differ: original 21129, ours 21766"
   ],
   "0x7338E0": [
    "different",
-   "differs in first_fight: hit totals differ: original 24591, ours 32979; world_entry: hit totals differ: original 341, ours 359"
+   "differs in first_fight: hit totals differ: original 20447, ours 24591; walk_and_talk: hit totals differ: original 21236, ours 21889"
   ],
   "0x737EF0": [
-   "different",
-   "differs in first_fight: event 66: original {\"ret\": -1, \"tag\": \"fn_737EF0_ret\"}, ours {\"ret\": 1, \"tag\": \"fn_737EF0_ret\"}"
+   "equal",
+   "identical in first_fight"
   ],
   "0x738E70": [
    "not-exercised",
-   "no scenario hit it: first_fight, walk_and_talk, world_entry"
+   "no scenario hit it: world_entry, first_fight, walk_and_talk"
   ],
   "0x73B760": [
-   "different",
-   "differs in first_fight: event 1: original {\"a0_ptr\": \"<ptr>\", \"a1_s32\": 136308808, \"a2_u32\": 0, \"a3_ptr\": \"<ptr>\", \"a4_s32\": 1, \"a5_u8\": 1, \"tag\": \"fn_73B760\", \"this\": \"<ptr>\"}, ours {\"a0_ptr\": \"<ptr>\", \"a1_s32\": 289754664, \"a2_u32\": 0, \"a3_ptr\": \"<ptr>\", \"a4_s32\": 1, \"a5_u8\": 1, \"tag\": \"fn_73B760\", \"this\": \"<ptr>\"}"
+   "equal",
+   "identical in first_fight"
   ],
   "0x7941D0": [
    "different",
-   "differs in first_fight: event 2: original {\"ret\": 1, \"tag\": \"fn_7941D0_ret\"}, ours {\"ret\": 22514689, \"tag\": \"fn_7941D0_ret\"}; world_entry: event 2: original {\"ret\": 1, \"tag\": \"fn_7941D0_ret\"}, ours {\"ret\": 27036673, \"tag\": \"fn_7941D0_ret\"}"
+   "differs in world_entry: hit totals differ: original 4068, ours 4037; first_fight: hit totals differ: original 4429, ours 4412; walk_and_talk: hit totals differ: original 4165, ours 4138"
   ],
   "0x7A3FD0": [
    "skipped",
@@ -119,6 +119,36 @@
    "failed": null,
    "hits": {
     "orig": {
+     "fn_46B160": 1933,
+     "fn_4BBCB0": 0,
+     "fn_54C770": 0,
+     "fn_58FF20": 2,
+     "fn_5ABA20": 1,
+     "fn_5D3A80": 1,
+     "fn_5DE2C0": 0,
+     "fn_5FD0A0": 1,
+     "fn_5FDB20": 0,
+     "fn_600B50": 0,
+     "fn_614EF0": 1,
+     "fn_6175A0": 0,
+     "fn_62F360": 0,
+     "fn_63BE80": 0,
+     "fn_63C940": 0,
+     "fn_65BCF0": 0,
+     "fn_67B8A0": 0,
+     "fn_67E560": 0,
+     "fn_704D40": 371,
+     "fn_708280": 3,
+     "fn_71FC00": 0,
+     "fn_72FD20": 20536,
+     "fn_7338E0": 20447,
+     "fn_737EF0": 142,
+     "fn_738E70": 0,
+     "fn_73B760": 2,
+     "fn_7941D0": 4429,
+     "loaded": 4
+    },
+    "ours": {
      "fn_46B160": 2293,
      "fn_4BBCB0": 0,
      "fn_54C770": 0,
@@ -137,7 +167,7 @@
      "fn_65BCF0": 0,
      "fn_67B8A0": 0,
      "fn_67E560": 0,
-     "fn_704D40": 460,
+     "fn_704D40": 434,
      "fn_708280": 3,
      "fn_71FC00": 0,
      "fn_72FD20": 24683,
@@ -145,37 +175,7 @@
      "fn_737EF0": 142,
      "fn_738E70": 0,
      "fn_73B760": 2,
-     "fn_7941D0": 4435,
-     "loaded": 4
-    },
-    "ours": {
-     "fn_46B160": 3120,
-     "fn_4BBCB0": 0,
-     "fn_54C770": 0,
-     "fn_58FF20": 2,
-     "fn_5ABA20": 1,
-     "fn_5D3A80": 1,
-     "fn_5DE2C0": 0,
-     "fn_5FD0A0": 1,
-     "fn_5FDB20": 0,
-     "fn_600B50": 0,
-     "fn_614EF0": 1,
-     "fn_6175A0": 0,
-     "fn_62F360": 0,
-     "fn_63BE80": 0,
-     "fn_63C940": 0,
-     "fn_65BCF0": 0,
-     "fn_67B8A0": 0,
-     "fn_67E560": 0,
-     "fn_704D40": 657,
-     "fn_708280": 2,
-     "fn_71FC00": 0,
-     "fn_72FD20": 32966,
-     "fn_7338E0": 32979,
-     "fn_737EF0": 117,
-     "fn_738E70": 0,
-     "fn_73B760": 1,
-     "fn_7941D0": 4536,
+     "fn_7941D0": 4412,
      "loaded": 4
     }
    },
@@ -186,15 +186,15 @@
     "ours": "CLEAN"
    },
    "trace": {
-    "orig": "runs/20261023-115953/replay/frida-cal-first_fight-original.jsonl",
-    "ours": "runs/20261023-120056/replay/frida-cal-first_fight-ours.jsonl"
+    "orig": "runs/20261023-124046/replay/frida-cal-first_fight-original.jsonl",
+    "ours": "runs/20261023-130147/replay/frida-cal-first_fight-ours.jsonl"
    }
   },
   "walk_and_talk": {
-   "failed": "ours side exited 2 (NOT-LOADED)",
+   "failed": null,
    "hits": {
     "orig": {
-     "fn_46B160": 1800,
+     "fn_46B160": 2023,
      "fn_4BBCB0": 0,
      "fn_54C770": 0,
      "fn_58FF20": 0,
@@ -212,29 +212,29 @@
      "fn_65BCF0": 0,
      "fn_67B8A0": 0,
      "fn_67E560": 0,
-     "fn_704D40": 305,
+     "fn_704D40": 372,
      "fn_708280": 0,
      "fn_71FC00": 0,
-     "fn_72FD20": 19063,
-     "fn_7338E0": 19143,
+     "fn_72FD20": 21129,
+     "fn_7338E0": 21236,
      "fn_737EF0": 0,
      "fn_738E70": 0,
      "fn_73B760": 0,
-     "fn_7941D0": 4159,
+     "fn_7941D0": 4165,
      "loaded": 5
     },
     "ours": {
-     "fn_46B160": 0,
+     "fn_46B160": 2082,
      "fn_4BBCB0": 0,
      "fn_54C770": 0,
      "fn_58FF20": 0,
      "fn_5ABA20": 1,
-     "fn_5D3A80": 0,
+     "fn_5D3A80": 1,
      "fn_5DE2C0": 0,
      "fn_5FD0A0": 1,
      "fn_5FDB20": 0,
      "fn_600B50": 0,
-     "fn_614EF0": 0,
+     "fn_614EF0": 1,
      "fn_6175A0": 0,
      "fn_62F360": 0,
      "fn_63BE80": 0,
@@ -242,27 +242,27 @@
      "fn_65BCF0": 0,
      "fn_67B8A0": 0,
      "fn_67E560": 0,
-     "fn_704D40": 0,
+     "fn_704D40": 400,
      "fn_708280": 0,
      "fn_71FC00": 0,
-     "fn_72FD20": 0,
-     "fn_7338E0": 0,
+     "fn_72FD20": 21766,
+     "fn_7338E0": 21889,
      "fn_737EF0": 0,
      "fn_738E70": 0,
      "fn_73B760": 0,
-     "fn_7941D0": 3404,
-     "loaded": 0
+     "fn_7941D0": 4138,
+     "loaded": 5
     }
    },
    "orig_exit": 0,
-   "ours_exit": 2,
+   "ours_exit": 0,
    "result": {
     "orig": "CLEAN",
-    "ours": "NOT-LOADED"
+    "ours": "CLEAN"
    },
    "trace": {
-    "orig": "runs/20261023-120620/replay/frida-cal-walk_and_talk-original.jsonl",
-    "ours": "runs/20261023-120719/replay/frida-cal-walk_and_talk-ours.jsonl"
+    "orig": "runs/20261023-125807/replay/frida-cal-walk_and_talk-original.jsonl",
+    "ours": "runs/20261023-125911/replay/frida-cal-walk_and_talk-ours.jsonl"
    }
   },
   "world_entry": {
@@ -295,7 +295,7 @@
      "fn_737EF0": 0,
      "fn_738E70": 0,
      "fn_73B760": 0,
-     "fn_7941D0": 4067,
+     "fn_7941D0": 4068,
      "loaded": 3
     },
     "ours": {
@@ -317,15 +317,15 @@
      "fn_65BCF0": 0,
      "fn_67B8A0": 0,
      "fn_67E560": 0,
-     "fn_704D40": 3,
+     "fn_704D40": 4,
      "fn_708280": 0,
      "fn_71FC00": 0,
-     "fn_72FD20": 316,
-     "fn_7338E0": 359,
+     "fn_72FD20": 298,
+     "fn_7338E0": 341,
      "fn_737EF0": 0,
      "fn_738E70": 0,
      "fn_73B760": 0,
-     "fn_7941D0": 4122,
+     "fn_7941D0": 4037,
      "loaded": 3
     }
    },
@@ -336,18 +336,17 @@
     "ours": "CLEAN"
    },
    "trace": {
-    "orig": "runs/20261023-115630/replay/frida-cal-world_entry-original.jsonl",
-    "ours": "runs/20261023-115718/replay/frida-cal-world_entry-ours.jsonl"
+    "orig": "runs/20261023-123817/replay/frida-cal-world_entry-original.jsonl",
+    "ours": "runs/20261023-123909/replay/frida-cal-world_entry-ours.jsonl"
    }
   }
  },
- "note": "frida off: measured 9 of 28, agree 1, disagree 8: a path that contradicts replay-verified rows more often than it agrees is miscalibrated.",
  "oracle_rows": {},
  "paths": {
   "frida": {
-   "agree": 1,
-   "disagree": 8,
-   "measured": 9,
+   "agree": 8,
+   "disagree": 5,
+   "measured": 13,
    "of": 28
   },
   "oracle": {
