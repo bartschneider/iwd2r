@@ -72,6 +72,10 @@ Context bundles (one per row you must decide; read these before the source):
 12. **Nothing on the desktop.** Never use `--host` with `oracle.py`, and never
     launch the game on the desktop. Never set IWD2R_DESKTOP_OK; only a
     person at the PC does.
+13. **Undecided rows.** If your reading says fork or neither but no probe,
+    replay or trace case you can run decides it, keep our body for that row,
+    write no verdict line for it, and list it under `## Undecided`. Never
+    write `ours` for a row your reading says is fork or neither.
 
 ## Report back
 
@@ -79,7 +83,14 @@ Write a section headed `## Verdicts`, with one line per row, exactly:
 
     verdict <0xADDR> <fork|ours|neither> case <id>
 
-Then, after that section, add one sentence of evidence per row, list the
-evidence files you wrote and anything you could not decide. The coordinator
+`## Verdicts` holds verdict lines only; put notes under `## Notes`.
+
+A row you cannot decide (rule 13) gets no verdict line. List it in a section
+headed `## Undecided`, one line per row, exactly:
+
+    undecided <0xADDR> <fork|neither> <one-line reason>
+
+Then add one sentence of evidence per row under `## Notes`, list the
+evidence files you wrote and anything else you could not do. The coordinator
 records the verdicts and runs the close; you do not fast-forward anything
 yourself.

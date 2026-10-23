@@ -40,6 +40,8 @@ FATAL_API_STATUSES = (401, 402, 403)
 
 VERDICT_RE = re.compile(
     r'^verdict (0[xX][0-9a-fA-F]+) (ours|fork|neither) case (\S+)$', re.IGNORECASE)
+UNDECIDED_RE = re.compile(
+    r'^undecided\s+(0[xX][0-9a-fA-F]+)\s+(fork|neither)\s+(\S.*)$', re.IGNORECASE)
 MARKER_RE = re.compile(r'^(?:[-*]|\d+\.)\s+')
 
 
@@ -684,9 +686,36 @@ def _git_paths(run, worktree, args, parse):
     return [parse(l) for l in (proc.stdout or '').splitlines() if l.strip()], None
 
 
+def parse_undecided(text):
+    """Parse the '## Undecided' section into {addr: (side, reason)} (ruling
+    R73): rows the worker's reading says are fork or neither but that no
+    probe, replay or trace case it can run decides.  Same tolerance as
+    parse_report; a missing section is {}."""
+    out = {}
+    in_section = False
+    for n, raw in enumerate(text.splitlines(), 1):
+        line = raw.strip()
+        if line.startswith('#'):
+            in_section = line.lstrip('#').strip().lower() == 'undecided'
+            continue
+        if not in_section or not line:
+            continue
+        if re.fullmatch(r'```[^`]*', line):
+            continue
+        cand = MARKER_RE.sub('', line, count=1).strip().strip('`').strip()
+        m = UNDECIDED_RE.match(cand)
+        if not m:
+            raise ReportError('line %d: malformed undecided line: %r' % (n, raw))
+        addr = '0x%X' % int(m.group(1), 16)
+        if addr in out:
+            raise ReportError('line %d: duplicate undecided line for %s' % (n, addr))
+        out[addr] = (m.group(2).lower(), m.group(3).strip())
+    return out
+
+
 def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
                       kind='verdicts', transcript=None, covered_files=(),
-                      probe=(), base='first'):
+                      probe=(), base='first', undecided=()):
     """Problems that stop a batch before any review; [] when clean.
 
     Each problem says what failed and how to fix it (it is the worker's
@@ -697,7 +726,10 @@ def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
     holds the address keys the driver recorded from an oracle probe pass:
     only those (and a `probe-<batch id>-...` ours case) need the
     'corroborated by WSO' phrase (ruling R71).  Uncommitted paths, and
-    paths changed against `base` outside ALLOWED_PATHS, are problems."""
+    paths changed against `base` outside ALLOWED_PATHS, are problems.
+    `undecided` holds the addresses of the report's ## Undecided section
+    (ruling R73): such a row needs no verdict line, and a verdict line for
+    it too is a problem."""
     wave = _tool('wave')
     problems = []
     if transcript:
@@ -706,8 +738,9 @@ def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
     rows = batch.get('rows', [])
     row_keys = {key(r['address']) for r in rows}
     given = {key(a): a for a in verdicts}
+    und = {key(a): a for a in undecided}
     if kind == 'import':
-        rows, given = [], {}
+        rows, given, und = [], {}, {}
     if kind != 'import':
         for k, a in sorted(given.items()):
             side, case = verdicts[a][0], verdicts[a][1]
@@ -721,10 +754,22 @@ def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
     for r in rows:
         if r.get('class') == 'ambiguous' or (
                 'class' not in r and not r.get('verdict')):
-            if key(r['address']) not in given:
+            if key(r['address']) not in given and \
+                    key(r['address']) not in und:
                 problems.append('%s: no verdict line in the report; add '
                                 '"verdict <addr> ours|fork|neither case <id>" '
-                                'under ## Verdicts' % r['address'])
+                                'under ## Verdicts (or, if no probe, replay or '
+                                'trace case you can run decides a fork or '
+                                'neither reading, list it under ## '
+                                'Undecided)' % r['address'])
+    for k, a in sorted(und.items()):
+        if k not in row_keys:
+            problems.append('%s: undecided line for an address outside this '
+                            'batch; remove that line' % a)
+        elif k in given:
+            problems.append('%s: both a verdict line and an undecided line; '
+                            'keep one (a row you cannot decide gets no '
+                            'verdict line, never ours)' % a)
     for k, a in given.items():
         if k not in row_keys:
             problems.append('%s: verdict for an address outside this batch; '
@@ -940,7 +985,11 @@ FIX_PROMPT = """# Fix round for batch {id}
 The driver's {stage} found the problems below in your work on `{branch}`
 (this worktree). Fix every one, commit, and write your report again: the
 full `## Verdicts` section, one line for every row you decide, not only
-the rows you fixed.
+the rows you fixed. `## Verdicts` holds verdict lines only; put notes under
+`## Notes`. A row whose reading is fork or neither, with no probe, replay
+or trace case you can run to decide it, gets no verdict line: keep our
+body and list it under `## Undecided` as `undecided <0xADDR> <fork|neither>
+<one-line reason>`. Never write `ours` for such a row.
 
 {problems}
 
@@ -1104,7 +1153,7 @@ def _side_case(v):
 
 def ledger_entry(batch, verdicts, classes, review, commits, credits, now=None,
                  ignored=None, pool=None, wall=None, tokens=None,
-                 tool_calls=None, transcript=None):
+                 tool_calls=None, transcript=None, undecided=None):
     """The templated progress.md entry for one batch.
 
     batch carries 'id'; verdicts maps address to a wave-state verdict or a
@@ -1113,7 +1162,8 @@ def ledger_entry(batch, verdicts, classes, review, commits, credits, now=None,
     ignored maps address to the (side, case) of a worker line set aside
     because the row was triage-decided (a line only when there are any).
     pool, wall (seconds), tokens ({input, cached, output}) and tool_calls
-    each add a line when given (rulings R10, R61)."""
+    each add a line when given (rulings R10, R61); undecided maps address
+    to the (side, reason) of a row left for a probe (ruling R73)."""
     wave = _tool('wave')
     known = _tool('triage').CLASSES
     order = [c for c in known if c in classes] + sorted(
@@ -1136,7 +1186,10 @@ def ledger_entry(batch, verdicts, classes, review, commits, credits, now=None,
     ] + ([
         '- ignored for triage-decided rows: ' + ', '.join(
             '%s %s' % (a, _side_case(v)[0]) for a, v in sorted(ignored.items())),
-    ] if ignored else []) + [
+    ] if ignored else []) + ([
+        '- undecided (probe needed): ' + ', '.join(
+            '%s %s' % (a, _side_case(v)[0]) for a, v in sorted(undecided.items())),
+    ] if undecided else []) + [
         '- deciding evidence: ' + ', '.join(
             '%s %d' % (k, deciding.get(k, 0)) for k in wave.DECIDING_ORDER),
         '- review: %s, %s' % ('yes' if reviewed else 'no', outcome),
@@ -1186,6 +1239,7 @@ class _BatchContext(threading.local):
         self.runs = []          # credits of this batch's worker and reviewer runs
         self.worker_ran = []    # this batch's worker runs: really ran
         self.ignored = {}
+        self.undecided = {}     # address -> (side, reason) the worker listed (R73)
         self.probe = {}         # address key -> (side, case) the oracle passed
         self.frida_got = {}     # address key -> (status, detail) of its one Frida run
         self.pool = None        # the pool this batch runs on
@@ -1279,6 +1333,7 @@ class Driver:
         self.template_path = os.path.join(
             docs, os.path.basename(wave.QUEUES[queue]['template']))
         self.report_path = os.path.join(docs, 'xrec-report.md')
+        self.probe_path = os.path.join(docs, 'probe-list.json')
         self.calibration_path = os.path.join(docs, 'truth-calibration.json')
         truth = _tool('truth')
         self.frida = frida
@@ -1324,6 +1379,7 @@ class Driver:
     _runs = _per_thread('runs')
     _worker_ran = _per_thread('worker_ran')
     _ignored = _per_thread('ignored')
+    _undecided = _per_thread('undecided')
     _probe = _per_thread('probe')
     _frida_got = _per_thread('frida_got')
 
@@ -1604,12 +1660,20 @@ class Driver:
         triage-* case are set aside in self._ignored (ruling R33): never
         recorded, never checked, never a reason to review."""
         self._ignored = {}
+        self._undecided = {}
         try:
             parsed = parse_report(report)
         except ReportError as e:
             return {}, ['report: %s; fix that line under ## Verdicts (one '
                         '"verdict <0xADDR> <fork|ours|neither> case <id>" '
-                        'per row)' % e]
+                        'per row; ## Verdicts holds verdict lines only, put '
+                        'notes under ## Notes)' % e]
+        try:
+            listed = parse_undecided(report)
+        except ReportError as e:
+            return {}, ['report: %s; fix that line under ## Undecided (one '
+                        '"undecided <0xADDR> <fork|neither> <one-line '
+                        'reason>" per row)' % e]
         self._stage(batch_id, 'checks')
         batch = self.load_state(self.state_path)['batches'][batch_id]
         key = _tool('wave')._addr_key
@@ -1627,9 +1691,22 @@ class Driver:
                 self.log('%s: %s decided by the oracle probe (%s); the '
                          'report line is replaced' % (batch_id, addr, sc[1]))
             verdicts[addr] = sc
+        # A row the driver's own probe decided, or triage decided, is not
+        # undecided whatever the report says.
+        for addr in sorted(listed):
+            if key(addr) in auto:
+                del listed[addr]
+        probed = {key(a) for a in self._probe_verdicts(batch)}
+        for addr in sorted(listed):
+            if key(addr) in probed:
+                self.log('%s: %s decided by the oracle probe; its undecided '
+                         'line is dropped' % (batch_id, addr))
+                del listed[addr]
+        self._undecided = dict(listed)
         try:
             kw = {'kind': 'import'} if self.kind == 'import' else {}
             kw['probe'] = sorted(self._probe)
+            kw['undecided'] = sorted(listed)
             return verdicts, self.mechanical_checks(
                 dict(batch, id=batch_id), worktree, verdicts, **kw)
         except OSError as e:
@@ -2009,13 +2086,14 @@ class Driver:
 
     def _commit_state(self, batch_id):
         """After a close, before the push (rulings R66, R71): commit the
-        wave state and the regenerated scorecard, and only those, on the
-        base, in the worktree that has it checked out, staged by name.
+        wave state, the regenerated scorecard and the probe list (ruling
+        R73, when it exists), and only those, on the base, in the
+        worktree that has it checked out, staged by name.
         Wave 1 only: the import queue's state is not committed (its
         scorecard is never written, and its state file stays a working
         file of the coordinator).  Skipped in a dry run, with nothing to
         commit, or when a file lies outside that worktree.  Under the
-        lock.  Whatever goes wrong is logged, the two paths are unstaged,
+        lock.  Whatever goes wrong is logged, those paths are unstaged,
         one aoe line is sent, and the push still happens."""
         if self.dry_run or self.kind != 'verdicts':
             return
@@ -2042,7 +2120,7 @@ class Driver:
         if wt is None:
             return 'no worktree has %s' % self.base
         top = os.path.realpath(wt)
-        for path in (self.state_path, self.report_path):
+        for path in (self.state_path, self.report_path, self.probe_path):
             if not os.path.exists(path):
                 continue
             rel = os.path.relpath(os.path.realpath(path), top)
@@ -2128,6 +2206,7 @@ class Driver:
         self._runs = []
         self._worker_ran = []
         self._ignored = {}
+        self._undecided = {}
         self._probe = {}
         self._frida_got = {}
         self._ctx.usage = {'input': 0, 'cached': 0, 'output': 0, 'tool_calls': 0}
@@ -2272,6 +2351,39 @@ class Driver:
             return {a: sc for a, sc in parsed.items() if key(a) not in have}
         return {}
 
+    def _move_undecided(self, batch_id):
+        """Ruling R73: the rows the worker listed under ## Undecided leave
+        the batch and join the probe list (docs/wso/probe-list.json, one
+        entry per address), the same way triage moves an ours-stub row to
+        the import list.  The list is written first: a crash between the
+        two writes leaves the row in both places, never in neither.  The
+        caller holds the driver lock."""
+        wave = _tool('wave')
+        if not self._undecided:
+            return
+        key = wave._addr_key
+        state = self.load_state(self.state_path)
+        batch = state['batches'][batch_id]
+        gone = {key(a): sc for a, sc in self._undecided.items()}
+        moved = [r for r in batch['rows'] if key(r['address']) in gone]
+        listed, err = wave._load_list(self.probe_path, 'probe list',
+                                      missing_ok=True)
+        if err:
+            raise ValueError(err.strip())
+        have = {key(e['address']) for e in listed}
+        at = _now()
+        listed += [{'address': r['address'], 'file': r['file'],
+                    'name': r.get('name'), 'reading': gone[key(r['address'])][0],
+                    'reason': gone[key(r['address'])][1], 'batch': batch_id,
+                    'source': 'worker', 'at': at}
+                   for r in moved if key(r['address']) not in have]
+        wave._save_json(self.probe_path, listed)
+        batch['rows'] = [r for r in batch['rows'] if key(r['address']) not in gone]
+        batch['files'] = wave._files_of(batch['rows'])
+        wave.save_state(self.state_path, state)
+        self.log('%s: %d undecided row(s) moved to the probe list' % (
+            batch_id, len(moved)))
+
     def _land(self, batch_id, batch, worktree, verdicts, review):
         """Record, close, push, ledger -- and the retry of a cleared record,
         close or push exception, which comes straight here (ruling R71)."""
@@ -2280,6 +2392,14 @@ class Driver:
         # inside the locked blocks takes it again.
         self._stage(batch_id, 'record')
         failed = []
+        with self._lock:
+            try:
+                self._move_undecided(batch_id)
+            except Exception as e:
+                failed.append('moving the undecided rows to the probe list '
+                              'raised %r' % (e,))
+        if failed:
+            return self._exception(batch_id, 'record', failed)
         with self._lock:
             for addr, (side, case) in sorted(verdicts.items()):
                 measured = self._measured_for(addr, side)
@@ -2336,7 +2456,8 @@ class Driver:
         entry = ledger_entry(
             dict(batch, id=batch_id), batch['verdicts'],
             self._classes(batch_id, batch), review, commits, self._credits(),
-            ignored=self._ignored, **self._figure_kw())
+            ignored=self._ignored, undecided=self._undecided,
+            **self._figure_kw())
         kept = [(a, d) for a, (side, _c) in sorted(verdicts.items())
                 for st, d in [self._frida_got.get(_tool('wave')._addr_key(a), ('', ''))]
                 if side == 'ours' and st == 'different']

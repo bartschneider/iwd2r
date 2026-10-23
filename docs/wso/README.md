@@ -186,6 +186,11 @@ the push of `first:main first:first` to `iwd2r`, and a templated
 `.superpowers/sdd/2026-10-17-wso-integration/progress.md`. The driver
 itself uses no model.
 
+A row the worker's reading calls fork or neither, with no probe, replay or
+trace case it can run, goes under `## Undecided` (no verdict line); the
+driver moves it out of the batch to `docs/wso/probe-list.json`, which
+`next` treats as decided, for a later probe.
+
 A rule that is not a check, a flag or a test is not a rule.
 
 `close` refuses
