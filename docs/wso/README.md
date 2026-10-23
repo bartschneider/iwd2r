@@ -80,11 +80,14 @@ reconstruction — the fork's own style of verification. A `trace` evidence
 file must cite its source in `trace_source`, in one of exactly two forms:
 
 ```
-WillScarlettOhara/iwd2-re@<sha> <path to recovery note>
+WillScarlettOhara/iwd2-re@<sha> docs/<name>-recovery.md
 frida <probe name> orig:<sha256> ours:<sha256> compare=0
 ```
 
-The first cites his recovery note; the second is the line
+The first cites his recovery note (never a source file): the gate reads
+the note at that sha with `git show` and requires the function's address or
+short name in it, and an unreadable note (the fork not fetched) fails. The
+second is the line
 `check_evidence.py` accepts today for a differential Frida capture of our
 own binary against the original. The harness that produces such captures is
 planned, not yet in the tree: the integration plan's Task 5b

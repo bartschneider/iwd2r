@@ -1995,9 +1995,12 @@ class CheckEvidenceTest(unittest.TestCase):
 
     def trace_sources(self):
         """The two trace_source citation forms ruling 6 accepts: the fork's
-        recovery note and a frida capture of our own binary."""
-        return ['WillScarlettOhara/iwd2-re@e8dd16a7'
-                ' docs/wso/recovery/CScreenMap.md',
+        recovery note (committed in this fixture repo, which stands in for the
+        fork; it names 0x401000) and a frida capture of our own binary."""
+        self.write('docs/a-recovery.md', 'A::f at 0x401000 returns x.\n')
+        self.commit('fork note')
+        sha = self.git('rev-parse', 'HEAD').strip()
+        return ['WillScarlettOhara/iwd2-re@%s docs/a-recovery.md' % sha,
                 'frida sendmsg_probe orig:%s ours:%s compare=0'
                 % ('a' * 64, 'b' * 64)]
 
@@ -2035,6 +2038,109 @@ class CheckEvidenceTest(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         self.assertIn('docs/evidence/401000.md', r.stdout)
         self.assertIn('trace_source', r.stdout)
+
+    def test_trace_source_requires_recovery_note_path(self):
+        ok = check_evidence.TRACE_SOURCES[0]
+        sha = 'e8dd16a750966af53f24daaf49dcb4fb13594c13'
+        self.assertTrue(ok.fullmatch(
+            'WillScarlettOhara/iwd2-re@%s docs/area-nearest-recovery.md' % sha))
+        for bad in ('src/CVideo.cpp', 'docs/wso/recovery/CScreenMap.md',
+                    'docs/README.md', 'docs/x-recovery.md.bak',
+                    'docs/../src/CVideo-recovery.md'):
+            self.assertIsNone(ok.fullmatch(
+                'WillScarlettOhara/iwd2-re@%s %s' % (sha, bad)), bad)
+        self.write('src/a.cpp', TWO_FUNCTIONS.replace('return x;',
+                                                      'return x * 2;'))
+        self.evidence('401000', 'oracle_case: rand/roll\nkind: trace\n'
+                                'trace_source: "WillScarlettOhara/iwd2-re@'
+                                'e8dd16a src/CVideo.cpp"')
+        self.commit()
+        r = self.check()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn('docs/evidence/401000.md', r.stdout)
+        self.assertIn('trace_source', r.stdout)
+
+    def fork_repo(self, notes):
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, True)
+        g = lambda *a: subprocess.run(['git', '-C', d, *a], check=True,
+                                      capture_output=True, text=True)
+        g('init', '-q')
+        g('config', 'user.name', 'T')
+        g('config', 'user.email', 't@example.com')
+        g('config', 'commit.gpgsign', 'false')
+        for path, text in notes.items():
+            os.makedirs(os.path.dirname(os.path.join(d, path)), exist_ok=True)
+            with open(os.path.join(d, path), 'wb') as f:
+                f.write(text if isinstance(text, bytes) else text.encode())
+        g('add', '-A')
+        g('commit', '-q', '-m', 'fork')
+        return d, g('rev-parse', 'HEAD').stdout.strip()
+
+    def test_fork_note_must_mention_function(self):
+        d, sha = self.fork_repo({
+            'docs/addr-recovery.md': 'body at 00401000 ok\n',
+            'docs/pre-recovery.md': 'body at 0X401000 ok\n',
+            'docs/name-recovery.md': 'the CFoo::Bar routine\n',
+            'docs/cp1252-recovery.md': b'caf\x97 CFoo::Bar \x97 ok\n',
+            'docs/none-recovery.md': 'something else 0x4010000 Barista\n'})
+        run = lambda argv, **kw: subprocess.run(argv, cwd=d, **kw)
+        f = lambda path: check_evidence.fork_note_mentions(
+            sha, path, 0x401000, 'CFoo::Bar', run=run)
+        self.assertEqual(f('docs/addr-recovery.md'), (True, ''))
+        self.assertTrue(f('docs/pre-recovery.md')[0])
+        self.assertTrue(f('docs/name-recovery.md')[0])
+        self.assertTrue(f('docs/cp1252-recovery.md')[0])  # byte 0x97
+        ok, why = f('docs/none-recovery.md')
+        self.assertFalse(ok)
+        self.assertIn('docs/none-recovery.md', why)
+        self.assertIn('0x401000', why)
+        self.assertIn('CFoo::Bar', why)
+        ok, why = f('docs/missing-recovery.md')
+        self.assertFalse(ok)
+        self.assertIn('docs/missing-recovery.md', why)
+        self.assertIn('fetched', why)
+        # an unfetched sha is a failure, not a pass
+        ok, why = check_evidence.fork_note_mentions(
+            'e' * 40, 'docs/addr-recovery.md', 0x401000, 'CFoo::Bar', run=run)
+        self.assertFalse(ok)
+        self.assertIn('fetched', why)
+
+    def test_gate_fails_when_note_does_not_name_function(self):
+        self.write('src/a.cpp', TWO_FUNCTIONS.replace('return x;',
+                                                      'return x * 2;'))
+        self.write('docs/b-recovery.md', 'nothing relevant\n')
+        self.commit('fork note')
+        sha = self.git('rev-parse', 'HEAD').strip()
+        self.evidence('401000', 'oracle_case: rand/roll\nkind: trace\n'
+                                'trace_source: "WillScarlettOhara/iwd2-re@%s '
+                                'docs/b-recovery.md"' % sha)
+        self.commit()
+        r = self.check()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn('docs/b-recovery.md', r.stdout)
+        self.assertIn('0x401000', r.stdout)
+
+    def test_trace_file_needs_no_exemption(self):
+        self.write('src/a.cpp', TWO_FUNCTIONS.replace('return x;',
+                                                      'return x * 2;'))
+        frida = ('frida sendmsg_probe orig:%s ours:%s compare=0'
+                 % ('a' * 64, 'b' * 64))
+        self.evidence('401000', 'kind: trace\ntrace_source: "%s"' % frida)
+        self.commit()
+        r = self.check()
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertIn('trace 1 (1 of 1 touched function(s))', r.stdout)
+        self.evidence('401000', 'kind: trace\ntrace_source: "by eye"')
+        self.commit()
+        r = self.check()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn('trace_source', r.stdout)
+        self.assertNotIn('neither oracle_case nor exemption', r.stdout)
+        # a non-trace file still needs one
+        self.evidence('401000', 'kind: replay')
+        self.commit()
+        self.assertIn('neither oracle_case nor exemption', self.check().stdout)
 
     def test_rules_math_rejects_trace(self):
         address = self.touch_rules_math('oracle_case: rand/roll\n'
@@ -8734,6 +8840,44 @@ class TriageTest(unittest.TestCase):
         self.assertEqual(out[1]['reason'], 'disabled by calibration')
         self.assertEqual(out[1]['auto_class'], 'rename-only')
 
+    def test_triage_regen_keeps_closed_entries(self):
+        state = {'batches': {'b': {'status': 'closed', 'verdicts': {
+            '0x1': {'side': 'ours'}, '0x4': {'side': 'ours'}}}}}
+
+        def entry(addr, name, cls='ambiguous'):
+            return {'address': addr, 'class': cls, 'name': name,
+                    'file': 'src/a.cpp', 'ours_ref': '82d75232',
+                    'reason': 'old'}
+        committed = [entry('0x4', 'Exec'), entry(None, 'Parse'),
+                     entry('0x1', 'A'), entry('0x2', 'B'),
+                     entry('0x4', 'Start')]
+
+        def row(addr, name, cat='both_changed_differ'):
+            return {'address': addr, 'name': name, 'file': 'src/a.cpp',
+                    'category': cat}
+        rows = [row('0x1', 'A'), row('0x2', 'B'), row('0x3', 'C'),
+                row('0x4', 'Exec'), row('0x4', 'Start'), row(None, 'Parse'),
+                row(None, 'Parse'), row('0x5', 'D', 'only_ours')]
+        seen = []
+
+        def fake(todo, fork, ours, **kw):
+            seen.append((ours, [(r['address'], r['name']) for r in todo]))
+            return [dict(r, **{'class': 'rename-only', 'reason': 'new'})
+                    for r in todo if r['category'] == 'both_changed_differ']
+        with mock.patch.object(triage, 'triage_rows', fake):
+            out = triage.regen_triage(state, rows, committed, 'fork', 'first')
+        # the closed rows' committed entries, in committed order, then the
+        # open both_changed_differ rows; nothing re-keyed by address
+        self.assertEqual([(r['address'], r['name']) for r in out],
+                         [('0x4', 'Exec'), ('0x1', 'A'), ('0x4', 'Start'),
+                          ('0x2', 'B'), ('0x3', 'C'), (None, 'Parse'),
+                          (None, 'Parse')])
+        self.assertEqual(out[:3], [committed[0], committed[2], committed[4]])
+        self.assertEqual({r['ours_ref'] for r in out[3:]}, {'first'})
+        self.assertEqual([r['class'] for r in out[3:]], ['rename-only'] * 4)
+        self.assertEqual(seen[0][0], 'first')
+        self.assertNotIn('0x1', [a for a, _ in seen[0][1]])
+
     def test_calibration_against_committed_batches(self):
         if subprocess.run(['git', '-C', ROOT, 'rev-parse', '--verify', '--quiet',
                            'e8dd16a7^{commit}'], capture_output=True).returncode:
@@ -9471,6 +9615,60 @@ class DriverTest(unittest.TestCase):
             return subprocess.CompletedProcess(argv, rc, '', 'boom\n')
         return run
 
+    def test_driver_path_check_uses_merge_base(self):
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, True)
+        def g(*a):
+            return subprocess.run(['git', '-C', d, '-c', 'user.name=T',
+                                   '-c', 'user.email=t@e.com',
+                                   '-c', 'commit.gpgsign=false', *a],
+                                  check=True, capture_output=True, text=True)
+        def put(rel, text):
+            os.makedirs(os.path.dirname(os.path.join(d, rel)), exist_ok=True)
+            with open(os.path.join(d, rel), 'w') as f:
+                f.write(text)
+        g('init', '-q', '-b', 'first')
+        put('src/a.cpp', 'a\n')
+        g('add', '-A')
+        g('commit', '-q', '-m', 'base')
+        g('checkout', '-q', '-b', 'p3/wso-b011')
+        put('src/a.cpp', 'b\n')
+        g('commit', '-q', '-am', 'worker')
+        g('checkout', '-q', 'first')
+        put('docs/plan.md', 'plan\n')
+        g('add', '-A')
+        g('commit', '-q', '-m', 'first moves on')
+        g('checkout', '-q', 'p3/wso-b011')
+        g('merge', '-q', '--no-edit', 'first')
+        batch = self._mc_batch()
+        batch['rows'] = []
+
+        calls = []
+
+        def run(argv, **kw):
+            calls.append(argv)
+            if argv[:1] == ['git']:
+                return subprocess.run(argv, **kw)
+            return subprocess.CompletedProcess(argv, 0, '', '')
+        # the cut base would call docs/plan.md the worker's edit
+        self.assertEqual(g('diff', '--name-only', 'first~1...HEAD').stdout.split(),
+                         ['docs/plan.md', 'src/a.cpp'])
+        probs = driver.mechanical_checks(batch, d, {}, run=run)
+        self.assertFalse([p for p in probs if 'changed outside' in p], probs)
+        mb = g('merge-base', 'first', 'p3/wso-b011').stdout.strip()
+        self.assertIn(['git', 'merge-base', 'first', 'p3/wso-b011'], calls)
+        diffs = [a for a in calls if a[:3] == ['git', 'diff', '--name-only']]
+        self.assertEqual(diffs, [['git', 'diff', '--name-only', mb, 'HEAD']])
+        # a real out-of-scope edit by the worker is still found
+        put('tools/x.py', 'x\n')
+        g('add', '-A')
+        g('commit', '-q', '-m', 'oops')
+        probs = driver.mechanical_checks(batch, d, {}, run=run)
+        outside = [p for p in probs if 'changed outside' in p]
+        self.assertEqual(len(outside), 1, probs)
+        self.assertIn('tools/x.py', outside[0])
+        self.assertNotIn('docs/plan.md', outside[0])
+
     def test_mechanical_checks_flags_missing_and_foreign_verdicts(self):
         d = self._mc_repo({'76D370': 'corroborated by WSO at abc'})
         calls = []
@@ -9572,12 +9770,12 @@ class DriverTest(unittest.TestCase):
                 mock.patch.dict(os.environ, {'IWD2R_HOME': d}):
             probs = driver.mechanical_checks(batch, d, {'0x76D370': ('ours', 'c')},
                                              run=self._mc_run(1, calls))
-        # git status, git diff, tests, check_evidence, parity, gen_map
-        self.assertEqual(len(calls), 6)
-        self.assertEqual(calls[4][0], ['python3', '-I', 'tools/parity/run.py', '--base', 'first'])
-        self.assertEqual(len(probs), 6)
-        self.assertIn('failed (exit 1); last lines: boom', probs[2])
-        self.assertIn('gen_map.py --check', probs[5])
+        # git status, merge-base, git diff, tests, check_evidence, parity, gen_map
+        self.assertEqual(len(calls), 7)
+        self.assertEqual(calls[5][0], ['python3', '-I', 'tools/parity/run.py', '--base', 'first'])
+        self.assertEqual(len(probs), 7)
+        self.assertIn('failed (exit 1); last lines: boom', probs[3])
+        self.assertIn('gen_map.py --check', probs[6])
         venv = os.path.join(d, 'parity-venv', 'bin')
         os.makedirs(venv)
         py = os.path.join(venv, 'python')
@@ -9588,7 +9786,7 @@ class DriverTest(unittest.TestCase):
                 mock.patch.dict(os.environ, {'IWD2R_HOME': d}):
             driver.mechanical_checks(batch, d, {'0x76D370': ('ours', 'c')},
                                      run=self._mc_run(0, calls))
-        self.assertEqual(calls[4][0][0], py)
+        self.assertEqual(calls[5][0][0], py)
 
     def test_review_needed_for_fork_rows(self):
         self.assertEqual(driver.review_needed({'id': 'b011'}, {'0x1': ('ours', 'a'), '0x2': ('fork', 'b')}, 's'),
