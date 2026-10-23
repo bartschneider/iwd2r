@@ -606,9 +606,9 @@ def _fallback_split(text, seps):
 
 
 def _feeds_shell(stage):
-    """True when a word of the pipe stage before a << names a shell (the
-    command word, or after env, exec, nohup and the like)."""
-    cw, args = _words(_split_unquoted(stage, ('|',))[-1])
+    """True when a word of a pipe stage names a shell (the command word,
+    or after env, exec, nohup and the like)."""
+    cw, args = _words(stage)
     for w in [cw] + args:
         w = os.path.basename(w.replace('\\', '/')).lower()
         if (w[:-4] if w.endswith('.exe') else w) in _SHELLS:
@@ -621,9 +621,10 @@ def _split_unquoted(text, seps):
     backslash escapes the next character, an unquoted # at the start of a
     word is a comment to the end of the line, and the body of a heredoc
     (<<WORD, <<-WORD, <<'WORD') is data up to its delimiter line, unless
-    the heredoc is fed to a shell (_feeds_shell): that body is commands
-    and is split the same way.  Fails closed: a quote or heredoc left open
-    at the end falls back to _SEGMENT."""
+    a stage of the pipeline that opened it names a shell (_feeds_shell,
+    before or after the <<): that body is commands and is split the same
+    way.  Fails closed: a quote or heredoc left open at the end falls
+    back to _SEGMENT."""
     parts, cur, quote, i, pending = [], [], None, 0, []
     while i < len(text):
         ch = text[i]
@@ -649,7 +650,13 @@ def _split_unquoted(text, seps):
             cur = []
             delims, pending = pending, []
             i += 1
-            for d, run in delims:
+            for d, idx in delims:
+                # the whole pipeline of the segment that opened it (slots
+                # stay valid, bodies are appended only after this newline);
+                # a trailing | continues it past the body: fail closed
+                run = parts[idx].rstrip().endswith('|') or any(
+                    _feeds_shell(st)
+                    for st in _split_unquoted(parts[idx], ('|',)))
                 found, body = False, []
                 while i < len(text) and not found:
                     j = text.find('\n', i)
@@ -668,7 +675,7 @@ def _split_unquoted(text, seps):
             m = _HEREDOC.match(text, i)
             d = next(g for g in m.groups() if g is not None)
             pending.append((re.sub(r'[\\\'"]', '', d) if m.group(3) else d,
-                            _feeds_shell(''.join(cur))))
+                            len(parts)))
             cur.append(text[i:m.end()])
             i = m.end()
             continue

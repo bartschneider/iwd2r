@@ -11399,6 +11399,14 @@ class DriverTest(unittest.TestCase):
             ("bash <<'A'; cat > n.md <<'B'\ngit reset --hard\nA\ndata\nB",
              'history rewrite'),
             ("bash <<'EOF'\nunclosed 'quote\ngit push\nEOF", 'history rewrite'),
+            # ... wherever the shell sits in the heredoc's pipeline
+            ("cat <<'EOF' | bash\nWindowsSandbox.exe run.wsb\nEOF", 'launch outside'),
+            ("cat <<'EOF' | sh -s\ncat src/A.cpp\nEOF", 'cat of src/A.cpp'),
+            ("cat <<'EOF' | bash\ngit reset --hard\nEOF", 'history rewrite'),
+            ("<<'EOF' bash\ngit push\nEOF", 'history rewrite'),
+            ("cat <<'A' | bash; cat > n.md <<'B'\ngit push\nA\ndata\nB",
+             'history rewrite'),
+            ("cat <<'EOF' |\ngit push\nEOF\nbash", 'history rewrite'),
         )
         for cmd, why in cases:
             probs = self._bash(cmd)
@@ -11413,6 +11421,9 @@ class DriverTest(unittest.TestCase):
             "bash <<'A'; cat > n.md <<'B'\ngit status\nA\ngit push later\nB"), [])
         self.assertEqual(self._bash(
             "bash <<'EOF'\ncat > n.md <<'X'\ngit push later\nX\ngit log\nEOF"), [])
+        self.assertEqual(self._bash("cat <<'EOF' | head -3\ngit push later\nEOF"), [])
+        self.assertEqual(self._bash(
+            "cat <<'A' | bash; cat > n.md <<'B'\ngit log\nA\ngit push later\nB"), [])
 
     def test_transcript_history_allows_add_commit_and_branches(self):
         for cmd in ('git checkout -b feature', 'git checkout -b feature first',
