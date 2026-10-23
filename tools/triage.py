@@ -18,6 +18,10 @@ xrec = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(xrec)
 
 CLASSES = ('rename-only', 'signature-only', 'fork-stub', 'ours-stub', 'ambiguous')
+# disagreements.json was computed against our tree at this commit; the closed
+# batches have since adopted fork bodies into later trees, so calibration must
+# classify the already-closed rows here, never at the ref used for new batches
+CALIBRATION_OURS_REF = '82d75232'
 AUTO_OURS = ('rename-only', 'signature-only', 'fork-stub')
 CASE_IDS = {'rename-only': 'triage-rename', 'signature-only': 'triage-sig',
             'fork-stub': 'triage-stub'}
@@ -207,8 +211,15 @@ def triage_rows(rows, fork_ref, ours_ref, show=xrec.show, type_names=None):
         if r['category'] == 'both_changed_differ':
             by_file.setdefault(r['file'], []).append(r)
     out = []
+    memo = {}
+
+    def cached(ref, path):
+        if (ref, path) not in memo:
+            memo[(ref, path)] = show(ref, path)
+        return memo[(ref, path)]
+
     for path, group in by_file.items():
-        theirs, ours = extract(show(fork_ref, path)), extract(show(ours_ref, path))
+        theirs, ours = extract(cached(fork_ref, path)), extract(cached(ours_ref, path))
         for r in group:
             t, o = _find(theirs, r['name'], r['address']), _find(ours, r['name'], r['address'])
             if t is None or o is None:
@@ -279,6 +290,26 @@ def calibration_text(calibration):
     return '\n'.join(lines)
 
 
+def closed_rows(state, rows):
+    """Disagreement rows whose address has a verdict in a closed batch."""
+    done = {a for b in state.get('batches', {}).values() if b.get('status') == 'closed'
+            for a in (b.get('verdicts') or {})}
+    return [r for r in rows if r['address'] in done]
+
+
+def calibration_triage(state, rows, fork_ref, show=xrec.show, type_names=None):
+    """The closed-batch rows classified at CALIBRATION_OURS_REF."""
+    return triage_rows(closed_rows(state, rows), fork_ref, CALIBRATION_OURS_REF,
+                       show=show, type_names=type_names)
+
+
+def require_ref(ref):
+    r = subprocess.run(['git', 'rev-parse', '--verify', '--quiet', ref + '^{commit}'],
+                       capture_output=True, text=True)
+    if r.returncode:
+        raise SystemExit('triage: ref %r is missing or unreachable' % ref)
+
+
 def apply_calibration(triaged, calibration):
     """Rows of a disabled auto class become 'ambiguous' (the original class
     is kept as auto_class so a later calibration still sees it)."""
@@ -297,31 +328,25 @@ def main(argv=None):
     root = os.path.dirname(_here)
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--fork-ref')
-    # the default is the commit that recorded disagreements.json: closed batches
-    # have since adopted fork bodies into HEAD, so HEAD would make every
-    # resolved row look like a rename
-    ap.add_argument('--ours-ref', default='82d75232')
+    ap.add_argument('--ours-ref', default='first')
     ap.add_argument('--disagreements', default=os.path.join(root, 'docs/wso/disagreements.json'))
     ap.add_argument('--calibrate', action='store_true')
     ap.add_argument('--out', default=os.path.join(root, 'docs/wso/triage.json'))
     a = ap.parse_args(argv)
-    if a.calibrate:
-        with open(os.path.join(root, 'docs/wso/wave-state.json'), encoding='utf-8') as f:
-            state = json.load(f)
-        with open(a.out, encoding='utf-8') as f:
-            triaged = json.load(f)
-        cal = calibrate(state, triaged)
-        print(calibration_text(cal))
-        return 1 if any(cal[c]['mismatches'] for c in AUTO_OURS) else 0
-    fork = a.fork_ref
-    if not fork:
-        with open(os.path.join(root, 'docs/wso/wave-state.json'), encoding='utf-8') as f:
-            fork = json.load(f)['fork_base']
+    with open(os.path.join(root, 'docs/wso/wave-state.json'), encoding='utf-8') as f:
+        state = json.load(f)
+    fork = a.fork_ref or state['fork_base']
     with open(a.disagreements, encoding='utf-8') as f:
         rows = json.load(f)
-    out = triage_rows(rows, fork, a.ours_ref)
-    with open(os.path.join(root, 'docs/wso/wave-state.json'), encoding='utf-8') as f:
-        out = apply_calibration(out, calibrate(json.load(f), out))
+    for ref in (fork, CALIBRATION_OURS_REF) + (() if a.calibrate else (a.ours_ref,)):
+        require_ref(ref)
+    cal = calibrate(state, calibration_triage(state, rows, fork))
+    if a.calibrate:
+        print(calibration_text(cal))
+        return 1 if any(cal[c]['mismatches'] for c in AUTO_OURS) else 0
+    out = apply_calibration(triage_rows(rows, fork, a.ours_ref), cal)
+    for r in out:
+        r['ours_ref'] = a.ours_ref
     _write_atomic(a.out, out)
     counts = collections.Counter(r['class'] for r in out)
     for c in CLASSES:

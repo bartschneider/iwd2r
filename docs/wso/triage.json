@@ -4,6 +4,7 @@
     "class": "ambiguous",
     "file": "src/CUIControlFactory.cpp",
     "name": "CUIControlBase::CreateControl",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -11,6 +12,7 @@
     "class": "ambiguous",
     "file": "src/CUIControlFactory.cpp",
     "name": "CUIControlEncumbrance::Render",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -18,6 +20,7 @@
     "class": "ambiguous",
     "file": "src/CUIControlFactory.cpp",
     "name": "CUIControlButtonAction::Render",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -25,6 +28,7 @@
     "class": "ambiguous",
     "file": "src/CUIControlFactory.cpp",
     "name": "CUIControlEditLua::CUIControlEditLua",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -32,6 +36,7 @@
     "class": "ambiguous",
     "file": "src/CProjectile.cpp",
     "name": "CProjectile::DecodeProjectile",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -39,6 +44,7 @@
     "class": "ambiguous",
     "file": "src/CProjectile.cpp",
     "name": "CProjectile::GetSourcePosition",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -46,6 +52,7 @@
     "class": "ambiguous",
     "file": "src/CProjectile.cpp",
     "name": "CProjectile::DeliverEffects",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -53,6 +60,7 @@
     "class": "ambiguous",
     "file": "src/CProjectile.cpp",
     "name": "CProjectile::~CProjectile",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -60,6 +68,7 @@
     "class": "ambiguous",
     "file": "src/CInfButtonArray.cpp",
     "name": "CInfButtonArray::UpdateButtons",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -67,6 +76,7 @@
     "class": "ambiguous",
     "file": "src/CInfButtonArray.cpp",
     "name": "CInfButtonArray::OnLButtonPressed",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -74,6 +84,7 @@
     "class": "ambiguous",
     "file": "src/CInfButtonArray.cpp",
     "name": "CInfButtonArray::SetState",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -81,6 +92,7 @@
     "class": "ambiguous",
     "file": "src/CInfButtonArray.cpp",
     "name": "CInfButtonArray::OnRButtonPressed",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -88,6 +100,7 @@
     "class": "ambiguous",
     "file": "src/CInfButtonArray.cpp",
     "name": "CInfButtonArray::sub_594280",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -95,6 +108,7 @@
     "class": "ambiguous",
     "file": "src/CInfButtonArray.cpp",
     "name": "CInfButtonArray::sub_587C20",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -102,6 +116,7 @@
     "class": "ambiguous",
     "file": "src/CInfButtonArray.cpp",
     "name": "CInfButtonArray::sub_588820",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -109,6 +124,7 @@
     "class": "ambiguous",
     "file": "src/CInfButtonArray.cpp",
     "name": "CInfButtonArray::sub_587DF0",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -116,6 +132,7 @@
     "class": "ambiguous",
     "file": "src/CInfButtonArray.cpp",
     "name": "CInfButtonArray::sub_588CB0",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -123,6 +140,7 @@
     "class": "ambiguous",
     "file": "src/CInfButtonArray.cpp",
     "name": "CInfButtonArray::sub_588570",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -130,6 +148,7 @@
     "class": "ambiguous",
     "file": "src/CInfButtonArray.cpp",
     "name": "CInfButtonArray::sub_594170",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -137,6 +156,7 @@
     "class": "ambiguous",
     "file": "src/CInfButtonArray.cpp",
     "name": "CInfButtonArray::sub_5884B0",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -144,6 +164,7 @@
     "class": "ambiguous",
     "file": "src/CInfButtonArray.cpp",
     "name": "CInfButtonArray::sub_5886A0",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -151,6 +172,7 @@
     "class": "ambiguous",
     "file": "src/CInfButtonArray.cpp",
     "name": "CInfButtonArray::sub_596040",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -158,6 +180,7 @@
     "class": "ambiguous",
     "file": "src/CInfButtonArray.cpp",
     "name": "CInfButtonArray::sub_588760",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -165,6 +188,7 @@
     "class": "ambiguous",
     "file": "src/CInfButtonArray.cpp",
     "name": "CInfButtonArray::CInfButtonArray",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -172,6 +196,7 @@
     "class": "ambiguous",
     "file": "src/CInfButtonArray.cpp",
     "name": "CInfButtonArray::sub_595FB0",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -179,6 +204,7 @@
     "class": "ambiguous",
     "file": "src/CInfButtonArray.cpp",
     "name": "CInfButtonArray::sub_589FF0",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -186,6 +212,7 @@
     "class": "ambiguous",
     "file": "src/CInfButtonArray.cpp",
     "name": "CInfButtonSettings::CInfButtonSettings",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -193,6 +220,7 @@
     "class": "ambiguous",
     "file": "src/CInfButtonArray.cpp",
     "name": "CInfButtonArray::ResetState",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -200,6 +228,7 @@
     "class": "ambiguous",
     "file": "src/CInfButtonArray.cpp",
     "name": "CInfButtonArray::UpdateCustomizableButtonTypes",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -207,6 +236,7 @@
     "class": "ambiguous",
     "file": "src/CInfButtonArray.cpp",
     "name": "CInfButtonArray::UpdateSelectedWeaponSet",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -214,6 +244,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::FeedBack",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -221,6 +252,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::AIUpdate",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -228,6 +260,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::ProcessAI",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -235,6 +268,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::Spell",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -242,6 +276,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::Damage",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -249,6 +284,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::ExecuteAction",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -256,6 +292,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::Swing",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -263,6 +300,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::CGameSprite",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -270,6 +308,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::Unmarshal",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -277,6 +316,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::AIUpdateWalk",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -284,6 +324,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::Render",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -291,6 +332,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::Hit",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -298,6 +340,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::ProcessEffectList",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -305,6 +348,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::sub_763200",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -312,6 +356,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::SetCurrAction",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -319,6 +364,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::UpdateSpriteEffect",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -326,6 +372,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::RenderPortrait",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -333,6 +380,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::ClearBumpPath",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -340,6 +388,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::AttackReevaluate",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -347,6 +396,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::Attack",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -354,6 +404,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::RenderSpriteEffect",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -361,6 +412,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::CheckModal",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -368,6 +420,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::sub_726810",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -375,6 +428,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::Marshal",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -382,6 +436,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::StartSpriteEffect",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -389,6 +444,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::GetInnateQuickButtons",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -396,6 +452,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::OnActionButton",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -403,6 +460,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::sub_71E240",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -410,6 +468,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::ApplyTriggers",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -417,6 +476,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::sub_755A70",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -424,6 +484,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::CheckIfUsedUp",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -431,6 +492,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::MoveToObject",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -438,6 +500,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::JumpToPoint",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -445,6 +508,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::AddToArea",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -452,6 +516,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::SetModalState",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -459,6 +524,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::EvaluateStatusTrigger",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -466,6 +532,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::sub_756930",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -473,6 +540,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::GetSpellQuickButtons",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -480,6 +548,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::sub_726F20",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -487,6 +556,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::SelectWeaponAbility",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -494,6 +564,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::GetDomainQuickButtons",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -501,6 +572,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::RemoveFromArea",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -508,6 +580,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::RenderDamageArrow",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -515,6 +588,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::PlayerDialog",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -522,6 +596,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::MoveToPoint",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -529,6 +604,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::sub_716E80",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -536,6 +612,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::GetTargetShare",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -543,6 +620,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::Dialog",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -550,6 +628,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::sub_722820",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -557,6 +636,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::RemoveReplacementFromArea",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -564,6 +644,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::CheckIfVisible",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -571,6 +652,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::DoAIUpdate",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -578,6 +660,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::sub_73CD00",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -585,6 +668,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::sub_727720",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -592,6 +676,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::sub_75E330",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -599,6 +684,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::EquipRanged",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -606,6 +692,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::sub_71D0B0",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -613,6 +700,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::sub_717FC0",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -620,6 +708,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::EquipMostDamagingMelee",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -627,6 +716,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::sub_73D1B0",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -634,6 +724,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::HandleEffects",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -641,6 +732,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::sub_73C490",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -648,6 +740,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::SetTargetObject",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -655,6 +748,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::AddSpecialAbility",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -662,6 +756,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::GetAC",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -669,6 +764,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::AddEffect",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -676,6 +772,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::sub_718390",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -683,6 +780,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::sub_73CF10",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -690,6 +788,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::sub_73D080",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -697,6 +796,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::sub_723DB0",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -704,6 +804,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::sub_6F50A0",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -711,6 +812,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::ReturnToStartLoc",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -718,6 +820,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::sub_71CFF0",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -725,6 +828,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::ApplyCastingEffectPost",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -732,6 +836,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::sub_761AB0",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -739,6 +844,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::sub_72FBF0",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -746,6 +852,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::sub_723F60",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -753,6 +860,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::CanSaveGame",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -760,6 +868,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::SetPath",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -767,6 +876,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::ProcessPendingTriggers",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -774,6 +884,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::sub_75F240",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -781,6 +892,7 @@
     "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::IsVisibleToCaller",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -788,6 +900,7 @@
     "class": "ambiguous",
     "file": "src/CGameAIBase.cpp",
     "name": "CGameAIBase::ExecuteAction",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -795,6 +908,7 @@
     "class": "ambiguous",
     "file": "src/CGameAIBase.cpp",
     "name": "CGameAIBase::EvaluateStatusTrigger",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -802,6 +916,7 @@
     "class": "ambiguous",
     "file": "src/CGameAIBase.cpp",
     "name": "CGameAIBase::ForceSpellPoint",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -809,6 +924,7 @@
     "class": "ambiguous",
     "file": "src/CGameAIBase.cpp",
     "name": "CGameAIBase::ProcessPendingTriggers",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -816,6 +932,7 @@
     "class": "ambiguous",
     "file": "src/CGameAIBase.cpp",
     "name": "CGameAIBase::ProcessAI",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -823,6 +940,7 @@
     "class": "ambiguous",
     "file": "src/CGameAIBase.cpp",
     "name": "CGameAIBase::SetGlobal",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -830,6 +948,7 @@
     "class": "ambiguous",
     "file": "src/CGameAIBase.cpp",
     "name": "CGameAIBase::IncrementGlobal",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -837,6 +956,7 @@
     "class": "ambiguous",
     "file": "src/CGameAIBase.cpp",
     "name": "CGameAIBase::StartCutScene",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -844,6 +964,7 @@
     "class": "ambiguous",
     "file": "src/CGameAIBase.cpp",
     "name": "CGameAIBase::IncrementChapter",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -851,6 +972,7 @@
     "class": "ambiguous",
     "file": "src/CGameAIBase.cpp",
     "name": "CGameAIBase::sub_481890",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -858,6 +980,7 @@
     "class": "ambiguous",
     "file": "src/CGameAIBase.cpp",
     "name": "CGameAIBase::GetGlobalVariable",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -865,6 +988,7 @@
     "class": "ambiguous",
     "file": "src/CGameAIBase.cpp",
     "name": "CGameAIBase::GetTriggerSprite",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -872,6 +996,7 @@
     "class": "ambiguous",
     "file": "src/CGameAIBase.cpp",
     "name": "CGameAIBase::DecodeSpell",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -879,6 +1004,7 @@
     "class": "ambiguous",
     "file": "src/CCacheStatus.cpp",
     "name": "CCacheStatus::Update",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -886,6 +1012,7 @@
     "class": "ambiguous",
     "file": "src/CGameArea.cpp",
     "name": "CGameArea::Unmarshal",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -893,6 +1020,7 @@
     "class": "ambiguous",
     "file": "src/CGameArea.cpp",
     "name": "CGameArea::Marshal",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -900,6 +1028,7 @@
     "class": "ambiguous",
     "file": "src/CGameArea.cpp",
     "name": "CGameArea::AIUpdate",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -907,6 +1036,7 @@
     "class": "ambiguous",
     "file": "src/CGameArea.cpp",
     "name": "CGameArea::SortLists",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -914,6 +1044,7 @@
     "class": "ambiguous",
     "file": "src/CGameArea.cpp",
     "name": "CGameArea::Render",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -921,6 +1052,7 @@
     "class": "ambiguous",
     "file": "src/CGameArea.cpp",
     "name": "CGameArea::GetNearest",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -928,6 +1060,7 @@
     "class": "ambiguous",
     "file": "src/CGameArea.cpp",
     "name": "CGameArea::GetTintColor",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -935,6 +1068,7 @@
     "class": "ambiguous",
     "file": "src/CGameArea.cpp",
     "name": "CGameArea::GetAllInPoly",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -942,6 +1076,7 @@
     "class": "ambiguous",
     "file": "src/CGameArea.cpp",
     "name": "CGameArea::sub_46DAE0",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -949,6 +1084,7 @@
     "class": "ambiguous",
     "file": "src/CGameArea.cpp",
     "name": "CGameArea::sub_47A1C0",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -956,6 +1092,7 @@
     "class": "ambiguous",
     "file": "src/CGameArea.cpp",
     "name": "CGameArea::OnActivation",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -963,6 +1100,7 @@
     "class": "ambiguous",
     "file": "src/CGameArea.cpp",
     "name": "CGameArea::SetDawn",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -970,6 +1108,7 @@
     "class": "ambiguous",
     "file": "src/CGameArea.cpp",
     "name": "CGameArea::RemoveObject",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -977,6 +1116,7 @@
     "class": "ambiguous",
     "file": "src/CGameArea.cpp",
     "name": "CGameArea::AdjustTarget",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -984,6 +1124,7 @@
     "class": "ambiguous",
     "file": "src/CGameArea.cpp",
     "name": "CGameArea::GetAllInRangeBack",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -991,6 +1132,7 @@
     "class": "ambiguous",
     "file": "src/CGameArea.cpp",
     "name": "CGameArea::GetAllInRange",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -998,6 +1140,7 @@
     "class": "ambiguous",
     "file": "src/CGameArea.cpp",
     "name": "CGameArea::SnapshotAdjustTarget",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1005,6 +1148,7 @@
     "class": "ambiguous",
     "file": "src/CGameArea.cpp",
     "name": "CGameArea::SetNight",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1012,6 +1156,7 @@
     "class": "ambiguous",
     "file": "src/CGameArea.cpp",
     "name": "CGameArea::SetDay",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1019,6 +1164,7 @@
     "class": "ambiguous",
     "file": "src/CInfGame.cpp",
     "name": "CInfGame::SwapItemPersonal",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1026,6 +1172,7 @@
     "class": "ambiguous",
     "file": "src/CInfGame.cpp",
     "name": "CInfGame::Unmarshal",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1033,6 +1180,7 @@
     "class": "ambiguous",
     "file": "src/CInfGame.cpp",
     "name": "CInfGame::Marshal",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1040,6 +1188,7 @@
     "class": "ambiguous",
     "file": "src/CInfGame.cpp",
     "name": "CInfGame::LoadArea",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1047,6 +1196,7 @@
     "class": "ambiguous",
     "file": "src/CInfGame.cpp",
     "name": "CInfGame::SaveGame",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1054,6 +1204,7 @@
     "class": "ambiguous",
     "file": "src/CInfGame.cpp",
     "name": "CInfGame::SwapItemPersonalInventory",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1061,6 +1212,7 @@
     "class": "ambiguous",
     "file": "src/CInfGame.cpp",
     "name": "CInfGame::DestroyGame",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1068,6 +1220,7 @@
     "class": "ambiguous",
     "file": "src/CInfGame.cpp",
     "name": "CInfGame::SynchronousUpdate",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1075,6 +1228,7 @@
     "class": "ambiguous",
     "file": "src/CInfGame.cpp",
     "name": "CInfGame::SelectAll",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1082,6 +1236,7 @@
     "class": "ambiguous",
     "file": "src/CInfGame.cpp",
     "name": "CInfGame::ImportCharacter",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1089,6 +1244,7 @@
     "class": "ambiguous",
     "file": "src/CInfGame.cpp",
     "name": "CInfGame::UseMagicOnObject",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1096,6 +1252,7 @@
     "class": "ambiguous",
     "file": "src/CInfGame.cpp",
     "name": "CInfGame::NewGame",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1103,6 +1260,7 @@
     "class": "ambiguous",
     "file": "src/CInfGame.cpp",
     "name": "CInfGame::SwapItemGround",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1110,6 +1268,7 @@
     "class": "ambiguous",
     "file": "src/CInfGame.cpp",
     "name": "CInfGame::SetupCharacters",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1117,6 +1276,7 @@
     "class": "ambiguous",
     "file": "src/CInfGame.cpp",
     "name": "CInfGame::UseMagicOnGround",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1124,6 +1284,7 @@
     "class": "ambiguous",
     "file": "src/CInfGame.cpp",
     "name": "CInfGame::AddItemToBag",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1131,6 +1292,7 @@
     "class": "ambiguous",
     "file": "src/CInfGame.cpp",
     "name": "CInfGame::UpdateCharacterSlots",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1138,6 +1300,7 @@
     "class": "ambiguous",
     "file": "src/CInfGame.cpp",
     "name": "CInfGame::SelectToolbar",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1145,6 +1308,7 @@
     "class": "fork-stub",
     "file": "src/CInfGame.cpp",
     "name": "CInfGame::GetProtagonist",
+    "ours_ref": "82d75232",
     "reason": "their body is under a quarter of ours and calls nothing new"
   },
   {
@@ -1152,6 +1316,7 @@
     "class": "ambiguous",
     "file": "src/CInfGame.cpp",
     "name": "CInfGame::FindEmptyItemPersonalInventory",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1159,6 +1324,7 @@
     "class": "ambiguous",
     "file": "src/CInfGame.cpp",
     "name": "CInfGame::CanPortraitEquipInSlot",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1166,6 +1332,7 @@
     "class": "ambiguous",
     "file": "src/CGameEffect.cpp",
     "name": "CGameEffectDamage::ApplyEffect",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1173,6 +1340,7 @@
     "class": "ambiguous",
     "file": "src/CGameEffect.cpp",
     "name": "CGameEffectDeath::ApplyEffect",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1180,6 +1348,7 @@
     "class": "ambiguous",
     "file": "src/CGameEffect.cpp",
     "name": "CGameEffect::CheckSave",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1187,6 +1356,7 @@
     "class": "ambiguous",
     "file": "src/CGameEffect.cpp",
     "name": "CGameEffectVisualSpellHit::ApplyEffect",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1194,6 +1364,7 @@
     "class": "ambiguous",
     "file": "src/CGameEffect.cpp",
     "name": "CGameEffectStoneSkins::ApplyEffect",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1201,6 +1372,7 @@
     "class": "ambiguous",
     "file": "src/CGameEffect.cpp",
     "name": "CGameEffectColorLightSolid::ApplyEffect",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1208,6 +1380,7 @@
     "class": "ambiguous",
     "file": "src/CGameEffect.cpp",
     "name": "CGameEffectColorTintSolid::ApplyEffect",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1215,6 +1388,7 @@
     "class": "ambiguous",
     "file": "src/CGameEffect.cpp",
     "name": "CGameEffectBaseAttackBonus::ApplyEffect",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1222,6 +1396,7 @@
     "class": "ambiguous",
     "file": "src/CGameEffect.cpp",
     "name": "CGameEffect::ResolveEffect",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1229,6 +1404,7 @@
     "class": "ambiguous",
     "file": "src/CGameEffect.cpp",
     "name": "CGameEffectInvisible::ApplyEffect",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1236,6 +1412,7 @@
     "class": "ambiguous",
     "file": "src/CGameEffect.cpp",
     "name": "CGameEffectImmunitySpell::ApplyEffect",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1243,6 +1420,7 @@
     "class": "ambiguous",
     "file": "src/CGameEffect.cpp",
     "name": "CGameEffect::sub_4A4FC0",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1250,6 +1428,7 @@
     "class": "ambiguous",
     "file": "src/CGameEffect.cpp",
     "name": "CGameEffectSkillUnsummon::ApplyEffect",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1257,6 +1436,7 @@
     "class": "ambiguous",
     "file": "src/CBaldurChitin.cpp",
     "name": "CBaldurChitin::CBaldurChitin",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1264,6 +1444,7 @@
     "class": "ambiguous",
     "file": "src/CBaldurChitin.cpp",
     "name": "CBaldurChitin::Init",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1271,6 +1452,7 @@
     "class": "ambiguous",
     "file": "src/CBaldurChitin.cpp",
     "name": "CBaldurChitin::MainAIThread",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1278,6 +1460,7 @@
     "class": "ambiguous",
     "file": "src/CBaldurChitin.cpp",
     "name": "CBaldurChitin::OnMultiplayerSessionOpen",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1285,6 +1468,7 @@
     "class": "ambiguous",
     "file": "src/CScreenCharacter.cpp",
     "name": "CScreenCharacter::UpdateGeneralInformation",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1292,6 +1476,7 @@
     "class": "ambiguous",
     "file": "src/CScreenCharacter.cpp",
     "name": "CScreenCharacter::UpdateEquipmentInformation",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1299,6 +1484,7 @@
     "class": "ambiguous",
     "file": "src/CScreenCharacter.cpp",
     "name": "CScreenCharacter::CScreenCharacter",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1306,6 +1492,7 @@
     "class": "ambiguous",
     "file": "src/CScreenCharacter.cpp",
     "name": "CScreenCharacter::UpdateMainPanel",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1313,6 +1500,7 @@
     "class": "fork-stub",
     "file": "src/CScreenCharacter.cpp",
     "name": "CScreenCharacter::OnDoneButtonClick",
+    "ours_ref": "82d75232",
     "reason": "their body is under a quarter of ours and calls nothing new"
   },
   {
@@ -1320,6 +1508,7 @@
     "class": "ambiguous",
     "file": "src/CScreenCharacter.cpp",
     "name": "CScreenCharacter::EngineGameInit",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1327,6 +1516,7 @@
     "class": "fork-stub",
     "file": "src/CScreenCharacter.cpp",
     "name": "CScreenCharacter::OnCancelButtonClick",
+    "ours_ref": "82d75232",
     "reason": "their body is under a quarter of ours and calls nothing new"
   },
   {
@@ -1334,6 +1524,7 @@
     "class": "ambiguous",
     "file": "src/CScreenCharacter.cpp",
     "name": "CScreenCharacter::sub_5F8C90",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1341,6 +1532,7 @@
     "class": "ambiguous",
     "file": "src/CScreenCharacter.cpp",
     "name": "CUIControlButtonCharacterFeatsCircle::Render",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1348,6 +1540,7 @@
     "class": "ambiguous",
     "file": "src/CScreenCharacter.cpp",
     "name": "CScreenCharacter::UpdateClassSelectionPanel",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1355,6 +1548,7 @@
     "class": "ambiguous",
     "file": "src/CScreenCharacter.cpp",
     "name": "CScreenCharacter::OnScriptItemSelect",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1362,6 +1556,7 @@
     "class": "ambiguous",
     "file": "src/CScreenCharacter.cpp",
     "name": "CUIControlButtonCharacterClassSelection::OnLButtonClick",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1369,6 +1564,7 @@
     "class": "ambiguous",
     "file": "src/CScreenCharacter.cpp",
     "name": "CScreenCharacter::UpdatePopupPanel",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1376,6 +1572,7 @@
     "class": "ambiguous",
     "file": "src/CScreenCharacter.cpp",
     "name": "CUIControlButtonCharacterFeatsPlusMinus::AdjustValue",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1383,6 +1580,7 @@
     "class": "ambiguous",
     "file": "src/CScreenCharacter.cpp",
     "name": "CScreenCharacter::sub_5F91F0",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1390,6 +1588,7 @@
     "class": "ambiguous",
     "file": "src/CScreenCharacter.cpp",
     "name": "CScreenCharacter::EnableMainPanel",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1397,6 +1596,7 @@
     "class": "ambiguous",
     "file": "src/CScreenCharacter.cpp",
     "name": "CScreenCharacter::UpdateSavingThrows",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1404,6 +1604,7 @@
     "class": "ambiguous",
     "file": "src/CScreenCharacter.cpp",
     "name": "CUIControlScrollbarCharacter5F9410::OnPageDown",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1411,6 +1612,7 @@
     "class": "ambiguous",
     "file": "src/CScreenCharacter.cpp",
     "name": "CUIControlCharacterHotArea778ED0::OnHotAreaClick",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1418,6 +1620,7 @@
     "class": "ambiguous",
     "file": "src/CScreenCharacter.cpp",
     "name": "CUIControlScrollbarCharacter5F9410::OnScroll",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1425,6 +1628,7 @@
     "class": "ambiguous",
     "file": "src/CScreenCharacter.cpp",
     "name": "CUIControlScrollbarCharacter5F9410::OnPageUp",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1432,6 +1636,7 @@
     "class": "ambiguous",
     "file": "src/CScreenWorld.cpp",
     "name": "CScreenWorld::OnKeyDown",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1439,6 +1644,7 @@
     "class": "ambiguous",
     "file": "src/CScreenWorld.cpp",
     "name": "CScreenWorld::StartDialog",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1446,6 +1652,7 @@
     "class": "ambiguous",
     "file": "src/CScreenWorld.cpp",
     "name": "CScreenWorld::CScreenWorld",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1453,6 +1660,7 @@
     "class": "ambiguous",
     "file": "src/CScreenWorld.cpp",
     "name": "CScreenWorld::EndDialog",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1460,6 +1668,7 @@
     "class": "ambiguous",
     "file": "src/CScreenWorld.cpp",
     "name": "CScreenWorld::TogglePauseGame",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1467,6 +1676,7 @@
     "class": "ambiguous",
     "file": "src/CScreenWorld.cpp",
     "name": "CScreenWorld::EngineGameInit",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1474,6 +1684,7 @@
     "class": "ambiguous",
     "file": "src/CScreenWorld.cpp",
     "name": "CScreenWorld::StartDeath",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1481,6 +1692,7 @@
     "class": "ambiguous",
     "file": "src/CAIScriptFile.cpp",
     "name": "CAIScriptFile::ParseTrigger",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1488,6 +1700,7 @@
     "class": "ambiguous",
     "file": "src/CAIScriptFile.cpp",
     "name": "CAIScriptFile::ParseOneLine",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1495,6 +1708,7 @@
     "class": "ambiguous",
     "file": "src/CGameAnimationTypeCharacter.cpp",
     "name": "CGameAnimationTypeCharacter::SetSequence",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1502,6 +1716,7 @@
     "class": "ambiguous",
     "file": "src/CGameAnimationTypeCharacter.cpp",
     "name": "CGameAnimationTypeCharacter::EquipWeapon",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1509,6 +1724,7 @@
     "class": "ambiguous",
     "file": "src/CGameAnimationTypeCharacter.cpp",
     "name": "CGameAnimationTypeCharacter::Render",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1516,6 +1732,7 @@
     "class": "ambiguous",
     "file": "src/CGameAnimationTypeCharacter.cpp",
     "name": "CGameAnimationTypeCharacter::EquipHelmet",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1523,6 +1740,7 @@
     "class": "ambiguous",
     "file": "src/CScreenStore.cpp",
     "name": "CScreenStore::UpdateBuySellPanel",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1530,6 +1748,7 @@
     "class": "ambiguous",
     "file": "src/CScreenStore.cpp",
     "name": "CScreenStore::OnBuySpellButtonClick",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1537,6 +1756,7 @@
     "class": "ambiguous",
     "file": "src/CScreenStore.cpp",
     "name": "CScreenStore::BuyBagItems",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1544,6 +1764,7 @@
     "class": "ambiguous",
     "file": "src/CScreenStore.cpp",
     "name": "CScreenStore::BuyStoreItems",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1551,6 +1772,7 @@
     "class": "ambiguous",
     "file": "src/CScreenStore.cpp",
     "name": "CScreenStore::UpdateGroupItems",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1558,6 +1780,7 @@
     "class": "ambiguous",
     "file": "src/CScreenStore.cpp",
     "name": "CScreenStore::UpdateIdentifyPanel",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1565,6 +1788,7 @@
     "class": "ambiguous",
     "file": "src/CScreenStore.cpp",
     "name": "CScreenStore::BuyContainerBagItems",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1572,6 +1796,7 @@
     "class": "ambiguous",
     "file": "src/CScreenStore.cpp",
     "name": "CScreenStore::UpdateStoreItems",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1579,6 +1804,7 @@
     "class": "ambiguous",
     "file": "src/CScreenStore.cpp",
     "name": "CScreenStore::BuyContainerItems",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1586,6 +1812,7 @@
     "class": "ambiguous",
     "file": "src/CScreenStore.cpp",
     "name": "CUIControlButtonStoreGroupItem::Render",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1593,6 +1820,7 @@
     "class": "ambiguous",
     "file": "src/CScreenStore.cpp",
     "name": "CUIControlButtonStoreStoreItem::Render",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1600,6 +1828,7 @@
     "class": "ambiguous",
     "file": "src/CScreenStore.cpp",
     "name": "CScreenStore::CheckSpellUsable",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1607,6 +1836,7 @@
     "class": "ambiguous",
     "file": "src/CScreenStore.cpp",
     "name": "CScreenStore::UpdateSpellItems",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1614,6 +1844,7 @@
     "class": "ambiguous",
     "file": "src/CScreenStore.cpp",
     "name": "CScreenStore::UpdateBuySpellPanel",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1621,6 +1852,7 @@
     "class": "ambiguous",
     "file": "src/CScreenStore.cpp",
     "name": "CScreenStore::OnBuyDrinkButtonClick",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1628,6 +1860,7 @@
     "class": "ambiguous",
     "file": "src/CScreenStore.cpp",
     "name": "CScreenStore::UpdateIdentifyItems",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1635,6 +1868,7 @@
     "class": "ambiguous",
     "file": "src/CScreenStore.cpp",
     "name": "CScreenStore::OnKeyDown",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1642,6 +1876,7 @@
     "class": "ambiguous",
     "file": "src/CScreenStore.cpp",
     "name": "CScreenStore::IsBuyItemButtonClickable",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1649,6 +1884,7 @@
     "class": "ambiguous",
     "file": "src/CScreenStore.cpp",
     "name": "CScreenStore::OnIdentifyItemButtonClick",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1656,6 +1892,7 @@
     "class": "ambiguous",
     "file": "src/CScreenStore.cpp",
     "name": "CScreenStore::sub_6734F0",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1663,6 +1900,7 @@
     "class": "ambiguous",
     "file": "src/CScreenStore.cpp",
     "name": "CUIControlButtonStoreStoreSpell::Render",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1670,6 +1908,7 @@
     "class": "ambiguous",
     "file": "src/CScreenStore.cpp",
     "name": "CUIControlButtonStoreGroupItem::OnLButtonClick",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1677,6 +1916,7 @@
     "class": "ambiguous",
     "file": "src/CScreenStore.cpp",
     "name": "CUIControlButtonStoreStoreItem::OnLButtonDoubleClick",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1684,6 +1924,7 @@
     "class": "ambiguous",
     "file": "src/CScreenStore.cpp",
     "name": "CUIControlButtonStoreGroupItem::OnRButtonClick",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1691,6 +1932,7 @@
     "class": "ambiguous",
     "file": "src/CScreenStore.cpp",
     "name": "CUIControlButtonStoreGroupItem::OnLButtonDoubleClick",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1698,6 +1940,7 @@
     "class": "ambiguous",
     "file": "src/CScreenStore.cpp",
     "name": "CScreenStore::EnableMainPanel",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1705,6 +1948,7 @@
     "class": "ambiguous",
     "file": "src/CScreenStore.cpp",
     "name": "CUIControlButtonStoreStoreItem::OnRButtonClick",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1712,6 +1956,7 @@
     "class": "ambiguous",
     "file": "src/CScreenStore.cpp",
     "name": "CScreenStore::OnBuyItemButtonClick",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1719,6 +1964,7 @@
     "class": "ambiguous",
     "file": "src/CScreenStore.cpp",
     "name": "CScreenStore::OnSellItemButtonClick",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1726,6 +1972,7 @@
     "class": "ambiguous",
     "file": "src/IcewindCGameEffects.cpp",
     "name": "IcewindCGameEffectApplyEffectsList::ApplyEffect",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1733,6 +1980,7 @@
     "class": "ambiguous",
     "file": "src/IcewindCGameEffects.cpp",
     "name": "IcewindCGameEffectCastingGlow::ApplyEffect",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1740,6 +1988,7 @@
     "class": "ambiguous",
     "file": "src/IcewindCGameEffects.cpp",
     "name": "IcewindCGameEffectCallLightning::ApplyEffect",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1747,6 +1996,7 @@
     "class": "ambiguous",
     "file": "src/IcewindCGameEffects.cpp",
     "name": "IcewindCGameEffectProjectile::ApplyEffect",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1754,6 +2004,7 @@
     "class": "ambiguous",
     "file": "src/IcewindCGameEffects.cpp",
     "name": "IcewindCGameEffectVisualSpellHit::ApplyEffect",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1761,6 +2012,7 @@
     "class": "ambiguous",
     "file": "src/IcewindCGameEffects.cpp",
     "name": "IcewindCGameEffectDamageReduction::ApplyEffect",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1768,6 +2020,7 @@
     "class": "ambiguous",
     "file": "src/IcewindCGameEffects.cpp",
     "name": "IcewindCGameEffectWhenStruck::ApplyEffect",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1775,6 +2028,7 @@
     "class": "ambiguous",
     "file": "src/IcewindCGameEffects.cpp",
     "name": "IcewindCGameEffectProtectionFromArrows::ApplyEffect",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1782,6 +2036,7 @@
     "class": "ambiguous",
     "file": "src/CScreenInventory.cpp",
     "name": "CScreenInventory::SwapWithSlot",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1789,6 +2044,7 @@
     "class": "ambiguous",
     "file": "src/CScreenInventory.cpp",
     "name": "CScreenInventory::UpdateMainPanel",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1796,6 +2052,7 @@
     "class": "ambiguous",
     "file": "src/CScreenInventory.cpp",
     "name": "CScreenInventory::CScreenInventory",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1803,6 +2060,7 @@
     "class": "ambiguous",
     "file": "src/CScreenInventory.cpp",
     "name": "CUIControlButtonInventorySlot::Render",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1810,6 +2068,7 @@
     "class": "ambiguous",
     "file": "src/CScreenInventory.cpp",
     "name": "CScreenInventory::OnDoneButtonClick",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1817,6 +2076,7 @@
     "class": "ambiguous",
     "file": "src/CScreenInventory.cpp",
     "name": "CUIControlButtonInventorySlot::UpdateWeaponHighlight",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1824,6 +2084,7 @@
     "class": "ambiguous",
     "file": "src/CScreenInventory.cpp",
     "name": "CScreenInventory::CancelEngine",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1831,6 +2092,7 @@
     "class": "ambiguous",
     "file": "src/CScreenInventory.cpp",
     "name": "CScreenInventory::OnKeyDown",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1838,6 +2100,7 @@
     "class": "ambiguous",
     "file": "src/CScreenInventory.cpp",
     "name": "CScreenInventory::IsAbilitiesButtonActive",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1845,6 +2108,7 @@
     "class": "ambiguous",
     "file": "src/CScreenInventory.cpp",
     "name": "CUIControlButtonInventorySlot::TimerAsynchronousUpdate",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1852,6 +2116,7 @@
     "class": "ambiguous",
     "file": "src/CScreenInventory.cpp",
     "name": "CScreenInventory::SelectItemAbility",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1859,6 +2124,7 @@
     "class": "ambiguous",
     "file": "src/CScreenInventory.cpp",
     "name": "CScreenInventory::SwapWithPortrait",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1866,6 +2132,7 @@
     "class": "ambiguous",
     "file": "src/CScreenInventory.cpp",
     "name": "CScreenInventory::IsUseButtonActive",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1873,6 +2140,7 @@
     "class": "ambiguous",
     "file": "src/CScreenInventory.cpp",
     "name": "CScreenInventory::UpdateHistoryPanel",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1880,6 +2148,7 @@
     "class": "ambiguous",
     "file": "src/CScreenInventory.cpp",
     "name": "CScreenInventory::TimerAsynchronousUpdate",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1887,6 +2156,7 @@
     "class": "ambiguous",
     "file": "src/CScreenInventory.cpp",
     "name": "CUIControlButtonInventorySlot::OnRButtonClick",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1894,6 +2164,7 @@
     "class": "ambiguous",
     "file": "src/CScreenInventory.cpp",
     "name": "CScreenInventory::UpdateAbilitiesPanel",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1901,6 +2172,7 @@
     "class": "ambiguous",
     "file": "src/CScreenInventory.cpp",
     "name": "CUIControlButtonInventorySlot::UpdateHighlight",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1908,6 +2180,7 @@
     "class": "ambiguous",
     "file": "src/CScreenInventory.cpp",
     "name": "CScreenInventory::EnableMainPanel",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1915,6 +2188,7 @@
     "class": "ambiguous",
     "file": "src/CScreenInventory.cpp",
     "name": "CUIControlButtonInventoryRequesterPlusMinus::AdjustValue",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1922,6 +2196,7 @@
     "class": "ambiguous",
     "file": "src/CScreenInventory.cpp",
     "name": "CUIControlButtonInventoryColorChoice::GetColorRange",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1929,6 +2204,7 @@
     "class": "ambiguous",
     "file": "src/CScreenInventory.cpp",
     "name": "CScreenInventory::OnCancelButtonClick",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1936,6 +2212,7 @@
     "class": "ambiguous",
     "file": "src/CScreenInventory.cpp",
     "name": "CUIControlButtonInventoryAbilitiesAbility::OnLButtonClick",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1943,6 +2220,7 @@
     "class": "ambiguous",
     "file": "src/CScreenInventory.cpp",
     "name": "CScreenInventory::GetPortraitByPosition",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1950,6 +2228,7 @@
     "class": "ambiguous",
     "file": "src/CScreenConnection.cpp",
     "name": "CScreenConnection::OnDoneButtonClick",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1957,6 +2236,7 @@
     "class": "ambiguous",
     "file": "src/CScreenConnection.cpp",
     "name": "CScreenConnection::HandleEMEvent",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1964,6 +2244,7 @@
     "class": "ambiguous",
     "file": "src/CScreenConnection.cpp",
     "name": "CScreenConnection::OnNewGameButtonClick",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1971,6 +2252,7 @@
     "class": "ambiguous",
     "file": "src/CScreenConnection.cpp",
     "name": "CScreenConnection::OnLobbyNewGameButtonClick",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1978,6 +2260,7 @@
     "class": "ambiguous",
     "file": "src/CScreenConnection.cpp",
     "name": "CScreenConnection::AutoStartDirectPlayLobby",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1985,6 +2268,7 @@
     "class": "ambiguous",
     "file": "src/CScreenConnection.cpp",
     "name": "CScreenConnection::EnableMainPanel",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1992,6 +2276,7 @@
     "class": "ambiguous",
     "file": "src/CVidInf.cpp",
     "name": "CVidInf::CreateSurfaces",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -1999,6 +2284,7 @@
     "class": "ambiguous",
     "file": "src/CVidInf.cpp",
     "name": "CVidInf::PrintSurfaceToBmp",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2006,6 +2292,7 @@
     "class": "ambiguous",
     "file": "src/CVidInf.cpp",
     "name": "CVidInf::FXBltToBack",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2013,6 +2300,7 @@
     "class": "ambiguous",
     "file": "src/CVidInf.cpp",
     "name": "CVidInf::FXRender",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2020,6 +2308,7 @@
     "class": "ambiguous",
     "file": "src/CVidInf.cpp",
     "name": "CVidInf::BKTextOut",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2027,6 +2316,7 @@
     "class": "ambiguous",
     "file": "src/CVidPalette.cpp",
     "name": "CVidPalette::RealizeRange",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2034,6 +2324,7 @@
     "class": "ambiguous",
     "file": "src/CVidPalette.cpp",
     "name": "CVidPalette::RealizeResource",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2041,6 +2332,7 @@
     "class": "ambiguous",
     "file": "src/CAIObjectType.cpp",
     "name": "CAIObjectType::Decode",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2048,6 +2340,7 @@
     "class": "ambiguous",
     "file": "src/CAIObjectType.cpp",
     "name": "CAIObjectType::sub_40CED0",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2055,6 +2348,7 @@
     "class": "ambiguous",
     "file": "src/CAIObjectType.cpp",
     "name": "CAIObjectType::sub_40CCA0",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2062,6 +2356,7 @@
     "class": "ambiguous",
     "file": "src/CAIObjectType.cpp",
     "name": "CAIObjectType::sub_40D0F0",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2069,6 +2364,7 @@
     "class": "ambiguous",
     "file": "src/CDerivedStats.cpp",
     "name": "CDerivedStats::Reload",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2076,6 +2372,7 @@
     "class": "ambiguous",
     "file": "src/CDerivedStats.cpp",
     "name": "CDerivedStats::operator=",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2083,6 +2380,7 @@
     "class": "ambiguous",
     "file": "src/CDerivedStats.cpp",
     "name": "CDerivedStats::BonusInit",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2090,6 +2388,7 @@
     "class": "fork-stub",
     "file": "src/CDerivedStats.cpp",
     "name": "CDerivedStats::CDerivedStats",
+    "ours_ref": "82d75232",
     "reason": "their body is under a quarter of ours and calls nothing new"
   },
   {
@@ -2097,6 +2396,7 @@
     "class": "ambiguous",
     "file": "src/CDerivedStats.cpp",
     "name": "CDamageReductionList::Apply",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2104,6 +2404,7 @@
     "class": "ambiguous",
     "file": "src/CDerivedStats.cpp",
     "name": "CDamageReduction::Apply",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2111,6 +2412,7 @@
     "class": "ambiguous",
     "file": "src/CDerivedStats.cpp",
     "name": "CDamageReduction::IsGeneric",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2118,6 +2420,7 @@
     "class": "ambiguous",
     "file": "src/CDerivedStats.cpp",
     "name": "CDamageReduction::GetEffectiveAmount",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2125,6 +2428,7 @@
     "class": "ambiguous",
     "file": "src/CDerivedStats.cpp",
     "name": "CDamageReduction::SetSource",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2132,6 +2436,7 @@
     "class": "ambiguous",
     "file": "src/CScreenCreateChar.cpp",
     "name": "CScreenCreateChar::UpdateCharacterStats",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2139,6 +2444,7 @@
     "class": "ambiguous",
     "file": "src/CScreenCreateChar.cpp",
     "name": "CUIControlButtonCharGenAccept::OnLButtonClick",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2146,6 +2452,7 @@
     "class": "ambiguous",
     "file": "src/CScreenCreateChar.cpp",
     "name": "CUIControlButtonCharGenFeatsCircle::Render",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2153,6 +2460,7 @@
     "class": "ambiguous",
     "file": "src/CScreenCreateChar.cpp",
     "name": "CScreenCreateChar::CompleteCharacterWrapup",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2160,6 +2468,7 @@
     "class": "ambiguous",
     "file": "src/CScreenCreateChar.cpp",
     "name": "CScreenCreateChar::OnMainCancelButtonClick",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2167,6 +2476,7 @@
     "class": "ambiguous",
     "file": "src/CScreenCreateChar.cpp",
     "name": "CScreenCreateChar::UpdateFeatsPanel",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2174,6 +2484,7 @@
     "class": "ambiguous",
     "file": "src/CScreenCreateChar.cpp",
     "name": "CScreenCreateChar::CompleteCharacterAbilities",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2181,6 +2492,7 @@
     "class": "ambiguous",
     "file": "src/CScreenCreateChar.cpp",
     "name": "CScreenCreateChar::CompleteCharacterSkills",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2188,6 +2500,7 @@
     "class": "ambiguous",
     "file": "src/CScreenCreateChar.cpp",
     "name": "CScreenCreateChar::EnableMainPanel",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2195,6 +2508,7 @@
     "class": "ambiguous",
     "file": "src/CUIControlEdit.cpp",
     "name": "CUIControlEdit::OnKeyDown",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2202,6 +2516,7 @@
     "class": "ambiguous",
     "file": "src/CGameDoor.cpp",
     "name": "CGameDoor::CGameDoor",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2209,6 +2524,7 @@
     "class": "ambiguous",
     "file": "src/CGameDoor.cpp",
     "name": "CGameDoor::ToggleDoor",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2216,6 +2532,7 @@
     "class": "ambiguous",
     "file": "src/CGameDoor.cpp",
     "name": "CGameDoor::OnActionButton",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2223,6 +2540,7 @@
     "class": "ambiguous",
     "file": "src/CGameDoor.cpp",
     "name": "CGameDoor::Render",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2230,6 +2548,7 @@
     "class": "ambiguous",
     "file": "src/CGameDoor.cpp",
     "name": "CGameDoor::FillClosedPoly",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2237,6 +2556,7 @@
     "class": "ambiguous",
     "file": "src/CGameDoor.cpp",
     "name": "CGameDoor::FillOpenPoly",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2244,6 +2564,7 @@
     "class": "ambiguous",
     "file": "src/CGameDoor.cpp",
     "name": "CGameDoor::GetCloserDestPt",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2251,6 +2572,7 @@
     "class": "ambiguous",
     "file": "src/CInfinity.cpp",
     "name": "CInfinity::Render",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2258,6 +2580,7 @@
     "class": "ambiguous",
     "file": "src/CInfinity.cpp",
     "name": "CInfinity::FXRenderClippingPolys",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2265,6 +2588,7 @@
     "class": "ambiguous",
     "file": "src/CInfinity.cpp",
     "name": "CInfinity::Scroll",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2272,6 +2596,7 @@
     "class": "ambiguous",
     "file": "src/CGameDialog.cpp",
     "name": "CGameDialogEntry::Handle",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2279,6 +2604,7 @@
     "class": "ambiguous",
     "file": "src/CGameDialog.cpp",
     "name": "CGameDialogSprite::AsynchronousUpdate",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2286,6 +2612,7 @@
     "class": "fork-stub",
     "file": "src/CGameDialog.cpp",
     "name": "CGameDialogSprite::Reload",
+    "ours_ref": "82d75232",
     "reason": "their body is under a quarter of ours and calls nothing new"
   },
   {
@@ -2293,6 +2620,7 @@
     "class": "ambiguous",
     "file": "src/CGameDialog.cpp",
     "name": "CGameDialogSprite::Load",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2300,6 +2628,7 @@
     "class": "ambiguous",
     "file": "src/CGameDialog.cpp",
     "name": "CGameDialogReply::Pick",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2307,6 +2636,7 @@
     "class": "ambiguous",
     "file": "src/CGameDialog.cpp",
     "name": "CGameDialogSprite::FetchRumor",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2314,6 +2644,7 @@
     "class": "ambiguous",
     "file": "src/CGameDialog.cpp",
     "name": "CGameDialogSprite::StartDialog",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2321,6 +2652,7 @@
     "class": "ambiguous",
     "file": "src/CGameDialog.cpp",
     "name": "CGameDialogSprite::EndDialog",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2328,6 +2660,7 @@
     "class": "ambiguous",
     "file": "src/CScreenSave.cpp",
     "name": "CScreenSave::RefreshGameSlots",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2335,6 +2668,7 @@
     "class": "ambiguous",
     "file": "src/CScreenSave.cpp",
     "name": "CScreenSave::DrawPortrait",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2342,6 +2676,7 @@
     "class": "ambiguous",
     "file": "src/CScreenSave.cpp",
     "name": "CScreenSave::UpdateMainPanel",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2349,6 +2684,7 @@
     "class": "ambiguous",
     "file": "src/CScreenSave.cpp",
     "name": "CScreenSave::OnDoneButtonClick",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2356,6 +2692,7 @@
     "class": "ambiguous",
     "file": "src/CScreenSave.cpp",
     "name": "CScreenSave::DrawScreenShot",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2363,6 +2700,7 @@
     "class": "ambiguous",
     "file": "src/CScreenSave.cpp",
     "name": "CScreenSave::EnableMainPanel",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2370,6 +2708,7 @@
     "class": "ambiguous",
     "file": "src/CScreenSave.cpp",
     "name": "CScreenSave::OnErrorButtonClick",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2377,6 +2716,7 @@
     "class": "ambiguous",
     "file": "src/CScreenSave.cpp",
     "name": "CScreenSave::OnCancelButtonClick",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2384,6 +2724,7 @@
     "class": "ambiguous",
     "file": "src/CScreenSpellbook.cpp",
     "name": "CScreenSpellbook::UpdateMainPanel",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2391,6 +2732,7 @@
     "class": "ambiguous",
     "file": "src/CScreenSpellbook.cpp",
     "name": "CScreenSpellbook::sub_669830",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2398,6 +2740,7 @@
     "class": "ambiguous",
     "file": "src/CScreenSpellbook.cpp",
     "name": "CScreenSpellbook::UnmemorizeSpell",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2405,6 +2748,7 @@
     "class": "ambiguous",
     "file": "src/CScreenSpellbook.cpp",
     "name": "CUIControlButtonSpellbookSpell::OnLButtonClick",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2412,6 +2756,7 @@
     "class": "ambiguous",
     "file": "src/CScreenSpellbook.cpp",
     "name": "CUIControlButtonSpellbookSpell::Render",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2419,6 +2764,7 @@
     "class": "ambiguous",
     "file": "src/CScreenSpellbook.cpp",
     "name": "CScreenSpellbook::EnableMainPanel",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2426,6 +2772,7 @@
     "class": "ambiguous",
     "file": "src/CScreenSpellbook.cpp",
     "name": "CUIControlButtonSpellbookClassSelection::OnLButtonClick",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2433,6 +2780,7 @@
     "class": "ambiguous",
     "file": "src/CScreenSpellbook.cpp",
     "name": "CScreenSpellbook::ResetErrorPanel",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2440,6 +2788,7 @@
     "class": "ambiguous",
     "file": "src/CScreenSpellbook.cpp",
     "name": "CScreenSpellbook::EngineActivated",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2447,6 +2796,7 @@
     "class": "ambiguous",
     "file": "src/CScreenSpellbook.cpp",
     "name": "CScreenSpellbook::OnCancelButtonClick",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2454,6 +2804,7 @@
     "class": "ambiguous",
     "file": "src/CGameSpriteEquipment.cpp",
     "name": "CGameSpriteEquipment::Marshal",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2461,6 +2812,7 @@
     "class": "ambiguous",
     "file": "src/CScreenLoad.cpp",
     "name": "CScreenLoad::RefreshGameSlots",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2468,6 +2820,7 @@
     "class": "ambiguous",
     "file": "src/CScreenLoad.cpp",
     "name": "CScreenLoad::LoadGame",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2475,6 +2828,7 @@
     "class": "ambiguous",
     "file": "src/CScreenLoad.cpp",
     "name": "CScreenLoad::DrawPortrait",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2482,6 +2836,7 @@
     "class": "ambiguous",
     "file": "src/CScreenLoad.cpp",
     "name": "CScreenLoad::DrawScreenShot",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2489,6 +2844,7 @@
     "class": "ambiguous",
     "file": "src/CScreenLoad.cpp",
     "name": "CScreenLoad::EnableMainPanel",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2496,6 +2852,7 @@
     "class": "ambiguous",
     "file": "src/CGameContainer.cpp",
     "name": "CGameContainer::Render",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2503,6 +2860,7 @@
     "class": "ambiguous",
     "file": "src/CGameContainer.cpp",
     "name": "CGameContainer::MarshalMessage",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2510,6 +2868,7 @@
     "class": "ambiguous",
     "file": "src/CGameContainer.cpp",
     "name": "CGameContainer::FillPoly",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2517,6 +2876,7 @@
     "class": "ambiguous",
     "file": "src/CVidCell.cpp",
     "name": "CVidCell::Blt8To32",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2524,6 +2884,7 @@
     "class": "ambiguous",
     "file": "src/CVidCell.cpp",
     "name": "CVidCell::sub_7D1190",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2531,6 +2892,7 @@
     "class": "ambiguous",
     "file": "src/CVidCell.cpp",
     "name": "CVidCell::sub_7D0950",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2538,6 +2900,7 @@
     "class": "ambiguous",
     "file": "src/CVidCell.cpp",
     "name": "CVidCell::Blt8To32Brightest",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2545,6 +2908,7 @@
     "class": "ambiguous",
     "file": "src/CVidCell.cpp",
     "name": "CVidCell::GetFrame",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2552,6 +2916,7 @@
     "class": "ambiguous",
     "file": "src/CVidCell.cpp",
     "name": "CVidCell::GetCurrentCenterPoint",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2559,6 +2924,7 @@
     "class": "ambiguous",
     "file": "src/CVidCell.cpp",
     "name": "CVidCell::GetCurrentFrameSize",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2566,6 +2932,7 @@
     "class": "ambiguous",
     "file": "src/CVidBitmap.cpp",
     "name": "CVidBitmap::BltBmp24To32Tint",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2573,6 +2940,7 @@
     "class": "ambiguous",
     "file": "src/CVidBitmap.cpp",
     "name": "CVidBitmap::RenderDirect",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2580,6 +2948,7 @@
     "class": "ambiguous",
     "file": "src/CItem.cpp",
     "name": "CItem::sub_4EA750",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2587,6 +2956,7 @@
     "class": "ambiguous",
     "file": "src/CItem.cpp",
     "name": "CItem::Equip",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2594,6 +2964,7 @@
     "class": "ambiguous",
     "file": "src/CItem.cpp",
     "name": "CItem::Unequip",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2601,6 +2972,7 @@
     "class": "ambiguous",
     "file": "src/CItem.cpp",
     "name": "CItem::CItem",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2608,6 +2980,7 @@
     "class": "ambiguous",
     "file": "src/CItem.cpp",
     "name": "CItem::sub_4EA580",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2616,6 +2989,7 @@
     "class": "ambiguous",
     "file": "src/CItem.cpp",
     "name": "CItem::sub_4E9840",
+    "ours_ref": "82d75232",
     "reason": "disabled by calibration"
   },
   {
@@ -2623,6 +2997,7 @@
     "class": "ambiguous",
     "file": "src/CVidMode.cpp",
     "name": "CVidMode::DrawRecticle32",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2630,6 +3005,7 @@
     "class": "ambiguous",
     "file": "src/CVidMode.cpp",
     "name": "CVidMode::OutlinePoly",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2637,6 +3013,7 @@
     "class": "ambiguous",
     "file": "src/CVidMode.cpp",
     "name": "CVidMode::PackColor",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2644,6 +3021,7 @@
     "class": "ambiguous",
     "file": "src/CScreenOptions.cpp",
     "name": "CUIControlSliderOptionsSlider::OnThumbFinalChange",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2651,6 +3029,7 @@
     "class": "ambiguous",
     "file": "src/CScreenOptions.cpp",
     "name": "CScreenOptions::OnErrorButtonClick",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2658,6 +3037,7 @@
     "class": "ambiguous",
     "file": "src/CScreenOptions.cpp",
     "name": "CScreenOptions::EnableMainPanel",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2665,6 +3045,7 @@
     "class": "ambiguous",
     "file": "src/CScreenOptions.cpp",
     "name": "CScreenOptions::OnDoneButtonClick",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2672,6 +3053,7 @@
     "class": "ambiguous",
     "file": "src/CAIGroup.cpp",
     "name": "CAIGroup::GetOffsets",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2679,6 +3061,7 @@
     "class": "ambiguous",
     "file": "src/CAIGroup.cpp",
     "name": "CAIGroup::HandleFollowPath",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2686,6 +3069,7 @@
     "class": "ambiguous",
     "file": "src/CAIGroup.cpp",
     "name": "CAIGroup::GroupAction",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2693,6 +3077,7 @@
     "class": "ambiguous",
     "file": "src/CAIGroup.cpp",
     "name": "CAIGroup::RemoveFromSearch",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2700,6 +3085,7 @@
     "class": "ambiguous",
     "file": "src/CAIGroup.cpp",
     "name": "CAIGroup::AddToSearch",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2707,6 +3093,7 @@
     "class": "ambiguous",
     "file": "src/CAIGroup.cpp",
     "name": "CAIGroup::RotateOffsets",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2714,6 +3101,7 @@
     "class": "ambiguous",
     "file": "src/CVidPoly.cpp",
     "name": "CVidPoly::FillConvexPoly",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2721,6 +3109,7 @@
     "class": "ambiguous",
     "file": "src/CVidPoly.cpp",
     "name": "CVidPoly::FillPoly",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2728,6 +3117,7 @@
     "class": "ambiguous",
     "file": "src/CVidPoly.cpp",
     "name": "CVidPoly::BuildEdgeTable",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2735,6 +3125,7 @@
     "class": "ambiguous",
     "file": "src/CVidPoly.cpp",
     "name": "CVidPoly::DrawHLineShadedMirrored16",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2742,6 +3133,7 @@
     "class": "ambiguous",
     "file": "src/CVidPoly.cpp",
     "name": "CVidPoly::DrawHLineShaded16",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2749,6 +3141,7 @@
     "class": "ambiguous",
     "file": "src/CVidPoly.cpp",
     "name": "CVidPoly::DrawHLineShadedMirrored32",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2756,6 +3149,7 @@
     "class": "ambiguous",
     "file": "src/CVidPoly.cpp",
     "name": "CVidPolyEdgeCache::Find",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2763,6 +3157,7 @@
     "class": "ambiguous",
     "file": "src/CVidPoly.cpp",
     "name": "CVidPolyEdgeCache::Add",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2770,6 +3165,7 @@
     "class": "ambiguous",
     "file": "src/CVidPoly.cpp",
     "name": "CVidPoly::DrawHLineShaded32",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2777,6 +3173,7 @@
     "class": "ambiguous",
     "file": "src/CVidPoly.cpp",
     "name": "CVidPoly::AdvanceActiveEdges",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2785,6 +3182,7 @@
     "class": "ambiguous",
     "file": "src/CVidPoly.cpp",
     "name": "CVidPoly::CVidPoly",
+    "ours_ref": "82d75232",
     "reason": "disabled by calibration"
   },
   {
@@ -2792,6 +3190,7 @@
     "class": "ambiguous",
     "file": "src/CVisibility.cpp",
     "name": "CVisibilityMap::MarkTileLine",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2799,6 +3198,7 @@
     "class": "ambiguous",
     "file": "src/CVisibility.cpp",
     "name": "CVisibilityMap::BltDitherPattern",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2806,6 +3206,7 @@
     "class": "ambiguous",
     "file": "src/CVisibility.cpp",
     "name": "CVisibilityMap::BltFogOWar",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2813,6 +3214,7 @@
     "class": "ambiguous",
     "file": "src/CVisibility.cpp",
     "name": "CVisibilityMap::sub_553990",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2820,6 +3222,7 @@
     "class": "ambiguous",
     "file": "src/CVisibility.cpp",
     "name": "CVisibilityMap::sub_553800",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2827,6 +3230,7 @@
     "class": "ambiguous",
     "file": "src/CVisibility.cpp",
     "name": "CVisibilityMap::sub_5535D0",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2834,6 +3238,7 @@
     "class": "ambiguous",
     "file": "src/CVisibility.cpp",
     "name": "CVisibilityMap::sub_553440",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2841,6 +3246,7 @@
     "class": "ambiguous",
     "file": "src/CVisibility.cpp",
     "name": "CVisibilityMap::UpDate",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2848,6 +3254,7 @@
     "class": "ambiguous",
     "file": "src/CVisibility.cpp",
     "name": "CVisibilityMap::AddCharacter",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2855,6 +3262,7 @@
     "class": "ambiguous",
     "file": "src/CResCache.cpp",
     "name": "CResCache::CopyFile",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2862,6 +3270,7 @@
     "class": "ambiguous",
     "file": "src/CSpell.cpp",
     "name": "CSpell::GetAbilityEffect",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2869,6 +3278,7 @@
     "class": "ambiguous",
     "file": "src/CGameTrigger.cpp",
     "name": "CGameTrigger::CGameTrigger",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2876,6 +3286,7 @@
     "class": "ambiguous",
     "file": "src/CGameTrigger.cpp",
     "name": "CGameTrigger::OnActionButton",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2883,6 +3294,7 @@
     "class": "ambiguous",
     "file": "src/CGameTrigger.cpp",
     "name": "CGameTrigger::Marshal",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2890,6 +3302,7 @@
     "class": "ambiguous",
     "file": "src/CGameTrigger.cpp",
     "name": "CGameTrigger::DoAIUpdate",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2897,6 +3310,7 @@
     "class": "ambiguous",
     "file": "src/CGameTrigger.cpp",
     "name": "CGameTrigger::FillPoly",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2904,6 +3318,7 @@
     "class": "ambiguous",
     "file": "src/CGameTrigger.cpp",
     "name": "CGameTrigger::Render",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2911,6 +3326,7 @@
     "class": "ambiguous",
     "file": "src/CDimm.cpp",
     "name": "CDimm::Dump",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2918,6 +3334,7 @@
     "class": "ambiguous",
     "file": "src/CDimm.cpp",
     "name": "CDimm::CompressDirectory",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2925,6 +3342,7 @@
     "class": "ambiguous",
     "file": "src/CDimm.cpp",
     "name": "CDimm::WriteResourceWithData",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2932,6 +3350,7 @@
     "class": "ambiguous",
     "file": "src/CGameAnimationTypeMonsterIcewind.cpp",
     "name": "CGameAnimationTypeMonsterIcewind::SetSequence",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2939,6 +3358,7 @@
     "class": "ambiguous",
     "file": "src/CMessage.cpp",
     "name": "CMessageHandler::PostAsynchronousUpdate",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2946,6 +3366,7 @@
     "class": "ambiguous",
     "file": "src/CMessage.cpp",
     "name": "CMessageHandler::AsynchronousUpdate",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2953,6 +3374,7 @@
     "class": "ambiguous",
     "file": "src/CMessage.cpp",
     "name": "CMessageSetVariable::Run",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2960,6 +3382,7 @@
     "class": "ambiguous",
     "file": "src/CMessage.cpp",
     "name": "CBaldurMessage::NonBlockingWaitForSignal",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2967,6 +3390,7 @@
     "class": "ambiguous",
     "file": "src/CMessage.cpp",
     "name": "CMessageSaveGame::Run",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2974,6 +3398,7 @@
     "class": "ambiguous",
     "file": "src/CMessage.cpp",
     "name": "CMessageAddItem::Run",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2981,6 +3406,7 @@
     "class": "ambiguous",
     "file": "src/CMessage.cpp",
     "name": "CMessageHandler::Send",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2988,6 +3414,7 @@
     "class": "ambiguous",
     "file": "src/CMessage.cpp",
     "name": "CMessageSetPath::Run",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -2995,6 +3422,7 @@
     "class": "ambiguous",
     "file": "src/CMessage.cpp",
     "name": "CBaldurMessage::OnSettingsArbitrationLockStatus",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3002,6 +3430,7 @@
     "class": "ambiguous",
     "file": "src/CMessage.cpp",
     "name": "CMessageFireProjectile::Run",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3009,6 +3438,7 @@
     "class": "ambiguous",
     "file": "src/CMessage.cpp",
     "name": "CMessageLoadDialog::Run",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3016,6 +3446,7 @@
     "class": "ambiguous",
     "file": "src/CMessage.cpp",
     "name": "CMessageHandler::Broadcast",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3023,6 +3454,7 @@
     "class": "ambiguous",
     "file": "src/CMessage.cpp",
     "name": "CMessageInsertResponse::Run",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3030,6 +3462,7 @@
     "class": "ambiguous",
     "file": "src/CMessage.cpp",
     "name": "CMessageSetPath::CMessageSetPath",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3037,6 +3470,7 @@
     "class": "ambiguous",
     "file": "src/CMessage.cpp",
     "name": "CMessagePickedDialogResponse::Run",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3044,6 +3478,7 @@
     "class": "ambiguous",
     "file": "src/CMessage.cpp",
     "name": "CMessageGroup::~CMessageGroup",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3052,6 +3487,7 @@
     "class": "ambiguous",
     "file": "src/CMessage.cpp",
     "name": "CMessageInsertResponse::CMessageInsertResponse",
+    "ours_ref": "82d75232",
     "reason": "disabled by calibration"
   },
   {
@@ -3059,6 +3495,7 @@
     "class": "ambiguous",
     "file": "src/CMessage.cpp",
     "name": "CMessageSaveGame::MarshalMessage",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3066,6 +3503,7 @@
     "class": "ambiguous",
     "file": "src/CMessage.cpp",
     "name": "CMessageSaveGame::UnmarshalMessage",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3073,6 +3511,7 @@
     "class": "ambiguous",
     "file": "src/CMessage.cpp",
     "name": "CMessageGroup::Run",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3080,6 +3519,7 @@
     "class": "ambiguous",
     "file": "src/CMessage.cpp",
     "name": "CMessagePickedDialogResponse::GetMsgSubType",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3087,6 +3527,7 @@
     "class": "ambiguous",
     "file": "src/CMessage.cpp",
     "name": "CMessageGroup::GetMsgSubType",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3094,6 +3535,7 @@
     "class": "ambiguous",
     "file": "src/CBaldurEngine.cpp",
     "name": "CBaldurEngine::OnLeftPanelButtonClick",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3101,6 +3543,7 @@
     "class": "ambiguous",
     "file": "src/CTimerWorld.cpp",
     "name": "CTimerWorld::GetCurrentTimeString",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3108,6 +3551,7 @@
     "class": "ambiguous",
     "file": "src/CGameAnimationTypeMonster.cpp",
     "name": "CGameAnimationTypeMonster::Render",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3115,6 +3559,7 @@
     "class": "ambiguous",
     "file": "src/CRuleTables.cpp",
     "name": "CRuleTables::sub_546B60",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3122,6 +3567,7 @@
     "class": "ambiguous",
     "file": "src/CRuleTables.cpp",
     "name": "CRuleTables::GetSaveAdjustmentForSourceSprite",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3129,6 +3575,7 @@
     "class": "ambiguous",
     "file": "src/CRuleTables.cpp",
     "name": "CRuleTables::GetIterativeAttackBonus",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3136,6 +3583,7 @@
     "class": "ambiguous",
     "file": "src/CStore.cpp",
     "name": "CStore::AddItemToStore",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3143,6 +3591,7 @@
     "class": "ambiguous",
     "file": "src/CStore.cpp",
     "name": "CStore::SetResRef",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3150,6 +3599,7 @@
     "class": "ambiguous",
     "file": "src/CStore.cpp",
     "name": "CStore::Marshal",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3157,6 +3607,7 @@
     "class": "ambiguous",
     "file": "src/CStore.cpp",
     "name": "CStore::RemoveItemFromStore",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3164,6 +3615,7 @@
     "class": "ambiguous",
     "file": "src/CStore.cpp",
     "name": "CStore::AddItemToBag",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3171,6 +3623,7 @@
     "class": "ambiguous",
     "file": "src/CStore.cpp",
     "name": "CStore::RemoveItemFromBag",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3178,6 +3631,7 @@
     "class": "ambiguous",
     "file": "src/CStore.cpp",
     "name": "CStore::InvalidateStore",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3185,6 +3639,7 @@
     "class": "ambiguous",
     "file": "src/CStore.cpp",
     "name": "CStore::sub_54D130",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3192,6 +3647,7 @@
     "class": "ambiguous",
     "file": "src/CStore.cpp",
     "name": "CStore::sub_54CFE0",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3199,6 +3655,7 @@
     "class": "ambiguous",
     "file": "src/CStore.cpp",
     "name": "CStore::sub_54CF80",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3206,6 +3663,7 @@
     "class": "ambiguous",
     "file": "src/CStore.cpp",
     "name": "CStore::IsItemAcceptable",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3213,6 +3671,7 @@
     "class": "ambiguous",
     "file": "src/CStore.cpp",
     "name": "CStore::RemoveItemExt",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3220,6 +3679,7 @@
     "class": "ambiguous",
     "file": "src/CStore.cpp",
     "name": "CStore::AddItemExt",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3227,6 +3687,7 @@
     "class": "ambiguous",
     "file": "src/CScreenChapter.cpp",
     "name": "CScreenChapter::ResetMainPanel",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3234,6 +3695,7 @@
     "class": "ambiguous",
     "file": "src/CNetwork.cpp",
     "name": "CNetwork::CNetwork",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3241,6 +3703,7 @@
     "class": "ambiguous",
     "file": "src/CNetwork.cpp",
     "name": "CNetwork::OnCloseSession",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3248,6 +3711,7 @@
     "class": "ambiguous",
     "file": "src/CNetwork.cpp",
     "name": "CNetwork::CreatePlayer",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3255,6 +3719,7 @@
     "class": "ambiguous",
     "file": "src/CNetwork.cpp",
     "name": "CNetwork::HostNewSession",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3262,6 +3727,7 @@
     "class": "ambiguous",
     "file": "src/CNetwork.cpp",
     "name": "CNetwork::CheckSessionStatus",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3269,6 +3735,7 @@
     "class": "ambiguous",
     "file": "src/CNetwork.cpp",
     "name": "CNetwork::EnumeratePlayers",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3276,6 +3743,7 @@
     "class": "ambiguous",
     "file": "src/CNetwork.cpp",
     "name": "CNetwork::EnumerateServiceProviders",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3283,6 +3751,7 @@
     "class": "ambiguous",
     "file": "src/CNetwork.cpp",
     "name": "CNetwork::SetInSessionOptions",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3290,6 +3759,7 @@
     "class": "ambiguous",
     "file": "src/CNetwork.cpp",
     "name": "CNetwork::~CNetwork",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3297,6 +3767,7 @@
     "class": "ambiguous",
     "file": "src/CNetwork.cpp",
     "name": "CNetwork::InitializeConnectionToServiceProvider",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3304,6 +3775,7 @@
     "class": "ambiguous",
     "file": "src/CTlkTable.cpp",
     "name": "CTlkTable::Fetch",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3311,6 +3783,7 @@
     "class": "ambiguous",
     "file": "src/CGameAnimationTypeMonsterQuadrant.cpp",
     "name": "CGameAnimationTypeMonsterQuadrant::Render",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3318,6 +3791,7 @@
     "class": "ambiguous",
     "file": "src/CPathSearch.cpp",
     "name": "CPathSearch::BuildPathList",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3325,6 +3799,7 @@
     "class": "ambiguous",
     "file": "src/CPathSearch.cpp",
     "name": "CPathSearch::PopOpenList",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3332,6 +3807,7 @@
     "class": "ambiguous",
     "file": "src/CPathSearch.cpp",
     "name": "CPathSearch::SmoothPath",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3339,6 +3815,7 @@
     "class": "ambiguous",
     "file": "src/CGameSound.cpp",
     "name": "CGameSound::CGameSound",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3346,6 +3823,7 @@
     "class": "ambiguous",
     "file": "src/CGameSound.cpp",
     "name": "CGameSound::DoAIUpdate",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3353,6 +3831,7 @@
     "class": "ambiguous",
     "file": "src/CGameAnimationTypeMonsterOld.cpp",
     "name": "CGameAnimationTypeMonsterOld::Render",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3360,6 +3839,7 @@
     "class": "ambiguous",
     "file": "src/CGameAnimationTypeAmbient.cpp",
     "name": "CGameAnimationTypeAmbient::Render",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3367,6 +3847,7 @@
     "class": "ambiguous",
     "file": "src/CResCellHeader.cpp",
     "name": "CResCellHeader::Parse",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3374,6 +3855,7 @@
     "class": "ambiguous",
     "file": "src/CWorldMap.cpp",
     "name": "CWorldMap::Marshal",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3381,6 +3863,7 @@
     "class": "ambiguous",
     "file": "src/CGameAnimationTypeEffect.cpp",
     "name": "CGameAnimationTypeEffect::Render",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3388,6 +3871,7 @@
     "class": "ambiguous",
     "file": "src/CGameAnimationTypeMonsterLarge.cpp",
     "name": "CGameAnimationTypeMonsterLarge::CGameAnimationTypeMonsterLarge",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3395,6 +3879,7 @@
     "class": "ambiguous",
     "file": "src/CGameAnimationTypeMonsterLarge.cpp",
     "name": "CGameAnimationTypeMonsterLarge::Render",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3402,6 +3887,7 @@
     "class": "ambiguous",
     "file": "src/CUIPanel.cpp",
     "name": "CUIPanel::Render",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3409,6 +3895,7 @@
     "class": "ambiguous",
     "file": "src/CGameAnimationTypeMonsterLarge16.cpp",
     "name": "CGameAnimationTypeMonsterLarge16::Render",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3416,6 +3903,7 @@
     "class": "ambiguous",
     "file": "src/CGameAnimationTypeAmbientStatic.cpp",
     "name": "CGameAnimationTypeAmbientStatic::Render",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3423,6 +3911,7 @@
     "class": "ambiguous",
     "file": "src/CGameAnimationTypeFlying.cpp",
     "name": "CGameAnimationTypeFlying::Render",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3430,6 +3919,7 @@
     "class": "ambiguous",
     "file": "src/CGameAnimationTypeMonsterIcewindNew.cpp",
     "name": "CGameAnimationTypeMonsterIcewindNew::Render",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3437,6 +3927,7 @@
     "class": "ambiguous",
     "file": "src/CGameAnimationTypeTownStatic.cpp",
     "name": "CGameAnimationTypeTownStatic::Render",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3444,6 +3935,7 @@
     "class": "ambiguous",
     "file": "src/CBaldurProjector.cpp",
     "name": "CBaldurProjector::EngineActivated",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3451,6 +3943,7 @@
     "class": "ambiguous",
     "file": "src/CSearchBitmap.cpp",
     "name": "CSearchBitmap::GetNearestOpenSquare",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3458,6 +3951,7 @@
     "class": "ambiguous",
     "file": "src/CSearchBitmap.cpp",
     "name": "CSearchBitmap::RemoveObject",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3465,6 +3959,7 @@
     "class": "ambiguous",
     "file": "src/CSearchBitmap.cpp",
     "name": "CSearchBitmap::SnapshotAddObjectDiagonals",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3472,6 +3967,7 @@
     "class": "ambiguous",
     "file": "src/CSearchBitmap.cpp",
     "name": "CSearchBitmap::SnapshotRemoveObject",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3479,6 +3975,7 @@
     "class": "ambiguous",
     "file": "src/CSearchBitmap.cpp",
     "name": "CSearchBitmap::sub_54A210",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3486,6 +3983,7 @@
     "class": "ambiguous",
     "file": "src/CGameObject.cpp",
     "name": "CGameObject::FloatText",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3493,6 +3991,7 @@
     "class": "ambiguous",
     "file": "src/CGameObjectArray.cpp",
     "name": "CGameObjectArray::Delete",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3500,6 +3999,7 @@
     "class": "ambiguous",
     "file": "src/CUIControlTextDisplay.cpp",
     "name": "CUIControlTextDisplay::RemoveString",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3507,6 +4007,7 @@
     "class": "ambiguous",
     "file": "src/CUIControlTextDisplay.cpp",
     "name": "CUIControlTextDisplay::CopyDisplay",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3514,6 +4015,7 @@
     "class": "ambiguous",
     "file": "src/CUIControlTextDisplay.cpp",
     "name": "CUIControlTextDisplay::OnPageDown",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3521,6 +4023,7 @@
     "class": "ambiguous",
     "file": "src/CUIControlTextDisplay.cpp",
     "name": "CUIControlTextDisplay::OnPageUp",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3528,6 +4031,7 @@
     "class": "ambiguous",
     "file": "src/CUIControlTextDisplay.cpp",
     "name": "CUIControlTextDisplay::OnScroll",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3535,6 +4039,7 @@
     "class": "ambiguous",
     "file": "src/CVidImage.cpp",
     "name": "CVidTile::BltTile8To32",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3542,6 +4047,7 @@
     "class": "ambiguous",
     "file": "src/CVidImage.cpp",
     "name": "CVidTile::BltStencilTile8To32",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3549,6 +4055,7 @@
     "class": "ambiguous",
     "file": "src/CMoveList.cpp",
     "name": "CMoveList::AIUpdate",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3556,6 +4063,7 @@
     "class": "ambiguous",
     "file": "src/CResItem.cpp",
     "name": "CResItem::Parse",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3563,6 +4071,7 @@
     "class": "ambiguous",
     "file": "src/CScreenJournal.cpp",
     "name": "CScreenJournal::EnableMainPanel",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3570,6 +4079,7 @@
     "class": "ambiguous",
     "file": "src/CScreenMap.cpp",
     "name": "CScreenMap::EnableMainPanel",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3577,6 +4087,7 @@
     "class": "ambiguous",
     "file": "src/CVariableHash.cpp",
     "name": "CNamedCreatureVariableHash::AddKey",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3584,6 +4095,7 @@
     "class": "ambiguous",
     "file": "src/CChitin3d.cpp",
     "name": "CChitin::Init3d",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3591,6 +4103,7 @@
     "class": "ambiguous",
     "file": "src/CScreenSinglePlayer.cpp",
     "name": "CScreenSinglePlayer::EnableMainPanel",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3598,6 +4111,7 @@
     "class": "ambiguous",
     "file": "src/CChitin.cpp",
     "name": "CChitin::InitApplication",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3605,6 +4119,7 @@
     "class": "ambiguous",
     "file": "src/CGameJournal.cpp",
     "name": "CGameJournal::Unmarshal",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3612,6 +4127,7 @@
     "class": "ambiguous",
     "file": "src/CScreenStart.cpp",
     "name": "CScreenStart::EnableMainPanel",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3619,6 +4135,7 @@
     "class": "ambiguous",
     "file": "src/CUIControlEditMultiLine.cpp",
     "name": "CUIControlEditMultiLineScroller::OnScroll",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3626,6 +4143,7 @@
     "class": "ambiguous",
     "file": "src/CGameEffectList.cpp",
     "name": "CGameEffectList::RemoveAllOfType",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3633,6 +4151,7 @@
     "class": "ambiguous",
     "file": "src/CGameEffectList.cpp",
     "name": "CGameEffectList::sub_4C0830",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3640,6 +4159,7 @@
     "class": "ambiguous",
     "file": "src/CSpawn.cpp",
     "name": "CSpawnList::ParseData",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3647,6 +4167,7 @@
     "class": "ambiguous",
     "file": "src/CSpawn.cpp",
     "name": "CSpawnFile::ParseData",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3654,6 +4175,7 @@
     "class": "ambiguous",
     "file": "src/CResFile.cpp",
     "name": "CResFile::GetFileSize",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3661,6 +4183,7 @@
     "class": "ambiguous",
     "file": "src/CResCHR.cpp",
     "name": "CResCHR::Parse",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3668,6 +4191,7 @@
     "class": "ambiguous",
     "file": "src/Icewind586B70.cpp",
     "name": "Icewind586B70::sub_586D60",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3675,6 +4199,7 @@
     "class": "ambiguous",
     "file": "src/Icewind586B70.cpp",
     "name": "Icewind586B70::sub_586F20",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3682,6 +4207,7 @@
     "class": "ambiguous",
     "file": "src/CResStore.cpp",
     "name": "CResStore::Parse",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3689,6 +4215,7 @@
     "class": "ambiguous",
     "file": "src/CResEffect.cpp",
     "name": "CResEffect::Parse",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3696,6 +4223,7 @@
     "class": "ambiguous",
     "file": "src/CAIResponse.cpp",
     "name": "CAIResponse::InListEnd",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
   {
@@ -3703,6 +4231,7 @@
     "class": "ambiguous",
     "file": "src/CResDLG.cpp",
     "name": "CResDLG::Parse",
+    "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   }
 ]

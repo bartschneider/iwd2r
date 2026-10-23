@@ -8465,6 +8465,22 @@ class TriageTest(unittest.TestCase):
         self.assertEqual(triage.enabled_classes(cal), frozenset({'rename-only'}))
         self.assertIn('fork-stub', triage.calibration_text(cal))
 
+    def test_reclassified_closed_rows_agree_with_recorded_verdicts(self):
+        state = json.load(open(os.path.join(ROOT, 'docs/wso/wave-state.json')))
+        fork = state['fork_base']
+        for ref in (fork, triage.CALIBRATION_OURS_REF):
+            if subprocess.run(['git', '-C', ROOT, 'rev-parse', '--verify', '--quiet',
+                               ref + '^{commit}'], capture_output=True).returncode:
+                self.skipTest('%s not fetched' % ref)
+        rows = json.load(open(os.path.join(ROOT, 'docs/wso/disagreements.json')))
+        committed = json.load(open(os.path.join(ROOT, 'docs/wso/triage.json')))
+        cal = triage.calibrate(state, triage.calibration_triage(state, rows, fork))
+        enabled = triage.enabled_classes(cal)
+        for cls in enabled:
+            self.assertEqual(cal[cls]['mismatches'], [], cls)
+        self.assertEqual(enabled, frozenset(r['class'] for r in committed
+                                            if r['class'] in triage.AUTO_OURS))
+
     def test_apply_calibration_disables_unproven_classes(self):
         cal = triage.calibrate({'batches': {'b': {'status': 'closed', 'verdicts': {
             '0x1': {'side': 'ours'}, '0x2': {'side': 'fork'}}}}},
