@@ -42,15 +42,39 @@ def _tokens(text):
     return TOKEN.findall(xrec.blank_comments(text))
 
 
-def normalize(body, type_names):
+MEMBER_OPS = frozenset(('->', '.', '::'))
+
+
+def _plain(toks, i, type_names):
+    """True when toks[i] is an identifier that gets renamed: not a keyword,
+    a type name, a call target, or a member after ->, . or ::."""
+    t = toks[i]
+    return (IDENT.match(t) and t not in KEYWORDS and t not in type_names
+            and not (i + 1 < len(toks) and toks[i + 1] == '(')
+            and not (i and toks[i - 1] in MEMBER_OPS))
+
+
+def _names(text, type_names):
+    """Renamable identifiers of text in first-seen order."""
+    toks = _tokens(text)
+    seen = []
+    for i, t in enumerate(toks):
+        if _plain(toks, i, type_names) and t not in seen:
+            seen.append(t)
+    return seen
+
+
+def normalize(body, type_names, seed=()):
     """Token stream with every plain identifier replaced by v<n> in
-    first-seen order. Keywords, type names, call targets and literals stay."""
+    first-seen order (names in seed are numbered first). Keywords, type
+    names, call targets, members and literals stay."""
     toks = _tokens(body)
     names = {}
+    for n in seed:
+        names.setdefault(n, 'v%d' % (len(names) + 1))
     out = []
     for i, t in enumerate(toks):
-        if (IDENT.match(t) and t not in KEYWORDS and t not in type_names
-                and not (i + 1 < len(toks) and toks[i + 1] == '(')):
+        if _plain(toks, i, type_names):
             t = names.setdefault(t, 'v%d' % (len(names) + 1))
         out.append(t)
     return ' '.join(out)
@@ -92,8 +116,12 @@ def classify(theirs, ours, type_names):
     ol = len(re.sub(r'\s+', '', xrec.blank_comments(obody)))
     if tl < ol / 4 and callees(tbody) <= callees(obody):
         return 'fork-stub', 'their body is under a quarter of ours and calls nothing new'
-    if normalize(tbody, type_names) == normalize(obody, type_names):
-        if normalize(theirs, type_names) == normalize(ours, type_names):
-            return 'rename-only', 'bodies and signatures match after renaming identifiers'
-        return 'signature-only', 'bodies match after renaming; signatures differ'
+    if normalize(theirs, type_names) == normalize(ours, type_names):
+        return 'rename-only', 'bodies and signatures match after renaming identifiers'
+    # bodies under a mapping seeded from each signature's parameters, so a
+    # changed use order inside the body cannot hide behind a matching signature
+    tseed, oseed = _names(tsig, type_names), _names(osig, type_names)
+    if (normalize(tbody, type_names, tseed) == normalize(obody, type_names, oseed)
+            and normalize(tsig, type_names) != normalize(osig, type_names)):
+        return 'signature-only', 'bodies match under the signature parameters; signatures differ'
     return 'ambiguous', 'the bodies differ beyond identifier names'

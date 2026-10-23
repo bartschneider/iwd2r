@@ -8393,6 +8393,22 @@ class TriageTest(unittest.TestCase):
                                  'int f(int a){if(a>=0)return 1;return 0;}', self.TYPES)
         self.assertEqual(cls, 'ambiguous')
 
+    def test_classify_swapped_operands_are_not_signature_only(self):
+        cls, _ = triage.classify('int f(int a,int b){return a-b;}',
+                                 'int f(int a,int b){return b-a;}', self.TYPES)
+        self.assertEqual(cls, 'ambiguous')
+
+    def test_classify_different_member_is_ambiguous(self):
+        cls, _ = triage.classify('void f(CGameSprite* x){x->hp=1;Go();}',
+                                 'void f(CGameSprite* x){x->mp=1;Go();}', self.TYPES)
+        self.assertEqual(cls, 'ambiguous')
+
+    def test_normalize_keeps_members_verbatim(self):
+        self.assertNotEqual(triage.normalize('void f(){p->hp=1;}', self.TYPES),
+                            triage.normalize('void f(){p->mp=1;}', self.TYPES))
+        self.assertNotEqual(triage.normalize('void f(){p.hp=1;}', self.TYPES),
+                            triage.normalize('void f(){p.mp=1;}', self.TYPES))
+
 
 if __name__ == '__main__':
     unittest.main()
