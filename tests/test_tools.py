@@ -7230,6 +7230,52 @@ class ExportDecompilesTest(unittest.TestCase):
                          (1, 2))
         self.assertEqual(self.calls, [['0x401000', '0x401020']])
 
+    def test_export_decompiles_skips_a_path_reported_twice(self):
+        def twice(args, log, read_only=False, **kw):
+            i = args.index('DecompileFunctions.java')
+            out, queries = args[i + 1], args[i + 2:]
+            self.assertIn('.tmp-', out)
+            path = os.path.join(out, 'Dup.c')
+            _write(path, 'body\n')
+            lines = [f'DECOMPILE {q}\t{q}\tDup\t{path}' for q in queries]
+            return types.SimpleNamespace(returncode=0,
+                                         stdout='\n'.join(lines), stderr='')
+        export_decompiles.mp.headless = twice
+        _write(os.path.join(self.exports, 'functions.tsv'),
+               '401000\tA\t8\n401010\tB\t8\n')
+        runs, written, missing = self.run_export(chunk=400)
+        self.assertEqual((written, missing), (0, [0x401000, 0x401010]))
+        d = os.path.join(self.exports, 'decompile')
+        self.assertEqual(os.listdir(d), [])  # temp folder gone, no ADDR.c
+
+    def test_export_decompiles_lists_failures_and_retries(self):
+        d = os.path.join(self.exports, 'decompile')
+        _write(os.path.join(self.exports, 'functions.tsv'),
+               '401000\tA\t8\n401010\tB\t8\n')
+        _write(os.path.join(d, '401000.c'),
+               '// decompilation failed: timeout\n')
+        _write(os.path.join(d, '401010.c'), 'ok\n')
+        self.assertEqual(export_decompiles.failure_line(d, 0x401000),
+                         '// decompilation failed: timeout')
+        self.assertIsNone(export_decompiles.failure_line(d, 0x401010))
+        self.assertEqual(self.run_export(chunk=400)[0], 0)
+        self.assertEqual(self.run_export(chunk=400, retry_failed=True)[:2],
+                         (1, 1))
+        self.assertEqual(self.calls, [['0x401000']])
+        rc = []
+        self.addCleanup(setattr, export_decompiles.mp, 'project_exists',
+                        export_decompiles.mp.project_exists)
+        export_decompiles.mp.project_exists = lambda: True
+        with contextlib.redirect_stdout(io.StringIO()) as buf:
+            rc.append(export_decompiles.main(['--exports', self.exports]))
+        self.assertEqual(rc, [0])
+        _write(os.path.join(d, '401010.c'), '// decompilation failed: x\n')
+        with contextlib.redirect_stdout(io.StringIO()) as buf:
+            rc.append(export_decompiles.main(['--exports', self.exports]))
+        self.assertEqual(rc[1], 1)
+        self.assertIn('failed: 401010: // decompilation failed: x',
+                      buf.getvalue())
+
     def test_export_decompiles_splits_repeated_names(self):
         _write(os.path.join(self.exports, 'functions.tsv'),
                '401000\tSame::Name\t8\n401010\tSame::Name\t8\n')
@@ -7319,6 +7365,15 @@ class AssembleContextTest(unittest.TestCase):
         callers = b[b.index('## Callers'):]
         self.assertIn('row39', callers)
         self.assertNotIn('row40', callers)
+
+    def test_bundle_name_fallback_only_for_unique_names(self):
+        _write(os.path.join(self.exports, 'functions.tsv'),
+               '5845D0\tCGameSprite::Render\t120\n'
+               '584600\tCGameSprite::Render\t24\n')
+        b = assemble_context.bundle(0x5845D0, exports=self.exports,
+                                    src_root=self.src, bg2_db=False)
+        self.assertIn('decompile: not exported', b)
+        self.assertNotIn('ApplyEffect(FOO_BAR', b)
 
     def test_bundle_without_decompile_still_builds(self):
         os.remove(os.path.join(self.exports, 'CGameSprite::Render.c'))

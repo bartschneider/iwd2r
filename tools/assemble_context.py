@@ -192,11 +192,12 @@ CALLER_CAP = 12
 CALLER_LINES = 40
 
 
-def _decompile_path(exports, address, name=None):
+def _decompile_path(exports, address, name=None, unique=False):
     """<exports>/decompile/ADDR.c (tools/ghidra/export_decompiles.py), else
-    the older <exports>/<name>.c; None when neither exists."""
+    the older <exports>/<name>.c when the name is unique in functions.tsv
+    (a repeated name could be another overload's body); None otherwise."""
     cands = [os.path.join(exports, "decompile", f"{address:X}.c")]
-    if name:
+    if name and unique:
         cands.append(os.path.join(exports, name + ".c"))
     for path in cands:
         if os.path.isfile(path):
@@ -226,12 +227,20 @@ def bundle(address: int, *, exports=None, src_root=None, ids_dir=None,
     row = functions.get(address)
     fname = row[0] if row else None
 
+    name_counts = {}
+    for n, _ in functions.values():
+        name_counts[n] = name_counts.get(n, 0) + 1
+
+    def _path(addr):
+        n = functions.get(addr, ("",))[0]
+        return _decompile_path(exports, addr, n, name_counts.get(n) == 1)
+
     cache = {}
     src_ok = bool(src_root) and os.path.isdir(src_root)
 
     text = decompile_text
     if text is None:
-        path = _decompile_path(exports, address, fname)
+        path = _path(address)
         if path:
             text = _read_text(path)
 
@@ -261,13 +270,13 @@ def bundle(address: int, *, exports=None, src_root=None, ids_dir=None,
                           if address in dsts and a != address)
     caller_lines = []
     shown = 0
-    for caddr in caller_addrs:
+    for idx, caddr in enumerate(caller_addrs):
         cname = functions.get(caddr, (f"0x{caddr:x}", 0))[0]
-        path = _decompile_path(exports, caddr, functions.get(caddr, ("",))[0])
+        path = _path(caddr)
         if path is None:
             continue
         if shown >= CALLER_CAP:
-            caller_lines.append(f"... (+{len(caller_addrs)} callers in all; "
+            caller_lines.append(f"... (+{len(caller_addrs) - idx} more callers; "
                                 f"first {CALLER_CAP} with a decompile shown)")
             break
         shown += 1
@@ -358,7 +367,7 @@ def main(argv=None) -> int:
                                      "(default $IWD2R_HOME/wso/bg2/"
                                      "bg2_pdb.sqlite if present)")
     ap.add_argument("--decompile",
-                    help="decompile .c file (default <exports>/<name>.c)")
+                    help="decompile .c file (default <exports>/decompile/<ADDR>.c)")
     args = ap.parse_args(argv)
     text = None
     if args.decompile:

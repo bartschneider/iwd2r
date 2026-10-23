@@ -23,6 +23,7 @@ import argparse
 import os
 import shutil
 import sys
+import tempfile
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -83,7 +84,7 @@ def run_batch(addrs, out_dir, tmp, log):
     args = ['-process', mp.PROGRAM, '-noanalysis', '-readOnly',
             '-postScript', SCRIPT, tmp] + [f'0x{a:X}' for a in addrs]
     r = mp.headless(args, log, read_only=True)
-    done = []
+    reported = []
     for line in r.stdout.splitlines():
         if 'DECOMPILE ' not in line:
             continue
@@ -96,8 +97,20 @@ def run_batch(addrs, out_dir, tmp, log):
             addr = int(parts[1], 16)
         except ValueError:
             continue
-        src = os.path.join(tmp, os.path.basename(parts[3]))
-        if addr in addrs and os.path.isfile(src):
+        if addr in addrs:
+            reported.append((addr, os.path.basename(parts[3])))
+    # A path reported twice was written by two functions: one body is
+    # lost, so neither is trusted; both stay missing.
+    counts = {}
+    for _, base in reported:
+        counts[base] = counts.get(base, 0) + 1
+    done = []
+    for addr, base in reported:
+        src = os.path.join(tmp, base)
+        if counts[base] > 1:
+            sys.stderr.write(f'export_decompiles: {addr:X}: {base} reported '
+                             'twice in one run; skipped\n')
+        elif os.path.isfile(src):
             os.replace(src, os.path.join(out_dir, file_name(addr)))
             done.append(addr)
     shutil.rmtree(tmp, ignore_errors=True)
@@ -107,7 +120,19 @@ def run_batch(addrs, out_dir, tmp, log):
     return done
 
 
-def export(exports, chunk=400, only=None, out=sys.stdout):
+def failure_line(out_dir, addr):
+    """The first line of ADDR.c when it records a failed decompile."""
+    try:
+        with open(os.path.join(out_dir, file_name(addr)), encoding='utf-8',
+                  errors='replace') as f:
+            first = f.readline().rstrip('\n')
+    except OSError:
+        return None
+    return first if first.startswith('// decompil') else None
+
+
+def export(exports, chunk=400, only=None, out=sys.stdout,
+           retry_failed=False):
     """Returns (runs, written, missing addresses)."""
     out_dir = os.path.join(exports, 'decompile')
     os.makedirs(out_dir, exist_ok=True)
@@ -119,25 +144,30 @@ def export(exports, chunk=400, only=None, out=sys.stdout):
         pending = functions
     else:
         pending = [(a, n) for a, n in functions
-                   if not os.path.isfile(os.path.join(out_dir, file_name(a)))]
+                   if not os.path.isfile(os.path.join(out_dir, file_name(a)))
+                   or (retry_failed and failure_line(out_dir, a))]
     log = os.path.join(mp.PROJECT_DIR, 'headless-decompiles.log')
-    tmp = os.path.join(out_dir, '.tmp')
+    # Per process: two exports from two worktrees may share this dir.
+    tmp = tempfile.mkdtemp(prefix='.tmp-', dir=out_dir)
     runs = written = 0
     missing = []
     total = (len(pending) + chunk - 1) // chunk
-    for i in range(0, len(pending), chunk):
-        part = pending[i:i + chunk]
-        t0 = time.time()
-        got = 0
-        for batch in _runs(part):
-            runs += 1
-            done = run_batch(set(batch), out_dir, tmp, log)
-            got += len(done)
-            missing += [a for a in batch if a not in set(done)]
-        written += got
-        print(f'chunk {i // chunk + 1}/{total}: {got}/{len(part)} written, '
-              f'{time.time() - t0:.0f}s, {written} so far', file=out,
-              flush=True)
+    try:
+        for i in range(0, len(pending), chunk):
+            part = pending[i:i + chunk]
+            t0 = time.time()
+            got = 0
+            for batch in _runs(part):
+                runs += 1
+                done = run_batch(set(batch), out_dir, tmp, log)
+                got += len(done)
+                missing += [a for a in batch if a not in set(done)]
+            written += got
+            print(f'chunk {i // chunk + 1}/{total}: {got}/{len(part)} '
+                  f'written, {time.time() - t0:.0f}s, {written} so far',
+                  file=out, flush=True)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
     return runs, written, missing
 
 
@@ -147,14 +177,26 @@ def main(argv=None):
     ap.add_argument('--chunk', type=int, default=400)
     ap.add_argument('--only', nargs='+', metavar='ADDR',
                     help='only these addresses (hex), re-exported')
+    ap.add_argument('--retry-failed', action='store_true',
+                    help='re-queue functions whose file records a failed '
+                         'decompile (kept as present otherwise)')
     a = ap.parse_args(argv)
     if not a.only and not mp.project_exists():
         sys.exit('export_decompiles: no project; run make_project.py')
-    runs, written, missing = export(a.exports, a.chunk, a.only)
-    print(f'{runs} runs, {written} written, {len(missing)} not reported')
+    runs, written, missing = export(a.exports, a.chunk, a.only,
+                                    retry_failed=a.retry_failed)
+    out_dir = os.path.join(a.exports, 'decompile')
+    requested = ([int(x, 16) for x in a.only] if a.only
+                 else [x for x, _ in read_functions(a.exports)])
+    failed = [(x, line) for x in requested
+              for line in [failure_line(out_dir, x)] if line]
+    print(f'{runs} runs, {written} written, {len(missing)} not reported, '
+          f'{len(failed)} failed')
     for addr in missing:
         print(f'not reported: {addr:X}')
-    return 0
+    for addr, line in failed:
+        print(f'failed: {addr:X}: {line}')
+    return 1 if missing or failed else 0
 
 
 if __name__ == '__main__':

@@ -113,7 +113,9 @@ and nobody answers "what does this call" by reading a raw decompile.
 - [tools/assemble_context.py](../../tools/assemble_context.py) —
   `bundle(address)` → digest, decompile, the first 40 lines of each
   caller's decompile, callees' signatures, resolved IDS constants and
-  resrefs, in that order, with a token estimate on the first line. The
+  resrefs, in that order, with a token estimate on the first line. At most
+  12 callers are shown (`CALLER_CAP`); callers without a decompile are
+  skipped. The
   decompiles are `$IWD2R_HOME/ghidra-exports/decompile/<ADDR>.c`, written
   once per function by `tools/ghidra/export_decompiles.py` (chunked,
   resumable, read-only Ghidra; a missing file reads `decompile: not
