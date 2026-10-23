@@ -160,6 +160,21 @@ after the world screen came up is what success looks like; dying before
 
 As measured on 2026-10-23, newest first:
 
+- The validation pair (final fix wave): a disposable import batch in a
+  scratch worktree (`p3/frida-validate`), row 0x46B160
+  `CGameArea::GetNearest`, `world_entry` only, through the driver's own
+  phase (the scratch worktree built for x86 in its own checkout; ours hooked
+  at that build's RVA: 0x10FE10 for the stubs, 0x7F070 for the full body).
+  A stub returning `INVALID_INDEX` read **equal**: the original returns -1
+  on all 12 of `world_entry`'s calls, so that scenario cannot tell such a
+  stub from the body (an equal row is equal on the inputs the scenarios
+  exercise, no more). A stub returning 0 read **different** (event 2: ret
+  -1 against 0) and drew the park finding; the full body read **equal**
+  (12/12 calls, final totals, 27 checkpoints and 87 periodic dumps
+  matching) and the driver rewrote its evidence to `kind: trace` with a
+  `compare=0` line that `check_evidence` and the close accept. Runs
+  `runs/20261023-144231` (original, reused for the two later ours runs),
+  `-144325`, `-144634`, `-144839`; four launches.
 - The calibration (`truth.py calibrate`, the 28 calibration rows, all three
   scenarios, both sides under the replay clock, typed tables, exit-time hit
   totals; runs `runs/20261023-1321..1328`): every side `RESULT: CLEAN` with

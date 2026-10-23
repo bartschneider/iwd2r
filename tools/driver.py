@@ -910,9 +910,11 @@ def park_text(address, mb, needs):
     docs/wso/import-parked/ (one per row, so parallel batches never
     conflict), one commit."""
     stem = address[2:].upper() if address.lower().startswith('0x') else address.upper()
+    # needs as a JSON string literal: a diff detail carries quotes of its own.
     return ('%s, delete docs/evidence/%s.md, write docs/wso/import-parked/%s.json '
-            '{"address", "name", "file", "batch", "needs"} with needs "%s", and commit '
-            'the three together; %s' % (EDIT_BACK % mb, stem, stem, needs, SHARED_FILE))
+            '{"address", "name", "file", "batch", "needs"} with needs %s, and commit '
+            'the three together; %s' % (EDIT_BACK % mb, stem, stem, json.dumps(needs),
+                                        SHARED_FILE))
 
 
 UNMEASURED_NEEDS = FRIDA_SCENARIOS_TEXT + ': not exercised'

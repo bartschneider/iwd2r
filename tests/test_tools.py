@@ -12673,6 +12673,9 @@ class DriverTest(unittest.TestCase):
                 self.assertIn('outside the paths a batch may touch', text)
                 self.assertIn('no batch row lives there', text)
         self.assertIn(driver.SHARED_FILE, driver.park_text('0x401000', 'abc', 'x'))
+        # a diff detail's own quotes arrive escaped: needs is a JSON string literal
+        self.assertIn(r'with needs "frida different: ours {\"ret\": 0}",',
+                      driver.park_text('0x401000', 'abc', 'frida different: ours {"ret": 0}'))
         self.assertIn(driver.EDIT_BACK % 'abc', driver.park_text('0x401000', 'abc', 'x'))
 
     def test_transcript_rejects_wso_ref(self):
