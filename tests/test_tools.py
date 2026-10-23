@@ -11391,6 +11391,14 @@ class DriverTest(unittest.TestCase):
             ("echo $((1<<4))\ngit reset --hard", 'history rewrite'),
             ("printf '%x\\n' $((0x400000 + (1<<4)))\nWindowsSandbox.exe run.wsb",
              'launch outside'),
+            # a heredoc fed to a shell is commands, not data
+            ("bash <<'EOF'\nWindowsSandbox.exe run.wsb\nEOF", 'launch outside'),
+            ("sh -s <<EOF\ncd /w\ngit push\nEOF", 'history rewrite'),
+            ("bash <<'EOF'\ncat src/A.cpp\nEOF", 'cat of src/A.cpp'),
+            ("env bash <<'EOF'\ngit reset --hard\nEOF", 'history rewrite'),
+            ("bash <<'A'; cat > n.md <<'B'\ngit reset --hard\nA\ndata\nB",
+             'history rewrite'),
+            ("bash <<'EOF'\nunclosed 'quote\ngit push\nEOF", 'history rewrite'),
         )
         for cmd, why in cases:
             probs = self._bash(cmd)
@@ -11401,6 +11409,10 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(self._bash(
             "cat <<EOF > docs/evidence/n.md\nit's git reset --hard\nEOF\ngit status"), [])
         self.assertEqual(self._bash("git status # git push is bad\ngit log"), [])
+        self.assertEqual(self._bash(
+            "bash <<'A'; cat > n.md <<'B'\ngit status\nA\ngit push later\nB"), [])
+        self.assertEqual(self._bash(
+            "bash <<'EOF'\ncat > n.md <<'X'\ngit push later\nX\ngit log\nEOF"), [])
 
     def test_transcript_history_allows_add_commit_and_branches(self):
         for cmd in ('git checkout -b feature', 'git checkout -b feature first',

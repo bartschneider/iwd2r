@@ -597,16 +597,33 @@ _BATCH_DIRS = ('src', 'compat', 'docs', 'oracle', 'tools', 'tests')
 _HEREDOC = re.compile(r"""<<-?[ \t]*(?:'([^'\n]*)'|"([^"\n]*)"|([^\s;&|<>()]+))""")
 
 
+# A heredoc fed to one of these runs its body as commands.
+_SHELLS = ('bash', 'sh', 'zsh', 'dash', 'ksh', 'wsl', 'pwsh', 'powershell')
+
+
 def _fallback_split(text, seps):
     return text.split('|') if seps == ('|',) else _SEGMENT.split(text)
+
+
+def _feeds_shell(stage):
+    """True when a word of the pipe stage before a << names a shell (the
+    command word, or after env, exec, nohup and the like)."""
+    cw, args = _words(_split_unquoted(stage, ('|',))[-1])
+    for w in [cw] + args:
+        w = os.path.basename(w.replace('\\', '/')).lower()
+        if (w[:-4] if w.endswith('.exe') else w) in _SHELLS:
+            return True
+    return False
 
 
 def _split_unquoted(text, seps):
     """text split at any of seps (longest first) outside quotes; a
     backslash escapes the next character, an unquoted # at the start of a
     word is a comment to the end of the line, and the body of a heredoc
-    (<<WORD, <<-WORD, <<'WORD') is data up to its delimiter line.  Fails
-    closed: a quote or heredoc left open at the end falls back to _SEGMENT."""
+    (<<WORD, <<-WORD, <<'WORD') is data up to its delimiter line, unless
+    the heredoc is fed to a shell (_feeds_shell): that body is commands
+    and is split the same way.  Fails closed: a quote or heredoc left open
+    at the end falls back to _SEGMENT."""
     parts, cur, quote, i, pending = [], [], None, 0, []
     while i < len(text):
         ch = text[i]
@@ -632,21 +649,26 @@ def _split_unquoted(text, seps):
             cur = []
             delims, pending = pending, []
             i += 1
-            for d in delims:
-                found = False
+            for d, run in delims:
+                found, body = False, []
                 while i < len(text) and not found:
                     j = text.find('\n', i)
                     line = text[i:len(text) if j < 0 else j]
                     i = len(text) if j < 0 else j + 1
                     found = line.strip() == d
+                    if not found:
+                        body.append(line)
                 if not found:           # no delimiter line: fail closed
                     return _fallback_split(text, seps)
+                if run:                 # fed to a shell: the body is commands
+                    parts += _split_unquoted('\n'.join(body), seps)
             continue
         elif text.startswith('<<', i) and not text.startswith('<<<', i) \
                 and _HEREDOC.match(text, i):
             m = _HEREDOC.match(text, i)
             d = next(g for g in m.groups() if g is not None)
-            pending.append(re.sub(r'[\\\'"]', '', d) if m.group(3) else d)
+            pending.append((re.sub(r'[\\\'"]', '', d) if m.group(3) else d,
+                            _feeds_shell(''.join(cur))))
             cur.append(text[i:m.end()])
             i = m.end()
             continue
