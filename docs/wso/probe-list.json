@@ -1,0 +1,12 @@
+[
+  {
+    "address": "0x716E80",
+    "at": "2026-10-23T09:51:36+00:00",
+    "batch": "b011",
+    "file": "src/CGameSprite.cpp",
+    "name": "CGameSprite::sub_716E80",
+    "reading": "fork",
+    "reason": "The exe leaks the LEARNSPELL effect for a scroll's first ability, as his body does, but only a dump reading shows it and no probe or replay case runs it, so ours (which frees it) stays.",
+    "source": "worker"
+  }
+]

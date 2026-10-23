@@ -2842,7 +2842,7 @@
     "b011": {
       "assigned_at": "2026-10-19T03:00:24+00:00",
       "branch": "p3/wso-b011",
-      "closed_at": null,
+      "closed_at": "2026-10-23T09:58:20+00:00",
       "files": [
         "src/CGameSprite.cpp",
         "src/CGameAIBase.cpp",
@@ -2885,15 +2885,6 @@
           "name": "CInfGame::UseMagicOnGround",
           "our_len": 2247,
           "their_len": 2234
-        },
-        {
-          "address": "0x716E80",
-          "category": "both_changed_differ",
-          "class": "ambiguous",
-          "file": "src/CGameSprite.cpp",
-          "name": "CGameSprite::sub_716E80",
-          "our_len": 2118,
-          "their_len": 2219
         },
         {
           "address": "0x594280",
@@ -3040,8 +3031,104 @@
           "their_len": 1942
         }
       ],
-      "status": "assigned",
-      "verdicts": {}
+      "status": "closed",
+      "verdicts": {
+        "0x404D00": {
+          "case": "dump-404D00",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x45CA10": {
+          "case": "dump-45CA10",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x46D7E0": {
+          "case": "dump-46D7E0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x46DAE0": {
+          "case": "dump-46DAE0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x47A1C0": {
+          "case": "dump-47A1C0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x4C8B10": {
+          "case": "dump-4C8B10",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x4C90A0": {
+          "case": "dump-4C90A0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x50A820": {
+          "case": "dump-50A820",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x52A640": {
+          "case": "dump-52A640",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x594280": {
+          "case": "dump-594280",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5BB980": {
+          "case": "dump-5BB980",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x6A8470": {
+          "case": "dump-6A8470",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x6B03E0": {
+          "case": "dump-6B03E0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x6F47F0": {
+          "case": "dump-6F47F0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x722820": {
+          "case": "dump-722820",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x733340": {
+          "case": "dump-733340",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x73FEC0": {
+          "case": "dump-73FEC0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x752DD0": {
+          "case": "dump-752DD0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x77FF50": {
+          "case": "dump-77FF50",
+          "losing_kind": "trace",
+          "side": "ours"
+        }
+      }
     },
     "b012": {
       "assigned_at": "2026-10-19T03:07:36+00:00",
