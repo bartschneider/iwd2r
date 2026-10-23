@@ -1386,7 +1386,48 @@ void CInfGame::DestroyGame(BOOLEAN bProgressBarRequired, BOOLEAN bProgressBarInP
 // 0x5A0160
 void CInfGame::sub_5A0160()
 {
-    // TODO: Incomplete.
+    CString sSearchPath = g_pChitin->cDimm.cResCache.m_sDirName + "data\\*.*";
+    CString sResolvedSearchPath;
+    if (g_pChitin->lAliases.ResolveFileName(sSearchPath, sResolvedSearchPath) == FALSE) {
+        sResolvedSearchPath = sSearchPath;
+    }
+
+    CFileFind fileFind;
+    BOOLEAN bWorking = fileFind.FindFile(sResolvedSearchPath, 0);
+    while (bWorking) {
+        bWorking = fileFind.FindNextFile();
+
+        CString sBifFileName = fileFind.GetFilePath();
+        INT nSlash = sBifFileName.Find('\\');
+        while (nSlash != -1) {
+            sBifFileName = sBifFileName.Right(sBifFileName.GetLength() - nSlash - 1);
+            nSlash = sBifFileName.Find('\\');
+        }
+
+        CString sBifName = sBifFileName.Left(sBifFileName.GetLength() - 4);
+        CString sExtension = sBifFileName.Right(4);
+        sExtension.MakeUpper();
+        if (sExtension.Compare(".BIF") == 0) {
+            CString sMinimumSize;
+            CPoint ptLocation;
+            if (m_ruleTables.m_tCacheValidation.Find(sBifName, ptLocation, FALSE) == TRUE) {
+                if (m_ruleTables.m_tCacheValidation.GetWidth() < 2
+                    || m_ruleTables.m_tCacheValidation.GetHeight() <= ptLocation.y
+                    || ptLocation.y < 0) {
+                    sMinimumSize = m_ruleTables.m_tCacheValidation.GetDefault();
+                } else {
+                    sMinimumSize = m_ruleTables.m_tCacheValidation.GetAt(CPoint(1, ptLocation.y));
+                }
+            } else {
+                sMinimumSize = m_ruleTables.m_tCacheValidation.GetDefault();
+            }
+
+            g_pChitin->cDimm.cResCache.ValidateFile(g_pChitin->cDimm.GetResFileID(sBifName),
+                atol(sMinimumSize));
+        }
+    }
+
+    fileFind.Close();
 }
 
 // 0x5A04B0
