@@ -3901,6 +3901,7 @@ class Driver:
         adopt = self._adoptable([b for b, _w, _n in pending] + retries)
         capped = False        # --max-batches reached
         crash = None          # an exception that escaped a batch thread
+        launched = set()      # every batch this run started (no second pickup)
 
         threads = self._threads = []
 
@@ -3919,6 +3920,7 @@ class Driver:
             nonlocal running
             running += 1
             self._began += 1
+            launched.add(batch_id)
             self._start(lambda: body(batch_id, why, name))
 
         def reap(block):
@@ -3978,6 +3980,17 @@ class Driver:
                     self._busy[name] += 1
             if name is None:
                 return False
+            if not retries:
+                # An exception cleared while the driver runs (`wave.py run
+                # --clear`): outside the lock, as at the start.
+                live = set(self._read_status()['running'])
+                skip = launched | live | {b for b, _w, _n in pending}
+                for bid in self._cleared():
+                    if bid not in skip:
+                        retries.append(bid)
+                        self.log('%s: exception cleared while running; '
+                                 'retrying at its %s stage'
+                                 % (bid, self._retry_stage.get(bid)))
             if retries:
                 bid = retries.pop(0)
                 why = self._retry_why(bid)
