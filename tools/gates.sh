@@ -186,10 +186,12 @@ format_check() {
 step "format" format_check
 if [ "$WINDOWS" = 1 ]; then
     # The x86 preset with the oracle runner, injector and recorder; the x64
-    # engine through play.py's build helper. Windows ctest runs are covered
+    # engine and the x86 engine (what tools/frida/probe.py runs) through
+    # play.py's build helpers. Windows ctest runs are covered
     # by the sandbox suite (play.py --vm windows --suite) for now.
-    step "windows x86 build" python3 tools/oracle.py build
+    step "windows x86 oracle build" python3 tools/oracle.py build
     step "windows x64 build" python3 -c "import sys; sys.path.insert(0, 'tools'); import play; play.sync_windows(); play.build_windows()"
+    step "windows x86 engine build (frida probe)" python3 -c "import sys; sys.path.insert(0, 'tools'); import play; play.sync_windows(); play.build_windows_x86()"
 fi
 [ -n "$COPY_MANIFEST" ] && rm -f "$COPY_MANIFEST"
 echo

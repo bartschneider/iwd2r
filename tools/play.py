@@ -529,6 +529,15 @@ def build_windows(preset=WIN_PRESET, target='iwd2r', exe_rel=WIN_EXE_REL,
     return exe
 
 
+def build_windows_x86(bat_name='play-build-x86.bat', build=build_windows):
+    """Builds the x86 RelWithDebInfo exe (with its linker map) that
+    tools/frida/probe.py runs in the sandbox; returns the WSL path of the
+    exe. build is injectable for tests."""
+    return build(preset='windows-msvc-x86', target='iwd2r',
+                 exe_rel='build/windows-msvc-x86/RelWithDebInfo/iwd2r.exe',
+                 bat_name=bat_name)
+
+
 def run_linux(exe, env, log_file):
     log('running %s' % exe)
     return stream([exe], log_file=log_file, env=env, cwd=ROOT)

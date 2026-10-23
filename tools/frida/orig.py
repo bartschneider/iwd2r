@@ -45,8 +45,6 @@ import sys
 import time
 from pathlib import Path
 
-import frida
-
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import hooks  # noqa: E402  (the renderer this file is staged with)
 
@@ -194,6 +192,7 @@ def attach_when_there(name: str, deadline: float):
     get_process_by_name raises InvalidArgumentError("process not found")
     on frida 17.24.1 -- measured on the smoke venv -- where older releases
     raised ProcessNotFoundError, so both mean "not there yet"."""
+    import frida
     device = frida.get_local_device()
     while True:
         try:
@@ -205,8 +204,9 @@ def attach_when_there(name: str, deadline: float):
             time.sleep(0.5)
 
 
-def main() -> int:
-    global LOADED_ADDR, LOADED_RVA, LOADED_MODULE
+def build_parser() -> argparse.ArgumentParser:
+    """The command line, importable without frida (probe.py's tests parse
+    every generated sidecar command with it)."""
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--hooks", required=True, help="hook spec JSON (schema: hooks.py)")
     ap.add_argument("--out", default="trace.jsonl")
@@ -233,6 +233,13 @@ def main() -> int:
                     help="module --loaded-rva resolves against (default iwd2r.exe)")
     ap.add_argument("--no-loaded", dest="require_loaded", action="store_false",
                     help="drop the loaded observation; CLEAN no longer requires it")
+    return ap
+
+
+def main() -> int:
+    global LOADED_ADDR, LOADED_RVA, LOADED_MODULE
+    import frida
+    ap = build_parser()
     ns = ap.parse_args()
 
     if bool(ns.exe) == bool(ns.attach):

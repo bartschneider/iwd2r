@@ -64,6 +64,8 @@ ORIGINAL_ATTACH = 'IWD2.exe'
 TRACE_GRACE = 90                     # orig.py's extra seconds over the timeout
 CLICK_SPOT = (400, 300)              # where --clicks places its clicks
 CLICK_WAIT = 60                      # frames between a click and the next
+RESULT_GRACE = 60                    # box wait for RESULT: past the timeout
+POST_LOAD_FALLBACK = 180             # --post-load when the scenario has no header
 
 
 def log(message):
@@ -145,7 +147,23 @@ def sidecar_args(ns, out, status):
         args += ['--module', ns.module]
     if ns.no_loaded:
         args += ['--no-loaded']
+    post_load = getattr(ns, 'post_load', None)
+    if post_load is not None:
+        args += ['--post-load', str(post_load)]
     return args
+
+
+def resolve_post_load(arg, script):
+    """--post-load SECONDS: the argument when given, else the scenario's
+    "# timeout: S" header, else POST_LOAD_FALLBACK -- the sidecar's own 20 s
+    default closes the window long before the scenario's trailing clicks."""
+    if arg is not None:
+        return arg
+    import realinput
+    try:
+        return realinput.load_header_timeout(script) or POST_LOAD_FALLBACK
+    except realinput.ScenarioError as e:
+        sys.exit('probe: %s' % e)
 
 
 def _cmdline(argv):
@@ -153,19 +171,58 @@ def _cmdline(argv):
     return ' '.join(a if a and ' ' not in a else '"%s"' % a for a in argv)
 
 
+def sidecar_argv(target, python_win, env, timeout, args):
+    """The Frida sidecar as argv: [python, orig.py, <orig.py's options>].
+    original attaches to the injected IWD2.exe; ours spawns our build under
+    Frida with one --env K=V flag per pair (the option is argparse
+    "append", one value each)."""
+    argv = [python_win, winsandbox.BOX_TOOLS + '\\orig.py']
+    if target == 'original':
+        argv += ['--attach', ORIGINAL_ATTACH]
+    else:
+        argv += ['--exe', BOX_OURS + '\\iwd2r.exe',
+                 '--workdir', env['IWD2_DATA']]
+    argv += ['--timeout', str(timeout + TRACE_GRACE)] + list(args)
+    if target != 'original':
+        for key, value in sorted(env.items()):
+            argv += ['--env', '%s=%s' % (key, value)]
+    return argv
+
+
+def wait_for_result_cmd(status_win, deadline_s):
+    """A powershell one-liner for cmd /c: returns once the sidecar's status
+    file has a line starting RESULT: , or after deadline_s seconds.  No
+    cmd metacharacters outside the double quotes, so it chains with &."""
+    return ('powershell -NoProfile -Command "$e=(Get-Date).AddSeconds(%d); '
+            "while((Get-Date) -lt $e){ if((Test-Path '%s') -and "
+            "(Select-String -Path '%s' -Pattern '^RESULT:' -Quiet)){ break }; "
+            'Start-Sleep -Seconds 1 }"' % (deadline_s, status_win, status_win))
+
+
+def _status_path(args):
+    return args[args.index('--status') + 1]
+
+
+def _finish_cmd(args, timeout):
+    """Wait for the verdict, then done.txt, then the shutdown."""
+    return '%s & echo done > %s\\done.txt & shutdown /s /t 0' % (
+        wait_for_result_cmd(_status_path(args), timeout + RESULT_GRACE),
+        winsandbox.BOX_RESULTS)
+
+
 def original_logon(python_win, timeout, args):
     """The box's logon command: the Frida sidecar in the background (start
     /b returns at once), the replay driver in front -- the driver injects,
-    drives and quits the game exactly as in a recording, and writes
-    done.txt, so the run fails exactly as a recording would.  The whole
-    line is wrapped in cmd /c: the sandbox executes LogonCommand without a
-    shell, where start, & and redirection do not exist."""
-    sidecar = ['start', '""', '/b', python_win,
-               winsandbox.BOX_TOOLS + '\\orig.py',
-               '--attach', ORIGINAL_ATTACH,
-               '--timeout', str(timeout + TRACE_GRACE)] + args
-    return 'cmd.exe /c %s & %s' % (_cmdline(sidecar),
-                                   winsandbox.replay_logon_command())
+    drives and quits the game exactly as in a recording (its config has
+    shutdown off for a probe run, see run_side) -- then the wait for the
+    sidecar's RESULT: line, done.txt and the shutdown.  The whole line is
+    wrapped in cmd /c: the sandbox executes LogonCommand without a shell,
+    where start, & and redirection do not exist."""
+    sidecar = ['start', '""', '/b'] + sidecar_argv(
+        'original', python_win, None, timeout, args)
+    return 'cmd.exe /c %s & %s & %s' % (
+        _cmdline(sidecar), winsandbox.replay_logon_command(),
+        _finish_cmd(args, timeout))
 
 
 def ours_env(game_win, seed):
@@ -183,15 +240,14 @@ def ours_env(game_win, seed):
 
 def ours_logon(python_win, game_win, env, timeout, args):
     """The box's logon command: orig.py spawns our build under Frida in the
-    foreground (its verdict is the run), then done.txt, then the shutdown
-    that closes the sandbox -- cmd's & runs on regardless of exit codes.
-    Wrapped in cmd /c like original_logon (no shell at LogonCommand)."""
-    sidecar = [python_win, winsandbox.BOX_TOOLS + '\\orig.py',
-               '--exe', BOX_OURS + '\\iwd2r.exe', '--workdir', game_win,
-               '--timeout', str(timeout + TRACE_GRACE)] + args
-    sidecar += ['--env', *('%s=%s' % kv for kv in sorted(env.items()))]
-    return 'cmd.exe /c %s & echo done > %s\\done.txt & shutdown /s /t 0' % (
-        _cmdline(sidecar), winsandbox.BOX_RESULTS)
+    foreground (its verdict is the run), then the RESULT: wait (immediate
+    once the sidecar returned), done.txt, and the shutdown that closes the
+    sandbox -- cmd's & runs on regardless of exit codes.  Wrapped in
+    cmd /c like original_logon (no shell at LogonCommand)."""
+    env = dict(env, IWD2_DATA=game_win)
+    return 'cmd.exe /c %s & %s' % (
+        _cmdline(sidecar_argv('ours', python_win, env, timeout, args)),
+        _finish_cmd(args, timeout))
 
 
 def plan_folders(target, venv_win, build_win, game_win, results_win,
@@ -213,8 +269,23 @@ def plan_folders(target, venv_win, build_win, game_win, results_win,
                        BOX_PYTHON314, True)]
 
 
+def wait_for_result_file(path, seconds):
+    """Polls path for a RESULT: line; False after seconds (report() then
+    says so)."""
+    end = time.time() + seconds
+    while time.time() < end:
+        try:
+            with open(path, encoding='utf-8', errors='replace') as f:
+                if any(l.startswith('RESULT:') for l in f):
+                    return True
+        except OSError:
+            pass
+        time.sleep(2)
+    return False
+
+
 def run_side(target, script, folders, logon_cmd, timeout, host_run, out_dir,
-             probe, seed, dump_every, dry):
+             probe, seed, dump_every, dry, status_name='frida-trace.jsonl.status'):
     """One sandbox for one side -- winsandbox.run_replay's shape with the
     Frida staging and logon command swapped in.  Everything under results/
     (the driver's logs; results/replay/ also carries the scenario copy, the
@@ -228,13 +299,17 @@ def run_side(target, script, folders, logon_cmd, timeout, host_run, out_dir,
     os.makedirs(tools)
     shutil.copyfile(script, os.path.join(results, 'replay', 'scenario.txt'))
     if target == 'original':
+        config = winsandbox.replay_driver_config(
+            winsandbox.wslpath_w(oracle.GAME_DIR),
+            oracle.recorder_env(
+                winsandbox.BOX_REPLAY_DIR + '\\scenario.txt',
+                winsandbox.BOX_REPLAY_DIR, seed, dump_every),
+            timeout)
+        # The driver must not shut the box down when the game exits: the
+        # logon command waits for the sidecar's RESULT: and shuts down.
+        config['shutdown'] = False
         with open(os.path.join(tools, 'config.json'), 'w') as f:
-            json.dump(winsandbox.replay_driver_config(
-                winsandbox.wslpath_w(oracle.GAME_DIR),
-                oracle.recorder_env(
-                    winsandbox.BOX_REPLAY_DIR + '\\scenario.txt',
-                    winsandbox.BOX_REPLAY_DIR, seed, dump_every),
-                timeout), f, indent=1)
+            json.dump(config, f, indent=1)
         shutil.copy2(winsandbox.REPLAY_DRIVER,
                      os.path.join(tools, 'replay-driver.ps1'))
         winsandbox.stage_directplay(os.path.join(tools, 'directplay'))
@@ -248,6 +323,12 @@ def run_side(target, script, folders, logon_cmd, timeout, host_run, out_dir,
             winsandbox.wait_done(
                 results, timeout + winsandbox.REPLAY_BACKSTOP
                 + winsandbox.REPLAY_BOOT_ALLOWANCE)
+            # The replay driver writes done.txt when the game exits, which
+            # on the original side is before the sidecar's verdict: keep
+            # the box open until the status file has its RESULT: line.
+            wait_for_result_file(
+                os.path.join(results, 'replay', status_name),
+                timeout + RESULT_GRACE + 30)
             error = winsandbox.read_text(os.path.join(results, 'error.txt'))
             if error:
                 result['error'] = 'driver: %s' % error
@@ -292,6 +373,7 @@ def run(ns):
     host_python, venv_win, box_python = venv_python()
     script = oracle.scenario_path(ns.scenario)
     timeout = oracle.replay_timeout(ns.timeout, script)
+    ns.post_load = resolve_post_load(ns.post_load, script)
     if timeout <= TRACE_GRACE:
         sys.exit('probe: timeout %d s leaves no %d s trace window'
                  % (timeout, TRACE_GRACE))
@@ -360,7 +442,7 @@ def run(ns):
                 filelock.hold(winsandbox.SANDBOX_LOCK, 'sandbox'):
             result = run_side(ns.target, script, folders, logon_cmd, timeout,
                               host_run, out_dir, ns.probe, ns.seed,
-                              ns.dump_every, dry)
+                              ns.dump_every, dry, status_name)
     except (RuntimeError, TimeoutError) as e:
         print('probe: %s' % e, file=sys.stderr)
         result = {'error': str(e), 'seconds': 0.0}
@@ -401,6 +483,10 @@ def add_side_args(p):
                    help='insert N click actions before the trailing quit, '
                         'on a copy of the scenario, so a click-driven hook '
                         'fires (default: none)')
+    p.add_argument('--post-load', type=oracle.positive_int, metavar='SECONDS',
+                   help='seconds the sidecar keeps tracing once the world '
+                        'screen is up (default: the scenario header\'s '
+                        '"# timeout: S", else %d)' % POST_LOAD_FALLBACK)
     p.add_argument('--hit', help='hook name that must fire, else '
                                  'NOT-EXERCISED (default: any hit)')
     p.add_argument('--hit-min', type=int, default=1)

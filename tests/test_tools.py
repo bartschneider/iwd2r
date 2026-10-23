@@ -6793,6 +6793,98 @@ class ProbePlanTest(unittest.TestCase):
         self.assertTrue(ours.endswith('shutdown /s /t 0'), ours)
 
 
+class FridaProbeTest(unittest.TestCase):
+    """The sandbox run completes with a verdict: the sidecar command parses
+    with orig.py's own argparse, the logon waits for RESULT: before
+    done.txt, --post-load defaults to the scenario timeout, and the x86
+    build helper uses the x86 preset."""
+
+    PY = 'C:\\Users\\thier\\iwd2r-frida\\venv\\Scripts\\python.exe'
+
+    @classmethod
+    def setUpClass(cls):
+        stub = types.ModuleType('frida')
+        cls._saved_frida = sys.modules.get('frida')
+        sys.modules['frida'] = stub     # build_parser needs no real frida
+        cls.orig = load_tool('frida/orig')
+
+    @classmethod
+    def tearDownClass(cls):
+        if cls._saved_frida is not None:
+            sys.modules['frida'] = cls._saved_frida
+        else:
+            del sys.modules['frida']
+
+    def ns(self, **kw):
+        base = dict(hit='MTP', hit_min=1, attach_timeout=None, loaded_addr=None,
+                    loaded_rva='0x330E60', module=None, no_loaded=False,
+                    post_load=None)
+        base.update(kw)
+        return types.SimpleNamespace(**base)
+
+    def args(self, **kw):
+        return probe.sidecar_args(self.ns(**kw), 't.jsonl', 't.jsonl.status')
+
+    def test_sidecar_argv_parses_with_orig_parser(self):
+        env = probe.ours_env('C:\\game', 1)
+        env['IWD2_DATA'] = 'C:\\game'
+        for target, e in (('original', None), ('ours', env)):
+            argv = probe.sidecar_argv(target, self.PY, e, 120, self.args())
+            self.assertEqual(argv[0], self.PY)
+            # argv[1] is orig.py itself; the rest is its command line.
+            ns = self.orig.build_parser().parse_args(argv[2:])
+            if target == 'ours':
+                self.assertEqual(sorted(ns.env),
+                                 sorted('%s=%s' % kv for kv in env.items()))
+                self.assertEqual(ns.exe, probe.BOX_OURS + '\\iwd2r.exe')
+            else:
+                self.assertEqual(ns.env, [])
+                self.assertEqual(ns.attach, probe.ORIGINAL_ATTACH)
+
+    def test_logon_waits_for_result_before_done(self):
+        args = self.args()
+        status = args[args.index('--status') + 1]
+        cmds = (probe.original_logon(self.PY, 120, args),
+                probe.ours_logon(self.PY, 'C:\\game',
+                                 probe.ours_env('C:\\game', 1), 120, args))
+        for cmd in cmds:
+            self.assertLess(cmd.index('^RESULT:'), cmd.index('done.txt'), cmd)
+            self.assertLess(cmd.index('Select-String'), cmd.index('done.txt'))
+            self.assertIn(status, cmd)
+            self.assertIn('AddSeconds(180)', cmd)     # timeout 120 + 60
+            self.assertTrue(cmd.endswith('& shutdown /s /t 0'), cmd)
+        orig = cmds[0]
+        self.assertLess(orig.index('replay-driver.ps1'), orig.index('^RESULT:'))
+        self.assertEqual(probe.wait_for_result_cmd('C:\\s', 7).count(
+            'AddSeconds(7)'), 1)
+
+    def test_post_load_default_is_scenario_timeout(self):
+        with tempfile.TemporaryDirectory() as d:
+            def scenario(header):
+                path = os.path.join(d, 'x.txt')
+                with open(path, 'w') as f:
+                    f.write(header + 'wait 5\nquit\n')
+                return path
+            for header, arg, want in (('# timeout: 240\n', None, 240),
+                                      ('# timeout: 240\n', 30, 30),
+                                      ('', None, 180)):
+                got = probe.resolve_post_load(arg, scenario(header))
+                self.assertEqual(got, want)
+                args = self.args(post_load=got)
+                self.assertEqual(args[args.index('--post-load') + 1],
+                                 str(want))
+
+    def test_build_windows_x86_uses_x86_preset(self):
+        calls = []
+        out = play.build_windows_x86(
+            build=lambda **kw: calls.append(kw) or '/x/iwd2r.exe')
+        self.assertEqual(out, '/x/iwd2r.exe')
+        self.assertEqual(calls, [dict(
+            preset='windows-msvc-x86', target='iwd2r',
+            exe_rel='build/windows-msvc-x86/RelWithDebInfo/iwd2r.exe',
+            bat_name='play-build-x86.bat')])
+
+
 class OrigAttachTest(unittest.TestCase):
     """attach_when_there must ride out every flavour of "process not found"
     frida raises while polling for the game -- frida 17 raises
