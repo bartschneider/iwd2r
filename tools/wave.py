@@ -1500,10 +1500,18 @@ def unpark(addresses, reason=None, state_path=IMPORT_STATE_PATH, repo=ROOT):
     parked, problem = _parked_rows(repo)
     if problem:
         return 2, f'{problem}\n'
+    # the file each row was read from, under whatever spelling it carries
+    # (<ADDR>.json, 0x<ADDR>.json, lower case): that is the file to remove
+    folder = os.path.join(repo, IMPORT_PARKED_DIR)
+    files = {}
+    for name in (sorted(os.listdir(folder)) if os.path.isdir(folder) else []):
+        stem = name[:-len('.json')] if name.endswith('.json') else None
+        if stem and re.fullmatch(r'(?:0[xX])?[0-9A-Fa-f]+', stem):
+            files.setdefault(_addr_key(stem.lower()), os.path.join(folder, name))
     state = load_state(state_path)
     plan, refusals, seen = [], [], set()
     for address in addresses:
-        key = _addr_key(address)
+        key = _addr_key(str(address).lower())      # the parked keys are lower case
         if key in seen:
             continue
         seen.add(key)
@@ -1531,9 +1539,19 @@ def unpark(addresses, reason=None, state_path=IMPORT_STATE_PATH, repo=ROOT):
         lines.append(f'unparked 0x{key.upper()} {row.get("name")} '
                      f'(was {entry.get("needs")}) from {bid}')
     save_state(state_path, state)
+    stuck = []
     for key, *_ in plan:
-        os.unlink(os.path.join(repo, parked_rel(key)))
+        try:
+            os.unlink(files[key])
+        except OSError as e:
+            stuck.append(f'{os.path.relpath(files[key], repo)} ({e.strerror or e})')
     lines.append(f'commit {os.path.relpath(state_path, repo)} and {IMPORT_PARKED_DIR}')
+    if stuck:
+        # the row is back in the queue but still reads as parked until the
+        # file is gone; nothing else to redo
+        lines.append('the state is saved but these parked files remain; delete them '
+                     'by hand and commit: ' + '; '.join(stuck))
+        return 1, '\n'.join(lines) + '\n'
     return 0, '\n'.join(lines) + '\n'
 
 

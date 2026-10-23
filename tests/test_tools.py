@@ -14379,11 +14379,35 @@ class DriverTest(unittest.TestCase):
 
     def test_unpark_reason_and_any_address_spelling(self):
         tmp, dp, ip, imp, folder, wave = self._unpark_fixture()
-        rc, out = wave.unpark(['403000'], 'signature parses now', state_path=imp, repo=self.root)
+        # the parked file may carry a worker's spelling (0x prefix, lower
+        # case): the file that was read is the file that goes
+        os.rename(os.path.join(folder, '403000.json'), os.path.join(folder, '0x403000.json'))
+        rc, out = wave.unpark(['0X403000'], 'signature parses now', state_path=imp, repo=self.root)
         self.assertEqual(rc, 0, out)
+        self.assertNotIn('0x403000.json', os.listdir(folder))
         with open(imp) as f:
             self.assertEqual(json.load(f)['batches']['i001']['unparked'][0]['reason'],
                              'signature parses now')
+
+    def test_unpark_reports_a_parked_file_it_could_not_delete(self):
+        tmp, dp, ip, imp, folder, wave = self._unpark_fixture()
+        real_unlink = os.unlink
+
+        def failing(path):
+            if path.endswith('403000.json'):
+                raise PermissionError(13, 'Permission denied', path)
+            real_unlink(path)
+        with mock.patch.object(os, 'unlink', failing):
+            rc, out = wave.unpark(['403000'], None, state_path=imp, repo=self.root)
+        self.assertEqual(rc, 1, out)
+        self.assertIn('unparked 0x403000 H', out)
+        self.assertIn('the state is saved but these parked files remain', out)
+        self.assertIn('403000.json (Permission denied)', out)
+        self.assertIn('403000.json', os.listdir(folder))
+        with open(imp) as f:
+            st = json.load(f)
+        self.assertEqual([r['address'] for r in st['batches']['i001'].get('unparked', [])],
+                         ['0x403000'])
 
     def test_unpark_refusals_write_nothing(self):
         tmp, dp, ip, imp, folder, wave = self._unpark_fixture()
