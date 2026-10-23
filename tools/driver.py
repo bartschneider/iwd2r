@@ -1143,14 +1143,15 @@ def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
             side == 'ours' and batch.get('id') is not None
             and case.startswith('probe-%s-' % batch['id']))
         paras = wave.evidence_paragraphs(text)
-        if driver_probe and not any(wave.EVIDENCE_PHRASES[1] in para
-                                    for para in paras):
+        probe_msg = driver_probe and not any(
+            wave.EVIDENCE_PHRASES[1] in para for para in paras)
+        if probe_msg:
             # A probe pass says ours matches the original (ruling R57).
             problems.append("%s: its verdict case is a probe; write the "
                             "sentence 'corroborated by WSO at <sha>: ...; "
                             "case %s decides' in the ## WSO delta section"
                             % (rel, case))
-        elif not wave._evidence_decided_by(text, case):
+        if not probe_msg and not wave._evidence_decided_by(text, case):
             problems.append(
                 '%s: docs/evidence/%s.md has no sentence reading "disagreed '
                 'with WSO at <sha>: ...; case %s decides" (or "corroborated '

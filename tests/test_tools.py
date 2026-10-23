@@ -8070,6 +8070,9 @@ class WaveTest(unittest.TestCase):
         self.assertIn('case ', brief)
         self.assertIn('disagreed with WSO', brief)
         self.assertIn('corroborated by WSO', brief)
+        self.assertIn('; case <id> decides', brief)
+        self.assertIn("the driver's checks refuse a verdict row whose "
+                      "evidence lacks it", brief)
         self.assertIn('Imported-From', brief)
         self.assertIn('WIP', brief)
         self.assertIn('parity_waiver', brief)
@@ -11463,6 +11466,22 @@ class DriverTest(unittest.TestCase):
             '0x401000: docs/evidence/401000.md has no sentence reading "disagreed '
             'with WSO at <sha>: ...; case dump-401000 decides" (or "corroborated '
             'by WSO ..."); write it in the ## WSO delta section'])
+
+    def test_check_probe_row_needs_the_deciding_sentence_too(self):
+        d = self._driver(worker=driver.FakeWorker(self.REPORT))
+        case = 'probe-b011-402000'
+        self._set_evidence('401000', self.WRAPPED % 'dump-401000')
+        self._set_evidence('402000', 'corroborated by WSO at e8dd16a7: same\n')
+        _v, probs = d._check('b011', self.wt, self.REPORT.replace(
+            'fork case probe-b011-402000', 'ours case ' + case))
+        self.assertEqual(probs, [
+            '0x402000: docs/evidence/402000.md has no sentence reading "disagreed '
+            'with WSO at <sha>: ...; case %s decides" (or "corroborated by WSO '
+            '..."); write it in the ## WSO delta section' % case])
+        self._set_evidence('402000', self.WRAPPED % case)
+        _v, probs = d._check('b011', self.wt, self.REPORT.replace(
+            'fork case probe-b011-402000', 'ours case ' + case))
+        self.assertEqual(probs, [])
 
     def test_check_flags_a_pin_the_evidence_does_not_cite(self):
         d = self._driver(worker=driver.FakeWorker(self.REPORT))
