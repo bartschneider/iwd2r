@@ -23,6 +23,7 @@ import re
 import shutil
 import struct
 import subprocess
+from unittest import mock
 import sys
 import tempfile
 import time
@@ -122,6 +123,7 @@ token_audit = load_tool('token_audit')
 bg2_find = load_tool('bg2_find')
 gltrace = load_tool('gltrace')
 triage = load_tool('triage')
+driver = load_tool('driver')
 
 
 def load_ghidra_tool(name):
@@ -9033,6 +9035,92 @@ class WaveTriageTest(unittest.TestCase):
             triage_path=os.path.join(self.tmp, 'absent.json'))
         with open(report) as f:
             self.assertNotIn('computed from triage.json', f.read())
+
+class DriverTest(unittest.TestCase):
+    REPORT = ('# report\n\n## Verdicts\n\nverdict 0x401000 ours case dump-401000\n'
+              'verdict 0x402000 fork case probe-b011-402000\n')
+
+    def test_parse_report(self):
+        self.assertEqual(driver.parse_report(self.REPORT),
+                         {'0x401000': ('ours', 'dump-401000'), '0x402000': ('fork', 'probe-b011-402000')})
+
+    def test_parse_report_rejects_duplicate(self):
+        with self.assertRaises(driver.ReportError):
+            driver.parse_report(self.REPORT + 'verdict 0x401000 fork case x\n')
+
+    def test_parse_report_rejects_malformed(self):
+        with self.assertRaises(driver.ReportError):
+            driver.parse_report('## Verdicts\nverdict 0x401000 maybe case x\n')
+
+    def test_credits_of_uses_both_formulas(self):
+        lines = [json.dumps({'type': 'assistant', 'message': {'model': 'glm-5.3-flash',
+                 'usage': {'input_tokens': 10000, 'cache_read_input_tokens': 100000, 'output_tokens': 1000}}})]
+        with tempfile.NamedTemporaryFile('w', suffix='.jsonl', delete=False) as f:
+            f.write('\n'.join(lines))
+        self.addCleanup(os.unlink, f.name)
+        self.assertAlmostEqual(driver.credits_of(f.name), (10000*2.3 + 100000*0.56 + 1000*8)/10000)
+
+    def test_credits_of_full_formula_and_skips(self):
+        lines = [
+            json.dumps({'type': 'assistant', 'message': {'model': 'glm-5.3[1m]',
+                'usage': {'input_tokens': 1000, 'cache_creation_input_tokens': 1000,
+                          'cache_read_input_tokens': 5000, 'output_tokens': 100}}}),
+            'not json', json.dumps({'type': 'user', 'message': {'content': 'x'}}), '[1]']
+        with tempfile.NamedTemporaryFile('w', suffix='.jsonl', delete=False) as f:
+            f.write('\n'.join(lines))
+        self.addCleanup(os.unlink, f.name)
+        self.assertAlmostEqual(driver.credits_of(f.name), (2000*6.9 + 5000*1.7 + 100*24)/10000)
+
+    def test_headless_worker_argv(self):
+        w = driver.HeadlessWorker()
+        argv, env = w.command('BRIEF')
+        self.assertEqual(argv[:3], ['claude-glm', '-p', 'BRIEF'])
+        self.assertIn('--dangerously-skip-permissions', argv)
+        self.assertEqual(env['CLAUDE_GLM_MODEL'], 'glm-5.3-flash[1m]')
+
+    def test_slug_and_config_dir(self):
+        self.assertEqual(driver.project_slug('/home/thier/iwd2-re-worktrees/p3-wso-b011'),
+                         '-home-thier-iwd2-re-worktrees-p3-wso-b011')
+        with mock.patch.dict(os.environ, {'CLAUDE_GLM_CONFIG_DIR': '/x/cfg'}):
+            self.assertEqual(driver.HeadlessWorker().config_dir, '/x/cfg')
+            self.assertEqual(driver.HeadlessWorker(config_dir='/y').config_dir, '/y')
+        env = {k: v for k, v in os.environ.items() if k != 'CLAUDE_GLM_CONFIG_DIR'}
+        with mock.patch.dict(os.environ, env, clear=True):
+            self.assertEqual(driver.HeadlessWorker().config_dir,
+                             os.path.expanduser('~/.claude-glm'))
+            self.assertEqual(driver.HeadlessWorker(wrapper='claude').config_dir,
+                             os.path.expanduser('~/.claude'))
+
+    def test_run_with_stubbed_subprocess(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = os.path.join(tmp, 'wt')
+            os.mkdir(cwd)
+            proj = os.path.join(tmp, 'cfg', 'projects', driver.project_slug(os.path.abspath(cwd)))
+            os.makedirs(proj)
+            with open(os.path.join(proj, 'sess1.jsonl'), 'w') as f:
+                f.write(json.dumps({'message': {'model': 'glm-5.3-flash[1m]',
+                        'usage': {'output_tokens': 10000}}}) + '\n')
+            out = json.dumps({'result': 'REPORT', 'session_id': 'sess1'})
+            calls = []
+
+            def stub(argv, **kw):
+                calls.append((argv, kw))
+                return subprocess.CompletedProcess(argv, 0, out, '')
+            w = driver.HeadlessWorker(config_dir=os.path.join(tmp, 'cfg'), run=stub)
+            r = w.run('B', cwd)
+            self.assertEqual((r.exit_code, r.report, r.rate_limited), (0, 'REPORT', False))
+            self.assertAlmostEqual(r.credits, 8.0)
+            self.assertEqual(calls[0][1]['cwd'], cwd)
+            # missing transcript: no crash
+            out = json.dumps({'result': 'R', 'session_id': 'nope'})
+            r = w.run('B', cwd)
+            self.assertIsNone(r.transcript)
+            self.assertIsNone(r.credits)
+
+    def test_fake_worker(self):
+        r = driver.FakeWorker('R', exit_code=2, rate_limited=True).run('b', '/tmp')
+        self.assertEqual((r.exit_code, r.report, r.rate_limited), (2, 'R', True))
+
 
 if __name__ == '__main__':
     unittest.main()
