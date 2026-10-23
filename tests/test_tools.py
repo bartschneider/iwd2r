@@ -9441,7 +9441,7 @@ class DriverTest(unittest.TestCase):
         with open(self.state_path, 'w') as f:
             json.dump(state, f)
         with open(os.path.join(self.wt, 'docs', 'evidence', '401000.md'), 'a') as f:
-            f.write(self.PURE_EVIDENCE)
+            f.write('\ncorroborated by WSO at e8dd16a7\n' + self.PURE_EVIDENCE)
         with open(os.path.join(self.wt, 'docs', 'evidence', '402000.md'), 'a') as f:
             f.write('\n## Decompiled (Ghidra)\n\n```c\nint Roll(int a, int b)\n\n{\n  return g_x;\n}\n```\n')
         self.git('commit', '-qam', 'decompiled', cwd=self.wt)
@@ -9515,6 +9515,75 @@ class DriverTest(unittest.TestCase):
             self.assertEqual('oracle/cases/wave-b011.cpp' in tree, status == 'pass')
             self.assertEqual('cases/wave-b011.cpp' in cmake, status == 'pass')
 
+    def test_driver_resume_keeps_a_committed_probe_file(self):
+        def real(status):
+            def oracle_run(batch_id, worktree, cases):
+                if status == 'error':
+                    raise RuntimeError('windows is gone')
+                def run(cmd, **kw):
+                    path = os.path.join(rd, 'r.json')
+                    with open(path, 'w') as f:
+                        json.dump({'cases': [{'case': 'wave/b011/401000', 'iterations': 36,
+                                              'failure_count': 0}]}, f)
+                    return subprocess.CompletedProcess(cmd, 0, 'report: %s\n' % path, '')
+                return truth.run_oracle(batch_id, worktree, cases, build=lambda w: None, run=run)
+            return oracle_run
+        rd = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, rd, True)
+        d = self._measured_driver(oracle_run=real('pass'))
+        os.makedirs(os.path.join(self.wt, 'oracle'), exist_ok=True)
+        with open(os.path.join(self.wt, 'oracle', 'CMakeLists.txt'), 'w') as f:
+            f.write('add_executable(r cases/store_spell.cpp)\n')
+        self.git('add', 'oracle', cwd=self.wt)
+        self.git('commit', '-qm', 'cmake', cwd=self.wt)
+        batch = self._state()
+        brief = d._oracle_phase('b011', batch, self.wt)           # the pass, committed, then the park
+        self.assertIn('probe-b011-401000', brief)
+        self.assertEqual(self.git('status', '--porcelain', cwd=self.wt).stdout, '')
+        d.oracle_run = real('error')                              # the resume: the oracle fails
+        brief = d._oracle_phase('b011', batch, self.wt)
+        self.assertEqual(self.git('status', '--porcelain', cwd=self.wt).stdout, '')
+        self.assertTrue(os.path.isfile(os.path.join(self.wt, 'oracle', 'cases', 'wave-b011.cpp')))
+        with open(os.path.join(self.wt, 'oracle', 'CMakeLists.txt')) as f:
+            self.assertIn('cases/wave-b011.cpp', f.read())
+        self.assertEqual(d._probe, {'401000': ('ours', 'probe-b011-401000')})   # carried forward
+        self.assertIn('probe-b011-401000', brief)
+        # the settle step itself never deletes a tracked file
+        d._settle_oracle_files('b011', self.wt, [{'address': '0x401000', 'name': 'Rules::Render',
+                                                   'signature': 'int Rules::Render(int a, int b)'}], ())
+        self.assertEqual(self.git('status', '--porcelain', cwd=self.wt).stdout, '')
+        self.assertTrue(os.path.isfile(os.path.join(self.wt, 'oracle', 'cases', 'wave-b011.cpp')))
+
+    def test_driver_fail_finding_quotes_the_case(self):
+        briefs = []
+
+        class Worker(driver.FakeWorker):
+            def run(self, brief, cwd):
+                briefs.append(brief)
+                return super().run(brief, cwd)
+        d = self._measured_driver(worker=Worker(self.REPORT),
+                                  oracle_run=lambda b, w, c: {'0x401000': ('fail', 'failure_count 2')})
+        d.run_batch('b011')
+        self.assertIn('wave/b011/401000', briefs[0])
+        self.assertIn('Original_401000', briefs[0])               # the drafted source
+        self.assertNotIn('is wave-b011.cpp', briefs[0])
+
+    def test_mechanical_checks_want_corroborated_for_a_probe_case(self):
+        d = self._driver(worker=driver.FakeWorker(self.REPORT))
+        batch = self._state()
+        batch = dict(batch, branch='p3/wso-b011')
+        ok = lambda argv, **_: subprocess.CompletedProcess(argv, 0, '', '')
+        with mock.patch.object(driver, '_vanilla_exe', return_value='/nonexistent'):
+            # 401000 says "disagreed", 402000 says "corroborated"
+            probs = driver.mechanical_checks(batch, self.wt, {
+                '0x401000': ('ours', 'probe-b011-401000'), '0x402000': ('ours', 'probe-b011-402000')}, run=ok)
+            self.assertEqual([p for p in probs if 'corroborated' in p],
+                             [p for p in probs if p.startswith('docs/evidence/401000.md')])
+            self.assertEqual(len([p for p in probs if 'probe' in p]), 1)
+            probs = driver.mechanical_checks(batch, self.wt, {
+                '0x401000': ('ours', 'dump-401000'), '0x402000': ('ours', 'probe-b011-402000')}, run=ok)
+            self.assertEqual(probs, [])
+
     def test_driver_skips_the_oracle_without_a_pure_row(self):
         d = self._driver(worker=driver.FakeWorker(self.REPORT),
                          oracle_run=lambda *a: self.fail('no pure row: nothing to build'))
@@ -9554,11 +9623,13 @@ class DriverTest(unittest.TestCase):
                 self.assertEqual(b['status'], 'closed')
                 self.assertEqual(b['verdicts']['0x402000']['measured'], 'frida')
                 self.assertEqual(b['verdicts']['0x401000']['measured'], 'probe')
-            else:   # different, yet the verdict is ours: a finding, one fix round (the same report again)
-                self.assertIn('1 problem(s); one fix round', '\n'.join(self.logs))
-                with open(os.path.join(os.path.dirname(d.status_path), 'b011', 'worker-fix-checks.brief.md')) as f:
-                    self.assertIn('Frida trace diff shows ours different from the original', f.read())
-                self.assertNotIn('measured', b['verdicts']['0x402000'])
+            else:   # different, yet the verdict is ours: one fix round, then Frida runs again
+                self.assertEqual(b['status'], 'assigned')
+                self.assertEqual(len(seen), 2)       # after the first check and after the fix round
+                self.assertEqual(self._status(d)['exceptions']['b011']['stage'], 'checks')
+                self.assertIn('Frida trace diff shows ours different from the original',
+                              self._status(d)['exceptions']['b011']['problems'][0])
+                self.assertNotIn('measured', b['verdicts'].get('0x402000', {}))
 
     def test_driver_frida_off_by_default_and_read_from_the_calibration(self):
         d = self._measured_driver(frida_run=lambda *a: self.fail('--no-frida'),
@@ -11039,7 +11110,8 @@ class TruthTest(unittest.TestCase):
         one = {sample[0]: ('equal', ''), addrs[0]: ('equal', ''), sample[1]: ('not-exercised', '')}
         cal = truth.calibrate(state, rows, {'oracle': {}, 'frida': one}, seed='s', sample=sample)
         self.assertFalse(cal['frida_default'])
-        self.assertIn('Truth calibration (seed s', truth.calibration_text(cal))
+        text = truth.calibration_text(cal)
+        self.assertIn('Truth calibration (seed s, sample ' + ', '.join(sample), text)
 
     def test_evidence_signature_and_oracle_candidates(self):
         pure = ('---\naddress: 0x1\n---\n## Decompiled (Ghidra)\n\n```c\n'
@@ -11139,6 +11211,36 @@ class TruthTest(unittest.TestCase):
                                  os.path.join(d, 'absent.json'))
             with open(report) as f:
                 self.assertNotIn('Truth calibration', f.read())
+
+    def test_rules_math_names_are_the_default_pure_helpers(self):
+        ce = load_tool('check_evidence')
+        addr = sorted(ce.RULES_MATH)[0]
+        texts = {'0x%X' % addr: '---\nname: CRuleTables::Helper\n---\n'}
+        self.assertEqual(truth.rules_math_names(texts.get), frozenset({'CRuleTables::Helper'}))
+        body = ('---\naddress: 0x1\n---\n## Decompiled (Ghidra)\n\n```c\nint Rules::Mix(int a)\n\n{\n'
+                '  return CRuleTables::Helper(a);\n}\n```\n')
+        texts['0x1'] = body
+        rows = [{'address': '0x1', 'name': 'Rules::Mix'}]
+        keep, why = truth.oracle_candidates(rows, texts.get)
+        self.assertEqual([c['address'] for c in keep], ['0x1'], why)
+        keep, why = truth.oracle_candidates(rows, texts.get, pure_names=frozenset())
+        self.assertEqual(keep, [])
+
+    def test_calibrate_requires_a_worktree_to_probe(self):
+        with tempfile.TemporaryDirectory() as d:
+            state_path = os.path.join(d, 'state.json')
+            with open(state_path, 'w') as f:
+                json.dump(self._cal_state(), f)
+            os.makedirs(os.path.join(d, 'docs', 'evidence'))
+            name = self._cal_state()['batches']['b001']['rows'][0]['address'][2:]
+            with open(os.path.join(d, 'docs', 'evidence', name + '.md'), 'w') as f:
+                f.write('## Decompiled (Ghidra)\n\n```c\nint C::f(int a)\n\n{\n  return a;\n}\n```\n')
+            args = ['calibrate', '--seed', 's', '--state', state_path, '--out', os.path.join(d, 'c.json'),
+                    '--evidence-root', d]
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()) as err:
+                self.assertEqual(truth.main(args), 2)
+            self.assertIn('--worktree', err.getvalue())
+            self.assertFalse(os.path.exists(os.path.join(d, 'c.json')))
 
     def test_record_verdict_stores_measured(self):
         wave = load_tool('wave')

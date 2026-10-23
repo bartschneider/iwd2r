@@ -495,10 +495,11 @@ def _frida_type(text):
 
 def decorated_convention(decorated):
     """The calling convention a decorated MSVC name encodes, or None: a member
-    function code (A, B, E, F, I, J, M, N, Q, R, U or V, per access and
-    const or volatile `this`) then AE is thiscall, [CKSY]A is cdecl, [CKSY]G
-    stdcall and [CKSY]I fastcall (skipped by the hooks); a plain _name is cdecl and
-    _name@N stdcall."""
+    function code [AEIMQU] (private, protected or public, plain or virtual),
+    then the `this` qualifier [ABCD] (none, const, volatile, const volatile),
+    then E, is thiscall (regex [AEIMQU][ABCD]E); [CKSY]A is cdecl, [CKSY]G
+    stdcall and [CKSY]I fastcall (skipped by the hooks); a plain _name is
+    cdecl and _name@N stdcall."""
     m = re.match(r'^\?[^@?]+(?:@[^@]+)*?@@(.*)$', decorated or '')
     if m:
         tail = m.group(1)
@@ -872,11 +873,37 @@ def evidence_signature(evidence_text):
     return head or None
 
 
-def oracle_candidates(rows, read_evidence, pure_names=frozenset()):
+_check_evidence = None
+
+
+def rules_math_names(read_evidence):
+    """The names of the rules-math set (tools/check_evidence.py RULES_MATH,
+    keyed by address): the known pure helpers a pure function may call. The
+    name of each is the `name:` of its evidence file (read_evidence takes
+    '0x<ADDR>'); one with no evidence file is left out."""
+    global _check_evidence
+    if _check_evidence is None:
+        import importlib.util
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'check_evidence.py')
+        spec = importlib.util.spec_from_file_location('truth_check_evidence', path)
+        _check_evidence = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(_check_evidence)
+    names = set()
+    for address in _check_evidence.RULES_MATH:
+        text = read_evidence('0x%X' % address)
+        m = re.search(r'^name:\s*(\S+)\s*$', text or '', re.M)
+        if m:
+            names.add(m.group(1))
+    return frozenset(names)
+
+
+def oracle_candidates(rows, read_evidence, pure_names=None):
     """([row dict for write_cases], {address: why not}) over the rows (dicts
     with address and name). read_evidence(address) is the evidence file's text
     or None. A row is a candidate when its evidence is_pure and draft_case
-    does not skip it."""
+    does not skip it. pure_names defaults to the rules-math set."""
+    if pure_names is None:
+        pure_names = rules_math_names(read_evidence)
     keep, why = [], {}
     for row in rows:
         address = row['address']
@@ -1045,11 +1072,11 @@ def calibration_text(cal):
         text = '%s: measured %d of %d rows, agreed %d, disagreed %d' % (
             label, p['measured'], p['of'], p['agree'], p['disagree'])
         return text + (' (deferred: not run)' if p.get('deferred') else '')
-    return ('Truth calibration (seed %s, tools/truth.py over the %d ruling rows with side fork or neither '
+    return ('Truth calibration (seed %s, sample %s, tools/truth.py over the %d ruling rows with side fork or neither '
             'plus a sample of %d dump-decided ours rows; a path measures a row when it gives pass/fail '
             '(oracle) or equal/different (Frida) and agrees on pass or equal): %s; %s; Frida on by '
             'default: %s.\n' % (
-                cal.get('seed'), paths['oracle']['of'] - len(cal.get('sample', [])),
+                cal.get('seed'), ', '.join(cal.get('sample', [])) or 'none', paths['oracle']['of'] - len(cal.get('sample', [])),
                 len(cal.get('sample', [])), line('oracle', 'oracle probes'),
                 line('frida', 'Frida trace diff'), 'yes' if cal.get('frida_default') else 'no'))
 
@@ -1097,8 +1124,13 @@ def _calibrate_main(args):
         print('  not probed %s: %s' % (address, reason))
     oracle = {}
     if cases:
+        if not args.worktree:
+            print('truth.py calibrate: %d oracle candidate(s); pass --worktree <a disposable clone>: '
+                  'the cases are written and CMake is edited there, never in the real checkout'
+                  % len(cases), file=sys.stderr)
+            return 2
         # One case file per calibration run; the batch id inside the case ids is `cal`.
-        oracle = run_oracle('cal', args.worktree or root, cases)
+        oracle = run_oracle('cal', args.worktree, cases)
     for address, (status, detail) in sorted(oracle.items()):
         print('  probe %s: %s (%s)' % (address, status, detail))
     # Frida launches the game on the desktop: deferred unless a run is wired in by hand.
@@ -1122,7 +1154,7 @@ def main(argv=None):
     c.add_argument('--seed', default='2026-10-22', help='sample seed (default %(default)s)')
     c.add_argument('--state', help='the wave-state file to read (default docs/wso/wave-state.json)')
     c.add_argument('--worktree', help='where the oracle cases are written, wired and built '
-                                      '(default: this checkout; use a disposable clone)')
+                                      '(required when a row is probed; use a disposable clone)')
     c.add_argument('--evidence-root', help='checkout whose docs/evidence to read (default this one)')
     c.add_argument('--out', help='calibration file to write (default docs/wso/truth-calibration.json)')
     args = p.parse_args(argv)

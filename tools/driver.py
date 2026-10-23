@@ -321,6 +321,11 @@ def mechanical_checks(batch, worktree, verdicts, run=subprocess.run):
         text, err = wave._read_evidence(worktree, batch['branch'], r['address'])
         if text is None:
             problems.append('%s: missing; write it and commit it' % rel)
+        elif str(verdicts[given[k]][1]).startswith('probe-'):
+            # A probe pass says ours matches the original (ruling R57).
+            if wave.EVIDENCE_PHRASES[1] not in text:
+                problems.append("%s: its verdict case is a probe; add the exact "
+                                "phrase 'corroborated by WSO at <sha>'" % rel)
         elif not any(p in text for p in wave.EVIDENCE_PHRASES):
             problems.append("%s: no 'disagreed with WSO' or 'corroborated by "
                             "WSO' phrase; add one of the exact phrases" % rel)
@@ -913,6 +918,20 @@ class Driver:
         decided = {wave._addr_key(a) for a in batch.get('verdicts', {})}
         rows = [r for r in self._open_rows(batch)
                 if wave._addr_key(r['address']) not in decided]
+        carried = self._carry_probe_passes(batch_id, worktree)
+        if carried is not None:
+            # A resume: the probe file is already committed, so its passes
+            # stand and the oracle does not run again (it would rewrite it).
+            for k in carried:
+                self._probe[k] = ('ours', 'probe-%s-%s' % (batch_id, k.upper()))
+            self.log('%s: oracle: %d earlier probe pass(es) carried forward' % (
+                batch_id, len(carried)))
+            if not carried:
+                return ''
+            return ('## Measured before you started\n\nThe oracle probe passed these rows earlier '
+                    '(the driver records each as `ours`; cite `corroborated by WSO at <sha>`):\n'
+                    + ''.join('- 0x%s: case %s\n' % (k.upper(), self._probe[k][1]) for k in sorted(carried))
+                    + '\n')
 
         def read(address):
             text, _err = wave._read_evidence(self.repo, batch['branch'], address)
@@ -944,19 +963,43 @@ class Driver:
                 self._probe[key(c['address'])] = ('ours', case)
                 passed.append((c['address'], case, detail))
             elif status == 'fail':
-                failed.append((c['address'], c['name'], detail))
+                failed.append((c['address'], c['name'], detail, c))
         lines = []
         if passed:
             lines.append('The oracle probe passed these rows (ours matches the original over a '
                          'swept domain). The driver records each as `ours`, with the case shown; '
-                         'write the evidence file as usual and cite that case:')
+                         'write the evidence file with the exact phrase '
+                         '`corroborated by WSO at <sha>` and cite that case:')
             lines += ['- %s: case %s (%s)' % p for p in passed]
         if failed:
             lines.append('The oracle probe FAILED these rows (ours and the original disagree). '
-                         'Decide them with that in mind; the case file is wave-%s.cpp in '
-                         'oracle/cases:' % batch_id)
-            lines += ['- %s %s: %s' % f for f in failed]
+                         'Decide them with that in mind. The failing case is not kept in the '
+                         'tree; its source, each integer argument swept over {min, -1, 0, 1, 7, max}:')
+            for address, name, detail, c in failed:
+                lines.append('- %s %s: case wave/%s/%s, %s' % (
+                    address, name, batch_id, key(address)[0:].upper(), detail))
+                lines.append('```cpp\n' + truth.draft_case(
+                    c['address'], c['name'], c['signature'], batch_id).rstrip() + '\n```')
         return ('## Measured before you started\n\n' + '\n'.join(lines) + '\n\n') if lines else ''
+
+    def _tracked(self, worktree, rel):
+        r = subprocess.run(['git', '-C', worktree, 'ls-files', '--error-unmatch', '--', rel],
+                           capture_output=True, text=True)
+        return r.returncode == 0
+
+    def _carry_probe_passes(self, batch_id, worktree):
+        """None when the batch has no committed probe file; else the address
+        keys of the passing cases in it."""
+        rel = 'oracle/cases/wave-%s.cpp' % batch_id
+        if not self._tracked(worktree, rel):
+            return None
+        try:
+            with open(os.path.join(worktree, rel), encoding='utf-8') as f:
+                text = f.read()
+        except OSError:
+            return None
+        return set(m.group(1).lower() for m in re.finditer(
+            r'ORACLE_CASE\("wave/%s/([0-9A-Fa-f]+)"' % re.escape(batch_id), text))
 
     def _settle_oracle_files(self, batch_id, worktree, cases, passed):
         """Leave in the batch worktree only what is worth keeping of the
@@ -976,8 +1019,14 @@ class Driver:
             if not os.path.exists(path):
                 return
             if not passed:
-                os.unlink(path)
-                git('checkout', '--', 'oracle/CMakeLists.txt')
+                # Tracked files (an earlier committed probe) are restored,
+                # never deleted; only an untracked case file is unlinked.
+                if self._tracked(worktree, 'oracle/cases/wave-%s.cpp' % batch_id):
+                    git('checkout', 'HEAD', '--', 'oracle/cases/wave-%s.cpp' % batch_id,
+                        'oracle/CMakeLists.txt')
+                else:
+                    os.unlink(path)
+                    git('checkout', 'HEAD', '--', 'oracle/CMakeLists.txt')
                 return
             if len(passed) != len(cases):
                 truth.write_cases(batch_id, passed, cases_dir)
@@ -1219,6 +1268,11 @@ class Driver:
             if out:
                 return out
             verdicts, problems = self._check(batch_id, worktree, res.report)
+            if not problems:
+                # The first check was not clean, so Frida has not run (or the
+                # worker may have changed verdicts): run it now; what it finds
+                # after the one fix round is an exception.
+                problems = self._frida_phase(batch_id, batch, worktree, verdicts)
         if self.dry_run:
             self._ledger_for(batch_id, self._merged(batch_id, verdicts), (
                 False, 'dry run: no review, nothing recorded, no close'))
