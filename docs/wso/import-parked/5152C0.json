@@ -1,0 +1,1 @@
+{"address": "0x5152C0", "name": "CMessageGroup::CMessageGroup", "file": "src/CMessage.cpp", "batch": "i002", "needs": "ours already matches the decompile (std::list copy into an empty list; MSVC6 list at +0xC: allocator byte, head +0x10, size +0x14); his body is for a different class design (CMessage105 with a hand-rolled node list) and does not apply to our CMessageGroup"}

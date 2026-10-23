@@ -84,10 +84,11 @@ Each bundle carries the function's decompile and its callers' decompiles; objdum
     and a bare `git checkout <path>` of a file. Allowed: `add`, `commit`,
     `status`, `diff`, `log`, `show`, `ls-tree`, `merge-base`, `rev-parse`,
     `blame`, `checkout -b`, `checkout <branch>`, `switch -c`. To undo a change
-    to a file, restore the base's copy with `git show <base>:<path> > <path>`
-    (`git rm <path>` when the base lacks it) and commit; workers only add and
-    commit. The driver stops a batch whose
-    transcript shows one.
+    to a function, edit that function back to the merge base's body (`git
+    show <merge-base>:<path>` shows it; `git merge-base first HEAD` names the
+    merge base) and commit; do not replace a file that holds other rows'
+    changes. Workers only add and commit. The driver stops a batch whose
+    transcript shows a history rewrite.
 
 ## Report back
 

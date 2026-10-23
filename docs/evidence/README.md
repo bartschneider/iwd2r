@@ -46,10 +46,21 @@ The file name is the address in upper-case hex without `0x`:
   the gate), `replay` (a replay scenario or compare run covers it),
   `read-only` (nothing runs it; the exemption stands on its own) or `trace`
   (a run trace covers it; the kind the WSO fork's imports carry). A
-  `trace` document's `trace_source` cites where the trace came from — the
-  fork's recovery note (`WillScarlettOhara/iwd2-re@<sha> <path>`) or a
-  frida capture of our own binary (`frida <probe> orig:<sha256>
-  ours:<sha256> compare=0`) — and the gate rejects a `trace` without one.
+  `trace` document's `trace_source` cites where the trace came from, in one
+  of exactly two forms, and the gate rejects a `trace` without one:
+
+      WillScarlettOhara/iwd2-re@<sha> docs/<name>-recovery.md
+      frida <probe> orig:<sha256> ours:<sha256> compare=0
+
+  The first is the fork's recovery note, never one of his source files: the
+  gate reads it at that sha with `git show` (the fork must be fetched; an
+  unreadable note fails) and requires the function's address in it (hex,
+  any case, with or without `0x`) or its name as a whole word together with
+  its class's name. The second is a Frida differential capture of our own
+  binary against the original, with the sha256 of the two trace files; only
+  the wave driver's Frida phase writes it (in an import batch, a frida line
+  the driver did not write is a check problem). A `trace` whose source
+  checks out needs neither `oracle_case` nor `exemption`.
   The checker reports counts per kind but does not require one — except for
   the rules-math set (`RULES_MATH` in `tools/check_evidence.py`: attack rolls,
   saving throws, damage resolution, effect application), which requires

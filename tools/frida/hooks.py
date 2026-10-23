@@ -29,6 +29,14 @@ conv: thiscall (this=ecx, stack args -> args[0..]) | cdecl | stdcall.
 Hook function ENTRIES only (Frida's x86 inline trampoline rewrites ~5 bytes
 and corrupts anything mid-function).
 
+A site Frida refuses ("unable to intercept function at ...": a body shorter
+than the 5-byte jump, e.g. a stub that is `ret 4` and int3 padding) must not
+take the rest down: each Interceptor.attach runs inside try/catch, and a
+refusal sends {tag: 'unhooked', name, addr, error} instead of throwing out of
+the script (which left every later hook, the loaded observation and the
+exit-time totals uninstalled).  The hook's counter stays 0: the sidecar
+reports it as UNHOOKED, never as a hit total.
+
 Addresses (ours, in addition to his): a hook may carry "rva" instead of
 "addr" -- an offset from the module base, resolved in the target at install
 time (Process.getModuleByName(...).base).  Tables for the original use
@@ -134,6 +142,7 @@ def js_for_hook(h, idx):
     maxn = int(h.get("max", 500))
     parts = []
     parts.append(f"let cnt{idx} = 0;")
+    parts.append("try {")
     parts.append(f"Interceptor.attach({addr_expr(h)}, {{")
     parts.append("  onEnter(args) {")
     parts.append(f"    if (++cnt{idx} > {maxn}) return;")
@@ -162,6 +171,10 @@ def js_for_hook(h, idx):
         parts.append(f"    send({{ tag: '{name}_ret', ret: {rexpr} }});")
     parts.append("  }")
     parts.append("});")
+    parts.append("} catch (e) {")
+    parts.append(f"  send({{ tag: 'unhooked', name: '{name}', "
+                 f"addr: guard(() => {addr_expr(h)}.toString()), error: String(e) }});")
+    parts.append("}")
     return "\n".join(parts)
 
 
@@ -170,14 +183,36 @@ def hooks_js(hooks):
 
 
 def hit_counts_js(hooks, period_ms=2000):
-    """Re-emit per-hook totals on a timer.
+    """Per-hook totals: re-emitted on a timer, and once more, marked final,
+    when the process exits.
 
-    Two reasons this is a timer and not a teardown handler: the wrapper kills
-    the game rather than letting the driver unwind (same as the fork's crash
-    guard), and the counters keep incrementing past a hook's "max", so the
-    totals stay true even once logging has stopped."""
+    The timer alone loses the last stretch of a run by a run-dependent amount
+    (the host keeps the last message it received), so ExitProcess, and
+    TerminateProcess aimed at the own process, send {tag: 'HITS', final: true}
+    on entry and block on the host's ack (recv('HITSACK').wait()) before the
+    call proceeds: the totals are then complete and deterministic.  The
+    counters keep incrementing past a hook's "max", so the totals stay true
+    even once logging has stopped.  A process the driver kills from outside
+    never reaches either call and ends without final totals."""
     counts = ", ".join("'%s': cnt%d" % (h["name"], i) for i, h in enumerate(hooks))
-    return "setInterval(() => send({ tag: 'HITS', counts: { %s } }), %d);" % (counts, period_ms)
+    return (
+        "function hitCounts() { return { %s }; }\n"
+        "setInterval(() => send({ tag: 'HITS', counts: hitCounts() }), %d);\n"
+        "let hitsSentFinal = false;\n"
+        "function finalHits(why) {\n"
+        "  if (hitsSentFinal) return;\n"
+        "  hitsSentFinal = true;\n"
+        "  send({ tag: 'HITS', final: true, why: why, counts: hitCounts() });\n"
+        "  recv('HITSACK', () => {}).wait();\n"
+        "}\n"
+        "guard(() => {\n"
+        "  const k32 = Process.getModuleByName('kernel32.dll');\n"
+        "  Interceptor.attach(k32.getExportByName('ExitProcess'), { onEnter(args) { finalHits('ExitProcess'); } });\n"
+        "  Interceptor.attach(k32.getExportByName('TerminateProcess'), { onEnter(args) {\n"
+        "    const h = args[0].toInt32();\n"
+        "    if (h === -1 || h === 0xffffffff) finalHits('TerminateProcess');\n"
+        "  } });\n"
+        "});" % (counts, period_ms))
 
 
 def install_dump_js(hooks):

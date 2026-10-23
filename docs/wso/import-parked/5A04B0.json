@@ -1,0 +1,1 @@
+{"address": "0x5A04B0", "name": "CInfGame::CachingRequirements", "file": "src/CInfGame.cpp", "batch": "i001", "needs": "dependency outside the batch's files: CResFile::GetCacheSize (0x789A20) and CResFile::GetCacheKey (0x78A0F0) are absent from src/CResFile.cpp"}

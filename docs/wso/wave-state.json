@@ -3734,7 +3734,7 @@
     "b014": {
       "assigned_at": "2026-10-23T16:28:44+00:00",
       "branch": "p3/wso-b014",
-      "closed_at": null,
+      "closed_at": "2026-10-23T19:56:31+00:00",
       "files": [
         "src/CGameAnimationTypeTownStatic.cpp",
         "src/CBaldurProjector.cpp",
@@ -3745,9 +3745,7 @@
         "src/IcewindCGameEffects.cpp",
         "src/CSearchBitmap.cpp",
         "src/CInfButtonArray.cpp",
-        "src/CBaldurChitin.cpp",
         "src/CScreenInventory.cpp",
-        "src/CScreenConnection.cpp",
         "src/CScreenSave.cpp",
         "src/CGameObject.cpp",
         "src/CGameDoor.cpp"
@@ -3845,15 +3843,6 @@
           "their_len": 1363
         },
         {
-          "address": "0x4258D0",
-          "category": "both_changed_differ",
-          "class": "ambiguous",
-          "file": "src/CBaldurChitin.cpp",
-          "name": "CBaldurChitin::OnMultiplayerSessionOpen",
-          "our_len": 1206,
-          "their_len": 1292
-        },
-        {
           "address": "0x629740",
           "category": "both_changed_differ",
           "class": "ambiguous",
@@ -3861,15 +3850,6 @@
           "name": "CScreenInventory::IsUseButtonActive",
           "our_len": 1944,
           "their_len": 548
-        },
-        {
-          "address": "0x602170",
-          "category": "both_changed_differ",
-          "class": "ambiguous",
-          "file": "src/CScreenConnection.cpp",
-          "name": "CScreenConnection::OnLobbyNewGameButtonClick",
-          "our_len": 1153,
-          "their_len": 1329
         },
         {
           "address": "0x65B6A0",
@@ -3935,10 +3915,95 @@
           "their_len": 1149
         }
       ],
-      "status": "assigned",
+      "status": "closed",
       "verdicts": {
+        "0x43EC20": {
+          "case": "dump-43EC20",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x46A3D0": {
+          "case": "dump-46A3D0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x46D140": {
+          "case": "dump-46D140",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x46D590": {
+          "case": "dump-46D590",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
         "0x4824F0": {
           "case": "triage-stub",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x48B3C0": {
+          "case": "dump-48B3C0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x48B600": {
+          "case": "dump-48B600",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x4C0250": {
+          "case": "dump-4C0250",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x4C80E0": {
+          "case": "dump-4C80E0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x548B80": {
+          "case": "dump-548B80",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x55E130": {
+          "case": "dump-55E130",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x587DF0": {
+          "case": "dump-587DF0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x588CB0": {
+          "case": "dump-588CB0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x612930": {
+          "case": "dump-612930",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x629740": {
+          "case": "dump-629740",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x631790": {
+          "case": "dump-631790",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x65B6A0": {
+          "case": "dump-65B6A0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x6A55C0": {
+          "case": "dump-6A55C0",
           "losing_kind": "trace",
           "side": "ours"
         }
@@ -4249,6 +4314,1195 @@
         "0x7CE830": {
           "case": "dump-7CE830",
           "losing_kind": "trace",
+          "side": "ours"
+        }
+      }
+    },
+    "b016": {
+      "assigned_at": "2026-10-23T18:24:03+00:00",
+      "branch": "p3/wso-b016",
+      "closed_at": null,
+      "files": [
+        "src/CVidImage.cpp",
+        "src/CScreenLoad.cpp",
+        "src/CRuleTables.cpp",
+        "src/CGameTrigger.cpp",
+        "src/CUIControlFactory.cpp",
+        "src/CVidPoly.cpp",
+        "src/CVariableHash.cpp",
+        "src/CItem.cpp",
+        "src/CStore.cpp",
+        "src/CVisibility.cpp",
+        "src/CDerivedStats.cpp",
+        "src/CScreenCharacter.cpp",
+        "src/CChitin3d.cpp"
+      ],
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x7CE290",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CVidImage.cpp",
+          "name": "CVidTile::BltStencilTile8To32",
+          "our_len": 763,
+          "their_len": 762
+        },
+        {
+          "address": "0x63D460",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenLoad.cpp",
+          "name": "CScreenLoad::DrawScreenShot",
+          "our_len": 712,
+          "their_len": 770
+        },
+        {
+          "address": "0x547040",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CRuleTables.cpp",
+          "name": "CRuleTables::GetSaveAdjustmentForSourceSprite",
+          "our_len": 733,
+          "their_len": 659
+        },
+        {
+          "address": "0x4CFA60",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameTrigger.cpp",
+          "name": "CGameTrigger::Render",
+          "our_len": 717,
+          "their_len": 630
+        },
+        {
+          "address": "0x77B530",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CUIControlFactory.cpp",
+          "name": "CUIControlButtonAction::Render",
+          "our_len": 882,
+          "their_len": 440
+        },
+        {
+          "address": "0x7C2040",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CVidPoly.cpp",
+          "name": "CVidPoly::DrawHLineShadedMirrored16",
+          "our_len": 368,
+          "their_len": 954
+        },
+        {
+          "address": "0x550D10",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CVariableHash.cpp",
+          "name": "CNamedCreatureVariableHash::AddKey",
+          "our_len": 672,
+          "their_len": 648
+        },
+        {
+          "address": "0x4E7E90",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CItem.cpp",
+          "name": "CItem::CItem",
+          "our_len": 699,
+          "their_len": 620
+        },
+        {
+          "address": "0x54C460",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CStore.cpp",
+          "name": "CStore::RemoveItemFromBag",
+          "our_len": 661,
+          "their_len": 653
+        },
+        {
+          "address": "0x54CCB0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CStore.cpp",
+          "name": "CStore::InvalidateStore",
+          "our_len": 621,
+          "their_len": 652
+        },
+        {
+          "address": "0x7C1FD0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CVidPoly.cpp",
+          "name": "CVidPoly::DrawHLineShaded16",
+          "our_len": 335,
+          "their_len": 935
+        },
+        {
+          "address": "0x5535D0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CVisibility.cpp",
+          "name": "CVisibilityMap::sub_5535D0",
+          "our_len": 673,
+          "their_len": 588
+        },
+        {
+          "address": "0x7D6FD0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CVidPoly.cpp",
+          "name": "CVidPoly::DrawHLineShadedMirrored32",
+          "our_len": 717,
+          "their_len": 543
+        },
+        {
+          "address": "0x7C1DE0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CVidPoly.cpp",
+          "name": "CVidPolyEdgeCache::Find",
+          "our_len": 689,
+          "their_len": 569
+        },
+        {
+          "address": "0x443B30",
+          "category": "both_changed_differ",
+          "class": "fork-stub",
+          "file": "src/CDerivedStats.cpp",
+          "name": "CDerivedStats::CDerivedStats",
+          "our_len": 1094,
+          "their_len": 162
+        },
+        {
+          "address": "0x7C1EC0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CVidPoly.cpp",
+          "name": "CVidPolyEdgeCache::Add",
+          "our_len": 572,
+          "their_len": 680
+        },
+        {
+          "address": "0x7D6EB0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CVidPoly.cpp",
+          "name": "CVidPoly::DrawHLineShaded32",
+          "our_len": 684,
+          "their_len": 524
+        },
+        {
+          "address": "0x5D79B0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CScreenCharacter::UpdateSavingThrows",
+          "our_len": 600,
+          "their_len": 575
+        },
+        {
+          "address": "0x553440",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CVisibility.cpp",
+          "name": "CVisibilityMap::sub_553440",
+          "our_len": 765,
+          "their_len": 315
+        },
+        {
+          "address": "0x7C8990",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CChitin3d.cpp",
+          "name": "CChitin::Init3d",
+          "our_len": 241,
+          "their_len": 800
+        }
+      ],
+      "status": "assigned",
+      "verdicts": {
+        "0x443B30": {
+          "case": "triage-stub",
+          "losing_kind": "trace",
+          "side": "ours"
+        }
+      }
+    },
+    "b017": {
+      "assigned_at": "2026-10-23T19:27:44+00:00",
+      "branch": "p3/wso-b017",
+      "closed_at": null,
+      "files": [
+        "src/CScreenStore.cpp",
+        "src/CScreenSpellbook.cpp",
+        "src/CScreenOptions.cpp",
+        "src/CScreenSinglePlayer.cpp",
+        "src/CChitin.cpp"
+      ],
+      "fork_base": "e8dd16a750966af53f24daaf49dcb4fb13594c13",
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x677AF0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenStore.cpp",
+          "name": "CScreenStore::UpdateIdentifyItems",
+          "our_len": 1596,
+          "their_len": 1682
+        },
+        {
+          "address": "0x671FC0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenStore.cpp",
+          "name": "CScreenStore::OnKeyDown",
+          "our_len": 1549,
+          "their_len": 1613
+        },
+        {
+          "address": "0x66DC30",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenSpellbook.cpp",
+          "name": "CUIControlButtonSpellbookSpell::Render",
+          "our_len": 1907,
+          "their_len": 1011
+        },
+        {
+          "address": "0x677E60",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenStore.cpp",
+          "name": "CScreenStore::IsBuyItemButtonClickable",
+          "our_len": 1189,
+          "their_len": 1457
+        },
+        {
+          "address": "0x67B640",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenStore.cpp",
+          "name": "CScreenStore::OnIdentifyItemButtonClick",
+          "our_len": 1355,
+          "their_len": 1284
+        },
+        {
+          "address": "0x6734F0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenStore.cpp",
+          "name": "CScreenStore::sub_6734F0",
+          "our_len": 1145,
+          "their_len": 1148
+        },
+        {
+          "address": "0x682D10",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenStore.cpp",
+          "name": "CUIControlButtonStoreStoreSpell::Render",
+          "our_len": 990,
+          "their_len": 1143
+        },
+        {
+          "address": "0x681EE0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenStore.cpp",
+          "name": "CUIControlButtonStoreGroupItem::OnLButtonClick",
+          "our_len": 991,
+          "their_len": 879
+        },
+        {
+          "address": "0x66A750",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenSpellbook.cpp",
+          "name": "CScreenSpellbook::EnableMainPanel",
+          "our_len": 938,
+          "their_len": 792
+        },
+        {
+          "address": "0x66EF00",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenSpellbook.cpp",
+          "name": "CUIControlButtonSpellbookClassSelection::OnLButtonClick",
+          "our_len": 849,
+          "their_len": 864
+        },
+        {
+          "address": "0x66BEE0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenSpellbook.cpp",
+          "name": "CScreenSpellbook::ResetErrorPanel",
+          "our_len": 786,
+          "their_len": 867
+        },
+        {
+          "address": "0x681500",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenStore.cpp",
+          "name": "CUIControlButtonStoreStoreItem::OnLButtonDoubleClick",
+          "our_len": 839,
+          "their_len": 776
+        },
+        {
+          "address": "0x654E30",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenOptions.cpp",
+          "name": "CScreenOptions::EnableMainPanel",
+          "our_len": 856,
+          "their_len": 710
+        },
+        {
+          "address": "0x6821A0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenStore.cpp",
+          "name": "CUIControlButtonStoreGroupItem::OnRButtonClick",
+          "our_len": 782,
+          "their_len": 784
+        },
+        {
+          "address": "0x654780",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenOptions.cpp",
+          "name": "CScreenOptions::OnDoneButtonClick",
+          "our_len": 759,
+          "their_len": 768
+        },
+        {
+          "address": "0x685090",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenStore.cpp",
+          "name": "CUIControlButtonStoreGroupItem::OnLButtonDoubleClick",
+          "our_len": 849,
+          "their_len": 609
+        },
+        {
+          "address": "0x668D10",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenSpellbook.cpp",
+          "name": "CScreenSpellbook::EngineActivated",
+          "our_len": 680,
+          "their_len": 715
+        },
+        {
+          "address": "0x672E20",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenStore.cpp",
+          "name": "CScreenStore::EnableMainPanel",
+          "our_len": 701,
+          "their_len": 555
+        },
+        {
+          "address": "0x661CC0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenSinglePlayer.cpp",
+          "name": "CScreenSinglePlayer::EnableMainPanel",
+          "our_len": 581,
+          "their_len": 435
+        },
+        {
+          "address": "0x790FE0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CChitin.cpp",
+          "name": "CChitin::InitApplication",
+          "our_len": 520,
+          "their_len": 482
+        }
+      ],
+      "status": "assigned",
+      "verdicts": {}
+    },
+    "b018": {
+      "assigned_at": "2026-10-23T19:56:33+00:00",
+      "branch": "p3/wso-b018",
+      "closed_at": "2026-10-23T21:34:08+00:00",
+      "files": [
+        "src/CScreenInventory.cpp",
+        "src/IcewindCGameEffects.cpp",
+        "src/CGameDialog.cpp",
+        "src/CSearchBitmap.cpp",
+        "src/CGameEffect.cpp",
+        "src/CScreenCreateChar.cpp",
+        "src/CGameArea.cpp"
+      ],
+      "fork_base": "e8dd16a750966af53f24daaf49dcb4fb13594c13",
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x625E10",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenInventory.cpp",
+          "name": "CScreenInventory::TimerAsynchronousUpdate",
+          "our_len": 1141,
+          "their_len": 1115
+        },
+        {
+          "address": "0x564F80",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/IcewindCGameEffects.cpp",
+          "name": "IcewindCGameEffectCallLightning::ApplyEffect",
+          "our_len": 1092,
+          "their_len": 1131
+        },
+        {
+          "address": "0x482210",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameDialog.cpp",
+          "name": "CGameDialogSprite::Load",
+          "our_len": 1123,
+          "their_len": 1089
+        },
+        {
+          "address": "0x548020",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CSearchBitmap.cpp",
+          "name": "CSearchBitmap::RemoveObject",
+          "our_len": 1153,
+          "their_len": 1045
+        },
+        {
+          "address": "0x4A71B0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameEffect.cpp",
+          "name": "CGameEffectColorLightSolid::ApplyEffect",
+          "our_len": 1097,
+          "their_len": 1100
+        },
+        {
+          "address": "0x4A7000",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameEffect.cpp",
+          "name": "CGameEffectColorTintSolid::ApplyEffect",
+          "our_len": 1097,
+          "their_len": 1100
+        },
+        {
+          "address": "0x62DBF0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenInventory.cpp",
+          "name": "CUIControlButtonInventorySlot::OnRButtonClick",
+          "our_len": 1100,
+          "their_len": 1082
+        },
+        {
+          "address": "0x485750",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameDialog.cpp",
+          "name": "CGameDialogReply::Pick",
+          "our_len": 1167,
+          "their_len": 975
+        },
+        {
+          "address": "0x4B2D20",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameEffect.cpp",
+          "name": "CGameEffectBaseAttackBonus::ApplyEffect",
+          "our_len": 1208,
+          "their_len": 930
+        },
+        {
+          "address": "0x4A3030",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameEffect.cpp",
+          "name": "CGameEffect::ResolveEffect",
+          "our_len": 966,
+          "their_len": 1150
+        },
+        {
+          "address": "0x631A20",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenInventory.cpp",
+          "name": "CScreenInventory::UpdateAbilitiesPanel",
+          "our_len": 1044,
+          "their_len": 1044
+        },
+        {
+          "address": "0x612DE0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenCreateChar.cpp",
+          "name": "CScreenCreateChar::CompleteCharacterSkills",
+          "our_len": 1069,
+          "their_len": 1013
+        },
+        {
+          "address": "0x607A90",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenCreateChar.cpp",
+          "name": "CScreenCreateChar::EnableMainPanel",
+          "our_len": 1060,
+          "their_len": 914
+        },
+        {
+          "address": "0x46A630",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameArea.cpp",
+          "name": "CGameArea::SnapshotAdjustTarget",
+          "our_len": 884,
+          "their_len": 1054
+        },
+        {
+          "address": "0x5489E0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CSearchBitmap.cpp",
+          "name": "CSearchBitmap::SnapshotAddObjectDiagonals",
+          "our_len": 874,
+          "their_len": 1033
+        },
+        {
+          "address": "0x4AED10",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameEffect.cpp",
+          "name": "CGameEffectInvisible::ApplyEffect",
+          "our_len": 785,
+          "their_len": 1048
+        },
+        {
+          "address": "0x62D0B0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenInventory.cpp",
+          "name": "CUIControlButtonInventorySlot::UpdateHighlight",
+          "our_len": 833,
+          "their_len": 863
+        },
+        {
+          "address": "0x483B70",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameDialog.cpp",
+          "name": "CGameDialogSprite::FetchRumor",
+          "our_len": 825,
+          "their_len": 839
+        },
+        {
+          "address": "0x4839F0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameDialog.cpp",
+          "name": "CGameDialogSprite::StartDialog",
+          "our_len": 817,
+          "their_len": 824
+        }
+      ],
+      "status": "closed",
+      "verdicts": {
+        "0x46A630": {
+          "case": "dump-46A630",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x482210": {
+          "case": "dump-482210",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x4839F0": {
+          "case": "dump-4839F0",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x483B70": {
+          "case": "dump-483B70",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x485750": {
+          "case": "dump-485750",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x4A3030": {
+          "case": "dump-4A3030",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x4A7000": {
+          "case": "dump-4A7000",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x4A71B0": {
+          "case": "dump-4A71B0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x4AED10": {
+          "case": "dump-4AED10",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x4B2D20": {
+          "case": "dump-4B2D20",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x548020": {
+          "case": "dump-548020",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x5489E0": {
+          "case": "dump-5489E0",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x564F80": {
+          "case": "dump-564F80",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x607A90": {
+          "case": "dump-607A90",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x612DE0": {
+          "case": "dump-612DE0",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x625E10": {
+          "case": "dump-625E10",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x62D0B0": {
+          "case": "dump-62D0B0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x62DBF0": {
+          "case": "dump-62DBF0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x631A20": {
+          "case": "dump-631A20",
+          "losing_kind": "trace",
+          "side": "ours"
+        }
+      }
+    },
+    "b019": {
+      "assigned_at": "2026-10-23T21:04:47+00:00",
+      "branch": "p3/wso-b019",
+      "closed_at": null,
+      "files": [
+        "src/CInfButtonArray.cpp",
+        "src/CScreenSave.cpp",
+        "src/CGameJournal.cpp",
+        "src/CScreenStart.cpp",
+        "src/CUIControlTextDisplay.cpp",
+        "src/CGameEffectList.cpp",
+        "src/CSpawn.cpp",
+        "src/CResFile.cpp",
+        "src/CResCHR.cpp"
+      ],
+      "fork_base": "e8dd16a750966af53f24daaf49dcb4fb13594c13",
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x588570",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CInfButtonArray.cpp",
+          "name": "CInfButtonArray::sub_588570",
+          "our_len": 784,
+          "their_len": 740
+        },
+        {
+          "address": "0x594170",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CInfButtonArray.cpp",
+          "name": "CInfButtonArray::sub_594170",
+          "our_len": 590,
+          "their_len": 595
+        },
+        {
+          "address": "0x5884B0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CInfButtonArray.cpp",
+          "name": "CInfButtonArray::sub_5884B0",
+          "our_len": 590,
+          "their_len": 568
+        },
+        {
+          "address": "0x5886A0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CInfButtonArray.cpp",
+          "name": "CInfButtonArray::sub_5886A0",
+          "our_len": 580,
+          "their_len": 563
+        },
+        {
+          "address": "0x596040",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CInfButtonArray.cpp",
+          "name": "CInfButtonArray::sub_596040",
+          "our_len": 563,
+          "their_len": 580
+        },
+        {
+          "address": "0x588760",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CInfButtonArray.cpp",
+          "name": "CInfButtonArray::sub_588760",
+          "our_len": 580,
+          "their_len": 561
+        },
+        {
+          "address": "0x5879E0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CInfButtonArray.cpp",
+          "name": "CInfButtonArray::CInfButtonArray",
+          "our_len": 556,
+          "their_len": 570
+        },
+        {
+          "address": "0x65C850",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenSave.cpp",
+          "name": "CScreenSave::DrawScreenShot",
+          "our_len": 558,
+          "their_len": 558
+        },
+        {
+          "address": "0x65CEA0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenSave.cpp",
+          "name": "CScreenSave::EnableMainPanel",
+          "our_len": 581,
+          "their_len": 435
+        },
+        {
+          "address": "0x4C6CD0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameJournal.cpp",
+          "name": "CGameJournal::Unmarshal",
+          "our_len": 478,
+          "their_len": 501
+        },
+        {
+          "address": "0x66FA90",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenStart.cpp",
+          "name": "CScreenStart::EnableMainPanel",
+          "our_len": 558,
+          "their_len": 412
+        },
+        {
+          "address": "0x4E28B0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CUIControlTextDisplay.cpp",
+          "name": "CUIControlTextDisplay::OnPageDown",
+          "our_len": 450,
+          "their_len": 428
+        },
+        {
+          "address": "0x65D970",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenSave.cpp",
+          "name": "CScreenSave::OnErrorButtonClick",
+          "our_len": 433,
+          "their_len": 429
+        },
+        {
+          "address": "0x4C08E0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameEffectList.cpp",
+          "name": "CGameEffectList::RemoveAllOfType",
+          "our_len": 514,
+          "their_len": 338
+        },
+        {
+          "address": "0x768D50",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CSpawn.cpp",
+          "name": "CSpawnList::ParseData",
+          "our_len": 426,
+          "their_len": 426
+        },
+        {
+          "address": "0x4E2A00",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CUIControlTextDisplay.cpp",
+          "name": "CUIControlTextDisplay::OnPageUp",
+          "our_len": 406,
+          "their_len": 372
+        },
+        {
+          "address": "0x78A280",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CResFile.cpp",
+          "name": "CResFile::GetFileSize",
+          "our_len": 391,
+          "their_len": 377
+        },
+        {
+          "address": "0x4022E0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CResCHR.cpp",
+          "name": "CResCHR::Parse",
+          "our_len": 424,
+          "their_len": 338
+        },
+        {
+          "address": "0x768840",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CSpawn.cpp",
+          "name": "CSpawnFile::ParseData",
+          "our_len": 381,
+          "their_len": 381
+        },
+        {
+          "address": "0x595FB0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CInfButtonArray.cpp",
+          "name": "CInfButtonArray::sub_595FB0",
+          "our_len": 346,
+          "their_len": 402
+        }
+      ],
+      "status": "assigned",
+      "verdicts": {}
+    },
+    "b020": {
+      "assigned_at": "2026-10-23T21:34:12+00:00",
+      "branch": "p3/wso-b020",
+      "closed_at": "2026-10-23T23:22:01+00:00",
+      "files": [
+        "src/CScreenInventory.cpp",
+        "src/IcewindCGameEffects.cpp",
+        "src/CGameEffect.cpp",
+        "src/CSearchBitmap.cpp",
+        "src/CScreenConnection.cpp",
+        "src/CGameDialog.cpp",
+        "src/CVidMode.cpp",
+        "src/CAIObjectType.cpp"
+      ],
+      "fork_base": "e8dd16a750966af53f24daaf49dcb4fb13594c13",
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x626C70",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenInventory.cpp",
+          "name": "CScreenInventory::EnableMainPanel",
+          "our_len": 856,
+          "their_len": 710
+        },
+        {
+          "address": "0x56A730",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/IcewindCGameEffects.cpp",
+          "name": "IcewindCGameEffectProjectile::ApplyEffect",
+          "our_len": 830,
+          "their_len": 716
+        },
+        {
+          "address": "0x4BFE20",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameEffect.cpp",
+          "name": "CGameEffectImmunitySpell::ApplyEffect",
+          "our_len": 735,
+          "their_len": 697
+        },
+        {
+          "address": "0x633960",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenInventory.cpp",
+          "name": "CUIControlButtonInventoryRequesterPlusMinus::AdjustValue",
+          "our_len": 706,
+          "their_len": 708
+        },
+        {
+          "address": "0x4A4FC0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameEffect.cpp",
+          "name": "CGameEffect::sub_4A4FC0",
+          "our_len": 725,
+          "their_len": 668
+        },
+        {
+          "address": "0x632A70",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenInventory.cpp",
+          "name": "CUIControlButtonInventoryColorChoice::GetColorRange",
+          "our_len": 703,
+          "their_len": 670
+        },
+        {
+          "address": "0x5488C0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CSearchBitmap.cpp",
+          "name": "CSearchBitmap::SnapshotRemoveObject",
+          "our_len": 708,
+          "their_len": 560
+        },
+        {
+          "address": "0x5601E0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/IcewindCGameEffects.cpp",
+          "name": "IcewindCGameEffectVisualSpellHit::ApplyEffect",
+          "our_len": 600,
+          "their_len": 545
+        },
+        {
+          "address": "0x54A210",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CSearchBitmap.cpp",
+          "name": "CSearchBitmap::sub_54A210",
+          "our_len": 563,
+          "their_len": 533
+        },
+        {
+          "address": "0x5FED80",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenConnection.cpp",
+          "name": "CScreenConnection::EnableMainPanel",
+          "our_len": 598,
+          "their_len": 452
+        },
+        {
+          "address": "0x628D20",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenInventory.cpp",
+          "name": "CScreenInventory::OnCancelButtonClick",
+          "our_len": 498,
+          "their_len": 493
+        },
+        {
+          "address": "0x483CF0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameDialog.cpp",
+          "name": "CGameDialogSprite::EndDialog",
+          "our_len": 481,
+          "their_len": 491
+        },
+        {
+          "address": "0x6345A0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenInventory.cpp",
+          "name": "CUIControlButtonInventoryAbilitiesAbility::OnLButtonClick",
+          "our_len": 431,
+          "their_len": 427
+        },
+        {
+          "address": "0x56ADC0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/IcewindCGameEffects.cpp",
+          "name": "IcewindCGameEffectDamageReduction::ApplyEffect",
+          "our_len": 437,
+          "their_len": 397
+        },
+        {
+          "address": "0x626140",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenInventory.cpp",
+          "name": "CScreenInventory::GetPortraitByPosition",
+          "our_len": 361,
+          "their_len": 392
+        },
+        {
+          "address": "0x79ADF0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CVidMode.cpp",
+          "name": "CVidMode::PackColor",
+          "our_len": 371,
+          "their_len": 314
+        },
+        {
+          "address": "0x40CCA0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CAIObjectType.cpp",
+          "name": "CAIObjectType::sub_40CCA0",
+          "our_len": 334,
+          "their_len": 336
+        },
+        {
+          "address": "0x40D0F0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CAIObjectType.cpp",
+          "name": "CAIObjectType::sub_40D0F0",
+          "our_len": 334,
+          "their_len": 336
+        }
+      ],
+      "status": "closed",
+      "verdicts": {
+        "0x40CCA0": {
+          "case": "ai/decode",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x40D0F0": {
+          "case": "ai/decode",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x483CF0": {
+          "case": "dump-483CF0",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x4A4FC0": {
+          "case": "dump-4A4FC0",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x4BFE20": {
+          "case": "dump-4BFE20",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5488C0": {
+          "case": "search/snapshot_objects",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x54A210": {
+          "case": "ai/door_blocker_points",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5601E0": {
+          "case": "dump-5601E0",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x56A730": {
+          "case": "dump-56A730",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x56ADC0": {
+          "case": "dump-56ADC0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5FED80": {
+          "case": "dump-5FED80",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x626140": {
+          "case": "dump-626140",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x626C70": {
+          "case": "dump-626C70",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x628D20": {
+          "case": "dump-628D20",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x632A70": {
+          "case": "dump-632A70",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x633960": {
+          "case": "dump-633960",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x6345A0": {
+          "case": "dump-6345A0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x79ADF0": {
+          "case": "vid/pack_color",
+          "losing_kind": "trace",
+          "measured": "frida",
           "side": "ours"
         }
       }

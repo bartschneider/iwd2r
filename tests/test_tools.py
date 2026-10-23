@@ -1997,9 +1997,12 @@ class CheckEvidenceTest(unittest.TestCase):
 
     def trace_sources(self):
         """The two trace_source citation forms ruling 6 accepts: the fork's
-        recovery note and a frida capture of our own binary."""
-        return ['WillScarlettOhara/iwd2-re@e8dd16a7'
-                ' docs/wso/recovery/CScreenMap.md',
+        recovery note (committed in this fixture repo, which stands in for the
+        fork; it names 0x401000) and a frida capture of our own binary."""
+        self.write('docs/a-recovery.md', 'A::f at 0x401000 returns x.\n')
+        self.commit('fork note')
+        sha = self.git('rev-parse', 'HEAD').strip()
+        return ['WillScarlettOhara/iwd2-re@%s docs/a-recovery.md' % sha,
                 'frida sendmsg_probe orig:%s ours:%s compare=0'
                 % ('a' * 64, 'b' * 64)]
 
@@ -2037,6 +2040,133 @@ class CheckEvidenceTest(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         self.assertIn('docs/evidence/401000.md', r.stdout)
         self.assertIn('trace_source', r.stdout)
+
+    def test_trace_source_requires_recovery_note_path(self):
+        ok = check_evidence.TRACE_SOURCES[0]
+        sha = 'e8dd16a750966af53f24daaf49dcb4fb13594c13'
+        self.assertTrue(ok.fullmatch(
+            'WillScarlettOhara/iwd2-re@%s docs/area-nearest-recovery.md' % sha))
+        for bad in ('src/CVideo.cpp', 'docs/wso/recovery/CScreenMap.md',
+                    'docs/README.md', 'docs/x-recovery.md.bak',
+                    'docs/../src/CVideo-recovery.md'):
+            self.assertIsNone(ok.fullmatch(
+                'WillScarlettOhara/iwd2-re@%s %s' % (sha, bad)), bad)
+        self.write('src/a.cpp', TWO_FUNCTIONS.replace('return x;',
+                                                      'return x * 2;'))
+        self.evidence('401000', 'oracle_case: rand/roll\nkind: trace\n'
+                                'trace_source: "WillScarlettOhara/iwd2-re@'
+                                'e8dd16a src/CVideo.cpp"')
+        self.commit()
+        r = self.check()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn('docs/evidence/401000.md', r.stdout)
+        self.assertIn('trace_source', r.stdout)
+
+    def fork_repo(self, notes):
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, True)
+        g = lambda *a: subprocess.run(['git', '-C', d, *a], check=True,
+                                      capture_output=True, text=True)
+        g('init', '-q')
+        g('config', 'user.name', 'T')
+        g('config', 'user.email', 't@example.com')
+        g('config', 'commit.gpgsign', 'false')
+        for path, text in notes.items():
+            os.makedirs(os.path.dirname(os.path.join(d, path)), exist_ok=True)
+            with open(os.path.join(d, path), 'wb') as f:
+                f.write(text if isinstance(text, bytes) else text.encode())
+        g('add', '-A')
+        g('commit', '-q', '-m', 'fork')
+        return d, g('rev-parse', 'HEAD').stdout.strip()
+
+    def test_fork_note_must_mention_function(self):
+        d, sha = self.fork_repo({
+            'docs/addr-recovery.md': 'body at 00401000 ok\n',
+            'docs/pre-recovery.md': 'body at 0X401000 ok\n',
+            'docs/name-recovery.md': 'the CFoo::Bar routine\n',
+            'docs/cp1252-recovery.md': b'caf\x97 CFoo::Bar \x97 ok\n',
+            'docs/none-recovery.md': 'something else 0x4010000 Barista\n'})
+        run = lambda argv, **kw: subprocess.run(argv, cwd=d, **kw)
+        f = lambda path: check_evidence.fork_note_mentions(
+            sha, path, 0x401000, 'CFoo::Bar', run=run)
+        self.assertEqual(f('docs/addr-recovery.md'), (True, ''))
+        self.assertTrue(f('docs/pre-recovery.md')[0])
+        self.assertTrue(f('docs/name-recovery.md')[0])
+        self.assertTrue(f('docs/cp1252-recovery.md')[0])  # byte 0x97
+        ok, why = f('docs/none-recovery.md')
+        self.assertFalse(ok)
+        self.assertIn('docs/none-recovery.md', why)
+        self.assertIn('0x401000', why)
+        self.assertIn('CFoo::Bar', why)
+        ok, why = f('docs/missing-recovery.md')
+        self.assertFalse(ok)
+        self.assertIn('docs/missing-recovery.md', why)
+        self.assertIn('fetched', why)
+
+    def test_fork_note_short_name_needs_its_class_and_a_whole_word(self):
+        # "Render" names a method of every class: a note that names another
+        # class's Render (and not this address) does not name this function
+        d, sha = self.fork_repo({
+            'docs/beam-recovery.md': 'Recovered Render 57B780 of IcewindCProjectileScorcher.\n',
+            'docs/split-recovery.md': 'CUIControlPortraitWorld redraws; see Render below.\n',
+            'docs/part-recovery.md': 'CUIControlPortraitWorld::Rendered and render\n',
+            'docs/free-recovery.md': 'the helper sub_401000x and Roll\n'})
+        run = lambda argv, **kw: subprocess.run(argv, cwd=d, **kw)
+        f = lambda path, address, name: check_evidence.fork_note_mentions(
+            sha, path, address, name, run=run)[0]
+        self.assertFalse(f('docs/beam-recovery.md', 0x77B360, 'CUIControlPortraitWorld::Render'))
+        self.assertTrue(f('docs/beam-recovery.md', 0x57B780, 'IcewindCProjectileScorcher::Render'))
+        self.assertTrue(f('docs/beam-recovery.md', 0x111111, 'IcewindCProjectileScorcher::Render'))
+        self.assertTrue(f('docs/split-recovery.md', 0x77B360, 'CUIControlPortraitWorld::Render'))
+        # whole words, case-sensitive
+        self.assertFalse(f('docs/part-recovery.md', 0x77B360, 'CUIControlPortraitWorld::Render'))
+        # an unqualified name needs only itself, as a whole word
+        self.assertTrue(f('docs/free-recovery.md', 0x222222, 'Roll'))
+        self.assertFalse(f('docs/free-recovery.md', 0x222222, 'Rol'))
+        ok, why = check_evidence.fork_note_mentions(sha, 'docs/beam-recovery.md', 0x77B360,
+                                                    'CUIControlPortraitWorld::Render', run=run)
+        self.assertIn('its class CUIControlPortraitWorld with Render', why)
+        # an unfetched sha is a failure, not a pass
+        ok, why = check_evidence.fork_note_mentions(
+            'e' * 40, 'docs/addr-recovery.md', 0x401000, 'CFoo::Bar', run=run)
+        self.assertFalse(ok)
+        self.assertIn('fetched', why)
+
+    def test_gate_fails_when_note_does_not_name_function(self):
+        self.write('src/a.cpp', TWO_FUNCTIONS.replace('return x;',
+                                                      'return x * 2;'))
+        self.write('docs/b-recovery.md', 'nothing relevant\n')
+        self.commit('fork note')
+        sha = self.git('rev-parse', 'HEAD').strip()
+        self.evidence('401000', 'oracle_case: rand/roll\nkind: trace\n'
+                                'trace_source: "WillScarlettOhara/iwd2-re@%s '
+                                'docs/b-recovery.md"' % sha)
+        self.commit()
+        r = self.check()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn('docs/b-recovery.md', r.stdout)
+        self.assertIn('0x401000', r.stdout)
+
+    def test_trace_file_needs_no_exemption(self):
+        self.write('src/a.cpp', TWO_FUNCTIONS.replace('return x;',
+                                                      'return x * 2;'))
+        frida = ('frida sendmsg_probe orig:%s ours:%s compare=0'
+                 % ('a' * 64, 'b' * 64))
+        self.evidence('401000', 'kind: trace\ntrace_source: "%s"' % frida)
+        self.commit()
+        r = self.check()
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertIn('trace 1 (1 of 1 touched function(s))', r.stdout)
+        self.evidence('401000', 'kind: trace\ntrace_source: "by eye"')
+        self.commit()
+        r = self.check()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn('trace_source', r.stdout)
+        self.assertNotIn('neither oracle_case nor exemption', r.stdout)
+        # a non-trace file still needs one
+        self.evidence('401000', 'kind: replay')
+        self.commit()
+        self.assertIn('neither oracle_case nor exemption', self.check().stdout)
 
     def test_rules_math_rejects_trace(self):
         address = self.touch_rules_math('oracle_case: rand/roll\n'
@@ -6795,6 +6925,190 @@ class ProbePlanTest(unittest.TestCase):
         self.assertTrue(ours.endswith('shutdown /s /t 0'), ours)
 
 
+class FridaProbeTest(unittest.TestCase):
+    """The sandbox run completes with a verdict: the sidecar command parses
+    with orig.py's own argparse, the logon waits for RESULT: before
+    done.txt, --post-load defaults to the scenario timeout, and the x86
+    build helper uses the x86 preset."""
+
+    PY = 'C:\\Users\\thier\\iwd2r-frida\\venv\\Scripts\\python.exe'
+
+    @classmethod
+    def setUpClass(cls):
+        cls._saved_frida = sys.modules.get('frida')
+        sys.modules['frida'] = None     # any `import frida` now raises
+        cls.orig = load_tool('frida/orig')
+
+    @classmethod
+    def tearDownClass(cls):
+        if cls._saved_frida is not None:
+            sys.modules['frida'] = cls._saved_frida
+        else:
+            del sys.modules['frida']
+
+    def ns(self, **kw):
+        base = dict(hit='MTP', hit_min=1, attach_timeout=None, loaded_addr=None,
+                    loaded_rva='0x330E60', module=None, no_loaded=False,
+                    post_load=None)
+        base.update(kw)
+        return types.SimpleNamespace(**base)
+
+    def args(self, **kw):
+        return probe.sidecar_args(self.ns(**kw), 't.jsonl', 't.jsonl.status')
+
+    def test_sidecar_argv_parses_with_orig_parser(self):
+        env = probe.ours_env('C:\\game', 1)
+        env['IWD2_DATA'] = 'C:\\game'
+        for target, e in (('original', None), ('ours', env)):
+            argv = probe.sidecar_argv(target, self.PY, e, 120, self.args())
+            self.assertEqual(argv[0], self.PY)
+            # argv[1] is orig.py itself; the rest is its command line.
+            ns = self.orig.build_parser().parse_args(argv[2:])
+            if target == 'ours':
+                self.assertEqual(sorted(ns.env),
+                                 sorted('%s=%s' % kv for kv in env.items()))
+                self.assertEqual(ns.exe, probe.BOX_OURS + '\\iwd2r.exe')
+            else:
+                self.assertEqual(ns.env, [])
+                self.assertEqual(ns.attach, probe.ORIGINAL_ATTACH)
+
+    def test_logon_waits_for_result_before_done(self):
+        args = self.args()
+        status = args[args.index('--status') + 1]
+        cmds = (probe.original_logon(self.PY, 120, args),
+                probe.ours_logon(self.PY, 'C:\\game',
+                                 probe.ours_env('C:\\game', 1), 120, args))
+        for cmd in cmds:
+            self.assertLess(cmd.index('^RESULT:'), cmd.index('done.txt'), cmd)
+            self.assertLess(cmd.index('Select-String'), cmd.index('done.txt'))
+            self.assertIn(status, cmd)
+            self.assertIn('AddSeconds(180)', cmd)     # timeout 120 + 60
+            self.assertTrue(cmd.endswith('& shutdown /s /t 0'), cmd)
+        orig = cmds[0]
+        self.assertLess(orig.index('replay-driver.ps1'), orig.index('^RESULT:'))
+        self.assertEqual(probe.wait_for_result_cmd('C:\\s', 7).count(
+            'AddSeconds(7)'), 1)
+
+    def test_post_load_default_is_scenario_timeout(self):
+        with tempfile.TemporaryDirectory() as d:
+            def scenario(header):
+                path = os.path.join(d, 'x.txt')
+                with open(path, 'w') as f:
+                    f.write(header + 'wait 5\nquit\n')
+                return path
+            for header, arg, want in (('# timeout: 240\n', None, 240),
+                                      ('# timeout: 240\n', 30, 30),
+                                      ('', None, 180)):
+                got = probe.resolve_post_load(arg, scenario(header))
+                self.assertEqual(got, want)
+                args = self.args(post_load=got)
+                self.assertEqual(args[args.index('--post-load') + 1],
+                                 str(want))
+
+    def stage(self, host_run, target='original', dry=True):
+        script = os.path.join(os.path.dirname(host_run), 'scenario-src.txt')
+        with open(script, 'w') as f:
+            f.write('wait 5\nquit\n')
+        probe_json = os.path.join(os.path.dirname(host_run), 'p.json')
+        with open(probe_json, 'w') as f:
+            f.write('{"hooks": []}')
+        out = os.path.join(os.path.dirname(host_run), 'out')
+        with mock.patch.object(probe.winsandbox, 'stage_directplay'), \
+                mock.patch.object(probe.winsandbox, 'make_wsb',
+                                  return_value='wsb'):
+            return probe.run_side(target, script, [], 'cmd', 100, host_run,
+                                  out, probe_json, 1, 0, dry)
+
+    def test_original_driver_shutdown_is_off(self):
+        with tempfile.TemporaryDirectory() as d:
+            host_run = os.path.join(d, 'run')
+            self.stage(host_run)
+            with open(os.path.join(host_run, 'tools', 'config.json')) as f:
+                self.assertIs(json.load(f)['shutdown'], False)
+
+    def test_wait_for_result_file(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, 's.status')
+            self.assertFalse(probe.wait_for_result_file(path, 0))
+            with open(path, 'w') as f:
+                f.write('ARMED pid=1\n')
+            self.assertFalse(probe.wait_for_result_file(path, 0))
+            with open(path, 'a') as f:
+                f.write('RESULT: CLEAN\n')
+            self.assertTrue(probe.wait_for_result_file(path, 0))
+            started = time.time()
+            self.assertFalse(probe.wait_for_result_file(
+                os.path.join(d, 'none'), 600))
+            self.assertLess(time.time() - started, 5)
+
+    def run_live(self, target):
+        calls = []
+        with tempfile.TemporaryDirectory() as d:
+            host_run = os.path.join(d, 'run')
+            os.makedirs(os.path.join(d, 'out'))
+            patches = [
+                mock.patch.object(probe.winsandbox, 'start_sandbox',
+                                  side_effect=lambda *a: calls.append('start')),
+                mock.patch.object(probe.winsandbox, 'wait_done',
+                                  side_effect=lambda r, t: calls.append(
+                                      ('wait_done', t))),
+                mock.patch.object(probe.winsandbox, 'close_sandbox',
+                                  side_effect=lambda *a: calls.append('close')),
+                mock.patch.object(probe, 'wait_for_result_file',
+                                  side_effect=lambda p, s: calls.append(
+                                      ('host_wait', s)) or True),
+                mock.patch.object(probe.winsandbox, 'replay_copy_plan',
+                                  return_value=[])]
+            for p in patches:
+                p.start()
+                self.addCleanup(p.stop)
+            self.stage(host_run, target, dry=False)
+        return calls
+
+    def test_original_host_waits_for_result_before_close(self):
+        calls = self.run_live('original')
+        self.assertEqual([c if isinstance(c, str) else c[0] for c in calls],
+                         ['start', 'wait_done', 'host_wait', 'close'])
+        self.assertEqual(calls[2], ('host_wait', 100 + probe.RESULT_GRACE))
+        self.assertEqual(probe.RESULT_GRACE, 60)
+
+    def test_ours_has_no_host_result_wait(self):
+        calls = self.run_live('ours')
+        self.assertEqual([c if isinstance(c, str) else c[0] for c in calls],
+                         ['start', 'wait_done', 'close'])
+
+    def test_build_windows_x86_uses_x86_preset(self):
+        calls = []
+        out = play.build_windows_x86(
+            build=lambda **kw: calls.append(kw) or '/x/iwd2r.exe')
+        self.assertEqual(out, '/x/iwd2r.exe')
+        self.assertEqual(calls, [dict(
+            preset='windows-msvc-x86', target='iwd2r',
+            exe_rel='build/windows-msvc-x86/RelWithDebInfo/iwd2r.exe',
+            bat_name='play-build-x86.bat')])
+        calls.clear()
+        play.build_windows_x86(build=lambda **kw: calls.append(kw) or '/x/iwd2r.exe',
+                               checkout='/mnt/c/b', log_path='/l')
+        self.assertEqual((calls[0]['checkout'], calls[0]['log_path']), ('/mnt/c/b', '/l'))
+        calls.clear()
+        play.build_windows_x86(build=lambda **kw: calls.append(kw) or '/x/iwd2r.exe',
+                               target='iwd2r iwd2r_recorder')
+        self.assertEqual(calls[0]['target'], 'iwd2r iwd2r_recorder')
+
+    def test_ours_runs_the_build_checkout_it_is_given(self):
+        probe = load_tool('frida/probe')
+        self.assertEqual(probe.ours_build('ours', '/mnt/c/b'),
+                         os.path.join('/mnt/c/b', probe.OURS_EXE_REL))
+        self.assertEqual(probe.ours_build('ours'),
+                         os.path.join(play.WIN_CHECKOUT, probe.OURS_EXE_REL))
+        # the original side's injector and recorder come from the same
+        # checkout, so both sides' dumps follow the same schema.json
+        self.assertEqual(probe.ours_build('original', '/mnt/c/b'),
+                         os.path.join('/mnt/c/b', load_tool('oracle').REPLAY_DIR_REL))
+        self.assertEqual(probe.ours_build('original'),
+                         os.path.join(play.WIN_CHECKOUT, load_tool('oracle').REPLAY_DIR_REL))
+
+
 class OrigAttachTest(unittest.TestCase):
     """attach_when_there must ride out every flavour of "process not found"
     frida raises while polling for the game -- frida 17 raises
@@ -8914,6 +9228,44 @@ class TriageTest(unittest.TestCase):
         self.assertEqual(out[1]['reason'], 'disabled by calibration')
         self.assertEqual(out[1]['auto_class'], 'rename-only')
 
+    def test_triage_regen_keeps_closed_entries(self):
+        state = {'batches': {'b': {'status': 'closed', 'verdicts': {
+            '0x1': {'side': 'ours'}, '0x4': {'side': 'ours'}}}}}
+
+        def entry(addr, name, cls='ambiguous'):
+            return {'address': addr, 'class': cls, 'name': name,
+                    'file': 'src/a.cpp', 'ours_ref': '82d75232',
+                    'reason': 'old'}
+        committed = [entry('0x4', 'Exec'), entry(None, 'Parse'),
+                     entry('0x1', 'A'), entry('0x2', 'B'),
+                     entry('0x4', 'Start')]
+
+        def row(addr, name, cat='both_changed_differ'):
+            return {'address': addr, 'name': name, 'file': 'src/a.cpp',
+                    'category': cat}
+        rows = [row('0x1', 'A'), row('0x2', 'B'), row('0x3', 'C'),
+                row('0x4', 'Exec'), row('0x4', 'Start'), row(None, 'Parse'),
+                row(None, 'Parse'), row('0x5', 'D', 'only_ours')]
+        seen = []
+
+        def fake(todo, fork, ours, **kw):
+            seen.append((ours, [(r['address'], r['name']) for r in todo]))
+            return [dict(r, **{'class': 'rename-only', 'reason': 'new'})
+                    for r in todo if r['category'] == 'both_changed_differ']
+        with mock.patch.object(triage, 'triage_rows', fake):
+            out = triage.regen_triage(state, rows, committed, 'fork', 'first')
+        # the closed rows' committed entries, in committed order, then the
+        # open both_changed_differ rows; nothing re-keyed by address
+        self.assertEqual([(r['address'], r['name']) for r in out],
+                         [('0x4', 'Exec'), ('0x1', 'A'), ('0x4', 'Start'),
+                          ('0x2', 'B'), ('0x3', 'C'), (None, 'Parse'),
+                          (None, 'Parse')])
+        self.assertEqual(out[:3], [committed[0], committed[2], committed[4]])
+        self.assertEqual({r['ours_ref'] for r in out[3:]}, {'first'})
+        self.assertEqual([r['class'] for r in out[3:]], ['rename-only'] * 4)
+        self.assertEqual(seen[0][0], 'first')
+        self.assertNotIn('0x1', [a for a, _ in seen[0][1]])
+
     def test_calibration_against_committed_batches(self):
         if subprocess.run(['git', '-C', ROOT, 'rev-parse', '--verify', '--quiet',
                            'e8dd16a7^{commit}'], capture_output=True).returncode:
@@ -9601,11 +9953,22 @@ class DriverTest(unittest.TestCase):
                          {'0x76D370': ('ours', 'c1')})
         self.assertEqual(driver.parse_report(h + '`verdict 0x1 fork case c2`\n2. Verdict 0X02 neither case c3\n'),
                          {'0x1': ('fork', 'c2'), '0x2': ('neither', 'c3')})
+        # a mangled verdict (it names an address, or starts with the word)
+        # still fails, with its line number
         with self.assertRaises(driver.ReportError) as cm:
-            driver.parse_report(h + '\nI think it is ours.\n')
+            driver.parse_report(h + '\nI think 0x401000 is ours.\n')
         self.assertIn('line 3', str(cm.exception))
         with self.assertRaises(driver.ReportError):
+            driver.parse_report(h + 'verdict ours case a\n')
+        with self.assertRaises(driver.ReportError):
             driver.parse_report(h + 'verdict 0x401000 ours case a\nverdict 0x0401000 fork case b\n')
+        # prose that names no address decides nothing and is skipped (b017's
+        # Flash worker wrote this sentence under ## Verdicts three times)
+        self.assertEqual(driver.parse_report(
+            h + 'verdict 0x1 ours case a\n'
+                'All 20 rows are decided; there is no `## Undecided` section.\n'
+                '(none; this is an import batch)\nverdict 0x2 fork case b\n'),
+            {'0x1': ('ours', 'a'), '0x2': ('fork', 'b')})
 
     def test_run_non_json_output(self):
         def stub(argv, **kw):
@@ -9650,6 +10013,60 @@ class DriverTest(unittest.TestCase):
             calls.append((argv, kw.get('cwd')))
             return subprocess.CompletedProcess(argv, rc, '', 'boom\n')
         return run
+
+    def test_driver_path_check_uses_merge_base(self):
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, True)
+        def g(*a):
+            return subprocess.run(['git', '-C', d, '-c', 'user.name=T',
+                                   '-c', 'user.email=t@e.com',
+                                   '-c', 'commit.gpgsign=false', *a],
+                                  check=True, capture_output=True, text=True)
+        def put(rel, text):
+            os.makedirs(os.path.dirname(os.path.join(d, rel)), exist_ok=True)
+            with open(os.path.join(d, rel), 'w') as f:
+                f.write(text)
+        g('init', '-q', '-b', 'first')
+        put('src/a.cpp', 'a\n')
+        g('add', '-A')
+        g('commit', '-q', '-m', 'base')
+        g('checkout', '-q', '-b', 'p3/wso-b011')
+        put('src/a.cpp', 'b\n')
+        g('commit', '-q', '-am', 'worker')
+        g('checkout', '-q', 'first')
+        put('docs/plan.md', 'plan\n')
+        g('add', '-A')
+        g('commit', '-q', '-m', 'first moves on')
+        g('checkout', '-q', 'p3/wso-b011')
+        g('merge', '-q', '--no-edit', 'first')
+        batch = self._mc_batch()
+        batch['rows'] = []
+
+        calls = []
+
+        def run(argv, **kw):
+            calls.append(argv)
+            if argv[:1] == ['git']:
+                return subprocess.run(argv, **kw)
+            return subprocess.CompletedProcess(argv, 0, '', '')
+        # the cut base would call docs/plan.md the worker's edit
+        self.assertEqual(g('diff', '--name-only', 'first~1...HEAD').stdout.split(),
+                         ['docs/plan.md', 'src/a.cpp'])
+        probs = driver.mechanical_checks(batch, d, {}, run=run)
+        self.assertFalse([p for p in probs if 'changed outside' in p], probs)
+        mb = g('merge-base', 'first', 'p3/wso-b011').stdout.strip()
+        self.assertIn(['git', 'merge-base', 'first', 'p3/wso-b011'], calls)
+        diffs = [a for a in calls if a[:3] == ['git', 'diff', '--name-only']]
+        self.assertEqual(diffs, [['git', 'diff', '--name-only', mb, 'HEAD']])
+        # a real out-of-scope edit by the worker is still found
+        put('tools/x.py', 'x\n')
+        g('add', '-A')
+        g('commit', '-q', '-m', 'oops')
+        probs = driver.mechanical_checks(batch, d, {}, run=run)
+        outside = [p for p in probs if 'changed outside' in p]
+        self.assertEqual(len(outside), 1, probs)
+        self.assertIn('tools/x.py', outside[0])
+        self.assertNotIn('docs/plan.md', outside[0])
 
     def test_mechanical_checks_flags_missing_and_foreign_verdicts(self):
         d = self._mc_repo({'76D370': 'corroborated by WSO at abc'})
@@ -9703,6 +10120,9 @@ class DriverTest(unittest.TestCase):
             self.assertEqual(len(probs), 1, probs)
             self.assertIn('0x401000: listed under ## Undecided but its body '
                           'changed against first', probs[0])
+            self.assertIn("edit that function back to the merge base's body (`git show "
+                          "first:<path>` shows it) and commit; do not replace a file that "
+                          "holds other rows' changes.", probs[0])
             with mock.patch.object(ce, 'touched', return_value=[
                     ('src/A.cpp', 0x999000, 'G')]):
                 self.assertEqual(driver.mechanical_checks(
@@ -9752,11 +10172,12 @@ class DriverTest(unittest.TestCase):
                 mock.patch.dict(os.environ, {'IWD2R_HOME': d}):
             probs = driver.mechanical_checks(batch, d, {'0x76D370': ('ours', 'c')},
                                              run=self._mc_run(1, calls))
-        # git status, git diff, tests, check_evidence, parity (the map is the close's)
-        self.assertEqual(len(calls), 5)
-        self.assertEqual(calls[4][0], ['python3', '-I', 'tools/parity/run.py', '--base', 'first'])
-        self.assertEqual(len(probs), 5)
-        self.assertIn('failed (exit 1); last lines: boom', probs[2])
+        # git status, merge-base, git diff, tests, check_evidence, parity
+        # (the map is the close's)
+        self.assertEqual(len(calls), 6)
+        self.assertEqual(calls[5][0], ['python3', '-I', 'tools/parity/run.py', '--base', 'first'])
+        self.assertEqual(len(probs), 6)
+        self.assertIn('failed (exit 1); last lines: boom', probs[3])
         venv = os.path.join(d, 'parity-venv', 'bin')
         os.makedirs(venv)
         py = os.path.join(venv, 'python')
@@ -9767,7 +10188,7 @@ class DriverTest(unittest.TestCase):
                 mock.patch.dict(os.environ, {'IWD2R_HOME': d}):
             driver.mechanical_checks(batch, d, {'0x76D370': ('ours', 'c')},
                                      run=self._mc_run(0, calls))
-        self.assertEqual(calls[4][0][0], py)
+        self.assertEqual(calls[5][0][0], py)
 
     def test_review_needed_for_fork_rows(self):
         self.assertEqual(driver.review_needed({'id': 'b011'}, {'0x1': ('ours', 'a'), '0x2': ('fork', 'b')}, 's'),
@@ -9914,6 +10335,9 @@ class DriverTest(unittest.TestCase):
         with open(os.path.join(self.wt, 'docs', 'evidence', '402000.md'), 'a') as f:
             f.write('\n## Decompiled (Ghidra)\n\n```c\nint Roll(int a, int b)\n\n{\n  return g_x;\n}\n```\n')
         self.git('commit', '-qam', 'decompiled', cwd=self.wt)
+        # hermetic: a row without a signature never reads the machine's real
+        # ghidra-exports (tests that want the fallback set their own folder)
+        d.exports_dir = os.path.join(self.tmp, 'no-exports')
         return d
 
     def test_driver_records_measured_from_probe_results(self):
@@ -10074,15 +10498,12 @@ class DriverTest(unittest.TestCase):
                 (4, 'verdict 0x401000 ours case dump-401000\nverdict 0x402000 ours case dump-402000\n', 'different')):
             seen = []
 
-            def frida_run(batch_id, table, scenarios, ours_ret=ours_ret):
+            def frida_run(batch_id, table, scenarios, ours_ret=ours_ret, **kw):
                 seen.append((batch_id, [h['name'] for h in table['original']['hooks']], list(scenarios)))
                 return {'world_entry': (trace(('fn_402000', 7, 3)), trace(('fn_402000', 7, ours_ret)))}
-            map_path = os.path.join(tempfile.mkdtemp(), 'iwd2r.map')
-            self.addCleanup(shutil.rmtree, os.path.dirname(map_path), True)
-            with open(map_path, 'w') as f:
-                f.write(TruthTest.MAP)
             d = self._measured_driver(worker=_SeqWorker('# r\n\n## Verdicts\n\n' + report),
-                                      frida=True, frida_map=map_path, frida_run=frida_run,
+                                      frida=True, frida_build=self._frida_builder()[0],
+                                      frida_run=frida_run,
                                       oracle_run=lambda *a: {'0x401000': ('pass', 'ok')})
             d.run_batch('b011')
             self.assertEqual(seen[0][1], ['fn_402000'])
@@ -10098,27 +10519,741 @@ class DriverTest(unittest.TestCase):
                 self.assertEqual(len(seen), 1)
                 self.assertNotIn('measured', b['verdicts']['0x402000'])
                 with open(os.path.join(os.path.dirname(d.status_path), 'b011', 'worker-fix-checks.brief.md')) as f:
-                    self.assertIn('Frida trace diff shows ours different from the original', f.read())
+                    self.assertIn('the Frida trace diff shows the body on the branch (verdict ours) '
+                                  'different from the original', f.read())
                 self.assertIn('- frida different, kept ours: 0x402000 differs in world_entry', self._ledger(d))
+
+    def test_driver_frida_on_the_batch_build_equal_confirms_a_fork_verdict(self):
+        # the phase measures the branch's body: for a fork verdict that is the
+        # adopted fork body, so equal confirms it (measured frida, no finding)
+        # and different is a finding
+        trace = TruthTest._trace
+        report = ('# r\n\n## Verdicts\n\nverdict 0x401000 ours case dump-401000\n'
+                  'verdict 0x402000 fork case probe-12\n')
+        for ours_ret, outcome in ((3, 'equal'), (4, 'different')):
+            d = self._measured_driver(
+                worker=_SeqWorker(report, report), frida=True, frida_build=self._frida_builder()[0],
+                frida_run=lambda b, table, scenarios, r=ours_ret, **kw: {
+                    'world_entry': (trace(('fn_402000', 7, 3)), trace(('fn_402000', 7, r)))},
+                oracle_run=lambda *a: {})
+            self.assertEqual(d.run_batch('b011'), 'closed', self._status(d)['exceptions'])
+            v = self._state()['verdicts']['0x402000']
+            self.assertEqual(v['side'], 'fork')
+            fix = os.path.join(os.path.dirname(d.status_path), 'b011', 'worker-fix-checks.brief.md')
+            if outcome == 'equal':
+                self.assertEqual(v['measured'], 'frida')
+                self.assertFalse(os.path.exists(fix))
+                self.assertNotIn('recheck', self._ledger(d))
+            else:
+                self.assertNotIn('measured', v)
+                with open(fix) as f:
+                    self.assertIn('0x402000: the Frida trace diff shows the body on the branch '
+                                  '(verdict fork) different from the original', f.read())
+                self.assertIn('- frida different, kept fork: 0x402000 differs in world_entry',
+                              self._ledger(d))
+
+    def test_driver_frida_phase_types_tables_from_the_batch_worktrees_headers(self):
+        trace = TruthTest._trace
+        got = []
+        truth_mod = driver._tool('truth')
+        real = truth_mod.frida_batch
+
+        def spy(*a, **kw):
+            got.append(kw.get('headers'))
+            return real(*a, **kw)
+        d = self._measured_driver(worker=_SeqWorker('# r\n\n## Verdicts\n\nverdict 0x401000 ours case dump-401000\nverdict 0x402000 ours case dump-402000\n'),
+                                  frida=True, frida_build=self._frida_builder()[0],
+                                  frida_run=lambda *a, **k: {'world_entry': (trace(('fn_402000', 7, 3)), trace(('fn_402000', 7, 3)))},
+                                  oracle_run=lambda *a: {'0x401000': ('pass', 'ok')})
+        os.makedirs(os.path.join(self.wt, 'src'), exist_ok=True)
+        with open(os.path.join(self.wt, 'src', 'IcewindMisc.h'), 'w') as f:
+            f.write('class IcewindMisc {\n    BOOLEAN Roll(DWORD a, STR_RES& b);\n};\n')
+        with mock.patch.object(truth_mod, 'frida_batch', spy):
+            d.run_batch('b011')
+        self.assertEqual(len(got), 1)
+        self.assertEqual(got[0], truth_mod._our_headers(self.wt))
+        self.assertTrue(any('BOOLEAN Roll' in h for h in got[0]))
 
     def test_driver_frida_runs_once_even_with_a_fix_round(self):
         calls = []
-        map_path = os.path.join(tempfile.mkdtemp(), 'iwd2r.map')
-        self.addCleanup(shutil.rmtree, os.path.dirname(map_path), True)
-        with open(map_path, 'w') as f:
-            f.write(TruthTest.MAP)
 
-        def frida_run(batch_id, table, scenarios):
+        def frida_run(batch_id, table, scenarios, **kw):
             calls.append(1)
             t = TruthTest._trace(('fn_402000', 7, 3))
             return {'world_entry': (t, t)}
         bad = '# r\n\n## Verdicts\n\nverdict 0x401000 ours case dump-401000\n'   # 0x402000 missing: a problem
         good = bad + 'verdict 0x402000 ours case dump-402000\n'
-        d = self._measured_driver(worker=_SeqWorker(bad, good), frida=True, frida_map=map_path,
+        d = self._measured_driver(worker=_SeqWorker(bad, good), frida=True,
+                                  frida_build=self._frida_builder()[0],
                                   frida_run=frida_run, oracle_run=lambda *a: {})
         self.assertEqual(d.run_batch('b011'), 'closed', self._status(d)['exceptions'])
         self.assertEqual(calls, [1])
         self.assertEqual(self._state()['verdicts']['0x402000']['measured'], 'frida')
+
+    @staticmethod
+    def _stage_oracle_tools(checkout):
+        """The injector and recorder an x86 build leaves under checkout, as
+        empty files (the original side of a Frida pair runs them)."""
+        oracle = driver._tool('oracle')
+        folder = os.path.join(checkout, oracle.REPLAY_DIR_REL)
+        os.makedirs(folder, exist_ok=True)
+        for name in (oracle.INJECTOR, oracle.RECORDER):
+            with open(os.path.join(folder, name), 'w'):
+                pass
+
+    def _frida_builder(self, map_text=None):
+        """(builder, calls, checkout): a fake per-batch x86 build whose map
+        sits where the x86 build writes it, under a fake Windows checkout."""
+        checkout = os.path.join(tempfile.mkdtemp(), 'iwd2r-build-wt')
+        self.addCleanup(shutil.rmtree, os.path.dirname(checkout), True)
+        map_path = os.path.join(checkout, driver.X86_MAP_REL)
+        os.makedirs(os.path.dirname(map_path))
+        with open(map_path, 'w') as f:
+            f.write(TruthTest.MAP if map_text is None else map_text)
+        calls = []
+
+        def build(worktree, log_path=None):
+            calls.append((worktree, log_path))
+            return checkout, map_path
+        return build, calls, checkout
+
+    def test_driver_frida_phase_builds_and_runs_the_batch_worktree(self):
+        trace = TruthTest._trace
+        build, built, checkout = self._frida_builder(
+            TruthTest.MAP.replace('0001:00001230       ?Roll@IcewindMisc@@YAHHH@Z 00402230',
+                                  '0001:00009990       ?Roll@IcewindMisc@@YAHHH@Z 0040A990'))
+        seen = []
+
+        def frida_run(batch_id, table, scenarios, build_checkout=None):
+            seen.append((build_checkout, [h['rva'] for h in table['ours']['hooks']]))
+            t = trace(('fn_402000', 7, 3))
+            return {'world_entry': (t, t)}
+        d = self._measured_driver(worker=_SeqWorker('# r\n\n## Verdicts\n\nverdict 0x401000 ours case dump-401000\nverdict 0x402000 ours case dump-402000\n'),
+                                  frida=True, frida_build=build, frida_run=frida_run,
+                                  oracle_run=lambda *a: {'0x401000': ('pass', 'ok')})
+        self.assertEqual(d.run_batch('b011'), 'closed', self._status(d)['exceptions'])
+        # built once, from the batch worktree, the compiler output in the batch's folder
+        self.assertEqual(built, [(self.wt, os.path.join(os.path.dirname(d.status_path), 'b011',
+                                                        'frida-build.log'))])
+        # ours runs that build, hooked at the RVAs of that build's map
+        self.assertEqual(seen, [(checkout, ['0xa990'])])
+        self.assertIn('x86 build of %s in %s' % (self.wt, checkout), '\n'.join(self.logs))
+
+    def test_driver_frida_build_failure_is_the_batchs_exception(self):
+        # a phase-wide failure parks nothing: the batch goes to the human
+        d, batch = self._import_phase_driver()
+
+        def build(worktree, log_path=None):
+            raise SystemExit('play: Windows build failed')
+        d.frida_build = build
+        d.frida_run = lambda *a, **kw: self.fail('nothing runs without a build')
+        before = self.git('rev-parse', 'HEAD', cwd=self.wt).stdout
+        with self.assertRaises(driver._StageError) as cm:
+            d._frida_phase('b011', batch, self.wt, {})
+        self.assertEqual(cm.exception.stage, 'frida')
+        self.assertIn('the x86 build of %s failed: play: Windows build failed' % self.wt,
+                      cm.exception.problem)
+        self.assertIn('no row was measured, parked or rewritten', cm.exception.problem)
+        self.assertEqual(self.git('rev-parse', 'HEAD', cwd=self.wt).stdout, before)
+        self.assertEqual(self.git('status', '--porcelain', cwd=self.wt).stdout, '')
+        # through run_batch: the exception path (status file, ledger, one aoe line)
+        d = self._measured_driver(worker=_SeqWorker('# r\n\n## Verdicts\n\nverdict 0x401000 ours case '
+                                                    'dump-401000\nverdict 0x402000 ours case dump-402000\n'),
+                                  frida=True, frida_build=build,
+                                  frida_run=lambda *a, **kw: self.fail('no build, no run'),
+                                  oracle_run=lambda *a: {})
+        self.assertEqual(d.run_batch('b011'), 'exception')
+        exc = self._status(d)['exceptions']['b011']
+        self.assertEqual(exc['stage'], 'frida')
+        self.assertIn('play: Windows build failed', exc['problems'][0])
+        self.assertEqual(self.sent, ['driver: b011 exception at frida; see %s' % d.status_path])
+        self.assertNotIn('measured', self._state()['verdicts'].get('0x402000', {}))
+
+    def test_driver_frida_infrastructure_failure_is_an_exception_row_failures_park(self):
+        d, batch = self._import_phase_driver()
+        dead = {sc: {'orig': [], 'ours': [], 'orig_path': None, 'ours_path': None,
+                     'orig_exit': 2, 'ours_exit': 2, 'failed': 'original side exited 2',
+                     'result': {'orig': None, 'ours': None}, 'hits': {'orig': None, 'ours': None},
+                     'dumps': None} for sc in driver._tool('truth').FRIDA_SCENARIOS}
+        d.frida_run = lambda *a, **kw: dict(dead)
+        with self.assertRaises(driver._StageError) as cm:
+            d._frida_phase('b011', batch, self.wt, {})
+        self.assertEqual(cm.exception.stage, 'frida')
+        self.assertIn('every Frida scenario failed on infrastructure (no side produced a status): '
+                      'first_fight: original side exited 2', cm.exception.problem)
+        self.assertIn('kind: read-only', _slurp(os.path.join(self.wt, 'docs', 'evidence', '401000.md')))
+        # the run itself raising is the same exception
+        d.frida_run = lambda *a, **kw: (_ for _ in ()).throw(RuntimeError('sandbox gone'))
+        with self.assertRaises(driver._StageError) as cm:
+            d._frida_phase('b011', batch, self.wt, {})
+        self.assertIn("the Frida run raised RuntimeError('sandbox gone')", cm.exception.problem)
+        # one scenario failed where a side did produce a status: row-level, the row parks
+        trace = TruthTest._trace
+        t = trace(('fn_401000', 7, 3))
+        out = self._file_traces(['world_entry', 'walk_and_talk'], t, t)
+        out['first_fight'] = dict(dead['first_fight'], orig=t, ours=t[:2], failed='ours side exited 2',
+                                  result={'orig': 'CLEAN', 'ours': None}, orig_exit=0)
+        d.frida_run = lambda *a, **kw: dict(out)
+        findings = d._frida_phase('b011', batch, self.wt, {})
+        self.assertEqual(d._frida_got['401000'][0], 'scenario failed')
+        self.assertTrue(any(f.startswith('0x401000:') and 'park it' in f for f in findings), findings)
+
+    def test_driver_frida_dumps_the_schema_refuses_are_an_exception(self):
+        # a recorder (or our dumper) out of step with schema.json makes every
+        # scenario's dumps uncomparable: tooling, not the rows; nothing parks
+        d, batch = self._import_phase_driver()
+        trace = TruthTest._trace
+        t = trace(('fn_401000', 7, 3))
+        out = self._file_traces(['world_entry', 'walk_and_talk'], t, t)
+        out['world_entry']['dumps'] = {
+            'match': None, 'invalid': {'original': 24},
+            'detail': "the original's dumps fail oracle/replay/schema.json (24 of 114; first: "
+                      "checkpoint-world.json: $.world: missing required property 'enemy_creatures')"}
+        d.frida_run = lambda *a, **kw: dict(out)
+        before = self.git('rev-parse', 'HEAD', cwd=self.wt).stdout
+        with self.assertRaises(driver._StageError) as cm:
+            d._frida_phase('b011', batch, self.wt, {})
+        self.assertEqual(cm.exception.stage, 'frida')
+        self.assertIn("world_entry: the original's dumps fail oracle/replay/schema.json",
+                      cm.exception.problem)
+        self.assertIn('no row was measured, parked or rewritten', cm.exception.problem)
+        self.assertEqual(self.git('rev-parse', 'HEAD', cwd=self.wt).stdout, before)
+        self.assertEqual(self.git('status', '--porcelain', cwd=self.wt).stdout, '')
+
+    def test_driver_frida_map_override_measures_the_build_beside_it(self):
+        d, batch = self._import_phase_driver()
+        _build, _calls, checkout = self._frida_builder(self.IMPORT_MAP)
+        d.frida_build = lambda *a, **kw: self.fail('the override builds nothing')
+        d.frida_map = os.path.join(checkout, driver.X86_MAP_REL)
+        seen = []
+        d.frida_run = lambda b, table, scenarios, build_checkout=None: seen.append(build_checkout) or {}
+        # the original side runs the injector and recorder beside the map:
+        # without them the override measures nothing (the batch's exception)
+        with self.assertRaises(driver._StageError) as cm:
+            d._frida_phase('b011', batch, self.wt, {})
+        self.assertIn('no %s beside it' % os.path.join(
+            checkout, driver._tool('oracle').REPLAY_DIR_REL, 'injector.exe'), cm.exception.problem)
+        self.assertEqual(seen, [])
+        self._stage_oracle_tools(checkout)
+        d._frida_phase('b011', batch, self.wt, {})
+        self.assertEqual(seen, [checkout])
+        # a map that is not where an x86 build puts it measures nothing: the
+        # batch's exception at stage frida
+        stray = os.path.join(self.tmp, 'iwd2r.map')
+        with open(stray, 'w') as f:
+            f.write(self.IMPORT_MAP)
+        d.frida_map = stray
+        d.frida_run = lambda *a, **kw: self.fail('no build to run')
+        with self.assertRaises(driver._StageError) as cm:
+            d._frida_phase('b011', batch, self.wt, {})
+        self.assertIn('not where an x86 build writes its map', cm.exception.problem)
+
+    def test_frida_build_uses_the_worktrees_own_checkout(self):
+        play = driver._tool('play')
+        oracle = driver._tool('oracle')
+        calls = []
+        base = os.path.join(tempfile.mkdtemp(), 'iwd2r-build')
+        self.addCleanup(shutil.rmtree, os.path.dirname(base), True)
+        want = base + '-p3-wso-i009'
+        out = os.path.join(want, driver.X86_MAP_REL[:-len('.map')] + '.exe')
+        _write(os.path.splitext(out)[0] + '.map', '')
+        for name in (oracle.INJECTOR, oracle.RECORDER):
+            _write(os.path.join(want, oracle.REPLAY_DIR_REL, name), '')
+        with mock.patch.object(play, 'WIN_BUILD_BASE', base), \
+                mock.patch.object(play, 'sync_windows',
+                                  lambda **kw: calls.append(('sync', kw))), \
+                mock.patch.object(play, 'build_windows_x86',
+                                  lambda **kw: calls.append(('build', kw)) or out), \
+                mock.patch.dict(os.environ, {'IWD2R_WIN_CHECKOUT': '/mnt/c/driver-checkout'}):
+            got = driver.frida_build('/home/x/wt/p3-wso-i009', log_path='/l/b.log')
+            self.assertEqual(got, (want, os.path.splitext(out)[0] + '.map'))
+            # ours, and the injector and recorder the original side runs: the
+            # recorder built from the same tree as our dumper
+            self.assertEqual(calls, [('sync', {'root': '/home/x/wt/p3-wso-i009', 'checkout': want}),
+                                     ('build', {'checkout': want, 'log_path': '/l/b.log',
+                                                'target': 'iwd2r iwd2r_injector iwd2r_recorder'})])
+            os.unlink(os.path.join(want, oracle.REPLAY_DIR_REL, oracle.RECORDER))
+            with self.assertRaises(RuntimeError) as cm:
+                driver.frida_build('/home/x/wt/p3-wso-i009')
+            self.assertIn(oracle.RECORDER, str(cm.exception))
+            os.unlink(os.path.splitext(out)[0] + '.map')
+            with self.assertRaises(RuntimeError):
+                driver.frida_build('/home/x/wt/p3-wso-i009')
+
+    @property
+    def IMPORT_MAP(self):
+        return (TruthTest.MAP + ' 0001:00007000       ?Render@Rules@@YAHHH@Z 00408000 f   r.obj\n'
+                ' 0001:00007100       ?Tick@Rules@@YAHHH@Z 00408100 f   r.obj\n')
+
+    def _import_phase_driver(self):
+        d = self._measured_driver(frida=True, frida_map=None, queue='import')
+        d.kind = 'import'
+        self.assertEqual(d.kind, 'import')
+        d.frida_build = self._frida_builder(self.IMPORT_MAP)[0]
+        decomp = '\n## Decompiled (Ghidra)\n\n```c\nint %s(int a, int b)\n\n{\n  return g_x;\n}\n```\n'
+        # 401000 equal (with an exemption to drop), 402000 different, 403000 never exercised
+        with open(os.path.join(self.wt, 'docs', 'evidence', '401000.md'), 'w') as f:
+            f.write('---\naddress: 0x401000\nname: Rules::Render\nkind: read-only\n'
+                    'exemption: "thin"\n---\n' + decomp % 'Render')
+        with open(os.path.join(self.wt, 'docs', 'evidence', '403000.md'), 'w') as f:
+            f.write('---\naddress: 0x403000\nname: Rules::Tick\nkind: read-only\n---\n' + decomp % 'Tick')
+        self.git('commit', '-qam', 'import evidence', cwd=self.wt)
+        rows = [{'address': '0x401000', 'name': 'Rules::Render'},
+                {'address': '0x402000', 'name': 'IcewindMisc::Roll'},
+                {'address': '0x403000', 'name': 'Rules::Tick'}]
+        return d, {'branch': 'p3/wso-b011', 'rows': rows}
+
+    def test_driver_frida_phase_falls_back_to_the_ghidra_export_signature(self):
+        d, batch = self._import_phase_driver()
+        # 403000's evidence loses its Decompiled section
+        with open(os.path.join(self.wt, 'docs', 'evidence', '403000.md'), 'w') as f:
+            f.write('---\naddress: 0x403000\nname: Rules::Tick\nkind: read-only\n---\n')
+        self.git('commit', '-qam', 'no decompiled section', cwd=self.wt)
+        ex = os.path.join(self.tmp, 'exports')
+        os.makedirs(os.path.join(ex, 'decompile'))
+        with open(os.path.join(ex, 'decompile', '403000.c'), 'w') as f:
+            f.write('\nint Tick(int a,\n         int b)\n\n{\n  return 0;\n}\n')
+        names = []
+
+        def frida_run(batch_id, table, scenarios, **kw):
+            names.append(sorted(h['name'] for h in table['original']['hooks']))
+            return {sc: {'orig': [], 'ours': [], 'orig_path': None, 'ours_path': None,
+                         'failed': 'x', 'dumps': None} for sc in scenarios}
+        d.frida_run = frida_run
+        line = ('b011: frida: 0x403000 signature from the Ghidra export '
+                '(the evidence gives none)')
+        d.exports_dir = ex
+        try:
+            d._frida_phase('b011', batch, self.wt, {})
+        except driver._StageError:
+            pass
+        self.assertIn('fn_403000', names[0])
+        self.assertIn(line, self.logs)
+        # without the export the row is skipped as before
+        names.clear()
+        self.logs.clear()
+        d.exports_dir = os.path.join(self.tmp, 'no-exports')
+        try:
+            d._frida_phase('b011', batch, self.wt, {})
+        except driver._StageError:
+            pass
+        self.assertNotIn('fn_403000', names[0] if names else [])
+        self.assertNotIn(line, self.logs)
+
+    def test_driver_frida_phase_runs_for_import_kind(self):
+        trace = TruthTest._trace
+        d, batch = self._import_phase_driver()
+        files = os.path.join(self.tmp, 'traces')
+        os.makedirs(files)
+        calls = []
+
+        def frida_run(batch_id, table, scenarios, **kw):
+            calls.append((batch_id, sorted(h['name'] for h in table['original']['hooks']),
+                          list(scenarios)))
+            out = {}
+            for scenario in scenarios:
+                orig = trace(('fn_401000', 7, 3), ('fn_402000', 7, 3))
+                ours = trace(('fn_401000', 7, 3), ('fn_402000', 7, 4))
+                paths = {}
+                for side, events in (('orig', orig), ('ours', ours)):
+                    paths[side] = os.path.join(files, '%s-%s.jsonl' % (scenario, side))
+                    with open(paths[side], 'w') as f:
+                        f.write(''.join(json.dumps(e) + '\n' for e in events))
+                out[scenario] = {'orig': orig, 'ours': ours, 'orig_path': paths['orig'],
+                                 'ours_path': paths['ours'], 'failed': None,
+                                 'dumps': {'match': True, 'detail': 'fixture'}}
+            return out
+        d.frida_run = frida_run
+        before = self.git('rev-parse', 'HEAD', cwd=self.wt).stdout.strip()
+        findings = d._frida_phase('b011', batch, self.wt, {})
+        self.assertEqual(calls, [('b011', ['fn_401000', 'fn_402000', 'fn_403000'],
+                                  list(driver._tool('truth').FRIDA_SCENARIOS))])
+        # equal: evidence rewritten and committed on the batch branch
+        text = open(os.path.join(self.wt, 'docs', 'evidence', '401000.md')).read()
+        ce = load_tool('check_evidence')
+        fields = ce.front_matter(text)
+        self.assertEqual(fields['kind'], 'trace')
+        self.assertNotIn('exemption', fields)
+        self.assertTrue(any(p.fullmatch(fields['trace_source']) for p in ce.TRACE_SOURCES),
+                        fields['trace_source'])
+        self.assertIn('frida b011-world_entry orig:', fields['trace_source'])
+        # the driver keeps the lines it wrote; the worker-line check accepts them
+        self.assertEqual(d._frida_lines('b011'), {'401000': fields['trace_source']})
+        self.assertEqual(driver._foreign_frida_lines(self.wt, ['docs/evidence/401000.md'],
+                                                     d._frida_lines('b011')), [])
+        self.assertEqual(len(driver._foreign_frida_lines(self.wt, ['docs/evidence/401000.md'], {})), 1)
+        self.assertEqual(self.git('status', '--porcelain', cwd=self.wt).stdout, '')
+        self.assertEqual(self.git('log', '-1', '--format=%s', cwd=self.wt).stdout.strip(),
+                         'frida: trace evidence for 1 rows of b011')
+        self.assertEqual(self.git('rev-list', '--count', before + '..HEAD', cwd=self.wt).stdout.strip(), '1')
+        # different: a finding with the diff summary; the file is untouched
+        self.assertTrue(any(f.startswith('0x402000:') and 'different' in f and 'world_entry' in f
+                            for f in findings), findings)
+        # never exercised: the exact message, naming the merge base and the row's parked file
+        mb = self.git('merge-base', 'first', 'HEAD', cwd=self.wt).stdout.strip()[:12]
+        self.assertIn('0x403000: exercised by no scenario (world_entry, first_fight, walk_and_talk); '
+                      "park it: edit that function back to the merge base's body (`git show "
+                      '%s:<path>` shows it), delete docs/evidence/403000.md, write '
+                      'docs/wso/import-parked/403000.json {"address", "name", "file", "batch", '
+                      '"needs"} with needs "world_entry, first_fight, walk_and_talk: not exercised", '
+                      'and commit the three together; '
+                      "do not replace a file that holds other rows' changes" % mb, findings)
+        self.assertIn('kind: read-only', open(os.path.join(self.wt, 'docs', 'evidence', '403000.md')).read())
+        self.assertEqual(len(findings), 2)
+
+    def test_driver_frida_phase_measures_kinds_the_worker_declared(self):
+        trace = TruthTest._trace
+        d, batch = self._import_phase_driver()
+        seen = []
+
+        def frida_run(b, table, scenarios, **kw):
+            seen.append(sorted(h['name'] for h in table['original']['hooks']))
+            return self._file_traces(scenarios, trace(('fn_401000', 7, 3), ('fn_402000', 7, 3)),
+                                     trace(('fn_401000', 7, 3), ('fn_402000', 7, 4)))
+        d.frida_run = frida_run
+        # 401000 an oracle with no case and equal, 402000 a declared replay and
+        # different, 403000 a declared replay and never exercised: all measured
+        for stem, kind in (('401000', 'oracle'), ('402000', 'replay'), ('403000', 'replay')):
+            path = os.path.join(self.wt, 'docs', 'evidence', stem + '.md')
+            with open(path) as f:
+                text = f.read()
+            text = re.sub(r'^kind: \S+$', 'kind: ' + kind, text, count=1, flags=re.M)
+            with open(path, 'w') as f:
+                f.write(text)
+        self.git('commit', '-qam', 'kinds', cwd=self.wt)
+        findings = d._frida_phase('b011', batch, self.wt, {})
+        self.assertEqual(seen, [['fn_401000', 'fn_402000', 'fn_403000']])
+        # the equal one is upgraded by the driver; the others park
+        self.assertIn('kind: trace', _slurp(os.path.join(self.wt, 'docs', 'evidence', '401000.md')))
+        self.assertEqual([f[:9] for f in findings], ['0x402000:', '0x403000:'])
+        self.assertIn('frida different', findings[0])
+        self.assertIn('docs/wso/import-parked/402000.json', findings[0])
+        self.assertIn('docs/wso/import-parked/403000.json', findings[1])
+        self.assertTrue(all('park it' in f for f in findings), findings)
+
+    def _file_traces(self, scenarios, orig, ours, **extra):
+        """frida_run's result with the traces on disk (the evidence rewrite
+        hashes the files): the same orig/ours events in every scenario."""
+        files = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, files, True)
+        out = {}
+        for scenario in scenarios:
+            paths = {}
+            for side, events in (('orig', orig), ('ours', ours)):
+                paths[side] = os.path.join(files, '%s-%s.jsonl' % (scenario, side))
+                with open(paths[side], 'w') as f:
+                    f.write(''.join(json.dumps(e) + '\n' for e in events))
+            out[scenario] = dict({'orig': orig, 'ours': ours, 'orig_path': paths['orig'],
+                                  'ours_path': paths['ours'], 'failed': None,
+                                  'dumps': {'match': True, 'detail': 'fixture'}}, **extra)
+        return out
+
+    def _fork_note(self, rel, text):
+        """The sha of a commit (beside the batch, in the same object store)
+        that carries the fork recovery note rel."""
+        fork = os.path.join(self.tmp, 'fork')
+        self.git('worktree', 'add', '-q', '-b', 'fork', fork, 'first')
+        _write(os.path.join(fork, rel), text)
+        self.git('add', '-A', cwd=fork)
+        self.git('commit', '-qm', 'note', cwd=fork)
+        return self.git('rev-parse', 'HEAD', cwd=fork).stdout.strip()
+
+    def test_driver_frida_phase_keeps_what_stands_as_written(self):
+        d, batch = self._import_phase_driver()
+        sha = self._fork_note('docs/roll-recovery.md',
+                              '# Roll\n\nIcewindMisc::Roll sums the dice.\n')
+        ev = os.path.join(self.wt, 'docs', 'evidence')
+        # an oracle case the tree registers, a fork note that names the
+        # function, and a file unchanged since the merge base (trace or better)
+        _write(os.path.join(self.wt, 'oracle', 'cases', 'rules.cpp'),
+               'ORACLE_CASE("rules/render", Render);\n')
+        _write(os.path.join(self.wt, 'oracle', 'CMakeLists.txt'),
+               'add_executable(oracle_runner\n        cases/rules.cpp\n)\n')
+        _write(os.path.join(ev, '401000.md'), '---\naddress: 0x401000\nname: Rules::Render\n'
+               'kind: oracle\noracle_case: rules/render\n---\n')
+        _write(os.path.join(ev, '402000.md'), '---\naddress: 0x402000\nname: IcewindMisc::Roll\n'
+               'kind: trace\ntrace_source: WillScarlettOhara/iwd2-re@%s docs/roll-recovery.md\n---\n'
+               % sha)
+        _write(os.path.join(ev, '403000.md'), self.git('show', 'first:docs/evidence/403000.md').stdout)
+        self.git('add', '-A', cwd=self.wt)
+        self.git('commit', '-qm', 'standing evidence', cwd=self.wt)
+        d.frida_build = lambda *a, **kw: self.fail('nothing to measure: no build')
+        d.frida_run = lambda *a, **kw: self.fail('nothing to measure')
+        self.assertEqual(d._frida_phase('b011', batch, self.wt, {}), [])
+        logs = '\n'.join(self.logs)
+        for needle in ('0x401000 kept as written (oracle case rules/render)',
+                       '0x402000 kept as written (fork note docs/roll-recovery.md)',
+                       '0x403000 kept as written (unchanged since the merge base)'):
+            self.assertIn(needle, logs)
+        # a note that does not name the function, a case nothing registers,
+        # and a file changed since the merge base are measured
+        _write(os.path.join(ev, '401000.md'), '---\naddress: 0x401000\nname: Rules::Render\n'
+               'kind: oracle\noracle_case: rules/nothing\n---\n')
+        _write(os.path.join(ev, '402000.md'), '---\naddress: 0x402000\nname: Rules::Tick\n'
+               'kind: trace\ntrace_source: WillScarlettOhara/iwd2-re@%s docs/roll-recovery.md\n---\n'
+               % sha)
+        with open(os.path.join(ev, '403000.md'), 'a') as f:
+            f.write('one more line\n')
+        self.git('commit', '-qam', 'changed', cwd=self.wt)
+        wave = driver._tool('wave')
+        mb = wave.merge_base_sha(self.wt, 'first')
+        for addr, name in (('0x401000', 'Rules::Render'), ('0x402000', 'Rules::Tick'),
+                           ('0x403000', 'Rules::Tick')):
+            self.assertIsNone(wave.kept_evidence(self.wt, mb, addr, name, _slurp(
+                os.path.join(ev, addr[2:] + '.md'))), addr)
+
+    def test_driver_frida_phase_hooks_dependencies_imported_with_a_row(self):
+        trace = TruthTest._trace
+        d, batch = self._import_phase_driver()
+        batch = dict(batch, rows=[r for r in batch['rows'] if r['address'] != '0x403000'])
+        # Rules::Tick is no batch row, but the worker imported it with one
+        _write(os.path.join(self.wt, 'src', 'T.cpp'),
+               '// 0x403000\nint Rules::Tick(int a, int b)\n{\n  return a;\n}\n')
+        self.git('add', '-A', cwd=self.wt)
+        self.git('commit', '-qm', 'dependency', cwd=self.wt)
+        seen = []
+
+        def frida_run(b, table, scenarios, **kw):
+            seen.append(sorted(h['name'] for h in table['original']['hooks']))
+            t = trace(('fn_401000', 7, 3), ('fn_402000', 7, 3))
+            return {sc: (t, t) for sc in scenarios}
+        d.frida_run = frida_run
+        findings = d._frida_phase('b011', batch, self.wt, {})
+        self.assertEqual(seen, [['fn_401000', 'fn_402000', 'fn_403000']])
+        dep = [f for f in findings if f.startswith('0x403000:')]
+        self.assertEqual(len(dep), 1, findings)
+        self.assertIn('exercised by no scenario', dep[0])
+        self.assertIn('a dependency you imported with the batch', dep[0])
+        self.assertIn('imported with the batch; measured like a row', '\n'.join(self.logs))
+
+    def test_driver_frida_phase_parks_failed_and_unmeasured_rows(self):
+        d, batch = self._import_phase_driver()
+        truth_mod = driver._tool('truth')
+        got = {'0x401000': ('not measured', 'no final HITS totals in world_entry'),
+               '0x402000': ('scenario failed', 'first_fight: ours side exited 2'),
+               '0x403000': ('not-exercised', 'no scenario hit it: world_entry')}
+        with mock.patch.object(truth_mod, 'frida_batch', lambda *a, **kw: dict(got)):
+            findings = d._frida_phase('b011', batch, self.wt, {})
+        by = {f[:8]: f for f in findings}
+        self.assertEqual(sorted(by), ['0x401000', '0x402000', '0x403000'])
+        self.assertIn('the Frida phase gave "not measured" (no final HITS totals in world_entry)',
+                      by['0x401000'])
+        self.assertIn('with needs "not measured: no final HITS totals in world_entry"', by['0x401000'])
+        self.assertIn('with needs "scenario failed: first_fight: ours side exited 2"', by['0x402000'])
+
+    def test_driver_writes_trace_evidence_only_from_matching_dumps(self):
+        trace = TruthTest._trace
+        d, batch = self._import_phase_driver()
+        t = trace(('fn_401000', 7, 3))
+        final = {'hits': {'orig': {'fn_401000': 1}, 'ours': {'fn_401000': 1}},
+                 'final': {'orig': True, 'ours': True}}
+        d.frida_run = lambda b, table, scenarios, **kw: self._file_traces(
+            scenarios, t, t, dumps={'match': False, 'detail': '3 difference(s)'}, **final)
+        findings = d._frida_phase('b011', batch, self.wt, {})
+        self.assertEqual(d._frida_got['401000'][0], 'not measured')
+        f401 = [f for f in findings if f.startswith('0x401000:')][0]
+        self.assertIn('dumps differ in world_entry (3 difference(s))', f401)
+        self.assertIn('kind: read-only', _slurp(os.path.join(self.wt, 'docs', 'evidence', '401000.md')))
+        # an equal verdict whose run carries no matching dumps writes nothing either
+        truth_mod = driver._tool('truth')
+        d.frida_run = lambda b, table, scenarios, **kw: self._file_traces(
+            scenarios, t, t, dumps=None)
+        real = truth_mod.frida_batch
+
+        def equal(batch_id, rows, sigs, map_text, run_frida=None, **kw):
+            run_frida(batch_id, {}, list(truth_mod.FRIDA_SCENARIOS))
+            return {'0x401000': ('equal', truth_mod.EQUAL_PREFIX + 'world_entry')}
+        with mock.patch.object(truth_mod, 'frida_batch', equal):
+            findings = d._frida_phase('b011', batch, self.wt, {})
+        self.assertTrue(real)
+        f401 = [f for f in findings if f.startswith('0x401000:')][0]
+        self.assertIn("measured equal in world_entry but that run's state dumps were not shown "
+                      'to match', f401)
+        self.assertIn('kind: read-only', _slurp(os.path.join(self.wt, 'docs', 'evidence', '401000.md')))
+
+    def test_driver_import_frequency_only_row_gets_trace_and_a_ledger_line(self):
+        trace = TruthTest._trace
+        t = trace(('fn_401000', 7, 3))
+        build = self._frida_builder(self.IMPORT_MAP)[0]
+        d = self._driver(worker=driver.FakeWorker('# report\n\nImported.\n'), queue='import',
+                         frida=True, frida_build=build,
+                         frida_run=lambda b, table, scenarios, **kw: self._file_traces(
+                             scenarios, t, t, final={'orig': True, 'ours': True},
+                             hits={'orig': {'fn_401000': 5}, 'ours': {'fn_401000': 4}}))
+        with open(self.state_path) as f:
+            state = json.load(f)
+        b = state['batches'].pop('b011')
+        b['rows'] = [dict(r) for r in b['rows'][:2]]
+        b['rows'][0]['name'] = 'Rules::Render'
+        for r in b['rows']:
+            r.pop('class')
+        b['files'], b['verdicts'] = ['src/A.cpp'], {}
+        state['batches']['i001'] = b
+        with open(self.state_path, 'w') as f:
+            json.dump(state, f)
+        _write(os.path.join(self.wt, 'src', 'A.cpp'),
+               '// 0x401000\nint Rules::Render(int a, int b)\n{\n  return a;\n}\n'
+               '// 0x402000\nint Draw()\n{\n  return 2;\n}\n')
+        _write(os.path.join(self.wt, 'docs', 'evidence', '401000.md'),
+               '---\naddress: 0x401000\nname: Rules::Render\nkind: read-only\nexemption: read\n---\n'
+               '\n## Decompiled (Ghidra)\n\n```c\nint Render(int a, int b)\n\n{\n  return a;\n}\n```\n')
+        _write(os.path.join(self.wt, 'docs', 'evidence', '402000.md'),
+               self.git('show', 'first:docs/evidence/402000.md').stdout)
+        self.git('add', '-A', cwd=self.wt)
+        self.git('commit', '-qm', 'import', cwd=self.wt)
+        self.assertEqual(d.run_batch('i001'), 'closed', self._status(d)['exceptions'])
+        # evidence rewritten, no finding (no fix round), the note in the ledger
+        fields = load_tool('check_evidence').front_matter(
+            self.git('show', 'first:docs/evidence/401000.md').stdout)
+        self.assertEqual(fields['kind'], 'trace')
+        self.assertIn('frida i001-world_entry orig:', fields['trace_source'])
+        self.assertFalse(os.path.exists(os.path.join(os.path.dirname(d.status_path), 'i001',
+                                                     'worker-fix-checks.brief.md')))
+        ledger = self._ledger(d)
+        for sc in driver._tool('truth').FRIDA_SCENARIOS:
+            self.assertIn('- frida frequency only (a caller finding): 0x401000 %s: frequency only: '
+                          'original 5 calls, ours 4 (final totals); every captured event equal' % sc,
+                          ledger)
+
+    def test_driver_import_cites_the_first_exact_scenario_whatever_it_is(self):
+        # world_entry never calls 401000; first_fight compares it exactly: the
+        # evidence cites first_fight's run and hashes its trace files
+        trace = TruthTest._trace
+        d, batch = self._import_phase_driver()
+        other = trace(('fn_402000', 7, 3))
+        mine = trace(('fn_401000', 7, 3))
+        out = self._file_traces(['world_entry'], other, other)
+        out.update(self._file_traces(['first_fight'], mine, mine))
+        d.frida_run = lambda b, table, scenarios, **kw: dict(out)
+        d._frida_phase('b011', batch, self.wt, {})
+        self.assertEqual(d._frida_got['401000'], ('equal', 'identical in first_fight'))
+        fields = load_tool('check_evidence').front_matter(
+            _slurp(os.path.join(self.wt, 'docs', 'evidence', '401000.md')))
+        self.assertEqual(fields['trace_source'], driver._tool('truth').trace_source_line(
+            'b011-first_fight', out['first_fight']['orig_path'], out['first_fight']['ours_path']))
+
+    def test_driver_wave_one_frequency_only_is_a_ledger_line(self):
+        trace = TruthTest._trace
+        t = trace(('fn_402000', 7, 3))
+        report = ('# r\n\n## Verdicts\n\nverdict 0x401000 ours case dump-401000\n'
+                  'verdict 0x402000 ours case dump-402000\n')
+        d = self._measured_driver(
+            worker=_SeqWorker(report), frida=True, frida_build=self._frida_builder()[0],
+            frida_run=lambda b, table, scenarios, **kw: {'world_entry': {
+                'orig': t, 'ours': t, 'failed': None, 'dumps': {'match': True},
+                'final': {'orig': True, 'ours': True},
+                'hits': {'orig': {'fn_402000': 9}, 'ours': {'fn_402000': 7}}}},
+            oracle_run=lambda *a: {'0x401000': ('pass', 'ok')})
+        self.assertEqual(d.run_batch('b011'), 'closed', self._status(d)['exceptions'])
+        self.assertEqual(self._state()['verdicts']['0x402000']['measured'], 'frida')
+        self.assertFalse(os.path.exists(os.path.join(os.path.dirname(d.status_path), 'b011',
+                                                     'worker-fix-checks.brief.md')))
+        self.assertIn('- frida frequency only (a caller finding): 0x402000 world_entry: frequency '
+                      'only: original 9 calls, ours 7 (final totals); every captured event equal',
+                      self._ledger(d))
+
+    def test_import_brief_says_read_only_until_the_driver_measures(self):
+        text = _slurp(os.path.join(ROOT, 'docs', 'wso', 'import-brief-template.md'))
+        flat = ' '.join(text.split())
+        for needle in ('`kind: read-only` with an `exemption:`',
+                       'the driver writes frida evidence, and a frida line it did not write is a '
+                       'check problem',
+                       'Do not declare `trace`, `replay` or `oracle` yourself',
+                       '`docs/wso/import-parked/<ADDRESS>.json`',
+                       'Every row you do not park must be imported',
+                       'The driver measures it like a row'):
+            self.assertIn(needle, flat)
+        self.assertNotIn('is not enough here', flat)
+        self.assertNotIn('import-parked.json', flat)
+
+    def test_mechanical_checks_flag_a_frida_line_the_driver_did_not_write(self):
+        d = self._driver(worker=driver.FakeWorker(self.REPORT))
+        line = 'frida b011-world_entry orig:%s ours:%s compare=0' % ('a' * 64, 'b' * 64)
+        _write(os.path.join(self.wt, 'docs', 'evidence', '401000.md'),
+               '---\naddress: 0x401000\nname: Render\nkind: trace\ntrace_source: %s\n---\n' % line)
+        self.git('commit', '-qam', 'a frida line', cwd=self.wt)
+
+        def run(argv, **kw):
+            if argv[0] == 'git':
+                return subprocess.run(argv, **kw)
+            return subprocess.CompletedProcess(argv, 0, '', '')
+        batch = {'id': 'i001', 'branch': 'p3/wso-b011', 'rows': [{'address': '0x401000'}]}
+        with mock.patch.object(driver, '_vanilla_exe', return_value='/nonexistent'):
+            probs = driver.mechanical_checks(batch, self.wt, {}, run=run, kind='import')
+            self.assertEqual(probs, ['docs/evidence/401000.md: a frida trace_source the driver did '
+                                     'not write; the driver writes frida evidence: remove the line '
+                                     '(write kind: read-only with an exemption: describing your '
+                                     'reading; the Frida phase measures the row)'])
+            # the line the driver's own phase wrote is not a problem
+            self.assertEqual(driver.mechanical_checks(batch, self.wt, {}, run=run, kind='import',
+                                                      frida_lines={'401000': line}), [])
+            # nor is one on a wave-1 batch's file (the import rule only)
+            self.assertEqual([p for p in driver.mechanical_checks(
+                dict(batch, rows=[]), self.wt, {}, run=run) if 'frida' in p], [])
+
+    def test_driver_frida_phase_different_read_only_row_is_parked(self):
+        trace = TruthTest._trace
+        d, batch = self._import_phase_driver()
+        d.frida_run = lambda b, table, scenarios, **kw: {sc: (
+            trace(('fn_401000', 7, 3), ('fn_402000', 7, 3)),
+            trace(('fn_401000', 7, 3), ('fn_402000', 7, 4))) for sc in scenarios}
+        path = os.path.join(self.wt, 'docs', 'evidence', '402000.md')
+        with open(path) as f:
+            text = f.read()
+        with open(path, 'w') as f:
+            f.write(re.sub(r'^kind: \S+$', 'kind: read-only', text, count=1, flags=re.M))
+        self.assertEqual(d._evidence_kind(self.wt, '0x402000'), 'read-only')
+        findings = d._frida_phase('b011', batch, self.wt, {})
+        text = [f for f in findings if f.startswith('0x402000:')][0]
+        for needle in ("edit that function back to the merge base's body",
+                       'docs/wso/import-parked/402000.json', 'frida different', 'world_entry'):
+            self.assertIn(needle, text)
+        self.assertNotIn('fix the body', text)
+
+    def test_driver_frida_phase_leaves_a_wave_one_batch_as_before_and_honours_no_frida(self):
+        d, batch = self._import_phase_driver()
+        d.frida_run = lambda *a: self.fail('no run expected')
+        d.frida = False
+        self.assertEqual(d._frida_phase('b011', batch, self.wt, {}), [])
+
+    def test_write_trace_evidence_touches_only_front_matter(self):
+        d = self._tmpdir()
+        orig, ours = os.path.join(d, 'o.jsonl'), os.path.join(d, 'r.jsonl')
+        for path, data in ((orig, b'{"tag":"a"}\n'), (ours, b'{"tag":"b"}\n')):
+            with open(path, 'wb') as f:
+                f.write(data)
+        want = driver._tool('truth').trace_source_line('i001-world_entry', orig, ours)
+        body = '\n# Notes\r\n\nexemption: not front matter\nkind: oracle\n  trailing  \n'
+        for head, expect_head in (
+                ('---\naddress: 0x401000\nname: F\nkind: read-only\nexemption: "thin"\n'
+                 'oracle_case: x\n---\n',
+                 ['---', 'address: 0x401000', 'name: F', 'kind: trace',
+                  'trace_source: ' + want, 'oracle_case: x', '---']),
+                ('---\nname: F\nkind: replay\ntrace_source: stale\nexemption: y\n---\n',
+                 ['---', 'name: F', 'kind: trace', 'trace_source: ' + want, '---']),
+                ('---\nname: F\n---\n', ['---', 'name: F', 'kind: trace',
+                                           'trace_source: ' + want, '---'])):
+            path = os.path.join(d, 'E.md')
+            with open(path, 'w', newline='') as f:
+                f.write(head + body)
+            driver._write_trace_evidence(path, 'i001-world_entry', orig, ours)
+            with open(path, newline='') as f:
+                got = f.read()
+            self.assertEqual(got.splitlines(keepends=True)[len(expect_head):],
+                             body.splitlines(keepends=True), head)
+            self.assertEqual(got.splitlines()[:len(expect_head)], expect_head)
+        # CRLF front matter keeps its endings
+        path = os.path.join(d, 'C.md')
+        with open(path, 'w', newline='') as f:
+            f.write('---\r\nkind: read-only\r\nexemption: z\r\n---\r\nbody\r\n')
+        driver._write_trace_evidence(path, 'p', orig, ours)
+        with open(path, newline='') as f:
+            self.assertEqual(f.read(), '---\r\nkind: trace\r\ntrace_source: %s\r\n---\r\nbody\r\n'
+                             % driver._tool('truth').trace_source_line('p', orig, ours))
+        with open(path, 'w') as f:
+            f.write('no front matter\n')
+        with self.assertRaises(ValueError):
+            driver._write_trace_evidence(path, 'p', orig, ours)
 
     def test_driver_repeats_oracle_failures_on_a_resumed_brief(self):
         d = self._measured_driver(oracle_run=lambda b, w, c: {'0x401000': ('fail', 'failure_count 2')})
@@ -10228,7 +11363,7 @@ class DriverTest(unittest.TestCase):
         self.assertIn('BRIEF b011', w.briefs[1])
 
     def test_malformed_report_is_a_check_failure(self):
-        w = _SeqWorker('## Verdicts\nI think it is ours.\n', self.REPORT)
+        w = _SeqWorker('## Verdicts\nI think 0x401000 is ours.\n', self.REPORT)
         d = self._driver(worker=w)
         self.assertEqual(d.run_batch('b011'), 'closed')
         self.assertIn('malformed verdict line', w.briefs[1])
@@ -11693,7 +12828,7 @@ class DriverTest(unittest.TestCase):
                 pass
         # the fix-round, resume and check texts, rendered
         quoted += re.findall(r'`(git [^`]*)`', driver.FIX_PROMPT + driver.RESUME_PREAMBLE
-                             + driver.REVIEW_BRIEF)
+                             + driver.REVIEW_BRIEF + ''.join(driver.FIX_REPORT_RULES.values()))
         self.assertTrue(any(q.startswith('git show') for q in quoted), quoted)
         self.assertTrue(any(q.startswith('git rm') for q in quoted), quoted)
         for q in quoted:
@@ -11702,6 +12837,28 @@ class DriverTest(unittest.TestCase):
             self.assertFalse(driver._history_rewrite(args, ['src/A.cpp']), q)
         # and the checker notices a forbidden quote
         self.assertTrue(driver._history_rewrite(['checkout', 'first', '--', 'x']))
+        # The prose remedies too (first's 021a6cb0): no worker-facing text tells
+        # a worker to revert or restore, and none puts a whole file back except
+        # the out-of-scope-path check, whose files hold no batch row.
+        prose = [n.value for n in ast.walk(tree)
+                 if isinstance(n, ast.Constant) and isinstance(n.value, str)
+                 and id(n) not in docs and ' ' in n.value]
+        prose += [driver.FIX_PROMPT, driver.RESUME_PREAMBLE, driver.REVIEW_BRIEF]
+        prose += list(driver.FIX_REPORT_RULES.values())
+        for rel in ('import-brief-template.md', 'brief-template.md', 'README.md'):
+            prose.append(_slurp(os.path.join(ROOT, 'docs', 'wso', rel)))
+        verb = re.compile(r'\b(?:revert|restor)\w*', re.I)
+        for text in prose:
+            bare = re.sub(r'`[^`]*`', '', text)
+            self.assertIsNone(verb.search(bare), text[:200])
+            if re.search(r'git show[^`]*> *<path>', text):
+                self.assertIn('outside the paths a batch may touch', text)
+                self.assertIn('no batch row lives there', text)
+        self.assertIn(driver.SHARED_FILE, driver.park_text('0x401000', 'abc', 'x'))
+        # a diff detail's own quotes arrive escaped: needs is a JSON string literal
+        self.assertIn(r'with needs "frida different: ours {\"ret\": 0}",',
+                      driver.park_text('0x401000', 'abc', 'frida different: ours {"ret": 0}'))
+        self.assertIn(driver.EDIT_BACK % 'abc', driver.park_text('0x401000', 'abc', 'x'))
 
     def test_transcript_rejects_wso_ref(self):
         for cmd in ('git show wso/main:src/A.cpp', 'git show wso/x', 'git diff wso/main -- src',
@@ -11936,6 +13093,8 @@ class DriverTest(unittest.TestCase):
             self.assertNotIn(ok, text)
         self.assertFalse(driver._path_allowed('docs/evidence-other/x.md'))
         self.assertTrue(driver._path_allowed('docs/evidence/40B000.md'))
+        self.assertTrue(driver._path_allowed('docs/wso/import-parked/40B000.json'))
+        self.assertFalse(driver._path_allowed('docs/wso/import-parked.json'))
 
     def test_driver_syncs_the_base_before_merging_into_a_batch(self):
         w = self._BatchWorker(credits=0.0)
@@ -12347,9 +13506,22 @@ class DriverTest(unittest.TestCase):
         self.assertTrue(any('both a verdict line and an undecided line' in p
                             for p in problems), problems)
 
+    def test_fix_prompt_report_rule_follows_the_batch_kind(self):
+        # i002 wrote "(none; this is an import batch)" under ## Verdicts because
+        # the fix-round prompt asked every batch for that section
+        imp = driver.fix_prompt('i002', 'checks', 'p3/wso-i002', 'BRIEF', ['p1', 'p2'], 'import')
+        self.assertIn('do not write a `## Verdicts` section at all', imp)
+        self.assertNotIn('full `## Verdicts` section', imp)
+        self.assertIn('- p1\n- p2', imp)
+        self.assertTrue(imp.rstrip().endswith('BRIEF'))
+        wave = driver.fix_prompt('b011', 'checks', 'p3/wso-b011', 'BRIEF', ['p1'])
+        self.assertIn('full `## Verdicts` section', wave)
+        self.assertNotIn('import batch', wave)
+
     def test_the_fix_round_header_names_undecided_and_notes(self):
+        rendered = driver.fix_prompt('b011', 'checks', 'p3/wso-b011', '', ['p'])
         for needle in ('## Undecided', '## Notes', 'verdict lines only', 'Never write `ours`'):
-            self.assertIn(needle, driver.FIX_PROMPT)
+            self.assertIn(needle, rendered)
         with open(os.path.join(ROOT, 'docs', 'wso', 'brief-template.md')) as f:
             text = f.read()
         for needle in ('undecided <0xADDR> <fork|neither> <one-line reason>',
@@ -13018,7 +14190,7 @@ class DriverTest(unittest.TestCase):
                         root=self._tmpdir(), loaded_rva='0x1')
         self.assertTrue(cmds)
         for c in cmds:
-            self.assertEqual(c[c.index('--new-attempt') + 1], 'driver frida b011')
+            self.assertEqual(c[c.index('--new-attempt') + 1], 'driver frida b011 s1')
 
     def test_union_merge_attribute_lets_parallel_probe_lines_merge(self):
         anchor = driver._tool('truth').CMAKE_ANCHOR
@@ -13160,6 +14332,119 @@ class DriverTest(unittest.TestCase):
             rc, out = wave.next_batch(dp, w1, 20, repo=self.root, import_path=ip)
         self.assertTrue(out.startswith('b001 assigned'), out)
 
+    # -- wave.py unpark ----------------------------------------------------------
+
+    def _unpark_fixture(self):
+        tmp, dp, ip = self._import_repo()
+        wave = driver._tool('wave')
+        imp = os.path.join(tmp, 'import-state.json')
+        row = lambda a, n, f: {'address': a, 'name': n, 'file': f, 'their_len': 70, 'our_len': 2}
+        state = {'batches': {
+            'i001': {'status': 'closed', 'branch': 'p3/wso-i001', 'files': ['src/A.cpp', 'src/C.cpp'],
+                     'verdicts': {}, 'rows': [row('0x401000', 'F', 'src/A.cpp'),
+                                              row('0x403000', 'H', 'src/C.cpp')]},
+            'i002': {'status': 'assigned', 'branch': 'p3/wso-i002', 'files': ['src/D.cpp'],
+                     'verdicts': {}, 'rows': [row('0x404000', 'I', 'src/D.cpp')]}}}
+        with open(imp, 'w') as f:
+            json.dump(state, f)
+        folder = os.path.join(self.root, 'docs', 'wso', 'import-parked')
+        os.makedirs(folder)
+        for a, n, b in (('403000', 'H', 'i001'), ('404000', 'I', 'i002'), ('405000', 'J', 'i001')):
+            with open(os.path.join(folder, a + '.json'), 'w') as f:
+                json.dump({'address': '0x' + a, 'name': n, 'file': 'src/x.cpp', 'batch': b,
+                           'needs': 'world_entry: not exercised'}, f)
+        return tmp, dp, ip, imp, folder, wave
+
+    def _unpark_snapshot(self, imp, folder):
+        with open(imp) as f:
+            st = f.read()
+        return st, sorted(os.listdir(folder))
+
+    def test_unpark_moves_the_row_and_next_offers_it_again(self):
+        tmp, dp, ip, imp, folder, wave = self._unpark_fixture()
+        rc, out = wave.unpark(['0x403000'], None, state_path=imp, repo=self.root)
+        self.assertEqual(rc, 0, out)
+        lines = out.splitlines()
+        self.assertEqual(lines[0], 'unparked 0x403000 H (was world_entry: not exercised) from i001')
+        self.assertIn('import-state.json', lines[-1])
+        self.assertIn('docs/wso/import-parked', lines[-1])
+        self.assertFalse(os.path.exists(os.path.join(folder, '403000.json')))
+        with open(imp) as f:
+            b = json.load(f)['batches']['i001']
+        self.assertEqual([r['address'] for r in b['rows']], ['0x401000'])
+        (u,) = b['unparked']
+        self.assertEqual((u['address'], u['reason'], u['needs']),
+                         ('0x403000', 'needs met', 'world_entry: not exercised'))
+        self.assertRegex(u['at'], r'^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d')
+        rc, out = wave.next_batch(dp, imp, 20, wave.IMPORT_CATEGORY, repo=self.root,
+                                  import_path=ip, worktree_root=os.path.join(tmp, 'wts'),
+                                  queue='import')
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(out.startswith('i003 assigned: 1 rows'), out)
+        with open(imp) as f:
+            (r,) = json.load(f)['batches']['i003']['rows']
+        self.assertEqual((r['address'], r['category']), ('0x403000', 'theirs_real_ours_stub'))
+        # A second unpark of the same address: not parked any more.
+        rc, out = wave.unpark(['403000'], None, state_path=imp, repo=self.root)
+        self.assertEqual((rc, out), (1, '403000: not parked\n'))
+
+    def test_unpark_reason_and_any_address_spelling(self):
+        tmp, dp, ip, imp, folder, wave = self._unpark_fixture()
+        # the parked file may carry a worker's spelling (0x prefix, lower
+        # case): the file that was read is the file that goes
+        os.rename(os.path.join(folder, '403000.json'), os.path.join(folder, '0x403000.json'))
+        rc, out = wave.unpark(['0X403000'], 'signature parses now', state_path=imp, repo=self.root)
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn('0x403000.json', os.listdir(folder))
+        with open(imp) as f:
+            self.assertEqual(json.load(f)['batches']['i001']['unparked'][0]['reason'],
+                             'signature parses now')
+
+    def test_unpark_reports_a_parked_file_it_could_not_delete(self):
+        tmp, dp, ip, imp, folder, wave = self._unpark_fixture()
+        real_unlink = os.unlink
+
+        def failing(path):
+            if path.endswith('403000.json'):
+                raise PermissionError(13, 'Permission denied', path)
+            real_unlink(path)
+        with mock.patch.object(os, 'unlink', failing):
+            rc, out = wave.unpark(['403000'], None, state_path=imp, repo=self.root)
+        self.assertEqual(rc, 1, out)
+        self.assertIn('unparked 0x403000 H', out)
+        self.assertIn('the state is saved but these parked files remain', out)
+        self.assertIn('403000.json (Permission denied)', out)
+        self.assertIn('403000.json', os.listdir(folder))
+        with open(imp) as f:
+            st = json.load(f)
+        self.assertEqual([r['address'] for r in st['batches']['i001'].get('unparked', [])],
+                         ['0x403000'])
+
+    def test_unpark_refusals_write_nothing(self):
+        tmp, dp, ip, imp, folder, wave = self._unpark_fixture()
+        before = self._unpark_snapshot(imp, folder)
+        for args, msg in ((['0x401000'], '0x401000: not parked\n'),
+                          (['0x404000'], '0x404000: in assigned batch i002; close or clear it first\n'),
+                          (['0x405000'], '0x405000: in no import batch\n'),
+                          # one good address does not carry a bad one through
+                          (['0x403000', '0x404000'],
+                           '0x404000: in assigned batch i002; close or clear it first\n')):
+            rc, out = wave.unpark(args, None, state_path=imp, repo=self.root)
+            self.assertEqual((rc, out), (1, msg))
+            self.assertEqual(self._unpark_snapshot(imp, folder), before)
+
+    def test_unpark_leaves_scorecard_and_status_working(self):
+        tmp, dp, ip, imp, folder, wave = self._unpark_fixture()
+        self.assertEqual(wave.unpark(['0x403000'], None, state_path=imp, repo=self.root)[0], 0)
+        report = os.path.join(tmp, 'report.md')
+        with open(report, 'w') as f:
+            f.write('# R\n\n## Scorecard\n\nold\n')
+        rc, out = wave.write_scorecard(imp, report, os.path.join(tmp, 'no-triage.json'))
+        self.assertEqual(rc, 0, out)
+        rc, out = wave.status(imp)
+        self.assertEqual(rc, 0, out)
+        self.assertIn('i001 closed p3/wso-i001 1 rows', out)
+
     def test_queue_import_driver_wiring(self):
         tmp, dp, ip = self._import_repo()
         d, err = driver.driver_from_args(
@@ -13233,7 +14518,22 @@ class DriverTest(unittest.TestCase):
         state['batches']['i001'] = b
         with open(self.state_path, 'w') as f:
             json.dump(state, f)
-        self.assertEqual(d.run_batch('i001'), 'closed')
+        # Both rows imported; 401000 stands on its registered oracle case,
+        # 402000 on evidence unchanged since the merge base.
+        _write(os.path.join(self.wt, 'src', 'A.cpp'),
+               '// 0x401000\nint Render()\n{\n  return 1;\n}\n'
+               '// 0x402000\nint Draw()\n{\n  return 2;\n}\n')
+        _write(os.path.join(self.wt, 'oracle', 'cases', 'loop.cpp'),
+               'ORACLE_CASE("loop/render", Render);\n')
+        _write(os.path.join(self.wt, 'oracle', 'CMakeLists.txt'),
+               'add_executable(oracle_runner\n        cases/loop.cpp\n)\n')
+        _write(os.path.join(self.wt, 'docs', 'evidence', '401000.md'),
+               '---\naddress: 0x401000\nname: Render\nkind: oracle\noracle_case: loop/render\n---\n')
+        _write(os.path.join(self.wt, 'docs', 'evidence', '402000.md'),
+               self.git('show', 'first:docs/evidence/402000.md').stdout)
+        self.git('add', '-A', cwd=self.wt)
+        self.git('commit', '-qm', 'import', cwd=self.wt)
+        self.assertEqual(d.run_batch('i001'), 'closed', self._status(d)['exceptions'])
         with open(self.state_path) as f:
             closed = json.load(f)['batches']['i001']
         self.assertEqual((closed['status'], closed['verdicts']), ('closed', {}))
@@ -13546,6 +14846,139 @@ class TruthTest(unittest.TestCase):
         self.assertNotIn('fn_999999', orig)
         self.assertEqual(table['ours_loaded_rva'], '0x7200')
 
+    TYPED_MAP = (' Preferred load address is 00400000\n\n'
+                 ' 0001:00001000       ?Fetch@CTlkTable@@QAEEKAAUSTR_RES@@@Z 00402000 f   t.obj\n'
+                 ' 0001:00002000       ?CheckModal@CGameSprite@@QAEXXZ 00403000 f   s.obj\n'
+                 ' 0001:00003000       ?Hit@CGameSprite@@QAEHPAV1@PAVCItem@@FPAHHE@Z 00404000 f   s.obj\n'
+                 ' 0001:00004000       ?GetNearest@CGameArea@@QAEJJABVCAIObjectType@@FPBEHHHEH@Z 00405000 f   a.obj\n'
+                 ' 0001:00005000       ?Pick@CGameArea@@QAEFHK@Z 00406000 f   a.obj\n')
+    TYPED_HEADERS = (
+        '// header\nstruct STR_RES;\nclass CTlkTable {\npublic:\n'
+        '    BOOLEAN Fetch(DWORD dwStrId, STR_RES& strRes);\n};\n'
+        'class CGameSprite {\npublic:\n    int Inline() const { return 1; }\n'
+        '    BOOL Hit(CGameSprite* target, CItem* curWeapon, SHORT nAbility, BOOL* pCritical, BOOL bOffHand, BYTE nAttackCount);\n'
+        '    void CheckModal();\n};\n'
+        'class CGameArea {\npublic:\n'
+        '    LONG GetNearest(LONG startObject, const CAIObjectType& type, SHORT range, const BYTE* terrainTable, BOOL checkLOS, BOOL seeInvisible, BOOL ignoreSleeping, BYTE nNearest, BOOL ignoreDead);\n'
+        '    BOOL Pick(int a);\n    SHORT Pick(int a, DWORD b);\n};\n')
+    TYPED_ROWS = [{'address': '0x100', 'name': 'CTlkTable::Fetch'},
+                  {'address': '0x200', 'name': 'CGameSprite::CheckModal'},
+                  {'address': '0x300', 'name': 'CGameSprite::Hit'},
+                  {'address': '0x400', 'name': 'CGameArea::GetNearest'},
+                  {'address': '0x500', 'name': 'CGameArea::Pick'}]
+    # Ghidra's guesses: int for pointers, uint for the void function's EAX.
+    TYPED_SIGS = {'0x100': 'uint Fetch(uint a, int b)', '0x200': 'uint CheckModal(void)',
+                  '0x300': 'int Hit(int a, int b, short c, int d, int e, byte f)',
+                  '0x400': 'int GetNearest(int a, uint b, short c, int d, int e, int f, int g, byte h, int i)',
+                  '0x500': 'int Pick(int a, uint b)'}
+
+    def test_hook_table_types_from_our_prototype(self):
+        table = truth.hook_table(self.TYPED_ROWS, self.TYPED_SIGS, self.TYPED_MAP, ['s'], self.TYPED_HEADERS)
+        orig = {h['name']: h for h in table['original']['hooks']}
+        ours = {h['name']: h for h in table['ours']['hooks']}
+        self.assertEqual((orig['fn_100']['args'], orig['fn_100']['ret']), (['u32', 'ptr'], 'u8'))
+        self.assertEqual(orig['fn_200']['args'], [])
+        self.assertNotIn('ret', orig['fn_200'])
+        self.assertEqual((orig['fn_300']['args'], orig['fn_300']['ret']),
+                         (['ptr', 'ptr', 's16', 'ptr', 's32', 'u8'], 's32'))
+        self.assertEqual((orig['fn_400']['args'], orig['fn_400']['ret']),
+                         (['s32', 'ptr', 's16', 'ptr', 's32', 's32', 's32', 'u8', 's32'], 's32'))
+        # overloads: the evidence signature's argument count picks the prototype
+        self.assertEqual((orig['fn_500']['args'], orig['fn_500']['ret']), (['s32', 'u32'], 's16'))
+        for name in orig:
+            self.assertEqual(ours[name]['args'], orig[name]['args'])
+            self.assertEqual(ours[name].get('ret'), orig[name].get('ret'))
+            self.assertEqual(orig[name]['conv'], 'thiscall')
+        self.assertEqual(table['typed_from'], {'0x%s' % a: 'ours' for a in ('100', '200', '300', '400', '500')})
+
+    def test_hook_table_falls_back_to_ghidra_types(self):
+        rows = self.TYPED_ROWS + [{'address': '0x5845D0', 'name': 'IcewindMisc::Roll'}]
+        sigs = dict(self.TYPED_SIGS, **{'0x5845D0': 'int Roll(int dice, short sides)'})
+        table = truth.hook_table(rows, sigs, self.TYPED_MAP + self.MAP, ['s'], self.TYPED_HEADERS)
+        orig = {h['name']: h for h in table['original']['hooks']}
+        self.assertEqual(table['typed_from']['0x5845D0'], 'ghidra')
+        self.assertEqual((orig['fn_5845D0']['args'], orig['fn_5845D0']['ret']), (['s32', 's16'], 's32'))
+        # no headers at all: every row is typed as before
+        table = truth.hook_table(self.TYPED_ROWS, self.TYPED_SIGS, self.TYPED_MAP, ['s'])
+        self.assertEqual(set(table['typed_from'].values()), {'ghidra'})
+        orig = {h['name']: h for h in table['original']['hooks']}
+        self.assertEqual(orig['fn_300']['args'], ['s32', 's32', 's16', 's32', 's32', 'u8'])
+        self.assertEqual(orig['fn_200']['ret'], 'u32')
+        # a class by value, or an overload the argument count cannot pick: Ghidra's types
+        headers = 'class CGameArea {\n    BOOL Pick(int a);\n    BOOL Pick(DWORD a);\n    LONG GetNearest(CResRef r);\n};\n'
+        table = truth.hook_table(self.TYPED_ROWS[3:], self.TYPED_SIGS, self.TYPED_MAP, ['s'], headers)
+        self.assertEqual(table['typed_from'], {'0x400': 'ghidra', '0x500': 'ghidra'})
+
+    def test_proto_type_typedefs(self):
+        self.assertEqual(truth._proto_type('POSITION'), 'ptr')
+        self.assertEqual(truth._proto_type('const RESREF'), 'ptr')
+        self.assertEqual(truth._proto_type('HWND'), 'ptr')
+        self.assertEqual(truth._proto_type('RESID'), 'u32')
+        self.assertEqual(truth._proto_type('WPARAM'), 'u32')
+        self.assertEqual(truth._proto_type('LRESULT'), 's32')
+        self.assertEqual(truth._proto_type('LONG_PTR'), 's32')
+        self.assertIsNone(truth._proto_type('CString'))
+
+    B019_HEADERS = ('class CGameEffectList {\npublic:\n'
+                    '    void RemoveAllOfType(CGameSprite* pSprite, WORD effectID, POSITION posLeave, LONG effectAmount);\n'
+                    '    void Take(CString s, RESREF resref, DWORD n);\n};\n')
+
+    def test_typed_from_headers_takes_ghidra_type_for_unknown_slot(self):
+        got = truth._typed_from_headers([self.B019_HEADERS], 'CGameEffectList::RemoveAllOfType', 4, 'thiscall',
+                                        ['u32', 'u16', 'u32', 's32'], None)
+        self.assertEqual(got[:3], ('thiscall', ['ptr', 'u16', 'ptr', 's32'], None))
+        self.assertFalse(got[4])
+        # a class by value with Ghidra's slot count: the slot takes Ghidra's type, the row is mixed
+        got = truth._typed_from_headers([self.B019_HEADERS], 'CGameEffectList::Take', 3, 'thiscall',
+                                        ['u32', 'ptr', 'u32'], None)
+        self.assertEqual((got[1], got[3], got[4]), (['u32', 'ptr', 'u32'], ['ghidra', 'ours', 'ours'], True))
+        # a different count rejects it
+        self.assertIsNone(truth._typed_from_headers([self.B019_HEADERS], 'CGameEffectList::Take', 2, 'thiscall',
+                                                    ['u32', 'ptr'], None))
+        self.assertIsNone(truth._typed_from_headers([self.B019_HEADERS], 'CGameEffectList::Take', 3, 'thiscall'))
+
+    def test_hook_table_mixed_typing_and_slots(self):
+        m = ' 0001:00001000       ?Take@CGameEffectList@@QAEXPAEK@Z 00401000 f a.obj\n'
+        rows = [{'address': '0x100', 'name': 'CGameEffectList::Take'}]
+        table = truth.hook_table(rows, {'0x100': 'void Take(uint a, byte *b, uint c)'}, m, ['s'], self.B019_HEADERS)
+        self.assertEqual(table['typed_from'], {'0x100': 'mixed'})
+        self.assertEqual(table['typed_slots'], {'0x100': ['ghidra', 'ours', 'ours']})
+
+    B019_ORIG = [{'tag': 'fn_100', 'a0_u32': 91363456, 'a1_u32': 142, 'a2_ptr': None, 'a3_s32': 39}]
+    B019_OURS = [{'tag': 'fn_100', 'a0_u32': 145435200, 'a1_u32': 142, 'a2_ptr': None, 'a3_s32': 39}]
+
+    def test_address_like_untyped_argument_is_not_measured(self):
+        rows = [{'address': '0x100', 'name': 'X'}]
+        v = truth.frida_verdicts({'s': (self.B019_ORIG, self.B019_OURS)}, rows, info={'typed_from': {'0x100': 'ghidra'}})
+        self.assertEqual(v['0x100'], ('not measured', 'address-like untyped argument a0 (91363456 vs 145435200); '
+                                                    'type it from the header'))
+        # exact slots of a mixed row
+        info = {'typed_from': {'0x100': 'mixed'}, 'typed_slots': {'0x100': ['ghidra', 'ours', 'ours', 'ours']}}
+        v = truth.frida_verdicts({'s': (self.B019_ORIG, self.B019_OURS)}, rows, info=info)
+        self.assertEqual(v['0x100'][0], 'not measured')
+        # header-typed slot stays different
+        info = {'typed_from': {'0x100': 'ours'}, 'typed_slots': {'0x100': ['ours'] * 4}}
+        v = truth.frida_verdicts({'s': (self.B019_ORIG, self.B019_OURS)}, rows, info=info)
+        self.assertEqual(v['0x100'][0], 'different')
+        # another field differing too, or a non-address value, stays different
+        other = [dict(self.B019_OURS[0], a1_u32=143)]
+        v = truth.frida_verdicts({'s': (self.B019_ORIG, other)}, rows, info={'typed_from': {'0x100': 'ghidra'}})
+        self.assertEqual(v['0x100'][0], 'different')
+        small = [dict(self.B019_OURS[0], a0_u32=5)]
+        v = truth.frida_verdicts({'s': (self.B019_ORIG, small)}, rows, info={'typed_from': {'0x100': 'ghidra'}})
+        self.assertEqual(v['0x100'][0], 'different')
+        only1 = [dict(self.B019_ORIG[0], a1_u32=142)]
+        v = truth.frida_verdicts({'s': ([dict(self.B019_ORIG[0], a1_u32=142)], [dict(self.B019_ORIG[0], a1_u32=143)])},
+                                 rows, info={'typed_from': {'0x100': 'ghidra'}})
+        self.assertEqual(v['0x100'][0], 'different')
+
+    def test_ours_env_runs_under_replay_clock(self):
+        env = probe.ours_env('C:\\game', 7)
+        self.assertEqual(env['IWD2R_SEED'], '7')
+        self.assertEqual(env['IWD2R_STATE_DUMP'], winsandbox.BOX_REPLAY_DIR)
+        self.assertNotIn('IWD2R_DUMP_EVERY', env)
+        self.assertEqual(probe.ours_env('C:\\game', 7, 5)['IWD2R_DUMP_EVERY'], '5')
+
     def test_hook_table_takes_the_convention_from_the_decorated_name(self):
         rows = [{'address': '0x600000', 'name': 'Gone::Std'}, {'address': '0x600001', 'name': 'Gone::Fast'},
                 {'address': '0x600002', 'name': 'Gone::Stat'}, {'address': '0x600003', 'name': 'CGameSprite::GetAbilityNo'},
@@ -13608,9 +15041,9 @@ class TruthTest(unittest.TestCase):
         self.assertEqual(v['0x73F560'][0], 'different')
         self.assertIn('world_entry', v['0x73F560'][1])
         self.assertEqual(v['0x777777'][0], 'not-exercised')
-        # fired on one side only is a difference
+        # fired on one side only compares no call: never equal, never different
         v = truth.frida_verdicts({'s': (self._trace(('fn_5845D0', 7, 3)), self._trace())}, rows)
-        self.assertEqual(v['0x5845D0'][0], 'different')
+        self.assertEqual(v['0x5845D0'][0], 'not measured')
         # a crash event in a trace that exercised the row never passes
         crashed = self._trace(('fn_5845D0', 7, 3)) + [{'tag': 'crash'}]
         v = truth.frida_verdicts({'s': (self._trace(('fn_5845D0', 7, 3)), crashed)}, rows)
@@ -13630,15 +15063,29 @@ class TruthTest(unittest.TestCase):
         # skipped rows say so, with the reason
         v = truth.frida_verdicts({'s': (t, t)}, rows, {'0x73F560': 'ambiguous: 2 overloads of X in our map'})
         self.assertEqual(v['0x73F560'], ('skipped', 'ambiguous: 2 overloads of X in our map'))
-        # a failed scenario is left out and reported
+        # a failed scenario counts as "not hit" only when its original side completed
+        # (exit 0, HITS present, 0 for the hook); otherwise the row stays scenario failed
         failed = {'orig': [], 'ours': [], 'failed': 'ours side exited 2'}
         good = {'orig': t, 'ours': t, 'failed': None}
         v = truth.frida_verdicts({'a': failed, 'b': good}, rows)
+        self.assertEqual(v['0x5845D0'], ('scenario failed', 'a: ours side exited 2'))
+        done = dict(failed, orig_exit=0, hits={'orig': {'fn_5845D0': 0, 'fn_73F560': 0}, 'ours': None})
+        v = truth.frida_verdicts({'a': done, 'b': good}, rows)
         self.assertEqual(v['0x5845D0'][0], 'equal')
+        for bad_orig in (dict(done, orig_exit=2), dict(done, hits={'orig': None, 'ours': None}),
+                         dict(done, hits={'orig': {}, 'ours': None}),
+                         dict(done, hits={'orig': {'fn_5845D0': 3}, 'ours': None})):
+            v = truth.frida_verdicts({'a': bad_orig, 'b': good}, rows)
+            self.assertEqual(v['0x5845D0'][0], 'scenario failed', bad_orig)
+        # hit by no scenario at all, the failed one's original completed: not exercised
         self.assertEqual(v['0x73F560'][0], 'scenario failed')
+        v = truth.frida_verdicts({'a': done, 'b': good}, rows)
+        self.assertEqual(v['0x73F560'][0], 'not-exercised')
+        self.assertEqual(v['0x73F560'][1], 'no scenario hit it: a, b')
+        v = truth.frida_verdicts({'a': done}, rows)
+        self.assertEqual(v['0x5845D0'], ('not-exercised', 'no scenario hit it: a'))
         v = truth.frida_verdicts({'a': failed}, rows)
-        self.assertEqual(v['0x5845D0'][0], 'scenario failed')
-        self.assertIn('a: ours side exited 2', v['0x5845D0'][1])
+        self.assertEqual(v['0x5845D0'], ('scenario failed', 'a: ours side exited 2'))
         # a row that appears in a failed scenario is never equal: ours crashed in a
         crash = {'orig': t, 'ours': t[:2] + [{'tag': 'crash', 'where': 'x'}], 'failed': 'ours side exited 1'}
         v = truth.frida_verdicts({'a': crash, 'b': good}, rows)
@@ -13705,6 +15152,601 @@ class TruthTest(unittest.TestCase):
                 return done
             traces = truth.frida_run('b011', table, ['s1'], run=rc2, root=root)
             self.assertIn('exited 2', traces['s1']['failed'])
+
+    def _frida_fake(self, root, exits=None, status=None):
+        """A fake probe runner leaving a trace (and, with `status`, a .status
+        file per side) under root/runs; records each argv in .calls."""
+        import subprocess as sp
+        calls = []
+
+        def fake(cmd, **kw):
+            calls.append(cmd)
+            target = cmd[cmd.index('--target') + 1]
+            out = cmd[cmd.index('--out') + 1]
+            d = os.path.join(root, 'runs', 'x-' + target, 'replay')
+            os.makedirs(d, exist_ok=True)
+            with open(os.path.join(d, out), 'w') as f:
+                f.write(json.dumps({'tag': 'fn_5845D0', 'a0_s32': 1}) + '\n')
+            if status:
+                with open(os.path.join(d, out + '.status'), 'w') as f:
+                    f.write(status[target])
+            return sp.CompletedProcess(cmd, (exits or {}).get(target, 0),
+                                       stdout='probe: runs/x-%s\n' % target, stderr='')
+        fake.calls = calls
+        return fake
+
+    def test_frida_run_compares_each_scenarios_dumps(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as root:
+            fake = self._frida_fake(root)
+            table = truth.hook_table(self.ROWS, self.SIGS, self.MAP, ['a'])
+            seen = []
+
+            def dumps(orig_dir, ours_dir, script):
+                seen.append((orig_dir, ours_dir, script))
+                return {'match': False, 'detail': '1 difference(s)'}
+            got = truth.frida_run('b011', table, ['world_entry'], run=fake, root=root, dumps=dumps)
+            self.assertEqual(seen, [(os.path.join(root, 'runs', 'x-original', 'replay'),
+                                     os.path.join(root, 'runs', 'x-ours', 'replay'),
+                                     os.path.join(root, 'runs', 'x-ours', 'scenario.txt'))])
+            self.assertEqual(got['world_entry']['dumps'], {'match': False, 'detail': '1 difference(s)'})
+            # a failed scenario compares nothing
+            seen.clear()
+            got = truth.frida_run('b011', table, ['world_entry'], run=self._frida_fake(
+                root, exits={'ours': 2}), root=root, dumps=dumps)
+            self.assertEqual(seen, [])
+            self.assertIsNone(got['world_entry']['dumps'])
+
+    @staticmethod
+    def _fixture_dump(name):
+        return json.loads(_slurp(os.path.join(ROOT, 'tests', 'fixtures',
+                                              'state_dump_%s.json' % name)))
+
+    @staticmethod
+    def _dump_sides(root, orig_dumps, ours_dumps):
+        """Two replay folders under root, each holding its {file name: dump}."""
+        sides = [os.path.join(root, side) for side in ('orig', 'ours')]
+        for side, dumps in zip(sides, (orig_dumps, ours_dumps)):
+            for name, dump in dumps.items():
+                _write(os.path.join(side, name), json.dumps(dump))
+        return sides
+
+    def test_compare_dumps_uses_the_replay_compare(self):
+        with tempfile.TemporaryDirectory() as root:
+            script = os.path.join(root, 'scenario.txt')
+            _write(script, 'wait 10\ncheckpoint world\nquit\n')
+            world, periodic = self._fixture_dump('world'), self._fixture_dump('periodic')
+            same = {'checkpoint-world.json': world, 'frame-30.json': periodic}
+            sides = self._dump_sides(root, same, same)
+            got = truth.compare_dumps(sides[0], sides[1], script)
+            self.assertEqual(got, {'match': True,
+                                   'detail': '1 checkpoints and 1 periodic dumps match'})
+            moved = json.loads(json.dumps(periodic))
+            moved['chargen']['rolls'][0] += 1
+            _write(os.path.join(sides[1], 'frame-30.json'), json.dumps(moved))
+            got = truth.compare_dumps(sides[0], sides[1], script)
+            self.assertIs(got['match'], False)
+            self.assertIn('chargen.rolls[0]', got['detail'])
+            os.unlink(os.path.join(sides[1], 'checkpoint-world.json'))
+            self.assertIn('MISSING', truth.compare_dumps(sides[0], sides[1], script)['detail'])
+            empty = os.path.join(root, 'empty.txt')
+            _write(empty, 'wait 10\nquit\n')
+            self.assertIsNone(truth.compare_dumps(os.path.join(root, 'none1'),
+                                                  os.path.join(root, 'none2'), empty)['match'])
+
+    def test_compare_dumps_skips_ours_only_and_timing_fields_as_the_harness_does(self):
+        # the b014 world_entry pair, in small: the recorder writes no
+        # search_wait_timeouts and the two runs' timing fields differ; the
+        # replay compare (oracle.field_differences) skips both, so the dumps
+        # match; a world value that differs does not
+        oracle = load_tool('oracle')
+        with tempfile.TemporaryDirectory() as root:
+            script = os.path.join(root, 'scenario.txt')
+            _write(script, 'wait 10\ncheckpoint world\nquit\n')
+            world, periodic = self._fixture_dump('world'), self._fixture_dump('periodic')
+            orig = {'checkpoint-world.json': json.loads(json.dumps(world)),
+                    'frame-30.json': json.loads(json.dumps(periodic))}
+            for dump in orig.values():
+                for field in oracle.OURS_ONLY_FIELDS:
+                    dump[field.split('.')[0]].pop(field.split('.')[1])
+            ours = {'checkpoint-world.json': json.loads(json.dumps(world)),
+                    'frame-30.json': json.loads(json.dumps(periodic))}
+            for dump in ours.values():
+                dump['globals']['search_wait_timeouts'] = 3
+                for field in oracle.TIMING_FIELDS:
+                    if field == 'frame':
+                        dump['frame'] += 1
+                    else:
+                        dump['globals'][field.split('.')[1]] += 1
+            self.assertEqual(set(oracle.OURS_ONLY_FIELDS) | set(oracle.TIMING_FIELDS),
+                             {'globals.search_wait_timeouts', 'frame', 'globals.au_counter',
+                              'globals.ai_stalled_frames', 'globals.ai_overlap_frames',
+                              'globals.in_async_update', 'globals.held_frames'})
+            sides = self._dump_sides(root, orig, ours)
+            self.assertEqual(truth.compare_dumps(sides[0], sides[1], script),
+                             {'match': True, 'detail': '1 checkpoints and 1 periodic dumps match'})
+            hurt = json.loads(json.dumps(ours['checkpoint-world.json']))
+            hurt['world']['enemy_creatures'][0]['hp'] -= 1
+            _write(os.path.join(sides[1], 'checkpoint-world.json'), json.dumps(hurt))
+            got = truth.compare_dumps(sides[0], sides[1], script)
+            self.assertIs(got['match'], False)
+            self.assertIn('DIFF world.enemy_creatures[0].hp: original 4, ours 3', got['detail'])
+
+    def test_compare_dumps_refuses_dumps_the_schema_refuses(self):
+        # replay record checks every dump against schema.json (finish_replay)
+        # before anything compares it; a recorder built before the schema
+        # grew world.enemy_creatures and party morale (the b014/i001 runs:
+        # recorder.dll of 2026-10-17 12:15) is caught there, not read as an
+        # engine difference: no verdict, the side and the cause named
+        oracle = load_tool('oracle')
+        with tempfile.TemporaryDirectory() as root:
+            script = os.path.join(root, 'scenario.txt')
+            _write(script, 'wait 10\ncheckpoint world\nquit\n')
+            world, periodic = self._fixture_dump('world'), self._fixture_dump('periodic')
+            stale = json.loads(json.dumps(world))
+            del stale['world']['enemy_creatures']
+            for member in stale['world']['party']:
+                del member['morale']
+            sides = self._dump_sides(root, {'checkpoint-world.json': stale, 'frame-30.json': periodic},
+                                     {'checkpoint-world.json': world, 'frame-30.json': periodic})
+            got = truth.compare_dumps(sides[0], sides[1], script)
+            self.assertIsNone(got['match'])
+            self.assertEqual(got['invalid'], {'original': 1})
+            self.assertIn("the original's dumps fail oracle/replay/schema.json (1 of 2; first: "
+                          "checkpoint-world.json: $.world: missing required property "
+                          "'enemy_creatures')", got['detail'])
+            self.assertIn('recorder', got['detail'])
+            self.assertIn('tools/oracle.py build', got['detail'])
+            # ours failing it names our dumper
+            sides = self._dump_sides(os.path.join(root, 'b'),
+                                     {'checkpoint-world.json': world},
+                                     {'checkpoint-world.json': stale})
+            got = truth.compare_dumps(sides[0], sides[1], script)
+            self.assertEqual((got['match'], got['invalid']), (None, {'ours': 1}))
+            self.assertIn("our dumps fail oracle/replay/schema.json", got['detail'])
+            # the same check as replay record's
+            self.assertTrue(any(oracle.check_dumps(sides[1], json.loads(
+                _slurp(oracle.REPLAY_SCHEMA))).values()))
+
+    def test_frida_verdicts_dump_guard(self):
+        # equal events and final totals, but the two runs did not keep the
+        # same state: nothing is measured there, not even a difference
+        rows = [{'address': '0x5845D0'}]
+        ev = [{'tag': 'fn_5845D0', 'a0_s32': 1}]
+        base = {'orig': ev, 'ours': ev, 'failed': None, 'orig_exit': 0, 'ours_exit': 0,
+                'hits': {'orig': {'fn_5845D0': 1}, 'ours': {'fn_5845D0': 1}},
+                'final': {'orig': True, 'ours': True}}
+        for dumps, want in (({'match': True, 'detail': 'ok'}, 'equal'),
+                            ({'match': False, 'detail': '2 difference(s)'}, 'not measured'),
+                            (None, 'not measured'),
+                            ({'match': None, 'detail': 'no dump on a compared screen'}, 'not measured')):
+            got = truth.frida_verdicts({'world_entry': dict(base, dumps=dumps)}, rows)
+            self.assertEqual(got['0x5845D0'][0], want, dumps)
+        got = truth.frida_verdicts({'world_entry': dict(base, dumps={'match': False, 'detail': '2'})},
+                                   rows)
+        self.assertEqual(got['0x5845D0'], ('not measured', 'dumps differ in world_entry (2)'))
+        different = dict(base, ours=[{'tag': 'fn_5845D0', 'a0_s32': 2}],
+                         dumps={'match': False, 'detail': '2'})
+        self.assertEqual(truth.frida_verdicts({'world_entry': different}, rows)['0x5845D0'][0],
+                         'not measured')
+        # one scenario whose dumps differ keeps the row unmeasured
+        got = truth.frida_verdicts({'world_entry': dict(base, dumps={'match': True}),
+                                    'first_fight': dict(base, dumps={'match': False, 'detail': 'x'})},
+                                   rows)
+        self.assertEqual(got['0x5845D0'], ('not measured', 'dumps differ in first_fight (x)'))
+
+    def test_frida_run_argv_per_side(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as root:
+            fake = self._frida_fake(root)
+            table = truth.hook_table(self.ROWS, self.SIGS, self.MAP, ['a', 'b'])
+            truth.frida_run('b011', table, ['world_entry', 'walk_and_talk'], run=fake, root=root)
+            self.assertEqual(len(fake.calls), 4)
+            for c in fake.calls:
+                scenario = c[c.index('--scenario') + 1]
+                self.assertEqual(c[c.index('--clicks') + 1], '3')
+                self.assertEqual(c[c.index('--hit-min') + 1], '1')
+                self.assertEqual(c[c.index('--timeout') + 1], '180')
+                self.assertEqual(c[c.index('--new-attempt') + 1],
+                                 'driver frida b011 %s' % scenario)
+                self.assertNotIn('--hit', c)
+            self.assertEqual([('--loaded-rva' in c) for c in fake.calls], [False, True, False, True])
+            self.assertEqual([c[c.index('--scenario') + 1] for c in fake.calls],
+                             ['world_entry', 'world_entry', 'walk_and_talk', 'walk_and_talk'])
+            # explicit values and the scenario's own timeout header win
+            _write(os.path.join(root, 'scenarios', 'first_fight.txt'), '# timeout: 240\nclick 1 1\n')
+            fake.calls.clear()
+            truth.frida_run('b011', dict(table, clicks=5), ['first_fight'], run=fake, root=root,
+                            hit_min=2)
+            c = fake.calls[0]
+            self.assertEqual((c[c.index('--clicks') + 1], c[c.index('--hit-min') + 1],
+                              c[c.index('--timeout') + 1]), ('5', '2', '240'))
+            fake.calls.clear()
+            truth.frida_run('b011', table, ['first_fight'], run=fake, root=root, clicks=1, timeout=77)
+            c = fake.calls[0]
+            self.assertEqual((c[c.index('--clicks') + 1], c[c.index('--timeout') + 1]), ('1', '77'))
+            # no build checkout: probe.py runs this checkout's builds; with one,
+            # both sides run it (ours its exe, the original its injector and
+            # recorder: one tree writes both sides' dumps)
+            self.assertFalse(any('--build-checkout' in c for c in fake.calls))
+            fake.calls.clear()
+            truth.frida_run('b011', table, ['first_fight'], run=fake, root=root,
+                            build_checkout='/mnt/c/Users/u/iwd2r-build-p3-wso-i009')
+            self.assertEqual([c[c.index('--build-checkout') + 1] if '--build-checkout' in c else None
+                              for c in fake.calls],
+                             ['/mnt/c/Users/u/iwd2r-build-p3-wso-i009'] * 2)
+
+    def test_map_matches_constructors_and_destructors(self):
+        publics = {'??0CMessageHandler@@QAE@XZ': 0x220830,
+                   '??1CMessageHandler@@QAE@XZ': 0x222d20,
+                   '??_GCMessageHandler@@QAEPAXI@Z': 0x222d90,
+                   '?AddMessage@CMessageHandler@@QAEFPAVCMessage@@H@Z': 0x224a60,
+                   '??1CInner@COuter@@QAE@XZ': 0x300000}
+        self.assertEqual(truth._map_matches('CMessageHandler::~CMessageHandler', publics),
+                         {0x222d20: '??1CMessageHandler@@QAE@XZ'})
+        self.assertEqual(truth._map_matches('CMessageHandler::CMessageHandler', publics),
+                         {0x220830: '??0CMessageHandler@@QAE@XZ'})
+        self.assertEqual(truth._map_matches('COuter::CInner::~CInner', publics),
+                         {0x300000: '??1CInner@COuter@@QAE@XZ'})
+        self.assertEqual(truth._map_matches('CMessageHandler::AddMessage', publics),
+                         {0x224a60: '?AddMessage@CMessageHandler@@QAEFPAVCMessage@@H@Z'})
+        # the special members' tails read like any member's
+        self.assertEqual(truth.decorated_convention('??1CMessageHandler@@QAE@XZ'), '__thiscall')
+        self.assertEqual(truth.decorated_convention('??0CMessageHandler@@QAE@XZ'), '__thiscall')
+        self.assertEqual(truth.decorated_convention('?Roll@IcewindMisc@@YAHHH@Z'), '__cdecl')
+        # a destructor's Ghidra head hooks as a thiscall with no arguments
+        self.assertEqual(truth._hook_signature('void CMessageHandler::~CMessageHandler(void)',
+                                               '??1CMessageHandler@@QAE@XZ'),
+                         ('thiscall', [], None))
+
+    def test_exports_default_matches_export_decompiles(self):
+        # truth repeats the four-line default rather than loading the module
+        # (which puts tools/ on sys.path); this keeps the two in step
+        import importlib.util
+        path = os.path.join(ROOT, 'tools', 'ghidra', 'export_decompiles.py')
+        spec = importlib.util.spec_from_file_location('_export_decompiles_for_test', path)
+        mod = importlib.util.module_from_spec(spec)
+        saved_path, saved_mods = list(sys.path), set(sys.modules)
+        try:
+            spec.loader.exec_module(mod)
+            for home in (os.path.join(tempfile.gettempdir(), 'iwd2r-home-for-test'), '', None):
+                with mock.patch.dict(os.environ, {'IWD2R_HOME': home} if home is not None else {},
+                                     clear=False):
+                    if home is None:
+                        os.environ.pop('IWD2R_HOME', None)
+                    self.assertEqual(truth.exports_default(), mod._exports_default())
+        finally:
+            sys.path[:] = saved_path
+            for name in set(sys.modules) - saved_mods:
+                del sys.modules[name]
+
+    def test_export_signature_reads_the_ghidra_export_head(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as ex:
+            os.makedirs(os.path.join(ex, 'decompile'))
+            with open(os.path.join(ex, 'decompile', '407280.c'), 'w') as f:
+                f.write('/* header */\nvoid CAIGroup::GroupProtectPoint\n'
+                        '  /* the args */\n          (uint param_1,int param_2,undefined4 param_3)\n'
+                        '\n{\n  return;\n}\n')
+            with open(os.path.join(ex, 'decompile', '407FC0.c'), 'w') as f:
+                f.write('// nothing here\n')
+            want = 'void CAIGroup::GroupProtectPoint (uint param_1,int param_2,undefined4 param_3)'
+            self.assertEqual(truth.export_signature('0x407280', ex), want)
+            self.assertEqual(truth.export_signature('0x407fc0', ex), None)
+            self.assertEqual(truth.export_signature('0x999999', ex), None)
+
+    def test_frida_run_retries_a_side_that_came_home_with_no_status_once(self):
+        import tempfile
+        import subprocess as sp
+        clean = 'HITS fn_5845D0 4\nRESULT: CLEAN\n'
+        table = truth.hook_table(self.ROWS, self.SIGS, self.MAP, ['s1'])
+
+        def make(root, ours_statuses, ours_exit_first=2):
+            calls = []
+
+            def fake(cmd, **kw):
+                calls.append(cmd)
+                target = cmd[cmd.index('--target') + 1]
+                out = cmd[cmd.index('--out') + 1]
+                d = os.path.join(root, 'runs', 'x-' + target, 'replay')
+                os.makedirs(d, exist_ok=True)
+                with open(os.path.join(d, out), 'w') as f:
+                    f.write(json.dumps({'tag': 'fn_5845D0', 'a0_s32': 1}) + '\n')
+                rc, st = 0, clean
+                if target == 'ours':
+                    n = sum(1 for c in calls if c[c.index('--target') + 1] == 'ours') - 1
+                    rc, st = ours_statuses[min(n, len(ours_statuses) - 1)]
+                sp_path = os.path.join(d, out + '.status')
+                if os.path.exists(sp_path):
+                    os.remove(sp_path)
+                if st is not None:
+                    with open(sp_path, 'w') as f:
+                        f.write(st)
+                return sp.CompletedProcess(cmd, rc, stdout='probe: runs/x-%s\n' % target, stderr='')
+            fake.calls = calls
+            return fake
+
+        def ours_calls(fake):
+            return [c for c in fake.calls if c[c.index('--target') + 1] == 'ours']
+        with tempfile.TemporaryDirectory() as root:
+            fake = make(root, [(2, None), (0, clean)])
+            r = truth.frida_run('b011', table, ['s1'], run=fake, root=root,
+                                dumps=lambda *a: {'match': True, 'detail': 'x'})['s1']
+            self.assertTrue(r['measured'])
+            self.assertTrue(r['ours_retried'])
+            self.assertNotIn('orig_retried', r)
+            ours = ours_calls(fake)
+            self.assertEqual(len(ours), 2)
+            self.assertEqual(ours[1][ours[1].index('--new-attempt') + 1],
+                             'driver frida b011 s1 retry: ours side came home with no status')
+            fake = make(root, [(2, None)])
+            r = truth.frida_run('b011', table, ['s1'], run=fake, root=root,
+                                attempt_reason=lambda sc, k: 'why %s %s' % (sc, k))['s1']
+            self.assertFalse(r['measured'])
+            self.assertIn('ours side exited 2', r['failed'])
+            self.assertEqual(len(ours_calls(fake)), 2)
+            self.assertEqual(ours_calls(fake)[1][ours_calls(fake)[1].index('--new-attempt') + 1],
+                             'why s1 ours retry: no status')
+            fake = make(root, [(2, 'HITS fn_5845D0 0\nRESULT: UNSAFE\n')])
+            r = truth.frida_run('b011', table, ['s1'], run=fake, root=root)['s1']
+            self.assertFalse(r['measured'])
+            self.assertNotIn('ours_retried', r)
+            self.assertEqual(len(ours_calls(fake)), 1)
+
+    def test_frida_run_marks_exit2_side_not_measured(self):
+        import tempfile
+        status = {'original': 'HITS fn_5845D0 283\nRESULT: CLEAN  (x)\n',
+                  'ours': 'HITS fn_5845D0 0\nRESULT: NOT-EXERCISED\n'}
+        with tempfile.TemporaryDirectory() as root:
+            fake = self._frida_fake(root, exits={'ours': 2}, status=status)
+            table = truth.hook_table(self.ROWS, self.SIGS, self.MAP, ['s1'])
+            r = truth.frida_run('b011', table, ['s1'], run=fake, root=root)['s1']
+            self.assertEqual((r['orig_exit'], r['ours_exit']), (0, 2))
+            self.assertEqual(r['result'], {'orig': 'CLEAN', 'ours': 'NOT-EXERCISED'})
+            self.assertFalse(r['measured'])
+            self.assertIn('ours side exited 2', r['failed'])
+            self.assertEqual(r['hits']['orig'], {'fn_5845D0': 283})
+            # not fatal: the verdicts name the scenario instead of raising
+            v = truth.frida_verdicts({'s1': r}, self.ROWS[:1])
+            self.assertEqual(v['0x5845D0'][0], 'scenario failed')
+            clean = {'original': 'HITS fn_5845D0 4\nRESULT: CLEAN\n',
+                     'ours': 'HITS fn_5845D0 4\nRESULT: CLEAN\n'}
+            fake = self._frida_fake(root, status=clean)
+            r = truth.frida_run('b011', table, ['s1'], run=fake, root=root)['s1']
+            self.assertTrue(r['measured'])
+            self.assertEqual(r['result'], {'orig': 'CLEAN', 'ours': 'CLEAN'})
+
+    def test_frida_verdicts_frequency_only_is_equal_with_a_note(self):
+        # The final review's ruling: every captured event equal but the final
+        # totals differ -> equal; the frequency difference travels in info,
+        # never as a status (a caller finding)
+        t = self._trace(('fn_5845D0', 7, 3))
+        rows = self.ROWS[:1]
+
+        def scenario(orig_n, ours_n):
+            return {'orig': t, 'ours': t, 'failed': None, 'final': {'orig': True, 'ours': True},
+                    'hits': {'orig': {'fn_5845D0': orig_n}, 'ours': {'fn_5845D0': ours_n}}}
+        info = {}
+        v = truth.frida_verdicts({'walk_and_talk': scenario(283, 310)}, rows, info=info)
+        self.assertEqual(v['0x5845D0'], ('equal', 'identical in walk_and_talk'))
+        self.assertEqual(info['notes'], {'0x5845D0': [
+            'walk_and_talk: frequency only: original 283 calls, ours 310 (final totals); '
+            'every captured event equal']})
+        self.assertEqual(info['exact'], {'0x5845D0': ['walk_and_talk']})
+        info = {}
+        self.assertEqual(truth.frida_verdicts({'w': scenario(283, 283)}, rows, info=info)['0x5845D0'][0],
+                         'equal')
+        self.assertEqual(info['notes'], {})
+        # a bare pair carries no status data at all: the events decide
+        bare = {'orig': t, 'ours': t, 'failed': None}
+        self.assertEqual(truth.frida_verdicts({'w': bare}, rows)['0x5845D0'][0], 'equal')
+        # status files without HITS lines (both sides, or one) never read equal
+        for hits in ({'orig': None, 'ours': None}, {'orig': {}, 'ours': {}},
+                     {'orig': {'fn_5845D0': 4}, 'ours': {}}, {'orig': None, 'ours': {'fn_5845D0': 4}}):
+            v = truth.frida_verdicts({'w': dict(bare, hits=hits)}, rows)['0x5845D0']
+            self.assertEqual(v[0], 'not measured', hits)
+            self.assertIn('no final HITS totals', v[1])
+        # totals that were not the exit-time ones, on either side, never read equal or different
+        full = {'orig': {'fn_5845D0': 4}, 'ours': {'fn_5845D0': 9}}
+        for final in ({'orig': True, 'ours': False}, {'orig': False, 'ours': True}, {}, {'orig': False, 'ours': False}):
+            v = truth.frida_verdicts({'w': dict(bare, hits=full, final=final)}, rows)['0x5845D0']
+            self.assertEqual(v[0], 'not measured', final)
+            self.assertEqual(v[1], 'no final HITS totals in w')
+        same = {'orig': {'fn_5845D0': 4}, 'ours': {'fn_5845D0': 4}}
+        self.assertEqual(truth.frida_verdicts({'w': dict(bare, hits=same, final={'orig': True, 'ours': False})},
+                                              rows)['0x5845D0'][0], 'not measured')
+        # events that differ are different whether or not the totals are final
+        bad = [{'tag': 'fn_5845D0', 'a0_s32': 8}, {'tag': 'fn_5845D0_ret', 'ret': 3}]
+        self.assertEqual(truth.frida_verdicts({'w': {'orig': t, 'ours': bad, 'failed': None, 'hits': same, 'final': {}}},
+                                              rows)['0x5845D0'][0], 'different')
+
+    def test_frida_verdicts_prefix_case(self):
+        # one side's events a strict prefix of the other's, that side under the
+        # hooks' cap: frequency-only with final totals on both sides (equal,
+        # a note, no exact scenario to cite), not measured without them
+        rows = self.ROWS[:1]
+        three = self._trace(('fn_5845D0', 7, 3), ('fn_5845D0', 8, 4), ('fn_5845D0', 9, 5))
+        two = three[:5]
+        final = {'final': {'orig': True, 'ours': True},
+                 'hits': {'orig': {'fn_5845D0': 3}, 'ours': {'fn_5845D0': 2}}}
+        info = {}
+        v = truth.frida_verdicts({'first_fight': dict({'orig': three, 'ours': two, 'failed': None},
+                                                      **final)}, rows, info=info)
+        self.assertEqual(v['0x5845D0'], ('equal', 'identical in first_fight'))
+        self.assertEqual(info['exact'], {'0x5845D0': []})
+        self.assertIn("first_fight: frequency only: original 3 calls, ours 2 (final totals); "
+                      "the ours trace is a prefix of the other's", info['notes']['0x5845D0'])
+        # with an exact scenario too, that one is cited first
+        info = {}
+        exact = dict({'orig': three, 'ours': three, 'failed': None}, **dict(
+            final, hits={'orig': {'fn_5845D0': 3}, 'ours': {'fn_5845D0': 3}}))
+        v = truth.frida_verdicts({'first_fight': dict({'orig': three, 'ours': two, 'failed': None},
+                                                      **final), 'walk_and_talk': exact}, rows, info=info)
+        self.assertEqual(v['0x5845D0'], ('equal', 'identical in walk_and_talk, first_fight'))
+        self.assertEqual(info['exact'], {'0x5845D0': ['walk_and_talk']})
+        # without final totals (a killed run's shorter trace): not measured
+        for extra in ({}, {'hits': final['hits'], 'final': {'orig': True, 'ours': False}}):
+            v = truth.frida_verdicts({'w': dict({'orig': three, 'ours': two, 'failed': None}, **extra)}, rows)
+            self.assertEqual(v['0x5845D0'], ('not measured', 'no final HITS totals in w'), extra)
+        # not a prefix (a differing call inside the shorter trace): different
+        off = self._trace(('fn_5845D0', 7, 3), ('fn_5845D0', 8, 99))
+        v = truth.frida_verdicts({'w': dict({'orig': three, 'ours': off, 'failed': None}, **final)}, rows)
+        self.assertEqual(v['0x5845D0'][0], 'different')
+        # the shorter side at the hooks' cap is not "under the cap": a difference
+        capped = self._trace(*[('fn_5845D0', 1, 1)] * truth.HOOK_MAX)
+        longer = capped + self._trace(('fn_5845D0', 1, 1))
+        v = truth.frida_verdicts({'w': dict({'orig': longer, 'ours': capped, 'failed': None}, **final)}, rows)
+        self.assertEqual(v['0x5845D0'][0], 'different')
+        # called on one side only, final totals or not: not measured, with a note
+        info = {}
+        v = truth.frida_verdicts({'w': dict({'orig': three, 'ours': [], 'failed': None}, **dict(
+            final, hits={'orig': {'fn_5845D0': 3}, 'ours': {'fn_5845D0': 0, 'x': 1}}))}, rows, info=info)
+        self.assertEqual(v['0x5845D0'], ('not measured', 'called on one side only in w'))
+        self.assertIn('called on one side only', info['notes']['0x5845D0'][0])
+
+    def test_exit_time_hit_totals(self):
+        hooks_mod = load_tool('frida/hooks')
+        js = hooks_mod.hit_counts_js([{'name': 'fn_A'}, {'name': 'fn_B'}])
+        self.assertIn("'fn_A': cnt0, 'fn_B': cnt1", js)
+        self.assertIn("'ExitProcess'", js)
+        self.assertIn("'TerminateProcess'", js)
+        self.assertIn("final: true", js)
+        self.assertIn("recv('HITSACK'", js)
+        self.assertIn('.wait()', js)
+        self.assertIn('setInterval', js)
+        # the sidecar: a final HITS replaces the timer's, is acked, and is reported
+        orig = load_tool('frida/orig')
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, True)
+        posted = []
+        tr = orig.Trace(os.path.join(d, 'o.jsonl'), os.path.join(d, 'o.status'))
+        tr.script = type('S', (), {'post': lambda self, m: posted.append(m)})()
+        tr.on_message({'type': 'send', 'payload': {'tag': 'HITS', 'counts': {'fn_A': 3}}}, None)
+        self.assertFalse(tr.final)
+        self.assertEqual(posted, [])
+        tr.on_message({'type': 'send', 'payload': {'tag': 'HITS', 'final': True, 'counts': {'fn_A': 9}}}, None)
+        tr.on_message({'type': 'send', 'payload': {'tag': 'HITS', 'counts': {'fn_A': 4}}}, None)
+        self.assertTrue(tr.final)
+        self.assertEqual(posted, [{'type': 'HITS' + 'ACK'}])
+        self.assertEqual(tr.counts, {'fn_A': 9})
+        tr.loaded = True
+        tr.finish('', 1)
+        with open(os.path.join(d, 'o.status')) as f:
+            text = f.read()
+        self.assertIn('HITS fn_A 9', text)
+        self.assertIn('HITS-FINAL yes', text)
+        self.assertEqual(truth._read_status(os.path.join(d, 'o.status')), ('CLEAN', {'fn_A': 9}, True))
+        tr2 = orig.Trace(os.path.join(d, 'p.jsonl'), os.path.join(d, 'p.status'))
+        tr2.loaded = True
+        tr2.counts = {'fn_A': 2}
+        tr2.finish('', 1)
+        self.assertEqual(truth._read_status(os.path.join(d, 'p.status'))[2], False)
+        self.assertEqual(truth._read_status(os.path.join(d, 'none.status')), (None, None, False))
+        # frida_run carries it per side
+        with tempfile.TemporaryDirectory() as root:
+            yes = 'HITS fn_5845D0 4\nHITS-FINAL yes\nRESULT: CLEAN\n'
+            no = 'HITS fn_5845D0 4\nRESULT: CLEAN\n'
+            fake = self._frida_fake(root, status={'original': yes, 'ours': no})
+            table = truth.hook_table(self.ROWS, self.SIGS, self.MAP, ['s1'])
+            r = truth.frida_run('b011', table, ['s1'], run=fake, root=root)['s1']
+            self.assertEqual(r['final'], {'orig': True, 'ours': False})
+
+    def test_a_site_frida_cannot_hook_is_reported_not_fatal(self):
+        # i001: CInfGame::CacheResFileWithResource is `ret 4` + int3 padding in
+        # our build (rva 0x1f26b0); Interceptor.attach threw at the script's
+        # top level, so the hooks after it, the loaded observation and the
+        # exit-time totals never installed: ours ended OBSERVER-ERROR with
+        # HITS-FINAL no, the error text only in the trace file
+        hooks_mod = load_tool('frida/hooks')
+        table = [{'name': 'fn_5A0950', 'rva': '0x1f26b0', 'conv': 'thiscall', 'args': ['ptr']},
+                 {'name': 'fn_5A04B0', 'rva': '0x1f26c0', 'conv': 'thiscall', 'args': ['ptr'],
+                  'ret': 's32'}]
+        js = hooks_mod.hooks_js(table)
+        self.assertEqual(js.count('try {'), 2)
+        self.assertEqual(js.count('Interceptor.attach('), 2)
+        for i, hook in enumerate(table):
+            one = hooks_mod.js_for_hook(hook, i)
+            self.assertLess(one.index('try {'), one.index('Interceptor.attach('))
+            catch = one[one.index('} catch (e) {'):]
+            self.assertIn("tag: 'unhooked', name: '%s'" % hook['name'], catch)
+            self.assertIn('error: String(e)', catch)
+        # every hook orig.py installs is guarded, its own loaded hook too
+        orig = load_tool('frida/orig')
+        full = orig.build_js({'hooks': table})
+        self.assertEqual(full.count("tag: 'unhooked'"), 3)
+        self.assertLess(full.index("tag: 'unhooked', name: 'loaded'"), full.index("tag: 'ready'"))
+        # the sidecar: an UNHOOKED line, no HITS line for it, the run still CLEAN
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, True)
+        trace, status = os.path.join(d, 'o.jsonl'), os.path.join(d, 'o.status')
+        tr = orig.Trace(trace, status)
+        err = 'Error: unable to intercept function at 00B126B0; please file a bug'
+        tr.on_message({'type': 'send', 'payload': {'tag': 'unhooked', 'name': 'fn_5A0950',
+                                                   'addr': '0xb126b0', 'error': err}}, None)
+        tr.on_message({'type': 'send', 'payload': {'tag': 'loaded'}}, None)
+        tr.on_message({'type': 'send', 'payload': {'tag': 'HITS', 'final': True, 'counts': {
+            'fn_5A0950': 0, 'fn_5A04B0': 2, 'loaded': 1}}}, None)
+        self.assertEqual(tr.finish('', 1), 0)
+        text = _slurp(status)
+        self.assertIn('UNHOOKED fn_5A0950 at 0xb126b0: ' + err + '\n', text)
+        self.assertNotIn('HITS fn_5A0950', text)
+        self.assertIn('HITS fn_5A04B0 2\n', text)
+        self.assertIn('HITS-FINAL yes\n', text)
+        self.assertIn('RESULT: CLEAN', text)
+        self.assertEqual(truth._read_status(status), ('CLEAN', {'fn_5A04B0': 2, 'loaded': 1}, True))
+        # the trace keeps the event: frida_verdicts reads it
+        self.assertEqual(json.loads(_slurp(trace).splitlines()[0]),
+                         {'tag': 'unhooked', 'name': 'fn_5A0950', 'addr': '0xb126b0', 'error': err})
+        # an unhooked loaded observation cannot pass for loaded
+        tr = orig.Trace(os.path.join(d, 'l.jsonl'), os.path.join(d, 'l.status'))
+        tr.on_message({'type': 'send', 'payload': {'tag': 'unhooked', 'name': 'loaded',
+                                                   'addr': '0x1', 'error': err}}, None)
+        self.assertEqual(tr.finish('', 1), 2)
+        self.assertIn('RESULT: NOT-LOADED', _slurp(os.path.join(d, 'l.status')))
+        # any other script error: its text in the status file, not only the trace
+        tr = orig.Trace(os.path.join(d, 'e.jsonl'), os.path.join(d, 'e.status'))
+        tr.on_message({'type': 'error', 'description': 'ReferenceError: x is not defined',
+                       'stack': 'ReferenceError: x is not defined\n    at <eval> (/script1.js:54:19)',
+                       'fileName': '/script1.js', 'lineNumber': 54, 'columnNumber': 19}, None)
+        tr.loaded = True
+        self.assertEqual(tr.finish('', 1), 2)
+        text = _slurp(os.path.join(d, 'e.status'))
+        self.assertIn('ERROR script: ReferenceError: x is not defined (/script1.js:54)\n', text)
+        self.assertIn('RESULT: OBSERVER-ERROR', text)
+
+    def test_frida_verdicts_a_row_frida_could_not_hook_is_not_measured(self):
+        rows = self.ROWS[:2]
+        t = self._trace(('fn_5845D0', 7, 3), ('fn_73F560', 1, 9))
+        err = 'Error: unable to intercept function at 00B126B0; please file a bug'
+        unhooked = {'tag': 'unhooked', 'name': 'fn_5845D0', 'addr': '0xb126b0', 'error': err}
+        ours = [unhooked] + [e for e in t if not str(e['tag']).startswith('fn_5845D0')]
+        base = {'failed': None, 'final': {'orig': True, 'ours': True},
+                'hits': {'orig': {'fn_5845D0': 1, 'fn_73F560': 1}, 'ours': {'fn_73F560': 1}},
+                'dumps': {'match': True, 'detail': 'ok'}}
+        v = truth.frida_verdicts({'world_entry': dict(base, orig=t, ours=ours)}, rows)
+        self.assertEqual(v['0x5845D0'], ('not measured', 'Frida could not hook it on ours in '
+                                                         'world_entry (%s)' % err))
+        self.assertEqual(v['0x73F560'], ('equal', 'identical in world_entry'))
+        # the original not calling it there proves nothing either: ours is blind
+        orig = [e for e in t if not str(e['tag']).startswith('fn_5845D0')]
+        v = truth.frida_verdicts({'world_entry': dict(base, orig=orig, ours=ours)}, rows)
+        self.assertEqual(v['0x5845D0'][0], 'not measured')
+        # either side
+        v = truth.frida_verdicts({'world_entry': dict(base, orig=[unhooked] + orig, ours=t)}, rows)
+        self.assertEqual(v['0x5845D0'], ('not measured', 'Frida could not hook it on the original '
+                                                         'in world_entry (%s)' % err))
+
+    def test_frida_batch_types_from_our_headers_by_default(self):
+        seen = []
+        rows = [{'address': '0x100', 'name': 'CTlkTable::Fetch'}]
+        sigs = {'0x100': 'uint Fetch(uint a, int b)'}
+        info = {}
+        with mock.patch.object(truth, '_our_headers', lambda root=None: ['class CTlkTable {\n BOOLEAN Fetch(DWORD a, STR_RES& b);\n};\n']):
+            truth.frida_batch('b', rows, sigs, self.TYPED_MAP, run_frida=lambda b, t, s: seen.append(t) or {}, info=info)
+            self.assertEqual(seen[0]['original']['hooks'][0]['args'], ['u32', 'ptr'])
+            self.assertEqual(info['typed_from'], {'0x100': 'ours'})
+            truth.frida_batch('b', rows, sigs, self.TYPED_MAP, run_frida=lambda b, t, s: seen.append(t) or {}, headers=[])
+            self.assertEqual(seen[1]['original']['hooks'][0]['args'], ['u32', 's32'])
 
     def test_trace_source_hashes_the_files_and_check_evidence_accepts_it(self):
         import tempfile
@@ -13776,6 +15818,25 @@ class TruthTest(unittest.TestCase):
         text = truth.calibration_text(cal)
         self.assertIn('Truth calibration (seed s, sample ' + ', '.join(sample), text)
 
+    def test_frida_default_needs_agreement(self):
+        state = self._cal_state()
+        rows, sample = truth.calibration_rows(state, 's')
+        mixed = {sample[0]: ('equal', '')}
+        mixed.update({a: ('different', 'd') for a in sample[1:9]})
+        cal = truth.calibrate(state, rows, {'oracle': {}, 'frida': mixed}, seed='s', sample=sample)
+        self.assertEqual((cal['paths']['frida']['agree'], cal['paths']['frida']['disagree']), (1, 8))
+        self.assertFalse(cal['frida_default'])
+        self.assertIn('measured 9 of 14, agree 1, disagree 8', cal['note'])
+        self.assertIn('miscalibrated', cal['note'])
+        good = {sample[0]: ('equal', ''), sample[1]: ('equal', ''), sample[2]: ('equal', ''),
+                sample[3]: ('different', 'd')}
+        cal = truth.calibrate(state, rows, {'oracle': {}, 'frida': good}, seed='s', sample=sample)
+        self.assertTrue(cal['frida_default'])
+        self.assertNotIn('note', cal)
+        cal = truth.calibrate(state, rows, {'oracle': {}, 'frida': None}, seed='s', sample=sample)
+        self.assertFalse(cal['frida_default'])
+        self.assertIn('deferred', cal['note'])
+
     def test_evidence_signature_and_oracle_candidates(self):
         pure = ('---\naddress: 0x1\n---\n## Decompiled (Ghidra)\n\n```c\n'
                 'int Rules::Mix(int a,\n    int b)\n\n{\n  return a * 3 + b;\n}\n```\n')
@@ -13834,6 +15895,73 @@ class TruthTest(unittest.TestCase):
                 truth.run_oracle('b011', wt, cases, build=built.append,
                                  run=lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, 'nothing\n', 'boom'))
 
+    def test_calibrate_runs_frida_with_injected_runner(self):
+        with tempfile.TemporaryDirectory() as d:
+            state = self._cal_state()
+            state_path = os.path.join(d, 'state.json')
+            with open(state_path, 'w') as f:
+                json.dump(state, f)
+            rows, sample = truth.calibration_rows(state, 's')
+            os.makedirs(os.path.join(d, 'docs', 'evidence'))
+            lines = [' Preferred load address is 00400000\n']
+            for r in rows:
+                _write(os.path.join(d, 'docs', 'evidence', r['address'][2:] + '.md'),
+                       '## Decompiled (Ghidra)\n\n```c\nint %s(int a)\n\n{\n  return a;\n}\n```\n'
+                       % r['name'].split('::')[1])
+                lines.append(' 0001:00000010       ?%s@C@@QAEHH@Z %08X f   c.obj\n'
+                             % (r['name'].split('::')[1], 0x401000 + int(r['address'], 16) % 0x1000))
+            lines.append(' 0001:00000020       ?EngineActivated@CScreenWorld@@UAEXXZ 00402000 f   w.obj\n')
+            map_path = os.path.join(d, 'x.map')
+            _write(map_path, ''.join(lines))
+            picked = [r for r in rows if r['sample']]
+            equal_rows, diff_row = picked[:3], picked[3]
+
+            def events(addr, ret):
+                tag = 'fn_%s' % addr[2:]
+                return [{'tag': tag, 'args': [1]}, {'tag': tag + '_ret', 'ret': ret}]
+
+            def fake_run(batch_id, table, scenarios, **kw):
+                self.assertEqual(kw['attempt_reason']('world_entry', 'orig'), 'calibrate world_entry original')
+                self.assertEqual(kw['attempt_reason']('world_entry', 'ours'), 'calibrate world_entry ours')
+                orig = [e for r in picked[:4] for e in events(r['address'], 1)]
+                ours = [e for r in equal_rows for e in events(r['address'], 1)] + events(diff_row['address'], 2)
+                hits = {'orig': {'fn_%s' % r['address'][2:]: 1 for r in picked[:4]}}
+                hits['ours'] = dict(hits['orig'])
+                ok = {'orig': orig, 'ours': ours, 'orig_path': None, 'ours_path': None, 'orig_exit': 0,
+                      'final': {'orig': True, 'ours': True},
+                      'ours_exit': 0, 'result': {'orig': 'CLEAN', 'ours': 'CLEAN'}, 'hits': hits,
+                      'measured': True, 'failed': None}
+                # ours failed, but the original completed and never hit any hook: "not hit"
+                bad = dict(ok, orig=[], ours=[], ours_exit=2,
+                           hits={'orig': {'fn_%s' % r['address'][2:]: 0 for r in picked[:4]}, 'ours': None},
+                           measured=False, failed='ours side exited 2')
+                return {'world_entry': ok, 'first_fight': bad, 'walk_and_talk': bad}
+            out = os.path.join(d, 'cal.json')
+            with mock.patch.object(truth, 'frida_run', fake_run), \
+                    mock.patch.object(truth, 'run_oracle', lambda b, w, c: {}):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    rc = truth.main(['calibrate', '--seed', 's', '--state', state_path, '--out', out,
+                                     '--evidence-root', d, '--frida-map', map_path, '--worktree', d])
+            self.assertEqual(rc, 0)
+            with open(out) as f:
+                cal = json.load(f)
+            self.assertEqual(cal['paths']['frida'], {'measured': 4, 'agree': 3, 'disagree': 1, 'of': 14})
+            self.assertTrue(cal['frida_default'])
+            self.assertNotIn('note', cal)
+            self.assertEqual(cal['frida_scenarios']['first_fight']['ours_exit'], 2)
+            self.assertEqual(cal['frida_rows'][diff_row['address']][0], 'different')
+            unmeasured = [a for a, (s, _c) in cal['frida_rows'].items() if s not in ('equal', 'different')]
+            self.assertEqual(len(unmeasured), 10)
+            # no map: refused; --no-frida: the deferred record
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                with mock.patch.object(truth, 'run_oracle', lambda b, w, c: {}):
+                    self.assertEqual(truth.main(['calibrate', '--seed', 's', '--state', state_path,
+                                                 '--out', out, '--evidence-root', d, '--worktree', d]), 2)
+                    truth.main(['calibrate', '--seed', 's', '--state', state_path, '--out', out,
+                                '--evidence-root', d, '--worktree', d, '--no-frida'])
+            with open(out) as f:
+                self.assertTrue(json.load(f)['paths']['frida']['deferred'])
+
     def test_calibrate_cli_writes_the_record_and_the_scorecard_paragraph(self):
         with tempfile.TemporaryDirectory() as d:
             state = self._cal_state()
@@ -13846,7 +15974,7 @@ class TruthTest(unittest.TestCase):
             with mock.patch.object(truth, 'run_oracle', lambda b, w, c: seen.append((b, w, c)) or {}):
                 with contextlib.redirect_stdout(io.StringIO()) as buf:
                     rc = truth.main(['calibrate', '--seed', 's', '--state', state_path, '--out', out,
-                                     '--evidence-root', d, '--worktree', d])
+                                     '--evidence-root', d, '--worktree', d, '--no-frida'])
             self.assertEqual(rc, 0)
             self.assertEqual(seen, [])                          # no evidence, no pure row, no build
             with open(out) as f:
@@ -14178,6 +16306,203 @@ class WaveCloseRulesTest(unittest.TestCase):
         self.assertEqual(rc, 0, out)
         self.assertIn('Ruling R70: dump readings may decide b001.', out)
         self.assertEqual(self.batches()['b001']['status'], 'closed')
+
+    # -- import batches: measured rows and parked rows ----------------------
+
+    SRC_BODY = '// 0x643CD0\nint Draw()\n{\n  return %d;\n}\n'
+    RENDER_BODY = '// 0x643CC0\nint Render()\n{\n  return 7;\n}\n'
+    FRIDA = ('frida b001-world_entry orig:' + 'a' * 64 + ' ours:' + 'b' * 64 + ' compare=0')
+
+    def _import_ready(self, trace=('0x643CC0',), src=None, parked=None, evidence=(),
+                      render=True):
+        """An import batch: evidence kind trace (the driver's frida line) for
+        `trace`, evidence of kind replay for `evidence`, Render imported in
+        src/A.cpp when `render`, an optional Draw body there, and the parked
+        files."""
+        self.init_repo()
+        for addr in trace + tuple(evidence):
+            stem = addr[2:]
+            head = (f'kind: trace\ntrace_source: {self.FRIDA}' if addr in trace
+                    else 'kind: replay')
+            _write(os.path.join(self.wt, 'docs', 'evidence', stem + '.md'),
+                   f'---\naddress: {addr}\nname: fn\n{head}\n---\n\nnotes\n')
+        body = (self.RENDER_BODY if render else '') + (
+            self.SRC_BODY % src if src is not None else '')
+        if body:
+            _write(os.path.join(self.wt, 'src', 'A.cpp'), body)
+        for entry in parked or ():
+            _write(os.path.join(self.wt, self.wave.parked_rel(entry['address'])),
+                   json.dumps(entry))
+        self.commit_worktree()
+
+    PARKED = [{'address': '0x643CD0', 'name': 'Draw', 'file': 'src/A.cpp', 'batch': 'b001',
+               'needs': 'world_entry, first_fight, walk_and_talk'}]
+
+    def test_import_close_accepts_parked_rows(self):
+        self._import_ready(parked=self.PARKED)
+        rc, out = self.close(kind='import')
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.batches()['b001']['status'], 'closed')
+
+    def test_import_close_refuses_unparked_dropped_row(self):
+        self._import_ready(parked=[])
+        first = self.first_sha()
+        rc, out = self.close(kind='import')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('no evidence file docs/evidence/643CD0.md (and 0x643CD0 is not parked: '
+                      'no docs/wso/import-parked/643CD0.json)', out)
+        self.assertNotIn('643CC0', out)
+        self.assertEqual(self.first_sha(), first)
+
+    def test_import_close_refuses_parked_row_with_body(self):
+        self._import_ready(parked=self.PARKED, src=1)
+        rc, out = self.close(kind='import')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('0x643CD0: parked (docs/wso/import-parked/643CD0.json) but its body is '
+                      'still changed against first', out)
+        self.assertEqual(self.batches()['b001']['status'], 'assigned')
+
+    def test_import_close_reads_parked_addresses_loosely_and_refuses_bad_ones(self):
+        self._import_ready(parked=[])
+        path = os.path.join(self.wt, 'docs', 'wso', 'import-parked', '643CD0.json')
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        for bad in ({'address': 5}, {'name': 'x'}, ['0x643CD0'], dict(self.PARKED[0], address='0x643CC0')):
+            with open(path, 'w') as f:
+                json.dump(bad, f)
+            self.commit_worktree('bad parked')
+            rc, out = self.close(kind='import')
+            self.assertEqual(rc, 1, out)
+            self.assertIn('docs/wso/import-parked/643CD0.json', out)
+            self.assertNotIn('Traceback', out)
+        with open(path, 'w') as f:
+            f.write('{not json')
+        self.commit_worktree('unreadable')
+        rc, out = self.close(kind='import')
+        self.assertIn('docs/wso/import-parked/643CD0.json is unreadable', out)
+        with open(path, 'w') as f:
+            json.dump(dict(self.PARKED[0], address='0X643cd0'), f)
+        self.commit_worktree('loose address')
+        rc, out = self.close(kind='import')
+        self.assertEqual(rc, 0, out)
+
+    def test_import_close_refuses_a_row_whose_body_is_unchanged(self):
+        # a row whose body was never imported (or was put back) cannot close on
+        # any evidence: the gate only checks the trace_source of touched functions
+        self._import_ready(parked=self.PARKED, render=False)
+        mb = self.git('merge-base', 'first', 'HEAD', cwd=self.wt).stdout.strip()[:12]
+        rc, out = self.close(kind='import')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('row 0x643CC0 not imported: body unchanged against %s; import it or '
+                      'park it (docs/wso/import-parked/643CC0.json)' % mb, out)
+
+    def test_import_close_refuses_evidence_nothing_measured(self):
+        # a worker-declared replay, or an oracle without a registered case,
+        # does not stand at close; an oracle case that oracle/cases registers does
+        self._import_ready(trace=(), evidence=('0x643CC0',), parked=self.PARKED)
+        rc, out = self.close(kind='import')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('docs/evidence/643CC0.md: kind replay was written in this batch and '
+                      'nothing measured it', out)
+        path = os.path.join(self.wt, 'docs', 'evidence', '643CC0.md')
+        _write(path, '---\naddress: 0x643CC0\nname: Render\nkind: oracle\n'
+                     'oracle_case: render/seven\n---\n')
+        self.commit_worktree('oracle without its case')
+        rc, out = self.close(kind='import')
+        self.assertIn('kind oracle was written in this batch and nothing measured it', out)
+        _write(os.path.join(self.wt, 'oracle', 'cases', 'render.cpp'),
+               'ORACLE_CASE("render/seven", Seven);\n')
+        self.commit_worktree('the case, not wired')
+        rc, out = self.close(kind='import')
+        # a case file oracle/CMakeLists.txt does not list never runs: not registered
+        self.assertIn('kind oracle was written in this batch and nothing measured it', out)
+        _write(os.path.join(self.wt, 'oracle', 'CMakeLists.txt'),
+               '# cases/render.cpp is listed below\nadd_executable(oracle_runner\n'
+               '        cases/selftest.cpp\n)\n')
+        self.commit_worktree('a comment is not a listing')
+        rc, out = self.close(kind='import')
+        self.assertIn('kind oracle was written in this batch and nothing measured it', out)
+        _write(os.path.join(self.wt, 'oracle', 'CMakeLists.txt'),
+               'add_executable(oracle_runner\n        cases/selftest.cpp cases/render.cpp\n)\n')
+        self.commit_worktree('wired')
+        rc, out = self.close(kind='import')
+        self.assertEqual(rc, 0, out)
+
+    def test_import_close_holds_dependencies_to_the_bar(self):
+        # Draw is not a batch row here: a touched dependency needs trace or better
+        self._import_ready(parked=[], src=1)
+        with open(self.state) as f:
+            state = json.load(f)
+        state['batches']['b001']['rows'] = [r for r in state['batches']['b001']['rows']
+                                            if r['address'] == '0x643CC0']
+        with open(self.state, 'w') as f:
+            json.dump(state, f)
+        rc, out = self.close(kind='import')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('0x643CD0 (Draw, imported with the batch): no evidence file '
+                      'docs/evidence/643CD0.md', out)
+        _write(os.path.join(self.wt, 'docs', 'evidence', '643CD0.md'),
+               '---\naddress: 0x643CD0\nname: Draw\nkind: read-only\nexemption: x\n---\n')
+        self.commit_worktree('dependency evidence')
+        rc, out = self.close(kind='import')
+        self.assertIn('0x643CD0 (Draw, imported with the batch): docs/evidence/643CD0.md: kind '
+                      'read-only is not trace or better', out)
+        _write(os.path.join(self.wt, 'docs', 'evidence', '643CD0.md'),
+               f'---\naddress: 0x643CD0\nname: Draw\nkind: trace\ntrace_source: {self.FRIDA}\n---\n')
+        self.commit_worktree('dependency measured')
+        rc, out = self.close(kind='import')
+        self.assertEqual(rc, 0, out)
+
+    def test_import_close_refuses_the_retired_parked_list(self):
+        self._import_ready(parked=self.PARKED)
+        _write(os.path.join(self.wt, 'docs', 'wso', 'import-parked.json'), '[]')
+        self.commit_worktree('old list')
+        rc, out = self.close(kind='import')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('docs/wso/import-parked.json is retired: write one file per row', out)
+
+    def test_two_batches_parking_different_rows_merge_cleanly(self):
+        # one file per row: two branches off first, each parking its own row,
+        # both merge into first without a conflict and both rows read back
+        self.init_repo()
+        for branch, entry in (('p3/wso-i001', dict(self.PARKED[0], batch='i001')),
+                              ('p3/wso-i002', dict(self.PARKED[0], address='0x643CC0',
+                                                   name='Render', batch='i002'))):
+            self.git('checkout', '-q', '-b', branch, 'first')
+            _write(os.path.join(self.root, self.wave.parked_rel(entry['address'])),
+                   json.dumps(entry))
+            self.git('add', '-A')
+            self.git('commit', '-qm', 'park ' + entry['address'])
+        self.git('checkout', '-q', 'first')
+        self.git('merge', '-q', '--no-edit', 'p3/wso-i001')
+        self.git('merge', '-q', '--no-edit', 'p3/wso-i002')     # check=True: a conflict raises
+        parked, bad = self.wave._parked_rows(self.root)
+        self.assertIsNone(bad)
+        self.assertEqual(sorted(parked), ['643cc0', '643cd0'])
+        self.assertEqual(parked['643cc0']['batch'], 'i002')
+
+    def test_parked_file_named_with_0x_prefix_is_read(self):
+        # i001's worker wrote docs/wso/import-parked/0x5A0950.json; the reader
+        # keys it by the bare address like a <ADDR>.json file (the brief asks
+        # for caps, no 0x; either spelling is the same row)
+        self.init_repo()
+        entry = dict(self.PARKED[0], address='0x5A0950', name='Stub', batch='i001')
+        _write(os.path.join(self.root, 'docs', 'wso', 'import-parked', '0x5A0950.json'),
+               json.dumps(entry))
+        parked, bad = self.wave._parked_rows(self.root)
+        self.assertIsNone(bad)
+        self.assertEqual(list(parked), ['5a0950'])
+        self.assertEqual(parked['5a0950']['batch'], 'i001')
+        # anything else in the folder is still refused
+        _write(os.path.join(self.root, 'docs', 'wso', 'import-parked', 'notes.json'), '{}')
+        parked, bad = self.wave._parked_rows(self.root)
+        self.assertIn('notes.json: not a parked row', bad)
+
+    def test_import_close_refuses_parked_row_whose_evidence_remains(self):
+        self._import_ready(parked=self.PARKED, evidence=('0x643CD0',))
+        rc, out = self.close(kind='import')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('0x643CD0: parked (docs/wso/import-parked/643CD0.json) but '
+                      'docs/evidence/643CD0.md still exists', out)
 
     def test_close_cli_takes_allow_dump_and_ledger(self):
         from unittest import mock

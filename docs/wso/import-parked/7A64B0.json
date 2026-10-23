@@ -1,0 +1,1 @@
+{"address": "0x7A64B0", "name": "CNetwork::JoinSelectedSession", "file": "src/CNetwork.cpp", "batch": "i001", "needs": "fork body is DirectPlay (DPSESSIONDESC2, IDirectPlay::Open with DPOPEN_JOIN) which ADR 0002 deletes from our tree; it cannot compile here; kept our body"}

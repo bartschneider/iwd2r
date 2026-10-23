@@ -68,6 +68,13 @@ def parse_report(text):
         cand = MARKER_RE.sub('', line, count=1).strip().strip('`').strip()
         m = VERDICT_RE.match(cand)
         if not m:
+            # Prose that names no address and does not try to be a verdict
+            # ("All 20 rows are decided; there is no ## Undecided section.")
+            # decides nothing and is skipped: a mangled verdict line always
+            # carries its address or the word verdict, and those still fail.
+            if not re.search(r'0[xX][0-9a-fA-F]+', cand) and \
+                    not cand.lower().startswith('verdict'):
+                continue
             raise ReportError('line %d: malformed verdict line: %r' % (n, raw))
         addr = '0x%X' % int(m.group(1), 16)
         side, case = m.group(2).lower(), m.group(3)
@@ -847,9 +854,11 @@ def transcript_checks(transcript_path, covered_files, tracked=None):
 
 
 # The paths a batch may change (ruling R71): anything else on the branch is
-# a check problem, tools/, tests/, .claude/, .mcp.json and docs/wso/ included.
+# a check problem, tools/, tests/, .claude/, .mcp.json and docs/wso/ included
+# (but for the import parked rows, one file per row, that the worker writes).
 ALLOWED_PATHS = ('src/', 'compat/', 'docs/evidence/', 'docs/MAP.md',
-                 'oracle/cases/', 'oracle/CMakeLists.txt')
+                 'oracle/cases/', 'oracle/CMakeLists.txt',
+                 'docs/wso/import-parked/')
 
 
 def _path_allowed(path):
@@ -893,9 +902,148 @@ def parse_undecided(text):
     return out
 
 
+FRIDA_SCENARIOS_TEXT = 'world_entry, first_fight, walk_and_talk'
+# The history rule's way to undo one function (first's 021a6cb0): the
+# function is edited back, never the whole file put back, which would
+# discard the other rows' changes in a shared file.  %s is the merge base.
+EDIT_BACK = ("edit that function back to the merge base's body (`git show %s:<path>` "
+             'shows it)')
+SHARED_FILE = "do not replace a file that holds other rows' changes"
+
+
+def park_text(address, mb, needs):
+    """How a worker parks one import row (the import brief's rule): the
+    function edited back, its evidence deleted, its own file under
+    docs/wso/import-parked/ (one per row, so parallel batches never
+    conflict), one commit."""
+    stem = address[2:].upper() if address.lower().startswith('0x') else address.upper()
+    # needs as a JSON string literal: a diff detail carries quotes of its own.
+    return ('%s, delete docs/evidence/%s.md, write docs/wso/import-parked/%s.json '
+            '{"address", "name", "file", "batch", "needs"} with needs %s, and commit '
+            'the three together; %s' % (EDIT_BACK % mb, stem, stem, json.dumps(needs),
+                                        SHARED_FILE))
+
+
+UNMEASURED_NEEDS = FRIDA_SCENARIOS_TEXT + ': not exercised'
+UNMEASURED = '%s: exercised by no scenario (' + FRIDA_SCENARIOS_TEXT + '); park it: %s'
+
+
+def _merge_base(worktree, base):
+    """Where the worktree's HEAD left base (`git merge-base base HEAD`), as
+    a short sha; base itself when git cannot tell."""
+    r = subprocess.run(['git', '-C', worktree, 'merge-base', base, 'HEAD'],
+                       capture_output=True, text=True)
+    sha = r.stdout.strip() if r.returncode == 0 else ''
+    return sha[:12] if sha else base
+
+
+X86_MAP_REL = 'build/windows-msvc-x86/RelWithDebInfo/iwd2r.map'
+
+
+FRIDA_BUILD_TARGETS = 'iwd2r iwd2r_injector iwd2r_recorder'
+
+
+def frida_build(worktree, log_path=None):
+    """Our x86 build of a batch worktree, for its Frida phase (spec B): the
+    worktree synced into its own Windows checkout (play.win_checkout:
+    %USERPROFILE%\\iwd2r-build-<worktree folder name>, never the driver's,
+    whatever IWD2R_WIN_CHECKOUT says) and built there with the x86 preset,
+    the compiler output in log_path: our exe and the oracle's injector and
+    recorder (FRIDA_BUILD_TARGETS), which the original side runs from the
+    same checkout (probe.py --build-checkout), so the recorder writing the
+    original's state dumps and the dumper writing ours come from one tree and
+    the dump guard compares like with like (the driver checkout's recorder,
+    older than schema.json, failed every b014/i001 guard).  Returns
+    (checkout, map path): the map beside the exe names the RVAs of the
+    bodies under test.  Raises on any failure (play exits with
+    SystemExit)."""
+    play = _tool('play')
+    oracle = _tool('oracle')
+    checkout = play.win_checkout(worktree, {})
+    play.sync_windows(root=worktree, checkout=checkout)
+    exe = play.build_windows_x86(checkout=checkout, log_path=log_path,
+                                 target=FRIDA_BUILD_TARGETS)
+    map_path = os.path.splitext(exe)[0] + '.map'
+    if not os.path.isfile(map_path):
+        raise RuntimeError('the x86 build left no %s' % map_path)
+    for name in (oracle.INJECTOR, oracle.RECORDER):
+        path = os.path.join(checkout, oracle.REPLAY_DIR_REL, name)
+        if not os.path.isfile(path):
+            raise RuntimeError('the x86 build left no %s' % path)
+    return checkout, map_path
+
+
+def _map_checkout(map_path):
+    """The Windows checkout whose x86 build wrote map_path (the --frida-map
+    override measures the exe beside it), or None when the map is not where
+    that build puts it."""
+    norm = os.path.normpath(os.path.abspath(map_path))
+    rel = os.path.normpath(X86_MAP_REL)
+    return norm[:-len(rel) - 1] if norm.endswith(os.sep + rel) else None
+
+
+def _infrastructure_failure(traces):
+    """The failures of a Frida run in which every scenario failed with no
+    status file on either side (nothing measured anything: an infrastructure
+    failure, the batch's exception, not its rows' park), else ''."""
+    runs = [(sc, t) for sc, t in sorted(traces.items()) if isinstance(t, dict)]
+    if not runs or len(runs) != len(traces) or not all(
+            t.get('failed') and not any((t.get('result') or {}).values()) for _sc, t in runs):
+        return ''
+    return '; '.join('%s: %s' % (sc, t['failed']) for sc, t in runs)
+
+
+def _schema_failure(traces):
+    """The scenarios whose state dumps truth.compare_dumps refused on the
+    replay schema (a recorder or our dumper out of step with schema.json:
+    every scenario's dump guard would fail on it, whatever the rows did),
+    with its detail, else ''."""
+    return '; '.join('%s: %s' % (sc, t['dumps'].get('detail'))
+                     for sc, t in sorted(traces.items())
+                     if isinstance(t, dict) and isinstance(t.get('dumps'), dict)
+                     and t['dumps'].get('invalid'))
+
+
+def _write_trace_evidence(path, probe, orig_path, ours_path):
+    """Rewrite one evidence file's front matter to `kind: trace` with the
+    `trace_source:` of a measured Frida pair (truth.trace_source_line) and no
+    `exemption:`; every other line, and the line endings, stay as they are."""
+    truth = _tool('truth')
+    with open(path, encoding='utf-8', newline='') as f:
+        lines = f.read().splitlines(keepends=True)
+    if not lines or lines[0].strip() != '---':
+        raise ValueError('%s has no front matter' % path)
+    end = next((i for i in range(1, len(lines)) if lines[i].strip() == '---'), None)
+    if end is None:
+        raise ValueError('%s has an unclosed front matter' % path)
+    eol = '\r\n' if lines[0].endswith('\r\n') else '\n'
+    source = truth.trace_source_line(probe, orig_path, ours_path)
+    head, kind_at, source_at = [], None, None
+    for line in lines[1:end]:
+        name = line.partition(':')[0].strip()
+        if name == 'exemption':
+            continue
+        if name == 'kind' and kind_at is None:
+            kind_at = len(head)
+            line = 'kind: trace' + (line[len(line.rstrip('\r\n')):] or eol)
+        elif name == 'trace_source' and source_at is None:
+            source_at = len(head)
+            line = 'trace_source: %s' % source + (line[len(line.rstrip('\r\n')):] or eol)
+        head.append(line)
+    if kind_at is None:
+        kind_at = len(head)
+        head.append('kind: trace' + eol)
+        if source_at is not None and source_at >= kind_at:
+            source_at += 1
+    if source_at is None:
+        head.insert(kind_at + 1, 'trace_source: %s%s' % (source, eol))
+    with open(path, 'w', encoding='utf-8', newline='') as f:
+        f.write(''.join([lines[0]] + head + lines[end:]))
+
+
 def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
                       kind='verdicts', transcript=None, covered_files=(),
-                      probe=(), base='first', undecided=()):
+                      probe=(), base='first', undecided=(), frida_lines=None):
     """Problems that stop a batch before any review; [] when clean.
 
     Each problem says what failed and how to fix it (it is the worker's
@@ -909,7 +1057,10 @@ def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
     paths changed against `base` outside ALLOWED_PATHS, are problems.
     `undecided` holds the addresses of the report's ## Undecided section
     (ruling R73): such a row needs no verdict line, and a verdict line for
-    it too is a problem."""
+    it too is a problem.  For an import batch, an evidence file changed
+    against the merge base whose trace_source is a frida line the driver did
+    not write (`frida_lines`, {address key: line} of the lines its Frida
+    phase wrote) is a problem: the driver writes frida evidence."""
     wave = _tool('wave')
     problems = []
     if transcript:
@@ -964,13 +1115,12 @@ def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
             changed = set()
             problems.append('cannot tell whether the undecided rows kept '
                             'our bodies (%r); fix it and rerun' % (e,))
+        mb = _merge_base(worktree, base)
         for k, a in sorted(inside.items()):
             if k in changed:
                 problems.append('%s: listed under ## Undecided but its body '
-                                'changed against %s; edit that function back to the '
-                                "base's body (`git show %s:<path>` shows it) and commit; "
-                                "do not replace a file that holds other rows' changes."
-                                % (a, base, base))
+                                'changed against %s; %s and commit; %s.'
+                                % (a, base, EDIT_BACK % mb, SHARED_FILE))
     for k, a in given.items():
         if k not in row_keys:
             problems.append('%s: verdict for an address outside this batch; '
@@ -1007,18 +1157,33 @@ def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
     if dirty:
         problems.append('uncommitted paths in the worktree; commit or '
                         'delete: %s' % ', '.join(sorted(dirty)))
+    # The base is where the branch left `base`, not `base` itself: commits
+    # that landed on first meanwhile (merged into the batch before the close)
+    # are not the worker's edits.
+    mbs, bad = _git_paths(run, worktree,
+                          ('merge-base', base, batch.get('branch') or 'HEAD'),
+                          str.strip)
+    if bad:
+        problems.append(bad)
     changed, bad = _git_paths(run, worktree,
-                              ('diff', '--name-only', '%s...HEAD' % base),
+                              ('diff', '--name-only') + (
+                                  (mbs[0], 'HEAD') if mbs
+                                  else ('%s...HEAD' % base,)),
                               str.strip)
     if bad:
         problems.append(bad)
+    if kind == 'import':
+        problems += _foreign_frida_lines(worktree, changed, frida_lines or {})
     outside = sorted(p for p in changed if not _path_allowed(p))
     if outside:
+        # These files hold no batch row, so the whole file goes back, from
+        # the merge base the diff above was taken against.
+        held = mbs[0][:12] if mbs else base
         problems.append('changed outside the paths a batch may touch (%s): '
-                        '%s; restore the base copy of each (`git show %s:<path> > '
-                        '<path>`, or `git rm <path>` when %s lacks the file) '
-                        'and commit' % (', '.join(ALLOWED_PATHS),
-                                        ', '.join(outside), base, base))
+                        '%s; put back the merge base\'s copy of each (`git show '
+                        '%s:<path> > <path>`, or `git rm <path>` when the merge base '
+                        'lacks the file; no batch row lives there) and commit'
+                        % (', '.join(ALLOWED_PATHS), ', '.join(outside), held))
     steps = [
         (['python3', '-I', 'tests/test_tools.py'], 'tests/test_tools.py'),
         (['python3', '-I', 'tools/check_evidence.py', '--base', 'first'],
@@ -1035,6 +1200,29 @@ def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
             problems.append('%s failed (exit %s); last lines: %s; fix it and '
                             'rerun' % (label, proc.returncode, _tail(proc)))
     return problems
+
+
+def _foreign_frida_lines(worktree, changed, frida_lines):
+    """Problems for the evidence files among `changed` whose trace_source is
+    a frida line the driver's phase did not write (frida_lines)."""
+    ce = _tool('check_evidence')
+    out = []
+    for rel in sorted(changed):
+        m = re.fullmatch(r'docs/evidence/([0-9A-Fa-f]+)\.md', rel)
+        if not m:
+            continue
+        try:
+            with open(os.path.join(worktree, rel), encoding='utf-8') as f:
+                source = ce.front_matter(f.read()).get('trace_source') or ''
+        except OSError:
+            continue
+        if ce.TRACE_SOURCES[1].fullmatch(source) and \
+                frida_lines.get(m.group(1).lower()) != source:
+            out.append('%s: a frida trace_source the driver did not write; the driver writes '
+                       'frida evidence: remove the line (write kind: read-only with an '
+                       'exemption: describing your reading; the Frida phase measures the row)'
+                       % rel)
+    return out
 
 
 def review_needed(batch, verdicts, seed, sample=0.2):
@@ -1184,13 +1372,8 @@ BLOCKING_RE = re.compile(r'^(?:[-*]|\d+\.)?\s*[*_`]*BLOCKING[*_`]*:')
 FIX_PROMPT = """# Fix round for batch {id}
 
 The driver's {stage} found the problems below in your work on `{branch}`
-(this worktree). Fix every one, commit, and write your report again: the
-full `## Verdicts` section, one line for every row you decide, not only
-the rows you fixed. `## Verdicts` holds verdict lines only; put notes under
-`## Notes`. A row whose reading is fork or neither, with no probe, replay
-or trace case you can run to decide it, gets no verdict line: keep our
-body and list it under `## Undecided` as `undecided <0xADDR> <fork|neither>
-<one-line reason>`. Never write `ours` for such a row.
+(this worktree). Fix every one, commit, and write your report again.
+{report_rule}
 
 {problems}
 
@@ -1199,6 +1382,33 @@ The original brief follows.
 ---
 
 {brief}"""
+
+
+FIX_REPORT_RULES = {
+    'verdicts': ("Write the full `## Verdicts` section, one line for every row you "
+                 "decide, not only the rows you fixed. `## Verdicts` holds verdict lines "
+                 "only; put notes under `## Notes`. A row whose reading is fork or neither, "
+                 "with no probe, replay or trace case you can run to decide it, gets no "
+                 "verdict line: keep our body and list it under `## Undecided` as "
+                 "`undecided <0xADDR> <fork|neither> <one-line reason>`. Never write "
+                 "`ours` for such a row."),
+    'import': ("This is an import batch: do not write a `## Verdicts` section at all, "
+               "not even an empty one or a placeholder line. Report as the brief says: "
+               "`## Imported` with one `imported <0xADDR> <evidence kind>` line per "
+               "function, then the commits you made, the evidence files you wrote and "
+               "anything you could not import (the rows you parked, with their parked "
+               "files)."),
+}
+
+
+def fix_prompt(batch_id, stage, branch, brief, problems, kind='verdicts'):
+    """The fix-round prompt: the problems, the report rule for the batch's
+    kind (a verdicts batch rewrites ## Verdicts; an import batch has none),
+    then the original brief."""
+    return FIX_PROMPT.format(
+        id=batch_id, stage=stage, branch=branch, brief=brief,
+        report_rule=FIX_REPORT_RULES['import' if kind == 'import' else 'verdicts'],
+        problems='\n'.join('- ' + p for p in problems))
 
 REVIEW_BRIEF = """# Review of wave-1 batch {id}
 
@@ -1446,6 +1656,7 @@ class _BatchContext(threading.local):
         self.undecided = {}     # address -> (side, reason) the worker listed (R73)
         self.probe = {}         # address key -> (side, case) the oracle passed
         self.frida_got = {}     # address key -> (status, detail) of its one Frida run
+        self.frida_notes = {}   # address key -> [frequency-only notes] (ledger lines)
         self.pool = None        # the pool this batch runs on
         self.t0 = None          # clock() at the cut or resume (ruling R61)
         self.usage = {'input': 0, 'cached': 0, 'output': 0, 'tool_calls': 0}
@@ -1483,7 +1694,7 @@ class Driver:
                  status_path, aoe_session=None, seed=DEFAULT_SEED, budget=None,
                  workers=1, *, push=None, send=None, dry_run=False, gate=True,
                  base='first', log=None, frida=False, frida_map=None,
-                 oracle_run=None, frida_run=None, pools=None,
+                 oracle_run=None, frida_run=None, frida_build=None, pools=None,
                  workers_by_pool=None, reviewers_by_pool=None, budgets=None,
                  queue='wave1', runner=None, clock=None, max_batches=None):
         wave = _tool('wave')
@@ -1542,9 +1753,12 @@ class Driver:
         self.calibration_path = os.path.join(docs, 'truth-calibration.json')
         truth = _tool('truth')
         self.frida = frida
+        self.exports_dir = None
         self.frida_map = frida_map
         self.oracle_run = truth.run_oracle if oracle_run is None else oracle_run
         self.frida_run = truth.frida_run if frida_run is None else frida_run
+        # The per-batch x86 build the phase measures (spec B); injectable.
+        self.frida_build = globals()['frida_build'] if frida_build is None else frida_build
         self.next_batch = wave.next_batch
         self.recompare = wave.recompare
         self._recompared = False
@@ -1594,6 +1808,7 @@ class Driver:
     _undecided = _per_thread('undecided')
     _probe = _per_thread('probe')
     _frida_got = _per_thread('frida_got')
+    _frida_notes = _per_thread('frida_notes')
 
     @property
     def worker(self):
@@ -1670,8 +1885,9 @@ class Driver:
 
         def apply(s):
             old = s['batches'].get(batch_id)
-            if isinstance(old, dict) and old.get('oracle_findings'):
-                entry['oracle_findings'] = old['oracle_findings']
+            for field in ('oracle_findings', 'frida_written'):
+                if isinstance(old, dict) and old.get(field):
+                    entry[field] = old[field]
             s['batches'][batch_id] = entry
             s['running'].pop(batch_id, None)
             # current: the latest batch still in flight, if any.
@@ -1922,6 +2138,8 @@ class Driver:
             kw = {'kind': 'import'} if self.kind == 'import' else {}
             kw['probe'] = sorted(self._probe)
             kw['undecided'] = sorted(listed)
+            if self.kind == 'import':
+                kw['frida_lines'] = self._frida_lines(batch_id)
             return verdicts, self.mechanical_checks(
                 dict(batch, id=batch_id), worktree, verdicts, **kw)
         except OSError as e:
@@ -1953,7 +2171,9 @@ class Driver:
         key = _tool('wave')._addr_key(addr)
         if key in self._probe:
             return 'probe'
-        if side == 'ours' and self._frida_got.get(key, ('',))[0] == 'equal':
+        # The Frida phase measures the batch's own build, so an equal row
+        # confirms whichever side's body the branch holds.
+        if side and self._frida_got.get(key, ('',))[0] == 'equal':
             return 'frida'
         return None
 
@@ -2102,55 +2322,321 @@ class Driver:
 
     def _frida_phase(self, batch_id, batch, worktree, verdicts):
         """After the worker, with --frida: one batched Frida differential run
-        over the open rows the oracle did not decide.  Equal confirms a
-        verdict of ours (measured frida); different where the verdict says
-        ours, or equal where it says the fork, is a finding for the one fix
-        round.  It runs once per batch, never again.  Returns the findings."""
+        (all three scenarios) of an x86 build of the batch worktree
+        (_frida_target).  Wave 1 measures the open rows the oracle did not
+        decide; the build is the branch's, so equal confirms whichever side
+        the verdict records (measured frida) and different is a finding for
+        that side.  An import batch measures every row not parked plus every
+        function the batch touched that carries a `// 0xADDR` marker (a
+        dependency imported with a row), except the ones whose evidence
+        stands as written (wave.kept_evidence: an oracle case, a fork note
+        that names the function, or evidence unchanged since the merge base);
+        an equal row's evidence is rewritten to kind: trace and committed on
+        the batch branch, and any other outcome (different, not exercised, no
+        hook, scenario failed, not measured) is a finding that parks it.  A
+        phase-wide failure (no build, the run raised, every scenario failed
+        with no status on either side, state dumps the replay schema refuses)
+        raises _StageError('frida'): the
+        batch's exception, nothing measured, parked or rewritten.  It runs
+        once per batch, never again.  Returns the findings."""
         self._frida_got = {}
-        if not self.frida or self.dry_run or self.kind == 'import':
+        self._frida_notes = {}
+        if not self.frida or self.dry_run:
             return []
         truth = _tool('truth')
         wave = _tool('wave')
         key = wave._addr_key
-        rows = [r for r in self._open_rows(batch) if key(r['address']) not in self._probe]
+        importing = self.kind == 'import'
+        mb = None
+        info = {}
+        if importing:
+            mb_sha = wave.merge_base_sha(worktree, self.base)
+            mb = mb_sha[:12] if mb_sha else self.base
+            rows = self._import_rows(batch_id, batch, worktree, mb_sha)
+        else:
+            rows = [r for r in self._open_rows(batch) if key(r['address']) not in self._probe]
         if not rows:
             return []
-        if not self.frida_map or not os.path.isfile(self.frida_map):
-            self.log('%s: frida skipped: no --frida-map (our build\'s .map)' % batch_id)
-            return []
+        checkout, map_path, why = self._frida_target(batch_id, worktree)
         sigs = {}
         for r in rows:
             text, _err = wave._read_evidence(self.repo, batch['branch'], r['address'])
             sig = truth.evidence_signature(text) if text else None
+            if not sig:
+                sig = truth.export_signature(r['address'], self.exports_dir)
+                if sig:
+                    self.log('%s: frida: %s signature from the Ghidra export (the evidence '
+                             'gives none)' % (batch_id, r['address']))
             if sig:
                 sigs[r['address']] = sig
+        traces = {}
+
+        def run_frida(batch_id, table, scenarios):
+            # Ours runs the batch worktree's own build (the map's RVAs).
+            traces.update(self.frida_run(batch_id, table, scenarios,
+                                         build_checkout=checkout))
+            return traces
+        # A phase-wide failure (no build, the run raised, every scenario
+        # failed on infrastructure) is an exception for the human at stage
+        # frida: no row is measured, parked or rewritten (ruled).  Row-level
+        # outcomes below still park.
+        if why:
+            raise _StageError('frida', 'the Frida phase could not run: %s; no row was measured, '
+                                       'parked or rewritten; fix it and clear this exception' % why)
         try:
-            with open(self.frida_map, encoding='utf-8', errors='replace') as f:
+            with open(map_path, encoding='utf-8', errors='replace') as f:
                 map_text = f.read()
             self._stage(batch_id, 'frida')
-            got = truth.frida_batch(batch_id, rows, sigs, map_text,
-                                    run_frida=self.frida_run)
+            got = truth.frida_batch(batch_id, rows, sigs, map_text, run_frida=run_frida,
+                                    headers=truth._our_headers(worktree), info=info)
             got = {key(a): v for a, v in got.items()}
         except Exception as e:
-            self.log('%s: frida path skipped: %s' % (batch_id, _one_line(repr(e), 300)))
-            return []
+            raise _StageError('frida', 'the Frida run raised %s; no row was measured, parked or '
+                                       'rewritten; fix it and clear this exception'
+                              % _one_line(repr(e), 300)) from None
+        dead = _infrastructure_failure(traces)
+        if dead:
+            raise _StageError('frida', 'every Frida scenario failed on infrastructure (no side '
+                                       'produced a status): %s; no row was measured, parked or '
+                                       'rewritten; fix it and clear this exception' % dead)
+        refused = _schema_failure(traces)
+        if refused:
+            raise _StageError('frida', 'the state dumps of a Frida run fail the replay schema '
+                                       '(tooling out of step, not the rows): %s; no row was '
+                                       'measured, parked or rewritten; fix it and clear this '
+                                       'exception' % refused)
         self._frida_got = {key(r['address']): got.get(key(r['address']), ('skipped', 'no result'))
                            for r in rows}
+        # Frequency-only differences are caller findings: ledger lines in
+        # _land, never a finding or a verdict (the final review's ruling).
+        self._frida_notes = {key(a): list(n) for a, n in (info.get('notes') or {}).items()}
+        exact = {key(a): list(v) for a, v in (info.get('exact') or {}).items()}
         sides = {key(a): s for a, (s, _c) in verdicts.items()}
-        findings = []
+        findings, written = [], []
         for r in rows:
             k = key(r['address'])
             status, detail = got.get(k, ('skipped', 'no result'))
             self.log('%s: frida %s %s (%s)' % (batch_id, r['address'], status, detail))
+            for note in self._frida_notes.get(k, ()):
+                self.log('%s: frida %s %s (a caller finding, for the ledger)'
+                         % (batch_id, r['address'], note))
+            if importing:
+                # The citation names a scenario whose compare returned 0;
+                # without info (an injected frida_batch) the detail's first.
+                cite = (exact.get(k) or [None])[0] if 'exact' in info else (
+                    detail[len(truth.EQUAL_PREFIX):].split(', ')[0]
+                    if detail.startswith(truth.EQUAL_PREFIX) else None)
+                finding = self._import_outcome(batch_id, worktree, r, status, detail, traces, mb,
+                                               cite)
+                if finding:
+                    findings.append(finding)
+                elif status == 'equal':
+                    written.append(r['address'])
+                continue
+            # The phase measured the batch's own build: the body on the branch
+            # is the recorded side's (ours or neither keep ours', a fork verdict
+            # adopted the fork's).  Equal confirms that side (measured frida,
+            # _measured_for); different is a finding whatever the side.
             side = sides.get(k)
-            if status == 'equal':
-                if side and side != 'ours':
-                    findings.append('%s: the Frida trace diff shows ours equal to the original (%s) '
-                                    'but the verdict is %s; recheck it' % (r['address'], detail, side))
-            elif status == 'different' and side == 'ours':
-                findings.append('%s: the Frida trace diff shows ours different from the original '
-                                '(%s) but the verdict is ours; recheck it' % (r['address'], detail))
+            if side and status == 'different':
+                findings.append('%s: the Frida trace diff shows the body on the branch (verdict %s) '
+                                'different from the original (%s); recheck it' % (
+                                    r['address'], side, detail))
+        if written:
+            self._commit_trace_evidence(batch_id, worktree, written)
         return findings
+
+    def _import_rows(self, batch_id, batch, worktree, mb_sha):
+        """The functions an import batch's Frida phase measures: its rows
+        that are not parked, plus every function the batch touched against
+        the merge base that carries a `// 0xADDR` marker (a stub dependency
+        imported with a row: it is hooked and held to the same bar), less
+        those whose evidence stands as written (wave.kept_evidence)."""
+        wave = _tool('wave')
+        key = wave._addr_key
+        parked, bad = wave._parked_rows(worktree)
+        if bad:
+            self.log('%s: frida: parked rows: %s' % (batch_id, bad))
+        rows = [dict(r) for r in batch.get('rows', []) if key(r['address']) not in parked]
+        seen = {key(r['address']) for r in batch.get('rows', [])} | set(parked)
+        try:
+            touched = _tool('check_evidence').touched(worktree, self.base)
+        except Exception as e:
+            touched = []
+            self.log('%s: frida: cannot tell which functions the batch touched (%s)'
+                     % (batch_id, _one_line(repr(e), 200)))
+        for path, addr, name in touched:
+            k = key('0x%X' % addr)
+            if k not in seen:
+                seen.add(k)
+                rows.append({'address': '0x%X' % addr, 'name': name, 'file': path,
+                             'dependency': True})
+                self.log('%s: frida: 0x%X %s imported with the batch; measured like a row'
+                         % (batch_id, addr, name))
+        out = []
+        for r in rows:
+            try:
+                with open(os.path.join(worktree, wave._evidence_rel(r['address'])),
+                          encoding='utf-8') as f:
+                    text = f.read()
+            except OSError:
+                text = None
+            why = text is not None and wave.kept_evidence(
+                worktree, mb_sha, r['address'], r.get('name', ''), text)
+            if why:
+                self.log('%s: frida %s kept as written (%s); not measured'
+                         % (batch_id, r['address'], why))
+            else:
+                out.append(r)
+        return out
+
+    def _import_outcome(self, batch_id, worktree, row, status, detail, traces, mb, cite):
+        """None when an import row measured equal and its evidence is now
+        kind: trace (citing `cite`, a scenario whose compare returned 0);
+        else the finding that parks it (the phase runs once per batch, so
+        nothing else can measure it)."""
+        a = row['address']
+        dep = (' It is a dependency you imported with the batch: park the rows that need '
+               'it with it.' if row.get('dependency') else '')
+        if status == 'equal' and cite is None:
+            # Equal only as a prefix (frequency-only): no run compared exactly,
+            # and a compare=0 citation of a run that did not would be false.
+            return ('%s: equal only up to a frequency difference (%s); no scenario compared '
+                    'exactly, so no trace evidence can cite one, and the phase does not run '
+                    'again in this batch, so park it: %s' % (a, detail, park_text(
+                        a, mb, 'frida frequency only, no exact compare: %s' % detail))) + dep
+        if status == 'equal':
+            err = self._trace_evidence(batch_id, worktree, row, cite, traces, mb)
+            return err + dep if err else None
+        if status == 'different':
+            text = ('%s: the Frida trace diff shows the imported body different from the '
+                    'original (%s); the phase does not run again in this batch, so park it: %s'
+                    % (a, detail, park_text(a, mb, 'frida different: %s' % detail)))
+        elif status == 'not-exercised':
+            text = UNMEASURED % (a, park_text(a, mb, UNMEASURED_NEEDS))
+        elif status == 'skipped':
+            text = '%s: no Frida hook (%s); park it: %s' % (
+                a, detail, park_text(a, mb, 'no Frida hook: %s' % detail))
+        else:
+            # scenario failed, not measured: nothing measured the row, and the
+            # close would refuse it with no retry left.
+            needs = _one_line('%s: %s' % (status, detail), 300)
+            text = ('%s: the Frida phase gave "%s" (%s); the phase does not run again in this '
+                    'batch, so park it: %s' % (a, status, detail, park_text(a, mb, needs)))
+        return text + dep
+
+    def _frida_target(self, batch_id, worktree):
+        """(checkout, map path, phase error or None): what the Frida phase
+        measures.  By default the batch worktree is built for x86 in its own
+        Windows checkout (self.frida_build), so the bodies under test are the
+        batch's and the map's RVAs are theirs; --frida-map overrides that
+        with an existing build (the exe beside the map), for hand runs.  A
+        failed build is returned as the phase error (the caller makes it the
+        batch's exception at stage frida), never a crash."""
+        if self.frida_map:
+            checkout = _map_checkout(self.frida_map)
+            if not os.path.isfile(self.frida_map):
+                return None, None, '--frida-map %s does not exist' % self.frida_map
+            if checkout is None:
+                return None, None, ('--frida-map %s is not where an x86 build writes its map '
+                                    '(<checkout>/%s)' % (self.frida_map, X86_MAP_REL))
+            oracle = _tool('oracle')
+            for name in (oracle.INJECTOR, oracle.RECORDER):
+                path = os.path.join(checkout, oracle.REPLAY_DIR_REL, name)
+                if not os.path.isfile(path):
+                    return None, None, ('--frida-map %s: no %s beside it; the original side runs '
+                                        'that checkout\'s injector and recorder (tools/oracle.py '
+                                        'build from it)' % (self.frida_map, path))
+            self.log('%s: frida: --frida-map given: measuring the build in %s, not a build '
+                     'of %s' % (batch_id, checkout, worktree))
+            return checkout, self.frida_map, None
+        self._stage(batch_id, 'frida build')
+        log_path = os.path.join(self.driver_dir, batch_id, 'frida-build.log')
+        try:
+            os.makedirs(os.path.dirname(log_path), exist_ok=True)
+            checkout, map_path = self.frida_build(worktree, log_path=log_path)
+        except (Exception, SystemExit) as e:
+            return None, None, 'the x86 build of %s failed: %s (log %s)' % (
+                worktree, _one_line(str(e) or repr(e), 300), log_path)
+        self.log('%s: frida: x86 build of %s in %s' % (batch_id, worktree, checkout))
+        return checkout, map_path, None
+
+    def _evidence_kind(self, worktree, address):
+        """The `kind:` of a row's evidence file in the worktree, or None."""
+        wave = _tool('wave')
+        try:
+            with open(os.path.join(worktree, wave._evidence_rel(address)),
+                      encoding='utf-8') as f:
+                m = wave.KIND_RE.search(f.read())
+        except OSError:
+            return None
+        return m.group(1) if m else None
+
+    def _trace_evidence(self, batch_id, worktree, row, scenario, traces, mb):
+        """Rewrite one equal import row's evidence to kind: trace, citing
+        `scenario`'s run (one whose compare returned 0); None, or the finding
+        that says why it could not be."""
+        wave = _tool('wave')
+        t = traces.get(scenario)
+        t = t if isinstance(t, dict) else {}
+        orig, ours = t.get('orig_path'), t.get('ours_path')
+        dumps = t.get('dumps')
+        if not (isinstance(dumps, dict) and dumps.get('match') is True):
+            # The dump guard: trace evidence only from a run whose two sides
+            # kept the same state (frida_run compares their dumps).
+            return ('%s: measured equal in %s but that run\'s state dumps were not shown to '
+                    'match (%s); trace evidence comes only from a run whose dumps match and '
+                    'the phase does not run again in this batch, so park it: %s' % (
+                        row['address'], scenario, (dumps or {}).get('detail') or 'not compared',
+                        park_text(row['address'], mb,
+                                  'not measured: dumps not shown to match in %s' % scenario)))
+        if not (orig and ours and os.path.isfile(orig) and os.path.isfile(ours)):
+            return ('%s: measured equal in %s but its trace files are missing; the phase does '
+                    'not run again in this batch, so park it: %s' % (
+                        row['address'], scenario, park_text(
+                            row['address'], mb, 'frida trace files missing')))
+        path = os.path.join(worktree, wave._evidence_rel(row['address']))
+        try:
+            _write_trace_evidence(path, '%s-%s' % (batch_id, scenario), orig, ours)
+        except (OSError, ValueError) as e:
+            return ('%s: its evidence could not be rewritten to kind: trace (%s); the phase does '
+                    'not run again in this batch, so park it: %s' % (
+                        row['address'], e, park_text(
+                            row['address'], mb, 'evidence not rewritable: %s' % e)))
+        return None
+
+    def _frida_lines(self, batch_id):
+        """{address key: trace_source} of the frida lines this batch's phase
+        wrote (kept in the status file across a park), for the check that a
+        worker wrote none."""
+        saved = (self._read_status()['batches'].get(batch_id) or {}).get('frida_written')
+        return dict(saved) if isinstance(saved, dict) else {}
+
+    def _commit_trace_evidence(self, batch_id, worktree, addresses):
+        wave = _tool('wave')
+        ce = _tool('check_evidence')
+        rels = [wave._evidence_rel(a) for a in addresses]
+        lines = {}
+        for a, rel in zip(addresses, rels):
+            try:
+                with open(os.path.join(worktree, rel), encoding='utf-8') as f:
+                    lines[wave._addr_key(a)] = ce.front_matter(f.read()).get('trace_source')
+            except OSError:
+                pass
+        self._update_status(lambda s: s['batches'].setdefault(batch_id, {}).setdefault(
+            'frida_written', {}).update(lines))
+
+        def git(*args):
+            return subprocess.run(['git', '-C', worktree, *args],
+                                  capture_output=True, text=True)
+        if not git('status', '--porcelain', '--', *rels).stdout.strip():
+            return
+        git('add', '--', *rels)
+        r = git('commit', '-q', '-m', 'frida: trace evidence for %d rows of %s' % (
+            len(rels), batch_id), '--', *rels)
+        if r.returncode != 0:
+            self.log('%s: trace evidence not committed: %s' % (
+                batch_id, _one_line((r.stderr or '') + (r.stdout or ''))))
 
     def _merged(self, batch_id, verdicts):
         """The state's verdicts plus the report's, as (side, case)."""
@@ -2161,9 +2647,7 @@ class Driver:
         return out
 
     def _fix(self, batch_id, batch, worker, worktree, stage, problems, brief, label):
-        prompt = FIX_PROMPT.format(
-            id=batch_id, stage=stage, branch=batch['branch'], brief=brief,
-            problems='\n'.join('- ' + p for p in problems))
+        prompt = fix_prompt(batch_id, stage, batch['branch'], brief, problems, self.kind)
         self._stage(batch_id, label)
         return self._run(worker, prompt, worktree, batch_id, label)
 
@@ -2556,6 +3040,7 @@ class Driver:
         self._undecided = {}
         self._probe = {}
         self._frida_got = {}
+        self._frida_notes = {}
         self._ctx.usage = {'input': 0, 'cached': 0, 'output': 0, 'tool_calls': 0}
         self._ctx.final = None
         self._ctx.transcript_lines = []
@@ -2839,10 +3324,14 @@ class Driver:
             self._classes(batch_id, batch), review, commits, self._credits(),
             ignored=self._ignored, undecided=self._undecided,
             **self._figure_kw())
-        kept = [(a, d) for a, (side, _c) in sorted(verdicts.items())
+        kept = [(side, a, d) for a, (side, _c) in sorted(verdicts.items())
                 for st, d in [self._frida_got.get(_tool('wave')._addr_key(a), ('', ''))]
-                if side == 'ours' and st == 'different']
-        entry += ''.join('- frida different, kept ours: %s %s\n' % kd for kd in kept)
+                if st == 'different']
+        entry += ''.join('- frida different, kept %s: %s %s\n' % skd for skd in kept)
+        # Frequency-only differences (both kinds): a caller finding for the
+        # ledger, never a verdict change or a park.
+        entry += ''.join('- frida frequency only (a caller finding): 0x%s %s\n' % (k.upper(), n)
+                         for k, notes in sorted(self._frida_notes.items()) for n in notes)
         self._append_ledger(entry)
         self._finish(batch_id, 'closed')
         if err:
@@ -3628,7 +4117,11 @@ def _parse(argv):
                    help='run the batched Frida differential path after the worker '
                         '(default: docs/wso/truth-calibration.json frida_default; '
                         'off when that file is missing)')
-    p.add_argument('--frida-map', help="our build's iwd2r.map, for the Frida hook table")
+    p.add_argument('--frida-map',
+                   help='override: measure an existing x86 build (the exe beside this '
+                        'iwd2r.map, at <checkout>/' + X86_MAP_REL + ') instead of '
+                        "building each batch's worktree (hand runs; the default builds "
+                        'the batch so the bodies under test are its own)')
     one = p.add_mutually_exclusive_group()
     one.add_argument('--dry-run', action='store_true',
                      help='one batch with a fake worker; no review, no close, '

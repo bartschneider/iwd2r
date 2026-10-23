@@ -80,18 +80,19 @@ reconstruction — the fork's own style of verification. A `trace` evidence
 file must cite its source in `trace_source`, in one of exactly two forms:
 
 ```
-WillScarlettOhara/iwd2-re@<sha> <path to recovery note>
+WillScarlettOhara/iwd2-re@<sha> docs/<name>-recovery.md
 frida <probe name> orig:<sha256> ours:<sha256> compare=0
 ```
 
-The first cites his recovery note; the second is the line
-`check_evidence.py` accepts today for a differential Frida capture of our
-own binary against the original. The harness that produces such captures is
-planned, not yet in the tree: the integration plan's Task 5b
-([docs/superpowers/plans/2026-10-17-wso-integration.md](../superpowers/plans/2026-10-17-wso-integration.md),
-added at 8ce297d7 — the plan revision `check_evidence.py` cites) adopts the
-fork's tracing scripts into `tools/frida/`, and its `compare=0` verdict
-means the two captures agree call for call. A missing, empty or
+The first cites his recovery note (never a source file): the gate reads
+the note at that sha with `git show` and requires the function's address in
+it, or its name as a whole word together with its class's name (a bare
+"Render" names a method of every class), and an unreadable note (the fork
+not fetched) fails. The second is the line the wave driver's Frida phase
+writes for a differential capture of our own binary against the original
+(`tools/frida/`, [docs/frida-tracing.md](../frida-tracing.md)): its
+`compare=0` means the two captures agree call for call in a run whose state
+dumps matched, and only the driver writes it. A missing, empty or
 unrecognizable citation fails the gate; the format contract is in
 [docs/evidence/README.md](../evidence/README.md). Rules math — attack
 rolls, saving throws, damage, effect application — never accepts a trace:
@@ -365,7 +366,79 @@ launches per attempt until `--new-attempt "<why>"`; and every merge into
   `close --kind import`: no verdict lines or evidence phrases are
   checked, the evidence must be `kind: trace` or better, and the tool
   tests, `check_evidence` and parity still run. The import queue skips
-  the oracle and Frida phases and never rewrites wave 1's scorecard.
+  the oracle phase and never rewrites wave 1's scorecard. It runs the
+  Frida phase (with `--frida`): all three scenarios (`world_entry`,
+  `first_fight`, `walk_and_talk`), each through `probe.py run` once per
+  side. Before it the driver builds our x86 exe from the batch worktree in
+  that worktree's own Windows checkout (`%USERPROFILE%\iwd2r-build-<worktree
+  name>`, `driver.frida_build`, compiler output in the batch's
+  `frida-build.log`), hooks at the RVAs of that build's map and runs that
+  exe (`probe.py run --build-checkout`), so the bodies measured are the
+  batch's; the tools are staged from the driver's checkout. A phase-wide
+  failure (the build fails, the run raises, or every scenario failed with no
+  status on either side) is the batch's exception at stage `frida` (status
+  file, ledger, one aoe line): no row is measured, parked or rewritten, and
+  clearing it reruns the worker and the phase; a row-level failure (one row
+  not exercised, one scenario failed for one row) still parks that row. On
+  a wave-1 batch the build is the branch's too, so an equal row confirms
+  whichever side the verdict records (`measured: frida`, ours, neither or
+  an adopted fork body) and a different one is a finding for that side.
+  `--frida-map MAP`
+  overrides the build with an existing one (the exe beside MAP), for hand
+  runs. A row is measured equal when `trace_diff compare` exits 0 over the
+  captured events and both sidecars sent their exit-time (final) hit totals
+  (equal events without final totals on both sides are `not measured`: the
+  hooks cap what they log and the timer's totals lose a run-dependent
+  tail). Frequency is the callers' business: when the final totals differ
+  but every captured event is equal, or one side's events are a strict
+  prefix of the other's with that side under the cap (with final totals on
+  both sides; without them it is `not measured`), the row is still equal and
+  the difference goes to the ledger as a caller finding (`- frida frequency
+  only (a caller finding): ...`, for both queues), never a finding or a
+  verdict change; only an event-level difference (an argument or a return
+  at a call both sides made, or a crash) is `different`. The evidence cites
+  only a scenario whose compare returned 0, so an import row that is equal
+  only as a prefix IS parked (no exact compare to cite); wave-1 and the
+  calibration treat it as equal. All of it holds only in
+  a scenario whose two runs kept the same state:
+  both sides write checkpoint and periodic state dumps, `truth.frida_run`
+  compares them with the replay compare's own functions
+  (`truth.compare_dumps`: `oracle.compare_checkpoints` and
+  `compare_frames`, its screens and known differences), and a scenario whose
+  dumps differ measures nothing (its rows read `not measured`, "dumps
+  differ"); the driver writes trace evidence only from a run whose dumps
+  match (a void function logs no return, so its trace mostly measures its
+  callers; the dumps are what speak for its body). The driver then rewrites that row's evidence front matter to
+  `kind: trace` with `trace_source: frida <batch>-<scenario> orig:<sha256>
+  ours:<sha256> compare=0` (dropping `exemption:`) and commits it as
+  `frida: trace evidence for <N> rows of <batch>`. The phase measures
+  every row that is not parked and every function the batch touched
+  against the merge base that carries a `// 0xADDR` marker (a stub
+  dependency imported with a row). Workers write `kind: read-only` with an
+  `exemption:`; only three kinds of evidence stand as written and are not
+  measured (`wave.kept_evidence`): `kind: oracle` with an `oracle_case`
+  that a case in `oracle/cases` registers, `kind: trace` citing a fork
+  recovery note that names the function, and an evidence file unchanged
+  since the merge base at `trace` or better. A declared `replay`, an oracle
+  without its case or a worker's `frida` line is measured like a read-only
+  row, and a frida line the driver did not write (it keeps the lines it
+  wrote in the status file, `frida_written`) is a mechanical-check problem.
+  A measured row that is not equal (different, exercised by no scenario,
+  no hook, `scenario failed`, `not measured`) cannot close: the phase runs
+  once per batch, so the finding tells the worker to park it in its fix
+  round: edit that function back to the merge base's body (one function,
+  never a whole file that holds other rows' changes), delete its evidence
+  file and write `{address, name, file, batch, needs}` as the row's own
+  `docs/wso/import-parked/<ADDR>.json` (one file per row, so two batches
+  parking different rows merge cleanly; `needs` is what the finding names:
+  the scenarios tried, `frida different: <detail>`, or the status text;
+  a batch may add files there). `close --kind import` accepts a batch when
+  every row that is not parked is imported (its body changed against the
+  merge base: "row <addr> not imported: body unchanged against <base>;
+  import it or park it") and at `trace` or better as the driver's frida
+  trace or as evidence that stands as written, every parked row has its
+  body back at the merge base's and its evidence gone, and every
+  dependency the batch touched meets the same bar.
   The two queues' assigned batches all hold files, so they stay
   disjoint (`tools/claims.py` counts both state files). Each queue has
   its own status file and run lock, so one driver per queue can run at

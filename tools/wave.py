@@ -8,6 +8,7 @@ The coordinator's wave loop, one command each::
     python3 tools/wave.py verdict b001 0x643CC0 ours probe-9
     python3 tools/wave.py close b001           # gates, then ff `first`
     python3 tools/wave.py resolve 0x716E80 ours dump-716E80   # a probe-list row into its batch
+    python3 tools/wave.py unpark 0x5152C0 [--reason TEXT]     # a parked import row back to the queue
     python3 tools/wave.py close b002 --kind import   # waves 2-5
     python3 tools/wave.py scorecard            # the tally into xrec-report.md
     python3 tools/wave.py status
@@ -58,6 +59,13 @@ CALIBRATION_PATH = os.path.join(ROOT, 'docs', 'wso', 'truth-calibration.json')
 IMPORT_LIST_REL = os.path.join('docs', 'wso', 'import-list.json')
 # Rows a worker could not decide (ruling R73): they wait for a probe.
 PROBE_LIST_REL = os.path.join('docs', 'wso', 'probe-list.json')
+# Import rows a batch dropped (no scenario measured them, the fork body was
+# refused, ...): the body edited back, the evidence deleted, and one file per
+# row here, written by the worker (one file per row, so parallel batches never
+# conflict); `close --kind import` accepts them as dropped.
+IMPORT_PARKED_DIR = 'docs/wso/import-parked'
+# The single list it replaced; a batch that still carries it is refused.
+RETIRED_PARKED_REL = 'docs/wso/import-parked.json'
 DISAGREEMENTS_REL = os.path.join('docs', 'wso', 'disagreements.json')
 # The fork is read by pinned sha, never by branch name (wso/main moves).
 DEFAULT_FORK_BASE = 'e8dd16a750966af53f24daaf49dcb4fb13594c13'
@@ -214,6 +222,160 @@ def _driver():
         spec.loader.exec_module(module)
         _driver_module = module
     return _driver_module
+
+
+_check_evidence_module = None
+
+
+def _check_evidence():
+    """tools/check_evidence.py, loaded by path (tools/ is not on sys.path
+    under -I)."""
+    global _check_evidence_module
+    if _check_evidence_module is None:
+        spec = importlib.util.spec_from_file_location(
+            'check_evidence', os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), 'check_evidence.py'))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _check_evidence_module = module
+    return _check_evidence_module
+
+
+def merge_base_sha(worktree, base):
+    """The full sha where the worktree's HEAD left base, or None."""
+    r = subprocess.run(['git', '-C', worktree, 'merge-base', base, 'HEAD'],
+                       capture_output=True, text=True)
+    return r.stdout.strip() or None if r.returncode == 0 else None
+
+
+ORACLE_CASE_RE = re.compile(r'ORACLE_CASE\(\s*"([^"]+)"')
+
+
+def _oracle_case_names(worktree):
+    """Every case id registered (ORACLE_CASE) by an oracle/cases/*.cpp of the
+    worktree that oracle/CMakeLists.txt lists: a case file the runner does
+    not build never runs, so its ids count for nothing."""
+    names = set()
+    folder = os.path.join(worktree, 'oracle', 'cases')
+    try:
+        with open(os.path.join(worktree, 'oracle', 'CMakeLists.txt'), encoding='utf-8',
+                  errors='replace') as f:
+            cmake = '\n'.join(line.split('#', 1)[0] for line in f.read().splitlines())
+    except OSError:
+        return names
+    wired = set(re.findall(r'(?<![\w/.-])cases/([A-Za-z0-9_.+-]+\.cpp)(?![\w.])', cmake))
+    for name in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
+        if name.endswith('.cpp') and name in wired:
+            with open(os.path.join(folder, name), encoding='utf-8', errors='replace') as f:
+                names.update(ORACLE_CASE_RE.findall(f.read()))
+    return names
+
+
+def frida_trace(text):
+    """True when an evidence text is `kind: trace` with a frida
+    trace_source (check_evidence.TRACE_SOURCES[1]): the line only the
+    driver's Frida phase writes."""
+    ce = _check_evidence()
+    fields = ce.front_matter(text or '')
+    return fields.get('kind') == 'trace' and bool(
+        ce.TRACE_SOURCES[1].fullmatch(fields.get('trace_source') or ''))
+
+
+def kept_evidence(worktree, merge_base, address, name, text):
+    """Why an import row's evidence stands as it is written, or None when
+    the Frida phase must measure it (the whole-branch review's ruling):
+    `kind: oracle` with an oracle_case that a case file in the worktree's
+    oracle/cases registers and oracle/CMakeLists.txt wires; `kind: trace`
+    citing a fork recovery note that names the function
+    (check_evidence.fork_note_mentions, the note read with git show); or an evidence file unchanged since the merge base whose
+    kind is trace or better.  Anything else a worker wrote (read-only, a
+    declared replay, an oracle without its case, a trace citing anything
+    else) is measured; a frida line is the driver's alone."""
+    ce = _check_evidence()
+    fields = ce.front_matter(text or '')
+    kind = fields.get('kind')
+    case = fields.get('oracle_case')
+    if kind == 'oracle' and case and case in _oracle_case_names(worktree):
+        return f'oracle case {case}'
+    m = ce.TRACE_SOURCES[0].fullmatch(fields.get('trace_source') or '')
+    if kind == 'trace' and m:
+        try:
+            addr = int(_addr_key(address), 16)
+        except ValueError:
+            addr = None
+        ok, _why = ce.fork_note_mentions(
+            m.group(1), m.group(2), addr, name,
+            run=lambda argv, **kw: subprocess.run(argv, cwd=worktree, **kw)) \
+            if addr is not None else (False, '')
+        if ok:
+            return f'fork note {m.group(2)}'
+    if merge_base and kind in IMPORT_KINDS:
+        at = subprocess.run(['git', '-C', worktree, 'show',
+                             f'{merge_base}:{_evidence_rel(address)}'],
+                            capture_output=True, text=True)
+        if at.returncode == 0 and at.stdout == text:
+            return 'unchanged since the merge base'
+    return None
+
+
+def _import_bar(worktree, merge_base, address, name, rel, text):
+    """The close's problem with an import function's evidence, or None:
+    trace or better, and either the driver's frida trace or evidence that
+    stands as written (kept_evidence)."""
+    m = KIND_RE.search(text)
+    have = m.group(1) if m else 'none'
+    if have not in IMPORT_KINDS:
+        return (f'{rel}: kind {have} is not trace or better; let the Frida phase '
+                f'measure it, or park it ({parked_rel(address)})')
+    if frida_trace(text) or kept_evidence(worktree, merge_base, address, name, text):
+        return None
+    return (f'{rel}: kind {have} was written in this batch and nothing measured it: only '
+            f'the driver\'s frida trace, an oracle case registered in a case file '
+            f'oracle/CMakeLists.txt wires, a fork '
+            f'recovery note that names the function, or evidence unchanged since the merge '
+            f'base stands; let the Frida phase measure it, or park it ({parked_rel(address)})')
+
+
+def parked_rel(address):
+    """docs/wso/import-parked/<ADDR>.json: where one parked row's entry lives."""
+    return f'{IMPORT_PARKED_DIR}/{_addr_key(address).upper()}.json'
+
+
+def _parked_rows(worktree):
+    """({address key: entry}, problem or None) of the worktree's
+    docs/wso/import-parked/<ADDR>.json files: the rows import batches
+    dropped, one JSON object per file ({address, name, file, batch, needs}),
+    named after its row.  A file that is not such an object, or names
+    another address, is a problem; so is the retired single list."""
+    out, problems = {}, []
+    if os.path.exists(os.path.join(worktree, RETIRED_PARKED_REL)):
+        problems.append(f'{RETIRED_PARKED_REL} is retired: write one file per row, '
+                        f'{IMPORT_PARKED_DIR}/<ADDR>.json, and delete it')
+    folder = os.path.join(worktree, IMPORT_PARKED_DIR)
+    names = sorted(os.listdir(folder)) if os.path.isdir(folder) else []
+    for name in names:
+        rel = f'{IMPORT_PARKED_DIR}/{name}'
+        stem = name[:-len('.json')] if name.endswith('.json') else None
+        if not stem or not re.fullmatch(r'(?:0[xX])?[0-9A-Fa-f]+', stem):
+            problems.append(f'{rel}: not a parked row; the folder holds only <ADDR>.json files')
+            continue
+        try:
+            with open(os.path.join(folder, name), encoding='utf-8') as f:
+                entry = json.load(f)
+        except (OSError, ValueError) as e:
+            problems.append(f'{rel} is unreadable ({e!r}); it is one JSON object '
+                            f'{{"address", "name", "file", "batch", "needs"}}')
+            continue
+        if not isinstance(entry, dict) or not isinstance(entry.get('address'), str):
+            problems.append(f'{rel}: no string address ({entry!r}); it is one JSON object '
+                            f'{{"address", "name", "file", "batch", "needs"}}')
+            continue
+        if _addr_key(entry['address'].lower()) != _addr_key(stem.lower()):
+            problems.append(f'{rel} records address {entry["address"]}; name the file '
+                            f'after its row ({parked_rel(entry["address"])})')
+            continue
+        out[_addr_key(stem.lower())] = entry
+    return out, ('; '.join(problems) or None)
 
 
 _assemble_module = None
@@ -919,7 +1081,8 @@ def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
     on success fast-forward `base` to the batch branch.  kind='verdicts'
     (wave 1) requires a verdict and a phrase-bearing evidence file per
     row; kind='import' (waves 2-5) requires evidence kind trace or
-    better instead.  A branch that modified tools/gates.sh or tools/parity
+    better instead, or the row parked (docs/wso/import-parked/<ADDR>.json)
+    with its body back at the merge base's and its evidence deleted.  A branch that modified tools/gates.sh or tools/parity
     is refused outright -- it would be certified by its own gate.  The
     gate runs only when everything else is clean: it costs minutes.
     gate=False skips tools/gates.sh (tests only).  A fork or neither
@@ -977,6 +1140,18 @@ def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
             problems.append(f'these paths differ from {base}; a batch must '
                             f'not change the gate that certifies it:')
             problems += ['  ' + p for p in changed]
+        parked = {}
+        if kind != 'verdicts':
+            parked, bad = _parked_rows(wt)
+            if bad:
+                problems.append(bad)
+            try:
+                touched = {_addr_key('0x%X' % a): n for _p, a, n in
+                           _check_evidence().touched(wt, base)}
+            except Exception as e:
+                touched = {}
+                problems.append(f'cannot tell which bodies the batch touched ({e!r})')
+            mb = merge_base_sha(wt, base)
         for row in batch['rows']:
             rel = _evidence_rel(row['address'])
             path = os.path.join(wt, rel)
@@ -984,8 +1159,20 @@ def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
             if os.path.isfile(path):
                 with open(path, encoding='utf-8') as f:
                     text = f.read()
+            k = _addr_key(row['address'])
+            if k in parked:
+                if text is not None:
+                    problems.append(f'{row["address"]}: parked ({parked_rel(k)}) '
+                                    f'but {rel} still exists; delete it')
+                if k in touched:
+                    problems.append(f'{row["address"]}: parked ({parked_rel(k)}) '
+                                    f'but its body is still changed against {base}; '
+                                    f"edit that function back to the merge base's body")
+                continue
             if text is None:
-                problems.append(f'no evidence file {rel}')
+                problems.append(f'no evidence file {rel}' + (
+                    f' (and {row["address"]} is not parked: no {parked_rel(k)})'
+                    if kind != 'verdicts' else ''))
                 continue
             if kind == 'verdicts':
                 if not any(p in text for p in EVIDENCE_PHRASES):
@@ -999,11 +1186,40 @@ def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
                         f'"corroborated by WSO at <sha>" line names this '
                         f'batch\'s pin {batch["fork_base"][:7]}')
             else:
-                m = KIND_RE.search(text)
-                have = m.group(1) if m else 'none'
-                if have not in IMPORT_KINDS:
-                    problems.append(f'{rel}: kind {have} is not trace or '
-                                    f'better')
+                # Imported means changed: a body left (or put back) as the
+                # stub cannot close on any evidence, and only touched
+                # functions have their trace_source checked by the gate.
+                if k not in touched:
+                    problems.append(f'row {row["address"]} not imported: body unchanged '
+                                    f'against {mb[:12] if mb else base}; import it or park '
+                                    f'it ({parked_rel(k)})')
+                bar = _import_bar(wt, mb, row['address'], row.get('name', ''), rel, text)
+                if bar:
+                    problems.append(bar)
+        if kind != 'verdicts' and wt is not None:
+            # A stub dependency imported with a row (the brief allows it in
+            # the batch's own files) meets the same bar: trace or better, or
+            # edited back and parked.
+            rows = {_addr_key(r['address']) for r in batch['rows']}
+            for k, name in sorted(touched.items()):
+                if k in rows:
+                    continue
+                rel = _evidence_rel(k)
+                label = f'0x{k.upper()} ({name}, imported with the batch)'
+                if k in parked:
+                    problems.append(f'{label}: parked ({parked_rel(k)}) but its body is still '
+                                    f"changed against {base}; edit that function back to the "
+                                    f"merge base's body")
+                    continue
+                path = os.path.join(wt, rel)
+                if not os.path.isfile(path):
+                    problems.append(f'{label}: no evidence file {rel}; the Frida phase measures '
+                                    f'it like a row, or edit it back and park it')
+                    continue
+                with open(path, encoding='utf-8') as f:
+                    bar = _import_bar(wt, mb, '0x' + k, name, rel, f.read())
+                if bar:
+                    problems.append(f'{label}: {bar}')
     if gate and not problems and wt is not None:
         g = subprocess.run(['bash', 'tools/gates.sh', '--base', base],
                            cwd=wt, capture_output=True, text=True)
@@ -1269,6 +1485,74 @@ def resolve_probe(address, side, case, state_path=STATE_PATH, repo=ROOT):
     _save_json(probe_path, remaining)
     return 0, (f'resolved {addr} in {batch_id}: {side} (case {case}); '
                f'probe list now {len(remaining)} entries\n')
+
+
+def unpark(addresses, reason=None, state_path=IMPORT_STATE_PATH, repo=ROOT):
+    """Return parked import rows to the queue.  Each address needs its
+    docs/wso/import-parked/<ADDR>.json and a row in a closed batch of the
+    import state; the file goes, the row moves from the batch's `rows` to
+    its `unparked` list with `at`, `reason` and `needs`, so `next --queue
+    import` offers it again.  Any refusal (exit 1) writes nothing.  No git:
+    the caller commits."""
+    if not addresses:
+        return 2, 'unpark: at least one address is required\n'
+    reason = reason or 'needs met'
+    parked, problem = _parked_rows(repo)
+    if problem:
+        return 2, f'{problem}\n'
+    # the file each row was read from, under whatever spelling it carries
+    # (<ADDR>.json, 0x<ADDR>.json, lower case): that is the file to remove
+    folder = os.path.join(repo, IMPORT_PARKED_DIR)
+    files = {}
+    for name in (sorted(os.listdir(folder)) if os.path.isdir(folder) else []):
+        stem = name[:-len('.json')] if name.endswith('.json') else None
+        if stem and re.fullmatch(r'(?:0[xX])?[0-9A-Fa-f]+', stem):
+            files.setdefault(_addr_key(stem.lower()), os.path.join(folder, name))
+    state = load_state(state_path)
+    plan, refusals, seen = [], [], set()
+    for address in addresses:
+        key = _addr_key(str(address).lower())      # the parked keys are lower case
+        if key in seen:
+            continue
+        seen.add(key)
+        entry = parked.get(key)
+        if entry is None:
+            refusals.append(f'{address}: not parked')
+            continue
+        hit = next(((bid, b, r) for bid, b in sorted(state['batches'].items())
+                    for r in b.get('rows', [])
+                    if _addr_key(r.get('address')) == key), None)
+        if hit is None:
+            refusals.append(f'{address}: in no import batch')
+        elif hit[1].get('status') != 'closed':
+            refusals.append(f'{address}: in assigned batch {hit[0]}; '
+                            f'close or clear it first')
+        else:
+            plan.append((key, entry, *hit))
+    if refusals:
+        return 1, '\n'.join(refusals) + '\n'
+    lines, now = [], _now()
+    for key, entry, bid, batch, row in plan:
+        batch['rows'] = [r for r in batch['rows'] if r is not row]
+        moved = dict(row, at=now, reason=reason, needs=entry.get('needs'))
+        batch.setdefault('unparked', []).append(moved)
+        lines.append(f'unparked 0x{key.upper()} {row.get("name")} '
+                     f'(was {entry.get("needs")}) from {bid}')
+    save_state(state_path, state)
+    stuck = []
+    for key, *_ in plan:
+        try:
+            os.unlink(files[key])
+        except OSError as e:
+            stuck.append(f'{os.path.relpath(files[key], repo)} ({e.strerror or e})')
+    lines.append(f'commit {os.path.relpath(state_path, repo)} and {IMPORT_PARKED_DIR}')
+    if stuck:
+        # the row is back in the queue but still reads as parked until the
+        # file is gone; nothing else to redo
+        lines.append('the state is saved but these parked files remain; delete them '
+                     'by hand and commit: ' + '; '.join(stuck))
+        return 1, '\n'.join(lines) + '\n'
+    return 0, '\n'.join(lines) + '\n'
 
 
 # -- scorecard -----------------------------------------------------------
@@ -1575,6 +1859,25 @@ def main(argv=None):
                   file=sys.stderr)
             return 2
         rc, out = resolve_probe(rest[0], rest[1], rest[2])
+    elif cmd == 'unpark':
+        addrs, reason, it = [], None, iter(rest)
+        for a in it:
+            if a == '--reason':
+                reason = next(it, None)
+                if reason is None:
+                    print('wave unpark: --reason needs a value', file=sys.stderr)
+                    return 2
+            elif a == '--queue':
+                if next(it, '') != 'import':
+                    print('wave unpark: --queue is import', file=sys.stderr)
+                    return 2
+            else:
+                addrs.append(a)
+        if not addrs:
+            print('usage: wave.py unpark <address> [<address> ...] '
+                  '[--reason TEXT] [--queue import]', file=sys.stderr)
+            return 2
+        rc, out = unpark(addrs, reason)
     elif cmd == 'recompare':
         kw, it = {}, iter(rest)
         for a in it:
