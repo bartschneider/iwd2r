@@ -35,8 +35,9 @@ Each bundle carries the function's decompile and its callers' decompiles; objdum
    body (if you already changed it, edit that function back to the merge
    base's body: `git show <merge-base>:<path>` shows it, `git merge-base
    first HEAD` names the merge base), delete the row's evidence file, and
-   record the refusal in the report and in `docs/wso/import-parked.json` as
-   `{address, name, file, batch, needs}` with `needs` of
+   record the refusal in the report and in the row's own
+   `docs/wso/import-parked/<ADDRESS>.json` (one JSON object
+   `{address, name, file, batch, needs}`) with `needs` of
    `"fork body contradicts the exe: <what differs>"`. Three of seven fork
    bodies in batch i002 did.
 2. **Every commit that brings in his code carries exactly this trailer**, one
@@ -79,9 +80,9 @@ Each bundle carries the function's decompile and its callers' decompiles; objdum
    scenario" cannot close. In your fix round edit that function back to the
    merge base's body (`git show <merge-base>:<path>` shows it; do not
    replace a file that holds other rows' changes), delete
-   `docs/evidence/<ADDRESS>.md`, and append an entry to
-   `docs/wso/import-parked.json` (a JSON list; create it as `[]` first if
-   missing):
+   `docs/evidence/<ADDRESS>.md`, and write the row's own file
+   `docs/wso/import-parked/<ADDRESS>.json` (one file per row, so parallel
+   batches never collide; never one shared list):
 
        {"address": "0x...", "name": "...", "file": "src/...", "batch": "{{id}}",
         "needs": "world_entry, first_fight, walk_and_talk: not exercised"}
@@ -95,8 +96,9 @@ Each bundle carries the function's decompile and its callers' decompiles; objdum
    imported with the row, in its own commit with its own trailer, and with
    its own `docs/evidence/<ADDR>.md` (the gate demands one for every touched
    function). A dependency outside your files parks the row: edit that
-   function back to the merge base's body, delete the parked row's evidence file and append it to `docs/wso/import-parked.json` with `needs`
-   of `"dependency outside the batch's files: <name>"`.
+   function back to the merge base's body, delete the parked row's
+   evidence file and write its `docs/wso/import-parked/<ADDRESS>.json` with
+   `needs` of `"dependency outside the batch's files: <name>"`.
 6. **Commit as you go.** WIP commits are fine.
 7. **Asm reds: confirm or waive.** The parity step's asm verify has a known
    false-positive class — the binary inlined a helper that the source calls

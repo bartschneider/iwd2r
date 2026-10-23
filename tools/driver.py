@@ -848,10 +848,10 @@ def transcript_checks(transcript_path, covered_files, tracked=None):
 
 # The paths a batch may change (ruling R71): anything else on the branch is
 # a check problem, tools/, tests/, .claude/, .mcp.json and docs/wso/ included
-# (but for the import parked list the worker appends to).
+# (but for the import parked rows, one file per row, that the worker writes).
 ALLOWED_PATHS = ('src/', 'compat/', 'docs/evidence/', 'docs/MAP.md',
                  'oracle/cases/', 'oracle/CMakeLists.txt',
-                 'docs/wso/import-parked.json')
+                 'docs/wso/import-parked/')
 
 
 def _path_allowed(path):
@@ -902,9 +902,21 @@ FRIDA_SCENARIOS_TEXT = 'world_entry, first_fight, walk_and_talk'
 EDIT_BACK = ("edit that function back to the merge base's body (`git show %s:<path>` "
              'shows it)')
 SHARED_FILE = "do not replace a file that holds other rows' changes"
-UNMEASURED = ('%s: exercised by no scenario (' + FRIDA_SCENARIOS_TEXT + '); '
-              + EDIT_BACK + ', delete docs/evidence/%s.md, append it to '
-              'docs/wso/import-parked.json and commit; ' + SHARED_FILE)
+
+
+def park_text(address, mb, needs):
+    """How a worker parks one import row (the import brief's rule): the
+    function edited back, its evidence deleted, its own file under
+    docs/wso/import-parked/ (one per row, so parallel batches never
+    conflict), one commit."""
+    stem = address[2:].upper() if address.lower().startswith('0x') else address.upper()
+    return ('%s, delete docs/evidence/%s.md, write docs/wso/import-parked/%s.json '
+            '{"address", "name", "file", "batch", "needs"} with needs "%s", and commit '
+            'the three together; %s' % (EDIT_BACK % mb, stem, stem, needs, SHARED_FILE))
+
+
+UNMEASURED_NEEDS = FRIDA_SCENARIOS_TEXT + ': not exercised'
+UNMEASURED = '%s: exercised by no scenario (' + FRIDA_SCENARIOS_TEXT + '); park it: %s'
 
 
 def _merge_base(worktree, base):
@@ -2284,17 +2296,16 @@ class Driver:
                 elif status == 'different':
                     findings.append(
                         '%s: the Frida trace diff shows the imported body different from the '
-                        'original (%s); the phase does not run again in this batch, so %s, '
-                        'delete docs/evidence/%s.md, append it to docs/wso/import-parked.json '
-                        'with needs "frida different: %s" and commit; %s'
-                        % (r['address'], detail, EDIT_BACK % mb, k.upper(), detail, SHARED_FILE))
+                        'original (%s); the phase does not run again in this batch, so park '
+                        'it: %s' % (r['address'], detail, park_text(
+                            r['address'], mb, 'frida different: %s' % detail)))
                 elif status == 'not-exercised' and not kept:
-                    findings.append(UNMEASURED % (r['address'], mb, k.upper()))
+                    findings.append(UNMEASURED % (r['address'], park_text(
+                        r['address'], mb, UNMEASURED_NEEDS)))
                 elif status == 'skipped' and not kept:
-                    findings.append('%s: no Frida hook (%s); %s, delete docs/evidence/%s.md, '
-                                    'append it to docs/wso/import-parked.json with that reason '
-                                    'as `needs` and commit; %s'
-                                    % (r['address'], detail, EDIT_BACK % mb, k.upper(), SHARED_FILE))
+                    findings.append('%s: no Frida hook (%s); park it: %s' % (
+                        r['address'], detail, park_text(r['address'], mb,
+                                                        'no Frida hook: %s' % detail)))
                 continue
             side = sides.get(k)
             if status == 'equal':
@@ -2359,20 +2370,18 @@ class Driver:
         if not (orig and ours and os.path.isfile(orig) and os.path.isfile(ours)):
             return ('%s: measured equal in %s but its trace files are missing; the phase does '
                     'not run again, so write its evidence as kind trace (a legal trace_source) or '
-                    'better yourself, or %s, delete docs/evidence/%s.md, park it in '
-                    'docs/wso/import-parked.json and commit; %s' % (
-                        row['address'], scenario, EDIT_BACK % mb,
-                        wave._addr_key(row['address']).upper(), SHARED_FILE))
+                    'better yourself, or park it: %s' % (
+                        row['address'], scenario, park_text(
+                            row['address'], mb, 'frida trace files missing')))
         path = os.path.join(worktree, wave._evidence_rel(row['address']))
         try:
             _write_trace_evidence(path, '%s-%s' % (batch_id, scenario), orig, ours)
         except (OSError, ValueError) as e:
             return ('%s: its evidence could not be rewritten to kind: trace (%s); the phase does '
                     'not run again, so write the evidence as kind trace (a legal trace_source) or '
-                    'better yourself, or %s, delete docs/evidence/%s.md, park it in '
-                    'docs/wso/import-parked.json and commit; %s' % (
-                        row['address'], e, EDIT_BACK % mb,
-                        wave._addr_key(row['address']).upper(), SHARED_FILE))
+                    'better yourself, or park it: %s' % (
+                        row['address'], e, park_text(
+                            row['address'], mb, 'evidence not rewritable: %s' % e)))
         return None
 
     def _commit_trace_evidence(self, batch_id, worktree, addresses):

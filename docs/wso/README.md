@@ -393,11 +393,13 @@ launches per attempt until `--new-attempt "<why>"`; and every merge into
   close (the phase runs once per batch): the worker's fix
   round edits that function back to the merge base's body (one function,
   never a whole file that holds other rows' changes),
-  deletes its evidence file and appends `{address, name, file, batch,
-  needs}` to `docs/wso/import-parked.json` (`needs` names the scenarios
-  tried, or `frida different: <detail>`; a batch may change that file). `close --kind import` accepts a
-  batch when every row is `trace` or better, or is in the parked list with
-  its body back at the merge base's and its evidence gone.
+  deletes its evidence file and writes `{address, name, file, batch,
+  needs}` as the row's own `docs/wso/import-parked/<ADDR>.json` (one file
+  per row, so two batches parking different rows merge cleanly; `needs`
+  names the scenarios tried, or `frida different: <detail>`; a batch may
+  add files there). `close --kind import` accepts a batch when every row
+  is `trace` or better, or is parked with its body back at the merge
+  base's and its evidence gone.
   The two queues' assigned batches all hold files, so they stay
   disjoint (`tools/claims.py` counts both state files). Each queue has
   its own status file and run lock, so one driver per queue can run at

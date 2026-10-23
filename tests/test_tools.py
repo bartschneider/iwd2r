@@ -10674,12 +10674,14 @@ class DriverTest(unittest.TestCase):
         # different: a finding with the diff summary; the file is untouched
         self.assertTrue(any(f.startswith('0x402000:') and 'different' in f and 'world_entry' in f
                             for f in findings), findings)
-        # never exercised: the exact message, naming the merge base
+        # never exercised: the exact message, naming the merge base and the row's parked file
         mb = self.git('merge-base', 'first', 'HEAD', cwd=self.wt).stdout.strip()[:12]
         self.assertIn('0x403000: exercised by no scenario (world_entry, first_fight, walk_and_talk); '
-                      "edit that function back to the merge base's body (`git show %s:<path>` "
-                      'shows it), delete docs/evidence/403000.md, append it to '
-                      'docs/wso/import-parked.json and commit; '
+                      "park it: edit that function back to the merge base's body (`git show "
+                      '%s:<path>` shows it), delete docs/evidence/403000.md, write '
+                      'docs/wso/import-parked/403000.json {"address", "name", "file", "batch", '
+                      '"needs"} with needs "world_entry, first_fight, walk_and_talk: not exercised", '
+                      'and commit the three together; '
                       "do not replace a file that holds other rows' changes" % mb, findings)
         self.assertIn('kind: read-only', open(os.path.join(self.wt, 'docs', 'evidence', '403000.md')).read())
         self.assertEqual(len(findings), 2)
@@ -10708,7 +10710,7 @@ class DriverTest(unittest.TestCase):
         self.assertEqual([f[:9] for f in findings], ['0x402000:'])
         self.assertIn('world_entry', findings[0])           # the diff detail
         self.assertIn('evidence (kind replay) stands', findings[0])
-        self.assertNotIn('import-parked.json', findings[0])
+        self.assertNotIn('import-parked/', findings[0])
         self.assertNotIn('edit that function back', findings[0])
 
     def test_driver_frida_phase_different_read_only_row_is_parked(self):
@@ -10725,8 +10727,8 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(d._evidence_kind(self.wt, '0x402000'), 'read-only')
         findings = d._frida_phase('b011', batch, self.wt, {})
         text = [f for f in findings if f.startswith('0x402000:')][0]
-        for needle in ("edit that function back to the merge base's body", 'import-parked.json',
-                       'frida different', 'world_entry'):
+        for needle in ("edit that function back to the merge base's body",
+                       'docs/wso/import-parked/402000.json', 'frida different', 'world_entry'):
             self.assertIn(needle, text)
         self.assertNotIn('fix the body', text)
 
@@ -12373,7 +12375,8 @@ class DriverTest(unittest.TestCase):
             if re.search(r'git show[^`]*> *<path>', text):
                 self.assertIn('outside the paths a batch may touch', text)
                 self.assertIn('no batch row lives there', text)
-        self.assertIn(driver.SHARED_FILE, driver.UNMEASURED)
+        self.assertIn(driver.SHARED_FILE, driver.park_text('0x401000', 'abc', 'x'))
+        self.assertIn(driver.EDIT_BACK % 'abc', driver.park_text('0x401000', 'abc', 'x'))
 
     def test_transcript_rejects_wso_ref(self):
         for cmd in ('git show wso/main:src/A.cpp', 'git show wso/x', 'git diff wso/main -- src',
@@ -12608,6 +12611,8 @@ class DriverTest(unittest.TestCase):
             self.assertNotIn(ok, text)
         self.assertFalse(driver._path_allowed('docs/evidence-other/x.md'))
         self.assertTrue(driver._path_allowed('docs/evidence/40B000.md'))
+        self.assertTrue(driver._path_allowed('docs/wso/import-parked/40B000.json'))
+        self.assertFalse(driver._path_allowed('docs/wso/import-parked.json'))
 
     def test_driver_syncs_the_base_before_merging_into_a_batch(self):
         w = self._BatchWorker(credits=0.0)
@@ -15216,9 +15221,9 @@ class WaveCloseRulesTest(unittest.TestCase):
                    f'---\naddress: {addr}\nname: fn\nkind: {kind}\n---\n\nnotes\n')
         if src is not None:
             _write(os.path.join(self.wt, 'src', 'A.cpp'), self.SRC_BODY % src)
-        if parked is not None:
-            _write(os.path.join(self.wt, 'docs', 'wso', 'import-parked.json'),
-                   json.dumps(parked))
+        for entry in parked or ():
+            _write(os.path.join(self.wt, self.wave.parked_rel(entry['address'])),
+                   json.dumps(entry))
         self.commit_worktree()
 
     PARKED = [{'address': '0x643CD0', 'name': 'Draw', 'file': 'src/A.cpp', 'batch': 'b001',
@@ -15235,8 +15240,8 @@ class WaveCloseRulesTest(unittest.TestCase):
         first = self.first_sha()
         rc, out = self.close(kind='import')
         self.assertEqual(rc, 1, out)
-        self.assertIn('no evidence file docs/evidence/643CD0.md', out)
-        self.assertIn('import-parked.json', out)
+        self.assertIn('no evidence file docs/evidence/643CD0.md (and 0x643CD0 is not parked: '
+                      'no docs/wso/import-parked/643CD0.json)', out)
         self.assertNotIn('643CC0', out)
         self.assertEqual(self.first_sha(), first)
 
@@ -15244,32 +15249,66 @@ class WaveCloseRulesTest(unittest.TestCase):
         self._import_ready(parked=self.PARKED, src=1)
         rc, out = self.close(kind='import')
         self.assertEqual(rc, 1, out)
-        self.assertIn('0x643CD0: listed in docs/wso/import-parked.json but its body is still '
-                      'changed against first', out)
+        self.assertIn('0x643CD0: parked (docs/wso/import-parked/643CD0.json) but its body is '
+                      'still changed against first', out)
         self.assertEqual(self.batches()['b001']['status'], 'assigned')
 
     def test_import_close_reads_parked_addresses_loosely_and_refuses_bad_ones(self):
         self._import_ready(parked=[])
-        path = os.path.join(self.wt, 'docs', 'wso', 'import-parked.json')
-        for bad in ([{'address': 5}], [{'name': 'x'}], ['0x643CD0']):
+        path = os.path.join(self.wt, 'docs', 'wso', 'import-parked', '643CD0.json')
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        for bad in ({'address': 5}, {'name': 'x'}, ['0x643CD0'], dict(self.PARKED[0], address='0x643CC0')):
             with open(path, 'w') as f:
                 json.dump(bad, f)
             self.commit_worktree('bad parked')
             rc, out = self.close(kind='import')
             self.assertEqual(rc, 1, out)
-            self.assertIn('import-parked.json', out)
+            self.assertIn('docs/wso/import-parked/643CD0.json', out)
             self.assertNotIn('Traceback', out)
         with open(path, 'w') as f:
-            json.dump([dict(self.PARKED[0], address='0X643cd0')], f)
+            f.write('{not json')
+        self.commit_worktree('unreadable')
+        rc, out = self.close(kind='import')
+        self.assertIn('docs/wso/import-parked/643CD0.json is unreadable', out)
+        with open(path, 'w') as f:
+            json.dump(dict(self.PARKED[0], address='0X643cd0'), f)
         self.commit_worktree('loose address')
         rc, out = self.close(kind='import')
         self.assertEqual(rc, 0, out)
+
+    def test_import_close_refuses_the_retired_parked_list(self):
+        self._import_ready(parked=self.PARKED)
+        _write(os.path.join(self.wt, 'docs', 'wso', 'import-parked.json'), '[]')
+        self.commit_worktree('old list')
+        rc, out = self.close(kind='import')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('docs/wso/import-parked.json is retired: write one file per row', out)
+
+    def test_two_batches_parking_different_rows_merge_cleanly(self):
+        # one file per row: two branches off first, each parking its own row,
+        # both merge into first without a conflict and both rows read back
+        self.init_repo()
+        for branch, entry in (('p3/wso-i001', dict(self.PARKED[0], batch='i001')),
+                              ('p3/wso-i002', dict(self.PARKED[0], address='0x643CC0',
+                                                   name='Render', batch='i002'))):
+            self.git('checkout', '-q', '-b', branch, 'first')
+            _write(os.path.join(self.root, self.wave.parked_rel(entry['address'])),
+                   json.dumps(entry))
+            self.git('add', '-A')
+            self.git('commit', '-qm', 'park ' + entry['address'])
+        self.git('checkout', '-q', 'first')
+        self.git('merge', '-q', '--no-edit', 'p3/wso-i001')
+        self.git('merge', '-q', '--no-edit', 'p3/wso-i002')     # check=True: a conflict raises
+        parked, bad = self.wave._parked_rows(self.root)
+        self.assertIsNone(bad)
+        self.assertEqual(sorted(parked), ['643cc0', '643cd0'])
+        self.assertEqual(parked['643cc0']['batch'], 'i002')
 
     def test_import_close_refuses_parked_row_whose_evidence_remains(self):
         self._import_ready(parked=self.PARKED, evidence=('0x643CD0',))
         rc, out = self.close(kind='import')
         self.assertEqual(rc, 1, out)
-        self.assertIn('0x643CD0: listed in docs/wso/import-parked.json but '
+        self.assertIn('0x643CD0: parked (docs/wso/import-parked/643CD0.json) but '
                       'docs/evidence/643CD0.md still exists', out)
 
     def test_close_cli_takes_allow_dump_and_ledger(self):

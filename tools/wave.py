@@ -58,9 +58,13 @@ CALIBRATION_PATH = os.path.join(ROOT, 'docs', 'wso', 'truth-calibration.json')
 IMPORT_LIST_REL = os.path.join('docs', 'wso', 'import-list.json')
 # Rows a worker could not decide (ruling R73): they wait for a probe.
 PROBE_LIST_REL = os.path.join('docs', 'wso', 'probe-list.json')
-# Import rows no scenario could measure: reverted, evidence deleted, listed
-# here by the worker; `close --kind import` accepts them as dropped.
-IMPORT_PARKED_REL = 'docs/wso/import-parked.json'
+# Import rows a batch dropped (no scenario measured them, the fork body was
+# refused, ...): the body edited back, the evidence deleted, and one file per
+# row here, written by the worker (one file per row, so parallel batches never
+# conflict); `close --kind import` accepts them as dropped.
+IMPORT_PARKED_DIR = 'docs/wso/import-parked'
+# The single list it replaced; a batch that still carries it is refused.
+RETIRED_PARKED_REL = 'docs/wso/import-parked.json'
 DISAGREEMENTS_REL = os.path.join('docs', 'wso', 'disagreements.json')
 # The fork is read by pinned sha, never by branch name (wso/main moves).
 DEFAULT_FORK_BASE = 'e8dd16a750966af53f24daaf49dcb4fb13594c13'
@@ -236,25 +240,46 @@ def _check_evidence():
     return _check_evidence_module
 
 
+def parked_rel(address):
+    """docs/wso/import-parked/<ADDR>.json: where one parked row's entry lives."""
+    return f'{IMPORT_PARKED_DIR}/{_addr_key(address).upper()}.json'
+
+
 def _parked_rows(worktree):
     """({address key: entry}, problem or None) of the worktree's
-    docs/wso/import-parked.json: the rows an import batch dropped, which the
-    worker appended in its fix round."""
-    path = os.path.join(worktree, IMPORT_PARKED_REL)
-    if not os.path.isfile(path):
-        return {}, None
-    try:
-        with open(path, encoding='utf-8') as f:
-            data = json.load(f)
-        out = {}
-        for e in data:
-            if not isinstance(e.get('address'), str):
-                return {}, (f'{IMPORT_PARKED_REL}: an entry has no string address ({e!r}); '
-                            f'it is a JSON list of entries with an address')
-            out[_addr_key(e['address'].lower())] = e
-        return out, None
-    except (OSError, ValueError, TypeError, KeyError, AttributeError) as e:
-        return {}, f'{IMPORT_PARKED_REL} is unreadable ({e!r}); it is a JSON list of entries with an address'
+    docs/wso/import-parked/<ADDR>.json files: the rows import batches
+    dropped, one JSON object per file ({address, name, file, batch, needs}),
+    named after its row.  A file that is not such an object, or names
+    another address, is a problem; so is the retired single list."""
+    out, problems = {}, []
+    if os.path.exists(os.path.join(worktree, RETIRED_PARKED_REL)):
+        problems.append(f'{RETIRED_PARKED_REL} is retired: write one file per row, '
+                        f'{IMPORT_PARKED_DIR}/<ADDR>.json, and delete it')
+    folder = os.path.join(worktree, IMPORT_PARKED_DIR)
+    names = sorted(os.listdir(folder)) if os.path.isdir(folder) else []
+    for name in names:
+        rel = f'{IMPORT_PARKED_DIR}/{name}'
+        stem = name[:-len('.json')] if name.endswith('.json') else None
+        if not stem or not re.fullmatch(r'[0-9A-Fa-f]+', stem):
+            problems.append(f'{rel}: not a parked row; the folder holds only <ADDR>.json files')
+            continue
+        try:
+            with open(os.path.join(folder, name), encoding='utf-8') as f:
+                entry = json.load(f)
+        except (OSError, ValueError) as e:
+            problems.append(f'{rel} is unreadable ({e!r}); it is one JSON object '
+                            f'{{"address", "name", "file", "batch", "needs"}}')
+            continue
+        if not isinstance(entry, dict) or not isinstance(entry.get('address'), str):
+            problems.append(f'{rel}: no string address ({entry!r}); it is one JSON object '
+                            f'{{"address", "name", "file", "batch", "needs"}}')
+            continue
+        if _addr_key(entry['address'].lower()) != _addr_key(stem.lower()):
+            problems.append(f'{rel} records address {entry["address"]}; name the file '
+                            f'after its row ({parked_rel(entry["address"])})')
+            continue
+        out[_addr_key(stem.lower())] = entry
+    return out, ('; '.join(problems) or None)
 
 
 _assemble_module = None
@@ -960,8 +985,8 @@ def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
     on success fast-forward `base` to the batch branch.  kind='verdicts'
     (wave 1) requires a verdict and a phrase-bearing evidence file per
     row; kind='import' (waves 2-5) requires evidence kind trace or
-    better instead, or the row listed in docs/wso/import-parked.json with
-    its body reverted and its evidence deleted.  A branch that modified tools/gates.sh or tools/parity
+    better instead, or the row parked (docs/wso/import-parked/<ADDR>.json)
+    with its body back at the merge base's and its evidence deleted.  A branch that modified tools/gates.sh or tools/parity
     is refused outright -- it would be certified by its own gate.  The
     gate runs only when everything else is clean: it costs minutes.
     gate=False skips tools/gates.sh (tests only).  A fork or neither
@@ -1040,16 +1065,16 @@ def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
             k = _addr_key(row['address'])
             if k in parked:
                 if text is not None:
-                    problems.append(f'{row["address"]}: listed in {IMPORT_PARKED_REL} '
+                    problems.append(f'{row["address"]}: parked ({parked_rel(k)}) '
                                     f'but {rel} still exists; delete it')
                 if k in touched:
-                    problems.append(f'{row["address"]}: listed in {IMPORT_PARKED_REL} '
+                    problems.append(f'{row["address"]}: parked ({parked_rel(k)}) '
                                     f'but its body is still changed against {base}; '
-                                    f'revert it to the merge base')
+                                    f"edit that function back to the merge base's body")
                 continue
             if text is None:
                 problems.append(f'no evidence file {rel}' + (
-                    f' (and {row["address"]} is not in {IMPORT_PARKED_REL})'
+                    f' (and {row["address"]} is not parked: no {parked_rel(k)})'
                     if kind != 'verdicts' else ''))
                 continue
             if kind == 'verdicts':
@@ -1068,8 +1093,8 @@ def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
                 have = m.group(1) if m else 'none'
                 if have not in IMPORT_KINDS:
                     problems.append(f'{rel}: kind {have} is not trace or '
-                                    f'better; measure it, or revert it and '
-                                    f'list it in {IMPORT_PARKED_REL}')
+                                    f'better; let the Frida phase measure it, or park '
+                                    f'it ({parked_rel(k)})')
     if gate and not problems and wt is not None:
         g = subprocess.run(['bash', 'tools/gates.sh', '--base', base],
                            cwd=wt, capture_output=True, text=True)
