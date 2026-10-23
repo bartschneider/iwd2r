@@ -954,9 +954,10 @@ def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
         for k, a in sorted(inside.items()):
             if k in changed:
                 problems.append('%s: listed under ## Undecided but its body '
-                                'changed against %s; restore our body (`git show %s:<path> > <path>`, '
-                                '`git rm <path>` when %s lacks the file) and '
-                                'commit.' % (a, base, base, base))
+                                'changed against %s; edit that function back to the '
+                                "base's body (`git show %s:<path>` shows it) and commit; "
+                                "do not replace a file that holds other rows' changes."
+                                % (a, base, base))
     for k, a in given.items():
         if k not in row_keys:
             problems.append('%s: verdict for an address outside this batch; '
