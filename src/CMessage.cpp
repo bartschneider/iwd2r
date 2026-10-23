@@ -3480,7 +3480,7 @@ BOOLEAN CBaldurMessage::ChapterAnnounceStatus(BYTE nChapter, CResRef cResRef)
 
     memcpy(pByteMessage + cnt, sResRef.GetBuffer(nResRefLength), nResRefLength);
 
-    g_pChitin->cNetwork.SendSpecificMessage(CString(""),
+    g_pChitin->cNetwork.SendSpecificMessage(CString(""), // re-lint: disable RE002 (narrow literals are the norm in this tree)
         CNetwork::SEND_GUARANTEED | CNetwork::SEND_ALL_PLAYERS,
         MSG_TYPE_CHAPTER,
         MSG_SUBTYPE_CHAPTER_ANNOUNCE_STATUS,

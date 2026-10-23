@@ -5349,7 +5349,7 @@ void CUIControlButtonWorldContainerSlot::OnLButtonClick(CPoint pt)
         pGame->GetObjectArray()->ReleaseShare(nLooterId, CGameObjectArray::THREAD_ASYNCH, INFINITE);
 
         CString sGold;
-        sGold.Format("%d", pGame->GetGameSave()->m_nPartyGold);
+        sGold.Format("%d", pGame->GetGameSave()->m_nPartyGold); // re-lint: disable RE001 (narrow literals are the norm in this tree)
         static_cast<CUIControlLabel*>(m_pPanel->GetControl(0x10000036))->SetText(sGold);
     }
 }

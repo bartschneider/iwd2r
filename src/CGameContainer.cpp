@@ -918,10 +918,10 @@ void CGameContainer::SetItem(SHORT nSlotNum, CItem* pItem)
 }
 
 // 0x480480
-void CGameContainer::sub_480480(SHORT nSlotNum, CItem* pItem)
+void CGameContainer::sub_480480(SHORT nSlotNum, CItem* pItem)  // re-lint: disable RE004 (address-named in this tree; rename is Ghidra-first)
 {
     static const CResRef HEART_ITEM_PREFIX("60HEART");
-    static const CString HEART_CONTAINER_NAME("HCx");
+    static const CString HEART_CONTAINER_NAME("HCx"); // re-lint: disable RE002 (narrow literals are the norm in this tree)
 
     CItem* pHeartItem = pItem;
     if (pHeartItem == NULL) {

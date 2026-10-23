@@ -12410,7 +12410,7 @@ void CGameSpriteLastUpdate::Initialize(BOOL bFullUpdateRequired)
 }
 
 // 0x723BF0
-void CGameSprite::sub_723BF0(BOOLEAN a1, BOOLEAN a2)
+void CGameSprite::sub_723BF0(BOOLEAN a1, BOOLEAN a2)  // re-lint: disable RE004 (address-named in this tree; rename is Ghidra-first)
 {
     // dword_8E752C counts how many party members are currently hidden, so it
     // only moves on a real transition.

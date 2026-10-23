@@ -1384,7 +1384,7 @@ void CInfGame::DestroyGame(BOOLEAN bProgressBarRequired, BOOLEAN bProgressBarInP
 }
 
 // 0x5A0160
-void CInfGame::sub_5A0160()
+void CInfGame::sub_5A0160()  // re-lint: disable RE004 (address-named in this tree; rename is Ghidra-first)
 {
     CString sSearchPath = g_pChitin->cDimm.cResCache.m_sDirName + "data\\*.*";
     CString sResolvedSearchPath;
