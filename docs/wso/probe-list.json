@@ -1,1 +1,22 @@
-[]
+[
+  {
+    "address": "0x478490",
+    "at": "2026-10-23T16:20:20+00:00",
+    "batch": "b013",
+    "file": "src/CGameArea.cpp",
+    "name": "CGameArea::SetDawn",
+    "reading": "fork",
+    "reason": "<exe sign-extends GetSong(0) via movsx so nSong is char, ours declares BYTE; a dump reading cannot decide a fork row>",
+    "source": "worker"
+  },
+  {
+    "address": "0x6EEBA0",
+    "at": "2026-10-23T16:20:20+00:00",
+    "batch": "b013",
+    "file": "src/CGameAnimationTypeMonsterIcewindNew.cpp",
+    "name": "CGameAnimationTypeMonsterIcewindNew::Render",
+    "reading": "fork",
+    "reason": "<exe ORs 0x2 only when transparency != 0 and pushes the same dwRenderFlags to both FXRender calls \u2014 his plain flag arguments look right; a dump reading cannot decide a fork row>",
+    "source": "worker"
+  }
+]
