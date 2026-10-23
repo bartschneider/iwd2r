@@ -808,7 +808,7 @@ void CScreenCharacter::OnPortraitLClick(DWORD nPortrait)
 }
 
 // 0x5D79B0
-// Imported-From: WillScarlettOhara/iwd2-re@e8dd16a750966af53f24daaf49dcb4fb13594c13
+// Imported-From: WillScarlettOhara/iwd2-re@e8dd16a750966af53f24daaf49dcb4fb13594c13 (MIT per author, 2026-10-17)
 void CScreenCharacter::UpdateSavingThrows(CUIControlTextDisplay* pText, CDerivedStats& DStats)
 {
     const CRuleTables& ruleTables = g_pBaldurChitin->GetObjectGame()->GetRuleTables();
