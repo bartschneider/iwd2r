@@ -360,7 +360,9 @@ owner at a time. `wave-state.json` has one writer, the driver; nobody else
 edits it. Claim before you edit and release at merge:
 `python3 -I tools/claims.py claim <stream> <holder> <file>...`, then
 `... release <stream>` ([tools/claims.py](../../tools/claims.py), recorded in
-`docs/wso/claims.json`); `wave.py next` skips claimed files exactly as it
+`docs/wso/claims.json`). Claims always go to the checkout that has `first`
+checked out, whichever worktree you run the tool from, and the tool refuses
+when none has it. Paths are stored repo-relative. `wave.py next` skips claimed files exactly as it
 skips files of assigned batches. Run `git pull --ff-only` before every merge
 into `first`. Keep one ledger per plan. `tools/gates.sh` takes an exclusive
 lock on `.gates.lock` at the main repo root, so two gates never run at once;

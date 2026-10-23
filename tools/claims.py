@@ -9,22 +9,76 @@ stream claims the files it is about to edit, so the batch driver never cuts
 a batch over them (wave.next_batch skips them), and releases them at merge.
 A file also counts as held by every batch with status "assigned" in
 docs/wso/wave-state.json, which this module only reads.
+
+Claims and state always live in the checkout that has branch `first`
+(found with `git worktree list`), whichever worktree runs this tool, so the
+driver and every stream see the same file.  Paths are stored repo-relative
+with forward slashes; relative arguments are taken from this checkout's root.
 """
 
 import argparse
 import datetime
+import importlib.util
 import json
 import os
+import subprocess
 import sys
 import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CLAIMS_PATH = os.path.join(ROOT, 'docs', 'wso', 'claims.json')
-STATE_PATH = os.path.join(ROOT, 'docs', 'wso', 'wave-state.json')
+CLAIMS_REL = os.path.join('docs', 'wso', 'claims.json')
+STATE_REL = os.path.join('docs', 'wso', 'wave-state.json')
 
 
 class ClaimError(Exception):
     pass
+
+
+class NoFirstCheckout(ClaimError):
+    pass
+
+
+def _filelock():
+    spec = importlib.util.spec_from_file_location(
+        'filelock', os.path.join(ROOT, 'tools', 'filelock.py'))
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
+
+
+def first_checkout(repo=ROOT):
+    """The worktree directory that has branch `first` checked out."""
+    try:
+        out = subprocess.run(['git', '-C', repo, 'worktree', 'list',
+                              '--porcelain'], capture_output=True, text=True,
+                             check=True).stdout
+    except (OSError, subprocess.CalledProcessError) as e:
+        raise NoFirstCheckout(f'cannot list worktrees: {e}')
+    path = None
+    for line in out.splitlines():
+        if line.startswith('worktree '):
+            path = line[len('worktree '):]
+        elif line == 'branch refs/heads/first' and path:
+            return path
+    raise NoFirstCheckout('no worktree has branch first checked out; '
+                          'claims live in that checkout')
+
+
+def _paths(claims_path, state_path):
+    if claims_path is None or state_path is None:
+        top = first_checkout()
+        claims_path = claims_path or os.path.join(top, CLAIMS_REL)
+        state_path = state_path or os.path.join(top, STATE_REL)
+    return claims_path, state_path
+
+
+def normalize(path):
+    """Repo-relative POSIX form of path; ClaimError when outside the repo."""
+    p = os.path.normpath(os.path.join(ROOT, path))
+    rel = os.path.relpath(p, ROOT)
+    if rel == '.' or rel == '..' or rel.startswith('..' + os.sep):
+        raise ClaimError(f'{path} is outside the repository')
+    return rel.replace(os.sep, '/')
 
 
 def _load(path):
@@ -71,49 +125,55 @@ def _batch_holders(state_path):
     return out
 
 
-def owned(path, claims_path=CLAIMS_PATH, state_path=STATE_PATH):
+def owned(path, claims_path=None, state_path=None):
     """The stream name or batch id holding path, or None."""
+    claims_path, state_path = _paths(claims_path, state_path)
+    path = normalize(path)
     for stream, c in sorted(_load(claims_path).items()):
         if path in c.get('files', []):
             return stream
     return _batch_holders(state_path).get(path)
 
 
-def claim(stream, holder, files, claims_path=CLAIMS_PATH,
-          state_path=STATE_PATH):
+def claim(stream, holder, files, claims_path=None, state_path=None):
     """Claim files for stream; ClaimError names the conflicting holder."""
-    claims = _load(claims_path)
-    batches = _batch_holders(state_path)
-    for p in files:
-        for other, c in sorted(claims.items()):
-            if other != stream and p in c.get('files', []):
-                raise ClaimError(f'{p} is held by stream {other} '
-                                 f'({c.get("holder", "?")})')
-        if p in batches:
-            raise ClaimError(f'{p} is held by assigned batch {batches[p]}')
-    cur = claims.get(stream)
-    if cur:
-        merged = list(cur.get('files', []))
-        merged += [p for p in files if p not in merged]
-        claims[stream] = dict(cur, holder=holder, files=merged)
-    else:
-        claims[stream] = {
-            'holder': holder, 'files': list(dict.fromkeys(files)),
-            'since': datetime.datetime.now(datetime.timezone.utc)
-            .strftime('%Y-%m-%dT%H:%M:%SZ')}
-    _save(claims_path, claims)
-
-
-def release(stream, claims_path=CLAIMS_PATH, state_path=STATE_PATH):
-    claims = _load(claims_path)
-    if claims.pop(stream, None) is not None:
+    claims_path, state_path = _paths(claims_path, state_path)
+    files = list(dict.fromkeys(normalize(p) for p in files))
+    with _filelock().hold(claims_path + '.lock', 'claims'):
+        claims = _load(claims_path)
+        batches = _batch_holders(state_path)
+        for p in files:
+            for other, c in sorted(claims.items()):
+                if other != stream and p in c.get('files', []):
+                    raise ClaimError(f'{p} is held by stream {other} '
+                                     f'({c.get("holder", "?")})')
+            if p in batches:
+                raise ClaimError(f'{p} is held by assigned batch {batches[p]}')
+        cur = claims.get(stream)
+        if cur:
+            merged = list(cur.get('files', []))
+            merged += [p for p in files if p not in merged]
+            claims[stream] = dict(cur, holder=holder, files=merged)
+        else:
+            claims[stream] = {
+                'holder': holder, 'files': files,
+                'since': datetime.datetime.now(datetime.timezone.utc)
+                .strftime('%Y-%m-%dT%H:%M:%SZ')}
         _save(claims_path, claims)
+
+
+def release(stream, claims_path=None, state_path=None):
+    claims_path, state_path = _paths(claims_path, state_path)
+    with _filelock().hold(claims_path + '.lock', 'claims'):
+        claims = _load(claims_path)
+        if claims.pop(stream, None) is not None:
+            _save(claims_path, claims)
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(prog='claims.py')
-    ap.add_argument('--claims', default=CLAIMS_PATH)
-    ap.add_argument('--state', default=STATE_PATH)
+    ap.add_argument('--claims', default=None)
+    ap.add_argument('--state', default=None)
     sub = ap.add_subparsers(dest='cmd', required=True)
     c = sub.add_parser('claim')
     c.add_argument('stream')
@@ -123,16 +183,20 @@ def main(argv=None):
     r.add_argument('stream')
     sub.add_parser('list')
     a = ap.parse_args(argv)
-    kw = dict(claims_path=a.claims, state_path=a.state)
     try:
+        kw = dict(zip(('claims_path', 'state_path'),
+                      _paths(a.claims, a.state)))
         if a.cmd == 'claim':
             claim(a.stream, a.holder, a.files, **kw)
         elif a.cmd == 'release':
             release(a.stream, **kw)
         else:
-            for s, e in sorted(_load(a.claims).items()):
+            for s, e in sorted(_load(kw['claims_path']).items()):
                 print(f'{s}\t{e.get("holder", "")}\t{e.get("since", "")}\t'
                       + ' '.join(e.get('files', [])))
+    except NoFirstCheckout as e:
+        print(f'claims: {e}', file=sys.stderr)
+        return 2
     except ClaimError as e:
         print(f'claims: {e}', file=sys.stderr)
         return 1

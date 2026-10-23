@@ -13,6 +13,9 @@
 # the MAIN repo root (shared by every worktree) and a second gate waits for it.
 # --no-wait fails fast, naming the holder, instead. --dry-lock SECONDS takes
 # the lock, holds it that long and exits 0 without running any step (tests).
+# Exit status: 3 for --no-wait with the lock held, 4 when flock itself fails.
+# The lock file is git-ignored: `git clean -X` deletes it mid-hold, and a new
+# gate would then lock a fresh inode and run beside the old one.
 set -u
 cd "$(dirname "$0")/.."
 BASE=iwd2r/main; WINDOWS=0; CLANG=1; NOWAIT=0; DRYLOCK=
@@ -29,20 +32,25 @@ done
 # The lock lives at the main repo root, not at this worktree's root: batch
 # worktrees run this script too, and a per-worktree lock would serialise nothing.
 GATE_LOCK="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.gates.lock"
-exec 9>>"$GATE_LOCK"
-if [ "$NOWAIT" = 1 ]; then
-    if ! flock -n 9; then
-        echo "gates: another gate holds $GATE_LOCK ($(head -n 1 "$GATE_LOCK" 2>/dev/null)); not waiting (--no-wait)" >&2
+command -v flock >/dev/null 2>&1 || { echo "gates: flock (util-linux) is missing; refusing to run without the gate lock" >&2; exit 4; }
+exec 9>>"$GATE_LOCK" || { echo "gates: cannot open $GATE_LOCK" >&2; exit 4; }
+# flock -n exits 77 (-E) only when the lock is held elsewhere; any other
+# failure is a real error and never lets the gate run unlocked.
+flock -n -E 77 9; lock_rc=$?
+if [ "$lock_rc" = 77 ]; then
+    holder=$(head -n 1 "$GATE_LOCK" 2>/dev/null)
+    if [ "$NOWAIT" = 1 ]; then
+        echo "gates: another gate holds $GATE_LOCK ($holder); not waiting (--no-wait)" >&2
         exit 3
     fi
-elif ! flock -n 9; then
-    echo "gates: waiting for the gate lock $GATE_LOCK ($(head -n 1 "$GATE_LOCK" 2>/dev/null))" >&2
-    flock 9
+    echo "gates: waiting for the gate lock $GATE_LOCK ($holder)" >&2
+    flock 9; lock_rc=$?
 fi
+[ "$lock_rc" = 0 ] || { echo "gates: flock failed on $GATE_LOCK (status $lock_rc)" >&2; exit 4; }
 # Record the holder for the messages above (the lock is on the inode, so
 # rewriting the file through its path keeps it).
 echo "held by pid $$ in $PWD since $(date -u +%FT%TZ)" > "$GATE_LOCK"
-if [ -n "$DRYLOCK" ]; then sleep "$DRYLOCK"; exit 0; fi
+if [ -n "$DRYLOCK" ]; then sleep "$DRYLOCK" 9>&-; exit 0; fi
 export IWD2R_AUDIO=null SDL_AUDIO_DRIVER=dummy
 # Data tests read a Linux-local copy of the vanilla game when one exists:
 # the oracle's copy on the Windows drive is locked while a sandbox replay
@@ -114,7 +122,9 @@ failed=()
 step() {
     local name="$1"; shift
     echo "=== $name"
-    if "$@"; then echo "--- $name: ok"; else echo "--- $name: FAILED"; failed+=("$name"); fi
+    # fd 9 (the gate lock) is closed in every child: a surviving orphan must
+    # not keep the lock after this script is killed.
+    if "$@" 9>&-; then echo "--- $name: ok"; else echo "--- $name: FAILED"; failed+=("$name"); fi
 }
 linux_preset() {
     local preset="$1" log rc skipped

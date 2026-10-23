@@ -322,7 +322,7 @@ def next_batch(disagreements_path=DISAGREEMENTS_PATH, state_path=STATE_PATH,
     if not eligible:
         if candidates:
             return 2, ('nothing left to assign: %d row%s wait%s on files '
-                       'owned by assigned batches\n'
+                       'owned by assigned batches or claimed by streams\n'
                        % (len(candidates), 's' if len(candidates) != 1 else '',
                           '' if len(candidates) != 1 else 's'))
         return 2, f'nothing left: every {category} row is assigned or decided\n'

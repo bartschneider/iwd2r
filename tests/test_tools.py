@@ -13,6 +13,7 @@ directory afterwards.
 
 import contextlib
 import datetime
+import fcntl
 import glob
 import hashlib
 import importlib.util
@@ -21,6 +22,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import struct
 import subprocess
 from unittest import mock
@@ -10053,7 +10055,7 @@ class DriverTest(unittest.TestCase):
 
     def test_stalled_run_exits_4_and_a_cut_clears_it(self):
         d = self._driver(worker=driver.FakeWorker(self.REPORT))
-        msg = 'nothing left to assign: 3 rows wait on files owned by assigned batches\n'
+        msg = 'nothing left to assign: 3 rows wait on files owned by assigned batches or claimed by streams\n'
         d.next_batch = lambda *a, **kw: (2, msg)
         self.assertEqual(d.run(), 4)
         stalled = self._status(d)['stalled']
@@ -11403,45 +11405,114 @@ class ClaimsTest(unittest.TestCase):
                     os.path.join(root, 'tools', 'gates.sh'))
         return root
 
+    def hold_lock(self, root):
+        """The test itself holds the temp repo's gate lock, as a gate would."""
+        fd = os.open(os.path.join(root, '.gates.lock'),
+                     os.O_RDWR | os.O_CREAT, 0o666)
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        os.write(fd, ('held by pid %d\n' % os.getpid()).encode())
+        return fd
+
     def test_gate_lock_serializes(self):
         root = self.lock_repo()
         gates = os.path.join(root, 'tools', 'gates.sh')
-        log = os.path.join(self.tmp, 'log')
-        # Each holder records when it got the lock and when it let go.
-        script = ('bash "%s" --dry-lock 1 && date +%%s.%%N >> "%s"' % (gates, log))
-        t0 = time.time()
-        procs = [subprocess.Popen(['bash', '-c', script]) for _ in range(2)]
-        for p in procs:
-            self.assertEqual(p.wait(timeout=60), 0)
-        # Two one-second holds cannot overlap: the second ends >= 2 s in.
-        self.assertGreaterEqual(time.time() - t0, 2.0)
-        with open(log) as f:
-            ends = sorted(float(x) for x in f.read().split())
-        self.assertEqual(len(ends), 2)
-        self.assertGreaterEqual(ends[1] - ends[0], 0.5)
-        self.assertTrue(os.path.exists(os.path.join(root, '.gates.lock')))
+        fd = self.hold_lock(root)
+        try:
+            # --no-wait fails fast, exit 3, naming the holder.
+            a = subprocess.run(['bash', gates, '--no-wait', '--dry-lock', '0'],
+                               capture_output=True, text=True, timeout=30)
+            self.assertEqual(a.returncode, 3, a.stderr)
+            self.assertIn('pid %d' % os.getpid(), a.stderr)
+            # Without it the gate blocks: it says so, and has not exited.
+            b = subprocess.Popen(['bash', gates, '--dry-lock', '0'],
+                                 stderr=subprocess.PIPE, text=True)
+            try:
+                self.assertIn('waiting for the gate lock', b.stderr.readline())
+                self.assertIsNone(b.poll())
+            except BaseException:
+                b.kill()
+                b.communicate()
+                raise
+        finally:
+            os.close(fd)  # releases the flock
+        _, err = b.communicate(timeout=30)
+        self.assertEqual(b.returncode, 0, err)
 
-    def test_gate_lock_no_wait_fails_fast(self):
+    def test_gate_lock_not_inherited_by_children(self):
         root = self.lock_repo()
         gates = os.path.join(root, 'tools', 'gates.sh')
-        holder = subprocess.Popen(['bash', gates, '--dry-lock', '4'])
+        holder = subprocess.Popen(['bash', gates, '--dry-lock', '30'],
+                                  start_new_session=True)
         self.addCleanup(holder.wait)
+        self.addCleanup(lambda: os.killpg(holder.pid, signal.SIGKILL))
         lock = os.path.join(root, '.gates.lock')
-        deadline = time.time() + 10
+        deadline = time.time() + 30
         while time.time() < deadline and not (
                 os.path.exists(lock) and os.path.getsize(lock) > 0):
-            time.sleep(0.05)
-        t0 = time.time()
-        r = subprocess.run(['bash', gates, '--no-wait', '--dry-lock', '0'],
-                           capture_output=True, text=True, timeout=30)
-        self.assertLess(time.time() - t0, 2.0)
-        self.assertNotEqual(r.returncode, 0)
-        self.assertIn('held', r.stderr)
-        self.assertIn(str(holder.pid), r.stderr)
-        holder.wait()
-        r = subprocess.run(['bash', gates, '--no-wait', '--dry-lock', '0'],
-                           capture_output=True, text=True, timeout=30)
+            time.sleep(0.02)
+        os.kill(holder.pid, signal.SIGKILL)
+        holder.wait(timeout=30)
+        # The orphaned sleep is still running, and must not hold the lock.
+        fd = os.open(lock, os.O_RDWR)
+        self.addCleanup(os.close, fd)
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+    # -- claims go to the checkout that has `first` ------------------------
+
+    def two_worktrees(self, first_checked_out=True):
+        env = dict(os.environ, GIT_AUTHOR_NAME='t', GIT_AUTHOR_EMAIL='t@t',
+                   GIT_COMMITTER_NAME='t', GIT_COMMITTER_EMAIL='t@t',
+                   GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM='1')
+
+        def git(*a, cwd):
+            subprocess.run(['git', *a], cwd=cwd, env=env, check=True,
+                           capture_output=True)
+        main = os.path.join(self.tmp, 'main')
+        other = os.path.join(self.tmp, 'other')
+        os.makedirs(os.path.join(main, 'tools'))
+        os.makedirs(os.path.join(main, 'docs', 'wso'))
+        for n in ('claims.py', 'filelock.py'):
+            shutil.copy(os.path.join(ROOT, 'tools', n),
+                        os.path.join(main, 'tools', n))
+        git('init', '-q', '-b', 'first' if first_checked_out else 'main',
+            cwd=main)
+        git('add', '-A', cwd=main)
+        git('commit', '-q', '-m', 'x', cwd=main)
+        git('worktree', 'add', '-q', '-b', 'stream', other, cwd=main)
+        return main, other
+
+    def test_claims_go_to_the_first_checkout(self):
+        main, other = self.two_worktrees()
+        tool = os.path.join(other, 'tools', 'claims.py')
+        r = subprocess.run(['python3', '-I', tool, 'claim', 's1', 'me',
+                            './src/A.cpp', os.path.join(other, 'src', 'B.cpp')],
+                           capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stderr)
+        with open(os.path.join(main, 'docs', 'wso', 'claims.json')) as f:
+            self.assertEqual(json.load(f)['s1']['files'],
+                             ['src/A.cpp', 'src/B.cpp'])
+        self.assertFalse(os.path.exists(
+            os.path.join(other, 'docs', 'wso', 'claims.json')))
+
+    def test_claims_refuse_without_a_first_checkout(self):
+        main, other = self.two_worktrees(first_checked_out=False)
+        tool = os.path.join(other, 'tools', 'claims.py')
+        r = subprocess.run(['python3', '-I', tool, 'claim', 's1', 'me', 'a.c'],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn('first', r.stderr)
+
+    def test_claim_paths_are_normalised(self):
+        self.claims.claim('s1', 'me', ['./src/A.cpp',
+                                       os.path.join(ROOT, 'src', 'B.cpp')],
+                          **self.kw)
+        with open(self.cp) as f:
+            self.assertEqual(json.load(f)['s1']['files'],
+                             ['src/A.cpp', 'src/B.cpp'])
+        self.assertEqual(self.claims.owned('src/../src/A.cpp', **self.kw), 's1')
+        for bad in ('../x.cpp', '/etc/passwd', '.'):
+            with self.assertRaises(self.claims.ClaimError):
+                self.claims.claim('s2', 'me', [bad], **self.kw)
 
 
 if __name__ == '__main__':
