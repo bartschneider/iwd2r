@@ -10601,15 +10601,20 @@ class TruthTest(unittest.TestCase):
            '  Address         Publics by Value              Rva+Base       Lib:Object\n\n'
            ' 0001:00001230       ?Roll@IcewindMisc@@YAHHH@Z 00402230 f   rand.obj\n'
            ' 0001:00004560       ?GetAbilityNo@CGameSprite@@QAEIXZ 00405560 f   spr.obj\n'
-           ' 0001:00005560       ?Missing@Gone@@YAXXZ 00406560 f   gone.obj\n')
+           ' 0001:00005560       ?Missing@Gone@@YAXXZ 00406560 f   gone.obj\n'
+           ' 0001:00006000       ?Twice@Gone@@QAEHH@Z 00407000 f   gone.obj\n'
+           ' 0001:00006100       ?Twice@Gone@@QAEHHH@Z 00407100 f   gone.obj\n'
+           ' 0001:00006200       ?EngineActivated@CScreenWorld@@QAEXXZ 00407200 f   w.obj\n')
     ROWS = [{'address': '0x5845D0', 'name': 'IcewindMisc::Roll'},
             {'address': '0x73F560', 'name': 'CGameSprite::GetAbilityNo'},
             {'address': '0x777777', 'name': 'Gone::Missing'},
-            {'address': '0x888888', 'name': 'Gone::Unmapped'}]
+            {'address': '0x888888', 'name': 'Gone::Unmapped'},
+            {'address': '0x999999', 'name': 'Gone::Twice'}]
     SIGS = {'0x5845D0': 'int __cdecl Roll(int dice, short sides)',
             '0x73F560': 'uint __thiscall CGameSprite::GetAbilityNo(CGameSprite *this, byte x)',
             '0x777777': 'void __cdecl Missing(void)',
-            '0x888888': 'int __cdecl Unmapped(int a)'}
+            '0x888888': 'int __cdecl Unmapped(int a)',
+            '0x999999': 'int __thiscall Twice(Gone *this, int a)'}
 
     def test_hook_table_from_signatures(self):
         table = truth.hook_table(self.ROWS, self.SIGS, self.MAP, ['world_entry'])
@@ -10635,6 +10640,23 @@ class TruthTest(unittest.TestCase):
         self.assertIn('0x888888', table['skipped'])
         for h in list(orig.values()) + list(ours.values()):
             self.assertEqual(h['max'], 200)
+        # overloads at different rvas are never guessed between
+        self.assertEqual(table['skipped']['0x999999'], 'ambiguous: 2 overloads of Gone::Twice in our map')
+        self.assertNotIn('fn_999999', orig)
+        self.assertEqual(table['ours_loaded_rva'], '0x7200')
+
+    def test_hook_table_skips_what_the_hooks_cannot_log(self):
+        rows = [{'address': '0x%X' % (0x5845D0 + i), 'name': 'IcewindMisc::Roll'} for i in range(6)]
+        sigs = {'0x5845D0': 'int __fastcall Roll(int a)', '0x5845D1': 'int Roll(int a)',
+                '0x5845D2': 'double __cdecl Roll(int a)', '0x5845D3': 'int __cdecl Roll(float a)',
+                '0x5845D4': 'int __cdecl Roll(longlong a)', '0x5845D5': 'int __cdecl Roll(int a)'}
+        table = truth.hook_table(rows, sigs, self.MAP, ['s'])
+        self.assertEqual(sorted(table['skipped']), ['0x5845D%d' % i for i in range(5)])
+        self.assertIn('__fastcall', table['skipped']['0x5845D0'])
+        self.assertIn('no calling convention', table['skipped']['0x5845D1'])
+        for i in (2, 3, 4):
+            self.assertIn('8 bytes or floating point', table['skipped']['0x5845D%d' % i])
+        self.assertEqual([h['name'] for h in table['ours']['hooks']], ['fn_5845D5'])
 
     @staticmethod
     def _trace(*calls):
@@ -10667,6 +10689,29 @@ class TruthTest(unittest.TestCase):
         bad = self._trace(('fn_5845D0', 8, 3))
         v = truth.frida_verdicts({'a': (t, t), 'b': (t, bad)}, rows)
         self.assertEqual(v['0x5845D0'][0], 'different')
+        self.assertIn('b: event 1', v['0x5845D0'][1])
+        self.assertIn('"a0_s32": 7', v['0x5845D0'][1])
+        self.assertIn('"a0_s32": 8', v['0x5845D0'][1])
+        v = truth.frida_verdicts({'s': (t, crashed)}, rows)
+        self.assertIn('ours logged {"tag": "crash"}', v['0x5845D0'][1])
+        # skipped rows say so, with the reason
+        v = truth.frida_verdicts({'s': (t, t)}, rows, {'0x73F560': 'ambiguous: 2 overloads of X in our map'})
+        self.assertEqual(v['0x73F560'], ('skipped', 'ambiguous: 2 overloads of X in our map'))
+        # a failed scenario is left out and reported
+        failed = {'orig': [], 'ours': [], 'failed': 'ours side exited 2'}
+        good = {'orig': t, 'ours': t, 'failed': None}
+        v = truth.frida_verdicts({'a': failed, 'b': good}, rows)
+        self.assertEqual(v['0x5845D0'][0], 'equal')
+        self.assertEqual(v['0x73F560'][0], 'scenario failed')
+        v = truth.frida_verdicts({'a': failed}, rows)
+        self.assertEqual(v['0x5845D0'][0], 'scenario failed')
+        self.assertIn('a: ours side exited 2', v['0x5845D0'][1])
+        # pointer returns are compared by presence, not by heap address
+        p1 = [{'tag': 'fn_5845D0', 'a0_s32': 1}, {'tag': 'fn_5845D0_ret', 'ret': '0x1a2b3c'}]
+        p2 = [{'tag': 'fn_5845D0', 'a0_s32': 1}, {'tag': 'fn_5845D0_ret', 'ret': '0x99ff00'}]
+        self.assertEqual(truth.frida_verdicts({'s': (p1, p2)}, rows)['0x5845D0'][0], 'equal')
+        p3 = [p2[0], {'tag': 'fn_5845D0_ret', 'ret': '0x0'}]
+        self.assertEqual(truth.frida_verdicts({'s': (p1, p3)}, rows)['0x5845D0'][0], 'different')
 
     def test_frida_run_is_injectable_and_never_launches(self):
         import subprocess as sp
@@ -10690,20 +10735,48 @@ class TruthTest(unittest.TestCase):
             for c in calls:
                 self.assertIn('--probe', c)
                 self.assertEqual(c[c.index('--scenario') + 1], 's1')
-            orig, ours = traces['s1']
-            self.assertEqual(orig[0]['tag'], 'fn_5845D0')
-            self.assertEqual(ours[0]['a0_s32'], 1)
-            # a side that wrote no trace is an empty list, not an exception
+            # ours loads off the map's EngineActivated rva; the original keeps its default
+            self.assertNotIn('--loaded-rva', calls[0])
+            self.assertEqual(calls[1][calls[1].index('--loaded-rva') + 1], '0x7200')
+            r = traces['s1']
+            self.assertIsNone(r['failed'])
+            self.assertEqual(r['orig'][0]['tag'], 'fn_5845D0')
+            self.assertEqual(r['ours'][0]['a0_s32'], 1)
+            self.assertTrue(os.path.isfile(r['orig_path']) and os.path.isfile(r['ours_path']))
+            # an explicit loaded_rva wins; with none anywhere ours runs --no-loaded
+            calls.clear()
+            truth.frida_run('b011', table, ['s1'], run=fake, root=root, loaded_rva='0x1234')
+            self.assertEqual(calls[1][calls[1].index('--loaded-rva') + 1], '0x1234')
+            calls.clear()
+            truth.frida_run('b011', dict(table, ours_loaded_rva=None), ['s1'], run=fake, root=root)
+            self.assertIn('--no-loaded', calls[1])
+            self.assertNotIn('--loaded-rva', calls[1])
+            # no trace file: a failed scenario, not an empty trace
             traces = truth.frida_run('b011', table, ['s1'],
-                                     run=lambda cmd, **kw: sp.CompletedProcess(cmd, 2, stdout='', stderr='x'),
+                                     run=lambda cmd, **kw: sp.CompletedProcess(cmd, 0, stdout='', stderr=''),
                                      root=root)
-            self.assertEqual(traces['s1'], ([], []))
+            self.assertIn('left no trace file', traces['s1']['failed'])
+            self.assertEqual((traces['s1']['orig'], traces['s1']['ours']), ([], []))
+            # a non-zero exit is a failed scenario even with a trace
+            def rc2(cmd, **kw):
+                done = fake(cmd, **kw)
+                done.returncode = 2
+                return done
+            traces = truth.frida_run('b011', table, ['s1'], run=rc2, root=root)
+            self.assertIn('exited 2', traces['s1']['failed'])
 
-    def test_trace_source_is_accepted_by_check_evidence(self):
+    def test_trace_source_hashes_the_files_and_check_evidence_accepts_it(self):
+        import tempfile
         ce = load_tool('check_evidence')
-        src = truth.trace_source('hooks-b011', [{'tag': 'a'}], [{'tag': 'a'}])
-        self.assertTrue(any(p.match(src) for p in ce.TRACE_SOURCES), src)
-        self.assertNotEqual(src, truth.trace_source('hooks-b011', [{'tag': 'b'}], [{'tag': 'a'}]))
+        with tempfile.TemporaryDirectory() as d:
+            o, r = os.path.join(d, 'o.jsonl'), os.path.join(d, 'r.jsonl')
+            for path, data in ((o, b'{"tag":"a"}\n'), (r, b'{"tag":"a"}\r\n')):
+                with open(path, 'wb') as f:
+                    f.write(data)
+            src = truth.trace_source('hooks-b011', o, r)
+            self.assertTrue(any(p.match(src) for p in ce.TRACE_SOURCES), src)
+            self.assertIn('orig:' + hashlib.sha256(b'{"tag":"a"}\n').hexdigest(), src)
+            self.assertIn('ours:' + hashlib.sha256(b'{"tag":"a"}\r\n').hexdigest(), src)
 
 
 if __name__ == '__main__':
