@@ -1384,50 +1384,9 @@ void CInfGame::DestroyGame(BOOLEAN bProgressBarRequired, BOOLEAN bProgressBarInP
 }
 
 // 0x5A0160
-void CInfGame::sub_5A0160()  // re-lint: disable RE004 (address-named in this tree; rename is Ghidra-first)
+void CInfGame::sub_5A0160()
 {
-    CString sSearchPath = g_pChitin->cDimm.cResCache.m_sDirName + "data\\*.*";
-    CString sResolvedSearchPath;
-    if (g_pChitin->lAliases.ResolveFileName(sSearchPath, sResolvedSearchPath) == FALSE) {
-        sResolvedSearchPath = sSearchPath;
-    }
-
-    CFileFind fileFind;
-    BOOLEAN bWorking = fileFind.FindFile(sResolvedSearchPath, 0);
-    while (bWorking) {
-        bWorking = fileFind.FindNextFile();
-
-        CString sBifFileName = fileFind.GetFilePath();
-        INT nSlash = sBifFileName.Find('\\');
-        while (nSlash != -1) {
-            sBifFileName = sBifFileName.Right(sBifFileName.GetLength() - nSlash - 1);
-            nSlash = sBifFileName.Find('\\');
-        }
-
-        CString sBifName = sBifFileName.Left(sBifFileName.GetLength() - 4);
-        CString sExtension = sBifFileName.Right(4);
-        sExtension.MakeUpper();
-        if (sExtension.Compare(".BIF") == 0) {
-            CString sMinimumSize;
-            CPoint ptLocation;
-            if (m_ruleTables.m_tCacheValidation.Find(sBifName, ptLocation, FALSE) == TRUE) {
-                if (m_ruleTables.m_tCacheValidation.GetWidth() < 2
-                    || m_ruleTables.m_tCacheValidation.GetHeight() <= ptLocation.y
-                    || ptLocation.y < 0) {
-                    sMinimumSize = m_ruleTables.m_tCacheValidation.GetDefault();
-                } else {
-                    sMinimumSize = m_ruleTables.m_tCacheValidation.GetAt(CPoint(1, ptLocation.y));
-                }
-            } else {
-                sMinimumSize = m_ruleTables.m_tCacheValidation.GetDefault();
-            }
-
-            g_pChitin->cDimm.cResCache.ValidateFile(g_pChitin->cDimm.GetResFileID(sBifName),
-                atol(sMinimumSize));
-        }
-    }
-
-    fileFind.Close();
+    // TODO: Incomplete.
 }
 
 // 0x5A04B0
@@ -6267,50 +6226,6 @@ LONG CInfGame::GetGroundPile(LONG iSprite)
         INFINITE);
 
     return iGroundPile;
-}
-
-// 0x5B7730
-BOOL CInfGame::CanTakeContainerItem(LONG nContainerId, SHORT nSlotNum, CGameSprite* pLooter, SHORT nPortrait)
-{
-    CResRef cResIcon;
-    CResRef cResItem;
-
-    CGameContainer* pContainer;
-    if (m_cObjectArray.GetDeny(nContainerId,
-            CGameObjectArray::THREAD_ASYNCH,
-            reinterpret_cast<CGameObject**>(&pContainer),
-            INFINITE) != CGameObjectArray::SUCCESS) {
-        return FALSE;
-    }
-
-    CItem* pItem = pContainer->GetItem(nSlotNum);
-
-    m_cObjectArray.ReleaseDeny(nContainerId,
-        CGameObjectArray::THREAD_ASYNCH,
-        INFINITE);
-
-    if (pItem == NULL) {
-        return FALSE;
-    }
-
-    // Gold (MISC07) merges into party gold, so it can always be taken.
-    if (pItem->GetResRef() == "MISC07") {
-        return TRUE;
-    }
-
-    // Otherwise the looter needs a free backpack slot (18 .. 18 + PERSONAL_INVENTORY_SIZE).
-    CItem* pScanItem;
-    STRREF description;
-    WORD wCount;
-    SHORT nSlot = 18;
-    do {
-        InventoryInfoPersonal(nPortrait, nSlot, pScanItem, description, cResIcon, cResItem, wCount, TRUE);
-        if (cResIcon != "") {
-            nSlot++;
-        }
-    } while (cResIcon != "" && nSlot < CScreenInventory::PERSONAL_INVENTORY_SIZE + 18);
-
-    return nSlot < CScreenInventory::PERSONAL_INVENTORY_SIZE + 18;
 }
 
 // 0x5B7FF0

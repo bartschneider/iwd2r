@@ -1,0 +1,1 @@
+{"address": "0x434EB0", "name": "CBaldurMessage::ChapterAnnounceStatus", "file": "src/CMessage.cpp", "batch": "i001", "needs": "no Frida hook: the signature does not parse"}

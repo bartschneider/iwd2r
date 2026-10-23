@@ -25,7 +25,6 @@
 #include "CScreenCreateChar.h"
 #include "CScreenInventory.h"
 #include "CScreenMap.h"
-#include "CScreenStore.h"
 #include "CScreenWorld.h"
 #include "CScreenWorldMap.h"
 #include "CSpawn.h"
@@ -10675,33 +10674,7 @@ void CGameSprite::AddSpecialAbility(const CResRef& cResInnateSpell, BOOL feedBac
 // 0x71BC60
 void CGameSprite::RemoveSpecialAbility(const CResRef& cResInnateSpell)
 {
-    CString name;
-    cResInnateSpell.CopyToString(name);
-    CInfGame* game = g_pBaldurChitin->GetObjectGame();
-    UINT id = 0;
-    UINT maximum = 0;
-    UINT current = 0;
-    if (game->GetMasterSongLookup().Find(cResInnateSpell, id)) {
-        id = 0;
-        if (game->GetMasterSongLookup().Find(cResInnateSpell, id)) {
-            m_songs.Remove(id, TRUE, maximum, current);
-        }
-    } else if (game->GetShapeshifts()->Find(cResInnateSpell, id)) {
-        id = 0;
-        if (game->GetShapeshifts()->Find(cResInnateSpell, id)) {
-            m_shapeshifts.Remove(id, TRUE, maximum, current);
-        }
-    } else if (game->GetInnateSpells()->Find(cResInnateSpell, id)) {
-        id = 0;
-        if (game->GetInnateSpells()->Find(cResInnateSpell, id)) {
-            m_innateSpells.Remove(id, TRUE, maximum, current);
-        }
-    }
-
-    CAbilityId ability;
-    ability.m_itemType = 1;
-    ability.m_res = name;
-    CheckQuickLists(&ability, -1, FALSE, FALSE);
+    // TODO: Incomplete.
 }
 
 // 0x71BE80
@@ -12410,32 +12383,9 @@ void CGameSpriteLastUpdate::Initialize(BOOL bFullUpdateRequired)
 }
 
 // 0x723BF0
-void CGameSprite::sub_723BF0(BOOLEAN a1, BOOLEAN a2)  // re-lint: disable RE004 (address-named in this tree; rename is Ghidra-first)
+void CGameSprite::sub_723BF0(BOOLEAN a1, BOOLEAN a2)
 {
-    // dword_8E752C counts how many party members are currently hidden, so it
-    // only moves on a real transition.
-    if (field_70F2 == 1 && a1 == 0) {
-        // Coming back into view closes the store this station had open, but
-        // only for a character it controls.
-        if (a2 == TRUE
-            && (g_pChitin->cNetwork.GetServiceProvider() == CNetwork::SERV_PROV_NULL
-                || g_pChitin->cNetwork.m_idLocalPlayer == m_remotePlayerID)) {
-            g_pBaldurChitin->SelectEngine(g_pBaldurChitin->m_pEngineWorld);
-            g_pBaldurChitin->m_pEngineStore->StopStore();
-        }
-
-        CInfGame::dword_8E752C--;
-    } else if (field_70F2 == 0 && a1 == 1) {
-        CInfGame::dword_8E752C++;
-    }
-
-    if (CInfGame::dword_8E752C < 0) {
-        CInfGame::dword_8E752C = 0;
-    } else if (CInfGame::dword_8E752C > g_pBaldurChitin->GetObjectGame()->m_nCharacters) {
-        CInfGame::dword_8E752C = g_pBaldurChitin->GetObjectGame()->m_nCharacters;
-    }
-
-    field_70F2 = a1;
+    // TODO: Incomplete.
 }
 
 // 0x723CC0

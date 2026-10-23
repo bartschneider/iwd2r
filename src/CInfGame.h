@@ -238,7 +238,6 @@ public:
     void ReputationAdjustment(SHORT reputationAdjustment, BOOL set);
     void ChangeReputation(SHORT eventCode);
     void AddDisposableItem(CItem* pItem);
-    BOOL CanTakeContainerItem(LONG nContainerId, SHORT nSlotNum, CGameSprite* pLooter, SHORT nPortrait);
     void PutBackItem(CItem* pItem, LONG nLooterId);
     void DestroyDisposableItems();
     void AddPartyGold(LONG dwAddPartyGold);
