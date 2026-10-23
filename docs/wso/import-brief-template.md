@@ -23,6 +23,8 @@ Context bundles (one per row; read these before the source):
 
 {{bundle}}
 
+Each bundle carries the function's decompile and its callers' decompiles; objdump confirms a reading, it does not replace one.
+
 ## The rules
 
 1. **Read his body through git plumbing only.** `git show {{fork_base}}:<path>`
