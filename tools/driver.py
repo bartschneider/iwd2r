@@ -597,12 +597,16 @@ _BATCH_DIRS = ('src', 'compat', 'docs', 'oracle', 'tools', 'tests')
 _HEREDOC = re.compile(r"""<<-?[ \t]*(?:'([^'\n]*)'|"([^"\n]*)"|([^\s;&|<>()]+))""")
 
 
+def _fallback_split(text, seps):
+    return text.split('|') if seps == ('|',) else _SEGMENT.split(text)
+
+
 def _split_unquoted(text, seps):
     """text split at any of seps (longest first) outside quotes; a
     backslash escapes the next character, an unquoted # at the start of a
     word is a comment to the end of the line, and the body of a heredoc
     (<<WORD, <<-WORD, <<'WORD') is data up to its delimiter line.  Fails
-    closed: a quote still open at the end falls back to _SEGMENT."""
+    closed: a quote or heredoc left open at the end falls back to _SEGMENT."""
     parts, cur, quote, i, pending = [], [], None, 0, []
     while i < len(text):
         ch = text[i]
@@ -629,17 +633,20 @@ def _split_unquoted(text, seps):
             delims, pending = pending, []
             i += 1
             for d in delims:
-                while i < len(text):
+                found = False
+                while i < len(text) and not found:
                     j = text.find('\n', i)
                     line = text[i:len(text) if j < 0 else j]
                     i = len(text) if j < 0 else j + 1
-                    if line.strip() == d:
-                        break
+                    found = line.strip() == d
+                if not found:           # no delimiter line: fail closed
+                    return _fallback_split(text, seps)
             continue
         elif text.startswith('<<', i) and not text.startswith('<<<', i) \
                 and _HEREDOC.match(text, i):
             m = _HEREDOC.match(text, i)
-            pending.append(next(g for g in m.groups() if g is not None))
+            d = next(g for g in m.groups() if g is not None)
+            pending.append(re.sub(r'[\\\'"]', '', d) if m.group(3) else d)
             cur.append(text[i:m.end()])
             i = m.end()
             continue
@@ -652,8 +659,8 @@ def _split_unquoted(text, seps):
             else:
                 cur.append(ch)
         i += 1
-    if quote:
-        return _SEGMENT.split(text) if seps != ('|',) else text.split('|')
+    if quote or pending:
+        return _fallback_split(text, seps)
     parts.append(''.join(cur))
     return parts
 

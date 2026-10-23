@@ -11385,6 +11385,12 @@ class DriverTest(unittest.TestCase):
             ("git commit -m 'it is' && git reset --hard", 'history rewrite'),
             ("echo 'unclosed; git reset --hard", 'history rewrite'),
             ('git branch -C a b', 'history rewrite'),
+            ("cat > n.md <<\\EOF\nbody\nEOF\ngit reset --hard", 'history rewrite'),
+            ("cat > n.md <<\\EOF\nbody\nEOF\nWindowsSandbox.exe run.wsb",
+             'launch outside'),
+            ("echo $((1<<4))\ngit reset --hard", 'history rewrite'),
+            ("printf '%x\\n' $((0x400000 + (1<<4)))\nWindowsSandbox.exe run.wsb",
+             'launch outside'),
         )
         for cmd, why in cases:
             probs = self._bash(cmd)
