@@ -62,9 +62,14 @@ zero symbols and looks like a bug in your parser). No PDB tool is installed
 on this machine (no llvm-pdbutil, no DIA build), so the walk is ~30 lines of
 Python against the record layout: `reclen u16, kind u16 (0x110E for
 S_PUB32), flags u32, off u32, sect u16, name z-string`. Re-resolve after
-every rebuild — the numbers are per-build, not project constants (e.g.
+every rebuild (`truth.parse_map` on the build's `iwd2r.map` does the same in
+one call; `tools/play.py build_windows_x86()` builds the x86 RelWithDebInfo
+exe and map: `python3 -I -c "import sys; sys.path.insert(0,'tools'); import
+play; play.sync_windows(); play.build_windows_x86()"`; `tools/gates.sh
+--windows` runs it too) — the numbers are per-build, not project constants (e.g.
 `?MoveToPoint@CGameSprite@@QAEFXZ` was RVA 0x12B2D0 in the 2026-10-12 build
-and 0x1A7CA0 in the 2026-10-18 one; the same query on the old build's PDB
+and 0x1A7CA0 in the 2026-10-18 one, 0x1A8A90 in the 2026-10-23 one
+(`?EngineActivated@CScreenWorld@@UAEXXZ` was 0x330E60 there); the same query on the old build's PDB
 reproducing the old number is how the parser was validated).
 
 ## Running one side
@@ -75,7 +80,28 @@ reproducing the old number is how the parser was validated).
 
     python3 -I tools/frida/probe.py run --target ours \
         --probe <table-for-ours.json> --scenario world_entry \
-        --seed 1 --clicks 3 --hit MTP --loaded-rva 0x330000
+        --seed 1 --clicks 3 --hit MTP --hit-min 1 --loaded-rva 0x330E60
+
+The original-side table hooks `CGameSprite::MoveToPoint()` (the no-argument
+action handler, `QAEFXZ`) at 0x73F560; 0x73FEC0 is the `(dest, range)`
+overload, a different function. `--post-load SECONDS` is how long the sidecar
+keeps tracing once `loaded` is seen (default: the scenario's `# timeout: S`
+header, else 180; the sidecar's own default of 20 s ended ours before the
+trailing clicks).
+
+The sandbox run waits for the verdict. The logon command is `cmd.exe /c
+<sidecar> & <driver> & <wait> & echo done > done.txt & shutdown /s /t 0`
+(ours has no driver): `<wait>` is a powershell one-liner that polls the
+sidecar's status file for a `RESULT:` line, bounded by scenario timeout +
+60 s. The original side's replay driver runs with `shutdown` off for a probe
+(it used to power the box off when the game exited, killing the background
+sidecar before its verdict), and the host keeps the box open until the
+status file carries `RESULT:` because that driver writes its own `done.txt`
+when the game exits.
+
+On the original side the host has its own deadline (scenario timeout + 60 s
+for the `RESULT:` line, after the replay driver's `done.txt`) and the driver's
+shutdown is off.
 
 `plan` stages the same run and prints the sandbox plan (folders, logon
 command) without starting a box — use it to check a new table's staging
@@ -88,6 +114,12 @@ before spending a launch.
   RunScenario drives the same scenario in-engine. `--loaded-rva` points the
   `loaded` observation at `CScreenWorld::EngineActivated` (the default,
   0x6869C0, is the original's absolute address; ours needs the RVA).
+- `--build-checkout CHECKOUT` (ours only) runs the x86 build of another
+  Windows checkout: the driver's Frida phase builds each batch worktree in
+  its own checkout (`%USERPROFILE%\iwd2r-build-<worktree name>`) and passes
+  it here, with the hook table's RVAs from that build's map, so the bodies
+  under test are the batch's. The default is this checkout's build; the
+  sidecar tools are staged from this checkout either way.
 - `--clicks N` inserts N `click 400 300` actions (each followed by a wait)
   before the scenario's trailing `quit`, on a run-folder-local copy — the
   repo's scenarios/ tree is never written. A click is what drives
@@ -124,7 +156,49 @@ PROCESS-EXITED verdict (a scenario ends with `quit`, so the process exiting
 after the world screen came up is what success looks like; dying before
 `loaded` is still NOT-LOADED).
 
-## Measured smoke (PENDING)
+## Measured state
+
+As measured on 2026-10-23, newest first:
+
+- The validation pair (final fix wave): a disposable import batch in a
+  scratch worktree (`p3/frida-validate`), row 0x46B160
+  `CGameArea::GetNearest`, `world_entry` only, through the driver's own
+  phase (the scratch worktree built for x86 in its own checkout; ours hooked
+  at that build's RVA: 0x10FE10 for the stubs, 0x7F070 for the full body).
+  A stub returning `INVALID_INDEX` read **equal**: the original returns -1
+  on all 12 of `world_entry`'s calls, so that scenario cannot tell such a
+  stub from the body (an equal row is equal on the inputs the scenarios
+  exercise, no more). A stub returning 0 read **different** (event 2: ret
+  -1 against 0) and drew the park finding; the full body read **equal**
+  (12/12 calls, final totals, 27 checkpoints and 87 periodic dumps
+  matching) and the driver rewrote its evidence to `kind: trace` with a
+  `compare=0` line that `check_evidence` and the close accept. Runs
+  `runs/20261023-144231` (original, reused for the two later ours runs),
+  `-144325`, `-144634`, `-144839`; four launches.
+- The calibration (`truth.py calibrate`, the 28 calibration rows, all three
+  scenarios, both sides under the replay clock, typed tables, exit-time hit
+  totals; runs `runs/20261023-1321..1328`): every side `RESULT: CLEAN` with
+  `HITS-FINAL yes`, frame counts equal (world_entry 2623, first_fight 5924,
+  walk_and_talk 4839), every checkpoint and periodic dump equal (27/87,
+  39/197, 36/158). Frida measured 13 of 28 rows; re-derived under the
+  frequency rule (no launches) it agrees on 12 and disagrees on 1
+  (0x704D40, an argument at event 13 of first_fight); 0x7941D0's call
+  counts differ by 23 to 31 per scenario with every captured event equal, a
+  caller finding. `docs/wso/truth-calibration.json` holds the record.
+- The MoveToPoint pair on `walk_and_talk` (before the replay clock): both
+  sides CLEAN (283 and 310 hits), compare DIFFERENT on two returns; the
+  pipeline worked end to end, the difference was the free-running clock.
+
+The rest of this section is the history of the smoke, kept for its
+diagnoses.
+
+2026-10-23 (after the sidecar wait, `--post-load` and the x86 build): both
+sides now finish with a verdict, `RESULT: NOT-EXERCISED (MTP hit x0)` each,
+over `world_entry --clicks 3`. At the end of that scenario the world has a
+dialog open (`dialog.active 1`) and the party member's position does not
+change across the three clicks (original dumps, frames 2430 to 2610), so
+`click 400 300` never reaches `MoveToPoint`: the smoke needs a scenario that
+closes the dialog and selects the character before its clicks.
 
 The smoke gate — `CGameSprite::MoveToPoint` (original absolute 0x73F560 /
 ours RVA 0x1A7CA0, `ret: "u16"`) over the `world_entry` replay, original
@@ -181,8 +255,81 @@ session, measured):
         MTP[2].ret: 65535|0
     RESULT: DIFFERENT      # exit 1 — one ret field changed
 
-When the slot comes: relaunch the original side with the RESULT-wait fix,
-expect `RESULT: CLEAN` with MTP hits, then the ours side
-(`--loaded-rva 0x330000`, probe rva 0x1A7CA0), then
-`trace_diff.py compare` — exit 0 or the measured difference, reported as
-measured.
+State as measured 2026-10-23: the RESULT-wait fix has landed and both sides
+now end with a verdict, but the `world_entry` pair ends NOT-EXERCISED on both
+sides because the scenario ends in a dialog (the clicks never move a sprite).
+RVAs in the 2026-10-23 map: `CScreenWorld::EngineActivated` 0x330E60
+(`--loaded-rva`), `CGameSprite::MoveToPoint` 0x1A8A90; the original's no-arg
+`MoveToPoint` is 0x73F560 (0x73FEC0 is the `(dest, range)` overload). Next:
+a scenario that walks the party (`walk_and_talk`), then `trace_diff.py
+compare`, exit 0 or the measured difference, reported as measured.
+
+## Typed tables and the replay clock (truth.py batches)
+
+`truth.hook_table` types a row from our prototype when our map has the
+function and `src/*.h` declares it: references and pointers are `ptr`
+(trace_diff canonicalises them), `BYTE`/`BOOLEAN` `u8`, `SHORT` `s16`,
+`WORD` `u16`, `BOOL`/`LONG`/`int` `s32`, `DWORD` `u32`; `void` logs no return.
+Ghidra's guesses (`int` for pointers, a `uint` return for a void function)
+read stack and EAX leftovers as values and made equal functions look
+different. Overloads in a header are picked by the evidence signature's
+argument count and typed only when they agree; a class or enum by value, a
+float, or no declaration falls back to the evidence signature, and the
+table's `typed_from` says `ours` or `ghidra` per row.
+
+`probe.py`'s ours side sets `IWD2R_STATE_DUMP` (the run's replay folder) and
+`IWD2R_SEED`, so platform/replay.cpp runs ours under the same virtual clock
+and frame-locked AI the recorder gives the original. Without it ours ran on
+the real clock with a free-running AI thread and its call counts and order
+could not match.
+
+## Verdicts in a batch (truth.frida_verdicts)
+
+The driver's Frida phase (and `truth.py calibrate`) compares each hooked row
+per scenario, then across the three scenarios:
+
+- **Final totals.** The hooks cap what they log (`max: 200`), so equal
+  events alone say nothing about how often a function ran. The agent script
+  sends one last `HITS` message, marked final, when the process calls
+  `ExitProcess` or `TerminateProcess` on itself, and waits for the sidecar's
+  ack; the status file then says `HITS-FINAL yes`. The 2 s timer's totals
+  lose a run-dependent tail, so a scenario whose events compare equal but
+  lacks final totals on either side is `not measured`.
+- **Frequency is a caller finding.** When every captured event compares
+  equal but the final totals differ, the row is still `equal` in that
+  scenario; so is the prefix case, one side's events a strict prefix of the
+  other's with that side under the cap, when both sides have final totals
+  (without them it is `not measured`: a killed run's shorter trace proves
+  nothing). The difference goes out of band (`info['notes']`), and the
+  driver writes it to the ledger (`- frida frequency only (a caller
+  finding): ...`), for wave-1 and import batches alike, never as a finding
+  or a verdict change. One exception: an import row that is equal only as a
+  prefix IS parked, since no scenario compared it exactly and a `compare=0`
+  citation would be false; wave-1 and the calibration treat it as equal. A
+  row called on one side only compares no call: `not measured`, with a note.
+- **Different** means an event-level difference: an argument or a return at
+  a call both sides made, or a crash event.
+- **The dump guard.** Both sides write checkpoint and periodic state dumps
+  into their replay folders; `truth.frida_run` compares them per scenario
+  with the replay compare's own functions (`truth.compare_dumps`:
+  `oracle.compare_checkpoints` and `compare_frames`, `screens.json`, the
+  known differences). A scenario whose dumps differ measures nothing (its
+  rows read `not measured`, "dumps differ in <scenario>"), and the driver
+  writes trace evidence only from a run whose dumps match. A void hook logs
+  no return, so its trace mostly measures its callers; the dumps speak for
+  its body.
+- **Citations.** `info['exact']` lists the scenarios whose compare returned
+  0; an import row's `trace_source` cites the first of them (whichever
+  scenario it is), never a prefix-only one. A row equal only as a prefix
+  has nothing to cite and is parked.
+
+Precedence across scenarios: any difference, then a failed scenario, then
+not measured, then equal; a row no scenario exercised is `not-exercised`.
+
+The phase measures the batch's own build, so for a wave-1 batch an `equal`
+row confirms whichever side the verdict records (ours, neither, or a fork
+body the worker adopted: `measured: frida`) and `different` is a finding
+for whichever side it is. A phase-wide failure (the x86 build fails, the run
+raises, or every scenario failed with no status on either side) is the
+batch's exception at stage `frida`: nothing is measured, parked or
+rewritten; one row's or one scenario's failure stays a row-level outcome.

@@ -45,8 +45,6 @@ import sys
 import time
 from pathlib import Path
 
-import frida
-
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import hooks  # noqa: E402  (the renderer this file is staged with)
 
@@ -109,6 +107,8 @@ class Trace:
         self.detach_reason = ""
         self.errors = []
         self.counts = {}
+        self.final = False       # the final HITS message (sent at process exit) arrived
+        self.script = None
 
     def _write(self, fp, line: str) -> None:
         if fp.closed:
@@ -136,7 +136,15 @@ class Trace:
         payload = message["payload"]
         tag = payload.get("tag")
         if tag == "HITS":
+            if self.final:
+                return
             self.counts = payload.get("counts", {})
+            if payload.get("final"):
+                self.final = True
+                try:
+                    self.script.post({"type": "HITSACK"})   # lets the exiting process go on
+                except Exception:
+                    pass
             return          # the timer fires every 2s; only the totals matter
         self.record(payload)
         if tag == "loaded" and not self.loaded:
@@ -153,6 +161,7 @@ class Trace:
     def finish(self, hit: str, hit_min: int, require_loaded: bool = True) -> int:
         for name, n in sorted(self.counts.items()):
             self.say("HITS %s %d" % (name, n))
+        self.say("HITS-FINAL %s" % ("yes" if self.final else "no"))
 
         if self.crash is not None:
             c = self.crash
@@ -194,6 +203,7 @@ def attach_when_there(name: str, deadline: float):
     get_process_by_name raises InvalidArgumentError("process not found")
     on frida 17.24.1 -- measured on the smoke venv -- where older releases
     raised ProcessNotFoundError, so both mean "not there yet"."""
+    import frida
     device = frida.get_local_device()
     while True:
         try:
@@ -205,8 +215,9 @@ def attach_when_there(name: str, deadline: float):
             time.sleep(0.5)
 
 
-def main() -> int:
-    global LOADED_ADDR, LOADED_RVA, LOADED_MODULE
+def build_parser() -> argparse.ArgumentParser:
+    """The command line, importable without frida (probe.py's tests parse
+    every generated sidecar command with it)."""
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--hooks", required=True, help="hook spec JSON (schema: hooks.py)")
     ap.add_argument("--out", default="trace.jsonl")
@@ -233,6 +244,13 @@ def main() -> int:
                     help="module --loaded-rva resolves against (default iwd2r.exe)")
     ap.add_argument("--no-loaded", dest="require_loaded", action="store_false",
                     help="drop the loaded observation; CLEAN no longer requires it")
+    return ap
+
+
+def main() -> int:
+    global LOADED_ADDR, LOADED_RVA, LOADED_MODULE
+    import frida
+    ap = build_parser()
     ns = ap.parse_args()
 
     if bool(ns.exe) == bool(ns.attach):
@@ -268,6 +286,7 @@ def main() -> int:
                                              time.monotonic() + ns.attach_timeout)
         session.on("detached", trace.on_detached)
         script = session.create_script(build_js(spec))
+        trace.script = script
         script.on("message", trace.on_message)
         script.load()
         if spawned is not None:

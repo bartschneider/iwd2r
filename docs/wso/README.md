@@ -80,18 +80,19 @@ reconstruction — the fork's own style of verification. A `trace` evidence
 file must cite its source in `trace_source`, in one of exactly two forms:
 
 ```
-WillScarlettOhara/iwd2-re@<sha> <path to recovery note>
+WillScarlettOhara/iwd2-re@<sha> docs/<name>-recovery.md
 frida <probe name> orig:<sha256> ours:<sha256> compare=0
 ```
 
-The first cites his recovery note; the second is the line
-`check_evidence.py` accepts today for a differential Frida capture of our
-own binary against the original. The harness that produces such captures is
-planned, not yet in the tree: the integration plan's Task 5b
-([docs/superpowers/plans/2026-10-17-wso-integration.md](../superpowers/plans/2026-10-17-wso-integration.md),
-added at 8ce297d7 — the plan revision `check_evidence.py` cites) adopts the
-fork's tracing scripts into `tools/frida/`, and its `compare=0` verdict
-means the two captures agree call for call. A missing, empty or
+The first cites his recovery note (never a source file): the gate reads
+the note at that sha with `git show` and requires the function's address in
+it, or its name as a whole word together with its class's name (a bare
+"Render" names a method of every class), and an unreadable note (the fork
+not fetched) fails. The second is the line the wave driver's Frida phase
+writes for a differential capture of our own binary against the original
+(`tools/frida/`, [docs/frida-tracing.md](../frida-tracing.md)): its
+`compare=0` means the two captures agree call for call in a run whose state
+dumps matched, and only the driver writes it. A missing, empty or
 unrecognizable citation fails the gate; the format contract is in
 [docs/evidence/README.md](../evidence/README.md). Rules math — attack
 rolls, saving throws, damage, effect application — never accepts a trace:
@@ -111,9 +112,15 @@ and nobody answers "what does this call" by reading a raw decompile.
   `(file, line, signature)` for `0xADDR`, `Class::`, `Class::Method` or a
   bare name, resolved from the `// 0xADDR` markers. No grep chains.
 - [tools/assemble_context.py](../../tools/assemble_context.py) —
-  `bundle(address)` → digest, decompile, callees' signatures, resolved IDS
-  constants and resrefs, in that order, with a token estimate on the first
-  line; when the function belongs to a class and the BG2 index exists, the
+  `bundle(address)` → digest, decompile, the first 40 lines of each
+  caller's decompile, callees' signatures, resolved IDS constants and
+  resrefs, in that order, with a token estimate on the first line. At most
+  12 callers are shown (`CALLER_CAP`); callers without a decompile are
+  skipped. The
+  decompiles are `$IWD2R_HOME/ghidra-exports/decompile/<ADDR>.c`, written
+  once per function by `tools/ghidra/export_decompiles.py` (chunked,
+  resumable, read-only Ghidra; a missing file reads `decompile: not
+  exported`); when the function belongs to a class and the BG2 index exists, the
   class's BG2 layout is appended as a hypothesis to check against IWD2
   (the offsets are BG2's, never quoted as ours).
 - [tools/token_audit.py](../../tools/token_audit.py) —
@@ -158,6 +165,28 @@ worktree keeps it). Then it applies [triage.json](triage.json):
 
 It reports `triage: n auto, n import, n ambiguous`. Do not
 `git worktree add` after `next`: the worktree already exists.
+
+### Will's tip: `recompare`
+
+Will pushes daily, and the rows were compared at one sha. `wave.py recompare
+[--tip SHA] [--no-fetch]` fetches `wso`, resolves the tip (default `wso/main`),
+runs `tools/xrec.py 4fa36bcd <tip> first` and appends to `disagreements.json`
+the `both_changed_differ` rows that are in no batch and have no verdict (an
+older undecided row for the same address is replaced by the tip's). The state's
+`fork_base` becomes the tip. It prints `recompare: N new rows at <tip7> (M
+already queued, K decided)` and exits 0, or 2 when the tip does not resolve
+(nothing is written). The fork is only read, through `git show` and `git
+ls-tree`. `--state`, `--disagreements` and `--repo` point it at copies, to look
+without touching the live files.
+
+Each batch carries the `fork_base` its rows were compared at, recorded at cut
+(old batches fall back to the state's). `brief`, the triage evidence line and
+`close`'s check read the batch's pin: a batch cut before a recompare is briefed
+and closed at its own sha, and its evidence must say `disagreed with WSO at
+<sha>` or `corroborated by WSO at <sha>` with that sha (an abbreviation of at
+least seven digits is enough). `wave.py run` calls `recompare` once when the
+wave-1 queue is exhausted, logs `recompare: N new rows at <tip7>`, and cuts
+again when N is not zero.
 `close` refuses — listing every reason — unless each row has a verdict,
 the batch's worktree has no uncommitted paths, every touched function's
 `docs/evidence/<ADDRESS>.md` says `disagreed with WSO` or
@@ -212,7 +241,13 @@ A rule that is not a check, a flag or a test is not a rule.
 a fork or neither verdict decided by a dump reading unless
 `--allow-dump RULING --ledger PATH` names a `Ruling <id>` line of that file;
 the driver rejects a worker whose transcript shows a git command naming a
-`wso/` ref, a whole-file read of a covered source file or a launch outside
+`wso/` ref, a whole-file read of a covered source file, a history rewrite
+(refused: `reset`, `rebase`, `revert`, `restore`, `clean`, any `stash`,
+`commit --amend`, `filter-repo`, `push`, `branch -d/-D/-f/-M/-C`,
+`checkout -B`, `switch -C`, `checkout -- <path>`, `checkout <sha> <path>`
+and a bare `git checkout <path>` of a file; allowed: `add`, `commit`,
+`status`, `diff`, `log`, `show`, `ls-tree`, `merge-base`, `rev-parse`,
+`blame`, `checkout -b`, `checkout <branch>`, `switch -c`) or a launch outside
 `tools/play.py` and `tools/gltrace.py`; those two launchers allow two
 launches per attempt until `--new-attempt "<why>"`; and every merge into
 `first` pulls first (`git pull --ff-only`) and fast-forwards.
@@ -264,9 +299,32 @@ launches per attempt until `--new-attempt "<why>"`; and every merge into
 - After every close the driver commits `docs/wso/wave-state.json` and the
   regenerated `docs/wso/xrec-report.md` on `first` (staged by name, message
   `wave-state: close <id> (ours N, fork N, neither N)`), before the push.
-  Also when it pushes a closed batch again. Wave 1 only: the import queue's
-  state is not committed. If the commit fails, the two paths are unstaged,
-  one aoe line goes out, and the push still happens.
+  Also when it pushes a closed batch again. The same commit carries the
+  probe list (wave 1), `docs/wso/import-list.json` (where ours-stub rows
+  leave wave 1), and, on `--queue import`, `docs/wso/import-state.json`
+  (message `import-state: close <id> ...`; no scorecard). If the commit
+  fails, those paths are unstaged, one aoe line goes out, and the push still
+  happens.
+- Several workers per pool (`--pool glm:2`): `docs/MAP.md` is not the
+  batch's. The driver regenerates it once at each close, on the branch after
+  the base is merged in, and commits it by name (`map: regenerate ...`), so
+  `gen_map.py --check` passes after the fast-forward and two parallel closes
+  never conflict on it (a worker's own edit of it loses to the base's copy at
+  the sync). A stop (SIGTERM, SIGINT) starts no new worker (a worker forked
+  just as it lands is killed on joining), and takes only re-entrant locks in
+  the handler. The signal reaches only the main thread: its own writes (the
+  cut, an adoption, the recompare) finish before the stop is raised, and the
+  stop waits up to 30 s for a git write in progress on another thread. The
+  run still joins a close in flight without a limit (the gate included, about
+  ten minutes), and a Ctrl-C in the terminal also reaches the git and gate
+  children directly (same process group); the bounded wait is for a SIGTERM
+  sent to the driver's pid.
+- Two `claude-glm` launches at once race on the wrapper's re-link of
+  `~/.claude` into `~/.claude-glm` (and on its `settings.json.tmp`). The
+  wrapper lives outside the repo, so the fix is a patch the coordinator
+  applies once: `patch ~/.local/bin/claude-glm < tools/claude-glm.lock.patch`
+  (an `flock` on `~/.claude-glm/.relink.lock` around that section; needs
+  util-linux `flock`). Apply it before running `--pool glm:2`.
 - Workers: every `AOE_*` variable is removed from a worker's environment
   (for every wrapper), and the driver's own `aoe send` runs without
   `CLAUDECODE`, `CLAUDE_CODE_*`, `CLAUDE_PID` and `CLAUDE_EFFORT`. A `claude`
@@ -287,7 +345,8 @@ launches per attempt until `--new-attempt "<why>"`; and every merge into
   commits them for you), a path changed against `first` outside `src/`,
   `compat/`, `docs/evidence/`, `docs/MAP.md`, `oracle/cases/` and
   `oracle/CMakeLists.txt`, a `fork` verdict whose evidence has no `kind:`
-  line, and a stale `docs/MAP.md` (`tools/gen_map.py --check`). The
+  line. (A stale `docs/MAP.md` is no longer checked here: the close
+  regenerates it.) The
   `corroborated by WSO` phrase is required only for verdicts the driver
   recorded from an oracle probe pass.
 - Retrying a cleared exception (`--clear`): at the `close`, `record` or
@@ -307,7 +366,79 @@ launches per attempt until `--new-attempt "<why>"`; and every merge into
   `close --kind import`: no verdict lines or evidence phrases are
   checked, the evidence must be `kind: trace` or better, and the tool
   tests, `check_evidence` and parity still run. The import queue skips
-  the oracle and Frida phases and never rewrites wave 1's scorecard.
+  the oracle phase and never rewrites wave 1's scorecard. It runs the
+  Frida phase (with `--frida`): all three scenarios (`world_entry`,
+  `first_fight`, `walk_and_talk`), each through `probe.py run` once per
+  side. Before it the driver builds our x86 exe from the batch worktree in
+  that worktree's own Windows checkout (`%USERPROFILE%\iwd2r-build-<worktree
+  name>`, `driver.frida_build`, compiler output in the batch's
+  `frida-build.log`), hooks at the RVAs of that build's map and runs that
+  exe (`probe.py run --build-checkout`), so the bodies measured are the
+  batch's; the tools are staged from the driver's checkout. A phase-wide
+  failure (the build fails, the run raises, or every scenario failed with no
+  status on either side) is the batch's exception at stage `frida` (status
+  file, ledger, one aoe line): no row is measured, parked or rewritten, and
+  clearing it reruns the worker and the phase; a row-level failure (one row
+  not exercised, one scenario failed for one row) still parks that row. On
+  a wave-1 batch the build is the branch's too, so an equal row confirms
+  whichever side the verdict records (`measured: frida`, ours, neither or
+  an adopted fork body) and a different one is a finding for that side.
+  `--frida-map MAP`
+  overrides the build with an existing one (the exe beside MAP), for hand
+  runs. A row is measured equal when `trace_diff compare` exits 0 over the
+  captured events and both sidecars sent their exit-time (final) hit totals
+  (equal events without final totals on both sides are `not measured`: the
+  hooks cap what they log and the timer's totals lose a run-dependent
+  tail). Frequency is the callers' business: when the final totals differ
+  but every captured event is equal, or one side's events are a strict
+  prefix of the other's with that side under the cap (with final totals on
+  both sides; without them it is `not measured`), the row is still equal and
+  the difference goes to the ledger as a caller finding (`- frida frequency
+  only (a caller finding): ...`, for both queues), never a finding or a
+  verdict change; only an event-level difference (an argument or a return
+  at a call both sides made, or a crash) is `different`. The evidence cites
+  only a scenario whose compare returned 0, so an import row that is equal
+  only as a prefix IS parked (no exact compare to cite); wave-1 and the
+  calibration treat it as equal. All of it holds only in
+  a scenario whose two runs kept the same state:
+  both sides write checkpoint and periodic state dumps, `truth.frida_run`
+  compares them with the replay compare's own functions
+  (`truth.compare_dumps`: `oracle.compare_checkpoints` and
+  `compare_frames`, its screens and known differences), and a scenario whose
+  dumps differ measures nothing (its rows read `not measured`, "dumps
+  differ"); the driver writes trace evidence only from a run whose dumps
+  match (a void function logs no return, so its trace mostly measures its
+  callers; the dumps are what speak for its body). The driver then rewrites that row's evidence front matter to
+  `kind: trace` with `trace_source: frida <batch>-<scenario> orig:<sha256>
+  ours:<sha256> compare=0` (dropping `exemption:`) and commits it as
+  `frida: trace evidence for <N> rows of <batch>`. The phase measures
+  every row that is not parked and every function the batch touched
+  against the merge base that carries a `// 0xADDR` marker (a stub
+  dependency imported with a row). Workers write `kind: read-only` with an
+  `exemption:`; only three kinds of evidence stand as written and are not
+  measured (`wave.kept_evidence`): `kind: oracle` with an `oracle_case`
+  that a case in `oracle/cases` registers, `kind: trace` citing a fork
+  recovery note that names the function, and an evidence file unchanged
+  since the merge base at `trace` or better. A declared `replay`, an oracle
+  without its case or a worker's `frida` line is measured like a read-only
+  row, and a frida line the driver did not write (it keeps the lines it
+  wrote in the status file, `frida_written`) is a mechanical-check problem.
+  A measured row that is not equal (different, exercised by no scenario,
+  no hook, `scenario failed`, `not measured`) cannot close: the phase runs
+  once per batch, so the finding tells the worker to park it in its fix
+  round: edit that function back to the merge base's body (one function,
+  never a whole file that holds other rows' changes), delete its evidence
+  file and write `{address, name, file, batch, needs}` as the row's own
+  `docs/wso/import-parked/<ADDR>.json` (one file per row, so two batches
+  parking different rows merge cleanly; `needs` is what the finding names:
+  the scenarios tried, `frida different: <detail>`, or the status text;
+  a batch may add files there). `close --kind import` accepts a batch when
+  every row that is not parked is imported (its body changed against the
+  merge base: "row <addr> not imported: body unchanged against <base>;
+  import it or park it") and at `trace` or better as the driver's frida
+  trace or as evidence that stands as written, every parked row has its
+  body back at the merge base's and its evidence gone, and every
+  dependency the batch touched meets the same bar.
   The two queues' assigned batches all hold files, so they stay
   disjoint (`tools/claims.py` counts both state files). Each queue has
   its own status file and run lock, so one driver per queue can run at
@@ -440,10 +571,11 @@ closed without writing the ledger entry gets the entry and the push. Then
 each pool's parked batch (on that pool), and after them a batch left
 in `current` or `running` (the process died mid-batch), run again, each with its
 brief re-rendered under a `Resume:` preamble that lists the verdicts
-already recorded. The preamble forbids rewriting the branch, except that
-when its tip is the driver's own unpushed WIP commit the worker may
-`git reset --soft HEAD~1` once, to commit that work again with proper
-messages and `Imported-From:` trailers. `parked` clears when that batch
+already recorded. The preamble forbids rewriting the branch. When its tip is
+the driver's own unpushed WIP commit, the driver itself soft-resets it
+before resuming, so the previous work is staged in the worktree and the
+worker commits it again with proper messages and `Imported-From:` trailers
+without any git command. `parked` clears when that batch
 ends any other way. A batch whose worktree is gone (a directory removed
 by hand stays listed until `git worktree prune`) becomes its `worktree`
 exception, which also ends its park, and the run goes on.

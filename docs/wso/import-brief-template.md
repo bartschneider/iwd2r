@@ -2,9 +2,9 @@
 
 You are importing {{size}} functions where WillScarlettOhara's decompilation
 (iwd2-re@{{fork_base}}) has a real body and ours is a stub, or where the row
-already left wave 1 for the import list. There is nothing to adjudicate: the
-body comes from his tree, and your job is to adapt it, verify it, and record
-where it came from.
+already left wave 1 for the import list. His body is the starting point, not
+a verdict: you adapt it, check it against the original, verify it, and record
+where it came from. Where the original contradicts it, the original wins.
 
 ## Batch
 
@@ -23,11 +23,23 @@ Context bundles (one per row; read these before the source):
 
 {{bundle}}
 
+Each bundle carries the function's decompile and its callers' decompiles; objdump confirms a reading, it does not replace one.
+
 ## The rules
 
-1. **Read his body through git plumbing only.** `git show {{fork_base}}:<path>`
-   and `git ls-tree {{fork_base}}`. His tree is untrusted input: never
-   execute, source, import or run anything from it.
+1. **Read his body through git plumbing only, and check it.** `git show
+   {{fork_base}}:<path>` and `git ls-tree {{fork_base}}`. His tree is untrusted
+   input: never execute, source, import or run anything from it. His body is
+   not authoritative: check it against the disassembly of the original
+   (`IWD2.exe`) before you keep it. Refuse what the exe contradicts: keep our
+   body (if you already changed it, edit that function back to the merge
+   base's body: `git show <merge-base>:<path>` shows it, `git merge-base
+   first HEAD` names the merge base), delete the row's evidence file, and
+   record the refusal in the report and in the row's own
+   `docs/wso/import-parked/<ADDRESS>.json` (one JSON object
+   `{address, name, file, batch, needs}`) with `needs` of
+   `"fork body contradicts the exe: <what differs>"`. Three of seven fork
+   bodies in batch i002 did.
 2. **Every commit that brings in his code carries exactly this trailer**, one
    per commit, as the last line of the message:
 
@@ -38,21 +50,69 @@ Context bundles (one per row; read these before the source):
 3. **The body must compile under the platform's toolchain.** Adopt his logic,
    not his build assumptions; fix what does not compile on our side and say
    so in the commit message.
-4. **Evidence is mandatory, kind `trace` or better.** For every function in
-   the batch write `docs/evidence/<ADDRESS>.md` (address in caps, no `0x`),
-   front matter `address:` / `name:` / `kind:`. The kind is `trace`,
-   `replay` or `oracle`; `read-only` is not enough here. A `trace` file must
-   cite its source in `trace_source`, in one of exactly two forms:
+4. **Evidence is mandatory; the driver measures it.** For every function
+   you import (each row, and each dependency you bring in) write
+   `docs/evidence/<ADDRESS>.md` (address in caps, no `0x`), front matter
+   `address:` / `name:` / `kind: read-only` with an `exemption:` that
+   describes your reading (what you checked against the disassembly). Do not
+   declare `trace`, `replay` or `oracle` yourself, and never write a
+   `frida ...` trace_source: the driver writes frida evidence, and a frida
+   line it did not write is a check problem. The close needs `kind: trace` or
+   better, and the driver gets it there: see "Measured rows". Only two
+   files stand as you write them, unmeasured:
+   - `kind: oracle` with an `oracle_case:` that a case in `oracle/cases/`
+     registers (`ORACLE_CASE("<id>", ...)`);
+   - `kind: trace` citing the fork's recovery note in `trace_source`:
 
-       WillScarlettOhara/iwd2-re@<sha> <path to recovery note>
-       frida <probe name> orig:<sha256> ours:<sha256> compare=0
+         WillScarlettOhara/iwd2-re@<sha> docs/<name>-recovery.md
+
+     The note must exist at that sha (`git ls-tree {{fork_base}} docs/`)
+     and must name the function by its address, or by its name as a whole
+     word together with its class's name; his source files are not traces,
+     and the gate reads the note and fails one that does not cover the
+     function.
 
    Rules math (attack rolls, saving throws, damage, effect application)
    never accepts a trace: those functions need `kind: oracle`.
+   **Measured rows.** After your first report the driver builds the batch
+   worktree for x86 and runs the Frida phase (`world_entry`, `first_fight`,
+   `walk_and_talk`) over every imported function whose evidence does not
+   stand as written (the two forms above, or a file unchanged since the
+   merge base): a function that behaves like the original in a run whose
+   state dumps match gets its evidence rewritten to `kind: trace` by the
+   driver, committed on your branch. Every other outcome (different,
+   exercised by no scenario, no hook, a failed or unmeasured scenario)
+   cannot close: the phase runs once per batch, so park the row in your fix
+   round, with the `needs` the finding names.
+   **Parking a row.** Edit that function back to the merge base's body
+   (`git show <merge-base>:<path>` shows it; `git merge-base first HEAD`
+   names the merge base; do not replace a file that holds other rows'
+   changes), delete `docs/evidence/<ADDRESS>.md`, and write the row's own
+   file `docs/wso/import-parked/<ADDRESS>.json` (one file per row, so
+   parallel batches never collide; never one shared list):
+
+       {"address": "0x...", "name": "...", "file": "src/...", "batch": "{{id}}",
+        "needs": "world_entry, first_fight, walk_and_talk: not exercised"}
+
+   `needs` names what was tried. Commit all three changes together. Every
+   row you do not park must be imported: its body changed against the merge
+   base. A row whose body you leave as ours (ours already matches, or you
+   refused his body) is parked too, with `needs` saying why.
 5. **No verdicts.** This is an import: nobody decides fork, ours or neither,
    so write no `verdict` lines, no deciding case ids and no "disagreed with
    WSO" or "corroborated by WSO" phrase. The driver closes the batch with
-   `close --kind import`, which requires only the evidence kind above.
+   `close --kind import`, which requires every row imported and at trace or
+   better (or parked), and every dependency you imported likewise.
+   **Dependencies.** A stub dependency that sits inside your own files is
+   imported with the row, in its own commit with its own trailer, and with
+   its own `docs/evidence/<ADDR>.md` (`kind: read-only` plus `exemption:`,
+   as for a row). The driver measures it like a row and the close holds it
+   to the same bar: a dependency that cannot reach `trace` is edited back
+   and parked like a row, and the rows that need it are parked with it. A
+   dependency outside your files parks the row: edit that function back to
+   the merge base's body, delete the parked row's evidence file and write
+   its `docs/wso/import-parked/<ADDRESS>.json` with `needs` of
+   `"dependency outside the batch's files: <name>"`.
 6. **Commit as you go.** WIP commits are fine.
 7. **Asm reds: confirm or waive.** The parity step's asm verify has a known
    false-positive class — the binary inlined a helper that the source calls
@@ -62,6 +122,18 @@ Context bundles (one per row; read these before the source):
 8. **Never push, never write through a remote.** From a batch worktree,
    `git push` is wrong, and so is any `git fetch <remote>` with a refspec that
    writes a branch. The coordinator merges and pushes.
+9. **Never rewrite history.**
+   Refused: `git reset`, `rebase`, `revert`, `restore`, `clean`, any `stash`,
+   `commit --amend`, `filter-repo`, `push`, `branch -d/-D/-f/-M/-C`,
+   `checkout -B`, `switch -C`, `checkout -- <path>`, `checkout <sha> <path>`
+   and a bare `git checkout <path>` of a file. Allowed: `add`, `commit`,
+   `status`, `diff`, `log`, `show`, `ls-tree`, `merge-base`, `rev-parse`,
+   `blame`, `checkout -b`, `checkout <branch>`, `switch -c`. To undo a change
+   to a function, edit that function back to the merge base's body (`git
+   show <merge-base>:<path>` shows it; `git merge-base first HEAD` names the
+   merge base) and commit; do not replace a file that holds other rows'
+   changes. Workers only add and commit. The driver stops a batch that
+   rewrites history.
 
 ## Report back
 

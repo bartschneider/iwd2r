@@ -328,6 +328,25 @@ def apply_calibration(triaged, calibration):
     return out
 
 
+def regen_triage(state, rows, committed, fork_ref, ours_ref, calibration=None,
+                 show=xrec.show, type_names=None):
+    """The triage file for `rows`: every committed entry whose address has a
+    recorded verdict in `state` is kept as it is (its class was calibrated at
+    its own ours_ref; re-classifying a closed row at a moved ref flips rows
+    whose fork bodies we adopted); the rest are classified at `ours_ref`."""
+    decided = {a for b in state.get('batches', {}).values()
+               for a in (b.get('verdicts') or {})}
+    kept = [r for r in committed if r.get('address') in decided]
+    kept_addresses = {r['address'] for r in kept}
+    todo = [r for r in rows if r.get('address') not in kept_addresses]
+    fresh = triage_rows(todo, fork_ref, ours_ref, show=show,
+                        type_names=type_names)
+    if calibration is not None:
+        fresh = apply_calibration(fresh, calibration)
+    fresh = [dict(r, ours_ref=ours_ref) for r in fresh]
+    return kept + fresh
+
+
 def main(argv=None):
     root = os.path.dirname(_here)
     ap = argparse.ArgumentParser(description=__doc__)
@@ -348,9 +367,14 @@ def main(argv=None):
     if a.calibrate:
         print(calibration_text(cal))
         return 1 if any(cal[c]['mismatches'] for c in AUTO_OURS) else 0
-    out = apply_calibration(triage_rows(rows, fork, a.ours_ref), cal)
-    for r in out:
-        r['ours_ref'] = a.ours_ref
+    # The committed classification, not --out: a new --out must not
+    # re-classify the closed rows.
+    committed = []
+    committed_path = os.path.join(root, 'docs/wso/triage.json')
+    if os.path.exists(committed_path):
+        with open(committed_path, encoding='utf-8') as f:
+            committed = json.load(f)
+    out = regen_triage(state, rows, committed, fork, a.ours_ref, cal)
     _write_atomic(a.out, out)
     counts = collections.Counter(r['class'] for r in out)
     for c in CLASSES:

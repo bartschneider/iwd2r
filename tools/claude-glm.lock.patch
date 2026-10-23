@@ -1,0 +1,23 @@
+--- a/claude-glm
++++ b/claude-glm
+@@ -29,6 +29,11 @@
+ # copy below), lock files, Claude's background-daemon state (own instance per config dir).
+ umask 077
+ mkdir -p "$GLM_DIR"
++# Two launches at once (two driver workers) race on the re-link and on settings.json.tmp:
++# serialise this section with flock (released, and fd 9 closed, before exec so claude
++# does not inherit the lock).
++exec 9>"$GLM_DIR/.relink.lock"
++flock 9
+ for src in "$SRC"/* "$SRC"/.[!.]*; do
+   [ -e "$src" ] || continue
+   name=${src##*/}
+@@ -54,6 +59,8 @@
+     json.dump(d, f, indent=2); f.write("\n")
+ os.replace(tmp, dst)
+ PY
++flock -u 9
++exec 9>&-
+ 
+ export CLAUDE_CONFIG_DIR="$GLM_DIR"
+ export ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic"

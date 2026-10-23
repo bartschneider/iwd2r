@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""bg2_find -- class/member/method layout lookups from the BG2:EE PDB dumps.
+r"""bg2_find -- class/member/method layout lookups from the BG2:EE PDB dumps.
 
 Adopted from WillScarlettOhara/iwd2-re@e8dd16a scripts/bg2_find.py: the
 record regexes, the two-pass type parsing (records, then continuations),

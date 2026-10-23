@@ -188,6 +188,28 @@ def _bg2_lines(fname, bg2_db):
     return out
 
 
+CALLER_CAP = 12
+CALLER_LINES = 40
+
+
+def _decompile_path(exports, address, name=None, unique=False):
+    """<exports>/decompile/ADDR.c (tools/ghidra/export_decompiles.py), else
+    the older <exports>/<name>.c when the name is unique in functions.tsv
+    (a repeated name could be another overload's body); None otherwise."""
+    cands = [os.path.join(exports, "decompile", f"{address:X}.c")]
+    if name and unique:
+        cands.append(os.path.join(exports, name + ".c"))
+    for path in cands:
+        if os.path.isfile(path):
+            return path
+    return None
+
+
+def _read_text(path):
+    with open(path, encoding="utf-8", errors="replace") as f:
+        return f.read()
+
+
 def bundle(address: int, *, exports=None, src_root=None, ids_dir=None,
            bg2_db=None, decompile_text=None) -> str:
     """The brief for one function: digest, decompile, callees with
@@ -205,15 +227,22 @@ def bundle(address: int, *, exports=None, src_root=None, ids_dir=None,
     row = functions.get(address)
     fname = row[0] if row else None
 
+    name_counts = {}
+    for n, _ in functions.values():
+        name_counts[n] = name_counts.get(n, 0) + 1
+
+    def _path(addr):
+        n = functions.get(addr, ("",))[0]
+        return _decompile_path(exports, addr, n, name_counts.get(n) == 1)
+
     cache = {}
     src_ok = bool(src_root) and os.path.isdir(src_root)
 
     text = decompile_text
-    if text is None and fname:
-        path = os.path.join(exports, fname + ".c")
-        if os.path.isfile(path):
-            with open(path, encoding="utf-8", errors="replace") as f:
-                text = f.read()
+    if text is None:
+        path = _path(address)
+        if path:
+            text = _read_text(path)
 
     # ## digest
     if text:
@@ -232,9 +261,32 @@ def bundle(address: int, *, exports=None, src_root=None, ids_dir=None,
     if text is not None:
         decomp_text = text.rstrip("\n")
     elif fname:
-        decomp_text = f"(no decompile: no {fname}.c under {exports})"
+        decomp_text = "decompile: not exported"
     else:
         decomp_text = (f"(no decompile: no functions.tsv under {exports})")
+
+    # ## callers (decompile)
+    caller_addrs = sorted(a for a, dsts in callgraph.items()
+                          if address in dsts and a != address)
+    caller_lines = []
+    shown = 0
+    for idx, caddr in enumerate(caller_addrs):
+        cname = functions.get(caddr, (f"0x{caddr:x}", 0))[0]
+        path = _path(caddr)
+        if path is None:
+            continue
+        if shown >= CALLER_CAP:
+            caller_lines.append(f"... (+{len(caller_addrs) - idx} more callers; "
+                                f"first {CALLER_CAP} with a decompile shown)")
+            break
+        shown += 1
+        head = _read_text(path).splitlines()[:CALLER_LINES]
+        caller_lines.append(f"### {cname} @ 0x{caddr:x}")
+        caller_lines.extend(head)
+    if not caller_addrs:
+        caller_lines = [f"(no callers in the callgraph for {hexaddr})"]
+    elif not caller_lines:
+        caller_lines = ["decompile: not exported"]
 
     # ## callees
     callee_addrs = callgraph.get(address, [])
@@ -286,7 +338,9 @@ def bundle(address: int, *, exports=None, src_root=None, ids_dir=None,
         ids_lines.append("(no ids dir)")
 
     body = "\n".join(["## digest", digest_text, "",
-                      "## decompile", decomp_text, "",
+                      "## Decompile", decomp_text, "",
+                      "## Callers (decompile, first 40 lines each)"]
+                     + caller_lines + ["",
                       "## callees"] + callee_lines + ["",
                       "## ids"] + ids_lines)
 
@@ -313,7 +367,7 @@ def main(argv=None) -> int:
                                      "(default $IWD2R_HOME/wso/bg2/"
                                      "bg2_pdb.sqlite if present)")
     ap.add_argument("--decompile",
-                    help="decompile .c file (default <exports>/<name>.c)")
+                    help="decompile .c file (default <exports>/decompile/<ADDR>.c)")
     args = ap.parse_args(argv)
     text = None
     if args.decompile:
