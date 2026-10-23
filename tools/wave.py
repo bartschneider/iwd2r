@@ -616,25 +616,34 @@ def _next_batch(disagreements_path=DISAGREEMENTS_PATH, state_path=STATE_PATH,
         cov_mod = _coverage()
         cpath = coverage_path or os.path.join(
             os.path.dirname(os.path.abspath(disagreements_path)), 'coverage.json')
-        cov = cov_mod.read(cpath)
+        cov, why = cov_mod.check(cpath, coverage_root or repo or ROOT)
         if cov is None:
-            coverage_note = 'coverage: no map (docs/wso/coverage.json); candidate order unchanged'
-        elif cov_mod.stale(cov, coverage_root or repo or ROOT):
-            coverage_note = ('coverage: map is stale (scenarios changed); candidate order '
-                             'unchanged; re-run `wave.py coverage`')
+            coverage_note = 'coverage: %s; candidate order unchanged' % why
         else:
-            hit = {id(r): len(cov_mod.covered(cov, r['address'])) for r in eligible}
-            left = [r for r in eligible if not hit[id(r)]]
-            eligible = sorted((r for r in eligible if hit[id(r)]),
-                              key=lambda r: -hit[id(r)])  # stable: size order within a count
-            if include_uncovered:
-                eligible += left
-            else:
-                coverage_note = ('coverage: %d candidate row(s) left out as exercised by no '
-                                 'scenario' % len(left))
-            if not eligible:
-                return 2, ('nothing left: every remaining import row is exercised by no '
-                           'scenario (--include-uncovered offers them anyway)\n')
+            try:
+                phase = cov_mod.phase_scenarios()
+                state_of = {id(r): cov_mod.status_of(cov, r['address'], phase) for r in eligible}
+                count = {id(r): len(cov_mod.covered(cov, r['address'])) for r in eligible}
+            except (TypeError, AttributeError, ValueError, KeyError) as e:
+                state_of = None
+                coverage_note = 'coverage: map unreadable (%r); candidate order unchanged' % (e,)
+            if state_of is not None:
+                hit = [r for r in eligible if state_of[id(r)] == 'hit']
+                unknown = [r for r in eligible if state_of[id(r)] == 'unknown']
+                dead = [r for r in eligible if state_of[id(r)] == 'dead']
+                hit.sort(key=lambda r: -count[id(r)])   # stable: size order within a count
+                eligible = hit + unknown + (dead if include_uncovered else [])
+                notes = []
+                if not include_uncovered:
+                    notes.append('coverage: %d candidate row(s) left out as exercised by no '
+                                 'scenario' % len(dead))
+                if unknown:
+                    notes.append('coverage: %d row(s) kept that no scenario measured (unknown)'
+                                 % len(unknown))
+                coverage_note = '\n'.join(notes) or None
+                if not eligible:
+                    return 2, ('nothing left: every remaining import row is exercised by no '
+                               'scenario (--include-uncovered offers them anyway)\n')
     chosen = eligible[:size]
     pre = q['prefix']
     nid = 1 + max((int(m.group(1)) for bid in state['batches']
@@ -1748,16 +1757,17 @@ def coverage_line(folder=None):
     `Coverage: not measured`."""
     folder = folder or os.path.dirname(DISAGREEMENTS_PATH)
     cov_mod = _coverage()
-    cov = cov_mod.read(os.path.join(folder, 'coverage.json'))
+    path = os.path.join(folder, 'coverage.json')
+    cov, why = cov_mod.check(path, os.path.dirname(os.path.dirname(folder)) or ROOT)
     if cov is None:
-        return 'Coverage: not measured'
+        return 'Coverage: not measured' + ('' if why.startswith('no map') else ' (%s)' % why)
     try:
         cands = cov_mod.candidates(os.path.join(folder, 'disagreements.json'))
-    except (OSError, ValueError):
-        cands = []
-    hit = sum(1 for a in cands if cov_mod.covered(cov, a))
-    return 'Coverage: %d of %d candidate functions exercised by %d scenarios (%s)' % (
-        hit, len(cands), len(cov['scenarios']), str(cov.get('at', ''))[:10])
+        hit = sum(1 for a in cands if cov_mod.covered(cov, a))
+        return 'Coverage: %d of %d candidate functions exercised by %d scenarios (%s)' % (
+            hit, len(cands), len(cov['scenarios']), str(cov.get('at', ''))[:10])
+    except (OSError, ValueError, TypeError, AttributeError, KeyError):
+        return 'Coverage: not measured (map unreadable)'
 
 
 def write_scorecard(state_path=STATE_PATH, report_path=REPORT_PATH,
@@ -1887,6 +1897,10 @@ def main(argv=None):
             else:
                 print(f'wave next: unknown option {a}', file=sys.stderr)
                 return 2
+        if include and queue != 'import':
+            print('wave next: --include-uncovered only applies to --queue import',
+                  file=sys.stderr)
+            return 2
         extra = {} if queue == 'wave1' else {
             'state_path': QUEUES[queue]['state'], 'queue': queue,
             'include_uncovered': include}

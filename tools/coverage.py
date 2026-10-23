@@ -12,7 +12,12 @@ and writes docs/wso/coverage.json:
    "refused": [fn names Frida could not hook], "failed_chunks": [chunk
    numbers whose status had no RESULT twice], "hits": {"0xADDR": n}}}}
 
-Only non-zero hits are stored.  Consumers: `wave.py next --queue import`
+Only non-zero hits are stored.  A chunk is complete only with `RESULT: CLEAN`
+and `HITS-FINAL yes` on a zero exit (after one retry); per scenario "measured"
+counts, and "hooked" lists, the addresses of complete chunks less the refused
+ones.  A pass with any failed chunk writes coverage.failed.json instead, and a
+map with failed chunks, a missing phase scenario or a changed scenario set is
+never `usable`.  Consumers: `wave.py next --queue import`
 (covered rows first), the driver's frida phase (skips the launches when no
 row is covered) and the scorecard line.  The pass itself is run by hand:
 
@@ -56,13 +61,25 @@ def norm(address):
     return '0x%X' % int(str(address), 16)
 
 
-def candidates(disagreements_path):
-    """Sorted unique addresses of the rows in a candidate category."""
+TEXT_START, TEXT_END = 0x401000, 0x8468F1    # the exe's .text: [start, end)
+
+
+def split_candidates(disagreements_path):
+    """(in .text, outside .text): sorted unique addresses of the rows in a
+    candidate category; the second list holds the non-code addresses."""
     with open(disagreements_path, encoding='utf-8') as f:
         rows = json.load(f)
     found = {int(norm(r['address']), 16) for r in rows
              if r.get('address') and r.get('category') in CATEGORIES}
-    return ['0x%X' % a for a in sorted(found)]
+    code = ['0x%X' % a for a in sorted(found) if TEXT_START <= a < TEXT_END]
+    other = ['0x%X' % a for a in sorted(found) if not TEXT_START <= a < TEXT_END]
+    return code, other
+
+
+def candidates(disagreements_path):
+    """Sorted unique addresses of the rows in a candidate category that lie
+    in the exe's .text range."""
+    return split_candidates(disagreements_path)[0]
 
 
 def read_addresses(path):
@@ -134,10 +151,10 @@ def run(scenarios, chunk=DEFAULT_CHUNK, run=subprocess.run, root=ROOT,
         for i, part in enumerate(parts, 1):
             p = os.path.join(tmp, 'coverage-hooks-%d.json' % i)
             with open(p, 'w', encoding='utf-8', newline='\n') as f:
-                json.dump(table(part), f, indent=1)
+                json.dump(dict(table(part)['original'], count_only=True), f, indent=1)
             paths.append(p)
         for s in scenarios:
-            res = {'hooks': 0, 'refused': [], 'failed_chunks': [], 'hits': {}}
+            res = {'hooks': 0, 'refused': [], 'failed_chunks': [], 'hits': {}, 'hooked': []}
             for i, part in enumerate(parts, 1):
                 out = 'coverage-%s-%d.jsonl' % (s, i)
                 reason = 'coverage %s chunk %d/%d: %d hooks' % (s, i, len(parts), len(part))
@@ -147,27 +164,33 @@ def run(scenarios, chunk=DEFAULT_CHUNK, run=subprocess.run, root=ROOT,
                        str(truth._scenario_timeout(root, s)), '--new-attempt', reason]
                 if log:
                     log(reason)
-                verdict, hits, status = None, {}, None
+                complete, hits, status = False, {}, None
                 for attempt in (0, 1):
                     if attempt:
                         cmd = list(cmd)
-                        cmd[cmd.index('--new-attempt') + 1] = reason + ' retry: no status'
+                        cmd[cmd.index('--new-attempt') + 1] = reason + ' retry: incomplete'
                     done = run(cmd, capture_output=True, text=True, cwd=root)
                     folder, out_path = truth._home_of(done, root, out)
                     status = out_path + '.status' if folder else None
-                    verdict, hits, _final = truth._read_status(status) if status else (None, None, False)
-                    if verdict is not None:
+                    verdict, hits, final = truth._read_status(status) if status else (None, None, False)
+                    complete = (verdict == 'CLEAN' and final
+                                and getattr(done, 'returncode', 0) == 0)
+                    if complete:
                         break
                 res['hooks'] += len(part)
-                if verdict is None:
-                    res['failed_chunks'].append(i)
-                    continue
-                res['refused'] += _unhooked(status)
+                refused = _unhooked(status) if status else []
+                res['refused'] += refused
                 for name, n in (hits or {}).items():
                     if n and name.startswith('fn_'):
                         a = _addr_of(name)
                         res['hits'][a] = res['hits'].get(a, 0) + n
+                if complete:
+                    gone = {_addr_of(n) for n in refused}
+                    res['hooked'] += [a for a in part if a not in gone]
+                else:
+                    res['failed_chunks'].append(i)
             res['refused'] = sorted(set(res['refused']))
+            res['hooked'] = sorted(set(res['hooked']), key=lambda a: int(a, 16))
             results[s] = res
     return results
 
@@ -210,6 +233,8 @@ def write(path, results, root=ROOT, exe=None):
             'at': datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
             'scenarios': {s: {'hooks': r['hooks'], 'refused': r['refused'],
                               'failed_chunks': r['failed_chunks'],
+                              'measured': len(r.get('hooked', ())),
+                              'hooked': list(r.get('hooked', ())),
                               'hits': {a: n for a, n in sorted(
                                   r['hits'].items(), key=lambda kv: int(kv[0], 16)) if n}}
                           for s, r in results.items()}}
@@ -238,14 +263,59 @@ def covered(cov, address, scenarios=None):
             and a in r.get('hits', {})]
 
 
+def measured(cov, address, scenarios=None):
+    """Names of the scenarios that measured the address (hooked in a
+    complete chunk and not refused)."""
+    a = norm(address)
+    return [s for s, r in sorted(cov['scenarios'].items())
+            if (scenarios is None or s in scenarios)
+            and a in r.get('hooked', ())]
+
+
+def status_of(cov, address, scenarios):
+    """'hit' (some phase scenario hits it), 'dead' (every phase scenario
+    measured it and none hit it) or 'unknown' (not measured everywhere)."""
+    if covered(cov, address, scenarios):
+        return 'hit'
+    if len(measured(cov, address, scenarios)) == len(scenarios):
+        return 'dead'
+    return 'unknown'
+
+
 def stale(cov, root=ROOT):
     return cov.get('scenarios_sha') != scenarios_sha(root)
 
 
-def usable(path, root=ROOT):
-    """The map at path when it exists and is fresh, else None."""
+def phase_scenarios():
+    return tuple(_load('truth').FRIDA_SCENARIOS)
+
+
+def check(path, root=ROOT):
+    """(map, None) when the map at path is usable, else (None, why):
+    present and well formed, the scenarios set unchanged, every phase
+    scenario present, no failed chunk anywhere."""
     cov = read(path)
-    return cov if cov is not None and not stale(cov, root) else None
+    if cov is None:
+        return None, 'no map (%s)' % COVERAGE_REL
+    try:
+        if stale(cov, root):
+            return None, 'map is stale (scenarios changed); re-run `wave.py coverage`'
+        missing = [s for s in phase_scenarios() if s not in cov['scenarios']]
+        if missing:
+            return None, 'map lacks scenario(s) %s' % ', '.join(missing)
+        for s, r in sorted(cov['scenarios'].items()):
+            if r.get('failed_chunks'):
+                return None, 'map has failed chunk(s) in %s' % s
+            if not (isinstance(r.get('hits', {}), dict) and isinstance(r.get('hooked', []), list)):
+                return None, 'map is malformed (%s)' % s
+    except (TypeError, AttributeError, ValueError, KeyError) as e:
+        return None, 'map is malformed (%r)' % (e,)
+    return cov, None
+
+
+def usable(path, root=ROOT):
+    """The map at path when it is fresh and complete, else None."""
+    return check(path, root)[0]
 
 
 def main(argv, root=ROOT, run_=subprocess.run, out=sys.stdout):
@@ -278,15 +348,43 @@ def main(argv, root=ROOT, run_=subprocess.run, out=sys.stdout):
     launches = plan(scenarios, addresses, chunk)
     if dry:
         out.write('coverage: %d candidate function(s), %d launch(es)\n' % (len(addresses), len(launches)))
+        if not addrs:
+            _, other = split_candidates(os.path.join(root, 'docs', 'wso', 'disagreements.json'))
+            if other:
+                out.write('coverage: dropped %d address(es) outside .text [0x%X, 0x%X): %s\n'
+                          % (len(other), TEXT_START, TEXT_END, ', '.join(other)))
+        out.write(_tooling_line() + '\n')
         for s, i, n, k in launches:
             out.write('coverage %s chunk %d/%d: %d hooks\n' % (s, i, n, k))
         return 0
     results = run(scenarios, chunk, run=run_, root=root, addresses=addresses,
                   log=lambda m: out.write(m + '\n'))
+    failed = {s: r['failed_chunks'] for s, r in results.items() if r['failed_chunks']}
     path = os.path.join(root, COVERAGE_REL)
+    if failed:
+        path = os.path.join(os.path.dirname(path), 'coverage.failed.json')
     data = write(path, results, root)
     for s, r in data['scenarios'].items():
         out.write('%s: %d of %d hooks hit, %d refused, %d failed chunk(s)\n'
                   % (s, len(r['hits']), r['hooks'], len(r['refused']), len(r['failed_chunks'])))
+    if failed:
+        out.write('coverage: failed chunk(s): %s; wrote %s, NOT %s\n' % (
+            '; '.join('%s %s' % (s, ','.join(map(str, c))) for s, c in sorted(failed.items())),
+            path, COVERAGE_REL))
+        return 1
     out.write('wrote %s\n' % path)
-    return 1 if any(r['failed_chunks'] for r in data['scenarios'].values()) else 0
+    return 0
+
+
+def _tooling_line():
+    """Which Windows checkout supplies the injector and recorder the probe
+    runs, and whether both are there."""
+    try:
+        play, oracle = _load('play'), _load('oracle')
+        base = os.path.join(play.WIN_CHECKOUT, oracle.REPLAY_DIR_REL)
+        have = {n: os.path.isfile(os.path.join(base, n)) for n in (oracle.INJECTOR, oracle.RECORDER)}
+        return 'coverage: injector and recorder from %s: %s' % (
+            base, ', '.join('%s %s' % (n, 'present' if ok else 'MISSING')
+                            for n, ok in have.items()))
+    except Exception as e:      # reporting only
+        return 'coverage: cannot tell which checkout supplies the injector and recorder (%r)' % (e,)

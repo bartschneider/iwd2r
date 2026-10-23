@@ -10804,16 +10804,18 @@ class DriverTest(unittest.TestCase):
                 {'address': '0x403000', 'name': 'Rules::Tick'}]
         return d, {'branch': 'p3/wso-b011', 'rows': rows}
 
-    def _coverage_map(self, hits):
+    def _coverage_map(self, hits, hooked=('0x401000', '0x402000', '0x403000')):
+        phase = driver._tool('truth').FRIDA_SCENARIOS
         cov = {'exe': 'x', 'scenarios_sha': coverage.scenarios_sha(self.root),
                'at': '2026-10-24T00:00:00Z',
-               'scenarios': {sc: {'hooks': 3, 'refused': [], 'failed_chunks': [], 'hits': h}
-                             for sc, h in hits.items()}}
+               'scenarios': {sc: {'hooks': 3, 'refused': [], 'failed_chunks': [],
+                                  'measured': len(hooked), 'hooked': list(hooked),
+                                  'hits': hits.get(sc, {})} for sc in phase}}
         _write(os.path.join(self.root, 'docs', 'wso', 'coverage.json'), json.dumps(cov))
 
     def test_driver_frida_phase_skips_launches_when_coverage_hits_no_row(self):
         d, batch = self._import_phase_driver()
-        self._coverage_map({'world_entry': {'0x999000': 4}, 'first_fight': {}})
+        self._coverage_map({'world_entry': {'0x999000': 4}})
         d.frida_build = lambda *a, **kw: self.fail('no build when coverage says nothing is hit')
         d.frida_run = lambda *a, **kw: self.fail('no launch when coverage says nothing is hit')
         findings = d._frida_phase('b011', batch, self.wt, {})
@@ -10848,6 +10850,36 @@ class DriverTest(unittest.TestCase):
         self.assertTrue(len(ran[0]) >= 2)   # uncovered rows stay in the table
         self.assertNotIn('b011: frida: skipped, coverage says no scenario exercises any row',
                          self.logs)
+
+    def test_driver_frida_phase_runs_when_a_row_was_not_measured(self):
+        # an unmeasured row is unknown, not dead: the phase runs
+        d, batch = self._import_phase_driver()
+        self._coverage_map({'world_entry': {'0x999000': 4}}, hooked=('0x401000', '0x402000'))
+        built = []
+        d.frida_build = lambda *a, **kw: built.append(1) or (_ for _ in ()).throw(
+            SystemExit('stop here'))
+        with self.assertRaises(driver._StageError):
+            d._frida_phase('b011', batch, self.wt, {})
+        self.assertEqual(built, [1])
+
+    def test_driver_frida_phase_ignores_an_incomplete_coverage_map(self):
+        d, batch = self._import_phase_driver()
+        self._coverage_map({'world_entry': {'0x999000': 4}})
+        path = os.path.join(self.root, 'docs', 'wso', 'coverage.json')
+        cov = json.loads(_slurp(path))
+        cov['scenarios']['first_fight']['failed_chunks'] = [2]
+        _write(path, json.dumps(cov))
+        d.frida_build = lambda *a, **kw: (_ for _ in ()).throw(SystemExit('stop here'))
+        with self.assertRaises(driver._StageError):
+            d._frida_phase('b011', batch, self.wt, {})
+        self.assertIn('map has failed chunk(s) in first_fight', '\n'.join(self.logs))
+        del cov['scenarios']['first_fight']
+        _write(path, json.dumps(cov))
+        with self.assertRaises(driver._StageError):
+            d._frida_phase('b011', batch, self.wt, {})
+        _write(path, json.dumps({'scenarios': 5}))
+        with self.assertRaises(driver._StageError):
+            d._frida_phase('b011', batch, self.wt, {})
 
     def test_driver_frida_phase_ignores_a_stale_coverage_map(self):
         d, batch = self._import_phase_driver()
@@ -17107,6 +17139,8 @@ class CoverageTest(unittest.TestCase):
          'name': 'F', 'their_len': 5, 'our_len': 5},
         {'address': '0x407000', 'category': 'theirs_real_ours_stub', 'file': 'src/G.cpp',
          'name': 'G', 'their_len': 5, 'our_len': 5},
+        {'address': '0x8C', 'category': 'only_theirs', 'file': 'src/H.cpp',
+         'name': 'H', 'their_len': 5, 'our_len': 0},
         {'name': 'noaddr', 'category': 'only_theirs'}]
 
     def setUp(self):
@@ -17118,16 +17152,20 @@ class CoverageTest(unittest.TestCase):
         _write(os.path.join(self.tmp, 'scenarios', 'world_entry.txt'), '# timeout: 99\nquit\n')
         _write(os.path.join(self.tmp, 'scenarios', 'first_fight.txt'), 'quit\n')
 
-    def cov(self, hits, **kw):
+    def cov(self, hits, hooked=None, **kw):
+        phase = truth.FRIDA_SCENARIOS
+        hooked = coverage.candidates(self.dp) if hooked is None else list(hooked)
         data = {'exe': 'x', 'scenarios_sha': coverage.scenarios_sha(self.tmp),
                 'at': '2026-10-24T01:02:03Z',
-                'scenarios': {sc: {'hooks': 6, 'refused': [], 'failed_chunks': [], 'hits': h}
-                              for sc, h in hits.items()}}
+                'scenarios': {sc: {'hooks': 6, 'refused': [], 'failed_chunks': [],
+                                   'measured': len(hooked), 'hooked': hooked,
+                                   'hits': hits.get(sc, {})} for sc in phase}}
         data.update(kw)
         _write(os.path.join(self.tmp, 'docs', 'wso', 'coverage.json'), json.dumps(data))
         return data
 
     def test_candidates_are_the_sorted_unique_addresses_of_five_categories(self):
+        self.assertEqual(coverage.split_candidates(self.dp)[1], ['0x8C'])
         self.assertEqual(coverage.candidates(self.dp), [
             '0x401000', '0x402000', '0x403000', '0x405000', '0x406000', '0x407000'])
         f = os.path.join(self.tmp, 'addrs.txt')
@@ -17193,9 +17231,10 @@ class CoverageTest(unittest.TestCase):
                            addresses=addrs)
         self.assertEqual(res['world_entry'], {
             'hooks': 3, 'refused': ['fn_402000'], 'failed_chunks': [],
-            'hits': {'0x401000': 5, '0x403000': 2}})
+            'hits': {'0x401000': 5, '0x403000': 2}, 'hooked': ['0x401000', '0x403000']})
         self.assertEqual(res['first_fight'], {
-            'hooks': 3, 'refused': [], 'failed_chunks': [2], 'hits': {'0x401000': 1}})
+            'hooks': 3, 'refused': [], 'failed_chunks': [2], 'hits': {'0x401000': 1},
+            'hooked': ['0x401000', '0x402000']})
         cmds = [c for c in fake.calls]
         self.assertEqual(len(cmds), 2 + 2 + 2)
         first = cmds[0]
@@ -17213,6 +17252,9 @@ class CoverageTest(unittest.TestCase):
         self.assertEqual(data['exe'], 'abc')
         self.assertEqual(data['scenarios']['world_entry']['hits'],
                          {'0x401000': 5, '0x403000': 2})
+        self.assertEqual(data['scenarios']['world_entry']['measured'], 2)
+        self.assertEqual(coverage.measured(data, '0x402000'), ['first_fight'])
+        self.assertEqual(coverage.measured(data, '0x401000'), ['first_fight', 'world_entry'])
         self.assertEqual(coverage.covered(data, '0x401000'), ['first_fight', 'world_entry'])
         self.assertEqual(coverage.covered(data, '0x402000'), [])
         self.assertIsNone(coverage.read(os.path.join(self.tmp, 'nope.json')))
@@ -17225,14 +17267,84 @@ class CoverageTest(unittest.TestCase):
         self.assertIsNone(coverage.usable(os.path.join(self.tmp, 'docs', 'wso', 'coverage.json'),
                                           self.tmp))
 
+    def test_usable_needs_every_phase_scenario_complete(self):
+        path = os.path.join(self.tmp, 'docs', 'wso', 'coverage.json')
+        data = self.cov({'world_entry': {'0x401000': 1}})
+        self.assertIsNotNone(coverage.usable(path, self.tmp))
+        data['scenarios']['walk_and_talk']['failed_chunks'] = [3]
+        _write(path, json.dumps(data))
+        self.assertIsNone(coverage.usable(path, self.tmp))
+        self.assertIn('failed chunk(s) in walk_and_talk', coverage.check(path, self.tmp)[1])
+        del data['scenarios']['walk_and_talk']
+        _write(path, json.dumps(data))
+        self.assertIn('lacks scenario(s) walk_and_talk', coverage.check(path, self.tmp)[1])
+        _write(path, json.dumps({'scenarios': {'world_entry': 3}, 'scenarios_sha': 1}))
+        self.assertIsNone(coverage.usable(path, self.tmp))
+        data = self.cov({'world_entry': {'0x401000': 1}})
+        data['scenarios']['first_fight']['hits'] = 7
+        _write(path, json.dumps(data))
+        self.assertIsNone(coverage.usable(path, self.tmp))
+
+    def test_status_of_separates_hit_dead_and_unknown(self):
+        data = self.cov({'first_fight': {'0x401000': 1}}, hooked=['0x401000', '0x402000'])
+        phase = truth.FRIDA_SCENARIOS
+        self.assertEqual(coverage.status_of(data, '0x401000', phase), 'hit')
+        self.assertEqual(coverage.status_of(data, '0x402000', phase), 'dead')
+        self.assertEqual(coverage.status_of(data, '0x403000', phase), 'unknown')
+
+    def test_the_table_file_is_what_probe_and_orig_read(self):
+        probe = load_tool('frida/probe')
+        orig = load_tool('frida/orig')
+        seen = []
+
+        def fake(cmd, **kw):
+            import subprocess as sp
+            spec = probe.load_probe(cmd[cmd.index('--probe') + 1])   # SystemExit if no hooks
+            seen.append(orig.build_js(spec))
+            return sp.CompletedProcess(cmd, 2, stdout='', stderr='')
+        coverage.run(['world_entry'], chunk=5, run=fake, root=self.tmp,
+                     addresses=['0x401000', '0x402000'])
+        js = seen[0]
+        self.assertNotIn("send({ tag: 'fn_", js)
+        self.assertIn('hitCounts', js)
+        self.assertIn('finalHits', js)
+        self.assertIn("send({ tag: 'loaded'", js)
+        self.assertIn('onEnter(args) { ++cnt0; }', js)
+
+    def test_incomplete_chunks_fail_and_a_failed_pass_writes_no_map(self):
+        import io
+        for bad in ('HITS fn_401000 3\nHITS-FINAL yes\nRESULT: CRASH\n',
+                    'HITS fn_401000 3\nHITS-FINAL no\nRESULT: CLEAN\n',
+                    'HITS fn_401000 3\nHITS-FINAL yes\nRESULT: NOT-LOADED\n'):
+            fake = self._status_fake(self.tmp, {(sc, 1): [bad] for sc in truth.FRIDA_SCENARIOS})
+            res = coverage.run(['world_entry'], chunk=5, run=fake, root=self.tmp,
+                               addresses=['0x401000'])
+            self.assertEqual(res['world_entry']['failed_chunks'], [1])
+            self.assertEqual(res['world_entry']['hits'], {'0x401000': 3})   # kept
+            self.assertEqual(res['world_entry']['hooked'], [])
+            self.assertEqual(len(fake.calls), 2)                            # one retry
+        fake = self._status_fake(self.tmp, {(sc, 1): [None] for sc in truth.FRIDA_SCENARIOS})
+        out = io.StringIO()
+        _write(os.path.join(self.tmp, 'addrs.txt'), '0x401000\n')
+        rc = coverage.main(['--addresses', os.path.join(self.tmp, 'addrs.txt')],
+                           root=self.tmp, run_=fake, out=out)
+        self.assertEqual(rc, 1)
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, 'docs', 'wso', 'coverage.json')))
+        self.assertTrue(os.path.exists(os.path.join(self.tmp, 'docs', 'wso', 'coverage.failed.json')))
+        self.assertIn('failed chunk(s): first_fight 1; walk_and_talk 1; world_entry 1', out.getvalue())
+
     def test_cli_dry_prints_the_launches_and_writes_nothing(self):
         import io
         out = io.StringIO()
         rc = coverage.main(['--dry', '--chunk', '2', '--scenarios', 'world_entry'],
                            root=self.tmp, out=out)
         self.assertEqual(rc, 0)
-        self.assertEqual(out.getvalue().splitlines(), [
+        lines = out.getvalue().splitlines()
+        self.assertTrue(lines[2].startswith('coverage: injector and recorder'), lines[2])
+        del lines[2]
+        self.assertEqual(lines, [
             'coverage: 6 candidate function(s), 3 launch(es)',
+            'coverage: dropped 1 address(es) outside .text [0x401000, 0x8468F1): 0x8C',
             'coverage world_entry chunk 1/3: 2 hooks',
             'coverage world_entry chunk 2/3: 2 hooks',
             'coverage world_entry chunk 3/3: 2 hooks'])
@@ -17266,6 +17378,31 @@ class CoverageTest(unittest.TestCase):
         rc, out = self.next_import(include_uncovered=True)
         self.assertEqual(self.rows_of(out), ['0x403000', '0x401000'])
 
+    def test_next_import_keeps_rows_nobody_measured(self):
+        cands = [a for a in coverage.candidates(self.dp) if a != '0x407000']
+        self.cov({'world_entry': {'0x403000': 3}}, hooked=cands)
+        rc, out = self.next_import()
+        self.assertEqual(self.rows_of(out), ['0x403000', '0x407000'])
+        self.assertIn('coverage: 1 candidate row(s) left out as exercised by no scenario', out)
+        self.assertIn('coverage: 1 row(s) kept that no scenario measured (unknown)', out)
+        os.unlink(os.path.join(self.tmp, 'import-state.json'))
+        self.cov({'world_entry': {'0x403000': 3}}, hooked=['0x403000'])
+        with mock.patch.object(self.wave, '_cut_worktree', return_value=('/wt', 'new')):
+            rc, out = self.wave.next_batch(
+                self.dp, os.path.join(self.tmp, 'import-state.json'), 5, queue='import',
+                repo=self.tmp, import_path=os.path.join(self.tmp, 'import-list.json'),
+                base='first', coverage_root=self.tmp,
+                claims_path=os.path.join(self.tmp, 'claims.json'))
+        self.assertEqual(self.rows_of(out), ['0x403000', '0x401000', '0x407000'])
+        self.assertIn('coverage: 0 candidate row(s) left out as exercised by no scenario', out)
+        self.assertIn('coverage: 2 row(s) kept that no scenario measured (unknown)', out)
+
+    def test_next_include_uncovered_needs_the_import_queue(self):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self.assertEqual(self.wave.main(['next', '--include-uncovered']), 2)
+        self.assertIn('--include-uncovered only applies to --queue import', err.getvalue())
+
     def test_next_import_without_a_fresh_map_is_unchanged(self):
         rc, out = self.next_import()
         self.assertEqual(rc, 0, out)
@@ -17289,7 +17426,7 @@ class CoverageTest(unittest.TestCase):
         self.cov({'world_entry': {'0x401000': 1, '0x403000': 2}, 'first_fight': {'0x403000': 1}})
         rc, out = self.wave.write_scorecard(*args)
         self.assertEqual(rc, 0, out)
-        self.assertIn('Coverage: 2 of 6 candidate functions exercised by 2 scenarios (2026-10-24)',
+        self.assertIn('Coverage: 2 of 6 candidate functions exercised by 3 scenarios (2026-10-24)',
                       _slurp(report))
 
 

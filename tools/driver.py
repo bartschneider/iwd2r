@@ -2465,17 +2465,22 @@ class Driver:
         return findings
 
     def _coverage_skips(self, batch_id, rows):
-        """True when a fresh coverage map exists and no row (a dependency
-        included) is exercised by any scenario the phase would run."""
+        """True when a usable coverage map exists and every row (a dependency
+        included) was measured by every scenario the phase runs and hit by
+        none; a row nobody measured is unknown and keeps the phase."""
         try:
             cov_mod = _tool('coverage')
-            cov = cov_mod.usable(os.path.join(self.repo, cov_mod.COVERAGE_REL), self.repo)
+            path = os.path.join(self.repo, cov_mod.COVERAGE_REL)
+            cov, why = cov_mod.check(path, self.repo)
             if cov is None:
+                if os.path.exists(path):
+                    self.log('%s: frida: coverage map not used (%s); running as usual'
+                             % (batch_id, why))
                 return False
-            scenarios = _tool('truth').FRIDA_SCENARIOS
-            if any(cov_mod.covered(cov, r['address'], scenarios) for r in rows):
+            phase = _tool('truth').FRIDA_SCENARIOS
+            if any(cov_mod.status_of(cov, r['address'], phase) != 'dead' for r in rows):
                 return False
-        except (OSError, ValueError, KeyError) as e:
+        except (OSError, ValueError, KeyError, TypeError, AttributeError) as e:
             self.log('%s: frida: coverage map unreadable (%s); running as usual'
                      % (batch_id, _one_line(repr(e), 200)))
             return False
