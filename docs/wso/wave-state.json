@@ -3021,6 +3021,191 @@
       ],
       "status": "assigned",
       "verdicts": {}
+    },
+    "b012": {
+      "assigned_at": "2026-10-19T03:07:36+00:00",
+      "branch": "p3/wso-b012",
+      "closed_at": null,
+      "files": [
+        "src/CScreenCharacter.cpp",
+        "src/CGameTrigger.cpp",
+        "src/CScreenStore.cpp",
+        "src/CVidCell.cpp",
+        "src/CScreenInventory.cpp",
+        "src/CScreenSave.cpp",
+        "src/CWorldMap.cpp",
+        "src/CScreenWorld.cpp",
+        "src/CVidInf.cpp",
+        "src/CScreenCreateChar.cpp",
+        "src/CGameAnimationTypeEffect.cpp",
+        "src/CGameAnimationTypeMonsterLarge.cpp",
+        "src/CNetwork.cpp",
+        "src/CUIPanel.cpp"
+      ],
+      "rows": [
+        {
+          "address": "0x5E8B70",
+          "category": "both_changed_differ",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CScreenCharacter::UpdateClassSelectionPanel",
+          "our_len": 1967,
+          "their_len": 1984
+        },
+        {
+          "address": "0x4CD220",
+          "category": "both_changed_differ",
+          "file": "src/CGameTrigger.cpp",
+          "name": "CGameTrigger::DoAIUpdate",
+          "our_len": 2058,
+          "their_len": 1851
+        },
+        {
+          "address": "0x67C710",
+          "category": "both_changed_differ",
+          "file": "src/CScreenStore.cpp",
+          "name": "CScreenStore::OnBuyDrinkButtonClick",
+          "our_len": 1921,
+          "their_len": 1907
+        },
+        {
+          "address": "0x5E7C50",
+          "category": "both_changed_differ",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CScreenCharacter::OnScriptItemSelect",
+          "our_len": 1870,
+          "their_len": 1875
+        },
+        {
+          "address": "0x7D0730",
+          "category": "both_changed_differ",
+          "file": "src/CVidCell.cpp",
+          "name": "CVidCell::Blt8To32Brightest",
+          "our_len": 1881,
+          "their_len": 1839
+        },
+        {
+          "address": "0x6257C0",
+          "category": "both_changed_differ",
+          "file": "src/CScreenInventory.cpp",
+          "name": "CScreenInventory::OnKeyDown",
+          "our_len": 1891,
+          "their_len": 1817
+        },
+        {
+          "address": "0x5EB5E0",
+          "category": "both_changed_differ",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CUIControlButtonCharacterClassSelection::OnLButtonClick",
+          "our_len": 1856,
+          "their_len": 1840
+        },
+        {
+          "address": "0x65AEE0",
+          "category": "both_changed_differ",
+          "file": "src/CScreenSave.cpp",
+          "name": "CScreenSave::UpdateMainPanel",
+          "our_len": 1861,
+          "their_len": 1781
+        },
+        {
+          "address": "0x558F40",
+          "category": "both_changed_differ",
+          "file": "src/CWorldMap.cpp",
+          "name": "CWorldMap::Marshal",
+          "our_len": 1807,
+          "their_len": 1774
+        },
+        {
+          "address": "0x692A50",
+          "category": "both_changed_differ",
+          "file": "src/CScreenWorld.cpp",
+          "name": "CScreenWorld::StartDeath",
+          "our_len": 1784,
+          "their_len": 1790
+        },
+        {
+          "address": "0x79CC90",
+          "category": "both_changed_differ",
+          "file": "src/CVidInf.cpp",
+          "name": "CVidInf::FXBltToBack",
+          "our_len": 1774,
+          "their_len": 1758
+        },
+        {
+          "address": "0x6175A0",
+          "category": "both_changed_differ",
+          "file": "src/CScreenCreateChar.cpp",
+          "name": "CScreenCreateChar::OnMainCancelButtonClick",
+          "our_len": 1576,
+          "their_len": 1910
+        },
+        {
+          "address": "0x6A36A0",
+          "category": "both_changed_differ",
+          "file": "src/CGameAnimationTypeEffect.cpp",
+          "name": "CGameAnimationTypeEffect::Render",
+          "our_len": 1713,
+          "their_len": 1772
+        },
+        {
+          "address": "0x60E3E0",
+          "category": "both_changed_differ",
+          "file": "src/CScreenCreateChar.cpp",
+          "name": "CScreenCreateChar::UpdateFeatsPanel",
+          "our_len": 1732,
+          "their_len": 1744
+        },
+        {
+          "address": "0x6B0A00",
+          "category": "both_changed_differ",
+          "file": "src/CGameAnimationTypeMonsterLarge.cpp",
+          "name": "CGameAnimationTypeMonsterLarge::CGameAnimationTypeMonsterLarge",
+          "our_len": 1715,
+          "their_len": 1715
+        },
+        {
+          "address": "0x629230",
+          "category": "both_changed_differ",
+          "file": "src/CScreenInventory.cpp",
+          "name": "CScreenInventory::IsAbilitiesButtonActive",
+          "our_len": 1708,
+          "their_len": 1681
+        },
+        {
+          "address": "0x7A5A60",
+          "category": "both_changed_differ",
+          "file": "src/CNetwork.cpp",
+          "name": "CNetwork::OnCloseSession",
+          "our_len": 1510,
+          "their_len": 1874
+        },
+        {
+          "address": "0x4D3100",
+          "category": "both_changed_differ",
+          "file": "src/CUIPanel.cpp",
+          "name": "CUIPanel::Render",
+          "our_len": 1729,
+          "their_len": 1629
+        },
+        {
+          "address": "0x62D4B0",
+          "category": "both_changed_differ",
+          "file": "src/CScreenInventory.cpp",
+          "name": "CUIControlButtonInventorySlot::TimerAsynchronousUpdate",
+          "our_len": 1747,
+          "their_len": 1604
+        },
+        {
+          "address": "0x5E0B20",
+          "category": "both_changed_differ",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CScreenCharacter::UpdatePopupPanel",
+          "our_len": 1999,
+          "their_len": 1338
+        }
+      ],
+      "status": "assigned",
+      "verdicts": {}
     }
   },
   "fork_base": "e8dd16a750966af53f24daaf49dcb4fb13594c13"
