@@ -238,6 +238,7 @@ public:
     void ReputationAdjustment(SHORT reputationAdjustment, BOOL set);
     void ChangeReputation(SHORT eventCode);
     void AddDisposableItem(CItem* pItem);
+    void PutBackItem(CItem* pItem, LONG nLooterId);
     void DestroyDisposableItems();
     void AddPartyGold(LONG dwAddPartyGold);
     void SetupCharacters(BOOLEAN bProgressBarInPlace);

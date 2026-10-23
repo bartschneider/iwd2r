@@ -1,0 +1,185 @@
+{
+  "batches": {
+    "i001": {
+      "assigned_at": "2026-10-23T19:22:55+00:00",
+      "branch": "p3/wso-i001",
+      "closed_at": "2026-10-23T21:46:42+00:00",
+      "files": [
+        "src/CAIGroup.cpp",
+        "src/CScreenWorld.cpp",
+        "src/CMessage.cpp",
+        "src/CInfGame.cpp",
+        "src/CVidCell.cpp",
+        "src/CNetwork.cpp",
+        "src/CGameAIBase.cpp",
+        "src/CGameContainer.cpp",
+        "src/CGameSprite.cpp"
+      ],
+      "pool": "claude",
+      "rows": [
+        {
+          "address": "0x407280",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CAIGroup.cpp",
+          "name": "CAIGroup::GroupProtectPoint",
+          "our_len": 2,
+          "their_len": 5488
+        },
+        {
+          "address": "0x407FC0",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CAIGroup.cpp",
+          "name": "CAIGroup::GroupDrawMove",
+          "our_len": 2,
+          "their_len": 4975
+        },
+        {
+          "address": "0x6957E0",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CScreenWorld.cpp",
+          "name": "CUIControlButtonWorldContainerSlot::OnLButtonClick",
+          "our_len": 2,
+          "their_len": 4560
+        },
+        {
+          "address": "0x6913C0",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CScreenWorld.cpp",
+          "name": "CScreenWorld::StartStore",
+          "our_len": 2,
+          "their_len": 4359
+        },
+        {
+          "address": "0x696140",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CScreenWorld.cpp",
+          "name": "CUIControlButtonWorldContainerSlot::Render",
+          "our_len": 14,
+          "their_len": 2907
+        },
+        {
+          "address": "0x433950",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CMessage.cpp",
+          "name": "CBaldurMessage::WaitForSignal",
+          "our_len": 14,
+          "their_len": 2004
+        },
+        {
+          "address": "0x5A0950",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CInfGame.cpp",
+          "name": "CInfGame::CacheResFileWithResource",
+          "our_len": 2,
+          "their_len": 1845
+        },
+        {
+          "address": "0x7B49D0",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CVidCell.cpp",
+          "name": "CVidCell::sub_7B49D0",
+          "our_len": 13,
+          "their_len": 1755
+        },
+        {
+          "address": "0x7D0C60",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CVidCell.cpp",
+          "name": "CVidCell::sub_7D0C60",
+          "our_len": 13,
+          "their_len": 1693
+        },
+        {
+          "address": "0x7A5F00",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CNetwork.cpp",
+          "name": "CNetwork::EnumerateSessions",
+          "our_len": 14,
+          "their_len": 1583
+        },
+        {
+          "address": "0x5A04B0",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CInfGame.cpp",
+          "name": "CInfGame::CachingRequirements",
+          "our_len": 10,
+          "their_len": 1352
+        },
+        {
+          "address": "0x45F6D0",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CGameAIBase.cpp",
+          "name": "CGameAIBase::MoveCursor",
+          "our_len": 20,
+          "their_len": 1273
+        },
+        {
+          "address": "0x7A64B0",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CNetwork.cpp",
+          "name": "CNetwork::JoinSelectedSession",
+          "our_len": 14,
+          "their_len": 1240
+        },
+        {
+          "address": "0x5A0160",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CInfGame.cpp",
+          "name": "CInfGame::sub_5A0160",
+          "our_len": 2,
+          "their_len": 1247
+        },
+        {
+          "address": "0x4337D0",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CMessage.cpp",
+          "name": "CBaldurMessage::KickOutWaitingForSignal",
+          "our_len": 14,
+          "their_len": 1184
+        },
+        {
+          "address": "0x480480",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CGameContainer.cpp",
+          "name": "CGameContainer::sub_480480",
+          "our_len": 2,
+          "their_len": 844
+        },
+        {
+          "address": "0x691B50",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CScreenWorld.cpp",
+          "name": "CScreenWorld::StopStore",
+          "our_len": 2,
+          "their_len": 781
+        },
+        {
+          "address": "0x71BC60",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::RemoveSpecialAbility",
+          "our_len": 2,
+          "their_len": 752
+        },
+        {
+          "address": "0x434EB0",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CMessage.cpp",
+          "name": "CBaldurMessage::ChapterAnnounceStatus",
+          "our_len": 14,
+          "their_len": 734
+        },
+        {
+          "address": "0x723BF0",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::sub_723BF0",
+          "our_len": 2,
+          "their_len": 614
+        }
+      ],
+      "status": "closed",
+      "verdicts": {}
+    }
+  }
+}

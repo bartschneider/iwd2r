@@ -1,0 +1,1 @@
+{"address": "0x407FC0", "name": "CAIGroup::GroupDrawMove", "file": "src/CAIGroup.cpp", "batch": "i001", "needs": "no Frida hook: the signature does not parse"}
