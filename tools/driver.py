@@ -7,6 +7,7 @@ template, the batch loop (`wave.py run`) with its budget stop, 429 park
 and resume, and `--clear`.  The driver itself uses no model."""
 import argparse
 import collections
+import contextlib
 import datetime
 import fcntl
 import glob
@@ -335,7 +336,13 @@ DEFAULT_TIMEOUT = 10800   # seconds a worker or reviewer run may take (R71)
 # Process groups of the live worker and reviewer runs (pgid = child pid), so
 # that stopping the driver stops them (ruling R72).
 _LIVE = set()
-_LIVE_LOCK = threading.Lock()
+# Re-entrant: the stop handler runs on a thread that may hold it already.
+_LIVE_LOCK = threading.RLock()
+
+
+# Set (under _LIVE_LOCK) once a stop has killed the live groups: a worker
+# forked after that kill, before it joined _LIVE, is killed on joining.
+_STOPPED = threading.Event()
 
 
 class _Stop(BaseException):
@@ -346,6 +353,7 @@ def kill_live_groups():
     """SIGKILL every live worker process group; the pgids killed."""
     with _LIVE_LOCK:
         groups = sorted(_LIVE)
+        _STOPPED.set()
     for pgid in groups:
         try:
             os.killpg(pgid, signal.SIGKILL)
@@ -364,6 +372,11 @@ def _run_group(argv, timeout=None, **kw):
                                if k not in ('capture_output',)})
     with _LIVE_LOCK:
         _LIVE.add(proc.pid)
+        if _STOPPED.is_set():      # forked after the stop's kill: not missed
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except OSError:
+                pass
     try:
         out, err = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
@@ -586,15 +599,177 @@ def _tool_calls(path):
                     yield block.get('name'), block['input']
 
 
-def transcript_findings(transcript_path, covered_files):
+_HISTORY_VERBS = ('reset', 'rebase', 'revert', 'restore', 'clean', 'stash',
+                  'filter-repo', 'push', 'update-ref')
+
+
+# No real branch is named for these (the batch's own path prefixes).
+_BATCH_DIRS = ('src', 'compat', 'docs', 'oracle', 'tools', 'tests')
+
+
+_HEREDOC = re.compile(r"""<<-?[ \t]*(?:'([^'\n]*)'|"([^"\n]*)"|([^\s;&|<>()]+))""")
+
+
+# A heredoc fed to one of these runs its body as commands.
+_SHELLS = ('bash', 'sh', 'zsh', 'dash', 'ksh', 'wsl', 'pwsh', 'powershell')
+
+
+def _fallback_split(text, seps):
+    return text.split('|') if seps == ('|',) else _SEGMENT.split(text)
+
+
+def _feeds_shell(stage):
+    """True when a word of a pipe stage names a shell (the command word,
+    or after env, exec, nohup and the like)."""
+    cw, args = _words(stage)
+    for w in [cw] + args:
+        w = os.path.basename(w.replace('\\', '/')).lower()
+        if (w[:-4] if w.endswith('.exe') else w) in _SHELLS:
+            return True
+    return False
+
+
+def _split_unquoted(text, seps):
+    """text split at any of seps (longest first) outside quotes; a
+    backslash escapes the next character, an unquoted # at the start of a
+    word is a comment to the end of the line, and the body of a heredoc
+    (<<WORD, <<-WORD, <<'WORD') is data up to its delimiter line, unless
+    a stage of the pipeline that opened it names a shell (_feeds_shell,
+    before or after the <<): that body is commands and is split the same
+    way.  Fails closed: a quote or heredoc left open at the end falls
+    back to _SEGMENT."""
+    parts, cur, quote, i, pending = [], [], None, 0, []
+    while i < len(text):
+        ch = text[i]
+        if quote:
+            cur.append(ch)
+            if ch == '\\' and quote == '"' and i + 1 < len(text):
+                i += 1
+                cur.append(text[i])
+            elif ch == quote:
+                quote = None
+        elif ch == '\\' and i + 1 < len(text):
+            cur.append(ch + text[i + 1])
+            i += 1
+        elif ch in '\'"':
+            quote = ch
+            cur.append(ch)
+        elif ch == '#' and (not cur or cur[-1][-1:] in ' \t'):
+            j = text.find('\n', i)
+            i = len(text) if j < 0 else j
+            continue
+        elif ch == '\n' and pending:
+            parts.append(''.join(cur))
+            cur = []
+            delims, pending = pending, []
+            i += 1
+            for d, idx in delims:
+                # the whole pipeline of the segment that opened it (slots
+                # stay valid, bodies are appended only after this newline);
+                # a trailing | continues it past the body: fail closed
+                run = parts[idx].rstrip().endswith('|') or any(
+                    _feeds_shell(st)
+                    for st in _split_unquoted(parts[idx], ('|',)))
+                found, body = False, []
+                while i < len(text) and not found:
+                    j = text.find('\n', i)
+                    line = text[i:len(text) if j < 0 else j]
+                    i = len(text) if j < 0 else j + 1
+                    found = line.strip() == d
+                    if not found:
+                        body.append(line)
+                if not found:           # no delimiter line: fail closed
+                    return _fallback_split(text, seps)
+                if run:                 # fed to a shell: the body is commands
+                    parts += _split_unquoted('\n'.join(body), seps)
+            continue
+        elif text.startswith('<<', i) and not text.startswith('<<<', i) \
+                and _HEREDOC.match(text, i):
+            m = _HEREDOC.match(text, i)
+            d = next(g for g in m.groups() if g is not None)
+            pending.append((re.sub(r'[\\\'"]', '', d) if m.group(3) else d,
+                            len(parts)))
+            cur.append(text[i:m.end()])
+            i = m.end()
+            continue
+        else:
+            sep = next((x for x in seps if text.startswith(x, i)), None)
+            if sep:
+                parts.append(''.join(cur))
+                cur = []
+                i += len(sep) - 1
+            else:
+                cur.append(ch)
+        i += 1
+    if quote or pending:
+        return _fallback_split(text, seps)
+    parts.append(''.join(cur))
+    return parts
+
+
+def _history_rewrite(args, covered=(), tracked=None):
+    """True when the arguments of a `git` command (after the command word)
+    rewrite or discard history or work: reset, rebase, revert, restore,
+    clean, stash, filter-repo, push, update-ref, commit --amend, branch
+    -d/-D, reflog expire, gc --prune, and a checkout that is not a plain
+    branch switch (`--`, -f, -B, `.`, a path after a start point, or one
+    argument that names a covered file, looks like a path or starts with a
+    batch directory), branch -f/-M/-C and switch -C/--force-create.
+    add, commit, switch, checkout -b / <branch> and the read-only
+    commands are not.  `tracked(name)`, when given, says whether a name is a
+    file tracked in the worktree: one checkout argument naming one is a
+    path restore, not a branch switch."""
+    rest = list(args)
+    while rest and rest[0].startswith('-'):      # git -C dir / -c k=v / --x
+        rest = rest[2:] if rest[0] in ('-C', '-c') else rest[1:]
+    if not rest:
+        return False
+    sub, rest = rest[0], rest[1:]
+    if sub in _HISTORY_VERBS:
+        return True
+    if sub == 'commit':
+        return any(a == '--amend' for a in rest)
+    if sub == 'branch':
+        return any(a in ('--delete', '--force')
+                   or re.fullmatch(r'-[a-zA-Z]*[dDfMC][a-zA-Z]*', a)
+                   for a in rest)
+    if sub == 'reflog':
+        return 'expire' in rest or 'delete' in rest
+    if sub == 'gc':
+        return any(a.startswith('--prune') for a in rest)
+    if sub == 'switch':
+        return any(a in ('--force', '--discard-changes', '--force-create')
+                   or re.fullmatch(r'-[a-zA-Z]*[fC][a-zA-Z]*', a)
+                   for a in rest)
+    if sub == 'checkout':
+        if '--' in rest or any(
+                a in ('--force', '--patch', '--ours', '--theirs')
+                or re.fullmatch(r'-[a-zA-Z]*[fpB][a-zA-Z]*', a) for a in rest):
+            return True
+        if '-b' in rest:
+            return False
+        pos = [a for a in rest if not a.startswith('-')]
+        if len(pos) != 1:
+            return len(pos) > 1
+        a = pos[0]
+        return (a == '.' or a.startswith(('./', '../'))
+                or any(ch in a for ch in '*?[')
+                or a.split('/')[0] in _BATCH_DIRS
+                or any(a == c or a.endswith('/' + c) for c in covered)
+                or bool(tracked and tracked(a)))
+    return False
+
+
+def transcript_findings(transcript_path, covered_files, tracked=None):
     """[(kind, problem, file)] for the forbidden tool calls in a worker's
     transcript.  kind 'wso' (a git command naming a wso/ ref; the pinned
     sha is allowed), 'launch' (a .wsb, WindowsSandbox or Start-Process
     launch outside HOUSE_RUNNERS), 'read' (a whole-file read of a covered
     source file: no Read limit or one over READ_LIMIT; cat, a sed -n span
-    or head/tail -n over READ_LIMIT; file is the covered file) or
-    'unreadable'.  cat and the launch words count only as a command word,
-    and a cat piped into a bounded head/tail/sed is bounded."""
+    or head/tail -n over READ_LIMIT; file is the covered file),
+    'history' (a git command that rewrites history or discards work, see
+    _history_rewrite; terminal like launch) or 'unreadable'.  cat and the launch words count only as a
+    command word, and a cat piped into a bounded head/tail/sed is bounded."""
     covered = [c for c in covered_files if c]
     out = []
     calls = []
@@ -621,17 +796,22 @@ def transcript_findings(transcript_path, covered_files):
                                 hit[0], 'no limit' if not isinstance(limit, int)
                                 else 'limit %d' % limit, READ_LIMIT), hit[0]))
         elif name == 'Bash':
-            for seg in _SEGMENT.split(str(inp.get('command', ''))):
+            for seg in _split_unquoted(str(inp.get('command', '')),
+                                       ('&&', '||', ';', '\n')):
                 seg = seg.strip()
                 if not seg:
                     continue
-                stages = [_words(st) for st in seg.split('|')]
+                stages = [_words(st) for st in _split_unquoted(seg, ('|',))]
                 for i, (cw, args) in enumerate(stages):
                     text = ' '.join(args)
                     if cw == 'git' and _WSO_REF.search(' ' + text):
                         out.append(('wso', 'git command naming a wso/ ref '
                                     '(%s): read the fork only at the pinned '
                                     'sha, `git show <sha>:<path>`'
+                                    % _short(seg), None))
+                    if cw == 'git' and _history_rewrite(args, covered, tracked):
+                        out.append(('history', 'history rewrite in a worker '
+                                    '(%s): workers only add and commit'
                                     % _short(seg), None))
                     launch = cw in ('windowssandbox', 'start-process', 'start') \
                         or (cw in _LAUNCH_SHELLS and _LAUNCH.search(text))
@@ -660,10 +840,10 @@ def transcript_findings(transcript_path, covered_files):
     return out
 
 
-def transcript_checks(transcript_path, covered_files):
+def transcript_checks(transcript_path, covered_files, tracked=None):
     """One problem per forbidden worker tool call (transcript_findings)."""
     return [text for _kind, text, _f in
-            transcript_findings(transcript_path, covered_files)]
+            transcript_findings(transcript_path, covered_files, tracked)]
 
 
 # The paths a batch may change (ruling R71): anything else on the branch is
@@ -787,8 +967,10 @@ def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
         for k, a in sorted(inside.items()):
             if k in changed:
                 problems.append('%s: listed under ## Undecided but its body '
-                                'changed against %s; restore our body and '
-                                'commit.' % (a, base))
+                                'changed against %s; edit that function back to the '
+                                "base's body (`git show %s:<path>` shows it) and commit; "
+                                "do not replace a file that holds other rows' changes."
+                                % (a, base, base))
     for k, a in given.items():
         if k not in row_keys:
             problems.append('%s: verdict for an address outside this batch; '
@@ -833,9 +1015,10 @@ def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
     outside = sorted(p for p in changed if not _path_allowed(p))
     if outside:
         problems.append('changed outside the paths a batch may touch (%s): '
-                        '%s; revert them (git checkout %s -- <path>) and '
-                        'commit' % (', '.join(ALLOWED_PATHS),
-                                    ', '.join(outside), base))
+                        '%s; restore the base copy of each (`git show %s:<path> > '
+                        '<path>`, or `git rm <path>` when %s lacks the file) '
+                        'and commit' % (', '.join(ALLOWED_PATHS),
+                                        ', '.join(outside), base, base))
     steps = [
         (['python3', '-I', 'tests/test_tools.py'], 'tests/test_tools.py'),
         (['python3', '-I', 'tools/check_evidence.py', '--base', 'first'],
@@ -844,9 +1027,8 @@ def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
     if os.path.isfile(_vanilla_exe()):
         steps.append((_parity_python() + ['tools/parity/run.py', '--base', 'first'],
                       'tools/parity/run.py'))
-    steps.append((['python3', '-I', 'tools/gen_map.py', '--check'],
-                  'tools/gen_map.py --check (run `python3 -I tools/gen_map.py` '
-                  'and commit docs/MAP.md)'))
+    # docs/MAP.md is not the batch's: the driver regenerates it once at close,
+    # on the merged tree (_regen_map), so parallel batches never conflict.
     for argv, label in steps:
         proc = run(argv, cwd=worktree, capture_output=True, text=True)
         if proc.returncode != 0:
@@ -1043,7 +1225,7 @@ blocks, say so in one line.
 RESUME_PREAMBLE = """Resume: batch {id} {why}. This run takes the batch up again in
 the same worktree, on `{branch}`. The work done so far is on that branch:
 `git log {base}..{branch}`, and `git status` for anything not committed
-(a `{wip}` commit holds what a park saved). Build on it: do not redo
+(a `{wip}` commit, if one is still there, holds what a park saved). Build on it: do not redo
 finished work, and do not rewrite that history.{reset}
 
 Verdicts already recorded in the wave state:
@@ -1356,6 +1538,7 @@ class Driver:
             docs, os.path.basename(wave.QUEUES[queue]['template']))
         self.report_path = os.path.join(docs, 'xrec-report.md')
         self.probe_path = os.path.join(docs, 'probe-list.json')
+        self.import_list_path = os.path.join(repo, wave.IMPORT_LIST_REL)
         self.calibration_path = os.path.join(docs, 'truth-calibration.json')
         truth = _tool('truth')
         self.frida = frida
@@ -1363,6 +1546,8 @@ class Driver:
         self.oracle_run = truth.run_oracle if oracle_run is None else oracle_run
         self.frida_run = truth.frida_run if frida_run is None else frida_run
         self.next_batch = wave.next_batch
+        self.recompare = wave.recompare
+        self._recompared = False
         self.render_brief = wave.render_brief
         self.record_verdict = wave.record_verdict
         self.close_batch = wave.close_batch
@@ -1381,6 +1566,11 @@ class Driver:
         # Ruling R62: the one lock over every wave-state mutation and
         # repo-level git operation; never taken twice by one thread.
         self._lock = threading.Lock()
+        # Git writes in progress (their thread idents), so a stop waits for
+        # them: a signal must not land mid commit or fast-forward.
+        self._write_cv = threading.Condition(threading.RLock())
+        self._writers = {}         # thread ident -> nesting depth
+        self._stop_deferred = None    # ident of the thread whose write defers the stop
         self._ctx = _BatchContext()
         self._runner = runner      # runs a callable on its own thread; None: threads
         self._clock = time.monotonic if clock is None else clock
@@ -1511,6 +1701,8 @@ class Driver:
     def _run(self, worker, brief, cwd, batch_id, label):
         """One worker run; the brief, report and result land in
         <driver folder>/<batch_id>/<label>.*"""
+        if self._stopping:     # stopped before this launch: start nothing
+            raise _Stop()
         try:
             res = worker.run(brief, cwd)
         except OSError as e:
@@ -1551,8 +1743,8 @@ class Driver:
 
     def _scan_transcript(self, batch_id, label, res):
         """Every run's transcript, worker, fix rounds and reviewer: a wso/
-        ref or a launch outside the house runners is a past call nobody can
-        undo, so a `transcript` exception with no fix round; a whole-file
+        ref, a launch outside the house runners or a history rewrite is a
+        past call nobody can undo, so a `transcript` exception with no fix round; a whole-file
         read is a ledger line only; a missing transcript is a ledger line."""
         lines = self._ctx.transcript_lines
         if not res.transcript:
@@ -1562,7 +1754,8 @@ class Driver:
         covered = sorted({r['file'] for r in batch.get('rows', [])
                           if r.get('file')})
         fatal = []
-        for kind, text, f in transcript_findings(res.transcript, covered):
+        for kind, text, f in transcript_findings(res.transcript, covered,
+                                              self._is_tracked):
             if kind == 'read':
                 line = 'transcript: whole read of %s' % f
                 if line not in lines:
@@ -2013,6 +2206,11 @@ class Driver:
         return subprocess.run(['git', '-C', self.repo, *args],
                               capture_output=True, text=True)
 
+    def _is_tracked(self, name):
+        """True when `name` is a file tracked in the driver's worktree."""
+        return self._git('ls-files', '--error-unmatch', '--', name
+                         ).returncode == 0
+
     def _commits(self, branch):
         """'<merge-base>..<tip> (n commits)' of the batch branch over base."""
         mb = self._git('merge-base', self.base, branch).stdout.strip()
@@ -2099,6 +2297,14 @@ class Driver:
         self._union_merge_attributes()
         r = subprocess.run(['git', '-C', worktree, 'merge', '--no-edit', '-q',
                             self.base], capture_output=True, text=True)
+        if r.returncode != 0 and self._only_map_conflicts(worktree):
+            # A worker's own docs/MAP.md edit: the close regenerates the map
+            # on the merged tree anyway, so the base's copy stands.
+            r = self._git_in(worktree, 'checkout', '--theirs', '--', 'docs/MAP.md')
+            if r.returncode == 0:
+                r = self._git_in(worktree, 'add', '--', 'docs/MAP.md')
+            if r.returncode == 0:
+                r = self._git_in(worktree, 'commit', '-q', '--no-edit')
         if r.returncode == 0:
             self.log('%s: %s merged into it before the close' % (branch, self.base))
             return None
@@ -2107,18 +2313,105 @@ class Driver:
         return 'merging %s into %s failed: %s' % (
             self.base, branch, _one_line((r.stderr or '') + (r.stdout or '')))
 
+    STOP_WAIT = 30     # seconds a stop waits for a git write in progress
+
+    @contextlib.contextmanager
+    def _writing(self):
+        """A git write is in progress on this thread: a stop waits for it
+        (bounded by STOP_WAIT), and a stop that lands on this very thread
+        waits for the write's end and is raised there."""
+        tid = threading.get_ident()
+        with self._write_cv:
+            self._writers[tid] = self._writers.get(tid, 0) + 1
+        try:
+            yield
+        finally:
+            with self._write_cv:
+                n = self._writers[tid] - 1
+                if n:
+                    self._writers[tid] = n
+                else:
+                    del self._writers[tid]
+                self._write_cv.notify_all()
+                deferred = not n and self._stop_deferred == tid
+            if deferred:
+                self._stop_deferred = None
+                raise _Stop()
+
+    def _on_stop(self, signum, _frame):
+        """SIGTERM/SIGINT: kill the workers, let a git write in progress
+        finish (bounded), then raise _Stop.  Only locks that are re-entrant
+        are taken here: the signal may land while this thread holds them."""
+        self._stopping = True
+        kill_live_groups()
+        with self._write_cv:
+            if threading.get_ident() in self._writers:
+                # Raised on this thread when its write ends (the main
+                # thread's cut, adoption and recompare are writes too).
+                self._stop_deferred = threading.get_ident()
+                return
+            deadline = time.monotonic() + self.STOP_WAIT
+            while self._writers:
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    break
+                self._write_cv.wait(left)
+        raise _Stop()
+
+    def _git_in(self, worktree, *args):
+        return subprocess.run(['git', '-C', worktree, *args],
+                              capture_output=True, text=True)
+
+    def _only_map_conflicts(self, worktree):
+        r = self._git_in(worktree, 'diff', '--name-only', '--diff-filter=U')
+        return r.returncode == 0 and r.stdout.split() == ['docs/MAP.md']
+
+    def _regen_map(self, worktree):
+        """None, or why not: regenerate docs/MAP.md on the merged tree
+        (batches no longer carry it, so parallel closes cannot conflict)
+        and commit it by name when it changed; `gen_map.py --check` passes
+        after the fast-forward.  Under the lock."""
+        # The worktree's own tool, the one the gate's check runs, so the two
+        # cannot disagree.
+        gen = os.path.join(worktree, 'tools', 'gen_map.py')
+        if not os.path.isfile(os.path.join(worktree, 'docs', 'MAP.md')):
+            return None        # no map to keep current
+        if subprocess.run([sys.executable, '-I', gen, '--repo', worktree,
+                           '--check'], capture_output=True,
+                          text=True).returncode == 0:
+            return None        # current already (the commit line aside)
+        r = subprocess.run([sys.executable, '-I', gen, '--repo', worktree],
+                           capture_output=True, text=True)
+        if r.returncode != 0:
+            return _one_line((r.stderr or '') + (r.stdout or '')) or \
+                'gen_map.py exit %s' % r.returncode
+        st = self._git_in(worktree, 'status', '--porcelain', '--', 'docs/MAP.md')
+        if st.returncode != 0:
+            return _one_line(st.stderr) or 'git status failed'
+        if not st.stdout.strip():
+            return None
+        r = self._git_in(worktree, 'add', '--', 'docs/MAP.md')
+        if r.returncode == 0:
+            r = self._git_in(
+                worktree, 'commit', '-q', '-m',
+                'map: regenerate docs/MAP.md on the merged tree\n\n%s\n'
+                % STATE_COMMIT_TRAILER, '--', 'docs/MAP.md')
+        if r.returncode != 0:
+            return _one_line((r.stderr or '') + (r.stdout or '')) or \
+                'exit %s' % r.returncode
+        return None
+
     def _commit_state(self, batch_id):
         """After a close, before the push (rulings R66, R71): commit the
         wave state, the regenerated scorecard and the probe list (ruling
         R73, when it exists), and only those, on the base, in the
-        worktree that has it checked out, staged by name.
-        Wave 1 only: the import queue's state is not committed (its
-        scorecard is never written, and its state file stays a working
-        file of the coordinator).  Skipped in a dry run, with nothing to
+        worktree that has it checked out, staged by name.  The import
+        list goes with either queue's state, and the import queue
+        commits its state file (no scorecard).  Skipped in a dry run, with nothing to
         commit, or when a file lies outside that worktree.  Under the
         lock.  Whatever goes wrong is logged, those paths are unstaged,
         one aoe line is sent, and the push still happens."""
-        if self.dry_run or self.kind != 'verdicts':
+        if self.dry_run:
             return
         rels = []
         try:
@@ -2143,7 +2436,14 @@ class Driver:
         if wt is None:
             return 'no worktree has %s' % self.base
         top = os.path.realpath(wt)
-        for path in (self.state_path, self.report_path, self.probe_path):
+        if self.kind == 'verdicts':
+            # disagreements.json too: add and diff --cached skip it unchanged
+            paths = [self.state_path, self.report_path, self.probe_path,
+                     self.disagreements_path]
+        else:    # the import queue: its state (never a scorecard)
+            paths = [self.state_path]
+        paths.append(self.import_list_path)   # ours-stub rows leave wave 1 for it
+        for path in paths:
             if not os.path.exists(path):
                 continue
             rel = os.path.relpath(os.path.realpath(path), top)
@@ -2168,7 +2468,8 @@ class Driver:
             return None
         sides = [v.get('side') for v in self.load_state(self.state_path)[
             'batches'][batch_id]['verdicts'].values()]
-        msg = 'wave-state: close %s (ours %d, fork %d, neither %d)\n\n%s\n' % (
+        msg = '%s: close %s (ours %d, fork %d, neither %d)\n\n%s\n' % (
+            'wave-state' if self.kind == 'verdicts' else 'import-state',
             batch_id, sides.count('ours'), sides.count('fork'),
             sides.count('neither'), STATE_COMMIT_TRAILER)
         r = git('commit', '-q', '-m', msg, '--', *rels)
@@ -2191,18 +2492,41 @@ class Driver:
             return None
         return tip
 
-    def _resume_preamble(self, batch_id, batch, why):
+    def _undo_wip(self, worktree, tip):
+        """`git reset --soft HEAD~1` of the driver's own WIP commit, made
+        in the batch worktree when that worktree's HEAD is `tip`: `tip`, or
+        None when nothing was undone."""
+        if not worktree or os.path.realpath(worktree) == os.path.realpath(
+                self.repo):
+            return None
+
+        def git(*args):
+            return subprocess.run(['git', '-C', worktree, *args],
+                                  capture_output=True, text=True)
+        if git('rev-parse', 'HEAD').stdout.strip() != tip:
+            return None
+        r = git('reset', '--soft', 'HEAD~1')
+        if r.returncode != 0:
+            self.log('WIP commit not undone: %s' % _one_line(
+                (r.stderr or '') + (r.stdout or '')))
+            return None
+        return tip
+
+    def _resume_preamble(self, batch_id, batch, why, worktree=None):
         key = _tool('wave')._addr_key
         recorded = sorted(batch.get('verdicts', {}).items(),
                           key=lambda kv: key(kv[0]))
         tip = self._wip_tip(batch_id, batch['branch'])
-        # Ruling R44: the one rewrite allowed, so an adopted fork body in
-        # the WIP commit can get its Imported-From: trailer.
+        # Ruling R44: the driver, not the worker, undoes its own WIP commit
+        # (a worker's `git reset` is a history exception), so an adopted fork
+        # body in it can get its Imported-From: trailer.
+        if tip is not None:
+            tip = self._undo_wip(worktree, tip)
         reset = '' if tip is None else (
-            ' The branch tip, %s, is the driver\'s own unpushed `%s` commit, '
-            'so you may `git reset --soft HEAD~1` once and commit that work '
-            'again with proper messages and its `Imported-From:` trailers; '
-            'rewrite nothing else.' % (tip[:8], WIP_MESSAGE))
+            ' The driver undid its own `%s` commit before resuming: the '
+            'previous work is staged in the worktree, no git command needed. '
+            'Commit it with proper messages and its `Imported-From:` '
+            'trailers.' % WIP_MESSAGE)
         return RESUME_PREAMBLE.format(
             id=batch_id, why=why, branch=batch['branch'], base=self.base,
             wip=WIP_MESSAGE, reset=reset, verdicts='\n'.join(
@@ -2290,7 +2614,8 @@ class Driver:
         if rc != 0:
             return self._exception(batch_id, 'brief', [brief.strip()])
         if resume:
-            brief = self._resume_preamble(batch_id, batch, resume) + brief
+            brief = self._resume_preamble(batch_id, batch, resume,
+                                          worktree) + brief
             self.log('%s: resumed (%s)' % (batch_id, resume))
         worker = (FakeWorker(dry_report(batch)) if self.dry_run
                   else self._worker_of(name))
@@ -2461,7 +2786,7 @@ class Driver:
         if failed:
             return self._exception(batch_id, 'record', failed)
         self._stage(batch_id, 'close')
-        with self._lock:
+        with self._lock, self._writing():
             commits = self._commits(batch['branch'])
             # Uncommitted paths were a mechanical-check problem already
             # (ruling R71); nothing is committed on the worker's behalf.
@@ -2472,6 +2797,13 @@ class Driver:
                 sync = self._sync_branch(batch['branch'], worktree)
                 if sync:
                     rc, text = 1, sync
+                    break
+                try:
+                    why = self._regen_map(worktree)
+                except Exception as e:
+                    why = 'raised %r' % (e,)
+                if why:
+                    rc, text = 1, 'regenerating docs/MAP.md failed: %s' % why
                     break
                 try:
                     rc, text = self.close_batch(
@@ -2488,7 +2820,7 @@ class Driver:
             return self._exception(batch_id, 'close', [
                 l.strip() for l in text.splitlines() if l.strip()])
         self.log(text.rstrip())
-        with self._lock:
+        with self._lock, self._writing():
             if self.kind == 'verdicts':
                 # The import queue has no verdicts: its state must not
                 # overwrite wave 1's scorecard.
@@ -2519,18 +2851,40 @@ class Driver:
 
     # -- the loop: cuts and retries -------------------------------------------
 
+    def _recompare(self):
+        """Once per run, when the wave-1 list is exhausted: look at Will's
+        tip.  Logs `recompare: N new rows at <tip7>`; returns N (0 when
+        the comparison failed, which only costs the exit the run had)."""
+        if self._recompared:
+            return 0
+        self._recompared = True
+        try:
+            with self._lock, self._writing():
+                rc, text = self.recompare(
+                    self.state_path, self.disagreements_path, repo=self.repo)
+        except Exception as e:
+            rc, text = 2, 'recompare raised %r\n' % (e,)
+        self.log(text.rstrip())
+        m = re.match(r'recompare: (\d+) new rows', text)
+        return int(m.group(1)) if rc == 0 and m else 0
+
     def _cut(self):
         """(batch_id, None) for a batch cut and triaged, else (None, exit)."""
         triage = (self.triage_path
                   if _tool('wave').QUEUES[self.queue]['triage'] else None)
         try:
-            with self._lock:
+            with self._lock, self._writing():
                 rc, text = self.next_batch(
                     self.disagreements_path, self.state_path, self.size,
                     self.category, triage_path=triage, repo=self.repo,
                     base=self.base, queue=self.queue)
         except Exception as e:
             rc, text = 1, 'next_batch raised %r\n' % (e,)
+        if (rc == 2 and text.startswith('nothing left:')
+                and self.queue == 'wave1' and not self.dry_run):
+            n = self._recompare()
+            if n:
+                return self._cut()
         self.log(text.rstrip())
         m = re.match(r'(\S+) assigned:', text)
         if m:
@@ -2586,8 +2940,8 @@ class Driver:
         claims = os.path.join(os.path.dirname(os.path.abspath(self.state_path)),
                               'claims.json')
         try:
-            with self._lock, wave._filelock().hold(claims + '.lock',
-                                                   'wave adopt'):
+            with self._lock, self._writing(), \
+                    wave._filelock().hold(claims + '.lock', 'wave adopt'):
                 wt, how = self.cut_worktree(self.repo, batch['branch'],
                                             self.base)
                 if wt is None:
@@ -2974,15 +3328,12 @@ class Driver:
                      'stops' % (holder, self.status_path))
             return 1
         self._stopping = False
+        self._stop_deferred = None
+        _STOPPED.clear()
         previous = {}
-
-        def stop(signum, _frame):
-            self._stopping = True
-            kill_live_groups()
-            raise _Stop()
         for sig in (signal.SIGTERM, signal.SIGINT):
             try:
-                previous[sig] = signal.signal(sig, stop)
+                previous[sig] = signal.signal(sig, self._on_stop)
             except ValueError:     # not the main thread: no handler
                 pass
         try:
@@ -2998,6 +3349,7 @@ class Driver:
         finally:
             for sig, handler in previous.items():
                 signal.signal(sig, handler)
+            _STOPPED.clear()
             try:
                 os.ftruncate(fd, 0)
             except OSError:
@@ -3034,6 +3386,8 @@ class Driver:
         """Run fn on its own thread (the default), or as the injected
         runner says; the synchronous runner `lambda fn: fn()` keeps a
         test deterministic."""
+        if self._stopping:
+            raise _Stop()
         if self._runner is not None:
             self._runner(fn)
         elif sum(p.workers for p in self.pools) <= 1:
@@ -3094,6 +3448,8 @@ class Driver:
 
         def launch_next():
             nonlocal exhausted, cut_blocked, failure, capped
+            if self._stopping:
+                return False
             if self._halt:
                 return False
             if self.max_batches is not None and self._began >= self.max_batches:

@@ -1,7 +1,7 @@
 # Wave-1 batch {{id}}: decide {{size}} disagreement rows
 
 You are verifying {{size}} functions where our decompilation and WillScarlettOhara's
-(iwd2-re@e8dd16a) disagree about something material (category `both_changed_differ`).
+(iwd2-re@{{fork_base7}}) disagree about something material (category `both_changed_differ`).
 For each row you decide which body is right against the vanilla exe, using the
 oracle probes or a replay checkpoint. Your verdict is one of:
 
@@ -27,6 +27,8 @@ Context bundles (one per row you must decide; read these before the source):
 
 {{bundle}}
 
+Each bundle carries the function's decompile and its callers' decompiles; objdump confirms a reading, it does not replace one.
+
 ## The rules
 
 1. **One deciding case per function.** For every row where you claim fork or
@@ -38,12 +40,12 @@ Context bundles (one per row you must decide; read these before the source):
    no `0x`) for every function you touch, front matter `address:` / `name:` /
    `kind:` (`kind: oracle` or `kind: replay`), and exactly one line in the body
    saying the outcome:
-   - a disagreement: `disagreed with WSO at e8dd16a: <what differed>; case <id> decides`
-   - an agreement on closer reading: `corroborated by WSO at e8dd16a` (and leave
+   - a disagreement: `disagreed with WSO at {{fork_base7}}: <what differed>; case <id> decides`
+   - an agreement on closer reading: `corroborated by WSO at {{fork_base7}}` (and leave
      the evidence kind as it was)
 3. **Bundles first.** Read the bundle for a function before its source; do not read a whole `src/*.cpp` the bundle covers.
 4. **Adopted fork bodies carry the trailer.** When a row is decided for the
-   fork, the copied body keeps its `Imported-From: WillScarlettOhara/iwd2-re@e8dd16a`
+   fork, the copied body keeps its `Imported-From: WillScarlettOhara/iwd2-re@{{fork_base7}}`
    trailer naming the function. Bodies we write ourselves get no trailer.
 5. **Commit as you go.** WIP commits are fine. Wave-1 branches are expected
    to show parity failures elsewhere in the tree, which is by design, but
@@ -66,9 +68,8 @@ Context bundles (one per row you must decide; read these before the source):
    (`wso/main` or any `wso/` ref), only at the pinned sha `{{fork_base}}`.
 10. **Engine tests run under a memory cap.** `ctest` and `iwd2r_tests` run
     only as `systemd-run --user --scope -q -p MemoryMax=8G -p MemorySwapMax=0 -- <command>`.
-11. **Regenerate the map.** When you add or rename functions, run
-    `python3 -I tools/gen_map.py` and commit `docs/MAP.md`; the gate runs
-    `gen_map.py --check`.
+11. **Do not edit `docs/MAP.md`.** The driver regenerates it at close on the
+    merged tree.
 12. **Nothing on the desktop.** Never use `--host` with `oracle.py`, and never
     launch the game on the desktop. Never set IWD2R_DESKTOP_OK; only a
     person at the PC does.
@@ -76,6 +77,17 @@ Context bundles (one per row you must decide; read these before the source):
     replay or trace case you can run decides it, keep our body for that row,
     write no verdict line for it, and list it under `## Undecided`. Never
     write `ours` for a row your reading says is fork or neither.
+14. **Never rewrite history.**
+    Refused: `git reset`, `rebase`, `revert`, `restore`, `clean`, any `stash`,
+    `commit --amend`, `filter-repo`, `push`, `branch -d/-D/-f/-M/-C`,
+    `checkout -B`, `switch -C`, `checkout -- <path>`, `checkout <sha> <path>`
+    and a bare `git checkout <path>` of a file. Allowed: `add`, `commit`,
+    `status`, `diff`, `log`, `show`, `ls-tree`, `merge-base`, `rev-parse`,
+    `blame`, `checkout -b`, `checkout <branch>`, `switch -c`. To undo a change
+    to a file, restore the base's copy with `git show <base>:<path> > <path>`
+    (`git rm <path>` when the base lacks it) and commit; workers only add and
+    commit. The driver stops a batch whose
+    transcript shows one.
 
 ## Report back
 

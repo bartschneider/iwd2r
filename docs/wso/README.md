@@ -111,9 +111,15 @@ and nobody answers "what does this call" by reading a raw decompile.
   `(file, line, signature)` for `0xADDR`, `Class::`, `Class::Method` or a
   bare name, resolved from the `// 0xADDR` markers. No grep chains.
 - [tools/assemble_context.py](../../tools/assemble_context.py) —
-  `bundle(address)` → digest, decompile, callees' signatures, resolved IDS
-  constants and resrefs, in that order, with a token estimate on the first
-  line; when the function belongs to a class and the BG2 index exists, the
+  `bundle(address)` → digest, decompile, the first 40 lines of each
+  caller's decompile, callees' signatures, resolved IDS constants and
+  resrefs, in that order, with a token estimate on the first line. At most
+  12 callers are shown (`CALLER_CAP`); callers without a decompile are
+  skipped. The
+  decompiles are `$IWD2R_HOME/ghidra-exports/decompile/<ADDR>.c`, written
+  once per function by `tools/ghidra/export_decompiles.py` (chunked,
+  resumable, read-only Ghidra; a missing file reads `decompile: not
+  exported`); when the function belongs to a class and the BG2 index exists, the
   class's BG2 layout is appended as a hypothesis to check against IWD2
   (the offsets are BG2's, never quoted as ours).
 - [tools/token_audit.py](../../tools/token_audit.py) —
@@ -158,6 +164,28 @@ worktree keeps it). Then it applies [triage.json](triage.json):
 
 It reports `triage: n auto, n import, n ambiguous`. Do not
 `git worktree add` after `next`: the worktree already exists.
+
+### Will's tip: `recompare`
+
+Will pushes daily, and the rows were compared at one sha. `wave.py recompare
+[--tip SHA] [--no-fetch]` fetches `wso`, resolves the tip (default `wso/main`),
+runs `tools/xrec.py 4fa36bcd <tip> first` and appends to `disagreements.json`
+the `both_changed_differ` rows that are in no batch and have no verdict (an
+older undecided row for the same address is replaced by the tip's). The state's
+`fork_base` becomes the tip. It prints `recompare: N new rows at <tip7> (M
+already queued, K decided)` and exits 0, or 2 when the tip does not resolve
+(nothing is written). The fork is only read, through `git show` and `git
+ls-tree`. `--state`, `--disagreements` and `--repo` point it at copies, to look
+without touching the live files.
+
+Each batch carries the `fork_base` its rows were compared at, recorded at cut
+(old batches fall back to the state's). `brief`, the triage evidence line and
+`close`'s check read the batch's pin: a batch cut before a recompare is briefed
+and closed at its own sha, and its evidence must say `disagreed with WSO at
+<sha>` or `corroborated by WSO at <sha>` with that sha (an abbreviation of at
+least seven digits is enough). `wave.py run` calls `recompare` once when the
+wave-1 queue is exhausted, logs `recompare: N new rows at <tip7>`, and cuts
+again when N is not zero.
 `close` refuses — listing every reason — unless each row has a verdict,
 the batch's worktree has no uncommitted paths, every touched function's
 `docs/evidence/<ADDRESS>.md` says `disagreed with WSO` or
@@ -212,7 +240,13 @@ A rule that is not a check, a flag or a test is not a rule.
 a fork or neither verdict decided by a dump reading unless
 `--allow-dump RULING --ledger PATH` names a `Ruling <id>` line of that file;
 the driver rejects a worker whose transcript shows a git command naming a
-`wso/` ref, a whole-file read of a covered source file or a launch outside
+`wso/` ref, a whole-file read of a covered source file, a history rewrite
+(refused: `reset`, `rebase`, `revert`, `restore`, `clean`, any `stash`,
+`commit --amend`, `filter-repo`, `push`, `branch -d/-D/-f/-M/-C`,
+`checkout -B`, `switch -C`, `checkout -- <path>`, `checkout <sha> <path>`
+and a bare `git checkout <path>` of a file; allowed: `add`, `commit`,
+`status`, `diff`, `log`, `show`, `ls-tree`, `merge-base`, `rev-parse`,
+`blame`, `checkout -b`, `checkout <branch>`, `switch -c`) or a launch outside
 `tools/play.py` and `tools/gltrace.py`; those two launchers allow two
 launches per attempt until `--new-attempt "<why>"`; and every merge into
 `first` pulls first (`git pull --ff-only`) and fast-forwards.
@@ -264,9 +298,32 @@ launches per attempt until `--new-attempt "<why>"`; and every merge into
 - After every close the driver commits `docs/wso/wave-state.json` and the
   regenerated `docs/wso/xrec-report.md` on `first` (staged by name, message
   `wave-state: close <id> (ours N, fork N, neither N)`), before the push.
-  Also when it pushes a closed batch again. Wave 1 only: the import queue's
-  state is not committed. If the commit fails, the two paths are unstaged,
-  one aoe line goes out, and the push still happens.
+  Also when it pushes a closed batch again. The same commit carries the
+  probe list (wave 1), `docs/wso/import-list.json` (where ours-stub rows
+  leave wave 1), and, on `--queue import`, `docs/wso/import-state.json`
+  (message `import-state: close <id> ...`; no scorecard). If the commit
+  fails, those paths are unstaged, one aoe line goes out, and the push still
+  happens.
+- Several workers per pool (`--pool glm:2`): `docs/MAP.md` is not the
+  batch's. The driver regenerates it once at each close, on the branch after
+  the base is merged in, and commits it by name (`map: regenerate ...`), so
+  `gen_map.py --check` passes after the fast-forward and two parallel closes
+  never conflict on it (a worker's own edit of it loses to the base's copy at
+  the sync). A stop (SIGTERM, SIGINT) starts no new worker (a worker forked
+  just as it lands is killed on joining), and takes only re-entrant locks in
+  the handler. The signal reaches only the main thread: its own writes (the
+  cut, an adoption, the recompare) finish before the stop is raised, and the
+  stop waits up to 30 s for a git write in progress on another thread. The
+  run still joins a close in flight without a limit (the gate included, about
+  ten minutes), and a Ctrl-C in the terminal also reaches the git and gate
+  children directly (same process group); the bounded wait is for a SIGTERM
+  sent to the driver's pid.
+- Two `claude-glm` launches at once race on the wrapper's re-link of
+  `~/.claude` into `~/.claude-glm` (and on its `settings.json.tmp`). The
+  wrapper lives outside the repo, so the fix is a patch the coordinator
+  applies once: `patch ~/.local/bin/claude-glm < tools/claude-glm.lock.patch`
+  (an `flock` on `~/.claude-glm/.relink.lock` around that section; needs
+  util-linux `flock`). Apply it before running `--pool glm:2`.
 - Workers: every `AOE_*` variable is removed from a worker's environment
   (for every wrapper), and the driver's own `aoe send` runs without
   `CLAUDECODE`, `CLAUDE_CODE_*`, `CLAUDE_PID` and `CLAUDE_EFFORT`. A `claude`
@@ -287,7 +344,8 @@ launches per attempt until `--new-attempt "<why>"`; and every merge into
   commits them for you), a path changed against `first` outside `src/`,
   `compat/`, `docs/evidence/`, `docs/MAP.md`, `oracle/cases/` and
   `oracle/CMakeLists.txt`, a `fork` verdict whose evidence has no `kind:`
-  line, and a stale `docs/MAP.md` (`tools/gen_map.py --check`). The
+  line. (A stale `docs/MAP.md` is no longer checked here: the close
+  regenerates it.) The
   `corroborated by WSO` phrase is required only for verdicts the driver
   recorded from an oracle probe pass.
 - Retrying a cleared exception (`--clear`): at the `close`, `record` or
@@ -440,10 +498,11 @@ closed without writing the ledger entry gets the entry and the push. Then
 each pool's parked batch (on that pool), and after them a batch left
 in `current` or `running` (the process died mid-batch), run again, each with its
 brief re-rendered under a `Resume:` preamble that lists the verdicts
-already recorded. The preamble forbids rewriting the branch, except that
-when its tip is the driver's own unpushed WIP commit the worker may
-`git reset --soft HEAD~1` once, to commit that work again with proper
-messages and `Imported-From:` trailers. `parked` clears when that batch
+already recorded. The preamble forbids rewriting the branch. When its tip is
+the driver's own unpushed WIP commit, the driver itself soft-resets it
+before resuming, so the previous work is staged in the worktree and the
+worker commits it again with proper messages and `Imported-From:` trailers
+without any git command. `parked` clears when that batch
 ends any other way. A batch whose worktree is gone (a directory removed
 by hand stays listed until `git worktree prune`) becomes its `worktree`
 exception, which also ends its park, and the run goes on.
