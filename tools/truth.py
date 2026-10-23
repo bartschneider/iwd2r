@@ -862,7 +862,7 @@ def frida_verdicts(traces, rows, skipped=None):
             verdicts[key] = ('skipped', skipped[key])
             continue
         tag = hook_name(key)
-        different, equal, partial, crashed = [], [], [], []
+        different, equal, partial, crashed, unmeasured = [], [], [], [], []
         for scenario, value in traces.items():
             t = _as_scenario(value)
             if t['failed']:
@@ -885,8 +885,12 @@ def frida_verdicts(traces, rows, skipped=None):
             code = trace_diff.compare(orig, ours)
             # The hooks cap the events they log, so equal events do not show
             # equal frequency: the sidecars' totals must match too.
-            totals = t.get('hits') or {}
-            if code == 0 and totals.get('orig') is not None and totals.get('ours') is not None \
+            totals = t.get('hits')
+            if code == 0 and totals is not None and not (totals.get('orig') and totals.get('ours')):
+                # A side without HITS lines is an infrastructure artefact,
+                # not a difference, and never proof of equality.
+                unmeasured.append(scenario)
+            elif code == 0 and totals is not None \
                     and totals['orig'].get(tag, 0) != totals['ours'].get(tag, 0):
                 different.append('%s: hit totals differ: original %d, ours %d' % (
                     scenario, totals['orig'].get(tag, 0), totals['ours'].get(tag, 0)))
@@ -898,6 +902,8 @@ def frida_verdicts(traces, rows, skipped=None):
             verdicts[key] = ('different', 'differs in ' + '; '.join(different + crashed))
         elif partial:
             verdicts[key] = ('scenario failed', '; '.join(partial))
+        elif unmeasured:
+            verdicts[key] = ('not measured', 'no HITS totals in %s' % ', '.join(unmeasured))
         elif equal:
             verdicts[key] = ('equal', EQUAL_PREFIX + ', '.join(equal))
         elif failed:

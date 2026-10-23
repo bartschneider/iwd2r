@@ -316,12 +316,14 @@ launches per attempt until `--new-attempt "<why>"`; and every merge into
   frequency). The driver then rewrites that row's evidence front matter to
   `kind: trace` with `trace_source: frida <batch>-<scenario> orig:<sha256>
   ours:<sha256> compare=0` (dropping `exemption:`) and commits it as
-  `frida: trace evidence for <N> rows of <batch>`. A row measured
-  different is a finding for the fix round. A row no scenario exercised
-  cannot close: the worker's fix round reverts its body to the merge base,
+  `frida: trace evidence for <N> rows of <batch>`. The phase
+  never lowers evidence: a row already at `replay` or `oracle` keeps its
+  file in every outcome. A row measured different, or exercised by no
+  scenario, cannot close (the phase runs once per batch): the worker's fix
+  round reverts its body to the merge base,
   deletes its evidence file and appends `{address, name, file, batch,
   needs}` to `docs/wso/import-parked.json` (`needs` names the scenarios
-  tried; a batch may change that file). `close --kind import` accepts a
+  tried, or `frida different: <detail>`; a batch may change that file). `close --kind import` accepts a
   batch when every row is `trace` or better, or is in the parked list with
   its body reverted and its evidence gone.
   The two queues' assigned batches all hold files, so they stay

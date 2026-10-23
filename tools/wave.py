@@ -242,8 +242,14 @@ def _parked_rows(worktree):
     try:
         with open(path, encoding='utf-8') as f:
             data = json.load(f)
-        return {_addr_key(e['address']): e for e in data}, None
-    except (OSError, ValueError, TypeError, KeyError) as e:
+        out = {}
+        for e in data:
+            if not isinstance(e.get('address'), str):
+                return {}, (f'{IMPORT_PARKED_REL}: an entry has no string address ({e!r}); '
+                            f'it is a JSON list of entries with an address')
+            out[_addr_key(e['address'].lower())] = e
+        return out, None
+    except (OSError, ValueError, TypeError, KeyError, AttributeError) as e:
         return {}, f'{IMPORT_PARKED_REL} is unreadable ({e!r}); it is a JSON list of entries with an address'
 
 

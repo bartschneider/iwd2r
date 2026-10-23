@@ -2005,19 +2005,26 @@ class Driver:
             status, detail = got.get(k, ('skipped', 'no result'))
             self.log('%s: frida %s %s (%s)' % (batch_id, r['address'], status, detail))
             if importing:
+                # The phase never lowers evidence: a row already at replay
+                # or oracle keeps its file in every outcome.
+                kept = self._evidence_kind(worktree, r['address']) in wave.IMPORT_KINDS
                 if status == 'equal':
-                    err = self._trace_evidence(batch_id, worktree, r, detail, traces)
-                    if err:
-                        findings.append(err)
-                    else:
-                        written.append(r['address'])
+                    if not kept:
+                        err = self._trace_evidence(batch_id, worktree, r, detail, traces)
+                        if err:
+                            findings.append(err)
+                        else:
+                            written.append(r['address'])
                 elif status == 'different':
-                    findings.append('%s: the Frida trace diff shows the imported body different '
-                                    'from the original (%s); fix the body, or revert the import '
-                                    'and say which' % (r['address'], detail))
-                elif status == 'not-exercised':
+                    findings.append(
+                        '%s: the Frida trace diff shows the imported body different from the '
+                        'original (%s); the phase does not run again in this batch, so revert '
+                        'its body to the merge base, delete docs/evidence/%s.md and append it '
+                        'to docs/wso/import-parked.json with needs "frida different: %s"'
+                        % (r['address'], detail, k.upper(), detail))
+                elif status == 'not-exercised' and not kept:
                     findings.append(UNMEASURED % (r['address'], k.upper()))
-                elif status == 'skipped':
+                elif status == 'skipped' and not kept:
                     findings.append('%s: no Frida hook (%s); revert its body to the merge base, '
                                     'delete docs/evidence/%s.md and append it to '
                                     'docs/wso/import-parked.json with that reason as `needs`'
@@ -2035,6 +2042,17 @@ class Driver:
             self._commit_trace_evidence(batch_id, worktree, written)
         return findings
 
+    def _evidence_kind(self, worktree, address):
+        """The `kind:` of a row's evidence file in the worktree, or None."""
+        wave = _tool('wave')
+        try:
+            with open(os.path.join(worktree, wave._evidence_rel(address)),
+                      encoding='utf-8') as f:
+                m = wave.KIND_RE.search(f.read())
+        except OSError:
+            return None
+        return m.group(1) if m else None
+
     def _trace_evidence(self, batch_id, worktree, row, detail, traces):
         """Rewrite one equal import row's evidence to kind: trace; None, or
         the finding that says why it could not be."""
@@ -2045,14 +2063,17 @@ class Driver:
         t = t if isinstance(t, dict) else {}
         orig, ours = t.get('orig_path'), t.get('ours_path')
         if not (orig and ours and os.path.isfile(orig) and os.path.isfile(ours)):
-            return '%s: measured equal in %s but its trace files are missing; rerun' % (
-                row['address'], scenario)
+            return '%s: measured equal in %s but its trace files are missing; the phase does not run again, so write its evidence as kind trace (a legal trace_source) or better yourself, or revert its body to the merge base, delete docs/evidence/%s.md and park it in docs/wso/import-parked.json' % (
+                row['address'], scenario, wave._addr_key(row['address']).upper())
         path = os.path.join(worktree, wave._evidence_rel(row['address']))
         try:
             _write_trace_evidence(path, '%s-%s' % (batch_id, scenario), orig, ours)
         except (OSError, ValueError) as e:
-            return '%s: its evidence could not be rewritten to kind: trace (%s); fix the front matter' % (
-                row['address'], e)
+            return ('%s: its evidence could not be rewritten to kind: trace (%s); the phase does '
+                    'not run again, so write the evidence as kind trace (a legal trace_source) or '
+                    'better yourself, or revert its body to the merge base, delete '
+                    'docs/evidence/%s.md and park it in docs/wso/import-parked.json' % (
+                        row['address'], e, wave._addr_key(row['address']).upper()))
         return None
 
     def _commit_trace_evidence(self, batch_id, worktree, addresses):

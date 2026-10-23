@@ -9957,10 +9957,10 @@ class DriverTest(unittest.TestCase):
         decomp = '\n## Decompiled (Ghidra)\n\n```c\nint %s(int a, int b)\n\n{\n  return g_x;\n}\n```\n'
         # 401000 equal (with an exemption to drop), 402000 different, 403000 never exercised
         with open(os.path.join(self.wt, 'docs', 'evidence', '401000.md'), 'w') as f:
-            f.write('---\naddress: 0x401000\nname: Rules::Render\nkind: oracle\n'
+            f.write('---\naddress: 0x401000\nname: Rules::Render\nkind: read-only\n'
                     'exemption: "thin"\n---\n' + decomp % 'Render')
         with open(os.path.join(self.wt, 'docs', 'evidence', '403000.md'), 'w') as f:
-            f.write('---\naddress: 0x403000\nname: Rules::Tick\nkind: replay\n---\n' + decomp % 'Tick')
+            f.write('---\naddress: 0x403000\nname: Rules::Tick\nkind: read-only\n---\n' + decomp % 'Tick')
         self.git('commit', '-qam', 'import evidence', cwd=self.wt)
         rows = [{'address': '0x401000', 'name': 'Rules::Render'},
                 {'address': '0x402000', 'name': 'IcewindMisc::Roll'},
@@ -10010,13 +10010,49 @@ class DriverTest(unittest.TestCase):
         # different: a finding with the diff summary; the file is untouched
         self.assertTrue(any(f.startswith('0x402000:') and 'different' in f and 'world_entry' in f
                             for f in findings), findings)
-        self.assertIn('kind: oracle', open(os.path.join(self.wt, 'docs', 'evidence', '402000.md')).read())
         # never exercised: the exact message
         self.assertIn('0x403000: exercised by no scenario (world_entry, first_fight, walk_and_talk); '
                       'revert its body to the merge base, delete docs/evidence/403000.md and '
                       'append it to docs/wso/import-parked.json', findings)
-        self.assertIn('kind: replay', open(os.path.join(self.wt, 'docs', 'evidence', '403000.md')).read())
+        self.assertIn('kind: read-only', open(os.path.join(self.wt, 'docs', 'evidence', '403000.md')).read())
         self.assertEqual(len(findings), 2)
+
+    def test_driver_frida_phase_never_lowers_evidence_and_parks_different_rows(self):
+        trace = TruthTest._trace
+        d, batch = self._import_phase_driver()
+        d.frida_run = lambda b, table, scenarios: {sc: (
+            trace(('fn_401000', 7, 3), ('fn_402000', 7, 3)),
+            trace(('fn_401000', 7, 3), ('fn_402000', 7, 4))) for sc in scenarios}
+        # 401000 oracle and equal, 402000 replay and different, 403000 replay and unexercised
+        for stem, kind in (('401000', 'oracle'), ('402000', 'replay'), ('403000', 'replay')):
+            path = os.path.join(self.wt, 'docs', 'evidence', stem + '.md')
+            with open(path) as f:
+                text = f.read()
+            text = re.sub(r'^kind: \S+$', 'kind: ' + kind, text, count=1, flags=re.M)
+            with open(path, 'w') as f:
+                f.write(text)
+        self.git('commit', '-qam', 'kinds', cwd=self.wt)
+        before = self.git('rev-parse', 'HEAD', cwd=self.wt).stdout.strip()
+        findings = d._frida_phase('b011', batch, self.wt, {})
+        self.assertEqual(self.git('rev-parse', 'HEAD', cwd=self.wt).stdout.strip(), before)
+        self.assertIn('kind: oracle', open(os.path.join(self.wt, 'docs', 'evidence', '401000.md')).read())
+        self.assertEqual(d._frida_got['401000'][0], 'equal')
+        # the different replay row is still a finding; the unexercised replay row is not
+        self.assertEqual([f[:9] for f in findings], ['0x402000:'])
+
+    def test_driver_frida_phase_different_read_only_row_is_parked(self):
+        trace = TruthTest._trace
+        d, batch = self._import_phase_driver()
+        d.frida_run = lambda b, table, scenarios: {sc: (
+            trace(('fn_401000', 7, 3), ('fn_402000', 7, 3)),
+            trace(('fn_401000', 7, 3), ('fn_402000', 7, 4))) for sc in scenarios}
+        with open(os.path.join(self.wt, 'docs', 'evidence', '402000.md'), 'a') as f:
+            f.write('kind: read-only\n')
+        findings = d._frida_phase('b011', batch, self.wt, {})
+        text = [f for f in findings if f.startswith('0x402000:')][0]
+        for needle in ('revert its body', 'import-parked.json', 'frida different', 'world_entry'):
+            self.assertIn(needle, text)
+        self.assertNotIn('fix the body', text)
 
     def test_driver_frida_phase_leaves_a_wave_one_batch_as_before_and_honours_no_frida(self):
         d, batch = self._import_phase_driver()
@@ -10033,7 +10069,7 @@ class DriverTest(unittest.TestCase):
         want = driver._tool('truth').trace_source_line('i001-world_entry', orig, ours)
         body = '\n# Notes\r\n\nexemption: not front matter\nkind: oracle\n  trailing  \n'
         for head, expect_head in (
-                ('---\naddress: 0x401000\nname: F\nkind: oracle\nexemption: "thin"\n'
+                ('---\naddress: 0x401000\nname: F\nkind: read-only\nexemption: "thin"\n'
                  'oracle_case: x\n---\n',
                  ['---', 'address: 0x401000', 'name: F', 'kind: trace',
                   'trace_source: ' + want, 'oracle_case: x', '---']),
@@ -10053,7 +10089,7 @@ class DriverTest(unittest.TestCase):
         # CRLF front matter keeps its endings
         path = os.path.join(d, 'C.md')
         with open(path, 'w', newline='') as f:
-            f.write('---\r\nkind: oracle\r\nexemption: z\r\n---\r\nbody\r\n')
+            f.write('---\r\nkind: read-only\r\nexemption: z\r\n---\r\nbody\r\n')
         driver._write_trace_evidence(path, 'p', orig, ours)
         with open(path, newline='') as f:
             self.assertEqual(f.read(), '---\r\nkind: trace\r\ntrace_source: %s\r\n---\r\nbody\r\n'
@@ -13322,9 +13358,15 @@ class TruthTest(unittest.TestCase):
         self.assertIn('hit totals differ: original 283, ours 310', v['0x5845D0'][1])
         self.assertIn('walk_and_talk', v['0x5845D0'][1])
         self.assertEqual(truth.frida_verdicts({'w': scenario(283, 283)}, rows)['0x5845D0'][0], 'equal')
-        # no totals (a side without a status file): the events decide
-        bare = dict(scenario(1, 2), hits={'orig': None, 'ours': None})
+        # a bare pair carries no status data at all: the events decide
+        bare = {'orig': t, 'ours': t, 'failed': None}
         self.assertEqual(truth.frida_verdicts({'w': bare}, rows)['0x5845D0'][0], 'equal')
+        # status files without HITS lines (both sides, or one) never read equal
+        for hits in ({'orig': None, 'ours': None}, {'orig': {}, 'ours': {}},
+                     {'orig': {'fn_5845D0': 4}, 'ours': {}}, {'orig': None, 'ours': {'fn_5845D0': 4}}):
+            v = truth.frida_verdicts({'w': dict(bare, hits=hits)}, rows)['0x5845D0']
+            self.assertEqual(v[0], 'not measured', hits)
+            self.assertIn('no HITS totals', v[1])
 
     def test_trace_source_hashes_the_files_and_check_evidence_accepts_it(self):
         import tempfile
@@ -13846,6 +13888,23 @@ class WaveCloseRulesTest(unittest.TestCase):
         self.assertIn('0x643CD0: listed in docs/wso/import-parked.json but its body is still '
                       'changed against first', out)
         self.assertEqual(self.batches()['b001']['status'], 'assigned')
+
+    def test_import_close_reads_parked_addresses_loosely_and_refuses_bad_ones(self):
+        self._import_ready(parked=[])
+        path = os.path.join(self.wt, 'docs', 'wso', 'import-parked.json')
+        for bad in ([{'address': 5}], [{'name': 'x'}], ['0x643CD0']):
+            with open(path, 'w') as f:
+                json.dump(bad, f)
+            self.commit_worktree('bad parked')
+            rc, out = self.close(kind='import')
+            self.assertEqual(rc, 1, out)
+            self.assertIn('import-parked.json', out)
+            self.assertNotIn('Traceback', out)
+        with open(path, 'w') as f:
+            json.dump([dict(self.PARKED[0], address='0X643cd0')], f)
+        self.commit_worktree('loose address')
+        rc, out = self.close(kind='import')
+        self.assertEqual(rc, 0, out)
 
     def test_import_close_refuses_parked_row_whose_evidence_remains(self):
         self._import_ready(parked=self.PARKED, evidence=('0x643CD0',))

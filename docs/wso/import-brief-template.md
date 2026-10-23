@@ -53,8 +53,10 @@ Context bundles (one per row; read these before the source):
    phase over every row (`world_entry`, `first_fight`, `walk_and_talk`):
    a row that behaves like the original gets its evidence rewritten to
    `kind: trace` by the driver. You do not write the `frida` citation.
-   A row the phase reports as different needs its body fixed, or its import
-   reverted (say which in your report).
+   A row already at `kind: replay` or `oracle` keeps its evidence whatever
+   the phase measures. A row the phase reports as different is handled like
+   an unmeasured one (the phase runs once per batch): revert and park it,
+   with `needs` of `frida different: <the diff detail>`.
    **Unmeasured rows.** A row the phase reports as "exercised by no
    scenario" cannot close. In your fix round revert its body to the merge
    base (`git diff first...HEAD` shows what changed), delete
