@@ -11499,6 +11499,111 @@ class DriverTest(unittest.TestCase):
             self.assertEqual(len(probs), 1, cmd)
             self.assertIn('launch outside a house runner', probs[0])
 
+    def test_transcript_history_refuses_rewrites(self):
+        forbidden = (
+            'git checkout -- src/A.cpp', 'git checkout HEAD src/A.cpp',
+            'git checkout abc1234 -- src/A.cpp', 'git checkout .',
+            'git checkout -f main', 'git restore src/A.cpp',
+            'git restore --staged src/A.cpp', 'git reset', 'git reset --hard HEAD~1',
+            'git reset --soft abc1234', 'git rebase first', 'git rebase -i HEAD~3',
+            'git revert abc1234', 'git clean -fd', 'git stash', 'git stash pop',
+            'git commit --amend', 'git commit --amend -m x',
+            'git commit -a --amend --no-edit', 'git filter-repo --path src',
+            'git push', 'git push origin HEAD', 'git branch -D old',
+            'git branch -d old', 'git branch --delete old', 'git update-ref -d refs/x',
+            'git reflog expire --expire=now --all', 'git gc --prune=now',
+            'git -C /w reset --hard', 'git -c core.x=1 revert abc1234',
+            'git checkout src/A.cpp', 'git checkout ./src/A.cpp',
+            'git checkout ../x/A.cpp', "git checkout 'src/*.cpp'",
+            'git checkout src', 'git checkout src/B.cpp', 'git checkout docs/MAP.md',
+            'git checkout compat/x.h', 'git checkout oracle/cases/a',
+            'git checkout x?.c',
+            'git branch -f p3/x first', 'git branch -M p3/x', 'git branch -fq p3/x',
+            'git branch -Mf p3/x', 'git checkout -B p3/x first',
+            'git switch -C p3/x first', 'git switch --force-create p3/x',
+        )
+        for cmd in forbidden:
+            for form in (cmd, 'git add -A && ' + cmd, 'git status; ' + cmd,
+                         'git log | head -3 && ' + cmd):
+                probs = self._bash(form)
+                self.assertEqual(len(probs), 1, form)
+                self.assertIn('history rewrite in a worker', probs[0])
+                self.assertIn('workers only add and commit', probs[0])
+        fs = driver.transcript_findings(self._tcalls(
+            ('Bash', {'command': 'git reset --hard'})), ['src/A.cpp'])
+        self.assertEqual([k for k, _t, _f in fs], ['history'])
+
+    def test_transcript_splitter_sees_commands_after_comments_and_heredocs(self):
+        cases = (
+            ("git status  # check the worker's state\ngit reset --hard HEAD~1",
+             'history rewrite'),
+            ("# it's time\nWindowsSandbox.exe run.wsb", 'launch outside'),
+            ("# what's here\ncat src/A.cpp", 'cat of src/A.cpp'),
+            ("# what's here\ngit show wso/main:src/A.cpp", 'wso/ ref'),
+            ("cat > docs/evidence/x.md <<'EOF'\nThe binary's body differs\nEOF\n"
+             "git reset --hard", 'history rewrite'),
+            ("cat > docs/evidence/x.md <<'EOF'\nThe binary's body differs\nEOF\n"
+             "WindowsSandbox.exe run.wsb", 'launch outside'),
+            ("git commit -m 'it is' && git reset --hard", 'history rewrite'),
+            ("echo 'unclosed; git reset --hard", 'history rewrite'),
+            ('git branch -C a b', 'history rewrite'),
+            ("cat > n.md <<\\EOF\nbody\nEOF\ngit reset --hard", 'history rewrite'),
+            ("cat > n.md <<\\EOF\nbody\nEOF\nWindowsSandbox.exe run.wsb",
+             'launch outside'),
+            ("echo $((1<<4))\ngit reset --hard", 'history rewrite'),
+            ("printf '%x\\n' $((0x400000 + (1<<4)))\nWindowsSandbox.exe run.wsb",
+             'launch outside'),
+            # a heredoc fed to a shell is commands, not data
+            ("bash <<'EOF'\nWindowsSandbox.exe run.wsb\nEOF", 'launch outside'),
+            ("sh -s <<EOF\ncd /w\ngit push\nEOF", 'history rewrite'),
+            ("bash <<'EOF'\ncat src/A.cpp\nEOF", 'cat of src/A.cpp'),
+            ("env bash <<'EOF'\ngit reset --hard\nEOF", 'history rewrite'),
+            ("bash <<'A'; cat > n.md <<'B'\ngit reset --hard\nA\ndata\nB",
+             'history rewrite'),
+            ("bash <<'EOF'\nunclosed 'quote\ngit push\nEOF", 'history rewrite'),
+            # ... wherever the shell sits in the heredoc's pipeline
+            ("cat <<'EOF' | bash\nWindowsSandbox.exe run.wsb\nEOF", 'launch outside'),
+            ("cat <<'EOF' | sh -s\ncat src/A.cpp\nEOF", 'cat of src/A.cpp'),
+            ("cat <<'EOF' | bash\ngit reset --hard\nEOF", 'history rewrite'),
+            ("<<'EOF' bash\ngit push\nEOF", 'history rewrite'),
+            ("cat <<'A' | bash; cat > n.md <<'B'\ngit push\nA\ndata\nB",
+             'history rewrite'),
+            ("cat <<'EOF' |\ngit push\nEOF\nbash", 'history rewrite'),
+        )
+        for cmd, why in cases:
+            probs = self._bash(cmd)
+            self.assertEqual(len(probs), 1, cmd)
+            self.assertIn(why, probs[0], cmd)
+        self.assertEqual(self._bash(
+            "git commit -F - <<'EOF'\nfix the thing\ngit push later\nEOF"), [])
+        self.assertEqual(self._bash(
+            "cat <<EOF > docs/evidence/n.md\nit's git reset --hard\nEOF\ngit status"), [])
+        self.assertEqual(self._bash("git status # git push is bad\ngit log"), [])
+        self.assertEqual(self._bash(
+            "bash <<'A'; cat > n.md <<'B'\ngit status\nA\ngit push later\nB"), [])
+        self.assertEqual(self._bash(
+            "bash <<'EOF'\ncat > n.md <<'X'\ngit push later\nX\ngit log\nEOF"), [])
+        self.assertEqual(self._bash("cat <<'EOF' | head -3\ngit push later\nEOF"), [])
+        self.assertEqual(self._bash(
+            "cat <<'A' | bash; cat > n.md <<'B'\ngit log\nA\ngit push later\nB"), [])
+
+    def test_transcript_history_allows_add_commit_and_branches(self):
+        for cmd in ('git checkout -b feature', 'git checkout -b feature first',
+                    'git checkout main', 'git checkout p3/batch-1',
+                    'git switch main', 'git switch -c feature', 'git add src/A.cpp',
+                    'git add -A && git commit -m "x"', 'git commit -m "reset the thing"',
+                    'git status', 'git diff HEAD~1', 'git log --oneline -5',
+                    'git show abc1234:src/A.cpp', 'git ls-tree -r HEAD',
+                    'git merge-base first HEAD', 'git rev-parse HEAD',
+                    'git blame src/A.cpp', 'git branch', 'git branch -a',
+                    'git commit -m x; git status', 'git -C /w log -3',
+                    'git checkout -b X first', 'git commit -m "WIP; git push later"',
+                    'git commit -m "a\ngit push\nb"',
+                    'git commit -m "$(cat <<\'EOF\'\nfix\ngit push\nEOF\n)"',
+                    'git commit -m "x && git reset --hard"', 'git branch -m new',
+                    'echo reset && git status', 'grep -r "git push" docs'):
+            self.assertEqual(self._bash(cmd), [], cmd)
+
     def test_transcript_allows_house_runner(self):
         for cmd in ('python3 -I tools/play.py --vm windows --script s.txt',
                     'python3 -I tools/gltrace.py boot --dry-run',
@@ -11652,7 +11757,8 @@ class DriverTest(unittest.TestCase):
         self.assertIn('transcript: none', self._ledger_text(d))
 
     def test_wso_ref_or_launch_in_a_transcript_is_an_exception_without_a_fix_round(self):
-        for cmd in ('git show wso/main:src/F11.cpp', 'WindowsSandbox.exe run.wsb'):
+        for cmd in ('git show wso/main:src/F11.cpp', 'WindowsSandbox.exe run.wsb',
+                    'git reset --hard'):
             t = self._tcalls(('Bash', {'command': cmd}))
             w = self._twork([t])
             d = self._pool_driver(self._two_pools()[:1], {'a': w}, ids=('b011',))

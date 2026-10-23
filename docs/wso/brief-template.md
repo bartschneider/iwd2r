@@ -78,6 +78,10 @@ Each bundle carries the function's decompile and its callers' decompiles; objdum
     replay or trace case you can run decides it, keep our body for that row,
     write no verdict line for it, and list it under `## Undecided`. Never
     write `ours` for a row your reading says is fork or neither.
+14. **Never rewrite history.** No `git reset`, `rebase`, `revert`, `restore`,
+    `clean`, `stash`, `push`, `commit --amend`, `checkout -- <path>` or
+    `branch -d`; workers only add and commit. The driver stops a batch whose
+    transcript shows one.
 
 ## Report back
 

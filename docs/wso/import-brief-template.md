@@ -64,6 +64,9 @@ Each bundle carries the function's decompile and its callers' decompiles; objdum
 8. **Never push, never write through a remote.** From a batch worktree,
    `git push` is wrong, and so is any `git fetch <remote>` with a refspec that
    writes a branch. The coordinator merges and pushes.
+9. **Never rewrite history.** No `git reset`, `rebase`, `revert`, `restore`,
+   `clean`, `stash`, `commit --amend`, `checkout -- <path>` or `branch -d`;
+   workers only add and commit. The driver stops a batch that does.
 
 ## Report back
 

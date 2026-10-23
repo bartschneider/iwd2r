@@ -586,15 +586,174 @@ def _tool_calls(path):
                     yield block.get('name'), block['input']
 
 
+_HISTORY_VERBS = ('reset', 'rebase', 'revert', 'restore', 'clean', 'stash',
+                  'filter-repo', 'push', 'update-ref')
+
+
+# No real branch is named for these (the batch's own path prefixes).
+_BATCH_DIRS = ('src', 'compat', 'docs', 'oracle', 'tools', 'tests')
+
+
+_HEREDOC = re.compile(r"""<<-?[ \t]*(?:'([^'\n]*)'|"([^"\n]*)"|([^\s;&|<>()]+))""")
+
+
+# A heredoc fed to one of these runs its body as commands.
+_SHELLS = ('bash', 'sh', 'zsh', 'dash', 'ksh', 'wsl', 'pwsh', 'powershell')
+
+
+def _fallback_split(text, seps):
+    return text.split('|') if seps == ('|',) else _SEGMENT.split(text)
+
+
+def _feeds_shell(stage):
+    """True when a word of a pipe stage names a shell (the command word,
+    or after env, exec, nohup and the like)."""
+    cw, args = _words(stage)
+    for w in [cw] + args:
+        w = os.path.basename(w.replace('\\', '/')).lower()
+        if (w[:-4] if w.endswith('.exe') else w) in _SHELLS:
+            return True
+    return False
+
+
+def _split_unquoted(text, seps):
+    """text split at any of seps (longest first) outside quotes; a
+    backslash escapes the next character, an unquoted # at the start of a
+    word is a comment to the end of the line, and the body of a heredoc
+    (<<WORD, <<-WORD, <<'WORD') is data up to its delimiter line, unless
+    a stage of the pipeline that opened it names a shell (_feeds_shell,
+    before or after the <<): that body is commands and is split the same
+    way.  Fails closed: a quote or heredoc left open at the end falls
+    back to _SEGMENT."""
+    parts, cur, quote, i, pending = [], [], None, 0, []
+    while i < len(text):
+        ch = text[i]
+        if quote:
+            cur.append(ch)
+            if ch == '\\' and quote == '"' and i + 1 < len(text):
+                i += 1
+                cur.append(text[i])
+            elif ch == quote:
+                quote = None
+        elif ch == '\\' and i + 1 < len(text):
+            cur.append(ch + text[i + 1])
+            i += 1
+        elif ch in '\'"':
+            quote = ch
+            cur.append(ch)
+        elif ch == '#' and (not cur or cur[-1][-1:] in ' \t'):
+            j = text.find('\n', i)
+            i = len(text) if j < 0 else j
+            continue
+        elif ch == '\n' and pending:
+            parts.append(''.join(cur))
+            cur = []
+            delims, pending = pending, []
+            i += 1
+            for d, idx in delims:
+                # the whole pipeline of the segment that opened it (slots
+                # stay valid, bodies are appended only after this newline);
+                # a trailing | continues it past the body: fail closed
+                run = parts[idx].rstrip().endswith('|') or any(
+                    _feeds_shell(st)
+                    for st in _split_unquoted(parts[idx], ('|',)))
+                found, body = False, []
+                while i < len(text) and not found:
+                    j = text.find('\n', i)
+                    line = text[i:len(text) if j < 0 else j]
+                    i = len(text) if j < 0 else j + 1
+                    found = line.strip() == d
+                    if not found:
+                        body.append(line)
+                if not found:           # no delimiter line: fail closed
+                    return _fallback_split(text, seps)
+                if run:                 # fed to a shell: the body is commands
+                    parts += _split_unquoted('\n'.join(body), seps)
+            continue
+        elif text.startswith('<<', i) and not text.startswith('<<<', i) \
+                and _HEREDOC.match(text, i):
+            m = _HEREDOC.match(text, i)
+            d = next(g for g in m.groups() if g is not None)
+            pending.append((re.sub(r'[\\\'"]', '', d) if m.group(3) else d,
+                            len(parts)))
+            cur.append(text[i:m.end()])
+            i = m.end()
+            continue
+        else:
+            sep = next((x for x in seps if text.startswith(x, i)), None)
+            if sep:
+                parts.append(''.join(cur))
+                cur = []
+                i += len(sep) - 1
+            else:
+                cur.append(ch)
+        i += 1
+    if quote or pending:
+        return _fallback_split(text, seps)
+    parts.append(''.join(cur))
+    return parts
+
+
+def _history_rewrite(args, covered=()):
+    """True when the arguments of a `git` command (after the command word)
+    rewrite or discard history or work: reset, rebase, revert, restore,
+    clean, stash, filter-repo, push, update-ref, commit --amend, branch
+    -d/-D, reflog expire, gc --prune, and a checkout that is not a plain
+    branch switch (`--`, -f, -B, `.`, a path after a start point, or one
+    argument that names a covered file, looks like a path or starts with a
+    batch directory), branch -f/-M/-C and switch -C/--force-create.
+    add, commit, switch, checkout -b / <branch> and the read-only
+    commands are not."""
+    rest = list(args)
+    while rest and rest[0].startswith('-'):      # git -C dir / -c k=v / --x
+        rest = rest[2:] if rest[0] in ('-C', '-c') else rest[1:]
+    if not rest:
+        return False
+    sub, rest = rest[0], rest[1:]
+    if sub in _HISTORY_VERBS:
+        return True
+    if sub == 'commit':
+        return any(a == '--amend' for a in rest)
+    if sub == 'branch':
+        return any(a in ('--delete', '--force')
+                   or re.fullmatch(r'-[a-zA-Z]*[dDfMC][a-zA-Z]*', a)
+                   for a in rest)
+    if sub == 'reflog':
+        return 'expire' in rest or 'delete' in rest
+    if sub == 'gc':
+        return any(a.startswith('--prune') for a in rest)
+    if sub == 'switch':
+        return any(a in ('--force', '--discard-changes', '--force-create')
+                   or re.fullmatch(r'-[a-zA-Z]*[fC][a-zA-Z]*', a)
+                   for a in rest)
+    if sub == 'checkout':
+        if '--' in rest or any(
+                a in ('--force', '--patch', '--ours', '--theirs')
+                or re.fullmatch(r'-[a-zA-Z]*[fpB][a-zA-Z]*', a) for a in rest):
+            return True
+        if '-b' in rest:
+            return False
+        pos = [a for a in rest if not a.startswith('-')]
+        if len(pos) != 1:
+            return len(pos) > 1
+        a = pos[0]
+        return (a == '.' or a.startswith(('./', '../'))
+                or any(ch in a for ch in '*?[')
+                or a.split('/')[0] in _BATCH_DIRS
+                or any(a == c or a.endswith('/' + c) for c in covered))
+    return False
+
+
 def transcript_findings(transcript_path, covered_files):
     """[(kind, problem, file)] for the forbidden tool calls in a worker's
     transcript.  kind 'wso' (a git command naming a wso/ ref; the pinned
     sha is allowed), 'launch' (a .wsb, WindowsSandbox or Start-Process
     launch outside HOUSE_RUNNERS), 'read' (a whole-file read of a covered
     source file: no Read limit or one over READ_LIMIT; cat, a sed -n span
-    or head/tail -n over READ_LIMIT; file is the covered file) or
-    'unreadable'.  cat and the launch words count only as a command word,
-    and a cat piped into a bounded head/tail/sed is bounded."""
+    or head/tail -n over READ_LIMIT; file is the covered file),
+    'history' (a git command that rewrites history or discards work, see
+    _history_rewrite; terminal like launch) or 'unreadable'.  cat and the launch words count only as a
+    command word, and a cat piped into a bounded head/tail/sed is bounded."""
     covered = [c for c in covered_files if c]
     out = []
     calls = []
@@ -621,17 +780,22 @@ def transcript_findings(transcript_path, covered_files):
                                 hit[0], 'no limit' if not isinstance(limit, int)
                                 else 'limit %d' % limit, READ_LIMIT), hit[0]))
         elif name == 'Bash':
-            for seg in _SEGMENT.split(str(inp.get('command', ''))):
+            for seg in _split_unquoted(str(inp.get('command', '')),
+                                       ('&&', '||', ';', '\n')):
                 seg = seg.strip()
                 if not seg:
                     continue
-                stages = [_words(st) for st in seg.split('|')]
+                stages = [_words(st) for st in _split_unquoted(seg, ('|',))]
                 for i, (cw, args) in enumerate(stages):
                     text = ' '.join(args)
                     if cw == 'git' and _WSO_REF.search(' ' + text):
                         out.append(('wso', 'git command naming a wso/ ref '
                                     '(%s): read the fork only at the pinned '
                                     'sha, `git show <sha>:<path>`'
+                                    % _short(seg), None))
+                    if cw == 'git' and _history_rewrite(args, covered):
+                        out.append(('history', 'history rewrite in a worker '
+                                    '(%s): workers only add and commit'
                                     % _short(seg), None))
                     launch = cw in ('windowssandbox', 'start-process', 'start') \
                         or (cw in _LAUNCH_SHELLS and _LAUNCH.search(text))
@@ -1551,8 +1715,8 @@ class Driver:
 
     def _scan_transcript(self, batch_id, label, res):
         """Every run's transcript, worker, fix rounds and reviewer: a wso/
-        ref or a launch outside the house runners is a past call nobody can
-        undo, so a `transcript` exception with no fix round; a whole-file
+        ref, a launch outside the house runners or a history rewrite is a
+        past call nobody can undo, so a `transcript` exception with no fix round; a whole-file
         read is a ledger line only; a missing transcript is a ledger line."""
         lines = self._ctx.transcript_lines
         if not res.transcript:
