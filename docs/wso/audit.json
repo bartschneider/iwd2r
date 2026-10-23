@@ -67,15 +67,15 @@
    "probe": "park",
    "run": "",
    "result": "parked",
-   "note": "SL replay (m3-end-save_load-b-20261017-183641) agrees on the 32-bpp plain 24-bit arm the bodies share; the disputed 16/24-bpp arms are unreachable in iwd2r captures."
+   "note": "SL replay agrees on the 32-bpp plain 24-bit arm both bodies share; an oracle attempt was blocked (DirectDraw LockSurface fixture, and our 16-bpp/24-bpp-tint blit kernels are TODO stubs)."
   },
   {
    "address": "0x470F10",
    "batch": "b007",
-   "probe": "park",
-   "run": "",
-   "result": "parked",
-   "note": "FF replay shows pixel-identical creature tint on the day path but the night-bit/no-night-map hunk is not shown to run; needs an area oracle case."
+   "probe": "oracle",
+   "run": "area/get_tint_color",
+   "result": "match",
+   "note": "Oracle case area/get_tint_color PASS 2688/2688 (seed 1) incl. the code-3-without-night-map arms the fork differs on; negative control fails 675/2688."
   },
   {
    "address": "0x62DDE0",
