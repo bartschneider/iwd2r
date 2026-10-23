@@ -1,7 +1,7 @@
 # Wave-1 batch {{id}}: decide {{size}} disagreement rows
 
 You are verifying {{size}} functions where our decompilation and WillScarlettOhara's
-(iwd2-re@e8dd16a) disagree about something material (category `both_changed_differ`).
+(iwd2-re@{{fork_base7}}) disagree about something material (category `both_changed_differ`).
 For each row you decide which body is right against the vanilla exe, using the
 oracle probes or a replay checkpoint. Your verdict is one of:
 
@@ -38,12 +38,12 @@ Context bundles (one per row you must decide; read these before the source):
    no `0x`) for every function you touch, front matter `address:` / `name:` /
    `kind:` (`kind: oracle` or `kind: replay`), and exactly one line in the body
    saying the outcome:
-   - a disagreement: `disagreed with WSO at e8dd16a: <what differed>; case <id> decides`
-   - an agreement on closer reading: `corroborated by WSO at e8dd16a` (and leave
+   - a disagreement: `disagreed with WSO at {{fork_base7}}: <what differed>; case <id> decides`
+   - an agreement on closer reading: `corroborated by WSO at {{fork_base7}}` (and leave
      the evidence kind as it was)
 3. **Bundles first.** Read the bundle for a function before its source; do not read a whole `src/*.cpp` the bundle covers.
 4. **Adopted fork bodies carry the trailer.** When a row is decided for the
-   fork, the copied body keeps its `Imported-From: WillScarlettOhara/iwd2-re@e8dd16a`
+   fork, the copied body keeps its `Imported-From: WillScarlettOhara/iwd2-re@{{fork_base7}}`
    trailer naming the function. Bodies we write ourselves get no trailer.
 5. **Commit as you go.** WIP commits are fine. Wave-1 branches are expected
    to show parity failures elsewhere in the tree, which is by design, but

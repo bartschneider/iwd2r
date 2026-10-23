@@ -2145,7 +2145,10 @@ class Driver:
         if wt is None:
             return 'no worktree has %s' % self.base
         top = os.path.realpath(wt)
-        for path in (self.state_path, self.report_path, self.probe_path):
+        paths = [self.state_path, self.report_path, self.probe_path]
+        if self._recompared:
+            paths.append(self.disagreements_path)   # recompare rewrote it
+        for path in paths:
             if not os.path.exists(path):
                 continue
             rel = os.path.relpath(os.path.realpath(path), top)

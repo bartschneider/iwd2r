@@ -703,6 +703,7 @@ def render_brief(template_path=TEMPLATE_PATH, state_path=STATE_PATH,
              .replace('{{id}}', batch_id)
              .replace('{{branch}}', batch['branch'])
              .replace('{{fork_base}}', fork_base)
+             .replace('{{fork_base7}}', fork_base[:7])
              .replace('{{size}}', str(len(batch['rows'])))
              .replace('{{files}}', files)
              .replace('{{rows}}', rows)
@@ -1059,6 +1060,23 @@ def _xrec_rows(repo, base, theirs, ours):
         os.unlink(out)
 
 
+def _write_rows(path, rows):
+    """xrec's format: indent 1, keys as given, a trailing newline, atomic."""
+    d = os.path.dirname(os.path.abspath(path)) or '.'
+    fd, tmp = tempfile.mkstemp(dir=d, prefix='.wave-', suffix='.json')
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8', newline='\n') as f:
+            json.dump(rows, f, indent=1)
+            f.write('\n')
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def recompare(state_path=STATE_PATH, disagreements_path=DISAGREEMENTS_PATH,
               repo=ROOT, tip=FORK_REMOTE + '/main', fetch=True,
               base=COMMON_BASE, ours='first', category=DEFAULT_CATEGORY):
@@ -1110,26 +1128,58 @@ def recompare(state_path=STATE_PATH, disagreements_path=DISAGREEMENTS_PATH,
             if err:
                 return 2, err
             decided.update(_addr_key(e['address']) for e in listed)
-        have = {_addr_key(r.get('address')): i for i, r in enumerate(rows)
-                if r.get('address')}
-        new, queued, done, fresh = 0, 0, 0, {}
+        def cuttable(r):
+            return r.get('category') == category and r.get('address')
+
+        # The row `next` would cut for an address: the first in-category
+        # one; matched by (address, name) first, else that one.
+        have = {}
+        for i, r in enumerate(rows):
+            if r.get('address'):
+                have.setdefault(_addr_key(r['address']), []).append(i)
+
+        def slot(a, name):
+            idx = have.get(a, [])
+            for i in idx:
+                if rows[i].get('name') == name:
+                    return i
+            for i in idx:
+                if cuttable(rows[i]):
+                    return i
+            return idx[0] if idx else None
+
+        new, queued, done, seen = 0, 0, 0, set()
         for r in theirs:
             a = _addr_key(r.get('address'))
-            if r.get('category') != category or not a or a in fresh:
+            if r.get('category') != category or not a or a in seen:
                 continue
-            fresh[a] = r
+            seen.add(a)
             if a in decided:
                 done += 1
-            elif a in in_batch:
+                continue
+            if a in in_batch:
                 queued += 1
-            elif a in have:
-                queued += 1
-                rows[have[a]] = r
-            else:
+                continue
+            i = slot(a, r.get('name'))
+            if i is None:
                 new += 1
-                have[a] = len(rows)
+                have.setdefault(a, []).append(len(rows))
                 rows.append(r)
-        _save_json(disagreements_path, rows)
+            else:
+                # A row that was not cuttable before (another category)
+                # is new to the queue; the replacement is in place.
+                if cuttable(rows[i]):
+                    queued += 1
+                else:
+                    new += 1
+                rows[i] = r
+        # Batches in flight keep the pin their rows were compared at.
+        for b in state['batches'].values():
+            if b.get('status') != 'closed':
+                b.setdefault('fork_base',
+                             state.get('fork_base') or DEFAULT_FORK_BASE)
+        # xrec's own format, so an unchanged file stays byte-identical.
+        _write_rows(disagreements_path, rows)
         state['fork_base'] = sha
         save_state(state_path, state)
     return 0, (f'recompare: {new} new rows at {sha[:7]} '

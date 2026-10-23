@@ -7660,6 +7660,68 @@ class WaveTest(unittest.TestCase):
             self.assertEqual(f.read(), before)
         self.assertFalse(os.path.exists(self.state))
 
+    def test_recompare_counts_category_changes_and_keeps_shape(self):
+        R = self._row
+        raw = json.dumps([R('0x1000', cat='only_ours'),
+                          R('0x2000'), dict(R('0x2000'), name='Other'),
+                          R('0x3000')], indent=1) + '\n'
+        with open(self.disagreements, 'w') as f:
+            f.write(raw)
+        # An unchanged file stays byte-identical when nothing is new.
+        rc, out = self._recompare([R('0x2000'), R('0x3000')])
+        self.assertIn('recompare: 0 new rows', out)
+        with open(self.disagreements) as f:
+            self.assertEqual(f.read(), raw)
+        # only_ours in the file, both_changed_differ at the tip: new, and
+        # replaced in place.  The duplicate address is matched by name.
+        tip = [R('0x1000', n=7), dict(R('0x2000', n=5), name='Other')]
+        rc, out = self._recompare(tip)
+        self.assertEqual(out, 'recompare: 1 new rows at bbbbbbb '
+                              '(1 already queued, 0 decided)\n')
+        with open(self.disagreements) as f:
+            rows = json.load(f)
+        self.assertEqual([(r['address'], r['name'], r['category'], r['their_len'])
+                          for r in rows],
+                         [('0x1000', 'F0x1000', 'both_changed_differ', 7),
+                          ('0x2000', 'F0x2000', 'both_changed_differ', 100),
+                          ('0x2000', 'Other', 'both_changed_differ', 5),
+                          ('0x3000', 'F0x3000', 'both_changed_differ', 100)])
+
+    def test_recompare_pins_in_flight_batches_and_leaves_them_alone(self):
+        R = self._row
+        batch = {'status': 'assigned', 'branch': 'p3/wso-b014',
+                 'files': ['src/A.cpp'], 'rows': [R('0x2000')],
+                 'verdicts': {'0x2000': {'side': 'ours', 'case': 'c'}}}
+        before = json.loads(json.dumps(batch))
+        with open(self.state, 'w') as f:
+            json.dump({'fork_base': 'a' * 40, 'batches': {'b014': batch}}, f)
+        rc, out = self._recompare([R('0x2000', n=1)], tip='b' * 40)
+        self.assertEqual(rc, 0, out)
+        with open(self.state) as f:
+            st = json.load(f)
+        self.assertEqual(st['fork_base'], 'b' * 40)
+        got = st['batches']['b014']
+        self.assertEqual(got.pop('fork_base'), 'a' * 40)
+        self.assertEqual(got, before)
+        template = os.path.join(self.tmp, 'tpl.md')
+        with open(template, 'w') as f:
+            f.write('{{fork_base}}')
+        self.assertEqual(self.wave.render_brief(template, self.state, 'b014'),
+                         (0, 'a' * 40))
+
+    def test_real_brief_template_carries_the_batch_pin(self):
+        pin = 'c0ffee1' + '2' * 33
+        with open(self.state, 'w') as f:
+            json.dump({'fork_base': pin, 'batches': {}}, f)
+        self.assertEqual(self.next(size=1)[0], 0)
+        rc, brief = self.wave.render_brief(
+            self.wave.TEMPLATE_PATH, self.state, 'b001')
+        self.assertEqual(rc, 0, brief)
+        self.assertNotIn('e8dd16a', brief)
+        self.assertIn('disagreed with WSO at c0ffee1:', brief)
+        self.assertIn('corroborated by WSO at c0ffee1', brief)
+        self.assertIn('git show ' + pin + ':', brief)
+
     def test_batch_keeps_its_own_fork_base(self):
         from unittest import mock
         A, B = 'e8dd16a750966af53f24daaf49dcb4fb13594c13', 'b' * 40
@@ -11905,6 +11967,21 @@ class DriverTest(unittest.TestCase):
         names = self.git('show', '--format=', '--name-only', 'first').stdout.split()
         self.assertEqual(names, ['docs/wso/probe-list.json'])
         self.assertEqual(self.git('status', '--porcelain').stdout.strip(), 'M README')
+
+    def test_commit_state_stages_disagreements_after_a_recompare(self):
+        d = self._undecided_driver('x')
+        _write(d.probe_path, '[]\n')
+        _write(d.disagreements_path, '[]\n')
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            d._commit_state('b011')
+        names = self.git('show', '--format=', '--name-only', 'first').stdout.split()
+        self.assertEqual(names, ['docs/wso/probe-list.json'])
+        _write(d.disagreements_path, '[{"address": "0x1"}]\n')
+        d._recompared = True
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            d._commit_state('b011')
+        names = self.git('show', '--format=', '--name-only', 'first').stdout.split()
+        self.assertEqual(names, ['docs/wso/disagreements.json'])
 
     def test_an_undecided_row_beside_a_verdict_row_keeps_the_other(self):
         d = self._undecided_driver('')
