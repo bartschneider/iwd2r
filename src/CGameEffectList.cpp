@@ -72,6 +72,15 @@ void CGameEffectList::RemoveAllOfType(CGameSprite* pSprite, WORD effectID, POSIT
                 bLeaveNext = TRUE;
             }
 
+            // NOTE: The original's second filter compares the argument against
+            // the effect at runtime offset +0x1c -- m_dwFlags in our layout
+            // (CGameEffectBase declares no vtable, so runtime offsets sit one
+            // pointer above the header comments; cf. the m_effectID match at
+            // +0xc, and src/CGameEffect.cpp:1919, where our own engine keys
+            // portrait icon ids off m_dwFlags). Ours compares m_effectAmount
+            // here -- undecided in b019 (0x4C08E0): the wave's body matches
+            // m_dwFlags but handles posLeave/m_posNext unlike the original, so
+            // neither is adopted yet.
             if (effectID == pEffect->m_effectID
                 && (effectAmount == -1 || effectAmount == pEffect->m_effectAmount)) {
                 // NOTE: When the node to leave was skipped just above, the
