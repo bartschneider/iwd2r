@@ -235,19 +235,28 @@ on `status.json.lock`. The coordinator clears an exception with
 driver's writes, and either loses a new exception or brings back the one
 it removed.
 
+One driver runs per status file. `run` holds a non-blocking flock on
+`status.json.run.lock`, with its pid written in it, for its whole
+lifetime; a second `run` on the same status file exits 1 with `another
+driver is running (pid N)`. `--clear` does not take that lock.
+
 Exit codes:
 
 - 0: nothing left (every row is assigned or decided), or the budget
   stop; a dry run always exits 0 (its outcome is in its status file).
 - 1: a cut or push failure (an exception that is not the batch's own),
-  or a status file that cannot be read (the message names it).
+  a status file that cannot be read (the message names it), or another
+  driver already running on the same status file.
 - 3: parked on a Z.ai rate limit.
 - 4: stalled: the rows left wait on files owned by assigned batches.
 
 (2 is a usage error, a refused dry run, or `--clear` with no such entry.)
 
-**Park and resume.** A worker or reviewer whose JSON result or
-transcript says `Request rejected (429)` parks the batch. The driver
+**Park and resume.** A worker or reviewer hit by Z.ai's rate limit
+parks the batch: its final JSON result says `Request rejected (429)`,
+or the last API-error entry in its transcript does and no successful
+turn follows it. Tool output, file text and the worker's own prose never
+count, and neither does a 429 the worker retried past. The driver
 commits whatever the batch worktree holds uncommitted
 (`git add -A && git commit -m "WIP: parked by driver"`, in the batch
 worktree only, and skipped when it is clean), writes `parked`, and the

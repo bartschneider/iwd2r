@@ -9822,42 +9822,64 @@ class DriverTest(unittest.TestCase):
     def _rev(self, ref, cwd=None):
         return self.git('rev-parse', ref, cwd=cwd).stdout.strip()
 
+    # Transcript lines in Claude Code's shapes (read as data only).
+    @staticmethod
+    def _turn(text='working'):
+        return {'type': 'assistant', 'message': {
+            'model': 'glm-5.3-flash[1m]', 'usage': {'output_tokens': 10000},
+            'content': [{'type': 'text', 'text': text}]}}
+
+    @staticmethod
+    def _api_error(text='API Error: Request rejected (429) · [1308][Usage limit '
+                        'reached for 5 hour.]'):
+        return {'type': 'assistant', 'isApiErrorMessage': True, 'error': 'rate_limit',
+                'message': {'model': '<synthetic>',
+                            'content': [{'type': 'text', 'text': text}]}}
+
     def test_headless_worker_flags_a_429(self):
-        """rate_limited when the JSON result or the transcript says
-        `Request rejected (429)`; the transcript is read as text only."""
+        """R41: rate_limited only from the final JSON result's text, or
+        from the transcript's last API-error entry when no successful turn
+        follows it; never from tool content, file text or prose."""
+        phrase = 'Request rejected (429)'
+        noise = [
+            {'type': 'assistant', 'message': {'model': 'glm-5.3-flash[1m]', 'content': [
+                {'type': 'tool_use', 'id': 't1', 'name': 'Bash',
+                 'input': {'command': "grep -n '%s' tools/driver.py" % phrase}}]}},
+            {'type': 'user', 'message': {'role': 'user', 'content': [
+                {'type': 'tool_result', 'tool_use_id': 't1',
+                 'content': "27:RATE_LIMIT_TEXT = '%s'" % phrase}]}},
+            {'type': 'queue-operation', 'content': 'API Error: ' + phrase},
+            self._turn('The driver parks on %s; nothing to do here.' % phrase),
+        ]
+        cases = [   # (name, transcript lines, exit, JSON result, rate limited)
+            ('noise', noise, 0, {'result': '# report\n'}, False),
+            ('retried', [self._turn(), self._api_error(), self._turn(), self._turn()],
+             0, {'result': '# report\n'}, False),
+            ('final', [self._turn(), self._api_error()], 1,
+             {'is_error': True, 'result': 'API Error: %s · limit reached' % phrase}, True),
+            ('result-only', None, 0, {'result': 'API Error: %s' % phrase}, True),
+            ('last-entry', [self._turn(), self._api_error()], 1,
+             {'is_error': True, 'result': ''}, True),
+            ('other-error-last', [self._api_error(), self._turn(), self._api_error(
+                'API Error: 500 internal error')], 1, {'is_error': True, 'result': ''}, False),
+            ('calm', [self._turn()], 0, {'result': '# report 429\n'}, False),
+        ]
         with tempfile.TemporaryDirectory() as tmp:
             cwd = os.path.join(tmp, 'wt')
             os.mkdir(cwd)
             proj = os.path.join(tmp, 'cfg', 'projects', driver.project_slug(cwd))
             os.makedirs(proj)
-            with open(os.path.join(proj, 'hit.jsonl'), 'w') as f:
-                f.write(json.dumps({'message': {'model': 'glm-5.3-flash[1m]',
-                        'usage': {'output_tokens': 10000}}}) + '\n')
-                f.write(json.dumps({'type': 'assistant', 'message': {'content': [
-                    {'type': 'text', 'text': 'API Error: Request rejected (429) '
-                     'rate limit reached'}]}}) + '\n')
-            with open(os.path.join(proj, 'calm.jsonl'), 'w') as f:
-                f.write(json.dumps({'message': {'model': 'glm-5.3-flash[1m]',
-                        'usage': {'output_tokens': 10000}}}) + '\n')
-            outs = []
-
-            def stub(argv, **kw):
-                return subprocess.CompletedProcess(argv, outs[-1][0], outs[-1][1], '')
-            w = driver.HeadlessWorker(config_dir=os.path.join(tmp, 'cfg'), run=stub)
-            # In the transcript only: the result is a normal partial report.
-            outs.append((0, json.dumps({'result': '# report\n', 'session_id': 'hit'})))
-            r = w.run('B', cwd)
-            self.assertTrue(r.rate_limited)
-            self.assertAlmostEqual(r.credits, 8.0)
-            # In the JSON result only, with no transcript on disk.
-            outs.append((1, json.dumps({'result': 'API Error: Request rejected (429)',
-                                        'is_error': True, 'session_id': 'gone'})))
-            r = w.run('B', cwd)
-            self.assertTrue(r.rate_limited)
-            self.assertIsNone(r.transcript)
-            # Neither: not rate limited.
-            outs.append((0, json.dumps({'result': '# report 429\n', 'session_id': 'calm'})))
-            self.assertFalse(w.run('B', cwd).rate_limited)
+            w = driver.HeadlessWorker(config_dir=os.path.join(tmp, 'cfg'))
+            for name, lines, rc, result, expected in cases:
+                if lines is not None:
+                    with open(os.path.join(proj, name + '.jsonl'), 'w') as f:
+                        f.write(''.join(json.dumps(x) + '\n' for x in lines))
+                out = json.dumps(dict(result, session_id=name))
+                w._run = lambda argv, **kw: subprocess.CompletedProcess(argv, rc, out, '')
+                r = w.run('B', cwd)
+                self.assertEqual(r.rate_limited, expected, name)
+                self.assertEqual(r.transcript is None, lines is None, name)
+            self.assertAlmostEqual(driver.credits_of(os.path.join(proj, 'final.jsonl')), 8.0)
 
     def test_park_on_rate_limit_commits_wip_and_exit_3(self):
         w = _DirtyWorker('API Error: Request rejected (429)', rate_limited=True)
@@ -10118,6 +10140,36 @@ class DriverTest(unittest.TestCase):
             with contextlib.redirect_stderr(err), mock.patch.object(driver.time, 'sleep'):
                 self.assertEqual(driver.main(argv, repo=tmp), 1)
             self.assertIn(path, err.getvalue())
+
+    def test_one_driver_per_status_file(self):
+        """R42: run() holds `<status>.run.lock` (with its pid in it) for its
+        whole lifetime; a second run() on the same status file exits 1 and
+        names that pid; --clear does not take the run lock."""
+        seen = []
+
+        class Nested(_SeqWorker):
+            def run(w, brief, cwd):
+                with open(d.status_path + '.run.lock') as f:
+                    seen.append(('pid', f.read().strip()))
+                seen.append(('second', second.run()))
+                seen.append(('clear', driver.clear_exception(d.status_path, 'b099')))
+                return super().run(brief, cwd)
+        d = self._driver(worker=Nested(self.REPORT))
+        second = self._reload(d)
+        second.next_batch = lambda *a, **kw: self.fail('the second driver cuts nothing')
+        cuts = iter([(0, self.CUT), self.NOTHING])
+        d.next_batch = lambda *a, **kw: next(cuts)
+        self.assertEqual(d.run(), 0)
+        self.assertEqual(seen, [('pid', str(os.getpid())), ('second', 1), ('clear', (2, None))])
+        self.assertIn('another driver is running (pid %d)' % os.getpid(), '\n'.join(self.logs))
+        # The first is unaffected: b011 closed and its status is its own.
+        self.assertEqual(self._state()['status'], 'closed')
+        status = self._status(d)
+        self.assertEqual(status['batches']['b011']['outcome'], 'closed')
+        self.assertIsNone(status['current'])
+        # Released when run() returns: a later driver takes it.
+        second.next_batch = lambda *a, **kw: self.NOTHING
+        self.assertEqual(second.run(), 0)
 
 
 if __name__ == '__main__':

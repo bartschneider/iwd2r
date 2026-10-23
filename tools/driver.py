@@ -8,6 +8,7 @@ and resume, and `--clear`.  The driver itself uses no model."""
 import argparse
 import collections
 import datetime
+import fcntl
 import json
 import importlib.util
 import os
@@ -23,7 +24,8 @@ Result = collections.namedtuple(
 # (input, cached, output) credits per 10000 tokens.
 FLASH_RATES = (2.3, 0.56, 8.0)
 GLM53_RATES = (6.9, 1.7, 24.0)
-# Z.ai's rate-limit refusal, in a worker's JSON result or its transcript.
+# Z.ai's rate-limit refusal, in a worker's final JSON result or in the
+# transcript's last API-error entry (ruling R41).
 RATE_LIMIT_TEXT = 'Request rejected (429)'
 
 VERDICT_RE = re.compile(
@@ -105,11 +107,40 @@ def credits_of(path):
     return total
 
 
-def mentions(path, text):
-    """True when `text` occurs in the file.  It is read as text: data,
-    never executed."""
+def _texts(content):
+    """The text blocks of a message's content (a string or a block list)."""
+    if isinstance(content, str):
+        return [content]
+    if not isinstance(content, list):
+        return []
+    return [b['text'] for b in content if isinstance(b, dict)
+            and b.get('type') == 'text' and isinstance(b.get('text'), str)]
+
+
+def rate_limited_in(path):
+    """True when the transcript's last API-error entry says
+    RATE_LIMIT_TEXT and no successful assistant turn follows it (ruling
+    R41).  The API-error entry is the synthetic assistant line Claude Code
+    writes with isApiErrorMessage; only its own text is read, never
+    tool_use or tool_result content, file text or the worker's prose.  A
+    429 the worker retried past is not a park.  Lines are parsed as JSON
+    data, never executed."""
+    hit = False
     with open(path, encoding='utf-8', errors='replace') as f:
-        return any(text in line for line in f)
+        for line in f:
+            try:
+                obj = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(obj, dict) or obj.get('type') != 'assistant':
+                continue
+            msg = obj.get('message')
+            msg = msg if isinstance(msg, dict) else {}
+            if obj.get('isApiErrorMessage') is True:
+                hit = any(RATE_LIMIT_TEXT in t for t in _texts(msg.get('content')))
+            elif msg.get('model') != '<synthetic>':
+                hit = False      # a successful turn: the 429 was retried past
+    return hit
 
 
 def project_slug(cwd):
@@ -158,22 +189,25 @@ class HeadlessWorker:
         proc = self._run(argv, cwd=cwd, env=env, capture_output=True, text=True)
         report, session_id = '', None
         exit_code = proc.returncode
+        rate_limited = False
         try:
             data = json.loads(proc.stdout)
             if isinstance(data, dict):
                 report = data.get('result') or ''
                 session_id = data.get('session_id')
+                # The final result says so (is_error with the 429 text, or
+                # the text alone).
+                rate_limited = isinstance(report, str) and RATE_LIMIT_TEXT in report
         except ValueError:
             report = proc.stdout or ''
             exit_code = exit_code or 1
-        rate_limited = isinstance(report, str) and RATE_LIMIT_TEXT in report
         transcript = credits = None
         if isinstance(session_id, str) and re.fullmatch(r'[A-Za-z0-9_-]+', session_id):
             path = self.transcript_path(cwd, session_id)
             if os.path.isfile(path):
                 transcript = path
                 credits = credits_of(path)
-                rate_limited = rate_limited or mentions(path, RATE_LIMIT_TEXT)
+                rate_limited = rate_limited or rate_limited_in(path)
         return Result(exit_code, report, transcript, credits, rate_limited)
 
 
@@ -1106,20 +1140,52 @@ class Driver:
             return 1
         return None
 
+    def _take_run_lock(self):
+        """(fd, None) holding a non-blocking flock on
+        `<status_path>.run.lock` with this pid written into it, or (None,
+        the holder's pid) when another driver has it (ruling R42)."""
+        path = self.status_path + '.run.lock'
+        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+        fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            holder = os.pread(fd, 32, 0).decode('ascii', 'replace').strip()
+            os.close(fd)
+            return None, holder or 'unknown'
+        except BaseException:
+            os.close(fd)
+            raise
+        os.ftruncate(fd, 0)
+        os.pwrite(fd, b'%d\n' % os.getpid(), 0)
+        return fd, None
+
     def run(self):
         """0 when every row is assigned or decided, or at the budget stop;
         3 when parked; 4 when stalled (the rows left wait on files owned by
         assigned batches); 1 when an exception that is not the batch's own
-        stopped the run, or the status file cannot be read.  What the last
-        run left goes first: a closed batch's missing ledger entry and
-        push, then the parked batch, then an interrupted one.  A dry run
-        processes one batch and exits 0."""
+        stopped the run, the status file cannot be read, or another driver
+        runs on the same status file.  What the last run left goes first:
+        a closed batch's missing ledger entry and push, then the parked
+        batch, then an interrupted one.  A dry run processes one batch and
+        exits 0."""
+        fd, holder = self._take_run_lock()
+        if fd is None:
+            self.log('another driver is running (pid %s) on %s; this one '
+                     'stops' % (holder, self.status_path))
+            return 1
         try:
             return self._loop()
         except StatusError as e:
             self.log('driver stopped: the status file cannot be read: %s. '
                      'Repair it (one JSON object), then run again.' % e)
             return 1
+        finally:
+            try:
+                os.ftruncate(fd, 0)
+            except OSError:
+                pass
+            os.close(fd)   # releases the run lock
 
     def _loop(self):
         if self.dry_run:
