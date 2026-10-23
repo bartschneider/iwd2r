@@ -8879,6 +8879,18 @@ class WaveTriageTest(unittest.TestCase):
         self.assertEqual(sorted(self.wave.load_state(self.state_path)['batches']),
                          ['b000', 'b001'])
 
+    def test_next_batch_skips_a_probe_list_address(self):
+        self.init_root()
+        self.write_state()
+        dis = self.write_disagreements(['0x402000'])
+        _write(os.path.join(self.root, 'docs', 'wso', 'probe-list.json'),
+               json.dumps([{'address': '0x402000', 'file': 'src/A.cpp',
+                            'name': 'F', 'reading': 'fork', 'source': 'worker'}]))
+        rc, out = self.next(dis)
+        self.assertEqual(rc, 2, out)
+        self.assertIn('nothing left', out)
+        self.assertEqual(sorted(self.wave.load_state(self.state_path)['batches']), ['b000'])
+
     def test_next_batch_reuses_existing_worktree(self):
         self.init_root(evidence={'401000'})
         self.write_state()
@@ -9122,6 +9134,35 @@ class DriverTest(unittest.TestCase):
         with self.assertRaises(driver.ReportError):
             driver.parse_report('## Verdicts\nverdict 0x401000 maybe case x\n')
 
+    def test_parse_undecided(self):
+        text = ('## Verdicts\nverdict 0x1 ours case a\n\n## Undecided\n'
+                'undecided 0x716e80 fork the exe skips the ability\n'
+                '- `Undecided 0X02 NEITHER both wrong`\n3. undecided 0x0403000 neither  x y \n'
+                '\n## Notes\nundecided nonsense here\n')
+        self.assertEqual(driver.parse_undecided(text), {
+            '0x716E80': ('fork', 'the exe skips the ability'),
+            '0x2': ('neither', 'both wrong'), '0x403000': ('neither', 'x y')})
+        self.assertEqual(driver.parse_undecided(self.REPORT), {})
+        self.assertEqual(driver.parse_report('## Undecided\nundecided 0x1 fork r\n'), {})
+
+    def test_parse_undecided_rejects_malformed_and_duplicates(self):
+        h = '## Undecided\n'
+        for bad in ('undecided 0x1 ours no\n', 'undecided 0x1 fork\n',
+                    'undecided 0x1\n', 'I could not decide.\n',
+                    'verdict 0x1 fork case x\n'):
+            with self.assertRaises(driver.ReportError, msg=bad):
+                driver.parse_undecided(h + bad)
+        with self.assertRaises(driver.ReportError) as cm:
+            driver.parse_undecided(h + '\nsome note\n')
+        self.assertIn('line 3', str(cm.exception))
+        with self.assertRaises(driver.ReportError):
+            driver.parse_undecided(h + 'undecided 0x401000 fork a\nundecided 0x0401000 neither b\n')
+
+    def test_parse_undecided_skips_code_fences(self):
+        text = '## Undecided\n```text\nundecided 0x401000 fork a\n```\n```\nundecided 0x2 neither b\n```\n'
+        self.assertEqual(driver.parse_undecided(text),
+                         {'0x401000': ('fork', 'a'), '0x2': ('neither', 'b')})
+
     def test_credits_of_uses_both_formulas(self):
         lines = [json.dumps({'type': 'assistant', 'message': {'model': 'glm-5.3-flash',
                  'usage': {'input_tokens': 10000, 'cache_read_input_tokens': 100000, 'output_tokens': 1000}}})]
@@ -9281,6 +9322,62 @@ class DriverTest(unittest.TestCase):
                       [c[0][-3:] for c in calls])
         self.assertEqual(calls[-1][0][-2:], ['tools/gen_map.py', '--check'])
         self.assertTrue(all(c[1] == d for c in calls))
+
+    def test_mechanical_checks_accept_undecided_in_place_of_a_verdict(self):
+        d = self._mc_repo({'76D370': 'corroborated by WSO at abc'})
+        batch = self._mc_batch()
+        with mock.patch.object(driver, '_vanilla_exe', return_value='/nonexistent'), \
+                mock.patch.object(driver._tool('check_evidence'), 'touched',
+                                  return_value=[]):
+            probs = driver.mechanical_checks(
+                batch, d, {'0x76D370': ('ours', 'c')}, run=self._mc_run(0, []),
+                undecided=['0x401000'])
+            self.assertEqual(probs, [])
+            # not listed: still a missing verdict
+            probs = driver.mechanical_checks(
+                batch, d, {'0x76D370': ('ours', 'c')}, run=self._mc_run(0, []))
+            self.assertEqual(len(probs), 1)
+            self.assertIn('## Undecided', probs[0])
+            # a verdict and an undecided line together, and one outside the batch
+            probs = driver.mechanical_checks(
+                batch, d, {'0x76D370': ('ours', 'c')}, run=self._mc_run(0, []),
+                undecided=['0x401000', '0x76d370', '0x999999'])
+        self.assertEqual(len(probs), 2, probs)
+        self.assertTrue(any(p.startswith('0x76d370: both a verdict') for p in probs))
+        self.assertTrue(any(p.startswith('0x999999:') and 'outside' in p for p in probs))
+
+    def test_mechanical_checks_undecided_row_must_keep_our_body(self):
+        d = self._mc_repo({'76D370': 'corroborated by WSO at abc'})
+        batch = self._mc_batch()
+        ce = driver._tool('check_evidence')
+        args = (batch, d, {'0x76D370': ('ours', 'c')})
+        with mock.patch.object(driver, '_vanilla_exe', return_value='/nonexistent'):
+            with mock.patch.object(ce, 'touched', return_value=[
+                    ('src/A.cpp', 0x401000, 'F')]) as t:
+                probs = driver.mechanical_checks(
+                    *args, run=self._mc_run(0, []), undecided=['0x401000'])
+                self.assertEqual(t.call_args[0], (d, 'first'))
+            self.assertEqual(len(probs), 1, probs)
+            self.assertIn('0x401000: listed under ## Undecided but its body '
+                          'changed against first', probs[0])
+            with mock.patch.object(ce, 'touched', return_value=[
+                    ('src/A.cpp', 0x999000, 'G')]):
+                self.assertEqual(driver.mechanical_checks(
+                    *args, run=self._mc_run(0, []), undecided=['0x401000']), [])
+            # no undecided rows: the span diff is not run
+            with mock.patch.object(ce, 'touched', side_effect=AssertionError) as t:
+                driver.mechanical_checks(*args, run=self._mc_run(0, []),
+                                         undecided=[])
+            t.assert_not_called()
+
+    def test_mechanical_checks_import_batches_refuse_undecided(self):
+        d = self._mc_repo({})
+        with mock.patch.object(driver, '_vanilla_exe', return_value='/nonexistent'):
+            probs = driver.mechanical_checks(
+                self._mc_batch(), d, {}, run=self._mc_run(0, []), kind='import',
+                undecided=['0x401000'])
+        self.assertEqual(probs, ['Undecided is for wave-1 batches; remove the '
+                                 '## Undecided section'])
 
     def test_mechanical_checks_requires_phrase(self):
         d = self._mc_repo({'76D370': 'nothing here'})
@@ -11601,6 +11698,127 @@ class DriverTest(unittest.TestCase):
         with mock.patch.dict(os.environ, self.GIT_ENV):
             d._commit_state('b011')
         self.assertEqual(self.git('rev-parse', 'first').stdout, before)
+
+    # -- undecided rows (R73)
+
+    @staticmethod
+    def _load(path):
+        with open(path) as f:
+            return json.load(f)
+
+    def _undecided_driver(self, report):
+        d = self._pool_driver(self._two_pools()[:1],
+                              {'a': driver.FakeWorker(report)}, ids=('b011',))
+        self._state_in_repo(d)
+        d.probe_path = os.path.join(self.root, 'docs', 'wso', 'probe-list.json')
+        return d
+
+    def test_an_undecided_row_moves_to_the_probe_list(self):
+        d = self._undecided_driver(
+            '## Verdicts\n\n## Undecided\nundecided 0x40B000 fork exe skips it\n')
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 0)
+        batch = self._load(d.state_path)['batches']['b011']
+        self.assertEqual((batch['status'], batch['rows'], batch['files'],
+                          batch['verdicts']), ('closed', [], [], {}))
+        with open(d.probe_path) as f:
+            entries = json.load(f)
+        self.assertEqual(len(entries), 1)
+        e = entries[0]
+        self.assertEqual({k: e[k] for k in ('address', 'file', 'name', 'reading',
+                                            'reason', 'batch', 'source')},
+                         {'address': '0x40B000', 'file': 'src/F11.cpp', 'name': 'F11',
+                          'reading': 'fork', 'reason': 'exe skips it',
+                          'batch': 'b011', 'source': 'worker'})
+        self.assertTrue(e['at'])
+        with open(os.path.join(self.tmp, 'ledger.md')) as f:
+            self.assertIn('- undecided (probe needed): 0x40B000 fork\n', f.read())
+        # the state commit staged the probe list with the state
+        names = self.git('show', '--format=', '--name-only', 'first').stdout.split()
+        self.assertEqual(sorted(names), ['docs/wso/probe-list.json',
+                                         'docs/wso/wave-state.json',
+                                         'docs/wso/xrec-report.md'])
+        self.assertEqual(self.git('status', '--porcelain').stdout.strip(), '')
+
+    def test_a_cleared_record_retry_completes_an_interrupted_move(self):
+        d = self._undecided_driver(
+            '## Verdicts\n\n## Undecided\nundecided 0x40B000 fork exe skips it\n')
+        wave = driver._tool('wave')
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            real = d._move_undecided
+
+            def crash(batch_id):
+                with mock.patch.object(wave, 'save_state', side_effect=OSError('disk')):
+                    real(batch_id)
+            d._move_undecided = crash
+            self.assertEqual(d.run(), 0)
+            d._move_undecided = real
+            # crashed after the probe-list write, before the state write
+            self.assertEqual(len(self._load(d.probe_path)), 1)
+            b = self._load(d.state_path)['batches']['b011']
+            self.assertEqual((b['status'], len(b['rows'])), ('assigned', 1))
+            d._retry_stage['b011'] = 'record'
+            self.assertEqual(d._run_batch('b011', None), 'closed')
+        b = self._load(d.state_path)['batches']['b011']
+        self.assertEqual((b['status'], b['rows'], b['verdicts']), ('closed', [], {}))
+        self.assertEqual([e['address'] for e in self._load(d.probe_path)], ['0x40B000'])
+        with open(os.path.join(self.tmp, 'ledger.md')) as f:
+            self.assertIn('- undecided (probe needed): 0x40B000 fork\n', f.read())
+
+    def test_the_resume_preamble_sends_decided_ours_rows_to_undecided(self):
+        self.assertIn('A row you decided `ours` before this resume although your '
+                      'reading says fork or neither goes under ## Undecided now '
+                      '(rule 13): keep our body and drop its verdict line.',
+                      driver.RESUME_PREAMBLE.replace('\n', ' '))
+
+    def test_commit_state_stages_the_probe_list_by_name(self):
+        d = self._undecided_driver('x')
+        _write(d.probe_path, '[]\n')
+        _write(os.path.join(self.root, 'README'), 'dirty\n')
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            d._commit_state('b011')
+        names = self.git('show', '--format=', '--name-only', 'first').stdout.split()
+        self.assertEqual(names, ['docs/wso/probe-list.json'])
+        self.assertEqual(self.git('status', '--porcelain').stdout.strip(), 'M README')
+
+    def test_an_undecided_row_beside_a_verdict_row_keeps_the_other(self):
+        d = self._undecided_driver('')
+        state = self._load(d.state_path)
+        b = state['batches']['b011']
+        b['rows'].append({'address': '0x40B100', 'name': 'G', 'file': 'src/G.cpp',
+                          'category': 'both_changed_differ', 'their_len': 1, 'our_len': 1})
+        b['files'].append('src/G.cpp')
+        _write(d.state_path, json.dumps(state))
+        d._undecided = {'0x40b100': ('neither', 'why')}
+        with d._lock:
+            d._move_undecided('b011')
+        b = self._load(d.state_path)['batches']['b011']
+        self.assertEqual([r['address'] for r in b['rows']], ['0x40B000'])
+        self.assertEqual(b['files'], ['src/F11.cpp'])
+        # moving again does not duplicate the entry
+        with d._lock:
+            d._move_undecided('b011')
+        self.assertEqual([e['address'] for e in self._load(d.probe_path)],
+                         ['0x40B100'])
+
+    def test_a_verdict_and_an_undecided_line_for_one_row_stop_the_batch(self):
+        d = self._undecided_driver(
+            '## Verdicts\nverdict 0x40B000 ours case dump-x\n'
+            '## Undecided\nundecided 0x40B000 fork r\n')
+        verdicts, problems = d._check('b011', d.worktree_for(self.root, 'p3/wso-b011'),
+                                      d.workers_by_pool['a'].report)
+        self.assertTrue(any('both a verdict line and an undecided line' in p
+                            for p in problems), problems)
+
+    def test_the_fix_round_header_names_undecided_and_notes(self):
+        for needle in ('## Undecided', '## Notes', 'verdict lines only', 'Never write `ours`'):
+            self.assertIn(needle, driver.FIX_PROMPT)
+        with open(os.path.join(ROOT, 'docs', 'wso', 'brief-template.md')) as f:
+            text = f.read()
+        for needle in ('undecided <0xADDR> <fork|neither> <one-line reason>',
+                       'Never\n    write `ours` for a row your reading says is fork or neither.',
+                       '`## Verdicts` holds verdict lines only; put notes under `## Notes`.'):
+            self.assertIn(needle, text)
 
     # -- the pre-launch round (R71)
 

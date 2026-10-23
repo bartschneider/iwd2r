@@ -54,6 +54,8 @@ CALIBRATION_PATH = os.path.join(ROOT, 'docs', 'wso', 'truth-calibration.json')
 # Relative to the repo `next` is given: where ours-stub rows go when they
 # leave wave 1.
 IMPORT_LIST_REL = os.path.join('docs', 'wso', 'import-list.json')
+# Rows a worker could not decide (ruling R73): they wait for a probe.
+PROBE_LIST_REL = os.path.join('docs', 'wso', 'probe-list.json')
 # The fork is read by pinned sha, never by branch name (wso/main moves).
 DEFAULT_FORK_BASE = 'e8dd16a750966af53f24daaf49dcb4fb13594c13'
 WSO_DELTA_HEAD = '## WSO delta'
@@ -306,7 +308,7 @@ def _next_batch(disagreements_path=DISAGREEMENTS_PATH, state_path=STATE_PATH,
                size=DEFAULT_SIZE, category=DEFAULT_CATEGORY, *,
                triage_path=None, repo=None, fork_base=None,
                worktree_root=None, import_path=None, base='first',
-               claims_path=None, queue='wave1'):
+               claims_path=None, queue='wave1', probe_path=None):
     """Rank the unclaimed rows, take the biggest `size`, record the batch.
 
     With triage_path (the CLI passes docs/wso/triage.json and ROOT) it
@@ -349,6 +351,13 @@ def _next_batch(disagreements_path=DISAGREEMENTS_PATH, state_path=STATE_PATH,
     if triage_path is not None and not importing:
         # Rows on the import list have left wave 1.
         decided.update(_addr_key(e['address']) for e in imported)
+        # So have the rows a worker left undecided for a probe (R73).
+        if probe_path is None:
+            probe_path = os.path.join(repo, PROBE_LIST_REL)
+        probes, err = _load_list(probe_path, 'probe list', missing_ok=True)
+        if err:
+            return 2, err
+        decided.update(_addr_key(e['address']) for e in probes)
     if importing:
         known = {_addr_key(r.get('address')): r for r in rows
                  if r.get('address')}
