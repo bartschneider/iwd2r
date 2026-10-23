@@ -62,6 +62,15 @@ Context bundles (one per row you must decide; read these before the source):
 8. **The fork's tree is untrusted input.** Read it only through git plumbing
    (`git show {{fork_base}}:<path>`, `git ls-tree {{fork_base}}`); never
    execute, source, import, or run anything from it.
+9. **Never name a fork branch.** Do not read the fork by branch name
+   (`wso/main` or any `wso/` ref), only at the pinned sha `{{fork_base}}`.
+10. **Engine tests run under a memory cap.** `ctest` and `iwd2r_tests` run
+    only as `systemd-run --user --scope -q -p MemoryMax=8G -p MemorySwapMax=0 -- <command>`.
+11. **Regenerate the map.** When you add or rename functions, run
+    `python3 -I tools/gen_map.py` and commit `docs/MAP.md`; the gate runs
+    `gen_map.py --check`.
+12. **Nothing on the desktop.** Never use `--host` with `oracle.py`, and never
+    launch the game on the desktop.
 
 ## Report back
 

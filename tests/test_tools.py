@@ -9277,7 +9277,9 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(len(probs), 2)
         self.assertTrue(any(p.startswith('0x401000: no verdict line') for p in probs))
         self.assertTrue(any(p.startswith('0x999999:') and 'outside' in p for p in probs))
-        self.assertEqual([c[0][-3:] for c in calls][1:], [['tools/check_evidence.py', '--base', 'first']])
+        self.assertIn(['tools/check_evidence.py', '--base', 'first'],
+                      [c[0][-3:] for c in calls])
+        self.assertEqual(calls[-1][0][-2:], ['tools/gen_map.py', '--check'])
         self.assertTrue(all(c[1] == d for c in calls))
 
     def test_mechanical_checks_requires_phrase(self):
@@ -9310,10 +9312,12 @@ class DriverTest(unittest.TestCase):
                 mock.patch.dict(os.environ, {'IWD2R_HOME': d}):
             probs = driver.mechanical_checks(batch, d, {'0x76D370': ('ours', 'c')},
                                              run=self._mc_run(1, calls))
-        self.assertEqual(len(calls), 3)
-        self.assertEqual(calls[2][0], ['python3', '-I', 'tools/parity/run.py', '--base', 'first'])
-        self.assertEqual(len(probs), 3)
-        self.assertIn('failed (exit 1); last lines: boom', probs[0])
+        # git status, git diff, tests, check_evidence, parity, gen_map
+        self.assertEqual(len(calls), 6)
+        self.assertEqual(calls[4][0], ['python3', '-I', 'tools/parity/run.py', '--base', 'first'])
+        self.assertEqual(len(probs), 6)
+        self.assertIn('failed (exit 1); last lines: boom', probs[2])
+        self.assertIn('gen_map.py --check', probs[5])
         venv = os.path.join(d, 'parity-venv', 'bin')
         os.makedirs(venv)
         py = os.path.join(venv, 'python')
@@ -9324,7 +9328,7 @@ class DriverTest(unittest.TestCase):
                 mock.patch.dict(os.environ, {'IWD2R_HOME': d}):
             driver.mechanical_checks(batch, d, {'0x76D370': ('ours', 'c')},
                                      run=self._mc_run(0, calls))
-        self.assertEqual(calls[2][0][0], py)
+        self.assertEqual(calls[4][0][0], py)
 
     def test_review_needed_for_fork_rows(self):
         self.assertEqual(driver.review_needed({'id': 'b011'}, {'0x1': ('ours', 'a'), '0x2': ('fork', 'b')}, 's'),
@@ -9597,7 +9601,7 @@ class DriverTest(unittest.TestCase):
     def test_mechanical_checks_want_corroborated_for_a_probe_case(self):
         d = self._driver(worker=driver.FakeWorker(self.REPORT))
         batch = self._state()
-        batch = dict(batch, branch='p3/wso-b011')
+        batch = dict(batch, branch='p3/wso-b011', id='b011')
         ok = lambda argv, **_: subprocess.CompletedProcess(argv, 0, '', '')
         with mock.patch.object(driver, '_vanilla_exe', return_value='/nonexistent'):
             # 401000 says "disagreed", 402000 says "corroborated"
@@ -9899,7 +9903,7 @@ class DriverTest(unittest.TestCase):
             json.dump({'exceptions': {}, 'batches': {'b011': {'outcome': 'exception'}}}, f)
         d = self._reload(d)
         ran = []
-        d.run_batch = lambda bid: ran.append(bid) or 'closed'
+        d.run_batch = lambda bid, resume=None: ran.append(bid) or 'closed'
         d.next_batch = lambda *a, **kw: self.NOTHING
         self.assertEqual(d.run(), 0)
         self.assertEqual(ran, ['b011'])
@@ -9909,7 +9913,7 @@ class DriverTest(unittest.TestCase):
                        'batches': {'b011': {'outcome': 'exception'}}}, f)
         d = self._reload(d)
         ran.clear()
-        d.run_batch = lambda bid: ran.append(bid) or 'closed'
+        d.run_batch = lambda bid, resume=None: ran.append(bid) or 'closed'
         d.next_batch = lambda *a, **kw: self.NOTHING
         self.assertEqual(d.run(), 0)
         self.assertEqual(ran, [])
@@ -11146,12 +11150,14 @@ class DriverTest(unittest.TestCase):
             self.assertEqual(e['CLAUDE_CONFIG_DIR'], '/glm/cfg')
             w = driver.HeadlessWorker(model='sonnet', wrapper='claude')
             _, e = w.command('B')
-            self.assertEqual(sorted(e), ['ANTHROPIC_API_KEY', 'HOME', 'PATH'])
+            self.assertEqual(sorted(e), ['ANTHROPIC_API_KEY',
+                                         'ENABLE_CLAUDEAI_MCP_SERVERS', 'HOME', 'PATH'])
             self.assertEqual(w.config_dir, os.path.expanduser('~/.claude'))
         with mock.patch.dict(os.environ, {'CLAUDE_CONFIG_DIR': '/own/cfg', 'X': '1'}, clear=True):
             w = driver.HeadlessWorker(model='sonnet', wrapper='claude')
             _, e = w.command('B')
-            self.assertEqual(e, {'CLAUDE_CONFIG_DIR': '/own/cfg', 'X': '1'})
+            self.assertEqual(e, {'CLAUDE_CONFIG_DIR': '/own/cfg', 'X': '1',
+                                 'ENABLE_CLAUDEAI_MCP_SERVERS': '0'})
             self.assertEqual(w.config_dir, '/own/cfg')
 
     def test_worker_env_drops_claudecode_and_glm_tuning(self):
@@ -11259,18 +11265,59 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(len(probs), 1)
         self.assertIn('wso/', probs[0])
 
-    def test_driver_commits_wip_before_gate(self):
+    def _real_git_checks(self, d):
+        """The mechanical checks with the git commands real and the rest
+        faked ok."""
+        def run(argv, **kw):
+            if argv[0] == 'git':
+                return subprocess.run(argv, **kw)
+            return subprocess.CompletedProcess(argv, 0, '', '')
+
+        def checks(batch, wt, verdicts, **kw):
+            with mock.patch.object(driver, '_vanilla_exe', return_value='/nonexistent'):
+                return driver.mechanical_checks(batch, wt, verdicts, run=run, **kw)
+        d.mechanical_checks = checks
+
+    def test_uncommitted_work_is_a_check_problem_not_a_wip_commit(self):
         def leave_work(cwd):
             _write(os.path.join(cwd, 'notes.txt'), 'uncommitted\n')
         w = self._BatchWorker(credits=0.0, before=leave_work)
         d = self._pool_driver(self._two_pools()[:1], {'a': w}, ids=('b011',))
+        self._real_git_checks(d)
         with mock.patch.dict(os.environ, self.GIT_ENV):
-            self.assertEqual(d.run(), 0)
-        self.assertEqual(self._status(d)['exceptions'], {})
-        self.assertEqual(self.git('log', '-1', '--format=%s', 'first').stdout.strip(),
-                         'WIP: before gate')
-        self.assertEqual(self.git('rev-parse', 'first').stdout,
-                         self.git('rev-parse', 'p3/wso-b011').stdout)
+            d.run()
+        exc = self._status(d)['exceptions']['b011']
+        self.assertEqual(exc['stage'], 'checks')
+        self.assertTrue(any('commit or delete: notes.txt' in p for p in exc['problems']), exc)
+        self.assertEqual(len(w.briefs), 2)               # one fix round
+        self.assertNotIn('WIP', self.git('log', '-1', '--format=%s', 'p3/wso-b011').stdout)
+        self.assertEqual(self._state_of(d, 'b011')['status'], 'assigned')
+
+    def test_paths_outside_the_allowlist_are_check_problems(self):
+        def stray(wt, bid):
+            _write(os.path.join(wt, 'tools', 'extra.py'), 'x\n')
+            _write(os.path.join(wt, 'docs', 'wso', 'brief-template.md'), 'x\n')
+            _write(os.path.join(wt, 'src', 'ok.cpp'), 'x\n')
+            _write(os.path.join(wt, 'compat', 'ok.h'), 'x\n')
+            _write(os.path.join(wt, 'oracle', 'cases', 'c.json'), 'x\n')
+            _write(os.path.join(wt, 'oracle', 'CMakeLists.txt'), 'x\n')
+            _write(os.path.join(wt, 'docs', 'MAP.md'), 'x\n')
+            _write(os.path.join(wt, '.mcp.json'), '{}\n')
+        w = self._BatchWorker(credits=0.0)
+        d = self._pool_driver(self._two_pools()[:1], {'a': w}, ids=('b011',),
+                              on_branch=stray)
+        self._real_git_checks(d)
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            d.run()
+        exc = self._status(d)['exceptions']['b011']
+        text = ' '.join(exc['problems']).split('): ', 1)[1].split(';')[0]
+        for bad in ('tools/extra.py', 'docs/wso/brief-template.md', '.mcp.json'):
+            self.assertIn(bad, text)
+        for ok in ('src/ok.cpp', 'compat/ok.h', 'oracle/cases/c.json',
+                   'oracle/CMakeLists.txt', 'docs/MAP.md'):
+            self.assertNotIn(ok, text)
+        self.assertFalse(driver._path_allowed('docs/evidence-other/x.md'))
+        self.assertTrue(driver._path_allowed('docs/evidence/40B000.md'))
 
     def test_driver_syncs_the_base_before_merging_into_a_batch(self):
         w = self._BatchWorker(credits=0.0)
@@ -11294,8 +11341,8 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(len(self._bash('cat src/A.cpp | head -300')), 1)
 
     def test_mechanical_checks_refuse_dump_decided_fork_or_neither(self):
-        d = self._mc_repo({'76D370': 'corroborated by WSO at abc',
-                           '401000': 'corroborated by WSO at abc'})
+        d = self._mc_repo({'76D370': 'kind: oracle\ncorroborated by WSO at abc',
+                           '401000': 'kind: oracle\ncorroborated by WSO at abc'})
         batch = self._mc_batch()
         batch['rows'] = batch['rows'][:2]
         with mock.patch.object(driver, '_vanilla_exe', return_value='/nonexistent'):
@@ -11552,6 +11599,343 @@ class DriverTest(unittest.TestCase):
         with mock.patch.dict(os.environ, self.GIT_ENV):
             d._commit_state('b011')
         self.assertEqual(self.git('rev-parse', 'first').stdout, before)
+
+    # -- the pre-launch round (R71)
+
+    def _state_in_repo(self, d):
+        docs = os.path.join(self.root, 'docs', 'wso')
+        os.makedirs(docs)
+        state = os.path.join(docs, 'wave-state.json')
+        shutil.move(self.state_path, state)
+        d.state_path = state
+        d.report_path = os.path.join(docs, 'xrec-report.md')
+        _write(d.report_path, 'old\n')
+        self.git('add', 'docs/wso/wave-state.json', 'docs/wso/xrec-report.md')
+        self.git('commit', '-qm', 'state')
+        d.write_scorecard = lambda sp, rp, tp, calibration_path=None: (
+            _write(rp, 'scorecard\n') or (0, 'scorecard written'))
+
+    def test_worker_env_drops_every_aoe_variable_for_every_wrapper(self):
+        env = {'PATH': '/bin', 'AOE_INSTANCE_ID': 'i', 'AOE_HOOK_BIN': '/h',
+               'AOE_SERVE_PASSPHRASE': 'p', 'AOE_AGENT_BIN': 'a',
+               'AOE_AGENT_PID': '1', 'AOE_PROFILE': 'x', 'AOE_SERVE_INSTANCE_ID': 's',
+               'AOE_FUTURE_THING': 'f', 'NOT_AOE': 'keep'}
+        for glm in (True, False):
+            self.assertEqual(driver.worker_env(env, glm), {'PATH': '/bin', 'NOT_AOE': 'keep'})
+        with mock.patch.dict(os.environ, env, clear=True):
+            for wrapper in ('claude-glm', 'claude'):
+                _, e = driver.HeadlessWorker(wrapper=wrapper).command('B')
+                self.assertFalse([k for k in e if k.startswith('AOE_')], wrapper)
+
+    def test_aoe_send_drops_the_claude_code_session_but_keeps_aoe(self):
+        env = {'PATH': '/bin', 'CLAUDECODE': '1', 'CLAUDE_CODE_ENTRYPOINT': 'cli',
+               'CLAUDE_CODE_SESSION_ID': 's', 'CLAUDE_PID': '9', 'CLAUDE_EFFORT': 'hi',
+               'AOE_INSTANCE_ID': 'i', 'AOE_PROFILE': 'x', 'CLAUDE_CONFIG_DIR': '/c'}
+        self.assertEqual(driver.send_env(env), {
+            'PATH': '/bin', 'AOE_INSTANCE_ID': 'i', 'AOE_PROFILE': 'x',
+            'CLAUDE_CONFIG_DIR': '/c'})
+        d = self._pool_driver(self._two_pools()[:1], {'a': None}, ids=('b011',))
+        d.aoe_session = 'sess'
+        seen = []
+        with mock.patch.dict(os.environ, env, clear=True), \
+                mock.patch.object(driver.subprocess, 'run', lambda argv, **kw: seen.append(
+                    (argv, kw)) or subprocess.CompletedProcess(argv, 0, '', '')):
+            d._aoe_send('hello')
+        self.assertEqual(seen[0][0], ['aoe', 'send', 'sess', 'hello'])
+        self.assertNotIn('CLAUDECODE', seen[0][1]['env'])
+        self.assertEqual(seen[0][1]['env']['AOE_INSTANCE_ID'], 'i')
+
+    def test_the_aoe_line_never_carries_problem_text(self):
+        w = self._BatchWorker(credits=0.0)
+        w.run = lambda brief, cwd: driver.Result(0, '', None, 0.0, False)   # no report
+        d = self._pool_driver(self._two_pools()[:1], {'a': w}, ids=('b011',))
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            d.run()
+        self.assertEqual(self.sent, ['driver: b011 exception at worker; see %s' % d.status_path])
+
+    def test_probe_phrase_applies_only_to_driver_recorded_probe_passes(self):
+        d = self._mc_repo({'76D370': 'kind: oracle\ndisagreed with WSO at abc',
+                           '401000': 'kind: oracle\ndisagreed with WSO at abc'})
+        batch = self._mc_batch()
+        batch['rows'] = batch['rows'][:2]
+        ok = self._mc_run(0, [])
+        with mock.patch.object(driver, '_vanilla_exe', return_value='/nonexistent'):
+            # A worker's own probe-17 fork verdict: the normal phrase rule.
+            self.assertEqual(driver.mechanical_checks(
+                batch, d, {'0x76D370': ('fork', 'probe-17'), '0x401000': ('ours', 'probe-17')},
+                run=ok), [])
+            # probe-<this batch>-... with side ours is the driver's form.
+            probs = driver.mechanical_checks(
+                batch, d, {'0x76D370': ('ours', 'probe-b011-76D370'), '0x401000': ('ours', 'x')},
+                run=ok)
+            self.assertEqual(len(probs), 1)
+            self.assertIn("'corroborated by WSO at <sha>'", probs[0])
+            # The driver's probe set decides whatever the case says.
+            probs = driver.mechanical_checks(
+                batch, d, {'0x76D370': ('ours', 'x'), '0x401000': ('ours', 'x')},
+                run=ok, probe=['0x401000'])
+            self.assertEqual(len(probs), 1)
+            self.assertIn('401000.md', probs[0])
+
+    def test_a_fork_verdict_needs_a_kind_line_in_the_evidence(self):
+        d = self._mc_repo({'76D370': 'corroborated by WSO at abc',
+                           '401000': 'kind: oracle\ncorroborated by WSO at abc'})
+        batch = self._mc_batch()
+        batch['rows'] = batch['rows'][:2]
+        with mock.patch.object(driver, '_vanilla_exe', return_value='/nonexistent'):
+            probs = driver.mechanical_checks(
+                batch, d, {'0x76D370': ('fork', 'probe-3'), '0x401000': ('fork', 'probe-4')},
+                run=self._mc_run(0, []))
+            self.assertEqual(len(probs), 1)
+            self.assertIn("76D370.md: no 'kind:' line", probs[0])
+            self.assertEqual(driver.mechanical_checks(      # ours needs none
+                batch, d, {'0x76D370': ('ours', 'c'), '0x401000': ('ours', 'c')},
+                run=self._mc_run(0, [])), [])
+
+    def test_subagent_transcripts_are_scanned_and_counted(self):
+        tmp = self._tmpdir()
+        main = os.path.join(tmp, 'sess1.jsonl')
+        with open(main, 'w') as f:
+            f.write(json.dumps({'type': 'assistant', 'message': {
+                'id': 'm1', 'usage': {'input_tokens': 10, 'output_tokens': 5},
+                'content': [{'type': 'tool_use', 'id': 't1', 'name': 'Bash',
+                             'input': {'command': 'ls'}}]}}) + '\n')
+        self.assertEqual(driver.transcript_checks(main, []), [])
+        self.assertEqual(driver.subagent_transcripts(main), [])
+        sub = os.path.join(tmp, 'sess1', 'subagents')
+        os.makedirs(sub)
+        with open(os.path.join(sub, 'agent-1.jsonl'), 'w') as f:
+            f.write(json.dumps({'type': 'assistant', 'message': {
+                'id': 'm2', 'usage': {'input_tokens': 100, 'output_tokens': 50},
+                'content': [{'type': 'tool_use', 'id': 't2', 'name': 'Bash',
+                             'input': {'command': 'git show wso/main:x'}},
+                            {'type': 'tool_use', 'id': 't3', 'name': 'Bash',
+                             'input': {'command': 'ls'}}]}}) + '\n')
+        probs = driver.transcript_checks(main, [])
+        self.assertEqual(len(probs), 1)
+        self.assertIn('wso/', probs[0])
+        tokens, calls = driver.usage_all(main)
+        self.assertEqual((tokens['input'], tokens['output'], calls), (110, 55, 3))
+        self.assertEqual(driver.usage_of(main)[1], 1)
+
+    def test_a_plain_claude_worker_is_isolated(self):
+        with mock.patch.dict(os.environ, {'PATH': '/bin'}, clear=True):
+            argv, env = driver.HeadlessWorker(model='sonnet', wrapper='claude').command('B')
+            self.assertEqual(argv[argv.index('--setting-sources') + 1], 'project,local')
+            self.assertIn('--strict-mcp-config', argv)
+            self.assertNotIn('--mcp-config', argv)
+            self.assertEqual(env['ENABLE_CLAUDEAI_MCP_SERVERS'], '0')
+            argv, env = driver.HeadlessWorker().command('B')       # claude-glm
+            self.assertNotIn('--setting-sources', argv)
+            self.assertNotIn('--strict-mcp-config', argv)
+            self.assertNotIn('ENABLE_CLAUDEAI_MCP_SERVERS', env)
+
+    def test_the_worker_runs_without_stdin_and_with_a_timeout(self):
+        seen = []
+
+        def run(argv, **kw):
+            seen.append(kw)
+            raise subprocess.TimeoutExpired(argv, kw['timeout'])
+        w = driver.HeadlessWorker(run=run, timeout=7)
+        res = w.run('B', '/tmp')
+        self.assertEqual((seen[0]['stdin'], seen[0]['timeout']), (subprocess.DEVNULL, 7))
+        self.assertTrue(res.timed_out)
+        self.assertEqual(driver.HeadlessWorker().timeout, 10800)
+        args, _ = driver._parse(['--worker-timeout', '60'])
+        self.assertEqual(args.worker_timeout, 60)
+
+    def test_run_group_kills_the_whole_process_group_on_timeout(self):
+        tmp = self._tmpdir()
+        mark = os.path.join(tmp, 'child.pid')
+        code = ("import subprocess,sys,time;"
+                "p=subprocess.Popen(['sleep','60']);"
+                "open(sys.argv[1],'w').write(str(p.pid));time.sleep(60)")
+        with self.assertRaises(subprocess.TimeoutExpired):
+            driver._run_group([sys.executable, '-c', code, mark], timeout=1.5,
+                              stdin=subprocess.DEVNULL, text=True, capture_output=True)
+        pid = int(open(mark).read())
+        time.sleep(0.3)
+        try:
+            os.kill(pid, 0)
+            alive = True
+        except OSError:
+            alive = False
+        self.assertFalse(alive)
+
+    def test_a_timeout_parks_the_batch_and_the_run_exits_3(self):
+        def run(argv, **kw):
+            raise subprocess.TimeoutExpired(argv, 1)
+        w = driver.HeadlessWorker(run=run)
+        d = self._pool_driver(self._two_pools()[:1], {'a': w}, ids=('b011', 'b012'))
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 3)
+        parked = self._status(d)['pools']['a']['parked']
+        self.assertEqual(parked['b011']['reason'], 'timeout')
+        self.assertEqual(self._state_of(d, 'b011')['status'], 'assigned')
+        self.assertEqual(self._status(d)['exceptions'], {})
+
+    def _clear(self, d, bid):
+        self.assertEqual(driver.clear_exception(d.status_path, bid)[0], 0)
+
+    def test_a_cleared_close_exception_goes_straight_to_close(self):
+        w = self._BatchWorker(credits=0.0)
+        d = self._pool_driver(self._two_pools()[:1], {'a': w}, ids=('b011',))
+        real = d.close_batch
+        d.close_batch = lambda *a, **kw: (1, 'batch b011 not closed:\n  - gate\n')
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            d.run()
+        self.assertEqual(self._status(d)['exceptions']['b011']['stage'], 'close')
+        self.assertEqual(len(w.briefs), 1)
+        self._clear(d, 'b011')
+        d.close_batch = real
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 0)
+        self.assertEqual(len(w.briefs), 1)               # the worker did not run again
+        self.assertEqual(self._state_of(d, 'b011')['status'], 'closed')
+        self.assertEqual(self._status(d)['batches']['b011']['outcome'], 'closed')
+
+    def test_a_cleared_record_exception_records_the_saved_verdicts(self):
+        w = self._BatchWorker(credits=0.0)
+        d = self._pool_driver(self._two_pools()[:1], {'a': w}, ids=('b011',))
+        real = d.record_verdict
+        d.record_verdict = lambda *a, **kw: (1, 'no way\n')
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            d.run()
+        self.assertEqual(self._status(d)['exceptions']['b011']['stage'], 'record')
+        self._clear(d, 'b011')
+        d.record_verdict = real
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 0)
+        self.assertEqual(len(w.briefs), 1)
+        self.assertEqual(self._state_of(d, 'b011')['status'], 'closed')
+        self.assertEqual(len(self._state_of(d, 'b011')['verdicts']), 1)
+
+    def test_a_cleared_push_exception_pushes_again_without_the_worker(self):
+        w = self._BatchWorker(credits=0.0)
+        d = self._pool_driver(self._two_pools()[:1], {'a': w}, ids=('b011',))
+        results = iter(['rejected', None])
+        d.push = lambda: self.pushes.append(1) or next(results)
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            d.run()
+        self.assertEqual(self._status(d)['exceptions']['b011']['stage'], 'push')
+        self._clear(d, 'b011')
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 0)
+        self.assertEqual(len(self.pushes), 2)
+        self.assertEqual(len(w.briefs), 1)
+        self.assertEqual(self._status(d)['batches']['b011']['outcome'], 'closed')
+
+    def test_a_cleared_worker_exception_restarts_the_worker_with_a_resume_preamble(self):
+        w = self._BatchWorker(credits=0.0)
+        norun = w.run
+        d = self._pool_driver(self._two_pools()[:1], {'a': w}, ids=('b011',))
+        first = []
+        w.run = lambda brief, cwd: (first.append(brief) or driver.Result(0, '', None, 0.0, False)) \
+            if not first else norun(brief, cwd)
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            d.run()
+        self.assertEqual(self._status(d)['exceptions']['b011']['stage'], 'worker')
+        self._clear(d, 'b011')
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 0)
+        self.assertTrue(w.briefs[0].startswith('Resume:'), w.briefs[0][:80])
+        self.assertIn('worker stage', w.briefs[0])
+
+    def test_a_cleared_adoption_failure_is_adopted_again(self):
+        d, w = self._adopt_driver()
+        d.next_batch = lambda *a, **kw: self.NOTHING
+        real = d.cut_worktree
+        d.cut_worktree = lambda *a, **kw: (None, 'git worktree add failed')
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 1)
+        self.assertEqual(self._status(d)['exceptions']['b012']['stage'], 'cut')
+        self.assertEqual(w.ids, [])
+        self._clear(d, 'b012')
+        d.cut_worktree = real
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 0)
+        self.assertEqual(w.ids, ['b012', 'b011'])
+        self.assertEqual(self._state_of(d, 'b012')['rows'][0]['class'], 'ambiguous')
+
+    def test_an_adopted_batch_is_cut_when_it_starts_not_at_the_scan(self):
+        seen = {}
+        d, w = self._adopt_driver()
+        d.next_batch = lambda *a, **kw: self.NOTHING
+
+        def before(cwd):
+            bid = os.path.basename(cwd)[len('p3-wso-'):]
+            other = 'b011' if bid == 'b012' else 'b012'
+            seen[bid] = (
+                os.path.isdir(os.path.join(self.tmp, 'repo-worktrees', 'p3-wso-' + other)),
+                self.git('rev-parse', 'HEAD', cwd=cwd).stdout.strip(),
+                self.git('rev-parse', 'first').stdout.strip())
+            if bid == 'b012':                       # the first batch moves first
+                _write(os.path.join(cwd, 'src', 'new.cpp'), 'x\n')
+                self.git('add', 'src/new.cpp', cwd=cwd)
+                self.git('commit', '-qm', 'work', cwd=cwd)
+        w.before = before
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 0)
+        self.assertEqual(w.ids, ['b012', 'b011'])
+        self.assertFalse(seen['b012'][0])             # b011 not cut while b012 ran
+        self.assertEqual(seen['b012'][1], seen['b012'][2])
+        self.assertEqual(seen['b011'][1], seen['b011'][2])    # cut from first as moved
+        self.assertNotEqual(seen['b011'][1], seen['b012'][1])
+        self.assertIn('b011', d._imported)
+
+    def test_a_failed_state_commit_unstages_sends_one_line_and_still_pushes(self):
+        w = self._BatchWorker(credits=0.0)
+        d = self._pool_driver(self._two_pools()[:1], {'a': w}, ids=('b011',))
+        self._state_in_repo(d)
+        hook = os.path.join(self.root, '.git', 'hooks', 'pre-commit')
+        _write(hook, '#!/bin/sh\nexit 1\n')
+        os.chmod(hook, 0o755)
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 0)
+        self.assertEqual(len(self.pushes), 1)
+        self.assertEqual(self.sent, ['driver: b011 exception at state-commit; see %s' % d.status_path])
+        self.assertEqual(self.git('diff', '--cached', '--name-only').stdout.strip(), '')
+        self.assertEqual(self._status(d)['exceptions'], {})
+
+    def test_an_exception_in_the_state_commit_never_skips_the_push(self):
+        w = self._BatchWorker(credits=0.0)
+        d = self._pool_driver(self._two_pools()[:1], {'a': w}, ids=('b011',))
+        orig = d.worktree_for
+        base = d.base
+        d.worktree_for = lambda repo, branch: (_ for _ in ()).throw(RuntimeError('boom')) \
+            if branch == base else orig(repo, branch)
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 0)
+        self.assertEqual(len(self.pushes), 1)
+        self.assertTrue(any('state commit failed' in l and 'boom' in l for l in self.logs))
+
+    def test_settle_closed_commits_the_state_before_its_push(self):
+        w = self._BatchWorker(credits=0.0)
+        d = self._pool_driver(self._two_pools()[:1], {'a': w}, ids=('b011',))
+        order = []
+        d._commit_state = lambda bid: order.append(('commit', bid))
+        d.push = lambda: order.append('push')
+        d._append_ledger('## driver b011 (x)\n')
+        self.assertIsNone(d._settle_closed('b011'))
+        self.assertEqual(order, [('commit', 'b011'), 'push'])
+
+    def test_the_import_queue_does_not_commit_the_state(self):
+        w = self._BatchWorker(credits=0.0)
+        d = self._pool_driver(self._two_pools()[:1], {'a': w}, ids=('b011',))
+        self._state_in_repo(d)
+        d.kind = 'import'
+        _write(d.state_path, '{}\n')
+        before = self.git('rev-parse', 'first').stdout
+        d._commit_state('b011')
+        self.assertEqual(self.git('rev-parse', 'first').stdout, before)
+
+    def test_the_brief_template_carries_the_launch_rules(self):
+        with open(os.path.join(ROOT, 'docs', 'wso', 'brief-template.md')) as f:
+            text = f.read()
+        for needle in ('wso/main', 'systemd-run --user --scope -q -p MemoryMax=8G '
+                       '-p MemorySwapMax=0 --', 'python3 -I tools/gen_map.py',
+                       '--host', 'desktop'):
+            self.assertIn(needle, text)
 
     def test_a_dry_run_never_commits_the_state(self):
         d = self._pool_driver(self._two_pools()[:1], {'a': None}, ids=('b011',))

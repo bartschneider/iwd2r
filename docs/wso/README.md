@@ -244,6 +244,34 @@ launches per attempt until `--new-attempt "<why>"`; and every merge into
 - After every close the driver commits `docs/wso/wave-state.json` and the
   regenerated `docs/wso/xrec-report.md` on `first` (staged by name, message
   `wave-state: close <id> (ours N, fork N, neither N)`), before the push.
+  Also when it pushes a closed batch again. Wave 1 only: the import queue's
+  state is not committed. If the commit fails, the two paths are unstaged,
+  one aoe line goes out, and the push still happens.
+- Workers: every `AOE_*` variable is removed from a worker's environment
+  (for every wrapper), and the driver's own `aoe send` runs without
+  `CLAUDECODE`, `CLAUDE_CODE_*`, `CLAUDE_PID` and `CLAUDE_EFFORT`. A `claude`
+  worker gets `--setting-sources project,local`, `--strict-mcp-config` and
+  `ENABLE_CLAUDEAI_MCP_SERVERS=0`. Every run has no stdin and a time bound,
+  `--worker-timeout SECONDS` (default 10800): on a timeout the whole process
+  group is killed and the batch is parked with the reason `timeout`, like a
+  429 park (the run exits 3 once the other pools are done). A worker's
+  subagent transcripts (`<session>/subagents/*.jsonl`) are scanned and
+  counted too.
+- The mechanical checks (the worker's fix round) also fail on: uncommitted
+  paths in the batch worktree ("commit or delete: ..."; the driver no longer
+  commits them for you), a path changed against `first` outside `src/`,
+  `compat/`, `docs/evidence/`, `docs/MAP.md`, `oracle/cases/` and
+  `oracle/CMakeLists.txt`, a `fork` verdict whose evidence has no `kind:`
+  line, and a stale `docs/MAP.md` (`tools/gen_map.py --check`). The
+  `corroborated by WSO` phrase is required only for verdicts the driver
+  recorded from an oracle probe pass.
+- Retrying a cleared exception (`--clear`): at the `close`, `record` or
+  `push` stage the batch goes straight to that stage on its worktree and
+  recorded verdicts, with no worker run; at any other stage the worker
+  restarts with a `Resume:` preamble, as after a park; a failed adoption
+  cut is adopted again. The one aoe line per exception is
+  `driver: <id> exception at <stage>; see <status file>`, never problem text.
+
 - `--queue wave1|import`: which list to work (default `wave1`). `wave1`
   is `docs/wso/wave-state.json`: the `both_changed_differ` rows, triaged,
   batch ids `b<NNN>`, brief `brief-template.md`, closed with verdicts.

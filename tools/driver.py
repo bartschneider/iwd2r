@@ -9,11 +9,13 @@ import argparse
 import collections
 import datetime
 import fcntl
+import glob
 import json
 import importlib.util
 import os
 import random
 import shlex
+import signal
 import re
 import queue as queue_mod
 import subprocess
@@ -23,8 +25,8 @@ import time
 
 # api_error: the kind of an API error no retry cures (ruling R46), or None.
 Result = collections.namedtuple(
-    'Result', 'exit_code report transcript credits rate_limited api_error',
-    defaults=(None,))
+    'Result', 'exit_code report transcript credits rate_limited api_error '
+    'timed_out', defaults=(None, False))
 
 # (input, cached, output) credits per 10000 tokens.
 FLASH_RATES = (2.3, 0.56, 8.0)
@@ -113,6 +115,31 @@ def credits_of(path):
                   + (usage.get('cache_read_input_tokens') or 0) * rates[1]
                   + (usage.get('output_tokens') or 0) * rates[2]) / 10000
     return total
+
+
+def subagent_transcripts(path):
+    """The transcripts of the subagents a session ran:
+    <transcript dir>/<session id>/subagents/*.jsonl, sorted; [] when none
+    (ruling R71)."""
+    if not path:
+        return []
+    session = os.path.splitext(path)[0]
+    return sorted(glob.glob(os.path.join(glob.escape(session), 'subagents',
+                                         '*.jsonl')))
+
+
+def usage_all(path):
+    """usage_of summed over the transcript and its subagents'."""
+    tokens, calls = usage_of(path)
+    for sub in subagent_transcripts(path):
+        try:
+            t, c = usage_of(sub)
+        except OSError:
+            continue
+        for k in tokens:
+            tokens[k] += t[k]
+        calls += c
+    return tokens, calls
 
 
 def usage_of(path):
@@ -248,6 +275,22 @@ SESSION_VARS = ('CLAUDE_CODE_CHILD_SESSION', 'CLAUDE_CODE_ENTRYPOINT',
                 'CLAUDE_CODE_EXECPATH', 'CLAUDE_PID', 'CLAUDE_EFFORT',
                 'CLAUDECODE')
 SESSION_PREFIXES = ('CLAUDE_CODE_MESSAGING_', 'CLAUDE_CODE_SESSION_')
+# The launching shell's AoE identity (ruling R71): the user's hooks call
+# $AOE_HOOK_BIN whenever AOE_INSTANCE_ID is set, which would re-bind the
+# coordinator's session to the worker.  Dropped for every wrapper.
+AOE_PREFIX = 'AOE_'
+# What the driver's own `aoe send` must not inherit: the coordinator's
+# Claude Code session.  AOE_* stays (aoe finds its session and profile
+# through it; `aoe send --help` names no other way than --profile).
+SEND_DROP = ('CLAUDECODE', 'CLAUDE_PID', 'CLAUDE_EFFORT')
+SEND_DROP_PREFIXES = ('CLAUDE_CODE_',)
+
+
+def send_env(environ):
+    """environ for `aoe send`: without the Claude Code session variables."""
+    return {k: v for k, v in environ.items()
+            if k not in SEND_DROP and not k.startswith(SEND_DROP_PREFIXES)}
+
 GLM_VARS = ('ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN',
             'CLAUDE_CODE_AUTO_COMPACT_WINDOW', 'API_TIMEOUT_MS')
 GLM_PREFIXES = ('ANTHROPIC_DEFAULT_', 'CLAUDE_GLM_', 'CLAUDE_CODE_SUBAGENT_MODEL')
@@ -271,7 +314,8 @@ def worker_env(environ, glm):
     added."""
     env = dict(environ)
     for k in list(env):
-        drop = k in SESSION_VARS or k.startswith(SESSION_PREFIXES)
+        drop = (k in SESSION_VARS or k.startswith(SESSION_PREFIXES)
+                or k.startswith(AOE_PREFIX))
         if not glm:
             drop = (drop or k in GLM_VARS or k.startswith(GLM_PREFIXES)
                     or (k == 'CLAUDE_CONFIG_DIR' and _in_glm_config(env[k])))
@@ -280,13 +324,45 @@ def worker_env(environ, glm):
     return env
 
 
+DEFAULT_TIMEOUT = 10800   # seconds a worker or reviewer run may take (R71)
+
+
+def _run_group(argv, timeout=None, **kw):
+    """subprocess.run in a session of its own, so that a timeout kills the
+    whole process group (the worker's children too), then raises
+    TimeoutExpired."""
+    proc = subprocess.Popen(argv, start_new_session=True,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            **{k: v for k, v in kw.items()
+                               if k not in ('capture_output',)})
+    try:
+        out, err = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except OSError:
+            proc.kill()
+        proc.communicate()
+        raise
+    except BaseException:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except OSError:
+            pass
+        proc.wait()
+        raise
+    return subprocess.CompletedProcess(argv, proc.returncode, out, err)
+
+
 class HeadlessWorker:
     def __init__(self, model='glm-5.3-flash[1m]', max_turns=400,
-                 wrapper='claude-glm', config_dir=None, run=subprocess.run):
+                 wrapper='claude-glm', config_dir=None, run=None,
+                 timeout=DEFAULT_TIMEOUT):
         self.model = model
         self.max_turns = max_turns
         self.wrapper = wrapper
-        self._run = run
+        self.timeout = timeout
+        self._run = _run_group if run is None else run
         if config_dir is None:
             if os.path.basename(wrapper) == 'claude-glm':
                 config_dir = (os.environ.get('CLAUDE_GLM_CONFIG_DIR')
@@ -311,6 +387,10 @@ class HeadlessWorker:
             # A plain `claude` takes the model as a flag, and its
             # transcripts are under ~/.claude/projects (ruling R23).
             argv += ['--model', self.model]
+            # Worker isolation (ruling R71): only the project's and the
+            # local settings, no user hooks or MCP servers.
+            argv += ['--setting-sources', 'project,local', '--strict-mcp-config']
+            env['ENABLE_CLAUDEAI_MCP_SERVERS'] = '0'
         return argv, env
 
     def transcript_path(self, cwd, session_id):
@@ -319,7 +399,12 @@ class HeadlessWorker:
 
     def run(self, brief, cwd):
         argv, env = self.command(brief)
-        proc = self._run(argv, cwd=cwd, env=env, capture_output=True, text=True)
+        try:
+            proc = self._run(argv, cwd=cwd, env=env, capture_output=True,
+                             text=True, stdin=subprocess.DEVNULL,
+                             timeout=self.timeout)
+        except subprocess.TimeoutExpired:
+            return Result(124, '', None, None, False, None, True)
         report, session_id = '', None
         exit_code = proc.returncode
         rate_limited, api_error = False, None
@@ -475,12 +560,14 @@ def transcript_findings(transcript_path, covered_files):
     and a cat piped into a bounded head/tail/sed is bounded."""
     covered = [c for c in covered_files if c]
     out = []
-    try:
-        calls = list(_tool_calls(transcript_path))
-    except OSError as e:
-        return [('unreadable', 'transcript %s could not be read (%s); the '
-                 'rules about tool calls cannot be checked'
-                 % (transcript_path, e), None)]
+    calls = []
+    for path in [transcript_path] + subagent_transcripts(transcript_path):
+        try:
+            calls += list(_tool_calls(path))
+        except OSError as e:
+            return [('unreadable', 'transcript %s could not be read (%s); '
+                     'the rules about tool calls cannot be checked'
+                     % (path, e), None)]
     for name, inp in calls:
         if name == 'Read':
             fp = str(inp.get('file_path', ''))
@@ -538,15 +625,40 @@ def transcript_checks(transcript_path, covered_files):
             transcript_findings(transcript_path, covered_files)]
 
 
+# The paths a batch may change (ruling R71): anything else on the branch is
+# a check problem, tools/, tests/, .claude/, .mcp.json and docs/wso/ included.
+ALLOWED_PATHS = ('src/', 'compat/', 'docs/evidence/', 'docs/MAP.md',
+                 'oracle/cases/', 'oracle/CMakeLists.txt')
+
+
+def _path_allowed(path):
+    return any(path == a or (a.endswith('/') and path.startswith(a))
+               for a in ALLOWED_PATHS)
+
+
+def _git_paths(run, worktree, args, parse):
+    """(paths, problem) from a git command run in the worktree."""
+    proc = run(['git', *args], cwd=worktree, capture_output=True, text=True)
+    if proc.returncode != 0:
+        return [], 'git %s failed (exit %s): %s' % (
+            ' '.join(args), proc.returncode, _tail(proc))
+    return [parse(l) for l in (proc.stdout or '').splitlines() if l.strip()], None
+
+
 def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
-                      kind='verdicts', transcript=None, covered_files=()):
+                      kind='verdicts', transcript=None, covered_files=(),
+                      probe=(), base='first'):
     """Problems that stop a batch before any review; [] when clean.
 
     Each problem says what failed and how to fix it (it is the worker's
     fix-round prompt).  An import batch (kind 'import', ruling R63) has no
     verdict lines or evidence phrases to check; the tool tests,
     check_evidence and parity still run.  With a transcript, the worker's
-    forbidden tool calls (transcript_checks) join the problems."""
+    forbidden tool calls (transcript_checks) join the problems.  `probe`
+    holds the address keys the driver recorded from an oracle probe pass:
+    only those (and a `probe-<batch id>-...` ours case) need the
+    'corroborated by WSO' phrase (ruling R71).  Uncommitted paths, and
+    paths changed against `base` outside ALLOWED_PATHS, are problems."""
     wave = _tool('wave')
     problems = []
     if transcript:
@@ -578,6 +690,7 @@ def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
         if k not in row_keys:
             problems.append('%s: verdict for an address outside this batch; '
                             'remove that line' % a)
+    probe_keys = {key(a) for a in probe}
     for r in rows:
         k = key(r['address'])
         if k not in given:
@@ -586,7 +699,15 @@ def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
         text, err = wave._read_evidence(worktree, batch['branch'], r['address'])
         if text is None:
             problems.append('%s: missing; write it and commit it' % rel)
-        elif str(verdicts[given[k]][1]).startswith('probe-'):
+            continue
+        side, case = verdicts[given[k]][0], str(verdicts[given[k]][1])
+        if side == 'fork' and not wave.KIND_RE.search(text):
+            problems.append("%s: no 'kind:' line in the front matter; add "
+                            "'kind: oracle' or 'kind: replay'" % rel)
+        driver_probe = k in probe_keys or (
+            side == 'ours' and batch.get('id') is not None
+            and case.startswith('probe-%s-' % batch['id']))
+        if driver_probe:
             # A probe pass says ours matches the original (ruling R57).
             if wave.EVIDENCE_PHRASES[1] not in text:
                 problems.append("%s: its verdict case is a probe; add the exact "
@@ -594,6 +715,24 @@ def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
         elif not any(p in text for p in wave.EVIDENCE_PHRASES):
             problems.append("%s: no 'disagreed with WSO' or 'corroborated by "
                             "WSO' phrase; add one of the exact phrases" % rel)
+    dirty, bad = _git_paths(run, worktree, ('status', '--porcelain', '-uall'),
+                            lambda l: l[3:].split(' -> ')[-1].strip('"'))
+    if bad:
+        problems.append(bad)
+    if dirty:
+        problems.append('uncommitted paths in the worktree; commit or '
+                        'delete: %s' % ', '.join(sorted(dirty)))
+    changed, bad = _git_paths(run, worktree,
+                              ('diff', '--name-only', '%s...HEAD' % base),
+                              str.strip)
+    if bad:
+        problems.append(bad)
+    outside = sorted(p for p in changed if not _path_allowed(p))
+    if outside:
+        problems.append('changed outside the paths a batch may touch (%s): '
+                        '%s; revert them (git checkout %s -- <path>) and '
+                        'commit' % (', '.join(ALLOWED_PATHS),
+                                    ', '.join(outside), base))
     steps = [
         (['python3', '-I', 'tests/test_tools.py'], 'tests/test_tools.py'),
         (['python3', '-I', 'tools/check_evidence.py', '--base', 'first'],
@@ -602,6 +741,9 @@ def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
     if os.path.isfile(_vanilla_exe()):
         steps.append((_parity_python() + ['tools/parity/run.py', '--base', 'first'],
                       'tools/parity/run.py'))
+    steps.append((['python3', '-I', 'tools/gen_map.py', '--check'],
+                  'tools/gen_map.py --check (run `python3 -I tools/gen_map.py` '
+                  'and commit docs/MAP.md)'))
     for argv, label in steps:
         proc = run(argv, cwd=worktree, capture_output=True, text=True)
         if proc.returncode != 0:
@@ -745,7 +887,6 @@ DEFAULT_SEED = '2026-10-22'
 # the plan's ledger example is 1180).
 DEFAULT_ESTIMATE = 1200.0
 WIP_MESSAGE = 'WIP: parked by driver'
-WIP_GATE_MESSAGE = 'WIP: before gate'
 # The breaker (ruling R45): this many batch exceptions in a row whose
 # worker never produced a transcript halt the run.
 BREAKER_LIMIT = 3
@@ -1134,6 +1275,7 @@ class Driver:
         self._threads = []
         self._pool_batch_credits = {p.name: [] for p in self.pools}
         self._imported = {}
+        self._retry_stage = {}     # cleared batch id -> the stage it failed at
         self._halt = False
         self._batch_credits = []   # this run's batches: credits or None
         self._no_transcript = 0    # batch exceptions in a row without one
@@ -1260,7 +1402,7 @@ class Driver:
             self._worker_ran.append(worker_ran(res))
         if res.transcript:
             try:
-                tokens, calls = usage_of(res.transcript)
+                tokens, calls = usage_all(res.transcript)
             except OSError:
                 tokens, calls = None, 0
             if tokens:
@@ -1331,12 +1473,17 @@ class Driver:
         self.log(line)
         if not self.dry_run:
             try:
-                self.send(_one_line('iwd2r driver: %s exception at %s: %s (status %s)'
-                                    % (batch_id, stage, problems[0],
-                                       self.status_path), 400))
+                self.send(self._exception_line(batch_id, stage))
             except Exception as e:   # a failed send must not stop the loop
                 self.log('send failed: %r' % (e,))
         return 'exception'
+
+    def _exception_line(self, batch_id, stage):
+        """The one line sent over aoe (ruling R71): the batch, the stage
+        and where to read more; never problem text, which comes from a
+        worker's work."""
+        return 'driver: %s exception at %s; see %s' % (
+            batch_id, stage, self.status_path)
 
     def _commit_wip(self, worktree, message=WIP_MESSAGE):
         """Commit what the batch worktree holds uncommitted, as
@@ -1392,6 +1539,8 @@ class Driver:
     def _settle(self, batch_id, res, label, worktree):
         """'parked' or 'exception' when a run gave nothing to check.  An
         auth or billing error parks the batch and halts the run (R46)."""
+        if res.timed_out:
+            return self._park(batch_id, 'timeout', worktree)
         if res.api_error:
             reason = 'api error: %s' % res.api_error
             out = self._park(batch_id, reason, worktree)
@@ -1438,8 +1587,9 @@ class Driver:
             verdicts[addr] = sc
         try:
             kw = {'kind': 'import'} if self.kind == 'import' else {}
-            return verdicts, self.mechanical_checks(batch, worktree, verdicts,
-                                                    **kw)
+            kw['probe'] = sorted(self._probe)
+            return verdicts, self.mechanical_checks(
+                dict(batch, id=batch_id), worktree, verdicts, **kw)
         except OSError as e:
             raise _launch_failed('the mechanical checks', worktree, e) from None
 
@@ -1816,50 +1966,70 @@ class Driver:
             self.base, branch, _one_line((r.stderr or '') + (r.stdout or '')))
 
     def _commit_state(self, batch_id):
-        """After a close, before the push (ruling R66): commit the wave
-        state and the regenerated scorecard, and only those, on the base,
-        in the worktree that has it checked out, staged by name.  Skipped
-        in a dry run, with nothing to commit, or when a file lies outside
-        that worktree.  Under the lock; a failure is logged (the close
-        stands)."""
-        if self.dry_run:
+        """After a close, before the push (rulings R66, R71): commit the
+        wave state and the regenerated scorecard, and only those, on the
+        base, in the worktree that has it checked out, staged by name.
+        Wave 1 only: the import queue's state is not committed (its
+        scorecard is never written, and its state file stays a working
+        file of the coordinator).  Skipped in a dry run, with nothing to
+        commit, or when a file lies outside that worktree.  Under the
+        lock.  Whatever goes wrong is logged, the two paths are unstaged,
+        one aoe line is sent, and the push still happens."""
+        if self.dry_run or self.kind != 'verdicts':
             return
+        rels = []
+        try:
+            err = self._commit_state_files(batch_id, rels)
+        except Exception as e:
+            err = 'raised %r' % (e,)
+        if err is None:
+            return
+        self.log('%s: the state commit failed: %s' % (batch_id, err))
+        try:
+            wt = self.worktree_for(self.repo, self.base)
+            if wt and rels:
+                subprocess.run(['git', '-C', wt, 'reset', '-q', '--', *rels],
+                               capture_output=True, text=True)
+            self.send(self._exception_line(batch_id, 'state-commit'))
+        except Exception as e:
+            self.log('%s: state commit cleanup failed: %r' % (batch_id, e))
+
+    def _commit_state_files(self, batch_id, rels):
+        """None, or why not; `rels` is filled with the paths staged."""
         wt = self.worktree_for(self.repo, self.base)
         if wt is None:
-            self.log('%s: no worktree has %s; the state is not committed' % (
-                batch_id, self.base))
-            return
+            return 'no worktree has %s' % self.base
         top = os.path.realpath(wt)
-        rels = []
-        for path in (self.state_path,
-                     self.report_path if self.kind == 'verdicts' else None):
-            if path is None or not os.path.exists(path):
+        for path in (self.state_path, self.report_path):
+            if not os.path.exists(path):
                 continue
             rel = os.path.relpath(os.path.realpath(path), top)
             if rel != os.pardir and not rel.startswith(os.pardir + os.sep) \
                     and rel not in rels:
                 rels.append(rel)
         if not rels:
-            return
+            return None
 
         def git(*args):
             return subprocess.run(['git', '-C', wt, *args],
                                   capture_output=True, text=True)
 
+        def fail(r):
+            return _one_line((r.stderr or '') + (r.stdout or '')) or \
+                'exit %s' % r.returncode
+
         r = git('add', '--', *rels)
-        if r.returncode == 0 and git('diff', '--cached', '--quiet',
-                                     '--', *rels).returncode == 0:
-            return
-        if r.returncode == 0:
-            sides = [v.get('side') for v in self.load_state(self.state_path)[
-                'batches'][batch_id]['verdicts'].values()]
-            msg = 'wave-state: close %s (ours %d, fork %d, neither %d)\n\n%s\n' % (
-                batch_id, sides.count('ours'), sides.count('fork'),
-                sides.count('neither'), STATE_COMMIT_TRAILER)
-            r = git('commit', '-q', '-m', msg, '--', *rels)
         if r.returncode != 0:
-            self.log('%s: the state commit failed: %s' % (batch_id, _one_line(
-                (r.stderr or '') + (r.stdout or ''))))
+            return fail(r)
+        if git('diff', '--cached', '--quiet', '--', *rels).returncode == 0:
+            return None
+        sides = [v.get('side') for v in self.load_state(self.state_path)[
+            'batches'][batch_id]['verdicts'].values()]
+        msg = 'wave-state: close %s (ours %d, fork %d, neither %d)\n\n%s\n' % (
+            batch_id, sides.count('ours'), sides.count('fork'),
+            sides.count('neither'), STATE_COMMIT_TRAILER)
+        r = git('commit', '-q', '-m', msg, '--', *rels)
+        return fail(r) if r.returncode != 0 else None
 
     def _wip_tip(self, batch_id, branch):
         """The branch tip's sha when it is the driver's own unpushed WIP
@@ -1926,10 +2096,15 @@ class Driver:
             self._ctx.t0 = self._clock()
         state = self.load_state(self.state_path)
         batch = state['batches'].get(batch_id)
+        stage = self._retry_stage.pop(batch_id, None)
         if batch is None:
             return self._exception(batch_id, 'state', [
                 'no batch %s in %s' % (batch_id, self.state_path)])
         if batch['status'] != 'assigned':
+            if stage == 'push' and batch['status'] == 'closed':
+                # A cleared push exception: the push again, nothing else.
+                return ('exception' if self._settle_closed(batch_id)
+                        else 'closed')
             self.log('%s is %s; nothing to do' % (batch_id, batch['status']))
             return 'closed'
         # The pool: the one this run assigned, else the one the state
@@ -1949,6 +2124,16 @@ class Driver:
                 '%s has no worktree%s; run `git worktree prune`, then `git '
                 'worktree add <path> %s`, then clear this exception' % (
                     batch['branch'], gone, batch['branch'])])
+        if stage in ('record', 'close') and not self.dry_run:
+            # A cleared record or close exception: straight to that stage on
+            # the worktree and the verdicts already recorded; the worker is
+            # not run again (ruling R71).
+            self.log('%s: retried at its %s stage; the worker and the review '
+                     'are not run again' % (batch_id, stage))
+            return self._land(
+                batch_id, batch, worktree,
+                self._saved_verdicts(batch_id, batch) if stage == 'record' else {},
+                (False, 'retry at %s: worker and review not run again' % stage))
         self._stage(batch_id, 'brief')
         try:
             rc, brief = self.render_brief(
@@ -2027,6 +2212,27 @@ class Driver:
             review = (True, '%s (seed %s): clean%s' % (
                 why, self.seed, ' after one fix round' if fixed else ''))
 
+        return self._land(batch_id, batch, worktree, verdicts, review)
+
+    def _saved_verdicts(self, batch_id, batch):
+        """The verdicts of the last saved report that the state does not
+        hold yet (the retry of a record exception)."""
+        key = _tool('wave')._addr_key
+        have = {key(a) for a in batch.get('verdicts', {})}
+        folder = os.path.join(self.driver_dir, batch_id)
+        for label in ('worker-fix-review', 'worker-fix-checks', 'worker'):
+            try:
+                with open(os.path.join(folder, label + '.report.md'),
+                          encoding='utf-8') as f:
+                    parsed = parse_report(f.read())
+            except (OSError, ReportError):
+                continue
+            return {a: sc for a, sc in parsed.items() if key(a) not in have}
+        return {}
+
+    def _land(self, batch_id, batch, worktree, verdicts, review):
+        """Record, close, push, ledger -- and the retry of a cleared record,
+        close or push exception, which comes straight here (ruling R71)."""
         # Record, close, push, ledger.  Every state write and git
         # operation here holds the driver lock (ruling R62); nothing
         # inside the locked blocks takes it again.
@@ -2046,12 +2252,8 @@ class Driver:
         self._stage(batch_id, 'close')
         with self._lock:
             commits = self._commits(batch['branch'])
-            # What the worker left uncommitted is committed before the gate
-            # certifies the branch; close refuses a dirty worktree.
-            _wip, why = self._commit_wip(worktree, WIP_GATE_MESSAGE)
-            if why:
-                self.log('%s: WIP not committed before the gate: %s' % (
-                    batch_id, why))
+            # Uncommitted paths were a mechanical-check problem already
+            # (ruling R71); nothing is committed on the worker's behalf.
             # Another driver may fast-forward the base while this one waits
             # on the gate lock: on that error, and only after the gate
             # passed, sync and gate once more in place (ruling R64).
@@ -2203,15 +2405,37 @@ class Driver:
                                           if l.strip()])
         return 1
 
+    def _retry_why(self, batch_id):
+        """The resume text for a cleared batch (None: it goes straight to
+        its stage, or is closed), or False when it has no worktree and no
+        verdict and so is adopted anew (ruling R71)."""
+        batch = self.load_state(self.state_path)['batches'].get(batch_id) or {}
+        stage = self._retry_stage.get(batch_id)
+        if batch.get('status') != 'assigned' or stage in ('record', 'close'):
+            return None
+        if not batch.get('verdicts') and self.queue == 'wave1' and \
+                not self.dry_run and (self.worktree_for(
+                    self.repo, batch.get('branch', '')) is None):
+            return False
+        return 'had its exception at the %s stage cleared: the work so ' \
+               'far is on its branch' % (stage or 'earlier')
+
     def _cleared(self):
         """Batches whose exception the coordinator cleared on disk: retried
         first."""
         state = self.load_state(self.state_path)
         status = self._read_status()
-        return [bid for bid, info in sorted(status['batches'].items())
-                if isinstance(info, dict) and info.get('outcome') == 'exception'
-                and bid not in status['exceptions']
-                and state['batches'].get(bid, {}).get('status') == 'assigned']
+        out = []
+        for bid, info in sorted(status['batches'].items()):
+            if not (isinstance(info, dict) and info.get('outcome') == 'exception'
+                    and bid not in status['exceptions']):
+                continue
+            st = state['batches'].get(bid, {}).get('status')
+            stage = info.get('stage')
+            if st == 'assigned' or (st == 'closed' and stage == 'push'):
+                out.append(bid)
+                self._retry_stage[bid] = stage
+        return out
 
     # -- the budget (ruling R38) ----------------------------------------------
 
@@ -2279,7 +2503,9 @@ class Driver:
                 pool=batch.get('pool')))
             self.log('%s: closed by the last run without its ledger entry; '
                      'entry written' % batch_id)
-        err = self.push()
+        with self._lock:
+            self._commit_state(batch_id)
+            err = self.push()
         self._finish(batch_id, 'closed')
         if err:
             self._exception(batch_id, 'push', ['git push failed: %s' % err])
@@ -2678,7 +2904,18 @@ class Driver:
             if name is None:
                 return False
             if retries:
-                launch(retries.pop(0), None, name)
+                bid = retries.pop(0)
+                why = self._retry_why(bid)
+                if why is False:           # a cut that never happened: adopt it
+                    code = self._adopt(bid)
+                    if code is not None:
+                        with self._lock:
+                            self._busy[name] -= 1
+                        failure = code
+                        return False
+                    self._record_pool(bid, name)
+                    why = None
+                launch(bid, why, name)
                 return True
             if adopt:
                 batch_id = adopt.pop(0)
@@ -2748,7 +2985,8 @@ class Driver:
             return
         try:
             r = subprocess.run(['aoe', 'send', self.aoe_session, line],
-                               capture_output=True, text=True, timeout=60)
+                               capture_output=True, text=True, timeout=60,
+                               env=send_env(os.environ))
         except (OSError, subprocess.SubprocessError) as e:
             self.log('aoe send failed: %r' % (e,))
             return
@@ -2789,6 +3027,11 @@ def _parse(argv):
                    help='stop starting batches once N have started in this '
                         'run (adopted, cut or resumed); the ones in flight '
                         'finish, and the run exits 0')
+    p.add_argument('--worker-timeout', type=float, default=DEFAULT_TIMEOUT,
+                   metavar='SECONDS',
+                   help='kill a worker or reviewer run (its whole process '
+                        'group) after this long and park the batch with the '
+                        'reason timeout (default %(default)s)')
     p.add_argument('--seed', default=DEFAULT_SEED,
                    help='the review sample seed (default %(default)s)')
     p.add_argument('--state', help='the queue\'s state file '
@@ -2872,6 +3115,8 @@ def _build(args, repo):
                          'it at a copy, never at docs/wso/wave-state.json.')
     if args.max_batches is not None and args.max_batches < 1:
         return None, (2, 'wave.py run: --max-batches must be at least 1')
+    if args.worker_timeout <= 0:
+        return None, (2, 'wave.py run: --worker-timeout must be positive')
     live_path = wave.QUEUES[queue]['state']
     if args.dry_run:
         live = {os.path.realpath(live_path), os.path.realpath(
@@ -2893,10 +3138,12 @@ def _build(args, repo):
         worker = reviewer = None
     else:
         worker = reviewer = None
-        workers_by_pool = {p.name: HeadlessWorker(model=p.model, wrapper=p.wrapper)
+        workers_by_pool = {p.name: HeadlessWorker(model=p.model, wrapper=p.wrapper,
+                                           timeout=args.worker_timeout)
                            for p in pools}
         reviewers_by_pool = {p.name: HeadlessWorker(model=p.reviewer_model,
-                                                    wrapper=p.wrapper)
+                                                    wrapper=p.wrapper,
+                                                    timeout=args.worker_timeout)
                              for p in pools}
     frida = args.frida
     if frida is None:
