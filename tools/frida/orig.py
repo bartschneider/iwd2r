@@ -19,6 +19,15 @@ Verdicts (exit codes): CLEAN 0, CRASH 1, NOT-LOADED / NOT-EXERCISED /
 OBSERVER-ERROR 2 -- the last three all mean *ran, proved nothing*, the same
 discipline as smoke's --hit, so a green run cannot be a false green.
 
+The status file explains itself: a script error (OBSERVER-ERROR) writes an
+`ERROR script: <description> (<file>:<line>)` line there, not only into the
+trace.  A hook site Frida refuses (hooks.py: {tag: 'unhooked'}, e.g. a body
+too short for the 5-byte jump) writes `UNHOOKED <name> at <addr>: <error>`,
+gets no HITS line (its counter never ran) and is not an observer error: the
+other hooks were installed and prove what they prove; the refused row is
+unmeasured (truth.frida_verdicts reads the event from the trace).  A refused
+`loaded` observation never fires, so the run reads NOT-LOADED.
+
 Two ways to find the target:
 
   orig.py --exe C:\\path\\to\\game.exe --env K=V ...      spawn it suspended,
@@ -106,6 +115,7 @@ class Trace:
         self.detached = False
         self.detach_reason = ""
         self.errors = []
+        self.unhooked = {}       # hook name -> Frida's refusal text
         self.counts = {}
         self.final = False       # the final HITS message (sent at process exit) arrived
         self.script = None
@@ -132,6 +142,12 @@ class Trace:
         if message["type"] != "send":
             self.errors.append(message)
             self.record({"tag": "ERROR", "message": message})
+            where = ""
+            if message.get("fileName"):
+                where = " (%s:%s)" % (message["fileName"], message.get("lineNumber", "?"))
+            text = str(message.get("description") or message.get("stack")
+                       or json.dumps(message, sort_keys=True))
+            self.say("ERROR script: %s%s" % (text.splitlines()[0] if text else "?", where))
             return
         payload = message["payload"]
         tag = payload.get("tag")
@@ -147,7 +163,12 @@ class Trace:
                     pass
             return          # the timer fires every 2s; only the totals matter
         self.record(payload)
-        if tag == "loaded" and not self.loaded:
+        if tag == "unhooked":
+            name = str(payload.get("name"))
+            self.unhooked[name] = str(payload.get("error", ""))
+            self.say("UNHOOKED %s at %s: %s" % (name, payload.get("addr"),
+                                               self.unhooked[name]))
+        elif tag == "loaded" and not self.loaded:
             self.loaded = True
             self.loaded_detail = payload.get("detail", "")
             self.say("loaded: %s" % (self.loaded_detail or "world screen up"))
@@ -160,7 +181,8 @@ class Trace:
 
     def finish(self, hit: str, hit_min: int, require_loaded: bool = True) -> int:
         for name, n in sorted(self.counts.items()):
-            self.say("HITS %s %d" % (name, n))
+            if name not in self.unhooked:     # a refused hook counted nothing
+                self.say("HITS %s %d" % (name, n))
         self.say("HITS-FINAL %s" % ("yes" if self.final else "no"))
 
         if self.crash is not None:

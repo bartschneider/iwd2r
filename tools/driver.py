@@ -933,22 +933,36 @@ def _merge_base(worktree, base):
 X86_MAP_REL = 'build/windows-msvc-x86/RelWithDebInfo/iwd2r.map'
 
 
+FRIDA_BUILD_TARGETS = 'iwd2r iwd2r_injector iwd2r_recorder'
+
+
 def frida_build(worktree, log_path=None):
     """Our x86 build of a batch worktree, for its Frida phase (spec B): the
     worktree synced into its own Windows checkout (play.win_checkout:
     %USERPROFILE%\\iwd2r-build-<worktree folder name>, never the driver's,
     whatever IWD2R_WIN_CHECKOUT says) and built there with the x86 preset,
-    the compiler output in log_path.  Returns (checkout, map path): the map
-    beside the exe names the RVAs of the bodies under test, and probe.py
-    --build-checkout runs that exe.  Raises on any failure (play exits with
+    the compiler output in log_path: our exe and the oracle's injector and
+    recorder (FRIDA_BUILD_TARGETS), which the original side runs from the
+    same checkout (probe.py --build-checkout), so the recorder writing the
+    original's state dumps and the dumper writing ours come from one tree and
+    the dump guard compares like with like (the driver checkout's recorder,
+    older than schema.json, failed every b014/i001 guard).  Returns
+    (checkout, map path): the map beside the exe names the RVAs of the
+    bodies under test.  Raises on any failure (play exits with
     SystemExit)."""
     play = _tool('play')
+    oracle = _tool('oracle')
     checkout = play.win_checkout(worktree, {})
     play.sync_windows(root=worktree, checkout=checkout)
-    exe = play.build_windows_x86(checkout=checkout, log_path=log_path)
+    exe = play.build_windows_x86(checkout=checkout, log_path=log_path,
+                                 target=FRIDA_BUILD_TARGETS)
     map_path = os.path.splitext(exe)[0] + '.map'
     if not os.path.isfile(map_path):
         raise RuntimeError('the x86 build left no %s' % map_path)
+    for name in (oracle.INJECTOR, oracle.RECORDER):
+        path = os.path.join(checkout, oracle.REPLAY_DIR_REL, name)
+        if not os.path.isfile(path):
+            raise RuntimeError('the x86 build left no %s' % path)
     return checkout, map_path
 
 
@@ -970,6 +984,17 @@ def _infrastructure_failure(traces):
             t.get('failed') and not any((t.get('result') or {}).values()) for _sc, t in runs):
         return ''
     return '; '.join('%s: %s' % (sc, t['failed']) for sc, t in runs)
+
+
+def _schema_failure(traces):
+    """The scenarios whose state dumps truth.compare_dumps refused on the
+    replay schema (a recorder or our dumper out of step with schema.json:
+    every scenario's dump guard would fail on it, whatever the rows did),
+    with its detail, else ''."""
+    return '; '.join('%s: %s' % (sc, t['dumps'].get('detail'))
+                     for sc, t in sorted(traces.items())
+                     if isinstance(t, dict) and isinstance(t.get('dumps'), dict)
+                     and t['dumps'].get('invalid'))
 
 
 def _write_trace_evidence(path, probe, orig_path, ours_path):
@@ -2280,7 +2305,8 @@ class Driver:
         the batch branch, and any other outcome (different, not exercised, no
         hook, scenario failed, not measured) is a finding that parks it.  A
         phase-wide failure (no build, the run raised, every scenario failed
-        with no status on either side) raises _StageError('frida'): the
+        with no status on either side, state dumps the replay schema refuses)
+        raises _StageError('frida'): the
         batch's exception, nothing measured, parked or rewritten.  It runs
         once per batch, never again.  Returns the findings."""
         self._frida_got = {}
@@ -2338,6 +2364,12 @@ class Driver:
             raise _StageError('frida', 'every Frida scenario failed on infrastructure (no side '
                                        'produced a status): %s; no row was measured, parked or '
                                        'rewritten; fix it and clear this exception' % dead)
+        refused = _schema_failure(traces)
+        if refused:
+            raise _StageError('frida', 'the state dumps of a Frida run fail the replay schema '
+                                       '(tooling out of step, not the rows): %s; no row was '
+                                       'measured, parked or rewritten; fix it and clear this '
+                                       'exception' % refused)
         self._frida_got = {key(r['address']): got.get(key(r['address']), ('skipped', 'no result'))
                            for r in rows}
         # Frequency-only differences are caller findings: ledger lines in
@@ -2473,6 +2505,13 @@ class Driver:
             if checkout is None:
                 return None, None, ('--frida-map %s is not where an x86 build writes its map '
                                     '(<checkout>/%s)' % (self.frida_map, X86_MAP_REL))
+            oracle = _tool('oracle')
+            for name in (oracle.INJECTOR, oracle.RECORDER):
+                path = os.path.join(checkout, oracle.REPLAY_DIR_REL, name)
+                if not os.path.isfile(path):
+                    return None, None, ('--frida-map %s: no %s beside it; the original side runs '
+                                        'that checkout\'s injector and recorder (tools/oracle.py '
+                                        'build from it)' % (self.frida_map, path))
             self.log('%s: frida: --frida-map given: measuring the build in %s, not a build '
                      'of %s' % (batch_id, checkout, worktree))
             return checkout, self.frida_map, None

@@ -388,12 +388,16 @@ def report(out_dir, status_name):
 
 
 def ours_build(target, build_checkout=None):
-    """The build folder a side runs from: the original's injector and
-    recorder from this checkout's oracle build; ours from build_checkout's
-    x86 RelWithDebInfo build (the checkout that built the bodies under
-    test, e.g. a batch worktree's), else this checkout's."""
+    """The build folder a side runs from, in build_checkout (the checkout
+    that built the bodies under test, e.g. a batch worktree's) else this
+    checkout's: the original's injector and recorder from its oracle build,
+    ours from its x86 RelWithDebInfo build.  One checkout for both sides, so
+    the recorder writing the original's dumps and the dumper writing ours
+    come from one tree and follow one schema.json (a recorder.dll older than
+    the schema in the driver's checkout made every b014/i001 dump guard
+    fail)."""
     if target == 'original':
-        return os.path.join(play.WIN_CHECKOUT, oracle.REPLAY_DIR_REL)
+        return os.path.join(build_checkout or play.WIN_CHECKOUT, oracle.REPLAY_DIR_REL)
     return os.path.join(build_checkout or play.WIN_CHECKOUT, OURS_EXE_REL)
 
 
@@ -424,7 +428,8 @@ def run(ns):
                        else 'iwd2r.exe')
     if not os.path.isfile(exe):
         if ns.target == 'original':
-            sys.exit('probe: no %s; run tools/oracle.py build' % exe)
+            sys.exit('probe: no %s; build the oracle there (tools/oracle.py build for '
+                     'this checkout; driver.frida_build for a batch checkout)' % exe)
         sys.exit('probe: no %s; build windows-msvc-x86 first' % exe)
     if not dry:
         winsandbox.deploy_runtime(exe, log, arch='x86')
@@ -530,11 +535,12 @@ def add_side_args(p):
                    help="ours side: loaded observation site as an RVA off "
                         '--module')
     p.add_argument('--build-checkout', metavar='CHECKOUT',
-                   help='ours side: the Windows checkout (a WSL path) whose '
-                        + OURS_EXE_REL + '/iwd2r.exe runs, e.g. a batch '
-                        "worktree's (default: this checkout's, "
-                        'play.WIN_CHECKOUT); the tools are staged from this '
-                        'checkout either way')
+                   help='the Windows checkout (a WSL path) a side runs from, '
+                        "e.g. a batch worktree's: ours its "
+                        + OURS_EXE_REL + '/iwd2r.exe, the original its '
+                        + oracle.REPLAY_DIR_REL + ' injector and recorder '
+                        "(default: this checkout's, play.WIN_CHECKOUT); the "
+                        'tools are staged from this checkout either way')
     p.add_argument('--module', default=None,
                    help='module --loaded-rva resolves against '
                         '(default iwd2r.exe)')
