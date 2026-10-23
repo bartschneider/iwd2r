@@ -135,8 +135,19 @@ def _global_js(g):
     return READERS.get(g.get("type", "u32"), READERS["u32"]).format(p=expr)
 
 
-def js_for_hook(h, idx):
+def js_for_hook(h, idx, count_only=False):
     name = h["name"]
+    if count_only and name != "loaded":
+        # coverage pass: count the hit, send nothing per call (the HITS
+        # totals and the unhooked event stay as in every other table)
+        return "\n".join([
+            f"let cnt{idx} = 0;",
+            "try {",
+            f"Interceptor.attach({addr_expr(h)}, {{ onEnter(args) {{ ++cnt{idx}; }} }});",
+            "} catch (e) {",
+            f"  send({{ tag: 'unhooked', name: '{name}', "
+            f"addr: guard(() => {addr_expr(h)}.toString()), error: String(e) }});",
+            "}"])
     conv = h.get("conv", "thiscall")
     args = h.get("args", [])
     maxn = int(h.get("max", 500))
@@ -178,8 +189,11 @@ def js_for_hook(h, idx):
     return "\n".join(parts)
 
 
-def hooks_js(hooks):
-    return "\n".join(js_for_hook(h, i) for i, h in enumerate(hooks))
+def hooks_js(hooks, count_only=False):
+    """The hooks' JS; count_only (a table-level flag) installs a bare
+    counter per hook instead of the logging onEnter/onLeave (the "loaded"
+    hook keeps its event: the scenario waits on it)."""
+    return "\n".join(js_for_hook(h, i, count_only) for i, h in enumerate(hooks))
 
 
 def hit_counts_js(hooks, period_ms=2000):

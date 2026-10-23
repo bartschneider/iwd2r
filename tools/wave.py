@@ -14,7 +14,10 @@ The coordinator's wave loop, one command each::
     python3 tools/wave.py status
     python3 tools/wave.py recompare [--tip SHA] [--no-fetch]   # queue what Will's tip adds
     python3 tools/wave.py run [--queue wave1|import] [--pool SPEC]... [--budget C] [--seed S]   # the driver
-    python3 tools/wave.py next --queue import   # cut an import batch i<NNN>
+    python3 tools/wave.py next --queue import   # cut an import batch i<NNN> (covered rows first;
+                                                # --include-uncovered keeps the rest)
+    python3 tools/wave.py coverage [--scenarios a,b] [--chunk N] [--addresses FILE] [--dry]
+                                                # original-exe hit map per scenario
     python3 tools/wave.py run --dry-run --state COPY.json   # one batch, fake worker
     python3 tools/wave.py run --clear b011      # the coordinator's retry of an exception
 
@@ -190,6 +193,22 @@ def _triage():
         spec.loader.exec_module(module)
         _triage_module = module
     return _triage_module
+
+
+_coverage_module = None
+
+
+def _coverage():
+    """tools/coverage.py, loaded by path (tools/ is not on sys.path under -I)."""
+    global _coverage_module
+    if _coverage_module is None:
+        spec = importlib.util.spec_from_file_location(
+            'wave_coverage', os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                          'coverage.py'))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _coverage_module = module
+    return _coverage_module
 
 
 _truth_module = None
@@ -476,7 +495,8 @@ def _next_batch(disagreements_path=DISAGREEMENTS_PATH, state_path=STATE_PATH,
                size=DEFAULT_SIZE, category=DEFAULT_CATEGORY, *,
                triage_path=None, repo=None, fork_base=None,
                worktree_root=None, import_path=None, base='first',
-               claims_path=None, queue='wave1', probe_path=None):
+               claims_path=None, queue='wave1', probe_path=None,
+               coverage_path=None, coverage_root=None, include_uncovered=False):
     """Rank the unclaimed rows, take the biggest `size`, record the batch.
 
     With triage_path (the CLI passes docs/wso/triage.json and ROOT) it
@@ -589,6 +609,32 @@ def _next_batch(disagreements_path=DISAGREEMENTS_PATH, state_path=STATE_PATH,
         return 2, f'nothing left: every {category} row is assigned or decided\n'
     eligible.sort(key=lambda r: (-(r['their_len'] + r['our_len']),
                                  r['file'], r['name']))
+    coverage_note = None
+    if importing:
+        # The coverage map (tools/coverage.py): covered rows first, most
+        # scenarios first; rows no scenario exercises are left out.
+        cov_mod = _coverage()
+        cpath = coverage_path or os.path.join(
+            os.path.dirname(os.path.abspath(disagreements_path)), 'coverage.json')
+        cov = cov_mod.read(cpath)
+        if cov is None:
+            coverage_note = 'coverage: no map (docs/wso/coverage.json); candidate order unchanged'
+        elif cov_mod.stale(cov, coverage_root or repo or ROOT):
+            coverage_note = ('coverage: map is stale (scenarios changed); candidate order '
+                             'unchanged; re-run `wave.py coverage`')
+        else:
+            hit = {id(r): len(cov_mod.covered(cov, r['address'])) for r in eligible}
+            left = [r for r in eligible if not hit[id(r)]]
+            eligible = sorted((r for r in eligible if hit[id(r)]),
+                              key=lambda r: -hit[id(r)])  # stable: size order within a count
+            if include_uncovered:
+                eligible += left
+            else:
+                coverage_note = ('coverage: %d candidate row(s) left out as exercised by no '
+                                 'scenario' % len(left))
+            if not eligible:
+                return 2, ('nothing left: every remaining import row is exercised by no '
+                           'scenario (--include-uncovered offers them anyway)\n')
     chosen = eligible[:size]
     pre = q['prefix']
     nid = 1 + max((int(m.group(1)) for bid in state['batches']
@@ -629,6 +675,8 @@ def _next_batch(disagreements_path=DISAGREEMENTS_PATH, state_path=STATE_PATH,
         return 0, '\n'.join(lines) + '\n'
     lines.append(f'worktree {wt} ({how})')
     if importing:
+        if coverage_note:
+            lines.append(coverage_note)
         return 0, '\n'.join(lines) + '\n'
     rc, out = apply_triage(
         state_path, repo, batch_id, triage_path,
@@ -1694,6 +1742,24 @@ def audit_text(audit):
             f'{results.count("flip")} flips.\n'), None
 
 
+def coverage_line(folder=None):
+    """`Coverage: <covered> of <candidates> candidate functions exercised by
+    <k> scenarios (<date>)` from coverage.json beside the state file, or
+    `Coverage: not measured`."""
+    folder = folder or os.path.dirname(DISAGREEMENTS_PATH)
+    cov_mod = _coverage()
+    cov = cov_mod.read(os.path.join(folder, 'coverage.json'))
+    if cov is None:
+        return 'Coverage: not measured'
+    try:
+        cands = cov_mod.candidates(os.path.join(folder, 'disagreements.json'))
+    except (OSError, ValueError):
+        cands = []
+    hit = sum(1 for a in cands if cov_mod.covered(cov, a))
+    return 'Coverage: %d of %d candidate functions exercised by %d scenarios (%s)' % (
+        hit, len(cands), len(cov['scenarios']), str(cov.get('at', ''))[:10])
+
+
 def write_scorecard(state_path=STATE_PATH, report_path=REPORT_PATH,
                     triage_path=TRIAGE_PATH, calibration_path=CALIBRATION_PATH,
                     audit_path=None):
@@ -1706,6 +1772,7 @@ def write_scorecard(state_path=STATE_PATH, report_path=REPORT_PATH,
     audit_path) exists it ends with the rule-3 audit sample paragraph."""
     state = load_state(state_path)
     section = scorecard_text(state)
+    section += '\n' + coverage_line(os.path.dirname(os.path.abspath(state_path))) + '\n'
     if audit_path is None:
         audit_path = os.path.join(
             os.path.dirname(os.path.abspath(state_path)), 'audit.json')
@@ -1793,9 +1860,12 @@ def main(argv=None):
     cmd, rest = argv[0], argv[1:]
     if cmd == 'next':
         size, category, queue = DEFAULT_SIZE, DEFAULT_CATEGORY, 'wave1'
+        include = False
         it = iter(rest)
         for a in it:
-            if a == '--queue':
+            if a == '--include-uncovered':
+                include = True
+            elif a == '--queue':
                 queue = next(it, '')
                 if queue not in QUEUES:
                     print('wave next: --queue is one of '
@@ -1818,7 +1888,8 @@ def main(argv=None):
                 print(f'wave next: unknown option {a}', file=sys.stderr)
                 return 2
         extra = {} if queue == 'wave1' else {
-            'state_path': QUEUES[queue]['state'], 'queue': queue}
+            'state_path': QUEUES[queue]['state'], 'queue': queue,
+            'include_uncovered': include}
         rc, out = next_batch(
             size=size, category=category,
             triage_path=TRIAGE_PATH if QUEUES[queue]['triage'] else None,
@@ -1895,6 +1966,8 @@ def main(argv=None):
                 print(f'wave recompare: unknown option {a}', file=sys.stderr)
                 return 2
         rc, out = recompare(**kw)
+    elif cmd == 'coverage':
+        return _coverage().main(rest)
     elif cmd == 'scorecard':
         rc, out = write_scorecard()
     elif cmd == 'status':
