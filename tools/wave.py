@@ -240,6 +240,91 @@ def _check_evidence():
     return _check_evidence_module
 
 
+def merge_base_sha(worktree, base):
+    """The full sha where the worktree's HEAD left base, or None."""
+    r = subprocess.run(['git', '-C', worktree, 'merge-base', base, 'HEAD'],
+                       capture_output=True, text=True)
+    return r.stdout.strip() or None if r.returncode == 0 else None
+
+
+ORACLE_CASE_RE = re.compile(r'ORACLE_CASE\(\s*"([^"]+)"')
+
+
+def _oracle_case_names(worktree):
+    """Every case id an oracle/cases/*.cpp of the worktree registers."""
+    names = set()
+    folder = os.path.join(worktree, 'oracle', 'cases')
+    for name in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
+        if name.endswith('.cpp'):
+            with open(os.path.join(folder, name), encoding='utf-8', errors='replace') as f:
+                names.update(ORACLE_CASE_RE.findall(f.read()))
+    return names
+
+
+def frida_trace(text):
+    """True when an evidence text is `kind: trace` with a frida
+    trace_source (check_evidence.TRACE_SOURCES[1]): the line only the
+    driver's Frida phase writes."""
+    ce = _check_evidence()
+    fields = ce.front_matter(text or '')
+    return fields.get('kind') == 'trace' and bool(
+        ce.TRACE_SOURCES[1].fullmatch(fields.get('trace_source') or ''))
+
+
+def kept_evidence(worktree, merge_base, address, name, text):
+    """Why an import row's evidence stands as it is written, or None when
+    the Frida phase must measure it (the whole-branch review's ruling):
+    `kind: oracle` with an oracle_case that a case in the worktree's
+    oracle/cases registers; `kind: trace` citing a fork recovery note that
+    names the function (check_evidence.fork_note_mentions, the note read
+    with git show); or an evidence file unchanged since the merge base whose
+    kind is trace or better.  Anything else a worker wrote (read-only, a
+    declared replay, an oracle without its case, a trace citing anything
+    else) is measured; a frida line is the driver's alone."""
+    ce = _check_evidence()
+    fields = ce.front_matter(text or '')
+    kind = fields.get('kind')
+    case = fields.get('oracle_case')
+    if kind == 'oracle' and case and case in _oracle_case_names(worktree):
+        return f'oracle case {case}'
+    m = ce.TRACE_SOURCES[0].fullmatch(fields.get('trace_source') or '')
+    if kind == 'trace' and m:
+        try:
+            addr = int(_addr_key(address), 16)
+        except ValueError:
+            addr = None
+        ok, _why = ce.fork_note_mentions(
+            m.group(1), m.group(2), addr, name,
+            run=lambda argv, **kw: subprocess.run(argv, cwd=worktree, **kw)) \
+            if addr is not None else (False, '')
+        if ok:
+            return f'fork note {m.group(2)}'
+    if merge_base and kind in IMPORT_KINDS:
+        at = subprocess.run(['git', '-C', worktree, 'show',
+                             f'{merge_base}:{_evidence_rel(address)}'],
+                            capture_output=True, text=True)
+        if at.returncode == 0 and at.stdout == text:
+            return 'unchanged since the merge base'
+    return None
+
+
+def _import_bar(worktree, merge_base, address, name, rel, text):
+    """The close's problem with an import function's evidence, or None:
+    trace or better, and either the driver's frida trace or evidence that
+    stands as written (kept_evidence)."""
+    m = KIND_RE.search(text)
+    have = m.group(1) if m else 'none'
+    if have not in IMPORT_KINDS:
+        return (f'{rel}: kind {have} is not trace or better; let the Frida phase '
+                f'measure it, or park it ({parked_rel(address)})')
+    if frida_trace(text) or kept_evidence(worktree, merge_base, address, name, text):
+        return None
+    return (f'{rel}: kind {have} was written in this batch and nothing measured it: only '
+            f'the driver\'s frida trace, an oracle case registered in oracle/cases, a fork '
+            f'recovery note that names the function, or evidence unchanged since the merge '
+            f'base stands; let the Frida phase measure it, or park it ({parked_rel(address)})')
+
+
 def parked_rel(address):
     """docs/wso/import-parked/<ADDR>.json: where one parked row's entry lives."""
     return f'{IMPORT_PARKED_DIR}/{_addr_key(address).upper()}.json'
@@ -1050,11 +1135,12 @@ def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
             if bad:
                 problems.append(bad)
             try:
-                touched = {_addr_key('0x%X' % a) for _p, a, _n in
+                touched = {_addr_key('0x%X' % a): n for _p, a, n in
                            _check_evidence().touched(wt, base)}
             except Exception as e:
-                touched = set()
+                touched = {}
                 problems.append(f'cannot tell which bodies the batch touched ({e!r})')
+            mb = merge_base_sha(wt, base)
         for row in batch['rows']:
             rel = _evidence_rel(row['address'])
             path = os.path.join(wt, rel)
@@ -1089,12 +1175,40 @@ def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
                         f'"corroborated by WSO at <sha>" line names this '
                         f'batch\'s pin {batch["fork_base"][:7]}')
             else:
-                m = KIND_RE.search(text)
-                have = m.group(1) if m else 'none'
-                if have not in IMPORT_KINDS:
-                    problems.append(f'{rel}: kind {have} is not trace or '
-                                    f'better; let the Frida phase measure it, or park '
+                # Imported means changed: a body left (or put back) as the
+                # stub cannot close on any evidence, and only touched
+                # functions have their trace_source checked by the gate.
+                if k not in touched:
+                    problems.append(f'row {row["address"]} not imported: body unchanged '
+                                    f'against {mb[:12] if mb else base}; import it or park '
                                     f'it ({parked_rel(k)})')
+                bar = _import_bar(wt, mb, row['address'], row.get('name', ''), rel, text)
+                if bar:
+                    problems.append(bar)
+        if kind != 'verdicts' and wt is not None:
+            # A stub dependency imported with a row (the brief allows it in
+            # the batch's own files) meets the same bar: trace or better, or
+            # edited back and parked.
+            rows = {_addr_key(r['address']) for r in batch['rows']}
+            for k, name in sorted(touched.items()):
+                if k in rows:
+                    continue
+                rel = _evidence_rel(k)
+                label = f'0x{k.upper()} ({name}, imported with the batch)'
+                if k in parked:
+                    problems.append(f'{label}: parked ({parked_rel(k)}) but its body is still '
+                                    f"changed against {base}; edit that function back to the "
+                                    f"merge base's body")
+                    continue
+                path = os.path.join(wt, rel)
+                if not os.path.isfile(path):
+                    problems.append(f'{label}: no evidence file {rel}; the Frida phase measures '
+                                    f'it like a row, or edit it back and park it')
+                    continue
+                with open(path, encoding='utf-8') as f:
+                    bar = _import_bar(wt, mb, '0x' + k, name, rel, f.read())
+                if bar:
+                    problems.append(f'{label}: {bar}')
     if gate and not problems and wt is not None:
         g = subprocess.run(['bash', 'tools/gates.sh', '--base', base],
                            cwd=wt, capture_output=True, text=True)

@@ -10667,6 +10667,11 @@ class DriverTest(unittest.TestCase):
         self.assertTrue(any(p.fullmatch(fields['trace_source']) for p in ce.TRACE_SOURCES),
                         fields['trace_source'])
         self.assertIn('frida b011-world_entry orig:', fields['trace_source'])
+        # the driver keeps the lines it wrote; the worker-line check accepts them
+        self.assertEqual(d._frida_lines('b011'), {'401000': fields['trace_source']})
+        self.assertEqual(driver._foreign_frida_lines(self.wt, ['docs/evidence/401000.md'],
+                                                     d._frida_lines('b011')), [])
+        self.assertEqual(len(driver._foreign_frida_lines(self.wt, ['docs/evidence/401000.md'], {})), 1)
         self.assertEqual(self.git('status', '--porcelain', cwd=self.wt).stdout, '')
         self.assertEqual(self.git('log', '-1', '--format=%s', cwd=self.wt).stdout.strip(),
                          'frida: trace evidence for 1 rows of b011')
@@ -10686,13 +10691,18 @@ class DriverTest(unittest.TestCase):
         self.assertIn('kind: read-only', open(os.path.join(self.wt, 'docs', 'evidence', '403000.md')).read())
         self.assertEqual(len(findings), 2)
 
-    def test_driver_frida_phase_never_lowers_evidence_and_parks_different_rows(self):
+    def test_driver_frida_phase_measures_kinds_the_worker_declared(self):
         trace = TruthTest._trace
         d, batch = self._import_phase_driver()
-        d.frida_run = lambda b, table, scenarios, **kw: {sc: (
-            trace(('fn_401000', 7, 3), ('fn_402000', 7, 3)),
-            trace(('fn_401000', 7, 3), ('fn_402000', 7, 4))) for sc in scenarios}
-        # 401000 oracle and equal, 402000 replay and different, 403000 replay and unexercised
+        seen = []
+
+        def frida_run(b, table, scenarios, **kw):
+            seen.append(sorted(h['name'] for h in table['original']['hooks']))
+            return self._file_traces(scenarios, trace(('fn_401000', 7, 3), ('fn_402000', 7, 3)),
+                                     trace(('fn_401000', 7, 3), ('fn_402000', 7, 4)))
+        d.frida_run = frida_run
+        # 401000 an oracle with no case and equal, 402000 a declared replay and
+        # different, 403000 a declared replay and never exercised: all measured
         for stem, kind in (('401000', 'oracle'), ('402000', 'replay'), ('403000', 'replay')):
             path = os.path.join(self.wt, 'docs', 'evidence', stem + '.md')
             with open(path) as f:
@@ -10701,17 +10711,167 @@ class DriverTest(unittest.TestCase):
             with open(path, 'w') as f:
                 f.write(text)
         self.git('commit', '-qam', 'kinds', cwd=self.wt)
-        before = self.git('rev-parse', 'HEAD', cwd=self.wt).stdout.strip()
         findings = d._frida_phase('b011', batch, self.wt, {})
-        self.assertEqual(self.git('rev-parse', 'HEAD', cwd=self.wt).stdout.strip(), before)
-        self.assertIn('kind: oracle', open(os.path.join(self.wt, 'docs', 'evidence', '401000.md')).read())
-        self.assertEqual(d._frida_got['401000'][0], 'equal')
-        # the different replay row is still a finding; the unexercised replay row is not
-        self.assertEqual([f[:9] for f in findings], ['0x402000:'])
-        self.assertIn('world_entry', findings[0])           # the diff detail
-        self.assertIn('evidence (kind replay) stands', findings[0])
-        self.assertNotIn('import-parked/', findings[0])
-        self.assertNotIn('edit that function back', findings[0])
+        self.assertEqual(seen, [['fn_401000', 'fn_402000', 'fn_403000']])
+        # the equal one is upgraded by the driver; the others park
+        self.assertIn('kind: trace', _slurp(os.path.join(self.wt, 'docs', 'evidence', '401000.md')))
+        self.assertEqual([f[:9] for f in findings], ['0x402000:', '0x403000:'])
+        self.assertIn('frida different', findings[0])
+        self.assertIn('docs/wso/import-parked/402000.json', findings[0])
+        self.assertIn('docs/wso/import-parked/403000.json', findings[1])
+        self.assertTrue(all('park it' in f for f in findings), findings)
+
+    def _file_traces(self, scenarios, orig, ours, **extra):
+        """frida_run's result with the traces on disk (the evidence rewrite
+        hashes the files): the same orig/ours events in every scenario."""
+        files = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, files, True)
+        out = {}
+        for scenario in scenarios:
+            paths = {}
+            for side, events in (('orig', orig), ('ours', ours)):
+                paths[side] = os.path.join(files, '%s-%s.jsonl' % (scenario, side))
+                with open(paths[side], 'w') as f:
+                    f.write(''.join(json.dumps(e) + '\n' for e in events))
+            out[scenario] = dict({'orig': orig, 'ours': ours, 'orig_path': paths['orig'],
+                                  'ours_path': paths['ours'], 'failed': None}, **extra)
+        return out
+
+    def _fork_note(self, rel, text):
+        """The sha of a commit (beside the batch, in the same object store)
+        that carries the fork recovery note rel."""
+        fork = os.path.join(self.tmp, 'fork')
+        self.git('worktree', 'add', '-q', '-b', 'fork', fork, 'first')
+        _write(os.path.join(fork, rel), text)
+        self.git('add', '-A', cwd=fork)
+        self.git('commit', '-qm', 'note', cwd=fork)
+        return self.git('rev-parse', 'HEAD', cwd=fork).stdout.strip()
+
+    def test_driver_frida_phase_keeps_what_stands_as_written(self):
+        d, batch = self._import_phase_driver()
+        sha = self._fork_note('docs/roll-recovery.md',
+                              '# Roll\n\nIcewindMisc::Roll sums the dice.\n')
+        ev = os.path.join(self.wt, 'docs', 'evidence')
+        # an oracle case the tree registers, a fork note that names the
+        # function, and a file unchanged since the merge base (trace or better)
+        _write(os.path.join(self.wt, 'oracle', 'cases', 'rules.cpp'),
+               'ORACLE_CASE("rules/render", Render);\n')
+        _write(os.path.join(ev, '401000.md'), '---\naddress: 0x401000\nname: Rules::Render\n'
+               'kind: oracle\noracle_case: rules/render\n---\n')
+        _write(os.path.join(ev, '402000.md'), '---\naddress: 0x402000\nname: IcewindMisc::Roll\n'
+               'kind: trace\ntrace_source: WillScarlettOhara/iwd2-re@%s docs/roll-recovery.md\n---\n'
+               % sha)
+        _write(os.path.join(ev, '403000.md'), self.git('show', 'first:docs/evidence/403000.md').stdout)
+        self.git('add', '-A', cwd=self.wt)
+        self.git('commit', '-qm', 'standing evidence', cwd=self.wt)
+        d.frida_build = lambda *a, **kw: self.fail('nothing to measure: no build')
+        d.frida_run = lambda *a, **kw: self.fail('nothing to measure')
+        self.assertEqual(d._frida_phase('b011', batch, self.wt, {}), [])
+        logs = '\n'.join(self.logs)
+        for needle in ('0x401000 kept as written (oracle case rules/render)',
+                       '0x402000 kept as written (fork note docs/roll-recovery.md)',
+                       '0x403000 kept as written (unchanged since the merge base)'):
+            self.assertIn(needle, logs)
+        # a note that does not name the function, a case nothing registers,
+        # and a file changed since the merge base are measured
+        _write(os.path.join(ev, '401000.md'), '---\naddress: 0x401000\nname: Rules::Render\n'
+               'kind: oracle\noracle_case: rules/nothing\n---\n')
+        _write(os.path.join(ev, '402000.md'), '---\naddress: 0x402000\nname: Rules::Tick\n'
+               'kind: trace\ntrace_source: WillScarlettOhara/iwd2-re@%s docs/roll-recovery.md\n---\n'
+               % sha)
+        with open(os.path.join(ev, '403000.md'), 'a') as f:
+            f.write('one more line\n')
+        self.git('commit', '-qam', 'changed', cwd=self.wt)
+        wave = driver._tool('wave')
+        mb = wave.merge_base_sha(self.wt, 'first')
+        for addr, name in (('0x401000', 'Rules::Render'), ('0x402000', 'Rules::Tick'),
+                           ('0x403000', 'Rules::Tick')):
+            self.assertIsNone(wave.kept_evidence(self.wt, mb, addr, name, _slurp(
+                os.path.join(ev, addr[2:] + '.md'))), addr)
+
+    def test_driver_frida_phase_hooks_dependencies_imported_with_a_row(self):
+        trace = TruthTest._trace
+        d, batch = self._import_phase_driver()
+        batch = dict(batch, rows=[r for r in batch['rows'] if r['address'] != '0x403000'])
+        # Rules::Tick is no batch row, but the worker imported it with one
+        _write(os.path.join(self.wt, 'src', 'T.cpp'),
+               '// 0x403000\nint Rules::Tick(int a, int b)\n{\n  return a;\n}\n')
+        self.git('add', '-A', cwd=self.wt)
+        self.git('commit', '-qm', 'dependency', cwd=self.wt)
+        seen = []
+
+        def frida_run(b, table, scenarios, **kw):
+            seen.append(sorted(h['name'] for h in table['original']['hooks']))
+            t = trace(('fn_401000', 7, 3), ('fn_402000', 7, 3))
+            return {sc: (t, t) for sc in scenarios}
+        d.frida_run = frida_run
+        findings = d._frida_phase('b011', batch, self.wt, {})
+        self.assertEqual(seen, [['fn_401000', 'fn_402000', 'fn_403000']])
+        dep = [f for f in findings if f.startswith('0x403000:')]
+        self.assertEqual(len(dep), 1, findings)
+        self.assertIn('exercised by no scenario', dep[0])
+        self.assertIn('a dependency you imported with the batch', dep[0])
+        self.assertIn('imported with the batch; measured like a row', '\n'.join(self.logs))
+
+    def test_driver_frida_phase_parks_failed_and_unmeasured_rows(self):
+        d, batch = self._import_phase_driver()
+        truth_mod = driver._tool('truth')
+        got = {'0x401000': ('not measured', 'no final HITS totals in world_entry'),
+               '0x402000': ('scenario failed', 'first_fight: ours side exited 2'),
+               '0x403000': ('not-exercised', 'no scenario hit it: world_entry')}
+        with mock.patch.object(truth_mod, 'frida_batch', lambda *a, **kw: dict(got)):
+            findings = d._frida_phase('b011', batch, self.wt, {})
+        by = {f[:8]: f for f in findings}
+        self.assertEqual(sorted(by), ['0x401000', '0x402000', '0x403000'])
+        self.assertIn('the Frida phase gave "not measured" (no final HITS totals in world_entry)',
+                      by['0x401000'])
+        self.assertIn('with needs "not measured: no final HITS totals in world_entry"', by['0x401000'])
+        self.assertIn('with needs "scenario failed: first_fight: ours side exited 2"', by['0x402000'])
+        # a failed build parks too: nothing measured the rows
+        d.frida_build = lambda wt, log_path=None: (_ for _ in ()).throw(RuntimeError('no MSVC'))
+        findings = d._frida_phase('b011', batch, self.wt, {})
+        self.assertEqual(len(findings), 3)
+        self.assertTrue(all('with needs "not measured: the x86 build of' in f for f in findings),
+                        findings)
+
+    def test_import_brief_says_read_only_until_the_driver_measures(self):
+        text = _slurp(os.path.join(ROOT, 'docs', 'wso', 'import-brief-template.md'))
+        flat = ' '.join(text.split())
+        for needle in ('`kind: read-only` with an `exemption:`',
+                       'the driver writes frida evidence, and a frida line it did not write is a '
+                       'check problem',
+                       'Do not declare `trace`, `replay` or `oracle` yourself',
+                       '`docs/wso/import-parked/<ADDRESS>.json`',
+                       'Every row you do not park must be imported',
+                       'The driver measures it like a row'):
+            self.assertIn(needle, flat)
+        self.assertNotIn('is not enough here', flat)
+        self.assertNotIn('import-parked.json', flat)
+
+    def test_mechanical_checks_flag_a_frida_line_the_driver_did_not_write(self):
+        d = self._driver(worker=driver.FakeWorker(self.REPORT))
+        line = 'frida b011-world_entry orig:%s ours:%s compare=0' % ('a' * 64, 'b' * 64)
+        _write(os.path.join(self.wt, 'docs', 'evidence', '401000.md'),
+               '---\naddress: 0x401000\nname: Render\nkind: trace\ntrace_source: %s\n---\n' % line)
+        self.git('commit', '-qam', 'a frida line', cwd=self.wt)
+
+        def run(argv, **kw):
+            if argv[0] == 'git':
+                return subprocess.run(argv, **kw)
+            return subprocess.CompletedProcess(argv, 0, '', '')
+        batch = {'id': 'i001', 'branch': 'p3/wso-b011', 'rows': [{'address': '0x401000'}]}
+        with mock.patch.object(driver, '_vanilla_exe', return_value='/nonexistent'):
+            probs = driver.mechanical_checks(batch, self.wt, {}, run=run, kind='import')
+            self.assertEqual(probs, ['docs/evidence/401000.md: a frida trace_source the driver did '
+                                     'not write; the driver writes frida evidence: remove the line '
+                                     '(write kind: read-only with an exemption: describing your '
+                                     'reading; the Frida phase measures the row)'])
+            # the line the driver's own phase wrote is not a problem
+            self.assertEqual(driver.mechanical_checks(batch, self.wt, {}, run=run, kind='import',
+                                                      frida_lines={'401000': line}), [])
+            # nor is one on a wave-1 batch's file (the import rule only)
+            self.assertEqual([p for p in driver.mechanical_checks(
+                dict(batch, rows=[]), self.wt, {}, run=run) if 'frida' in p], [])
 
     def test_driver_frida_phase_different_read_only_row_is_parked(self):
         trace = TruthTest._trace
@@ -13910,7 +14070,20 @@ class DriverTest(unittest.TestCase):
         state['batches']['i001'] = b
         with open(self.state_path, 'w') as f:
             json.dump(state, f)
-        self.assertEqual(d.run_batch('i001'), 'closed')
+        # Both rows imported; 401000 stands on its registered oracle case,
+        # 402000 on evidence unchanged since the merge base.
+        _write(os.path.join(self.wt, 'src', 'A.cpp'),
+               '// 0x401000\nint Render()\n{\n  return 1;\n}\n'
+               '// 0x402000\nint Draw()\n{\n  return 2;\n}\n')
+        _write(os.path.join(self.wt, 'oracle', 'cases', 'loop.cpp'),
+               'ORACLE_CASE("loop/render", Render);\n')
+        _write(os.path.join(self.wt, 'docs', 'evidence', '401000.md'),
+               '---\naddress: 0x401000\nname: Render\nkind: oracle\noracle_case: loop/render\n---\n')
+        _write(os.path.join(self.wt, 'docs', 'evidence', '402000.md'),
+               self.git('show', 'first:docs/evidence/402000.md').stdout)
+        self.git('add', '-A', cwd=self.wt)
+        self.git('commit', '-qm', 'import', cwd=self.wt)
+        self.assertEqual(d.run_batch('i001'), 'closed', self._status(d)['exceptions'])
         with open(self.state_path) as f:
             closed = json.load(f)['batches']['i001']
         self.assertEqual((closed['status'], closed['verdicts']), ('closed', {}))
@@ -15208,19 +15381,26 @@ class WaveCloseRulesTest(unittest.TestCase):
     # -- import batches: measured rows and parked rows ----------------------
 
     SRC_BODY = '// 0x643CD0\nint Draw()\n{\n  return %d;\n}\n'
+    RENDER_BODY = '// 0x643CC0\nint Render()\n{\n  return 7;\n}\n'
+    FRIDA = ('frida b001-world_entry orig:' + 'a' * 64 + ' ours:' + 'b' * 64 + ' compare=0')
 
-    def _import_ready(self, trace=('0x643CC0',), src=None, parked=None, evidence=()):
-        """An import batch: evidence kind trace for `trace`, evidence of other
-        kinds for `evidence`, an optional src/A.cpp body for Draw, and the
-        parked file."""
+    def _import_ready(self, trace=('0x643CC0',), src=None, parked=None, evidence=(),
+                      render=True):
+        """An import batch: evidence kind trace (the driver's frida line) for
+        `trace`, evidence of kind replay for `evidence`, Render imported in
+        src/A.cpp when `render`, an optional Draw body there, and the parked
+        files."""
         self.init_repo()
         for addr in trace + tuple(evidence):
             stem = addr[2:]
-            kind = 'trace' if addr in trace else 'replay'
+            head = (f'kind: trace\ntrace_source: {self.FRIDA}' if addr in trace
+                    else 'kind: replay')
             _write(os.path.join(self.wt, 'docs', 'evidence', stem + '.md'),
-                   f'---\naddress: {addr}\nname: fn\nkind: {kind}\n---\n\nnotes\n')
-        if src is not None:
-            _write(os.path.join(self.wt, 'src', 'A.cpp'), self.SRC_BODY % src)
+                   f'---\naddress: {addr}\nname: fn\n{head}\n---\n\nnotes\n')
+        body = (self.RENDER_BODY if render else '') + (
+            self.SRC_BODY % src if src is not None else '')
+        if body:
+            _write(os.path.join(self.wt, 'src', 'A.cpp'), body)
         for entry in parked or ():
             _write(os.path.join(self.wt, self.wave.parked_rel(entry['address'])),
                    json.dumps(entry))
@@ -15273,6 +15453,61 @@ class WaveCloseRulesTest(unittest.TestCase):
         with open(path, 'w') as f:
             json.dump(dict(self.PARKED[0], address='0X643cd0'), f)
         self.commit_worktree('loose address')
+        rc, out = self.close(kind='import')
+        self.assertEqual(rc, 0, out)
+
+    def test_import_close_refuses_a_row_whose_body_is_unchanged(self):
+        # a row whose body was never imported (or was put back) cannot close on
+        # any evidence: the gate only checks the trace_source of touched functions
+        self._import_ready(parked=self.PARKED, render=False)
+        mb = self.git('merge-base', 'first', 'HEAD', cwd=self.wt).stdout.strip()[:12]
+        rc, out = self.close(kind='import')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('row 0x643CC0 not imported: body unchanged against %s; import it or '
+                      'park it (docs/wso/import-parked/643CC0.json)' % mb, out)
+
+    def test_import_close_refuses_evidence_nothing_measured(self):
+        # a worker-declared replay, or an oracle without a registered case,
+        # does not stand at close; an oracle case that oracle/cases registers does
+        self._import_ready(trace=(), evidence=('0x643CC0',), parked=self.PARKED)
+        rc, out = self.close(kind='import')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('docs/evidence/643CC0.md: kind replay was written in this batch and '
+                      'nothing measured it', out)
+        path = os.path.join(self.wt, 'docs', 'evidence', '643CC0.md')
+        _write(path, '---\naddress: 0x643CC0\nname: Render\nkind: oracle\n'
+                     'oracle_case: render/seven\n---\n')
+        self.commit_worktree('oracle without its case')
+        rc, out = self.close(kind='import')
+        self.assertIn('kind oracle was written in this batch and nothing measured it', out)
+        _write(os.path.join(self.wt, 'oracle', 'cases', 'render.cpp'),
+               'ORACLE_CASE("render/seven", Seven);\n')
+        self.commit_worktree('the case')
+        rc, out = self.close(kind='import')
+        self.assertEqual(rc, 0, out)
+
+    def test_import_close_holds_dependencies_to_the_bar(self):
+        # Draw is not a batch row here: a touched dependency needs trace or better
+        self._import_ready(parked=[], src=1)
+        with open(self.state) as f:
+            state = json.load(f)
+        state['batches']['b001']['rows'] = [r for r in state['batches']['b001']['rows']
+                                            if r['address'] == '0x643CC0']
+        with open(self.state, 'w') as f:
+            json.dump(state, f)
+        rc, out = self.close(kind='import')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('0x643CD0 (Draw, imported with the batch): no evidence file '
+                      'docs/evidence/643CD0.md', out)
+        _write(os.path.join(self.wt, 'docs', 'evidence', '643CD0.md'),
+               '---\naddress: 0x643CD0\nname: Draw\nkind: read-only\nexemption: x\n---\n')
+        self.commit_worktree('dependency evidence')
+        rc, out = self.close(kind='import')
+        self.assertIn('0x643CD0 (Draw, imported with the batch): docs/evidence/643CD0.md: kind '
+                      'read-only is not trace or better', out)
+        _write(os.path.join(self.wt, 'docs', 'evidence', '643CD0.md'),
+               f'---\naddress: 0x643CD0\nname: Draw\nkind: trace\ntrace_source: {self.FRIDA}\n---\n')
+        self.commit_worktree('dependency measured')
         rc, out = self.close(kind='import')
         self.assertEqual(rc, 0, out)
 

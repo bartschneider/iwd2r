@@ -385,21 +385,34 @@ launches per attempt until `--new-attempt "<why>"`; and every merge into
   frequency). The driver then rewrites that row's evidence front matter to
   `kind: trace` with `trace_source: frida <batch>-<scenario> orig:<sha256>
   ours:<sha256> compare=0` (dropping `exemption:`) and commits it as
-  `frida: trace evidence for <N> rows of <batch>`. The phase
-  never lowers evidence: a row already at `trace`, `replay` or `oracle` is
-  kept: its file is never rewritten, and measured different it is only a
-  finding (the evidence stands; the worker notes it). A `read-only` or
-  kind-less row measured different, or exercised by no scenario, cannot
-  close (the phase runs once per batch): the worker's fix
-  round edits that function back to the merge base's body (one function,
-  never a whole file that holds other rows' changes),
-  deletes its evidence file and writes `{address, name, file, batch,
-  needs}` as the row's own `docs/wso/import-parked/<ADDR>.json` (one file
-  per row, so two batches parking different rows merge cleanly; `needs`
-  names the scenarios tried, or `frida different: <detail>`; a batch may
-  add files there). `close --kind import` accepts a batch when every row
-  is `trace` or better, or is parked with its body back at the merge
-  base's and its evidence gone.
+  `frida: trace evidence for <N> rows of <batch>`. The phase measures
+  every row that is not parked and every function the batch touched
+  against the merge base that carries a `// 0xADDR` marker (a stub
+  dependency imported with a row). Workers write `kind: read-only` with an
+  `exemption:`; only three kinds of evidence stand as written and are not
+  measured (`wave.kept_evidence`): `kind: oracle` with an `oracle_case`
+  that a case in `oracle/cases` registers, `kind: trace` citing a fork
+  recovery note that names the function, and an evidence file unchanged
+  since the merge base at `trace` or better. A declared `replay`, an oracle
+  without its case or a worker's `frida` line is measured like a read-only
+  row, and a frida line the driver did not write (it keeps the lines it
+  wrote in the status file, `frida_written`) is a mechanical-check problem.
+  A measured row that is not equal (different, exercised by no scenario,
+  no hook, `scenario failed`, `not measured`) cannot close: the phase runs
+  once per batch, so the finding tells the worker to park it in its fix
+  round: edit that function back to the merge base's body (one function,
+  never a whole file that holds other rows' changes), delete its evidence
+  file and write `{address, name, file, batch, needs}` as the row's own
+  `docs/wso/import-parked/<ADDR>.json` (one file per row, so two batches
+  parking different rows merge cleanly; `needs` is what the finding names:
+  the scenarios tried, `frida different: <detail>`, or the status text;
+  a batch may add files there). `close --kind import` accepts a batch when
+  every row that is not parked is imported (its body changed against the
+  merge base: "row <addr> not imported: body unchanged against <base>;
+  import it or park it") and at `trace` or better as the driver's frida
+  trace or as evidence that stands as written, every parked row has its
+  body back at the merge base's and its evidence gone, and every
+  dependency the batch touched meets the same bar.
   The two queues' assigned batches all hold files, so they stay
   disjoint (`tools/claims.py` counts both state files). Each queue has
   its own status file and run lock, so one driver per queue can run at
