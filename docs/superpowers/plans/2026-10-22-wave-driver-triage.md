@@ -565,7 +565,17 @@ Added by thierbig on 2026-10-23. It runs after Task 14 and before Task 13. Sever
 - Consumes: `HeadlessWorker(model, max_turns, wrapper)` (Task 6), `Driver` and its park and budget logic (Tasks 8-9), `claims.owned` (Task 14).
 - Produces:
   - `Pool = namedtuple('Pool', 'name wrapper model workers')`.
-  - `parse_pool(spec: str) -> Pool` for `NAME=WRAPPER:MODEL[:WORKERS]`. WORKERS defaults to 1, and a malformed spec raises `ValueError`. `DEFAULT_POOL = 'glm=claude-glm:glm-5.3-flash[1m]:2'`.
+  - `parse_pool(spec: str, queue='wave1') -> Pool` for `NAME=WRAPPER:MODEL[:WORKERS]`. WORKERS defaults to 1, and a malformed spec raises `ValueError`. `DEFAULT_POOL = 'glm=claude-glm:glm-5.3-flash[1m]:2'`.
+  - The two known pool names also accept the short form `NAME[:WORKERS]`, which fills WRAPPER:MODEL from `POOL_DEFAULTS` (added by thierbig on 2026-10-23):
+    - `glm` is `claude-glm:glm-5.3-flash[1m]` on either queue;
+    - `claude` is `claude:sonnet` on `--queue wave1` and `claude:haiku` on `--queue import`.
+  - `Pool` gains `reviewer_model`. `--reviewer-model NAME=MODEL` is repeatable. Its defaults:
+    - `sonnet` for the `claude` pool;
+    - `glm-5.3-flash[1m]` for the `glm` pool;
+    - the pool's own worker model for any other pool.
+    
+    Each pool's reviewer is a `HeadlessWorker` with the pool's wrapper and its `reviewer_model`.
+  - For a wrapper other than `claude-glm`, `HeadlessWorker` passes the model as `--model <model>` instead of `CLAUDE_GLM_MODEL`. Its transcripts are found under `~/.claude/projects` (ruling R23).
   - `Driver(..., pools=[Pool], workers_by_pool=None, budgets={name: credits})`. Each pool gets its own `HeadlessWorker(model=pool.model, wrapper=pool.wrapper)`; tests inject `workers_by_pool={name: FakeWorker}` instead.
   - The status file holds `status['pools'][name] = {'credits': float, 'budget': float|None, 'parked': {batch_id, at, reason}|None, 'stopped': None|'budget'}`. This replaces Task 9's top-level `status['parked']`, which a run still reads once for migration.
   - `Driver.pick_pool() -> str | None` returns the first pool, in declaration order, that has a free worker (busy < workers), is not parked and is under its budget. When several pools qualify, a cursor that advances after each assignment rotates the choice (round-robin on ties).
@@ -586,6 +596,9 @@ Added by thierbig on 2026-10-23. It runs after Task 14 and before Task 13. Sever
 
 - [ ] **Step 1: Write the failing tests** (all with `FakeWorker` and temp state, status and ledger files; never the real wave-state.json):
   - `test_parse_pool_default_and_errors`;
+  - `test_pool_short_forms_follow_the_queue`: `claude` gives `claude:sonnet` on wave1 and `claude:haiku` on import, and `glm` gives `claude-glm:glm-5.3-flash[1m]`;
+  - `test_reviewer_model_defaults_and_override`: the defaults are sonnet for claude, glm-5.3-flash[1m] for glm, and the worker model otherwise; `--reviewer-model claude=opus` overrides one pool only;
+  - `test_headless_worker_model_flag_for_claude_wrapper`: `argv` carries `--model sonnet`, and there is no `CLAUDE_GLM_MODEL`;
   - `test_two_pools_share_batches`: pools a and b, three batches, assigned a, b, a, each recorded in `batch['pool']`;
   - `test_parked_pool_is_skipped`: a's worker returns `rate_limited` on its first batch; a is parked with the WIP committed, b closes the remaining batches, and `run()` returns 3;
   - `test_pool_budget_stops_only_that_pool`: a's budget is below one batch's credits, so a stops after its first batch and b continues;
@@ -596,7 +609,12 @@ Added by thierbig on 2026-10-23. It runs after Task 14 and before Task 13. Sever
 - [ ] **Step 3: Implement**
 - [ ] **Step 4: Run, see them pass**; the full tool suite; then `tools/gates.sh --base iwd2r/main`
 - [ ] **Step 5: README.** Update "Running the batches":
-  - `--pool`, `--budget-NAME` and `--queue`;
+  - `--pool`, `--budget-NAME`, `--reviewer-model` and `--queue`;
+  - the four defaults:
+    - the claude pool's worker is `claude:sonnet` on wave1 and `claude:haiku` on import;
+    - the claude pool's reviewer is `sonnet`;
+    - the glm pool's reviewer is `glm-5.3-flash[1m]`;
+  - the fact that Z.ai credits price only GLM turns, so `--budget-NAME` on a pool whose model is not GLM is refused with a clear message (ruling R40). Add `test_budget_on_non_glm_pool_is_refused`;
   - the per-pool status shape;
   - the fact that a 429 parks one pool only.
 - [ ] **Step 6: Commit** `driver: worker pools with per-pool budget and park, a second queue for the import list`
