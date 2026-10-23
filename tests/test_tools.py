@@ -89,9 +89,9 @@ class GenMapTest(unittest.TestCase):
     def test_deterministic(self):
         self.run_gen()
         path = os.path.join(self.repo, 'docs', 'MAP.md')
-        first = open(path, 'rb').read()
+        first = _slurp(path, 'rb')
         self.run_gen()
-        self.assertEqual(first, open(path, 'rb').read())
+        self.assertEqual(first, _slurp(path, 'rb'))
 
     def test_check(self):
         self.run_gen()
@@ -6659,7 +6659,7 @@ class WsoFetchTest(unittest.TestCase):
         pins = {'fork_commit': 'f' * 40, 'upstream_commit': 'u' * 40,
                 'files': [{'url': 'file://' + src,
                            'dest': 'bg2/dump.zip', 'unzip': True,
-                           'sha256': hashlib.sha256(open(src, 'rb').read()).hexdigest()}]}
+                           'sha256': hashlib.sha256(_slurp(src, 'rb')).hexdigest()}]}
         self.assertEqual(wso_fetch.fetch(pins, wso_fetch.wso_root()), [])
         self.root = wso_fetch.wso_root()
         with open(os.path.join(self.root, 'bg2', 'bg2_pdb_types.txt'), 'rb') as f:
@@ -6693,7 +6693,7 @@ class WsoFetchTest(unittest.TestCase):
         pins = {'fork_commit': 'f' * 40, 'upstream_commit': 'u' * 40,
                 'files': [{'url': 'file://' + src,
                            'dest': 'bg2/evil.zip', 'unzip': True,
-                           'sha256': hashlib.sha256(open(src, 'rb').read()).hexdigest()}]}
+                           'sha256': hashlib.sha256(_slurp(src, 'rb')).hexdigest()}]}
         problems = wso_fetch.fetch(pins, wso_fetch.wso_root())
         self.assertEqual([p for p in problems if 'evil.txt' in p], problems,
                          problems)
@@ -7143,6 +7143,13 @@ def _write(path, text):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, 'w') as f:
         f.write(text)
+
+
+def _slurp(path, mode='r'):
+    """The whole file, closed again (an open(...).read() leaks the file
+    under -W error)."""
+    with open(path, mode) as f:
+        return f.read()
 
 
 class SrcFindTest(unittest.TestCase):
@@ -8867,14 +8874,14 @@ class TriageTest(unittest.TestCase):
             self.assertEqual(cal[cls]['mismatches'], [], cls)
 
     def test_reclassified_closed_rows_agree_with_recorded_verdicts(self):
-        state = json.load(open(os.path.join(ROOT, 'docs/wso/wave-state.json')))
+        state = json.loads(_slurp(os.path.join(ROOT, 'docs/wso/wave-state.json')))
         fork = state['fork_base']
         for ref in (fork, triage.CALIBRATION_OURS_REF):
             if subprocess.run(['git', '-C', ROOT, 'rev-parse', '--verify', '--quiet',
                                ref + '^{commit}'], capture_output=True).returncode:
                 self.skipTest('%s not fetched' % ref)
-        rows = json.load(open(os.path.join(ROOT, 'docs/wso/disagreements.json')))
-        committed = json.load(open(os.path.join(ROOT, 'docs/wso/triage.json')))
+        rows = json.loads(_slurp(os.path.join(ROOT, 'docs/wso/disagreements.json')))
+        committed = json.loads(_slurp(os.path.join(ROOT, 'docs/wso/triage.json')))
         cal = triage.calibrate(state, triage.calibration_triage(state, rows, fork))
         self.assert_auto_classes_agree(cal)
         enabled = triage.enabled_classes(cal)
@@ -8911,8 +8918,8 @@ class TriageTest(unittest.TestCase):
         if subprocess.run(['git', '-C', ROOT, 'rev-parse', '--verify', '--quiet',
                            'e8dd16a7^{commit}'], capture_output=True).returncode:
             self.skipTest('fork base not fetched')
-        state = json.load(open(os.path.join(ROOT, 'docs/wso/wave-state.json')))
-        triaged = json.load(open(os.path.join(ROOT, 'docs/wso/triage.json')))
+        state = json.loads(_slurp(os.path.join(ROOT, 'docs/wso/wave-state.json')))
+        triaged = json.loads(_slurp(os.path.join(ROOT, 'docs/wso/triage.json')))
         cal = triage.calibrate(state, triaged)
         self.assertTrue(any(cal[c]['total'] for c in triage.AUTO_OURS))
         for cls in triage.AUTO_OURS:
@@ -9656,7 +9663,7 @@ class DriverTest(unittest.TestCase):
         self.assertTrue(any(p.startswith('0x999999:') and 'outside' in p for p in probs))
         self.assertIn(['tools/check_evidence.py', '--base', 'first'],
                       [c[0][-3:] for c in calls])
-        self.assertEqual(calls[-1][0][-2:], ['tools/gen_map.py', '--check'])
+        self.assertEqual(calls[-1][0][-3:], ['tools/check_evidence.py', '--base', 'first'])
         self.assertTrue(all(c[1] == d for c in calls))
 
     def test_mechanical_checks_accept_undecided_in_place_of_a_verdict(self):
@@ -9745,12 +9752,11 @@ class DriverTest(unittest.TestCase):
                 mock.patch.dict(os.environ, {'IWD2R_HOME': d}):
             probs = driver.mechanical_checks(batch, d, {'0x76D370': ('ours', 'c')},
                                              run=self._mc_run(1, calls))
-        # git status, git diff, tests, check_evidence, parity, gen_map
-        self.assertEqual(len(calls), 6)
+        # git status, git diff, tests, check_evidence, parity (the map is the close's)
+        self.assertEqual(len(calls), 5)
         self.assertEqual(calls[4][0], ['python3', '-I', 'tools/parity/run.py', '--base', 'first'])
-        self.assertEqual(len(probs), 6)
+        self.assertEqual(len(probs), 5)
         self.assertIn('failed (exit 1); last lines: boom', probs[2])
-        self.assertIn('gen_map.py --check', probs[5])
         venv = os.path.join(d, 'parity-venv', 'bin')
         os.makedirs(venv)
         py = os.path.join(venv, 'python')
@@ -12505,7 +12511,7 @@ class DriverTest(unittest.TestCase):
         with self.assertRaises(subprocess.TimeoutExpired):
             driver._run_group([sys.executable, '-c', code, mark], timeout=1.5,
                               stdin=subprocess.DEVNULL, text=True, capture_output=True)
-        pid = int(open(mark).read())
+        pid = int(_slurp(mark))
         time.sleep(0.3)
         try:
             os.kill(pid, 0)
@@ -12685,7 +12691,7 @@ class DriverTest(unittest.TestCase):
         with open(os.path.join(ROOT, 'docs', 'wso', 'brief-template.md')) as f:
             text = f.read()
         for needle in ('wso/main', 'systemd-run --user --scope -q -p MemoryMax=8G '
-                       '-p MemorySwapMax=0 --', 'python3 -I tools/gen_map.py',
+                       '-p MemorySwapMax=0 --', 'Do not edit `docs/MAP.md`',
                        '--host', 'desktop'):
             self.assertIn(needle, text)
 
@@ -12701,8 +12707,8 @@ class DriverTest(unittest.TestCase):
         for cmd in ('grep -n DESKTOP_OK tools/play.py', 'ls', 'echo $IWD2R_DESKTOP_OK'):
             self.assertEqual(driver.transcript_findings(
                 self._tcalls(('Bash', {'command': cmd})), []), [], cmd)
-        self.assertIn('Never set IWD2R_DESKTOP_OK', open(os.path.join(
-            ROOT, 'docs', 'wso', 'brief-template.md')).read())
+        self.assertIn('Never set IWD2R_DESKTOP_OK', _slurp(os.path.join(
+            ROOT, 'docs', 'wso', 'brief-template.md')))
 
     def test_the_desktop_refusals_say_a_person_must_be_at_the_pc(self):
         play = load_tool('play')
@@ -12748,6 +12754,226 @@ class DriverTest(unittest.TestCase):
         self.pending[:] = []
         with mock.patch.dict(os.environ, self.GIT_ENV):
             self.assertEqual(d.run(), 0)
+
+    # -- two workers per pool: the morning report's caveats --------------------
+
+    def test_stop_handler_reentrant(self):
+        """A signal can land while the same thread holds the live-groups
+        lock: the handler must not deadlock on it."""
+        done = threading.Event()
+        self.addCleanup(driver._STOPPED.clear)
+
+        def hold_and_kill():
+            with driver._LIVE_LOCK:
+                driver.kill_live_groups()
+            done.set()
+        t = threading.Thread(target=hold_and_kill, daemon=True)
+        t.start()
+        self.assertTrue(done.wait(5), 'kill_live_groups deadlocked on its own lock')
+
+    def test_stop_waits_for_git_write(self):
+        self.addCleanup(driver._STOPPED.clear)
+        d = self._pool_driver(self._two_pools()[:1], {'a': None}, ids=('b011',))
+        d.STOP_WAIT = 5
+        inside, release = threading.Event(), threading.Event()
+        finished = []
+
+        def writer():
+            with d._writing():
+                inside.set()
+                release.wait(10)
+                finished.append(time.monotonic())
+        t = threading.Thread(target=writer, daemon=True)
+        t.start()
+        self.assertTrue(inside.wait(5))
+        threading.Timer(0.3, release.set).start()
+        with self.assertRaises(driver._Stop):
+            d._on_stop(signal.SIGTERM, None)
+        raised = time.monotonic()
+        t.join(5)
+        self.assertTrue(finished and finished[0] <= raised,
+                        'the stop was raised before the git write finished')
+        self.assertTrue(d._stopping)
+
+    def test_stop_wait_is_bounded(self):
+        self.addCleanup(driver._STOPPED.clear)
+        d = self._pool_driver(self._two_pools()[:1], {'a': None}, ids=('b011',))
+        d.STOP_WAIT = 0.2
+        inside, release = threading.Event(), threading.Event()
+
+        def writer():
+            with d._writing():
+                inside.set()
+                release.wait(10)
+        t = threading.Thread(target=writer, daemon=True)
+        t.start()
+        self.assertTrue(inside.wait(5))
+        start = time.monotonic()
+        with self.assertRaises(driver._Stop):
+            d._on_stop(signal.SIGTERM, None)
+        self.assertLess(time.monotonic() - start, 3)
+        release.set()
+        t.join(5)
+
+    def test_stop_in_the_writing_thread_is_deferred_to_the_write_end(self):
+        self.addCleanup(driver._STOPPED.clear)
+        d = self._pool_driver(self._two_pools()[:1], {'a': None}, ids=('b011',))
+        steps = []
+        with self.assertRaises(driver._Stop):
+            with d._writing():
+                d._on_stop(signal.SIGTERM, None)    # lands mid write: no raise
+                steps.append('write finished')
+        self.assertEqual(steps, ['write finished'])
+
+    def test_stop_launches_nothing(self):
+        w = self._BatchWorker(credits=0.0)
+        d = self._pool_driver(self._two_pools()[:1], {'a': w}, ids=('b011',))
+        d._stopping = True
+        with self.assertRaises(driver._Stop):
+            d._run(w, 'brief', self.root, 'b011', 'worker')
+        self.assertEqual(w.briefs, [])
+        started = []
+        d._runner = started.append
+        with self.assertRaises(driver._Stop):
+            d._start(lambda: None)
+        self.assertEqual(started, [])
+
+    def test_map_regenerated_once_at_close(self):
+        gen = os.path.join(ROOT, 'tools', 'gen_map.py')
+        src = {'src/CAIFoo.cpp': 'int x;\n', 'docs/MAP.md': 'stale\n',
+               'tools/gen_map.py': _slurp(gen)}
+        added = {'b011': 'src/CGameNew.cpp', 'b012': 'src/CScreenNew.cpp'}
+
+        def on_branch(wt, bid):    # a worker's source file and its own MAP edit
+            _write(os.path.join(wt, added[bid]), '// 0x401000\nint y; // TODO: Incomplete\n')
+            _write(os.path.join(wt, 'docs', 'MAP.md'), 'mine ' + bid + '\n')
+        d = self._pool_driver(self._two_pools()[:1], {'a': self._BatchWorker(credits=0.0)},
+                              ids=('b011', 'b012'), base_files=src, on_branch=on_branch)
+        calls = []
+        real = d._regen_map
+
+        def counted(worktree):
+            calls.append(os.path.basename(worktree))
+            return real(worktree)
+        d._regen_map = counted
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 0)
+        self.assertEqual(sorted(calls), ['wt-b011', 'wt-b012'])   # once per close
+        r = subprocess.run([sys.executable, '-I', gen, '--repo', self.root, '--check'],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout)
+        # first's map equals the generator on a fresh clone of the final tree
+        ref = os.path.join(self.tmp, 'ref')
+        subprocess.run(['git', 'clone', '-q', self.root, ref], check=True)
+        subprocess.run([sys.executable, '-I', gen, '--repo', ref], check=True)
+
+        def body(t):
+            return [l for l in t.splitlines() if not l.startswith('Generated from commit')]
+        mine = _slurp(os.path.join(self.root, 'docs', 'MAP.md'))
+        self.assertEqual(body(mine), body(_slurp(os.path.join(ref, 'docs', 'MAP.md'))))
+        self.assertIn('| Game | 1 |', mine)
+        self.assertIn('| Screens | 1 |', mine)
+        # Regenerating the final tree again changes nothing.
+        before = self.git('rev-parse', 'first').stdout
+        self.assertIsNone(real(self.root))
+        self.assertEqual(self.git('rev-parse', 'first').stdout, before)
+
+    def test_stop_mid_cut_lets_the_cut_finish_and_starts_nothing(self):
+        pools = [driver.parse_pool('a=claude-glm:glm-5.3-flash[1m]:2')]
+        w = self._BatchWorker(credits=0.0)
+        d = self._pool_driver(pools, {'a': w}, ids=('b011', 'b012'))
+        d._runner = None                       # real threads: two workers
+        trace = []
+        real_cut = d.next_batch
+
+        def slow_cut(*a, **kw):
+            trace.append('cut start')
+            time.sleep(1.0)                    # stands in for the branch and worktree
+            r = real_cut(*a, **kw)
+            trace.append('cut end')
+            return r
+        d.next_batch = slow_cut
+        timer = threading.Timer(0.4, os.kill, (os.getpid(), signal.SIGTERM))
+        timer.start()
+        self.addCleanup(timer.cancel)
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 1)
+        self.assertEqual(trace, ['cut start', 'cut end'])    # not aborted, no second cut
+        self.assertEqual(w.briefs, [])                       # no worker launched
+
+    def test_run_group_started_after_a_stop_is_killed_at_once(self):
+        driver._STOPPED.set()
+        self.addCleanup(driver._STOPPED.clear)
+        start = time.monotonic()
+        res = driver._run_group(['sleep', '60'], timeout=30)
+        self.assertLess(time.monotonic() - start, 10)
+        self.assertNotEqual(res.returncode, 0)
+
+    def test_mechanical_checks_leave_the_map_to_the_close(self):
+        d = self._mc_repo({'76D370': 'corroborated by WSO at abc'})
+        calls = []
+        with mock.patch.object(driver, '_vanilla_exe', return_value='/nonexistent'):
+            driver.mechanical_checks(self._mc_batch(), d, {'0x76d370': ('ours', 'c')},
+                                     run=self._mc_run(0, calls))
+        self.assertNotIn('tools/gen_map.py', [a for c in calls for a in c[0]])
+
+    def test_import_state_committed_at_close(self):
+        d = self._undecided_driver('x')
+        d.import_list_path = os.path.join(self.root, 'docs', 'wso', 'import-list.json')
+        _write(d.probe_path, '[]\n')
+        _write(d.import_list_path, '[{"address": "0x1"}]\n')
+        _write(os.path.join(self.root, 'README'), 'dirty\n')
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            d._commit_state('b011')
+        names = sorted(self.git('show', '--format=', '--name-only', 'first').stdout.split())
+        self.assertEqual(names, ['docs/wso/import-list.json', 'docs/wso/probe-list.json'])
+        self.assertEqual(self.git('status', '--porcelain').stdout.strip(), 'M README')
+
+    def test_import_queue_state_committed_at_close(self):
+        d = self._pool_driver(self._two_pools()[:1], {'a': None}, ids=('i011',),
+                              queue='import')
+        docs = os.path.join(self.root, 'docs', 'wso')
+        os.makedirs(docs)
+        shutil.move(self.state_path, os.path.join(docs, 'import-state.json'))
+        d.state_path = os.path.join(docs, 'import-state.json')
+        d.import_list_path = os.path.join(docs, 'import-list.json')
+        _write(d.import_list_path, '[]\n')
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            d._commit_state('i011')
+        names = sorted(self.git('show', '--format=', '--name-only', 'first').stdout.split())
+        self.assertEqual(names, ['docs/wso/import-list.json', 'docs/wso/import-state.json'])
+
+    def test_no_resource_warnings_under_w_error(self):
+        names = ['GenMapTest.test_deterministic',
+                 'WsoFetchTest.test_wso_fetch_extracts_after_hash_match',
+                 'WsoFetchTest.test_wso_fetch_refuses_unsafe_archive_members',
+                 'TriageTest.test_reclassified_closed_rows_agree_with_recorded_verdicts',
+                 'TriageTest.test_calibration_against_committed_batches',
+                 'DriverTest.test_run_group_kills_the_whole_process_group_on_timeout',
+                 'DriverTest.test_setting_the_desktop_override_is_a_launch_finding']
+        r = subprocess.run([sys.executable, '-I', '-W', 'error',
+                            os.path.join(ROOT, 'tests', 'test_tools.py')] + names,
+                           capture_output=True, text=True, timeout=300)
+        self.assertEqual(r.returncode, 0, r.stderr[-2000:])
+        self.assertNotIn('ResourceWarning', r.stderr)
+
+    def test_gates_summary_reports_step_times(self):
+        env = dict(os.environ)
+        r = subprocess.run(['bash', os.path.join(ROOT, 'tools', 'gates.sh'),
+                            '--summary-fixture'], capture_output=True, text=True,
+                           env=env, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertRegex(r.stdout, r'(?m)^step fixture one: \d+s$')
+        self.assertRegex(r.stdout, r'(?m)^step fixture two: \d+s$')
+        self.assertRegex(r.stdout, r'(?m)^gates: total \d+s$')
+        self.assertRegex(r.stdout, r'(?m)^gates: (ccache: installed, launcher set for|ccache not used)')
+        self.assertIn('gates: all passed', r.stdout)
+        # With ccache absent from PATH the summary says it was not used.
+        r = subprocess.run(['/bin/bash', os.path.join(ROOT, 'tools', 'gates.sh'),
+                            '--summary-fixture'], capture_output=True, text=True,
+                           env={'PATH': '/nonexistent:/usr/bin:/bin'}, timeout=60)
+        if not os.path.exists('/usr/bin/ccache') and not os.path.exists('/bin/ccache'):
+            self.assertIn('gates: ccache not used', r.stdout)
 
     def test_a_dry_run_never_commits_the_state(self):
         d = self._pool_driver(self._two_pools()[:1], {'a': None}, ids=('b011',))

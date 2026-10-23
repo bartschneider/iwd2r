@@ -298,9 +298,32 @@ launches per attempt until `--new-attempt "<why>"`; and every merge into
 - After every close the driver commits `docs/wso/wave-state.json` and the
   regenerated `docs/wso/xrec-report.md` on `first` (staged by name, message
   `wave-state: close <id> (ours N, fork N, neither N)`), before the push.
-  Also when it pushes a closed batch again. Wave 1 only: the import queue's
-  state is not committed. If the commit fails, the two paths are unstaged,
-  one aoe line goes out, and the push still happens.
+  Also when it pushes a closed batch again. The same commit carries the
+  probe list (wave 1), `docs/wso/import-list.json` (where ours-stub rows
+  leave wave 1), and, on `--queue import`, `docs/wso/import-state.json`
+  (message `import-state: close <id> ...`; no scorecard). If the commit
+  fails, those paths are unstaged, one aoe line goes out, and the push still
+  happens.
+- Several workers per pool (`--pool glm:2`): `docs/MAP.md` is not the
+  batch's. The driver regenerates it once at each close, on the branch after
+  the base is merged in, and commits it by name (`map: regenerate ...`), so
+  `gen_map.py --check` passes after the fast-forward and two parallel closes
+  never conflict on it (a worker's own edit of it loses to the base's copy at
+  the sync). A stop (SIGTERM, SIGINT) starts no new worker (a worker forked
+  just as it lands is killed on joining), and takes only re-entrant locks in
+  the handler. The signal reaches only the main thread: its own writes (the
+  cut, an adoption, the recompare) finish before the stop is raised, and the
+  stop waits up to 30 s for a git write in progress on another thread. The
+  run still joins a close in flight without a limit (the gate included, about
+  ten minutes), and a Ctrl-C in the terminal also reaches the git and gate
+  children directly (same process group); the bounded wait is for a SIGTERM
+  sent to the driver's pid.
+- Two `claude-glm` launches at once race on the wrapper's re-link of
+  `~/.claude` into `~/.claude-glm` (and on its `settings.json.tmp`). The
+  wrapper lives outside the repo, so the fix is a patch the coordinator
+  applies once: `patch ~/.local/bin/claude-glm < tools/claude-glm.lock.patch`
+  (an `flock` on `~/.claude-glm/.relink.lock` around that section; needs
+  util-linux `flock`). Apply it before running `--pool glm:2`.
 - Workers: every `AOE_*` variable is removed from a worker's environment
   (for every wrapper), and the driver's own `aoe send` runs without
   `CLAUDECODE`, `CLAUDE_CODE_*`, `CLAUDE_PID` and `CLAUDE_EFFORT`. A `claude`
@@ -321,7 +344,8 @@ launches per attempt until `--new-attempt "<why>"`; and every merge into
   commits them for you), a path changed against `first` outside `src/`,
   `compat/`, `docs/evidence/`, `docs/MAP.md`, `oracle/cases/` and
   `oracle/CMakeLists.txt`, a `fork` verdict whose evidence has no `kind:`
-  line, and a stale `docs/MAP.md` (`tools/gen_map.py --check`). The
+  line. (A stale `docs/MAP.md` is no longer checked here: the close
+  regenerates it.) The
   `corroborated by WSO` phrase is required only for verdicts the driver
   recorded from an oracle probe pass.
 - Retrying a cleared exception (`--clear`): at the `close`, `record` or
