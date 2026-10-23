@@ -29064,6 +29064,7 @@ CGameButtonList* CGameSprite::sub_716E80(BOOL bFirstOnly)
                 if (pEffect != NULL) {
                     if (pEffect->m_effectID == 147) {
                         // NOTE: The original leaks the effect here.
+                        delete pEffect;
                         continue;
                     }
                     delete pEffect;
