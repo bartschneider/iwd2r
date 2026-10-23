@@ -12817,7 +12817,7 @@ class DriverTest(unittest.TestCase):
                 pass
         # the fix-round, resume and check texts, rendered
         quoted += re.findall(r'`(git [^`]*)`', driver.FIX_PROMPT + driver.RESUME_PREAMBLE
-                             + driver.REVIEW_BRIEF)
+                             + driver.REVIEW_BRIEF + ''.join(driver.FIX_REPORT_RULES.values()))
         self.assertTrue(any(q.startswith('git show') for q in quoted), quoted)
         self.assertTrue(any(q.startswith('git rm') for q in quoted), quoted)
         for q in quoted:
@@ -12833,6 +12833,7 @@ class DriverTest(unittest.TestCase):
                  if isinstance(n, ast.Constant) and isinstance(n.value, str)
                  and id(n) not in docs and ' ' in n.value]
         prose += [driver.FIX_PROMPT, driver.RESUME_PREAMBLE, driver.REVIEW_BRIEF]
+        prose += list(driver.FIX_REPORT_RULES.values())
         for rel in ('import-brief-template.md', 'brief-template.md', 'README.md'):
             prose.append(_slurp(os.path.join(ROOT, 'docs', 'wso', rel)))
         verb = re.compile(r'\b(?:revert|restor)\w*', re.I)
@@ -13494,9 +13495,22 @@ class DriverTest(unittest.TestCase):
         self.assertTrue(any('both a verdict line and an undecided line' in p
                             for p in problems), problems)
 
+    def test_fix_prompt_report_rule_follows_the_batch_kind(self):
+        # i002 wrote "(none; this is an import batch)" under ## Verdicts because
+        # the fix-round prompt asked every batch for that section
+        imp = driver.fix_prompt('i002', 'checks', 'p3/wso-i002', 'BRIEF', ['p1', 'p2'], 'import')
+        self.assertIn('do not write a `## Verdicts` section at all', imp)
+        self.assertNotIn('full `## Verdicts` section', imp)
+        self.assertIn('- p1\n- p2', imp)
+        self.assertTrue(imp.rstrip().endswith('BRIEF'))
+        wave = driver.fix_prompt('b011', 'checks', 'p3/wso-b011', 'BRIEF', ['p1'])
+        self.assertIn('full `## Verdicts` section', wave)
+        self.assertNotIn('import batch', wave)
+
     def test_the_fix_round_header_names_undecided_and_notes(self):
+        rendered = driver.fix_prompt('b011', 'checks', 'p3/wso-b011', '', ['p'])
         for needle in ('## Undecided', '## Notes', 'verdict lines only', 'Never write `ours`'):
-            self.assertIn(needle, driver.FIX_PROMPT)
+            self.assertIn(needle, rendered)
         with open(os.path.join(ROOT, 'docs', 'wso', 'brief-template.md')) as f:
             text = f.read()
         for needle in ('undecided <0xADDR> <fork|neither> <one-line reason>',
@@ -15174,6 +15188,29 @@ class TruthTest(unittest.TestCase):
             self.assertEqual([c[c.index('--build-checkout') + 1] if '--build-checkout' in c else None
                               for c in fake.calls],
                              ['/mnt/c/Users/u/iwd2r-build-p3-wso-i009'] * 2)
+
+    def test_map_matches_constructors_and_destructors(self):
+        publics = {'??0CMessageHandler@@QAE@XZ': 0x220830,
+                   '??1CMessageHandler@@QAE@XZ': 0x222d20,
+                   '??_GCMessageHandler@@QAEPAXI@Z': 0x222d90,
+                   '?AddMessage@CMessageHandler@@QAEFPAVCMessage@@H@Z': 0x224a60,
+                   '??1CInner@COuter@@QAE@XZ': 0x300000}
+        self.assertEqual(truth._map_matches('CMessageHandler::~CMessageHandler', publics),
+                         {0x222d20: '??1CMessageHandler@@QAE@XZ'})
+        self.assertEqual(truth._map_matches('CMessageHandler::CMessageHandler', publics),
+                         {0x220830: '??0CMessageHandler@@QAE@XZ'})
+        self.assertEqual(truth._map_matches('COuter::CInner::~CInner', publics),
+                         {0x300000: '??1CInner@COuter@@QAE@XZ'})
+        self.assertEqual(truth._map_matches('CMessageHandler::AddMessage', publics),
+                         {0x224a60: '?AddMessage@CMessageHandler@@QAEFPAVCMessage@@H@Z'})
+        # the special members' tails read like any member's
+        self.assertEqual(truth.decorated_convention('??1CMessageHandler@@QAE@XZ'), '__thiscall')
+        self.assertEqual(truth.decorated_convention('??0CMessageHandler@@QAE@XZ'), '__thiscall')
+        self.assertEqual(truth.decorated_convention('?Roll@IcewindMisc@@YAHHH@Z'), '__cdecl')
+        # a destructor's Ghidra head hooks as a thiscall with no arguments
+        self.assertEqual(truth._hook_signature('void CMessageHandler::~CMessageHandler(void)',
+                                               '??1CMessageHandler@@QAE@XZ'),
+                         ('thiscall', [], None))
 
     def test_exports_default_matches_export_decompiles(self):
         # truth repeats the four-line default rather than loading the module

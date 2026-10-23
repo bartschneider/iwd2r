@@ -500,8 +500,9 @@ def decorated_convention(decorated):
     then the `this` qualifier [ABCD] (none, const, volatile, const volatile),
     then E, is thiscall (regex [AEIMQU][ABCD]E); [CKSY]A is cdecl, [CKSY]G
     stdcall and [CKSY]I fastcall (skipped by the hooks); a plain _name is
-    cdecl and _name@N stdcall."""
-    m = re.match(r'^\?[^@?]+(?:@[^@]+)*?@@(.*)$', decorated or '')
+    cdecl and _name@N stdcall. Special members (??0 constructor, ??1
+    destructor, ??_G and the like) carry the same tail."""
+    m = re.match(r'^\?(?:\?[0-9_A-Z]?)?[^@?]+(?:@[^@]+)*?@@(.*)$', decorated or '')
     if m:
         tail = m.group(1)
         if re.match(r'[AEIMQU][ABCD]E', tail):
@@ -586,9 +587,16 @@ def parse_map(text):
 
 def _map_matches(name, publics):
     """{rva: decorated name} of every public that is Class::Method (decorated
-    ?Method@Class@@...) or a plain name."""
+    ?Method@Class@@...), Class::Class (??0Class@@...), Class::~Class
+    (??1Class@@...; the scalar deleting destructor ??_G is another symbol) or
+    a plain name."""
     parts = name.split('::')
-    prefix = '?' + '@'.join(reversed(parts)) + '@@'
+    if len(parts) >= 2 and parts[-1] == '~' + parts[-2]:
+        prefix = '??1' + '@'.join(reversed(parts[:-1])) + '@@'      # destructor
+    elif len(parts) >= 2 and parts[-1] == parts[-2]:
+        prefix = '??0' + '@'.join(reversed(parts[:-1])) + '@@'      # constructor
+    else:
+        prefix = '?' + '@'.join(reversed(parts)) + '@@'
     found = {}
     for decorated, rva in publics.items():
         if decorated.startswith(prefix) or (len(parts) == 1 and decorated in (name, '_' + name)):
