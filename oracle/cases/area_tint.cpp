@@ -190,13 +190,31 @@ void TintCase(CaseContext& ctx)
             uint8_t areaType = 0x40;
             bool withNight = false, withDay = true;
             switch (arm) {
-            case 0: code = 1; break;
-            case 1: code = 2; withNight = true; break;
-            case 2: code = 3; withNight = true; break;
-            case 3: code = 2; break;
-            case 4: code = 3; break;
-            case 5: code = 3; areaType = 0x00; break;
-            case 6: code = 3; withDay = false; break;
+            case 0:
+                code = 1;
+                break;
+            case 1:
+                code = 2;
+                withNight = true;
+                break;
+            case 2:
+                code = 3;
+                withNight = true;
+                break;
+            case 3:
+                code = 2;
+                break;
+            case 4:
+                code = 3;
+                break;
+            case 5:
+                code = 3;
+                areaType = 0x00;
+                break;
+            case 6:
+                code = 3;
+                withDay = false;
+                break;
             }
             const uint8_t intensity = static_cast<uint8_t>(*bits.Next());
             const uint32_t tint = *bits.Next() & 0xFFFFFF;
