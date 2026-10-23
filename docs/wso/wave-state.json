@@ -3451,6 +3451,285 @@
           "side": "ours"
         }
       }
+    },
+    "b013": {
+      "assigned_at": "2026-10-23T14:52:59+00:00",
+      "branch": "p3/wso-b013",
+      "closed_at": "2026-10-23T16:27:39+00:00",
+      "files": [
+        "src/CGameArea.cpp",
+        "src/CScreenInventory.cpp",
+        "src/CPathSearch.cpp",
+        "src/CInfButtonArray.cpp",
+        "src/CGameAnimationTypeMonsterLarge.cpp",
+        "src/CGameAnimationTypeMonsterLarge16.cpp",
+        "src/CGameAnimationTypeAmbientStatic.cpp",
+        "src/CProjectile.cpp",
+        "src/CVidInf.cpp",
+        "src/CScreenCharacter.cpp",
+        "src/CStore.cpp",
+        "src/CGameAnimationTypeFlying.cpp",
+        "src/CItem.cpp",
+        "src/CScreenLoad.cpp"
+      ],
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x4750E0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameArea.cpp",
+          "name": "CGameArea::OnActivation",
+          "our_len": 1787,
+          "their_len": 1788
+        },
+        {
+          "address": "0x628200",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenInventory.cpp",
+          "name": "CScreenInventory::SelectItemAbility",
+          "our_len": 1675,
+          "their_len": 1611
+        },
+        {
+          "address": "0x51D9E0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CPathSearch.cpp",
+          "name": "CPathSearch::PopOpenList",
+          "our_len": 1608,
+          "their_len": 1646
+        },
+        {
+          "address": "0x587C20",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CInfButtonArray.cpp",
+          "name": "CInfButtonArray::sub_587C20",
+          "our_len": 1314,
+          "their_len": 1915
+        },
+        {
+          "address": "0x51DB40",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CPathSearch.cpp",
+          "name": "CPathSearch::SmoothPath",
+          "our_len": 1549,
+          "their_len": 1678
+        },
+        {
+          "address": "0x6305B0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenInventory.cpp",
+          "name": "CScreenInventory::SwapWithPortrait",
+          "our_len": 1614,
+          "their_len": 1599
+        },
+        {
+          "address": "0x6B1E70",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameAnimationTypeMonsterLarge.cpp",
+          "name": "CGameAnimationTypeMonsterLarge::Render",
+          "our_len": 1604,
+          "their_len": 1604
+        },
+        {
+          "address": "0x6B3C60",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameAnimationTypeMonsterLarge16.cpp",
+          "name": "CGameAnimationTypeMonsterLarge16::Render",
+          "our_len": 1604,
+          "their_len": 1604
+        },
+        {
+          "address": "0x6A6A30",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameAnimationTypeAmbientStatic.cpp",
+          "name": "CGameAnimationTypeAmbientStatic::Render",
+          "our_len": 1598,
+          "their_len": 1598
+        },
+        {
+          "address": "0x52A1A0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CProjectile.cpp",
+          "name": "CProjectile::DeliverEffects",
+          "our_len": 1782,
+          "their_len": 1387
+        },
+        {
+          "address": "0x79D680",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CVidInf.cpp",
+          "name": "CVidInf::FXRender",
+          "our_len": 1660,
+          "their_len": 1497
+        },
+        {
+          "address": "0x5F6FD0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CUIControlButtonCharacterFeatsPlusMinus::AdjustValue",
+          "our_len": 1549,
+          "their_len": 1555
+        },
+        {
+          "address": "0x477550",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameArea.cpp",
+          "name": "CGameArea::RemoveObject",
+          "our_len": 1608,
+          "their_len": 1494
+        },
+        {
+          "address": "0x54B9A0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CStore.cpp",
+          "name": "CStore::Marshal",
+          "our_len": 1512,
+          "their_len": 1581
+        },
+        {
+          "address": "0x6A44F0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameAnimationTypeFlying.cpp",
+          "name": "CGameAnimationTypeFlying::Render",
+          "our_len": 1541,
+          "their_len": 1541
+        },
+        {
+          "address": "0x4E8DF0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CItem.cpp",
+          "name": "CItem::Unequip",
+          "our_len": 1361,
+          "their_len": 1715
+        },
+        {
+          "address": "0x63D720",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenLoad.cpp",
+          "name": "CScreenLoad::DrawPortrait",
+          "our_len": 2157,
+          "their_len": 893
+        },
+        {
+          "address": "0x588820",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CInfButtonArray.cpp",
+          "name": "CInfButtonArray::sub_588820",
+          "our_len": 1457,
+          "their_len": 1391
+        }
+      ],
+      "status": "closed",
+      "verdicts": {
+        "0x4750E0": {
+          "case": "dump-4750E0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x477550": {
+          "case": "dump-477550",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x4E8DF0": {
+          "case": "dump-4E8DF0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x51D9E0": {
+          "case": "dump-51D9E0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x51DB40": {
+          "case": "dump-51DB40",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x52A1A0": {
+          "case": "dump-52A1A0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x54B9A0": {
+          "case": "dump-54B9A0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x587C20": {
+          "case": "dump-587C20",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x588820": {
+          "case": "dump-588820",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5F6FD0": {
+          "case": "dump-5F6FD0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x628200": {
+          "case": "dump-628200",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x6305B0": {
+          "case": "dump-6305B0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x63D720": {
+          "case": "dump-63D720",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x6A44F0": {
+          "case": "dump-6A44F0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x6A6A30": {
+          "case": "dump-6A6A30",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x6B1E70": {
+          "case": "dump-6B1E70",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x6B3C60": {
+          "case": "dump-6B3C60",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x79D680": {
+          "case": "dump-79D680",
+          "losing_kind": "trace",
+          "side": "ours"
+        }
+      }
     }
   },
   "fork_base": "e8dd16a750966af53f24daaf49dcb4fb13594c13"
