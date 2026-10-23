@@ -68,6 +68,13 @@ def parse_report(text):
         cand = MARKER_RE.sub('', line, count=1).strip().strip('`').strip()
         m = VERDICT_RE.match(cand)
         if not m:
+            # Prose that names no address and does not try to be a verdict
+            # ("All 20 rows are decided; there is no ## Undecided section.")
+            # decides nothing and is skipped: a mangled verdict line always
+            # carries its address or the word verdict, and those still fail.
+            if not re.search(r'0[xX][0-9a-fA-F]+', cand) and \
+                    not cand.lower().startswith('verdict'):
+                continue
             raise ReportError('line %d: malformed verdict line: %r' % (n, raw))
         addr = '0x%X' % int(m.group(1), 16)
         side, case = m.group(2).lower(), m.group(3)

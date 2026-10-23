@@ -9953,11 +9953,22 @@ class DriverTest(unittest.TestCase):
                          {'0x76D370': ('ours', 'c1')})
         self.assertEqual(driver.parse_report(h + '`verdict 0x1 fork case c2`\n2. Verdict 0X02 neither case c3\n'),
                          {'0x1': ('fork', 'c2'), '0x2': ('neither', 'c3')})
+        # a mangled verdict (it names an address, or starts with the word)
+        # still fails, with its line number
         with self.assertRaises(driver.ReportError) as cm:
-            driver.parse_report(h + '\nI think it is ours.\n')
+            driver.parse_report(h + '\nI think 0x401000 is ours.\n')
         self.assertIn('line 3', str(cm.exception))
         with self.assertRaises(driver.ReportError):
+            driver.parse_report(h + 'verdict ours case a\n')
+        with self.assertRaises(driver.ReportError):
             driver.parse_report(h + 'verdict 0x401000 ours case a\nverdict 0x0401000 fork case b\n')
+        # prose that names no address decides nothing and is skipped (b017's
+        # Flash worker wrote this sentence under ## Verdicts three times)
+        self.assertEqual(driver.parse_report(
+            h + 'verdict 0x1 ours case a\n'
+                'All 20 rows are decided; there is no `## Undecided` section.\n'
+                '(none; this is an import batch)\nverdict 0x2 fork case b\n'),
+            {'0x1': ('ours', 'a'), '0x2': ('fork', 'b')})
 
     def test_run_non_json_output(self):
         def stub(argv, **kw):
@@ -11352,7 +11363,7 @@ class DriverTest(unittest.TestCase):
         self.assertIn('BRIEF b011', w.briefs[1])
 
     def test_malformed_report_is_a_check_failure(self):
-        w = _SeqWorker('## Verdicts\nI think it is ours.\n', self.REPORT)
+        w = _SeqWorker('## Verdicts\nI think 0x401000 is ours.\n', self.REPORT)
         d = self._driver(worker=w)
         self.assertEqual(d.run_batch('b011'), 'closed')
         self.assertIn('malformed verdict line', w.briefs[1])
