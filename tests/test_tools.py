@@ -11309,5 +11309,140 @@ class TruthTest(unittest.TestCase):
                 self.assertNotIn('measured', json.load(f)['batches']['b1']['verdicts']['0x1'])
 
 
+class ClaimsTest(unittest.TestCase):
+    """tools/claims.py and the gate lock in tools/gates.sh."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp = self._tmp.name
+        self.claims = load_tool('claims')
+        self.wave = load_tool('wave')
+        self.cp = os.path.join(self.tmp, 'claims.json')
+        self.sp = os.path.join(self.tmp, 'wave-state.json')
+        self.kw = dict(claims_path=self.cp, state_path=self.sp)
+
+    def write_state(self, files, status='assigned'):
+        with open(self.sp, 'w') as f:
+            json.dump({'batches': {'b7': {
+                'files': files, 'rows': [], 'branch': 'x',
+                'status': status, 'verdicts': {}}}}, f)
+
+    def test_claim_and_release(self):
+        self.claims.claim('s1', 'claude', ['src/A.cpp', 'src/B.cpp'], **self.kw)
+        with open(self.cp) as f:
+            entry = json.load(f)['s1']
+        self.assertEqual(entry['holder'], 'claude')
+        self.assertEqual(entry['files'], ['src/A.cpp', 'src/B.cpp'])
+        self.assertTrue(entry['since'])
+        self.assertEqual(self.claims.owned('src/A.cpp', **self.kw), 's1')
+        # The same stream may claim more; it does not conflict with itself.
+        self.claims.claim('s1', 'claude', ['src/C.cpp'], **self.kw)
+        self.assertEqual(self.claims.owned('src/C.cpp', **self.kw), 's1')
+        self.claims.release('s1', **self.kw)
+        self.assertIsNone(self.claims.owned('src/A.cpp', **self.kw))
+        self.claims.release('s1', **self.kw)  # releasing twice is fine
+
+    def test_claim_conflicts_with_other_stream(self):
+        self.claims.claim('s1', 'claude', ['src/A.cpp'], **self.kw)
+        with self.assertRaises(self.claims.ClaimError) as cm:
+            self.claims.claim('s2', 'other', ['src/B.cpp', 'src/A.cpp'], **self.kw)
+        self.assertIn('s1', str(cm.exception))
+        self.assertIsNone(self.claims.owned('src/B.cpp', **self.kw))
+
+    def test_claim_conflicts_with_assigned_batch(self):
+        self.write_state(['src/A.cpp'])
+        with self.assertRaises(self.claims.ClaimError) as cm:
+            self.claims.claim('s1', 'claude', ['src/A.cpp'], **self.kw)
+        self.assertIn('b7', str(cm.exception))
+        self.write_state(['src/A.cpp'], status='closed')
+        self.claims.claim('s1', 'claude', ['src/A.cpp'], **self.kw)
+
+    def test_owned_reports_batches_and_streams(self):
+        self.write_state(['src/A.cpp'])
+        self.claims.claim('s1', 'claude', ['src/B.cpp'], **self.kw)
+        self.assertEqual(self.claims.owned('src/A.cpp', **self.kw), 'b7')
+        self.assertEqual(self.claims.owned('src/B.cpp', **self.kw), 's1')
+        self.assertIsNone(self.claims.owned('src/Z.cpp', **self.kw))
+
+    def test_cli(self):
+        tool = os.path.join(ROOT, 'tools', 'claims.py')
+
+        def run(*a):
+            return subprocess.run(
+                ['python3', '-I', tool, '--claims', self.cp, '--state', self.sp,
+                 *a], capture_output=True, text=True)
+        self.assertEqual(run('claim', 's1', 'me', 'src/A.cpp').returncode, 0)
+        r = run('claim', 's2', 'you', 'src/A.cpp')
+        self.assertEqual(r.returncode, 1)
+        self.assertIn('s1', r.stderr)
+        self.assertIn('s1', run('list').stdout)
+        self.assertEqual(run('release', 's1').returncode, 0)
+        self.assertNotIn('s1', run('list').stdout)
+
+    def test_next_batch_skips_claimed_file(self):
+        disagreements = os.path.join(self.tmp, 'disagreements.json')
+        with open(disagreements, 'w') as f:
+            json.dump(_WAVE_ROWS, f)
+        self.claims.claim('s1', 'claude', ['src/A.cpp'], **self.kw)
+        rc, _ = self.wave.next_batch(disagreements, self.sp, size=20,
+                                     claims_path=self.cp)
+        self.assertEqual(rc, 0)
+        with open(self.sp) as f:
+            b = json.load(f)['batches']['b001']
+        self.assertNotIn('src/A.cpp', b['files'])
+        self.assertIn('src/B.cpp', b['files'])
+
+    # -- the gate lock -----------------------------------------------------
+
+    def lock_repo(self):
+        root = os.path.join(self.tmp, 'repo')
+        os.makedirs(os.path.join(root, 'tools'))
+        subprocess.run(['git', 'init', '-q', root], check=True)
+        shutil.copy(os.path.join(ROOT, 'tools', 'gates.sh'),
+                    os.path.join(root, 'tools', 'gates.sh'))
+        return root
+
+    def test_gate_lock_serializes(self):
+        root = self.lock_repo()
+        gates = os.path.join(root, 'tools', 'gates.sh')
+        log = os.path.join(self.tmp, 'log')
+        # Each holder records when it got the lock and when it let go.
+        script = ('bash "%s" --dry-lock 1 && date +%%s.%%N >> "%s"' % (gates, log))
+        t0 = time.time()
+        procs = [subprocess.Popen(['bash', '-c', script]) for _ in range(2)]
+        for p in procs:
+            self.assertEqual(p.wait(timeout=60), 0)
+        # Two one-second holds cannot overlap: the second ends >= 2 s in.
+        self.assertGreaterEqual(time.time() - t0, 2.0)
+        with open(log) as f:
+            ends = sorted(float(x) for x in f.read().split())
+        self.assertEqual(len(ends), 2)
+        self.assertGreaterEqual(ends[1] - ends[0], 0.5)
+        self.assertTrue(os.path.exists(os.path.join(root, '.gates.lock')))
+
+    def test_gate_lock_no_wait_fails_fast(self):
+        root = self.lock_repo()
+        gates = os.path.join(root, 'tools', 'gates.sh')
+        holder = subprocess.Popen(['bash', gates, '--dry-lock', '4'])
+        self.addCleanup(holder.wait)
+        lock = os.path.join(root, '.gates.lock')
+        deadline = time.time() + 10
+        while time.time() < deadline and not (
+                os.path.exists(lock) and os.path.getsize(lock) > 0):
+            time.sleep(0.05)
+        t0 = time.time()
+        r = subprocess.run(['bash', gates, '--no-wait', '--dry-lock', '0'],
+                           capture_output=True, text=True, timeout=30)
+        self.assertLess(time.time() - t0, 2.0)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn('held', r.stderr)
+        self.assertIn(str(holder.pid), r.stderr)
+        holder.wait()
+        r = subprocess.run(['bash', gates, '--no-wait', '--dry-lock', '0'],
+                           capture_output=True, text=True, timeout=30)
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+
 if __name__ == '__main__':
     unittest.main()

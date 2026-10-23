@@ -352,3 +352,16 @@ archive's hash first, then extracts it beside the archive under the same
 `wso/` tree — member names are sanitized (no absolute paths, no `..`, no
 symlinks, no drive letters) and capped at 4,096 files and 2 GiB — and
 nothing extracted is ever executed.
+
+## Working beside the driver
+
+A Claude stream and the batch driver share this repo, so each file has one
+owner at a time. `wave-state.json` has one writer, the driver; nobody else
+edits it. Claim before you edit and release at merge:
+`python3 -I tools/claims.py claim <stream> <holder> <file>...`, then
+`... release <stream>` ([tools/claims.py](../../tools/claims.py), recorded in
+`docs/wso/claims.json`); `wave.py next` skips claimed files exactly as it
+skips files of assigned batches. Run `git pull --ff-only` before every merge
+into `first`. Keep one ledger per plan. `tools/gates.sh` takes an exclusive
+lock on `.gates.lock` at the main repo root, so two gates never run at once;
+`--no-wait` fails fast instead of waiting.

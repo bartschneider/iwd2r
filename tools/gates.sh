@@ -3,22 +3,46 @@
 # for when GitHub Actions is disabled (gh workflow disable CI) to save
 # minutes. Linux presets always; the Windows builds with --windows.
 #
-#   tools/gates.sh [--base REV] [--windows] [--skip-clang]
+#   tools/gates.sh [--base REV] [--windows] [--skip-clang] [--no-wait]
 #
 # --base is the evidence check's base (default: iwd2r/main, what CI's push
 # event would have used). Engine tests run serially and muted. Exits 1 on the
 # first failing step and prints a summary.
+#
+# One gate runs at a time: gates.sh holds an exclusive flock on .gates.lock at
+# the MAIN repo root (shared by every worktree) and a second gate waits for it.
+# --no-wait fails fast, naming the holder, instead. --dry-lock SECONDS takes
+# the lock, holds it that long and exits 0 without running any step (tests).
 set -u
 cd "$(dirname "$0")/.."
-BASE=iwd2r/main; WINDOWS=0; CLANG=1
+BASE=iwd2r/main; WINDOWS=0; CLANG=1; NOWAIT=0; DRYLOCK=
 while [ $# -gt 0 ]; do
     case "$1" in
         --base) BASE="$2"; shift 2 ;;
         --windows) WINDOWS=1; shift ;;
         --skip-clang) CLANG=0; shift ;;
+        --no-wait) NOWAIT=1; shift ;;
+        --dry-lock) DRYLOCK="$2"; shift 2 ;;
         *) echo "gates: unknown option $1" >&2; exit 2 ;;
     esac
 done
+# The lock lives at the main repo root, not at this worktree's root: batch
+# worktrees run this script too, and a per-worktree lock would serialise nothing.
+GATE_LOCK="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.gates.lock"
+exec 9>>"$GATE_LOCK"
+if [ "$NOWAIT" = 1 ]; then
+    if ! flock -n 9; then
+        echo "gates: another gate holds $GATE_LOCK ($(head -n 1 "$GATE_LOCK" 2>/dev/null)); not waiting (--no-wait)" >&2
+        exit 3
+    fi
+elif ! flock -n 9; then
+    echo "gates: waiting for the gate lock $GATE_LOCK ($(head -n 1 "$GATE_LOCK" 2>/dev/null))" >&2
+    flock 9
+fi
+# Record the holder for the messages above (the lock is on the inode, so
+# rewriting the file through its path keeps it).
+echo "held by pid $$ in $PWD since $(date -u +%FT%TZ)" > "$GATE_LOCK"
+if [ -n "$DRYLOCK" ]; then sleep "$DRYLOCK"; exit 0; fi
 export IWD2R_AUDIO=null SDL_AUDIO_DRIVER=dummy
 # Data tests read a Linux-local copy of the vanilla game when one exists:
 # the oracle's copy on the Windows drive is locked while a sandbox replay

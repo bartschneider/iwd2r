@@ -263,7 +263,8 @@ def _cut_worktree(repo, branch, base, worktree_root=None):
 def next_batch(disagreements_path=DISAGREEMENTS_PATH, state_path=STATE_PATH,
                size=DEFAULT_SIZE, category=DEFAULT_CATEGORY, *,
                triage_path=None, repo=None, fork_base=None,
-               worktree_root=None, import_path=None, base='first'):
+               worktree_root=None, import_path=None, base='first',
+               claims_path=None):
     """Rank the unclaimed rows, take the biggest `size`, record the batch.
 
     With triage_path (the CLI passes docs/wso/triage.json and ROOT) it
@@ -272,7 +273,9 @@ def next_batch(disagreements_path=DISAGREEMENTS_PATH, state_path=STATE_PATH,
     default_worktree_root(repo)) unless the branch has one, and then runs
     apply_triage with fork_base (default: the state's).  Nothing is
     recorded when the worktree cannot be cut.  Without triage_path only
-    the state file is written."""
+    the state file is written.  Files held in claims_path (default:
+    claims.json beside the state file) are skipped like those of assigned
+    batches."""
     with open(disagreements_path, encoding='utf-8') as f:
         rows = json.load(f)
     state = load_state(state_path)
@@ -296,6 +299,17 @@ def next_batch(disagreements_path=DISAGREEMENTS_PATH, state_path=STATE_PATH,
                 decided.add(_addr_key(r['address']))
         if b['status'] == 'assigned':
             owned.update(b['files'])
+    if claims_path is None:
+        claims_path = os.path.join(os.path.dirname(os.path.abspath(state_path)),
+                                   'claims.json')
+    try:
+        with open(claims_path, encoding='utf-8') as f:
+            for c in json.load(f).values():
+                owned.update(c.get('files', []))
+    except FileNotFoundError:
+        pass
+    except (OSError, ValueError, AttributeError) as e:
+        return 2, f'claims file {claims_path}: {e}\n'
 
     def in_category(r):
         return r.get('category') == category
