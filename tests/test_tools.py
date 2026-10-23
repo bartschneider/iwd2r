@@ -121,6 +121,7 @@ assemble_context = load_tool('assemble_context')
 token_audit = load_tool('token_audit')
 bg2_find = load_tool('bg2_find')
 gltrace = load_tool('gltrace')
+triage = load_tool('triage')
 
 
 def load_ghidra_tool(name):
@@ -8348,6 +8349,49 @@ public:
         # pair is gone, and the two real members are in order
         self.assertEqual(verdict, struct_layout_audit.SKIP)
         self.assertNotIn('goes backwards', ' '.join(notes))
+
+
+class TriageTest(unittest.TestCase):
+    TYPES = frozenset({'CGameSprite', 'int', 'void', 'BOOL'})
+
+    def test_normalize_renames_identifiers_positionally(self):
+        a = 'int f(int count){int total=count*2;return total;}'
+        b = 'int f(int n){int sum=n*2;return sum;}'
+        self.assertEqual(triage.normalize(a, self.TYPES), triage.normalize(b, self.TYPES))
+
+    def test_normalize_keeps_calls_and_literals(self):
+        a = 'void f(){Foo(3);}'
+        b = 'void f(){Bar(3);}'
+        self.assertNotEqual(triage.normalize(a, self.TYPES), triage.normalize(b, self.TYPES))
+        self.assertNotEqual(triage.normalize('void f(){Foo(3);}', self.TYPES),
+                            triage.normalize('void f(){Foo(4);}', self.TYPES))
+
+    def test_classify_rename_only(self):
+        cls, _ = triage.classify('int f(int a){return a+1;}', 'int f(int b){return b+1;}', self.TYPES)
+        self.assertEqual(cls, 'rename-only')
+
+    def test_classify_signature_only(self):
+        cls, _ = triage.classify('BOOL f(int a){return a+1;}', 'int f(int a){return a+1;}', self.TYPES)
+        self.assertEqual(cls, 'signature-only')
+
+    def test_classify_fork_stub(self):
+        ours = 'void f(){' + 'Step();' * 40 + '}'
+        cls, _ = triage.classify('void f(){// TODO\n}', ours, self.TYPES)
+        self.assertEqual(cls, 'fork-stub')
+
+    def test_classify_short_fork_body_with_new_callee_is_ambiguous(self):
+        ours = 'void f(){' + 'Step();' * 40 + '}'
+        cls, _ = triage.classify('void f(){Other();}', ours, self.TYPES)
+        self.assertEqual(cls, 'ambiguous')
+
+    def test_classify_ours_stub(self):
+        cls, _ = triage.classify('void f(){Real();Work();}', 'void f(){// TODO\n}', self.TYPES)
+        self.assertEqual(cls, 'ours-stub')
+
+    def test_classify_real_difference_is_ambiguous(self):
+        cls, _ = triage.classify('int f(int a){if(a>0)return 1;return 0;}',
+                                 'int f(int a){if(a>=0)return 1;return 0;}', self.TYPES)
+        self.assertEqual(cls, 'ambiguous')
 
 
 if __name__ == '__main__':
