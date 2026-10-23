@@ -1,0 +1,32 @@
+{
+ "frida_default": false,
+ "oracle_rows": {},
+ "paths": {
+  "frida": {
+   "agree": 0,
+   "deferred": true,
+   "disagree": 0,
+   "measured": 0,
+   "of": 28
+  },
+  "oracle": {
+   "agree": 0,
+   "disagree": 0,
+   "measured": 0,
+   "of": 28
+  }
+ },
+ "sample": [
+  "0x58FF20",
+  "0x5DE2C0",
+  "0x62F360",
+  "0x709B60",
+  "0x7338E0",
+  "0x46B160",
+  "0x54C770",
+  "0x4BBCB0",
+  "0x5ABA20",
+  "0x71FC00"
+ ],
+ "seed": "2026-10-22"
+}

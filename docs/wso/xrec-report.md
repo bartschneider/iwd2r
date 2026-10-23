@@ -96,12 +96,24 @@ above; the sort order was verified programmatically.
 
 Per-side tally across every batch in docs/wso/wave-state.json, split by deciding evidence kind (regenerate with `python3 tools/wave.py scorecard`):
 
-Decided for the fork: 10 (losing kind: oracle 1, replay 1, read-only 8) -- deciding evidence: dump reading 10
-Decided for ours: 182 (losing kind: trace 182) -- deciding evidence: replay checkpoint 21, dump reading 161
-Decided for neither: 8 -- deciding evidence: dump reading 8
-Deciding evidence across all 200 verdicts: oracle probe 0, replay checkpoint 21, dump reading 179, trace 0
+Decided for the fork: 10 (losing kind: oracle 1, replay 1, read-only 8) -- deciding evidence: dump reading 10; measured: probe 0, frida 0, replay 0, none 10
+Decided for ours: 182 (losing kind: trace 182) -- deciding evidence: replay checkpoint 21, dump reading 161; measured: probe 0, frida 0, replay 0, none 182
+Decided for neither: 8 -- deciding evidence: dump reading 8; measured: probe 0, frida 0, replay 0, none 8
+Deciding evidence across all 200 verdicts: oracle probe 0, replay checkpoint 21, dump reading 179, trace 0, triage 0
 
 Batches: b001 closed (20 rows), b002 closed (20 rows), b003 closed (20 rows), b004 closed (20 rows), b005 closed (20 rows), b006 closed (20 rows), b007 closed (20 rows), b008 closed (20 rows), b009 closed (20 rows), b010 closed (20 rows), b011 assigned (20 rows), b012 assigned (20 rows)
+
+Calibration, computed from triage.json classes over closed verdicts:
+
+class           agree total  status
+rename-only         0     0  disabled (no verdicts)
+signature-only      0     0  disabled (no verdicts)
+fork-stub           2     2  enabled
+ours-stub           0     0  never enabled
+ambiguous         180   198  never enabled
+    mismatches: 0x5FDB20, 0x600B50, 0x63C940, 0x65BCF0, 0x704D40, 0x737EF0, 0x738E70, 0x73B760, 0x5FD0A0, 0x614EF0, 0x63BE80, 0x67B8A0, 0x708280, 0x72FD20, 0x67E560, 0x5D3A80, 0x7941D0, 0x7A3FD0
+
+Truth calibration (seed 2026-10-22, tools/truth.py over the 18 ruling rows with side fork or neither plus a sample of 10 dump-decided ours rows; a path measures a row when it gives pass/fail (oracle) or equal/different (Frida) and agrees on pass or equal): oracle probes: measured 0 of 28 rows, agreed 0, disagreed 0; Frida trace diff: measured 0 of 28 rows, agreed 0, disagreed 0 (deferred: not run); Frida on by default: no.
 
 ## Triage calibration
 
