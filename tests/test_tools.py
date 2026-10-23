@@ -123,6 +123,7 @@ assemble_context = load_tool('assemble_context')
 token_audit = load_tool('token_audit')
 bg2_find = load_tool('bg2_find')
 gltrace = load_tool('gltrace')
+truth = load_tool('truth')
 triage = load_tool('triage')
 driver = load_tool('driver')
 
@@ -10418,6 +10419,93 @@ class DriverTest(unittest.TestCase):
         # Released when run() returns: a later driver takes it.
         second.next_batch = lambda *a, **kw: self.NOTHING
         self.assertEqual(second.run(), 0)
+
+
+class TruthTest(unittest.TestCase):
+    def test_is_pure_accepts_arithmetic_on_args(self):
+        ok, _ = truth.is_pure('## Decompiled (Ghidra)\nint f(int a,int b){return (a*3+b)%7;}\n')
+        self.assertTrue(ok)
+
+    def test_is_pure_rejects_global_through_pointer_chain(self):
+        ok, why = truth.is_pure('## Decompiled (Ghidra)\nint f(int a){return *(int*)(DAT_008cf6d8+0x1c54)+a;}\n')
+        self.assertFalse(ok); self.assertIn('DAT_008cf6d8', why)
+
+    def test_is_pure_rejects_unknown_callee(self):
+        ok, _ = truth.is_pure('## Decompiled (Ghidra)\nint f(int a){return Helper(a);}\n')
+        self.assertFalse(ok)
+        ok, _ = truth.is_pure('## Decompiled (Ghidra)\nint f(int a){return Helper(a);}\n', frozenset({'Helper'}))
+        self.assertTrue(ok)
+
+    def test_is_pure_ignores_keywords_casts_and_the_signature(self):
+        text = ('## Decompiled (Ghidra)\n\n```c\nuint Foo::Bar(int a, uint b)\n\n{\n'
+                '  if (a < 0) {\n    return (uint)b;\n  }\n'
+                '  while (b != 0) {\n    b = b - sizeof(int);\n  }\n'
+                '  return (int)(char *)a * (b + 1);\n}\n```\n\n## Callers\n\n- x\n')
+        ok, why = truth.is_pure(text)
+        self.assertTrue(ok, why)
+
+    def test_is_pure_names_the_first_offending_line(self):
+        text = '## Decompiled (Ghidra)\nint f(int a)\n{\n  int b;\n  b = a + 1;\n  *(int *)(a + 4) = b;\n  return Other(b);\n}\n'
+        ok, why = truth.is_pure(text)
+        self.assertFalse(ok)
+        self.assertIn('*(int *)(a + 4) = b;', why)
+        self.assertNotIn('Other', why)
+        ok, why = truth.is_pure('## Decompiled (Ghidra)\nint f(int a){\n return this->x + a;\n}\n')
+        self.assertFalse(ok); self.assertIn('this', why)
+
+    def test_is_pure_reads_only_the_decompiled_section(self):
+        text = '## Decompiled (Ghidra)\nint f(int a){return a;}\n## Callees\n\n- 0x401000 Helper\n DAT_00400000\n'
+        self.assertTrue(truth.is_pure(text)[0])
+        self.assertFalse(truth.is_pure('no section here')[0])
+
+    def test_draft_case_matches_rand_case_shape(self):
+        src = truth.draft_case('0x5845D0', 'IcewindMisc::Roll', 'int Roll(int dice, int sides)', 'b011')
+        self.assertIn('ORACLE_CASE("wave/b011/5845D0"', src)
+        self.assertIn('CallOriginal', src)
+        self.assertNotIn('#include <windows.h>', src)
+        self.assertIn('IcewindMisc::Roll(dice, sides)', src)
+        self.assertIn('using Fn_5845D0 = int(__cdecl*)(int, int);', src)
+
+    def test_draft_case_skips_what_it_cannot_call_honestly(self):
+        for sig, kwargs in (('uint GetAbilityNo(void)', {'thiscall': True}),
+                            ('int F(char *p)', {}), ('float F(int a)', {}),
+                            ('int F(float a)', {}), ('void F(int a)', {}),
+                            ('int F(int a, int b, int c, int d, int e)', {}),
+                            ('int __thiscall F(int a)', {})):
+            src = truth.draft_case('0x401000', 'X::F', sig, 'b011', **kwargs)
+            self.assertTrue(src.startswith('// skipped 0x401000'), sig)
+            self.assertNotIn('ORACLE_CASE', src)
+
+    def test_write_cases_writes_only_into_cases_dir(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = truth.write_cases('b011', [
+                {'address': '0x5845D0', 'name': 'IcewindMisc::Roll', 'signature': 'int Roll(int a, int b)'},
+                {'address': '0x4016D0', 'name': 'CResItem::GetAbilityNo', 'signature': 'uint GetAbilityNo(void)',
+                 'thiscall': True}], cases_dir=d)
+            self.assertEqual(path, os.path.join(d, 'wave-b011.cpp'))
+            self.assertEqual(os.listdir(d), ['wave-b011.cpp'])
+            with open(path) as f:
+                text = f.read()
+        self.assertIn('ORACLE_CASE("wave/b011/5845D0"', text)
+        self.assertIn('// skipped 0x4016D0', text)
+        self.assertNotIn('<windows.h>', text.replace('must not include <windows.h>', ''))
+        self.assertLess(text.index('} // namespace'), text.index('ORACLE_CASE('))
+
+    def test_probe_verdicts_uses_case_ok_semantics(self):
+        def case(name, **kw):
+            c = {'name': name, 'pending': False, 'has_body': True, 'iterations': 36,
+                 'crashed': False, 'failure_count': 0}
+            c.update(kw)
+            return c
+        report = json.dumps({'cases': [
+            case('wave/b011/5845D0'), case('wave/b011/401000', failure_count=2),
+            case('wave/b012/402000', crashed=True),
+            case('wave/b011/403000', pending=True, iterations=0),
+            case('wave/b011/404000', expect='fail', failure_count=1),
+            case('rand/roll'), case('wave/b011/not-hex')]})
+        self.assertEqual(truth.probe_verdicts(report), {
+            '0x5845D0': True, '0x401000': False, '0x402000': False,
+            '0x403000': False, '0x404000': True})
 
 
 if __name__ == '__main__':
