@@ -379,10 +379,10 @@
   },
   {
     "address": "0x708280",
-    "class": "rename-only",
+    "class": "ambiguous",
     "file": "src/CGameSprite.cpp",
     "name": "CGameSprite::StartSpriteEffect",
-    "reason": "bodies and signatures match after renaming identifiers"
+    "reason": "the bodies differ beyond identifier names"
   },
   {
     "address": "0x715BD0",
@@ -2318,10 +2318,10 @@
   },
   {
     "address": "0x483CF0",
-    "class": "rename-only",
+    "class": "ambiguous",
     "file": "src/CGameDialog.cpp",
     "name": "CGameDialogSprite::EndDialog",
-    "reason": "bodies and signatures match after renaming identifiers"
+    "reason": "the bodies differ beyond identifier names"
   },
   {
     "address": "0x65BCF0",
@@ -2612,10 +2612,11 @@
   },
   {
     "address": "0x4E9840",
-    "class": "signature-only",
+    "auto_class": "signature-only",
+    "class": "ambiguous",
     "file": "src/CItem.cpp",
     "name": "CItem::sub_4E9840",
-    "reason": "bodies match under the signature parameters; signatures differ"
+    "reason": "disabled by calibration"
   },
   {
     "address": "0x7CB670",
@@ -2780,10 +2781,11 @@
   },
   {
     "address": "0x7C0DB0",
-    "class": "rename-only",
+    "auto_class": "rename-only",
+    "class": "ambiguous",
     "file": "src/CVidPoly.cpp",
     "name": "CVidPoly::CVidPoly",
-    "reason": "bodies and signatures match after renaming identifiers"
+    "reason": "disabled by calibration"
   },
   {
     "address": "0x552A50",
@@ -3046,10 +3048,11 @@
   },
   {
     "address": "0x4F59D0",
+    "auto_class": "signature-only",
     "class": "ambiguous",
     "file": "src/CMessage.cpp",
     "name": "CMessageInsertResponse::CMessageInsertResponse",
-    "reason": "the bodies differ beyond identifier names"
+    "reason": "disabled by calibration"
   },
   {
     "address": "0x504C40",
@@ -3298,10 +3301,10 @@
   },
   {
     "address": "0x7941D0",
-    "class": "rename-only",
+    "class": "ambiguous",
     "file": "src/CTlkTable.cpp",
     "name": "CTlkTable::Fetch",
-    "reason": "bodies and signatures match after renaming identifiers"
+    "reason": "the bodies differ beyond identifier names"
   },
   {
     "address": "0x6BC5F0",

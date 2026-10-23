@@ -8433,7 +8433,60 @@ class TriageTest(unittest.TestCase):
                'src/b.h': 'typedef class CFoo CFoo;'}
         names = triage.load_type_names(lambda ref, p: src[p], 'O',
                                        list_headers=lambda ref: sorted(src))
-        self.assertEqual(names, frozenset({'CPoint', 'CRect', 'CFoo'}))
+        self.assertLessEqual(frozenset({'CPoint', 'CRect', 'CFoo'}), names)
+
+    def test_load_type_names_reads_typedef_and_using_aliases(self):
+        src = {'src/a.h': 'typedef unsigned int GameId;\nusing Handle2 = void*;\n'
+                          'typedef struct { int a; } Packed;\n'}
+        names = triage.load_type_names(lambda ref, p: src[p], 'O',
+                                       list_headers=lambda ref: sorted(src))
+        self.assertLessEqual(frozenset({'GameId', 'Handle2', 'Packed'}), names)
+
+    def test_load_type_names_includes_builtin_win32_names(self):
+        names = triage.load_type_names(lambda ref, p: '', 'O', list_headers=lambda ref: [])
+        for n in ('LONG', 'INT', 'DWORD', 'BOOL', 'RESREF', 'CString', 'POSITION',
+                  'unsigned', 'signed', 'int', 'void', 'bool'):
+            self.assertIn(n, names)
+
+    def test_change_of_type_alone_is_not_rename_only(self):
+        names = triage.load_type_names(lambda ref, p: '', 'O', list_headers=lambda ref: [])
+        cls, _ = triage.classify('void f(){LONG x=1;Go(x);}', 'void f(){INT x=1;Go(x);}', names)
+        self.assertNotEqual(cls, 'rename-only')
+
+    def test_calibrate_counts_agreement_per_class(self):
+        state = {'batches': {'b001': {'status': 'closed', 'rows': [
+            {'address': '0x1'}, {'address': '0x2'}],
+            'verdicts': {'0x1': {'side': 'ours'}, '0x2': {'side': 'fork'}}}}}
+        triaged = [{'address': '0x1', 'class': 'rename-only'},
+                   {'address': '0x2', 'class': 'fork-stub'}]
+        cal = triage.calibrate(state, triaged)
+        self.assertEqual(cal['rename-only']['agree'], 1)
+        self.assertEqual(cal['fork-stub'], {'agree': 0, 'total': 1, 'mismatches': ['0x2']})
+        self.assertEqual(triage.enabled_classes(cal), frozenset({'rename-only'}))
+        self.assertIn('fork-stub', triage.calibration_text(cal))
+
+    def test_apply_calibration_disables_unproven_classes(self):
+        cal = triage.calibrate({'batches': {'b': {'status': 'closed', 'verdicts': {
+            '0x1': {'side': 'ours'}, '0x2': {'side': 'fork'}}}}},
+            [{'address': '0x1', 'class': 'fork-stub'}, {'address': '0x2', 'class': 'rename-only'}])
+        rows = [{'address': '0x1', 'class': 'fork-stub', 'reason': 'x'},
+                {'address': '0x2', 'class': 'rename-only', 'reason': 'x'},
+                {'address': '0x3', 'class': 'signature-only', 'reason': 'x'}]
+        out = triage.apply_calibration(rows, cal)
+        self.assertEqual([r['class'] for r in out], ['fork-stub', 'ambiguous', 'ambiguous'])
+        self.assertEqual(out[1]['reason'], 'disabled by calibration')
+        self.assertEqual(out[1]['auto_class'], 'rename-only')
+
+    def test_calibration_against_committed_batches(self):
+        if subprocess.run(['git', '-C', ROOT, 'rev-parse', '--verify', '--quiet',
+                           'e8dd16a7^{commit}'], capture_output=True).returncode:
+            self.skipTest('fork base not fetched')
+        state = json.load(open(os.path.join(ROOT, 'docs/wso/wave-state.json')))
+        triaged = json.load(open(os.path.join(ROOT, 'docs/wso/triage.json')))
+        cal = triage.calibrate(state, triaged)
+        self.assertTrue(any(cal[c]['total'] for c in triage.AUTO_OURS))
+        for cls in triage.AUTO_OURS:
+            self.assertEqual(cal[cls]['mismatches'], [], cls)
 
 
 if __name__ == '__main__':

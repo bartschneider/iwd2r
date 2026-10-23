@@ -136,6 +136,15 @@ def classify(theirs, ours, type_names):
 SIG = re.compile(r'^(?:[A-Za-z_][\w:<>,*&\s]*?\s+)?([A-Za-z_]\w*(?:::[~A-Za-z_]\w*)*'
                  r'|[A-Za-z_]\w*::operator\S*)\s*\([^;{]*\)\s*(?:const)?\s*\{', re.M)
 TYPE_DECL = re.compile(r'\b(?:class|struct)\s+([A-Za-z_]\w*)')
+TYPEDEF_FN = re.compile(r'\btypedef\b[^;{]*\(\s*[*&]\s*([A-Za-z_]\w*)\s*\)')
+TYPEDEF = re.compile(r'\btypedef\b[^;{]*(?:\{[^{}]*\}[^;{]*)?\b([A-Za-z_]\w*)\s*(?:\[[^\]]*\]\s*)*;')
+USING = re.compile(r'\busing\s+([A-Za-z_]\w*)\s*=')
+BUILTIN_TYPES = frozenset('''
+LONG ULONG INT UINT BYTE WORD DWORD BOOL BOOLEAN SHORT USHORT CHAR UCHAR WCHAR
+FLOAT DOUBLE SIZE_T LPSTR LPCSTR LPVOID HANDLE COLORREF RESREF STRREF CString
+CPoint CRect CSize POSITION unsigned signed char short long float double bool
+int void
+'''.split())
 
 
 def extract(text):
@@ -161,16 +170,20 @@ def extract(text):
 
 
 def _headers(ref):
-    r = subprocess.run(['git', 'ls-tree', '-r', '--name-only', ref, 'src'],
+    r = subprocess.run(['git', 'ls-tree', '-r', '--name-only', ref, 'src', 'compat'],
                        capture_output=True, text=True)
     return [f for f in r.stdout.splitlines() if f.endswith('.h')]
 
 
 def load_type_names(show, ours_ref, list_headers=_headers):
-    """class X / struct X names declared in src/*.h at ours_ref."""
-    names = set()
+    """Type names: class / struct names, typedef and using aliases declared
+    in src/*.h and compat/*.h at ours_ref, plus the fixed Win32 and compat
+    builtins. A change of type alone must never normalise equal."""
+    names = set(BUILTIN_TYPES)
     for path in list_headers(ours_ref):
-        names.update(TYPE_DECL.findall(xrec.blank_comments(show(ours_ref, path))))
+        text = xrec.blank_comments(show(ours_ref, path))
+        for rx in (TYPE_DECL, TYPEDEF_FN, TYPEDEF, USING):
+            names.update(rx.findall(text))
     return frozenset(names)
 
 
@@ -226,14 +239,80 @@ def _write_atomic(path, data):
         raise
 
 
+def calibrate(state, triaged):
+    """class -> {agree, total, mismatches}: each triaged row that has a
+    recorded verdict in a closed batch, agreeing when the side is 'ours'."""
+    cls_of = {r['address']: r.get('auto_class', r['class']) for r in triaged}
+    cal = {c: {'agree': 0, 'total': 0, 'mismatches': []} for c in CLASSES}
+    for b in state.get('batches', {}).values():
+        if b.get('status') != 'closed':
+            continue
+        for addr, v in (b.get('verdicts') or {}).items():
+            c = cls_of.get(addr)
+            if c is None:
+                continue
+            cal[c]['total'] += 1
+            if v.get('side') == 'ours':
+                cal[c]['agree'] += 1
+            else:
+                cal[c]['mismatches'].append(addr)
+    return cal
+
+
+def enabled_classes(calibration):
+    return frozenset(c for c in AUTO_OURS
+                     if calibration[c]['total'] > 0
+                     and calibration[c]['agree'] == calibration[c]['total'])
+
+
+def calibration_text(calibration):
+    enabled = enabled_classes(calibration)
+    lines = ['%-15s %5s %5s  %s' % ('class', 'agree', 'total', 'status')]
+    for c in CLASSES:
+        e = calibration[c]
+        status = ('enabled' if c in enabled else
+                  'never enabled' if c not in AUTO_OURS else
+                  'disabled (no verdicts)' if not e['total'] else 'disabled by calibration')
+        lines.append('%-15s %5d %5d  %s' % (c, e['agree'], e['total'], status))
+        if e['mismatches']:
+            lines.append('    mismatches: ' + ', '.join(e['mismatches']))
+    return '\n'.join(lines)
+
+
+def apply_calibration(triaged, calibration):
+    """Rows of a disabled auto class become 'ambiguous' (the original class
+    is kept as auto_class so a later calibration still sees it)."""
+    on = enabled_classes(calibration)
+    out = []
+    for r in triaged:
+        r = dict(r)
+        c = r.get('auto_class', r['class'])
+        if c in AUTO_OURS and c not in on:
+            r.update({'auto_class': c, 'class': 'ambiguous', 'reason': 'disabled by calibration'})
+        out.append(r)
+    return out
+
+
 def main(argv=None):
     root = os.path.dirname(_here)
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--fork-ref')
-    ap.add_argument('--ours-ref', default='first')
+    # the default is the commit that recorded disagreements.json: closed batches
+    # have since adopted fork bodies into HEAD, so HEAD would make every
+    # resolved row look like a rename
+    ap.add_argument('--ours-ref', default='82d75232')
     ap.add_argument('--disagreements', default=os.path.join(root, 'docs/wso/disagreements.json'))
+    ap.add_argument('--calibrate', action='store_true')
     ap.add_argument('--out', default=os.path.join(root, 'docs/wso/triage.json'))
     a = ap.parse_args(argv)
+    if a.calibrate:
+        with open(os.path.join(root, 'docs/wso/wave-state.json'), encoding='utf-8') as f:
+            state = json.load(f)
+        with open(a.out, encoding='utf-8') as f:
+            triaged = json.load(f)
+        cal = calibrate(state, triaged)
+        print(calibration_text(cal))
+        return 1 if any(cal[c]['mismatches'] for c in AUTO_OURS) else 0
     fork = a.fork_ref
     if not fork:
         with open(os.path.join(root, 'docs/wso/wave-state.json'), encoding='utf-8') as f:
@@ -241,6 +320,8 @@ def main(argv=None):
     with open(a.disagreements, encoding='utf-8') as f:
         rows = json.load(f)
     out = triage_rows(rows, fork, a.ours_ref)
+    with open(os.path.join(root, 'docs/wso/wave-state.json'), encoding='utf-8') as f:
+        out = apply_calibration(out, calibrate(json.load(f), out))
     _write_atomic(a.out, out)
     counts = collections.Counter(r['class'] for r in out)
     for c in CLASSES:
