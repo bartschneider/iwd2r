@@ -111,9 +111,13 @@ and nobody answers "what does this call" by reading a raw decompile.
   `(file, line, signature)` for `0xADDR`, `Class::`, `Class::Method` or a
   bare name, resolved from the `// 0xADDR` markers. No grep chains.
 - [tools/assemble_context.py](../../tools/assemble_context.py) —
-  `bundle(address)` → digest, decompile, callees' signatures, resolved IDS
-  constants and resrefs, in that order, with a token estimate on the first
-  line; when the function belongs to a class and the BG2 index exists, the
+  `bundle(address)` → digest, decompile, the first 40 lines of each
+  caller's decompile, callees' signatures, resolved IDS constants and
+  resrefs, in that order, with a token estimate on the first line. The
+  decompiles are `$IWD2R_HOME/ghidra-exports/decompile/<ADDR>.c`, written
+  once per function by `tools/ghidra/export_decompiles.py` (chunked,
+  resumable, read-only Ghidra; a missing file reads `decompile: not
+  exported`); when the function belongs to a class and the BG2 index exists, the
   class's BG2 layout is appended as a hypothesis to check against IWD2
   (the offsets are BG2's, never quoted as ours).
 - [tools/token_audit.py](../../tools/token_audit.py) —

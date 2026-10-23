@@ -27,6 +27,8 @@ Context bundles (one per row you must decide; read these before the source):
 
 {{bundle}}
 
+Each bundle carries the function's decompile and its callers' decompiles; objdump confirms a reading, it does not replace one.
+
 ## The rules
 
 1. **One deciding case per function.** For every row where you claim fork or
