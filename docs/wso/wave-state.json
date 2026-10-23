@@ -3029,6 +3029,15 @@
           "name": "CAIGroup::GroupAction",
           "our_len": 1652,
           "their_len": 1942
+        },
+        {
+          "address": "0x716E80",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::sub_716E80",
+          "our_len": 2118,
+          "their_len": 2219
         }
       ],
       "status": "closed",
@@ -3101,6 +3110,12 @@
         "0x6F47F0": {
           "case": "dump-6F47F0",
           "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x716E80": {
+          "case": "dump-716E80",
+          "losing_kind": "trace",
+          "measured": "none",
           "side": "ours"
         },
         "0x722820": {
