@@ -10604,17 +10604,21 @@ class TruthTest(unittest.TestCase):
            ' 0001:00005560       ?Missing@Gone@@YAXXZ 00406560 f   gone.obj\n'
            ' 0001:00006000       ?Twice@Gone@@QAEHH@Z 00407000 f   gone.obj\n'
            ' 0001:00006100       ?Twice@Gone@@QAEHHH@Z 00407100 f   gone.obj\n'
+           ' 0001:00006300       ?Std@Gone@@YGHH@Z 00407300 f   gone.obj\n'
+           ' 0001:00006400       ?Fast@Gone@@YIHH@Z 00407400 f   gone.obj\n'
+           ' 0001:00006500       ?Stat@Gone@@SAHH@Z 00407500 f   gone.obj\n'
            ' 0001:00006200       ?EngineActivated@CScreenWorld@@QAEXXZ 00407200 f   w.obj\n')
     ROWS = [{'address': '0x5845D0', 'name': 'IcewindMisc::Roll'},
             {'address': '0x73F560', 'name': 'CGameSprite::GetAbilityNo'},
             {'address': '0x777777', 'name': 'Gone::Missing'},
             {'address': '0x888888', 'name': 'Gone::Unmapped'},
             {'address': '0x999999', 'name': 'Gone::Twice'}]
-    SIGS = {'0x5845D0': 'int __cdecl Roll(int dice, short sides)',
-            '0x73F560': 'uint __thiscall CGameSprite::GetAbilityNo(CGameSprite *this, byte x)',
-            '0x777777': 'void __cdecl Missing(void)',
-            '0x888888': 'int __cdecl Unmapped(int a)',
-            '0x999999': 'int __thiscall Twice(Gone *this, int a)'}
+    # Like the real evidence: no calling convention in the signature.
+    SIGS = {'0x5845D0': 'int Roll(int dice, short sides)',
+            '0x73F560': 'uint GetAbilityNo(byte param_1)',
+            '0x777777': 'void Missing(void)',
+            '0x888888': 'int Unmapped(int a)',
+            '0x999999': 'int Twice(int a)'}
 
     def test_hook_table_from_signatures(self):
         table = truth.hook_table(self.ROWS, self.SIGS, self.MAP, ['world_entry'])
@@ -10645,18 +10649,43 @@ class TruthTest(unittest.TestCase):
         self.assertNotIn('fn_999999', orig)
         self.assertEqual(table['ours_loaded_rva'], '0x7200')
 
+    def test_hook_table_takes_the_convention_from_the_decorated_name(self):
+        rows = [{'address': '0x600000', 'name': 'Gone::Std'}, {'address': '0x600001', 'name': 'Gone::Fast'},
+                {'address': '0x600002', 'name': 'Gone::Stat'}, {'address': '0x600003', 'name': 'CGameSprite::GetAbilityNo'},
+                {'address': '0x600004', 'name': 'IcewindMisc::Roll'}]
+        sigs = {'0x600000': 'int Std(int a)', '0x600001': 'int Fast(int a)', '0x600002': 'int Stat(int a)',
+                '0x600003': 'uint GetAbilityNo(CGameSprite *this, byte x)',
+                '0x600004': 'int __stdcall Roll(int a)'}  # the signature's own convention wins
+        table = truth.hook_table(rows, sigs, self.MAP, ['s'])
+        convs = {h['name']: h['conv'] for h in table['ours']['hooks']}
+        self.assertEqual(convs, {'fn_600000': 'stdcall', 'fn_600002': 'cdecl',
+                                 'fn_600003': 'thiscall', 'fn_600004': 'stdcall'})
+        self.assertIn('__fastcall', table['skipped']['0x600001'])
+        hooks = {h['name']: h for h in table['original']['hooks']}
+        self.assertEqual(hooks['fn_600003']['args'], ['u8'])  # the explicit this is dropped
+        for code, conv in (('?F@C@@QAEXXZ', '__thiscall'), ('?F@C@@UAEXXZ', '__thiscall'),
+                           ('?F@C@@AAEXXZ', '__thiscall'), ('?F@C@@IAEXXZ', '__thiscall'),
+                           ('?F@C@@EAEXXZ', '__thiscall'), ('?F@C@@MAEXXZ', '__thiscall'),
+                           ('?F@@YAXXZ', '__cdecl'), ('?F@@YGXXZ', '__stdcall'),
+                           ('?F@@YIXXZ', '__fastcall'), ('?F@@3HA', None)):
+            self.assertEqual(truth.decorated_convention(code), conv, code)
+
     def test_hook_table_skips_what_the_hooks_cannot_log(self):
         rows = [{'address': '0x%X' % (0x5845D0 + i), 'name': 'IcewindMisc::Roll'} for i in range(6)]
         sigs = {'0x5845D0': 'int __fastcall Roll(int a)', '0x5845D1': 'int Roll(int a)',
-                '0x5845D2': 'double __cdecl Roll(int a)', '0x5845D3': 'int __cdecl Roll(float a)',
-                '0x5845D4': 'int __cdecl Roll(longlong a)', '0x5845D5': 'int __cdecl Roll(int a)'}
+                '0x5845D2': 'double Roll(int a)', '0x5845D3': 'int Roll(float a)',
+                '0x5845D4': 'int Roll(longlong a)', '0x5845D5': 'int Roll(BOOL a, bool b)'}
         table = truth.hook_table(rows, sigs, self.MAP, ['s'])
-        self.assertEqual(sorted(table['skipped']), ['0x5845D%d' % i for i in range(5)])
+        self.assertEqual(sorted(table['skipped']), ['0x5845D%d' % i for i in range(5) if i != 1])
         self.assertIn('__fastcall', table['skipped']['0x5845D0'])
-        self.assertIn('no calling convention', table['skipped']['0x5845D1'])
         for i in (2, 3, 4):
             self.assertIn('8 bytes or floating point', table['skipped']['0x5845D%d' % i])
-        self.assertEqual([h['name'] for h in table['ours']['hooks']], ['fn_5845D5'])
+        self.assertEqual([h['name'] for h in table['ours']['hooks']], ['fn_5845D1', 'fn_5845D5'])
+        self.assertEqual(table['ours']['hooks'][1]['args'], ['s32', 'u8'])  # BOOL is 4 bytes, bool one
+        # neither the signature nor a decorated name gives a convention
+        table = truth.hook_table([{'address': '0x1', 'name': 'Gone::Odd'}], {'0x1': 'int Odd(int a)'},
+                                 ' 0001:00000000 ?Odd@Gone@@3HA 00400010 f x.obj\n', ['s'])
+        self.assertIn('no calling convention', table['skipped']['0x1'])
 
     @staticmethod
     def _trace(*calls):
@@ -10706,6 +10735,14 @@ class TruthTest(unittest.TestCase):
         v = truth.frida_verdicts({'a': failed}, rows)
         self.assertEqual(v['0x5845D0'][0], 'scenario failed')
         self.assertIn('a: ours side exited 2', v['0x5845D0'][1])
+        # a row that appears in a failed scenario is never equal: ours crashed in a
+        crash = {'orig': t, 'ours': t[:2] + [{'tag': 'crash', 'where': 'x'}], 'failed': 'ours side exited 1'}
+        v = truth.frida_verdicts({'a': crash, 'b': good}, rows)
+        self.assertEqual(v['0x5845D0'][0], 'different')
+        self.assertIn('ours logged {"tag": "crash", "where": "x"}', v['0x5845D0'][1])
+        partial = {'orig': t, 'ours': t[:2], 'failed': 'ours side exited 2'}
+        v = truth.frida_verdicts({'a': partial, 'b': good}, rows)
+        self.assertEqual(v['0x5845D0'][0], 'scenario failed')
         # pointer returns are compared by presence, not by heap address
         p1 = [{'tag': 'fn_5845D0', 'a0_s32': 1}, {'tag': 'fn_5845D0_ret', 'ret': '0x1a2b3c'}]
         p2 = [{'tag': 'fn_5845D0', 'a0_s32': 1}, {'tag': 'fn_5845D0_ret', 'ret': '0x99ff00'}]
@@ -10748,9 +10785,9 @@ class TruthTest(unittest.TestCase):
             truth.frida_run('b011', table, ['s1'], run=fake, root=root, loaded_rva='0x1234')
             self.assertEqual(calls[1][calls[1].index('--loaded-rva') + 1], '0x1234')
             calls.clear()
-            truth.frida_run('b011', dict(table, ours_loaded_rva=None), ['s1'], run=fake, root=root)
-            self.assertIn('--no-loaded', calls[1])
-            self.assertNotIn('--loaded-rva', calls[1])
+            traces = truth.frida_run('b011', dict(table, ours_loaded_rva=None), ['s1'], run=fake, root=root)
+            self.assertEqual(calls, [])
+            self.assertIn('EngineActivated', traces['s1']['failed'])
             # no trace file: a failed scenario, not an empty trace
             traces = truth.frida_run('b011', table, ['s1'],
                                      run=lambda cmd, **kw: sp.CompletedProcess(cmd, 0, stdout='', stderr=''),

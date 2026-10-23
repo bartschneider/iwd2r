@@ -475,6 +475,8 @@ def hook_name(address):
 def _frida_type(text):
     """(frida type, None) or (None, reason)."""
     text = re.sub(r'\bconst\b', '', text).strip()
+    if text == 'BOOL':
+        return 's32', None  # the Win32 BOOL is a 4-byte int (lowercase bool is a byte)
     if '*' in text or '&' in text:
         return 'ptr', None
     words = [w.lower() for w in text.split()]
@@ -486,11 +488,35 @@ def _frida_type(text):
     return FRIDA_TYPES.get(' '.join(words), 'u32'), None
 
 
-def _hook_signature(signature):
+def decorated_convention(decorated):
+    """The calling convention a decorated MSVC name encodes, or None: a member
+    function code (Q, U, A, I, E or M) then AE is thiscall, YA and SA are
+    cdecl, YG and SG stdcall, YI fastcall; a plain _name is cdecl and
+    _name@N stdcall."""
+    m = re.match(r'^\?[^@?]+(?:@[^@]+)*?@@(.*)$', decorated or '')
+    if m:
+        tail = m.group(1)
+        if re.match(r'[QUAIEM]AE', tail):
+            return '__thiscall'
+        for code, conv in (('YA', '__cdecl'), ('SA', '__cdecl'), ('YG', '__stdcall'),
+                           ('SG', '__stdcall'), ('YI', '__fastcall')):
+            if tail.startswith(code):
+                return conv
+        return None
+    if re.match(r'^_\w+@\d+$', decorated or ''):
+        return '__stdcall'
+    if re.match(r'^_\w+$', decorated or ''):
+        return '__cdecl'
+    return None
+
+
+def _hook_signature(signature, decorated=None):
     """(conv, args, ret or None) of a C signature, or a reason string. The
-    implicit this is dropped for thiscall; void returns log no value. An
-    unknown or non-(cdecl, stdcall, thiscall) convention, and any 8-byte or
-    floating-point argument or return, give a reason instead."""
+    convention is the signature's; real evidence signatures carry none, so it
+    then comes from the decorated name in our map (decorated_convention). The
+    implicit this is dropped for thiscall; void returns log no value. A
+    convention neither source gives, a non-(cdecl, stdcall, thiscall) one, and
+    any 8-byte or floating-point argument or return give a reason instead."""
     m = SIGNATURE.match(signature or '')
     if not m:
         return 'the signature does not parse'
@@ -500,7 +526,12 @@ def _hook_signature(signature):
     if others:
         return 'calling convention %s is not hookable (cdecl, stdcall and thiscall only)' % others[0]
     if not convs:
-        return 'no calling convention in the signature'
+        named = decorated_convention(decorated)
+        if named is None:
+            return 'no calling convention in the signature or in our map\'s decorated name'
+        if named not in FRIDA_CONVS:
+            return 'calling convention %s is not hookable (cdecl, stdcall and thiscall only)' % named
+        convs = [named]
     conv = FRIDA_CONVS[convs[0]]
     for key in FRIDA_CONVS:
         head = head.replace(key, ' ')
@@ -546,16 +577,16 @@ def parse_map(text):
     return out
 
 
-def _map_rvas(name, publics):
-    """The distinct rvas of every public that is Class::Method (decorated
+def _map_matches(name, publics):
+    """{rva: decorated name} of every public that is Class::Method (decorated
     ?Method@Class@@...) or a plain name."""
     parts = name.split('::')
     prefix = '?' + '@'.join(reversed(parts)) + '@@'
-    found = set()
+    found = {}
     for decorated, rva in publics.items():
         if decorated.startswith(prefix) or (len(parts) == 1 and decorated in (name, '_' + name)):
-            found.add(rva)
-    return sorted(found)
+            found.setdefault(rva, decorated)
+    return found
 
 
 def hook_table(rows, signatures, our_map, scenarios):
@@ -579,14 +610,18 @@ def hook_table(rows, signatures, our_map, scenarios):
     for row in rows:
         address = row['address']
         key = '0x' + address[2:].upper() if address.lower().startswith('0x') else '0x' + address.upper()
-        sig = _hook_signature(signatures.get(address) or signatures.get(key))
+        if from_text:
+            found = _map_matches(row['name'], publics)
+        else:
+            found = {publics[row['name']]: None} if row['name'] in publics else {}
+        rvas = sorted(found)
+        sig = _hook_signature(signatures.get(address) or signatures.get(key),
+                              found[rvas[0]] if len(rvas) == 1 else None)
+        if isinstance(sig, str) and len(rvas) != 1:
+            sig = None  # ambiguity is the more useful reason; reported below
         if isinstance(sig, str):
             skipped[key] = sig
             continue
-        if from_text:
-            rvas = _map_rvas(row['name'], publics)
-        else:
-            rvas = [publics[row['name']]] if row['name'] in publics else []
         if not rvas:
             skipped[key] = 'no entry for %s in our map' % row['name']
             continue
@@ -600,7 +635,7 @@ def hook_table(rows, signatures, our_map, scenarios):
         hook['max'] = HOOK_MAX
         original.append(dict(hook, addr=key))
         ours.append(dict(hook, rva=hex(rvas[0])))
-    loaded = _map_rvas(LOADED_NAME, publics) if from_text else (
+    loaded = sorted(_map_matches(LOADED_NAME, publics)) if from_text else (
         [publics[LOADED_NAME]] if LOADED_NAME in publics else [])
     return {'original': {'hooks': original}, 'ours': {'hooks': ours},
             'scenarios': list(scenarios), 'skipped': skipped,
@@ -637,7 +672,8 @@ def frida_run(batch_id, table, scenarios, run=subprocess.run, root=ROOT, loaded_
     Ours must pass --loaded-rva, else orig.py would hook the original's
     EngineActivated address inside iwd2r.exe: loaded_rva (or the table's
     ours_loaded_rva, read from the map) names CScreenWorld::EngineActivated in
-    our build; with neither, ours runs with --no-loaded. `run` is injectable
+    our build. With neither, every scenario fails with that reason and nothing
+    is run. `run` is injectable
     (the tests never launch anything); the real call is made by hand on the
     Windows machine under the one-launch rules."""
     import tempfile
@@ -652,13 +688,18 @@ def frida_run(batch_id, table, scenarios, run=subprocess.run, root=ROOT, loaded_
                 json.dump(table[target], f, indent=1)
             tables[target] = path
         for scenario in scenarios:
+            if not loaded_rva:
+                traces[scenario] = {'orig': [], 'ours': [], 'orig_path': None, 'ours_path': None,
+                                    'failed': 'no %s in our map: ours cannot signal loaded '
+                                              '(pass loaded_rva)' % LOADED_NAME}
+                continue
             result = {'failed': None}
             for target, key in (('original', 'orig'), ('ours', 'ours')):
                 out = 'frida-%s-%s-%s.jsonl' % (batch_id, scenario, target)
                 cmd = [sys.executable, '-I', probe, 'run', '--target', target,
                        '--probe', tables[target], '--scenario', scenario, '--out', out]
                 if target == 'ours':
-                    cmd += ['--loaded-rva', loaded_rva] if loaded_rva else ['--no-loaded']
+                    cmd += ['--loaded-rva', loaded_rva]
                 done = run(cmd, capture_output=True, text=True, cwd=root)
                 folder = None
                 for line in (getattr(done, 'stdout', '') or '').splitlines():
@@ -685,7 +726,7 @@ def _ptr_returns(events):
     for e in events:
         if str(e.get('tag', '')).endswith('_ret') and isinstance(e.get('ret'), str) \
                 and trace_diff.HEX_POINTER.fullmatch(e['ret'].strip()):
-            e = dict(e, ret=trace_diff._pointer_presence(e['ret']))
+            e = dict(e, ret='<null>' if int(e['ret'].strip(), 16) == 0 else '<ptr>')
         out.append(e)
     return out
 
@@ -750,10 +791,22 @@ def frida_verdicts(traces, rows, skipped=None):
             verdicts[key] = ('skipped', skipped[key])
             continue
         tag = hook_name(key)
-        different, equal = [], []
+        different, equal, partial, crashed = [], [], [], []
         for scenario, value in traces.items():
             t = _as_scenario(value)
             if t['failed']:
+                # A partial trace that saw this row can never read equal.
+                orig, ours = _row_events(t['orig'], tag), _row_events(t['ours'], tag)
+                if [e for e in orig + ours if str(e.get('tag', '')).startswith(tag)]:
+                    terminal = [(side, e) for side, evs in (('original', t['orig']), ('ours', t['ours']))
+                                for e in evs if str(e.get('tag', '')).lower()
+                                in trace_diff.TERMINAL_FAILURE_TAGS]
+                    if terminal:
+                        crashed.append('%s (%s): %s logged %s' % (
+                            scenario, t['failed'], terminal[0][0],
+                            json.dumps(terminal[0][1], sort_keys=True)))
+                    else:
+                        partial.append('%s: %s' % (scenario, t['failed']))
                 continue
             orig, ours = _row_events(t['orig'], tag), _row_events(t['ours'], tag)
             if not [e for e in orig + ours if str(e.get('tag', '')).startswith(tag)]:
@@ -763,8 +816,10 @@ def frida_verdicts(traces, rows, skipped=None):
                 equal.append(scenario)
             else:
                 different.append('%s: %s' % (scenario, _first_difference(orig, ours)))
-        if different:
-            verdicts[key] = ('different', 'differs in ' + '; '.join(different))
+        if different or crashed:
+            verdicts[key] = ('different', 'differs in ' + '; '.join(different + crashed))
+        elif partial:
+            verdicts[key] = ('scenario failed', '; '.join(partial))
         elif equal:
             verdicts[key] = ('equal', 'identical in ' + ', '.join(equal))
         elif failed:
