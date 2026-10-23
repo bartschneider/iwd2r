@@ -26,9 +26,10 @@ fast-forwards `first` to the batch branch.
 Exit codes: 0 ok, 1 refusal (close lists every reason), 2 usage error or
 nothing left to assign.  `run` (tools/driver.py) exits 0 when every row
 is assigned or decided or at the budget stop, 1 when an exception that is
-not a batch's own (cut, push) stopped it, the status file cannot be read
-or another driver runs on it, 3 when parked, 4 when stalled (the rows
-left wait on files owned by assigned batches).  Every state write is atomic (temp file in the
+not a batch's own (cut, push) stopped it, it halted (a launch failure, the
+breaker), the status file cannot be read or another driver runs on it, 3
+when parked, 4 when stalled (the rows left wait on files owned by
+assigned batches).  Every state write is atomic (temp file in the
 same directory, then os.replace), so a killed `next` cannot corrupt it.
 """
 from __future__ import annotations

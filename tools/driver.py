@@ -324,6 +324,9 @@ DEFAULT_SEED = '2026-10-22'
 # the plan's ledger example is 1180).
 DEFAULT_ESTIMATE = 1200.0
 WIP_MESSAGE = 'WIP: parked by driver'
+# The breaker (ruling R45): this many batch exceptions in a row whose
+# worker never produced a transcript halt the run.
+BREAKER_LIMIT = 3
 PUSH_ARGS = ('push', 'iwd2r', 'first:main', 'first:first')
 # Exceptions at these stages are not the batch's own: the run stops.
 GLOBAL_STAGES = ('cut', 'push')
@@ -392,13 +395,36 @@ class StatusError(ValueError):
 
 
 class _StageError(Exception):
-    """A stage of one batch failed with an OSError: run_batch turns it
-    into that batch's exception, never a traceback."""
+    """A stage of one batch failed: run_batch turns it into that batch's
+    exception, never a traceback."""
 
     def __init__(self, stage, problem):
         super().__init__(problem)
         self.stage = stage
         self.problem = problem
+
+
+class _LaunchError(Exception):
+    """A worker, a reviewer or a check step could not be launched in an
+    existing worktree (ruling R45): not the batch's fault, so the run
+    halts with the batch parked."""
+
+    def __init__(self, cwd, error):
+        super().__init__(error)
+        self.cwd = cwd
+        self.error = error
+
+
+def _launch_failed(label, cwd, e):
+    """The error for an OSError raised while launching something in cwd:
+    a missing cwd (the batch worktree vanished) is the batch's `worktree`
+    exception; anything else (a wrapper not on PATH, ...) halts the run."""
+    if not os.path.isdir(cwd):
+        return _StageError('worktree', '%s could not run: the worktree %s is '
+                           'gone (%s); run `git worktree prune`, then `git '
+                           'worktree add <path> <branch>`, then clear this '
+                           'exception' % (label, cwd, e))
+    return _LaunchError(cwd, '%s: %s' % (label, e))
 
 
 def read_status(path):
@@ -424,7 +450,8 @@ def read_status(path):
                           % path)
     for key, empty in (('exceptions', {}), ('batches', {}),
                        ('current', None), ('parked', None),
-                       ('stopped', None), ('stalled', None)):
+                       ('stopped', None), ('stalled', None),
+                       ('halted', None)):
         status.setdefault(key, empty)
         if isinstance(empty, dict) and not isinstance(status[key], dict):
             raise StatusError('%s: %r is not a JSON object' % (path, key))
@@ -592,6 +619,8 @@ class Driver:
         self._ignored = {}
         self._halt = False
         self._batch_credits = []   # this run's batches: credits or None
+        self._transcripts = []     # this batch's worker runs: had a transcript
+        self._no_transcript = 0    # batch exceptions in a row without one
 
     # -- status, ledger, results ----------------------------------------
 
@@ -653,11 +682,10 @@ class Driver:
         try:
             res = worker.run(brief, cwd)
         except OSError as e:
-            raise _StageError(
-                'review' if label.startswith('reviewer') else 'worker',
-                '%s could not run in %s: %s; check the worktree (`git worktree '
-                'list`), then clear this exception' % (label, cwd, e)) from None
+            raise _launch_failed(label, cwd, e) from None
         self._runs.append(res.credits)
+        if label.startswith('worker'):
+            self._transcripts.append(res.transcript is not None)
         folder = os.path.join(self.driver_dir, batch_id)
         os.makedirs(folder, exist_ok=True)
         for name, text in (('brief.md', brief), ('report.md', res.report or '')):
@@ -780,9 +808,7 @@ class Driver:
         try:
             return verdicts, self.mechanical_checks(batch, worktree, verdicts)
         except OSError as e:
-            raise _StageError('checks', 'the mechanical checks could not run in '
-                              '%s: %s; check the worktree, then clear this '
-                              'exception' % (worktree, e)) from None
+            raise _launch_failed('the mechanical checks', worktree, e) from None
 
     def _merged(self, batch_id, verdicts):
         """The state's verdicts plus the report's, as (side, case)."""
@@ -897,9 +923,15 @@ class Driver:
             return self._run_batch(batch_id, resume)
         except _StageError as e:
             return self._exception(batch_id, e.stage, [e.problem])
+        except _LaunchError as e:
+            reason = 'launch failed: %s' % e.error
+            out = self._park(batch_id, reason, e.cwd)
+            self._halt_run(reason)
+            return out
 
     def _run_batch(self, batch_id, resume):
         self._runs = []
+        self._transcripts = []
         self._ignored = {}
         state = self.load_state(self.state_path)
         batch = state['batches'].get(batch_id)
@@ -1191,18 +1223,48 @@ class Driver:
 
     # -- the loop -------------------------------------------------------------
 
+    def _halt_run(self, reason):
+        """Stop the run (exit 1) with status['halted'] = {at, reason}, and
+        say so once on the AoE session.  A later run that starts a batch
+        clears it."""
+        self._halt = True
+        halted = {'at': _now(), 'reason': reason}
+        self._update_status(lambda s: s.__setitem__('halted', halted))
+        self.log('driver halted: %s' % reason)
+        if not self.dry_run:
+            try:
+                self.send(_one_line('iwd2r driver halted: %s (status %s)' % (
+                    reason, self.status_path), 400))
+            except Exception as e:   # a failed send must not hide the halt
+                self.log('send failed: %r' % (e,))
+
     def _one(self, batch_id, resume=None):
-        """Run one batch and count its credits; an exit code when the run
-        must stop, else None."""
+        """Run one batch (clearing an earlier halt), count its credits,
+        and feed the breaker; an exit code when the run must stop, else
+        None."""
         self._runs = []
+        self._transcripts = []
+        if self._read_status()['halted'] is not None:
+            self._update_status(lambda s: s.__setitem__('halted', None))
         out = (self.run_batch(batch_id, resume=resume) if resume
                else self.run_batch(batch_id))
         if self._runs:
             self._batch_credits.append(self._credits())
-        if out == 'parked':
-            return 3
         if self._halt:
             return 1
+        if out == 'parked':
+            return 3
+        # The breaker (ruling R45): a batch exception whose worker never
+        # produced a transcript (the worker never really ran) counts; any
+        # other batch resets.  Credits are no signal: a Claude pool's read 0.
+        if out == 'exception' and not any(self._transcripts):
+            self._no_transcript += 1
+            if self._no_transcript >= BREAKER_LIMIT:
+                self._halt_run('breaker: %d batches without a worker transcript'
+                               % BREAKER_LIMIT)
+                return 1
+        else:
+            self._no_transcript = 0
         return None
 
     def _take_run_lock(self):
@@ -1229,11 +1291,12 @@ class Driver:
         """0 when every row is assigned or decided, or at the budget stop;
         3 when parked; 4 when stalled (the rows left wait on files owned by
         assigned batches); 1 when an exception that is not the batch's own
-        stopped the run, the status file cannot be read, or another driver
-        runs on the same status file.  What the last run left goes first:
-        a closed batch's missing ledger entry and push, then the parked
-        batch, then an interrupted one.  A dry run processes one batch and
-        exits 0."""
+        stopped the run, the run halted (a launch failure, the breaker:
+        status['halted']), the status file cannot be read, or another
+        driver runs on the same status file.  What the last run left goes
+        first: a closed batch's missing ledger entry and push, then the
+        parked batch, then an interrupted one.  A dry run processes one
+        batch and exits 0."""
         fd, holder = self._take_run_lock()
         if fd is None:
             self.log('another driver is running (pid %s) on %s; this one '
@@ -1253,6 +1316,7 @@ class Driver:
             os.close(fd)   # releases the run lock
 
     def _loop(self):
+        self._halt = False            # per run, like the counters below
         if self.dry_run:
             batch_id, code = self._cut()
             if batch_id is None:
@@ -1262,6 +1326,7 @@ class Driver:
                      % (batch_id, self.driver_dir))
             return 0
         self._batch_credits = []
+        self._no_transcript = 0
         if self._read_status()['stopped'] is not None:
             self._update_status(lambda s: s.__setitem__('stopped', None))
         resume, code = self._leftovers()

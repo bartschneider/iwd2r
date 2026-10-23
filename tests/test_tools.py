@@ -10192,23 +10192,95 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(d.run(), 0)                    # no crash, no retry
         self.assertEqual(order, ['cut'])
 
-    def test_worker_oserror_is_a_stage_exception(self):
-        """R44: an OSError from the worker's or the reviewer's run is that
-        stage's exception, and the run goes on."""
-        class Broken:
+    def test_launch_failure_halts_and_parks(self):
+        """R45: a worker or reviewer that cannot be launched (the wrapper
+        is not on PATH) in an existing worktree halts the run after ONE
+        cut: the batch is parked `launch failed`, `halted` is set, exit 1.
+        The next run resumes that batch first and clears `halted`.  Only a
+        missing cwd stays the batch's `worktree` exception."""
+        class Missing:
             def run(self, brief, cwd):
                 raise FileNotFoundError(2, 'No such file or directory', 'claude-glm')
-        for worker, reviewer, stage in ((Broken(), None, 'worker'),
-                                        (driver.FakeWorker(self.REPORT), Broken(), 'review')):
+        for worker, reviewer, label in ((Missing(), None, 'worker'),
+                                        (driver.FakeWorker(self.REPORT), Missing(), 'reviewer')):
             d = self._driver(worker=worker, reviewer=reviewer)
-            cuts = iter([(0, self.CUT), self.NOTHING])
-            d.next_batch = lambda *a, **kw: next(cuts)
-            self.assertEqual(d.run(), 0)
-            exc = self._status(d)['exceptions']['b011']
-            self.assertEqual(exc['stage'], stage)
-            self.assertIn('could not run in %s' % self.wt, exc['problems'][0])
-            self.assertIn('No such file or directory', exc['problems'][0])
-            self.assertIsNone(self._status(d)['current'])
+            cuts = []
+            d.next_batch = lambda *a, **kw: cuts.append(1) or (0, self.CUT)
+            self.assertEqual(d.run(), 1)
+            self.assertEqual(len(cuts), 1)                  # no further cut
+            status = self._status(d)
+            reason = status['parked']['reason']
+            self.assertTrue(reason.startswith('launch failed: %s: ' % label), reason)
+            self.assertIn("'claude-glm'", reason)
+            self.assertEqual(status['parked']['batch_id'], 'b011')
+            self.assertEqual(status['halted']['reason'], reason)
+            self.assertTrue(status['halted']['at'])
+            self.assertEqual(status['exceptions'], {})
+            self.assertEqual(self._state()['status'], 'assigned')
+            self.assertEqual(len(self.sent), 1)
+            self.assertIn('halted: launch failed', self.sent[0])
+        # The wrapper is back: the next run resumes the parked batch first.
+        order = []
+        w = _SeqWorker(self.REPORT)
+        run = w.run
+        w.run = lambda brief, cwd: order.append('worker') or run(brief, cwd)
+        d.worker, d.reviewer = w, driver.FakeWorker(self.CLEAN_REVIEW)
+        d.next_batch = lambda *a, **kw: order.append('cut') or self.NOTHING
+        self.assertEqual(d.run(), 0)
+        self.assertEqual(order, ['worker', 'cut'])
+        self.assertTrue(w.briefs[0].startswith('Resume:'))
+        self.assertIn('launch failed', w.briefs[0])
+        status = self._status(d)
+        self.assertIsNone(status['halted'])
+        self.assertIsNone(status['parked'])
+        self.assertEqual(self._state()['status'], 'closed')
+        # A missing cwd is the batch's worktree exception; the run goes on.
+        class Vanishing:
+            def run(self, brief, cwd):
+                shutil.rmtree(cwd)
+                raise FileNotFoundError(2, 'No such file or directory', cwd)
+        d = self._driver(worker=Vanishing())
+        cuts = iter([(0, self.CUT), self.NOTHING])
+        d.next_batch = lambda *a, **kw: next(cuts)
+        self.assertEqual(d.run(), 0)
+        status = self._status(d)
+        self.assertEqual(status['exceptions']['b011']['stage'], 'worktree')
+        self.assertIn('git worktree prune', status['exceptions']['b011']['problems'][0])
+        self.assertIsNone(status['halted'])
+        self.assertIsNone(status['parked'])
+
+    class _NoReport:
+        """A worker that exits without a report; the transcript of each
+        run comes from the list in turn (None: the worker never ran)."""
+
+        def __init__(self, transcripts):
+            self.transcripts = list(transcripts)
+
+        def run(self, brief, cwd):
+            return driver.Result(1, '', self.transcripts.pop(0), None, False)
+
+    def test_breaker_trips_after_three_batches_without_a_transcript(self):
+        """R45: three batch exceptions in a row whose worker produced no
+        transcript halt the run (exit 1, no fourth cut); a batch whose
+        worker produced one resets the count."""
+        self.assertEqual(driver.BREAKER_LIMIT, 3)
+        d = self._driver(worker=self._NoReport([None] * 4))
+        cuts = []
+        d.next_batch = lambda *a, **kw: cuts.append(1) or (0, self.CUT)
+        self.assertEqual(d.run(), 1)
+        self.assertEqual(len(cuts), 3)                      # no fourth cut
+        halted = self._status(d)['halted']
+        self.assertEqual(halted['reason'], 'breaker: 3 batches without a worker transcript')
+        self.assertEqual(len(self.sent), 4)                 # 3 exceptions, 1 halt
+        self.assertIn('halted: breaker', self.sent[-1])
+        # A transcript-bearing batch in between resets the count; a later
+        # run that cuts a batch clears `halted`.
+        d.worker = self._NoReport([None, None, '/t/one.jsonl', None, None])
+        cuts = iter([(0, self.CUT)] * 5 + [self.NOTHING])
+        d.next_batch = lambda *a, **kw: next(cuts)
+        self.assertEqual(d.run(), 0)
+        self.assertEqual(d.worker.transcripts, [])          # all five ran
+        self.assertIsNone(self._status(d)['halted'])
 
     def test_one_driver_per_status_file(self):
         """R42: run() holds `<status>.run.lock` (with its pid in it) for its
