@@ -974,8 +974,9 @@ def compare_dumps(orig_dir, ours_dir, script):
 
 
 def _home_of(done, root, out):
-    """(run folder as printed by probe.py, path of `out`'s status file base)
-    of a finished probe process; (None, None) without a folder."""
+    """(run folder as printed by probe.py, path of the trace file `out` in
+    it; its status file is that path + '.status') of a finished probe
+    process; (None, None) without a folder."""
     folder = None
     for line in (getattr(done, 'stdout', '') or '').splitlines():
         if line.startswith('probe: ') and line[7:].startswith('runs'):
@@ -987,7 +988,9 @@ def frida_run(batch_id, table, scenarios, run=subprocess.run, root=ROOT, loaded_
               clicks=3, hit_min=1, timeout=None, attempt_reason=None, build_checkout=None,
               dumps=compare_dumps):
     """{scenario: {'orig': events, 'ours': events, 'orig_path': path or None,
-    'ours_path': path or None, 'orig_exit': int, 'ours_exit': int, 'final':
+    'ours_path': path or None, 'orig_exit': int, 'ours_exit': int,
+    '<side>_retried': True when that side was launched a second time because
+    its first run came home with no status (exit 2, no RESULT), 'final':
     {'orig': bool, 'ours': bool} (the totals are the exit-time ones),
     'result': {'orig': verdict word, 'ours': verdict word}, 'hits': {'orig':
     {hook: total}, 'ours': {...}} (None per side without a status file),
@@ -1369,19 +1372,23 @@ def _signature_head(code):
     return head or None
 
 
+def exports_default():
+    """The ghidra-exports folder tools/ghidra/export_decompiles.py writes by
+    default (IWD2R_HOME aware). The four lines are repeated here on purpose:
+    loading that module puts tools/ on sys.path and imports its Ghidra
+    helpers; the test suite keeps the two in step."""
+    home = (os.environ.get('IWD2R_HOME')
+            or os.path.join(os.path.expanduser('~'), '.local', 'share', 'iwd2r'))
+    return os.path.join(home, 'ghidra-exports')
+
+
 def export_signature(address, exports_dir=None):
     """The one-line signature head of the Ghidra decompile export's
     <exports_dir>/decompile/<ADDR>.c (ADDR: `address` without 0x, uppercase),
     or None when the file is missing, unreadable or has no `{`. exports_dir
-    None is the default of tools/ghidra/export_decompiles.py (IWD2R_HOME
-    aware)."""
+    None is exports_default()."""
     if exports_dir is None:
-        import importlib.util
-        path = os.path.join(ROOT, 'tools', 'ghidra', 'export_decompiles.py')
-        spec = importlib.util.spec_from_file_location('_export_decompiles', path)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        exports_dir = mod._exports_default()
+        exports_dir = exports_default()
     addr = str(address).strip()
     if addr[:2].lower() == '0x':
         addr = addr[2:]

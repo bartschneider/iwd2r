@@ -2336,8 +2336,8 @@ class Driver:
             if not sig:
                 sig = truth.export_signature(r['address'], self.exports_dir)
                 if sig:
-                    self.log('%s: frida: %s signature from the Ghidra export (the evidence has '
-                             'no Decompiled section)' % (batch_id, r['address']))
+                    self.log('%s: frida: %s signature from the Ghidra export (the evidence '
+                             'gives none)' % (batch_id, r['address']))
             if sig:
                 sigs[r['address']] = sig
         traces = {}
