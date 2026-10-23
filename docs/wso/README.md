@@ -379,10 +379,21 @@ launches per attempt until `--new-attempt "<why>"`; and every merge into
   batch's; the tools are staged from the driver's checkout. A failed build
   is a phase error: logged, every row `not measured`. `--frida-map MAP`
   overrides the build with an existing one (the exe beside MAP), for hand
-  runs. A row is measured equal only when `trace_diff compare` exits 0 over
-  the captured events and the sidecars' total hits for its hook match (the
-  hooks cap what they log, so equal events alone do not prove equal
-  frequency), and only in a scenario whose two runs kept the same state:
+  runs. A row is measured equal when `trace_diff compare` exits 0 over the
+  captured events and both sidecars sent their exit-time (final) hit totals
+  (equal events without final totals on both sides are `not measured`: the
+  hooks cap what they log and the timer's totals lose a run-dependent
+  tail). Frequency is the callers' business: when the final totals differ
+  but every captured event is equal, or one side's events are a strict
+  prefix of the other's with that side under the cap (with final totals on
+  both sides; without them it is `not measured`), the row is still equal and
+  the difference goes to the ledger as a caller finding (`- frida frequency
+  only (a caller finding): ...`, for both queues), never a finding, a park
+  or a verdict change; only an event-level difference (an argument or a
+  return at a call both sides made, or a crash) is `different`. The
+  evidence cites only a scenario whose compare returned 0 (a row equal only
+  as a prefix is parked: nothing compared exactly). All of it holds only in
+  a scenario whose two runs kept the same state:
   both sides write checkpoint and periodic state dumps, `truth.frida_run`
   compares them with the replay compare's own functions
   (`truth.compare_dumps`: `oracle.compare_checkpoints` and

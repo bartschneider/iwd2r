@@ -1,5 +1,12 @@
 {
  "frida_default": true,
+ "frida_notes": {
+  "0x7941D0": [
+   "world_entry: frequency only: original 4068 calls, ours 4037 (final totals); every captured event equal",
+   "first_fight: frequency only: original 4435 calls, ours 4412 (final totals); every captured event equal",
+   "walk_and_talk: frequency only: original 4167 calls, ours 4137 (final totals); every captured event equal"
+  ]
+ },
  "frida_rows": {
   "0x46B160": [
    "equal",
@@ -106,8 +113,8 @@
    "identical in first_fight"
   ],
   "0x7941D0": [
-   "different",
-   "differs in world_entry: hit totals differ: original 4068, ours 4037; first_fight: hit totals differ: original 4435, ours 4412; walk_and_talk: hit totals differ: original 4167, ours 4137"
+   "equal",
+   "identical in world_entry, first_fight, walk_and_talk"
   ],
   "0x7A3FD0": [
    "skipped",
@@ -116,6 +123,10 @@
  },
  "frida_scenarios": {
   "first_fight": {
+   "dumps": {
+    "detail": "39 checkpoints and 197 periodic dumps match",
+    "match": true
+   },
    "failed": null,
    "final": {
     "orig": true,
@@ -195,6 +206,10 @@
    }
   },
   "walk_and_talk": {
+   "dumps": {
+    "detail": "36 checkpoints and 158 periodic dumps match",
+    "match": true
+   },
    "failed": null,
    "final": {
     "orig": true,
@@ -274,6 +289,10 @@
    }
   },
   "world_entry": {
+   "dumps": {
+    "detail": "27 checkpoints and 87 periodic dumps match",
+    "match": true
+   },
    "failed": null,
    "final": {
     "orig": true,
@@ -385,8 +404,8 @@
  "oracle_rows": {},
  "paths": {
   "frida": {
-   "agree": 11,
-   "disagree": 2,
+   "agree": 12,
+   "disagree": 1,
    "measured": 13,
    "of": 28
   },

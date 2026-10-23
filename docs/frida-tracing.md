@@ -248,3 +248,44 @@ table's `typed_from` says `ours` or `ghidra` per row.
 and frame-locked AI the recorder gives the original. Without it ours ran on
 the real clock with a free-running AI thread and its call counts and order
 could not match.
+
+## Verdicts in a batch (truth.frida_verdicts)
+
+The driver's Frida phase (and `truth.py calibrate`) compares each hooked row
+per scenario, then across the three scenarios:
+
+- **Final totals.** The hooks cap what they log (`max: 200`), so equal
+  events alone say nothing about how often a function ran. The agent script
+  sends one last `HITS` message, marked final, when the process calls
+  `ExitProcess` or `TerminateProcess` on itself, and waits for the sidecar's
+  ack; the status file then says `HITS-FINAL yes`. The 2 s timer's totals
+  lose a run-dependent tail, so a scenario whose events compare equal but
+  lacks final totals on either side is `not measured`.
+- **Frequency is a caller finding.** When every captured event compares
+  equal but the final totals differ, the row is still `equal` in that
+  scenario; so is the prefix case, one side's events a strict prefix of the
+  other's with that side under the cap, when both sides have final totals
+  (without them it is `not measured`: a killed run's shorter trace proves
+  nothing). The difference goes out of band (`info['notes']`), and the
+  driver writes it to the ledger (`- frida frequency only (a caller
+  finding): ...`), for wave-1 and import batches alike, never as a finding,
+  a park or a verdict change. A row called on one side only compares no call:
+  `not measured`, with a note.
+- **Different** means an event-level difference: an argument or a return at
+  a call both sides made, or a crash event.
+- **The dump guard.** Both sides write checkpoint and periodic state dumps
+  into their replay folders; `truth.frida_run` compares them per scenario
+  with the replay compare's own functions (`truth.compare_dumps`:
+  `oracle.compare_checkpoints` and `compare_frames`, `screens.json`, the
+  known differences). A scenario whose dumps differ measures nothing (its
+  rows read `not measured`, "dumps differ in <scenario>"), and the driver
+  writes trace evidence only from a run whose dumps match. A void hook logs
+  no return, so its trace mostly measures its callers; the dumps speak for
+  its body.
+- **Citations.** `info['exact']` lists the scenarios whose compare returned
+  0; an import row's `trace_source` cites the first of them (whichever
+  scenario it is), never a prefix-only one. A row equal only as a prefix
+  has nothing to cite and is parked.
+
+Precedence across scenarios: any difference, then a failed scenario, then
+not measured, then equal; a row no scenario exercised is `not-exercised`.

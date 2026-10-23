@@ -10866,6 +10866,87 @@ class DriverTest(unittest.TestCase):
                       'to match', f401)
         self.assertIn('kind: read-only', _slurp(os.path.join(self.wt, 'docs', 'evidence', '401000.md')))
 
+    def test_driver_import_frequency_only_row_gets_trace_and_a_ledger_line(self):
+        trace = TruthTest._trace
+        t = trace(('fn_401000', 7, 3))
+        build = self._frida_builder(self.IMPORT_MAP)[0]
+        d = self._driver(worker=driver.FakeWorker('# report\n\nImported.\n'), queue='import',
+                         frida=True, frida_build=build,
+                         frida_run=lambda b, table, scenarios, **kw: self._file_traces(
+                             scenarios, t, t, final={'orig': True, 'ours': True},
+                             hits={'orig': {'fn_401000': 5}, 'ours': {'fn_401000': 4}}))
+        with open(self.state_path) as f:
+            state = json.load(f)
+        b = state['batches'].pop('b011')
+        b['rows'] = [dict(r) for r in b['rows'][:2]]
+        b['rows'][0]['name'] = 'Rules::Render'
+        for r in b['rows']:
+            r.pop('class')
+        b['files'], b['verdicts'] = ['src/A.cpp'], {}
+        state['batches']['i001'] = b
+        with open(self.state_path, 'w') as f:
+            json.dump(state, f)
+        _write(os.path.join(self.wt, 'src', 'A.cpp'),
+               '// 0x401000\nint Rules::Render(int a, int b)\n{\n  return a;\n}\n'
+               '// 0x402000\nint Draw()\n{\n  return 2;\n}\n')
+        _write(os.path.join(self.wt, 'docs', 'evidence', '401000.md'),
+               '---\naddress: 0x401000\nname: Rules::Render\nkind: read-only\nexemption: read\n---\n'
+               '\n## Decompiled (Ghidra)\n\n```c\nint Render(int a, int b)\n\n{\n  return a;\n}\n```\n')
+        _write(os.path.join(self.wt, 'docs', 'evidence', '402000.md'),
+               self.git('show', 'first:docs/evidence/402000.md').stdout)
+        self.git('add', '-A', cwd=self.wt)
+        self.git('commit', '-qm', 'import', cwd=self.wt)
+        self.assertEqual(d.run_batch('i001'), 'closed', self._status(d)['exceptions'])
+        # evidence rewritten, no finding (no fix round), the note in the ledger
+        fields = load_tool('check_evidence').front_matter(
+            self.git('show', 'first:docs/evidence/401000.md').stdout)
+        self.assertEqual(fields['kind'], 'trace')
+        self.assertIn('frida i001-world_entry orig:', fields['trace_source'])
+        self.assertFalse(os.path.exists(os.path.join(os.path.dirname(d.status_path), 'i001',
+                                                     'worker-fix-checks.brief.md')))
+        ledger = self._ledger(d)
+        for sc in driver._tool('truth').FRIDA_SCENARIOS:
+            self.assertIn('- frida frequency only (a caller finding): 0x401000 %s: frequency only: '
+                          'original 5 calls, ours 4 (final totals); every captured event equal' % sc,
+                          ledger)
+
+    def test_driver_import_cites_the_first_exact_scenario_whatever_it_is(self):
+        # world_entry never calls 401000; first_fight compares it exactly: the
+        # evidence cites first_fight's run and hashes its trace files
+        trace = TruthTest._trace
+        d, batch = self._import_phase_driver()
+        other = trace(('fn_402000', 7, 3))
+        mine = trace(('fn_401000', 7, 3))
+        out = self._file_traces(['world_entry'], other, other)
+        out.update(self._file_traces(['first_fight'], mine, mine))
+        d.frida_run = lambda b, table, scenarios, **kw: dict(out)
+        d._frida_phase('b011', batch, self.wt, {})
+        self.assertEqual(d._frida_got['401000'], ('equal', 'identical in first_fight'))
+        fields = load_tool('check_evidence').front_matter(
+            _slurp(os.path.join(self.wt, 'docs', 'evidence', '401000.md')))
+        self.assertEqual(fields['trace_source'], driver._tool('truth').trace_source_line(
+            'b011-first_fight', out['first_fight']['orig_path'], out['first_fight']['ours_path']))
+
+    def test_driver_wave_one_frequency_only_is_a_ledger_line(self):
+        trace = TruthTest._trace
+        t = trace(('fn_402000', 7, 3))
+        report = ('# r\n\n## Verdicts\n\nverdict 0x401000 ours case dump-401000\n'
+                  'verdict 0x402000 ours case dump-402000\n')
+        d = self._measured_driver(
+            worker=_SeqWorker(report), frida=True, frida_build=self._frida_builder()[0],
+            frida_run=lambda b, table, scenarios, **kw: {'world_entry': {
+                'orig': t, 'ours': t, 'failed': None, 'dumps': {'match': True},
+                'final': {'orig': True, 'ours': True},
+                'hits': {'orig': {'fn_402000': 9}, 'ours': {'fn_402000': 7}}}},
+            oracle_run=lambda *a: {'0x401000': ('pass', 'ok')})
+        self.assertEqual(d.run_batch('b011'), 'closed', self._status(d)['exceptions'])
+        self.assertEqual(self._state()['verdicts']['0x402000']['measured'], 'frida')
+        self.assertFalse(os.path.exists(os.path.join(os.path.dirname(d.status_path), 'b011',
+                                                     'worker-fix-checks.brief.md')))
+        self.assertIn('- frida frequency only (a caller finding): 0x402000 world_entry: frequency '
+                      'only: original 9 calls, ours 7 (final totals); every captured event equal',
+                      self._ledger(d))
+
     def test_import_brief_says_read_only_until_the_driver_measures(self):
         text = _slurp(os.path.join(ROOT, 'docs', 'wso', 'import-brief-template.md'))
         flat = ' '.join(text.split())
@@ -14560,9 +14641,9 @@ class TruthTest(unittest.TestCase):
         self.assertEqual(v['0x73F560'][0], 'different')
         self.assertIn('world_entry', v['0x73F560'][1])
         self.assertEqual(v['0x777777'][0], 'not-exercised')
-        # fired on one side only is a difference
+        # fired on one side only compares no call: never equal, never different
         v = truth.frida_verdicts({'s': (self._trace(('fn_5845D0', 7, 3)), self._trace())}, rows)
-        self.assertEqual(v['0x5845D0'][0], 'different')
+        self.assertEqual(v['0x5845D0'][0], 'not measured')
         # a crash event in a trace that exercised the row never passes
         crashed = self._trace(('fn_5845D0', 7, 3)) + [{'tag': 'crash'}]
         v = truth.frida_verdicts({'s': (self._trace(('fn_5845D0', 7, 3)), crashed)}, rows)
@@ -14832,18 +14913,27 @@ class TruthTest(unittest.TestCase):
             self.assertTrue(r['measured'])
             self.assertEqual(r['result'], {'orig': 'CLEAN', 'ours': 'CLEAN'})
 
-    def test_frida_verdicts_equal_needs_equal_hit_totals(self):
+    def test_frida_verdicts_frequency_only_is_equal_with_a_note(self):
+        # The final review's ruling: every captured event equal but the final
+        # totals differ -> equal; the frequency difference travels in info,
+        # never as a status (a caller finding)
         t = self._trace(('fn_5845D0', 7, 3))
         rows = self.ROWS[:1]
 
         def scenario(orig_n, ours_n):
             return {'orig': t, 'ours': t, 'failed': None, 'final': {'orig': True, 'ours': True},
                     'hits': {'orig': {'fn_5845D0': orig_n}, 'ours': {'fn_5845D0': ours_n}}}
-        v = truth.frida_verdicts({'walk_and_talk': scenario(283, 310)}, rows)
-        self.assertEqual(v['0x5845D0'][0], 'different')
-        self.assertIn('hit totals differ: original 283, ours 310', v['0x5845D0'][1])
-        self.assertIn('walk_and_talk', v['0x5845D0'][1])
-        self.assertEqual(truth.frida_verdicts({'w': scenario(283, 283)}, rows)['0x5845D0'][0], 'equal')
+        info = {}
+        v = truth.frida_verdicts({'walk_and_talk': scenario(283, 310)}, rows, info=info)
+        self.assertEqual(v['0x5845D0'], ('equal', 'identical in walk_and_talk'))
+        self.assertEqual(info['notes'], {'0x5845D0': [
+            'walk_and_talk: frequency only: original 283 calls, ours 310 (final totals); '
+            'every captured event equal']})
+        self.assertEqual(info['exact'], {'0x5845D0': ['walk_and_talk']})
+        info = {}
+        self.assertEqual(truth.frida_verdicts({'w': scenario(283, 283)}, rows, info=info)['0x5845D0'][0],
+                         'equal')
+        self.assertEqual(info['notes'], {})
         # a bare pair carries no status data at all: the events decide
         bare = {'orig': t, 'ours': t, 'failed': None}
         self.assertEqual(truth.frida_verdicts({'w': bare}, rows)['0x5845D0'][0], 'equal')
@@ -14866,6 +14956,50 @@ class TruthTest(unittest.TestCase):
         bad = [{'tag': 'fn_5845D0', 'a0_s32': 8}, {'tag': 'fn_5845D0_ret', 'ret': 3}]
         self.assertEqual(truth.frida_verdicts({'w': {'orig': t, 'ours': bad, 'failed': None, 'hits': same, 'final': {}}},
                                               rows)['0x5845D0'][0], 'different')
+
+    def test_frida_verdicts_prefix_case(self):
+        # one side's events a strict prefix of the other's, that side under the
+        # hooks' cap: frequency-only with final totals on both sides (equal,
+        # a note, no exact scenario to cite), not measured without them
+        rows = self.ROWS[:1]
+        three = self._trace(('fn_5845D0', 7, 3), ('fn_5845D0', 8, 4), ('fn_5845D0', 9, 5))
+        two = three[:5]
+        final = {'final': {'orig': True, 'ours': True},
+                 'hits': {'orig': {'fn_5845D0': 3}, 'ours': {'fn_5845D0': 2}}}
+        info = {}
+        v = truth.frida_verdicts({'first_fight': dict({'orig': three, 'ours': two, 'failed': None},
+                                                      **final)}, rows, info=info)
+        self.assertEqual(v['0x5845D0'], ('equal', 'identical in first_fight'))
+        self.assertEqual(info['exact'], {'0x5845D0': []})
+        self.assertIn("first_fight: frequency only: original 3 calls, ours 2 (final totals); "
+                      "the ours trace is a prefix of the other's", info['notes']['0x5845D0'])
+        # with an exact scenario too, that one is cited first
+        info = {}
+        exact = dict({'orig': three, 'ours': three, 'failed': None}, **dict(
+            final, hits={'orig': {'fn_5845D0': 3}, 'ours': {'fn_5845D0': 3}}))
+        v = truth.frida_verdicts({'first_fight': dict({'orig': three, 'ours': two, 'failed': None},
+                                                      **final), 'walk_and_talk': exact}, rows, info=info)
+        self.assertEqual(v['0x5845D0'], ('equal', 'identical in walk_and_talk, first_fight'))
+        self.assertEqual(info['exact'], {'0x5845D0': ['walk_and_talk']})
+        # without final totals (a killed run's shorter trace): not measured
+        for extra in ({}, {'hits': final['hits'], 'final': {'orig': True, 'ours': False}}):
+            v = truth.frida_verdicts({'w': dict({'orig': three, 'ours': two, 'failed': None}, **extra)}, rows)
+            self.assertEqual(v['0x5845D0'], ('not measured', 'no final HITS totals in w'), extra)
+        # not a prefix (a differing call inside the shorter trace): different
+        off = self._trace(('fn_5845D0', 7, 3), ('fn_5845D0', 8, 99))
+        v = truth.frida_verdicts({'w': dict({'orig': three, 'ours': off, 'failed': None}, **final)}, rows)
+        self.assertEqual(v['0x5845D0'][0], 'different')
+        # the shorter side at the hooks' cap is not "under the cap": a difference
+        capped = self._trace(*[('fn_5845D0', 1, 1)] * truth.HOOK_MAX)
+        longer = capped + self._trace(('fn_5845D0', 1, 1))
+        v = truth.frida_verdicts({'w': dict({'orig': longer, 'ours': capped, 'failed': None}, **final)}, rows)
+        self.assertEqual(v['0x5845D0'][0], 'different')
+        # called on one side only, final totals or not: not measured, with a note
+        info = {}
+        v = truth.frida_verdicts({'w': dict({'orig': three, 'ours': [], 'failed': None}, **dict(
+            final, hits={'orig': {'fn_5845D0': 3}, 'ours': {'fn_5845D0': 0, 'x': 1}}))}, rows, info=info)
+        self.assertEqual(v['0x5845D0'], ('not measured', 'called on one side only in w'))
+        self.assertIn('called on one side only', info['notes']['0x5845D0'][0])
 
     def test_exit_time_hit_totals(self):
         hooks_mod = load_tool('frida/hooks')

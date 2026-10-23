@@ -1092,24 +1092,66 @@ def _as_scenario(value):
 EQUAL_PREFIX = 'identical in '
 
 
-def frida_verdicts(traces, rows, skipped=None):
+def _prefix_side(orig, ours, tag):
+    """How two event-different row traces relate: 'orig' or 'ours' when that
+    side's events are a strict prefix of the other side's and it logged fewer
+    calls than the hooks' cap (its trace is complete: that side just made
+    fewer calls), 'one side' when only one side logged a call at all, None
+    when they differ at a call both made (or a crash event is there)."""
+    if any(str(e.get('tag', '')).lower() in trace_diff.TERMINAL_FAILURE_TAGS
+           for e in orig + ours):
+        return None
+    calls = lambda events: sum(1 for e in events if e.get('tag') == tag)
+    if not calls(orig) or not calls(ours):
+        return 'one side' if calls(orig) or calls(ours) else None
+    short, other, side = (orig, ours, 'orig') if len(orig) < len(ours) else (ours, orig, 'ours')
+    if len(short) == len(other) or calls(short) >= HOOK_MAX:
+        return None
+    return side if trace_diff.compare(short, other[:len(short)]) == 0 else None
+
+
+def frida_verdicts(traces, rows, skipped=None, info=None):
     """{'0x<ADDR>': (status, detail)} from the {scenario: ...} traces frida_run
     returns (a bare (orig, ours) pair per scenario is accepted too) and the
-    rows, with the hook table's `skipped` mapping. status is 'equal',
-    'different', 'not-exercised', 'skipped' (the row had no hook; detail is
-    the reason) or 'scenario failed'.
+    rows, with the hook table's `skipped` mapping. status is one of:
+    'equal' (detail `identical in <scenarios>`, the scenarios whose compare
+    returned 0 first); 'different' (an event-level difference: an argument
+    or a return at a call both sides made, or a crash event; detail carries
+    the first differing pair); 'not measured' (a compared scenario without
+    final HITS totals on both sides where they are needed, one whose state
+    dumps do not match (the dump guard), or a row called on one side only);
+    'scenario failed'; 'not-exercised'; 'skipped' (the row had no hook;
+    detail is the reason).
 
     A row is exercised in a scenario when either side logged one of its
     hooks. A failed scenario (a probe exited non-zero or left no trace) that
     shows the row is never equal (a crash event is a difference, a partial
     trace is 'scenario failed'); one that does not show it counts as 'not
     hit' only when its ORIGINAL side completed (exit 0, HITS present, 0 for
-    that hook), otherwise the row is 'scenario failed' too. Across the
-    scenarios any difference wins, otherwise a row exercised anywhere is
-    equal; one exercised nowhere is not-exercised.
-    A different detail carries the first differing event pair or the crash
-    event. Pointer returns are compared by presence."""
+    that hook), otherwise the row is 'scenario failed' too. A scenario whose
+    dumps (frida_run's) do not match measures nothing.
+
+    Frequency is a caller's business (the final review's ruling): when every
+    captured event compares equal but the final totals differ (both sides
+    have final totals), the row is still equal in that scenario; so is the
+    prefix case, one side's events a strict prefix of the other's with that
+    side under the hooks' cap, when both sides have final totals (without
+    them it is not measured: a killed run's shorter trace proves nothing).
+    The frequency difference travels out of band, never as a status: info (a
+    dict, optional) receives 'notes' {address: [text]} for those, and
+    'exact' {address: [scenarios whose compare returned 0]}, the only
+    scenarios a `compare=0` trace_source may cite. Equal events without
+    final totals on both sides are not measured too (the hooks cap what they
+    log, and the timer's totals lose a run-dependent tail); a bare pair
+    carries no totals and compares on its events alone.
+
+    Across the scenarios any difference wins, then a failed scenario, then
+    not measured, then equal; a row exercised nowhere is not-exercised.
+    Pointer returns are compared by presence."""
     skipped = skipped or {}
+    info = {} if info is None else info
+    notes_out = info.setdefault('notes', {})
+    exact_out = info.setdefault('exact', {})
     verdicts = {}
     for row in rows:
         address = row['address']
@@ -1118,7 +1160,8 @@ def frida_verdicts(traces, rows, skipped=None):
             verdicts[key] = ('skipped', skipped[key])
             continue
         tag = hook_name(key)
-        different, equal, partial, crashed, unmeasured, dumped = [], [], [], [], [], []
+        different, exact, prefix, partial, crashed = [], [], [], [], []
+        unmeasured, dumped, one_sided, notes = [], [], [], []
         for scenario, value in traces.items():
             t = _as_scenario(value)
             if t['failed']:
@@ -1152,23 +1195,37 @@ def frida_verdicts(traces, rows, skipped=None):
                     else 'dumps not compared', scenario, why))
                 continue
             code = trace_diff.compare(orig, ours)
-            # The hooks cap the events they log, so equal events do not show
-            # equal frequency: the sidecars' totals must match too, and only
-            # the exit-time (final) totals are complete; the timer's last
-            # message loses a run-dependent tail.
+            # Only the exit-time (final) totals are complete; the timer's
+            # last message loses a run-dependent tail.
             totals = t.get('hits')
             final = t.get('final') or {}
-            if code == 0 and totals is not None and not (
-                    totals.get('orig') and totals.get('ours') and final.get('orig') and final.get('ours')):
-                unmeasured.append(scenario)
-            elif code == 0 and totals is not None \
-                    and totals['orig'].get(tag, 0) != totals['ours'].get(tag, 0):
-                different.append('%s: hit totals differ: original %d, ours %d' % (
-                    scenario, totals['orig'].get(tag, 0), totals['ours'].get(tag, 0)))
-            elif code == 0:
-                equal.append(scenario)
-            else:
+            have_final = bool(totals and totals.get('orig') and totals.get('ours')
+                              and final.get('orig') and final.get('ours'))
+            counts = ((totals['orig'].get(tag, 0), totals['ours'].get(tag, 0))
+                      if have_final else None)
+            if code == 0:
+                if totals is not None and not have_final:
+                    unmeasured.append(scenario)
+                    continue
+                exact.append(scenario)
+                if counts and counts[0] != counts[1]:
+                    notes.append('%s: frequency only: original %d calls, ours %d (final totals); '
+                                 'every captured event equal' % ((scenario,) + counts))
+                continue
+            side = _prefix_side(orig, ours, tag)
+            if side is None:
                 different.append('%s: %s' % (scenario, _first_difference(orig, ours)))
+            elif not have_final:
+                unmeasured.append(scenario)
+            elif side == 'one side':
+                one_sided.append(scenario)
+                notes.append('%s: frequency only: original %d calls, ours %d (final totals); '
+                             'called on one side only, nothing to compare' % ((scenario,) + counts))
+            else:
+                prefix.append(scenario)
+                notes.append('%s: frequency only: original %d calls, ours %d (final totals); '
+                             "the %s trace is a prefix of the other's" % (
+                                 (scenario,) + counts + ('original' if side == 'orig' else 'ours',)))
         if different or crashed:
             verdicts[key] = ('different', 'differs in ' + '; '.join(different + crashed))
         elif partial:
@@ -1177,12 +1234,17 @@ def frida_verdicts(traces, rows, skipped=None):
             verdicts[key] = ('not measured', '; '.join(
                 (['no final HITS totals in %s' % ', '.join(unmeasured)] if unmeasured else [])
                 + dumped))
-        elif equal:
-            verdicts[key] = ('equal', EQUAL_PREFIX + ', '.join(equal))
+        elif exact or prefix:
+            verdicts[key] = ('equal', EQUAL_PREFIX + ', '.join(exact + prefix))
+        elif one_sided:
+            verdicts[key] = ('not measured', 'called on one side only in %s' % ', '.join(one_sided))
         else:
             # Hit by no scenario at all (a failed scenario's trace showed nothing of it
             # either): not exercised, not a failure.
             verdicts[key] = ('not-exercised', 'no scenario hit it: %s' % (', '.join(traces) or 'any scenario'))
+        if notes and verdicts[key][0] in ('equal', 'not measured'):
+            notes_out[key] = notes
+        exact_out[key] = exact
     return verdicts
 
 
@@ -1481,21 +1543,24 @@ def frida_batch(batch_id, rows, signatures, map_text, scenarios=FRIDA_SCENARIOS,
     differential run: the hook table from the signatures and our .map text,
     run_frida(batch_id, table, scenarios) for the traces, frida_verdicts to
     compare. headers (our src/*.h texts; default this checkout's) type the
-    hooks from our prototypes; info, a dict, receives typed_from. run_frida is
-    injectable (the default launches the game)."""
+    hooks from our prototypes; info, a dict, receives typed_from and
+    frida_verdicts' notes (frequency-only differences) and exact (the
+    scenarios a compare=0 citation may name). run_frida is injectable (the
+    default launches the game)."""
     table = hook_table(rows, signatures, map_text, list(scenarios),
                        _our_headers() if headers is None else headers)
     if info is not None:
         info['typed_from'] = dict(table.get('typed_from', {}))
     traces = run_frida(batch_id, table, list(scenarios)) if table['original']['hooks'] else {}
-    return frida_verdicts(traces, rows, table['skipped'])
+    return frida_verdicts(traces, rows, table['skipped'], info=info)
 
 
 def _scenario_summary(traces):
     out = {}
     for name, t in traces.items():
         t = _as_scenario(t)
-        out[name] = {k: t.get(k) for k in ('orig_exit', 'ours_exit', 'failed', 'result', 'hits', 'final')}
+        out[name] = {k: t.get(k) for k in ('orig_exit', 'ours_exit', 'failed', 'result', 'hits', 'final',
+                                           'dumps')}
         out[name]['trace'] = {side: os.path.relpath(t[side + '_path'], ROOT) if t.get(side + '_path') else None
                               for side in ('orig', 'ours')}
     return out
@@ -1541,7 +1606,7 @@ def _calibrate_frida(rows, read_evidence, map_path):
     for r in rows:
         got.setdefault(_key(r['address']), ('not measured', error or 'no result'))
     return got, {'scenarios': _scenario_summary(captured), 'error': error,
-                 'typed_from': info.get('typed_from', {})}
+                 'typed_from': info.get('typed_from', {}), 'notes': info.get('notes', {})}
 
 
 def _calibrate_main(args):
@@ -1587,6 +1652,8 @@ def _calibrate_main(args):
         cal['frida_rows'] = {a: list(v) for a, v in sorted(frida.items())}
         cal['frida_scenarios'] = frida_info.get('scenarios', {})
         cal['frida_typed_from'] = frida_info.get('typed_from', {})
+        # Frequency-only differences: caller findings, never a verdict.
+        cal['frida_notes'] = {a: list(n) for a, n in sorted(frida_info.get('notes', {}).items())}
         if frida_info.get('error'):
             cal['paths']['frida']['error'] = frida_info['error']
         for a, (status, detail) in sorted(frida.items()):

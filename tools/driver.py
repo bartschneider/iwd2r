@@ -1589,6 +1589,7 @@ class _BatchContext(threading.local):
         self.undecided = {}     # address -> (side, reason) the worker listed (R73)
         self.probe = {}         # address key -> (side, case) the oracle passed
         self.frida_got = {}     # address key -> (status, detail) of its one Frida run
+        self.frida_notes = {}   # address key -> [frequency-only notes] (ledger lines)
         self.pool = None        # the pool this batch runs on
         self.t0 = None          # clock() at the cut or resume (ruling R61)
         self.usage = {'input': 0, 'cached': 0, 'output': 0, 'tool_calls': 0}
@@ -1739,6 +1740,7 @@ class Driver:
     _undecided = _per_thread('undecided')
     _probe = _per_thread('probe')
     _frida_got = _per_thread('frida_got')
+    _frida_notes = _per_thread('frida_notes')
 
     @property
     def worker(self):
@@ -2264,6 +2266,7 @@ class Driver:
         hook, scenario failed, not measured) is a finding that parks it.  It
         runs once per batch, never again.  Returns the findings."""
         self._frida_got = {}
+        self._frida_notes = {}
         if not self.frida or self.dry_run:
             return []
         truth = _tool('truth')
@@ -2271,6 +2274,7 @@ class Driver:
         key = wave._addr_key
         importing = self.kind == 'import'
         mb = None
+        info = {}
         if importing:
             mb_sha = wave.merge_base_sha(worktree, self.base)
             mb = mb_sha[:12] if mb_sha else self.base
@@ -2303,7 +2307,7 @@ class Driver:
                     map_text = f.read()
                 self._stage(batch_id, 'frida')
                 got = truth.frida_batch(batch_id, rows, sigs, map_text, run_frida=run_frida,
-                                        headers=truth._our_headers(worktree))
+                                        headers=truth._our_headers(worktree), info=info)
                 got = {key(a): v for a, v in got.items()}
             except Exception as e:
                 self.log('%s: frida path skipped: %s' % (batch_id, _one_line(repr(e), 300)))
@@ -2311,14 +2315,27 @@ class Driver:
                                            % _one_line(repr(e), 200)) for r in rows}
         self._frida_got = {key(r['address']): got.get(key(r['address']), ('skipped', 'no result'))
                            for r in rows}
+        # Frequency-only differences are caller findings: ledger lines in
+        # _land, never a finding or a verdict (the final review's ruling).
+        self._frida_notes = {key(a): list(n) for a, n in (info.get('notes') or {}).items()}
+        exact = {key(a): list(v) for a, v in (info.get('exact') or {}).items()}
         sides = {key(a): s for a, (s, _c) in verdicts.items()}
         findings, written = [], []
         for r in rows:
             k = key(r['address'])
             status, detail = got.get(k, ('skipped', 'no result'))
             self.log('%s: frida %s %s (%s)' % (batch_id, r['address'], status, detail))
+            for note in self._frida_notes.get(k, ()):
+                self.log('%s: frida %s %s (a caller finding, for the ledger)'
+                         % (batch_id, r['address'], note))
             if importing:
-                finding = self._import_outcome(batch_id, worktree, r, status, detail, traces, mb)
+                # The citation names a scenario whose compare returned 0;
+                # without info (an injected frida_batch) the detail's first.
+                cite = (exact.get(k) or [None])[0] if 'exact' in info else (
+                    detail[len(truth.EQUAL_PREFIX):].split(', ')[0]
+                    if detail.startswith(truth.EQUAL_PREFIX) else None)
+                finding = self._import_outcome(batch_id, worktree, r, status, detail, traces, mb,
+                                               cite)
                 if finding:
                     findings.append(finding)
                 elif status == 'equal':
@@ -2380,15 +2397,23 @@ class Driver:
                 out.append(r)
         return out
 
-    def _import_outcome(self, batch_id, worktree, row, status, detail, traces, mb):
+    def _import_outcome(self, batch_id, worktree, row, status, detail, traces, mb, cite):
         """None when an import row measured equal and its evidence is now
-        kind: trace; else the finding that parks it (the phase runs once per
-        batch, so nothing else can measure it)."""
+        kind: trace (citing `cite`, a scenario whose compare returned 0);
+        else the finding that parks it (the phase runs once per batch, so
+        nothing else can measure it)."""
         a = row['address']
         dep = (' It is a dependency you imported with the batch: park the rows that need '
                'it with it.' if row.get('dependency') else '')
+        if status == 'equal' and cite is None:
+            # Equal only as a prefix (frequency-only): no run compared exactly,
+            # and a compare=0 citation of a run that did not would be false.
+            return ('%s: equal only up to a frequency difference (%s); no scenario compared '
+                    'exactly, so no trace evidence can cite one, and the phase does not run '
+                    'again in this batch, so park it: %s' % (a, detail, park_text(
+                        a, mb, 'frida frequency only, no exact compare: %s' % detail))) + dep
         if status == 'equal':
-            err = self._trace_evidence(batch_id, worktree, row, detail, traces, mb)
+            err = self._trace_evidence(batch_id, worktree, row, cite, traces, mb)
             return err + dep if err else None
         if status == 'different':
             text = ('%s: the Frida trace diff shows the imported body different from the '
@@ -2446,12 +2471,11 @@ class Driver:
             return None
         return m.group(1) if m else None
 
-    def _trace_evidence(self, batch_id, worktree, row, detail, traces, mb):
-        """Rewrite one equal import row's evidence to kind: trace; None, or
-        the finding that says why it could not be."""
-        truth = _tool('truth')
+    def _trace_evidence(self, batch_id, worktree, row, scenario, traces, mb):
+        """Rewrite one equal import row's evidence to kind: trace, citing
+        `scenario`'s run (one whose compare returned 0); None, or the finding
+        that says why it could not be."""
         wave = _tool('wave')
-        scenario = detail[len(truth.EQUAL_PREFIX):].split(', ')[0]
         t = traces.get(scenario)
         t = t if isinstance(t, dict) else {}
         orig, ours = t.get('orig_path'), t.get('ours_path')
@@ -2917,6 +2941,7 @@ class Driver:
         self._undecided = {}
         self._probe = {}
         self._frida_got = {}
+        self._frida_notes = {}
         self._ctx.usage = {'input': 0, 'cached': 0, 'output': 0, 'tool_calls': 0}
         self._ctx.final = None
         self._ctx.transcript_lines = []
@@ -3204,6 +3229,10 @@ class Driver:
                 for st, d in [self._frida_got.get(_tool('wave')._addr_key(a), ('', ''))]
                 if side == 'ours' and st == 'different']
         entry += ''.join('- frida different, kept ours: %s %s\n' % kd for kd in kept)
+        # Frequency-only differences (both kinds): a caller finding for the
+        # ledger, never a verdict change or a park.
+        entry += ''.join('- frida frequency only (a caller finding): 0x%s %s\n' % (k.upper(), n)
+                         for k, notes in sorted(self._frida_notes.items()) for n in notes)
         self._append_ledger(entry)
         self._finish(batch_id, 'closed')
         if err:
