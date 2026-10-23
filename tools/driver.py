@@ -2015,6 +2015,12 @@ class Driver:
                             findings.append(err)
                         else:
                             written.append(r['address'])
+                elif status == 'different' and kept:
+                    findings.append(
+                        '%s: the Frida trace diff shows the imported body different from the '
+                        'original (%s); its evidence (kind %s) stands and nothing is reverted, '
+                        'deleted or parked in this batch; note the difference in your report'
+                        % (r['address'], detail, self._evidence_kind(worktree, r['address'])))
                 elif status == 'different':
                     findings.append(
                         '%s: the Frida trace diff shows the imported body different from the '

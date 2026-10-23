@@ -10039,6 +10039,10 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(d._frida_got['401000'][0], 'equal')
         # the different replay row is still a finding; the unexercised replay row is not
         self.assertEqual([f[:9] for f in findings], ['0x402000:'])
+        self.assertIn('world_entry', findings[0])           # the diff detail
+        self.assertIn('evidence (kind replay) stands', findings[0])
+        self.assertNotIn('import-parked.json', findings[0])
+        self.assertNotIn('revert its body', findings[0])
 
     def test_driver_frida_phase_different_read_only_row_is_parked(self):
         trace = TruthTest._trace
@@ -10046,8 +10050,12 @@ class DriverTest(unittest.TestCase):
         d.frida_run = lambda b, table, scenarios: {sc: (
             trace(('fn_401000', 7, 3), ('fn_402000', 7, 3)),
             trace(('fn_401000', 7, 3), ('fn_402000', 7, 4))) for sc in scenarios}
-        with open(os.path.join(self.wt, 'docs', 'evidence', '402000.md'), 'a') as f:
-            f.write('kind: read-only\n')
+        path = os.path.join(self.wt, 'docs', 'evidence', '402000.md')
+        with open(path) as f:
+            text = f.read()
+        with open(path, 'w') as f:
+            f.write(re.sub(r'^kind: \S+$', 'kind: read-only', text, count=1, flags=re.M))
+        self.assertEqual(d._evidence_kind(self.wt, '0x402000'), 'read-only')
         findings = d._frida_phase('b011', batch, self.wt, {})
         text = [f for f in findings if f.startswith('0x402000:')][0]
         for needle in ('revert its body', 'import-parked.json', 'frida different', 'world_entry'):
