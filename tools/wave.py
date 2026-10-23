@@ -8,6 +8,7 @@ The coordinator's wave loop, one command each::
     python3 tools/wave.py verdict b001 0x643CC0 ours probe-9
     python3 tools/wave.py close b001           # gates, then ff `first`
     python3 tools/wave.py resolve 0x716E80 ours dump-716E80   # a probe-list row into its batch
+    python3 tools/wave.py unpark 0x5152C0 [--reason TEXT]     # a parked import row back to the queue
     python3 tools/wave.py close b002 --kind import   # waves 2-5
     python3 tools/wave.py scorecard            # the tally into xrec-report.md
     python3 tools/wave.py status
@@ -1486,6 +1487,56 @@ def resolve_probe(address, side, case, state_path=STATE_PATH, repo=ROOT):
                f'probe list now {len(remaining)} entries\n')
 
 
+def unpark(addresses, reason=None, state_path=IMPORT_STATE_PATH, repo=ROOT):
+    """Return parked import rows to the queue.  Each address needs its
+    docs/wso/import-parked/<ADDR>.json and a row in a closed batch of the
+    import state; the file goes, the row moves from the batch's `rows` to
+    its `unparked` list with `at`, `reason` and `needs`, so `next --queue
+    import` offers it again.  Any refusal (exit 1) writes nothing.  No git:
+    the caller commits."""
+    if not addresses:
+        return 2, 'unpark: at least one address is required\n'
+    reason = reason or 'needs met'
+    parked, problem = _parked_rows(repo)
+    if problem:
+        return 2, f'{problem}\n'
+    state = load_state(state_path)
+    plan, refusals, seen = [], [], set()
+    for address in addresses:
+        key = _addr_key(address)
+        if key in seen:
+            continue
+        seen.add(key)
+        entry = parked.get(key)
+        if entry is None:
+            refusals.append(f'{address}: not parked')
+            continue
+        hit = next(((bid, b, r) for bid, b in sorted(state['batches'].items())
+                    for r in b.get('rows', [])
+                    if _addr_key(r.get('address')) == key), None)
+        if hit is None:
+            refusals.append(f'{address}: in no import batch')
+        elif hit[1].get('status') != 'closed':
+            refusals.append(f'{address}: in assigned batch {hit[0]}; '
+                            f'close or clear it first')
+        else:
+            plan.append((key, entry, *hit))
+    if refusals:
+        return 1, '\n'.join(refusals) + '\n'
+    lines, now = [], _now()
+    for key, entry, bid, batch, row in plan:
+        batch['rows'] = [r for r in batch['rows'] if r is not row]
+        moved = dict(row, at=now, reason=reason, needs=entry.get('needs'))
+        batch.setdefault('unparked', []).append(moved)
+        lines.append(f'unparked 0x{key.upper()} {row.get("name")} '
+                     f'(was {entry.get("needs")}) from {bid}')
+    save_state(state_path, state)
+    for key, *_ in plan:
+        os.unlink(os.path.join(repo, parked_rel(key)))
+    lines.append(f'commit {os.path.relpath(state_path, repo)} and {IMPORT_PARKED_DIR}')
+    return 0, '\n'.join(lines) + '\n'
+
+
 # -- scorecard -----------------------------------------------------------
 
 SCORECARD_HEAD = '## Scorecard'
@@ -1790,6 +1841,25 @@ def main(argv=None):
                   file=sys.stderr)
             return 2
         rc, out = resolve_probe(rest[0], rest[1], rest[2])
+    elif cmd == 'unpark':
+        addrs, reason, it = [], None, iter(rest)
+        for a in it:
+            if a == '--reason':
+                reason = next(it, None)
+                if reason is None:
+                    print('wave unpark: --reason needs a value', file=sys.stderr)
+                    return 2
+            elif a == '--queue':
+                if next(it, '') != 'import':
+                    print('wave unpark: --queue is import', file=sys.stderr)
+                    return 2
+            else:
+                addrs.append(a)
+        if not addrs:
+            print('usage: wave.py unpark <address> [<address> ...] '
+                  '[--reason TEXT] [--queue import]', file=sys.stderr)
+            return 2
+        rc, out = unpark(addrs, reason)
     elif cmd == 'recompare':
         kw, it = {}, iter(rest)
         for a in it:

@@ -14321,6 +14321,95 @@ class DriverTest(unittest.TestCase):
             rc, out = wave.next_batch(dp, w1, 20, repo=self.root, import_path=ip)
         self.assertTrue(out.startswith('b001 assigned'), out)
 
+    # -- wave.py unpark ----------------------------------------------------------
+
+    def _unpark_fixture(self):
+        tmp, dp, ip = self._import_repo()
+        wave = driver._tool('wave')
+        imp = os.path.join(tmp, 'import-state.json')
+        row = lambda a, n, f: {'address': a, 'name': n, 'file': f, 'their_len': 70, 'our_len': 2}
+        state = {'batches': {
+            'i001': {'status': 'closed', 'branch': 'p3/wso-i001', 'files': ['src/A.cpp', 'src/C.cpp'],
+                     'verdicts': {}, 'rows': [row('0x401000', 'F', 'src/A.cpp'),
+                                              row('0x403000', 'H', 'src/C.cpp')]},
+            'i002': {'status': 'assigned', 'branch': 'p3/wso-i002', 'files': ['src/D.cpp'],
+                     'verdicts': {}, 'rows': [row('0x404000', 'I', 'src/D.cpp')]}}}
+        with open(imp, 'w') as f:
+            json.dump(state, f)
+        folder = os.path.join(self.root, 'docs', 'wso', 'import-parked')
+        os.makedirs(folder)
+        for a, n, b in (('403000', 'H', 'i001'), ('404000', 'I', 'i002'), ('405000', 'J', 'i001')):
+            with open(os.path.join(folder, a + '.json'), 'w') as f:
+                json.dump({'address': '0x' + a, 'name': n, 'file': 'src/x.cpp', 'batch': b,
+                           'needs': 'world_entry: not exercised'}, f)
+        return tmp, dp, ip, imp, folder, wave
+
+    def _unpark_snapshot(self, imp, folder):
+        with open(imp) as f:
+            st = f.read()
+        return st, sorted(os.listdir(folder))
+
+    def test_unpark_moves_the_row_and_next_offers_it_again(self):
+        tmp, dp, ip, imp, folder, wave = self._unpark_fixture()
+        rc, out = wave.unpark(['0x403000'], None, state_path=imp, repo=self.root)
+        self.assertEqual(rc, 0, out)
+        lines = out.splitlines()
+        self.assertEqual(lines[0], 'unparked 0x403000 H (was world_entry: not exercised) from i001')
+        self.assertIn('import-state.json', lines[-1])
+        self.assertIn('docs/wso/import-parked', lines[-1])
+        self.assertFalse(os.path.exists(os.path.join(folder, '403000.json')))
+        with open(imp) as f:
+            b = json.load(f)['batches']['i001']
+        self.assertEqual([r['address'] for r in b['rows']], ['0x401000'])
+        (u,) = b['unparked']
+        self.assertEqual((u['address'], u['reason'], u['needs']),
+                         ('0x403000', 'needs met', 'world_entry: not exercised'))
+        self.assertRegex(u['at'], r'^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d')
+        rc, out = wave.next_batch(dp, imp, 20, wave.IMPORT_CATEGORY, repo=self.root,
+                                  import_path=ip, worktree_root=os.path.join(tmp, 'wts'),
+                                  queue='import')
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(out.startswith('i003 assigned: 1 rows'), out)
+        with open(imp) as f:
+            (r,) = json.load(f)['batches']['i003']['rows']
+        self.assertEqual((r['address'], r['category']), ('0x403000', 'theirs_real_ours_stub'))
+        # A second unpark of the same address: not parked any more.
+        rc, out = wave.unpark(['403000'], None, state_path=imp, repo=self.root)
+        self.assertEqual((rc, out), (1, '403000: not parked\n'))
+
+    def test_unpark_reason_and_any_address_spelling(self):
+        tmp, dp, ip, imp, folder, wave = self._unpark_fixture()
+        rc, out = wave.unpark(['403000'], 'signature parses now', state_path=imp, repo=self.root)
+        self.assertEqual(rc, 0, out)
+        with open(imp) as f:
+            self.assertEqual(json.load(f)['batches']['i001']['unparked'][0]['reason'],
+                             'signature parses now')
+
+    def test_unpark_refusals_write_nothing(self):
+        tmp, dp, ip, imp, folder, wave = self._unpark_fixture()
+        before = self._unpark_snapshot(imp, folder)
+        for args, msg in ((['0x401000'], '0x401000: not parked\n'),
+                          (['0x404000'], '0x404000: in assigned batch i002; close or clear it first\n'),
+                          (['0x405000'], '0x405000: in no import batch\n'),
+                          # one good address does not carry a bad one through
+                          (['0x403000', '0x404000'],
+                           '0x404000: in assigned batch i002; close or clear it first\n')):
+            rc, out = wave.unpark(args, None, state_path=imp, repo=self.root)
+            self.assertEqual((rc, out), (1, msg))
+            self.assertEqual(self._unpark_snapshot(imp, folder), before)
+
+    def test_unpark_leaves_scorecard_and_status_working(self):
+        tmp, dp, ip, imp, folder, wave = self._unpark_fixture()
+        self.assertEqual(wave.unpark(['0x403000'], None, state_path=imp, repo=self.root)[0], 0)
+        report = os.path.join(tmp, 'report.md')
+        with open(report, 'w') as f:
+            f.write('# R\n\n## Scorecard\n\nold\n')
+        rc, out = wave.write_scorecard(imp, report, os.path.join(tmp, 'no-triage.json'))
+        self.assertEqual(rc, 0, out)
+        rc, out = wave.status(imp)
+        self.assertEqual(rc, 0, out)
+        self.assertIn('i001 closed p3/wso-i001 1 rows', out)
+
     def test_queue_import_driver_wiring(self):
         tmp, dp, ip = self._import_repo()
         d, err = driver.driver_from_args(

@@ -100,6 +100,9 @@ Each bundle carries the function's decompile and its callers' decompiles; objdum
    row you do not park must be imported: its body changed against the merge
    base. A row whose body you leave as ours (ours already matches, or you
    refused his body) is parked too, with `needs` saying why.
+   A row that was parked and unparked before carries an earlier attempt in that
+   batch's branch history (`git log --all -- docs/evidence/<ADDRESS>.md` finds
+   it); read it, do not trust it.
 5. **No verdicts.** This is an import: nobody decides fork, ours or neither,
    so write no `verdict` lines, no deciding case ids and no "disagreed with
    WSO" or "corroborated by WSO" phrase. The driver closes the batch with
