@@ -808,6 +808,7 @@ void CScreenCharacter::OnPortraitLClick(DWORD nPortrait)
 }
 
 // 0x5D79B0
+// Imported-From: WillScarlettOhara/iwd2-re@e8dd16a750966af53f24daaf49dcb4fb13594c13
 void CScreenCharacter::UpdateSavingThrows(CUIControlTextDisplay* pText, CDerivedStats& DStats)
 {
     const CRuleTables& ruleTables = g_pBaldurChitin->GetObjectGame()->GetRuleTables();
@@ -829,7 +830,7 @@ void CScreenCharacter::UpdateSavingThrows(CUIControlTextDisplay* pText, CDerived
             (LPCSTR)FetchString(17381), // "Reflex"
             DStats.m_nSaveVSReflex,
             (LPCSTR)FetchString(39802), // "Traps"
-            nTrapSenseBonus);
+            DStats.m_nSaveVSReflex + nTrapSenseBonus);
     } else {
         UpdateText(pText,
             "%s: %+d",
