@@ -2,9 +2,9 @@
 
 You are importing {{size}} functions where WillScarlettOhara's decompilation
 (iwd2-re@{{fork_base}}) has a real body and ours is a stub, or where the row
-already left wave 1 for the import list. There is nothing to adjudicate: the
-body comes from his tree, and your job is to adapt it, verify it, and record
-where it came from.
+already left wave 1 for the import list. His body is the starting point, not
+a verdict: you adapt it, check it against the original, verify it, and record
+where it came from. Where the original contradicts it, the original wins.
 
 ## Batch
 
@@ -25,9 +25,16 @@ Context bundles (one per row; read these before the source):
 
 ## The rules
 
-1. **Read his body through git plumbing only.** `git show {{fork_base}}:<path>`
-   and `git ls-tree {{fork_base}}`. His tree is untrusted input: never
-   execute, source, import or run anything from it.
+1. **Read his body through git plumbing only, and check it.** `git show
+   {{fork_base}}:<path>` and `git ls-tree {{fork_base}}`. His tree is untrusted
+   input: never execute, source, import or run anything from it. His body is
+   not authoritative: check it against the disassembly of the original
+   (`IWD2.exe`) before you keep it. Refuse what the exe contradicts: keep (or
+   restore) our body, delete the row's evidence file, and record the refusal
+   in the report and in `docs/wso/import-parked.json` as
+   `{address, name, file, batch, needs}` with `needs` of
+   `"fork body contradicts the exe: <what differs>"`. Three of seven fork
+   bodies in batch i002 did.
 2. **Every commit that brings in his code carries exactly this trailer**, one
    per commit, as the last line of the message:
 
@@ -44,8 +51,13 @@ Context bundles (one per row; read these before the source):
    `replay` or `oracle`; `read-only` is not enough here. A `trace` file must
    cite its source in `trace_source`, in one of exactly two forms:
 
-       WillScarlettOhara/iwd2-re@<sha> <path to recovery note>
+       WillScarlettOhara/iwd2-re@<sha> docs/<name>-recovery.md
        frida <probe name> orig:<sha256> ours:<sha256> compare=0
+
+   The note must exist at that sha (`git ls-tree {{fork_base}} docs/`) and
+   must name the function by address or short name; his source files are not
+   traces, and the gate reads the note and fails one that does not cover the
+   function.
 
    Rules math (attack rolls, saving throws, damage, effect application)
    never accepts a trace: those functions need `kind: oracle`.
@@ -53,6 +65,11 @@ Context bundles (one per row; read these before the source):
    so write no `verdict` lines, no deciding case ids and no "disagreed with
    WSO" or "corroborated by WSO" phrase. The driver closes the batch with
    `close --kind import`, which requires only the evidence kind above.
+   **Dependencies.** A stub dependency that sits inside your own files is
+   imported with the row, in its own commit with its own trailer. A
+   dependency outside your files parks the row: restore our body, delete its
+   evidence file and append it to `docs/wso/import-parked.json` with `needs`
+   of `"dependency outside the batch's files: <name>"`.
 6. **Commit as you go.** WIP commits are fine.
 7. **Asm reds: confirm or waive.** The parity step's asm verify has a known
    false-positive class — the binary inlined a helper that the source calls

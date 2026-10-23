@@ -825,8 +825,17 @@ def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
     if dirty:
         problems.append('uncommitted paths in the worktree; commit or '
                         'delete: %s' % ', '.join(sorted(dirty)))
+    # The base is where the branch left `base`, not `base` itself: commits
+    # that landed on first meanwhile (merged into the batch before the close)
+    # are not the worker's edits.
+    mbs, bad = _git_paths(run, worktree,
+                          ('merge-base', base, batch.get('branch') or 'HEAD'),
+                          str.strip)
+    if bad:
+        problems.append(bad)
     changed, bad = _git_paths(run, worktree,
-                              ('diff', '--name-only', '%s...HEAD' % base),
+                              ('diff', '--name-only',
+                               mbs[0] if mbs else base, 'HEAD'),
                               str.strip)
     if bad:
         problems.append(bad)
