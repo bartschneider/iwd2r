@@ -12711,6 +12711,7 @@ class DriverTest(unittest.TestCase):
         self.assertTrue(done.wait(5), 'kill_live_groups deadlocked on its own lock')
 
     def test_stop_waits_for_git_write(self):
+        self.addCleanup(driver._STOPPED.clear)
         d = self._pool_driver(self._two_pools()[:1], {'a': None}, ids=('b011',))
         d.STOP_WAIT = 5
         inside, release = threading.Event(), threading.Event()
@@ -12734,6 +12735,7 @@ class DriverTest(unittest.TestCase):
         self.assertTrue(d._stopping)
 
     def test_stop_wait_is_bounded(self):
+        self.addCleanup(driver._STOPPED.clear)
         d = self._pool_driver(self._two_pools()[:1], {'a': None}, ids=('b011',))
         d.STOP_WAIT = 0.2
         inside, release = threading.Event(), threading.Event()
@@ -12753,6 +12755,7 @@ class DriverTest(unittest.TestCase):
         t.join(5)
 
     def test_stop_in_the_writing_thread_is_deferred_to_the_write_end(self):
+        self.addCleanup(driver._STOPPED.clear)
         d = self._pool_driver(self._two_pools()[:1], {'a': None}, ids=('b011',))
         steps = []
         with self.assertRaises(driver._Stop):
