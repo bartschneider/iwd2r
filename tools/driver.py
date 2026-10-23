@@ -740,6 +740,9 @@ def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
     given = {key(a): a for a in verdicts}
     und = {key(a): a for a in undecided}
     if kind == 'import':
+        if und:
+            problems.append('Undecided is for wave-1 batches; remove the '
+                            '## Undecided section')
         rows, given, und = [], {}, {}
     if kind != 'import':
         for k, a in sorted(given.items()):
@@ -770,6 +773,22 @@ def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
             problems.append('%s: both a verdict line and an undecided line; '
                             'keep one (a row you cannot decide gets no '
                             'verdict line, never ours)' % a)
+    inside = {k: a for k, a in und.items() if k in row_keys and k not in given}
+    if inside:
+        # An undecided row leaves the batch with our body: a changed body
+        # would reach the base as an import without a probe.
+        try:
+            changed = {key('0x%X' % addr) for _p, addr, _n in
+                       _tool('check_evidence').touched(worktree, base)}
+        except Exception as e:
+            changed = set()
+            problems.append('cannot tell whether the undecided rows kept '
+                            'our bodies (%r); fix it and rerun' % (e,))
+        for k, a in sorted(inside.items()):
+            if k in changed:
+                problems.append('%s: listed under ## Undecided but its body '
+                                'changed against %s; restore our body and '
+                                'commit.' % (a, base))
     for k, a in given.items():
         if k not in row_keys:
             problems.append('%s: verdict for an address outside this batch; '
@@ -1033,6 +1052,9 @@ Verdicts already recorded in the wave state:
 
 Your report still carries the full `## Verdicts` section: one line for
 every row you decide, the rows you decided before this resume included.
+A row you decided `ours` before this resume although your reading says fork
+or neither goes under ## Undecided now (rule 13): keep our body and drop its
+verdict line.
 
 The original brief follows.
 
@@ -1702,7 +1724,7 @@ class Driver:
                 self.log('%s: %s decided by the oracle probe; its undecided '
                          'line is dropped' % (batch_id, addr))
                 del listed[addr]
-        self._undecided = dict(listed)
+        self._undecided = {} if self.kind == 'import' else dict(listed)
         try:
             kw = {'kind': 'import'} if self.kind == 'import' else {}
             kw['probe'] = sorted(self._probe)
@@ -2018,7 +2040,8 @@ class Driver:
         self._append_ledger(ledger_entry(
             dict(batch, id=batch_id), verdicts, self._classes(batch_id, batch),
             review, self._commits(batch['branch']), self._credits(),
-            ignored=self._ignored, **self._figure_kw()))
+            ignored=self._ignored, undecided=self._undecided,
+            **self._figure_kw()))
 
     def _record_pool(self, batch_id, name):
         """Write batch['pool'] = name into the state entry (ruling R10)."""
@@ -2251,6 +2274,8 @@ class Driver:
             # not run again (ruling R71).
             self.log('%s: retried at its %s stage; the worker and the review '
                      'are not run again' % (batch_id, stage))
+            if self.kind == 'verdicts':
+                self._undecided = self._saved_undecided(batch_id, batch)
             return self._land(
                 batch_id, batch, worktree,
                 self._saved_verdicts(batch_id, batch) if stage == 'record' else {},
@@ -2340,15 +2365,39 @@ class Driver:
         hold yet (the retry of a record exception)."""
         key = _tool('wave')._addr_key
         have = {key(a) for a in batch.get('verdicts', {})}
+        for text in self._saved_reports(batch_id):
+            try:
+                parsed = parse_report(text)
+            except ReportError:
+                continue
+            return {a: sc for a, sc in parsed.items() if key(a) not in have}
+        return {}
+
+    def _saved_reports(self, batch_id):
+        """The texts of the saved worker reports, the last one first."""
         folder = os.path.join(self.driver_dir, batch_id)
         for label in ('worker-fix-review', 'worker-fix-checks', 'worker'):
             try:
                 with open(os.path.join(folder, label + '.report.md'),
                           encoding='utf-8') as f:
-                    parsed = parse_report(f.read())
-            except (OSError, ReportError):
+                    yield f.read()
+            except OSError:
                 continue
-            return {a: sc for a, sc in parsed.items() if key(a) not in have}
+
+    def _saved_undecided(self, batch_id, batch):
+        """The ## Undecided rows of the last saved report that are still in
+        the batch with no recorded verdict (a retry of record or close,
+        ruling R74: the move is idempotent)."""
+        key = _tool('wave')._addr_key
+        open_rows = {key(r['address']) for r in batch.get('rows', [])} - \
+            {key(a) for a in batch.get('verdicts', {})}
+        for text in self._saved_reports(batch_id):
+            try:
+                parse_report(text)
+                listed = parse_undecided(text)
+            except ReportError:
+                continue
+            return {a: sc for a, sc in listed.items() if key(a) in open_rows}
         return {}
 
     def _move_undecided(self, batch_id):
