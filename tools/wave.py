@@ -7,6 +7,7 @@ The coordinator's wave loop, one command each::
     python3 tools/wave.py brief b001           # the text to dispatch verbatim
     python3 tools/wave.py verdict b001 0x643CC0 ours probe-9
     python3 tools/wave.py close b001           # gates, then ff `first`
+    python3 tools/wave.py resolve 0x716E80 ours dump-716E80   # a probe-list row into its batch
     python3 tools/wave.py close b002 --kind import   # waves 2-5
     python3 tools/wave.py scorecard            # the tally into xrec-report.md
     python3 tools/wave.py status
@@ -56,6 +57,8 @@ CALIBRATION_PATH = os.path.join(ROOT, 'docs', 'wso', 'truth-calibration.json')
 IMPORT_LIST_REL = os.path.join('docs', 'wso', 'import-list.json')
 # Rows a worker could not decide (ruling R73): they wait for a probe.
 PROBE_LIST_REL = os.path.join('docs', 'wso', 'probe-list.json')
+TRIAGE_REL = os.path.join('docs', 'wso', 'triage.json')
+DISAGREEMENTS_REL = os.path.join('docs', 'wso', 'disagreements.json')
 # The fork is read by pinned sha, never by branch name (wso/main moves).
 DEFAULT_FORK_BASE = 'e8dd16a750966af53f24daaf49dcb4fb13594c13'
 WSO_DELTA_HEAD = '## WSO delta'
@@ -926,10 +929,7 @@ def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
         if (v.get('side') in ('fork', 'neither')
                 and deciding_kind(v.get('case')) == 'dump reading'
                 and used is None):
-            problems.append(
-                f'{addr}: a fork/neither verdict decided by a dump reading '
-                f'({v.get("case")}); probe before import, or --allow-dump '
-                f'<ruling id>')
+            problems.append(_dump_refusal(addr, v.get('case')))
     if wt is not None:
         st = subprocess.run(['git', '-C', wt, 'status', '--porcelain', '-uall'],
                             capture_output=True, text=True)
@@ -993,6 +993,92 @@ def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
                       v.get('side') in ('fork', 'neither')
                       and deciding_kind(v.get('case')) == 'dump reading'
                       for v in batch['verdicts'].values()) else ''))
+
+
+# -- resolve -------------------------------------------------------------
+
+def _dump_refusal(addr, case):
+    """The refusal close and resolve share for a fork/neither verdict
+    decided by a dump reading."""
+    return (f'{addr}: a fork/neither verdict decided by a dump reading '
+            f'({case}); probe before import, or --allow-dump <ruling id>')
+
+
+def _evidence_decided_by(text, case):
+    """True when a line of an evidence file carries one of EVIDENCE_PHRASES
+    and ends with `case <case> decides`."""
+    return any(any(p in line for p in EVIDENCE_PHRASES)
+               and line.rstrip().rstrip('.').endswith(f'case {case} decides')
+               for line in text.splitlines())
+
+
+def resolve_probe(address, side, case, state_path=STATE_PATH, repo=ROOT):
+    """Record the verdict of a row on the probe list (ruling R73): the row
+    returns to the batch it was moved out of, with the verdict `verdict`
+    would record, and leaves the list.  Exit 1 refuses (a dump-decided
+    fork/neither verdict, or no evidence line naming the case)."""
+    if side not in SIDES:
+        return 2, f'side must be one of {"|".join(SIDES)}\n'
+    if not case:
+        return 2, 'the deciding case id is required\n'
+    probe_path = os.path.join(repo, PROBE_LIST_REL)
+    probes, err = _load_list(probe_path, 'probe list', missing_ok=True)
+    if err:
+        return 2, err
+    entry = next((e for e in probes
+                  if _addr_key(e['address']) == _addr_key(address)), None)
+    if entry is None:
+        return 2, f'{address} is not on the probe list\n'
+    state = load_state(state_path)
+    batch_id = entry.get('batch')
+    batch = state['batches'].get(batch_id or '')
+    if batch is None:
+        return 2, f'no batch {batch_id} (named by the probe list entry)\n'
+    addr = entry['address']
+    if side in ('fork', 'neither') and deciding_kind(case) == 'dump reading':
+        return 1, _dump_refusal(addr, case) + '\n'
+    rel = _evidence_rel(addr)
+    try:
+        with open(os.path.join(repo, rel), encoding='utf-8') as f:
+            text = f.read()
+    except FileNotFoundError:
+        text = None
+    if text is None or not _evidence_decided_by(text, case):
+        return 1, (f'{rel}: no line with {" or ".join(EVIDENCE_PHRASES)} '
+                   f'ending "case {case} decides"\n')
+    if not any(_addr_key(r.get('address')) == _addr_key(addr)
+               for r in batch['rows']):
+        rows, err = _load_list(os.path.join(repo, DISAGREEMENTS_REL),
+                               'disagreements')
+        if err:
+            return 2, err
+        row = next((dict(r) for r in rows
+                    if _addr_key(r['address']) == _addr_key(addr)), None)
+        if row is None:
+            return 2, f'{addr} is not in {DISAGREEMENTS_REL}\n'
+        tri, err = _load_list(os.path.join(repo, TRIAGE_REL), 'triage file',
+                              missing_ok=True)
+        if err:
+            return 2, err
+        t = next((e for e in tri
+                  if _addr_key(e['address']) == _addr_key(addr)), None)
+        row['class'] = (t.get('auto_class', t['class']) if t and 'class' in t
+                        else row.get('class', 'ambiguous'))
+        batch['rows'].append(row)
+    batch['verdicts'][addr] = {
+        'side': side, 'case': case,
+        'losing_kind': 'trace' if side == 'ours' else None,
+        'measured': 'none'}
+    if side == 'fork':
+        losing, err = _evidence_kind(repo, batch['branch'], addr)
+        if losing is None:
+            return 1, err + '\n'
+        batch['verdicts'][addr]['losing_kind'] = losing
+    remaining = [e for e in probes if e is not entry]
+    save_state(state_path, state)
+    _save_json(probe_path, remaining)
+    return 0, (f'resolved {addr} in {batch_id}: {side} (case {case}); '
+               f'probe list now {len(remaining)} entries\n')
 
 
 # -- scorecard -----------------------------------------------------------
@@ -1101,16 +1187,63 @@ def scorecard_text(state):
     return '\n'.join(lines) + '\n'
 
 
+AUDIT_PROBES = ('replay', 'oracle', 'none')
+AUDIT_RESULTS = ('match', 'flip', 'parked')
+
+
+def audit_text(audit):
+    """(paragraph, None) for the rule-3 audit sample (docs/wso/audit.json),
+    or (None, one-line error)."""
+    try:
+        rows = audit['rows']
+        if not isinstance(rows, list) or not all(
+                isinstance(r, dict) for r in rows):
+            raise TypeError
+        probes = [r['probe'] for r in rows]
+        results = [r['result'] for r in rows]
+        head = (f'seed {audit["seed"]} over {audit["population"]} '
+                f'dump-decided ours rows at {audit["base"]}')
+    except (KeyError, TypeError):
+        return None, ('audit file: needs an object with seed, population, '
+                      'base and a list of rows\n')
+    if (any(p not in AUDIT_PROBES for p in probes)
+            or any(r not in AUDIT_RESULTS for r in results)):
+        return None, (f'audit file: every row needs probe in '
+                      f'{"|".join(AUDIT_PROBES)} and result in '
+                      f'{"|".join(AUDIT_RESULTS)}\n')
+    probed = [p for p in probes if p in ('replay', 'oracle')]
+    return (f'Audit sample (rule 3): {head}; {len(rows)} drawn: '
+            f'{len(probed)} probed (replay {probes.count("replay")}, '
+            f'oracle {probes.count("oracle")}), '
+            f'{results.count("parked")} parked, '
+            f'{results.count("flip")} flips.\n'), None
+
+
 def write_scorecard(state_path=STATE_PATH, report_path=REPORT_PATH,
-                    triage_path=TRIAGE_PATH, calibration_path=CALIBRATION_PATH):
+                    triage_path=TRIAGE_PATH, calibration_path=CALIBRATION_PATH,
+                    audit_path=None):
     """Replace (or append) the '## Scorecard' section of the report.
     Idempotent: the same state writes the same bytes.  When triage.json
     exists the section ends with a labelled calibration block (the
     separate '## Triage calibration' section stays triage.py's); when
     truth-calibration.json exists it ends with the truth calibration
-    paragraph."""
+    paragraph; when docs/wso/audit.json (beside the state file, or
+    audit_path) exists it ends with the rule-3 audit sample paragraph."""
     state = load_state(state_path)
     section = scorecard_text(state)
+    if audit_path is None:
+        audit_path = os.path.join(
+            os.path.dirname(os.path.abspath(state_path)), 'audit.json')
+    audit_para = None
+    if os.path.exists(audit_path):
+        try:
+            with open(audit_path, encoding='utf-8') as f:
+                audit = json.load(f)
+        except (OSError, ValueError) as e:
+            return 2, f'audit file {audit_path}: {e}\n'
+        audit_para, err = audit_text(audit)
+        if err:
+            return 2, err
     if os.path.exists(triage_path):
         rows, err = _load_list(triage_path, 'triage')
         if err:
@@ -1129,6 +1262,8 @@ def write_scorecard(state_path=STATE_PATH, report_path=REPORT_PATH,
         except (OSError, ValueError, KeyError, TypeError) as e:
             return 2, f'cannot read {calibration_path}: {e!r}\n'
         section += '\n' + para
+    if audit_para:
+        section += '\n' + audit_para
     try:
         with open(report_path, encoding='utf-8') as f:
             text = f.read()
@@ -1243,6 +1378,12 @@ def main(argv=None):
             return 2
         rc, out = close_batch(batch_id=args[0], kind=kind,
                               allow_dump=allow, ledger_path=ledger)
+    elif cmd == 'resolve':
+        if len(rest) != 3:
+            print('usage: wave.py resolve <address> fork|ours|neither <case>',
+                  file=sys.stderr)
+            return 2
+        rc, out = resolve_probe(rest[0], rest[1], rest[2])
     elif cmd == 'scorecard':
         rc, out = write_scorecard()
     elif cmd == 'status':

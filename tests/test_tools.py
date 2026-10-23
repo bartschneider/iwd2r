@@ -13179,6 +13179,172 @@ class TruthTest(unittest.TestCase):
                 self.assertNotIn('measured', json.load(f)['batches']['b1']['verdicts']['0x1'])
 
 
+class WaveResolveTest(unittest.TestCase):
+    """wave.py resolve (a probe-list row into its batch) and the rule-3
+    audit paragraph of the scorecard."""
+
+    setUp = WaveTest.setUp
+    PROBED = '0x716E80'
+    ROW = {'address': '0x716E80', 'category': 'both_changed_differ',
+           'class': 'ambiguous', 'file': 'src/CGameSprite.cpp',
+           'name': 'CGameSprite::sub_716E80', 'our_len': 300, 'their_len': 310}
+
+    def repo(self, evidence='disagreed with WSO at e8dd16a: x; case dump-716E80 decides\n',
+             probes=True):
+        self.root = os.path.join(self.tmp, 'repo')
+        shutil.rmtree(self.root, ignore_errors=True)
+        wso = os.path.join(self.root, 'docs', 'wso')
+        first = dict(self.ROW, address='0x643CC0', name='Render')
+        _write(os.path.join(wso, 'disagreements.json'),
+               json.dumps([first, self.ROW]))
+        self.state = os.path.join(wso, 'wave-state.json')
+        self.wave.save_state(self.state, {'batches': {'b011': {
+            'rows': [first], 'files': ['src/CGameSprite.cpp'],
+            'branch': 'p3/wso-b011', 'status': 'closed', 'assigned_at': 't',
+            'closed_at': 't', 'verdicts': {
+                '0x643CC0': {'side': 'ours', 'case': 'probe-1',
+                             'losing_kind': 'trace'}}}}})
+        if probes:
+            _write(os.path.join(wso, 'probe-list.json'), json.dumps([
+                {'address': '0x716E80', 'at': 't', 'batch': 'b011',
+                 'file': 'src/CGameSprite.cpp', 'name': 'CGameSprite::sub_716E80',
+                 'reading': 'fork', 'reason': 'r', 'source': 'worker'}]))
+        if evidence is not None:
+            _write(os.path.join(self.root, 'docs', 'evidence', '716E80.md'),
+                   '---\nkind: oracle\n---\n\n' + evidence)
+
+    def resolve(self, side='ours', case='dump-716E80', address='0x716E80'):
+        return self.wave.resolve_probe(address, side, case, self.state, self.root)
+
+    def probe_list(self):
+        with open(os.path.join(self.root, 'docs', 'wso', 'probe-list.json')) as f:
+            return json.load(f)
+
+    def test_resolve_probe_records_ours_verdict(self):
+        self.repo()
+        rc, out = self.resolve()
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(out, 'resolved 0x716E80 in b011: ours (case dump-716E80); '
+                              'probe list now 0 entries\n')
+        b = self.wave.load_state(self.state)['batches']['b011']
+        self.assertEqual([r['address'] for r in b['rows']], ['0x643CC0', '0x716E80'])
+        self.assertEqual(sorted(b['rows'][1]), sorted(b['rows'][0]))
+        self.assertEqual(b['rows'][1], self.ROW)
+        self.assertEqual(b['verdicts']['0x716E80'],
+                         {'side': 'ours', 'case': 'dump-716E80',
+                          'losing_kind': 'trace', 'measured': 'none'})
+        self.assertEqual(b['status'], 'closed')
+        self.assertEqual(self.probe_list(), [])
+
+    def test_resolve_probe_is_idempotent_on_rows(self):
+        self.repo()
+        st = self.wave.load_state(self.state)
+        st['batches']['b011']['rows'].append(dict(self.ROW))
+        self.wave.save_state(self.state, st)
+        rc, out = self.resolve()
+        self.assertEqual(rc, 0, out)
+        b = self.wave.load_state(self.state)['batches']['b011']
+        self.assertEqual([r['address'] for r in b['rows']], ['0x643CC0', '0x716E80'])
+        self.assertEqual(b['verdicts']['0x716E80']['side'], 'ours')
+
+    def test_resolve_probe_refuses_dump_decided_fork(self):
+        self.repo()
+        for side in ('fork', 'neither'):
+            rc, out = self.resolve(side=side)
+            self.assertEqual(rc, 1, out)
+            self.assertIn('a fork/neither verdict decided by a dump reading', out)
+        self.assertEqual(len(self.probe_list()), 1)
+        self.assertNotIn('0x716E80',
+                         self.wave.load_state(self.state)['batches']['b011']['verdicts'])
+
+    def test_resolve_probe_unknown_address(self):
+        self.repo()
+        rc, out = self.resolve(address='0x999999')
+        self.assertEqual(rc, 2, out)
+        self.assertEqual(out, '0x999999 is not on the probe list\n')
+        self.repo(probes=False)
+        self.assertEqual(self.resolve()[0], 2)
+        self.repo()
+        _write(os.path.join(self.root, 'docs', 'wso', 'probe-list.json'), json.dumps([
+            {'address': '0x716E80', 'batch': 'b099', 'file': 'f', 'name': 'n'}]))
+        rc, out = self.resolve()
+        self.assertEqual(rc, 2, out)
+        self.assertIn('b099', out)
+
+    def test_resolve_probe_requires_evidence_phrase(self):
+        for ev in (None, 'no phrase here; case dump-716E80 decides\n',
+                   'disagreed with WSO at e8dd16a: x; case probe-9 decides\n'):
+            self.repo(evidence=ev)
+            rc, out = self.resolve()
+            self.assertEqual(rc, 1, out)
+            self.assertIn('docs/evidence/716E80.md', out)
+            self.assertEqual(len(self.probe_list()), 1)
+            self.assertEqual(self.wave.load_state(self.state)['batches']['b011']['rows'][0]
+                             ['address'], '0x643CC0')
+
+    # -- the audit paragraph ------------------------------------------------
+
+    AUDIT_PARA = ('Audit sample (rule 3): seed rule3-2026-10-23 over 199 '
+                  'dump-decided ours rows at 9fad8484; 10 drawn: 7 probed '
+                  '(replay 6, oracle 1), 3 parked, 0 flips.\n')
+
+    def audit(self, rows=None, **kw):
+        if rows is None:
+            rows = ([{'address': f'0x{i}', 'probe': 'replay', 'result': 'match'}
+                     for i in range(6)]
+                    + [{'address': '0x7', 'probe': 'oracle', 'result': 'match'}]
+                    + [{'address': f'0x{i}', 'probe': 'none', 'result': 'parked'}
+                       for i in (8, 9, 10)])
+        data = {'seed': 'rule3-2026-10-23', 'population': 199,
+                'base': '9fad8484', 'rows': rows}
+        data.update(kw)
+        _write(os.path.join(os.path.dirname(self.state), 'audit.json'),
+               json.dumps(data))
+
+    def scorecard(self):
+        if not hasattr(self, 'root'):
+            self.repo()
+        report = os.path.join(self.tmp, 'xrec-report.md')
+        rc, out = self.wave.write_scorecard(
+            self.state, report, os.path.join(self.tmp, 'no-triage.json'), None)
+        return rc, out, report
+
+    def test_scorecard_renders_audit_sample(self):
+        self.repo()
+        self.audit()
+        rc, out, report = self.scorecard()
+        self.assertEqual(rc, 0, out)
+        with open(report) as f:
+            text = f.read()
+        self.assertTrue(text.endswith('\n' + self.AUDIT_PARA), text)
+
+    def test_scorecard_without_audit_file_unchanged(self):
+        rc, out, report = self.scorecard()
+        self.assertEqual(rc, 0, out)
+        with open(report) as f:
+            text = f.read()
+        with open(self.state) as f:
+            self.assertEqual(text, self.wave.scorecard_text(json.load(f)))
+        self.assertNotIn('Audit sample', text)
+
+    def test_scorecard_rejects_malformed_audit(self):
+        self.repo()
+        for bad in ({'seed': 's', 'population': 1, 'base': 'b'},
+                    {'seed': 's', 'population': 1, 'base': 'b', 'rows': 'x'},
+                    {'seed': 's', 'population': 1, 'base': 'b',
+                     'rows': [{'probe': 'replay', 'result': 'maybe'}]},
+                    {'seed': 's', 'population': 1, 'base': 'b',
+                     'rows': [{'probe': 'guess', 'result': 'match'}]}):
+            _write(os.path.join(os.path.dirname(self.state), 'audit.json'),
+                   json.dumps(bad))
+            report = os.path.join(self.tmp, 'bad.md')
+            rc, out = self.wave.write_scorecard(
+                self.state, report, os.path.join(self.tmp, 'no-triage.json'), None)
+            self.assertEqual(rc, 2, out)
+            self.assertEqual(len(out.splitlines()), 1, out)
+            self.assertFalse(os.path.exists(report))
+
+
 class WaveCloseRulesTest(unittest.TestCase):
     """Task 16: close refuses dump-decided fork/neither verdicts, syncs the
     base before it merges, and the checked-out base follows the ref."""
