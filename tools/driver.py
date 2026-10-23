@@ -118,10 +118,11 @@ def _texts(content):
 
 
 def rate_limited_in(path):
-    """True when the transcript's last API-error entry says
-    RATE_LIMIT_TEXT and no successful assistant turn follows it (ruling
-    R41).  The API-error entry is the synthetic assistant line Claude Code
-    writes with isApiErrorMessage; only its own text is read, never
+    """True when the transcript's last API-error entry is a rate limit
+    and no successful assistant turn follows it (rulings R41, R44).  The
+    API-error entry is the synthetic assistant line Claude Code writes
+    with isApiErrorMessage; its apiErrorStatus 429 or error 'rate_limit'
+    decides, its own text (RATE_LIMIT_TEXT) is the fallback.  Never
     tool_use or tool_result content, file text or the worker's prose.  A
     429 the worker retried past is not a park.  Lines are parsed as JSON
     data, never executed."""
@@ -137,7 +138,10 @@ def rate_limited_in(path):
             msg = obj.get('message')
             msg = msg if isinstance(msg, dict) else {}
             if obj.get('isApiErrorMessage') is True:
-                hit = any(RATE_LIMIT_TEXT in t for t in _texts(msg.get('content')))
+                hit = (obj.get('apiErrorStatus') == 429
+                       or obj.get('error') == 'rate_limit'
+                       or any(RATE_LIMIT_TEXT in t
+                              for t in _texts(msg.get('content'))))
             elif msg.get('model') != '<synthetic>':
                 hit = False      # a successful turn: the 429 was retried past
     return hit
@@ -195,9 +199,13 @@ class HeadlessWorker:
             if isinstance(data, dict):
                 report = data.get('result') or ''
                 session_id = data.get('session_id')
-                # The final result says so (is_error with the 429 text, or
-                # the text alone).
-                rate_limited = isinstance(report, str) and RATE_LIMIT_TEXT in report
+                # The final result says so: an error result (is_error, or
+                # text that starts `API Error`) with the 429 text.  A
+                # report that quotes the phrase is not one.
+                rate_limited = (
+                    isinstance(report, str) and RATE_LIMIT_TEXT in report
+                    and (data.get('is_error') is True
+                         or report.lstrip().startswith('API Error')))
         except ValueError:
             report = proc.stdout or ''
             exit_code = exit_code or 1
@@ -362,7 +370,7 @@ RESUME_PREAMBLE = """Resume: batch {id} {why}. This run takes the batch up again
 the same worktree, on `{branch}`. The work done so far is on that branch:
 `git log {base}..{branch}`, and `git status` for anything not committed
 (a `{wip}` commit holds what a park saved). Build on it: do not redo
-finished work, and do not rewrite that history.
+finished work, and do not rewrite that history.{reset}
 
 Verdicts already recorded in the wave state:
 
@@ -381,6 +389,16 @@ The original brief follows.
 class StatusError(ValueError):
     """The driver status file cannot be read: corrupt, torn, or not a
     status object.  The message names the file."""
+
+
+class _StageError(Exception):
+    """A stage of one batch failed with an OSError: run_batch turns it
+    into that batch's exception, never a traceback."""
+
+    def __init__(self, stage, problem):
+        super().__init__(problem)
+        self.stage = stage
+        self.problem = problem
 
 
 def read_status(path):
@@ -632,7 +650,13 @@ class Driver:
     def _run(self, worker, brief, cwd, batch_id, label):
         """One worker run; the brief, report and result land in
         <driver folder>/<batch_id>/<label>.*"""
-        res = worker.run(brief, cwd)
+        try:
+            res = worker.run(brief, cwd)
+        except OSError as e:
+            raise _StageError(
+                'review' if label.startswith('reviewer') else 'worker',
+                '%s could not run in %s: %s; check the worktree (`git worktree '
+                'list`), then clear this exception' % (label, cwd, e)) from None
         self._runs.append(res.credits)
         folder = os.path.join(self.driver_dir, batch_id)
         os.makedirs(folder, exist_ok=True)
@@ -753,7 +777,12 @@ class Driver:
         if self._ignored:
             self.log('%s: ignored for triage-decided rows: %s' % (
                 batch_id, ', '.join(sorted(self._ignored))))
-        return verdicts, self.mechanical_checks(batch, worktree, verdicts)
+        try:
+            return verdicts, self.mechanical_checks(batch, worktree, verdicts)
+        except OSError as e:
+            raise _StageError('checks', 'the mechanical checks could not run in '
+                              '%s: %s; check the worktree, then clear this '
+                              'exception' % (worktree, e)) from None
 
     def _merged(self, batch_id, verdicts):
         """The state's verdicts plus the report's, as (side, case)."""
@@ -823,13 +852,38 @@ class Driver:
             review, self._commits(batch['branch']), self._credits(),
             ignored=self._ignored))
 
+    def _wip_tip(self, batch_id, branch):
+        """The branch tip's sha when it is the driver's own unpushed WIP
+        commit: the one this batch's park recorded, with WIP_MESSAGE, not
+        in the base and on no remote branch.  Else None."""
+        entry = self._read_status()['batches'].get(batch_id)
+        wip = entry.get('wip') if isinstance(entry, dict) else None
+        tip = self._git('rev-parse', '--verify', branch).stdout.strip()
+        if not wip or tip != wip:
+            return None
+        if self._git('log', '-1', '--format=%s', tip).stdout.strip() != WIP_MESSAGE:
+            return None
+        if self._git('merge-base', '--is-ancestor', tip, self.base).returncode == 0:
+            return None
+        if self._git('branch', '-r', '--contains', tip).stdout.strip():
+            return None
+        return tip
+
     def _resume_preamble(self, batch_id, batch, why):
         key = _tool('wave')._addr_key
         recorded = sorted(batch.get('verdicts', {}).items(),
                           key=lambda kv: key(kv[0]))
+        tip = self._wip_tip(batch_id, batch['branch'])
+        # Ruling R44: the one rewrite allowed, so an adopted fork body in
+        # the WIP commit can get its Imported-From: trailer.
+        reset = '' if tip is None else (
+            ' The branch tip, %s, is the driver\'s own unpushed `%s` commit, '
+            'so you may `git reset --soft HEAD~1` once and commit that work '
+            'again with proper messages and its `Imported-From:` trailers; '
+            'rewrite nothing else.' % (tip[:8], WIP_MESSAGE))
         return RESUME_PREAMBLE.format(
             id=batch_id, why=why, branch=batch['branch'], base=self.base,
-            wip=WIP_MESSAGE, verdicts='\n'.join(
+            wip=WIP_MESSAGE, reset=reset, verdicts='\n'.join(
                 '- verdict %s %s case %s' % ((a,) + _side_case(v))
                 for a, v in recorded) or '(none yet)')
 
@@ -837,7 +891,14 @@ class Driver:
         """One assigned batch, start to end: 'closed', 'exception' or
         'parked' ('checked' for a dry run whose checks passed).  With
         `resume` (why the batch is taken up again), the brief opens with
-        a `Resume:` preamble listing the verdicts already recorded."""
+        a `Resume:` preamble listing the verdicts already recorded.  An
+        OSError in a stage is that stage's exception (ruling R44)."""
+        try:
+            return self._run_batch(batch_id, resume)
+        except _StageError as e:
+            return self._exception(batch_id, e.stage, [e.problem])
+
+    def _run_batch(self, batch_id, resume):
         self._runs = []
         self._ignored = {}
         state = self.load_state(self.state_path)
@@ -849,10 +910,14 @@ class Driver:
             self.log('%s is %s; nothing to do' % (batch_id, batch['status']))
             return 'closed'
         worktree = self.worktree_for(self.repo, batch['branch'])
-        if worktree is None:
+        if worktree is None or not os.path.isdir(worktree):
+            # A removed directory stays listed (prunable) until a prune.
+            # The exception also ends this batch's park and current.
+            gone = '' if worktree is None else ' (%s is gone)' % worktree
             return self._exception(batch_id, 'worktree', [
-                '%s has no worktree; `git worktree add <path> %s`, then clear '
-                'this exception' % (batch['branch'], batch['branch'])])
+                '%s has no worktree%s; run `git worktree prune`, then `git '
+                'worktree add <path> %s`, then clear this exception' % (
+                    batch['branch'], gone, batch['branch'])])
         self._stage(batch_id, 'brief')
         try:
             rc, brief = self.render_brief(

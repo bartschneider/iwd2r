@@ -9831,15 +9831,22 @@ class DriverTest(unittest.TestCase):
 
     @staticmethod
     def _api_error(text='API Error: Request rejected (429) · [1308][Usage limit '
-                        'reached for 5 hour.]'):
-        return {'type': 'assistant', 'isApiErrorMessage': True, 'error': 'rate_limit',
-                'message': {'model': '<synthetic>',
-                            'content': [{'type': 'text', 'text': text}]}}
+                        'reached for 5 hour.]', error='rate_limit', status=429):
+        entry = {'type': 'assistant', 'isApiErrorMessage': True,
+                 'message': {'model': '<synthetic>',
+                             'content': [{'type': 'text', 'text': text}]}}
+        if error is not None:
+            entry['error'] = error
+        if status is not None:
+            entry['apiErrorStatus'] = status
+        return entry
 
     def test_headless_worker_flags_a_429(self):
-        """R41: rate_limited only from the final JSON result's text, or
-        from the transcript's last API-error entry when no successful turn
-        follows it; never from tool content, file text or prose."""
+        """R41, R44: rate_limited only from an error final result (is_error,
+        or text starting `API Error`) with the 429 text, or from the
+        transcript's last API-error entry (apiErrorStatus 429 or error
+        rate_limit, its text as fallback) when no successful turn follows
+        it; never from tool content, file text or prose."""
         phrase = 'Request rejected (429)'
         noise = [
             {'type': 'assistant', 'message': {'model': 'glm-5.3-flash[1m]', 'content': [
@@ -9858,10 +9865,19 @@ class DriverTest(unittest.TestCase):
             ('final', [self._turn(), self._api_error()], 1,
              {'is_error': True, 'result': 'API Error: %s · limit reached' % phrase}, True),
             ('result-only', None, 0, {'result': 'API Error: %s' % phrase}, True),
+            ('quoted', [self._turn()], 0, {'is_error': False, 'result':
+                '# report\n\nThe driver parks on `%s`; this batch did not.\n' % phrase},
+             False),
             ('last-entry', [self._turn(), self._api_error()], 1,
              {'is_error': True, 'result': ''}, True),
+            ('status-key', [self._turn(), self._api_error(
+                'API Error: limit reached', error=None, status=429)], 1,
+             {'is_error': True, 'result': ''}, True),
+            ('text-fallback', [self._turn(), self._api_error(error=None, status=None)], 1,
+             {'is_error': True, 'result': ''}, True),
             ('other-error-last', [self._api_error(), self._turn(), self._api_error(
-                'API Error: 500 internal error')], 1, {'is_error': True, 'result': ''}, False),
+                'API Error: 500 internal error', error='api_error', status=500)], 1,
+             {'is_error': True, 'result': ''}, False),
             ('calm', [self._turn()], 0, {'result': '# report 429\n'}, False),
         ]
         with tempfile.TemporaryDirectory() as tmp:
@@ -9911,8 +9927,13 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(status['batches']['b011']['outcome'], 'parked')
         self.assertEqual(self._state()['status'], 'assigned')
         self.assertEqual(self.sent, [])
-        # A clean worktree parks without a commit.
+        # The resume may undo only that WIP commit (R44): its own, unpushed.
         wip = self._rev('p3/wso-b011')
+        self.assertEqual(status['batches']['b011']['wip'], wip)
+        preamble = d._resume_preamble('b011', self._state(), 'was parked')
+        self.assertIn('The branch tip, %s, is the driver\'s own unpushed' % wip[:8], preamble)
+        self.assertIn('`git reset --soft HEAD~1` once', preamble)
+        # A clean worktree parks without a commit.
         d.worker = _SeqWorker('', rate_limited=True)
         with mock.patch.dict(os.environ, self.GIT_ENV):
             self.assertEqual(d.run_batch('b011'), 'parked')
@@ -9934,6 +9955,7 @@ class DriverTest(unittest.TestCase):
         brief = w.briefs[0]
         self.assertTrue(brief.startswith('Resume:'))
         self.assertIn('worker rate limited', brief)
+        self.assertNotIn('git reset', brief)        # the tip is no WIP commit
         self.assertIn('- verdict 0x403000 ours case triage-rename', brief)
         self.assertTrue(brief.rstrip().endswith('BRIEF b011'))   # re-rendered, after the preamble
         self.assertEqual(len(self.bundle_dirs), 1)
@@ -10140,6 +10162,53 @@ class DriverTest(unittest.TestCase):
             with contextlib.redirect_stderr(err), mock.patch.object(driver.time, 'sleep'):
                 self.assertEqual(driver.main(argv, repo=tmp), 1)
             self.assertIn(path, err.getvalue())
+
+    def test_vanished_worktree_is_a_worktree_exception(self):
+        """R44: a batch worktree directory removed by hand stays listed
+        (prunable).  Resuming its parked batch is that batch's `worktree`
+        exception, not a crash: parked and current clear, the run goes on,
+        and a second run does not crash either."""
+        order = []
+        d = self._driver(worker=driver.FakeWorker(self.REPORT))
+        d.worker.run = lambda *a: self.fail('no worker runs without a worktree')
+        self._write_status(d, {
+            'parked': {'batch_id': 'b011', 'at': 't', 'reason': 'worker rate limited'},
+            'current': {'batch': 'b011', 'stage': 'worker', 'at': 't'},
+            'batches': {'b011': {'outcome': 'parked'}}})
+        shutil.rmtree(self.wt)
+        self.assertIn(self.wt, self.git('worktree', 'list', '--porcelain').stdout)
+        d.next_batch = lambda *a, **kw: order.append('cut') or self.NOTHING
+        self.assertEqual(d.run(), 0)
+        self.assertEqual(order, ['cut'])                # the run went on
+        status = self._status(d)
+        exc = status['exceptions']['b011']
+        self.assertEqual(exc['stage'], 'worktree')
+        self.assertIn('%s is gone' % self.wt, exc['problems'][0])
+        self.assertIn('`git worktree prune`, then `git worktree add <path> p3/wso-b011`',
+                      exc['problems'][0])
+        self.assertIsNone(status['parked'])
+        self.assertIsNone(status['current'])
+        order.clear()
+        self.assertEqual(d.run(), 0)                    # no crash, no retry
+        self.assertEqual(order, ['cut'])
+
+    def test_worker_oserror_is_a_stage_exception(self):
+        """R44: an OSError from the worker's or the reviewer's run is that
+        stage's exception, and the run goes on."""
+        class Broken:
+            def run(self, brief, cwd):
+                raise FileNotFoundError(2, 'No such file or directory', 'claude-glm')
+        for worker, reviewer, stage in ((Broken(), None, 'worker'),
+                                        (driver.FakeWorker(self.REPORT), Broken(), 'review')):
+            d = self._driver(worker=worker, reviewer=reviewer)
+            cuts = iter([(0, self.CUT), self.NOTHING])
+            d.next_batch = lambda *a, **kw: next(cuts)
+            self.assertEqual(d.run(), 0)
+            exc = self._status(d)['exceptions']['b011']
+            self.assertEqual(exc['stage'], stage)
+            self.assertIn('could not run in %s' % self.wt, exc['problems'][0])
+            self.assertIn('No such file or directory', exc['problems'][0])
+            self.assertIsNone(self._status(d)['current'])
 
     def test_one_driver_per_status_file(self):
         """R42: run() holds `<status>.run.lock` (with its pid in it) for its

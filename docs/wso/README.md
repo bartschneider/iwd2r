@@ -227,7 +227,12 @@ The status file is
   assigned batches own; the next cut clears it.
 - `exceptions`: `{<id>: {stage, problems, at}}`, the batches waiting on
   the coordinator.
-- `batches`: `{<id>: {outcome, credits, at}}`, each batch's last outcome.
+- `batches`: `{<id>: {...}}`, each batch's last outcome: `outcome`
+  (closed, exception, parked, or checked for a dry run), `credits` (null
+  when unknown) and `at`, plus `stage` for an exception, and `wip` (the
+  WIP commit's sha) or `wip_error` (why none was made) for a park.
+- `updated_at`: the time of the last write.
+- `dry_run`: `true`, in the dry run's own status file only.
 
 Every write is a read-modify-write of that file under an `fcntl.flock`
 on `status.json.lock`. The coordinator clears an exception with
@@ -243,7 +248,10 @@ driver is running (pid N)`. `--clear` does not take that lock.
 Exit codes:
 
 - 0: nothing left (every row is assigned or decided), or the budget
-  stop; a dry run always exits 0 (its outcome is in its status file).
+  stop; a dry run that cuts a batch exits 0 whatever the batch's outcome
+  (its outcome is in its status file). A dry run that cuts nothing exits
+  like a run: 0 when nothing is left, 4 when stalled, 1 on a cut failure.
+  Any dry run exits 1 on a held run lock or a corrupt status file.
 - 1: a cut or push failure (an exception that is not the batch's own),
   a status file that cannot be read (the message names it), or another
   driver already running on the same status file.
@@ -253,19 +261,27 @@ Exit codes:
 (2 is a usage error, a refused dry run, or `--clear` with no such entry.)
 
 **Park and resume.** A worker or reviewer hit by Z.ai's rate limit
-parks the batch: its final JSON result says `Request rejected (429)`,
-or the last API-error entry in its transcript does and no successful
-turn follows it. Tool output, file text and the worker's own prose never
-count, and neither does a 429 the worker retried past. The driver
-commits whatever the batch worktree holds uncommitted
-(`git add -A && git commit -m "WIP: parked by driver"`, in the batch
-worktree only, and skipped when it is clean), writes `parked`, and the
-run exits 3. The next `run` settles what the last one left before any
+parks the batch. Either its final JSON result is an error (`is_error`,
+or text that starts `API Error`) saying `Request rejected (429)`, or the
+last API-error entry in its transcript is a rate limit
+(`apiErrorStatus` 429 or `error` `rate_limit`, that text as fallback)
+and no successful turn follows it. Tool output, file text and the
+worker's own prose never count, and neither does a 429 the worker
+retried past. The driver commits whatever the batch worktree holds
+uncommitted (`git add -A && git commit -m "WIP: parked by driver"`, in
+the batch worktree only, and skipped when it is clean), writes `parked`,
+and the run exits 3. The next `run` settles what the last one left before any
 new cut. First, a batch it closed without writing the ledger entry gets
 the entry and the push. Then the parked batch, and after it a batch left
 in `current` (the process died mid-batch), run again, each with its
 brief re-rendered under a `Resume:` preamble that lists the verdicts
-already recorded. `parked` clears when that batch ends any other way.
+already recorded. The preamble forbids rewriting the branch, except that
+when its tip is the driver's own unpushed WIP commit the worker may
+`git reset --soft HEAD~1` once, to commit that work again with proper
+messages and `Imported-From:` trailers. `parked` clears when that batch
+ends any other way. A batch whose worktree is gone (a directory removed
+by hand stays listed until `git worktree prune`) becomes its `worktree`
+exception, which also ends its park, and the run goes on.
 
 **The Friday timer** (user-side; the timer is not in the repo) starts
 the driver again after the weekly Z.ai reset, instead of sending
