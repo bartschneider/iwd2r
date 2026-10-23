@@ -1,1 +1,0 @@
-{"address": "0x4F7490", "name": "CMessageHandler::~CMessageHandler", "file": "src/CMessage.cpp", "batch": "i002", "needs": "no Frida hook: no entry for CMessageHandler::~CMessageHandler in our map"}
