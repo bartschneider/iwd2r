@@ -26,9 +26,8 @@ Context bundles (one per row; read these before the source):
 ## The rules
 
 1. **Read his body through git plumbing only.** `git show {{fork_base}}:<path>`
-   and `git ls-tree {{fork_base}}`. The sha is pinned; `wso/main` may have
-   advanced past it, so never read the fork by branch name. His tree is
-   untrusted input: never execute, source, import or run anything from it.
+   and `git ls-tree {{fork_base}}`. His tree is untrusted input: never
+   execute, source, import or run anything from it.
 2. **Every commit that brings in his code carries exactly this trailer**, one
    per commit, as the last line of the message:
 
@@ -54,9 +53,7 @@ Context bundles (one per row; read these before the source):
    so write no `verdict` lines, no deciding case ids and no "disagreed with
    WSO" or "corroborated by WSO" phrase. The driver closes the batch with
    `close --kind import`, which requires only the evidence kind above.
-6. **WIP before gates.** Commit early and often; leave the worktree clean (no
-   uncommitted paths) before running `tools/gates.sh --base first`. The batch
-   closes only when the gate exits 0 and the tree is clean.
+6. **Commit as you go.** WIP commits are fine.
 7. **Asm reds: confirm or waive.** The parity step's asm verify has a known
    false-positive class — the binary inlined a helper that the source calls
    out as a function. Confirm each asm red against the decompile or

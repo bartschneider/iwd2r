@@ -800,8 +800,31 @@ def _tally_line(batch):
     return line
 
 
+def _sync_base(repo, base):
+    """None, or why not: `git pull --ff-only` in the worktree that has
+    `base` checked out, so a merge into it starts from what the upstream
+    holds (ruling R17).  Nothing to pull when no worktree has `base`
+    checked out or the branch has no upstream."""
+    wt = worktree_for(repo, base)
+    if wt is None:
+        return None
+    up = subprocess.run(['git', '-C', wt, 'rev-parse', '--abbrev-ref',
+                         f'{base}@{{upstream}}'],
+                        capture_output=True, text=True)
+    if up.returncode != 0:
+        return None
+    r = subprocess.run(['git', '-C', wt, 'pull', '--ff-only', '-q'],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        msg = ' '.join(((r.stderr or '') + (r.stdout or '')).split())
+        return f'git pull --ff-only failed in {wt}: {msg}'
+    return None
+
+
 def _fast_forward(repo, base, branch):
-    """Move `base` to `branch`, only as a fast-forward, atomically."""
+    """Move `base` to `branch`, only as a fast-forward.  When a worktree
+    has `base` checked out it is moved with `git merge --ff-only`, so the
+    checkout follows the ref (ruling R17); else update-ref, atomically."""
     def rev(ref):
         r = subprocess.run(['git', '-C', repo, 'rev-parse', '--verify', ref],
                            capture_output=True, text=True)
@@ -817,6 +840,14 @@ def _fast_forward(repo, base, branch):
                         base, branch], capture_output=True, text=True)
     if r.returncode != 0:
         return f'not a fast-forward: {base} is not an ancestor of {branch}'
+    wt = worktree_for(repo, base)
+    if wt is not None:
+        r = subprocess.run(['git', '-C', wt, 'merge', '--ff-only', '-q',
+                            branch], capture_output=True, text=True)
+        if r.returncode != 0:
+            msg = ' '.join(((r.stderr or '') + (r.stdout or '')).split())
+            return f'merge --ff-only failed in {wt}: {msg}'
+        return None
     r = subprocess.run(['git', '-C', repo, 'update-ref',
                         f'refs/heads/{base}', new, old],
                        capture_output=True, text=True)
@@ -825,8 +856,23 @@ def _fast_forward(repo, base, branch):
     return None
 
 
+def _ruling_line(ledger_path, ruling):
+    """The first line of `ledger_path` starting `Ruling <ruling>` (the id
+    ends at a non-id character), or None."""
+    try:
+        with open(ledger_path, encoding='utf-8') as f:
+            for line in f:
+                m = re.match(r'Ruling (\S+?)[:.,;)]*(\s|$)', line)
+                if m and m.group(1) == ruling:
+                    return line.rstrip('\n')
+    except OSError:
+        return None
+    return None
+
+
 def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
-                kind='verdicts', base='first', gate=True):
+                kind='verdicts', base='first', gate=True, allow_dump=None,
+                ledger_path=None):
     """Close a batch: every reason checked, one refusal naming them all;
     on success fast-forward `base` to the batch branch.  kind='verdicts'
     (wave 1) requires a verdict and a phrase-bearing evidence file per
@@ -834,7 +880,9 @@ def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
     better instead.  A branch that modified tools/gates.sh or tools/parity
     is refused outright -- it would be certified by its own gate.  The
     gate runs only when everything else is clean: it costs minutes.
-    gate=False skips tools/gates.sh (tests only)."""
+    gate=False skips tools/gates.sh (tests only).  A fork or neither
+    verdict decided by a dump reading is refused (probe before import)
+    unless allow_dump names a `Ruling <id>` line of ledger_path."""
     state = load_state(state_path)
     batch = state['batches'].get(batch_id or '')
     if batch is None:
@@ -857,6 +905,22 @@ def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
         missing = [r['address'] for r in batch['rows']
                    if r['address'] not in batch.get('verdicts', {})]
         problems += [f'no verdict for {a}' for a in missing]
+    used = None
+    if allow_dump is not None:
+        used = (_ruling_line(ledger_path, allow_dump) if ledger_path
+                else None)
+        if used is None:
+            problems.append(
+                f'--allow-dump {allow_dump}: no line starting '
+                f'"Ruling {allow_dump}" in {ledger_path or "(no --ledger)"}')
+    for addr, v in batch.get('verdicts', {}).items():
+        if (v.get('side') in ('fork', 'neither')
+                and deciding_kind(v.get('case')) == 'dump reading'
+                and used is None):
+            problems.append(
+                f'{addr}: a fork/neither verdict decided by a dump reading '
+                f'({v.get("case")}); probe before import, or --allow-dump '
+                f'<ruling id>')
     if wt is not None:
         st = subprocess.run(['git', '-C', wt, 'status', '--porcelain', '-uall'],
                             capture_output=True, text=True)
@@ -904,7 +968,7 @@ def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
     if problems:
         return 1, (f'batch {batch_id} not closed:\n'
                    + '\n'.join('  - ' + p for p in problems) + '\n')
-    err = _fast_forward(repo, base, branch)
+    err = _sync_base(repo, base) or _fast_forward(repo, base, branch)
     if err:
         return 1, f'batch {batch_id} not closed:\n  - {err}\n'
     batch['status'] = 'closed'
@@ -914,7 +978,12 @@ def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
                          capture_output=True, text=True).stdout.strip()
     return 0, (f'{batch_id} closed: {len(batch["rows"])} rows'
                f'{_tally_line(batch)}\n{base} fast-forwarded to {new} '
-               f'({branch})\n')
+               f'({branch})\n'
+               + (f'dump-decided verdicts allowed by: {used}\n'
+                  if used and any(
+                      v.get('side') in ('fork', 'neither')
+                      and deciding_kind(v.get('case')) == 'dump reading'
+                      for v in batch['verdicts'].values()) else ''))
 
 
 # -- scorecard -----------------------------------------------------------
@@ -1148,18 +1217,23 @@ def main(argv=None):
         rc, out = record_verdict(batch_id=rest[0], address=rest[1],
                                  side=rest[2], case=rest[3])
     elif cmd == 'close':
-        kind, args = 'verdicts', []
+        kind, args, allow, ledger = 'verdicts', [], None, None
         it = iter(rest)
         for a in it:
             if a == '--kind':
                 kind = next(it, 'import')
+            elif a == '--allow-dump':
+                allow = next(it, '')
+            elif a == '--ledger':
+                ledger = next(it, '')
             else:
                 args.append(a)
-        if len(args) != 1:
-            print('usage: wave.py close <batch-id> [--kind import]',
-                  file=sys.stderr)
+        if len(args) != 1 or (allow is not None) != (ledger is not None):
+            print('usage: wave.py close <batch-id> [--kind import] '
+                  '[--allow-dump RULING --ledger PATH]', file=sys.stderr)
             return 2
-        rc, out = close_batch(batch_id=args[0], kind=kind)
+        rc, out = close_batch(batch_id=args[0], kind=kind,
+                              allow_dump=allow, ledger_path=ledger)
     elif cmd == 'scorecard':
         rc, out = write_scorecard()
     elif cmd == 'status':

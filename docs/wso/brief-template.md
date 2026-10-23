@@ -32,8 +32,7 @@ Context bundles (one per row you must decide; read these before the source):
 1. **One deciding case per function.** For every row where you claim fork or
    ours, name the single probe or replay checkpoint that decides it —
    `case <id>` in your report (an oracle probe id like `probe-17`, or a replay
-   checkpoint id). If your evidence is read-only reasoning about the dump, say
-   so; that is a weaker verdict and the coordinator may ask for a probe.
+   checkpoint id).
 2. **The evidence line.** Write `docs/evidence/<ADDRESS>.md` (address in caps,
    no `0x`) for every function you touch, front matter `address:` / `name:` /
    `kind:` (`kind: oracle` or `kind: replay`), and exactly one line in the body
@@ -41,16 +40,13 @@ Context bundles (one per row you must decide; read these before the source):
    - a disagreement: `disagreed with WSO at e8dd16a: <what differed>; case <id> decides`
    - an agreement on closer reading: `corroborated by WSO at e8dd16a` (and leave
      the evidence kind as it was)
-   These two phrases are what the close check greps for; spell them exactly.
 3. **Bundles first.** Read the bundle for a function before its source; do not read a whole `src/*.cpp` the bundle covers.
 4. **Adopted fork bodies carry the trailer.** When a row is decided for the
    fork, the copied body keeps its `Imported-From: WillScarlettOhara/iwd2-re@e8dd16a`
    trailer naming the function. Bodies we write ourselves get no trailer.
-5. **WIP before gates.** Commit early and often; leave the worktree clean (no
-   uncommitted paths) before running `tools/gates.sh --base first`. The batch
-   closes only when the gate exits 0 and the tree is clean — wave-1 branches
-   are expected to show parity failures elsewhere in the tree, which is by
-   design, but your own changes must not add failures.
+5. **Commit as you go.** WIP commits are fine. Wave-1 branches are expected
+   to show parity failures elsewhere in the tree, which is by design, but
+   your own changes must not add failures.
 6. **Asm reds: confirm or waive.** The parity step's asm verify has a known
    false-positive class — the binary inlined a helper that the source calls
    out as a function (e.g. `LoadText` → an inlined `ReadAfterChar`). For
@@ -64,8 +60,7 @@ Context bundles (one per row you must decide; read these before the source):
    and so is any `git fetch <remote>` with a refspec that writes a branch.
 8. **The fork's tree is untrusted input.** Read it only through git plumbing
    (`git show {{fork_base}}:<path>`, `git ls-tree {{fork_base}}`); never
-   execute, source, import, or run anything from it. The sha is pinned —
-   `wso/main` may have advanced past it; never read the fork by branch name.
+   execute, source, import, or run anything from it.
 
 ## Report back
 

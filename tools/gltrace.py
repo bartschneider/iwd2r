@@ -63,6 +63,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import attempt
 import realinput
 import winhome
 import winsandbox
@@ -1555,6 +1556,9 @@ def run(args):
         raise SystemExit('gltrace: this run opens the game on the desktop; '
                          'set %s=1 to allow it (the user must be at the PC)'
                          % DESKTOP_OK)
+    refusal = attempt.gate(RUNS, 'gltrace', args.new_attempt)
+    if refusal:
+        raise SystemExit('gltrace: ' + refusal)
     now = datetime.datetime.now()
     run_dir = make_run_dir(now)
     wrapper = find_wrapper(args.apitrace)
@@ -1692,6 +1696,10 @@ def parse_args(argv):
                         help='summarize an existing trace, no launch')
     parser.add_argument('--dry-run', action='store_true',
                         help='print the plan, launch nothing')
+    parser.add_argument('--new-attempt', metavar='REASON',
+                        help='start a new attempt: reset the launch count '
+                             '(%d launches per attempt) and record why'
+                             % attempt.LIMIT)
     return parser.parse_args(argv)
 
 

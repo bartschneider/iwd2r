@@ -69,6 +69,7 @@ import time
 # The sibling modules (python3 -I does not put the script's folder on the
 # path).
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import attempt  # noqa: E402
 import dataview  # noqa: E402
 import filelock  # noqa: E402
 import oracle  # noqa: E402
@@ -239,6 +240,10 @@ def parse_args(argv):
                     help='with --vm: per-scenario timeout in seconds, for '
                     'every scenario (default: the scenario header\'s '
                     '"# timeout: S", else %d)' % realinput.DEFAULT_TIMEOUT)
+    ap.add_argument('--new-attempt', metavar='REASON',
+                    help='start a new attempt: reset the launch count '
+                    '(%d launches per attempt) and record why'
+                    % attempt.LIMIT)
     args = ap.parse_args(argv)
     if args.vm:
         if not args.suite and not args.script:
@@ -821,6 +826,9 @@ def main_vm(args, argv):
             scenario_timeout(args.timeout, path)
         except realinput.ScenarioError as e:
             sys.exit('play: %s' % e)
+    refusal = launch_refusal(args)
+    if refusal:
+        sys.exit('play: ' + refusal)
     platforms = ['linux', 'windows'] if args.vm == 'all' else [args.vm]
     datas = {p: resolve_data(args.data, p) for p in platforms}
     for platform in platforms:
@@ -863,6 +871,14 @@ def main_vm(args, argv):
     return failed[0] if failed else 0
 
 
+def launch_refusal(args, runs_dir=None):
+    """Why this launch is refused (the attempt's launch limit, ruling R16),
+    or None.  One play.py invocation is one launch, a suite included; the
+    count lives in the runs root the run folders are created under."""
+    return attempt.gate(runs_dir or os.path.join(ROOT, 'runs'), 'play',
+                        args.new_attempt)
+
+
 DESKTOP_OK = 'IWD2R_DESKTOP_OK'
 
 
@@ -899,6 +915,9 @@ def main(argv):
         sys.exit('play: no script %s' % script)
     overrides = build_overrides(args.resolution, args.fullscreen, args.sets,
                                 args.scale)
+    refusal = launch_refusal(args)
+    if refusal:
+        sys.exit('play: ' + refusal)
 
     if args.linux:
         exe = os.path.join(ROOT, 'build', LINUX_PRESET, 'iwd2r') \

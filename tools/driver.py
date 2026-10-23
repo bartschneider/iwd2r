@@ -244,9 +244,11 @@ class FakeWorker:
 # Claude Code session must not let its workers attach to that session, and
 # a plain-claude worker must not inherit the GLM wrapper's endpoint.
 SESSION_VARS = ('CLAUDE_CODE_CHILD_SESSION', 'CLAUDE_CODE_ENTRYPOINT',
-                'CLAUDE_CODE_EXECPATH', 'CLAUDE_PID', 'CLAUDE_EFFORT')
+                'CLAUDE_CODE_EXECPATH', 'CLAUDE_PID', 'CLAUDE_EFFORT',
+                'CLAUDECODE')
 SESSION_PREFIXES = ('CLAUDE_CODE_MESSAGING_', 'CLAUDE_CODE_SESSION_')
-GLM_VARS = ('ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN')
+GLM_VARS = ('ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN',
+            'CLAUDE_CODE_AUTO_COMPACT_WINDOW', 'API_TIMEOUT_MS')
 GLM_PREFIXES = ('ANTHROPIC_DEFAULT_', 'CLAUDE_GLM_', 'CLAUDE_CODE_SUBAGENT_MODEL')
 
 
@@ -383,17 +385,124 @@ def _tail(proc, n=5):
     text = ((proc.stdout or '') + (proc.stderr or '')).strip()
     return ' | '.join(text.splitlines()[-n:])
 
+# -- the worker's transcript (Task 16) --------------------------------------
+
+# The runners a worker may launch the game, a sandbox or a trace with.
+HOUSE_RUNNERS = ('tools/play.py', 'tools/gltrace.py')
+READ_LIMIT = 200      # lines of a covered source file one read may take
+_SEGMENT = re.compile(r'&&|\|\||;|\||\n')
+_WSO_REF = re.compile(r"(?:(?<=[\s'\"=:.^~@])|(?<=remotes/)|(?<=heads/))wso/")
+_SED_SPAN = re.compile(r"\bsed\s+(?:-\w+\s+)*['\"]?(\d+),(\d+)p")
+_HEAD_TAIL = re.compile(r"\b(?:head|tail)\s+(?:-n\s*|-)(\d+)\b")
+_LAUNCH = re.compile(r'\.wsb\b|WindowsSandbox|Start-Process', re.I)
+
+
+def _is_runner(segment):
+    for r in HOUSE_RUNNERS:
+        if re.search(r'\bpython3\s+-I\s+(?:\S*/)?%s\b' % re.escape(r), segment):
+            return True
+    return False
+
+
+def _names(segment, covered):
+    return [c for c in covered if c in segment]
+
+
+def _short(text, n=100):
+    text = ' '.join(str(text).split())
+    return text if len(text) <= n else text[:n - 3] + '...'
+
+
+def _tool_calls(path):
+    """(name, input) of every tool_use block of the assistant messages in a
+    Claude Code JSONL transcript; unparseable lines are skipped."""
+    with open(path, encoding='utf-8', errors='replace') as f:
+        for line in f:
+            try:
+                obj = json.loads(line)
+            except ValueError:
+                continue
+            msg = obj.get('message') if isinstance(obj, dict) else None
+            content = msg.get('content') if isinstance(msg, dict) else None
+            if not isinstance(content, list):
+                continue
+            for block in content:
+                if isinstance(block, dict) and block.get('type') == 'tool_use' \
+                        and isinstance(block.get('input'), dict):
+                    yield block.get('name'), block['input']
+
+
+def transcript_checks(transcript_path, covered_files):
+    """One problem per forbidden worker tool call in the transcript: a git
+    command naming a wso/ ref (the pinned sha is allowed), a whole-file read
+    of a covered source file (no limit or over READ_LIMIT lines; cat, sed -n
+    spans and head/tail -n likewise), a .wsb, WindowsSandbox or
+    Start-Process launch outside HOUSE_RUNNERS."""
+    covered = [c for c in covered_files if c]
+    problems = []
+    try:
+        calls = list(_tool_calls(transcript_path))
+    except OSError as e:
+        return ['transcript %s could not be read (%s); the rules about '
+                'tool calls cannot be checked' % (transcript_path, e)]
+    for name, inp in calls:
+        if name == 'Read':
+            fp = str(inp.get('file_path', ''))
+            hit = [c for c in covered if fp == c or fp.endswith('/' + c)]
+            limit = inp.get('limit')
+            if hit and (not isinstance(limit, int) or limit > READ_LIMIT):
+                problems.append(
+                    'Read of %s with %s: read a covered source file in '
+                    'slices of at most %d lines (offset and limit)' % (
+                        hit[0], 'no limit' if not isinstance(limit, int)
+                        else 'limit %d' % limit, READ_LIMIT))
+        elif name == 'Bash':
+            cmd = str(inp.get('command', ''))
+            for seg in _SEGMENT.split(cmd):
+                seg = seg.strip()
+                if not seg:
+                    continue
+                if re.search(r'\bgit\b', seg) and _WSO_REF.search(seg):
+                    problems.append(
+                        'git command naming a wso/ ref (%s): read the fork '
+                        'only at the pinned sha, `git show <sha>:<path>`'
+                        % _short(seg))
+                if _LAUNCH.search(seg) and not _is_runner(seg):
+                    problems.append(
+                        'launch outside a house runner (%s): launch only '
+                        'through `python3 -I %s`' % (
+                            _short(seg), '` or `python3 -I '.join(HOUSE_RUNNERS)))
+                for c in _names(seg, covered):
+                    why = None
+                    if re.search(r'\bcat\b', seg):
+                        why = 'cat of %s' % c
+                    m = _SED_SPAN.search(seg)
+                    if m and int(m.group(2)) - int(m.group(1)) + 1 > READ_LIMIT:
+                        why = 'sed span of %d lines of %s' % (
+                            int(m.group(2)) - int(m.group(1)) + 1, c)
+                    m = _HEAD_TAIL.search(seg)
+                    if m and int(m.group(1)) > READ_LIMIT:
+                        why = '%s of %s' % (_short(m.group(0), 40), c)
+                    if why:
+                        problems.append(
+                            '%s: read a covered source file in slices of at '
+                            'most %d lines' % (why, READ_LIMIT))
+    return problems
+
 
 def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
-                      kind='verdicts'):
+                      kind='verdicts', transcript=None, covered_files=()):
     """Problems that stop a batch before any review; [] when clean.
 
     Each problem says what failed and how to fix it (it is the worker's
     fix-round prompt).  An import batch (kind 'import', ruling R63) has no
     verdict lines or evidence phrases to check; the tool tests,
-    check_evidence and parity still run."""
+    check_evidence and parity still run.  With a transcript, the worker's
+    forbidden tool calls (transcript_checks) join the problems."""
     wave = _tool('wave')
     problems = []
+    if transcript:
+        problems += transcript_checks(transcript, covered_files)
     key = wave._addr_key
     rows = batch.get('rows', [])
     row_keys = {key(r['address']) for r in rows}
@@ -578,6 +687,7 @@ DEFAULT_SEED = '2026-10-22'
 # the plan's ledger example is 1180).
 DEFAULT_ESTIMATE = 1200.0
 WIP_MESSAGE = 'WIP: parked by driver'
+WIP_GATE_MESSAGE = 'WIP: before gate'
 # The breaker (ruling R45): this many batch exceptions in a row whose
 # worker never produced a transcript halt the run.
 BREAKER_LIMIT = 3
@@ -937,6 +1047,7 @@ class Driver:
         self.render_brief = wave.render_brief
         self.record_verdict = wave.record_verdict
         self.close_batch = wave.close_batch
+        self.sync_base = wave._sync_base
         self.write_scorecard = wave.write_scorecard
         self.worktree_for = wave.worktree_for
         self.load_state = wave.load_state
@@ -1133,7 +1244,7 @@ class Driver:
                 self.log('send failed: %r' % (e,))
         return 'exception'
 
-    def _commit_wip(self, worktree):
+    def _commit_wip(self, worktree, message=WIP_MESSAGE):
         """Commit what the batch worktree holds uncommitted, as
         `git add -A && git commit -m WIP_MESSAGE` (ruling R39): (sha, None),
         (None, None) when it is clean, or (None, why) when nothing was
@@ -1152,7 +1263,7 @@ class Driver:
             return None, 'git status failed: %s' % _one_line(st.stderr)
         if not st.stdout.strip():
             return None, None
-        for args in (('add', '-A'), ('commit', '-q', '-m', WIP_MESSAGE)):
+        for args in (('add', '-A'), ('commit', '-q', '-m', message)):
             r = git(*args)
             if r.returncode != 0:
                 return None, 'git %s failed: %s' % (
@@ -1202,7 +1313,7 @@ class Driver:
 
     # -- the stages ---------------------------------------------------------
 
-    def _check(self, batch_id, worktree, report):
+    def _check(self, batch_id, worktree, report, transcript=None):
         """(verdicts, problems) for a report: the parse, then the
         mechanical checks.  Lines for rows whose recorded verdict is a
         triage-* case are set aside in self._ignored (ruling R33): never
@@ -1233,6 +1344,9 @@ class Driver:
             verdicts[addr] = sc
         try:
             kw = {'kind': 'import'} if self.kind == 'import' else {}
+            if transcript:
+                kw.update(transcript=transcript, covered_files=sorted(
+                    {r['file'] for r in batch.get('rows', []) if r.get('file')}))
             return verdicts, self.mechanical_checks(batch, worktree, verdicts,
                                                     **kw)
         except OSError as e:
@@ -1590,7 +1704,11 @@ class Driver:
         """None, or why not: with batches in parallel the base may have
         moved since this branch was cut, and close only fast-forwards, so
         the base is merged into the branch first (the files are disjoint;
-        a no-op when the base is already an ancestor).  Under the lock."""
+        a no-op when the base is already an ancestor).  The base is pulled
+        first (ruling R17).  Under the lock."""
+        why = self.sync_base(self.repo, self.base)
+        if why:
+            return why
         if self._git('merge-base', '--is-ancestor', self.base,
                      branch).returncode == 0:
             return None
@@ -1715,7 +1833,7 @@ class Driver:
         out = self._settle(batch_id, res, 'worker', worktree)
         if out:
             return out
-        verdicts, problems = self._check(batch_id, worktree, res.report)
+        verdicts, problems = self._check(batch_id, worktree, res.report, res.transcript)
         # Frida runs once, here, clean check or not; what it finds joins the
         # one fix round (ruling R58).
         problems = problems + self._frida_phase(batch_id, batch, worktree, verdicts)
@@ -1726,7 +1844,7 @@ class Driver:
             out = self._settle(batch_id, res, 'worker-fix-checks', worktree)
             if out:
                 return out
-            verdicts, problems = self._check(batch_id, worktree, res.report)
+            verdicts, problems = self._check(batch_id, worktree, res.report, res.transcript)
         if self.dry_run:
             self._ledger_for(batch_id, self._merged(batch_id, verdicts), (
                 False, 'dry run: no review, nothing recorded, no close'))
@@ -1757,7 +1875,7 @@ class Driver:
                 out = self._settle(batch_id, res, 'worker-fix-review', worktree)
                 if out:
                     return out
-                verdicts, problems = self._check(batch_id, worktree, res.report)
+                verdicts, problems = self._check(batch_id, worktree, res.report, res.transcript)
                 if problems:
                     return self._exception(batch_id, 'checks', problems)
                 merged = self._merged(batch_id, verdicts)
@@ -1789,6 +1907,12 @@ class Driver:
         self._stage(batch_id, 'close')
         with self._lock:
             commits = self._commits(batch['branch'])
+            # What the worker left uncommitted is committed before the gate
+            # certifies the branch; close refuses a dirty worktree.
+            _wip, why = self._commit_wip(worktree, WIP_GATE_MESSAGE)
+            if why:
+                self.log('%s: WIP not committed before the gate: %s' % (
+                    batch_id, why))
             # Another driver may fast-forward the base while this one waits
             # on the gate lock: on that error, and only after the gate
             # passed, sync and gate once more in place (ruling R64).

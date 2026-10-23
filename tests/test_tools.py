@@ -11129,6 +11129,137 @@ class DriverTest(unittest.TestCase):
             self.assertEqual(e, {'CLAUDE_CONFIG_DIR': '/own/cfg', 'X': '1'})
             self.assertEqual(w.config_dir, '/own/cfg')
 
+    def test_worker_env_drops_claudecode_and_glm_tuning(self):
+        env = {'PATH': '/bin', 'CLAUDECODE': '1',
+               'CLAUDE_CODE_AUTO_COMPACT_WINDOW': '400000', 'API_TIMEOUT_MS': '3000000',
+               'ANTHROPIC_BASE_URL': 'u'}
+        glm = driver.worker_env(env, True)
+        self.assertNotIn('CLAUDECODE', glm)
+        self.assertEqual(glm['CLAUDE_CODE_AUTO_COMPACT_WINDOW'], '400000')
+        self.assertEqual(glm['API_TIMEOUT_MS'], '3000000')
+        plain = driver.worker_env(env, False)
+        self.assertEqual(plain, {'PATH': '/bin'})
+
+    # -- the worker's transcript (Task 16) --------------------------------
+
+    def _tcalls(self, *calls):
+        """A JSONL transcript with one assistant message per (name, input)."""
+        tmp = self._tmpdir()
+        path = os.path.join(tmp, 't.jsonl')
+        with open(path, 'w') as f:
+            f.write(json.dumps({'type': 'user', 'message': {'content': 'hi'}}) + '\n')
+            f.write('not json\n')
+            for i, (name, inp) in enumerate(calls):
+                f.write(json.dumps({'type': 'assistant', 'message': {'content': [
+                    {'type': 'text', 'text': 'x'},
+                    {'type': 'tool_use', 'id': 't%d' % i, 'name': name, 'input': inp}]}}) + '\n')
+        return path
+
+    def _bash(self, cmd):
+        return driver.transcript_checks(self._tcalls(('Bash', {'command': cmd})),
+                                        ['src/A.cpp'])
+
+    def test_transcript_rejects_wso_ref(self):
+        for cmd in ('git show wso/main:src/A.cpp', 'git show wso/x', 'git diff wso/main -- src',
+                    'git log wso/main --oneline', 'cd x && git diff first..wso/main',
+                    'git show refs/remotes/wso/main:README'):
+            probs = self._bash(cmd)
+            self.assertEqual(len(probs), 1, cmd)
+            self.assertIn('wso/', probs[0])
+        # a path under docs/wso/ is not a ref
+        self.assertEqual(self._bash('git log -- docs/wso/README.md'), [])
+        self.assertEqual(self._bash('ls wso/ && git status'), [])
+
+    def test_transcript_allows_pinned_sha(self):
+        self.assertEqual(self._bash('git show e8dd16a7:src/A.cpp | head -50'), [])
+        self.assertEqual(self._bash('git ls-tree e8dd16a750966af53f24daaf49dcb4fb13594c13 src'), [])
+
+    def test_transcript_rejects_whole_read_of_covered_file(self):
+        path = self._tcalls(
+            ('Read', {'file_path': '/wt/src/A.cpp'}),
+            ('Read', {'file_path': '/wt/src/A.cpp', 'offset': 1, 'limit': 201}),
+            ('Bash', {'command': 'cat src/A.cpp'}),
+            ('Bash', {'command': "sed -n '1,201p' src/A.cpp"}),
+            ('Bash', {'command': 'head -n 300 src/A.cpp'}),
+            ('Bash', {'command': 'tail -n 201 src/A.cpp'}))
+        probs = driver.transcript_checks(path, ['src/A.cpp'])
+        self.assertEqual(len(probs), 6, probs)
+        self.assertIn('no limit', probs[0])
+        self.assertIn('limit 201', probs[1])
+        self.assertIn('cat', probs[2])
+        self.assertIn('201 lines', probs[3])
+
+    def test_transcript_allows_short_read(self):
+        path = self._tcalls(
+            ('Read', {'file_path': '/wt/src/A.cpp', 'offset': 10, 'limit': 200}),
+            ('Read', {'file_path': '/wt/src/Other.cpp'}),
+            ('Read', {'file_path': '/wt/docs/evidence/X.md'}),
+            ('Bash', {'command': "sed -n '1,200p' src/A.cpp"}),
+            ('Bash', {'command': 'head -n 200 src/A.cpp'}),
+            ('Bash', {'command': 'cat src/Other.cpp'}))
+        self.assertEqual(driver.transcript_checks(path, ['src/A.cpp']), [])
+
+    def test_transcript_rejects_wsb_launch_outside_runners(self):
+        for cmd in ('cmd.exe /c start run.wsb', 'WindowsSandbox.exe run.wsb',
+                    'powershell Start-Process game.exe',
+                    'python3 -I tools/other.py && WindowsSandbox.exe x'):
+            probs = self._bash(cmd)
+            self.assertEqual(len(probs), 1, cmd)
+            self.assertIn('launch outside a house runner', probs[0])
+
+    def test_transcript_allows_house_runner(self):
+        for cmd in ('python3 -I tools/play.py --vm windows --script s.txt',
+                    'python3 -I tools/gltrace.py boot --dry-run',
+                    'python3 -I /home/x/tools/play.py --vm windows --script a.wsb'):
+            self.assertEqual(self._bash(cmd), [], cmd)
+        self.assertEqual(driver.HOUSE_RUNNERS, ('tools/play.py', 'tools/gltrace.py'))
+
+    def test_transcript_unreadable_is_a_problem(self):
+        probs = driver.transcript_checks('/nonexistent/t.jsonl', [])
+        self.assertEqual(len(probs), 1)
+        self.assertIn('could not be read', probs[0])
+
+    def test_mechanical_checks_include_transcript_problems(self):
+        d = self._mc_repo({'76D370': 'corroborated by WSO at abc'})
+        batch = self._mc_batch()
+        batch['rows'] = batch['rows'][:1]
+        path = self._tcalls(('Bash', {'command': 'git show wso/main:src/A.cpp'}))
+        with mock.patch.object(driver, '_vanilla_exe', return_value='/nonexistent'):
+            probs = driver.mechanical_checks(
+                batch, d, {'0x76D370': ('ours', 'c')}, transcript=path,
+                covered_files=['src/A.cpp'], run=self._mc_run(0, []))
+            clean = driver.mechanical_checks(
+                batch, d, {'0x76D370': ('ours', 'c')}, run=self._mc_run(0, []))
+        self.assertEqual(clean, [])
+        self.assertEqual(len(probs), 1)
+        self.assertIn('wso/', probs[0])
+
+    def test_driver_commits_wip_before_gate(self):
+        def leave_work(cwd):
+            _write(os.path.join(cwd, 'notes.txt'), 'uncommitted\n')
+        w = self._BatchWorker(credits=0.0, before=leave_work)
+        d = self._pool_driver(self._two_pools()[:1], {'a': w}, ids=('b011',))
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 0)
+        self.assertEqual(self._status(d)['exceptions'], {})
+        self.assertEqual(self.git('log', '-1', '--format=%s', 'first').stdout.strip(),
+                         'WIP: before gate')
+        self.assertEqual(self.git('rev-parse', 'first').stdout,
+                         self.git('rev-parse', 'p3/wso-b011').stdout)
+
+    def test_driver_syncs_the_base_before_merging_into_a_batch(self):
+        w = self._BatchWorker(credits=0.0)
+        d = self._pool_driver(self._two_pools()[:1], {'a': w}, ids=('b011',))
+        order = []
+        real = d.sync_base
+        d.sync_base = lambda repo, base: (order.append('sync'), real(repo, base))[1]
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.git('commit', '-q', '--allow-empty', '-m', 'base moved')
+            self.assertEqual(d.run(), 0)
+        self.assertIn('sync', order)
+        self.assertEqual(self.git('rev-parse', 'first').stdout,
+                         self.git('rev-parse', 'p3/wso-b011').stdout)
+
     def test_union_merge_attribute_lets_parallel_probe_lines_merge(self):
         anchor = driver._tool('truth').CMAKE_ANCHOR
 
@@ -12043,6 +12174,255 @@ class TruthTest(unittest.TestCase):
             wave.record_verdict(path, d, 'b1', '0x1', 'ours', 'c')
             with open(path) as f:
                 self.assertNotIn('measured', json.load(f)['batches']['b1']['verdicts']['0x1'])
+
+
+class WaveCloseRulesTest(unittest.TestCase):
+    """Task 16: close refuses dump-decided fork/neither verdicts, syncs the
+    base before it merges, and the checked-out base follows the ref."""
+
+    setUp = WaveTest.setUp
+    write_disagreements = WaveTest.write_disagreements
+    next = WaveTest.next
+    batches = WaveTest.batches
+    git = WaveTest.git
+    init_repo = WaveTest.init_repo
+    EVIDENCE = WaveTest.EVIDENCE
+    write_evidence = WaveTest.write_evidence
+    commit_worktree = WaveTest.commit_worktree
+    gates = WaveTest.gates
+    first_sha = WaveTest.first_sha
+
+    def ready(self, render=('ours', 'probe-11'), draw=('fork', 'probe-9')):
+        self.init_repo()
+        self.write_evidence()
+        self.commit_worktree()
+        for addr, (side, case) in (('0x643CC0', render), ('0x643CD0', draw)):
+            self.assertEqual(self.wave.record_verdict(
+                self.state, self.root, 'b001', addr, side, case)[0], 0)
+
+    def close(self, **kw):
+        return self.wave.close_batch(self.state, self.root, 'b001', gate=False, **kw)
+
+    def ledger(self, text):
+        path = os.path.join(self.tmp, 'ledger.md')
+        with open(path, 'w') as f:
+            f.write(text)
+        return path
+
+    def test_close_refuses_dump_decided_fork_verdict(self):
+        self.ready(draw=('fork', 'dump-3'))
+        first = self.first_sha()
+        rc, out = self.close()
+        self.assertEqual(rc, 1, out)
+        self.assertIn('0x643CD0: a fork/neither verdict decided by a dump reading '
+                      '(dump-3); probe before import, or --allow-dump <ruling id>', out)
+        self.assertNotIn('0x643CC0', out)
+        self.assertEqual(self.first_sha(), first)
+        self.assertEqual(self.batches()['b001']['status'], 'assigned')
+
+    def test_close_refuses_dump_decided_neither_verdict(self):
+        self.ready(draw=('neither', 'readout-643CD0'))
+        rc, out = self.close()
+        self.assertEqual(rc, 1, out)
+        self.assertIn('a fork/neither verdict decided by a dump reading (readout-643CD0)', out)
+
+    def test_close_dump_decided_ours_verdict_passes(self):
+        self.ready(render=('ours', 'dump-1'))
+        rc, out = self.close()
+        self.assertEqual(rc, 0, out)
+
+    def test_close_allow_dump_needs_a_ledger_ruling(self):
+        self.ready(draw=('fork', 'dump-3'))
+        ledger = self.ledger('# rulings\nRuling R70: dump readings may decide b001.\n'
+                             'not a Ruling R71 line\n')
+        for kw in ({'allow_dump': 'R71', 'ledger_path': ledger},
+                   {'allow_dump': 'R70', 'ledger_path': os.path.join(self.tmp, 'none.md')},
+                   {'allow_dump': 'R70'}):
+            rc, out = self.close(**kw)
+            self.assertEqual(rc, 1, out)
+            self.assertIn('--allow-dump', out)
+        self.assertEqual(self.batches()['b001']['status'], 'assigned')
+        rc, out = self.close(allow_dump='R70', ledger_path=ledger)
+        self.assertEqual(rc, 0, out)
+        self.assertIn('Ruling R70: dump readings may decide b001.', out)
+        self.assertEqual(self.batches()['b001']['status'], 'closed')
+
+    def test_close_cli_takes_allow_dump_and_ledger(self):
+        from unittest import mock
+        seen = {}
+
+        def fake(**kw):
+            seen.update(kw)
+            return 0, 'ok\n'
+        with mock.patch.object(self.wave, 'close_batch', fake), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(self.wave.main(
+                ['close', 'b001', '--allow-dump', 'R70', '--ledger', '/l.md']), 0)
+        self.assertEqual((seen['allow_dump'], seen['ledger_path']), ('R70', '/l.md'))
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(self.wave.main(['close', 'b001', '--allow-dump', 'R70']), 2)
+
+    # -- sync before merge --------------------------------------------------
+
+    def upstream(self):
+        """A bare upstream with `first`, tracked by the repo's first; returns
+        a second clone's path for pushing from."""
+        self.bare = os.path.join(self.tmp, 'up.git')
+        self.git('clone', '-q', '--bare', self.root, self.bare, cwd=self.tmp)
+        self.git('remote', 'add', 'origin', self.bare)
+        self.git('fetch', '-q', 'origin')
+        self.git('branch', '-q', '--set-upstream-to=origin/first', 'first')
+        other = os.path.join(self.tmp, 'other')
+        self.git('clone', '-q', self.bare, other, cwd=self.tmp)
+        return other
+
+    def push_upstream(self, other, name='upstream.txt'):
+        with open(os.path.join(other, name), 'w') as f:
+            f.write('from upstream\n')
+        self.git('add', name, cwd=other)
+        self.git('commit', '-qm', 'upstream ' + name, cwd=other)
+        self.git('push', '-q', 'origin', 'HEAD:first', cwd=other)
+        return self.git('rev-parse', 'HEAD', cwd=other).stdout.strip()
+
+    def test_close_pulls_before_fast_forward(self):
+        from unittest import mock
+        self.ready()
+        other = self.upstream()
+        x = self.push_upstream(other)
+        # The batch branch was cut after the fetch: it already holds x.
+        self.git('fetch', '-q', 'origin')
+        self.git('merge', '-q', '--no-edit', x, cwd=self.wt)
+        order = []
+        real_sync, real_ff = self.wave._sync_base, self.wave._fast_forward
+        with mock.patch.object(self.wave, '_sync_base',
+                               lambda *a: (order.append('sync'), real_sync(*a))[1]), \
+                mock.patch.object(self.wave, '_fast_forward',
+                                  lambda *a: (order.append('ff'), real_ff(*a))[1]):
+            rc, out = self.close()
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(order, ['sync', 'ff'])
+        self.assertEqual(self.first_sha(),
+                         self.git('rev-parse', 'p3/wso-b001').stdout.strip())
+        self.git('merge-base', '--is-ancestor', x, 'first')
+        self.assertTrue(os.path.isfile(os.path.join(self.root, 'upstream.txt')))
+
+    def test_close_refuses_when_base_diverged(self):
+        self.ready()
+        other = self.upstream()
+        x = self.push_upstream(other)
+        branch = self.git('rev-parse', 'p3/wso-b001').stdout.strip()
+        rc, out = self.close()
+        self.assertEqual(rc, 1, out)
+        self.assertIn('not a fast-forward', out)
+        self.assertEqual(self.batches()['b001']['status'], 'assigned')
+        # The pull happened; the branch did not move first.
+        self.assertEqual(self.first_sha(), x)
+        self.assertEqual(self.git('rev-parse', 'p3/wso-b001').stdout.strip(), branch)
+
+    def test_sync_base_refuses_when_the_pull_cannot_fast_forward(self):
+        self.ready()
+        other = self.upstream()
+        self.push_upstream(other)
+        with open(os.path.join(self.root, 'local.txt'), 'w') as f:
+            f.write('local\n')
+        self.git('add', 'local.txt')
+        self.git('commit', '-qm', 'local only')
+        err = self.wave._sync_base(self.root, 'first')
+        self.assertIn('git pull --ff-only failed', err)
+        rc, out = self.close()
+        self.assertEqual(rc, 1, out)
+
+    def test_sync_base_without_upstream_is_a_no_op(self):
+        self.ready()
+        self.assertIsNone(self.wave._sync_base(self.root, 'first'))
+
+    def test_fast_forward_moves_checked_out_base(self):
+        self.ready()
+        branch = self.git('rev-parse', 'p3/wso-b001').stdout.strip()
+        rc, out = self.close()
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.first_sha(), branch)
+        # The checkout followed the ref: files present, nothing staged or dirty.
+        self.assertTrue(os.path.isfile(
+            os.path.join(self.root, 'docs', 'evidence', '643CC0.md')))
+        self.assertEqual(self.git('status', '--porcelain').stdout.strip(), '')
+
+    def test_fast_forward_without_a_checkout_uses_update_ref(self):
+        self.ready()
+        self.git('checkout', '-q', '-b', 'elsewhere')
+        branch = self.git('rev-parse', 'p3/wso-b001').stdout.strip()
+        self.assertIsNone(self.wave._fast_forward(self.root, 'first', 'p3/wso-b001'))
+        self.assertEqual(self.first_sha(), branch)
+
+
+class AttemptTest(unittest.TestCase):
+    """tools/attempt.py: the per-attempt launch limit (ruling R16).  Nothing
+    here launches anything."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp = self._tmp.name
+        self.attempt = load_tool('attempt')
+
+    def data(self):
+        with open(os.path.join(self.tmp, 'attempt.json')) as f:
+            return json.load(f)
+
+    def test_attempt_refuses_third_launch(self):
+        self.assertIsNone(self.attempt.launch(self.tmp, 'gltrace'))
+        self.assertIsNone(self.attempt.launch(self.tmp, 'gltrace'))
+        self.assertEqual(self.data()['launches'], 2)
+        self.assertEqual(self.data()['limit'], 2)
+        msg = self.attempt.launch(self.tmp, 'gltrace')
+        self.assertEqual(msg, 'launch limit reached (2 of 2) for this attempt; '
+                              'rerun with --new-attempt "<why>"')
+        self.assertEqual(self.data()['launches'], 2)    # a refusal counts nothing
+        self.assertEqual(os.listdir(self.tmp), ['attempt.json'])   # no temp file left
+
+    def test_new_attempt_resets_and_records_reason(self):
+        for _ in range(2):
+            self.attempt.launch(self.tmp, 'play')
+        self.assertIsNotNone(self.attempt.launch(self.tmp, 'play'))
+        self.attempt.reset(self.tmp, 'fixed the scenario')
+        d = self.data()
+        self.assertEqual(d['launches'], 0)
+        self.assertEqual(len(d['history']), 1)
+        self.assertEqual(d['history'][0]['reason'], 'fixed the scenario')
+        self.assertTrue(d['history'][0]['at'])
+        self.assertIsNone(self.attempt.launch(self.tmp, 'play'))
+        with self.assertRaises(ValueError):
+            self.attempt.reset(self.tmp, '  ')
+
+    def test_gate_resets_first_when_given_a_reason(self):
+        for _ in range(2):
+            self.attempt.gate(self.tmp, 'play')
+        self.assertIn('launch limit reached', self.attempt.gate(self.tmp, 'play'))
+        self.assertIsNone(self.attempt.gate(self.tmp, 'play', 'new idea'))
+        self.assertEqual(self.data()['launches'], 1)
+
+    def test_corrupt_counter_starts_over_and_folder_is_created(self):
+        folder = os.path.join(self.tmp, 'runs')
+        os.makedirs(folder)
+        with open(os.path.join(folder, 'attempt.json'), 'w') as f:
+            f.write('{broken')
+        self.assertIsNone(self.attempt.launch(folder, 'x'))
+        self.assertIsNone(self.attempt.launch(os.path.join(self.tmp, 'new', 'runs'), 'x'))
+
+    def test_launchers_take_new_attempt_and_check_the_counter(self):
+        gltrace = load_tool('gltrace')
+        play = load_tool('play')
+        self.assertEqual(gltrace.parse_args(['s', '--new-attempt', 'why']).new_attempt, 'why')
+        self.assertIsNone(gltrace.parse_args(['s']).new_attempt)
+        args = play.parse_args(['--linux', '--headless', '--new-attempt', 'why'])
+        self.assertEqual(args.new_attempt, 'why')
+        # play.launch_refusal counts in the runs folder it is given.
+        args = play.parse_args(['--linux', '--headless'])
+        self.assertIsNone(play.launch_refusal(args, self.tmp))
+        self.assertIsNone(play.launch_refusal(args, self.tmp))
+        self.assertIn('launch limit reached', play.launch_refusal(args, self.tmp))
+        args = play.parse_args(['--linux', '--headless', '--new-attempt', 'why'])
+        self.assertIsNone(play.launch_refusal(args, self.tmp))
 
 
 class ClaimsTest(unittest.TestCase):

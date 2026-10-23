@@ -186,6 +186,17 @@ the push of `first:main first:first` to `iwd2r`, and a templated
 `.superpowers/sdd/2026-10-17-wso-integration/progress.md`. The driver
 itself uses no model.
 
+A rule that is not a check, a flag or a test is not a rule.
+
+`close` refuses
+a fork or neither verdict decided by a dump reading unless
+`--allow-dump RULING --ledger PATH` names a `Ruling <id>` line of that file;
+the driver rejects a worker whose transcript shows a git command naming a
+`wso/` ref, a whole-file read of a covered source file or a launch outside
+`tools/play.py` and `tools/gltrace.py`; those two launchers allow two
+launches per attempt until `--new-attempt "<why>"`; and every merge into
+`first` pulls first (`git pull --ff-only`) and fast-forwards.
+
     python3 -I tools/wave.py run --workers 2 --budget 50000
     python3 -I tools/wave.py run --queue wave1 --pool claude=claude:sonnet:1
     python3 -I tools/wave.py run --pool glm:2 --pool claude --budget-glm 30000
