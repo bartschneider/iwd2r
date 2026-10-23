@@ -12,6 +12,7 @@ The coordinator's wave loop, one command each::
     python3 tools/wave.py status
     python3 tools/wave.py run [--workers N] [--budget C] [--seed S]   # the driver
     python3 tools/wave.py run --dry-run --state COPY.json   # one batch, fake worker
+    python3 tools/wave.py run --clear b011      # the coordinator's retry of an exception
 
 Rows come from docs/wso/disagreements.json (tools/xrec.py); batch state
 lives in docs/wso/wave-state.json, created by the first `next`.  Nothing
@@ -24,9 +25,10 @@ fast-forwards `first` to the batch branch.
 
 Exit codes: 0 ok, 1 refusal (close lists every reason), 2 usage error or
 nothing left to assign.  `run` (tools/driver.py) exits 0 when every row
-is assigned or decided, 1 when an exception that is not a batch's own
-(cut, push) stopped it, 3 when parked, 4 when stalled (the rows left wait
-on files owned by assigned batches).  Every state write is atomic (temp file in the
+is assigned or decided or at the budget stop, 1 when an exception that is
+not a batch's own (cut, push) stopped it or the status file cannot be
+read, 3 when parked, 4 when stalled (the rows left wait on files owned by
+assigned batches).  Every state write is atomic (temp file in the
 same directory, then os.replace), so a killed `next` cannot corrupt it.
 """
 from __future__ import annotations

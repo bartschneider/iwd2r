@@ -173,6 +173,101 @@ state writes the same bytes). Waves 2 to 5 are imports and reuse
 `close --kind import`: no verdicts are required, but every row's
 evidence must be `kind: trace` or better instead.
 
+## Running the batches
+
+`wave.py run` ([tools/driver.py](../../tools/driver.py)) runs that loop
+without a coordinator turn per batch: `next` (cut and triage), the brief,
+one headless worker (`claude-glm`, `glm-5.3-flash[1m]`, the batch
+worktree as its cwd), the mechanical checks with one fix round, a review
+when it can matter (any fork or neither verdict, or the seeded
+twenty-percent sample) with one fix round, then the verdicts, `close`,
+the push of `first:main first:first` to `iwd2r`, and a templated
+`## driver <id>` entry in
+`.superpowers/sdd/2026-10-17-wso-integration/progress.md`. The driver
+itself uses no model.
+
+    python3 -I tools/wave.py run --workers 2 --budget 50000
+    python3 -I tools/wave.py run --clear b011
+    python3 -I tools/wave.py run --dry-run --state /outside/the/repo/state-copy.json
+
+- `--workers N`: stored; batches run one at a time until the worker
+  pools land.
+- `--budget C`: credits for this run (no limit without it). Before each
+  new batch (a cut, or the retry of a cleared exception) the run stops
+  when the credits spent plus the next batch's estimate exceed `C`; a
+  batch is never stopped midway. The estimate is the mean of this run's
+  batches with known credits, 1200 before there is one, and a batch whose
+  credits are unknown counts as the estimate.
+- `--dry-run`: one batch with a fake worker that answers `ours` for every
+  row; no review, no record, no close, no push, no `aoe send`, no budget.
+  It needs `--state` pointing at a copy of the wave state OUTSIDE the
+  repo, and refuses the live `docs/wso/wave-state.json` (even through a
+  symlink). It still cuts a real batch (branch, worktree, triage
+  commits), so run it in a disposable `git clone --shared`. Its ledger
+  and status go to `driver/dry-run/`.
+- `--state PATH`: the wave-state file (default `docs/wso/wave-state.json`).
+- `--seed S`: the review sample seed (default `2026-10-22`), recorded in
+  each ledger entry's review line.
+- `--aoe-session ID`: the AoE session that gets one `aoe send` line per
+  exception.
+- `--clear BATCH_ID`: removes that batch's entry from `exceptions`,
+  prints what it removed, and exits 0, or 2 when there is no such entry.
+  The next run retries that batch before any new cut.
+
+The status file is
+`.superpowers/sdd/2026-10-17-wso-integration/driver/status.json`
+(untracked; each batch's briefs, reports and review diff are beside it in
+`driver/<id>/`). Its keys:
+
+- `current`: `{batch, stage, at}`, the batch in flight.
+- `parked`: `{batch_id, at, reason}`, the batch a 429 parked.
+- `stopped`: `{at, reason: "budget", spent, budget}`, the last budget
+  stop; a later run clears it.
+- `stalled`: `{at, message}`, set when the rows left wait on files that
+  assigned batches own; the next cut clears it.
+- `exceptions`: `{<id>: {stage, problems, at}}`, the batches waiting on
+  the coordinator.
+- `batches`: `{<id>: {outcome, credits, at}}`, each batch's last outcome.
+
+Every write is a read-modify-write of that file under an `fcntl.flock`
+on `status.json.lock`. The coordinator clears an exception with
+`--clear`, never by editing the file by hand: a hand edit races the
+driver's writes, and either loses a new exception or brings back the one
+it removed.
+
+Exit codes:
+
+- 0: nothing left (every row is assigned or decided), or the budget
+  stop; a dry run always exits 0 (its outcome is in its status file).
+- 1: a cut or push failure (an exception that is not the batch's own),
+  or a status file that cannot be read (the message names it).
+- 3: parked on a Z.ai rate limit.
+- 4: stalled: the rows left wait on files owned by assigned batches.
+
+(2 is a usage error, a refused dry run, or `--clear` with no such entry.)
+
+**Park and resume.** A worker or reviewer whose JSON result or
+transcript says `Request rejected (429)` parks the batch. The driver
+commits whatever the batch worktree holds uncommitted
+(`git add -A && git commit -m "WIP: parked by driver"`, in the batch
+worktree only, and skipped when it is clean), writes `parked`, and the
+run exits 3. The next `run` settles what the last one left before any
+new cut. First, a batch it closed without writing the ledger entry gets
+the entry and the push. Then the parked batch, and after it a batch left
+in `current` (the process died mid-batch), run again, each with its
+brief re-rendered under a `Resume:` preamble that lists the verdicts
+already recorded. `parked` clears when that batch ends any other way.
+
+**The Friday timer** (user-side; the timer is not in the repo) starts
+the driver again after the weekly Z.ai reset, instead of sending
+`continue` to a model:
+
+    systemd-run --user --unit=zai-resume-driver --on-calendar=... python3 -I tools/wave.py run --workers 2 --budget 50000
+
+`...` is the reset's calendar time. A user unit starts in the home
+directory, so add `--working-directory=<this worktree>` and make sure
+`claude-glm` is on the unit's `PATH`.
+
 ## Nothing from his IWD2EE branch enters the repository
 
 His renderer is built into IEex, and his IWD2EE work is game-data overrides

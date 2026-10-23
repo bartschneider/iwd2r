@@ -3,8 +3,8 @@
 
 The worker protocol, a fake worker, the report parser, the credit
 estimate, the mechanical checks and the review policy, the ledger
-template and the batch loop (`wave.py run`).  The driver itself uses no
-model."""
+template, the batch loop (`wave.py run`) with its budget stop, 429 park
+and resume, and `--clear`.  The driver itself uses no model."""
 import argparse
 import collections
 import datetime
@@ -23,6 +23,8 @@ Result = collections.namedtuple(
 # (input, cached, output) credits per 10000 tokens.
 FLASH_RATES = (2.3, 0.56, 8.0)
 GLM53_RATES = (6.9, 1.7, 24.0)
+# Z.ai's rate-limit refusal, in a worker's JSON result or its transcript.
+RATE_LIMIT_TEXT = 'Request rejected (429)'
 
 VERDICT_RE = re.compile(
     r'^verdict (0[xX][0-9a-fA-F]+) (ours|fork|neither) case (\S+)$', re.IGNORECASE)
@@ -103,6 +105,13 @@ def credits_of(path):
     return total
 
 
+def mentions(path, text):
+    """True when `text` occurs in the file.  It is read as text: data,
+    never executed."""
+    with open(path, encoding='utf-8', errors='replace') as f:
+        return any(text in line for line in f)
+
+
 def project_slug(cwd):
     return re.sub(r'[^A-Za-z0-9]', '-', os.path.abspath(cwd))
 
@@ -157,13 +166,15 @@ class HeadlessWorker:
         except ValueError:
             report = proc.stdout or ''
             exit_code = exit_code or 1
+        rate_limited = isinstance(report, str) and RATE_LIMIT_TEXT in report
         transcript = credits = None
         if isinstance(session_id, str) and re.fullmatch(r'[A-Za-z0-9_-]+', session_id):
             path = self.transcript_path(cwd, session_id)
             if os.path.isfile(path):
                 transcript = path
                 credits = credits_of(path)
-        return Result(exit_code, report, transcript, credits, False)
+                rate_limited = rate_limited or mentions(path, RATE_LIMIT_TEXT)
+        return Result(exit_code, report, transcript, credits, rate_limited)
 
 
 _TOOLS = {}
@@ -267,6 +278,10 @@ LEDGER_REL = os.path.join('.superpowers', 'sdd', '2026-10-17-wso-integration',
 STATUS_REL = os.path.join('.superpowers', 'sdd', '2026-10-17-wso-integration',
                           'driver', 'status.json')
 DEFAULT_SEED = '2026-10-22'
+# The next batch's credits before this run has measured one (ruling R38;
+# the plan's ledger example is 1180).
+DEFAULT_ESTIMATE = 1200.0
+WIP_MESSAGE = 'WIP: parked by driver'
 PUSH_ARGS = ('push', 'iwd2r', 'first:main', 'first:first')
 # Exceptions at these stages are not the batch's own: the run stops.
 GLOBAL_STAGES = ('cut', 'push')
@@ -308,6 +323,83 @@ fixed before the batch closes on its own line starting exactly
 Anything else is advisory: write it without that prefix. When nothing
 blocks, say so in one line.
 """
+
+RESUME_PREAMBLE = """Resume: batch {id} {why}. This run takes the batch up again in
+the same worktree, on `{branch}`. The work done so far is on that branch:
+`git log {base}..{branch}`, and `git status` for anything not committed
+(a `{wip}` commit holds what a park saved). Build on it: do not redo
+finished work, and do not rewrite that history.
+
+Verdicts already recorded in the wave state:
+
+{verdicts}
+
+Your report still carries the full `## Verdicts` section: one line for
+every row you decide, the rows you decided before this resume included.
+
+The original brief follows.
+
+---
+
+"""
+
+
+class StatusError(ValueError):
+    """The driver status file cannot be read: corrupt, torn, or not a
+    status object.  The message names the file."""
+
+
+def read_status(path):
+    """The status file as it is on disk now, every key present ({}
+    defaults when there is no file).  The coordinator changes it through
+    `--clear`, so the driver never keeps a copy."""
+    for attempt in range(3):
+        try:
+            with open(path, encoding='utf-8') as f:
+                status = json.load(f)
+            break
+        except FileNotFoundError:
+            status = {}
+            break
+        except ValueError as e:
+            if attempt == 2:
+                raise StatusError('%s: not valid JSON (%s)' % (path, e)) from None
+            time.sleep(0.2)   # a torn read of a file edited in place
+        except OSError as e:
+            raise StatusError('%s: unreadable (%s)' % (path, e)) from None
+    if not isinstance(status, dict):
+        raise StatusError('%s: not a driver status file (not a JSON object)'
+                          % path)
+    for key, empty in (('exceptions', {}), ('batches', {}),
+                       ('current', None), ('parked', None),
+                       ('stopped', None), ('stalled', None)):
+        status.setdefault(key, empty)
+        if isinstance(empty, dict) and not isinstance(status[key], dict):
+            raise StatusError('%s: %r is not a JSON object' % (path, key))
+    return status
+
+
+def status_lock(status_path):
+    """The flock on the sidecar `<status_path>.lock` that every
+    read-modify-write of the status file holds, the driver's and
+    `--clear`'s (ruling R37): the read, the change and the replace only."""
+    return _tool('filelock').hold(status_path + '.lock', 'wave.py run')
+
+
+def clear_exception(status_path, batch_id):
+    """Remove status['exceptions'][batch_id] under the status lock:
+    (0, the removed entry), or (2, None) when there is no such entry.
+    StatusError when the file cannot be read."""
+    if not os.path.isfile(status_path):
+        return 2, None
+    with status_lock(status_path):
+        status = read_status(status_path)
+        if batch_id not in status['exceptions']:
+            return 2, None
+        entry = status['exceptions'].pop(batch_id)
+        status['updated_at'] = _now()
+        _tool('wave')._save_json(status_path, status)
+    return 0, entry
 
 
 def _now():
@@ -398,8 +490,11 @@ class Driver:
     session, and the loop goes on with the next batch.
 
     The wave functions are attributes, so tests replace them.  Batches run
-    one at a time; `workers` is stored for the pools (ruling R30), and
-    `budget` for the budget stop."""
+    one at a time; `workers` is stored for the pools (ruling R30).
+    `budget` is in credits: before each new batch the run stops when what
+    it spent plus the next batch's estimate would pass it (ruling R38).
+    A worker's 429 parks the batch, its WIP committed in the batch
+    worktree; the next run resumes it first (ruling R39)."""
 
     def __init__(self, repo, state_path, worker, reviewer, ledger_path,
                  status_path, aoe_session=None, seed=DEFAULT_SEED, budget=None,
@@ -444,41 +539,26 @@ class Driver:
         self._runs = []
         self._ignored = {}
         self._halt = False
+        self._batch_credits = []   # this run's batches: credits or None
 
     # -- status, ledger, results ----------------------------------------
 
     def _read_status(self):
-        """The status file as it is on disk now: the coordinator edits it
-        (clearing an exception is how it asks for a retry)."""
-        for attempt in range(3):
-            try:
-                with open(self.status_path, encoding='utf-8') as f:
-                    status = json.load(f)
-                break
-            except FileNotFoundError:
-                status = {}
-                break
-            except ValueError:
-                if attempt == 2:
-                    raise
-                time.sleep(0.2)   # a torn read while the coordinator writes
-        if not isinstance(status, dict):
-            raise ValueError('%s: not a driver status file' % self.status_path)
-        for key, empty in (('exceptions', {}), ('batches', {}),
-                           ('current', None), ('parked', None),
-                           ('stalled', None)):
-            status.setdefault(key, empty)
-        return status
+        """The status file as it is on disk now (the coordinator's
+        `--clear` changes it between the driver's writes)."""
+        return read_status(self.status_path)
 
     def _update_status(self, change):
-        """Read-modify-write: re-read the file, apply only this change,
-        write it atomically.  What the coordinator removed stays removed."""
-        status = self._read_status()
-        change(status)
-        if self.dry_run:
-            status['dry_run'] = True
-        status['updated_at'] = _now()
-        _tool('wave')._save_json(self.status_path, status)
+        """Read-modify-write under the status lock: re-read the file,
+        apply only this change, write it atomically.  What the
+        coordinator removed stays removed."""
+        with status_lock(self.status_path):
+            status = self._read_status()
+            change(status)
+            if self.dry_run:
+                status['dry_run'] = True
+            status['updated_at'] = _now()
+            _tool('wave')._save_json(self.status_path, status)
         return status
 
     def _stage(self, batch_id, stage):
@@ -488,12 +568,16 @@ class Driver:
 
     def _finish(self, batch_id, outcome, change=None, **extra):
         """Record the batch's outcome; `change` edits the status in the
-        same write."""
+        same write.  Any outcome but another park ends the batch's park."""
         entry = dict(outcome=outcome, credits=self._credits(), at=_now(), **extra)
 
         def apply(s):
             s['batches'][batch_id] = entry
             s['current'] = None
+            parked = s.get('parked')
+            if outcome != 'parked' and isinstance(parked, dict) and \
+                    parked.get('batch_id') == batch_id:
+                s['parked'] = None
             if change:
                 change(s)
         self._update_status(apply)
@@ -557,17 +641,53 @@ class Driver:
                 self.log('send failed: %r' % (e,))
         return 'exception'
 
-    def _park(self, batch_id, reason):
+    def _commit_wip(self, worktree):
+        """Commit what the batch worktree holds uncommitted, as
+        `git add -A && git commit -m WIP_MESSAGE` (ruling R39): (sha, None),
+        (None, None) when it is clean, or (None, why) when nothing was
+        committed.  Never in the driver's own worktree."""
+        if not worktree:
+            return None, 'no batch worktree'
+        if os.path.realpath(worktree) == os.path.realpath(self.repo):
+            return None, ("%s is the driver's own worktree, not a batch "
+                          "worktree" % worktree)
+
+        def git(*args):
+            return subprocess.run(['git', '-C', worktree, *args],
+                                  capture_output=True, text=True)
+        st = git('status', '--porcelain')
+        if st.returncode != 0:
+            return None, 'git status failed: %s' % _one_line(st.stderr)
+        if not st.stdout.strip():
+            return None, None
+        for args in (('add', '-A'), ('commit', '-q', '-m', WIP_MESSAGE)):
+            r = git(*args)
+            if r.returncode != 0:
+                return None, 'git %s failed: %s' % (
+                    args[0], _one_line((r.stderr or '') + (r.stdout or '')))
+        return git('rev-parse', 'HEAD').stdout.strip() or None, None
+
+    def _park(self, batch_id, reason, worktree):
+        """Commit the WIP in the batch worktree, write status['parked'];
+        the run then exits 3 and the next one resumes this batch first."""
+        wip, err = self._commit_wip(worktree)
+        extra = {}
+        if wip:
+            extra['wip'] = wip
+        if err:
+            extra['wip_error'] = err
+            self.log('%s: WIP not committed: %s' % (batch_id, err))
         parked = {'batch_id': batch_id, 'at': _now(), 'reason': reason}
         self._finish(batch_id, 'parked',
-                     change=lambda s: s.__setitem__('parked', parked))
-        self.log('%s: parked (%s)' % (batch_id, reason))
+                     change=lambda s: s.__setitem__('parked', parked), **extra)
+        self.log('%s: parked (%s)%s' % (
+            batch_id, reason, '; WIP committed as %s' % wip[:8] if wip else ''))
         return 'parked'
 
-    def _settle(self, batch_id, res, label):
+    def _settle(self, batch_id, res, label, worktree):
         """'parked' or 'exception' when a run gave nothing to check."""
         if res.rate_limited:
-            return self._park(batch_id, '%s rate limited' % label)
+            return self._park(batch_id, '%s rate limited' % label, worktree)
         if not (res.report or '').strip():
             return self._exception(
                 batch_id, 'review' if label.startswith('reviewer') else 'worker',
@@ -634,7 +754,7 @@ class Driver:
                 '- verdict 0x%s %s case %s' % (k.upper(), side, case)
                 for k, (side, case) in sorted(merged.items())))
         res = self._run(self.reviewer, brief, worktree, batch_id, label)
-        out = self._settle(batch_id, res, label)
+        out = self._settle(batch_id, res, label, worktree)
         if out:
             return None, out
         return blocking_findings(res.report), None
@@ -669,9 +789,21 @@ class Driver:
             review, self._commits(batch['branch']), self._credits(),
             ignored=self._ignored))
 
-    def run_batch(self, batch_id):
+    def _resume_preamble(self, batch_id, batch, why):
+        key = _tool('wave')._addr_key
+        recorded = sorted(batch.get('verdicts', {}).items(),
+                          key=lambda kv: key(kv[0]))
+        return RESUME_PREAMBLE.format(
+            id=batch_id, why=why, branch=batch['branch'], base=self.base,
+            wip=WIP_MESSAGE, verdicts='\n'.join(
+                '- verdict %s %s case %s' % ((a,) + _side_case(v))
+                for a, v in recorded) or '(none yet)')
+
+    def run_batch(self, batch_id, resume=None):
         """One assigned batch, start to end: 'closed', 'exception' or
-        'parked' ('checked' for a dry run whose checks passed)."""
+        'parked' ('checked' for a dry run whose checks passed).  With
+        `resume` (why the batch is taken up again), the brief opens with
+        a `Resume:` preamble listing the verdicts already recorded."""
         self._runs = []
         self._ignored = {}
         state = self.load_state(self.state_path)
@@ -696,12 +828,15 @@ class Driver:
             rc, brief = 1, 'render_brief raised %r' % (e,)
         if rc != 0:
             return self._exception(batch_id, 'brief', [brief.strip()])
+        if resume:
+            brief = self._resume_preamble(batch_id, batch, resume) + brief
+            self.log('%s: resumed (%s)' % (batch_id, resume))
         worker = FakeWorker(dry_report(batch)) if self.dry_run else self.worker
 
         # The worker, the mechanical checks, one fix round.
         self._stage(batch_id, 'worker')
         res = self._run(worker, brief, worktree, batch_id, 'worker')
-        out = self._settle(batch_id, res, 'worker')
+        out = self._settle(batch_id, res, 'worker', worktree)
         if out:
             return out
         verdicts, problems = self._check(batch_id, worktree, res.report)
@@ -709,7 +844,7 @@ class Driver:
             self.log('%s: %d problem(s); one fix round' % (batch_id, len(problems)))
             res = self._fix(batch_id, batch, worker, worktree, 'mechanical checks',
                             problems, brief, 'worker-fix-checks')
-            out = self._settle(batch_id, res, 'worker-fix-checks')
+            out = self._settle(batch_id, res, 'worker-fix-checks', worktree)
             if out:
                 return out
             verdicts, problems = self._check(batch_id, worktree, res.report)
@@ -740,7 +875,7 @@ class Driver:
             if findings:
                 res = self._fix(batch_id, batch, worker, worktree, 'review',
                                 findings, brief, 'worker-fix-review')
-                out = self._settle(batch_id, res, 'worker-fix-review')
+                out = self._settle(batch_id, res, 'worker-fix-review', worktree)
                 if out:
                     return out
                 verdicts, problems = self._check(batch_id, worktree, res.report)
@@ -794,7 +929,7 @@ class Driver:
             return self._exception(batch_id, 'push', ['git push failed: %s' % err])
         return 'closed'
 
-    # -- the loop -----------------------------------------------------------
+    # -- the loop: cuts and retries -------------------------------------------
 
     def _cut(self):
         """(batch_id, None) for a batch cut and triaged, else (None, exit)."""
@@ -841,11 +976,152 @@ class Driver:
                 and bid not in status['exceptions']
                 and state['batches'].get(bid, {}).get('status') == 'assigned']
 
+    # -- the budget (ruling R38) ----------------------------------------------
+
+    @property
+    def estimate_next(self):
+        """The next batch's credits: the mean of this run's batches with
+        known credits, DEFAULT_ESTIMATE before there is one."""
+        known = [c for c in self._batch_credits if c is not None]
+        return sum(known) / len(known) if known else DEFAULT_ESTIMATE
+
+    @property
+    def credits_spent(self):
+        """This run's credits; a batch with unknown credits counts as the
+        estimate (unknown is not free)."""
+        est = self.estimate_next
+        return sum(est if c is None else c for c in self._batch_credits)
+
+    def _over_budget(self):
+        """True, with status['stopped'] written, when the credits spent
+        plus the next batch's estimate pass the budget.  Checked before
+        each new batch, never mid-batch."""
+        if self.budget is None:
+            return False
+        spent, est = self.credits_spent, self.estimate_next
+        if spent + est <= self.budget:
+            return False
+        stopped = {'at': _now(), 'reason': 'budget', 'spent': spent,
+                   'budget': self.budget}
+        self._update_status(lambda s: s.__setitem__('stopped', stopped))
+        self.log('budget stop: %.0f credits spent + %.0f estimated for the '
+                 'next batch > budget %.0f' % (spent, est, self.budget))
+        return True
+
+    # -- what the last run left (resume) --------------------------------------
+
+    def _has_ledger_entry(self, batch_id):
+        head = '## driver %s (' % batch_id
+        try:
+            with open(self.ledger_path, encoding='utf-8') as f:
+                return any(line.startswith(head) for line in f)
+        except FileNotFoundError:
+            return False
+
+    def _settle_closed(self, batch_id):
+        """A batch the last run closed and then stopped on: its ledger
+        entry when it is missing, the push, then the status.  1 when the
+        push fails (the push exception), else None."""
+        self._runs = []
+        self._ignored = {}
+        batch = self.load_state(self.state_path)['batches'][batch_id]
+        if self._has_ledger_entry(batch_id):
+            self.log('%s: closed by the last run, ledger entry present; '
+                     'pushing again' % batch_id)
+        else:
+            folder = os.path.join(self.driver_dir, batch_id)
+            reviewed = any(os.path.isfile(os.path.join(folder, l + '.report.md'))
+                           for l in ('reviewer', 'reviewer-2'))
+            tip = self._git('rev-parse', '--verify', batch['branch']).stdout.strip()
+            self._append_ledger(ledger_entry(
+                dict(batch, id=batch_id), batch.get('verdicts', {}),
+                self._classes(batch_id, batch),
+                (reviewed, 'recovered after the last run stopped between '
+                           'close and ledger'),
+                'unknown..%s (recovered)' % (tip[:8] or batch['branch']), None))
+            self.log('%s: closed by the last run without its ledger entry; '
+                     'entry written' % batch_id)
+        err = self.push()
+        self._finish(batch_id, 'closed')
+        if err:
+            self._exception(batch_id, 'push', ['git push failed: %s' % err])
+            return 1
+        return None
+
+    def _leftovers(self):
+        """What the last run left behind: ([(batch_id, why)] to resume
+        before anything new, None), or ([], exit code).  First a batch it
+        closed but did not finish (current names a closed batch), then
+        the parked batch, then a batch it left in flight (current names an
+        assigned batch: the process died mid-batch)."""
+        status = self._read_status()
+        batches = self.load_state(self.state_path)['batches']
+        current = status['current'] if isinstance(status['current'], dict) else {}
+        cur = current.get('batch')
+        if cur and batches.get(cur, {}).get('status') == 'closed':
+            if self._settle_closed(cur):
+                return [], 1
+            cur = None
+        resume = []
+        parked = status['parked'] if isinstance(status['parked'], dict) else {}
+        pid = parked.get('batch_id')
+        if pid:
+            st = batches.get(pid, {}).get('status')
+            if st == 'assigned':
+                resume.append((pid, 'was parked by the driver at %s (%s)' % (
+                    parked.get('at'), parked.get('reason'))))
+            else:
+                def unpark(s):
+                    if isinstance(s['parked'], dict) and \
+                            s['parked'].get('batch_id') == pid:
+                        s['parked'] = None
+                self._update_status(unpark)
+                self.log('%s was parked but is %s; parked cleared' % (
+                    pid, st or 'not in the wave state'))
+        if cur and cur != pid:
+            st = batches.get(cur, {}).get('status')
+            if st == 'assigned':
+                resume.append((cur, 'was interrupted at its %s stage (%s): '
+                                    'the last run stopped mid-batch' % (
+                                        current.get('stage'), current.get('at'))))
+            else:
+                self._update_status(lambda s: s.__setitem__('current', None))
+                self.log('%s was in flight but is %s; current cleared' % (
+                    cur, st or 'not in the wave state'))
+        return resume, None
+
+    # -- the loop -------------------------------------------------------------
+
+    def _one(self, batch_id, resume=None):
+        """Run one batch and count its credits; an exit code when the run
+        must stop, else None."""
+        self._runs = []
+        out = (self.run_batch(batch_id, resume=resume) if resume
+               else self.run_batch(batch_id))
+        if self._runs:
+            self._batch_credits.append(self._credits())
+        if out == 'parked':
+            return 3
+        if self._halt:
+            return 1
+        return None
+
     def run(self):
-        """0 when every row is assigned or decided, 3 when parked, 4 when
-        stalled (the rows left wait on files owned by assigned batches), 1
-        when an exception that is not the batch's own stopped the run.  A
-        dry run processes one batch and exits 0."""
+        """0 when every row is assigned or decided, or at the budget stop;
+        3 when parked; 4 when stalled (the rows left wait on files owned by
+        assigned batches); 1 when an exception that is not the batch's own
+        stopped the run, or the status file cannot be read.  What the last
+        run left goes first: a closed batch's missing ledger entry and
+        push, then the parked batch, then an interrupted one.  A dry run
+        processes one batch and exits 0."""
+        try:
+            return self._loop()
+        except StatusError as e:
+            self.log('driver stopped: the status file cannot be read: %s. '
+                     'Repair it (one JSON object), then run again.' % e)
+            return 1
+
+    def _loop(self):
         if self.dry_run:
             batch_id, code = self._cut()
             if batch_id is None:
@@ -854,18 +1130,29 @@ class Driver:
             self.log('dry run: %s left assigned; ledger and status in %s'
                      % (batch_id, self.driver_dir))
             return 0
+        self._batch_credits = []
+        if self._read_status()['stopped'] is not None:
+            self._update_status(lambda s: s.__setitem__('stopped', None))
+        resume, code = self._leftovers()
+        if code is not None:
+            return code
+        for batch_id, why in resume:
+            code = self._one(batch_id, why)
+            if code is not None:
+                return code
         queue = self._cleared()
         while True:
+            if self._over_budget():
+                return 0
             if queue:
                 batch_id = queue.pop(0)
             else:
                 batch_id, code = self._cut()
                 if batch_id is None:
                     return code
-            if self.run_batch(batch_id) == 'parked':
-                return 3
-            if self._halt:
-                return 1
+            code = self._one(batch_id)
+            if code is not None:
+                return code
 
     # -- the defaults for push and send (ruling R28) ------------------------
 
@@ -896,30 +1183,39 @@ class Driver:
                 r.returncode, _one_line((r.stderr or '') + (r.stdout or ''))))
 
 
-def driver_from_args(argv, repo=None):
-    """(Driver, None), or (None, (exit code, message)) for `wave.py run`."""
-    wave = _tool('wave')
-    repo = repo or wave.ROOT
+def _parse(argv):
+    """(args, None), or (None, (exit code, message)) for `wave.py run`."""
     p = argparse.ArgumentParser(
         prog='wave.py run',
         description='Run the wave batches: cut, triage, worker, checks, '
                     'review, close, push, ledger.')
     p.add_argument('--workers', type=int, default=1,
                    help='stored; batches run one at a time for now')
-    p.add_argument('--budget', type=float, default=None, help='credits')
-    p.add_argument('--dry-run', action='store_true',
-                   help='one batch with a fake worker; no review, no close, '
-                        'no push, no aoe; needs --state')
+    p.add_argument('--budget', type=float, default=None,
+                   help='credits: stop before a new batch would pass it')
     p.add_argument('--seed', default=DEFAULT_SEED,
                    help='the review sample seed (default %(default)s)')
     p.add_argument('--state', help='the wave-state file '
                                    '(default docs/wso/wave-state.json)')
     p.add_argument('--aoe-session', help='the AoE session that gets '
                                          'exception lines')
+    one = p.add_mutually_exclusive_group()
+    one.add_argument('--dry-run', action='store_true',
+                     help='one batch with a fake worker; no review, no close, '
+                          'no push, no aoe; needs --state')
+    one.add_argument('--clear', metavar='BATCH_ID',
+                     help="remove that batch's exception from the status "
+                          "file, under its lock (the coordinator's retry); "
+                          "exit 2 when there is none")
     try:
-        args = p.parse_args(argv)
+        return p.parse_args(argv), None
     except SystemExit as e:
         return None, (e.code if isinstance(e.code, int) else 2, '')
+
+
+def _build(args, repo):
+    """(Driver, None), or (None, (exit code, message))."""
+    wave = _tool('wave')
     if args.workers < 1:
         return None, (2, 'wave.py run: --workers must be at least 1')
     if args.dry_run and not args.state:
@@ -949,13 +1245,47 @@ def driver_from_args(argv, repo=None):
                    aoe_session=args.aoe_session, seed=args.seed,
                    budget=args.budget, workers=args.workers,
                    dry_run=args.dry_run)
+    except StatusError as e:
+        return None, (1, 'wave.py run: the status file cannot be read: %s' % e)
     except ValueError as e:
         return None, (2, 'wave.py run: %s' % e)
     return d, None
 
 
+def driver_from_args(argv, repo=None):
+    """(Driver, None), or (None, (exit code, message)) for `wave.py run`."""
+    args, err = _parse(argv)
+    if err:
+        return None, err
+    return _build(args, repo or _tool('wave').ROOT)
+
+
+def _clear(batch_id, repo):
+    """`wave.py run --clear <batch_id>`: 0, 2 when the status file holds
+    no exception for it, 1 when the file cannot be read."""
+    path = os.path.join(repo, STATUS_REL)
+    try:
+        rc, entry = clear_exception(path, batch_id)
+    except StatusError as e:
+        print('wave.py run --clear: the status file cannot be read: %s' % e,
+              file=sys.stderr)
+        return 1
+    if rc != 0:
+        print('wave.py run --clear: no exception for %s in %s' % (batch_id, path),
+              file=sys.stderr)
+        return rc
+    print('removed the exception for %s from %s: %s' % (
+        batch_id, path, json.dumps(entry, sort_keys=True)))
+    return 0
+
+
 def main(argv=None, repo=None):
-    d, err = driver_from_args(sys.argv[1:] if argv is None else argv, repo)
+    repo = repo or _tool('wave').ROOT
+    args, err = _parse(sys.argv[1:] if argv is None else argv)
+    if err is None:
+        if args.clear is not None:
+            return _clear(args.clear, repo)
+        d, err = _build(args, repo)
     if err:
         if err[1]:
             print(err[1], file=sys.stderr)

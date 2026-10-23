@@ -26,6 +26,7 @@ import subprocess
 from unittest import mock
 import sys
 import tempfile
+import threading
 import time
 import types
 import unittest
@@ -9068,6 +9069,18 @@ class _SeqWorker:
         return driver.Result(0, report, None, self.credits, self.rate_limited)
 
 
+class _DirtyWorker(_SeqWorker):
+    """A _SeqWorker that leaves uncommitted work in its cwd first: a
+    change to a tracked file and a new untracked one."""
+
+    def run(self, brief, cwd):
+        with open(os.path.join(cwd, 'docs', 'evidence', '401000.md'), 'a') as f:
+            f.write('\nhalf-written note\n')
+        with open(os.path.join(cwd, 'scratch.txt'), 'w') as f:
+            f.write('untracked\n')
+        return super().run(brief, cwd)
+
+
 class DriverTest(unittest.TestCase):
     REPORT = ('# report\n\n## Verdicts\n\nverdict 0x401000 ours case dump-401000\n'
               'verdict 0x402000 fork case probe-b011-402000\n')
@@ -9793,6 +9806,318 @@ class DriverTest(unittest.TestCase):
             self.assertIsNone(d)
             self.assertEqual(err[0], 2)
             self.assertIn('live wave-state file', err[1])
+
+    # -- budget, 429 park, resume, --clear (Task 9) -------------------------
+
+    # The identity the driver's WIP commit runs under in these temp repos.
+    GIT_ENV = {'GIT_AUTHOR_NAME': 't', 'GIT_AUTHOR_EMAIL': 't@t',
+               'GIT_COMMITTER_NAME': 't', 'GIT_COMMITTER_EMAIL': 't@t',
+               'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_NOSYSTEM': '1'}
+
+    def _write_status(self, d, status):
+        os.makedirs(os.path.dirname(d.status_path), exist_ok=True)
+        with open(d.status_path, 'w') as f:
+            json.dump(status, f)
+
+    def _rev(self, ref, cwd=None):
+        return self.git('rev-parse', ref, cwd=cwd).stdout.strip()
+
+    def test_headless_worker_flags_a_429(self):
+        """rate_limited when the JSON result or the transcript says
+        `Request rejected (429)`; the transcript is read as text only."""
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = os.path.join(tmp, 'wt')
+            os.mkdir(cwd)
+            proj = os.path.join(tmp, 'cfg', 'projects', driver.project_slug(cwd))
+            os.makedirs(proj)
+            with open(os.path.join(proj, 'hit.jsonl'), 'w') as f:
+                f.write(json.dumps({'message': {'model': 'glm-5.3-flash[1m]',
+                        'usage': {'output_tokens': 10000}}}) + '\n')
+                f.write(json.dumps({'type': 'assistant', 'message': {'content': [
+                    {'type': 'text', 'text': 'API Error: Request rejected (429) '
+                     'rate limit reached'}]}}) + '\n')
+            with open(os.path.join(proj, 'calm.jsonl'), 'w') as f:
+                f.write(json.dumps({'message': {'model': 'glm-5.3-flash[1m]',
+                        'usage': {'output_tokens': 10000}}}) + '\n')
+            outs = []
+
+            def stub(argv, **kw):
+                return subprocess.CompletedProcess(argv, outs[-1][0], outs[-1][1], '')
+            w = driver.HeadlessWorker(config_dir=os.path.join(tmp, 'cfg'), run=stub)
+            # In the transcript only: the result is a normal partial report.
+            outs.append((0, json.dumps({'result': '# report\n', 'session_id': 'hit'})))
+            r = w.run('B', cwd)
+            self.assertTrue(r.rate_limited)
+            self.assertAlmostEqual(r.credits, 8.0)
+            # In the JSON result only, with no transcript on disk.
+            outs.append((1, json.dumps({'result': 'API Error: Request rejected (429)',
+                                        'is_error': True, 'session_id': 'gone'})))
+            r = w.run('B', cwd)
+            self.assertTrue(r.rate_limited)
+            self.assertIsNone(r.transcript)
+            # Neither: not rate limited.
+            outs.append((0, json.dumps({'result': '# report 429\n', 'session_id': 'calm'})))
+            self.assertFalse(w.run('B', cwd).rate_limited)
+
+    def test_park_on_rate_limit_commits_wip_and_exit_3(self):
+        w = _DirtyWorker('API Error: Request rejected (429)', rate_limited=True)
+        d = self._driver(worker=w)
+        cuts = []
+        d.next_batch = lambda *a, **kw: cuts.append(1) or (0, self.CUT)
+        first, tip = self._rev('first'), self._rev('p3/wso-b011')
+        root_head = self._rev('HEAD')
+        root_dirt = self.git('status', '--porcelain').stdout
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 3)
+        self.assertEqual(len(cuts), 1)            # nothing cut after the park
+        # The WIP commit is on the batch branch, made in the batch worktree.
+        self.assertEqual(self._rev('p3/wso-b011^'), tip)
+        self.assertEqual(self.git('log', '-1', '--format=%s', 'p3/wso-b011').stdout.strip(),
+                         'WIP: parked by driver')
+        files = self.git('show', '--name-only', '--format=', 'p3/wso-b011').stdout.split()
+        self.assertEqual(sorted(files), ['docs/evidence/401000.md', 'scratch.txt'])
+        self.assertEqual(self.git('status', '--porcelain', cwd=self.wt).stdout, '')
+        # Never in the driver's own worktree.
+        self.assertEqual((self._rev('first'), self._rev('HEAD')), (first, root_head))
+        self.assertEqual(self.git('status', '--porcelain').stdout, root_dirt)
+        status = self._status(d)
+        self.assertEqual(set(status['parked']), {'batch_id', 'at', 'reason'})
+        self.assertEqual(status['parked']['batch_id'], 'b011')
+        self.assertIn('rate limited', status['parked']['reason'])
+        self.assertTrue(status['parked']['at'])
+        self.assertIsNone(status['current'])
+        self.assertEqual(status['batches']['b011']['outcome'], 'parked')
+        self.assertEqual(self._state()['status'], 'assigned')
+        self.assertEqual(self.sent, [])
+        # A clean worktree parks without a commit.
+        wip = self._rev('p3/wso-b011')
+        d.worker = _SeqWorker('', rate_limited=True)
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run_batch('b011'), 'parked')
+        self.assertEqual(self._rev('p3/wso-b011'), wip)
+
+    def test_resume_picks_parked_batch_first(self):
+        order = []
+        w = _SeqWorker(self.REPORT)
+        run = w.run
+        w.run = lambda brief, cwd: order.append('worker') or run(brief, cwd)
+        d = self._driver(worker=w)
+        self._write_status(d, {
+            'parked': {'batch_id': 'b011', 'at': '2026-10-23T01:00:00+00:00',
+                       'reason': 'worker rate limited'},
+            'batches': {'b011': {'outcome': 'parked'}}})
+        d.next_batch = lambda *a, **kw: order.append('cut') or self.NOTHING
+        self.assertEqual(d.run(), 0)
+        self.assertEqual(order, ['worker', 'cut'])
+        brief = w.briefs[0]
+        self.assertTrue(brief.startswith('Resume:'))
+        self.assertIn('worker rate limited', brief)
+        self.assertIn('- verdict 0x403000 ours case triage-rename', brief)
+        self.assertTrue(brief.rstrip().endswith('BRIEF b011'))   # re-rendered, after the preamble
+        self.assertEqual(len(self.bundle_dirs), 1)
+        status = self._status(d)
+        self.assertIsNone(status['parked'])
+        self.assertIsNone(status['current'])
+        self.assertEqual(status['batches']['b011']['outcome'], 'closed')
+        self.assertEqual(self._state()['status'], 'closed')
+        # A parked batch that is no longer assigned is not run; parked clears.
+        self._write_status(d, {'parked': {'batch_id': 'b011', 'at': 't', 'reason': 'r'}})
+        order.clear()
+        self.assertEqual(d.run(), 0)
+        self.assertEqual(order, ['cut'])
+        self.assertIsNone(self._status(d)['parked'])
+
+    def test_resume_interrupted_current(self):
+        """A stale status['current'] (the process died mid-batch) naming an
+        assigned batch takes the resume path ahead of new cuts."""
+        order = []
+        w = _SeqWorker(self.REPORT)
+        run = w.run
+        w.run = lambda brief, cwd: order.append('worker') or run(brief, cwd)
+        d = self._driver(worker=w)
+        self._write_status(d, {'current': {'batch': 'b011', 'stage': 'worker',
+                                           'at': '2026-10-23T01:00:00+00:00'}})
+        d.next_batch = lambda *a, **kw: order.append('cut') or self.NOTHING
+        self.assertEqual(d.run(), 0)
+        self.assertEqual(order, ['worker', 'cut'])
+        self.assertTrue(w.briefs[0].startswith('Resume:'))
+        self.assertIn('interrupted', w.briefs[0])
+        self.assertIn('worker stage', w.briefs[0])
+        self.assertIn('- verdict 0x403000 ours case triage-rename', w.briefs[0])
+        self.assertEqual(self._state()['status'], 'closed')
+        self.assertIsNone(self._status(d)['current'])
+
+    def test_resume_closed_current_writes_ledger_and_pushes_first(self):
+        """current names a batch already closed with no ledger entry (a
+        crash between close and the ledger): the entry, then the push,
+        before anything else; never a second entry."""
+        order = []
+        d = self._driver(worker=driver.FakeWorker(self.REPORT))
+        d.worker.run = lambda *a: self.fail('a closed batch runs no worker')
+        with open(self.state_path) as f:
+            state = json.load(f)
+        b = state['batches']['b011']
+        b.update(status='closed', closed_at='2026-10-23T01:00:00+00:00')
+        b['verdicts']['0x401000'] = {'side': 'ours', 'case': 'dump-401000', 'losing_kind': 'trace'}
+        b['verdicts']['0x402000'] = {'side': 'ours', 'case': 'dump-402000', 'losing_kind': 'trace'}
+        with open(self.state_path, 'w') as f:
+            json.dump(state, f)
+        self._write_status(d, {'current': {'batch': 'b011', 'stage': 'close', 'at': 't'}})
+        d.push = lambda: order.append('push')
+        d.next_batch = lambda *a, **kw: order.append('cut') or self.NOTHING
+        self.assertEqual(d.run(), 0)
+        self.assertEqual(order, ['push', 'cut'])
+        ledger = self._ledger(d)
+        self.assertEqual(ledger.count('## driver b011 ('), 1)
+        self.assertIn('verdicts: fork 0, ours 3, neither 0', ledger)
+        status = self._status(d)
+        self.assertIsNone(status['current'])
+        self.assertEqual(status['batches']['b011']['outcome'], 'closed')
+        # The entry is there already: the push again, no second entry.
+        self._write_status(d, dict(status, current={'batch': 'b011', 'stage': 'push', 'at': 't'}))
+        order.clear()
+        self.assertEqual(d.run(), 0)
+        self.assertEqual(order, ['push', 'cut'])
+        self.assertEqual(self._ledger(d).count('## driver b011 ('), 1)
+        # A failed push is the push exception: exit 1, nothing cut.
+        self._write_status(d, dict(status, current={'batch': 'b011', 'stage': 'push', 'at': 't'}))
+        order.clear()
+        d.push = lambda: 'rejected'
+        self.assertEqual(d.run(), 1)
+        self.assertEqual(order, [])
+        self.assertEqual(self._status(d)['exceptions']['b011']['stage'], 'push')
+
+    def test_budget_stop_before_next_batch(self):
+        # 700 + 100 credits for b011; 800 spent + 800 estimated > 1500.
+        d = self._driver(worker=_SeqWorker(self.REPORT, credits=700.0),
+                         reviewer=_SeqWorker(self.CLEAN_REVIEW, credits=100.0), budget=1500)
+        cuts = []
+        d.next_batch = lambda *a, **kw: cuts.append(1) or (0, self.CUT)
+        self.assertEqual(d.run(), 0)
+        self.assertEqual(len(cuts), 1)            # checked before the second cut
+        self.assertEqual(self._state()['status'], 'closed')
+        stopped = self._status(d)['stopped']
+        self.assertEqual({k: stopped[k] for k in ('reason', 'spent', 'budget')},
+                         {'reason': 'budget', 'spent': 800.0, 'budget': 1500})
+        self.assertEqual(set(stopped), {'at', 'reason', 'spent', 'budget'})
+        # A later run with room clears it.
+        d.budget = None
+        d.next_batch = lambda *a, **kw: self.NOTHING
+        self.assertEqual(d.run(), 0)
+        self.assertIsNone(self._status(d)['stopped'])
+        # Before any batch the estimate is DEFAULT_ESTIMATE (1200).
+        self.assertEqual(driver.DEFAULT_ESTIMATE, 1200)
+        d = self._driver(worker=driver.FakeWorker(self.REPORT), budget=1000)
+        d.next_batch = lambda *a, **kw: self.fail('over budget: nothing is cut')
+        self.assertEqual(d.run(), 0)
+        self.assertEqual(self._status(d)['stopped']['spent'], 0)
+        # A batch with unknown credits counts as the estimate, and a batch
+        # over budget is never stopped midway.
+        d = self._driver(worker=_SeqWorker(self.REPORT), budget=2000)
+        cuts = []
+        d.next_batch = lambda *a, **kw: cuts.append(1) or (0, self.CUT)
+        self.assertEqual(d.run(), 0)
+        self.assertEqual((len(cuts), self._state()['status']), (1, 'closed'))
+        self.assertEqual(self._status(d)['stopped']['spent'], 1200)
+        # The mean over this run's batches with known credits.
+        d._batch_credits = [None, 600.0, 1000.0]
+        self.assertEqual((d.estimate_next, d.credits_spent), (800.0, 2400.0))
+
+    def _status_tmp(self, status):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        path = os.path.join(tmp, driver.STATUS_REL)
+        os.makedirs(os.path.dirname(path))
+        with open(path, 'w') as f:
+            f.write(status if isinstance(status, str) else json.dumps(status))
+        return tmp, path
+
+    def test_clear_removes_an_exception(self):
+        exc = {'stage': 'checks', 'problems': ['0x401000: no verdict line'], 'at': 't'}
+        tmp, path = self._status_tmp({
+            'exceptions': {'b011': exc, 'b012': {'stage': 'worktree', 'problems': ['x'], 'at': 't'}},
+            'batches': {'b011': {'outcome': 'exception'}}, 'current': None})
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(driver.main(['--clear', 'b011'], repo=tmp), 0)
+        self.assertIn('b011', out.getvalue())
+        self.assertIn('0x401000: no verdict line', out.getvalue())
+        with open(path) as f:
+            status = json.load(f)
+        self.assertEqual(set(status['exceptions']), {'b012'})
+        self.assertEqual(status['batches'], {'b011': {'outcome': 'exception'}})
+        # It waits for the status lock, as every driver write does.
+        with filelock.hold(path + '.lock', 'test'):
+            done = []
+            t = threading.Thread(target=lambda: done.append(
+                driver.clear_exception(path, 'b012')))
+            t.start()
+            t.join(0.3)
+            self.assertTrue(t.is_alive())
+            with open(path) as f:
+                self.assertIn('b012', json.load(f)['exceptions'])
+        t.join(10)
+        self.assertEqual(done[0][0], 0)
+        with open(path) as f:
+            self.assertEqual(json.load(f)['exceptions'], {})
+
+    def test_clear_missing_id_exits_2(self):
+        tmp, path = self._status_tmp({'exceptions': {}, 'batches': {}})
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self.assertEqual(driver.main(['--clear', 'b099'], repo=tmp), 2)
+        self.assertIn('no exception for b099', err.getvalue())
+        empty = tempfile.mkdtemp()                 # no status file at all
+        self.addCleanup(shutil.rmtree, empty, True)
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(driver.main(['--clear', 'b099'], repo=empty), 2)
+        self.assertFalse(os.path.exists(os.path.join(empty, '.superpowers')))
+
+    def test_status_writes_take_the_lock(self):
+        d = self._driver(worker=driver.FakeWorker(self.REPORT))
+        d._update_status(lambda s: None)
+        with filelock.hold(d.status_path + '.lock', 'test'):
+            t = threading.Thread(target=lambda: d._update_status(
+                lambda s: s.__setitem__('stalled', {'at': 't', 'message': 'm'})))
+            t.start()
+            t.join(0.3)
+            self.assertTrue(t.is_alive())
+            self.assertIsNone(self._status(d)['stalled'])
+        t.join(10)
+        self.assertEqual(self._status(d)['stalled']['message'], 'm')
+
+    def test_corrupt_status_file_exits_1_with_a_message(self):
+        d = self._driver(worker=driver.FakeWorker(self.REPORT))
+        self._write_status(d, {})
+        with open(d.status_path, 'w') as f:
+            f.write('{"exceptions": ')              # torn
+        d.next_batch = lambda *a, **kw: self.fail('nothing is cut')
+        with mock.patch.object(driver.time, 'sleep'):
+            self.assertEqual(d.run(), 1)
+        self.assertTrue(any(d.status_path in l for l in self.logs))
+        # Mid-batch: the file goes bad while the worker runs.
+        self._write_status(d, {})
+        status_path = d.status_path
+
+        class Tearing(_SeqWorker):
+            def run(self, brief, cwd):
+                with open(status_path, 'w') as f:
+                    f.write('[1, 2')
+                return super().run(brief, cwd)
+        d.worker = Tearing(self.REPORT)
+        d.next_batch = lambda *a, **kw: (0, self.CUT)
+        self.logs.clear()
+        with mock.patch.object(driver.time, 'sleep'):
+            self.assertEqual(d.run(), 1)
+        self.assertTrue(any(d.status_path in l for l in self.logs))
+        # wave.py run, and --clear, on a corrupt file: exit 1, the file named.
+        for argv in (['--state', os.path.join(self.tmp, 'state-copy.json')],
+                     ['--clear', 'b011']):
+            tmp, path = self._status_tmp('not json')
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err), mock.patch.object(driver.time, 'sleep'):
+                self.assertEqual(driver.main(argv, repo=tmp), 1)
+            self.assertIn(path, err.getvalue())
 
 
 if __name__ == '__main__':
