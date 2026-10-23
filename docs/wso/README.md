@@ -169,8 +169,8 @@ print the tally. After a close, sync the worktree that has `first`
 checked out: `git -C <path> reset --hard first`. `status` is one line
 per batch, and `scorecard` rewrites the "## Scorecard" section of
 [xrec-report.md](xrec-report.md) from state (idempotent — the same
-state writes the same bytes); when `docs/wso/audit.json` (seed,
-population, base, and rows with `probe` replay|oracle|none and `result`
+state writes the same bytes); when `docs/wso/audit.json` (rule, seed,
+state, pool, drawn, and rows with `probe` replay|oracle|park and `result`
 match|flip|parked) exists, the section ends with one rule-3 audit sample
 paragraph rendered from it, and a malformed file fails the scorecard with
 exit 2. Waves 2 to 5 are imports and reuse

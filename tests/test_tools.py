@@ -13253,6 +13253,8 @@ class WaveResolveTest(unittest.TestCase):
             rc, out = self.resolve(side=side)
             self.assertEqual(rc, 1, out)
             self.assertIn('a fork/neither verdict decided by a dump reading', out)
+            self.assertIn('only way to record it', out)
+            self.assertNotIn('--allow-dump', out)
         self.assertEqual(len(self.probe_list()), 1)
         self.assertNotIn('0x716E80',
                          self.wave.load_state(self.state)['batches']['b011']['verdicts'])
@@ -13293,10 +13295,10 @@ class WaveResolveTest(unittest.TestCase):
             rows = ([{'address': f'0x{i}', 'probe': 'replay', 'result': 'match'}
                      for i in range(6)]
                     + [{'address': '0x7', 'probe': 'oracle', 'result': 'match'}]
-                    + [{'address': f'0x{i}', 'probe': 'none', 'result': 'parked'}
+                    + [{'address': f'0x{i}', 'probe': 'park', 'result': 'parked'}
                        for i in (8, 9, 10)])
-        data = {'seed': 'rule3-2026-10-23', 'population': 199,
-                'base': '9fad8484', 'rows': rows}
+        data = {'rule': 3, 'seed': 'rule3-2026-10-23', 'state': '9fad8484',
+                'pool': 199, 'drawn': 10, 'rows': rows}
         data.update(kw)
         _write(os.path.join(os.path.dirname(self.state), 'audit.json'),
                json.dumps(data))
@@ -13329,11 +13331,11 @@ class WaveResolveTest(unittest.TestCase):
 
     def test_scorecard_rejects_malformed_audit(self):
         self.repo()
-        for bad in ({'seed': 's', 'population': 1, 'base': 'b'},
-                    {'seed': 's', 'population': 1, 'base': 'b', 'rows': 'x'},
-                    {'seed': 's', 'population': 1, 'base': 'b',
+        for bad in ({'seed': 's', 'pool': 1, 'state': 'b', 'drawn': 1},
+                    {'seed': 's', 'pool': 1, 'state': 'b', 'drawn': 1, 'rows': 'x'},
+                    {'seed': 's', 'pool': 1, 'state': 'b', 'drawn': 1,
                      'rows': [{'probe': 'replay', 'result': 'maybe'}]},
-                    {'seed': 's', 'population': 1, 'base': 'b',
+                    {'seed': 's', 'pool': 1, 'state': 'b', 'drawn': 1,
                      'rows': [{'probe': 'guess', 'result': 'match'}]}):
             _write(os.path.join(os.path.dirname(self.state), 'audit.json'),
                    json.dumps(bad))

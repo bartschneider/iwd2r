@@ -747,6 +747,19 @@ def _evidence_kind(repo, branch, address):
     return m.group(1), ''
 
 
+def _verdict_entry(repo, batch, address, side, case):
+    """(verdict dict, None) or (None, error): the losing-kind rule and the
+    shape of a recorded verdict, shared by `verdict` and `resolve`."""
+    losing = None
+    if side == 'ours':
+        losing = 'trace'   # his evidence is always a trace of the exe
+    elif side == 'fork':
+        losing, err = _evidence_kind(repo, batch['branch'], address)
+        if losing is None:
+            return None, err
+    return {'side': side, 'case': case, 'losing_kind': losing}, None
+
+
 def record_verdict(state_path=STATE_PATH, repo=ROOT, batch_id=None,
                    address=None, side=None, case=None, measured=None):
     """Record one row's outcome.  `side` says who won: fork (his body is
@@ -771,17 +784,13 @@ def record_verdict(state_path=STATE_PATH, repo=ROOT, batch_id=None,
                 if _addr_key(r.get('address')) == _addr_key(address)), None)
     if row is None:
         return 1, f'{address} is not one of batch {batch_id}\'s rows\n'
-    losing = None
-    if side == 'ours':
-        losing = 'trace'   # his evidence is always a trace of the exe
-    elif side == 'fork':
-        losing, err = _evidence_kind(repo, batch['branch'], row['address'])
-        if losing is None:
-            return 1, err + '\n'
-    batch['verdicts'][row['address']] = {
-        'side': side, 'case': case, 'losing_kind': losing}
+    entry, err = _verdict_entry(repo, batch, row['address'], side, case)
+    if entry is None:
+        return 1, err + '\n'
+    losing = entry['losing_kind']
+    batch['verdicts'][row['address']] = entry
     if measured is not None:
-        batch['verdicts'][row['address']]['measured'] = measured
+        entry['measured'] = measured
     save_state(state_path, state)
     kind = f', losing kind: {losing}' if losing else ''
     return 0, f'verdict {batch_id} {row["address"]} {side} (case {case}{kind})\n'
@@ -929,7 +938,9 @@ def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
         if (v.get('side') in ('fork', 'neither')
                 and deciding_kind(v.get('case')) == 'dump reading'
                 and used is None):
-            problems.append(_dump_refusal(addr, v.get('case')))
+            problems.append(_dump_refusal(
+                addr, v.get('case'),
+                'probe before import, or --allow-dump <ruling id>'))
     if wt is not None:
         st = subprocess.run(['git', '-C', wt, 'status', '--porcelain', '-uall'],
                             capture_output=True, text=True)
@@ -997,11 +1008,11 @@ def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
 
 # -- resolve -------------------------------------------------------------
 
-def _dump_refusal(addr, case):
+def _dump_refusal(addr, case, remedy):
     """The refusal close and resolve share for a fork/neither verdict
-    decided by a dump reading."""
+    decided by a dump reading; `remedy` is the command's own hint."""
     return (f'{addr}: a fork/neither verdict decided by a dump reading '
-            f'({case}); probe before import, or --allow-dump <ruling id>')
+            f'({case}); {remedy}')
 
 
 def _evidence_decided_by(text, case):
@@ -1036,7 +1047,9 @@ def resolve_probe(address, side, case, state_path=STATE_PATH, repo=ROOT):
         return 2, f'no batch {batch_id} (named by the probe list entry)\n'
     addr = entry['address']
     if side in ('fork', 'neither') and deciding_kind(case) == 'dump reading':
-        return 1, _dump_refusal(addr, case) + '\n'
+        return 1, _dump_refusal(
+            addr, case,
+            'a probe or replay checkpoint is the only way to record it') + '\n'
     rel = _evidence_rel(addr)
     try:
         with open(os.path.join(repo, rel), encoding='utf-8') as f:
@@ -1065,15 +1078,11 @@ def resolve_probe(address, side, case, state_path=STATE_PATH, repo=ROOT):
         row['class'] = (t.get('auto_class', t['class']) if t and 'class' in t
                         else row.get('class', 'ambiguous'))
         batch['rows'].append(row)
-    batch['verdicts'][addr] = {
-        'side': side, 'case': case,
-        'losing_kind': 'trace' if side == 'ours' else None,
-        'measured': 'none'}
-    if side == 'fork':
-        losing, err = _evidence_kind(repo, batch['branch'], addr)
-        if losing is None:
-            return 1, err + '\n'
-        batch['verdicts'][addr]['losing_kind'] = losing
+    verdict, err = _verdict_entry(repo, batch, addr, side, case)
+    if verdict is None:
+        return 1, err + '\n'
+    verdict['measured'] = 'none'
+    batch['verdicts'][addr] = verdict
     remaining = [e for e in probes if e is not entry]
     save_state(state_path, state)
     _save_json(probe_path, remaining)
@@ -1187,7 +1196,7 @@ def scorecard_text(state):
     return '\n'.join(lines) + '\n'
 
 
-AUDIT_PROBES = ('replay', 'oracle', 'none')
+AUDIT_PROBES = ('replay', 'oracle', 'park')
 AUDIT_RESULTS = ('match', 'flip', 'parked')
 
 
@@ -1201,19 +1210,20 @@ def audit_text(audit):
             raise TypeError
         probes = [r['probe'] for r in rows]
         results = [r['result'] for r in rows]
-        head = (f'seed {audit["seed"]} over {audit["population"]} '
-                f'dump-decided ours rows at {audit["base"]}')
+        head = (f'seed {audit["seed"]} over {audit["pool"]} '
+                f'dump-decided ours rows at {audit["state"]}')
+        drawn = audit['drawn']
     except (KeyError, TypeError):
-        return None, ('audit file: needs an object with seed, population, '
-                      'base and a list of rows\n')
+        return None, ('audit file: needs an object with seed, pool, state, '
+                      'drawn and a list of rows\n')
     if (any(p not in AUDIT_PROBES for p in probes)
             or any(r not in AUDIT_RESULTS for r in results)):
         return None, (f'audit file: every row needs probe in '
                       f'{"|".join(AUDIT_PROBES)} and result in '
                       f'{"|".join(AUDIT_RESULTS)}\n')
-    probed = [p for p in probes if p in ('replay', 'oracle')]
-    return (f'Audit sample (rule 3): {head}; {len(rows)} drawn: '
-            f'{len(probed)} probed (replay {probes.count("replay")}, '
+    return (f'Audit sample (rule 3): {head}; {drawn} drawn: '
+            f'{probes.count("replay") + probes.count("oracle")} probed '
+            f'(replay {probes.count("replay")}, '
             f'oracle {probes.count("oracle")}), '
             f'{results.count("parked")} parked, '
             f'{results.count("flip")} flips.\n'), None
