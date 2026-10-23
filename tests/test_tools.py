@@ -11515,6 +11515,82 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(d.run(), 0)
         self.assertEqual(ran, [])
 
+    def _live_clear_driver(self):
+        """The first cut (b011) runs and blocks on `release`; b012 is
+        assigned with an exception entry; the next cut would be b013."""
+        d = self._driver(worker=driver.FakeWorker(self.REPORT))
+        with open(self.state_path) as f:
+            state = json.load(f)
+        state['batches']['b012'] = dict(state['batches']['b011'], branch='p3/wso-b012')
+        with open(self.state_path, 'w') as f:
+            json.dump(state, f)
+        os.makedirs(os.path.dirname(d.status_path))
+        with open(d.status_path, 'w') as f:
+            json.dump({'exceptions': {'b012': {'stage': 'checks'}}, 'running': {},
+                       'batches': {'b012': {'outcome': 'exception',
+                                            'stage': 'checks'}}}, f)
+        d = self._reload(d)
+        inside, release = threading.Event(), threading.Event()
+        events = []
+
+        def run_batch(bid, resume=None):
+            events.append('run ' + bid)
+            if bid == 'b011':
+                inside.set()
+                self.assertTrue(release.wait(10))
+            return 'closed'
+        d.run_batch = run_batch
+        cuts = iter([(0, self.CUT), (0, self.CUT.replace('b011', 'b013')),
+                     self.NOTHING])
+
+        def cut(*a, **kw):
+            events.append('cut')
+            return next(cuts)
+        d.next_batch = cut
+        return d, inside, release, events
+
+    def _edit_status(self, d, fn):
+        with open(d.status_path) as f:
+            status = json.load(f)
+        fn(status)
+        with open(d.status_path, 'w') as f:
+            json.dump(status, f)
+
+    def _run_with_clear(self, d, inside, release, edit):
+        codes = []
+        t = threading.Thread(target=lambda: codes.append(d.run()))
+        t.start()
+        try:
+            self.assertTrue(inside.wait(10))
+            self._edit_status(d, edit)
+        finally:
+            release.set()
+            t.join(20)
+        return codes
+
+    def test_run_picks_up_an_exception_cleared_while_running(self):
+        d, inside, release, events = self._live_clear_driver()
+        codes = self._run_with_clear(
+            d, inside, release, lambda s: s.__setitem__('exceptions', {}))
+        self.assertEqual(codes, [0])
+        # The cleared batch goes before the next cut, and only once.
+        self.assertEqual(events, ['cut', 'run b011', 'run b012', 'cut',
+                                  'run b013', 'cut'])
+        line = ('b012: exception cleared while running; retrying at its '
+                'checks stage')
+        self.assertEqual(self.logs.count(line), 1)
+
+    def test_live_clear_skips_a_batch_that_is_still_running(self):
+        d, inside, release, events = self._live_clear_driver()
+
+        def edit(s):
+            s['exceptions'] = {}
+            s['running'] = {'b012': {'at': 't'}}   # stale: its own retry
+        codes = self._run_with_clear(d, inside, release, edit)
+        self.assertEqual(codes, [0])
+        self.assertNotIn('run b012', events)
+        self.assertEqual([l for l in self.logs if 'cleared while running' in l], [])
+
     def _reload(self, d):
         """A fresh Driver over the same paths, reading the status file again."""
         n = driver.Driver(d.repo, d.state_path, d.worker, d.reviewer, d.ledger_path,
