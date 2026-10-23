@@ -497,7 +497,8 @@ def add_side_args(p):
                         % oracle.REPLAY_TIMEOUT)
     p.add_argument('--dump-every', type=oracle.non_negative_int,
                    default=oracle.REPLAY_DUMP_EVERY,
-                   help='original side only: a dump every N frames '
+                   help='a dump every N frames, both sides (ours gets '
+                        'IWD2R_DUMP_EVERY too) '
                         '(default %(default)s)')
     p.add_argument('--clicks', type=int, default=0, metavar='N',
                    help='insert N click actions before the trailing quit, '

@@ -107,6 +107,8 @@ class Trace:
         self.detach_reason = ""
         self.errors = []
         self.counts = {}
+        self.final = False       # the final HITS message (sent at process exit) arrived
+        self.script = None
 
     def _write(self, fp, line: str) -> None:
         if fp.closed:
@@ -134,7 +136,15 @@ class Trace:
         payload = message["payload"]
         tag = payload.get("tag")
         if tag == "HITS":
+            if self.final:
+                return
             self.counts = payload.get("counts", {})
+            if payload.get("final"):
+                self.final = True
+                try:
+                    self.script.post({"type": "HITSACK"})   # lets the exiting process go on
+                except Exception:
+                    pass
             return          # the timer fires every 2s; only the totals matter
         self.record(payload)
         if tag == "loaded" and not self.loaded:
@@ -151,6 +161,7 @@ class Trace:
     def finish(self, hit: str, hit_min: int, require_loaded: bool = True) -> int:
         for name, n in sorted(self.counts.items()):
             self.say("HITS %s %d" % (name, n))
+        self.say("HITS-FINAL %s" % ("yes" if self.final else "no"))
 
         if self.crash is not None:
             c = self.crash
@@ -275,6 +286,7 @@ def main() -> int:
                                              time.monotonic() + ns.attach_timeout)
         session.on("detached", trace.on_detached)
         script = session.create_script(build_js(spec))
+        trace.script = script
         script.on("message", trace.on_message)
         script.load()
         if spawned is not None:

@@ -2001,7 +2001,8 @@ class Driver:
             with open(self.frida_map, encoding='utf-8', errors='replace') as f:
                 map_text = f.read()
             self._stage(batch_id, 'frida')
-            got = truth.frida_batch(batch_id, rows, sigs, map_text, run_frida=run_frida)
+            got = truth.frida_batch(batch_id, rows, sigs, map_text, run_frida=run_frida,
+                                    headers=truth._our_headers(worktree))
             got = {key(a): v for a, v in got.items()}
         except Exception as e:
             self.log('%s: frida path skipped: %s' % (batch_id, _one_line(repr(e), 300)))

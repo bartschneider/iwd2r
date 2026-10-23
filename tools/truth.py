@@ -599,10 +599,9 @@ def _map_matches(name, publics):
 PROTO_TYPES = {
     'byte': 'u8', 'boolean': 'u8', 'bool': 'u8', 'uchar': 'u8', 'char': 'u8', 'uint8_t': 'u8', 'u8': 'u8',
     'short': 's16', 'int16_t': 's16', 'word': 'u16', 'ushort': 'u16', 'uint16_t': 'u16',
-    'bool32': 's32', 'int': 's32', 'long': 's32', 'int32_t': 's32', 'LONG': 's32',
+    'int': 's32', 'long': 's32', 'int32_t': 's32',
     'dword': 'u32', 'uint': 'u32', 'ulong': 'u32', 'uint32_t': 'u32', 'size_t': 'u32',
 }
-PROTO_TYPES.update({'BOOL': 's32'})
 _PROTO_MODIFIERS = frozenset({'const', 'volatile', 'struct', 'class', 'enum', 'virtual', 'static',
                               'inline', 'explicit', 'extern', 'friend', 'constexpr'})
 _PROTO_SIGN = frozenset({'unsigned', 'signed'})
@@ -617,7 +616,7 @@ def _proto_type(text):
     words = [w for w in re.split(r'\s+', text.strip()) if w and w not in _PROTO_MODIFIERS]
     if words == ['void']:
         return 'void'
-    if words == ['BOOL']:
+    if words == ['BOOL']:   # the Win32 int; checked before lowercasing, where it would read as bool (a byte)
         return 's32'
     sign = [w for w in words if w in _PROTO_SIGN]
     base = [w.lower() for w in words if w not in _PROTO_SIGN]
@@ -860,28 +859,33 @@ def _scenario_timeout(root, scenario):
 
 
 def _read_status(path):
-    """(RESULT: verdict word or None, {hook: total hits}) of a sidecar status
-    file (`HITS <name> <n>` lines, then `RESULT: <verdict> ...`); (None, None)
-    when there is no file."""
+    """(RESULT: verdict word or None, {hook: total hits}, final) of a sidecar
+    status file (`HITS <name> <n>` lines, `HITS-FINAL yes|no`, then `RESULT:
+    <verdict> ...`); final is True when the totals are the exit-time message's
+    (a file without the line is not final); (None, None, False) when there is
+    no file."""
     try:
         with open(path, encoding='utf-8', errors='replace') as f:
             lines = f.read().splitlines()
     except OSError:
-        return None, None
-    verdict, hits = None, {}
+        return None, None, False
+    verdict, hits, final = None, {}, False
     for line in lines:
         parts = line.split()
         if len(parts) == 3 and parts[0] == 'HITS' and parts[2].isdigit():
             hits[parts[1]] = int(parts[2])
+        elif parts[:1] == ['HITS-FINAL']:
+            final = parts[1:] == ['yes']
         elif parts[:1] == ['RESULT:'] and len(parts) > 1:
             verdict = parts[1]
-    return verdict, hits
+    return verdict, hits, final
 
 
 def frida_run(batch_id, table, scenarios, run=subprocess.run, root=ROOT, loaded_rva=None,
               clicks=3, hit_min=1, timeout=None, attempt_reason=None):
     """{scenario: {'orig': events, 'ours': events, 'orig_path': path or None,
-    'ours_path': path or None, 'orig_exit': int, 'ours_exit': int,
+    'ours_path': path or None, 'orig_exit': int, 'ours_exit': int, 'final':
+    {'orig': bool, 'ours': bool} (the totals are the exit-time ones),
     'result': {'orig': verdict word, 'ours': verdict word}, 'hits': {'orig':
     {hook: total}, 'ours': {...}} (None per side without a status file),
     'measured': bool, 'failed': reason or None}}: for each scenario, both
@@ -948,10 +952,11 @@ def frida_run(batch_id, table, scenarios, run=subprocess.run, root=ROOT, loaded_
                     path = None
                 result[key + '_path'] = path
                 result[key] = _read_events(path) if path else []
-                verdict, hits = _read_status(os.path.join(root, folder, 'replay', out + '.status')
-                                             ) if folder else (None, None)
+                verdict, hits, final = _read_status(os.path.join(root, folder, 'replay', out + '.status')
+                                                    ) if folder else (None, None, False)
                 result['result'][key] = verdict
                 result['hits'][key] = hits
+                result.setdefault('final', {})[key] = final
                 rc = getattr(done, 'returncode', 0)
                 result[key + '_exit'] = rc
                 if result['failed'] is None and (rc != 0 or path is None):
@@ -1066,11 +1071,13 @@ def frida_verdicts(traces, rows, skipped=None):
                 continue
             code = trace_diff.compare(orig, ours)
             # The hooks cap the events they log, so equal events do not show
-            # equal frequency: the sidecars' totals must match too.
+            # equal frequency: the sidecars' totals must match too, and only
+            # the exit-time (final) totals are complete; the timer's last
+            # message loses a run-dependent tail.
             totals = t.get('hits')
-            if code == 0 and totals is not None and not (totals.get('orig') and totals.get('ours')):
-                # A side without HITS lines is an infrastructure artefact,
-                # not a difference, and never proof of equality.
+            final = t.get('final') or {}
+            if code == 0 and totals is not None and not (
+                    totals.get('orig') and totals.get('ours') and final.get('orig') and final.get('ours')):
                 unmeasured.append(scenario)
             elif code == 0 and totals is not None \
                     and totals['orig'].get(tag, 0) != totals['ours'].get(tag, 0):
@@ -1085,7 +1092,7 @@ def frida_verdicts(traces, rows, skipped=None):
         elif partial:
             verdicts[key] = ('scenario failed', '; '.join(partial))
         elif unmeasured:
-            verdicts[key] = ('not measured', 'no HITS totals in %s' % ', '.join(unmeasured))
+            verdicts[key] = ('not measured', 'no final HITS totals in %s' % ', '.join(unmeasured))
         elif equal:
             verdicts[key] = ('equal', EQUAL_PREFIX + ', '.join(equal))
         else:
@@ -1385,13 +1392,17 @@ def frida_default(path=os.path.join(ROOT, CALIBRATION_REL)):
 
 
 def frida_batch(batch_id, rows, signatures, map_text, scenarios=FRIDA_SCENARIOS,
-                run_frida=frida_run, headers=None):
+                run_frida=frida_run, headers=None, info=None):
     """{'0x<ADDR>': (status, detail)} for the rows through one batched Frida
     differential run: the hook table from the signatures and our .map text,
     run_frida(batch_id, table, scenarios) for the traces, frida_verdicts to
-    compare. headers (our src/*.h texts) type the hooks from our prototypes.
-    run_frida is injectable (the default launches the game)."""
-    table = hook_table(rows, signatures, map_text, list(scenarios), headers)
+    compare. headers (our src/*.h texts; default this checkout's) type the
+    hooks from our prototypes; info, a dict, receives typed_from. run_frida is
+    injectable (the default launches the game)."""
+    table = hook_table(rows, signatures, map_text, list(scenarios),
+                       _our_headers() if headers is None else headers)
+    if info is not None:
+        info['typed_from'] = dict(table.get('typed_from', {}))
     traces = run_frida(batch_id, table, list(scenarios)) if table['original']['hooks'] else {}
     return frida_verdicts(traces, rows, table['skipped'])
 
@@ -1400,16 +1411,17 @@ def _scenario_summary(traces):
     out = {}
     for name, t in traces.items():
         t = _as_scenario(t)
-        out[name] = {k: t.get(k) for k in ('orig_exit', 'ours_exit', 'failed', 'result', 'hits')}
+        out[name] = {k: t.get(k) for k in ('orig_exit', 'ours_exit', 'failed', 'result', 'hits', 'final')}
         out[name]['trace'] = {side: os.path.relpath(t[side + '_path'], ROOT) if t.get(side + '_path') else None
                               for side in ('orig', 'ours')}
     return out
 
 
-def _our_headers():
-    """The texts of our src/*.h, for the hook tables' prototypes."""
+def _our_headers(root=None):
+    """The texts of our src/*.h (under root, default this checkout), for the
+    hook tables' prototypes."""
     texts = []
-    for path in sorted(glob.glob(os.path.join(ROOT, 'src', '*.h'))):
+    for path in sorted(glob.glob(os.path.join(root or ROOT, 'src', '*.h'))):
         with open(path, encoding='utf-8', errors='replace') as f:
             texts.append(f.read())
     return texts
@@ -1427,7 +1439,7 @@ def _calibrate_frida(rows, read_evidence, map_path):
         sig = evidence_signature(text) if text else None
         if sig:
             sigs[r['address']] = sig
-    captured = {}
+    captured, info = {}, {}
 
     def run_frida(batch_id, table, scenarios):
         captured.update(frida_run(batch_id, table, scenarios,
@@ -1437,14 +1449,15 @@ def _calibrate_frida(rows, read_evidence, map_path):
     try:
         with open(map_path, encoding='utf-8', errors='replace') as f:
             map_text = f.read()
-        got = frida_batch('cal', rows, sigs, map_text, run_frida=run_frida, headers=_our_headers())
+        got = frida_batch('cal', rows, sigs, map_text, run_frida=run_frida, info=info)
         error = None
     except Exception as e:
         got, error = {}, repr(e)[:300]
     got = {_key(a): v for a, v in got.items()}
     for r in rows:
         got.setdefault(_key(r['address']), ('not measured', error or 'no result'))
-    return got, {'scenarios': _scenario_summary(captured), 'error': error}
+    return got, {'scenarios': _scenario_summary(captured), 'error': error,
+                 'typed_from': info.get('typed_from', {})}
 
 
 def _calibrate_main(args):
@@ -1489,6 +1502,7 @@ def _calibrate_main(args):
     if frida is not None:
         cal['frida_rows'] = {a: list(v) for a, v in sorted(frida.items())}
         cal['frida_scenarios'] = frida_info.get('scenarios', {})
+        cal['frida_typed_from'] = frida_info.get('typed_from', {})
         if frida_info.get('error'):
             cal['paths']['frida']['error'] = frida_info['error']
         for a, (status, detail) in sorted(frida.items()):

@@ -10120,6 +10120,32 @@ class DriverTest(unittest.TestCase):
                     self.assertIn('Frida trace diff shows ours different from the original', f.read())
                 self.assertIn('- frida different, kept ours: 0x402000 differs in world_entry', self._ledger(d))
 
+    def test_driver_frida_phase_types_tables_from_the_batch_worktrees_headers(self):
+        trace = TruthTest._trace
+        got = []
+        truth_mod = driver._tool('truth')
+        real = truth_mod.frida_batch
+
+        def spy(*a, **kw):
+            got.append(kw.get('headers'))
+            return real(*a, **kw)
+        map_path = os.path.join(tempfile.mkdtemp(), 'iwd2r.map')
+        self.addCleanup(shutil.rmtree, os.path.dirname(map_path), True)
+        with open(map_path, 'w') as f:
+            f.write(TruthTest.MAP)
+        d = self._measured_driver(worker=_SeqWorker('# r\n\n## Verdicts\n\nverdict 0x401000 ours case dump-401000\nverdict 0x402000 ours case dump-402000\n'),
+                                  frida=True, frida_map=map_path,
+                                  frida_run=lambda *a, **k: {'world_entry': (trace(('fn_402000', 7, 3)), trace(('fn_402000', 7, 3)))},
+                                  oracle_run=lambda *a: {'0x401000': ('pass', 'ok')})
+        os.makedirs(os.path.join(self.wt, 'src'), exist_ok=True)
+        with open(os.path.join(self.wt, 'src', 'IcewindMisc.h'), 'w') as f:
+            f.write('class IcewindMisc {\n    BOOLEAN Roll(DWORD a, STR_RES& b);\n};\n')
+        with mock.patch.object(truth_mod, 'frida_batch', spy):
+            d.run_batch('b011')
+        self.assertEqual(len(got), 1)
+        self.assertEqual(got[0], truth_mod._our_headers(self.wt))
+        self.assertTrue(any('BOOLEAN Roll' in h for h in got[0]))
+
     def test_driver_frida_runs_once_even_with_a_fix_round(self):
         calls = []
         map_path = os.path.join(tempfile.mkdtemp(), 'iwd2r.map')
@@ -13641,7 +13667,7 @@ class TruthTest(unittest.TestCase):
         rows = self.ROWS[:1]
 
         def scenario(orig_n, ours_n):
-            return {'orig': t, 'ours': t, 'failed': None,
+            return {'orig': t, 'ours': t, 'failed': None, 'final': {'orig': True, 'ours': True},
                     'hits': {'orig': {'fn_5845D0': orig_n}, 'ours': {'fn_5845D0': ours_n}}}
         v = truth.frida_verdicts({'walk_and_talk': scenario(283, 310)}, rows)
         self.assertEqual(v['0x5845D0'][0], 'different')
@@ -13656,7 +13682,79 @@ class TruthTest(unittest.TestCase):
                      {'orig': {'fn_5845D0': 4}, 'ours': {}}, {'orig': None, 'ours': {'fn_5845D0': 4}}):
             v = truth.frida_verdicts({'w': dict(bare, hits=hits)}, rows)['0x5845D0']
             self.assertEqual(v[0], 'not measured', hits)
-            self.assertIn('no HITS totals', v[1])
+            self.assertIn('no final HITS totals', v[1])
+        # totals that were not the exit-time ones, on either side, never read equal or different
+        full = {'orig': {'fn_5845D0': 4}, 'ours': {'fn_5845D0': 9}}
+        for final in ({'orig': True, 'ours': False}, {'orig': False, 'ours': True}, {}, {'orig': False, 'ours': False}):
+            v = truth.frida_verdicts({'w': dict(bare, hits=full, final=final)}, rows)['0x5845D0']
+            self.assertEqual(v[0], 'not measured', final)
+            self.assertEqual(v[1], 'no final HITS totals in w')
+        same = {'orig': {'fn_5845D0': 4}, 'ours': {'fn_5845D0': 4}}
+        self.assertEqual(truth.frida_verdicts({'w': dict(bare, hits=same, final={'orig': True, 'ours': False})},
+                                              rows)['0x5845D0'][0], 'not measured')
+        # events that differ are different whether or not the totals are final
+        bad = [{'tag': 'fn_5845D0', 'a0_s32': 8}, {'tag': 'fn_5845D0_ret', 'ret': 3}]
+        self.assertEqual(truth.frida_verdicts({'w': {'orig': t, 'ours': bad, 'failed': None, 'hits': same, 'final': {}}},
+                                              rows)['0x5845D0'][0], 'different')
+
+    def test_exit_time_hit_totals(self):
+        hooks_mod = load_tool('frida/hooks')
+        js = hooks_mod.hit_counts_js([{'name': 'fn_A'}, {'name': 'fn_B'}])
+        self.assertIn("'fn_A': cnt0, 'fn_B': cnt1", js)
+        self.assertIn("'ExitProcess'", js)
+        self.assertIn("'TerminateProcess'", js)
+        self.assertIn("final: true", js)
+        self.assertIn("recv('HITSACK'", js)
+        self.assertIn('.wait()', js)
+        self.assertIn('setInterval', js)
+        # the sidecar: a final HITS replaces the timer's, is acked, and is reported
+        orig = load_tool('frida/orig')
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, True)
+        posted = []
+        tr = orig.Trace(os.path.join(d, 'o.jsonl'), os.path.join(d, 'o.status'))
+        tr.script = type('S', (), {'post': lambda self, m: posted.append(m)})()
+        tr.on_message({'type': 'send', 'payload': {'tag': 'HITS', 'counts': {'fn_A': 3}}}, None)
+        self.assertFalse(tr.final)
+        self.assertEqual(posted, [])
+        tr.on_message({'type': 'send', 'payload': {'tag': 'HITS', 'final': True, 'counts': {'fn_A': 9}}}, None)
+        tr.on_message({'type': 'send', 'payload': {'tag': 'HITS', 'counts': {'fn_A': 4}}}, None)
+        self.assertTrue(tr.final)
+        self.assertEqual(posted, [{'type': 'HITS' + 'ACK'}])
+        self.assertEqual(tr.counts, {'fn_A': 9})
+        tr.loaded = True
+        tr.finish('', 1)
+        with open(os.path.join(d, 'o.status')) as f:
+            text = f.read()
+        self.assertIn('HITS fn_A 9', text)
+        self.assertIn('HITS-FINAL yes', text)
+        self.assertEqual(truth._read_status(os.path.join(d, 'o.status')), ('CLEAN', {'fn_A': 9}, True))
+        tr2 = orig.Trace(os.path.join(d, 'p.jsonl'), os.path.join(d, 'p.status'))
+        tr2.loaded = True
+        tr2.counts = {'fn_A': 2}
+        tr2.finish('', 1)
+        self.assertEqual(truth._read_status(os.path.join(d, 'p.status'))[2], False)
+        self.assertEqual(truth._read_status(os.path.join(d, 'none.status')), (None, None, False))
+        # frida_run carries it per side
+        with tempfile.TemporaryDirectory() as root:
+            yes = 'HITS fn_5845D0 4\nHITS-FINAL yes\nRESULT: CLEAN\n'
+            no = 'HITS fn_5845D0 4\nRESULT: CLEAN\n'
+            fake = self._frida_fake(root, status={'original': yes, 'ours': no})
+            table = truth.hook_table(self.ROWS, self.SIGS, self.MAP, ['s1'])
+            r = truth.frida_run('b011', table, ['s1'], run=fake, root=root)['s1']
+            self.assertEqual(r['final'], {'orig': True, 'ours': False})
+
+    def test_frida_batch_types_from_our_headers_by_default(self):
+        seen = []
+        rows = [{'address': '0x100', 'name': 'CTlkTable::Fetch'}]
+        sigs = {'0x100': 'uint Fetch(uint a, int b)'}
+        info = {}
+        with mock.patch.object(truth, '_our_headers', lambda root=None: ['class CTlkTable {\n BOOLEAN Fetch(DWORD a, STR_RES& b);\n};\n']):
+            truth.frida_batch('b', rows, sigs, self.TYPED_MAP, run_frida=lambda b, t, s: seen.append(t) or {}, info=info)
+            self.assertEqual(seen[0]['original']['hooks'][0]['args'], ['u32', 'ptr'])
+            self.assertEqual(info['typed_from'], {'0x100': 'ours'})
+            truth.frida_batch('b', rows, sigs, self.TYPED_MAP, run_frida=lambda b, t, s: seen.append(t) or {}, headers=[])
+            self.assertEqual(seen[1]['original']['hooks'][0]['args'], ['u32', 's32'])
 
     def test_trace_source_hashes_the_files_and_check_evidence_accepts_it(self):
         import tempfile
@@ -13838,6 +13936,7 @@ class TruthTest(unittest.TestCase):
                 hits = {'orig': {'fn_%s' % r['address'][2:]: 1 for r in picked[:4]}}
                 hits['ours'] = dict(hits['orig'])
                 ok = {'orig': orig, 'ours': ours, 'orig_path': None, 'ours_path': None, 'orig_exit': 0,
+                      'final': {'orig': True, 'ours': True},
                       'ours_exit': 0, 'result': {'orig': 'CLEAN', 'ours': 'CLEAN'}, 'hits': hits,
                       'measured': True, 'failed': None}
                 # ours failed, but the original completed and never hit any hook: "not hit"
