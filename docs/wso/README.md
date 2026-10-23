@@ -177,8 +177,8 @@ evidence must be `kind: trace` or better instead.
 
 `wave.py run` ([tools/driver.py](../../tools/driver.py)) runs that loop
 without a coordinator turn per batch: `next` (cut and triage), the brief,
-one headless worker (`claude-glm`, `glm-5.3-flash[1m]`, the batch
-worktree as its cwd), the mechanical checks with one fix round, a review
+one headless worker from a pool (by default `claude-glm`,
+`glm-5.3-flash[1m]`, the batch worktree as its cwd), the mechanical checks with one fix round, a review
 when it can matter (any fork or neither verdict, or the seeded
 twenty-percent sample) with one fix round, then the verdicts, `close`,
 the push of `first:main first:first` to `iwd2r`, and a templated
@@ -187,17 +187,53 @@ the push of `first:main first:first` to `iwd2r`, and a templated
 itself uses no model.
 
     python3 -I tools/wave.py run --workers 2 --budget 50000
+    python3 -I tools/wave.py run --queue wave1 --pool claude=claude:sonnet:1
+    python3 -I tools/wave.py run --pool glm:2 --pool claude --budget-glm 30000
+    python3 -I tools/wave.py run --queue import --pool claude
     python3 -I tools/wave.py run --clear b011
     python3 -I tools/wave.py run --dry-run --state /outside/the/repo/state-copy.json
 
-- `--workers N`: stored; batches run one at a time until the worker
-  pools land.
-- `--budget C`: credits for this run (no limit without it). Before each
-  new batch (a cut, or the retry of a cleared exception) the run stops
-  when the credits spent plus the next batch's estimate exceed `C`; a
-  batch is never stopped midway. The estimate is the mean of this run's
-  batches with known credits, 1200 before there is one, and a batch whose
-  credits are unknown counts as the estimate.
+- `--pool NAME=WRAPPER:MODEL[:WORKERS]`: a worker pool; repeatable.
+  `WORKERS` defaults to 1. The two known names also take the short form
+  `NAME[:WORKERS]`, which fills in the wrapper and model: `glm` is
+  `claude-glm:glm-5.3-flash[1m]` on either queue, and `claude` is
+  `claude:sonnet` on `--queue wave1` and `claude:haiku` on
+  `--queue import`. With no `--pool` the driver has one pool,
+  `glm=claude-glm:glm-5.3-flash[1m]:2`. A pool whose wrapper is not
+  `claude-glm` gets its model as `--model <model>` (not `CLAUDE_GLM_MODEL`),
+  and its transcripts are read from `~/.claude/projects` (or
+  `CLAUDE_CONFIG_DIR`).
+- `--reviewer-model NAME=MODEL`: the model that pool's reviewer uses
+  (same wrapper as the pool); repeatable. Defaults: `sonnet` for the
+  `claude` pool, `glm-5.3-flash[1m]` for the `glm` pool, and the pool's
+  own worker model for any other pool.
+- `--workers N`: the default pool's worker count. It is an error
+  together with `--pool`: give each pool its own `:WORKERS`.
+- `--budget C`: credits for this run over all pools (no limit without
+  it). Before each new batch (a cut, or the retry of a cleared
+  exception) the run stops when the credits spent plus the next batch's
+  estimate exceed `C`; a batch is never stopped midway. The estimate is
+  the mean of this run's batches with known credits, 1200 before there
+  is one, and a batch whose credits are unknown counts as the estimate.
+- `--budget-NAME C`: the same cap for one pool; that pool stops
+  (`stopped: "budget"`) and the others go on. Z.ai credits price only
+  GLM turns, so `--budget-NAME` on a pool whose model is not GLM is
+  refused with a message (ruling R40), and so is a name that is no pool.
+- `--queue wave1|import`: which list to work (default `wave1`). `wave1`
+  is `docs/wso/wave-state.json`: the `both_changed_differ` rows, triaged,
+  batch ids `b<NNN>`, brief `brief-template.md`, closed with verdicts.
+  `import` is `docs/wso/import-state.json`: the `theirs_real_ours_stub`
+  rows plus the entries of `docs/wso/import-list.json`, no triage, batch
+  ids `i<NNN>` (branches and worktrees `p3/wso-i<NNN>`, so they never
+  collide with wave 1's), brief `import-brief-template.md`, closed with
+  `close --kind import`: no verdict lines or evidence phrases are
+  checked, the evidence must be `kind: trace` or better, and the tool
+  tests, `check_evidence` and parity still run. The import queue skips
+  the oracle and Frida phases and never rewrites wave 1's scorecard.
+  The two queues' assigned batches all hold files, so they stay
+  disjoint (`tools/claims.py` counts both state files). Each queue has
+  its own status file and run lock, so one driver per queue can run at
+  the same time; the ledger is one file.
 - `--dry-run`: one batch with a fake worker that answers `ours` for every
   row; no review, no record, no close, no push, no `aoe send`, no budget.
   It needs `--state` pointing at a copy of the wave state OUTSIDE the
@@ -205,7 +241,8 @@ itself uses no model.
   symlink). It still cuts a real batch (branch, worktree, triage
   commits), so run it in a disposable `git clone --shared`. Its ledger
   and status go to `driver/dry-run/`.
-- `--state PATH`: the wave-state file (default `docs/wso/wave-state.json`).
+- `--state PATH`: the queue's state file (default `docs/wso/wave-state.json`
+  or `docs/wso/import-state.json`).
 - `--seed S`: the review sample seed (default `2026-10-22`), recorded in
   each ledger entry's review line.
 - `--aoe-session ID`: the AoE session that gets one `aoe send` line per
@@ -214,15 +251,46 @@ itself uses no model.
   prints what it removed, and exits 0, or 2 when there is no such entry.
   The next run retries that batch before any new cut.
 
+**Pools and threads.** Pools share the batches: a batch goes to the first
+pool that has a free worker, is not parked and is under its budget, and
+ties rotate round-robin. Each busy worker is one thread, up to the pool's
+`WORKERS`; a run with one worker in all runs everything on the main
+thread. Only the worker and reviewer runs, the oracle and Frida phases and
+the mechanical checks run in parallel. Every wave-state write and every
+repo-level git operation (the cut, record, close with its fast-forward, the
+push) runs under one driver-wide lock, and the gate is serialised across
+drivers by the `tools/gates.sh` lock. A batch cut before another closed has
+the base merged into its branch just before its close (the files are
+disjoint, so it merges cleanly), because `close` only fast-forwards. The
+deciding pool is recorded as `pool` in the batch's state entry, printed as
+a `- pool <name>` line in its ledger entry, and shown beside the batch in
+the scorecard.
+
+**Per-batch figures.** Each batch's ledger entry and its `batches` entry in
+the status file carry `wall` (seconds from the cut, or the resume, to the
+finish), `tokens` (`{input, cached, output}`) and `tool_calls`, summed over
+the batch's worker and reviewer runs from their transcripts (once per
+message id). Credits stay GLM-only; tokens and tool calls count every
+model.
+
 The status file is
-`.superpowers/sdd/2026-10-17-wso-integration/driver/status.json`
+`.superpowers/sdd/2026-10-17-wso-integration/driver/status.json` for
+`wave1` and `driver/status-import.json` for `import`
 (untracked; each batch's briefs, reports and review diff are beside it in
 `driver/<id>/`). Its keys:
 
-- `current`: `{batch, stage, at}`, the batch in flight.
-- `parked`: `{batch_id, at, reason}`, the batch a 429 parked.
-- `stopped`: `{at, reason: "budget", spent, budget}`, the last budget
-  stop; a later run clears it.
+- `current`: `{batch, stage, at}`, the latest batch in flight; `running`
+  is `{<id>: {batch, stage, at, pool}}` for all of them.
+- `pools`: `{<name>: {credits, budget, parked, stopped}}`. `credits` is
+  this run's spend on the pool (a batch with unknown credits counts as the
+  estimate), `budget` its `--budget-NAME` (null for none), `stopped` is
+  `"budget"` once the pool stopped, and `parked` is `{batch_id, at,
+  reason}`: the batch a 429 parked on that pool. A 429 parks only its own
+  pool; the other pools keep taking batches. This replaces the single
+  top-level `parked` of the one-worker driver; a run still reads an old
+  one once and moves it to its batch's pool.
+- `stopped`: `{at, reason: "budget", spent, budget}`, the last stop of the
+  `--budget` cap over all pools; a later run clears it.
 - `stalled`: `{at, message}`, set when the rows left wait on files that
   assigned batches own; the next cut clears it.
 - `halted`: `{at, reason}`, set when the run halted (a launch failure,
@@ -232,8 +300,9 @@ The status file is
   the coordinator.
 - `batches`: `{<id>: {...}}`, each batch's last outcome: `outcome`
   (closed, exception, parked, or checked for a dry run), `credits` (null
-  when unknown) and `at`, plus `stage` for an exception, and `wip` (the
-  WIP commit's sha) or `wip_error` (why none was made) for a park.
+  when unknown), `at`, `wall`, `tokens` and `tool_calls`, plus `stage` for
+  an exception, and `wip` (the WIP commit's sha) or `wip_error` (why none
+  was made) for a park.
 - `updated_at`: the time of the last write.
 - `dry_run`: `true`, in the dry run's own status file only.
 
@@ -243,7 +312,7 @@ on `status.json.lock`. The coordinator clears an exception with
 driver's writes, and either loses a new exception or brings back the one
 it removed.
 
-One driver runs per status file. `run` holds a non-blocking flock on
+One driver runs per status file (so one per queue). `run` holds a non-blocking flock on
 `status.json.run.lock`, with its pid written in it, for its whole
 lifetime; a second `run` on the same status file exits 1 with `another
 driver is running (pid N)`. `--clear` does not take that lock.
@@ -260,13 +329,14 @@ Exit codes:
   the breaker), a status file that
   cannot be read (the message names it), or another driver already
   running on the same status file.
-- 3: parked on a Z.ai rate limit.
+- 3: a pool ended parked on a Z.ai rate limit (the other pools ran on
+  until they had nothing left).
 - 4: stalled: the rows left wait on files owned by assigned batches.
 
 (2 is a usage error, a refused dry run, or `--clear` with no such entry.)
 
 **Park and resume.** A worker or reviewer hit by Z.ai's rate limit
-parks the batch. Either its final JSON result is an error (`is_error`,
+parks the batch, and its pool with it. Either its final JSON result is an error (`is_error`,
 or text that starts `API Error`) saying `Request rejected (429)`, or the
 last API-error entry in its transcript is a rate limit
 (`apiErrorStatus` 429 or `error` `rate_limit`, that text as fallback)
@@ -274,11 +344,12 @@ and no successful turn follows it. Tool output, file text and the
 worker's own prose never count, and neither does a 429 the worker
 retried past. The driver commits whatever the batch worktree holds
 uncommitted (`git add -A && git commit -m "WIP: parked by driver"`, in
-the batch worktree only, and skipped when it is clean), writes `parked`,
-and the run exits 3. The next `run` settles what the last one left before any
-new cut. First, a batch it closed without writing the ledger entry gets
-the entry and the push. Then the parked batch, and after it a batch left
-in `current` (the process died mid-batch), run again, each with its
+the batch worktree only, and skipped when it is clean), writes the pool's
+`parked`, and the run exits 3 once the other pools are done. The next `run`
+settles what the last one left before any new cut. First, a batch it
+closed without writing the ledger entry gets the entry and the push. Then
+each pool's parked batch (on that pool), and after them a batch left
+in `current` or `running` (the process died mid-batch), run again, each with its
 brief re-rendered under a `Resume:` preamble that lists the verdicts
 already recorded. The preamble forbids rewriting the branch, except that
 when its tip is the driver's own unpushed WIP commit the worker may

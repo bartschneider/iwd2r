@@ -9380,15 +9380,17 @@ class DriverTest(unittest.TestCase):
             self.bundle_dirs.append(bundle_dir)
             return 0, f'BRIEF {batch_id}'
 
-        def checks(batch, wt, verdicts):
-            ok = lambda argv, **_: subprocess.CompletedProcess(argv, 0, '', '')
-            with mock.patch.object(driver, '_vanilla_exe', return_value='/nonexistent'):
-                return driver.mechanical_checks(batch, wt, verdicts, run=ok)
         d.render_brief = brief
-        d.mechanical_checks = checks
+        d.mechanical_checks = self._checks
         d.report_path = os.path.join(tmp, 'xrec-report.md')
         d.triage_path = os.path.join(tmp, 'no-triage.json')
         return d
+
+    @staticmethod
+    def _checks(batch, wt, verdicts, **kw):
+        ok = lambda argv, **_: subprocess.CompletedProcess(argv, 0, '', '')
+        with mock.patch.object(driver, '_vanilla_exe', return_value='/nonexistent'):
+            return driver.mechanical_checks(batch, wt, verdicts, run=ok, **kw)
 
     def _state(self):
         with open(self.state_path) as f:
@@ -9825,7 +9827,7 @@ class DriverTest(unittest.TestCase):
     def test_rate_limited_worker_parks(self):
         d = self._driver(worker=_SeqWorker('', rate_limited=True))
         self.assertEqual(d.run_batch('b011'), 'parked')
-        self.assertEqual(self._status(d)['parked']['batch_id'], 'b011')
+        self.assertEqual(self._status(d)['pools']['glm']['parked']['batch_id'], 'b011')
         self.assertEqual(self.sent, [])
         self.assertEqual(self._state()['status'], 'assigned')
 
@@ -10192,10 +10194,10 @@ class DriverTest(unittest.TestCase):
         self.assertEqual((self._rev('first'), self._rev('HEAD')), (first, root_head))
         self.assertEqual(self.git('status', '--porcelain').stdout, root_dirt)
         status = self._status(d)
-        self.assertEqual(set(status['parked']), {'batch_id', 'at', 'reason'})
-        self.assertEqual(status['parked']['batch_id'], 'b011')
-        self.assertIn('rate limited', status['parked']['reason'])
-        self.assertTrue(status['parked']['at'])
+        self.assertEqual(set(status['pools']['glm']['parked']), {'batch_id', 'at', 'reason'})
+        self.assertEqual(status['pools']['glm']['parked']['batch_id'], 'b011')
+        self.assertIn('rate limited', status['pools']['glm']['parked']['reason'])
+        self.assertTrue(status['pools']['glm']['parked']['at'])
         self.assertIsNone(status['current'])
         self.assertEqual(status['batches']['b011']['outcome'], 'parked')
         self.assertEqual(self._state()['status'], 'assigned')
@@ -10482,10 +10484,10 @@ class DriverTest(unittest.TestCase):
             self.assertEqual(d.run(), 1)
             self.assertEqual(len(cuts), 1)                  # no further cut
             status = self._status(d)
-            reason = status['parked']['reason']
+            reason = status['pools']['glm']['parked']['reason']
             self.assertTrue(reason.startswith('launch failed: %s: ' % label), reason)
             self.assertIn("'claude-glm'", reason)
-            self.assertEqual(status['parked']['batch_id'], 'b011')
+            self.assertEqual(status['pools']['glm']['parked']['batch_id'], 'b011')
             self.assertEqual(status['halted']['reason'], reason)
             self.assertTrue(status['halted']['at'])
             self.assertEqual(status['exceptions'], {})
@@ -10646,8 +10648,8 @@ class DriverTest(unittest.TestCase):
             self.assertEqual(d.run(), 1, name)
             self.assertEqual(len(cuts), 1, name)
             status = self._status(d)
-            self.assertEqual(status['parked']['batch_id'], 'b011')
-            self.assertEqual(status['parked']['reason'], 'api error: %s' % kind)
+            self.assertEqual(status['pools']['glm']['parked']['batch_id'], 'b011')
+            self.assertEqual(status['pools']['glm']['parked']['reason'], 'api error: %s' % kind)
             self.assertEqual(status['halted']['reason'], 'api error: %s' % kind)
             self.assertEqual(status['exceptions'], {})
             self.assertEqual(len(self.sent), 1)
@@ -10691,6 +10693,583 @@ class DriverTest(unittest.TestCase):
         # Released when run() returns: a later driver takes it.
         second.next_batch = lambda *a, **kw: self.NOTHING
         self.assertEqual(second.run(), 0)
+
+    # -- worker pools and the import queue (Task 15) ---------------------------
+
+    def test_parse_pool_default_and_errors(self):
+        p = driver.parse_pool(driver.DEFAULT_POOL)
+        self.assertEqual(p, driver.Pool('glm', 'claude-glm', 'glm-5.3-flash[1m]', 2,
+                                        'glm-5.3-flash[1m]'))
+        p = driver.parse_pool('a=claude:opus')
+        self.assertEqual((p.name, p.wrapper, p.model, p.workers), ('a', 'claude', 'opus', 1))
+        self.assertEqual(driver.parse_pool('a=claude:opus:3').workers, 3)
+        for bad in ('', '   ', 'a=claude', 'a=claude:opus:0', 'a=claude:opus:x',
+                    'a=claude:opus:1:9', 'a=:opus', 'a=claude:', 'x', 'x:2',
+                    'claude:two', 'claude:0', 'b a=claude:opus', '=claude:opus'):
+            with self.assertRaises(ValueError, msg=bad):
+                driver.parse_pool(bad)
+
+    def test_pool_short_forms_follow_the_queue(self):
+        c = driver.parse_pool('claude')
+        self.assertEqual((c.wrapper, c.model, c.workers), ('claude', 'sonnet', 1))
+        c = driver.parse_pool('claude:3', queue='wave1')
+        self.assertEqual((c.model, c.workers), ('sonnet', 3))
+        c = driver.parse_pool('claude', queue='import')
+        self.assertEqual((c.wrapper, c.model), ('claude', 'haiku'))
+        for queue in ('wave1', 'import'):
+            g = driver.parse_pool('glm', queue=queue)
+            self.assertEqual((g.wrapper, g.model, g.workers),
+                             ('claude-glm', 'glm-5.3-flash[1m]', 1))
+
+    def _tmpdir(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        return tmp
+
+    def test_reviewer_model_defaults_and_override(self):
+        self.assertEqual(driver.parse_pool('claude').reviewer_model, 'sonnet')
+        self.assertEqual(driver.parse_pool('glm').reviewer_model, 'glm-5.3-flash[1m]')
+        self.assertEqual(driver.parse_pool('x=claude:haiku:2').reviewer_model, 'haiku')
+        pools = [driver.parse_pool('claude'), driver.parse_pool('glm')]
+        out = driver.pools_with_reviewers(pools, {'claude': 'opus'})
+        self.assertEqual([p.reviewer_model for p in out],
+                         ['opus', 'glm-5.3-flash[1m]'])
+        with self.assertRaises(ValueError):
+            driver.pools_with_reviewers(pools, {'nope': 'opus'})
+        tmp = self._tmpdir()
+        d, err = driver.driver_from_args(
+            ['--pool', 'claude', '--pool', 'x=claude:haiku', '--reviewer-model',
+             'claude=opus', '--state', os.path.join(tmp, 'wave-state.json')], repo=tmp)
+        self.assertIsNone(err)
+        self.assertEqual([p.reviewer_model for p in d.pools], ['opus', 'haiku'])
+        self.assertEqual(d.reviewers_by_pool['claude'].model, 'opus')
+        self.assertEqual(d.reviewers_by_pool['claude'].wrapper, 'claude')
+        self.assertEqual(d.workers_by_pool['claude'].model, 'sonnet')
+
+    def test_headless_worker_model_flag_for_claude_wrapper(self):
+        env = {k: v for k, v in os.environ.items()
+               if k not in ('CLAUDE_GLM_MODEL', 'CLAUDE_GLM_CONFIG_DIR',
+                            'CLAUDE_CONFIG_DIR')}
+        with mock.patch.dict(os.environ, env, clear=True):
+            w = driver.HeadlessWorker(model='sonnet', wrapper='claude')
+            argv, e = w.command('BRIEF')
+            self.assertEqual(argv[:3], ['claude', '-p', 'BRIEF'])
+            self.assertEqual(argv[argv.index('--model') + 1], 'sonnet')
+            self.assertNotIn('CLAUDE_GLM_MODEL', e)
+            argv, e = driver.HeadlessWorker().command('BRIEF')
+            self.assertNotIn('--model', argv)
+            self.assertEqual(e['CLAUDE_GLM_MODEL'], 'glm-5.3-flash[1m]')
+            # Its transcripts are under ~/.claude, not the GLM wrapper's.
+            self.assertEqual(w.transcript_path('/x/y', 's1'), os.path.join(
+                os.path.expanduser('~/.claude'), 'projects', '-x-y', 's1.jsonl'))
+        with mock.patch.dict(os.environ, {'CLAUDE_GLM_CONFIG_DIR': '/glm/cfg'}):
+            self.assertEqual(driver.HeadlessWorker(wrapper='claude').config_dir,
+                             os.environ.get('CLAUDE_CONFIG_DIR')
+                             or os.path.expanduser('~/.claude'))
+
+    # A repo with `first` and one single-row batch per id, each with its own
+    # address and a committed evidence file, so batches close in any order.
+    def _pool_driver(self, pools, workers, ids=('b011', 'b012', 'b013'),
+                     reviewers=None, queue='wave1', **kw):
+        tmp = self._tmpdir()
+        self.tmp = tmp
+        self.root = os.path.join(tmp, 'repo')
+        os.makedirs(self.root)
+        self.git('init', '-q', '-b', 'first')
+        _write(os.path.join(self.root, 'README'), 'x\n')
+        self.git('add', '-A')
+        self.git('commit', '-qm', 'base')
+        batches = {}
+        for bid in ids:
+            n = int(bid[1:])
+            addr = '0x%X' % (0x400000 + n * 0x1000)
+            wt = os.path.join(tmp, 'wt-' + bid)
+            self.git('worktree', 'add', '-q', '-b', 'p3/wso-' + bid, wt, 'first')
+            _write(os.path.join(wt, 'docs', 'evidence', addr[2:] + '.md'),
+                   f'---\naddress: {addr}\nname: F{n}\nkind: oracle\n---\n\n'
+                   'corroborated by WSO at e8dd16a7\n')
+            self.git('add', '-A', cwd=wt)
+            self.git('commit', '-qm', 'evidence ' + bid, cwd=wt)
+            row = {'address': addr, 'name': 'F%d' % n, 'file': 'src/F%d.cpp' % n,
+                   'category': 'both_changed_differ', 'their_len': 9, 'our_len': 9}
+            batches[bid] = {'rows': [row], 'files': [row['file']],
+                            'branch': 'p3/wso-' + bid, 'status': 'assigned',
+                            'assigned_at': 't', 'closed_at': None, 'verdicts': {}}
+        self.state_path = os.path.join(tmp, 'wave-state.json')
+        with open(self.state_path, 'w') as f:
+            json.dump({'fork_base': 'e8dd16a7', 'batches': batches}, f)
+        self.pushes, self.sent, self.logs = [], [], []
+        d = driver.Driver(
+            self.root, self.state_path, None, None, os.path.join(tmp, 'ledger.md'),
+            os.path.join(tmp, 'driver', 'status.json'), pools=pools,
+            workers_by_pool=workers,
+            reviewers_by_pool=reviewers or {
+                p.name: _SeqWorker(self.CLEAN_REVIEW, credits=0.0) for p in pools},
+            runner=lambda fn: fn(),
+            push=lambda: self.pushes.append(1), send=self.sent.append, gate=False,
+            log=self.logs.append, queue=queue, **kw)
+        d.render_brief = lambda template_path, state_path, batch_id, bundle_dir=None, **_: (
+            0, 'BRIEF ' + batch_id)
+        d.mechanical_checks = self._checks
+        d.report_path = os.path.join(tmp, 'xrec-report.md')
+        d.triage_path = os.path.join(tmp, 'no-triage.json')
+        self.pending = list(ids)
+
+        def cut(*a, **kw):
+            if self.pending:
+                return 0, '%s assigned: 1 rows\n' % self.pending.pop(0)
+            return self.NOTHING
+        d.next_batch = cut
+        return d
+
+    class _BatchWorker(_SeqWorker):
+        """Answers each batch's brief with its own all-ours report, after
+        running `before(cwd)` when given."""
+
+        def __init__(self, credits=None, rate_limited=False, before=None):
+            super().__init__('', credits=credits, rate_limited=rate_limited)
+            self.before = before
+            self.ids = []
+
+        def run(self, brief, cwd):
+            self.briefs.append(brief)
+            self.cwds.append(cwd)
+            if self.before:
+                self.before(cwd)
+            bid = re.search(r'BRIEF (b\d+)', brief).group(1)
+            self.ids.append(bid)
+            addr = 0x400000 + int(bid[1:]) * 0x1000
+            report = '## Verdicts\n\nverdict 0x%X ours case dump-%s\n' % (addr, bid)
+            return driver.Result(0, '' if self.rate_limited else report, None,
+                                 self.credits, self.rate_limited)
+
+    def _two_pools(self):
+        return [driver.parse_pool('a=claude-glm:glm-5.3-flash[1m]:1'),
+                driver.parse_pool('b=claude:sonnet:1')]
+
+    def test_two_pools_share_batches(self):
+        wa, wb = self._BatchWorker(credits=0.0), self._BatchWorker()
+        d = self._pool_driver(self._two_pools(), {'a': wa, 'b': wb})
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 0)
+        self.assertEqual((wa.ids, wb.ids), (['b011', 'b013'], ['b012']))
+        with open(self.state_path) as f:
+            batches = json.load(f)['batches']
+        self.assertEqual({k: v['pool'] for k, v in batches.items()},
+                         {'b011': 'a', 'b012': 'b', 'b013': 'a'})
+        self.assertTrue(all(v['status'] == 'closed' for v in batches.values()))
+        status = self._status(d)
+        self.assertEqual(set(status['pools']), {'a', 'b'})
+        self.assertEqual(status['pools']['a']['parked'], None)
+        # b012 was cut before b011 closed: the base was merged in first.
+        self.assertTrue(self.git('rev-list', '--merges', 'first').stdout.strip())
+        self.assertEqual(self.git('rev-parse', 'first').stdout,
+                         self.git('rev-parse', 'p3/wso-b013').stdout)
+
+    def test_pick_pool_rotates_and_skips(self):
+        d = self._pool_driver(self._two_pools(), {'a': None, 'b': None})
+        self.assertEqual([d.pick_pool() for _ in range(4)], ['a', 'b', 'a', 'b'])
+        d._busy['a'] = 1       # a has no free worker
+        self.assertEqual(d.pick_pool(), 'b')
+        self.assertEqual(d.pick_pool(), 'b')
+        d._busy['b'] = 1
+        self.assertIsNone(d.pick_pool())
+        d._busy.update(a=0, b=0)
+        d._parked_now.add('b')
+        self.assertEqual([d.pick_pool() for _ in range(2)], ['a', 'a'])
+
+    def test_parked_pool_is_skipped(self):
+        def scratch(cwd):
+            _write(os.path.join(cwd, 'scratch.txt'), 'half done\n')
+        wa = self._BatchWorker(rate_limited=True, before=scratch)
+        wb = self._BatchWorker(credits=0.0)
+        d = self._pool_driver(self._two_pools(), {'a': wa, 'b': wb})
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 3)
+        self.assertEqual((wa.ids, wb.ids), (['b011'], ['b012', 'b013']))
+        status = self._status(d)
+        parked = status['pools']['a']['parked']
+        self.assertEqual(parked['batch_id'], 'b011')
+        self.assertIsNone(status['pools']['b']['parked'])
+        self.assertIsNone(status['parked'])
+        self.assertEqual(self.git('log', '-1', '--format=%s', 'p3/wso-b011').stdout.strip(),
+                         'WIP: parked by driver')
+        with open(self.state_path) as f:
+            batches = json.load(f)['batches']
+        self.assertEqual([batches[k]['status'] for k in ('b011', 'b012', 'b013')],
+                         ['assigned', 'closed', 'closed'])
+        # The next run resumes the parked batch on pool a, before any cut.
+        wa.rate_limited = False
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 0)
+        self.assertEqual(wa.ids, ['b011', 'b011'])
+        self.assertIn('Resume: batch b011', wa.briefs[-1])
+        self.assertIsNone(self._status(d)['pools']['a']['parked'])
+
+    def test_pool_budget_stops_only_that_pool(self):
+        wa, wb = self._BatchWorker(credits=1500.0), self._BatchWorker(credits=0.0)
+        d = self._pool_driver(self._two_pools(), {'a': wa, 'b': wb},
+                              ids=('b011', 'b012', 'b013', 'b014'),
+                              budgets={'a': 2000.0})
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 0)
+        self.assertEqual(wa.ids, ['b011'])
+        self.assertEqual(wb.ids, ['b012', 'b013', 'b014'])
+        pools = self._status(d)['pools']
+        self.assertEqual(pools['a']['stopped'], 'budget')
+        self.assertEqual(pools['a']['budget'], 2000.0)
+        self.assertEqual(pools['a']['credits'], 1500.0)
+        self.assertIsNone(pools['b']['stopped'])
+        self.assertIsNone(pools['b']['budget'])
+
+    def test_budget_on_non_glm_pool_is_refused(self):
+        tmp = self._tmpdir()
+        state = os.path.join(tmp, 'wave-state.json')
+        d, err = driver.driver_from_args(
+            ['--pool', 'claude=claude:sonnet:1', '--budget-claude', '500',
+             '--state', state], repo=tmp)
+        self.assertIsNone(d)
+        self.assertEqual(err[0], 2)
+        self.assertIn('--budget-claude', err[1])
+        self.assertIn('Z.ai', err[1])
+        self.assertIn('sonnet', err[1])
+        d, err = driver.driver_from_args(['--budget-nosuch', '5', '--state', state], repo=tmp)
+        self.assertEqual((d, err[0]), (None, 2))
+        self.assertIn('no pool named nosuch', err[1])
+        d, err = driver.driver_from_args(['--budget-glm', 'lots', '--state', state], repo=tmp)
+        self.assertEqual((d, err[0]), (None, 2))
+        for argv in (['--budget-glm', '500'], ['--budget-glm=500']):
+            d, err = driver.driver_from_args(argv + ['--state', state], repo=tmp)
+            self.assertIsNone(err)
+            self.assertEqual(d.budgets, {'glm': 500.0})
+        with self.assertRaises(ValueError):
+            driver.Driver(tmp, state, None, None, 'l', 's', budgets={'x': 1.0})
+
+    def test_pool_flags(self):
+        tmp = self._tmpdir()
+        state = os.path.join(tmp, 'wave-state.json')
+        d, err = driver.driver_from_args(['--state', state], repo=tmp)
+        self.assertEqual([(p.name, p.workers) for p in d.pools], [('glm', 2)])
+        d, err = driver.driver_from_args(['--workers', '3', '--state', state], repo=tmp)
+        self.assertEqual(([(p.name, p.workers) for p in d.pools], d.workers),
+                         ([('glm', 3)], 3))
+        d, err = driver.driver_from_args(
+            ['--workers', '3', '--pool', 'claude', '--state', state], repo=tmp)
+        self.assertIsNone(d)
+        self.assertEqual(err[0], 2)
+        self.assertIn('--workers', err[1])
+        self.assertIn('--pool', err[1])
+        d, err = driver.driver_from_args(
+            ['--pool', 'claude=claude:sonnet:1', '--pool', 'claude=claude:haiku',
+             '--state', state], repo=tmp)
+        self.assertEqual((d, err[0]), (None, 2))
+        d, err = driver.driver_from_args(['--pool', 'bogus', '--state', state], repo=tmp)
+        self.assertEqual((d, err[0]), (None, 2))
+        # Tonight's command line.
+        d, err = driver.driver_from_args(
+            ['--queue', 'wave1', '--pool', 'claude=claude:sonnet:1', '--state', state],
+            repo=tmp)
+        self.assertIsNone(err)
+        p, = d.pools
+        self.assertEqual((p.name, p.wrapper, p.model, p.workers, p.reviewer_model),
+                         ('claude', 'claude', 'sonnet', 1, 'sonnet'))
+        self.assertEqual(d.status_path, os.path.join(
+            tmp, '.superpowers', 'sdd', '2026-10-17-wso-integration', 'driver',
+            'status.json'))
+
+    def test_pool_name_reaches_ledger_entry(self):
+        wa, wb = self._BatchWorker(credits=0.0), self._BatchWorker(credits=0.0)
+        d = self._pool_driver(self._two_pools(), {'a': wa, 'b': wb})
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 0)
+        ledger = self._ledger(d)
+        entries = ledger.split('## driver ')[1:]
+        pools = {e.split(' ')[0]: re.search(r'^- pool (\S+)$', e, re.M).group(1)
+                 for e in entries}
+        self.assertEqual(pools, {'b011': 'a', 'b012': 'b', 'b013': 'a'})
+        with open(d.report_path) as f:
+            report = f.read()
+        self.assertIn('b012 closed (1 rows, pool b)', report)
+        self.assertIn('b011 closed (1 rows, pool a)', report)
+        text = driver._tool('wave').scorecard_text({'batches': {
+            'b1': {'status': 'closed', 'rows': [{}], 'verdicts': {}},
+            'b2': {'status': 'closed', 'rows': [{}], 'verdicts': {}, 'pool': 'x'}}})
+        self.assertIn('b1 closed (1 rows), b2 closed (1 rows, pool x)', text)
+        self.assertIn('- pool a\n', driver.ledger_entry(
+            {'id': 'b1'}, {}, {}, (False, 'n'), 'c', None, pool='a'))
+
+    def test_state_mutations_hold_the_driver_lock(self):
+        w = self._BatchWorker(credits=0.0)
+        d = self._pool_driver(self._two_pools()[:1], {'a': w}, ids=('b011',))
+        held = []
+
+        def locked(name, fn):
+            def run(*a, **kw):
+                held.append((name, d._lock.locked()))
+                return fn(*a, **kw)
+            return run
+        d.next_batch = locked('next', d.next_batch)
+        d.record_verdict = locked('record', d.record_verdict)
+        d.close_batch = locked('close', d.close_batch)
+        d.write_scorecard = locked('scorecard', d.write_scorecard)
+        d.push = locked('push', d.push)
+        d.pick_pool = locked('pick', d.pick_pool)
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 0)
+        self.assertEqual({n for n, _ in held},
+                         {'next', 'record', 'close', 'scorecard', 'push', 'pick'})
+        self.assertTrue(all(h for _, h in held), held)
+        self.assertFalse(d._lock.locked())
+
+    def test_pools_run_batches_at_the_same_time(self):
+        """Real threads: two batches must meet at a barrier, which only a
+        run of both at once passes."""
+        d = self._pool_driver(self._two_pools(), {'a': None, 'b': None},
+                              ids=('b011', 'b012'))
+        d._runner = None
+        barrier = threading.Barrier(2, timeout=20)
+        seen = []
+
+        def run_batch(batch_id):
+            barrier.wait()
+            seen.append((batch_id, d._ctx.pool, threading.current_thread().name))
+            return 'closed'
+        d.run_batch = run_batch
+        self.assertEqual(d.run(), 0)
+        self.assertEqual(sorted(s[:2] for s in seen), [('b011', 'a'), ('b012', 'b')])
+        self.assertEqual({s[2] for s in seen}, {'driver-batch'})
+        self.assertEqual(threading.active_count(), 1)   # every thread was joined
+
+    def test_a_crash_in_a_batch_thread_surfaces_after_the_others_finish(self):
+        d = self._pool_driver(self._two_pools(), {'a': None, 'b': None},
+                              ids=('b011', 'b012'))
+        d._runner = None
+        ran = []
+
+        def run_batch(batch_id):
+            ran.append(batch_id)
+            if batch_id == 'b011':
+                raise RuntimeError('boom')
+            return 'closed'
+        d.run_batch = run_batch
+        with self.assertRaises(RuntimeError):
+            d.run()
+        self.assertIn('b011', ran)
+
+    # -- the second queue ------------------------------------------------------
+
+    def _import_repo(self):
+        tmp = self._tmpdir()
+        self.root = os.path.join(tmp, 'repo')
+        os.makedirs(os.path.join(self.root, 'docs', 'wso'))
+        self.git('init', '-q', '-b', 'first')
+        _write(os.path.join(self.root, 'README'), 'x\n')
+        self.git('add', '-A')
+        self.git('commit', '-qm', 'base')
+        rows = [{'file': 'src/A.cpp', 'name': 'F', 'address': '0x401000',
+                 'category': 'theirs_real_ours_stub', 'their_len': 90, 'our_len': 2},
+                {'file': 'src/B.cpp', 'name': 'G', 'address': '0x402000',
+                 'category': 'both_changed_differ', 'their_len': 50, 'our_len': 40},
+                {'file': 'src/C.cpp', 'name': 'H', 'address': '0x403000',
+                 'category': 'both_changed_differ', 'their_len': 70, 'our_len': 60}]
+        dp = os.path.join(tmp, 'disagreements.json')
+        ip = os.path.join(tmp, 'import-list.json')
+        with open(dp, 'w') as f:
+            json.dump(rows, f)
+        with open(ip, 'w') as f:
+            json.dump([{'address': '0x403000', 'file': 'src/C.cpp', 'name': 'H',
+                        'source': 'triage'},
+                       {'address': '0x404000', 'file': 'src/D.cpp', 'name': 'I',
+                        'source': 'triage'}], f)
+        return tmp, dp, ip
+
+    def test_queue_import_uses_its_own_state_and_ids(self):
+        tmp, dp, ip = self._import_repo()
+        wave = driver._tool('wave')
+        imp = os.path.join(tmp, 'import-state.json')
+        rc, out = wave.next_batch(dp, imp, 20, wave.IMPORT_CATEGORY, repo=self.root,
+                                  import_path=ip, worktree_root=os.path.join(tmp, 'wts'),
+                                  queue='import')
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(out.startswith('i001 assigned: 3 rows'), out)
+        with open(imp) as f:
+            b = json.load(f)['batches']['i001']
+        self.assertEqual(b['branch'], 'p3/wso-i001')
+        self.assertEqual(sorted(r['address'] for r in b['rows']),
+                         ['0x401000', '0x403000', '0x404000'])
+        self.assertTrue(all('class' not in r for r in b['rows']))   # no triage
+        self.assertEqual(b['verdicts'], {})
+        # The import-list row took its lengths from disagreements.json.
+        self.assertEqual({r['address']: r['their_len'] for r in b['rows']}['0x403000'], 70)
+        self.assertTrue(os.path.isdir(os.path.join(tmp, 'wts', 'p3-wso-i001')))
+        self.assertFalse(os.path.exists(os.path.join(tmp, 'wave-state.json')))
+        rc, out = wave.next_batch(dp, imp, 20, wave.IMPORT_CATEGORY, repo=self.root,
+                                  import_path=ip, worktree_root=os.path.join(tmp, 'wts'),
+                                  queue='import')
+        self.assertEqual(rc, 2, out)
+        self.assertTrue(out.startswith('nothing left'))
+        # wave1 numbering is its own: b001, whatever import cut.
+        w1 = os.path.join(tmp, 'wave-state.json')
+        with mock.patch.object(wave, '_cut_worktree', return_value=('/wt', 'new')):
+            rc, out = wave.next_batch(dp, w1, 20, repo=self.root, import_path=ip)
+        self.assertTrue(out.startswith('b001 assigned'), out)
+
+    def test_queue_import_driver_wiring(self):
+        tmp, dp, ip = self._import_repo()
+        d, err = driver.driver_from_args(
+            ['--queue', 'import', '--pool', 'claude', '--state',
+             os.path.join(tmp, 'import-state.json')], repo=tmp)
+        self.assertIsNone(err)
+        self.assertEqual((d.queue, d.kind, d.category), ('import', 'import', 'theirs_real_ours_stub'))
+        self.assertEqual(d.pools[0].model, 'haiku')
+        self.assertEqual(os.path.basename(d.status_path), 'status-import.json')
+        self.assertEqual(os.path.basename(d.template_path), 'import-brief-template.md')
+        self.assertEqual(d.workers_by_pool['claude'].model, 'haiku')
+        w1, err = driver.driver_from_args(
+            ['--state', os.path.join(tmp, 'wave-state.json')], repo=tmp)
+        self.assertEqual(os.path.basename(w1.status_path), 'status.json')
+        self.assertEqual(w1.kind, 'verdicts')
+        self.assertNotEqual(d.status_path + '.run.lock', w1.status_path + '.run.lock')
+        # The cut passes the queue, and no triage for it.
+        calls = []
+        d.log = lambda m: None
+        d.next_batch = lambda *a, **kw: calls.append(kw) or (2, 'nothing left: x\n')
+        self.assertEqual((None, 0), d._cut())
+        self.assertEqual((calls[0]['queue'], calls[0]['triage_path']), ('import', None))
+        # --clear reads its queue's status file.
+        status = os.path.join(tmp, driver.status_rel('import'))
+        _write(status, json.dumps({'exceptions': {'i001': {'stage': 'worker'}}}))
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(driver.main(['--queue', 'import', '--clear', 'i001'], repo=tmp), 0)
+        with open(status) as f:
+            self.assertEqual(json.load(f)['exceptions'], {})
+
+    def test_import_brief_template_renders(self):
+        tmp = self._tmpdir()
+        wave = driver._tool('wave')
+        state = os.path.join(tmp, 'import-state.json')
+        with open(state, 'w') as f:
+            json.dump({'fork_base': 'e8dd16a7', 'batches': {'i001': {
+                'rows': [{'address': '0x401000', 'name': 'F', 'file': 'src/A.cpp',
+                          'their_len': 90, 'our_len': 2}],
+                'files': ['src/A.cpp'], 'branch': 'p3/wso-i001', 'status': 'assigned',
+                'verdicts': {}}}}, f)
+        rc, text = wave.render_brief(wave.IMPORT_TEMPLATE_PATH, state, 'i001',
+                                     bundle_dir=os.path.join(tmp, 'b'),
+                                     bundle_fn=lambda a: 'bundle %x' % a)
+        self.assertEqual(rc, 0, text)
+        self.assertNotIn('{{', text)
+        for needle in ('i001', 'p3/wso-i001', '`src/A.cpp`', '`0x401000` **F**',
+                       os.path.join(tmp, 'b', '0x401000.md'), 'Imported-From:',
+                       'close --kind import', 'trace', 'e8dd16a7'):
+            self.assertIn(needle, text)
+        self.assertNotIn('verdict <0xADDR>', text)
+        self.assertIn('No verdicts', text)
+
+    def test_import_dry_run_refuses_the_live_import_state(self):
+        tmp = self._tmpdir()
+        live = driver._tool('wave').IMPORT_STATE_PATH
+        d, err = driver.driver_from_args(['--queue', 'import', '--dry-run', '--state', live],
+                                         repo=tmp)
+        self.assertEqual((d, err[0]), (None, 2))
+        self.assertIn('live import-state file', err[1])
+
+    def test_import_batch_closes_without_verdict_lines(self):
+        d = self._driver(worker=driver.FakeWorker('# report\n\nImported; no verdicts.\n'),
+                         queue='import')
+        with open(self.state_path) as f:
+            state = json.load(f)
+        b = state['batches'].pop('b011')
+        b['rows'] = [dict(r) for r in b['rows'][:2]]
+        for r in b['rows']:
+            r.pop('class')
+        b['files'], b['verdicts'] = ['src/A.cpp'], {}
+        state['batches']['i001'] = b
+        with open(self.state_path, 'w') as f:
+            json.dump(state, f)
+        self.assertEqual(d.run_batch('i001'), 'closed')
+        with open(self.state_path) as f:
+            closed = json.load(f)['batches']['i001']
+        self.assertEqual((closed['status'], closed['verdicts']), ('closed', {}))
+        self.assertEqual(self.git('rev-parse', 'first').stdout,
+                         self.git('rev-parse', 'p3/wso-b011').stdout)
+        self.assertIn('verdicts: fork 0, ours 0, neither 0', self._ledger(d))
+        # An import state never rewrites wave 1's scorecard.
+        self.assertFalse(os.path.exists(d.report_path))
+        # The import checks skip the verdict lines a verdict batch needs.
+        batch = {'branch': 'x', 'rows': [{'address': '0x401000'}]}
+        self.assertEqual(self._checks(batch, self.wt, {}, kind='import'), [])
+        self.assertTrue(self._checks(batch, self.wt, {})[0].startswith('0x401000: no verdict line'))
+
+    # -- per-batch figures (R61) -------------------------------------------------
+
+    @staticmethod
+    def _transcript(tmp, lines):
+        path = os.path.join(tmp, 'sess.jsonl')
+        with open(path, 'w') as f:
+            f.write('\n'.join(json.dumps(x) if not isinstance(x, str) else x
+                              for x in lines) + '\n')
+        return path
+
+    def test_usage_of_dedups_messages_and_counts_tool_calls(self):
+        tmp = self._tmpdir()
+        use = lambda i, c, cr, o: {'input_tokens': i, 'cache_creation_input_tokens': c,
+                                   'cache_read_input_tokens': cr, 'output_tokens': o}
+        tool = lambda i: {'type': 'tool_use', 'id': i, 'name': 'Bash', 'input': {}}
+        path = self._transcript(tmp, [
+            {'type': 'assistant', 'message': {'id': 'm1', 'model': 'claude-sonnet',
+             'usage': use(10, 5, 100, 1), 'content': [tool('t1')]}},
+            {'type': 'assistant', 'message': {'id': 'm1', 'model': 'claude-sonnet',
+             'usage': use(10, 5, 100, 20), 'content': [tool('t2')]}},
+            {'type': 'assistant', 'message': {'id': 'm1', 'model': 'claude-sonnet',
+             'usage': use(10, 5, 100, 20), 'content': [tool('t2')]}},
+            {'type': 'user', 'message': {'content': [{'type': 'tool_result'}]}},
+            'not json',
+            {'type': 'assistant', 'message': {'id': 'm2', 'model': 'glm-5.3-flash',
+             'usage': use(1, 0, 2, 3), 'content': [tool('t3'), {'type': 'text', 'text': 'x'}]}},
+            {'type': 'assistant', 'message': {'model': 'glm-5.3-flash',
+             'usage': use(1, 1, 1, 1), 'content': [dict(tool('t4'), id=None)]}},
+        ])
+        tokens, calls = driver.usage_of(path)
+        self.assertEqual(tokens, {'input': 15 + 1 + 2, 'cached': 100 + 2 + 1,
+                                  'output': 20 + 3 + 1})
+        self.assertEqual(calls, 4)
+        # Credits stay GLM-only, from the same file.
+        self.assertGreater(driver.credits_of(path), 0)
+        self.assertEqual(driver.credits_of(self._transcript(tmp, [
+            {'message': {'id': 'm', 'model': 'claude-sonnet', 'usage': use(9, 9, 9, 9)}}])), 0.0)
+        self.assertEqual(driver.usage_of(self._transcript(tmp, ['{}'])),
+                         ({'input': 0, 'cached': 0, 'output': 0}, 0))
+
+    def test_batch_figures_reach_status_and_ledger(self):
+        tmp = self._tmpdir()
+        path = self._transcript(tmp, [
+            {'type': 'assistant', 'message': {'id': 'm1', 'model': 'claude-sonnet',
+             'usage': {'input_tokens': 7, 'cache_read_input_tokens': 50, 'output_tokens': 9},
+             'content': [{'type': 'tool_use', 'id': 't1'}, {'type': 'tool_use', 'id': 't2'}]}}])
+
+        class W:
+            def run(self_, brief, cwd):
+                return driver.Result(0, DriverTest.REPORT, path, 0.0, False)
+
+        ticks = iter([100.0, 193.4])
+        d = self._driver(worker=W(), clock=lambda: next(ticks))
+        self.assertEqual(d.run_batch('b011'), 'closed')
+        entry = self._status(d)['batches']['b011']
+        self.assertEqual(entry['tokens'], {'input': 7, 'cached': 50, 'output': 9})
+        self.assertEqual((entry['tool_calls'], entry['wall']), (2, 93.4))
+        ledger = self._ledger(d)
+        self.assertIn('- wall 93s\n', ledger)
+        self.assertIn('- tokens input 7, cached 50, output 9\n', ledger)
+        self.assertIn('- tool calls 2\n', ledger)
+
+    def test_wall_runs_from_the_cut(self):
+        ticks = iter([50.0, 200.0])
+        d = self._driver(worker=driver.FakeWorker(self.REPORT), clock=lambda: next(ticks))
+        cuts = iter([(0, self.CUT), self.NOTHING])
+        d.next_batch = lambda *a, **kw: next(cuts)
+        self.assertEqual(d.run(), 0)
+        self.assertEqual(self._status(d)['batches']['b011']['wall'], 150.0)
 
 
 class TruthTest(unittest.TestCase):
@@ -11444,7 +12023,13 @@ class ClaimsTest(unittest.TestCase):
         holder = subprocess.Popen(['bash', gates, '--dry-lock', '30'],
                                   start_new_session=True)
         self.addCleanup(holder.wait)
-        self.addCleanup(lambda: os.killpg(holder.pid, signal.SIGKILL))
+
+        def kill_group():
+            try:
+                os.killpg(holder.pid, signal.SIGKILL)
+            except ProcessLookupError:   # nothing left in the group
+                pass
+        self.addCleanup(kill_group)
         lock = os.path.join(root, '.gates.lock')
         deadline = time.time() + 30
         while time.time() < deadline and not (
@@ -11453,9 +12038,66 @@ class ClaimsTest(unittest.TestCase):
         os.kill(holder.pid, signal.SIGKILL)
         holder.wait(timeout=30)
         # The orphaned sleep is still running, and must not hold the lock.
+        # The kill can land between bash's fork and the child closing fd 9,
+        # so the lock may take a moment to free (ruling R60).
         fd = os.open(lock, os.O_RDWR)
         self.addCleanup(os.close, fd)
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        end = time.time() + 5
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.time() >= end:
+                    raise
+                time.sleep(0.05)
+
+    def test_queues_keep_files_disjoint(self):
+        # A file in an assigned wave1 batch is skipped by the import
+        # queue's next_batch, and claims.owned names that batch.
+        self.write_state(['src/A.cpp'])
+        rows = [
+            {'file': 'src/A.cpp', 'name': 'F', 'address': '0x401000',
+             'category': 'theirs_real_ours_stub', 'their_len': 90, 'our_len': 2},
+            {'file': 'src/B.cpp', 'name': 'G', 'address': '0x402000',
+             'category': 'theirs_real_ours_stub', 'their_len': 50, 'our_len': 2}]
+        dp = os.path.join(self.tmp, 'disagreements.json')
+        with open(dp, 'w') as f:
+            json.dump(rows, f)
+        self.assertEqual(self.claims.owned('src/A.cpp', **self.kw), 'b7')
+        self.assertIsNone(self.claims.owned('src/B.cpp', **self.kw))
+        imp = os.path.join(self.tmp, 'import-state.json')
+        rc, out = self.wave.next_batch(
+            dp, imp, 20, queue='import', repo=self.tmp,
+            import_path=os.path.join(self.tmp, 'import-list.json'),
+            worktree_root=os.path.join(self.tmp, 'wts'),
+            triage_path=None, base='first')
+        # No repository here: the worktree cut fails, and nothing is
+        # recorded; so ask without cutting through the plain state path.
+        self.assertFalse(os.path.exists(imp), out)
+        with mock.patch.object(self.wave, '_cut_worktree',
+                               return_value=('/wt', 'new')):
+            rc, out = self.wave.next_batch(
+                dp, imp, 20, queue='import', repo=self.tmp,
+                import_path=os.path.join(self.tmp, 'import-list.json'),
+                base='first')
+        self.assertEqual(rc, 0, out)
+        self.assertIn('i001 assigned: 1 rows', out)
+        with open(imp) as f:
+            self.assertEqual(json.load(f)['batches']['i001']['files'],
+                             ['src/B.cpp'])
+        # The import batch's file is now held from the claims side too.
+        self.assertEqual(self.claims.owned('src/B.cpp', **self.kw), 'i001')
+        with self.assertRaises(self.claims.ClaimError) as cm:
+            self.claims.claim('s9', 'me', ['src/B.cpp'], **self.kw)
+        self.assertIn('i001', str(cm.exception))
+
+    def test_a_missing_second_state_file_holds_nothing(self):
+        self.write_state(['src/A.cpp'])
+        self.assertFalse(os.path.exists(
+            os.path.join(self.tmp, 'import-state.json')))
+        self.claims.claim('s1', 'me', ['src/Z.cpp'], **self.kw)
+        self.assertEqual(self.claims.owned('src/Z.cpp', **self.kw), 's1')
 
     # -- claims go to the checkout that has `first` ------------------------
 

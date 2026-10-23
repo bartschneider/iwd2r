@@ -14,8 +14,10 @@ import importlib.util
 import os
 import random
 import re
+import queue as queue_mod
 import subprocess
 import sys
+import threading
 import time
 
 # api_error: the kind of an API error no retry cures (ruling R46), or None.
@@ -112,6 +114,50 @@ def credits_of(path):
     return total
 
 
+def usage_of(path):
+    """(tokens, tool_calls) for a transcript (ruling R61): tokens is
+    {input, cached, output} summed over the transcript's assistant
+    messages once per message.id (last line wins, as credits_of), input
+    counting cache creation as credits_of does; tool_calls counts the
+    distinct tool_use blocks.  Any model counts: credits stay GLM-only,
+    these figures do not.  Lines are data, never executed."""
+    by_id = {}
+    anon = []
+    calls, anon_calls = set(), 0
+    with open(path, encoding='utf-8', errors='replace') as f:
+        for line in f:
+            try:
+                obj = json.loads(line)
+            except ValueError:
+                continue
+            msg = obj.get('message') if isinstance(obj, dict) else None
+            if not isinstance(msg, dict):
+                continue
+            content = msg.get('content')
+            if obj.get('type') == 'assistant' and isinstance(content, list):
+                for b in content:
+                    if isinstance(b, dict) and b.get('type') == 'tool_use':
+                        if isinstance(b.get('id'), str) and b['id']:
+                            calls.add(b['id'])
+                        else:
+                            anon_calls += 1
+            usage = msg.get('usage')
+            if not isinstance(usage, dict):
+                continue
+            mid = msg.get('id')
+            if isinstance(mid, str) and mid:
+                by_id[mid] = usage
+            else:
+                anon.append(usage)
+    tokens = {'input': 0, 'cached': 0, 'output': 0}
+    for usage in list(by_id.values()) + anon:
+        tokens['input'] += (usage.get('input_tokens') or 0) + \
+            (usage.get('cache_creation_input_tokens') or 0)
+        tokens['cached'] += usage.get('cache_read_input_tokens') or 0
+        tokens['output'] += usage.get('output_tokens') or 0
+    return tokens, len(calls) + anon_calls
+
+
 def _texts(content):
     """The text blocks of a message's content (a string or a block list)."""
     if isinstance(content, str):
@@ -202,19 +248,26 @@ class HeadlessWorker:
         self.wrapper = wrapper
         self._run = run
         if config_dir is None:
-            if os.environ.get('CLAUDE_GLM_CONFIG_DIR'):
-                config_dir = os.environ['CLAUDE_GLM_CONFIG_DIR']
-            elif os.path.basename(wrapper) == 'claude-glm':
-                config_dir = os.path.expanduser('~/.claude-glm')
+            if os.path.basename(wrapper) == 'claude-glm':
+                config_dir = (os.environ.get('CLAUDE_GLM_CONFIG_DIR')
+                              or os.path.expanduser('~/.claude-glm'))
             else:
-                config_dir = os.path.expanduser('~/.claude')
+                # A plain claude keeps its transcripts in ~/.claude (or
+                # CLAUDE_CONFIG_DIR), never in the GLM wrapper's folder.
+                config_dir = (os.environ.get('CLAUDE_CONFIG_DIR')
+                              or os.path.expanduser('~/.claude'))
         self.config_dir = config_dir
 
     def command(self, brief):
         argv = [self.wrapper, '-p', brief, '--output-format', 'json',
                 '--dangerously-skip-permissions', '--max-turns', str(self.max_turns)]
         env = dict(os.environ)
-        env['CLAUDE_GLM_MODEL'] = self.model
+        if os.path.basename(self.wrapper) == 'claude-glm':
+            env['CLAUDE_GLM_MODEL'] = self.model
+        else:
+            # A plain `claude` takes the model as a flag, and its
+            # transcripts are under ~/.claude/projects (ruling R23).
+            argv += ['--model', self.model]
         return argv, env
 
     def transcript_path(self, cwd, session_id):
@@ -291,17 +344,22 @@ def _tail(proc, n=5):
     return ' | '.join(text.splitlines()[-n:])
 
 
-def mechanical_checks(batch, worktree, verdicts, run=subprocess.run):
+def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
+                      kind='verdicts'):
     """Problems that stop a batch before any review; [] when clean.
 
     Each problem says what failed and how to fix it (it is the worker's
-    fix-round prompt)."""
+    fix-round prompt).  An import batch (kind 'import', ruling R63) has no
+    verdict lines or evidence phrases to check; the tool tests,
+    check_evidence and parity still run."""
     wave = _tool('wave')
     problems = []
     key = wave._addr_key
     rows = batch.get('rows', [])
     row_keys = {key(r['address']) for r in rows}
     given = {key(a): a for a in verdicts}
+    if kind == 'import':
+        rows, given = [], {}
     for r in rows:
         if r.get('class') == 'ambiguous' or (
                 'class' not in r and not r.get('verdict')):
@@ -355,14 +413,100 @@ def review_needed(batch, verdicts, seed, sample=0.2):
     return False, ''
 
 
+# -- worker pools (Task 15) -----------------------------------------------
+
+# reviewer_model is resolved by parse_pool; None only on a hand-built Pool.
+Pool = collections.namedtuple(
+    'Pool', 'name wrapper model workers reviewer_model', defaults=(None,))
+DEFAULT_POOL = 'glm=claude-glm:glm-5.3-flash[1m]:2'
+# The short form NAME[:WORKERS] of the two known pool names, per queue.
+POOL_DEFAULTS = {
+    'glm': {'wave1': ('claude-glm', 'glm-5.3-flash[1m]'),
+            'import': ('claude-glm', 'glm-5.3-flash[1m]')},
+    'claude': {'wave1': ('claude', 'sonnet'), 'import': ('claude', 'haiku')},
+}
+# A pool's reviewer model unless --reviewer-model says otherwise; any
+# other pool reviews with its own worker model.
+REVIEWER_DEFAULTS = {'claude': 'sonnet', 'glm': 'glm-5.3-flash[1m]'}
+POOL_NAME_RE = re.compile(r'[A-Za-z0-9_-]+')
+
+
+def _workers_count(text, spec):
+    try:
+        n = int(text)
+    except ValueError:
+        n = 0
+    if n < 1:
+        raise ValueError('pool %r: WORKERS must be a whole number of at '
+                         'least 1, not %r' % (spec, text))
+    return n
+
+
+def parse_pool(spec, queue='wave1', reviewer_model=None):
+    """A Pool from `NAME=WRAPPER:MODEL[:WORKERS]` (WORKERS defaults to 1),
+    or from the short form `NAME[:WORKERS]` of a known name (POOL_DEFAULTS,
+    which depend on the queue).  ValueError when malformed.
+    reviewer_model overrides REVIEWER_DEFAULTS."""
+    if not isinstance(spec, str) or not spec.strip():
+        raise ValueError('empty pool spec')
+    if '=' in spec:
+        name, _, rest = spec.partition('=')
+        parts = rest.split(':')
+        if len(parts) not in (2, 3) or not parts[0] or not parts[1]:
+            raise ValueError(
+                'pool %r: expected NAME=WRAPPER:MODEL[:WORKERS]' % spec)
+        wrapper, model = parts[0], parts[1]
+        workers = _workers_count(parts[2], spec) if len(parts) == 3 else 1
+    else:
+        name, _, count = spec.partition(':')
+        if name not in POOL_DEFAULTS or queue not in POOL_DEFAULTS[name]:
+            raise ValueError(
+                'pool %r: the short form NAME[:WORKERS] needs a known name '
+                '(%s) and a known queue; give NAME=WRAPPER:MODEL[:WORKERS]'
+                % (spec, ', '.join(sorted(POOL_DEFAULTS))))
+        wrapper, model = POOL_DEFAULTS[name][queue]
+        workers = _workers_count(count, spec) if ':' in spec else 1
+    if not POOL_NAME_RE.fullmatch(name):
+        raise ValueError('pool %r: the name must be letters, digits, - or _'
+                         % spec)
+    return Pool(name, wrapper, model, workers,
+                reviewer_model or REVIEWER_DEFAULTS.get(name, model))
+
+
+def pools_with_reviewers(pools, reviewer_models):
+    """The pools with --reviewer-model NAME=MODEL applied; ValueError for
+    a name that is no pool."""
+    names = {p.name for p in pools}
+    for name in reviewer_models:
+        if name not in names:
+            raise ValueError('--reviewer-model %s=...: no pool named %s '
+                             '(pools: %s)' % (name, name, ', '.join(sorted(names))))
+    return [p._replace(reviewer_model=reviewer_models[p.name])
+            if p.name in reviewer_models else p for p in pools]
+
+
+def pool_is_glm(pool):
+    """True when Z.ai credits price the pool's turns (ruling R40)."""
+    return _rates(pool.model) is not None
+
+
 # -- the batch loop ------------------------------------------------------
 
 # Relative to the repo root (ruling R29): one ledger per plan, and the
 # driver folder is the status file's directory.
 LEDGER_REL = os.path.join('.superpowers', 'sdd', '2026-10-17-wso-integration',
                           'progress.md')
-STATUS_REL = os.path.join('.superpowers', 'sdd', '2026-10-17-wso-integration',
-                          'driver', 'status.json')
+DRIVER_REL = os.path.join('.superpowers', 'sdd', '2026-10-17-wso-integration',
+                          'driver')
+STATUS_REL = os.path.join(DRIVER_REL, 'status.json')
+
+
+def status_rel(queue='wave1'):
+    """The status file of a queue, relative to the repo root (ruling
+    R42): status.json for wave1, status-import.json for import."""
+    return os.path.join(DRIVER_REL, _tool('wave').QUEUES[queue]['status'])
+
+
 DEFAULT_SEED = '2026-10-22'
 # The next batch's credits before this run has measured one (ruling R38;
 # the plan's ledger example is 1180).
@@ -492,7 +636,8 @@ def read_status(path):
     if not isinstance(status, dict):
         raise StatusError('%s: not a driver status file (not a JSON object)'
                           % path)
-    for key, empty in (('exceptions', {}), ('batches', {}),
+    for key, empty in (('exceptions', {}), ('batches', {}), ('pools', {}),
+                       ('running', {}),
                        ('current', None), ('parked', None),
                        ('stopped', None), ('stalled', None),
                        ('halted', None)):
@@ -543,14 +688,17 @@ def _side_case(v):
 
 
 def ledger_entry(batch, verdicts, classes, review, commits, credits, now=None,
-                 ignored=None):
+                 ignored=None, pool=None, wall=None, tokens=None,
+                 tool_calls=None):
     """The templated progress.md entry for one batch.
 
     batch carries 'id'; verdicts maps address to a wave-state verdict or a
     (side, case) tuple; classes maps class to row count; review is
     (reviewed, outcome); credits None prints as 'credits unknown';
     ignored maps address to the (side, case) of a worker line set aside
-    because the row was triage-decided (a line only when there are any)."""
+    because the row was triage-decided (a line only when there are any).
+    pool, wall (seconds), tokens ({input, cached, output}) and tool_calls
+    each add a line when given (rulings R10, R61)."""
     wave = _tool('wave')
     known = _tool('triage').CLASSES
     order = [c for c in known if c in classes] + sorted(
@@ -580,6 +728,15 @@ def ledger_entry(batch, verdicts, classes, review, commits, credits, now=None,
         '- commits %s' % commits,
         '- credits unknown' if credits is None else '- credits %.0f' % credits,
     ]
+    if pool:
+        lines.append('- pool %s' % pool)
+    if wall is not None:
+        lines.append('- wall %ds' % round(wall))
+    if tokens is not None:
+        lines.append('- tokens input %d, cached %d, output %d' % (
+            tokens['input'], tokens['cached'], tokens['output']))
+    if tool_calls is not None:
+        lines.append('- tool calls %d' % tool_calls)
     return '\n'.join(lines) + '\n'
 
 
@@ -605,6 +762,27 @@ def blocking_findings(report):
     return out
 
 
+class _BatchContext(threading.local):
+    """The fields of the batch a thread is running (a fresh set per
+    thread): the Driver exposes them as properties."""
+
+    def __init__(self):
+        self.runs = []          # credits of this batch's worker and reviewer runs
+        self.worker_ran = []    # this batch's worker runs: really ran
+        self.ignored = {}
+        self.probe = {}         # address key -> (side, case) the oracle passed
+        self.frida_got = {}     # address key -> (status, detail) of its one Frida run
+        self.pool = None        # the pool this batch runs on
+        self.t0 = None          # clock() at the cut or resume (ruling R61)
+        self.usage = {'input': 0, 'cached': 0, 'output': 0, 'tool_calls': 0}
+        self.final = None       # the figures once the ledger has used them
+
+
+def _per_thread(name):
+    return property(lambda self: getattr(self._ctx, name),
+                    lambda self, v: setattr(self._ctx, name, v))
+
+
 class Driver:
     """The batch loop: cut and triage, brief, worker, mechanical checks
     (one fix round), review when it can matter (one fix round), record,
@@ -612,39 +790,76 @@ class Driver:
     exception: written to the status file and the ledger, sent to the AoE
     session, and the loop goes on with the next batch.
 
-    The wave functions are attributes, so tests replace them.  Batches run
-    one at a time; `workers` is stored for the pools (ruling R30).
-    `budget` is in credits: before each new batch the run stops when what
-    it spent plus the next batch's estimate would pass it (ruling R38).
-    A worker's 429 parks the batch, its WIP committed in the batch
-    worktree; the next run resumes it first (ruling R39)."""
+    The wave functions are attributes, so tests replace them.  Worker
+    pools (Task 15) share the batches: a batch goes to the first pool with
+    a free worker (`pick_pool`), each busy worker is one thread, and every
+    wave-state mutation and repo-level git operation runs under the one
+    driver-wide `_lock` (ruling R62); only the worker and reviewer runs,
+    the oracle and Frida phases and the mechanical checks run in parallel.
+    The per-batch fields (`_runs`, `_probe`, ...) are thread-local.
+    `budget` is in credits over all pools: before each new batch the run
+    stops when what it spent plus the next batch's estimate would pass it
+    (ruling R38); `budgets` caps single pools.  A worker's 429 parks its
+    pool, the WIP committed in the batch worktree; the next run resumes
+    that batch on that pool first (ruling R39).  `queue` picks the state
+    file's schema twin: wave1 or import (ruling R11)."""
 
     def __init__(self, repo, state_path, worker, reviewer, ledger_path,
                  status_path, aoe_session=None, seed=DEFAULT_SEED, budget=None,
                  workers=1, *, push=None, send=None, dry_run=False, gate=True,
                  base='first', log=None, frida=False, frida_map=None,
-                 oracle_run=None, frida_run=None):
+                 oracle_run=None, frida_run=None, pools=None,
+                 workers_by_pool=None, reviewers_by_pool=None, budgets=None,
+                 queue='wave1', runner=None, clock=None):
         wave = _tool('wave')
+        if queue not in wave.QUEUES:
+            raise ValueError('unknown queue %r (one of %s)' % (
+                queue, ', '.join(wave.QUEUES)))
         self.repo = repo
         self.state_path = state_path
-        self.worker = worker
-        self.reviewer = reviewer
+        self.queue = queue
+        self.kind = wave.QUEUES[queue]['kind']
+        # One pool by default, named glm; `worker` and `reviewer` serve
+        # every pool that workers_by_pool / reviewers_by_pool leaves out.
+        self.pools = list(pools) if pools else [Pool(
+            'glm', 'claude-glm', 'glm-5.3-flash[1m]', workers,
+            'glm-5.3-flash[1m]')]
+        if len({p.name for p in self.pools}) != len(self.pools):
+            raise ValueError('two pools have the same name')
+        self.workers_by_pool = dict(workers_by_pool or {})
+        self.reviewers_by_pool = dict(reviewers_by_pool or {})
+        for p in self.pools:
+            self.workers_by_pool.setdefault(p.name, worker)
+            self.reviewers_by_pool.setdefault(p.name, reviewer)
+        self.budgets = dict(budgets or {})
+        for name in self.budgets:
+            pool = next((p for p in self.pools if p.name == name), None)
+            if pool is None:
+                raise ValueError('--budget-%s: no pool named %s' % (name, name))
+            if not pool_is_glm(pool):
+                raise ValueError(
+                    '--budget-%s is refused: pool %s runs %s, which Z.ai '
+                    'credits do not price (only GLM turns are priced); '
+                    'budget a GLM pool, or cap the run with --budget over '
+                    'the GLM pools' % (name, name, pool.model))
         self.ledger_path = ledger_path
         self.status_path = status_path
         self.driver_dir = os.path.dirname(os.path.abspath(status_path))
         self.aoe_session = aoe_session
         self.seed = seed
         self.budget = budget
-        self.workers = workers
+        self.workers = (workers if pools is None
+                        else sum(p.workers for p in self.pools))
         self.dry_run = dry_run
         self.gate = gate
         self.base = base
         self.size = wave.DEFAULT_SIZE
-        self.category = wave.DEFAULT_CATEGORY
+        self.category = wave.QUEUES[queue]['category']
         docs = os.path.join(repo, 'docs', 'wso')
         self.disagreements_path = os.path.join(docs, 'disagreements.json')
         self.triage_path = os.path.join(docs, 'triage.json')
-        self.template_path = os.path.join(docs, 'brief-template.md')
+        self.template_path = os.path.join(
+            docs, os.path.basename(wave.QUEUES[queue]['template']))
         self.report_path = os.path.join(docs, 'xrec-report.md')
         self.calibration_path = os.path.join(docs, 'truth-calibration.json')
         truth = _tool('truth')
@@ -665,15 +880,48 @@ class Driver:
         self.send = self._aoe_send if send is None else send
         self.log = (lambda m: print(m, flush=True)) if log is None else log
         self._read_status()   # a corrupt status file refuses here
+        # Ruling R62: the one lock over every wave-state mutation and
+        # repo-level git operation; never taken twice by one thread.
+        self._lock = threading.Lock()
+        self._ctx = _BatchContext()
+        self._runner = runner      # runs a callable on its own thread; None: threads
+        self._clock = time.monotonic if clock is None else clock
+        self._started = {}         # batch id -> clock() at its cut
+        self._busy = {p.name: 0 for p in self.pools}
+        self._cursor = 0           # pick_pool's round-robin position
+        self._parked_now = set()   # pools that ended a batch parked this run
+        self._threads = []
+        self._pool_batch_credits = {p.name: [] for p in self.pools}
         self._imported = {}
-        self._runs = []
-        self._ignored = {}
         self._halt = False
         self._batch_credits = []   # this run's batches: credits or None
-        self._worker_ran = []      # this batch's worker runs: really ran
         self._no_transcript = 0    # batch exceptions in a row without one
-        self._probe = {}           # this batch: address key -> (side, case) the oracle passed
-        self._frida_got = {}       # this batch: address key -> (status, detail) of its one Frida run
+
+    _runs = _per_thread('runs')
+    _worker_ran = _per_thread('worker_ran')
+    _ignored = _per_thread('ignored')
+    _probe = _per_thread('probe')
+    _frida_got = _per_thread('frida_got')
+
+    @property
+    def worker(self):
+        return self.workers_by_pool[self.pools[0].name]
+
+    @worker.setter
+    def worker(self, value):
+        self.workers_by_pool[self.pools[0].name] = value
+
+    @property
+    def reviewer(self):
+        return self.reviewers_by_pool[self.pools[0].name]
+
+    @reviewer.setter
+    def reviewer(self, value):
+        self.reviewers_by_pool[self.pools[0].name] = value
+
+    def _pool_name(self):
+        """The pool the current batch runs on."""
+        return self._ctx.pool or self.pools[0].name
 
     # -- status, ledger, results ----------------------------------------
 
@@ -697,35 +945,67 @@ class Driver:
 
     def _stage(self, batch_id, stage):
         current = {'batch': batch_id, 'stage': stage, 'at': _now()}
-        self._update_status(lambda s: s.__setitem__('current', current))
+
+        def apply(s):
+            s['current'] = current
+            s['running'][batch_id] = dict(current, pool=self._pool_name())
+        self._update_status(apply)
         self.log('%s: %s' % (batch_id, stage))
+
+    def _figures(self):
+        """{wall, tokens, tool_calls} of the batch this thread runs
+        (ruling R61), fixed at the first call so the ledger entry and the
+        status agree; None for a batch that was never started."""
+        if self._ctx.t0 is None:
+            return None
+        if self._ctx.final is None:
+            u = self._ctx.usage
+            self._ctx.final = {
+                'wall': max(0.0, self._clock() - self._ctx.t0),
+                'tokens': {k: u[k] for k in ('input', 'cached', 'output')},
+                'tool_calls': u['tool_calls']}
+        return self._ctx.final
 
     def _finish(self, batch_id, outcome, change=None, **extra):
         """Record the batch's outcome; `change` edits the status in the
         same write.  Any outcome but another park ends the batch's park."""
         entry = dict(outcome=outcome, credits=self._credits(), at=_now(), **extra)
+        figures = self._figures()
+        if figures:
+            entry.update(wall=round(figures['wall'], 1),
+                         tokens=dict(figures['tokens']),
+                         tool_calls=figures['tool_calls'])
 
         def apply(s):
             old = s['batches'].get(batch_id)
             if isinstance(old, dict) and old.get('oracle_findings'):
                 entry['oracle_findings'] = old['oracle_findings']
             s['batches'][batch_id] = entry
-            s['current'] = None
-            parked = s.get('parked')
-            if outcome != 'parked' and isinstance(parked, dict) and \
-                    parked.get('batch_id') == batch_id:
-                s['parked'] = None
+            s['running'].pop(batch_id, None)
+            # current: the latest batch still in flight, if any.
+            left = sorted(s['running'].items(), key=lambda kv: kv[1].get('at', ''))
+            s['current'] = ({'batch': left[-1][0], 'stage': left[-1][1].get('stage'),
+                             'at': left[-1][1].get('at')} if left else None)
+            if outcome != 'parked':
+                holders = [s] + [p for p in s['pools'].values()
+                                 if isinstance(p, dict)]
+                for holder in holders:
+                    parked = holder.get('parked')
+                    if isinstance(parked, dict) and \
+                            parked.get('batch_id') == batch_id:
+                        holder['parked'] = None
             if change:
                 change(s)
         self._update_status(apply)
 
     def _append_ledger(self, text):
-        os.makedirs(os.path.dirname(os.path.abspath(self.ledger_path)),
-                    exist_ok=True)
-        sep = '\n' if os.path.isfile(self.ledger_path) and os.path.getsize(
-            self.ledger_path) else ''
-        with open(self.ledger_path, 'a', encoding='utf-8') as f:
-            f.write(sep + text.rstrip('\n') + '\n')
+        with self._lock:
+            os.makedirs(os.path.dirname(os.path.abspath(self.ledger_path)),
+                        exist_ok=True)
+            sep = '\n' if os.path.isfile(self.ledger_path) and os.path.getsize(
+                self.ledger_path) else ''
+            with open(self.ledger_path, 'a', encoding='utf-8') as f:
+                f.write(sep + text.rstrip('\n') + '\n')
 
     def _credits(self):
         if not self._runs or any(c is None for c in self._runs):
@@ -742,6 +1022,16 @@ class Driver:
         self._runs.append(res.credits)
         if label.startswith('worker'):
             self._worker_ran.append(worker_ran(res))
+        if res.transcript:
+            try:
+                tokens, calls = usage_of(res.transcript)
+            except OSError:
+                tokens, calls = None, 0
+            if tokens:
+                u = self._ctx.usage
+                for k in ('input', 'cached', 'output'):
+                    u[k] += tokens[k]
+                u['tool_calls'] += calls
         folder = os.path.join(self.driver_dir, batch_id)
         os.makedirs(folder, exist_ok=True)
         for name, text in (('brief.md', brief), ('report.md', res.report or '')):
@@ -810,8 +1100,9 @@ class Driver:
         return git('rev-parse', 'HEAD').stdout.strip() or None, None
 
     def _park(self, batch_id, reason, worktree):
-        """Commit the WIP in the batch worktree, write status['parked'];
-        the run then exits 3 and the next one resumes this batch first."""
+        """Commit the WIP in the batch worktree, write the pool's
+        `parked`; the pool takes no more batches, the run exits 3 once the
+        other pools are done, and the next run resumes this batch first."""
         wip, err = self._commit_wip(worktree)
         extra = {}
         if wip:
@@ -820,8 +1111,11 @@ class Driver:
             extra['wip_error'] = err
             self.log('%s: WIP not committed: %s' % (batch_id, err))
         parked = {'batch_id': batch_id, 'at': _now(), 'reason': reason}
-        self._finish(batch_id, 'parked',
-                     change=lambda s: s.__setitem__('parked', parked), **extra)
+        name = self._pool_name()
+
+        def mark(s):
+            s['pools'].setdefault(name, {})['parked'] = parked
+        self._finish(batch_id, 'parked', change=mark, **extra)
         self.log('%s: parked (%s)%s' % (
             batch_id, reason, '; WIP committed as %s' % wip[:8] if wip else ''))
         return 'parked'
@@ -874,7 +1168,9 @@ class Driver:
                          'report line is replaced' % (batch_id, addr, sc[1]))
             verdicts[addr] = sc
         try:
-            return verdicts, self.mechanical_checks(batch, worktree, verdicts)
+            kw = {'kind': 'import'} if self.kind == 'import' else {}
+            return verdicts, self.mechanical_checks(batch, worktree, verdicts,
+                                                    **kw)
         except OSError as e:
             raise _launch_failed('the mechanical checks', worktree, e) from None
 
@@ -1058,7 +1354,7 @@ class Driver:
         ours, or equal where it says the fork, is a finding for the one fix
         round.  It runs once per batch, never again.  Returns the findings."""
         self._frida_got = {}
-        if not self.frida or self.dry_run:
+        if not self.frida or self.dry_run or self.kind == 'import':
             return []
         truth = _tool('truth')
         wave = _tool('wave')
@@ -1134,8 +1430,10 @@ class Driver:
             id=batch_id, branch=batch['branch'], base=self.base, diff=path,
             why=why, verdicts='\n'.join(
                 '- verdict 0x%s %s case %s' % (k.upper(), side, case)
-                for k, (side, case) in sorted(merged.items())))
-        res = self._run(self.reviewer, brief, worktree, batch_id, label)
+                for k, (side, case) in sorted(merged.items()))
+            or '(none: an import batch has no verdicts)')
+        res = self._run(self._reviewer_of(self._pool_name()), brief, worktree,
+                        batch_id, label)
         out = self._settle(batch_id, res, label, worktree)
         if out:
             return None, out
@@ -1164,12 +1462,51 @@ class Driver:
         n = self._git('rev-list', '--count', '%s..%s' % (mb, tip)).stdout.strip()
         return '%s..%s (%s commit%s)' % (mb[:8], tip[:8], n, '' if n == '1' else 's')
 
+    def _worker_of(self, name):
+        return self.workers_by_pool.get(name)
+
+    def _reviewer_of(self, name):
+        return self.reviewers_by_pool.get(name)
+
+    def _figure_kw(self):
+        """ledger_entry's pool, wall, tokens and tool_calls (R10, R61)."""
+        f = self._figures() or {}
+        return dict(pool=self._pool_name(), wall=f.get('wall'),
+                    tokens=f.get('tokens'), tool_calls=f.get('tool_calls'))
+
     def _ledger_for(self, batch_id, verdicts, review):
         batch = self.load_state(self.state_path)['batches'][batch_id]
         self._append_ledger(ledger_entry(
             dict(batch, id=batch_id), verdicts, self._classes(batch_id, batch),
             review, self._commits(batch['branch']), self._credits(),
-            ignored=self._ignored))
+            ignored=self._ignored, **self._figure_kw()))
+
+    def _record_pool(self, batch_id, name):
+        """Write batch['pool'] = name into the state entry (ruling R10)."""
+        with self._lock:
+            state = self.load_state(self.state_path)
+            batch = state['batches'].get(batch_id)
+            if batch is not None and batch.get('pool') != name:
+                batch['pool'] = name
+                _tool('wave').save_state(self.state_path, state)
+
+    def _sync_branch(self, branch, worktree):
+        """None, or why not: with batches in parallel the base may have
+        moved since this branch was cut, and close only fast-forwards, so
+        the base is merged into the branch first (the files are disjoint;
+        a no-op when the base is already an ancestor).  Under the lock."""
+        if self._git('merge-base', '--is-ancestor', self.base,
+                     branch).returncode == 0:
+            return None
+        r = subprocess.run(['git', '-C', worktree, 'merge', '--no-edit', '-q',
+                            self.base], capture_output=True, text=True)
+        if r.returncode == 0:
+            self.log('%s: %s merged into it before the close' % (branch, self.base))
+            return None
+        subprocess.run(['git', '-C', worktree, 'merge', '--abort'],
+                       capture_output=True, text=True)
+        return 'merging %s into %s failed: %s' % (
+            self.base, branch, _one_line((r.stderr or '') + (r.stdout or '')))
 
     def _wip_tip(self, batch_id, branch):
         """The branch tip's sha when it is the driver's own unpushed WIP
@@ -1228,6 +1565,11 @@ class Driver:
         self._ignored = {}
         self._probe = {}
         self._frida_got = {}
+        self._ctx.usage = {'input': 0, 'cached': 0, 'output': 0, 'tool_calls': 0}
+        self._ctx.final = None
+        self._ctx.t0 = self._started.pop(batch_id, None)
+        if self._ctx.t0 is None:
+            self._ctx.t0 = self._clock()
         state = self.load_state(self.state_path)
         batch = state['batches'].get(batch_id)
         if batch is None:
@@ -1236,6 +1578,14 @@ class Driver:
         if batch['status'] != 'assigned':
             self.log('%s is %s; nothing to do' % (batch_id, batch['status']))
             return 'closed'
+        # The pool: the one this run assigned, else the one the state
+        # names, else the first.
+        names = [p.name for p in self.pools]
+        name = self._ctx.pool or batch.get('pool')
+        if name not in names:
+            name = names[0]
+        self._ctx.pool = name
+        self._record_pool(batch_id, name)
         worktree = self.worktree_for(self.repo, batch['branch'])
         if worktree is None or not os.path.isdir(worktree):
             # A removed directory stays listed (prunable) until a prune.
@@ -1257,8 +1607,9 @@ class Driver:
         if resume:
             brief = self._resume_preamble(batch_id, batch, resume) + brief
             self.log('%s: resumed (%s)' % (batch_id, resume))
-        worker = FakeWorker(dry_report(batch)) if self.dry_run else self.worker
-        if not self.dry_run:
+        worker = (FakeWorker(dry_report(batch)) if self.dry_run
+                  else self._worker_of(name))
+        if not self.dry_run and self.kind == 'verdicts':
             brief = self._oracle_phase(batch_id, batch, worktree) + brief
 
         # The worker, the mechanical checks, one fix round.
@@ -1294,7 +1645,7 @@ class Driver:
         needed, why = self.review_needed(batch_id, merged, self.seed)
         if not needed:
             review = (False, 'not sampled (seed %s)' % self.seed)
-        elif self.reviewer is None:
+        elif self._reviewer_of(name) is None:
             return self._exception(batch_id, 'review', [
                 'review needed (%s) but no reviewer is configured' % why])
         else:
@@ -1322,42 +1673,56 @@ class Driver:
             review = (True, '%s (seed %s): clean%s' % (
                 why, self.seed, ' after one fix round' if fixed else ''))
 
-        # Record, close, push, ledger.
+        # Record, close, push, ledger.  Every state write and git
+        # operation here holds the driver lock (ruling R62); nothing
+        # inside the locked blocks takes it again.
         self._stage(batch_id, 'record')
         failed = []
-        for addr, (side, case) in sorted(verdicts.items()):
-            measured = self._measured_for(addr, side)
-            extra = {} if measured is None else {'measured': measured}
-            rc, text = self.record_verdict(self.state_path, self.repo, batch_id,
-                                           addr, side, case, **extra)
-            if rc != 0:
-                failed.append(text.strip())
+        with self._lock:
+            for addr, (side, case) in sorted(verdicts.items()):
+                measured = self._measured_for(addr, side)
+                extra = {} if measured is None else {'measured': measured}
+                rc, text = self.record_verdict(self.state_path, self.repo,
+                                               batch_id, addr, side, case,
+                                               **extra)
+                if rc != 0:
+                    failed.append(text.strip())
         if failed:
             return self._exception(batch_id, 'record', failed)
-        commits = self._commits(batch['branch'])
         self._stage(batch_id, 'close')
-        try:
-            rc, text = self.close_batch(self.state_path, self.repo, batch_id,
-                                        base=self.base, gate=self.gate)
-        except Exception as e:
-            rc, text = 1, 'close_batch raised %r' % (e,)
+        with self._lock:
+            commits = self._commits(batch['branch'])
+            sync = self._sync_branch(batch['branch'], worktree)
+            if sync:
+                rc, text = 1, sync
+            else:
+                try:
+                    rc, text = self.close_batch(
+                        self.state_path, self.repo, batch_id, base=self.base,
+                        gate=self.gate, kind=self.kind)
+                except Exception as e:
+                    rc, text = 1, 'close_batch raised %r' % (e,)
         if rc != 0:
             return self._exception(batch_id, 'close', [
                 l.strip() for l in text.splitlines() if l.strip()])
         self.log(text.rstrip())
-        try:
-            rc, text = self.write_scorecard(self.state_path, self.report_path,
-                                            self.triage_path,
-                                            calibration_path=self.calibration_path)
-            self.log(text.rstrip())
-        except Exception as e:   # the batch is closed; the scorecard can wait
-            self.log('scorecard not written: %r' % (e,))
-        err = self.push()
+        with self._lock:
+            if self.kind == 'verdicts':
+                # The import queue has no verdicts: its state must not
+                # overwrite wave 1's scorecard.
+                try:
+                    rc, text = self.write_scorecard(
+                        self.state_path, self.report_path, self.triage_path,
+                        calibration_path=self.calibration_path)
+                    self.log(text.rstrip())
+                except Exception as e:   # the batch is closed; the scorecard can wait
+                    self.log('scorecard not written: %r' % (e,))
+            err = self.push()
         batch = self.load_state(self.state_path)['batches'][batch_id]
         entry = ledger_entry(
             dict(batch, id=batch_id), batch['verdicts'],
             self._classes(batch_id, batch), review, commits, self._credits(),
-            ignored=self._ignored)
+            ignored=self._ignored, **self._figure_kw())
         kept = [(a, d) for a, (side, _c) in sorted(verdicts.items())
                 for st, d in [self._frida_got.get(_tool('wave')._addr_key(a), ('', ''))]
                 if side == 'ours' and st == 'different']
@@ -1372,17 +1737,21 @@ class Driver:
 
     def _cut(self):
         """(batch_id, None) for a batch cut and triaged, else (None, exit)."""
+        triage = (self.triage_path
+                  if _tool('wave').QUEUES[self.queue]['triage'] else None)
         try:
-            rc, text = self.next_batch(
-                self.disagreements_path, self.state_path, self.size,
-                self.category, triage_path=self.triage_path, repo=self.repo,
-                base=self.base)
+            with self._lock:
+                rc, text = self.next_batch(
+                    self.disagreements_path, self.state_path, self.size,
+                    self.category, triage_path=triage, repo=self.repo,
+                    base=self.base, queue=self.queue)
         except Exception as e:
             rc, text = 1, 'next_batch raised %r\n' % (e,)
         self.log(text.rstrip())
         m = re.match(r'(\S+) assigned:', text)
         if m:
             batch_id = m.group(1)
+            self._started[batch_id] = self._clock()
             t = re.search(r'^triage: \d+ auto, (\d+) import, \d+ ambiguous$',
                           text, re.M)
             if t:
@@ -1477,7 +1846,8 @@ class Driver:
                 self._classes(batch_id, batch),
                 (reviewed, 'recovered after the last run stopped between '
                            'close and ledger'),
-                'unknown..%s (recovered)' % (tip[:8] or batch['branch']), None))
+                'unknown..%s (recovered)' % (tip[:8] or batch['branch']), None,
+                pool=batch.get('pool')))
             self.log('%s: closed by the last run without its ledger entry; '
                      'entry written' % batch_id)
         err = self.push()
@@ -1487,47 +1857,149 @@ class Driver:
             return 1
         return None
 
+    def _pool_or_first(self, name):
+        return name if name in self._busy else self.pools[0].name
+
     def _leftovers(self):
-        """What the last run left behind: ([(batch_id, why)] to resume
-        before anything new, None), or ([], exit code).  First a batch it
-        closed but did not finish (current names a closed batch), then
-        the parked batch, then a batch it left in flight (current names an
-        assigned batch: the process died mid-batch)."""
+        """What the last run left behind: ([(batch_id, why, pool)] to
+        resume before anything new, None), or ([], exit code).  First a
+        batch it closed but did not finish (current or running names a
+        closed batch), then each pool's parked batch (a top-level `parked`
+        from before the pools is moved to its batch's pool once), then a
+        batch it left in flight (the process died mid-batch)."""
         status = self._read_status()
         batches = self.load_state(self.state_path)['batches']
+        old = status['parked'] if isinstance(status['parked'], dict) else None
+        if old:
+            owner = self._pool_or_first(
+                (batches.get(old.get('batch_id')) or {}).get('pool'))
+
+            def migrate(s):
+                if isinstance(s['parked'], dict):
+                    s['pools'].setdefault(owner, {})['parked'] = s['parked']
+                    s['parked'] = None
+            status = self._update_status(migrate)
         current = status['current'] if isinstance(status['current'], dict) else {}
-        cur = current.get('batch')
-        if cur and batches.get(cur, {}).get('status') == 'closed':
-            if self._settle_closed(cur):
-                return [], 1
-            cur = None
+        flying = {}
+        for bid, info in status['running'].items():
+            if isinstance(info, dict):
+                flying[bid] = dict(info)
+        if current.get('batch'):
+            flying.setdefault(current['batch'], current)
+        for cur in sorted(flying):
+            if batches.get(cur, {}).get('status') == 'closed':
+                if self._settle_closed(cur):
+                    return [], 1
+                flying.pop(cur)
         resume = []
-        parked = status['parked'] if isinstance(status['parked'], dict) else {}
-        pid = parked.get('batch_id')
-        if pid:
+        parked_ids = set()
+        for name, info in sorted(status['pools'].items()):
+            parked = info.get('parked') if isinstance(info, dict) else None
+            if not isinstance(parked, dict) or not parked.get('batch_id'):
+                continue
+            pid = parked['batch_id']
+            parked_ids.add(pid)
             st = batches.get(pid, {}).get('status')
             if st == 'assigned':
                 resume.append((pid, 'was parked by the driver at %s (%s)' % (
-                    parked.get('at'), parked.get('reason'))))
+                    parked.get('at'), parked.get('reason')),
+                    self._pool_or_first(name)))
             else:
-                def unpark(s):
-                    if isinstance(s['parked'], dict) and \
-                            s['parked'].get('batch_id') == pid:
-                        s['parked'] = None
+                def unpark(s, name=name, pid=pid):
+                    p = s['pools'].get(name)
+                    if isinstance(p, dict) and isinstance(p.get('parked'), dict) \
+                            and p['parked'].get('batch_id') == pid:
+                        p['parked'] = None
                 self._update_status(unpark)
                 self.log('%s was parked but is %s; parked cleared' % (
                     pid, st or 'not in the wave state'))
-        if cur and cur != pid:
+        for cur, info in sorted(flying.items()):
+            if cur in parked_ids:
+                continue
             st = batches.get(cur, {}).get('status')
             if st == 'assigned':
                 resume.append((cur, 'was interrupted at its %s stage (%s): '
                                     'the last run stopped mid-batch' % (
-                                        current.get('stage'), current.get('at'))))
+                                        info.get('stage'), info.get('at')),
+                               self._pool_or_first(
+                                   batches[cur].get('pool') or info.get('pool'))))
             else:
-                self._update_status(lambda s: s.__setitem__('current', None))
+                def clear(s, cur=cur):
+                    s['running'].pop(cur, None)
+                    if isinstance(s['current'], dict) and \
+                            s['current'].get('batch') == cur:
+                        s['current'] = None
+                self._update_status(clear)
                 self.log('%s was in flight but is %s; current cleared' % (
                     cur, st or 'not in the wave state'))
         return resume, None
+
+    # -- pools ----------------------------------------------------------------
+
+    def _pool_estimate(self, name):
+        known = [c for c in self._pool_batch_credits[name] if c is not None]
+        return sum(known) / len(known) if known else DEFAULT_ESTIMATE
+
+    def _pool_spent(self, name):
+        est = self._pool_estimate(name)
+        return sum(est if c is None else c
+                   for c in self._pool_batch_credits[name])
+
+    def _init_pools(self):
+        """status['pools'][name]: this run's credits (0), the budget, no
+        stop; an earlier park stays until its batch is resumed."""
+        def init(s):
+            for p in self.pools:
+                old = s['pools'].get(p.name)
+                parked = old.get('parked') if isinstance(old, dict) else None
+                s['pools'][p.name] = {
+                    'credits': 0.0, 'budget': self.budgets.get(p.name),
+                    'parked': parked, 'stopped': None}
+        self._update_status(init)
+
+    def _pool_over_budget(self, name, status):
+        """True, with the pool's `stopped: 'budget'` written, when its
+        credits plus the next batch's estimate pass its budget."""
+        budget = self.budgets.get(name)
+        if budget is None:
+            return False
+        info = status['pools'].get(name) or {}
+        if info.get('stopped') == 'budget':
+            return True
+        spent, est = self._pool_spent(name), self._pool_estimate(name)
+        if spent + est <= budget:
+            return False
+        self._update_status(lambda s: s['pools'].setdefault(name, {})
+                            .__setitem__('stopped', 'budget'))
+        self.log('pool %s budget stop: %.0f credits spent + %.0f estimated '
+                 'for the next batch > budget %.0f' % (name, spent, est, budget))
+        return True
+
+    def pick_pool(self):
+        """The pool for the next batch, or None: the first, from a
+        round-robin cursor that advances after each assignment, that has a
+        free worker, is not parked and is under its budget.  Call under
+        the lock."""
+        status = self._read_status()
+        ok = []
+        for i, p in enumerate(self.pools):
+            info = status['pools'].get(p.name)
+            if self._busy[p.name] >= p.workers:
+                continue
+            if p.name in self._parked_now or (
+                    isinstance(info, dict) and info.get('parked')):
+                continue
+            if self._pool_over_budget(p.name, status):
+                continue
+            ok.append(i)
+        if not ok:
+            return None
+        n = len(self.pools)
+        for off in range(n):
+            i = (self._cursor + off) % n
+            if i in ok:
+                self._cursor = (i + 1) % n
+                return self.pools[i].name
 
     # -- the loop -------------------------------------------------------------
 
@@ -1546,34 +2018,49 @@ class Driver:
             except Exception as e:   # a failed send must not hide the halt
                 self.log('send failed: %r' % (e,))
 
-    def _one(self, batch_id, resume=None):
-        """Run one batch (clearing an earlier halt), count its credits,
-        and feed the breaker; an exit code when the run must stop, else
-        None."""
+    def _one(self, batch_id, resume=None, pool=None):
+        """Run one batch on `pool` (clearing an earlier halt), count its
+        credits, and feed the breaker; an exit code when the run must
+        stop, else None."""
         self._runs = []
         self._worker_ran = []
+        self._ctx.pool = pool
         if self._read_status()['halted'] is not None:
             self._update_status(lambda s: s.__setitem__('halted', None))
         out = (self.run_batch(batch_id, resume=resume) if resume
                else self.run_batch(batch_id))
+        name = self._pool_name()
         if self._runs:
-            self._batch_credits.append(self._credits())
+            credits = self._credits()
+            with self._lock:
+                self._batch_credits.append(credits)
+                if name in self._pool_batch_credits:
+                    self._pool_batch_credits[name].append(credits)
+            if name in self._pool_batch_credits:
+                spent = self._pool_spent(name)
+                self._update_status(lambda s: s['pools'].setdefault(name, {})
+                                    .__setitem__('credits', spent))
         if self._halt:
             return 1
         if out == 'parked':
+            with self._lock:
+                self._parked_now.add(name)   # whatever the status file says
             return 3
         # The breaker (rulings R45, R46): a batch exception whose worker
         # never really ran (no transcript, or one with no successful
         # non-synthetic turn) counts; any other batch resets.  Credits are
         # no signal: a Claude pool's read 0.
-        if out == 'exception' and not any(self._worker_ran):
-            self._no_transcript += 1
-            if self._no_transcript >= BREAKER_LIMIT:
-                self._halt_run('breaker: %d batches without a worker transcript'
-                               % BREAKER_LIMIT)
-                return 1
-        else:
-            self._no_transcript = 0
+        tripped = False
+        with self._lock:
+            if out == 'exception' and not any(self._worker_ran):
+                self._no_transcript += 1
+                tripped = self._no_transcript >= BREAKER_LIMIT
+            else:
+                self._no_transcript = 0
+        if tripped:
+            self._halt_run('breaker: %d batches without a worker transcript'
+                           % BREAKER_LIMIT)
+            return 1
         return None
 
     def _take_run_lock(self):
@@ -1598,14 +2085,15 @@ class Driver:
 
     def run(self):
         """0 when every row is assigned or decided, or at the budget stop;
-        3 when parked; 4 when stalled (the rows left wait on files owned by
-        assigned batches); 1 when an exception that is not the batch's own
-        stopped the run, the run halted (a launch failure, an auth or
-        billing API error, the breaker: status['halted']), the status file
-        cannot be read, or another driver runs on the same status file.
-        What the last run left goes first: a closed batch's missing ledger
-        entry and push, then the parked batch, then an interrupted one.  A
-        dry run processes one batch and exits 0."""
+        3 when a pool ended parked by a rate limit; 4 when stalled (the
+        rows left wait on files owned by assigned batches); 1 when an
+        exception that is not the batch's own stopped the run, the run
+        halted (a launch failure, an auth or billing API error, the
+        breaker: status['halted']), the status file cannot be read, or
+        another driver runs on the same status file.  What the last run
+        left goes first: a closed batch's missing ledger entry and push,
+        then each pool's parked batch on that pool, then an interrupted
+        one.  A dry run processes one batch and exits 0."""
         fd, holder = self._take_run_lock()
         if fd is None:
             self.log('another driver is running (pid %s) on %s; this one '
@@ -1635,29 +2123,141 @@ class Driver:
                      % (batch_id, self.driver_dir))
             return 0
         self._batch_credits = []
+        self._pool_batch_credits = {p.name: [] for p in self.pools}
         self._no_transcript = 0
+        self._busy = {p.name: 0 for p in self.pools}
+        self._parked_now = set()
+        self._init_pools()
         if self._read_status()['stopped'] is not None:
             self._update_status(lambda s: s.__setitem__('stopped', None))
         resume, code = self._leftovers()
         if code is not None:
             return code
-        for batch_id, why in resume:
-            code = self._one(batch_id, why)
-            if code is not None:
-                return code
-        queue = self._cleared()
-        while True:
+        return self._schedule(resume, self._cleared())
+
+    def _start(self, fn):
+        """Run fn on its own thread (the default), or as the injected
+        runner says; the synchronous runner `lambda fn: fn()` keeps a
+        test deterministic."""
+        if self._runner is not None:
+            self._runner(fn)
+        elif sum(p.workers for p in self.pools) <= 1:
+            fn()   # one worker: no second thread to overlap with
+        else:
+            t = threading.Thread(target=fn, name='driver-batch')
+            self._threads.append(t)
+            t.start()
+
+    def _schedule(self, resume, retries):
+        """Hand batches to the pools until nothing is left: resumes first
+        (each on its own pool), then the cleared exceptions, then new
+        cuts.  One thread per busy worker; this thread only assigns, under
+        the lock, and collects the finished ones."""
+        done = queue_mod.Queue()
+        pending = list(resume)
+        retries = list(retries)
+        running = 0
+        exhausted = None      # the exit code once a cut finds nothing
+        cut_blocked = False   # stalled while batches run: retry after one ends
+        failure = None        # 1 when the run must stop
+        crash = None          # an exception that escaped a batch thread
+
+        threads = self._threads = []
+
+        def body(batch_id, why, name):
+            err = None
+            try:
+                code = self._one(batch_id, why, name)
+            except BaseException as e:   # reported by the scheduler
+                code, err = 1, e
+            finally:
+                with self._lock:
+                    self._busy[name] -= 1
+            done.put((code, err))
+
+        def launch(batch_id, why, name):
+            nonlocal running
+            running += 1
+            self._start(lambda: body(batch_id, why, name))
+
+        def reap(block):
+            nonlocal running, cut_blocked, failure, crash
+            try:
+                code, err = done.get(block=block)
+            except queue_mod.Empty:
+                return False
+            running -= 1
+            cut_blocked = False
+            if err is not None and crash is None:
+                crash = err
+            if code == 1:
+                failure = 1
+            return True
+
+        def launch_next():
+            nonlocal exhausted, cut_blocked, failure
+            if pending:
+                with self._lock:
+                    for i, (batch_id, why, name) in enumerate(pending):
+                        pool = next(p for p in self.pools if p.name == name)
+                        if self._busy[name] < pool.workers:
+                            pending.pop(i)
+                            self._busy[name] += 1
+                            break
+                    else:
+                        return False
+                # A resumed batch is in flight again, not parked.
+                self._update_status(lambda s: s['pools'].setdefault(name, {})
+                                    .__setitem__('parked', None))
+                launch(batch_id, why, name)
+                return True
+            if exhausted is not None or cut_blocked:
+                return False
             if self._over_budget():
-                return 0
-            if queue:
-                batch_id = queue.pop(0)
-            else:
-                batch_id, code = self._cut()
-                if batch_id is None:
-                    return code
-            code = self._one(batch_id)
-            if code is not None:
-                return code
+                exhausted = 0
+                return False
+            with self._lock:
+                name = self.pick_pool()
+                if name is not None:
+                    self._busy[name] += 1
+            if name is None:
+                return False
+            if retries:
+                launch(retries.pop(0), None, name)
+                return True
+            batch_id, code = self._cut()
+            if batch_id is None:
+                with self._lock:
+                    self._busy[name] -= 1
+                if code == 4 and running:
+                    cut_blocked = True
+                elif code == 1:
+                    failure = 1
+                else:
+                    exhausted = code
+                return False
+            launch(batch_id, None, name)
+            return True
+
+        while True:
+            while reap(False):
+                pass
+            if failure is None and crash is None and launch_next():
+                continue
+            if running == 0:
+                break
+            reap(True)
+        for t in threads:
+            t.join()
+        if crash is not None:
+            raise crash
+        if failure:
+            return failure
+        status = self._read_status()
+        if self._parked_now or any(isinstance(p, dict) and p.get('parked')
+                                   for p in status['pools'].values()):
+            return 3
+        return exhausted or 0
 
     # -- the defaults for push and send (ruling R28) ------------------------
 
@@ -1689,19 +2289,37 @@ class Driver:
 
 
 def _parse(argv):
-    """(args, None), or (None, (exit code, message)) for `wave.py run`."""
+    """(args, None), or (None, (exit code, message)) for `wave.py run`.
+
+    `--budget-NAME C` is parsed here by hand: the pool names are only
+    known after `--pool` (ruling R12), so argparse cannot declare them."""
+    wave = _tool('wave')
     p = argparse.ArgumentParser(
-        prog='wave.py run',
+        prog='wave.py run', allow_abbrev=False,
         description='Run the wave batches: cut, triage, worker, checks, '
                     'review, close, push, ledger.')
-    p.add_argument('--workers', type=int, default=1,
-                   help='stored; batches run one at a time for now')
+    p.add_argument('--queue', choices=sorted(wave.QUEUES), default='wave1',
+                   help='wave1 (both_changed_differ, b<NNN>) or import '
+                        '(theirs_real_ours_stub and the import list, i<NNN>)')
+    p.add_argument('--pool', action='append', default=[], metavar='SPEC',
+                   help='NAME=WRAPPER:MODEL[:WORKERS], or the short form '
+                        'NAME[:WORKERS] of glm or claude; repeatable '
+                        '(default: %s)' % DEFAULT_POOL)
+    p.add_argument('--reviewer-model', action='append', default=[],
+                   metavar='NAME=MODEL',
+                   help="a pool's reviewer model; repeatable (default: "
+                        'sonnet for claude, glm-5.3-flash[1m] for glm, else '
+                        "the pool's worker model)")
+    p.add_argument('--workers', type=int, default=None,
+                   help="the default pool's worker count (an error with "
+                        '--pool: give each pool its :WORKERS)')
     p.add_argument('--budget', type=float, default=None,
-                   help='credits: stop before a new batch would pass it')
+                   help='credits over all pools: stop before a new batch '
+                        'would pass it; --budget-NAME C caps one GLM pool')
     p.add_argument('--seed', default=DEFAULT_SEED,
                    help='the review sample seed (default %(default)s)')
-    p.add_argument('--state', help='the wave-state file '
-                                   '(default docs/wso/wave-state.json)')
+    p.add_argument('--state', help='the queue\'s state file '
+                                   '(default: its docs/wso state file)')
     p.add_argument('--aoe-session', help='the AoE session that gets '
                                          'exception lines')
     p.add_argument('--frida', action=argparse.BooleanOptionalAction, default=None,
@@ -1718,38 +2336,93 @@ def _parse(argv):
                           "file, under its lock (the coordinator's retry); "
                           "exit 2 when there is none")
     try:
-        return p.parse_args(argv), None
+        args, extra = p.parse_known_args(argv)
     except SystemExit as e:
         return None, (e.code if isinstance(e.code, int) else 2, '')
+    args.budgets = {}
+    i = 0
+    while i < len(extra):
+        m = re.fullmatch(r'--budget-([A-Za-z0-9_-]+)(?:=(.*))?', extra[i])
+        if not m:
+            return None, (2, 'wave.py run: unrecognized argument %s' % extra[i])
+        value = m.group(2)
+        if value is None:
+            i += 1
+            value = extra[i] if i < len(extra) else ''
+        try:
+            args.budgets[m.group(1)] = float(value)
+        except ValueError:
+            return None, (2, 'wave.py run: --budget-%s needs a number of '
+                             'credits, not %r' % (m.group(1), value))
+        i += 1
+    return args, None
+
+
+def _pools_of(args):
+    """([Pool], None), or (None, message) for the --pool, --workers and
+    --reviewer-model flags."""
+    if args.pool and args.workers is not None:
+        return None, ('--workers sets the default pool\'s worker count and '
+                      'cannot be combined with --pool: give each pool its '
+                      ':WORKERS')
+    if args.workers is not None and args.workers < 1:
+        return None, '--workers must be at least 1'
+    reviewers = {}
+    for spec in args.reviewer_model:
+        name, eq, model = spec.partition('=')
+        if not eq or not name or not model:
+            return None, '--reviewer-model %r: expected NAME=MODEL' % spec
+        reviewers[name] = model
+    try:
+        pools = [parse_pool(spec, args.queue) for spec in (
+            args.pool or [DEFAULT_POOL])]
+        if args.workers is not None:
+            pools[0] = pools[0]._replace(workers=args.workers)
+        if len({p.name for p in pools}) != len(pools):
+            return None, 'two --pool specs have the same name'
+        return pools_with_reviewers(pools, reviewers), None
+    except ValueError as e:
+        return None, str(e)
 
 
 def _build(args, repo):
     """(Driver, None), or (None, (exit code, message))."""
     wave = _tool('wave')
-    if args.workers < 1:
-        return None, (2, 'wave.py run: --workers must be at least 1')
+    queue = args.queue
+    pools, why = _pools_of(args)
+    if pools is None:
+        return None, (2, 'wave.py run: %s' % why)
     if args.dry_run and not args.state:
         return None, (2, 'wave.py run --dry-run refuses without an explicit '
                          '--state PATH: a dry run cuts a real batch (branch, '
                          'worktree, triage commits) in that state file. Point '
                          'it at a copy, never at docs/wso/wave-state.json.')
+    live_path = wave.QUEUES[queue]['state']
     if args.dry_run:
-        live = {os.path.realpath(wave.STATE_PATH), os.path.realpath(
-            os.path.join(repo, 'docs', 'wso', 'wave-state.json'))}
+        live = {os.path.realpath(live_path), os.path.realpath(
+            os.path.join(repo, 'docs', 'wso', os.path.basename(live_path)))}
         if os.path.realpath(args.state) in live:
             return None, (2, 'wave.py run --dry-run refuses %s: that is the '
-                             'live wave-state file. Copy it outside docs/wso '
-                             'and pass the copy.' % args.state)
-    state = os.path.abspath(args.state) if args.state else wave.STATE_PATH
+                             'live %s file. Copy it outside docs/wso '
+                             'and pass the copy.' % (
+                                 args.state, os.path.basename(live_path)
+                                 .replace('.json', '')))
+    state = os.path.abspath(args.state) if args.state else live_path
     ledger = os.path.join(repo, LEDGER_REL)
-    status = os.path.join(repo, STATUS_REL)
+    status = os.path.join(repo, status_rel(queue))
+    workers_by_pool = reviewers_by_pool = None
     if args.dry_run:
         dry = os.path.join(os.path.dirname(status), 'dry-run')
         ledger = os.path.join(dry, 'progress.md')
-        status = os.path.join(dry, 'status.json')
+        status = os.path.join(dry, os.path.basename(status))
         worker = reviewer = None
     else:
-        worker, reviewer = HeadlessWorker(), HeadlessWorker()
+        worker = reviewer = None
+        workers_by_pool = {p.name: HeadlessWorker(model=p.model, wrapper=p.wrapper)
+                           for p in pools}
+        reviewers_by_pool = {p.name: HeadlessWorker(model=p.reviewer_model,
+                                                    wrapper=p.wrapper)
+                             for p in pools}
     frida = args.frida
     if frida is None:
         frida = _tool('truth').frida_default(
@@ -1757,9 +2430,11 @@ def _build(args, repo):
     try:
         d = Driver(repo, state, worker, reviewer, ledger, status,
                    aoe_session=args.aoe_session, seed=args.seed,
-                   budget=args.budget, workers=args.workers,
-                   dry_run=args.dry_run, frida=frida,
-                   frida_map=args.frida_map)
+                   budget=args.budget, dry_run=args.dry_run, frida=frida,
+                   frida_map=args.frida_map, pools=pools,
+                   workers_by_pool=workers_by_pool,
+                   reviewers_by_pool=reviewers_by_pool,
+                   budgets=args.budgets, queue=queue)
     except StatusError as e:
         return None, (1, 'wave.py run: the status file cannot be read: %s' % e)
     except ValueError as e:
@@ -1775,10 +2450,10 @@ def driver_from_args(argv, repo=None):
     return _build(args, repo or _tool('wave').ROOT)
 
 
-def _clear(batch_id, repo):
+def _clear(batch_id, repo, queue='wave1'):
     """`wave.py run --clear <batch_id>`: 0, 2 when the status file holds
     no exception for it, 1 when the file cannot be read."""
-    path = os.path.join(repo, STATUS_REL)
+    path = os.path.join(repo, status_rel(queue))
     try:
         rc, entry = clear_exception(path, batch_id)
     except StatusError as e:
@@ -1799,7 +2474,7 @@ def main(argv=None, repo=None):
     args, err = _parse(sys.argv[1:] if argv is None else argv)
     if err is None:
         if args.clear is not None:
-            return _clear(args.clear, repo)
+            return _clear(args.clear, repo, args.queue)
         d, err = _build(args, repo)
     if err:
         if err[1]:

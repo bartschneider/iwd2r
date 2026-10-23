@@ -8,7 +8,8 @@ docs/wso/claims.json maps a stream name to {holder, since, files}.  A
 stream claims the files it is about to edit, so the batch driver never cuts
 a batch over them (wave.next_batch skips them), and releases them at merge.
 A file also counts as held by every batch with status "assigned" in
-docs/wso/wave-state.json, which this module only reads.
+docs/wso/wave-state.json and docs/wso/import-state.json (the two queues),
+which this module only reads.
 
 Claims and state always live in the checkout that has branch `first`
 (found with `git worktree list`), whichever worktree runs this tool, so the
@@ -28,6 +29,9 @@ import tempfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CLAIMS_REL = os.path.join('docs', 'wso', 'claims.json')
 STATE_REL = os.path.join('docs', 'wso', 'wave-state.json')
+# Every queue's state file (wave.QUEUES): their assigned batches all hold
+# files.  The second queue's file sits beside the first.
+STATE_NAMES = ('wave-state.json', 'import-state.json')
 
 
 class ClaimError(Exception):
@@ -111,17 +115,24 @@ def _save(path, data):
 
 
 def _batch_holders(state_path):
-    """{file: batch id} for the assigned batches (state is read only)."""
-    try:
-        with open(state_path, encoding='utf-8') as f:
-            state = json.load(f)
-    except FileNotFoundError:
-        return {}
+    """{file: batch id} for the assigned batches of every queue's state
+    file: state_path and the sibling files of the other queues (state is
+    read only; a missing file holds nothing)."""
+    here = os.path.abspath(state_path)
+    paths = [here] + [
+        os.path.join(os.path.dirname(here), n) for n in STATE_NAMES
+        if os.path.join(os.path.dirname(here), n) != here]
     out = {}
-    for bid, b in state.get('batches', {}).items():
-        if b.get('status') == 'assigned':
-            for p in b.get('files', []):
-                out.setdefault(p, bid)
+    for path in paths:
+        try:
+            with open(path, encoding='utf-8') as f:
+                state = json.load(f)
+        except FileNotFoundError:
+            continue
+        for bid, b in state.get('batches', {}).items():
+            if b.get('status') == 'assigned':
+                for p in b.get('files', []):
+                    out.setdefault(p, bid)
     return out
 
 

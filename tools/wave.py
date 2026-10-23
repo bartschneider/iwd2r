@@ -10,7 +10,8 @@ The coordinator's wave loop, one command each::
     python3 tools/wave.py close b002 --kind import   # waves 2-5
     python3 tools/wave.py scorecard            # the tally into xrec-report.md
     python3 tools/wave.py status
-    python3 tools/wave.py run [--workers N] [--budget C] [--seed S]   # the driver
+    python3 tools/wave.py run [--queue wave1|import] [--pool SPEC]... [--budget C] [--seed S]   # the driver
+    python3 tools/wave.py next --queue import   # cut an import batch i<NNN>
     python3 tools/wave.py run --dry-run --state COPY.json   # one batch, fake worker
     python3 tools/wave.py run --clear b011      # the coordinator's retry of an exception
 
@@ -59,6 +60,24 @@ WSO_DELTA_HEAD = '## WSO delta'
 
 DEFAULT_SIZE = 20
 DEFAULT_CATEGORY = 'both_changed_differ'
+IMPORT_CATEGORY = 'theirs_real_ours_stub'
+IMPORT_STATE_PATH = os.path.join(ROOT, 'docs', 'wso', 'import-state.json')
+IMPORT_TEMPLATE_PATH = os.path.join(ROOT, 'docs', 'wso', 'import-brief-template.md')
+# The two queues (ruling R11).  wave1 cuts the both_changed_differ rows,
+# triaged, as b<NNN>; import cuts the theirs_real_ours_stub rows plus the
+# import list, untriaged, as i<NNN>, so branches and worktrees never
+# collide.  Both use the wave-state schema.  `status` is the driver's
+# status file name beside its ledger (ruling R42); `kind` is what the
+# driver closes with.
+QUEUES = {
+    'wave1': {'state': STATE_PATH, 'category': DEFAULT_CATEGORY,
+              'prefix': 'b', 'triage': True, 'kind': 'verdicts',
+              'template': TEMPLATE_PATH, 'status': 'status.json'},
+    'import': {'state': IMPORT_STATE_PATH, 'category': IMPORT_CATEGORY,
+               'prefix': 'i', 'triage': False, 'kind': 'import',
+               'template': IMPORT_TEMPLATE_PATH,
+               'status': 'status-import.json'},
+}
 SIDES = ('fork', 'ours', 'neither')
 # Scorecard display order, strongest verification first (the same kinds
 # check_evidence.py knows).
@@ -264,7 +283,7 @@ def next_batch(disagreements_path=DISAGREEMENTS_PATH, state_path=STATE_PATH,
                size=DEFAULT_SIZE, category=DEFAULT_CATEGORY, *,
                triage_path=None, repo=None, fork_base=None,
                worktree_root=None, import_path=None, base='first',
-               claims_path=None):
+               claims_path=None, queue='wave1'):
     """Rank the unclaimed rows, take the biggest `size`, record the batch.
 
     With triage_path (the CLI passes docs/wso/triage.json and ROOT) it
@@ -275,30 +294,64 @@ def next_batch(disagreements_path=DISAGREEMENTS_PATH, state_path=STATE_PATH,
     recorded when the worktree cannot be cut.  Without triage_path only
     the state file is written.  Files held in claims_path (default:
     claims.json beside the state file) are skipped like those of assigned
-    batches."""
+    batches.
+
+    queue='import' (ruling R11) takes the rows of the import category
+    (`theirs_real_ours_stub`) plus the import list's entries (completed
+    from disagreements.json by address), applies no triage, cuts ids
+    i<NNN> and still cuts the worktree.  Files held by the assigned
+    batches of the other queue's state file, beside this one, are skipped
+    like those of this queue's own."""
+    if queue not in QUEUES:
+        return 2, f'unknown queue {queue}\n'
+    q = QUEUES[queue]
+    importing = queue == 'import'
     with open(disagreements_path, encoding='utf-8') as f:
         rows = json.load(f)
     state = load_state(state_path)
     decided = set()
     owned = set()
-    if triage_path is not None:
+    cut = triage_path is not None or importing
+    if cut:
         repo = repo or ROOT
-        _, err = _load_list(triage_path, 'triage file')
-        if err:
-            return 2, err
         if import_path is None:
             import_path = os.path.join(repo, IMPORT_LIST_REL)
         imported, err = _load_list(import_path, 'import list', missing_ok=True)
         if err:
             return 2, err
+    if triage_path is not None:
+        _, err = _load_list(triage_path, 'triage file')
+        if err:
+            return 2, err
+    if triage_path is not None and not importing:
         # Rows on the import list have left wave 1.
         decided.update(_addr_key(e['address']) for e in imported)
+    if importing:
+        known = {_addr_key(r.get('address')): r for r in rows
+                 if r.get('address')}
+        for e in imported:
+            full = dict(known.get(_addr_key(e['address']), e))
+            full.setdefault('their_len', 0)
+            full.setdefault('our_len', 0)
+            full['category'] = q['category']
+            rows.append(full)
     for b in state['batches'].values():
         for r in b['rows']:
             if r.get('address'):
                 decided.add(_addr_key(r['address']))
         if b['status'] == 'assigned':
             owned.update(b['files'])
+    for other in QUEUES.values():
+        sibling = os.path.join(os.path.dirname(os.path.abspath(state_path)),
+                               os.path.basename(other['state']))
+        if os.path.abspath(sibling) == os.path.abspath(state_path):
+            continue
+        try:
+            for b in load_state(sibling)['batches'].values():
+                if b.get('status') == 'assigned':
+                    owned.update(b.get('files', []))
+        except (OSError, ValueError) as e:
+            return 2, f'state file {sibling}: {e}\n'
     if claims_path is None:
         claims_path = os.path.join(os.path.dirname(os.path.abspath(state_path)),
                                    'claims.json')
@@ -311,13 +364,21 @@ def next_batch(disagreements_path=DISAGREEMENTS_PATH, state_path=STATE_PATH,
     except (OSError, ValueError, AttributeError) as e:
         return 2, f'claims file {claims_path}: {e}\n'
 
+    if importing:
+        category = q['category']
+
     def in_category(r):
         return r.get('category') == category
 
     no_addr = sum(1 for r in rows if in_category(r) and not r.get('address'))
-    candidates = [r for r in rows
-                  if in_category(r) and r.get('address')
-                  and _addr_key(r['address']) not in decided]
+    candidates = []
+    seen = set()
+    for r in rows:
+        if (in_category(r) and r.get('address')
+                and _addr_key(r['address']) not in decided
+                and _addr_key(r['address']) not in seen):
+            seen.add(_addr_key(r['address']))
+            candidates.append(r)
     eligible = [r for r in candidates if r['file'] not in owned]
     if not eligible:
         if candidates:
@@ -329,12 +390,14 @@ def next_batch(disagreements_path=DISAGREEMENTS_PATH, state_path=STATE_PATH,
     eligible.sort(key=lambda r: (-(r['their_len'] + r['our_len']),
                                  r['file'], r['name']))
     chosen = eligible[:size]
+    pre = q['prefix']
     nid = 1 + max((int(m.group(1)) for bid in state['batches']
-                   for m in [re.fullmatch(r'b(\d+)', bid)] if m), default=0)
-    batch_id = f'b{nid:03d}'
+                   for m in [re.fullmatch(pre + r'(\d+)', bid)] if m),
+                  default=0)
+    batch_id = f'{pre}{nid:03d}'
     files = _files_of(chosen)
     branch = f'p3/wso-{batch_id}'
-    if triage_path is not None:
+    if cut:
         wt, how = _cut_worktree(repo, branch, base, worktree_root)
         if wt is None:
             return 1, f'{batch_id} not assigned: {how}\n'
@@ -357,9 +420,11 @@ def next_batch(disagreements_path=DISAGREEMENTS_PATH, state_path=STATE_PATH,
     if no_addr:
         lines.append(f'(skipped {no_addr} row'
                      f'{"s" if no_addr != 1 else ""} without an address)')
-    if triage_path is None:
+    if triage_path is None and not importing:
         return 0, '\n'.join(lines) + '\n'
     lines.append(f'worktree {wt} ({how})')
+    if importing:
+        return 0, '\n'.join(lines) + '\n'
     rc, out = apply_triage(
         state_path, repo, batch_id, triage_path,
         fork_base or state.get('fork_base') or DEFAULT_FORK_BASE,
@@ -889,7 +954,8 @@ def scorecard_text(state):
             every[d] = every.get(d, 0) + 1
             m = v.get('measured', 'none')
             measured[v['side']][m] = measured[v['side']].get(m, 0) + 1
-        batches.append(f'{bid} {b["status"]} ({len(b["rows"])} rows)')
+        pool = f', pool {b["pool"]}' if b.get('pool') else ''
+        batches.append(f'{bid} {b["status"]} ({len(b["rows"])} rows{pool})')
 
     def split(side):
         ks = kinds[side]
@@ -1015,10 +1081,16 @@ def main(argv=None):
         return 0 if argv else 2
     cmd, rest = argv[0], argv[1:]
     if cmd == 'next':
-        size, category = DEFAULT_SIZE, DEFAULT_CATEGORY
+        size, category, queue = DEFAULT_SIZE, DEFAULT_CATEGORY, 'wave1'
         it = iter(rest)
         for a in it:
-            if a == '--size':
+            if a == '--queue':
+                queue = next(it, '')
+                if queue not in QUEUES:
+                    print('wave next: --queue is one of '
+                          + ', '.join(QUEUES), file=sys.stderr)
+                    return 2
+            elif a == '--size':
                 try:
                     size = int(next(it))
                 except (StopIteration, ValueError):
@@ -1034,8 +1106,12 @@ def main(argv=None):
             else:
                 print(f'wave next: unknown option {a}', file=sys.stderr)
                 return 2
-        rc, out = next_batch(size=size, category=category,
-                             triage_path=TRIAGE_PATH, repo=ROOT)
+        extra = {} if queue == 'wave1' else {
+            'state_path': QUEUES[queue]['state'], 'queue': queue}
+        rc, out = next_batch(
+            size=size, category=category,
+            triage_path=TRIAGE_PATH if QUEUES[queue]['triage'] else None,
+            repo=ROOT, **extra)
     elif cmd == 'brief':
         if len(rest) != 1:
             print('usage: wave.py brief <batch-id>', file=sys.stderr)
