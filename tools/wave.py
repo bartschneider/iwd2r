@@ -3,7 +3,7 @@
 
 The coordinator's wave loop, one command each::
 
-    python3 tools/wave.py next                 # pick the next batch
+    python3 tools/wave.py next                 # pick, cut and triage the next batch
     python3 tools/wave.py brief b001           # the text to dispatch verbatim
     python3 tools/wave.py verdict b001 0x643CC0 ours probe-9
     python3 tools/wave.py close b001           # gates, then ff `first`
@@ -13,9 +13,12 @@ The coordinator's wave loop, one command each::
 
 Rows come from docs/wso/disagreements.json (tools/xrec.py); batch state
 lives in docs/wso/wave-state.json, created by the first `next`.  Nothing
-is written by hand: `next` picks the rows, `close` checks the batch's
-worktree itself (verdicts, evidence lines, clean tree, an unmodified
-gate, gates), then fast-forwards `first` to the batch branch.
+is written by hand: `next` picks the rows, cuts the batch's branch and
+worktree from `first` and applies docs/wso/triage.json (auto verdicts for
+the classes calibration enables, ours-stub rows to
+docs/wso/import-list.json), `close` checks the batch's worktree itself
+(verdicts, evidence lines, clean tree, an unmodified gate, gates), then
+fast-forwards `first` to the batch branch.
 
 Exit codes: 0 ok, 1 refusal (close lists every reason), 2 usage error or
 nothing left to assign.  Every state write is atomic (temp file in the
@@ -24,6 +27,7 @@ same directory, then os.replace), so a killed `next` cannot corrupt it.
 from __future__ import annotations
 
 import datetime
+import importlib.util
 import json
 import os
 import re
@@ -36,6 +40,13 @@ STATE_PATH = os.path.join(ROOT, 'docs', 'wso', 'wave-state.json')
 DISAGREEMENTS_PATH = os.path.join(ROOT, 'docs', 'wso', 'disagreements.json')
 TEMPLATE_PATH = os.path.join(ROOT, 'docs', 'wso', 'brief-template.md')
 REPORT_PATH = os.path.join(ROOT, 'docs', 'wso', 'xrec-report.md')
+TRIAGE_PATH = os.path.join(ROOT, 'docs', 'wso', 'triage.json')
+# Relative to the repo `next` is given: where ours-stub rows go when they
+# leave wave 1.
+IMPORT_LIST_REL = os.path.join('docs', 'wso', 'import-list.json')
+# The fork is read by pinned sha, never by branch name (wso/main moves).
+DEFAULT_FORK_BASE = 'e8dd16a750966af53f24daaf49dcb4fb13594c13'
+WSO_DELTA_HEAD = '## WSO delta'
 
 DEFAULT_SIZE = 20
 DEFAULT_CATEGORY = 'both_changed_differ'
@@ -80,13 +91,15 @@ def load_state(path=STATE_PATH):
     return state
 
 
-def save_state(path, state):
+def _save_json(path, data):
+    """Write JSON atomically: a temp file in the same directory, then
+    os.replace."""
     d = os.path.dirname(os.path.abspath(path)) or '.'
     os.makedirs(d, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=d, prefix='.wave-', suffix='.json')
     try:
         with os.fdopen(fd, 'w', encoding='utf-8') as f:
-            json.dump(state, f, indent=2, sort_keys=True)
+            json.dump(data, f, indent=2, sort_keys=True)
             f.write('\n')
         os.replace(tmp, path)
     except BaseException:
@@ -97,16 +110,127 @@ def save_state(path, state):
         raise
 
 
+def save_state(path, state):
+    _save_json(path, state)
+
+
+def _load_list(path, what, missing_ok=False):
+    """(entries, None) for a JSON list of objects, or (None, error).  A
+    missing file is an empty list when missing_ok."""
+    try:
+        with open(path, encoding='utf-8') as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        if missing_ok:
+            return [], None
+        return None, f'no {what} {path}\n'
+    except (OSError, ValueError) as e:
+        return None, f'{what} {path}: {e}\n'
+    if not isinstance(data, list) or not all(
+            isinstance(e, dict) and 'address' in e for e in data):
+        return None, f'{what} {path}: not a list of rows with an address\n'
+    return data, None
+
+
+_triage_module = None
+
+
+def _triage():
+    """tools/triage.py, loaded by path: under -I tools/ is not on sys.path."""
+    global _triage_module
+    if _triage_module is None:
+        spec = importlib.util.spec_from_file_location(
+            'triage', os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                   'triage.py'))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _triage_module = module
+    return _triage_module
+
+
 # -- next ---------------------------------------------------------------
 
+def default_worktree_root(repo=ROOT):
+    """Where batch worktrees live: the main worktree's path (the first one
+    `git worktree list` names) plus '-worktrees'.  None outside a repo."""
+    r = subprocess.run(['git', '-C', repo, 'worktree', 'list', '--porcelain'],
+                       capture_output=True, text=True)
+    for line in r.stdout.splitlines():
+        if line.startswith('worktree '):
+            return line[len('worktree '):] + '-worktrees'
+    return None
+
+
+def _cut_worktree(repo, branch, base, worktree_root=None):
+    """The batch branch's worktree: the one it already has, else a new one
+    at <worktree_root>/<branch, / as -> with the branch cut from `base` (or
+    checked out as it is, when the branch exists without a worktree).
+    (path, how) or (None, error)."""
+    wt = worktree_for(repo, branch)
+    if wt:
+        return wt, 'its existing worktree'
+    root = worktree_root or default_worktree_root(repo)
+    if root is None:
+        return None, f'no main worktree found for {repo}'
+    path = os.path.join(root, branch.replace('/', '-'))
+    def rev(ref):
+        r = subprocess.run(['git', '-C', repo, 'rev-parse', '--verify',
+                            '--quiet', ref], capture_output=True, text=True)
+        return r.stdout.strip() if r.returncode == 0 else None
+
+    exists = rev(f'refs/heads/{branch}') is not None
+    if exists:
+        cmd = ['git', '-C', repo, 'worktree', 'add', '-q', path, branch]
+    else:
+        start = rev(f'{base}^{{commit}}')
+        if start is None:
+            return None, f'{base} not found in {repo}'
+        cmd = ['git', '-C', repo, 'worktree', 'add', '-q', '-b', branch, path,
+               start]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        if not exists:
+            # git creates the branch before it fails on the path; drop it,
+            # only while it still points where this call put it.
+            subprocess.run(['git', '-C', repo, 'update-ref', '-d',
+                            f'refs/heads/{branch}', start],
+                           capture_output=True, text=True)
+        return None, (f'git worktree add {path} {branch} failed: '
+                      f'{r.stderr.strip()}')
+    return path, ('the existing branch, new worktree' if exists
+                  else f'new branch from {base}')
+
+
 def next_batch(disagreements_path=DISAGREEMENTS_PATH, state_path=STATE_PATH,
-               size=DEFAULT_SIZE, category=DEFAULT_CATEGORY):
-    """Rank the unclaimed rows, take the biggest `size`, record the batch."""
+               size=DEFAULT_SIZE, category=DEFAULT_CATEGORY, *,
+               triage_path=None, repo=None, fork_base=None,
+               worktree_root=None, import_path=None, base='first'):
+    """Rank the unclaimed rows, take the biggest `size`, record the batch.
+
+    With triage_path (the CLI passes docs/wso/triage.json and ROOT) it
+    also skips rows already on the import list, cuts the batch's branch
+    p3/wso-<id> from `base` and its worktree under worktree_root (default
+    default_worktree_root(repo)) unless the branch has one, and then runs
+    apply_triage with fork_base (default: the state's).  Nothing is
+    recorded when the worktree cannot be cut.  Without triage_path only
+    the state file is written."""
     with open(disagreements_path, encoding='utf-8') as f:
         rows = json.load(f)
     state = load_state(state_path)
     decided = set()
     owned = set()
+    if triage_path is not None:
+        repo = repo or ROOT
+        _, err = _load_list(triage_path, 'triage file')
+        if err:
+            return 2, err
+        if import_path is None:
+            import_path = os.path.join(repo, IMPORT_LIST_REL)
+        imported, err = _load_list(import_path, 'import list', missing_ok=True)
+        if err:
+            return 2, err
+        # Rows on the import list have left wave 1.
+        decided.update(_addr_key(e['address']) for e in imported)
     for b in state['batches'].values():
         for r in b['rows']:
             if r.get('address'):
@@ -135,14 +259,16 @@ def next_batch(disagreements_path=DISAGREEMENTS_PATH, state_path=STATE_PATH,
     nid = 1 + max((int(m.group(1)) for bid in state['batches']
                    for m in [re.fullmatch(r'b(\d+)', bid)] if m), default=0)
     batch_id = f'b{nid:03d}'
-    files = []
-    for r in chosen:
-        if r['file'] not in files:
-            files.append(r['file'])
+    files = _files_of(chosen)
+    branch = f'p3/wso-{batch_id}'
+    if triage_path is not None:
+        wt, how = _cut_worktree(repo, branch, base, worktree_root)
+        if wt is None:
+            return 1, f'{batch_id} not assigned: {how}\n'
     state['batches'][batch_id] = {
         'rows': chosen,
         'files': files,
-        'branch': f'p3/wso-{batch_id}',
+        'branch': branch,
         'status': 'assigned',
         'assigned_at': _now(),
         'closed_at': None,
@@ -150,7 +276,7 @@ def next_batch(disagreements_path=DISAGREEMENTS_PATH, state_path=STATE_PATH,
     }
     save_state(state_path, state)
     lines = [f'{batch_id} assigned: {len(chosen)} rows, {len(files)} files, '
-             f'branch p3/wso-{batch_id}',
+             f'branch {branch}',
              f'files: {", ".join(files)}']
     for i, r in enumerate(chosen, 1):
         lines.append(f'{i:2}. {r["address"]}  {r["name"]}  {r["file"]}  '
@@ -158,7 +284,199 @@ def next_batch(disagreements_path=DISAGREEMENTS_PATH, state_path=STATE_PATH,
     if no_addr:
         lines.append(f'(skipped {no_addr} row'
                      f'{"s" if no_addr != 1 else ""} without an address)')
-    return 0, '\n'.join(lines) + '\n'
+    if triage_path is None:
+        return 0, '\n'.join(lines) + '\n'
+    lines.append(f'worktree {wt} ({how})')
+    rc, out = apply_triage(
+        state_path, repo, batch_id, triage_path,
+        fork_base or state.get('fork_base') or DEFAULT_FORK_BASE,
+        import_path=import_path)
+    return rc, '\n'.join(lines) + '\n' + out
+
+
+def _files_of(rows):
+    """The rows' files, first-seen order."""
+    files = []
+    for r in rows:
+        if r['file'] not in files:
+            files.append(r['file'])
+    return files
+
+
+def _under_heading(text, heading, line):
+    """text with `line` added at the end of the `heading` section (before
+    the next # or ## heading outside a code fence), or with the section
+    appended when the file has none."""
+    lines = text.split('\n')
+    fence = False
+    start = end = None
+    for i, l in enumerate(lines):
+        if l.lstrip().startswith('```'):
+            fence = not fence
+            continue
+        if fence:
+            continue
+        if start is None:
+            if l.rstrip() == heading:
+                start = i
+        elif re.match(r'#{1,2} ', l):
+            end = i
+            break
+    if start is None:
+        body = text.rstrip('\n')
+        return (body + '\n\n' if body else '') + heading + '\n\n' + line + '\n'
+    if end is None:
+        end = len(lines)
+    section = lines[start + 1:end]
+    while section and not section[-1].strip():
+        section.pop()
+    rest = lines[end:]
+    out = '\n'.join(lines[:start + 1] + section + ['', line]
+                    + ([''] + rest if rest else []))
+    return out if out.endswith('\n') else out + '\n'
+
+
+def write_triage_evidence(worktree, address, cls, fork_base):
+    """Add the auto verdict's line, `disagreed with WSO at <fork_base>:
+    <cls>; case <CASE_IDS[cls]> decides`, under '## WSO delta' in the
+    row's evidence file in `worktree`, and commit that file alone on the
+    worktree's branch.  The front matter (kind included) is untouched.  A
+    file that already carries the line, committed, is left as it is.
+    Returns None, or why it failed."""
+    rel = _evidence_rel(address)
+    path = os.path.join(worktree, rel)
+    line = (f'{EVIDENCE_PHRASES[0]} at {fork_base}: {cls}; '
+            f'case {_triage().CASE_IDS[cls]} decides')
+    try:
+        with open(path, encoding='utf-8') as f:
+            text = f.read()
+        if line not in text:
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(_under_heading(text, WSO_DELTA_HEAD, line))
+    except OSError as e:
+        return f'cannot edit {rel}: {e}'
+
+    def git(*args):
+        return subprocess.run(['git', '-C', worktree, *args],
+                              capture_output=True, text=True)
+
+    r = git('add', '--', rel)
+    if r.returncode != 0:
+        return f'git add {rel} failed: {r.stderr.strip()}'
+    if git('diff', '--cached', '--quiet', '--', rel).returncode == 0:
+        return None
+    r = git('commit', '-q', '-m', f'triage: {cls} verdict for {address}',
+            '--', rel)
+    if r.returncode != 0:
+        return f'git commit of {rel} failed: {(r.stderr or r.stdout).strip()}'
+    return None
+
+
+def apply_triage(state_path, repo, batch_id, triage_path, fork_base,
+                 import_path=None):
+    """Triage one assigned batch from triage.json.
+
+    A row's class is triage.json's auto_class when present, else its
+    class.  The enabled classes come from triage.calibrate over the same
+    entries and the state's closed batches, so the gate re-evaluates as
+    batches close.  A row of an enabled class whose evidence file exists
+    in the batch worktree gets write_triage_evidence (committed first),
+    then an `ours` verdict with case CASE_IDS[class], and keeps its class.
+    An ours-stub row leaves the batch (its files are recomputed) and is
+    appended to the import list (default <repo>/docs/wso/import-list.json,
+    created when missing).  Every other row stays for a worker, classed
+    'ambiguous'; the message says why for each row and ends with
+    `triage: n auto, n import, n ambiguous`.  Exit 0, 1 when an evidence
+    commit failed or the batch is not assigned, 2 on bad input."""
+    tri = _triage()
+    entries, err = _load_list(triage_path, 'triage file')
+    if err:
+        return 2, err
+    if not all('class' in e for e in entries):
+        return 2, f'triage file {triage_path}: a row has no class\n'
+    state = load_state(state_path)
+    batch = state['batches'].get(batch_id or '')
+    if batch is None:
+        return 2, f'no batch {batch_id}\n'
+    if batch['status'] != 'assigned':
+        return 1, (f'batch {batch_id} is {batch["status"]}; triage is for '
+                   f'assigned batches\n')
+    if import_path is None:
+        import_path = os.path.join(repo, IMPORT_LIST_REL)
+    imported, err = _load_list(import_path, 'import list', missing_ok=True)
+    if err:
+        return 2, err
+    enabled = tri.enabled_classes(tri.calibrate(state, entries))
+    by_addr = {_addr_key(e['address']): e for e in entries}
+    branch = batch['branch']
+    wt = worktree_for(repo, branch)
+    lines = [f'triage {batch_id} (calibration enables: '
+             f'{", ".join(sorted(enabled)) or "none"}):']
+    classes = {}
+    moved = []
+    failed = False
+    for row in batch['rows']:
+        addr = row['address']
+        if addr in batch['verdicts']:
+            classes[addr] = row.get('class', 'ambiguous')
+            lines.append(f'  {addr}: already has a verdict')
+            continue
+        entry = by_addr.get(_addr_key(addr))
+        if entry is None:
+            classes[addr] = 'ambiguous'
+            lines.append(f'  {addr}: no triage entry; left for a worker')
+            continue
+        cls = entry.get('auto_class', entry['class'])
+        rel = _evidence_rel(addr)
+        if cls == 'ours-stub':
+            moved.append(row)
+            lines.append(f'  {addr} ours-stub: moved to the import list')
+            continue
+        if cls not in tri.AUTO_OURS:
+            why = 'left for a worker'
+        elif cls not in enabled:
+            why = 'class not enabled by calibration; left for a worker'
+        elif wt is None:
+            why = f'no worktree for {branch}; left for a worker'
+        elif not os.path.isfile(os.path.join(wt, rel)):
+            why = f'no evidence file {rel}; left for a worker'
+        else:
+            case = tri.CASE_IDS[cls]
+            err = write_triage_evidence(wt, addr, cls, fork_base)
+            if err is None:
+                rc, out = record_verdict(state_path, repo, batch_id, addr,
+                                         'ours', case)
+                if rc != 0:
+                    err = out.strip()
+            if err is None:
+                classes[addr] = cls
+                lines.append(f'  {addr} {cls}: auto verdict ours, case {case}')
+                continue
+            failed = True
+            why = f'{err}; left for a worker'
+        classes[addr] = 'ambiguous'
+        lines.append(f'  {addr} {cls}: {why}')
+    # The import list first: a crash between the two writes leaves the row
+    # in both places (the next run de-duplicates), never in neither.
+    if moved:
+        have = {_addr_key(e['address']) for e in imported}
+        imported += [{'address': r['address'], 'file': r['file'],
+                      'name': r['name'], 'source': 'triage'}
+                     for r in moved if _addr_key(r['address']) not in have]
+        _save_json(import_path, imported)
+    # record_verdict wrote the state; re-read it before the class update.
+    state = load_state(state_path)
+    batch = state['batches'][batch_id]
+    gone = {r['address'] for r in moved}
+    batch['rows'] = [r for r in batch['rows'] if r['address'] not in gone]
+    for r in batch['rows']:
+        r['class'] = classes.get(r['address'], r.get('class', 'ambiguous'))
+    batch['files'] = _files_of(batch['rows'])
+    save_state(state_path, state)
+    auto = sum(1 for r in batch['rows'] if r['class'] in tri.AUTO_OURS)
+    lines.append(f'triage: {auto} auto, {len(moved)} import, '
+                 f'{len(batch["rows"]) - auto} ambiguous')
+    return (1 if failed else 0), '\n'.join(lines) + '\n'
 
 
 # -- brief --------------------------------------------------------------
@@ -181,9 +499,7 @@ def render_brief(template_path=TEMPLATE_PATH, state_path=STATE_PATH,
         f'theirs {r["their_len"]} / ours {r["our_len"]} chars)'
         for i, r in enumerate(batch['rows'], 1))
     files = '\n'.join(f'- `{f}`' for f in batch['files'])
-    # The fork is read by pinned sha, never by branch name (wso/main moves).
-    fork_base = str(state.get('fork_base') or
-                    'e8dd16a750966af53f24daaf49dcb4fb13594c13')
+    fork_base = str(state.get('fork_base') or DEFAULT_FORK_BASE)
     brief = (template
              .replace('{{id}}', batch_id)
              .replace('{{branch}}', batch['branch'])
@@ -419,11 +735,12 @@ def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
 
 SCORECARD_HEAD = '## Scorecard'
 # Deciding-evidence buckets, in display order -- strongest verification
-# first, the way DISPLAY_ORDER orders the losing kinds.  A verdict's
-# free-form case id picks exactly one, by deciding_kind(); `losing_kind`
-# is a different thing (the loser's kind, not what decided).
+# first, the way DISPLAY_ORDER orders the losing kinds; triage (an auto
+# verdict from the two bodies' text) comes last.  A verdict's free-form
+# case id picks exactly one, by deciding_kind(); `losing_kind` is a
+# different thing (the loser's kind, not what decided).
 DECIDING_ORDER = ('oracle probe', 'replay checkpoint', 'dump reading',
-                  'trace')
+                  'trace', 'triage')
 # Bare case ids that name a replay scenario: b005 decided rows with the
 # scenario name alone; later replay cases are scenario/checkpoint, which
 # the / rule already catches.  Membership is exact, and the classifier
@@ -433,10 +750,13 @@ LEGACY_REPLAY_CASES = frozenset({'world_entry'})
 
 def deciding_kind(case):
     """The evidence kind that decided a verdict, from its case id:
-    probe-N an oracle probe, replay-*, any scenario/checkpoint id
-    (a / in it) or a bare legacy scenario name a replay checkpoint,
-    dump-N / readout-ADDR a dump reading, anything else a trace."""
+    triage-* (apply_triage's auto verdicts) triage, probe-N an oracle
+    probe, replay-*, any scenario/checkpoint id (a / in it) or a bare
+    legacy scenario name a replay checkpoint, dump-N / readout-ADDR a
+    dump reading, anything else (frida-* included) a trace."""
     c = case or ''
+    if c.startswith('triage-'):
+        return 'triage'
     if c.startswith('probe'):
         return 'oracle probe'
     if (c.startswith('replay') or '/' in c
@@ -581,7 +901,8 @@ def main(argv=None):
             else:
                 print(f'wave next: unknown option {a}', file=sys.stderr)
                 return 2
-        rc, out = next_batch(size=size, category=category)
+        rc, out = next_batch(size=size, category=category,
+                             triage_path=TRIAGE_PATH, repo=ROOT)
     elif cmd == 'brief':
         if len(rest) != 1:
             print('usage: wave.py brief <batch-id>', file=sys.stderr)

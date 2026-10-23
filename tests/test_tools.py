@@ -8524,5 +8524,403 @@ class TriageTest(unittest.TestCase):
             self.assertEqual(cal[cls]['mismatches'], [], cls)
 
 
+class WaveTriageTest(unittest.TestCase):
+    """tools/wave.py next with triage: enabled auto classes get a verdict
+    and the exact evidence phrase, ours-stub rows go to the import list,
+    the rest stay for a worker."""
+
+    FORK = 'e8dd16a7'
+    # 0x400000 is a closed rename-only row decided for ours, so calibration
+    # enables rename-only; signature-only has no closed verdict and stays off.
+    TRIAGE = [
+        {'address': '0x400000', 'class': 'rename-only', 'file': 'src/Z.cpp',
+         'name': 'Old', 'reason': 'r'},
+        {'address': '0x401000', 'class': 'rename-only', 'file': 'src/A.cpp',
+         'name': 'Render', 'reason': 'r'},
+        {'address': '0x402000', 'class': 'ambiguous', 'file': 'src/A.cpp',
+         'name': 'Draw', 'reason': 'r'},
+        {'address': '0x403000', 'class': 'ours-stub', 'file': 'src/B.cpp',
+         'name': 'Tick', 'reason': 'r'},
+        {'address': '0x404000', 'class': 'signature-only', 'file': 'src/C.cpp',
+         'name': 'Init', 'reason': 'r'},
+        # Disabled when triage.json was written; the gate has since enabled
+        # rename-only, so auto_class decides.
+        {'address': '0x405000', 'class': 'ambiguous', 'auto_class': 'rename-only',
+         'file': 'src/D.cpp', 'name': 'Late', 'reason': 'disabled by calibration'},
+    ]
+    PHRASE = ('disagreed with WSO at e8dd16a7: rename-only; '
+              'case triage-rename decides')
+
+    git = WaveTest.git
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp = self._tmp.name
+        self.wave = load_tool('wave')
+        self.triage_path = os.path.join(self.tmp, 'triage.json')
+        with open(self.triage_path, 'w') as f:
+            json.dump(self.TRIAGE, f)
+        self.state_path = os.path.join(self.tmp, 'wave-state.json')
+
+    def disagreement(self, address, size=100):
+        t = next(r for r in self.TRIAGE if r['address'] == address)
+        return dict(file=t['file'], name=t['name'], address=address,
+                    category='both_changed_differ', their_len=size,
+                    our_len=size)
+
+    def evidence_text(self, stem):
+        return (f'---\naddress: 0x{stem}\nname: fn-{stem}\nkind: oracle\n---\n\n'
+                f'# 0x{stem}\n\nbody.\n')
+
+    def init_root(self, evidence=()):
+        """A repo on `first` with one evidence file per stem, committed."""
+        self.root = os.path.join(self.tmp, 'repo')
+        os.makedirs(self.root)
+        self.git('init', '-q', '-b', 'first', cwd=self.root)
+        for k, v in (('user.name', 't'), ('user.email', 't@t'),
+                     ('commit.gpgsign', 'false')):
+            self.git('config', k, v)
+        _write(os.path.join(self.root, 'src', 'A.cpp'), 'int a;\n')
+        for stem in evidence:
+            _write(os.path.join(self.root, 'docs', 'evidence', stem + '.md'),
+                   self.evidence_text(stem))
+        self.git('add', '-A')
+        self.git('commit', '-qm', 'base')
+        return self.root
+
+    def write_state(self, batches=None):
+        state = {'fork_base': self.FORK, 'batches': {
+            'b000': {'rows': [self.disagreement('0x400000')],
+                     'files': ['src/Z.cpp'], 'branch': 'p3/wso-b000',
+                     'status': 'closed', 'assigned_at': 't', 'closed_at': 't',
+                     'verdicts': {'0x400000': {'side': 'ours', 'case': 'probe-1',
+                                               'losing_kind': 'trace'}}}}}
+        state['batches'].update(batches or {})
+        self.wave.save_state(self.state_path, state)
+
+    def _repo(self, evidence=(), rows=('0x401000', '0x402000'), worktree=True):
+        """The repo plus batch b001 assigned with `rows`, its branch and
+        worktree already cut (apply_triage's starting point)."""
+        repo = self.init_root(evidence)
+        self.wt = os.path.join(self.tmp, 'wt')
+        if worktree:
+            self.git('worktree', 'add', '-q', '-b', 'p3/wso-b001', self.wt, 'first')
+        chosen = [self.disagreement(a) for a in rows]
+        files = []
+        for r in chosen:
+            if r['file'] not in files:
+                files.append(r['file'])
+        self.write_state({'b001': {
+            'rows': chosen, 'files': files, 'branch': 'p3/wso-b001',
+            'status': 'assigned', 'assigned_at': 't', 'closed_at': None,
+            'verdicts': {}}})
+        return repo, self.state_path
+
+    def batch(self, bid='b001'):
+        return self.wave.load_state(self.state_path)['batches'][bid]
+
+    def import_list(self):
+        with open(os.path.join(self.root, 'docs', 'wso', 'import-list.json')) as f:
+            return json.load(f)
+
+    # -- apply_triage ------------------------------------------------------
+
+    def test_apply_triage_records_auto_verdict_and_phrase(self):
+        repo, state_path = self._repo(evidence={'401000'})
+        code, msg = self.wave.apply_triage(state_path, repo, 'b001',
+                                           self.triage_path, 'e8dd16a7')
+        self.assertEqual(code, 0, msg)
+        state = self.wave.load_state(state_path)
+        b = state['batches']['b001']
+        self.assertEqual(b['verdicts']['0x401000'],
+                         {'side': 'ours', 'case': 'triage-rename',
+                          'losing_kind': 'trace'})
+        text = self.wave._read_evidence(repo, 'p3/wso-b001', '0x401000')[0]
+        self.assertIn(self.PHRASE, text)
+        self.assertIn('## WSO delta\n\n' + self.PHRASE + '\n', text)
+        # The front matter's kind is not changed.
+        self.assertIn('kind: oracle', text)
+        self.assertNotIn('0x402000', b['verdicts'])
+        # Every row carries its class; the row left for a worker is ambiguous.
+        self.assertEqual({r['address']: r['class'] for r in b['rows']},
+                         {'0x401000': 'rename-only', '0x402000': 'ambiguous'})
+        # The edit is committed on the batch branch; the worktree is clean.
+        self.assertIn(self.PHRASE, self.git(
+            'show', 'p3/wso-b001:docs/evidence/401000.md').stdout)
+        self.assertEqual(self.git('log', '-1', '--format=%s', 'p3/wso-b001')
+                         .stdout.strip(), 'triage: rename-only verdict for 0x401000')
+        self.assertEqual(self.git('status', '--porcelain', cwd=self.wt).stdout, '')
+        self.assertIn('1 auto, 0 import, 1 ambiguous', msg)
+        # A second run changes nothing: no second line, no second commit.
+        head = self.git('rev-parse', 'p3/wso-b001').stdout
+        code, msg = self.wave.apply_triage(state_path, repo, 'b001',
+                                           self.triage_path, 'e8dd16a7')
+        self.assertEqual(code, 0, msg)
+        self.assertEqual(self.git('rev-parse', 'p3/wso-b001').stdout, head)
+        text = self.wave._read_evidence(repo, 'p3/wso-b001', '0x401000')[0]
+        self.assertEqual(text.count(self.PHRASE), 1)
+
+    def test_apply_triage_skips_row_without_evidence_file(self):
+        repo, state_path = self._repo(evidence=set())
+        code, msg = self.wave.apply_triage(state_path, repo, 'b001',
+                                           self.triage_path, 'e8dd16a7')
+        self.assertEqual(code, 0, msg)
+        self.assertEqual(self.wave.load_state(state_path)['batches']['b001']['verdicts'], {})
+        self.assertIn('no evidence file', msg)
+        self.assertIn('docs/evidence/401000.md', msg)
+        self.assertEqual([r['class'] for r in self.batch()['rows']],
+                         ['ambiguous', 'ambiguous'])
+        self.assertIn('0 auto, 0 import, 2 ambiguous', msg)
+
+    def test_apply_triage_moves_ours_stub_to_import_list(self):
+        repo, state_path = self._repo(evidence={'401000', '403000'},
+                                      rows=('0x401000', '0x402000', '0x403000'))
+        # An existing import list is appended to, never replaced.
+        old = {'address': '0x777000', 'file': 'src/Q.cpp', 'name': 'Q',
+               'source': 'triage'}
+        _write(os.path.join(repo, 'docs', 'wso', 'import-list.json'),
+               json.dumps([old]))
+        code, msg = self.wave.apply_triage(state_path, repo, 'b001',
+                                           self.triage_path, 'e8dd16a7')
+        self.assertEqual(code, 0, msg)
+        b = self.batch()
+        self.assertEqual([r['address'] for r in b['rows']], ['0x401000', '0x402000'])
+        # src/B.cpp left with its only row, so the batch no longer owns it.
+        self.assertEqual(b['files'], ['src/A.cpp'])
+        self.assertNotIn('0x403000', b['verdicts'])
+        self.assertEqual(self.import_list(), [
+            old, {'address': '0x403000', 'file': 'src/B.cpp', 'name': 'Tick',
+                  'source': 'triage'}])
+        self.assertIn('1 auto, 1 import, 1 ambiguous', msg)
+        # The moved row's evidence file is untouched.
+        self.assertNotIn('WSO', self.git(
+            'show', 'p3/wso-b001:docs/evidence/403000.md').stdout)
+
+    def test_apply_triage_creates_import_list_when_missing(self):
+        repo, state_path = self._repo(rows=('0x403000',))
+        imports = os.path.join(self.tmp, 'elsewhere', 'import-list.json')
+        code, msg = self.wave.apply_triage(state_path, repo, 'b001',
+                                           self.triage_path, 'e8dd16a7',
+                                           import_path=imports)
+        self.assertEqual(code, 0, msg)
+        with open(imports) as f:
+            self.assertEqual(json.load(f), [
+                {'address': '0x403000', 'file': 'src/B.cpp', 'name': 'Tick',
+                 'source': 'triage'}])
+        self.assertEqual(self.batch()['rows'], [])
+        self.assertEqual(self.batch()['files'], [])
+
+    def test_apply_triage_gate_decides_from_current_calibration(self):
+        repo, state_path = self._repo(evidence={'404000', '405000'},
+                                      rows=('0x404000', '0x405000'))
+        code, msg = self.wave.apply_triage(state_path, repo, 'b001',
+                                           self.triage_path, 'e8dd16a7')
+        self.assertEqual(code, 0, msg)
+        b = self.batch()
+        # signature-only has no closed verdict: it stays for a worker,
+        # and the message says why.
+        self.assertNotIn('0x404000', b['verdicts'])
+        self.assertIn('0x404000 signature-only: class not enabled by calibration',
+                      msg)
+        # 0x405000 was written ambiguous with auto_class rename-only; the
+        # closed b000 verdict has since enabled rename-only.
+        self.assertEqual(b['verdicts']['0x405000']['case'], 'triage-rename')
+        self.assertEqual({r['address']: r['class'] for r in b['rows']},
+                         {'0x404000': 'ambiguous', '0x405000': 'rename-only'})
+        # Without the closed batch nothing is enabled: no verdict at all.
+        state2 = os.path.join(self.tmp, 'state2.json')
+        state = self.wave.load_state(state_path)
+        del state['batches']['b000']
+        state['batches']['b001']['verdicts'] = {}
+        self.wave.save_state(state2, state)
+        code, msg = self.wave.apply_triage(state2, repo, 'b001',
+                                           self.triage_path, 'e8dd16a7')
+        self.assertEqual(code, 0, msg)
+        self.assertEqual(self.wave.load_state(state2)['batches']['b001']['verdicts'], {})
+        self.assertIn('calibration enables: none', msg)
+
+    def test_apply_triage_without_worktree_leaves_rows(self):
+        repo, state_path = self._repo(evidence={'401000'}, worktree=False)
+        code, msg = self.wave.apply_triage(state_path, repo, 'b001',
+                                           self.triage_path, 'e8dd16a7')
+        self.assertEqual(code, 0, msg)
+        self.assertEqual(self.batch()['verdicts'], {})
+        self.assertIn('no worktree for p3/wso-b001', msg)
+
+    def test_apply_triage_refuses_unknown_or_closed_batch(self):
+        repo, state_path = self._repo()
+        self.assertEqual(self.wave.apply_triage(
+            state_path, repo, 'b999', self.triage_path, 'e8dd16a7')[0], 2)
+        self.assertEqual(self.wave.apply_triage(
+            state_path, repo, 'b000', self.triage_path, 'e8dd16a7')[0], 1)
+        self.assertEqual(self.wave.apply_triage(
+            state_path, repo, 'b001', os.path.join(self.tmp, 'nope.json'),
+            'e8dd16a7')[0], 2)
+
+    def test_write_triage_evidence_appends_under_existing_heading(self):
+        repo, _ = self._repo(evidence={'401000'})
+        path = os.path.join(self.wt, 'docs', 'evidence', '401000.md')
+        _write(path, self.evidence_text('401000')
+               + '\n## WSO delta\n\nan earlier note.\n\n## Verdict\n\nours.\n')
+        self.git('commit', '-qam', 'notes', cwd=self.wt)
+        err = self.wave.write_triage_evidence(self.wt, '0x401000', 'rename-only',
+                                              'e8dd16a7')
+        self.assertIsNone(err)
+        with open(path) as f:
+            text = f.read()
+        self.assertEqual(text.count('## WSO delta'), 1)
+        self.assertIn('## WSO delta\n\nan earlier note.\n\n' + self.PHRASE
+                      + '\n\n## Verdict\n\nours.\n', text)
+        self.assertEqual(self.git('status', '--porcelain', cwd=self.wt).stdout, '')
+
+    # -- next_batch with triage -------------------------------------------
+
+    def write_disagreements(self, addresses):
+        path = os.path.join(self.tmp, 'disagreements.json')
+        with open(path, 'w') as f:
+            json.dump([self.disagreement(a, 1000 - i)
+                       for i, a in enumerate(addresses)], f)
+        return path
+
+    def next(self, disagreements, **kw):
+        kw.setdefault('worktree_root', os.path.join(self.tmp, 'wts'))
+        return self.wave.next_batch(disagreements, self.state_path, size=20,
+                                    triage_path=self.triage_path, repo=self.root,
+                                    **kw)
+
+    def test_next_batch_cuts_worktree_and_applies_triage(self):
+        self.init_root(evidence={'401000'})
+        self.write_state()
+        dis = self.write_disagreements(['0x400000', '0x401000', '0x402000',
+                                        '0x403000'])
+        rc, out = self.next(dis)
+        self.assertEqual(rc, 0, out)
+        wt = os.path.join(self.tmp, 'wts', 'p3-wso-b001')
+        self.assertEqual(self.wave.worktree_for(self.root, 'p3/wso-b001'), wt)
+        # Cut from first: its base is first's tip.
+        self.assertEqual(self.git('merge-base', 'first', 'p3/wso-b001').stdout,
+                         self.git('rev-parse', 'first').stdout)
+        b = self.batch()
+        self.assertEqual(b['verdicts']['0x401000']['case'], 'triage-rename')
+        self.assertEqual([(r['address'], r['class']) for r in b['rows']],
+                         [('0x401000', 'rename-only'), ('0x402000', 'ambiguous')])
+        self.assertEqual(b['files'], ['src/A.cpp'])
+        # The phrase names the fork base recorded in the state.
+        with open(os.path.join(wt, 'docs', 'evidence', '401000.md')) as f:
+            self.assertIn(self.PHRASE, f.read())
+        self.assertEqual([e['address'] for e in self.import_list()], ['0x403000'])
+        self.assertIn('b001 assigned', out)
+        self.assertIn(wt, out)
+        self.assertIn('triage: 1 auto, 1 import, 1 ambiguous', out)
+        # The imported row has left wave 1: the next `next` does not pick it.
+        rc, out = self.next(dis)
+        self.assertEqual(rc, 2, out)
+        self.assertIn('nothing left', out)
+        self.assertEqual(sorted(self.wave.load_state(self.state_path)['batches']),
+                         ['b000', 'b001'])
+
+    def test_next_batch_reuses_existing_worktree(self):
+        self.init_root(evidence={'401000'})
+        self.write_state()
+        elsewhere = os.path.join(self.tmp, 'elsewhere')
+        self.git('worktree', 'add', '-q', '-b', 'p3/wso-b001', elsewhere, 'first')
+        rc, out = self.next(self.write_disagreements(['0x401000']))
+        self.assertEqual(rc, 0, out)
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, 'wts', 'p3-wso-b001')))
+        self.assertEqual(self.wave.worktree_for(self.root, 'p3/wso-b001'), elsewhere)
+        with open(os.path.join(elsewhere, 'docs', 'evidence', '401000.md')) as f:
+            self.assertIn(self.PHRASE, f.read())
+        self.assertIn('triage: 1 auto, 0 import, 0 ambiguous', out)
+
+    def test_next_batch_checks_out_existing_branch_without_worktree(self):
+        self.init_root(evidence={'401000'})
+        self.write_state()
+        self.git('branch', 'p3/wso-b001', 'first')
+        rc, out = self.next(self.write_disagreements(['0x401000']))
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.wave.worktree_for(self.root, 'p3/wso-b001'),
+                         os.path.join(self.tmp, 'wts', 'p3-wso-b001'))
+        self.assertEqual(self.batch()['verdicts']['0x401000']['case'],
+                         'triage-rename')
+
+    def test_next_batch_worktree_failure_records_nothing(self):
+        self.init_root(evidence={'401000'})
+        self.write_state()
+        before = self.wave.load_state(self.state_path)
+        # A non-empty directory where the worktree would go.
+        _write(os.path.join(self.tmp, 'wts', 'p3-wso-b001', 'junk'), 'x\n')
+        rc, out = self.next(self.write_disagreements(['0x401000']))
+        self.assertEqual(rc, 1, out)
+        self.assertIn('p3-wso-b001', out)
+        self.assertEqual(self.wave.load_state(self.state_path), before)
+        # git made the branch before failing on the path; it is removed.
+        self.assertNotIn('p3/wso-b001', self.git('branch', '--list').stdout)
+
+    def test_next_batch_refuses_missing_triage_file(self):
+        self.init_root()
+        self.write_state()
+        before = self.wave.load_state(self.state_path)
+        self.triage_path = os.path.join(self.tmp, 'nope.json')
+        rc, out = self.next(self.write_disagreements(['0x401000']))
+        self.assertEqual(rc, 2, out)
+        self.assertEqual(self.wave.load_state(self.state_path), before)
+        self.assertNotIn('p3/wso-b001', self.git('branch', '--list').stdout)
+
+    def test_default_worktree_root_is_main_worktree_plus_suffix(self):
+        self.init_root()
+        linked = os.path.join(self.tmp, 'linked')
+        self.git('worktree', 'add', '-q', '-b', 'side', linked, 'first')
+        # From the main worktree or a linked one, the root is the same.
+        for repo in (self.root, linked):
+            self.assertEqual(self.wave.default_worktree_root(repo),
+                             self.root + '-worktrees')
+
+    def test_cli_next_passes_triage_defaults(self):
+        from unittest import mock
+        calls = []
+
+        def fake(**kw):
+            calls.append(kw)
+            return 0, 'ok\n'
+
+        with mock.patch.object(self.wave, 'next_batch', fake), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(self.wave.main(['next', '--size', '3']), 0)
+        self.assertEqual(calls, [{'size': 3, 'category': 'both_changed_differ',
+                                  'triage_path': self.wave.TRIAGE_PATH,
+                                  'repo': self.wave.ROOT}])
+        self.assertEqual(self.wave.TRIAGE_PATH,
+                         os.path.join(ROOT, 'docs', 'wso', 'triage.json'))
+
+    # -- deciding kind and the scorecard ----------------------------------
+
+    def test_deciding_kind_triage(self):
+        k = self.wave.deciding_kind
+        self.assertEqual(k('triage-stub'), 'triage')
+        self.assertEqual(k('triage-rename'), 'triage')
+        self.assertEqual(k('triage-sig'), 'triage')
+        # Today's labels stay.
+        self.assertEqual(k('probe-3'), 'oracle probe')
+        self.assertEqual(k('frida-421E40'), 'trace')
+        self.assertEqual(k('dump-421E40'), 'dump reading')
+
+    def test_scorecard_counts_triage_verdicts(self):
+        state = {'batches': {'b001': {
+            'rows': [{'address': '0x1'}, {'address': '0x2'}],
+            'files': ['src/A.cpp'], 'branch': 'p3/wso-b001',
+            'status': 'closed', 'assigned_at': 't', 'closed_at': 't',
+            'verdicts': {
+                '0x1': {'side': 'ours', 'case': 'triage-rename',
+                        'losing_kind': 'trace'},
+                '0x2': {'side': 'ours', 'case': 'probe-3',
+                        'losing_kind': 'trace'}}}}}
+        text = self.wave.scorecard_text(state)
+        self.assertIn('Decided for ours: 2 (losing kind: trace 2) -- deciding '
+                      'evidence: oracle probe 1, triage 1', text)
+        self.assertIn('Deciding evidence across all 2 verdicts: oracle probe 1, '
+                      'replay checkpoint 0, dump reading 0, trace 0, triage 1', text)
+
+
 if __name__ == '__main__':
     unittest.main()
