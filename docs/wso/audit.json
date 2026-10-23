@@ -1,0 +1,89 @@
+{
+ "rule": 3,
+ "seed": "rule3-2026-10-23",
+ "state": "9fad8484",
+ "pool": 199,
+ "drawn": 10,
+ "rows": [
+  {
+   "address": "0x5EB5E0",
+   "batch": "b012",
+   "probe": "park",
+   "run": "",
+   "result": "parked",
+   "note": "The level-up class popup is opened by no capture and the delta (default arm after the assert) is unreachable from the real UI; needs a UI-fixture oracle case."
+  },
+  {
+   "address": "0x4242B0",
+   "batch": "b009",
+   "probe": "replay",
+   "run": "m3-end-first_fight-a-20261017-183441",
+   "result": "match",
+   "note": "FF replay MATCH 39/39 incl. au_counter/ai_stalled_frames/ai_rng_state at every checkpoint; the fork's extra vLog is a dead store no replay can separate."
+  },
+  {
+   "address": "0x488B30",
+   "batch": "b008",
+   "probe": "park",
+   "run": "",
+   "result": "parked",
+   "note": "No door highlight pixels in either side's FF shots, so the picked and draw-poly arms the delta lives in never run; needs a door-hover capture or oracle case."
+  },
+  {
+   "address": "0x71E240",
+   "batch": "b007",
+   "probe": "park",
+   "run": "",
+   "result": "parked",
+   "note": "FF chargen feats [512, 0x3E00880, 0] hit none of the tested feat masks, so only the no-feat path is shown; needs a capture or oracle case with Extra Rage/Toughness."
+  },
+  {
+   "address": "0x623EA0",
+   "batch": "b003",
+   "probe": "park",
+   "run": "",
+   "result": "parked",
+   "note": "The VK_ADD/VK_SUBTRACT key-repeat delta is invisible without an inventory-screen key press or a key-table oracle case."
+  },
+  {
+   "address": "0x6817A0",
+   "batch": "b008",
+   "probe": "park",
+   "run": "",
+   "result": "parked",
+   "note": "No capture opens the store and the thread byte delta changes locking, not pixels."
+  },
+  {
+   "address": "0x613310",
+   "batch": "b009",
+   "probe": "replay",
+   "run": "m3-end-first_fight-a-20261017-183441",
+   "result": "match",
+   "note": "FF replay MATCH 39/39; wrapup runs before party_formation and gold, hp, skills and ai_rng_state agree at every later checkpoint, Magic Missile cast identical at spell 5579."
+  },
+  {
+   "address": "0x7B3190",
+   "batch": "b006",
+   "probe": "park",
+   "run": "",
+   "result": "parked",
+   "note": "SL replay (m3-end-save_load-b-20261017-183641) agrees on the 32-bpp plain 24-bit arm the bodies share; the disputed 16/24-bpp arms are unreachable in iwd2r captures."
+  },
+  {
+   "address": "0x470F10",
+   "batch": "b007",
+   "probe": "park",
+   "run": "",
+   "result": "parked",
+   "note": "FF replay shows pixel-identical creature tint on the day path but the night-bit/no-night-map hunk is not shown to run; needs an area oracle case."
+  },
+  {
+   "address": "0x62DDE0",
+   "batch": "b003",
+   "probe": "park",
+   "run": "",
+   "result": "parked",
+   "note": "No capture draws the inventory slots; needs an inventory capture or oracle case."
+  }
+ ]
+}
