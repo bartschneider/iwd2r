@@ -617,7 +617,8 @@ class Driver:
     def __init__(self, repo, state_path, worker, reviewer, ledger_path,
                  status_path, aoe_session=None, seed=DEFAULT_SEED, budget=None,
                  workers=1, *, push=None, send=None, dry_run=False, gate=True,
-                 base='first', log=None):
+                 base='first', log=None, frida=False, frida_map=None,
+                 oracle_run=None, frida_run=None):
         wave = _tool('wave')
         self.repo = repo
         self.state_path = state_path
@@ -640,6 +641,12 @@ class Driver:
         self.triage_path = os.path.join(docs, 'triage.json')
         self.template_path = os.path.join(docs, 'brief-template.md')
         self.report_path = os.path.join(docs, 'xrec-report.md')
+        self.calibration_path = os.path.join(docs, 'truth-calibration.json')
+        truth = _tool('truth')
+        self.frida = frida
+        self.frida_map = frida_map
+        self.oracle_run = truth.run_oracle if oracle_run is None else oracle_run
+        self.frida_run = truth.frida_run if frida_run is None else frida_run
         self.next_batch = wave.next_batch
         self.render_brief = wave.render_brief
         self.record_verdict = wave.record_verdict
@@ -660,6 +667,8 @@ class Driver:
         self._batch_credits = []   # this run's batches: credits or None
         self._worker_ran = []      # this batch's worker runs: really ran
         self._no_transcript = 0    # batch exceptions in a row without one
+        self._probe = {}           # this batch: address key -> (side, case) the oracle passed
+        self._frida_equal = set()  # this batch: address keys Frida found equal
 
     # -- status, ledger, results ----------------------------------------
 
@@ -850,10 +859,190 @@ class Driver:
         if self._ignored:
             self.log('%s: ignored for triage-decided rows: %s' % (
                 batch_id, ', '.join(sorted(self._ignored))))
+        # Ruling R48: a probe pass is the verdict, whatever the report says.
+        for addr, sc in self._probe_verdicts(batch).items():
+            if addr in verdicts and verdicts[addr] != sc:
+                self.log('%s: %s decided by the oracle probe (%s); the '
+                         'report line is replaced' % (batch_id, addr, sc[1]))
+            verdicts[addr] = sc
         try:
             return verdicts, self.mechanical_checks(batch, worktree, verdicts)
         except OSError as e:
             raise _launch_failed('the mechanical checks', worktree, e) from None
+
+    # -- measurement (tools/truth.py) -----------------------------------
+
+    def _open_rows(self, batch):
+        """The rows a worker must decide: class ambiguous, or no class and no
+        verdict yet (the same test as the mechanical checks)."""
+        decided = batch.get('verdicts', {})
+        return [r for r in batch.get('rows', [])
+                if r.get('class') == 'ambiguous' or (
+                    'class' not in r and r['address'] not in decided
+                    and not r.get('verdict'))]
+
+    def _probe_verdicts(self, batch):
+        """{address as in the batch rows: (side, case)} for the rows the
+        oracle probe passed (ruling R48: side ours, case probe-<batch>-<addr>)."""
+        out = {}
+        for r in batch.get('rows', []):
+            hit = self._probe.get(_tool('wave')._addr_key(r['address']))
+            if hit:
+                out[r['address']] = hit
+        return out
+
+    def _measured_for(self, addr, side):
+        """The `measured` a verdict is recorded with, or None."""
+        key = _tool('wave')._addr_key(addr)
+        if key in self._probe:
+            return 'probe'
+        if key in self._frida_equal and side == 'ours':
+            return 'frida'
+        return None
+
+    def _oracle_phase(self, batch_id, batch, worktree):
+        """Before the worker: draft, build and run an oracle case for the
+        open rows that are pure.  Passes become verdicts (self._probe), a fail
+        is a finding for the brief, crash and pending leave the row alone.
+        Returns the text to put in front of the brief ('' for none).  A batch
+        with no pure row skips the build and the run; an oracle that cannot
+        run is logged and the batch goes on unmeasured."""
+        self._probe = {}
+        truth = _tool('truth')
+        wave = _tool('wave')
+        decided = {wave._addr_key(a) for a in batch.get('verdicts', {})}
+        rows = [r for r in self._open_rows(batch)
+                if wave._addr_key(r['address']) not in decided]
+
+        def read(address):
+            text, _err = wave._read_evidence(self.repo, batch['branch'], address)
+            return text
+        try:
+            cases, _why = truth.oracle_candidates(rows, read)
+        except Exception as e:
+            self.log('%s: oracle path skipped: %s' % (batch_id, _one_line(repr(e), 300)))
+            return ''
+        if not cases:
+            return ''
+        try:
+            self._stage(batch_id, 'oracle')
+            got = self.oracle_run(batch_id, worktree, cases)
+            got = {wave._addr_key(a): v for a, v in got.items()}
+        except Exception as e:   # measurement is best effort
+            self.log('%s: oracle path skipped: %s' % (batch_id, _one_line(repr(e), 300)))
+            self._settle_oracle_files(batch_id, worktree, cases, ())
+            return ''
+        self._settle_oracle_files(batch_id, worktree, cases, [
+            c for c in cases if got.get(wave._addr_key(c['address']), ('',))[0] == 'pass'])
+        key = wave._addr_key
+        passed, failed = [], []
+        for c in cases:
+            status, detail = got.get(key(c['address']), ('pending', 'no result'))
+            self.log('%s: oracle %s %s (%s)' % (batch_id, c['address'], status, detail))
+            if status == 'pass':
+                case = 'probe-%s-%s' % (batch_id, key(c['address']).upper())
+                self._probe[key(c['address'])] = ('ours', case)
+                passed.append((c['address'], case, detail))
+            elif status == 'fail':
+                failed.append((c['address'], c['name'], detail))
+        lines = []
+        if passed:
+            lines.append('The oracle probe passed these rows (ours matches the original over a '
+                         'swept domain). The driver records each as `ours`, with the case shown; '
+                         'write the evidence file as usual and cite that case:')
+            lines += ['- %s: case %s (%s)' % p for p in passed]
+        if failed:
+            lines.append('The oracle probe FAILED these rows (ours and the original disagree). '
+                         'Decide them with that in mind; the case file is wave-%s.cpp in '
+                         'oracle/cases:' % batch_id)
+            lines += ['- %s %s: %s' % f for f in failed]
+        return ('## Measured before you started\n\n' + '\n'.join(lines) + '\n\n') if lines else ''
+
+    def _settle_oracle_files(self, batch_id, worktree, cases, passed):
+        """Leave in the batch worktree only what is worth keeping of the
+        oracle path's files: the case file with the passing cases (their
+        permanent oracle cases) and its oracle/CMakeLists.txt line, committed;
+        a failing, crashing or unrun case never stays in the oracle suite, and
+        with nothing passing both files are put back."""
+        truth = _tool('truth')
+        cmake = os.path.join(worktree, 'oracle', 'CMakeLists.txt')
+        cases_dir = os.path.join(worktree, 'oracle', 'cases')
+        path = os.path.join(cases_dir, 'wave-%s.cpp' % batch_id)
+
+        def git(*args):
+            return subprocess.run(['git', '-C', worktree, *args],
+                                  capture_output=True, text=True)
+        try:
+            if not os.path.exists(path):
+                return
+            if not passed:
+                os.unlink(path)
+                git('checkout', '--', 'oracle/CMakeLists.txt')
+                return
+            if len(passed) != len(cases):
+                truth.write_cases(batch_id, passed, cases_dir)
+            names = ['oracle/cases/wave-%s.cpp' % batch_id, 'oracle/CMakeLists.txt']
+            if git('status', '--porcelain', '--', *names).stdout.strip():
+                git('add', '--', *names)
+                r = git('commit', '-q', '-m', 'truth: oracle probes for %s (pure rows; the driver)' % batch_id,
+                        '--', *names)
+                if r.returncode != 0:
+                    self.log('%s: oracle files not committed: %s' % (
+                        batch_id, _one_line((r.stderr or '') + (r.stdout or ''))))
+        except OSError as e:
+            self.log('%s: oracle files left as they are: %r' % (batch_id, e))
+
+    def _frida_phase(self, batch_id, batch, worktree, verdicts):
+        """After the worker, with --frida: one batched Frida differential run
+        over the open rows the oracle did not decide.  Equal confirms a
+        verdict of ours (measured frida); different where the verdict says
+        ours, or equal where it says the fork, is a finding for the fix
+        round.  Returns the findings."""
+        self._frida_equal = set()
+        if not self.frida or self.dry_run:
+            return []
+        truth = _tool('truth')
+        wave = _tool('wave')
+        key = wave._addr_key
+        rows = [r for r in self._open_rows(batch) if key(r['address']) not in self._probe]
+        if not rows:
+            return []
+        if not self.frida_map or not os.path.isfile(self.frida_map):
+            self.log('%s: frida skipped: no --frida-map (our build\'s .map)' % batch_id)
+            return []
+        sigs = {}
+        for r in rows:
+            text, _err = wave._read_evidence(self.repo, batch['branch'], r['address'])
+            sig = truth.evidence_signature(text) if text else None
+            if sig:
+                sigs[r['address']] = sig
+        try:
+            with open(self.frida_map, encoding='utf-8', errors='replace') as f:
+                map_text = f.read()
+            self._stage(batch_id, 'frida')
+            got = truth.frida_batch(batch_id, rows, sigs, map_text,
+                                    run_frida=self.frida_run)
+            got = {key(a): v for a, v in got.items()}
+        except Exception as e:
+            self.log('%s: frida path skipped: %s' % (batch_id, _one_line(repr(e), 300)))
+            return []
+        sides = {key(a): s for a, (s, _c) in verdicts.items()}
+        findings = []
+        for r in rows:
+            k = key(r['address'])
+            status, detail = got.get(k, ('skipped', 'no result'))
+            self.log('%s: frida %s %s (%s)' % (batch_id, r['address'], status, detail))
+            side = sides.get(k)
+            if status == 'equal':
+                if side == 'ours':
+                    self._frida_equal.add(k)
+                elif side:
+                    findings.append('%s: the Frida trace diff shows ours equal to the original (%s) '
+                                    'but the verdict is %s; recheck it' % (r['address'], detail, side))
+            elif status == 'different' and side == 'ours':
+                findings.append('%s: the Frida trace diff shows ours different from the original '
+                                '(%s) but the verdict is ours; recheck it' % (r['address'], detail))
+        return findings
 
     def _merged(self, batch_id, verdicts):
         """The state's verdicts plus the report's, as (side, case)."""
@@ -978,6 +1167,8 @@ class Driver:
         self._runs = []
         self._worker_ran = []
         self._ignored = {}
+        self._probe = {}
+        self._frida_equal = set()
         state = self.load_state(self.state_path)
         batch = state['batches'].get(batch_id)
         if batch is None:
@@ -1008,6 +1199,8 @@ class Driver:
             brief = self._resume_preamble(batch_id, batch, resume) + brief
             self.log('%s: resumed (%s)' % (batch_id, resume))
         worker = FakeWorker(dry_report(batch)) if self.dry_run else self.worker
+        if not self.dry_run:
+            brief = self._oracle_phase(batch_id, batch, worktree) + brief
 
         # The worker, the mechanical checks, one fix round.
         self._stage(batch_id, 'worker')
@@ -1016,6 +1209,8 @@ class Driver:
         if out:
             return out
         verdicts, problems = self._check(batch_id, worktree, res.report)
+        if not problems:
+            problems = self._frida_phase(batch_id, batch, worktree, verdicts)
         if problems:
             self.log('%s: %d problem(s); one fix round' % (batch_id, len(problems)))
             res = self._fix(batch_id, batch, worker, worktree, 'mechanical checks',
@@ -1071,8 +1266,10 @@ class Driver:
         self._stage(batch_id, 'record')
         failed = []
         for addr, (side, case) in sorted(verdicts.items()):
+            measured = self._measured_for(addr, side)
+            extra = {} if measured is None else {'measured': measured}
             rc, text = self.record_verdict(self.state_path, self.repo, batch_id,
-                                           addr, side, case)
+                                           addr, side, case, **extra)
             if rc != 0:
                 failed.append(text.strip())
         if failed:
@@ -1090,7 +1287,8 @@ class Driver:
         self.log(text.rstrip())
         try:
             rc, text = self.write_scorecard(self.state_path, self.report_path,
-                                            self.triage_path)
+                                            self.triage_path,
+                                            calibration_path=self.calibration_path)
             self.log(text.rstrip())
         except Exception as e:   # the batch is closed; the scorecard can wait
             self.log('scorecard not written: %r' % (e,))
@@ -1441,6 +1639,11 @@ def _parse(argv):
                                    '(default docs/wso/wave-state.json)')
     p.add_argument('--aoe-session', help='the AoE session that gets '
                                          'exception lines')
+    p.add_argument('--frida', action=argparse.BooleanOptionalAction, default=None,
+                   help='run the batched Frida differential path after the worker '
+                        '(default: docs/wso/truth-calibration.json frida_default; '
+                        'off when that file is missing)')
+    p.add_argument('--frida-map', help="our build's iwd2r.map, for the Frida hook table")
     one = p.add_mutually_exclusive_group()
     one.add_argument('--dry-run', action='store_true',
                      help='one batch with a fake worker; no review, no close, '
@@ -1482,11 +1685,16 @@ def _build(args, repo):
         worker = reviewer = None
     else:
         worker, reviewer = HeadlessWorker(), HeadlessWorker()
+    frida = args.frida
+    if frida is None:
+        frida = _tool('truth').frida_default(
+            os.path.join(repo, 'docs', 'wso', 'truth-calibration.json'))
     try:
         d = Driver(repo, state, worker, reviewer, ledger, status,
                    aoe_session=args.aoe_session, seed=args.seed,
                    budget=args.budget, workers=args.workers,
-                   dry_run=args.dry_run)
+                   dry_run=args.dry_run, frida=frida,
+                   frida_map=args.frida_map)
     except StatusError as e:
         return None, (1, 'wave.py run: the status file cannot be read: %s' % e)
     except ValueError as e:

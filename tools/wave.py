@@ -49,6 +49,7 @@ DISAGREEMENTS_PATH = os.path.join(ROOT, 'docs', 'wso', 'disagreements.json')
 TEMPLATE_PATH = os.path.join(ROOT, 'docs', 'wso', 'brief-template.md')
 REPORT_PATH = os.path.join(ROOT, 'docs', 'wso', 'xrec-report.md')
 TRIAGE_PATH = os.path.join(ROOT, 'docs', 'wso', 'triage.json')
+CALIBRATION_PATH = os.path.join(ROOT, 'docs', 'wso', 'truth-calibration.json')
 # Relative to the repo `next` is given: where ours-stub rows go when they
 # leave wave 1.
 IMPORT_LIST_REL = os.path.join('docs', 'wso', 'import-list.json')
@@ -154,6 +155,22 @@ def _triage():
         spec.loader.exec_module(module)
         _triage_module = module
     return _triage_module
+
+
+_truth_module = None
+
+
+def _truth():
+    """tools/truth.py, loaded by path: under -I tools/ is not on sys.path."""
+    global _truth_module
+    if _truth_module is None:
+        spec = importlib.util.spec_from_file_location(
+            'truth', os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                  'truth.py'))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _truth_module = module
+    return _truth_module
 
 
 _driver_module = None
@@ -617,12 +634,16 @@ def _evidence_kind(repo, branch, address):
 
 
 def record_verdict(state_path=STATE_PATH, repo=ROOT, batch_id=None,
-                   address=None, side=None, case=None):
+                   address=None, side=None, case=None, measured=None):
     """Record one row's outcome.  `side` says who won: fork (his body is
     adopted, ours' verification is a trace), ours (his verification wins,
-    ours' evidence kind is the losing kind), neither (parser noise)."""
+    ours' evidence kind is the losing kind), neither (parser noise).
+    `measured` ('probe', 'frida' or 'replay') says a measurement decided or
+    confirmed it; absent, the scorecard counts the verdict as 'none'."""
     if side not in SIDES:
         return 2, f'side must be one of {"|".join(SIDES)}\n'
+    if measured is not None and measured not in MEASURED_ORDER[:-1]:
+        return 2, f'measured must be one of {"|".join(MEASURED_ORDER[:-1])}\n'
     if not case:
         return 2, 'the deciding case id is required (probe-N, replay checkpoint, ...)\n'
     state = load_state(state_path)
@@ -645,6 +666,8 @@ def record_verdict(state_path=STATE_PATH, repo=ROOT, batch_id=None,
             return 1, err + '\n'
     batch['verdicts'][row['address']] = {
         'side': side, 'case': case, 'losing_kind': losing}
+    if measured is not None:
+        batch['verdicts'][row['address']]['measured'] = measured
     save_state(state_path, state)
     kind = f', losing kind: {losing}' if losing else ''
     return 0, f'verdict {batch_id} {row["address"]} {side} (case {case}{kind})\n'
@@ -898,11 +921,13 @@ def scorecard_text(state):
 
 
 def write_scorecard(state_path=STATE_PATH, report_path=REPORT_PATH,
-                    triage_path=TRIAGE_PATH):
+                    triage_path=TRIAGE_PATH, calibration_path=CALIBRATION_PATH):
     """Replace (or append) the '## Scorecard' section of the report.
     Idempotent: the same state writes the same bytes.  When triage.json
     exists the section ends with a labelled calibration block (the
-    separate '## Triage calibration' section stays triage.py's)."""
+    separate '## Triage calibration' section stays triage.py's); when
+    truth-calibration.json exists it ends with the truth calibration
+    paragraph."""
     state = load_state(state_path)
     section = scorecard_text(state)
     if os.path.exists(triage_path):
@@ -915,6 +940,14 @@ def write_scorecard(state_path=STATE_PATH, report_path=REPORT_PATH,
                     + tri.calibration_text(tri.calibrate(state, rows)))
         if not section.endswith('\n'):
             section += '\n'
+    if calibration_path and os.path.exists(calibration_path):
+        try:
+            with open(calibration_path, encoding='utf-8') as f:
+                cal = json.load(f)
+            para = _truth().calibration_text(cal)
+        except (OSError, ValueError, KeyError, TypeError) as e:
+            return 2, f'cannot read {calibration_path}: {e!r}\n'
+        section += '\n' + para
     try:
         with open(report_path, encoding='utf-8') as f:
             text = f.read()

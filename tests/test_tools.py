@@ -9424,6 +9424,169 @@ class DriverTest(unittest.TestCase):
         self.assertIn('credits unknown', none)
         self.assertIn('review: yes, sample: clean', none)
 
+    # -- measured verdicts (Task 12) ---------------------------------------
+
+    PURE_EVIDENCE = ('\n## Decompiled (Ghidra)\n\n```c\nint Rules::Render(int a, int b)\n\n'
+                     '{\n  return a + b;\n}\n```\n')
+
+    def _measured_driver(self, **kw):
+        """A loop driver whose 0x401000 is a pure function (a draftable
+        oracle case) and whose 0x402000 is IcewindMisc::Roll, for the Frida map."""
+        d = self._driver(worker=kw.pop('worker', driver.FakeWorker(self.REPORT)), **kw)
+        with open(self.state_path) as f:
+            state = json.load(f)
+        rows = state['batches']['b011']['rows']
+        rows[0]['name'] = 'Rules::Render'
+        rows[1]['name'] = 'IcewindMisc::Roll'
+        with open(self.state_path, 'w') as f:
+            json.dump(state, f)
+        with open(os.path.join(self.wt, 'docs', 'evidence', '401000.md'), 'a') as f:
+            f.write(self.PURE_EVIDENCE)
+        with open(os.path.join(self.wt, 'docs', 'evidence', '402000.md'), 'a') as f:
+            f.write('\n## Decompiled (Ghidra)\n\n```c\nint Roll(int a, int b)\n\n{\n  return g_x;\n}\n```\n')
+        self.git('commit', '-qam', 'decompiled', cwd=self.wt)
+        return d
+
+    def test_driver_records_measured_from_probe_results(self):
+        calls = []
+
+        def oracle_run(batch_id, worktree, cases):
+            calls.append((batch_id, worktree, [c['address'] for c in cases],
+                          [c['signature'] for c in cases]))
+            return {'0x401000': ('pass', '36 inputs')}
+        d = self._measured_driver(oracle_run=oracle_run)
+        out = d.run_batch('b011')
+        self.assertEqual(out, 'closed', self._status(d)['exceptions'])
+        self.assertEqual(calls, [('b011', self.wt, ['0x401000'], ['int Rules::Render(int a, int b)'])])
+        b = self._state()
+        self.assertEqual(b['verdicts']['0x401000'], {
+            'side': 'ours', 'case': 'probe-b011-401000', 'losing_kind': 'trace', 'measured': 'probe'})
+        self.assertNotIn('measured', b['verdicts']['0x402000'])   # the worker's own, unmeasured
+        self.assertEqual(b['verdicts']['0x402000']['side'], 'fork')
+        self.assertIn('decided by the oracle probe', '\n'.join(self.logs))
+        with open(os.path.join(os.path.dirname(d.status_path), 'b011', 'worker.brief.md')) as f:
+            self.assertIn('probe-b011-401000', f.read())
+
+    def test_driver_oracle_fail_is_a_finding_and_crash_leaves_the_row(self):
+        for status in ('fail', 'crash', 'pending'):
+            briefs = []
+
+            class Worker(driver.FakeWorker):
+                def run(self, brief, cwd):
+                    briefs.append(brief)
+                    return super().run(brief, cwd)
+            d = self._measured_driver(
+                worker=Worker(self.REPORT),
+                oracle_run=lambda b, w, c, status=status: {'0x401000': (status, 'detail-%s' % status)})
+            self.assertEqual(d.run_batch('b011'), 'closed')
+            v = self._state()['verdicts']['0x401000']
+            self.assertEqual((v['side'], v['case']), ('ours', 'dump-401000'), status)   # the worker's
+            self.assertNotIn('measured', v)
+            self.assertEqual('FAILED' in briefs[0], status == 'fail', status)
+            self.assertEqual('detail-fail' in briefs[0], status == 'fail')
+
+    def test_driver_keeps_only_passing_oracle_cases_committed(self):
+        report_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, report_dir, True)
+
+        def real_files(status):
+            def oracle_run(batch_id, worktree, cases):
+                # the real writer and wiring, with a fake build and run
+                def run(cmd, **kw):
+                    path = os.path.join(report_dir, 'r.json')
+                    with open(path, 'w') as f:
+                        json.dump({'cases': [{'case': 'wave/b011/401000', 'iterations': 36,
+                                              'failure_count': 0 if status == 'pass' else 2}]}, f)
+                    return subprocess.CompletedProcess(cmd, 0, 'report: %s\n' % path, '')
+                return truth.run_oracle(batch_id, worktree, cases, build=lambda w: None, run=run)
+            return oracle_run
+        for status in ('pass', 'fail'):
+            d = self._measured_driver(oracle_run=real_files(status))
+            os.makedirs(os.path.join(self.wt, 'oracle'), exist_ok=True)
+            with open(os.path.join(self.wt, 'oracle', 'CMakeLists.txt'), 'w') as f:
+                f.write('add_executable(r cases/store_spell.cpp)\n')
+            self.git('add', 'oracle', cwd=self.wt)
+            self.git('commit', '-qm', 'cmake', cwd=self.wt)
+            out = d.run_batch('b011')
+            self.assertEqual(out, 'closed', self._status(d)['exceptions'])
+            tree = self.git('ls-tree', '-r', '--name-only', 'p3/wso-b011', cwd=self.wt).stdout
+            cmake = self.git('show', 'p3/wso-b011:oracle/CMakeLists.txt', cwd=self.wt).stdout
+            # a failing case never stays in the oracle suite: the file and its wiring are put back
+            self.assertEqual('oracle/cases/wave-b011.cpp' in tree, status == 'pass')
+            self.assertEqual('cases/wave-b011.cpp' in cmake, status == 'pass')
+
+    def test_driver_skips_the_oracle_without_a_pure_row(self):
+        d = self._driver(worker=driver.FakeWorker(self.REPORT),
+                         oracle_run=lambda *a: self.fail('no pure row: nothing to build'))
+        self.assertEqual(d.run_batch('b011'), 'closed')
+        self.assertNotIn('measured', self._state()['verdicts']['0x401000'])
+
+    def test_driver_oracle_error_does_not_stop_the_batch(self):
+        def boom(*a):
+            raise RuntimeError('no windows here')
+        d = self._measured_driver(oracle_run=boom)
+        self.assertEqual(d.run_batch('b011'), 'closed')
+        self.assertIn('oracle path skipped', '\n'.join(self.logs))
+        self.assertNotIn('measured', self._state()['verdicts']['0x401000'])
+
+    def test_driver_frida_records_equal_and_flags_different(self):
+        trace = TruthTest._trace
+        for ours_ret, report, outcome in (
+                (3, 'verdict 0x401000 ours case dump-401000\nverdict 0x402000 ours case dump-402000\n', 'equal'),
+                (4, 'verdict 0x401000 ours case dump-401000\nverdict 0x402000 ours case dump-402000\n', 'different')):
+            seen = []
+
+            def frida_run(batch_id, table, scenarios, ours_ret=ours_ret):
+                seen.append((batch_id, [h['name'] for h in table['original']['hooks']], list(scenarios)))
+                return {'world_entry': (trace(('fn_402000', 7, 3)), trace(('fn_402000', 7, ours_ret)))}
+            map_path = os.path.join(tempfile.mkdtemp(), 'iwd2r.map')
+            self.addCleanup(shutil.rmtree, os.path.dirname(map_path), True)
+            with open(map_path, 'w') as f:
+                f.write(TruthTest.MAP)
+            d = self._measured_driver(worker=_SeqWorker('# r\n\n## Verdicts\n\n' + report),
+                                      frida=True, frida_map=map_path, frida_run=frida_run,
+                                      oracle_run=lambda *a: {'0x401000': ('pass', 'ok')})
+            d.run_batch('b011')
+            self.assertEqual(seen[0][1], ['fn_402000'])
+            self.assertEqual(seen[0][0], 'b011')
+            b = self._state()
+            if outcome == 'equal':
+                self.assertEqual(b['status'], 'closed')
+                self.assertEqual(b['verdicts']['0x402000']['measured'], 'frida')
+                self.assertEqual(b['verdicts']['0x401000']['measured'], 'probe')
+            else:   # different, yet the verdict is ours: a finding, one fix round (the same report again)
+                self.assertIn('1 problem(s); one fix round', '\n'.join(self.logs))
+                with open(os.path.join(os.path.dirname(d.status_path), 'b011', 'worker-fix-checks.brief.md')) as f:
+                    self.assertIn('Frida trace diff shows ours different from the original', f.read())
+                self.assertNotIn('measured', b['verdicts']['0x402000'])
+
+    def test_driver_frida_off_by_default_and_read_from_the_calibration(self):
+        d = self._measured_driver(frida_run=lambda *a: self.fail('--no-frida'),
+                                  oracle_run=lambda *a: {})
+        self.assertFalse(d.frida)
+        out = d.run_batch('b011')
+        self.assertEqual(out, 'closed', self._status(d)['exceptions'])
+        cal = os.path.join(self.tmp, 'cal.json')
+        self.assertFalse(truth.frida_default(cal))            # missing file: off
+        with open(cal, 'w') as f:
+            json.dump({'frida_default': True}, f)
+        self.assertTrue(truth.frida_default(cal))
+        with open(cal, 'w') as f:
+            f.write('{broken')
+        self.assertFalse(truth.frida_default(cal))
+        repo = os.path.join(self.tmp, 'r2')
+        os.makedirs(os.path.join(repo, 'docs', 'wso'))
+        args, _ = driver._parse([])
+        self.assertIsNone(args.frida)
+        self.assertTrue(driver._parse(['--frida'])[0].frida)
+        self.assertFalse(driver._parse(['--no-frida'])[0].frida)
+        built, err = driver._build(args, repo)
+        self.assertIsNone(err)
+        self.assertFalse(built.frida)                         # no calibration file under repo: off
+        with open(os.path.join(repo, 'docs', 'wso', 'truth-calibration.json'), 'w') as f:
+            json.dump({'frida_default': True}, f)
+        self.assertTrue(driver._build(args, repo)[0].frida)
+
     def test_run_batch_happy_path_closes(self):
         d = self._driver(worker=driver.FakeWorker(self.REPORT))   # fake wave functions injected
         first = self.git('rev-parse', 'first').stdout.strip()
@@ -10667,7 +10830,14 @@ class TruthTest(unittest.TestCase):
                            ('?F@C@@AAEXXZ', '__thiscall'), ('?F@C@@IAEXXZ', '__thiscall'),
                            ('?F@C@@EAEXXZ', '__thiscall'), ('?F@C@@MAEXXZ', '__thiscall'),
                            ('?F@@YAXXZ', '__cdecl'), ('?F@@YGXXZ', '__stdcall'),
-                           ('?F@@YIXXZ', '__fastcall'), ('?F@@3HA', None)):
+                           ('?F@@YIXXZ', '__fastcall'), ('?F@@3HA', None),
+                           # const / volatile this, and the private and protected statics (R53)
+                           ('?F@C@@QBEXXZ', '__thiscall'), ('?F@C@@UCEXXZ', '__thiscall'),
+                           ('?F@C@@AADEXXZ', None), ('?F@C@@IDEXXZ', '__thiscall'),
+                           ('?F@C@@CAXXZ', '__cdecl'), ('?F@C@@KAXXZ', '__cdecl'),
+                           ('?F@C@@CGXXZ', '__stdcall'), ('?F@C@@KGXXZ', '__stdcall'),
+                           ('?F@C@@SGXXZ', '__stdcall'), ('?F@C@@CIXXZ', '__fastcall'),
+                           ('?F@C@@QFEXXZ', None)):
             self.assertEqual(truth.decorated_convention(code), conv, code)
 
     def test_hook_table_skips_what_the_hooks_cannot_log(self):
@@ -10814,6 +10984,178 @@ class TruthTest(unittest.TestCase):
             self.assertTrue(any(p.match(src) for p in ce.TRACE_SOURCES), src)
             self.assertIn('orig:' + hashlib.sha256(b'{"tag":"a"}\n').hexdigest(), src)
             self.assertIn('ours:' + hashlib.sha256(b'{"tag":"a"}\r\n').hexdigest(), src)
+
+    # ---- Task 12: calibration and the oracle path ----
+
+    CAL_STATE = None
+
+    @staticmethod
+    def _cal_state():
+        def verdicts(batch, spec):
+            return {'0x%X' % (0x410000 + i * 16 + batch): {'side': side, 'case': case, 'losing_kind': 'trace'}
+                    for i, (side, case) in enumerate(spec)}
+        batches = {}
+        for n, bid in enumerate(('b001', 'b002')):
+            spec = [('fork', 'probe-1'), ('neither', 'x')] + [('ours', 'dump-%d' % i) for i in range(8)] \
+                + [('ours', 'replay-w'), ('ours', 'triage-rename')]
+            v = verdicts(n, spec)
+            batches[bid] = {'status': 'closed', 'verdicts': v,
+                            'rows': [{'address': a, 'name': 'C::f%s' % a[2:]} for a in v]}
+        batches['b003'] = {'status': 'assigned', 'rows': [{'address': '0x999999', 'name': 'C::g'}],
+                           'verdicts': {'0x999999': {'side': 'fork', 'case': 'p', 'losing_kind': 'trace'}}}
+        return {'fork_base': 'x', 'batches': batches}
+
+    def test_calibration_rows_are_seeded_and_closed_only(self):
+        state = self._cal_state()
+        rows, sample = truth.calibration_rows(state, '2026-10-22')
+        self.assertEqual((rows, sample), truth.calibration_rows(state, '2026-10-22'))
+        self.assertEqual(len(sample), 10)
+        self.assertEqual(sample, sorted(sample, key=lambda a: [r for r in rows if r['address'] == a][0]['batch'] + a))
+        ruling = [r for r in rows if not r['sample']]
+        self.assertEqual(len(ruling), 4)                       # 2 fork + 2 neither; b003 is not closed
+        self.assertEqual({r['side'] for r in ruling}, {'fork', 'neither'})
+        picked = [r for r in rows if r['sample']]
+        self.assertTrue(all(r['side'] == 'ours' and r['case'].startswith('dump-') for r in picked))
+        self.assertNotEqual(sample, truth.calibration_rows(state, 'another seed')[1])
+
+    def test_truth_calibrate_counts(self):
+        state = self._cal_state()
+        rows, sample = truth.calibration_rows(state, 's')
+        addrs = [r['address'] for r in rows]
+        oracle = {addrs[0]: ('pass', '6'), addrs[1]: ('fail', 'x'), addrs[2]: ('crash', 'c'),
+                  addrs[3]: ('pending', 'p'), addrs[4].lower().replace('0x', '0x'): ('pass', '6')}
+        cal = truth.calibrate(state, rows, {'oracle': oracle, 'frida': None}, seed='s', sample=sample)
+        self.assertEqual(cal['seed'], 's')
+        self.assertEqual(cal['sample'], sample)
+        self.assertEqual(cal['paths']['oracle'], {'measured': 3, 'agree': 2, 'disagree': 1, 'of': 14})
+        self.assertEqual(cal['paths']['frida'], {'measured': 0, 'agree': 0, 'disagree': 0, 'of': 14,
+                                                 'deferred': True})
+        self.assertFalse(cal['frida_default'])
+        # Frida measuring a fifth of the sample (2 of 10) switches it on by default; 1 does not.
+        two = {sample[0]: ('equal', ''), sample[1]: ('different', 'd'), addrs[0]: ('equal', '')}
+        cal = truth.calibrate(state, rows, {'oracle': {}, 'frida': two}, seed='s', sample=sample)
+        self.assertEqual(cal['paths']['frida'], {'measured': 3, 'agree': 2, 'disagree': 1, 'of': 14})
+        self.assertTrue(cal['frida_default'])
+        one = {sample[0]: ('equal', ''), addrs[0]: ('equal', ''), sample[1]: ('not-exercised', '')}
+        cal = truth.calibrate(state, rows, {'oracle': {}, 'frida': one}, seed='s', sample=sample)
+        self.assertFalse(cal['frida_default'])
+        self.assertIn('Truth calibration (seed s', truth.calibration_text(cal))
+
+    def test_evidence_signature_and_oracle_candidates(self):
+        pure = ('---\naddress: 0x1\n---\n## Decompiled (Ghidra)\n\n```c\n'
+                'int Rules::Mix(int a,\n    int b)\n\n{\n  return a * 3 + b;\n}\n```\n')
+        impure = pure.replace('a * 3 + b', 'g_total')
+        self.assertEqual(truth.evidence_signature(pure), 'int Rules::Mix(int a, int b)')
+        self.assertIsNone(truth.evidence_signature('no section'))
+        texts = {'0x1': pure, '0x2': impure, '0x3': pure.replace('Rules::Mix', 'Mix'),
+                 '0x4': pure.replace('int a,', 'int *a,')}
+        rows = [{'address': a, 'name': 'Rules::Mix'} for a in ('0x1', '0x2', '0x3', '0x4', '0x5')]
+        rows[2]['name'] = 'Mix'
+        keep, why = truth.oracle_candidates(rows, texts.get)
+        self.assertEqual([c['address'] for c in keep], ['0x1'])
+        self.assertEqual(keep[0]['signature'], 'int Rules::Mix(int a, int b)')
+        self.assertIn('not pure', why['0x2'])
+        self.assertIn('no Class::', why['0x3'])
+        self.assertIn('not integer-like', why['0x4'])
+        self.assertEqual(why['0x5'], 'no evidence file')
+
+    def test_wire_cases_and_run_oracle_with_fakes(self):
+        with tempfile.TemporaryDirectory() as wt:
+            os.makedirs(os.path.join(wt, 'oracle'))
+            cmake = os.path.join(wt, 'oracle', 'CMakeLists.txt')
+            with open(cmake, 'w') as f:
+                f.write('add_executable(iwd2r_oracle a.cpp\n        cases/store_spell.cpp\n        $<X>)\n')
+            self.assertTrue(truth.wire_cases(cmake, 'b011'))
+            self.assertFalse(truth.wire_cases(cmake, 'b011'))
+            with open(cmake) as f:
+                text = f.read()
+            self.assertEqual(text.count('cases/wave-b011.cpp'), 1)
+            self.assertIn('cases/store_spell.cpp\n        cases/wave-b011.cpp\n', text)
+            with open(cmake, 'w') as f:
+                f.write('nothing\n')
+            with self.assertRaises(truth.OracleError):
+                truth.wire_cases(cmake, 'b012')
+            with open(cmake, 'w') as f:
+                f.write('x cases/store_spell.cpp\n')
+            cases = [{'address': '0x5845D0', 'name': 'IcewindMisc::Roll', 'signature': 'int Roll(int a, int b)'}]
+            built, ran = [], []
+
+            def run(cmd, **kw):
+                ran.append((cmd[2:], kw['cwd']))
+                report = {'cases': [{'case': 'wave/b011/5845D0', 'iterations': 36, 'failure_count': 0}]}
+                os.makedirs(os.path.join(wt, 'runs', 'x'), exist_ok=True)
+                with open(os.path.join(wt, 'runs', 'x', 'oracle.json'), 'w') as f:
+                    json.dump(report, f)
+                return subprocess.CompletedProcess(cmd, 0, '36 inputs\nreport: runs/x/oracle.json\n', '')
+            got = truth.run_oracle('b011', wt, cases, build=built.append, run=run)
+            self.assertEqual(got, {'0x5845D0': ('pass', '36 inputs')})
+            self.assertEqual(built, [wt])
+            self.assertEqual(ran, [(['tools/oracle.py'.replace('/', os.sep), 'run', '--file', 'wave-b011'] if False
+                                    else [os.path.join('tools', 'oracle.py'), 'run', '--file', 'wave-b011'], wt)])
+            self.assertTrue(os.path.isfile(os.path.join(wt, 'oracle', 'cases', 'wave-b011.cpp')))
+            self.assertEqual(truth.run_oracle('b011', wt, [], build=built.append, run=run), {})
+            self.assertEqual(len(built), 1)                  # no case: no build
+            with self.assertRaises(truth.OracleError):       # no report line
+                truth.run_oracle('b011', wt, cases, build=built.append,
+                                 run=lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, 'nothing\n', 'boom'))
+
+    def test_calibrate_cli_writes_the_record_and_the_scorecard_paragraph(self):
+        with tempfile.TemporaryDirectory() as d:
+            state = self._cal_state()
+            state_path = os.path.join(d, 'state.json')
+            with open(state_path, 'w') as f:
+                json.dump(state, f)
+            os.makedirs(os.path.join(d, 'docs', 'evidence'))
+            out = os.path.join(d, 'cal.json')
+            seen = []
+            with mock.patch.object(truth, 'run_oracle', lambda b, w, c: seen.append((b, w, c)) or {}):
+                with contextlib.redirect_stdout(io.StringIO()) as buf:
+                    rc = truth.main(['calibrate', '--seed', 's', '--state', state_path, '--out', out,
+                                     '--evidence-root', d, '--worktree', d])
+            self.assertEqual(rc, 0)
+            self.assertEqual(seen, [])                          # no evidence, no pure row, no build
+            with open(out) as f:
+                cal = json.load(f)
+            self.assertEqual(cal['seed'], 's')
+            self.assertEqual(len(cal['sample']), 10)
+            self.assertEqual(cal['paths']['oracle']['of'], 14)
+            self.assertTrue(cal['paths']['frida']['deferred'])
+            self.assertFalse(cal['frida_default'])
+            self.assertIn('Frida trace diff: measured 0 of 14 rows', buf.getvalue())
+            wave = load_tool('wave')
+            report = os.path.join(d, 'report.md')
+            with open(report, 'w') as f:
+                f.write('# R\n\n## Scorecard\n\nold\n\n## Other\n\nkeep\n')
+            rc, msg = wave.write_scorecard(state_path, report, os.path.join(d, 'no-triage.json'), out)
+            self.assertEqual(rc, 0, msg)
+            with open(report) as f:
+                text = f.read()
+            self.assertEqual(text.count('Truth calibration (seed s'), 1)
+            self.assertLess(text.index('Truth calibration'), text.index('## Other'))
+            wave.write_scorecard(state_path, report, os.path.join(d, 'no-triage.json'), out)
+            with open(report) as f:
+                self.assertEqual(f.read(), text)               # idempotent
+            wave.write_scorecard(state_path, report, os.path.join(d, 'no-triage.json'),
+                                 os.path.join(d, 'absent.json'))
+            with open(report) as f:
+                self.assertNotIn('Truth calibration', f.read())
+
+    def test_record_verdict_stores_measured(self):
+        wave = load_tool('wave')
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, 's.json')
+            with open(path, 'w') as f:
+                json.dump({'fork_base': 'x', 'batches': {'b1': {
+                    'rows': [{'address': '0x1'}], 'branch': 'nope', 'status': 'assigned', 'verdicts': {}}}}, f)
+            rc, _ = wave.record_verdict(path, d, 'b1', '0x1', 'ours', 'probe-b1-1', measured='probe')
+            self.assertEqual(rc, 0)
+            with open(path) as f:
+                v = json.load(f)['batches']['b1']['verdicts']['0x1']
+            self.assertEqual((v['measured'], v['case']), ('probe', 'probe-b1-1'))
+            self.assertEqual(wave.record_verdict(path, d, 'b1', '0x1', 'ours', 'c', measured='guess')[0], 2)
+            wave.record_verdict(path, d, 'b1', '0x1', 'ours', 'c')
+            with open(path) as f:
+                self.assertNotIn('measured', json.load(f)['batches']['b1']['verdicts']['0x1'])
 
 
 if __name__ == '__main__':

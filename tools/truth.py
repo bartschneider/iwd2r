@@ -13,11 +13,16 @@ per target from the rows' signatures and our build's .map, frida_run drives
 tools/frida/probe.py (its subprocess injectable; nothing here launches a game
 on its own), and frida_verdicts compares the two traces with trace_diff.
 
+run_oracle builds and runs a batch's drafted cases (subprocesses injectable);
+calibrate measures both paths over rows whose verdicts were already ruled, and
+`truth.py calibrate` writes docs/wso/truth-calibration.json for the driver.
+
 Python 3 standard library only; run under `python3 -I`.
 """
 import hashlib
 import json
 import os
+import random
 import re
 import subprocess
 import sys
@@ -490,17 +495,17 @@ def _frida_type(text):
 
 def decorated_convention(decorated):
     """The calling convention a decorated MSVC name encodes, or None: a member
-    function code (Q, U, A, I, E or M) then AE is thiscall, YA and SA are
-    cdecl, YG and SG stdcall, YI fastcall; a plain _name is cdecl and
+    function code (A, B, E, F, I, J, M, N, Q, R, U or V, per access and
+    const or volatile `this`) then AE is thiscall, [CKSY]A is cdecl, [CKSY]G
+    stdcall and [CKSY]I fastcall (skipped by the hooks); a plain _name is cdecl and
     _name@N stdcall."""
     m = re.match(r'^\?[^@?]+(?:@[^@]+)*?@@(.*)$', decorated or '')
     if m:
         tail = m.group(1)
-        if re.match(r'[QUAIEM]AE', tail):
+        if re.match(r'[AEIMQU][ABCD]E', tail):
             return '__thiscall'
-        for code, conv in (('YA', '__cdecl'), ('SA', '__cdecl'), ('YG', '__stdcall'),
-                           ('SG', '__stdcall'), ('YI', '__fastcall')):
-            if tail.startswith(code):
+        for code, conv in (('A', '__cdecl'), ('G', '__stdcall'), ('I', '__fastcall')):
+            if re.match(r'[CKSY]' + code, tail):
                 return conv
         return None
     if re.match(r'^_\w+@\d+$', decorated or ''):
@@ -841,3 +846,288 @@ def trace_source(probe, orig_path, ours_path):
     paths frida_run returns). Only meaningful for an equal verdict."""
     return 'frida %s orig:%s ours:%s compare=0' % (
         probe, _file_hash(orig_path), _file_hash(ours_path))
+
+
+# ---- the oracle path, end to end -------------------------------------------------
+
+CMAKE_ANCHOR = 'cases/store_spell.cpp'   # the last case file of oracle/CMakeLists.txt's runner
+FRIDA_SCENARIOS = ('world_entry', 'first_fight', 'walk_and_talk')
+
+
+class OracleError(RuntimeError):
+    """The oracle could not be built or run (not a verdict)."""
+
+
+def evidence_signature(evidence_text):
+    """The function signature line of an evidence file's Decompiled (Ghidra)
+    section (everything before the opening brace, joined on one line), or
+    None."""
+    code = _section_code(evidence_text)
+    if code is None or '{' not in code:
+        return None
+    head = code[:code.find('{')]
+    head = re.sub(r'/\*.*?\*/', '', head, flags=re.S)
+    head = re.sub(r'//[^\n]*', '', head)
+    head = ' '.join(head.split())
+    return head or None
+
+
+def oracle_candidates(rows, read_evidence, pure_names=frozenset()):
+    """([row dict for write_cases], {address: why not}) over the rows (dicts
+    with address and name). read_evidence(address) is the evidence file's text
+    or None. A row is a candidate when its evidence is_pure and draft_case
+    does not skip it."""
+    keep, why = [], {}
+    for row in rows:
+        address = row['address']
+        text = read_evidence(address)
+        if text is None:
+            why[address] = 'no evidence file'
+            continue
+        pure, reason = is_pure(text, pure_names)
+        if not pure:
+            why[address] = 'not pure: ' + reason
+            continue
+        signature = evidence_signature(text)
+        if signature is None:
+            why[address] = 'no signature'
+            continue
+        cand = {'address': address, 'name': row['name'], 'signature': signature}
+        if row.get('header'):
+            cand['header'] = row['header']
+        draft = draft_case(address, row['name'], signature, 'probe')
+        if draft.startswith('// skipped'):
+            why[address] = draft.split('): ', 1)[-1].strip()
+            continue
+        keep.append(cand)
+    return keep, why
+
+
+def wire_cases(cmake_path, batch_id):
+    """Add cases/wave-<batch>.cpp to the oracle runner's sources in
+    oracle/CMakeLists.txt (after the last listed case file). Idempotent;
+    returns True when it changed the file."""
+    entry = 'cases/wave-%s.cpp' % batch_id
+    with open(cmake_path, encoding='utf-8') as f:
+        text = f.read()
+    if entry in text:
+        return False
+    if CMAKE_ANCHOR not in text:
+        raise OracleError('%s lists no %s to add %s after' % (cmake_path, CMAKE_ANCHOR, entry))
+    text = text.replace(CMAKE_ANCHOR, CMAKE_ANCHOR + '\n        ' + entry, 1)
+    with open(cmake_path, 'w', encoding='utf-8', newline='\n') as f:
+        f.write(text)
+    return True
+
+
+def oracle_build(worktree, run=subprocess.run):
+    """`oracle.py build` in the worktree (the x86 runner, through WSL interop)."""
+    done = run([sys.executable, '-I', os.path.join('tools', 'oracle.py'), 'build'],
+               cwd=worktree, capture_output=True, text=True)
+    if getattr(done, 'returncode', 0) != 0:
+        raise OracleError('oracle.py build exited %s: %s' % (
+            done.returncode, ((done.stdout or '') + (done.stderr or '')).strip()[-400:]))
+
+
+def run_oracle(batch_id, worktree, cases, build=oracle_build, run=subprocess.run):
+    """{'0x<ADDR>': (status, detail)} for the drafted cases (row dicts for
+    write_cases): the cases are written into the worktree's oracle/cases, the
+    file is added to its oracle/CMakeLists.txt, `build(worktree)` runs, then
+    `oracle.py run --file wave-<batch>` and its report is read with
+    probe_verdicts. OracleError when it cannot build or leaves no report.
+    Case files stay in place as the functions' oracle cases."""
+    if not cases:
+        return {}
+    write_cases(batch_id, cases, os.path.join(worktree, 'oracle', 'cases'))
+    wire_cases(os.path.join(worktree, 'oracle', 'CMakeLists.txt'), batch_id)
+    build(worktree)
+    done = run([sys.executable, '-I', os.path.join('tools', 'oracle.py'), 'run',
+                '--file', 'wave-%s' % batch_id],
+               cwd=worktree, capture_output=True, text=True)
+    out = (done.stdout or '') + (done.stderr or '')
+    m = re.search(r'^report: (\S+)\s*$', done.stdout or '', re.M)
+    if not m:
+        raise OracleError('oracle.py run exited %s with no report: %s' % (
+            done.returncode, out.strip()[-400:]))
+    try:
+        with open(os.path.join(worktree, m.group(1)), encoding='utf-8') as f:
+            report = json.load(f)
+    except (OSError, ValueError) as e:
+        raise OracleError('cannot read the oracle report %s: %s' % (m.group(1), e)) from None
+    return probe_verdicts(report, batch_id)
+
+
+# ---- calibration -------------------------------------------------------------------
+
+CALIBRATION_REL = os.path.join('docs', 'wso', 'truth-calibration.json')
+SAMPLE_SIZE = 10
+DUMP_CASE = re.compile(r'^(?:dump|readout)-')
+
+
+def _key(address):
+    a = address[2:] if address.lower().startswith('0x') else address
+    return '0x' + a.upper()
+
+
+def calibration_rows(state, seed, sample_size=SAMPLE_SIZE):
+    """(rows, sample): rows are every closed-batch verdict whose side is fork
+    or neither (the standing ruling's probe rows) plus a seeded sample of
+    closed `ours` verdicts decided by a dump reading (dump-* or readout-*
+    case). Each row is {address, batch, name, side, case, sample}. The
+    sample is drawn with random.Random(seed) from the candidates sorted by
+    (batch, address); sample is the sorted list of its addresses."""
+    rows, candidates = [], []
+    for bid in sorted(state['batches']):
+        b = state['batches'][bid]
+        if b.get('status') != 'closed':
+            continue
+        names = {_key(r['address']): r.get('name', '') for r in b.get('rows', [])}
+        for address in sorted(b.get('verdicts', {}), key=_key):
+            v = b['verdicts'][address]
+            row = {'address': _key(address), 'batch': bid, 'name': names.get(_key(address), ''),
+                   'side': v['side'], 'case': v.get('case', ''), 'sample': False}
+            if v['side'] in ('fork', 'neither'):
+                rows.append(row)
+            elif v['side'] == 'ours' and DUMP_CASE.match(v.get('case', '')):
+                candidates.append(row)
+    picked = random.Random(seed).sample(candidates, min(sample_size, len(candidates)))
+    picked.sort(key=lambda r: (r['batch'], r['address']))
+    for r in picked:
+        r['sample'] = True
+    return rows + picked, [r['address'] for r in picked]
+
+
+def _path_counts(statuses, measured_set, agree_status, rows):
+    measured = agree = disagree = 0
+    for row in rows:
+        got = statuses.get(row['address'])
+        status = got[0] if isinstance(got, (tuple, list)) else got
+        if status in measured_set:
+            measured += 1
+            if status == agree_status:
+                agree += 1
+            else:
+                disagree += 1
+    return {'measured': measured, 'agree': agree, 'disagree': disagree, 'of': len(rows)}
+
+
+def calibrate(state, rows, results, seed=None, sample=None):
+    """The calibration record: {seed, sample, paths: {oracle, frida}, frida_default}.
+
+    rows come from calibration_rows; results is {'oracle': {address: (status,
+    detail)}, 'frida': {...} or None}. A path measures a row when it gives
+    pass or fail (oracle) or equal or different (Frida); it agrees on pass or
+    equal and disagrees on fail or different. frida_default is true only when
+    Frida measured at least a fifth of the sample. A None Frida result means
+    the path was deferred: measured 0, marked deferred. (state is accepted for
+    the interface; the rows already carry their recorded verdicts.)"""
+    sample = list(sample if sample is not None else [r['address'] for r in rows if r.get('sample')])
+    rows = [dict(r, address=_key(r['address'])) for r in rows]
+    norm = lambda d: {_key(a): v for a, v in (d or {}).items()}
+    oracle = _path_counts(norm(results.get('oracle')), ('pass', 'fail'), 'pass', rows)
+    frida = _path_counts(norm(results.get('frida')), ('equal', 'different'), 'equal', rows)
+    if results.get('frida') is None:
+        frida['deferred'] = True
+    in_sample = [r for r in rows if r['address'] in sample]
+    frida_in_sample = _path_counts(norm(results.get('frida')), ('equal', 'different'), 'equal',
+                                   in_sample)['measured']
+    return {'seed': seed, 'sample': sample,
+            'paths': {'oracle': oracle, 'frida': frida},
+            'frida_default': bool(sample) and frida_in_sample * 5 >= len(sample)}
+
+
+def calibration_text(cal):
+    """The scorecard paragraph for a calibration record."""
+    paths = cal['paths']
+
+    def line(name, label):
+        p = paths[name]
+        text = '%s: measured %d of %d rows, agreed %d, disagreed %d' % (
+            label, p['measured'], p['of'], p['agree'], p['disagree'])
+        return text + (' (deferred: not run)' if p.get('deferred') else '')
+    return ('Truth calibration (seed %s, tools/truth.py over the %d ruling rows with side fork or neither '
+            'plus a sample of %d dump-decided ours rows; a path measures a row when it gives pass/fail '
+            '(oracle) or equal/different (Frida) and agrees on pass or equal): %s; %s; Frida on by '
+            'default: %s.\n' % (
+                cal.get('seed'), paths['oracle']['of'] - len(cal.get('sample', [])),
+                len(cal.get('sample', [])), line('oracle', 'oracle probes'),
+                line('frida', 'Frida trace diff'), 'yes' if cal.get('frida_default') else 'no'))
+
+
+def frida_default(path=os.path.join(ROOT, CALIBRATION_REL)):
+    """Whether the Frida path is on by default: truth-calibration.json says so;
+    a missing or unreadable file means no."""
+    try:
+        with open(path, encoding='utf-8') as f:
+            return json.load(f).get('frida_default') is True
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
+def frida_batch(batch_id, rows, signatures, map_text, scenarios=FRIDA_SCENARIOS,
+                run_frida=frida_run):
+    """{'0x<ADDR>': (status, detail)} for the rows through one batched Frida
+    differential run: the hook table from the signatures and our .map text,
+    run_frida(batch_id, table, scenarios) for the traces, frida_verdicts to
+    compare. run_frida is injectable (the default launches the game)."""
+    table = hook_table(rows, signatures, map_text, list(scenarios))
+    traces = run_frida(batch_id, table, list(scenarios)) if table['original']['hooks'] else {}
+    return frida_verdicts(traces, rows, table['skipped'])
+
+
+def _calibrate_main(args):
+    here = os.path.dirname(os.path.abspath(__file__))
+    root = os.path.dirname(here)
+    state_path = os.path.abspath(args.state) if args.state else os.path.join(root, 'docs', 'wso', 'wave-state.json')
+    with open(state_path, encoding='utf-8') as f:
+        state = json.load(f)
+    rows, sample = calibration_rows(state, args.seed)
+    reader_root = args.evidence_root or root
+
+    def read_evidence(address):
+        try:
+            with open(os.path.join(reader_root, 'docs', 'evidence', _key(address)[2:] + '.md'),
+                      encoding='utf-8') as f:
+                return f.read()
+        except OSError:
+            return None
+    cases, why = oracle_candidates(rows, read_evidence)
+    print('calibrate: %d rows (%d sample), %d oracle candidates' % (len(rows), len(sample), len(cases)))
+    for address, reason in sorted(why.items()):
+        print('  not probed %s: %s' % (address, reason))
+    oracle = {}
+    if cases:
+        # One case file per calibration run; the batch id inside the case ids is `cal`.
+        oracle = run_oracle('cal', args.worktree or root, cases)
+    for address, (status, detail) in sorted(oracle.items()):
+        print('  probe %s: %s (%s)' % (address, status, detail))
+    # Frida launches the game on the desktop: deferred unless a run is wired in by hand.
+    cal = calibrate(state, rows, {'oracle': oracle, 'frida': None}, seed=args.seed, sample=sample)
+    cal['oracle_rows'] = {a: list(v) for a, v in sorted(oracle.items())}
+    out = args.out or os.path.join(root, CALIBRATION_REL)
+    os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
+    with open(out, 'w', encoding='utf-8', newline='\n') as f:
+        json.dump(cal, f, indent=1, sort_keys=True)
+        f.write('\n')
+    print(calibration_text(cal), end='')
+    print('wrote %s' % out)
+    return 0
+
+
+def main(argv=None):
+    import argparse
+    p = argparse.ArgumentParser(prog='truth.py', description=__doc__.split('\n')[0])
+    sub = p.add_subparsers(dest='cmd', required=True)
+    c = sub.add_parser('calibrate', help='run the measurement paths over already-ruled rows')
+    c.add_argument('--seed', default='2026-10-22', help='sample seed (default %(default)s)')
+    c.add_argument('--state', help='the wave-state file to read (default docs/wso/wave-state.json)')
+    c.add_argument('--worktree', help='where the oracle cases are written, wired and built '
+                                      '(default: this checkout; use a disposable clone)')
+    c.add_argument('--evidence-root', help='checkout whose docs/evidence to read (default this one)')
+    c.add_argument('--out', help='calibration file to write (default docs/wso/truth-calibration.json)')
+    args = p.parse_args(argv)
+    return _calibrate_main(args)
+
+
+if __name__ == '__main__':
+    sys.exit(main())

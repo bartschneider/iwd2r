@@ -93,6 +93,11 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # backtrace_symbols_fd resolves names from the dynamic symbol table.
     target_link_options(iwd2r PRIVATE -Wl,--export-dynamic)
 endif()
+if(MSVC)
+    # The link map (iwd2r.map) is what tools/truth.py reads to find our
+    # functions' RVAs for the Frida differential run.
+    target_link_options(iwd2r PRIVATE /MAP)
+endif()
 iwd2r_strict_warnings(iwd2r)
 add_subdirectory(oracle)
 add_subdirectory(tests)
