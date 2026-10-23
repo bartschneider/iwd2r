@@ -13316,6 +13316,76 @@ class TruthTest(unittest.TestCase):
         self.assertNotIn('fn_999999', orig)
         self.assertEqual(table['ours_loaded_rva'], '0x7200')
 
+    TYPED_MAP = (' Preferred load address is 00400000\n\n'
+                 ' 0001:00001000       ?Fetch@CTlkTable@@QAEEKAAUSTR_RES@@@Z 00402000 f   t.obj\n'
+                 ' 0001:00002000       ?CheckModal@CGameSprite@@QAEXXZ 00403000 f   s.obj\n'
+                 ' 0001:00003000       ?Hit@CGameSprite@@QAEHPAV1@PAVCItem@@FPAHHE@Z 00404000 f   s.obj\n'
+                 ' 0001:00004000       ?GetNearest@CGameArea@@QAEJJABVCAIObjectType@@FPBEHHHEH@Z 00405000 f   a.obj\n'
+                 ' 0001:00005000       ?Pick@CGameArea@@QAEFHK@Z 00406000 f   a.obj\n')
+    TYPED_HEADERS = (
+        '// header\nstruct STR_RES;\nclass CTlkTable {\npublic:\n'
+        '    BOOLEAN Fetch(DWORD dwStrId, STR_RES& strRes);\n};\n'
+        'class CGameSprite {\npublic:\n    int Inline() const { return 1; }\n'
+        '    BOOL Hit(CGameSprite* target, CItem* curWeapon, SHORT nAbility, BOOL* pCritical, BOOL bOffHand, BYTE nAttackCount);\n'
+        '    void CheckModal();\n};\n'
+        'class CGameArea {\npublic:\n'
+        '    LONG GetNearest(LONG startObject, const CAIObjectType& type, SHORT range, const BYTE* terrainTable, BOOL checkLOS, BOOL seeInvisible, BOOL ignoreSleeping, BYTE nNearest, BOOL ignoreDead);\n'
+        '    BOOL Pick(int a);\n    SHORT Pick(int a, DWORD b);\n};\n')
+    TYPED_ROWS = [{'address': '0x100', 'name': 'CTlkTable::Fetch'},
+                  {'address': '0x200', 'name': 'CGameSprite::CheckModal'},
+                  {'address': '0x300', 'name': 'CGameSprite::Hit'},
+                  {'address': '0x400', 'name': 'CGameArea::GetNearest'},
+                  {'address': '0x500', 'name': 'CGameArea::Pick'}]
+    # Ghidra's guesses: int for pointers, uint for the void function's EAX.
+    TYPED_SIGS = {'0x100': 'uint Fetch(uint a, int b)', '0x200': 'uint CheckModal(void)',
+                  '0x300': 'int Hit(int a, int b, short c, int d, int e, byte f)',
+                  '0x400': 'int GetNearest(int a, uint b, short c, int d, int e, int f, int g, byte h, int i)',
+                  '0x500': 'int Pick(int a, uint b)'}
+
+    def test_hook_table_types_from_our_prototype(self):
+        table = truth.hook_table(self.TYPED_ROWS, self.TYPED_SIGS, self.TYPED_MAP, ['s'], self.TYPED_HEADERS)
+        orig = {h['name']: h for h in table['original']['hooks']}
+        ours = {h['name']: h for h in table['ours']['hooks']}
+        self.assertEqual((orig['fn_100']['args'], orig['fn_100']['ret']), (['u32', 'ptr'], 'u8'))
+        self.assertEqual(orig['fn_200']['args'], [])
+        self.assertNotIn('ret', orig['fn_200'])
+        self.assertEqual((orig['fn_300']['args'], orig['fn_300']['ret']),
+                         (['ptr', 'ptr', 's16', 'ptr', 's32', 'u8'], 's32'))
+        self.assertEqual((orig['fn_400']['args'], orig['fn_400']['ret']),
+                         (['s32', 'ptr', 's16', 'ptr', 's32', 's32', 's32', 'u8', 's32'], 's32'))
+        # overloads: the evidence signature's argument count picks the prototype
+        self.assertEqual((orig['fn_500']['args'], orig['fn_500']['ret']), (['s32', 'u32'], 's16'))
+        for name in orig:
+            self.assertEqual(ours[name]['args'], orig[name]['args'])
+            self.assertEqual(ours[name].get('ret'), orig[name].get('ret'))
+            self.assertEqual(orig[name]['conv'], 'thiscall')
+        self.assertEqual(table['typed_from'], {'0x%s' % a: 'ours' for a in ('100', '200', '300', '400', '500')})
+
+    def test_hook_table_falls_back_to_ghidra_types(self):
+        rows = self.TYPED_ROWS + [{'address': '0x5845D0', 'name': 'IcewindMisc::Roll'}]
+        sigs = dict(self.TYPED_SIGS, **{'0x5845D0': 'int Roll(int dice, short sides)'})
+        table = truth.hook_table(rows, sigs, self.TYPED_MAP + self.MAP, ['s'], self.TYPED_HEADERS)
+        orig = {h['name']: h for h in table['original']['hooks']}
+        self.assertEqual(table['typed_from']['0x5845D0'], 'ghidra')
+        self.assertEqual((orig['fn_5845D0']['args'], orig['fn_5845D0']['ret']), (['s32', 's16'], 's32'))
+        # no headers at all: every row is typed as before
+        table = truth.hook_table(self.TYPED_ROWS, self.TYPED_SIGS, self.TYPED_MAP, ['s'])
+        self.assertEqual(set(table['typed_from'].values()), {'ghidra'})
+        orig = {h['name']: h for h in table['original']['hooks']}
+        self.assertEqual(orig['fn_300']['args'], ['s32', 's32', 's16', 's32', 's32', 'u8'])
+        self.assertEqual(orig['fn_200']['ret'], 'u32')
+        # a class by value, or an overload the argument count cannot pick: Ghidra's types
+        headers = 'class CGameArea {\n    BOOL Pick(int a);\n    BOOL Pick(DWORD a);\n    LONG GetNearest(CResRef r);\n};\n'
+        table = truth.hook_table(self.TYPED_ROWS[3:], self.TYPED_SIGS, self.TYPED_MAP, ['s'], headers)
+        self.assertEqual(table['typed_from'], {'0x400': 'ghidra', '0x500': 'ghidra'})
+
+    def test_ours_env_runs_under_replay_clock(self):
+        env = probe.ours_env('C:\\game', 7)
+        self.assertEqual(env['IWD2R_SEED'], '7')
+        self.assertEqual(env['IWD2R_STATE_DUMP'], winsandbox.BOX_REPLAY_DIR)
+        self.assertNotIn('IWD2R_DUMP_EVERY', env)
+        self.assertEqual(probe.ours_env('C:\\game', 7, 5)['IWD2R_DUMP_EVERY'], '5')
+
     def test_hook_table_takes_the_convention_from_the_decorated_name(self):
         rows = [{'address': '0x600000', 'name': 'Gone::Std'}, {'address': '0x600001', 'name': 'Gone::Fast'},
                 {'address': '0x600002', 'name': 'Gone::Stat'}, {'address': '0x600003', 'name': 'CGameSprite::GetAbilityNo'},
@@ -13400,16 +13470,29 @@ class TruthTest(unittest.TestCase):
         # skipped rows say so, with the reason
         v = truth.frida_verdicts({'s': (t, t)}, rows, {'0x73F560': 'ambiguous: 2 overloads of X in our map'})
         self.assertEqual(v['0x73F560'], ('skipped', 'ambiguous: 2 overloads of X in our map'))
-        # a failed scenario is left out and reported
+        # a failed scenario counts as "not hit" only when its original side completed
+        # (exit 0, HITS present, 0 for the hook); otherwise the row stays scenario failed
         failed = {'orig': [], 'ours': [], 'failed': 'ours side exited 2'}
         good = {'orig': t, 'ours': t, 'failed': None}
         v = truth.frida_verdicts({'a': failed, 'b': good}, rows)
+        self.assertEqual(v['0x5845D0'], ('scenario failed', 'a: ours side exited 2'))
+        done = dict(failed, orig_exit=0, hits={'orig': {'fn_5845D0': 0, 'fn_73F560': 0}, 'ours': None})
+        v = truth.frida_verdicts({'a': done, 'b': good}, rows)
         self.assertEqual(v['0x5845D0'][0], 'equal')
-        # hit by no scenario at all: not exercised, whatever else failed
+        for bad_orig in (dict(done, orig_exit=2), dict(done, hits={'orig': None, 'ours': None}),
+                         dict(done, hits={'orig': {}, 'ours': None}),
+                         dict(done, hits={'orig': {'fn_5845D0': 3}, 'ours': None})):
+            v = truth.frida_verdicts({'a': bad_orig, 'b': good}, rows)
+            self.assertEqual(v['0x5845D0'][0], 'scenario failed', bad_orig)
+        # hit by no scenario at all, the failed one's original completed: not exercised
+        self.assertEqual(v['0x73F560'][0], 'scenario failed')
+        v = truth.frida_verdicts({'a': done, 'b': good}, rows)
         self.assertEqual(v['0x73F560'][0], 'not-exercised')
         self.assertEqual(v['0x73F560'][1], 'no scenario hit it: a, b')
-        v = truth.frida_verdicts({'a': failed}, rows)
+        v = truth.frida_verdicts({'a': done}, rows)
         self.assertEqual(v['0x5845D0'], ('not-exercised', 'no scenario hit it: a'))
+        v = truth.frida_verdicts({'a': failed}, rows)
+        self.assertEqual(v['0x5845D0'], ('scenario failed', 'a: ours side exited 2'))
         # a row that appears in a failed scenario is never equal: ours crashed in a
         crash = {'orig': t, 'ours': t[:2] + [{'tag': 'crash', 'where': 'x'}], 'failed': 'ours side exited 1'}
         v = truth.frida_verdicts({'a': crash, 'b': good}, rows)
@@ -13757,7 +13840,9 @@ class TruthTest(unittest.TestCase):
                 ok = {'orig': orig, 'ours': ours, 'orig_path': None, 'ours_path': None, 'orig_exit': 0,
                       'ours_exit': 0, 'result': {'orig': 'CLEAN', 'ours': 'CLEAN'}, 'hits': hits,
                       'measured': True, 'failed': None}
-                bad = dict(ok, orig=[], ours=[], ours_exit=2, hits={'orig': None, 'ours': None},
+                # ours failed, but the original completed and never hit any hook: "not hit"
+                bad = dict(ok, orig=[], ours=[], ours_exit=2,
+                           hits={'orig': {'fn_%s' % r['address'][2:]: 0 for r in picked[:4]}, 'ours': None},
                            measured=False, failed='ours side exited 2')
                 return {'world_entry': ok, 'first_fight': bad, 'walk_and_talk': bad}
             out = os.path.join(d, 'cal.json')

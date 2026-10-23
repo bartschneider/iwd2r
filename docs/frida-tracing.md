@@ -223,3 +223,22 @@ RVAs in the 2026-10-23 map: `CScreenWorld::EngineActivated` 0x330E60
 `MoveToPoint` is 0x73F560 (0x73FEC0 is the `(dest, range)` overload). Next:
 a scenario that walks the party (`walk_and_talk`), then `trace_diff.py
 compare`, exit 0 or the measured difference, reported as measured.
+
+## Typed tables and the replay clock (truth.py batches)
+
+`truth.hook_table` types a row from our prototype when our map has the
+function and `src/*.h` declares it: references and pointers are `ptr`
+(trace_diff canonicalises them), `BYTE`/`BOOLEAN` `u8`, `SHORT` `s16`,
+`WORD` `u16`, `BOOL`/`LONG`/`int` `s32`, `DWORD` `u32`; `void` logs no return.
+Ghidra's guesses (`int` for pointers, a `uint` return for a void function)
+read stack and EAX leftovers as values and made equal functions look
+different. Overloads in a header are picked by the evidence signature's
+argument count and typed only when they agree; a class or enum by value, a
+float, or no declaration falls back to the evidence signature, and the
+table's `typed_from` says `ours` or `ghidra` per row.
+
+`probe.py`'s ours side sets `IWD2R_STATE_DUMP` (the run's replay folder) and
+`IWD2R_SEED`, so platform/replay.cpp runs ours under the same virtual clock
+and frame-locked AI the recorder gives the original. Without it ours ran on
+the real clock with a free-running AI thread and its call counts and order
+could not match.

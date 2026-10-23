@@ -229,17 +229,25 @@ def original_logon(python_win, timeout, args):
         _finish_cmd(args, timeout))
 
 
-def ours_env(game_win, seed):
-    """Our build's replay environment, sandbox paths (platform/replay.cpp
-    reads IWD2R_SCRIPT and IWD2R_SEED the way the recorder does).  No
-    IWD2R_INI_OVERRIDE: both sides read the copy's prepared icewind2.ini."""
-    return {
+def ours_env(game_win, seed, dump_every=None):
+    """Our build's replay environment, sandbox paths: what oracle.our_env
+    sets for a headless replay.  IWD2R_STATE_DUMP (into the run's replay
+    folder, which comes home) switches platform/replay.cpp's deterministic
+    mode on -- the virtual clock and frame-locked AI the original runs under
+    in the recorder -- and IWD2R_SEED is read only then; without it ours ran
+    on the real clock.  No IWD2R_INI_OVERRIDE: both sides read the copy's
+    prepared icewind2.ini."""
+    env = {
         'IWD2_DATA': game_win,
         'IWD2R_SCRIPT': winsandbox.BOX_REPLAY_DIR + '\\scenario.txt',
+        'IWD2R_STATE_DUMP': winsandbox.BOX_REPLAY_DIR,
         'IWD2R_SEED': str(seed),
         'IWD2R_SHOT_DIR': winsandbox.BOX_REPLAY_DIR,
         'IWD2R_AUDIO': 'null',
     }
+    if dump_every is not None:
+        env['IWD2R_DUMP_EVERY'] = str(dump_every)
+    return env
 
 
 def ours_logon(python_win, game_win, env, timeout, args):
@@ -431,7 +439,7 @@ def run(ns):
         logon_cmd = original_logon(box_python, timeout, args)
     else:
         logon_cmd = ours_logon(box_python, game_win,
-                               ours_env(game_win, ns.seed), timeout, args)
+                               ours_env(game_win, ns.seed, ns.dump_every), timeout, args)
     with open(os.path.join(run_dir, 'plan.txt'), 'w') as f:
         f.write(logon_cmd + '\n')
     folders = plan_folders(ns.target, venv_win, winsandbox.wslpath_w(build),

@@ -19,6 +19,7 @@ calibrate measures both paths over rows whose verdicts were already ruled, and
 
 Python 3 standard library only; run under `python3 -I`.
 """
+import glob
 import hashlib
 import json
 import os
@@ -595,13 +596,172 @@ def _map_matches(name, publics):
     return found
 
 
-def hook_table(rows, signatures, our_map, scenarios):
+PROTO_TYPES = {
+    'byte': 'u8', 'boolean': 'u8', 'bool': 'u8', 'uchar': 'u8', 'char': 'u8', 'uint8_t': 'u8', 'u8': 'u8',
+    'short': 's16', 'int16_t': 's16', 'word': 'u16', 'ushort': 'u16', 'uint16_t': 'u16',
+    'bool32': 's32', 'int': 's32', 'long': 's32', 'int32_t': 's32', 'LONG': 's32',
+    'dword': 'u32', 'uint': 'u32', 'ulong': 'u32', 'uint32_t': 'u32', 'size_t': 'u32',
+}
+PROTO_TYPES.update({'BOOL': 's32'})
+_PROTO_MODIFIERS = frozenset({'const', 'volatile', 'struct', 'class', 'enum', 'virtual', 'static',
+                              'inline', 'explicit', 'extern', 'friend', 'constexpr'})
+_PROTO_SIGN = frozenset({'unsigned', 'signed'})
+
+
+def _proto_type(text):
+    """The Frida type of a C++ type as our headers spell it (references and
+    pointers are ptr, `void` is 'void'), or None for one the hooks cannot log
+    honestly from the spelling alone (a class by value, an enum, a float)."""
+    if '*' in text or '&' in text:
+        return 'ptr'
+    words = [w for w in re.split(r'\s+', text.strip()) if w and w not in _PROTO_MODIFIERS]
+    if words == ['void']:
+        return 'void'
+    if words == ['BOOL']:
+        return 's32'
+    sign = [w for w in words if w in _PROTO_SIGN]
+    base = [w.lower() for w in words if w not in _PROTO_SIGN]
+    if any(w in WIDE_TYPES for w in base):
+        return None
+    base = [w for w in base if w != 'int'] or ['int']
+    if base == ['long', 'long']:
+        return None
+    key = base[-1]
+    t = PROTO_TYPES.get(key)
+    if t is None:
+        return None
+    if sign:
+        t = ('u' if sign[0] == 'unsigned' else 's') + t[1:]
+    return t
+
+
+def _strip_comments(text):
+    text = re.sub(r'/\*.*?\*/', ' ', text, flags=re.S)
+    text = re.sub(r'//[^\n]*', ' ', text)
+    return re.sub(r'(?m)^\s*#[^\n]*', ' ', text)
+
+
+def _statements(body):
+    """The top-level statements of a C++ scope: split at ';', with nested
+    {...} blocks (inline bodies, nested types) skipped and ending a statement."""
+    out, cur, depth = [], [], 0
+    for ch in body:
+        if ch == '{':
+            if depth == 0:
+                out.append(''.join(cur))
+                cur = []
+            depth += 1
+        elif ch == '}':
+            depth = max(0, depth - 1)
+        elif depth == 0:
+            if ch == ';':
+                out.append(''.join(cur))
+                cur = []
+            else:
+                cur.append(ch)
+    out.append(''.join(cur))
+    return [re.sub(r'^\s*(?:public|private|protected)\s*:', '', x).strip() for x in out if x.strip()]
+
+
+def _class_body(text, cls):
+    m = re.search(r'\b(?:class|struct)\s+%s\b[^;{]*\{' % re.escape(cls), text)
+    if not m:
+        return None
+    depth, i = 1, m.end()
+    while i < len(text) and depth:
+        depth += {'{': 1, '}': -1}.get(text[i], 0)
+        i += 1
+    return text[m.end():i - 1]
+
+
+def _split_params(raw):
+    parts, depth, cur = [], 0, []
+    for ch in raw:
+        if ch in '(<[':
+            depth += 1
+        elif ch in ')>]':
+            depth -= 1
+        if ch == ',' and depth == 0:
+            parts.append(''.join(cur))
+            cur = []
+        else:
+            cur.append(ch)
+    parts.append(''.join(cur))
+    return [p.strip() for p in parts if p.strip()]
+
+
+def _param_type(part):
+    part = re.sub(r'=.*$', '', part, flags=re.S).strip()
+    words = re.findall(r'[A-Za-z_]\w*|[*&]', part)
+    if len(words) >= 2 and re.match(r'[A-Za-z_]', words[-1]) and words[-1].lower() not in PROTO_TYPES \
+            and words[-1] not in _PROTO_SIGN and words[-1] not in _PROTO_MODIFIERS \
+            and words[-1] not in ('void',):
+        words = words[:-1]
+    return ' '.join(words)
+
+
+def _header_prototypes(texts, name):
+    """[(ret type text, [param type texts])] of every declaration of
+    Class::Method (or a free function) named `name` in the header texts."""
+    parts = name.split('::')
+    found = []
+    for text in texts:
+        text = _strip_comments(text)
+        if len(parts) == 1:
+            scope = text
+        else:
+            scope = _class_body(text, parts[-2])
+            if scope is None:
+                continue
+        for st in _statements(scope):
+            m = re.search(r'(?<![\w~])%s\s*\((.*)\)\s*(?:const\b)?\s*(?:override\b)?\s*(?:=\s*0)?\s*$' % re.escape(parts[-1]),
+                          st, flags=re.S)
+            if not m or st.lstrip().startswith(('typedef', 'using', 'friend')):
+                continue
+            ret = re.sub(r'\b(?:__thiscall|__cdecl|__stdcall|__fastcall)\b', ' ', st[:m.start()]).strip()
+            ret = ' '.join(w for w in ret.split() if w not in _PROTO_MODIFIERS - {'const'} or w == 'const')
+            if not ret or '(' in ret or '=' in ret:
+                continue  # a constructor, a destructor, a macro or a data member
+            params = _split_params(m.group(1))
+            if params == ['void']:
+                params = []
+            found.append((ret, [_param_type(p) for p in params]))
+        if found:
+            break
+    return found
+
+
+def _typed_from_headers(texts, name, ghidra_argc, conv):
+    """(conv, args, ret or None) typed from our prototype, or None when no
+    header declares it (unambiguously) or a type cannot be logged honestly.
+    With several overloads, the ones with the evidence signature's argument
+    count are kept, and the typing stands only when they all agree."""
+    protos = _header_prototypes(texts, name)
+    if len(protos) > 1 and ghidra_argc is not None:
+        protos = [p for p in protos if len(p[1]) == ghidra_argc]
+    typed = set()
+    for ret, params in protos:
+        r = _proto_type(ret)
+        a = [_proto_type(p) for p in params]
+        if r is None or None in a or 'void' in a:
+            return None
+        typed.add((tuple(a), None if r == 'void' else r))
+    if len(typed) != 1:
+        return None
+    args, ret = next(iter(typed))
+    return conv, list(args), ret
+
+
+def hook_table(rows, signatures, our_map, scenarios, headers=None):
     """The hook tables for one batch: {'original': {'hooks': [...]}, 'ours':
     {'hooks': [...]}, 'scenarios': [...], 'skipped': {addr: reason},
     'ours_loaded_rva': '0x..' or None}.
 
     rows are dicts with address and name; signatures maps address to a C
-    signature; our_map is the build's .map text (or a {name: rva} dict). Each
+    signature; headers (header text or a list of them, optional) are our
+    src/*.h: a function found there is typed from our prototype (args and
+    return; typed_from[addr] is 'ours'), otherwise from the evidence
+    signature ('ghidra'); our_map is the build's .map text (or a {name: rva} dict). Each
     row gets one hook per target, named fn_<ADDR> so the traces line up: the
     original's by absolute addr, ours by rva. A row is listed in skipped, with
     no hook on either side, when its signature does not parse or has a
@@ -612,7 +772,8 @@ def hook_table(rows, signatures, our_map, scenarios):
     for probe.py's --loaded-rva."""
     from_text = isinstance(our_map, str)
     publics = parse_map(our_map) if from_text else dict(our_map)
-    original, ours, skipped = [], [], {}
+    texts = [headers] if isinstance(headers, str) else list(headers or [])
+    original, ours, skipped, typed = [], [], {}, {}
     for row in rows:
         address = row['address']
         key = '0x' + address[2:].upper() if address.lower().startswith('0x') else '0x' + address.upper()
@@ -621,8 +782,21 @@ def hook_table(rows, signatures, our_map, scenarios):
         else:
             found = {publics[row['name']]: None} if row['name'] in publics else {}
         rvas = sorted(found)
-        sig = _hook_signature(signatures.get(address) or signatures.get(key),
-                              found[rvas[0]] if len(rvas) == 1 else None)
+        decorated = found[rvas[0]] if len(rvas) == 1 else None
+        sig = _hook_signature(signatures.get(address) or signatures.get(key), decorated)
+        typed_from = 'ghidra'
+        if texts and len(rvas) == 1:
+            named = decorated_convention(decorated)
+            conv_name = None
+            if not isinstance(sig, str):
+                conv_name = sig[0]
+            elif named in FRIDA_CONVS:
+                conv_name = FRIDA_CONVS[named]
+            if conv_name:
+                argc = len(sig[1]) if not isinstance(sig, str) else None
+                mine = _typed_from_headers(texts, row['name'], argc, conv_name)
+                if mine:
+                    sig, typed_from = mine, 'ours'
         if isinstance(sig, str) and len(rvas) != 1:
             sig = None  # ambiguity is the more useful reason; reported below
         if isinstance(sig, str):
@@ -634,6 +808,7 @@ def hook_table(rows, signatures, our_map, scenarios):
         if len(rvas) > 1:
             skipped[key] = 'ambiguous: %d overloads of %s in our map' % (len(rvas), row['name'])
             continue
+        typed[key] = typed_from
         conv, args, ret = sig
         hook = {'name': hook_name(key), 'conv': conv, 'args': args}
         if ret:
@@ -644,7 +819,7 @@ def hook_table(rows, signatures, our_map, scenarios):
     loaded = sorted(_map_matches(LOADED_NAME, publics)) if from_text else (
         [publics[LOADED_NAME]] if LOADED_NAME in publics else [])
     return {'original': {'hooks': original}, 'ours': {'hooks': ours},
-            'scenarios': list(scenarios), 'skipped': skipped,
+            'scenarios': list(scenarios), 'skipped': skipped, 'typed_from': typed,
             'ours_loaded_rva': hex(loaded[0]) if len(loaded) == 1 else None}
 
 
@@ -847,16 +1022,17 @@ def frida_verdicts(traces, rows, skipped=None):
     the reason) or 'scenario failed'.
 
     A row is exercised in a scenario when either side logged one of its
-    hooks; failed scenarios (a probe exited non-zero or left no trace) are
-    left out of the comparison. Across the other scenarios any difference
-    wins, otherwise a row exercised anywhere is equal; one exercised nowhere
-    is not-exercised, or 'scenario failed' when a scenario failed, naming it.
+    hooks. A failed scenario (a probe exited non-zero or left no trace) that
+    shows the row is never equal (a crash event is a difference, a partial
+    trace is 'scenario failed'); one that does not show it counts as 'not
+    hit' only when its ORIGINAL side completed (exit 0, HITS present, 0 for
+    that hook), otherwise the row is 'scenario failed' too. Across the
+    scenarios any difference wins, otherwise a row exercised anywhere is
+    equal; one exercised nowhere is not-exercised.
     A different detail carries the first differing event pair or the crash
     event. Pointer returns are compared by presence."""
     skipped = skipped or {}
     verdicts = {}
-    failed = {name: _as_scenario(v)['failed'] for name, v in traces.items()
-              if _as_scenario(v)['failed']}
     for row in rows:
         address = row['address']
         key = '0x' + (address[2:] if address.lower().startswith('0x') else address).upper()
@@ -879,6 +1055,10 @@ def frida_verdicts(traces, rows, skipped=None):
                             scenario, t['failed'], terminal[0][0],
                             json.dumps(terminal[0][1], sort_keys=True)))
                     else:
+                        partial.append('%s: %s' % (scenario, t['failed']))
+                else:
+                    ohits = (t.get('hits') or {}).get('orig')
+                    if not (t.get('orig_exit') == 0 and ohits and tag in ohits and ohits[tag] == 0):
                         partial.append('%s: %s' % (scenario, t['failed']))
                 continue
             orig, ours = _row_events(t['orig'], tag), _row_events(t['ours'], tag)
@@ -1205,12 +1385,13 @@ def frida_default(path=os.path.join(ROOT, CALIBRATION_REL)):
 
 
 def frida_batch(batch_id, rows, signatures, map_text, scenarios=FRIDA_SCENARIOS,
-                run_frida=frida_run):
+                run_frida=frida_run, headers=None):
     """{'0x<ADDR>': (status, detail)} for the rows through one batched Frida
     differential run: the hook table from the signatures and our .map text,
     run_frida(batch_id, table, scenarios) for the traces, frida_verdicts to
-    compare. run_frida is injectable (the default launches the game)."""
-    table = hook_table(rows, signatures, map_text, list(scenarios))
+    compare. headers (our src/*.h texts) type the hooks from our prototypes.
+    run_frida is injectable (the default launches the game)."""
+    table = hook_table(rows, signatures, map_text, list(scenarios), headers)
     traces = run_frida(batch_id, table, list(scenarios)) if table['original']['hooks'] else {}
     return frida_verdicts(traces, rows, table['skipped'])
 
@@ -1223,6 +1404,15 @@ def _scenario_summary(traces):
         out[name]['trace'] = {side: os.path.relpath(t[side + '_path'], ROOT) if t.get(side + '_path') else None
                               for side in ('orig', 'ours')}
     return out
+
+
+def _our_headers():
+    """The texts of our src/*.h, for the hook tables' prototypes."""
+    texts = []
+    for path in sorted(glob.glob(os.path.join(ROOT, 'src', '*.h'))):
+        with open(path, encoding='utf-8', errors='replace') as f:
+            texts.append(f.read())
+    return texts
 
 
 def _calibrate_frida(rows, read_evidence, map_path):
@@ -1247,7 +1437,7 @@ def _calibrate_frida(rows, read_evidence, map_path):
     try:
         with open(map_path, encoding='utf-8', errors='replace') as f:
             map_text = f.read()
-        got = frida_batch('cal', rows, sigs, map_text, run_frida=run_frida)
+        got = frida_batch('cal', rows, sigs, map_text, run_frida=run_frida, headers=_our_headers())
         error = None
     except Exception as e:
         got, error = {}, repr(e)[:300]
