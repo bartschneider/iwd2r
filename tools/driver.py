@@ -1139,17 +1139,33 @@ def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
         if side == 'fork' and not wave.KIND_RE.search(text):
             problems.append("%s: no 'kind:' line in the front matter; add "
                             "'kind: oracle' or 'kind: replay'" % rel)
+        n_before = len(problems)
         driver_probe = k in probe_keys or (
             side == 'ours' and batch.get('id') is not None
             and case.startswith('probe-%s-' % batch['id']))
         if driver_probe:
             # A probe pass says ours matches the original (ruling R57).
-            if wave.EVIDENCE_PHRASES[1] not in text:
+            if not any(wave.EVIDENCE_PHRASES[1] in para
+                       for para in wave.evidence_paragraphs(text)):
                 problems.append("%s: its verdict case is a probe; add the exact "
                                 "phrase 'corroborated by WSO at <sha>'" % rel)
-        elif not any(p in text for p in wave.EVIDENCE_PHRASES):
+        elif not any(p in para for para in wave.evidence_paragraphs(text)
+                     for p in wave.EVIDENCE_PHRASES):
             problems.append("%s: no 'disagreed with WSO' or 'corroborated by "
                             "WSO' phrase; add one of the exact phrases" % rel)
+        if len(problems) == n_before and not wave._evidence_decided_by(
+                text, case):
+            problems.append(
+                '%s: docs/evidence/%s.md has no sentence reading "disagreed '
+                'with WSO at <sha>: ...; case %s decides" (or "corroborated '
+                'by WSO ..."); write it in the ## WSO delta section'
+                % (r['address'], k.upper(), case))
+        if batch.get('fork_base') and not wave._cites_pin(
+                text, batch['fork_base']):
+            problems.append(
+                '%s: no "disagreed with WSO at <sha>" / "corroborated by WSO '
+                'at <sha>" line names this batch\'s pin %s'
+                % (rel, batch['fork_base'][:7]))
     dirty, bad = _git_paths(run, worktree, ('status', '--porcelain', '-uall'),
                             lambda l: l[3:].split(' -> ')[-1].strip('"'))
     if bad:
